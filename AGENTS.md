@@ -15,7 +15,8 @@
 ├── desktop-tauri/
 ├── mobile-tauri/
 ├── frontend/                # 业务 UI；契约 git rev/tag
-├── scripts/                 # sync-connect、victauri-e2e、check.sh
+├── e2e/                     # Playwright（浏览器 UI）
+├── scripts/                 # sync-connect、victauri-e2e、e2e-playwright、check.sh
 ├── docs/
 │   ├── TESTING.md
 │   └── design/
@@ -48,6 +49,7 @@ make desktop-release         # .deb 打包
 bash scripts/check-no-main-path.sh
 bash scripts/lizard-rust.sh
 ./scripts/victauri-e2e.sh all   # 需可用的 crabmate serve 二进制；默认不进 CI
+./scripts/e2e-playwright.sh     # Playwright；需 frontend/dist + serve
 ```
 
 ## Documentation Rules

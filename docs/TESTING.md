@@ -23,9 +23,10 @@ pre-commit run --all-files
 | `fn-nloc-ratchet` | 函数 nloc ≤ 200、单文件 ≤ 920 |
 | `taplo-format` / `taplo-lint` | 有 `taplo` 才跑，否则跳过 |
 | `typos` | 拼写 |
+| `e2e-format` / `e2e-lint` | Playwright：`cd e2e && npm run format:check` / `lint`（需先 `cd e2e && npm ci`） |
 | `conventional-pre-commit` | commit-msg |
 
-**不含** Victauri 全量 E2E、也不跑 Server 主仓 Playwright。
+**不含** Victauri 全量 E2E（默认 CI）。**含** Playwright mock E2E（见下节与 `.github/workflows/e2e-playwright.yml`）。
 
 未装 `pre-commit` 时至少：
 
@@ -41,6 +42,7 @@ bash scripts/check.sh
 |--------------|------|
 | `CI` / `check` | `check-no-main-path`、`scripts/check.sh`（含 frontend wasm/clippy + 复杂度）、`make frontend`（trunk）、connect/desktop test、mobile check |
 | `CI` / `build-desktop-deb` | `CM_PREPARE_SKIP_FRONTEND=1` + stub；`make desktop-release`；校验无 serve sidecar |
+| `E2E Playwright` | 本仓 `make frontend` + checkout Server 编 `serve`；mock SSE 基线 |
 | `code-complexity` | 独立门禁：`lizard-rust` / `fn-param` / `fn-nloc` |
 
 Victauri 全量 E2E **不**进默认 CI（需本机/`PATH` 中的 `serve` + WebView）；见下节。
@@ -61,6 +63,20 @@ bash scripts/fn-param-ratchet.sh
 bash scripts/fn-nloc-ratchet.sh
 ```
 
+## Playwright（浏览器 Web UI E2E）
+
+权威目录：本仓 [`e2e/`](../e2e/)。一键（起 `serve` + 跑测）：
+
+```bash
+make frontend
+./scripts/e2e-playwright.sh
+# 或指定用例：./scripts/e2e-playwright.sh specs/mock-overlay-timing.spec.ts
+```
+
+`serve` 解析顺序：`CRABMATE_BIN` → `PATH` 的 `crabmate` → 同级 Server `target/{debug,release}/crabmate` → 同级仓 `cargo run`。正式 CI checkout `noisystreet/CrabMate`。
+
+真实 LLM 规格仅本地：`cd e2e && API_KEY=… npx playwright test specs/real-llm-*.spec.ts`。
+
 ## Victauri（Desktop 壳 E2E）
 
 ```bash
@@ -77,6 +93,6 @@ REAL_LLM_E2E=1 ./scripts/victauri-e2e.sh real_llm
 
 见 [`docs/design/shell_smoke_runbook.md`](design/shell_smoke_runbook.md)。
 
-## Server / 协议 / Playwright
+## Server / 协议
 
-留在主仓：`docs/测试指南.md`、`e2e/`、`crabmate e2e`、`client-contract` CI。
+主仓：`docs/测试指南.md`、`crabmate e2e`（编排真 LLM）、`client-contract` CI。Playwright **在本仓** `e2e/`。

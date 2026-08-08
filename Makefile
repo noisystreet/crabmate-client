@@ -28,7 +28,7 @@ CM_MOBILE_BUILD_FRONTEND ?= 0
 	desktop desktop-release desktop-dev desktop-bin-release \
 	apk mobile-apk \
 	test check fmt clippy \
-	victauri-e2e victauri-e2e-real \
+	victauri-e2e victauri-e2e-real e2e-playwright \
 	clean clean-desktop clean-mobile clean-connect clean-frontend
 
 help:
@@ -54,6 +54,7 @@ help:
 	@echo "  make fmt                 四包 cargo fmt（含 frontend）"
 	@echo "  make clippy              四包 clippy -D warnings"
 	@echo "  make victauri-e2e        全量 Victauri（需外部 crabmate serve）"
+	@echo "  make e2e-playwright      Playwright（需 frontend/dist + serve）"
 	@echo ""
 	@echo "清理："
 	@echo "  make clean               清理 desktop/mobile/connect/frontend 产物"
@@ -164,6 +165,9 @@ victauri-e2e:
 
 victauri-e2e-real:
 	REAL_LLM_E2E=1 ./scripts/victauri-e2e.sh real_llm
+
+e2e-playwright:
+	./scripts/e2e-playwright.sh
 
 # --- 清理 ---
 
