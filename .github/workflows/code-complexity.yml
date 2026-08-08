@@ -1,0 +1,34 @@
+# 圈复杂度（lizard CCN）、函数形参上限（fn-param：≤ 9）、函数 nloc + 源文件行数上限（fn-nloc：nloc ≤ 200、单文件 ≤ 920）。
+# 与 scripts/*.sh / pre-commit / scripts/check.sh 对齐（不含 Server 金样测试）。
+name: code-complexity
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: code-complexity-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lizard:
+    name: lizard · fn-param · fn-nloc
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install lizard
+        run: pip install lizard
+
+      - name: Run lizard (Rust CCN; per-module caps in lizard_module_ccn_caps.toml)
+        run: bash scripts/lizard-rust.sh
+
+      - name: Run fn-param cap (Rust max function params ≤ 9)
+        run: bash scripts/fn-param-ratchet.sh
+
+      - name: Run fn-nloc (nloc ≤ 200, file lines ≤ 920)
+        run: bash scripts/fn-nloc-ratchet.sh
