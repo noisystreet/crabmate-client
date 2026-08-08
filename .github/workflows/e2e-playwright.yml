@@ -1,0 +1,123 @@
+# Playwright E2E（Client 仓 · 官方 UI）
+#
+# mock SSE 基线（不依赖 LLM）。真实 LLM 仅本地：
+#   cd e2e && npx playwright test specs/real-llm-*.spec.ts
+#
+# CI：本仓 make frontend + checkout Server 编 serve，经 CM_WEB_STATIC_DIR 托管。
+
+name: E2E Playwright
+
+on:
+  pull_request:
+    branches: [main, master]
+  push:
+    branches: [main, master]
+    paths:
+      - "frontend/**"
+      - "e2e/**"
+      - "scripts/e2e-playwright.sh"
+      - ".github/workflows/e2e-playwright.yml"
+
+concurrency:
+  group: e2e-pw-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  playwright:
+    name: Playwright E2E
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Checkout CrabMate (serve)
+        uses: actions/checkout@v4
+        with:
+          repository: noisystreet/CrabMate
+          path: crabmate-server
+
+      - name: Install system deps (OpenSSL / libssh2)
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev libssh2-1-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            frontend
+            crabmate-server
+
+      - name: Install trunk
+        run: cargo install trunk --locked
+
+      - name: Build frontend WASM
+        run: |
+          unset NO_COLOR
+          make frontend
+
+      - name: Build backend (serve)
+        run: cargo build -p crabmate --features web
+        working-directory: crabmate-server
+
+      - name: Start backend server
+        env:
+          CM_WEB_STATIC_DIR: ${{ github.workspace }}/frontend/dist
+        run: |
+          ./crabmate-server/target/debug/crabmate serve &
+          sleep 5
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:8080/health > /dev/null 2>&1; then
+              echo "✅ 后端就绪 (尝试 $i)"
+              break
+            fi
+            echo "⏳ 等待后端... (尝试 $i)"
+            sleep 2
+          done
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: e2e/package-lock.json
+
+      - name: Install Playwright dependencies
+        run: |
+          npm ci
+          npx playwright install chromium
+        working-directory: e2e
+
+      - name: Run mock SSE tests (layout baseline + overlay)
+        run: |
+          npx playwright test \
+            specs/mock-overlay-timing.spec.ts \
+            specs/mock-mid-process-commentary-duplicate.spec.ts \
+            specs/mock-commentary-before-tool-order.spec.ts \
+            specs/mock-empty-assistant-shell.spec.ts \
+            specs/mock-real-tool-bubble-vanish.spec.ts \
+            specs/mock-tool-call-scenarios.spec.ts \
+            specs/mock-approval-scenarios.spec.ts \
+            specs/mock-multi-turn.spec.ts \
+            specs/mock-storage-consistency.spec.ts \
+            specs/mock-v2-multi-turn-boundaries.spec.ts \
+            specs/mock-mobile-shell.spec.ts \
+            --reporter=list
+        working-directory: e2e
+        env:
+          no_proxy: 127.0.0.1,localhost
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: e2e/playwright-report/
+          retention-days: 7
+
+      - name: Stop backend
+        if: always()
+        run: pkill -f "crabmate" || true

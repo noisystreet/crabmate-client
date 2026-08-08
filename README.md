@@ -15,8 +15,9 @@
 ├── desktop-tauri/             # Desktop Linux（Tauri 2）
 ├── mobile-tauri/              # Android（Tauri 2）
 ├── frontend/                  # 业务 UI（Leptos CSR + WASM；契约 git rev/tag）
-├── scripts/                   # check / connect 同步 / Victauri
-└── .github/workflows/         # CI（check + frontend wasm + desktop deb）
+├── e2e/                       # Playwright（浏览器 UI；mock SSE CI）
+├── scripts/                   # check / connect 同步 / Victauri / Playwright
+└── .github/workflows/         # CI（check + frontend + Playwright + desktop deb）
 ```
 
 ## 与主仓关系
@@ -26,7 +27,7 @@
 | 壳 + connect + 业务 UI | **本仓**维护 |
 | 契约 crate | 主仓发布；UI 钉 git `rev` / `client-contract-vX.Y.Z`（见 [contract_pin.md](docs/design/contract_pin.md)） |
 | Server `serve` | 主仓；本机或远程启动，壳不 spawn |
-| 主仓 `frontend/` | Phase C 前可能仍双轨；**禁止**本仓 `path = "../crabmate_agent/..."` |
+| 主仓 `frontend/` / Playwright | UI 与 Playwright **在本仓**；主仓 Phase C 后无 `frontend/` 源码 |
 
 ## Makefile
 
