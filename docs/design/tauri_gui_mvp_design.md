@@ -9,7 +9,7 @@
 
 - **不** spawn / 内嵌 `crabmate serve`
 - WebView + 连接页（`crabmate-connect`）连本机或远程已运行的 `serve`
-- 业务 UI 过渡期由远程 `serve` 托管；终点态由 Client / UI 仓自带（API 基址 + CORS）
+- 业务 UI 源码在本仓 `frontend/`；运行时由 `serve` 经 `CM_WEB_STATIC_DIR` 托管（或壳同步 `frontend/dist`）
 
 MVP 历史验收（部分已废弃）：
 
@@ -28,7 +28,7 @@ MVP 历史验收（部分已废弃）：
 1. 用户启动 `crabmate serve`（本机 / LAN / VPS）
 2. Tauri 打开连接页（预填 `CM_DESKTOP_SUGGESTED_URL` 或默认 `http://127.0.0.1:8080/`）
 3. 探测 `GET /health`；可选 Web Bearer 经 `#cm_web_api_bearer=` 交接
-4. 导航到该 `serve` 的 UI（或日后本仓静态 UI + API 基址）
+4. 导航到该 `serve` 的 UI（静态资源通常来自本仓 `frontend/dist` + `CM_WEB_STATIC_DIR`）
 
 历史「Web 壳 + 本地后端进程 / ready JSON」仅作考古；壳**不再**依赖 `--desktop-ready-json`。该 CLI 仍留在 Server（工具/脚本可解析）；是否改名/废弃见主仓 Phase 4。
 
@@ -45,7 +45,8 @@ MVP 历史验收（部分已废弃）：
 |------|------|
 | `desktop-tauri/src-tauri/src/main.rs` | 不 spawn `serve`；连接页或 E2E 直连 `CM_DESKTOP_SERVE_URL` |
 | `desktop-tauri/src-tauri/src/desktop_lifecycle.rs` | 单实例、托盘、最小化隐藏 |
-| `desktop-tauri/scripts/prepare-sidecar.sh` | 同步 connect/splash；可选 `CRABMATE_FRONTEND_DIST` |
+| `desktop-tauri/scripts/prepare-sidecar.sh` | 同步 connect/splash；默认本仓 `frontend/dist`；`CM_PREPARE_SKIP_FRONTEND=1` 可跳过 |
+| `frontend/` | 业务 UI（Leptos CSR）；契约 git `rev`/`tag` |
 | `mobile-tauri/` | Android 薄壳 |
 | `crates/crabmate-connect/` | 探测 / Bearer / 钥匙串 |
 

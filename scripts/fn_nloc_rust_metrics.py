@@ -18,6 +18,7 @@ RUST_ROOTS = (
     ROOT / "crates",
     ROOT / "desktop-tauri" / "src-tauri" / "src",
     ROOT / "mobile-tauri" / "src-tauri" / "src",
+    ROOT / "frontend" / "src",
 )
 MAX_NLOC_CAP = 200
 MAX_FILE_LINES_CAP = 920

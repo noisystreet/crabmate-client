@@ -9,25 +9,27 @@
 | 项 | 说明 |
 |----|------|
 | `serve` | 已安装或已编译的 **`crabmate serve`**（勿 path 编译回主开发树做正式验收；开发期可用同级 `../crabmate_agent`） |
-| 业务 UI | 过渡期：远程 `serve` 托管的 `frontend/dist` |
+| 业务 UI | 本仓 `make frontend` → `frontend/dist`；`serve` 设 `CM_WEB_STATIC_DIR`，或由 `prepare-sidecar` 同步进桌面 dist |
 | Bearer | 连接页填 **Web API 共享密钥**，不是模型 `API_KEY` |
 | 提示词 | `用一句话介绍你自己` → 助手终答或流式结束 |
 
 ## 2. Desktop
 
 ```bash
-# 终端 A（Server）
-crabmate serve --host 127.0.0.1 --port 8080
-# 或: cd ../crabmate_agent && cargo run -- serve --host 127.0.0.1 --port 8080
+# 终端 A（本仓 UI + Server）
+make frontend
+CM_WEB_STATIC_DIR="$PWD/frontend/dist" crabmate serve --host 127.0.0.1 --port 8080
+# 或: cd ../crabmate_agent && CM_WEB_STATIC_DIR=../crabmate-client/frontend/dist cargo run -- serve --host 127.0.0.1 --port 8080
 
 # 终端 B（本仓）
+make prepare-sidecar   # 可选：同步 frontend/dist
 cd desktop-tauri/src-tauri
 # 可选: CM_DESKTOP_SUGGESTED_URL=http://127.0.0.1:8080/
 cargo tauri dev
 ```
 
-- [ ] 闪屏 → 连接页预填本机 URL → 探测成功进入 UI  
-- [ ] 一轮对话  
+- [x] 闪屏 → 连接页预填本机 URL → 探测成功进入 UI（2026-08-08 验收用 `CM_DESKTOP_SKIP_CONNECT` + `CM_DESKTOP_SERVE_URL` 跳过连接页直达 UI）  
+- [x] 一轮对话（同日：干净克隆 release 壳对接本仓/主仓 `:18080` UI/`serve`；`POST /chat/stream` v2 得助手终答）  
 - [ ] （可选）改填 LAN 上另一台 `serve`；非回环时桌面 IPC 受限符合预期  
 
 跳过连接页（E2E）：`CM_E2E_FIXTURES=1` 或 `CM_DESKTOP_SKIP_CONNECT=1`，且必须 `CM_DESKTOP_SERVE_URL=…`。

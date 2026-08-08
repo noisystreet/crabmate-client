@@ -1,6 +1,6 @@
 # crabmate-client
 
-官方 **Client** 仓（路径 A）：Desktop Linux / Android Tauri 壳 + 共用 `crabmate-connect`。  
+官方 **Client** 仓（路径 A）：Desktop Linux / Android Tauri 壳 + 共用 `crabmate-connect` + 业务 UI `frontend/`。  
 连接兼容的 **`crabmate serve`**（本机或远程），**不** spawn / 内嵌 Agent 进程。
 
 > **Server / 契约权威仓**：[noisystreet/CrabMate](https://github.com/noisystreet/CrabMate)（本机常见检出目录：`../crabmate_agent`）  
@@ -14,29 +14,30 @@
 ├── crates/crabmate-connect/   # 连接页逻辑（本仓 path；勿再 path 回主仓）
 ├── desktop-tauri/             # Desktop Linux（Tauri 2）
 ├── mobile-tauri/              # Android（Tauri 2）
+├── frontend/                  # 业务 UI（Leptos CSR + WASM；契约 git rev/tag）
 ├── scripts/                   # check / connect 同步 / Victauri
-└── .github/workflows/         # CI（check + desktop deb 打包门禁）
+└── .github/workflows/         # CI（check + frontend wasm + desktop deb）
 ```
 
-## 与主仓关系（过渡）
+## 与主仓关系
 
 | 项 | 现状 |
 |----|------|
-| 壳 + connect | **本仓**维护与发版 |
-| 业务 UI（`frontend/`） | 仍在主仓；壳默认导航到远程 `serve` 托管的 UI |
-| 契约 crate | 主仓发布；钉 `client-contract-vX.Y.Z`（见 [contract_pin.md](docs/design/contract_pin.md)） |
-| 主仓同树副本 | Phase 4 前可短期双轨；**禁止**本仓 `path = "../crabmate_agent/..."` |
-
-路径 A 终点：本仓自带业务 UI（或依赖版本化 UI 产物）+ API 基址连 `serve`。
+| 壳 + connect + 业务 UI | **本仓**维护 |
+| 契约 crate | 主仓发布；UI 钉 git `rev` / `client-contract-vX.Y.Z`（见 [contract_pin.md](docs/design/contract_pin.md)） |
+| Server `serve` | 主仓；本机或远程启动，壳不 spawn |
+| 主仓 `frontend/` | Phase C 前可能仍双轨；**禁止**本仓 `path = "../crabmate_agent/..."` |
 
 ## Makefile
 
 ```bash
 make help
-make check              # 等同 scripts/check.sh
+make frontend           # trunk build → frontend/dist
+make frontend-check     # wasm32 cargo check
+make check              # 等同 scripts/check.sh（含 frontend）
 make test
 make desktop-dev        # 需已装 cargo-tauri ^2；另开终端跑 serve
-make desktop-release    # 产出 .deb（可选 CRABMATE_FRONTEND_DIST=…）
+make desktop-release    # 产出 .deb（默认同步本仓 frontend/dist）
 make desktop-bin-release
 make apk                # Android；默认不建 frontend
 make clean
@@ -50,17 +51,26 @@ make clean
 | [docs/TESTING.md](./docs/TESTING.md) | pre-commit / Victauri / CI |
 | [docs/design/tauri_gui_mvp_design.md](./docs/design/tauri_gui_mvp_design.md) | 壳架构（路径 A） |
 | [docs/design/shell_smoke_runbook.md](./docs/design/shell_smoke_runbook.md) | Desktop/Android 人工冒烟 |
-| [docs/design/contract_pin.md](./docs/design/contract_pin.md) | 契约 git tag 钉法 |
+| [docs/design/contract_pin.md](./docs/design/contract_pin.md) | 契约 git tag / rev 钉法 |
+| [frontend/README.md](./frontend/README.md) | UI 构建（trunk） |
 
-提交前：`pre-commit run --all-files` 或 `make check`。CI：`.github/workflows/ci.yml`（含 **desktop release .deb** 打包门禁）。
+提交前：`pre-commit run --all-files` 或 `make check`。CI：`.github/workflows/ci.yml`（含 **frontend wasm** 与 **desktop release .deb**）。
+
+## 快速开始（业务 UI + serve）
+
+```bash
+make frontend
+# 另开终端：主仓或已安装的 crabmate
+CM_WEB_STATIC_DIR="$PWD/frontend/dist" crabmate serve --host 127.0.0.1 --port 8080
+```
 
 ## 快速开始（Desktop）
 
 前置：本机或远程已启动 **`crabmate serve`**（默认 `http://127.0.0.1:8080/`）。
 
 ```bash
-# 可选：同步主仓已构建的 frontend/dist 进桌面 dist（deb / 调试）
-# export CRABMATE_FRONTEND_DIST=../crabmate_agent/frontend/dist
+make frontend           # 可选：把 UI 同步进 desktop-tauri/dist
+# 或：export CRABMATE_FRONTEND_DIST=$PWD/frontend/dist
 
 make desktop-dev
 # 或：cd desktop-tauri/src-tauri && cargo tauri dev
@@ -73,13 +83,13 @@ make desktop-dev
 ```bash
 make apk
 # 或：./mobile-tauri/scripts/build-apk.sh
-# 需要构建 UI 时：CM_MOBILE_BUILD_FRONTEND=1 CRABMATE_FRONTEND_DIR=../crabmate_agent/frontend make apk
+# 需要构建 UI 时：CM_MOBILE_BUILD_FRONTEND=1 make apk
 ```
 
 ## 开发约定
 
 - `crabmate-connect`：本仓 `path = "../../crates/crabmate-connect"`
-- 勿依赖主仓未发布 path；契约用 git tag / `rev`
+- `frontend` 契约：git tag / `rev`；勿 `path` 回主仓
 - 密钥边界与主仓 ADR §2.3 一致：跨 Origin 只认 Web Bearer + CORS
 
 ## 许可证

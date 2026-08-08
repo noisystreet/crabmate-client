@@ -40,7 +40,7 @@ cd desktop-tauri/src-tauri
 cargo tauri dev
 ```
 
-- **`prepare-sidecar.sh`**（名称历史遗留）会把 **`connect.html`** / **`splash.html`** 拷进 **`desktop-tauri/dist/`**；可选经 **`CRABMATE_FRONTEND_DIST`** 或同级主仓 `frontend/dist` 同步业务 UI 产物。
+- **`prepare-sidecar.sh`**（名称历史遗留）会把 **`connect.html`** / **`splash.html`** 拷进 **`desktop-tauri/dist/`**；业务 UI 优先本仓 **`frontend/dist`**（`make frontend`），可用 **`CRABMATE_FRONTEND_DIST`** 覆盖；**`CM_PREPARE_SKIP_FRONTEND=1`** 或 **`CRABMATE_FRONTEND_DIST=-`** 跳过 UI 同步。
 - 可选：**`CM_DESKTOP_SUGGESTED_URL`** 覆盖连接页预填。
 
 ## 打包
@@ -53,6 +53,6 @@ cargo tauri dev
 - 架构：**[`docs/design/tauri_gui_mvp_design.md`](../docs/design/tauri_gui_mvp_design.md)**
 - 冒烟：**[`docs/design/shell_smoke_runbook.md`](../docs/design/shell_smoke_runbook.md)**
 - 共用连接逻辑：**`crates/crabmate-connect`**（与 **`mobile-tauri`** 对齐）
-- 契约钉版本：主仓 **`docs/design/client_contract_versioning.md`**
+- 业务 UI：**[`frontend/README.md`](../frontend/README.md)**（契约钉版本见 [`docs/design/contract_pin.md`](../docs/design/contract_pin.md)）
 
-主 Web 前端过渡期仍在 Server 主仓 **`frontend/`**；桌面端提供壳层与连接页。
+业务 UI 源码在本仓 **`frontend/`**；运行时仍由外部 **`crabmate serve`**（经 `CM_WEB_STATIC_DIR`）或壳同步的 dist 提供页面。

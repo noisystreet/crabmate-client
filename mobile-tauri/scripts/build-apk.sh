@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 构建 CrabMate Android APK（远程薄客户端，无 sidecar）。
-# 默认跳过前端构建（业务 UI 由远程 serve 提供，或日后迁入本仓）。
-# 若需同步构建主仓 UI：设 CM_MOBILE_BUILD_FRONTEND=1，并保证 frontend/ 或 CRABMATE_FRONTEND_DIR 可用。
+# 默认跳过前端构建（业务 UI 由远程 serve 经 CM_WEB_STATIC_DIR 提供）。
+# 若需同步构建本仓 UI：设 CM_MOBILE_BUILD_FRONTEND=1（默认本仓 frontend/；可设 CRABMATE_FRONTEND_DIR）。
 # 用法（仓库根或任意目录）:
 #   ./mobile-tauri/scripts/build-apk.sh
 #   MOBILE_ANDROID_TARGET=aarch64 CM_MOBILE_GRADLE_STOP=1 ./mobile-tauri/scripts/build-apk.sh
@@ -17,8 +17,10 @@ frontend_dir="${CRABMATE_FRONTEND_DIR:-}"
 if [[ -z "${frontend_dir}" ]]; then
   if [[ -d "${repo_root}/frontend" ]]; then
     frontend_dir="${repo_root}/frontend"
-  elif [[ -d "${repo_root}/../crabmate_agent/frontend" ]]; then
-    frontend_dir="${repo_root}/../crabmate_agent/frontend"
+  elif [[ "${CRABMATE_ALLOW_SIBLING_FRONTEND:-0}" == "1" || "${CRABMATE_ALLOW_SIBLING_FRONTEND:-}" == "true" || "${CRABMATE_ALLOW_SIBLING_FRONTEND:-}" == "yes" ]]; then
+    if [[ -d "${repo_root}/../crabmate_agent/frontend" ]]; then
+      frontend_dir="${repo_root}/../crabmate_agent/frontend"
+    fi
   fi
 fi
 

@@ -141,10 +141,14 @@ start_serve_background() {
     local static_dir=""
     if [[ -n "${CM_WEB_STATIC_DIR:-}" ]]; then
       static_dir="${CM_WEB_STATIC_DIR}"
-    elif [[ -n "${CRABMATE_FRONTEND_DIST:-}" ]]; then
+    elif [[ -n "${CRABMATE_FRONTEND_DIST:-}" && "${CRABMATE_FRONTEND_DIST}" != "-" ]]; then
       static_dir="${CRABMATE_FRONTEND_DIST}"
-    elif [[ -f "${ROOT}/../crabmate_agent/frontend/dist/index.html" ]]; then
-      static_dir="${ROOT}/../crabmate_agent/frontend/dist"
+    elif [[ -f "${ROOT}/frontend/dist/index.html" ]]; then
+      static_dir="${ROOT}/frontend/dist"
+    elif [[ "${CRABMATE_ALLOW_SIBLING_FRONTEND:-0}" == "1" || "${CRABMATE_ALLOW_SIBLING_FRONTEND:-}" == "true" || "${CRABMATE_ALLOW_SIBLING_FRONTEND:-}" == "yes" ]]; then
+      if [[ -f "${ROOT}/../crabmate_agent/frontend/dist/index.html" ]]; then
+        static_dir="${ROOT}/../crabmate_agent/frontend/dist"
+      fi
     fi
     local serve_cwd="${ROOT}"
     if [[ -d "${ROOT}/../crabmate_agent" ]]; then
@@ -227,9 +231,17 @@ fi
 
 echo ">>> Preparing shell assets + building desktop ..."
 cd "$ROOT"
-# 可选 UI 产物：显式 CRABMATE_FRONTEND_DIST，或同级主仓 frontend/dist
-if [[ -z "${CRABMATE_FRONTEND_DIST:-}" && -f "${ROOT}/../crabmate_agent/frontend/dist/index.html" ]]; then
-  export CRABMATE_FRONTEND_DIST="${ROOT}/../crabmate_agent/frontend/dist"
+# 可选 UI 产物：显式 CRABMATE_FRONTEND_DIST，或本仓 frontend/dist
+# （同级主仓需 CRABMATE_ALLOW_SIBLING_FRONTEND=1）
+if [[ -z "${CRABMATE_FRONTEND_DIST:-}" || "${CRABMATE_FRONTEND_DIST}" == "-" ]]; then
+  unset CRABMATE_FRONTEND_DIST
+  if [[ -f "${ROOT}/frontend/dist/index.html" ]]; then
+    export CRABMATE_FRONTEND_DIST="${ROOT}/frontend/dist"
+  elif [[ "${CRABMATE_ALLOW_SIBLING_FRONTEND:-0}" == "1" || "${CRABMATE_ALLOW_SIBLING_FRONTEND:-}" == "true" || "${CRABMATE_ALLOW_SIBLING_FRONTEND:-}" == "yes" ]]; then
+    if [[ -f "${ROOT}/../crabmate_agent/frontend/dist/index.html" ]]; then
+      export CRABMATE_FRONTEND_DIST="${ROOT}/../crabmate_agent/frontend/dist"
+    fi
+  fi
 fi
 bash "$DESKTOP_ROOT/scripts/prepare-sidecar.sh"
 

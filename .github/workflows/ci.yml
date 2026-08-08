@@ -1,4 +1,4 @@
-# crabmate-client：壳 + connect 门禁（不含 Victauri 全量 E2E、不含 Server frontend）
+# crabmate-client：壳 + connect + frontend 门禁（不含 Victauri 全量 E2E）
 name: CI
 
 on:
@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   check:
-    name: check (fmt · clippy · complexity · no-main-path · test)
+    name: check (fmt · clippy · complexity · no-main-path · frontend · test)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -26,11 +26,13 @@ jobs:
         run: |
           sudo apt-get update && sudo apt-get install -y \
             libssl-dev libssh2-1-dev \
-            libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+            libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf \
+            ripgrep
 
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+          targets: wasm32-unknown-unknown
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -38,6 +40,7 @@ jobs:
             desktop-tauri/src-tauri
             mobile-tauri/src-tauri
             crates/crabmate-connect
+            frontend
 
       - name: Install lizard (complexity via check.sh)
         run: pip install lizard
@@ -45,8 +48,14 @@ jobs:
       - name: Forbid path deps back to Server monorepo
         run: bash scripts/check-no-main-path.sh
 
-      - name: scripts/check.sh (fmt + clippy + complexity)
+      - name: scripts/check.sh (fmt + clippy + frontend wasm + complexity)
         run: bash scripts/check.sh
+
+      - name: Install trunk (frontend smoke)
+        run: cargo install trunk --locked
+
+      - name: trunk build (frontend)
+        run: make frontend
 
       - name: cargo test (connect)
         run: cargo test
@@ -89,11 +98,10 @@ jobs:
       - name: Install tauri-cli
         run: cargo install tauri-cli --version "^2" --locked
 
-      # 打包门禁不依赖主仓 UI：壳静态页即可；真实 UI 可本地设 CRABMATE_FRONTEND_DIST
+      # 打包门禁不跑 trunk：显式跳过 UI 同步，仅用壳 stub
       - name: cargo tauri build (deb via Makefile)
         env:
-          # 避免 CI runner 上偶然存在的同级路径；仅用壳静态资源
-          CRABMATE_FRONTEND_DIST: ""
+          CM_PREPARE_SKIP_FRONTEND: "1"
         run: |
           mkdir -p desktop-tauri/dist
           echo '<!DOCTYPE html><html><body>ci-stub</body></html>' > desktop-tauri/dist/index.html

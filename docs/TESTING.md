@@ -9,22 +9,23 @@ pre-commit install --hook-type commit-msg
 pre-commit run --all-files
 ```
 
-钩子（对齐主仓结构，去掉 Server/frontend/Playwright）：
+钩子：
 
 | 钩子 | 说明 |
 |------|------|
 | `check-no-main-path` | 禁止 Cargo path 回主仓 |
-| `cargo-fmt` | desktop / mobile / connect |
+| `cargo-fmt` | desktop / mobile / connect / frontend |
 | `desktop-dist-stubs` | tauri-build 所需 dist 占位 |
 | `desktop-clippy` / `mobile-clippy` / `connect-clippy` | `-D warnings` |
-| `lizard-rust` | 按模块 CCN（`scripts/lizard_module_ccn_caps.toml`） |
+| `frontend-wasm-check` / `frontend-clippy` | wasm32 check + clippy |
+| `lizard-rust` | 按模块 CCN（含 `frontend`） |
 | `fn-param-ratchet` | 形参 ≤ 9 |
 | `fn-nloc-ratchet` | 函数 nloc ≤ 200、单文件 ≤ 920 |
 | `taplo-format` / `taplo-lint` | 有 `taplo` 才跑，否则跳过 |
 | `typos` | 拼写 |
 | `conventional-pre-commit` | commit-msg |
 
-**不含** Victauri 全量 E2E、也不跑 Server 主仓 frontend wasm。
+**不含** Victauri 全量 E2E、也不跑 Server 主仓 Playwright。
 
 未装 `pre-commit` 时至少：
 
@@ -38,16 +39,17 @@ bash scripts/check.sh
 
 | Job / 工作流 | 内容 |
 |--------------|------|
-| `CI` / `check` | `check-no-main-path`、`scripts/check.sh`（含复杂度）、connect/desktop test、mobile check |
-| `CI` / `build-desktop-deb` | `make desktop-release` 产出 `.deb`；校验无 serve sidecar |
-| `code-complexity` | 独立门禁：`lizard-rust` / `fn-param` / `fn-nloc`（对齐主仓） |
+| `CI` / `check` | `check-no-main-path`、`scripts/check.sh`（含 frontend wasm/clippy + 复杂度）、`make frontend`（trunk）、connect/desktop test、mobile check |
+| `CI` / `build-desktop-deb` | `CM_PREPARE_SKIP_FRONTEND=1` + stub；`make desktop-release`；校验无 serve sidecar |
+| `code-complexity` | 独立门禁：`lizard-rust` / `fn-param` / `fn-nloc` |
 
 Victauri 全量 E2E **不**进默认 CI（需本机/`PATH` 中的 `serve` + WebView）；见下节。
 
-本地打包：
+本地 UI / 打包：
 
 ```bash
-make desktop-release          # 完整 .deb（可选 CRABMATE_FRONTEND_DIST）
+make frontend                 # trunk → frontend/dist
+make desktop-release          # 完整 .deb（默认同步本仓 frontend/dist）
 make desktop-bin-release      # 仅二进制
 ```
 
