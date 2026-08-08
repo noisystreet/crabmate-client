@@ -9,7 +9,7 @@
 | 依赖 | 本仓做法 |
 |------|----------|
 | `crabmate-connect` | **本仓** `path = "../../crates/crabmate-connect"`（已迁入；勿再 git+path 回主仓旧路径） |
-| 业务 UI（`frontend/`） | **本仓**；契约 crates 见 `frontend/Cargo.toml` 的 git **`rev`**（开发期）/ **`tag`**（有 `client-contract-v*` 后） |
+| 业务 UI（`frontend/`） | **本仓**；契约 crates 见 `frontend/Cargo.toml` 的 git **`tag`** |
 | 壳二进制本身 | 暂不直接依赖主仓契约 crate（只经 WebView 加载 UI + HTTP/SSE） |
 
 本地门禁：`bash scripts/check-no-main-path.sh`（需 `rg` 或 `grep`；CI 装 ripgrep）。
@@ -18,19 +18,22 @@
 
 | 项 | 值 |
 |----|-----|
-| 源码迁入自 | 主仓 `origin/main` `eb0048bfc802b6dcb4048200d495156e978bbc1a`（见 `frontend/SOURCE.md`） |
-| 契约 `rev` | 同上（待主仓打 `client-contract-v0.1.0` 后改为 `tag`） |
+| 源码迁入自 | 主仓 `eb0048bf…`（见 `frontend/SOURCE.md`） |
+| 契约 `tag` | **`client-contract-v0.1.0`**（主仓 `c244ebb1`） |
 | lock | 提交 `frontend/Cargo.lock` |
 
 壳打包 UI 同步：`prepare-sidecar` 默认本仓 `frontend/dist`；`CM_PREPARE_SKIP_FRONTEND=1` 或 `CRABMATE_FRONTEND_DIST=-` 跳过；同级主仓回落需 `CRABMATE_ALLOW_SIBLING_FRONTEND=1`。
 
-## 钉主仓契约（有 tag 时）
-
-主仓打注释标签 `client-contract-vX.Y.Z` 后，将 `frontend/Cargo.toml` 中七个契约依赖的 `rev = "…"` 改为：
+## 钉主仓契约
 
 ```toml
 crabmate-api-contract = { git = "https://github.com/noisystreet/CrabMate", tag = "client-contract-v0.1.0", package = "crabmate-api-contract" }
-# … 其余六个同理：sse-protocol / types / display-rules / turn-layout / tool-card / chat-export
+crabmate-sse-protocol = { git = "https://github.com/noisystreet/CrabMate", tag = "client-contract-v0.1.0", package = "crabmate-sse-protocol" }
+crabmate-types = { git = "https://github.com/noisystreet/CrabMate", tag = "client-contract-v0.1.0", package = "crabmate-types" }
+crabmate-display-rules = { git = "https://github.com/noisystreet/CrabMate", tag = "client-contract-v0.1.0", package = "crabmate-display-rules" }
+crabmate-turn-layout = { git = "https://github.com/noisystreet/CrabMate", tag = "client-contract-v0.1.0", package = "crabmate-turn-layout" }
+crabmate-tool-card = { git = "https://github.com/noisystreet/CrabMate", tag = "client-contract-v0.1.0", package = "crabmate-tool-card" }
+crabmate-chat-export = { git = "https://github.com/noisystreet/CrabMate", tag = "client-contract-v0.1.0", package = "crabmate-chat-export" }
 ```
 
 开发期可用 `rev = "<sha>"` 代替 `tag`。打标签前主仓须绿：`bash scripts/check-client-contract.sh`。

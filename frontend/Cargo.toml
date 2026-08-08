@@ -3,20 +3,20 @@ name = "crabmate-web"
 version = "0.1.0"
 edition = "2024"
 description = "CrabMate Web UI (Leptos CSR + WASM)"
-# 契约钉版本：开发期用 rev；主仓打 client-contract-v* 后改为 tag（见 docs/design/contract_pin.md）
+# 契约钉版本：client-contract-v*（见 docs/design/contract_pin.md）
 
 [lib]
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 # Server monorepo 契约 crates（禁止 path 回本地 crabmate_agent）
-crabmate-chat-export = { git = "https://github.com/noisystreet/CrabMate", rev = "eb0048bfc802b6dcb4048200d495156e978bbc1a", package = "crabmate-chat-export" }
-crabmate-api-contract = { git = "https://github.com/noisystreet/CrabMate", rev = "eb0048bfc802b6dcb4048200d495156e978bbc1a", package = "crabmate-api-contract" }
-crabmate-display-rules = { git = "https://github.com/noisystreet/CrabMate", rev = "eb0048bfc802b6dcb4048200d495156e978bbc1a", package = "crabmate-display-rules" }
-crabmate-tool-card = { git = "https://github.com/noisystreet/CrabMate", rev = "eb0048bfc802b6dcb4048200d495156e978bbc1a", package = "crabmate-tool-card" }
-crabmate-types = { git = "https://github.com/noisystreet/CrabMate", rev = "eb0048bfc802b6dcb4048200d495156e978bbc1a", package = "crabmate-types" }
-crabmate-sse-protocol = { git = "https://github.com/noisystreet/CrabMate", rev = "eb0048bfc802b6dcb4048200d495156e978bbc1a", package = "crabmate-sse-protocol" }
-crabmate-turn-layout = { git = "https://github.com/noisystreet/CrabMate", rev = "eb0048bfc802b6dcb4048200d495156e978bbc1a", package = "crabmate-turn-layout" }
+crabmate-chat-export = { git = "https://github.com/noisystreet/CrabMate", tag = "client-contract-v0.1.0", package = "crabmate-chat-export" }
+crabmate-api-contract = { git = "https://github.com/noisystreet/CrabMate", tag = "client-contract-v0.1.0", package = "crabmate-api-contract" }
+crabmate-display-rules = { git = "https://github.com/noisystreet/CrabMate", tag = "client-contract-v0.1.0", package = "crabmate-display-rules" }
+crabmate-tool-card = { git = "https://github.com/noisystreet/CrabMate", tag = "client-contract-v0.1.0", package = "crabmate-tool-card" }
+crabmate-types = { git = "https://github.com/noisystreet/CrabMate", tag = "client-contract-v0.1.0", package = "crabmate-types" }
+crabmate-sse-protocol = { git = "https://github.com/noisystreet/CrabMate", tag = "client-contract-v0.1.0", package = "crabmate-sse-protocol" }
+crabmate-turn-layout = { git = "https://github.com/noisystreet/CrabMate", tag = "client-contract-v0.1.0", package = "crabmate-turn-layout" }
 ammonia = ">=4.1.4"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 console_error_panic_hook = "0.1"
