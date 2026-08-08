@@ -1,0 +1,22 @@
+---
+description: git commit 须 Conventional Commits，且 subject 中英双语简述
+alwaysApply: true
+---
+
+# Commit message：Conventional Commits + 中英双语
+
+```
+<type>(<optional scope>): <中文简述> / <English brief>
+```
+
+常用 type：`feat`、`fix`、`refactor`、`docs`、`test`、`chore`、`ci`、`build`、`style`、`perf`、`revert`。  
+scope 示例：`desktop`、`mobile`、`connect`、`docs`。
+
+示例：
+
+```
+docs(desktop): 对齐路径 A 薄壳说明 / align thin-shell docs with path A
+chore: 增加 pre-commit 与 check 脚本 / add pre-commit and check script
+```
+
+由 `pre-commit` 的 `commit-msg` 钩子校验 type；双语靠人工遵守。

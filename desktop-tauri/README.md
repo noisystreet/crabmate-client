@@ -50,6 +50,8 @@ cargo tauri dev
 ## 更多
 
 - 故障排查、代理、Wayland IME：**`DEVELOPMENT.md`**
+- 架构：**[`docs/design/tauri_gui_mvp_design.md`](../docs/design/tauri_gui_mvp_design.md)**
+- 冒烟：**[`docs/design/shell_smoke_runbook.md`](../docs/design/shell_smoke_runbook.md)**
 - 共用连接逻辑：**`crates/crabmate-connect`**（与 **`mobile-tauri`** 对齐）
 - 契约钉版本：主仓 **`docs/design/client_contract_versioning.md`**
 

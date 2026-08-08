@@ -64,11 +64,11 @@ pub async fn probe_server(base: &Url, bearer: &str) -> Result<(), String> {
         .map_err(|e| format!("无法构造 /health: {e}"))?;
     let health_resp = probe_get(&client, health, bearer, "/health").await?;
     map_auth_or_status(health_resp.status(), "/health")?;
-    if let Ok(body) = health_resp.text().await {
-        if let Some(note) = health_degraded_note(&body) {
-            // 不阻断连接：缺可选 CLI 等仍可进入 UI；摘要留给后续日志/扩展。
-            eprintln!("[crabmate-connect] /health degraded: {note}");
-        }
+    if let Ok(body) = health_resp.text().await
+        && let Some(note) = health_degraded_note(&body)
+    {
+        // 不阻断连接：缺可选 CLI 等仍可进入 UI；摘要留给后续日志/扩展。
+        eprintln!("[crabmate-connect] /health degraded: {note}");
     }
 
     let prefs = base

@@ -28,6 +28,7 @@ Thumbs.db
 /target/
 desktop-tauri/src-tauri/target/
 mobile-tauri/src-tauri/target/
+crates/crabmate-connect/target/
 desktop-tauri/src-tauri/gen/
 mobile-tauri/src-tauri/gen/schemas/
 desktop-tauri/binaries/
@@ -43,10 +44,6 @@ mobile-tauri/src-tauri/gen/android/app/key.properties
 **/*.keystore
 
 ########################
-# Node（若日后迁入 UI 构建）
+# Agent 草稿（勿提交）
 ########################
-node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
+agent_space/

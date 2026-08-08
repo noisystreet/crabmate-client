@@ -1,0 +1,33 @@
+---
+description: 提交代码前须运行 pre-commit，通过后再 git commit
+alwaysApply: true
+---
+
+# 提交前：pre-commit
+
+代表用户执行 **`git commit`** 之前，必须先完成本仓检查。
+
+## 必须执行
+
+优先（仓库根）：
+
+```bash
+pre-commit run --all-files
+```
+
+未安装 `pre-commit` 时：
+
+```bash
+bash scripts/check.sh
+```
+
+## 流程
+
+- 失败则修复后重跑，直至通过，再 `git commit`
+- **禁止** `--no-verify`
+- commit subject：Conventional Commits + 中英双语（见 `conventional-commits.mdc`）
+
+## 与本仓对应
+
+钩子见 **`.pre-commit-config.yaml`**：desktop / mobile / connect 的 fmt+clippy、typos、commit-msg。  
+**不含** Server 主仓的 frontend wasm、全 workspace clippy、Playwright。

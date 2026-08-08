@@ -28,6 +28,17 @@
 
 路径 A 终点：本仓自带业务 UI（或依赖版本化 UI 产物）+ API 基址连 `serve`。
 
+## 文档
+
+| 文档 | 内容 |
+|------|------|
+| [AGENTS.md](./AGENTS.md) | Agent 约束、命令、文档同步规则 |
+| [docs/TESTING.md](./docs/TESTING.md) | pre-commit / Victauri |
+| [docs/design/tauri_gui_mvp_design.md](./docs/design/tauri_gui_mvp_design.md) | 壳架构（路径 A） |
+| [docs/design/shell_smoke_runbook.md](./docs/design/shell_smoke_runbook.md) | Desktop/Android 人工冒烟 |
+
+提交前：`pre-commit run --all-files` 或 `bash scripts/check.sh`。
+
 ## 快速开始（Desktop）
 
 前置：本机或远程已启动 **`crabmate serve`**（默认 `http://127.0.0.1:8080/`）。
