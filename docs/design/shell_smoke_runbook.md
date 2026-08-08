@@ -28,7 +28,7 @@ cd desktop-tauri/src-tauri
 cargo tauri dev
 ```
 
-- [x] 闪屏 → 连接页预填本机 URL → 探测成功进入 UI（2026-08-08 验收用 `CM_DESKTOP_SKIP_CONNECT` + `CM_DESKTOP_SERVE_URL` 跳过连接页直达 UI）  
+- [x] 连接页预填本机 URL → 探测成功进入 UI（2026-08-08 验收用 `CM_DESKTOP_SKIP_CONNECT` + `CM_DESKTOP_SERVE_URL` 跳过连接页直达 UI）  
 - [x] 一轮对话（同日：干净克隆 release 壳对接本仓/主仓 `:18080` UI/`serve`；`POST /chat/stream` v2 得助手终答）  
 - [ ] （可选）改填 LAN 上另一台 `serve`；非回环时桌面 IPC 受限符合预期  
 

@@ -6,16 +6,16 @@
 
 ## 启动流程（与代码一致）
 
-1. 显示无边框 **闪屏**（`splash.html`），随后打开主窗口。
+1. **单窗启动**：主窗口先 `visible(false)`，连接页阶段**铺满主屏工作区**（`connect.html` 内 flex 居中卡片），再显示——不依赖合成器对小窗的 `center()`，避免左上角闪一下。
 2. **默认**：主窗口展示与移动端共用的**连接页**（`crates/crabmate-connect/assets/connect.html`）。预填建议地址为 **`CM_DESKTOP_SUGGESTED_URL`**，未设时为 **`http://127.0.0.1:8080/`**。用户填写 **服务器地址** + 可选 **Web API Bearer**，探测 `GET /health` 成功后导航到该 `serve` UI，并用 hash 交接 Bearer。
 3. **首次**成功连接且 Bearer 非空、本机钥匙串尚无对应条目时，写入系统钥匙串（账户 `tauri_connect_web_api_bearer`）；下次启动自动填充。
-4. 桌面应用保持单实例：再次启动会显示并聚焦已有主窗口（启动中则聚焦闪屏）。
+4. 桌面应用保持单实例：再次启动会显示并聚焦已有主窗口。
 5. 关闭主窗口会结束应用；系统托盘可用时，最小化按钮会隐藏主窗口，托盘「显示/隐藏」可恢复。托盘初始化失败时保留普通最小化。
-6. 会话主窗**默认最大化**（连接后 `show` 再 maximize；不 restore 连接页位置）。连接页仍为小窗。退出时仍保存大小/位置/最大化供参考。启动闪屏不参与状态保存。右侧可拖拽分栏宽度沿用 Web 偏好持久化；**工作区侧栏在宽屏默认展开**（prefs 为隐藏时也会展开；移动/窄屏默认收起，右缘左划打开）。
+6. 会话主窗**默认最大化**（连接后 `show` 再 maximize）。连接页阶段为铺满工作区的全屏底 + 居中卡片（非 480×420 小窗）。退出时仍保存大小/位置/最大化供参考。右侧可拖拽分栏宽度沿用 Web 偏好持久化；**工作区侧栏在宽屏默认展开**（prefs 为隐藏时也会展开；移动/窄屏默认收起，右缘左划打开）。
 
 **跳过连接页**（直接打开指定 URL）：**`CM_E2E_FIXTURES=1`**（Victauri E2E）或 **`CM_DESKTOP_SKIP_CONNECT=1`**，且必须设置 **`CM_DESKTOP_SERVE_URL`**（例如 `http://127.0.0.1:8080/`）。须事先自行启动 `serve`。
 
-闪屏文案提示「请先自行启动 serve」；失败时在闪屏内展示错误与「退出」。主窗首屏 page load 完成（或约 20s 超时兜底）后再显示主窗并关闭闪屏。
+主窗首屏 page load 完成（或约 20s 超时兜底）后再显示。启动失败（如跳过连接页但未设 URL）以对话框提示。
 
 ## 托盘与单实例
 
@@ -40,7 +40,7 @@ cd desktop-tauri/src-tauri
 cargo tauri dev
 ```
 
-- **`prepare-sidecar.sh`**（名称历史遗留）会把 **`connect.html`** / **`splash.html`** 拷进 **`desktop-tauri/dist/`**；业务 UI 优先本仓 **`frontend/dist`**。**`make desktop-release` / `cargo tauri build`** 经 **`before-desktop-build.sh`** 先跑 **`trunk build --release`**（需 **`wasm-opt`**），并拒绝把 debug 大体积 WASM 打进包。开发可用 **`make frontend`**；覆盖路径用 **`CRABMATE_FRONTEND_DIST`**；**`CM_PREPARE_SKIP_FRONTEND=1`** 或 **`CRABMATE_FRONTEND_DIST=-`** 跳过 UI 同步（CI stub）。
+- **`prepare-sidecar.sh`**（名称历史遗留）会把 **`connect.html`** 拷进 **`desktop-tauri/dist/`**（若存在亦同步遗留 `splash.html`）；业务 UI 优先本仓 **`frontend/dist`**。**`make desktop-release` / `cargo tauri build`** 经 **`before-desktop-build.sh`** 先跑 **`trunk build --release`**（需 **`wasm-opt`**），并拒绝把 debug 大体积 WASM 打进包。开发可用 **`make frontend`**；覆盖路径用 **`CRABMATE_FRONTEND_DIST`**；**`CM_PREPARE_SKIP_FRONTEND=1`** 或 **`CRABMATE_FRONTEND_DIST=-`** 跳过 UI 同步（CI stub）。
 - 可选：**`CM_DESKTOP_SUGGESTED_URL`** 覆盖连接页预填。
 
 ## 打包

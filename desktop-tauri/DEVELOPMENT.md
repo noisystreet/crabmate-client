@@ -70,11 +70,11 @@ cd desktop-tauri/src-tauri && cargo tauri dev
 
 ### 1.5 托盘、窗口与单实例
 
-- `tauri-plugin-single-instance` 必须在 Builder 插件序列最前注册。第二实例不会执行 `setup`，而是显示并聚焦已有 `main`；主窗口尚未创建时聚焦 `splash`。
+- `tauri-plugin-single-instance` 必须在 Builder 插件序列最前注册。第二实例不会执行 `setup`，而是显示并聚焦已有 `main`。
 - `src/desktop_lifecycle.rs` 负责托盘和窗口生命周期。托盘菜单含「显示/隐藏」「退出」；Linux 下须使用菜单，Windows/macOS 左键可切换。
 - 关闭 `main` 会正常退出壳进程；**不** kill 用户自行启动的 `serve`。托盘初始化成功时，前端最小化命令改为隐藏窗口。
-- `tauri-plugin-window-state` 仅跟踪稳定标签 `main`，保存大小、位置和最大化状态；`splash` 在 denylist 中。刻意不恢复 `VISIBLE`。会话窗在 **show 之后**默认 maximize（不 restore 连接页 POSITION，以免放大后偏到右下）；失败则铺满当前显示器工作区。
-- 主窗口先以 `visible(false)` 创建，再在 `show()` 前/后显式处理几何：闪屏与连接页共用 **480×420**；连上 `serve`（或 DirectUi）后默认最大化。
+- `tauri-plugin-window-state` 仅跟踪稳定标签 `main`，保存大小、位置和最大化状态。刻意不恢复 `VISIBLE`。会话窗在 **show 之后**默认 maximize（不 restore 连接页 POSITION，以免放大后偏到右下）；失败则铺满当前显示器工作区。
+- **单窗启动**：无独立闪屏。连接页阶段主窗口**铺满主屏工作区**（页内 CSS 居中连接卡片），从根上避免小窗被合成器先画在左上角；连上 `serve`（或 DirectUi）后默认最大化。
 - 托盘「退出」与 `quit_desktop_app` 共用 `request_desktop_quit`（直接 `app.exit(0)`）。
 
 手动验收：
@@ -102,11 +102,11 @@ cd desktop-tauri/src-tauri && cargo tauri dev
 curl -sS --noproxy '*' http://127.0.0.1:8080/health
 ```
 
-### 2.2 启动闪屏报错 / 跳过连接页失败
+### 2.2 跳过连接页失败
 
-启动时会先显示 **`splash.html`**。若设置了跳过连接页但未设 **`CM_DESKTOP_SERVE_URL`**，闪屏会报错并提示须先启动 `serve`。
+若设置了跳过连接页但未设 **`CM_DESKTOP_SERVE_URL`**，启动会失败并以对话框提示须先启动 `serve`。
 
-闪屏与连接页静态资源由 **`prepare-sidecar.sh`** 复制到 **`desktop-tauri/dist/splash.html`**、**`connect.html`**（连接页源在 **`crates/crabmate-connect/assets/`**）。
+连接页静态资源由 **`prepare-sidecar.sh`** 复制到 **`desktop-tauri/dist/connect.html`**（源在 **`crates/crabmate-connect/assets/`**）。
 
 ### 2.3 Web API 405（如「删除文件夹」）或接口版本不一致
 
@@ -186,7 +186,7 @@ export no_proxy=127.0.0.1,localhost
 - 连接页连接已运行的本机/远程 `serve`（壳不 spawn）
 - 单实例保护；第二次启动唤醒已有窗口
 - 系统托盘与最小化隐藏；托盘不可用时安全降级
-- 启动失败时的错误对话框 / 闪屏错误态
+- 启动失败时的错误对话框
 
 尚待完善：
 
