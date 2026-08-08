@@ -36,11 +36,19 @@ bash scripts/check.sh
 
 工作流：[`.github/workflows/ci.yml`](../.github/workflows/ci.yml)
 
-- `scripts/check-no-main-path.sh` + `scripts/check.sh`（含复杂度）
-- `cargo test`：connect + desktop（未设 `VICTAURI_E2E` 时 Victauri 套件自动跳过）
-- `cargo check`：mobile
+| Job | 内容 |
+|-----|------|
+| `check` | `make check` 同源：`check-no-main-path`、fmt/clippy/复杂度、connect/desktop test、mobile check |
+| `build-desktop-deb` | `cargo tauri build` 产出 `.deb`；校验含 `crabmate-desktop`、desktop 入口、config；**禁止** `usr/bin/crabmate` sidecar |
 
 Victauri 全量 E2E **不**进默认 CI（需本机/`PATH` 中的 `serve` + WebView）；见下节。
+
+本地打包：
+
+```bash
+make desktop-release          # 完整 .deb（可选 CRABMATE_FRONTEND_DIST）
+make desktop-bin-release      # 仅二进制
+```
 
 ## Victauri（Desktop 壳 E2E）
 

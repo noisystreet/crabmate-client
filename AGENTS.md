@@ -37,14 +37,13 @@
 ## Required Commands
 
 ```bash
-pre-commit run --all-files   # 提交前必跑（见 .cursor/rules/pre-commit-before-commit.mdc）
-bash scripts/check.sh        # 无 pre-commit 时的替代（fmt/clippy/复杂度/禁 path）
+make help
+make check                   # 或 pre-commit run --all-files
+make test
+make desktop-dev
+make desktop-release         # .deb 打包
 bash scripts/check-no-main-path.sh
 bash scripts/lizard-rust.sh
-bash scripts/fn-param-ratchet.sh
-bash scripts/fn-nloc-ratchet.sh
-bash scripts/sync-tauri-connect-page.sh
-cd desktop-tauri/src-tauri && cargo check
 ./scripts/victauri-e2e.sh all   # 需可用的 crabmate serve 二进制；默认不进 CI
 ```
 
