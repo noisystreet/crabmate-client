@@ -21,6 +21,8 @@ pre-commit run --all-files
 bash scripts/check.sh
 ```
 
+复杂度钩子另需 **`pip install lizard`**（与主仓一致）。
+
 ## 流程
 
 - 失败则修复后重跑，直至通过，再 `git commit`
@@ -29,5 +31,6 @@ bash scripts/check.sh
 
 ## 与本仓对应
 
-钩子见 **`.pre-commit-config.yaml`**：desktop / mobile / connect 的 fmt+clippy、typos、commit-msg。  
-**不含** Server 主仓的 frontend wasm、全 workspace clippy、Playwright。
+钩子见 **`.pre-commit-config.yaml`**（对齐主仓：分项 fmt/clippy、`check-no-main-path`、lizard / fn-param / fn-nloc、可选 taplo、typos、commit-msg）。  
+**不含** Server 主仓的 frontend wasm、全 workspace clippy、Playwright。  
+**`cargo test` / Victauri E2E 不在 pre-commit**（见 CI 与 `docs/TESTING.md`）。

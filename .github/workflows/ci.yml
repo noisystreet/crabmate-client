@@ -39,10 +39,13 @@ jobs:
             mobile-tauri/src-tauri
             crates/crabmate-connect
 
+      - name: Install lizard (complexity hooks)
+        run: pip install lizard
+
       - name: Forbid path deps back to Server monorepo
         run: bash scripts/check-no-main-path.sh
 
-      - name: scripts/check.sh (fmt + clippy)
+      - name: scripts/check.sh (fmt + clippy + complexity)
         run: bash scripts/check.sh
 
       - name: cargo test (connect)

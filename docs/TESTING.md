@@ -3,13 +3,27 @@
 ## pre-commit
 
 ```bash
-pip install pre-commit   # 或 uv tool install pre-commit
+pip install pre-commit lizard   # 或 uv tool install pre-commit；复杂度需 lizard
 pre-commit install
 pre-commit install --hook-type commit-msg
 pre-commit run --all-files
 ```
 
-钩子：`desktop` / `mobile` / `connect` 的 `cargo fmt` 与 `clippy -D warnings`；typos；Conventional Commits（commit-msg）。  
+钩子（对齐主仓结构，去掉 Server/frontend/Playwright）：
+
+| 钩子 | 说明 |
+|------|------|
+| `check-no-main-path` | 禁止 Cargo path 回主仓 |
+| `cargo-fmt` | desktop / mobile / connect |
+| `desktop-dist-stubs` | tauri-build 所需 dist 占位 |
+| `desktop-clippy` / `mobile-clippy` / `connect-clippy` | `-D warnings` |
+| `lizard-rust` | 按模块 CCN（`scripts/lizard_module_ccn_caps.toml`） |
+| `fn-param-ratchet` | 形参 ≤ 9 |
+| `fn-nloc-ratchet` | 函数 nloc ≤ 200、单文件 ≤ 920 |
+| `taplo-format` / `taplo-lint` | 有 `taplo` 才跑，否则跳过 |
+| `typos` | 拼写 |
+| `conventional-pre-commit` | commit-msg |
+
 **不含** Victauri 全量 E2E、也不跑 Server 主仓 frontend wasm。
 
 未装 `pre-commit` 时至少：
@@ -22,8 +36,7 @@ bash scripts/check.sh
 
 工作流：[`.github/workflows/ci.yml`](../.github/workflows/ci.yml)
 
-- `scripts/check-no-main-path.sh`：禁止 path 回主仓
-- `scripts/check.sh`：fmt + clippy（desktop / mobile / connect）
+- `scripts/check-no-main-path.sh` + `scripts/check.sh`（含复杂度）
 - `cargo test`：connect + desktop（未设 `VICTAURI_E2E` 时 Victauri 套件自动跳过）
 - `cargo check`：mobile
 
