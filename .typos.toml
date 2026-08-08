@@ -1,0 +1,10 @@
+[default.extend-words]
+typ = "typ"
+clen = "clen"
+hel = "hel"
+ratatui = "ratatui"
+
+[files]
+extend-exclude = [
+  "frontend/vendor/**",
+]
