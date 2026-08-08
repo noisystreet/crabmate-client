@@ -36,10 +36,11 @@ bash scripts/check.sh
 
 工作流：[`.github/workflows/ci.yml`](../.github/workflows/ci.yml)
 
-| Job | 内容 |
-|-----|------|
-| `check` | `make check` 同源：`check-no-main-path`、fmt/clippy/复杂度、connect/desktop test、mobile check |
-| `build-desktop-deb` | `cargo tauri build` 产出 `.deb`；校验含 `crabmate-desktop`、desktop 入口、config；**禁止** `usr/bin/crabmate` sidecar |
+| Job / 工作流 | 内容 |
+|--------------|------|
+| `CI` / `check` | `check-no-main-path`、`scripts/check.sh`（含复杂度）、connect/desktop test、mobile check |
+| `CI` / `build-desktop-deb` | `make desktop-release` 产出 `.deb`；校验无 serve sidecar |
+| `code-complexity` | 独立门禁：`lizard-rust` / `fn-param` / `fn-nloc`（对齐主仓） |
 
 Victauri 全量 E2E **不**进默认 CI（需本机/`PATH` 中的 `serve` + WebView）；见下节。
 
@@ -48,6 +49,14 @@ Victauri 全量 E2E **不**进默认 CI（需本机/`PATH` 中的 `serve` + WebV
 ```bash
 make desktop-release          # 完整 .deb（可选 CRABMATE_FRONTEND_DIST）
 make desktop-bin-release      # 仅二进制
+```
+
+本地仅跑复杂度：
+
+```bash
+bash scripts/lizard-rust.sh
+bash scripts/fn-param-ratchet.sh
+bash scripts/fn-nloc-ratchet.sh
 ```
 
 ## Victauri（Desktop 壳 E2E）

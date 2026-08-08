@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   check:
-    name: check (fmt · clippy · no-main-path · test)
+    name: check (fmt · clippy · complexity · no-main-path · test)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -39,7 +39,7 @@ jobs:
             mobile-tauri/src-tauri
             crates/crabmate-connect
 
-      - name: Install lizard (complexity hooks)
+      - name: Install lizard (complexity via check.sh)
         run: pip install lizard
 
       - name: Forbid path deps back to Server monorepo
