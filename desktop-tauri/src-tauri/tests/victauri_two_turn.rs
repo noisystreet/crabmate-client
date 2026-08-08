@@ -17,7 +17,9 @@ async fn install_two_turn_stub(client: &mut victauri_test::VictauriClient, slow_
          return window.__origFetch2(u,o);}};}})()"
     )).await;
     if slow_second_ms > 0 {
-        let _ = client.eval_js(&format!("window.__twoTurnSlowMs={slow_second_ms}")).await;
+        let _ = client
+            .eval_js(&format!("window.__twoTurnSlowMs={slow_second_ms}"))
+            .await;
     }
 }
 
@@ -25,7 +27,10 @@ async fn seed_and_send(client: &mut victauri_test::VictauriClient, sid: &str, ms
     let _ = client.eval_js("fetch('/user-data/prefs',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({locale:'zh',theme:'light',side_panel_view:'hidden',side_width:280,editor_layout_mode:false,status_bar_visible:true})})").await;
     let _ = client.eval_js(&format!("fetch('/user-data/workspaces/current/sessions',{{method:'PUT',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{sessions:[{{id:'{sid}',title:'E2E',draft:'',messages:[],updated_at:1,pinned:false,starred:false}}],active_session_id:'{sid}'}})}})")).await;
     let _ = client.eval_js("location.reload()").await;
-    client.wait_for("network_idle", Some(""), Some(10000), Some(500)).await.ok();
+    client
+        .wait_for("network_idle", Some(""), Some(10000), Some(500))
+        .await
+        .ok();
     let _ = client.eval_js(&format!("(()=>{{const el=document.querySelector('[data-testid=\"chat-composer-input\"]');if(!el)return;el.focus();const s=Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype,'value').set;s.call(el,'{msg}');el.dispatchEvent(new Event('input',{{bubbles:true}}));}})()")).await;
     client.press_key("Enter").await.ok();
 }
@@ -36,10 +41,16 @@ async fn seed_and_send(client: &mut victauri_test::VictauriClient, sid: &str, ms
 e2e_test!(fast_second_turn_completes, |client| async move {
     install_two_turn_stub(&mut client, 0).await;
     seed_and_send(&mut client, "s_e2e_two_a", "你好").await;
-    client.wait_for("text", Some("CrabMate 助手"), Some(15000), Some(200)).await.unwrap();
+    client
+        .wait_for("text", Some("CrabMate 助手"), Some(15000), Some(200))
+        .await
+        .unwrap();
 
     seed_and_send(&mut client, "s_e2e_two_a", "你有哪些技能").await;
-    client.wait_for("text", Some("E2E stub 技能列表"), Some(15000), Some(200)).await.unwrap();
+    client
+        .wait_for("text", Some("E2E stub 技能列表"), Some(15000), Some(200))
+        .await
+        .unwrap();
 });
 
 // ---------------------------------------------------------------------------
@@ -48,10 +59,16 @@ e2e_test!(fast_second_turn_completes, |client| async move {
 e2e_test!(slow_second_turn_completes, |client| async move {
     install_two_turn_stub(&mut client, 0).await;
     seed_and_send(&mut client, "s_e2e_two_b", "你好").await;
-    client.wait_for("text", Some("CrabMate 助手"), Some(15000), Some(200)).await.unwrap();
+    client
+        .wait_for("text", Some("CrabMate 助手"), Some(15000), Some(200))
+        .await
+        .unwrap();
 
     seed_and_send(&mut client, "s_e2e_two_b", "你有哪些技能").await;
-    client.wait_for("text", Some("E2E stub 技能列表"), Some(30000), Some(200)).await.unwrap();
+    client
+        .wait_for("text", Some("E2E stub 技能列表"), Some(30000), Some(200))
+        .await
+        .unwrap();
 });
 
 // ---------------------------------------------------------------------------
@@ -60,7 +77,10 @@ e2e_test!(slow_second_turn_completes, |client| async move {
 e2e_test!(two_turn_with_hydrate, |client| async move {
     install_two_turn_stub(&mut client, 0).await;
     seed_and_send(&mut client, "s_e2e_two_c", "你好").await;
-    client.wait_for("text", Some("CrabMate 助手"), Some(15000), Some(200)).await.unwrap();
+    client
+        .wait_for("text", Some("CrabMate 助手"), Some(15000), Some(200))
+        .await
+        .unwrap();
 
     // 水合桩：存根 conversation/messages GET
     let _ = client.eval_js("window.__origFetchHyd=window.fetch;window.fetch=(u,o)=>{if(typeof u==='string'&&u.includes('/conversation/messages')&&u.includes('e2e-two-turn')&&(!o||o.method!=='POST'))return Promise.resolve(new Response(JSON.stringify({conversation_id:'e2e-two-turn',total_count:2,messages:[{role:'user',content:'你好'},{role:'assistant',content:'你好！我是 CrabMate 助手。'}]}), {status:200,headers:{'content-type':'application/json'}}));return window.__origFetchHyd(u,o);};").await;
@@ -68,8 +88,14 @@ e2e_test!(two_turn_with_hydrate, |client| async move {
     // 绑定会话到 conversation
     let _ = client.eval_js("fetch('/user-data/workspaces/current/sessions',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessions:[{id:'s_e2e_two_c',title:'E2E',draft:'',messages:[],updated_at:1,pinned:false,starred:false,server_conversation_id:'e2e-two-turn',server_revision:2}],active_session_id:'s_e2e_two_c'})})").await;
     let _ = client.eval_js("location.reload()").await;
-    client.wait_for("network_idle", Some(""), Some(10000), Some(500)).await.ok();
+    client
+        .wait_for("network_idle", Some(""), Some(10000), Some(500))
+        .await
+        .ok();
 
     // 水合后应显示首轮内容
-    client.wait_for("text", Some("CrabMate 助手"), Some(15000), Some(200)).await.unwrap();
+    client
+        .wait_for("text", Some("CrabMate 助手"), Some(15000), Some(200))
+        .await
+        .unwrap();
 });

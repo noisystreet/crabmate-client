@@ -15,7 +15,10 @@ async fn seed_and_send(client: &mut victauri_test::VictauriClient, sid: &str, ms
     let _ = client.eval_js("fetch('/user-data/prefs',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({locale:'zh',theme:'light',side_panel_view:'hidden',side_width:280,editor_layout_mode:false,status_bar_visible:true})})").await;
     let _ = client.eval_js(&format!("fetch('/user-data/workspaces/current/sessions',{{method:'PUT',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{sessions:[{{id:'{sid}',title:'E2E',draft:'',messages:[],updated_at:1,pinned:false,starred:false}}],active_session_id:'{sid}'}})}})")).await;
     let _ = client.eval_js("location.reload()").await;
-    client.wait_for("network_idle", Some(""), Some(10000), Some(500)).await.ok();
+    client
+        .wait_for("network_idle", Some(""), Some(10000), Some(500))
+        .await
+        .ok();
     let _ = client.eval_js(&format!("(()=>{{const el=document.querySelector('[data-testid=\"chat-composer-input\"]');if(!el)return;el.focus();const s=Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype,'value').set;s.call(el,'{msg}');el.dispatchEvent(new Event('input',{{bubbles:true}}));}})()")).await;
     client.press_key("Enter").await.ok();
 }
@@ -46,10 +49,17 @@ e2e_test!(multi_tool_interleaved_layout, |client| async move {
     seed_and_send(&mut client, "s_e2e_turn", "编译 hpcg").await;
 
     // 终答应可见
-    client.wait_for("text", Some("编译流程结束"), Some(20000), Some(200)).await.unwrap();
+    client
+        .wait_for("text", Some("编译流程结束"), Some(20000), Some(200))
+        .await
+        .unwrap();
 
     // 工具过程行应出现（TUI）
-    Locator::test_id("chat-tui-tool-process").expect(&mut client).to_be_visible().await.unwrap();
+    Locator::test_id("chat-tui-tool-process")
+        .expect(&mut client)
+        .to_be_visible()
+        .await
+        .unwrap();
 });
 
 // ---------------------------------------------------------------------------
@@ -92,13 +102,19 @@ async fn poll_scroll_at_bottom(
             .await
             .map_err(|e| e.to_string())
             .and_then(|v| {
-                if v.as_bool().unwrap_or(false) { Ok(()) } else { Err("not at bottom".to_string()) }
+                if v.as_bool().unwrap_or(false) {
+                    Ok(())
+                } else {
+                    Err("not at bottom".to_string())
+                }
             });
         if at_bottom.is_ok() {
             return Ok(());
         }
         if Instant::now() > deadline {
-            return Err(format!("scroll did not reach bottom within {timeout_secs}s"));
+            return Err(format!(
+                "scroll did not reach bottom within {timeout_secs}s"
+            ));
         }
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
@@ -107,56 +123,61 @@ async fn poll_scroll_at_bottom(
 // ---------------------------------------------------------------------------
 // 回归测试：无工具问答后 FINAL_ANSWER_ROW 可见（状态就绪但气泡未显示的问题）
 // ---------------------------------------------------------------------------
-e2e_test!(no_tool_final_answer_visible_after_stream_end, |client| async move {
-    // SSE stub：纯无工具回复
-    let sse = concat!(
-        "id: 1\ndata: {\"sse_capabilities\":{\"supported_sse_v\":1}}\n\n",
-        "id: 2\ndata: {\"v\":1}\n\n",
-        "id: 3\ndata: 这是一个无工具问答的测试回复，用于验证 FINAL_ANSWER_ROW 在流结束后可见。\n\n",
-        "id: 4\ndata: {\"stream_ended\":{\"reason\":\"completed\"}}\n\n",
-    );
-    let _ = client.eval_js(&format!(
+e2e_test!(
+    no_tool_final_answer_visible_after_stream_end,
+    |client| async move {
+        // SSE stub：纯无工具回复
+        let sse = concat!(
+            "id: 1\ndata: {\"sse_capabilities\":{\"supported_sse_v\":1}}\n\n",
+            "id: 2\ndata: {\"v\":1}\n\n",
+            "id: 3\ndata: 这是一个无工具问答的测试回复，用于验证 FINAL_ANSWER_ROW 在流结束后可见。\n\n",
+            "id: 4\ndata: {\"stream_ended\":{\"reason\":\"completed\"}}\n\n",
+        );
+        let _ = client.eval_js(&format!(
         "(()=>{{const body=`{sse}`;window.__origFetchTL=window.fetch;window.fetch=(u,o)=>{{if(typeof u==='string'&&u.includes('/chat/stream')&&o&&o.method==='POST')return Promise.resolve(new Response(body,{{status:200,headers:{{'content-type':'text/event-stream'}}}}));return window.__origFetchTL(u,o);}};}})()"
     )).await;
 
-    seed_and_send(&mut client, "s_e2e_no_tool_final", "简单问答").await;
+        seed_and_send(&mut client, "s_e2e_no_tool_final", "简单问答").await;
 
-    // 等待回复正文出现
-    client
-        .wait_for(
-            "text",
-            Some("这是一个无工具问答的测试回复"),
-            Some(20000),
-            Some(200),
-        )
-        .await
-        .unwrap();
+        // 等待回复正文出现
+        client
+            .wait_for(
+                "text",
+                Some("这是一个无工具问答的测试回复"),
+                Some(20000),
+                Some(200),
+            )
+            .await
+            .unwrap();
 
-    // 验证滚动到底部（气泡在可视区内）
-    poll_scroll_at_bottom(&mut client, 10).await
-        .expect("should scroll to bottom after no-tool stream end");
+        // 验证滚动到底部（气泡在可视区内）
+        poll_scroll_at_bottom(&mut client, 10)
+            .await
+            .expect("should scroll to bottom after no-tool stream end");
 
-    // 验证距底在跟读阈值内
-    let gap = read_scroll_gap_px(&mut client).await
-        .expect("scroll gap readable");
-    assert!(
-        gap <= FOLLOW_GAP_MAX_PX,
-        "scroll gap {gap}px exceeds follow threshold after no-tool stream end"
-    );
+        // 验证距底在跟读阈值内
+        let gap = read_scroll_gap_px(&mut client)
+            .await
+            .expect("scroll gap readable");
+        assert!(
+            gap <= FOLLOW_GAP_MAX_PX,
+            "scroll gap {gap}px exceeds follow threshold after no-tool stream end"
+        );
 
-    // 重启页面验证持久化内容仍可见
-    let _ = client.eval_js("location.reload()").await;
-    client
-        .wait_for("network_idle", Some(""), Some(15000), Some(500))
-        .await
-        .ok();
-    client
-        .wait_for(
-            "text",
-            Some("这是一个无工具问答的测试回复"),
-            Some(15000),
-            Some(200),
-        )
-        .await
-        .unwrap();
-});
+        // 重启页面验证持久化内容仍可见
+        let _ = client.eval_js("location.reload()").await;
+        client
+            .wait_for("network_idle", Some(""), Some(15000), Some(500))
+            .await
+            .ok();
+        client
+            .wait_for(
+                "text",
+                Some("这是一个无工具问答的测试回复"),
+                Some(15000),
+                Some(200),
+            )
+            .await
+            .unwrap();
+    }
+);

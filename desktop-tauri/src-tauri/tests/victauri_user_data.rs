@@ -29,8 +29,9 @@ e2e_test!(get_put_prefs_roundtrip, |client| async move {
     // GET 初始 prefs
     let get0 = api_fetch(
         &mut client,
-        "fetch('/user-data/prefs').then(r=>r.json()).then(d=>JSON.stringify(d))"
-    ).await;
+        "fetch('/user-data/prefs').then(r=>r.json()).then(d=>JSON.stringify(d))",
+    )
+    .await;
     assert!(get0.is_object(), "initial GET prefs should return object");
 
     // PUT 新 prefs
@@ -43,8 +44,9 @@ e2e_test!(get_put_prefs_roundtrip, |client| async move {
     // GET 验证
     let get1 = api_fetch(
         &mut client,
-        "fetch('/user-data/prefs').then(r=>r.json()).then(d=>JSON.stringify(d))"
-    ).await;
+        "fetch('/user-data/prefs').then(r=>r.json()).then(d=>JSON.stringify(d))",
+    )
+    .await;
     assert_eq!(get1["locale"].as_str().unwrap_or(""), "en");
     assert_eq!(get1["theme"].as_str().unwrap_or(""), "dark");
     assert_eq!(get1["side_width"].as_i64().unwrap_or(0), 300);
@@ -75,33 +77,41 @@ e2e_test!(put_get_current_workspace_sessions, |client| async move {
     ).await;
     assert_eq!(get["active_session_id"].as_str().unwrap_or(""), "s_e2e_ud");
     let sessions = get["sessions"].as_array().unwrap();
-    assert!(sessions.iter().any(|s| s["id"].as_str() == Some("s_e2e_ud")));
+    assert!(
+        sessions
+            .iter()
+            .any(|s| s["id"].as_str() == Some("s_e2e_ud"))
+    );
 });
 
 // ---------------------------------------------------------------------------
 // user-data-mcp.spec.ts 测试 1: PUT assigns slug from name and GET round-trip
 // ---------------------------------------------------------------------------
-e2e_test!(put_mcp_assigns_slug_and_get_roundtrip, |client| async move {
-    let _ = client
+e2e_test!(
+    put_mcp_assigns_slug_and_get_roundtrip,
+    |client| async move {
+        let _ = client
         .eval_js(
             "fetch('/user-data/mcp-servers',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({schema_version:1,global_enabled:true,tool_timeout_secs:60,servers:[{id:'mcp_e2e_ud',name:'E2E Test Server',slug:'',command:'true',enabled:false,created_at_ms:0,updated_at_ms:0}]})})"
         )
         .await;
 
-    let get = api_fetch(
-        &mut client,
-        "fetch('/user-data/mcp-servers').then(r=>r.json()).then(d=>JSON.stringify(d))"
-    ).await;
-    assert!(get["global_enabled"].as_bool().unwrap_or(false));
-    let servers = get["servers"].as_array().unwrap();
-    assert_eq!(servers.len(), 1);
-    assert_eq!(servers[0]["id"].as_str().unwrap_or(""), "mcp_e2e_ud");
-    assert_eq!(servers[0]["slug"].as_str().unwrap_or(""), "e2e_test_server");
-    assert!(!servers[0]["enabled"].as_bool().unwrap_or(true));
-    assert!(servers[0]["has_command"].as_bool().unwrap_or(false));
-    // command 不应暴露
-    assert!(servers[0].get("command").is_none());
-});
+        let get = api_fetch(
+            &mut client,
+            "fetch('/user-data/mcp-servers').then(r=>r.json()).then(d=>JSON.stringify(d))",
+        )
+        .await;
+        assert!(get["global_enabled"].as_bool().unwrap_or(false));
+        let servers = get["servers"].as_array().unwrap();
+        assert_eq!(servers.len(), 1);
+        assert_eq!(servers[0]["id"].as_str().unwrap_or(""), "mcp_e2e_ud");
+        assert_eq!(servers[0]["slug"].as_str().unwrap_or(""), "e2e_test_server");
+        assert!(!servers[0]["enabled"].as_bool().unwrap_or(true));
+        assert!(servers[0]["has_command"].as_bool().unwrap_or(false));
+        // command 不应暴露
+        assert!(servers[0].get("command").is_none());
+    }
+);
 
 // ---------------------------------------------------------------------------
 // user-data-mcp.spec.ts 测试 2: GET status lists configured servers
@@ -116,19 +126,24 @@ e2e_test!(get_mcp_status_lists_servers, |client| async move {
     // 验证 file GET
     let file_get = api_fetch(
         &mut client,
-        "fetch('/user-data/mcp-servers').then(r=>r.json()).then(d=>JSON.stringify(d))"
-    ).await;
+        "fetch('/user-data/mcp-servers').then(r=>r.json()).then(d=>JSON.stringify(d))",
+    )
+    .await;
     assert!(!file_get["global_enabled"].as_bool().unwrap_or(true));
 
     // 验证 status GET
     let status = api_fetch(
         &mut client,
-        "fetch('/user-data/mcp-servers/status').then(r=>r.json()).then(d=>JSON.stringify(d))"
-    ).await;
+        "fetch('/user-data/mcp-servers/status').then(r=>r.json()).then(d=>JSON.stringify(d))",
+    )
+    .await;
     assert!(!status["global_enabled"].as_bool().unwrap_or(true));
     assert_eq!(status["tool_timeout_secs"].as_i64().unwrap_or(0), 45);
     let rows = status["servers"].as_array().unwrap();
-    let row = rows.iter().find(|r| r["id"].as_str() == Some("mcp_e2e_status")).unwrap();
+    let row = rows
+        .iter()
+        .find(|r| r["id"].as_str() == Some("mcp_e2e_status"))
+        .unwrap();
     assert_eq!(row["slug"].as_str().unwrap_or(""), "status_probe");
     assert!(row["enabled"].as_bool().unwrap_or(false));
     assert!(!row["connected"].as_bool().unwrap_or(true));

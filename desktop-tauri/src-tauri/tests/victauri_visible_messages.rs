@@ -60,84 +60,93 @@ async fn visible_assistant_count(client: &mut victauri_test::VictauriClient) -> 
 // ---------------------------------------------------------------------------
 // 测试 1：重复 assistant 行——读路径不去重，两条都显示
 // ---------------------------------------------------------------------------
-e2e_test!(stored_duplicate_assistant_rows_both_visible, |client| async move {
-    seed_messages_and_goto(
+e2e_test!(
+    stored_duplicate_assistant_rows_both_visible,
+    |client| async move {
+        seed_messages_and_goto(
         &mut client,
         "s_e2e_phase5_fuzzy",
         "[{\"id\":\"u1\",\"role\":\"user\",\"text\":\"分析当前目录\"},{\"id\":\"a1\",\"role\":\"assistant\",\"text\":\"当前目录下有三个压缩包:\\n\\n1.**A\"},{\"id\":\"a2\",\"role\":\"assistant\",\"text\":\"当前目录下有三个压缩包:\\n1.**A\"}]"
     )
     .await;
 
-    client
-        .wait_for("text", Some("分析当前目录"), Some(10000), Some(200))
-        .await
-        .unwrap();
+        client
+            .wait_for("text", Some("分析当前目录"), Some(10000), Some(200))
+            .await
+            .unwrap();
 
-    let count = visible_assistant_count(&mut client).await;
-    assert_eq!(count, 2, "expected 2 visible assistant rows, got {count}");
-});
+        let count = visible_assistant_count(&mut client).await;
+        assert_eq!(count, 2, "expected 2 visible assistant rows, got {count}");
+    }
+);
 
 // ---------------------------------------------------------------------------
 // 测试 2：final_response_snapshot 重复——聊天列只显示首条
 // ---------------------------------------------------------------------------
-e2e_test!(duplicate_final_response_snapshot_hidden_in_chat, |client| async move {
-    seed_messages_and_goto(
+e2e_test!(
+    duplicate_final_response_snapshot_hidden_in_chat,
+    |client| async move {
+        seed_messages_and_goto(
         &mut client,
         "s_e2e_phase5_snap",
         r###"[{"id":"u1","role":"user","text":"分析当前目录"},{"id":"a1","role":"assistant","text":"当前目录下有三个压缩包。"},{"id":"snap","role":"assistant","text":"当前目录下有三个压缩包。","state":"{\"k\":\"cm_tl\",\"t\":\"final_response_snapshot\"}"}]"###
     )
     .await;
 
-    client
-        .wait_for("text", Some("分析当前目录"), Some(10000), Some(200))
-        .await
-        .unwrap();
+        client
+            .wait_for("text", Some("分析当前目录"), Some(10000), Some(200))
+            .await
+            .unwrap();
 
-    let count = visible_assistant_count(&mut client).await;
-    assert_eq!(count, 1, "snapshot should be hidden, but got {count} rows");
-});
+        let count = visible_assistant_count(&mut client).await;
+        assert_eq!(count, 1, "snapshot should be hidden, but got {count} rows");
+    }
+);
 
 // ---------------------------------------------------------------------------
 // 测试 3：编排路由 + commentary 被隐藏，只显示终答
 // ---------------------------------------------------------------------------
-e2e_test!(orchestration_route_and_commentary_hidden_only_final_visible, |client| async move {
-    seed_messages_and_goto(
+e2e_test!(
+    orchestration_route_and_commentary_hidden_only_final_visible,
+    |client| async move {
+        seed_messages_and_goto(
         &mut client,
         "s_e2e_phase5_ephemeral",
         r###"[{"id":"u1","role":"user","text":"分析当前目录"},{"id":"route","role":"assistant","text":"CrabMate staged_timeline\n编排路由：freeform\n{}"},{"id":"cmt","role":"assistant","text":"","reasoning_text":"目录结构分析","state":"commentary_before_tools"},{"id":"a1","role":"assistant","text":"当前目录下有三个压缩包。"}]"###
     )
     .await;
 
-    client
-        .wait_for("text", Some("分析当前目录"), Some(10000), Some(200))
-        .await
-        .unwrap();
+        client
+            .wait_for("text", Some("分析当前目录"), Some(10000), Some(200))
+            .await
+            .unwrap();
 
-    // 终答应可见
-    client
-        .expect_text_with_timeout("当前目录下有三个压缩包。", 10000)
-        .await
-        .unwrap();
+        // 终答应可见
+        client
+            .expect_text_with_timeout("当前目录下有三个压缩包。", 10000)
+            .await
+            .unwrap();
 
-    // 编排路由不应可见
-    let route_visible: bool = client
-        .eval_js("document.body.innerText.includes('编排路由')")
-        .await
-        .unwrap()
-        .as_bool()
-        .unwrap_or(true);
-    assert!(!route_visible, "orchestration route should be hidden");
+        // 编排路由不应可见
+        let route_visible: bool = client
+            .eval_js("document.body.innerText.includes('编排路由')")
+            .await
+            .unwrap()
+            .as_bool()
+            .unwrap_or(true);
+        assert!(!route_visible, "orchestration route should be hidden");
 
-    // commentary 不应可见
-    let cmt_visible: bool = client
-        .eval_js("document.body.innerText.includes('目录结构分析')")
-        .await
-        .unwrap()
-        .as_bool()
-        .unwrap_or(true);
-    assert!(!cmt_visible, "commentary before tools should be hidden");
+        // commentary 不应可见
+        let cmt_visible: bool = client
+            .eval_js("document.body.innerText.includes('目录结构分析')")
+            .await
+            .unwrap()
+            .as_bool()
+            .unwrap_or(true);
+        assert!(!cmt_visible, "commentary before tools should be hidden");
 
-    // 只有 1 个可见 assistant 气泡
-    let count = visible_assistant_count(&mut client).await;
-    assert_eq!(count, 1, "expected 1 visible assistant row, got {count}");
-});
+        // 只有 1 个可见 assistant 气泡
+        let count = visible_assistant_count(&mut client).await;
+        assert_eq!(count, 1, "expected 1 visible assistant row, got {count}");
+    }
+);

@@ -12,10 +12,7 @@ use victauri_test::e2e_test;
 use victauri_test::locator::Locator;
 
 /// 播种会话 + 偏好，然后刷新页面。
-async fn seed_session_and_reload(
-    client: &mut victauri_test::VictauriClient,
-    session_id: &str,
-) {
+async fn seed_session_and_reload(client: &mut victauri_test::VictauriClient, session_id: &str) {
     let _ = client
         .eval_js(r#"fetch('/user-data/prefs', {
                 method: 'PUT',

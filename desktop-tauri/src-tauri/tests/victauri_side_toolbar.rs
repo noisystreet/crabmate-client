@@ -183,9 +183,7 @@ e2e_test!(
             .unwrap();
 
         let embed_visible = client
-            .eval_js(
-                "(()=>!!document.querySelector('[data-testid=\"github-embed-page\"]'))()",
-            )
+            .eval_js("(()=>!!document.querySelector('[data-testid=\"github-embed-page\"]'))()")
             .await
             .ok()
             .and_then(|v| v.as_bool())

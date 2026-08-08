@@ -2,8 +2,8 @@
 //!
 //! 桌面壳**不**拉起 `crabmate serve`；用户须自行启动后端或连接远程。
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use tauri::webview::{Color, PageLoadEvent};
@@ -177,13 +177,11 @@ fn finish_create_main_window(
                                 .open_url(url.as_str(), None::<&str>);
                             return false;
                         }
-                        if matches!(cur.scheme(), "http" | "https")
-                            && cur.origin() == url.origin()
+                        if matches!(cur.scheme(), "http" | "https") && cur.origin() == url.origin()
                         {
                             return true;
                         }
-                        if matches!(cur.scheme(), "http" | "https")
-                            && cur.origin() != url.origin()
+                        if matches!(cur.scheme(), "http" | "https") && cur.origin() != url.origin()
                         {
                             let _ = app_handle_clone
                                 .opener()
@@ -248,20 +246,12 @@ fn finish_create_main_window(
     Ok(window)
 }
 
-fn reveal_main_window_once(
-    window: &WebviewWindow,
-    app: &tauri::AppHandle,
-    revealed: &AtomicBool,
-) {
+fn reveal_main_window_once(window: &WebviewWindow, app: &tauri::AppHandle, revealed: &AtomicBool) {
     if revealed.swap(true, Ordering::SeqCst) {
         return;
     }
     if !e2e_hide_app_windows() {
-        let on_connect = window
-            .url()
-            .ok()
-            .as_ref()
-            .is_some_and(is_connect_page_url);
+        let on_connect = window.url().ok().as_ref().is_some_and(is_connect_page_url);
         if on_connect {
             apply_connect_page_geometry(window);
         }
@@ -269,9 +259,7 @@ fn reveal_main_window_once(
             eprintln!("[crabmate-desktop] failed to show main window: {e}");
         }
         // 显示后再居中：未映射时 `center()` 在部分合成器上无效。
-        if on_connect
-            && let Err(e) = window.center()
-        {
+        if on_connect && let Err(e) = window.center() {
             eprintln!("[crabmate-desktop] failed to center connect window: {e}");
         }
         if let Err(e) = window.set_focus() {

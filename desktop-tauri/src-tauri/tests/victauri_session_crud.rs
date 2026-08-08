@@ -78,9 +78,7 @@ e2e_test!(new_chat_creates_session_in_rail, |client| async move {
 
     // 确认初始有 2 条会话
     let count: f64 = client
-        .eval_js(
-            "document.querySelectorAll('[data-testid^=\"nav-session-\"]').length",
-        )
+        .eval_js("document.querySelectorAll('[data-testid^=\"nav-session-\"]').length")
         .await
         .unwrap()
         .as_f64()
@@ -88,23 +86,32 @@ e2e_test!(new_chat_creates_session_in_rail, |client| async move {
     assert_eq!(count as usize, 2, "expected 2 sessions, got {count}");
 
     // 点击「新建对话」
-    Locator::test_id("nav-new-chat").click(&mut client).await.unwrap();
+    Locator::test_id("nav-new-chat")
+        .click(&mut client)
+        .await
+        .unwrap();
 
     // 等待 rail 中出现第三条
     client
-        .wait_for("selector", Some("[data-testid^=\"nav-session-\"]:nth-child(3)"), Some(5000), Some(200))
+        .wait_for(
+            "selector",
+            Some("[data-testid^=\"nav-session-\"]:nth-child(3)"),
+            Some(5000),
+            Some(200),
+        )
         .await
         .unwrap();
 
     let count_after: f64 = client
-        .eval_js(
-            "document.querySelectorAll('[data-testid^=\"nav-session-\"]').length",
-        )
+        .eval_js("document.querySelectorAll('[data-testid^=\"nav-session-\"]').length")
         .await
         .unwrap()
         .as_f64()
         .unwrap_or(0.0);
-    assert_eq!(count_after as usize, 3, "expected 3 sessions after new chat");
+    assert_eq!(
+        count_after as usize, 3,
+        "expected 3 sessions after new chat"
+    );
 });
 
 // ---------------------------------------------------------------------------
@@ -137,113 +144,118 @@ e2e_test!(pin_session_shows_badge_in_rail, |client| async move {
         .unwrap()
         .as_bool()
         .unwrap_or(false);
-    assert!(has_pinned, "expected nav-session-s_e2e_drop to have class 'is-pinned'");
+    assert!(
+        has_pinned,
+        "expected nav-session-s_e2e_drop to have class 'is-pinned'"
+    );
 });
 
 // ---------------------------------------------------------------------------
 // 测试 3：确认删除后会话从模态框列表和 rail 中移除
 // ---------------------------------------------------------------------------
-e2e_test!(delete_session_after_confirm_removes_it, |client| async move {
-    seed_two_sessions(&mut client).await;
-    open_session_list_modal(&mut client).await;
+e2e_test!(
+    delete_session_after_confirm_removes_it,
+    |client| async move {
+        seed_two_sessions(&mut client).await;
+        open_session_list_modal(&mut client).await;
 
-    // 覆盖 window.confirm 使其始终返回 true
-    let _ = client.eval_js("window.confirm = () => true").await;
+        // 覆盖 window.confirm 使其始终返回 true
+        let _ = client.eval_js("window.confirm = () => true").await;
 
-    // 点击删除按钮
-    Locator::test_id("session-modal-delete-s_e2e_drop")
-        .click(&mut client)
-        .await
-        .unwrap();
+        // 点击删除按钮
+        Locator::test_id("session-modal-delete-s_e2e_drop")
+            .click(&mut client)
+            .await
+            .unwrap();
 
-    // 等待该会话从模态框列表中消失
-    client
-        .wait_for(
-            "selector_gone",
-            Some("[data-testid=\"session-modal-open-s_e2e_drop\"]"),
-            Some(5000),
-            Some(200),
-        )
-        .await
-        .unwrap();
+        // 等待该会话从模态框列表中消失
+        client
+            .wait_for(
+                "selector_gone",
+                Some("[data-testid=\"session-modal-open-s_e2e_drop\"]"),
+                Some(5000),
+                Some(200),
+            )
+            .await
+            .unwrap();
 
-    // 确认 rail 中也已移除
-    let rail_gone: bool = client
-        .eval_js(
-            "document.querySelector('[data-testid=\"nav-session-s_e2e_drop\"]') === null",
-        )
-        .await
-        .unwrap()
-        .as_bool()
-        .unwrap_or(false);
-    assert!(rail_gone, "nav-session-s_e2e_drop should be removed from rail after delete");
-});
+        // 确认 rail 中也已移除
+        let rail_gone: bool = client
+            .eval_js("document.querySelector('[data-testid=\"nav-session-s_e2e_drop\"]') === null")
+            .await
+            .unwrap()
+            .as_bool()
+            .unwrap_or(false);
+        assert!(
+            rail_gone,
+            "nav-session-s_e2e_drop should be removed from rail after delete"
+        );
+    }
+);
 
 // ---------------------------------------------------------------------------
 // 测试 4：模态框关闭后 rail 保持初始状态（Escape 关闭不产生副作用）
 // ---------------------------------------------------------------------------
-e2e_test!(escape_closes_modal_without_side_effects, |client| async move {
-    seed_two_sessions(&mut client).await;
-    open_session_list_modal(&mut client).await;
+e2e_test!(
+    escape_closes_modal_without_side_effects,
+    |client| async move {
+        seed_two_sessions(&mut client).await;
+        open_session_list_modal(&mut client).await;
 
-    // 按 Escape 关闭
-    client.press_key("Escape").await.unwrap();
+        // 按 Escape 关闭
+        client.press_key("Escape").await.unwrap();
 
-    // 模态框不可见
-    Locator::test_id("session-list-modal")
-        .expect(&mut client)
-        .to_be_hidden()
-        .await
-        .unwrap();
+        // 模态框不可见
+        Locator::test_id("session-list-modal")
+            .expect(&mut client)
+            .to_be_hidden()
+            .await
+            .unwrap();
 
-    // rail 中仍应有 2 条会话
-    let count: f64 = client
-        .eval_js(
-            "document.querySelectorAll('[data-testid^=\"nav-session-\"]').length",
-        )
-        .await
-        .unwrap()
-        .as_f64()
-        .unwrap_or(0.0);
-    assert_eq!(count as usize, 2, "expected 2 sessions after closing modal");
-});
+        // rail 中仍应有 2 条会话
+        let count: f64 = client
+            .eval_js("document.querySelectorAll('[data-testid^=\"nav-session-\"]').length")
+            .await
+            .unwrap()
+            .as_f64()
+            .unwrap_or(0.0);
+        assert_eq!(count as usize, 2, "expected 2 sessions after closing modal");
+    }
+);
 
 // ---------------------------------------------------------------------------
 // 测试 5（session-list.spec.ts）：模态框切换活动会话
 // ---------------------------------------------------------------------------
-e2e_test!(manage_sessions_modal_switches_active_session, |client| async move {
-    seed_two_sessions(&mut client).await;
+e2e_test!(
+    manage_sessions_modal_switches_active_session,
+    |client| async move {
+        seed_two_sessions(&mut client).await;
 
-    // 确认初始活动会话内容可见
-    client
-        .expect_text("keep me")
-        .await
-        .unwrap();
+        // 确认初始活动会话内容可见
+        client.expect_text("keep me").await.unwrap();
 
-    open_session_list_modal(&mut client).await;
+        open_session_list_modal(&mut client).await;
 
-    // 点击切换到 session B
-    Locator::test_id("session-modal-open-s_e2e_drop")
-        .click(&mut client)
-        .await
-        .unwrap();
+        // 点击切换到 session B
+        Locator::test_id("session-modal-open-s_e2e_drop")
+            .click(&mut client)
+            .await
+            .unwrap();
 
-    // 模态框应关闭
-    Locator::test_id("session-list-modal")
-        .expect(&mut client)
-        .to_be_hidden()
-        .await
-        .unwrap();
+        // 模态框应关闭
+        Locator::test_id("session-list-modal")
+            .expect(&mut client)
+            .to_be_hidden()
+            .await
+            .unwrap();
 
-    // 确认切换后显示 session B 的内容
-    client
-        .expect_text_with_timeout("drop me", 15000)
-        .await
-        .unwrap();
+        // 确认切换后显示 session B 的内容
+        client
+            .expect_text_with_timeout("drop me", 15000)
+            .await
+            .unwrap();
 
-    // 确认旧内容不再可见
-    client
-        .expect_no_text("keep me")
-        .await
-        .unwrap();
-});
+        // 确认旧内容不再可见
+        client.expect_no_text("keep me").await.unwrap();
+    }
+);

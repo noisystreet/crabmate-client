@@ -15,7 +15,10 @@ async fn stub_basic_routes(client: &mut victauri_test::VictauriClient) {
     let _ = client.eval_js("fetch('/user-data/prefs',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({locale:'zh',theme:'light',side_panel_view:'hidden',side_width:280,editor_layout_mode:false,status_bar_visible:true})})").await;
     let _ = client.eval_js("fetch('/user-data/workspaces/current/sessions',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessions:[{id:'s_layout',title:'Layout E2E',draft:'',messages:[],updated_at:1,pinned:false,starred:false}],active_session_id:'s_layout'})})").await;
     let _ = client.eval_js("location.reload()").await;
-    client.wait_for("network_idle", Some(""), Some(10000), Some(500)).await.ok();
+    client
+        .wait_for("network_idle", Some(""), Some(10000), Some(500))
+        .await
+        .ok();
 }
 
 /// 获取 DOM 元素可见性信息。
@@ -34,10 +37,7 @@ async fn is_visible(client: &mut victauri_test::VictauriClient, selector: &str) 
 /// 获取 DOM 元素数量。
 async fn count_elements(client: &mut victauri_test::VictauriClient, selector: &str) -> usize {
     client
-        .eval_js(&format!(
-            "document.querySelectorAll('{}').length",
-            selector
-        ))
+        .eval_js(&format!("document.querySelectorAll('{}').length", selector))
         .await
         .ok()
         .and_then(|v| v.as_f64())
@@ -51,20 +51,28 @@ e2e_test!(core_layout_sections_exist, |client| async move {
     stub_basic_routes(&mut client).await;
 
     // 聊天列存在
-    assert!(is_visible(&mut client, "[data-testid=\"chat-column\"]").await,
-        "chat column should be visible");
+    assert!(
+        is_visible(&mut client, "[data-testid=\"chat-column\"]").await,
+        "chat column should be visible"
+    );
 
     // 状态栏存在
-    assert!(is_visible(&mut client, "[data-testid=\"status-bar\"]").await,
-        "status bar should be visible");
+    assert!(
+        is_visible(&mut client, "[data-testid=\"status-bar\"]").await,
+        "status bar should be visible"
+    );
 
     // 侧栏默认隐藏
-    assert!(!is_visible(&mut client, "[data-testid=\"side-panel\"]").await,
-        "side panel should be hidden in chat mode");
+    assert!(
+        !is_visible(&mut client, "[data-testid=\"side-panel\"]").await,
+        "side panel should be hidden in chat mode"
+    );
 
     // 消息 scroller 存在
-    assert!(is_visible(&mut client, "[data-testid=\"chat-messages-scroller\"]").await,
-        "messages scroller should be visible");
+    assert!(
+        is_visible(&mut client, "[data-testid=\"chat-messages-scroller\"]").await,
+        "messages scroller should be visible"
+    );
 });
 
 // ---------------------------------------------------------------------------
@@ -74,12 +82,16 @@ e2e_test!(composer_structure, |client| async move {
     stub_basic_routes(&mut client).await;
 
     // 输入框存在
-    assert!(is_visible(&mut client, "[data-testid=\"chat-composer-input\"]").await,
-        "composer input should be visible");
+    assert!(
+        is_visible(&mut client, "[data-testid=\"chat-composer-input\"]").await,
+        "composer input should be visible"
+    );
 
     // 发送按钮存在
-    assert!(is_visible(&mut client, "[data-testid=\"chat-send-button\"]").await,
-        "send button should be visible");
+    assert!(
+        is_visible(&mut client, "[data-testid=\"chat-send-button\"]").await,
+        "send button should be visible"
+    );
 });
 
 // ---------------------------------------------------------------------------
@@ -91,19 +103,28 @@ e2e_test!(message_bubble_layout, |client| async move {
     // 发送一条简单消息触发回答
     let msg = "你好";
     let _ = client.eval_js("location.reload()").await;
-    client.wait_for("network_idle", Some(""), Some(10000), Some(500)).await.ok();
+    client
+        .wait_for("network_idle", Some(""), Some(10000), Some(500))
+        .await
+        .ok();
     let _ = client.eval_js(&format!(
         "(()=>{{const el=document.querySelector('[data-testid=\"chat-composer-input\"]');if(!el)return;el.focus();const s=Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype,'value').set;s.call(el,'{msg}');el.dispatchEvent(new Event('input',{{bubbles:true}}));}})()"
     )).await;
     client.press_key("Enter").await.ok();
-    client.wait_for("network_idle", Some(""), Some(10000), Some(200)).await.ok();
+    client
+        .wait_for("network_idle", Some(""), Some(10000), Some(200))
+        .await
+        .ok();
 
     // 至少有一条 TUI 回合
     let msg_rows = count_elements(&mut client, "section.chat-tui-turn[data-tui-msg-id]").await;
     assert!(msg_rows > 0, "should render at least one chat-tui-turn");
 
     // 助手响应到达
-    client.wait_for("text", Some("sse_capabilities"), Some(10000), Some(200)).await.unwrap();
+    client
+        .wait_for("text", Some("sse_capabilities"), Some(10000), Some(200))
+        .await
+        .unwrap();
 });
 
 // ---------------------------------------------------------------------------

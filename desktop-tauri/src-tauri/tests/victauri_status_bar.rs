@@ -82,5 +82,8 @@ e2e_test!(agent_role_trigger_opens_upward_menu, |client| async move {
         .unwrap()
         .as_bool()
         .unwrap_or(false);
-    assert!(menu_visible, "agent role menu should be visible after clicking trigger");
+    assert!(
+        menu_visible,
+        "agent role menu should be visible after clicking trigger"
+    );
 });

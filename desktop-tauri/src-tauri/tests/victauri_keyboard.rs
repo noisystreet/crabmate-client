@@ -58,27 +58,27 @@ async fn seed_sessions_with_messages(
 // ---------------------------------------------------------------------------
 // 测试 1：End 键滚底（来自 keyboard-shortcuts.spec.ts）
 // ---------------------------------------------------------------------------
-e2e_test!(end_key_scrolls_messages_toward_bottom, |client| async move {
-    seed_sessions_with_messages(&mut client, "s_e2e_keys", 40, "e2e-scroll").await;
+e2e_test!(
+    end_key_scrolls_messages_toward_bottom,
+    |client| async move {
+        seed_sessions_with_messages(&mut client, "s_e2e_keys", 40, "e2e-scroll").await;
 
-    // 确认页面已加载
-    client
-        .wait_for("text", Some("e2e-scroll-line-0"), Some(15000), Some(200))
-        .await
-        .unwrap();
+        // 确认页面已加载
+        client
+            .wait_for("text", Some("e2e-scroll-line-0"), Some(15000), Some(200))
+            .await
+            .unwrap();
 
-    // 聚焦输入框并按 Home 滚到顶
-    let _ = client
-        .eval_js(
-            "document.querySelector('[data-testid=\"chat-composer-input\"]')?.focus()",
-        )
-        .await;
+        // 聚焦输入框并按 Home 滚到顶
+        let _ = client
+            .eval_js("document.querySelector('[data-testid=\"chat-composer-input\"]')?.focus()")
+            .await;
 
-    client.press_key("Home").await.unwrap();
+        client.press_key("Home").await.unwrap();
 
-    let deadline = Instant::now() + Duration::from_secs(10);
-    loop {
-        let top: f64 = client
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let top: f64 = client
             .eval_js(
                 "(document.querySelector('[data-testid=\"chat-messages-scroller\"]')?.scrollTop) ?? -1",
             )
@@ -86,43 +86,44 @@ e2e_test!(end_key_scrolls_messages_toward_bottom, |client| async move {
             .unwrap()
             .as_f64()
             .unwrap_or(-1.0);
-        if top == 0.0 {
-            break;
+            if top == 0.0 {
+                break;
+            }
+            if Instant::now() > deadline {
+                panic!("Home key did not scroll to top within 10s, scrollTop={top}");
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
         }
-        if Instant::now() > deadline {
-            panic!("Home key did not scroll to top within 10s, scrollTop={top}");
-        }
-        tokio::time::sleep(Duration::from_millis(200)).await;
-    }
 
-    // 按 End 滚到底
-    client.press_key("End").await.unwrap();
+        // 按 End 滚到底
+        client.press_key("End").await.unwrap();
 
-    // 轮询等待滚到底
-    let deadline = Instant::now() + Duration::from_secs(10);
-    loop {
-        let result: bool = client
-            .eval_js(
-                r#"(() => {
+        // 轮询等待滚到底
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let result: bool = client
+                .eval_js(
+                    r#"(() => {
                     const el = document.querySelector('[data-testid="chat-messages-scroller"]');
                     if (!el) return false;
                     const max = el.scrollHeight - el.clientHeight;
                     return max > 0 && el.scrollTop >= max - 4;
                 })()"#,
-            )
-            .await
-            .unwrap()
-            .as_bool()
-            .unwrap_or(false);
-        if result {
-            break;
+                )
+                .await
+                .unwrap()
+                .as_bool()
+                .unwrap_or(false);
+            if result {
+                break;
+            }
+            if Instant::now() > deadline {
+                panic!("End key did not scroll to bottom within 10s");
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
         }
-        if Instant::now() > deadline {
-            panic!("End key did not scroll to bottom within 10s");
-        }
-        tokio::time::sleep(Duration::from_millis(200)).await;
     }
-});
+);
 
 // ---------------------------------------------------------------------------
 // 测试 3（Phase 3）：Enter 发送消息出现助手回复（fetch 拦截器存根 SSE 流）
@@ -150,7 +151,10 @@ e2e_test!(enter_sends_message_with_stream_stub, |client| async move {
 
     client.press_key("Enter").await.unwrap();
 
-    client.wait_for("text", Some("Hello from E2E stub"), Some(15000), Some(200)).await.unwrap();
+    client
+        .wait_for("text", Some("Hello from E2E stub"), Some(15000), Some(200))
+        .await
+        .unwrap();
 });
 
 // ---------------------------------------------------------------------------
@@ -178,7 +182,10 @@ e2e_test!(home_key_scrolls_to_top, |client| async move {
         .unwrap()
         .as_f64()
         .unwrap_or(0.0);
-    assert!(top > 0.0, "expected scrolled away from top, got scrollTop={top}");
+    assert!(
+        top > 0.0,
+        "expected scrolled away from top, got scrollTop={top}"
+    );
 
     // 按 Home
     client.press_key("Home").await.unwrap();

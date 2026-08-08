@@ -72,11 +72,7 @@ fn gsettings_get(schema: &str, key: &str) -> Option<String> {
         return None;
     }
     let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if text.is_empty() {
-        None
-    } else {
-        Some(text)
-    }
+    if text.is_empty() { None } else { Some(text) }
 }
 
 /// 监听 GNOME `color-scheme` 变化并更新主窗主题（使 WebView matchMedia 跟随）。
@@ -91,11 +87,7 @@ pub fn spawn_linux_color_scheme_watcher(app: AppHandle) {
             .name("cm-os-theme".into())
             .spawn(move || {
                 let Ok(mut child) = Command::new("gsettings")
-                    .args([
-                        "monitor",
-                        "org.gnome.desktop.interface",
-                        "color-scheme",
-                    ])
+                    .args(["monitor", "org.gnome.desktop.interface", "color-scheme"])
                     .stdout(Stdio::piped())
                     .stderr(Stdio::null())
                     .spawn()

@@ -65,18 +65,20 @@ async fn seed_and_goto(client: &mut victauri_test::VictauriClient, session_id: &
 // ---------------------------------------------------------------------------
 // 测试 1：发送消息后出现助手回复和工具卡（Phase 3 流存根演示）
 // ---------------------------------------------------------------------------
-e2e_test!(send_message_shows_assistant_reply_and_tool_card, |client| async move {
-    // Phase 3: 先注入 fetch 拦截器 → 再加载页面
-    install_chat_stream_stub(&mut client).await;
-    seed_and_goto(&mut client, "s_e2e_smoke").await;
+e2e_test!(
+    send_message_shows_assistant_reply_and_tool_card,
+    |client| async move {
+        // Phase 3: 先注入 fetch 拦截器 → 再加载页面
+        install_chat_stream_stub(&mut client).await;
+        seed_and_goto(&mut client, "s_e2e_smoke").await;
 
-    // 等待主页面加载
-    let _ = client
-        .wait_for("text", Some("CrabMate"), Some(10000), Some(200))
-        .await;
+        // 等待主页面加载
+        let _ = client
+            .wait_for("text", Some("CrabMate"), Some(10000), Some(200))
+            .await;
 
-    // 在输入框中填入文本
-    let _ = client
+        // 在输入框中填入文本
+        let _ = client
         .eval_js(
             "(()=>{const el=document.querySelector('[data-testid=\"chat-composer-input\"]');\
              if(!el)return;el.focus();\
@@ -86,41 +88,44 @@ e2e_test!(send_message_shows_assistant_reply_and_tool_card, |client| async move 
         )
         .await;
 
-    // 按 Enter 发送（等价于 sendStubMessage）
-    client.press_key("Enter").await.unwrap();
+        // 按 Enter 发送（等价于 sendStubMessage）
+        client.press_key("Enter").await.unwrap();
 
-    // 等待 SSE 流存根的助手回复出现
-    client
-        .wait_for(
-            "text",
-            Some("Hello from E2E stub via Victauri"),
-            Some(15000),
-            Some(200),
-        )
-        .await
-        .unwrap();
+        // 等待 SSE 流存根的助手回复出现
+        client
+            .wait_for(
+                "text",
+                Some("Hello from E2E stub via Victauri"),
+                Some(15000),
+                Some(200),
+            )
+            .await
+            .unwrap();
 
-    // 验证工具过程行出现（TUI）
-    Locator::test_id("chat-tui-tool-process")
-        .expect(&mut client)
-        .to_be_visible()
-        .await
-        .unwrap();
-});
+        // 验证工具过程行出现（TUI）
+        Locator::test_id("chat-tui-tool-process")
+            .expect(&mut client)
+            .to_be_visible()
+            .await
+            .unwrap();
+    }
+);
 
 // ---------------------------------------------------------------------------
 // 测试 2：流错误存根 → 状态栏显示失败
 // ---------------------------------------------------------------------------
-e2e_test!(stream_error_shows_failure_in_status_bar, |client| async move {
-    // Phase 3: 注入错误流存根
-    let sse_body = concat!(
-        "id: 1\ndata: {\"sse_capabilities\":{\"supported_sse_v\":1}}\n\n",
-        "id: 2\ndata: {\"v\":1}\n\n",
-        "id: 3\ndata: {\"error\":\"e2e intentional failure\",\"code\":\"E2E_STREAM_FAIL\"}\n\n",
-        "id: 4\ndata: {\"stream_ended\":{\"reason\":\"error\"}}\n\n",
-    );
+e2e_test!(
+    stream_error_shows_failure_in_status_bar,
+    |client| async move {
+        // Phase 3: 注入错误流存根
+        let sse_body = concat!(
+            "id: 1\ndata: {\"sse_capabilities\":{\"supported_sse_v\":1}}\n\n",
+            "id: 2\ndata: {\"v\":1}\n\n",
+            "id: 3\ndata: {\"error\":\"e2e intentional failure\",\"code\":\"E2E_STREAM_FAIL\"}\n\n",
+            "id: 4\ndata: {\"stream_ended\":{\"reason\":\"error\"}}\n\n",
+        );
 
-    let _ = client
+        let _ = client
         .eval_js(&format!(
             "(()=>{{const body=`{sse_body}`;\
              window.__originalFetch=window.fetch;\
@@ -130,10 +135,10 @@ e2e_test!(stream_error_shows_failure_in_status_bar, |client| async move {
         ))
         .await;
 
-    seed_and_goto(&mut client, "s_e2e_err").await;
+        seed_and_goto(&mut client, "s_e2e_err").await;
 
-    // 发送消息
-    let _ = client
+        // 发送消息
+        let _ = client
         .eval_js(
             "(()=>{const el=document.querySelector('[data-testid=\"chat-composer-input\"]');\
              if(!el)return;el.focus();\
@@ -142,16 +147,17 @@ e2e_test!(stream_error_shows_failure_in_status_bar, |client| async move {
         )
         .await;
 
-    client.press_key("Enter").await.unwrap();
+        client.press_key("Enter").await.unwrap();
 
-    // 等待状态栏显示 fetch-error 样式
-    client
-        .wait_for(
-            "selector",
-            Some("[data-testid=\"status-bar\"].status-bar-fetch-error"),
-            Some(15000),
-            Some(200),
-        )
-        .await
-        .unwrap();
-});
+        // 等待状态栏显示 fetch-error 样式
+        client
+            .wait_for(
+                "selector",
+                Some("[data-testid=\"status-bar\"].status-bar-fetch-error"),
+                Some(15000),
+                Some(200),
+            )
+            .await
+            .unwrap();
+    }
+);

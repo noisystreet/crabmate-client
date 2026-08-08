@@ -77,9 +77,18 @@ e2e_test!(full_window_when_limit_omitted, |client| async move {
     seed_paginated(&mut client).await;
 
     let body = get_messages(&mut client, PAGINATE_CONV_ID, "").await;
-    assert_eq!(body["conversation_id"].as_str().unwrap_or(""), PAGINATE_CONV_ID);
-    assert_eq!(body["total_count"].as_u64().unwrap_or(0) as usize, PAGINATE_TOTAL);
-    assert_eq!(body["window_start_index"].as_u64().unwrap_or(999) as usize, 0);
+    assert_eq!(
+        body["conversation_id"].as_str().unwrap_or(""),
+        PAGINATE_CONV_ID
+    );
+    assert_eq!(
+        body["total_count"].as_u64().unwrap_or(0) as usize,
+        PAGINATE_TOTAL
+    );
+    assert_eq!(
+        body["window_start_index"].as_u64().unwrap_or(999) as usize,
+        0
+    );
     assert!(!body["has_older"].as_bool().unwrap_or(true));
     let msgs = body["messages"].as_array().unwrap();
     assert_eq!(msgs.len(), PAGINATE_TOTAL);
@@ -96,8 +105,16 @@ e2e_test!(full_window_when_limit_omitted, |client| async move {
 e2e_test!(tail_page_limit_80, |client| async move {
     seed_paginated(&mut client).await;
 
-    let body = get_messages(&mut client, PAGINATE_CONV_ID, &format!("limit={PAGINATE_PAGE_LIMIT}")).await;
-    assert_eq!(body["total_count"].as_u64().unwrap_or(0) as usize, PAGINATE_TOTAL);
+    let body = get_messages(
+        &mut client,
+        PAGINATE_CONV_ID,
+        &format!("limit={PAGINATE_PAGE_LIMIT}"),
+    )
+    .await;
+    assert_eq!(
+        body["total_count"].as_u64().unwrap_or(0) as usize,
+        PAGINATE_TOTAL
+    );
     assert_eq!(
         body["window_start_index"].as_u64().unwrap_or(0) as usize,
         PAGINATE_TOTAL - PAGINATE_PAGE_LIMIT
@@ -117,16 +134,28 @@ e2e_test!(tail_page_limit_80, |client| async move {
 e2e_test!(older_page_before_index, |client| async move {
     seed_paginated(&mut client).await;
 
-    let tail = get_messages(&mut client, PAGINATE_CONV_ID, &format!("limit={PAGINATE_PAGE_LIMIT}")).await;
+    let tail = get_messages(
+        &mut client,
+        PAGINATE_CONV_ID,
+        &format!("limit={PAGINATE_PAGE_LIMIT}"),
+    )
+    .await;
     let win_start = tail["window_start_index"].as_u64().unwrap_or(0);
 
     let body = get_messages(
         &mut client,
         PAGINATE_CONV_ID,
         &format!("limit={PAGINATE_PAGE_LIMIT}&before_index={win_start}"),
-    ).await;
-    assert_eq!(body["total_count"].as_u64().unwrap_or(0) as usize, PAGINATE_TOTAL);
-    assert_eq!(body["window_start_index"].as_u64().unwrap_or(999) as usize, 0);
+    )
+    .await;
+    assert_eq!(
+        body["total_count"].as_u64().unwrap_or(0) as usize,
+        PAGINATE_TOTAL
+    );
+    assert_eq!(
+        body["window_start_index"].as_u64().unwrap_or(999) as usize,
+        0
+    );
     assert!(!body["has_older"].as_bool().unwrap_or(true));
     let msgs = body["messages"].as_array().unwrap();
     assert_eq!(msgs.len(), PAGINATE_TOTAL - PAGINATE_PAGE_LIMIT);
@@ -139,7 +168,7 @@ e2e_test!(older_page_before_index, |client| async move {
 e2e_test!(unknown_conversation_returns_404, |client| async move {
     let status: f64 = client
         .eval_js(
-            "fetch('/conversation/messages?conversation_id=e2e-no-such-conv').then(r=>r.status)"
+            "fetch('/conversation/messages?conversation_id=e2e-no-such-conv').then(r=>r.status)",
         )
         .await
         .unwrap()
@@ -151,41 +180,43 @@ e2e_test!(unknown_conversation_returns_404, |client| async move {
 // ---------------------------------------------------------------------------
 // 测试 5：水合尾页显示最新消息和 load-older 控件
 // ---------------------------------------------------------------------------
-e2e_test!(hydrate_tail_page_shows_latest_and_load_older, |client| async move {
-    seed_paginated(&mut client).await;
+e2e_test!(
+    hydrate_tail_page_shows_latest_and_load_older,
+    |client| async move {
+        seed_paginated(&mut client).await;
 
-    // 绑定会话到分页对话
-    let _ = client
+        // 绑定会话到分页对话
+        let _ = client
         .eval_js(
             "fetch('/user-data/prefs',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({locale:'zh',theme:'light',side_panel_view:'hidden',side_width:280,editor_layout_mode:false,status_bar_visible:true})})"
         )
         .await;
 
-    let _ = client
+        let _ = client
         .eval_js(&format!(
             "fetch('/user-data/workspaces/current/sessions',{{method:'PUT',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{sessions:[{{id:'s_e2e_hydrate',title:'E2E hydrate',draft:'',messages:[],updated_at:1,pinned:false,starred:false,server_conversation_id:'{PAGINATE_CONV_ID}',server_revision:1}}],active_session_id:'s_e2e_hydrate'}})}})"
         ))
         .await;
 
-    let _ = client.eval_js("location.reload()").await;
-    client
-        .wait_for("network_idle", Some(""), Some(15000), Some(500))
-        .await
-        .ok();
+        let _ = client.eval_js("location.reload()").await;
+        client
+            .wait_for("network_idle", Some(""), Some(15000), Some(500))
+            .await
+            .ok();
 
-    // 尾页最新消息应可见
-    client
-        .wait_for(
-            "text",
-            Some(&format!("e2e-msg-{}", PAGINATE_TOTAL - 1)),
-            Some(15000),
-            Some(200),
-        )
-        .await
-        .unwrap();
+        // 尾页最新消息应可见
+        client
+            .wait_for(
+                "text",
+                Some(&format!("e2e-msg-{}", PAGINATE_TOTAL - 1)),
+                Some(15000),
+                Some(200),
+            )
+            .await
+            .unwrap();
 
-    // load-older 按钮应可见
-    let load_older_visible: bool = client
+        // load-older 按钮应可见
+        let load_older_visible: bool = client
         .eval_js(
             "(()=>{const el=document.querySelector('[data-testid=\"chat-load-older\"]');return el!==null&&el.offsetParent!==null;})()"
         )
@@ -193,14 +224,15 @@ e2e_test!(hydrate_tail_page_shows_latest_and_load_older, |client| async move {
         .unwrap()
         .as_bool()
         .unwrap_or(false);
-    assert!(load_older_visible, "chat-load-older should be visible");
+        assert!(load_older_visible, "chat-load-older should be visible");
 
-    // 首条消息不应可见
-    let has_msg_0: bool = client
-        .eval_js("document.body.innerText.includes('e2e-msg-0')")
-        .await
-        .unwrap()
-        .as_bool()
-        .unwrap_or(true);
-    assert!(!has_msg_0, "e2e-msg-0 should not be visible in tail page");
-});
+        // 首条消息不应可见
+        let has_msg_0: bool = client
+            .eval_js("document.body.innerText.includes('e2e-msg-0')")
+            .await
+            .unwrap()
+            .as_bool()
+            .unwrap_or(true);
+        assert!(!has_msg_0, "e2e-msg-0 should not be visible in tail page");
+    }
+);

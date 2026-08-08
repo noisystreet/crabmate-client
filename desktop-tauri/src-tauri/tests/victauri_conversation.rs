@@ -75,52 +75,58 @@ async fn seed_paginated_conversation(client: &mut victauri_test::VictauriClient,
 // ---------------------------------------------------------------------------
 // 测试：点击「加载更早消息」加载更早分页并隐藏按钮
 // ---------------------------------------------------------------------------
-e2e_test!(click_load_older_fetches_older_and_hides_control, |client| async move {
-    seed_paginated_conversation(&mut client, "s_e2e_load_older").await;
+e2e_test!(
+    click_load_older_fetches_older_and_hides_control,
+    |client| async move {
+        seed_paginated_conversation(&mut client, "s_e2e_load_older").await;
 
-    // 等待分页水合完成：尾页最新消息应可见
-    client
-        .wait_for(
-            "text",
-            Some(&format!("e2e-msg-{}", PAGINATE_TOTAL - 1)),
-            Some(15000),
-            Some(200),
-        )
-        .await
-        .unwrap();
+        // 等待分页水合完成：尾页最新消息应可见
+        client
+            .wait_for(
+                "text",
+                Some(&format!("e2e-msg-{}", PAGINATE_TOTAL - 1)),
+                Some(15000),
+                Some(200),
+            )
+            .await
+            .unwrap();
 
-    // 确认「加载更早消息」按钮存在
-    Locator::test_id("chat-load-older")
-        .expect(&mut client)
-        .to_be_visible()
-        .await
-        .unwrap();
+        // 确认「加载更早消息」按钮存在
+        Locator::test_id("chat-load-older")
+            .expect(&mut client)
+            .to_be_visible()
+            .await
+            .unwrap();
 
-    // 确认首条消息不可见（在更早的分页中）
-    let has_msg_0: bool = client
-        .eval_js("document.body.innerText.includes('e2e-msg-0')")
-        .await
-        .unwrap()
-        .as_bool()
-        .unwrap_or(true);
-    assert!(!has_msg_0, "e2e-msg-0 should not be visible before loading older");
+        // 确认首条消息不可见（在更早的分页中）
+        let has_msg_0: bool = client
+            .eval_js("document.body.innerText.includes('e2e-msg-0')")
+            .await
+            .unwrap()
+            .as_bool()
+            .unwrap_or(true);
+        assert!(
+            !has_msg_0,
+            "e2e-msg-0 should not be visible before loading older"
+        );
 
-    // 点击「加载更早消息」
-    Locator::test_id("chat-load-older")
-        .click(&mut client)
-        .await
-        .unwrap();
+        // 点击「加载更早消息」
+        Locator::test_id("chat-load-older")
+            .click(&mut client)
+            .await
+            .unwrap();
 
-    // 等待首条消息出现（表示更早分页已加载）
-    client
-        .wait_for("text", Some("e2e-msg-0"), Some(10000), Some(200))
-        .await
-        .unwrap();
+        // 等待首条消息出现（表示更早分页已加载）
+        client
+            .wait_for("text", Some("e2e-msg-0"), Some(10000), Some(200))
+            .await
+            .unwrap();
 
-    // 加载完成后 load-older 按钮应消失
-    Locator::test_id("chat-load-older")
-        .expect(&mut client)
-        .to_be_hidden()
-        .await
-        .unwrap();
-});
+        // 加载完成后 load-older 按钮应消失
+        Locator::test_id("chat-load-older")
+            .expect(&mut client)
+            .to_be_hidden()
+            .await
+            .unwrap();
+    }
+);

@@ -117,7 +117,9 @@ async fn poll_scroll_at_bottom(
             return Ok(());
         }
         if Instant::now() > deadline {
-            return Err(format!("scroll did not reach bottom within {timeout_secs}s"));
+            return Err(format!(
+                "scroll did not reach bottom within {timeout_secs}s"
+            ));
         }
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
@@ -152,7 +154,9 @@ async fn poll_scroll_away_from_bottom(
             return Ok(());
         }
         if Instant::now() > deadline {
-            return Err(format!("scroll did not leave bottom within {timeout_secs}s"));
+            return Err(format!(
+                "scroll did not leave bottom within {timeout_secs}s"
+            ));
         }
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
@@ -262,38 +266,40 @@ async fn dispatch_wheel_up_on_scroller(client: &mut victauri_test::VictauriClien
 // ---------------------------------------------------------------------------
 // 测试 1：已有消息的会话中发送新消息 → 自动滚底
 // ---------------------------------------------------------------------------
-e2e_test!(send_message_scrolls_to_bottom_in_existing_chat, |client| async move {
-    // 注入 SSE 流存根
-    let sse = concat!(
-        "id: 1\ndata: {\"sse_capabilities\":{\"supported_sse_v\":1}}\n\n",
-        "id: 2\ndata: {\"v\":1}\n\n",
-        "id: 3\ndata: Hello from E2E scroll test.\n\n",
-        "id: 4\ndata: {\"stream_ended\":{\"reason\":\"completed\"}}\n\n",
-    );
-    inject_stream_stub(&mut client, sse).await;
+e2e_test!(
+    send_message_scrolls_to_bottom_in_existing_chat,
+    |client| async move {
+        // 注入 SSE 流存根
+        let sse = concat!(
+            "id: 1\ndata: {\"sse_capabilities\":{\"supported_sse_v\":1}}\n\n",
+            "id: 2\ndata: {\"v\":1}\n\n",
+            "id: 3\ndata: Hello from E2E scroll test.\n\n",
+            "id: 4\ndata: {\"stream_ended\":{\"reason\":\"completed\"}}\n\n",
+        );
+        inject_stream_stub(&mut client, sse).await;
 
-    // 播种 40 条消息的会话
-    seed_scrollable_session(&mut client, "s_e2e_scroll_send", 40).await;
+        // 播种 40 条消息的会话
+        seed_scrollable_session(&mut client, "s_e2e_scroll_send", 40).await;
 
-    // 确认页面加载
-    client
-        .wait_for("text", Some("scroll-test-line-0"), Some(15000), Some(200))
-        .await
-        .unwrap();
+        // 确认页面加载
+        client
+            .wait_for("text", Some("scroll-test-line-0"), Some(15000), Some(200))
+            .await
+            .unwrap();
 
-    // 先滚到顶部，确保不在底部
-    let _ = client
+        // 先滚到顶部，确保不在底部
+        let _ = client
         .eval_js(
             "document.querySelector('[data-testid=\"chat-messages-scroller\"]')?.scrollTo(0, 0)",
         )
         .await;
 
-    poll_scroll_away_from_bottom(&mut client, 10)
-        .await
-        .expect("should be away from bottom after scrolling to top");
+        poll_scroll_away_from_bottom(&mut client, 10)
+            .await
+            .expect("should be away from bottom after scrolling to top");
 
-    // 输入消息并发送
-    let _ = client
+        // 输入消息并发送
+        let _ = client
         .eval_js(
             "(()=>{const el=document.querySelector('[data-testid=\"chat-composer-input\"]');\
              if(!el)return;el.focus();\
@@ -303,24 +309,25 @@ e2e_test!(send_message_scrolls_to_bottom_in_existing_chat, |client| async move {
         )
         .await;
 
-    client.press_key("Enter").await.unwrap();
+        client.press_key("Enter").await.unwrap();
 
-    // 等待助手回复出现（确认流已处理）
-    client
-        .wait_for(
-            "text",
-            Some("Hello from E2E scroll test"),
-            Some(15000),
-            Some(200),
-        )
-        .await
-        .unwrap();
+        // 等待助手回复出现（确认流已处理）
+        client
+            .wait_for(
+                "text",
+                Some("Hello from E2E scroll test"),
+                Some(15000),
+                Some(200),
+            )
+            .await
+            .unwrap();
 
-    // 验证滚动条已到达底部
-    poll_scroll_at_bottom(&mut client, 10)
-        .await
-        .expect("should scroll to bottom after sending message");
-});
+        // 验证滚动条已到达底部
+        poll_scroll_at_bottom(&mut client, 10)
+            .await
+            .expect("should scroll to bottom after sending message");
+    }
+);
 
 // ---------------------------------------------------------------------------
 // 测试 2：空会话中发送首条消息 → 自动滚底
@@ -379,55 +386,61 @@ e2e_test!(send_first_message_scrolls_to_bottom, |client| async move {
 // ---------------------------------------------------------------------------
 // 测试 3：流式多 chunk 增高时保持在 live edge（delta 追底 + 72ms DOM 节流）
 // ---------------------------------------------------------------------------
-e2e_test!(streaming_tail_stays_within_follow_threshold, |client| async move {
-    let sse = build_multichunk_stream_sse(28);
-    inject_stream_stub(&mut client, &sse).await;
-    seed_empty_session(&mut client, "s_e2e_stream_follow").await;
+e2e_test!(
+    streaming_tail_stays_within_follow_threshold,
+    |client| async move {
+        let sse = build_multichunk_stream_sse(28);
+        inject_stream_stub(&mut client, &sse).await;
+        seed_empty_session(&mut client, "s_e2e_stream_follow").await;
 
-    send_composer_message(&mut client, "stream follow e2e").await;
+        send_composer_message(&mut client, "stream follow e2e").await;
 
-    client
-        .wait_for("text", Some("STREAM-E2E-LINE-00"), Some(15000), Some(200))
-        .await
-        .unwrap();
+        client
+            .wait_for("text", Some("STREAM-E2E-LINE-00"), Some(15000), Some(200))
+            .await
+            .unwrap();
 
-    poll_streaming_stays_at_live_edge(&mut client, "STREAM-E2E-LINE-27", 20)
-        .await
-        .expect("should stay within follow gap while streaming grows");
+        poll_streaming_stays_at_live_edge(&mut client, "STREAM-E2E-LINE-27", 20)
+            .await
+            .expect("should stay within follow gap while streaming grows");
 
-    poll_scroll_at_bottom(&mut client, 10)
-        .await
-        .expect("should remain at bottom after stream completes");
-});
+        poll_scroll_at_bottom(&mut client, 10)
+            .await
+            .expect("should remain at bottom after stream completes");
+    }
+);
 
 // ---------------------------------------------------------------------------
 // 测试 4：流式中上滚后不再强制跟底
 // ---------------------------------------------------------------------------
-e2e_test!(wheel_up_during_stream_disengages_follow, |client| async move {
-    let sse = build_multichunk_stream_sse(28);
-    inject_stream_stub(&mut client, &sse).await;
-    seed_empty_session(&mut client, "s_e2e_stream_wheel").await;
+e2e_test!(
+    wheel_up_during_stream_disengages_follow,
+    |client| async move {
+        let sse = build_multichunk_stream_sse(28);
+        inject_stream_stub(&mut client, &sse).await;
+        seed_empty_session(&mut client, "s_e2e_stream_wheel").await;
 
-    send_composer_message(&mut client, "wheel disengage e2e").await;
+        send_composer_message(&mut client, "wheel disengage e2e").await;
 
-    client
-        .wait_for("text", Some("STREAM-E2E-LINE-05"), Some(15000), Some(200))
-        .await
-        .unwrap();
+        client
+            .wait_for("text", Some("STREAM-E2E-LINE-05"), Some(15000), Some(200))
+            .await
+            .unwrap();
 
-    dispatch_wheel_up_on_scroller(&mut client).await;
-    tokio::time::sleep(Duration::from_millis(300)).await;
+        dispatch_wheel_up_on_scroller(&mut client).await;
+        tokio::time::sleep(Duration::from_millis(300)).await;
 
-    client
-        .wait_for("text", Some("STREAM-E2E-LINE-20"), Some(15000), Some(200))
-        .await
-        .unwrap();
+        client
+            .wait_for("text", Some("STREAM-E2E-LINE-20"), Some(15000), Some(200))
+            .await
+            .unwrap();
 
-    let gap = read_scroll_gap_px(&mut client)
-        .await
-        .expect("read scroll gap");
-    assert!(
-        gap > FOLLOW_GAP_MAX_PX,
-        "expected scroll away from live edge after wheel-up during stream, gap={gap}px"
-    );
-});
+        let gap = read_scroll_gap_px(&mut client)
+            .await
+            .expect("read scroll gap");
+        assert!(
+            gap > FOLLOW_GAP_MAX_PX,
+            "expected scroll away from live edge after wheel-up during stream, gap={gap}px"
+        );
+    }
+);
