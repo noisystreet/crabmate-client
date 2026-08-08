@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "crabmate",
+  "productName": "crabmate-desktop",
   "version": "0.1.0",
   "identifier": "com.crabmate.desktop",
   "build": {
@@ -31,8 +31,7 @@
       "deb": {
         "files": {
           "usr/share/crabmate/frontend/dist/": "../dist/",
-          "usr/share/applications/crabmate.desktop": "bundle/deb/crabmate.desktop",
-          "etc/crabmate/config.toml": "bundle/deb/config.toml"
+          "usr/share/applications/crabmate-desktop.desktop": "bundle/deb/crabmate-desktop.desktop"
         }
       }
     }

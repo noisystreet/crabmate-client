@@ -11,7 +11,7 @@
 3. **首次**成功连接且 Bearer 非空、本机钥匙串尚无对应条目时，写入系统钥匙串（账户 `tauri_connect_web_api_bearer`）；下次启动自动填充。
 4. 桌面应用保持单实例：再次启动会显示并聚焦已有主窗口（启动中则聚焦闪屏）。
 5. 关闭主窗口会结束应用；系统托盘可用时，最小化按钮会隐藏主窗口，托盘「显示/隐藏」可恢复。托盘初始化失败时保留普通最小化。
-6. 主窗口退出时保存大小、位置与最大化状态，下次启动恢复；启动闪屏不参与状态保存。右侧可拖拽分栏宽度沿用 Web 偏好持久化。
+6. 会话主窗**默认最大化**（连接后 `show` 再 maximize；不 restore 连接页位置）。连接页仍为小窗。退出时仍保存大小/位置/最大化供参考。启动闪屏不参与状态保存。右侧可拖拽分栏宽度沿用 Web 偏好持久化。
 
 **跳过连接页**（直接打开指定 URL）：**`CM_E2E_FIXTURES=1`**（Victauri E2E）或 **`CM_DESKTOP_SKIP_CONNECT=1`**，且必须设置 **`CM_DESKTOP_SERVE_URL`**（例如 `http://127.0.0.1:8080/`）。须事先自行启动 `serve`。
 
@@ -45,7 +45,7 @@ cargo tauri dev
 
 ## 打包
 
-见本仓根 [README.md](../README.md) 与 **`DEVELOPMENT.md`**（**`prepare-sidecar.sh`**、**`cargo tauri build`**）。桌面包**不再**内嵌 `crabmate` sidecar 二进制。
+见本仓根 [README.md](../README.md) 与 **`DEVELOPMENT.md`**（**`prepare-sidecar.sh`**、**`cargo tauri build`** / **`make desktop-release`**）。产物为 **`crabmate-desktop_*.deb`**（Debian 包名 **`crabmate-desktop`**，与 Server 仓 **`crabmate`** `.deb` 可并存）。桌面包**不再**内嵌 `crabmate` sidecar，也**不**占用 `/etc/crabmate/`。
 
 ## 更多
 
