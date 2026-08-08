@@ -18,6 +18,7 @@ export type PersistedSession = {
   id: string;
   messages?: PersistedMessage[];
   layout_schema_version?: number;
+  server_revision?: number;
 };
 
 /** 从 sessions API 拉当前工作区会话（单次，不等 hydration 稳定）。 */

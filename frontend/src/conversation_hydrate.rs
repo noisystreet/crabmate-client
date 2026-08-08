@@ -1,5 +1,7 @@
 //! 将 `GET /conversation/messages` 返回的 OpenAI 兼容消息转为 [`crate::storage::StoredMessage`]。
 
+use std::collections::HashSet;
+
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -51,13 +53,52 @@ struct ApiMessage {
     tool_calls: Option<Value>,
     #[serde(default)]
     name: Option<String>,
-    #[allow(dead_code)]
     #[serde(default)]
     tool_call_id: Option<String>,
     #[serde(default)]
     display_content: Option<String>,
     #[serde(default)]
     display_reasoning_content: Option<String>,
+}
+
+/// 收集快照里已有结果的 `tool_call_id`，避免再为同一次调用水合「工具：name」短卡。
+fn collect_tool_result_call_ids(msgs: &[Value]) -> HashSet<String> {
+    let mut ids = HashSet::new();
+    for raw in msgs {
+        let Ok(parsed) = serde_json::from_value::<ApiMessage>(raw.clone()) else {
+            continue;
+        };
+        if parsed.role.trim() != "tool" {
+            continue;
+        }
+        if let Some(id) = parsed
+            .tool_call_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            ids.insert(id.to_string());
+        }
+    }
+    ids
+}
+
+/// 去掉已有 `role=tool` 结果的 tool_calls；若全部已覆盖则返回 `None`（不再造调用短卡）。
+fn tool_calls_without_results(tool_calls: &Value, covered: &HashSet<String>) -> Option<Value> {
+    let arr = tool_calls.as_array()?;
+    let remaining: Vec<Value> = arr
+        .iter()
+        .filter(|tc| {
+            let id = tc.get("id").and_then(|v| v.as_str()).unwrap_or("").trim();
+            id.is_empty() || !covered.contains(id)
+        })
+        .cloned()
+        .collect();
+    if remaining.is_empty() {
+        None
+    } else {
+        Some(Value::Array(remaining))
+    }
 }
 
 fn text_from_content(content: &Option<Value>) -> (String, Vec<String>) {
@@ -109,6 +150,8 @@ struct HydrateSpecialLine<'a> {
     reasoning: &'a str,
     display_content: Option<&'a str>,
     display_reasoning: Option<&'a str>,
+    /// 同页已有 `role=tool` 的 call id；用于抑制重复调用短卡。
+    tool_result_call_ids: &'a HashSet<String>,
     base_ms: i64,
     out: &'a mut Vec<StoredMessage>,
     t: &'a mut i64,
@@ -130,7 +173,10 @@ fn hydrate_try_special_cases(line: HydrateSpecialLine<'_>) -> bool {
         && line.reasoning.trim().is_empty()
         && let Some(ref tc) = line.parsed.tool_calls
     {
-        append_assistant_tool_calls_timeline_card(tc, line.base_ms, line.out, line.t);
+        // 有对应 tool 结果时只保留结果卡（见 chat_export_20260808 双「## 工具」）。
+        if let Some(orphan_tc) = tool_calls_without_results(tc, line.tool_result_call_ids) {
+            append_assistant_tool_calls_timeline_card(&orphan_tc, line.base_ms, line.out, line.t);
+        }
         return true;
     }
     if line.role == "tool" {
@@ -139,6 +185,7 @@ fn hydrate_try_special_cases(line: HydrateSpecialLine<'_>) -> bool {
             line.text,
             line.display_content,
             line.display_reasoning,
+            line.parsed.tool_call_id.as_deref(),
             line.base_ms,
             line.out,
             line.t,
@@ -153,6 +200,7 @@ pub fn stored_messages_from_conversation_api_with_base(
     msgs: &[Value],
     base_ms: i64,
 ) -> Vec<StoredMessage> {
+    let tool_result_call_ids = collect_tool_result_call_ids(msgs);
     let mut out: Vec<StoredMessage> = Vec::new();
     let mut t = base_ms;
     for raw in msgs {
@@ -186,6 +234,7 @@ pub fn stored_messages_from_conversation_api_with_base(
             reasoning: reasoning.as_str(),
             display_content,
             display_reasoning,
+            tool_result_call_ids: &tool_result_call_ids,
             base_ms,
             out: &mut out,
             t: &mut t,
@@ -307,5 +356,59 @@ mod tests {
             out[0].reasoning_text, plan_json,
             "must hydrate display_reasoning_content, not fall back to raw reasoning_content"
         );
+    }
+
+    /// 对齐 chat_export_20260808：空 assistant.tool_calls + role=tool 不得拆成两张工具卡。
+    #[test]
+    fn skips_tool_call_stub_when_tool_result_present() {
+        let msgs = vec![
+            json!({"role":"user","content":"现在时间是什么"}),
+            json!({
+                "role":"assistant",
+                "content":"",
+                "tool_calls":[{
+                    "id":"tc_time",
+                    "type":"function",
+                    "function":{"name":"get_current_time","arguments":"{}"}
+                }]
+            }),
+            json!({
+                "role":"tool",
+                "name":"get_current_time",
+                "tool_call_id":"tc_time",
+                "content":"当前时间：2026-08-08 21:25:05"
+            }),
+            json!({"role":"assistant","content":"当前时间是 **2026-08-08 21:25:05**。"}),
+        ];
+        let out = stored_messages_from_conversation_api_with_base(&msgs, 0);
+        let tools: Vec<_> = out.iter().filter(|m| m.is_tool).collect();
+        assert_eq!(
+            tools.len(),
+            1,
+            "roles={:?}",
+            out.iter()
+                .map(|m| (m.role.as_str(), m.is_tool, m.text.as_str()))
+                .collect::<Vec<_>>()
+        );
+        assert!(!tools[0].text.starts_with("工具："));
+        assert_eq!(tools[0].tool_call_id.as_deref(), Some("tc_time"));
+    }
+
+    #[test]
+    fn keeps_orphan_tool_call_stub_without_result() {
+        let msgs = vec![json!({
+            "role":"assistant",
+            "content":"",
+            "tool_calls":[{
+                "id":"tc_orphan",
+                "type":"function",
+                "function":{"name":"list_tree","arguments":"{}"}
+            }]
+        })];
+        let out = stored_messages_from_conversation_api_with_base(&msgs, 0);
+        assert_eq!(out.len(), 1);
+        assert!(out[0].is_tool);
+        assert!(out[0].text.contains("list_tree"));
+        assert_eq!(out[0].tool_call_id.as_deref(), Some("tc_orphan"));
     }
 }

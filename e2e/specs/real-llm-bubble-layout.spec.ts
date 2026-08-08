@@ -1,17 +1,14 @@
 /**
  * 真实 LLM E2E 测试：流式完成后消息结构正确性
  *
- * 复现 Bug：流式结束时的本地块布局会在 hydration 后被同 revision 的服务端
- * 原始消息重新拆分，导致重载前后 stored messages 结构不一致。
+ * 前置：
+ *   1. `crabmate serve` 运行
+ *   2. `API_KEY` / TOML，或服务端钥匙串已有 `client_llm`
+ *   3. 启用 Web Bearer 时设 `CM_WEB_API_BEARER_TOKEN`
  *
- * 验证：流完成后立即从 API 拉取会话消息，检查结构是否交替正确。
- *
- * 前置条件：
- *   1. `cargo run -- serve` 运行
- *   2. 已配置 API_KEY
- *
- * 运行方式：
- *   cd e2e && npx playwright test specs/real-llm-bubble-layout.spec.ts
+ * 运行：
+ *   cd e2e && no_proxy=127.0.0.1,localhost,api.deepseek.com \
+ *     npx playwright test specs/real-llm-bubble-layout.spec.ts
  */
 
 import { test, expect } from "@playwright/test";
@@ -21,68 +18,14 @@ import {
   consecutiveDuplicateAssistantTexts,
   fetchPersistedSession,
 } from "../fixtures/session_assertions";
-import { setupRealLLMSession, sendMessage } from "../fixtures/helpers";
+import {
+  ensureRealLlmModelCredential,
+  resolveOptionalApiKeyFromEnvOrToml,
+  sendMessage,
+  setupRealLLMSessionPreferringKeyring,
+} from "../fixtures/helpers";
 
-function readApiKeyFromToml(filePath: string): string {
-  try {
-    const raw = fs.readFileSync(filePath, "utf8");
-    const inAgentSection: string[] = [];
-    let inAgent = false;
-    for (const line of raw.split("\n")) {
-      const trimmed = line.trim();
-      if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
-        const section = trimmed.slice(1, -1).trim();
-        inAgent = section === "agent";
-        continue;
-      }
-      if (inAgent && trimmed.startsWith("api_key")) {
-        const eqIdx = trimmed.indexOf("=");
-        if (eqIdx !== -1) {
-          let val = trimmed.slice(eqIdx + 1).trim();
-          if (
-            (val.startsWith('"') && val.endsWith('"')) ||
-            (val.startsWith("'") && val.endsWith("'"))
-          ) {
-            val = val.slice(1, -1);
-          }
-          if (val) inAgentSection.push(val);
-        }
-      }
-    }
-    if (inAgentSection.length > 0)
-      return inAgentSection[inAgentSection.length - 1];
-  } catch {
-    /* ignore */
-  }
-  return "";
-}
-
-function resolveApiKey(): string {
-  const env = process.env.API_KEY;
-  if (env && env.trim()) return env.trim();
-  const projectRoot = path.resolve(process.cwd(), "..");
-  const fromConfig = readApiKeyFromToml(path.join(projectRoot, "config.toml"));
-  if (fromConfig) return fromConfig;
-  const fromDemo = readApiKeyFromToml(
-    path.join(projectRoot, ".agent_demo.toml"),
-  );
-  if (fromDemo) return fromDemo;
-  const dataHome =
-    process.env.XDG_DATA_HOME ||
-    path.join(process.env.HOME || "", ".local", "share");
-  try {
-    return fs
-      .readFileSync(
-        path.join(dataHome, "crabmate", "secrets", "client_llm"),
-        "utf8",
-      )
-      .trim();
-  } catch {
-    return "";
-  }
-}
-
-const API_KEY = resolveApiKey();
+const API_KEY = resolveOptionalApiKeyFromEnvOrToml();
 const SID = "s_e2e_msg_structure_" + Date.now();
 
 interface StoredMessage {
@@ -212,15 +155,18 @@ async function waitForReadyWhileApproving(page: any, timeoutMs: number) {
 }
 
 test.describe("真实 LLM：流式后消息结构", () => {
-  const runTest = API_KEY ? test : test.skip;
-
-  runTest("流式布局在重载前后保持一致且无空气泡", async ({ page }) => {
-    // 先创建临时工作区目录（在项目根目录下，确保在 workspace_allowed_roots 范围内）
+  test("流式布局在重载前后保持一致且无空气泡", async ({ page }) => {
     const wsDir = path.resolve(process.cwd(), "..", ".e2e_tmp_" + Date.now());
     fs.mkdirSync(wsDir, { recursive: true });
 
-    // 再设置会话和工作区（顺序重要：先设工作区再设会话，避免工作区变更后会话丢失）
-    await setupRealLLMSession(page, SID, API_KEY);
+    await setupRealLLMSessionPreferringKeyring(page, SID, API_KEY);
+    if (!(await ensureRealLlmModelCredential(page, API_KEY))) {
+      test.skip(
+        true,
+        "未设置 API_KEY 且服务端钥匙串无 client_llm，跳过真实 LLM 用例",
+      );
+      return;
+    }
     await page.evaluate((dir: string) => {
       return fetch("/workspace", {
         method: "POST",

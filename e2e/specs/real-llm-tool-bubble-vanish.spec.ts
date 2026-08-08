@@ -2,78 +2,27 @@
  * 真实 LLM：按 `chat_export_20260730_225530.md` 同类任务复现
  * 「有工具调用时助手气泡先出现再消失」。
  *
- * 提示词对齐导出：「分析一下当前目录下的源码」；工作区含迷你 `cpp-demo/`。
- *
- * 流中监控（正文助手首次出现后）：
- *   1. 正文助手 section 不得归零
- *   2. 已见正文不得整段从 transcript 消失（允许换 section id / 移交 commentary）
- *   3. 可见性不得 true→false→true 闪回
- *
  * 前置：
- *   1. `cargo run -- serve` 在 127.0.0.1:8080
- *   2. `API_KEY` **或** 本机系统钥匙串已有 `client_llm`（测试进程不打印/导出明文）
+ *   1. `crabmate serve` 在 127.0.0.1:8080
+ *   2. `API_KEY` / TOML，或服务端钥匙串已有 `client_llm`
+ *   3. 启用 Web Bearer 时设 `CM_WEB_API_BEARER_TOKEN`
  *
  * 运行：
- *   cd e2e && no_proxy=127.0.0.1,localhost npx playwright test specs/real-llm-tool-bubble-vanish.spec.ts
+ *   cd e2e && no_proxy=127.0.0.1,localhost,api.deepseek.com \
+ *     npx playwright test specs/real-llm-tool-bubble-vanish.spec.ts
  */
 import { expect, test, type Page } from "@playwright/test";
 import * as fs from "fs";
 import * as path from "path";
 import {
+  ensureRealLlmModelCredential,
+  resolveOptionalApiKeyFromEnvOrToml,
   sendMessage,
-  setupRealLLMSession,
+  setupRealLLMSessionPreferringKeyring,
   waitForHealth,
 } from "../fixtures/helpers";
 
-function readApiKeyFromToml(filePath: string): string {
-  try {
-    const raw = fs.readFileSync(filePath, "utf8");
-    const inAgentSection: string[] = [];
-    let inAgent = false;
-    for (const line of raw.split("\n")) {
-      const trimmed = line.trim();
-      if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
-        const section = trimmed.slice(1, -1).trim();
-        inAgent = section === "agent";
-        continue;
-      }
-      if (inAgent && trimmed.startsWith("api_key")) {
-        const eqIdx = trimmed.indexOf("=");
-        if (eqIdx !== -1) {
-          let val = trimmed.slice(eqIdx + 1).trim();
-          if (
-            (val.startsWith('"') && val.endsWith('"')) ||
-            (val.startsWith("'") && val.endsWith("'"))
-          ) {
-            val = val.slice(1, -1);
-          }
-          if (val) inAgentSection.push(val);
-        }
-      }
-    }
-    if (inAgentSection.length > 0) {
-      return inAgentSection[inAgentSection.length - 1];
-    }
-  } catch {
-    /* ignore */
-  }
-  return "";
-}
-
-function resolveApiKey(): string {
-  const env = process.env.API_KEY;
-  if (env && env.trim()) return env.trim();
-  const projectRoot = path.resolve(process.cwd(), "..");
-  const fromConfig = readApiKeyFromToml(path.join(projectRoot, "config.toml"));
-  if (fromConfig) return fromConfig;
-  const fromDemo = readApiKeyFromToml(
-    path.join(projectRoot, ".agent_demo.toml"),
-  );
-  if (fromDemo) return fromDemo;
-  return "";
-}
-
-const API_KEY = resolveApiKey();
+const API_KEY = resolveOptionalApiKeyFromEnvOrToml();
 const PROMPT = "分析一下当前目录下的源码";
 
 type VanishGap = {
@@ -96,86 +45,6 @@ type MonitorResult = {
   zeroSnapshot: string[] | null;
   recoverSnapshot: string[] | null;
 };
-
-async function secretsClientLlmSet(page: Page): Promise<boolean> {
-  return page.evaluate(async () => {
-    const response = await fetch("/user-data/secrets/status");
-    if (!response.ok) return false;
-    const data = (await response.json()) as {
-      client_llm?: { set?: boolean };
-    };
-    return Boolean(data.client_llm?.set);
-  });
-}
-
-/** 无 API_KEY 时不写 secrets（避免清空钥匙串），只建会话与 LLM 覆盖。 */
-async function setupSessionPreferringKeyring(
-  page: Page,
-  sid: string,
-  apiKey: string,
-) {
-  if (apiKey) {
-    await setupRealLLMSession(page, sid, apiKey);
-    return;
-  }
-  await page.goto("/", { waitUntil: "networkidle", timeout: 20_000 });
-  await page.waitForSelector('[data-testid="chat-composer-input"]', {
-    timeout: 15_000,
-  });
-  await page.evaluate(() =>
-    fetch("/user-data/llm-overrides", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        client_llm: {
-          api_base: "https://api.deepseek.com",
-          model: "deepseek-v4-flash",
-          llm_context_tokens: "1000000",
-          llm_thinking_mode: "off",
-        },
-      }),
-    }),
-  );
-  await page.evaluate(() =>
-    fetch("/user-data/prefs", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        locale: "zh",
-        theme: "light",
-        side_panel_view: "hidden",
-        side_width: 280,
-        editor_layout_mode: false,
-        status_bar_visible: true,
-      }),
-    }).catch(() => {}),
-  );
-  await page.evaluate((s: string) => {
-    const body = JSON.stringify({
-      sessions: [
-        {
-          id: s,
-          title: "e2e-real-vanish",
-          draft: "",
-          messages: [],
-          updated_at: Date.now(),
-          pinned: false,
-          starred: false,
-        },
-      ],
-      active_session_id: s,
-    });
-    return fetch("/user-data/workspaces/current/sessions", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body,
-    }).catch(() => {});
-  }, sid);
-  await page.reload({ waitUntil: "networkidle", timeout: 20_000 });
-  await page.waitForSelector('[data-testid="chat-composer-input"]', {
-    timeout: 15_000,
-  });
-}
 
 function seedMiniCppWorkspace(): string {
   const projectRoot = path.resolve(process.cwd(), "..");
@@ -279,17 +148,14 @@ test.describe("真实 LLM：工具回合气泡闪没", () => {
     await waitForHealth(baseUrl);
 
     const sid = `s_e2e_real_vanish_${Date.now()}`;
-    await setupSessionPreferringKeyring(page, sid, API_KEY);
+    await setupRealLLMSessionPreferringKeyring(page, sid, API_KEY);
 
-    if (!API_KEY) {
-      const keyringOk = await secretsClientLlmSet(page);
-      if (!keyringOk) {
-        test.skip(
-          true,
-          "未设置 API_KEY 且系统钥匙串无 client_llm，跳过真实 LLM 用例",
-        );
-        return;
-      }
+    if (!(await ensureRealLlmModelCredential(page, API_KEY))) {
+      test.skip(
+        true,
+        "未设置 API_KEY 且服务端钥匙串无 client_llm，跳过真实 LLM 用例",
+      );
+      return;
     }
 
     const wsDir = seedMiniCppWorkspace();
