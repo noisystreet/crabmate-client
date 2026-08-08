@@ -1,0 +1,52 @@
+########################
+# OS / 编辑器
+########################
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*.log
+*.tmp
+*.bak
+*.orig
+
+########################
+# 环境 / IDE
+########################
+.idea/
+.vscode/
+.history/
+.env
+.env.*
+.cursor/*
+!.cursor/rules/
+!.cursor/rules/**
+
+########################
+# Rust / Tauri
+########################
+/target/
+desktop-tauri/src-tauri/target/
+mobile-tauri/src-tauri/target/
+desktop-tauri/src-tauri/gen/
+mobile-tauri/src-tauri/gen/schemas/
+desktop-tauri/binaries/
+desktop-tauri/dist/
+# make apk 稳定产物名
+mobile-tauri/crabmate.apk
+
+########################
+# Android 本地签名（勿提交）
+########################
+mobile-tauri/src-tauri/gen/android/app/key.properties
+**/*.jks
+**/*.keystore
+
+########################
+# Node（若日后迁入 UI 构建）
+########################
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
