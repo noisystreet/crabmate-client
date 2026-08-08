@@ -150,6 +150,117 @@ fn push_next_from_pool(
     }
 }
 
+/// 水合/流式调用短卡：无结果明细（空 reasoning），文案多为「工具：name」/「Tool: name」。
+fn is_hydrate_tool_call_stub(m: &StoredMessage) -> bool {
+    if !m.is_tool || !m.reasoning_text.trim().is_empty() {
+        return false;
+    }
+    let t = m.text.trim();
+    t.starts_with("工具：")
+        || t.starts_with("Tool:")
+        || t == "工具调用"
+        || t.eq_ignore_ascii_case("tool call")
+        || t.eq_ignore_ascii_case("tool calls")
+}
+
+fn trimmed_nonempty(s: Option<&str>) -> Option<&str> {
+    s.map(str::trim).filter(|x| !x.is_empty())
+}
+
+/// 短卡是否已被非短卡结果代表。
+/// - 双边有 `tool_call_id`：仅 id 相等才算（避免同名另一调用的 orphan stub 被误丢）
+/// - 短卡无 id（旧快照）：才允许用同名结果收编
+fn tool_stub_superseded_by_placed_result(out: &[StoredMessage], stub: &StoredMessage) -> bool {
+    let stub_id = trimmed_nonempty(stub.tool_call_id.as_deref());
+    out.iter().any(|m| {
+        if !m.is_tool || is_hydrate_tool_call_stub(m) {
+            return false;
+        }
+        let placed_id = trimmed_nonempty(m.tool_call_id.as_deref());
+        match (stub_id, placed_id) {
+            (Some(a), Some(b)) => a == b,
+            (Some(_), None) => false,
+            (None, _) => match (
+                trimmed_nonempty(stub.tool_name.as_deref()),
+                trimmed_nonempty(m.tool_name.as_deref()),
+            ) {
+                (Some(a), Some(b)) => a == b,
+                _ => false,
+            },
+        }
+    })
+}
+
+fn tool_pool_match_score(local: &StoredMessage, candidate: &StoredMessage) -> i32 {
+    let mut score = 0;
+    if let (Some(a), Some(b)) = (
+        local
+            .tool_call_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty()),
+        candidate
+            .tool_call_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty()),
+    ) {
+        if a == b {
+            score += 100;
+        }
+    }
+    if let (Some(a), Some(b)) = (
+        local
+            .tool_name
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty()),
+        candidate
+            .tool_name
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty()),
+    ) {
+        if a == b {
+            score += 10;
+        }
+    }
+    if candidate.tool_call_id.is_some() || !candidate.reasoning_text.trim().is_empty() {
+        score += 5;
+    }
+    if is_hydrate_tool_call_stub(candidate) {
+        score -= 50;
+    }
+    score
+}
+
+fn push_best_tool_from_pool(
+    out: &mut Vec<StoredMessage>,
+    placed_ids: &mut HashSet<String>,
+    pool: &mut VecDeque<StoredMessage>,
+    local: &StoredMessage,
+) {
+    let mut best_idx: Option<usize> = None;
+    let mut best_score = i32::MIN;
+    for (idx, candidate) in pool.iter().enumerate() {
+        if placed_ids.contains(&candidate.id) {
+            continue;
+        }
+        let score = tool_pool_match_score(local, candidate);
+        if best_idx.is_none() || score > best_score {
+            best_score = score;
+            best_idx = Some(idx);
+        }
+    }
+    if let Some(idx) = best_idx {
+        if let Some(h) = pool.remove(idx) {
+            push_once(out, placed_ids, h);
+            return;
+        }
+    }
+    push_next_from_pool(out, placed_ids, pool);
+}
+
 fn replay_local_order_against_server(
     server: Vec<StoredMessage>,
     local_tail: &[StoredMessage],
@@ -187,11 +298,19 @@ fn replay_local_order_against_server(
             continue;
         }
         if local.is_tool {
-            push_next_from_pool(&mut out, &mut placed_ids, &mut tool_pool);
+            push_best_tool_from_pool(&mut out, &mut placed_ids, &mut tool_pool, local);
         }
     }
 
     for h in server {
+        if placed_ids.contains(&h.id) {
+            continue;
+        }
+        // 丢弃已被结果卡代表的调用短卡，避免 append 成「工具→助手→工具」夹心。
+        if is_hydrate_tool_call_stub(&h) && tool_stub_superseded_by_placed_result(&out, &h) {
+            placed_ids.insert(h.id.clone());
+            continue;
+        }
         push_once(&mut out, &mut placed_ids, h);
     }
     out
@@ -400,6 +519,196 @@ mod golden {
         let merged = merge_session_tail(server, &local);
         let ids: Vec<_> = merged.iter().map(|m| m.id.as_str()).collect();
         assert_eq!(ids, vec!["u1", "h_0_0", "a-srv"]);
+    }
+
+    /// 对齐 `chat_export_20260808_212552.md`：服务端水合出 call 短卡 + result 卡，
+    /// 本地流式只剩 1 条工具；FIFO tool_pool 会把结果挤到终答后。
+    /// 期望：同一次调用只保留 1 条工具，且工具在终答之前。
+    #[test]
+    fn golden_dedupes_hydrate_call_and_result_cards() {
+        let local = vec![
+            user_msg("u1", "现在时间是什么"),
+            StoredMessage {
+                id: "sse-tool".into(),
+                role: "system".into(),
+                text: "get_current_time".into(),
+                reasoning_text: "当前时间：2026-08-08 21:25:05".into(),
+                image_urls: vec![],
+                state: Some(timeline_state_tool("sse-tool", true)),
+                is_tool: true,
+                tool_call_id: Some("tc_time".into()),
+                tool_name: Some("get_current_time".into()),
+                created_at: 1,
+            },
+            assistant_msg("a-local", "当前时间是 **2026-08-08 21:25:05**。"),
+        ];
+        let server = vec![
+            user_msg("u1", "现在时间是什么"),
+            StoredMessage {
+                id: "h_call".into(),
+                role: "system".into(),
+                text: "工具：get_current_time".into(),
+                reasoning_text: String::new(),
+                image_urls: vec![],
+                state: Some(timeline_state_tool("h_call", true)),
+                is_tool: true,
+                tool_call_id: None,
+                tool_name: Some("get_current_time".into()),
+                created_at: 1,
+            },
+            StoredMessage {
+                id: "h_result".into(),
+                role: "system".into(),
+                text: "get_current_time".into(),
+                reasoning_text: "当前时间：2026-08-08 21:25:05".into(),
+                image_urls: vec![],
+                state: Some(timeline_state_tool("h_result", true)),
+                is_tool: true,
+                tool_call_id: Some("tc_time".into()),
+                tool_name: Some("get_current_time".into()),
+                created_at: 2,
+            },
+            assistant_msg("a-srv", "当前时间是 **2026-08-08 21:25:05**。"),
+        ];
+        let merged = merge_session_tail(server, &local);
+        let tools: Vec<_> = merged.iter().filter(|m| m.is_tool).collect();
+        assert_eq!(
+            tools.len(),
+            1,
+            "ids={:?}",
+            merged.iter().map(|m| m.id.as_str()).collect::<Vec<_>>()
+        );
+        let tool_idx = merged.iter().position(|m| m.is_tool).unwrap();
+        let answer_idx = merged
+            .iter()
+            .position(|m| m.role == "assistant" && !m.is_tool)
+            .unwrap();
+        assert!(
+            tool_idx < answer_idx,
+            "tool must precede final answer; ids={:?}",
+            merged.iter().map(|m| m.id.as_str()).collect::<Vec<_>>()
+        );
+        // 应保留结果卡（有 tool_call_id / detail），而非仅「工具：name」短卡。
+        assert!(
+            tools[0].tool_call_id.as_deref() == Some("tc_time")
+                || !tools[0].reasoning_text.is_empty(),
+            "kept stub-only card: text={:?}",
+            tools[0].text
+        );
+    }
+
+    /// 同名另一调用的 orphan stub（有独立 tool_call_id）不得被已放置结果误丢。
+    #[test]
+    fn golden_keeps_orphan_stub_with_distinct_call_id() {
+        let local = vec![
+            user_msg("u1", "q"),
+            StoredMessage {
+                id: "sse-1".into(),
+                role: "system".into(),
+                text: "list_tree".into(),
+                reasoning_text: ".".into(),
+                image_urls: vec![],
+                state: Some(timeline_state_tool("sse-1", true)),
+                is_tool: true,
+                tool_call_id: Some("tc_1".into()),
+                tool_name: Some("list_tree".into()),
+                created_at: 1,
+            },
+            assistant_msg("a-local", "done"),
+        ];
+        let server = vec![
+            user_msg("u1", "q"),
+            StoredMessage {
+                id: "h_result".into(),
+                role: "system".into(),
+                text: "list_tree".into(),
+                reasoning_text: ".".into(),
+                image_urls: vec![],
+                state: Some(timeline_state_tool("h_result", true)),
+                is_tool: true,
+                tool_call_id: Some("tc_1".into()),
+                tool_name: Some("list_tree".into()),
+                created_at: 1,
+            },
+            StoredMessage {
+                id: "h_orphan".into(),
+                role: "system".into(),
+                text: "工具：list_tree".into(),
+                reasoning_text: String::new(),
+                image_urls: vec![],
+                state: Some(timeline_state_tool("h_orphan", true)),
+                is_tool: true,
+                tool_call_id: Some("tc_2".into()),
+                tool_name: Some("list_tree".into()),
+                created_at: 2,
+            },
+            assistant_msg("a-srv", "done"),
+        ];
+        let merged = merge_session_tail(server, &local);
+        let ids: Vec<_> = merged.iter().map(|m| m.id.as_str()).collect();
+        assert!(
+            ids.contains(&"h_orphan"),
+            "orphan stub with distinct call id must remain; ids={ids:?}"
+        );
+        assert!(ids.contains(&"h_result"), "ids={ids:?}");
+    }
+
+    /// 英文短卡指纹也应被识别并丢弃（当结果已放置）。
+    #[test]
+    fn golden_dedupes_english_tool_call_stub() {
+        let local = vec![
+            user_msg("u1", "q"),
+            StoredMessage {
+                id: "sse-tool".into(),
+                role: "system".into(),
+                text: "get_current_time".into(),
+                reasoning_text: "now".into(),
+                image_urls: vec![],
+                state: Some(timeline_state_tool("sse-tool", true)),
+                is_tool: true,
+                tool_call_id: Some("tc_en".into()),
+                tool_name: Some("get_current_time".into()),
+                created_at: 1,
+            },
+            assistant_msg("a-local", "ok"),
+        ];
+        let server = vec![
+            user_msg("u1", "q"),
+            StoredMessage {
+                id: "h_call_en".into(),
+                role: "system".into(),
+                text: "Tool: get_current_time".into(),
+                reasoning_text: String::new(),
+                image_urls: vec![],
+                state: Some(timeline_state_tool("h_call_en", true)),
+                is_tool: true,
+                tool_call_id: None,
+                tool_name: Some("get_current_time".into()),
+                created_at: 1,
+            },
+            StoredMessage {
+                id: "h_result".into(),
+                role: "system".into(),
+                text: "get_current_time".into(),
+                reasoning_text: "now".into(),
+                image_urls: vec![],
+                state: Some(timeline_state_tool("h_result", true)),
+                is_tool: true,
+                tool_call_id: Some("tc_en".into()),
+                tool_name: Some("get_current_time".into()),
+                created_at: 2,
+            },
+            assistant_msg("a-srv", "ok"),
+        ];
+        let merged = merge_session_tail(server, &local);
+        let tools: Vec<_> = merged.iter().filter(|m| m.is_tool).collect();
+        assert_eq!(
+            tools.len(),
+            1,
+            "ids={:?}",
+            merged.iter().map(|m| &m.id).collect::<Vec<_>>()
+        );
+        assert_eq!(tools[0].id, "h_result");
     }
 
     #[test]

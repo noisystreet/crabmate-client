@@ -147,18 +147,35 @@ x-stream-job-id: 1
 
 ### 密钥解析
 
-Playwright 测试进程不读取或导出 CrabMate 系统钥匙串。请通过环境变量 `API_KEY`（推荐）或仅用于本机测试且已忽略提交的配置提供密钥。
+模型密钥（`client_llm`，≠ Web Bearer）优先级：
 
-无密钥时测试自动跳过。
+1. 环境变量 **`API_KEY`**（明文，写入服务端钥匙串）
+2. 本仓根 `config.toml` / `.agent_demo.toml` 的 `[agent].api_key`（仅本地、勿提交）
+3. **服务端系统钥匙串**已有 `client_llm`（经 `/user-data/secrets/status` 探测 `set`；测试进程**不**读明文）
+
+旧路径 `$XDG_DATA_HOME/crabmate/secrets/client_llm` 明文文件已废弃，E2E **不再**读取。
+
+若 `serve` 启用了 Web API Bearer，请额外导出 **`CM_WEB_API_BEARER_TOKEN`**（与设置页「Web API 共享密钥」同一串）。助手会：
+
+1. 用 Playwright `extraHTTPHeaders` 给页内 `fetch` 加 `Authorization`（探测钥匙串 / 写 prefs）
+2. 经 `#cm_web_api_bearer=` 交接进 WASM 鉴权层（对话流等走前端封装）
+
+否则 `/user-data` 会 401，钥匙串探测失败并 skip。
+
+无模型密钥（环境/TOML/钥匙串皆无）时用例 `test.skip`。
 
 ### 本地运行
 
 ```bash
-# 确保后端运行（如系统有 http_proxy，须排除 LLM API 域名防超时）
-no_proxy=api.deepseek.com,localhost,127.0.0.1 cargo run -- serve
+# 确保后端运行（钥匙串已有 client_llm 时可不必 export API_KEY）
+# 若启用 Web Bearer：
+#   export CM_WEB_API_BEARER_TOKEN='…'
+no_proxy=api.deepseek.com,localhost,127.0.0.1
 
-# 运行真实 LLM 测试
 cd e2e && npx playwright test specs/real-llm-*.spec.ts
+
+# 三轮滚动用例另需显式开关：
+REAL_LLM_E2E=1 npx playwright test specs/real-llm-three-turn-scroll.spec.ts
 ```
 
 ### 注意事项
@@ -179,6 +196,7 @@ cd e2e && npx playwright test specs/real-llm-*.spec.ts
 - **中间过程旁白不双写**：`specs/mock-mid-process-commentary-duplicate.spec.ts` 按 `chat_export_20260729_210001.md` 多工具时序；**流中采样**（每段旁白出现后 + 工具可见后再断言 DOM 恰好 1）；**就绪瞬间**（不等 hydration）断言 DOM / 持久化 / 导出形段各恰好 1；**重载后再断言**恰好 1。共享断言见 `fixtures/session_assertions.ts`（`sampleCommentaryStepsDuringStream`）。
 - **真实 LLM 就绪瞬间成对双写**：`specs/real-llm-bubble-layout.spec.ts` 在 `waitForStableSessionMessages` **之前**检查相邻助手正文不得完全相同；其后仍比对重载前后 stored 一致（防 hydrate 拆合）。
 - **导出会话「分析当前项目」**：`specs/mock-export-analyze-project-flicker.spec.ts` 按 `chat_export_*.md` 时序重放开场白 + `parsing_tool_calls` + 6× `read_file` + 分块长终答，断言助手正文气泡不归零。
+- **水合双工具卡夹心**：`specs/mock-hydrate-duplicate-tool-cards.spec.ts` 按 `chat_export_20260808_212552.md`：mock `GET /conversation/messages` 返回空 `assistant.tool_calls` + `role=tool`；legacy 水合不得拆成两张卡，也不得出现「工具 → 终答 → 工具」三明治（工具前无 preamble 时也不应多造解读气泡）。
 - **真实红测派生 mock**：`specs/mock-real-tool-bubble-vanish.spec.ts` 回放 `real-llm-tool-bubble-vanish` 的两条时序，共同根因是旁白离开 overlay 后在 canonical 里还没有工具锚点，`project_turn_web_v2` 便投影不出 `turn-commentary-*` 行（详见 `docs/Turn布局设计.md` §14 I15）：
   - **无 START 的 `TOOL_CALL_RESULT`** —— `drain(clear=true)` 掏空 overlay，而 canonical 无该工具步；
   - **`turn_segment_start{beforeToolCallId}` 先于 `TOOL_CALL_START`**（真实 SSE 的实际形态，两者相隔约 475ms）—— `reset_loading_tail_streaming_text` 已清 overlay，pending 旁白要等 `ToolCall` 才被吸收。

@@ -37,7 +37,18 @@ fn first_tool_call_function_name(tool_calls: &Value) -> Option<String> {
     }
 }
 
-use crate::i18n::load_locale_from_storage;
+fn first_tool_call_id(tool_calls: &Value) -> Option<String> {
+    let arr = tool_calls.as_array()?;
+    let tc = arr.first()?;
+    let id = tc.get("id")?.as_str()?.trim();
+    if id.is_empty() {
+        None
+    } else {
+        Some(id.to_string())
+    }
+}
+
+use crate::i18n::{self, load_locale_from_storage};
 use crate::message_format::{
     format_tool_role_content_for_stored_message, tool_result_info_from_stored_content,
 };
@@ -87,14 +98,19 @@ pub(crate) fn append_assistant_tool_calls_timeline_card(
 ) {
     let id = format!("h_{}_{}", base_ms, out.len());
     *t = t.saturating_add(1);
+    let loc = load_locale_from_storage();
     let summary = tool_calls_summary(parsed_tool_calls);
     let card = if summary.is_empty() {
-        "工具调用".to_string()
+        match loc {
+            crate::i18n::Locale::ZhHans => "工具调用".to_string(),
+            crate::i18n::Locale::En => "Tool call".to_string(),
+        }
     } else {
-        format!("工具：{summary}")
+        format!("{}{summary}", i18n::tool_card_prefix(loc))
     };
     let state = timeline_state_tool(&id, true);
     let tool_name = first_tool_call_function_name(parsed_tool_calls);
+    let tool_call_id = first_tool_call_id(parsed_tool_calls);
     out.push(StoredMessage {
         id,
         role: "system".into(),
@@ -103,18 +119,20 @@ pub(crate) fn append_assistant_tool_calls_timeline_card(
         image_urls: vec![],
         state: Some(state),
         is_tool: true,
-        tool_call_id: None,
+        tool_call_id,
         tool_name,
         created_at: *t,
     });
 }
 
 /// `role=tool` 消息追加为时间线工具条目。
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn append_tool_role_timeline_row(
     name: &str,
     text: &str,
     display_content: Option<&str>,
     display_reasoning: Option<&str>,
+    api_tool_call_id: Option<&str>,
     base_ms: i64,
     out: &mut Vec<StoredMessage>,
     t: &mut i64,
@@ -133,6 +151,10 @@ pub(crate) fn append_tool_role_timeline_row(
         .and_then(|info| info.ok)
         .unwrap_or(true);
     let state = timeline_state_tool(&id, tl_ok);
+    let api_id = api_tool_call_id
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
     let (display_text, reasoning_text, tool_call_id, tool_name) = match parsed {
         Some((compact, detail)) => {
             let info = tool_result_info_from_stored_content(text, fallback_name);
@@ -141,7 +163,8 @@ pub(crate) fn append_tool_role_timeline_row(
                 detail,
                 info.as_ref()
                     .and_then(|i| i.tool_call_id.clone())
-                    .filter(|x| !x.trim().is_empty()),
+                    .filter(|x| !x.trim().is_empty())
+                    .or_else(|| api_id.clone()),
                 info.map(|i| i.name)
                     .or_else(|| fallback_name.map(String::from)),
             )
@@ -149,7 +172,7 @@ pub(crate) fn append_tool_role_timeline_row(
         None => (
             text.to_string(),
             String::new(),
-            None,
+            api_id,
             fallback_name.map(String::from),
         ),
     };

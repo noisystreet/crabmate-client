@@ -75,7 +75,9 @@ make frontend
 
 `serve` 解析顺序：`CRABMATE_BIN` → `PATH` 的 `crabmate` → 同级 Server `target/{debug,release}/crabmate` → 同级仓 `cargo run`。正式 CI checkout `noisystreet/CrabMate`。
 
-真实 LLM 规格仅本地：`cd e2e && API_KEY=… npx playwright test specs/real-llm-*.spec.ts`。
+真实 LLM 规格仅本地：钥匙串已有 `client_llm` 时可不必 `API_KEY`；启用 Web Bearer 时设 `CM_WEB_API_BEARER_TOKEN`。  
+`cd e2e && no_proxy=127.0.0.1,localhost,api.deepseek.com npx playwright test specs/real-llm-*.spec.ts`  
+（三轮滚动另需 `REAL_LLM_E2E=1`。）
 
 ## Victauri（Desktop 壳 E2E）
 
