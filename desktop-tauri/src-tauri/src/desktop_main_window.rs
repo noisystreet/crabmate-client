@@ -11,23 +11,57 @@ use tauri::{Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 use tauri_plugin_opener::OpenerExt;
 use url::Url;
 
+use crate::e2e_hide_app_windows;
 use crate::os_theme;
-use crate::{close_splash_window, e2e_hide_app_windows};
 
 /// 主 UI（连上 `serve` 后）默认逻辑尺寸。
 const MAIN_UI_WIDTH: f64 = 1280.0;
 const MAIN_UI_HEIGHT: f64 = 840.0;
 
-/// 启动闪屏与连接页共用逻辑尺寸（居中小窗，视觉一致）。
-pub(crate) const BOOT_SHELL_WIDTH: f64 = 480.0;
-pub(crate) const BOOT_SHELL_HEIGHT: f64 = 420.0;
+/// 无显示器信息时连接页回退尺寸。
+const CONNECT_FALLBACK_WIDTH: f64 = 480.0;
+const CONNECT_FALLBACK_HEIGHT: f64 = 420.0;
 
-/// WebView / 闪屏底色（与前端深色壳一致）。
-pub(crate) const BOOT_SHELL_BG: Color = Color(0x0A, 0x0D, 0x12, 0xFF);
+/// WebView 底色（与前端深色壳一致）。
+const BOOT_SHELL_BG: Color = Color(0x0A, 0x0D, 0x12, 0xFF);
+
+/// 主屏（或第一块屏）工作区：逻辑宽高 + 物理原点（供连接页铺满，页内 CSS 居中卡片）。
+#[derive(Clone, Copy, Debug)]
+struct WorkAreaGeometry {
+    logical_width: f64,
+    logical_height: f64,
+    logical_x: f64,
+    logical_y: f64,
+    physical_position: tauri::PhysicalPosition<i32>,
+    physical_size: tauri::PhysicalSize<u32>,
+}
+
+fn primary_work_area(app: &tauri::AppHandle) -> Option<WorkAreaGeometry> {
+    let monitor = app
+        .primary_monitor()
+        .ok()
+        .flatten()
+        .or_else(|| app.available_monitors().ok()?.into_iter().next())?;
+    let scale = monitor.scale_factor();
+    let area = *monitor.work_area();
+    Some(WorkAreaGeometry {
+        logical_width: f64::from(area.size.width) / scale,
+        logical_height: f64::from(area.size.height) / scale,
+        logical_x: f64::from(area.position.x) / scale,
+        logical_y: f64::from(area.position.y) / scale,
+        physical_position: area.position,
+        physical_size: area.size,
+    })
+}
+
+fn apply_work_area_geometry(window: &WebviewWindow, geo: WorkAreaGeometry) {
+    let _ = window.set_position(tauri::Position::Physical(geo.physical_position));
+    let _ = window.set_size(tauri::Size::Physical(geo.physical_size));
+}
 
 #[derive(Clone, Copy)]
 enum MainWindowMode {
-    /// 先打开连接页（与闪屏同尺寸小窗）；导航到 `serve` 后再放大并恢复几何。
+    /// 连接页：铺满工作区（页内居中）；导航到 `serve` 后再 maximize。
     ConnectPage,
     /// E2E / 跳过连接页：直接全尺寸 UI（须已有可连的 `serve`）。
     DirectUi,
@@ -92,12 +126,18 @@ fn is_connect_page_url(url: &Url) -> bool {
 }
 
 fn apply_connect_page_geometry(window: &WebviewWindow) {
-    // 会话窗可能处于最大化；不先取消则 set_size 无效，连接页会仍占满屏。
+    // 会话窗可能处于最大化；不先取消则无法改回连接页几何。
     let _ = window.unmaximize();
     let _ = window.set_resizable(false);
+    // 铺满工作区：合成器常把首个窗口丢到原点；全屏时 connect.html 的 flex 居中卡片
+    // 仍在屏幕中央，不会出现「小窗从左上角跳到中间」。
+    if let Some(geo) = primary_work_area(window.app_handle()) {
+        apply_work_area_geometry(window, geo);
+        return;
+    }
     let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
-        width: BOOT_SHELL_WIDTH,
-        height: BOOT_SHELL_HEIGHT,
+        width: CONNECT_FALLBACK_WIDTH,
+        height: CONNECT_FALLBACK_HEIGHT,
     }));
     let _ = window.center();
 }
@@ -137,6 +177,40 @@ fn apply_main_ui_geometry(window: &WebviewWindow) {
     fill_monitor_work_area_or_default(window);
 }
 
+fn allow_http_navigation(app: &tauri::AppHandle, url: &Url, backend_origin: &url::Origin) -> bool {
+    let host = url.host_str().unwrap_or("");
+    if host.eq_ignore_ascii_case("tauri.localhost") {
+        return true;
+    }
+    let allowed = app
+        .try_state::<crabmate_connect::AllowedServeOrigin>()
+        .is_some_and(|s| s.matches_url(url));
+    let is_backend = url.origin() == *backend_origin;
+    if let Some(w) = app.get_webview_window("main")
+        && let Ok(cur) = w.url()
+    {
+        if is_connect_page_url(&cur) {
+            if is_backend || allowed {
+                return true;
+            }
+            let _ = app.opener().open_url(url.as_str(), None::<&str>);
+            return false;
+        }
+        if matches!(cur.scheme(), "http" | "https") && cur.origin() == url.origin() {
+            return true;
+        }
+        if matches!(cur.scheme(), "http" | "https") && cur.origin() != url.origin() {
+            let _ = app.opener().open_url(url.as_str(), None::<&str>);
+            return false;
+        }
+    }
+    if is_backend || allowed {
+        return true;
+    }
+    let _ = app.opener().open_url(url.as_str(), None::<&str>);
+    false
+}
+
 fn finish_create_main_window(
     app_handle: &tauri::AppHandle,
     webview_url: WebviewUrl,
@@ -146,14 +220,17 @@ fn finish_create_main_window(
     let app_handle_clone = app_handle.clone();
     let revealed = Arc::new(AtomicBool::new(false));
     let revealed_on_load = Arc::clone(&revealed);
-    let app_on_load = app_handle.clone();
+    let connect_geo = matches!(mode, MainWindowMode::ConnectPage)
+        .then(|| primary_work_area(app_handle))
+        .flatten();
     let (width, height) = match mode {
-        MainWindowMode::ConnectPage => (BOOT_SHELL_WIDTH, BOOT_SHELL_HEIGHT),
+        MainWindowMode::ConnectPage => connect_geo
+            .map(|g| (g.logical_width, g.logical_height))
+            .unwrap_or((CONNECT_FALLBACK_WIDTH, CONNECT_FALLBACK_HEIGHT)),
         MainWindowMode::DirectUi => (MAIN_UI_WIDTH, MAIN_UI_HEIGHT),
     };
 
-    // 连接页：builder 即 `.center()`；Wayland 上未映射窗口的 `center()` 常被忽略，
-    // 故在 `show()` 后再居中一次（见 `reveal_main_window_once`）。
+    // 连接页：builder 即铺满工作区（勿用居中小窗；未映射时 center/position 常被忽略）。
     let mut builder = WebviewWindowBuilder::new(app_handle, "main", webview_url)
         .title("CrabMate Desktop")
         .inner_size(width, height)
@@ -163,78 +240,34 @@ fn finish_create_main_window(
         .background_color(BOOT_SHELL_BG)
         .visible(false)
         .theme(os_theme::initial_window_theme());
-    if matches!(mode, MainWindowMode::ConnectPage) {
-        builder = builder.center();
+    if let Some(geo) = connect_geo {
+        builder = builder.position(geo.logical_x, geo.logical_y);
     }
     let window = builder
-        .on_navigation(move |url| {
-            // 连接页 → 仅已探测通过的 AllowedServeOrigin；会话内跨源外开。
-            match url.scheme() {
-                "tauri" | "asset" => true,
-                "mailto" => {
-                    let _ = app_handle_clone
-                        .opener()
-                        .open_url(url.as_str(), None::<&str>);
-                    false
-                }
-                "http" | "https" => {
-                    let host = url.host_str().unwrap_or("");
-                    if host.eq_ignore_ascii_case("tauri.localhost") {
-                        return true;
-                    }
-                    let allowed = app_handle_clone
-                        .try_state::<crabmate_connect::AllowedServeOrigin>()
-                        .is_some_and(|s| s.matches_url(url));
-                    let is_backend = url.origin() == backend_origin;
-                    if let Some(w) = app_handle_clone.get_webview_window("main")
-                        && let Ok(cur) = w.url()
-                    {
-                        if is_connect_page_url(&cur) {
-                            if is_backend || allowed {
-                                return true;
-                            }
-                            let _ = app_handle_clone
-                                .opener()
-                                .open_url(url.as_str(), None::<&str>);
-                            return false;
-                        }
-                        if matches!(cur.scheme(), "http" | "https") && cur.origin() == url.origin()
-                        {
-                            return true;
-                        }
-                        if matches!(cur.scheme(), "http" | "https") && cur.origin() != url.origin()
-                        {
-                            let _ = app_handle_clone
-                                .opener()
-                                .open_url(url.as_str(), None::<&str>);
-                            return false;
-                        }
-                    }
-                    // 程序化 navigate / 尚无 current URL：仅放行已允许 Origin。
-                    if is_backend || allowed {
-                        return true;
-                    }
-                    let _ = app_handle_clone
-                        .opener()
-                        .open_url(url.as_str(), None::<&str>);
-                    false
-                }
-                _ => false,
+        .on_navigation(move |url| match url.scheme() {
+            "tauri" | "asset" => true,
+            "mailto" => {
+                let _ = app_handle_clone
+                    .opener()
+                    .open_url(url.as_str(), None::<&str>);
+                false
             }
+            "http" | "https" => allow_http_navigation(&app_handle_clone, url, &backend_origin),
+            _ => false,
         })
         .on_page_load(move |window, payload| {
             if !matches!(payload.event(), PageLoadEvent::Finished) {
                 return;
             }
-            // 连接页：小窗。会话 UI：已显示则立刻 maximize；尚未 reveal 则等 show 之后。
+            // 连接页：铺满工作区。会话 UI：已显示则立刻 maximize；尚未 reveal 则等 show 之后。
             if is_connect_page_url(payload.url()) {
                 apply_connect_page_geometry(&window);
-                reveal_main_window_once(&window, &app_on_load, &revealed_on_load);
+                reveal_main_window_once(&window, &revealed_on_load);
             } else if revealed_on_load.load(Ordering::SeqCst) {
                 apply_main_ui_geometry(&window);
             } else {
                 let _ = window.set_resizable(true);
-                reveal_main_window_once(&window, &app_on_load, &revealed_on_load);
+                reveal_main_window_once(&window, &revealed_on_load);
             }
         })
         .build()
@@ -242,11 +275,9 @@ fn finish_create_main_window(
 
     match mode {
         MainWindowMode::ConnectPage => {
-            // 勿 restore 上次全尺寸，否则连接页会被撑大。
             apply_connect_page_geometry(&window);
         }
         MainWindowMode::DirectUi => {
-            // 几何在首次 show 后由 reveal_main_window_once 应用。
             let _ = window.set_resizable(true);
         }
     }
@@ -259,9 +290,7 @@ fn finish_create_main_window(
         let app = app_fallback.clone();
         let _ = app_fallback.run_on_main_thread(move || {
             if let Some(main) = app.get_webview_window("main") {
-                reveal_main_window_once(&main, &app, &revealed);
-            } else {
-                close_splash_window(&app);
+                reveal_main_window_once(&main, &revealed);
             }
         });
     });
@@ -269,7 +298,7 @@ fn finish_create_main_window(
     Ok(window)
 }
 
-fn reveal_main_window_once(window: &WebviewWindow, app: &tauri::AppHandle, revealed: &AtomicBool) {
+fn reveal_main_window_once(window: &WebviewWindow, revealed: &AtomicBool) {
     if revealed.swap(true, Ordering::SeqCst) {
         return;
     }
@@ -281,11 +310,9 @@ fn reveal_main_window_once(window: &WebviewWindow, app: &tauri::AppHandle, revea
         if let Err(e) = window.show() {
             eprintln!("[crabmate-desktop] failed to show main window: {e}");
         }
-        // 显示后再居中 / 最大化：未映射时 center/maximize/monitor 在部分合成器上无效。
+        // 映射后再钉几何 / 最大化：部分合成器忽略未映射时的定位与尺寸。
         if on_connect {
-            if let Err(e) = window.center() {
-                eprintln!("[crabmate-desktop] failed to center connect window: {e}");
-            }
+            apply_connect_page_geometry(window);
         } else {
             apply_main_ui_geometry(window);
         }
@@ -293,5 +320,4 @@ fn reveal_main_window_once(window: &WebviewWindow, app: &tauri::AppHandle, revea
             eprintln!("[crabmate-desktop] failed to focus main window: {e}");
         }
     }
-    close_splash_window(app);
 }

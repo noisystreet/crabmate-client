@@ -6,7 +6,6 @@ use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent}
 use tauri::{App, AppHandle, Manager, Runtime};
 
 const MAIN_WINDOW_LABEL: &str = "main";
-const SPLASH_WINDOW_LABEL: &str = "splash";
 const TRAY_ID: &str = "crabmate-main";
 const TRAY_TOGGLE_ID: &str = "tray-toggle-main";
 const TRAY_QUIT_ID: &str = "tray-quit";
@@ -16,12 +15,10 @@ struct DesktopLifecycleState {
     tray_available: AtomicBool,
 }
 
-/// 第二实例回调：优先唤醒主窗口；启动尚未完成时聚焦 splash。
+/// 第二实例回调：唤醒并聚焦已有主窗口。
 pub(crate) fn focus_existing_instance<R: Runtime>(app: &AppHandle<R>) {
     if let Some(main) = app.get_webview_window(MAIN_WINDOW_LABEL) {
         show_and_focus(&main);
-    } else if let Some(splash) = app.get_webview_window(SPLASH_WINDOW_LABEL) {
-        show_and_focus(&splash);
     }
 }
 

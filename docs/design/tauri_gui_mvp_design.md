@@ -45,7 +45,7 @@ MVP 历史验收（部分已废弃）：
 |------|------|
 | `desktop-tauri/src-tauri/src/main.rs` | 不 spawn `serve`；连接页或 E2E 直连 `CM_DESKTOP_SERVE_URL` |
 | `desktop-tauri/src-tauri/src/desktop_lifecycle.rs` | 单实例、托盘、最小化隐藏 |
-| `desktop-tauri/scripts/prepare-sidecar.sh` | 同步 connect/splash；默认本仓 `frontend/dist`；`CM_PREPARE_SKIP_FRONTEND=1` 可跳过 |
+| `desktop-tauri/scripts/prepare-sidecar.sh` | 同步 connect（及可选遗留 splash）；默认本仓 `frontend/dist`；`CM_PREPARE_SKIP_FRONTEND=1` 可跳过 |
 | `desktop-tauri/scripts/before-desktop-build.sh` | release 构建：`trunk --release` + prepare；拒绝 debug 大 WASM |
 | `frontend/` | 业务 UI（Leptos CSR）；契约 git `rev`/`tag` |
 | `mobile-tauri/` | Android 薄壳 |
@@ -76,6 +76,6 @@ cargo install tauri-cli --version "^2"
 
 | 风险 | 缓解 |
 |------|------|
-| 误以为壳会起后端 | README / 闪屏文案；E2E 须自备 `serve` |
+| 误以为壳会起后端 | README / 连接页文案；E2E 须自备 `serve` |
 | monorepo E2E 假设 | `scripts/victauri-e2e.sh` 经 `CM_DESKTOP_BACKEND_BIN` / PATH / 同级主仓解析 `crabmate` |
 | 无托盘环境窗口不可恢复 | 托盘失败时保留普通最小化 |
