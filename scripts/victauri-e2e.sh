@@ -14,7 +14,8 @@
 #   VICTAURI_START_TIMEOUT  等待 /health 秒数（默认 120）
 #   VICTAURI_MAIN_WINDOW_WAIT  health 后主窗口额外等待秒数（默认 20）
 #   VICTAURI_E2E_LOG      桌面应用日志路径（默认 /tmp/crabmate-desktop-e2e.log）
-#   CM_E2E_FIXTURES       默认 1
+#   CM_E2E_FIXTURES       默认 1（跳过连接页；隐藏窗口除非 CM_E2E_SHOW_WINDOWS / xvfb）
+#   CM_E2E_SHOW_WINDOWS   默认 1（映射 WebView，否则 bridge 常失败）
 #   CM_DESKTOP_SERVE_PORT 本脚本拉起的 serve 端口（默认 18080）
 #   CM_DESKTOP_SERVE_URL  可覆盖（默认 http://127.0.0.1:$CM_DESKTOP_SERVE_PORT/）
 #   CRABMATE_FRONTEND_DIST  可选：同步进 desktop dist（否则仅 connect/splash）
@@ -94,7 +95,7 @@ maybe_reexec_under_xvfb() {
         echo "xvfb-run not found; install package xvfb (e.g. apt install xvfb)" >&2
         exit 1
     fi
-    echo ">>> Relaunching under xvfb-run (E2E windows are also hidden via CM_E2E_FIXTURES) ..." >&2
+    echo ">>> Relaunching under xvfb-run (windows shown on virtual display for JS bridge) ..." >&2
     exec env -u WAYLAND_DISPLAY -u WAYLAND_SOCKET -u GDK_BACKEND \
         WINIT_UNIX_BACKEND=x11 \
         LIBGL_ALWAYS_SOFTWARE=1 \
@@ -103,6 +104,7 @@ maybe_reexec_under_xvfb() {
         WINIT_UNIX_BACKEND=x11 \
         LIBGL_ALWAYS_SOFTWARE=1 \
         CM_E2E_FIXTURES="${CM_E2E_FIXTURES:-1}" \
+        CM_E2E_SHOW_WINDOWS="${CM_E2E_SHOW_WINDOWS:-1}" \
         CM_DESKTOP_BACKEND_BIN="${CM_DESKTOP_BACKEND_BIN:-$BACKEND_BIN}" \
         CM_DESKTOP_SERVE_PORT="${SERVE_PORT}" \
         CM_DESKTOP_SERVE_URL="${SERVE_URL}" \
@@ -133,28 +135,46 @@ wait_http_health() {
     done
 }
 
-# 独立启动 serve（壳不再 spawn）
+# 独立启动 serve（壳不再 spawn）；尽量带上前端 dist，避免空白页导致无 JS bridge
 start_serve_background() {
     : >"$SERVE_LOG"
-    env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY \
+    local static_dir=""
+    if [[ -n "${CM_WEB_STATIC_DIR:-}" ]]; then
+      static_dir="${CM_WEB_STATIC_DIR}"
+    elif [[ -n "${CRABMATE_FRONTEND_DIST:-}" ]]; then
+      static_dir="${CRABMATE_FRONTEND_DIST}"
+    elif [[ -f "${ROOT}/../crabmate_agent/frontend/dist/index.html" ]]; then
+      static_dir="${ROOT}/../crabmate_agent/frontend/dist"
+    fi
+    local serve_cwd="${ROOT}"
+    if [[ -d "${ROOT}/../crabmate_agent" ]]; then
+      serve_cwd="${ROOT}/../crabmate_agent"
+    fi
+    (
+      cd "${serve_cwd}"
+      if [[ -n "${static_dir}" ]]; then
+        export CM_WEB_STATIC_DIR="${static_dir}"
+      fi
+      exec env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY \
         no_proxy=127.0.0.1,localhost \
         CM_E2E_FIXTURES="${CM_E2E_FIXTURES:-1}" \
-        "$BACKEND_BIN" serve --host 127.0.0.1 --port "$SERVE_PORT" \
-        >>"$SERVE_LOG" 2>&1 &
+        "$BACKEND_BIN" serve --host 127.0.0.1 --port "$SERVE_PORT"
+    ) >>"$SERVE_LOG" 2>&1 &
     echo $!
 }
 
-# 启动桌面端：剥离 Wayland；CM_E2E_FIXTURES 令 splash/main 为 visible(false)
+# 启动桌面端：剥离 Wayland。xvfb 内显示窗口（WebKit 隐藏窗不跑 JS → bridge 失效）。
 start_desktop_background() {
     if [ -n "${VICTAURI_INSIDE_XVFB:-}" ]; then
-        echo "   display: ${DISPLAY:-<xvfb>} + CM_E2E_FIXTURES hidden windows" >&2
+        echo "   display: ${DISPLAY:-<xvfb>} + visible windows (bridge needs mapped WebView)" >&2
     else
-        echo "   display: ${DISPLAY:-<unset>} + CM_E2E_FIXTURES hidden windows" >&2
+        echo "   display: ${DISPLAY:-<unset>} + CM_E2E_SHOW_WINDOWS (prefer xvfb via VICTAURI_USE_XVFB=1)" >&2
     fi
     env -u WAYLAND_DISPLAY -u WAYLAND_SOCKET -u GDK_BACKEND \
         WINIT_UNIX_BACKEND=x11 \
         LIBGL_ALWAYS_SOFTWARE=1 \
         CM_E2E_FIXTURES="${CM_E2E_FIXTURES:-1}" \
+        CM_E2E_SHOW_WINDOWS="${CM_E2E_SHOW_WINDOWS:-1}" \
         CM_DESKTOP_SERVE_URL="$SERVE_URL" \
         "$DESKTOP_BIN" >>"$VICTAURI_E2E_LOG" 2>&1 &
     echo $!
@@ -209,11 +229,19 @@ echo ">>> Preparing shell assets + building desktop ..."
 cd "$ROOT"
 # 可选 UI 产物：显式 CRABMATE_FRONTEND_DIST，或同级主仓 frontend/dist
 if [[ -z "${CRABMATE_FRONTEND_DIST:-}" && -f "${ROOT}/../crabmate_agent/frontend/dist/index.html" ]]; then
-    export CRABMATE_FRONTEND_DIST="${ROOT}/../crabmate_agent/frontend/dist"
+  export CRABMATE_FRONTEND_DIST="${ROOT}/../crabmate_agent/frontend/dist"
 fi
 bash "$DESKTOP_ROOT/scripts/prepare-sidecar.sh"
 
+# E2E 须 victauri:default（JS bridge invoke）；release/check 不能长期写进 capabilities
+# shellcheck source=victauri-capability.sh
+source "$ROOT/scripts/victauri-capability.sh"
+ensure_victauri_capability "$TAURI_DIR"
+trap 'restore_victauri_capability' EXIT
+
 cd "$TAURI_DIR"
+# 显式带 feature 构建壳二进制 + 测试（插件与 ACL 一致）
+cargo build --features victauri --bin crabmate-desktop 2>&1 | tail -3
 cargo build --tests --features victauri 2>&1 | tail -3
 echo "   done."
 
@@ -255,6 +283,16 @@ wait_for_victauri_health "$APP_PID"
 echo ">>> Waiting for main window (page load, ${VICTAURI_MAIN_WINDOW_WAIT}s) ..."
 sleep "$VICTAURI_MAIN_WINDOW_WAIT"
 
+# 确认 serve UI 可取（空白页会导致 bridge invoke 失败）。
+# 勿 pipeline 到 head：curl -sf 遇 SIGPIPE 会误报失败。
+_serve_snip="$(curl --noproxy '*' --connect-timeout 2 --max-time 5 -sf \
+  "${SERVE_URL%/}/" | dd bs=200 count=1 2>/dev/null || true)"
+if ! printf '%s' "${_serve_snip}" | grep -qi 'html'; then
+  echo "   WARN: serve root does not look like HTML UI; DOM bridge tests may fail" >&2
+  echo "   set CM_WEB_STATIC_DIR or CRABMATE_FRONTEND_DIST to a built frontend/dist" >&2
+fi
+unset _serve_snip
+
 # ── Phase 5: Clean stale discovery dirs ────────────────────
 for d in /tmp/victauri/*/port; do
     [ -e "$d" ] || continue
@@ -282,16 +320,19 @@ find_test_bin() {
     find target/debug/deps -name "${name}-*" -not -name '*.d' 2>/dev/null | head -1
 }
 
+# 共用同一 WebView：套件内必须串行，否则 seed/reload 互踩。
+export RUST_TEST_THREADS="${RUST_TEST_THREADS:-1}"
+
 if [ "$TEST" = "real_llm" ]; then
     export REAL_LLM_E2E=1
     BIN=$(find_test_bin victauri_real_llm)
     if [ -n "$BIN" ]; then
-        "$BIN" || EXIT=$?
+        "$BIN" --test-threads=1 || EXIT=$?
     else
-        cargo test --test victauri_real_llm -- --nocapture || EXIT=$?
+        cargo test --features victauri --test victauri_real_llm -- --nocapture --test-threads=1 || EXIT=$?
     fi
 elif [ "$TEST" = "all" ]; then
-    cargo test --no-fail-fast --no-run 2>/dev/null || true
+    cargo test --features victauri --no-fail-fast --no-run 2>/dev/null || true
     for name in victauri_e2e victauri_session_crud victauri_prefs_theme victauri_status_bar \
         victauri_settings victauri_settings2 victauri_keyboard victauri_conversation \
         victauri_user_data victauri_pagination victauri_visible_messages \
@@ -300,11 +341,11 @@ elif [ "$TEST" = "all" ]; then
         BIN=$(find_test_bin "$name")
         if [ -n "$BIN" ]; then
             echo ">>> $name"
-            "$BIN" || EXIT=$?
+            "$BIN" --test-threads=1 || EXIT=$?
         fi
     done
 else
-    cargo test --features victauri --test "$TEST" -- "$TEST_FILTER" --nocapture || EXIT=$?
+    cargo test --features victauri --test "$TEST" -- "$TEST_FILTER" --nocapture --test-threads=1 || EXIT=$?
 fi
 
 # ── Phase 7: Cleanup ────────────────────────────────────────

@@ -32,6 +32,10 @@ cargo run -- serve --host 127.0.0.1 --port 8080
 
 主 UI 加载在 **`http(s)://…`**（用户填写的本机或远程 `serve`），不是 `tauri://` 资产页。桌面 **`capabilities/default.json`** 的 **`remote.urls` 仅回环**（`127.0.0.1` / `localhost`），以便本机 UI 可 `invoke`；**远程非回环 serve 无桌面 IPC**（外链等走前端 `window.open` 回退）。连接页导航仅放行 `connect_remote` 探测成功后的 **`AllowedServeOrigin`**，避免任意站点留在 WebView 并拿到钥匙串等命令。
 
+Victauri E2E（`--features victauri`）另需 **`victauri:default`** 权限，否则 WebView 内 JS bridge 无法 `invoke` 回调（表现为 `bridge not responding`）。该权限不能常驻 default capability（无 feature 时 tauri-build 报 Permission not found）。**`scripts/victauri-e2e.sh`** 会临时注入并在退出时恢复。
+
+另：WebKitGTK 在窗口 `visible(false)` 时常常不执行页面 JS。E2E 请在 **xvfb** 下跑（脚本默认），并用 **`CM_E2E_SHOW_WINDOWS=1`** / **`VICTAURI_INSIDE_XVFB`** 让主窗映射显示；仅隐藏窗口时会出现同样的 `bridge not responding`。
+
 ### 1.3 常用环境变量
 
 | 变量 | 说明 |
@@ -39,7 +43,8 @@ cargo run -- serve --host 127.0.0.1 --port 8080
 | `CM_DESKTOP_SUGGESTED_URL` | 连接页预填（默认 `http://127.0.0.1:8080/`） |
 | `CM_DESKTOP_SERVE_URL` | 跳过连接页时必填的已运行 `serve` URL |
 | `CM_DESKTOP_SKIP_CONNECT` | 非空且非 `0` 时跳过连接页（须配合上一行） |
-| `CM_E2E_FIXTURES` | Victauri E2E：隐藏窗口并跳过连接页（须 `CM_DESKTOP_SERVE_URL`） |
+| `CM_E2E_FIXTURES` | Victauri E2E：跳过连接页（须 `CM_DESKTOP_SERVE_URL`）；默认还会隐藏窗口 |
+| `CM_E2E_SHOW_WINDOWS` | 非空且非 `0`：即便 `CM_E2E_FIXTURES` 也显示窗口（xvfb E2E 需要） |
 
 ### 1.4 常用开发命令
 

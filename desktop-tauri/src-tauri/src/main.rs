@@ -17,8 +17,18 @@ pub(crate) fn desktop_window_state_flags() -> StateFlags {
 /// 连接页默认建议地址（本机常见 `serve` 端口；用户可改）。
 const DEFAULT_SUGGESTED_SERVE_URL: &str = "http://127.0.0.1:8080/";
 
-/// `CM_E2E_FIXTURES=1` 时隐藏 splash/main，避免 Wayland 桌面在 xvfb 外仍弹窗。
+/// `CM_E2E_FIXTURES=1` 时默认隐藏 splash/main，避免 Wayland 上在 xvfb 外仍弹窗。
+///
+/// WebKitGTK 在 `visible(false)` 时往往不跑页面 JS，Victauri bridge/`eval_js` 会失败
+///（`bridge not responding`）。在 xvfb 内或显式 `CM_E2E_SHOW_WINDOWS=1` 时改为显示
+///（窗口只在虚拟屏上，不打扰本机桌面）。
 pub(crate) fn e2e_hide_app_windows() -> bool {
+    if std::env::var("CM_E2E_SHOW_WINDOWS").is_ok_and(|v| !v.is_empty() && v != "0") {
+        return false;
+    }
+    if std::env::var("VICTAURI_INSIDE_XVFB").is_ok_and(|v| !v.is_empty() && v != "0") {
+        return false;
+    }
     std::env::var("CM_E2E_FIXTURES").is_ok_and(|v| !v.is_empty() && v != "0")
 }
 

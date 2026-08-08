@@ -13,30 +13,43 @@ use victauri_test::locator::Locator;
 
 /// 播种一个本地会话并刷新页面。
 async fn seed_and_goto(client: &mut victauri_test::VictauriClient, session_id: &str) {
+    // eval_js 会 await 返回的 Promise；须 `return fetch(...)` 等 PUT 完成再 reload。
     let _ = client
-        .eval_js(r#"fetch('/user-data/prefs', {
+        .eval_js(
+            r#"return fetch('/user-data/prefs', {
                 method: 'PUT',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({locale:'zh',theme:'light',side_panel_view:'hidden',side_width:280,editor_layout_mode:false,status_bar_visible:true})
-            })"#)
+            }).then(r => r.status)"#,
+        )
         .await;
 
     let _ = client
         .eval_js(&format!(
-            r#"fetch('/user-data/workspaces/current/sessions', {{
+            r#"return fetch('/user-data/workspaces/current/sessions', {{
                 method: 'PUT',
                 headers: {{'Content-Type': 'application/json'}},
                 body: JSON.stringify({{
                     sessions: [{{id:'{session_id}',title:'E2E status',draft:'',messages:[],updated_at:1,pinned:false,starred:false}}],
                     active_session_id: '{session_id}'
                 }})
-            }})"#
+            }}).then(r => r.status)"#
         ))
         .await;
 
     let _ = client.eval_js("location.reload()").await;
     client
-        .wait_for("network_idle", Some(""), Some(10000), Some(500))
+        .wait_for("network_idle", Some(""), Some(15000), Some(500))
+        .await
+        .ok();
+    // 默认 prefs 里 status_bar_visible=false；等服务端 prefs 同步后再断言。
+    client
+        .wait_for(
+            "selector",
+            Some("[data-testid=\"status-bar\"]"),
+            Some(15000),
+            Some(500),
+        )
         .await
         .ok();
 }
