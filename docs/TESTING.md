@@ -18,6 +18,17 @@ pre-commit run --all-files
 bash scripts/check.sh
 ```
 
+## CI（GitHub Actions）
+
+工作流：[`.github/workflows/ci.yml`](../.github/workflows/ci.yml)
+
+- `scripts/check-no-main-path.sh`：禁止 path 回主仓
+- `scripts/check.sh`：fmt + clippy（desktop / mobile / connect）
+- `cargo test`：connect + desktop（未设 `VICTAURI_E2E` 时 Victauri 套件自动跳过）
+- `cargo check`：mobile
+
+Victauri 全量 E2E **不**进默认 CI（需本机/`PATH` 中的 `serve` + WebView）；见下节。
+
 ## Victauri（Desktop 壳 E2E）
 
 ```bash
@@ -27,6 +38,8 @@ REAL_LLM_E2E=1 ./scripts/victauri-e2e.sh real_llm
 ```
 
 `serve` 二进制解析顺序：`CM_DESKTOP_BACKEND_BIN` → `PATH` 中的 `crabmate` → 同级 `../crabmate_agent/target/debug/crabmate`（仅本地双轨）。正式验收应钉已发布/`PATH` 中的 `serve`。
+
+脚本在构建前会**临时**写入 `victauri:default` capability（JS bridge 必需），退出时恢复；**勿**把该权限长期留在无 `--features victauri` 的 `capabilities/default.json`（否则普通 `cargo check` 会失败）。
 
 ## 人工壳冒烟
 

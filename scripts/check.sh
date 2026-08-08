@@ -4,6 +4,9 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+echo "[check] forbid path deps back to Server monorepo"
+bash "$ROOT/scripts/check-no-main-path.sh"
+
 echo "[check] cargo fmt (desktop + mobile + connect)"
 (cd desktop-tauri/src-tauri && cargo fmt --all -- --check)
 (cd mobile-tauri/src-tauri && cargo fmt --all -- --check)

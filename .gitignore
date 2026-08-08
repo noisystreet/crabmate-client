@@ -47,3 +47,6 @@ mobile-tauri/src-tauri/gen/android/app/key.properties
 # Agent 草稿（勿提交）
 ########################
 agent_space/
+
+# local tauri/app data
+**/.crabmate/

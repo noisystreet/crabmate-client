@@ -38,10 +38,11 @@
 
 ```bash
 pre-commit run --all-files   # 提交前必跑（见 .cursor/rules/pre-commit-before-commit.mdc）
-bash scripts/check.sh        # 无 pre-commit 时的最小替代
+bash scripts/check.sh        # 无 pre-commit 时的最小替代（含 check-no-main-path）
+bash scripts/check-no-main-path.sh
 bash scripts/sync-tauri-connect-page.sh
 cd desktop-tauri/src-tauri && cargo check
-./scripts/victauri-e2e.sh all   # 需可用的 crabmate serve 二进制
+./scripts/victauri-e2e.sh all   # 需可用的 crabmate serve 二进制；默认不进 CI
 ```
 
 ## Documentation Rules
@@ -51,7 +52,8 @@ cd desktop-tauri/src-tauri && cargo check
 | 壳用户可见行为 / 启动流程 | 本仓 `README.md`、`desktop-tauri/README.md` 或 `mobile-tauri/README.md` |
 | 壳架构 / 生命周期 / 连接模型 | 本仓 `docs/design/tauri_gui_mvp_design.md` |
 | 壳人工冒烟步骤 | 本仓 `docs/design/shell_smoke_runbook.md` |
-| Victauri / pre-commit 命令 | 本仓 `docs/TESTING.md` |
+| Victauri / pre-commit / CI 命令 | 本仓 `docs/TESTING.md` |
+| 契约钉 tag | 本仓 `docs/design/contract_pin.md`；策略权威在主仓 |
 | SSE / CORS / Bearer / API 基址 / 契约 semver | **Server 主仓** `docs/`；本仓只加链接 |
 | 路径 A 进度勾选 | 主仓 `docs/design/client_shell_split_todo.md` |
 

@@ -1,0 +1,58 @@
+# crabmate-client：壳 + connect 门禁（不含 Victauri 全量 E2E、不含 Server frontend）
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: check (fmt · clippy · no-main-path · test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force 2>/dev/null || true
+
+      - name: Install system deps (OpenSSL / libssh2 / libgtk-3 / libwebkit2gtk / libappindicator)
+        run: |
+          sudo apt-get update && sudo apt-get install -y \
+            libssl-dev libssh2-1-dev \
+            libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            desktop-tauri/src-tauri
+            mobile-tauri/src-tauri
+            crates/crabmate-connect
+
+      - name: Forbid path deps back to Server monorepo
+        run: bash scripts/check-no-main-path.sh
+
+      - name: scripts/check.sh (fmt + clippy)
+        run: bash scripts/check.sh
+
+      - name: cargo test (connect)
+        run: cargo test
+        working-directory: crates/crabmate-connect
+
+      - name: cargo test (desktop; Victauri auto-skip)
+        run: cargo test --no-fail-fast
+        working-directory: desktop-tauri/src-tauri
+
+      - name: cargo check (mobile)
+        run: cargo check --tests
+        working-directory: mobile-tauri/src-tauri

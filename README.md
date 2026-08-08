@@ -14,7 +14,8 @@
 ├── crates/crabmate-connect/   # 连接页逻辑（本仓 path；勿再 path 回主仓）
 ├── desktop-tauri/             # Desktop Linux（Tauri 2）
 ├── mobile-tauri/              # Android（Tauri 2）
-└── scripts/                   # 连接页同步等
+├── scripts/                   # check / connect 同步 / Victauri
+└── .github/workflows/         # CI（fmt · clippy · test；不含全量 Victauri）
 ```
 
 ## 与主仓关系（过渡）
@@ -23,7 +24,7 @@
 |----|------|
 | 壳 + connect | **本仓**维护与发版 |
 | 业务 UI（`frontend/`） | 仍在主仓；壳默认导航到远程 `serve` 托管的 UI |
-| 契约 crate | 主仓发布；钉 `client-contract-vX.Y.Z`（见上文档） |
+| 契约 crate | 主仓发布；钉 `client-contract-vX.Y.Z`（见 [contract_pin.md](docs/design/contract_pin.md)） |
 | 主仓同树副本 | Phase 4 前可短期双轨；**禁止**本仓 `path = "../crabmate_agent/..."` |
 
 路径 A 终点：本仓自带业务 UI（或依赖版本化 UI 产物）+ API 基址连 `serve`。
@@ -33,11 +34,12 @@
 | 文档 | 内容 |
 |------|------|
 | [AGENTS.md](./AGENTS.md) | Agent 约束、命令、文档同步规则 |
-| [docs/TESTING.md](./docs/TESTING.md) | pre-commit / Victauri |
+| [docs/TESTING.md](./docs/TESTING.md) | pre-commit / Victauri / CI |
 | [docs/design/tauri_gui_mvp_design.md](./docs/design/tauri_gui_mvp_design.md) | 壳架构（路径 A） |
 | [docs/design/shell_smoke_runbook.md](./docs/design/shell_smoke_runbook.md) | Desktop/Android 人工冒烟 |
+| [docs/design/contract_pin.md](./docs/design/contract_pin.md) | 契约 git tag 钉法 |
 
-提交前：`pre-commit run --all-files` 或 `bash scripts/check.sh`。
+提交前：`pre-commit run --all-files` 或 `bash scripts/check.sh`。CI 等价：`.github/workflows/ci.yml`。
 
 ## 快速开始（Desktop）
 

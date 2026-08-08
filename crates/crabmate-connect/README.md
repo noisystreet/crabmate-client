@@ -7,7 +7,8 @@
 ## 版本与钉依赖
 
 Server 侧契约发版策略（`api-contract` / `sse-protocol`）：  
-[client_contract_versioning.md](https://github.com/noisystreet/CrabMate/blob/main/docs/design/client_contract_versioning.md)
+[client_contract_versioning.md](https://github.com/noisystreet/CrabMate/blob/main/docs/design/client_contract_versioning.md)  
+本仓钉法摘要：[contract_pin.md](../../docs/design/contract_pin.md)
 
 - Crate **`version`**：本目录 `Cargo.toml`（semver）
 - **`publish = false`**：随本仓发版；不强制 crates.io
