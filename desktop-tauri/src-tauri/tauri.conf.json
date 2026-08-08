@@ -5,7 +5,7 @@
   "identifier": "com.crabmate.desktop",
   "build": {
     "beforeDevCommand": "bash ./scripts/prepare-sidecar.sh",
-    "beforeBuildCommand": "bash ./scripts/prepare-sidecar.sh",
+    "beforeBuildCommand": "bash ./scripts/before-desktop-build.sh",
     "frontendDist": "../dist"
   },
   "app": {

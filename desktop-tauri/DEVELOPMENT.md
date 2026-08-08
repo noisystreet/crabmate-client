@@ -66,7 +66,7 @@ cargo run -- serve
 cd desktop-tauri/src-tauri && cargo tauri dev
 ```
 
-发布构建：**`cargo tauri build`**（**`beforeBuildCommand`** 会执行 **`prepare-sidecar.sh`**，仅同步壳静态资源 / 可选 `frontend/dist`，**不**再打包 sidecar 二进制）。
+发布构建：**`cargo tauri build`** / **`make desktop-release`**（**`beforeBuildCommand`** → **`before-desktop-build.sh`**：默认 **`trunk build --release`**（需 **wasm-opt**）+ **`prepare-sidecar.sh`**，并校验 WASM 非 debug 体积；**不**再打包 sidecar 二进制）。CI 可用 **`CM_PREPARE_SKIP_FRONTEND=1`** 跳过 UI。
 
 ### 1.5 托盘、窗口与单实例
 
@@ -197,7 +197,7 @@ export no_proxy=127.0.0.1,localhost
 
 发布前建议最少检查：
 
-- **前端与壳同次构建**：`cd frontend && trunk build --release`；`bash desktop-tauri/scripts/prepare-sidecar.sh`（同步 `connect`/`splash` 与可选 `frontend/dist`）
+- **前端与壳同次构建**：**`make desktop-release`**（或 `cargo tauri build`）会经 `before-desktop-build.sh` 执行 **`trunk build --release`** 再同步 `frontend/dist`；勿只依赖先前的 `make frontend`（debug）产物
 - **桌面 `.deb` 不再内嵌 `crabmate` sidecar**；用户需另装 CLI/`serve` 或连远程
 - 安装后 **`/usr/share/crabmate/frontend/dist`**（若仍映射进包）可供本机 `serve` 经 **`CM_WEB_STATIC_DIR`** 使用
 - 冷启动：先起 `serve`，再开壳，连接页可连通
@@ -207,7 +207,7 @@ export no_proxy=127.0.0.1,localhost
 `tauri.conf.json`：
 
 - `productName` = **`crabmate-desktop`** → 产物 `crabmate-desktop_*.deb`（`Package: crabmate-desktop`）
-- `beforeBuildCommand` / `beforeDevCommand` 调用 `desktop-tauri/scripts/prepare-sidecar.sh`
+- `beforeBuildCommand` → `desktop-tauri/scripts/before-desktop-build.sh`；`beforeDevCommand` → `prepare-sidecar.sh`
 - **无** `bundle.externalBin`
 - `bundle.targets` 仅 `deb`
 
@@ -216,7 +216,8 @@ export no_proxy=127.0.0.1,localhost
 ```bash
 # 同机需 CLI/serve 时：在 Server 仓（../crabmate_agent）make package / cargo deb
 cd /path/to/crabmate-client
-make frontend
 make desktop-release
 # → desktop-tauri/src-tauri/target/release/bundle/deb/crabmate-desktop_*.deb
+# 本机 serve 请指向安装后的 UI，例如：
+#   CM_WEB_STATIC_DIR=/usr/share/crabmate/frontend/dist crabmate serve …
 ```

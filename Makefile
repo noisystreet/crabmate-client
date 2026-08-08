@@ -36,11 +36,11 @@ help:
 	@echo ""
 	@echo "构建："
 	@echo "  make frontend            trunk build（业务 UI → frontend/dist）"
-	@echo "  make frontend-release    trunk build --release"
+	@echo "  make frontend-release    trunk build --release（需 wasm-opt）"
 	@echo "  make prepare-sidecar     同步 connect/splash（及 frontend dist）到 desktop-tauri/dist"
 	@echo "  make sync-connect        同步连接页到 desktop/mobile dist"
 	@echo "  make desktop             桌面 debug 安装包（需 cargo-tauri ^2）"
-	@echo "  make desktop-release     桌面 release .deb（默认 targets=deb）"
+	@echo "  make desktop-release     桌面 release .deb（自动 trunk --release + WASM 体积门禁）"
 	@echo "  make desktop-bin-release 仅 release 二进制（不打 deb，较快）"
 	@echo "  make desktop-dev         cargo tauri dev（请先自行启动 serve）"
 	@echo "  make apk                 Android APK（默认不建 frontend）"
@@ -88,7 +88,9 @@ frontend: _require_trunk
 frontend-release: _require_trunk
 	rustup target add wasm32-unknown-unknown 2>/dev/null || true
 	@command -v wasm-opt >/dev/null 2>&1 || { \
-		echo "警告: 未找到 wasm-opt。trunk build --release 会产出空 .wasm 文件。建议: cargo install wasm-opt" >&2; \
+		echo "错误: 未找到 wasm-opt。trunk build --release 会产出空 .wasm。" >&2; \
+		echo "  请执行: cargo install wasm-opt" >&2; \
+		exit 1; \
 	}
 	cd "$(FRONTEND_DIR)" && unset NO_COLOR && trunk build --release
 
@@ -119,7 +121,9 @@ _require_tauri:
 desktop: prepare-sidecar _require_tauri
 	cd "$(TAURI_DIR)" && $(CARGO) tauri build --debug
 
-desktop-release: prepare-sidecar _require_tauri
+# release .deb：beforeBuildCommand → before-desktop-build.sh（trunk --release + 体积门禁）
+# CI 可设 CM_PREPARE_SKIP_FRONTEND=1 跳过 UI，仅打壳 stub。
+desktop-release: _require_tauri
 	cd "$(TAURI_DIR)" && $(CARGO) tauri build
 
 # CI / 快速验证：不跑 bundler

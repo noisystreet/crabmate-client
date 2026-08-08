@@ -37,9 +37,36 @@ elif [[ -n "${dist_src}" && -f "${dist_src}/index.html" ]]; then
   rm -rf "${dist_dest}"
   cp -a "${dist_src}" "${dist_dest}"
   echo "synced frontend dist (${dist_src}) -> ${dist_dest}"
+  if [[ "${CM_PREPARE_REQUIRE_OPTIMIZED_WASM:-0}" == "1" || "${CM_PREPARE_REQUIRE_OPTIMIZED_WASM:-}" == "true" ]]; then
+    mapfile -t wasm_found < <(find "${dist_dest}" -type f -name '*.wasm' 2>/dev/null || true)
+    if [[ "${#wasm_found[@]}" -eq 0 ]]; then
+      echo "error: no .wasm under ${dist_dest} after sync (release UI required)" >&2
+      exit 1
+    fi
+    # debug trunk 产物常 >100MB；release+wasm-opt 约数 MB。40MiB 作硬上限。
+    max_bytes=$((40 * 1024 * 1024))
+    for w in "${wasm_found[@]}"; do
+      sz=$(wc -c <"${w}" | tr -d ' ')
+      if [[ "${sz}" -eq 0 ]]; then
+        echo "error: empty WASM ${w} (wasm-opt missing?)" >&2
+        exit 1
+      fi
+      if [[ "${sz}" -gt "${max_bytes}" ]]; then
+        echo "error: ${w} is ${sz} bytes — looks like a debug trunk build" >&2
+        echo "  run: make frontend-release   # then re-run desktop-release" >&2
+        echo "  or:  ensure before-desktop-build.sh ran trunk build --release" >&2
+        exit 1
+      fi
+    done
+    echo "ok: release WASM size check passed (${#wasm_found[@]} file(s))"
+  fi
 else
   echo "note: no frontend dist found (ok for shell-only; connect/splash still copied)" >&2
-  echo "  run: make frontend   # or set CRABMATE_FRONTEND_DIST" >&2
+  echo "  run: make frontend-release   # or set CRABMATE_FRONTEND_DIST" >&2
+  if [[ "${CM_PREPARE_REQUIRE_OPTIMIZED_WASM:-0}" == "1" || "${CM_PREPARE_REQUIRE_OPTIMIZED_WASM:-}" == "true" ]]; then
+    echo "error: release desktop build requires frontend dist" >&2
+    exit 1
+  fi
 fi
 
 # 启动画面

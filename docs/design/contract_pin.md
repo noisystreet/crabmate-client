@@ -22,7 +22,7 @@
 | 契约 `tag` | **`client-contract-v0.1.0`**（主仓 `c244ebb1`） |
 | lock | 提交 `frontend/Cargo.lock` |
 
-壳打包 UI 同步：`prepare-sidecar` 默认本仓 `frontend/dist`；`CM_PREPARE_SKIP_FRONTEND=1` 或 `CRABMATE_FRONTEND_DIST=-` 跳过；同级主仓回落需 `CRABMATE_ALLOW_SIBLING_FRONTEND=1`。
+壳打包 UI 同步：`make desktop-release` / `before-desktop-build.sh` 默认 **`trunk build --release`** 再同步本仓 `frontend/dist`（拒绝 debug 大 WASM）；`CM_PREPARE_SKIP_FRONTEND=1` 或 `CRABMATE_FRONTEND_DIST=-` 跳过；同级主仓回落需 `CRABMATE_ALLOW_SIBLING_FRONTEND=1`。
 
 ## 钉主仓契约
 
