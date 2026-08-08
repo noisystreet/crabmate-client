@@ -50,8 +50,9 @@ Victauri 全量 E2E **不**进默认 CI（需本机/`PATH` 中的 `serve` + WebV
 本地 UI / 打包：
 
 ```bash
-make frontend                 # trunk → frontend/dist
-make desktop-release          # 完整 .deb（默认同步本仓 frontend/dist）
+make frontend                 # trunk debug → frontend/dist（开发迭代）
+make frontend-release         # trunk --release（需 wasm-opt；~数 MB WASM）
+make desktop-release          # 完整 .deb（beforeBuild 会跑 trunk --release + 体积门禁）
 make desktop-bin-release      # 仅二进制
 ```
 

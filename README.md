@@ -38,7 +38,7 @@ make frontend-check     # wasm32 cargo check
 make check              # 等同 scripts/check.sh（含 frontend）
 make test
 make desktop-dev        # 需已装 cargo-tauri ^2；另开终端跑 serve
-make desktop-release    # 产出 crabmate-desktop_*.deb（默认同步本仓 frontend/dist）
+make desktop-release    # 产出 crabmate-desktop_*.deb（自动 trunk --release UI，勿用 debug dist）
 make desktop-bin-release
 make apk                # Android；默认不建 frontend
 make clean

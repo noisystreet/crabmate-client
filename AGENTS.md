@@ -45,7 +45,7 @@ make frontend                # trunk → frontend/dist
 make check                   # 或 pre-commit run --all-files（含 frontend wasm）
 make test
 make desktop-dev
-make desktop-release         # .deb 打包
+make desktop-release         # .deb（自动 trunk --release UI）
 bash scripts/check-no-main-path.sh
 bash scripts/lizard-rust.sh
 ./scripts/victauri-e2e.sh all   # 需可用的 crabmate serve 二进制；默认不进 CI

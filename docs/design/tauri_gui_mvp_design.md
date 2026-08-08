@@ -46,6 +46,7 @@ MVP 历史验收（部分已废弃）：
 | `desktop-tauri/src-tauri/src/main.rs` | 不 spawn `serve`；连接页或 E2E 直连 `CM_DESKTOP_SERVE_URL` |
 | `desktop-tauri/src-tauri/src/desktop_lifecycle.rs` | 单实例、托盘、最小化隐藏 |
 | `desktop-tauri/scripts/prepare-sidecar.sh` | 同步 connect/splash；默认本仓 `frontend/dist`；`CM_PREPARE_SKIP_FRONTEND=1` 可跳过 |
+| `desktop-tauri/scripts/before-desktop-build.sh` | release 构建：`trunk --release` + prepare；拒绝 debug 大 WASM |
 | `frontend/` | 业务 UI（Leptos CSR）；契约 git `rev`/`tag` |
 | `mobile-tauri/` | Android 薄壳 |
 | `crates/crabmate-connect/` | 探测 / Bearer / 钥匙串 |
