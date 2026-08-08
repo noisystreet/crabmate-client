@@ -1,7 +1,9 @@
 # https://pre-commit.com
 # 安装：pip install pre-commit && pre-commit install
-#   另：pre-commit install --hook-type commit-msg
-# 手动：pre-commit run --all-files
+#   （本配置含 default_install_hook_types，会同时安装 pre-commit + commit-msg；旧环境可补：pre-commit install --hook-type commit-msg）
+# 手动：pre-commit run --all-files（不含 commit-msg）
+# 复杂度脚本需：pip install lizard
+# 不含：Server frontend wasm、主 workspace clippy、Playwright e2e（留在主仓）
 default_install_hook_types:
   - pre-commit
   - commit-msg
@@ -9,9 +11,98 @@ default_install_hook_types:
 repos:
   - repo: local
     hooks:
-      - id: client-check
-        name: crabmate-client check (fmt + clippy)
-        entry: bash scripts/check.sh
+      - id: check-no-main-path
+        name: forbid path deps back to Server monorepo
+        entry: bash scripts/check-no-main-path.sh
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
+
+      - id: cargo-fmt
+        name: cargo fmt (desktop + mobile + connect)
+        entry: >-
+          bash -c 'cd desktop-tauri/src-tauri && cargo fmt --all -- --check
+          && cd ../../mobile-tauri/src-tauri && cargo fmt --all -- --check
+          && cd ../../crates/crabmate-connect && cargo fmt --all -- --check'
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
+
+      - id: desktop-dist-stubs
+        name: desktop dist stubs for tauri codegen
+        entry: >-
+          bash -c 'mkdir -p desktop-tauri/dist
+          && [[ -f desktop-tauri/dist/index.html ]] || echo "<html></html>" > desktop-tauri/dist/index.html
+          && [[ -f desktop-tauri/dist/splash.html ]] || echo "<html></html>" > desktop-tauri/dist/splash.html
+          && [[ -f desktop-tauri/dist/connect.html ]] || cp crates/crabmate-connect/assets/connect.html desktop-tauri/dist/connect.html'
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
+
+      - id: desktop-clippy
+        name: desktop-tauri clippy (-D warnings)
+        entry: bash -c 'cd desktop-tauri/src-tauri && cargo clippy --all-targets -- -D warnings'
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
+
+      - id: mobile-clippy
+        name: mobile-tauri clippy (-D warnings)
+        entry: bash -c 'cd mobile-tauri/src-tauri && cargo clippy --all-targets -- -D warnings'
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
+
+      - id: connect-clippy
+        name: crabmate-connect clippy (-D warnings)
+        entry: bash -c 'cd crates/crabmate-connect && cargo clippy --all-targets -- -D warnings'
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
+
+      - id: lizard-rust
+        name: lizard complexity (Rust CCN)
+        entry: bash scripts/lizard-rust.sh
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
+
+      - id: fn-param-ratchet
+        name: fn param cap (lizard max params ≤ 9)
+        entry: bash scripts/fn-param-ratchet.sh
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
+
+      - id: fn-nloc-ratchet
+        name: fn nloc + rust file lines (nloc ≤ 200, file ≤ 920)
+        entry: bash scripts/fn-nloc-ratchet.sh
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
+
+      - id: taplo-format
+        name: taplo format (check)
+        entry: >-
+          bash -c 'if command -v taplo >/dev/null 2>&1; then taplo format --check .; else echo "taplo 未安装，跳过"; fi'
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
+
+      - id: taplo-lint
+        name: taplo lint
+        entry: >-
+          bash -c 'if command -v taplo >/dev/null 2>&1; then taplo lint .; else echo "taplo 未安装，跳过"; fi'
         language: system
         pass_filenames: false
         always_run: true
@@ -28,6 +119,7 @@ repos:
       - id: conventional-pre-commit
         stages: [commit-msg]
         args:
+          # 与 .cursor/rules/conventional-commits.mdc 中的 type 对齐
           - build
           - chore
           - ci

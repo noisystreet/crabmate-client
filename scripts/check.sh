@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 无 pre-commit 时的最小检查；与 .pre-commit-config.yaml 中 client-check 一致。
+# 无 pre-commit 时的最小检查；与 .pre-commit-config.yaml 本地钩子对齐（不含 commit-msg / typos）。
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -26,5 +26,18 @@ echo "[check] cargo clippy mobile"
 
 echo "[check] cargo clippy connect"
 (cd crates/crabmate-connect && cargo clippy --all-targets -- -D warnings)
+
+echo "[check] lizard / fn-param / fn-nloc"
+bash "$ROOT/scripts/lizard-rust.sh"
+bash "$ROOT/scripts/fn-param-ratchet.sh"
+bash "$ROOT/scripts/fn-nloc-ratchet.sh"
+
+if command -v taplo >/dev/null 2>&1; then
+  echo "[check] taplo format + lint"
+  taplo format --check .
+  taplo lint .
+else
+  echo "[check] taplo 未安装，跳过"
+fi
 
 echo "[check] ok"
