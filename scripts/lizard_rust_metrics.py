@@ -5,6 +5,7 @@
   - crates/<crate>
   - desktop-tauri（desktop-tauri/src-tauri/src）
   - mobile-tauri（mobile-tauri/src-tauri/src）
+  - frontend（frontend/src）
 
 各模块上限见 **`scripts/lizard_module_ccn_caps.toml`**（`[modules]` + `default_ccn_max`）。
 全局天花板 **`global_ccn_ceiling`**（默认 15）：配置中的模块 cap 不得高于此值。
@@ -36,6 +37,7 @@ RUST_ROOTS = [
     ROOT / "crates",
     ROOT / "desktop-tauri" / "src-tauri" / "src",
     ROOT / "mobile-tauri" / "src-tauri" / "src",
+    ROOT / "frontend" / "src",
 ]
 CAPS_PATH = ROOT / "scripts" / "lizard_module_ccn_caps.toml"
 
@@ -79,6 +81,8 @@ def module_id_for(path: Path) -> str:
         return "desktop-tauri"
     if parts[0] == "mobile-tauri":
         return "mobile-tauri"
+    if parts[0] == "frontend":
+        return "frontend"
     return str(Path(*parts[:2]) if len(parts) >= 2 else rel)
 
 

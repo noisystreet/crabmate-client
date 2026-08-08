@@ -7,7 +7,16 @@ cd "$ROOT"
 # 匹配典型误用：相对 path 指向 crabmate_agent / CrabMate crates，或绝对 path 回主仓。
 PATTERN='path\s*=\s*"[^"]*(crabmate_agent|CrabMate/crates|/CrabMate/)'
 
-hits="$(rg -n --glob '**/Cargo.toml' -e "$PATTERN" . || true)"
+hits=""
+if command -v rg >/dev/null 2>&1; then
+  hits="$(rg -n --glob '**/Cargo.toml' -e "$PATTERN" . || true)"
+elif command -v grep >/dev/null 2>&1; then
+  hits="$(grep -Rn --include='Cargo.toml' -E "$PATTERN" . || true)"
+else
+  echo "error: check-no-main-path 需要 rg 或 grep（CI 请 apt install ripgrep）" >&2
+  exit 1
+fi
+
 if [[ -n "${hits}" ]]; then
   echo "error: 发现 path 依赖回 Server monorepo（禁止）：" >&2
   echo "${hits}" >&2

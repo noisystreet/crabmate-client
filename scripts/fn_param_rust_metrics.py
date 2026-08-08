@@ -17,6 +17,7 @@ RUST_ROOTS = (
     ROOT / "crates",
     ROOT / "desktop-tauri" / "src-tauri" / "src",
     ROOT / "mobile-tauri" / "src-tauri" / "src",
+    ROOT / "frontend" / "src",
 )
 MAX_PARAM_CAP = 9
 

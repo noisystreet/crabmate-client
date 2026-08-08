@@ -7,10 +7,11 @@ cd "$ROOT"
 echo "[check] forbid path deps back to Server monorepo"
 bash "$ROOT/scripts/check-no-main-path.sh"
 
-echo "[check] cargo fmt (desktop + mobile + connect)"
+echo "[check] cargo fmt (desktop + mobile + connect + frontend)"
 (cd desktop-tauri/src-tauri && cargo fmt --all -- --check)
 (cd mobile-tauri/src-tauri && cargo fmt --all -- --check)
 (cd crates/crabmate-connect && cargo fmt --all -- --check)
+(cd frontend && cargo fmt --all -- --check)
 
 echo "[check] ensure desktop dist stubs for tauri codegen"
 mkdir -p desktop-tauri/dist
@@ -26,6 +27,13 @@ echo "[check] cargo clippy mobile"
 
 echo "[check] cargo clippy connect"
 (cd crates/crabmate-connect && cargo clippy --all-targets -- -D warnings)
+
+echo "[check] frontend wasm check"
+rustup target add wasm32-unknown-unknown 2>/dev/null || true
+(cd frontend && cargo check --target wasm32-unknown-unknown --all-targets)
+
+echo "[check] cargo clippy frontend (wasm32)"
+(cd frontend && cargo clippy --target wasm32-unknown-unknown --all-targets --all-features -- -D warnings)
 
 echo "[check] lizard / fn-param / fn-nloc"
 bash "$ROOT/scripts/lizard-rust.sh"

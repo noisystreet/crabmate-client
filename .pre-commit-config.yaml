@@ -3,7 +3,7 @@
 #   （本配置含 default_install_hook_types，会同时安装 pre-commit + commit-msg；旧环境可补：pre-commit install --hook-type commit-msg）
 # 手动：pre-commit run --all-files（不含 commit-msg）
 # 复杂度脚本需：pip install lizard
-# 不含：Server frontend wasm、主 workspace clippy、Playwright e2e（留在主仓）
+# 不含：Victauri 全量 E2E、Playwright（主仓）；含本仓 frontend wasm / clippy
 default_install_hook_types:
   - pre-commit
   - commit-msg
@@ -20,11 +20,12 @@ repos:
         stages: [pre-commit]
 
       - id: cargo-fmt
-        name: cargo fmt (desktop + mobile + connect)
+        name: cargo fmt (desktop + mobile + connect + frontend)
         entry: >-
           bash -c 'cd desktop-tauri/src-tauri && cargo fmt --all -- --check
           && cd ../../mobile-tauri/src-tauri && cargo fmt --all -- --check
-          && cd ../../crates/crabmate-connect && cargo fmt --all -- --check'
+          && cd ../../crates/crabmate-connect && cargo fmt --all -- --check
+          && cd ../../frontend && cargo fmt --all -- --check'
         language: system
         pass_filenames: false
         always_run: true
@@ -61,6 +62,22 @@ repos:
       - id: connect-clippy
         name: crabmate-connect clippy (-D warnings)
         entry: bash -c 'cd crates/crabmate-connect && cargo clippy --all-targets -- -D warnings'
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
+
+      - id: frontend-wasm-check
+        name: frontend wasm check
+        entry: bash -c 'rustup target add wasm32-unknown-unknown 2>/dev/null || true; cd frontend && cargo check --target wasm32-unknown-unknown --all-targets'
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
+
+      - id: frontend-clippy
+        name: frontend clippy wasm32 (-D warnings)
+        entry: bash -c 'rustup target add wasm32-unknown-unknown 2>/dev/null || true; cd frontend && cargo clippy --target wasm32-unknown-unknown --all-targets --all-features -- -D warnings'
         language: system
         pass_filenames: false
         always_run: true

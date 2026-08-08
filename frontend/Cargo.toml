@@ -1,0 +1,86 @@
+[package]
+name = "crabmate-web"
+version = "0.1.0"
+edition = "2024"
+description = "CrabMate Web UI (Leptos CSR + WASM)"
+# 契约钉版本：开发期用 rev；主仓打 client-contract-v* 后改为 tag（见 docs/design/contract_pin.md）
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Server monorepo 契约 crates（禁止 path 回本地 crabmate_agent）
+crabmate-chat-export = { git = "https://github.com/noisystreet/CrabMate", rev = "eb0048bfc802b6dcb4048200d495156e978bbc1a", package = "crabmate-chat-export" }
+crabmate-api-contract = { git = "https://github.com/noisystreet/CrabMate", rev = "eb0048bfc802b6dcb4048200d495156e978bbc1a", package = "crabmate-api-contract" }
+crabmate-display-rules = { git = "https://github.com/noisystreet/CrabMate", rev = "eb0048bfc802b6dcb4048200d495156e978bbc1a", package = "crabmate-display-rules" }
+crabmate-tool-card = { git = "https://github.com/noisystreet/CrabMate", rev = "eb0048bfc802b6dcb4048200d495156e978bbc1a", package = "crabmate-tool-card" }
+crabmate-types = { git = "https://github.com/noisystreet/CrabMate", rev = "eb0048bfc802b6dcb4048200d495156e978bbc1a", package = "crabmate-types" }
+crabmate-sse-protocol = { git = "https://github.com/noisystreet/CrabMate", rev = "eb0048bfc802b6dcb4048200d495156e978bbc1a", package = "crabmate-sse-protocol" }
+crabmate-turn-layout = { git = "https://github.com/noisystreet/CrabMate", rev = "eb0048bfc802b6dcb4048200d495156e978bbc1a", package = "crabmate-turn-layout" }
+ammonia = ">=4.1.4"
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+console_error_panic_hook = "0.1"
+gloo-timers = { version = "0.4", features = ["futures"] }
+js-sys = "0.3"
+leptos = { version = "0.8.17", features = ["csr"] }
+leptos_dom = "0.8.8"
+pulldown-cmark = "0.13"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+urlencoding = "2.1"
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = [
+    "AbortController",
+    "AbortSignal",
+    "Blob",
+    "BlobPropertyBag",
+    "Clipboard",
+    "console",
+    "DataTransfer",
+    "Document",
+    "DomRect",
+    "DomTokenList",
+    "DragEvent",
+    "Element",
+    "Event",
+    "FormData",
+    "File",
+    "FileList",
+    "HashChangeEvent",
+    "Headers",
+    "History",
+    "IntersectionObserver",
+    "IntersectionObserverEntry",
+    "IntersectionObserverInit",
+    "Location",
+    "ResizeObserver",
+    "HtmlAnchorElement",
+    "HtmlElement",
+    "HtmlInputElement",
+    "HtmlDivElement",
+    "HtmlElement",
+    "HtmlTextAreaElement",
+    "KeyboardEvent",
+    "MouseEvent",
+    "Navigator",
+    "Node",
+    "NodeList",
+    "Performance",
+    "PointerEvent",
+    "ReadableStream",
+    "ReadableStreamDefaultReader",
+    "Request",
+    "RequestInit",
+    "RequestMode",
+    "Response",
+    "Selection",
+    "Storage",
+    "Url",
+    "VisualViewport",
+    "WheelEvent",
+    "Window",
+] }
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3"

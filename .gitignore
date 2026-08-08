@@ -29,6 +29,10 @@ Thumbs.db
 desktop-tauri/src-tauri/target/
 mobile-tauri/src-tauri/target/
 crates/crabmate-connect/target/
+frontend/target/
+frontend/dist/
+frontend/node_modules/
+frontend/.trunk/
 desktop-tauri/src-tauri/gen/
 mobile-tauri/src-tauri/gen/schemas/
 desktop-tauri/binaries/
