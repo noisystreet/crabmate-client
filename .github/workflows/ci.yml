@@ -110,12 +110,18 @@ jobs:
       - name: Verify deb package
         run: |
           set -euo pipefail
-          DEB=$(ls desktop-tauri/src-tauri/target/release/bundle/deb/crabmate_*.deb | head -1)
+          DEB=$(ls desktop-tauri/src-tauri/target/release/bundle/deb/crabmate-desktop_*.deb | head -1)
           test -f "$DEB"
           ls -lh "$DEB"
+          # Debian Package 名须与 Server 主仓 crabmate.deb 区分
+          dpkg-deb -I "$DEB" | grep -E '^ Package: crabmate-desktop$'
           dpkg-deb -c "$DEB" | grep -E 'usr/bin/crabmate-desktop$'
-          dpkg-deb -c "$DEB" | grep -E 'usr/share/applications/crabmate.desktop$'
-          dpkg-deb -c "$DEB" | grep -E 'etc/crabmate/config.toml$'
+          dpkg-deb -c "$DEB" | grep -E 'usr/share/applications/crabmate-desktop\.desktop$'
+          # /etc/crabmate 归 Server 包；桌面壳不得占用
+          if dpkg-deb -c "$DEB" | grep -E 'etc/crabmate/'; then
+            echo "error: desktop deb must not ship /etc/crabmate (owned by server package)" >&2
+            exit 1
+          fi
           # 不得再打进 serve sidecar
           if dpkg-deb -c "$DEB" | grep -E 'usr/bin/crabmate$'; then
             echo "error: deb must not contain crabmate serve sidecar" >&2

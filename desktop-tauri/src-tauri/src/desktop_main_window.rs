@@ -9,11 +9,10 @@ use std::time::Duration;
 use tauri::webview::{Color, PageLoadEvent};
 use tauri::{Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 use tauri_plugin_opener::OpenerExt;
-use tauri_plugin_window_state::{StateFlags, WindowExt};
 use url::Url;
 
 use crate::os_theme;
-use crate::{close_splash_window, desktop_window_state_flags, e2e_hide_app_windows};
+use crate::{close_splash_window, e2e_hide_app_windows};
 
 /// 主 UI（连上 `serve` 后）默认逻辑尺寸。
 const MAIN_UI_WIDTH: f64 = 1280.0;
@@ -103,18 +102,39 @@ fn apply_connect_page_geometry(window: &WebviewWindow) {
     let _ = window.center();
 }
 
-fn apply_main_ui_geometry(window: &WebviewWindow) {
-    // 连接页小尺寸可能已写入 window-state；连上后恢复显示器位置，再最大化会话窗。
-    // 不 restore SIZE/MAXIMIZED（连接页会把「未最大化」写脏）。
-    let _ = window.set_resizable(true);
-    let _ = window.restore_state(StateFlags::POSITION);
+fn maximize_main_ui(window: &WebviewWindow) -> bool {
     if let Err(e) = window.maximize() {
         eprintln!("[crabmate-desktop] maximize after connect failed: {e}");
-        let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
-            width: MAIN_UI_WIDTH,
-            height: MAIN_UI_HEIGHT,
-        }));
+        return false;
     }
+    // 未映射时 is_maximized 常为 false；调用方应在 show() 之后再检查。
+    matches!(window.is_maximized(), Ok(true))
+}
+
+fn fill_monitor_work_area_or_default(window: &WebviewWindow) {
+    let _ = window.unmaximize();
+    if let Ok(Some(monitor)) = window.current_monitor() {
+        let area = *monitor.work_area();
+        // 先定位到工作区原点，再设尺寸，避免从小窗中心放大后「沉」到右下。
+        let _ = window.set_position(tauri::Position::Physical(area.position));
+        let _ = window.set_size(tauri::Size::Physical(area.size));
+        return;
+    }
+    let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize {
+        width: MAIN_UI_WIDTH,
+        height: MAIN_UI_HEIGHT,
+    }));
+    let _ = window.center();
+}
+
+/// 会话窗几何：须在窗口 **show 之后**调用（X11/Wayland 上未映射时 maximize/monitor 不可靠）。
+fn apply_main_ui_geometry(window: &WebviewWindow) {
+    let _ = window.set_resizable(true);
+    // 不 restore POSITION：连接页中心坐标被当成会话窗原点时，放大后会偏到右下。
+    if maximize_main_ui(window) {
+        return;
+    }
+    fill_monitor_work_area_or_default(window);
 }
 
 fn finish_create_main_window(
@@ -138,6 +158,7 @@ fn finish_create_main_window(
         .title("CrabMate Desktop")
         .inner_size(width, height)
         .resizable(matches!(mode, MainWindowMode::DirectUi))
+        .maximized(matches!(mode, MainWindowMode::DirectUi))
         .decorations(false)
         .background_color(BOOT_SHELL_BG)
         .visible(false)
@@ -205,13 +226,16 @@ fn finish_create_main_window(
             if !matches!(payload.event(), PageLoadEvent::Finished) {
                 return;
             }
-            // 连接页小窗；连上 serve（或从连接页返回）时切换几何。
+            // 连接页：小窗。会话 UI：已显示则立刻 maximize；尚未 reveal 则等 show 之后。
             if is_connect_page_url(payload.url()) {
                 apply_connect_page_geometry(&window);
-            } else {
+                reveal_main_window_once(&window, &app_on_load, &revealed_on_load);
+            } else if revealed_on_load.load(Ordering::SeqCst) {
                 apply_main_ui_geometry(&window);
+            } else {
+                let _ = window.set_resizable(true);
+                reveal_main_window_once(&window, &app_on_load, &revealed_on_load);
             }
-            reveal_main_window_once(&window, &app_on_load, &revealed_on_load);
         })
         .build()
         .map_err(|e| format!("failed to create main window: {e}"))?;
@@ -222,9 +246,8 @@ fn finish_create_main_window(
             apply_connect_page_geometry(&window);
         }
         MainWindowMode::DirectUi => {
-            if let Err(error) = window.restore_state(desktop_window_state_flags()) {
-                eprintln!("[crabmate-desktop] failed to restore window state: {error}");
-            }
+            // 几何在首次 show 后由 reveal_main_window_once 应用。
+            let _ = window.set_resizable(true);
         }
     }
 
@@ -258,9 +281,13 @@ fn reveal_main_window_once(window: &WebviewWindow, app: &tauri::AppHandle, revea
         if let Err(e) = window.show() {
             eprintln!("[crabmate-desktop] failed to show main window: {e}");
         }
-        // 显示后再居中：未映射时 `center()` 在部分合成器上无效。
-        if on_connect && let Err(e) = window.center() {
-            eprintln!("[crabmate-desktop] failed to center connect window: {e}");
+        // 显示后再居中 / 最大化：未映射时 center/maximize/monitor 在部分合成器上无效。
+        if on_connect {
+            if let Err(e) = window.center() {
+                eprintln!("[crabmate-desktop] failed to center connect window: {e}");
+            }
+        } else {
+            apply_main_ui_geometry(window);
         }
         if let Err(e) = window.set_focus() {
             eprintln!("[crabmate-desktop] failed to focus main window: {e}");

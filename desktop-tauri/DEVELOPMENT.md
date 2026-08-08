@@ -73,8 +73,8 @@ cd desktop-tauri/src-tauri && cargo tauri dev
 - `tauri-plugin-single-instance` 必须在 Builder 插件序列最前注册。第二实例不会执行 `setup`，而是显示并聚焦已有 `main`；主窗口尚未创建时聚焦 `splash`。
 - `src/desktop_lifecycle.rs` 负责托盘和窗口生命周期。托盘菜单含「显示/隐藏」「退出」；Linux 下须使用菜单，Windows/macOS 左键可切换。
 - 关闭 `main` 会正常退出壳进程；**不** kill 用户自行启动的 `serve`。托盘初始化成功时，前端最小化命令改为隐藏窗口。
-- `tauri-plugin-window-state` 仅跟踪稳定标签 `main`，保存/恢复大小、位置和最大化状态；`splash` 在 denylist 中。刻意不恢复 `VISIBLE`。
-- 主窗口先以 `visible(false)` 创建，再在 `show()` 前显式处理几何：闪屏与连接页共用 **480×420**；连上 `serve` 后恢复位置并 **maximize** 会话窗。E2E 直连用完整 `restore_state`。
+- `tauri-plugin-window-state` 仅跟踪稳定标签 `main`，保存大小、位置和最大化状态；`splash` 在 denylist 中。刻意不恢复 `VISIBLE`。会话窗在 **show 之后**默认 maximize（不 restore 连接页 POSITION，以免放大后偏到右下）；失败则铺满当前显示器工作区。
+- 主窗口先以 `visible(false)` 创建，再在 `show()` 前/后显式处理几何：闪屏与连接页共用 **480×420**；连上 `serve`（或 DirectUi）后默认最大化。
 - 托盘「退出」与 `quit_desktop_app` 共用 `request_desktop_quit`（直接 `app.exit(0)`）。
 
 手动验收：
@@ -84,7 +84,7 @@ cd desktop-tauri/src-tauri && cargo tauri dev
 3. 再次启动同一桌面二进制，确认没有第二个窗口，原窗口被唤醒。
 4. 关闭主窗口，确认桌面进程退出且**不影响**已独立运行的 `serve`。
 5. 未启动 `serve` 时打开壳，连接页探测失败应有明确提示。
-6. 调整主窗口大小、位置、最大化状态后退出；重新启动确认状态恢复。
+6. 调整主窗口大小、位置后退出；重新启动并连接后确认会话窗仍默认最大化。
 
 ## 2. 常见故障
 
@@ -145,7 +145,7 @@ curl -sS --noproxy '*' http://127.0.0.1:8080/health
 
 在 **Wayland** 会话里，GTK/WebKitGTK（Tauri 嵌入页）对输入法支持仍可能不完整。若设置 **`GDK_BACKEND=x11`** 后正常，说明走 **X11（XWayland）** 可规避。
 
-打包的 **deb** 在 `bundle > linux > deb > files` 中**覆盖** `usr/share/applications/crabmate.desktop`（见 `src-tauri/bundle/deb/crabmate.desktop`），在 `Exec=` 中注入 `GDK_BACKEND=x11`。同一段映射里还会把默认配置打入安装包（`/etc/crabmate/…`）。
+打包的 **deb** 包名是 **`crabmate-desktop`**（`productName`，与 Server 主仓 **`crabmate`** `.deb` 区分）。`bundle > linux > deb > files` 覆盖 `usr/share/applications/crabmate-desktop.desktop`（见 `src-tauri/bundle/deb/crabmate-desktop.desktop`），在 `Exec=` 中注入 `GDK_BACKEND=x11`。**不**打包 `/etc/crabmate/`（该路径归 Server 包）。
 
 本地调试可：
 
@@ -206,6 +206,7 @@ export no_proxy=127.0.0.1,localhost
 
 `tauri.conf.json`：
 
+- `productName` = **`crabmate-desktop`** → 产物 `crabmate-desktop_*.deb`（`Package: crabmate-desktop`）
 - `beforeBuildCommand` / `beforeDevCommand` 调用 `desktop-tauri/scripts/prepare-sidecar.sh`
 - **无** `bundle.externalBin`
 - `bundle.targets` 仅 `deb`
@@ -213,9 +214,9 @@ export no_proxy=127.0.0.1,localhost
 建议：
 
 ```bash
-cd /path/to/crabmate_agent
-cargo build --release   # 若需同机安装 CLI/serve
-cd frontend && trunk build --release && cd ..
-cd desktop-tauri/src-tauri
-cargo tauri build
+# 同机需 CLI/serve 时：在 Server 仓（../crabmate_agent）make package / cargo deb
+cd /path/to/crabmate-client
+make frontend
+make desktop-release
+# → desktop-tauri/src-tauri/target/release/bundle/deb/crabmate-desktop_*.deb
 ```
