@@ -32,13 +32,34 @@ pub(crate) struct ShellUiInitialSnapshot {
     pub session_chat_font_size: f64,
 }
 
-/// 进入壳层后按端调整工作区侧栏：移动/窄屏折叠；桌面保留服务端 prefs（含用户主动隐藏）。
+/// 按端决定进入壳层后的工作区侧栏视图（纯函数，便于单测）。
 ///
-/// 桌面与移动共用 `/user-data/prefs`：移动端写入的 `none` 可能带到桌面，用户可在桌面再展开并持久化。
+/// - 移动 / 窄屏：强制收起（仅右缘左划或显式操作再开）
+/// - 宽屏（桌面 Tauri / 浏览器）：`None` 时展开为 Workspace（不沿用移动端写入的 `none`）
+#[must_use]
+pub(crate) fn platform_side_panel_on_entry(
+    narrow_or_mobile: bool,
+    current: SidePanelView,
+) -> SidePanelView {
+    if narrow_or_mobile {
+        return SidePanelView::None;
+    }
+    if matches!(current, SidePanelView::None) {
+        return SidePanelView::Workspace;
+    }
+    current
+}
+
+/// 进入壳层后按端调整工作区侧栏。
 pub(crate) fn apply_platform_side_panel_on_entry(app: &AppSignals) {
     let narrow = app.shell_ui.is_narrow_viewport.get_untracked();
-    if crate::mobile_remote::mobile_remote_client() || narrow {
-        app.shell_ui.side_panel_view.set(SidePanelView::None);
+    let narrow_or_mobile = crate::mobile_remote::mobile_remote_client() || narrow;
+    let next = platform_side_panel_on_entry(
+        narrow_or_mobile,
+        app.shell_ui.side_panel_view.get_untracked(),
+    );
+    if next != app.shell_ui.side_panel_view.get_untracked() {
+        app.shell_ui.side_panel_view.set(next);
     }
 }
 
@@ -181,5 +202,39 @@ pub(crate) fn apply_narrow_viewport_dom_flag(narrow: bool) {
         let _ = root.set_attribute("data-narrow-viewport", "");
     } else {
         let _ = root.remove_attribute("data-narrow-viewport");
+    }
+}
+
+#[cfg(test)]
+mod platform_side_panel_tests {
+    use super::platform_side_panel_on_entry;
+    use crate::app_prefs::SidePanelView;
+
+    #[test]
+    fn mobile_or_narrow_forces_collapsed() {
+        assert_eq!(
+            platform_side_panel_on_entry(true, SidePanelView::Workspace),
+            SidePanelView::None
+        );
+        assert_eq!(
+            platform_side_panel_on_entry(true, SidePanelView::Tasks),
+            SidePanelView::None
+        );
+    }
+
+    #[test]
+    fn wide_viewport_expands_hidden_prefs() {
+        assert_eq!(
+            platform_side_panel_on_entry(false, SidePanelView::None),
+            SidePanelView::Workspace
+        );
+        assert_eq!(
+            platform_side_panel_on_entry(false, SidePanelView::Tasks),
+            SidePanelView::Tasks
+        );
+        assert_eq!(
+            platform_side_panel_on_entry(false, SidePanelView::DebugConsole),
+            SidePanelView::DebugConsole
+        );
     }
 }
