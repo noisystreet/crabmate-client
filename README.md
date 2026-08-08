@@ -15,7 +15,7 @@
 ├── desktop-tauri/             # Desktop Linux（Tauri 2）
 ├── mobile-tauri/              # Android（Tauri 2）
 ├── scripts/                   # check / connect 同步 / Victauri
-└── .github/workflows/         # CI（fmt · clippy · test；不含全量 Victauri）
+└── .github/workflows/         # CI（check + desktop deb 打包门禁）
 ```
 
 ## 与主仓关系（过渡）
@@ -29,6 +29,19 @@
 
 路径 A 终点：本仓自带业务 UI（或依赖版本化 UI 产物）+ API 基址连 `serve`。
 
+## Makefile
+
+```bash
+make help
+make check              # 等同 scripts/check.sh
+make test
+make desktop-dev        # 需已装 cargo-tauri ^2；另开终端跑 serve
+make desktop-release    # 产出 .deb（可选 CRABMATE_FRONTEND_DIST=…）
+make desktop-bin-release
+make apk                # Android；默认不建 frontend
+make clean
+```
+
 ## 文档
 
 | 文档 | 内容 |
@@ -39,7 +52,7 @@
 | [docs/design/shell_smoke_runbook.md](./docs/design/shell_smoke_runbook.md) | Desktop/Android 人工冒烟 |
 | [docs/design/contract_pin.md](./docs/design/contract_pin.md) | 契约 git tag 钉法 |
 
-提交前：`pre-commit run --all-files` 或 `bash scripts/check.sh`。CI 等价：`.github/workflows/ci.yml`。
+提交前：`pre-commit run --all-files` 或 `make check`。CI：`.github/workflows/ci.yml`（含 **desktop release .deb** 打包门禁）。
 
 ## 快速开始（Desktop）
 
@@ -49,8 +62,8 @@
 # 可选：同步主仓已构建的 frontend/dist 进桌面 dist（deb / 调试）
 # export CRABMATE_FRONTEND_DIST=../crabmate_agent/frontend/dist
 
-cd desktop-tauri/src-tauri
-cargo tauri dev
+make desktop-dev
+# 或：cd desktop-tauri/src-tauri && cargo tauri dev
 ```
 
 连接页填写服务器地址与可选 Web Bearer（**不是**模型 `API_KEY`）。
@@ -58,8 +71,9 @@ cargo tauri dev
 ## 快速开始（Android）
 
 ```bash
-./mobile-tauri/scripts/build-apk.sh
-# 默认不构建 frontend；需要时：CM_MOBILE_BUILD_FRONTEND=1 CRABMATE_FRONTEND_DIR=../crabmate_agent/frontend
+make apk
+# 或：./mobile-tauri/scripts/build-apk.sh
+# 需要构建 UI 时：CM_MOBILE_BUILD_FRONTEND=1 CRABMATE_FRONTEND_DIR=../crabmate_agent/frontend make apk
 ```
 
 ## 开发约定

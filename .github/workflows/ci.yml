@@ -59,3 +59,58 @@ jobs:
       - name: cargo check (mobile)
         run: cargo check --tests
         working-directory: mobile-tauri/src-tauri
+
+  build-desktop-deb:
+    name: desktop release package (deb)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force 2>/dev/null || true
+
+      - name: Install system deps (GTK / WebKit / bundler)
+        run: |
+          sudo apt-get update && sudo apt-get install -y \
+            libssl-dev libssh2-1-dev \
+            libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev \
+            librsvg2-dev patchelf
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            desktop-tauri/src-tauri
+            crates/crabmate-connect
+
+      - name: Install tauri-cli
+        run: cargo install tauri-cli --version "^2" --locked
+
+      # 打包门禁不依赖主仓 UI：壳静态页即可；真实 UI 可本地设 CRABMATE_FRONTEND_DIST
+      - name: cargo tauri build (deb via Makefile)
+        env:
+          # 避免 CI runner 上偶然存在的同级路径；仅用壳静态资源
+          CRABMATE_FRONTEND_DIST: ""
+        run: |
+          mkdir -p desktop-tauri/dist
+          echo '<!DOCTYPE html><html><body>ci-stub</body></html>' > desktop-tauri/dist/index.html
+          make desktop-release
+
+      - name: Verify deb package
+        run: |
+          set -euo pipefail
+          DEB=$(ls desktop-tauri/src-tauri/target/release/bundle/deb/crabmate_*.deb | head -1)
+          test -f "$DEB"
+          ls -lh "$DEB"
+          dpkg-deb -c "$DEB" | grep -E 'usr/bin/crabmate-desktop$'
+          dpkg-deb -c "$DEB" | grep -E 'usr/share/applications/crabmate.desktop$'
+          dpkg-deb -c "$DEB" | grep -E 'etc/crabmate/config.toml$'
+          # 不得再打进 serve sidecar
+          if dpkg-deb -c "$DEB" | grep -E 'usr/bin/crabmate$'; then
+            echo "error: deb must not contain crabmate serve sidecar" >&2
+            exit 1
+          fi
+          echo "deb package OK: $DEB"
