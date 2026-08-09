@@ -11,6 +11,7 @@
     "windows": [
       {
         "title": "crabmate",
+        "url": "connect.html",
         "width": 390,
         "height": 844,
         "resizable": true

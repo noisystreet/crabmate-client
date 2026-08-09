@@ -1,4 +1,13 @@
-# 测试与检查（crabmate-client）
+## 单元 / 静态检查（分开）
+
+```bash
+make test-frontend   # wasm check + frontend lib 单测
+make test-tauri      # crabmate-connect + desktop cargo test + mobile check
+make test            # 先 frontend 再 tauri
+```
+
+Victauri 全量 E2E（需 WebView / 外部 serve）另跑：`make victauri-e2e`。  
+Playwright（浏览器 UI，需 `serve --with-web`）：`make e2e-playwright`。
 
 ## pre-commit
 
@@ -69,7 +78,7 @@ Lizard 个数棘轮：重构后若某模块 `CCN>10` 函数变少，pre-commit /
 
 ## Playwright（浏览器 Web UI E2E）
 
-权威目录：本仓 [`e2e/`](../e2e/)。一键（起 `serve` + 跑测）：
+权威目录：本仓 [`e2e/`](../e2e/)。一键（起 `serve --with-web` + 跑测）：
 
 ```bash
 make frontend
@@ -77,7 +86,7 @@ make frontend
 # 或指定用例：./scripts/e2e-playwright.sh specs/mock-overlay-timing.spec.ts
 ```
 
-`serve` 解析顺序：`CRABMATE_BIN` → `PATH` 的 `crabmate` → 同级 Server `target/{debug,release}/crabmate` → 同级仓 `cargo run`。正式 CI checkout `noisystreet/CrabMate`。
+`serve` 解析顺序：`CRABMATE_BIN` → `PATH` 的 `crabmate` → 同级 Server `target/{debug,release}/crabmate` → 同级仓 `cargo run`。正式 CI checkout `noisystreet/CrabMate`。托管 SPA 时脚本/CI **始终传 `--with-web`**（Server 默认纯 API）。
 
 真实 LLM 规格仅本地：钥匙串已有 `client_llm` 时可不必 `API_KEY`；启用 Web Bearer 时设 `CM_WEB_API_BEARER_TOKEN`。  
 `cd e2e && no_proxy=127.0.0.1,localhost,api.deepseek.com npx playwright test specs/real-llm-*.spec.ts`  
@@ -91,7 +100,7 @@ make frontend
 REAL_LLM_E2E=1 ./scripts/victauri-e2e.sh real_llm
 ```
 
-`serve` 二进制解析顺序：`CM_DESKTOP_BACKEND_BIN` → `PATH` 中的 `crabmate` → 同级 `../crabmate_agent/target/debug/crabmate`（仅本地双轨）。正式验收应钉已发布/`PATH` 中的 `serve`。
+`serve` 二进制解析顺序：`CM_DESKTOP_BACKEND_BIN` → `PATH` 中的 `crabmate` → 同级 `../crabmate_agent/target/debug/crabmate`（仅本地双轨）。正式验收应钉已发布/`PATH` 中的 `serve`。脚本启动 `serve` 时传 **`--with-web`**（尽量挂本仓 `frontend/dist`）。
 
 脚本在构建前会**临时**写入 `victauri:default` capability（JS bridge 必需），退出时恢复；**勿**把该权限长期留在无 `--features victauri` 的 `capabilities/default.json`（否则普通 `cargo check` 会失败）。
 

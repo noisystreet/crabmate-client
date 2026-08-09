@@ -1,6 +1,6 @@
 # crabmate-client 构建入口：桌面 / Android 壳、业务 UI、质检与清理。
 # 用法：make help
-# 壳不 spawn serve；业务 UI 默认本仓 frontend/dist（prepare-sidecar / CRABMATE_FRONTEND_DIST）。
+# 壳不 spawn serve；业务 UI 包内加载（prepare-sidecar / prepare-mobile）；API 指向远程 serve。
 
 ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 DESKTOP_ROOT := $(ROOT)/desktop-tauri
@@ -14,8 +14,8 @@ CARGO ?= cargo
 # Android ABI：aarch64 | armv7 | i686 | x86_64（传给 build-apk.sh）
 MOBILE_ANDROID_TARGET ?= aarch64
 CM_MOBILE_GRADLE_STOP ?= 0
-# 1=构建本仓/指定 frontend（默认本仓 frontend/；可设 CRABMATE_FRONTEND_DIR）
-CM_MOBILE_BUILD_FRONTEND ?= 0
+# 1=跳过 trunk（仍 prepare-mobile）；默认会 trunk + 同步包内 UI
+CM_MOBILE_SKIP_FRONTEND ?= 0
 
 # 可选：打 desktop deb 时同步进 dist 的 UI 产物目录（默认用本仓 frontend/dist）
 # CRABMATE_FRONTEND_DIST ?=
@@ -23,11 +23,11 @@ CM_MOBILE_BUILD_FRONTEND ?= 0
 .DEFAULT_GOAL := help
 
 .PHONY: help all \
-	prepare-sidecar sync-connect \
+	prepare-sidecar prepare-mobile sync-connect \
 	frontend frontend-release frontend-check frontend-clippy \
 	desktop desktop-release desktop-dev desktop-bin-release \
 	apk mobile-apk \
-	test check fmt clippy ktlint-android \
+	test test-frontend test-tauri check fmt clippy ktlint-android \
 	victauri-e2e victauri-e2e-real e2e-playwright \
 	clean clean-desktop clean-mobile clean-connect clean-frontend
 
@@ -37,25 +37,28 @@ help:
 	@echo "构建："
 	@echo "  make frontend            trunk build（业务 UI → frontend/dist）"
 	@echo "  make frontend-release    trunk build --release（需 wasm-opt）"
-	@echo "  make prepare-sidecar     同步 connect/splash（及 frontend dist）到 desktop-tauri/dist"
-	@echo "  make sync-connect        同步连接页到 desktop/mobile dist"
+	@echo "  make prepare-sidecar     同步 connect + frontend dist → desktop-tauri/dist"
+	@echo "  make prepare-mobile      同步 connect + frontend dist → mobile-tauri/dist"
+	@echo "  make sync-connect        仅同步连接页到 desktop/mobile dist"
 	@echo "  make desktop             桌面 debug 安装包（需 cargo-tauri ^2）"
 	@echo "  make desktop-release     桌面 release .deb（自动 trunk --release + WASM 体积门禁）"
 	@echo "  make desktop-bin-release 仅 release 二进制（不打 deb，较快）"
-	@echo "  make desktop-dev         cargo tauri dev（请先自行启动 serve）"
-	@echo "  make apk                 Android APK（默认不建 frontend）"
+	@echo "  make desktop-dev         cargo tauri dev（请先自行启动纯 API serve + CORS）"
+	@echo "  make apk                 Android APK（默认 trunk + 包内 UI）"
 	@echo "  make all                 desktop-release"
 	@echo ""
 	@echo "质检："
 	@echo "  make check               bash scripts/check.sh（含 frontend wasm check、ktlint）"
 	@echo "  make frontend-check      cargo check --target wasm32-unknown-unknown"
 	@echo "  make frontend-clippy     frontend clippy -D warnings"
+	@echo "  make test-frontend       frontend：wasm check + lib 单测（与 Tauri 分开）"
+	@echo "  make test-tauri          connect + desktop cargo test + mobile check（不含 Victauri E2E）"
+	@echo "  make test                test-frontend 然后 test-tauri"
 	@echo "  make ktlint-android      手改 Android Kotlin ktlint（edu/crabmate）"
-	@echo "  make test                connect + desktop cargo test（Victauri 默认跳过）"
 	@echo "  make fmt                 四包 cargo fmt（含 frontend）"
 	@echo "  make clippy              四包 clippy -D warnings"
 	@echo "  make victauri-e2e        全量 Victauri（需外部 crabmate serve）"
-	@echo "  make e2e-playwright      Playwright（需 frontend/dist + serve）"
+	@echo "  make e2e-playwright      Playwright（需 frontend/dist + serve --with-web）"
 	@echo ""
 	@echo "清理："
 	@echo "  make clean               清理 desktop/mobile/connect/frontend 产物"
@@ -68,7 +71,7 @@ help:
 	@echo "      CM_PREPARE_SKIP_FRONTEND=1 或 CRABMATE_FRONTEND_DIST=-（不同步 UI）"
 	@echo "      CRABMATE_ALLOW_SIBLING_FRONTEND=1（允许回落同级主仓 dist）"
 	@echo "      MOBILE_ANDROID_TARGET=aarch64  CM_MOBILE_GRADLE_STOP=1"
-	@echo "      CM_MOBILE_BUILD_FRONTEND=1（apk 时 trunk 构建本仓 UI）"
+	@echo "      CM_MOBILE_SKIP_FRONTEND=1（apk 时跳过 trunk，仍 prepare-mobile）"
 
 # --- 聚合 ---
 
@@ -108,6 +111,9 @@ frontend-clippy:
 prepare-sidecar:
 	bash "$(DESKTOP_ROOT)/scripts/prepare-sidecar.sh"
 
+prepare-mobile:
+	bash "$(MOBILE_ROOT)/scripts/prepare-mobile.sh"
+
 sync-connect:
 	bash "$(ROOT)/scripts/sync-tauri-connect-page.sh"
 
@@ -136,24 +142,34 @@ desktop-dev: prepare-sidecar _require_tauri
 
 # --- Android ---
 
-apk mobile-apk: sync-connect
+apk mobile-apk:
 	MOBILE_ANDROID_TARGET="$(MOBILE_ANDROID_TARGET)" \
 		CM_MOBILE_GRADLE_STOP="$(CM_MOBILE_GRADLE_STOP)" \
-		CM_MOBILE_BUILD_FRONTEND="$(CM_MOBILE_BUILD_FRONTEND)" \
+		CM_MOBILE_SKIP_FRONTEND="$(CM_MOBILE_SKIP_FRONTEND)" \
 		bash "$(MOBILE_ROOT)/scripts/build-apk.sh"
 
 # --- 质检 ---
+
+# frontend：与壳分开；wasm check + lib 单测（跳过需 Server fixtures 的 golden）
+test-frontend: frontend-check
+	cd "$(FRONTEND_DIR)" && $(CARGO) test --lib -- --nocapture --skip golden_
+
+# Tauri / 壳：connect 逻辑 + desktop 单测；mobile 仅 check（默认无显示则跳过 Victauri）
+test-tauri:
+	cd "$(CONNECT_DIR)" && $(CARGO) test -- --nocapture
+	@mkdir -p "$(DESKTOP_ROOT)/dist"
+	@test -f "$(DESKTOP_ROOT)/dist/index.html" || echo '<html></html>' > "$(DESKTOP_ROOT)/dist/index.html"
+	@test -f "$(DESKTOP_ROOT)/dist/connect.html" || cp "$(CONNECT_DIR)/assets/connect.html" "$(DESKTOP_ROOT)/dist/connect.html"
+	cd "$(TAURI_DIR)" && $(CARGO) test --no-fail-fast
+	cd "$(MOBILE_TAURI_DIR)" && $(CARGO) check --tests
+
+test: test-frontend test-tauri
 
 check:
 	bash "$(ROOT)/scripts/check.sh"
 
 ktlint-android:
 	bash "$(ROOT)/scripts/ktlint-android.sh"
-
-test:
-	cd "$(CONNECT_DIR)" && $(CARGO) test
-	cd "$(TAURI_DIR)" && $(CARGO) test --no-fail-fast
-	cd "$(MOBILE_TAURI_DIR)" && $(CARGO) check --tests
 
 fmt:
 	cd "$(TAURI_DIR)" && $(CARGO) fmt --all

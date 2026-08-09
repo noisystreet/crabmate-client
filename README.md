@@ -61,27 +61,30 @@ make clean
 
 Before commit: `pre-commit run --all-files` or `make check`. CI: `.github/workflows/ci.yml` (includes **frontend wasm** and **desktop release .deb**).
 
-## Quick start (business UI + serve)
+## Quick start (Desktop)
+
+Prerequisite: **`crabmate serve`** (API-only by default) already running. Allow the shell Origin in CORS:
+
+```bash
+# Terminal A — Server (no --with-web needed for the shell)
+CM_WEB_CORS_ALLOWED_ORIGINS='http://tauri.localhost' \
+  crabmate serve --host 127.0.0.1 --port 8080
+
+# Terminal B — this repo
+make frontend           # sync UI into desktop-tauri/dist via prepare-sidecar
+make desktop-dev
+```
+
+On the connect page, enter the server URL and optional Web API Bearer (**not** the model `API_KEY`). The shell loads **local** `index.html` and points API calls at `serve`.
+
+## Quick start (business UI via browser + serve)
+
+For Playwright / same-origin browser testing only (not the Desktop/Android path):
 
 ```bash
 make frontend
-# Other terminal: Server checkout or installed crabmate
-CM_WEB_STATIC_DIR="$PWD/frontend/dist" crabmate serve --host 127.0.0.1 --port 8080
+CM_WEB_STATIC_DIR="$PWD/frontend/dist" crabmate serve --with-web --host 127.0.0.1 --port 8080
 ```
-
-## Quick start (Desktop)
-
-Prerequisite: **`crabmate serve`** already running locally or remotely (default `http://127.0.0.1:8080/`).
-
-```bash
-make frontend           # optional: sync UI into desktop-tauri/dist
-# or: export CRABMATE_FRONTEND_DIST=$PWD/frontend/dist
-
-make desktop-dev
-# or: cd desktop-tauri/src-tauri && cargo tauri dev
-```
-
-On the connect page, enter the server URL and optional Web API Bearer (**not** the model `API_KEY`).
 
 ## Quick start (Android)
 

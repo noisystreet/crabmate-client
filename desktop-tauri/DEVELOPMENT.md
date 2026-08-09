@@ -19,8 +19,9 @@
 当前桌面壳**不**拉起 `crabmate serve`。请先在本机或远程启动后端，例如：
 
 ```bash
-# 仓库根目录（另开终端）
-cargo run -- serve --host 127.0.0.1 --port 8080
+# Server 仓（另开终端）；默认纯 API。同机托管 Client UI 加 --with-web + CM_WEB_STATIC_DIR
+CM_WEB_STATIC_DIR=../crabmate-client/frontend/dist \
+  cargo run -- serve --with-web --host 127.0.0.1 --port 8080
 ```
 
 然后启动壳：打开共用**连接页**，预填 **`CM_DESKTOP_SUGGESTED_URL`**（默认 **`http://127.0.0.1:8080/`**）；用户确认后导航到 `serve` UI。
@@ -58,11 +59,13 @@ cargo tauri dev
 完整链路（仓库根目录）：
 
 ```bash
-cargo build
-cd frontend && trunk build && cd ..
-# 终端 A
-cargo run -- serve
-# 终端 B
+# 终端 A — Server 仓（默认纯 API；托管 UI 须 --with-web）
+make frontend   # 在 Client 仓
+CM_WEB_STATIC_DIR="$PWD/frontend/dist" \
+  crabmate serve --with-web --host 127.0.0.1 --port 8080
+# 或: cd ../crabmate_agent && CM_WEB_STATIC_DIR=../crabmate-client/frontend/dist \
+#       cargo run -- serve --with-web --host 127.0.0.1 --port 8080
+# 终端 B — 本仓
 cd desktop-tauri/src-tauri && cargo tauri dev
 ```
 
@@ -219,5 +222,5 @@ cd /path/to/crabmate-client
 make desktop-release
 # → desktop-tauri/src-tauri/target/release/bundle/deb/crabmate-desktop_*.deb
 # 本机 serve 请指向安装后的 UI，例如：
-#   CM_WEB_STATIC_DIR=/usr/share/crabmate/frontend/dist crabmate serve …
+#   CM_WEB_STATIC_DIR=/usr/share/crabmate/frontend/dist crabmate serve --with-web …
 ```

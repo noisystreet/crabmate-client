@@ -27,8 +27,8 @@
 make frontend
 export CM_WEB_STATIC_DIR="$PWD/frontend/dist"
 
-# 启动 Server（同级主仓或 PATH 中的 crabmate）：
-#   ../crabmate_agent 下: cargo run -- serve
+# 启动 Server（同级主仓或 PATH 中的 crabmate；默认纯 API，托管 UI 须 --with-web）：
+#   ../crabmate_agent 下: cargo run -- serve --with-web
 # 或一键：./scripts/e2e-playwright.sh
 ```
 

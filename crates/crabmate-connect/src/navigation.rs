@@ -14,6 +14,16 @@ pub fn is_app_origin(url: &Url) -> bool {
         || (host.eq_ignore_ascii_case("localhost") && url.path().contains("connect"))
 }
 
+/// 是否为壳内**连接页**（非业务 UI）。业务 UI 为同 Origin 的 `/index.html`。
+#[must_use]
+pub fn is_connect_page_url(url: &Url) -> bool {
+    if !is_app_origin(url) {
+        return false;
+    }
+    let path = url.path();
+    path.ends_with("connect.html")
+}
+
 /// 纯决策（便于单测）：是否允许导航，以及是否应清空 [`AllowedServeOrigin`]。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ShellNavigationDecision {
@@ -34,15 +44,19 @@ pub fn decide_shell_navigation(
 ) -> ShellNavigationDecision {
     match url.scheme() {
         "tauri" | "asset" => {
-            if is_app_origin(url) {
+            if is_connect_page_url(url) {
                 ShellNavigationDecision::AllowClearServeOrigin
             } else {
                 ShellNavigationDecision::Allow
             }
         }
         "http" | "https" => {
-            if is_app_origin(url) {
+            if is_connect_page_url(url) {
                 return ShellNavigationDecision::AllowClearServeOrigin;
+            }
+            if is_app_origin(url) {
+                // 包内业务 UI（index.html 等）：放行且**不清** allowlist
+                return ShellNavigationDecision::Allow;
             }
             if allowed_matches {
                 return ShellNavigationDecision::Allow;
@@ -88,12 +102,12 @@ pub fn allow_shell_navigation<R: Runtime>(webview: &Webview<R>, url: &Url) -> bo
     }
 }
 
-/// 页面已落到连接页 / App Origin 时清空白名单。
+/// 页面已落到连接页时清空白名单。
 ///
 /// Android 侧 `WebView.loadUrl` 有时不走 `on_navigation`；断开回连接页须在 page load 再清一次，
-/// 避免旧 serve Origin 仍被放行。
+/// 避免旧 serve Origin 仍被放行。加载包内业务 UI **不会**清空。
 pub fn clear_allowed_if_app_origin_loaded<R: Runtime>(app: &AppHandle<R>, url: &Url) {
-    if is_app_origin(url) {
+    if is_connect_page_url(url) {
         clear_allowed_serve_origin(app);
     }
 }
@@ -106,15 +120,17 @@ mod tests {
     fn app_origin_requires_trusted_host() {
         let home = Url::parse("http://tauri.localhost/").unwrap();
         assert!(is_app_origin(&home));
-        let connect = Url::parse("http://tauri.localhost/?manual=1").unwrap();
+        let connect = Url::parse("http://tauri.localhost/connect.html?manual=1").unwrap();
         assert!(is_app_origin(&connect));
+        assert!(is_connect_page_url(&connect));
+        let ui = Url::parse("http://tauri.localhost/index.html").unwrap();
+        assert!(is_app_origin(&ui));
+        assert!(!is_connect_page_url(&ui));
         let remote = Url::parse("http://192.168.1.10:8080/").unwrap();
         assert!(!is_app_origin(&remote));
-        // 路径含 connect.html 但 host 不可信 → 不得当作壳 Origin
         let spoof = Url::parse("http://evil.example/connect.html").unwrap();
         assert!(!is_app_origin(&spoof));
-        let query_spoof = Url::parse("http://evil.example/?x=http://tauri.localhost/").unwrap();
-        assert!(!is_app_origin(&query_spoof));
+        assert!(!is_connect_page_url(&spoof));
     }
 
     #[test]
@@ -140,7 +156,6 @@ mod tests {
             decide_shell_navigation(&other, Some(&cur), true),
             ShellNavigationDecision::Allow
         );
-        // 钩子在 Android 上不能安全读取 current，依赖 allowlist 匹配同 serve Origin
         assert_eq!(
             decide_shell_navigation(&next, None, true),
             ShellNavigationDecision::Allow
@@ -150,10 +165,20 @@ mod tests {
     #[test]
     fn return_to_connect_clears_allowlist_flag() {
         let serve = Url::parse("http://192.168.1.10:8080/").unwrap();
-        let home = Url::parse("http://tauri.localhost/?manual=1").unwrap();
+        let home = Url::parse("http://tauri.localhost/connect.html?manual=1").unwrap();
         assert_eq!(
             decide_shell_navigation(&home, Some(&serve), true),
             ShellNavigationDecision::AllowClearServeOrigin
+        );
+    }
+
+    #[test]
+    fn local_ui_does_not_clear_allowlist() {
+        let serve = Url::parse("http://192.168.1.10:8080/").unwrap();
+        let ui = Url::parse("http://tauri.localhost/index.html").unwrap();
+        assert_eq!(
+            decide_shell_navigation(&ui, Some(&serve), true),
+            ShellNavigationDecision::Allow
         );
     }
 }

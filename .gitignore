@@ -42,6 +42,7 @@ desktop-tauri/src-tauri/gen/
 mobile-tauri/src-tauri/gen/schemas/
 desktop-tauri/binaries/
 desktop-tauri/dist/
+mobile-tauri/dist/
 # make apk 稳定产物名
 mobile-tauri/crabmate.apk
 

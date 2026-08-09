@@ -1,9 +1,12 @@
-//! URL 规范化与 Bearer hash 交接。
+//! URL 规范化与本地 UI 交接（Bearer + API 基址 hash）。
 
 use url::Url;
 
 /// 与前端 [`frontend/src/api/connect_handoff.rs`] 一致。
 pub const BEARER_HASH_KEY: &str = "cm_web_api_bearer";
+
+/// 本地业务 UI 启动时写入的 API 基址（指向远程 `serve` 根）。
+pub const API_BASE_HASH_KEY: &str = "cm_api_base";
 
 pub fn normalize_base_url(raw: &str) -> Result<Url, String> {
     let trimmed = raw.trim();
@@ -31,7 +34,32 @@ pub fn normalize_base_url(raw: &str) -> Result<Url, String> {
     Ok(u)
 }
 
-/// 仅在 Bearer 非空时写入 hash，避免空交接清掉远程源已有凭证。
+/// 包内业务 UI 入口（与 `connect.html` 同 Origin 的 `index.html`）。
+#[must_use]
+pub fn local_business_ui_url(connect_home: &Url) -> Url {
+    let mut ui = connect_home.clone();
+    ui.set_path("/index.html");
+    ui.set_query(None);
+    ui.set_fragment(None);
+    ui
+}
+
+/// 在本地 UI URL 上写入 API 基址；Bearer 非空时一并写入（空 Bearer 不写，避免清掉页内已有凭证）。
+#[must_use]
+pub fn build_local_ui_handoff_url(mut ui: Url, api_base: &Url, bearer: &str) -> Url {
+    let mut parts: Vec<String> = Vec::with_capacity(2);
+    let api = api_base.as_str().trim_end_matches('/');
+    parts.push(format!("{API_BASE_HASH_KEY}={}", urlencoding::encode(api)));
+    let b = bearer.trim();
+    if !b.is_empty() {
+        parts.push(format!("{BEARER_HASH_KEY}={}", urlencoding::encode(b)));
+    }
+    ui.set_fragment(Some(&parts.join("&")));
+    ui
+}
+
+/// 兼容旧调用：仅 Bearer、目标为任意基址（旧「导航到 serve」路径）。
+#[must_use]
 pub fn build_handoff_url(mut base: Url, bearer: &str) -> Url {
     let b = bearer.trim();
     if b.is_empty() {
@@ -67,5 +95,26 @@ mod tests {
         let base = normalize_base_url("http://127.0.0.1:8080").unwrap();
         let u = build_handoff_url(base, "  ");
         assert!(u.fragment().is_none());
+    }
+
+    #[test]
+    fn local_ui_handoff_includes_api_base_and_bearer() {
+        let home = Url::parse("http://tauri.localhost/connect.html").unwrap();
+        let api = normalize_base_url("http://127.0.0.1:8080").unwrap();
+        let u = build_local_ui_handoff_url(local_business_ui_url(&home), &api, "tok/en");
+        assert_eq!(u.path(), "/index.html");
+        let frag = u.fragment().unwrap();
+        assert!(frag.contains("cm_api_base=http%3A%2F%2F127.0.0.1%3A8080"));
+        assert!(frag.contains("cm_web_api_bearer=tok%2Fen"));
+    }
+
+    #[test]
+    fn local_ui_handoff_omits_empty_bearer() {
+        let home = Url::parse("http://tauri.localhost/connect.html").unwrap();
+        let api = normalize_base_url("http://127.0.0.1:8080").unwrap();
+        let u = build_local_ui_handoff_url(local_business_ui_url(&home), &api, "  ");
+        let frag = u.fragment().unwrap();
+        assert!(frag.starts_with("cm_api_base="));
+        assert!(!frag.contains("cm_web_api_bearer"));
     }
 }
