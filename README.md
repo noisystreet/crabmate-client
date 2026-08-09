@@ -76,6 +76,10 @@ make desktop-dev
 
 On the connect page, enter the server URL and optional Web API Bearer (**not** the model `API_KEY`). The shell loads **local** `index.html` and points API calls at `serve`.
 
+## Personal cloud (remote API-only)
+
+Expose only `api.…` → Caddy → loopback `serve` (no `--with-web`); the shell uses packaged UI against `https://api.…/` + Bearer. Steps: [`docs/design/personal_cloud_runbook.md`](docs/design/personal_cloud_runbook.md). VPS/systemd/Caddy: Server [`个人VPS部署指南.md`](https://github.com/noisystreet/CrabMate/blob/main/docs/个人VPS部署指南.md).
+
 ## Quick start (business UI via browser + serve)
 
 For Playwright / same-origin browser testing only (not the Desktop/Android path):

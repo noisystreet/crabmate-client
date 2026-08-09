@@ -33,6 +33,18 @@ cargo tauri dev
 
 跳过连接页（E2E）：`CM_E2E_FIXTURES=1` 或 `CM_DESKTOP_SKIP_CONNECT=1`，且必须 `CM_DESKTOP_SERVE_URL=…`。
 
+## 2b. 个人云（远程纯 API）
+
+见 [`personal_cloud_runbook.md`](./personal_cloud_runbook.md)。摘要：
+
+```text
+连接页：https://api.example.com/  +  与 VPS CM_WEB_API_BEARER_TOKEN 相同的 Bearer
+（包内 UI；serve 默认纯 API，不要 --with-web）
+```
+
+- [ ] HTTPS + Bearer 探测成功并进入包内 UI  
+- [ ] 一轮对话  
+
 ## 3. Mobile 或「桌面当远程壳」
 
 **A. Android**：`./mobile-tauri/scripts/build-apk.sh` → 连接页填 `http://<LAN-IP>:8080/` + Web Bearer → 一轮对话。

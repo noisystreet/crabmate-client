@@ -23,7 +23,7 @@
 - 点击窗口关闭按钮会退出应用；需要让本机 `serve` 继续运行时，请使用最小化隐藏到托盘（壳不管理 `serve` 进程生命周期）。
 - 第二次启动不会再开第二个壳窗口；已有窗口会显示并获得焦点。
 
-请先在本机或远程启动 **`crabmate serve`**，再开桌面壳连接；勿假设壳会自动起后端。
+请先在本机或远程启动 **`crabmate serve`**，再开桌面壳连接；勿假设壳会自动起后端。个人云（`https://api.…` + Bearer、包内 UI）见仓根 [`docs/design/personal_cloud_runbook.md`](../docs/design/personal_cloud_runbook.md)。
 
 ## 本地开发
 

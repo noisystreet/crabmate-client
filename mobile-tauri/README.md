@@ -70,7 +70,7 @@ CM_WEB_API_BEARER_TOKEN='your-shared-secret' \
   crabmate serve --host 0.0.0.0 --port 8080
 ```
 
-手机连接页填写 `http://<电脑局域网IP>:8080/` 与同一共享密钥。
+手机连接页填写 `http://<电脑局域网IP>:8080/` 与同一共享密钥。个人云则填 `https://api.…/` + Bearer（见 [`docs/design/personal_cloud_runbook.md`](../docs/design/personal_cloud_runbook.md)）。
 
 ## GitHub（Device Flow）
 

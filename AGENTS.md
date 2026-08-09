@@ -22,6 +22,7 @@
 │   └── design/
 │       ├── tauri_gui_mvp_design.md
 │       ├── contract_pin.md
+│       ├── personal_cloud_runbook.md
 │       └── shell_smoke_runbook.md
 ├── CHANGELOG.md             # Release notes (English)
 ├── README.md                # English (default)
@@ -74,6 +75,7 @@ When updating docs:
 | UI build / trunk | `frontend/README.md` |
 | Shell architecture / lifecycle / connect model | `docs/design/tauri_gui_mvp_design.md` |
 | Manual shell smoke steps | `docs/design/shell_smoke_runbook.md` |
+| Personal cloud (shell → remote API-only) | `docs/design/personal_cloud_runbook.md`; VPS/Caddy authority is Server |
 | Victauri / pre-commit / CI commands | `docs/TESTING.md` |
 | User/maintainer release notes | `CHANGELOG.md` (English; Keep a Changelog; move Unreleased into a version section on release) |
 | Contract pin tag / rev | `docs/design/contract_pin.md`; policy authority is Server |
@@ -93,3 +95,5 @@ When updating docs:
 - [client_turn_smoke_runbook.md](https://github.com/noisystreet/CrabMate/blob/main/docs/design/client_turn_smoke_runbook.md) (host + contracts; shell steps follow this repo’s `shell_smoke_runbook`)
 - [SSE协议.md](https://github.com/noisystreet/CrabMate/blob/main/docs/SSE协议.md)
 - [配置说明.md](https://github.com/noisystreet/CrabMate/blob/main/docs/配置说明.md)
+- [client_ui_runtime_split.md](https://github.com/noisystreet/CrabMate/blob/main/docs/design/client_ui_runtime_split.md)
+- [个人VPS部署指南.md](https://github.com/noisystreet/CrabMate/blob/main/docs/个人VPS部署指南.md)

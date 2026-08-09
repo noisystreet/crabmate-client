@@ -159,8 +159,9 @@
         <div class="mark" aria-hidden="true"><span>C</span></div>
         <h1>CrabMate</h1>
         <p class="lead" id="lead">
-          连接到已有的 <code>crabmate serve</code>。填写服务器地址与 Web API 共享密钥（与
-          <code>CM_WEB_API_BEARER_TOKEN</code> 一致；不是模型 API_KEY）。
+          连接到已有的 <code>crabmate serve</code>（本机 / 局域网 / 个人云
+          <code>https://api.…</code>）。填写地址与 Web API 共享密钥（与
+          <code>CM_WEB_API_BEARER_TOKEN</code> 一致；不是模型 API_KEY）。公网须 HTTPS + Bearer。
         </p>
       </div>
       <form id="connect-form" method="post" action="#" autocomplete="on">
@@ -174,10 +175,10 @@
           autocapitalize="off"
           autocorrect="off"
           spellcheck="false"
-          placeholder="http://192.168.1.10:8080/"
+          placeholder="https://api.example.com/ 或 http://192.168.1.10:8080/"
           required
         />
-        <label for="bearer">Web API 共享密钥（可选）</label>
+        <label for="bearer">Web API 共享密钥（个人云建议必填）</label>
         <input
           id="bearer"
           name="password"
@@ -193,7 +194,7 @@
         <button type="submit" id="submit">连接</button>
       </form>
       <p class="hint">
-        局域网可用明文 HTTP；公网请用 HTTPS + Bearer。成功后会记住地址；非空 Bearer 写入系统钥匙串。
+        局域网可用明文 HTTP；个人云 / 公网请用 HTTPS + Bearer（UI 在壳内，不必给 API 域名挂 SPA）。成功后会记住地址；非空 Bearer 写入系统钥匙串。
       </p>
     </div>
     <script>
@@ -343,7 +344,7 @@
         suggestedServerUrl = (suggested || "").trim();
         if (suggestedServerUrl) {
           leadEl.innerHTML =
-            "连接到 <code>crabmate serve</code>。若壳提供建议地址则预填；也可改为局域网/远程服务器。连接成功的非空 Bearer 写入系统钥匙串。";
+            "连接到 <code>crabmate serve</code>。若壳提供建议地址则预填；也可改为局域网或个人云 <code>https://api.…</code>。连接成功的非空 Bearer 写入系统钥匙串。";
         }
 
         const savedUrl = readLegacyUrl();
