@@ -330,6 +330,7 @@ pub(crate) fn ChatTuiStreamView(
     scroll_shell: ChatScrollShellSignals,
     action_handlers: TuiTurnActionHandlers,
 ) -> impl IntoView {
+    let status_err = action_handlers.status_err;
     let transcript_ref = NodeRef::<leptos::html::Div>::new();
     let mount_state = RwSignal::new(None::<TuiMountState>);
     let turn_menu = RwSignal::new(None::<MessageTurnMenuAnchor>);
@@ -436,6 +437,7 @@ pub(crate) fn ChatTuiStreamView(
                                             chat,
                                             locale.get_untracked(),
                                             scroll_shell,
+                                            status_err,
                                         );
                                     }
                                 >

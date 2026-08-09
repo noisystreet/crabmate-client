@@ -135,11 +135,13 @@ pub(crate) fn format_user_error_with_meta(
 // ── 状态同步 ──
 
 fn dispatch_state_snapshot(val: &serde_json::Value, sink: &mut SseControlSink<'_>) {
-    // STATE_SNAPSHOT 携带完整的回合状态 JSON，由应用层注册 `on_state_snapshot` 处理
+    // AG-UI STATE_SNAPSHOT：完整 agent state。Client 默认不注册 hook（会话对齐靠 REST 水合）；
+    // 若将来需要，在 `SseNoticeTimelineHooks::on_state_snapshot` 接线即可。
+    let Some(hook) = sink.notice_timeline.on_state_snapshot.as_mut() else {
+        return;
+    };
     let state = val.get("state").cloned().unwrap_or(serde_json::Value::Null);
-    if let Some(hook) = sink.notice_timeline.on_state_snapshot.as_mut() {
-        hook(state);
-    }
+    hook(state);
 }
 
 // ── 工具调用 ──

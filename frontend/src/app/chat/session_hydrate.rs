@@ -391,6 +391,17 @@ fn try_hydration_wire_snapshot(
     })
 }
 
+/// 水合写回时所需的角色/模式信号与错误条（缩短 [`conversation_hydration_cycle::run`] 形参）。
+#[derive(Clone)]
+pub(crate) struct ConversationHydrationApplyCtx {
+    selected_agent_role: RwSignal<Option<String>>,
+    agent_role_user_override: RwSignal<bool>,
+    selected_session_mode: RwSignal<String>,
+    session_mode_user_override: RwSignal<bool>,
+    default_agent_role_id: Option<String>,
+    status_err: RwSignal<Option<String>>,
+}
+
 /// 将 [`run_conversation_hydration_cycle`] 主体收拢为可单测对照的 FSM 式模块。
 pub(crate) mod conversation_hydration_cycle {
     use leptos::prelude::*;
@@ -400,7 +411,7 @@ pub(crate) mod conversation_hydration_cycle {
     use crate::conversation_hydrate::stored_messages_from_conversation_api;
 
     use super::{
-        HydrationWireSnapshot, MergeHydrationIntoActiveSessionArgs,
+        ConversationHydrationApplyCtx, HydrationWireSnapshot, MergeHydrationIntoActiveSessionArgs,
         apply_saved_revision_if_same_conversation, merge_hydration_into_active_session,
         restore_reasoning_after_hydration,
     };
@@ -408,11 +419,7 @@ pub(crate) mod conversation_hydration_cycle {
     pub(crate) async fn run(
         snap: HydrationWireSnapshot,
         chat: ChatSessionSignals,
-        selected_agent_role: RwSignal<Option<String>>,
-        agent_role_user_override: RwSignal<bool>,
-        selected_session_mode: RwSignal<String>,
-        session_mode_user_override: RwSignal<bool>,
-        default_agent_role_id: Option<String>,
+        apply: ConversationHydrationApplyCtx,
     ) {
         let HydrationWireSnapshot {
             aid,
@@ -420,14 +427,24 @@ pub(crate) mod conversation_hydration_cycle {
             nonce_at_start,
             locale,
         } = snap;
-        let Ok(resp) = fetch_conversation_messages(
+        let resp = match fetch_conversation_messages(
             &cid,
             crate::conversation_messages_page::ConversationMessagesFetchParams::tail_page(),
             locale,
         )
         .await
-        else {
-            return;
+        {
+            Ok(r) => {
+                // 成功拉取后清掉此前水合/拉历史失败条，避免「假失败」残留。
+                apply.status_err.set(None);
+                r
+            }
+            Err(e) => {
+                apply.status_err.set(Some(
+                    crate::i18n::api_err_conversation_messages_fetch_failed(locale, &e),
+                ));
+                return;
+            }
         };
 
         if chat.session_hydrate_nonce.get_untracked() != nonce_at_start {
@@ -462,11 +479,11 @@ pub(crate) mod conversation_hydration_cycle {
                     nonce_at_start,
                     current_nonce: cur_nonce,
                     active_id: &active,
-                    selected_agent_role,
-                    agent_role_user_override,
-                    selected_session_mode,
-                    session_mode_user_override,
-                    default_agent_role_id: default_agent_role_id.as_deref(),
+                    selected_agent_role: apply.selected_agent_role,
+                    agent_role_user_override: apply.agent_role_user_override,
+                    selected_session_mode: apply.selected_session_mode,
+                    session_mode_user_override: apply.session_mode_user_override,
+                    default_agent_role_id: apply.default_agent_role_id.as_deref(),
                 });
             applied_hydration |= merge_outcome.is_applied();
         });
@@ -500,23 +517,10 @@ pub(crate) mod conversation_hydration_cycle {
 async fn run_conversation_hydration_cycle(
     snap: HydrationWireSnapshot,
     chat: ChatSessionSignals,
-    selected_agent_role: RwSignal<Option<String>>,
-    agent_role_user_override: RwSignal<bool>,
-    selected_session_mode: RwSignal<String>,
-    session_mode_user_override: RwSignal<bool>,
-    default_agent_role_id: Option<String>,
+    apply: ConversationHydrationApplyCtx,
 ) {
     let _stream_lane = chat.stream_lane_overlay_phase_untracked();
-    conversation_hydration_cycle::run(
-        snap,
-        chat,
-        selected_agent_role,
-        agent_role_user_override,
-        selected_session_mode,
-        session_mode_user_override,
-        default_agent_role_id,
-    )
-    .await;
+    conversation_hydration_cycle::run(snap, chat, apply).await;
 }
 
 fn clear_conversation_prompt_tokens_if_no_server_conversation(chat: ChatSessionSignals) {
@@ -545,6 +549,7 @@ pub(crate) fn try_load_older_messages_for_active_session(
     chat: ChatSessionSignals,
     locale: Locale,
     scroll_shell: super::scroll_shell::ChatScrollShellSignals,
+    status_err: RwSignal<Option<String>>,
 ) {
     if chat.history_loading_older.get_untracked() {
         return;
@@ -571,7 +576,7 @@ pub(crate) fn try_load_older_messages_for_active_session(
     let prepend_snap = scroll_shell.capture_prepend_snapshot();
     let chat2 = chat;
     spawn_local(async move {
-        let Ok(resp) = crate::api::fetch_conversation_messages(
+        let resp = match crate::api::fetch_conversation_messages(
             &snap.cid,
             crate::conversation_messages_page::ConversationMessagesFetchParams::older_before(
                 window_start,
@@ -579,9 +584,19 @@ pub(crate) fn try_load_older_messages_for_active_session(
             snap.locale,
         )
         .await
-        else {
-            chat2.history_loading_older.set(false);
-            return;
+        {
+            Ok(r) => {
+                status_err.set(None);
+                r
+            }
+            Err(e) => {
+                status_err.set(Some(i18n::api_err_conversation_messages_fetch_failed(
+                    snap.locale,
+                    &e,
+                )));
+                chat2.history_loading_older.set(false);
+                return;
+            }
         };
         if chat2.session_hydrate_nonce.get_untracked() != snap.nonce_at_start {
             chat2.history_loading_older.set(false);
@@ -620,6 +635,8 @@ pub struct WireSessionHydrationArgs {
     pub selected_session_mode: RwSignal<String>,
     pub session_mode_user_override: RwSignal<bool>,
     pub status_tasks: StatusTasksSignals,
+    /// 水合 / 拉取更早消息失败时写入状态栏错误条。
+    pub status_err: RwSignal<Option<String>>,
 }
 
 /// 订阅 `session_hydrate_nonce` 与 `active_id`：拉取服务端快照并写回当前会话（含 tiktoken 用量）。
@@ -638,6 +655,7 @@ pub fn wire_session_hydration(args: WireSessionHydrationArgs) {
         selected_session_mode,
         session_mode_user_override,
         status_tasks,
+        status_err,
     } = args;
     Effect::new({
         let chat = chat;
@@ -667,11 +685,14 @@ pub fn wire_session_hydration(args: WireSessionHydrationArgs) {
             spawn_local(run_conversation_hydration_cycle(
                 snap,
                 chat,
-                selected_agent_role,
-                agent_role_user_override,
-                selected_session_mode,
-                session_mode_user_override,
-                default_agent_role_id,
+                ConversationHydrationApplyCtx {
+                    selected_agent_role,
+                    agent_role_user_override,
+                    selected_session_mode,
+                    session_mode_user_override,
+                    default_agent_role_id,
+                    status_err,
+                },
             ));
         }
     });

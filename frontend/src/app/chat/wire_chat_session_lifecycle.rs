@@ -65,6 +65,7 @@ pub(crate) fn wire_chat_session_lifecycle_effects(args: WireChatSessionLifecycle
         status_tasks,
         app,
     } = args;
+    let status_err = app.stream.status_err;
 
     wire_initial_sessions_from_storage(app);
     wire_web_ui_config_once_after_init(
@@ -86,6 +87,7 @@ pub(crate) fn wire_chat_session_lifecycle_effects(args: WireChatSessionLifecycle
             selected_session_mode,
             session_mode_user_override,
             status_tasks,
+            status_err,
         },
     );
 
