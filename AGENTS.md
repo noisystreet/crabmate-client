@@ -34,7 +34,7 @@
 
 - **Forbidden**: `path = "../crabmate_agent/..."` or any Cargo path dependency back into the Server monorepo tree
 - **Forbidden**: shell spawning / bundling a `crabmate serve` sidecar
-- Contract crates only via git **tag** `client-contract-vX.Y.Z` or `rev` pinned to Server (see `frontend/Cargo.toml`)
+- Contract crates only via git **tag** (`vX.Y.Z` product release, or `client-contract-vX.Y.Z`) or `rev` pinned to Server (see `frontend/Cargo.toml`; current pin: **`v0.1.0`**)
 - `crabmate-connect` is in-repo path only (`crates/crabmate-connect`)
 - Web Bearer ≠ model `API_KEY`
 - **Split decision / contracts / SSE / CORS** are authoritative in the Server repo; this repo documents shell behavior and links out
