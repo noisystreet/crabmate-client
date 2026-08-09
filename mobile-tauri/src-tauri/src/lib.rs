@@ -1,5 +1,5 @@
-//! CrabMate Android 远程薄客户端库入口。
-//! 不 spawn 本机 Agent sidecar；连接页探测远程 `serve` 后加载其 Web UI。
+//! CrabMate Android 薄客户端库入口。
+//! 不 spawn 本机 Agent；连接页探测远程 `serve` 后加载**包内**业务 UI，API 基址指向 serve。
 
 use tauri::Manager;
 use tauri::plugin::Builder as PluginBuilder;

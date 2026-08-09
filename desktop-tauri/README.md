@@ -7,7 +7,7 @@
 ## 启动流程（与代码一致）
 
 1. **单窗启动**：主窗口先 `visible(false)`，连接页阶段**铺满主屏工作区**（`connect.html` 内 flex 居中卡片），再显示——不依赖合成器对小窗的 `center()`，避免左上角闪一下。
-2. **默认**：主窗口展示与移动端共用的**连接页**（`crates/crabmate-connect/assets/connect.html`）。预填建议地址为 **`CM_DESKTOP_SUGGESTED_URL`**，未设时为 **`http://127.0.0.1:8080/`**。用户填写 **服务器地址** + 可选 **Web API Bearer**，探测 `GET /health` 成功后导航到该 `serve` UI，并用 hash 交接 Bearer。
+2. **默认**：主窗口展示与移动端共用的**连接页**（`crates/crabmate-connect/assets/connect.html`）。预填建议地址为 **`CM_DESKTOP_SUGGESTED_URL`**，未设时为 **`http://127.0.0.1:8080/`**。用户填写 **服务器地址** + 可选 **Web API Bearer**，探测 `GET /health` 成功后导航到**包内** `index.html`，并用 hash 交接 **API 基址** + Bearer。
 3. **首次**成功连接且 Bearer 非空、本机钥匙串尚无对应条目时，写入系统钥匙串（账户 `tauri_connect_web_api_bearer`）；下次启动自动填充。
 4. 桌面应用保持单实例：再次启动会显示并聚焦已有主窗口。
 5. 关闭主窗口会结束应用；系统托盘可用时，最小化按钮会隐藏主窗口，托盘「显示/隐藏」可恢复。托盘初始化失败时保留普通最小化。
@@ -31,7 +31,7 @@
 
 - Rust stable、Tauri 2 系统依赖
 - **`cargo install tauri-cli --version "^2"`**（一次性）
-- 在 **Server 主仓**（如 `../crabmate_agent`）另开终端：`cargo run -- serve`（或已有远程 `serve`）
+- 在 **Server 主仓**另开终端：`CM_WEB_CORS_ALLOWED_ORIGINS='http://tauri.localhost' cargo run -- serve`（默认纯 API；壳不依赖 `--with-web`）
 
 ### 推荐步骤
 
@@ -55,4 +55,4 @@ cargo tauri dev
 - 共用连接逻辑：**`crates/crabmate-connect`**（与 **`mobile-tauri`** 对齐）
 - 业务 UI：**[`frontend/README.md`](../frontend/README.md)**（契约钉版本见 [`docs/design/contract_pin.md`](../docs/design/contract_pin.md)）
 
-业务 UI 源码在本仓 **`frontend/`**；运行时仍由外部 **`crabmate serve`**（经 `CM_WEB_STATIC_DIR`）或壳同步的 dist 提供页面。
+业务 UI 源码在本仓 **`frontend/`**；运行时由壳加载包内 dist，API 指向外部 **`crabmate serve`**。

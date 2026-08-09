@@ -9,20 +9,21 @@
 | 项 | 说明 |
 |----|------|
 | `serve` | 已安装或已编译的 **`crabmate serve`**（勿 path 编译回主开发树做正式验收；开发期可用同级 `../crabmate_agent`） |
-| 业务 UI | 本仓 `make frontend` → `frontend/dist`；`serve` 设 `CM_WEB_STATIC_DIR`，或由 `prepare-sidecar` 同步进桌面 dist |
+| 业务 UI | 本仓 `make frontend` → `prepare-sidecar` 进 `desktop-tauri/dist`；连接后壳加载包内 `index.html` |
 | Bearer | 连接页填 **Web API 共享密钥**，不是模型 `API_KEY` |
 | 提示词 | `用一句话介绍你自己` → 助手终答或流式结束 |
 
 ## 2. Desktop
 
 ```bash
-# 终端 A（本仓 UI + Server）
-make frontend
-CM_WEB_STATIC_DIR="$PWD/frontend/dist" crabmate serve --host 127.0.0.1 --port 8080
-# 或: cd ../crabmate_agent && CM_WEB_STATIC_DIR=../crabmate-client/frontend/dist cargo run -- serve --host 127.0.0.1 --port 8080
+# 终端 A — 纯 API serve + CORS（壳加载包内 UI）
+CM_WEB_CORS_ALLOWED_ORIGINS='http://tauri.localhost' \
+  crabmate serve --host 127.0.0.1 --port 8080
+# 或: cd ../crabmate_agent && CM_WEB_CORS_ALLOWED_ORIGINS='http://tauri.localhost' \
+#       cargo run -- serve --host 127.0.0.1 --port 8080
 
 # 终端 B（本仓）
-make prepare-sidecar   # 可选：同步 frontend/dist
+make frontend && make prepare-sidecar
 cd desktop-tauri/src-tauri
 # 可选: CM_DESKTOP_SUGGESTED_URL=http://127.0.0.1:8080/
 cargo tauri dev

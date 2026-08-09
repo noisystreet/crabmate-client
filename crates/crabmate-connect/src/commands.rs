@@ -6,13 +6,13 @@ use tauri::{AppHandle, Manager, State, Url};
 
 use crate::allowed_origin::AllowedServeOrigin;
 use crate::cleartext::enforce_cleartext_connect_policy;
-use crate::handoff::{build_handoff_url, normalize_base_url};
+use crate::handoff::{build_local_ui_handoff_url, local_business_ui_url, normalize_base_url};
 use crate::keyring_bearer::{read_connect_bearer, write_connect_bearer_on_connect};
 use crate::navigation::is_app_origin;
 use crate::probe::probe_server;
 
 /// Android 默认资产源（`useHttpsScheme=false`）；桌面 Tauri 2 亦常用此 origin。
-const DEFAULT_CONNECT_HOME: &str = "http://tauri.localhost/";
+const DEFAULT_CONNECT_HOME: &str = "http://tauri.localhost/connect.html";
 
 static CONNECT_HOME: Mutex<Option<Url>> = Mutex::new(None);
 
@@ -38,7 +38,7 @@ fn remember_connect_home(url: &Url) {
     }
     let mut home = url.clone();
     home.set_fragment(None);
-    // 保留路径（桌面为 /connect.html）；去掉 manual 等 query 在 disconnect 时再设。
+    // 保留路径（桌面 / 移动均为 /connect.html）；disconnect 时再设 manual query。
     if let Ok(mut g) = CONNECT_HOME.lock() {
         *g = Some(home);
     }
@@ -52,7 +52,7 @@ fn connect_home_url() -> Url {
         .unwrap_or_else(|| Url::parse(DEFAULT_CONNECT_HOME).expect("DEFAULT_CONNECT_HOME"))
 }
 
-/// 在打开连接页后调用，确保断开时能回到正确的 App 资产 URL（桌面为 `/connect.html`）。
+/// 在打开连接页后调用，确保断开时能回到正确的 App 资产 URL（`/connect.html`）。
 pub fn seed_connect_home(url: &Url) {
     remember_connect_home(url);
 }
@@ -62,7 +62,7 @@ fn main_window(app: &AppHandle) -> Result<tauri::WebviewWindow, String> {
         .ok_or_else(|| "主窗口未就绪".to_string())
 }
 
-/// 探测 `/health` + `/user-data/prefs` 后导航到远程 UI；非空 Bearer 经 URL hash 交接。
+/// 探测 `/health` + `/user-data/prefs` 后加载**包内业务 UI**，经 hash 交接 API 基址与 Bearer。
 ///
 /// 成功连接且 Bearer 非空时**覆盖写入**系统钥匙串。
 #[tauri::command]
@@ -72,12 +72,12 @@ pub async fn connect_remote(
     bearer: Option<String>,
 ) -> Result<(), String> {
     let bearer = bearer.unwrap_or_default();
-    let base = normalize_base_url(&url)?;
-    enforce_cleartext_connect_policy(&base)?;
-    probe_server(&base, &bearer).await?;
+    let api_base = normalize_base_url(&url)?;
+    enforce_cleartext_connect_policy(&api_base)?;
+    probe_server(&api_base, &bearer).await?;
 
     if let Some(allowed) = app.try_state::<AllowedServeOrigin>() {
-        allowed.set_from_url(&base);
+        allowed.set_from_url(&api_base);
     }
 
     // 钥匙串失败不阻断连接（Android 无后端时由连接页写 Keystore 加密 prefs）。
@@ -85,14 +85,16 @@ pub async fn connect_remote(
         eprintln!("[crabmate-connect] keyring write skipped: {e}");
     }
 
-    let target = build_handoff_url(base, &bearer);
     let window = main_window(&app)?;
     if let Ok(current) = window.url() {
         remember_connect_home(&current);
     }
+
+    let ui = local_business_ui_url(&connect_home_url());
+    let target = build_local_ui_handoff_url(ui, &api_base, &bearer);
     window
         .navigate(target)
-        .map_err(|e| format!("无法打开远程界面: {e}"))?;
+        .map_err(|e| format!("无法打开本地界面: {e}"))?;
     Ok(())
 }
 

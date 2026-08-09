@@ -47,4 +47,4 @@ crabmate-chat-export = { git = "https://github.com/noisystreet/CrabMate", tag = 
 1. `bash scripts/check-no-main-path.sh`
 2. `bash scripts/check.sh`（含 frontend wasm check / clippy）
 3. `make frontend` → `trunk build`；产物在 `frontend/dist`
-4. 外部 `crabmate serve` + `CM_WEB_STATIC_DIR=$PWD/frontend/dist`，或 `make prepare-sidecar` 后桌面壳一轮对话（[`shell_smoke_runbook.md`](./shell_smoke_runbook.md)）
+4. 外部 `crabmate serve --with-web` + `CM_WEB_STATIC_DIR=$PWD/frontend/dist`，或 `make prepare-sidecar` 后桌面壳一轮对话（[`shell_smoke_runbook.md`](./shell_smoke_runbook.md)）

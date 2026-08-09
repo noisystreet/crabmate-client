@@ -15,8 +15,8 @@ import androidx.core.view.WindowInsetsCompat
 import kotlin.math.roundToInt
 
 class MainActivity : TauriActivity() {
-  /** 与 Tauri Android 默认资产源一致（`useHttpsScheme=false` → http）。 */
-  private var connectHomeUrl: String = "http://tauri.localhost/"
+  /** 与 Tauri Android 默认资产源一致（`useHttpsScheme=false` → http）。启动页为包内 connect.html。 */
+  private var connectHomeUrl: String = DEFAULT_CONNECT_HOME
   private var appWebView: WebView? = null
   private var exitConfirmDialog: AlertDialog? = null
 
@@ -47,7 +47,7 @@ class MainActivity : TauriActivity() {
     super.onResume()
     // AppPlugin 可能在首次 resume 前后才 load；每次回前台再盖过其 goBack 回调。
     installBackPressedHandler()
-    trimHistoryIfRemote()
+    trimHistoryIfNotConnectPage()
   }
 
   /** 注册（或重新注册）返回键回调，确保优先于 Tauri AppPlugin 的默认 goBack。 */
@@ -57,12 +57,12 @@ class MainActivity : TauriActivity() {
       object : OnBackPressedCallback(true) {
         override fun handleOnBackPressed() {
           val url = appWebView?.url
-          if (isAppOrigin(url)) {
+          if (isConnectPageUrl(url)) {
             // 连接页：确认后退出
-            showExitConfirmDialog(fromRemote = false)
+            showExitConfirmDialog(offerReturnToConnect = false)
           } else {
-            // 远程主界面：可退出 App，或回到连接页换服务器
-            showExitConfirmDialog(fromRemote = true)
+            // 包内业务 UI 或（过渡期）远程 serve：可退出，或回到连接页换服务器
+            showExitConfirmDialog(offerReturnToConnect = true)
           }
         }
       }
@@ -71,19 +71,19 @@ class MainActivity : TauriActivity() {
   }
 
   /**
-   * 已在远程 serve 时清掉退回连接页的历史。
+   * 已离开连接页时清掉可 goBack 的历史（包内 index 或远程 serve）。
    * 若 AppPlugin 仍抢到 Back：canGoBack==false 时会转交 activity.onBackPressed，落到我们的确认框。
    */
-  private fun trimHistoryIfRemote() {
+  private fun trimHistoryIfNotConnectPage() {
     val view = appWebView ?: return
-    if (!isAppOrigin(view.url) && view.canGoBack()) {
+    if (!isConnectPageUrl(view.url) && view.canGoBack()) {
       view.clearHistory()
     }
   }
 
   /**
    * WebView 就绪后短窗口内多次重钉回调，覆盖 Rust 侧晚到的 AppPlugin 构造。
-   * 同时在已导航到远程时 trim history。
+   * 同时在已离开连接页时 trim history。
    */
   private fun scheduleBackHandlerDominance(webView: WebView) {
     installBackPressedHandler()
@@ -92,7 +92,7 @@ class MainActivity : TauriActivity() {
       webView.postDelayed(
         {
           installBackPressedHandler()
-          trimHistoryIfRemote()
+          trimHistoryIfNotConnectPage()
         },
         delayMs,
       )
@@ -101,9 +101,9 @@ class MainActivity : TauriActivity() {
 
   /**
    * 系统返回键确认框。
-   * @param fromRemote 远程主界面时额外提供「返回连接页」。
+   * @param offerReturnToConnect 业务 UI 时额外提供「返回连接页」。
    */
-  private fun showExitConfirmDialog(fromRemote: Boolean) {
+  private fun showExitConfirmDialog(offerReturnToConnect: Boolean) {
     if (exitConfirmDialog?.isShowing == true) {
       return
     }
@@ -112,7 +112,7 @@ class MainActivity : TauriActivity() {
         .Builder(this)
         .setTitle(R.string.exit_confirm_title)
         .setMessage(
-          if (fromRemote) {
+          if (offerReturnToConnect) {
             R.string.exit_confirm_message_remote
           } else {
             R.string.exit_confirm_message
@@ -120,7 +120,7 @@ class MainActivity : TauriActivity() {
         ).setNegativeButton(R.string.exit_confirm_cancel, null)
         .setPositiveButton(R.string.exit_confirm_ok) { _, _ -> finishAffinity() }
         .setOnDismissListener { exitConfirmDialog = null }
-    if (fromRemote) {
+    if (offerReturnToConnect) {
       builder.setNeutralButton(R.string.exit_confirm_to_connect) { _, _ -> loadConnectPage() }
     }
     exitConfirmDialog = builder.show()
@@ -137,7 +137,7 @@ class MainActivity : TauriActivity() {
     appWebView = webView
     WindowCompat.setDecorFitsSystemWindows(window, true)
     window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
-    // 与前端 `--bg` 对齐：远程 HTML/WASM 未就绪前避免系统默认纯黑空页。
+    // 与前端 `--bg` 对齐：HTML/WASM 未就绪前避免系统默认纯黑空页。
     webView.setBackgroundColor(android.graphics.Color.parseColor("#0A0D12"))
     // 允许系统 Autofill / 密码管理器填充连接页的 URL+Bearer
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -151,12 +151,12 @@ class MainActivity : TauriActivity() {
       // 勿 CONSUMED：让 WebView/Chromium 仍能收到 insets（visualViewport / safe-area）。
       insets
     }
-    webView.post { rememberConnectHomeIfAppOrigin(webView.url) }
+    webView.post { rememberConnectHomeIfConnectPage(webView.url) }
     scheduleBackHandlerDominance(webView)
   }
 
   /**
-   * 写入远程 Web 的安全区与软键盘 inset。
+   * 写入 Web 的安全区与软键盘 inset。
    * `--cm-ime-inset`：IME 相对导航栏多出的高度（targetSdk 35+ 上 adjustResize 常不缩小窗口时的兜底）。
    */
   private fun injectSafeInsetsCss(
@@ -185,25 +185,30 @@ class MainActivity : TauriActivity() {
     return ((ime - nav).coerceAtLeast(0) / density).roundToInt()
   }
 
-  private fun rememberConnectHomeIfAppOrigin(url: String?) {
-    if (url.isNullOrBlank() || !isAppOrigin(url)) {
+  /** 仅当当前确为连接页时更新 home；勿用包内 index.html 覆盖。 */
+  private fun rememberConnectHomeIfConnectPage(url: String?) {
+    if (url.isNullOrBlank() || !isConnectPageUrl(url)) {
       return
     }
-    connectHomeUrl = stripFragmentAndQuery(url).ifBlank { "http://tauri.localhost/" }
+    connectHomeUrl = stripFragmentAndQuery(url).ifBlank { DEFAULT_CONNECT_HOME }
   }
 
   private fun loadConnectPage() {
     val view = appWebView ?: return
-    rememberConnectHomeIfAppOrigin(view.url)
-    val base = connectHomeUrl.ifBlank { "http://tauri.localhost/" }
+    // 勿用当前业务 UI URL 覆盖 connectHome（Phase 2 同为 tauri.localhost）。
+    val base =
+      when {
+        isConnectPageUrl(connectHomeUrl) -> stripFragmentAndQuery(connectHomeUrl)
+        else -> DEFAULT_CONNECT_HOME
+      }
     // ?manual=1：跳过连接页冷启动自动登录，便于更换服务器
     val sep = if (base.contains('?')) '&' else '?'
     view.loadUrl("$base${sep}manual=1")
-    // 页面提交后再清后退栈（慢网多试一次）；避免 goBack 退回远程或误走无 manual 的历史项。
+    // 页面提交后再清后退栈（慢网多试一次）；避免 goBack 退回业务 UI 或误走无 manual 的历史项。
     for (delayMs in longArrayOf(400L, 1200L)) {
       view.postDelayed(
         {
-          if (isAppOrigin(view.url)) {
+          if (isConnectPageUrl(view.url)) {
             view.clearHistory()
           }
         },
@@ -251,18 +256,18 @@ class MainActivity : TauriActivity() {
   }
 
   /**
-   * 仅当 WebView **已加载**且确认为连接页 Origin 时允许读写加密 Bearer。
-   * 与 [isAppOrigin] 不同：URL 为空时拒绝（避免远程页加载间隙误放行）。
+   * 仅当 WebView **已加载**且确认为连接页时允许读写加密 Bearer。
+   * URL 为空或业务 UI 时拒绝（避免包内 index / 远程页误放行）。
    */
   private fun allowSecureBearerBridge(): Boolean {
     val url = appWebView?.url
     if (url.isNullOrBlank()) {
       return false
     }
-    return isAppOrigin(url)
+    return isConnectPageUrl(url)
   }
 
-  /** 供连接页 / 远程 Web 调用。 */
+  /** 供连接页 / 包内业务 UI 调用。 */
   inner class MobileBridge {
     @JavascriptInterface
     fun disconnect() {
@@ -281,7 +286,7 @@ class MainActivity : TauriActivity() {
     fun getNavBarInsetPx(): Int = navBarInsetCssPx()
 
     /**
-     * 读取 Keystore AES-GCM 加密的连接 Bearer。仅连接页 Origin；远程调用返回空串。
+     * 读取 Keystore AES-GCM 加密的连接 Bearer。仅连接页；业务 UI 调用返回空串。
      */
     @JavascriptInterface
     fun getSecureBearer(): String {
@@ -296,7 +301,7 @@ class MainActivity : TauriActivity() {
     }
 
     /**
-     * 写入（或清空）加密 Bearer。仅连接页 Origin；空串删除条目。
+     * 写入（或清空）加密 Bearer。仅连接页；空串删除条目。
      * @return true 表示已写入/清除；false 表示拒绝或存储不可用
      */
     @JavascriptInterface
@@ -316,9 +321,9 @@ class MainActivity : TauriActivity() {
     fun notifyLoginSuccess() {
       runOnUiThread {
         autofillManager()?.commit()
-        // 手动连接成功后即将 navigate 到远程；短延迟清 history，降低 goBack 退回裸连接页的窗口。
-        appWebView?.postDelayed({ trimHistoryIfRemote() }, 500)
-        appWebView?.postDelayed({ trimHistoryIfRemote() }, 1500)
+        // 手动连接成功后即将 navigate 到包内 UI；短延迟清 history。
+        appWebView?.postDelayed({ trimHistoryIfNotConnectPage() }, 500)
+        appWebView?.postDelayed({ trimHistoryIfNotConnectPage() }, 1500)
       }
     }
 
@@ -330,7 +335,7 @@ class MainActivity : TauriActivity() {
       }
     }
 
-    /** 在系统浏览器中打开 http(s)/mailto（远程 WebView 内 `window.open` 通常无效）。 */
+    /** 在系统浏览器中打开 http(s)/mailto（WebView 内 `window.open` 通常无效）。 */
     @JavascriptInterface
     fun openExternalUrl(url: String) {
       runOnUiThread {
@@ -349,9 +354,11 @@ class MainActivity : TauriActivity() {
   }
 
   companion object {
+    const val DEFAULT_CONNECT_HOME: String = "http://tauri.localhost/connect.html"
+
     /**
-     * 是否为壳内连接页 Origin。按 scheme + host 解析，禁止 `contains("://tauri.localhost")`
-     * 子串误判（恶意查询串可污染 [connectHomeUrl]）。
+     * 是否为壳内 App 资产 Origin（连接页或包内业务 UI）。
+     * 按 scheme + host 解析，禁止 `contains("://tauri.localhost")` 子串误判。
      */
     fun isAppOrigin(url: String?): Boolean {
       if (url.isNullOrBlank()) {
@@ -374,6 +381,22 @@ class MainActivity : TauriActivity() {
             false
           }
         }
+      } catch (_: Exception) {
+        false
+      }
+    }
+
+    /** 是否为连接页（`…/connect.html`）；包内 `index.html` 不算。 */
+    fun isConnectPageUrl(url: String?): Boolean {
+      if (url.isNullOrBlank() || !isAppOrigin(url)) {
+        return false
+      }
+      return try {
+        val path =
+          android.net.Uri
+            .parse(url)
+            .path ?: return false
+        path.endsWith("connect.html")
       } catch (_: Exception) {
         false
       }

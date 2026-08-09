@@ -15,6 +15,8 @@
 #   CM_WEB_STATIC_DIR      UI dist（默认本仓 frontend/dist）
 #   CM_E2E_BUILD_FRONTEND  为 1 且 dist 缺失时执行 make frontend
 #   E2E_DIR                Playwright 目录（默认 e2e/）
+#
+# 说明：Server 默认纯 API；本脚本托管 SPA，启动时始终传 --with-web。
 
 set -euo pipefail
 
@@ -81,15 +83,17 @@ export RUST_LOG="${CM_E2E_RUST_LOG:-warn}"
 SERVER_DIR="$(resolve_server_dir)"
 
 start_backend() {
+  # Server 默认不挂 SPA；E2E 需要 UI，必须显式 --with-web（配合 CM_WEB_STATIC_DIR）。
+  local serve_args=(serve --with-web --port "$PORT")
   if [[ -n "${CRABMATE_BIN:-}" ]]; then
     echo ">>> 启动后端 (CRABMATE_BIN=$CRABMATE_BIN)..."
-    "$CRABMATE_BIN" serve --port "$PORT" &
+    "$CRABMATE_BIN" "${serve_args[@]}" &
     BACKEND_PID=$!
     return
   fi
   if command -v crabmate >/dev/null 2>&1; then
     echo ">>> 启动后端 (PATH crabmate)..."
-    crabmate serve --port "$PORT" &
+    crabmate "${serve_args[@]}" &
     BACKEND_PID=$!
     return
   fi
@@ -98,14 +102,14 @@ start_backend() {
     "${SERVER_DIR:+$SERVER_DIR/target/release/crabmate}"; do
     if [[ -n "$cand" && -x "$cand" ]]; then
       echo ">>> 启动后端 ($cand)..."
-      "$cand" serve --port "$PORT" &
+      "$cand" "${serve_args[@]}" &
       BACKEND_PID=$!
       return
     fi
   done
   if [[ -n "$SERVER_DIR" && -f "$SERVER_DIR/Cargo.toml" ]]; then
     echo ">>> 启动后端 (cargo run @ $SERVER_DIR)..."
-    (cd "$SERVER_DIR" && cargo run -- serve --port "$PORT") &
+    (cd "$SERVER_DIR" && cargo run -- "${serve_args[@]}") &
     BACKEND_PID=$!
     return
   fi

@@ -3,7 +3,7 @@
 # mock SSE 基线（不依赖 LLM）。真实 LLM 仅本地：
 #   cd e2e && npx playwright test specs/real-llm-*.spec.ts
 #
-# CI：本仓 make frontend + checkout Server 编 serve，经 CM_WEB_STATIC_DIR 托管。
+# CI：本仓 make frontend + checkout Server 编 serve，经 CM_WEB_STATIC_DIR + --with-web 托管。
 
 name: E2E Playwright
 
@@ -68,7 +68,8 @@ jobs:
         env:
           CM_WEB_STATIC_DIR: ${{ github.workspace }}/frontend/dist
         run: |
-          ./crabmate-server/target/debug/crabmate serve &
+          # Server 默认纯 API；托管 SPA 须 --with-web
+          ./crabmate-server/target/debug/crabmate serve --with-web &
           sleep 5
           for i in $(seq 1 30); do
             if curl -sf http://127.0.0.1:8080/health > /dev/null 2>&1; then

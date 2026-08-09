@@ -135,33 +135,20 @@ wait_http_health() {
     done
 }
 
-# 独立启动 serve（壳不再 spawn）；尽量带上前端 dist，避免空白页导致无 JS bridge
+# 独立启动 serve（壳不再 spawn）。Phase 2：壳加载包内 UI，serve 默认纯 API。
+# 须 CORS 放行 http://tauri.localhost（桌面 WebView Origin）。
 start_serve_background() {
     : >"$SERVE_LOG"
-    local static_dir=""
-    if [[ -n "${CM_WEB_STATIC_DIR:-}" ]]; then
-      static_dir="${CM_WEB_STATIC_DIR}"
-    elif [[ -n "${CRABMATE_FRONTEND_DIST:-}" && "${CRABMATE_FRONTEND_DIST}" != "-" ]]; then
-      static_dir="${CRABMATE_FRONTEND_DIST}"
-    elif [[ -f "${ROOT}/frontend/dist/index.html" ]]; then
-      static_dir="${ROOT}/frontend/dist"
-    elif [[ "${CRABMATE_ALLOW_SIBLING_FRONTEND:-0}" == "1" || "${CRABMATE_ALLOW_SIBLING_FRONTEND:-}" == "true" || "${CRABMATE_ALLOW_SIBLING_FRONTEND:-}" == "yes" ]]; then
-      if [[ -f "${ROOT}/../crabmate_agent/frontend/dist/index.html" ]]; then
-        static_dir="${ROOT}/../crabmate_agent/frontend/dist"
-      fi
-    fi
     local serve_cwd="${ROOT}"
     if [[ -d "${ROOT}/../crabmate_agent" ]]; then
       serve_cwd="${ROOT}/../crabmate_agent"
     fi
     (
       cd "${serve_cwd}"
-      if [[ -n "${static_dir}" ]]; then
-        export CM_WEB_STATIC_DIR="${static_dir}"
-      fi
       exec env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY \
         no_proxy=127.0.0.1,localhost \
         CM_E2E_FIXTURES="${CM_E2E_FIXTURES:-1}" \
+        CM_WEB_CORS_ALLOWED_ORIGINS="${CM_WEB_CORS_ALLOWED_ORIGINS:-http://tauri.localhost}" \
         "$BACKEND_BIN" serve --host 127.0.0.1 --port "$SERVE_PORT"
     ) >>"$SERVE_LOG" 2>&1 &
     echo $!
@@ -295,15 +282,17 @@ wait_for_victauri_health "$APP_PID"
 echo ">>> Waiting for main window (page load, ${VICTAURI_MAIN_WINDOW_WAIT}s) ..."
 sleep "$VICTAURI_MAIN_WINDOW_WAIT"
 
-# 确认 serve UI 可取（空白页会导致 bridge invoke 失败）。
-# 勿 pipeline 到 head：curl -sf 遇 SIGPIPE 会误报失败。
-_serve_snip="$(curl --noproxy '*' --connect-timeout 2 --max-time 5 -sf \
-  "${SERVE_URL%/}/" | dd bs=200 count=1 2>/dev/null || true)"
-if ! printf '%s' "${_serve_snip}" | grep -qi 'html'; then
-  echo "   WARN: serve root does not look like HTML UI; DOM bridge tests may fail" >&2
-  echo "   set CM_WEB_STATIC_DIR or CRABMATE_FRONTEND_DIST to a built frontend/dist" >&2
+# Phase 2：业务 UI 在壳包内；serve 纯 API 时根路径 404 为预期。
+echo ">>> Checking serve /health (API-only OK) ..."
+if ! curl --noproxy '*' --connect-timeout 2 --max-time 5 -sf \
+  "http://127.0.0.1:${SERVE_PORT}/health" >/dev/null; then
+  echo "   WARN: serve /health failed after start; DOM bridge tests may fail" >&2
 fi
-unset _serve_snip
+
+# 确认桌面 dist 有业务 UI（prepare-sidecar 应已同步）。
+if [[ ! -f "${ROOT}/desktop-tauri/dist/index.html" ]]; then
+  echo "   WARN: desktop-tauri/dist/index.html missing; run make prepare-sidecar" >&2
+fi
 
 # ── Phase 5: Clean stale discovery dirs ────────────────────
 for d in /tmp/victauri/*/port; do
@@ -367,6 +356,7 @@ kill "$APP_PID" 2>/dev/null || true
 kill "$SERVE_PID" 2>/dev/null || true
 pkill -f 'target/debug/crabmate-desktop' 2>/dev/null || true
 pkill -f "crabmate serve --host 127.0.0.1 --port ${SERVE_PORT}" 2>/dev/null || true
+pkill -f "serve --host 127.0.0.1 --port ${SERVE_PORT}" 2>/dev/null || true
 wait 2>/dev/null || true
 
 echo ""

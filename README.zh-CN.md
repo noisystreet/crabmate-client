@@ -60,27 +60,30 @@ make clean
 
 提交前：`pre-commit run --all-files` 或 `make check`。CI：`.github/workflows/ci.yml`（含 **frontend wasm** 与 **desktop release .deb**）。
 
-## 快速开始（业务 UI + serve）
+## 快速开始（Desktop）
+
+前置：已启动 **`crabmate serve`**（默认纯 API）。须 CORS 放行壳 Origin：
+
+```bash
+# 终端 A — Server（壳路径不必 --with-web）
+CM_WEB_CORS_ALLOWED_ORIGINS='http://tauri.localhost' \
+  crabmate serve --host 127.0.0.1 --port 8080
+
+# 终端 B — 本仓
+make frontend           # prepare-sidecar 会同步进 desktop-tauri/dist
+make desktop-dev
+```
+
+连接页填写服务器地址与可选 Web Bearer（**不是**模型 `API_KEY`）。连接成功后加载**包内** `index.html`，API 指向该 `serve`。
+
+## 快速开始（浏览器 + serve 托管 UI）
+
+仅用于 Playwright / 同 Origin 浏览器调试（非 Desktop/Android 主路径）：
 
 ```bash
 make frontend
-# 另开终端：主仓或已安装的 crabmate
-CM_WEB_STATIC_DIR="$PWD/frontend/dist" crabmate serve --host 127.0.0.1 --port 8080
+CM_WEB_STATIC_DIR="$PWD/frontend/dist" crabmate serve --with-web --host 127.0.0.1 --port 8080
 ```
-
-## 快速开始（Desktop）
-
-前置：本机或远程已启动 **`crabmate serve`**（默认 `http://127.0.0.1:8080/`）。
-
-```bash
-make frontend           # 可选：把 UI 同步进 desktop-tauri/dist
-# 或：export CRABMATE_FRONTEND_DIST=$PWD/frontend/dist
-
-make desktop-dev
-# 或：cd desktop-tauri/src-tauri && cargo tauri dev
-```
-
-连接页填写服务器地址与可选 Web Bearer（**不是**模型 `API_KEY`）。
 
 ## 快速开始（Android）
 

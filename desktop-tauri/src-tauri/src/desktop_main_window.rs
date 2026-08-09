@@ -67,25 +67,34 @@ enum MainWindowMode {
     DirectUi,
 }
 
-/// E2E / `CM_DESKTOP_SKIP_CONNECT`：直接打开已运行的 `serve` URL。
+/// E2E / `CM_DESKTOP_SKIP_CONNECT`：包内业务 UI + API 基址指向已运行的 `serve`。
 pub(crate) fn create_main_window_from_url(
     app_handle: &tauri::AppHandle,
     ready_url: String,
 ) -> Result<(), String> {
-    let parsed_url: Url = ready_url
-        .parse()
+    let api_base = crabmate_connect::normalize_base_url(&ready_url)
         .map_err(|e| format!("invalid serve url `{ready_url}`: {e}"))?;
-    let backend_origin = parsed_url.origin();
+    let backend_origin = api_base.origin();
     if let Some(allowed) = app_handle.try_state::<crabmate_connect::AllowedServeOrigin>() {
-        allowed.set_from_url(&parsed_url);
+        allowed.set_from_url(&api_base);
     }
-    finish_create_main_window(
+    let bearer = std::env::var("CM_WEB_API_BEARER_TOKEN").unwrap_or_default();
+    let home = Url::parse("http://tauri.localhost/connect.html")
+        .map_err(|e| format!("invalid local connect placeholder: {e}"))?;
+    crabmate_connect::seed_connect_home(&home);
+    let ui = crabmate_connect::local_business_ui_url(&home);
+    let target = crabmate_connect::build_local_ui_handoff_url(ui, &api_base, &bearer);
+    // 先挂 App 资产，再 navigate 带 hash 交接（避免 External 解析差异）。
+    let window = finish_create_main_window(
         app_handle,
-        WebviewUrl::External(parsed_url),
+        WebviewUrl::App("index.html".into()),
         backend_origin,
         MainWindowMode::DirectUi,
-    )
-    .map(|_| ())
+    )?;
+    window
+        .navigate(target)
+        .map_err(|e| format!("failed to open local UI with API handoff: {e}"))?;
+    Ok(())
 }
 
 /// 展示共用连接页；可选预填建议服务器 URL（经 `get_suggested_server_url`）。
@@ -119,10 +128,7 @@ pub(crate) fn create_main_window_connect_page(
 }
 
 fn is_connect_page_url(url: &Url) -> bool {
-    let host = url.host_str().unwrap_or("");
-    matches!(url.scheme(), "tauri" | "asset")
-        || host.eq_ignore_ascii_case("tauri.localhost")
-        || url.path().ends_with("connect.html")
+    crabmate_connect::is_connect_page_url(url)
 }
 
 fn apply_connect_page_geometry(window: &WebviewWindow) {

@@ -5,7 +5,7 @@
 - Project: `crabmate-client`
 - Purpose: Official Client (Desktop Linux / Android Tauri shells + `crabmate-connect` + business UI `frontend/`); connects to a running `crabmate serve`; does **not** maintain the Server
 - Tech stack: Rust, Tauri 2, Leptos CSR (WASM)
-- Target: Desktop Linux, Android; browsers load this repo’s `frontend/dist` via `serve` + `CM_WEB_STATIC_DIR`
+- Target: Desktop Linux, Android; shells load packaged `frontend/dist`; API calls go to remote `serve` (set `CM_WEB_CORS_ALLOWED_ORIGINS=http://tauri.localhost` for Desktop)
 
 ## Directory Overview
 

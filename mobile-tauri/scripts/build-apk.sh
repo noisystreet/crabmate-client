@@ -1,7 +1,7 @@
-#!/usr/bin/env bash
-# 构建 CrabMate Android APK（远程薄客户端，无 sidecar）。
-# 默认跳过前端构建（业务 UI 由远程 serve 经 CM_WEB_STATIC_DIR 提供）。
-# 若需同步构建本仓 UI：设 CM_MOBILE_BUILD_FRONTEND=1（默认本仓 frontend/；可设 CRABMATE_FRONTEND_DIR）。
+#! /usr/bin/env bash
+# 构建 CrabMate Android APK（包内业务 UI + 远程 API）。
+# 默认：同步本仓 frontend/dist 进 mobile-tauri/dist（Phase 2）。
+# 设 CM_MOBILE_SKIP_FRONTEND=1 可跳过 trunk；仍会尝试 prepare-mobile 用已有 dist。
 # 用法（仓库根或任意目录）:
 #   ./mobile-tauri/scripts/build-apk.sh
 #   MOBILE_ANDROID_TARGET=aarch64 CM_MOBILE_GRADLE_STOP=1 ./mobile-tauri/scripts/build-apk.sh
@@ -26,7 +26,11 @@ fi
 
 target="${MOBILE_ANDROID_TARGET:-aarch64}"
 gradle_stop="${CM_MOBILE_GRADLE_STOP:-0}"
-build_frontend="${CM_MOBILE_BUILD_FRONTEND:-0}"
+# 兼容旧变量名：CM_MOBILE_BUILD_FRONTEND=0 曾表示跳过；现默认构建/同步
+skip_frontend="${CM_MOBILE_SKIP_FRONTEND:-0}"
+if [[ "${CM_MOBILE_BUILD_FRONTEND:-}" == "0" || "${CM_MOBILE_BUILD_FRONTEND:-}" == "false" ]]; then
+  skip_frontend=1
+fi
 
 die() {
   echo "错误: $*" >&2
@@ -37,9 +41,11 @@ command -v cargo >/dev/null 2>&1 || die "未找到 cargo"
 command -v cargo-tauri >/dev/null 2>&1 || command -v tauri >/dev/null 2>&1 || \
   die "未找到 Tauri CLI。请执行: cargo install tauri-cli --version \"^2\""
 
-if [[ "${build_frontend}" == "1" || "${build_frontend}" == "true" || "${build_frontend}" == "yes" ]]; then
+if [[ "${skip_frontend}" == "1" || "${skip_frontend}" == "true" || "${skip_frontend}" == "yes" ]]; then
+  echo "跳过 trunk（CM_MOBILE_SKIP_FRONTEND）；仍执行 prepare-mobile"
+else
   [[ -n "${frontend_dir}" && -d "${frontend_dir}" ]] || \
-    die "CM_MOBILE_BUILD_FRONTEND=1 但找不到 frontend（设 CRABMATE_FRONTEND_DIR）"
+    die "找不到 frontend（设 CRABMATE_FRONTEND_DIR 或 CM_MOBILE_SKIP_FRONTEND=1）"
   command -v trunk >/dev/null 2>&1 || die "未找到 trunk（前端构建需要）。见 https://trunkrs.dev/ 或: cargo install trunk"
   echo "building frontend (trunk) in ${frontend_dir}…"
   rustup target add wasm32-unknown-unknown 2>/dev/null || true
@@ -48,10 +54,11 @@ if [[ "${build_frontend}" == "1" || "${build_frontend}" == "true" || "${build_fr
     trunk_flags+=(--release)
   fi
   (cd "${frontend_dir}" && trunk build "${trunk_flags[@]+"${trunk_flags[@]}"}")
-  echo "提示: 远程 UI 来自 serve 的 frontend/dist；请重启 serve 后再用手机连接。"
-else
-  echo "跳过 frontend（默认；需要时设 CM_MOBILE_BUILD_FRONTEND=1）"
 fi
+
+echo "preparing mobile dist (UI + connect.html)…"
+CM_PREPARE_REQUIRE_FRONTEND="${CM_PREPARE_REQUIRE_FRONTEND:-1}" \
+  bash "${mobile_root}/scripts/prepare-mobile.sh"
 
 if ! command -v javac >/dev/null 2>&1; then
   die "未找到 javac（需要完整 JDK，不是仅 JRE）。设置 JAVA_HOME 后重试"
