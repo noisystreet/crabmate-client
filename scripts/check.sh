@@ -14,11 +14,8 @@ echo "[check] cargo fmt (desktop + mobile + connect + frontend)"
 (cd crates/crabmate-connect && cargo fmt --all -- --check)
 (cd frontend && cargo fmt --all -- --check)
 
-echo "[check] ensure desktop dist stubs for tauri codegen"
-mkdir -p desktop-tauri/dist
-[[ -f desktop-tauri/dist/index.html ]] || echo '<html></html>' > desktop-tauri/dist/index.html
-[[ -f desktop-tauri/dist/splash.html ]] || echo '<html></html>' > desktop-tauri/dist/splash.html
-[[ -f desktop-tauri/dist/connect.html ]] || cp crates/crabmate-connect/assets/connect.html desktop-tauri/dist/connect.html
+echo "[check] ensure desktop/mobile dist stubs for tauri codegen"
+bash "$ROOT/scripts/ensure-tauri-dist-stubs.sh"
 
 echo "[check] cargo clippy desktop"
 (cd desktop-tauri/src-tauri && cargo clippy --all-targets -- -D warnings)

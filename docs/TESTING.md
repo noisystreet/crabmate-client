@@ -24,7 +24,7 @@ pre-commit run --all-files
 |------|------|
 | `check-no-main-path` | 禁止 Cargo path 回主仓 |
 | `cargo-fmt` | desktop / mobile / connect / frontend |
-| `desktop-dist-stubs` | tauri-build 所需 dist 占位 |
+| `desktop-dist-stubs` → **`tauri-dist-stubs`** | 为 **desktop/mobile** `frontendDist` 建占位（`scripts/ensure-tauri-dist-stubs.sh`；与 CI `check.sh` 共用） |
 | `desktop-clippy` / `mobile-clippy` / `connect-clippy` | `-D warnings` |
 | `frontend-wasm-check` / `frontend-clippy` | wasm32 check + clippy |
 | `lizard-rust` | 按模块限制 CCN>10 函数个数（含 `frontend`；见 `lizard_module_ccn_caps.toml`）。实测必须等于 cap；变小则失败，须调低 cap 或 `bash scripts/lizard-rust.sh --write-caps` |
