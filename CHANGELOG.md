@@ -19,6 +19,7 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 - Pin Server contract crates and Playwright serve checkout to product tag **`v0.1.0`** (was `client-contract-v0.1.0` / unpinned default branch)
 - Android: keep the system Back handler above Tauri `AppPlugin` (re-install after WebView ready, on resume, and briefly thereafter) and trim WebView history on remote so Back cannot `goBack()` to a bare connect page and auto-login; returning to connect still uses `?manual=1`
 - Android: wire WebView navigation allowlist (`AllowedServeOrigin` via `crabmate-shell-navigation`); parse connect-page origin by host (not substring); keep `MobileBridge` in ProGuard
+- Connect: reject cleartext HTTP to public hosts (LAN/loopback/`.local` still allowed; public must use HTTPS); probe follows redirects only when the host is unchanged
 - Post-connect first paint: LLM hydrate runs in parallel with session list; hydrate path no longer repeats `GET /user-data/prefs`; `initialized` still waits for prefs to land, avoiding a read-only TTL race on the first chat
 - CodeMirror: load `ide-codemirror.js` dynamically when entering the IDE so it no longer blocks chat cold start
 - Desktop: maximize on page-load **Started** when navigating to the `serve` UI; no need to wait for WASM Finished

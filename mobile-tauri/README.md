@@ -18,7 +18,7 @@
 
 连接页将 **服务器 URL** 写入 `localStorage`（`crabmate.connect.serverUrl`，并兼容旧键 `crabmate.mobile.*`），下次冷启动自动探测并登录。也可配合系统 Autofill / 密码管理器（表单 `username`=`服务器地址`，`password`=`Bearer`；手动连接成功后 `AutofillManager.commit()`）。侧栏工具栏 **断开** 图标或系统返回键回到连接页时带 `?manual=1`，**不会**立刻自动重连，便于更换服务器。空 Bearer 不会写 hash，以免清掉远程源已有凭证。
 
-`gen/android/app/build.gradle.kts` 中 release 的 `usesCleartextTraffic=true` 为局域网明文 HTTP 而设；若重新执行 `tauri android init`，需再确认该补丁与下方签名配置仍在。公网请用 HTTPS。
+`gen/android/app/build.gradle.kts` 中 release 的 `usesCleartextTraffic=true` 与 `network_security_config.xml` 为**局域网**明文 HTTP WebView 而设（Android NSC 无法按 RFC1918 网段放行）。连接层（`crabmate-connect`）会拒绝公网 `http://` 主机，公网须 **HTTPS**；探测禁止跨 host 重定向。若重新执行 `tauri android init`，需再确认上述补丁与下方签名配置仍在。
 
 `MainActivity` **不**调用 `enableEdgeToEdge()`，避免 WebView 内容画进系统状态栏后与壳顶栏按钮重叠（Android WebView 一般不提供可用的 `safe-area-inset-*`）。软键盘：manifest / `onCreate` / `onStart` / `onWebViewCreate` 设置 **`windowSoftInputMode=adjustResize`**；在 **targetSdk 35+** 上 resize 常不可靠，故 `OnApplyWindowInsetsListener` 另将 **IME 相对导航栏高度** 写入 CSS **`--cm-ime-inset`**，与前端 **`--vv-keyboard-inset`** 取 `max` 抬高底部 composer。
 

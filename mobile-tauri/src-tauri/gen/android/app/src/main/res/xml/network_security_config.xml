@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  WebView 仍需访问局域网明文 serve（RFC1918 无法用 domain 列表表达），故 base 允许 cleartext。
+  连接层另有策略（crabmate-connect）：公网 http 主机在 connect_remote 被拒绝，须 HTTPS。
+  debug 构建同样允许明文，便于模拟器 / 本机调试。
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+    <debug-overrides>
+        <base-config cleartextTrafficPermitted="true" />
+    </debug-overrides>
+</network-security-config>

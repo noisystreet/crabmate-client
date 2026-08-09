@@ -54,7 +54,7 @@ android {
             }
         }
         getByName("release") {
-            // Phase 1：允许局域网明文 HTTP 连接远程 serve；公网请用 HTTPS。
+            // 局域网 WebView 仍需明文 HTTP；公网 http 由 crabmate-connect 连接策略拒绝（须 HTTPS）。
             manifestPlaceholders["usesCleartextTraffic"] = "true"
             isMinifyEnabled = true
             if (keystorePropertiesFile.exists()) {

@@ -5,6 +5,7 @@ use std::sync::Mutex;
 use tauri::{AppHandle, Manager, State, Url};
 
 use crate::allowed_origin::AllowedServeOrigin;
+use crate::cleartext::enforce_cleartext_connect_policy;
 use crate::handoff::{build_handoff_url, normalize_base_url};
 use crate::keyring_bearer::{read_connect_bearer, write_connect_bearer_on_connect};
 use crate::navigation::is_app_origin;
@@ -72,6 +73,7 @@ pub async fn connect_remote(
 ) -> Result<(), String> {
     let bearer = bearer.unwrap_or_default();
     let base = normalize_base_url(&url)?;
+    enforce_cleartext_connect_policy(&base)?;
     probe_server(&base, &bearer).await?;
 
     if let Some(allowed) = app.try_state::<AllowedServeOrigin>() {
