@@ -1,27 +1,38 @@
 ---
-description: 壳行为或架构变更时同步本仓文档；契约/协议只链主仓
+description: Sync this-repo docs on shell/behavior changes; EN/ZH pairs together; contracts link to Server only
 alwaysApply: true
 ---
 
-# 文档同步（crabmate-client）
+# Doc sync (crabmate-client)
 
-## 本仓须更新
+## EN/ZH sync (hard rule)
 
-- 用户可见壳行为 → `README.md` 与对应 `desktop-tauri/` / `mobile-tauri/` README
-- 连接模型、生命周期、托盘/单实例 → `docs/design/tauri_gui_mvp_design.md`
-- 人工壳冒烟步骤 → `docs/design/shell_smoke_runbook.md`
-- 测试/检查入口 → `docs/TESTING.md`、`AGENTS.md` Required Commands
+- When bilingual pairs exist, **update both sides in the same change**; never English-only or Chinese-only
+- Current pair: `README.md` ↔ `README.zh-CN.md`
+- Facts, commands, paths, and constraints must match; wording may be localized; content drift is forbidden
+- Future `*.zh-CN.md` / English counterparts follow the same rule
+- `AGENTS.md` is **English-only** (no `AGENTS.zh-CN.md`)
 
-## 勿在本仓「另起炉灶」
+## Update in this repo
 
-以下变更写 **Server 主仓**，本仓最多加链接：
+- User-visible shell behavior → **`README.md` + `README.zh-CN.md` (must sync)**, plus matching `desktop-tauri/` / `mobile-tauri/` READMEs
+- Agent / contributor constraints → **`AGENTS.md`** (English only)
+- Connect model, lifecycle, tray / single-instance → `docs/design/tauri_gui_mvp_design.md`
+- Manual shell smoke steps → `docs/design/shell_smoke_runbook.md`
+- Test / check entrypoints → `docs/TESTING.md`, `AGENTS.md` Required Commands
+- User/maintainer release notes → `CHANGELOG.md` (English; `[Unreleased]`; move into a version section when tagging)
 
-- SSE / HTTP 契约、错误码、`request_id`
-- CORS、`CM_WEB_*`、API 基址语义
-- `client-contract-v*` 发版策略
-- 路径 A ADR / Phase todo 勾选
+## Do not reinvent here
 
-## 禁止
+Write these in the **Server** repo; this repo only links:
 
-- 把 `agent_space/` 草稿当作权威文档引用
-- 用 path 依赖回主开发树「顺便」改主仓文档冒充已同步
+- SSE / HTTP contracts, error codes, `request_id`
+- CORS, `CM_WEB_*`, API base semantics
+- `client-contract-v*` release policy
+- Path A ADR / Phase todo checkboxes
+
+## Forbidden
+
+- Citing `agent_space/` drafts as authoritative docs
+- Using a path dep back into the Server tree to “sync” Server docs in this PR
+- Updating only one side of a bilingual pair

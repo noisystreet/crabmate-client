@@ -4,7 +4,7 @@
 包名 **`edu.crabmate`**，桌面显示名 **`crabmate`**。  
 定位：**远程薄客户端**——只连已启动的 `serve`（LAN/VPS）。业务 UI 源码在本仓 **`frontend/`**（`make frontend`）；运行时由远程 `serve` 经 **`CM_WEB_STATIC_DIR`** 托管（与桌面壳同模型）。
 
-连接页与桌面壳共用 **`crates/crabmate-connect`**（探测、`#cm_web_api_bearer=` 交接、首次 Bearer 写钥匙串）。静态页源文件为 **`crates/crabmate-connect/assets/connect.html`**；同步：`bash scripts/sync-tauri-connect-page.sh`（写入 **`mobile-tauri/dist/index.html`**）。见仓根 [README.md](../README.md)。
+连接页与桌面壳共用 **`crates/crabmate-connect`**（探测、`#cm_web_api_bearer=` 交接、首次 Bearer 写钥匙串）。静态页源文件为 **`crates/crabmate-connect/assets/connect.html`**；同步：`bash scripts/sync-tauri-connect-page.sh`（写入 **`mobile-tauri/dist/index.html`**）。见仓根 [README.md](../README.md)（[中文](../README.zh-CN.md)）。
 
 ## Phase 1 行为
 

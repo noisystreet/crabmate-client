@@ -2,7 +2,7 @@
 
 基于 Tauri 2 的 CrabMate 桌面壳（**`crabmate-client` 仓**）：**WebView** 加载已运行的 **`serve`**（本机或远程）提供的 Web UI，业务逻辑不重复实现。**壳不拉起** `crabmate serve`（与移动端同模型）。
 
-官方 Client 拆分（路径 A）：见仓根 [README.md](../README.md) 与主仓 ADR `client_shell_split.md`。
+官方 Client 拆分（路径 A）：见仓根 [README.md](../README.md)（[中文](../README.zh-CN.md)）与主仓 ADR `client_shell_split.md`。
 
 ## 启动流程（与代码一致）
 
@@ -45,7 +45,7 @@ cargo tauri dev
 
 ## 打包
 
-见本仓根 [README.md](../README.md) 与 **`DEVELOPMENT.md`**（**`prepare-sidecar.sh`**、**`cargo tauri build`** / **`make desktop-release`**）。产物为 **`crabmate-desktop_*.deb`**（Debian 包名 **`crabmate-desktop`**，与 Server 仓 **`crabmate`** `.deb` 可并存）。桌面包**不再**内嵌 `crabmate` sidecar，也**不**占用 `/etc/crabmate/`。
+见本仓根 [README.md](../README.md)（[中文](../README.zh-CN.md)）与 **`DEVELOPMENT.md`**（**`prepare-sidecar.sh`**、**`cargo tauri build`** / **`make desktop-release`**）。产物为 **`crabmate-desktop_*.deb`**（Debian 包名 **`crabmate-desktop`**，与 Server 仓 **`crabmate`** `.deb` 可并存）。桌面包**不再**内嵌 `crabmate` sidecar，也**不**占用 `/etc/crabmate/`。
 
 ## 更多
 
