@@ -29,7 +29,7 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 - Desktop: extract main-window navigation / page-load handlers from `finish_create_main_window`
 - Lizard gate: per-module **count of functions with CCN > 10** (was per-module max CCN); caps in `scripts/lizard_module_ccn_caps.toml`; ratchet requires measured count to match the cap (shrink → lower the cap / `--write-caps`)
 - SSE: document that AG-UI `STATE_SNAPSHOT` is intentionally ignored (`on_state_snapshot: None`); conversation sync stays on `GET /conversation/messages`
-- Session hydrate / load-older: surface `GET /conversation/messages` failures on the status error banner instead of failing silently
+- Session hydrate / load-older: surface `GET /conversation/messages` failures on the status error banner instead of failing silently (`CONVERSATION_NOT_FOUND` on auto-hydrate stays soft so mock/ephemeral ids do not block Ready)
 
 ## [0.1.0] - 2026-08-08
 

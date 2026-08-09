@@ -100,6 +100,12 @@ pub fn api_err_conversation_messages_fetch_failed(l: Locale, detail: &str) -> St
     }
 }
 
+/// 服务端无此会话（过期 / mock SSE 假 id 等）。自动水合应软忽略并保留本地缓存，勿钉死状态栏。
+#[must_use]
+pub fn conversation_messages_err_is_not_found(detail: &str) -> bool {
+    detail.contains("CONVERSATION_NOT_FOUND")
+}
+
 pub fn api_err_branch_failed(l: Locale) -> &'static str {
     match l {
         Locale::ZhHans => "分支请求未成功",
