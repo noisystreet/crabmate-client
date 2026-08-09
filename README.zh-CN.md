@@ -62,12 +62,11 @@ make clean
 
 ## 快速开始（Desktop）
 
-前置：已启动 **`crabmate serve`**（默认纯 API）。须 CORS 放行壳 Origin：
+前置：已启动 **`crabmate serve`**（默认纯 API）。当前 Server 默认已放行官方壳 Origin（`tauri://localhost`、`http://tauri.localhost`），Desktop/Android **不必**再设 `CM_WEB_CORS_ALLOWED_ORIGINS`。
 
 ```bash
 # 终端 A — Server（壳路径不必 --with-web）
-CM_WEB_CORS_ALLOWED_ORIGINS='tauri://localhost,http://tauri.localhost' \
-  crabmate serve --host 127.0.0.1 --port 8080
+crabmate serve --host 127.0.0.1 --port 8080
 
 # 终端 B — 本仓
 make frontend           # prepare-sidecar 会同步进 desktop-tauri/dist

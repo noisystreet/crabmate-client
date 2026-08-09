@@ -36,9 +36,8 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: noisystreet/CrabMate
-          # v0.1.0 尚无 --with-web；钉含 API-only + --with-web 的 main（14ca2e24）
-          # 契约 crates 仍可钉产品 tag（见 docs/design/contract_pin.md）
-          ref: 14ca2e24cc4519ea9bff474f8d41fab36d719b0d
+          # 与契约钉点一致：产品 tag（含 --with-web + 默认壳 CORS）
+          ref: v0.2.0
           path: crabmate-server
 
       - name: Install system deps (OpenSSL / libssh2)

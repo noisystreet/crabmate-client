@@ -5,7 +5,7 @@
 - Project: `crabmate-client`
 - Purpose: Official Client (Desktop Linux / Android Tauri shells + `crabmate-connect` + business UI `frontend/`); connects to a running `crabmate serve`; does **not** maintain the Server
 - Tech stack: Rust, Tauri 2, Leptos CSR (WASM)
-- Target: Desktop Linux, Android; shells load packaged `frontend/dist`; API calls go to remote `serve` (set `CM_WEB_CORS_ALLOWED_ORIGINS=tauri://localhost,http://tauri.localhost` — Linux WebKit fetch Origin is `tauri://localhost`)
+- Target: Desktop Linux, Android; shells load packaged `frontend/dist`; API calls go to remote `serve` (Server defaults CORS for `tauri://localhost` + `http://tauri.localhost`; set `CM_WEB_CORS_ALLOWED_ORIGINS` only for extra browser Origins)
 
 ## Directory Overview
 
@@ -34,8 +34,8 @@
 
 - **Forbidden**: `path = "../crabmate_agent/..."` or any Cargo path dependency back into the Server monorepo tree
 - **Forbidden**: shell spawning / bundling a `crabmate serve` sidecar
-- Contract crates only via git **tag** (`vX.Y.Z` product release, or `client-contract-vX.Y.Z`) or `rev` pinned to Server (see `frontend/Cargo.toml`; current pin: **`v0.1.0`**)
-- Playwright E2E CI checkouts Server `serve` at a pin that supports **`--with-web`** (currently **`14ca2e24`**; may be ahead of the contract product tag — see `docs/design/contract_pin.md`)
+- Contract crates only via git **tag** (`vX.Y.Z` product release, or `client-contract-vX.Y.Z`) or `rev` pinned to Server (see `frontend/Cargo.toml`; current pin: **`v0.2.0`**)
+- Playwright E2E CI checkouts Server `serve` at the same product pin (**`v0.2.0`**; includes **`--with-web`** — see `docs/design/contract_pin.md`)
 - `crabmate-connect` is in-repo path only (`crates/crabmate-connect`)
 - Web Bearer ≠ model `API_KEY`
 - **Split decision / contracts / SSE / CORS** are authoritative in the Server repo; this repo documents shell behavior and links out
@@ -76,7 +76,7 @@ When updating docs:
 | Manual shell smoke steps | `docs/design/shell_smoke_runbook.md` |
 | Victauri / pre-commit / CI commands | `docs/TESTING.md` |
 | User/maintainer release notes | `CHANGELOG.md` (English; Keep a Changelog; move Unreleased into a version section on release) |
-| Contract pin tag / rev | `docs/design/contract_pin.md`; policy authority is Server (contract tag ≠ Playwright `serve` checkout when CLI flags land first) |
+| Contract pin tag / rev | `docs/design/contract_pin.md`; policy authority is Server |
 | SSE / CORS / Bearer / API base / contract semver | **Server** `docs/`; this repo only links |
 | Path A progress checkboxes | Server `docs/design/client_shell_split_todo.md` |
 

@@ -207,7 +207,7 @@ pub fn format_fetch_transport_error(e: &wasm_bindgen::JsValue) -> String {
             || lower.contains("networkerror")
         {
             msg.push_str(&format!(
-                "。请确认 serve 可达（基址 {base}），且 CORS 含 Linux WebView 实际 Origin：CM_WEB_CORS_ALLOWED_ORIGINS='tauri://localhost,http://tauri.localhost'；勿用 0.0.0.0 作连接地址。"
+                "。请确认 serve 可达（基址 {base}），且 CORS 放行 Linux WebView Origin `tauri://localhost`（及 `http://tauri.localhost`）；当前 Server 默认已含二者——若你显式清空了 CM_WEB_CORS_ALLOWED_ORIGINS 请 unset；勿用 0.0.0.0 作连接地址。"
             ));
         }
     }

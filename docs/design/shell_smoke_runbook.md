@@ -16,11 +16,9 @@
 ## 2. Desktop
 
 ```bash
-# 终端 A — 纯 API serve + CORS（壳加载包内 UI）
-CM_WEB_CORS_ALLOWED_ORIGINS='tauri://localhost,http://tauri.localhost' \
-  crabmate serve --host 127.0.0.1 --port 8080
-# 或: cd ../crabmate_agent && CM_WEB_CORS_ALLOWED_ORIGINS='tauri://localhost,http://tauri.localhost' \
-#       cargo run -- serve --host 127.0.0.1 --port 8080
+# 终端 A — 纯 API serve（壳加载包内 UI；Server 默认 CORS 已含壳 Origin）
+crabmate serve --host 127.0.0.1 --port 8080
+# 或: cd ../crabmate_agent && cargo run -- serve --host 127.0.0.1 --port 8080
 
 # 终端 B（本仓）
 make frontend && make prepare-sidecar
