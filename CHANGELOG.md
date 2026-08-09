@@ -16,6 +16,7 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Changed
 
+- Pin Server contract crates and Playwright serve checkout to product tag **`v0.1.0`** (was `client-contract-v0.1.0` / unpinned default branch)
 - Post-connect first paint: LLM hydrate runs in parallel with session list; hydrate path no longer repeats `GET /user-data/prefs`; `initialized` still waits for prefs to land, avoiding a read-only TTL race on the first chat
 - CodeMirror: load `ide-codemirror.js` dynamically when entering the IDE so it no longer blocks chat cold start
 - Desktop: maximize on page-load **Started** when navigating to the `serve` UI; no need to wait for WASM Finished
