@@ -74,8 +74,10 @@ pub struct SseNoticeTimelineHooks<'a> {
     pub on_run_finished: Option<&'a mut dyn FnMut(Option<TiktokenPromptTokensSnapshot>)>,
     /// 非终态 `CUSTOM stream_draining`：可提前进入 Draining 文案；**不**标记 `saw_stream_ended`。
     pub on_stream_draining: Option<&'a mut dyn FnMut()>,
-    /// AG-UI `STATE_SNAPSHOT`：后端在工具批结束/终答写盘等边界发送的完整状态快照，
-    /// 前端可用于断线重连恢复 overlay 与时间线。
+    /// AG-UI `STATE_SNAPSHOT`（完整 agent state）。
+    ///
+    /// Client 当前传 `None`：不在此路径恢复 UI；会话正文/revision 对齐走
+    /// `GET /conversation/messages` 水合。保留钩子以便将来按需接线。
     pub on_state_snapshot: Option<&'a mut dyn FnMut(serde_json::Value)>,
 }
 

@@ -77,6 +77,29 @@ pub fn api_err_no_response_body(l: Locale) -> &'static str {
     }
 }
 
+/// `GET /conversation/messages` 失败：本地缓存可能仍显示，须让用户知道未与服务端对齐。
+pub fn api_err_conversation_messages_fetch_failed(l: Locale, detail: &str) -> String {
+    let detail = detail.trim();
+    match l {
+        Locale::ZhHans => {
+            if detail.is_empty() {
+                "拉取会话消息失败，仍显示本地缓存".to_string()
+            } else {
+                format!("拉取会话消息失败，仍显示本地缓存：{detail}")
+            }
+        }
+        Locale::En => {
+            if detail.is_empty() {
+                "Failed to fetch conversation messages; still showing local cache".to_string()
+            } else {
+                format!(
+                    "Failed to fetch conversation messages; still showing local cache: {detail}"
+                )
+            }
+        }
+    }
+}
+
 pub fn api_err_branch_failed(l: Locale) -> &'static str {
     match l {
         Locale::ZhHans => "分支请求未成功",

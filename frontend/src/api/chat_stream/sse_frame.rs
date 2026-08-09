@@ -213,10 +213,6 @@ pub(super) fn handle_sse_block(
     let mut on_stream_draining = || {
         (cbs.on_stream_draining)();
     };
-    let mut on_state_snapshot = |_state: serde_json::Value| {
-        // STATE_SNAPSHOT 由上层应用层注册回调处理；此处为占位桥接。
-        // 应用层可在 ChatStreamCallbacks 的 on_timeline_log 等路径中注册专用处理。
-    };
     let mut on_ag_ui_delta = |text: String| (cbs.on_delta)(text);
 
     let mut cbs2 = SseControlSink {
@@ -246,7 +242,8 @@ pub(super) fn handle_sse_block(
             on_timeline_log: Some(&mut on_timeline_log),
             on_run_finished: Some(&mut on_run_finished),
             on_stream_draining: Some(&mut on_stream_draining),
-            on_state_snapshot: Some(&mut on_state_snapshot),
+            // Client 不消费 AG-UI STATE_SNAPSHOT：会话对齐走 GET /conversation/messages 水合。
+            on_state_snapshot: None,
         },
     };
     match default_parser().parse(&data, &mut cbs2) {
