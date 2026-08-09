@@ -75,6 +75,10 @@ make desktop-dev
 
 连接页填写服务器地址与可选 Web Bearer（**不是**模型 `API_KEY`）。连接成功后加载**包内** `index.html`，API 指向该 `serve`。
 
+## 个人云（远程纯 API）
+
+公网只暴露 `api.…` → Caddy → 本机 `serve`（不要 `--with-web`）；壳用包内 UI 连接 `https://api.…/` + Bearer。步骤与勾选见 [`docs/design/personal_cloud_runbook.md`](docs/design/personal_cloud_runbook.md)。VPS/systemd/Caddy 见 Server [`个人VPS部署指南.md`](https://github.com/noisystreet/CrabMate/blob/main/docs/个人VPS部署指南.md)。
+
 ## 快速开始（浏览器 + serve 托管 UI）
 
 仅用于 Playwright / 同 Origin 浏览器调试（非 Desktop/Android 主路径）：

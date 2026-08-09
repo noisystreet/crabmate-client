@@ -14,6 +14,7 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 - Root `CHANGELOG.md` (Keep a Changelog; English)
 - Default English [README.md](./README.md); Chinese [README.zh-CN.md](./README.zh-CN.md); [AGENTS.md](./AGENTS.md) English-only
 - pre-commit / `scripts/check.sh`: **ktlint** for hand-maintained Android Kotlin (`edu/crabmate`, excludes Tauri `generated/`); `bash scripts/ktlint-android.sh` (`--format` to fix)
+- Personal cloud shell runbook: connect packaged UI to remote API-only `serve` (`docs/design/personal_cloud_runbook.md`)
 
 ### Changed
 
