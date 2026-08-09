@@ -84,6 +84,16 @@ pub fn allow_shell_navigation<R: Runtime>(webview: &Webview<R>, url: &Url) -> bo
     }
 }
 
+/// 页面已落到连接页 / App Origin 时清空白名单。
+///
+/// Android 侧 `WebView.loadUrl` 有时不走 `on_navigation`；断开回连接页须在 page load 再清一次，
+/// 避免旧 serve Origin 仍被放行。
+pub fn clear_allowed_if_app_origin_loaded<R: Runtime>(app: &AppHandle<R>, url: &Url) {
+    if is_app_origin(url) {
+        clear_allowed_serve_origin(app);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

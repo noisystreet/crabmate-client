@@ -25,6 +25,7 @@ pub use keyring_bearer::{
     read_connect_bearer, write_connect_bearer_on_connect, write_connect_bearer_unchecked,
 };
 pub use navigation::{
-    ShellNavigationDecision, allow_shell_navigation, decide_shell_navigation, is_app_origin,
+    ShellNavigationDecision, allow_shell_navigation, clear_allowed_if_app_origin_loaded,
+    decide_shell_navigation, is_app_origin,
 };
 pub use probe::probe_server;
