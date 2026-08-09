@@ -2,7 +2,7 @@
 
 本目录属于 **`crabmate-client`** 仓。Tauri 2 壳 + 连接页，**不**拉起本机 `crabmate serve`。  
 包名 **`edu.crabmate`**，桌面显示名 **`crabmate`**。  
-定位：**包内业务 UI + 远程 API**——连接页探测已启动的 `serve`（LAN/VPS）后，加载本仓 `frontend/dist`（经 `make prepare-mobile` 同步），API 基址指向该 `serve`（须配置 CORS，例如 `CM_WEB_CORS_ALLOWED_ORIGINS=http://tauri.localhost`）。
+定位：**包内业务 UI + 远程 API**——连接页探测已启动的 `serve`（LAN/VPS）后，加载本仓 `frontend/dist`（经 `make prepare-mobile` 同步），API 基址指向该 `serve`（Server 默认 CORS 已含 `http://tauri.localhost` / `tauri://localhost`）。
 
 连接页与桌面壳共用 **`crates/crabmate-connect`**（探测、`#cm_api_base=` + `#cm_web_api_bearer=` 交接、首次 Bearer 写钥匙串）。静态页源：`crates/crabmate-connect/assets/connect.html`；同步：`make prepare-mobile` 或 `bash scripts/sync-tauri-connect-page.sh`（写入 **`mobile-tauri/dist/connect.html`**，**不**覆盖业务 `index.html`）。见仓根 [README.md](../README.md)（[中文](../README.zh-CN.md)）。
 
@@ -62,10 +62,9 @@ cd mobile-tauri/src-tauri
 cargo tauri android dev
 ```
 
-服务端示例（局域网，纯 API + CORS）：
+服务端示例（局域网，纯 API；壳 CORS 默认已放行）：
 
 ```bash
-CM_WEB_CORS_ALLOWED_ORIGINS='tauri://localhost,http://tauri.localhost' \
 CM_WEB_API_BEARER_TOKEN='your-shared-secret' \
   crabmate serve --host 0.0.0.0 --port 8080
 ```

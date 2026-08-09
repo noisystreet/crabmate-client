@@ -283,7 +283,7 @@ dependencies = [
 [[package]]
 name = "crabmate-api-contract"
 version = "0.1.0"
-source = "git+https://github.com/noisystreet/CrabMate?tag=v0.1.0#74f182cb500f8da47d1a7f2c0f61567da359b517"
+source = "git+https://github.com/noisystreet/CrabMate?tag=v0.2.0#f2c82de610de1dd342399a2a88930ba4a09435b5"
 dependencies = [
  "crabmate-types",
  "schemars",
@@ -294,7 +294,7 @@ dependencies = [
 [[package]]
 name = "crabmate-chat-export"
 version = "0.1.0"
-source = "git+https://github.com/noisystreet/CrabMate?tag=v0.1.0#74f182cb500f8da47d1a7f2c0f61567da359b517"
+source = "git+https://github.com/noisystreet/CrabMate?tag=v0.2.0#f2c82de610de1dd342399a2a88930ba4a09435b5"
 dependencies = [
  "crabmate-types",
  "serde",
@@ -304,12 +304,12 @@ dependencies = [
 [[package]]
 name = "crabmate-display-rules"
 version = "0.1.0"
-source = "git+https://github.com/noisystreet/CrabMate?tag=v0.1.0#74f182cb500f8da47d1a7f2c0f61567da359b517"
+source = "git+https://github.com/noisystreet/CrabMate?tag=v0.2.0#f2c82de610de1dd342399a2a88930ba4a09435b5"
 
 [[package]]
 name = "crabmate-sse-protocol"
 version = "0.1.0"
-source = "git+https://github.com/noisystreet/CrabMate?tag=v0.1.0#74f182cb500f8da47d1a7f2c0f61567da359b517"
+source = "git+https://github.com/noisystreet/CrabMate?tag=v0.2.0#f2c82de610de1dd342399a2a88930ba4a09435b5"
 dependencies = [
  "crabmate-types",
  "log",
@@ -321,7 +321,7 @@ dependencies = [
 [[package]]
 name = "crabmate-tool-card"
 version = "0.1.0"
-source = "git+https://github.com/noisystreet/CrabMate?tag=v0.1.0#74f182cb500f8da47d1a7f2c0f61567da359b517"
+source = "git+https://github.com/noisystreet/CrabMate?tag=v0.2.0#f2c82de610de1dd342399a2a88930ba4a09435b5"
 dependencies = [
  "serde_json",
 ]
@@ -329,7 +329,7 @@ dependencies = [
 [[package]]
 name = "crabmate-turn-layout"
 version = "0.1.0"
-source = "git+https://github.com/noisystreet/CrabMate?tag=v0.1.0#74f182cb500f8da47d1a7f2c0f61567da359b517"
+source = "git+https://github.com/noisystreet/CrabMate?tag=v0.2.0#f2c82de610de1dd342399a2a88930ba4a09435b5"
 dependencies = [
  "log",
  "serde",
@@ -339,7 +339,7 @@ dependencies = [
 [[package]]
 name = "crabmate-types"
 version = "0.1.0"
-source = "git+https://github.com/noisystreet/CrabMate?tag=v0.1.0#74f182cb500f8da47d1a7f2c0f61567da359b517"
+source = "git+https://github.com/noisystreet/CrabMate?tag=v0.2.0#f2c82de610de1dd342399a2a88930ba4a09435b5"
 dependencies = [
  "crabmate-display-rules",
  "serde",

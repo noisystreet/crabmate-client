@@ -63,12 +63,11 @@ Before commit: `pre-commit run --all-files` or `make check`. CI: `.github/workfl
 
 ## Quick start (Desktop)
 
-Prerequisite: **`crabmate serve`** (API-only by default) already running. Allow the shell Origin in CORS:
+Prerequisite: **`crabmate serve`** (API-only by default) already running. Official shell Origins are allowed by default on current Server (`tauri://localhost`, `http://tauri.localhost`)—no `CM_WEB_CORS_ALLOWED_ORIGINS` needed for Desktop/Android.
 
 ```bash
 # Terminal A — Server (no --with-web needed for the shell)
-CM_WEB_CORS_ALLOWED_ORIGINS='tauri://localhost,http://tauri.localhost' \
-  crabmate serve --host 127.0.0.1 --port 8080
+crabmate serve --host 127.0.0.1 --port 8080
 
 # Terminal B — this repo
 make frontend           # sync UI into desktop-tauri/dist via prepare-sidecar

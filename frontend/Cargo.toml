@@ -10,13 +10,13 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 # Server monorepo 契约 crates（禁止 path 回本地 crabmate_agent）
-crabmate-chat-export = { git = "https://github.com/noisystreet/CrabMate", tag = "v0.1.0", package = "crabmate-chat-export" }
-crabmate-api-contract = { git = "https://github.com/noisystreet/CrabMate", tag = "v0.1.0", package = "crabmate-api-contract" }
-crabmate-display-rules = { git = "https://github.com/noisystreet/CrabMate", tag = "v0.1.0", package = "crabmate-display-rules" }
-crabmate-tool-card = { git = "https://github.com/noisystreet/CrabMate", tag = "v0.1.0", package = "crabmate-tool-card" }
-crabmate-types = { git = "https://github.com/noisystreet/CrabMate", tag = "v0.1.0", package = "crabmate-types" }
-crabmate-sse-protocol = { git = "https://github.com/noisystreet/CrabMate", tag = "v0.1.0", package = "crabmate-sse-protocol" }
-crabmate-turn-layout = { git = "https://github.com/noisystreet/CrabMate", tag = "v0.1.0", package = "crabmate-turn-layout" }
+crabmate-chat-export = { git = "https://github.com/noisystreet/CrabMate", tag = "v0.2.0", package = "crabmate-chat-export" }
+crabmate-api-contract = { git = "https://github.com/noisystreet/CrabMate", tag = "v0.2.0", package = "crabmate-api-contract" }
+crabmate-display-rules = { git = "https://github.com/noisystreet/CrabMate", tag = "v0.2.0", package = "crabmate-display-rules" }
+crabmate-tool-card = { git = "https://github.com/noisystreet/CrabMate", tag = "v0.2.0", package = "crabmate-tool-card" }
+crabmate-types = { git = "https://github.com/noisystreet/CrabMate", tag = "v0.2.0", package = "crabmate-types" }
+crabmate-sse-protocol = { git = "https://github.com/noisystreet/CrabMate", tag = "v0.2.0", package = "crabmate-sse-protocol" }
+crabmate-turn-layout = { git = "https://github.com/noisystreet/CrabMate", tag = "v0.2.0", package = "crabmate-turn-layout" }
 ammonia = ">=4.1.4"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 console_error_panic_hook = "0.1"

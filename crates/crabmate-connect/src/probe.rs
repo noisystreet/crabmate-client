@@ -113,7 +113,9 @@ pub fn cors_allows_shell_origin(acao: &str) -> bool {
 }
 
 fn shell_cors_env_hint() -> String {
-    format!("CM_WEB_CORS_ALLOWED_ORIGINS='{SHELL_WEBVIEW_FETCH_ORIGIN},{SHELL_WEBVIEW_ORIGIN}'")
+    format!(
+        "须放行 {SHELL_WEBVIEW_FETCH_ORIGIN} 与 {SHELL_WEBVIEW_ORIGIN}（新版 Server 默认已含；若显式清空了 CORS，请 unset CM_WEB_CORS_ALLOWED_ORIGINS，或设为 '{SHELL_WEBVIEW_FETCH_ORIGIN},{SHELL_WEBVIEW_ORIGIN}'）"
+    )
 }
 
 /// 桌面 Linux（`tauri://localhost`）与 Android http 资产（`http://tauri.localhost`）均须在 CORS 白名单中。

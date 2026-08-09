@@ -86,7 +86,7 @@ make frontend
 # 或指定用例：./scripts/e2e-playwright.sh specs/mock-overlay-timing.spec.ts
 ```
 
-`serve` 解析顺序：`CRABMATE_BIN` → `PATH` 的 `crabmate` → 同级 Server `target/{debug,release}/crabmate` → 同级仓 `cargo run`。正式 CI checkout `noisystreet/CrabMate` 钉 **`14ca2e24`**（含 `--with-web`；见 [`contract_pin.md`](design/contract_pin.md)）。托管 SPA 时脚本/CI **始终传 `--with-web`**（Server 默认纯 API；产品 tag `v0.1.0` 尚无该旗标）。
+`serve` 解析顺序：`CRABMATE_BIN` → `PATH` 的 `crabmate` → 同级 Server `target/{debug,release}/crabmate` → 同级仓 `cargo run`。正式 CI checkout `noisystreet/CrabMate` 钉 **`v0.2.0`**（见 [`contract_pin.md`](design/contract_pin.md)）。托管 SPA 时脚本/CI **始终传 `--with-web`**（Server 默认纯 API）。
 
 真实 LLM 规格仅本地：钥匙串已有 `client_llm` 时可不必 `API_KEY`；启用 Web Bearer 时设 `CM_WEB_API_BEARER_TOKEN`。  
 `cd e2e && no_proxy=127.0.0.1,localhost,api.deepseek.com npx playwright test specs/real-llm-*.spec.ts`  
