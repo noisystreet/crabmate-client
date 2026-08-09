@@ -17,25 +17,12 @@ fn event_input_value(ev: &leptos::ev::Event) -> Option<String> {
 }
 
 #[component]
-pub(crate) fn SettingsMcpBlockToolbar(
+fn SettingsMcpTimeoutField(
     locale: RwSignal<Locale>,
     file: ReadSignal<McpServersFileDto>,
     set_file: WriteSignal<McpServersFileDto>,
-    import_json: RwSignal<String>,
-    busy: ReadSignal<bool>,
-    feedback: ReadSignal<Option<String>>,
-    set_feedback: WriteSignal<Option<String>>,
-    row_ctx: McpSettingsSignals,
 ) -> impl IntoView {
     view! {
-        <SettingsToggleSwitch
-            test_id="settings-mcp-global-enabled"
-            checked=Signal::derive(move || file.get().global_enabled)
-            label=Signal::derive(move || {
-                i18n::settings_mcp_global_enabled_label(locale.get()).to_string()
-            })
-            on_toggle=move || set_file.update(|f| f.global_enabled = !f.global_enabled)
-        />
         <label class="settings-field">
             <span class="settings-field-label">{move || i18n::settings_mcp_timeout_label(locale.get())}</span>
             <input
@@ -53,6 +40,19 @@ pub(crate) fn SettingsMcpBlockToolbar(
                 }
             />
         </label>
+    }
+}
+
+#[component]
+fn SettingsMcpToolbarActions(
+    locale: RwSignal<Locale>,
+    import_json: RwSignal<String>,
+    busy: ReadSignal<bool>,
+    feedback: ReadSignal<Option<String>>,
+    set_feedback: WriteSignal<Option<String>>,
+    row_ctx: McpSettingsSignals,
+) -> impl IntoView {
+    view! {
         <div class="settings-mcp-actions">
             <button
                 type="button"
@@ -85,5 +85,37 @@ pub(crate) fn SettingsMcpBlockToolbar(
         <Show when=move || feedback.get().is_some()>
             <p class="settings-intro settings-mcp-feedback">{move || feedback.get().unwrap_or_default()}</p>
         </Show>
+    }
+}
+
+#[component]
+pub(crate) fn SettingsMcpBlockToolbar(
+    locale: RwSignal<Locale>,
+    file: ReadSignal<McpServersFileDto>,
+    set_file: WriteSignal<McpServersFileDto>,
+    import_json: RwSignal<String>,
+    busy: ReadSignal<bool>,
+    feedback: ReadSignal<Option<String>>,
+    set_feedback: WriteSignal<Option<String>>,
+    row_ctx: McpSettingsSignals,
+) -> impl IntoView {
+    view! {
+        <SettingsToggleSwitch
+            test_id="settings-mcp-global-enabled"
+            checked=Signal::derive(move || file.get().global_enabled)
+            label=Signal::derive(move || {
+                i18n::settings_mcp_global_enabled_label(locale.get()).to_string()
+            })
+            on_toggle=move || set_file.update(|f| f.global_enabled = !f.global_enabled)
+        />
+        <SettingsMcpTimeoutField locale file set_file />
+        <SettingsMcpToolbarActions
+            locale
+            import_json
+            busy
+            feedback
+            set_feedback
+            row_ctx
+        />
     }
 }

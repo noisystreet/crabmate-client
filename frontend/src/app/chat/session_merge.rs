@@ -261,6 +261,60 @@ fn push_best_tool_from_pool(
     push_next_from_pool(out, placed_ids, pool);
 }
 
+struct PlaceLocalRowCtx<'a> {
+    server: &'a [StoredMessage],
+    local_tail: &'a [StoredMessage],
+    hydrated_by_id: &'a HashMap<String, StoredMessage>,
+    out: &'a mut Vec<StoredMessage>,
+    placed_ids: &'a mut HashSet<String>,
+    assistant_pool: &'a mut VecDeque<StoredMessage>,
+    tool_pool: &'a mut VecDeque<StoredMessage>,
+}
+
+fn place_one_local_row(local: &StoredMessage, ctx: &mut PlaceLocalRowCtx<'_>) {
+    if is_local_only_row_to_replay(local, ctx.server, ctx.local_tail) {
+        push_once(ctx.out, ctx.placed_ids, local.clone());
+        return;
+    }
+    if local.role == "user" && !local.is_tool {
+        let h = hydrated_or_matching_user(ctx.hydrated_by_id, ctx.server, ctx.placed_ids, local);
+        push_once(ctx.out, ctx.placed_ids, h);
+        return;
+    }
+    if let Some(h) = ctx.hydrated_by_id.get(&local.id) {
+        push_once(ctx.out, ctx.placed_ids, h.clone());
+        return;
+    }
+    if local.state.as_ref().is_some_and(|s| s.is_loading()) {
+        return;
+    }
+    if local.role == "assistant" && !local.is_tool {
+        push_next_from_pool(ctx.out, ctx.placed_ids, ctx.assistant_pool);
+        return;
+    }
+    if local.is_tool {
+        push_best_tool_from_pool(ctx.out, ctx.placed_ids, ctx.tool_pool, local);
+    }
+}
+
+fn append_unplaced_server_rows(
+    server: Vec<StoredMessage>,
+    out: &mut Vec<StoredMessage>,
+    placed_ids: &mut HashSet<String>,
+) {
+    for h in server {
+        if placed_ids.contains(&h.id) {
+            continue;
+        }
+        // 丢弃已被结果卡代表的调用短卡，避免 append 成「工具→助手→工具」夹心。
+        if is_hydrate_tool_call_stub(&h) && tool_stub_superseded_by_placed_result(out, &h) {
+            placed_ids.insert(h.id.clone());
+            continue;
+        }
+        push_once(out, placed_ids, h);
+    }
+}
+
 fn replay_local_order_against_server(
     server: Vec<StoredMessage>,
     local_tail: &[StoredMessage],
@@ -277,42 +331,21 @@ fn replay_local_order_against_server(
     let mut placed_ids = HashSet::new();
 
     for local in local_tail {
-        if is_local_only_row_to_replay(local, &server, local_tail) {
-            push_once(&mut out, &mut placed_ids, local.clone());
-            continue;
-        }
-        if local.role == "user" && !local.is_tool {
-            let h = hydrated_or_matching_user(&hydrated_by_id, &server, &placed_ids, local);
-            push_once(&mut out, &mut placed_ids, h);
-            continue;
-        }
-        if let Some(h) = hydrated_by_id.get(&local.id) {
-            push_once(&mut out, &mut placed_ids, h.clone());
-            continue;
-        }
-        if local.state.as_ref().is_some_and(|s| s.is_loading()) {
-            continue;
-        }
-        if local.role == "assistant" && !local.is_tool {
-            push_next_from_pool(&mut out, &mut placed_ids, &mut assistant_pool);
-            continue;
-        }
-        if local.is_tool {
-            push_best_tool_from_pool(&mut out, &mut placed_ids, &mut tool_pool, local);
-        }
+        place_one_local_row(
+            local,
+            &mut PlaceLocalRowCtx {
+                server: &server,
+                local_tail,
+                hydrated_by_id: &hydrated_by_id,
+                out: &mut out,
+                placed_ids: &mut placed_ids,
+                assistant_pool: &mut assistant_pool,
+                tool_pool: &mut tool_pool,
+            },
+        );
     }
 
-    for h in server {
-        if placed_ids.contains(&h.id) {
-            continue;
-        }
-        // 丢弃已被结果卡代表的调用短卡，避免 append 成「工具→助手→工具」夹心。
-        if is_hydrate_tool_call_stub(&h) && tool_stub_superseded_by_placed_result(&out, &h) {
-            placed_ids.insert(h.id.clone());
-            continue;
-        }
-        push_once(&mut out, &mut placed_ids, h);
-    }
+    append_unplaced_server_rows(server, &mut out, &mut placed_ids);
     out
 }
 

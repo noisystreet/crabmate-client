@@ -12,5 +12,5 @@ frozen_modules = ["desktop-tauri"]
 "crates/crabmate-connect" = 10
 # 禁止修改：desktop-tauri 单函数 CCN 上限固定为 10
 "desktop-tauri" = 10
-"frontend" = 14
+"frontend" = 13
 "mobile-tauri" = 1

@@ -102,7 +102,7 @@ pub fn build_prefs_dto(app: &AppSignals) -> UserPrefsDto {
     }
 }
 
-fn apply_shell_prefs_dto(app: &AppSignals, dto: &UserPrefsDto) {
+fn apply_shell_chrome_prefs(app: &AppSignals, dto: &UserPrefsDto) {
     if let Some(ref t) = dto.theme {
         app.shell_ui
             .theme
@@ -134,6 +134,9 @@ fn apply_shell_prefs_dto(app: &AppSignals, dto: &UserPrefsDto) {
             .sidebar_rail_collapsed
             .set(if in_editor && c { false } else { c });
     }
+}
+
+fn apply_session_typography_prefs(app: &AppSignals, dto: &UserPrefsDto) {
     if let Some(ref f) = dto.session_ui_font {
         app.shell_ui.session_ui_font.set(
             crate::session_typography_prefs::normalize_session_ui_font(f),
@@ -149,6 +152,11 @@ fn apply_shell_prefs_dto(app: &AppSignals, dto: &UserPrefsDto) {
             .session_chat_font_size
             .set(crate::session_typography_prefs::clamp_session_chat_font_size(n as f64));
     }
+}
+
+fn apply_shell_prefs_dto(app: &AppSignals, dto: &UserPrefsDto) {
+    apply_shell_chrome_prefs(app, dto);
+    apply_session_typography_prefs(app, dto);
     app.workspace
         .recent_workspace_roots
         .set(crate::user_data_bootstrap::recent_roots_from_prefs(dto));

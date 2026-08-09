@@ -299,6 +299,105 @@ fn ComposerPendingImagesRow(
 }
 
 #[component]
+fn ComposerClarificationField(
+    locale: RwSignal<crate::i18n::Locale>,
+    pending_clarification: RwSignal<Option<crate::clarification_form::PendingClarificationForm>>,
+    idx: usize,
+    label: String,
+    hint: Option<String>,
+    required: bool,
+) -> impl IntoView {
+    let loc = locale.get_untracked();
+    let req_suffix = if required {
+        i18n::clarification_required_suffix(loc).to_string()
+    } else {
+        String::new()
+    };
+    let hint_view = match hint {
+        Some(h) => view! { <span class="composer-clarification-hint">{h}</span> }.into_any(),
+        None => view! { <span></span> }.into_any(),
+    };
+    view! {
+        <label class="composer-clarification-field">
+            <span class="composer-clarification-label">
+                {label}
+                {req_suffix}
+            </span>
+            {hint_view}
+            <input
+                type="text"
+                class="composer-clarification-input"
+                data-testid="composer-clarification-input"
+                prop:value=move || {
+                    pending_clarification.with(|opt| {
+                        opt.as_ref()
+                            .and_then(|fm| fm.values.get(idx))
+                            .cloned()
+                            .unwrap_or_default()
+                    })
+                }
+                on:input=move |ev| {
+                    let t = event_target_value(&ev);
+                    pending_clarification.update(|opt| {
+                        if let Some(fm) = opt.as_mut()
+                            && fm.values.len() > idx
+                        {
+                            fm.values[idx] = t;
+                        }
+                    });
+                }
+            />
+        </label>
+    }
+}
+
+#[component]
+fn ComposerClarificationActions(
+    locale: RwSignal<crate::i18n::Locale>,
+    pending_clarification: RwSignal<Option<crate::clarification_form::PendingClarificationForm>>,
+    stream_turn_busy_ui: Memo<bool>,
+    run_send_clarify_sv: StoredValue<Arc<dyn Fn() + Send + Sync>>,
+) -> impl IntoView {
+    view! {
+        <div class="composer-clarification-actions">
+            <button
+                type="button"
+                class="btn btn-muted btn-sm"
+                prop:disabled=move || stream_turn_busy_ui.get()
+                on:click=move |_| pending_clarification.set(None)
+            >
+                {move || i18n::clarification_dismiss(locale.get())}
+            </button>
+            <button
+                type="button"
+                class="btn btn-primary btn-sm"
+                data-testid="composer-clarification-submit"
+                prop:disabled=move || stream_turn_busy_ui.get()
+                on:click=move |_| run_send_clarify_sv.get_value()()
+            >
+                {move || i18n::clarification_submit(locale.get())}
+            </button>
+        </div>
+    }
+}
+
+fn ensure_clarification_values_len(
+    pending_clarification: RwSignal<Option<crate::clarification_form::PendingClarificationForm>>,
+    n: usize,
+) {
+    let needs_resize = pending_clarification
+        .with_untracked(|opt| opt.as_ref().is_some_and(|fm| fm.values.len() != n));
+    if !needs_resize {
+        return;
+    }
+    pending_clarification.update(|opt| {
+        if let Some(fm) = opt.as_mut() {
+            fm.values.resize(n, String::new());
+        }
+    });
+}
+
+#[component]
 fn ComposerClarificationPanel(
     locale: RwSignal<crate::i18n::Locale>,
     pending_clarification: RwSignal<Option<crate::clarification_form::PendingClarificationForm>>,
@@ -315,95 +414,39 @@ fn ComposerClarificationPanel(
                     let intro = form.intro.clone();
                     let loc = locale.get();
                     let n = form.fields.len();
-                    let pc = pending_clarification;
-                    if form.values.len() != n {
-                        pc.update(|opt| {
-                            if let Some(fm) = opt.as_mut() {
-                                fm.values.resize(n, String::new());
+                    ensure_clarification_values_len(pending_clarification, n);
+                    let fields = form
+                        .fields
+                        .iter()
+                        .enumerate()
+                        .map(|(i, f)| {
+                            view! {
+                                <ComposerClarificationField
+                                    locale
+                                    pending_clarification
+                                    idx=i
+                                    label=f.label.clone()
+                                    hint=f.hint.clone()
+                                    required=f.required
+                                />
                             }
-                        });
-                    }
+                            .into_any()
+                        })
+                        .collect_view();
                     view! {
                         <div class="composer-clarification-title">
                             {i18n::clarification_panel_title(loc)}
                         </div>
                         <p class="composer-clarification-intro">{intro}</p>
                         <div class="composer-clarification-fields">
-                            {form
-                                .fields
-                                .iter()
-                                .enumerate()
-                                .map(|(i, f)| {
-                                    let label = f.label.clone();
-                                    let hint = f.hint.clone();
-                                    let req = f.required;
-                                    let idx = i;
-                                    let pc2 = pc;
-                                    view! {
-                                        <label class="composer-clarification-field">
-                                            <span class="composer-clarification-label">
-                                                {label.clone()}
-                                                {if req {
-                                                    i18n::clarification_required_suffix(loc).to_string()
-                                                } else {
-                                                    String::new()
-                                                }}
-                                            </span>
-                                            {match &hint {
-                                                Some(h) => view! {
-                                                    <span class="composer-clarification-hint">{h.clone()}</span>
-                                                }
-                                                .into_any(),
-                                                None => view! { <span></span> }.into_any(),
-                                            }}
-                                            <input
-                                                type="text"
-                                                class="composer-clarification-input"
-                                                data-testid="composer-clarification-input"
-                                                prop:value=move || {
-                                                    pc2.with(|opt| {
-                                                        opt.as_ref()
-                                                            .and_then(|fm| fm.values.get(idx))
-                                                            .cloned()
-                                                            .unwrap_or_default()
-                                                    })
-                                                }
-                                                on:input=move |ev| {
-                                                    let t = event_target_value(&ev);
-                                                    pc2.update(|opt| {
-                                                        if let Some(fm) = opt.as_mut()
-                                                            && fm.values.len() > idx
-                                                        {
-                                                            fm.values[idx] = t;
-                                                        }
-                                                    });
-                                                }
-                                            />
-                                        </label>
-                                    }
-                                    .into_any()
-                                })
-                                .collect_view()}
+                            {fields}
                         </div>
-                        <div class="composer-clarification-actions">
-                            <button
-                                type="button"
-                                class="btn btn-muted btn-sm"
-                                prop:disabled=move || stream_turn_busy_ui.get()
-                                on:click=move |_| pending_clarification.set(None)
-                            >
-                                {move || i18n::clarification_dismiss(locale.get())}
-                            </button>
-                            <button
-                                type="button"
-                                class="btn btn-primary btn-sm"
-                                data-testid="composer-clarification-submit"
-                                prop:disabled=move || stream_turn_busy_ui.get()
-                                on:click=move |_| run_send_clarify_sv.get_value()()
-                            >
-                                {move || i18n::clarification_submit(locale.get())}
-                            </button>
-                        </div>
+                        <ComposerClarificationActions
+                            locale
+                            pending_clarification
+                            stream_turn_busy_ui
+                            run_send_clarify_sv
+                        />
                     }
                     .into_any()
                 }}

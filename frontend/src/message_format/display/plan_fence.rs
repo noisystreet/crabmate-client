@@ -54,6 +54,25 @@ fn format_agent_reply_plan_json_for_display(
     Some(lines.join("\n"))
 }
 
+fn plan_steps_are_all_strings(steps: &[Value]) -> bool {
+    steps.iter().all(|step| step.is_string())
+}
+
+fn append_numbered_plan_steps(lines: &mut Vec<String>, steps: &[Value]) {
+    if steps.is_empty() {
+        return;
+    }
+    lines.push(String::new());
+    for (idx, step) in steps.iter().enumerate() {
+        let text = step.as_str().unwrap_or("").trim();
+        if text.is_empty() {
+            continue;
+        }
+        let n = idx + 1;
+        lines.push(format!("{n}. {text}"));
+    }
+}
+
 /// 执行器输出的紧凑规划：`plan_summary` + `steps`（**字符串**数组）+ 可选 `no_new_tool_calls`。
 fn format_plan_summary_steps_json_for_display(json_text: &str, loc: Locale) -> Option<String> {
     let v: Value = serde_json::from_str(json_text).ok()?;
@@ -63,23 +82,11 @@ fn format_plan_summary_steps_json_for_display(json_text: &str, loc: Locale) -> O
         return None;
     }
     let steps = obj.get("steps")?.as_array()?;
-    for step in steps {
-        if !step.is_string() {
-            return None;
-        }
+    if !plan_steps_are_all_strings(steps) {
+        return None;
     }
     let mut lines: Vec<String> = vec![summary.to_string()];
-    if !steps.is_empty() {
-        lines.push(String::new());
-        for (idx, step) in steps.iter().enumerate() {
-            let text = step.as_str().unwrap_or("").trim();
-            if text.is_empty() {
-                continue;
-            }
-            let n = idx + 1;
-            lines.push(format!("{n}. {text}"));
-        }
-    }
+    append_numbered_plan_steps(&mut lines, steps);
     if obj.get("no_new_tool_calls").and_then(|x| x.as_bool()) == Some(true) {
         lines.push(String::new());
         lines.push(crate::i18n::plan_no_new_tool_calls_note(loc).to_string());
