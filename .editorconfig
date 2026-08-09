@@ -14,5 +14,10 @@ indent_size = 4
 indent_style = space
 indent_size = 2
 
+# 手改 Android Kotlin；gen/android/.editorconfig（indent 2）对壳工程优先
+[*.{kt,kts}]
+indent_style = space
+indent_size = 2
+
 [Makefile]
 indent_style = tab

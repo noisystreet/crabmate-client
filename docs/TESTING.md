@@ -22,6 +22,7 @@ pre-commit run --all-files
 | `fn-param-ratchet` | 形参 ≤ 9 |
 | `fn-nloc-ratchet` | 函数 nloc ≤ 200、单文件 ≤ 920 |
 | `taplo-format` / `taplo-lint` | 有 `taplo` 才跑，否则跳过 |
+| `ktlint-android` | 手改 Android Kotlin（`edu/crabmate`，排除 `generated/`）；需 **java**；首次下载钉死的 ktlint CLI 到缓存。格式化：`bash scripts/ktlint-android.sh --format` |
 | `typos` | 拼写 |
 | `e2e-format` / `e2e-lint` | Playwright：`cd e2e && npm run format:check` / `lint`（需先 `cd e2e && npm ci`） |
 | `conventional-pre-commit` | commit-msg |

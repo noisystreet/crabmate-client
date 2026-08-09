@@ -27,7 +27,7 @@ CM_MOBILE_BUILD_FRONTEND ?= 0
 	frontend frontend-release frontend-check frontend-clippy \
 	desktop desktop-release desktop-dev desktop-bin-release \
 	apk mobile-apk \
-	test check fmt clippy \
+	test check fmt clippy ktlint-android \
 	victauri-e2e victauri-e2e-real e2e-playwright \
 	clean clean-desktop clean-mobile clean-connect clean-frontend
 
@@ -47,9 +47,10 @@ help:
 	@echo "  make all                 desktop-release"
 	@echo ""
 	@echo "质检："
-	@echo "  make check               bash scripts/check.sh（含 frontend wasm check）"
+	@echo "  make check               bash scripts/check.sh（含 frontend wasm check、ktlint）"
 	@echo "  make frontend-check      cargo check --target wasm32-unknown-unknown"
 	@echo "  make frontend-clippy     frontend clippy -D warnings"
+	@echo "  make ktlint-android      手改 Android Kotlin ktlint（edu/crabmate）"
 	@echo "  make test                connect + desktop cargo test（Victauri 默认跳过）"
 	@echo "  make fmt                 四包 cargo fmt（含 frontend）"
 	@echo "  make clippy              四包 clippy -D warnings"
@@ -145,6 +146,9 @@ apk mobile-apk: sync-connect
 
 check:
 	bash "$(ROOT)/scripts/check.sh"
+
+ktlint-android:
+	bash "$(ROOT)/scripts/ktlint-android.sh"
 
 test:
 	cd "$(CONNECT_DIR)" && $(CARGO) test

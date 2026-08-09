@@ -22,8 +22,10 @@ class MainActivity : TauriActivity() {
   private var connectHomeUrl: String = "http://tauri.localhost/"
   private var appWebView: WebView? = null
   private var exitConfirmDialog: AlertDialog? = null
+
   /** Keystore 加密 prefs；懒创建，失败时为 null（连接页不再写明文 localStorage）。 */
   @Volatile private var securePrefs: SharedPreferences? = null
+
   /**
    * 系统返回键：弹确认框（退出 / 回连接页），不走 WebView.goBack。
    *
@@ -112,7 +114,8 @@ class MainActivity : TauriActivity() {
       return
     }
     val builder =
-      AlertDialog.Builder(this)
+      AlertDialog
+        .Builder(this)
         .setTitle(R.string.exit_confirm_title)
         .setMessage(
           if (fromRemote) {
@@ -120,8 +123,7 @@ class MainActivity : TauriActivity() {
           } else {
             R.string.exit_confirm_message
           },
-        )
-        .setNegativeButton(R.string.exit_confirm_cancel, null)
+        ).setNegativeButton(R.string.exit_confirm_cancel, null)
         .setPositiveButton(R.string.exit_confirm_ok) { _, _ -> finishAffinity() }
         .setOnDismissListener { exitConfirmDialog = null }
     if (fromRemote) {
@@ -163,7 +165,10 @@ class MainActivity : TauriActivity() {
    * 写入远程 Web 的安全区与软键盘 inset。
    * `--cm-ime-inset`：IME 相对导航栏多出的高度（targetSdk 35+ 上 adjustResize 常不缩小窗口时的兜底）。
    */
-  private fun injectSafeInsetsCss(webView: WebView, insets: WindowInsetsCompat?) {
+  private fun injectSafeInsetsCss(
+    webView: WebView,
+    insets: WindowInsetsCompat?,
+  ) {
     val topPx = statusBarInsetCssPx()
     val bottomPx = navBarInsetCssPx()
     val imePx = imeInsetCssPx(insets)
@@ -261,7 +266,8 @@ class MainActivity : TauriActivity() {
     }
     return try {
       val masterKey =
-        MasterKey.Builder(applicationContext)
+        MasterKey
+          .Builder(applicationContext)
           .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
           .build()
       val prefs =
@@ -336,13 +342,15 @@ class MainActivity : TauriActivity() {
       val prefs = securePrefsOrNull() ?: return false
       return try {
         val trimmed = bearer.trim()
-        prefs.edit().apply {
-          if (trimmed.isEmpty()) {
-            remove(SECURE_BEARER_KEY)
-          } else {
-            putString(SECURE_BEARER_KEY, trimmed)
-          }
-        }.commit()
+        prefs
+          .edit()
+          .apply {
+            if (trimmed.isEmpty()) {
+              remove(SECURE_BEARER_KEY)
+            } else {
+              putString(SECURE_BEARER_KEY, trimmed)
+            }
+          }.commit()
       } catch (_: Exception) {
         false
       }
@@ -366,6 +374,7 @@ class MainActivity : TauriActivity() {
         autofillManager()?.cancel()
       }
     }
+
     /** 在系统浏览器中打开 http(s)/mailto（远程 WebView 内 `window.open` 通常无效）。 */
     @JavascriptInterface
     fun openExternalUrl(url: String) {
@@ -399,13 +408,19 @@ class MainActivity : TauriActivity() {
       return try {
         val uri = android.net.Uri.parse(url)
         when (uri.scheme?.lowercase()) {
-          "tauri", "asset" -> true
+          "tauri", "asset" -> {
+            true
+          }
+
           "http", "https" -> {
             val host = uri.host?.lowercase() ?: return false
             host == "tauri.localhost" ||
               (host == "localhost" && (uri.path?.contains("connect") == true))
           }
-          else -> false
+
+          else -> {
+            false
+          }
         }
       } catch (_: Exception) {
         false
