@@ -1,7 +1,8 @@
-//! 连接用 Web API Bearer：本机系统钥匙串（非 TOML / 非 localStorage）。
+//! 连接用 Web API Bearer：本机系统钥匙串（非 TOML / 非明文 localStorage）。
 //!
 //! 账户名与服务端 `web_api_bearer` 槽位区分，避免与 serve 主机钥匙串语义混淆。
-//! Android 等无钥匙串后端的平台上读写失败时静默降级（连接页仍可用 localStorage）。
+//! Android 等无钥匙串后端的平台上读写失败时静默降级；移动连接页改用
+//! `CrabMateMobile` + Keystore 加密 SharedPreferences（见 `MainActivity`）。
 
 const KEYRING_SERVICE: &str = "com.crabmate.credentials";
 /// Tauri 壳「连接页」客户端凭证（桌面 / 移动共用）。

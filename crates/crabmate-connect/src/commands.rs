@@ -80,7 +80,7 @@ pub async fn connect_remote(
         allowed.set_from_url(&base);
     }
 
-    // 钥匙串失败不阻断连接（Android 等可能无后端）。
+    // 钥匙串失败不阻断连接（Android 无后端时由连接页写 Keystore 加密 prefs）。
     if let Err(e) = write_connect_bearer_on_connect(&bearer) {
         eprintln!("[crabmate-connect] keyring write skipped: {e}");
     }
