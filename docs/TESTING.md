@@ -18,7 +18,7 @@ pre-commit run --all-files
 | `desktop-dist-stubs` | tauri-build 所需 dist 占位 |
 | `desktop-clippy` / `mobile-clippy` / `connect-clippy` | `-D warnings` |
 | `frontend-wasm-check` / `frontend-clippy` | wasm32 check + clippy |
-| `lizard-rust` | 按模块 CCN（含 `frontend`） |
+| `lizard-rust` | 按模块限制 CCN>10 函数个数（含 `frontend`；见 `lizard_module_ccn_caps.toml`）。实测必须等于 cap；变小则失败，须调低 cap 或 `bash scripts/lizard-rust.sh --write-caps` |
 | `fn-param-ratchet` | 形参 ≤ 9 |
 | `fn-nloc-ratchet` | 函数 nloc ≤ 200、单文件 ≤ 920 |
 | `taplo-format` / `taplo-lint` | 有 `taplo` 才跑，否则跳过 |
@@ -63,6 +63,8 @@ bash scripts/lizard-rust.sh
 bash scripts/fn-param-ratchet.sh
 bash scripts/fn-nloc-ratchet.sh
 ```
+
+Lizard 个数棘轮：重构后若某模块 `CCN>10` 函数变少，pre-commit / `lizard-rust` 会失败并要求把 `scripts/lizard_module_ccn_caps.toml` 中该模块上限调低到实测值（推荐 `bash scripts/lizard-rust.sh --write-caps`）。不得长期保留偏高的 cap。
 
 ## Playwright（浏览器 Web UI E2E）
 

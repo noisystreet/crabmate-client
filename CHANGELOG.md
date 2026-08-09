@@ -20,8 +20,9 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 - CodeMirror: load `ide-codemirror.js` dynamically when entering the IDE so it no longer blocks chat cold start
 - Desktop: maximize on page-load **Started** when navigating to the `serve` UI; no need to wait for WASM Finished
 - Sync read-only TTL settings signals when prefs land; after a CM script load failure, leave and re-enter to retry
-- Frontend: split high-CCN helpers/components (workspace HTTP, SSE info dispatch, theme sync, IDE tabs, composer/toolbar/settings); lizard `frontend` cap **15 → 13**
-- Desktop: extract main-window navigation / page-load handlers from `finish_create_main_window`; lizard `desktop-tauri` cap **24 → 10** (fixed; do not raise)
+- Frontend: split high-CCN helpers/components (workspace HTTP, SSE info dispatch, theme sync, IDE tabs, composer/toolbar/settings)
+- Desktop: extract main-window navigation / page-load handlers from `finish_create_main_window`
+- Lizard gate: per-module **count of functions with CCN > 10** (was per-module max CCN); caps in `scripts/lizard_module_ccn_caps.toml`; ratchet requires measured count to match the cap (shrink → lower the cap / `--write-caps`)
 
 ## [0.1.0] - 2026-08-08
 

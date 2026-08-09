@@ -51,7 +51,7 @@ make test
 make desktop-dev
 make desktop-release         # .deb (auto trunk --release UI)
 bash scripts/check-no-main-path.sh
-bash scripts/lizard-rust.sh
+bash scripts/lizard-rust.sh              # CCN>10 count must equal module cap; if lower, tighten cap / --write-caps
 ./scripts/victauri-e2e.sh all   # needs a usable crabmate serve binary; not in default CI
 ./scripts/e2e-playwright.sh     # Playwright; needs frontend/dist + serve
 ```
