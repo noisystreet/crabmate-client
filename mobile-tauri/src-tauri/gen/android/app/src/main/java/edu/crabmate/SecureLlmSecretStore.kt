@@ -89,7 +89,7 @@ internal object SecureLlmSecretStore {
     }
     val iv = blob.copyOfRange(0, IV_BYTES)
     val ct = blob.copyOfRange(IV_BYTES, blob.size)
-    val cipher = Cipher.getInstance(TRANSFORMAT)
+    val cipher = Cipher.getInstance(TRANSFORMATION)
     cipher.init(Cipher.DECRYPT_MODE, secretKey(), GCMParameterSpec(GCM_TAG_BITS, iv))
     return String(cipher.doFinal(ct), Charsets.UTF_8).trim()
   }
