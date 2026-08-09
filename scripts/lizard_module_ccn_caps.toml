@@ -1,14 +1,16 @@
 # 各模块单函数 CCN 硬上限（lizard）。与 scripts/lizard_rust_metrics.py 配套。
 # - global_ccn_ceiling：任一模块的 cap 不得超过此值（仓库全局天花板）
 # - default_ccn_max：未在 [modules] 登记的新模块回退值
-# 壳侧 desktop-tauri 暂有高 CCN 函数（导航闭包）；天花板略高于主仓 15，收紧时优先拆分 finish_create_main_window。
+# - frozen_modules：禁止修改 cap（勿抬高；--write-caps 保留原值并保留注释）
 # 可用：python3 scripts/lizard_rust_metrics.py --write-caps 按当前实测 max 重写 [modules]
 
 global_ccn_ceiling = 25
 default_ccn_max = 15
+frozen_modules = ["desktop-tauri"]
 
 [modules]
 "crates/crabmate-connect" = 10
-"desktop-tauri" = 24
+# 禁止修改：desktop-tauri 单函数 CCN 上限固定为 10
+"desktop-tauri" = 10
 "frontend" = 14
 "mobile-tauri" = 1

@@ -47,6 +47,7 @@ class CapsConfig:
     global_ceiling: int
     default_max: int
     modules: dict[str, int]
+    frozen_modules: frozenset[str] = frozenset()
 
 
 @dataclass
@@ -143,7 +144,20 @@ def load_caps(path: Path = CAPS_PATH) -> CapsConfig:
             )
             raise SystemExit(2)
         modules[mid] = cap
-    return CapsConfig(ceiling, default_max, modules)
+    frozen_raw = raw.get("frozen_modules") or []
+    if not isinstance(frozen_raw, list):
+        print("lizard: frozen_modules 必须是数组", file=sys.stderr)
+        raise SystemExit(2)
+    frozen = frozenset(str(x) for x in frozen_raw)
+    unknown_frozen = sorted(frozen - set(modules))
+    if unknown_frozen:
+        print(
+            "lizard: frozen_modules 含未在 [modules] 登记的键: "
+            + ", ".join(unknown_frozen),
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+    return CapsConfig(ceiling, default_max, modules, frozen)
 
 
 def cap_for(mid: str, caps: CapsConfig, *, missing: set[str]) -> int:
@@ -246,25 +260,41 @@ def write_caps_from_measured(
     caps: CapsConfig,
     path: Path,
 ) -> None:
-    """按当前实测 max（夹在 1..ceiling）重写 caps 文件的 [modules]。"""
+    """按当前实测 max（夹在 1..ceiling）重写 caps 文件的 [modules]。
+
+    `frozen_modules` 保留原 cap，禁止被 --write-caps 抬高或改写。
+    """
     lines = [
         "# 各模块单函数 CCN 硬上限（lizard）。与 scripts/lizard_rust_metrics.py 配套。",
         "# - global_ccn_ceiling：任一模块的 cap 不得超过此值（仓库全局天花板）",
         "# - default_ccn_max：未在 [modules] 登记的新模块回退值",
+        "# - frozen_modules：禁止修改 cap（勿抬高；--write-caps 保留原值）",
         "# 收紧：重构后把对应模块数值调低；升高须有意为之（勿默认放宽）。",
         "# 可用：python3 scripts/lizard_rust_metrics.py --write-caps 按当前实测 max 重写 [modules]",
         "",
         f"global_ccn_ceiling = {caps.global_ceiling}",
         f"default_ccn_max = {caps.default_max}",
-        "",
-        "[modules]",
     ]
+    if caps.frozen_modules:
+        frozen_list = ", ".join(f'"{m}"' for m in sorted(caps.frozen_modules))
+        lines.append(f"frozen_modules = [{frozen_list}]")
+    lines.extend(["", "[modules]"])
     n = 0
     for mid in sorted(by_mod.keys()):
         if by_mod[mid].fn_count == 0:
             continue
-        measured = max(1, min(by_mod[mid].max_ccn, caps.global_ceiling))
-        lines.append(f'"{mid}" = {measured}')
+        if mid in caps.frozen_modules:
+            if mid not in caps.modules:
+                print(
+                    f"lizard: frozen 模块 {mid!r} 缺少既有 cap，无法 --write-caps",
+                    file=sys.stderr,
+                )
+                raise SystemExit(2)
+            value = caps.modules[mid]
+            lines.append(f"# 禁止修改：{mid} 单函数 CCN 上限固定为 {value}")
+        else:
+            value = max(1, min(by_mod[mid].max_ccn, caps.global_ceiling))
+        lines.append(f'"{mid}" = {value}')
         n += 1
     lines.append("")
     path.write_text("\n".join(lines), encoding="utf-8")
@@ -338,7 +368,7 @@ def main(argv: list[str] | None = None) -> int:
         if caps_path.is_file():
             caps = load_caps(caps_path)
         else:
-            caps = CapsConfig(15, 15, {})
+            caps = CapsConfig(15, 15, {}, frozenset())
         by_mod, _ = analyze(files, caps, list_above=None)
         if not by_mod:
             print("lizard: 未分析到任何函数", file=sys.stderr)

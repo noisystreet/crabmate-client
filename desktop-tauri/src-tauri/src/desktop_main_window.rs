@@ -177,38 +177,135 @@ fn apply_main_ui_geometry(window: &WebviewWindow) {
     fill_monitor_work_area_or_default(window);
 }
 
-fn allow_http_navigation(app: &tauri::AppHandle, url: &Url, backend_origin: &url::Origin) -> bool {
-    let host = url.host_str().unwrap_or("");
-    if host.eq_ignore_ascii_case("tauri.localhost") {
-        return true;
-    }
+fn open_url_external(app: &tauri::AppHandle, url: &Url) {
+    let _ = app.opener().open_url(url.as_str(), None::<&str>);
+}
+
+fn is_tauri_localhost_host(url: &Url) -> bool {
+    url.host_str()
+        .unwrap_or("")
+        .eq_ignore_ascii_case("tauri.localhost")
+}
+
+fn is_trusted_serve_navigation(
+    app: &tauri::AppHandle,
+    url: &Url,
+    backend_origin: &url::Origin,
+) -> bool {
     let allowed = app
         .try_state::<crabmate_connect::AllowedServeOrigin>()
         .is_some_and(|s| s.matches_url(url));
-    let is_backend = url.origin() == *backend_origin;
+    url.origin() == *backend_origin || allowed
+}
+
+/// 当前页为 http(s) 时：同 Origin 放行，跨 Origin 外开；否则 `None`（交给后续策略）。
+fn same_origin_http_decision(cur: &Url, url: &Url) -> Option<bool> {
+    if !matches!(cur.scheme(), "http" | "https") {
+        return None;
+    }
+    Some(cur.origin() == url.origin())
+}
+
+fn deny_and_open_external(app: &tauri::AppHandle, url: &Url) -> bool {
+    open_url_external(app, url);
+    false
+}
+
+fn allow_http_navigation(app: &tauri::AppHandle, url: &Url, backend_origin: &url::Origin) -> bool {
+    if is_tauri_localhost_host(url) {
+        return true;
+    }
+    let trusted = is_trusted_serve_navigation(app, url, backend_origin);
     if let Some(w) = app.get_webview_window("main")
         && let Ok(cur) = w.url()
     {
         if is_connect_page_url(&cur) {
-            if is_backend || allowed {
-                return true;
+            return trusted || deny_and_open_external(app, url);
+        }
+        if let Some(same_origin) = same_origin_http_decision(&cur, url) {
+            return same_origin || deny_and_open_external(app, url);
+        }
+    }
+    trusted || deny_and_open_external(app, url)
+}
+
+fn on_main_navigation(app: &tauri::AppHandle, url: &Url, backend_origin: &url::Origin) -> bool {
+    match url.scheme() {
+        "tauri" | "asset" => true,
+        "mailto" => deny_and_open_external(app, url),
+        "http" | "https" => allow_http_navigation(app, url, backend_origin),
+        _ => false,
+    }
+}
+
+fn handle_main_page_load(
+    window: &WebviewWindow,
+    event: PageLoadEvent,
+    page_url: &Url,
+    revealed: &AtomicBool,
+) {
+    let connect = is_connect_page_url(page_url);
+    match event {
+        // 离开连接页后尽早 maximize，不必等 serve WASM Finished。
+        PageLoadEvent::Started if !connect => {
+            let _ = window.set_resizable(true);
+            if revealed.load(Ordering::SeqCst) {
+                apply_main_ui_geometry(window);
+            } else {
+                reveal_main_window_once(window, revealed);
             }
-            let _ = app.opener().open_url(url.as_str(), None::<&str>);
-            return false;
         }
-        if matches!(cur.scheme(), "http" | "https") && cur.origin() == url.origin() {
-            return true;
+        PageLoadEvent::Finished if connect => {
+            apply_connect_page_geometry(window);
+            reveal_main_window_once(window, revealed);
         }
-        if matches!(cur.scheme(), "http" | "https") && cur.origin() != url.origin() {
-            let _ = app.opener().open_url(url.as_str(), None::<&str>);
-            return false;
+        PageLoadEvent::Finished if !connect => {
+            if revealed.load(Ordering::SeqCst) {
+                apply_main_ui_geometry(window);
+            } else {
+                let _ = window.set_resizable(true);
+                reveal_main_window_once(window, revealed);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn main_window_builder_size(
+    mode: MainWindowMode,
+    connect_geo: Option<WorkAreaGeometry>,
+) -> (f64, f64) {
+    match mode {
+        MainWindowMode::ConnectPage => connect_geo
+            .map(|g| (g.logical_width, g.logical_height))
+            .unwrap_or((CONNECT_FALLBACK_WIDTH, CONNECT_FALLBACK_HEIGHT)),
+        MainWindowMode::DirectUi => (MAIN_UI_WIDTH, MAIN_UI_HEIGHT),
+    }
+}
+
+fn apply_mode_after_build(window: &WebviewWindow, mode: MainWindowMode) {
+    match mode {
+        MainWindowMode::ConnectPage => {
+            apply_connect_page_geometry(window);
+        }
+        MainWindowMode::DirectUi => {
+            let _ = window.set_resizable(true);
         }
     }
-    if is_backend || allowed {
-        return true;
-    }
-    let _ = app.opener().open_url(url.as_str(), None::<&str>);
-    false
+}
+
+fn spawn_reveal_fallback(app_handle: &tauri::AppHandle, revealed: Arc<AtomicBool>) {
+    let app_fallback = app_handle.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_secs(20));
+        let revealed = Arc::clone(&revealed);
+        let app = app_fallback.clone();
+        let _ = app_fallback.run_on_main_thread(move || {
+            if let Some(main) = app.get_webview_window("main") {
+                reveal_main_window_once(&main, &revealed);
+            }
+        });
+    });
 }
 
 fn finish_create_main_window(
@@ -223,12 +320,7 @@ fn finish_create_main_window(
     let connect_geo = matches!(mode, MainWindowMode::ConnectPage)
         .then(|| primary_work_area(app_handle))
         .flatten();
-    let (width, height) = match mode {
-        MainWindowMode::ConnectPage => connect_geo
-            .map(|g| (g.logical_width, g.logical_height))
-            .unwrap_or((CONNECT_FALLBACK_WIDTH, CONNECT_FALLBACK_HEIGHT)),
-        MainWindowMode::DirectUi => (MAIN_UI_WIDTH, MAIN_UI_HEIGHT),
-    };
+    let (width, height) = main_window_builder_size(mode, connect_geo);
 
     // 连接页：builder 即铺满工作区（勿用居中小窗；未映射时 center/position 常被忽略）。
     let mut builder = WebviewWindowBuilder::new(app_handle, "main", webview_url)
@@ -244,69 +336,15 @@ fn finish_create_main_window(
         builder = builder.position(geo.logical_x, geo.logical_y);
     }
     let window = builder
-        .on_navigation(move |url| match url.scheme() {
-            "tauri" | "asset" => true,
-            "mailto" => {
-                let _ = app_handle_clone
-                    .opener()
-                    .open_url(url.as_str(), None::<&str>);
-                false
-            }
-            "http" | "https" => allow_http_navigation(&app_handle_clone, url, &backend_origin),
-            _ => false,
-        })
+        .on_navigation(move |url| on_main_navigation(&app_handle_clone, url, &backend_origin))
         .on_page_load(move |window, payload| {
-            let connect = is_connect_page_url(payload.url());
-            match payload.event() {
-                // 离开连接页后尽早 maximize，不必等 serve WASM Finished。
-                PageLoadEvent::Started if !connect => {
-                    let _ = window.set_resizable(true);
-                    if revealed_on_load.load(Ordering::SeqCst) {
-                        apply_main_ui_geometry(&window);
-                    } else {
-                        reveal_main_window_once(&window, &revealed_on_load);
-                    }
-                }
-                PageLoadEvent::Finished if connect => {
-                    apply_connect_page_geometry(&window);
-                    reveal_main_window_once(&window, &revealed_on_load);
-                }
-                PageLoadEvent::Finished if !connect => {
-                    if revealed_on_load.load(Ordering::SeqCst) {
-                        apply_main_ui_geometry(&window);
-                    } else {
-                        let _ = window.set_resizable(true);
-                        reveal_main_window_once(&window, &revealed_on_load);
-                    }
-                }
-                _ => {}
-            }
+            handle_main_page_load(&window, payload.event(), payload.url(), &revealed_on_load);
         })
         .build()
         .map_err(|e| format!("failed to create main window: {e}"))?;
 
-    match mode {
-        MainWindowMode::ConnectPage => {
-            apply_connect_page_geometry(&window);
-        }
-        MainWindowMode::DirectUi => {
-            let _ = window.set_resizable(true);
-        }
-    }
-
-    let app_fallback = app_handle.clone();
-    let revealed_fallback = Arc::clone(&revealed);
-    std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_secs(20));
-        let revealed = Arc::clone(&revealed_fallback);
-        let app = app_fallback.clone();
-        let _ = app_fallback.run_on_main_thread(move || {
-            if let Some(main) = app.get_webview_window("main") {
-                reveal_main_window_once(&main, &revealed);
-            }
-        });
-    });
-
+    apply_mode_after_build(&window, mode);
+    spawn_reveal_fallback(app_handle, revealed);
     Ok(window)
 }
 

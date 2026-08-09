@@ -21,6 +21,7 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 - Desktop: maximize on page-load **Started** when navigating to the `serve` UI; no need to wait for WASM Finished
 - Sync read-only TTL settings signals when prefs land; after a CM script load failure, leave and re-enter to retry
 - Frontend: split high-CCN helpers/components (workspace HTTP, SSE info dispatch, theme sync, IDE tabs, composer/toolbar/settings); lizard `frontend` cap **15 → 14**
+- Desktop: extract main-window navigation / page-load handlers from `finish_create_main_window`; lizard `desktop-tauri` cap **24 → 10** (fixed; do not raise)
 
 ## [0.1.0] - 2026-08-08
 
