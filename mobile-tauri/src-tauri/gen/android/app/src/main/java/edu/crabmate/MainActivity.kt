@@ -1,5 +1,6 @@
 package edu.crabmate
 
+import android.content.SharedPreferences
 import android.os.Build
 import android.os.Bundle
 import android.view.View
@@ -12,6 +13,8 @@ import androidx.appcompat.app.AlertDialog
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKey
 import kotlin.math.roundToInt
 
 class MainActivity : TauriActivity() {
@@ -19,6 +22,8 @@ class MainActivity : TauriActivity() {
   private var connectHomeUrl: String = "http://tauri.localhost/"
   private var appWebView: WebView? = null
   private var exitConfirmDialog: AlertDialog? = null
+  /** Keystore 加密 prefs；懒创建，失败时为 null（连接页不再写明文 localStorage）。 */
+  @Volatile private var securePrefs: SharedPreferences? = null
   /**
    * 系统返回键：弹确认框（退出 / 回连接页），不走 WebView.goBack。
    *
@@ -246,6 +251,46 @@ class MainActivity : TauriActivity() {
     return (css + 8).coerceAtLeast(24)
   }
 
+  /**
+   * Keystore 加密的 SharedPreferences（AES-256-GCM）。
+   * 供连接页持久化 Web API Bearer；远程页不得读写（见 [allowSecureBearerBridge]）。
+   */
+  private fun securePrefsOrNull(): SharedPreferences? {
+    securePrefs?.let {
+      return it
+    }
+    return try {
+      val masterKey =
+        MasterKey.Builder(applicationContext)
+          .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+          .build()
+      val prefs =
+        EncryptedSharedPreferences.create(
+          applicationContext,
+          SECURE_PREFS_NAME,
+          masterKey,
+          EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+          EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
+        )
+      securePrefs = prefs
+      prefs
+    } catch (_: Exception) {
+      null
+    }
+  }
+
+  /**
+   * 仅当 WebView **已加载**且确认为连接页 Origin 时允许读写加密 Bearer。
+   * 与 [isAppOrigin] 不同：URL 为空时拒绝（避免远程页加载间隙误放行）。
+   */
+  private fun allowSecureBearerBridge(): Boolean {
+    val url = appWebView?.url
+    if (url.isNullOrBlank()) {
+      return false
+    }
+    return isAppOrigin(url)
+  }
+
   /** 供连接页 / 远程 Web 调用。 */
   inner class MobileBridge {
     @JavascriptInterface
@@ -263,6 +308,45 @@ class MainActivity : TauriActivity() {
     /** 底栏 / 系统导航安全区（CSS 像素）。 */
     @JavascriptInterface
     fun getNavBarInsetPx(): Int = navBarInsetCssPx()
+
+    /**
+     * 读取 Keystore 加密存储的连接 Bearer。仅连接页 Origin；远程调用返回空串。
+     */
+    @JavascriptInterface
+    fun getSecureBearer(): String {
+      if (!allowSecureBearerBridge()) {
+        return ""
+      }
+      return try {
+        securePrefsOrNull()?.getString(SECURE_BEARER_KEY, "")?.trim().orEmpty()
+      } catch (_: Exception) {
+        ""
+      }
+    }
+
+    /**
+     * 写入（或清空）加密 Bearer。仅连接页 Origin；空串删除条目。
+     * @return true 表示已写入/清除；false 表示拒绝或存储不可用
+     */
+    @JavascriptInterface
+    fun setSecureBearer(bearer: String): Boolean {
+      if (!allowSecureBearerBridge()) {
+        return false
+      }
+      val prefs = securePrefsOrNull() ?: return false
+      return try {
+        val trimmed = bearer.trim()
+        prefs.edit().apply {
+          if (trimmed.isEmpty()) {
+            remove(SECURE_BEARER_KEY)
+          } else {
+            putString(SECURE_BEARER_KEY, trimmed)
+          }
+        }.commit()
+      } catch (_: Exception) {
+        false
+      }
+    }
 
     /** 连接探测成功后调用，提示系统密码管理器保存 URL+Bearer。 */
     @JavascriptInterface
@@ -301,6 +385,9 @@ class MainActivity : TauriActivity() {
   }
 
   companion object {
+    private const val SECURE_PREFS_NAME = "crabmate_secure_connect"
+    private const val SECURE_BEARER_KEY = "web_api_bearer"
+
     /**
      * 是否为壳内连接页 Origin。按 scheme + host 解析，禁止 `contains("://tauri.localhost")`
      * 子串误判（恶意查询串可污染 [connectHomeUrl]）。

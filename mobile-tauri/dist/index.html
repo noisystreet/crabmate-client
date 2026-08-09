@@ -292,12 +292,47 @@
         }
       }
 
+      function clearPlaintextBearerStorage() {
+        try {
+          localStorage.removeItem(BEARER_KEY_LEGACY_MOBILE);
+        } catch (_) {}
+      }
+
+      /**
+       * Android：优先 Keystore 加密桥；若仅有旧版明文 localStorage 则一次性迁入加密存储后清除明文。
+       * 桌面：无桥时返回空（预填靠系统钥匙串 invoke）。
+       */
       function readLegacyBearer() {
         try {
-          return localStorage.getItem(BEARER_KEY_LEGACY_MOBILE) || "";
+          const bridge = mobileBridge();
+          if (bridge && typeof bridge.getSecureBearer === "function") {
+            const secure = (bridge.getSecureBearer() || "").trim();
+            if (secure) {
+              clearPlaintextBearerStorage();
+              return secure;
+            }
+          }
+        } catch (_) {}
+        let plaintext = "";
+        try {
+          plaintext = (localStorage.getItem(BEARER_KEY_LEGACY_MOBILE) || "").trim();
         } catch (_) {
+          plaintext = "";
+        }
+        if (!plaintext) {
           return "";
         }
+        try {
+          const bridge = mobileBridge();
+          if (
+            bridge &&
+            typeof bridge.setSecureBearer === "function" &&
+            bridge.setSecureBearer(plaintext)
+          ) {
+            clearPlaintextBearerStorage();
+          }
+        } catch (_) {}
+        return plaintext;
       }
 
       async function hydrateFields() {
@@ -383,11 +418,20 @@
       }
 
       function persistBearerFallback(bearer) {
-        // Android 等可能无钥匙串：仍把非空 Bearer 记在壳 localStorage，供下次预填。
+        // Android：无系统钥匙串时写入 Keystore 加密 prefs（CrabMateMobile）；不再落明文 localStorage。
+        // 桌面：connect_remote 已写钥匙串；此处不写 Bearer。空串不写入、也不清除已存密钥。
+        const b = (bearer || "").trim();
+        if (!b) {
+          return;
+        }
         try {
-          const b = (bearer || "").trim();
-          if (b) {
-            localStorage.setItem(BEARER_KEY_LEGACY_MOBILE, b);
+          const bridge = mobileBridge();
+          if (
+            bridge &&
+            typeof bridge.setSecureBearer === "function" &&
+            bridge.setSecureBearer(b)
+          ) {
+            clearPlaintextBearerStorage();
           }
         } catch (_) {}
       }

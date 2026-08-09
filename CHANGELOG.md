@@ -20,6 +20,7 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 - Android: keep the system Back handler above Tauri `AppPlugin` (re-install after WebView ready, on resume, and briefly thereafter) and trim WebView history on remote so Back cannot `goBack()` to a bare connect page and auto-login; returning to connect still uses `?manual=1`
 - Android: wire WebView navigation allowlist (`AllowedServeOrigin` via `crabmate-shell-navigation`); parse connect-page origin by host (not substring); keep `MobileBridge` in ProGuard
 - Connect: reject cleartext HTTP to public hosts (LAN/loopback/CGNAT `100.64/10`/`.local`/`.internal` still allowed; public must use HTTPS); probe follows redirects only when the host is unchanged
+- Android: persist connect-page Web API Bearer in Keystore-backed `EncryptedSharedPreferences` (`CrabMateMobile` bridge, app-origin only) instead of plaintext `localStorage`; migrate and clear the legacy key on read
 - Post-connect first paint: LLM hydrate runs in parallel with session list; hydrate path no longer repeats `GET /user-data/prefs`; `initialized` still waits for prefs to land, avoiding a read-only TTL race on the first chat
 - CodeMirror: load `ide-codemirror.js` dynamically when entering the IDE so it no longer blocks chat cold start
 - Desktop: maximize on page-load **Started** when navigating to the `serve` UI; no need to wait for WASM Finished
