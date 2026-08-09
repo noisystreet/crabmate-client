@@ -12,7 +12,8 @@
 2. 壳进程探测远程 `GET /health`（带 Bearer），失败时在连接页显示错误。
 3. 成功后导航到**包内** `index.html`，hash 交接 **API 基址** + Bearer；前端启动时写入本页凭证并 `replaceState` 清掉 hash。
 4. **首次**成功连接且 Bearer 非空、本机钥匙串尚无值时，写入系统钥匙串（账户 `tauri_connect_web_api_bearer`）。Android 无钥匙串后端时跳过该路径，改将非空 Bearer 用 **AndroidKeyStore AES-GCM** 加密后写入普通 SharedPreferences（`SecureBearerStore` / `CrabMateMobile.getSecureBearer`·`setSecureBearer`，**仅连接页**可调；**不**使用 `security-crypto`/Tink）；旧版明文 `localStorage` Bearer 会在首次读取时迁入并清除。仍可配合系统 Autofill。
-5. 聊天 / SSE / 工具审批在远程 `serve` 执行；UI 在壳内加载。
+5. 设置页模型 `API_KEY`：桌面走系统钥匙串（`get_llm_secret` / `set_llm_secret`）；Android 走 **Keystore**（`SecureLlmSecretStore` / `getSecureLlmSecret`·`setSecureLlmSecret`，**包内 App Origin** 可调，含业务 UI）。不落明文 `localStorage`。
+6. 聊天 / SSE / 工具审批在远程 `serve` 执行；UI 在壳内加载。
 
 连接页将 **服务器 URL** 写入 `localStorage`（`crabmate.connect.serverUrl`，并兼容旧键 `crabmate.mobile.*`），下次冷启动自动探测并登录。也可配合系统 Autofill / 密码管理器（表单 `username`=`服务器地址`，`password`=`Bearer`；手动连接成功后 `AutofillManager.commit()`）。侧栏工具栏 **断开** 图标或系统返回键回到连接页时带 `?manual=1`，**不会**立刻自动重连，便于更换服务器。空 Bearer 不会写 hash，以免清掉页内已有凭证。
 

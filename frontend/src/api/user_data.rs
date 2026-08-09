@@ -109,9 +109,12 @@ pub struct SecretSlotStatusDto {
 
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct SecretsStatusDto {
+    /// 服务端槽位仍可能存在；Client 已改为本机存模型密钥，UI 不再读此字段。
     #[serde(default)]
+    #[allow(dead_code)]
     pub client_llm: SecretSlotStatusDto,
     #[serde(default)]
+    #[allow(dead_code)]
     pub executor_llm: SecretSlotStatusDto,
     #[serde(default)]
     #[allow(dead_code)]
@@ -443,16 +446,6 @@ pub async fn put_mcp_server_remote_auth(
         loc,
     )
     .await
-}
-
-pub async fn put_secret_executor_llm(api_key: &str, loc: Locale) -> Result<(), String> {
-    let body = serde_json::json!({ "api_key": api_key }).to_string();
-    put_json_no_content("/user-data/secrets/executor-llm", &body, loc).await
-}
-
-pub async fn put_secret_client_llm(api_key: &str, loc: Locale) -> Result<(), String> {
-    let body = serde_json::json!({ "api_key": api_key }).to_string();
-    put_json_no_content("/user-data/secrets/client-llm", &body, loc).await
 }
 
 /// 写入或清除 GitHub token（空串清除）；不经 GET 回显。供 PAT fallback / 测试。

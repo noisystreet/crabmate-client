@@ -13,6 +13,7 @@ mod github_oauth;
 mod http;
 mod http_workspace_clone;
 mod http_workspace_projects;
+pub(crate) mod llm_secrets_local;
 mod saved_models;
 mod session_store;
 pub mod user_data;
@@ -27,6 +28,7 @@ pub use browser::{
     web_api_bearer_token_is_set,
 };
 pub use chat_stream::{ChatStreamCallbacks, OnToolCallFn, SendChatStreamParams, send_chat_stream};
+#[allow(unused_imports)] // 对外 re-export；壳内设置页等按需引用
 pub use client_llm_storage::{
     clear_client_llm_api_key_storage, clear_executor_llm_api_key_storage,
     client_llm_storage_has_api_key, executor_llm_storage_has_api_key,
@@ -51,11 +53,12 @@ pub use http_workspace_clone::{
     post_workspace_clone_stream,
 };
 pub use http_workspace_projects::{fetch_workspace_projects, post_workspace_project};
+pub use llm_secrets_local::{PersistKind, secure_llm_secret_backend_available};
 pub use saved_models::{
     ExecutorLlmDraftSignals, MainLlmDraftSignals, SavedModelPreset,
     apply_saved_model_preset_to_executor_fields, apply_saved_model_preset_to_main_fields,
     load_saved_model_presets_from_storage, matching_saved_preset_index,
-    persist_saved_model_presets_to_storage,
+    persist_saved_model_presets_to_storage, persist_saved_model_presets_to_storage_async,
 };
 pub use session_store::post_session_conversation_store;
 pub use user_data::{

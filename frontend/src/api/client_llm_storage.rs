@@ -1,13 +1,15 @@
-//! 侧栏「本机模型」：进程内缓存 + 非机密覆盖文件；API 密钥由服务端写系统钥匙串。
+//! 侧栏「本机模型」：进程内缓存 + 非机密覆盖文件；API 密钥存本机钥匙串/Keystore。
 
 use serde_json::Value;
 
 use crate::i18n::Locale;
 
 use super::client_llm_cache::{self, with_mem, with_mem_mut};
-use super::user_data::{
-    LlmOverridesDto, put_llm_overrides, put_secret_client_llm, put_secret_executor_llm,
+use super::llm_secrets_local::{
+    PersistKind, client_llm_api_key_is_set, executor_llm_api_key_is_set,
+    set_client_llm_api_key_async, set_executor_llm_api_key_async,
 };
+use super::user_data::{LlmOverridesDto, put_llm_overrides};
 
 pub async fn hydrate_client_llm_from_server(loc: Locale) {
     client_llm_cache::hydrate_from_server(loc).await;
@@ -56,9 +58,9 @@ fn sync_llm_to_server_async(loc: Locale) {
     });
 }
 
-/// 是否已配置主模型 API Key（系统钥匙串状态或本进程内存）。
+/// 是否已配置主模型 API Key（本机安全存储水合后的内存）。
 pub fn client_llm_storage_has_api_key() -> bool {
-    with_mem(|m| m.client_key_on_server || !m.api_key.trim().is_empty())
+    with_mem(|m| !m.api_key.trim().is_empty()) || client_llm_api_key_is_set()
 }
 
 pub fn load_client_llm_text_fields_from_storage() -> (String, String, String, String, String) {
@@ -73,6 +75,44 @@ pub fn load_client_llm_text_fields_from_storage() -> (String, String, String, St
     })
 }
 
+fn merge_persist_kind(acc: &mut Option<PersistKind>, kind: PersistKind) {
+    match (*acc, kind) {
+        (None, k) => *acc = Some(k),
+        (Some(PersistKind::Durable), PersistKind::BrowserInsecure)
+        | (Some(PersistKind::BrowserInsecure), PersistKind::Durable) => {
+            *acc = Some(PersistKind::BrowserInsecure);
+        }
+        _ => {}
+    }
+}
+
+/// 持久化非机密字段 + 可选密钥；密钥写入失败时返回 Err（不假装已保存）。
+pub async fn persist_client_llm_to_storage_async(
+    api_base: &str,
+    model: &str,
+    temperature: &str,
+    llm_context_tokens: &str,
+    llm_thinking_mode: &str,
+    api_key_update: Option<&str>,
+    loc: Locale,
+) -> Result<Option<PersistKind>, String> {
+    with_mem_mut(|m| {
+        m.api_base = api_base.trim().to_string();
+        m.model = model.trim().to_string();
+        m.temperature = temperature.trim().to_string();
+        m.llm_context_tokens = llm_context_tokens.trim().to_string();
+        m.llm_thinking_mode = llm_thinking_mode.trim().to_string();
+    });
+    sync_llm_to_server_async(loc);
+    if let Some(k) = api_key_update {
+        let kind = set_client_llm_api_key_async(k).await?;
+        with_mem_mut(|m| m.api_key = k.trim().to_string());
+        return Ok(Some(kind));
+    }
+    Ok(None)
+}
+
+/// 同步入口（slash 等）：密钥路径内部 spawn；非密钥字段立即写入。
 pub fn persist_client_llm_to_storage(
     api_base: &str,
     model: &str,
@@ -90,26 +130,30 @@ pub fn persist_client_llm_to_storage(
         m.llm_thinking_mode = llm_thinking_mode.trim().to_string();
         if let Some(k) = api_key_update {
             m.api_key = k.trim().to_string();
-            m.client_key_on_server = !m.api_key.is_empty();
         }
     });
     sync_llm_to_server_async(loc);
     if let Some(k) = api_key_update {
-        let key = k.trim().to_string();
+        let key = k.to_string();
         leptos::task::spawn_local(async move {
-            let _ = put_secret_client_llm(&key, loc).await;
+            let _ = set_client_llm_api_key_async(&key).await;
         });
     }
     Ok(())
 }
 
+pub async fn clear_client_llm_api_key_storage_async(_loc: Locale) -> Result<PersistKind, String> {
+    let kind = set_client_llm_api_key_async("").await?;
+    with_mem_mut(|m| m.api_key.clear());
+    Ok(kind)
+}
+
+#[allow(dead_code)] // 同步 slash / 旧调用保留；设置页走 async
 pub fn clear_client_llm_api_key_storage(loc: Locale) -> Result<(), String> {
-    with_mem_mut(|m| {
-        m.api_key.clear();
-        m.client_key_on_server = false;
-    });
+    // 同步路径：乐观清内存，后台确认钥匙串（失败时下次水合可能恢复——slash 应改用 async）。
+    with_mem_mut(|m| m.api_key.clear());
     leptos::task::spawn_local(async move {
-        let _ = put_secret_client_llm("", loc).await;
+        let _ = clear_client_llm_api_key_storage_async(loc).await;
     });
     Ok(())
 }
@@ -132,8 +176,13 @@ pub fn client_llm_json_for_chat_body() -> Option<Value> {
         if tm == "on" || tm == "off" {
             map.insert("llm_thinking_mode".into(), Value::String(tm.to_string()));
         }
-        if !m.api_key.trim().is_empty() {
-            map.insert("api_key".into(), Value::String(m.api_key.clone()));
+        let key = if m.api_key.trim().is_empty() {
+            super::llm_secrets_local::client_llm_api_key()
+        } else {
+            m.api_key.clone()
+        };
+        if !key.trim().is_empty() {
+            map.insert("api_key".into(), Value::String(key));
         }
         if map.is_empty() {
             None
@@ -164,8 +213,13 @@ pub fn executor_llm_json_for_chat_body() -> Option<Value> {
         if !m.executor_model.trim().is_empty() {
             map.insert("model".into(), Value::String(m.executor_model.clone()));
         }
-        if !m.executor_api_key.trim().is_empty() {
-            map.insert("api_key".into(), Value::String(m.executor_api_key.clone()));
+        let key = if m.executor_api_key.trim().is_empty() {
+            super::llm_secrets_local::executor_llm_api_key()
+        } else {
+            m.executor_api_key.clone()
+        };
+        if !key.trim().is_empty() {
+            map.insert("api_key".into(), Value::String(key));
         }
         if map.is_empty() {
             None
@@ -176,13 +230,33 @@ pub fn executor_llm_json_for_chat_body() -> Option<Value> {
 }
 
 pub fn executor_llm_storage_has_api_key() -> bool {
-    with_mem(|m| m.executor_key_on_server || !m.executor_api_key.trim().is_empty())
+    with_mem(|m| !m.executor_api_key.trim().is_empty()) || executor_llm_api_key_is_set()
 }
 
 pub fn load_executor_llm_text_fields_from_storage() -> (String, String) {
     with_mem(|m| (m.executor_api_base.clone(), m.executor_model.clone()))
 }
 
+pub async fn persist_executor_llm_to_storage_async(
+    api_base: &str,
+    model: &str,
+    api_key_update: Option<&str>,
+    loc: Locale,
+) -> Result<Option<PersistKind>, String> {
+    with_mem_mut(|m| {
+        m.executor_api_base = api_base.trim().to_string();
+        m.executor_model = model.trim().to_string();
+    });
+    sync_llm_to_server_async(loc);
+    if let Some(k) = api_key_update {
+        let kind = set_executor_llm_api_key_async(k).await?;
+        with_mem_mut(|m| m.executor_api_key = k.trim().to_string());
+        return Ok(Some(kind));
+    }
+    Ok(None)
+}
+
+#[allow(dead_code)] // 同步路径保留；设置页走 async
 pub fn persist_executor_llm_to_storage(
     api_base: &str,
     model: &str,
@@ -194,26 +268,30 @@ pub fn persist_executor_llm_to_storage(
         m.executor_model = model.trim().to_string();
         if let Some(k) = api_key_update {
             m.executor_api_key = k.trim().to_string();
-            m.executor_key_on_server = !m.executor_api_key.is_empty();
         }
     });
     sync_llm_to_server_async(loc);
     if let Some(k) = api_key_update {
-        let key = k.trim().to_string();
+        let key = k.to_string();
         leptos::task::spawn_local(async move {
-            let _ = put_secret_executor_llm(&key, loc).await;
+            let _ = set_executor_llm_api_key_async(&key).await;
         });
     }
     Ok(())
 }
 
+#[allow(dead_code)]
+pub async fn clear_executor_llm_api_key_storage_async(_loc: Locale) -> Result<PersistKind, String> {
+    let kind = set_executor_llm_api_key_async("").await?;
+    with_mem_mut(|m| m.executor_api_key.clear());
+    Ok(kind)
+}
+
+#[allow(dead_code)]
 pub fn clear_executor_llm_api_key_storage(loc: Locale) -> Result<(), String> {
-    with_mem_mut(|m| {
-        m.executor_api_key.clear();
-        m.executor_key_on_server = false;
-    });
+    with_mem_mut(|m| m.executor_api_key.clear());
     leptos::task::spawn_local(async move {
-        let _ = put_secret_executor_llm("", loc).await;
+        let _ = clear_executor_llm_api_key_storage_async(loc).await;
     });
     Ok(())
 }
@@ -249,4 +327,23 @@ pub fn readonly_tool_ttl_cache_secs_for_chat_body() -> Option<u64> {
     } else {
         Some(0)
     }
+}
+
+/// 供设置「保存全部」汇总密钥落盘结果。
+pub fn merge_llm_persist_kinds(
+    client: Option<PersistKind>,
+    executor: Option<PersistKind>,
+    presets: Option<PersistKind>,
+) -> Option<PersistKind> {
+    let mut acc = None;
+    if let Some(k) = client {
+        merge_persist_kind(&mut acc, k);
+    }
+    if let Some(k) = executor {
+        merge_persist_kind(&mut acc, k);
+    }
+    if let Some(k) = presets {
+        merge_persist_kind(&mut acc, k);
+    }
+    acc
 }

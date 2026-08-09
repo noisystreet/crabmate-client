@@ -13,14 +13,15 @@ mod cleartext;
 mod commands;
 mod handoff;
 mod keyring_bearer;
+mod keyring_llm;
 mod navigation;
 mod probe;
 
 pub use allowed_origin::AllowedServeOrigin;
 pub use cleartext::enforce_cleartext_connect_policy;
 pub use commands::{
-    SuggestedServerUrl, connect_remote, disconnect_remote, get_connect_bearer,
-    get_suggested_server_url, seed_connect_home,
+    SuggestedServerUrl, connect_remote, disconnect_remote, get_connect_bearer, get_llm_secret,
+    get_suggested_server_url, seed_connect_home, set_llm_secret,
 };
 pub use handoff::{
     API_BASE_HASH_KEY, BEARER_HASH_KEY, build_handoff_url, build_local_ui_handoff_url,
@@ -29,6 +30,7 @@ pub use handoff::{
 pub use keyring_bearer::{
     read_connect_bearer, write_connect_bearer_on_connect, write_connect_bearer_unchecked,
 };
+pub use keyring_llm::{LlmSecretSlot, read_llm_secret, write_llm_secret};
 pub use navigation::{
     ShellNavigationDecision, allow_shell_navigation, clear_allowed_if_app_origin_loaded,
     decide_shell_navigation, is_app_origin, is_connect_page_url,

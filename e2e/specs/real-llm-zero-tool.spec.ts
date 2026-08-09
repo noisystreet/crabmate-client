@@ -7,7 +7,7 @@
  *
  * 前置条件：
  *   1. `crabmate serve` 在 127.0.0.1:8080 运行
- *   2. 模型密钥：环境变量 `API_KEY` / 本地 TOML，**或**服务端系统钥匙串已有 `client_llm`
+ *   2. 模型密钥：环境变量 `API_KEY` / 本地 TOML，**或**本机钥匙串/E2E 注入已有 `client_llm` 密钥
  *   3. 若服务端启用了 Web Bearer：`CM_WEB_API_BEARER_TOKEN`（与浏览器设置同源）
  *
  * 运行方式：
@@ -33,7 +33,7 @@ test.describe("真实 LLM：无工具终答场景", () => {
     if (!(await ensureRealLlmModelCredential(page, API_KEY))) {
       test.skip(
         true,
-        "未设置 API_KEY 且服务端钥匙串无 client_llm，跳过真实 LLM 用例",
+        "未设置 API_KEY 且无 client_llm 密钥（钥匙串/E2E），跳过真实 LLM 用例",
       );
       return;
     }
@@ -62,7 +62,7 @@ test.describe("真实 LLM：无工具终答场景", () => {
     if (!(await ensureRealLlmModelCredential(page, API_KEY))) {
       test.skip(
         true,
-        "未设置 API_KEY 且服务端钥匙串无 client_llm，跳过真实 LLM 用例",
+        "未设置 API_KEY 且无 client_llm 密钥（钥匙串/E2E），跳过真实 LLM 用例",
       );
       return;
     }

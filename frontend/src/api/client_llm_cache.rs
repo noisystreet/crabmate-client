@@ -1,4 +1,4 @@
-//! 进程内 LLM 覆盖缓存（持久化在 **`/user-data/llm-overrides`** 与 **`secrets/*`**）。
+//! 进程内 LLM 覆盖缓存（非机密：`/user-data/llm-overrides`；密钥：本机钥匙串/Keystore）。
 
 use std::cell::RefCell;
 
@@ -21,8 +21,6 @@ pub(crate) struct LlmMem {
     pub(crate) executor_api_key: String,
     pub(crate) execution_mode: String,
     pub(crate) readonly_ttl_follow_server: bool,
-    pub(crate) client_key_on_server: bool,
-    pub(crate) executor_key_on_server: bool,
     pub(crate) saved_models: Vec<Value>,
 }
 
@@ -35,16 +33,19 @@ pub fn with_mem_mut<R>(f: impl FnOnce(&mut LlmMem) -> R) -> R {
 }
 
 pub async fn hydrate_from_server(loc: crate::i18n::Locale) {
-    use super::user_data::{fetch_llm_overrides, fetch_secrets_status};
-    use futures_util::future::join;
+    use super::llm_secrets_local::{
+        client_llm_api_key, executor_llm_api_key, hydrate_llm_secrets_from_secure_store,
+    };
+    use super::saved_models::migrate_saved_models_secrets_to_local;
+    use super::user_data::fetch_llm_overrides;
 
-    // 不在此再 GET `/user-data/prefs`：壳层 `wire_load_user_prefs_from_server` 已拉一次，
-    // 并经 `set_readonly_tool_ttl_cache_follow_server_in_memory` 写入只读 TTL 开关。
-    let (file, secrets) = join(
-        async { fetch_llm_overrides(loc).await.unwrap_or_default() },
-        async { fetch_secrets_status(loc).await.ok() },
-    )
-    .await;
+    hydrate_llm_secrets_from_secure_store().await;
+
+    let file = fetch_llm_overrides(loc).await.unwrap_or_default();
+    let client_key = client_llm_api_key();
+    let executor_key = executor_llm_api_key();
+    let saved = migrate_saved_models_secrets_to_local(file.saved_models).await;
+
     with_mem_mut(|m| {
         m.api_base = file.client_llm.api_base.unwrap_or_default();
         m.model = file.client_llm.model.unwrap_or_default();
@@ -54,10 +55,8 @@ pub async fn hydrate_from_server(loc: crate::i18n::Locale) {
         m.executor_api_base = file.executor_llm.api_base.unwrap_or_default();
         m.executor_model = file.executor_llm.model.unwrap_or_default();
         m.execution_mode = file.execution_mode.unwrap_or_default();
-        m.saved_models = file.saved_models;
-        if let Some(st) = secrets.as_ref() {
-            m.client_key_on_server = st.client_llm.set;
-            m.executor_key_on_server = st.executor_llm.set;
-        }
+        m.saved_models = saved;
+        m.api_key = client_key;
+        m.executor_api_key = executor_key;
     });
 }

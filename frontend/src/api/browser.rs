@@ -4,7 +4,7 @@
 //! - **服务端** `CM_WEB_API_BEARER_TOKEN` / `web_api_bearer_token`（校验用）
 //! - **本页**内存（及 `localStorage` 引导键，见下）：请求头 `Authorization` / `X-API-Key`
 //!
-//! 与侧栏「API 密钥」(`client_llm` / `API_KEY`) 不是同一字段。
+//! 与侧栏「模型 API 密钥」(`client_llm`，本机钥匙串/Keystore) 不是同一字段。
 //!
 //! **API 基址**（路径 A Phase 2）：空 = 同 Origin 相对路径；非空时拼到 `/chat/stream` 等路径前。
 //! 可选构建期默认：`option_env!("CRABMATE_API_BASE")`。

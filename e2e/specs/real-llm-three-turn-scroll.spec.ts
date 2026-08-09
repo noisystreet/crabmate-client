@@ -5,7 +5,7 @@
  *   REAL_LLM_E2E=1 no_proxy=127.0.0.1,localhost,api.deepseek.com \
  *     npx playwright test specs/real-llm-three-turn-scroll.spec.ts
  *
- * 模型密钥：`API_KEY` / TOML，或服务端钥匙串 `client_llm`。
+ * 模型密钥：`API_KEY` / TOML，或本机钥匙串/E2E 注入的 `client_llm` 密钥。
  * Web Bearer：启用时设 `CM_WEB_API_BEARER_TOKEN`。
  * 未设 `REAL_LLM_E2E=1` 时跳过，避免 CI 意外产生真实调用费用。
  */
@@ -67,7 +67,7 @@ test.describe("真实 LLM：三轮对话滚动跟随", () => {
       if (!(await ensureRealLlmModelCredential(page, API_KEY))) {
         test.skip(
           true,
-          "未设置 API_KEY 且服务端钥匙串无 client_llm，跳过真实 LLM 用例",
+          "未设置 API_KEY 且无 client_llm 密钥（钥匙串/E2E），跳过真实 LLM 用例",
         );
         return;
       }
