@@ -19,6 +19,79 @@ pub struct WireSyncThemeSignals {
     pub settings_page: RwSignal<bool>,
 }
 
+fn settings_shell_open(settings_modal: RwSignal<bool>, settings_page: RwSignal<bool>) -> bool {
+    settings_modal.get_untracked() || settings_page.get_untracked()
+}
+
+fn should_refresh_system_theme(
+    theme: RwSignal<String>,
+    settings_modal: RwSignal<bool>,
+    settings_page: RwSignal<bool>,
+) -> bool {
+    theme.get_untracked() == THEME_SYSTEM && !settings_shell_open(settings_modal, settings_page)
+}
+
+fn refresh_system_theme_dom_if_idle(
+    theme: RwSignal<String>,
+    settings_modal: RwSignal<bool>,
+    settings_page: RwSignal<bool>,
+) {
+    if should_refresh_system_theme(theme, settings_modal, settings_page) {
+        shell_prefs_storage::persist_theme_to_storage_and_dom(THEME_SYSTEM);
+    }
+}
+
+fn attach_prefers_color_scheme_listener(
+    theme: RwSignal<String>,
+    settings_modal: RwSignal<bool>,
+    settings_page: RwSignal<bool>,
+) {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let Ok(f) = js_sys::Reflect::get(
+        window.as_ref(),
+        &wasm_bindgen::JsValue::from_str("matchMedia"),
+    ) else {
+        return;
+    };
+    let Ok(f) = f.dyn_into::<js_sys::Function>() else {
+        return;
+    };
+    let Ok(mql_v) = f.call1(
+        window.as_ref(),
+        &wasm_bindgen::JsValue::from_str("(prefers-color-scheme: dark)"),
+    ) else {
+        return;
+    };
+    if mql_v.is_null() || mql_v.is_undefined() {
+        return;
+    }
+    let Ok(mql) = mql_v.dyn_into::<web_sys::EventTarget>() else {
+        return;
+    };
+    let cb = Closure::<dyn FnMut(web_sys::Event)>::new(move |_| {
+        if settings_shell_open(settings_modal, settings_page) {
+            return;
+        }
+        if theme.get_untracked() != THEME_SYSTEM {
+            return;
+        }
+        // 桌面：OS 变化后同步刷新 gsettings 提示（matchMedia 可能仍滞后）。
+        if tauri_shell_available() {
+            spawn_local(async move {
+                let _ = tauri_fetch_os_prefers_dark_hint().await;
+                refresh_system_theme_dom_if_idle(theme, settings_modal, settings_page);
+            });
+        } else {
+            shell_prefs_storage::persist_theme_to_storage_and_dom(THEME_SYSTEM);
+        }
+    });
+    let _ = mql.add_event_listener_with_callback("change", cb.as_ref().unchecked_ref());
+    // Effect 无信号依赖，仅挂载一次；泄漏监听器与页面同寿。
+    cb.forget();
+}
+
 pub fn wire_sync_theme_to_storage_and_dom(sig: WireSyncThemeSignals) {
     let theme = sig.theme;
     let settings_modal = sig.settings_modal;
@@ -29,66 +102,15 @@ pub fn wire_sync_theme_to_storage_and_dom(sig: WireSyncThemeSignals) {
     // Linux 桌面：WebKit matchMedia 常不可靠，用 Tauri gsettings 提示覆盖后再刷一次 DOM。
     if tauri_shell_available() {
         spawn_local(async move {
-            if tauri_fetch_os_prefers_dark_hint().await.is_some()
-                && theme.get_untracked() == THEME_SYSTEM
-                && !settings_modal.get_untracked()
-                && !settings_page.get_untracked()
-            {
-                shell_prefs_storage::persist_theme_to_storage_and_dom(THEME_SYSTEM);
+            if tauri_fetch_os_prefers_dark_hint().await.is_some() {
+                refresh_system_theme_dom_if_idle(theme, settings_modal, settings_page);
             }
         });
     }
     // 一次性监听 OS 明暗；仅当偏好为 `system` 且设置未打开时重刷 `data-theme`。
     // 设置打开时由外观草稿 Effect 独占 DOM，避免预览被 OS 变化冲掉。
     Effect::new(move |_| {
-        let Some(window) = web_sys::window() else {
-            return;
-        };
-        let Ok(f) = js_sys::Reflect::get(
-            window.as_ref(),
-            &wasm_bindgen::JsValue::from_str("matchMedia"),
-        ) else {
-            return;
-        };
-        let Ok(f) = f.dyn_into::<js_sys::Function>() else {
-            return;
-        };
-        let Ok(mql_v) = f.call1(
-            window.as_ref(),
-            &wasm_bindgen::JsValue::from_str("(prefers-color-scheme: dark)"),
-        ) else {
-            return;
-        };
-        if mql_v.is_null() || mql_v.is_undefined() {
-            return;
-        }
-        let Ok(mql) = mql_v.dyn_into::<web_sys::EventTarget>() else {
-            return;
-        };
-        let cb = Closure::<dyn FnMut(web_sys::Event)>::new(move |_| {
-            if settings_modal.get_untracked() || settings_page.get_untracked() {
-                return;
-            }
-            if theme.get_untracked() == THEME_SYSTEM {
-                // 桌面：OS 变化后同步刷新 gsettings 提示（matchMedia 可能仍滞后）。
-                if tauri_shell_available() {
-                    spawn_local(async move {
-                        let _ = tauri_fetch_os_prefers_dark_hint().await;
-                        if theme.get_untracked() == THEME_SYSTEM
-                            && !settings_modal.get_untracked()
-                            && !settings_page.get_untracked()
-                        {
-                            shell_prefs_storage::persist_theme_to_storage_and_dom(THEME_SYSTEM);
-                        }
-                    });
-                } else {
-                    shell_prefs_storage::persist_theme_to_storage_and_dom(THEME_SYSTEM);
-                }
-            }
-        });
-        let _ = mql.add_event_listener_with_callback("change", cb.as_ref().unchecked_ref());
-        // Effect 无信号依赖，仅挂载一次；泄漏监听器与页面同寿。
-        cb.forget();
+        attach_prefers_color_scheme_listener(theme, settings_modal, settings_page);
     });
 }
 

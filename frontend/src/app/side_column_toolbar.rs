@@ -271,6 +271,111 @@ fn SideToolbarGithubRepoBtn(
     }
 }
 
+fn disconnect_remote_available() -> bool {
+    crate::mobile_remote::mobile_remote_disconnect_available()
+        || crate::tauri_shell::tauri_shell_available()
+}
+
+fn run_toolbar_disconnect(view_menu_open: RwSignal<bool>) {
+    view_menu_open.set(false);
+    if crate::mobile_remote::mobile_remote_disconnect_available() {
+        crate::mobile_remote::mobile_remote_disconnect();
+    } else {
+        crate::tauri_shell::tauri_disconnect_remote();
+    }
+}
+
+#[component]
+fn StatusBarToggleBtn(
+    locale: RwSignal<Locale>,
+    status_bar_visible: RwSignal<bool>,
+) -> impl IntoView {
+    view! {
+        <button
+            type="button"
+            class="btn btn-secondary btn-sm shell-toolbar-icon-btn"
+            class:active=move || status_bar_visible.get()
+            on:click=move |_| status_bar_visible.update(|v| *v = !*v)
+            prop:title=move || i18n::side_status_btn_title(locale.get())
+            prop:aria-label=move || i18n::side_status_btn_title(locale.get())
+        >
+            <svg
+                class="shell-toolbar-icon"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+            >
+                <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+            </svg>
+        </button>
+    }
+}
+
+#[component]
+fn SettingsToolbarBtn(locale: RwSignal<Locale>, settings_page: RwSignal<bool>) -> impl IntoView {
+    view! {
+        <button
+            type="button"
+            class="btn btn-secondary btn-sm shell-toolbar-icon-btn"
+            data-testid="settings-open"
+            on:click=move |_| {
+                navigate_to_settings(settings_page, SettingsSection::Appearance);
+            }
+            prop:title=move || i18n::side_settings_title(locale.get())
+            prop:aria-label=move || i18n::side_settings_title(locale.get())
+        >
+            <svg
+                class="shell-toolbar-icon"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+            >
+                <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+                <circle cx="12" cy="12" r="3" />
+            </svg>
+        </button>
+    }
+}
+
+#[component]
+fn DisconnectToolbarBtn(locale: RwSignal<Locale>, view_menu_open: RwSignal<bool>) -> impl IntoView {
+    view! {
+        <Show when=disconnect_remote_available>
+            <button
+                type="button"
+                class="btn btn-secondary btn-sm shell-toolbar-icon-btn shell-toolbar-disconnect-btn"
+                data-testid="side-toolbar-disconnect"
+                on:click=move |_| run_toolbar_disconnect(view_menu_open)
+                prop:title=move || i18n::mobile_disconnect_server(locale.get())
+                prop:aria-label=move || i18n::mobile_disconnect_server_aria(locale.get())
+            >
+                <svg
+                    class="shell-toolbar-icon"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    aria-hidden="true"
+                >
+                    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                    <polyline points="16 17 21 12 16 7" />
+                    <line x1="21" x2="9" y1="12" y2="12" />
+                </svg>
+            </button>
+        </Show>
+    }
+}
+
 /// GitHub / 工作区视图 / 状态栏 / 设置（及远程断开）：桌面贴右浮动；窄屏仅在右侧抽屉顶部。
 #[component]
 pub(crate) fn ShellToolbarIcons(
@@ -315,86 +420,9 @@ pub(crate) fn ShellToolbarIcons(
                     <SidePanelViewPickerMenu props=picker />
                 </Show>
             </div>
-            <button
-                type="button"
-                class="btn btn-secondary btn-sm shell-toolbar-icon-btn"
-                class:active=move || status_bar_visible.get()
-                on:click=move |_| status_bar_visible.update(|v| *v = !*v)
-                prop:title=move || i18n::side_status_btn_title(locale.get())
-                prop:aria-label=move || i18n::side_status_btn_title(locale.get())
-            >
-                <svg
-                    class="shell-toolbar-icon"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    aria-hidden="true"
-                >
-                    <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
-                </svg>
-            </button>
-            <button
-                type="button"
-                class="btn btn-secondary btn-sm shell-toolbar-icon-btn"
-                data-testid="settings-open"
-                on:click=move |_| {
-                    navigate_to_settings(settings_page, SettingsSection::Appearance);
-                }
-                prop:title=move || i18n::side_settings_title(locale.get())
-                prop:aria-label=move || i18n::side_settings_title(locale.get())
-            >
-                <svg
-                    class="shell-toolbar-icon"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    aria-hidden="true"
-                >
-                    <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
-                    <circle cx="12" cy="12" r="3" />
-                </svg>
-            </button>
-            <Show when=move || {
-                crate::mobile_remote::mobile_remote_disconnect_available()
-                    || crate::tauri_shell::tauri_shell_available()
-            }>
-                <button
-                    type="button"
-                    class="btn btn-secondary btn-sm shell-toolbar-icon-btn shell-toolbar-disconnect-btn"
-                    data-testid="side-toolbar-disconnect"
-                    on:click=move |_| {
-                        view_menu_open.set(false);
-                        if crate::mobile_remote::mobile_remote_disconnect_available() {
-                            crate::mobile_remote::mobile_remote_disconnect();
-                        } else {
-                            crate::tauri_shell::tauri_disconnect_remote();
-                        }
-                    }
-                    prop:title=move || i18n::mobile_disconnect_server(locale.get())
-                    prop:aria-label=move || i18n::mobile_disconnect_server_aria(locale.get())
-                >
-                    <svg
-                        class="shell-toolbar-icon"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        aria-hidden="true"
-                    >
-                        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-                        <polyline points="16 17 21 12 16 7" />
-                        <line x1="21" x2="9" y1="12" y2="12" />
-                    </svg>
-                </button>
-            </Show>
+            <StatusBarToggleBtn locale=locale status_bar_visible=status_bar_visible />
+            <SettingsToolbarBtn locale=locale settings_page=settings_page />
+            <DisconnectToolbarBtn locale=locale view_menu_open=view_menu_open />
         </div>
     }
 }

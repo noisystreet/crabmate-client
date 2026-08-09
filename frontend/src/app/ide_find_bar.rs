@@ -57,6 +57,42 @@ fn find_meta_line(locale: Locale, query: &str, match_count: usize, cursor: usize
     }
 }
 
+fn find_bar_on_keydown(ev: web_sys::KeyboardEvent, input: IdeFindBarInput) {
+    if ev.key() != "Enter" {
+        return;
+    }
+    ev.prevent_default();
+    find_nav(input, if ev.shift_key() { -1 } else { 1 });
+}
+
+#[component]
+fn IdeFindNavCluster(
+    locale: RwSignal<Locale>,
+    input: IdeFindBarInput,
+    match_count: Memo<usize>,
+) -> impl IntoView {
+    view! {
+        <button
+            type="button"
+            class="btn btn-secondary btn-sm ide-find-nav"
+            prop:title=move || i18n::ide_find_prev_title(locale.get())
+            prop:disabled=move || match_count.get() == 0
+            on:click=move |_| find_nav(input, -1)
+        >
+            "‹"
+        </button>
+        <button
+            type="button"
+            class="btn btn-secondary btn-sm ide-find-nav"
+            prop:title=move || i18n::ide_find_next_title(locale.get())
+            prop:disabled=move || match_count.get() == 0
+            on:click=move |_| find_nav(input, 1)
+        >
+            "›"
+        </button>
+    }
+}
+
 #[component]
 fn IdeFindBarPanel(
     locale: RwSignal<Locale>,
@@ -85,12 +121,7 @@ fn IdeFindBarPanel(
                     chrome.find_query.set(event_target_value(&ev));
                     chrome.find_match_index.set(0);
                 }
-                on:keydown=move |ev: web_sys::KeyboardEvent| {
-                    if ev.key() == "Enter" {
-                        ev.prevent_default();
-                        find_nav(input, if ev.shift_key() { -1 } else { 1 });
-                    }
-                }
+                on:keydown=move |ev: web_sys::KeyboardEvent| find_bar_on_keydown(ev, input)
             />
             <span class="ide-find-meta" aria-live="polite">
                 {move || {
@@ -102,24 +133,7 @@ fn IdeFindBarPanel(
                     )
                 }}
             </span>
-            <button
-                type="button"
-                class="btn btn-secondary btn-sm ide-find-nav"
-                prop:title=move || i18n::ide_find_prev_title(locale.get())
-                prop:disabled=move || match_count.get() == 0
-                on:click=move |_| find_nav(input, -1)
-            >
-                "‹"
-            </button>
-            <button
-                type="button"
-                class="btn btn-secondary btn-sm ide-find-nav"
-                prop:title=move || i18n::ide_find_next_title(locale.get())
-                prop:disabled=move || match_count.get() == 0
-                on:click=move |_| find_nav(input, 1)
-            >
-                "›"
-            </button>
+            <IdeFindNavCluster locale=locale input=input match_count=match_count />
             <button
                 type="button"
                 class="btn btn-ghost btn-sm ide-find-close"

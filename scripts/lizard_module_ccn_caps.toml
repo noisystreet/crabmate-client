@@ -10,5 +10,5 @@ default_ccn_max = 15
 [modules]
 "crates/crabmate-connect" = 10
 "desktop-tauri" = 24
-"frontend" = 15
+"frontend" = 14
 "mobile-tauri" = 1

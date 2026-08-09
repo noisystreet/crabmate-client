@@ -369,6 +369,45 @@ pub async fn try_switch_tab(
     true
 }
 
+fn remap_active_after_tab_remove(
+    prev_active: Option<usize>,
+    removed_index: usize,
+    len_after: usize,
+) -> Option<usize> {
+    if len_after == 0 {
+        return None;
+    }
+    let a = prev_active?;
+    if a == removed_index {
+        Some(removed_index.min(len_after.saturating_sub(1)))
+    } else if a > removed_index {
+        Some(a - 1)
+    } else {
+        Some(a)
+    }
+}
+
+async fn confirm_close_tab_if_dirty(
+    tabs: IdeTabsHandle,
+    index: usize,
+    closing_active: bool,
+    locale: RwSignal<Locale>,
+    ide_text: RwSignal<String>,
+    ide_baseline: RwSignal<String>,
+    confirm: IdeConfirmSignals,
+) -> bool {
+    if closing_active && tabs.active_editor_is_dirty(ide_text, ide_baseline) {
+        return confirm_discard(locale.get_untracked(), confirm).await;
+    }
+    if !closing_active
+        && let Some(tab) = tabs.tabs.get_untracked().get(index)
+        && tab.text != tab.baseline
+    {
+        return confirm_discard(locale.get_untracked(), confirm).await;
+    }
+    true
+}
+
 pub async fn close_tab_at(
     tabs: IdeTabsHandle,
     index: usize,
@@ -382,17 +421,18 @@ pub async fn close_tab_at(
         ide_baseline,
     } = editor;
     let closing_active = tabs.active.get_untracked() == Some(index);
-    if closing_active && tabs.active_editor_is_dirty(ide_text, ide_baseline) {
-        if !confirm_discard(locale.get_untracked(), confirm).await {
-            return;
-        }
-    } else if !closing_active {
-        if let Some(tab) = tabs.tabs.get_untracked().get(index)
-            && tab.text != tab.baseline
-            && !confirm_discard(locale.get_untracked(), confirm).await
-        {
-            return;
-        }
+    if !confirm_close_tab_if_dirty(
+        tabs,
+        index,
+        closing_active,
+        locale,
+        ide_text,
+        ide_baseline,
+        confirm,
+    )
+    .await
+    {
+        return;
     }
 
     if closing_active {
@@ -406,20 +446,7 @@ pub async fn close_tab_at(
     });
 
     let len = tabs.tabs.get_untracked().len();
-    let prev_active = tabs.active.get_untracked();
-    let new_active = if len == 0 {
-        None
-    } else if let Some(a) = prev_active {
-        if a == index {
-            Some(index.min(len.saturating_sub(1)))
-        } else if a > index {
-            Some(a - 1)
-        } else {
-            Some(a)
-        }
-    } else {
-        None
-    };
+    let new_active = remap_active_after_tab_remove(tabs.active.get_untracked(), index, len);
 
     tabs.active.set(new_active);
     tabs.load_active_into_editor(ide_path, ide_text, ide_baseline);
