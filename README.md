@@ -67,7 +67,7 @@ Prerequisite: **`crabmate serve`** (API-only by default) already running. Allow 
 
 ```bash
 # Terminal A — Server (no --with-web needed for the shell)
-CM_WEB_CORS_ALLOWED_ORIGINS='http://tauri.localhost' \
+CM_WEB_CORS_ALLOWED_ORIGINS='tauri://localhost,http://tauri.localhost' \
   crabmate serve --host 127.0.0.1 --port 8080
 
 # Terminal B — this repo

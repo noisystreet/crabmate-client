@@ -33,4 +33,8 @@ pub use navigation::{
     ShellNavigationDecision, allow_shell_navigation, clear_allowed_if_app_origin_loaded,
     decide_shell_navigation, is_app_origin, is_connect_page_url,
 };
-pub use probe::{probe_redirect_host_allowed, probe_server};
+pub use probe::{
+    SHELL_WEBVIEW_CORS_ORIGINS, SHELL_WEBVIEW_FETCH_ORIGIN, SHELL_WEBVIEW_ORIGIN,
+    acao_allows_requested_origin, cors_allows_shell_origin, probe_redirect_host_allowed,
+    probe_server, probe_shell_cors,
+};

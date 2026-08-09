@@ -66,7 +66,7 @@ make clean
 
 ```bash
 # 终端 A — Server（壳路径不必 --with-web）
-CM_WEB_CORS_ALLOWED_ORIGINS='http://tauri.localhost' \
+CM_WEB_CORS_ALLOWED_ORIGINS='tauri://localhost,http://tauri.localhost' \
   crabmate serve --host 127.0.0.1 --port 8080
 
 # 终端 B — 本仓

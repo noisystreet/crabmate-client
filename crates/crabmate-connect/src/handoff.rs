@@ -8,6 +8,14 @@ pub const BEARER_HASH_KEY: &str = "cm_web_api_bearer";
 /// 本地业务 UI 启动时写入的 API 基址（指向远程 `serve` 根）。
 pub const API_BASE_HASH_KEY: &str = "cm_api_base";
 
+fn is_unspecified_connect_host(host: &str) -> bool {
+    let h = host
+        .trim()
+        .trim_matches(|c| c == '[' || c == ']')
+        .to_ascii_lowercase();
+    matches!(h.as_str(), "0.0.0.0" | "::" | "0:0:0:0:0:0:0:0")
+}
+
 pub fn normalize_base_url(raw: &str) -> Result<Url, String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
@@ -22,6 +30,12 @@ pub fn normalize_base_url(raw: &str) -> Result<Url, String> {
     match u.scheme() {
         "http" | "https" => {}
         other => return Err(format!("仅支持 http/https，收到 {other}")),
+    }
+    if u.host_str().is_some_and(is_unspecified_connect_host) {
+        return Err(
+            "0.0.0.0 / :: 是服务端监听地址，不能作为客户端连接目标。请改用 http://127.0.0.1:端口/ 或本机局域网 IP"
+                .into(),
+        );
     }
     if !u.path().ends_with('/') {
         let p = if u.path().is_empty() {
@@ -81,6 +95,14 @@ mod tests {
         assert_eq!(u.scheme(), "http");
         assert!(u.path().ends_with('/'));
         assert!(u.as_str().contains("192.168.1.10:8080"));
+    }
+
+    #[test]
+    fn normalize_rejects_unspecified_bind_host() {
+        let err = normalize_base_url("http://0.0.0.0:8080/").unwrap_err();
+        assert!(err.contains("127.0.0.1"), "{err}");
+        let err6 = normalize_base_url("http://[::]:8080/").unwrap_err();
+        assert!(err6.contains("127.0.0.1"), "{err6}");
     }
 
     #[test]

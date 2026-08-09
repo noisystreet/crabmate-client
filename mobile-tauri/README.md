@@ -65,7 +65,7 @@ cargo tauri android dev
 服务端示例（局域网，纯 API + CORS）：
 
 ```bash
-CM_WEB_CORS_ALLOWED_ORIGINS='http://tauri.localhost' \
+CM_WEB_CORS_ALLOWED_ORIGINS='tauri://localhost,http://tauri.localhost' \
 CM_WEB_API_BEARER_TOKEN='your-shared-secret' \
   crabmate serve --host 0.0.0.0 --port 8080
 ```
