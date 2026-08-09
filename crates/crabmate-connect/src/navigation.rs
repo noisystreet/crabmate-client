@@ -65,15 +65,19 @@ fn clear_allowed_serve_origin<R: Runtime>(app: &AppHandle<R>) {
     }
 }
 
-/// 壳 WebView 导航钩子：仅放行 App Origin、已探测的 serve Origin，或同 Origin 内跳转。
+/// 壳 WebView 导航钩子：仅放行 App Origin、已探测的 serve Origin。
+///
+/// **禁止**在此调用 [`Webview::url`]：Android 上 `url()` 经 MainPipe 同步 `GetUrl`，
+/// 而 `on_navigation` 已在 MainPipe looper 回调内执行；再发 `GetUrl` 会超时，随后
+/// `tx.send().unwrap()` panic → `abort_on_panic` 闪退（wryCreate / 导航路径）。
+/// 同 Origin 内跳转依赖连接成功后的 [`AllowedServeOrigin`]（与目标 Origin 匹配即可）。
 #[must_use]
 pub fn allow_shell_navigation<R: Runtime>(webview: &Webview<R>, url: &Url) -> bool {
     let app = webview.app_handle();
     let allowed_matches = app
         .try_state::<AllowedServeOrigin>()
         .is_some_and(|s| s.matches_url(url));
-    let current = webview.url().ok();
-    let decision = decide_shell_navigation(url, current.as_ref(), allowed_matches);
+    let decision = decide_shell_navigation(url, None, allowed_matches);
     match decision {
         ShellNavigationDecision::Allow => true,
         ShellNavigationDecision::AllowClearServeOrigin => {
@@ -134,6 +138,11 @@ mod tests {
         let other = Url::parse("http://10.0.0.2:8080/").unwrap();
         assert_eq!(
             decide_shell_navigation(&other, Some(&cur), true),
+            ShellNavigationDecision::Allow
+        );
+        // 钩子在 Android 上不能安全读取 current，依赖 allowlist 匹配同 serve Origin
+        assert_eq!(
+            decide_shell_navigation(&next, None, true),
             ShellNavigationDecision::Allow
         );
     }
