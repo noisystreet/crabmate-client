@@ -114,6 +114,81 @@ pub struct SendChatStreamParams<'a> {
     pub clarify_questionnaire_answers: Option<serde_json::Value>,
 }
 
+enum ChatStreamAttemptControl {
+    Completed,
+    Retry,
+}
+
+async fn chat_stream_fetch_or_backoff(
+    w: &web_sys::Window,
+    req: &web_sys::Request,
+    stream_resume_job_id: Option<u64>,
+    attempt: &mut u32,
+) -> Result<Option<Response>, String> {
+    match JsFuture::from(w.fetch_with_request(req)).await {
+        Ok(v) => {
+            let resp: Response = v.dyn_into().map_err(|_| "not Response")?;
+            Ok(Some(resp))
+        }
+        Err(e) => {
+            if chat_stream_fetch_retry_exhausted(stream_resume_job_id, *attempt) {
+                return Err(format!("fetch: {:?}", e));
+            }
+            *attempt = attempt.saturating_add(1);
+            http_request::sleep_chat_stream_retry_backoff(*attempt).await;
+            Ok(None)
+        }
+    }
+}
+
+struct ChatStreamAttemptCtx<'a> {
+    w: &'a web_sys::Window,
+    signal: &'a web_sys::AbortSignal,
+    cbs: &'a ChatStreamCallbacks,
+    stream_resume_job_id: &'a mut Option<u64>,
+    last_event_id: &'a mut u64,
+    attempt: &'a mut u32,
+    loc: Locale,
+}
+
+async fn chat_stream_one_attempt(
+    ctx: &mut ChatStreamAttemptCtx<'_>,
+    body_parts: http_request::ChatStreamPostBodyParts<'_>,
+) -> Result<ChatStreamAttemptControl, String> {
+    let body = http_request::build_chat_stream_post_body(body_parts)?;
+    let body_json = serde_json::to_string(&body).map_err(|e| e.to_string())?;
+    let req =
+        http_request::build_chat_stream_fetch_request(&body_json, ctx.signal, *ctx.last_event_id)?;
+    let Some(resp) =
+        chat_stream_fetch_or_backoff(ctx.w, &req, *ctx.stream_resume_job_id, ctx.attempt).await?
+    else {
+        return Ok(ChatStreamAttemptControl::Retry);
+    };
+    match run_chat_stream_http_round(
+        resp,
+        ctx.cbs,
+        ctx.stream_resume_job_id,
+        ctx.signal,
+        ctx.last_event_id,
+        ctx.loc,
+    )
+    .await?
+    {
+        ChatStreamRoundOutcome::Completed => Ok(ChatStreamAttemptControl::Completed),
+        ChatStreamRoundOutcome::ResumeReconnect => {
+            if ctx.stream_resume_job_id.is_none() {
+                return Err(crate::i18n::api_err_no_response_body(ctx.loc).to_string());
+            }
+            *ctx.attempt = ctx.attempt.saturating_add(1);
+            if *ctx.attempt >= 6 {
+                return Err(crate::i18n::api_err_request_failed(ctx.loc).to_string());
+            }
+            http_request::sleep_chat_stream_retry_backoff(*ctx.attempt).await;
+            Ok(ChatStreamAttemptControl::Retry)
+        }
+    }
+}
+
 /// `/chat/stream`：支持 **`Last-Event-ID`** 与 JSON **`stream_resume`** 断线重连（网络抖动时自动重试若干次）。
 pub async fn send_chat_stream(p: SendChatStreamParams<'_>) -> Result<(), String> {
     let SendChatStreamParams {
@@ -137,52 +212,33 @@ pub async fn send_chat_stream(p: SendChatStreamParams<'_>) -> Result<(), String>
         if signal.aborted() {
             return Ok(());
         }
-        let body =
-            http_request::build_chat_stream_post_body(http_request::ChatStreamPostBodyParts {
-                message: &message,
-                image_urls: &image_urls,
-                conversation_id: &conversation_id,
-                agent_role: &agent_role,
-                session_mode: &session_mode,
-                approval_session_id: &approval_session_id,
-                stream_resume_job_id,
-                last_event_id,
-                clarify_questionnaire_answers: &clarify_questionnaire_answers,
-            })?;
-        let body_json = serde_json::to_string(&body).map_err(|e| e.to_string())?;
-        let req = http_request::build_chat_stream_fetch_request(&body_json, signal, last_event_id)?;
-        let resp_val = match JsFuture::from(w.fetch_with_request(&req)).await {
-            Ok(v) => v,
-            Err(e) => {
-                if chat_stream_fetch_retry_exhausted(stream_resume_job_id, attempt) {
-                    return Err(format!("fetch: {:?}", e));
-                }
-                attempt = attempt.saturating_add(1);
-                http_request::sleep_chat_stream_retry_backoff(attempt).await;
-                continue;
-            }
+        let body_parts = http_request::ChatStreamPostBodyParts {
+            message: &message,
+            image_urls: &image_urls,
+            conversation_id: &conversation_id,
+            agent_role: &agent_role,
+            session_mode: &session_mode,
+            approval_session_id: &approval_session_id,
+            stream_resume_job_id,
+            last_event_id,
+            clarify_questionnaire_answers: &clarify_questionnaire_answers,
         };
-        let resp: Response = resp_val.dyn_into().map_err(|_| "not Response")?;
-        match run_chat_stream_http_round(
-            resp,
-            &cbs,
-            &mut stream_resume_job_id,
-            signal,
-            &mut last_event_id,
-            loc,
+        match chat_stream_one_attempt(
+            &mut ChatStreamAttemptCtx {
+                w: &w,
+                signal,
+                cbs: &cbs,
+                stream_resume_job_id: &mut stream_resume_job_id,
+                last_event_id: &mut last_event_id,
+                attempt: &mut attempt,
+                loc,
+            },
+            body_parts,
         )
         .await?
         {
-            ChatStreamRoundOutcome::Completed => return Ok(()),
-            ChatStreamRoundOutcome::ResumeReconnect => {}
+            ChatStreamAttemptControl::Completed => return Ok(()),
+            ChatStreamAttemptControl::Retry => {}
         }
-        if stream_resume_job_id.is_none() {
-            return Err(crate::i18n::api_err_no_response_body(loc).to_string());
-        }
-        attempt = attempt.saturating_add(1);
-        if attempt >= 6 {
-            return Err(crate::i18n::api_err_request_failed(loc).to_string());
-        }
-        http_request::sleep_chat_stream_retry_backoff(attempt).await;
     }
 }

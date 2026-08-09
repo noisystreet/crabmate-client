@@ -698,6 +698,28 @@ pub async fn fetch_conversation_messages(
     fetch_json("GET", &url, None, loc).await
 }
 
+fn parse_chat_branch_ok_body(body: &str, loc: Locale) -> Result<u64, ChatBranchError> {
+    let r: ChatBranchResponse =
+        serde_json::from_str(body).map_err(|e| ChatBranchError::Other(e.to_string()))?;
+    if !r.ok {
+        return Err(ChatBranchError::Other(
+            crate::i18n::api_err_branch_failed(loc).to_string(),
+        ));
+    }
+    Ok(r.revision)
+}
+
+async fn read_ok_response_text(resp: Response) -> Result<String, ChatBranchError> {
+    let text = JsFuture::from(
+        resp.text()
+            .map_err(|e| ChatBranchError::Other(format!("text: {:?}", e)))?,
+    )
+    .await
+    .map_err(|e| ChatBranchError::Other(format!("read body: {:?}", e)))?;
+    text.as_string()
+        .ok_or_else(|| ChatBranchError::Other("body not string".to_string()))
+}
+
 pub async fn post_chat_branch(
     conversation_id: &str,
     before_user_ordinal: u64,
@@ -729,23 +751,8 @@ pub async fn post_chat_branch(
     if !resp.ok() {
         return Err(ChatBranchError::from_response(&resp, loc));
     }
-    let text = JsFuture::from(
-        resp.text()
-            .map_err(|e| ChatBranchError::Other(format!("text: {:?}", e)))?,
-    )
-    .await
-    .map_err(|e| ChatBranchError::Other(format!("read body: {:?}", e)))?;
-    let s = text
-        .as_string()
-        .ok_or_else(|| ChatBranchError::Other("body not string".to_string()))?;
-    let r: ChatBranchResponse =
-        serde_json::from_str(&s).map_err(|e| ChatBranchError::Other(e.to_string()))?;
-    if !r.ok {
-        return Err(ChatBranchError::Other(
-            crate::i18n::api_err_branch_failed(loc).to_string(),
-        ));
-    }
-    Ok(r.revision)
+    let s = read_ok_response_text(resp).await?;
+    parse_chat_branch_ok_body(&s, loc)
 }
 
 pub async fn submit_chat_approval(

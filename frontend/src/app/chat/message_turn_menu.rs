@@ -134,6 +134,116 @@ pub(crate) struct MessageTurnPressHandlers {
     pub try_consume_suppress_click: Rc<dyn Fn() -> bool>,
 }
 
+fn build_arm_suppress(
+    suppress_click: SuppressFlag,
+    suppress_clear_timer: TimerSlot,
+) -> Rc<dyn Fn()> {
+    Rc::new(move || {
+        suppress_click.set(true);
+        if let Some(t) = suppress_clear_timer.borrow_mut().take() {
+            t.cancel();
+        }
+        let suppress_click = Rc::clone(&suppress_click);
+        let suppress_clear_timer_c = Rc::clone(&suppress_clear_timer);
+        *suppress_clear_timer.borrow_mut() = Some(Timeout::new(SUPPRESS_CLICK_MS, move || {
+            suppress_clear_timer_c.borrow_mut().take();
+            suppress_click.set(false);
+        }));
+    })
+}
+
+fn build_clear_long_press(long_press_timer: TimerSlot, press_origin: PressOrigin) -> Rc<dyn Fn()> {
+    Rc::new(move || {
+        if let Some(t) = long_press_timer.borrow_mut().take() {
+            t.cancel();
+        }
+        press_origin.set(None);
+    })
+}
+
+fn build_contextmenu_handler(
+    chat: ChatSessionSignals,
+    menu: RwSignal<Option<MessageTurnMenuAnchor>>,
+    arm_suppress: Rc<dyn Fn()>,
+    clear_long_press: Rc<dyn Fn()>,
+) -> Rc<dyn Fn(web_sys::MouseEvent)> {
+    Rc::new(move |ev: web_sys::MouseEvent| {
+        let Some((_wrap, message_id)) = resolve_turn_press_target(ev.target()) else {
+            return;
+        };
+        // 选区非空时保留浏览器右键（复制选中文本等）
+        if selection_wants_native_context_menu() {
+            return;
+        }
+        ev.prevent_default();
+        clear_long_press();
+        arm_suppress();
+        open_menu_at(menu, chat, message_id, ev.client_x(), ev.client_y());
+    })
+}
+
+fn build_pointerdown_handler(
+    chat: ChatSessionSignals,
+    menu: RwSignal<Option<MessageTurnMenuAnchor>>,
+    long_press_timer: TimerSlot,
+    press_origin: PressOrigin,
+    arm_suppress: Rc<dyn Fn()>,
+) -> Rc<dyn Fn(web_sys::PointerEvent)> {
+    Rc::new(move |ev: web_sys::PointerEvent| {
+        if ev.pointer_type() == "mouse" {
+            return;
+        }
+        let Some((_wrap, message_id)) = resolve_turn_press_target(ev.target()) else {
+            return;
+        };
+        if let Some(t) = long_press_timer.borrow_mut().take() {
+            t.cancel();
+        }
+        press_origin.set(Some((f64::from(ev.client_x()), f64::from(ev.client_y()))));
+        let long_press_timer_c = Rc::clone(&long_press_timer);
+        let arm_suppress = Rc::clone(&arm_suppress);
+        let x = ev.client_x();
+        let y = ev.client_y();
+        *long_press_timer.borrow_mut() = Some(Timeout::new(LONG_PRESS_MS, move || {
+            long_press_timer_c.borrow_mut().take();
+            arm_suppress();
+            open_menu_at(menu, chat, message_id, x, y);
+        }));
+    })
+}
+
+fn build_pointermove_handler(
+    press_origin: PressOrigin,
+    clear_long_press: Rc<dyn Fn()>,
+) -> Rc<dyn Fn(web_sys::PointerEvent)> {
+    Rc::new(move |ev: web_sys::PointerEvent| {
+        let Some((ox, oy)) = press_origin.get() else {
+            return;
+        };
+        let dx = f64::from(ev.client_x()) - ox;
+        let dy = f64::from(ev.client_y()) - oy;
+        if dx * dx + dy * dy > MOVE_CANCEL_PX * MOVE_CANCEL_PX {
+            clear_long_press();
+        }
+    })
+}
+
+fn build_try_consume_suppress_click(
+    suppress_click: SuppressFlag,
+    suppress_clear_timer: TimerSlot,
+) -> Rc<dyn Fn() -> bool> {
+    Rc::new(move || -> bool {
+        if !suppress_click.get() {
+            return false;
+        }
+        suppress_click.set(false);
+        if let Some(t) = suppress_clear_timer.borrow_mut().take() {
+            t.cancel();
+        }
+        true
+    })
+}
+
 #[must_use]
 pub(crate) fn build_message_turn_press_handlers(
     chat: ChatSessionSignals,
@@ -144,115 +254,34 @@ pub(crate) fn build_message_turn_press_handlers(
     let press_origin: PressOrigin = Rc::new(Cell::new(None));
     let suppress_click: SuppressFlag = Rc::new(Cell::new(false));
 
-    let arm_suppress = {
-        let suppress_click = Rc::clone(&suppress_click);
-        let suppress_clear_timer = Rc::clone(&suppress_clear_timer);
-        Rc::new(move || {
-            suppress_click.set(true);
-            if let Some(t) = suppress_clear_timer.borrow_mut().take() {
-                t.cancel();
-            }
-            let suppress_click = Rc::clone(&suppress_click);
-            let suppress_clear_timer_c = Rc::clone(&suppress_clear_timer);
-            *suppress_clear_timer.borrow_mut() = Some(Timeout::new(SUPPRESS_CLICK_MS, move || {
-                suppress_clear_timer_c.borrow_mut().take();
-                suppress_click.set(false);
-            }));
-        }) as Rc<dyn Fn()>
-    };
-
-    let clear_long_press = {
-        let long_press_timer = Rc::clone(&long_press_timer);
-        let press_origin = Rc::clone(&press_origin);
-        Rc::new(move || {
-            if let Some(t) = long_press_timer.borrow_mut().take() {
-                t.cancel();
-            }
-            press_origin.set(None);
-        }) as Rc<dyn Fn()>
-    };
-
-    let on_contextmenu = {
-        let arm_suppress = Rc::clone(&arm_suppress);
-        let clear_long_press = Rc::clone(&clear_long_press);
-        Rc::new(move |ev: web_sys::MouseEvent| {
-            let Some((_wrap, message_id)) = resolve_turn_press_target(ev.target()) else {
-                return;
-            };
-            // 选区非空时保留浏览器右键（复制选中文本等）
-            if selection_wants_native_context_menu() {
-                return;
-            }
-            ev.prevent_default();
-            clear_long_press();
-            arm_suppress();
-            open_menu_at(menu, chat, message_id, ev.client_x(), ev.client_y());
-        }) as Rc<dyn Fn(web_sys::MouseEvent)>
-    };
-
-    let on_pointerdown = {
-        let long_press_timer = Rc::clone(&long_press_timer);
-        let press_origin = Rc::clone(&press_origin);
-        let arm_suppress = Rc::clone(&arm_suppress);
-        Rc::new(move |ev: web_sys::PointerEvent| {
-            if ev.pointer_type() == "mouse" {
-                return;
-            }
-            let Some((_wrap, message_id)) = resolve_turn_press_target(ev.target()) else {
-                return;
-            };
-            if let Some(t) = long_press_timer.borrow_mut().take() {
-                t.cancel();
-            }
-            press_origin.set(Some((f64::from(ev.client_x()), f64::from(ev.client_y()))));
-            let long_press_timer_c = Rc::clone(&long_press_timer);
-            let arm_suppress = Rc::clone(&arm_suppress);
-            let x = ev.client_x();
-            let y = ev.client_y();
-            *long_press_timer.borrow_mut() = Some(Timeout::new(LONG_PRESS_MS, move || {
-                long_press_timer_c.borrow_mut().take();
-                arm_suppress();
-                open_menu_at(menu, chat, message_id, x, y);
-            }));
-        }) as Rc<dyn Fn(web_sys::PointerEvent)>
-    };
-
-    let on_pointermove = {
-        let press_origin = Rc::clone(&press_origin);
-        let clear_long_press = Rc::clone(&clear_long_press);
-        Rc::new(move |ev: web_sys::PointerEvent| {
-            let Some((ox, oy)) = press_origin.get() else {
-                return;
-            };
-            let dx = f64::from(ev.client_x()) - ox;
-            let dy = f64::from(ev.client_y()) - oy;
-            if dx * dx + dy * dy > MOVE_CANCEL_PX * MOVE_CANCEL_PX {
-                clear_long_press();
-            }
-        }) as Rc<dyn Fn(web_sys::PointerEvent)>
-    };
-
-    let try_consume_suppress_click = {
-        let suppress_click = Rc::clone(&suppress_click);
-        let suppress_clear_timer = Rc::clone(&suppress_clear_timer);
-        Rc::new(move || -> bool {
-            if !suppress_click.get() {
-                return false;
-            }
-            suppress_click.set(false);
-            if let Some(t) = suppress_clear_timer.borrow_mut().take() {
-                t.cancel();
-            }
-            true
-        }) as Rc<dyn Fn() -> bool>
-    };
+    let arm_suppress =
+        build_arm_suppress(Rc::clone(&suppress_click), Rc::clone(&suppress_clear_timer));
+    let clear_long_press =
+        build_clear_long_press(Rc::clone(&long_press_timer), Rc::clone(&press_origin));
 
     MessageTurnPressHandlers {
-        on_contextmenu,
-        on_pointerdown,
-        on_pointermove,
+        on_contextmenu: build_contextmenu_handler(
+            chat,
+            menu,
+            Rc::clone(&arm_suppress),
+            Rc::clone(&clear_long_press),
+        ),
+        on_pointerdown: build_pointerdown_handler(
+            chat,
+            menu,
+            Rc::clone(&long_press_timer),
+            Rc::clone(&press_origin),
+            arm_suppress,
+        ),
+        on_pointermove: build_pointermove_handler(
+            Rc::clone(&press_origin),
+            Rc::clone(&clear_long_press),
+        ),
         on_pointer_end: clear_long_press,
-        try_consume_suppress_click,
+        try_consume_suppress_click: build_try_consume_suppress_click(
+            suppress_click,
+            suppress_clear_timer,
+        ),
     }
 }
 

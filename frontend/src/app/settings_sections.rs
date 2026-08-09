@@ -35,13 +35,9 @@ pub(crate) struct SettingsLlmBlockBundle {
 }
 
 #[component]
-pub(crate) fn SettingsAppearanceBlock(
+fn SettingsLanguageBlock(
     locale: RwSignal<Locale>,
     appearance_locale: RwSignal<Locale>,
-    appearance_theme: RwSignal<String>,
-    appearance_bg_decor: RwSignal<bool>,
-    /// `<select id=…>`：设置页与弹窗可能同时挂载，须用不同 id。
-    theme_select_id: &'static str,
 ) -> impl IntoView {
     view! {
         <div class="settings-block">
@@ -65,6 +61,16 @@ pub(crate) fn SettingsAppearanceBlock(
                 </button>
             </div>
         </div>
+    }
+}
+
+#[component]
+fn SettingsThemeSelectBlock(
+    locale: RwSignal<Locale>,
+    appearance_theme: RwSignal<String>,
+    theme_select_id: &'static str,
+) -> impl IntoView {
+    view! {
         <div class="settings-block">
             <h3 class="settings-block-title">{move || i18n::settings_block_theme(locale.get())}</h3>
             <div class="settings-field">
@@ -87,6 +93,15 @@ pub(crate) fn SettingsAppearanceBlock(
                 </select>
             </div>
         </div>
+    }
+}
+
+#[component]
+fn SettingsBgDecorBlock(
+    locale: RwSignal<Locale>,
+    appearance_bg_decor: RwSignal<bool>,
+) -> impl IntoView {
+    view! {
         <div class="settings-block">
             <h3 class="settings-block-title">{move || i18n::settings_block_bg(locale.get())}</h3>
             <label class="settings-checkbox-label">
@@ -98,6 +113,26 @@ pub(crate) fn SettingsAppearanceBlock(
                 <span>{move || i18n::settings_bg_glow(locale.get())}</span>
             </label>
         </div>
+    }
+}
+
+/// 外观：语言 / 主题 / 背景装饰（`theme_select_id`：设置页与弹窗须不同 id）。
+#[component]
+pub(crate) fn SettingsAppearanceBlock(
+    locale: RwSignal<Locale>,
+    appearance_locale: RwSignal<Locale>,
+    appearance_theme: RwSignal<String>,
+    appearance_bg_decor: RwSignal<bool>,
+    theme_select_id: &'static str,
+) -> impl IntoView {
+    view! {
+        <SettingsLanguageBlock locale=locale appearance_locale=appearance_locale />
+        <SettingsThemeSelectBlock
+            locale=locale
+            appearance_theme=appearance_theme
+            theme_select_id=theme_select_id
+        />
+        <SettingsBgDecorBlock locale=locale appearance_bg_decor=appearance_bg_decor />
     }
 }
 

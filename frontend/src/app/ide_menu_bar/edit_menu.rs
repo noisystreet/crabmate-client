@@ -25,7 +25,7 @@ fn close_menus(open_menu: RwSignal<Option<IdeMenuId>>, ide_menubar_dropdown_open
 }
 
 #[component]
-pub(super) fn IdeMenuEditSection(
+fn IdeMenuEditDropdown(
     signals: IdeMenuBarSignals,
     open_menu: RwSignal<Option<IdeMenuId>>,
     ide_menubar_dropdown_open: RwSignal<bool>,
@@ -38,6 +38,60 @@ pub(super) fn IdeMenuEditSection(
         editor_host,
         ..
     } = signals;
+
+    view! {
+        <div class="ide-menu-dropdown" role="menu">
+            <button
+                type="button"
+                class="ide-menu-item"
+                role="menuitem"
+                data-testid="ide-menu-find"
+                prop:disabled=move || ide_path.get().is_none() || ide_load_busy.get()
+                on:click=move |_| {
+                    chrome.goto_panel_open.set(false);
+                    chrome.find_panel_open.set(true);
+                    close_menus(open_menu, ide_menubar_dropdown_open);
+                }
+            >
+                {move || i18n::ide_menu_find(locale.get())}
+            </button>
+            <button
+                type="button"
+                class="ide-menu-item"
+                role="menuitem"
+                data-testid="ide-menu-goto-line"
+                prop:disabled=move || ide_path.get().is_none() || ide_load_busy.get()
+                on:click=move |_| {
+                    chrome.find_panel_open.set(false);
+                    chrome.goto_panel_open.set(true);
+                    close_menus(open_menu, ide_menubar_dropdown_open);
+                }
+            >
+                {move || i18n::ide_menu_goto_line(locale.get())}
+            </button>
+            <button
+                type="button"
+                class="ide-menu-item"
+                role="menuitem"
+                prop:disabled=move || ide_path.get().is_none() || ide_load_busy.get()
+                on:click=move |_| {
+                    editor_host.select_all();
+                    close_menus(open_menu, ide_menubar_dropdown_open);
+                }
+            >
+                {move || i18n::ide_menu_select_all(locale.get())}
+            </button>
+        </div>
+    }
+}
+
+#[component]
+pub(super) fn IdeMenuEditSection(
+    signals: IdeMenuBarSignals,
+    open_menu: RwSignal<Option<IdeMenuId>>,
+    ide_menubar_dropdown_open: RwSignal<bool>,
+) -> impl IntoView {
+    let locale = signals.locale;
 
     view! {
         <div class="ide-menu-wrap">
@@ -53,48 +107,11 @@ pub(super) fn IdeMenuEditSection(
                 {move || i18n::ide_menu_edit(locale.get())}
             </button>
             <Show when=move || open_menu.get() == Some(IdeMenuId::Edit)>
-                <div class="ide-menu-dropdown" role="menu">
-                    <button
-                        type="button"
-                        class="ide-menu-item"
-                        role="menuitem"
-                        data-testid="ide-menu-find"
-                        prop:disabled=move || ide_path.get().is_none() || ide_load_busy.get()
-                        on:click=move |_| {
-                            chrome.goto_panel_open.set(false);
-                            chrome.find_panel_open.set(true);
-                            close_menus(open_menu, ide_menubar_dropdown_open);
-                        }
-                    >
-                        {move || i18n::ide_menu_find(locale.get())}
-                    </button>
-                    <button
-                        type="button"
-                        class="ide-menu-item"
-                        role="menuitem"
-                        data-testid="ide-menu-goto-line"
-                        prop:disabled=move || ide_path.get().is_none() || ide_load_busy.get()
-                        on:click=move |_| {
-                            chrome.find_panel_open.set(false);
-                            chrome.goto_panel_open.set(true);
-                            close_menus(open_menu, ide_menubar_dropdown_open);
-                        }
-                    >
-                        {move || i18n::ide_menu_goto_line(locale.get())}
-                    </button>
-                    <button
-                        type="button"
-                        class="ide-menu-item"
-                        role="menuitem"
-                        prop:disabled=move || ide_path.get().is_none() || ide_load_busy.get()
-                        on:click=move |_| {
-                            editor_host.select_all();
-                            close_menus(open_menu, ide_menubar_dropdown_open);
-                        }
-                    >
-                        {move || i18n::ide_menu_select_all(locale.get())}
-                    </button>
-                </div>
+                <IdeMenuEditDropdown
+                    signals=signals
+                    open_menu=open_menu
+                    ide_menubar_dropdown_open=ide_menubar_dropdown_open
+                />
             </Show>
         </div>
     }

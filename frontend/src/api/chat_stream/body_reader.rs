@@ -140,6 +140,54 @@ async fn process_available_sse_frames(
     Ok(total)
 }
 
+enum StreamChunkLoop {
+    Continue,
+    Break { stream_finished_normally: bool },
+}
+
+struct StreamChunkBuffers<'a> {
+    raw: &'a mut Vec<u8>,
+    buffer: &'a mut String,
+    last_event_id: &'a mut u64,
+    saw_stream_ended: &'a mut bool,
+    last_meaningful_payload_ms: &'a mut f64,
+}
+
+async fn process_stream_chunk_value(
+    chunk: &JsValue,
+    bufs: &mut StreamChunkBuffers<'_>,
+    cbs: &ChatStreamCallbacks,
+    loc: Locale,
+) -> Result<StreamChunkLoop, String> {
+    let done = js_sys::Reflect::get(chunk, &JsValue::from_str("done"))
+        .ok()
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+    if done {
+        return Ok(StreamChunkLoop::Break {
+            stream_finished_normally: true,
+        });
+    }
+    let value = js_sys::Reflect::get(chunk, &JsValue::from_str("value")).unwrap_or(JsValue::NULL);
+    if let Some(u8) = value.dyn_ref::<js_sys::Uint8Array>() {
+        append_chunk_to_text_buffer(bufs.raw, &u8.to_vec(), bufs.buffer);
+    }
+    let progress = process_available_sse_frames(
+        bufs.buffer,
+        bufs.last_event_id,
+        bufs.saw_stream_ended,
+        cbs,
+        loc,
+    )
+    .await?;
+    if progress.meaningful > 0 {
+        *bufs.last_meaningful_payload_ms = js_sys::Date::now();
+    }
+    // 不在此处因 `stream_ended` 提前 break：提前结束 ReadableStream 消费可能导致部分环境下
+    // `fetch` 身未完成、外层 `send_chat_stream` 永久 await，状态栏卡「模型生成中」。
+    Ok(StreamChunkLoop::Continue)
+}
+
 /// 消费 `/chat/stream` 响应体：UTF-8 重组、SSE 分帧与尾部 flush（与断线重连时的读失败语义一致）。
 pub(super) async fn consume_chat_stream_response_body(
     rb: web_sys::ReadableStream,
@@ -186,32 +234,28 @@ pub(super) async fn consume_chat_stream_response_body(
                     break;
                 }
             };
-        let done = js_sys::Reflect::get(&chunk, &JsValue::from_str("done"))
-            .ok()
-            .and_then(|v| v.as_bool())
-            .unwrap_or(true);
-        if done {
-            stream_finished_normally = true;
-            break;
-        }
-        let value =
-            js_sys::Reflect::get(&chunk, &JsValue::from_str("value")).unwrap_or(JsValue::NULL);
-        if let Some(u8) = value.dyn_ref::<js_sys::Uint8Array>() {
-            append_chunk_to_text_buffer(&mut raw, &u8.to_vec(), &mut buffer);
-        }
-        let progress = process_available_sse_frames(
-            &mut buffer,
-            last_event_id,
-            &mut saw_stream_ended,
+        match process_stream_chunk_value(
+            &chunk,
+            &mut StreamChunkBuffers {
+                raw: &mut raw,
+                buffer: &mut buffer,
+                last_event_id,
+                saw_stream_ended: &mut saw_stream_ended,
+                last_meaningful_payload_ms: &mut last_meaningful_payload_ms,
+            },
             cbs,
             loc,
         )
-        .await?;
-        if progress.meaningful > 0 {
-            last_meaningful_payload_ms = js_sys::Date::now();
+        .await?
+        {
+            StreamChunkLoop::Continue => {}
+            StreamChunkLoop::Break {
+                stream_finished_normally: finished,
+            } => {
+                stream_finished_normally = finished;
+                break;
+            }
         }
-        // 不在此处因 `stream_ended` 提前 break：提前结束 ReadableStream 消费可能导致部分环境下
-        // `fetch` 身未完成、外层 `send_chat_stream` 永久 await，状态栏卡「模型生成中」。
     }
     if !raw.is_empty() {
         buffer.push_str(&String::from_utf8_lossy(&raw));

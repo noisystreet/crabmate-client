@@ -51,9 +51,65 @@ struct RegistryPresetRowModel {
 }
 
 #[component]
-fn SettingsModelsRegistryPresetRow(
+fn SettingsModelsRegistryPresetToggle(
+    locale: RwSignal<Locale>,
+    saved_model_presets: RwSignal<Vec<SavedModelPreset>>,
+    row_index: ReadSignal<usize>,
+    sync_for_toggle: Arc<dyn Fn() + Send + Sync>,
+    llm_settings_feedback: RwSignal<Option<String>>,
+    pending_delete_row_key: RwSignal<Option<String>>,
+) -> impl IntoView {
+    view! {
+        <button
+            type="button"
+            class="settings-model-toggle"
+            role="switch"
+            class:settings-model-toggle-on=move || {
+                let idx = row_index.get();
+                saved_model_presets
+                    .get()
+                    .get(idx)
+                    .is_some_and(|p| p.enabled)
+            }
+            prop:aria-checked=move || {
+                let idx = row_index.get();
+                saved_model_presets
+                    .get()
+                    .get(idx)
+                    .is_some_and(|p| p.enabled)
+            }
+            prop:aria-label=move || i18n::settings_models_row_enabled_aria(locale.get())
+            prop:title=move || i18n::settings_models_row_enabled_short(locale.get())
+            on:click=move |_| {
+                pending_delete_row_key.set(None);
+                let loc = locale.get_untracked();
+                let idx = row_index.get_untracked();
+                let mut next = saved_model_presets.with_untracked(|v| v.clone());
+                if let Some(p) = next.get_mut(idx) {
+                    p.enabled = !p.enabled;
+                } else {
+                    return;
+                }
+                let _ = try_persist_saved_presets_with_feedback(
+                    next,
+                    loc,
+                    saved_model_presets,
+                    &sync_for_toggle,
+                    llm_settings_feedback,
+                );
+            }
+        >
+            <span class="settings-model-toggle-track" aria-hidden="true">
+            <span class="settings-model-toggle-thumb"></span>
+            </span>
+        </button>
+    }
+}
+
+#[component]
+fn SettingsModelsRegistryPresetEditBtn(
     s: RegistryPresetRowSignals,
-    row: RegistryPresetRowModel,
+    row_index: ReadSignal<usize>,
 ) -> impl IntoView {
     let RegistryPresetRowSignals {
         locale,
@@ -67,12 +123,128 @@ fn SettingsModelsRegistryPresetRow(
         new_ctx_tokens,
         new_temperature,
         new_thinking_mode,
+        pending_delete_row_key,
+        ..
+    } = s;
+    view! {
+        <button
+            type="button"
+            class="btn btn-ghost settings-model-registry-edit"
+            prop:aria-label=move || i18n::settings_models_row_edit_aria(locale.get())
+            prop:title=move || i18n::settings_models_row_edit_btn(locale.get())
+            on:click=move |_| {
+                pending_delete_row_key.set(None);
+                let idx = row_index.get_untracked();
+                let Some(p) = saved_model_presets.with_untracked(|v| v.get(idx).cloned())
+                else {
+                    return;
+                };
+                new_label.set(p.label);
+                new_api_base.set(p.api_base);
+                new_model_id.set(p.model);
+                new_api_key.set(p.api_key);
+                new_ctx_tokens.set(p.llm_context_tokens);
+                new_temperature.set(p.temperature);
+                new_thinking_mode.set(p.llm_thinking_mode);
+                dialog_mode.set(Some(RegistryPresetDialogKind::Edit(idx)));
+                form_error.set(None);
+            }
+        >
+            <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+            >
+                <path d="M12 20h9" />
+                <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L8 18l-4 1 1-4Z" />
+            </svg>
+        </button>
+    }
+}
+
+#[component]
+fn SettingsModelsRegistryPresetDeleteSlot(
+    locale: RwSignal<Locale>,
+    saved_model_presets: RwSignal<Vec<SavedModelPreset>>,
+    row_index: ReadSignal<usize>,
+    sync_baseline_sv: StoredValue<Arc<dyn Fn() + Send + Sync>>,
+    llm_settings_feedback: RwSignal<Option<String>>,
+    pending_delete_row_key: RwSignal<Option<String>>,
+    show_delete_confirm: Memo<bool>,
+) -> impl IntoView {
+    view! {
+        <Show
+            when=move || show_delete_confirm.get()
+            fallback=move || {
+                let loc_fb = locale;
+                let row_index_fb = row_index;
+                let saved_fb = saved_model_presets;
+                let pending_fb = pending_delete_row_key;
+                view! {
+        <button
+            type="button"
+            class="btn btn-ghost settings-model-registry-edit settings-model-registry-trash"
+            prop:aria-label=move || i18n::settings_saved_models_remove(loc_fb.get())
+            prop:title=move || i18n::settings_models_delete_confirm(loc_fb.get())
+            on:click=move |_| {
+                let i = row_index_fb.get_untracked();
+                let Some(k) = saved_fb.with_untracked(|v| v.get(i).map(saved_preset_row_key))
+                else {
+                    return;
+                };
+                pending_fb.set(Some(k));
+            }
+        >
+            <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+            >
+                <path d="M3 6h18" />
+                <path d="M8 6V4h8v2" />
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+                <path d="M10 11v6M14 11v6" />
+            </svg>
+        </button>
+                }
+            }
+        >
+            <SettingsModelsDeleteConfirm
+                locale
+                saved_model_presets
+                row_index
+                sync_saved_presets_baseline={sync_baseline_sv.get_value().clone()}
+                llm_settings_feedback
+                pending_delete_row_key
+            />
+        </Show>
+    }
+}
+
+#[component]
+fn SettingsModelsRegistryPresetRow(
+    s: RegistryPresetRowSignals,
+    row: RegistryPresetRowModel,
+) -> impl IntoView {
+    let s_edit = s.clone();
+    let RegistryPresetRowSignals {
+        locale,
+        saved_model_presets,
         sync_saved_presets_baseline,
         llm_settings_feedback,
         pending_delete_row_key,
+        ..
     } = s;
     let sync_baseline_sv = StoredValue::new(sync_saved_presets_baseline.clone());
-    let sync_for_toggle = sync_saved_presets_baseline.clone();
+    let sync_for_toggle = sync_saved_presets_baseline;
     let RegistryPresetRowModel { row_index, preset } = row;
     let show_delete_confirm = Memo::new(move |_| {
         let pending = pending_delete_row_key.get();
@@ -97,134 +269,24 @@ fn SettingsModelsRegistryPresetRow(
             <div class="settings-model-registry-primary">
                 <span class="settings-saved-models-label">{label}</span>
                 <div class="settings-model-registry-inline-actions">
-                <button
-                    type="button"
-                    class="settings-model-toggle"
-                    role="switch"
-                    class:settings-model-toggle-on=move || {
-                        let idx = row_index.get();
-                        saved_model_presets
-                            .get()
-                            .get(idx)
-                            .is_some_and(|p| p.enabled)
-                    }
-                    prop:aria-checked=move || {
-                        let idx = row_index.get();
-                        saved_model_presets
-                            .get()
-                            .get(idx)
-                            .is_some_and(|p| p.enabled)
-                    }
-                    prop:aria-label=move || i18n::settings_models_row_enabled_aria(locale.get())
-                    prop:title=move || i18n::settings_models_row_enabled_short(locale.get())
-                    on:click=move |_| {
-                        pending_delete_row_key.set(None);
-                        let loc = locale.get_untracked();
-                        let idx = row_index.get_untracked();
-                        let mut next = saved_model_presets.with_untracked(|v| v.clone());
-                        if let Some(p) = next.get_mut(idx) {
-                            p.enabled = !p.enabled;
-                        } else {
-                            return;
-                        }
-                        let _ = try_persist_saved_presets_with_feedback(
-                            next,
-                            loc,
-                            saved_model_presets,
-                            &sync_for_toggle,
-                            llm_settings_feedback,
-                        );
-                    }
-                >
-                    <span class="settings-model-toggle-track" aria-hidden="true">
-                    <span class="settings-model-toggle-thumb"></span>
-                    </span>
-                </button>
-                <button
-                    type="button"
-                    class="btn btn-ghost settings-model-registry-edit"
-                    prop:aria-label=move || i18n::settings_models_row_edit_aria(locale.get())
-                    prop:title=move || i18n::settings_models_row_edit_btn(locale.get())
-                    on:click=move |_| {
-                        pending_delete_row_key.set(None);
-                        let idx = row_index.get_untracked();
-                        let Some(p) = saved_model_presets.with_untracked(|v| v.get(idx).cloned())
-                        else {
-                            return;
-                        };
-                        new_label.set(p.label);
-                        new_api_base.set(p.api_base);
-                        new_model_id.set(p.model);
-                        new_api_key.set(p.api_key);
-                        new_ctx_tokens.set(p.llm_context_tokens);
-                        new_temperature.set(p.temperature);
-                        new_thinking_mode.set(p.llm_thinking_mode);
-                        dialog_mode.set(Some(RegistryPresetDialogKind::Edit(idx)));
-                        form_error.set(None);
-                    }
-                >
-                    <svg
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        aria-hidden="true"
-                    >
-                        <path d="M12 20h9" />
-                        <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L8 18l-4 1 1-4Z" />
-                    </svg>
-                </button>
-                <Show
-                    when=move || show_delete_confirm.get()
-                    fallback=move || {
-                        let loc_fb = locale;
-                        let row_index_fb = row_index;
-                        let saved_fb = saved_model_presets;
-                        let pending_fb = pending_delete_row_key;
-                        view! {
-                <button
-                    type="button"
-                    class="btn btn-ghost settings-model-registry-edit settings-model-registry-trash"
-                    prop:aria-label=move || i18n::settings_saved_models_remove(loc_fb.get())
-                    prop:title=move || i18n::settings_models_delete_confirm(loc_fb.get())
-                    on:click=move |_| {
-                        let i = row_index_fb.get_untracked();
-                        let Some(k) = saved_fb.with_untracked(|v| v.get(i).map(saved_preset_row_key))
-                        else {
-                            return;
-                        };
-                        pending_fb.set(Some(k));
-                    }
-                >
-                    <svg
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="2"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        aria-hidden="true"
-                    >
-                        <path d="M3 6h18" />
-                        <path d="M8 6V4h8v2" />
-                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
-                        <path d="M10 11v6M14 11v6" />
-                    </svg>
-                </button>
-                        }
-                    }
-                >
-                    <SettingsModelsDeleteConfirm
-                        locale
-                        saved_model_presets
-                        row_index
-                        sync_saved_presets_baseline={sync_baseline_sv.get_value().clone()}
-                        llm_settings_feedback
-                        pending_delete_row_key
-                    />
-                </Show>
+                <SettingsModelsRegistryPresetToggle
+                    locale
+                    saved_model_presets
+                    row_index
+                    sync_for_toggle
+                    llm_settings_feedback
+                    pending_delete_row_key
+                />
+                <SettingsModelsRegistryPresetEditBtn s=s_edit row_index />
+                <SettingsModelsRegistryPresetDeleteSlot
+                    locale
+                    saved_model_presets
+                    row_index
+                    sync_baseline_sv
+                    llm_settings_feedback
+                    pending_delete_row_key
+                    show_delete_confirm
+                />
                 </div>
             </div>
             <div class="settings-model-registry-secondary">

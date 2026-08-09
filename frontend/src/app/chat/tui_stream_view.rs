@@ -254,12 +254,7 @@ fn apply_actions_html(transcript: &web_sys::HtmlElement, message_id: &str, html:
     wrap.insert_adjacent_html("beforeend", html).is_ok()
 }
 
-fn apply_tui_sync_plan(transcript: &web_sys::HtmlElement, plan: &TuiSyncPlan) -> bool {
-    if let Some(html) = &plan.full_html {
-        transcript.set_inner_html(html);
-        return true;
-    }
-
+fn apply_tui_promote_and_appends(transcript: &web_sys::HtmlElement, plan: &TuiSyncPlan) -> bool {
     if let Some(promote_id) = &plan.promote_id
         && let Some(section) = find_turn_section(transcript, promote_id)
     {
@@ -268,20 +263,27 @@ fn apply_tui_sync_plan(transcript: &web_sys::HtmlElement, plan: &TuiSyncPlan) ->
         let _ = section.class_list().remove_1("is-loading");
     }
 
-    if !plan.append_sections.is_empty() {
-        if let Some(empty) = transcript.query_selector(".chat-tui-empty").ok().flatten() {
-            empty.remove();
-        }
-        for section_html in &plan.append_sections {
-            if transcript
-                .insert_adjacent_html("beforeend", section_html)
-                .is_err()
-            {
-                return false;
-            }
+    if plan.append_sections.is_empty() {
+        return true;
+    }
+    if let Some(empty) = transcript.query_selector(".chat-tui-empty").ok().flatten() {
+        empty.remove();
+    }
+    for section_html in &plan.append_sections {
+        if transcript
+            .insert_adjacent_html("beforeend", section_html)
+            .is_err()
+        {
+            return false;
         }
     }
+    true
+}
 
+fn apply_tui_body_and_action_patches(
+    transcript: &web_sys::HtmlElement,
+    plan: &TuiSyncPlan,
+) -> bool {
     if let Some(live) = &plan.live {
         let Some(body) = find_turn_body(transcript, &live.message_id) else {
             return false;
@@ -305,8 +307,18 @@ fn apply_tui_sync_plan(transcript: &web_sys::HtmlElement, plan: &TuiSyncPlan) ->
             return false;
         }
     }
-
     true
+}
+
+fn apply_tui_sync_plan(transcript: &web_sys::HtmlElement, plan: &TuiSyncPlan) -> bool {
+    if let Some(html) = &plan.full_html {
+        transcript.set_inner_html(html);
+        return true;
+    }
+    if !apply_tui_promote_and_appends(transcript, plan) {
+        return false;
+    }
+    apply_tui_body_and_action_patches(transcript, plan)
 }
 
 #[component]

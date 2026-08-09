@@ -223,6 +223,103 @@ pub(super) struct SlashMenuSignals {
     pub menu_dismissed: RwSignal<bool>,
 }
 
+fn wire_slash_draft_reset_effect(
+    draft: RwSignal<String>,
+    menu_dismissed: RwSignal<bool>,
+    bare_slash_fetched: RwSignal<bool>,
+) {
+    Effect::new(move |_| {
+        let d = draft.get();
+        if slash_skill_prefix(&d).is_none() {
+            menu_dismissed.set(false);
+        }
+        if d.trim() != "/" {
+            bare_slash_fetched.set(false);
+        }
+    });
+}
+
+fn wire_slash_workspace_invalidate_effect(
+    workspace_path: Memo<String>,
+    skills_cache: RwSignal<Option<SkillsListData>>,
+    skills_err: RwSignal<Option<String>>,
+    bare_slash_fetched: RwSignal<bool>,
+) {
+    Effect::new(move |_| {
+        let _ = workspace_path.get();
+        skills_cache.set(None);
+        skills_err.set(None);
+        bare_slash_fetched.set(false);
+    });
+}
+
+fn wire_slash_selection_clamp_effect(
+    filtered: Memo<Vec<SlashMenuItem>>,
+    selected_idx: RwSignal<usize>,
+) {
+    Effect::new(move |_| {
+        let n = filtered.get().len();
+        let i = selected_idx.get_untracked();
+        if n == 0 {
+            selected_idx.set(0);
+        } else if i >= n {
+            selected_idx.set(n - 1);
+        }
+    });
+}
+
+fn apply_skills_fetch_result(
+    result: Result<SkillsListData, String>,
+    skills_cache: RwSignal<Option<SkillsListData>>,
+    skills_err: RwSignal<Option<String>>,
+    skills_loading: RwSignal<bool>,
+) {
+    match result {
+        Ok(data) => {
+            if let Some(ref e) = data.error {
+                skills_err.set(Some(e.clone()));
+            } else {
+                skills_err.set(None);
+            }
+            skills_cache.set(Some(data));
+        }
+        Err(e) => skills_err.set(Some(e)),
+    }
+    skills_loading.set(false);
+}
+
+fn wire_slash_skills_fetch_effect(
+    draft: RwSignal<String>,
+    locale: RwSignal<Locale>,
+    menu_open: Memo<bool>,
+    skills_cache: RwSignal<Option<SkillsListData>>,
+    skills_loading: RwSignal<bool>,
+    skills_err: RwSignal<Option<String>>,
+    bare_slash_fetched: RwSignal<bool>,
+) {
+    Effect::new(move |_| {
+        if !menu_open.get() || skills_loading.get_untracked() {
+            return;
+        }
+        let bare = draft.get().trim() == "/";
+        let cache_empty = skills_cache.get_untracked().is_none();
+        let refresh_bare = bare && !bare_slash_fetched.get_untracked();
+        if !cache_empty && !refresh_bare {
+            return;
+        }
+        if bare {
+            bare_slash_fetched.set(true);
+        }
+        skills_loading.set(true);
+        skills_err.set(None);
+        let loc = locale.get_untracked();
+        leptos::task::spawn_local(async move {
+            let result = fetch_skills(loc).await;
+            apply_skills_fetch_result(result, skills_cache, skills_err, skills_loading);
+        });
+    });
+}
+
 /// 挂载 slash 菜单相关信号与 Effect（工作区失效、拉取目录、选中索引钳制）。
 pub(super) fn install_slash_menu_effects(
     draft: RwSignal<String>,
@@ -247,64 +344,23 @@ pub(super) fn install_slash_menu_effects(
         build_filtered_menu(prefix, loc, skills_cache.get().as_ref())
     });
 
-    Effect::new(move |_| {
-        let d = draft.get();
-        if slash_skill_prefix(&d).is_none() {
-            menu_dismissed.set(false);
-        }
-        if d.trim() != "/" {
-            bare_slash_fetched.set(false);
-        }
-    });
-
-    Effect::new(move |_| {
-        let _ = workspace_path.get();
-        skills_cache.set(None);
-        skills_err.set(None);
-        bare_slash_fetched.set(false);
-    });
-
-    Effect::new(move |_| {
-        let n = filtered.get().len();
-        let i = selected_idx.get_untracked();
-        if n == 0 {
-            selected_idx.set(0);
-        } else if i >= n {
-            selected_idx.set(n - 1);
-        }
-    });
-
-    Effect::new(move |_| {
-        if !menu_open.get() || skills_loading.get_untracked() {
-            return;
-        }
-        let bare = draft.get().trim() == "/";
-        let cache_empty = skills_cache.get_untracked().is_none();
-        let refresh_bare = bare && !bare_slash_fetched.get_untracked();
-        if !cache_empty && !refresh_bare {
-            return;
-        }
-        if bare {
-            bare_slash_fetched.set(true);
-        }
-        skills_loading.set(true);
-        skills_err.set(None);
-        let loc = locale.get_untracked();
-        leptos::task::spawn_local(async move {
-            match fetch_skills(loc).await {
-                Ok(data) => {
-                    if let Some(ref e) = data.error {
-                        skills_err.set(Some(e.clone()));
-                    } else {
-                        skills_err.set(None);
-                    }
-                    skills_cache.set(Some(data));
-                }
-                Err(e) => skills_err.set(Some(e)),
-            }
-            skills_loading.set(false);
-        });
-    });
+    wire_slash_draft_reset_effect(draft, menu_dismissed, bare_slash_fetched);
+    wire_slash_workspace_invalidate_effect(
+        workspace_path,
+        skills_cache,
+        skills_err,
+        bare_slash_fetched,
+    );
+    wire_slash_selection_clamp_effect(filtered, selected_idx);
+    wire_slash_skills_fetch_effect(
+        draft,
+        locale,
+        menu_open,
+        skills_cache,
+        skills_loading,
+        skills_err,
+        bare_slash_fetched,
+    );
 
     SlashMenuSignals {
         menu_open,
