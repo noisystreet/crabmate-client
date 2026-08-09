@@ -184,6 +184,36 @@ pub fn api_base_url() -> String {
     API_BASE_URL.with(|c| c.borrow().clone())
 }
 
+/// WebKit 常把 CORS / 不可达写成不透明的 `TypeError: Load failed`。
+pub fn format_fetch_transport_error(e: &wasm_bindgen::JsValue) -> String {
+    let detail = e
+        .as_string()
+        .or_else(|| {
+            js_sys::Reflect::get(e, &wasm_bindgen::JsValue::from_str("message"))
+                .ok()
+                .and_then(|v| v.as_string())
+        })
+        .unwrap_or_else(|| format!("{e:?}"));
+    let base = api_base_url();
+    let mut msg = format!("fetch 失败: {detail}");
+    if base.is_empty() {
+        msg.push_str(
+            "。当前无 API 基址（相对路径会打到 tauri.localhost）。请从连接页重新连接，确认 hash 含 cm_api_base。",
+        );
+    } else {
+        let lower = detail.to_ascii_lowercase();
+        if lower.contains("load failed")
+            || lower.contains("failed to fetch")
+            || lower.contains("networkerror")
+        {
+            msg.push_str(&format!(
+                "。请确认 serve 可达（基址 {base}），且 CORS 含 Linux WebView 实际 Origin：CM_WEB_CORS_ALLOWED_ORIGINS='tauri://localhost,http://tauri.localhost'；勿用 0.0.0.0 作连接地址。"
+            ));
+        }
+    }
+    msg
+}
+
 /// 将以 `/` 开头的 API 路径接到基址上；基址为空则原样返回 `path`。
 ///
 /// 已是 `http(s)://` 绝对 URL 时原样返回。

@@ -15,6 +15,7 @@ use web_sys::Response;
 
 use crate::i18n::Locale;
 
+use super::browser::format_fetch_transport_error;
 use send_helpers::{
     ChatStreamRoundOutcome, chat_stream_fetch_retry_exhausted, run_chat_stream_http_round,
 };
@@ -132,7 +133,7 @@ async fn chat_stream_fetch_or_backoff(
         }
         Err(e) => {
             if chat_stream_fetch_retry_exhausted(stream_resume_job_id, *attempt) {
-                return Err(format!("fetch: {:?}", e));
+                return Err(format_fetch_transport_error(&e));
             }
             *attempt = attempt.saturating_add(1);
             http_request::sleep_chat_stream_retry_backoff(*attempt).await;

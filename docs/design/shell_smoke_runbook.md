@@ -17,9 +17,9 @@
 
 ```bash
 # 终端 A — 纯 API serve + CORS（壳加载包内 UI）
-CM_WEB_CORS_ALLOWED_ORIGINS='http://tauri.localhost' \
+CM_WEB_CORS_ALLOWED_ORIGINS='tauri://localhost,http://tauri.localhost' \
   crabmate serve --host 127.0.0.1 --port 8080
-# 或: cd ../crabmate_agent && CM_WEB_CORS_ALLOWED_ORIGINS='http://tauri.localhost' \
+# 或: cd ../crabmate_agent && CM_WEB_CORS_ALLOWED_ORIGINS='tauri://localhost,http://tauri.localhost' \
 #       cargo run -- serve --host 127.0.0.1 --port 8080
 
 # 终端 B（本仓）

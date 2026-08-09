@@ -10,7 +10,7 @@ use crate::i18n::Locale;
 
 use crabmate_api_contract::StatusShellView;
 
-use super::browser::{api_url, auth_headers, window};
+use super::browser::{api_url, auth_headers, format_fetch_transport_error, window};
 
 fn truncate_to_char_boundary(s: &str, max_bytes: usize) -> &str {
     if s.len() <= max_bytes {
@@ -536,7 +536,7 @@ async fn do_fetch_json<T: for<'de> Deserialize<'de>>(
     let p = w.fetch_with_request(&req);
     let resp_val = JsFuture::from(p)
         .await
-        .map_err(|e| format!("fetch: {:?}", e))?;
+        .map_err(|e| format_fetch_transport_error(&e))?;
     let resp: Response = resp_val
         .dyn_into()
         .map_err(|_| crate::i18n::api_err_response_type(loc))?;
@@ -601,7 +601,7 @@ pub async fn upload_files_multipart_raw(
         .map_err(|e| format!("request: {:?}", e))?;
     let resp_val = JsFuture::from(w.fetch_with_request(&req))
         .await
-        .map_err(|e| format!("fetch: {:?}", e))?;
+        .map_err(|e| format_fetch_transport_error(&e))?;
     let resp: Response = resp_val
         .dyn_into()
         .map_err(|_| crate::i18n::api_err_response_type(loc))?;
@@ -744,7 +744,7 @@ pub async fn post_chat_branch(
         .map_err(|e| ChatBranchError::Other(format!("req: {:?}", e)))?;
     let resp_val = JsFuture::from(w.fetch_with_request(&req))
         .await
-        .map_err(|e| ChatBranchError::Other(format!("fetch: {:?}", e)))?;
+        .map_err(|e| ChatBranchError::Other(format_fetch_transport_error(&e)))?;
     let resp: Response = resp_val
         .dyn_into()
         .map_err(|_| ChatBranchError::Other("not Response".to_string()))?;
@@ -777,7 +777,7 @@ pub async fn submit_chat_approval(
     let w = window().ok_or_else(|| crate::i18n::api_err_no_window(loc).to_string())?;
     let resp_val = JsFuture::from(w.fetch_with_request(&req))
         .await
-        .map_err(|e| format!("fetch: {:?}", e))?;
+        .map_err(|e| format_fetch_transport_error(&e))?;
     let resp: Response = resp_val
         .dyn_into()
         .map_err(|_| crate::i18n::api_err_response_type(loc))?;

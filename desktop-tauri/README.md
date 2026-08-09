@@ -31,7 +31,7 @@
 
 - Rust stable、Tauri 2 系统依赖
 - **`cargo install tauri-cli --version "^2"`**（一次性）
-- 在 **Server 主仓**另开终端：`CM_WEB_CORS_ALLOWED_ORIGINS='http://tauri.localhost' cargo run -- serve`（默认纯 API；壳不依赖 `--with-web`）
+- 在 **Server 主仓**另开终端：`CM_WEB_CORS_ALLOWED_ORIGINS='tauri://localhost,http://tauri.localhost' cargo run -- serve`（默认纯 API；壳不依赖 `--with-web`。Linux WebKit 实际 `Origin` 为 `tauri://localhost`）
 
 ### 推荐步骤
 

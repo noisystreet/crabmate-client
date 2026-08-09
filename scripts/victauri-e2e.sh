@@ -148,7 +148,7 @@ start_serve_background() {
       exec env -u http_proxy -u https_proxy -u HTTP_PROXY -u HTTPS_PROXY \
         no_proxy=127.0.0.1,localhost \
         CM_E2E_FIXTURES="${CM_E2E_FIXTURES:-1}" \
-        CM_WEB_CORS_ALLOWED_ORIGINS="${CM_WEB_CORS_ALLOWED_ORIGINS:-http://tauri.localhost}" \
+        CM_WEB_CORS_ALLOWED_ORIGINS="${CM_WEB_CORS_ALLOWED_ORIGINS:-tauri://localhost,http://tauri.localhost}" \
         "$BACKEND_BIN" serve --host 127.0.0.1 --port "$SERVE_PORT"
     ) >>"$SERVE_LOG" 2>&1 &
     echo $!
