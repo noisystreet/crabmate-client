@@ -14,7 +14,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.security.crypto.EncryptedSharedPreferences
-import androidx.security.crypto.MasterKey
+import androidx.security.crypto.MasterKeys
 import kotlin.math.roundToInt
 
 class MainActivity : TauriActivity() {
@@ -265,16 +265,14 @@ class MainActivity : TauriActivity() {
       return it
     }
     return try {
-      val masterKey =
-        MasterKey
-          .Builder(applicationContext)
-          .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-          .build()
+      // security-crypto 1.0.0：MasterKeys + 旧版 create(fileName, alias, context, …)
+      // （MasterKey.Builder 属于 1.1.0-alpha，稳定版尚不可用）
+      val masterKeyAlias = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)
       val prefs =
         EncryptedSharedPreferences.create(
-          applicationContext,
           SECURE_PREFS_NAME,
-          masterKey,
+          masterKeyAlias,
+          applicationContext,
           EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
           EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM,
         )
