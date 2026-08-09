@@ -408,13 +408,40 @@ pub(crate) mod conversation_hydration_cycle {
 
     use crate::api::fetch_conversation_messages;
     use crate::chat_session_state::{ChatSessionSignals, ConversationPromptTokenHydrate};
-    use crate::conversation_hydrate::stored_messages_from_conversation_api;
+    use crate::conversation_hydrate::{
+        ConversationMessagesResponse, stored_messages_from_conversation_api,
+    };
+    use crate::i18n::Locale;
 
     use super::{
         ConversationHydrationApplyCtx, HydrationWireSnapshot, MergeHydrationIntoActiveSessionArgs,
         apply_saved_revision_if_same_conversation, merge_hydration_into_active_session,
         restore_reasoning_after_hydration,
     };
+
+    /// 自动水合拉取结果：成功清错误条；`CONVERSATION_NOT_FOUND` 软忽略；其余钉状态栏。
+    fn take_hydrate_fetch_or_set_status_err(
+        apply: &ConversationHydrationApplyCtx,
+        locale: Locale,
+        result: Result<ConversationMessagesResponse, String>,
+    ) -> Option<ConversationMessagesResponse> {
+        match result {
+            Ok(r) => {
+                // 成功拉取后清掉此前水合/拉历史失败条，避免「假失败」残留。
+                apply.status_err.set(None);
+                Some(r)
+            }
+            Err(e) => {
+                // 过期或 mock 流假 id：保留本地时间线，勿钉状态栏（否则挡「就绪」）。
+                if !crate::i18n::conversation_messages_err_is_not_found(&e) {
+                    apply.status_err.set(Some(
+                        crate::i18n::api_err_conversation_messages_fetch_failed(locale, &e),
+                    ));
+                }
+                None
+            }
+        }
+    }
 
     pub(crate) async fn run(
         snap: HydrationWireSnapshot,
@@ -427,24 +454,17 @@ pub(crate) mod conversation_hydration_cycle {
             nonce_at_start,
             locale,
         } = snap;
-        let resp = match fetch_conversation_messages(
-            &cid,
-            crate::conversation_messages_page::ConversationMessagesFetchParams::tail_page(),
+        let Some(resp) = take_hydrate_fetch_or_set_status_err(
+            &apply,
             locale,
-        )
-        .await
-        {
-            Ok(r) => {
-                // 成功拉取后清掉此前水合/拉历史失败条，避免「假失败」残留。
-                apply.status_err.set(None);
-                r
-            }
-            Err(e) => {
-                apply.status_err.set(Some(
-                    crate::i18n::api_err_conversation_messages_fetch_failed(locale, &e),
-                ));
-                return;
-            }
+            fetch_conversation_messages(
+                &cid,
+                crate::conversation_messages_page::ConversationMessagesFetchParams::tail_page(),
+                locale,
+            )
+            .await,
+        ) else {
+            return;
         };
 
         if chat.session_hydrate_nonce.get_untracked() != nonce_at_start {
