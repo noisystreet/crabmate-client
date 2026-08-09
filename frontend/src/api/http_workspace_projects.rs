@@ -66,21 +66,15 @@ pub async fn post_workspace_project(
     fetch_json_with_body("POST", "/workspace/projects", &body, loc).await
 }
 
-/// `POST /workspace`（支持 `project` 字段）。
-pub async fn post_workspace_set_inner(
-    path: Option<String>,
-    project: Option<String>,
-    loc: Locale,
-) -> Result<String, String> {
-    let body =
-        serde_json::to_string(&WorkspaceSetBody { path, project }).map_err(|e| e.to_string())?;
+/// `POST /workspace` 原始响应：`(resp.ok(), status, body text)`。
+async fn post_workspace_raw(body: &str, loc: Locale) -> Result<(bool, u16, String), String> {
     let init = RequestInit::new();
     init.set_method("POST");
     init.set_mode(RequestMode::Cors);
     let h = auth_headers();
     let _ = h.set("Content-Type", "application/json");
     init.set_headers(&h);
-    init.set_body(&JsValue::from_str(&body));
+    init.set_body(&JsValue::from_str(body));
     let req = Request::new_with_str_and_init(&api_url("/workspace"), &init)
         .map_err(|e| format!("request: {:?}", e))?;
     let w = window().ok_or_else(|| crate::i18n::api_err_no_window(loc).to_string())?;
@@ -90,15 +84,26 @@ pub async fn post_workspace_set_inner(
     let resp: Response = resp_val
         .dyn_into()
         .map_err(|_| crate::i18n::api_err_response_type(loc))?;
+    let status = resp.status();
     let text = JsFuture::from(resp.text().map_err(|e| format!("text: {:?}", e))?)
         .await
         .map_err(|e| format!("read body: {:?}", e))?;
     let s = text
         .as_string()
         .ok_or_else(|| crate::i18n::api_err_body_type(loc).to_string())?;
+    Ok((resp.ok(), status, s))
+}
+
+/// 与历史手写 fetch 路径一致：2xx 看 `ok`/`path`；非 2xx 优先 body `error`，否则 `HTTP {status}`。
+fn parse_workspace_set_response(
+    resp_ok: bool,
+    status: u16,
+    body: &str,
+    loc: Locale,
+) -> Result<String, String> {
     let v: serde_json::Value =
-        serde_json::from_str(&s).map_err(|_| crate::i18n::api_err_request_failed(loc))?;
-    if resp.ok() {
+        serde_json::from_str(body).map_err(|_| crate::i18n::api_err_request_failed(loc))?;
+    if resp_ok {
         if v.get("ok").and_then(|x| x.as_bool()) != Some(true) {
             return Err(v
                 .get("error")
@@ -116,5 +121,52 @@ pub async fn post_workspace_set_inner(
         .get("error")
         .and_then(|x| x.as_str())
         .map(std::string::ToString::to_string)
-        .unwrap_or_else(|| format!("HTTP {}", resp.status())))
+        .unwrap_or_else(|| format!("HTTP {status}")))
+}
+
+/// `POST /workspace`（支持 `project` 字段）。
+pub async fn post_workspace_set_inner(
+    path: Option<String>,
+    project: Option<String>,
+    loc: Locale,
+) -> Result<String, String> {
+    let body =
+        serde_json::to_string(&WorkspaceSetBody { path, project }).map_err(|e| e.to_string())?;
+    let (resp_ok, status, s) = post_workspace_raw(&body, loc).await?;
+    parse_workspace_set_response(resp_ok, status, &s, loc)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_workspace_set_response;
+    use crate::i18n::Locale;
+
+    #[test]
+    fn workspace_set_ok_returns_path() {
+        let out =
+            parse_workspace_set_response(true, 200, r#"{"ok":true,"path":"/tmp/ws"}"#, Locale::En)
+                .unwrap();
+        assert_eq!(out, "/tmp/ws");
+    }
+
+    #[test]
+    fn workspace_set_ok_false_uses_error_field() {
+        let err =
+            parse_workspace_set_response(true, 200, r#"{"ok":false,"error":"busy"}"#, Locale::En)
+                .unwrap_err();
+        assert_eq!(err, "busy");
+    }
+
+    #[test]
+    fn workspace_set_http_error_prefers_body_error() {
+        let err = parse_workspace_set_response(false, 403, r#"{"error":"forbidden"}"#, Locale::En)
+            .unwrap_err();
+        assert_eq!(err, "forbidden");
+    }
+
+    #[test]
+    fn workspace_set_http_error_fallback_status() {
+        let err = parse_workspace_set_response(false, 502, r#"{}"#, Locale::En).unwrap_err();
+        assert_eq!(err, "HTTP 502");
+    }
 }

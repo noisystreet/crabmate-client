@@ -396,112 +396,89 @@ fn dispatch_plan_custom(custom_type: &str, val: &serde_json::Value, sink: &mut S
 }
 
 /// 信息类 CUSTOM 事件分发（澄清问卷、思维迹、时间线旁注、会话保存）。
+fn json_str_field(data: &serde_json::Value, key: &str) -> String {
+    data.get(key)
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string()
+}
+
+fn json_opt_str_field(data: &serde_json::Value, key: &str) -> Option<String> {
+    data.get(key).and_then(|v| v.as_str()).map(str::to_string)
+}
+
+fn parse_clarification_questionnaire(data: &serde_json::Value) -> ClarificationQuestionnaireInfo {
+    let fields: Vec<ClarificationFormField> = data
+        .get("questions")
+        .and_then(|q| q.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|f| {
+                    Some(ClarificationFormField {
+                        id: f.get("id")?.as_str()?.to_string(),
+                        label: f.get("label")?.as_str()?.to_string(),
+                        hint: f.get("hint")?.as_str().map(str::to_string),
+                        required: f.get("required").and_then(|r| r.as_bool()).unwrap_or(false),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    ClarificationQuestionnaireInfo {
+        questionnaire_id: json_str_field(data, "questionnaireId"),
+        intro: json_str_field(data, "intro"),
+        fields,
+    }
+}
+
+fn parse_thinking_trace(data: &serde_json::Value) -> ThinkingTraceInfo {
+    ThinkingTraceInfo {
+        op: json_str_field(data, "op"),
+        node_id: json_opt_str_field(data, "nodeId"),
+        parent_id: json_opt_str_field(data, "parentId"),
+        title: json_opt_str_field(data, "title"),
+        chunk: json_opt_str_field(data, "chunk"),
+        context_snapshot: json_opt_str_field(data, "contextSnapshot"),
+    }
+}
+
+fn parse_timeline_log(data: &serde_json::Value) -> TimelineLogInfo {
+    TimelineLogInfo {
+        kind: json_str_field(data, "kind"),
+        title: json_str_field(data, "title"),
+        detail: json_opt_str_field(data, "detail"),
+    }
+}
+
 fn dispatch_info_custom(custom_type: &str, val: &serde_json::Value, sink: &mut SseControlSink<'_>) {
+    let Some(data) = val.get("data") else {
+        return;
+    };
     match custom_type {
         "clarification_questionnaire" => {
-            if let Some(data) = val.get("data") {
-                let fields: Vec<ClarificationFormField> = data
-                    .get("questions")
-                    .and_then(|q| q.as_array())
-                    .map(|arr| {
-                        arr.iter()
-                            .filter_map(|f| {
-                                Some(ClarificationFormField {
-                                    id: f.get("id")?.as_str()?.to_string(),
-                                    label: f.get("label")?.as_str()?.to_string(),
-                                    hint: f.get("hint")?.as_str().map(str::to_string),
-                                    required: f
-                                        .get("required")
-                                        .and_then(|r| r.as_bool())
-                                        .unwrap_or(false),
-                                })
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                let info = ClarificationQuestionnaireInfo {
-                    questionnaire_id: data
-                        .get("questionnaireId")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_string(),
-                    intro: data
-                        .get("intro")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_string(),
-                    fields,
-                };
-                if let Some(hook) = sink.clarify_trace.on_clarification_questionnaire.as_mut() {
-                    hook(info);
-                }
+            let info = parse_clarification_questionnaire(data);
+            if let Some(hook) = sink.clarify_trace.on_clarification_questionnaire.as_mut() {
+                hook(info);
             }
         }
         "thinking_trace" => {
-            if let Some(data) = val.get("data") {
-                let info = ThinkingTraceInfo {
-                    op: data
-                        .get("op")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_string(),
-                    node_id: data
-                        .get("nodeId")
-                        .and_then(|v| v.as_str())
-                        .map(str::to_string),
-                    parent_id: data
-                        .get("parentId")
-                        .and_then(|v| v.as_str())
-                        .map(str::to_string),
-                    title: data
-                        .get("title")
-                        .and_then(|v| v.as_str())
-                        .map(str::to_string),
-                    chunk: data
-                        .get("chunk")
-                        .and_then(|v| v.as_str())
-                        .map(str::to_string),
-                    context_snapshot: data
-                        .get("contextSnapshot")
-                        .and_then(|v| v.as_str())
-                        .map(str::to_string),
-                };
-                if let Some(hook) = sink.clarify_trace.on_thinking_trace.as_mut() {
-                    hook(info);
-                }
+            let info = parse_thinking_trace(data);
+            if let Some(hook) = sink.clarify_trace.on_thinking_trace.as_mut() {
+                hook(info);
             }
         }
         "timeline_log" => {
-            if let Some(data) = val.get("data") {
-                let info = TimelineLogInfo {
-                    kind: data
-                        .get("kind")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_string(),
-                    title: data
-                        .get("title")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_string(),
-                    detail: data
-                        .get("detail")
-                        .and_then(|v| v.as_str())
-                        .map(str::to_string),
-                };
-                if let Some(hook) = sink.notice_timeline.on_timeline_log.as_mut() {
-                    hook(info);
-                }
+            let info = parse_timeline_log(data);
+            if let Some(hook) = sink.notice_timeline.on_timeline_log.as_mut() {
+                hook(info);
             }
         }
         "conversation_saved" => {
-            if let Some(data) = val.get("data") {
-                let revision = data.get("revision").and_then(|v| v.as_u64()).unwrap_or(0);
-                let tiktoken =
-                    crate::conversation_prompt_tokens_apply::tiktoken_from_ag_ui_object(data);
-                if let Some(hook) = sink.notice_timeline.on_conversation_saved_revision.as_mut() {
-                    hook(revision, tiktoken);
-                }
+            let revision = data.get("revision").and_then(|v| v.as_u64()).unwrap_or(0);
+            let tiktoken =
+                crate::conversation_prompt_tokens_apply::tiktoken_from_ag_ui_object(data);
+            if let Some(hook) = sink.notice_timeline.on_conversation_saved_revision.as_mut() {
+                hook(revision, tiktoken);
             }
         }
         _ => {}

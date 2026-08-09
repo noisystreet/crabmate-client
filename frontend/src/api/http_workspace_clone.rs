@@ -215,24 +215,27 @@ async fn open_clone_sse_response(
     Ok(resp)
 }
 
-/// 流式 clone；`on_event` 每条 SSE 业务事件回调一次。成功返回 `done` 的 path。
-pub async fn post_workspace_clone_stream<F>(
-    req: WorkspaceCloneRequest,
-    loc: Locale,
-    mut on_event: F,
-) -> Result<(String, String), String>
+fn finalize_clone_stream_outcome(
+    stream_err: Option<String>,
+    done_name: Option<String>,
+    done_path: Option<String>,
+) -> Result<(String, String), String> {
+    if let Some(err) = stream_err {
+        return Err(err);
+    }
+    match (done_name, done_path) {
+        (Some(n), Some(p)) if !p.is_empty() => Ok((n, p)),
+        _ => Err("clone stream ended without done".to_string()),
+    }
+}
+
+async fn read_clone_sse_until_terminal<F>(
+    reader: &web_sys::ReadableStreamDefaultReader,
+    on_event: &mut F,
+) -> Result<(Option<String>, Option<String>, Option<String>), String>
 where
     F: FnMut(WorkspaceCloneSseEvent),
 {
-    let resp = open_clone_sse_response(&req, loc).await?;
-    let body = resp
-        .body()
-        .ok_or_else(|| "clone stream: empty body".to_string())?;
-    let reader = body
-        .get_reader()
-        .dyn_into::<web_sys::ReadableStreamDefaultReader>()
-        .map_err(|_| "clone stream: reader".to_string())?;
-
     let mut text_buf = String::new();
     let mut raw: Vec<u8> = Vec::new();
     let mut done_name = None::<String>;
@@ -260,13 +263,29 @@ where
         }
     }
 
-    if let Some(err) = stream_err {
-        return Err(err);
-    }
-    match (done_name, done_path) {
-        (Some(n), Some(p)) if !p.is_empty() => Ok((n, p)),
-        _ => Err("clone stream ended without done".to_string()),
-    }
+    Ok((done_name, done_path, stream_err))
+}
+
+/// 流式 clone；`on_event` 每条 SSE 业务事件回调一次。成功返回 `done` 的 path。
+pub async fn post_workspace_clone_stream<F>(
+    req: WorkspaceCloneRequest,
+    loc: Locale,
+    mut on_event: F,
+) -> Result<(String, String), String>
+where
+    F: FnMut(WorkspaceCloneSseEvent),
+{
+    let resp = open_clone_sse_response(&req, loc).await?;
+    let body = resp
+        .body()
+        .ok_or_else(|| "clone stream: empty body".to_string())?;
+    let reader = body
+        .get_reader()
+        .dyn_into::<web_sys::ReadableStreamDefaultReader>()
+        .map_err(|_| "clone stream: reader".to_string())?;
+    let (done_name, done_path, stream_err) =
+        read_clone_sse_until_terminal(&reader, &mut on_event).await?;
+    finalize_clone_stream_outcome(stream_err, done_name, done_path)
 }
 
 /// 从仓库 URL 推断默认项目名（去 `.git`）。

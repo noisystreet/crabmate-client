@@ -111,6 +111,20 @@ fn message_id_from_wrap(wrap: &web_sys::HtmlElement) -> Option<String> {
     wrap.get_attribute("data-tui-wrap-id")
 }
 
+fn resolve_turn_press_target(
+    target: Option<web_sys::EventTarget>,
+) -> Option<(web_sys::HtmlElement, String)> {
+    let wrap = wrap_from_event_target(target.as_ref()?)?;
+    let message_id = message_id_from_wrap(&wrap)?;
+    Some((wrap, message_id))
+}
+
+fn selection_wants_native_context_menu() -> bool {
+    web_sys::window()
+        .and_then(|w| w.get_selection().ok().flatten())
+        .is_some_and(|s| !s.is_collapsed() && !String::from(s.to_string()).trim().is_empty())
+}
+
 /// 绑定在 transcript 上的右键 / 长按处理器。
 pub(crate) struct MessageTurnPressHandlers {
     pub on_contextmenu: Rc<dyn Fn(web_sys::MouseEvent)>,
@@ -162,19 +176,11 @@ pub(crate) fn build_message_turn_press_handlers(
         let arm_suppress = Rc::clone(&arm_suppress);
         let clear_long_press = Rc::clone(&clear_long_press);
         Rc::new(move |ev: web_sys::MouseEvent| {
-            let Some(wrap) = ev.target().as_ref().and_then(wrap_from_event_target) else {
-                return;
-            };
-            let Some(message_id) = message_id_from_wrap(&wrap) else {
+            let Some((_wrap, message_id)) = resolve_turn_press_target(ev.target()) else {
                 return;
             };
             // 选区非空时保留浏览器右键（复制选中文本等）
-            if web_sys::window()
-                .and_then(|w| w.get_selection().ok().flatten())
-                .is_some_and(|s| {
-                    !s.is_collapsed() && !String::from(s.to_string()).trim().is_empty()
-                })
-            {
+            if selection_wants_native_context_menu() {
                 return;
             }
             ev.prevent_default();
@@ -192,10 +198,7 @@ pub(crate) fn build_message_turn_press_handlers(
             if ev.pointer_type() == "mouse" {
                 return;
             }
-            let Some(wrap) = ev.target().as_ref().and_then(wrap_from_event_target) else {
-                return;
-            };
-            let Some(message_id) = message_id_from_wrap(&wrap) else {
+            let Some((_wrap, message_id)) = resolve_turn_press_target(ev.target()) else {
                 return;
             };
             if let Some(t) = long_press_timer.borrow_mut().take() {

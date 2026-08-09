@@ -101,6 +101,47 @@ pub(crate) fn SettingsAppearanceBlock(
     }
 }
 
+fn bearer_status_label(locale: Locale, present: bool) -> &'static str {
+    if present {
+        i18n::settings_web_api_bearer_status_set(locale)
+    } else {
+        i18n::settings_web_api_bearer_status_unset(locale)
+    }
+}
+
+fn bearer_placeholder(present: bool) -> &'static str {
+    if present {
+        "••••••••"
+    } else {
+        ""
+    }
+}
+
+fn save_web_api_bearer(
+    locale: Locale,
+    draft: RwSignal<String>,
+    present: RwSignal<bool>,
+    feedback: RwSignal<Option<String>>,
+    save_nonce: RwSignal<u64>,
+) {
+    let token = draft.get_untracked();
+    crate::api::set_web_api_bearer_token(&token);
+    present.set(crate::api::web_api_bearer_token_is_set());
+    draft.set(String::new());
+    let cleared = token.trim().is_empty();
+    feedback.set(Some(if cleared {
+        i18n::settings_web_api_bearer_cleared(locale).to_string()
+    } else {
+        i18n::settings_web_api_bearer_saved(locale).to_string()
+    }));
+    // 仅非空保存后触发壳层恢复（重试 /status、水合）；清空时不乐观清错、不拉水合。
+    if !cleared {
+        save_nonce.update(|n| *n = n.saturating_add(1));
+    }
+    // 本页请求头已可用；不再 PUT 服务端钥匙串——远程浏览器写入的是
+    // **serve 主机**上的 keyring，与 CM_WEB_API_BEARER_TOKEN 校验无关，且空串会误清主机槽位。
+}
+
 /// 局域网 / 非回环 `serve`：把与 `CM_WEB_API_BEARER_TOKEN` 相同的共享密钥写入本页请求头。
 #[component]
 pub(crate) fn SettingsWebApiBearerBlock(
@@ -124,13 +165,7 @@ pub(crate) fn SettingsWebApiBearerBlock(
             </h3>
             <p class="settings-muted">{move || i18n::settings_web_api_bearer_hint(locale.get())}</p>
             <p class="settings-muted" data-testid="settings-web-api-bearer-status">
-                {move || {
-                    if present.get() {
-                        i18n::settings_web_api_bearer_status_set(locale.get())
-                    } else {
-                        i18n::settings_web_api_bearer_status_unset(locale.get())
-                    }
-                }}
+                {move || bearer_status_label(locale.get(), present.get())}
             </p>
             <div class="settings-field">
                 <label class="settings-field-label" for=input_id>
@@ -143,13 +178,7 @@ pub(crate) fn SettingsWebApiBearerBlock(
                     autocomplete="off"
                     data-testid="settings-web-api-bearer-input"
                     prop:value=move || draft.get()
-                    prop:placeholder=move || {
-                        if present.get() {
-                            "••••••••"
-                        } else {
-                            ""
-                        }
-                    }
+                    prop:placeholder=move || bearer_placeholder(present.get())
                     on:input=move |ev| draft.set(event_target_value(&ev))
                 />
             </div>
@@ -158,23 +187,13 @@ pub(crate) fn SettingsWebApiBearerBlock(
                 class="btn btn-primary btn-sm"
                 data-testid="settings-web-api-bearer-save"
                 on:click=move |_| {
-                    let loc = locale.get_untracked();
-                    let token = draft.get_untracked();
-                    crate::api::set_web_api_bearer_token(&token);
-                    present.set(crate::api::web_api_bearer_token_is_set());
-                    draft.set(String::new());
-                    let cleared = token.trim().is_empty();
-                    feedback.set(Some(if cleared {
-                        i18n::settings_web_api_bearer_cleared(loc).to_string()
-                    } else {
-                        i18n::settings_web_api_bearer_saved(loc).to_string()
-                    }));
-                    // 仅非空保存后触发壳层恢复（重试 /status、水合）；清空时不乐观清错、不拉水合。
-                    if !cleared {
-                        save_nonce.update(|n| *n = n.saturating_add(1));
-                    }
-                    // 本页请求头已可用；不再 PUT 服务端钥匙串——远程浏览器写入的是
-                    // **serve 主机**上的 keyring，与 CM_WEB_API_BEARER_TOKEN 校验无关，且空串会误清主机槽位。
+                    save_web_api_bearer(
+                        locale.get_untracked(),
+                        draft,
+                        present,
+                        feedback,
+                        save_nonce,
+                    );
                 }
             >
                 {move || i18n::settings_web_api_bearer_save(locale.get())}

@@ -9,7 +9,7 @@ use wasm_bindgen::JsCast;
 use web_sys::HtmlTextAreaElement;
 
 use super::composer_slash_menu::{
-    ComposerSlashMenu, handle_slash_menu_keydown, install_slash_menu_effects,
+    ComposerSlashMenu, SlashMenuSignals, handle_slash_menu_keydown, install_slash_menu_effects,
     keydown_is_ime_composing,
 };
 use crate::app::app_shell_effects::on_composer_focus_keep_visible;
@@ -26,6 +26,54 @@ pub(crate) fn autosize_composer_textarea(ta: &HtmlTextAreaElement) {
     if sh > 0 {
         let _ = style.set_property("height", &format!("{sh}px"));
     }
+}
+
+fn composer_on_input(ev: web_sys::Event, draft: RwSignal<String>) {
+    let v = event_target_value(&ev);
+    if let Some(t) = ev.target()
+        && let Ok(ta) = t.dyn_into::<HtmlTextAreaElement>()
+    {
+        autosize_composer_textarea(&ta);
+    }
+    draft.set(v);
+}
+
+fn composer_on_focus(ev: web_sys::FocusEvent) {
+    if let Some(t) = ev.target()
+        && let Ok(ta) = t.dyn_into::<HtmlTextAreaElement>()
+    {
+        on_composer_focus_keep_visible(&ta);
+    }
+}
+
+fn composer_on_keydown(
+    ev: web_sys::KeyboardEvent,
+    slash: SlashMenuSignals,
+    draft: RwSignal<String>,
+    composer_input_ref: NodeRef<Textarea>,
+    run_send_message: &Arc<dyn Fn() + Send + Sync>,
+) {
+    // IME 组字中不拦截、不发送，避免中文选词误触发。
+    if keydown_is_ime_composing(&ev) {
+        return;
+    }
+    if handle_slash_menu_keydown(&ev, slash, draft, composer_input_ref) {
+        return;
+    }
+    if ev.key() == "Enter" && !ev.shift_key() {
+        ev.prevent_default();
+        run_send_message();
+    }
+}
+
+fn composer_on_scroll(ev: web_sys::Event, composer_mirror_scroll_top: RwSignal<f64>) {
+    let Some(t) = ev.target() else {
+        return;
+    };
+    let Ok(ta) = t.dyn_into::<web_sys::HtmlTextAreaElement>() else {
+        return;
+    };
+    composer_mirror_scroll_top.set(ta.scroll_top() as f64);
 }
 
 #[component]
@@ -84,46 +132,16 @@ pub fn ComposerInputStack(
                 prop:aria-label=move || i18n::composer_ph(locale.get())
                 prop:aria-expanded=move || menu_open.get()
                 node_ref=composer_input_ref
-                on:input=move |ev| {
-                    let v = event_target_value(&ev);
-                    if let Some(t) = ev.target() {
-                        if let Ok(ta) = t.dyn_into::<HtmlTextAreaElement>() {
-                            autosize_composer_textarea(&ta);
-                        }
-                    }
-                    draft.set(v);
-                }
-                on:focus=move |ev: web_sys::FocusEvent| {
-                    if let Some(t) = ev.target() {
-                        if let Ok(ta) = t.dyn_into::<HtmlTextAreaElement>() {
-                            on_composer_focus_keep_visible(&ta);
-                        }
-                    }
-                }
+                on:input=move |ev| composer_on_input(ev, draft)
+                on:focus=move |ev: web_sys::FocusEvent| composer_on_focus(ev)
                 on:keydown={
                     let r = Arc::clone(&run_send_message);
                     move |ev: web_sys::KeyboardEvent| {
-                        // IME 组字中不拦截、不发送，避免中文选词误触发。
-                        if keydown_is_ime_composing(&ev) {
-                            return;
-                        }
-                        if handle_slash_menu_keydown(&ev, slash, draft, composer_input_ref) {
-                            return;
-                        }
-                        if ev.key() == "Enter" && !ev.shift_key() {
-                            ev.prevent_default();
-                            r();
-                        }
+                        composer_on_keydown(ev, slash, draft, composer_input_ref, &r);
                     }
                 }
                 on:scroll=move |ev: web_sys::Event| {
-                    let Some(t) = ev.target() else {
-                        return;
-                    };
-                    let Ok(ta) = t.dyn_into::<web_sys::HtmlTextAreaElement>() else {
-                        return;
-                    };
-                    composer_mirror_scroll_top.set(ta.scroll_top() as f64);
+                    composer_on_scroll(ev, composer_mirror_scroll_top)
                 }
                 rows="1"
             ></textarea>
