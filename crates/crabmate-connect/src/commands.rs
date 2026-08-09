@@ -8,6 +8,7 @@ use crate::allowed_origin::AllowedServeOrigin;
 use crate::cleartext::enforce_cleartext_connect_policy;
 use crate::handoff::{build_local_ui_handoff_url, local_business_ui_url, normalize_base_url};
 use crate::keyring_bearer::{read_connect_bearer, write_connect_bearer_on_connect};
+use crate::keyring_llm::{LlmSecretSlot, read_llm_secret, write_llm_secret};
 use crate::navigation::is_app_origin;
 use crate::probe::probe_server;
 
@@ -129,6 +130,30 @@ pub fn get_connect_bearer() -> Option<String> {
             None
         }
     }
+}
+
+/// 系统钥匙串中的模型 API 密钥槽（`client_llm` / `executor_llm` / `saved_models`）。
+#[tauri::command]
+pub fn get_llm_secret(slot: String) -> Option<String> {
+    let Some(s) = LlmSecretSlot::parse(&slot) else {
+        eprintln!("[crabmate-connect] unknown llm secret slot: {slot}");
+        return None;
+    };
+    match read_llm_secret(s) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("[crabmate-connect] llm keyring read skipped: {e}");
+            None
+        }
+    }
+}
+
+/// 写入或清除模型 API 密钥槽（空串清除）。Android 无钥匙串后端时由前端走 Keystore 桥。
+#[tauri::command]
+pub fn set_llm_secret(slot: String, value: String) -> Result<(), String> {
+    let s =
+        LlmSecretSlot::parse(&slot).ok_or_else(|| format!("unknown llm secret slot: {slot}"))?;
+    write_llm_secret(s, &value)
 }
 
 #[cfg(test)]

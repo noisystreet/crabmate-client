@@ -187,7 +187,7 @@ export async function waitForHealth(
   throw new Error(`后端 ${baseUrl} 在 ${maxRetries * intervalMs}ms 内未就绪`);
 }
 
-/** 环境变量 / 本地 TOML 中的明文模型密钥（可选）。不含系统钥匙串。 */
+/** 环境变量 / 本地 TOML 中的明文模型密钥（可选）。不含本页已存密钥。 */
 export function resolveOptionalApiKeyFromEnvOrToml(): string {
   const env = process.env.API_KEY?.trim();
   if (env) return env;
@@ -225,22 +225,25 @@ export async function applyWebApiBearerHeaders(page: Page): Promise<void> {
   });
 }
 
-/** 经已鉴权页面探测服务端钥匙串是否已有 `client_llm`（不读明文）。 */
-export async function isClientLlmSetViaSecretsStatus(
-  page: Page,
-): Promise<boolean> {
-  return page.evaluate(async () => {
-    const response = await fetch("/user-data/secrets/status");
-    if (!response.ok) return false;
-    const data = (await response.json()) as {
-      client_llm?: { set?: boolean };
+/** 经已加载页面探测本机是否已有模型 `client_llm` 密钥（水合标志 / E2E 注入）。 */
+export async function isClientLlmSetOnClient(page: Page): Promise<boolean> {
+  return page.evaluate(() => {
+    const w = window as unknown as {
+      __CRABMATE_E2E_CLIENT_LLM_KEY?: string;
+      __CRABMATE_CLIENT_LLM_KEY_SET?: boolean;
     };
-    return Boolean(data.client_llm?.set);
+    if (
+      typeof w.__CRABMATE_E2E_CLIENT_LLM_KEY === "string" &&
+      w.__CRABMATE_E2E_CLIENT_LLM_KEY.trim()
+    ) {
+      return true;
+    }
+    return w.__CRABMATE_CLIENT_LLM_KEY_SET === true;
   });
 }
 
 /**
- * 真实 LLM 凭证是否可用：明文 `API_KEY` / TOML，或服务端钥匙串已有 `client_llm`。
+ * 真实 LLM 凭证是否可用：明文 `API_KEY` / TOML，或 E2E 已注入本机密钥。
  * 调用前须已完成带 Web Bearer 的页面导航（见 `setupRealLLMSessionPreferringKeyring`）。
  */
 export async function ensureRealLlmModelCredential(
@@ -248,7 +251,7 @@ export async function ensureRealLlmModelCredential(
   apiKey: string,
 ): Promise<boolean> {
   if (apiKey.trim()) return true;
-  return isClientLlmSetViaSecretsStatus(page);
+  return isClientLlmSetOnClient(page);
 }
 
 function readApiKeyFromToml(filePath: string): string {
@@ -294,12 +297,12 @@ export type RealLlmSetupOptions = {
 /** 为真实 LLM 测试设置会话：API key + LLM 配置 + prefs + 空会话。
  *
  * 流程：
- *   1. 导航至首页并等待输入框就绪
- *   2. 设置 client_llm.api_key 到后端 secrets 存储
+ *   1. 经 addInitScript 注入 `__CRABMATE_E2E_CLIENT_LLM_KEY`（浏览器无钥匙串时的测试钩子）
+ *   2. 导航至首页并等待输入框就绪
  *   3. 设置 LLM 覆盖配置（api_base、model 等）
  *   4. 设置用户偏好
  *   5. 创建空会话
- *   6. 重载页面等待 UI 就绪
+ *   6. 重载页面等待 UI 就绪（init script 仍生效）
  */
 export async function setupRealLLMSession(
   page: Page,
@@ -314,6 +317,12 @@ export async function setupRealLLMSession(
     thinkingMode: llmConfig?.thinkingMode ?? "off",
   };
 
+  await page.addInitScript((key: string) => {
+    (
+      window as unknown as { __CRABMATE_E2E_CLIENT_LLM_KEY?: string }
+    ).__CRABMATE_E2E_CLIENT_LLM_KEY = key.trim();
+  }, apiKey);
+
   await applyWebApiBearerHeaders(page);
   await page.goto(homeUrlWithOptionalWebBearer("/"), {
     waitUntil: "networkidle",
@@ -322,17 +331,6 @@ export async function setupRealLLMSession(
   await page.waitForSelector('[data-testid="chat-composer-input"]', {
     timeout: 15000,
   });
-
-  // 设置 API key
-  await page.evaluate(
-    (key: string) =>
-      fetch("/user-data/secrets/client-llm", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ api_key: key }),
-      }),
-    apiKey,
-  );
 
   // 设置 LLM 覆盖配置
   await page.evaluate(
@@ -404,8 +402,7 @@ export async function setupRealLLMSession(
 }
 
 /**
- * 优先明文 `API_KEY`；否则不写钥匙串，复用服务端已有 `client_llm`。
- * 旧 `$XDG_DATA_HOME/crabmate/secrets/client_llm` 明文文件路径已废弃，勿再读取。
+ * 优先明文 `API_KEY`；否则依赖页面已注入的 E2E 密钥钩子（无则后续 ensure 会 skip）。
  */
 export async function setupRealLLMSessionPreferringKeyring(
   page: Page,

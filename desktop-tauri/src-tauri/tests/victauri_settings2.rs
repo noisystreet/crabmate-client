@@ -52,7 +52,6 @@ async fn close_settings(client: &mut victauri_test::VictauriClient) {
 
 e2e_test!(model_and_api_key_save, |client| async move {
     seed_settings_session(&mut client, "s_e2e_llm").await;
-    let _ = client.eval_js("(()=>{window.__e2eSecretPut=null;window.__origFetch4=window.fetch;window.fetch=(u,o)=>{if(typeof u==='string'&&u.includes('/user-data/secrets/client-llm')&&o&&o.method==='PUT'){try{window.__e2eSecretPut=JSON.parse(o.body);}catch(e){}return Promise.resolve(new Response('',{status:204}));}return window.__origFetch4(u,o);};})()").await;
     open_settings(&mut client, "llm").await;
     let _ = client.eval_js("(()=>{const el=document.querySelector('[data-testid=\"settings-llm-model\"]');if(el){const s=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set;s.call(el,'e2e-test-model');el.dispatchEvent(new Event('input',{bubbles:true}));}})()").await;
     let _ = client.eval_js("(()=>{const el=document.querySelector('[data-testid=\"settings-client-api-key\"]');if(el){const s=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set;s.call(el,'E2E_STUB_KEY');el.dispatchEvent(new Event('input',{bubbles:true}));}})()").await;
@@ -65,13 +64,32 @@ e2e_test!(model_and_api_key_save, |client| async move {
         .await
         .ok();
     close_settings(&mut client).await;
-    let secret_ok: bool = client
-        .eval_js("window.__e2eSecretPut?.api_key==='E2E_STUB_KEY'")
+    let _ = client
+        .eval_js(
+            r#"(async()=>{window.__e2eLlmKeyOk=false;for(let i=0;i<40;i++){try{const inv=window.__TAURI__&&window.__TAURI__.core&&window.__TAURI__.core.invoke;if(typeof inv!=='function')return;const v=await inv('get_llm_secret',{slot:'client_llm'});if(v==='E2E_STUB_KEY'){window.__e2eLlmKeyOk=true;return;}}catch(e){}await new Promise(r=>setTimeout(r,100));}})()"#,
+        )
+        .await;
+    let mut secret_ok = false;
+    for _ in 0..50 {
+        secret_ok = client
+            .eval_js("window.__e2eLlmKeyOk===true")
+            .await
+            .ok()
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        if secret_ok {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    let ls_empty: bool = client
+        .eval_js("!localStorage.getItem('crabmate-client-llm-api-key')")
         .await
         .unwrap()
         .as_bool()
         .unwrap_or(false);
-    assert!(secret_ok);
+    assert!(secret_ok, "expected client_llm in device keyring");
+    assert!(ls_empty, "must not persist model API key in localStorage");
     open_settings(&mut client, "llm").await;
     let model_val: String = client
         .eval_js("document.querySelector('[data-testid=\"settings-llm-model\"]')?.value??''")

@@ -4,7 +4,7 @@
  *
  * 前置：
  *   1. `crabmate serve` 在 127.0.0.1:8080
- *   2. `API_KEY` / TOML，或服务端钥匙串已有 `client_llm`
+ *   2. `API_KEY` / TOML，或本机钥匙串/E2E 注入已有 `client_llm` 密钥
  *   3. 启用 Web Bearer 时设 `CM_WEB_API_BEARER_TOKEN`
  *
  * 运行：
@@ -153,7 +153,7 @@ test.describe("真实 LLM：工具回合气泡闪没", () => {
     if (!(await ensureRealLlmModelCredential(page, API_KEY))) {
       test.skip(
         true,
-        "未设置 API_KEY 且服务端钥匙串无 client_llm，跳过真实 LLM 用例",
+        "未设置 API_KEY 且无 client_llm 密钥（钥匙串/E2E），跳过真实 LLM 用例",
       );
       return;
     }

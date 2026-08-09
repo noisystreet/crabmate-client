@@ -53,7 +53,7 @@ npx playwright test --list
 # 运行 mock SSE 回归测试（CI 中的标准模式）
 npx playwright test specs/mock-overlay-timing.spec.ts
 
-# 运行真实 LLM 测试（测试进程请显式设置 API_KEY；不会导出系统钥匙串明文）
+# 运行真实 LLM 测试（测试进程请显式设置 API_KEY；或壳钥匙串已有密钥）
 npx playwright test specs/real-llm-*.spec.ts
 
 # 运行单个用例（按名称过滤）
@@ -149,18 +149,16 @@ x-stream-job-id: 1
 
 模型密钥（`client_llm`，≠ Web Bearer）优先级：
 
-1. 环境变量 **`API_KEY`**（明文，写入服务端钥匙串）
+1. 环境变量 **`API_KEY`**（明文；经 `__CRABMATE_E2E_CLIENT_LLM_KEY` 注入页面，水合进内存）
 2. 本仓根 `config.toml` / `.agent_demo.toml` 的 `[agent].api_key`（仅本地、勿提交）
-3. **服务端系统钥匙串**已有 `client_llm`（经 `/user-data/secrets/status` 探测 `set`；测试进程**不**读明文）
-
-旧路径 `$XDG_DATA_HOME/crabmate/secrets/client_llm` 明文文件已废弃，E2E **不再**读取。
+3. 壳环境：本机钥匙串 / Android Keystore 已有 `client_llm`（产品路径；浏览器 Playwright 无钥匙串时用第 1 项）
 
 若 `serve` 启用了 Web API Bearer，请额外导出 **`CM_WEB_API_BEARER_TOKEN`**（与设置页「Web API 共享密钥」同一串）。助手会：
 
-1. 用 Playwright `extraHTTPHeaders` 给页内 `fetch` 加 `Authorization`（探测钥匙串 / 写 prefs）
+1. 用 Playwright `extraHTTPHeaders` 给页内 `fetch` 加 `Authorization`（写 prefs / llm-overrides）
 2. 经 `#cm_web_api_bearer=` 交接进 WASM 鉴权层（对话流等走前端封装）
 
-否则 `/user-data` 会 401，钥匙串探测失败并 skip。
+否则 `/user-data` 会 401 并可能导致 setup 失败。
 
 无模型密钥（环境/TOML/钥匙串皆无）时用例 `test.skip`。
 

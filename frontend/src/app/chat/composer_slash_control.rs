@@ -5,10 +5,14 @@ use std::sync::Arc;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
+use crate::api::client_llm_storage::{
+    clear_client_llm_api_key_storage_async, persist_client_llm_to_storage_async,
+};
+use crate::api::llm_secrets_local::PersistKind;
 use crate::api::{
-    clear_client_llm_api_key_storage, client_llm_storage_has_api_key, fetch_skills, fetch_status,
-    fetch_workspace, load_client_llm_text_fields_from_storage, persist_client_llm_to_storage,
-    post_config_reload, post_workspace_set,
+    client_llm_storage_has_api_key, fetch_skills, fetch_status, fetch_workspace,
+    load_client_llm_text_fields_from_storage, persist_client_llm_to_storage, post_config_reload,
+    post_workspace_set,
 };
 use crate::app::chat::handles::ComposerStreamShell;
 use crate::chat_session_state::ChatSessionSignals;
@@ -466,30 +470,45 @@ fn handle_api_key(
                 },
             );
         }
-        "clear" => match clear_client_llm_api_key_storage(loc) {
-            Ok(()) => set_ok(chat, shell, "已清除 client_llm API 密钥"),
-            Err(e) => set_err(shell, format!("清除失败: {e}")),
-        },
+        "clear" => {
+            let shell = shell.clone();
+            spawn_local(async move {
+                match clear_client_llm_api_key_storage_async(loc).await {
+                    Ok(_) => set_ok(chat, &shell, "已清除 client_llm API 密钥"),
+                    Err(e) => set_err(&shell, format!("清除失败: {e}")),
+                }
+            });
+        }
         "set" => {
             let secret = args.iter().skip(1).copied().collect::<Vec<_>>().join(" ");
-            let secret = secret.trim();
+            let secret = secret.trim().to_string();
             if secret.is_empty() {
                 set_ok(chat, shell, "用法: /api-key set <密钥>");
                 return;
             }
             let (base, model, temp, ctx_tok, think) = load_client_llm_text_fields_from_storage();
-            match persist_client_llm_to_storage(
-                &base,
-                &model,
-                &temp,
-                &ctx_tok,
-                &think,
-                Some(secret),
-                loc,
-            ) {
-                Ok(()) => set_ok(chat, shell, "已写入 API 密钥（不进对话；已同步系统钥匙串）"),
-                Err(e) => set_err(shell, format!("写入失败: {e}")),
-            }
+            let shell = shell.clone();
+            spawn_local(async move {
+                match persist_client_llm_to_storage_async(
+                    &base,
+                    &model,
+                    &temp,
+                    &ctx_tok,
+                    &think,
+                    Some(&secret),
+                    loc,
+                )
+                .await
+                {
+                    Ok(Some(PersistKind::BrowserInsecure)) => set_ok(
+                        chat,
+                        &shell,
+                        "已写入 API 密钥（不进对话；浏览器弱持久化，建议使用壳）",
+                    ),
+                    Ok(_) => set_ok(chat, &shell, "已写入 API 密钥（不进对话；已存本机钥匙串）"),
+                    Err(e) => set_err(&shell, format!("写入失败: {e}")),
+                }
+            });
         }
         _ => set_ok(
             chat,

@@ -267,6 +267,15 @@ class MainActivity : TauriActivity() {
     return isConnectPageUrl(url)
   }
 
+  /** 包内 App Origin（连接页或业务 UI）可读写模型密钥；远程 serve 页拒绝。 */
+  private fun allowSecureLlmSecretBridge(): Boolean {
+    val url = appWebView?.url
+    if (url.isNullOrBlank()) {
+      return false
+    }
+    return isAppOrigin(url)
+  }
+
   /** 供连接页 / 包内业务 UI 调用。 */
   inner class MobileBridge {
     @JavascriptInterface
@@ -311,6 +320,40 @@ class MainActivity : TauriActivity() {
       }
       return try {
         SecureBearerStore.write(applicationContext, bearer)
+      } catch (_: Exception) {
+        false
+      }
+    }
+
+    /**
+     * 读取 Keystore 加密的模型 API 密钥槽（`client_llm` / `executor_llm` / `saved_models`）。
+     * 仅包内 App Origin；远程页返回空串。
+     */
+    @JavascriptInterface
+    fun getSecureLlmSecret(slot: String): String {
+      if (!allowSecureLlmSecretBridge()) {
+        return ""
+      }
+      return try {
+        SecureLlmSecretStore.read(applicationContext, slot)
+      } catch (_: Exception) {
+        ""
+      }
+    }
+
+    /**
+     * 写入或清除模型 API 密钥槽。空串删除；仅包内 App Origin。
+     */
+    @JavascriptInterface
+    fun setSecureLlmSecret(
+      slot: String,
+      value: String,
+    ): Boolean {
+      if (!allowSecureLlmSecretBridge()) {
+        return false
+      }
+      return try {
+        SecureLlmSecretStore.write(applicationContext, slot, value)
       } catch (_: Exception) {
         false
       }

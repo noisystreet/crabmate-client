@@ -54,3 +54,34 @@ pub fn settings_api_base_invalid(l: Locale) -> &'static str {
         Locale::En => "Invalid URL: must start with http:// or https:// (or leave empty).",
     }
 }
+
+pub fn settings_save_ok_browser_insecure_key(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => {
+            "已保存。当前不在桌面/移动壳内：模型密钥仅弱持久化在本浏览器（明文 localStorage），刷新后可用但不如系统钥匙串安全。正式使用请用 Desktop / Android 壳。"
+        }
+        Locale::En => {
+            "Saved. Not running in the Desktop/Android shell: the model API key is weakly persisted in this browser (plaintext localStorage). Prefer the official shell for keyring/Keystore storage."
+        }
+    }
+}
+
+pub fn settings_llm_key_store_hint_browser(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => {
+            "当前为纯浏览器：模型密钥仅弱持久化（明文 localStorage）。正式使用请用 Desktop / Android 壳（系统钥匙串 / Keystore）。"
+        }
+        Locale::En => {
+            "Plain browser: model API keys use weak persistence (plaintext localStorage). Prefer the Desktop/Android shell (keyring/Keystore)."
+        }
+    }
+}
+
+pub fn settings_llm_key_store_hint(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "写入本机系统钥匙串 / Android Keystore（不落明文 localStorage）。",
+        Locale::En => {
+            "Stored in the device keyring / Android Keystore (not plaintext localStorage)."
+        }
+    }
+}

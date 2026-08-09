@@ -354,6 +354,15 @@ pub(crate) fn SettingsLlmBlock(bundle: SettingsLlmBlockBundle) -> impl IntoView 
             />
             <LlmModelIdField locale model_draft=llm_model_draft />
             <LlmClientApiKeyField locale api_key_draft=llm_api_key_draft />
+            <p class="settings-muted" data-testid="settings-llm-key-store-hint">
+                {move || {
+                    if crate::api::secure_llm_secret_backend_available() {
+                        i18n::settings_llm_key_store_hint(locale.get())
+                    } else {
+                        i18n::settings_llm_key_store_hint_browser(locale.get())
+                    }
+                }}
+            </p>
             <LlmTemperatureField locale temperature_draft=llm_temperature_draft />
             <LlmContextTokensField locale llm_context_tokens_draft />
             <LlmThinkingModeField

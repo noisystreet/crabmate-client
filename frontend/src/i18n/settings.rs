@@ -862,8 +862,8 @@ pub fn settings_models_ph_model_id(l: Locale) -> &'static str {
 
 pub fn settings_models_label_api_key(l: Locale) -> &'static str {
     match l {
-        Locale::ZhHans => "模型 API 密钥（云端，可选；存钥匙串）",
-        Locale::En => "Model API key (cloud, optional; keyring)",
+        Locale::ZhHans => "模型 API 密钥（云端，可选；存本机钥匙串）",
+        Locale::En => "Model API key (cloud, optional; device keyring)",
     }
 }
 

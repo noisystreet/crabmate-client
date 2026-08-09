@@ -28,6 +28,8 @@ pub fn run() {
             crabmate_connect::disconnect_remote,
             crabmate_connect::get_suggested_server_url,
             crabmate_connect::get_connect_bearer,
+            crabmate_connect::get_llm_secret,
+            crabmate_connect::set_llm_secret,
         ])
         .setup(|app| {
             if let Some(window) = tauri::Manager::get_webview_window(app, "main")
