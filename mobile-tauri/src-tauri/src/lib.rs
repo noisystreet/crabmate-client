@@ -1,12 +1,19 @@
 //! CrabMate Android 远程薄客户端库入口。
 //! 不 spawn 本机 Agent sidecar；连接页探测远程 `serve` 后加载其 Web UI。
 
+use tauri::Manager;
 use tauri::plugin::Builder as PluginBuilder;
 
 /// 接线 [`crabmate_connect::AllowedServeOrigin`]：拦截跨 Origin 乱跳；回连接页时清空白名单。
 fn navigation_guard_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
     PluginBuilder::new("crabmate-shell-navigation")
         .on_navigation(|webview, url| crabmate_connect::allow_shell_navigation(webview, url))
+        .on_page_load(|webview, payload| {
+            crabmate_connect::clear_allowed_if_app_origin_loaded(
+                webview.app_handle(),
+                payload.url(),
+            );
+        })
         .build()
 }
 
