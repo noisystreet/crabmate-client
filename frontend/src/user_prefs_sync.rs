@@ -200,7 +200,11 @@ fn apply_ide_and_llm_prefs_dto(
     }
     prefs_session_mode_present.set_value(prefs_had_session_mode);
     if let Some(d) = dto.disable_readonly_tool_ttl_cache {
-        crate::api::client_llm_storage::set_readonly_tool_ttl_cache_follow_server_in_memory(!d);
+        let follow = !d;
+        crate::api::client_llm_storage::set_readonly_tool_ttl_cache_follow_server_in_memory(follow);
+        app.llm_settings
+            .readonly_tool_ttl_cache_follow_server
+            .set(follow);
     }
 }
 

@@ -256,18 +256,30 @@ fn finish_create_main_window(
             _ => false,
         })
         .on_page_load(move |window, payload| {
-            if !matches!(payload.event(), PageLoadEvent::Finished) {
-                return;
-            }
-            // 连接页：铺满工作区。会话 UI：已显示则立刻 maximize；尚未 reveal 则等 show 之后。
-            if is_connect_page_url(payload.url()) {
-                apply_connect_page_geometry(&window);
-                reveal_main_window_once(&window, &revealed_on_load);
-            } else if revealed_on_load.load(Ordering::SeqCst) {
-                apply_main_ui_geometry(&window);
-            } else {
-                let _ = window.set_resizable(true);
-                reveal_main_window_once(&window, &revealed_on_load);
+            let connect = is_connect_page_url(payload.url());
+            match payload.event() {
+                // 离开连接页后尽早 maximize，不必等 serve WASM Finished。
+                PageLoadEvent::Started if !connect => {
+                    let _ = window.set_resizable(true);
+                    if revealed_on_load.load(Ordering::SeqCst) {
+                        apply_main_ui_geometry(&window);
+                    } else {
+                        reveal_main_window_once(&window, &revealed_on_load);
+                    }
+                }
+                PageLoadEvent::Finished if connect => {
+                    apply_connect_page_geometry(&window);
+                    reveal_main_window_once(&window, &revealed_on_load);
+                }
+                PageLoadEvent::Finished if !connect => {
+                    if revealed_on_load.load(Ordering::SeqCst) {
+                        apply_main_ui_geometry(&window);
+                    } else {
+                        let _ = window.set_resizable(true);
+                        reveal_main_window_once(&window, &revealed_on_load);
+                    }
+                }
+                _ => {}
             }
         })
         .build()

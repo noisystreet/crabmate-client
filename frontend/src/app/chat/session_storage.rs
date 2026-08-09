@@ -47,14 +47,19 @@ pub fn wire_initial_sessions_from_storage(app: crate::app::app_signals::AppSigna
     let chat = app.chat;
 
     wire_load_user_prefs_from_server(app.clone());
+    let prefs_hydrated = app.workspace.user_prefs_hydrated;
     Effect::new(move |_| {
         if initialized.get() {
             return;
         }
         let loc = locale.get_untracked();
         spawn_local(async move {
-            hydrate_client_llm_from_server(loc).await;
-            let (list, aid) = load_web_sessions(loc).await;
+            // LLM 覆盖 / 密钥状态 与 会话列表并行，缩短门闸；prefs（含只读 TTL）另路由行。
+            let ((), (list, aid)) = futures_util::future::join(
+                hydrate_client_llm_from_server(loc),
+                load_web_sessions(loc),
+            )
+            .await;
             let (mut list, def_id) =
                 ensure_at_least_one(list, i18n::default_session_title(loc).to_string());
             for s in &mut list {
@@ -72,6 +77,13 @@ pub fn wire_initial_sessions_from_storage(app: crate::app::app_signals::AppSigna
             sessions.set(list);
             active_id.set(pick);
             draft.set(d);
+            // 等 prefs 落地后再 `initialized`，避免首条聊天用默认只读 TTL（false→附带 0）。
+            for _ in 0..250 {
+                if prefs_hydrated.get_untracked() {
+                    break;
+                }
+                TimeoutFuture::new(20).await;
+            }
             initialized.set(true);
             bump_session_hydrate_nonce(chat);
         });

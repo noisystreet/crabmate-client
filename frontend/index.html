@@ -111,7 +111,7 @@
       <div class="cm-boot-loader" aria-hidden="true"></div>
       <p class="cm-boot-status">正在加载界面…</p>
     </div>
-    <script src="/vendor/ide-codemirror.js"></script>
+    <!-- ide-codemirror.js：进 IDE 时由 ide_codemirror.rs 动态加载，避免阻塞对话首屏 -->
     <!--
       Trunk：`trunk build`（默认 dev）不跑 wasm-opt，迭代快；`trunk build --release` 使用默认 wasm-opt。
       workspace 根 Cargo.toml 对 crabmate-web 设 opt-level="z"；release 默认无 LTO（`release-lto` profile 可选）。
