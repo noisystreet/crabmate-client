@@ -12,6 +12,7 @@ mod allowed_origin;
 mod commands;
 mod handoff;
 mod keyring_bearer;
+mod navigation;
 mod probe;
 
 pub use allowed_origin::AllowedServeOrigin;
@@ -22,5 +23,8 @@ pub use commands::{
 pub use handoff::{BEARER_HASH_KEY, build_handoff_url, normalize_base_url};
 pub use keyring_bearer::{
     read_connect_bearer, write_connect_bearer_on_connect, write_connect_bearer_unchecked,
+};
+pub use navigation::{
+    ShellNavigationDecision, allow_shell_navigation, decide_shell_navigation, is_app_origin,
 };
 pub use probe::probe_server;

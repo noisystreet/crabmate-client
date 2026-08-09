@@ -7,6 +7,7 @@ use tauri::{AppHandle, Manager, State, Url};
 use crate::allowed_origin::AllowedServeOrigin;
 use crate::handoff::{build_handoff_url, normalize_base_url};
 use crate::keyring_bearer::{read_connect_bearer, write_connect_bearer_on_connect};
+use crate::navigation::is_app_origin;
 use crate::probe::probe_server;
 
 /// Android 默认资产源（`useHttpsScheme=false`）；桌面 Tauri 2 亦常用此 origin。
@@ -28,14 +29,6 @@ impl SuggestedServerUrl {
             *g = url;
         }
     }
-}
-
-fn is_app_origin(url: &Url) -> bool {
-    let host = url.host_str().unwrap_or("");
-    matches!(url.scheme(), "tauri" | "asset")
-        || host.eq_ignore_ascii_case("tauri.localhost")
-        || (host.eq_ignore_ascii_case("localhost") && url.path().contains("connect"))
-        || url.path().ends_with("connect.html")
 }
 
 fn remember_connect_home(url: &Url) {
@@ -137,9 +130,10 @@ pub fn get_connect_bearer() -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::navigation::is_app_origin;
 
     #[test]
-    fn app_origin_detects_connect_html() {
+    fn app_origin_detects_tauri_localhost() {
         let u = Url::parse("http://tauri.localhost/connect.html").unwrap();
         assert!(is_app_origin(&u));
         let remote = Url::parse("http://192.168.1.10:8080/").unwrap();

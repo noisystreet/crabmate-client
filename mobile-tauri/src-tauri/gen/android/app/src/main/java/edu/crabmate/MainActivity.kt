@@ -301,14 +301,28 @@ class MainActivity : TauriActivity() {
   }
 
   companion object {
+    /**
+     * 是否为壳内连接页 Origin。按 scheme + host 解析，禁止 `contains("://tauri.localhost")`
+     * 子串误判（恶意查询串可污染 [connectHomeUrl]）。
+     */
     fun isAppOrigin(url: String?): Boolean {
       if (url.isNullOrBlank()) {
         return true
       }
-      val u = url.lowercase()
-      return u.startsWith("tauri://") ||
-        u.startsWith("asset://") ||
-        u.contains("://tauri.localhost")
+      return try {
+        val uri = android.net.Uri.parse(url)
+        when (uri.scheme?.lowercase()) {
+          "tauri", "asset" -> true
+          "http", "https" -> {
+            val host = uri.host?.lowercase() ?: return false
+            host == "tauri.localhost" ||
+              (host == "localhost" && (uri.path?.contains("connect") == true))
+          }
+          else -> false
+        }
+      } catch (_: Exception) {
+        false
+      }
     }
 
     fun stripFragmentAndQuery(url: String): String {
