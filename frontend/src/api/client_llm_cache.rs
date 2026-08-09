@@ -35,9 +35,16 @@ pub fn with_mem_mut<R>(f: impl FnOnce(&mut LlmMem) -> R) -> R {
 }
 
 pub async fn hydrate_from_server(loc: crate::i18n::Locale) {
-    use super::user_data::{fetch_llm_overrides, fetch_user_data_prefs};
-    let file = fetch_llm_overrides(loc).await.unwrap_or_default();
-    let _prefs = fetch_user_data_prefs(loc).await;
+    use super::user_data::{fetch_llm_overrides, fetch_secrets_status};
+    use futures_util::future::join;
+
+    // 不在此再 GET `/user-data/prefs`：壳层 `wire_load_user_prefs_from_server` 已拉一次，
+    // 并经 `set_readonly_tool_ttl_cache_follow_server_in_memory` 写入只读 TTL 开关。
+    let (file, secrets) = join(
+        async { fetch_llm_overrides(loc).await.unwrap_or_default() },
+        async { fetch_secrets_status(loc).await.ok() },
+    )
+    .await;
     with_mem_mut(|m| {
         m.api_base = file.client_llm.api_base.unwrap_or_default();
         m.model = file.client_llm.model.unwrap_or_default();
@@ -48,14 +55,9 @@ pub async fn hydrate_from_server(loc: crate::i18n::Locale) {
         m.executor_model = file.executor_llm.model.unwrap_or_default();
         m.execution_mode = file.execution_mode.unwrap_or_default();
         m.saved_models = file.saved_models;
-        if let Some(d) = _prefs.ok().and_then(|p| p.disable_readonly_tool_ttl_cache) {
-            m.readonly_ttl_follow_server = !d;
-        }
-    });
-    if let Ok(st) = super::user_data::fetch_secrets_status(loc).await {
-        with_mem_mut(|m| {
+        if let Some(st) = secrets.as_ref() {
             m.client_key_on_server = st.client_llm.set;
             m.executor_key_on_server = st.executor_llm.set;
-        });
-    }
+        }
+    });
 }

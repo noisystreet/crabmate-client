@@ -2,6 +2,7 @@
 
 use js_sys::{Function, Reflect};
 use leptos::prelude::*;
+use leptos::task::spawn_local;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::prelude::*;
@@ -11,6 +12,7 @@ use crate::ide_editor_prefs::ide_editor_font_family_css;
 use crate::ide_syntax_highlight::ide_syntax_lang_for_path;
 
 const CM_MOUNT_MAX_RETRIES: u32 = 12;
+const CM_SCRIPT_SRC: &str = "/vendor/ide-codemirror.js";
 
 fn cm_global() -> JsValue {
     js_sys::Reflect::get(&js_sys::global(), &JsValue::from_str("CrabMateIdeEditor"))
@@ -25,6 +27,44 @@ fn cm_fn(name: &str) -> Option<Function> {
     Reflect::get(&g, &JsValue::from_str(name))
         .ok()
         .and_then(|v| v.dyn_into::<Function>().ok())
+}
+
+/// 动态加载 CodeMirror vendor（首屏对话不阻塞解析大脚本）。
+async fn ensure_cm_script_loaded() -> bool {
+    if IdeEditorHost::cm_available() {
+        return true;
+    }
+    let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
+        return false;
+    };
+    let already = doc
+        .query_selector(&format!("script[src=\"{CM_SCRIPT_SRC}\"]"))
+        .ok()
+        .flatten()
+        .is_some();
+    if !already {
+        let Ok(el) = doc.create_element("script") else {
+            return false;
+        };
+        let Ok(script) = el.dyn_into::<web_sys::HtmlScriptElement>() else {
+            return false;
+        };
+        script.set_src(CM_SCRIPT_SRC);
+        script.set_async(true);
+        let Some(head) = doc.head() else {
+            return false;
+        };
+        if head.append_child(&script).is_err() {
+            return false;
+        }
+    }
+    for _ in 0..80 {
+        gloo_timers::future::TimeoutFuture::new(40).await;
+        if IdeEditorHost::cm_available() {
+            return true;
+        }
+    }
+    IdeEditorHost::cm_available()
 }
 
 fn call_cm1(name: &str, a0: &JsValue) {
@@ -365,6 +405,64 @@ fn mount_cm_instance(
     ok
 }
 
+fn kick_cm_script_load(
+    cm_script_load_started: StoredValue<bool>,
+    cm_mount_retry: RwSignal<u32>,
+    cm_init_failed: RwSignal<bool>,
+) {
+    if cm_script_load_started.get_value() {
+        return;
+    }
+    cm_script_load_started.set_value(true);
+    cm_init_failed.set(false);
+    spawn_local(async move {
+        if ensure_cm_script_loaded().await {
+            cm_mount_retry.update(|n| *n = n.wrapping_add(1));
+        } else {
+            // 允许切出再进 IDE 时重试；不自动死循环以免 404 刷屏。
+            cm_script_load_started.set_value(false);
+            cm_init_failed.set(true);
+        }
+    });
+}
+
+fn schedule_cm_mount_after_layout(
+    host: IdeEditorHost,
+    parent: HtmlElement,
+    signals: IdeCmWireSignals,
+    suppress_sync: RwSignal<bool>,
+    cm_mount_generation: RwSignal<u32>,
+    cm_mount_retry: RwSignal<u32>,
+    cm_init_failed: RwSignal<bool>,
+) {
+    let editor_visible = signals.editor_visible;
+    let generation = cm_mount_generation.get_untracked().wrapping_add(1);
+    cm_mount_generation.set(generation);
+    let attempt = cm_mount_retry.get_untracked();
+    after_layout_settled(move || {
+        if cm_mount_generation.get_untracked() != generation {
+            return;
+        }
+        if !editor_visible.get_untracked() || host.handle.get_untracked().is_some() {
+            return;
+        }
+        if !IdeEditorHost::cm_available() {
+            return;
+        }
+        cm_init_failed.set(false);
+        if mount_cm_instance(host, &parent, signals, suppress_sync) {
+            cm_mount_retry.set(0);
+            cm_init_failed.set(false);
+            return;
+        }
+        if attempt + 1 < CM_MOUNT_MAX_RETRIES {
+            cm_mount_retry.set(attempt + 1);
+        } else {
+            cm_init_failed.set(true);
+        }
+    });
+}
+
 /// 挂载 / 更新 IDE 编辑器：容器就绪后创建 CM，并随偏好与路径重配置。
 pub fn wire_ide_codemirror(host: IdeEditorHost, signals: IdeCmWireSignals) {
     let IdeCmWireSignals {
@@ -382,6 +480,7 @@ pub fn wire_ide_codemirror(host: IdeEditorHost, signals: IdeCmWireSignals) {
     let suppress_sync = RwSignal::new(false);
     let cm_mount_retry = RwSignal::new(0u32);
     let cm_mount_generation = RwSignal::new(0u32);
+    let cm_script_load_started = StoredValue::new(false);
 
     // 外部（切标签等）写入 ide_text → 同步到 CM
     Effect::new(move |_| {
@@ -428,46 +527,24 @@ pub fn wire_ide_codemirror(host: IdeEditorHost, signals: IdeCmWireSignals) {
         if !visible {
             return;
         }
-
         if host.handle.get_untracked().is_some() {
             host.request_measure();
             cm_init_failed.set(false);
             return;
         }
         if !IdeEditorHost::cm_available() {
+            kick_cm_script_load(cm_script_load_started, cm_mount_retry, cm_init_failed);
             return;
         }
-
-        let parent: HtmlElement = el.unchecked_into();
-        let generation = cm_mount_generation.get_untracked().wrapping_add(1);
-        cm_mount_generation.set(generation);
-        let attempt = cm_mount_retry.get_untracked();
-        let wire = signals;
-
-        after_layout_settled(move || {
-            if cm_mount_generation.get_untracked() != generation {
-                return;
-            }
-            if !editor_visible.get_untracked() || host.handle.get_untracked().is_some() {
-                return;
-            }
-            if !IdeEditorHost::cm_available() {
-                return;
-            }
-
-            cm_init_failed.set(false);
-            if mount_cm_instance(host, &parent, wire, suppress_sync) {
-                cm_mount_retry.set(0);
-                cm_init_failed.set(false);
-                return;
-            }
-
-            if attempt + 1 < CM_MOUNT_MAX_RETRIES {
-                cm_mount_retry.set(attempt + 1);
-            } else {
-                cm_init_failed.set(true);
-            }
-        });
+        schedule_cm_mount_after_layout(
+            host,
+            el.unchecked_into(),
+            signals,
+            suppress_sync,
+            cm_mount_generation,
+            cm_mount_retry,
+            cm_init_failed,
+        );
     });
 
     on_cleanup(move || {
