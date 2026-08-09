@@ -5,6 +5,7 @@ use std::time::Duration;
 use url::Url;
 
 const PROBE_TIMEOUT: Duration = Duration::from_secs(8);
+const PROBE_MAX_REDIRECTS: usize = 3;
 
 fn attach_bearer(mut req: reqwest::RequestBuilder, bearer: &str) -> reqwest::RequestBuilder {
     let b = bearer.trim();
@@ -16,10 +17,35 @@ fn attach_bearer(mut req: reqwest::RequestBuilder, bearer: &str) -> reqwest::Req
     req
 }
 
-fn build_client() -> Result<reqwest::Client, String> {
+/// 是否允许探测跟随该重定向：必须与起始 URL **同 host**（防开放重定向骗过探测后仍导航到原 host）。
+#[must_use]
+pub fn probe_redirect_host_allowed(start: &Url, next: &Url) -> bool {
+    match (start.host_str(), next.host_str()) {
+        (Some(a), Some(b)) => a.eq_ignore_ascii_case(b),
+        _ => false,
+    }
+}
+
+fn same_host_redirect_policy(start: Url) -> reqwest::redirect::Policy {
+    reqwest::redirect::Policy::custom(move |attempt| {
+        if attempt.previous().len() >= PROBE_MAX_REDIRECTS {
+            return attempt.error("探测重定向次数过多");
+        }
+        let next = attempt.url().clone();
+        if probe_redirect_host_allowed(&start, &next) {
+            attempt.follow()
+        } else {
+            let from = start.host_str().unwrap_or("?").to_string();
+            let to = next.host_str().unwrap_or("?").to_string();
+            attempt.error(format!("探测拒绝跨 host 重定向（{from} → {to}）"))
+        }
+    })
+}
+
+fn build_client(base: &Url) -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
         .timeout(PROBE_TIMEOUT)
-        .redirect(reqwest::redirect::Policy::limited(3))
+        .redirect(same_host_redirect_policy(base.clone()))
         // 避免 http_proxy 把 127.0.0.1 / 局域网探测拐走。
         .no_proxy()
         .build()
@@ -57,7 +83,7 @@ fn map_auth_or_status(status: reqwest::StatusCode, label: &str) -> Result<(), St
 /// 先探 `/health`（可达性；`degraded` 时给出可读失败检查摘要但仍允许继续），
 /// 再探 `/user-data/prefs`（鉴权；无密钥中间件时亦应 2xx）。
 pub async fn probe_server(base: &Url, bearer: &str) -> Result<(), String> {
-    let client = build_client()?;
+    let client = build_client(base)?;
 
     let health = base
         .join("health")
@@ -111,7 +137,8 @@ fn health_degraded_note(body: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::health_degraded_note;
+    use super::{health_degraded_note, probe_redirect_host_allowed};
+    use url::Url;
 
     #[test]
     fn degraded_note_lists_failed_checks() {
@@ -126,5 +153,16 @@ mod tests {
     fn ok_status_yields_no_note() {
         let body = r#"{"status":"ok","checks":{}}"#;
         assert!(health_degraded_note(body).is_none());
+    }
+
+    #[test]
+    fn redirect_same_host_ok_cross_host_denied() {
+        let start = Url::parse("http://192.168.1.10:8080/health").unwrap();
+        let same = Url::parse("http://192.168.1.10:8080/user-data/prefs").unwrap();
+        let https_upgrade = Url::parse("https://192.168.1.10/health").unwrap();
+        let evil = Url::parse("http://evil.example/health").unwrap();
+        assert!(probe_redirect_host_allowed(&start, &same));
+        assert!(probe_redirect_host_allowed(&start, &https_upgrade));
+        assert!(!probe_redirect_host_allowed(&start, &evil));
     }
 }

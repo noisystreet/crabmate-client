@@ -9,6 +9,7 @@
 //! 发版与外仓钉版本（git tag + `path`、Tauri 2）：见仓库 **`docs/design/client_contract_versioning.md`** 与本目录 **`README.md`**。
 
 mod allowed_origin;
+mod cleartext;
 mod commands;
 mod handoff;
 mod keyring_bearer;
@@ -16,6 +17,7 @@ mod navigation;
 mod probe;
 
 pub use allowed_origin::AllowedServeOrigin;
+pub use cleartext::enforce_cleartext_connect_policy;
 pub use commands::{
     SuggestedServerUrl, connect_remote, disconnect_remote, get_connect_bearer,
     get_suggested_server_url, seed_connect_home,
@@ -28,4 +30,4 @@ pub use navigation::{
     ShellNavigationDecision, allow_shell_navigation, clear_allowed_if_app_origin_loaded,
     decide_shell_navigation, is_app_origin,
 };
-pub use probe::probe_server;
+pub use probe::{probe_redirect_host_allowed, probe_server};
