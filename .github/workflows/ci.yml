@@ -45,10 +45,15 @@ jobs:
       - name: Install lizard (complexity via check.sh)
         run: pip install lizard
 
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
       - name: Forbid path deps back to Server monorepo
         run: bash scripts/check-no-main-path.sh
 
-      - name: scripts/check.sh (fmt + clippy + frontend wasm + complexity)
+      - name: scripts/check.sh (fmt + clippy + frontend wasm + complexity + ktlint)
         run: bash scripts/check.sh
 
       - name: Install trunk (frontend smoke)

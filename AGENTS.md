@@ -46,12 +46,14 @@
 ```bash
 make help
 make frontend                # trunk → frontend/dist
-make check                   # or pre-commit run --all-files (includes frontend wasm)
+make check                   # or pre-commit run --all-files (includes frontend wasm + ktlint)
+make ktlint-android          # hand-maintained Android Kotlin only (`edu/crabmate`)
 make test
 make desktop-dev
 make desktop-release         # .deb (auto trunk --release UI)
 bash scripts/check-no-main-path.sh
 bash scripts/lizard-rust.sh              # CCN>10 count must equal module cap; if lower, tighten cap / --write-caps
+bash scripts/ktlint-android.sh           # needs java; `--format` to fix
 ./scripts/victauri-e2e.sh all   # needs a usable crabmate serve binary; not in default CI
 ./scripts/e2e-playwright.sh     # Playwright; needs frontend/dist + serve
 ```

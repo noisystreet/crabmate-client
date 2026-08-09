@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# 无 pre-commit 时的最小检查；与 .pre-commit-config.yaml 本地钩子对齐（不含 commit-msg / typos）。
+# 无 pre-commit 时的最小检查；与 .pre-commit-config.yaml 本地钩子对齐（不含 commit-msg / typos / e2e）。
+# 含 ktlint-android（需 java）。
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -47,5 +48,8 @@ if command -v taplo >/dev/null 2>&1; then
 else
   echo "[check] taplo 未安装，跳过"
 fi
+
+echo "[check] ktlint Android (edu/crabmate)"
+bash "$ROOT/scripts/ktlint-android.sh"
 
 echo "[check] ok"
