@@ -23,7 +23,7 @@ crabmate-connect = { path = "../../crates/crabmate-connect" }
 ## 能力边界
 
 - 探测 `GET /health` 与受保护的 prefs；非空 Bearer 经 `#cm_web_api_bearer=` 交给前端
-- 桌面：连接成功后非空 Bearer 写系统钥匙串；Android：钥匙串不可用时由壳 `EncryptedSharedPreferences`（连接页 Origin 桥）落盘，**不**再写明文 localStorage
+- 桌面：连接成功后非空 Bearer 写系统钥匙串；Android：钥匙串不可用时由壳 `SecureBearerStore`（AndroidKeyStore AES-GCM，连接页 Origin 桥）落盘，**不**再写明文 localStorage
 - **不**实现聊天 / SSE；线协议版本错位由 UI 与 `serve` 按 `SSE_PROTOCOL_VERSION` 与稳定错误码处理
 
 静态页：`assets/connect.html`（`bash scripts/sync-tauri-connect-page.sh` 同步进壳 `dist/`）

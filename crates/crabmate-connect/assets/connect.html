@@ -299,7 +299,7 @@
       }
 
       /**
-       * Android：优先 Keystore 加密桥；若仅有旧版明文 localStorage 则一次性迁入加密存储后清除明文。
+       * Android：优先 Keystore AES-GCM 桥（SecureBearerStore）；若仅有旧版明文 localStorage 则一次性迁入后清除。
        * 桌面：无桥时返回空（预填靠系统钥匙串 invoke）。
        */
       function readLegacyBearer() {
@@ -418,7 +418,7 @@
       }
 
       function persistBearerFallback(bearer) {
-        // Android：无系统钥匙串时写入 Keystore 加密 prefs（CrabMateMobile）；不再落明文 localStorage。
+        // Android：无系统钥匙串时写入 Keystore AES-GCM（CrabMateMobile）；不再落明文 localStorage。
         // 桌面：connect_remote 已写钥匙串；此处不写 Bearer。空串不写入、也不清除已存密钥。
         const b = (bearer || "").trim();
         if (!b) {

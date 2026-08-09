@@ -11,7 +11,7 @@
 1. App 打开本地连接页：填写 **服务器 URL** + 可选 **Web API 共享密钥**（`CM_WEB_API_BEARER_TOKEN`，不是模型 `API_KEY`）。
 2. 壳进程探测远程 `GET /health`（带 Bearer），失败时在连接页显示错误。
 3. 成功后导航到远程 UI，并用 URL hash `#cm_web_api_bearer=…` 一次性交接密钥；远程前端启动时写入本页凭证并 `replaceState` 清掉 hash。
-4. **首次**成功连接且 Bearer 非空、本机钥匙串尚无值时，写入系统钥匙串（账户 `tauri_connect_web_api_bearer`）。Android 无钥匙串后端时跳过该路径，改将非空 Bearer 写入 **Keystore 加密 SharedPreferences**（`CrabMateMobile.getSecureBearer` / `setSecureBearer`，仅连接页 Origin 可调）；旧版明文 `localStorage` Bearer 会在首次读取时迁入加密存储并清除。仍可配合系统 Autofill。
+4. **首次**成功连接且 Bearer 非空、本机钥匙串尚无值时，写入系统钥匙串（账户 `tauri_connect_web_api_bearer`）。Android 无钥匙串后端时跳过该路径，改将非空 Bearer 用 **AndroidKeyStore AES-GCM** 加密后写入普通 SharedPreferences（`SecureBearerStore` / `CrabMateMobile.getSecureBearer`·`setSecureBearer`，仅连接页 Origin 可调；**不**使用 `security-crypto`/Tink）；旧版明文 `localStorage` Bearer 会在首次读取时迁入并清除。仍可配合系统 Autofill。
 5. 聊天 / SSE / 工具审批均在远程 `serve` 上执行；手机侧只记住连接配置。
 
 **注意**：远程主机须使用已包含 `consume_mobile_connect_handoff` 的前端构建（`cd frontend && trunk build` 后重启 `serve`）。

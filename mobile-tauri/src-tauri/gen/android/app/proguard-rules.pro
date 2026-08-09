@@ -11,6 +11,17 @@
 }
 -keep class edu.crabmate.MainActivity$MobileBridge { *; }
 
+# Wry 通过虚方法回调壳 Activity；勿混淆 override
+-keep class edu.crabmate.MainActivity { *; }
+-keep class edu.crabmate.SecureBearerStore { *; }
+-keepclassmembers class edu.crabmate.WryActivity {
+   public <init>(...);
+   void setWebView(...);
+   void onWebViewCreate(...);
+   int getId();
+   java.lang.String getVersion();
+}
+
 # Uncomment this to preserve the line number information for
 # debugging stack traces.
 #-keepattributes SourceFile,LineNumberTable
