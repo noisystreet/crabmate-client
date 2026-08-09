@@ -22,7 +22,7 @@
 
 `MainActivity` **不**调用 `enableEdgeToEdge()`，避免 WebView 内容画进系统状态栏后与壳顶栏按钮重叠（Android WebView 一般不提供可用的 `safe-area-inset-*`）。软键盘：manifest / `onCreate` / `onStart` / `onWebViewCreate` 设置 **`windowSoftInputMode=adjustResize`**；在 **targetSdk 35+** 上 resize 常不可靠，故 `OnApplyWindowInsetsListener` 另将 **IME 相对导航栏高度** 写入 CSS **`--cm-ime-inset`**，与前端 **`--vv-keyboard-inset`** 取 `max` 抬高底部 composer。
 
-连上远程后：系统返回键会弹出确认框（可 **退出应用**，或 **返回连接页** 换服务器）；侧栏工具栏 **断开** 图标同样回到连接页。连接页再按返回亦会确认后退出。远程源无 Tauri IPC，故断开走原生桥而非 `invoke`。侧栏 GitHub / Device Flow 授权页经 **`CrabMateMobile.openExternalUrl`** 打开系统浏览器（WebView 内 `window.open` 通常无效）。**工作区侧栏默认收起**，自屏幕右缘 **左划** 打开（右划关闭）；与桌面壳「默认展开」不同。
+连上远程后：系统返回键会弹出确认框（可 **退出应用**，或 **返回连接页** 换服务器）；侧栏工具栏 **断开** 图标同样回到连接页。连接页再按返回亦会确认后退出。`MainActivity` 在 WebView 就绪后**重新注册**返回键回调，盖过 Tauri `AppPlugin` 默认的 `WebView.goBack()`（否则会退回无 `?manual=1` 的连接页并自动登录）。远程源无 Tauri IPC，故断开走原生桥而非 `invoke`。侧栏 GitHub / Device Flow 授权页经 **`CrabMateMobile.openExternalUrl`** 打开系统浏览器（WebView 内 `window.open` 通常无效）。**工作区侧栏默认收起**，自屏幕右缘 **左划** 打开（右划关闭）；与桌面壳「默认展开」不同。
 
 顶栏安全区：`CrabMateMobile.getStatusBarInsetPx()` 写入 CSS `--cm-safe-top`（状态栏/刘海 + 少量触控余量，至少约 24px；Web 侧 `--cm-safe-top-floor` 同保底）；原生还会在页面侧注入该变量。远程前端与连接页共用。
 

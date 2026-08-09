@@ -42,6 +42,7 @@ cargo tauri dev
 
 - [ ] 连接成功，hash Bearer 交接后能发消息  
 - [ ] 侧栏「断开」/ `?manual=1` 不立刻误重连  
+- [ ] Android：连上后系统返回键弹出确认框（非静默退回连接页并自动登录）；选「返回连接页」带 `?manual=1` 且不立刻重连  
 
 ## 4. 自动化（Victauri）
 

@@ -19,6 +19,14 @@ class MainActivity : TauriActivity() {
   private var connectHomeUrl: String = "http://tauri.localhost/"
   private var appWebView: WebView? = null
   private var exitConfirmDialog: AlertDialog? = null
+  /**
+   * 系统返回键：弹确认框（退出 / 回连接页），不走 WebView.goBack。
+   *
+   * Tauri AppPlugin 在构造时（Rust `register_android_plugin` → PluginManager.load）
+   * 会注册默认回调并对 canGoBack 执行 goBack；若退回无 `?manual=1` 的连接页会自动登录。
+   * AppPlugin 往往晚于 [onWebViewCreate]，故除创建时钉回调外，还在 [onResume] 与短暂延迟窗口内重钉。
+   */
+  private var backPressedCallback: OnBackPressedCallback? = null
 
   override fun onCreate(savedInstanceState: Bundle?) {
     // 不要 enableEdgeToEdge()：Android WebView 通常不提供 CSS safe-area-inset-*，
@@ -31,8 +39,20 @@ class MainActivity : TauriActivity() {
     WindowCompat.setDecorFitsSystemWindows(window, true)
     window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
 
-    onBackPressedDispatcher.addCallback(
-      this,
+    installBackPressedHandler()
+  }
+
+  override fun onResume() {
+    super.onResume()
+    // AppPlugin 可能在首次 resume 前后才 load；每次回前台再盖过其 goBack 回调。
+    installBackPressedHandler()
+    trimHistoryIfRemote()
+  }
+
+  /** 注册（或重新注册）返回键回调，确保优先于 Tauri AppPlugin 的默认 goBack。 */
+  private fun installBackPressedHandler() {
+    backPressedCallback?.remove()
+    val callback =
       object : OnBackPressedCallback(true) {
         override fun handleOnBackPressed() {
           val url = appWebView?.url
@@ -44,8 +64,38 @@ class MainActivity : TauriActivity() {
             showExitConfirmDialog(fromRemote = true)
           }
         }
-      },
-    )
+      }
+    backPressedCallback = callback
+    onBackPressedDispatcher.addCallback(this, callback)
+  }
+
+  /**
+   * 已在远程 serve 时清掉退回连接页的历史。
+   * 若 AppPlugin 仍抢到 Back：canGoBack==false 时会转交 activity.onBackPressed，落到我们的确认框。
+   */
+  private fun trimHistoryIfRemote() {
+    val view = appWebView ?: return
+    if (!isAppOrigin(view.url) && view.canGoBack()) {
+      view.clearHistory()
+    }
+  }
+
+  /**
+   * WebView 就绪后短窗口内多次重钉回调，覆盖 Rust 侧晚到的 AppPlugin 构造。
+   * 同时在已导航到远程时 trim history。
+   */
+  private fun scheduleBackHandlerDominance(webView: WebView) {
+    installBackPressedHandler()
+    // 含较晚一档：覆盖慢速自动登录 navigate，以及 Rust 侧晚到的 AppPlugin.load。
+    for (delayMs in longArrayOf(0L, 100L, 500L, 2000L, 5000L)) {
+      webView.postDelayed(
+        {
+          installBackPressedHandler()
+          trimHistoryIfRemote()
+        },
+        delayMs,
+      )
+    }
   }
 
   /**
@@ -101,6 +151,7 @@ class MainActivity : TauriActivity() {
       insets
     }
     webView.post { rememberConnectHomeIfAppOrigin(webView.url) }
+    scheduleBackHandlerDominance(webView)
   }
 
   /**
@@ -144,6 +195,17 @@ class MainActivity : TauriActivity() {
     // ?manual=1：跳过连接页冷启动自动登录，便于更换服务器
     val sep = if (base.contains('?')) '&' else '?'
     view.loadUrl("$base${sep}manual=1")
+    // 页面提交后再清后退栈（慢网多试一次）；避免 goBack 退回远程或误走无 manual 的历史项。
+    for (delayMs in longArrayOf(400L, 1200L)) {
+      view.postDelayed(
+        {
+          if (isAppOrigin(view.url)) {
+            view.clearHistory()
+          }
+        },
+        delayMs,
+      )
+    }
   }
 
   private fun autofillManager(): AutofillManager? {
@@ -207,6 +269,9 @@ class MainActivity : TauriActivity() {
     fun notifyLoginSuccess() {
       runOnUiThread {
         autofillManager()?.commit()
+        // 手动连接成功后即将 navigate 到远程；短延迟清 history，降低 goBack 退回裸连接页的窗口。
+        appWebView?.postDelayed({ trimHistoryIfRemote() }, 500)
+        appWebView?.postDelayed({ trimHistoryIfRemote() }, 1500)
       }
     }
 
