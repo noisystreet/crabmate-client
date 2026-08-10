@@ -7,7 +7,10 @@ mod chat_stream;
 mod client;
 mod config;
 mod error;
+mod json_api;
+mod sessions;
 mod url;
+mod workspace;
 
 pub use approval::{
     ApprovalDecision, ApprovalGate, AutoAllowOnce, CommandApprovalRequest, new_approval_session_id,
@@ -17,4 +20,8 @@ pub use chat_stream::{ChatStreamArgs, ChatStreamOutcome, run_chat_stream};
 pub use client::ServeClient;
 pub use config::ConnectionConfig;
 pub use error::TermError;
+pub use sessions::{
+    SessionListItem, WebSessionsList, conversation_id_for_resume, fetch_web_sessions,
+};
 pub use url::{api_url, normalize_api_base};
+pub use workspace::{WorkspaceInfo, fetch_workspace, set_workspace};

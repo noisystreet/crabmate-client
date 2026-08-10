@@ -15,7 +15,7 @@ Connects to a compatible **`crabmate serve`** (local or remote). Does **not** sp
 .
 ├── crates/crabmate-connect/   # Connect-page logic (path dep in this repo; do not path back to Server)
 ├── crates/crabmate-tui-core/  # Remote terminal HTTP/SSE core
-├── crates/crabmate-tui/       # Binary crabmate-tui (P2: chat / repl + approval)
+├── crates/crabmate-tui/       # Binary crabmate-tui (P3: chat / repl + slashes)
 ├── desktop-tauri/             # Desktop Linux (Tauri 2)
 ├── mobile-tauri/              # Android (Tauri 2)
 ├── frontend/                  # Business UI (Leptos CSR + WASM; contracts via git rev/tag)
@@ -49,7 +49,7 @@ make tui                # build crabmate-tui (remote terminal)
 make clean
 ```
 
-## Remote terminal (P2)
+## Remote terminal (P3)
 
 Start `crabmate serve`, then:
 
@@ -64,6 +64,7 @@ make tui
 ./crates/crabmate-tui/target/debug/crabmate-tui \
   --api-base http://127.0.0.1:8080 \
   repl
+# In repl: /help · /workspace [path] · /conv list|new|use <id>
 ```
 
 Piping the message into `chat` (no argv) consumes stdin, so a later approval prompt cannot read a decision — use **`--yes`**, or pass the message as an argument:

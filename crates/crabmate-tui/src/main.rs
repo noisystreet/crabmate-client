@@ -1,6 +1,7 @@
-//! `crabmate-tui`：连接远程 `crabmate serve` 的终端客户端（P2：`chat` + `repl` + 审批）。
+//! `crabmate-tui`：连接远程 `crabmate serve` 的终端客户端（P3：chat / repl / 斜杠）。
 
 mod approval_tty;
+mod slash;
 mod turn;
 
 use std::io::{self, IsTerminal, Write};
@@ -15,6 +16,7 @@ use crabmate_tui_core::{
 use reedline::{DefaultPrompt, DefaultPromptSegment, Reedline, Signal};
 
 use crate::approval_tty::TtyApprovalGate;
+use crate::slash::{handle_control_slash, is_control_slash};
 use crate::turn::run_turn;
 
 #[derive(Debug, Parser)]
@@ -201,7 +203,7 @@ fn ensure_repl_tty() -> Result<()> {
 
 fn print_repl_banner(client: &ServeClient, conversation_id: Option<&str>) {
     eprintln!(
-        "crabmate-tui repl → {}  (Ctrl+C / Ctrl+D / /quit to exit)",
+        "crabmate-tui repl → {}  (/help · Ctrl+C / Ctrl+D / /quit)",
         client.config().api_base
     );
     if let Some(cid) = conversation_id {
@@ -220,8 +222,14 @@ async fn dispatch_repl_line(
     if text.is_empty() {
         return Ok(true);
     }
-    if matches!(text, "/quit" | "/exit" | "/q") {
-        return Ok(false);
+    if is_control_slash(text) {
+        return match handle_control_slash(client, text, conversation_id).await {
+            Ok(keep) => Ok(keep),
+            Err(e) => {
+                eprintln!("error: {e:#}");
+                Ok(true)
+            }
+        };
     }
     let mut gate = make_gate(yes);
     match run_turn(client, text, conversation_id.as_deref(), &mut gate).await {

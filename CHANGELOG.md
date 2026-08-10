@@ -11,7 +11,7 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Added
 
-- Remote terminal **`crabmate-tui`** (P2): `connect` / `chat` / interactive `repl` (reedline); TTY or `--yes` command approval via `POST /chat/approval`; conversation id continuation (design in `docs/design/remote_cli_tui.md`)
+- Remote terminal **`crabmate-tui`** (P3): `connect` / `chat` / `repl` with TTY or `--yes` approval; control slashes `/help`, `/workspace` (`/cd`), `/conv` (show/list/new/use) against serve HTTP APIs (design in `docs/design/remote_cli_tui.md`)
 - Root `CHANGELOG.md` (Keep a Changelog; English)
 - Default English [README.md](./README.md); Chinese [README.zh-CN.md](./README.zh-CN.md); [AGENTS.md](./AGENTS.md) English-only
 - pre-commit / `scripts/check.sh`: **ktlint** for hand-maintained Android Kotlin (`edu/crabmate`, excludes Tauri `generated/`); `bash scripts/ktlint-android.sh` (`--format` to fix)
