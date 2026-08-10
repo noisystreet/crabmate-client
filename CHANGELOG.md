@@ -20,7 +20,7 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Fixed
 
-- Android: model API key Keystore bridge no longer calls `WebView.getUrl()` from the JS binder thread (use UI-thread URL cache); serialize Keystore encrypt/decrypt with retries so saves stick across app restarts
+- Android: model API key Keystore bridge no longer calls `WebView.getUrl()` from the JS binder thread (use UI-thread URL cache refreshed on resume/navigation sampling); deny bridge access until the cache is ready (frontend retries); serialize Keystore encrypt/decrypt with retries so saves stick across app restarts
 
 ### Changed
 

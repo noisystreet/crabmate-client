@@ -86,12 +86,7 @@ export function mobileGetSecureLlmSecret(slot) {
   try {
     const b = globalThis.CrabMateMobile;
     if (!b || typeof b.getSecureLlmSecret !== "function") return "";
-    const s = String(slot || "");
-    for (let i = 0; i < 3; i++) {
-      const v = String(b.getSecureLlmSecret(s) || "").trim();
-      if (v) return v;
-    }
-    return "";
+    return String(b.getSecureLlmSecret(String(slot || "")) || "").trim();
   } catch (_) {
     return "";
   }
@@ -101,12 +96,7 @@ export function mobileSetSecureLlmSecret(slot, value) {
   try {
     const b = globalThis.CrabMateMobile;
     if (!b || typeof b.setSecureLlmSecret !== "function") return false;
-    const s = String(slot || "");
-    const v = String(value || "");
-    for (let i = 0; i < 3; i++) {
-      if (b.setSecureLlmSecret(s, v)) return true;
-    }
-    return false;
+    return !!b.setSecureLlmSecret(String(slot || ""), String(value || ""));
   } catch (_) {
     return false;
   }
@@ -252,13 +242,13 @@ pub(crate) async fn bridge_load_secure_slot(slot: &str) -> Option<String> {
 pub async fn persist_slot_async(slot: &str, value: &str) -> Result<PersistKind, String> {
     let v = value.trim();
     if bridge::has_mobile_llm_secret_bridge() {
-        // Android JS 桥偶发 Origin 缓存未就绪 / Keystore 竞态：短延迟重试。
-        for attempt in 0..3u32 {
+        // Android：URL 缓存未就绪或 Keystore 竞态时短延迟重试（桥内单次调用，避免嵌套放大）。
+        for attempt in 0..4u32 {
             if bridge::mobile_set_secure_llm_secret(slot, v) {
                 return Ok(PersistKind::Durable);
             }
-            if attempt + 1 < 3 {
-                TimeoutFuture::new(80 * (attempt + 1)).await;
+            if attempt + 1 < 4 {
+                TimeoutFuture::new(60 * (attempt + 1)).await;
             }
         }
         return Err("Android Keystore 写入模型密钥失败".into());
@@ -278,13 +268,13 @@ pub async fn persist_slot_async(slot: &str, value: &str) -> Result<PersistKind, 
 
 async fn load_slot_async(slot: &str) -> Option<String> {
     if bridge::has_mobile_llm_secret_bridge() {
-        for attempt in 0..3u32 {
+        for attempt in 0..4u32 {
             let mobile = bridge::mobile_get_secure_llm_secret(slot);
             if !mobile.is_empty() {
                 return Some(mobile);
             }
-            if attempt + 1 < 3 {
-                TimeoutFuture::new(80 * (attempt + 1)).await;
+            if attempt + 1 < 4 {
+                TimeoutFuture::new(60 * (attempt + 1)).await;
             }
         }
     }

@@ -71,7 +71,7 @@ class MainActivity : TauriActivity() {
 
   /** 导航/首屏期间多次采样，供 JS 桥用缓存做 Origin 判定。 */
   private fun scheduleUrlCacheSampling(webView: WebView) {
-    for (delayMs in longArrayOf(0L, 50L, 150L, 400L, 1000L, 2500L, 5000L)) {
+    for (delayMs in longArrayOf(0L, 50L, 150L, 400L, 1000L, 2500L, 5000L, 10000L)) {
       webView.postDelayed({ refreshCachedWebViewUrl() }, delayMs)
     }
   }
@@ -82,7 +82,8 @@ class MainActivity : TauriActivity() {
     val callback =
       object : OnBackPressedCallback(true) {
         override fun handleOnBackPressed() {
-          val url = appWebView?.url
+          refreshCachedWebViewUrl()
+          val url = cachedWebViewUrl
           if (isConnectPageUrl(url)) {
             // 连接页：确认后退出
             showExitConfirmDialog(offerReturnToConnect = false)
@@ -102,7 +103,8 @@ class MainActivity : TauriActivity() {
    */
   private fun trimHistoryIfNotConnectPage() {
     val view = appWebView ?: return
-    if (!isConnectPageUrl(view.url) && view.canGoBack()) {
+    refreshCachedWebViewUrl()
+    if (!isConnectPageUrl(cachedWebViewUrl) && view.canGoBack()) {
       view.clearHistory()
     }
   }
@@ -117,6 +119,7 @@ class MainActivity : TauriActivity() {
     for (delayMs in longArrayOf(0L, 100L, 500L, 2000L, 5000L)) {
       webView.postDelayed(
         {
+          refreshCachedWebViewUrl()
           installBackPressedHandler()
           trimHistoryIfNotConnectPage()
         },
@@ -298,12 +301,12 @@ class MainActivity : TauriActivity() {
 
   /**
    * 包内 App Origin（连接页或业务 UI）可读写模型密钥；远程 serve 页拒绝。
-   * 缓存尚未采样时放行：密钥落在应用私有 Keystore/prefs；若已缓存到非 App Origin 则拒绝。
+   * 缓存未就绪时拒绝（由前端短延迟重试）；切勿在 JS 桥线程读 `WebView.getUrl()`。
    */
   private fun allowSecureLlmSecretBridge(): Boolean {
     val url = cachedWebViewUrl
     if (url.isNullOrBlank()) {
-      return true
+      return false
     }
     return isAppOrigin(url)
   }
