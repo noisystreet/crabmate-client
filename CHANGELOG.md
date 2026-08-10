@@ -25,7 +25,7 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 - **Phase 2 runtime**: Desktop/Android shells load **packaged** business UI after connect; hash handoff sets **API base** (`cm_api_base`) + Bearer. `serve` stays API-only. Victauri E2E no longer requires `--with-web`.
 - Android `MainActivity`: treat only `connect.html` as connect home; back/disconnect from packaged UI offers return-to-connect; Keystore Bearer bridge limited to connect page
 - Align Playwright/browser docs with Server **API-only-by-default**: browser/E2E paths that still host SPA use **`--with-web`**
-- Pin Server contract crates and Playwright serve checkout to product tag **`v0.2.0`** (was `v0.1.0` / temporary `14ca2e24` rev)
+- Pin Server contract crates and Playwright serve checkout to **`client-contract-v0.1.1`** (was product tag `v0.2.0`)
 - Android: keep the system Back handler above Tauri `AppPlugin` (re-install after WebView ready, on resume, and briefly thereafter) and trim WebView history on remote so Back cannot `goBack()` to a bare connect page and auto-login; returning to connect still uses `?manual=1`
 - Android: wire WebView navigation allowlist (`AllowedServeOrigin` via `crabmate-shell-navigation`); parse connect-page origin by host (not substring); keep `MobileBridge` in ProGuard
 - Connect: reject cleartext HTTP to public hosts (LAN/loopback/CGNAT `100.64/10`/`.local`/`.internal` still allowed; public must use HTTPS); probe follows redirects only when the host is unchanged
