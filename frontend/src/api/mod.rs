@@ -10,6 +10,7 @@ pub(crate) mod client_llm_cache;
 pub(crate) mod client_llm_storage;
 mod connect_handoff;
 mod github_oauth;
+pub(crate) mod github_secrets_local;
 mod http;
 mod http_workspace_clone;
 mod http_workspace_projects;
@@ -20,7 +21,7 @@ pub mod user_data;
 
 pub use github_oauth::{
     GithubDeviceStartDto, fetch_github_oauth_device_status, post_github_oauth_device_cancel,
-    post_github_oauth_device_start,
+    post_github_oauth_device_logout, post_github_oauth_device_start,
 };
 
 pub use browser::{
@@ -61,7 +62,3 @@ pub use saved_models::{
     persist_saved_model_presets_to_storage, persist_saved_model_presets_to_storage_async,
 };
 pub use session_store::post_session_conversation_store;
-pub use user_data::{
-    delete_secret_github, delete_secret_github_oauth_client_id, fetch_secrets_status,
-    put_secret_github_oauth_client_id,
-};

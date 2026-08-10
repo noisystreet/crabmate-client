@@ -88,6 +88,7 @@ pub(super) fn build_chat_stream_fetch_request(
     let init = RequestInit::new();
     init.set_method("POST");
     init.set_mode(RequestMode::Cors);
+    init.set_credentials(web_sys::RequestCredentials::Include);
     init.set_signal(Some(signal));
     let h = browser::auth_headers();
     let _ = h.set("Content-Type", "application/json");

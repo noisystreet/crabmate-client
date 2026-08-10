@@ -4,13 +4,13 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
-use web_sys::{Request, RequestInit, RequestMode, Response};
+use web_sys::{Request, RequestInit, Response};
 
 use crate::i18n::Locale;
 
 use crabmate_api_contract::StatusShellView;
 
-use super::browser::{api_url, auth_headers, format_fetch_transport_error, window};
+use super::browser::{api_url, apply_api_auth, auth_headers, format_fetch_transport_error, window};
 
 fn truncate_to_char_boundary(s: &str, max_bytes: usize) -> &str {
     if s.len() <= max_bytes {
@@ -464,9 +464,7 @@ pub(crate) async fn fetch_json<T: for<'de> Deserialize<'de>>(
 ) -> Result<T, String> {
     let init = RequestInit::new();
     init.set_method(method);
-    init.set_mode(RequestMode::Cors);
-    let h = auth_headers();
-    init.set_headers(&h);
+    apply_api_auth(&init);
     let url = api_url(url);
     let req =
         Request::new_with_str_and_init(&url, &init).map_err(|e| format!("request: {:?}", e))?;
@@ -481,7 +479,7 @@ pub(crate) async fn fetch_json_with_body<T: for<'de> Deserialize<'de>>(
 ) -> Result<T, String> {
     let init = RequestInit::new();
     init.set_method(method);
-    init.set_mode(RequestMode::Cors);
+    apply_api_auth(&init);
     let h = auth_headers();
     let _ = h.set("Content-Type", "application/json");
     init.set_headers(&h);
@@ -593,10 +591,8 @@ pub async fn upload_files_multipart_raw(
     let w = window().ok_or_else(|| crate::i18n::api_err_no_window(loc).to_string())?;
     let init = RequestInit::new();
     init.set_method("POST");
-    init.set_mode(RequestMode::Cors);
+    apply_api_auth(&init);
     init.set_body(form);
-    let h = auth_headers();
-    init.set_headers(&h);
     let req = Request::new_with_str_and_init(&api_url("/upload"), &init)
         .map_err(|e| format!("request: {:?}", e))?;
     let resp_val = JsFuture::from(w.fetch_with_request(&req))
@@ -735,7 +731,7 @@ pub async fn post_chat_branch(
     let w = window().ok_or_else(|| ChatBranchError::Other("no window".to_string()))?;
     let init = RequestInit::new();
     init.set_method("POST");
-    init.set_mode(RequestMode::Cors);
+    apply_api_auth(&init);
     let h = auth_headers();
     let _ = h.set("Content-Type", "application/json");
     init.set_headers(&h);
@@ -767,7 +763,7 @@ pub async fn submit_chat_approval(
     .map_err(|e| e.to_string())?;
     let init = RequestInit::new();
     init.set_method("POST");
-    init.set_mode(RequestMode::Cors);
+    apply_api_auth(&init);
     let h = auth_headers();
     let _ = h.set("Content-Type", "application/json");
     init.set_headers(&h);

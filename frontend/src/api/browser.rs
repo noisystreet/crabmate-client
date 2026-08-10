@@ -26,6 +26,8 @@ thread_local! {
     static WEB_API_BEARER_HYDRATED: RefCell<bool> = const { RefCell::new(false) };
     static API_BASE_URL: RefCell<String> = const { RefCell::new(String::new()) };
     static API_BASE_HYDRATED: RefCell<bool> = const { RefCell::new(false) };
+    /// 壳内 GitHub user token（由 `github_secrets_local` 水合）；浏览器路径保持空，靠 Cookie。
+    static REQUEST_GITHUB_TOKEN: RefCell<String> = const { RefCell::new(String::new()) };
 }
 
 pub fn window() -> Option<Window> {
@@ -239,6 +241,22 @@ pub fn api_url(path: &str) -> String {
     }
 }
 
+/// 壳 Device Flow 成功后写入，供 `auth_headers` 附加 `X-CrabMate-GitHub-Token`。
+pub(crate) fn set_request_github_token(token: &str) {
+    REQUEST_GITHUB_TOKEN.with(|c| *c.borrow_mut() = token.trim().to_string());
+}
+
+pub(crate) fn clear_request_github_token() {
+    REQUEST_GITHUB_TOKEN.with(|c| c.borrow_mut().clear());
+}
+
+/// 设置 CORS + `credentials: include` + 鉴权头（含壳 GitHub token）。
+pub fn apply_api_auth(init: &web_sys::RequestInit) {
+    init.set_mode(web_sys::RequestMode::Cors);
+    init.set_credentials(web_sys::RequestCredentials::Include);
+    init.set_headers(&auth_headers());
+}
+
 pub fn auth_headers() -> Headers {
     let h = Headers::new().expect("Headers::new");
     let t = web_api_bearer_token();
@@ -246,6 +264,12 @@ pub fn auth_headers() -> Headers {
         let _ = h.set("Authorization", &format!("Bearer {t}"));
         let _ = h.set("X-API-Key", &t);
     }
+    REQUEST_GITHUB_TOKEN.with(|c| {
+        let gh = c.borrow();
+        if !gh.is_empty() {
+            let _ = h.set("X-CrabMate-GitHub-Token", &gh);
+        }
+    });
     h
 }
 

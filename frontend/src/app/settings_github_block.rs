@@ -1,14 +1,18 @@
-//! 设置页「GitHub」分区：Device Flow 连接与钥匙串 Client ID。
+//! 设置页「GitHub」分区：本机 Client ID + Device Flow（壳钥匙串 / 浏览器 Cookie）。
 
 use gloo_timers::future::TimeoutFuture;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use leptos_dom::helpers::event_target_value;
 
+use crate::api::github_secrets_local::{
+    clear_github_connection_local, clear_github_oauth_client_id, github_oauth_client_id,
+    github_oauth_client_id_is_set, on_device_flow_success, persist_github_oauth_client_id,
+    reconcile_github_connection_status,
+};
 use crate::api::{
-    GithubDeviceStartDto, delete_secret_github, delete_secret_github_oauth_client_id,
-    fetch_github_oauth_device_status, fetch_secrets_status, post_github_oauth_device_cancel,
-    post_github_oauth_device_start, put_secret_github_oauth_client_id,
+    GithubDeviceStartDto, fetch_github_oauth_device_status, post_github_oauth_device_cancel,
+    post_github_oauth_device_logout, post_github_oauth_device_start,
 };
 use crate::i18n::{self, Locale};
 use crate::tauri_shell::tauri_open_external_url;
@@ -17,7 +21,6 @@ use crate::tauri_shell::tauri_open_external_url;
 struct GithubUiSignals {
     github_set: RwSignal<bool>,
     client_id_set: RwSignal<bool>,
-    client_id_env: RwSignal<bool>,
     client_id_draft: RwSignal<String>,
     client_id_feedback: RwSignal<Option<String>>,
     user_code: RwSignal<Option<String>>,
@@ -27,17 +30,11 @@ struct GithubUiSignals {
     err: RwSignal<Option<String>>,
 }
 
-fn refresh_github_secret_slots(loc: Locale, ui: GithubUiSignals, report_err: bool) {
+fn refresh_github_local_slots(loc: Locale, ui: GithubUiSignals) {
+    ui.client_id_set.set(github_oauth_client_id_is_set());
     spawn_local(async move {
-        match fetch_secrets_status(loc).await {
-            Ok(st) => {
-                ui.github_set.set(st.github.set);
-                ui.client_id_set.set(st.github_oauth_client_id.set);
-                ui.client_id_env.set(st.github_oauth_client_id_env);
-            }
-            Err(e) if report_err => ui.err.set(Some(e)),
-            Err(_) => {}
-        }
+        let connected = reconcile_github_connection_status(loc).await;
+        ui.github_set.set(connected);
     });
 }
 
@@ -49,15 +46,24 @@ fn apply_terminal_device_state(
     loc: Locale,
     state: &str,
     error: Option<String>,
+    access_token: Option<String>,
+    login: Option<String>,
     ui: GithubUiSignals,
     auth_refresh_nonce: RwSignal<u64>,
 ) {
     match state {
         "success" => {
-            ui.err.set(None);
-            refresh_github_secret_slots(loc, ui, true);
-            bump_auth_refresh_nonce(auth_refresh_nonce);
-            ui.busy.set(false);
+            spawn_local(async move {
+                match on_device_flow_success(access_token.as_deref(), login.as_deref()).await {
+                    Ok(()) => {
+                        ui.err.set(None);
+                        refresh_github_local_slots(loc, ui);
+                        bump_auth_refresh_nonce(auth_refresh_nonce);
+                    }
+                    Err(e) => ui.err.set(Some(e)),
+                }
+                ui.busy.set(false);
+            });
         }
         "denied" | "expired" | "cancelled" | "error" => {
             ui.err.set(Some(
@@ -93,7 +99,15 @@ async fn poll_until_device_done(
                 ui.status_line
                     .set(Some(i18n::settings_github_device_state(loc, &st.state)));
                 if is_device_terminal(&st.state) {
-                    apply_terminal_device_state(loc, &st.state, st.error, ui, auth_refresh_nonce);
+                    apply_terminal_device_state(
+                        loc,
+                        &st.state,
+                        st.error,
+                        st.access_token,
+                        st.login,
+                        ui,
+                        auth_refresh_nonce,
+                    );
                     return;
                 }
             }
@@ -116,13 +130,19 @@ fn spawn_device_connect(loc: Locale, ui: GithubUiSignals, auth_refresh_nonce: Rw
     if ui.busy.get_untracked() {
         return;
     }
+    let client_id = github_oauth_client_id();
+    if client_id.trim().is_empty() {
+        ui.err
+            .set(Some(i18n::settings_github_client_id_required(loc).into()));
+        return;
+    }
     ui.busy.set(true);
     ui.err.set(None);
     ui.status_line.set(None);
     ui.user_code.set(None);
     ui.verify_url.set(None);
     spawn_local(async move {
-        match post_github_oauth_device_start(loc).await {
+        match post_github_oauth_device_start(&client_id, loc).await {
             Ok(start) => {
                 ui.user_code.set(Some(start.user_code.clone()));
                 ui.verify_url
@@ -143,13 +163,32 @@ fn spawn_device_disconnect(loc: Locale, ui: GithubUiSignals, auth_refresh_nonce:
         return;
     }
     ui.busy.set(true);
+    ui.err.set(None);
     spawn_local(async move {
+        // 进行中的 Device Flow：尽力取消，失败不阻断断开。
         let _ = post_github_oauth_device_cancel(loc).await;
-        let _ = delete_secret_github(loc).await;
+
+        let mut remote_errs: Vec<String> = Vec::new();
+        // 先清 Cookie（依赖 credentials），再清本机态。
+        if let Err(e) = post_github_oauth_device_logout(loc).await {
+            remote_errs.push(e);
+        }
+        if let Err(e) = clear_github_connection_local().await {
+            remote_errs.push(e);
+        }
+
         ui.github_set.set(false);
         ui.user_code.set(None);
         ui.verify_url.set(None);
         ui.status_line.set(None);
+        if remote_errs.is_empty() {
+            ui.err.set(None);
+        } else {
+            ui.err.set(Some(i18n::settings_github_disconnect_partial(
+                loc,
+                &remote_errs.join("；"),
+            )));
+        }
         bump_auth_refresh_nonce(auth_refresh_nonce);
         ui.busy.set(false);
     });
@@ -163,25 +202,22 @@ fn spawn_save_client_id(loc: Locale, ui: GithubUiSignals) {
     ui.busy.set(true);
     ui.err.set(None);
     ui.client_id_feedback.set(None);
-    spawn_local(async move {
-        match put_secret_github_oauth_client_id(&draft, loc).await {
-            Ok(()) => {
-                ui.client_id_draft.set(String::new());
-                if draft.trim().is_empty() {
-                    ui.client_id_set.set(false);
-                    ui.client_id_feedback
-                        .set(Some(i18n::settings_github_client_id_cleared(loc).into()));
-                } else {
-                    ui.client_id_set.set(true);
-                    ui.client_id_feedback
-                        .set(Some(i18n::settings_github_client_id_saved(loc).into()));
-                }
-                refresh_github_secret_slots(loc, ui, true);
-            }
-            Err(e) => ui.err.set(Some(e)),
-        }
-        ui.busy.set(false);
-    });
+    let trimmed = draft.trim().to_string();
+    if trimmed.is_empty() {
+        clear_github_oauth_client_id();
+        ui.client_id_draft.set(String::new());
+        ui.client_id_set.set(false);
+        ui.client_id_feedback
+            .set(Some(i18n::settings_github_client_id_cleared(loc).into()));
+    } else {
+        persist_github_oauth_client_id(&trimmed);
+        ui.client_id_draft.set(String::new());
+        ui.client_id_set.set(true);
+        ui.client_id_feedback
+            .set(Some(i18n::settings_github_client_id_saved(loc).into()));
+    }
+    refresh_github_local_slots(loc, ui);
+    ui.busy.set(false);
 }
 
 fn spawn_clear_client_id(loc: Locale, ui: GithubUiSignals) {
@@ -191,19 +227,13 @@ fn spawn_clear_client_id(loc: Locale, ui: GithubUiSignals) {
     ui.busy.set(true);
     ui.err.set(None);
     ui.client_id_feedback.set(None);
-    spawn_local(async move {
-        match delete_secret_github_oauth_client_id(loc).await {
-            Ok(()) => {
-                ui.client_id_draft.set(String::new());
-                ui.client_id_set.set(false);
-                ui.client_id_feedback
-                    .set(Some(i18n::settings_github_client_id_cleared(loc).into()));
-                refresh_github_secret_slots(loc, ui, true);
-            }
-            Err(e) => ui.err.set(Some(e)),
-        }
-        ui.busy.set(false);
-    });
+    clear_github_oauth_client_id();
+    ui.client_id_draft.set(String::new());
+    ui.client_id_set.set(false);
+    ui.client_id_feedback
+        .set(Some(i18n::settings_github_client_id_cleared(loc).into()));
+    refresh_github_local_slots(loc, ui);
+    ui.busy.set(false);
 }
 
 fn connection_label(loc: Locale, set: bool) -> &'static str {
@@ -214,7 +244,7 @@ fn connection_label(loc: Locale, set: bool) -> &'static str {
     }
 }
 
-fn client_id_keychain_label(loc: Locale, set: bool) -> &'static str {
+fn client_id_local_label(loc: Locale, set: bool) -> &'static str {
     if set {
         i18n::settings_github_client_id_set(loc)
     } else {
@@ -254,16 +284,8 @@ fn SettingsGithubClientIdStatus(locale: RwSignal<Locale>, ui: GithubUiSignals) -
                 class=move || status_pill_class(ui.client_id_set.get())
                 role="status"
             >
-                {move || client_id_keychain_label(locale.get(), ui.client_id_set.get())}
+                {move || client_id_local_label(locale.get(), ui.client_id_set.get())}
             </span>
-            <Show when=move || ui.client_id_env.get()>
-                <span
-                    class="settings-status-pill settings-status-pill--info"
-                    data-testid="settings-github-client-id-env"
-                >
-                    {move || i18n::settings_github_client_id_env_overrides(locale.get())}
-                </span>
-            </Show>
         </div>
     }
 }
@@ -313,6 +335,9 @@ fn SettingsGithubClientIdBlock(
                 {move || i18n::settings_github_client_id_label(locale.get())}
             </label>
             <SettingsGithubClientIdStatus locale=locale ui=ui />
+            <p class="settings-hint" data-testid="settings-github-client-id-hint">
+                {move || i18n::settings_github_client_id_hint(locale.get())}
+            </p>
             <input
                 id=input_id
                 class="input"
@@ -400,6 +425,9 @@ fn SettingsGithubBlockView(
                         {move || connection_label(locale.get(), ui.github_set.get())}
                     </span>
                 </div>
+                <p class="settings-hint" data-testid="settings-github-token-storage-hint">
+                    {move || i18n::settings_github_token_storage_hint(locale.get())}
+                </p>
                 <Show when=move || ui.user_code.get().is_some()>
                     <p class="settings-github-user-code" data-testid="settings-github-user-code">
                         {move || ui.user_code.get().unwrap_or_default()}
@@ -441,7 +469,6 @@ pub(crate) fn SettingsGithubBlock(
     let ui = GithubUiSignals {
         github_set: RwSignal::new(false),
         client_id_set: RwSignal::new(false),
-        client_id_env: RwSignal::new(false),
         client_id_draft: RwSignal::new(String::new()),
         client_id_feedback: RwSignal::new(None),
         user_code: RwSignal::new(None),
@@ -452,8 +479,8 @@ pub(crate) fn SettingsGithubBlock(
     };
 
     Effect::new(move |_| {
-        let _ = locale.get();
-        refresh_github_secret_slots(locale.get_untracked(), ui, false);
+        let loc = locale.get();
+        refresh_github_local_slots(loc, ui);
     });
 
     let on_connect = Callback::new(move |_| {

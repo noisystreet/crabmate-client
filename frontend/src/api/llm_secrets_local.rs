@@ -219,6 +219,24 @@ fn js_err_to_string(e: &wasm_bindgen::JsValue) -> String {
         .unwrap_or_else(|| format!("{e:?}"))
 }
 
+/// 仅经壳安全后端读写（无后端返回 Err / None）；供 GitHub token 等禁止 LS 降级的槽位。
+pub(crate) async fn bridge_persist_secure_slot(
+    slot: &str,
+    value: &str,
+) -> Result<PersistKind, String> {
+    if !secure_llm_secret_backend_available() {
+        return Err("无本机安全存储后端".into());
+    }
+    persist_slot_async(slot, value).await
+}
+
+pub(crate) async fn bridge_load_secure_slot(slot: &str) -> Option<String> {
+    if !secure_llm_secret_backend_available() {
+        return None;
+    }
+    load_slot_async(slot).await
+}
+
 /// 写入槽位并等待确认。壳失败返回 Err；无安全后端时降级浏览器 LS。
 pub async fn persist_slot_async(slot: &str, value: &str) -> Result<PersistKind, String> {
     let v = value.trim();
