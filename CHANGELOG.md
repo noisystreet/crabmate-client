@@ -18,6 +18,10 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 - pre-commit / `scripts/check.sh`: **ktlint** for hand-maintained Android Kotlin (`edu/crabmate`, excludes Tauri `generated/`); `bash scripts/ktlint-android.sh` (`--format` to fix)
 - Personal cloud shell runbook: connect packaged UI to remote API-only `serve` (`docs/design/personal_cloud_runbook.md`)
 
+### Fixed
+
+- Android: model API key Keystore bridge no longer calls `WebView.getUrl()` from the JS binder thread (use UI-thread URL cache); serialize Keystore encrypt/decrypt with retries so saves stick across app restarts
+
 ### Changed
 
 - Model `API_KEY` (`client_llm` / `executor_llm`): persist in the **device keyring** (Desktop) / **Android Keystore** (not plaintext `localStorage` in shells, not serve `PUT /user-data/secrets/*`); chat sends the key in `client_llm.api_key` / `executor_llm.api_key`. Writes await confirmation (failures surface in Settings); legacy localStorage is migrated only after durable success. Plain browser falls back to weak localStorage with an explicit save warning. Saved-model preset keys stay in the same secure store and are stripped from `llm-overrides`. Re-enter keys once if they previously lived only in the server keyring.

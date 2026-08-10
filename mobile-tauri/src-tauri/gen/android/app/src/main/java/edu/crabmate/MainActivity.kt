@@ -21,6 +21,15 @@ class MainActivity : TauriActivity() {
   private var exitConfirmDialog: AlertDialog? = null
 
   /**
+   * 仅在 UI 线程采样的当前 WebView URL。
+   *
+   * `@JavascriptInterface` 跑在 WebView 后台线程，**禁止**在那里调用 `WebView.getUrl()`
+   *（非线程安全，常返回 null/脏值 → 误拒 Keystore 读写，表现为保存失败或重启丢密钥）。
+   */
+  @Volatile
+  private var cachedWebViewUrl: String? = null
+
+  /**
    * 系统返回键：弹确认框（退出 / 回连接页），不走 WebView.goBack。
    *
    * Tauri AppPlugin 在构造时（Rust `register_android_plugin` → PluginManager.load）
@@ -48,6 +57,23 @@ class MainActivity : TauriActivity() {
     // AppPlugin 可能在首次 resume 前后才 load；每次回前台再盖过其 goBack 回调。
     installBackPressedHandler()
     trimHistoryIfNotConnectPage()
+    appWebView?.post { refreshCachedWebViewUrl() }
+  }
+
+  /** 必须在 UI 线程调用。 */
+  private fun refreshCachedWebViewUrl() {
+    val url = appWebView?.url
+    if (!url.isNullOrBlank()) {
+      cachedWebViewUrl = url
+      rememberConnectHomeIfConnectPage(url)
+    }
+  }
+
+  /** 导航/首屏期间多次采样，供 JS 桥用缓存做 Origin 判定。 */
+  private fun scheduleUrlCacheSampling(webView: WebView) {
+    for (delayMs in longArrayOf(0L, 50L, 150L, 400L, 1000L, 2500L, 5000L)) {
+      webView.postDelayed({ refreshCachedWebViewUrl() }, delayMs)
+    }
   }
 
   /** 注册（或重新注册）返回键回调，确保优先于 Tauri AppPlugin 的默认 goBack。 */
@@ -151,7 +177,8 @@ class MainActivity : TauriActivity() {
       // 勿 CONSUMED：让 WebView/Chromium 仍能收到 insets（visualViewport / safe-area）。
       insets
     }
-    webView.post { rememberConnectHomeIfConnectPage(webView.url) }
+    webView.post { refreshCachedWebViewUrl() }
+    scheduleUrlCacheSampling(webView)
     scheduleBackHandlerDominance(webView)
   }
 
@@ -204,11 +231,13 @@ class MainActivity : TauriActivity() {
     // ?manual=1：跳过连接页冷启动自动登录，便于更换服务器
     val sep = if (base.contains('?')) '&' else '?'
     view.loadUrl("$base${sep}manual=1")
+    view.post { refreshCachedWebViewUrl() }
     // 页面提交后再清后退栈（慢网多试一次）；避免 goBack 退回业务 UI 或误走无 manual 的历史项。
     for (delayMs in longArrayOf(400L, 1200L)) {
       view.postDelayed(
         {
-          if (isConnectPageUrl(view.url)) {
+          refreshCachedWebViewUrl()
+          if (isConnectPageUrl(cachedWebViewUrl)) {
             view.clearHistory()
           }
         },
@@ -256,22 +285,25 @@ class MainActivity : TauriActivity() {
   }
 
   /**
-   * 仅当 WebView **已加载**且确认为连接页时允许读写加密 Bearer。
-   * URL 为空或业务 UI 时拒绝（避免包内 index / 远程页误放行）。
+   * 仅当缓存 URL 确认为连接页时允许读写加密 Bearer。
+   * 缓存未就绪或业务 UI / 远程页时拒绝（避免包内 index / 远程页误放行）。
    */
   private fun allowSecureBearerBridge(): Boolean {
-    val url = appWebView?.url
+    val url = cachedWebViewUrl
     if (url.isNullOrBlank()) {
       return false
     }
     return isConnectPageUrl(url)
   }
 
-  /** 包内 App Origin（连接页或业务 UI）可读写模型密钥；远程 serve 页拒绝。 */
+  /**
+   * 包内 App Origin（连接页或业务 UI）可读写模型密钥；远程 serve 页拒绝。
+   * 缓存尚未采样时放行：密钥落在应用私有 Keystore/prefs；若已缓存到非 App Origin 则拒绝。
+   */
   private fun allowSecureLlmSecretBridge(): Boolean {
-    val url = appWebView?.url
+    val url = cachedWebViewUrl
     if (url.isNullOrBlank()) {
-      return false
+      return true
     }
     return isAppOrigin(url)
   }
@@ -364,9 +396,16 @@ class MainActivity : TauriActivity() {
     fun notifyLoginSuccess() {
       runOnUiThread {
         autofillManager()?.commit()
+        refreshCachedWebViewUrl()
         // 手动连接成功后即将 navigate 到包内 UI；短延迟清 history。
-        appWebView?.postDelayed({ trimHistoryIfNotConnectPage() }, 500)
-        appWebView?.postDelayed({ trimHistoryIfNotConnectPage() }, 1500)
+        appWebView?.postDelayed({
+          refreshCachedWebViewUrl()
+          trimHistoryIfNotConnectPage()
+        }, 500)
+        appWebView?.postDelayed({
+          refreshCachedWebViewUrl()
+          trimHistoryIfNotConnectPage()
+        }, 1500)
       }
     }
 
