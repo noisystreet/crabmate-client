@@ -40,6 +40,8 @@ jobs:
             desktop-tauri/src-tauri
             mobile-tauri/src-tauri
             crates/crabmate-connect
+            crates/crabmate-tui-core
+            crates/crabmate-tui
             frontend
 
       - name: Install lizard (complexity via check.sh)

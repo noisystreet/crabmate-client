@@ -1,0 +1,21 @@
+[package]
+name = "crabmate-tui"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+description = "CrabMate remote terminal client (HTTP/SSE to crabmate serve)"
+repository = "https://github.com/noisystreet/crabmate-client"
+publish = false
+default-run = "crabmate-tui"
+
+[[bin]]
+name = "crabmate-tui"
+path = "src/main.rs"
+
+[workspace]
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive", "env"] }
+crabmate-tui-core = { path = "../crabmate-tui-core" }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

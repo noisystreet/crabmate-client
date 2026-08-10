@@ -14,6 +14,8 @@ Connects to a compatible **`crabmate serve`** (local or remote). Does **not** sp
 ```text
 .
 ├── crates/crabmate-connect/   # Connect-page logic (path dep in this repo; do not path back to Server)
+├── crates/crabmate-tui-core/  # Remote terminal HTTP/SSE core
+├── crates/crabmate-tui/       # Binary crabmate-tui (P1: chat)
 ├── desktop-tauri/             # Desktop Linux (Tauri 2)
 ├── mobile-tauri/              # Android (Tauri 2)
 ├── frontend/                  # Business UI (Leptos CSR + WASM; contracts via git rev/tag)
@@ -43,8 +45,23 @@ make desktop-dev        # needs cargo-tauri ^2; run serve in another terminal
 make desktop-release    # crabmate-desktop_*.deb (auto trunk --release UI; do not ship debug dist)
 make desktop-bin-release
 make apk                # Android; does not build frontend by default
+make tui                # build crabmate-tui (remote terminal)
 make clean
 ```
+
+## Remote terminal (P1)
+
+Start `crabmate serve`, then:
+
+```bash
+make tui
+./crates/crabmate-tui/target/debug/crabmate-tui \
+  --api-base http://127.0.0.1:8080 \
+  --bearer "$CM_WEB_API_BEARER_TOKEN" \
+  chat "hello"
+```
+
+Design: [docs/design/remote_cli_tui.md](./docs/design/remote_cli_tui.md).
 
 ## Docs
 
@@ -56,6 +73,7 @@ make clean
 | [docs/TESTING.md](./docs/TESTING.md) | pre-commit / Victauri / CI |
 | [docs/design/tauri_gui_mvp_design.md](./docs/design/tauri_gui_mvp_design.md) | Shell architecture (path A) |
 | [docs/design/shell_smoke_runbook.md](./docs/design/shell_smoke_runbook.md) | Desktop/Android manual smoke |
+| [docs/design/remote_cli_tui.md](./docs/design/remote_cli_tui.md) | Remote terminal crabmate-tui |
 | [docs/design/contract_pin.md](./docs/design/contract_pin.md) | Contract git tag / rev pinning |
 | [frontend/README.md](./frontend/README.md) | UI build (trunk) |
 
