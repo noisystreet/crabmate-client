@@ -1,6 +1,6 @@
 # 远程 CLI / TUI（路径 B）
 
-> **状态**：方案（已拍板走 **远程客户端**；**P1 已落地** `crabmate-tui chat`）  
+> **状态**：方案（已拍板走 **远程客户端**；**P2 已落地** `crabmate-tui chat|repl` + TTY/`--yes` 审批）  
 > **范围**：`crabmate-client` 新增终端面；`crabmate serve` 仍为执行权威  
 > **关联**：Server [`client_shell_split.md`](https://github.com/noisystreet/CrabMate/blob/main/docs/design/client_shell_split.md)、[`命令行与路由.md`](https://github.com/noisystreet/CrabMate/blob/main/docs/命令行与路由.md)、本仓 [`contract_pin.md`](./contract_pin.md) / [`personal_cloud_runbook.md`](./personal_cloud_runbook.md)
 
@@ -110,7 +110,7 @@ crates/
 | 策略 | **B：远程 CLI/TUI 进 Client 仓** |
 | 同进程 Agent CLI | **不**迁入；Server 可暂留 |
 | 执行权威 | 仅 `serve` |
-| 下一步 | 实现 **P1**（`crates/crabmate-tui*` + `chat`） |
+| 下一步 | 实现 **P3**（工作区/会话斜杠子集） |
 
 ---
 

@@ -15,7 +15,7 @@
 .
 ├── crates/crabmate-connect/   # 连接页逻辑（本仓 path；勿再 path 回主仓）
 ├── crates/crabmate-tui-core/  # 远程终端 HTTP/SSE 核心
-├── crates/crabmate-tui/       # 二进制 crabmate-tui（P1：chat）
+├── crates/crabmate-tui/       # 二进制 crabmate-tui（P2：chat / repl + 审批）
 ├── desktop-tauri/             # Desktop Linux（Tauri 2）
 ├── mobile-tauri/              # Android（Tauri 2）
 ├── frontend/                  # 业务 UI（Leptos CSR + WASM；契约 git rev/tag）
@@ -49,7 +49,7 @@ make tui                # 构建 crabmate-tui（远程终端）
 make clean
 ```
 
-## 远程终端（P1）
+## 远程终端（P2）
 
 先启动 `crabmate serve`，再：
 
@@ -59,6 +59,18 @@ make tui
   --api-base http://127.0.0.1:8080 \
   --bearer "$CM_WEB_API_BEARER_TOKEN" \
   chat "你好"
+
+# 交互 REPL（会话 id 跨轮续聊；非白名单命令可 TTY 审批，或加 --yes 自动 allow_once）
+./crates/crabmate-tui/target/debug/crabmate-tui \
+  --api-base http://127.0.0.1:8080 \
+  repl
+```
+
+管道把消息喂给 `chat`（无 argv）会读尽 stdin，后续审批无法再读决策，应加 **`--yes`**，或把消息写在参数里：
+
+```bash
+echo "你好" | crabmate-tui --api-base http://127.0.0.1:8080 --yes chat
+crabmate-tui --api-base http://127.0.0.1:8080 chat "你好"
 ```
 
 设计见 [docs/design/remote_cli_tui.md](./docs/design/remote_cli_tui.md)。

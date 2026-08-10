@@ -15,7 +15,7 @@ Connects to a compatible **`crabmate serve`** (local or remote). Does **not** sp
 .
 ├── crates/crabmate-connect/   # Connect-page logic (path dep in this repo; do not path back to Server)
 ├── crates/crabmate-tui-core/  # Remote terminal HTTP/SSE core
-├── crates/crabmate-tui/       # Binary crabmate-tui (P1: chat)
+├── crates/crabmate-tui/       # Binary crabmate-tui (P2: chat / repl + approval)
 ├── desktop-tauri/             # Desktop Linux (Tauri 2)
 ├── mobile-tauri/              # Android (Tauri 2)
 ├── frontend/                  # Business UI (Leptos CSR + WASM; contracts via git rev/tag)
@@ -49,7 +49,7 @@ make tui                # build crabmate-tui (remote terminal)
 make clean
 ```
 
-## Remote terminal (P1)
+## Remote terminal (P2)
 
 Start `crabmate serve`, then:
 
@@ -59,6 +59,18 @@ make tui
   --api-base http://127.0.0.1:8080 \
   --bearer "$CM_WEB_API_BEARER_TOKEN" \
   chat "hello"
+
+# Interactive REPL (conversation id across turns; TTY approval or --yes for allow_once)
+./crates/crabmate-tui/target/debug/crabmate-tui \
+  --api-base http://127.0.0.1:8080 \
+  repl
+```
+
+Piping the message into `chat` (no argv) consumes stdin, so a later approval prompt cannot read a decision — use **`--yes`**, or pass the message as an argument:
+
+```bash
+echo "hello" | crabmate-tui --api-base http://127.0.0.1:8080 --yes chat
+crabmate-tui --api-base http://127.0.0.1:8080 chat "hello"
 ```
 
 Design: [docs/design/remote_cli_tui.md](./docs/design/remote_cli_tui.md).
