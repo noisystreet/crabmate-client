@@ -39,8 +39,8 @@
 
 - **Forbidden**: `path = "../crabmate_agent/..."` or any Cargo path dependency back into the Server monorepo tree
 - **Forbidden**: shell spawning / bundling a `crabmate serve` sidecar
-- Contract crates only via git **tag** (`vX.Y.Z` product release, or `client-contract-vX.Y.Z`) or `rev` pinned to Server (see `frontend/Cargo.toml`; current pin: **`v0.2.0`**)
-- Playwright E2E CI checkouts Server `serve` at the same product pin (**`v0.2.0`**; includes **`--with-web`** — see `docs/design/contract_pin.md`)
+- Contract crates only via git **tag** (`vX.Y.Z` product release, or `client-contract-vX.Y.Z`) or `rev` pinned to Server (see `frontend/Cargo.toml`; current pin: **`client-contract-v0.1.1`**)
+- Playwright E2E CI checkouts Server `serve` at the same contract pin (**`client-contract-v0.1.1`**; see `docs/design/contract_pin.md`)
 - `crabmate-connect` is in-repo path only (`crates/crabmate-connect`)
 - Web Bearer ≠ model `API_KEY`（model keys persist in the **device keyring** / Android Keystore; chat sends `client_llm.api_key` over HTTPS — do not `PUT /user-data/secrets/client-llm` from the UI; do not keep model keys in plaintext `localStorage`）
 - **Split decision / contracts / SSE / CORS** are authoritative in the Server repo; this repo documents shell behavior and links out

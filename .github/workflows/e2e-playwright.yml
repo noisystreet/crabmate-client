@@ -37,7 +37,7 @@ jobs:
         with:
           repository: noisystreet/CrabMate
           # 与契约钉点一致：产品 tag（含 --with-web + 默认壳 CORS）
-          ref: v0.2.0
+          ref: client-contract-v0.1.1
           path: crabmate-server
 
       - name: Install system deps (OpenSSL / libssh2)

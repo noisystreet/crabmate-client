@@ -10,7 +10,7 @@ publish = false
 [workspace]
 
 [dependencies]
-crabmate-sse-protocol = { git = "https://github.com/noisystreet/CrabMate", tag = "v0.2.0", package = "crabmate-sse-protocol" }
+crabmate-sse-protocol = { git = "https://github.com/noisystreet/CrabMate", tag = "client-contract-v0.1.1", package = "crabmate-sse-protocol" }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
 serde = { version = "1", features = ["derive"] }
