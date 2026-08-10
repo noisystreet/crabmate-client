@@ -7,6 +7,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 
+use gloo_timers::future::TimeoutFuture;
 use wasm_bindgen_futures::JsFuture;
 
 use super::browser::window;
@@ -85,7 +86,12 @@ export function mobileGetSecureLlmSecret(slot) {
   try {
     const b = globalThis.CrabMateMobile;
     if (!b || typeof b.getSecureLlmSecret !== "function") return "";
-    return String(b.getSecureLlmSecret(String(slot || "")) || "").trim();
+    const s = String(slot || "");
+    for (let i = 0; i < 3; i++) {
+      const v = String(b.getSecureLlmSecret(s) || "").trim();
+      if (v) return v;
+    }
+    return "";
   } catch (_) {
     return "";
   }
@@ -95,7 +101,12 @@ export function mobileSetSecureLlmSecret(slot, value) {
   try {
     const b = globalThis.CrabMateMobile;
     if (!b || typeof b.setSecureLlmSecret !== "function") return false;
-    return !!b.setSecureLlmSecret(String(slot || ""), String(value || ""));
+    const s = String(slot || "");
+    const v = String(value || "");
+    for (let i = 0; i < 3; i++) {
+      if (b.setSecureLlmSecret(s, v)) return true;
+    }
+    return false;
   } catch (_) {
     return false;
   }
@@ -241,8 +252,14 @@ pub(crate) async fn bridge_load_secure_slot(slot: &str) -> Option<String> {
 pub async fn persist_slot_async(slot: &str, value: &str) -> Result<PersistKind, String> {
     let v = value.trim();
     if bridge::has_mobile_llm_secret_bridge() {
-        if bridge::mobile_set_secure_llm_secret(slot, v) {
-            return Ok(PersistKind::Durable);
+        // Android JS 桥偶发 Origin 缓存未就绪 / Keystore 竞态：短延迟重试。
+        for attempt in 0..3u32 {
+            if bridge::mobile_set_secure_llm_secret(slot, v) {
+                return Ok(PersistKind::Durable);
+            }
+            if attempt + 1 < 3 {
+                TimeoutFuture::new(80 * (attempt + 1)).await;
+            }
         }
         return Err("Android Keystore 写入模型密钥失败".into());
     }
@@ -261,9 +278,14 @@ pub async fn persist_slot_async(slot: &str, value: &str) -> Result<PersistKind, 
 
 async fn load_slot_async(slot: &str) -> Option<String> {
     if bridge::has_mobile_llm_secret_bridge() {
-        let mobile = bridge::mobile_get_secure_llm_secret(slot);
-        if !mobile.is_empty() {
-            return Some(mobile);
+        for attempt in 0..3u32 {
+            let mobile = bridge::mobile_get_secure_llm_secret(slot);
+            if !mobile.is_empty() {
+                return Some(mobile);
+            }
+            if attempt + 1 < 3 {
+                TimeoutFuture::new(80 * (attempt + 1)).await;
+            }
         }
     }
     if bridge::has_tauri_llm_secret_invoke() {

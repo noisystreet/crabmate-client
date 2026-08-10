@@ -4,6 +4,7 @@ import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import android.util.Log
 import java.nio.ByteBuffer
 import java.security.KeyStore
 import javax.crypto.Cipher
@@ -14,6 +15,8 @@ import javax.crypto.spec.GCMParameterSpec
 /**
  * 模型 API 密钥：Android Keystore AES-GCM + SharedPreferences。
  * 槽位：`client_llm` / `executor_llm` / `saved_models` / `github`（与桌面钥匙串账户对应）。
+ *
+ * 全部入口同步，避免 WebView JS 桥并发 `generateKey` 竞态（Key already exists → 写入失败）。
  */
 internal object SecureLlmSecretStore {
   private const val ANDROID_KEYSTORE = "AndroidKeyStore"
@@ -22,8 +25,11 @@ internal object SecureLlmSecretStore {
   private const val TRANSFORMATION = "AES/GCM/NoPadding"
   private const val GCM_TAG_BITS = 128
   private const val IV_BYTES = 12
+  private const val TAG = "SecureLlmSecretStore"
+  private const val WRITE_ATTEMPTS = 3
 
   private val allowedSlots = setOf("client_llm", "executor_llm", "saved_models", "github")
+  private val lock = Any()
 
   fun read(
     context: Context,
@@ -35,10 +41,13 @@ internal object SecureLlmSecretStore {
         .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         .getString(prefKey, null)
         ?: return ""
-    return try {
-      decrypt(encoded)
-    } catch (_: Exception) {
-      ""
+    return synchronized(lock) {
+      try {
+        decrypt(encoded)
+      } catch (e: Exception) {
+        Log.w(TAG, "decrypt failed for slot=$slot: ${e.javaClass.simpleName}")
+        ""
+      }
     }
   }
 
@@ -53,10 +62,23 @@ internal object SecureLlmSecretStore {
     if (trimmed.isEmpty()) {
       return prefs.edit().remove(prefKey).commit()
     }
-    return try {
-      prefs.edit().putString(prefKey, encrypt(trimmed)).commit()
-    } catch (_: Exception) {
-      false
+    synchronized(lock) {
+      var lastError: Exception? = null
+      repeat(WRITE_ATTEMPTS) {
+        try {
+          val encoded = encrypt(trimmed)
+          if (prefs.edit().putString(prefKey, encoded).commit()) {
+            return true
+          }
+        } catch (e: Exception) {
+          lastError = e
+          Log.w(TAG, "encrypt/write attempt failed: ${e.javaClass.simpleName}: ${e.message}")
+        }
+      }
+      if (lastError != null) {
+        Log.e(TAG, "write failed for slot=$slot", lastError)
+      }
+      return false
     }
   }
 
@@ -95,10 +117,24 @@ internal object SecureLlmSecretStore {
   }
 
   private fun secretKey(): SecretKey {
-    val ks = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
-    (ks.getEntry(KEY_ALIAS, null) as? KeyStore.SecretKeyEntry)?.secretKey?.let {
-      return it
+    val existing = loadExistingKey()
+    if (existing != null) {
+      return existing
     }
+    return try {
+      generateNewKey()
+    } catch (e: Exception) {
+      // 并发首写：另一线程可能已创建 alias。
+      loadExistingKey() ?: throw e
+    }
+  }
+
+  private fun loadExistingKey(): SecretKey? {
+    val ks = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
+    return (ks.getEntry(KEY_ALIAS, null) as? KeyStore.SecretKeyEntry)?.secretKey
+  }
+
+  private fun generateNewKey(): SecretKey {
     val keyGenerator =
       KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEYSTORE)
     keyGenerator.init(
