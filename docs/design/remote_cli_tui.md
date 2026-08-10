@@ -56,6 +56,7 @@ crates/
 
 - `tui-core`：**无** Tauri 依赖，可供测试与未来其它宿主复用。
 - 可逐步把 `crabmate-connect` 里与「纯 HTTP 探测」重叠的逻辑抽到共用模块；**不**阻塞 P1（P1 可先在 `tui-core` 内复制最小 probe）。
+- 多端（WASM / connect / tui）共用纯逻辑的边界与分期见 [`client_shared_logic.md`](./client_shared_logic.md)（拟建 `crabmate-client-api`）。
 
 禁止：`path = "../crabmate_agent/..."`。
 
