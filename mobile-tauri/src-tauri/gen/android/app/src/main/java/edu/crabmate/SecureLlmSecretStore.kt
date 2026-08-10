@@ -13,7 +13,7 @@ import javax.crypto.spec.GCMParameterSpec
 
 /**
  * 模型 API 密钥：Android Keystore AES-GCM + SharedPreferences。
- * 槽位：`client_llm` / `executor_llm` / `saved_models`（与桌面钥匙串账户对应）。
+ * 槽位：`client_llm` / `executor_llm` / `saved_models` / `github`（与桌面钥匙串账户对应）。
  */
 internal object SecureLlmSecretStore {
   private const val ANDROID_KEYSTORE = "AndroidKeyStore"
@@ -23,7 +23,7 @@ internal object SecureLlmSecretStore {
   private const val GCM_TAG_BITS = 128
   private const val IV_BYTES = 12
 
-  private val allowedSlots = setOf("client_llm", "executor_llm", "saved_models")
+  private val allowedSlots = setOf("client_llm", "executor_llm", "saved_models", "github")
 
   fun read(
     context: Context,

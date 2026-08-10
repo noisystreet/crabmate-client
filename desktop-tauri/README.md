@@ -8,7 +8,7 @@
 
 1. **单窗启动**：主窗口先 `visible(false)`，连接页阶段**铺满主屏工作区**（`connect.html` 内 flex 居中卡片），再显示——不依赖合成器对小窗的 `center()`，避免左上角闪一下。
 2. **默认**：主窗口展示与移动端共用的**连接页**（`crates/crabmate-connect/assets/connect.html`）。预填建议地址为 **`CM_DESKTOP_SUGGESTED_URL`**，未设时为 **`http://127.0.0.1:8080/`**。用户填写 **服务器地址** + 可选 **Web API Bearer**，探测 `GET /health` 成功后导航到**包内** `index.html`，并用 hash 交接 **API 基址** + Bearer。
-3. **首次**成功连接且 Bearer 非空、本机钥匙串尚无对应条目时，写入系统钥匙串（账户 `tauri_connect_web_api_bearer`）；下次启动自动填充。设置页模型 `API_KEY` 亦写入本机钥匙串（`get_llm_secret` / `set_llm_secret`），不落明文 `localStorage`。
+3. **首次**成功连接且 Bearer 非空、本机钥匙串尚无对应条目时，写入系统钥匙串（账户 `tauri_connect_web_api_bearer`）；下次启动自动填充。设置页模型 `API_KEY` 亦写入本机钥匙串（`get_llm_secret` / `set_llm_secret`），不落明文 `localStorage`。GitHub user token 使用同一接口的 `github` 槽，经 `X-CrabMate-GitHub-Token` 出站。
 4. 桌面应用保持单实例：再次启动会显示并聚焦已有主窗口。
 5. 关闭主窗口会结束应用；系统托盘可用时，最小化按钮会隐藏主窗口，托盘「显示/隐藏」可恢复。托盘初始化失败时保留普通最小化。
 6. 会话主窗**默认最大化**（导航到 `serve` UI 时在 **page load Started** 即 maximize，不必等 WASM 下完）。连接页阶段为铺满工作区的全屏底 + 居中卡片。退出时仍保存大小/位置/最大化供参考。右侧可拖拽分栏宽度沿用 Web 偏好持久化；**工作区侧栏在宽屏默认展开**（prefs 为隐藏时也会展开；移动/窄屏默认收起，右缘左划打开）。

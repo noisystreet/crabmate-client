@@ -4,12 +4,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
-use web_sys::{Request, RequestInit, RequestMode, Response};
+use web_sys::{Request, RequestInit, Response};
 
 use crate::i18n::Locale;
 use crate::storage::ChatSession;
 
-use super::browser::{api_url, auth_headers, window};
+use super::browser::{api_url, apply_api_auth, auth_headers, window};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UserPrefsDto {
@@ -99,40 +99,6 @@ struct PutSessionsBody {
     active_session_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
-pub struct SecretSlotStatusDto {
-    pub set: bool,
-    #[serde(default)]
-    #[allow(dead_code)]
-    pub suffix: Option<String>,
-}
-
-#[derive(Debug, Clone, Default, Deserialize)]
-pub struct SecretsStatusDto {
-    /// 服务端槽位仍可能存在；Client 已改为本机存模型密钥，UI 不再读此字段。
-    #[serde(default)]
-    #[allow(dead_code)]
-    pub client_llm: SecretSlotStatusDto,
-    #[serde(default)]
-    #[allow(dead_code)]
-    pub executor_llm: SecretSlotStatusDto,
-    #[serde(default)]
-    #[allow(dead_code)]
-    pub web_api_bearer: SecretSlotStatusDto,
-    #[serde(default)]
-    #[allow(dead_code)]
-    pub github: SecretSlotStatusDto,
-    #[serde(default)]
-    pub github_oauth_client_id: SecretSlotStatusDto,
-    /// 环境变量 `CM_GITHUB_OAUTH_CLIENT_ID` 是否非空（不回显值）。
-    #[serde(default)]
-    pub github_oauth_client_id_env: bool,
-}
-
-pub async fn fetch_secrets_status(loc: Locale) -> Result<SecretsStatusDto, String> {
-    fetch_json("GET", "/user-data/secrets/status", loc).await
-}
-
 async fn fetch_json<T: for<'de> Deserialize<'de>>(
     method: &str,
     url: &str,
@@ -140,9 +106,7 @@ async fn fetch_json<T: for<'de> Deserialize<'de>>(
 ) -> Result<T, String> {
     let init = RequestInit::new();
     init.set_method(method);
-    init.set_mode(RequestMode::Cors);
-    let h = auth_headers();
-    init.set_headers(&h);
+    apply_api_auth(&init);
     let url = api_url(url);
     let req = Request::new_with_str_and_init(&url, &init).map_err(|e| format!("request: {e:?}"))?;
     let w = window().ok_or_else(|| crate::i18n::api_err_no_window(loc).to_string())?;
@@ -172,7 +136,7 @@ async fn put_json_no_content_with_keepalive(
 ) -> Result<(), String> {
     let init = RequestInit::new();
     init.set_method("PUT");
-    init.set_mode(RequestMode::Cors);
+    apply_api_auth(&init);
     if keepalive {
         js_sys::Reflect::set(
             init.as_ref(),
@@ -363,7 +327,7 @@ async fn post_json_body<T: for<'de> Deserialize<'de>>(
 ) -> Result<T, String> {
     let init = RequestInit::new();
     init.set_method("POST");
-    init.set_mode(RequestMode::Cors);
+    apply_api_auth(&init);
     let h = auth_headers();
     let _ = h.set("Content-Type", "application/json");
     init.set_headers(&h);
@@ -396,9 +360,7 @@ pub async fn fetch_mcp_servers_status(loc: Locale) -> Result<McpServersStatusDto
 async fn post_json<T: for<'de> Deserialize<'de>>(url: &str, loc: Locale) -> Result<T, String> {
     let init = RequestInit::new();
     init.set_method("POST");
-    init.set_mode(RequestMode::Cors);
-    let h = auth_headers();
-    init.set_headers(&h);
+    apply_api_auth(&init);
     let url = api_url(url);
     let req = Request::new_with_str_and_init(&url, &init).map_err(|e| format!("request: {e:?}"))?;
     let w = window().ok_or_else(|| crate::i18n::api_err_no_window(loc).to_string())?;
@@ -446,48 +408,6 @@ pub async fn put_mcp_server_remote_auth(
         loc,
     )
     .await
-}
-
-/// 写入或清除 GitHub token（空串清除）；不经 GET 回显。供 PAT fallback / 测试。
-#[allow(dead_code)]
-pub async fn put_secret_github(token: &str, loc: Locale) -> Result<(), String> {
-    let body = serde_json::json!({ "token": token }).to_string();
-    put_json_no_content("/user-data/secrets/github", &body, loc).await
-}
-
-pub async fn delete_secret_github(loc: Locale) -> Result<(), String> {
-    delete_json_no_content("/user-data/secrets/github", loc).await
-}
-
-/// 写入或清除 GitHub OAuth/App Client ID（空串清除）；不经 GET 回显全文。
-pub async fn put_secret_github_oauth_client_id(client_id: &str, loc: Locale) -> Result<(), String> {
-    let body = serde_json::json!({ "token": client_id }).to_string();
-    put_json_no_content("/user-data/secrets/github-oauth-client-id", &body, loc).await
-}
-
-pub async fn delete_secret_github_oauth_client_id(loc: Locale) -> Result<(), String> {
-    delete_json_no_content("/user-data/secrets/github-oauth-client-id", loc).await
-}
-
-async fn delete_json_no_content(url: &str, loc: Locale) -> Result<(), String> {
-    let init = RequestInit::new();
-    init.set_method("DELETE");
-    init.set_mode(RequestMode::Cors);
-    let h = auth_headers();
-    init.set_headers(&h);
-    let url = api_url(url);
-    let req = Request::new_with_str_and_init(&url, &init).map_err(|e| format!("request: {e:?}"))?;
-    let w = window().ok_or_else(|| crate::i18n::api_err_no_window(loc).to_string())?;
-    let resp_val = JsFuture::from(w.fetch_with_request(&req))
-        .await
-        .map_err(|e| format!("fetch: {e:?}"))?;
-    let resp: Response = resp_val
-        .dyn_into()
-        .map_err(|_| crate::i18n::api_err_response_type(loc))?;
-    if !resp.ok() {
-        return Err(crate::i18n::api_err_request_failed(loc).to_string());
-    }
-    Ok(())
 }
 
 pub async fn fetch_current_web_sessions(

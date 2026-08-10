@@ -5,12 +5,14 @@
 
 const KEYRING_SERVICE: &str = "com.crabmate.credentials";
 
-/// 主模型 / 执行器 / 已保存模型密钥表（JSON）在钥匙串中的账户名。
+/// 主模型 / 执行器 / 已保存模型密钥表（JSON）/ GitHub user token 在钥匙串中的账户名。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LlmSecretSlot {
     ClientLlm,
     ExecutorLlm,
     SavedModels,
+    /// Device Flow 成功后的 GitHub user access token（壳专用；浏览器走 HttpOnly Cookie）。
+    Github,
 }
 
 impl LlmSecretSlot {
@@ -19,6 +21,7 @@ impl LlmSecretSlot {
             Self::ClientLlm => "client_llm",
             Self::ExecutorLlm => "executor_llm",
             Self::SavedModels => "saved_models",
+            Self::Github => "github",
         }
     }
 
@@ -27,6 +30,7 @@ impl LlmSecretSlot {
             "client_llm" => Some(Self::ClientLlm),
             "executor_llm" => Some(Self::ExecutorLlm),
             "saved_models" => Some(Self::SavedModels),
+            "github" => Some(Self::Github),
             _ => None,
         }
     }
@@ -36,6 +40,7 @@ impl LlmSecretSlot {
             Self::ClientLlm => "tauri_client_llm_api_key",
             Self::ExecutorLlm => "tauri_executor_llm_api_key",
             Self::SavedModels => "tauri_saved_model_api_keys",
+            Self::Github => "tauri_github_access_token",
         }
     }
 }

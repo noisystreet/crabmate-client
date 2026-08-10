@@ -132,7 +132,7 @@ pub fn get_connect_bearer() -> Option<String> {
     }
 }
 
-/// 系统钥匙串中的模型 API 密钥槽（`client_llm` / `executor_llm` / `saved_models`）。
+/// 系统钥匙串中的密钥槽（`client_llm` / `executor_llm` / `saved_models` / `github`）。
 #[tauri::command]
 pub fn get_llm_secret(slot: String) -> Option<String> {
     let Some(s) = LlmSecretSlot::parse(&slot) else {

@@ -5,11 +5,11 @@ use serde_json::json;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::JsValue;
 use wasm_bindgen_futures::JsFuture;
-use web_sys::{Request, RequestInit, RequestMode, Response};
+use web_sys::{Request, RequestInit, Response};
 
 use crate::i18n::Locale;
 
-use super::browser::{api_url, auth_headers, window};
+use super::browser::{api_url, apply_api_auth, auth_headers, window};
 
 #[derive(Debug, Clone)]
 pub struct WorkspaceCloneRequest {
@@ -187,7 +187,7 @@ async fn open_clone_sse_response(
 
     let init = RequestInit::new();
     init.set_method("POST");
-    init.set_mode(RequestMode::Cors);
+    apply_api_auth(&init);
     let h = auth_headers();
     let _ = h.set("Content-Type", "application/json");
     let _ = h.set("Accept", "text/event-stream");

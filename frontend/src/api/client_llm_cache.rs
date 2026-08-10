@@ -33,6 +33,7 @@ pub fn with_mem_mut<R>(f: impl FnOnce(&mut LlmMem) -> R) -> R {
 }
 
 pub async fn hydrate_from_server(loc: crate::i18n::Locale) {
+    use super::github_secrets_local::hydrate_github_secrets_from_secure_store;
     use super::llm_secrets_local::{
         client_llm_api_key, executor_llm_api_key, hydrate_llm_secrets_from_secure_store,
     };
@@ -40,6 +41,7 @@ pub async fn hydrate_from_server(loc: crate::i18n::Locale) {
     use super::user_data::fetch_llm_overrides;
 
     hydrate_llm_secrets_from_secure_store().await;
+    hydrate_github_secrets_from_secure_store().await;
 
     let file = fetch_llm_overrides(loc).await.unwrap_or_default();
     let client_key = client_llm_api_key();
