@@ -1,4 +1,4 @@
-//! `POST /chat/stream`：消费 AG-UI SSE，输出助手正文增量。
+//! `POST /chat/stream`：消费 AG-UI SSE，输出助手正文增量；流中处理命令审批。
 
 use std::io::{self, Write};
 
@@ -11,6 +11,9 @@ use reqwest::Response;
 use reqwest::header::{ACCEPT, CONTENT_TYPE, HeaderValue};
 use serde_json::{Value, json};
 
+use crate::approval::{
+    ApprovalDecision, ApprovalGate, CommandApprovalRequest, parse_command_approval_data,
+};
 use crate::client::ServeClient;
 use crate::error::TermError;
 
@@ -21,20 +24,38 @@ pub struct ChatStreamOutcome {
     pub last_event_id: u64,
 }
 
+/// `run_chat_stream` 入参。
+#[derive(Debug, Clone, Copy)]
+pub struct ChatStreamArgs<'a> {
+    pub message: &'a str,
+    pub conversation_id: Option<&'a str>,
+    pub approval_session_id: &'a str,
+}
+
 /// 运行一轮流式对话：正文写到 `out`，思维链等写到 `err`。
 pub async fn run_chat_stream(
     client: &ServeClient,
-    message: &str,
-    conversation_id: Option<&str>,
+    args: ChatStreamArgs<'_>,
     out: &mut dyn Write,
     err: &mut dyn Write,
+    approval: &mut dyn ApprovalGate,
 ) -> Result<ChatStreamOutcome, TermError> {
-    let resp = post_chat_stream(client, message, conversation_id).await?;
+    let resp = post_chat_stream(client, args).await?;
     let mut outcome = ChatStreamOutcome {
-        conversation_id: conversation_id_from_headers(&resp),
+        conversation_id: conversation_id_from_headers(&resp)
+            .or_else(|| args.conversation_id.map(str::to_string)),
         ..ChatStreamOutcome::default()
     };
-    consume_sse_response(resp, &mut outcome, out, err).await?;
+    consume_sse_response(
+        client,
+        args.approval_session_id,
+        resp,
+        &mut outcome,
+        out,
+        err,
+        approval,
+    )
+    .await?;
     let _ = out.flush();
     let _ = err.flush();
     Ok(outcome)
@@ -42,11 +63,10 @@ pub async fn run_chat_stream(
 
 async fn post_chat_stream(
     client: &ServeClient,
-    message: &str,
-    conversation_id: Option<&str>,
+    args: ChatStreamArgs<'_>,
 ) -> Result<Response, TermError> {
     let url = client.url("/chat/stream")?;
-    let body = chat_stream_body(message, conversation_id);
+    let body = chat_stream_body(args);
     let mut headers = client.auth_headers()?;
     headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
     headers.insert(ACCEPT, HeaderValue::from_static("text/event-stream"));
@@ -68,12 +88,17 @@ async fn post_chat_stream(
     })
 }
 
-fn chat_stream_body(message: &str, conversation_id: Option<&str>) -> Value {
+fn chat_stream_body(args: ChatStreamArgs<'_>) -> Value {
     let mut body = json!({
-        "message": message,
+        "message": args.message,
         "client_sse_protocol": SSE_PROTOCOL_VERSION,
+        "approval_session_id": args.approval_session_id,
     });
-    if let Some(cid) = conversation_id.map(str::trim).filter(|s| !s.is_empty()) {
+    if let Some(cid) = args
+        .conversation_id
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
         body["conversation_id"] = json!(cid);
     }
     body
@@ -89,26 +114,60 @@ fn conversation_id_from_headers(resp: &Response) -> Option<String> {
 }
 
 async fn consume_sse_response(
+    client: &ServeClient,
+    approval_session_id: &str,
     resp: Response,
     outcome: &mut ChatStreamOutcome,
     out: &mut dyn Write,
     err: &mut dyn Write,
+    approval: &mut dyn ApprovalGate,
 ) -> Result<(), TermError> {
     let mut buffer = String::new();
     let mut stream = resp.bytes_stream();
-    while let Some(chunk) = stream.next().await {
+    loop {
+        let chunk = tokio::select! {
+            biased;
+            _ = tokio::signal::ctrl_c() => {
+                return Err(TermError::Interrupted);
+            }
+            next = stream.next() => next,
+        };
+        let Some(chunk) = chunk else {
+            break;
+        };
         let chunk = chunk.map_err(|e| TermError::Stream(e.to_string()))?;
         buffer.push_str(&String::from_utf8_lossy(&chunk));
-        drain_sse_buffer(&mut buffer, outcome, out, err)?;
+        drain_sse_buffer(
+            client,
+            approval_session_id,
+            &mut buffer,
+            outcome,
+            out,
+            err,
+            approval,
+        )
+        .await?;
     }
-    flush_sse_tail(&mut buffer, outcome, out, err)
+    flush_sse_tail(
+        client,
+        approval_session_id,
+        &mut buffer,
+        outcome,
+        out,
+        err,
+        approval,
+    )
+    .await
 }
 
-fn flush_sse_tail(
+async fn flush_sse_tail(
+    client: &ServeClient,
+    approval_session_id: &str,
     buffer: &mut String,
     outcome: &mut ChatStreamOutcome,
     out: &mut dyn Write,
     err: &mut dyn Write,
+    approval: &mut dyn ApprovalGate,
 ) -> Result<(), TermError> {
     if buffer.trim().is_empty() {
         return Ok(());
@@ -116,14 +175,26 @@ fn flush_sse_tail(
     if !buffer.ends_with("\n\n") {
         buffer.push_str("\n\n");
     }
-    drain_sse_buffer(buffer, outcome, out, err)
+    drain_sse_buffer(
+        client,
+        approval_session_id,
+        buffer,
+        outcome,
+        out,
+        err,
+        approval,
+    )
+    .await
 }
 
-fn drain_sse_buffer(
+async fn drain_sse_buffer(
+    client: &ServeClient,
+    approval_session_id: &str,
     buffer: &mut String,
     outcome: &mut ChatStreamOutcome,
     out: &mut dyn Write,
     err: &mut dyn Write,
+    approval: &mut dyn ApprovalGate,
 ) -> Result<(), TermError> {
     while let Some(idx) = buffer.find("\n\n") {
         let block = buffer[..idx].to_string();
@@ -137,12 +208,19 @@ fn drain_sse_buffer(
         let Some(data) = join_sse_data_lines(&block) else {
             continue;
         };
-        handle_sse_data(&data, out, err)?;
+        handle_sse_data(client, approval_session_id, &data, out, err, approval).await?;
     }
     Ok(())
 }
 
-fn handle_sse_data(data: &str, out: &mut dyn Write, err: &mut dyn Write) -> Result<(), TermError> {
+async fn handle_sse_data(
+    client: &ServeClient,
+    approval_session_id: &str,
+    data: &str,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+    approval: &mut dyn ApprovalGate,
+) -> Result<(), TermError> {
     if is_sse_done_sentinel(data) {
         return Ok(());
     }
@@ -151,49 +229,70 @@ fn handle_sse_data(data: &str, out: &mut dyn Write, err: &mut dyn Write) -> Resu
         if line.is_empty() {
             continue;
         }
-        if handle_ag_ui_line(line, out, err)? {
-            continue;
-        }
-        match classify_ag_ui_sse_data(line) {
-            AgUiParseDispatch::Plain => write_out(out, line)?,
-            AgUiParseDispatch::Handled | AgUiParseDispatch::StreamEnded => {}
+        match classify_line(line)? {
+            LineAction::Skip => {}
+            LineAction::WriteOut(s) => write_out(out, &s)?,
+            LineAction::WriteErr(s) => {
+                let _ = write!(err, "{s}");
+            }
+            LineAction::Approve(req) => {
+                resolve_approval(client, approval_session_id, req, approval).await?;
+            }
+            LineAction::Plain(s) => write_out(out, &s)?,
         }
     }
     Ok(())
 }
 
-/// 若为带 `type` 的 AG-UI JSON 则处理并返回 `true`。
-fn handle_ag_ui_line(
-    line: &str,
-    out: &mut dyn Write,
-    err: &mut dyn Write,
-) -> Result<bool, TermError> {
+#[derive(Debug)]
+enum LineAction {
+    Skip,
+    WriteOut(String),
+    WriteErr(String),
+    Approve(CommandApprovalRequest),
+    Plain(String),
+}
+
+fn classify_line(line: &str) -> Result<LineAction, TermError> {
+    if let Some(action) = classify_ag_ui_line(line)? {
+        return Ok(action);
+    }
+    Ok(match classify_ag_ui_sse_data(line) {
+        AgUiParseDispatch::Plain => LineAction::Plain(line.to_string()),
+        AgUiParseDispatch::Handled | AgUiParseDispatch::StreamEnded => LineAction::Skip,
+    })
+}
+
+fn classify_ag_ui_line(line: &str) -> Result<Option<LineAction>, TermError> {
     let Ok(val) = serde_json::from_str::<Value>(line) else {
-        return Ok(false);
+        return Ok(None);
     };
     let Some(t) = val.get("type").and_then(|x| x.as_str()) else {
-        return Ok(false);
+        return Ok(None);
     };
-    match t {
-        "TEXT_MESSAGE_CONTENT" => write_delta_field(&val, out)?,
-        "REASONING_MESSAGE_CONTENT" => {
-            if let Some(delta) = val.get("delta").and_then(|d| d.as_str()) {
-                let _ = write!(err, "{delta}");
-            }
-        }
-        "RUN_FINISHED" => {}
+    Ok(Some(match t {
+        "TEXT_MESSAGE_CONTENT" => LineAction::WriteOut(delta_string(&val)),
+        "REASONING_MESSAGE_CONTENT" => LineAction::WriteErr(delta_string(&val)),
+        "RUN_FINISHED" => LineAction::Skip,
         "RUN_ERROR" => return Err(run_error_from_value(&val)),
-        "CUSTOM" => check_command_approval(&val)?,
-        _ => {}
-    }
-    Ok(true)
+        "CUSTOM" => classify_custom(&val),
+        _ => LineAction::Skip,
+    }))
 }
 
-fn write_delta_field(val: &Value, out: &mut dyn Write) -> Result<(), TermError> {
-    if let Some(delta) = val.get("delta").and_then(|d| d.as_str()) {
-        write_out(out, delta)?;
+fn classify_custom(val: &Value) -> LineAction {
+    if val.get("customType").and_then(|n| n.as_str()) != Some("command_approval") {
+        return LineAction::Skip;
     }
-    Ok(())
+    let data = val.get("data").cloned().unwrap_or(Value::Null);
+    LineAction::Approve(parse_command_approval_data(&data))
+}
+
+fn delta_string(val: &Value) -> String {
+    val.get("delta")
+        .and_then(|d| d.as_str())
+        .unwrap_or("")
+        .to_string()
 }
 
 fn run_error_from_value(val: &Value) -> TermError {
@@ -205,18 +304,32 @@ fn run_error_from_value(val: &Value) -> TermError {
     TermError::RunError(msg.to_string())
 }
 
-fn check_command_approval(val: &Value) -> Result<(), TermError> {
-    if val.get("customType").and_then(|n| n.as_str()) != Some("command_approval") {
-        return Ok(());
+async fn resolve_approval(
+    client: &ServeClient,
+    approval_session_id: &str,
+    req: CommandApprovalRequest,
+    approval: &mut dyn ApprovalGate,
+) -> Result<(), TermError> {
+    match approval.decide(&req) {
+        Ok(decision) => {
+            client
+                .submit_chat_approval(approval_session_id, decision)
+                .await
+        }
+        Err(e) => {
+            // 读决策失败 / 中断时尽量 deny，避免 serve 侧审批会话悬挂。
+            let _ = client
+                .submit_chat_approval(approval_session_id, ApprovalDecision::Deny)
+                .await;
+            Err(e)
+        }
     }
-    let cmd = val
-        .pointer("/data/command")
-        .and_then(|c| c.as_str())
-        .unwrap_or("?");
-    Err(TermError::ApprovalRequired(cmd.to_string()))
 }
 
 fn write_out(out: &mut dyn Write, s: &str) -> Result<(), TermError> {
+    if s.is_empty() {
+        return Ok(());
+    }
     out.write_all(s.as_bytes())
         .map_err(|e| TermError::Message(format!("stdout write failed: {e}")))?;
     let _ = io::Write::flush(out);
@@ -226,22 +339,66 @@ fn write_out(out: &mut dyn Write, s: &str) -> Result<(), TermError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::approval::{ApprovalDecision, AutoAllowOnce};
+
+    struct CaptureGate {
+        seen: Vec<CommandApprovalRequest>,
+        decision: ApprovalDecision,
+    }
+
+    impl ApprovalGate for CaptureGate {
+        fn decide(&mut self, req: &CommandApprovalRequest) -> Result<ApprovalDecision, TermError> {
+            self.seen.push(req.clone());
+            Ok(self.decision)
+        }
+    }
 
     #[test]
     fn extracts_text_message_content() {
         let data = r#"{"type":"TEXT_MESSAGE_CONTENT","delta":"你好"}"#;
         let mut out = Vec::new();
-        let mut err = Vec::new();
-        handle_sse_data(data, &mut out, &mut err).unwrap();
+        match classify_line(data).unwrap() {
+            LineAction::WriteOut(s) => write_out(&mut out, &s).unwrap(),
+            other => panic!("unexpected {other:?}"),
+        }
         assert_eq!(String::from_utf8(out).unwrap(), "你好");
     }
 
     #[test]
-    fn approval_custom_errors() {
-        let data = r#"{"type":"CUSTOM","customType":"command_approval","data":{"command":"rm"}}"#;
-        let mut out = Vec::new();
-        let mut err = Vec::new();
-        let e = handle_sse_data(data, &mut out, &mut err).unwrap_err();
-        assert!(matches!(e, TermError::ApprovalRequired(_)));
+    fn classifies_command_approval() {
+        let data = r#"{"type":"CUSTOM","customType":"command_approval","data":{"command":"rm","args":"-f"}}"#;
+        match classify_line(data).unwrap() {
+            LineAction::Approve(req) => {
+                assert_eq!(req.command, "rm");
+                assert_eq!(req.args, "-f");
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    #[test]
+    fn auto_allow_once_gate() {
+        let mut g = AutoAllowOnce;
+        let req = CommandApprovalRequest {
+            command: "x".into(),
+            args: String::new(),
+            allowlist_key: None,
+        };
+        assert_eq!(g.decide(&req).unwrap(), ApprovalDecision::AllowOnce);
+    }
+
+    #[test]
+    fn capture_gate_records() {
+        let mut g = CaptureGate {
+            seen: Vec::new(),
+            decision: ApprovalDecision::Deny,
+        };
+        let req = CommandApprovalRequest {
+            command: "df".into(),
+            args: "-h".into(),
+            allowlist_key: Some("df".into()),
+        };
+        assert_eq!(g.decide(&req).unwrap(), ApprovalDecision::Deny);
+        assert_eq!(g.seen.len(), 1);
     }
 }

@@ -13,10 +13,8 @@ pub enum TermError {
     Stream(String),
     #[error("server run error: {0}")]
     RunError(String),
-    #[error(
-        "command approval required (not supported in P1 chat; use shell UI or wait for P2): {0}"
-    )]
-    ApprovalRequired(String),
+    #[error("interrupted")]
+    Interrupted,
     #[error("{0}")]
     Message(String),
 }
