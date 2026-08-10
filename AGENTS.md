@@ -26,6 +26,7 @@
 │       ├── contract_pin.md
 │       ├── personal_cloud_runbook.md
 │       ├── remote_cli_tui.md   # remote crabmate-tui (HTTP/SSE; not in-process Agent)
+│       ├── client_shared_logic.md  # extract shared pure logic across WASM / connect / tui
 │       └── shell_smoke_runbook.md
 ├── CHANGELOG.md             # Release notes (English)
 ├── README.md                # English (default)
@@ -77,6 +78,7 @@ When updating docs:
 | Agent / contributor constraints | **`AGENTS.md`** (English only) |
 | UI build / trunk | `frontend/README.md` |
 | Shell architecture / lifecycle / connect model | `docs/design/tauri_gui_mvp_design.md` |
+| Shared pure logic extract (WASM / connect / tui) | `docs/design/client_shared_logic.md` |
 | Manual shell smoke steps | `docs/design/shell_smoke_runbook.md` |
 | Personal cloud (shell → remote API-only) | `docs/design/personal_cloud_runbook.md`; VPS/Caddy authority is Server |
 | Victauri / pre-commit / CI commands | `docs/TESTING.md` |
