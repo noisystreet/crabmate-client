@@ -8,6 +8,8 @@ TAURI_DIR := $(DESKTOP_ROOT)/src-tauri
 MOBILE_ROOT := $(ROOT)/mobile-tauri
 MOBILE_TAURI_DIR := $(MOBILE_ROOT)/src-tauri
 CONNECT_DIR := $(ROOT)/crates/crabmate-connect
+TUI_CORE_DIR := $(ROOT)/crates/crabmate-tui-core
+TUI_DIR := $(ROOT)/crates/crabmate-tui
 FRONTEND_DIR := $(ROOT)/frontend
 CARGO ?= cargo
 
@@ -27,9 +29,10 @@ CM_MOBILE_SKIP_FRONTEND ?= 0
 	frontend frontend-release frontend-check frontend-clippy \
 	desktop desktop-release desktop-dev desktop-bin-release \
 	apk mobile-apk \
-	test test-frontend test-tauri check fmt clippy ktlint-android \
+	tui tui-release \
+	test test-frontend test-tauri test-tui check fmt clippy ktlint-android \
 	victauri-e2e victauri-e2e-real e2e-playwright \
-	clean clean-desktop clean-mobile clean-connect clean-frontend
+	clean clean-desktop clean-mobile clean-connect clean-tui clean-frontend
 
 help:
 	@echo "crabmate-client Makefile（仓库根目录执行）"
@@ -44,6 +47,8 @@ help:
 	@echo "  make desktop-release     桌面 release .deb（自动 trunk --release + WASM 体积门禁）"
 	@echo "  make desktop-bin-release 仅 release 二进制（不打 deb，较快）"
 	@echo "  make desktop-dev         cargo tauri dev（请先自行启动纯 API serve + CORS）"
+	@echo "  make tui                 构建 crabmate-tui（远程终端；需外部 serve）"
+	@echo "  make tui-release         release 构建 crabmate-tui"
 	@echo "  make apk                 Android APK（默认 trunk + 包内 UI）"
 	@echo "  make all                 desktop-release"
 	@echo ""
@@ -53,10 +58,11 @@ help:
 	@echo "  make frontend-clippy     frontend clippy -D warnings"
 	@echo "  make test-frontend       frontend：wasm check + lib 单测（与 Tauri 分开）"
 	@echo "  make test-tauri          connect + desktop cargo test + mobile check（不含 Victauri E2E）"
-	@echo "  make test                test-frontend 然后 test-tauri"
+	@echo "  make test-tui            crabmate-tui-core + crabmate-tui 测试"
+	@echo "  make test                test-frontend 然后 test-tauri 然后 test-tui"
 	@echo "  make ktlint-android      手改 Android Kotlin ktlint（edu/crabmate）"
-	@echo "  make fmt                 四包 cargo fmt（含 frontend）"
-	@echo "  make clippy              四包 clippy -D warnings"
+	@echo "  make fmt                 六包 cargo fmt（含 frontend / tui）"
+	@echo "  make clippy              六包 clippy -D warnings"
 	@echo "  make victauri-e2e        全量 Victauri（需外部 crabmate serve）"
 	@echo "  make e2e-playwright      Playwright（需 frontend/dist + serve --with-web）"
 	@echo ""
@@ -65,6 +71,7 @@ help:
 	@echo "  make clean-desktop       desktop dist + Tauri target"
 	@echo "  make clean-mobile        mobile Tauri target"
 	@echo "  make clean-connect       connect target"
+	@echo "  make clean-tui           crabmate-tui* target"
 	@echo "  make clean-frontend      frontend dist + target"
 	@echo ""
 	@echo "变量：CRABMATE_FRONTEND_DIST=…（desktop prepare；默认本仓 frontend/dist）"
@@ -148,6 +155,14 @@ apk mobile-apk:
 		CM_MOBILE_SKIP_FRONTEND="$(CM_MOBILE_SKIP_FRONTEND)" \
 		bash "$(MOBILE_ROOT)/scripts/build-apk.sh"
 
+# --- 远程终端 ---
+
+tui:
+	cd "$(TUI_DIR)" && $(CARGO) build --bin crabmate-tui
+
+tui-release:
+	cd "$(TUI_DIR)" && $(CARGO) build --release --bin crabmate-tui
+
 # --- 质检 ---
 
 # frontend：与壳分开；wasm check + lib 单测（跳过需 Server fixtures 的 golden）
@@ -163,7 +178,11 @@ test-tauri:
 	cd "$(TAURI_DIR)" && $(CARGO) test --no-fail-fast
 	cd "$(MOBILE_TAURI_DIR)" && $(CARGO) check --tests
 
-test: test-frontend test-tauri
+test-tui:
+	cd "$(TUI_CORE_DIR)" && $(CARGO) test -- --nocapture
+	cd "$(TUI_DIR)" && $(CARGO) check
+
+test: test-frontend test-tauri test-tui
 
 check:
 	bash "$(ROOT)/scripts/check.sh"
@@ -175,12 +194,16 @@ fmt:
 	cd "$(TAURI_DIR)" && $(CARGO) fmt --all
 	cd "$(MOBILE_TAURI_DIR)" && $(CARGO) fmt --all
 	cd "$(CONNECT_DIR)" && $(CARGO) fmt --all
+	cd "$(TUI_CORE_DIR)" && $(CARGO) fmt --all
+	cd "$(TUI_DIR)" && $(CARGO) fmt --all
 	cd "$(FRONTEND_DIR)" && $(CARGO) fmt --all
 
 clippy: prepare-sidecar
 	cd "$(TAURI_DIR)" && $(CARGO) clippy --all-targets -- -D warnings
 	cd "$(MOBILE_TAURI_DIR)" && $(CARGO) clippy --all-targets -- -D warnings
 	cd "$(CONNECT_DIR)" && $(CARGO) clippy --all-targets -- -D warnings
+	cd "$(TUI_CORE_DIR)" && $(CARGO) clippy --all-targets -- -D warnings
+	cd "$(TUI_DIR)" && $(CARGO) clippy --all-targets -- -D warnings
 	rustup target add wasm32-unknown-unknown 2>/dev/null || true
 	cd "$(FRONTEND_DIR)" && $(CARGO) clippy --target wasm32-unknown-unknown --all-targets --all-features -- -D warnings
 
@@ -195,7 +218,7 @@ e2e-playwright:
 
 # --- 清理 ---
 
-clean: clean-desktop clean-mobile clean-connect clean-frontend
+clean: clean-desktop clean-mobile clean-connect clean-tui clean-frontend
 
 clean-desktop:
 	rm -rf "$(DESKTOP_ROOT)/dist" "$(DESKTOP_ROOT)/binaries"
@@ -206,6 +229,10 @@ clean-mobile:
 
 clean-connect:
 	$(CARGO) clean --manifest-path "$(CONNECT_DIR)/Cargo.toml"
+
+clean-tui:
+	$(CARGO) clean --manifest-path "$(TUI_CORE_DIR)/Cargo.toml"
+	$(CARGO) clean --manifest-path "$(TUI_DIR)/Cargo.toml"
 
 clean-frontend:
 	rm -rf "$(FRONTEND_DIR)/dist"

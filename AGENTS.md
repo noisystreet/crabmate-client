@@ -12,6 +12,8 @@
 ```text
 .
 ├── crates/crabmate-connect/
+├── crates/crabmate-tui-core/   # remote terminal HTTP/SSE core
+├── crates/crabmate-tui/        # binary crabmate-tui
 ├── desktop-tauri/
 ├── mobile-tauri/
 ├── frontend/                # Business UI; contract git rev/tag
@@ -23,6 +25,7 @@
 │       ├── tauri_gui_mvp_design.md
 │       ├── contract_pin.md
 │       ├── personal_cloud_runbook.md
+│       ├── remote_cli_tui.md   # remote crabmate-tui (HTTP/SSE; not in-process Agent)
 │       └── shell_smoke_runbook.md
 ├── CHANGELOG.md             # Release notes (English)
 ├── README.md                # English (default)

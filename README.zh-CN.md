@@ -14,6 +14,8 @@
 ```text
 .
 ├── crates/crabmate-connect/   # 连接页逻辑（本仓 path；勿再 path 回主仓）
+├── crates/crabmate-tui-core/  # 远程终端 HTTP/SSE 核心
+├── crates/crabmate-tui/       # 二进制 crabmate-tui（P1：chat）
 ├── desktop-tauri/             # Desktop Linux（Tauri 2）
 ├── mobile-tauri/              # Android（Tauri 2）
 ├── frontend/                  # 业务 UI（Leptos CSR + WASM；契约 git rev/tag）
@@ -43,8 +45,23 @@ make desktop-dev        # 需已装 cargo-tauri ^2；另开终端跑 serve
 make desktop-release    # 产出 crabmate-desktop_*.deb（自动 trunk --release UI，勿用 debug dist）
 make desktop-bin-release
 make apk                # Android；默认不建 frontend
+make tui                # 构建 crabmate-tui（远程终端）
 make clean
 ```
+
+## 远程终端（P1）
+
+先启动 `crabmate serve`，再：
+
+```bash
+make tui
+./crates/crabmate-tui/target/debug/crabmate-tui \
+  --api-base http://127.0.0.1:8080 \
+  --bearer "$CM_WEB_API_BEARER_TOKEN" \
+  chat "你好"
+```
+
+设计见 [docs/design/remote_cli_tui.md](./docs/design/remote_cli_tui.md)。
 
 ## 文档
 
@@ -55,6 +72,7 @@ make clean
 | [docs/TESTING.md](./docs/TESTING.md) | pre-commit / Victauri / CI |
 | [docs/design/tauri_gui_mvp_design.md](./docs/design/tauri_gui_mvp_design.md) | 壳架构（路径 A） |
 | [docs/design/shell_smoke_runbook.md](./docs/design/shell_smoke_runbook.md) | Desktop/Android 人工冒烟 |
+| [docs/design/remote_cli_tui.md](./docs/design/remote_cli_tui.md) | 远程终端 crabmate-tui |
 | [docs/design/contract_pin.md](./docs/design/contract_pin.md) | 契约 git tag / rev 钉法 |
 | [frontend/README.md](./frontend/README.md) | UI 构建（trunk） |
 
