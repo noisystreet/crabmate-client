@@ -244,9 +244,9 @@ pub fn wire_load_user_prefs_from_server(app: AppSignals) {
                     apply_prefs_dto(&app, &dto, prefs_session_mode_present);
                     crate::app::shell_prefs_storage::apply_loaded_prefs_to_dom(&app);
                 }
-                // prefs 可能来自另一端（移动折叠 / 桌面展开）：按当前端覆盖工作区侧栏
-                //（移动/窄屏强制收起；宽屏默认展开 Workspace）。
-                crate::app::shell_prefs_storage::apply_platform_side_panel_on_entry(&app);
+                // prefs 可能来自另一端：按当前端覆盖壳 UI 进入态
+                //（移动/窄屏收起侧栏；Android 壳默认隐藏应用内底部状态栏）。
+                crate::app::shell_prefs_storage::apply_platform_shell_ui_on_entry(&app);
                 // 无论成功失败都置位，避免永久阻塞壳偏好落盘；失败时最近列表可能为空。
                 app.workspace.user_prefs_hydrated.set(true);
             });

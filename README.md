@@ -129,6 +129,8 @@ make apk
 # to build UI as well: CM_MOBILE_BUILD_FRONTEND=1 make apk
 ```
 
+The Android shell starts with the in-app bottom status bar hidden; it can still be enabled from the side toolbar.
+
 ## Conventions
 
 - `crabmate-connect`: in-repo `path = "../../crates/crabmate-connect"`

@@ -50,16 +50,28 @@ pub(crate) fn platform_side_panel_on_entry(
     current
 }
 
-/// 进入壳层后按端调整工作区侧栏。
-pub(crate) fn apply_platform_side_panel_on_entry(app: &AppSignals) {
+/// Android 壳每次进入默认隐藏应用内底部状态栏；其它端沿用已存偏好。
+#[must_use]
+pub(crate) fn platform_status_bar_on_entry(mobile_remote: bool, current: bool) -> bool {
+    !mobile_remote && current
+}
+
+/// 进入壳层后按端调整工作区侧栏与应用内底部状态栏。
+pub(crate) fn apply_platform_shell_ui_on_entry(app: &AppSignals) {
+    let mobile = crate::mobile_remote::mobile_remote_client();
     let narrow = app.shell_ui.is_narrow_viewport.get_untracked();
-    let narrow_or_mobile = crate::mobile_remote::mobile_remote_client() || narrow;
+    let narrow_or_mobile = mobile || narrow;
     let next = platform_side_panel_on_entry(
         narrow_or_mobile,
         app.shell_ui.side_panel_view.get_untracked(),
     );
     if next != app.shell_ui.side_panel_view.get_untracked() {
         app.shell_ui.side_panel_view.set(next);
+    }
+    let status_bar_visible =
+        platform_status_bar_on_entry(mobile, app.shell_ui.status_bar_visible.get_untracked());
+    if status_bar_visible != app.shell_ui.status_bar_visible.get_untracked() {
+        app.shell_ui.status_bar_visible.set(status_bar_visible);
     }
 }
 
@@ -207,7 +219,7 @@ pub(crate) fn apply_narrow_viewport_dom_flag(narrow: bool) {
 
 #[cfg(test)]
 mod platform_side_panel_tests {
-    use super::platform_side_panel_on_entry;
+    use super::{platform_side_panel_on_entry, platform_status_bar_on_entry};
     use crate::app_prefs::SidePanelView;
 
     #[test]
@@ -236,5 +248,13 @@ mod platform_side_panel_tests {
             platform_side_panel_on_entry(false, SidePanelView::DebugConsole),
             SidePanelView::DebugConsole
         );
+    }
+
+    #[test]
+    fn android_defaults_app_status_bar_to_hidden() {
+        assert!(!platform_status_bar_on_entry(true, true));
+        assert!(!platform_status_bar_on_entry(true, false));
+        assert!(platform_status_bar_on_entry(false, true));
+        assert!(!platform_status_bar_on_entry(false, false));
     }
 }
