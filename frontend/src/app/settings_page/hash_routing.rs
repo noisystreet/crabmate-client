@@ -9,7 +9,6 @@ use leptos_dom::helpers::window_event_listener;
 pub(crate) enum SettingsSection {
     Appearance,
     Llm,
-    ExecutorLlm,
     Tools,
     Github,
     Mcp,
@@ -22,7 +21,6 @@ impl SettingsSection {
         match self {
             Self::Appearance => "appearance",
             Self::Llm => "llm",
-            Self::ExecutorLlm => "executor-llm",
             Self::Tools => "tools",
             Self::Github => "github",
             Self::Mcp => "mcp",
@@ -34,8 +32,8 @@ impl SettingsSection {
     pub(super) fn from_slug(s: &str) -> Option<Self> {
         match s {
             "appearance" => Some(Self::Appearance),
-            "llm" => Some(Self::Llm),
-            "executor-llm" => Some(Self::ExecutorLlm),
+            // 主模型 / 执行器已合并为「模型配置」；旧 hash 仍可打开
+            "llm" | "executor-llm" => Some(Self::Llm),
             "tools" => Some(Self::Tools),
             "github" => Some(Self::Github),
             "mcp" => Some(Self::Mcp),
@@ -193,7 +191,7 @@ mod tests {
         );
         assert_eq!(
             parse_settings_route("#/settings/executor-llm"),
-            Some(SettingsSection::ExecutorLlm)
+            Some(SettingsSection::Llm)
         );
         assert_eq!(
             parse_settings_route("#/settings/github"),

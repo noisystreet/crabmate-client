@@ -54,7 +54,7 @@ pub use http_workspace_clone::{
     post_workspace_clone_stream,
 };
 pub use http_workspace_projects::{fetch_workspace_projects, post_workspace_project};
-pub use llm_secrets_local::{PersistKind, secure_llm_secret_backend_available};
+pub use llm_secrets_local::PersistKind;
 pub use saved_models::{
     ExecutorLlmDraftSignals, MainLlmDraftSignals, SavedModelPreset,
     apply_saved_model_preset_to_executor_fields, apply_saved_model_preset_to_main_fields,

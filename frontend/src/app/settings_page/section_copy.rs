@@ -8,7 +8,6 @@ pub(super) fn section_title(section: SettingsSection, locale: Locale) -> &'stati
     match section {
         SettingsSection::Appearance => i18n::settings_section_appearance_title(locale),
         SettingsSection::Llm => i18n::settings_section_llm_title(locale),
-        SettingsSection::ExecutorLlm => i18n::settings_section_executor_llm_title(locale),
         SettingsSection::Tools => i18n::settings_section_tools_title(locale),
         SettingsSection::Github => i18n::settings_section_github_title(locale),
         SettingsSection::Mcp => i18n::settings_section_mcp_title(locale),
@@ -21,7 +20,6 @@ pub(super) fn section_desc(section: SettingsSection, locale: Locale) -> &'static
     match section {
         SettingsSection::Appearance => i18n::settings_section_appearance_desc(locale),
         SettingsSection::Llm => i18n::settings_section_llm_desc(locale),
-        SettingsSection::ExecutorLlm => i18n::settings_section_executor_llm_desc(locale),
         SettingsSection::Tools => i18n::settings_section_tools_desc(locale),
         SettingsSection::Github => i18n::settings_section_github_desc(locale),
         SettingsSection::Mcp => i18n::settings_section_mcp_desc(locale),

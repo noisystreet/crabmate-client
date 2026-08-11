@@ -9,32 +9,6 @@ use crate::api::{
 };
 use crate::i18n::{self, Locale};
 
-#[component]
-pub(crate) fn LlmContextTokensField(
-    locale: RwSignal<Locale>,
-    llm_context_tokens_draft: RwSignal<String>,
-) -> impl IntoView {
-    view! {
-        <div class="settings-field">
-            <label class="settings-field-label" for="settings-llm-context-tokens">
-                {move || i18n::settings_label_llm_context_tokens(locale.get())}
-            </label>
-            <input
-                type="number"
-                id="settings-llm-context-tokens"
-                class="settings-text-input"
-                min="0"
-                max="10000000"
-                step="1"
-                inputmode="numeric"
-                prop:placeholder=move || i18n::settings_ph_llm_context_tokens(locale.get())
-                prop:value=move || llm_context_tokens_draft.get()
-                on:input=move |ev| llm_context_tokens_draft.set(leptos_dom::helpers::event_target_value(&ev))
-            />
-        </div>
-    }
-}
-
 /// 温度草稿：`type="text"` + `inputmode="decimal"`，避免受控 `number` 输入时光标/字符顺序异常。
 #[component]
 pub(crate) fn LlmTemperatureFieldWithId(
@@ -61,100 +35,6 @@ pub(crate) fn LlmTemperatureFieldWithId(
     }
 }
 
-#[component]
-pub(crate) fn LlmModelIdField(
-    locale: RwSignal<Locale>,
-    model_draft: RwSignal<String>,
-) -> impl IntoView {
-    view! {
-        <div class="settings-field">
-            <label class="settings-field-label" for="settings-llm-model">
-                {move || i18n::settings_models_label_model_id(locale.get())}
-            </label>
-            <input
-                type="text"
-                id="settings-llm-model"
-                class="settings-text-input"
-                data-testid="settings-llm-model"
-                autocomplete="off"
-                prop:placeholder=move || i18n::settings_models_ph_model_id(locale.get())
-                prop:value=move || model_draft.get()
-                on:input=move |ev| model_draft.set(event_target_value(&ev))
-            />
-        </div>
-    }
-}
-
-#[component]
-pub(crate) fn LlmClientApiKeyField(
-    locale: RwSignal<Locale>,
-    api_key_draft: RwSignal<String>,
-) -> impl IntoView {
-    view! {
-        <div class="settings-field">
-            <label class="settings-field-label" for="settings-client-api-key">
-                {move || i18n::settings_models_label_api_key(locale.get())}
-            </label>
-            <input
-                type="password"
-                id="settings-client-api-key"
-                class="settings-text-input"
-                data-testid="settings-client-api-key"
-                autocomplete="off"
-                prop:placeholder=move || i18n::settings_models_label_api_key(locale.get())
-                prop:value=move || api_key_draft.get()
-                on:input=move |ev| api_key_draft.set(event_target_value(&ev))
-            />
-        </div>
-    }
-}
-
-#[component]
-pub(crate) fn LlmTemperatureField(
-    locale: RwSignal<Locale>,
-    temperature_draft: RwSignal<String>,
-) -> impl IntoView {
-    view! {
-        <LlmTemperatureFieldWithId
-            locale
-            temperature_draft
-            input_id="settings-llm-temperature".to_string()
-        />
-    }
-}
-
-#[allow(clippy::unit_arg)]
-#[component]
-pub(crate) fn LlmThinkingModeField(
-    locale: RwSignal<Locale>,
-    thinking_mode_draft: RwSignal<String>,
-    select_id: &'static str,
-) -> impl IntoView {
-    view! {
-        <div class="settings-field">
-            <label class="settings-field-label" for=select_id>
-                {move || i18n::settings_label_llm_thinking_mode(locale.get())}
-            </label>
-            <select
-                id=select_id
-                class="settings-select"
-                prop:value=move || thinking_mode_draft.get()
-                on:change=move |ev| thinking_mode_draft.set(event_target_value(&ev))
-            >
-                <option value="server">
-                    {move || i18n::settings_thinking_mode_server(locale.get())}
-                </option>
-                <option value="on">
-                    {move || i18n::settings_thinking_mode_on(locale.get())}
-                </option>
-                <option value="off">
-                    {move || i18n::settings_thinking_mode_off(locale.get())}
-                </option>
-            </select>
-        </div>
-    }
-}
-
 #[derive(Clone, Copy)]
 pub(crate) enum LlmSavedPresetApplyTarget {
     Main(
@@ -169,6 +49,42 @@ pub(crate) enum LlmSavedPresetApplyTarget {
         RwSignal<bool>,
         RwSignal<bool>,
     ),
+}
+
+/// 将已保存预设写入主模型或执行器草稿（含 API Key 标记）。
+pub(crate) fn apply_llm_saved_preset_pick(
+    target: LlmSavedPresetApplyTarget,
+    preset: &crate::api::SavedModelPreset,
+) {
+    apply_saved_pick(target, preset);
+}
+
+/// 当前草稿是否已指向该预设（用于编辑保存时决定是否回写主/执行器）。
+pub(crate) fn llm_drafts_match_saved_preset(
+    target: LlmSavedPresetApplyTarget,
+    preset: &crate::api::SavedModelPreset,
+) -> bool {
+    if !preset.enabled {
+        return false;
+    }
+    match target {
+        LlmSavedPresetApplyTarget::Main(d, ..) => matching_saved_preset_index(
+            std::slice::from_ref(preset),
+            d.llm_api_base_draft.get_untracked().as_str(),
+            d.llm_api_base_preset_select.get_untracked().as_str(),
+            d.llm_model_draft.get_untracked().as_str(),
+        )
+        .is_some(),
+        LlmSavedPresetApplyTarget::Executor(d, ..) => matching_saved_preset_index(
+            std::slice::from_ref(preset),
+            d.executor_llm_api_base_draft.get_untracked().as_str(),
+            d.executor_llm_api_base_preset_select
+                .get_untracked()
+                .as_str(),
+            d.executor_llm_model_draft.get_untracked().as_str(),
+        )
+        .is_some(),
+    }
 }
 
 fn apply_saved_pick(target: LlmSavedPresetApplyTarget, preset: &crate::api::SavedModelPreset) {

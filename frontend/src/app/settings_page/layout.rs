@@ -65,13 +65,6 @@ pub(super) fn SettingsPageNavRail(
             </SettingsNavItem>
             <SettingsNavItem
                 active_section=active_section
-                section=SettingsSection::ExecutorLlm
-                testid=None
-            >
-                {move || i18n::settings_section_executor_llm_title(appearance_locale.get())}
-            </SettingsNavItem>
-            <SettingsNavItem
-                active_section=active_section
                 section=SettingsSection::Tools
                 testid=Some("settings-nav-tools")
             >
@@ -231,6 +224,19 @@ pub(super) fn SettingsPageContentPanels(
                     form_id_prefix: "settings-page",
                     sync_saved_presets_baseline: sync_saved_presets_line.get_value().clone(),
                     llm_settings_feedback,
+                    apply_on_save: Some(crate::settings_llm_fields::LlmSavedPresetApplyTarget::Main(
+                        crate::api::MainLlmDraftSignals {
+                            llm_api_base_draft,
+                            llm_api_base_preset_select,
+                            llm_model_draft,
+                            llm_temperature_draft,
+                            llm_context_tokens_draft,
+                            llm_thinking_mode_draft,
+                        },
+                        llm_api_key_draft,
+                        llm_has_saved_key,
+                        clear_client_key_intent,
+                    )),
                 } />
                 <SettingsLlmBlock bundle=SettingsLlmBlockBundle {
                     locale: appearance_locale,
@@ -244,18 +250,7 @@ pub(super) fn SettingsPageContentPanels(
                     llm_api_key_draft,
                     llm_has_saved_key,
                     clear_client_key_intent,
-                    llm_thinking_mode_select_id: "settings-page-llm-thinking-mode",
                     llm_saved_preset_select_id: "settings-page-llm-saved-preset",
-                } />
-            </Show>
-
-            <Show when=move || active_section.get() == SettingsSection::ExecutorLlm>
-                <SettingsModelsRegistryPanel bundle=SettingsModelsRegistryBundle {
-                    locale: appearance_locale,
-                    saved_model_presets,
-                    form_id_prefix: "settings-page-exec-models",
-                    sync_saved_presets_baseline: sync_saved_presets_line.get_value().clone(),
-                    llm_settings_feedback,
                 } />
                 <SettingsExecutorLlmBlock bundle=SettingsExecutorLlmBlockBundle {
                     locale: appearance_locale,

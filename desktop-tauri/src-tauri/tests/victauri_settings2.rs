@@ -53,8 +53,15 @@ async fn close_settings(client: &mut victauri_test::VictauriClient) {
 e2e_test!(model_and_api_key_save, |client| async move {
     seed_settings_session(&mut client, "s_e2e_llm").await;
     open_settings(&mut client, "llm").await;
-    let _ = client.eval_js("(()=>{const el=document.querySelector('[data-testid=\"settings-llm-model\"]');if(el){const s=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set;s.call(el,'e2e-test-model');el.dispatchEvent(new Event('input',{bubbles:true}));}})()").await;
-    let _ = client.eval_js("(()=>{const el=document.querySelector('[data-testid=\"settings-client-api-key\"]');if(el){const s=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set;s.call(el,'E2E_STUB_KEY');el.dispatchEvent(new Event('input',{bubbles:true}));}})()").await;
+    Locator::test_id("settings-models-add")
+        .click(&mut client)
+        .await
+        .unwrap();
+    let _ = client.eval_js("(()=>{const set=(tid,val)=>{const el=document.querySelector('[data-testid=\"'+tid+'\"]');if(!el)return;const s=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set;s.call(el,val);el.dispatchEvent(new Event('input',{bubbles:true}));};set('settings-models-new-label','E2E');set('settings-models-new-base','https://api.example.com/v1');set('settings-models-new-model','e2e-test-model');set('settings-models-new-key','E2E_STUB_KEY');})()").await;
+    Locator::test_id("settings-models-add-submit")
+        .click(&mut client)
+        .await
+        .unwrap();
     Locator::test_id("settings-save-all")
         .click(&mut client)
         .await
@@ -91,22 +98,14 @@ e2e_test!(model_and_api_key_save, |client| async move {
     assert!(secret_ok, "expected client_llm in device keyring");
     assert!(ls_empty, "must not persist model API key in localStorage");
     open_settings(&mut client, "llm").await;
-    let model_val: String = client
-        .eval_js("document.querySelector('[data-testid=\"settings-llm-model\"]')?.value??''")
+    // Dialog closed after submit; assert via saved list label.
+    let listed: bool = client
+        .eval_js("!!Array.from(document.querySelectorAll('.settings-saved-models-label')).find(el=>el.textContent==='E2E')")
         .await
         .unwrap()
-        .as_str()
-        .unwrap_or("")
-        .to_string();
-    assert_eq!(model_val, "e2e-test-model");
-    let key_val: String = client
-        .eval_js("document.querySelector('[data-testid=\"settings-client-api-key\"]')?.value??''")
-        .await
-        .unwrap()
-        .as_str()
-        .unwrap_or("")
-        .to_string();
-    assert_eq!(key_val, "");
+        .as_bool()
+        .unwrap_or(false);
+    assert!(listed, "expected saved model row labeled E2E");
 });
 
 e2e_test!(import_mcp_json_adds_server_rows, |client| async move {

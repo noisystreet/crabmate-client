@@ -26,6 +26,7 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Changed
 
+- Settings: merge primary + executor into one **Models** section; configure endpoints only via the **+** model dialog (inline primary form removed); old `#/settings/executor-llm` opens Models
 - Shell: in workspace **project-pool** mode, the topbar workspace title shows only the project directory name (full path remains in the hover tooltip)
 - Model `API_KEY` (`client_llm` / `executor_llm`): persist in the **device keyring** (Desktop) / **Android Keystore** (not plaintext `localStorage` in shells, not serve `PUT /user-data/secrets/*`); chat sends the key in `client_llm.api_key` / `executor_llm.api_key`. Writes await confirmation (failures surface in Settings); legacy localStorage is migrated only after durable success. Plain browser falls back to weak localStorage with an explicit save warning. Saved-model preset keys stay in the same secure store and are stripped from `llm-overrides`. Re-enter keys once if they previously lived only in the server keyring.
 - Docs/Victauri: shell path no longer requires `CM_WEB_CORS_ALLOWED_ORIGINS` when using Server **`v0.2.0+`** (defaults official shell Origins)

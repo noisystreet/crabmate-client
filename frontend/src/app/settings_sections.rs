@@ -9,12 +9,9 @@ use crate::api::MainLlmDraftSignals;
 use crate::app_prefs::THEME_SLUGS;
 use crate::i18n::{self, Locale};
 use crate::session_typography_prefs::{SESSION_CHAT_FONT_SLUGS, SESSION_UI_FONT_SLUGS};
-use crate::settings_llm_fields::{
-    LlmClientApiKeyField, LlmContextTokensField, LlmModelIdField, LlmSavedPresetApplyTarget,
-    LlmSavedPresetPicker, LlmTemperatureField, LlmThinkingModeField,
-};
+use crate::settings_llm_fields::{LlmSavedPresetApplyTarget, LlmSavedPresetPicker};
 
-/// 设置页「主 LLM」区块所需信号（缩短 [`SettingsLlmBlock`] 形参列表；勿命名为 `*Props`，与 Leptos 组件宏生成类型冲突）。
+/// 设置页「当前主模型」选择器（字段仅通过模型列表「+」弹窗配置）。
 #[derive(Clone, Copy)]
 pub(crate) struct SettingsLlmBlockBundle {
     pub locale: RwSignal<Locale>,
@@ -28,8 +25,6 @@ pub(crate) struct SettingsLlmBlockBundle {
     pub llm_api_key_draft: RwSignal<String>,
     pub llm_has_saved_key: RwSignal<bool>,
     pub clear_client_key_intent: RwSignal<bool>,
-    /// `<select id=…>`：设置页与弹窗可能同时挂载，须用不同 id。
-    pub llm_thinking_mode_select_id: &'static str,
     /// 已保存模型下拉：设置页与弹窗须不同 id。
     pub llm_saved_preset_select_id: &'static str,
 }
@@ -327,7 +322,6 @@ pub(crate) fn SettingsLlmBlock(bundle: SettingsLlmBlockBundle) -> impl IntoView 
         llm_api_key_draft,
         llm_has_saved_key,
         clear_client_key_intent,
-        llm_thinking_mode_select_id,
         llm_saved_preset_select_id,
     } = bundle;
     let main_drafts = MainLlmDraftSignals {
@@ -351,24 +345,6 @@ pub(crate) fn SettingsLlmBlock(bundle: SettingsLlmBlockBundle) -> impl IntoView 
                     clear_client_key_intent,
                 )
                 select_id=llm_saved_preset_select_id
-            />
-            <LlmModelIdField locale model_draft=llm_model_draft />
-            <LlmClientApiKeyField locale api_key_draft=llm_api_key_draft />
-            <p class="settings-muted" data-testid="settings-llm-key-store-hint">
-                {move || {
-                    if crate::api::secure_llm_secret_backend_available() {
-                        i18n::settings_llm_key_store_hint(locale.get())
-                    } else {
-                        i18n::settings_llm_key_store_hint_browser(locale.get())
-                    }
-                }}
-            </p>
-            <LlmTemperatureField locale temperature_draft=llm_temperature_draft />
-            <LlmContextTokensField locale llm_context_tokens_draft />
-            <LlmThinkingModeField
-                locale
-                thinking_mode_draft=llm_thinking_mode_draft
-                select_id=llm_thinking_mode_select_id
             />
         </div>
     }

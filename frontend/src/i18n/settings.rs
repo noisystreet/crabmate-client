@@ -222,15 +222,15 @@ pub fn settings_web_api_bearer_status_unset(l: Locale) -> &'static str {
 
 pub fn settings_block_llm(l: Locale) -> &'static str {
     match l {
-        Locale::ZhHans => "模型网关与云端 API 密钥",
-        Locale::En => "Model gateway and cloud API key",
+        Locale::ZhHans => "当前主模型",
+        Locale::En => "Primary model",
     }
 }
 
 pub fn settings_block_executor_llm(l: Locale) -> &'static str {
     match l {
-        Locale::ZhHans => "执行器模型网关（可选覆盖）",
-        Locale::En => "Executor model endpoint (optional override)",
+        Locale::ZhHans => "当前执行器模型（可选）",
+        Locale::En => "Executor model (optional)",
     }
 }
 
@@ -294,22 +294,6 @@ pub fn settings_ph_temperature(l: Locale) -> &'static str {
     match l {
         Locale::ZhHans => "0 到 2，留空使用服务端默认值",
         Locale::En => "0 to 2, leave empty for server default",
-    }
-}
-
-pub fn settings_label_llm_context_tokens(l: Locale) -> &'static str {
-    match l {
-        Locale::ZhHans => "上下文窗口（tokens）",
-        Locale::En => "Context window (tokens)",
-    }
-}
-
-pub fn settings_ph_llm_context_tokens(l: Locale) -> &'static str {
-    match l {
-        Locale::ZhHans => "留空使用服务端；与 llm_context_tokens / CM_LLM_CONTEXT_TOKENS 一致",
-        Locale::En => {
-            "Leave empty for server default; same as llm_context_tokens / CM_LLM_CONTEXT_TOKENS"
-        }
     }
 }
 
@@ -377,23 +361,12 @@ pub fn settings_section_appearance_desc(_l: Locale) -> &'static str {
 
 pub fn settings_section_llm_title(l: Locale) -> &'static str {
     match l {
-        Locale::ZhHans => "主模型配置",
-        Locale::En => "Primary Model",
+        Locale::ZhHans => "模型配置",
+        Locale::En => "Models",
     }
 }
 
 pub fn settings_section_llm_desc(_l: Locale) -> &'static str {
-    ""
-}
-
-pub fn settings_section_executor_llm_title(l: Locale) -> &'static str {
-    match l {
-        Locale::ZhHans => "执行器模型配置",
-        Locale::En => "Executor Model",
-    }
-}
-
-pub fn settings_section_executor_llm_desc(_l: Locale) -> &'static str {
     ""
 }
 
