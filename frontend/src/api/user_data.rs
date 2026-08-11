@@ -22,7 +22,7 @@ pub struct UserPrefsDto {
     pub locale: Option<String>,
     #[serde(default)]
     pub theme: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub side_panel_view: Option<String>,
     #[serde(default)]
     pub side_width: Option<f64>,
@@ -48,7 +48,7 @@ pub struct UserPrefsDto {
     pub ide_editor_tab_size: Option<u32>,
     #[serde(default)]
     pub bg_decor: Option<bool>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub status_bar_visible: Option<bool>,
     #[serde(default)]
     pub cm_role: Option<String>,

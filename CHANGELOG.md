@@ -20,6 +20,7 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Fixed
 
+- Frontend: mobile/narrow platform entry layout (side panel collapse, Android default hidden status bar) no longer writes back to `/user-data/prefs` and overwrites desktop-saved layout preferences
 - GitHub Settings: validate OAuth Client IDs against the Server contract and report local-storage save/clear failures instead of showing false success; align Android docs with client-local Client ID and token storage
 - Chat: markdown tables render with light-gray cell borders (chat transcript lacked table border styles; `--border-subtle` was nearly invisible on dark surfaces)
 - Chat: long unbroken strings / code blocks no longer overflow message bubbles on narrow (mobile) widths
