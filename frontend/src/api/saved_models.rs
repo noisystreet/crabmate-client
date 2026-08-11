@@ -8,8 +8,18 @@ use super::client_llm_cache::{with_mem, with_mem_mut};
 use super::client_llm_storage;
 use super::llm_secrets_local::{
     PersistKind, get_saved_preset_api_key, saved_preset_api_key_is_set, set_client_llm_api_key,
-    set_executor_llm_api_key, set_saved_preset_api_key_async,
+    set_executor_llm_api_key, set_saved_preset_api_key, set_saved_preset_api_key_async,
 };
+
+/// 应用预设时的密钥：优先用会话草稿（避免异步落盘竞态），否则读本机已存密钥。
+fn api_key_for_preset_apply(preset: &SavedModelPreset) -> String {
+    let draft = preset.api_key.trim();
+    if !draft.is_empty() {
+        set_saved_preset_api_key(&preset.label, &preset.api_base, &preset.model, draft);
+        return draft.to_string();
+    }
+    get_saved_preset_api_key(&preset.label, &preset.api_base, &preset.model)
+}
 
 fn default_preset_enabled() -> bool {
     true
@@ -172,7 +182,7 @@ pub fn apply_saved_model_preset_to_main_fields(
     llm_context_tokens_draft.set(preset.llm_context_tokens.clone());
     llm_thinking_mode_draft.set(preset.llm_thinking_mode.clone());
 
-    let key = get_saved_preset_api_key(&preset.label, &preset.api_base, &preset.model);
+    let key = api_key_for_preset_apply(preset);
     if !key.trim().is_empty() {
         with_mem_mut(|m| m.api_key = key.clone());
         set_client_llm_api_key(&key);
@@ -203,7 +213,7 @@ pub fn apply_saved_model_preset_to_executor_fields(
     executor_llm_api_base_preset_select.set(preset.api_base_preset_select.clone());
     executor_llm_model_draft.set(preset.model.clone());
 
-    let key = get_saved_preset_api_key(&preset.label, &preset.api_base, &preset.model);
+    let key = api_key_for_preset_apply(preset);
     if !key.trim().is_empty() {
         with_mem_mut(|m| m.executor_api_key = key.clone());
         set_executor_llm_api_key(&key);

@@ -13,7 +13,7 @@ use std::sync::Arc;
 use crate::a11y::{
     focus_first_in_modal_container, mouse_event_target_is_current_target, trap_tab_in_container,
 };
-use crate::settings_llm_fields::LlmTemperatureFieldWithId;
+use crate::settings_llm_fields::{LlmSavedPresetApplyTarget, LlmTemperatureFieldWithId};
 
 use crate::api::SavedModelPreset;
 use crate::i18n::{self, Locale};
@@ -30,6 +30,8 @@ pub(crate) struct SettingsModelsRegistryBundle {
     pub sync_saved_presets_baseline: Arc<dyn Fn() + Send + Sync>,
     /// 与设置页/弹窗顶栏反馈共用（如本机列表持久化失败）。
     pub llm_settings_feedback: RwSignal<Option<String>>,
+    /// 「+」/编辑保存成功后，可选同步应用到主模型或执行器草稿。
+    pub apply_on_save: Option<LlmSavedPresetApplyTarget>,
 }
 
 /// 「+」添加与行内编辑共用同一弹窗。
@@ -94,6 +96,7 @@ fn SettingsModelsRegistryToolbar(s: RegistryToolbarSignals) -> impl IntoView {
             <button
                 type="button"
                 class="btn btn-secondary btn-sm settings-model-registry-add"
+                data-testid="settings-models-add"
                 prop:aria-label=move || i18n::settings_models_add_open_aria(locale.get())
                 prop:title=move || i18n::settings_models_add_open_aria(locale.get())
                 on:click=move |_| {
@@ -195,6 +198,7 @@ struct RegistryAddFormSignals {
     dialog_title_id: String,
     sync_saved_presets_baseline: Arc<dyn Fn() + Send + Sync>,
     llm_settings_feedback: RwSignal<Option<String>>,
+    apply_on_save: Option<LlmSavedPresetApplyTarget>,
 }
 
 #[derive(Clone)]
@@ -228,6 +232,7 @@ fn SettingsModelsRegistryAddFormPrimaryFields(s: RegistryAddFormPrimarySignals) 
                 type="text"
                 class="settings-text-input"
                 id=id_label.clone()
+                data-testid="settings-models-new-label"
                 prop:value=move || new_label.get()
                 on:input=move |ev| new_label.set(event_target_value(&ev))
             />
@@ -240,6 +245,7 @@ fn SettingsModelsRegistryAddFormPrimaryFields(s: RegistryAddFormPrimarySignals) 
                 type="text"
                 class="settings-text-input"
                 id=id_base_url.clone()
+                data-testid="settings-models-new-base"
                 prop:value=move || new_api_base.get()
                 on:input=move |ev| new_api_base.set(event_target_value(&ev))
             />
@@ -252,6 +258,7 @@ fn SettingsModelsRegistryAddFormPrimaryFields(s: RegistryAddFormPrimarySignals) 
                 type="text"
                 class="settings-text-input"
                 id=id_model.clone()
+                data-testid="settings-models-new-model"
                 prop:value=move || new_model_id.get()
                 prop:placeholder=move || i18n::settings_models_ph_model_id(locale.get())
                 on:input=move |ev| new_model_id.set(event_target_value(&ev))
@@ -335,6 +342,7 @@ fn SettingsModelsRegistryAddFormDetailFields(s: RegistryAddFormDetailSignals) ->
                 class="settings-text-input"
                 autocomplete="off"
                 id=id_key.clone()
+                data-testid="settings-models-new-key"
                 prop:value=move || new_api_key.get()
                 on:input=move |ev| new_api_key.set(event_target_value(&ev))
             />
@@ -357,6 +365,7 @@ struct RegistryAddFormActionSignals {
     new_thinking_mode: RwSignal<String>,
     sync_saved_presets_baseline: Arc<dyn Fn() + Send + Sync>,
     llm_settings_feedback: RwSignal<Option<String>>,
+    apply_on_save: Option<LlmSavedPresetApplyTarget>,
 }
 
 #[component]
@@ -375,6 +384,7 @@ fn SettingsModelsRegistryAddFormActions(s: RegistryAddFormActionSignals) -> impl
         new_thinking_mode,
         sync_saved_presets_baseline,
         llm_settings_feedback,
+        apply_on_save,
     } = s;
     let close_dialog = move || {
         dialog_mode.set(None);
@@ -394,6 +404,7 @@ fn SettingsModelsRegistryAddFormActions(s: RegistryAddFormActionSignals) -> impl
             <button
                 type="button"
                 class="btn btn-primary btn-sm"
+                data-testid="settings-models-add-submit"
                 on:click=move |_| {
                     let d = ManualPresetDraft {
                         api_base: new_api_base.get_untracked(),
@@ -429,6 +440,20 @@ fn SettingsModelsRegistryAddFormActions(s: RegistryAddFormActionSignals) -> impl
                     form_error.set(None);
                     let loc = locale.get_untracked();
                     let mut next = saved_model_presets.with_untracked(|v| v.clone());
+                    let applied = preset.clone();
+                    let should_apply = match (mode, apply_on_save) {
+                        (Some(RegistryPresetDialogKind::Add), Some(_)) => true,
+                        (Some(RegistryPresetDialogKind::Edit(i)), Some(target)) => {
+                            saved_model_presets.with_untracked(|v| {
+                                v.get(i).is_some_and(|old| {
+                                    crate::settings_llm_fields::llm_drafts_match_saved_preset(
+                                        target, old,
+                                    )
+                                })
+                            })
+                        }
+                        _ => false,
+                    };
                     match mode {
                         Some(RegistryPresetDialogKind::Add) => next.push(preset),
                         Some(RegistryPresetDialogKind::Edit(i)) if i < next.len() => {
@@ -444,6 +469,13 @@ fn SettingsModelsRegistryAddFormActions(s: RegistryAddFormActionSignals) -> impl
                         &sync_saved_presets_baseline,
                         llm_settings_feedback,
                     ) {
+                        if should_apply
+                            && let Some(target) = apply_on_save
+                        {
+                            crate::settings_llm_fields::apply_llm_saved_preset_pick(
+                                target, &applied,
+                            );
+                        }
                         reset_fields();
                         close_dialog();
                     }
@@ -493,6 +525,7 @@ fn SettingsModelsRegistryAddForm(s: RegistryAddFormSignals) -> impl IntoView {
         id_thinking,
         sync_saved_presets_baseline,
         llm_settings_feedback,
+        apply_on_save,
         ..
     } = s;
     view! {
@@ -536,6 +569,7 @@ fn SettingsModelsRegistryAddForm(s: RegistryAddFormSignals) -> impl IntoView {
                 new_thinking_mode,
                 sync_saved_presets_baseline: sync_saved_presets_baseline.clone(),
                 llm_settings_feedback,
+                apply_on_save,
             } />
         </div>
     }
@@ -668,6 +702,7 @@ pub(crate) fn SettingsModelsRegistryPanel(bundle: SettingsModelsRegistryBundle) 
         form_id_prefix,
         sync_saved_presets_baseline,
         llm_settings_feedback,
+        apply_on_save,
     } = bundle;
 
     let dialog_mode = RwSignal::new(None::<RegistryPresetDialogKind>);
@@ -750,6 +785,7 @@ pub(crate) fn SettingsModelsRegistryPanel(bundle: SettingsModelsRegistryBundle) 
                 dialog_title_id,
                 sync_saved_presets_baseline: sync_saved_presets_baseline.clone(),
                 llm_settings_feedback,
+                apply_on_save,
             } />
             <SettingsModelsRegistryPresetList s=RegistryPresetListSignals {
                 locale,

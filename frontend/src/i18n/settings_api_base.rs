@@ -65,23 +65,3 @@ pub fn settings_save_ok_browser_insecure_key(l: Locale) -> &'static str {
         }
     }
 }
-
-pub fn settings_llm_key_store_hint_browser(l: Locale) -> &'static str {
-    match l {
-        Locale::ZhHans => {
-            "当前为纯浏览器：模型密钥仅弱持久化（明文 localStorage）。正式使用请用 Desktop / Android 壳（系统钥匙串 / Keystore）。"
-        }
-        Locale::En => {
-            "Plain browser: model API keys use weak persistence (plaintext localStorage). Prefer the Desktop/Android shell (keyring/Keystore)."
-        }
-    }
-}
-
-pub fn settings_llm_key_store_hint(l: Locale) -> &'static str {
-    match l {
-        Locale::ZhHans => "写入本机系统钥匙串 / Android Keystore（不落明文 localStorage）。",
-        Locale::En => {
-            "Stored in the device keyring / Android Keystore (not plaintext localStorage)."
-        }
-    }
-}
