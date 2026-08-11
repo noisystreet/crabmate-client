@@ -12,7 +12,7 @@ use crate::session_export::tauri_pick_workspace_folder;
 use crate::session_workspace_bind::patch_active_session_workspace_root;
 use crate::stream_text_overlay::sessions_snapshot_with_stream_overlay_merged;
 use crate::tauri_shell::tauri_shell_available;
-use crate::user_data_bootstrap::remember_workspace_root;
+use crate::user_data_bootstrap::{remember_workspace_root, workspace_recent_menu_label};
 use crate::workspace_shell::reload_workspace_panel;
 
 use super::workspace_panel_state::WorkspacePanelSignals;
@@ -184,6 +184,7 @@ impl WorkspaceRootPickHandle {
 }
 
 /// 顶栏正中：工作区根路径只读标题（切换目录见「项目」菜单）。
+/// 项目池模式只展示末段目录名；完整路径放在 `title` 悬停提示。
 #[component]
 pub(crate) fn ShellTopbarWorkspaceRoot(pick: WorkspaceRootPickHandle) -> impl IntoView {
     let WorkspaceRootPickHandle { locale, ws, .. } = pick;
@@ -205,7 +206,10 @@ pub(crate) fn ShellTopbarWorkspaceRoot(pick: WorkspaceRootPickHandle) -> impl In
                 {move || {
                     let path = ws.workspace_path_draft.get();
                     if path.trim().is_empty() {
-                        i18n::ws_path_empty(locale.get()).to_string()
+                        return i18n::ws_path_empty(locale.get()).to_string();
+                    }
+                    if ws.workspace_pool_enabled.get() {
+                        workspace_recent_menu_label(&path)
                     } else {
                         path
                     }
