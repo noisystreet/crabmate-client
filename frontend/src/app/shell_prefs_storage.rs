@@ -56,11 +56,23 @@ pub(crate) fn platform_status_bar_on_entry(mobile_remote: bool, current: bool) -
     !mobile_remote && current
 }
 
+/// 移动 / 窄屏时侧栏与状态栏仅本端生效，不得经 `/user-data/prefs` 写回覆盖其它客户端。
+#[must_use]
+pub(crate) fn narrow_or_mobile_shell_layout(narrow_viewport: bool) -> bool {
+    crate::mobile_remote::mobile_remote_client() || narrow_viewport
+}
+
+/// 侧栏视图 / 应用内底部状态栏是否应与 `/user-data/prefs` 同步。
+#[must_use]
+pub(crate) fn shell_layout_prefs_sync_to_server(narrow_or_mobile: bool) -> bool {
+    !narrow_or_mobile
+}
+
 /// 进入壳层后按端调整工作区侧栏与应用内底部状态栏。
 pub(crate) fn apply_platform_shell_ui_on_entry(app: &AppSignals) {
     let mobile = crate::mobile_remote::mobile_remote_client();
     let narrow = app.shell_ui.is_narrow_viewport.get_untracked();
-    let narrow_or_mobile = mobile || narrow;
+    let narrow_or_mobile = narrow_or_mobile_shell_layout(narrow);
     let next = platform_side_panel_on_entry(
         narrow_or_mobile,
         app.shell_ui.side_panel_view.get_untracked(),
@@ -218,8 +230,11 @@ pub(crate) fn apply_narrow_viewport_dom_flag(narrow: bool) {
 }
 
 #[cfg(test)]
-mod platform_side_panel_tests {
-    use super::{platform_side_panel_on_entry, platform_status_bar_on_entry};
+mod platform_shell_ui_tests {
+    use super::{
+        narrow_or_mobile_shell_layout, platform_side_panel_on_entry, platform_status_bar_on_entry,
+        shell_layout_prefs_sync_to_server,
+    };
     use crate::app_prefs::SidePanelView;
 
     #[test]
@@ -251,10 +266,22 @@ mod platform_side_panel_tests {
     }
 
     #[test]
-    fn android_defaults_app_status_bar_to_hidden() {
+    fn android_entry_hides_status_bar_regardless_of_saved_pref() {
         assert!(!platform_status_bar_on_entry(true, true));
         assert!(!platform_status_bar_on_entry(true, false));
+    }
+
+    #[test]
+    fn desktop_entry_keeps_saved_status_bar_visibility() {
         assert!(platform_status_bar_on_entry(false, true));
         assert!(!platform_status_bar_on_entry(false, false));
+    }
+
+    #[test]
+    fn narrow_or_mobile_skips_server_layout_sync() {
+        assert!(!shell_layout_prefs_sync_to_server(true));
+        assert!(shell_layout_prefs_sync_to_server(false));
+        assert!(!narrow_or_mobile_shell_layout(false));
+        assert!(narrow_or_mobile_shell_layout(true));
     }
 }
