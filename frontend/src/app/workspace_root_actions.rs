@@ -83,8 +83,34 @@ pub(crate) async fn finish_workspace_root_ui(
     .await;
 }
 
+fn spawn_server_side_workspace_pick(
+    locale: RwSignal<Locale>,
+    ws: WorkspacePanelSignals,
+    side_panel_view: RwSignal<SidePanelView>,
+) {
+    ws.workspace_pick_busy.set(true);
+    let loc = locale.get_untracked();
+    spawn_local(async move {
+        match crate::api::fetch_workspace_projects(loc).await {
+            Ok(resp) if resp.enabled => {
+                side_panel_view.set(SidePanelView::Workspace);
+                ws.workspace_project_modal_open.set(true);
+            }
+            Ok(_) => {
+                // 未配置项目池：最近列表 + 路径输入（勿用 window.prompt，移动端常不可用）
+                ws.workspace_browser_pick_modal_open.set(true);
+            }
+            Err(e) => {
+                ws.workspace_set_err.set(Some(e));
+            }
+        }
+        ws.workspace_pick_busy.set(false);
+    });
+}
+
 impl WorkspaceRootPickHandle {
-    /// 桌面壳：系统文件夹对话框并提交；浏览器：项目池弹窗，或最近列表 + 路径输入弹窗。
+    /// 本机 loopback serve 的桌面壳：系统文件夹对话框；否则（远程 serve / 浏览器 / Android）：
+    /// 项目池弹窗，或最近列表 + 路径输入弹窗。
     pub fn spawn_pick_or_reveal(self) {
         let Self {
             locale,
@@ -96,25 +122,10 @@ impl WorkspaceRootPickHandle {
         if workspace_inputs_blocked(ws) {
             return;
         }
-        if !tauri_shell_available() {
-            ws.workspace_pick_busy.set(true);
-            let loc = locale.get_untracked();
-            spawn_local(async move {
-                match crate::api::fetch_workspace_projects(loc).await {
-                    Ok(resp) if resp.enabled => {
-                        side_panel_view.set(SidePanelView::Workspace);
-                        ws.workspace_project_modal_open.set(true);
-                    }
-                    Ok(_) => {
-                        // 未配置项目池：最近列表 + 路径输入（勿用 window.prompt，移动端常不可用）
-                        ws.workspace_browser_pick_modal_open.set(true);
-                    }
-                    Err(e) => {
-                        ws.workspace_set_err.set(Some(e));
-                    }
-                }
-                ws.workspace_pick_busy.set(false);
-            });
+        let use_native_folder_pick = tauri_shell_available()
+            && crate::api::api_base_host_is_loopback(&crate::api::api_base_url());
+        if !use_native_folder_pick {
+            spawn_server_side_workspace_pick(locale, ws, side_panel_view);
             return;
         }
         ws.workspace_pick_busy.set(true);

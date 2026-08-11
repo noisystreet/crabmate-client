@@ -186,6 +186,42 @@ pub fn api_base_url() -> String {
     API_BASE_URL.with(|c| c.borrow().clone())
 }
 
+/// 从已规范化的 `http(s)://` API 基址取出 host（不含端口）。
+#[must_use]
+pub fn api_base_host(base: &str) -> Option<&str> {
+    let rest = base
+        .trim()
+        .strip_prefix("https://")
+        .or_else(|| base.trim().strip_prefix("http://"))?;
+    let authority = rest.split('/').next().unwrap_or(rest);
+    if authority.is_empty() {
+        return None;
+    }
+    if let Some(inner) = authority.strip_prefix('[') {
+        return inner.split(']').next().filter(|s| !s.is_empty());
+    }
+    match authority.rsplit_once(':') {
+        Some((h, port)) if !h.is_empty() && port.chars().all(|c| c.is_ascii_digit()) => Some(h),
+        _ => Some(authority),
+    }
+}
+
+/// API 基址是否指向本机 loopback（与桌面壳共享同一文件系统）。
+///
+/// 空基址（同 Origin）**不算** loopback：桌面壳 Origin 是 `tauri.localhost`，不是 serve 工作区盘。
+#[must_use]
+pub fn api_base_host_is_loopback(base: &str) -> bool {
+    let Some(host) = api_base_host(base) else {
+        return false;
+    };
+    if host.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+    host.parse::<std::net::IpAddr>()
+        .map(|ip| ip.is_loopback())
+        .unwrap_or(false)
+}
+
 /// WebKit 常把 CORS / 不可达写成不透明的 `TypeError: Load failed`。
 pub fn format_fetch_transport_error(e: &wasm_bindgen::JsValue) -> String {
     let detail = e
@@ -322,6 +358,21 @@ mod tests {
         assert_eq!(normalize_api_base_url("  "), "");
         assert_eq!(normalize_api_base_url("/only-path"), "");
         assert_eq!(normalize_api_base_url("ftp://x"), "");
+    }
+
+    #[test]
+    fn api_base_host_is_loopback_only_for_local_serve() {
+        assert!(api_base_host_is_loopback("http://127.0.0.1:8080"));
+        assert!(api_base_host_is_loopback("http://localhost:8080"));
+        assert!(api_base_host_is_loopback("http://[::1]:8080"));
+        assert!(!api_base_host_is_loopback(""));
+        assert!(!api_base_host_is_loopback("https://api.example.com"));
+        assert!(!api_base_host_is_loopback("http://192.168.1.10:8080"));
+        assert_eq!(
+            api_base_host("https://api.example.com/v1"),
+            Some("api.example.com")
+        );
+        assert_eq!(api_base_host("http://[::1]:8080"), Some("::1"));
     }
 
     #[test]

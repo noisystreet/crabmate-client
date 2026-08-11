@@ -25,8 +25,8 @@ pub use github_oauth::{
 };
 
 pub use browser::{
-    api_base_url, api_url, is_web_api_credential_error, set_api_base_url, set_web_api_bearer_token,
-    web_api_bearer_token_is_set,
+    api_base_host_is_loopback, api_base_url, api_url, is_web_api_credential_error,
+    set_api_base_url, set_web_api_bearer_token, web_api_bearer_token_is_set,
 };
 pub use chat_stream::{ChatStreamCallbacks, OnToolCallFn, SendChatStreamParams, send_chat_stream};
 #[allow(unused_imports)] // 对外 re-export；壳内设置页等按需引用
