@@ -1,0 +1,77 @@
+name: Android Emulator Smoke
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * 2,5"
+
+concurrency:
+  group: android-emulator-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  launch:
+    name: build · install · launch (API 35)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: mobile-tauri/src-tauri
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK and NDK
+        run: |
+          sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;27.2.12479018"
+          echo "NDK_HOME=${ANDROID_SDK_ROOT}/ndk/27.2.12479018" >> "$GITHUB_ENV"
+
+      - name: Install tauri-cli
+        run: cargo install tauri-cli --version "^2" --locked
+
+      - name: Seed packaged UI stub
+        run: |
+          mkdir -p frontend/dist
+          printf '<!DOCTYPE html><html><body>android-emulator-smoke</body></html>\n' > frontend/dist/index.html
+          CM_PREPARE_REQUIRE_FRONTEND=1 bash mobile-tauri/scripts/prepare-mobile.sh
+
+      - name: Build x86_64 debug APK
+        run: |
+          cargo tauri android build --debug --apk --target x86_64 --ci
+        working-directory: mobile-tauri/src-tauri
+
+      - name: Install and launch on emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          script: |
+            APK="mobile-tauri/src-tauri/gen/android/app/build/outputs/apk/universal/debug/crabmate-debug.apk"
+            test -s "$APK"
+            adb install -r "$APK"
+            adb shell am start -W -n edu.crabmate/.MainActivity
+            sleep 3
+            adb shell pidof edu.crabmate

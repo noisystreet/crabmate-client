@@ -76,6 +76,55 @@ jobs:
         run: cargo check --tests
         working-directory: mobile-tauri/src-tauri
 
+  build-android-apk:
+    name: android package (aarch64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: mobile-tauri/src-tauri
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK and NDK
+        run: |
+          sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;27.2.12479018"
+          echo "NDK_HOME=${ANDROID_SDK_ROOT}/ndk/27.2.12479018" >> "$GITHUB_ENV"
+
+      - name: Install tauri-cli
+        run: cargo install tauri-cli --version "^2" --locked
+
+      - name: Seed packaged UI stub
+        run: |
+          mkdir -p frontend/dist
+          printf '<!DOCTYPE html><html><body>ci-mobile-stub</body></html>\n' > frontend/dist/index.html
+
+      - name: Build Android APK
+        env:
+          CM_MOBILE_SKIP_FRONTEND: "1"
+          MOBILE_ANDROID_TARGET: aarch64
+        run: make apk
+
+      - name: Verify Android APK
+        run: test -s mobile-tauri/crabmate.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: crabmate-android-aarch64
+          path: mobile-tauri/crabmate.apk
+          retention-days: 7
+
   build-desktop-deb:
     name: desktop release package (deb)
     runs-on: ubuntu-latest

@@ -63,6 +63,12 @@ cargo tauri dev
 # 真实 LLM：REAL_LLM_E2E=1 ./scripts/victauri-e2e.sh real_llm
 ```
 
+CI 分层：
+
+- PR：Playwright Chromium 覆盖工具后 SSE 提前 EOF → `stream_resume` → 终答恢复。
+- PR：构建并上传 Android aarch64 APK，验证完整 Android/Tauri 打包链。
+- 定时或手动：`.github/workflows/android-emulator-smoke.yml` 构建 x86_64 debug APK，在 API 35 模拟器安装并启动包 `edu.crabmate`。
+
 详见 [`docs/TESTING.md`](../TESTING.md)。
 
 ## 5. 执行记录（可选）
