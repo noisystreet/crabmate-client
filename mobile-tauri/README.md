@@ -25,6 +25,8 @@
 
 顶栏安全区：`CrabMateMobile.getStatusBarInsetPx()` 写入 CSS `--cm-safe-top`（状态栏/刘海 + 少量触控余量，至少约 24px；Web 侧 `--cm-safe-top-floor` 同保底）；原生还会在页面侧注入该变量。包内前端与连接页共用。
 
+应用内底部状态栏在 Android 壳每次进入时默认隐藏（不会沿用其它端“显示”偏好）；需要时仍可从侧栏工具条开启。
+
 ### Release 签名（可选）
 
 本地创建（已 gitignore，勿提交）：

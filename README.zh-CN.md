@@ -128,6 +128,8 @@ make apk
 # 需要构建 UI 时：CM_MOBILE_BUILD_FRONTEND=1 make apk
 ```
 
+Android 壳默认隐藏应用内底部状态栏；仍可从侧栏工具条重新开启。
+
 ## 开发约定
 
 - `crabmate-connect`：本仓 `path = "../../crates/crabmate-connect"`
