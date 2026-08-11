@@ -20,6 +20,7 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Fixed
 
+- Desktop: when the connected API base is not loopback, **Choose workspace** opens the server project-pool / path modal instead of the local OS folder picker (local `127.0.0.1` / `localhost` still uses the native dialog)
 - Android: model API key Keystore bridge no longer calls `WebView.getUrl()` from the JS binder thread (use UI-thread URL cache refreshed on resume/navigation sampling); deny bridge access until the cache is ready (frontend retries); serialize Keystore encrypt/decrypt with retries so saves stick across app restarts
 
 ### Changed
