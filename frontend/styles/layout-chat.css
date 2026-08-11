@@ -292,11 +292,19 @@
 
 .chat-tui-body {
   min-width: 0;
+  max-width: 100%;
+  /* 长 URL / 无空格串：在气泡宽度内断行，避免撑破消息卡 */
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 /* —— 用户：accent 轻卡片，靠右（外层 wrap 负责贴右） —— */
 .chat-tui-turn--user {
+  /* fit-content 在窄屏 + 长词时易与 max-width 打架；显式封顶并允许断行 */
   width: fit-content;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   background: linear-gradient(
     160deg,
     color-mix(in srgb, var(--accent) 26%, var(--surface)) 0%,
@@ -312,8 +320,8 @@
 .chat-tui-turn--user .chat-tui-body {
   /* 块靠右；正文在块内左对齐（与「整气泡贴右」区分） */
   text-align: left;
-  overflow-wrap: break-word;
-  word-break: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 /* —— 助手：中性卡片，拉满 —— */
@@ -413,6 +421,10 @@
 .chat-tui-line {
   /* 冻结块 append 时减少牵连已滚过区域的布局抖动（勿用 size，避免无显式尺寸时塌缩） */
   contain: layout;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .chat-tui-line > :first-child {
@@ -434,9 +446,36 @@
   margin: 0 0 0.35em;
 }
 
+/* 代码块 / 表：横向滚动，勿把气泡撑出视口 */
+.chat-tui-line pre {
+  overflow-x: auto;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.chat-tui-line table {
+  display: block;
+  overflow-x: auto;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.chat-tui-line code {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.chat-tui-line img,
+.chat-tui-line video {
+  max-width: 100%;
+  height: auto;
+}
+
 .chat-tui-line--plain,
 .chat-tui-line--active {
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .chat-tui-line--active code {
