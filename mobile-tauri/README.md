@@ -74,7 +74,7 @@ CM_WEB_API_BEARER_TOKEN='your-shared-secret' \
 
 ## GitHub（Device Flow）
 
-移动端：GitHub 授权走包内 UI 的 **设置 → GitHub**（`#/settings/github`），token 写入 **serve 所在主机** 钥匙串，**不**落在手机本机。
+移动端：GitHub 授权走包内 UI 的 **设置 → GitHub**（`#/settings/github`）。OAuth Client ID 是公开标识符，保存在包内 UI 的本机 `localStorage`；user token 写入手机 Android Keystore 的 `github` 槽，经请求头交给远程 `serve`，服务端不持久化 Client ID 或 user token。
 
-1. 在运行 `serve` 的机器上配置 Client ID：环境变量 **`CM_GITHUB_OAUTH_CLIENT_ID`**，或在设置页写入钥匙串（详见主仓 **`docs/配置说明.md`**「`CM_GITHUB_OAUTH_*`」与 **`docs/命令行与路由.md`** Device Flow 路由）。
+1. 在包内 UI 的 **设置 → GitHub** 保存 OAuth / App Client ID；它不属于密钥，不写入钥匙串。Server 不再读取 `CM_GITHUB_OAUTH_CLIENT_ID`；仅 `CM_GITHUB_OAUTH_SCOPES` 仍是服务端配置（详见主仓 **`docs/配置说明.md`** 与 **`docs/命令行与路由.md`** Device Flow 路由）。
 2. 手机连上后打开 **设置 → GitHub**，点「连接 GitHub」；系统浏览器完成授权。
