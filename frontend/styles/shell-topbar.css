@@ -340,10 +340,11 @@ html[data-cm-mobile-shell] .shell-topbar {
   font-size: 0.75rem;
 }
 
+/* Portal → body；须低于 .shell-topbar (90)，高于主内容，才能点空白收起且不挡菜单 */
 .ide-menu-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 4;
+  z-index: 80;
   border: none;
   padding: 0;
   margin: 0;

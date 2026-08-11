@@ -1,6 +1,9 @@
 //! 「项目」菜单（对话顶栏与 IDE 顶栏共用：打开工作区、最近；IDE 另附保存/新建/回会话）。
 
+use leptos::portal::Portal;
 use leptos::prelude::*;
+use leptos_dom::helpers::window_event_listener;
+use wasm_bindgen::JsCast;
 
 use super::menu_id::IdeMenuId;
 use super::props::IdeMenuBarSignals;
@@ -345,25 +348,66 @@ pub(crate) fn ShellTopbarFileMenu(
 }
 
 /// 菜单下拉打开时的全屏透明遮罩（会话 / IDE 共用）。
+///
+/// 经 [`Portal`] 挂到 `document.body`：顶栏有 `backdrop-filter`，内部的
+/// `position: fixed` 会被困在顶栏高度内，点页面空白无法收起；Portal 后遮罩
+/// 覆盖视口，且 z-index 低于 `.shell-topbar`（90），不挡住菜单点击。
+///
+/// 另挂 `pointerdown`：点顶栏内菜单外区域（路径标题等）也能收起——这些命中在
+/// 顶栏叠层之上，遮罩接不到。
 #[component]
 pub(crate) fn ShellTopbarMenuBackdrop(
     open_menu: RwSignal<Option<IdeMenuId>>,
     menubar_dropdown_open: RwSignal<bool>,
 ) -> impl IntoView {
+    Effect::new(move |_| {
+        if open_menu.get().is_none() {
+            return;
+        }
+        let h = window_event_listener(leptos::ev::pointerdown, move |ev: web_sys::PointerEvent| {
+            if pointer_event_inside_ide_menu(&ev) {
+                return;
+            }
+            open_menu.set(None);
+            menubar_dropdown_open.set(false);
+        });
+        on_cleanup(move || h.remove());
+    });
+
     view! {
         <Show when=move || open_menu.get().is_some()>
-            <button
-                type="button"
-                class="ide-menu-backdrop"
-                tabindex="-1"
-                aria-hidden="true"
-                on:click=move |_| {
-                    open_menu.set(None);
-                    menubar_dropdown_open.set(false);
-                }
-            />
+            <Portal>
+                <button
+                    type="button"
+                    class="ide-menu-backdrop"
+                    tabindex="-1"
+                    aria-hidden="true"
+                    on:click=move |ev: web_sys::MouseEvent| {
+                        ev.stop_propagation();
+                        open_menu.set(None);
+                        menubar_dropdown_open.set(false);
+                    }
+                />
+            </Portal>
         </Show>
     }
+}
+
+fn pointer_event_inside_ide_menu(ev: &web_sys::PointerEvent) -> bool {
+    let Some(target) = ev.target() else {
+        return false;
+    };
+    let el = match target.dyn_into::<web_sys::Element>() {
+        Ok(el) => el,
+        Err(node) => match node.dyn_into::<web_sys::Node>() {
+            Ok(n) => match n.parent_element() {
+                Some(el) => el,
+                None => return false,
+            },
+            Err(_) => return false,
+        },
+    };
+    el.closest(".ide-menu-wrap").ok().flatten().is_some()
 }
 
 #[component]
