@@ -204,19 +204,18 @@ pub fn chat_temperature_override_from_storage() -> Option<f64> {
 pub fn executor_llm_json_for_chat_body() -> Option<Value> {
     with_mem(|m| {
         let mut map = serde_json::Map::new();
-        if !m.executor_api_base.trim().is_empty() {
-            map.insert(
-                "api_base".into(),
-                Value::String(m.executor_api_base.clone()),
-            );
+        // 官方 Client 的执行轮与主轮强制共用同一模型身份，避免工具后切换到陈旧的
+        // executor 密钥或端点；服务端仍保留兼容字段供其它调用方使用。
+        if !m.api_base.trim().is_empty() {
+            map.insert("api_base".into(), Value::String(m.api_base.clone()));
         }
-        if !m.executor_model.trim().is_empty() {
-            map.insert("model".into(), Value::String(m.executor_model.clone()));
+        if !m.model.trim().is_empty() {
+            map.insert("model".into(), Value::String(m.model.clone()));
         }
-        let key = if m.executor_api_key.trim().is_empty() {
-            super::llm_secrets_local::executor_llm_api_key()
+        let key = if m.api_key.trim().is_empty() {
+            super::llm_secrets_local::client_llm_api_key()
         } else {
-            m.executor_api_key.clone()
+            m.api_key.clone()
         };
         if !key.trim().is_empty() {
             map.insert("api_key".into(), Value::String(key));
@@ -346,4 +345,28 @@ pub fn merge_llm_persist_kinds(
         merge_persist_kind(&mut acc, k);
     }
     acc
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn executor_chat_body_uses_primary_model_identity() {
+        with_mem_mut(|m| {
+            m.api_base = "https://primary.example/v1".to_string();
+            m.model = "primary-model".to_string();
+            m.api_key = "sk-primary".to_string();
+            m.executor_api_base = "https://stale.example/v1".to_string();
+            m.executor_model = "stale-model".to_string();
+            m.executor_api_key = "Bearer sk-stale".to_string();
+        });
+
+        let body = executor_llm_json_for_chat_body().expect("primary identity should be present");
+        assert_eq!(body["api_base"], "https://primary.example/v1");
+        assert_eq!(body["model"], "primary-model");
+        assert_eq!(body["api_key"], "sk-primary");
+        assert!(!body.to_string().contains("stale"));
+        with_mem_mut(|m| *m = Default::default());
+    }
 }
