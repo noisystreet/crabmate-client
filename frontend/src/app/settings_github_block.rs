@@ -7,8 +7,8 @@ use leptos_dom::helpers::event_target_value;
 
 use crate::api::github_secrets_local::{
     clear_github_connection_local, clear_github_oauth_client_id, github_oauth_client_id,
-    github_oauth_client_id_is_set, on_device_flow_success, persist_github_oauth_client_id,
-    reconcile_github_connection_status,
+    github_oauth_client_id_is_set, github_oauth_client_id_is_valid, on_device_flow_success,
+    persist_github_oauth_client_id, reconcile_github_connection_status,
 };
 use crate::api::{
     GithubDeviceStartDto, fetch_github_oauth_device_status, post_github_oauth_device_cancel,
@@ -204,20 +204,43 @@ fn spawn_save_client_id(loc: Locale, ui: GithubUiSignals) {
     ui.client_id_feedback.set(None);
     let trimmed = draft.trim().to_string();
     if trimmed.is_empty() {
-        clear_github_oauth_client_id();
-        ui.client_id_draft.set(String::new());
-        ui.client_id_set.set(false);
-        ui.client_id_feedback
-            .set(Some(i18n::settings_github_client_id_cleared(loc).into()));
+        apply_client_id_clear_result(loc, ui, clear_github_oauth_client_id());
+    } else if !github_oauth_client_id_is_valid(&trimmed) {
+        ui.err
+            .set(Some(i18n::settings_github_client_id_invalid(loc).into()));
     } else {
-        persist_github_oauth_client_id(&trimmed);
-        ui.client_id_draft.set(String::new());
-        ui.client_id_set.set(true);
-        ui.client_id_feedback
-            .set(Some(i18n::settings_github_client_id_saved(loc).into()));
+        match persist_github_oauth_client_id(&trimmed) {
+            Ok(()) => {
+                ui.client_id_draft.set(String::new());
+                ui.client_id_set.set(true);
+                ui.client_id_feedback
+                    .set(Some(i18n::settings_github_client_id_saved(loc).into()));
+            }
+            Err(e) => ui
+                .err
+                .set(Some(i18n::settings_github_client_id_storage_failed(
+                    loc, &e,
+                ))),
+        }
     }
     refresh_github_local_slots(loc, ui);
     ui.busy.set(false);
+}
+
+fn apply_client_id_clear_result(loc: Locale, ui: GithubUiSignals, result: Result<(), String>) {
+    match result {
+        Ok(()) => {
+            ui.client_id_draft.set(String::new());
+            ui.client_id_set.set(false);
+            ui.client_id_feedback
+                .set(Some(i18n::settings_github_client_id_cleared(loc).into()));
+        }
+        Err(e) => ui
+            .err
+            .set(Some(i18n::settings_github_client_id_storage_failed(
+                loc, &e,
+            ))),
+    }
 }
 
 fn spawn_clear_client_id(loc: Locale, ui: GithubUiSignals) {
@@ -227,11 +250,7 @@ fn spawn_clear_client_id(loc: Locale, ui: GithubUiSignals) {
     ui.busy.set(true);
     ui.err.set(None);
     ui.client_id_feedback.set(None);
-    clear_github_oauth_client_id();
-    ui.client_id_draft.set(String::new());
-    ui.client_id_set.set(false);
-    ui.client_id_feedback
-        .set(Some(i18n::settings_github_client_id_cleared(loc).into()));
+    apply_client_id_clear_result(loc, ui, clear_github_oauth_client_id());
     refresh_github_local_slots(loc, ui);
     ui.busy.set(false);
 }

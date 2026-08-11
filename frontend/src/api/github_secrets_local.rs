@@ -30,19 +30,42 @@ fn read_ls(key: &str) -> Option<String> {
     if t.is_empty() { None } else { Some(t) }
 }
 
-fn write_ls(key: &str, value: &str) {
-    let Some(w) = window() else {
-        return;
-    };
-    let Ok(Some(storage)) = w.local_storage() else {
-        return;
-    };
+fn local_storage_checked() -> Result<web_sys::Storage, String> {
+    let w = window().ok_or_else(|| "window unavailable".to_string())?;
+    w.local_storage()
+        .map_err(|_| "localStorage unavailable".to_string())?
+        .ok_or_else(|| "localStorage unavailable".to_string())
+}
+
+fn verify_ls_value(storage: &web_sys::Storage, key: &str, expected: &str) -> Result<(), String> {
+    let stored = storage
+        .get_item(key)
+        .map_err(|_| "localStorage read-back failed".to_string())?
+        .unwrap_or_default();
+    if stored.trim() != expected {
+        return Err("localStorage read-back mismatch".to_string());
+    }
+    Ok(())
+}
+
+fn write_ls_checked(key: &str, value: &str) -> Result<(), String> {
+    let storage = local_storage_checked()?;
     let t = value.trim();
     if t.is_empty() {
-        let _ = storage.remove_item(key);
+        storage
+            .remove_item(key)
+            .map_err(|_| "localStorage remove failed".to_string())?;
     } else {
-        let _ = storage.set_item(key, t);
+        storage
+            .set_item(key, t)
+            .map_err(|_| "localStorage write failed".to_string())?;
     }
+    verify_ls_value(&storage, key, t)
+}
+
+/// 非关键连接态提示采用尽力写入；失败不影响当前会话，也不会暴露 token。
+fn write_ls(key: &str, value: &str) {
+    let _ = write_ls_checked(key, value);
 }
 
 /// 是否存在壳安全存储（桌面钥匙串 / Android Keystore）。
@@ -61,12 +84,25 @@ pub fn github_oauth_client_id_is_set() -> bool {
     !github_oauth_client_id().trim().is_empty()
 }
 
-pub fn persist_github_oauth_client_id(client_id: &str) {
-    write_ls(LS_CLIENT_ID, client_id);
+#[must_use]
+pub fn github_oauth_client_id_is_valid(client_id: &str) -> bool {
+    let id = client_id.trim();
+    !id.is_empty()
+        && id.len() <= 128
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
 }
 
-pub fn clear_github_oauth_client_id() {
-    write_ls(LS_CLIENT_ID, "");
+pub fn persist_github_oauth_client_id(client_id: &str) -> Result<(), String> {
+    if !github_oauth_client_id_is_valid(client_id) {
+        return Err("invalid GitHub OAuth client ID".to_string());
+    }
+    write_ls_checked(LS_CLIENT_ID, client_id)
+}
+
+pub fn clear_github_oauth_client_id() -> Result<(), String> {
+    write_ls_checked(LS_CLIENT_ID, "")
 }
 
 fn sync_request_header_from_memory() {
@@ -192,5 +228,19 @@ pub async fn reconcile_github_connection_status(loc: Locale) -> bool {
             false
         }
         Err(_) => true,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::github_oauth_client_id_is_valid;
+
+    #[test]
+    fn github_client_id_validation_matches_server_contract() {
+        assert!(github_oauth_client_id_is_valid("Iv1.abcDEF12"));
+        assert!(github_oauth_client_id_is_valid("Ov23li_example-1"));
+        assert!(!github_oauth_client_id_is_valid(""));
+        assert!(!github_oauth_client_id_is_valid("bad id"));
+        assert!(!github_oauth_client_id_is_valid(&"a".repeat(129)));
     }
 }

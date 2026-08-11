@@ -43,9 +43,11 @@ pub fn settings_github_client_id_set(l: Locale) -> &'static str {
 
 pub fn settings_github_client_id_hint(l: Locale) -> &'static str {
     match l {
-        Locale::ZhHans => "保存在本机；仅连接 GitHub 时需要，不是启动必配项。",
+        Locale::ZhHans => {
+            "保存在当前应用 / 浏览器站点的本机存储；仅连接 GitHub 时需要，不是启动必配项。"
+        }
         Locale::En => {
-            "Stored on this device; required only when connecting GitHub, not at startup."
+            "Stored in this app/site's local storage; required only when connecting GitHub, not at startup."
         }
     }
 }
@@ -54,6 +56,22 @@ pub fn settings_github_client_id_required(l: Locale) -> &'static str {
     match l {
         Locale::ZhHans => "请先填写并保存 OAuth / App Client ID",
         Locale::En => "Save an OAuth / App Client ID first",
+    }
+}
+
+pub fn settings_github_client_id_invalid(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "Client ID 格式无效：最多 128 字节，仅允许字母、数字、点、下划线和连字符",
+        Locale::En => {
+            "Invalid Client ID: use at most 128 bytes containing only letters, digits, dot, underscore, or hyphen"
+        }
+    }
+}
+
+pub fn settings_github_client_id_storage_failed(l: Locale, detail: &str) -> String {
+    match l {
+        Locale::ZhHans => format!("Client ID 本机存储失败：{detail}"),
+        Locale::En => format!("Failed to store Client ID locally: {detail}"),
     }
 }
 
