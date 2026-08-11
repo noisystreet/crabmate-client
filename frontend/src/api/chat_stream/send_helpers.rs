@@ -45,9 +45,31 @@ pub(super) async fn chat_stream_http_error_message(
     Ok(msg)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ChatStreamConsumeOutcome {
     Finished { saw_stream_ended: bool },
     ResumeReconnect,
+}
+
+fn classify_chat_stream_consume_outcome(
+    stream_finished_normally: bool,
+    saw_stream_ended: bool,
+    stream_resume_job_id: Option<u64>,
+) -> ChatStreamConsumeOutcome {
+    if saw_stream_ended {
+        return ChatStreamConsumeOutcome::Finished {
+            saw_stream_ended: true,
+        };
+    }
+    // 队列流拥有 job id：即使 WebView 把提前 EOF 报成 `done=true`，缺少 RUN_FINISHED /
+    // stream_ended 也不能合成 completed；按 Last-Event-ID 重连补收终答与真实终态。
+    if stream_resume_job_id.is_some() || !stream_finished_normally {
+        return ChatStreamConsumeOutcome::ResumeReconnect;
+    }
+    // 无 job id 的内建命令是单帧短响应，兼容其「body EOF 即完成」旧契约。
+    ChatStreamConsumeOutcome::Finished {
+        saw_stream_ended: false,
+    }
 }
 
 pub(super) async fn consume_chat_stream_body_phase(
@@ -73,11 +95,11 @@ pub(super) async fn consume_chat_stream_body_phase(
         stream_resume_job_id,
     )
     .await?;
-    Ok(if stream_finished_normally {
-        ChatStreamConsumeOutcome::Finished { saw_stream_ended }
-    } else {
-        ChatStreamConsumeOutcome::ResumeReconnect
-    })
+    Ok(classify_chat_stream_consume_outcome(
+        stream_finished_normally,
+        saw_stream_ended,
+        stream_resume_job_id,
+    ))
 }
 
 pub(super) enum ChatStreamRoundOutcome {
@@ -136,8 +158,39 @@ pub(super) async fn run_chat_stream_http_round(
 
 #[cfg(test)]
 mod tests {
-    use super::dispatch_finished_round_callbacks;
+    use super::{
+        ChatStreamConsumeOutcome, classify_chat_stream_consume_outcome,
+        dispatch_finished_round_callbacks,
+    };
     use std::cell::Cell;
+
+    #[test]
+    fn queued_body_eof_without_terminal_reconnects() {
+        assert_eq!(
+            classify_chat_stream_consume_outcome(true, false, Some(42)),
+            ChatStreamConsumeOutcome::ResumeReconnect
+        );
+    }
+
+    #[test]
+    fn queued_body_with_terminal_finishes() {
+        assert_eq!(
+            classify_chat_stream_consume_outcome(true, true, Some(42)),
+            ChatStreamConsumeOutcome::Finished {
+                saw_stream_ended: true
+            }
+        );
+    }
+
+    #[test]
+    fn builtin_body_eof_without_job_keeps_short_response_compatibility() {
+        assert_eq!(
+            classify_chat_stream_consume_outcome(true, false, None),
+            ChatStreamConsumeOutcome::Finished {
+                saw_stream_ended: false
+            }
+        );
+    }
 
     #[test]
     fn body_completion_dispatches_done_exactly_once_after_run_finished() {

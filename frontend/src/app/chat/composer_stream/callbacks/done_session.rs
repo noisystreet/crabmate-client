@@ -9,7 +9,18 @@ use super::super::per_stream_accum::PerStreamTurnSummary;
 use super::done_bubble::{DoneBubbleAction, DoneBubbleDecisionInputs, decide_done_bubble_action};
 use super::helpers::build_empty_reply_with_diagnostic;
 
-fn push_synthetic_assistant_text(messages: &mut Vec<StoredMessage>, text: String) {
+fn push_missing_assistant_diagnostic(
+    messages: &mut Vec<StoredMessage>,
+    turn: &PerStreamTurnSummary,
+    in_answer_body_lane: bool,
+    locale: Locale,
+) {
+    let text = build_empty_reply_with_diagnostic(
+        locale,
+        in_answer_body_lane,
+        turn.answer_delta_chars,
+        turn.stream_end_reason.as_deref(),
+    );
     messages.push(StoredMessage {
         id: format!("asst_diag_{}", messages.len()),
         role: "assistant".to_string(),
@@ -22,60 +33,6 @@ fn push_synthetic_assistant_text(messages: &mut Vec<StoredMessage>, text: String
         tool_name: None,
         created_at: 0,
     });
-}
-
-/// 主 loading id 已漂移/被撤壳时，仍按与尾泡相同的 [`decide_done_bubble_action`] 决定是否补诊断。
-///
-/// 工具轮 `completed` + 空终答本应静默（`RemoveBubble`）；旧逻辑无条件 `push` 会误报
-/// 「未收到正文片段」（安卓上工具后空 `final_response`/撤壳更常见）。
-fn apply_missing_loading_id_done_action(
-    messages: &mut Vec<StoredMessage>,
-    turn: &PerStreamTurnSummary,
-    in_answer_body_lane: bool,
-    has_tool: bool,
-    locale: Locale,
-) {
-    if turn.answer_delta_chars > 0 || turn.saw_final_response_timeline {
-        return;
-    }
-    let end_reason = turn.stream_end_reason.as_deref();
-    let diag_chars = turn.answer_delta_chars;
-    match decide_done_bubble_action(DoneBubbleDecisionInputs {
-        body_and_reasoning_empty: true,
-        end_reason_raw: end_reason,
-        in_answer_body_lane,
-        diag_chars,
-        has_tool,
-        saw_final_response_timeline: turn.saw_final_response_timeline,
-    }) {
-        DoneBubbleAction::Keep | DoneBubbleAction::RemoveBubble => {}
-        DoneBubbleAction::FillMissingFinalHint => {
-            push_synthetic_assistant_text(
-                messages,
-                format!(
-                    "{}\n\n{}",
-                    crate::i18n::stream_completed_missing_final_summary_hint(locale),
-                    crate::i18n::stream_empty_reply_diag_line(
-                        locale,
-                        end_reason,
-                        in_answer_body_lane,
-                        diag_chars,
-                    )
-                ),
-            );
-        }
-        DoneBubbleAction::FillDiagnostic => {
-            push_synthetic_assistant_text(
-                messages,
-                build_empty_reply_with_diagnostic(
-                    locale,
-                    in_answer_body_lane,
-                    diag_chars,
-                    end_reason,
-                ),
-            );
-        }
-    }
 }
 
 /// 流式整轮结束后仍残留的助手 `Loading` 占位（轮换/id 漂移等）须在此清除，避免 UI 与 lifecycle 长期不一致。
@@ -95,7 +52,9 @@ pub(super) fn apply_stream_done_to_loading_assistant(
     let Some(idx) = messages.iter().position(|m| m.id == assistant_message_id) else {
         clear_residual_assistant_loading_placeholders(messages);
         clear_residual_empty_assistant_rows(messages);
-        apply_missing_loading_id_done_action(messages, turn, in_answer_body_lane, has_tool, locale);
+        if turn.answer_delta_chars == 0 && !turn.saw_final_response_timeline {
+            push_missing_assistant_diagnostic(messages, turn, in_answer_body_lane, locale);
+        }
         return;
     };
     if !is_loading_plain_assistant(&messages[idx]) {
@@ -199,55 +158,6 @@ mod tests {
         );
         assert_eq!(msgs.len(), 1);
         assert!(msgs[0].text.contains("未进入正文阶段"));
-    }
-
-    #[test]
-    fn completed_tool_turn_missing_loading_id_does_not_fake_no_delta() {
-        // 复现：工具后空 final_response/撤壳导致 mid 丢失；旧逻辑无条件 push
-        // 「未收到正文片段」，即使用户看到 stream_ended=完成。
-        let mut msgs = vec![StoredMessage {
-            id: "tool_1".into(),
-            role: "assistant".into(),
-            text: "ok".into(),
-            reasoning_text: String::new(),
-            image_urls: vec![],
-            state: None,
-            is_tool: true,
-            tool_call_id: Some("tc1".into()),
-            tool_name: Some("list_tree".into()),
-            created_at: 0,
-        }];
-        apply_stream_done_to_loading_assistant(
-            &mut msgs,
-            "post_tool_loading_gone",
-            &PerStreamTurnSummary {
-                answer_delta_chars: 0,
-                stream_end_reason: Some("completed".into()),
-                saw_final_response_timeline: false,
-            },
-            true,
-            crate::i18n::Locale::ZhHans,
-        );
-        assert_eq!(msgs.len(), 1);
-        assert!(msgs[0].is_tool);
-        assert!(!msgs.iter().any(|m| m.text.contains("未收到正文片段")));
-    }
-
-    #[test]
-    fn completed_plain_empty_missing_loading_id_stays_silent() {
-        let mut msgs: Vec<StoredMessage> = vec![];
-        apply_stream_done_to_loading_assistant(
-            &mut msgs,
-            "gone",
-            &PerStreamTurnSummary {
-                answer_delta_chars: 0,
-                stream_end_reason: Some("completed".into()),
-                saw_final_response_timeline: false,
-            },
-            true,
-            crate::i18n::Locale::ZhHans,
-        );
-        assert!(msgs.is_empty());
     }
 
     #[test]
