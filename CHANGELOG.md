@@ -20,6 +20,7 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Fixed
 
+- Chat: markdown tables render with light-gray cell borders (chat transcript lacked table border styles; `--border-subtle` was nearly invisible on dark surfaces)
 - Chat: long unbroken strings / code blocks no longer overflow message bubbles on narrow (mobile) widths
 - Shell: clicking outside an open **Project** / Edit / View topbar menu dismisses it (portaled backdrop escapes topbar `backdrop-filter`; `pointerdown` also closes when clicking other topbar chrome)
 - Desktop: when the connected API base is not loopback, **Choose workspace** opens the server project-pool / path modal instead of the local OS folder picker (local `127.0.0.1` / `localhost` still uses the native dialog)
