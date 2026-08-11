@@ -458,6 +458,22 @@
   overflow-x: auto;
   max-width: 100%;
   box-sizing: border-box;
+  border-collapse: collapse;
+  font-size: 13px;
+  margin: 0.35em 0;
+}
+
+.chat-tui-line th,
+.chat-tui-line td {
+  /* 浅灰格线：勿用 --border-subtle（深色主题下接近底色，几乎看不见） */
+  border: 1px solid color-mix(in srgb, var(--muted) 42%, var(--surface));
+  padding: 0.35em 0.55em;
+  text-align: left;
+}
+
+.chat-tui-line th {
+  font-weight: 650;
+  background: color-mix(in srgb, var(--muted) 12%, var(--surface));
 }
 
 .chat-tui-line code {
@@ -948,14 +964,14 @@
 
 .msg-md-prose th,
 .msg-md-prose td {
-  border: 1px solid var(--border-subtle);
+  border: 1px solid color-mix(in srgb, var(--muted) 42%, var(--surface));
   padding: 0.35em 0.55em;
   text-align: left;
 }
 
 .msg-md-prose th {
   font-weight: 650;
-  background: color-mix(in srgb, var(--surface) 55%, transparent);
+  background: color-mix(in srgb, var(--muted) 12%, var(--surface));
 }
 
 .msg-md-prose blockquote {
