@@ -99,23 +99,10 @@ struct PutSessionsBody {
     active_session_id: Option<String>,
 }
 
-async fn fetch_json<T: for<'de> Deserialize<'de>>(
-    method: &str,
-    url: &str,
+async fn read_ok_json_body<T: for<'de> Deserialize<'de>>(
+    resp: Response,
     loc: Locale,
 ) -> Result<T, String> {
-    let init = RequestInit::new();
-    init.set_method(method);
-    prepare_api_auth(&init).await;
-    let url = api_url(url);
-    let req = Request::new_with_str_and_init(&url, &init).map_err(|e| format!("request: {e:?}"))?;
-    let w = window().ok_or_else(|| crate::i18n::api_err_no_window(loc).to_string())?;
-    let resp_val = JsFuture::from(w.fetch_with_request(&req))
-        .await
-        .map_err(|e| format!("fetch: {e:?}"))?;
-    let resp: Response = resp_val
-        .dyn_into()
-        .map_err(|_| crate::i18n::api_err_response_type(loc))?;
     if !resp.ok() {
         return Err(crate::i18n::api_err_request_failed(loc).to_string());
     }
@@ -126,6 +113,34 @@ async fn fetch_json<T: for<'de> Deserialize<'de>>(
         .as_string()
         .ok_or_else(|| crate::i18n::api_err_body_type(loc).to_string())?;
     serde_json::from_str(&s).map_err(|e| e.to_string())
+}
+
+async fn fetch_request_json<T: for<'de> Deserialize<'de>>(
+    init: &RequestInit,
+    url: &str,
+    loc: Locale,
+) -> Result<T, String> {
+    let url = api_url(url);
+    let req = Request::new_with_str_and_init(&url, init).map_err(|e| format!("request: {e:?}"))?;
+    let w = window().ok_or_else(|| crate::i18n::api_err_no_window(loc).to_string())?;
+    let resp_val = JsFuture::from(w.fetch_with_request(&req))
+        .await
+        .map_err(|e| format!("fetch: {e:?}"))?;
+    let resp: Response = resp_val
+        .dyn_into()
+        .map_err(|_| crate::i18n::api_err_response_type(loc))?;
+    read_ok_json_body(resp, loc).await
+}
+
+async fn fetch_json<T: for<'de> Deserialize<'de>>(
+    method: &str,
+    url: &str,
+    loc: Locale,
+) -> Result<T, String> {
+    let init = RequestInit::new();
+    init.set_method(method);
+    prepare_api_auth(&init).await;
+    fetch_request_json(&init, url, loc).await
 }
 
 async fn put_json_no_content_with_keepalive(
@@ -332,25 +347,7 @@ async fn post_json_body<T: for<'de> Deserialize<'de>>(
     let _ = h.set("Content-Type", "application/json");
     init.set_headers(&h);
     init.set_body(&wasm_bindgen::JsValue::from_str(body));
-    let url = api_url(url);
-    let req = Request::new_with_str_and_init(&url, &init).map_err(|e| format!("request: {e:?}"))?;
-    let w = window().ok_or_else(|| crate::i18n::api_err_no_window(loc).to_string())?;
-    let resp_val = JsFuture::from(w.fetch_with_request(&req))
-        .await
-        .map_err(|e| format!("fetch: {e:?}"))?;
-    let resp: Response = resp_val
-        .dyn_into()
-        .map_err(|_| crate::i18n::api_err_response_type(loc))?;
-    if !resp.ok() {
-        return Err(crate::i18n::api_err_request_failed(loc).to_string());
-    }
-    let text = JsFuture::from(resp.text().map_err(|e| format!("text: {e:?}"))?)
-        .await
-        .map_err(|e| format!("read body: {e:?}"))?;
-    let s = text
-        .as_string()
-        .ok_or_else(|| crate::i18n::api_err_body_type(loc).to_string())?;
-    serde_json::from_str(&s).map_err(|e| e.to_string())
+    fetch_request_json(&init, url, loc).await
 }
 
 pub async fn fetch_mcp_servers_status(loc: Locale) -> Result<McpServersStatusDto, String> {
@@ -361,25 +358,7 @@ async fn post_json<T: for<'de> Deserialize<'de>>(url: &str, loc: Locale) -> Resu
     let init = RequestInit::new();
     init.set_method("POST");
     prepare_api_auth(&init).await;
-    let url = api_url(url);
-    let req = Request::new_with_str_and_init(&url, &init).map_err(|e| format!("request: {e:?}"))?;
-    let w = window().ok_or_else(|| crate::i18n::api_err_no_window(loc).to_string())?;
-    let resp_val = JsFuture::from(w.fetch_with_request(&req))
-        .await
-        .map_err(|e| format!("fetch: {e:?}"))?;
-    let resp: Response = resp_val
-        .dyn_into()
-        .map_err(|_| crate::i18n::api_err_response_type(loc))?;
-    if !resp.ok() {
-        return Err(crate::i18n::api_err_request_failed(loc).to_string());
-    }
-    let text = JsFuture::from(resp.text().map_err(|e| format!("text: {e:?}"))?)
-        .await
-        .map_err(|e| format!("read body: {e:?}"))?;
-    let s = text
-        .as_string()
-        .ok_or_else(|| crate::i18n::api_err_body_type(loc).to_string())?;
-    serde_json::from_str(&s).map_err(|e| e.to_string())
+    fetch_request_json(&init, url, loc).await
 }
 
 pub async fn post_mcp_server_probe(

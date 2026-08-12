@@ -2,6 +2,7 @@
 
 mod delete_confirm;
 mod persist;
+mod submit;
 
 use gloo_timers::future::TimeoutFuture;
 use leptos::html::Div;
@@ -17,7 +18,7 @@ use crate::settings_llm_fields::{LlmSavedPresetApplyTarget, LlmTemperatureFieldW
 
 use crate::api::SavedModelPreset;
 use crate::i18n::{self, Locale};
-use persist::try_persist_saved_presets_with_feedback;
+use submit::{RegistryAddFormActionSignals, submit_registry_add_form};
 
 /// 模型注册表接线（单组件形参，满足 fn-param 棘轮）。
 #[derive(Clone)]
@@ -123,17 +124,17 @@ fn SettingsModelsRegistryToolbar(s: RegistryToolbarSignals) -> impl IntoView {
 }
 
 #[derive(Clone)]
-struct ManualPresetDraft {
-    api_base: String,
-    label: String,
-    model_id: String,
-    api_key: String,
-    ctx_tokens: String,
-    temperature: String,
-    thinking_mode: String,
+pub(super) struct ManualPresetDraft {
+    pub(super) api_base: String,
+    pub(super) label: String,
+    pub(super) model_id: String,
+    pub(super) api_key: String,
+    pub(super) ctx_tokens: String,
+    pub(super) temperature: String,
+    pub(super) thinking_mode: String,
 }
 
-fn try_build_manual_saved_preset(
+pub(super) fn try_build_manual_saved_preset(
     d: &ManualPresetDraft,
     enabled: bool,
 ) -> Result<SavedModelPreset, ()> {
@@ -350,47 +351,20 @@ fn SettingsModelsRegistryAddFormDetailFields(s: RegistryAddFormDetailSignals) ->
     }
 }
 
-#[derive(Clone)]
-struct RegistryAddFormActionSignals {
-    locale: RwSignal<Locale>,
-    saved_model_presets: RwSignal<Vec<SavedModelPreset>>,
-    dialog_mode: RwSignal<Option<RegistryPresetDialogKind>>,
-    form_error: RwSignal<Option<String>>,
-    new_api_base: RwSignal<String>,
-    new_label: RwSignal<String>,
-    new_model_id: RwSignal<String>,
-    new_api_key: RwSignal<String>,
-    new_ctx_tokens: RwSignal<String>,
-    new_temperature: RwSignal<String>,
-    new_thinking_mode: RwSignal<String>,
-    sync_saved_presets_baseline: Arc<dyn Fn() + Send + Sync>,
-    llm_settings_feedback: RwSignal<Option<String>>,
-    apply_on_save: Option<LlmSavedPresetApplyTarget>,
-}
-
 #[component]
 fn SettingsModelsRegistryAddFormActions(s: RegistryAddFormActionSignals) -> impl IntoView {
-    let RegistryAddFormActionSignals {
-        locale,
-        saved_model_presets,
-        dialog_mode,
-        form_error,
-        new_api_base,
-        new_label,
-        new_model_id,
-        new_api_key,
-        new_ctx_tokens,
-        new_temperature,
-        new_thinking_mode,
-        sync_saved_presets_baseline,
-        llm_settings_feedback,
-        apply_on_save,
-    } = s;
-    let close_dialog = move || {
-        dialog_mode.set(None);
-        form_error.set(None);
-    };
-    let reset_fields = move || {
+    let locale = s.locale;
+    let dialog_mode = s.dialog_mode;
+    let form_error = s.form_error;
+    let new_api_base = s.new_api_base;
+    let new_label = s.new_label;
+    let new_model_id = s.new_model_id;
+    let new_api_key = s.new_api_key;
+    let new_ctx_tokens = s.new_ctx_tokens;
+    let new_temperature = s.new_temperature;
+    let new_thinking_mode = s.new_thinking_mode;
+    let submit_signals = s;
+    let reset_and_close = Arc::new(move || {
         new_api_base.set(String::new());
         new_label.set(String::new());
         new_model_id.set(String::new());
@@ -398,86 +372,22 @@ fn SettingsModelsRegistryAddFormActions(s: RegistryAddFormActionSignals) -> impl
         new_ctx_tokens.set(String::new());
         new_temperature.set("0.7".to_string());
         new_thinking_mode.set("server".to_string());
-    };
+        dialog_mode.set(None);
+        form_error.set(None);
+    });
     view! {
         <div class="settings-row">
             <button
                 type="button"
                 class="btn btn-primary btn-sm"
                 data-testid="settings-models-add-submit"
-                on:click=move |_| {
-                    let d = ManualPresetDraft {
-                        api_base: new_api_base.get_untracked(),
-                        label: new_label.get_untracked(),
-                        model_id: new_model_id.get_untracked(),
-                        api_key: new_api_key.get_untracked(),
-                        ctx_tokens: new_ctx_tokens.get_untracked(),
-                        temperature: new_temperature.get_untracked(),
-                        thinking_mode: new_thinking_mode.get_untracked(),
-                    };
-                    let mode = dialog_mode.get_untracked();
-                    let enabled_for_preset = match mode {
-                        Some(RegistryPresetDialogKind::Add) => true,
-                        Some(RegistryPresetDialogKind::Edit(i)) => saved_model_presets
-                            .with_untracked(|v| v.get(i).map(|p| p.enabled).unwrap_or(true)),
-                        None => true,
-                    };
-                    let mut preset = match try_build_manual_saved_preset(&d, enabled_for_preset) {
-                        Ok(p) => p,
-                        Err(()) => {
-                            form_error.set(Some(
-                                i18n::settings_models_validation_required(locale.get()).to_string(),
-                            ));
-                            return;
+                on:click={
+                    let reset_and_close = Arc::clone(&reset_and_close);
+                    let submit_signals = submit_signals.clone();
+                    move |_| {
+                        if submit_registry_add_form(&submit_signals) {
+                            reset_and_close();
                         }
-                    };
-                    if let Some(RegistryPresetDialogKind::Edit(i)) = mode
-                        && preset.api_key.trim().is_empty()
-                    {
-                        preset.has_api_key = saved_model_presets
-                            .with_untracked(|v| v.get(i).is_some_and(|old| old.has_api_key));
-                    }
-                    form_error.set(None);
-                    let loc = locale.get_untracked();
-                    let mut next = saved_model_presets.with_untracked(|v| v.clone());
-                    let applied = preset.clone();
-                    let should_apply = match (mode, apply_on_save) {
-                        (Some(RegistryPresetDialogKind::Add), Some(_)) => true,
-                        (Some(RegistryPresetDialogKind::Edit(i)), Some(target)) => {
-                            saved_model_presets.with_untracked(|v| {
-                                v.get(i).is_some_and(|old| {
-                                    crate::settings_llm_fields::llm_drafts_match_saved_preset(
-                                        target, old,
-                                    )
-                                })
-                            })
-                        }
-                        _ => false,
-                    };
-                    match mode {
-                        Some(RegistryPresetDialogKind::Add) => next.push(preset),
-                        Some(RegistryPresetDialogKind::Edit(i)) if i < next.len() => {
-                            next[i] = preset;
-                        }
-                        Some(RegistryPresetDialogKind::Edit(_)) => return,
-                        None => return,
-                    }
-                    if try_persist_saved_presets_with_feedback(
-                        next,
-                        loc,
-                        saved_model_presets,
-                        &sync_saved_presets_baseline,
-                        llm_settings_feedback,
-                    ) {
-                        if should_apply
-                            && let Some(target) = apply_on_save
-                        {
-                            crate::settings_llm_fields::apply_llm_saved_preset_pick(
-                                target, &applied,
-                            );
-                        }
-                        reset_fields();
-                        close_dialog();
                     }
                 }
             >
@@ -491,9 +401,9 @@ fn SettingsModelsRegistryAddFormActions(s: RegistryAddFormActionSignals) -> impl
             <button
                 type="button"
                 class="btn btn-ghost btn-sm"
-                on:click=move |_| {
-                    reset_fields();
-                    close_dialog();
+                on:click={
+                    let reset_and_close = Arc::clone(&reset_and_close);
+                    move |_| reset_and_close()
                 }
             >
                 {move || i18n::settings_models_cancel_form(locale.get())}
