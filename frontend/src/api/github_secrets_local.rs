@@ -215,11 +215,14 @@ fn looks_like_github_auth_failure(msg: &str) -> bool {
         || (low.contains("认证") && (low.contains("失败") || low.contains("无效")))
 }
 
-/// 刷新连接态：壳先从钥匙串/Keystore 水合再看内存；浏览器在有 session 标记时用 `repo-context` 探活，鉴权失败则清标记。
+/// 刷新连接态：壳在内存无 token 时先从钥匙串/Keystore 水合再判定；浏览器在有 session 标记时用 `repo-context` 探活，鉴权失败则清标记。
 pub async fn reconcile_github_connection_status(loc: Locale) -> bool {
     if github_token_secure_backend_available() {
-        // 设置页可能早于首启 hydrate 挂载；每次核对前先读耐久槽，避免误显「未连接」。
-        hydrate_github_secrets_from_secure_store().await;
+        // 设置页可能早于首启 hydrate 挂载；仅在内存为空时读耐久槽。
+        // 避免桥瞬时空读把已有内存 token 清掉后误显「未连接」。
+        if !github_token_is_set() {
+            hydrate_github_secrets_from_secure_store().await;
+        }
         return github_token_is_set();
     }
     if read_ls(LS_SESSION_LOGIN).is_none() {
