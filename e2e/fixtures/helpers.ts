@@ -32,8 +32,8 @@ export async function seedSession(page: Page, sid: string) {
     }).catch(() => {}),
   );
 
-  const putOk = await page.evaluate(async (s: string) => {
-    const body = JSON.stringify({
+  const seedBody = (s: string) =>
+    JSON.stringify({
       sessions: [
         {
           id: s,
@@ -47,14 +47,24 @@ export async function seedSession(page: Page, sid: string) {
       ],
       active_session_id: s,
     });
-    const res = await fetch("/user-data/workspaces/current/sessions", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body,
-    });
-    if (!res.ok) {
-      return false;
-    }
+
+  const putSeed = async () =>
+    page.evaluate(async (body: string) => {
+      const res = await fetch("/user-data/workspaces/current/sessions", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body,
+      });
+      return res.ok;
+    }, seedBody(sid));
+
+  // 首屏已把旧桶载入内存；400ms 防抖 PUT 可能在 seed 之后把旧列表写回。
+  // 先写一次，等过防抖窗口，再写一次盖住竞态，然后校验。
+  expect(await putSeed(), `seedSession first PUT ${sid}`).toBe(true);
+  await new Promise((r) => setTimeout(r, 500));
+  expect(await putSeed(), `seedSession debounce-winner PUT ${sid}`).toBe(true);
+
+  const putOk = await page.evaluate(async (s: string) => {
     const got = await fetch("/user-data/workspaces/current/sessions");
     if (!got.ok) {
       return false;
@@ -66,12 +76,30 @@ export async function seedSession(page: Page, sid: string) {
     const ids = (data.sessions ?? []).map((x) => x.id);
     return ids.includes(s) && data.active_session_id === s;
   }, sid);
-  expect(putOk, `seedSession PUT/GET must retain ${sid}`).toBe(true);
+  expect(putOk, `seedSession GET must retain ${sid}`).toBe(true);
 
   await page.reload({ waitUntil: "networkidle", timeout: 20000 });
   await page.waitForSelector('[data-testid="chat-composer-input"]', {
     timeout: 15000,
   });
+
+  // 确认 WASM 内存活动会话是 seed（避免分桶/防抖再次切到其它 id）。
+  await expect
+    .poll(
+      async () =>
+        page.evaluate(async (s: string) => {
+          const got = await fetch("/user-data/workspaces/current/sessions");
+          if (!got.ok) return false;
+          const data = (await got.json()) as {
+            sessions?: { id?: string }[];
+            active_session_id?: string;
+          };
+          const ids = (data.sessions ?? []).map((x) => x.id);
+          return ids.includes(s) && data.active_session_id === s;
+        }, sid),
+      { timeout: 15000 },
+    )
+    .toBe(true);
 }
 
 /** 在页面中发送消息（填值 + Enter）。*/
