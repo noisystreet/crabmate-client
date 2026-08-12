@@ -7,13 +7,16 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 
 use crate::api::post_workspace_project;
-use crate::api::user_data::put_current_web_sessions;
 use crate::app::workspace_panel_state::WorkspacePanelSignals;
-use crate::app::workspace_root_actions::{WorkspaceSessionHandoff, finish_workspace_root_ui};
+use crate::app::workspace_root_actions::{
+    WorkspaceSessionHandoff, finish_workspace_root_ui, flush_current_workspace_sessions,
+};
 use crate::app_prefs::SidePanelView;
 use crate::chat_session_state::ChatSessionSignals;
 use crate::i18n::{self, Locale};
-use crate::stream_text_overlay::sessions_snapshot_with_stream_overlay_merged;
+use crate::session_workspace_partition::{
+    begin_workspace_session_persist_block, clear_workspace_session_persist_block,
+};
 
 #[derive(Clone, Copy)]
 pub(crate) struct WorkspaceProjectOpenArgs {
@@ -54,15 +57,12 @@ pub(crate) fn spawn_workspace_project_open(
     side_panel_view.set(SidePanelView::Workspace);
     let loc = locale.get_untracked();
     spawn_local(async move {
-        let aid = chat.active_id.get_untracked();
-        if !aid.is_empty() {
-            let list = chat.sessions.get_untracked();
-            let merged = sessions_snapshot_with_stream_overlay_merged(
-                list.as_slice(),
-                chat.stream_text_overlay.get_untracked().as_ref(),
-            );
-            let _ = put_current_web_sessions(&merged, Some(aid.as_str()), loc).await;
+        if let Err(e) = flush_current_workspace_sessions(chat, loc).await {
+            action_err.set(Some(e));
+            ws.workspace_set_busy.set(false);
+            return;
         }
+        begin_workspace_session_persist_block();
         match post_workspace_project(&name, create, loc).await {
             Ok(resp) if resp.ok => {
                 ws.workspace_path_draft.set(resp.path.clone());
@@ -81,6 +81,7 @@ pub(crate) fn spawn_workspace_project_open(
                 open.set(false);
             }
             Ok(resp) => {
+                clear_workspace_session_persist_block();
                 action_err.set(
                     resp.error
                         .or(Some(i18n::api_err_workspace_set_failed(loc).to_string())),
@@ -88,6 +89,7 @@ pub(crate) fn spawn_workspace_project_open(
                 ws.workspace_set_busy.set(false);
             }
             Err(e) => {
+                clear_workspace_session_persist_block();
                 action_err.set(Some(e));
                 ws.workspace_set_busy.set(false);
             }

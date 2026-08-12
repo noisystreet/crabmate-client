@@ -11,7 +11,9 @@ use crate::chat_session_state::ChatSessionSignals;
 use crate::i18n::{self, Locale};
 use crate::session_export::tauri_pick_workspace_folder;
 use crate::session_workspace_partition::{
-    apply_empty_session_in_memory, request_empty_session_after_next_partition,
+    begin_workspace_session_persist_block, clear_workspace_session_persist_block,
+    ensure_sessions_for_workspace, memory_sessions_match_workspace,
+    request_empty_session_after_next_partition, session_persist_allowed,
 };
 use crate::stream_text_overlay::sessions_snapshot_with_stream_overlay_merged;
 use crate::tauri_shell::tauri_shell_available;
@@ -45,17 +47,24 @@ pub(crate) fn workspace_inputs_blocked(ws: WorkspacePanelSignals) -> bool {
 }
 
 /// 将当前活动会话（含流式 overlay）写回**当前**工作区桶。
-pub(crate) async fn flush_current_workspace_sessions(chat: ChatSessionSignals, loc: Locale) {
+pub(crate) async fn flush_current_workspace_sessions(
+    chat: ChatSessionSignals,
+    loc: Locale,
+) -> Result<(), String> {
+    if !session_persist_allowed() {
+        // 切仓窗口内内存可能仍属旧桶，而服务端 current 已是新桶——禁止 PUT。
+        return Ok(());
+    }
     let aid = chat.active_id.get_untracked();
     if aid.is_empty() {
-        return;
+        return Ok(());
     }
     let list = chat.sessions.get_untracked();
     let merged = sessions_snapshot_with_stream_overlay_merged(
         list.as_slice(),
         chat.stream_text_overlay.get_untracked().as_ref(),
     );
-    let _ = put_current_web_sessions(&merged, Some(aid.as_str()), loc).await;
+    put_current_web_sessions(&merged, Some(aid.as_str()), loc).await
 }
 
 /// 提交工作区根；成功返回 `true`（调用方可用于关闭弹窗）。
@@ -66,7 +75,12 @@ pub(crate) async fn commit_workspace_root(
     loc: Locale,
 ) -> bool {
     let path = path.clone();
-    flush_current_workspace_sessions(chat, loc).await;
+    if let Err(e) = flush_current_workspace_sessions(chat, loc).await {
+        ws.workspace_set_err.set(Some(e));
+        ws.workspace_set_busy.set(false);
+        return false;
+    }
+    begin_workspace_session_persist_block();
     let ok = match post_workspace_set(Some(path.clone()), loc).await {
         Ok(_) => {
             finish_workspace_root_ui(
@@ -81,6 +95,7 @@ pub(crate) async fn commit_workspace_root(
             true
         }
         Err(e) => {
+            clear_workspace_session_persist_block();
             ws.workspace_set_err.set(Some(e));
             false
         }
@@ -89,7 +104,7 @@ pub(crate) async fn commit_workspace_root(
     ok
 }
 
-/// 切换工作区成功后的 UI：记最近路径、刷新树；由分桶 Effect 换会话列表。
+/// 切换工作区成功后的 UI：记最近路径、刷新树，并等待会话分桶落地。
 ///
 /// **不**在换桶前改写当前活动会话的 `workspace_root`（避免串桶写脏）。
 pub(crate) async fn finish_workspace_root_ui(
@@ -100,7 +115,8 @@ pub(crate) async fn finish_workspace_root_ui(
     handoff: WorkspaceSessionHandoff,
     composer_draft: Option<RwSignal<String>>,
 ) {
-    if matches!(handoff, WorkspaceSessionHandoff::PreferEmptySession) {
+    let force_empty = matches!(handoff, WorkspaceSessionHandoff::PreferEmptySession);
+    if force_empty {
         request_empty_session_after_next_partition();
     }
     remember_workspace_root(&path, ws.recent_workspace_roots);
@@ -115,37 +131,57 @@ pub(crate) async fn finish_workspace_root_ui(
         loc,
     )
     .await;
-    if matches!(handoff, WorkspaceSessionHandoff::PreferEmptySession) {
-        await_empty_session_handoff(chat, composer_draft, &path, loc).await;
-    }
+    await_workspace_session_handoff(
+        chat,
+        ws.workspace_path_draft,
+        composer_draft,
+        &path,
+        loc,
+        force_empty,
+    )
+    .await;
 }
 
-/// 等待分桶 Effect 真正切到目标路径下的空白会话；超时则本地兜底。
-async fn await_empty_session_handoff(
+/// 等待分桶 Effect 将内存会话切到目标工作区；超时则显式 `ensure_sessions_for_workspace`。
+///
+/// PreferEmpty：禁止在「内存仍属旧桶」时 in-memory 插空会话（会触发串桶 PUT）。
+async fn await_workspace_session_handoff(
     chat: ChatSessionSignals,
+    session_workspace_path: RwSignal<String>,
     composer_draft: Option<RwSignal<String>>,
     path: &str,
     loc: Locale,
+    force_empty: bool,
 ) {
     use crate::session_workspace_partition::{
-        active_session_is_blank_for_workspace, take_pending_empty_session_after_partition,
+        active_session_is_blank_for_workspace, apply_empty_session_in_memory,
+        take_pending_empty_session_after_partition,
     };
 
-    for _ in 0..75 {
-        if active_session_is_blank_for_workspace(chat, path) {
+    const POLL_MS: u32 = 20;
+    // Android / 远程：clone+reload+load sessions 常超过 1.5s。
+    const MAX_POLLS: u32 = 500;
+
+    for _ in 0..MAX_POLLS {
+        let matched = memory_sessions_match_workspace(path) && session_persist_allowed();
+        if matched {
+            if !force_empty || active_session_is_blank_for_workspace(chat, path) {
+                let _ = take_pending_empty_session_after_partition();
+                return;
+            }
+            // 新桶已落地但尚未空会话：仅在内存已属新桶时本地补空。
+            let draft = composer_draft.unwrap_or_else(|| RwSignal::new(String::new()));
+            apply_empty_session_in_memory(chat, draft, path, loc);
             let _ = take_pending_empty_session_after_partition();
             return;
         }
-        TimeoutFuture::new(20).await;
+        TimeoutFuture::new(POLL_MS).await;
     }
-    let _ = take_pending_empty_session_after_partition();
-    if active_session_is_blank_for_workspace(chat, path) {
-        return;
-    }
-    let Some(draft) = composer_draft else {
-        return;
-    };
-    apply_empty_session_in_memory(chat, draft, path, loc);
+
+    // 超时：显式加载目标桶（勿 take pending 抢分桶任务；ensure 自己处理 force_empty）。
+    let draft = composer_draft.unwrap_or_else(|| RwSignal::new(String::new()));
+    ensure_sessions_for_workspace(chat, draft, session_workspace_path, path, loc, force_empty)
+        .await;
 }
 
 fn spawn_server_side_workspace_pick(

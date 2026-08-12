@@ -17,6 +17,9 @@ use crate::app::workspace_root_actions::{
     flush_current_workspace_sessions, workspace_inputs_blocked,
 };
 use crate::i18n::{self, Locale};
+use crate::session_workspace_partition::{
+    begin_workspace_session_persist_block, clear_workspace_session_persist_block,
+};
 
 use parts::{CloneFormViewSignals, WorkspaceCloneFormBody, WorkspaceCloneProgressBody};
 
@@ -61,6 +64,90 @@ pub(super) struct CloneProgressSignals {
     pub log_lines: RwSignal<Vec<String>>,
     pub percent: RwSignal<Option<u8>>,
     pub form_err: RwSignal<Option<String>>,
+}
+
+async fn prepare_clone_after_flush(
+    pick: WorkspaceRootPickHandle,
+    loc: Locale,
+    form_err: RwSignal<Option<String>>,
+    ui_phase: RwSignal<CloneUiPhase>,
+) -> bool {
+    if let Err(e) = flush_current_workspace_sessions(pick.chat, loc).await {
+        pick.ws.workspace_set_busy.set(false);
+        form_err.set(Some(e));
+        ui_phase.set(CloneUiPhase::Failed);
+        return false;
+    }
+    begin_workspace_session_persist_block();
+    true
+}
+
+fn fail_clone_ui(
+    pick: WorkspaceRootPickHandle,
+    form_err: RwSignal<Option<String>>,
+    ui_phase: RwSignal<CloneUiPhase>,
+    err: String,
+) {
+    clear_workspace_session_persist_block();
+    pick.ws.workspace_set_busy.set(false);
+    form_err.set(Some(err));
+    ui_phase.set(CloneUiPhase::Failed);
+}
+
+fn push_clone_log_line(log_lines: RwSignal<Vec<String>>, line: String) {
+    log_lines.update(|v| {
+        v.push(line);
+        if v.len() > 200 {
+            let drain = v.len() - 200;
+            v.drain(..drain);
+        }
+    });
+}
+
+fn on_clone_sse_event(
+    loc: Locale,
+    status_text: RwSignal<String>,
+    log_lines: RwSignal<Vec<String>>,
+    percent: RwSignal<Option<u8>>,
+    ev: WorkspaceCloneSseEvent,
+) {
+    match ev {
+        WorkspaceCloneSseEvent::Phase(p) => {
+            status_text.set(phase_label(loc, &p).to_string());
+        }
+        WorkspaceCloneSseEvent::Log(line) => push_clone_log_line(log_lines, line),
+        WorkspaceCloneSseEvent::Progress { percent: p, .. } => {
+            percent.set(Some(p));
+        }
+        WorkspaceCloneSseEvent::Done { .. } | WorkspaceCloneSseEvent::Error { .. } => {}
+    }
+}
+
+async fn finish_clone_success(
+    open: RwSignal<bool>,
+    pick: WorkspaceRootPickHandle,
+    loc: Locale,
+    path: String,
+    status_text: RwSignal<String>,
+    percent: RwSignal<Option<u8>>,
+    ui_phase: RwSignal<CloneUiPhase>,
+) {
+    status_text.set(i18n::ws_clone_done(loc).to_string());
+    percent.set(Some(100));
+    finish_workspace_root_ui(
+        pick.chat,
+        pick.ws,
+        path,
+        loc,
+        WorkspaceSessionHandoff::PreferEmptySession,
+        Some(pick.composer_draft),
+    )
+    .await;
+    pick.ws.workspace_set_busy.set(false);
+    ui_phase.set(CloneUiPhase::Succeeded);
+    TimeoutFuture::new(400).await;
+    open.set(false);
+    ui_phase.set(CloneUiPhase::Form);
 }
 
 pub(super) fn start_clone(form: CloneFormSignals, progress: CloneProgressSignals) {
@@ -113,52 +200,18 @@ pub(super) fn start_clone(form: CloneFormSignals, progress: CloneProgressSignals
     };
 
     spawn_local(async move {
-        // Clone 会在服务端切到新仓；必须先把旧桶会话落盘，再开 SSE。
-        flush_current_workspace_sessions(pick.chat, loc).await;
-        let result = post_workspace_clone_stream(req, loc, |ev| match ev {
-            WorkspaceCloneSseEvent::Phase(p) => {
-                status_text.set(phase_label(loc, &p).to_string());
-            }
-            WorkspaceCloneSseEvent::Log(line) => {
-                log_lines.update(|v| {
-                    v.push(line);
-                    if v.len() > 200 {
-                        let drain = v.len() - 200;
-                        v.drain(..drain);
-                    }
-                });
-            }
-            WorkspaceCloneSseEvent::Progress { percent: p, .. } => {
-                percent.set(Some(p));
-            }
-            WorkspaceCloneSseEvent::Done { .. } | WorkspaceCloneSseEvent::Error { .. } => {}
+        if !prepare_clone_after_flush(pick, loc, form_err, ui_phase).await {
+            return;
+        }
+        let result = post_workspace_clone_stream(req, loc, |ev| {
+            on_clone_sse_event(loc, status_text, log_lines, percent, ev);
         })
         .await;
-
         match result {
             Ok((_name, path)) => {
-                status_text.set(i18n::ws_clone_done(loc).to_string());
-                percent.set(Some(100));
-                finish_workspace_root_ui(
-                    pick.chat,
-                    pick.ws,
-                    path,
-                    loc,
-                    WorkspaceSessionHandoff::PreferEmptySession,
-                    Some(pick.composer_draft),
-                )
-                .await;
-                pick.ws.workspace_set_busy.set(false);
-                ui_phase.set(CloneUiPhase::Succeeded);
-                TimeoutFuture::new(400).await;
-                open.set(false);
-                ui_phase.set(CloneUiPhase::Form);
+                finish_clone_success(open, pick, loc, path, status_text, percent, ui_phase).await;
             }
-            Err(e) => {
-                pick.ws.workspace_set_busy.set(false);
-                form_err.set(Some(e));
-                ui_phase.set(CloneUiPhase::Failed);
-            }
+            Err(e) => fail_clone_ui(pick, form_err, ui_phase, e),
         }
     });
 }

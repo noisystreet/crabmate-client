@@ -24,6 +24,9 @@ const PERSIST_SESSIONS_DEBOUNCE_MS: u32 = 400;
 
 /// 流结束后立即发起一次可跨页面刷新的持久化；常规变更仍由防抖 Effect 兜底。
 pub(crate) fn persist_chat_sessions_at_stream_end(chat: ChatSessionSignals, loc: Locale) {
+    if !crate::session_workspace_partition::session_persist_allowed() {
+        return;
+    }
     let aid = chat.active_id.get_untracked();
     if aid.is_empty() {
         return;
@@ -34,6 +37,9 @@ pub(crate) fn persist_chat_sessions_at_stream_end(chat: ChatSessionSignals, loc:
         chat.stream_text_overlay.get_untracked().as_ref(),
     );
     spawn_local(async move {
+        if !crate::session_workspace_partition::session_persist_allowed() {
+            return;
+        }
         let _ = put_current_web_sessions_keepalive(&merged, Some(aid.as_str()), loc).await;
     });
 }
@@ -146,6 +152,9 @@ pub fn wire_persist_chat_sessions(
             if !initialized.get_untracked() {
                 return;
             }
+            if !crate::session_workspace_partition::session_persist_allowed() {
+                return;
+            }
             let list = sessions.get_untracked();
             let aid = active_id.get_untracked();
             if aid.is_empty() {
@@ -156,6 +165,9 @@ pub fn wire_persist_chat_sessions(
                 stream_text_overlay.get_untracked().as_ref(),
             );
             let loc = locale.get_untracked();
+            if !crate::session_workspace_partition::session_persist_allowed() {
+                return;
+            }
             let _ = put_current_web_sessions(&merged, Some(aid.as_str()), loc).await;
         });
     });
