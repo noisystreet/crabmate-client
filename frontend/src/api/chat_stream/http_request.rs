@@ -103,6 +103,7 @@ pub(super) async fn build_chat_stream_fetch_request(
     last_event_id: u64,
 ) -> Result<Request, String> {
     browser::ensure_web_api_bearer_hydrated_for_request().await;
+    browser::ensure_github_token_hydrated_for_request().await;
     let init = RequestInit::new();
     init.set_method("POST");
     init.set_mode(RequestMode::Cors);

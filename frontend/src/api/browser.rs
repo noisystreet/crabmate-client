@@ -317,15 +317,20 @@ pub fn apply_api_auth(init: &web_sys::RequestInit) {
     init.set_headers(&auth_headers());
 }
 
-/// 发起受保护 API 请求前调用：壳内先完成 Bearer 水合，再 [`apply_api_auth`]。
+/// 发起受保护 API 请求前调用：壳内先完成 Bearer + GitHub token 水合，再 [`apply_api_auth`]。
 pub async fn prepare_api_auth(init: &web_sys::RequestInit) {
     ensure_web_api_bearer_hydrated_for_request().await;
+    ensure_github_token_hydrated_for_request().await;
     apply_api_auth(init);
 }
 
 /// 供不经 [`prepare_api_auth`] 组装 headers 的路径（如 SSE）在发请求前调用。
 pub async fn ensure_web_api_bearer_hydrated_for_request() {
     super::web_api_bearer_local::ensure_web_api_bearer_hydrated().await;
+}
+
+pub async fn ensure_github_token_hydrated_for_request() {
+    super::github_secrets_local::ensure_github_token_hydrated().await;
 }
 
 pub fn auth_headers() -> Headers {
