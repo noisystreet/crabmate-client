@@ -47,13 +47,15 @@ pub(crate) fn workspace_inputs_blocked(ws: WorkspacePanelSignals) -> bool {
 }
 
 /// 将当前活动会话（含流式 overlay）写回**当前**工作区桶。
+///
+/// 切仓门闩期间返回错误（禁止「假成功」跳过落盘后继续切仓）。
+/// 进后台等 best-effort 场景请先查 [`session_persist_allowed`]。
 pub(crate) async fn flush_current_workspace_sessions(
     chat: ChatSessionSignals,
     loc: Locale,
 ) -> Result<(), String> {
     if !session_persist_allowed() {
-        // 切仓窗口内内存可能仍属旧桶，而服务端 current 已是新桶——禁止 PUT。
-        return Ok(());
+        return Err(i18n::ws_browse_busy_title(loc).to_string());
     }
     let aid = chat.active_id.get_untracked();
     if aid.is_empty() {
@@ -75,6 +77,12 @@ pub(crate) async fn commit_workspace_root(
     loc: Locale,
 ) -> bool {
     let path = path.clone();
+    if !session_persist_allowed() {
+        ws.workspace_set_err
+            .set(Some(i18n::ws_browse_busy_title(loc).to_string()));
+        ws.workspace_set_busy.set(false);
+        return false;
+    }
     if let Err(e) = flush_current_workspace_sessions(chat, loc).await {
         ws.workspace_set_err.set(Some(e));
         ws.workspace_set_busy.set(false);
@@ -142,6 +150,31 @@ pub(crate) async fn finish_workspace_root_ui(
     .await;
 }
 
+/// 若内存已属目标桶：按需补空会话并结束交接；否则返回 `false`。
+fn try_finish_handoff_if_matched(
+    chat: ChatSessionSignals,
+    composer_draft: Option<RwSignal<String>>,
+    path: &str,
+    loc: Locale,
+    force_empty: bool,
+) -> bool {
+    use crate::session_workspace_partition::{
+        active_session_is_blank_for_workspace, apply_empty_session_in_memory,
+        take_pending_empty_session_after_partition,
+    };
+    if !(memory_sessions_match_workspace(path) && session_persist_allowed()) {
+        return false;
+    }
+    if !force_empty || active_session_is_blank_for_workspace(chat, path) {
+        let _ = take_pending_empty_session_after_partition();
+        return true;
+    }
+    let draft = composer_draft.unwrap_or_else(|| RwSignal::new(String::new()));
+    apply_empty_session_in_memory(chat, draft, path, loc);
+    let _ = take_pending_empty_session_after_partition();
+    true
+}
+
 /// 等待分桶 Effect 将内存会话切到目标工作区；超时则显式 `ensure_sessions_for_workspace`。
 ///
 /// PreferEmpty：禁止在「内存仍属旧桶」时 in-memory 插空会话（会触发串桶 PUT）。
@@ -153,35 +186,32 @@ async fn await_workspace_session_handoff(
     loc: Locale,
     force_empty: bool,
 ) {
-    use crate::session_workspace_partition::{
-        active_session_is_blank_for_workspace, apply_empty_session_in_memory,
-        take_pending_empty_session_after_partition,
-    };
-
     const POLL_MS: u32 = 20;
     // Android / 远程：clone+reload+load sessions 常超过 1.5s。
     const MAX_POLLS: u32 = 500;
 
     for _ in 0..MAX_POLLS {
-        let matched = memory_sessions_match_workspace(path) && session_persist_allowed();
-        if matched {
-            if !force_empty || active_session_is_blank_for_workspace(chat, path) {
-                let _ = take_pending_empty_session_after_partition();
-                return;
-            }
-            // 新桶已落地但尚未空会话：仅在内存已属新桶时本地补空。
-            let draft = composer_draft.unwrap_or_else(|| RwSignal::new(String::new()));
-            apply_empty_session_in_memory(chat, draft, path, loc);
-            let _ = take_pending_empty_session_after_partition();
+        if try_finish_handoff_if_matched(chat, composer_draft, path, loc, force_empty) {
             return;
         }
         TimeoutFuture::new(POLL_MS).await;
     }
 
-    // 超时：显式加载目标桶（勿 take pending 抢分桶任务；ensure 自己处理 force_empty）。
     let draft = composer_draft.unwrap_or_else(|| RwSignal::new(String::new()));
-    ensure_sessions_for_workspace(chat, draft, session_workspace_path, path, loc, force_empty)
-        .await;
+    if ensure_sessions_for_workspace(chat, draft, session_workspace_path, path, loc, force_empty)
+        .await
+    {
+        return;
+    }
+    for _ in 0..50 {
+        if try_finish_handoff_if_matched(chat, None, path, loc, force_empty) {
+            return;
+        }
+        TimeoutFuture::new(POLL_MS).await;
+    }
+    if !session_persist_allowed() && !memory_sessions_match_workspace(path) {
+        clear_workspace_session_persist_block();
+    }
 }
 
 fn spawn_server_side_workspace_pick(
