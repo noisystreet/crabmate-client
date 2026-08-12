@@ -294,6 +294,46 @@ fn prepare_partition_session_list(
     (list, pick, draft)
 }
 
+/// 分桶 GET 结果是否应覆盖内存会话。
+///
+/// - 真切仓 / force_empty / persist 门闩：允许覆盖（空桶新建）。
+/// - 同仓且流式忙碌：禁止（勿清 overlay / 勿 bump hydrate）。
+/// - 同仓且内存活动会话不在 GET 结果中：视为陈旧/空桶竞态，禁止覆盖（保护 seedSession）。
+#[must_use]
+pub(crate) fn should_apply_partition_load(
+    switching: bool,
+    stream_busy: bool,
+    memory_active_id: &str,
+    memory_session_count: usize,
+    loaded_contains_active: bool,
+) -> bool {
+    if switching {
+        return true;
+    }
+    if stream_busy {
+        return false;
+    }
+    if memory_session_count > 0 && !memory_active_id.trim().is_empty() && !loaded_contains_active {
+        return false;
+    }
+    true
+}
+
+fn memory_stream_busy(chat: ChatSessionSignals) -> bool {
+    chat.stream_text_overlay.get_untracked().is_some()
+        || chat.stream_bound_resume_handles_untracked().is_some()
+}
+
+fn partition_switch_context(
+    force_empty_gate: bool,
+    prev_norm: Option<&str>,
+    next_norm: &str,
+) -> bool {
+    force_empty_gate
+        || prev_norm.is_some_and(|p| p != next_norm)
+        || SESSION_PERSIST_BLOCKED.load(Ordering::SeqCst)
+}
+
 fn commit_partition_sessions(
     chat: ChatSessionSignals,
     draft: RwSignal<String>,
@@ -372,6 +412,91 @@ pub struct WireWorkspaceSessionPartitionArgs {
     pub session_workspace_path: RwSignal<String>,
 }
 
+fn partition_effect_should_skip_reload(
+    force_empty_gate: bool,
+    workspace_path: &str,
+    norm: &str,
+    prev_slot: &mut Option<String>,
+) -> bool {
+    if force_empty_gate {
+        return false;
+    }
+    if memory_sessions_match_workspace(workspace_path) {
+        *prev_slot = Some(norm.to_string());
+        return true;
+    }
+    if prev_slot.as_deref() == Some(norm) {
+        return true;
+    }
+    false
+}
+
+struct PartitionLoadCommitArgs {
+    chat: ChatSessionSignals,
+    draft: RwSignal<String>,
+    session_workspace_path: RwSignal<String>,
+    workspace_path: String,
+    norm: String,
+    loc: Locale,
+    my_gen: u64,
+    switching: bool,
+}
+
+async fn load_and_commit_partition_sessions(args: PartitionLoadCommitArgs) {
+    let PartitionLoadCommitArgs {
+        chat,
+        draft,
+        session_workspace_path,
+        workspace_path,
+        norm,
+        loc,
+        my_gen,
+        switching,
+    } = args;
+    let (list2, aid2) = load_web_sessions(loc).await;
+    if PARTITION_LOAD_GEN.load(Ordering::Acquire) != my_gen {
+        return;
+    }
+    // 在加载成功且仍是最新代际后再 take，避免旧任务抢走 empty 标记。
+    let force_empty = take_pending_empty_session_after_partition();
+    let switching = switching || force_empty;
+    let memory_active = chat.active_id.get_untracked();
+    let memory_count = chat.sessions.get_untracked().len();
+    let loaded_has_active =
+        !memory_active.is_empty() && list2.iter().any(|s| s.id == memory_active);
+    if !should_apply_partition_load(
+        switching,
+        memory_stream_busy(chat),
+        memory_active.as_str(),
+        memory_count,
+        loaded_has_active,
+    ) {
+        // 同仓陈旧 GET：只登记桶，保留内存（含 seedSession / 流式中会话）。
+        record_memory_sessions_partition(workspace_path.as_str());
+        if force_empty {
+            request_empty_session_after_next_partition();
+        }
+        return;
+    }
+    let (list2, pick, draft_text) =
+        prepare_partition_session_list(list2, aid2, workspace_path.as_str(), loc, force_empty);
+    if PARTITION_LOAD_GEN.load(Ordering::Acquire) != my_gen {
+        if force_empty {
+            request_empty_session_after_next_partition();
+        }
+        return;
+    }
+    commit_partition_sessions(
+        chat,
+        draft,
+        session_workspace_path,
+        list2,
+        pick,
+        draft_text,
+        norm,
+    );
+}
+
 /// 在 `workspace_data` 的有效根变化时，从服务端加载另一工作区桶的会话列表。
 pub fn wire_workspace_session_storage_partition(args: WireWorkspaceSessionPartitionArgs) {
     let WireWorkspaceSessionPartitionArgs {
@@ -398,15 +523,16 @@ pub fn wire_workspace_session_storage_partition(args: WireWorkspaceSessionPartit
         let force_empty_gate = pending_empty_session_after_partition();
         let prev_cell = prev_applied.get_value();
         let mut prev_slot = prev_cell.lock().expect("partition prev workspace");
-        if !force_empty_gate {
-            if memory_sessions_match_workspace(wd.path.as_str()) {
-                *prev_slot = Some(norm.clone());
-                return;
-            }
-            if prev_slot.as_deref() == Some(norm.as_str()) {
-                return;
-            }
+        if partition_effect_should_skip_reload(
+            force_empty_gate,
+            wd.path.as_str(),
+            norm.as_str(),
+            &mut prev_slot,
+        ) {
+            return;
         }
+        let switching =
+            partition_switch_context(force_empty_gate, prev_slot.as_deref(), norm.as_str());
         *prev_slot = Some(norm.clone());
         drop(prev_slot);
 
@@ -414,31 +540,19 @@ pub fn wire_workspace_session_storage_partition(args: WireWorkspaceSessionPartit
             .fetch_add(1, Ordering::AcqRel)
             .wrapping_add(1);
         let loc = locale.get_untracked();
-
+        let workspace_path = wd.path.clone();
         leptos::task::spawn_local(async move {
-            let (list2, aid2) = load_web_sessions(loc).await;
-            if PARTITION_LOAD_GEN.load(Ordering::Acquire) != my_gen {
-                return;
-            }
-            // 在加载成功且仍是最新代际后再 take，避免旧任务抢走 empty 标记。
-            let force_empty = take_pending_empty_session_after_partition();
-            let (list2, pick, draft_text) =
-                prepare_partition_session_list(list2, aid2, wd.path.as_str(), loc, force_empty);
-            if PARTITION_LOAD_GEN.load(Ordering::Acquire) != my_gen {
-                if force_empty {
-                    request_empty_session_after_next_partition();
-                }
-                return;
-            }
-            commit_partition_sessions(
+            load_and_commit_partition_sessions(PartitionLoadCommitArgs {
                 chat,
                 draft,
                 session_workspace_path,
-                list2,
-                pick,
-                draft_text,
+                workspace_path,
                 norm,
-            );
+                loc,
+                my_gen,
+                switching,
+            })
+            .await;
         });
     });
 }
@@ -527,5 +641,22 @@ mod tests {
                 .as_deref(),
             Some("/tmp/ws")
         );
+    }
+
+    #[test]
+    fn should_apply_partition_load_guards_stale_same_workspace_get() {
+        assert!(should_apply_partition_load(true, false, "a", 1, false));
+        assert!(!should_apply_partition_load(false, true, "a", 1, true));
+        assert!(!should_apply_partition_load(false, false, "seed", 2, false));
+        assert!(should_apply_partition_load(false, false, "seed", 2, true));
+        assert!(should_apply_partition_load(false, false, "", 0, false));
+    }
+
+    #[test]
+    fn partition_switch_context_detects_path_change_and_gate() {
+        assert!(!partition_switch_context(false, Some("/a"), "/a"));
+        assert!(partition_switch_context(false, Some("/a"), "/b"));
+        assert!(partition_switch_context(true, Some("/a"), "/a"));
+        assert!(!partition_switch_context(false, None, "/a"));
     }
 }

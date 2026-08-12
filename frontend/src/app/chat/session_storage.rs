@@ -73,6 +73,9 @@ pub fn wire_initial_sessions_from_storage(app: crate::app::app_signals::AppSigna
             .await;
             if let Ok(wd) = ws_outcome {
                 record_memory_sessions_partition(wd.path.as_str());
+            } else {
+                // 工作区探测失败也登记空路径桶，避免 initialized 后误走破坏性同仓 GET。
+                record_memory_sessions_partition("");
             }
             let (mut list, def_id) =
                 ensure_at_least_one(list, i18n::default_session_title(loc).to_string());

@@ -32,7 +32,7 @@ export async function seedSession(page: Page, sid: string) {
     }).catch(() => {}),
   );
 
-  await page.evaluate((s: string) => {
+  const putOk = await page.evaluate(async (s: string) => {
     const body = JSON.stringify({
       sessions: [
         {
@@ -47,12 +47,26 @@ export async function seedSession(page: Page, sid: string) {
       ],
       active_session_id: s,
     });
-    return fetch("/user-data/workspaces/current/sessions", {
+    const res = await fetch("/user-data/workspaces/current/sessions", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body,
-    }).catch(() => {});
+    });
+    if (!res.ok) {
+      return false;
+    }
+    const got = await fetch("/user-data/workspaces/current/sessions");
+    if (!got.ok) {
+      return false;
+    }
+    const data = (await got.json()) as {
+      sessions?: { id?: string }[];
+      active_session_id?: string;
+    };
+    const ids = (data.sessions ?? []).map((x) => x.id);
+    return ids.includes(s) && data.active_session_id === s;
   }, sid);
+  expect(putOk, `seedSession PUT/GET must retain ${sid}`).toBe(true);
 
   await page.reload({ waitUntil: "networkidle", timeout: 20000 });
   await page.waitForSelector('[data-testid="chat-composer-input"]', {
