@@ -30,6 +30,8 @@ pub struct WorkspaceSignals {
     pub recent_workspace_roots: RwSignal<Vec<String>>,
     /// 首启 `GET /user-data/prefs` 已结束（成功或失败）；为 false 时勿 PUT prefs。
     pub user_prefs_hydrated: RwSignal<bool>,
+    /// 首启 `GET /user-data/prefs` 是否成功；仅成功才允许 PUT 写回（防默认值覆盖真实偏好）。
+    pub user_prefs_loaded_ok: RwSignal<bool>,
     pub workspace_context_menu:
         RwSignal<Option<crate::workspace_context_menu::WorkspaceContextAnchor>>,
     pub workspace_pending_create:
@@ -55,6 +57,7 @@ impl WorkspaceSignals {
             workspace_browser_pick_modal_open: RwSignal::new(false),
             recent_workspace_roots: RwSignal::new(Vec::new()),
             user_prefs_hydrated: RwSignal::new(false),
+            user_prefs_loaded_ok: RwSignal::new(false),
             workspace_context_menu: RwSignal::new(None),
             workspace_pending_create: RwSignal::new(None),
         }
