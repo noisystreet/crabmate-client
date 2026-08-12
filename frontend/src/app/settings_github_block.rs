@@ -1,7 +1,7 @@
 //! 设置页「GitHub」分区：本机 Client ID + Device Flow（壳钥匙串 / 浏览器 Cookie）。
 //!
-//! Device Flow 轮询经 `spawn_local` 脱离组件；用 [`device_flow_generation`] 代际作废旧任务
-//!（卸载 / 重新授权 / 断开），避免多轮询串线（issue #27）。
+//! Device Flow 轮询经 `spawn_local` 脱离组件；用 [`DeviceFlowGate`] / [`bump_device_flow_generation`]
+//! 代际作废旧任务（卸载 / 重新授权 / 断开），避免多轮询串线（issue #27）。
 
 use gloo_timers::future::TimeoutFuture;
 use leptos::prelude::*;
@@ -76,11 +76,50 @@ impl DeviceFlowGate {
     }
 }
 
+/// 落盘成功后发现代际已失效时，必须补偿清除本机 token（避免「假断开仍带钥」）。
+#[must_use]
+pub(crate) fn should_rollback_stale_device_token(persist_ok: bool, gate_active: bool) -> bool {
+    persist_ok && !gate_active
+}
+
 struct TerminalDeviceOutcome {
     state: String,
     error: Option<String>,
     access_token: Option<String>,
     login: Option<String>,
+}
+
+async fn persist_device_success_if_current(
+    loc: Locale,
+    outcome: TerminalDeviceOutcome,
+    ui: GithubUiSignals,
+    auth_refresh_nonce: RwSignal<u64>,
+    gate: DeviceFlowGate,
+) {
+    if !gate.active() {
+        return;
+    }
+    let persist =
+        on_device_flow_success(outcome.access_token.as_deref(), outcome.login.as_deref()).await;
+    match persist {
+        Ok(()) => {
+            if should_rollback_stale_device_token(true, gate.active()) {
+                let _ = clear_github_connection_local().await;
+                return;
+            }
+            ui.err.set(None);
+            refresh_github_local_slots(loc, ui);
+            bump_auth_refresh_nonce(auth_refresh_nonce);
+        }
+        Err(e) => {
+            if gate.active() {
+                ui.err.set(Some(e));
+            }
+        }
+    }
+    if gate.active() {
+        ui.busy.set(false);
+    }
 }
 
 fn apply_terminal_device_state(
@@ -96,32 +135,7 @@ fn apply_terminal_device_state(
     match outcome.state.as_str() {
         "success" => {
             spawn_local(async move {
-                if !gate.active() {
-                    return;
-                }
-                match on_device_flow_success(
-                    outcome.access_token.as_deref(),
-                    outcome.login.as_deref(),
-                )
-                .await
-                {
-                    Ok(()) => {
-                        if !gate.active() {
-                            return;
-                        }
-                        ui.err.set(None);
-                        refresh_github_local_slots(loc, ui);
-                        bump_auth_refresh_nonce(auth_refresh_nonce);
-                    }
-                    Err(e) => {
-                        if gate.active() {
-                            ui.err.set(Some(e));
-                        }
-                    }
-                }
-                if gate.active() {
-                    ui.busy.set(false);
-                }
+                persist_device_success_if_current(loc, outcome, ui, auth_refresh_nonce, gate).await;
             });
         }
         "denied" | "expired" | "cancelled" | "error" => {
@@ -264,15 +278,21 @@ fn spawn_device_disconnect(
     ui.err.set(None);
     spawn_local(async move {
         let _ = post_github_oauth_device_cancel(loc).await;
+        // 代际已易主则不得再 logout/清本机，避免误删新一轮授权写入的 token。
+        if !gate.active() {
+            return;
+        }
 
         let mut remote_errs: Vec<String> = Vec::new();
         if let Err(e) = post_github_oauth_device_logout(loc).await {
             remote_errs.push(e);
         }
+        if !gate.active() {
+            return;
+        }
         if let Err(e) = clear_github_connection_local().await {
             remote_errs.push(e);
         }
-
         if !gate.active() {
             return;
         }
@@ -649,7 +669,10 @@ pub(crate) fn SettingsGithubBlock(
 
 #[cfg(test)]
 mod tests {
-    use super::{disconnect_disabled, is_device_flow_generation_current, is_device_terminal};
+    use super::{
+        disconnect_disabled, is_device_flow_generation_current, is_device_terminal,
+        should_rollback_stale_device_token,
+    };
 
     #[test]
     fn generation_matches_only_when_equal() {
@@ -666,6 +689,13 @@ mod tests {
             !is_device_flow_generation_current(current, mine),
             "旧代际任务不得写 UI / 落 token"
         );
+    }
+
+    #[test]
+    fn stale_persist_requires_token_rollback() {
+        assert!(should_rollback_stale_device_token(true, false));
+        assert!(!should_rollback_stale_device_token(true, true));
+        assert!(!should_rollback_stale_device_token(false, false));
     }
 
     #[test]
