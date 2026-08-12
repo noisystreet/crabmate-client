@@ -21,12 +21,12 @@ use crate::app::chat::stream_user_abort::finalize_superseded_assistant_loading_r
 
 /// [`prepare_stream_attach`] 的产物：`spawn_local` 内发起 HTTP/SSE 与代际校验共用。
 pub(crate) struct StreamAttachPrepared {
-    pub(crate) stream_ctx: Rc<ChatStreamCallbackCtx>,
-    pub(crate) attach_generation: u64,
+    pub(super) stream_ctx: Rc<ChatStreamCallbackCtx>,
+    pub(super) attach_generation: u64,
     /// 已登记到 [`crate::app::app_signals::StreamControlSignals::abort_cell`] 的控制器所暴露的信号。
-    pub(crate) abort_signal: web_sys::AbortSignal,
+    pub(super) abort_signal: web_sys::AbortSignal,
     /// 与 [`ChatStreamCallbackCtx::approval_session_store_id`] 同源，须原样传入 `send_chat_stream`（不可再次调用 [`approval_session_id`](crate::session_ops::approval_session_id)）。
-    pub(crate) approval_session_id: String,
+    pub(super) approval_session_id: String,
 }
 
 /// 绑定本轮流式写入目标并构造回调上下文（**不含** `send_chat_stream` / `spawn_local`）。
@@ -50,10 +50,60 @@ pub(crate) fn prepare_stream_attach(
     chat.clear_stream_text_overlay();
     chat.set_stream_overlay_display_mid(asst_id.as_str());
     chat.bind_stream_to_session(bound_session_id.clone(), attach_generation);
+    finish_stream_attach_prepare(
+        chat,
+        shell,
+        locale_sig,
+        asst_id,
+        bound_session_id,
+        attach_generation,
+        None,
+    )
+}
+
+/// 回前台软续传准备：保留 overlay / SSE 序号 / `job_id`，抬升代际并换新 `AbortController`。
+pub(crate) fn prepare_stream_resume_attach(
+    chat: ChatSessionSignals,
+    shell: &ComposerStreamShell,
+    locale_sig: RwSignal<Locale>,
+    asst_id: String,
+    session_id: String,
+    job_id: u64,
+) -> StreamAttachPrepared {
+    let attach_generation = chat.bump_stream_attach_generation();
+    reset_abort_state_for_new_attach(shell);
+    chat.set_stream_overlay_display_mid(asst_id.as_str());
+    chat.rebind_stream_resume(session_id.clone(), job_id, attach_generation);
+    let reuse_appr = shell
+        .approval
+        .pending_approval
+        .get_untracked()
+        .map(|(sid, _, _)| sid)
+        .filter(|s| !s.trim().is_empty());
+    finish_stream_attach_prepare(
+        chat,
+        shell,
+        locale_sig,
+        asst_id,
+        session_id,
+        attach_generation,
+        reuse_appr,
+    )
+}
+
+fn finish_stream_attach_prepare(
+    chat: ChatSessionSignals,
+    shell: &ComposerStreamShell,
+    locale_sig: RwSignal<Locale>,
+    asst_id: String,
+    bound_session_id: String,
+    attach_generation: u64,
+    approval_reuse: Option<String>,
+) -> StreamAttachPrepared {
     let ac = web_sys::AbortController::new().expect("AbortController");
     let abort_signal = ac.signal();
     store_abort_controller(shell, ac);
-    let appr = approval_session_id();
+    let appr = approval_reuse.unwrap_or_else(approval_session_id);
     let appr_store = appr.clone();
 
     let stream_ctx = Rc::new(ChatStreamCallbackCtx {

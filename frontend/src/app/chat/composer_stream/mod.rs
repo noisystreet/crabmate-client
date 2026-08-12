@@ -13,6 +13,7 @@
 
 mod callbacks;
 mod context;
+pub(crate) mod foreground_resume;
 mod per_stream_accum;
 mod shell_abort;
 mod stream_attach_lifecycle;
@@ -35,7 +36,6 @@ use crate::chat_session_state::ChatSessionSignals;
 use crate::i18n::Locale;
 
 use super::handles::ComposerStreamShell;
-use shell_abort::user_cancelled_flag;
 use stream_attach_lifecycle::prepare_stream_attach;
 
 /// 长生命周期句柄：`attach` 闭包捕获，供每次发起流式请求复用。
@@ -127,7 +127,7 @@ pub(super) fn make_attach_chat_stream(h: ComposerStreamHandles) -> AttachChatStr
                     .stream
                     .apply_release_turn_and_stream_run(gen_snapshot);
                 if let Err(e) = stream_result {
-                    if user_cancelled_flag(&shell_for_stream_err) {
+                    if shell_abort::user_cancelled_flag(&shell_for_stream_err) {
                         return;
                     }
                     if e == "stream stopped" {

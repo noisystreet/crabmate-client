@@ -130,6 +130,15 @@ pub(crate) fn wire_chat_composer_streams(args: WireComposerStreamsArgs) -> ChatC
         stream_turn_busy_ui,
     });
 
+    super::stream_visibility_resume::wire_stream_visibility_resume(
+        initialized,
+        chat,
+        locale,
+        selected_agent_role,
+        selected_session_mode,
+        stream_shell.clone(),
+    );
+
     let cancel_stream: Arc<dyn Fn() + Send + Sync> = Arc::new({
         let chat = chat;
         let shell = stream_shell.clone();

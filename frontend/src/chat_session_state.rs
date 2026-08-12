@@ -80,6 +80,13 @@ impl ChatStreamTransport {
         };
     }
 
+    fn rebind_stream_resume(&mut self, session_id: String, job_id: u64) {
+        self.lane = ChatStreamTransportLane::Bound {
+            session_id,
+            job_id: Some(job_id),
+        };
+    }
+
     fn clear_resume_handles(&mut self) {
         self.lane = ChatStreamTransportLane::Idle;
     }
@@ -319,6 +326,30 @@ impl ChatSessionSignals {
             );
             t.bind_stream_session(session_id);
         });
+    }
+
+    /// 回前台软续传：保持 `job_id` 与已有 overlay，仅抬升 attach 代际并重绑 Bound。
+    #[inline]
+    pub fn rebind_stream_resume(self, session_id: String, job_id: u64, attach_generation: u64) {
+        #[cfg(not(debug_assertions))]
+        let _ = attach_generation;
+        self.stream_transport.update(|t| {
+            #[cfg(debug_assertions)]
+            debug_assert_eq!(
+                t.attach_generation, attach_generation,
+                "rebind_stream_resume: attach_generation must match bump_stream_attach_generation"
+            );
+            t.rebind_stream_resume(session_id, job_id);
+        });
+    }
+
+    /// 当前 Bound 的 `(session_id, job_id)`；Idle 为 `None`。
+    #[must_use]
+    pub fn stream_bound_resume_handles_untracked(self) -> Option<(String, Option<u64>)> {
+        match self.stream_transport.get_untracked().lane {
+            ChatStreamTransportLane::Idle => None,
+            ChatStreamTransportLane::Bound { session_id, job_id } => Some((session_id, job_id)),
+        }
     }
 
     /// 发起新一轮流式 attach 时调用，返回**本轮**代际值（写入 [`crate::app::chat::composer_stream::context::ChatStreamCallbackCtx::attach_generation`]）。
