@@ -61,7 +61,7 @@ impl WorkspaceSignals {
             workspace_pool_enabled: RwSignal::new(false),
             workspace_browser_pick_modal_open: RwSignal::new(false),
             recent_workspace_roots: RwSignal::new(Vec::new()),
-            user_prefs_sync_phase: RwSignal::new(UserPrefsSyncPhase::Loading),
+            user_prefs_sync_phase: RwSignal::new(UserPrefsSyncPhase::Pending),
             user_prefs_load_err: RwSignal::new(None),
             user_prefs_save_err: RwSignal::new(None),
             user_prefs_reload_nonce: RwSignal::new(1),
