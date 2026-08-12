@@ -214,10 +214,7 @@ impl ChatSession {
     /// 非空且 trim 后的 `server_conversation_id`；与 `GET /conversation/messages` 路径参数对齐。
     #[must_use]
     pub fn trimmed_server_conversation_id(&self) -> Option<&str> {
-        self.server_conversation_id
-            .as_deref()
-            .map(str::trim)
-            .filter(|x| !x.is_empty())
+        crabmate_client_api::conversation_id_for_resume(self.server_conversation_id.as_deref())
     }
 }
 

@@ -1,6 +1,6 @@
 # 多端 Client 共用逻辑抽取（规划）
 
-> **状态**：S1–S2 **已落地**（`url` / `auth` / `secrets` / `approval`）；S3+ 未开工  
+> **状态**：S1–S4 **已落地**（`url` / `auth` / `secrets` / `approval` / `workspace` / `sessions` / `chat_body`）；S5 可选未开工  
 > **范围**：`frontend`（WASM）、`crabmate-connect`（Desktop/Android 壳）、`crabmate-tui` / `crabmate-tui-core`（远程终端）之间的重复逻辑  
 > **关联**：[remote_cli_tui.md](./remote_cli_tui.md)、[tauri_gui_mvp_design.md](./tauri_gui_mvp_design.md)、[contract_pin.md](./contract_pin.md)；Server [`client_shell_split.md`](https://github.com/noisystreet/CrabMate/blob/main/docs/design/client_shell_split.md)
 
@@ -51,11 +51,11 @@ frontend & tui-core ──┴── crabmate-sse-protocol 等（Server git tag�
 
 ```text
 crates/
-  crabmate-client-api/   # S1–S2 已建：纯逻辑（url / auth / secrets / approval；无 Tauri、无 web-sys、无 reqwest）
+  crabmate-client-api/   # S1–S4 已建：纯逻辑（url / auth / secrets / approval / workspace / sessions / chat_body）
   crabmate-connect/      # 保持：Tauri commands + keyring IO + CORS + handoff（可选依赖 client-api）
   crabmate-tui-core/     # 变薄：reqwest ServeClient 调用 client-api
   crabmate-tui/          # CLI / TTY / slash 宿主
-frontend/                # wasm fetch 适配器 + UI；S1–S2 已用 client-api 规范化/鉴权/槽名/审批
+frontend/                # wasm fetch 适配器 + UI；S1–S4 已用 client-api 核心字段/解析
 ```
 
 拟定模块（实现时可拆文件，名称可微调）：
@@ -163,11 +163,11 @@ GitHub：`X-CrabMate-GitHub-Token` 目前主要在 frontend（+ 壳钥匙串槽�
 | **S0** | 本文档；命名与依赖边界共识 | 与 AGENTS / `remote_cli_tui` / connect 无冲突 |
 | **S1** ✅ | `crabmate-client-api`：`url` + `auth` + `secrets` 常量；tui-core / connect / frontend 改依赖 | clippy；表征测试；`wasm32` check（frontend） |
 | **S2** ✅ | `approval` 类型/解析；两端替换拷贝 | 审批决策串与 `allowlistKey` 单测对齐 |
-| **S3** | `workspace` set 解析 + `sessions` 瘦模型 | tui `/workspace` `/conv list` 与 Web 字段一致 |
-| **S4** | `chat_body` 核心字段 builder | `client_sse_protocol` 钉点不易漏 |
+| **S3** ✅ | `workspace` set 解析 + `sessions` 瘦模型 | tui `/workspace` `/conv list` 与 Web 字段一致 |
+| **S4** ✅ | `chat_body` 核心字段 builder | `client_sse_protocol` 钉点不易漏 |
 | **S5**（可选） | health 子集；斜杠名字表；frontend 其余纯逻辑继续上收 | WASM 体积与编译时间可接受 |
 
-**建议开工顺序**：S0 → S1（已完成）→ S2（已完成）→ S3；S3/S4 可与终端钥匙串、续传功能并行。
+**建议开工顺序**：S0 → S1–S4（已完成）→ 可选 S5。
 
 ---
 
@@ -189,7 +189,7 @@ GitHub：`X-CrabMate-GitHub-Token` 目前主要在 frontend（+ 壳钥匙串槽�
 | 共享形态 | 新建 **`crabmate-client-api`**（纯逻辑），不是扩大 `connect` 或 `tui-core` |
 | 依赖 | frontend / tui-core → client-api；connect **可选**依赖 client-api 仅用 URL/auth 常量 |
 | IO | 仍分端：`fetch` vs `reqwest` vs keyring |
-| 下一步 | 实现 **S3**（`workspace` set 解析 + `sessions` 瘦模型） |
+| 下一步 | 可选 **S5**（health 子集 / 斜杠名字表）或功能并行 |
 
 ---
 

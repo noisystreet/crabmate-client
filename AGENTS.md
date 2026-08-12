@@ -11,7 +11,7 @@
 
 ```text
 .
-├── crates/crabmate-client-api/ # shared pure logic (URL / auth / secret slots / approval)
+├── crates/crabmate-client-api/ # shared pure logic (URL / auth / secrets / approval / workspace / sessions / chat body)
 ├── crates/crabmate-connect/
 ├── crates/crabmate-tui-core/   # remote terminal HTTP/SSE core
 ├── crates/crabmate-tui/        # binary crabmate-tui

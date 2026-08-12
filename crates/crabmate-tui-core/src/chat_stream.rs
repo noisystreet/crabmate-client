@@ -2,6 +2,7 @@
 
 use std::io::{self, Write};
 
+use crabmate_client_api::{ChatStreamCoreFields, build_chat_stream_core_body};
 use crabmate_sse_protocol::{
     AgUiParseDispatch, SSE_PROTOCOL_VERSION, classify_ag_ui_sse_data, is_sse_done_sentinel,
     join_sse_data_lines, parse_sse_event_id,
@@ -9,7 +10,7 @@ use crabmate_sse_protocol::{
 use futures_util::StreamExt;
 use reqwest::Response;
 use reqwest::header::{ACCEPT, CONTENT_TYPE, HeaderValue};
-use serde_json::{Value, json};
+use serde_json::Value;
 
 use crate::approval::{
     ApprovalDecision, ApprovalGate, CommandApprovalRequest, parse_command_approval_data,
@@ -89,19 +90,12 @@ async fn post_chat_stream(
 }
 
 fn chat_stream_body(args: ChatStreamArgs<'_>) -> Value {
-    let mut body = json!({
-        "message": args.message,
-        "client_sse_protocol": SSE_PROTOCOL_VERSION,
-        "approval_session_id": args.approval_session_id,
-    });
-    if let Some(cid) = args
-        .conversation_id
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    {
-        body["conversation_id"] = json!(cid);
-    }
-    body
+    build_chat_stream_core_body(ChatStreamCoreFields {
+        message: args.message,
+        client_sse_protocol: SSE_PROTOCOL_VERSION,
+        approval_session_id: Some(args.approval_session_id),
+        conversation_id: args.conversation_id,
+    })
 }
 
 fn conversation_id_from_headers(resp: &Response) -> Option<String> {

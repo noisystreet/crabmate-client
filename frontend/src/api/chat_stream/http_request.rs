@@ -1,6 +1,7 @@
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{Request, RequestInit, RequestMode, Response};
 
+use crabmate_client_api::{ChatStreamCoreFields, merge_chat_stream_core_fields};
 use crabmate_sse_protocol::SSE_PROTOCOL_VERSION;
 
 use crate::i18n::Locale;
@@ -40,12 +41,20 @@ pub(super) fn build_chat_stream_post_body(
         clarify_questionnaire_answers,
     } = p;
     let mut body = serde_json::json!({
-        "message": message,
-        "conversation_id": conversation_id,
         "agent_role": agent_role,
-        "approval_session_id": approval_session_id,
-        "client_sse_protocol": SSE_PROTOCOL_VERSION,
     });
+    merge_chat_stream_core_fields(
+        &mut body,
+        ChatStreamCoreFields {
+            message,
+            client_sse_protocol: SSE_PROTOCOL_VERSION,
+            approval_session_id: approval_session_id.as_deref(),
+            conversation_id: conversation_id.as_deref(),
+        },
+    );
+    // Web 历史形状：缺省 id 仍发 JSON null（与改前 `Option` 字段一致），避免省略键带来的契约歧义。
+    ensure_json_null_if_absent(&mut body, "conversation_id");
+    ensure_json_null_if_absent(&mut body, "approval_session_id");
     if let Some(mode) = session_mode
         .as_ref()
         .map(|s| s.trim())
@@ -78,6 +87,14 @@ pub(super) fn build_chat_stream_post_body(
         body["readonly_tool_ttl_cache_secs"] = serde_json::json!(secs);
     }
     Ok(body)
+}
+
+fn ensure_json_null_if_absent(body: &mut serde_json::Value, key: &str) {
+    let Some(map) = body.as_object_mut() else {
+        return;
+    };
+    map.entry(key.to_string())
+        .or_insert(serde_json::Value::Null);
 }
 
 pub(super) async fn build_chat_stream_fetch_request(

@@ -104,24 +104,19 @@ fn parse_workspace_set_response(
     let v: serde_json::Value =
         serde_json::from_str(body).map_err(|_| crate::i18n::api_err_request_failed(loc))?;
     if resp_ok {
-        if v.get("ok").and_then(|x| x.as_bool()) != Some(true) {
-            return Err(v
-                .get("error")
-                .and_then(|x| x.as_str())
-                .unwrap_or(crate::i18n::api_err_workspace_set_failed(loc))
-                .to_string());
-        }
-        return Ok(v
-            .get("path")
-            .and_then(|x| x.as_str())
-            .unwrap_or("")
-            .to_string());
+        return crabmate_client_api::parse_workspace_set_ok_body(&v).map_err(|e| {
+            use crabmate_client_api::WorkspaceSetErrorKind;
+            match e.kind {
+                WorkspaceSetErrorKind::RejectedWithoutDetail => {
+                    crate::i18n::api_err_workspace_set_failed(loc).to_string()
+                }
+                WorkspaceSetErrorKind::RejectedWithDetail => e.message,
+            }
+        });
     }
-    Err(v
-        .get("error")
-        .and_then(|x| x.as_str())
-        .map(std::string::ToString::to_string)
-        .unwrap_or_else(|| format!("HTTP {status}")))
+    Err(crabmate_client_api::workspace_set_http_error_message(
+        &v, status,
+    ))
 }
 
 /// `POST /workspace`（支持 `project` 字段）。

@@ -11,6 +11,7 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Added
 
+- Shared pure client logic crate `crabmate-client-api` **S3–S4**: workspace set JSON parse, thin session list rows + resume `conversation_id`, and `POST /chat/stream` core body builder (`message` / `client_sse_protocol` / ids); wired into `tui-core` and `frontend`
 - Shared pure client logic crate `crabmate-client-api` **S2**: `ApprovalDecision` / `CommandApprovalRequest` / `allowlistKey` parse / `ApprovalPostBody`; wired into `crabmate-tui-core` and `frontend` SSE approval path
 - Shared pure client logic crate `crabmate-client-api` (S1): strict API base URL normalize/join, Web API auth header shapes, and secret-slot / keyring account name constants; wired into `crabmate-tui-core`, `crabmate-connect`, and `frontend` (`docs/design/client_shared_logic.md`)
 - CI: run `make test-frontend` and `make test-tui` in default `check` job; desktop unit tests use `cargo test --bins` (excludes Victauri integration binaries that fake-pass without `VICTAURI_E2E`)
