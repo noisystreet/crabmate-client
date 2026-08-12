@@ -126,15 +126,7 @@ fn hydrate_web_api_bearer_once() {
 /// 规范化 API 基址：去空白与尾 `/`；非法时返回空（回退同 Origin）。
 #[must_use]
 pub fn normalize_api_base_url(raw: &str) -> String {
-    let t = raw.trim();
-    if t.is_empty() {
-        return String::new();
-    }
-    let without_slash = t.trim_end_matches('/');
-    if !(without_slash.starts_with("http://") || without_slash.starts_with("https://")) {
-        return String::new();
-    }
-    without_slash.to_string()
+    crabmate_client_api::normalize_api_base(raw)
 }
 
 fn build_time_api_base_default() -> String {
@@ -338,15 +330,16 @@ pub async fn ensure_web_api_bearer_hydrated_for_request() {
 
 pub fn auth_headers() -> Headers {
     let h = Headers::new().expect("Headers::new");
-    let t = web_api_bearer_token();
-    if !t.is_empty() {
-        let _ = h.set("Authorization", &format!("Bearer {t}"));
-        let _ = h.set("X-API-Key", &t);
+    if let Some(creds) = crabmate_client_api::web_api_credential_pair(&web_api_bearer_token()) {
+        let _ = h.set(
+            crabmate_client_api::HEADER_AUTHORIZATION,
+            &creds.authorization,
+        );
+        let _ = h.set(crabmate_client_api::HEADER_X_API_KEY, &creds.api_key);
     }
     REQUEST_GITHUB_TOKEN.with(|c| {
-        let gh = c.borrow();
-        if !gh.is_empty() {
-            let _ = h.set("X-CrabMate-GitHub-Token", &gh);
+        if let Some(gh) = crabmate_client_api::github_token_header_value(c.borrow().as_str()) {
+            let _ = h.set(crabmate_client_api::HEADER_GITHUB_TOKEN, gh);
         }
     });
     h

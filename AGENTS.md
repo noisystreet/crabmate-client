@@ -11,6 +11,7 @@
 
 ```text
 .
+├── crates/crabmate-client-api/ # shared pure logic (URL / auth / secret slot names)
 ├── crates/crabmate-connect/
 ├── crates/crabmate-tui-core/   # remote terminal HTTP/SSE core
 ├── crates/crabmate-tui/        # binary crabmate-tui
@@ -42,6 +43,7 @@
 - Contract crates only via git **tag** (`vX.Y.Z` product release, or `client-contract-vX.Y.Z`) or `rev` pinned to Server (see `frontend/Cargo.toml`; current pin: **`client-contract-v0.1.1`**)
 - Playwright E2E CI checkouts Server `serve` at the same contract pin (**`client-contract-v0.1.1`**; see `docs/design/contract_pin.md`)
 - `crabmate-connect` is in-repo path only (`crates/crabmate-connect`)
+- `crabmate-client-api` is in-repo path only (`crates/crabmate-client-api`); no Tauri / `web-sys` / `reqwest` / `tokio`
 - Web Bearer ≠ model `API_KEY`（Web Bearer：官方壳仅内存 + 本机钥匙串/Android Keystore，**禁止**明文 `localStorage`；model keys 同样走钥匙串/Keystore；chat 经 HTTPS 发送 `client_llm.api_key` — do not `PUT /user-data/secrets/client-llm` from the UI；plain browser may keep weak localStorage with an explicit warning）
 - **Split decision / contracts / SSE / CORS** are authoritative in the Server repo; this repo documents shell behavior and links out
 - Scratch drafts go in **`agent_space/`** (gitignored); **do not** treat `agent_space/` as committed documentation

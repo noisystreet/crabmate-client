@@ -1,38 +1,20 @@
-//! API 基址规范化与路径拼接。
+//! API 基址规范化与路径拼接（委托 [`crabmate_client_api::url`]）。
+
+use crabmate_client_api::url::{self, ApiUrlError};
 
 use crate::error::TermError;
 
 /// 去掉尾斜杠；拒绝相对路径。
 #[must_use]
 pub fn normalize_api_base(raw: &str) -> String {
-    let t = raw.trim();
-    if t.is_empty() {
-        return String::new();
-    }
-    if !(t.starts_with("http://") || t.starts_with("https://")) {
-        return String::new();
-    }
-    t.trim_end_matches('/').to_string()
+    url::normalize_api_base(raw)
 }
 
 /// `base` + `path`（`path` 须以 `/` 开头）。
 pub fn api_url(base: &str, path: &str) -> Result<String, TermError> {
-    let base = normalize_api_base(base);
-    if base.is_empty() {
-        return Err(TermError::InvalidApiBase(
-            "API base must be an absolute http(s) URL".into(),
-        ));
-    }
-    let path = if path.is_empty() {
-        "/"
-    } else if path.starts_with('/') {
-        path
-    } else {
-        return Err(TermError::InvalidApiBase(format!(
-            "path must start with /: {path}"
-        )));
-    };
-    Ok(format!("{base}{path}"))
+    url::join_api_path(base, path).map_err(|e| match e {
+        ApiUrlError::InvalidBase(m) | ApiUrlError::InvalidPath(m) => TermError::InvalidApiBase(m),
+    })
 }
 
 #[cfg(test)]

@@ -10,15 +10,23 @@ use std::collections::HashMap;
 use gloo_timers::future::TimeoutFuture;
 use wasm_bindgen_futures::JsFuture;
 
+use crabmate_client_api::SecretSlot;
+
 use super::browser::window;
 
 const LEGACY_CLIENT_LS: &str = "crabmate-client-llm-api-key";
 const LEGACY_EXECUTOR_LS: &str = "crabmate-executor-llm-api-key";
 const LEGACY_PRESET_LS: &str = "crabmate-saved-model-api-keys";
 
-const SLOT_CLIENT: &str = "client_llm";
-const SLOT_EXECUTOR: &str = "executor_llm";
-const SLOT_SAVED: &str = "saved_models";
+fn slot_client() -> &'static str {
+    SecretSlot::ClientLlm.as_str()
+}
+fn slot_executor() -> &'static str {
+    SecretSlot::ExecutorLlm.as_str()
+}
+fn slot_saved() -> &'static str {
+    SecretSlot::SavedModels.as_str()
+}
 
 thread_local! {
     static CLIENT: RefCell<String> = const { RefCell::new(String::new()) };
@@ -175,11 +183,14 @@ pub fn secure_llm_secret_backend_available() -> bool {
 }
 
 fn legacy_ls_key(slot: &str) -> Option<&'static str> {
-    match slot {
-        SLOT_CLIENT => Some(LEGACY_CLIENT_LS),
-        SLOT_EXECUTOR => Some(LEGACY_EXECUTOR_LS),
-        SLOT_SAVED => Some(LEGACY_PRESET_LS),
-        _ => None,
+    if slot == slot_client() {
+        Some(LEGACY_CLIENT_LS)
+    } else if slot == slot_executor() {
+        Some(LEGACY_EXECUTOR_LS)
+    } else if slot == slot_saved() {
+        Some(LEGACY_PRESET_LS)
+    } else {
+        None
     }
 }
 
@@ -315,7 +326,7 @@ fn parse_preset_secret_map(raw: Option<&str>) -> HashMap<String, String> {
 }
 
 async fn hydrate_client_slot() {
-    let client = load_slot_async(SLOT_CLIENT)
+    let client = load_slot_async(slot_client())
         .await
         .or_else(|| read_legacy_ls(LEGACY_CLIENT_LS))
         .or_else(|| {
@@ -324,25 +335,25 @@ async fn hydrate_client_slot() {
         });
     if let Some(ref k) = client {
         CLIENT.with(|c| *c.borrow_mut() = k.clone());
-        migrate_legacy_if_needed(SLOT_CLIENT, LEGACY_CLIENT_LS, k).await;
+        migrate_legacy_if_needed(slot_client(), LEGACY_CLIENT_LS, k).await;
     }
     CLIENT_HYDRATED.with(|h| *h.borrow_mut() = true);
     sync_client_key_set_flag();
 }
 
 async fn hydrate_executor_slot() {
-    let executor = load_slot_async(SLOT_EXECUTOR)
+    let executor = load_slot_async(slot_executor())
         .await
         .or_else(|| read_legacy_ls(LEGACY_EXECUTOR_LS));
     if let Some(ref k) = executor {
         EXECUTOR.with(|c| *c.borrow_mut() = k.clone());
-        migrate_legacy_if_needed(SLOT_EXECUTOR, LEGACY_EXECUTOR_LS, k).await;
+        migrate_legacy_if_needed(slot_executor(), LEGACY_EXECUTOR_LS, k).await;
     }
     EXECUTOR_HYDRATED.with(|h| *h.borrow_mut() = true);
 }
 
 async fn hydrate_saved_preset_map() {
-    let saved_raw = load_slot_async(SLOT_SAVED)
+    let saved_raw = load_slot_async(slot_saved())
         .await
         .or_else(|| read_legacy_ls(LEGACY_PRESET_LS));
     let map = parse_preset_secret_map(saved_raw.as_deref());
@@ -352,7 +363,7 @@ async fn hydrate_saved_preset_map() {
         } else {
             serde_json::to_string(&map).unwrap_or_default()
         };
-        if let Ok(PersistKind::Durable) = persist_slot_async(SLOT_SAVED, &raw).await {
+        if let Ok(PersistKind::Durable) = persist_slot_async(slot_saved(), &raw).await {
             clear_legacy_ls(LEGACY_PRESET_LS);
         }
     }
@@ -370,7 +381,7 @@ pub async fn hydrate_llm_secrets_from_secure_store() {
 /// 写入或清除主模型 API 密钥（先落盘成功再改内存）。
 pub async fn set_client_llm_api_key_async(api_key: &str) -> Result<PersistKind, String> {
     let t = api_key.trim().to_string();
-    let kind = persist_slot_async(SLOT_CLIENT, &t).await?;
+    let kind = persist_slot_async(slot_client(), &t).await?;
     CLIENT.with(|c| *c.borrow_mut() = t);
     CLIENT_HYDRATED.with(|h| *h.borrow_mut() = true);
     if kind == PersistKind::Durable {
@@ -392,7 +403,7 @@ pub fn client_llm_api_key_is_set() -> bool {
 
 pub async fn set_executor_llm_api_key_async(api_key: &str) -> Result<PersistKind, String> {
     let t = api_key.trim().to_string();
-    let kind = persist_slot_async(SLOT_EXECUTOR, &t).await?;
+    let kind = persist_slot_async(slot_executor(), &t).await?;
     EXECUTOR.with(|c| *c.borrow_mut() = t);
     EXECUTOR_HYDRATED.with(|h| *h.borrow_mut() = true);
     if kind == PersistKind::Durable {
@@ -434,7 +445,7 @@ async fn persist_preset_map_async(map: &HashMap<String, String>) -> Result<Persi
     } else {
         serde_json::to_string(map).map_err(|e| e.to_string())?
     };
-    let kind = persist_slot_async(SLOT_SAVED, &raw).await?;
+    let kind = persist_slot_async(slot_saved(), &raw).await?;
     if kind == PersistKind::Durable {
         clear_legacy_ls(LEGACY_PRESET_LS);
     }
