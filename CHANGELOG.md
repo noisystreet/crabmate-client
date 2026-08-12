@@ -22,7 +22,11 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Fixed
 
+<<<<<<< HEAD
 - Frontend: `GET /user-data/prefs` failure no longer marks prefs as hydrated and debounced PUT no longer overwrites server theme, sidebar width, or recent workspaces with local defaults; load/save errors surface in the status bar with retry
+=======
+- GitHub Device Flow (Desktop/Android): persist user token only after durable keyring/Keystore write **and** read-back; reconcile connection status re-hydrates from the secure slot before updating the Settings UI (avoids false “disconnected” / silent failed saves)
+>>>>>>> 590d65d (fix(github): Device Flow token 写后校验并在核对前水合 / verify durable GitHub token write and hydrate before reconcile)
 - Security: official Desktop/Android shells no longer write Web API Bearer to plaintext `localStorage` (`crabmate-api-bearer-token`); in-shell UI keeps it in memory and hydrates from device keyring / Android Keystore; disconnect / return-to-connect and Settings clear also wipe the native slot (reconnect requires re-entering Bearer); plain browsers keep weak localStorage with an explicit save warning; protected API fetches await secure-store hydrate before sending auth headers
 - Frontend: mobile/narrow platform entry layout (side panel collapse, Android default hidden status bar) no longer writes back to `/user-data/prefs` and overwrites desktop-saved layout preferences
 - GitHub Settings: validate OAuth Client IDs against the Server contract and report local-storage save/clear failures instead of showing false success; align Android docs with client-local Client ID and token storage

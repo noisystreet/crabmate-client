@@ -135,6 +135,23 @@ pub async fn hydrate_github_secrets_from_secure_store() {
     sync_request_header_from_memory();
 }
 
+/// 壳端写入 `github` 槽并读回校验；失败不更新内存 token。
+async fn persist_github_token_durable(token: &str) -> Result<(), String> {
+    let kind = bridge_persist_secure_slot(SLOT_GITHUB, token).await?;
+    if kind != PersistKind::Durable {
+        return Err("GitHub token 未能写入本机安全存储".into());
+    }
+    let loaded = bridge_load_secure_slot(SLOT_GITHUB)
+        .await
+        .unwrap_or_default();
+    if loaded.trim() != token.trim() {
+        return Err("GitHub token 写入后读回校验失败".into());
+    }
+    TOKEN.with(|c| *c.borrow_mut() = loaded);
+    sync_request_header_from_memory();
+    Ok(())
+}
+
 /// Device Flow 成功后：壳写入钥匙串；浏览器只记 login（token 在 Cookie）。
 pub async fn on_device_flow_success(
     access_token: Option<&str>,
@@ -147,12 +164,7 @@ pub async fn on_device_flow_success(
             .ok_or_else(|| {
                 "壳端未收到 access_token（请确认 X-CrabMate-GitHub-Token-Delivery）".to_string()
             })?;
-        let kind = bridge_persist_secure_slot(SLOT_GITHUB, t).await?;
-        if kind != PersistKind::Durable {
-            return Err("GitHub token 未能写入本机安全存储".into());
-        }
-        TOKEN.with(|c| *c.borrow_mut() = t.to_string());
-        sync_request_header_from_memory();
+        persist_github_token_durable(t).await?;
         if let Some(login_t) = login.map(str::trim).filter(|s| !s.is_empty()) {
             write_ls(LS_SESSION_LOGIN, login_t);
         }
@@ -203,9 +215,11 @@ fn looks_like_github_auth_failure(msg: &str) -> bool {
         || (low.contains("认证") && (low.contains("失败") || low.contains("无效")))
 }
 
-/// 刷新连接态：壳看钥匙串内存；浏览器在有 session 标记时用 `repo-context` 探活，鉴权失败则清标记。
+/// 刷新连接态：壳先从钥匙串/Keystore 水合再看内存；浏览器在有 session 标记时用 `repo-context` 探活，鉴权失败则清标记。
 pub async fn reconcile_github_connection_status(loc: Locale) -> bool {
     if github_token_secure_backend_available() {
+        // 设置页可能早于首启 hydrate 挂载；每次核对前先读耐久槽，避免误显「未连接」。
+        hydrate_github_secrets_from_secure_store().await;
         return github_token_is_set();
     }
     if read_ls(LS_SESSION_LOGIN).is_none() {
