@@ -57,7 +57,7 @@ help:
 	@echo "  make frontend-check      cargo check --target wasm32-unknown-unknown"
 	@echo "  make frontend-clippy     frontend clippy -D warnings"
 	@echo "  make test-frontend       frontend：wasm check + lib 单测（与 Tauri 分开）"
-	@echo "  make test-tauri          connect + desktop cargo test + mobile check（不含 Victauri E2E）"
+	@echo "  make test-tauri          connect + desktop unit tests (--bins) + mobile check（不含 Victauri E2E）"
 	@echo "  make test-tui            crabmate-tui-core + crabmate-tui 测试"
 	@echo "  make test                test-frontend 然后 test-tauri 然后 test-tui"
 	@echo "  make ktlint-android      手改 Android Kotlin ktlint（edu/crabmate）"
@@ -175,7 +175,7 @@ test-tauri:
 	@mkdir -p "$(DESKTOP_ROOT)/dist"
 	@test -f "$(DESKTOP_ROOT)/dist/index.html" || echo '<html></html>' > "$(DESKTOP_ROOT)/dist/index.html"
 	@test -f "$(DESKTOP_ROOT)/dist/connect.html" || cp "$(CONNECT_DIR)/assets/connect.html" "$(DESKTOP_ROOT)/dist/connect.html"
-	cd "$(TAURI_DIR)" && $(CARGO) test --no-fail-fast
+	cd "$(TAURI_DIR)" && $(CARGO) test --bins --no-fail-fast
 	cd "$(MOBILE_TAURI_DIR)" && $(CARGO) check --tests
 
 test-tui:

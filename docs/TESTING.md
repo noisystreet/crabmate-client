@@ -50,12 +50,14 @@ bash scripts/check.sh
 
 | Job / 工作流 | 内容 |
 |--------------|------|
-| `CI` / `check` | `check-no-main-path`、`scripts/check.sh`（含 frontend wasm/clippy + 复杂度）、`make frontend`（trunk）、connect/desktop test、mobile check |
+| `CI` / `check` | `check-no-main-path`、`scripts/check.sh`（含 frontend wasm/clippy + 复杂度）、`make frontend`（trunk）、`make test-frontend`、`make test-tui`、connect/desktop **unit** test（desktop `cargo test --bins`）、mobile check |
+| `CI` / `victauri-e2e` | **Skipped**（`if: false`）；壳 E2E 见 nightly |
 | `CI` / `build-desktop-deb` | `CM_PREPARE_SKIP_FRONTEND=1` + stub；`make desktop-release`；校验 `Package: crabmate-desktop`、无 serve sidecar、无 `/etc/crabmate` |
 | `E2E Playwright` | 本仓 `make frontend` + checkout Server 编 `serve`；mock SSE 基线 |
+| `Victauri E2E Nightly` | `make frontend` + Server `serve` + `./scripts/victauri-e2e.sh all`（xvfb；不含 `real_llm`）；失败上传桌面/serve 日志 |
 | `code-complexity` | 独立门禁：`lizard-rust` / `fn-param` / `fn-nloc` |
 
-Victauri 全量 E2E **不**进默认 CI（需本机/`PATH` 中的 `serve` + WebView）；见下节。
+Victauri 全量 E2E **不进** PR 默认 CI（`e2e_test!` 未设 `VICTAURI_E2E` 时会 0 秒假通过）；见 nightly 或本地 `victauri-e2e.sh`。
 
 本地 UI / 打包：
 

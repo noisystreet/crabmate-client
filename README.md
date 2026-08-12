@@ -21,7 +21,7 @@ Connects to a compatible **`crabmate serve`** (local or remote). Does **not** sp
 ├── frontend/                  # Business UI (Leptos CSR + WASM; contracts via git rev/tag)
 ├── e2e/                       # Playwright (browser UI; mock SSE in CI)
 ├── scripts/                   # check / connect sync / Victauri / Playwright
-└── .github/workflows/         # CI (check + frontend + Playwright + desktop deb)
+└── .github/workflows/         # CI (check + frontend tests + Playwright + desktop deb + Victauri nightly)
 ```
 
 ## Relationship to the Server repo
@@ -91,7 +91,7 @@ Design: [docs/design/remote_cli_tui.md](./docs/design/remote_cli_tui.md).
 | [docs/design/contract_pin.md](./docs/design/contract_pin.md) | Contract git tag / rev pinning |
 | [frontend/README.md](./frontend/README.md) | UI build (trunk) |
 
-Before commit: `pre-commit run --all-files` or `make check`. CI: `.github/workflows/ci.yml` (includes **frontend wasm** and **desktop release .deb**).
+Before commit: `pre-commit run --all-files` or `make check`. CI: `.github/workflows/ci.yml` (includes **frontend wasm**, **frontend/TUI unit tests**, and **desktop release .deb**); Victauri shell E2E: nightly workflow or `./scripts/victauri-e2e.sh`.
 
 ## Quick start (Desktop)
 

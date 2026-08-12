@@ -1,4 +1,4 @@
-# crabmate-client：壳 + connect + frontend 门禁（不含 Victauri 全量 E2E）
+# crabmate-client：壳 + connect + frontend 门禁（Victauri 全量 E2E 见 victauri-e2e-nightly.yml）
 name: CI
 
 on:
@@ -64,17 +64,33 @@ jobs:
       - name: trunk build (frontend)
         run: make frontend
 
+      - name: make test-frontend
+        run: make test-frontend
+
+      - name: make test-tui
+        run: make test-tui
+
       - name: cargo test (connect)
         run: cargo test
         working-directory: crates/crabmate-connect
 
-      - name: cargo test (desktop; Victauri auto-skip)
-        run: cargo test --no-fail-fast
+      - name: cargo test (desktop unit; excludes Victauri integration)
+        run: |
+          mkdir -p desktop-tauri/dist
+          test -f desktop-tauri/dist/index.html || echo '<html></html>' > desktop-tauri/dist/index.html
+          cargo test --bins --no-fail-fast
         working-directory: desktop-tauri/src-tauri
 
       - name: cargo check (mobile)
         run: cargo check --tests
         working-directory: mobile-tauri/src-tauri
+
+  victauri-e2e:
+    name: Victauri E2E (nightly only)
+    if: false
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Victauri shell E2E runs in victauri-e2e-nightly.yml or ./scripts/victauri-e2e.sh locally"
 
   build-desktop-deb:
     name: desktop release package (deb)

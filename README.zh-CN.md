@@ -21,7 +21,7 @@
 ├── frontend/                  # 业务 UI（Leptos CSR + WASM；契约 git rev/tag）
 ├── e2e/                       # Playwright（浏览器 UI；mock SSE CI）
 ├── scripts/                   # check / connect 同步 / Victauri / Playwright
-└── .github/workflows/         # CI（check + frontend + Playwright + desktop deb）
+└── .github/workflows/         # CI（check + frontend 单测 + Playwright + desktop deb + Victauri nightly）
 ```
 
 ## 与主仓关系
@@ -90,7 +90,7 @@ crabmate-tui --api-base http://127.0.0.1:8080 chat "你好"
 | [docs/design/contract_pin.md](./docs/design/contract_pin.md) | 契约 git tag / rev 钉法 |
 | [frontend/README.md](./frontend/README.md) | UI 构建（trunk） |
 
-提交前：`pre-commit run --all-files` 或 `make check`。CI：`.github/workflows/ci.yml`（含 **frontend wasm** 与 **desktop release .deb**）。
+提交前：`pre-commit run --all-files` 或 `make check`。CI：`.github/workflows/ci.yml`（含 **frontend wasm**、**frontend/TUI 单测** 与 **desktop release .deb**）；Victauri 壳 E2E：nightly 工作流或 `./scripts/victauri-e2e.sh`。
 
 ## 快速开始（Desktop）
 
