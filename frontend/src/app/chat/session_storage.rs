@@ -8,12 +8,14 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 
 use crate::api::fetch_web_ui_config;
+use crate::api::fetch_workspace;
 use crate::api::user_data::{put_current_web_sessions, put_current_web_sessions_keepalive};
 use crate::chat_session_state::ChatSessionSignals;
 
 use super::session_hydrate::bump_session_hydrate_nonce;
 use crate::api::client_llm_storage::hydrate_client_llm_from_server;
 use crate::i18n::{self, Locale};
+use crate::session_workspace_partition::record_memory_sessions_partition;
 use crate::storage::{clear_stale_stream_loading_states, ensure_at_least_one};
 use crate::stream_text_overlay::sessions_snapshot_with_stream_overlay_merged;
 use crate::user_data_bootstrap::load_web_sessions;
@@ -64,11 +66,14 @@ pub fn wire_initial_sessions_from_storage(app: crate::app::app_signals::AppSigna
         let loc = locale.get_untracked();
         spawn_local(async move {
             // LLM 覆盖 / 密钥状态 与 会话列表并行，缩短门闸；prefs（含只读 TTL）另路由行。
-            let ((), (list, aid)) = futures_util::future::join(
+            let ((), ((list, aid), ws_outcome)) = futures_util::future::join(
                 hydrate_client_llm_from_server(loc),
-                load_web_sessions(loc),
+                futures_util::future::join(load_web_sessions(loc), fetch_workspace(None, loc)),
             )
             .await;
+            if let Ok(wd) = ws_outcome {
+                record_memory_sessions_partition(wd.path.as_str());
+            }
             let (mut list, def_id) =
                 ensure_at_least_one(list, i18n::default_session_title(loc).to_string());
             for s in &mut list {
