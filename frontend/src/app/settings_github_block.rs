@@ -1,4 +1,7 @@
 //! 设置页「GitHub」分区：本机 Client ID + Device Flow（壳钥匙串 / 浏览器 Cookie）。
+//!
+//! Device Flow 轮询经 `spawn_local` 脱离组件；用 [`device_flow_generation`] 代际作废旧任务
+//!（卸载 / 重新授权 / 断开），避免多轮询串线（issue #27）。
 
 use gloo_timers::future::TimeoutFuture;
 use leptos::prelude::*;
@@ -30,6 +33,25 @@ struct GithubUiSignals {
     err: RwSignal<Option<String>>,
 }
 
+/// 当前全局 Device Flow 代际是否仍等于本任务启动时的快照。
+#[must_use]
+pub(crate) fn is_device_flow_generation_current(current: u64, mine: u64) -> bool {
+    current == mine
+}
+
+fn bump_device_flow_generation(flow_gen: RwSignal<u64>) -> u64 {
+    let mut out = 0u64;
+    flow_gen.update(|n| {
+        *n = n.saturating_add(1);
+        out = *n;
+    });
+    out
+}
+
+fn device_flow_still_active(flow_gen: RwSignal<u64>, mine: u64) -> bool {
+    is_device_flow_generation_current(flow_gen.get_untracked(), mine)
+}
+
 fn refresh_github_local_slots(loc: Locale, ui: GithubUiSignals) {
     ui.client_id_set.set(github_oauth_client_id_is_set());
     spawn_local(async move {
@@ -42,33 +64,70 @@ fn bump_auth_refresh_nonce(nonce: RwSignal<u64>) {
     nonce.update(|n| *n = n.saturating_add(1));
 }
 
-fn apply_terminal_device_state(
-    loc: Locale,
-    state: &str,
+#[derive(Clone, Copy)]
+struct DeviceFlowGate {
+    flow_gen: RwSignal<u64>,
+    flow_mine: u64,
+}
+
+impl DeviceFlowGate {
+    fn active(self) -> bool {
+        device_flow_still_active(self.flow_gen, self.flow_mine)
+    }
+}
+
+struct TerminalDeviceOutcome {
+    state: String,
     error: Option<String>,
     access_token: Option<String>,
     login: Option<String>,
+}
+
+fn apply_terminal_device_state(
+    loc: Locale,
+    outcome: TerminalDeviceOutcome,
     ui: GithubUiSignals,
     auth_refresh_nonce: RwSignal<u64>,
+    gate: DeviceFlowGate,
 ) {
-    match state {
+    if !gate.active() {
+        return;
+    }
+    match outcome.state.as_str() {
         "success" => {
             spawn_local(async move {
-                match on_device_flow_success(access_token.as_deref(), login.as_deref()).await {
+                if !gate.active() {
+                    return;
+                }
+                match on_device_flow_success(
+                    outcome.access_token.as_deref(),
+                    outcome.login.as_deref(),
+                )
+                .await
+                {
                     Ok(()) => {
+                        if !gate.active() {
+                            return;
+                        }
                         ui.err.set(None);
                         refresh_github_local_slots(loc, ui);
                         bump_auth_refresh_nonce(auth_refresh_nonce);
                     }
-                    Err(e) => ui.err.set(Some(e)),
+                    Err(e) => {
+                        if gate.active() {
+                            ui.err.set(Some(e));
+                        }
+                    }
                 }
-                ui.busy.set(false);
+                if gate.active() {
+                    ui.busy.set(false);
+                }
             });
         }
         "denied" | "expired" | "cancelled" | "error" => {
-            ui.err.set(Some(
-                error.unwrap_or_else(|| i18n::settings_github_device_state(loc, state)),
-            ));
+            ui.err.set(Some(outcome.error.unwrap_or_else(|| {
+                i18n::settings_github_device_state(loc, &outcome.state)
+            })));
             ui.busy.set(false);
         }
         _ => {}
@@ -87,94 +146,135 @@ async fn poll_until_device_done(
     start: GithubDeviceStartDto,
     ui: GithubUiSignals,
     auth_refresh_nonce: RwSignal<u64>,
+    gate: DeviceFlowGate,
 ) {
     let interval_ms = u32::try_from(start.interval.max(1).saturating_mul(1000)).unwrap_or(5000);
     let expires = start.expires_in.max(60);
     let mut waited = 0u64;
     loop {
         TimeoutFuture::new(interval_ms).await;
+        if !gate.active() {
+            return;
+        }
         waited = waited.saturating_add(start.interval.max(1));
         match fetch_github_oauth_device_status(loc).await {
             Ok(st) => {
+                if !gate.active() {
+                    return;
+                }
                 ui.status_line
                     .set(Some(i18n::settings_github_device_state(loc, &st.state)));
                 if is_device_terminal(&st.state) {
                     apply_terminal_device_state(
                         loc,
-                        &st.state,
-                        st.error,
-                        st.access_token,
-                        st.login,
+                        TerminalDeviceOutcome {
+                            state: st.state,
+                            error: st.error,
+                            access_token: st.access_token,
+                            login: st.login,
+                        },
                         ui,
                         auth_refresh_nonce,
+                        gate,
                     );
                     return;
                 }
             }
             Err(e) => {
-                ui.err.set(Some(e));
-                ui.busy.set(false);
+                if gate.active() {
+                    ui.err.set(Some(e));
+                    ui.busy.set(false);
+                }
                 return;
             }
         }
         if waited >= expires {
-            ui.err
-                .set(Some(i18n::settings_github_device_expired(loc).to_string()));
-            ui.busy.set(false);
+            if gate.active() {
+                ui.err
+                    .set(Some(i18n::settings_github_device_expired(loc).to_string()));
+                ui.busy.set(false);
+            }
             return;
         }
     }
 }
 
-fn spawn_device_connect(loc: Locale, ui: GithubUiSignals, auth_refresh_nonce: RwSignal<u64>) {
-    if ui.busy.get_untracked() {
-        return;
-    }
+fn spawn_device_connect(
+    loc: Locale,
+    ui: GithubUiSignals,
+    auth_refresh_nonce: RwSignal<u64>,
+    flow_gen: RwSignal<u64>,
+) {
     let client_id = github_oauth_client_id();
     if client_id.trim().is_empty() {
         ui.err
             .set(Some(i18n::settings_github_client_id_required(loc).into()));
         return;
     }
+    // 作废进行中的轮询；必要时取消远端上一轮 Device Flow。
+    let flow_mine = bump_device_flow_generation(flow_gen);
+    let gate = DeviceFlowGate {
+        flow_gen,
+        flow_mine,
+    };
     ui.busy.set(true);
     ui.err.set(None);
     ui.status_line.set(None);
     ui.user_code.set(None);
     ui.verify_url.set(None);
     spawn_local(async move {
+        let _ = post_github_oauth_device_cancel(loc).await;
+        if !gate.active() {
+            return;
+        }
         match post_github_oauth_device_start(&client_id, loc).await {
             Ok(start) => {
+                if !gate.active() {
+                    return;
+                }
                 ui.user_code.set(Some(start.user_code.clone()));
                 ui.verify_url
                     .set(Some(start.verification_uri_complete.clone()));
                 tauri_open_external_url(&start.verification_uri_complete);
-                poll_until_device_done(loc, start, ui, auth_refresh_nonce).await;
+                poll_until_device_done(loc, start, ui, auth_refresh_nonce, gate).await;
             }
             Err(e) => {
-                ui.err.set(Some(e));
-                ui.busy.set(false);
+                if gate.active() {
+                    ui.err.set(Some(e));
+                    ui.busy.set(false);
+                }
             }
         }
     });
 }
 
-fn spawn_device_disconnect(loc: Locale, ui: GithubUiSignals, auth_refresh_nonce: RwSignal<u64>) {
-    if ui.busy.get_untracked() {
-        return;
-    }
+fn spawn_device_disconnect(
+    loc: Locale,
+    ui: GithubUiSignals,
+    auth_refresh_nonce: RwSignal<u64>,
+    flow_gen: RwSignal<u64>,
+) {
+    // 即使 busy（授权轮询中）也允许断开：先抬升代际停本地 poll。
+    let flow_mine = bump_device_flow_generation(flow_gen);
+    let gate = DeviceFlowGate {
+        flow_gen,
+        flow_mine,
+    };
     ui.busy.set(true);
     ui.err.set(None);
     spawn_local(async move {
-        // 进行中的 Device Flow：尽力取消，失败不阻断断开。
         let _ = post_github_oauth_device_cancel(loc).await;
 
         let mut remote_errs: Vec<String> = Vec::new();
-        // 先清 Cookie（依赖 credentials），再清本机态。
         if let Err(e) = post_github_oauth_device_logout(loc).await {
             remote_errs.push(e);
         }
         if let Err(e) = clear_github_connection_local().await {
             remote_errs.push(e);
+        }
+
+        if !gate.active() {
+            return;
         }
 
         ui.github_set.set(false);
@@ -279,12 +379,17 @@ fn status_pill_class(ok: bool) -> &'static str {
     }
 }
 
-fn disconnect_disabled(busy: bool, connected: bool) -> bool {
+/// `device_ui_active`：已展示 user_code / verify_url 时允许「断开」取消进行中的 Device Flow。
+fn disconnect_disabled(busy: bool, connected: bool, device_ui_active: bool) -> bool {
+    if device_ui_active {
+        return false;
+    }
     busy || !connected
 }
 
 fn reopen_disabled(busy: bool, verify_url: Option<String>) -> bool {
-    busy || verify_url.is_none()
+    let _ = busy;
+    verify_url.is_none()
 }
 
 fn clear_client_id_disabled(busy: bool, set: bool) -> bool {
@@ -388,7 +493,6 @@ fn SettingsGithubBlockActions(
                 type="button"
                 class="btn btn-primary btn-sm"
                 data-testid="settings-github-connect"
-                prop:disabled=move || ui.busy.get()
                 on:click=move |_| on_connect.run(())
             >
                 {move || i18n::settings_github_connect(locale.get())}
@@ -397,7 +501,13 @@ fn SettingsGithubBlockActions(
                 type="button"
                 class="btn btn-secondary btn-sm"
                 data-testid="settings-github-disconnect"
-                prop:disabled=move || disconnect_disabled(ui.busy.get(), ui.github_set.get())
+                prop:disabled=move || {
+                    disconnect_disabled(
+                        ui.busy.get(),
+                        ui.github_set.get(),
+                        ui.user_code.get().is_some() || ui.verify_url.get().is_some(),
+                    )
+                }
                 on:click=move |_| on_disconnect.run(())
             >
                 {move || i18n::settings_github_disconnect(locale.get())}
@@ -496,17 +606,27 @@ pub(crate) fn SettingsGithubBlock(
         busy: RwSignal::new(false),
         err: RwSignal::new(None),
     };
+    let flow_gen = RwSignal::new(0u64);
 
     Effect::new(move |_| {
         let loc = locale.get();
         refresh_github_local_slots(loc, ui);
     });
 
+    // 卸载设置块：作废本地 poll，并尽力取消远端 Device Flow。
+    on_cleanup(move || {
+        bump_device_flow_generation(flow_gen);
+        let loc = locale.get_untracked();
+        spawn_local(async move {
+            let _ = post_github_oauth_device_cancel(loc).await;
+        });
+    });
+
     let on_connect = Callback::new(move |_| {
-        spawn_device_connect(locale.get_untracked(), ui, auth_refresh_nonce);
+        spawn_device_connect(locale.get_untracked(), ui, auth_refresh_nonce, flow_gen);
     });
     let on_disconnect = Callback::new(move |_| {
-        spawn_device_disconnect(locale.get_untracked(), ui, auth_refresh_nonce);
+        spawn_device_disconnect(locale.get_untracked(), ui, auth_refresh_nonce, flow_gen);
     });
     let on_reopen = Callback::new(move |_| {
         if let Some(url) = ui.verify_url.get_untracked() {
@@ -524,5 +644,42 @@ pub(crate) fn SettingsGithubBlock(
             on_disconnect=on_disconnect
             on_reopen=on_reopen
         />
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{disconnect_disabled, is_device_flow_generation_current, is_device_terminal};
+
+    #[test]
+    fn generation_matches_only_when_equal() {
+        assert!(is_device_flow_generation_current(3, 3));
+        assert!(!is_device_flow_generation_current(4, 3));
+        assert!(!is_device_flow_generation_current(0, 1));
+    }
+
+    #[test]
+    fn stale_generation_must_not_apply() {
+        let current = 2u64;
+        let mine = 1u64;
+        assert!(
+            !is_device_flow_generation_current(current, mine),
+            "旧代际任务不得写 UI / 落 token"
+        );
+    }
+
+    #[test]
+    fn disconnect_enabled_during_device_ui() {
+        assert!(!disconnect_disabled(true, false, true));
+        assert!(disconnect_disabled(false, false, false));
+        assert!(!disconnect_disabled(false, true, false));
+        assert!(disconnect_disabled(true, true, false));
+    }
+
+    #[test]
+    fn terminal_states_recognized() {
+        assert!(is_device_terminal("success"));
+        assert!(is_device_terminal("cancelled"));
+        assert!(!is_device_terminal("pending"));
     }
 }
