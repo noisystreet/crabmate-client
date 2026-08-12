@@ -24,23 +24,54 @@ static PENDING_EMPTY_SESSION_AFTER_PARTITION: AtomicBool = AtomicBool::new(false
 static PARTITION_LOAD_GEN: AtomicU64 = AtomicU64::new(0);
 /// 切仓后、新桶会话尚未 commit 前禁止 `PUT …/current/sessions`（防串桶）。
 static SESSION_PERSIST_BLOCKED: AtomicBool = AtomicBool::new(false);
+/// 每次门闩/解闩递增；异步 PUT 快照必须仍对应该代际。
+static SESSION_PERSIST_EPOCH: AtomicU64 = AtomicU64::new(0);
 /// 内存会话列表已对应的工作区规范化路径（`commit_partition_sessions` 写入）。
 static MEMORY_SESSIONS_PARTITION_NORM: Mutex<Option<String>> = Mutex::new(None);
+
+fn bump_session_persist_epoch() -> u64 {
+    SESSION_PERSIST_EPOCH
+        .fetch_add(1, Ordering::SeqCst)
+        .wrapping_add(1)
+}
 
 /// 旧桶已 flush、即将 `POST /workspace` 时调用：挡住防抖 PUT 写到新 `current`。
 pub fn begin_workspace_session_persist_block() {
     SESSION_PERSIST_BLOCKED.store(true, Ordering::SeqCst);
+    let _ = bump_session_persist_epoch();
 }
 
 /// 切仓失败回滚时解除门闩（内存仍属旧桶）。
 pub fn clear_workspace_session_persist_block() {
     SESSION_PERSIST_BLOCKED.store(false, Ordering::SeqCst);
+    let _ = bump_session_persist_epoch();
 }
 
 /// 是否允许把内存会话写回服务端 `current` 桶。
 #[must_use]
 pub fn session_persist_allowed() -> bool {
     !SESSION_PERSIST_BLOCKED.load(Ordering::SeqCst)
+}
+
+/// 当前会话持久化代际（异步 PUT 用：快照时记下，写入前必须仍相等）。
+#[must_use]
+pub fn session_persist_epoch() -> u64 {
+    SESSION_PERSIST_EPOCH.load(Ordering::SeqCst)
+}
+
+/// `allowed && epoch` 与快照时一致时才可 PUT。
+#[must_use]
+pub fn session_persist_put_ok(snapshot_epoch: u64) -> bool {
+    persist_put_ok_parts(
+        session_persist_allowed(),
+        session_persist_epoch(),
+        snapshot_epoch,
+    )
+}
+
+#[must_use]
+pub(crate) fn persist_put_ok_parts(allowed: bool, current_epoch: u64, snapshot_epoch: u64) -> bool {
+    allowed && current_epoch == snapshot_epoch
 }
 
 /// 内存会话是否已提交为 `workspace_path` 对应桶。
@@ -209,6 +240,7 @@ pub fn apply_empty_session_in_memory(
         *g = Some(norm);
     }
     SESSION_PERSIST_BLOCKED.store(false, Ordering::SeqCst);
+    let _ = bump_session_persist_epoch();
 }
 
 fn workspace_root_opt(path: &str) -> Option<String> {
@@ -277,9 +309,12 @@ fn commit_partition_sessions(
         *g = Some(norm);
     }
     SESSION_PERSIST_BLOCKED.store(false, Ordering::SeqCst);
+    let _ = bump_session_persist_epoch();
 }
 
 /// 显式加载并提交某一工作区桶的会话（`finish_workspace_root_ui` 等待超时或 reload 失败时兜底）。
+///
+/// 成功 commit 返回 `true`；代际过期返回 `false`（不解闩，由更新的加载任务负责）。
 pub async fn ensure_sessions_for_workspace(
     chat: ChatSessionSignals,
     draft: RwSignal<String>,
@@ -287,14 +322,14 @@ pub async fn ensure_sessions_for_workspace(
     workspace_path: &str,
     loc: Locale,
     force_empty: bool,
-) {
+) -> bool {
     let norm = normalize_workspace_partition_path(workspace_path);
     let my_gen = PARTITION_LOAD_GEN
         .fetch_add(1, Ordering::AcqRel)
         .wrapping_add(1);
     let (list2, aid2) = load_web_sessions(loc).await;
     if PARTITION_LOAD_GEN.load(Ordering::Acquire) != my_gen {
-        return;
+        return false;
     }
     let force_empty = take_pending_empty_session_after_partition() || force_empty;
     let (list2, pick, draft_text) =
@@ -303,7 +338,7 @@ pub async fn ensure_sessions_for_workspace(
         if force_empty {
             request_empty_session_after_next_partition();
         }
-        return;
+        return false;
     }
     commit_partition_sessions(
         chat,
@@ -314,6 +349,7 @@ pub async fn ensure_sessions_for_workspace(
         draft_text,
         norm,
     );
+    true
 }
 
 /// `wire_workspace_session_storage_partition` 的入参。
@@ -418,6 +454,13 @@ mod tests {
             history_window_start: None,
             history_has_older: None,
         }
+    }
+
+    #[test]
+    fn persist_put_ok_requires_allow_and_matching_epoch() {
+        assert!(persist_put_ok_parts(true, 3, 3));
+        assert!(!persist_put_ok_parts(false, 3, 3));
+        assert!(!persist_put_ok_parts(true, 4, 3));
     }
 
     #[test]
