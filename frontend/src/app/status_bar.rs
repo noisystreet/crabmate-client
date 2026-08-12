@@ -11,6 +11,7 @@ use crate::app_prefs::{
 };
 use crate::chat_session_state::{ChatSessionSignals, ChatStreamBusyMemos};
 use crate::i18n::{self, Locale};
+use crate::user_prefs_sync_state::UserPrefsSyncPhase;
 
 use super::app_shell_ctx::StatusBarFooterSignals;
 use super::settings_page::{SettingsSection, navigate_to_settings};
@@ -19,6 +20,56 @@ use super::status_agent_role_menu::{AgentRoleMenuProps, StatusAgentRoleMenu};
 use super::status_fetch_state::status_bar_should_show_skeleton;
 use super::status_session_mode_seg::{SessionModeSegProps, StatusSessionModeSeg};
 use super::status_tasks_state::StatusTasksSignals;
+
+#[component]
+fn UserPrefsLoadErrorPanel(
+    fetch_err: String,
+    user_prefs_reload_nonce: RwSignal<u64>,
+    locale: RwSignal<Locale>,
+) -> impl IntoView {
+    let fetch_err_for_title = fetch_err.clone();
+    let fetch_err_for_body = fetch_err.clone();
+    view! {
+        <div
+            class="status-fetch-error"
+            role="status"
+            aria-live="polite"
+            data-testid="prefs-load-error"
+        >
+            <span class="status-fetch-error-text" title=fetch_err_for_title.clone()>
+                {move || i18n::prefs_load_failed(locale.get(), fetch_err_for_body.as_str())}
+            </span>
+            <button
+                type="button"
+                class="btn btn-secondary btn-sm"
+                data-testid="prefs-load-retry"
+                on:click=move |_| {
+                    user_prefs_reload_nonce.update(|n| *n = n.wrapping_add(1));
+                }
+            >
+                {move || i18n::status_retry(locale.get())}
+            </button>
+        </div>
+    }
+}
+
+#[component]
+fn UserPrefsSaveErrorPanel(save_err: String, locale: RwSignal<Locale>) -> impl IntoView {
+    let save_err_for_title = save_err.clone();
+    let save_err_for_body = save_err.clone();
+    view! {
+        <div
+            class="status-fetch-error status-fetch-error--prefs-save"
+            role="status"
+            aria-live="polite"
+            data-testid="prefs-save-error"
+        >
+            <span class="status-fetch-error-text" title=save_err_for_title.clone()>
+                {move || i18n::prefs_save_failed(locale.get(), save_err_for_body.as_str())}
+            </span>
+        </div>
+    }
+}
 
 #[component]
 fn StatusFetchErrorPanel(
@@ -332,6 +383,10 @@ fn StatusBarChipsLoaded(
 fn StatusBarChipsRow(
     chips: StatusBarChipsSignals,
     refresh_status: Arc<dyn Fn() + Send + Sync>,
+    user_prefs_sync_phase: RwSignal<UserPrefsSyncPhase>,
+    user_prefs_load_err: RwSignal<Option<String>>,
+    user_prefs_save_err: RwSignal<Option<String>>,
+    user_prefs_reload_nonce: RwSignal<u64>,
 ) -> impl IntoView {
     let StatusBarChipsSignals {
         st,
@@ -352,6 +407,26 @@ fn StatusBarChipsRow(
             class:status-chips--mode-menu-open=move || mode_menu_open.get()
         >
             {move || {
+                if user_prefs_sync_phase.get() == UserPrefsSyncPhase::LoadFailed {
+                    if let Some(err) = user_prefs_load_err.get() {
+                        return view! {
+                            <UserPrefsLoadErrorPanel
+                                fetch_err=err
+                                user_prefs_reload_nonce=user_prefs_reload_nonce
+                                locale=locale
+                            />
+                        }
+                        .into_any();
+                    }
+                }
+                if user_prefs_sync_phase.get() == UserPrefsSyncPhase::SaveFailed {
+                    if let Some(err) = user_prefs_save_err.get() {
+                        return view! {
+                            <UserPrefsSaveErrorPanel save_err=err locale=locale />
+                        }
+                        .into_any();
+                    }
+                }
                 let phase = st.status_fetch_phase.get();
                 let has_data = st.status_data.get().is_some();
                 let has_error = st.status_fetch_err.get().is_some();
@@ -439,6 +514,10 @@ fn StatusBarFooterBody(signals: StatusBarFooterSignals) -> impl IntoView {
         selected_session_mode,
         session_mode_user_override,
         refresh_status,
+        user_prefs_reload_nonce,
+        user_prefs_sync_phase,
+        user_prefs_load_err,
+        user_prefs_save_err,
         settings_page,
         ..
     } = signals;
@@ -457,13 +536,22 @@ fn StatusBarFooterBody(signals: StatusBarFooterSignals) -> impl IntoView {
         <footer
             data-testid="status-bar"
             class=move || {
-            if st.status_fetch_err.get().is_some() {
+            if st.status_fetch_err.get().is_some()
+                || user_prefs_sync_phase.get() == UserPrefsSyncPhase::LoadFailed
+            {
                 "status-bar status-bar-fetch-error"
             } else {
                 "status-bar"
             }
         }>
-            <StatusBarChipsRow chips=chips refresh_status=refresh_status />
+            <StatusBarChipsRow
+                chips=chips
+                refresh_status=refresh_status
+                user_prefs_sync_phase=user_prefs_sync_phase
+                user_prefs_load_err=user_prefs_load_err
+                user_prefs_save_err=user_prefs_save_err
+                user_prefs_reload_nonce=user_prefs_reload_nonce
+            />
             <StatusBarRunIndicator
                 st=st
                 status_err=status_err

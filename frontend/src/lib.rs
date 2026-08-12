@@ -53,6 +53,7 @@ mod tauri_shell;
 mod timeline_scan;
 mod user_data_bootstrap;
 mod user_prefs_sync;
+mod user_prefs_sync_state;
 mod visible_messages;
 mod workspace_context_menu;
 mod workspace_fs_ops;

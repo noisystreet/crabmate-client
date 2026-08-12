@@ -150,6 +150,10 @@ pub struct StatusBarFooterSignals {
     pub selected_session_mode: RwSignal<String>,
     pub session_mode_user_override: RwSignal<bool>,
     pub refresh_status: Arc<dyn Fn() + Send + Sync>,
+    pub user_prefs_reload_nonce: RwSignal<u64>,
+    pub user_prefs_sync_phase: RwSignal<crate::user_prefs_sync_state::UserPrefsSyncPhase>,
+    pub user_prefs_load_err: RwSignal<Option<String>>,
+    pub user_prefs_save_err: RwSignal<Option<String>>,
     pub settings_page: RwSignal<bool>,
 }
 
@@ -320,6 +324,10 @@ impl AppShellCtx {
             selected_session_mode: self.signals.llm_settings.selected_session_mode,
             session_mode_user_override: self.signals.llm_settings.session_mode_user_override,
             refresh_status: Arc::clone(&self.refresh_status),
+            user_prefs_reload_nonce: self.signals.workspace.user_prefs_reload_nonce,
+            user_prefs_sync_phase: self.signals.workspace.user_prefs_sync_phase,
+            user_prefs_load_err: self.signals.workspace.user_prefs_load_err,
+            user_prefs_save_err: self.signals.workspace.user_prefs_save_err,
             settings_page: self.signals.modal.settings_page,
         }
     }

@@ -5,6 +5,7 @@ use std::collections::{HashMap, HashSet};
 use leptos::prelude::*;
 
 use crate::api::WorkspaceData;
+use crate::user_prefs_sync_state::UserPrefsSyncPhase;
 
 #[derive(Clone, Copy)]
 pub struct WorkspaceSignals {
@@ -28,10 +29,14 @@ pub struct WorkspaceSignals {
     pub workspace_browser_pick_modal_open: RwSignal<bool>,
     /// 最近打开的工作区根（新在前；来自 `prefs.recent_workspace_roots`）。
     pub recent_workspace_roots: RwSignal<Vec<String>>,
-    /// 首启 `GET /user-data/prefs` 已结束（成功或失败）；为 false 时勿 PUT prefs。
-    pub user_prefs_hydrated: RwSignal<bool>,
-    /// 首启 `GET /user-data/prefs` 是否成功；仅成功才允许 PUT 写回（防默认值覆盖真实偏好）。
-    pub user_prefs_loaded_ok: RwSignal<bool>,
+    /// `GET /user-data/prefs` 同步阶段（见 [`crate::user_prefs_sync_state::UserPrefsSyncPhase`]）。
+    pub user_prefs_sync_phase: RwSignal<UserPrefsSyncPhase>,
+    /// 最近一次 GET 失败原因（`LoadFailed` 时展示）。
+    pub user_prefs_load_err: RwSignal<Option<String>>,
+    /// 最近一次 PUT 失败原因（`SaveFailed` 时展示）。
+    pub user_prefs_save_err: RwSignal<Option<String>>,
+    /// 递增以触发 `GET /user-data/prefs`（首启为 1；失败重试时 +1）。
+    pub user_prefs_reload_nonce: RwSignal<u64>,
     pub workspace_context_menu:
         RwSignal<Option<crate::workspace_context_menu::WorkspaceContextAnchor>>,
     pub workspace_pending_create:
@@ -56,8 +61,10 @@ impl WorkspaceSignals {
             workspace_pool_enabled: RwSignal::new(false),
             workspace_browser_pick_modal_open: RwSignal::new(false),
             recent_workspace_roots: RwSignal::new(Vec::new()),
-            user_prefs_hydrated: RwSignal::new(false),
-            user_prefs_loaded_ok: RwSignal::new(false),
+            user_prefs_sync_phase: RwSignal::new(UserPrefsSyncPhase::Loading),
+            user_prefs_load_err: RwSignal::new(None),
+            user_prefs_save_err: RwSignal::new(None),
+            user_prefs_reload_nonce: RwSignal::new(1),
             workspace_context_menu: RwSignal::new(None),
             workspace_pending_create: RwSignal::new(None),
         }
