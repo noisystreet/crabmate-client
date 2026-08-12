@@ -306,9 +306,9 @@ pub fn set_readonly_tool_ttl_cache_follow_server_in_memory(follow: bool) {
 pub fn persist_readonly_tool_ttl_cache_follow_server(follow: bool, loc: Locale) {
     set_readonly_tool_ttl_cache_follow_server_in_memory(follow);
     leptos::task::spawn_local(async move {
-        let mut prefs = super::user_data::fetch_user_data_prefs(loc)
-            .await
-            .unwrap_or_default();
+        let Ok(mut prefs) = super::user_data::fetch_user_data_prefs(loc).await else {
+            return;
+        };
         prefs.disable_readonly_tool_ttl_cache = Some(!follow);
         let _ = super::user_data::put_user_data_prefs(&prefs, loc).await;
     });

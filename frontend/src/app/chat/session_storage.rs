@@ -18,6 +18,7 @@ use crate::storage::{clear_stale_stream_loading_states, ensure_at_least_one};
 use crate::stream_text_overlay::sessions_snapshot_with_stream_overlay_merged;
 use crate::user_data_bootstrap::load_web_sessions;
 use crate::user_prefs_sync::wire_load_user_prefs_from_server;
+use crate::user_prefs_sync_state::user_prefs_load_attempt_finished;
 
 const PERSIST_SESSIONS_DEBOUNCE_MS: u32 = 400;
 
@@ -47,7 +48,7 @@ pub fn wire_initial_sessions_from_storage(app: crate::app::app_signals::AppSigna
     let chat = app.chat;
 
     wire_load_user_prefs_from_server(app.clone());
-    let prefs_hydrated = app.workspace.user_prefs_hydrated;
+    let prefs_sync_phase = app.workspace.user_prefs_sync_phase;
     Effect::new(move |_| {
         if initialized.get() {
             return;
@@ -79,7 +80,7 @@ pub fn wire_initial_sessions_from_storage(app: crate::app::app_signals::AppSigna
             draft.set(d);
             // 等 prefs 落地后再 `initialized`，避免首条聊天用默认只读 TTL（false→附带 0）。
             for _ in 0..250 {
-                if prefs_hydrated.get_untracked() {
+                if user_prefs_load_attempt_finished(prefs_sync_phase.get_untracked()) {
                     break;
                 }
                 TimeoutFuture::new(20).await;

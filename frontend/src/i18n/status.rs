@@ -16,6 +16,20 @@ pub fn status_retry(l: Locale) -> &'static str {
     }
 }
 
+pub fn prefs_load_failed(l: Locale, err: &str) -> String {
+    match l {
+        Locale::ZhHans => format!("无法加载偏好（/user-data/prefs）：{err}"),
+        Locale::En => format!("Failed to load preferences (/user-data/prefs): {err}"),
+    }
+}
+
+pub fn prefs_save_failed(l: Locale, err: &str) -> String {
+    match l {
+        Locale::ZhHans => format!("偏好保存失败：{err}"),
+        Locale::En => format!("Failed to save preferences: {err}"),
+    }
+}
+
 pub fn status_open_web_api_settings(l: Locale) -> &'static str {
     match l {
         Locale::ZhHans => "填写 Web Bearer",

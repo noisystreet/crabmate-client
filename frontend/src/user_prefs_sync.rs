@@ -11,6 +11,9 @@ use crate::api::user_data::{UserPrefsDto, fetch_user_data_prefs, put_user_data_p
 use crate::app::app_signals::AppSignals;
 use crate::app_prefs::SidePanelView;
 use crate::i18n::Locale;
+use crate::user_prefs_sync_state::{
+    UserPrefsSyncPhase, user_prefs_allows_persist, user_prefs_load_attempt_finished,
+};
 const PERSIST_DEBOUNCE_MS: u32 = 400;
 
 fn side_panel_from_slug(s: &str) -> SidePanelView {
@@ -261,36 +264,91 @@ fn apply_prefs_dto(
     apply_llm_prefs_dto(app, dto, prefs_session_mode_present);
 }
 
+/// 从服务端拉取偏好并写入信号（由 `user_prefs_reload_nonce` 触发）。
+fn spawn_user_prefs_load(app: &AppSignals, prefs_session_mode_present: StoredValue<bool>) {
+    if app.workspace.user_prefs_sync_phase.get_untracked() == UserPrefsSyncPhase::Loading {
+        return;
+    }
+    app.workspace
+        .user_prefs_sync_phase
+        .set(UserPrefsSyncPhase::Loading);
+    app.workspace.user_prefs_load_err.set(None);
+    let app = app.clone();
+    spawn_local(async move {
+        let loc = app.shell_ui.locale.get_untracked();
+        match fetch_user_data_prefs(loc).await {
+            Ok(dto) => {
+                apply_prefs_dto(&app, &dto, prefs_session_mode_present);
+                crate::app::shell_prefs_storage::apply_loaded_prefs_to_dom(&app);
+                app.workspace.user_prefs_load_err.set(None);
+                app.workspace
+                    .user_prefs_sync_phase
+                    .set(UserPrefsSyncPhase::Ready);
+            }
+            Err(e) => {
+                app.workspace.user_prefs_load_err.set(Some(e));
+                app.workspace
+                    .user_prefs_sync_phase
+                    .set(UserPrefsSyncPhase::LoadFailed);
+            }
+        }
+        crate::app::shell_prefs_storage::apply_platform_shell_ui_on_entry(&app);
+    });
+}
+
 /// 首启从服务端加载偏好并写入信号（随后由 DOM sync Effect 反映到页面）。
 pub fn wire_load_user_prefs_from_server(app: AppSignals) {
-    let loaded = RwSignal::new(false);
     let prefs_session_mode_present = StoredValue::new(false);
     Effect::new({
         let app = app.clone();
         move |_| {
-            if loaded.get() {
-                return;
-            }
-            loaded.set(true);
-            let app = app.clone();
-            let prefs_session_mode_present = prefs_session_mode_present;
-            spawn_local(async move {
-                let loc = app.shell_ui.locale.get_untracked();
-                if let Ok(dto) = fetch_user_data_prefs(loc).await {
-                    apply_prefs_dto(&app, &dto, prefs_session_mode_present);
-                    crate::app::shell_prefs_storage::apply_loaded_prefs_to_dom(&app);
-                    // 仅读取成功才允许 PUT 写回，否则默认值会覆盖服务端真实偏好。
-                    app.workspace.user_prefs_loaded_ok.set(true);
-                }
-                // prefs 可能来自另一端：按当前端覆盖壳 UI 进入态
-                //（移动/窄屏收起侧栏；Android 壳默认隐藏应用内底部状态栏）。
-                crate::app::shell_prefs_storage::apply_platform_shell_ui_on_entry(&app);
-                // 无论成功失败都置位，避免永久阻塞壳偏好落盘；失败时最近列表可能为空。
-                app.workspace.user_prefs_hydrated.set(true);
-            });
+            let _ = app.workspace.user_prefs_reload_nonce.get();
+            spawn_user_prefs_load(&app, prefs_session_mode_present);
         }
     });
-    wire_role_default_session_mode_when_status_ready(app, prefs_session_mode_present);
+    wire_role_default_session_mode_when_status_ready(app.clone(), prefs_session_mode_present);
+    wire_user_prefs_auto_retry_on_init(app.clone());
+    wire_user_prefs_online_retry(app);
+}
+
+/// `initialized` 后若首启 GET 仍失败，自动再试一次（不阻塞聊天门闸）。
+fn wire_user_prefs_auto_retry_on_init(app: AppSignals) {
+    let auto_retried = StoredValue::new(false);
+    Effect::new(move |_| {
+        if !app.initialized.get() {
+            return;
+        }
+        if app.workspace.user_prefs_sync_phase.get() != UserPrefsSyncPhase::LoadFailed {
+            return;
+        }
+        if auto_retried.get_value() {
+            return;
+        }
+        auto_retried.set_value(true);
+        app.workspace
+            .user_prefs_reload_nonce
+            .update(|n| *n = n.wrapping_add(1));
+    });
+}
+
+/// 浏览器 `online` 时若仍处于 `LoadFailed`，重试 GET。
+fn wire_user_prefs_online_retry(app: AppSignals) {
+    use wasm_bindgen::JsCast;
+    use wasm_bindgen::closure::Closure;
+
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let closure = Closure::wrap(Box::new(move || {
+        if app.workspace.user_prefs_sync_phase.get_untracked() != UserPrefsSyncPhase::LoadFailed {
+            return;
+        }
+        app.workspace
+            .user_prefs_reload_nonce
+            .update(|n| *n = n.wrapping_add(1));
+    }) as Box<dyn FnMut()>);
+    let _ = window.add_event_listener_with_callback("online", closure.as_ref().unchecked_ref());
+    closure.forget();
 }
 
 /// prefs 未记忆 mode 时，待 `/status` 就绪后按当前角色补默认一次（companion → ask 等）。
@@ -300,7 +358,7 @@ fn wire_role_default_session_mode_when_status_ready(
 ) {
     let applied = StoredValue::new(false);
     Effect::new(move |_| {
-        if !app.workspace.user_prefs_hydrated.get() {
+        if !user_prefs_load_attempt_finished(app.workspace.user_prefs_sync_phase.get()) {
             return;
         }
         let Some(status) = app.status.status_data.get() else {
@@ -328,8 +386,8 @@ pub fn wire_persist_user_prefs_to_server(app: AppSignals) {
     let debounce_tick = StoredValue::new(Arc::new(AtomicU64::new(0)));
 
     Effect::new(move |_| {
-        // 仅当首启 GET 成功后才允许 PUT，否则默认值会覆盖服务端真实偏好。
-        if !app.workspace.user_prefs_loaded_ok.get() {
+        // 须等首启 GET 成功（或此前已成功同步），否则空 `recent_workspace_roots` 会覆盖磁盘上的最近列表。
+        if !user_prefs_allows_persist(app.workspace.user_prefs_sync_phase.get()) {
             return;
         }
         let _ = app.shell_ui.theme.get();
@@ -362,12 +420,29 @@ pub fn wire_persist_user_prefs_to_server(app: AppSignals) {
             if ctr2.load(Ordering::Relaxed) != tick {
                 return;
             }
-            if !app2.workspace.user_prefs_loaded_ok.get_untracked() {
+            if !user_prefs_allows_persist(app2.workspace.user_prefs_sync_phase.get_untracked()) {
                 return;
             }
             let loc = app2.shell_ui.locale.get_untracked();
             let dto = build_prefs_dto(&app2);
-            let _ = put_user_data_prefs(&dto, loc).await;
+            match put_user_data_prefs(&dto, loc).await {
+                Ok(()) => {
+                    app2.workspace.user_prefs_save_err.set(None);
+                    if app2.workspace.user_prefs_sync_phase.get_untracked()
+                        == UserPrefsSyncPhase::SaveFailed
+                    {
+                        app2.workspace
+                            .user_prefs_sync_phase
+                            .set(UserPrefsSyncPhase::Ready);
+                    }
+                }
+                Err(e) => {
+                    app2.workspace.user_prefs_save_err.set(Some(e));
+                    app2.workspace
+                        .user_prefs_sync_phase
+                        .set(UserPrefsSyncPhase::SaveFailed);
+                }
+            }
         });
     });
 }
