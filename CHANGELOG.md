@@ -25,6 +25,7 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Fixed
 
+- Frontend: workspace-bound sessions — switching workspace loads that bucket only (empty bucket gets a default empty session; no longer copies the previous workspace’s list); clone flushes the old bucket then opens an empty session; avoid patching the prior active session’s `workspace_root` before the partition reload
 - GitHub Settings: Device Flow poll tasks are generation-gated and cancelled on Settings unmount / reconnect / disconnect, so stale `spawn_local` polls no longer update UI or apply tokens after the user left or started a new flow; success persist rolls back if the generation became stale mid-write, and disconnect skips logout/local clear once superseded
 - Chat (Android/Desktop WebView): when returning from background (`visibilitychange`), soft-resume `/chat/stream` only if a job id remains but the abort slot is empty (avoid tearing down a live attach/scratch); otherwise hydrate conversation messages when the turn looked busy while hidden
 - GitHub Device Flow (Desktop/Android): persist user token only after durable keyring/Keystore write **and** read-back; Settings reconcile re-hydrates from the secure slot when memory is empty (avoids false “disconnected” without wiping a good in-memory token on flaky reads)

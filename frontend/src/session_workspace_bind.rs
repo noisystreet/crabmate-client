@@ -14,27 +14,6 @@ use crate::i18n::Locale;
 use crate::storage::ChatSession;
 use crate::storage::normalize_workspace_partition_path;
 
-/// 将成功设置的工作区根路径写入当前活动会话（供本地持久化）。
-pub fn patch_active_session_workspace_root(
-    sessions: RwSignal<Vec<ChatSession>>,
-    active_session_id: &str,
-    path: String,
-) {
-    if active_session_id.is_empty() {
-        return;
-    }
-    let p = path.trim().to_string();
-    if p.is_empty() {
-        return;
-    }
-    let id = active_session_id.to_string();
-    sessions.update(|list| {
-        if let Some(s) = list.iter_mut().find(|s| s.id == id) {
-            s.workspace_root = Some(p);
-        }
-    });
-}
-
 /// 若 `session_id` 对应会话存有非空 `workspace_root`，则异步 `POST /workspace` 并刷新侧栏目录树。
 pub fn spawn_apply_session_bound_workspace(
     sessions: RwSignal<Vec<ChatSession>>,

@@ -277,6 +277,7 @@ impl AppShellCtx {
             workspace_pick: super::workspace_root_actions::WorkspaceRootPickHandle {
                 locale: self.signals.shell_ui.locale,
                 chat: self.signals.chat,
+                composer_draft: self.signals.chat_composer.draft,
                 ws: self.signals.to_workspace_panel(),
                 side_panel_view: self.signals.shell_ui.side_panel_view,
             },
@@ -292,6 +293,7 @@ impl AppShellCtx {
             workspace_pick: super::workspace_root_actions::WorkspaceRootPickHandle {
                 locale: self.signals.shell_ui.locale,
                 chat: self.signals.chat,
+                composer_draft: self.signals.chat_composer.draft,
                 ws: self.signals.to_workspace_panel(),
                 side_panel_view: self.signals.shell_ui.side_panel_view,
             },
@@ -306,6 +308,7 @@ impl AppShellCtx {
             workspace_pick: super::workspace_root_actions::WorkspaceRootPickHandle {
                 locale: self.signals.shell_ui.locale,
                 chat: self.signals.chat,
+                composer_draft: self.signals.chat_composer.draft,
                 ws: self.signals.to_workspace_panel(),
                 side_panel_view: self.signals.shell_ui.side_panel_view,
             },
@@ -356,6 +359,7 @@ impl AppShellCtx {
             workspace_pick: super::workspace_root_actions::WorkspaceRootPickHandle {
                 locale: self.signals.shell_ui.locale,
                 chat: self.signals.chat,
+                composer_draft: self.signals.chat_composer.draft,
                 ws: self.signals.to_workspace_panel(),
                 side_panel_view: self.signals.shell_ui.side_panel_view,
             },

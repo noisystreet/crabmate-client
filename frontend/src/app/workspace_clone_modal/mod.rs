@@ -13,7 +13,8 @@ use crate::api::{
     post_workspace_clone_stream,
 };
 use crate::app::workspace_root_actions::{
-    WorkspaceRootPickHandle, finish_workspace_root_ui, workspace_inputs_blocked,
+    WorkspaceRootPickHandle, WorkspaceSessionHandoff, finish_workspace_root_ui,
+    flush_current_workspace_sessions, workspace_inputs_blocked,
 };
 use crate::i18n::{self, Locale};
 
@@ -112,6 +113,8 @@ pub(super) fn start_clone(form: CloneFormSignals, progress: CloneProgressSignals
     };
 
     spawn_local(async move {
+        // Clone 会在服务端切到新仓；必须先把旧桶会话落盘，再开 SSE。
+        flush_current_workspace_sessions(pick.chat, loc).await;
         let result = post_workspace_clone_stream(req, loc, |ev| match ev {
             WorkspaceCloneSseEvent::Phase(p) => {
                 status_text.set(phase_label(loc, &p).to_string());
@@ -136,7 +139,15 @@ pub(super) fn start_clone(form: CloneFormSignals, progress: CloneProgressSignals
             Ok((_name, path)) => {
                 status_text.set(i18n::ws_clone_done(loc).to_string());
                 percent.set(Some(100));
-                finish_workspace_root_ui(pick.chat, pick.ws, path, loc).await;
+                finish_workspace_root_ui(
+                    pick.chat,
+                    pick.ws,
+                    path,
+                    loc,
+                    WorkspaceSessionHandoff::PreferEmptySession,
+                    Some(pick.composer_draft),
+                )
+                .await;
                 pick.ws.workspace_set_busy.set(false);
                 ui_phase.set(CloneUiPhase::Succeeded);
                 TimeoutFuture::new(400).await;

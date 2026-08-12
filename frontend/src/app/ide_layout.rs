@@ -144,6 +144,7 @@ pub struct IdeLayoutShellSignals {
     pub ide_settings_page: RwSignal<bool>,
     pub ide_menubar_dropdown_open: RwSignal<bool>,
     pub chat: ChatSessionSignals,
+    pub composer_draft: RwSignal<String>,
     pub workspace_panel: WorkspacePanelSignals,
     pub refresh_workspace: Arc<dyn Fn() + Send + Sync>,
     pub initialized: RwSignal<bool>,
@@ -162,6 +163,7 @@ pub fn IdeLayoutView(shell: IdeLayoutShellSignals) -> impl IntoView {
         ide_settings_page,
         ide_menubar_dropdown_open,
         chat,
+        composer_draft,
         workspace_panel,
         refresh_workspace,
         initialized,
@@ -263,6 +265,7 @@ pub fn IdeLayoutView(shell: IdeLayoutShellSignals) -> impl IntoView {
         workspace_pick: crate::app::workspace_root_actions::WorkspaceRootPickHandle {
             locale,
             chat,
+            composer_draft,
             ws: workspace_panel,
             side_panel_view: shell_ui.side_panel_view,
         },
