@@ -4,9 +4,8 @@
 //! 映射到 `ChatStreamCallbacks` 的 `on_*` 回调。
 
 use crate::sse_dispatch::{
-    ClarificationFormField, ClarificationQuestionnaireInfo, CommandApprovalRequest, SseControlSink,
-    SseDispatch, ThinkingTraceInfo, TimelineLogInfo, ToolOutputChunkInfo, ToolResultInfo,
-    TurnSegmentStartInfo,
+    ClarificationFormField, ClarificationQuestionnaireInfo, SseControlSink, SseDispatch,
+    ThinkingTraceInfo, TimelineLogInfo, ToolOutputChunkInfo, ToolResultInfo, TurnSegmentStartInfo,
 };
 
 use crabmate_sse_protocol::{AgUiParseDispatch, classify_ag_ui_sse_data};
@@ -321,22 +320,7 @@ fn dispatch_tool_custom(custom_type: &str, val: &serde_json::Value, sink: &mut S
         }
         "command_approval" => {
             if let Some(data) = val.get("data") {
-                let req = CommandApprovalRequest {
-                    command: data
-                        .get("command")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_string(),
-                    args: data
-                        .get("args")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_string(),
-                    allowlist_key: data
-                        .get("allowlistKey")
-                        .and_then(|v| v.as_str())
-                        .map(str::to_string),
-                };
+                let req = crabmate_client_api::parse_command_approval_data(data);
                 if let Some(hook) = sink.workspace_tool.on_command_approval_request.as_mut() {
                     hook(req);
                 }
