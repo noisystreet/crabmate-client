@@ -35,6 +35,7 @@ fn WorkspaceProjectModalPanel(signals: WorkspaceProjectModalSignals) -> impl Int
         chat,
         ws,
         side_panel_view,
+        ..
     } = workspace_pick;
 
     let projects = RwSignal::new(Vec::<String>::new());

@@ -192,6 +192,7 @@ pub fn App() -> impl IntoView {
                             ide_settings_page: app_ctx.signals.modal.ide_settings_page,
                             ide_menubar_dropdown_open: app_ctx.signals.shell_ui.ide_menubar_dropdown_open,
                             chat: app_ctx.signals.chat,
+                            composer_draft: app_ctx.signals.chat_composer.draft,
                             workspace_panel: app_ctx.signals.to_workspace_panel(),
                             refresh_workspace: app_ctx.refresh_workspace.clone(),
                             initialized: app_ctx.signals.initialized,

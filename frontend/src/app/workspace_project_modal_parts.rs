@@ -9,7 +9,7 @@ use leptos::task::spawn_local;
 use crate::api::post_workspace_project;
 use crate::api::user_data::put_current_web_sessions;
 use crate::app::workspace_panel_state::WorkspacePanelSignals;
-use crate::app::workspace_root_actions::finish_workspace_root_ui;
+use crate::app::workspace_root_actions::{WorkspaceSessionHandoff, finish_workspace_root_ui};
 use crate::app_prefs::SidePanelView;
 use crate::chat_session_state::ChatSessionSignals;
 use crate::i18n::{self, Locale};
@@ -68,7 +68,15 @@ pub(crate) fn spawn_workspace_project_open(
                 ws.workspace_path_draft.set(resp.path.clone());
                 action_err.set(None);
                 ws.workspace_set_err.set(None);
-                finish_workspace_root_ui(chat, ws, resp.path, loc).await;
+                finish_workspace_root_ui(
+                    chat,
+                    ws,
+                    resp.path,
+                    loc,
+                    WorkspaceSessionHandoff::RestoreBucketActive,
+                    None,
+                )
+                .await;
                 ws.workspace_set_busy.set(false);
                 open.set(false);
             }

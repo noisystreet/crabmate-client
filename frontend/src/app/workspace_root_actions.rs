@@ -1,5 +1,6 @@
 //! 工作区根目录选择 / 提交（顶栏只读路径与「项目」菜单共用）。
 
+use gloo_timers::future::TimeoutFuture;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
@@ -9,7 +10,9 @@ use crate::app_prefs::SidePanelView;
 use crate::chat_session_state::ChatSessionSignals;
 use crate::i18n::{self, Locale};
 use crate::session_export::tauri_pick_workspace_folder;
-use crate::session_workspace_bind::patch_active_session_workspace_root;
+use crate::session_workspace_partition::{
+    apply_empty_session_in_memory, request_empty_session_after_next_partition,
+};
 use crate::stream_text_overlay::sessions_snapshot_with_stream_overlay_merged;
 use crate::tauri_shell::tauri_shell_available;
 use crate::user_data_bootstrap::{remember_workspace_root, workspace_recent_menu_label};
@@ -17,17 +20,42 @@ use crate::workspace_shell::reload_workspace_panel;
 
 use super::workspace_panel_state::WorkspacePanelSignals;
 
+/// 切换工作区后的会话交接策略。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum WorkspaceSessionHandoff {
+    /// 加载新桶并恢复该桶 `active_session_id`；空桶则默认空会话。
+    RestoreBucketActive,
+    /// Clone 等：在新桶上强制切到空会话。
+    PreferEmptySession,
+}
+
 /// 顶栏 / 菜单共用的工作区根选择句柄。
 #[derive(Clone, Copy)]
 pub struct WorkspaceRootPickHandle {
     pub locale: RwSignal<Locale>,
     pub chat: ChatSessionSignals,
+    /// 聊天 composer 草稿（Clone 强制空会话时需清空）。
+    pub composer_draft: RwSignal<String>,
     pub ws: WorkspacePanelSignals,
     pub side_panel_view: RwSignal<SidePanelView>,
 }
 
 pub(crate) fn workspace_inputs_blocked(ws: WorkspacePanelSignals) -> bool {
     ws.workspace_set_busy.get() || ws.workspace_pick_busy.get() || ws.workspace_loading.get()
+}
+
+/// 将当前活动会话（含流式 overlay）写回**当前**工作区桶。
+pub(crate) async fn flush_current_workspace_sessions(chat: ChatSessionSignals, loc: Locale) {
+    let aid = chat.active_id.get_untracked();
+    if aid.is_empty() {
+        return;
+    }
+    let list = chat.sessions.get_untracked();
+    let merged = sessions_snapshot_with_stream_overlay_merged(
+        list.as_slice(),
+        chat.stream_text_overlay.get_untracked().as_ref(),
+    );
+    let _ = put_current_web_sessions(&merged, Some(aid.as_str()), loc).await;
 }
 
 /// 提交工作区根；成功返回 `true`（调用方可用于关闭弹窗）。
@@ -38,18 +66,18 @@ pub(crate) async fn commit_workspace_root(
     loc: Locale,
 ) -> bool {
     let path = path.clone();
-    let aid = chat.active_id.get_untracked();
-    if !aid.is_empty() {
-        let list = chat.sessions.get_untracked();
-        let merged = sessions_snapshot_with_stream_overlay_merged(
-            list.as_slice(),
-            chat.stream_text_overlay.get_untracked().as_ref(),
-        );
-        let _ = put_current_web_sessions(&merged, Some(aid.as_str()), loc).await;
-    }
+    flush_current_workspace_sessions(chat, loc).await;
     let ok = match post_workspace_set(Some(path.clone()), loc).await {
         Ok(_) => {
-            finish_workspace_root_ui(chat, ws, path, loc).await;
+            finish_workspace_root_ui(
+                chat,
+                ws,
+                path,
+                loc,
+                WorkspaceSessionHandoff::RestoreBucketActive,
+                None,
+            )
+            .await;
             true
         }
         Err(e) => {
@@ -61,15 +89,21 @@ pub(crate) async fn commit_workspace_root(
     ok
 }
 
+/// 切换工作区成功后的 UI：记最近路径、刷新树；由分桶 Effect 换会话列表。
+///
+/// **不**在换桶前改写当前活动会话的 `workspace_root`（避免串桶写脏）。
 pub(crate) async fn finish_workspace_root_ui(
     chat: ChatSessionSignals,
     ws: WorkspacePanelSignals,
     path: String,
     loc: Locale,
+    handoff: WorkspaceSessionHandoff,
+    composer_draft: Option<RwSignal<String>>,
 ) {
+    if matches!(handoff, WorkspaceSessionHandoff::PreferEmptySession) {
+        request_empty_session_after_next_partition();
+    }
     remember_workspace_root(&path, ws.recent_workspace_roots);
-    let aid = chat.active_id.get_untracked();
-    patch_active_session_workspace_root(chat.sessions, &aid, path.clone());
     reload_workspace_panel(
         ws.workspace_loading,
         ws.workspace_err,
@@ -81,6 +115,37 @@ pub(crate) async fn finish_workspace_root_ui(
         loc,
     )
     .await;
+    if matches!(handoff, WorkspaceSessionHandoff::PreferEmptySession) {
+        await_empty_session_handoff(chat, composer_draft, &path, loc).await;
+    }
+}
+
+/// 等待分桶 Effect 真正切到目标路径下的空白会话；超时则本地兜底。
+async fn await_empty_session_handoff(
+    chat: ChatSessionSignals,
+    composer_draft: Option<RwSignal<String>>,
+    path: &str,
+    loc: Locale,
+) {
+    use crate::session_workspace_partition::{
+        active_session_is_blank_for_workspace, take_pending_empty_session_after_partition,
+    };
+
+    for _ in 0..75 {
+        if active_session_is_blank_for_workspace(chat, path) {
+            let _ = take_pending_empty_session_after_partition();
+            return;
+        }
+        TimeoutFuture::new(20).await;
+    }
+    let _ = take_pending_empty_session_after_partition();
+    if active_session_is_blank_for_workspace(chat, path) {
+        return;
+    }
+    let Some(draft) = composer_draft else {
+        return;
+    };
+    apply_empty_session_in_memory(chat, draft, path, loc);
 }
 
 fn spawn_server_side_workspace_pick(
@@ -117,6 +182,7 @@ impl WorkspaceRootPickHandle {
             chat,
             ws,
             side_panel_view,
+            ..
         } = self;
         ws.workspace_set_err.set(None);
         if workspace_inputs_blocked(ws) {
