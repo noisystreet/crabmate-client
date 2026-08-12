@@ -29,6 +29,15 @@ static SESSION_PERSIST_EPOCH: AtomicU64 = AtomicU64::new(0);
 /// 内存会话列表已对应的工作区规范化路径（`commit_partition_sessions` 写入）。
 static MEMORY_SESSIONS_PARTITION_NORM: Mutex<Option<String>> = Mutex::new(None);
 
+/// 首启从 `/user-data` 载入会话后登记当前工作区桶（避免 `workspace_data` 就绪时重复 GET 覆盖内存）。
+pub fn record_memory_sessions_partition(workspace_path: &str) {
+    let norm = normalize_workspace_partition_path(workspace_path);
+    if let Ok(mut g) = MEMORY_SESSIONS_PARTITION_NORM.lock() {
+        *g = Some(norm);
+    }
+    SESSION_PERSIST_BLOCKED.store(false, Ordering::SeqCst);
+}
+
 fn bump_session_persist_epoch() -> u64 {
     SESSION_PERSIST_EPOCH
         .fetch_add(1, Ordering::SeqCst)
@@ -389,8 +398,14 @@ pub fn wire_workspace_session_storage_partition(args: WireWorkspaceSessionPartit
         let force_empty_gate = pending_empty_session_after_partition();
         let prev_cell = prev_applied.get_value();
         let mut prev_slot = prev_cell.lock().expect("partition prev workspace");
-        if prev_slot.as_deref() == Some(norm.as_str()) && !force_empty_gate {
-            return;
+        if !force_empty_gate {
+            if memory_sessions_match_workspace(wd.path.as_str()) {
+                *prev_slot = Some(norm.clone());
+                return;
+            }
+            if prev_slot.as_deref() == Some(norm.as_str()) {
+                return;
+            }
         }
         *prev_slot = Some(norm.clone());
         drop(prev_slot);
@@ -461,6 +476,13 @@ mod tests {
         assert!(persist_put_ok_parts(true, 3, 3));
         assert!(!persist_put_ok_parts(false, 3, 3));
         assert!(!persist_put_ok_parts(true, 4, 3));
+    }
+
+    #[test]
+    fn record_memory_partition_makes_memory_match_workspace() {
+        record_memory_sessions_partition("/tmp/proj/");
+        assert!(memory_sessions_match_workspace("/tmp/proj"));
+        assert!(!memory_sessions_match_workspace("/other"));
     }
 
     #[test]
