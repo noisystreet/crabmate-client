@@ -14,7 +14,7 @@ fn bump_stream_abort_epoch(shell: &ComposerStreamShell) {
 }
 
 /// 发起新流前：中止上一控制器、清除「用户取消」标记（随后应 [`store_abort_controller`]）。
-pub(super) fn reset_abort_state_for_new_attach(shell: &ComposerStreamShell) {
+pub(crate) fn reset_abort_state_for_new_attach(shell: &ComposerStreamShell) {
     let prev = shell.stream.abort_cell.lock().unwrap().take();
     if prev.is_some() {
         bump_stream_abort_epoch(shell);
@@ -37,7 +37,7 @@ pub(crate) fn clear_abort_slot(shell: &ComposerStreamShell) {
     }
 }
 
-pub(super) fn user_cancelled_flag(shell: &ComposerStreamShell) -> bool {
+pub(crate) fn user_cancelled_flag(shell: &ComposerStreamShell) -> bool {
     *shell.stream.user_cancelled_stream.lock().unwrap()
 }
 

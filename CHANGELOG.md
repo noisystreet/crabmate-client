@@ -22,6 +22,7 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Fixed
 
+- Chat (Android/Desktop WebView): when the page returns from background (`visibilitychange`), soft-resume an in-flight `/chat/stream` via `stream_resume` if a job id is still held; otherwise clear a stuck bind and hydrate conversation messages from the server
 - GitHub Device Flow (Desktop/Android): persist user token only after durable keyring/Keystore write **and** read-back; Settings reconcile re-hydrates from the secure slot when memory is empty (avoids false “disconnected” without wiping a good in-memory token on flaky reads)
 - Security: official Desktop/Android shells no longer write Web API Bearer to plaintext `localStorage` (`crabmate-api-bearer-token`); in-shell UI keeps it in memory and hydrates from device keyring / Android Keystore; disconnect / return-to-connect and Settings clear also wipe the native slot (reconnect requires re-entering Bearer); plain browsers keep weak localStorage with an explicit save warning; protected API fetches await secure-store hydrate before sending auth headers
 - Frontend: mobile/narrow platform entry layout (side panel collapse, Android default hidden status bar) no longer writes back to `/user-data/prefs` and overwrites desktop-saved layout preferences
