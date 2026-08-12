@@ -305,7 +305,7 @@ fn prepare_partition_session_list(
 ///
 /// - 真切仓 / force_empty / persist 门闩：允许覆盖（空桶新建）。
 /// - 同仓且流式忙碌：禁止（勿清 overlay / 勿 bump hydrate）。
-/// - 同仓且内存活动会话不在 GET 结果中：视为陈旧/空桶竞态，禁止覆盖（保护 seedSession）。
+/// - 同仓且内存非空而 GET 空/不含活动会话：视为陈旧竞态，禁止覆盖（对齐旧版 empty-GET 保内存）。
 #[must_use]
 pub(crate) fn should_apply_partition_load(
     switching: bool,
@@ -313,11 +313,15 @@ pub(crate) fn should_apply_partition_load(
     memory_active_id: &str,
     memory_session_count: usize,
     loaded_contains_active: bool,
+    loaded_session_count: usize,
 ) -> bool {
     if switching {
         return true;
     }
     if stream_busy {
+        return false;
+    }
+    if memory_session_count > 0 && loaded_session_count == 0 {
         return false;
     }
     if memory_session_count > 0 && !memory_active_id.trim().is_empty() && !loaded_contains_active {
@@ -477,6 +481,7 @@ async fn load_and_commit_partition_sessions(args: PartitionLoadCommitArgs) {
         memory_active.as_str(),
         memory_count,
         loaded_has_active,
+        list2.len(),
     ) {
         // 同仓陈旧 GET：只记桶路径，保留内存；勿解 PUT 门闩（切仓中途 in-flight GET 可能 skip）。
         note_memory_sessions_partition(workspace_path.as_str());
@@ -658,11 +663,17 @@ mod tests {
 
     #[test]
     fn should_apply_partition_load_guards_stale_same_workspace_get() {
-        assert!(should_apply_partition_load(true, false, "a", 1, false));
-        assert!(!should_apply_partition_load(false, true, "a", 1, true));
-        assert!(!should_apply_partition_load(false, false, "seed", 2, false));
-        assert!(should_apply_partition_load(false, false, "seed", 2, true));
-        assert!(should_apply_partition_load(false, false, "", 0, false));
+        assert!(should_apply_partition_load(true, false, "a", 1, false, 0));
+        assert!(!should_apply_partition_load(false, true, "a", 1, true, 1));
+        assert!(!should_apply_partition_load(
+            false, false, "seed", 2, false, 1
+        ));
+        assert!(should_apply_partition_load(
+            false, false, "seed", 2, true, 2
+        ));
+        assert!(should_apply_partition_load(false, false, "", 0, false, 0));
+        // 同仓空 GET + 内存非空：即使 active 暂时为空也不覆盖
+        assert!(!should_apply_partition_load(false, false, "", 2, false, 0));
     }
 
     #[test]
