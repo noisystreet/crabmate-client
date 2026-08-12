@@ -29,12 +29,19 @@ static SESSION_PERSIST_EPOCH: AtomicU64 = AtomicU64::new(0);
 /// 内存会话列表已对应的工作区规范化路径（`commit_partition_sessions` 写入）。
 static MEMORY_SESSIONS_PARTITION_NORM: Mutex<Option<String>> = Mutex::new(None);
 
-/// 首启从 `/user-data` 载入会话后登记当前工作区桶（避免 `workspace_data` 就绪时重复 GET 覆盖内存）。
-pub fn record_memory_sessions_partition(workspace_path: &str) {
+/// 仅登记内存会话对应的工作区桶路径（不清切仓 PUT 门闩）。
+fn note_memory_sessions_partition(workspace_path: &str) {
     let norm = normalize_workspace_partition_path(workspace_path);
     if let Ok(mut g) = MEMORY_SESSIONS_PARTITION_NORM.lock() {
         *g = Some(norm);
     }
+}
+
+/// 首启从 `/user-data` 载入会话后登记当前工作区桶（避免 `workspace_data` 就绪时重复 GET 覆盖内存）。
+///
+/// 同时解除 PUT 门闩：首启/显式登记表示内存已对齐 `current`，可写回。
+pub fn record_memory_sessions_partition(workspace_path: &str) {
+    note_memory_sessions_partition(workspace_path);
     SESSION_PERSIST_BLOCKED.store(false, Ordering::SeqCst);
 }
 
@@ -471,11 +478,8 @@ async fn load_and_commit_partition_sessions(args: PartitionLoadCommitArgs) {
         memory_count,
         loaded_has_active,
     ) {
-        // 同仓陈旧 GET：只登记桶，保留内存（含 seedSession / 流式中会话）。
-        record_memory_sessions_partition(workspace_path.as_str());
-        if force_empty {
-            request_empty_session_after_next_partition();
-        }
+        // 同仓陈旧 GET：只记桶路径，保留内存；勿解 PUT 门闩（切仓中途 in-flight GET 可能 skip）。
+        note_memory_sessions_partition(workspace_path.as_str());
         return;
     }
     let (list2, pick, draft_text) =
@@ -597,6 +601,15 @@ mod tests {
         record_memory_sessions_partition("/tmp/proj/");
         assert!(memory_sessions_match_workspace("/tmp/proj"));
         assert!(!memory_sessions_match_workspace("/other"));
+    }
+
+    #[test]
+    fn note_memory_partition_keeps_persist_block() {
+        SESSION_PERSIST_BLOCKED.store(true, Ordering::SeqCst);
+        note_memory_sessions_partition("/tmp/proj/");
+        assert!(memory_sessions_match_workspace("/tmp/proj"));
+        assert!(!session_persist_allowed());
+        SESSION_PERSIST_BLOCKED.store(false, Ordering::SeqCst);
     }
 
     #[test]
