@@ -11,6 +11,8 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Added
 
+- CI: run `make test-frontend` and `make test-tui` in default `check` job; desktop unit tests use `cargo test --bins` (excludes Victauri integration binaries that fake-pass without `VICTAURI_E2E`)
+- CI: nightly Victauri shell E2E workflow (`victauri-e2e-nightly.yml`; mock suites via `victauri-e2e.sh`; failure log artifacts)
 - Design: multi-client shared pure-logic extract plan (`docs/design/client_shared_logic.md`)
 - Remote terminal **`crabmate-tui`** (P3): `connect` / `chat` / `repl` with TTY or `--yes` approval; control slashes `/help`, `/workspace` (`/cd`), `/conv` (show/list/new/use) against serve HTTP APIs (design in `docs/design/remote_cli_tui.md`)
 - Root `CHANGELOG.md` (Keep a Changelog; English)
