@@ -22,6 +22,36 @@ use crate::user_data_bootstrap::load_web_sessions;
 static PENDING_EMPTY_SESSION_AFTER_PARTITION: AtomicBool = AtomicBool::new(false);
 /// 分桶异步加载代际：较旧的 `load_web_sessions` 结果不得覆盖较新切换。
 static PARTITION_LOAD_GEN: AtomicU64 = AtomicU64::new(0);
+/// 切仓后、新桶会话尚未 commit 前禁止 `PUT …/current/sessions`（防串桶）。
+static SESSION_PERSIST_BLOCKED: AtomicBool = AtomicBool::new(false);
+/// 内存会话列表已对应的工作区规范化路径（`commit_partition_sessions` 写入）。
+static MEMORY_SESSIONS_PARTITION_NORM: Mutex<Option<String>> = Mutex::new(None);
+
+/// 旧桶已 flush、即将 `POST /workspace` 时调用：挡住防抖 PUT 写到新 `current`。
+pub fn begin_workspace_session_persist_block() {
+    SESSION_PERSIST_BLOCKED.store(true, Ordering::SeqCst);
+}
+
+/// 切仓失败回滚时解除门闩（内存仍属旧桶）。
+pub fn clear_workspace_session_persist_block() {
+    SESSION_PERSIST_BLOCKED.store(false, Ordering::SeqCst);
+}
+
+/// 是否允许把内存会话写回服务端 `current` 桶。
+#[must_use]
+pub fn session_persist_allowed() -> bool {
+    !SESSION_PERSIST_BLOCKED.load(Ordering::SeqCst)
+}
+
+/// 内存会话是否已提交为 `workspace_path` 对应桶。
+#[must_use]
+pub fn memory_sessions_match_workspace(workspace_path: &str) -> bool {
+    let target = normalize_workspace_partition_path(workspace_path);
+    MEMORY_SESSIONS_PARTITION_NORM
+        .lock()
+        .map(|g| g.as_deref() == Some(target.as_str()))
+        .unwrap_or(false)
+}
 
 /// 标记下一次工作区会话分桶应切到空会话（见 [`prefer_or_create_empty_session`]）。
 pub fn request_empty_session_after_next_partition() {
@@ -153,7 +183,7 @@ fn align_workspace_roots_to_server_path(list2: &mut [ChatSession], server_path: 
     }
 }
 
-/// 在当前内存会话列表上切到空会话（分桶 Effect 因同路径跳过时的兜底）。
+/// 在当前内存会话列表上切到空会话（仅当内存已属于该工作区桶时由交接逻辑调用）。
 pub fn apply_empty_session_in_memory(
     chat: ChatSessionSignals,
     draft: RwSignal<String>,
@@ -161,16 +191,10 @@ pub fn apply_empty_session_in_memory(
     loc: Locale,
 ) {
     let title = crate::i18n::default_session_title(loc).to_string();
-    let root = {
-        let t = workspace_path.trim();
-        if t.is_empty() {
-            None
-        } else {
-            Some(t.to_string())
-        }
-    };
+    let root = workspace_root_opt(workspace_path);
     let list = chat.sessions.get_untracked();
     let (list, pick) = prefer_or_create_empty_session(list, root, title);
+    let norm = normalize_workspace_partition_path(workspace_path);
     chat.clear_stream_resume_handles();
     chat.stream_text_overlay.set(None);
     chat.session_sync
@@ -181,6 +205,10 @@ pub fn apply_empty_session_in_memory(
     chat.sessions.set(list);
     chat.active_id.set(pick);
     draft.set(String::new());
+    if let Ok(mut g) = MEMORY_SESSIONS_PARTITION_NORM.lock() {
+        *g = Some(norm);
+    }
+    SESSION_PERSIST_BLOCKED.store(false, Ordering::SeqCst);
 }
 
 fn workspace_root_opt(path: &str) -> Option<String> {
@@ -244,7 +272,48 @@ fn commit_partition_sessions(
     chat.sessions.set(list);
     chat.active_id.set(pick);
     draft.set(draft_text);
-    session_workspace_path.set(norm);
+    session_workspace_path.set(norm.clone());
+    if let Ok(mut g) = MEMORY_SESSIONS_PARTITION_NORM.lock() {
+        *g = Some(norm);
+    }
+    SESSION_PERSIST_BLOCKED.store(false, Ordering::SeqCst);
+}
+
+/// 显式加载并提交某一工作区桶的会话（`finish_workspace_root_ui` 等待超时或 reload 失败时兜底）。
+pub async fn ensure_sessions_for_workspace(
+    chat: ChatSessionSignals,
+    draft: RwSignal<String>,
+    session_workspace_path: RwSignal<String>,
+    workspace_path: &str,
+    loc: Locale,
+    force_empty: bool,
+) {
+    let norm = normalize_workspace_partition_path(workspace_path);
+    let my_gen = PARTITION_LOAD_GEN
+        .fetch_add(1, Ordering::AcqRel)
+        .wrapping_add(1);
+    let (list2, aid2) = load_web_sessions(loc).await;
+    if PARTITION_LOAD_GEN.load(Ordering::Acquire) != my_gen {
+        return;
+    }
+    let force_empty = take_pending_empty_session_after_partition() || force_empty;
+    let (list2, pick, draft_text) =
+        prepare_partition_session_list(list2, aid2, workspace_path, loc, force_empty);
+    if PARTITION_LOAD_GEN.load(Ordering::Acquire) != my_gen {
+        if force_empty {
+            request_empty_session_after_next_partition();
+        }
+        return;
+    }
+    commit_partition_sessions(
+        chat,
+        draft,
+        session_workspace_path,
+        list2,
+        pick,
+        draft_text,
+        norm,
+    );
 }
 
 /// `wire_workspace_session_storage_partition` 的入参。

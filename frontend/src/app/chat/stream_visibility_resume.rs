@@ -114,6 +114,14 @@ pub(crate) fn wire_stream_visibility_resume(
             if doc.hidden() {
                 was_hidden.set(true);
                 was_busy_when_hidden.set(looks_stream_busy(chat));
+                // Android 杀进程前尽量落盘（仅当未处于切仓 persist 门闩）。
+                let loc = locale.get_untracked();
+                leptos::task::spawn_local(async move {
+                    let _ = crate::app::workspace_root_actions::flush_current_workspace_sessions(
+                        chat, loc,
+                    )
+                    .await;
+                });
                 return;
             }
             let action = foreground_stream_action_after_hidden(ForegroundStreamDecisionInput {
