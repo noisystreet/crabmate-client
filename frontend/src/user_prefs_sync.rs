@@ -123,8 +123,7 @@ pub fn build_prefs_dto(app: &AppSignals) -> UserPrefsDto {
     }
 }
 
-fn apply_shell_chrome_prefs(app: &AppSignals, dto: &UserPrefsDto) {
-    let skip_server_layout = crate::mobile_remote::mobile_remote_client();
+fn apply_shell_appearance_prefs(app: &AppSignals, dto: &UserPrefsDto) {
     if let Some(ref t) = dto.theme {
         app.shell_ui
             .theme
@@ -136,6 +135,10 @@ fn apply_shell_chrome_prefs(app: &AppSignals, dto: &UserPrefsDto) {
     if let Some(ref loc) = dto.locale {
         app.shell_ui.locale.set(Locale::from_storage_slug(loc));
     }
+}
+
+fn apply_shell_layout_prefs(app: &AppSignals, dto: &UserPrefsDto) {
+    let skip_server_layout = crate::mobile_remote::mobile_remote_client();
     if !skip_server_layout {
         if let Some(v) = dto.status_bar_visible {
             app.shell_ui.status_bar_visible.set(v);
@@ -158,6 +161,11 @@ fn apply_shell_chrome_prefs(app: &AppSignals, dto: &UserPrefsDto) {
             .sidebar_rail_collapsed
             .set(if in_editor && c { false } else { c });
     }
+}
+
+fn apply_shell_chrome_prefs(app: &AppSignals, dto: &UserPrefsDto) {
+    apply_shell_appearance_prefs(app, dto);
+    apply_shell_layout_prefs(app, dto);
 }
 
 fn apply_session_typography_prefs(app: &AppSignals, dto: &UserPrefsDto) {
@@ -186,11 +194,7 @@ fn apply_shell_prefs_dto(app: &AppSignals, dto: &UserPrefsDto) {
         .set(crate::user_data_bootstrap::recent_roots_from_prefs(dto));
 }
 
-fn apply_ide_and_llm_prefs_dto(
-    app: &AppSignals,
-    dto: &UserPrefsDto,
-    prefs_session_mode_present: StoredValue<bool>,
-) {
+fn apply_ide_editor_prefs_dto(app: &AppSignals, dto: &UserPrefsDto) {
     if let Some(ref f) = dto.ide_editor_font {
         app.ide_editor
             .font_slug
@@ -210,6 +214,13 @@ fn apply_ide_and_llm_prefs_dto(
     if let Some(ts) = dto.ide_editor_tab_size {
         app.ide_editor.tab_size.set(ts.clamp(2, 8) as u8);
     }
+}
+
+fn apply_llm_prefs_dto(
+    app: &AppSignals,
+    dto: &UserPrefsDto,
+    prefs_session_mode_present: StoredValue<bool>,
+) {
     if let Some(ref r) = dto.cm_role {
         let t = r.trim();
         if !app.llm_settings.agent_role_user_override.get_untracked() {
@@ -246,7 +257,8 @@ fn apply_prefs_dto(
     prefs_session_mode_present: StoredValue<bool>,
 ) {
     apply_shell_prefs_dto(app, dto);
-    apply_ide_and_llm_prefs_dto(app, dto, prefs_session_mode_present);
+    apply_ide_editor_prefs_dto(app, dto);
+    apply_llm_prefs_dto(app, dto, prefs_session_mode_present);
 }
 
 /// 首启从服务端加载偏好并写入信号（随后由 DOM sync Effect 反映到页面）。

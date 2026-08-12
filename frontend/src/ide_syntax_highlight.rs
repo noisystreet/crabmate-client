@@ -16,6 +16,41 @@ pub enum IdeSyntaxLang {
     Go,
 }
 
+/// 后缀 → 语言（顺序有意义：如 `.h` 归 Cpp，须先于 C）。
+/// Shell / `go.mod` / `.go` 在表外处理，以保持原匹配顺序。
+const SUFFIX_LANG_TABLE: &[(&[&str], IdeSyntaxLang)] = &[
+    (&[".rs", ".rs.in"], IdeSyntaxLang::Rust),
+    (&[".toml", ".lock"], IdeSyntaxLang::Toml),
+    (
+        &[".yaml", ".yml", ".yaml.tpl", ".yml.tpl"],
+        IdeSyntaxLang::Yaml,
+    ),
+    (
+        &[
+            ".cpp", ".cc", ".cxx", ".c++", ".hpp", ".hh", ".hxx", ".h++", ".h",
+        ],
+        IdeSyntaxLang::Cpp,
+    ),
+    (&[".c", ".i", ".mi"], IdeSyntaxLang::C),
+    (&[".py", ".pyi", ".pyw", ".py.in"], IdeSyntaxLang::Python),
+    (
+        &[".ts", ".tsx", ".mts", ".cts", ".ts.in", ".tsx.in"],
+        IdeSyntaxLang::TypeScript,
+    ),
+    (
+        &[".js", ".jsx", ".mjs", ".cjs", ".js.in", ".jsx.in"],
+        IdeSyntaxLang::JavaScript,
+    ),
+    (
+        &[".json", ".jsonc", ".json5", ".jsonl"],
+        IdeSyntaxLang::Json,
+    ),
+    (
+        &[".md", ".markdown", ".mdx", ".mdown", ".mkd"],
+        IdeSyntaxLang::Markdown,
+    ),
+];
+
 #[must_use]
 pub fn ide_syntax_lang_for_path(path: Option<&str>) -> Option<IdeSyntaxLang> {
     let lower = path?.to_ascii_lowercase();
@@ -48,61 +83,12 @@ fn shell_lang_for_path(lower: &str) -> Option<IdeSyntaxLang> {
 }
 
 fn ide_syntax_lang_for_lower_path(lower: &str) -> Option<IdeSyntaxLang> {
-    lang_from_suffixes(lower, &[".rs", ".rs.in"], IdeSyntaxLang::Rust)
-        .or_else(|| lang_from_suffixes(lower, &[".toml", ".lock"], IdeSyntaxLang::Toml))
-        .or_else(|| {
-            lang_from_suffixes(
-                lower,
-                &[".yaml", ".yml", ".yaml.tpl", ".yml.tpl"],
-                IdeSyntaxLang::Yaml,
-            )
-        })
-        .or_else(|| {
-            lang_from_suffixes(
-                lower,
-                &[
-                    ".cpp", ".cc", ".cxx", ".c++", ".hpp", ".hh", ".hxx", ".h++", ".h",
-                ],
-                IdeSyntaxLang::Cpp,
-            )
-        })
-        .or_else(|| lang_from_suffixes(lower, &[".c", ".i", ".mi"], IdeSyntaxLang::C))
-        .or_else(|| {
-            lang_from_suffixes(
-                lower,
-                &[".py", ".pyi", ".pyw", ".py.in"],
-                IdeSyntaxLang::Python,
-            )
-        })
-        .or_else(|| {
-            lang_from_suffixes(
-                lower,
-                &[".ts", ".tsx", ".mts", ".cts", ".ts.in", ".tsx.in"],
-                IdeSyntaxLang::TypeScript,
-            )
-        })
-        .or_else(|| {
-            lang_from_suffixes(
-                lower,
-                &[".js", ".jsx", ".mjs", ".cjs", ".js.in", ".jsx.in"],
-                IdeSyntaxLang::JavaScript,
-            )
-        })
-        .or_else(|| {
-            lang_from_suffixes(
-                lower,
-                &[".json", ".jsonc", ".json5", ".jsonl"],
-                IdeSyntaxLang::Json,
-            )
-        })
-        .or_else(|| {
-            lang_from_suffixes(
-                lower,
-                &[".md", ".markdown", ".mdx", ".mdown", ".mkd"],
-                IdeSyntaxLang::Markdown,
-            )
-        })
-        .or_else(|| shell_lang_for_path(lower))
+    for &(suffixes, lang) in SUFFIX_LANG_TABLE {
+        if let Some(hit) = lang_from_suffixes(lower, suffixes, lang) {
+            return Some(hit);
+        }
+    }
+    shell_lang_for_path(lower)
         .or_else(|| lang_from_suffixes(lower, &[".go"], IdeSyntaxLang::Go))
         .or_else(|| lower.ends_with("go.mod").then_some(IdeSyntaxLang::Go))
 }
@@ -159,6 +145,14 @@ mod tests {
         );
         assert_eq!(
             ide_syntax_lang_for_path(Some("cmd/main.go")),
+            Some(IdeSyntaxLang::Go)
+        );
+        assert_eq!(
+            ide_syntax_lang_for_path(Some("Dockerfile")),
+            Some(IdeSyntaxLang::Shell)
+        );
+        assert_eq!(
+            ide_syntax_lang_for_path(Some("go.mod")),
             Some(IdeSyntaxLang::Go)
         );
         assert_eq!(ide_syntax_lang_for_path(Some("notes.txt")), None);
