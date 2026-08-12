@@ -1,11 +1,10 @@
 //! `reqwest` 封装：鉴权头 + 健康探测 + 审批提交。
 
 use crabmate_client_api::auth::{HEADER_X_API_KEY, web_api_credential_pair};
+use crabmate_client_api::{ApprovalDecision, ApprovalPostBody};
 use reqwest::Client;
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue};
-use serde_json::json;
 
-use crate::approval::ApprovalDecision;
 use crate::config::ConnectionConfig;
 use crate::error::TermError;
 use crate::url::api_url;
@@ -77,10 +76,7 @@ impl ServeClient {
         let url = self.url("/chat/approval")?;
         let mut headers = self.auth_headers()?;
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-        let body = json!({
-            "approval_session_id": approval_session_id,
-            "decision": decision.as_api_str(),
-        });
+        let body = ApprovalPostBody::new(approval_session_id, decision);
         let resp = self
             .http
             .post(&url)

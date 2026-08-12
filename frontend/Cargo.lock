@@ -304,6 +304,10 @@ dependencies = [
 [[package]]
 name = "crabmate-client-api"
 version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "crabmate-display-rules"

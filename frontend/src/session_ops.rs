@@ -191,11 +191,13 @@ pub fn message_role_label(m: &StoredMessage, locale: crate::i18n::Locale) -> &'s
 }
 
 pub fn approval_session_id() -> String {
-    format!(
+    let id = format!(
         "approval_{}_{}",
         js_sys::Date::now() as i64,
         (js_sys::Math::random() * 1e9) as i64
-    )
+    );
+    debug_assert!(crabmate_client_api::approval_session_id_is_valid(&id));
+    id
 }
 
 /// 首条用户消息生成侧栏/「管理会话」列表标题：压平换行、折叠空白，截断过长前缀。

@@ -622,12 +622,6 @@ pub async fn upload_files_multipart_raw(
 }
 
 #[derive(Debug, Serialize)]
-struct ApprovalBody<'a> {
-    approval_session_id: &'a str,
-    decision: &'a str,
-}
-
-#[derive(Debug, Serialize)]
 struct ChatBranchBody {
     conversation_id: String,
     before_user_ordinal: u64,
@@ -758,10 +752,9 @@ pub async fn submit_chat_approval(
     decision: &str,
     loc: Locale,
 ) -> Result<(), String> {
-    let body = serde_json::to_string(&ApprovalBody {
-        approval_session_id: session_id,
-        decision,
-    })
+    let body = serde_json::to_string(&crabmate_client_api::ApprovalPostBody::from_decision_str(
+        session_id, decision,
+    ))
     .map_err(|e| e.to_string())?;
     let init = RequestInit::new();
     init.set_method("POST");

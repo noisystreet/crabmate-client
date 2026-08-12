@@ -4,6 +4,8 @@ use serde_json::Value;
 
 use crate::conversation_hydrate::TiktokenPromptTokensSnapshot;
 
+pub use crabmate_client_api::CommandApprovalRequest;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SseDispatch {
     Handled,
@@ -121,14 +123,6 @@ pub struct ToolResultInfo {
     pub failure_category: Option<String>,
     /// 可选：与 `read_file` / `read_dir` / `list_tree` 工具输出首行 **`crabmate_tool_output`** 同源（SSE 侧复制），便于 UI 表格化。
     pub structured_preview: Option<Value>,
-}
-
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub struct CommandApprovalRequest {
-    pub command: String,
-    pub args: String,
-    pub allowlist_key: Option<String>,
 }
 
 /// `clarification_questionnaire`：Web 表单用字段子集。
