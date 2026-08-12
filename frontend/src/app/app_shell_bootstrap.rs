@@ -14,6 +14,10 @@ use super::chat::ChatColumnShell;
 pub fn bootstrap_app_shell() -> AppShellCtx {
     // 移动薄客户端：先消费 URL hash 中的 Web API Bearer，再挂接会打 `/status` 的 Effect。
     crate::api::consume_mobile_connect_handoff();
+    // 官方壳：尽早从钥匙串 / Keystore 水合（hash 已写入内存时仅清明文 LS）。
+    leptos::task::spawn_local(async {
+        crate::api::hydrate_web_api_bearer_from_secure_store().await;
+    });
     // Android 壳：尽早写入 --cm-safe-top，避免顶栏贴系统状态栏难点选。
     crate::mobile_remote::apply_mobile_remote_safe_top();
     // 仅移动远程壳需要在此安装外链桥；桌面 Tauri 仍由 frameless chrome 安装。

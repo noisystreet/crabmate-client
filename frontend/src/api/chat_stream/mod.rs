@@ -159,7 +159,8 @@ async fn chat_stream_one_attempt(
     let body = http_request::build_chat_stream_post_body(body_parts)?;
     let body_json = serde_json::to_string(&body).map_err(|e| e.to_string())?;
     let req =
-        http_request::build_chat_stream_fetch_request(&body_json, ctx.signal, *ctx.last_event_id)?;
+        http_request::build_chat_stream_fetch_request(&body_json, ctx.signal, *ctx.last_event_id)
+            .await?;
     let Some(resp) =
         chat_stream_fetch_or_backoff(ctx.w, &req, *ctx.stream_resume_job_id, ctx.attempt).await?
     else {

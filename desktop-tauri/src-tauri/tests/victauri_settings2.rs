@@ -108,6 +108,50 @@ e2e_test!(model_and_api_key_save, |client| async move {
     assert!(listed, "expected saved model row labeled E2E");
 });
 
+e2e_test!(web_api_bearer_not_in_local_storage, |client| async move {
+    seed_settings_session(&mut client, "s_e2e_web_bearer").await;
+    open_settings(&mut client, "appearance").await;
+    let _ = client
+        .eval_js(
+            r#"(()=>{const el=document.querySelector('[data-testid="settings-web-api-bearer-input"]');if(!el)return;const s=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set;s.call(el,'E2E_WEB_BEARER');el.dispatchEvent(new Event('input',{bubbles:true}));})()"#,
+        )
+        .await;
+    Locator::test_id("settings-web-api-bearer-save")
+        .click(&mut client)
+        .await
+        .unwrap();
+    client
+        .wait_for("text", Some("已保存"), Some(10000), Some(200))
+        .await
+        .ok();
+    let _ = client
+        .eval_js(
+            r#"(async()=>{window.__e2eBearerOk=false;for(let i=0;i<40;i++){try{const inv=window.__TAURI__&&window.__TAURI__.core&&window.__TAURI__.core.invoke;if(typeof inv!=='function')return;const v=await inv('get_connect_bearer');if(v==='E2E_WEB_BEARER'){window.__e2eBearerOk=true;return;}}catch(e){}await new Promise(r=>setTimeout(r,100));}})()"#,
+        )
+        .await;
+    let mut secret_ok = false;
+    for _ in 0..50 {
+        secret_ok = client
+            .eval_js("window.__e2eBearerOk===true")
+            .await
+            .ok()
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        if secret_ok {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    let ls_empty: bool = client
+        .eval_js("!localStorage.getItem('crabmate-api-bearer-token')")
+        .await
+        .unwrap()
+        .as_bool()
+        .unwrap_or(false);
+    assert!(secret_ok, "expected connect bearer in device keyring");
+    assert!(ls_empty, "must not persist Web API Bearer in localStorage");
+});
+
 e2e_test!(import_mcp_json_adds_server_rows, |client| async move {
     seed_settings_session(&mut client, "s_e2e_mcp_import").await;
     open_settings(&mut client, "mcp").await;

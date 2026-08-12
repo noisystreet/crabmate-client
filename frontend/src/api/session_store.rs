@@ -9,7 +9,7 @@ use web_sys::{Request, RequestInit, Response};
 
 use crate::i18n::Locale;
 
-use super::browser::{api_url, apply_api_auth, auth_headers, window};
+use super::browser::{api_url, auth_headers, prepare_api_auth, window};
 
 /// `POST /config/session/conversation-store` 成功体。
 #[derive(Debug, Clone, Deserialize)]
@@ -21,7 +21,7 @@ pub struct SessionConversationStoreResponse {
 async fn session_store_post_json_value(body: &str, loc: Locale) -> Result<(u16, Value), String> {
     let init = RequestInit::new();
     init.set_method("POST");
-    apply_api_auth(&init);
+    prepare_api_auth(&init).await;
     let h = auth_headers();
     let _ = h.set("Content-Type", "application/json");
     init.set_headers(&h);

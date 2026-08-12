@@ -9,7 +9,7 @@ use web_sys::{Request, RequestInit, Response};
 use crate::i18n::Locale;
 use crate::storage::ChatSession;
 
-use super::browser::{api_url, apply_api_auth, auth_headers, window};
+use super::browser::{api_url, auth_headers, prepare_api_auth, window};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UserPrefsDto {
@@ -106,7 +106,7 @@ async fn fetch_json<T: for<'de> Deserialize<'de>>(
 ) -> Result<T, String> {
     let init = RequestInit::new();
     init.set_method(method);
-    apply_api_auth(&init);
+    prepare_api_auth(&init).await;
     let url = api_url(url);
     let req = Request::new_with_str_and_init(&url, &init).map_err(|e| format!("request: {e:?}"))?;
     let w = window().ok_or_else(|| crate::i18n::api_err_no_window(loc).to_string())?;
@@ -136,7 +136,7 @@ async fn put_json_no_content_with_keepalive(
 ) -> Result<(), String> {
     let init = RequestInit::new();
     init.set_method("PUT");
-    apply_api_auth(&init);
+    prepare_api_auth(&init).await;
     if keepalive {
         js_sys::Reflect::set(
             init.as_ref(),
@@ -327,7 +327,7 @@ async fn post_json_body<T: for<'de> Deserialize<'de>>(
 ) -> Result<T, String> {
     let init = RequestInit::new();
     init.set_method("POST");
-    apply_api_auth(&init);
+    prepare_api_auth(&init).await;
     let h = auth_headers();
     let _ = h.set("Content-Type", "application/json");
     init.set_headers(&h);
@@ -360,7 +360,7 @@ pub async fn fetch_mcp_servers_status(loc: Locale) -> Result<McpServersStatusDto
 async fn post_json<T: for<'de> Deserialize<'de>>(url: &str, loc: Locale) -> Result<T, String> {
     let init = RequestInit::new();
     init.set_method("POST");
-    apply_api_auth(&init);
+    prepare_api_auth(&init).await;
     let url = api_url(url);
     let req = Request::new_with_str_and_init(&url, &init).map_err(|e| format!("request: {e:?}"))?;
     let w = window().ok_or_else(|| crate::i18n::api_err_no_window(loc).to_string())?;

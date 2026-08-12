@@ -2,7 +2,11 @@
 //!
 //! Web API Bearer 须同时存在于：
 //! - **服务端** `CM_WEB_API_BEARER_TOKEN` / `web_api_bearer_token`（校验用）
-//! - **本页**内存（及 `localStorage` 引导键，见下）：请求头 `Authorization` / `X-API-Key`
+//! - **本页**内存：请求头 `Authorization` / `X-API-Key`
+//!
+//! 持久化：
+//! - **官方壳**：仅本机钥匙串 / Android Keystore（见 [`super::web_api_bearer_local`]）；**禁止**明文 `localStorage`
+//! - **纯浏览器**：可选 `localStorage` 引导键（弱存储）
 //!
 //! 与侧栏「模型 API 密钥」(`client_llm`，本机钥匙串/Keystore) 不是同一字段。
 //!
@@ -15,8 +19,8 @@ use std::cell::RefCell;
 
 use web_sys::{Headers, Window};
 
-/// 与历史文档 / `serve` 启动提示一致：浏览器侧引导缓存键（先于钥匙串，解决「须鉴权才能写 secrets」的冷启动）。
-const WEB_API_BEARER_TOKEN_KEY: &str = "crabmate-api-bearer-token";
+/// 与历史文档 / `serve` 启动提示一致：纯浏览器侧引导缓存键（官方壳不得写入）。
+pub(crate) const WEB_API_BEARER_TOKEN_KEY: &str = "crabmate-api-bearer-token";
 
 /// 跨 Origin 时指向远程 `serve` 根（无尾斜杠）；空 = 同 Origin。
 const API_BASE_URL_KEY: &str = "crabmate-api-base-url";
@@ -75,12 +79,28 @@ fn write_api_base_local_storage(normalized: &str) {
     let _ = storage.set_item(API_BASE_URL_KEY, normalized);
 }
 
-fn read_local_storage_bearer() -> Option<String> {
+pub(crate) fn read_local_storage_web_api_bearer() -> Option<String> {
     read_local_storage_item(WEB_API_BEARER_TOKEN_KEY)
 }
 
-fn write_local_storage_bearer(token: &str) {
+pub(crate) fn write_local_storage_web_api_bearer(token: &str) {
     write_local_storage_item(WEB_API_BEARER_TOKEN_KEY, token);
+}
+
+pub(crate) fn clear_local_storage_web_api_bearer() {
+    write_local_storage_item(WEB_API_BEARER_TOKEN_KEY, "");
+}
+
+/// 仅写进程内内存（及 hydrate 标记）；不触碰 localStorage。
+pub(crate) fn set_web_api_bearer_token_memory_only(token: &str) {
+    let t = token.trim().to_string();
+    WEB_API_BEARER.with(|c| *c.borrow_mut() = t);
+    WEB_API_BEARER_HYDRATED.with(|h| *h.borrow_mut() = true);
+}
+
+/// 仅读进程内内存（不触发 localStorage hydrate）。
+pub(crate) fn web_api_bearer_token_memory_peek() -> String {
+    WEB_API_BEARER.with(|c| c.borrow().clone())
 }
 
 fn hydrate_web_api_bearer_once() {
@@ -89,7 +109,11 @@ fn hydrate_web_api_bearer_once() {
             return;
         }
         *h.borrow_mut() = true;
-        if let Some(t) = read_local_storage_bearer() {
+        // 官方壳：不从明文 LS 水合（由 `hydrate_web_api_bearer_from_secure_store` 异步补齐）。
+        if super::web_api_bearer_local::secure_web_api_bearer_backend_available() {
+            return;
+        }
+        if let Some(t) = read_local_storage_web_api_bearer() {
             WEB_API_BEARER.with(|c| {
                 if c.borrow().is_empty() {
                     *c.borrow_mut() = t;
@@ -149,16 +173,24 @@ fn hydrate_api_base_once() {
     });
 }
 
-/// 设置本页访问 CrabMate HTTP API 的 Bearer（写入内存 + `localStorage` 引导键）。
+/// 设置本页访问 CrabMate HTTP API 的 Bearer。
+///
+/// - **官方壳**：仅内存，并清除明文 `localStorage`（持久化已在连接页 / 设置异步写入钥匙串）
+/// - **纯浏览器**：内存 + `localStorage` 弱引导键
+///
 /// 值须与服务端 `CM_WEB_API_BEARER_TOKEN` **完全一致**。
 pub fn set_web_api_bearer_token(token: &str) {
     let t = token.trim().to_string();
-    WEB_API_BEARER.with(|c| *c.borrow_mut() = t.clone());
-    WEB_API_BEARER_HYDRATED.with(|h| *h.borrow_mut() = true);
-    write_local_storage_bearer(&t);
+    set_web_api_bearer_token_memory_only(&t);
+    let secure = super::web_api_bearer_local::secure_web_api_bearer_backend_available();
+    if super::web_api_bearer_local::should_persist_web_api_bearer_to_local_storage(secure) {
+        write_local_storage_web_api_bearer(&t);
+    } else {
+        clear_local_storage_web_api_bearer();
+    }
 }
 
-/// 当前内存中的 Web API Bearer（必要时从 `localStorage` 冷启动注入）。
+/// 当前内存中的 Web API Bearer（浏览器路径必要时从 `localStorage` 冷启动注入）。
 #[must_use]
 pub fn web_api_bearer_token() -> String {
     hydrate_web_api_bearer_once();
@@ -291,6 +323,17 @@ pub fn apply_api_auth(init: &web_sys::RequestInit) {
     init.set_mode(web_sys::RequestMode::Cors);
     init.set_credentials(web_sys::RequestCredentials::Include);
     init.set_headers(&auth_headers());
+}
+
+/// 发起受保护 API 请求前调用：壳内先完成 Bearer 水合，再 [`apply_api_auth`]。
+pub async fn prepare_api_auth(init: &web_sys::RequestInit) {
+    ensure_web_api_bearer_hydrated_for_request().await;
+    apply_api_auth(init);
+}
+
+/// 供不经 [`prepare_api_auth`] 组装 headers 的路径（如 SSE）在发请求前调用。
+pub async fn ensure_web_api_bearer_hydrated_for_request() {
+    super::web_api_bearer_local::ensure_web_api_bearer_hydrated().await;
 }
 
 pub fn auth_headers() -> Headers {

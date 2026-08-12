@@ -2,8 +2,8 @@
 //!
 //! 连接成功后导航到本地 `{app}/index.html#cm_api_base=…&cm_web_api_bearer=…`；
 //! 本模块在前端启动时消费并写入 [`super::browser::set_api_base_url`] /
-//! [`super::browser::set_web_api_bearer_token`]，再从地址栏清除敏感参数
-//!（`history.replaceState`）。
+//! [`super::browser::set_web_api_bearer_token`]（官方壳仅内存并清明文 LS；
+//! 浏览器路径可弱持久化），再从地址栏清除敏感参数（`history.replaceState`）。
 //!
 //! **勿**把 Bearer 写入查询串（易进访问日志）；hash 仍可能进 WebView 历史，仅作短时手递。
 
