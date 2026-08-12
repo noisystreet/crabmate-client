@@ -170,10 +170,10 @@ pub fn settings_block_web_api_bearer(l: Locale) -> &'static str {
 pub fn settings_web_api_bearer_hint(l: Locale) -> &'static str {
     match l {
         Locale::ZhHans => {
-            "保护 CrabMate HTTP API：须与 serve 的 CM_WEB_API_BEARER_TOKEN 完全一致。保存后写入本浏览器请求头。这不是下方「模型」里的云端 API_KEY。"
+            "保护 CrabMate HTTP API：须与 serve 的 CM_WEB_API_BEARER_TOKEN 完全一致。官方壳写入本机钥匙串/Keystore（不落明文 localStorage）；普通浏览器仅弱持久化到本页。这不是下方「模型」里的云端 API_KEY。"
         }
         Locale::En => {
-            "Protects CrabMate HTTP APIs: must match CM_WEB_API_BEARER_TOKEN on serve. Saved into this browser’s request headers. Not the cloud API_KEY under Model below."
+            "Protects CrabMate HTTP APIs: must match CM_WEB_API_BEARER_TOKEN on serve. Official shells store it in the device keyring/Keystore (not plaintext localStorage); plain browsers use weak in-page persistence. Not the cloud API_KEY under Model below."
         }
     }
 }
@@ -196,6 +196,17 @@ pub fn settings_web_api_bearer_saved(l: Locale) -> &'static str {
     match l {
         Locale::ZhHans => "已保存；正在重新拉取状态…",
         Locale::En => "Saved; refreshing status…",
+    }
+}
+
+pub fn settings_web_api_bearer_saved_browser_insecure(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => {
+            "已保存。当前不在桌面/移动壳内：Web Bearer 仅弱持久化在本浏览器（明文 localStorage）。正式使用请用 Desktop / Android 壳。"
+        }
+        Locale::En => {
+            "Saved. Not running in the Desktop/Android shell: Web Bearer is weakly persisted in this browser (plaintext localStorage). Prefer the official shell for keyring/Keystore storage."
+        }
     }
 }
 

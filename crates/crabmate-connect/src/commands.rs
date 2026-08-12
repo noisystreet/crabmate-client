@@ -7,7 +7,7 @@ use tauri::{AppHandle, Manager, State, Url};
 use crate::allowed_origin::AllowedServeOrigin;
 use crate::cleartext::enforce_cleartext_connect_policy;
 use crate::handoff::{build_local_ui_handoff_url, local_business_ui_url, normalize_base_url};
-use crate::keyring_bearer::{read_connect_bearer, write_connect_bearer_on_connect};
+use crate::keyring_bearer::{read_connect_bearer, write_connect_bearer_unchecked};
 use crate::keyring_llm::{LlmSecretSlot, read_llm_secret, write_llm_secret};
 use crate::navigation::is_app_origin;
 use crate::probe::probe_server;
@@ -65,7 +65,7 @@ fn main_window(app: &AppHandle) -> Result<tauri::WebviewWindow, String> {
 
 /// 探测 `/health` + `/user-data/prefs` 后加载**包内业务 UI**，经 hash 交接 API 基址与 Bearer。
 ///
-/// 成功连接且 Bearer 非空时**覆盖写入**系统钥匙串。
+/// 成功连接后写入系统钥匙串（非空覆盖；空串删除条目）。
 #[tauri::command]
 pub async fn connect_remote(
     app: AppHandle,
@@ -81,8 +81,8 @@ pub async fn connect_remote(
         allowed.set_from_url(&api_base);
     }
 
-    // 钥匙串失败不阻断连接（Android 无后端时由连接页写 Keystore 加密 prefs）。
-    if let Err(e) = write_connect_bearer_on_connect(&bearer) {
+    // 空串删除钥匙串条目；非空覆盖写入（Android 无后端时由连接页写 Keystore）。
+    if let Err(e) = write_connect_bearer_unchecked(bearer.trim()) {
         eprintln!("[crabmate-connect] keyring write skipped: {e}");
     }
 
@@ -100,10 +100,15 @@ pub async fn connect_remote(
 }
 
 /// 导航回 App 内连接页；带 `manual=1` 避免立刻自动重连。
+///
+/// 同时清除本机连接 Bearer 槽（桌面钥匙串）；Android Keystore 由业务 UI 在断开前经桥清除。
 #[tauri::command]
 pub async fn disconnect_remote(app: AppHandle) -> Result<(), String> {
     if let Some(allowed) = app.try_state::<AllowedServeOrigin>() {
         allowed.clear();
+    }
+    if let Err(e) = write_connect_bearer_unchecked("") {
+        eprintln!("[crabmate-connect] keyring clear on disconnect skipped: {e}");
     }
     let window = main_window(&app)?;
     let mut home = connect_home_url();
@@ -130,6 +135,14 @@ pub fn get_connect_bearer() -> Option<String> {
             None
         }
     }
+}
+
+/// 写入或清除连接用 Web API Bearer（空串删除钥匙串条目）。
+///
+/// 供包内业务 UI 设置页保存/清除；连接成功路径仍走 [`connect_remote`]。
+#[tauri::command]
+pub fn set_connect_bearer(bearer: String) -> Result<(), String> {
+    write_connect_bearer_unchecked(&bearer)
 }
 
 /// 系统钥匙串中的密钥槽（`client_llm` / `executor_llm` / `saved_models` / `github`）。

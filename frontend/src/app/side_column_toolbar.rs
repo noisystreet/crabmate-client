@@ -278,11 +278,14 @@ fn disconnect_remote_available() -> bool {
 
 fn run_toolbar_disconnect(view_menu_open: RwSignal<bool>) {
     view_menu_open.set(false);
-    if crate::mobile_remote::mobile_remote_disconnect_available() {
-        crate::mobile_remote::mobile_remote_disconnect();
-    } else {
-        crate::tauri_shell::tauri_disconnect_remote();
-    }
+    leptos::task::spawn_local(async move {
+        crate::api::clear_web_api_bearer_on_disconnect().await;
+        if crate::mobile_remote::mobile_remote_disconnect_available() {
+            crate::mobile_remote::mobile_remote_disconnect();
+        } else {
+            crate::tauri_shell::tauri_disconnect_remote();
+        }
+    });
 }
 
 #[component]

@@ -18,12 +18,14 @@ pub(crate) mod llm_secrets_local;
 mod saved_models;
 mod session_store;
 pub mod user_data;
+pub(crate) mod web_api_bearer_local;
 
 pub use github_oauth::{
     GithubDeviceStartDto, fetch_github_oauth_device_status, post_github_oauth_device_cancel,
     post_github_oauth_device_logout, post_github_oauth_device_start,
 };
 
+#[allow(unused_imports)] // 对外 re-export；handoff / 设置页等按需引用
 pub use browser::{
     api_base_host_is_loopback, api_base_url, api_url, is_web_api_credential_error,
     set_api_base_url, set_web_api_bearer_token, web_api_bearer_token_is_set,
@@ -62,3 +64,9 @@ pub use saved_models::{
     persist_saved_model_presets_to_storage, persist_saved_model_presets_to_storage_async,
 };
 pub use session_store::post_session_conversation_store;
+#[allow(unused_imports)] // 对外 re-export；壳内设置/断开等按需引用
+pub use web_api_bearer_local::{
+    clear_web_api_bearer_on_disconnect, ensure_web_api_bearer_hydrated,
+    hydrate_web_api_bearer_from_secure_store, secure_web_api_bearer_backend_available,
+    set_web_api_bearer_token_async,
+};

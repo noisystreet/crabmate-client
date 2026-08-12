@@ -5,7 +5,7 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{Request, RequestInit, Response};
 
-use super::browser::{api_url, apply_api_auth, auth_headers, window};
+use super::browser::{api_url, auth_headers, prepare_api_auth, window};
 use super::github_secrets_local::github_token_secure_backend_available;
 use crate::i18n::Locale;
 
@@ -41,7 +41,7 @@ pub async fn post_github_oauth_device_start(
 ) -> Result<GithubDeviceStartDto, String> {
     let init = RequestInit::new();
     init.set_method("POST");
-    apply_api_auth(&init);
+    prepare_api_auth(&init).await;
     let h = auth_headers();
     let _ = h.set("Content-Type", "application/json");
     init.set_headers(&h);
@@ -78,7 +78,7 @@ pub async fn fetch_github_oauth_device_status(
 ) -> Result<GithubDeviceStatusDto, String> {
     let init = RequestInit::new();
     init.set_method("GET");
-    apply_api_auth(&init);
+    prepare_api_auth(&init).await;
     if github_token_secure_backend_available() {
         let h = auth_headers();
         let _ = h.set("X-CrabMate-GitHub-Token-Delivery", "body");
@@ -108,7 +108,7 @@ pub async fn fetch_github_oauth_device_status(
 pub async fn post_github_oauth_device_cancel(loc: Locale) -> Result<(), String> {
     let init = RequestInit::new();
     init.set_method("POST");
-    apply_api_auth(&init);
+    prepare_api_auth(&init).await;
     let req = Request::new_with_str_and_init(&api_url("/github/oauth/device/cancel"), &init)
         .map_err(|e| format!("request: {e:?}"))?;
     let w = window().ok_or_else(|| crate::i18n::api_err_no_window(loc).to_string())?;
@@ -128,7 +128,7 @@ pub async fn post_github_oauth_device_cancel(loc: Locale) -> Result<(), String> 
 pub async fn post_github_oauth_device_logout(loc: Locale) -> Result<(), String> {
     let init = RequestInit::new();
     init.set_method("POST");
-    apply_api_auth(&init);
+    prepare_api_auth(&init).await;
     let req = Request::new_with_str_and_init(&api_url("/github/oauth/device/logout"), &init)
         .map_err(|e| format!("request: {e:?}"))?;
     let w = window().ok_or_else(|| crate::i18n::api_err_no_window(loc).to_string())?;

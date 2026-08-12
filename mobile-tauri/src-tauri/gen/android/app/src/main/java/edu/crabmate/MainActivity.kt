@@ -225,6 +225,12 @@ class MainActivity : TauriActivity() {
 
   private fun loadConnectPage() {
     val view = appWebView ?: return
+    // 与工具栏断开一致：回连接页时清除 Keystore 中的连接 Bearer。
+    try {
+      SecureBearerStore.write(applicationContext, "")
+    } catch (_: Exception) {
+      // ignore
+    }
     // 勿用当前业务 UI URL 覆盖 connectHome（Phase 2 同为 tauri.localhost）。
     val base =
       when {
@@ -288,15 +294,15 @@ class MainActivity : TauriActivity() {
   }
 
   /**
-   * 仅当缓存 URL 确认为连接页时允许读写加密 Bearer。
-   * 缓存未就绪或业务 UI / 远程页时拒绝（避免包内 index / 远程页误放行）。
+   * 包内 App Origin（连接页或业务 UI）可读写加密连接 Bearer；远程 serve 页拒绝。
+   * 缓存未就绪时拒绝（由前端短延迟重试）；业务 UI 需水合/清除，不得仅限连接页。
    */
   private fun allowSecureBearerBridge(): Boolean {
     val url = cachedWebViewUrl
     if (url.isNullOrBlank()) {
       return false
     }
-    return isConnectPageUrl(url)
+    return isAppOrigin(url)
   }
 
   /**
@@ -330,7 +336,7 @@ class MainActivity : TauriActivity() {
     fun getNavBarInsetPx(): Int = navBarInsetCssPx()
 
     /**
-     * 读取 Keystore AES-GCM 加密的连接 Bearer。仅连接页；业务 UI 调用返回空串。
+     * 读取 Keystore AES-GCM 加密的连接 Bearer。包内 App Origin（连接页 / 业务 UI）。
      */
     @JavascriptInterface
     fun getSecureBearer(): String {
@@ -345,7 +351,7 @@ class MainActivity : TauriActivity() {
     }
 
     /**
-     * 写入（或清空）加密 Bearer。仅连接页；空串删除条目。
+     * 写入（或清空）加密 Bearer。包内 App Origin；空串删除条目。
      * @return true 表示已写入/清除；false 表示拒绝或存储不可用
      */
     @JavascriptInterface

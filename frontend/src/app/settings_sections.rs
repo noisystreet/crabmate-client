@@ -155,21 +155,30 @@ fn save_web_api_bearer(
     save_nonce: RwSignal<u64>,
 ) {
     let token = draft.get_untracked();
-    crate::api::set_web_api_bearer_token(&token);
-    present.set(crate::api::web_api_bearer_token_is_set());
-    draft.set(String::new());
-    let cleared = token.trim().is_empty();
-    feedback.set(Some(if cleared {
-        i18n::settings_web_api_bearer_cleared(locale).to_string()
-    } else {
-        i18n::settings_web_api_bearer_saved(locale).to_string()
-    }));
-    // 仅非空保存后触发壳层恢复（重试 /status、水合）；清空时不乐观清错、不拉水合。
-    if !cleared {
-        save_nonce.update(|n| *n = n.saturating_add(1));
-    }
-    // 本页请求头已可用；不再 PUT 服务端钥匙串——远程浏览器写入的是
-    // **serve 主机**上的 keyring，与 CM_WEB_API_BEARER_TOKEN 校验无关，且空串会误清主机槽位。
+    spawn_local(async move {
+        match crate::api::set_web_api_bearer_token_async(&token).await {
+            Ok(kind) => {
+                draft.set(String::new());
+                present.set(crate::api::web_api_bearer_token_is_set());
+                let cleared = token.trim().is_empty();
+                let msg = if cleared {
+                    i18n::settings_web_api_bearer_cleared(locale).to_string()
+                } else if kind == crate::api::PersistKind::BrowserInsecure {
+                    i18n::settings_web_api_bearer_saved_browser_insecure(locale).to_string()
+                } else {
+                    i18n::settings_web_api_bearer_saved(locale).to_string()
+                };
+                feedback.set(Some(msg));
+                // 仅非空保存后触发壳层恢复（重试 /status、水合）；清空时不乐观清错、不拉水合。
+                if !cleared {
+                    save_nonce.update(|n| *n = n.saturating_add(1));
+                }
+            }
+            Err(e) => {
+                feedback.set(Some(e));
+            }
+        }
+    });
 }
 
 /// 局域网 / 非回环 `serve`：把与 `CM_WEB_API_BEARER_TOKEN` 相同的共享密钥写入本页请求头。

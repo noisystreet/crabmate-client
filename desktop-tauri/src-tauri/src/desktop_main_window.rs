@@ -79,6 +79,10 @@ pub(crate) fn create_main_window_from_url(
         allowed.set_from_url(&api_base);
     }
     let bearer = std::env::var("CM_WEB_API_BEARER_TOKEN").unwrap_or_default();
+    // 与 connect_remote 一致：非空 Bearer 写入钥匙串，供包内 UI 刷新后水合（不落明文 LS）。
+    if let Err(e) = crabmate_connect::write_connect_bearer_on_connect(&bearer) {
+        eprintln!("[crabmate-desktop] e2e keyring write skipped: {e}");
+    }
     let home = Url::parse("http://tauri.localhost/connect.html")
         .map_err(|e| format!("invalid local connect placeholder: {e}"))?;
     crabmate_connect::seed_connect_home(&home);

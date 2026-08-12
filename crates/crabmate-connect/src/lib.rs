@@ -21,7 +21,7 @@ pub use allowed_origin::AllowedServeOrigin;
 pub use cleartext::enforce_cleartext_connect_policy;
 pub use commands::{
     SuggestedServerUrl, connect_remote, disconnect_remote, get_connect_bearer, get_llm_secret,
-    get_suggested_server_url, seed_connect_home, set_llm_secret,
+    get_suggested_server_url, seed_connect_home, set_connect_bearer, set_llm_secret,
 };
 pub use handoff::{
     API_BASE_HASH_KEY, BEARER_HASH_KEY, build_handoff_url, build_local_ui_handoff_url,

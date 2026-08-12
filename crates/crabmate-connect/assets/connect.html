@@ -420,11 +420,9 @@
 
       function persistBearerFallback(bearer) {
         // Android：无系统钥匙串时写入 Keystore AES-GCM（CrabMateMobile）；不再落明文 localStorage。
-        // 桌面：connect_remote 已写钥匙串；此处不写 Bearer。空串不写入、也不清除已存密钥。
+        // 桌面：connect_remote 已写/清钥匙串；此处不写 Bearer。
+        // 空串：显式清除已存密钥（与 connect_remote 空串删槽一致）。
         const b = (bearer || "").trim();
-        if (!b) {
-          return;
-        }
         try {
           const bridge = mobileBridge();
           if (
@@ -432,7 +430,9 @@
             typeof bridge.setSecureBearer === "function" &&
             bridge.setSecureBearer(b)
           ) {
-            clearPlaintextBearerStorage();
+            if (b) {
+              clearPlaintextBearerStorage();
+            }
           }
         } catch (_) {}
       }

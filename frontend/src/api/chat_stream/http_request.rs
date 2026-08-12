@@ -80,11 +80,12 @@ pub(super) fn build_chat_stream_post_body(
     Ok(body)
 }
 
-pub(super) fn build_chat_stream_fetch_request(
+pub(super) async fn build_chat_stream_fetch_request(
     body_json: &str,
     signal: &web_sys::AbortSignal,
     last_event_id: u64,
 ) -> Result<Request, String> {
+    browser::ensure_web_api_bearer_hydrated_for_request().await;
     let init = RequestInit::new();
     init.set_method("POST");
     init.set_mode(RequestMode::Cors);
