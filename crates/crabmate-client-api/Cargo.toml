@@ -3,7 +3,7 @@ name = "crabmate-client-api"
 version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
-description = "Pure shared client logic for CrabMate (URL / auth / secrets / approval; no IO)"
+description = "Pure shared client logic for CrabMate (URL / auth / secrets / approval / workspace / sessions / chat body; no IO)"
 repository = "https://github.com/noisystreet/crabmate-client"
 publish = false
 
