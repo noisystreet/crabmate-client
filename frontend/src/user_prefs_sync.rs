@@ -267,6 +267,8 @@ pub fn wire_load_user_prefs_from_server(app: AppSignals) {
                 if let Ok(dto) = fetch_user_data_prefs(loc).await {
                     apply_prefs_dto(&app, &dto, prefs_session_mode_present);
                     crate::app::shell_prefs_storage::apply_loaded_prefs_to_dom(&app);
+                    // 仅读取成功才允许 PUT 写回，否则默认值会覆盖服务端真实偏好。
+                    app.workspace.user_prefs_loaded_ok.set(true);
                 }
                 // prefs 可能来自另一端：按当前端覆盖壳 UI 进入态
                 //（移动/窄屏收起侧栏；Android 壳默认隐藏应用内底部状态栏）。
@@ -314,8 +316,8 @@ pub fn wire_persist_user_prefs_to_server(app: AppSignals) {
     let debounce_tick = StoredValue::new(Arc::new(AtomicU64::new(0)));
 
     Effect::new(move |_| {
-        // 须等首启 GET 结束，否则空 `recent_workspace_roots` 会覆盖磁盘上的最近列表。
-        if !app.workspace.user_prefs_hydrated.get() {
+        // 仅当首启 GET 成功后才允许 PUT，否则默认值会覆盖服务端真实偏好。
+        if !app.workspace.user_prefs_loaded_ok.get() {
             return;
         }
         let _ = app.shell_ui.theme.get();
@@ -348,7 +350,7 @@ pub fn wire_persist_user_prefs_to_server(app: AppSignals) {
             if ctr2.load(Ordering::Relaxed) != tick {
                 return;
             }
-            if !app2.workspace.user_prefs_hydrated.get_untracked() {
+            if !app2.workspace.user_prefs_loaded_ok.get_untracked() {
                 return;
             }
             let loc = app2.shell_ui.locale.get_untracked();
