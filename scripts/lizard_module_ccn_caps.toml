@@ -13,6 +13,7 @@ global_over_ceiling = 10000
 frozen_modules = ["desktop-tauri"]
 
 [modules]
+"crates/crabmate-client-api" = 0
 "crates/crabmate-connect" = 0
 "crates/crabmate-tui" = 0
 "crates/crabmate-tui-core" = 0

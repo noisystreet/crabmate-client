@@ -17,6 +17,7 @@ crabmate-tool-card = { git = "https://github.com/noisystreet/CrabMate", tag = "c
 crabmate-types = { git = "https://github.com/noisystreet/CrabMate", tag = "client-contract-v0.1.1", package = "crabmate-types" }
 crabmate-sse-protocol = { git = "https://github.com/noisystreet/CrabMate", tag = "client-contract-v0.1.1", package = "crabmate-sse-protocol" }
 crabmate-turn-layout = { git = "https://github.com/noisystreet/CrabMate", tag = "client-contract-v0.1.1", package = "crabmate-turn-layout" }
+crabmate-client-api = { path = "../crates/crabmate-client-api" }
 ammonia = ">=4.1.4"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 console_error_panic_hook = "0.1"

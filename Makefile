@@ -8,6 +8,7 @@ TAURI_DIR := $(DESKTOP_ROOT)/src-tauri
 MOBILE_ROOT := $(ROOT)/mobile-tauri
 MOBILE_TAURI_DIR := $(MOBILE_ROOT)/src-tauri
 CONNECT_DIR := $(ROOT)/crates/crabmate-connect
+CLIENT_API_DIR := $(ROOT)/crates/crabmate-client-api
 TUI_CORE_DIR := $(ROOT)/crates/crabmate-tui-core
 TUI_DIR := $(ROOT)/crates/crabmate-tui
 FRONTEND_DIR := $(ROOT)/frontend
@@ -32,7 +33,7 @@ CM_MOBILE_SKIP_FRONTEND ?= 0
 	tui tui-release \
 	test test-frontend test-tauri test-tui check fmt clippy ktlint-android \
 	victauri-e2e victauri-e2e-real e2e-playwright \
-	clean clean-desktop clean-mobile clean-connect clean-tui clean-frontend
+	clean clean-desktop clean-mobile clean-connect clean-client-api clean-tui clean-frontend
 
 help:
 	@echo "crabmate-client Makefile（仓库根目录执行）"
@@ -61,8 +62,8 @@ help:
 	@echo "  make test-tui            crabmate-tui-core + crabmate-tui 测试"
 	@echo "  make test                test-frontend 然后 test-tauri 然后 test-tui"
 	@echo "  make ktlint-android      手改 Android Kotlin ktlint（edu/crabmate）"
-	@echo "  make fmt                 六包 cargo fmt（含 frontend / tui）"
-	@echo "  make clippy              六包 clippy -D warnings"
+	@echo "  make fmt                 七包 cargo fmt（含 client-api / frontend / tui）"
+	@echo "  make clippy              七包 clippy -D warnings"
 	@echo "  make victauri-e2e        全量 Victauri（需外部 crabmate serve）"
 	@echo "  make e2e-playwright      Playwright（需 frontend/dist + serve --with-web）"
 	@echo ""
@@ -71,6 +72,7 @@ help:
 	@echo "  make clean-desktop       desktop dist + Tauri target"
 	@echo "  make clean-mobile        mobile Tauri target"
 	@echo "  make clean-connect       connect target"
+	@echo "  make clean-client-api    crabmate-client-api target"
 	@echo "  make clean-tui           crabmate-tui* target"
 	@echo "  make clean-frontend      frontend dist + target"
 	@echo ""
@@ -193,6 +195,7 @@ ktlint-android:
 fmt:
 	cd "$(TAURI_DIR)" && $(CARGO) fmt --all
 	cd "$(MOBILE_TAURI_DIR)" && $(CARGO) fmt --all
+	cd "$(CLIENT_API_DIR)" && $(CARGO) fmt --all
 	cd "$(CONNECT_DIR)" && $(CARGO) fmt --all
 	cd "$(TUI_CORE_DIR)" && $(CARGO) fmt --all
 	cd "$(TUI_DIR)" && $(CARGO) fmt --all
@@ -201,6 +204,7 @@ fmt:
 clippy: prepare-sidecar
 	cd "$(TAURI_DIR)" && $(CARGO) clippy --all-targets -- -D warnings
 	cd "$(MOBILE_TAURI_DIR)" && $(CARGO) clippy --all-targets -- -D warnings
+	cd "$(CLIENT_API_DIR)" && $(CARGO) clippy --all-targets -- -D warnings
 	cd "$(CONNECT_DIR)" && $(CARGO) clippy --all-targets -- -D warnings
 	cd "$(TUI_CORE_DIR)" && $(CARGO) clippy --all-targets -- -D warnings
 	cd "$(TUI_DIR)" && $(CARGO) clippy --all-targets -- -D warnings
@@ -218,7 +222,7 @@ e2e-playwright:
 
 # --- 清理 ---
 
-clean: clean-desktop clean-mobile clean-connect clean-tui clean-frontend
+clean: clean-desktop clean-mobile clean-connect clean-client-api clean-tui clean-frontend
 
 clean-desktop:
 	rm -rf "$(DESKTOP_ROOT)/dist" "$(DESKTOP_ROOT)/binaries"
@@ -229,6 +233,9 @@ clean-mobile:
 
 clean-connect:
 	$(CARGO) clean --manifest-path "$(CONNECT_DIR)/Cargo.toml"
+
+clean-client-api:
+	$(CARGO) clean --manifest-path "$(CLIENT_API_DIR)/Cargo.toml"
 
 clean-tui:
 	$(CARGO) clean --manifest-path "$(TUI_CORE_DIR)/Cargo.toml"

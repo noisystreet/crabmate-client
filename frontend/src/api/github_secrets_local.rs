@@ -12,11 +12,15 @@ use super::llm_secrets_local::{
     secure_llm_secret_backend_available,
 };
 use crate::i18n::Locale;
+use crabmate_client_api::SecretSlot;
 
 const LS_CLIENT_ID: &str = "crabmate-github-oauth-client-id";
 /// 浏览器连接态提示（非机密）：上次成功授权的 login；壳以钥匙串为准。
 const LS_SESSION_LOGIN: &str = "crabmate-github-session-login";
-const SLOT_GITHUB: &str = "github";
+
+fn slot_github() -> &'static str {
+    SecretSlot::Github.as_str()
+}
 
 thread_local! {
     static TOKEN: RefCell<String> = const { RefCell::new(String::new()) };
@@ -128,7 +132,7 @@ pub async fn hydrate_github_secrets_from_secure_store() {
         clear_request_github_token();
         return;
     }
-    let loaded = bridge_load_secure_slot(SLOT_GITHUB)
+    let loaded = bridge_load_secure_slot(slot_github())
         .await
         .unwrap_or_default();
     TOKEN.with(|c| *c.borrow_mut() = loaded);
@@ -137,11 +141,11 @@ pub async fn hydrate_github_secrets_from_secure_store() {
 
 /// 壳端写入 `github` 槽并读回校验；失败不更新内存 token。
 async fn persist_github_token_durable(token: &str) -> Result<(), String> {
-    let kind = bridge_persist_secure_slot(SLOT_GITHUB, token).await?;
+    let kind = bridge_persist_secure_slot(slot_github(), token).await?;
     if kind != PersistKind::Durable {
         return Err("GitHub token 未能写入本机安全存储".into());
     }
-    let loaded = bridge_load_secure_slot(SLOT_GITHUB)
+    let loaded = bridge_load_secure_slot(slot_github())
         .await
         .unwrap_or_default();
     if loaded.trim() != token.trim() {
@@ -190,7 +194,7 @@ pub async fn clear_github_connection_local() -> Result<(), String> {
     if !github_token_secure_backend_available() {
         return Ok(());
     }
-    bridge_persist_secure_slot(SLOT_GITHUB, "")
+    bridge_persist_secure_slot(slot_github(), "")
         .await
         .map(|_| ())
         .map_err(|e| format!("本机钥匙串未能清除 GitHub token: {e}"))

@@ -1,5 +1,6 @@
 //! `reqwest` 封装：鉴权头 + 健康探测 + 审批提交。
 
+use crabmate_client_api::auth::{HEADER_X_API_KEY, web_api_credential_pair};
 use reqwest::Client;
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue};
 use serde_json::json;
@@ -36,14 +37,15 @@ impl ServeClient {
 
     pub fn auth_headers(&self) -> Result<HeaderMap, TermError> {
         let mut h = HeaderMap::new();
-        let t = self.cfg.bearer_token.trim();
-        if !t.is_empty() {
-            let v = HeaderValue::from_str(&format!("Bearer {t}"))
+        if let Some(creds) = web_api_credential_pair(&self.cfg.bearer_token) {
+            let v = HeaderValue::from_str(&creds.authorization)
                 .map_err(|e| TermError::Message(format!("invalid bearer token header: {e}")))?;
             h.insert(AUTHORIZATION, v);
+            let name = HeaderName::from_bytes(HEADER_X_API_KEY.as_bytes())
+                .map_err(|e| TermError::Message(format!("invalid X-API-Key header name: {e}")))?;
             h.insert(
-                HeaderName::from_static("x-api-key"),
-                HeaderValue::from_str(t)
+                name,
+                HeaderValue::from_str(&creds.api_key)
                     .map_err(|e| TermError::Message(format!("invalid X-API-Key header: {e}")))?,
             );
         }

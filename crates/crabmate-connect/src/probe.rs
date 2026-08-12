@@ -3,6 +3,7 @@
 
 use std::time::Duration;
 
+use crabmate_client_api::auth::{HEADER_X_API_KEY, web_api_credential_pair};
 use url::Url;
 
 const PROBE_TIMEOUT: Duration = Duration::from_secs(8);
@@ -22,11 +23,10 @@ pub const SHELL_WEBVIEW_CORS_ORIGINS: &[&str] = &[
 ];
 
 fn attach_bearer(mut req: reqwest::RequestBuilder, bearer: &str) -> reqwest::RequestBuilder {
-    let b = bearer.trim();
-    if !b.is_empty() {
+    if let Some(creds) = web_api_credential_pair(bearer) {
         req = req
-            .header(reqwest::header::AUTHORIZATION, format!("Bearer {b}"))
-            .header("X-API-Key", b);
+            .header(reqwest::header::AUTHORIZATION, creds.authorization.as_str())
+            .header(HEADER_X_API_KEY, creds.api_key.as_str());
     }
     req
 }

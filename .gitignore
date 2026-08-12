@@ -34,6 +34,7 @@ __pycache__/
 desktop-tauri/src-tauri/target/
 mobile-tauri/src-tauri/target/
 crates/crabmate-connect/target/
+crates/crabmate-client-api/target/
 crates/crabmate-tui/target/
 crates/crabmate-tui-core/target/
 frontend/target/
