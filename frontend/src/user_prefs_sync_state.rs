@@ -3,8 +3,10 @@
 /// `GET /user-data/prefs` 与防抖 `PUT` 的生命周期。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum UserPrefsSyncPhase {
-    /// 首启或重试 GET 进行中。
+    /// 尚未发起 GET（首启 Effect 将转入 [`Loading`]）。
     #[default]
+    Pending,
+    /// 首启或重试 GET 进行中。
     Loading,
     /// GET 成功；允许防抖 PUT。
     Ready,
@@ -22,7 +24,7 @@ impl UserPrefsSyncPhase {
 
     #[must_use]
     pub const fn load_attempt_finished(self) -> bool {
-        !matches!(self, Self::Loading)
+        !matches!(self, Self::Pending | Self::Loading)
     }
 }
 
@@ -53,7 +55,10 @@ mod tests {
     }
 
     #[test]
-    fn only_loading_blocks_initialized_gate() {
+    fn pending_and_loading_block_initialized_gate() {
+        assert!(!user_prefs_load_attempt_finished(
+            UserPrefsSyncPhase::Pending
+        ));
         assert!(!user_prefs_load_attempt_finished(
             UserPrefsSyncPhase::Loading
         ));
@@ -69,6 +74,7 @@ mod tests {
     #[test]
     fn persist_gate_by_phase() {
         for (phase, persist) in [
+            (UserPrefsSyncPhase::Pending, false),
             (UserPrefsSyncPhase::Loading, false),
             (UserPrefsSyncPhase::LoadFailed, false),
             (UserPrefsSyncPhase::Ready, true),
