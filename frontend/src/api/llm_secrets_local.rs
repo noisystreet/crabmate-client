@@ -253,13 +253,14 @@ pub(crate) async fn bridge_load_secure_slot(slot: &str) -> Option<String> {
 pub async fn persist_slot_async(slot: &str, value: &str) -> Result<PersistKind, String> {
     let v = value.trim();
     if bridge::has_mobile_llm_secret_bridge() {
-        // Android：URL 缓存未就绪或 Keystore 竞态时短延迟重试（桥内单次调用，避免嵌套放大）。
-        for attempt in 0..4u32 {
+        // Android：URL 缓存未就绪时短延迟重试；总等待约 2s，避免空槽拖慢每次保存。
+        const GAPS_MS: &[u32] = &[60, 120, 240, 500, 1000];
+        for (attempt, gap) in GAPS_MS.iter().enumerate() {
             if bridge::mobile_set_secure_llm_secret(slot, v) {
                 return Ok(PersistKind::Durable);
             }
-            if attempt + 1 < 4 {
-                TimeoutFuture::new(60 * (attempt + 1)).await;
+            if attempt + 1 < GAPS_MS.len() {
+                TimeoutFuture::new(*gap).await;
             }
         }
         return Err("Android Keystore 写入模型密钥失败".into());
@@ -279,14 +280,18 @@ pub async fn persist_slot_async(slot: &str, value: &str) -> Result<PersistKind, 
 
 async fn load_slot_async(slot: &str) -> Option<String> {
     if bridge::has_mobile_llm_secret_bridge() {
-        for attempt in 0..4u32 {
+        // 覆盖 MainActivity 早期 URL 采样（~1s）；空槽最多多等约 2s，勿拉到 10s×多槽。
+        const GAPS_MS: &[u32] = &[50, 150, 400, 1000];
+        for gap in GAPS_MS {
             let mobile = bridge::mobile_get_secure_llm_secret(slot);
             if !mobile.is_empty() {
                 return Some(mobile);
             }
-            if attempt + 1 < 4 {
-                TimeoutFuture::new(60 * (attempt + 1)).await;
-            }
+            TimeoutFuture::new(*gap).await;
+        }
+        let mobile = bridge::mobile_get_secure_llm_secret(slot);
+        if !mobile.is_empty() {
+            return Some(mobile);
         }
     }
     if bridge::has_tauri_llm_secret_invoke() {

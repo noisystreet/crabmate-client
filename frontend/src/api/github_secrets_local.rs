@@ -24,6 +24,8 @@ fn slot_github() -> &'static str {
 
 thread_local! {
     static TOKEN: RefCell<String> = const { RefCell::new(String::new()) };
+    /// 壳安全槽水合已尝试（成功或确认空）；避免无 GitHub 连接时每个 API 请求重跑长重试。
+    static SECURE_HYDRATE_DONE: RefCell<bool> = const { RefCell::new(false) };
 }
 
 fn read_ls(key: &str) -> Option<String> {
@@ -124,12 +126,15 @@ fn wipe_local_github_session_state() {
     TOKEN.with(|c| *c.borrow_mut() = String::new());
     clear_request_github_token();
     write_ls(LS_SESSION_LOGIN, "");
+    // 断开后允许再次 ensure/hydrate（例如同会话重新 Device Flow）。
+    SECURE_HYDRATE_DONE.with(|h| *h.borrow_mut() = false);
 }
 
 /// 从钥匙串 / Keystore 水合壳内 token（浏览器无操作）。
 pub async fn hydrate_github_secrets_from_secure_store() {
     if !github_token_secure_backend_available() {
         clear_request_github_token();
+        SECURE_HYDRATE_DONE.with(|h| *h.borrow_mut() = true);
         return;
     }
     let loaded = bridge_load_secure_slot(slot_github())
@@ -137,6 +142,22 @@ pub async fn hydrate_github_secrets_from_secure_store() {
         .unwrap_or_default();
     TOKEN.with(|c| *c.borrow_mut() = loaded);
     sync_request_header_from_memory();
+    SECURE_HYDRATE_DONE.with(|h| *h.borrow_mut() = true);
+}
+
+/// 壳内发请求前调用：尚未水合时从钥匙串/Keystore 读一次（幂等；空槽不反复长重试）。
+pub async fn ensure_github_token_hydrated() {
+    if !github_token_secure_backend_available() {
+        return;
+    }
+    if SECURE_HYDRATE_DONE.with(|h| *h.borrow()) {
+        return;
+    }
+    if github_token_is_set() {
+        SECURE_HYDRATE_DONE.with(|h| *h.borrow_mut() = true);
+        return;
+    }
+    hydrate_github_secrets_from_secure_store().await;
 }
 
 /// 壳端写入 `github` 槽并读回校验；失败不更新内存 token。
@@ -153,6 +174,7 @@ async fn persist_github_token_durable(token: &str) -> Result<(), String> {
     }
     TOKEN.with(|c| *c.borrow_mut() = loaded);
     sync_request_header_from_memory();
+    SECURE_HYDRATE_DONE.with(|h| *h.borrow_mut() = true);
     Ok(())
 }
 
@@ -210,13 +232,28 @@ pub fn github_token_is_set() -> bool {
 
 fn looks_like_github_auth_failure(msg: &str) -> bool {
     let low = msg.to_ascii_lowercase();
-    low.contains("401")
-        || low.contains("unauthorized")
-        || low.contains("bad credentials")
-        || low.contains("requires authentication")
-        || low.contains("authentication failed")
-        || low.contains("gh auth login")
-        || (low.contains("认证") && (low.contains("失败") || low.contains("无效")))
+    const NEEDLES: &[&str] = &[
+        "401",
+        "unauthorized",
+        "bad credentials",
+        "requires authentication",
+        "authentication failed",
+        "gh auth login",
+        "token in gh_token is invalid",
+        "using token (gh_token)",
+    ];
+    if NEEDLES.iter().any(|n| low.contains(n)) {
+        return true;
+    }
+    if low.contains("gh_token") && low.contains("invalid") {
+        return true;
+    }
+    if low.contains("认证")
+        && (low.contains("失败") || low.contains("无效") || low.contains("失效"))
+    {
+        return true;
+    }
+    low.contains("失效") && low.contains("token") && low.contains("gh")
 }
 
 /// 刷新连接态：壳在内存无 token 时先从钥匙串/Keystore 水合再判定；浏览器在有 session 标记时用 `repo-context` 探活，鉴权失败则清标记。
@@ -224,6 +261,8 @@ pub async fn reconcile_github_connection_status(loc: Locale) -> bool {
     if github_token_secure_backend_available() {
         // 设置页可能早于首启 hydrate 挂载；仅在内存为空时读耐久槽。
         // 避免桥瞬时空读把已有内存 token 清掉后误显「未连接」。
+        // 壳端不探活 repo-context：该路由若不把请求头 token 传入 spawn_blocking，
+        // 会误用服务端本机 gh auth，反而可能误清客户端 Keystore。
         if !github_token_is_set() {
             hydrate_github_secrets_from_secure_store().await;
         }
@@ -254,7 +293,7 @@ pub async fn reconcile_github_connection_status(loc: Locale) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::github_oauth_client_id_is_valid;
+    use super::{github_oauth_client_id_is_valid, looks_like_github_auth_failure};
 
     #[test]
     fn github_client_id_validation_matches_server_contract() {
@@ -263,5 +302,18 @@ mod tests {
         assert!(!github_oauth_client_id_is_valid(""));
         assert!(!github_oauth_client_id_is_valid("bad id"));
         assert!(!github_oauth_client_id_is_valid(&"a".repeat(129)));
+    }
+
+    #[test]
+    fn detects_gh_token_invalid_messages() {
+        assert!(looks_like_github_auth_failure(
+            "Failed to log in to github.com using token (GH_TOKEN)\nThe token in GH_TOKEN is invalid."
+        ));
+        assert!(looks_like_github_auth_failure(
+            "gh 使用 GH_TOKEN 环境变量认证，但该 token 已失效（invalid）。"
+        ));
+        assert!(!looks_like_github_auth_failure(
+            "workspace not a git repository"
+        ));
     }
 }
