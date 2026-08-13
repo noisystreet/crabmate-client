@@ -15,7 +15,7 @@
 5. 设置页模型 `API_KEY`：桌面走系统钥匙串（`get_llm_secret` / `set_llm_secret`）；Android 走 **Keystore**（`SecureLlmSecretStore` / `getSecureLlmSecret`·`setSecureLlmSecret`，**包内 App Origin** 可调，含业务 UI）。不落明文 `localStorage`。GitHub Device Flow 的 user token 共用同一安全槽机制（槽名 `github`），经请求头 `X-CrabMate-GitHub-Token` 交给远程 `serve`；OAuth Client ID 仅存本机。
 6. 聊天 / SSE / 工具审批在远程 `serve` 执行；UI 在壳内加载。
 
-连接页将 **服务器 URL** 写入 `localStorage`（`crabmate.connect.serverUrl`，并兼容旧键 `crabmate.mobile.*`），下次冷启动自动探测并登录。也可配合系统 Autofill / 密码管理器（表单 `username`=`服务器地址`，`password`=`Bearer`；手动连接成功后 `AutofillManager.commit()`）。侧栏工具栏 **断开** 图标或系统返回键回到连接页时带 `?manual=1`，并**清除**本机连接 Bearer 槽（不再自动填旧密钥），**不会**立刻自动重连，便于更换服务器。空 Bearer 连接会清除已存密钥。空 Bearer 不会写 hash，以免清掉页内已有会话内存凭证。
+连接页将 **服务器 URL** 写入 `localStorage`（`crabmate.connect.serverUrl`，并兼容旧键 `crabmate.mobile.*`），下次冷启动自动探测并登录；同时把最近多个服务器地址记入「最近连接」列表（`crabmate.connect.recentUrls`，至多 8 个），点击即可回填。也可配合系统 Autofill / 密码管理器（表单 `username`=`服务器地址`，`password`=`Bearer`；手动连接成功后 `AutofillManager.commit()`）。侧栏工具栏 **断开** 图标或系统返回键回到连接页时带 `?manual=1`，并**清除**本机连接 Bearer 槽（不再自动填旧密钥），**不会**立刻自动重连，便于更换服务器。空 Bearer 连接会清除已存密钥。空 Bearer 不会写 hash，以免清掉页内已有会话内存凭证。
 
 `gen/android/app/build.gradle.kts` 中 release 的 `usesCleartextTraffic=true` 与 `network_security_config.xml` 为**局域网**明文 HTTP WebView 而设（Android NSC 无法按 RFC1918 网段放行）。连接层（`crabmate-connect`）会拒绝公网 `http://` 主机，公网须 **HTTPS**；探测禁止跨 host 重定向。若重新执行 `tauri android init`，需再确认上述补丁与下方签名配置仍在。
 

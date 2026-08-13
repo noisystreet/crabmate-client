@@ -125,6 +125,59 @@
       button:active:not(:disabled) {
         filter: brightness(0.94);
       }
+      .recent {
+        margin-top: 0.9rem;
+        border-top: 1px solid var(--border);
+        padding-top: 0.7rem;
+      }
+      .recent[hidden] { display: none; }
+      .recent-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 0.4rem;
+      }
+      .recent-title {
+        font-size: 0.76rem;
+        color: var(--muted);
+        letter-spacing: 0.02em;
+      }
+      .recent-clear {
+        width: auto;
+        padding: 0.15rem 0.5rem;
+        font-size: 0.72rem;
+        font-weight: 500;
+        background: transparent;
+        border: 1px solid transparent;
+        color: var(--muted);
+        border-radius: 4px;
+      }
+      .recent-clear:hover { color: var(--fg); }
+      .recent-list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 0.35rem;
+      }
+      .recent-item {
+        width: 100%;
+        text-align: left;
+        padding: 0.5rem 0.7rem;
+        font-size: 0.82rem;
+        font-weight: 500;
+        color: var(--fg);
+        background: var(--field);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-btn);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .recent-item:hover {
+        border-color: rgba(123, 144, 196, 0.5);
+      }
       .hint {
         margin-top: 0.55rem;
         font-size: 0.72rem;
@@ -193,6 +246,13 @@
         <p class="err" id="err" aria-live="assertive"></p>
         <button type="submit" id="submit">连接</button>
       </form>
+      <section class="recent" id="recent" hidden>
+        <div class="recent-head">
+          <span class="recent-title">最近连接</span>
+          <button type="button" class="recent-clear" id="recent-clear">清空</button>
+        </div>
+        <ul class="recent-list" id="recent-list"></ul>
+      </section>
       <p class="hint">
         局域网可用明文 HTTP；个人云 / 公网请用 HTTPS + Bearer（UI 在壳内，不必给 API 域名挂 SPA）。成功后会记住地址；非空 Bearer 写入系统钥匙串。
       </p>
@@ -201,6 +261,8 @@
       const URL_KEY = "crabmate.connect.serverUrl";
       const BEARER_KEY_LEGACY_MOBILE = "crabmate.mobile.webApiBearer";
       const URL_KEY_LEGACY_MOBILE = "crabmate.mobile.serverUrl";
+      const RECENT_KEY = "crabmate.connect.recentUrls";
+      const MAX_RECENT = 8;
       const form = document.getElementById("connect-form");
       const urlInput = document.getElementById("url");
       const bearerInput = document.getElementById("bearer");
@@ -293,6 +355,92 @@
         }
       }
 
+      function normalizeRecentUrl(raw) {
+        let s = (raw || "").trim();
+        if (!s) return "";
+        if (!/^https?:\/\//i.test(s)) s = "http://" + s;
+        try {
+          const u = new URL(s);
+          if (u.protocol !== "http:" && u.protocol !== "https:") return "";
+          return u.href;
+        } catch (_) {
+          return "";
+        }
+      }
+
+      function readRecentUrls() {
+        try {
+          const raw = localStorage.getItem(RECENT_KEY);
+          if (!raw) return [];
+          const arr = JSON.parse(raw);
+          if (!Array.isArray(arr)) return [];
+          const out = [];
+          for (const item of arr) {
+            const href = normalizeRecentUrl(item);
+            if (href && out.indexOf(href) === -1) out.push(href);
+            if (out.length >= MAX_RECENT) break;
+          }
+          return out;
+        } catch (_) {
+          return [];
+        }
+      }
+
+      function writeRecentUrls(list) {
+        try {
+          localStorage.setItem(
+            RECENT_KEY,
+            JSON.stringify((list || []).slice(0, MAX_RECENT))
+          );
+        } catch (_) {}
+      }
+
+      /** 是否已初始化过历史（区分“从未写入”与“清空后为空”）。 */
+      function hasRecentHistory() {
+        try {
+          return localStorage.getItem(RECENT_KEY) !== null;
+        } catch (_) {
+          return false;
+        }
+      }
+
+      function rememberRecentUrl(href) {
+        const norm = normalizeRecentUrl(href);
+        if (!norm) return;
+        const list = readRecentUrls().filter((h) => h !== norm);
+        list.unshift(norm);
+        writeRecentUrls(list);
+        renderRecent();
+      }
+
+      function renderRecent() {
+        const section = document.getElementById("recent");
+        const listEl = document.getElementById("recent-list");
+        if (!section || !listEl) return;
+        const list = readRecentUrls();
+        if (!list.length) {
+          section.hidden = true;
+          listEl.innerHTML = "";
+          return;
+        }
+        section.hidden = false;
+        listEl.innerHTML = "";
+        list.forEach((href) => {
+          const li = document.createElement("li");
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "recent-item";
+          btn.textContent = href;
+          btn.title = href;
+          btn.addEventListener("click", function () {
+            urlInput.value = href;
+            bearerInput.focus();
+          });
+          li.appendChild(btn);
+          listEl.appendChild(li);
+        });
+      }
+
       function clearPlaintextBearerStorage() {
         try {
           localStorage.removeItem(BEARER_KEY_LEGACY_MOBILE);
@@ -357,6 +505,11 @@
           urlInput.value = suggestedServerUrl;
         }
 
+        // 首次升级：仅在尚未初始化历史时，把既存的“上次地址”纳入最近连接。
+        if (savedUrl && !hasRecentHistory()) {
+          rememberRecentUrl(savedUrl);
+        }
+
         let keyringBearer = "";
         try {
           keyringBearer = (await invoke("get_connect_bearer")) || "";
@@ -367,6 +520,7 @@
           const legacy = readLegacyBearer();
           if (legacy) bearerInput.value = legacy;
         }
+        renderRecent();
       }
 
       function setBusy(busy, msg) {
@@ -415,6 +569,7 @@
           localStorage.setItem(URL_KEY, href);
           // 兼容旧移动端键，避免升级后丢地址
           localStorage.setItem(URL_KEY_LEGACY_MOBILE, href);
+          rememberRecentUrl(href);
         } catch (_) {}
       }
 
@@ -497,6 +652,12 @@
         await connectWithValues(urlInput.value, bearerInput.value, {
           fromAuto: false,
         });
+      });
+
+      document.getElementById("recent-clear").addEventListener("click", function () {
+        // 写空数组（而非删除键），避免下次加载又触发“首次升级”种子。
+        writeRecentUrls([]);
+        renderRecent();
       });
 
       (async function boot() {
