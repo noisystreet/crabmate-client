@@ -6,9 +6,73 @@ import * as path from "path";
 // 辅助函数：seed 会话 & prefs，mock SSE 拦截
 // ---------------------------------------------------------------------------
 
-/** 设置 prefs、session，重载页面等待输入框就绪。*/
+/** 设置 prefs、session，再导航一次等待输入框就绪（避免 SPA 防抖 PUT 盖住 seed）。*/
 export async function seedSession(page: Page, sid: string) {
   await applyWebApiBearerHeaders(page);
+
+  const bearer = resolveWebApiBearerToken();
+  const jsonHeaders: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  if (bearer) {
+    jsonHeaders.Authorization = `Bearer ${bearer}`;
+  }
+
+  const prefs = {
+    locale: "zh",
+    theme: "light",
+    side_panel_view: "hidden",
+    side_width: 280,
+    editor_layout_mode: false,
+    status_bar_visible: true,
+  };
+  const sessionsBody = {
+    sessions: [
+      {
+        id: sid,
+        title: "e2e",
+        draft: "",
+        messages: [],
+        updated_at: Date.now(),
+        pinned: false,
+        starred: false,
+      },
+    ],
+    active_session_id: sid,
+  };
+
+  // 用 APIRequestContext 写入，不先加载旧桶进 WASM，杜绝「旧列表防抖回写」竞态。
+  const prefsRes = await page.request.put("/user-data/prefs", {
+    data: prefs,
+    headers: jsonHeaders,
+  });
+  expect(prefsRes.ok(), `seedSession prefs PUT ${prefsRes.status()}`).toBe(
+    true,
+  );
+
+  const putRes = await page.request.put(
+    "/user-data/workspaces/current/sessions",
+    {
+      data: sessionsBody,
+      headers: jsonHeaders,
+    },
+  );
+  expect(putRes.ok(), `seedSession sessions PUT ${putRes.status()}`).toBe(true);
+
+  const got = await page.request.get("/user-data/workspaces/current/sessions", {
+    headers: bearer ? { Authorization: `Bearer ${bearer}` } : undefined,
+  });
+  expect(got.ok(), `seedSession sessions GET ${got.status()}`).toBe(true);
+  const before = (await got.json()) as {
+    sessions?: { id?: string }[];
+    active_session_id?: string;
+  };
+  expect(
+    (before.sessions ?? []).some((s) => s.id === sid) &&
+      before.active_session_id === sid,
+    `seedSession bucket must contain ${sid}`,
+  ).toBe(true);
+
   await page.goto(homeUrlWithOptionalWebBearer("/"), {
     waitUntil: "networkidle",
     timeout: 20000,
@@ -17,86 +81,26 @@ export async function seedSession(page: Page, sid: string) {
     timeout: 15000,
   });
 
-  await page.evaluate(() =>
-    fetch("/user-data/prefs", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        locale: "zh",
-        theme: "light",
-        side_panel_view: "hidden",
-        side_width: 280,
-        editor_layout_mode: false,
-        status_bar_visible: true,
-      }),
-    }).catch(() => {}),
-  );
-
-  const seedBody = (s: string) =>
-    JSON.stringify({
-      sessions: [
-        {
-          id: s,
-          title: "e2e",
-          draft: "",
-          messages: [],
-          updated_at: Date.now(),
-          pinned: false,
-          starred: false,
-        },
-      ],
-      active_session_id: s,
-    });
-
-  const putSeed = async () =>
-    page.evaluate(async (body: string) => {
-      const res = await fetch("/user-data/workspaces/current/sessions", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body,
-      });
-      return res.ok;
-    }, seedBody(sid));
-
-  // 首屏已把旧桶载入内存；400ms 防抖 PUT 可能在 seed 之后把旧列表写回。
-  // 先写一次，等过防抖窗口，再写一次盖住竞态，然后校验。
-  expect(await putSeed(), `seedSession first PUT ${sid}`).toBe(true);
-  await new Promise((r) => setTimeout(r, 500));
-  expect(await putSeed(), `seedSession debounce-winner PUT ${sid}`).toBe(true);
-
-  const putOk = await page.evaluate(async (s: string) => {
-    const got = await fetch("/user-data/workspaces/current/sessions");
-    if (!got.ok) {
-      return false;
-    }
-    const data = (await got.json()) as {
-      sessions?: { id?: string }[];
-      active_session_id?: string;
-    };
-    const ids = (data.sessions ?? []).map((x) => x.id);
-    return ids.includes(s) && data.active_session_id === s;
-  }, sid);
-  expect(putOk, `seedSession GET must retain ${sid}`).toBe(true);
-
-  await page.reload({ waitUntil: "networkidle", timeout: 20000 });
-  await page.waitForSelector('[data-testid="chat-composer-input"]', {
-    timeout: 15000,
-  });
-
-  // 确认 WASM 内存活动会话是 seed（避免分桶/防抖再次切到其它 id）。
+  // 等过防抖窗口，确认 SPA 没有把 seed 桶写坏。
   await expect
     .poll(
-      async () =>
-        page.evaluate(async (s: string) => {
-          const got = await fetch("/user-data/workspaces/current/sessions");
-          if (!got.ok) return false;
-          const data = (await got.json()) as {
-            sessions?: { id?: string }[];
-            active_session_id?: string;
-          };
-          const ids = (data.sessions ?? []).map((x) => x.id);
-          return ids.includes(s) && data.active_session_id === s;
-        }, sid),
+      async () => {
+        const r = await page.request.get(
+          "/user-data/workspaces/current/sessions",
+          {
+            headers: bearer ? { Authorization: `Bearer ${bearer}` } : undefined,
+          },
+        );
+        if (!r.ok()) return false;
+        const data = (await r.json()) as {
+          sessions?: { id?: string }[];
+          active_session_id?: string;
+        };
+        return (
+          data.active_session_id === sid &&
+          (data.sessions ?? []).some((s) => s.id === sid)
+        );
+      },
       { timeout: 15000 },
     )
     .toBe(true);

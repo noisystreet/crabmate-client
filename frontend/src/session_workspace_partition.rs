@@ -451,6 +451,8 @@ struct PartitionLoadCommitArgs {
     loc: Locale,
     my_gen: u64,
     switching: bool,
+    /// 仅在成功 commit 后写入，避免 skip/陈旧 GET 永久挡住重试或伪造成功对齐。
+    prev_applied: Arc<Mutex<Option<String>>>,
 }
 
 async fn load_and_commit_partition_sessions(args: PartitionLoadCommitArgs) {
@@ -463,6 +465,7 @@ async fn load_and_commit_partition_sessions(args: PartitionLoadCommitArgs) {
         loc,
         my_gen,
         switching,
+        prev_applied,
     } = args;
     let (list2, aid2) = load_web_sessions(loc).await;
     if PARTITION_LOAD_GEN.load(Ordering::Acquire) != my_gen {
@@ -483,8 +486,10 @@ async fn load_and_commit_partition_sessions(args: PartitionLoadCommitArgs) {
         loaded_has_active,
         list2.len(),
     ) {
-        // 同仓陈旧 GET：只记桶路径，保留内存；勿解 PUT 门闩（切仓中途 in-flight GET 可能 skip）。
-        note_memory_sessions_partition(workspace_path.as_str());
+        // 同仓陈旧/空 GET 或流式中：保留内存与 overlay；不登记 MEMORY match、不写 prev。
+        if force_empty {
+            request_empty_session_after_next_partition();
+        }
         return;
     }
     let (list2, pick, draft_text) =
@@ -502,8 +507,11 @@ async fn load_and_commit_partition_sessions(args: PartitionLoadCommitArgs) {
         list2,
         pick,
         draft_text,
-        norm,
+        norm.clone(),
     );
+    if let Ok(mut g) = prev_applied.lock() {
+        *g = Some(norm);
+    }
 }
 
 /// 在 `workspace_data` 的有效根变化时，从服务端加载另一工作区桶的会话列表。
@@ -531,25 +539,25 @@ pub fn wire_workspace_session_storage_partition(args: WireWorkspaceSessionPartit
         let norm = normalize_workspace_partition_path(&wd.path);
         let force_empty_gate = pending_empty_session_after_partition();
         let prev_cell = prev_applied.get_value();
-        let mut prev_slot = prev_cell.lock().expect("partition prev workspace");
-        if partition_effect_should_skip_reload(
-            force_empty_gate,
-            wd.path.as_str(),
-            norm.as_str(),
-            &mut prev_slot,
-        ) {
-            return;
-        }
-        let switching =
-            partition_switch_context(force_empty_gate, prev_slot.as_deref(), norm.as_str());
-        *prev_slot = Some(norm.clone());
-        drop(prev_slot);
+        let switching = {
+            let mut prev_slot = prev_cell.lock().expect("partition prev workspace");
+            if partition_effect_should_skip_reload(
+                force_empty_gate,
+                wd.path.as_str(),
+                norm.as_str(),
+                &mut prev_slot,
+            ) {
+                return;
+            }
+            partition_switch_context(force_empty_gate, prev_slot.as_deref(), norm.as_str())
+        };
 
         let my_gen = PARTITION_LOAD_GEN
             .fetch_add(1, Ordering::AcqRel)
             .wrapping_add(1);
         let loc = locale.get_untracked();
         let workspace_path = wd.path.clone();
+        let prev_applied = Arc::clone(&prev_cell);
         leptos::task::spawn_local(async move {
             load_and_commit_partition_sessions(PartitionLoadCommitArgs {
                 chat,
@@ -560,6 +568,7 @@ pub fn wire_workspace_session_storage_partition(args: WireWorkspaceSessionPartit
                 loc,
                 my_gen,
                 switching,
+                prev_applied,
             })
             .await;
         });
