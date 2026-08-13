@@ -232,6 +232,7 @@ fn SessionModalRowActions(bundle: SessionModalRowBundle) -> impl IntoView {
                             active_id,
                             draft,
                             session_sync,
+                            chat.stream_transport,
                             &id,
                             locale.get_untracked(),
                         );

@@ -207,6 +207,14 @@ pub fn session_badge_pin_aria(l: Locale) -> &'static str {
     }
 }
 
+/// 侧栏会话行「后台流仍在生成」指示。
+pub fn session_row_streaming_label(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "生成中…",
+        Locale::En => "Generating…",
+    }
+}
+
 pub fn mobile_disconnect_server(l: Locale) -> &'static str {
     match l {
         Locale::ZhHans => "断开连接",

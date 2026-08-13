@@ -180,6 +180,8 @@ fn nav_session_row_button(s: ChatSession, nav: NavRailHitRowNavSignals) -> impl 
     let session_id_class = s.id.clone();
     let session_id_testid = s.id.clone();
     let session_id_click = s.id.clone();
+    // 供「生成中」badge 的独立 move 闭包使用，避免与 class 闭包争抢 `session_id_class` 所有权。
+    let session_id_streaming = session_id_class.clone();
     let title = s.title.clone();
     let n = s.messages.len();
     let is_pinned = s.pinned;
@@ -200,10 +202,16 @@ fn nav_session_row_button(s: ChatSession, nav: NavRailHitRowNavSignals) -> impl 
             type="button"
             data-testid=format!("nav-session-{session_id_testid}")
             class=move || {
+                let streaming = chat
+                    .stream_transport
+                    .get()
+                    .bound_session_id()
+                    == Some(session_id_class.as_str());
                 session_row_item_class(
                     active_id.get() == session_id_class,
                     is_pinned,
                     is_starred,
+                    streaming,
                 )
             }
             on:contextmenu=move |ev| on_contextmenu(ev)
@@ -249,7 +257,23 @@ fn nav_session_row_button(s: ChatSession, nav: NavRailHitRowNavSignals) -> impl 
                     }}
                 </span>
             </span>
-            <span class="nav-session-meta">{move || i18n::session_row_msg_count(locale.get(), n)}</span>
+            <span class="nav-session-meta">
+                <Show when=move || {
+                    chat.stream_transport.get().bound_session_id()
+                        == Some(session_id_streaming.as_str())
+                }>
+                    <span
+                        class="nav-session-streaming-badge"
+                        data-testid="nav-session-streaming"
+                        role="status"
+                    >
+                        {move || i18n::session_row_streaming_label(locale.get())}
+                    </span>
+                </Show>
+                <span class="nav-session-count">
+                    {move || i18n::session_row_msg_count(locale.get(), n)}
+                </span>
+            </span>
         </button>
     }
 }

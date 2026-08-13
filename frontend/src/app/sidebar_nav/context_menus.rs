@@ -182,6 +182,7 @@ pub(super) fn SessionContextMenuLayer(
                                 chat.active_id,
                                 draft,
                                 chat.session_sync,
+                                chat.stream_transport,
                                 &id,
                                 locale.get_untracked(),
                             );

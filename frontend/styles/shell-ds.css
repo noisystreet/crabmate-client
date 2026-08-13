@@ -477,6 +477,9 @@
 }
 
 .nav-session-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-size: 11px;
   color: var(--muted);
   flex-shrink: 0;
@@ -484,6 +487,39 @@
 
 .nav-session-item.is-active .nav-session-meta {
   color: color-mix(in srgb, var(--accent) 55%, var(--muted));
+}
+
+.nav-session-count {
+  flex-shrink: 0;
+}
+
+/* 后台流仍在生成：侧栏该会话行显示脉冲指示 */
+.nav-session-item.is-streaming .nav-session-meta {
+  color: color-mix(in srgb, var(--accent) 72%, var(--muted));
+}
+
+.nav-session-streaming-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.nav-session-streaming-badge::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: nav-streaming-pulse 1.1s ease-in-out infinite;
+}
+
+@keyframes nav-streaming-pulse {
+  50% {
+    opacity: 0.3;
+  }
 }
 
 /* —— 主列 —— */

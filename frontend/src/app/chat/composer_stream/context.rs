@@ -19,6 +19,19 @@ use crate::i18n::Locale;
 use super::super::handles::ComposerStreamShell;
 use super::stream_sse_scratch::StreamSseScratch;
 
+/// 纯判定：`session_sync` 全局槽是否允许写入。
+///
+/// SSE 同步事件（`conversation_id` / `conversation_saved.revision`）只在该流**正被用户查看**且未过期时
+/// 写全局槽；否则仅落绑定会话记录，切换回来时由切换 Effect 从记录重推导，避免后台流污染活跃会话的同步快照。
+#[must_use]
+pub(super) fn session_sync_global_gate(
+    stale: bool,
+    active_id: &str,
+    bound_session_id: &str,
+) -> bool {
+    !stale && active_id == bound_session_id
+}
+
 /// 各 `Rc<dyn Fn>` 共享：避免在闭包树中重复 `Arc::clone` 同一组字段。
 pub(super) struct ChatStreamCallbackCtx {
     pub(super) chat: ChatSessionSignals,
@@ -38,21 +51,62 @@ impl ChatStreamCallbackCtx {
         self.chat.stream_transport.get_untracked().attach_generation != self.attach_generation
     }
 
+    /// 本轮 SSE 是否正被用户查看（即 UI `active_id` 仍是绑定会话且未过期）。
+    ///
+    /// 决定 [`crate::chat_session_state::ChatSessionSignals::session_sync`] 全局槽是否同步写入；
+    /// 后台流（用户已切到其它会话）只落绑定会话记录。
+    #[inline]
+    pub(super) fn is_bound_session_active(&self) -> bool {
+        session_sync_global_gate(
+            self.is_stale(),
+            self.chat.active_id.get_untracked().as_str(),
+            self.bound_stream_session_id.as_str(),
+        )
+    }
+
+    /// 绑定会话记录中的服务端 `conversation_id`。
+    ///
+    /// 供回前台 resume 使用：后台流期间全局 `session_sync` 槽可能已切到其它会话，
+    /// resume 的 `conversation_id` 必须取**绑定会话记录**，否则会把绑定会话的流续到错误会话。
+    #[must_use]
+    pub(super) fn bound_session_server_conversation_id(&self) -> Option<String> {
+        let sid = self.bound_stream_session_id.as_str();
+        self.chat.sessions.with_untracked(|list| {
+            list.iter()
+                .find(|s| s.id == sid)
+                .and_then(|s| s.trimmed_server_conversation_id().map(str::to_string))
+        })
+    }
+
     /// 绑定会话的服务端 `conversation_id`（流式写回侧栏会话优先，其次 `session_sync`）。
     pub(super) fn server_conversation_id_for_tokens(&self) -> Option<String> {
         if self.is_stale() {
             return None;
         }
-        let sid = self.bound_stream_session_id.as_str();
-        let from_session = self.chat.sessions.with_untracked(|list| {
-            list.iter()
-                .find(|s| s.id == sid)
-                .and_then(|s| s.trimmed_server_conversation_id().map(str::to_string))
-        });
-        from_session.or_else(|| {
+        self.bound_session_server_conversation_id().or_else(|| {
             self.chat
                 .session_sync
                 .with_untracked(|s| s.conversation_id.clone())
         })
+    }
+}
+
+#[cfg(test)]
+mod session_sync_global_gate_tests {
+    use super::session_sync_global_gate;
+
+    #[test]
+    fn active_and_fresh_writes_global_slot() {
+        assert!(session_sync_global_gate(false, "s1", "s1"));
+    }
+
+    #[test]
+    fn background_stream_skips_global_slot() {
+        assert!(!session_sync_global_gate(false, "s2", "s1"));
+    }
+
+    #[test]
+    fn stale_never_writes_global_slot() {
+        assert!(!session_sync_global_gate(true, "s1", "s1"));
     }
 }

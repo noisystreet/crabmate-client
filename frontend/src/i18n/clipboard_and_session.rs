@@ -16,6 +16,16 @@ pub fn delete_session_confirm(l: Locale) -> &'static str {
     }
 }
 
+/// 流式进行中禁止删除绑定会话（否则 SSE 收尾找不到写入目标，内容静默丢失）。
+pub fn delete_session_streaming_blocked(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "会话正在生成中，请先停止或等待生成完成后再删除。",
+        Locale::En => {
+            "This session is still generating. Stop or wait for it to finish before deleting."
+        }
+    }
+}
+
 /// 新建会话默认标题（写入 `ChatSession.title`）；与旧数据 **`新会话`** 等价判断见 [`is_default_session_title`]。
 pub fn default_session_title(l: Locale) -> &'static str {
     match l {

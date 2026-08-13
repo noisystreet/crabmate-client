@@ -2,6 +2,7 @@
 
 mod stream_end;
 mod stream_phase_hooks;
+mod stream_sync_callbacks;
 mod timeline_dispatch;
 mod tool_callbacks;
 mod turn_layout_callbacks;
@@ -12,6 +13,9 @@ pub(super) use stream_end::{
 pub(super) use stream_phase_hooks::{
     make_on_assistant_answer_phase_with_stream_phase, make_on_stream_draining_with_stream_phase,
     make_on_stream_ended_with_stream_phase, make_on_tool_status_with_stream_phase,
+};
+pub(super) use stream_sync_callbacks::{
+    make_on_conversation_id_builder, make_on_conversation_revision_builder,
 };
 pub(super) use timeline_dispatch::make_on_timeline_log;
 pub(super) use tool_callbacks::{

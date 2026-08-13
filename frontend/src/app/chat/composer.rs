@@ -62,7 +62,15 @@ fn apply_shell_after_active_session_changed(arg: ApplyShellAfterActiveSessionCha
     });
     chat.session_sync
         .set(st.unwrap_or_else(SessionSyncState::local_only));
-    chat.clear_stream_resume_handles();
+    // 切换会话时保留在途流的重连句柄：仅当无 Bound 流（Idle）才清空，否则会打断
+    // 后台流软续传（job_id / SSE 序号 / overlay）；流结束由 on_stream_ended / on_error 自行清 lane。
+    if chat
+        .stream_transport
+        .get_untracked()
+        .resume_handles_clear_allowed()
+    {
+        chat.clear_stream_resume_handles();
+    }
 }
 
 /// 切换会话时重置会话级 UI 状态并加载该会话草稿。

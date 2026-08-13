@@ -57,6 +57,7 @@ pub fn wire_session_delete_hotkey(signals: SessionDeleteHotkeySignals) {
                     signals.chat.active_id,
                     signals.draft,
                     signals.chat.session_sync,
+                    signals.chat.stream_transport,
                     &sid,
                     signals.locale.get_untracked(),
                 );
@@ -66,6 +67,7 @@ pub fn wire_session_delete_hotkey(signals: SessionDeleteHotkeySignals) {
                     signals.chat.active_id,
                     signals.draft,
                     signals.chat.session_sync,
+                    signals.chat.stream_transport,
                     &sid,
                     signals.locale.get_untracked(),
                 );

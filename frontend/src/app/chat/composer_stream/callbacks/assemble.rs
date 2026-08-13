@@ -7,7 +7,6 @@ use leptos::prelude::*;
 use crate::api::ChatStreamCallbacks;
 use crate::clarification_form::PendingClarificationForm;
 use crate::conversation_hydrate::TiktokenPromptTokensSnapshot;
-use crate::conversation_prompt_tokens_apply::apply_conversation_prompt_tokens_from_sse;
 use crate::sse_dispatch::{
     ClarificationQuestionnaireInfo, CommandApprovalRequest, ThinkingTraceInfo,
 };
@@ -54,45 +53,10 @@ pub(crate) fn build_chat_stream_callbacks(
         })
     };
 
-    let on_cid: Rc<dyn Fn(String)> = {
-        let stream_ctx = Rc::clone(&stream_ctx);
-        Rc::new(move |id: String| {
-            if stream_ctx.is_stale() {
-                return;
-            }
-            stream_ctx
-                .chat
-                .session_sync
-                .update(|s| s.apply_stream_conversation_id(id.clone()));
-            stream_ctx.update_bound_session(|s| {
-                s.server_conversation_id = Some(id);
-                s.server_revision = None;
-            });
-        })
-    };
+    let on_cid: Rc<dyn Fn(String)> = make_on_conversation_id_builder(Rc::clone(&stream_ctx));
 
-    let on_conv_rev: Rc<dyn Fn(u64, Option<TiktokenPromptTokensSnapshot>)> = {
-        let stream_ctx = Rc::clone(&stream_ctx);
-        Rc::new(
-            move |rev: u64, tiktoken: Option<TiktokenPromptTokensSnapshot>| {
-                if stream_ctx.is_stale() {
-                    return;
-                }
-                stream_ctx
-                    .chat
-                    .session_sync
-                    .update(|s| s.apply_saved_revision(rev));
-                stream_ctx.update_bound_session(|s| {
-                    s.server_revision = Some(rev);
-                });
-                if let (Some(snap), Some(cid)) =
-                    (tiktoken, stream_ctx.server_conversation_id_for_tokens())
-                {
-                    apply_conversation_prompt_tokens_from_sse(stream_ctx.chat, &cid, snap);
-                }
-            },
-        )
-    };
+    let on_conv_rev: Rc<dyn Fn(u64, Option<TiktokenPromptTokensSnapshot>)> =
+        make_on_conversation_revision_builder(Rc::clone(&stream_ctx));
 
     let on_stream_ended =
         make_on_stream_ended_with_stream_phase(Rc::clone(&stream_ctx), Rc::clone(&accum));
