@@ -155,6 +155,62 @@ fn is_device_terminal(state: &str) -> bool {
     )
 }
 
+/// Android 切到 GitHub App 授权时 WebView 常中断 `fetch`（`TypeError: Failed to fetch`）。
+/// 仅把网络中断 / 瞬时 HTTP 当作可重试，避免把 CORS、401 等永久失败拖到过期。
+pub(crate) fn is_transient_http_status(status: u16) -> bool {
+    matches!(status, 408 | 425 | 429 | 500..=599)
+}
+
+/// 从 [`crate::i18n::api_err_http_status`] 文案取出状态码；WASM `fetch` 栈不含此前缀。
+pub(crate) fn http_status_hint_in_error(err: &str) -> Option<u16> {
+    let marker = if err.contains("Request failed (") {
+        "Request failed ("
+    } else if err.contains("请求失败 (") {
+        "请求失败 ("
+    } else {
+        return None;
+    };
+    let rest = err.split_once(marker)?.1;
+    let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+    let status = digits.parse().ok()?;
+    (100..600).contains(&status).then_some(status)
+}
+
+pub(crate) fn is_transient_device_poll_error(err: &str) -> bool {
+    if let Some(status) = http_status_hint_in_error(err)
+        && is_transient_http_status(status)
+    {
+        return true;
+    }
+    let e = err.to_ascii_lowercase();
+    e.contains("failed to fetch") || e.contains("networkerror")
+}
+
+/// `true`：代际已失效，或错误不可恢复，应结束轮询。
+pub(crate) fn should_stop_device_poll_on_error(gate_active: bool, err: &str) -> bool {
+    !gate_active || !is_transient_device_poll_error(err)
+}
+
+/// 返回 `true` 时停止轮询（代际失效、或不可恢复错误）。
+fn abort_after_device_poll_error(
+    loc: Locale,
+    err: String,
+    ui: GithubUiSignals,
+    gate: DeviceFlowGate,
+) -> bool {
+    if should_stop_device_poll_on_error(gate.active(), &err) {
+        if gate.active() {
+            ui.err.set(Some(err));
+            ui.busy.set(false);
+        }
+        return true;
+    }
+    ui.status_line.set(Some(
+        i18n::settings_github_device_poll_retry(loc).to_string(),
+    ));
+    false
+}
+
 async fn poll_until_device_done(
     loc: Locale,
     start: GithubDeviceStartDto,
@@ -195,11 +251,9 @@ async fn poll_until_device_done(
                 }
             }
             Err(e) => {
-                if gate.active() {
-                    ui.err.set(Some(e));
-                    ui.busy.set(false);
+                if abort_after_device_poll_error(loc, e, ui, gate) {
+                    return;
                 }
-                return;
             }
         }
         if waited >= expires {
@@ -670,8 +724,9 @@ pub(crate) fn SettingsGithubBlock(
 #[cfg(test)]
 mod tests {
     use super::{
-        disconnect_disabled, is_device_flow_generation_current, is_device_terminal,
-        should_rollback_stale_device_token,
+        disconnect_disabled, http_status_hint_in_error, is_device_flow_generation_current,
+        is_device_terminal, is_transient_device_poll_error, is_transient_http_status,
+        should_rollback_stale_device_token, should_stop_device_poll_on_error,
     };
 
     #[test]
@@ -711,5 +766,64 @@ mod tests {
         assert!(is_device_terminal("success"));
         assert!(is_device_terminal("cancelled"));
         assert!(!is_device_terminal("pending"));
+    }
+
+    #[test]
+    fn android_github_app_fetch_abort_is_transient() {
+        let wasm_fetch = "fetch: JsValue(TypeError: Failed to fetch TypeError: Failed to fetch at __wbg_fetch_729fad2e5272298f (http://tauri.localhost/crabmate-web.js:424:30))";
+        assert!(is_transient_device_poll_error(wasm_fetch));
+        assert!(is_transient_device_poll_error(
+            "fetch: JsValue(TypeError: NetworkError when attempting to fetch resource.)"
+        ));
+        assert!(is_transient_device_poll_error(
+            "read body: JsValue(TypeError: Failed to fetch)"
+        ));
+        assert!(!is_transient_device_poll_error(
+            "fetch: JsValue(TypeError: Failed to execute 'fetch' on 'Window': Illegal invocation)"
+        ));
+        assert!(!is_transient_device_poll_error("upload failed"));
+        assert!(!is_transient_device_poll_error("invalid client_id"));
+        assert!(!is_transient_device_poll_error("Request failed"));
+    }
+
+    #[test]
+    fn transient_http_status_retries_5xx_not_401() {
+        assert!(is_transient_http_status(502));
+        assert!(is_transient_http_status(429));
+        assert!(is_transient_http_status(408));
+        assert!(!is_transient_http_status(401));
+        assert!(!is_transient_http_status(400));
+        assert!(!is_transient_http_status(404));
+        assert_eq!(http_status_hint_in_error("Request failed (502)"), Some(502));
+        assert_eq!(http_status_hint_in_error("请求失败 (503)：网关"), Some(503));
+        assert_eq!(
+            http_status_hint_in_error(wasm_stack_without_http_hint()),
+            None
+        );
+        assert!(is_transient_device_poll_error("Request failed (502)"));
+        assert!(is_transient_device_poll_error("请求失败 (503)"));
+        assert!(!is_transient_device_poll_error(
+            "Request failed (401): enter bearer"
+        ));
+        assert!(!is_transient_device_poll_error("请求失败 (400)"));
+    }
+
+    #[test]
+    fn poll_error_stop_policy_matches_gate_and_transience() {
+        let fetch_abort = "fetch: JsValue(TypeError: Failed to fetch)";
+        assert!(!should_stop_device_poll_on_error(true, fetch_abort));
+        assert!(!should_stop_device_poll_on_error(
+            true,
+            "Request failed (502)"
+        ));
+        assert!(should_stop_device_poll_on_error(
+            true,
+            "Request failed (401)"
+        ));
+        assert!(should_stop_device_poll_on_error(false, fetch_abort));
+    }
+
+    fn wasm_stack_without_http_hint() -> &'static str {
+        "fetch: JsValue(TypeError: Failed to fetch at __wbg_fetch (http://tauri.localhost/x.js:1:1))"
     }
 }

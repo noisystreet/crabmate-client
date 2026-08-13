@@ -73,7 +73,7 @@ async fn parse_ok_json<T: for<'de> Deserialize<'de>>(
     loc: Locale,
 ) -> Result<T, String> {
     if !resp.ok() {
-        return Err(crate::i18n::api_err_request_failed(loc).to_string());
+        return Err(crate::i18n::api_err_http_status(loc, resp.status(), "").to_string());
     }
     let s = response_body_text(&resp, loc).await?;
     serde_json::from_str(&s).map_err(|e| e.to_string())

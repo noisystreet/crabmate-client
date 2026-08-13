@@ -174,11 +174,18 @@ pub fn settings_github_device_expired(l: Locale) -> &'static str {
     }
 }
 
+pub fn settings_github_device_poll_retry(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "网络暂时中断，仍在等待授权…",
+        Locale::En => "Network interrupted; still waiting for authorization…",
+    }
+}
+
 pub fn settings_github_device_state(l: Locale, state: &str) -> String {
     match state {
         "pending" => match l {
-            Locale::ZhHans => "等待在浏览器中完成授权…".into(),
-            Locale::En => "Waiting for browser authorization…".into(),
+            Locale::ZhHans => "等待在浏览器或 GitHub App 中完成授权…".into(),
+            Locale::En => "Waiting for authorization in the browser or GitHub App…".into(),
         },
         "slow_down" => match l {
             Locale::ZhHans => "轮询过快，已自动降速…".into(),
