@@ -462,6 +462,19 @@ mod tests {
         assert!(html.contains("title=\"run_command\""), "{html}");
         assert!(html.contains("chat-tui-tool-emoji"), "{html}");
         assert!(html.contains("⚡"), "{html}");
+        assert!(html.contains("cargo clippy --workspace"), "{html}");
+    }
+
+    #[test]
+    fn run_command_one_line_shows_invocation_while_running() {
+        let m = tool_msg(
+            "run_command",
+            "cargo test --all -- --nocapture",
+            "tool: run_command\nstatus: running\n$ cargo test --all -- --nocapture",
+            true,
+        );
+        let fields = tool_row_live_fields(&m, Locale::ZhHans, None);
+        assert_eq!(fields.one_line, "cargo test --all -- --nocapture");
     }
 
     #[test]
