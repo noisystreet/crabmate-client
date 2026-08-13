@@ -165,17 +165,30 @@ pub(in super::super) fn chat_stream_on_tool_call_builder(
                 &stream_ctx.shell.stream,
                 StreamControlEvent::ToolCallDeclared,
             );
-            let _ = (preview, full, goal_id);
+            let _ = goal_id;
             let loc = stream_ctx.locale.get_untracked();
-            let core = if !summary.trim().is_empty() {
+            let core = if name.trim() == "run_command" {
+                let inv = run_command_card_invocation_line(
+                    summary.as_str(),
+                    preview.as_deref(),
+                    full.as_deref(),
+                );
+                if inv.is_empty() {
+                    format!("{}{}", i18n::tool_card_prefix(loc), name.trim())
+                } else {
+                    inv
+                }
+            } else if !summary.trim().is_empty() {
                 summary.trim().to_string()
             } else if !name.trim().is_empty() {
                 format!("{}{}", i18n::tool_card_prefix(loc), name.trim())
             } else {
                 i18n::tool_card_fallback(loc).to_string()
             };
-            let text = to_single_line(&core, 140);
-            let detail = if !name.trim().is_empty() {
+            let text = to_single_line(&core, 180);
+            let detail = if name.trim() == "run_command" && !core.is_empty() {
+                format!("tool: {name}\nstatus: running\n$ {core}")
+            } else if !name.trim().is_empty() {
                 format!("tool: {name}\nstatus: running")
             } else {
                 "status: running".to_string()
