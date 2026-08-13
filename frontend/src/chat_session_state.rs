@@ -68,6 +68,16 @@ impl ChatStreamTransport {
         }
     }
 
+    /// 仅当无在途流（Idle）时才允许清空重连句柄；Bound 期间清空会丢失
+    /// `job_id` / SSE 序号 / overlay，导致后台流切后台后无法软续传。
+    ///
+    /// 会话切换路径（[`crate::app::chat::composer::apply_shell_after_active_session_changed`]）依赖此判定；
+    /// 流结束由 `on_stream_ended` / `on_error` 自行清 lane。
+    #[must_use]
+    pub(crate) fn resume_handles_clear_allowed(&self) -> bool {
+        self.bound_session_id().is_none()
+    }
+
     fn bump_attach_generation(&mut self) -> u64 {
         self.attach_generation = self.attach_generation.wrapping_add(1);
         self.attach_generation
@@ -515,5 +525,32 @@ mod conflict_loading_tests {
         assert!(session_has_conflicting_stream_loading_in_messages(
             &sessions, sid, "asst_new"
         ));
+    }
+}
+
+#[cfg(test)]
+mod resume_handles_clear_allowed_tests {
+    use super::*;
+
+    #[test]
+    fn idle_allows_clearing() {
+        assert!(ChatStreamTransport::default().resume_handles_clear_allowed());
+    }
+
+    #[test]
+    fn bound_without_job_blocks_clearing() {
+        let mut t = ChatStreamTransport::default();
+        t.bump_attach_generation();
+        t.bind_stream_session("s1".into());
+        assert!(!t.resume_handles_clear_allowed());
+    }
+
+    #[test]
+    fn bound_with_job_blocks_clearing() {
+        let mut t = ChatStreamTransport::default();
+        t.bump_attach_generation();
+        t.bind_stream_session("s1".into());
+        t.set_stream_job_id(7);
+        assert!(!t.resume_handles_clear_allowed());
     }
 }

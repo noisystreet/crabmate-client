@@ -15,14 +15,36 @@ use crate::storage::{
     ensure_at_least_one, make_session_id,
 };
 
+/// 待删除会话是否仍被在途流（Bound）占用；此时删除会让 SSE 收尾找不到写入目标而静默丢内容。
+fn delete_blocked_by_stream(
+    stream_transport: RwSignal<crate::chat_session_state::ChatStreamTransport>,
+    id: &str,
+) -> bool {
+    stream_transport.get_untracked().bound_session_id() == Some(id)
+}
+
+/// 同步提示「会话正在生成中」。须在用户手势栈内调用（`on:click` / 快捷键处理器）；
+/// 勿放进 `spawn_local` 异步段（transient user activation 丢失后 `alert` 不可靠）。
+fn alert_delete_streaming_blocked(locale: crate::i18n::Locale) {
+    if let Some(w) = web_sys::window() {
+        let _ = w.alert_with_message(crate::i18n::delete_session_streaming_blocked(locale));
+    }
+}
+
 fn apply_delete_session(
     sessions: RwSignal<Vec<ChatSession>>,
     active_id: RwSignal<String>,
     draft: RwSignal<String>,
     session_sync: RwSignal<crate::session_sync::SessionSyncState>,
+    stream_transport: RwSignal<crate::chat_session_state::ChatStreamTransport>,
     id: &str,
     locale: crate::i18n::Locale,
 ) {
+    // 防御性静默拒绝（不 alert）：`delete_session_after_confirm` 的确认框是异步的，
+    // 前置守卫之后流才可能开始；此处只阻止删除，提示由各公开入口在同步上下文发出。
+    if delete_blocked_by_stream(stream_transport, id) {
+        return;
+    }
     let id = id.to_string();
     let was_active = active_id.get() == id;
     sessions.update(|list| {
@@ -414,14 +436,21 @@ pub fn delete_session_after_confirm(
     active_id: RwSignal<String>,
     draft: RwSignal<String>,
     session_sync: RwSignal<crate::session_sync::SessionSyncState>,
+    stream_transport: RwSignal<crate::chat_session_state::ChatStreamTransport>,
     id: &str,
     locale: crate::i18n::Locale,
 ) {
+    // 确认框之前守卫：Bound 会话直接提示，不弹「不可恢复」确认框。
+    if delete_blocked_by_stream(stream_transport, id) {
+        alert_delete_streaming_blocked(locale);
+        return;
+    }
     let confirm_msg = crate::i18n::delete_session_confirm(locale).to_string();
     let sessions_c = sessions;
     let active_id_c = active_id;
     let draft_c = draft;
     let session_sync_c = session_sync;
+    let stream_transport_c = stream_transport;
     let id_s = id.to_string();
     spawn_local(async move {
         if !crate::confirm_dialog::confirm_user_message(
@@ -438,6 +467,7 @@ pub fn delete_session_after_confirm(
             active_id_c,
             draft_c,
             session_sync_c,
+            stream_transport_c,
             &id_s,
             locale,
         );
@@ -450,10 +480,24 @@ pub fn delete_session_immediate(
     active_id: RwSignal<String>,
     draft: RwSignal<String>,
     session_sync: RwSignal<crate::session_sync::SessionSyncState>,
+    stream_transport: RwSignal<crate::chat_session_state::ChatStreamTransport>,
     id: &str,
     locale: crate::i18n::Locale,
 ) {
-    apply_delete_session(sessions, active_id, draft, session_sync, id, locale);
+    // 同步入口（快捷键 / 调用方手势栈内）：在此 alert，而非依赖 `apply_delete_session` 的异步上下文。
+    if delete_blocked_by_stream(stream_transport, id) {
+        alert_delete_streaming_blocked(locale);
+        return;
+    }
+    apply_delete_session(
+        sessions,
+        active_id,
+        draft,
+        session_sync,
+        stream_transport,
+        id,
+        locale,
+    );
 }
 
 /// 左栏会话右键菜单锚点（`position: fixed` 使用视口坐标）。

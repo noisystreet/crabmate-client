@@ -62,10 +62,16 @@ pub(crate) fn spawn_foreground_stream_resume(args: ForegroundStreamResumeArgs) {
         hydrate_after_background(chat, &shell);
         return;
     };
-    let conv = chat
-        .session_sync
-        .with_untracked(|s| s.stream_conversation_id());
     let prepared = prepare_stream_resume_attach(chat, &shell, locale, asst_id, session_id, job_id);
+    // 后台流期间用户可能已切到其它会话：resume 的 conversation_id 必须取**绑定会话记录**，
+    // 而非全局 session_sync 槽（后者只反映当前正在查看的会话），否则会把绑定会话的流续到错误会话。
+    let conv = prepared
+        .stream_ctx
+        .bound_session_server_conversation_id()
+        .or_else(|| {
+            chat.session_sync
+                .with_untracked(|s| s.stream_conversation_id())
+        });
     let agent_role = selected_agent_role.get_untracked();
     let session_mode = {
         let m = selected_session_mode

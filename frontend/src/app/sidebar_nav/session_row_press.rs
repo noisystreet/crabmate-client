@@ -210,7 +210,12 @@ fn make_try_consume_suppress_click(
     })
 }
 
-pub(super) fn session_row_item_class(active: bool, is_pinned: bool, is_starred: bool) -> String {
+pub(super) fn session_row_item_class(
+    active: bool,
+    is_pinned: bool,
+    is_starred: bool,
+    streaming: bool,
+) -> String {
     let mut c = String::from("nav-session-item");
     if active {
         c.push_str(" is-active");
@@ -221,5 +226,37 @@ pub(super) fn session_row_item_class(active: bool, is_pinned: bool, is_starred: 
     if is_starred {
         c.push_str(" is-starred");
     }
+    if streaming {
+        c.push_str(" is-streaming");
+    }
     c
+}
+
+#[cfg(test)]
+mod session_row_item_class_tests {
+    use super::session_row_item_class;
+
+    #[test]
+    fn base_class_always_present() {
+        assert_eq!(
+            session_row_item_class(false, false, false, false),
+            "nav-session-item"
+        );
+    }
+
+    #[test]
+    fn flags_append_suffixes_in_fixed_order() {
+        assert_eq!(
+            session_row_item_class(true, true, true, true),
+            "nav-session-item is-active is-pinned is-starred is-streaming"
+        );
+    }
+
+    #[test]
+    fn streaming_alone_appends_indicator() {
+        assert_eq!(
+            session_row_item_class(false, false, false, true),
+            "nav-session-item is-streaming"
+        );
+    }
 }
