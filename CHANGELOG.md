@@ -11,6 +11,7 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Added
 
+- Connect page: remember recent server URLs (up to 8) under `localStorage` key `crabmate.connect.recentUrls` with a clickable 「最近连接」 list and a clear action; a previously stored single server URL is seeded into the list on first load so switching servers no longer loses the prior address
 - Shared pure client logic crate `crabmate-client-api` **S3–S4**: workspace set JSON parse, thin session list rows + resume `conversation_id`, and `POST /chat/stream` core body builder (`message` / `client_sse_protocol` / ids); wired into `tui-core` and `frontend`
 - Shared pure client logic crate `crabmate-client-api` **S2**: `ApprovalDecision` / `CommandApprovalRequest` / `allowlistKey` parse / `ApprovalPostBody`; wired into `crabmate-tui-core` and `frontend` SSE approval path
 - Shared pure client logic crate `crabmate-client-api` (S1): strict API base URL normalize/join, Web API auth header shapes, and secret-slot / keyring account name constants; wired into `crabmate-tui-core`, `crabmate-connect`, and `frontend` (`docs/design/client_shared_logic.md`)
@@ -43,6 +44,7 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Changed
 
+- Chat **`run_command` tool card**: show `command` + `args` on the compact row (parse SSE `arguments` / `arguments_preview` when the summary is only `tool: run_command`); running detail includes `$ …`.
 - Android: start with the in-app bottom status bar hidden even when another client saved it as visible; users can still enable it from the side toolbar
 - Android: Keystore Web API Bearer bridge (`getSecureBearer` / `setSecureBearer`) allowed on packaged App Origin (connect page **and** business UI) so UI can hydrate/clear without plaintext `localStorage`
 - Settings: merge primary + executor into one **Models** section; configure endpoints only via the **+** model dialog (inline primary form removed); old `#/settings/executor-llm` opens Models
