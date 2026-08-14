@@ -31,7 +31,7 @@ CM_MOBILE_SKIP_FRONTEND ?= 0
 	desktop desktop-release desktop-dev desktop-bin-release \
 	apk mobile-apk \
 	tui tui-release \
-	test test-frontend test-tauri test-tui check fmt clippy ktlint-android \
+	test test-frontend test-tauri test-tui check dependency-security fmt clippy ktlint-android \
 	victauri-e2e victauri-e2e-real e2e-playwright \
 	clean clean-desktop clean-mobile clean-connect clean-client-api clean-tui clean-frontend
 
@@ -55,6 +55,7 @@ help:
 	@echo ""
 	@echo "质检："
 	@echo "  make check               bash scripts/check.sh（含 frontend wasm check、ktlint）"
+	@echo "  make dependency-security cargo audit + cargo deny（各 workspace；不进 pre-commit）"
 	@echo "  make frontend-check      cargo check --target wasm32-unknown-unknown"
 	@echo "  make frontend-clippy     frontend clippy -D warnings"
 	@echo "  make test-frontend       frontend：wasm check + lib 单测（与 Tauri 分开）"
@@ -188,6 +189,9 @@ test: test-frontend test-tauri test-tui
 
 check:
 	bash "$(ROOT)/scripts/check.sh"
+
+dependency-security:
+	bash "$(ROOT)/scripts/dependency-security.sh"
 
 ktlint-android:
 	bash "$(ROOT)/scripts/ktlint-android.sh"

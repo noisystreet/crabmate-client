@@ -2,6 +2,20 @@
 
 [English](./README.md) | **简体中文**
 
+<p align="center">
+  <a href="https://github.com/noisystreet/crabmate-client/actions/workflows/ci.yml"><img src="https://github.com/noisystreet/crabmate-client/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI" /></a>
+  <a href="https://github.com/noisystreet/crabmate-client/actions/workflows/code-complexity.yml"><img src="https://github.com/noisystreet/crabmate-client/actions/workflows/code-complexity.yml/badge.svg?branch=main" alt="code-complexity" /></a>
+  <a href="https://github.com/noisystreet/crabmate-client/actions/workflows/dependency-security.yml"><img src="https://github.com/noisystreet/crabmate-client/actions/workflows/dependency-security.yml/badge.svg?branch=main" alt="Dependency security" /></a>
+  <a href="https://github.com/noisystreet/crabmate-client/actions/workflows/e2e-playwright.yml"><img src="https://github.com/noisystreet/crabmate-client/actions/workflows/e2e-playwright.yml/badge.svg?branch=main" alt="E2E Playwright" /></a>
+  <br />
+  <a href="https://github.com/noisystreet/crabmate-client/stargazers"><img src="https://img.shields.io/github/stars/noisystreet/crabmate-client?style=flat&logo=github" alt="GitHub stars" /></a>
+  <a href="https://github.com/noisystreet/crabmate-client/commits/main"><img src="https://img.shields.io/github/last-commit/noisystreet/crabmate-client?logo=github" alt="Last commit" /></a>
+  <a href="https://github.com/noisystreet/crabmate-client/issues"><img src="https://img.shields.io/github/issues/noisystreet/crabmate-client" alt="Issues" /></a>
+  <a href="https://github.com/noisystreet/crabmate-client/pulls"><img src="https://img.shields.io/github/issues-pr/noisystreet/crabmate-client" alt="Pull requests" /></a>
+  <a href="https://github.com/noisystreet/crabmate-client/blob/main/LICENSE"><img src="https://img.shields.io/github/license/noisystreet/crabmate-client" alt="License" /></a>
+  <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/rust-1.85%2B-orange?logo=rust" alt="Rust 1.85+" /></a>
+</p>
+
 官方 **Client** 仓（路径 A）：Desktop Linux / Android Tauri 壳 + 共用 `crabmate-connect` + 业务 UI `frontend/`。  
 连接兼容的 **`crabmate serve`**（本机或远程），**不** spawn / 内嵌 Agent 进程。
 
@@ -22,7 +36,7 @@
 ├── frontend/                  # 业务 UI（Leptos CSR + WASM；契约 git rev/tag）
 ├── e2e/                       # Playwright（浏览器 UI；mock SSE CI）
 ├── scripts/                   # check / connect 同步 / Victauri / Playwright
-└── .github/workflows/         # CI（check + frontend 单测 + Playwright + desktop deb + Victauri nightly）
+└── .github/workflows/         # CI（check + frontend 单测 + Playwright + desktop deb + Victauri nightly + dependency-security）
 ```
 
 ## 与主仓关系
@@ -41,6 +55,7 @@ make help
 make frontend           # trunk build → frontend/dist
 make frontend-check     # wasm32 cargo check
 make check              # 等同 scripts/check.sh（含 frontend）
+make dependency-security # cargo audit + cargo deny（各 workspace；不进 pre-commit）
 make test
 make desktop-dev        # 需已装 cargo-tauri ^2；另开终端跑 serve
 make desktop-release    # 产出 crabmate-desktop_*.deb（自动 trunk --release UI，勿用 debug dist）
@@ -91,7 +106,7 @@ crabmate-tui --api-base http://127.0.0.1:8080 chat "你好"
 | [docs/design/contract_pin.md](./docs/design/contract_pin.md) | 契约 git tag / rev 钉法 |
 | [frontend/README.md](./frontend/README.md) | UI 构建（trunk） |
 
-提交前：`pre-commit run --all-files` 或 `make check`。CI：`.github/workflows/ci.yml`（含 **frontend wasm**、**frontend/TUI 单测** 与 **desktop release .deb**）；Victauri 壳 E2E：nightly 工作流或 `./scripts/victauri-e2e.sh`。
+提交前：`pre-commit run --all-files` 或 `make check`。CI：`.github/workflows/ci.yml`（含 **frontend wasm**、**frontend/TUI 单测** 与 **desktop release .deb**）；依赖审计：`.github/workflows/dependency-security.yml`（`make dependency-security`）；Victauri 壳 E2E：nightly 工作流或 `./scripts/victauri-e2e.sh`。
 
 ## 快速开始（Desktop）
 

@@ -1,0 +1,44 @@
+# 依赖安全：已知漏洞（RustSec）与许可证/来源策略（cargo-deny）。
+# 本地：bash scripts/dependency-security.sh
+# 不进 pre-commit（会拉 advisory DB）。
+name: Dependency security
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  schedule:
+    - cron: "0 6 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            desktop-tauri/src-tauri
+            mobile-tauri/src-tauri
+            crates/crabmate-client-api
+            crates/crabmate-connect
+            crates/crabmate-tui-core
+            crates/crabmate-tui
+            frontend
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit@0.22,cargo-deny@0.19
+
+      - name: cargo audit + cargo deny (all workspaces)
+        run: bash scripts/dependency-security.sh

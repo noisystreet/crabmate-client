@@ -2,6 +2,20 @@
 
 **English** | [简体中文](./README.zh-CN.md)
 
+<p align="center">
+  <a href="https://github.com/noisystreet/crabmate-client/actions/workflows/ci.yml"><img src="https://github.com/noisystreet/crabmate-client/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI" /></a>
+  <a href="https://github.com/noisystreet/crabmate-client/actions/workflows/code-complexity.yml"><img src="https://github.com/noisystreet/crabmate-client/actions/workflows/code-complexity.yml/badge.svg?branch=main" alt="code-complexity" /></a>
+  <a href="https://github.com/noisystreet/crabmate-client/actions/workflows/dependency-security.yml"><img src="https://github.com/noisystreet/crabmate-client/actions/workflows/dependency-security.yml/badge.svg?branch=main" alt="Dependency security" /></a>
+  <a href="https://github.com/noisystreet/crabmate-client/actions/workflows/e2e-playwright.yml"><img src="https://github.com/noisystreet/crabmate-client/actions/workflows/e2e-playwright.yml/badge.svg?branch=main" alt="E2E Playwright" /></a>
+  <br />
+  <a href="https://github.com/noisystreet/crabmate-client/stargazers"><img src="https://img.shields.io/github/stars/noisystreet/crabmate-client?style=flat&logo=github" alt="GitHub stars" /></a>
+  <a href="https://github.com/noisystreet/crabmate-client/commits/main"><img src="https://img.shields.io/github/last-commit/noisystreet/crabmate-client?logo=github" alt="Last commit" /></a>
+  <a href="https://github.com/noisystreet/crabmate-client/issues"><img src="https://img.shields.io/github/issues/noisystreet/crabmate-client" alt="Issues" /></a>
+  <a href="https://github.com/noisystreet/crabmate-client/pulls"><img src="https://img.shields.io/github/issues-pr/noisystreet/crabmate-client" alt="Pull requests" /></a>
+  <a href="https://github.com/noisystreet/crabmate-client/blob/main/LICENSE"><img src="https://img.shields.io/github/license/noisystreet/crabmate-client" alt="License" /></a>
+  <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/rust-1.85%2B-orange?logo=rust" alt="Rust 1.85+" /></a>
+</p>
+
 Official **Client** repository (path A): Desktop Linux / Android Tauri shells, shared `crabmate-connect`, and business UI in `frontend/`.  
 Connects to a compatible **`crabmate serve`** (local or remote). Does **not** spawn or embed the Agent process.
 
@@ -22,7 +36,7 @@ Connects to a compatible **`crabmate serve`** (local or remote). Does **not** sp
 ├── frontend/                  # Business UI (Leptos CSR + WASM; contracts via git rev/tag)
 ├── e2e/                       # Playwright (browser UI; mock SSE in CI)
 ├── scripts/                   # check / connect sync / Victauri / Playwright
-└── .github/workflows/         # CI (check + frontend tests + Playwright + desktop deb + Victauri nightly)
+└── .github/workflows/         # CI (check + frontend tests + Playwright + desktop deb + Victauri nightly + dependency-security)
 ```
 
 ## Relationship to the Server repo
@@ -41,6 +55,7 @@ make help
 make frontend           # trunk build → frontend/dist
 make frontend-check     # wasm32 cargo check
 make check              # same as scripts/check.sh (includes frontend)
+make dependency-security # cargo audit + cargo deny (all workspaces; not in pre-commit)
 make test
 make desktop-dev        # needs cargo-tauri ^2; run serve in another terminal
 make desktop-release    # crabmate-desktop_*.deb (auto trunk --release UI; do not ship debug dist)
@@ -92,7 +107,7 @@ Design: [docs/design/remote_cli_tui.md](./docs/design/remote_cli_tui.md).
 | [docs/design/contract_pin.md](./docs/design/contract_pin.md) | Contract git tag / rev pinning |
 | [frontend/README.md](./frontend/README.md) | UI build (trunk) |
 
-Before commit: `pre-commit run --all-files` or `make check`. CI: `.github/workflows/ci.yml` (includes **frontend wasm**, **frontend/TUI unit tests**, and **desktop release .deb**); Victauri shell E2E: nightly workflow or `./scripts/victauri-e2e.sh`.
+Before commit: `pre-commit run --all-files` or `make check`. CI: `.github/workflows/ci.yml` (includes **frontend wasm**, **frontend/TUI unit tests**, and **desktop release .deb**); dependency audit: `.github/workflows/dependency-security.yml` (`make dependency-security`); Victauri shell E2E: nightly workflow or `./scripts/victauri-e2e.sh`.
 
 ## Quick start (Desktop)
 
