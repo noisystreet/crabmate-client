@@ -148,6 +148,7 @@ pub fn sidebar_nav_view(signals: SidebarNavSignals) -> impl IntoView {
             <div
                 class="nav-rail-backdrop"
                 aria-hidden="true"
+                data-testid="nav-rail-backdrop"
                 on:click=move |_| mobile_nav_open.set(false)
             ></div>
         </Show>

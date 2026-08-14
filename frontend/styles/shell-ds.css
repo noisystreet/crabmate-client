@@ -1051,7 +1051,11 @@
   .nav-rail-backdrop {
     display: block;
     position: fixed;
-    inset: 0;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    /* 仅覆盖抽屉右侧遮罩区，避免点击命中被 z-index:100 的 aside 挡住（与 .side-column-backdrop 同理） */
+    left: min(var(--nav-rail-w), 88vw);
     z-index: 99;
     background: rgba(0, 0, 0, 0.48);
     backdrop-filter: blur(2px);

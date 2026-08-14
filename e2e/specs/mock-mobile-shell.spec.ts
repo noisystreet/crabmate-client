@@ -44,7 +44,9 @@ test.describe("移动端壳层", () => {
 
     await openNavDrawerBySwipe(page);
 
-    await page.locator(".nav-rail-backdrop").click();
+    const backdrop = page.getByTestId("nav-rail-backdrop");
+    await expect(backdrop).toBeVisible();
+    await backdrop.click();
     await expect(navRail).not.toHaveClass(/nav-rail-mobile-open/);
   });
 
