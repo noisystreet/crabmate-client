@@ -56,6 +56,7 @@ bash scripts/check.sh
 | `E2E Playwright` | 本仓 `make frontend` + checkout Server 编 `serve`；mock SSE 基线 |
 | `Victauri E2E Nightly` | `make frontend` + Server `serve` + `./scripts/victauri-e2e.sh all`（xvfb；不含 `real_llm`）；失败上传桌面/serve 日志 |
 | `code-complexity` | 独立门禁：`lizard-rust` / `fn-param` / `fn-nloc` |
+| `Dependency security` | 各 Cargo workspace：`cargo audit` + `cargo deny check licenses bans sources`（`deny.toml`）；**不进** pre-commit |
 
 Victauri 全量 E2E **不进** PR 默认 CI（`e2e_test!` 未设 `VICTAURI_E2E` 时会 0 秒假通过）；见 nightly 或本地 `victauri-e2e.sh`。
 
@@ -77,6 +78,17 @@ bash scripts/fn-nloc-ratchet.sh
 ```
 
 Lizard 个数棘轮：重构后若某模块 `CCN>10` 函数变少，pre-commit / `lizard-rust` 会失败并要求把 `scripts/lizard_module_ccn_caps.toml` 中该模块上限调低到实测值（推荐 `bash scripts/lizard-rust.sh --write-caps`）。不得长期保留偏高的 cap。
+
+## 依赖安全与许可证
+
+工作流：[`.github/workflows/dependency-security.yml`](../.github/workflows/dependency-security.yml)。需安装 **`cargo-audit`**、**`cargo-deny`**：
+
+```bash
+make dependency-security
+# 或：bash scripts/dependency-security.sh
+```
+
+策略见仓库根 **`deny.toml`**。对全部 7 个 Cargo workspace 各跑一遍（各有独立 `Cargo.lock`）。**不进** pre-commit，避免每次提交都拉 RustSec advisory DB。CI 不含 `advisories` deny 检查（与 `cargo audit` 重复，且会把 unmaintained 与漏洞混为一谈）。
 
 ## Playwright（浏览器 Web UI E2E）
 

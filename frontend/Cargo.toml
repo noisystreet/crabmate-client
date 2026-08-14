@@ -2,6 +2,7 @@
 name = "crabmate-web"
 version = "0.1.0"
 edition = "2024"
+license = "Apache-2.0"
 description = "CrabMate Web UI (Leptos CSR + WASM)"
 # 契约钉版本：Server 产品 tag v*（见 docs/design/contract_pin.md）
 

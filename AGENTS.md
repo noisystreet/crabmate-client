@@ -55,12 +55,14 @@
 make help
 make frontend                # trunk → frontend/dist
 make check                   # or pre-commit run --all-files (includes frontend wasm + ktlint)
+make dependency-security     # cargo audit + cargo deny (all workspaces; not in pre-commit)
 make ktlint-android          # hand-maintained Android Kotlin only (`edu/crabmate`)
 make test
 make desktop-dev
 make desktop-release         # .deb (auto trunk --release UI)
 bash scripts/check-no-main-path.sh
 bash scripts/lizard-rust.sh              # CCN>10 count must equal module cap; if lower, tighten cap / --write-caps
+bash scripts/dependency-security.sh      # cargo audit + cargo deny; not in pre-commit / check.sh
 bash scripts/ktlint-android.sh           # needs java; `--format` to fix
 ./scripts/victauri-e2e.sh all   # needs a usable crabmate serve binary; not in default CI
 ./scripts/e2e-playwright.sh     # Playwright; needs frontend/dist + serve
@@ -85,6 +87,7 @@ When updating docs:
 | Manual shell smoke steps | `docs/design/shell_smoke_runbook.md` |
 | Personal cloud (shell → remote API-only) | `docs/design/personal_cloud_runbook.md`; VPS/Caddy authority is Server |
 | Victauri / pre-commit / CI commands | `docs/TESTING.md` |
+| Dependency audit (`cargo audit` / `cargo deny`) | `deny.toml`; CI `.github/workflows/dependency-security.yml`; not in pre-commit |
 | User/maintainer release notes | `CHANGELOG.md` (English; Keep a Changelog; move Unreleased into a version section on release) |
 | Contract pin tag / rev | `docs/design/contract_pin.md`; policy authority is Server |
 | SSE / CORS / Bearer / API base / contract semver | **Server** `docs/`; this repo only links |
