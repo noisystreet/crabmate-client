@@ -4,8 +4,8 @@
 
 ## P0 · 明确缺陷
 
-- [ ] `theme=system` 在 Linux 非 GNOME（KDE / XFCE / 无 gsettings）下固定浅色：`desktop-tauri/src-tauri/src/os_theme.rs` 仅探测 GNOME 的 gsettings，无 portal / KDE 回退，双通道（窗口 `.theme()` + 前端 `TAURI_OS_DARK_HINT`）一起落到 light。
-- [ ] IDE 语法高亮在 material / high-contrast（均为深色）下仍用浅色 token：`frontend/styles/ide-highlight.css`、`ide-codemirror.css` 仅覆盖 `[data-theme="dark"]`，且 `--ide-hl-*` 变量未定义、靠浅色字面量兜底。
+- [x] `theme=system` 在 Linux 非 GNOME（KDE / XFCE / 无 gsettings）下固定浅色：`desktop-tauri/src-tauri/src/os_theme.rs` 仅探测 GNOME 的 gsettings，无 portal / KDE 回退，双通道（窗口 `.theme()` + 前端 `TAURI_OS_DARK_HINT`）一起落到 light。
+- [x] IDE 语法高亮在 material / high-contrast（均为深色）下仍用浅色 token：`frontend/styles/ide-highlight.css`、`ide-codemirror.css` 仅覆盖 `[data-theme="dark"]`，且 `--ide-hl-*` 变量未定义、靠浅色字面量兜底。
 
 ## P1 · 可访问性关键缺口
 

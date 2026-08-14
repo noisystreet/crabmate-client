@@ -70,4 +70,13 @@
     0 -10px 38px color-mix(in srgb, var(--bg) 52%, transparent);
   --composer-ws-ref-bg: color-mix(in srgb, var(--accent) 12%, var(--surface));
   --composer-ws-ref-box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 24%, var(--border));
+
+  --ide-hl-keyword: #c4b5fd;
+  --ide-hl-string: #5eead4;
+  --ide-hl-comment: var(--muted);
+  --ide-hl-number: #fdba74;
+  --ide-hl-type: #93c5fd;
+  --ide-hl-attribute: #f0abfc;
+  --ide-hl-macro: #fb923c;
+  --ide-hl-key: #7dd3fc;
 }

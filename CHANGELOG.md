@@ -33,6 +33,8 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Fixed
 
+- Linux Desktop: `theme=system` follows xdg-desktop-portal, then GNOME gsettings, `GTK_THEME` / gtk settings.ini, then KDE `kdeglobals` (watches portal + gsettings). Non-GNOME sessions no longer always resolve to light
+- IDE: define `--ide-hl-*` on dark / light / material / high-contrast so syntax colors follow the preset (high-contrast stays grayscale; material uses dark pastels)
 - Session hydration: when `GET /conversation/messages` returns non-empty `messages` but the client parses zero rows, show a status-bar parse error with retry instead of silently keeping stale local timeline
 - Mobile: left session-drawer backdrop only covers the dimmed strip to the right of the rail (same as the right side-column backdrop), so dismiss clicks are not intercepted by the open list
 - GitHub Device Flow (Android): opening the GitHub App for authorization backgrounds the WebView and can abort `GET /github/oauth/device/status` with `TypeError: Failed to fetch`; polling retries that class of network errors and transient HTTP 5xx/429/408 until the device code expires, instead of aborting the flow
