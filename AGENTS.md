@@ -80,6 +80,7 @@ When updating docs:
 | Agent / contributor constraints | **`AGENTS.md`** (English only) |
 | UI build / trunk | `frontend/README.md` |
 | Shell architecture / lifecycle / connect model | `docs/design/tauri_gui_mvp_design.md` |
+| Android stream FGS / approval notifications | `docs/adr/0002-android-approval-notification-foreground-keepalive.md` (Accepted) |
 | Shared pure logic extract (WASM / connect / tui) | `docs/design/client_shared_logic.md` |
 | Manual shell smoke steps | `docs/design/shell_smoke_runbook.md` |
 | Personal cloud (shell → remote API-only) | `docs/design/personal_cloud_runbook.md`; VPS/Caddy authority is Server |

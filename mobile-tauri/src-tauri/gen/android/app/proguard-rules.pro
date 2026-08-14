@@ -14,6 +14,8 @@
 # Wry 通过虚方法回调壳 Activity；勿混淆 override
 -keep class edu.crabmate.MainActivity { *; }
 -keep class edu.crabmate.SecureBearerStore { *; }
+-keep class edu.crabmate.StreamKeepAliveService { *; }
+-keep class edu.crabmate.StreamKeepAliveText { *; }
 -keepclassmembers class edu.crabmate.WryActivity {
    public <init>(...);
    void setWebView(...);

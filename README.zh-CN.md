@@ -131,6 +131,10 @@ make apk
 
 Android 壳默认隐藏应用内底部状态栏；仍可从侧栏工具条重新开启。
 
+`/chat/stream` 进行中时，壳会拉起前台服务（通知「对话进行中」），降低按 Home / 锁屏后 WebView 被系统冻结或杀进程的概率。服务端下发命令审批时，同一通知升级为「等待命令审批」（命令预览会截断）。点按通知回到应用内现有审批弹窗。Android 13+ 首次发送会请求通知权限；拒绝后保活/审批提醒不可用（状态栏提示）。部分厂商省电策略仍可能杀进程。
+
+详见 [ADR-0002](docs/adr/0002-android-approval-notification-foreground-keepalive.md)。
+
 ## 开发约定
 
 - `crabmate-connect`：本仓 `path = "../../crates/crabmate-connect"`

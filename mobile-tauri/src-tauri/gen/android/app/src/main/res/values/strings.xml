@@ -7,4 +7,14 @@
     <string name="exit_confirm_cancel">取消</string>
     <string name="exit_confirm_ok">退出</string>
     <string name="exit_confirm_to_connect">返回连接页</string>
+    <string name="stream_keepalive_channel_stream">后台对话</string>
+    <string name="stream_keepalive_channel_approval">命令审批</string>
+    <string name="stream_keepalive_stream_title">对话进行中</string>
+    <string name="stream_keepalive_stream_title_en">Chat in progress</string>
+    <string name="stream_keepalive_stream_body">CrabMate 正在保持与服务器的连接</string>
+    <string name="stream_keepalive_stream_body_en">CrabMate is keeping the server connection alive</string>
+    <string name="stream_keepalive_approval_title">等待命令审批</string>
+    <string name="stream_keepalive_approval_title_en">Command approval needed</string>
+    <string name="stream_keepalive_approval_body">打开应用以允许或拒绝</string>
+    <string name="stream_keepalive_approval_body_en">Open the app to allow or deny</string>
 </resources>

@@ -128,14 +128,17 @@ pub(super) fn make_attach_chat_stream(h: ComposerStreamHandles) -> AttachChatStr
                     .apply_release_turn_and_stream_run(gen_snapshot);
                 if let Err(e) = stream_result {
                     if shell_abort::user_cancelled_flag(&shell_for_stream_err) {
+                        crate::mobile_stream_keepalive::on_stream_attach_finished();
                         return;
                     }
                     if e == "stream stopped" {
+                        crate::mobile_stream_keepalive::on_stream_attach_finished();
                         return;
                     }
                     shell_for_stream_err.stream.status_err.set(Some(e.clone()));
                     on_error_spawn(e);
                 }
+                crate::mobile_stream_keepalive::on_stream_attach_finished();
             });
         }
     })

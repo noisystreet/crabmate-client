@@ -8,6 +8,7 @@ import android.view.autofill.AutofillManager
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import androidx.activity.OnBackPressedCallback
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
@@ -19,6 +20,23 @@ class MainActivity : TauriActivity() {
   private var connectHomeUrl: String = DEFAULT_CONNECT_HOME
   private var appWebView: WebView? = null
   private var exitConfirmDialog: AlertDialog? = null
+
+  /** 流式 attach 期间为 true：`onPause` 后仍 `resumeTimers`，避免 SSE 被冻。 */
+  private var streamKeepAliveWanted: Boolean = false
+  private var lastKeepAliveLocale: String = ""
+
+  private val notifyPermissionLauncher =
+    registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+      notifyPermissionDenied = !granted
+      if (streamKeepAliveWanted && granted) {
+        StreamKeepAliveService.start(this, lastKeepAliveLocale)
+      }
+      notifyWebKeepAlivePermission(granted)
+    }
+
+  /** 用户已明确拒绝通知权限（弹出系统框期间不算）。 */
+  @Volatile
+  private var notifyPermissionDenied: Boolean = false
 
   /**
    * 仅在 UI 线程采样的当前 WebView URL。
@@ -58,6 +76,13 @@ class MainActivity : TauriActivity() {
     installBackPressedHandler()
     trimHistoryIfNotConnectPage()
     appWebView?.post { refreshCachedWebViewUrl() }
+    resumeWebViewTimersIfKeepAlive()
+  }
+
+  override fun onPause() {
+    super.onPause()
+    // Tauri 基类 pause 可能 pauseTimers；保活期间立刻恢复，让 fetch/SSE 回调继续。
+    resumeWebViewTimersIfKeepAlive()
   }
 
   /** 必须在 UI 线程调用。 */
@@ -147,8 +172,11 @@ class MainActivity : TauriActivity() {
             R.string.exit_confirm_message
           },
         ).setNegativeButton(R.string.exit_confirm_cancel, null)
-        .setPositiveButton(R.string.exit_confirm_ok) { _, _ -> finishAffinity() }
-        .setOnDismissListener { exitConfirmDialog = null }
+        .setPositiveButton(R.string.exit_confirm_ok) { _, _ ->
+          streamKeepAliveWanted = false
+          StreamKeepAliveService.stop(this)
+          finishAffinity()
+        }.setOnDismissListener { exitConfirmDialog = null }
     if (offerReturnToConnect) {
       builder.setNeutralButton(R.string.exit_confirm_to_connect) { _, _ -> loadConnectPage() }
     }
@@ -231,6 +259,8 @@ class MainActivity : TauriActivity() {
     } catch (_: Exception) {
       // ignore
     }
+    streamKeepAliveWanted = false
+    StreamKeepAliveService.stop(this)
     // 勿用当前业务 UI URL 覆盖 connectHome（Phase 2 同为 tauri.localhost）。
     val base =
       when {
@@ -292,6 +322,32 @@ class MainActivity : TauriActivity() {
     val css = (bottomPx / density).roundToInt()
     return (css + 8).coerceAtLeast(24)
   }
+
+  private fun resumeWebViewTimersIfKeepAlive() {
+    if (!streamKeepAliveWanted && !StreamKeepAliveService.active) {
+      return
+    }
+    streamKeepAliveWanted = streamKeepAliveWanted || StreamKeepAliveService.active
+    appWebView?.resumeTimers()
+  }
+
+  private fun notifyWebKeepAlivePermission(granted: Boolean) {
+    val js =
+      "try{var f=globalThis.__cmKeepAlivePermission;if(typeof f==='function')f($granted);}catch(e){}"
+    appWebView?.evaluateJavascript(js, null)
+  }
+
+  private fun maybeRequestNotificationPermission() {
+    if (Build.VERSION.SDK_INT < 33) {
+      return
+    }
+    if (StreamKeepAliveService.hasNotifyPermission(this)) {
+      return
+    }
+    notifyPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+  }
+
+  private fun allowKeepAliveBridge(): Boolean = allowSecureBearerBridge()
 
   /**
    * 包内 App Origin（连接页或业务 UI）可读写加密连接 Bearer；远程 serve 页拒绝。
@@ -423,6 +479,77 @@ class MainActivity : TauriActivity() {
     fun notifyLoginFailure() {
       runOnUiThread {
         autofillManager()?.cancel()
+      }
+    }
+
+    /**
+     * 流式 attach 开始：拉起 dataSync FGS。
+     * 返回 `ok` / `prompting`（系统权限框弹出中）/ `need_permission`（已拒绝）/ 空串（Origin 拒绝）。
+     * 须在 Activity 仍前台时调用（ADR-0002）。
+     */
+    @JavascriptInterface
+    fun startStreamKeepAlive(locale: String): String {
+      if (!allowKeepAliveBridge()) {
+        return ""
+      }
+      val loc = locale.trim()
+      runOnUiThread {
+        streamKeepAliveWanted = true
+        lastKeepAliveLocale = loc
+        maybeRequestNotificationPermission()
+        StreamKeepAliveService.start(this@MainActivity, loc)
+        resumeWebViewTimersIfKeepAlive()
+      }
+      return if (StreamKeepAliveService.hasNotifyPermission(applicationContext)) {
+        "ok"
+      } else if (notifyPermissionDenied) {
+        "need_permission"
+      } else {
+        "prompting"
+      }
+    }
+
+    @JavascriptInterface
+    fun stopStreamKeepAlive() {
+      if (!allowKeepAliveBridge()) {
+        return
+      }
+      runOnUiThread {
+        streamKeepAliveWanted = false
+        StreamKeepAliveService.stop(this@MainActivity)
+      }
+    }
+
+    /**
+     * 升级为审批 heads-up。不把 session id 写入 Intent；点按只打开 Activity。
+     */
+    @JavascriptInterface
+    fun notifyApproval(
+      command: String,
+      args: String,
+      locale: String,
+    ) {
+      if (!allowKeepAliveBridge()) {
+        return
+      }
+      val cmd = command.take(256)
+      val a = args.take(256)
+      val loc = locale.trim()
+      runOnUiThread {
+        streamKeepAliveWanted = true
+        lastKeepAliveLocale = loc.ifBlank { lastKeepAliveLocale }
+        resumeWebViewTimersIfKeepAlive()
+        StreamKeepAliveService.notifyApproval(this@MainActivity, cmd, a, lastKeepAliveLocale)
+      }
+    }
+
+    @JavascriptInterface
+    fun clearApprovalNotification() {
+      if (!allowKeepAliveBridge()) {
+        return
+      }
+      runOnUiThread {
+        StreamKeepAliveService.clearApproval(this@MainActivity)
       }
     }
 

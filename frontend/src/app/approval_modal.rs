@@ -31,6 +31,7 @@ pub fn ApprovalModal(signals: ApprovalModalSignals) -> impl IntoView {
                     let _ = submit_chat_approval(&sid, "deny", loc).await;
                 });
                 pending_approval.set(None);
+                crate::mobile_stream_keepalive::on_approval_resolved();
             }
         }
     };
@@ -46,6 +47,7 @@ pub fn ApprovalModal(signals: ApprovalModalSignals) -> impl IntoView {
                     let _ = submit_chat_approval(&sid, "allow_once", loc).await;
                 });
                 pending_approval.set(None);
+                crate::mobile_stream_keepalive::on_approval_resolved();
             }
         }
     };
@@ -61,6 +63,7 @@ pub fn ApprovalModal(signals: ApprovalModalSignals) -> impl IntoView {
                     let _ = submit_chat_approval(&sid, "allow_always", loc).await;
                 });
                 pending_approval.set(None);
+                crate::mobile_stream_keepalive::on_approval_resolved();
             }
         }
     };

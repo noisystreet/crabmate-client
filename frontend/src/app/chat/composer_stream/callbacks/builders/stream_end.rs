@@ -33,6 +33,9 @@ pub(in super::super) fn chat_stream_on_done_builder(
                 &stream_ctx.shell.stream,
                 StreamControlEvent::StreamUserAbort,
             );
+            if !stream_ctx.is_stale() {
+                crate::mobile_stream_keepalive::on_stream_attach_finished();
+            }
             return;
         }
         if stream_ctx.is_stale() {
@@ -93,6 +96,7 @@ pub(in super::super) fn chat_stream_on_done_builder(
             .scratch
             .apply_stream_control_event(&stream_ctx.shell.stream, StreamControlEvent::StreamDone);
         bump_session_hydrate_nonce(stream_ctx.chat);
+        crate::mobile_stream_keepalive::on_stream_attach_finished();
     })
 }
 
@@ -106,6 +110,9 @@ pub(in super::super) fn chat_stream_on_error_builder(
                 &stream_ctx.shell.stream,
                 StreamControlEvent::StreamUserAbort,
             );
+            if !stream_ctx.is_stale() {
+                crate::mobile_stream_keepalive::on_stream_attach_finished();
+            }
             return;
         }
         if stream_ctx.is_stale() {
@@ -139,6 +146,7 @@ pub(in super::super) fn chat_stream_on_error_builder(
             .scratch
             .apply_stream_control_event(&stream_ctx.shell.stream, StreamControlEvent::StreamError);
         bump_session_hydrate_nonce(stream_ctx.chat);
+        crate::mobile_stream_keepalive::on_stream_attach_finished();
     })
 }
 
