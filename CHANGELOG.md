@@ -33,6 +33,7 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Fixed
 
+- Mobile: left session-drawer backdrop only covers the dimmed strip to the right of the rail (same as the right side-column backdrop), so dismiss clicks are not intercepted by the open list
 - GitHub Device Flow (Android): opening the GitHub App for authorization backgrounds the WebView and can abort `GET /github/oauth/device/status` with `TypeError: Failed to fetch`; polling retries that class of network errors and transient HTTP 5xx/429/408 until the device code expires, instead of aborting the flow
 - Frontend: same-workspace partition GET no longer overwrites in-memory sessions when the load is empty/stale vs the active id or a stream is busy (protects E2E `seedSession` and mid-turn commentary); init still records a partition when workspace fetch fails; skipped loads do not clear the session PUT gate or mark the bucket as matched; E2E `seedSession` seeds via API request then a single navigation (avoids SPA debounce clobber)
 - GitHub Device Flow (Desktop/Android): protected API / chat stream awaits Keystore-or-keyring hydrate of the `github` slot before attaching `X-CrabMate-GitHub-Token` (fixes cold-start race); Android secure-slot load/write retries align with WebView URL-cache sampling so restarts keep Device Flow tokens
