@@ -117,6 +117,7 @@ fn finish_stream_attach_prepare(
     });
 
     shell.stream.begin_stream_run(attach_generation);
+    crate::mobile_stream_keepalive::on_stream_attach_started(locale_sig, shell.stream.status_err);
 
     StreamAttachPrepared {
         stream_ctx,

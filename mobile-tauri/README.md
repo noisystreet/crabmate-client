@@ -27,6 +27,8 @@
 
 应用内底部状态栏在 Android 壳每次进入时默认隐藏（不会沿用其它端“显示”偏好）；需要时仍可从侧栏工具条开启。
 
+`/chat/stream` 进行中会拉起 `dataSync` 前台服务（通知渠道 `crabmate.stream`），保活期间 `onPause` 后仍 `WebView.resumeTimers()`。SSE `command_approval` 将同一通知升级为审批提醒（命令+args 截断至 80 字）；点按只打开 `MainActivity`，决策仍走包内审批弹窗的 `POST /chat/approval`。Android 13+ 首次 attach 请求 `POST_NOTIFICATIONS`；拒绝则状态栏提示。断开、停止、流结束、回连接页或退出 Activity 时停止该服务。见 [ADR-0002](../docs/adr/0002-android-approval-notification-foreground-keepalive.md)。
+
 ### Release 签名（可选）
 
 本地创建（已 gitignore，勿提交）：

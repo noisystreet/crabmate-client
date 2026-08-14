@@ -175,3 +175,13 @@ pub fn status_ready(l: Locale) -> &'static str {
         Locale::En => "Ready",
     }
 }
+
+/// Android 13+ 未授予通知权限：前台保活通知 / 审批 heads-up 不可见。
+pub fn android_stream_keepalive_notify_needed(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "未授予通知权限：后台保活与命令审批提醒不可用。可在系统设置中允许通知。",
+        Locale::En => {
+            "Notifications are off: background keep-alive and approval alerts are unavailable. Enable notifications in system settings."
+        }
+    }
+}

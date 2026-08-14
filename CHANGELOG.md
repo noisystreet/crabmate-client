@@ -11,12 +11,14 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Added
 
+- Android: in-flight `/chat/stream` starts a `dataSync` foreground service (channel `crabmate.stream`) so the WebView is less likely to freeze after Home/lock; `command_approval` upgrades that notification (truncated command). Tap opens the existing approval modal (`POST /chat/approval` still in-UI). Android 13+ requests `POST_NOTIFICATIONS` on first send; denial is shown on the status bar. Disconnect / Stop / stream end / return-to-connect stop the service ([ADR-0002](docs/adr/0002-android-approval-notification-foreground-keepalive.md))
 - Connect page: remember recent server URLs (up to 8) under `localStorage` key `crabmate.connect.recentUrls` with a clickable 「最近连接」 list and a clear action; a previously stored single server URL is seeded into the list on first load so switching servers no longer loses the prior address
 - Shared pure client logic crate `crabmate-client-api` **S3–S4**: workspace set JSON parse, thin session list rows + resume `conversation_id`, and `POST /chat/stream` core body builder (`message` / `client_sse_protocol` / ids); wired into `tui-core` and `frontend`
 - Shared pure client logic crate `crabmate-client-api` **S2**: `ApprovalDecision` / `CommandApprovalRequest` / `allowlistKey` parse / `ApprovalPostBody`; wired into `crabmate-tui-core` and `frontend` SSE approval path
 - Shared pure client logic crate `crabmate-client-api` (S1): strict API base URL normalize/join, Web API auth header shapes, and secret-slot / keyring account name constants; wired into `crabmate-tui-core`, `crabmate-connect`, and `frontend` (`docs/design/client_shared_logic.md`)
 - CI: run `make test-frontend` and `make test-tui` in default `check` job; desktop unit tests use `cargo test --bins` (excludes Victauri integration binaries that fake-pass without `VICTAURI_E2E`)
 - CI: nightly Victauri shell E2E workflow (`victauri-e2e-nightly.yml`; mock suites via `victauri-e2e.sh`; failure log artifacts)
+- Design: Android approval notification + foreground keep-alive ([ADR-0002](docs/adr/0002-android-approval-notification-foreground-keepalive.md); Accepted — `dataSync` FGS at `/chat/stream` attach, heads-up on `command_approval`, tap opens existing modal; no FCM / native SSE)
 - Design: multi-client shared pure-logic extract plan (`docs/design/client_shared_logic.md`)
 - Remote terminal **`crabmate-tui`** (P3): `connect` / `chat` / `repl` with TTY or `--yes` approval; control slashes `/help`, `/workspace` (`/cd`), `/conv` (show/list/new/use) against serve HTTP APIs (design in `docs/design/remote_cli_tui.md`)
 - Root `CHANGELOG.md` (Keep a Changelog; English)

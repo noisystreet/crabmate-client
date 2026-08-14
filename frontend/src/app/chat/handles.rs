@@ -30,6 +30,7 @@ impl ComposerStreamApprovalSignals {
     pub(crate) fn clear_pending_user_interactions(self) {
         self.pending_approval.set(None);
         self.pending_clarification.set(None);
+        crate::mobile_stream_keepalive::on_approval_resolved();
     }
 
     /// 收到 SSE 审批请求：与澄清表单**互斥**（后到的覆盖先到的语义由调用方保证顺序）。
@@ -44,6 +45,7 @@ impl ComposerStreamApprovalSignals {
     pub(crate) fn replace_with_pending_clarification(self, form: PendingClarificationForm) {
         self.pending_approval.set(None);
         self.pending_clarification.set(Some(form));
+        crate::mobile_stream_keepalive::on_approval_resolved();
     }
 }
 

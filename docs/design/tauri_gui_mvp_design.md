@@ -48,7 +48,7 @@ MVP 历史验收（部分已废弃）：
 | `desktop-tauri/scripts/prepare-sidecar.sh` | 同步 connect（及可选遗留 splash）；默认本仓 `frontend/dist`；`CM_PREPARE_SKIP_FRONTEND=1` 可跳过 |
 | `desktop-tauri/scripts/before-desktop-build.sh` | release 构建：`trunk --release` + prepare；拒绝 debug 大 WASM |
 | `frontend/` | 业务 UI（Leptos CSR）；契约 git `rev`/`tag` |
-| `mobile-tauri/` | Android 薄壳 |
+| `mobile-tauri/` | Android 薄壳（流式前台保活 / 审批通知见 [ADR-0002](../adr/0002-android-approval-notification-foreground-keepalive.md)） |
 | `crates/crabmate-connect/` | 探测 / Bearer / 钥匙串 |
 
 ## 4. 开发启动
@@ -80,3 +80,4 @@ cargo install tauri-cli --version "^2"
 | 误以为壳会起后端 | README / 连接页文案；E2E 须自备 `serve` |
 | monorepo E2E 假设 | `scripts/victauri-e2e.sh` 经 `CM_DESKTOP_BACKEND_BIN` / PATH / 同级主仓解析 `crabmate` |
 | 无托盘环境窗口不可恢复 | 托盘失败时保留普通最小化 |
+| Android 后台杀进程 / 丢工具审批 | [ADR-0002](../adr/0002-android-approval-notification-foreground-keepalive.md)：attach 时 `dataSync` FGS + 审批通知；`visibilitychange` 续传仍为退路 |

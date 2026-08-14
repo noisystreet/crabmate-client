@@ -45,6 +45,7 @@ pub(crate) fn hydrate_after_background(chat: ChatSessionSignals, shell: &Compose
         shell.stream.apply_release_turn_and_stream_run(attach_gen);
     }
     bump_session_hydrate_nonce(chat);
+    crate::mobile_stream_keepalive::on_stream_attach_finished();
 }
 
 pub(crate) fn spawn_foreground_stream_resume(args: ForegroundStreamResumeArgs) {
@@ -125,5 +126,6 @@ pub(crate) fn spawn_foreground_stream_resume(args: ForegroundStreamResumeArgs) {
                 bump_session_hydrate_nonce(chat);
             }
         }
+        crate::mobile_stream_keepalive::on_stream_attach_finished();
     });
 }

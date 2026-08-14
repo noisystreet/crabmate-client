@@ -132,6 +132,10 @@ make apk
 
 The Android shell starts with the in-app bottom status bar hidden; it can still be enabled from the side toolbar.
 
+During an in-flight `/chat/stream`, the shell starts a foreground service (notification **Chat in progress**) so the WebView is less likely to be killed after Home or lock. When the server asks for command approval, that notification upgrades to **Command approval needed** (truncated command text). Tap it to return to the in-app approval dialog. Android 13+ will ask for notification permission on the first send; if you deny it, keep-alive alerts are unavailable (status-bar hint). OEM battery savers may still kill the process.
+
+See [ADR-0002](docs/adr/0002-android-approval-notification-foreground-keepalive.md).
+
 ## Conventions
 
 - `crabmate-connect`: in-repo `path = "../../crates/crabmate-connect"`

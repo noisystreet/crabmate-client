@@ -97,6 +97,7 @@ pub(crate) fn apply_user_abort_of_inflight_stream(
         );
         shell.stream.apply_release_turn_and_stream_run(attach_gen);
         clear_abort_slot(shell);
+        crate::mobile_stream_keepalive::on_stream_attach_finished();
         return true;
     }
     if !session_has_loading_tool_message(chat) {

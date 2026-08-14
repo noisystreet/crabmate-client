@@ -47,9 +47,14 @@ pub(crate) fn build_chat_stream_callbacks(
             }
             stream_ctx.shell.approval.replace_with_pending_approval((
                 stream_ctx.approval_session_store_id.clone(),
-                req.command,
-                req.args,
+                req.command.clone(),
+                req.args.clone(),
             ));
+            crate::mobile_stream_keepalive::on_command_approval(
+                &req.command,
+                &req.args,
+                stream_ctx.locale.get_untracked(),
+            );
         })
     };
 
