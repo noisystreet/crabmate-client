@@ -131,7 +131,7 @@ fn quit_desktop_app(app: tauri::AppHandle) {
     request_desktop_quit(&app);
 }
 
-/// 与建窗逻辑一致：Linux 读 gsettings；其它平台 `None`（前端用 matchMedia）。
+/// 与建窗逻辑一致：Linux 读 portal / gsettings / GTK / KDE；其它平台 `None`（前端用 matchMedia）。
 #[tauri::command]
 fn os_prefers_dark_theme() -> Option<bool> {
     os_theme::os_prefers_dark_theme()

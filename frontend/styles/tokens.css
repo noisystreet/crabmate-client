@@ -123,5 +123,15 @@
   /* 终端内文字选中：须不透明高对比；勿沿用全局 ::selection（浅色主题多为半透明底 + 深色字，叠在深色终端上会「选中即消失」） */
   --terminal-panel-selection-bg: color-mix(in srgb, var(--accent) 52%, #d5dde8);
   --terminal-panel-selection-fg: #070b10;
+
+  /* IDE 语法高亮（深色默认；light / material / high-contrast 在 themes/*.css 覆盖） */
+  --ide-hl-keyword: #c4b5fd;
+  --ide-hl-string: #5eead4;
+  --ide-hl-comment: var(--muted);
+  --ide-hl-number: #fdba74;
+  --ide-hl-type: #93c5fd;
+  --ide-hl-attribute: #f0abfc;
+  --ide-hl-macro: #fb923c;
+  --ide-hl-key: #7dd3fc;
 }
 

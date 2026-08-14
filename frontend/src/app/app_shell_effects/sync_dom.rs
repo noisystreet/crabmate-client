@@ -77,7 +77,7 @@ fn attach_prefers_color_scheme_listener(
         if theme.get_untracked() != THEME_SYSTEM {
             return;
         }
-        // 桌面：OS 变化后同步刷新 gsettings 提示（matchMedia 可能仍滞后）。
+        // 桌面：OS 变化后同步刷新 portal/gsettings 提示（matchMedia 可能仍滞后）。
         if tauri_shell_available() {
             spawn_local(async move {
                 let _ = tauri_fetch_os_prefers_dark_hint().await;
@@ -99,7 +99,7 @@ pub fn wire_sync_theme_to_storage_and_dom(sig: WireSyncThemeSignals) {
     Effect::new(move |_| {
         shell_prefs_storage::persist_theme_to_storage_and_dom(&theme.get());
     });
-    // Linux 桌面：WebKit matchMedia 常不可靠，用 Tauri gsettings 提示覆盖后再刷一次 DOM。
+    // Linux 桌面：WebKit matchMedia 常不可靠，用 Tauri OS 明暗提示（portal / gsettings 等）覆盖后再刷一次 DOM。
     if tauri_shell_available() {
         spawn_local(async move {
             if tauri_fetch_os_prefers_dark_hint().await.is_some() {

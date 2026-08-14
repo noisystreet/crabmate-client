@@ -71,4 +71,13 @@
   --terminal-panel-bg: #0c0e12;
   --terminal-panel-border: #30363d;
   --terminal-panel-fg: #c8d1dc;
+
+  --ide-hl-keyword: #7c3aed;
+  --ide-hl-string: #0d9488;
+  --ide-hl-comment: var(--muted);
+  --ide-hl-number: #b45309;
+  --ide-hl-type: #2563eb;
+  --ide-hl-attribute: #c026d3;
+  --ide-hl-macro: #ea580c;
+  --ide-hl-key: #0369a1;
 }
