@@ -101,6 +101,7 @@ impl AppSignals {
             tool_output_chunks: RwSignal::new(HashMap::new()),
             conversation_prompt_tokens: RwSignal::new(None),
             history_loading_older: RwSignal::new(false),
+            conversation_hydration_err: RwSignal::new(None),
         };
 
         Self {

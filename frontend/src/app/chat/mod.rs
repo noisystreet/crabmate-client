@@ -42,3 +42,4 @@ pub(crate) use handles::ChatComposerWires;
 
 pub(crate) use column::chat_column_view;
 pub(crate) use find_bar::ChatFindBar;
+pub(crate) use session_hydrate::bump_session_hydrate_nonce;

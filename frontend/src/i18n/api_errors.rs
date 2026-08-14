@@ -100,6 +100,49 @@ pub fn api_err_conversation_messages_fetch_failed(l: Locale, detail: &str) -> St
     }
 }
 
+/// 服务端 `messages` 非空但客户端解析为 0 条：保留本地时间线并提示 ParseFailed。
+pub fn api_err_conversation_messages_parse_failed(
+    l: Locale,
+    raw_count: usize,
+    revision: u64,
+    conversation_id: &str,
+    sample_roles: &[String],
+) -> String {
+    let roles = if sample_roles.is_empty() {
+        match l {
+            Locale::ZhHans => "无".to_string(),
+            Locale::En => "none".to_string(),
+        }
+    } else {
+        sample_roles.join(", ")
+    };
+    let cid = conversation_id.trim();
+    match l {
+        Locale::ZhHans => {
+            if cid.is_empty() {
+                format!(
+                    "会话消息解析失败（服务端 {raw_count} 条，客户端 0 条），仍显示本地缓存；revision={revision}；样本角色={roles}"
+                )
+            } else {
+                format!(
+                    "会话消息解析失败（服务端 {raw_count} 条，客户端 0 条），仍显示本地缓存；revision={revision}；conversation_id={cid}；样本角色={roles}"
+                )
+            }
+        }
+        Locale::En => {
+            if cid.is_empty() {
+                format!(
+                    "Conversation message parse failed ({raw_count} server rows, 0 client rows); still showing local cache; revision={revision}; sample roles={roles}"
+                )
+            } else {
+                format!(
+                    "Conversation message parse failed ({raw_count} server rows, 0 client rows); still showing local cache; revision={revision}; conversation_id={cid}; sample roles={roles}"
+                )
+            }
+        }
+    }
+}
+
 /// 服务端无此会话（过期 / mock SSE 假 id 等）。自动水合应软忽略并保留本地缓存，勿钉死状态栏。
 #[must_use]
 pub fn conversation_messages_err_is_not_found(detail: &str) -> bool {

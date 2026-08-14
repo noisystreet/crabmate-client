@@ -155,6 +155,7 @@ pub struct StatusBarFooterSignals {
     pub user_prefs_load_err: RwSignal<Option<String>>,
     pub user_prefs_save_err: RwSignal<Option<String>>,
     pub settings_page: RwSignal<bool>,
+    pub conversation_hydration_err: RwSignal<Option<String>>,
 }
 
 type SideResizeHandlesCell = Rc<
@@ -332,6 +333,7 @@ impl AppShellCtx {
             user_prefs_load_err: self.signals.workspace.user_prefs_load_err,
             user_prefs_save_err: self.signals.workspace.user_prefs_save_err,
             settings_page: self.signals.modal.settings_page,
+            conversation_hydration_err: self.signals.chat.conversation_hydration_err,
         }
     }
 

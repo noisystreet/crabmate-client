@@ -275,6 +275,69 @@ pub fn stored_messages_from_conversation_api(msgs: &[Value]) -> Vec<StoredMessag
     stored_messages_from_conversation_api_with_base(msgs, js_sys::Date::now() as i64)
 }
 
+/// 水合诊断：服务端 `messages` 非空但客户端解析结果为空（ParseFailed）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HydrationParseDiagnostics {
+    pub raw_count: usize,
+    pub revision: u64,
+    pub conversation_id: String,
+    pub sample_roles: Vec<String>,
+}
+
+impl HydrationParseDiagnostics {
+    pub fn from_response(resp: &ConversationMessagesResponse) -> Self {
+        Self {
+            raw_count: resp.messages.len(),
+            revision: resp.revision,
+            conversation_id: resp.conversation_id.clone(),
+            sample_roles: sample_roles_from_raw_messages(&resp.messages),
+        }
+    }
+}
+
+/// 从 raw 消息提取至多 3 个 `role` 样本（不含正文，供状态栏诊断）。
+pub fn sample_roles_from_raw_messages(messages: &[Value]) -> Vec<String> {
+    let mut out = Vec::new();
+    for raw in messages {
+        if out.len() >= 3 {
+            break;
+        }
+        let role = raw
+            .get("role")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+        if let Some(r) = role {
+            if !out.iter().any(|existing| existing == r) {
+                out.push(r.to_string());
+            }
+        }
+    }
+    out
+}
+
+/// 解析水合消息；`ParseFailed` 时返回诊断（不覆盖本地时间线）。
+pub fn stored_messages_for_hydration_or_parse_failed(
+    resp: &ConversationMessagesResponse,
+) -> Result<Vec<StoredMessage>, HydrationParseDiagnostics> {
+    stored_messages_for_hydration_or_parse_failed_with_base(
+        resp,
+        js_sys::Date::now() as i64,
+    )
+}
+
+pub fn stored_messages_for_hydration_or_parse_failed_with_base(
+    resp: &ConversationMessagesResponse,
+    base_ms: i64,
+) -> Result<Vec<StoredMessage>, HydrationParseDiagnostics> {
+    let msgs = stored_messages_from_conversation_api_with_base(&resp.messages, base_ms);
+    if msgs.is_empty() && !resp.messages.is_empty() {
+        Err(HydrationParseDiagnostics::from_response(resp))
+    } else {
+        Ok(msgs)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -410,5 +473,26 @@ mod tests {
         assert!(out[0].is_tool);
         assert!(out[0].text.contains("list_tree"));
         assert_eq!(out[0].tool_call_id.as_deref(), Some("tc_orphan"));
+    }
+
+    #[test]
+    fn hydration_parse_failed_when_raw_non_empty_but_unmapped() {
+        let resp = ConversationMessagesResponse {
+            conversation_id: "c_parse_fail".into(),
+            revision: 3,
+            active_agent_role: None,
+            active_session_mode: None,
+            tiktoken_prompt_tokens: None,
+            messages: vec![json!({"bad": true}), json!({"role": ""})],
+            total_count: 2,
+            window_start_index: 0,
+            has_older: false,
+        };
+        let err =
+            stored_messages_for_hydration_or_parse_failed_with_base(&resp, 0).unwrap_err();
+        assert_eq!(err.raw_count, 2);
+        assert_eq!(err.revision, 3);
+        assert_eq!(err.conversation_id, "c_parse_fail");
+        assert!(err.sample_roles.is_empty());
     }
 }
