@@ -6,7 +6,7 @@ import { seedSession } from "../fixtures/helpers";
 
 const LOCAL_USER = "e2e-local-user-before-hydrate";
 
-async function installUnparseableHistoryRoute(
+async function installUnparsableHistoryRoute(
   page: Page,
   conversationId: string,
   revision: number,
@@ -33,7 +33,7 @@ test("hydration parse failure shows error, keeps local messages, retry refetches
   const sid = `s_e2e_hydrate_parse_fail_${Date.now()}`;
   const conversationId = `conv-hydrate-parse-fail-${Date.now()}`;
   await seedSession(page, sid);
-  await installUnparseableHistoryRoute(page, conversationId, 2);
+  await installUnparsableHistoryRoute(page, conversationId, 2);
 
   await page.evaluate(
     async ({ sessionId, cid, localText }) => {

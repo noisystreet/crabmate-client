@@ -320,17 +320,7 @@ pub fn sample_roles_from_raw_messages(messages: &[Value]) -> Vec<String> {
 pub fn stored_messages_for_hydration_or_parse_failed(
     resp: &ConversationMessagesResponse,
 ) -> Result<Vec<StoredMessage>, HydrationParseDiagnostics> {
-    stored_messages_for_hydration_or_parse_failed_with_base(
-        resp,
-        js_sys::Date::now() as i64,
-    )
-}
-
-pub fn stored_messages_for_hydration_or_parse_failed_with_base(
-    resp: &ConversationMessagesResponse,
-    base_ms: i64,
-) -> Result<Vec<StoredMessage>, HydrationParseDiagnostics> {
-    let msgs = stored_messages_from_conversation_api_with_base(&resp.messages, base_ms);
+    let msgs = stored_messages_from_conversation_api(&resp.messages);
     if msgs.is_empty() && !resp.messages.is_empty() {
         Err(HydrationParseDiagnostics::from_response(resp))
     } else {
@@ -477,22 +467,23 @@ mod tests {
 
     #[test]
     fn hydration_parse_failed_when_raw_non_empty_but_unmapped() {
+        let raw = vec![json!({"bad": true}), json!({"role": ""})];
+        assert!(stored_messages_from_conversation_api_with_base(&raw, 0).is_empty());
         let resp = ConversationMessagesResponse {
             conversation_id: "c_parse_fail".into(),
             revision: 3,
             active_agent_role: None,
             active_session_mode: None,
             tiktoken_prompt_tokens: None,
-            messages: vec![json!({"bad": true}), json!({"role": ""})],
+            messages: raw,
             total_count: 2,
             window_start_index: 0,
             has_older: false,
         };
-        let err =
-            stored_messages_for_hydration_or_parse_failed_with_base(&resp, 0).unwrap_err();
-        assert_eq!(err.raw_count, 2);
-        assert_eq!(err.revision, 3);
-        assert_eq!(err.conversation_id, "c_parse_fail");
-        assert!(err.sample_roles.is_empty());
+        let diag = HydrationParseDiagnostics::from_response(&resp);
+        assert_eq!(diag.raw_count, 2);
+        assert_eq!(diag.revision, 3);
+        assert_eq!(diag.conversation_id, "c_parse_fail");
+        assert!(diag.sample_roles.is_empty());
     }
 }
