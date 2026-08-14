@@ -412,7 +412,10 @@ fn set_conversation_hydration_failure(
     chat.conversation_hydration_err.set(Some(msg));
 }
 
-fn clear_conversation_hydration_failure(chat: ChatSessionSignals, status_err: RwSignal<Option<String>>) {
+fn clear_conversation_hydration_failure(
+    chat: ChatSessionSignals,
+    status_err: RwSignal<Option<String>>,
+) {
     status_err.set(None);
     chat.conversation_hydration_err.set(None);
 }
@@ -644,7 +647,9 @@ pub(crate) fn try_load_older_messages_for_active_session(
                     snap.locale,
                     &e,
                 )));
-                chat2.conversation_hydration_err.set(status_err.get_untracked());
+                chat2
+                    .conversation_hydration_err
+                    .set(status_err.get_untracked());
                 chat2.history_loading_older.set(false);
                 return;
             }
