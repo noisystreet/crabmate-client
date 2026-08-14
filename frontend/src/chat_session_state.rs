@@ -238,6 +238,8 @@ pub struct ChatSessionSignals {
     pub conversation_prompt_tokens: RwSignal<Option<ConversationPromptTokenHydrate>>,
     /// 正在拉取更早一页历史（`GET /conversation/messages?before_index=`）。
     pub history_loading_older: RwSignal<bool>,
+    /// 会话水合拉取/解析失败（与流式 `status_err` 分离，供底栏重试面板）。
+    pub conversation_hydration_err: RwSignal<Option<String>>,
 }
 
 impl ChatSessionSignals {

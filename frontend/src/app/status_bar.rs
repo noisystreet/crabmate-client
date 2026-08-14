@@ -14,12 +14,43 @@ use crate::i18n::{self, Locale};
 use crate::user_prefs_sync_state::UserPrefsSyncPhase;
 
 use super::app_shell_ctx::StatusBarFooterSignals;
+use super::chat::bump_session_hydrate_nonce;
 use super::settings_page::{SettingsSection, navigate_to_settings};
 use super::shell_runtime_context::expect_chat_shell_ctx;
 use super::status_agent_role_menu::{AgentRoleMenuProps, StatusAgentRoleMenu};
 use super::status_fetch_state::status_bar_should_show_skeleton;
 use super::status_session_mode_seg::{SessionModeSegProps, StatusSessionModeSeg};
 use super::status_tasks_state::StatusTasksSignals;
+
+#[component]
+fn ConversationHydrationErrorPanel(
+    hydration_err: String,
+    locale: RwSignal<Locale>,
+    on_retry: Arc<dyn Fn() + Send + Sync>,
+) -> impl IntoView {
+    let hydration_err_for_title = hydration_err.clone();
+    let hydration_err_for_body = hydration_err.clone();
+    view! {
+        <div
+            class="status-fetch-error"
+            role="status"
+            aria-live="polite"
+            data-testid="hydration-parse-error"
+        >
+            <span class="status-fetch-error-text" title=hydration_err_for_title.clone()>
+                {hydration_err_for_body}
+            </span>
+            <button
+                type="button"
+                class="btn btn-secondary btn-sm"
+                data-testid="hydration-retry"
+                on:click=move |_| on_retry()
+            >
+                {move || i18n::status_retry(locale.get())}
+            </button>
+        </div>
+    }
+}
 
 #[component]
 fn UserPrefsLoadErrorPanel(
@@ -387,6 +418,8 @@ fn StatusBarChipsRow(
     user_prefs_load_err: RwSignal<Option<String>>,
     user_prefs_save_err: RwSignal<Option<String>>,
     user_prefs_reload_nonce: RwSignal<u64>,
+    conversation_hydration_err: RwSignal<Option<String>>,
+    hydration_retry: Arc<dyn Fn() + Send + Sync>,
 ) -> impl IntoView {
     let StatusBarChipsSignals {
         st,
@@ -407,6 +440,16 @@ fn StatusBarChipsRow(
             class:status-chips--mode-menu-open=move || mode_menu_open.get()
         >
             {move || {
+                if let Some(err) = conversation_hydration_err.get() {
+                    return view! {
+                        <ConversationHydrationErrorPanel
+                            hydration_err=err
+                            locale=locale
+                            on_retry=hydration_retry.clone()
+                        />
+                    }
+                    .into_any();
+                }
                 if user_prefs_sync_phase.get() == UserPrefsSyncPhase::LoadFailed {
                     if let Some(err) = user_prefs_load_err.get() {
                         return view! {
@@ -519,9 +562,16 @@ fn StatusBarFooterBody(signals: StatusBarFooterSignals) -> impl IntoView {
         user_prefs_load_err,
         user_prefs_save_err,
         settings_page,
+        conversation_hydration_err,
         ..
     } = signals;
     let locale = expect_chat_shell_ctx().locale;
+    let chat = expect_chat_shell_ctx().chat;
+    let hydration_retry: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
+        status_err.set(None);
+        chat.conversation_hydration_err.set(None);
+        bump_session_hydrate_nonce(chat);
+    });
     let chips = StatusBarChipsSignals {
         st,
         client_llm_storage_tick,
@@ -538,6 +588,7 @@ fn StatusBarFooterBody(signals: StatusBarFooterSignals) -> impl IntoView {
             class=move || {
             if st.status_fetch_err.get().is_some()
                 || user_prefs_sync_phase.get() == UserPrefsSyncPhase::LoadFailed
+                || conversation_hydration_err.get().is_some()
             {
                 "status-bar status-bar-fetch-error"
             } else {
@@ -551,6 +602,8 @@ fn StatusBarFooterBody(signals: StatusBarFooterSignals) -> impl IntoView {
                 user_prefs_load_err=user_prefs_load_err
                 user_prefs_save_err=user_prefs_save_err
                 user_prefs_reload_nonce=user_prefs_reload_nonce
+                conversation_hydration_err=conversation_hydration_err
+                hydration_retry=hydration_retry.clone()
             />
             <StatusBarRunIndicator
                 st=st

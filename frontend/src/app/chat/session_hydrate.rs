@@ -24,7 +24,7 @@ use crate::app::status_tasks_state::StatusTasksSignals;
 use crate::app_prefs::status_bar_selected_agent_role_from_persisted;
 use crate::chat_session_state::ChatSessionSignals;
 use crate::conversation_hydrate::{
-    ConversationMessagesResponse, stored_messages_from_conversation_api,
+    ConversationMessagesResponse, stored_messages_for_hydration_or_parse_failed,
 };
 use crate::i18n::{self, Locale};
 use crate::message_loading::messages_have_any_loading;
@@ -394,12 +394,27 @@ fn try_hydration_wire_snapshot(
 /// 水合写回时所需的角色/模式信号与错误条（缩短 [`conversation_hydration_cycle::run`] 形参）。
 #[derive(Clone)]
 pub(crate) struct ConversationHydrationApplyCtx {
+    chat: ChatSessionSignals,
     selected_agent_role: RwSignal<Option<String>>,
     agent_role_user_override: RwSignal<bool>,
     selected_session_mode: RwSignal<String>,
     session_mode_user_override: RwSignal<bool>,
     default_agent_role_id: Option<String>,
     status_err: RwSignal<Option<String>>,
+}
+
+fn set_conversation_hydration_failure(
+    chat: ChatSessionSignals,
+    status_err: RwSignal<Option<String>>,
+    msg: String,
+) {
+    status_err.set(Some(msg.clone()));
+    chat.conversation_hydration_err.set(Some(msg));
+}
+
+fn clear_conversation_hydration_failure(chat: ChatSessionSignals, status_err: RwSignal<Option<String>>) {
+    status_err.set(None);
+    chat.conversation_hydration_err.set(None);
 }
 
 /// 将 [`run_conversation_hydration_cycle`] 主体收拢为可单测对照的 FSM 式模块。
@@ -409,14 +424,15 @@ pub(crate) mod conversation_hydration_cycle {
     use crate::api::fetch_conversation_messages;
     use crate::chat_session_state::{ChatSessionSignals, ConversationPromptTokenHydrate};
     use crate::conversation_hydrate::{
-        ConversationMessagesResponse, stored_messages_from_conversation_api,
+        ConversationMessagesResponse, stored_messages_for_hydration_or_parse_failed,
     };
     use crate::i18n::Locale;
 
     use super::{
         ConversationHydrationApplyCtx, HydrationWireSnapshot, MergeHydrationIntoActiveSessionArgs,
-        apply_saved_revision_if_same_conversation, merge_hydration_into_active_session,
-        restore_reasoning_after_hydration,
+        apply_saved_revision_if_same_conversation, clear_conversation_hydration_failure,
+        merge_hydration_into_active_session, restore_reasoning_after_hydration,
+        set_conversation_hydration_failure,
     };
 
     /// 自动水合拉取结果：成功清错误条；`CONVERSATION_NOT_FOUND` 软忽略；其余钉状态栏。
@@ -427,16 +443,17 @@ pub(crate) mod conversation_hydration_cycle {
     ) -> Option<ConversationMessagesResponse> {
         match result {
             Ok(r) => {
-                // 成功拉取后清掉此前水合/拉历史失败条，避免「假失败」残留。
-                apply.status_err.set(None);
+                clear_conversation_hydration_failure(apply.chat, apply.status_err);
                 Some(r)
             }
             Err(e) => {
                 // 过期或 mock 流假 id：保留本地时间线，勿钉状态栏（否则挡「就绪」）。
                 if !crate::i18n::conversation_messages_err_is_not_found(&e) {
-                    apply.status_err.set(Some(
+                    set_conversation_hydration_failure(
+                        apply.chat,
+                        apply.status_err,
                         crate::i18n::api_err_conversation_messages_fetch_failed(locale, &e),
-                    ));
+                    );
                 }
                 None
             }
@@ -474,10 +491,23 @@ pub(crate) mod conversation_hydration_cycle {
             return;
         }
 
-        let msgs = stored_messages_from_conversation_api(&resp.messages);
-        if msgs.is_empty() && !resp.messages.is_empty() {
-            return;
-        }
+        let msgs = match stored_messages_for_hydration_or_parse_failed(&resp) {
+            Ok(m) => m,
+            Err(diag) => {
+                set_conversation_hydration_failure(
+                    apply.chat,
+                    apply.status_err,
+                    crate::i18n::api_err_conversation_messages_parse_failed(
+                        locale,
+                        diag.raw_count,
+                        diag.revision,
+                        diag.conversation_id.as_str(),
+                        &diag.sample_roles,
+                    ),
+                );
+                return;
+            }
+        };
 
         let mut applied_hydration = false;
         chat.update_sessions_hydration(|list| {
@@ -606,7 +636,7 @@ pub(crate) fn try_load_older_messages_for_active_session(
         .await
         {
             Ok(r) => {
-                status_err.set(None);
+                clear_conversation_hydration_failure(chat2, status_err);
                 r
             }
             Err(e) => {
@@ -614,6 +644,7 @@ pub(crate) fn try_load_older_messages_for_active_session(
                     snap.locale,
                     &e,
                 )));
+                chat2.conversation_hydration_err.set(status_err.get_untracked());
                 chat2.history_loading_older.set(false);
                 return;
             }
@@ -622,7 +653,22 @@ pub(crate) fn try_load_older_messages_for_active_session(
             chat2.history_loading_older.set(false);
             return;
         }
-        let msgs = stored_messages_from_conversation_api(&resp.messages);
+        let msgs = match stored_messages_for_hydration_or_parse_failed(&resp) {
+            Ok(m) => m,
+            Err(diag) => {
+                let msg = i18n::api_err_conversation_messages_parse_failed(
+                    snap.locale,
+                    diag.raw_count,
+                    diag.revision,
+                    diag.conversation_id.as_str(),
+                    &diag.sample_roles,
+                );
+                status_err.set(Some(msg.clone()));
+                chat2.conversation_hydration_err.set(Some(msg));
+                chat2.history_loading_older.set(false);
+                return;
+            }
+        };
         chat2.update_sessions_hydration(|list| {
             let Some(s) = list.iter_mut().find(|x| x.id == snap.aid) else {
                 return;
@@ -706,6 +752,7 @@ pub fn wire_session_hydration(args: WireSessionHydrationArgs) {
                 snap,
                 chat,
                 ConversationHydrationApplyCtx {
+                    chat,
                     selected_agent_role,
                     agent_role_user_override,
                     selected_session_mode,
