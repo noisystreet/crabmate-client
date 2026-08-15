@@ -31,6 +31,7 @@ Connects to a compatible **`crabmate serve`** (local or remote). Does **not** sp
 ├── crates/crabmate-connect/   # Connect-page logic (path dep in this repo; do not path back to Server)
 ├── crates/crabmate-tui-core/  # Remote terminal HTTP/SSE core
 ├── crates/crabmate-tui/       # Binary crabmate-tui (P3: chat / repl + slashes)
+├── crates/crabmate-web-host/  # Binary crabmate-web (loopback static UI host)
 ├── desktop-tauri/             # Desktop Linux (Tauri 2)
 ├── mobile-tauri/              # Android (Tauri 2)
 ├── frontend/                  # Business UI (Leptos CSR + WASM; contracts via git rev/tag)
@@ -60,6 +61,7 @@ make test
 make desktop-dev        # needs cargo-tauri ^2; run serve in another terminal
 make desktop-release    # crabmate-desktop_*.deb (auto trunk --release UI; do not ship debug dist)
 make desktop-bin-release
+make web-release        # crabmate-web_*.deb (trunk --release + loopback static host; system browser)
 make apk                # Android; does not build frontend by default
 make tui                # build crabmate-tui (remote terminal)
 make clean
@@ -107,7 +109,7 @@ Design: [docs/design/remote_cli_tui.md](./docs/design/remote_cli_tui.md).
 | [docs/design/contract_pin.md](./docs/design/contract_pin.md) | Contract git tag / rev pinning |
 | [frontend/README.md](./frontend/README.md) | UI build (trunk) |
 
-Before commit: `pre-commit run --all-files` or `make check`. CI: `.github/workflows/ci.yml` (includes **frontend wasm**, **frontend/TUI unit tests**, and **desktop release .deb**); dependency audit: `.github/workflows/dependency-security.yml` (`make dependency-security`); Victauri shell E2E: nightly workflow or `./scripts/victauri-e2e.sh`.
+Before commit: `pre-commit run --all-files` or `make check`. CI: `.github/workflows/ci.yml` (includes **frontend wasm**, **frontend/TUI unit tests**, **desktop release .deb**, and **web release .deb**); dependency audit: `.github/workflows/dependency-security.yml` (`make dependency-security`); Victauri shell E2E: nightly workflow or `./scripts/victauri-e2e.sh`.
 
 ## Quick start (Desktop)
 
@@ -123,6 +125,26 @@ make desktop-dev
 ```
 
 On the connect page, enter the server URL and optional Web API Bearer (**not** the model `API_KEY`). The shell loads **local** `index.html` and points API calls at `serve`.
+
+## Quick start (web UI in the system browser)
+
+Not Tauri: a tiny loopback static server opens the default browser. Still **not** `crabmate serve` — start API separately and allow the page Origin on CORS.
+
+```bash
+# Terminal A — API
+crabmate serve --host 127.0.0.1 --port 8080
+# allow the web-host Origin (Server ≥ v0.2.0 already allows Tauri Origins only):
+#   CM_WEB_CORS_ALLOWED_ORIGINS=http://127.0.0.1:4173 crabmate serve …
+
+# Terminal B — this repo
+make web-release
+sudo dpkg -i crates/crabmate-web-host/target/debian/crabmate-web_*.deb
+crabmate-web --api-base http://127.0.0.1:8080
+# or without installing:
+#   cargo run --release --manifest-path crates/crabmate-web-host/Cargo.toml -- --root frontend/dist --api-base http://127.0.0.1:8080
+```
+
+Default listen is `127.0.0.1:4173`. `--no-open` skips `xdg-open`. Bearer: `--bearer` / `CM_WEB_API_BEARER_TOKEN` (plain browser stores it in `localStorage`). The `.deb` adds a **CrabMate Web** menu entry using the same icon as Desktop. A second launch on the same port reopens the browser instead of failing.
 
 ## Personal cloud (remote API-only)
 

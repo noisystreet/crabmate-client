@@ -24,6 +24,7 @@ CARGO_DIRS=(
   crates/crabmate-connect
   crates/crabmate-tui-core
   crates/crabmate-tui
+  crates/crabmate-web-host
   frontend
 )
 

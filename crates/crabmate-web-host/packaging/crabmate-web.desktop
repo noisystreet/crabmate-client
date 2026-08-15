@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=CrabMate Web
+Name[zh_CN]=CrabMate Web
+Comment=Open CrabMate UI in the system browser (loopback static host)
+Comment[zh_CN]=在系统浏览器中打开 CrabMate 界面（本机回环静态托管）
+Exec=crabmate-web
+Icon=crabmate-web
+Terminal=false
+Categories=Network;Utility;
+StartupWMClass=crabmate-web

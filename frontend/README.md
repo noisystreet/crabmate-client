@@ -2,8 +2,9 @@
 
 官方 Client 仓业务 UI（由 Server 主仓迁入，见 [`SOURCE.md`](./SOURCE.md)）。产物 **`frontend/dist`** 可供：
 
-- 外部 `crabmate serve --with-web` 经 **`CM_WEB_STATIC_DIR`** 托管（Server 默认纯 API，须显式开启）
+- 本仓 `make web-release` / `crabmate-web` 在回环上托管，并用系统浏览器打开（不是 Tauri，也不是 `crabmate serve`）
 - 本仓桌面壳 `prepare-sidecar` 同步进 `desktop-tauri/dist`
+- 外部 `crabmate serve --with-web` 经 **`CM_WEB_STATIC_DIR`** 托管（Server 默认纯 API，须显式开启；仅 Playwright / 同 Origin 调试）
 
 契约 crates 经 **git `rev`/`tag`** 钉主仓，禁止 `path` 回本地 `crabmate_agent`（见 [`../docs/design/contract_pin.md`](../docs/design/contract_pin.md)）。
 

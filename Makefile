@@ -1,6 +1,6 @@
-# crabmate-client 构建入口：桌面 / Android 壳、业务 UI、质检与清理。
+# crabmate-client 构建入口：桌面 / Android 壳、纯 Web Client、业务 UI、质检与清理。
 # 用法：make help
-# 壳不 spawn serve；业务 UI 包内加载（prepare-sidecar / prepare-mobile）；API 指向远程 serve。
+# 壳不 spawn serve；业务 UI 包内加载（prepare-sidecar / prepare-mobile / crabmate-web）；API 指向远程 serve。
 
 ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 DESKTOP_ROOT := $(ROOT)/desktop-tauri
@@ -11,6 +11,7 @@ CONNECT_DIR := $(ROOT)/crates/crabmate-connect
 CLIENT_API_DIR := $(ROOT)/crates/crabmate-client-api
 TUI_CORE_DIR := $(ROOT)/crates/crabmate-tui-core
 TUI_DIR := $(ROOT)/crates/crabmate-tui
+WEB_HOST_DIR := $(ROOT)/crates/crabmate-web-host
 FRONTEND_DIR := $(ROOT)/frontend
 CARGO ?= cargo
 
@@ -29,11 +30,12 @@ CM_MOBILE_SKIP_FRONTEND ?= 0
 	prepare-sidecar prepare-mobile sync-connect \
 	frontend frontend-release frontend-check frontend-clippy \
 	desktop desktop-release desktop-dev desktop-bin-release \
+	web-release \
 	apk mobile-apk \
 	tui tui-release \
-	test test-frontend test-tauri test-tui check dependency-security fmt clippy ktlint-android \
+	test test-frontend test-tauri test-tui test-web-host check dependency-security fmt clippy ktlint-android \
 	victauri-e2e victauri-e2e-real e2e-playwright \
-	clean clean-desktop clean-mobile clean-connect clean-client-api clean-tui clean-frontend
+	clean clean-desktop clean-mobile clean-connect clean-client-api clean-tui clean-web-host clean-frontend
 
 help:
 	@echo "crabmate-client Makefile（仓库根目录执行）"
@@ -48,6 +50,7 @@ help:
 	@echo "  make desktop-release     桌面 release .deb（自动 trunk --release + WASM 体积门禁）"
 	@echo "  make desktop-bin-release 仅 release 二进制（不打 deb，较快）"
 	@echo "  make desktop-dev         cargo tauri dev（请先自行启动纯 API serve + CORS）"
+	@echo "  make web-release         纯 Web Client .deb（trunk --release + 回环静态服务 crabmate-web）"
 	@echo "  make tui                 构建 crabmate-tui（远程终端；需外部 serve）"
 	@echo "  make tui-release         release 构建 crabmate-tui"
 	@echo "  make apk                 Android APK（默认 trunk + 包内 UI）"
@@ -61,10 +64,11 @@ help:
 	@echo "  make test-frontend       frontend：wasm check + lib 单测（与 Tauri 分开）"
 	@echo "  make test-tauri          connect + desktop unit tests (--bins) + mobile check（不含 Victauri E2E）"
 	@echo "  make test-tui            crabmate-tui-core + crabmate-tui 测试"
-	@echo "  make test                test-frontend 然后 test-tauri 然后 test-tui"
+	@echo "  make test-web-host       crabmate-web 回环静态服务单测"
+	@echo "  make test                test-frontend 然后 test-tauri 然后 test-tui 然后 test-web-host"
 	@echo "  make ktlint-android      手改 Android Kotlin ktlint（edu/crabmate）"
-	@echo "  make fmt                 七包 cargo fmt（含 client-api / frontend / tui）"
-	@echo "  make clippy              七包 clippy -D warnings"
+	@echo "  make fmt                 八包 cargo fmt（含 client-api / frontend / tui / web-host）"
+	@echo "  make clippy              八包 clippy -D warnings"
 	@echo "  make victauri-e2e        全量 Victauri（需外部 crabmate serve）"
 	@echo "  make e2e-playwright      Playwright（需 frontend/dist + serve --with-web）"
 	@echo ""
@@ -75,6 +79,7 @@ help:
 	@echo "  make clean-connect       connect target"
 	@echo "  make clean-client-api    crabmate-client-api target"
 	@echo "  make clean-tui           crabmate-tui* target"
+	@echo "  make clean-web-host      crabmate-web-host target"
 	@echo "  make clean-frontend      frontend dist + target"
 	@echo ""
 	@echo "变量：CRABMATE_FRONTEND_DIST=…（desktop prepare；默认本仓 frontend/dist）"
@@ -82,6 +87,7 @@ help:
 	@echo "      CRABMATE_ALLOW_SIBLING_FRONTEND=1（允许回落同级主仓 dist）"
 	@echo "      MOBILE_ANDROID_TARGET=aarch64  CM_MOBILE_GRADLE_STOP=1"
 	@echo "      CM_MOBILE_SKIP_FRONTEND=1（apk 时跳过 trunk，仍 prepare-mobile）"
+	@echo "      CM_WEB_SKIP_FRONTEND=1（web-release 跳过 trunk，用已有/stub dist）"
 
 # --- 聚合 ---
 
@@ -150,6 +156,11 @@ desktop-bin-release: prepare-sidecar
 desktop-dev: prepare-sidecar _require_tauri
 	cd "$(TAURI_DIR)" && $(CARGO) tauri dev
 
+# --- 纯 Web Client（回环静态服务，系统浏览器）---
+
+web-release:
+	bash "$(ROOT)/scripts/web-release.sh"
+
 # --- Android ---
 
 apk mobile-apk:
@@ -185,7 +196,10 @@ test-tui:
 	cd "$(TUI_CORE_DIR)" && $(CARGO) test -- --nocapture
 	cd "$(TUI_DIR)" && $(CARGO) check
 
-test: test-frontend test-tauri test-tui
+test-web-host:
+	cd "$(WEB_HOST_DIR)" && $(CARGO) test -- --nocapture
+
+test: test-frontend test-tauri test-tui test-web-host
 
 check:
 	bash "$(ROOT)/scripts/check.sh"
@@ -203,6 +217,7 @@ fmt:
 	cd "$(CONNECT_DIR)" && $(CARGO) fmt --all
 	cd "$(TUI_CORE_DIR)" && $(CARGO) fmt --all
 	cd "$(TUI_DIR)" && $(CARGO) fmt --all
+	cd "$(WEB_HOST_DIR)" && $(CARGO) fmt --all
 	cd "$(FRONTEND_DIR)" && $(CARGO) fmt --all
 
 clippy: prepare-sidecar
@@ -212,6 +227,7 @@ clippy: prepare-sidecar
 	cd "$(CONNECT_DIR)" && $(CARGO) clippy --all-targets -- -D warnings
 	cd "$(TUI_CORE_DIR)" && $(CARGO) clippy --all-targets -- -D warnings
 	cd "$(TUI_DIR)" && $(CARGO) clippy --all-targets -- -D warnings
+	cd "$(WEB_HOST_DIR)" && $(CARGO) clippy --all-targets -- -D warnings
 	rustup target add wasm32-unknown-unknown 2>/dev/null || true
 	cd "$(FRONTEND_DIR)" && $(CARGO) clippy --target wasm32-unknown-unknown --all-targets --all-features -- -D warnings
 
@@ -226,7 +242,7 @@ e2e-playwright:
 
 # --- 清理 ---
 
-clean: clean-desktop clean-mobile clean-connect clean-client-api clean-tui clean-frontend
+clean: clean-desktop clean-mobile clean-connect clean-client-api clean-tui clean-web-host clean-frontend
 
 clean-desktop:
 	rm -rf "$(DESKTOP_ROOT)/dist" "$(DESKTOP_ROOT)/binaries"
@@ -244,6 +260,9 @@ clean-client-api:
 clean-tui:
 	$(CARGO) clean --manifest-path "$(TUI_CORE_DIR)/Cargo.toml"
 	$(CARGO) clean --manifest-path "$(TUI_DIR)/Cargo.toml"
+
+clean-web-host:
+	$(CARGO) clean --manifest-path "$(WEB_HOST_DIR)/Cargo.toml"
 
 clean-frontend:
 	rm -rf "$(FRONTEND_DIR)/dist"

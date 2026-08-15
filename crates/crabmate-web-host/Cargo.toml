@@ -1,0 +1,20 @@
+[package]
+name = "crabmate-web-host"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+description = "Loopback static host for CrabMate frontend (opens the system browser; not crabmate serve)"
+repository = "https://github.com/noisystreet/crabmate-client"
+publish = false
+default-run = "crabmate-web"
+
+[[bin]]
+name = "crabmate-web"
+path = "src/main.rs"
+
+[workspace]
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive", "env"] }
+tiny_http = "0.12"

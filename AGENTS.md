@@ -5,7 +5,7 @@
 - Project: `crabmate-client`
 - Purpose: Official Client (Desktop Linux / Android Tauri shells + `crabmate-connect` + business UI `frontend/`); connects to a running `crabmate serve`; does **not** maintain the Server
 - Tech stack: Rust, Tauri 2, Leptos CSR (WASM)
-- Target: Desktop Linux, Android; shells load packaged `frontend/dist`; API calls go to remote `serve` (Server defaults CORS for `tauri://localhost` + `http://tauri.localhost`; set `CM_WEB_CORS_ALLOWED_ORIGINS` only for extra browser Origins)
+- Target: Desktop Linux, Android; shells load packaged `frontend/dist`; API calls go to remote `serve` (Server defaults CORS for `tauri://localhost` + `http://tauri.localhost`; set `CM_WEB_CORS_ALLOWED_ORIGINS` only for extra browser Origins, including `http://127.0.0.1:4173` when using `make web-release`)
 
 ## Directory Overview
 
@@ -15,6 +15,7 @@
 ├── crates/crabmate-connect/
 ├── crates/crabmate-tui-core/   # remote terminal HTTP/SSE core
 ├── crates/crabmate-tui/        # binary crabmate-tui
+├── crates/crabmate-web-host/   # binary crabmate-web (loopback static UI host)
 ├── desktop-tauri/
 ├── mobile-tauri/
 ├── frontend/                # Business UI; contract git rev/tag
@@ -60,6 +61,7 @@ make ktlint-android          # hand-maintained Android Kotlin only (`edu/crabmat
 make test
 make desktop-dev
 make desktop-release         # .deb (auto trunk --release UI)
+make web-release             # crabmate-web .deb (trunk --release + loopback static host)
 bash scripts/check-no-main-path.sh
 bash scripts/lizard-rust.sh              # CCN>10 count must equal module cap; if lower, tighten cap / --write-caps
 bash scripts/dependency-security.sh      # cargo audit + cargo deny; not in pre-commit / check.sh
