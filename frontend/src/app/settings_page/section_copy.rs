@@ -6,6 +6,7 @@ use super::hash_routing::SettingsSection;
 
 pub(super) fn section_title(section: SettingsSection, locale: Locale) -> &'static str {
     match section {
+        SettingsSection::Connection => i18n::settings_section_connection_title(locale),
         SettingsSection::Appearance => i18n::settings_section_appearance_title(locale),
         SettingsSection::Llm => i18n::settings_section_llm_title(locale),
         SettingsSection::Tools => i18n::settings_section_tools_title(locale),
@@ -18,6 +19,7 @@ pub(super) fn section_title(section: SettingsSection, locale: Locale) -> &'stati
 
 pub(super) fn section_desc(section: SettingsSection, locale: Locale) -> &'static str {
     match section {
+        SettingsSection::Connection => i18n::settings_section_connection_desc(locale),
         SettingsSection::Appearance => i18n::settings_section_appearance_desc(locale),
         SettingsSection::Llm => i18n::settings_section_llm_desc(locale),
         SettingsSection::Tools => i18n::settings_section_tools_desc(locale),

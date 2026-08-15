@@ -9,13 +9,6 @@ pub fn settings_block_api_base(l: Locale) -> &'static str {
     }
 }
 
-pub fn settings_api_base_label(l: Locale) -> &'static str {
-    match l {
-        Locale::ZhHans => "API 基址",
-        Locale::En => "API base URL",
-    }
-}
-
 pub fn settings_api_base_save(l: Locale) -> &'static str {
     match l {
         Locale::ZhHans => "保存 API 基址",

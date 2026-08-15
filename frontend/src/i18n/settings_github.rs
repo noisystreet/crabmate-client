@@ -41,17 +41,6 @@ pub fn settings_github_client_id_set(l: Locale) -> &'static str {
     }
 }
 
-pub fn settings_github_client_id_hint(l: Locale) -> &'static str {
-    match l {
-        Locale::ZhHans => {
-            "保存在当前应用 / 浏览器站点的本机存储；仅连接 GitHub 时需要，不是启动必配项。"
-        }
-        Locale::En => {
-            "Stored in this app/site's local storage; required only when connecting GitHub, not at startup."
-        }
-    }
-}
-
 pub fn settings_github_client_id_required(l: Locale) -> &'static str {
     match l {
         Locale::ZhHans => "请先填写并保存 OAuth / App Client ID",
@@ -121,17 +110,6 @@ pub fn settings_github_connection_label(l: Locale) -> &'static str {
     match l {
         Locale::ZhHans => "连接状态",
         Locale::En => "Connection",
-    }
-}
-
-pub fn settings_github_token_storage_hint(l: Locale) -> &'static str {
-    match l {
-        Locale::ZhHans => {
-            "桌面/Android：token 存本机钥匙串；浏览器：由 HttpOnly Cookie 保存，页面脚本无法读取。"
-        }
-        Locale::En => {
-            "Desktop/Android: token is stored in the OS keychain; browser: HttpOnly cookie (not readable by page scripts)."
-        }
     }
 }
 

@@ -533,9 +533,6 @@ fn SettingsGithubClientIdBlock(
                 {move || i18n::settings_github_client_id_label(locale.get())}
             </label>
             <SettingsGithubClientIdStatus locale=locale ui=ui />
-            <p class="settings-hint" data-testid="settings-github-client-id-hint">
-                {move || i18n::settings_github_client_id_hint(locale.get())}
-            </p>
             <input
                 id=input_id
                 class="input"
@@ -628,9 +625,6 @@ fn SettingsGithubBlockView(
                         {move || connection_label(locale.get(), ui.github_set.get())}
                     </span>
                 </div>
-                <p class="settings-hint" data-testid="settings-github-token-storage-hint">
-                    {move || i18n::settings_github_token_storage_hint(locale.get())}
-                </p>
                 <Show when=move || ui.user_code.get().is_some()>
                     <p class="settings-github-user-code" data-testid="settings-github-user-code">
                         {move || ui.user_code.get().unwrap_or_default()}

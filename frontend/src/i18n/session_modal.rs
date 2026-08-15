@@ -16,15 +16,6 @@ pub fn session_modal_badge(l: Locale) -> &'static str {
     }
 }
 
-pub fn session_modal_hint(l: Locale) -> &'static str {
-    match l {
-        Locale::ZhHans => {
-            "本地保存在浏览器；可导出为与 CLI save-session 同形的 JSON / Markdown 下载。"
-        }
-        Locale::En => "Stored in the browser; export as JSON / Markdown matching CLI save-session.",
-    }
-}
-
 pub fn session_row_msg_count(l: Locale, n: usize) -> String {
     match l {
         Locale::ZhHans => format!("{n} 条"),

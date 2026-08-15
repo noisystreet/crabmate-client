@@ -127,7 +127,7 @@ fn StatusFetchErrorPanel(
                     class="btn btn-primary btn-sm"
                     data-testid="status-open-web-api-settings"
                     on:click=move |_| {
-                        navigate_to_settings(settings_page, SettingsSection::Appearance);
+                        navigate_to_settings(settings_page, SettingsSection::Connection);
                     }
                 >
                     {move || i18n::status_open_web_api_settings(locale.get())}

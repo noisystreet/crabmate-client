@@ -35,13 +35,6 @@ pub fn ide_settings_section_editor_title(l: Locale) -> &'static str {
     }
 }
 
-pub fn ide_settings_section_editor_desc(l: Locale) -> &'static str {
-    match l {
-        Locale::ZhHans => "字体、行号与换行等仅保存在本浏览器。",
-        Locale::En => "Font, line numbers, and wrap are stored in this browser only.",
-    }
-}
-
 pub fn ide_settings_block_font(l: Locale) -> &'static str {
     match l {
         Locale::ZhHans => "字体",

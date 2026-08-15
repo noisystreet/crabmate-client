@@ -67,17 +67,15 @@ fn SettingsThemeSelectBlock(
 ) -> impl IntoView {
     view! {
         <div class="settings-block">
-            <h3 class="settings-block-title">{move || i18n::settings_block_theme(locale.get())}</h3>
-            <div class="settings-field">
-                <label class="settings-field-label" for=theme_select_id>
-                    {move || i18n::settings_label_theme_preset(locale.get())}
-                </label>
-                <select
-                    id=theme_select_id
-                    class="settings-select"
-                    prop:value=move || appearance_theme.get()
-                    on:change=move |ev| appearance_theme.set(event_target_value(&ev))
-                >
+            <label class="settings-block-title" for=theme_select_id>
+                {move || i18n::settings_block_theme(locale.get())}
+            </label>
+            <select
+                id=theme_select_id
+                class="settings-select"
+                prop:value=move || appearance_theme.get()
+                on:change=move |ev| appearance_theme.set(event_target_value(&ev))
+            >
                     {THEME_SLUGS.iter().copied().map(|slug| {
                         view! {
                             <option value=slug>
@@ -86,7 +84,6 @@ fn SettingsThemeSelectBlock(
                         }
                     }).collect_view()}
                 </select>
-            </div>
         </div>
     }
 }
@@ -260,24 +257,19 @@ pub(crate) fn SettingsApiBaseBlock(
             class="settings-block settings-block--api-base"
             data-testid="settings-api-base-block"
         >
-            <h3 class="settings-block-title">
+            <label class="settings-block-title" for=input_id>
                 {move || i18n::settings_block_api_base(locale.get())}
-            </h3>
-            <div class="settings-field">
-                <label class="settings-field-label" for=input_id>
-                    {move || i18n::settings_api_base_label(locale.get())}
-                </label>
-                <input
-                    id=input_id
-                    class="input"
-                    type="url"
-                    autocomplete="off"
-                    placeholder="http://127.0.0.1:8080"
-                    data-testid="settings-api-base-input"
-                    prop:value=move || draft.get()
-                    on:input=move |ev| draft.set(event_target_value(&ev))
-                />
-            </div>
+            </label>
+            <input
+                id=input_id
+                class="input"
+                type="url"
+                autocomplete="off"
+                placeholder="http://127.0.0.1:8080"
+                data-testid="settings-api-base-input"
+                prop:value=move || draft.get()
+                on:input=move |ev| draft.set(event_target_value(&ev))
+            />
             <button
                 type="button"
                 class="btn btn-primary btn-sm"
