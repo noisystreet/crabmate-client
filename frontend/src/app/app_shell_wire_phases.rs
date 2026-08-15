@@ -195,6 +195,8 @@ fn wire_phase3_escape_layered_dismiss(app: &AppSignals) {
         settings_page: app.modal.settings_page,
         ide_settings_page: app.modal.ide_settings_page,
         session_modal: app.modal.session_modal,
+        pending_approval: app.approval.pending_approval,
+        locale: app.shell_ui.locale,
     };
     wire_escape_key_layered_dismiss(shell_escape);
     wire_session_delete_hotkey(SessionDeleteHotkeySignals {

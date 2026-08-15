@@ -1,5 +1,6 @@
 use leptos::prelude::*;
 
+use crate::a11y::{aria_current_true_or_false, context_menu_keydown_anchor};
 use crate::chat_session_state::ChatSessionSignals;
 use crate::i18n;
 use crate::session_ops::{SessionContextAnchor, switch_active_session_after_composer_flush};
@@ -126,6 +127,22 @@ pub(super) fn nav_rail_session_scroll_inner(s: NavRailSessionScrollSignals) -> i
     }
 }
 
+fn session_row_accessible_label(
+    stored_title: &str,
+    pinned: bool,
+    starred: bool,
+    loc: crate::i18n::Locale,
+) -> String {
+    let mut parts = vec![i18n::session_title_for_display(stored_title, loc)];
+    if pinned {
+        parts.push(i18n::session_badge_pin_aria(loc).to_string());
+    }
+    if starred {
+        parts.push(i18n::session_badge_star_aria(loc).to_string());
+    }
+    parts.join(", ")
+}
+
 fn nav_search_hit_button(h: MessageSearchHit, nav: NavRailHitRowNavSignals) -> impl IntoView {
     let NavRailHitRowNavSignals {
         chat,
@@ -162,6 +179,81 @@ fn nav_search_hit_button(h: MessageSearchHit, nav: NavRailHitRowNavSignals) -> i
     }
 }
 
+fn session_row_is_streaming(chat: ChatSessionSignals, session_id: &str) -> bool {
+    chat.stream_transport.get().bound_session_id() == Some(session_id)
+}
+
+fn on_nav_session_row_context_keydown(
+    ev: web_sys::KeyboardEvent,
+    session_id: String,
+    session_context_menu: RwSignal<Option<SessionContextAnchor>>,
+    sidebar_rail_ctx_menu: RwSignal<Option<(f64, f64)>>,
+) {
+    use super::session_row_press::open_session_context_menu;
+    let Some((x, y)) = context_menu_keydown_anchor(&ev) else {
+        return;
+    };
+    open_session_context_menu(
+        session_id,
+        x,
+        y,
+        session_context_menu,
+        sidebar_rail_ctx_menu,
+    );
+}
+
+fn nav_session_row_inner(
+    title: String,
+    n: usize,
+    is_pinned: bool,
+    is_starred: bool,
+    locale: RwSignal<crate::i18n::Locale>,
+    chat: ChatSessionSignals,
+    session_id_streaming: String,
+) -> impl IntoView {
+    view! {
+        <span class="nav-session-title-row">
+            <span class="nav-session-badges">
+                <Show when=move || is_pinned>
+                    <span
+                        class="nav-session-badge nav-session-badge-pin"
+                        aria-hidden="true"
+                        prop:title=move || i18n::session_badge_pin_aria(locale.get())
+                    >
+                        "📌"
+                    </span>
+                </Show>
+                <Show when=move || is_starred>
+                    <span
+                        class="nav-session-badge nav-session-badge-star"
+                        aria-hidden="true"
+                        prop:title=move || i18n::session_badge_star_aria(locale.get())
+                    >
+                        "★"
+                    </span>
+                </Show>
+            </span>
+            <span class="nav-session-title">
+                {move || i18n::session_title_for_display(&title, locale.get())}
+            </span>
+        </span>
+        <span class="nav-session-meta">
+            <Show when=move || session_row_is_streaming(chat, session_id_streaming.as_str())>
+                <span
+                    class="nav-session-streaming-badge"
+                    data-testid="nav-session-streaming"
+                    role="status"
+                >
+                    {move || i18n::session_row_streaming_label(locale.get())}
+                </span>
+            </Show>
+            <span class="nav-session-count">
+                {move || i18n::session_row_msg_count(locale.get(), n)}
+            </span>
+        </span>
+    }
+}
+
 fn nav_session_row_button(s: ChatSession, nav: NavRailHitRowNavSignals) -> impl IntoView {
     use std::rc::Rc;
 
@@ -182,7 +274,10 @@ fn nav_session_row_button(s: ChatSession, nav: NavRailHitRowNavSignals) -> impl 
     let session_id_click = s.id.clone();
     // 供「生成中」badge 的独立 move 闭包使用，避免与 class 闭包争抢 `session_id_class` 所有权。
     let session_id_streaming = session_id_class.clone();
+    let session_id_keydown = s.id.clone();
+    let session_id_aria = s.id.clone();
     let title = s.title.clone();
+    let title_aria = title.clone();
     let n = s.messages.len();
     let is_pinned = s.pinned;
     let is_starred = s.starred;
@@ -202,19 +297,33 @@ fn nav_session_row_button(s: ChatSession, nav: NavRailHitRowNavSignals) -> impl 
             type="button"
             data-testid=format!("nav-session-{session_id_testid}")
             class=move || {
-                let streaming = chat
-                    .stream_transport
-                    .get()
-                    .bound_session_id()
-                    == Some(session_id_class.as_str());
                 session_row_item_class(
                     active_id.get() == session_id_class,
                     is_pinned,
                     is_starred,
-                    streaming,
+                    session_row_is_streaming(chat, session_id_class.as_str()),
+                )
+            }
+            prop:aria-current=move || {
+                aria_current_true_or_false(active_id.get() == session_id_aria)
+            }
+            prop:aria-label=move || {
+                session_row_accessible_label(
+                    &title_aria,
+                    is_pinned,
+                    is_starred,
+                    locale.get(),
                 )
             }
             on:contextmenu=move |ev| on_contextmenu(ev)
+            on:keydown=move |ev: web_sys::KeyboardEvent| {
+                on_nav_session_row_context_keydown(
+                    ev,
+                    session_id_keydown.clone(),
+                    session_context_menu,
+                    sidebar_rail_ctx_menu,
+                );
+            }
             on:pointerdown=move |ev| on_pointerdown(ev)
             on:pointermove=move |ev| on_pointermove(ev)
             on:pointerup=move |_| on_pointer_end()
@@ -230,50 +339,37 @@ fn nav_session_row_button(s: ChatSession, nav: NavRailHitRowNavSignals) -> impl 
                 mobile_nav_open.set(false);
             }
         >
-            <span class="nav-session-title-row">
-                <span class="nav-session-badges">
-                    <Show when=move || is_pinned>
-                        <span
-                            class="nav-session-badge nav-session-badge-pin"
-                            aria-hidden="true"
-                            prop:title=move || i18n::session_badge_pin_aria(locale.get())
-                        >
-                            "📌"
-                        </span>
-                    </Show>
-                    <Show when=move || is_starred>
-                        <span
-                            class="nav-session-badge nav-session-badge-star"
-                            aria-hidden="true"
-                            prop:title=move || i18n::session_badge_star_aria(locale.get())
-                        >
-                            "★"
-                        </span>
-                    </Show>
-                </span>
-                <span class="nav-session-title">
-                    {move || {
-                        i18n::session_title_for_display(&title, locale.get())
-                    }}
-                </span>
-            </span>
-            <span class="nav-session-meta">
-                <Show when=move || {
-                    chat.stream_transport.get().bound_session_id()
-                        == Some(session_id_streaming.as_str())
-                }>
-                    <span
-                        class="nav-session-streaming-badge"
-                        data-testid="nav-session-streaming"
-                        role="status"
-                    >
-                        {move || i18n::session_row_streaming_label(locale.get())}
-                    </span>
-                </Show>
-                <span class="nav-session-count">
-                    {move || i18n::session_row_msg_count(locale.get(), n)}
-                </span>
-            </span>
+            {nav_session_row_inner(
+                title,
+                n,
+                is_pinned,
+                is_starred,
+                locale,
+                chat,
+                session_id_streaming,
+            )}
         </button>
+    }
+}
+
+#[cfg(test)]
+mod session_row_accessible_label_tests {
+    use super::session_row_accessible_label;
+    use crate::i18n::Locale;
+
+    #[test]
+    fn title_only_when_no_badges() {
+        assert_eq!(
+            session_row_accessible_label("Hello", false, false, Locale::En),
+            "Hello"
+        );
+    }
+
+    #[test]
+    fn appends_pinned_and_starred_in_english() {
+        let s = session_row_accessible_label("Hello", true, true, Locale::En);
+        assert!(s.contains("Hello"));
+        assert!(s.contains("Pinned"));
+        assert!(s.contains("Starred"));
     }
 }

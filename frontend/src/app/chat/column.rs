@@ -242,6 +242,16 @@ fn handle_composer_image_input_change(
     input.set_value("");
 }
 
+fn click_hidden_composer_image_input() {
+    let Some(el) = leptos_dom::helpers::document().get_element_by_id("composer-image-input") else {
+        return;
+    };
+    let Ok(input) = el.dyn_into::<web_sys::HtmlInputElement>() else {
+        return;
+    };
+    input.click();
+}
+
 #[component]
 fn ComposerImageInput(
     locale: RwSignal<crate::i18n::Locale>,
@@ -253,6 +263,7 @@ fn ComposerImageInput(
             type="file"
             class="composer-file-input-hidden"
             id="composer-image-input"
+            tabindex="-1"
             accept="image/png,image/jpeg,image/jpg,image/webp,image/gif"
             multiple
             on:change=move |ev: web_sys::Event| {
@@ -519,11 +530,13 @@ fn ChatComposerPane(signals: ChatComposerPaneSignals) -> impl IntoView {
                     run_send_clarify_sv=run_send_clarify_sv
                 />
                 <div class="composer-input-row">
-                    <label
+                    <button
+                        type="button"
                         class="btn btn-muted btn-sm composer-attach-label"
-                        for="composer-image-input"
+                        data-testid="composer-attach"
                         prop:title=move || i18n::composer_attach_image_aria(locale.get())
                         prop:aria-label=move || i18n::composer_attach_image_aria(locale.get())
+                        on:click=move |_| click_hidden_composer_image_input()
                     >
                         <svg
                             viewBox="0 0 24 24"
@@ -539,7 +552,7 @@ fn ChatComposerPane(signals: ChatComposerPaneSignals) -> impl IntoView {
                             <circle cx="8.5" cy="8.5" r="1.5" />
                             <path d="m21 15-3.5-3.5a2 2 0 0 0-2.83 0L6 21" />
                         </svg>
-                    </label>
+                    </button>
                     <ComposerInputStack
                         composer_input_ref=composer_input_ref
                         draft=draft

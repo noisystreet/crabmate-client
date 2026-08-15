@@ -153,6 +153,8 @@ fn StatusSessionModeMenuPortal(props: SessionModeMenuPortalProps) -> impl IntoVi
         menu_open,
         menu_fixed_style,
     } = props;
+    let menu_style = Memo::new(move |_| menu_fixed_style.get().unwrap_or_default());
+    let aria_label = Memo::new(move |_| i18n::status_mode_label(locale.get()).to_string());
 
     view! {
         <Portal>
@@ -166,11 +168,10 @@ fn StatusSessionModeMenuPortal(props: SessionModeMenuPortalProps) -> impl IntoVi
                     close_mode_menu(menu_open, menu_fixed_style);
                 }
             />
-            <div
+            <crate::app::focusable_menu::FocusableRoleMenu
                 class="status-mode-menu status-mode-menu--fixed status-mode-menu--portal"
-                role="menu"
-                prop:style=move || menu_fixed_style.get().unwrap_or_default()
-                prop:aria-label=move || i18n::status_mode_label(locale.get())
+                menu_style=menu_style
+                aria_label=aria_label
             >
                 {MODES
                     .into_iter()
@@ -178,11 +179,15 @@ fn StatusSessionModeMenuPortal(props: SessionModeMenuPortalProps) -> impl IntoVi
                         let id_owned = id.to_string();
                         let id_for_active = id_owned.clone();
                         let id_for_click = id_owned.clone();
+                        let id_checked = id_owned.clone();
                         view! {
                             <button
                                 type="button"
                                 class="status-mode-menu-item"
-                                role="menuitem"
+                                role="menuitemradio"
+                                prop:aria-checked=move || {
+                                    (selected_session_mode.get() == id_checked).to_string()
+                                }
                                 class:active=move || {
                                     selected_session_mode.get() == id_for_active
                                 }
@@ -205,7 +210,7 @@ fn StatusSessionModeMenuPortal(props: SessionModeMenuPortalProps) -> impl IntoVi
                         }
                     })
                     .collect_view()}
-            </div>
+            </crate::app::focusable_menu::FocusableRoleMenu>
         </Portal>
     }
 }

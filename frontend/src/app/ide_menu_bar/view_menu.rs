@@ -34,7 +34,7 @@ fn IdeMenuViewDropdown(
     ide_menubar_dropdown_open: RwSignal<bool>,
 ) -> impl IntoView {
     view! {
-        <div class="ide-menu-dropdown" role="menu">
+        <crate::app::focusable_menu::FocusableRoleMenu class="ide-menu-dropdown">
             <button
                 type="button"
                 class="ide-menu-item"
@@ -76,7 +76,7 @@ fn IdeMenuViewDropdown(
                 }}</span>
                 {move || i18n::ide_menu_toggle_word_wrap(locale.get())}
             </button>
-        </div>
+        </crate::app::focusable_menu::FocusableRoleMenu>
     }
 }
 

@@ -87,6 +87,7 @@ When updating docs:
 | Shell architecture / lifecycle / connect model | `docs/design/tauri_gui_mvp_design.md` |
 | Android stream FGS / approval notifications | `docs/adr/0002-android-approval-notification-foreground-keepalive.md` (Accepted) |
 | Shared pure logic extract (WASM / connect / tui) | `docs/design/client_shared_logic.md` |
+| Chat UI follow-ups (composer / transcript / a11y) | `docs/design/chat_ui_todo.md` |
 | Manual shell smoke steps | `docs/design/shell_smoke_runbook.md` |
 | Personal cloud (shell → remote API-only) | `docs/design/personal_cloud_runbook.md`; VPS/Caddy authority is Server |
 | Victauri / pre-commit / CI commands | `docs/TESTING.md` |

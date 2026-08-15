@@ -13,6 +13,7 @@ mod approval_modal;
 mod changelist_modal;
 mod chat;
 pub(crate) use chat::turn_lifecycle;
+pub(crate) mod focusable_menu;
 mod github_embed_page;
 mod github_wiring;
 mod ide_confirm_dialog;

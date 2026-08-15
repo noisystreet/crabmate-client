@@ -40,7 +40,7 @@ fn IdeMenuEditDropdown(
     } = signals;
 
     view! {
-        <div class="ide-menu-dropdown" role="menu">
+        <crate::app::focusable_menu::FocusableRoleMenu class="ide-menu-dropdown">
             <button
                 type="button"
                 class="ide-menu-item"
@@ -81,7 +81,7 @@ fn IdeMenuEditDropdown(
             >
                 {move || i18n::ide_menu_select_all(locale.get())}
             </button>
-        </div>
+        </crate::app::focusable_menu::FocusableRoleMenu>
     }
 }
 

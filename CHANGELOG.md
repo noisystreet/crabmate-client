@@ -16,6 +16,7 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Added
 
+- Design: chat UI follow-ups (`docs/design/chat_ui_todo.md`); P1 keyboard/ARIA is done, remaining items are in-place edit, stream follow-up queue, find highlight, composer-adjacent Ask/Plan/Act
 - Loopback web UI host (`make web-release` / `crabmate-web`): static `frontend/dist` on `127.0.0.1:4173`, system browser; not Tauri and not `crabmate serve`. The `.deb` installs a menu entry with the same CrabMate icon as Desktop (`Icon=crabmate-web`). A second launch on the same port opens the existing instance. Logs redact `--bearer`. CI `build-web-deb` packs a stub UI (`CM_WEB_SKIP_FRONTEND=1`) and checks package layout
 - Remote terminal `.deb` (`make tui-release` / `crabmate-tui`): binary only at `/usr/bin/crabmate-tui`; no menu icon, no config files, not `crabmate serve`. CI `build-tui-deb` packs and checks layout
 - Chat markdown: closed fences show a language label and Copy button; streaming active lines render paired `*em*` / `_em_` and complete `[text](url)` (http(s) only); `~~~` fences buffer like backticks; `>` quotes freeze as their own block; GFM `[!NOTE]`/`[!TIP]`/… alerts keep `markdown-alert-*` classes
@@ -38,6 +39,7 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Fixed
 
+- Shell a11y (P1): approval modal traps Tab and Escape submits `deny`; confirm / new-file dialogs trap focus (Escape closes even from the path field); image attach is a real button; context menus take focus and arrow keys; session/file/message/IDE-tab Shift+F10; IDE tabs Left/Right; workspace file rows are keyboard-activatable; Ask/Plan/Act and side-view items are `menuitemradio`; current session `aria-current`; pin/star/unsaved names are announced
 - IDE: entering the editor no longer keeps the stale “rebuild the frontend” banner. CodeMirror load status is an explicit state machine; the warning is reactive and only shows after that load fails. A failed `<script>` is removed so leaving and re-entering IDE can retry (Tauri packaged UI with hash handoff included)
 - Chat markdown: message `#` / `##` render as `h3` / `h4` so they do not steal the page outline; heading `{#id}` is not turned into a DOM `id`. Normalize splits glued `~~~` fences, `。>` / `！>` / `？>` quotes (not `：>`), and CJK list markers missing a space (`-项` / `1.项`; not `-rf` / `1.0`)
 - Chat markdown: GFM task-list checkboxes survive sanitizer as read-only (`disabled` + `pointer-events: none`); fenced `language-*` classes are kept on `pre`/`code`; closed transcript blocks reuse `.msg-md-prose` so headings, quotes, `hr`, and code chrome match the changelist modal

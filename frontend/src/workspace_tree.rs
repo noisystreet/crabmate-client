@@ -363,6 +363,7 @@ fn WorkspaceTreeNodes(
                                 rel=rel
                                 parent_rel=parent_for_row
                                 chrome=env.chrome
+                                locale=env.subtree.locale
                                 on_file_double_click=env.on_file_double_click
                                 on_file_single_click=env.on_file_single_click
                             />
@@ -415,12 +416,17 @@ fn WorkspaceTreeFileRow(
     rel: String,
     parent_rel: String,
     chrome: WorkspaceTreeChromeSignals,
+    locale: RwSignal<Locale>,
     on_file_double_click: StoredValue<Arc<dyn Fn(String) + Send + Sync>>,
     on_file_single_click: StoredValue<Arc<dyn Fn(String) + Send + Sync>>,
 ) -> impl IntoView {
     let rel_dbl = rel.clone();
     let rel_click = rel.clone();
+    let rel_activate = rel.clone();
+    let rel_menu = rel.clone();
     let rel_drag = rel.clone();
+    let name_aria = name.clone();
+    let parent_for_menu = parent_rel.clone();
     let press = crate::workspace_tree_press::build_workspace_row_press_handlers(
         chrome.context_menu,
         crate::workspace_tree_press::WorkspaceRowPressTarget {
@@ -440,7 +446,12 @@ fn WorkspaceTreeFileRow(
         <li
             class=row_class
             style=format!("--list-stagger: {stagger}")
+            role="treeitem"
+            tabindex="0"
             draggable="true"
+            prop:aria-label=move || {
+                i18n::workspace_tree_file_row_aria(locale.get(), name_aria.as_str())
+            }
             on:dragstart=move |ev: web_sys::DragEvent| {
                 workspace_file_row_drag_start(&ev, rel_drag.as_str());
             }
@@ -452,6 +463,25 @@ fn WorkspaceTreeFileRow(
             }
             on:dblclick=move |_| {
                 (on_file_double_click.get_value())(rel_dbl.clone());
+            }
+            on:keydown=move |ev: web_sys::KeyboardEvent| {
+                if ev.key() == "Enter" || ev.key() == " " {
+                    ev.prevent_default();
+                    (on_file_double_click.get_value())(rel_activate.clone());
+                    return;
+                }
+                if let Some((x, y)) = crate::a11y::context_menu_keydown_anchor(&ev) {
+                    crate::workspace_tree_press::open_workspace_context_menu_at(
+                        chrome.context_menu,
+                        f64::from(x),
+                        f64::from(y),
+                        crate::workspace_tree_press::WorkspaceRowPressTarget {
+                            target_rel: Some(rel_menu.clone()),
+                            target_is_dir: false,
+                            parent_rel: parent_for_menu.clone(),
+                        },
+                    );
+                }
             }
             on:contextmenu=move |ev| on_contextmenu(ev)
             on:pointerdown=move |ev| on_pointerdown(ev)
@@ -697,6 +727,8 @@ pub fn WorkspaceFilesystemTree(input: WorkspaceFilesystemTreeInput) -> impl Into
     view! {
         <ul
             data-testid="workspace-file-tree"
+            role="tree"
+            prop:aria-label=move || i18n::workspace_tree_aria(locale.get())
             prop:title=move || i18n::workspace_tree_insert_file_title(locale.get())
             class=move || {
                 let entries = workspace_data

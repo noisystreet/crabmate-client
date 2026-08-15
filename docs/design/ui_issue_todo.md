@@ -9,10 +9,10 @@
 
 ## P1 · 可访问性关键缺口
 
-- [ ] 审批弹窗无焦点陷阱且无法 Esc 关闭：`frontend/src/app/approval_modal.rs`、`frontend/src/app/app_shell_effects/escape.rs` 未覆盖 `pending_approval`。
-- [ ] 部分对话框缺焦点陷阱：`ide_new_file_modal.rs`、`shell_confirm_dialog.rs`、`ide_confirm_dialog.rs`。
-- [ ] 键盘不可达：图片附件 `<label>`（`column.rs`）、右键/长按上下文菜单、顶部/底栏菜单、IDE 标签页（缺方向键）、工作区文件树文件行。
-- [ ] 语义缺口：聊天模式 `role="menuitem"` 孤儿节点；单选/当前会话缺 `aria-checked` / `aria-current`；未保存/置顶/星标状态对屏幕阅读器不可见。
+- [x] 审批弹窗无焦点陷阱且无法 Esc 关闭：`frontend/src/app/approval_modal.rs`、`frontend/src/app/app_shell_effects/escape.rs` 未覆盖 `pending_approval`。
+- [x] 部分对话框缺焦点陷阱：`ide_new_file_modal.rs`、`shell_confirm_dialog.rs`、`ide_confirm_dialog.rs`。
+- [x] 键盘不可达：图片附件 `<label>`（`column.rs`）、右键/长按上下文菜单、顶部/底栏菜单、IDE 标签页（缺方向键）、工作区文件树文件行。
+- [x] 语义缺口：聊天模式 `role="menuitem"` 孤儿节点；单选/当前会话缺 `aria-checked` / `aria-current`；未保存/置顶/星标状态对屏幕阅读器不可见。
 
 ## P2 · 移动端边界与体验
 

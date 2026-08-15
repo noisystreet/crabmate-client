@@ -5,7 +5,9 @@ use leptos_dom::helpers::window_event_listener;
 use wasm_bindgen::JsCast;
 
 use crate::app::app_signals::IdeChromeSignals;
+use crate::app::approval_modal::deny_pending_approval;
 use crate::app::settings_page::navigate_to_chat;
+use crate::i18n::Locale;
 use crate::ide_confirm::{IdeConfirmSignals, dismiss_ide_confirm};
 use crate::session_ops::SessionContextAnchor;
 
@@ -34,6 +36,9 @@ pub struct ShellEscapeSignals {
     pub settings_page: RwSignal<bool>,
     pub ide_settings_page: RwSignal<bool>,
     pub session_modal: RwSignal<bool>,
+    /// 命令审批弹窗：Escape 提交 `deny`（即使焦点在按钮上）。
+    pub pending_approval: RwSignal<Option<(String, String, String)>>,
+    pub locale: RwSignal<Locale>,
 }
 
 /// 焦点在可编辑控件上时不应触发全局快捷键（与 [`super::session_delete_hotkey`] 共用）。
@@ -55,16 +60,33 @@ pub(crate) fn keyboard_event_target_is_text_entry(ev: &web_sys::KeyboardEvent) -
     he.is_content_editable()
 }
 
+fn close_ide_new_file_modal(chrome: IdeChromeSignals) {
+    chrome.new_file_modal_open.set(false);
+    chrome.new_file_path_draft.set(String::new());
+}
+
+/// 阻塞对话框：即使焦点在输入框里，Escape 也关闭（审批视为拒绝）。
+fn dismiss_blocking_dialog_escape(shell: ShellEscapeSignals) -> bool {
+    if shell.pending_approval.get_untracked().is_some() {
+        deny_pending_approval(shell.pending_approval, shell.locale);
+        return true;
+    }
+    if shell.shell_confirm.pending.get_untracked().is_some() {
+        dismiss_ide_confirm(shell.shell_confirm);
+        return true;
+    }
+    if shell.ide_chrome.confirm_pending.get_untracked().is_some() {
+        dismiss_ide_confirm(shell.ide_chrome.confirm_signals());
+        return true;
+    }
+    if shell.ide_chrome.new_file_modal_open.get_untracked() {
+        close_ide_new_file_modal(shell.ide_chrome);
+        return true;
+    }
+    false
+}
+
 fn dismiss_ide_escape_layers(chrome: IdeChromeSignals) -> bool {
-    if chrome.confirm_pending.get_untracked().is_some() {
-        dismiss_ide_confirm(chrome.confirm_signals());
-        return true;
-    }
-    if chrome.new_file_modal_open.get_untracked() {
-        chrome.new_file_modal_open.set(false);
-        chrome.new_file_path_draft.set(String::new());
-        return true;
-    }
     if chrome.find_panel_open.get_untracked() {
         chrome.find_panel_open.set(false);
         return true;
@@ -156,10 +178,6 @@ fn dismiss_modal_escape_layers(shell: ShellEscapeSignals) -> bool {
 }
 
 fn dismiss_one_escape_layer(shell: ShellEscapeSignals) {
-    if shell.shell_confirm.pending.get_untracked().is_some() {
-        dismiss_ide_confirm(shell.shell_confirm);
-        return;
-    }
     if dismiss_ide_escape_layers(shell.ide_chrome) {
         return;
     }
@@ -172,11 +190,15 @@ fn dismiss_one_escape_layer(shell: ShellEscapeSignals) {
     let _ = dismiss_modal_escape_layers(shell);
 }
 
-/// 在输入控件外按 **`Escape`** 按层关闭：会话菜单 → 侧栏菜单 → 查找 → … → 会话管理模态。
+/// **`Escape`** 按层关闭：审批（deny）/ 确认 / 新建文件（含输入框内）→ 其余层（输入框内不关）。
 pub fn wire_escape_key_layered_dismiss(shell: ShellEscapeSignals) {
     Effect::new(move |_| {
         let h = window_event_listener(leptos::ev::keydown, move |ev: web_sys::KeyboardEvent| {
             if ev.key() != "Escape" {
+                return;
+            }
+            if dismiss_blocking_dialog_escape(shell) {
+                ev.prevent_default();
                 return;
             }
             if keyboard_event_target_is_text_entry(&ev) {
@@ -187,4 +209,16 @@ pub fn wire_escape_key_layered_dismiss(shell: ShellEscapeSignals) {
         });
         on_cleanup(move || h.remove());
     });
+}
+
+#[cfg(test)]
+mod escape_source_tests {
+    #[test]
+    fn escape_covers_approval_and_blocking_dialogs() {
+        let src = include_str!("escape.rs");
+        assert!(src.contains("deny_pending_approval"));
+        assert!(src.contains("dismiss_blocking_dialog_escape"));
+        assert!(src.contains("pending_approval"));
+        assert!(src.contains("new_file_modal_open"));
+    }
 }

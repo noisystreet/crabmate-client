@@ -103,7 +103,7 @@ fn make_clear_long_press(
     })
 }
 
-fn open_session_context_menu(
+pub(super) fn open_session_context_menu(
     session_id: String,
     x: i32,
     y: i32,

@@ -78,6 +78,8 @@ fn SidePanelViewPickerTrigger(props: SidePanelViewPickerProps) -> impl IntoView 
             data-testid="side-view-trigger"
             class:active=move || !matches!(side_panel_view.get(), SidePanelView::None)
             class:toolbar-view-trigger-open=move || view_menu_open.get()
+            aria-haspopup="menu"
+            prop:aria-expanded=move || view_menu_open.get().to_string()
             on:click=move |_| view_menu_open.update(|o| *o = !*o)
             prop:title=move || i18n::side_view_menu_title(locale.get())
             prop:aria-label=move || i18n::side_view_menu_aria(locale.get())
@@ -120,6 +122,59 @@ fn pick_side_panel_view(
     view_menu_open.set(false);
 }
 
+#[derive(Clone, Copy)]
+struct SidePanelViewMenuItemBundle {
+    locale: RwSignal<Locale>,
+    side_panel_view: RwSignal<SidePanelView>,
+    view_menu_open: RwSignal<bool>,
+    target: SidePanelView,
+    test_id: Option<&'static str>,
+    title: bool,
+}
+
+fn side_panel_view_item_label(locale: Locale, target: SidePanelView) -> &'static str {
+    match target {
+        SidePanelView::None => i18n::side_panel_hide(locale),
+        SidePanelView::Workspace => i18n::side_panel_workspace(locale),
+        SidePanelView::Tasks => i18n::side_panel_tasks(locale),
+        SidePanelView::DebugConsole => i18n::side_debug_console_btn(locale),
+    }
+}
+
+#[component]
+fn SidePanelViewMenuItem(bundle: SidePanelViewMenuItemBundle) -> impl IntoView {
+    let SidePanelViewMenuItemBundle {
+        locale,
+        side_panel_view,
+        view_menu_open,
+        target,
+        test_id,
+        title,
+    } = bundle;
+    view! {
+        <button
+            type="button"
+            class="toolbar-view-menu-item"
+            class:active=move || side_panel_view.get() == target
+            role="menuitemradio"
+            prop:data-testid=test_id.unwrap_or("")
+            prop:aria-checked=move || (side_panel_view.get() == target).to_string()
+            prop:title=move || {
+                if title {
+                    i18n::side_debug_console_title(locale.get())
+                } else {
+                    ""
+                }
+            }
+            on:click=move |_| {
+                pick_side_panel_view(side_panel_view, view_menu_open, target);
+            }
+        >
+            {move || side_panel_view_item_label(locale.get(), target)}
+        </button>
+    }
+}
+
 #[component]
 fn SidePanelViewPickerMenu(props: SidePanelViewPickerProps) -> impl IntoView {
     let SidePanelViewPickerProps {
@@ -128,57 +183,41 @@ fn SidePanelViewPickerMenu(props: SidePanelViewPickerProps) -> impl IntoView {
         view_menu_open,
     } = props;
     view! {
-        <div class="toolbar-view-menu" role="menu" prop:aria-label=move || i18n::side_view_menu_aria(locale.get())>
-            <button
-                type="button"
-                class="toolbar-view-menu-item"
-                class:active=move || matches!(side_panel_view.get(), SidePanelView::None)
-                role="menuitem"
-                on:click=move |_| {
-                    pick_side_panel_view(side_panel_view, view_menu_open, SidePanelView::None);
-                }
-            >
-                {move || i18n::side_panel_hide(locale.get())}
-            </button>
-            <button
-                type="button"
-                class="toolbar-view-menu-item"
-                data-testid="side-panel-workspace-menu"
-                class:active=move || matches!(side_panel_view.get(), SidePanelView::Workspace)
-                role="menuitem"
-                on:click=move |_| {
-                    pick_side_panel_view(side_panel_view, view_menu_open, SidePanelView::Workspace);
-                }
-            >
-                {move || i18n::side_panel_workspace(locale.get())}
-            </button>
-            <button
-                type="button"
-                class="toolbar-view-menu-item"
-                class:active=move || matches!(side_panel_view.get(), SidePanelView::Tasks)
-                role="menuitem"
-                on:click=move |_| {
-                    pick_side_panel_view(side_panel_view, view_menu_open, SidePanelView::Tasks);
-                }
-            >
-                {move || i18n::side_panel_tasks(locale.get())}
-            </button>
-            <button
-                type="button"
-                class="toolbar-view-menu-item"
-                class:active=move || matches!(side_panel_view.get(), SidePanelView::DebugConsole)
-                role="menuitem"
-                prop:title=move || i18n::side_debug_console_title(locale.get())
-                on:click=move |_| {
-                    pick_side_panel_view(
-                        side_panel_view,
-                        view_menu_open,
-                        SidePanelView::DebugConsole,
-                    );
-                }
-            >
-                {move || i18n::side_debug_console_btn(locale.get())}
-            </button>
+        <div prop:aria-label=move || i18n::side_view_menu_aria(locale.get())>
+            <crate::app::focusable_menu::FocusableRoleMenu class="toolbar-view-menu">
+                <SidePanelViewMenuItem bundle=SidePanelViewMenuItemBundle {
+                    locale,
+                    side_panel_view,
+                    view_menu_open,
+                    target: SidePanelView::None,
+                    test_id: None,
+                    title: false,
+                } />
+                <SidePanelViewMenuItem bundle=SidePanelViewMenuItemBundle {
+                    locale,
+                    side_panel_view,
+                    view_menu_open,
+                    target: SidePanelView::Workspace,
+                    test_id: Some("side-panel-workspace-menu"),
+                    title: false,
+                } />
+                <SidePanelViewMenuItem bundle=SidePanelViewMenuItemBundle {
+                    locale,
+                    side_panel_view,
+                    view_menu_open,
+                    target: SidePanelView::Tasks,
+                    test_id: None,
+                    title: false,
+                } />
+                <SidePanelViewMenuItem bundle=SidePanelViewMenuItemBundle {
+                    locale,
+                    side_panel_view,
+                    view_menu_open,
+                    target: SidePanelView::DebugConsole,
+                    test_id: None,
+                    title: true,
+                } />
+            </crate::app::focusable_menu::FocusableRoleMenu>
         </div>
     }
 }
