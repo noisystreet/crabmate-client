@@ -155,26 +155,15 @@ pub fn settings_block_bg(l: Locale) -> &'static str {
 
 pub fn settings_bg_glow(l: Locale) -> &'static str {
     match l {
-        Locale::ZhHans => "显示背景光晕（径向渐变）",
-        Locale::En => "Show background glow (radial gradients)",
+        Locale::ZhHans => "显示背景光晕",
+        Locale::En => "Show background glow",
     }
 }
 
 pub fn settings_block_web_api_bearer(l: Locale) -> &'static str {
     match l {
-        Locale::ZhHans => "Web API 共享密钥（访问本服务）",
-        Locale::En => "Web API shared secret (this server)",
-    }
-}
-
-pub fn settings_web_api_bearer_hint(l: Locale) -> &'static str {
-    match l {
-        Locale::ZhHans => {
-            "保护 CrabMate HTTP API：须与 serve 的 CM_WEB_API_BEARER_TOKEN 完全一致。官方壳写入本机钥匙串/Keystore（不落明文 localStorage）；普通浏览器仅弱持久化到本页。这不是下方「模型」里的云端 API_KEY。"
-        }
-        Locale::En => {
-            "Protects CrabMate HTTP APIs: must match CM_WEB_API_BEARER_TOKEN on serve. Official shells store it in the device keyring/Keystore (not plaintext localStorage); plain browsers use weak in-page persistence. Not the cloud API_KEY under Model below."
-        }
+        Locale::ZhHans => "Web API 共享密钥",
+        Locale::En => "Web API shared secret",
     }
 }
 
@@ -226,8 +215,8 @@ pub fn settings_web_api_bearer_status_set(l: Locale) -> &'static str {
 
 pub fn settings_web_api_bearer_status_unset(l: Locale) -> &'static str {
     match l {
-        Locale::ZhHans => "本页尚未配置 Web Bearer（若服务端启用了鉴权会出现 401）",
-        Locale::En => "Web Bearer not set on this page (401 if the server requires auth)",
+        Locale::ZhHans => "本页尚未配置 Web Bearer",
+        Locale::En => "Web Bearer not set on this page",
     }
 }
 
@@ -406,21 +395,10 @@ pub fn settings_block_session_typography(l: Locale) -> &'static str {
     }
 }
 
-pub fn settings_session_typography_hint(l: Locale) -> &'static str {
-    match l {
-        Locale::ZhHans => {
-            "以下选项存于本机用户偏好并立即生效；代码块与行内代码仍使用主题的等宽字体。"
-        }
-        Locale::En => {
-            "These choices are stored in local user prefs and apply immediately; code blocks still use the theme monospace stack."
-        }
-    }
-}
-
 pub fn settings_session_ui_font_label(l: Locale) -> &'static str {
     match l {
-        Locale::ZhHans => "界面字体（侧栏、顶栏、设置等）",
-        Locale::En => "UI font (sidebar, chrome, settings)",
+        Locale::ZhHans => "界面字体",
+        Locale::En => "UI font",
     }
 }
 
@@ -487,32 +465,21 @@ pub fn settings_section_session_title(l: Locale) -> &'static str {
     }
 }
 
-pub fn settings_section_session_desc(l: Locale) -> &'static str {
-    match l {
-        Locale::ZhHans => {
-            "控制当前浏览器连接到的服务端进程是否把 Web 会话写入 SQLite（仅本进程；重启 serve 后仍以配置文件为准）。界面与聊天字体、聊天区字号可在下方单独设置，存本机偏好并即时生效。"
-        }
-        Locale::En => {
-            "Control whether this server process persists Web chat to SQLite (this process only; restart serve still follows config files). UI/chat fonts and chat font size below are local prefs and apply immediately."
-        }
-    }
+pub fn settings_section_session_desc(_l: Locale) -> &'static str {
+    ""
 }
 
 pub fn settings_session_sqlite_toggle_label(l: Locale) -> &'static str {
     match l {
-        Locale::ZhHans => "使用 SQLite 保存会话（当前进程）",
-        Locale::En => "Persist sessions with SQLite (this process)",
+        Locale::ZhHans => "使用 SQLite 保存会话",
+        Locale::En => "Persist sessions with SQLite",
     }
 }
 
 pub fn settings_session_sqlite_unconfigured_hint(l: Locale) -> &'static str {
     match l {
-        Locale::ZhHans => {
-            "服务端未配置 conversation_store_sqlite_path，无法启用 SQLite；请在配置中设置后重启 serve。"
-        }
-        Locale::En => {
-            "Server has no conversation_store_sqlite_path; set it in config and restart serve to enable SQLite."
-        }
+        Locale::ZhHans => "服务端未配置 SQLite 会话存储",
+        Locale::En => "SQLite session storage is not configured on the server",
     }
 }
 

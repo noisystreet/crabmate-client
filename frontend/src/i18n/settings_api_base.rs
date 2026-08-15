@@ -4,19 +4,8 @@ use super::Locale;
 
 pub fn settings_block_api_base(l: Locale) -> &'static str {
     match l {
-        Locale::ZhHans => "API 基址（远程 serve）",
-        Locale::En => "API base URL (remote serve)",
-    }
-}
-
-pub fn settings_api_base_hint(l: Locale) -> &'static str {
-    match l {
-        Locale::ZhHans => {
-            "静态托管本 UI、API 在另一 Origin 时填写 serve 根地址（如 http://127.0.0.1:8080）。留空则同 Origin（相对路径）。须同时配置上方 Web Bearer，且 serve 开启 CORS 白名单。不是模型 api_base。"
-        }
-        Locale::En => {
-            "When this UI is hosted separately from serve, set the serve root (e.g. http://127.0.0.1:8080). Leave empty for same-origin relative paths. Also set Web Bearer above and allow this Origin in serve CORS. Not the LLM api_base."
-        }
+        Locale::ZhHans => "API 基址",
+        Locale::En => "API base URL",
     }
 }
 

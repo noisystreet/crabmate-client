@@ -44,9 +44,6 @@ pub(crate) fn SettingsMcpBlock(
                     }
                 }
             />
-            <p class="settings-intro settings-mcp-import-only-hint">
-                {move || crate::i18n::settings_mcp_servers_via_json_hint(locale.get())}
-            </p>
         </div>
     }
 }
