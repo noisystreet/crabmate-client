@@ -62,6 +62,7 @@ make test
 make desktop-dev
 make desktop-release         # .deb (auto trunk --release UI)
 make web-release             # crabmate-web .deb (trunk --release + loopback static host)
+make tui-release             # crabmate-tui .deb (binary only; no icon, no config)
 bash scripts/check-no-main-path.sh
 bash scripts/lizard-rust.sh              # CCN>10 count must equal module cap; if lower, tighten cap / --write-caps
 bash scripts/dependency-security.sh      # cargo audit + cargo deny; not in pre-commit / check.sh

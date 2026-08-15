@@ -64,6 +64,7 @@ make desktop-bin-release
 make web-release        # crabmate-web_*.deb (trunk --release + loopback static host; system browser)
 make apk                # Android; does not build frontend by default
 make tui                # build crabmate-tui (remote terminal)
+make tui-release        # crabmate-tui_*.deb (binary only; no icon, no config)
 make clean
 ```
 
@@ -92,7 +93,13 @@ echo "hello" | crabmate-tui --api-base http://127.0.0.1:8080 --yes chat
 crabmate-tui --api-base http://127.0.0.1:8080 chat "hello"
 ```
 
-Design: [docs/design/remote_cli_tui.md](./docs/design/remote_cli_tui.md).
+Design: [docs/design/remote_cli_tui.md](./docs/design/remote_cli_tui.md). Release package (binary only, no menu icon or config files):
+
+```bash
+make tui-release
+sudo dpkg -i crates/crabmate-tui/target/debian/crabmate-tui_*.deb
+crabmate-tui --api-base http://127.0.0.1:8080 repl
+```
 
 ## Docs
 
@@ -109,7 +116,7 @@ Design: [docs/design/remote_cli_tui.md](./docs/design/remote_cli_tui.md).
 | [docs/design/contract_pin.md](./docs/design/contract_pin.md) | Contract git tag / rev pinning |
 | [frontend/README.md](./frontend/README.md) | UI build (trunk) |
 
-Before commit: `pre-commit run --all-files` or `make check`. CI: `.github/workflows/ci.yml` (includes **frontend wasm**, **frontend/TUI unit tests**, **desktop release .deb**, and **web release .deb**); dependency audit: `.github/workflows/dependency-security.yml` (`make dependency-security`); Victauri shell E2E: nightly workflow or `./scripts/victauri-e2e.sh`.
+Before commit: `pre-commit run --all-files` or `make check`. CI: `.github/workflows/ci.yml` (includes **frontend wasm**, **frontend/TUI unit tests**, **desktop / web / tui release .deb**); dependency audit: `.github/workflows/dependency-security.yml` (`make dependency-security`); Victauri shell E2E: nightly workflow or `./scripts/victauri-e2e.sh`.
 
 ## Quick start (Desktop)
 
