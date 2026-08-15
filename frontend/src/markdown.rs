@@ -27,7 +27,6 @@ fn normalize_glued_markdown_blocks(md: &str) -> String {
     s = s.replace("。>", "。\n\n>");
     s = s.replace("！>", "！\n\n>");
     s = s.replace("？>", "？\n\n>");
-    s = s.replace("：>", "：\n\n>");
     s
 }
 
@@ -38,9 +37,9 @@ fn normalize_glued_markdown_blocks(md: &str) -> String {
 /// 2. **信息串与注释粘连**：行首合法围栏后写成 `` ```rust// comment ``，拆成 `` ```rust `` 与 `// comment` 两行。
 /// 3. **行尾悬空围栏**：行首不是合法围栏行，但行尾仅剩一段 `` ``` `` / `~~~` 且无其它正文，去掉尾部 fence，避免误开空代码块。
 /// 4. **ATX 标题缺空格**：如 `###规范与安全`（`#` 与标题字之间无空格），在至多 6 个 `#` 后补一个空格，满足 CommonMark 标题语法。
-/// 5. **列表标记缺空格**：如 `-规范` / `1.下一步`（标记与正文之间无空格）；不改 `1.0` 这类版本号，也不把 `*em*` 当列表。
+/// 5. **列表标记缺空格**：如 `-规范` / `1.下一步`（标记与**非 ASCII** 正文之间无空格）；不改 `-rf` / `1.0` / `*em*`。
 /// 6. **GFM 表头与分隔行粘连**：如 `| a | b ||---|---|`（模型常漏换行），拆成表头行 + 独立对齐行。
-/// 7. **引用粘连**：句末全角标点后紧贴 `>`（如 `结束。> 引用`），拆成独立引用块。
+/// 7. **引用粘连**：句末 `。` / `！` / `？` 后紧贴 `>`（如 `结束。> 引用`），拆成独立引用块；不拆 `：>`（避免 `阈值：> 0`）。
 ///
 /// 无法覆盖所有非法 Markdown；不改写嵌套列表缩进（避免误伤代码/散文）。极端正文若以围栏标记结尾仍可能被改写（极少见）。
 pub fn normalize_markdown_for_render(md: &str) -> String {
@@ -115,7 +114,12 @@ fn skip_atx_or_list_indent(chars: &[(usize, char)]) -> usize {
     idx
 }
 
-/// 行首 `-规范` / `+项` 补空格；不碰 `*`（与强调冲突）和 `--` 主题分割。
+/// 标记后紧贴的中文（等非 ASCII 字母）才补空格；避开 `-rf` / `1.Next`。
+fn glued_cjk_list_body(ch: char) -> bool {
+    ch.is_alphabetic() && !ch.is_ascii()
+}
+
+/// 行首 `-规范` / `+项` 补空格；不碰 `*`（与强调冲突）、`--` 主题分割、ASCII 短选项。
 fn fix_unordered_list_missing_space(line: &str) -> Option<String> {
     let chars: Vec<(usize, char)> = line.char_indices().collect();
     let idx = skip_atx_or_list_indent(&chars);
@@ -124,7 +128,7 @@ fn fix_unordered_list_missing_space(line: &str) -> Option<String> {
         return None;
     }
     let next = chars.get(idx + 1)?.1;
-    if !next.is_alphabetic() {
+    if !glued_cjk_list_body(next) {
         return None;
     }
     Some(insert_space_at(line, chars[idx + 1].0))
@@ -140,11 +144,7 @@ fn skip_ascii_digits(chars: &[(usize, char)], start: usize, max_digits: usize) -
     dig
 }
 
-fn ordered_marker_lacks_space(nch: char) -> bool {
-    nch != ' ' && nch != '\t' && !nch.is_ascii_digit()
-}
-
-/// `1.下一步` 的正文起始字节；`1.0` / 已有空格则 `None`。
+/// `1.下一步` 的正文起始字节；`1.0` / `1.Next` / 已有空格则 `None`。
 fn ordered_list_body_byte(line: &str) -> Option<usize> {
     let chars: Vec<(usize, char)> = line.char_indices().collect();
     let idx = skip_atx_or_list_indent(&chars);
@@ -157,7 +157,7 @@ fn ordered_list_body_byte(line: &str) -> Option<usize> {
     }
     let after = dig + 1;
     let nch = chars.get(after)?.1;
-    if !ordered_marker_lacks_space(nch) {
+    if !glued_cjk_list_body(nch) {
         return None;
     }
     Some(chars[after].0)
@@ -819,6 +819,18 @@ mod tests {
         assert!(h.contains("<h3"), "got {h:?}");
         assert!(!h.contains("<h1"), "got {h:?}");
         assert!(h.contains("Only"), "got {h:?}");
+    }
+
+    #[test]
+    fn normalize_skips_ascii_flags_and_colon_greater_than() {
+        assert_eq!(normalize_markdown_for_render("-rf"), "-rf");
+        assert_eq!(normalize_markdown_for_render("-n"), "-n");
+        assert_eq!(normalize_markdown_for_render("1.Next"), "1.Next");
+        assert_eq!(
+            normalize_markdown_for_render("```\n-e\n```"),
+            "```\n-e\n```"
+        );
+        assert_eq!(normalize_markdown_for_render("阈值：> 0.5"), "阈值：> 0.5");
     }
 }
 
