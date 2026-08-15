@@ -211,6 +211,13 @@ pub fn ide_menu_bar_aria(l: Locale) -> &'static str {
     }
 }
 
+pub fn shell_chat_menubar_aria(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "项目菜单",
+        Locale::En => "Project menu",
+    }
+}
+
 pub fn ide_tauri_window_controls_aria(l: Locale) -> &'static str {
     match l {
         Locale::ZhHans => "窗口控制",

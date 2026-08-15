@@ -164,4 +164,33 @@ test.describe("命令审批场景回归", () => {
 
     await expect(page.locator("section.chat-tui-turn--tool")).toHaveCount(1);
   });
+
+  test("approval_escape_denies_and_closes_modal", async ({ page }) => {
+    const sse = [
+      'id: 1\ndata: {"type":"CUSTOM","customType":"assistant_answer_phase"}\n\n',
+      "id: 2\ndata: 需要执行命令。\n\n",
+      'id: 3\ndata: {"type":"CUSTOM","customType":"command_approval","data":{"command":"rm","args":"-rf /tmp/x","allowlistKey":"rm"}}\n\n',
+      'id: 4\ndata: {"type":"RUN_FINISHED"}\n\n',
+    ].join("");
+
+    await installMockSseWithApproval(page, sse);
+    await seedSession(page, BASE_SID + "_escape_deny");
+    await sendMessage(page, "删临时目录");
+
+    await expect(page.locator('[data-testid="approval-modal"]')).toBeVisible({
+      timeout: 10_000,
+    });
+    const denyPost = page.waitForRequest((req) => {
+      if (req.method() !== "POST" || !req.url().includes("/chat/approval")) {
+        return false;
+      }
+      const body = req.postData() ?? "";
+      return body.includes('"decision":"deny"');
+    });
+    await page.keyboard.press("Escape");
+    await denyPost;
+    await expect(
+      page.locator('[data-testid="approval-modal"]'),
+    ).not.toBeVisible({ timeout: 5_000 });
+  });
 });

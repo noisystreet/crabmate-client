@@ -6,6 +6,7 @@ use wasm_bindgen::JsCast;
 
 use super::message_turn_menu::{
     MessageTurnContextMenuLayer, MessageTurnMenuAnchor, build_message_turn_press_handlers,
+    try_open_message_turn_menu_from_keydown,
 };
 use super::scroll_follow::follow_after_content_paint;
 use super::scroll_shell::ChatScrollShellSignals;
@@ -322,6 +323,121 @@ fn apply_tui_sync_plan(transcript: &web_sys::HtmlElement, plan: &TuiSyncPlan) ->
     apply_tui_body_and_action_patches(transcript, plan)
 }
 
+fn apply_or_rebuild_tui_mount(
+    el: &web_sys::HtmlElement,
+    plan: TuiSyncPlan,
+    mount_state: RwSignal<Option<TuiMountState>>,
+    rebuild: impl FnOnce() -> TuiSyncPlan,
+) {
+    if apply_tui_sync_plan(el, &plan) {
+        mount_state.set(Some(plan.next));
+        return;
+    }
+    let forced = rebuild();
+    if apply_tui_sync_plan(el, &forced) {
+        mount_state.set(Some(forced.next));
+        return;
+    }
+    web_sys::console::warn_1(
+        &"chat-tui: forced rebuild failed; keeping previous mount_state".into(),
+    );
+}
+
+fn sync_chat_tui_stream_dom(
+    chat: ChatSessionSignals,
+    locale: Locale,
+    apply_filters: bool,
+    md_on: bool,
+    transcript_ref: NodeRef<leptos::html::Div>,
+    mount_state: RwSignal<Option<TuiMountState>>,
+    scroll_shell: ChatScrollShellSignals,
+) {
+    let tool_chunks = chat.tool_output_chunks.get();
+    let active_id = chat.active_id.get();
+    let overlay = chat.stream_text_overlay.get();
+    let prev = mount_state.get_untracked();
+    let plan = chat.sessions.with(|sessions| {
+        plan_for_active_session(PlanActiveSessionArgs {
+            sessions,
+            active_id: &active_id,
+            prev: prev.as_ref(),
+            overlay: overlay.as_ref(),
+            locale,
+            apply_filters,
+            markdown_render: md_on,
+            tool_chunks: &tool_chunks,
+        })
+    });
+
+    let Some(node) = transcript_ref.get() else {
+        return;
+    };
+    let Some(el) = node.dyn_ref::<web_sys::HtmlElement>() else {
+        return;
+    };
+
+    apply_or_rebuild_tui_mount(el, plan, mount_state, || {
+        chat.sessions.with(|sessions| {
+            plan_for_active_session(PlanActiveSessionArgs {
+                sessions,
+                active_id: &active_id,
+                prev: None,
+                overlay: overlay.as_ref(),
+                locale,
+                apply_filters,
+                markdown_render: md_on,
+                tool_chunks: &tool_chunks,
+            })
+        })
+    });
+    follow_after_content_paint(scroll_shell);
+}
+
+#[component]
+fn ChatTuiHistoryLoadStrip(
+    history_flags: Memo<(bool, bool)>,
+    chat: ChatSessionSignals,
+    locale: RwSignal<Locale>,
+    scroll_shell: ChatScrollShellSignals,
+    status_err: RwSignal<Option<String>>,
+) -> impl IntoView {
+    view! {
+        <Show when=move || {
+            let (has_older, loading_older) = history_flags.get();
+            has_older || loading_older
+        }>
+            <div class="messages-history-load" role="status">
+                <Show
+                    when=move || history_flags.get().1
+                    fallback=move || {
+                        view! {
+                            <button
+                                type="button"
+                                class="btn btn-ghost btn-sm"
+                                data-testid="chat-load-older"
+                                on:click=move |_| {
+                                    try_load_older_messages_for_active_session(
+                                        chat,
+                                        locale.get_untracked(),
+                                        scroll_shell,
+                                        status_err,
+                                    );
+                                }
+                            >
+                                {move || i18n::chat_history_load_older(locale.get())}
+                            </button>
+                        }
+                    }
+                >
+                    <span class="messages-history-load-busy">
+                        {move || i18n::chat_history_loading_older(locale.get())}
+                    </span>
+                </Show>
+            </div>
+        </Show>
+    }
+}
+
 #[component]
 pub(crate) fn ChatTuiStreamView(
     chat: ChatSessionSignals,
@@ -351,58 +467,18 @@ pub(crate) fn ChatTuiStreamView(
 
     Effect::new(move |_| {
         let _ = chat.stream_overlay_revision.get();
-        let tool_chunks = chat.tool_output_chunks.get();
-        let active_id = chat.active_id.get();
         let locale = locale.get();
         let apply_filters = apply_assistant_display_filters.get();
         let md_on = markdown_render.get();
-        let overlay = chat.stream_text_overlay.get();
-        let prev = mount_state.get_untracked();
-        let plan = chat.sessions.with(|sessions| {
-            plan_for_active_session(PlanActiveSessionArgs {
-                sessions,
-                active_id: &active_id,
-                prev: prev.as_ref(),
-                overlay: overlay.as_ref(),
-                locale,
-                apply_filters,
-                markdown_render: md_on,
-                tool_chunks: &tool_chunks,
-            })
-        });
-
-        let Some(node) = transcript_ref.get() else {
-            return;
-        };
-        let Some(el) = node.dyn_ref::<web_sys::HtmlElement>() else {
-            return;
-        };
-
-        let applied = apply_tui_sync_plan(el, &plan);
-        if applied {
-            mount_state.set(Some(plan.next));
-        } else {
-            let forced = chat.sessions.with(|sessions| {
-                plan_for_active_session(PlanActiveSessionArgs {
-                    sessions,
-                    active_id: &active_id,
-                    prev: None,
-                    overlay: overlay.as_ref(),
-                    locale,
-                    apply_filters,
-                    markdown_render: md_on,
-                    tool_chunks: &tool_chunks,
-                })
-            });
-            if apply_tui_sync_plan(el, &forced) {
-                mount_state.set(Some(forced.next));
-            } else {
-                web_sys::console::warn_1(
-                    &"chat-tui: forced rebuild failed; keeping previous mount_state".into(),
-                );
-            }
-        }
-        follow_after_content_paint(scroll_shell);
+        sync_chat_tui_stream_dom(
+            chat,
+            locale,
+            apply_filters,
+            md_on,
+            transcript_ref,
+            mount_state,
+            scroll_shell,
+        );
     });
 
     let history_flags = Memo::new(move |_| {
@@ -420,39 +496,13 @@ pub(crate) fn ChatTuiStreamView(
             class="messages-inner chat-tui-inner"
             data-testid="chat-tui-stream-view"
         >
-            <Show when=move || {
-                let (has_older, loading_older) = history_flags.get();
-                has_older || loading_older
-            }>
-                <div class="messages-history-load" role="status">
-                    <Show
-                        when=move || history_flags.get().1
-                        fallback=move || {
-                            view! {
-                                <button
-                                    type="button"
-                                    class="btn btn-ghost btn-sm"
-                                    data-testid="chat-load-older"
-                                    on:click=move |_| {
-                                        try_load_older_messages_for_active_session(
-                                            chat,
-                                            locale.get_untracked(),
-                                            scroll_shell,
-                                            status_err,
-                                        );
-                                    }
-                                >
-                                    {move || i18n::chat_history_load_older(locale.get())}
-                                </button>
-                            }
-                        }
-                    >
-                        <span class="messages-history-load-busy">
-                            {move || i18n::chat_history_loading_older(locale.get())}
-                        </span>
-                    </Show>
-                </div>
-            </Show>
+            <ChatTuiHistoryLoadStrip
+                history_flags
+                chat
+                locale
+                scroll_shell
+                status_err
+            />
             <div
                 class="chat-tui-transcript"
                 data-testid="chat-tui-transcript"
@@ -460,6 +510,9 @@ pub(crate) fn ChatTuiStreamView(
                 aria-live="polite"
                 aria-atomic="false"
                 on:contextmenu=move |ev| on_contextmenu(ev)
+                on:keydown=move |ev: web_sys::KeyboardEvent| {
+                    try_open_message_turn_menu_from_keydown(&ev, chat, turn_menu);
+                }
                 on:pointerdown=move |ev| on_pointerdown(ev)
                 on:pointermove=move |ev| on_pointermove(ev)
                 on:pointerup=move |_| on_pointer_end()

@@ -9,6 +9,20 @@ pub fn workspace_tree_no_data(l: Locale) -> &'static str {
     }
 }
 
+pub fn workspace_tree_aria(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "工作区文件",
+        Locale::En => "Workspace files",
+    }
+}
+
+pub fn workspace_tree_file_row_aria(l: Locale, name: &str) -> String {
+    match l {
+        Locale::ZhHans => format!("打开文件 {name}"),
+        Locale::En => format!("Open file {name}"),
+    }
+}
+
 pub fn workspace_tree_toggle_dir_title(l: Locale) -> &'static str {
     match l {
         Locale::ZhHans => "展开或折叠子目录",

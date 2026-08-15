@@ -10,6 +10,7 @@ use wasm_bindgen::JsCast;
 use super::tui_actions_bar::{
     TuiTurnActionHandlers, dispatch_tui_turn_action, turn_menu_action_keys,
 };
+use crate::a11y::is_context_menu_open_key;
 use crate::chat_session_state::ChatSessionSignals;
 use crate::i18n::{self, Locale};
 use crate::session_ops::clamp_session_ctx_menu_pos;
@@ -96,6 +97,28 @@ fn open_menu_at(
         msg_idx: idx,
         action_keys,
     }));
+}
+
+pub(crate) fn try_open_message_turn_menu_from_keydown(
+    ev: &web_sys::KeyboardEvent,
+    chat: ChatSessionSignals,
+    menu: RwSignal<Option<MessageTurnMenuAnchor>>,
+) {
+    if !is_context_menu_open_key(&ev.key(), ev.shift_key()) {
+        return;
+    }
+    let Some((wrap, message_id)) = resolve_turn_press_target(ev.target()) else {
+        return;
+    };
+    ev.prevent_default();
+    let rect = wrap.get_bounding_client_rect();
+    open_menu_at(
+        menu,
+        chat,
+        message_id,
+        rect.left() as i32,
+        rect.bottom() as i32,
+    );
 }
 
 fn wrap_from_event_target(target: &web_sys::EventTarget) -> Option<web_sys::HtmlElement> {
@@ -291,6 +314,11 @@ pub(crate) fn MessageTurnContextMenuLayer(
     menu: RwSignal<Option<MessageTurnMenuAnchor>>,
     action_handlers: TuiTurnActionHandlers,
 ) -> impl IntoView {
+    let menu_style = Memo::new(move |_| {
+        menu.get()
+            .map(|a| format!("left:{}px;top:{}px", a.x, a.y))
+            .unwrap_or_default()
+    });
     view! {
         <Show when=move || menu.get().is_some()>
             <div class="session-ctx-layer message-turn-ctx-layer" data-testid="message-turn-ctx-menu">
@@ -298,14 +326,9 @@ pub(crate) fn MessageTurnContextMenuLayer(
                     class="session-ctx-backdrop"
                     on:click=move |_| menu.set(None)
                 ></div>
-                <div
+                <crate::app::focusable_menu::FocusableRoleMenu
                     class="session-ctx-menu"
-                    role="menu"
-                    style=move || {
-                        menu.get()
-                            .map(|a| format!("left:{}px;top:{}px", a.x, a.y))
-                            .unwrap_or_default()
-                    }
+                    menu_style=menu_style
                 >
                     {move || {
                         let Some(anchor) = menu.get() else {
@@ -357,7 +380,7 @@ pub(crate) fn MessageTurnContextMenuLayer(
                             .collect_view()
                             .into_any()
                     }}
-                </div>
+                </crate::app::focusable_menu::FocusableRoleMenu>
             </div>
         </Show>
     }

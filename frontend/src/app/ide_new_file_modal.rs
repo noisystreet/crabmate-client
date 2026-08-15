@@ -6,6 +6,7 @@ use leptos::prelude::*;
 use leptos_dom::helpers::event_target_value;
 
 use crate::app::app_signals::IdeChromeSignals;
+use crate::app::focusable_menu::FocusableModalPanel;
 use crate::app::workspace_panel::make_refresh_workspace_after_mutation;
 use crate::app::workspace_panel_state::WorkspacePanelSignals;
 use crate::i18n::{self, Locale};
@@ -55,64 +56,75 @@ fn submit_new_file(input: IdeNewFileModalInput) {
     );
 }
 
+fn on_new_file_path_keydown(ev: web_sys::KeyboardEvent, input: IdeNewFileModalInput) {
+    if ev.key() != "Enter" {
+        return;
+    }
+    ev.prevent_default();
+    submit_new_file(input);
+}
+
+#[component]
+fn IdeNewFileModalPanel(input: IdeNewFileModalInput) -> impl IntoView {
+    let IdeNewFileModalInput { locale, chrome, .. } = input;
+    view! {
+        <FocusableModalPanel
+            class="modal ide-new-file-modal"
+            dialog_role="dialog"
+            labelledby="ide-new-file-title"
+            on_escape=Callback::new(move |_| close_new_file_modal(chrome))
+        >
+            <div class="modal-head">
+                <span id="ide-new-file-title" class="modal-title">
+                    {move || i18n::ide_menu_new_file(locale.get())}
+                </span>
+            </div>
+            <div class="modal-body">
+                <label class="settings-field-label" for="ide-new-file-path">
+                    {move || i18n::ide_new_file_prompt(locale.get())}
+                </label>
+                <input
+                    id="ide-new-file-path"
+                    type="text"
+                    class="settings-field-input"
+                    data-testid="ide-new-file-path-input"
+                    prop:placeholder=move || i18n::ide_new_file_placeholder(locale.get())
+                    prop:value=move || chrome.new_file_path_draft.get()
+                    on:input=move |ev| chrome.new_file_path_draft.set(event_target_value(&ev))
+                    on:keydown=move |ev: web_sys::KeyboardEvent| {
+                        on_new_file_path_keydown(ev, input);
+                    }
+                />
+            </div>
+            <div class="modal-footer actions">
+                <button
+                    type="button"
+                    class="btn btn-secondary"
+                    data-testid="ide-new-file-cancel"
+                    on:click=move |_| close_new_file_modal(chrome)
+                >
+                    {move || i18n::ide_new_file_cancel(locale.get())}
+                </button>
+                <button
+                    type="button"
+                    class="btn btn-primary"
+                    data-testid="ide-new-file-create"
+                    on:click=move |_| submit_new_file(input)
+                >
+                    {move || i18n::ide_new_file_create(locale.get())}
+                </button>
+            </div>
+        </FocusableModalPanel>
+    }
+}
+
 #[component]
 pub fn IdeNewFileModal(input: IdeNewFileModalInput) -> impl IntoView {
-    let IdeNewFileModalInput { locale, chrome, .. } = input;
-
+    let chrome = input.chrome;
     view! {
         <Show when=move || chrome.new_file_modal_open.get()>
             <div class="modal-backdrop" data-testid="ide-new-file-modal">
-                <div
-                    class="modal ide-new-file-modal"
-                    role="dialog"
-                    aria-modal="true"
-                    aria-labelledby="ide-new-file-title"
-                    on:click=|ev: leptos::ev::MouseEvent| ev.stop_propagation()
-                >
-                    <div class="modal-head">
-                        <span id="ide-new-file-title" class="modal-title">
-                            {move || i18n::ide_menu_new_file(locale.get())}
-                        </span>
-                    </div>
-                    <div class="modal-body">
-                        <label class="settings-field-label" for="ide-new-file-path">
-                            {move || i18n::ide_new_file_prompt(locale.get())}
-                        </label>
-                        <input
-                            id="ide-new-file-path"
-                            type="text"
-                            class="settings-field-input"
-                            data-testid="ide-new-file-path-input"
-                            prop:placeholder=move || i18n::ide_new_file_placeholder(locale.get())
-                            prop:value=move || chrome.new_file_path_draft.get()
-                            on:input=move |ev| chrome.new_file_path_draft.set(event_target_value(&ev))
-                            on:keydown=move |ev: web_sys::KeyboardEvent| {
-                                if ev.key() == "Enter" {
-                                    ev.prevent_default();
-                                    submit_new_file(input);
-                                }
-                            }
-                        />
-                    </div>
-                    <div class="modal-footer actions">
-                        <button
-                            type="button"
-                            class="btn btn-secondary"
-                            data-testid="ide-new-file-cancel"
-                            on:click=move |_| close_new_file_modal(chrome)
-                        >
-                            {move || i18n::ide_new_file_cancel(locale.get())}
-                        </button>
-                        <button
-                            type="button"
-                            class="btn btn-primary"
-                            data-testid="ide-new-file-create"
-                            on:click=move |_| submit_new_file(input)
-                        >
-                            {move || i18n::ide_new_file_create(locale.get())}
-                        </button>
-                    </div>
-                </div>
+                <IdeNewFileModalPanel input />
             </div>
         </Show>
     }

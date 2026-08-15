@@ -114,6 +114,12 @@ pub fn WorkspaceContextMenuLayer(
         pending_create: workspace_pending_create,
     };
     let actions = StoredValue::new(actions);
+    let menu_style = Memo::new(move |_| {
+        workspace_context_menu
+            .get()
+            .map(|a| format!("left:{}px;top:{}px;", a.x, a.y))
+            .unwrap_or_default()
+    });
     view! {
         <Show when=move || workspace_context_menu.get().is_some()>
             <div class="session-ctx-layer workspace-ctx-layer">
@@ -122,16 +128,9 @@ pub fn WorkspaceContextMenuLayer(
                     aria-hidden="true"
                     on:click=move |_| workspace_context_menu.set(None)
                 ></div>
-                <div
+                <crate::app::focusable_menu::FocusableRoleMenu
                     class="session-ctx-menu workspace-ctx-menu"
-                    role="menu"
-                    on:click=|ev: leptos::ev::MouseEvent| ev.stop_propagation()
-                    style=move || {
-                        workspace_context_menu
-                            .get()
-                            .map(|a| format!("left:{}px;top:{}px;", a.x, a.y))
-                            .unwrap_or_default()
-                    }
+                    menu_style=menu_style
                 >
                     <button
                         type="button"
@@ -231,7 +230,7 @@ pub fn WorkspaceContextMenuLayer(
                             }}
                         </button>
                     </Show>
-                </div>
+                </crate::app::focusable_menu::FocusableRoleMenu>
             </div>
         </Show>
     }

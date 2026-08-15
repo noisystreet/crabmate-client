@@ -313,7 +313,7 @@ pub(crate) fn ShellTopbarFileMenu(
                 {move || i18n::ide_menu_project(locale.get())}
             </button>
             <Show when=move || open_menu.get() == Some(IdeMenuId::File)>
-                <div class="ide-menu-dropdown" role="menu">
+                <crate::app::focusable_menu::FocusableRoleMenu class="ide-menu-dropdown">
                     <ShellMenuOpenWorkspaceItem
                         workspace_pick=workspace_pick
                         open_menu=open_menu
@@ -341,7 +341,7 @@ pub(crate) fn ShellTopbarFileMenu(
                             />
                         }
                     })}
-                </div>
+                </crate::app::focusable_menu::FocusableRoleMenu>
             </Show>
         </div>
     }

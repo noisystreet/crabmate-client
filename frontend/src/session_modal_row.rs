@@ -92,6 +92,7 @@ fn SessionModalRowOpenButton(bundle: SessionModalRowBundle) -> impl IntoView {
         chat,
         draft,
         session_modal,
+        active,
         ..
     } = bundle;
     view! {
@@ -99,6 +100,7 @@ fn SessionModalRowOpenButton(bundle: SessionModalRowBundle) -> impl IntoView {
             type="button"
             class="session-open"
             data-testid=format!("session-modal-open-{id}")
+            prop:aria-current=move || crate::a11y::aria_current_true_or_false(active)
             on:click={
                 let id = id.clone();
                 move |_| {

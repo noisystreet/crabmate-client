@@ -42,7 +42,11 @@ fn ShellTopbarChatMenus(
     });
     view! {
         <>
-            <div class="shell-topbar-start shell-topbar-menus">
+            <div
+                class="shell-topbar-start shell-topbar-menus"
+                role="menubar"
+                prop:aria-label=move || i18n::shell_chat_menubar_aria(locale.get())
+            >
                 <ShellTopbarFileMenu
                     locale=locale
                     workspace_pick=workspace_pick
@@ -68,6 +72,7 @@ fn ShellTopbarIdeMenus(ide_menu_bar_bridge: RwSignal<Option<IdeMenuBarBridge>>) 
 
 #[component]
 fn ShellTopbarFileStatusSlot(
+    locale: RwSignal<Locale>,
     editor_layout_mode: RwSignal<bool>,
     ide_menu_bar_bridge: RwSignal<Option<IdeMenuBarBridge>>,
 ) -> impl IntoView {
@@ -86,6 +91,9 @@ fn ShellTopbarFileStatusSlot(
                         view! {
                             <Show when=move || ide_text.get() != ide_baseline.get()>
                                 <span class="ide-dirty-dot" aria-hidden="true">"●"</span>
+                                <span class="sr-only">
+                                    {move || i18n::ide_tab_unsaved_aria(locale.get())}
+                                </span>
                             </Show>
                             <span class="shell-topbar-file-path">
                                 {move || ide_path.get().unwrap_or_default()}
@@ -147,6 +155,7 @@ pub fn mobile_shell_header_view(signals: MobileShellHeaderSignals) -> impl IntoV
             <ShellTopbarWorkspaceRoot pick=workspace_pick />
             <div class="shell-topbar-trailing">
                 <ShellTopbarFileStatusSlot
+                    locale=locale
                     editor_layout_mode=editor_layout_mode
                     ide_menu_bar_bridge=ide_menu_bar_bridge
                 />

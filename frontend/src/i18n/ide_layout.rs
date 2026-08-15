@@ -76,6 +76,24 @@ pub fn ide_tab_close_aria(l: Locale, name: &str) -> String {
     }
 }
 
+pub fn ide_tab_unsaved_aria(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "未保存",
+        Locale::En => "Unsaved",
+    }
+}
+
+pub fn ide_tab_select_aria(name: &str, dirty: bool, pinned: bool, loc: Locale) -> String {
+    let mut parts = vec![name.to_string()];
+    if dirty {
+        parts.push(ide_tab_unsaved_aria(loc).to_string());
+    }
+    if pinned {
+        parts.push(ide_tab_pinned_aria(loc).to_string());
+    }
+    parts.join(", ")
+}
+
 pub fn ide_no_file(l: Locale) -> &'static str {
     match l {
         Locale::ZhHans => "请从左侧选择文件。",

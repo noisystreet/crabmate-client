@@ -156,6 +156,8 @@ fn StatusAgentRoleMenuPortal(props: AgentRoleMenuPortalProps) -> impl IntoView {
         menu_open,
         menu_fixed_style,
     } = props;
+    let menu_style = Memo::new(move |_| menu_fixed_style.get().unwrap_or_default());
+    let aria_label = Memo::new(move |_| i18n::status_role_title_attr(locale.get()).to_string());
 
     view! {
         <Portal>
@@ -169,16 +171,16 @@ fn StatusAgentRoleMenuPortal(props: AgentRoleMenuPortalProps) -> impl IntoView {
                     close_role_menu(menu_open, menu_fixed_style);
                 }
             />
-            <div
+            <crate::app::focusable_menu::FocusableRoleMenu
                 class="status-agent-role-menu status-agent-role-menu--fixed status-agent-role-menu--portal"
-                role="menu"
-                prop:style=move || menu_fixed_style.get().unwrap_or_default()
-                prop:aria-label=move || i18n::status_role_title_attr(locale.get())
+                menu_style=menu_style
+                aria_label=aria_label
             >
                 <button
                     type="button"
                     class="status-agent-role-menu-item"
-                    role="menuitem"
+                    role="menuitemradio"
+                    prop:aria-checked=move || selected_agent_role.get().is_none().to_string()
                     class:active=move || selected_agent_role.get().is_none()
                     on:click=move |_| {
                         apply_agent_role_selection(
@@ -213,16 +215,21 @@ fn StatusAgentRoleMenuPortal(props: AgentRoleMenuPortalProps) -> impl IntoView {
                         .into_iter()
                         .map(|id| {
                             let id_pick = id.clone();
+                            let id_checked = id.clone();
+                            let id_active = id.clone();
                             view! {
                                 <button
                                     type="button"
                                     class="status-agent-role-menu-item"
-                                    role="menuitem"
+                                    role="menuitemradio"
+                                    prop:aria-checked=move || {
+                                        (selected_agent_role.get().as_deref()
+                                            == Some(id_checked.as_str()))
+                                            .to_string()
+                                    }
                                     class:active=move || {
-                                        selected_agent_role
-                                            .get()
-                                            .as_deref()
-                                            == Some(id.as_str())
+                                        selected_agent_role.get().as_deref()
+                                            == Some(id_active.as_str())
                                     }
                                     on:click=move |_| {
                                         apply_agent_role_selection(
@@ -243,7 +250,7 @@ fn StatusAgentRoleMenuPortal(props: AgentRoleMenuPortalProps) -> impl IntoView {
                         })
                         .collect_view()
                 }}
-            </div>
+            </crate::app::focusable_menu::FocusableRoleMenu>
         </Portal>
     }
 }

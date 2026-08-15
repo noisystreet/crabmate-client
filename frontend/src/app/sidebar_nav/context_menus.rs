@@ -19,6 +19,12 @@ pub(super) fn SessionContextMenuLayer(
     let draft = shell.composer.draft;
     let locale = shell.locale;
     let apply_assistant_display_filters = shell.apply_assistant_display_filters;
+    let menu_style = Memo::new(move |_| {
+        session_context_menu
+            .get()
+            .map(|a| format!("left:{}px;top:{}px;", a.x, a.y))
+            .unwrap_or_default()
+    });
     view! {
         <Show when=move || session_context_menu.get().is_some()>
             <div class="session-ctx-layer">
@@ -27,16 +33,9 @@ pub(super) fn SessionContextMenuLayer(
                     aria-hidden="true"
                     on:click=move |_| session_context_menu.set(None)
                 ></div>
-                <div
+                <crate::app::focusable_menu::FocusableRoleMenu
                     class="session-ctx-menu"
-                    role="menu"
-                    on:click=|ev: leptos::ev::MouseEvent| ev.stop_propagation()
-                    style=move || {
-                        session_context_menu
-                            .get()
-                            .map(|a| format!("left:{}px;top:{}px;", a.x, a.y))
-                            .unwrap_or_default()
-                    }
+                    menu_style=menu_style
                 >
                     <button
                         type="button"
@@ -190,7 +189,7 @@ pub(super) fn SessionContextMenuLayer(
                     >
                         {move || i18n::ctx_delete_session(locale.get())}
                     </button>
-                </div>
+                </crate::app::focusable_menu::FocusableRoleMenu>
             </div>
         </Show>
     }
@@ -205,6 +204,12 @@ pub(super) fn RailContextMenuLayer(
     sidebar_search_panel_open: RwSignal<bool>,
     chat_find_panel_open: RwSignal<bool>,
 ) -> impl IntoView {
+    let menu_style = Memo::new(move |_| {
+        sidebar_rail_ctx_menu
+            .get()
+            .map(|(x, y)| format!("left:{x}px;top:{y}px;"))
+            .unwrap_or_default()
+    });
     view! {
         <Show when=move || sidebar_rail_ctx_menu.get().is_some()>
             <div class="session-ctx-layer">
@@ -213,16 +218,9 @@ pub(super) fn RailContextMenuLayer(
                     aria-hidden="true"
                     on:click=move |_| sidebar_rail_ctx_menu.set(None)
                 ></div>
-                <div
+                <crate::app::focusable_menu::FocusableRoleMenu
                     class="session-ctx-menu"
-                    role="menu"
-                    on:click=|ev: leptos::ev::MouseEvent| ev.stop_propagation()
-                    style=move || {
-                        sidebar_rail_ctx_menu
-                            .get()
-                            .map(|(x, y)| format!("left:{}px;top:{}px;", x, y))
-                            .unwrap_or_default()
-                    }
+                    menu_style=menu_style
                 >
                     <button
                         type="button"
@@ -258,7 +256,7 @@ pub(super) fn RailContextMenuLayer(
                     >
                         {move || i18n::nav_rail_ctx_find_in_chat(locale.get())}
                     </button>
-                </div>
+                </crate::app::focusable_menu::FocusableRoleMenu>
             </div>
         </Show>
     }
