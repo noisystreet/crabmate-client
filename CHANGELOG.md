@@ -15,6 +15,7 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Added
 
+- Chat: bare `http://` / `https://` URLs in markdown (and streaming active lines) render as links (case-insensitive scheme; CJK paths and IPv6 literals kept); skipped inside code/fences and when markdown is off; `javascript:` is not autolinked
 - CI: `dependency-security` workflow (`cargo audit` + `cargo deny check licenses bans sources` on each Cargo workspace; policy in `deny.toml`; not in pre-commit). Local: `make dependency-security`
 - Android: in-flight `/chat/stream` starts a `dataSync` foreground service (channel `crabmate.stream`) so the WebView is less likely to freeze after Home/lock; `command_approval` upgrades that notification (truncated command). Tap opens the existing approval modal (`POST /chat/approval` still in-UI). Android 13+ requests `POST_NOTIFICATIONS` on first send; denial is shown on the status bar. Disconnect / Stop / stream end / return-to-connect stop the service ([ADR-0002](docs/adr/0002-android-approval-notification-foreground-keepalive.md))
 - Connect page: remember recent server URLs (up to 8) under `localStorage` key `crabmate.connect.recentUrls` with a clickable 「最近连接」 list and a clear action; a previously stored single server URL is seeded into the list on first load so switching servers no longer loses the prior address

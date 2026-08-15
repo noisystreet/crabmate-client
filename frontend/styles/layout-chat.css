@@ -481,6 +481,16 @@
   word-break: break-word;
 }
 
+.chat-tui-line a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.chat-tui-line a:hover {
+  color: color-mix(in srgb, var(--accent) 88%, var(--text));
+}
+
 .chat-tui-line img,
 .chat-tui-line video {
   max-width: 100%;

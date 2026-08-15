@@ -2,7 +2,11 @@
 //!
 //! 解析前会做 [`normalize_markdown_for_render`]，降低模型常见围栏误写导致的整段被吃进代码块等问题。
 
-use pulldown_cmark::{Event, Options, Parser, html};
+mod autolink;
+
+use pulldown_cmark::{Options, Parser, html};
+
+pub(crate) use autolink::http_url_end_at;
 
 /// 在按行拆分前做**跨行**轻量修补：模型常把小节标题、围栏开符与正文粘在同一行，
 /// `pulldown_cmark` 会收成单段 `<p>` 或把后续正文吃进代码块，界面上像「一整段」且标点后缺空格感更强。
@@ -332,12 +336,10 @@ pub fn to_safe_html(md: &str) -> String {
     opts.insert(Options::ENABLE_STRIKETHROUGH);
     opts.insert(Options::ENABLE_TASKLISTS);
     opts.insert(Options::ENABLE_HEADING_ATTRIBUTES);
-    let parser = Parser::new_ext(&md, opts).map(|e| match e {
-        Event::SoftBreak => Event::HardBreak,
-        e => e,
-    });
+    let parser = Parser::new_ext(&md, opts);
+    let events = autolink::rewrite_events(parser);
     let mut body = String::new();
-    html::push_html(&mut body, parser);
+    html::push_html(&mut body, events.into_iter());
     let mut builder = ammonia::Builder::default();
     builder.link_rel(Some("noopener noreferrer"));
     let cleaned = builder.clean(&body).to_string();
@@ -422,6 +424,62 @@ mod tests {
         assert!(h.contains("target=\"_blank\""));
         assert!(h.contains("rel=\"noopener noreferrer\""));
         assert!(h.contains("https://example.com/path"));
+    }
+
+    #[test]
+    fn bare_https_url_becomes_link() {
+        let h = to_safe_html("见 https://example.com/path 与尾");
+        assert!(h.contains("href=\"https://example.com/path\""), "got {h:?}");
+        assert!(h.contains("target=\"_blank\""), "got {h:?}");
+        assert!(h.contains(">https://example.com/path<"), "got {h:?}");
+    }
+
+    #[test]
+    fn bare_url_inside_code_stays_plain() {
+        let h = to_safe_html("`https://example.com`");
+        assert!(h.contains("<code>"), "got {h:?}");
+        assert!(
+            !h.contains("<a "),
+            "inline code must not autolink, got {h:?}"
+        );
+    }
+
+    #[test]
+    fn bare_url_inside_fence_stays_plain() {
+        let h = to_safe_html("```\nhttps://example.com\n```");
+        assert!(h.contains("<pre") || h.contains("<code"), "got {h:?}");
+        assert!(!h.contains("<a "), "fence must not autolink, got {h:?}");
+    }
+
+    #[test]
+    fn javascript_scheme_not_autolinked() {
+        let h = to_safe_html("go javascript:alert(1) now");
+        assert!(!h.contains("<a "), "got {h:?}");
+        assert!(h.contains("javascript:alert(1)"), "got {h:?}");
+    }
+
+    #[test]
+    fn markdown_link_is_not_double_wrapped() {
+        let h = to_safe_html("[site](https://example.com/path)");
+        assert_eq!(h.matches("<a ").count(), 1, "got {h:?}");
+        assert!(h.contains("href=\"https://example.com/path\""), "got {h:?}");
+    }
+
+    #[test]
+    fn cjk_path_stays_inside_href() {
+        let h = to_safe_html("见 https://example.com/文档 尾");
+        assert!(h.contains("<a "), "got {h:?}");
+        assert!(
+            h.contains("https://example.com/文档") || h.contains("%E6%96%87%E6%A1%A3"),
+            "CJK path missing from link, got {h:?}"
+        );
+    }
+
+    #[test]
+    fn markdown_off_does_not_autolink() {
+        let h = plaintext_to_safe_html("见 https://example.com");
+        assert!(!h.contains("<a "), "got {h:?}");
+        assert!(h.contains("https://example.com"), "got {h:?}");
     }
 
     #[test]
