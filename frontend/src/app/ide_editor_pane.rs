@@ -4,7 +4,9 @@ use leptos::prelude::*;
 
 use crate::app::app_signals::IdeEditorSignals;
 use crate::i18n::{self, Locale};
-use crate::ide_codemirror::{IdeCmWireSignals, IdeEditorHost, wire_ide_codemirror};
+use crate::ide_codemirror::{
+    IdeCmScriptState, IdeCmWireSignals, IdeEditorHost, wire_ide_codemirror,
+};
 
 #[component]
 pub fn IdeEditorPane(
@@ -16,7 +18,7 @@ pub fn IdeEditorPane(
     ide_text: RwSignal<String>,
     ide_load_busy: RwSignal<bool>,
 ) -> impl IntoView {
-    let cm_init_failed = RwSignal::new(false);
+    let cm_script_state = RwSignal::new(IdeCmScriptState::Pending);
 
     wire_ide_codemirror(
         host,
@@ -30,7 +32,7 @@ pub fn IdeEditorPane(
             tab_size: editor.tab_size,
             font_slug: editor.font_slug,
             font_size_px: editor.font_size_px,
-            cm_init_failed,
+            cm_script_state,
         },
     );
 
@@ -40,17 +42,17 @@ pub fn IdeEditorPane(
             class="ide-editor-pane"
             class:ide-editor-pane--wrap=move || editor.word_wrap.get()
         >
-            <Show when=move || !IdeEditorHost::cm_available()>
-                <p class="ide-editor-cm-missing" role="alert">
+            <Show when=move || {
+                cm_script_state.get().show_missing_banner(editor_visible.get())
+            }>
+                <p class="ide-editor-cm-missing" role="alert" data-testid="ide-cm-missing">
                     {move || i18n::ide_cm_missing(locale.get())}
                 </p>
             </Show>
             <Show when=move || {
-                editor_visible.get()
-                    && IdeEditorHost::cm_available()
-                    && cm_init_failed.get()
+                cm_script_state.get().show_init_failed_banner(editor_visible.get())
             }>
-                <p class="ide-editor-cm-missing" role="alert">
+                <p class="ide-editor-cm-missing" role="alert" data-testid="ide-cm-init-failed">
                     {move || i18n::ide_cm_init_failed(locale.get())}
                 </p>
             </Show>

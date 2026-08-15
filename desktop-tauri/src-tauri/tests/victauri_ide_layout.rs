@@ -81,6 +81,16 @@ e2e_test!(chat_to_ide_shows_editor_content, |client| async move {
         content.contains("hello ide"),
         "editor should show 'hello ide', got '{content}'"
     );
+    let missing_banner: bool = client
+        .eval_js("document.querySelector('[data-testid=\"ide-cm-missing\"]')?.offsetParent!==null??false")
+        .await
+        .unwrap()
+        .as_bool()
+        .unwrap_or(true);
+    assert!(
+        !missing_banner,
+        "stale rebuild-frontend banner must not remain after CodeMirror loads"
+    );
 });
 
 // ---------------------------------------------------------------------------

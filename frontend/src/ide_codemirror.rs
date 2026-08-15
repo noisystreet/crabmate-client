@@ -1,5 +1,8 @@
 //! CodeMirror 6 编辑器桥接（`vendor/ide-codemirror.js`）。
 
+use std::cell::Cell;
+use std::rc::Rc;
+
 use js_sys::{Function, Reflect};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -12,7 +15,48 @@ use crate::ide_editor_prefs::ide_editor_font_family_css;
 use crate::ide_syntax_highlight::ide_syntax_lang_for_path;
 
 const CM_MOUNT_MAX_RETRIES: u32 = 12;
-const CM_SCRIPT_SRC: &str = "/vendor/ide-codemirror.js";
+const CM_SCRIPT_REL: &str = "vendor/ide-codemirror.js";
+const CM_SCRIPT_MARK: &str = "data-crabmate-ide-cm";
+
+/// CodeMirror vendor 脚本 / 实例生命周期（勿用「就绪 + 失败」两个布尔组合）。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum IdeCmScriptState {
+    /// 未开始或加载中：不显示重建/初始化失败横幅。
+    Pending,
+    Ready,
+    LoadFailed,
+    InitFailed,
+}
+
+impl IdeCmScriptState {
+    #[must_use]
+    pub(crate) fn show_missing_banner(self, editor_visible: bool) -> bool {
+        editor_visible && matches!(self, Self::LoadFailed)
+    }
+
+    #[must_use]
+    pub(crate) fn show_init_failed_banner(self, editor_visible: bool) -> bool {
+        editor_visible && matches!(self, Self::InitFailed)
+    }
+}
+
+/// 从当前页 href 解析 vendor 脚本 URL（去掉 hash/query，避免交接 fragment 干扰）。
+#[must_use]
+pub(crate) fn resolve_cm_script_src(page_href: &str) -> String {
+    let stripped = page_href.split(['#', '?']).next().unwrap_or(page_href);
+    match origin_of_href(stripped) {
+        Some(origin) => format!("{origin}/{CM_SCRIPT_REL}"),
+        None => format!("/{CM_SCRIPT_REL}"),
+    }
+}
+
+fn origin_of_href(href: &str) -> Option<&str> {
+    let scheme_sep = href.find("://")?;
+    let after = scheme_sep + 3;
+    let rest = href.get(after..)?;
+    let host_len = rest.find('/').unwrap_or(rest.len());
+    href.get(..after + host_len)
+}
 
 fn cm_global() -> JsValue {
     js_sys::Reflect::get(&js_sys::global(), &JsValue::from_str("CrabMateIdeEditor"))
@@ -29,6 +73,57 @@ fn cm_fn(name: &str) -> Option<Function> {
         .and_then(|v| v.dyn_into::<Function>().ok())
 }
 
+fn cm_script_selector() -> String {
+    format!("script[{CM_SCRIPT_MARK}]")
+}
+
+fn remove_cm_script_tags(doc: &web_sys::Document) {
+    let selector = cm_script_selector();
+    loop {
+        let Ok(Some(el)) = doc.query_selector(&selector) else {
+            break;
+        };
+        el.remove();
+    }
+}
+
+fn page_href() -> String {
+    web_sys::window()
+        .and_then(|w| w.location().href().ok())
+        .unwrap_or_default()
+}
+
+fn append_cm_script(doc: &web_sys::Document) -> Option<Rc<Cell<bool>>> {
+    let el = doc.create_element("script").ok()?;
+    let script = el.dyn_into::<web_sys::HtmlScriptElement>().ok()?;
+    script.set_src(&resolve_cm_script_src(&page_href()));
+    script.set_type("text/javascript");
+    script.set_async(true);
+    script.set_attribute(CM_SCRIPT_MARK, "1").ok()?;
+    let load_error = Rc::new(Cell::new(false));
+    let flag = Rc::clone(&load_error);
+    let on_error = Closure::<dyn FnMut(web_sys::Event)>::new(move |_| {
+        flag.set(true);
+    });
+    script.set_onerror(Some(on_error.as_ref().unchecked_ref()));
+    on_error.forget();
+    doc.head()?.append_child(&script).ok()?;
+    Some(load_error)
+}
+
+async fn poll_cm_available(load_error: &Rc<Cell<bool>>) -> bool {
+    for _ in 0..80 {
+        if IdeEditorHost::cm_available() {
+            return true;
+        }
+        if load_error.get() {
+            return false;
+        }
+        gloo_timers::future::TimeoutFuture::new(40).await;
+    }
+    IdeEditorHost::cm_available()
+}
+
 /// 动态加载 CodeMirror vendor（首屏对话不阻塞解析大脚本）。
 async fn ensure_cm_script_loaded() -> bool {
     if IdeEditorHost::cm_available() {
@@ -37,34 +132,16 @@ async fn ensure_cm_script_loaded() -> bool {
     let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
         return false;
     };
-    let already = doc
-        .query_selector(&format!("script[src=\"{CM_SCRIPT_SRC}\"]"))
-        .ok()
-        .flatten()
-        .is_some();
-    if !already {
-        let Ok(el) = doc.create_element("script") else {
-            return false;
-        };
-        let Ok(script) = el.dyn_into::<web_sys::HtmlScriptElement>() else {
-            return false;
-        };
-        script.set_src(CM_SCRIPT_SRC);
-        script.set_async(true);
-        let Some(head) = doc.head() else {
-            return false;
-        };
-        if head.append_child(&script).is_err() {
-            return false;
-        }
+    // 摘掉上次 404 留下的死标签，否则切出再进不会重新插入。
+    remove_cm_script_tags(&doc);
+    let Some(load_error) = append_cm_script(&doc) else {
+        return false;
+    };
+    let ok = poll_cm_available(&load_error).await;
+    if !ok {
+        remove_cm_script_tags(&doc);
     }
-    for _ in 0..80 {
-        gloo_timers::future::TimeoutFuture::new(40).await;
-        if IdeEditorHost::cm_available() {
-            return true;
-        }
-    }
-    IdeEditorHost::cm_available()
+    ok
 }
 
 fn call_cm1(name: &str, a0: &JsValue) {
@@ -104,7 +181,7 @@ pub struct IdeCmWireSignals {
     pub tab_size: RwSignal<u8>,
     pub font_slug: RwSignal<String>,
     pub font_size_px: RwSignal<f64>,
-    pub cm_init_failed: RwSignal<bool>,
+    pub cm_script_state: RwSignal<IdeCmScriptState>,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct IdeCmHandle(pub i32);
@@ -408,20 +485,21 @@ fn mount_cm_instance(
 fn kick_cm_script_load(
     cm_script_load_started: StoredValue<bool>,
     cm_mount_retry: RwSignal<u32>,
-    cm_init_failed: RwSignal<bool>,
+    cm_script_state: RwSignal<IdeCmScriptState>,
 ) {
     if cm_script_load_started.get_value() {
         return;
     }
     cm_script_load_started.set_value(true);
-    cm_init_failed.set(false);
+    cm_script_state.set(IdeCmScriptState::Pending);
     spawn_local(async move {
         if ensure_cm_script_loaded().await {
+            cm_script_state.set(IdeCmScriptState::Ready);
             cm_mount_retry.update(|n| *n = n.wrapping_add(1));
         } else {
-            // 允许切出再进 IDE 时重试；不自动死循环以免 404 刷屏。
+            // 失败会摘掉 script 标签；允许切出再进 IDE 时重试。
             cm_script_load_started.set_value(false);
-            cm_init_failed.set(true);
+            cm_script_state.set(IdeCmScriptState::LoadFailed);
         }
     });
 }
@@ -433,7 +511,7 @@ fn schedule_cm_mount_after_layout(
     suppress_sync: RwSignal<bool>,
     cm_mount_generation: RwSignal<u32>,
     cm_mount_retry: RwSignal<u32>,
-    cm_init_failed: RwSignal<bool>,
+    cm_script_state: RwSignal<IdeCmScriptState>,
 ) {
     let editor_visible = signals.editor_visible;
     let generation = cm_mount_generation.get_untracked().wrapping_add(1);
@@ -449,16 +527,15 @@ fn schedule_cm_mount_after_layout(
         if !IdeEditorHost::cm_available() {
             return;
         }
-        cm_init_failed.set(false);
         if mount_cm_instance(host, &parent, signals, suppress_sync) {
             cm_mount_retry.set(0);
-            cm_init_failed.set(false);
+            cm_script_state.set(IdeCmScriptState::Ready);
             return;
         }
         if attempt + 1 < CM_MOUNT_MAX_RETRIES {
             cm_mount_retry.set(attempt + 1);
         } else {
-            cm_init_failed.set(true);
+            cm_script_state.set(IdeCmScriptState::InitFailed);
         }
     });
 }
@@ -475,7 +552,7 @@ pub fn wire_ide_codemirror(host: IdeEditorHost, signals: IdeCmWireSignals) {
         tab_size,
         font_slug,
         font_size_px,
-        cm_init_failed,
+        cm_script_state,
     } = signals;
     let suppress_sync = RwSignal::new(false);
     let cm_mount_retry = RwSignal::new(0u32);
@@ -529,13 +606,14 @@ pub fn wire_ide_codemirror(host: IdeEditorHost, signals: IdeCmWireSignals) {
         }
         if host.handle.get_untracked().is_some() {
             host.request_measure();
-            cm_init_failed.set(false);
+            cm_script_state.set(IdeCmScriptState::Ready);
             return;
         }
         if !IdeEditorHost::cm_available() {
-            kick_cm_script_load(cm_script_load_started, cm_mount_retry, cm_init_failed);
+            kick_cm_script_load(cm_script_load_started, cm_mount_retry, cm_script_state);
             return;
         }
+        cm_script_state.set(IdeCmScriptState::Ready);
         schedule_cm_mount_after_layout(
             host,
             el.unchecked_into(),
@@ -543,7 +621,7 @@ pub fn wire_ide_codemirror(host: IdeEditorHost, signals: IdeCmWireSignals) {
             suppress_sync,
             cm_mount_generation,
             cm_mount_retry,
-            cm_init_failed,
+            cm_script_state,
         );
     });
 
@@ -554,10 +632,51 @@ pub fn wire_ide_codemirror(host: IdeEditorHost, signals: IdeCmWireSignals) {
 
 #[cfg(test)]
 mod tests {
-    use super::lang_wire_id;
+    use super::{IdeCmScriptState, lang_wire_id, resolve_cm_script_src};
 
     #[test]
     fn lang_wire_maps_rust() {
         assert_eq!(lang_wire_id(Some("src/lib.rs")), Some("rust"));
+    }
+
+    #[test]
+    fn cm_script_src_uses_origin_and_strips_handoff_hash() {
+        let href = "http://tauri.localhost/index.html#cm_api_base=http%3A%2F%2F127.0.0.1%3A8080";
+        assert_eq!(
+            resolve_cm_script_src(href),
+            "http://tauri.localhost/vendor/ide-codemirror.js"
+        );
+        assert_eq!(
+            resolve_cm_script_src("http://127.0.0.1:4173/"),
+            "http://127.0.0.1:4173/vendor/ide-codemirror.js"
+        );
+        assert_eq!(
+            resolve_cm_script_src("tauri://localhost/index.html"),
+            "tauri://localhost/vendor/ide-codemirror.js"
+        );
+    }
+
+    #[test]
+    fn missing_banner_only_on_load_failed_while_ide_visible() {
+        assert!(!IdeCmScriptState::Pending.show_missing_banner(true));
+        assert!(!IdeCmScriptState::Ready.show_missing_banner(true));
+        assert!(IdeCmScriptState::LoadFailed.show_missing_banner(true));
+        assert!(!IdeCmScriptState::LoadFailed.show_missing_banner(false));
+        assert!(!IdeCmScriptState::InitFailed.show_missing_banner(true));
+        assert!(IdeCmScriptState::InitFailed.show_init_failed_banner(true));
+        assert!(!IdeCmScriptState::LoadFailed.show_init_failed_banner(true));
+    }
+
+    #[test]
+    fn ide_editor_pane_does_not_use_nonreactive_cm_available() {
+        let src = include_str!("app/ide_editor_pane.rs");
+        assert!(
+            !src.contains("cm_available"),
+            "missing banner must subscribe to IdeCmScriptState, not cm_available()"
+        );
+        assert!(
+            src.contains("show_missing_banner"),
+            "pane must use IdeCmScriptState banner helpers"
+        );
     }
 }

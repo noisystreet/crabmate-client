@@ -38,6 +38,7 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Fixed
 
+- IDE: entering the editor no longer keeps the stale “rebuild the frontend” banner. CodeMirror load status is an explicit state machine; the warning is reactive and only shows after that load fails. A failed `<script>` is removed so leaving and re-entering IDE can retry (Tauri packaged UI with hash handoff included)
 - Chat markdown: message `#` / `##` render as `h3` / `h4` so they do not steal the page outline; heading `{#id}` is not turned into a DOM `id`. Normalize splits glued `~~~` fences, `。>` / `！>` / `？>` quotes (not `：>`), and CJK list markers missing a space (`-项` / `1.项`; not `-rf` / `1.0`)
 - Chat markdown: GFM task-list checkboxes survive sanitizer as read-only (`disabled` + `pointer-events: none`); fenced `language-*` classes are kept on `pre`/`code`; closed transcript blocks reuse `.msg-md-prose` so headings, quotes, `hr`, and code chrome match the changelist modal
 - Linux Desktop: `theme=system` follows xdg-desktop-portal, then GNOME gsettings, `GTK_THEME` / gtk settings.ini, then KDE `kdeglobals` (watches portal + gsettings). Non-GNOME sessions no longer always resolve to light
