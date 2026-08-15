@@ -173,13 +173,6 @@ pub fn ws_project_modal_title(l: Locale) -> &'static str {
     }
 }
 
-pub fn ws_project_modal_hint(l: Locale) -> &'static str {
-    match l {
-        Locale::ZhHans => "项目目录位于服务器项目池内；名称仅可含字母、数字及 . _ -",
-        Locale::En => "Projects live in the server pool; names may use letters, digits, and . _ -",
-    }
-}
-
 pub fn ws_project_new_label(l: Locale) -> &'static str {
     match l {
         Locale::ZhHans => "新建项目",
@@ -234,17 +227,6 @@ pub fn ws_browser_pick_modal_title(l: Locale) -> &'static str {
     match l {
         Locale::ZhHans => "选择工作区",
         Locale::En => "Choose workspace",
-    }
-}
-
-pub fn ws_browser_pick_modal_hint(l: Locale) -> &'static str {
-    match l {
-        Locale::ZhHans => {
-            "手机浏览器无法打开系统目录对话框。请从最近列表选择，或输入远程服务器上的绝对路径。"
-        }
-        Locale::En => {
-            "Mobile browsers cannot open a folder picker. Pick a recent root, or enter an absolute path on the remote server."
-        }
     }
 }
 

@@ -245,7 +245,6 @@ fn WorkspaceBrowserPickModalPanel(signals: WorkspaceBrowserPickModalSignals) -> 
                 </button>
             </div>
             <div class="modal-body">
-                <p class="modal-hint">{move || i18n::ws_browser_pick_modal_hint(locale.get())}</p>
                 <WorkspaceBrowserPickRecentList
                     locale=locale
                     recent=recent

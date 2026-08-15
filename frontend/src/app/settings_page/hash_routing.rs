@@ -7,6 +7,7 @@ use leptos_dom::helpers::window_event_listener;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SettingsSection {
+    Connection,
     Appearance,
     Llm,
     Tools,
@@ -19,6 +20,7 @@ pub(crate) enum SettingsSection {
 impl SettingsSection {
     pub(super) fn slug(self) -> &'static str {
         match self {
+            Self::Connection => "connection",
             Self::Appearance => "appearance",
             Self::Llm => "llm",
             Self::Tools => "tools",
@@ -31,6 +33,7 @@ impl SettingsSection {
 
     pub(super) fn from_slug(s: &str) -> Option<Self> {
         match s {
+            "connection" => Some(Self::Connection),
             "appearance" => Some(Self::Appearance),
             // 主模型 / 执行器已合并为「模型配置」；旧 hash 仍可打开
             "llm" | "executor-llm" => Some(Self::Llm),
@@ -184,6 +187,10 @@ mod tests {
         assert_eq!(
             parse_settings_route("#/settings/"),
             Some(SettingsSection::Appearance)
+        );
+        assert_eq!(
+            parse_settings_route("#/settings/connection"),
+            Some(SettingsSection::Connection)
         );
         assert_eq!(
             parse_settings_route("#/settings/mcp"),

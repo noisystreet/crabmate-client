@@ -65,9 +65,6 @@ fn SessionListModalPanel(session_modal: RwSignal<bool>) -> impl IntoView {
                 </button>
             </div>
             <div class="modal-body">
-                <p class="modal-hint">
-                    {move || i18n::session_modal_hint(locale.get())}
-                </p>
                 {move || {
                     sorted_sessions_clone(&chat.sessions.get())
                         .into_iter()

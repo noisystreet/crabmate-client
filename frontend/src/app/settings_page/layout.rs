@@ -51,6 +51,13 @@ pub(super) fn SettingsPageNavRail(
         <nav class="settings-nav" prop:aria-label=move || i18n::settings_nav_aria(appearance_locale.get())>
             <SettingsNavItem
                 active_section=active_section
+                section=SettingsSection::Connection
+                testid=Some("settings-nav-connection")
+            >
+                {move || i18n::settings_section_connection_title(appearance_locale.get())}
+            </SettingsNavItem>
+            <SettingsNavItem
+                active_section=active_section
                 section=SettingsSection::Appearance
                 testid=Some("settings-nav-appearance")
             >
@@ -197,7 +204,7 @@ pub(super) fn SettingsPageContentPanels(
                     }}</p>
                 </Show>
             </header>
-            <Show when=move || active_section.get() == SettingsSection::Appearance>
+            <Show when=move || active_section.get() == SettingsSection::Connection>
                 <SettingsWebApiBearerBlock
                     locale=appearance_locale
                     input_id="settings-page-web-api-bearer"
@@ -208,6 +215,8 @@ pub(super) fn SettingsPageContentPanels(
                     input_id="settings-page-api-base"
                     save_nonce=web_api_bearer_save_nonce
                 />
+            </Show>
+            <Show when=move || active_section.get() == SettingsSection::Appearance>
                 <SettingsAppearanceBlock
                     locale=appearance_locale
                     appearance_locale=appearance_locale

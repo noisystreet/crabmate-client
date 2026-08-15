@@ -21,7 +21,6 @@ pub(crate) fn WorkspaceProjectModalBody(
     on_open: Arc<dyn Fn(String) + Send + Sync>,
 ) -> impl IntoView {
     view! {
-        <p class="modal-hint">{move || i18n::ws_project_modal_hint(locale.get())}</p>
         <Show when=move || pool_path.get().is_some()>
             <p class="modal-hint workspace-project-pool-path">
                 {move || pool_path.get().unwrap_or_default()}

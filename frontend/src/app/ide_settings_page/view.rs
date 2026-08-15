@@ -57,9 +57,6 @@ pub fn IdeSettingsPageView(input: IdeSettingsPageViewInput) -> impl IntoView {
                             <h2 class="settings-content-title">
                                 {move || i18n::ide_settings_section_editor_title(locale.get())}
                             </h2>
-                            <p class="settings-content-desc">
-                                {move || i18n::ide_settings_section_editor_desc(locale.get())}
-                            </p>
                         </header>
                         <IdeSettingsEditorBlock locale=locale editor=draft.draft_editor />
                     </section>

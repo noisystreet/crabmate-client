@@ -110,7 +110,7 @@ e2e_test!(model_and_api_key_save, |client| async move {
 
 e2e_test!(web_api_bearer_not_in_local_storage, |client| async move {
     seed_settings_session(&mut client, "s_e2e_web_bearer").await;
-    open_settings(&mut client, "appearance").await;
+    open_settings(&mut client, "connection").await;
     let _ = client
         .eval_js(
             r#"(()=>{const el=document.querySelector('[data-testid="settings-web-api-bearer-input"]');if(!el)return;const s=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set;s.call(el,'E2E_WEB_BEARER');el.dispatchEvent(new Event('input',{bubbles:true}));})()"#,

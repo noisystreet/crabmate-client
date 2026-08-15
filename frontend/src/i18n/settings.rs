@@ -139,13 +139,6 @@ pub fn settings_theme_preset_label(l: Locale, slug: &str) -> &'static str {
     }
 }
 
-pub fn settings_label_theme_preset(l: Locale) -> &'static str {
-    match l {
-        Locale::ZhHans => "配色方案",
-        Locale::En => "Color scheme",
-    }
-}
-
 pub fn settings_block_bg(l: Locale) -> &'static str {
     match l {
         Locale::ZhHans => "页面背景",
@@ -348,6 +341,17 @@ pub fn settings_block_shortcuts(l: Locale) -> &'static str {
     }
 }
 
+pub fn settings_section_connection_title(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "连接",
+        Locale::En => "Connection",
+    }
+}
+
+pub fn settings_section_connection_desc(_l: Locale) -> &'static str {
+    ""
+}
+
 pub fn settings_section_appearance_title(l: Locale) -> &'static str {
     match l {
         Locale::ZhHans => "外观与界面",
@@ -499,10 +503,8 @@ pub fn settings_tools_readonly_ttl_block_title(l: Locale) -> &'static str {
 
 pub fn settings_tools_readonly_ttl_cache_label(l: Locale) -> &'static str {
     match l {
-        Locale::ZhHans => "跟随服务端配置的 TTL 缓存（关闭则每条消息禁用该缓存）",
-        Locale::En => {
-            "Follow server TTL for this cache (when off, each message disables the cache)"
-        }
+        Locale::ZhHans => "跟随服务端 TTL 缓存",
+        Locale::En => "Follow server TTL cache",
     }
 }
 
