@@ -100,6 +100,26 @@ pub fn user_ordinal_for_message_index(messages: &[StoredMessage], idx: usize) ->
     Some(ord)
 }
 
+/// 就地改用户气泡正文（不截断、不再生）。随后应走 [`truncate_at_user_message_and_prepare_regenerate`]。
+pub fn set_user_message_text(
+    sessions: &mut [ChatSession],
+    active_id: &str,
+    user_msg_id: &str,
+    new_text: &str,
+) -> bool {
+    let Some(s) = sessions.iter_mut().find(|sess| sess.id == active_id) else {
+        return false;
+    };
+    let Some(um) = s.messages.iter_mut().find(|m| m.id == user_msg_id) else {
+        return false;
+    };
+    if um.role != "user" || um.is_tool {
+        return false;
+    }
+    um.text = new_text.to_string();
+    true
+}
+
 /// 保留指定用户气泡（同 id），删除其后的消息，并挂上新的 loading 助手泡；返回用户原文与新助手 id。
 pub fn truncate_at_user_message_and_prepare_regenerate(
     sessions: &mut [ChatSession],
@@ -621,6 +641,40 @@ mod message_branch_tests {
         assert_eq!(sessions[0].messages.len(), 2);
         assert_eq!(sessions[0].messages[0].id, "u0");
         assert_eq!(sessions[0].messages[1].id, "a0");
+    }
+
+    #[test]
+    fn set_user_message_text_updates_only_that_user_line() {
+        let mut sessions = vec![ChatSession {
+            id: "s1".into(),
+            layout_schema_version: crate::storage::CURRENT_LAYOUT_SCHEMA_VERSION,
+            title: "t".into(),
+            draft: String::new(),
+            pinned: false,
+            starred: false,
+            server_conversation_id: None,
+            server_revision: None,
+            workspace_root: None,
+            history_total: None,
+            history_window_start: None,
+            history_has_older: None,
+            messages: vec![StoredMessage {
+                id: "u0".into(),
+                role: "user".into(),
+                text: "old".into(),
+                reasoning_text: String::new(),
+                image_urls: vec![],
+                state: None,
+                is_tool: false,
+                tool_call_id: None,
+                tool_name: None,
+                created_at: 0,
+            }],
+            updated_at: 0,
+        }];
+        assert!(set_user_message_text(&mut sessions, "s1", "u0", "new"));
+        assert_eq!(sessions[0].messages[0].text, "new");
+        assert!(!set_user_message_text(&mut sessions, "s1", "missing", "x"));
     }
 }
 

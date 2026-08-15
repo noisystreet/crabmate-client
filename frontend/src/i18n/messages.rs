@@ -109,3 +109,38 @@ pub fn msg_menu_retry(l: Locale) -> &'static str {
         Locale::En => "Retry",
     }
 }
+
+pub fn msg_menu_edit(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "编辑",
+        Locale::En => "Edit",
+    }
+}
+
+pub fn msg_edit_title(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "就地修改本条并从此重新生成",
+        Locale::En => "Edit this message and regenerate from here",
+    }
+}
+
+pub fn msg_edit_save(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "发送",
+        Locale::En => "Send",
+    }
+}
+
+pub fn msg_edit_cancel(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "取消",
+        Locale::En => "Cancel",
+    }
+}
+
+pub fn msg_edit_save_busy(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "请等待当前回复结束后再保存编辑",
+        Locale::En => "Wait for the current reply to finish before saving the edit",
+    }
+}

@@ -9,10 +9,10 @@ use super::super::composer_stream::AttachChatStreamArc;
 use super::super::handles::ComposerStreamShell;
 use super::super::scroll_follow::engage_follow_and_scroll_bottom;
 use super::super::stream_follow_up_gates::RegenAttachGate;
-use super::helpers::begin_stream_shell_turn;
+use super::helpers::{begin_stream_shell_turn, start_user_stream_turn};
 use crate::app::chat::scroll_shell::ChatScrollShellSignals;
 use crate::chat_session_state::ChatSessionSignals;
-use crate::session_ops::prepare_retry_failed_assistant_turn;
+use crate::session_ops::{flush_composer_draft_to_session, prepare_retry_failed_assistant_turn};
 
 /// [`wire_stream_follow_up_effect`] 入参聚合（压低形参个数与 clippy `type_complexity`）。
 pub(super) struct StreamFollowUpWiring {
@@ -23,6 +23,7 @@ pub(super) struct StreamFollowUpWiring {
     pub shell: ComposerStreamShell,
     pub stream_follow_up: RwSignal<ComposerStreamFollowUp>,
     pub stream_turn_busy_ui: Memo<bool>,
+    pub tool_timeline_busy_ui: Memo<bool>,
 }
 
 pub(super) fn wire_stream_follow_up_effect(args: StreamFollowUpWiring) {
@@ -34,6 +35,7 @@ pub(super) fn wire_stream_follow_up_effect(args: StreamFollowUpWiring) {
         shell,
         stream_follow_up,
         stream_turn_busy_ui,
+        tool_timeline_busy_ui,
     } = args;
 
     Effect::new({
@@ -46,7 +48,10 @@ pub(super) fn wire_stream_follow_up_effect(args: StreamFollowUpWiring) {
             match pending {
                 ComposerStreamFollowUp::Idle => {}
                 ComposerStreamFollowUp::RetryFailedAssistant { failed_asst_id } => {
-                    if !initialized.get() || stream_turn_busy_ui.get() {
+                    if !initialized.get()
+                        || stream_turn_busy_ui.get()
+                        || tool_timeline_busy_ui.get()
+                    {
                         return;
                     }
                     stream_follow_up.set(ComposerStreamFollowUp::Idle);
@@ -77,6 +82,35 @@ pub(super) fn wire_stream_follow_up_effect(args: StreamFollowUpWiring) {
                     engage_follow_and_scroll_bottom(scroll_shell);
                     begin_stream_shell_turn(&shell);
                     attach(user_text, user_imgs, asst_id, None);
+                }
+                ComposerStreamFollowUp::QueuedUserMessage {
+                    session_id,
+                    user_text,
+                    user_imgs,
+                } => {
+                    if !initialized.get()
+                        || stream_turn_busy_ui.get()
+                        || tool_timeline_busy_ui.get()
+                    {
+                        return;
+                    }
+                    if chat.active_id.get() != session_id {
+                        if !user_text.is_empty() {
+                            flush_composer_draft_to_session(chat.sessions, &session_id, &user_text);
+                        }
+                        stream_follow_up.set(ComposerStreamFollowUp::Idle);
+                        return;
+                    }
+                    stream_follow_up.set(ComposerStreamFollowUp::Idle);
+                    start_user_stream_turn(
+                        chat,
+                        &attach,
+                        scroll_shell,
+                        &shell,
+                        user_text,
+                        user_imgs,
+                        None,
+                    );
                 }
             }
         }

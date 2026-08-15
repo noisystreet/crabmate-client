@@ -16,7 +16,9 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Added
 
-- Design: chat UI follow-ups (`docs/design/chat_ui_todo.md`); P1 keyboard/ARIA is done, remaining items are in-place edit, stream follow-up queue, find highlight, composer-adjacent Ask/Plan/Act
+- Design: coding-agent client plan (`docs/design/coding_agent_client.md`): review/revert loop over a full IDE; Wave 1 is `chat_ui_todo.md` P2; Waves 2–3 need Server contracts for restore / structured changelog
+- Chat P2: in-place edit user messages (context menu → branch/regen); queue the next composer send while a turn is streaming; find hits highlight inside bubbles (`<mark>`); Ask/Plan/Act moved from the status bar onto the composer action row
+- Design: chat UI follow-ups (`docs/design/chat_ui_todo.md`); P1 keyboard/ARIA and P2 chat loop are done; remaining is P3 chat code highlighting
 - Loopback web UI host (`make web-release` / `crabmate-web`): static `frontend/dist` on `127.0.0.1:4173`, system browser; not Tauri and not `crabmate serve`. The `.deb` installs a menu entry with the same CrabMate icon as Desktop (`Icon=crabmate-web`). A second launch on the same port opens the existing instance. Logs redact `--bearer`. CI `build-web-deb` packs a stub UI (`CM_WEB_SKIP_FRONTEND=1`) and checks package layout
 - Remote terminal `.deb` (`make tui-release` / `crabmate-tui`): binary only at `/usr/bin/crabmate-tui`; no menu icon, no config files, not `crabmate serve`. CI `build-tui-deb` packs and checks layout
 - Chat markdown: closed fences show a language label and Copy button; streaming active lines render paired `*em*` / `_em_` and complete `[text](url)` (http(s) only); `~~~` fences buffer like backticks; `>` quotes freeze as their own block; GFM `[!NOTE]`/`[!TIP]`/… alerts keep `markdown-alert-*` classes
@@ -39,6 +41,7 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Fixed
 
+- Chat P2 follow-up: in-place edit save is refused while a turn is in flight or another follow-up is queued; switching sessions parks a queued composer line back onto that session’s draft; transcript sync no longer re-runs on every edit keystroke, and find `<mark>` wrapping does not walk the full transcript on each stream token
 - Shell a11y (P1): approval modal traps Tab and Escape submits `deny`; confirm / new-file dialogs trap focus (Escape closes even from the path field); image attach is a real button; context menus take focus and arrow keys; session/file/message/IDE-tab Shift+F10; IDE tabs Left/Right; workspace file rows are keyboard-activatable; Ask/Plan/Act and side-view items are `menuitemradio`; current session `aria-current`; pin/star/unsaved names are announced
 - IDE: entering the editor no longer keeps the stale “rebuild the frontend” banner. CodeMirror load status is an explicit state machine; the warning is reactive and only shows after that load fails. A failed `<script>` is removed so leaving and re-entering IDE can retry (Tauri packaged UI with hash handoff included)
 - Chat markdown: message `#` / `##` render as `h3` / `h4` so they do not steal the page outline; heading `{#id}` is not turned into a DOM `id`. Normalize splits glued `~~~` fences, `。>` / `！>` / `？>` quotes (not `：>`), and CJK list markers missing a space (`-项` / `1.项`; not `-rf` / `1.0`)

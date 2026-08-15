@@ -5,10 +5,15 @@ use leptos::prelude::*;
 use crate::chat_session_state::ChatSessionSignals;
 use crate::i18n;
 use crate::i18n::Locale;
-use crate::session_ops::{message_created_ms, patch_active_session, title_from_user_prompt};
+use crate::session_ops::{
+    make_message_id, message_created_ms, patch_active_session, title_from_user_prompt,
+};
 use crate::storage::{StoredMessage, StoredMessageState};
 
+use super::super::composer_stream::AttachChatStreamArc;
 use super::super::handles::ComposerStreamShell;
+use super::super::scroll_follow::engage_follow_and_scroll_bottom;
+use super::super::scroll_shell::ChatScrollShellSignals;
 
 pub(super) fn user_line_and_clarify_from_shell(
     shell: &ComposerStreamShell,
@@ -96,4 +101,27 @@ pub(super) fn push_user_and_loading_assistant(
 pub(super) fn begin_stream_shell_turn(shell: &ComposerStreamShell) {
     shell.stream.clear_status_banners();
     shell.approval.clear_pending_user_interactions();
+}
+
+pub(super) fn start_user_stream_turn(
+    chat: ChatSessionSignals,
+    attach: &AttachChatStreamArc,
+    scroll_shell: ChatScrollShellSignals,
+    shell: &ComposerStreamShell,
+    user_line: String,
+    imgs_send: Vec<String>,
+    clarify_json: Option<serde_json::Value>,
+) {
+    let uid = make_message_id();
+    let asst_id = make_message_id();
+    push_user_and_loading_assistant(
+        chat,
+        user_line.clone(),
+        imgs_send.clone(),
+        uid,
+        asst_id.clone(),
+    );
+    engage_follow_and_scroll_bottom(scroll_shell);
+    begin_stream_shell_turn(shell);
+    attach(user_line, imgs_send, asst_id, clarify_json);
 }

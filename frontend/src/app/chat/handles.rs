@@ -116,6 +116,19 @@ pub(crate) struct ChatMessagesPaneSignals {
     pub stream_follow_up: RwSignal<super::composer_follow_up::ComposerStreamFollowUp>,
     pub stream_turn_busy_ui: Memo<bool>,
     pub status_err: RwSignal<Option<String>>,
+    pub chat_find_query: RwSignal<String>,
+    pub chat_find_match_ids: RwSignal<Vec<String>>,
+    pub chat_find_cursor: RwSignal<usize>,
+    pub chat_find_panel_open: RwSignal<bool>,
+}
+
+/// 主列查找高亮（缩短 [`super::tui_stream_view::ChatTuiStreamView`] 形参）。
+#[derive(Clone, Copy)]
+pub(crate) struct ChatFindOverlaySignals {
+    pub query: RwSignal<String>,
+    pub match_ids: RwSignal<Vec<String>>,
+    pub cursor: RwSignal<usize>,
+    pub panel_open: RwSignal<bool>,
 }
 
 /// 输入区与发送条所需信号（与 [`ChatMessagesPaneSignals`] 对称，由 [`ChatColumnShell`] 单点组装）。
@@ -140,6 +153,10 @@ pub(crate) struct ChatComposerPaneSignals {
     pub workspace_path: Memo<String>,
     /// 将工作区相对路径插入 composer（双击树 / 拖放到输入区共用）。
     pub insert_workspace_file_ref: StoredValue<Arc<dyn Fn(String) + Send + Sync>>,
+    pub chat: ChatSessionSignals,
+    pub selected_session_mode: RwSignal<String>,
+    pub session_mode_user_override: RwSignal<bool>,
+    pub stream_follow_up: RwSignal<super::composer_follow_up::ComposerStreamFollowUp>,
 }
 
 /// 中部聊天列：`messages` 滚动区、时间线、消息列表与输入区所需的信号与闭包。
@@ -178,6 +195,10 @@ impl ChatColumnShell {
             stream_follow_up: self.stream_follow_up,
             stream_turn_busy_ui: self.stream_busy_memos.stream_turn_busy_ui,
             status_err: self.stream_shell.stream.status_err,
+            chat_find_query: cc.chat_find_query,
+            chat_find_match_ids: cc.chat_find_match_ids,
+            chat_find_cursor: cc.chat_find_cursor,
+            chat_find_panel_open: cc.chat_find_panel_open,
         }
     }
 
@@ -213,6 +234,10 @@ impl ChatColumnShell {
                 Memo::new(move |_| wd.get().map(|d| d.path).unwrap_or_default())
             },
             insert_workspace_file_ref: self.insert_workspace_file_ref,
+            chat: app.chat,
+            selected_session_mode: app.llm_settings.selected_session_mode,
+            session_mode_user_override: app.llm_settings.session_mode_user_override,
+            stream_follow_up: self.stream_follow_up,
         }
     }
 }

@@ -12,8 +12,11 @@ use super::column_keyboard::ChatColumnHomeEndNav;
 use super::composer_file_drop::{
     ComposerDropHighlight, composer_accept_drag_over, handle_composer_file_drop,
 };
+use super::composer_follow_up::ComposerStreamFollowUp;
 use super::composer_input_stack::ComposerInputStack;
-use super::handles::{ChatColumnShell, ChatComposerPaneSignals, ChatMessagesPaneSignals};
+use super::handles::{
+    ChatColumnShell, ChatComposerPaneSignals, ChatFindOverlaySignals, ChatMessagesPaneSignals,
+};
 use super::scroll_follow::on_content_resize_if_pinned;
 use super::scroll_shell::{
     ChatScrollShellSignals, STICK_UNPIN_GAP_PX, on_messages_pointer_scroll_intent,
@@ -22,7 +25,10 @@ use super::scroll_shell::{
 };
 use super::tui_actions_bar::TuiTurnActionHandlers;
 use super::tui_stream_view::ChatTuiStreamView;
+use super::user_message_edit::UserMessageEdit;
 use crate::api::upload_files_multipart;
+use crate::app::status_session_mode_seg::{SessionModeSegProps, StatusSessionModeSeg};
+use crate::chat_session_state::ChatSessionSignals;
 use crate::i18n;
 
 type ScrollSentinelCallback =
@@ -169,7 +175,12 @@ fn ChatMessagesPane(signals: ChatMessagesPaneSignals) -> impl IntoView {
         stream_follow_up,
         stream_turn_busy_ui,
         status_err,
+        chat_find_query,
+        chat_find_match_ids,
+        chat_find_cursor,
+        chat_find_panel_open,
     } = signals;
+    let editing_user_message = RwSignal::new(None::<UserMessageEdit>);
     let action_handlers = TuiTurnActionHandlers {
         chat,
         locale,
@@ -177,6 +188,7 @@ fn ChatMessagesPane(signals: ChatMessagesPaneSignals) -> impl IntoView {
         stream_follow_up,
         stream_turn_busy_ui,
         status_err,
+        editing_user_message,
     };
 
     view! {
@@ -188,6 +200,12 @@ fn ChatMessagesPane(signals: ChatMessagesPaneSignals) -> impl IntoView {
                 markdown_render=markdown_render
                 scroll_shell=scroll_shell
                 action_handlers=action_handlers
+                find=ChatFindOverlaySignals {
+                    query: chat_find_query,
+                    match_ids: chat_find_match_ids,
+                    cursor: chat_find_cursor,
+                    panel_open: chat_find_panel_open,
+                }
             />
         </ChatMessagesScrollShell>
     }
@@ -467,6 +485,129 @@ fn ComposerClarificationPanel(
 }
 
 #[component]
+fn ComposerQueuedChip(
+    locale: RwSignal<crate::i18n::Locale>,
+    stream_follow_up: RwSignal<ComposerStreamFollowUp>,
+) -> impl IntoView {
+    view! {
+        <Show when=move || stream_follow_up.get().queued_user_text().is_some()>
+            <div class="composer-queued" data-testid="composer-queued">
+                <span class="composer-queued-label">
+                    {move || i18n::composer_queued_chip(locale.get())}
+                </span>
+                <span class="composer-queued-preview">
+                    {move || {
+                        stream_follow_up
+                            .get()
+                            .queued_user_text()
+                            .unwrap_or_default()
+                            .chars()
+                            .take(72)
+                            .collect::<String>()
+                    }}
+                </span>
+                <button
+                    type="button"
+                    class="btn btn-ghost btn-sm"
+                    data-testid="composer-queued-dismiss"
+                    prop:aria-label=move || i18n::composer_queued_dismiss(locale.get())
+                    on:click=move |_| stream_follow_up.set(ComposerStreamFollowUp::Idle)
+                >
+                    {move || i18n::composer_queued_dismiss(locale.get())}
+                </button>
+            </div>
+        </Show>
+    }
+}
+
+#[component]
+fn ComposerBarActions(
+    locale: RwSignal<crate::i18n::Locale>,
+    chat: ChatSessionSignals,
+    selected_session_mode: RwSignal<String>,
+    session_mode_user_override: RwSignal<bool>,
+    composer_mode_open: RwSignal<bool>,
+    composer_stop_enabled: Memo<bool>,
+    initialized: RwSignal<bool>,
+    run_send_message: Arc<dyn Fn() + Send + Sync>,
+    trigger_stop: Arc<dyn Fn() + Send + Sync>,
+) -> impl IntoView {
+    view! {
+        <div class="composer-bar-actions">
+            <StatusSessionModeSeg props=SessionModeSegProps {
+                locale,
+                chat,
+                selected_session_mode,
+                session_mode_user_override,
+                menu_open: composer_mode_open,
+            } />
+            <Show when=move || composer_stop_enabled.get()>
+                <button
+                    type="button"
+                    class="btn btn-muted btn-send-icon"
+                    data-testid="chat-stop-button"
+                    on:click={
+                        let t = Arc::clone(&trigger_stop);
+                        move |_| t()
+                    }
+                    prop:title=move || i18n::composer_stop(locale.get())
+                    prop:aria-label=move || i18n::composer_stop(locale.get())
+                >
+                    <svg
+                        class="btn-send-icon-svg"
+                        viewBox="0 0 24 24"
+                        fill="currentColor"
+                        xmlns="http://www.w3.org/2000/svg"
+                        aria-hidden="true"
+                    >
+                        <rect x="6" y="6" width="12" height="12" rx="2" />
+                    </svg>
+                </button>
+            </Show>
+            <button
+                type="button"
+                class="btn btn-primary btn-send-icon"
+                data-testid="chat-send-button"
+                prop:disabled=move || !initialized.get()
+                on:click={
+                    let r = Arc::clone(&run_send_message);
+                    move |_| r()
+                }
+                prop:title=move || {
+                    if composer_stop_enabled.get() {
+                        i18n::composer_send_queue_aria(locale.get())
+                    } else {
+                        i18n::composer_send_aria(locale.get())
+                    }
+                }
+                prop:aria-label=move || {
+                    if composer_stop_enabled.get() {
+                        i18n::composer_send_queue_aria(locale.get())
+                    } else {
+                        i18n::composer_send_aria(locale.get())
+                    }
+                }
+            >
+                <svg
+                    class="btn-send-icon-svg"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    xmlns="http://www.w3.org/2000/svg"
+                    aria-hidden="true"
+                >
+                    <path d="M22 2 11 13" />
+                    <path d="M22 2 15 22 11 13 2 9 22 2Z" />
+                </svg>
+            </button>
+        </div>
+    }
+}
+
+#[component]
 fn ChatComposerPane(signals: ChatComposerPaneSignals) -> impl IntoView {
     let ChatComposerPaneSignals {
         locale,
@@ -485,9 +626,14 @@ fn ChatComposerPane(signals: ChatComposerPaneSignals) -> impl IntoView {
         composer_mirror_scroll_top,
         workspace_path,
         insert_workspace_file_ref,
+        chat,
+        selected_session_mode,
+        session_mode_user_override,
+        stream_follow_up,
     } = signals;
 
     let drop_hl = ComposerDropHighlight::new();
+    let composer_mode_open = RwSignal::new(false);
 
     view! {
         <div
@@ -529,6 +675,7 @@ fn ChatComposerPane(signals: ChatComposerPaneSignals) -> impl IntoView {
                     stream_turn_busy_ui=stream_turn_busy_ui
                     run_send_clarify_sv=run_send_clarify_sv
                 />
+                <ComposerQueuedChip locale=locale stream_follow_up=stream_follow_up />
                 <div class="composer-input-row">
                     <button
                         type="button"
@@ -562,67 +709,17 @@ fn ChatComposerPane(signals: ChatComposerPaneSignals) -> impl IntoView {
                         locale=locale
                         workspace_path=workspace_path
                     />
-                    <div class="composer-bar-actions">
-                        <Show
-                            when=move || composer_stop_enabled.get()
-                            fallback=move || {
-                                view! {
-                                    <button
-                                        type="button"
-                                        class="btn btn-primary btn-send-icon"
-                                        data-testid="chat-send-button"
-                                        prop:disabled=move || !initialized.get()
-                                        on:click={
-                                            let r = Arc::clone(&run_send_message);
-                                            move |_| r()
-                                        }
-                                        prop:title=move || i18n::composer_send_aria(locale.get())
-                                        prop:aria-label=move || {
-                                            i18n::composer_send_aria(locale.get())
-                                        }
-                                    >
-                                        <svg
-                                            class="btn-send-icon-svg"
-                                            viewBox="0 0 24 24"
-                                            fill="none"
-                                            stroke="currentColor"
-                                            stroke-width="2"
-                                            stroke-linecap="round"
-                                            stroke-linejoin="round"
-                                            xmlns="http://www.w3.org/2000/svg"
-                                            aria-hidden="true"
-                                        >
-                                            <path d="M22 2 11 13" />
-                                            <path d="M22 2 15 22 11 13 2 9 22 2Z" />
-                                        </svg>
-                                    </button>
-                                }
-                                .into_any()
-                            }
-                        >
-                            <button
-                                type="button"
-                                class="btn btn-muted btn-send-icon"
-                                data-testid="chat-stop-button"
-                                on:click={
-                                    let t = Arc::clone(&trigger_stop);
-                                    move |_| t()
-                                }
-                                prop:title=move || i18n::composer_stop(locale.get())
-                                prop:aria-label=move || i18n::composer_stop(locale.get())
-                            >
-                                <svg
-                                    class="btn-send-icon-svg"
-                                    viewBox="0 0 24 24"
-                                    fill="currentColor"
-                                    xmlns="http://www.w3.org/2000/svg"
-                                    aria-hidden="true"
-                                >
-                                    <rect x="6" y="6" width="12" height="12" rx="2" />
-                                </svg>
-                            </button>
-                        </Show>
-                    </div>
+                    <ComposerBarActions
+                        locale=locale
+                        chat=chat
+                        selected_session_mode=selected_session_mode
+                        session_mode_user_override=session_mode_user_override
+                        composer_mode_open=composer_mode_open
+                        composer_stop_enabled=composer_stop_enabled
+                        initialized=initialized
+                        run_send_message=run_send_message.clone()
+                        trigger_stop=trigger_stop.clone()
+                    />
                 </div>
             </div>
         </div>
