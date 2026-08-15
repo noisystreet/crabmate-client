@@ -32,13 +32,16 @@
 
 ## P1 · 体验缺口
 
-- [ ] **闭合代码块 UX**：无语法高亮、无语言标签、不能单块复制（整条消息可复制，见 `tui_actions_bar.rs`）。IDE 已有 `ide_syntax_highlight.rs` / CodeMirror，聊天 `pre`/`code` 未用。先做语言标签 + Copy；高亮第二步，控制 WASM 体积。依赖 P0 的 `language-*` 白名单。
+- [x] **闭合代码块 UX**：无语法高亮、无语言标签、不能单块复制（整条消息可复制，见 `tui_actions_bar.rs`）。IDE 已有 `ide_syntax_highlight.rs` / CodeMirror，聊天 `pre`/`code` 未用。先做语言标签 + Copy；高亮第二步，控制 WASM 体积。依赖 P0 的 `language-*` 白名单。
+  - 落地：`markdown/code_block.rs` 在净化后包 `md-code-block` 工具条；点击 `[data-md-copy-code]` 复制 `pre` 文本（聊天 transcript 与变更集模态）。高亮仍不做。
 - [x] **裸 URL 自动成链**：正文中的 `http://` / `https://` 收成 `<a target=_blank>`（`frontend/src/markdown/autolink.rs`）；scheme 大小写不敏感；中文路径与 `http://[::1]/` 保留；行内 code、围栏、已有 Markdown 链接内不处理；`javascript:` 不成链。流式活跃行同样生效。关 Markdown 时不成链。测试见 `markdown.rs` / `autolink.rs` / `tui_line_markdown.rs`。
-- [ ] **流式行内斜体与 Markdown 链接**：`tui_line_markdown.rs` 的 `stream_inline_safe_html` 只处理成对 `**` / `` ` `` / `~~` 与裸 URL。扩展扫描：`*em*` / `_em_`、已成对 `[text](url)`；半截标记保持转义字面量。测试对齐现有「半截 `**` 不着色」约定。
-- [ ] **流式围栏只认 \`\`\`**：`is_fence_marker` / `open_block_is_fence_buffer` 只看 \`\`\`；CommonMark 的 `~~~` 未闭合时不会走纯文本缓冲。识别 `~~~`，闭合后仍走 `to_safe_html`。
-- [ ] **引用不成块**：`BlockKind` 只有 Paragraph / Table / List；`>` 引用当段落，可能和后文粘在同一 pending。增加 Blockquote，空行或类型切换时单独冻结。
-- [ ] **GFM alert**：pulldown-cmark 0.13 的 `ENABLE_GFM` 目前覆盖 `[!NOTE]` / `[!TIP]` / `[!IMPORTANT]` / `[!WARNING]` / `[!CAUTION]`。模型常用；需同步 ammonia 放行 `blockquote` 上的 `markdown-alert-*` class，并补 CSS。不要顺手打开 `ENABLE_SMART_PUNCTUATION`。
-- [ ] **安全回归**：`markdown.rs` 仅测 `<script>` 剥离。补 `javascript:` / `data:` 链接与图片用例（scheme 应被拦）；评估远程 `![img](https://…)`（跟踪像素）是否加 `referrerpolicy=no-referrer` 或默认不加载。`chat_links_open_in_new_tab` 是字符串替换，改白名单时一并收紧，避免漏 `target`。
+- [x] **流式行内斜体与 Markdown 链接**：`tui_line_markdown.rs` 的 `stream_inline_safe_html` 只处理成对 `**` / `` ` `` / `~~` 与裸 URL。扩展扫描：`*em*` / `_em_`、已成对 `[text](url)`；半截标记保持转义字面量。测试对齐现有「半截 `**` 不着色」约定。
+  - 落地：`markdown/stream_inline.rs`；`_em_` 避开 `snake_case`；流式链接只接受 `http(s)`。
+- [x] **流式围栏只认 \`\`\`**：`is_fence_marker` / `open_block_is_fence_buffer` 只看 \`\`\`；CommonMark 的 `~~~` 未闭合时不会走纯文本缓冲。识别 `~~~`，闭合后仍走 `to_safe_html`。
+- [x] **引用不成块**：`BlockKind` 只有 Paragraph / Table / List；`>` 引用当段落，可能和后文粘在同一 pending。增加 Blockquote，空行或类型切换时单独冻结。
+- [x] **GFM alert**：pulldown-cmark 0.13 的 `ENABLE_GFM` 目前覆盖 `[!NOTE]` / `[!TIP]` / `[!IMPORTANT]` / `[!WARNING]` / `[!CAUTION]`。模型常用；需同步 ammonia 放行 `blockquote` 上的 `markdown-alert-*` class，并补 CSS。不要顺手打开 `ENABLE_SMART_PUNCTUATION`。
+- [x] **安全回归**：`markdown.rs` 仅测 `<script>` 剥离。补 `javascript:` / `data:` 链接与图片用例（scheme 应被拦）；评估远程 `![img](https://…)`（跟踪像素）是否加 `referrerpolicy=no-referrer` 或默认不加载。`chat_links_open_in_new_tab` 是字符串替换，改白名单时一并收紧，避免漏 `target`。
+  - 落地：ammonia `a[target=_blank]` + `img[referrerpolicy=no-referrer]`；测 `javascript:` 链接与 `data:` 图被剥。
 
 ## P2 · 清理与语义
 

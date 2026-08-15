@@ -3,11 +3,13 @@
 //! 解析前会做 [`normalize_markdown_for_render`]，降低模型常见围栏误写导致的整段被吃进代码块等问题。
 
 mod autolink;
+mod code_block;
 mod sanitize;
+mod stream_inline;
 
 use pulldown_cmark::{Options, Parser, html};
 
-pub(crate) use autolink::http_url_end_at;
+pub(crate) use stream_inline::stream_inline_safe_html;
 
 /// 在按行拆分前做**跨行**轻量修补：模型常把小节标题、围栏开符与正文粘在同一行，
 /// `pulldown_cmark` 会收成单段 `<p>` 或把后续正文吃进代码块，界面上像「一整段」且标点后缺空格感更强。
@@ -337,23 +339,13 @@ pub fn to_safe_html(md: &str) -> String {
     opts.insert(Options::ENABLE_STRIKETHROUGH);
     opts.insert(Options::ENABLE_TASKLISTS);
     opts.insert(Options::ENABLE_HEADING_ATTRIBUTES);
+    opts.insert(Options::ENABLE_GFM);
     let parser = Parser::new_ext(&md, opts);
     let events = autolink::rewrite_events(parser);
     let mut body = String::new();
     html::push_html(&mut body, events.into_iter());
     let cleaned = sanitize::clean_chat_html(&body);
-    chat_links_open_in_new_tab(cleaned)
-}
-
-/// 浏览器中聊天链接默认新标签打开；Tauri 内由壳层拦截为系统浏览器。
-fn chat_links_open_in_new_tab(mut html: String) -> String {
-    if html.contains("<a ") && !html.contains("target=") {
-        html = html.replace(
-            "<a href=",
-            r#"<a target="_blank" rel="noopener noreferrer" href="#,
-        );
-    }
-    html
+    code_block::decorate_fenced_code_blocks(&cleaned)
 }
 
 /// 调试：不做 Markdown 解析，将纯文本转义为可安全写入 `innerHTML` 的片段（换行 → `<br />`）。
@@ -614,6 +606,51 @@ mod tests {
             h.matches("<p").count() >= 2 || h.contains("<pre"),
             "expected multiple blocks or a code block, got {h:?}"
         );
+    }
+
+    #[test]
+    fn fenced_code_gets_toolbar() {
+        let h = to_safe_html("```rust\nlet x = 1;\n```");
+        assert!(h.contains("md-code-block"), "got {h:?}");
+        assert!(h.contains("data-md-copy-code"), "got {h:?}");
+        assert!(h.contains(">rust</span>"), "got {h:?}");
+    }
+
+    #[test]
+    fn gfm_alert_note_keeps_class() {
+        let h = to_safe_html("> [!NOTE]\n> hello");
+        assert!(h.contains("markdown-alert-note"), "got {h:?}");
+        assert!(h.contains("hello"), "got {h:?}");
+    }
+
+    #[test]
+    fn javascript_href_is_stripped() {
+        let h = to_safe_html("[x](javascript:alert(1))");
+        let lower = h.to_lowercase();
+        assert!(
+            !lower.contains("href=\"javascript:") && !lower.contains("href='javascript:"),
+            "javascript href must not survive, got {h:?}"
+        );
+        assert!(
+            !lower.contains("<a"),
+            "stripped javascript link must not leave a clickable <a>, got {h:?}"
+        );
+        assert!(h.contains('x'), "got {h:?}");
+    }
+
+    #[test]
+    fn data_image_src_is_stripped() {
+        let h = to_safe_html("![x](data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==)");
+        let lower = h.to_lowercase();
+        assert!(!lower.contains("data:"), "got {h:?}");
+    }
+
+    #[test]
+    fn https_image_gets_referrerpolicy() {
+        let h = to_safe_html("![x](https://example.com/p.png)");
+        assert!(h.contains("<img"), "got {h:?}");
+        assert!(h.contains("referrerpolicy=\"no-referrer\""), "got {h:?}");
+        assert!(h.contains("https://example.com/p.png"), "got {h:?}");
     }
 }
 

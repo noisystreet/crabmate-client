@@ -17,6 +17,7 @@ use super::tui_line_markdown::{
 use super::tui_transcript_sync::{PlanTuiSyncArgs, TuiMountState, TuiSyncPlan, plan_tui_sync};
 use crate::chat_session_state::ChatSessionSignals;
 use crate::i18n::{self, Locale};
+use crate::md_code_copy::try_copy_md_code_block;
 use crate::storage::ChatSession;
 use crate::stream_text_overlay::StreamTextOverlay;
 use std::collections::HashMap;
@@ -463,7 +464,10 @@ pub(crate) fn ChatTuiStreamView(
                 on:pointermove=move |ev| on_pointermove(ev)
                 on:pointerup=move |_| on_pointer_end()
                 on:pointercancel=move |_| on_pointer_end_cancel()
-                on:click=move |_ev| {
+                on:click=move |ev| {
+                    if try_copy_md_code_block(&ev, locale.get_untracked()) {
+                        return;
+                    }
                     let _ = try_consume_suppress_click();
                 }
             />

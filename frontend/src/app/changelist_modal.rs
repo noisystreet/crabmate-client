@@ -11,6 +11,7 @@ use wasm_bindgen::JsCast;
 use crate::a11y::{focus_first_in_modal_container, trap_tab_in_container};
 use crate::api::fetch_workspace_changelog;
 use crate::i18n::{self, load_locale_from_storage};
+use crate::md_code_copy::try_copy_md_code_block;
 use crate::message_render::fragment_to_chat_safe_html;
 use crate::session_sync::SessionSyncState;
 
@@ -213,6 +214,9 @@ fn changelist_modal_body_section(
             <div
                 class="changelist-modal-prose msg-md-prose"
                 node_ref=changelist_body_ref
+                on:click=move |ev| {
+                    let _ = try_copy_md_code_block(&ev, locale.get_untracked());
+                }
             ></div>
         </div>
     }

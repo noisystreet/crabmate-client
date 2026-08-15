@@ -1,149 +1,14 @@
 //! 终端流按**块** Markdown：已闭合块做安全 HTML（冻结，增量只 append）；
-//! 活跃末块做**流式安全**行内增强（成对 `**` / `` ` `` / `~~` 才着色；半截标记保持字面量）；
-//! 未闭合围栏仍纯文本。段落/表格/列表在空行或块类型切换时才冻结，避免终态全文重渲抖动。
+//! 活跃末块做**流式安全**行内增强（成对 `**` / `*` / `` ` `` / `~~` / `[text](url)` 才着色；半截标记保持字面量）；
+//! 未闭合围栏仍纯文本。段落/表格/列表/引用在空行或块类型切换时才冻结，避免终态全文重渲抖动。
 
-use crate::markdown::{http_url_end_at, plaintext_to_safe_html, to_safe_html};
+use crate::markdown::{plaintext_to_safe_html, stream_inline_safe_html, to_safe_html};
 
 /// 活跃块是否为未闭合围栏缓冲（须 `textContent`，禁止行内 HTML）。
 #[must_use]
 pub fn open_block_is_fence_buffer(text: &str) -> bool {
-    text.starts_with("```")
-}
-
-fn push_escaped_char(out: &mut String, c: char) {
-    match c {
-        '&' => out.push_str("&amp;"),
-        '<' => out.push_str("&lt;"),
-        '>' => out.push_str("&gt;"),
-        '"' => out.push_str("&quot;"),
-        _ => out.push(c),
-    }
-}
-
-fn push_escaped_str(out: &mut String, s: &str) {
-    for c in s.chars() {
-        push_escaped_char(out, c);
-    }
-}
-
-/// 成对扫描之外：当前位置若已是 `http(s)://` URL 则写成安全 `<a>`。
-fn try_push_autolink(out: &mut String, text: &str, i: usize) -> Option<usize> {
-    let end = http_url_end_at(text, i)?;
-    let url = &text[i..end];
-    out.push_str("<a target=\"_blank\" rel=\"noopener noreferrer\" href=\"");
-    push_escaped_str(out, url);
-    out.push_str("\">");
-    push_escaped_str(out, url);
-    out.push_str("</a>");
-    Some(end)
-}
-
-/// 在 `from` 起查找闭合 delimiter；要求非空内容且不跨换行。
-fn find_closing_delim(s: &str, from: usize, delim: &str) -> Option<usize> {
-    if from >= s.len() {
-        return None;
-    }
-    let rest = &s[from..];
-    let mut search_at = 0usize;
-    while let Some(rel) = rest[search_at..].find(delim) {
-        let abs = from + search_at + rel;
-        if abs > from {
-            let inner = &s[from..abs];
-            if !inner.is_empty() && !inner.contains('\n') {
-                return Some(abs);
-            }
-        }
-        search_at += rel + delim.len();
-        if search_at >= rest.len() {
-            break;
-        }
-    }
-    None
-}
-
-/// 流式活跃行：仅渲染**已成对**的行内标记，半截 `**` / `` ` `` 保持转义字面量。
-/// 不做标题/列表/围栏（那些等块闭合后再 `to_safe_html`）。
-#[must_use]
-pub fn stream_inline_safe_html(text: &str) -> String {
-    if text.is_empty() {
-        return String::new();
-    }
-    let mut out = String::with_capacity(text.len().saturating_mul(2));
-    let mut i = 0usize;
-    while i < text.len() {
-        if text[i..].starts_with('`') {
-            if let Some(end) = find_closing_delim(text, i + 1, "`") {
-                out.push_str("<code>");
-                push_escaped_str(&mut out, &text[i + 1..end]);
-                out.push_str("</code>");
-                i = end + 1;
-                continue;
-            }
-            push_escaped_char(&mut out, '`');
-            i += '`'.len_utf8();
-            continue;
-        }
-        if text[i..].starts_with("**") {
-            if let Some(end) = find_closing_delim(text, i + 2, "**") {
-                out.push_str("<strong>");
-                out.push_str(&stream_inline_safe_html_no_strong(&text[i + 2..end]));
-                out.push_str("</strong>");
-                i = end + 2;
-                continue;
-            }
-            push_escaped_str(&mut out, "**");
-            i += 2;
-            continue;
-        }
-        if text[i..].starts_with("~~") {
-            if let Some(end) = find_closing_delim(text, i + 2, "~~") {
-                out.push_str("<del>");
-                push_escaped_str(&mut out, &text[i + 2..end]);
-                out.push_str("</del>");
-                i = end + 2;
-                continue;
-            }
-            push_escaped_str(&mut out, "~~");
-            i += 2;
-            continue;
-        }
-        if let Some(end) = try_push_autolink(&mut out, text, i) {
-            i = end;
-            continue;
-        }
-        let c = text[i..].chars().next().unwrap_or('\0');
-        push_escaped_char(&mut out, c);
-        i += c.len_utf8();
-    }
-    out
-}
-
-/// 粗体内只处理 code / 转义，避免 `**` 递归。
-fn stream_inline_safe_html_no_strong(text: &str) -> String {
-    let mut out = String::with_capacity(text.len().saturating_mul(2));
-    let mut i = 0usize;
-    while i < text.len() {
-        if text[i..].starts_with('`') {
-            if let Some(end) = find_closing_delim(text, i + 1, "`") {
-                out.push_str("<code>");
-                push_escaped_str(&mut out, &text[i + 1..end]);
-                out.push_str("</code>");
-                i = end + 1;
-                continue;
-            }
-            push_escaped_char(&mut out, '`');
-            i += 1;
-            continue;
-        }
-        if let Some(end) = try_push_autolink(&mut out, text, i) {
-            i = end;
-            continue;
-        }
-        let c = text[i..].chars().next().unwrap_or('\0');
-        push_escaped_char(&mut out, c);
-        i += c.len_utf8();
-    }
-    out
+    let first = text.split('\n').next().unwrap_or(text);
+    parse_fence_line(first).is_some()
 }
 
 /// 活跃块写入 DOM / `to_inner_html`。
@@ -177,15 +42,37 @@ pub fn open_active_block_class(text: &str, markdown_render: bool) -> &'static st
     }
 }
 
-fn is_fence_marker(line: &str) -> bool {
-    line.trim_start().starts_with("```")
+/// CommonMark 围栏：行首最多 3 空格 + 至少 3 个 `` ` `` 或 `~`。
+fn parse_fence_line(line: &str) -> Option<(u8, usize, &str)> {
+    let t = line.trim_start();
+    let indent = line.len() - t.len();
+    if indent > 3 {
+        return None;
+    }
+    let bytes = t.as_bytes();
+    if bytes.len() < 3 {
+        return None;
+    }
+    let ch = bytes[0];
+    if ch != b'`' && ch != b'~' {
+        return None;
+    }
+    let mut run = 0usize;
+    while run < bytes.len() && bytes[run] == ch {
+        run += 1;
+    }
+    if run < 3 {
+        return None;
+    }
+    let info = t[run..].trim();
+    if ch == b'`' && info.contains('`') {
+        return None;
+    }
+    Some((ch, run, info))
 }
 
-fn fence_info(line: &str) -> &str {
-    line.trim_start()
-        .strip_prefix("```")
-        .map(str::trim)
-        .unwrap_or("")
+fn fence_marker_str(ch: u8, run: usize) -> String {
+    (ch as char).to_string().repeat(run.max(3))
 }
 
 fn blank_line_html() -> String {
@@ -208,16 +95,17 @@ fn closed_md_html(src: &str, markdown_render: bool) -> String {
     wrap_closed_html(&html)
 }
 
-fn fence_html(lang: &str, body: &str, markdown_render: bool) -> String {
-    let mut fenced = String::with_capacity(body.len() + lang.len() + 16);
-    fenced.push_str("```");
+fn fence_html(ch: u8, run: usize, lang: &str, body: &str, markdown_render: bool) -> String {
+    let mark = fence_marker_str(ch, run);
+    let mut fenced = String::with_capacity(body.len() + lang.len() + mark.len() * 2 + 8);
+    fenced.push_str(&mark);
     fenced.push_str(lang);
     fenced.push('\n');
     fenced.push_str(body);
     if !body.is_empty() && !body.ends_with('\n') {
         fenced.push('\n');
     }
-    fenced.push_str("```");
+    fenced.push_str(&mark);
     let html = if markdown_render {
         to_safe_html(&fenced)
     } else {
@@ -226,9 +114,10 @@ fn fence_html(lang: &str, body: &str, markdown_render: bool) -> String {
     format!("<div class=\"chat-tui-line chat-tui-line--fence msg-md-prose\">{html}</div>")
 }
 
-fn open_fence_plain_text(lang: &str, body: &str, open_tail: &str) -> String {
+fn open_fence_plain_text(ch: u8, run: usize, lang: &str, body: &str, open_tail: &str) -> String {
+    let mark = fence_marker_str(ch, run);
     let mut plain = String::new();
-    plain.push_str("```");
+    plain.push_str(&mark);
     plain.push_str(lang);
     plain.push('\n');
     plain.push_str(body);
@@ -241,6 +130,7 @@ enum BlockKind {
     Paragraph,
     Table,
     List,
+    Blockquote,
 }
 
 fn is_table_line(line: &str) -> bool {
@@ -301,8 +191,14 @@ fn is_block_continuation(line: &str) -> bool {
     line.starts_with("    ") || line.starts_with("\t")
 }
 
+fn is_blockquote_line(line: &str) -> bool {
+    line.trim_start().starts_with('>')
+}
+
 fn classify_block_line(line: &str) -> BlockKind {
-    if is_table_line(line) {
+    if is_blockquote_line(line) {
+        BlockKind::Blockquote
+    } else if is_table_line(line) {
         BlockKind::Table
     } else if is_list_line(line) {
         BlockKind::List
@@ -322,7 +218,7 @@ fn push_pending_line(pending: &mut String, line: &str) {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TuiBodyChunks {
     pub closed: Vec<String>,
-    /// 活跃块源文本；围栏缓冲以 \`\`\` 开头。DOM 用 [`render_open_active_html`] 写入。
+    /// 活跃块源文本；围栏缓冲以 \`\`\` / `~~~`（可带最多 3 空格缩进）开头。DOM 用 [`render_open_active_html`] 写入。
     pub open_plain: Option<String>,
     /// 与解析时 `markdown_render` 一致；活跃块与 Incremental 渲染均读此标志（patch 不再另带一份）。
     pub markdown_render: bool,
@@ -379,7 +275,12 @@ pub enum TuiBodyPatch {
 
 enum FenceMode {
     Off,
-    Open { lang: String, body: String },
+    Open {
+        ch: u8,
+        run: usize,
+        lang: String,
+        body: String,
+    },
 }
 
 struct BlockAbsorbState {
@@ -412,42 +313,67 @@ impl BlockAbsorbState {
         self.pending_kind = None;
     }
 
+    fn close_open_fence(&mut self) {
+        if let FenceMode::Open {
+            ch,
+            run,
+            lang,
+            body,
+        } = std::mem::replace(&mut self.fence, FenceMode::Off)
+        {
+            self.closed
+                .push(fence_html(ch, run, &lang, &body, self.markdown_render));
+        }
+    }
+
     /// 消息结束：把 pending / 未闭合围栏全部冻进 closed。
     fn seal_for_finalize(&mut self) {
         self.flush_pending();
-        if let FenceMode::Open { lang, body } = std::mem::replace(&mut self.fence, FenceMode::Off) {
-            self.closed
-                .push(fence_html(&lang, &body, self.markdown_render));
-        }
+        self.close_open_fence();
     }
 
     fn open_fence_plain(&self, open_tail: &str) -> Option<String> {
         match &self.fence {
             FenceMode::Off => None,
-            FenceMode::Open { lang, body } => Some(open_fence_plain_text(lang, body, open_tail)),
+            FenceMode::Open {
+                ch,
+                run,
+                lang,
+                body,
+            } => Some(open_fence_plain_text(*ch, *run, lang, body, open_tail)),
         }
     }
 
-    fn absorb_complete_line(&mut self, line: &str) {
-        if is_fence_marker(line) {
-            self.flush_pending();
-            match std::mem::replace(&mut self.fence, FenceMode::Off) {
-                FenceMode::Open { lang, body } => {
-                    self.closed
-                        .push(fence_html(&lang, &body, self.markdown_render));
-                }
-                FenceMode::Off => {
-                    self.fence = FenceMode::Open {
-                        lang: fence_info(line).to_string(),
-                        body: String::new(),
-                    };
-                }
+    fn try_absorb_fence(&mut self, line: &str) -> bool {
+        if matches!(&self.fence, FenceMode::Open { .. }) {
+            let closing = match &self.fence {
+                FenceMode::Open { ch, run, .. } => parse_fence_line(line)
+                    .is_some_and(|(c, r, info)| c == *ch && r >= *run && info.is_empty()),
+                FenceMode::Off => false,
+            };
+            if closing {
+                self.close_open_fence();
+            } else if let FenceMode::Open { body, .. } = &mut self.fence {
+                body.push_str(line);
+                body.push('\n');
             }
-            return;
+            return true;
         }
-        if let FenceMode::Open { body, .. } = &mut self.fence {
-            body.push_str(line);
-            body.push('\n');
+        let Some((ch, run, info)) = parse_fence_line(line) else {
+            return false;
+        };
+        self.flush_pending();
+        self.fence = FenceMode::Open {
+            ch,
+            run,
+            lang: info.to_string(),
+            body: String::new(),
+        };
+        true
+    }
+
+    fn absorb_complete_line(&mut self, line: &str) {
+        if self.try_absorb_fence(line) {
             return;
         }
         if line.trim().is_empty() {
@@ -631,6 +557,14 @@ mod tests {
     }
 
     #[test]
+    fn complete_inline_italic_and_link_in_active_line() {
+        let h = render_tui_block_markdown("见 *斜体* 与 [site](https://example.com)", false);
+        assert!(h.contains("<em>斜体</em>"), "got {h}");
+        assert!(h.contains("href=\"https://example.com\""), "got {h}");
+        assert!(h.contains(">site</a>"), "got {h}");
+    }
+
+    #[test]
     fn balanced_then_incomplete_bold_in_active_line() {
         let h = stream_inline_safe_html("**ok** and **no");
         assert!(h.contains("<strong>ok</strong>"), "got {h}");
@@ -810,5 +744,41 @@ mod tests {
             a.closed
         );
         assert_eq!(a.open_plain.as_deref(), Some("more"));
+    }
+
+    #[test]
+    fn open_tilde_fence_stays_plain_until_closed() {
+        let h = render_tui_block_markdown("~~~\nlet x = 1;\n", false);
+        assert!(h.contains("let x = 1;"), "got {h}");
+        assert!(
+            !h.contains("<code"),
+            "open tilde fence should stay plain, got {h}"
+        );
+        assert!(h.contains("chat-tui-line--plain"), "got {h}");
+    }
+
+    #[test]
+    fn closed_tilde_fence_renders_code() {
+        let h = render_tui_block_markdown("~~~\nlet x = 1;\n~~~\n", false);
+        assert!(h.contains("<code") || h.contains("<pre"), "got {h}");
+        assert!(h.contains("let x = 1;"), "got {h}");
+    }
+
+    #[test]
+    fn blockquote_does_not_merge_with_following_paragraph() {
+        let chunks = parse_tui_body_chunks("> quote\n\npara\n\n", true);
+        assert!(
+            chunks.closed.iter().any(|c| c.contains("<blockquote")),
+            "got {:?}",
+            chunks.closed
+        );
+        assert!(
+            chunks
+                .closed
+                .iter()
+                .any(|c| c.contains("para") && !c.contains("<blockquote")),
+            "paragraph should be its own block, got {:?}",
+            chunks.closed
+        );
     }
 }

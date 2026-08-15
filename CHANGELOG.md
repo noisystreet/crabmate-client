@@ -11,10 +11,12 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Security
 
+- Chat markdown: remote images get `referrerpolicy=no-referrer`; `javascript:` / `data:` href/src stay stripped; anchors that lose `href` unwrap to text; links use ammonia `target=_blank` instead of a post-pass string replace
 - Desktop / Android / connect lockfiles: bump transitive `plist` 1.8.0 → 1.10.0 so `quick-xml` is 0.41.0 (RUSTSEC-2026-0194 / RUSTSEC-2026-0195)
 
 ### Added
 
+- Chat markdown: closed fences show a language label and Copy button; streaming active lines render paired `*em*` / `_em_` and complete `[text](url)` (http(s) only); `~~~` fences buffer like backticks; `>` quotes freeze as their own block; GFM `[!NOTE]`/`[!TIP]`/… alerts keep `markdown-alert-*` classes
 - Chat: bare `http://` / `https://` URLs in markdown (and streaming active lines) render as links (case-insensitive scheme; CJK paths and IPv6 literals kept); skipped inside code/fences and when markdown is off; `javascript:` is not autolinked
 - CI: `dependency-security` workflow (`cargo audit` + `cargo deny check licenses bans sources` on each Cargo workspace; policy in `deny.toml`; not in pre-commit). Local: `make dependency-security`
 - Android: in-flight `/chat/stream` starts a `dataSync` foreground service (channel `crabmate.stream`) so the WebView is less likely to freeze after Home/lock; `command_approval` upgrades that notification (truncated command). Tap opens the existing approval modal (`POST /chat/approval` still in-UI). Android 13+ requests `POST_NOTIFICATIONS` on first send; denial is shown on the status bar. Disconnect / Stop / stream end / return-to-connect stop the service ([ADR-0002](docs/adr/0002-android-approval-notification-foreground-keepalive.md))
