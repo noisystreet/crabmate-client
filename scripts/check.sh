@@ -8,13 +8,14 @@ cd "$ROOT"
 echo "[check] forbid path deps back to Server monorepo"
 bash "$ROOT/scripts/check-no-main-path.sh"
 
-echo "[check] cargo fmt (desktop + mobile + client-api + connect + tui + frontend)"
+echo "[check] cargo fmt (desktop + mobile + client-api + connect + tui + web-host + frontend)"
 (cd desktop-tauri/src-tauri && cargo fmt --all -- --check)
 (cd mobile-tauri/src-tauri && cargo fmt --all -- --check)
 (cd crates/crabmate-client-api && cargo fmt --all -- --check)
 (cd crates/crabmate-connect && cargo fmt --all -- --check)
 (cd crates/crabmate-tui-core && cargo fmt --all -- --check)
 (cd crates/crabmate-tui && cargo fmt --all -- --check)
+(cd crates/crabmate-web-host && cargo fmt --all -- --check)
 (cd frontend && cargo fmt --all -- --check)
 
 echo "[check] ensure desktop/mobile dist stubs for tauri codegen"
@@ -37,6 +38,9 @@ echo "[check] cargo clippy crabmate-tui-core"
 
 echo "[check] cargo clippy crabmate-tui"
 (cd crates/crabmate-tui && cargo clippy --all-targets -- -D warnings)
+
+echo "[check] cargo clippy crabmate-web-host"
+(cd crates/crabmate-web-host && cargo clippy --all-targets -- -D warnings)
 
 echo "[check] frontend wasm check"
 rustup target add wasm32-unknown-unknown 2>/dev/null || true

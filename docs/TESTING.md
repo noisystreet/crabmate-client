@@ -3,7 +3,8 @@
 ```bash
 make test-frontend   # wasm check + frontend lib 单测
 make test-tauri      # crabmate-connect + desktop cargo test + mobile check
-make test            # 先 frontend 再 tauri
+make test-web-host   # crabmate-web 回环静态服务单测
+make test            # frontend → tauri → tui → web-host
 ```
 
 Victauri 全量 E2E（需 WebView / 外部 serve）另跑：`make victauri-e2e`。  
@@ -23,9 +24,9 @@ pre-commit run --all-files
 | 钩子 | 说明 |
 |------|------|
 | `check-no-main-path` | 禁止 Cargo path 回主仓 |
-| `cargo-fmt` | desktop / mobile / connect / frontend |
+| `cargo-fmt` | desktop / mobile / connect / tui / web-host / frontend |
 | `desktop-dist-stubs` → **`tauri-dist-stubs`** | 为 **desktop/mobile** `frontendDist` 建占位（`scripts/ensure-tauri-dist-stubs.sh`；与 CI `check.sh` 共用） |
-| `desktop-clippy` / `mobile-clippy` / `connect-clippy` | `-D warnings` |
+| `desktop-clippy` / `mobile-clippy` / `connect-clippy` / `tui-clippy` / `web-host-clippy` | `-D warnings` |
 | `frontend-wasm-check` / `frontend-clippy` | wasm32 check + clippy |
 | `lizard-rust` | 按模块限制 CCN>10 函数个数（含 `frontend`；见 `lizard_module_ccn_caps.toml`）。实测必须等于 cap；变小则失败，须调低 cap 或 `bash scripts/lizard-rust.sh --write-caps` |
 | `fn-param-ratchet` | 形参 ≤ 9 |
@@ -50,9 +51,10 @@ bash scripts/check.sh
 
 | Job / 工作流 | 内容 |
 |--------------|------|
-| `CI` / `check` | `check-no-main-path`、`scripts/check.sh`（含 frontend wasm/clippy + 复杂度）、`make frontend`（trunk）、`make test-frontend`、`make test-tui`、connect/desktop **unit** test（desktop `cargo test --bins`）、mobile check |
+| `CI` / `check` | `check-no-main-path`、`scripts/check.sh`（含 frontend wasm/clippy + 复杂度）、`make frontend`（trunk）、`make test-frontend`、`make test-tui`、`make test-web-host`、connect/desktop **unit** test（desktop `cargo test --bins`）、mobile check |
 | `CI` / `victauri-e2e` | **Skipped**（`if: false`）；壳 E2E 见 nightly |
 | `CI` / `build-desktop-deb` | `CM_PREPARE_SKIP_FRONTEND=1` + stub；`make desktop-release`；校验 `Package: crabmate-desktop`、无 serve sidecar、无 `/etc/crabmate` |
+| `CI` / `build-web-deb` | `CM_WEB_SKIP_FRONTEND=1` + stub dist；`make web-release`；校验 `Package: crabmate-web`、菜单图标、无 serve sidecar、无 `/etc/crabmate` |
 | `E2E Playwright` | 本仓 `make frontend` + checkout Server 编 `serve`；mock SSE 基线 |
 | `Victauri E2E Nightly` | `make frontend` + Server `serve` + `./scripts/victauri-e2e.sh all`（xvfb；不含 `real_llm`）；失败上传桌面/serve 日志 |
 | `code-complexity` | 独立门禁：`lizard-rust` / `fn-param` / `fn-nloc` |
@@ -66,6 +68,7 @@ Victauri 全量 E2E **不进** PR 默认 CI（`e2e_test!` 未设 `VICTAURI_E2E` 
 make frontend                 # trunk debug → frontend/dist（开发迭代）
 make frontend-release         # trunk --release（需 wasm-opt；~数 MB WASM）
 make desktop-release          # 完整 .deb（beforeBuild 会跑 trunk --release + 体积门禁）
+make web-release              # crabmate-web .deb（trunk --release + 回环静态服务）
 make desktop-bin-release      # 仅二进制
 ```
 

@@ -42,6 +42,7 @@ jobs:
             crates/crabmate-connect
             crates/crabmate-tui-core
             crates/crabmate-tui
+            crates/crabmate-web-host
             frontend
 
       - name: Install lizard (complexity via check.sh)
@@ -69,6 +70,9 @@ jobs:
 
       - name: make test-tui
         run: make test-tui
+
+      - name: make test-web-host
+        run: make test-web-host
 
       - name: cargo test (connect)
         run: cargo test
@@ -151,3 +155,34 @@ jobs:
             exit 1
           fi
           echo "deb package OK: $DEB"
+
+  build-web-deb:
+    name: web release package (deb)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force 2>/dev/null || true
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            crates/crabmate-web-host
+
+      # 打包门禁不跑 trunk：stub dist 只用来校验 .deb 布局（含菜单图标）
+      - name: make web-release (stub UI)
+        env:
+          CM_WEB_SKIP_FRONTEND: "1"
+        run: |
+          mkdir -p frontend/dist
+          echo '<!DOCTYPE html><html><body>ci-stub</body></html>' > frontend/dist/index.html
+          printf '\x00asm\x01\x00\x00\x00' > frontend/dist/ci-stub.wasm
+          make web-release
+
+      - name: Verify web deb package
+        run: bash scripts/verify-web-deb.sh

@@ -31,6 +31,7 @@
 ├── crates/crabmate-connect/   # 连接页逻辑（本仓 path；勿再 path 回主仓）
 ├── crates/crabmate-tui-core/  # 远程终端 HTTP/SSE 核心
 ├── crates/crabmate-tui/       # 二进制 crabmate-tui（P3：chat / repl + 斜杠）
+├── crates/crabmate-web-host/  # 二进制 crabmate-web（回环静态 UI 托管）
 ├── desktop-tauri/             # Desktop Linux（Tauri 2）
 ├── mobile-tauri/              # Android（Tauri 2）
 ├── frontend/                  # 业务 UI（Leptos CSR + WASM；契约 git rev/tag）
@@ -60,6 +61,7 @@ make test
 make desktop-dev        # 需已装 cargo-tauri ^2；另开终端跑 serve
 make desktop-release    # 产出 crabmate-desktop_*.deb（自动 trunk --release UI，勿用 debug dist）
 make desktop-bin-release
+make web-release        # 产出 crabmate-web_*.deb（trunk --release + 回环静态服务，系统浏览器）
 make apk                # Android；默认不建 frontend
 make tui                # 构建 crabmate-tui（远程终端）
 make clean
@@ -106,7 +108,7 @@ crabmate-tui --api-base http://127.0.0.1:8080 chat "你好"
 | [docs/design/contract_pin.md](./docs/design/contract_pin.md) | 契约 git tag / rev 钉法 |
 | [frontend/README.md](./frontend/README.md) | UI 构建（trunk） |
 
-提交前：`pre-commit run --all-files` 或 `make check`。CI：`.github/workflows/ci.yml`（含 **frontend wasm**、**frontend/TUI 单测** 与 **desktop release .deb**）；依赖审计：`.github/workflows/dependency-security.yml`（`make dependency-security`）；Victauri 壳 E2E：nightly 工作流或 `./scripts/victauri-e2e.sh`。
+提交前：`pre-commit run --all-files` 或 `make check`。CI：`.github/workflows/ci.yml`（含 **frontend wasm**、**frontend/TUI 单测**、**desktop release .deb** 与 **web release .deb**）；依赖审计：`.github/workflows/dependency-security.yml`（`make dependency-security`）；Victauri 壳 E2E：nightly 工作流或 `./scripts/victauri-e2e.sh`。
 
 ## 快速开始（Desktop）
 
@@ -122,6 +124,26 @@ make desktop-dev
 ```
 
 连接页填写服务器地址与可选 Web Bearer（**不是**模型 `API_KEY`）。连接成功后加载**包内** `index.html`，API 指向该 `serve`。
+
+## 快速开始（系统浏览器里的 Web UI）
+
+不是 Tauri：本机回环静态服务打开默认浏览器。仍然**不是** `crabmate serve` — API 要另开，并在 CORS 里放行页面 Origin。
+
+```bash
+# 终端 A — API
+crabmate serve --host 127.0.0.1 --port 8080
+# 放行 web-host Origin（Server ≥ v0.2.0 默认只放行 Tauri Origin）：
+#   CM_WEB_CORS_ALLOWED_ORIGINS=http://127.0.0.1:4173 crabmate serve …
+
+# 终端 B — 本仓
+make web-release
+sudo dpkg -i crates/crabmate-web-host/target/debian/crabmate-web_*.deb
+crabmate-web --api-base http://127.0.0.1:8080
+# 不安装时：
+#   cargo run --release --manifest-path crates/crabmate-web-host/Cargo.toml -- --root frontend/dist --api-base http://127.0.0.1:8080
+```
+
+默认监听 `127.0.0.1:4173`。`--no-open` 跳过 `xdg-open`。Bearer：`--bearer` / `CM_WEB_API_BEARER_TOKEN`（纯浏览器会弱持久化到 `localStorage`）。`.deb` 会安装 **CrabMate Web** 菜单项，图标与 Desktop 壳相同。同一端口上再次启动会打开已有实例，而不是报错退出。
 
 ## 个人云（远程纯 API）
 
