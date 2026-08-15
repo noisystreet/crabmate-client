@@ -12,7 +12,16 @@ const ALERT_CLASSES: &[&str] = &[
 
 /// 净化 pulldown-cmark 输出：保留只读任务列表、围栏语言 class、GFM alert class。
 pub fn clean_chat_html(body: &str) -> String {
-    unwrap_anchors_without_href(&chat_ammonia_builder().clean(body).to_string())
+    let cleaned = unwrap_anchors_without_href(&chat_ammonia_builder().clean(body).to_string());
+    demote_chat_headings(&cleaned)
+}
+
+/// 消息内 `h1`/`h2` 降为 `h3`/`h4`，避免抢页面大纲层级。
+fn demote_chat_headings(html: &str) -> String {
+    html.replace("<h1", "<h3")
+        .replace("</h1>", "</h3>")
+        .replace("<h2", "<h4")
+        .replace("</h2>", "</h4>")
 }
 
 fn find_anchor_open(s: &str) -> Option<usize> {
@@ -181,5 +190,15 @@ mod tests {
         let h = clean_chat_html("<a href=\"https://example.com\">x</a>");
         assert!(h.contains("<a"), "got {h:?}");
         assert!(h.contains("https://example.com"), "got {h:?}");
+    }
+
+    #[test]
+    fn demotes_h1_and_h2() {
+        let h = clean_chat_html("<h1>t</h1><h2>s</h2><h3>k</h3>");
+        assert!(!h.contains("<h1"), "got {h:?}");
+        assert!(!h.contains("<h2"), "got {h:?}");
+        assert!(h.contains("<h3>t</h3>"), "got {h:?}");
+        assert!(h.contains("<h4>s</h4>"), "got {h:?}");
+        assert!(h.contains("<h3>k</h3>"), "got {h:?}");
     }
 }

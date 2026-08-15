@@ -17,24 +17,32 @@ fn normalize_glued_markdown_blocks(md: &str) -> String {
     let mut s = md.to_string();
     // 全角冒号后紧跟围栏：强制换行，避免 `：**…**：```code` 整行误解析。
     s = s.replace("：```", "：\n```");
+    s = s.replace("：~~~", "：\n~~~");
     // 句末 / 右括号后紧贴下一小节 `**标题**`：拆成独立段，便于分段与列表式阅读。
     s = s.replace("）**", "）\n\n**");
     s = s.replace("。**", "。\n\n**");
     s = s.replace("！**", "！\n\n**");
     s = s.replace("？**", "？\n\n**");
+    // 句末紧贴引用：避免 `结束。> 引用` 被收进同一段落。
+    s = s.replace("。>", "。\n\n>");
+    s = s.replace("！>", "！\n\n>");
+    s = s.replace("？>", "？\n\n>");
+    s = s.replace("：>", "：\n\n>");
     s
 }
 
 /// 在 `pulldown_cmark` 解析前做轻量规范化（单行规则，不解析嵌套结构）。
 ///
 /// 处理常见误写：
-/// 1. **行内围栏**：正文后紧贴 `` ```lang ``（如 `依赖：```rust`），拆成上一行 + 独立围栏行。
+/// 1. **行内围栏**：正文后紧贴 `` ```lang `` / `~~~lang`（如 `依赖：```rust`），拆成上一行 + 独立围栏行。
 /// 2. **信息串与注释粘连**：行首合法围栏后写成 `` ```rust// comment ``，拆成 `` ```rust `` 与 `// comment` 两行。
-/// 3. **行尾悬空围栏**：行首不是合法围栏行，但行尾仅剩一段 `` ``` `` 且无其它正文，去掉尾部 fence，避免误开空代码块。
+/// 3. **行尾悬空围栏**：行首不是合法围栏行，但行尾仅剩一段 `` ``` `` / `~~~` 且无其它正文，去掉尾部 fence，避免误开空代码块。
 /// 4. **ATX 标题缺空格**：如 `###规范与安全`（`#` 与标题字之间无空格），在至多 6 个 `#` 后补一个空格，满足 CommonMark 标题语法。
-/// 5. **GFM 表头与分隔行粘连**：如 `| a | b ||---|---|`（模型常漏换行），拆成表头行 + 独立对齐行。
+/// 5. **列表标记缺空格**：如 `-规范` / `1.下一步`（标记与正文之间无空格）；不改 `1.0` 这类版本号，也不把 `*em*` 当列表。
+/// 6. **GFM 表头与分隔行粘连**：如 `| a | b ||---|---|`（模型常漏换行），拆成表头行 + 独立对齐行。
+/// 7. **引用粘连**：句末全角标点后紧贴 `>`（如 `结束。> 引用`），拆成独立引用块。
 ///
-/// 无法覆盖所有非法 Markdown；极端正文若以 `` ``` `` 结尾仍可能被改写（极少见）。
+/// 无法覆盖所有非法 Markdown；不改写嵌套列表缩进（避免误伤代码/散文）。极端正文若以围栏标记结尾仍可能被改写（极少见）。
 pub fn normalize_markdown_for_render(md: &str) -> String {
     if md.is_empty() {
         return String::new();
@@ -52,6 +60,7 @@ fn normalize_one_input_line(line: &str) -> String {
     let n = normalize_line_recursive(line);
     n.lines()
         .map(fix_atx_heading_missing_space)
+        .map(|line| fix_list_marker_missing_space(&line))
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -85,11 +94,88 @@ fn fix_atx_heading_missing_space(line: &str) -> String {
         _ => {}
     }
     let split_byte = chars[hash_end].0;
+    insert_space_at(line, split_byte)
+}
+
+fn insert_space_at(line: &str, byte: usize) -> String {
     let mut out = String::with_capacity(line.len() + 1);
-    out.push_str(&line[..split_byte]);
+    out.push_str(&line[..byte]);
     out.push(' ');
-    out.push_str(&line[split_byte..]);
+    out.push_str(&line[byte..]);
     out
+}
+
+fn skip_atx_or_list_indent(chars: &[(usize, char)]) -> usize {
+    let mut idx = 0usize;
+    let mut indent = 0usize;
+    while idx < chars.len() && indent < 3 && chars[idx].1 == ' ' {
+        indent += 1;
+        idx += 1;
+    }
+    idx
+}
+
+/// 行首 `-规范` / `+项` 补空格；不碰 `*`（与强调冲突）和 `--` 主题分割。
+fn fix_unordered_list_missing_space(line: &str) -> Option<String> {
+    let chars: Vec<(usize, char)> = line.char_indices().collect();
+    let idx = skip_atx_or_list_indent(&chars);
+    let c = chars.get(idx)?.1;
+    if c != '-' && c != '+' {
+        return None;
+    }
+    let next = chars.get(idx + 1)?.1;
+    if !next.is_alphabetic() {
+        return None;
+    }
+    Some(insert_space_at(line, chars[idx + 1].0))
+}
+
+fn skip_ascii_digits(chars: &[(usize, char)], start: usize, max_digits: usize) -> usize {
+    let mut dig = start;
+    let mut n_dig = 0usize;
+    while dig < chars.len() && chars[dig].1.is_ascii_digit() && n_dig < max_digits {
+        n_dig += 1;
+        dig += 1;
+    }
+    dig
+}
+
+fn ordered_marker_lacks_space(nch: char) -> bool {
+    nch != ' ' && nch != '\t' && !nch.is_ascii_digit()
+}
+
+/// `1.下一步` 的正文起始字节；`1.0` / 已有空格则 `None`。
+fn ordered_list_body_byte(line: &str) -> Option<usize> {
+    let chars: Vec<(usize, char)> = line.char_indices().collect();
+    let idx = skip_atx_or_list_indent(&chars);
+    let dig = skip_ascii_digits(&chars, idx, 9);
+    if dig == idx || dig >= chars.len() {
+        return None;
+    }
+    if chars[dig].1 != '.' && chars[dig].1 != ')' {
+        return None;
+    }
+    let after = dig + 1;
+    let nch = chars.get(after)?.1;
+    if !ordered_marker_lacks_space(nch) {
+        return None;
+    }
+    Some(chars[after].0)
+}
+
+/// `1.下一步` 补空格；`1.0` 视为版本号不改。
+fn fix_ordered_list_missing_space(line: &str) -> Option<String> {
+    Some(insert_space_at(line, ordered_list_body_byte(line)?))
+}
+
+fn fix_list_marker_missing_space(line: &str) -> String {
+    if let Some(s) = fix_unordered_list_missing_space(line) {
+        return s;
+    }
+    if let Some(s) = fix_ordered_list_missing_space(line) {
+        return s;
+    }
+    line.to_string()
 }
 
 fn normalize_line_recursive(line: &str) -> String {
@@ -193,15 +279,16 @@ fn is_delimiter_cell(cell: &str) -> bool {
         .all(|c| c == '-' || c == ':' || c.is_whitespace())
 }
 
-/// 行内第一个连续 `` ` `` 段：`(字节起点, 字节长度)`，长度 ≥3。
-fn first_backtick_run(line: &str) -> Option<(usize, usize)> {
+/// 行内第一个围栏开符段：`` ``` `` 或 `~~~`，`(字节起点, 字节长度)`，长度 ≥3。
+fn first_fence_run(line: &str) -> Option<(usize, usize)> {
     let b = line.as_bytes();
     let mut i = 0usize;
     while i < b.len() {
-        if b[i] == b'`' {
+        let ch = b[i];
+        if ch == b'`' || ch == b'~' {
             let start = i;
             let mut j = i;
-            while j < b.len() && b[j] == b'`' {
+            while j < b.len() && b[j] == ch {
                 j += 1;
             }
             if j - start >= 3 {
@@ -219,37 +306,59 @@ fn leading_space_width(line: &str) -> usize {
     line.chars().take_while(|&c| c == ' ').count()
 }
 
-/// CommonMark：围栏行前可有至多 3 个空格；其后第一个字符为 `` ` ``。
+/// CommonMark：围栏行前可有至多 3 个空格；其后为 `` ` `` 或 `~` 跑。
 fn fence_starts_line(line: &str) -> bool {
     let sp = leading_space_width(line).min(3);
-    match first_backtick_run(line) {
+    match first_fence_run(line) {
         Some((ix, _)) => ix == sp,
         None => false,
     }
 }
 
-/// 若首个 `` ``` `` 不在合法行首位置，拆成 `(prefix, 从 ``` 起的后缀)`。
+/// 若首个围栏不在合法行首位置，拆成 `(prefix, 从围栏起的后缀)`。
 fn split_mid_line_fence_if_needed(line: &str) -> Option<(&str, &str)> {
     let sp = leading_space_width(line).min(3);
-    let (ix, _) = first_backtick_run(line)?;
+    let (ix, _) = first_fence_run(line)?;
     if ix == sp {
         return None;
     }
     Some((&line[..ix], &line[ix..]))
 }
 
-/// 后缀在去掉行首空格后仅为 ≥3 个 `` ` ``（可选尾随空白）。
+/// 后缀在去掉行首空格后仅为 ≥3 个 `` ` `` 或 `~`（可选尾随空白）。
 fn is_fence_only_line(line: &str) -> bool {
     let s = line.trim_start_matches(' ');
-    let mut n = 0usize;
-    for ch in s.chars() {
-        if ch == '`' {
-            n += 1;
-        } else {
-            return false;
-        }
+    let bytes = s.as_bytes();
+    if bytes.len() < 3 {
+        return false;
     }
-    n >= 3
+    let ch = bytes[0];
+    if ch != b'`' && ch != b'~' {
+        return false;
+    }
+    bytes.iter().all(|b| *b == ch)
+}
+
+fn is_fence_info_token(s: &str) -> bool {
+    s.chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '+' || c == '.')
+}
+
+/// 围栏 info 与 `//` 粘连时返回 `//` 在 info 后缀中的字节下标。
+fn sticky_comment_slash_in_fence_info(after_ticks: &str) -> Option<usize> {
+    if after_ticks.trim().is_empty() {
+        return None;
+    }
+    let slash = after_ticks.find("//")?;
+    let before_slash = &after_ticks[..slash];
+    // info 段：语言 id，不含空白；允许空 info 后紧跟 `//`
+    if before_slash.contains(char::is_whitespace) {
+        return None;
+    }
+    if !is_fence_info_token(before_slash) {
+        return None;
+    }
+    Some(slash)
 }
 
 /// 行首合法围栏且 info 与 `//` 粘在同一行时拆开（如 `` ```rust// x ``）。
@@ -258,38 +367,21 @@ fn split_sticky_fence_lang_comment(line: &str) -> String {
         return line.to_string();
     }
     let sp = leading_space_width(line).min(3);
-    let Some((ix, run_len)) = first_backtick_run(line) else {
+    let Some((ix, run_len)) = first_fence_run(line) else {
         return line.to_string();
     };
     if ix != sp {
         return line.to_string();
     }
-    let after_ticks = &line[ix + run_len..];
-    // 闭合围栏：info 为空且可能只有空白
-    if after_ticks.trim().is_empty() {
-        return line.to_string();
-    }
-    let slash = after_ticks.find("//");
-    let Some(slash) = slash else {
+    let Some(slash) = sticky_comment_slash_in_fence_info(&line[ix + run_len..]) else {
         return line.to_string();
     };
-    let before_slash = &after_ticks[..slash];
-    // info 段：语言 id，不含空白；允许空 info 后紧跟 `//`
-    if before_slash.contains(|c: char| c.is_whitespace()) {
-        return line.to_string();
-    }
-    if !before_slash
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '+' || c == '.')
-    {
-        return line.to_string();
-    }
-    let fence_head = &line[..ix + run_len + before_slash.len()];
+    let fence_head = &line[..ix + run_len + slash];
     let tail = &line[ix + run_len + slash..];
     format!("{fence_head}\n{tail}")
 }
 
-/// 非围栏行且行尾为「若干空格 + 纯 `` ``` ``」时去掉尾部（避免行尾误写导致下一行被吃进代码块）。
+/// 非围栏行且行尾为「若干空格 + 纯围栏开符」时去掉尾部（避免行尾误写导致下一行被吃进代码块）。
 fn normalize_trailing_orphan_fence(line: &str) -> String {
     if fence_starts_line(line) {
         return line.to_string();
@@ -306,11 +398,15 @@ fn normalize_trailing_orphan_fence(line: &str) -> String {
     format!("{body}{suffix_ws}")
 }
 
-/// `text + (spaces) + ```+` → `(text, ```+)`；`text` 不得以空白结尾（避免误剥合法内联）。
+/// `text + (spaces) + ```+` 或 `~~~+` → `(text, fence)`；`text` 不得以空白结尾。
 fn split_trailing_fence_run(s: &str) -> Option<(&str, &str)> {
     let bytes = s.as_bytes();
+    let ch = *bytes.last()?;
+    if ch != b'`' && ch != b'~' {
+        return None;
+    }
     let mut i = bytes.len();
-    while i > 0 && bytes[i - 1] == b'`' {
+    while i > 0 && bytes[i - 1] == ch {
         i -= 1;
     }
     let tick_start = i;
@@ -338,7 +434,6 @@ pub fn to_safe_html(md: &str) -> String {
     opts.insert(Options::ENABLE_TABLES);
     opts.insert(Options::ENABLE_STRIKETHROUGH);
     opts.insert(Options::ENABLE_TASKLISTS);
-    opts.insert(Options::ENABLE_HEADING_ATTRIBUTES);
     opts.insert(Options::ENABLE_GFM);
     let parser = Parser::new_ext(&md, opts);
     let events = autolink::rewrite_events(parser);
@@ -375,9 +470,14 @@ mod tests {
     #[test]
     fn multi_level_headings_produce_h_tags() {
         let h = to_safe_html("# Title\n\n## Sub\n\n### H3");
-        assert!(h.contains("<h1"));
-        assert!(h.contains("<h2"));
-        assert!(h.contains("<h3"));
+        assert!(!h.contains("<h1"), "message h1 must be demoted, got {h:?}");
+        assert!(!h.contains("<h2"), "message h2 must be demoted, got {h:?}");
+        assert!(h.contains("<h3"), "got {h:?}");
+        assert!(h.contains("<h4"), "got {h:?}");
+        assert!(
+            h.contains("Title") && h.contains("Sub") && h.contains("H3"),
+            "got {h:?}"
+        );
     }
 
     #[test]
@@ -561,6 +661,57 @@ mod tests {
     }
 
     #[test]
+    fn normalize_preserves_valid_tilde_fence_line() {
+        let line = "~~~\nlet x = 1;\n~~~";
+        assert_eq!(normalize_markdown_for_render(line), line);
+    }
+
+    #[test]
+    fn normalize_splits_inline_tilde_fence_opener() {
+        let raw = "依赖：~~~rust\ncode()\n~~~";
+        let n = normalize_markdown_for_render(raw);
+        assert!(
+            n.contains("依赖：\n~~~rust"),
+            "expected tilde fence on its own line, got {n:?}"
+        );
+    }
+
+    #[test]
+    fn normalize_strips_trailing_tilde_fence_on_heading_like_line() {
+        let line = "#### 仍然存在的双向依赖~~~";
+        let n = normalize_markdown_for_render(line);
+        assert_eq!(n, "#### 仍然存在的双向依赖");
+    }
+
+    #[test]
+    fn normalize_sticky_tilde_lang_slash_slash() {
+        let line = "~~~rust// comment here";
+        let n = normalize_markdown_for_render(line);
+        assert_eq!(n, "~~~rust\n// comment here");
+    }
+
+    #[test]
+    fn normalize_splits_glued_blockquote_after_fullwidth_period() {
+        let raw = "结束。> 引用";
+        let n = normalize_markdown_for_render(raw);
+        assert!(
+            n.contains("结束。\n\n> 引用"),
+            "expected quote on its own block, got {n:?}"
+        );
+        let h = to_safe_html(raw);
+        assert!(h.contains("<blockquote"), "got {h:?}");
+    }
+
+    #[test]
+    fn normalize_inserts_space_after_list_markers() {
+        assert_eq!(normalize_markdown_for_render("-规范"), "- 规范");
+        assert_eq!(normalize_markdown_for_render("1.下一步"), "1. 下一步");
+        assert_eq!(normalize_markdown_for_render("1.0"), "1.0");
+        let h = to_safe_html("-规范\n");
+        assert!(h.contains("<li") && h.contains("规范"), "got {h:?}");
+    }
+
+    #[test]
     fn normalize_inserts_space_after_atx_hashes() {
         let raw = "###规范与安全\n\n正文。";
         assert_eq!(
@@ -651,6 +802,23 @@ mod tests {
         assert!(h.contains("<img"), "got {h:?}");
         assert!(h.contains("referrerpolicy=\"no-referrer\""), "got {h:?}");
         assert!(h.contains("https://example.com/p.png"), "got {h:?}");
+    }
+
+    #[test]
+    fn heading_attribute_syntax_does_not_emit_id() {
+        let h = to_safe_html("# Title {#main}");
+        let lower = h.to_lowercase();
+        assert!(!lower.contains("id=\"main\""), "got {h:?}");
+        assert!(!lower.contains("id='main'"), "got {h:?}");
+        assert!(h.contains("Title"), "got {h:?}");
+    }
+
+    #[test]
+    fn atx_h1_is_demoted_to_h3() {
+        let h = to_safe_html("# Only");
+        assert!(h.contains("<h3"), "got {h:?}");
+        assert!(!h.contains("<h1"), "got {h:?}");
+        assert!(h.contains("Only"), "got {h:?}");
     }
 }
 
