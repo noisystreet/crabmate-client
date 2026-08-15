@@ -52,7 +52,7 @@ help:
 	@echo "  make desktop-dev         cargo tauri dev（请先自行启动纯 API serve + CORS）"
 	@echo "  make web-release         纯 Web Client .deb（trunk --release + 回环静态服务 crabmate-web）"
 	@echo "  make tui                 构建 crabmate-tui（远程终端；需外部 serve）"
-	@echo "  make tui-release         release 构建 crabmate-tui"
+	@echo "  make tui-release         crabmate-tui .deb（仅二进制；无图标、无配置）"
 	@echo "  make apk                 Android APK（默认 trunk + 包内 UI）"
 	@echo "  make all                 desktop-release"
 	@echo ""
@@ -175,7 +175,7 @@ tui:
 	cd "$(TUI_DIR)" && $(CARGO) build --bin crabmate-tui
 
 tui-release:
-	cd "$(TUI_DIR)" && $(CARGO) build --release --bin crabmate-tui
+	bash "$(ROOT)/scripts/tui-release.sh"
 
 # --- 质检 ---
 

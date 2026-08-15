@@ -64,6 +64,7 @@ make desktop-bin-release
 make web-release        # 产出 crabmate-web_*.deb（trunk --release + 回环静态服务，系统浏览器）
 make apk                # Android；默认不建 frontend
 make tui                # 构建 crabmate-tui（远程终端）
+make tui-release        # 产出 crabmate-tui_*.deb（仅二进制；无图标、无配置）
 make clean
 ```
 
@@ -92,7 +93,13 @@ echo "你好" | crabmate-tui --api-base http://127.0.0.1:8080 --yes chat
 crabmate-tui --api-base http://127.0.0.1:8080 chat "你好"
 ```
 
-设计见 [docs/design/remote_cli_tui.md](./docs/design/remote_cli_tui.md)。
+设计见 [docs/design/remote_cli_tui.md](./docs/design/remote_cli_tui.md)。发版包（仅二进制，无菜单图标、无配置文件）：
+
+```bash
+make tui-release
+sudo dpkg -i crates/crabmate-tui/target/debian/crabmate-tui_*.deb
+crabmate-tui --api-base http://127.0.0.1:8080 repl
+```
 
 ## 文档
 
@@ -108,7 +115,7 @@ crabmate-tui --api-base http://127.0.0.1:8080 chat "你好"
 | [docs/design/contract_pin.md](./docs/design/contract_pin.md) | 契约 git tag / rev 钉法 |
 | [frontend/README.md](./frontend/README.md) | UI 构建（trunk） |
 
-提交前：`pre-commit run --all-files` 或 `make check`。CI：`.github/workflows/ci.yml`（含 **frontend wasm**、**frontend/TUI 单测**、**desktop release .deb** 与 **web release .deb**）；依赖审计：`.github/workflows/dependency-security.yml`（`make dependency-security`）；Victauri 壳 E2E：nightly 工作流或 `./scripts/victauri-e2e.sh`。
+提交前：`pre-commit run --all-files` 或 `make check`。CI：`.github/workflows/ci.yml`（含 **frontend wasm**、**frontend/TUI 单测**、**desktop / web / tui release .deb**）；依赖审计：`.github/workflows/dependency-security.yml`（`make dependency-security`）；Victauri 壳 E2E：nightly 工作流或 `./scripts/victauri-e2e.sh`。
 
 ## 快速开始（Desktop）
 

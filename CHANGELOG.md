@@ -17,6 +17,7 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 ### Added
 
 - Loopback web UI host (`make web-release` / `crabmate-web`): static `frontend/dist` on `127.0.0.1:4173`, system browser; not Tauri and not `crabmate serve`. The `.deb` installs a menu entry with the same CrabMate icon as Desktop (`Icon=crabmate-web`). A second launch on the same port opens the existing instance. Logs redact `--bearer`. CI `build-web-deb` packs a stub UI (`CM_WEB_SKIP_FRONTEND=1`) and checks package layout
+- Remote terminal `.deb` (`make tui-release` / `crabmate-tui`): binary only at `/usr/bin/crabmate-tui`; no menu icon, no config files, not `crabmate serve`. CI `build-tui-deb` packs and checks layout
 - Chat markdown: closed fences show a language label and Copy button; streaming active lines render paired `*em*` / `_em_` and complete `[text](url)` (http(s) only); `~~~` fences buffer like backticks; `>` quotes freeze as their own block; GFM `[!NOTE]`/`[!TIP]`/… alerts keep `markdown-alert-*` classes
 - Chat: bare `http://` / `https://` URLs in markdown (and streaming active lines) render as links (case-insensitive scheme; CJK paths and IPv6 literals kept); skipped inside code/fences and when markdown is off; `javascript:` is not autolinked
 - CI: `dependency-security` workflow (`cargo audit` + `cargo deny check licenses bans sources` on each Cargo workspace; policy in `deny.toml`; not in pre-commit). Local: `make dependency-security`

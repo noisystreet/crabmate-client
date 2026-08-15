@@ -55,6 +55,7 @@ bash scripts/check.sh
 | `CI` / `victauri-e2e` | **Skipped**（`if: false`）；壳 E2E 见 nightly |
 | `CI` / `build-desktop-deb` | `CM_PREPARE_SKIP_FRONTEND=1` + stub；`make desktop-release`；校验 `Package: crabmate-desktop`、无 serve sidecar、无 `/etc/crabmate` |
 | `CI` / `build-web-deb` | `CM_WEB_SKIP_FRONTEND=1` + stub dist；`make web-release`；校验 `Package: crabmate-web`、菜单图标、无 serve sidecar、无 `/etc/crabmate` |
+| `CI` / `build-tui-deb` | `make tui-release`；校验 `Package: crabmate-tui`、仅 `/usr/bin/crabmate-tui`、无图标/配置、无 serve sidecar、无 `/etc/crabmate` |
 | `E2E Playwright` | 本仓 `make frontend` + checkout Server 编 `serve`；mock SSE 基线 |
 | `Victauri E2E Nightly` | `make frontend` + Server `serve` + `./scripts/victauri-e2e.sh all`（xvfb；不含 `real_llm`）；失败上传桌面/serve 日志 |
 | `code-complexity` | 独立门禁：`lizard-rust` / `fn-param` / `fn-nloc` |
@@ -69,6 +70,7 @@ make frontend                 # trunk debug → frontend/dist（开发迭代）
 make frontend-release         # trunk --release（需 wasm-opt；~数 MB WASM）
 make desktop-release          # 完整 .deb（beforeBuild 会跑 trunk --release + 体积门禁）
 make web-release              # crabmate-web .deb（trunk --release + 回环静态服务）
+make tui-release              # crabmate-tui .deb（仅二进制；无图标、无配置）
 make desktop-bin-release      # 仅二进制
 ```
 

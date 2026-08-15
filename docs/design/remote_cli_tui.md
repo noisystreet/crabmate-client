@@ -86,7 +86,7 @@ crates/
 | **P2** | 交互 `repl`（reedline 或最小行编辑）+ 审批 TTY + 会话 id 续聊 | 非白名单命令可审批；Ctrl+C 干净退出 |
 | **P3** | 工作区/会话斜杠子集与 WASM 设置对齐的常用操作 | `/workspace`、列会话等 |
 | **P4** | 实验性 `tui`（ratatui）：流式中区 + 底栏输入；布局可简化 | TTY 全屏可用；不要求三栏齐全 |
-| **P5** | 文档 / `.deb` 或 cargo 安装说明；Server 侧标注同进程 CLI「过渡 / deprecate 窗口」 | README 双语文案同步 |
+| **P5** | 文档 / `.deb` 或 cargo 安装说明；Server 侧标注同进程 CLI「过渡 / deprecate 窗口」 | README 双语文案同步；Client `make tui-release` 产出仅二进制的 `crabmate-tui_*.deb`（无图标、无配置） |
 
 **建议开工顺序**：P1 → P2；P4 可与 P3 并行但不要阻塞 P2。
 

@@ -156,6 +156,32 @@ jobs:
           fi
           echo "deb package OK: $DEB"
 
+  build-tui-deb:
+    name: tui release package (deb)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force 2>/dev/null || true
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            crates/crabmate-tui
+            crates/crabmate-tui-core
+            crates/crabmate-client-api
+
+      - name: make tui-release
+        run: make tui-release
+
+      - name: Verify tui deb package
+        run: bash scripts/verify-tui-deb.sh
+
   build-web-deb:
     name: web release package (deb)
     runs-on: ubuntu-latest
