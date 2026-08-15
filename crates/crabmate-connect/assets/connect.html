@@ -78,13 +78,6 @@
         font-weight: 650;
         letter-spacing: 0.02em;
       }
-      p.lead {
-        margin: 0.35rem 0 0;
-        color: var(--muted);
-        line-height: 1.35;
-        font-size: 0.84rem;
-        text-align: center;
-      }
       label {
         display: block;
         font-size: 0.8rem;
@@ -178,13 +171,6 @@
       .recent-item:hover {
         border-color: rgba(123, 144, 196, 0.5);
       }
-      .hint {
-        margin-top: 0.55rem;
-        font-size: 0.72rem;
-        color: var(--muted);
-        line-height: 1.35;
-        text-align: center;
-      }
       .err {
         color: #e8c4cc;
         font-size: 0.82rem;
@@ -199,7 +185,6 @@
         text-align: center;
       }
       .status:empty { display: none; }
-      code { font-size: 0.85em; }
       html[data-cm-mobile-shell] body {
         justify-content: flex-start;
         padding-top: calc(1rem + var(--cm-safe-top, 0px));
@@ -211,11 +196,6 @@
       <div class="brand">
         <div class="mark" aria-hidden="true"><span>C</span></div>
         <h1>CrabMate</h1>
-        <p class="lead" id="lead">
-          连接到已有的 <code>crabmate serve</code>（本机 / 局域网 / 个人云
-          <code>https://api.…</code>）。填写地址与 Web API 共享密钥（与
-          <code>CM_WEB_API_BEARER_TOKEN</code> 一致；不是模型 API_KEY）。公网须 HTTPS + Bearer。
-        </p>
       </div>
       <form id="connect-form" method="post" action="#" autocomplete="on">
         <label for="url">服务器地址</label>
@@ -228,10 +208,10 @@
           autocapitalize="off"
           autocorrect="off"
           spellcheck="false"
-          placeholder="https://api.example.com/ 或 http://192.168.1.10:8080/"
+          placeholder="http://127.0.0.1:8080/"
           required
         />
-        <label for="bearer">Web API 共享密钥（个人云建议必填）</label>
+        <label for="bearer">Web API 共享密钥</label>
         <input
           id="bearer"
           name="password"
@@ -240,7 +220,6 @@
           autocapitalize="off"
           autocorrect="off"
           spellcheck="false"
-          placeholder="与 CM_WEB_API_BEARER_TOKEN 相同（不是模型 API_KEY）"
         />
         <p class="status" id="status" aria-live="polite"></p>
         <p class="err" id="err" aria-live="assertive"></p>
@@ -253,9 +232,6 @@
         </div>
         <ul class="recent-list" id="recent-list"></ul>
       </section>
-      <p class="hint">
-        局域网可用明文 HTTP；个人云 / 公网请用 HTTPS + Bearer（UI 在壳内，不必给 API 域名挂 SPA）。成功后会记住地址；非空 Bearer 写入系统钥匙串。
-      </p>
     </div>
     <script>
       const URL_KEY = "crabmate.connect.serverUrl";
@@ -269,7 +245,6 @@
       const err = document.getElementById("err");
       const statusEl = document.getElementById("status");
       const submitBtn = document.getElementById("submit");
-      const leadEl = document.getElementById("lead");
       /** 防止自动登录与手动提交并发探测 */
       let connectInFlight = false;
       /** 壳预填的建议服务器 URL（桌面多为本机 8080）；无则留空 */
@@ -490,10 +465,6 @@
           suggested = (await invoke("get_suggested_server_url")) || "";
         } catch (_) {}
         suggestedServerUrl = (suggested || "").trim();
-        if (suggestedServerUrl) {
-          leadEl.innerHTML =
-            "连接到 <code>crabmate serve</code>。若壳提供建议地址则预填；也可改为局域网或个人云 <code>https://api.…</code>。连接成功的非空 Bearer 写入系统钥匙串。";
-        }
 
         const savedUrl = readLegacyUrl();
         // 有建议地址且已存为回环（或尚无已存）时用建议值，避免旧端口残留。
