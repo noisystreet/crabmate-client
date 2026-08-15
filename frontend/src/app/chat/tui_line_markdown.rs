@@ -2,7 +2,7 @@
 //! 活跃末块做**流式安全**行内增强（成对 `**` / `` ` `` / `~~` 才着色；半截标记保持字面量）；
 //! 未闭合围栏仍纯文本。段落/表格/列表在空行或块类型切换时才冻结，避免终态全文重渲抖动。
 
-use crate::markdown::{plaintext_to_safe_html, to_safe_html};
+use crate::markdown::{http_url_end_at, plaintext_to_safe_html, to_safe_html};
 
 /// 活跃块是否为未闭合围栏缓冲（须 `textContent`，禁止行内 HTML）。
 #[must_use]
@@ -24,6 +24,18 @@ fn push_escaped_str(out: &mut String, s: &str) {
     for c in s.chars() {
         push_escaped_char(out, c);
     }
+}
+
+/// 成对扫描之外：当前位置若已是 `http(s)://` URL 则写成安全 `<a>`。
+fn try_push_autolink(out: &mut String, text: &str, i: usize) -> Option<usize> {
+    let end = http_url_end_at(text, i)?;
+    let url = &text[i..end];
+    out.push_str("<a target=\"_blank\" rel=\"noopener noreferrer\" href=\"");
+    push_escaped_str(out, url);
+    out.push_str("\">");
+    push_escaped_str(out, url);
+    out.push_str("</a>");
+    Some(end)
 }
 
 /// 在 `from` 起查找闭合 delimiter；要求非空内容且不跨换行。
@@ -95,6 +107,10 @@ pub fn stream_inline_safe_html(text: &str) -> String {
             i += 2;
             continue;
         }
+        if let Some(end) = try_push_autolink(&mut out, text, i) {
+            i = end;
+            continue;
+        }
         let c = text[i..].chars().next().unwrap_or('\0');
         push_escaped_char(&mut out, c);
         i += c.len_utf8();
@@ -117,6 +133,10 @@ fn stream_inline_safe_html_no_strong(text: &str) -> String {
             }
             push_escaped_char(&mut out, '`');
             i += 1;
+            continue;
+        }
+        if let Some(end) = try_push_autolink(&mut out, text, i) {
+            i = end;
             continue;
         }
         let c = text[i..].chars().next().unwrap_or('\0');
@@ -608,6 +628,14 @@ mod tests {
     }
 
     #[test]
+    fn active_bare_url_becomes_link() {
+        let h = stream_inline_safe_html("见 https://example.com 与尾");
+        assert!(h.contains("href=\"https://example.com\""), "got {h}");
+        assert!(h.contains("target=\"_blank\""), "got {h}");
+        assert!(!h.contains("https://example.com 与尾"), "got {h}");
+    }
+
+    #[test]
     fn finalize_renders_open_line_as_markdown() {
         let h = render_tui_block_markdown("**第一段，第二段**", true);
         assert!(h.contains("<strong>") || h.contains("<b>"), "got {h}");
@@ -737,6 +765,13 @@ mod tests {
         let h = render_open_active_html("见 **粗体**", false);
         assert!(!h.contains("<strong>"), "got {h}");
         assert!(h.contains("**粗体**") || h.contains("&#42;"), "got {h}");
+    }
+
+    #[test]
+    fn markdown_off_active_line_skips_autolink() {
+        let h = render_open_active_html("见 https://example.com", false);
+        assert!(!h.contains("<a "), "got {h}");
+        assert!(h.contains("https://example.com"), "got {h}");
     }
 
     #[test]
