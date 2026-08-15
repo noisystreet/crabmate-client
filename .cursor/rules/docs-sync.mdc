@@ -18,6 +18,7 @@ alwaysApply: true
 - User-visible shell behavior → **`README.md` + `README.zh-CN.md` (must sync)**, plus matching `desktop-tauri/` / `mobile-tauri/` READMEs
 - Agent / contributor constraints → **`AGENTS.md`** (English only)
 - Connect model, lifecycle, tray / single-instance → `docs/design/tauri_gui_mvp_design.md`
+- Coding-agent client plan (review / revert; not full IDE) → `docs/design/coding_agent_client.md` (Wave 1 checkboxes: `chat_ui_todo.md`; restore/changelog JSON: Server)
 - Manual shell smoke steps → `docs/design/shell_smoke_runbook.md`
 - Test / check entrypoints → `docs/TESTING.md`, `AGENTS.md` Required Commands
 - User/maintainer release notes → `CHANGELOG.md` (English; `[Unreleased]`; move into a version section when tagging)

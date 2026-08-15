@@ -37,6 +37,7 @@ type PressOrigin = Rc<Cell<Option<(f64, f64)>>>;
 fn menu_label(locale: Locale, action: &str) -> &'static str {
     match action {
         "copy" => i18n::msg_menu_copy(locale),
+        "edit" => i18n::msg_menu_edit(locale),
         "regen" => i18n::msg_menu_regen(locale),
         "branch" => i18n::msg_menu_branch(locale),
         "retry" => i18n::msg_menu_retry(locale),
@@ -47,6 +48,7 @@ fn menu_label(locale: Locale, action: &str) -> &'static str {
 fn menu_title(locale: Locale, action: &str) -> &'static str {
     match action {
         "copy" => i18n::msg_copy_title(locale),
+        "edit" => i18n::msg_edit_title(locale),
         "regen" => i18n::msg_regen_title(locale),
         "branch" => i18n::msg_branch_title(locale),
         "retry" => i18n::msg_retry_title(locale),
@@ -55,7 +57,7 @@ fn menu_title(locale: Locale, action: &str) -> &'static str {
 }
 
 fn action_is_busy_gated(action: &str) -> bool {
-    matches!(action, "regen" | "branch" | "retry")
+    matches!(action, "regen" | "branch" | "retry" | "edit")
 }
 
 fn action_is_danger(action: &str) -> bool {

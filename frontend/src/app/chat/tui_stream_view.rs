@@ -4,6 +4,12 @@ use leptos::ev;
 use leptos::prelude::*;
 use wasm_bindgen::JsCast;
 
+use super::find_highlight::{
+    FindRestoreScope, apply_chat_find_highlights, find_restore_scope,
+    reapply_chat_find_highlight_on_wrap,
+};
+use super::handles::ChatFindOverlaySignals;
+use super::message_row_actions::MessageRowActionSignals;
 use super::message_turn_menu::{
     MessageTurnContextMenuLayer, MessageTurnMenuAnchor, build_message_turn_press_handlers,
     try_open_message_turn_menu_from_keydown,
@@ -11,14 +17,20 @@ use super::message_turn_menu::{
 use super::scroll_follow::follow_after_content_paint;
 use super::scroll_shell::ChatScrollShellSignals;
 use super::session_hydrate::try_load_older_messages_for_active_session;
+use super::stream_follow_up_gates::user_edit_save_blocked;
 use super::tui_actions_bar::TuiTurnActionHandlers;
 use super::tui_line_markdown::{
     TuiBodyPatch, open_active_block_class, open_block_is_fence_buffer, render_open_active_html,
 };
 use super::tui_transcript_sync::{PlanTuiSyncArgs, TuiMountState, TuiSyncPlan, plan_tui_sync};
+use super::user_message_edit::{
+    UserEditClick, mount_user_message_editor, try_handle_user_edit_click, try_sync_user_edit_draft,
+};
 use crate::chat_session_state::ChatSessionSignals;
 use crate::i18n::{self, Locale};
 use crate::md_code_copy::try_copy_md_code_block;
+use crate::session_ops::set_user_message_text;
+use crate::session_search::normalize_search_query;
 use crate::storage::ChatSession;
 use crate::stream_text_overlay::StreamTextOverlay;
 use std::collections::HashMap;
@@ -323,24 +335,36 @@ fn apply_tui_sync_plan(transcript: &web_sys::HtmlElement, plan: &TuiSyncPlan) ->
     apply_tui_body_and_action_patches(transcript, plan)
 }
 
+fn find_restore_scope_from_plan(plan: &TuiSyncPlan) -> FindRestoreScope {
+    find_restore_scope(
+        plan.full_html.is_some()
+            || !plan.append_sections.is_empty()
+            || plan.promote_id.is_some()
+            || !plan.refresh_bodies.is_empty(),
+        plan.live.is_some(),
+    )
+}
+
 fn apply_or_rebuild_tui_mount(
     el: &web_sys::HtmlElement,
     plan: TuiSyncPlan,
     mount_state: RwSignal<Option<TuiMountState>>,
     rebuild: impl FnOnce() -> TuiSyncPlan,
-) {
+) -> FindRestoreScope {
+    let scope = find_restore_scope_from_plan(&plan);
     if apply_tui_sync_plan(el, &plan) {
         mount_state.set(Some(plan.next));
-        return;
+        return scope;
     }
     let forced = rebuild();
     if apply_tui_sync_plan(el, &forced) {
         mount_state.set(Some(forced.next));
-        return;
+        return FindRestoreScope::Full;
     }
     web_sys::console::warn_1(
         &"chat-tui: forced rebuild failed; keeping previous mount_state".into(),
     );
+    FindRestoreScope::None
 }
 
 fn sync_chat_tui_stream_dom(
@@ -351,10 +375,11 @@ fn sync_chat_tui_stream_dom(
     transcript_ref: NodeRef<leptos::html::Div>,
     mount_state: RwSignal<Option<TuiMountState>>,
     scroll_shell: ChatScrollShellSignals,
-) {
+) -> (FindRestoreScope, Option<String>) {
     let tool_chunks = chat.tool_output_chunks.get();
     let active_id = chat.active_id.get();
     let overlay = chat.stream_text_overlay.get();
+    let live_id = overlay.as_ref().map(|o| o.message_id.clone());
     let prev = mount_state.get_untracked();
     let plan = chat.sessions.with(|sessions| {
         plan_for_active_session(PlanActiveSessionArgs {
@@ -370,13 +395,13 @@ fn sync_chat_tui_stream_dom(
     });
 
     let Some(node) = transcript_ref.get() else {
-        return;
+        return (FindRestoreScope::None, live_id);
     };
     let Some(el) = node.dyn_ref::<web_sys::HtmlElement>() else {
-        return;
+        return (FindRestoreScope::None, live_id);
     };
 
-    apply_or_rebuild_tui_mount(el, plan, mount_state, || {
+    let scope = apply_or_rebuild_tui_mount(el, plan, mount_state, || {
         chat.sessions.with(|sessions| {
             plan_for_active_session(PlanActiveSessionArgs {
                 sessions,
@@ -391,6 +416,125 @@ fn sync_chat_tui_stream_dom(
         })
     });
     follow_after_content_paint(scroll_shell);
+    (scope, live_id)
+}
+
+fn transcript_html_el(transcript_ref: NodeRef<leptos::html::Div>) -> Option<web_sys::HtmlElement> {
+    transcript_ref
+        .get()
+        .and_then(|node| node.dyn_into::<web_sys::HtmlElement>().ok())
+}
+
+struct FindOverlaySnapshot {
+    query: String,
+    match_ids: Vec<String>,
+    current_id: Option<String>,
+    open: bool,
+}
+
+fn find_overlay_snapshot_tracked(find: ChatFindOverlaySignals) -> FindOverlaySnapshot {
+    let match_ids = find.match_ids.get();
+    let current_id = match_ids.get(find.cursor.get()).cloned();
+    FindOverlaySnapshot {
+        query: normalize_search_query(&find.query.get()),
+        match_ids,
+        current_id,
+        open: find.panel_open.get(),
+    }
+}
+
+fn find_overlay_snapshot_untracked(find: ChatFindOverlaySignals) -> FindOverlaySnapshot {
+    let match_ids = find.match_ids.get_untracked();
+    let current_id = match_ids.get(find.cursor.get_untracked()).cloned();
+    FindOverlaySnapshot {
+        query: normalize_search_query(&find.query.get_untracked()),
+        match_ids,
+        current_id,
+        open: find.panel_open.get_untracked(),
+    }
+}
+
+fn apply_find_snapshot(el: &web_sys::HtmlElement, snap: &FindOverlaySnapshot) {
+    if snap.open {
+        apply_chat_find_highlights(
+            el,
+            snap.query.as_str(),
+            &snap.match_ids,
+            snap.current_id.as_deref(),
+        );
+    } else {
+        apply_chat_find_highlights(el, "", &[], None);
+    }
+}
+
+fn restore_overlays_after_tui_sync(
+    transcript_ref: NodeRef<leptos::html::Div>,
+    scope: FindRestoreScope,
+    live_id: Option<&str>,
+    editing: RwSignal<Option<super::user_message_edit::UserMessageEdit>>,
+    locale: Locale,
+    find: ChatFindOverlaySignals,
+) {
+    let Some(el) = transcript_html_el(transcript_ref) else {
+        return;
+    };
+    let snap = find_overlay_snapshot_untracked(find);
+    match scope {
+        FindRestoreScope::None => {}
+        FindRestoreScope::LiveWrap => {
+            if snap.open
+                && let Some(id) = live_id
+            {
+                reapply_chat_find_highlight_on_wrap(
+                    &el,
+                    id,
+                    snap.query.as_str(),
+                    &snap.match_ids,
+                    snap.current_id.as_deref(),
+                );
+            }
+        }
+        FindRestoreScope::Full => {
+            mount_user_message_editor(&el, editing.get_untracked().as_ref(), locale);
+            apply_find_snapshot(&el, &snap);
+        }
+    }
+}
+
+fn save_edited_user_message(handlers: TuiTurnActionHandlers, message_id: String, text: String) {
+    let trimmed = text.trim().to_string();
+    if trimmed.is_empty() {
+        return;
+    }
+    let follow_up = handlers.stream_follow_up.get_untracked();
+    if user_edit_save_blocked(
+        handlers.stream_turn_busy_ui.get_untracked(),
+        follow_up.blocks_user_edit_save(),
+    ) {
+        handlers.status_err.set(Some(
+            i18n::msg_edit_save_busy(handlers.locale.get_untracked()).to_string(),
+        ));
+        return;
+    }
+    let aid = handlers.chat.active_id.get_untracked();
+    let mut idx = None;
+    handlers.chat.update_sessions_message_row(|list| {
+        let _ = set_user_message_text(list, &aid, &message_id, &trimmed);
+        idx = list
+            .iter()
+            .find(|s| s.id == aid)
+            .and_then(|s| s.messages.iter().position(|m| m.id == message_id));
+    });
+    let Some(msg_idx) = idx else {
+        return;
+    };
+    MessageRowActionSignals {
+        chat: handlers.chat,
+        stream_follow_up: handlers.stream_follow_up,
+        status_err: handlers.status_err,
+        locale: handlers.locale,
+    }
+    .spawn_regenerate_from_user_line(msg_idx, message_id);
 }
 
 #[component]
@@ -446,8 +590,10 @@ pub(crate) fn ChatTuiStreamView(
     markdown_render: RwSignal<bool>,
     scroll_shell: ChatScrollShellSignals,
     action_handlers: TuiTurnActionHandlers,
+    find: ChatFindOverlaySignals,
 ) -> impl IntoView {
     let status_err = action_handlers.status_err;
+    let editing_user_message = action_handlers.editing_user_message;
     let transcript_ref = NodeRef::<leptos::html::Div>::new();
     let mount_state = RwSignal::new(None::<TuiMountState>);
     let turn_menu = RwSignal::new(None::<MessageTurnMenuAnchor>);
@@ -460,25 +606,60 @@ pub(crate) fn ChatTuiStreamView(
     let try_consume_suppress_click = press.try_consume_suppress_click.clone();
 
     window_event_listener(ev::keydown, move |ev| {
-        if ev.key() == "Escape" && turn_menu.get_untracked().is_some() {
+        if ev.key() != "Escape" {
+            return;
+        }
+        if turn_menu.get_untracked().is_some() {
             turn_menu.set(None);
+        }
+        if editing_user_message.get_untracked().is_some() {
+            editing_user_message.set(None);
         }
     });
 
+    let editing_message_id =
+        Memo::new(move |_| editing_user_message.with(|e| e.as_ref().map(|x| x.message_id.clone())));
+
     Effect::new(move |_| {
         let _ = chat.stream_overlay_revision.get();
-        let locale = locale.get();
+        let loc = locale.get();
         let apply_filters = apply_assistant_display_filters.get();
         let md_on = markdown_render.get();
-        sync_chat_tui_stream_dom(
+        let (scope, live_id) = sync_chat_tui_stream_dom(
             chat,
-            locale,
+            loc,
             apply_filters,
             md_on,
             transcript_ref,
             mount_state,
             scroll_shell,
         );
+        restore_overlays_after_tui_sync(
+            transcript_ref,
+            scope,
+            live_id.as_deref(),
+            editing_user_message,
+            loc,
+            find,
+        );
+    });
+
+    Effect::new(move |_| {
+        let _ = editing_message_id.get();
+        let loc = locale.get();
+        let Some(el) = transcript_html_el(transcript_ref) else {
+            return;
+        };
+        mount_user_message_editor(&el, editing_user_message.get_untracked().as_ref(), loc);
+    });
+
+    Effect::new(move |_| {
+        let _ = chat.active_id.get();
+        let snap = find_overlay_snapshot_tracked(find);
+        let Some(el) = transcript_html_el(transcript_ref) else {
+            return;
+        };
+        apply_find_snapshot(&el, &snap);
     });
 
     let history_flags = Memo::new(move |_| {
@@ -517,7 +698,18 @@ pub(crate) fn ChatTuiStreamView(
                 on:pointermove=move |ev| on_pointermove(ev)
                 on:pointerup=move |_| on_pointer_end()
                 on:pointercancel=move |_| on_pointer_end_cancel()
+                on:input=move |ev: web_sys::Event| {
+                    try_sync_user_edit_draft(&ev, editing_user_message);
+                }
                 on:click=move |ev| {
+                    match try_handle_user_edit_click(&ev, editing_user_message) {
+                        UserEditClick::None => {}
+                        UserEditClick::Cancel => return,
+                        UserEditClick::Save { message_id, text } => {
+                            save_edited_user_message(action_handlers, message_id, text);
+                            return;
+                        }
+                    }
                     if try_copy_md_code_block(&ev, locale.get_untracked()) {
                         return;
                     }

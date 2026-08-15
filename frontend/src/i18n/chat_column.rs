@@ -82,6 +82,27 @@ pub fn composer_send_aria(l: Locale) -> &'static str {
     }
 }
 
+pub fn composer_send_queue_aria(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "排队下一句",
+        Locale::En => "Queue next message",
+    }
+}
+
+pub fn composer_queued_chip(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "下一句已排队",
+        Locale::En => "Next message queued",
+    }
+}
+
+pub fn composer_queued_dismiss(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "取消排队",
+        Locale::En => "Dismiss queued message",
+    }
+}
+
 pub fn composer_attach_image_aria(l: Locale) -> &'static str {
     match l {
         Locale::ZhHans => "附加图片",

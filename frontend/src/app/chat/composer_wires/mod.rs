@@ -11,9 +11,7 @@ use std::sync::Arc;
 use leptos::prelude::*;
 
 use self::follow_up::{StreamFollowUpWiring, wire_stream_follow_up_effect};
-use self::helpers::{
-    begin_stream_shell_turn, push_user_and_loading_assistant, user_line_and_clarify_from_shell,
-};
+use self::helpers::{start_user_stream_turn, user_line_and_clarify_from_shell};
 use super::composer_follow_up::ComposerStreamFollowUp;
 use super::composer_slash_control::{WebSlashControlCtx, try_handle_web_control_slash};
 use super::composer_stream::{ComposerStreamHandles, make_attach_chat_stream};
@@ -21,10 +19,9 @@ use super::handles::{
     ChatComposerWires, WireComposerStreamsArgs, WireComposerStreamsSessionSlice,
     WireComposerStreamsStreamSlice,
 };
-use super::scroll_follow::engage_follow_and_scroll_bottom;
-use super::stream_follow_up_gates::compose_user_send_allowed;
+use super::stream_follow_up_gates::{ComposerSendDecision, decide_composer_send};
 use super::stream_user_abort::apply_user_abort_of_inflight_stream;
-use crate::session_ops::{flush_active_composer_draft, make_message_id};
+use crate::session_ops::{flush_active_composer_draft, flush_composer_draft_to_session};
 use crate::session_sync::SessionSyncState;
 use crate::storage::{ChatSession, DEFAULT_CHAT_SESSION_TITLE, make_session_id};
 
@@ -60,12 +57,15 @@ pub(crate) fn wire_chat_composer_streams(args: WireComposerStreamsArgs) -> ChatC
         shell: stream_shell_for_attach,
     });
 
+    let stream_follow_up = RwSignal::new(ComposerStreamFollowUp::Idle);
+
     let run_send_message: Arc<dyn Fn() + Send + Sync> = Arc::new({
         let chat = chat;
         let attach = Arc::clone(&attach_chat_stream);
         let scroll_shell = scroll_shell;
         let shell = stream_shell.clone();
         let locale_sig = locale;
+        let stream_follow_up = stream_follow_up;
         move || {
             let text = draft.get_untracked().trim().to_string();
             let imgs = pending_images.get();
@@ -86,39 +86,51 @@ pub(crate) fn wire_chat_composer_streams(args: WireComposerStreamsArgs) -> ChatC
             {
                 return;
             }
+            let busy = stream_turn_busy_ui.get() || tool_timeline_busy_ui.get();
+            if busy && shell.approval.pending_clarification.get().is_some() {
+                return;
+            }
             let Some((user_line, clarify_json)) =
                 user_line_and_clarify_from_shell(&shell, &text, loc)
             else {
                 return;
             };
-            if !compose_user_send_allowed(
+            match decide_composer_send(
                 initialized.get(),
-                stream_turn_busy_ui.get() || tool_timeline_busy_ui.get(),
+                busy,
                 user_line.is_empty(),
                 imgs.is_empty(),
                 clarify_json.is_none(),
             ) {
-                return;
+                ComposerSendDecision::Ignore => {}
+                ComposerSendDecision::QueueWhileBusy => {
+                    if stream_follow_up.get_untracked().blocks_user_queue() {
+                        return;
+                    }
+                    stream_follow_up.set(ComposerStreamFollowUp::QueuedUserMessage {
+                        session_id: chat.active_id.get_untracked(),
+                        user_text: user_line,
+                        user_imgs: imgs,
+                    });
+                    draft.set(String::new());
+                    pending_images.set(Vec::new());
+                }
+                ComposerSendDecision::SendNow => {
+                    start_user_stream_turn(
+                        chat,
+                        &attach,
+                        scroll_shell,
+                        &shell,
+                        user_line,
+                        imgs,
+                        clarify_json,
+                    );
+                    draft.set(String::new());
+                    pending_images.set(Vec::new());
+                }
             }
-            let uid = make_message_id();
-            let asst_id = make_message_id();
-            let imgs_send = imgs.clone();
-            push_user_and_loading_assistant(
-                chat,
-                user_line.clone(),
-                imgs_send.clone(),
-                uid,
-                asst_id.clone(),
-            );
-            engage_follow_and_scroll_bottom(scroll_shell);
-            draft.set(String::new());
-            pending_images.set(Vec::new());
-            begin_stream_shell_turn(&shell);
-            attach(user_line, imgs_send, asst_id, clarify_json);
         }
     });
-
-    let stream_follow_up = RwSignal::new(ComposerStreamFollowUp::Idle);
 
     wire_stream_follow_up_effect(StreamFollowUpWiring {
         initialized,
@@ -128,6 +140,7 @@ pub(crate) fn wire_chat_composer_streams(args: WireComposerStreamsArgs) -> ChatC
         shell: stream_shell.clone(),
         stream_follow_up,
         stream_turn_busy_ui,
+        tool_timeline_busy_ui,
     });
 
     super::stream_visibility_resume::wire_stream_visibility_resume(
@@ -151,8 +164,17 @@ pub(crate) fn wire_chat_composer_streams(args: WireComposerStreamsArgs) -> ChatC
 
     let new_session: Rc<dyn Fn()> = Rc::new({
         let chat = chat;
+        let stream_follow_up = stream_follow_up;
         move || {
+            let parked = stream_follow_up
+                .get_untracked()
+                .queued_draft_to_park()
+                .map(|(id, text)| (id.to_string(), text.to_string()));
+            stream_follow_up.set(ComposerStreamFollowUp::Idle);
             flush_active_composer_draft(chat.sessions, chat.active_id, draft);
+            if let Some((sid, text)) = parked {
+                flush_composer_draft_to_session(chat.sessions, &sid, &text);
+            }
             let prev_id = chat.active_id.get_untracked();
             let inherited_ws = chat.sessions.with_untracked(|list| {
                 list.iter()

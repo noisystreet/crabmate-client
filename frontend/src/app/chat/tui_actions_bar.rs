@@ -4,6 +4,7 @@ use leptos::prelude::*;
 
 use super::composer_follow_up::ComposerStreamFollowUp;
 use super::message_row_actions::MessageRowActionSignals;
+use super::user_message_edit::UserMessageEdit;
 use crate::chat_session_state::ChatSessionSignals;
 use crate::i18n::Locale;
 use crate::session_ops::write_clipboard_text;
@@ -34,6 +35,7 @@ pub(crate) fn turn_menu_action_keys(message: &StoredMessage) -> Vec<&'static str
     }
     let mut keys = vec!["copy"];
     if is_user_plain(message) {
+        keys.push("edit");
         keys.push("regen");
         keys.push("branch");
     }
@@ -52,6 +54,7 @@ pub(crate) struct TuiTurnActionHandlers {
     pub stream_follow_up: RwSignal<ComposerStreamFollowUp>,
     pub stream_turn_busy_ui: Memo<bool>,
     pub status_err: RwSignal<Option<String>>,
+    pub editing_user_message: RwSignal<Option<UserMessageEdit>>,
 }
 
 fn copy_message_by_id(handlers: TuiTurnActionHandlers, message_id: &str) {
@@ -87,6 +90,24 @@ pub(crate) fn dispatch_tui_turn_action(
     match action {
         "copy" => {
             copy_message_by_id(handlers, message_id);
+            true
+        }
+        "edit" => {
+            if handlers.stream_turn_busy_ui.get_untracked() {
+                return true;
+            }
+            let draft = handlers.chat.sessions.with(|list| {
+                let aid = handlers.chat.active_id.get_untracked();
+                list.iter()
+                    .find(|s| s.id == aid)
+                    .and_then(|s| s.messages.iter().find(|m| m.id == message_id))
+                    .map(|m| m.text.clone())
+                    .unwrap_or_default()
+            });
+            handlers.editing_user_message.set(Some(UserMessageEdit {
+                message_id: message_id.to_string(),
+                draft,
+            }));
             true
         }
         "retry" => {
@@ -153,7 +174,7 @@ mod tests {
     #[test]
     fn user_menu_has_copy_regen_branch() {
         let keys = turn_menu_action_keys(&msg("u1", "user"));
-        assert_eq!(keys, ["copy", "regen", "branch"]);
+        assert_eq!(keys, ["copy", "edit", "regen", "branch"]);
     }
 
     #[test]

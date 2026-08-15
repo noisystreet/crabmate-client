@@ -643,6 +643,58 @@
   max-width: min(92%, 100%);
 }
 
+.chat-tui-turn-wrap--find-hit .chat-tui-turn {
+  outline: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  outline-offset: 2px;
+}
+
+.chat-tui-turn-wrap--find-current .chat-tui-turn {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+mark.chat-find-mark {
+  background: color-mix(in srgb, var(--accent) 32%, transparent);
+  color: inherit;
+  padding: 0;
+  border-radius: 2px;
+}
+
+mark.chat-find-mark--current {
+  background: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+.chat-tui-body--editing-hidden {
+  display: none;
+}
+
+.chat-user-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(100%, 36rem);
+  margin-top: 4px;
+}
+
+.chat-user-edit-ta {
+  width: 100%;
+  min-height: 4.5rem;
+  resize: vertical;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-input, 6px);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+
+.chat-user-edit-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
 .chat-tui-turn-wrap .chat-tui-turn {
   max-width: 100%;
 }
