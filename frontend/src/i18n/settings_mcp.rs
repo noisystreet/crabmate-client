@@ -9,15 +9,8 @@ pub fn settings_section_mcp_title(l: Locale) -> &'static str {
     }
 }
 
-pub fn settings_section_mcp_desc(l: Locale) -> &'static str {
-    match l {
-        Locale::ZhHans => {
-            "配置 stdio MCP 子进程（仅存本机 user-data）。command 等效于允许启动任意程序，请仅在信任环境下使用。"
-        }
-        Locale::En => {
-            "Configure stdio MCP child processes (stored in local user-data only). A command can start arbitrary programs—use only in trusted environments."
-        }
-    }
+pub fn settings_section_mcp_desc(_l: Locale) -> &'static str {
+    ""
 }
 
 pub fn settings_mcp_global_enabled_label(l: Locale) -> &'static str {
@@ -31,15 +24,6 @@ pub fn settings_mcp_timeout_label(l: Locale) -> &'static str {
     match l {
         Locale::ZhHans => "工具调用超时（秒）",
         Locale::En => "Tool call timeout (seconds)",
-    }
-}
-
-pub fn settings_mcp_servers_via_json_hint(l: Locale) -> &'static str {
-    match l {
-        Locale::ZhHans => "请通过上方 JSON 导入添加 MCP 服务器；无法在此页手填启动命令。",
-        Locale::En => {
-            "Add MCP servers via JSON import above; start commands cannot be edited on this page."
-        }
     }
 }
 
@@ -61,17 +45,6 @@ pub fn settings_mcp_import_title(l: Locale) -> &'static str {
     }
 }
 
-pub fn settings_mcp_import_hint(l: Locale) -> &'static str {
-    match l {
-        Locale::ZhHans => {
-            "粘贴 MCP 配置 JSON（含 mcpServers 对象，可为整份 mcp.json 或其中一段）。会从 command、args、cwd、env 或 url、headers 解析并写入配置；启动明文不在本页显示，连接时见服务端日志（target: crabmate）。粘贴不会自动导入：请点「解析并添加到列表」，或在保存时合并。支持 stdio（command）与远程 Streamable HTTP（url；非 HTTPS 仅 loopback）。"
-        }
-        Locale::En => {
-            "Paste MCP config JSON (an object with mcpServers—often a full mcp.json file or that section). Builds stored servers from command/args/cwd/env or url/headers—secrets are not shown here; see server logs on connect (target: crabmate). Pasting never imports on its own: click Parse and add to list, or Save to merge. Supports stdio (command) and remote Streamable HTTP (url; non-HTTPS only on loopback)."
-        }
-    }
-}
-
 pub fn settings_mcp_import_placeholder(l: Locale) -> &'static str {
     match l {
         Locale::ZhHans => {
@@ -85,10 +58,8 @@ pub fn settings_mcp_import_placeholder(l: Locale) -> &'static str {
 
 pub fn settings_mcp_import_paste_detected(l: Locale) -> &'static str {
     match l {
-        Locale::ZhHans => "已检测到 MCP 配置 JSON；确认内容无误后点「解析并添加到列表」再导入。",
-        Locale::En => {
-            "Detected MCP config JSON; review it, then click Parse and add to list to import."
-        }
+        Locale::ZhHans => "已检测到 MCP 配置 JSON",
+        Locale::En => "Detected MCP config JSON",
     }
 }
 
@@ -158,15 +129,15 @@ pub fn settings_mcp_name_label(l: Locale) -> &'static str {
 
 pub fn settings_mcp_transport_stdio(l: Locale) -> &'static str {
     match l {
-        Locale::ZhHans => "传输：本地 stdio（command）",
-        Locale::En => "Transport: local stdio (command)",
+        Locale::ZhHans => "本地 stdio",
+        Locale::En => "Local stdio",
     }
 }
 
 pub fn settings_mcp_transport_remote(l: Locale) -> &'static str {
     match l {
-        Locale::ZhHans => "传输：远程 Streamable HTTP（url）",
-        Locale::En => "Transport: remote Streamable HTTP (url)",
+        Locale::ZhHans => "远程 HTTP",
+        Locale::En => "Remote HTTP",
     }
 }
 
@@ -179,15 +150,15 @@ pub fn settings_mcp_bearer_label(l: Locale) -> &'static str {
 
 pub fn settings_mcp_bearer_hint_set(l: Locale) -> &'static str {
     match l {
-        Locale::ZhHans => "已写入系统钥匙串（不回显）。留空并保存可清除。",
-        Locale::En => "Stored in the system keyring (never echoed). Save empty to clear.",
+        Locale::ZhHans => "已配置 Bearer",
+        Locale::En => "Bearer is set",
     }
 }
 
 pub fn settings_mcp_bearer_hint_unset(l: Locale) -> &'static str {
     match l {
-        Locale::ZhHans => "可选。写入系统钥匙串，探测/对话时作为 Authorization。",
-        Locale::En => "Optional. Stored in the system keyring as Authorization for probe/chat.",
+        Locale::ZhHans => "尚未配置 Bearer",
+        Locale::En => "Bearer not set",
     }
 }
 
@@ -261,17 +232,10 @@ pub fn settings_mcp_tools_none(l: Locale) -> &'static str {
     }
 }
 
-pub fn settings_mcp_tools_probe_hint(l: Locale) -> &'static str {
-    match l {
-        Locale::ZhHans => "保存配置后将自动探测；也可点「探测」或「全部探测」。",
-        Locale::En => "Tools appear after Save (auto-probe), or use Probe / Probe all.",
-    }
-}
-
 pub fn settings_mcp_tools_server_disabled(l: Locale) -> &'static str {
     match l {
-        Locale::ZhHans => "该服务器未启用，不会在对话中合并工具。",
-        Locale::En => "This server is disabled; its tools are not merged into chat.",
+        Locale::ZhHans => "未启用",
+        Locale::En => "Disabled",
     }
 }
 

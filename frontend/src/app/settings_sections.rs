@@ -202,7 +202,6 @@ pub(crate) fn SettingsWebApiBearerBlock(
             <h3 class="settings-block-title">
                 {move || i18n::settings_block_web_api_bearer(locale.get())}
             </h3>
-            <p class="settings-muted">{move || i18n::settings_web_api_bearer_hint(locale.get())}</p>
             <p class="settings-muted" data-testid="settings-web-api-bearer-status">
                 {move || bearer_status_label(locale.get(), present.get())}
             </p>
@@ -264,7 +263,6 @@ pub(crate) fn SettingsApiBaseBlock(
             <h3 class="settings-block-title">
                 {move || i18n::settings_block_api_base(locale.get())}
             </h3>
-            <p class="settings-muted">{move || i18n::settings_api_base_hint(locale.get())}</p>
             <div class="settings-field">
                 <label class="settings-field-label" for=input_id>
                     {move || i18n::settings_api_base_label(locale.get())}
@@ -605,7 +603,6 @@ fn SettingsSessionTypographyBlock(
     view! {
         <div class="settings-block">
             <h3 class="settings-block-title">{move || i18n::settings_block_session_typography(locale.get())}</h3>
-            <p class="settings-intro">{move || i18n::settings_session_typography_hint(locale.get())}</p>
             <SettingsSessionFontSelectRow
                 locale=locale
                 kind=SessionFontFieldKind::Ui

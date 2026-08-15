@@ -66,6 +66,7 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Changed
 
+- Settings Appearance / MCP / Session: drop extra hint copy; keep form controls and status/feedback
 - Connect page: drop the extra lead/hint copy; keep title, server URL, Web API secret, and Connect
 - Chat **`run_command` tool card**: show `command` + `args` on the compact row (parse SSE `arguments` / `arguments_preview` when the summary is only `tool: run_command`); running detail includes `$ …`.
 - Android: start with the in-app bottom status bar hidden even when another client saved it as visible; users can still enable it from the side toolbar

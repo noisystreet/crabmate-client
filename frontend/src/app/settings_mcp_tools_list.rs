@@ -132,12 +132,7 @@ fn tools_panel_body(loc: Locale, row: Option<McpServerStatusEntryDto>) -> AnyVie
             }
             .into_any()
         }
-        None => view! {
-            <p class="settings-intro settings-mcp-tools-hint">
-                {i18n::settings_mcp_tools_probe_hint(loc)}
-            </p>
-        }
-        .into_any(),
+        None => ().into_any(),
     }
 }
 
