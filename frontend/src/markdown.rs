@@ -3,6 +3,7 @@
 //! 解析前会做 [`normalize_markdown_for_render`]，降低模型常见围栏误写导致的整段被吃进代码块等问题。
 
 mod autolink;
+mod sanitize;
 
 use pulldown_cmark::{Options, Parser, html};
 
@@ -340,9 +341,7 @@ pub fn to_safe_html(md: &str) -> String {
     let events = autolink::rewrite_events(parser);
     let mut body = String::new();
     html::push_html(&mut body, events.into_iter());
-    let mut builder = ammonia::Builder::default();
-    builder.link_rel(Some("noopener noreferrer"));
-    let cleaned = builder.clean(&body).to_string();
+    let cleaned = sanitize::clean_chat_html(&body);
     chat_links_open_in_new_tab(cleaned)
 }
 
@@ -490,9 +489,48 @@ mod tests {
     }
 
     #[test]
-    fn fenced_code_emits_pre_or_code() {
+    fn fenced_code_keeps_language_class() {
         let h = to_safe_html("```rust\nlet x = 1;\n```");
-        assert!(h.contains("<pre") || h.contains("<code"));
+        assert!(h.contains("<pre") || h.contains("<code"), "got {h:?}");
+        assert!(h.contains("language-rust"), "got {h:?}");
+        let csharp = to_safe_html("```c#\nConsole.WriteLine(1);\n```");
+        assert!(csharp.contains("language-c#"), "got {csharp:?}");
+    }
+
+    #[test]
+    fn task_list_unchecked_keeps_disabled_checkbox() {
+        let h = to_safe_html("- [ ] todo");
+        let lower = h.to_lowercase();
+        assert!(lower.contains("<input"), "got {h:?}");
+        assert!(lower.contains("type=\"checkbox\""), "got {h:?}");
+        assert!(lower.contains("disabled"), "got {h:?}");
+        assert!(!lower.contains("checked"), "got {h:?}");
+        assert!(h.contains("todo"), "got {h:?}");
+    }
+
+    #[test]
+    fn task_list_checked_keeps_checked_disabled_checkbox() {
+        let h = to_safe_html("- [x] done");
+        let lower = h.to_lowercase();
+        assert!(lower.contains("<input"), "got {h:?}");
+        assert!(lower.contains("type=\"checkbox\""), "got {h:?}");
+        assert!(lower.contains("disabled"), "got {h:?}");
+        assert!(lower.contains("checked"), "got {h:?}");
+        assert!(h.contains("done"), "got {h:?}");
+    }
+
+    #[test]
+    fn loose_task_list_keeps_disabled_checkboxes_inside_paragraphs() {
+        let h = to_safe_html("- [ ] a\n\n- [ ] b");
+        let lower = h.to_lowercase();
+        assert_eq!(lower.matches("<input").count(), 2, "got {h:?}");
+        assert!(
+            lower.contains("<p>") && lower.contains("<input"),
+            "got {h:?}"
+        );
+        assert!(lower.contains("type=\"checkbox\""), "got {h:?}");
+        assert!(lower.contains("disabled"), "got {h:?}");
+        assert!(h.contains('a') && h.contains('b'), "got {h:?}");
     }
 
     #[test]

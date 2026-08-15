@@ -196,7 +196,7 @@ fn wrap_closed_html(inner: &str) -> String {
     if inner.is_empty() {
         return blank_line_html();
     }
-    format!("<div class=\"chat-tui-line chat-tui-line--block\">{inner}</div>")
+    format!("<div class=\"chat-tui-line chat-tui-line--block msg-md-prose\">{inner}</div>")
 }
 
 fn closed_md_html(src: &str, markdown_render: bool) -> String {
@@ -223,7 +223,7 @@ fn fence_html(lang: &str, body: &str, markdown_render: bool) -> String {
     } else {
         plaintext_to_safe_html(&fenced)
     };
-    format!("<div class=\"chat-tui-line chat-tui-line--fence\">{html}</div>")
+    format!("<div class=\"chat-tui-line chat-tui-line--fence msg-md-prose\">{html}</div>")
 }
 
 fn open_fence_plain_text(lang: &str, body: &str, open_tail: &str) -> String {
@@ -592,6 +592,23 @@ mod tests {
         let h = render_tui_block_markdown("**你好**\n", false);
         assert!(h.contains("<strong>") || h.contains("<b>"), "got {h}");
         assert!(!h.contains("**你好**"), "got {h}");
+    }
+
+    #[test]
+    fn closed_markdown_block_reuses_msg_md_prose() {
+        let h = render_tui_block_markdown("# Title\n\n", true);
+        assert!(
+            h.contains("chat-tui-line--block") && h.contains("msg-md-prose"),
+            "closed transcript blocks should share changelist prose, got {h}"
+        );
+        assert!(!h.contains("chat-tui-line--active"), "got {h}");
+    }
+
+    #[test]
+    fn active_line_does_not_use_msg_md_prose() {
+        let h = render_tui_block_markdown("**第一段", false);
+        assert!(h.contains("chat-tui-line--active"), "got {h}");
+        assert!(!h.contains("msg-md-prose"), "got {h}");
     }
 
     #[test]
