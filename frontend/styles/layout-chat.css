@@ -1007,6 +1007,21 @@
   color: color-mix(in srgb, var(--accent) 88%, var(--text));
 }
 
+/* GFM 任务列表：只读 checkbox（ammonia 强制 disabled；CSS 再禁指针） */
+.msg-md-prose input[type="checkbox"],
+.chat-tui-line input[type="checkbox"] {
+  pointer-events: none;
+  margin: 0 0.4em 0 0;
+  vertical-align: text-bottom;
+  accent-color: var(--accent);
+}
+
+.msg-md-prose li:has(input[type="checkbox"]),
+.chat-tui-line li:has(input[type="checkbox"]) {
+  list-style: none;
+  margin-left: -1.15em;
+}
+
 /* 勿用 fit-content/max-content：部分引擎会收成窄条；用列宽百分比给出确定宽度 */
 
 /* 显式 `/<skill-id>`：内联「使用 xxx skill」 */

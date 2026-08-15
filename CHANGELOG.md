@@ -34,6 +34,7 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Fixed
 
+- Chat markdown: GFM task-list checkboxes survive sanitizer as read-only (`disabled` + `pointer-events: none`); fenced `language-*` classes are kept on `pre`/`code`; closed transcript blocks reuse `.msg-md-prose` so headings, quotes, `hr`, and code chrome match the changelist modal
 - Linux Desktop: `theme=system` follows xdg-desktop-portal, then GNOME gsettings, `GTK_THEME` / gtk settings.ini, then KDE `kdeglobals` (watches portal + gsettings). Non-GNOME sessions no longer always resolve to light
 - IDE: define `--ide-hl-*` on dark / light / material / high-contrast so syntax colors follow the preset (high-contrast stays grayscale; material uses dark pastels)
 - Session hydration: when `GET /conversation/messages` returns non-empty `messages` but the client parses zero rows, show a status-bar parse error with retry instead of silently keeping stale local timeline
