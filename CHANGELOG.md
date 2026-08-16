@@ -69,6 +69,7 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Changed
 
+- Pin Server contract crates and Playwright / Victauri serve checkout to product tag **`v0.3.0`** (was `client-contract-v0.1.1`)
 - Settings: drop extra hint copy (Appearance / MCP / Session / GitHub / IDE / session and workspace modals); move Web API Bearer and API base into a **Connection** section
 - Connect page: drop the extra lead/hint copy; keep title, server URL, Web API secret, and Connect
 - Chat **`run_command` tool card**: show `command` + `args` on the compact row (parse SSE `arguments` / `arguments_preview` when the summary is only `tool: run_command`); running detail includes `$ …`.

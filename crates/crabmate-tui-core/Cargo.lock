@@ -85,12 +85,12 @@ dependencies = [
 [[package]]
 name = "crabmate-display-rules"
 version = "0.1.0"
-source = "git+https://github.com/noisystreet/CrabMate?tag=client-contract-v0.1.1#9a78a182c33b4783c40cc150b2702a028c8c5934"
+source = "git+https://github.com/noisystreet/CrabMate?tag=v0.3.0#3ecde9186e4b7601d2667cce65632fd55fa71ad8"
 
 [[package]]
 name = "crabmate-sse-protocol"
 version = "0.1.0"
-source = "git+https://github.com/noisystreet/CrabMate?tag=client-contract-v0.1.1#9a78a182c33b4783c40cc150b2702a028c8c5934"
+source = "git+https://github.com/noisystreet/CrabMate?tag=v0.3.0#3ecde9186e4b7601d2667cce65632fd55fa71ad8"
 dependencies = [
  "crabmate-types",
  "log",
@@ -116,7 +116,7 @@ dependencies = [
 [[package]]
 name = "crabmate-types"
 version = "0.1.0"
-source = "git+https://github.com/noisystreet/CrabMate?tag=client-contract-v0.1.1#9a78a182c33b4783c40cc150b2702a028c8c5934"
+source = "git+https://github.com/noisystreet/CrabMate?tag=v0.3.0#3ecde9186e4b7601d2667cce65632fd55fa71ad8"
 dependencies = [
  "crabmate-display-rules",
  "serde",
@@ -142,7 +142,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -601,7 +601,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
