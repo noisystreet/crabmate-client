@@ -6,11 +6,13 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 
 use crate::api::{
-    delete_workspace_dir, delete_workspace_file, post_workspace_dir, post_workspace_file_write_opts,
+    delete_workspace_dir, delete_workspace_file, fetch_workspace_file, post_workspace_dir,
+    post_workspace_file_write_opts,
 };
 use crate::i18n::Locale;
 use crate::ide_save::spawn_create_and_open_file;
-use crate::ide_tabs::force_close_tabs_for_deleted_entry;
+use crate::ide_tabs::{force_close_tabs_for_deleted_entry, ide_tab_basename};
+use crate::session_export::trigger_download;
 use crate::workspace_context_menu::{
     WorkspaceContextMenuActions, WorkspaceInlineCreateKind, WorkspaceTreeRefreshHint,
 };
@@ -64,6 +66,68 @@ pub fn spawn_create_workspace_dir(
                 workspace_err.set(None);
                 refresh_after_create(&actions, parent_rel);
             }
+            Err(e) => workspace_err.set(Some(e)),
+        }
+    });
+}
+
+/// 浏览器 `<a download>` / 桌面另存为对话框用的文件名（仅最后一段）。
+#[must_use]
+pub fn workspace_download_basename(rel: &str) -> String {
+    let name = ide_tab_basename(rel);
+    let name = name.trim();
+    if name.is_empty() || name == "." || name == ".." {
+        "download".to_string()
+    } else {
+        name.to_string()
+    }
+}
+
+fn open_tab_text_for_path(actions: &WorkspaceContextMenuActions, rel: &str) -> Option<String> {
+    let (tabs, editor) = actions.ide_tabs?;
+    tabs.persist_editor_into_active(editor.ide_text, editor.ide_baseline);
+    tabs.tabs
+        .get_untracked()
+        .into_iter()
+        .find(|t| t.path == rel)
+        .map(|t| t.text)
+}
+
+async fn workspace_text_for_local_save(
+    rel: &str,
+    loc: Locale,
+    actions: &WorkspaceContextMenuActions,
+) -> Result<String, String> {
+    if let Some(text) = open_tab_text_for_path(actions, rel) {
+        return Ok(text);
+    }
+    let d = fetch_workspace_file(rel, None, loc).await?;
+    match d.error {
+        Some(e) => Err(e),
+        None => Ok(d.content),
+    }
+}
+
+/// 把工作区文本文件下载到本机（桌面另存为；浏览器 / Android 走下载）。
+/// 若该路径已在 IDE 打开，用当前缓冲区（含未写回 serve 的编辑）。
+pub fn spawn_save_workspace_file_to_device(
+    rel: String,
+    locale: RwSignal<Locale>,
+    workspace_err: RwSignal<Option<String>>,
+    actions: WorkspaceContextMenuActions,
+) {
+    spawn_local(async move {
+        let loc = locale.get_untracked();
+        let filename = workspace_download_basename(rel.as_str());
+        let content = match workspace_text_for_local_save(rel.as_str(), loc, &actions).await {
+            Ok(c) => c,
+            Err(e) => {
+                workspace_err.set(Some(e));
+                return;
+            }
+        };
+        match trigger_download(&filename, "text/plain;charset=utf-8", &content, loc) {
+            Ok(()) => workspace_err.set(None),
             Err(e) => workspace_err.set(Some(e)),
         }
     });
@@ -151,5 +215,38 @@ pub fn commit_inline_create(
         WorkspaceInlineCreateKind::Dir => {
             spawn_create_workspace_dir(rel, locale, workspace_err, actions);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::workspace_download_basename;
+    use crate::i18n::{Locale, workspace_tree_ctx_save_to_device};
+
+    #[test]
+    fn download_basename_uses_last_path_segment() {
+        assert_eq!(workspace_download_basename("src/lib.rs"), "lib.rs");
+        assert_eq!(workspace_download_basename("lib.rs"), "lib.rs");
+        assert_eq!(workspace_download_basename(r"src\lib.rs"), "lib.rs");
+    }
+
+    #[test]
+    fn download_basename_rejects_empty_and_dots() {
+        assert_eq!(workspace_download_basename(""), "download");
+        assert_eq!(workspace_download_basename("/"), "download");
+        assert_eq!(workspace_download_basename("."), "download");
+        assert_eq!(workspace_download_basename("foo/.."), "download");
+    }
+
+    #[test]
+    fn save_to_device_label_is_bilingual() {
+        assert_eq!(
+            workspace_tree_ctx_save_to_device(Locale::ZhHans),
+            "保存到本机…"
+        );
+        assert_eq!(
+            workspace_tree_ctx_save_to_device(Locale::En),
+            "Save to this device…"
+        );
     }
 }

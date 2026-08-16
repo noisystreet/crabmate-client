@@ -58,6 +58,13 @@ pub fn workspace_tree_ctx_new_dir(l: Locale) -> &'static str {
     }
 }
 
+pub fn workspace_tree_ctx_save_to_device(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "保存到本机…",
+        Locale::En => "Save to this device…",
+    }
+}
+
 pub fn workspace_tree_ctx_delete_file(l: Locale) -> &'static str {
     match l {
         Locale::ZhHans => "删除文件",
