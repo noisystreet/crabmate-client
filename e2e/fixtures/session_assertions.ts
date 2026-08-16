@@ -6,6 +6,7 @@
  * 本模块提供 **就绪后立刻** 可跑的检查，不依赖 server_revision 稳定。
  */
 import { expect, type Page } from "@playwright/test";
+import { openSessionInRail } from "./helpers";
 
 export type PersistedMessage = {
   id?: string;
@@ -221,6 +222,7 @@ export async function assertNeedlesExactlyOnceAfterReload(args: {
   await args.page.waitForSelector('[data-testid="chat-composer-input"]', {
     timeout: 15_000,
   });
+  await openSessionInRail(args.page, args.sid);
   await assertNeedlesExactlyOncePreHydrate({
     ...args,
     label: "post-reload",

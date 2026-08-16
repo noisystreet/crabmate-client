@@ -1,5 +1,9 @@
 import { expect, Page, Route, test } from "@playwright/test";
-import { seedSession, sendMessage } from "../fixtures/helpers";
+import {
+  openSessionInRail,
+  seedSession,
+  sendMessage,
+} from "../fixtures/helpers";
 
 type PersistedMessage = {
   id: string;
@@ -197,6 +201,7 @@ test.describe("v2 多回合边界", () => {
 
     await page.reload({ waitUntil: "networkidle", timeout: 20_000 });
     await page.waitForSelector('[data-testid="chat-composer-input"]');
+    await openSessionInRail(page, sid);
 
     await expect(
       page.locator('[data-testid="chat-messages-scroller"]'),
@@ -231,6 +236,7 @@ test.describe("v2 多回合边界", () => {
     await waitForAnswer(page, secondAnswer);
     await page.reload({ waitUntil: "networkidle", timeout: 20_000 });
     await page.waitForSelector('[data-testid="chat-composer-input"]');
+    await openSessionInRail(page, sid);
 
     const scroller = page.locator('[data-testid="chat-messages-scroller"]');
     await expect(scroller).toContainText(commentary);

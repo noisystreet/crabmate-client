@@ -18,7 +18,12 @@
  */
 
 import { test, expect } from "@playwright/test";
-import { seedSession, sendMessage, installMockSse } from "../fixtures/helpers";
+import {
+  seedSession,
+  sendMessage,
+  installMockSse,
+  openSessionInRail,
+} from "../fixtures/helpers";
 
 // 四轮助手正文的关键片段，用于检测是否分布在多行中
 const TEXT_SIGNATURES = [
@@ -107,6 +112,7 @@ test("多轮助手正文不应合并为一条 stored_message", async ({ page, br
   // 流结束后立即刷新；v2 finalized 行应已进入会话缓存，水合不得走 legacy pool 重排。
   await page.reload({ waitUntil: "networkidle", timeout: 20_000 });
   await page.waitForSelector('[data-testid="chat-composer-input"]');
+  await openSessionInRail(page, sid);
 
   // ── DOM 快照（TUI transcript section；旧 chat-message-row / chat-tool-card 已退役）──
   const domState = await page.evaluate(() => {

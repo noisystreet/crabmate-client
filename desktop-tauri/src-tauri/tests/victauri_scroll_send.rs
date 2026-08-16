@@ -10,6 +10,8 @@
 use std::time::{Duration, Instant};
 use victauri_test::e2e_test;
 
+mod common;
+
 /// 与前端 [`crabmate_web::app_prefs::STICKY_BOTTOM_THRESHOLD_PX`] 对齐，留 4px 容差。
 const FOLLOW_GAP_MAX_PX: i32 = 84;
 
@@ -68,6 +70,7 @@ async fn seed_scrollable_session(
         .wait_for("network_idle", Some(""), Some(15000), Some(500))
         .await
         .ok();
+    common::open_session_in_rail(client, session_id).await;
 }
 
 /// 注入 SSE 流存根，使发送消息后能收到助手回复。

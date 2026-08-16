@@ -9,6 +9,8 @@
 use victauri_test::e2e_test;
 use victauri_test::locator::Locator;
 
+mod common;
+
 /// 通过 webview 内 fetch() 播种 2 个会话，复用相同的 session-prefs helper 逻辑。
 async fn seed_two_sessions(client: &mut victauri_test::VictauriClient) {
     // 先设置布局偏好（等价于 ensureChatLayoutPrefs）
@@ -76,14 +78,14 @@ async fn open_session_list_modal(client: &mut victauri_test::VictauriClient) {
 e2e_test!(new_chat_creates_session_in_rail, |client| async move {
     seed_two_sessions(&mut client).await;
 
-    // 确认初始有 2 条会话
+    // 确认初始有 2 条播种会话 + 冷启动空会话
     let count: f64 = client
         .eval_js("document.querySelectorAll('[data-testid^=\"nav-session-\"]').length")
         .await
         .unwrap()
         .as_f64()
         .unwrap_or(0.0);
-    assert_eq!(count as usize, 2, "expected 2 sessions, got {count}");
+    assert_eq!(count as usize, 3, "expected 3 sessions, got {count}");
 
     // 点击「新建对话」
     Locator::test_id("nav-new-chat")
@@ -91,11 +93,11 @@ e2e_test!(new_chat_creates_session_in_rail, |client| async move {
         .await
         .unwrap();
 
-    // 等待 rail 中出现第三条
+    // 等待 rail 中出现第四条
     client
         .wait_for(
             "selector",
-            Some("[data-testid^=\"nav-session-\"]:nth-child(3)"),
+            Some("[data-testid^=\"nav-session-\"]:nth-child(4)"),
             Some(5000),
             Some(200),
         )
@@ -109,8 +111,8 @@ e2e_test!(new_chat_creates_session_in_rail, |client| async move {
         .as_f64()
         .unwrap_or(0.0);
     assert_eq!(
-        count_after as usize, 3,
-        "expected 3 sessions after new chat"
+        count_after as usize, 4,
+        "expected 4 sessions after new chat"
     );
 });
 
@@ -212,14 +214,14 @@ e2e_test!(
             .await
             .unwrap();
 
-        // rail 中仍应有 2 条会话
+        // rail 中仍应有播种的 2 条 + 冷启动空会话
         let count: f64 = client
             .eval_js("document.querySelectorAll('[data-testid^=\"nav-session-\"]').length")
             .await
             .unwrap()
             .as_f64()
             .unwrap_or(0.0);
-        assert_eq!(count as usize, 2, "expected 2 sessions after closing modal");
+        assert_eq!(count as usize, 3, "expected 3 sessions after closing modal");
     }
 );
 
@@ -230,6 +232,7 @@ e2e_test!(
     manage_sessions_modal_switches_active_session,
     |client| async move {
         seed_two_sessions(&mut client).await;
+        common::open_session_in_rail(&mut client, "s_e2e_keep").await;
 
         // 确认初始活动会话内容可见
         client.expect_text("keep me").await.unwrap();

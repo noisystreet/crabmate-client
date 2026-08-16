@@ -1,6 +1,7 @@
 //! 按工作区根路径分桶的会话：服务端 **`workspace_override`** 变化时加载对应 **`/user-data`** 桶。
 //!
 //! 空桶不搬迁上一工作区的会话（`ensure_at_least_one` → 默认空会话）。
+//! 冷启动见 [`prepare_cold_start_session_list`]：不恢复 `active_session_id`，活动会话为空聊天。
 //! Clone 等场景可通过 [`request_empty_session_after_next_partition`] 强制切到空会话。
 
 use std::collections::HashMap;
@@ -168,25 +169,23 @@ pub(crate) fn session_is_blank_chat(s: &ChatSession) -> bool {
             .is_none()
 }
 
-/// 优先复用已有空白会话，否则在列表前插入一条空会话并设为活动。
+/// 无正文、无草稿、无工作区绑定：冷启动可复用，且不必改写已有行。
 #[must_use]
-pub(crate) fn prefer_or_create_empty_session(
+pub(crate) fn session_is_unbound_empty_chat(s: &ChatSession) -> bool {
+    session_is_blank_chat(s)
+        && s.draft.trim().is_empty()
+        && s.workspace_root
+            .as_deref()
+            .map(str::trim)
+            .unwrap_or("")
+            .is_empty()
+}
+
+fn insert_empty_session(
     mut list: Vec<ChatSession>,
     workspace_root: Option<String>,
     default_title: String,
 ) -> (Vec<ChatSession>, String) {
-    if let Some(id) = list
-        .iter()
-        .find(|s| session_is_blank_chat(s))
-        .map(|s| s.id.clone())
-    {
-        if let Some(s) = list.iter_mut().find(|s| s.id == id) {
-            if workspace_root.is_some() {
-                s.workspace_root = workspace_root;
-            }
-        }
-        return (list, id);
-    }
     let now = js_sys::Date::now() as i64;
     let s = ChatSession {
         id: make_session_id(),
@@ -207,6 +206,52 @@ pub(crate) fn prefer_or_create_empty_session(
     let id = s.id.clone();
     list.insert(0, s);
     (list, id)
+}
+
+/// 冷启动：载入当前桶会话列表，但**不**恢复服务端 `active_session_id`。
+/// 只复用「未绑定的空会话」；否则插入新行，不改写已有会话的 `workspace_root` / 草稿。
+#[must_use]
+pub(crate) fn prepare_cold_start_session_list(
+    mut list: Vec<ChatSession>,
+    loc: Locale,
+) -> (Vec<ChatSession>, String, String) {
+    for s in &mut list {
+        s.normalize_layout_schema_version();
+        clear_stale_stream_loading_states(&mut s.messages, loc);
+    }
+    let title = crate::i18n::default_session_title(loc).to_string();
+    let (list, _) = ensure_at_least_one(list, title.clone());
+    if let Some(id) = list
+        .iter()
+        .find(|s| session_is_unbound_empty_chat(s))
+        .map(|s| s.id.clone())
+    {
+        return (list, id, String::new());
+    }
+    let (list, pick) = insert_empty_session(list, None, title);
+    (list, pick, String::new())
+}
+
+/// 优先复用已有空白会话，否则在列表前插入一条空会话并设为活动。
+#[must_use]
+pub(crate) fn prefer_or_create_empty_session(
+    mut list: Vec<ChatSession>,
+    workspace_root: Option<String>,
+    default_title: String,
+) -> (Vec<ChatSession>, String) {
+    if let Some(id) = list
+        .iter()
+        .find(|s| session_is_blank_chat(s))
+        .map(|s| s.id.clone())
+    {
+        if let Some(s) = list.iter_mut().find(|s| s.id == id) {
+            if workspace_root.is_some() {
+                s.workspace_root = workspace_root;
+            }
+        }
+        return (list, id);
+    }
+    insert_empty_session(list, workspace_root, default_title)
 }
 
 fn align_workspace_roots_to_server_path(list2: &mut [ChatSession], server_path: &str) {
@@ -648,6 +693,38 @@ mod tests {
         assert!(session_is_blank_chat(&spaced));
         let linked = sess("z", vec![], Some("c_1"));
         assert!(!session_is_blank_chat(&linked));
+    }
+
+    #[test]
+    fn cold_start_reuses_unbound_empty_without_rewriting_others() {
+        let list = vec![
+            sess("old", vec![], Some("c_1")),
+            sess("blank", vec![], None),
+        ];
+        let (out, pick, draft) = prepare_cold_start_session_list(list, Locale::En);
+        assert_eq!(pick, "blank");
+        assert!(draft.is_empty());
+        assert_eq!(out.len(), 2);
+        let blank = out.iter().find(|s| s.id == "blank").unwrap();
+        assert!(session_is_unbound_empty_chat(blank));
+    }
+
+    #[test]
+    fn unbound_empty_rejects_draft_or_workspace_root() {
+        let plain = sess("b", vec![], None);
+        assert!(session_is_unbound_empty_chat(&plain));
+        let drafted = ChatSession {
+            draft: "x".into(),
+            ..sess("d", vec![], None)
+        };
+        assert!(!session_is_unbound_empty_chat(&drafted));
+        let bound = ChatSession {
+            workspace_root: Some("/ws".into()),
+            ..sess("w", vec![], None)
+        };
+        assert!(!session_is_unbound_empty_chat(&bound));
+        assert!(session_is_blank_chat(&drafted));
+        assert!(session_is_blank_chat(&bound));
     }
 
     #[test]

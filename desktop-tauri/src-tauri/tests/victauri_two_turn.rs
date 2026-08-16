@@ -5,6 +5,8 @@
 
 use victauri_test::e2e_test;
 
+mod common;
+
 /// 注入两轮流存根：按 POST 次数返回不同 body。
 async fn install_two_turn_stub(client: &mut victauri_test::VictauriClient, slow_second_ms: u64) {
     let greeting = "id: 1\\ndata: {\\\"sse_capabilities\\\":{\\\"supported_sse_v\\\":1}}\\n\\nid: 2\\ndata: {\\\"v\\\":1}\\n\\nid: 3\\ndata: 你\\n\\nid: 4\\ndata: 好！我是 CrabMate 助手。\\n\\nid: 5\\ndata: {\\\"stream_ended\\\":{\\\"reason\\\":\\\"completed\\\"}}\\n\\n";
@@ -92,6 +94,7 @@ e2e_test!(two_turn_with_hydrate, |client| async move {
         .wait_for("network_idle", Some(""), Some(10000), Some(500))
         .await
         .ok();
+    common::open_session_in_rail(&mut client, "s_e2e_two_c").await;
 
     // 水合后应显示首轮内容
     client

@@ -26,7 +26,7 @@
  *     specs/mock-hydrate-duplicate-tool-cards.spec.ts
  */
 import { expect, type Page, test } from "@playwright/test";
-import { seedSession } from "../fixtures/helpers";
+import { seedSession, openSessionInRail } from "../fixtures/helpers";
 import {
   fetchPersistedSession,
   type PersistedMessage,
@@ -174,6 +174,7 @@ test.describe("水合双工具卡 / 终答夹心（export 20260808）", () => {
 
     await page.reload({ waitUntil: "networkidle", timeout: 20_000 });
     await page.waitForSelector('[data-testid="chat-composer-input"]');
+    await openSessionInRail(page, sid);
     // 等 DOM 出现工具行（sessions API 可能尚未回写）。
     await expect
       .poll(
@@ -290,6 +291,7 @@ test.describe("水合双工具卡 / 终答夹心（export 20260808）", () => {
 
     await page.reload({ waitUntil: "networkidle", timeout: 20_000 });
     await page.waitForSelector('[data-testid="chat-composer-input"]');
+    await openSessionInRail(page, sid);
     await expect
       .poll(async () => {
         const session = await fetchPersistedSession(page, sid);

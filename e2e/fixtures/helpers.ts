@@ -106,6 +106,11 @@ export async function seedSession(page: Page, sid: string) {
     .toBe(true);
 }
 
+/** 冷启动不再恢复上次活动会话；点开会话轨上的指定会话（水合 / 历史用例）。 */
+export async function openSessionInRail(page: Page, sid: string) {
+  await page.getByTestId(`nav-session-${sid}`).click();
+}
+
 /** 在页面中发送消息（填值 + Enter）。*/
 export async function sendMessage(page: Page, text: string) {
   await page.focus('[data-testid="chat-composer-input"]');
