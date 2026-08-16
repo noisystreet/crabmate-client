@@ -33,7 +33,9 @@ desktop/mobile ──path──► crabmate-connect ──reqwest──► serve
 
 crabmate-tui ──► crabmate-tui-core ──reqwest──► serve (/health, /chat/stream, …)
                       │
-frontend & tui-core ──┴── crabmate-sse-protocol 等（Server git tag）
+frontend & tui-core ──┴── crabmate-sse-protocol 等线契约（Server git tag）
+                         展示 crate（tool-card / turn-layout）计划改本仓 path
+                         见 display_crate_sink.md
 ```
 
 | 已共享 | 谁用 | 覆盖 |
