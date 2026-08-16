@@ -23,7 +23,7 @@
 | 源码迁入自 | 主仓 `eb0048bf…`（见 `frontend/SOURCE.md`） |
 | 契约 `tag` | **`v0.3.0`**（Server 产品 tag，指向 `3ecde918`） |
 | Playwright `serve` checkout | **`v0.3.0`**（与契约钉点对齐） |
-| lock | 提交 `frontend/Cargo.lock`、`crates/crabmate-tui-core/Cargo.lock` |
+| lock | 提交 `frontend/Cargo.lock`、`crates/crabmate-tui-core/Cargo.lock`、`crates/crabmate-tool-card/Cargo.lock` |
 
 壳打包 UI 同步：`make desktop-release` / `before-desktop-build.sh` 默认 **`trunk build --release`** 再同步本仓 `frontend/dist`（拒绝 debug 大 WASM）；`CM_PREPARE_SKIP_FRONTEND=1` 或 `CRABMATE_FRONTEND_DIST=-` 跳过；同级主仓回落需 `CRABMATE_ALLOW_SIBLING_FRONTEND=1`。
 
@@ -34,9 +34,10 @@ crabmate-api-contract = { git = "https://github.com/noisystreet/CrabMate", tag =
 crabmate-sse-protocol = { git = "https://github.com/noisystreet/CrabMate", tag = "v0.3.0", package = "crabmate-sse-protocol" }
 crabmate-display-rules = { git = "https://github.com/noisystreet/CrabMate", tag = "v0.3.0", package = "crabmate-display-rules" }
 crabmate-turn-layout = { git = "https://github.com/noisystreet/CrabMate", tag = "v0.3.0", package = "crabmate-turn-layout" }
-crabmate-tool-card = { git = "https://github.com/noisystreet/CrabMate", tag = "v0.3.0", package = "crabmate-tool-card" }
 crabmate-chat-export = { git = "https://github.com/noisystreet/CrabMate", tag = "v0.3.0", package = "crabmate-chat-export" }
 ```
+
+`crabmate-tool-card` 已改为本仓 path（W2：`crates/crabmate-tool-card`）；勿再 git 钉 Server 该包。
 
 `crabmate-types` 不再由 `frontend` **直接**依赖（W1：网关预设表在 `frontend/src/client_llm_presets.rs`）。lockfile 里仍可能作为 `api-contract` / `sse-protocol` 的传递依赖出现。
 

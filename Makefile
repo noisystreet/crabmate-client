@@ -9,6 +9,7 @@ MOBILE_ROOT := $(ROOT)/mobile-tauri
 MOBILE_TAURI_DIR := $(MOBILE_ROOT)/src-tauri
 CONNECT_DIR := $(ROOT)/crates/crabmate-connect
 CLIENT_API_DIR := $(ROOT)/crates/crabmate-client-api
+TOOL_CARD_DIR := $(ROOT)/crates/crabmate-tool-card
 TUI_CORE_DIR := $(ROOT)/crates/crabmate-tui-core
 TUI_DIR := $(ROOT)/crates/crabmate-tui
 WEB_HOST_DIR := $(ROOT)/crates/crabmate-web-host
@@ -33,9 +34,9 @@ CM_MOBILE_SKIP_FRONTEND ?= 0
 	web-release \
 	apk mobile-apk \
 	tui tui-release \
-	test test-frontend test-tauri test-tui test-web-host check dependency-security fmt clippy ktlint-android \
+	test test-frontend test-tauri test-tui test-web-host test-tool-card check dependency-security fmt clippy ktlint-android \
 	victauri-e2e victauri-e2e-real e2e-playwright \
-	clean clean-desktop clean-mobile clean-connect clean-client-api clean-tui clean-web-host clean-frontend
+	clean clean-desktop clean-mobile clean-connect clean-client-api clean-tool-card clean-tui clean-web-host clean-frontend
 
 help:
 	@echo "crabmate-client Makefile（仓库根目录执行）"
@@ -65,10 +66,11 @@ help:
 	@echo "  make test-tauri          connect + desktop unit tests (--bins) + mobile check（不含 Victauri E2E）"
 	@echo "  make test-tui            crabmate-tui-core + crabmate-tui 测试"
 	@echo "  make test-web-host       crabmate-web 回环静态服务单测"
-	@echo "  make test                test-frontend 然后 test-tauri 然后 test-tui 然后 test-web-host"
+	@echo "  make test-tool-card      crabmate-tool-card 金样（独立 workspace）"
+	@echo "  make test                test-frontend 然后 test-tauri 然后 test-tui 然后 test-web-host 然后 test-tool-card"
 	@echo "  make ktlint-android      手改 Android Kotlin ktlint（edu/crabmate）"
-	@echo "  make fmt                 八包 cargo fmt（含 client-api / frontend / tui / web-host）"
-	@echo "  make clippy              八包 clippy -D warnings"
+	@echo "  make fmt                 九包 cargo fmt（含 client-api / tool-card / frontend / tui / web-host）"
+	@echo "  make clippy              九包 clippy -D warnings"
 	@echo "  make victauri-e2e        全量 Victauri（需外部 crabmate serve）"
 	@echo "  make e2e-playwright      Playwright（需 frontend/dist + serve --with-web）"
 	@echo ""
@@ -78,6 +80,7 @@ help:
 	@echo "  make clean-mobile        mobile Tauri target"
 	@echo "  make clean-connect       connect target"
 	@echo "  make clean-client-api    crabmate-client-api target"
+	@echo "  make clean-tool-card     crabmate-tool-card target"
 	@echo "  make clean-tui           crabmate-tui* target"
 	@echo "  make clean-web-host      crabmate-web-host target"
 	@echo "  make clean-frontend      frontend dist + target"
@@ -199,7 +202,10 @@ test-tui:
 test-web-host:
 	cd "$(WEB_HOST_DIR)" && $(CARGO) test -- --nocapture
 
-test: test-frontend test-tauri test-tui test-web-host
+test-tool-card:
+	cd "$(TOOL_CARD_DIR)" && $(CARGO) test -- --nocapture
+
+test: test-frontend test-tauri test-tui test-web-host test-tool-card
 
 check:
 	bash "$(ROOT)/scripts/check.sh"
@@ -214,6 +220,7 @@ fmt:
 	cd "$(TAURI_DIR)" && $(CARGO) fmt --all
 	cd "$(MOBILE_TAURI_DIR)" && $(CARGO) fmt --all
 	cd "$(CLIENT_API_DIR)" && $(CARGO) fmt --all
+	cd "$(TOOL_CARD_DIR)" && $(CARGO) fmt --all
 	cd "$(CONNECT_DIR)" && $(CARGO) fmt --all
 	cd "$(TUI_CORE_DIR)" && $(CARGO) fmt --all
 	cd "$(TUI_DIR)" && $(CARGO) fmt --all
@@ -224,6 +231,7 @@ clippy: prepare-sidecar
 	cd "$(TAURI_DIR)" && $(CARGO) clippy --all-targets -- -D warnings
 	cd "$(MOBILE_TAURI_DIR)" && $(CARGO) clippy --all-targets -- -D warnings
 	cd "$(CLIENT_API_DIR)" && $(CARGO) clippy --all-targets -- -D warnings
+	cd "$(TOOL_CARD_DIR)" && $(CARGO) clippy --all-targets -- -D warnings
 	cd "$(CONNECT_DIR)" && $(CARGO) clippy --all-targets -- -D warnings
 	cd "$(TUI_CORE_DIR)" && $(CARGO) clippy --all-targets -- -D warnings
 	cd "$(TUI_DIR)" && $(CARGO) clippy --all-targets -- -D warnings
@@ -242,7 +250,7 @@ e2e-playwright:
 
 # --- 清理 ---
 
-clean: clean-desktop clean-mobile clean-connect clean-client-api clean-tui clean-web-host clean-frontend
+clean: clean-desktop clean-mobile clean-connect clean-client-api clean-tool-card clean-tui clean-web-host clean-frontend
 
 clean-desktop:
 	rm -rf "$(DESKTOP_ROOT)/dist" "$(DESKTOP_ROOT)/binaries"
@@ -256,6 +264,9 @@ clean-connect:
 
 clean-client-api:
 	$(CARGO) clean --manifest-path "$(CLIENT_API_DIR)/Cargo.toml"
+
+clean-tool-card:
+	$(CARGO) clean --manifest-path "$(TOOL_CARD_DIR)/Cargo.toml"
 
 clean-tui:
 	$(CARGO) clean --manifest-path "$(TUI_CORE_DIR)/Cargo.toml"

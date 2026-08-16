@@ -12,6 +12,7 @@
 ```text
 .
 ├── crates/crabmate-client-api/ # shared pure logic (URL / auth / secrets / approval / workspace / sessions / chat body)
+├── crates/crabmate-tool-card/  # tool-card compact/detail (W2: in-repo path; not git-pinned to Server)
 ├── crates/crabmate-connect/
 ├── crates/crabmate-tui-core/   # remote terminal HTTP/SSE core
 ├── crates/crabmate-tui/        # binary crabmate-tui
@@ -46,6 +47,7 @@
 - Playwright E2E CI checkouts Server `serve` at the same contract pin (**`v0.3.0`**; see `docs/design/contract_pin.md`)
 - `crabmate-connect` is in-repo path only (`crates/crabmate-connect`)
 - `crabmate-client-api` is in-repo path only (`crates/crabmate-client-api`); no Tauri / `web-sys` / `reqwest` / `tokio`
+- `crabmate-tool-card` is in-repo path only (`crates/crabmate-tool-card`); do not git-pin Server `crabmate-tool-card`
 - Web Bearer ≠ model `API_KEY`（Web Bearer：官方壳仅内存 + 本机钥匙串/Android Keystore，**禁止**明文 `localStorage`；model keys 同样走钥匙串/Keystore；chat 经 HTTPS 发送 `client_llm.api_key` — do not `PUT /user-data/secrets/client-llm` from the UI；plain browser may keep weak localStorage with an explicit warning）
 - **Split decision / contracts / SSE / CORS** are authoritative in the Server repo; this repo documents shell behavior and links out
 - Scratch drafts go in **`agent_space/`** (gitignored); **do not** treat `agent_space/` as committed documentation

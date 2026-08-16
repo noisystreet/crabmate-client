@@ -8,10 +8,11 @@ cd "$ROOT"
 echo "[check] forbid path deps back to Server monorepo"
 bash "$ROOT/scripts/check-no-main-path.sh"
 
-echo "[check] cargo fmt (desktop + mobile + client-api + connect + tui + web-host + frontend)"
+echo "[check] cargo fmt (desktop + mobile + client-api + tool-card + connect + tui + web-host + frontend)"
 (cd desktop-tauri/src-tauri && cargo fmt --all -- --check)
 (cd mobile-tauri/src-tauri && cargo fmt --all -- --check)
 (cd crates/crabmate-client-api && cargo fmt --all -- --check)
+(cd crates/crabmate-tool-card && cargo fmt --all -- --check)
 (cd crates/crabmate-connect && cargo fmt --all -- --check)
 (cd crates/crabmate-tui-core && cargo fmt --all -- --check)
 (cd crates/crabmate-tui && cargo fmt --all -- --check)
@@ -29,6 +30,9 @@ echo "[check] cargo clippy mobile"
 
 echo "[check] cargo clippy crabmate-client-api"
 (cd crates/crabmate-client-api && cargo clippy --all-targets -- -D warnings)
+
+echo "[check] cargo clippy crabmate-tool-card"
+(cd crates/crabmate-tool-card && cargo clippy --all-targets -- -D warnings)
 
 echo "[check] cargo clippy connect"
 (cd crates/crabmate-connect && cargo clippy --all-targets -- -D warnings)

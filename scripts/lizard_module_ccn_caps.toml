@@ -15,6 +15,7 @@ frozen_modules = ["desktop-tauri"]
 [modules]
 "crates/crabmate-client-api" = 0
 "crates/crabmate-connect" = 0
+"crates/crabmate-tool-card" = 0
 "crates/crabmate-tui" = 0
 "crates/crabmate-tui-core" = 0
 "crates/crabmate-web-host" = 0

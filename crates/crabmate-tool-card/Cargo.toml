@@ -1,0 +1,14 @@
+[package]
+name = "crabmate-tool-card"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+description = "Tool result card compact/detail formatting for CrabMate Client (WASM)"
+repository = "https://github.com/noisystreet/crabmate-client"
+publish = false
+
+# 独立单包 workspace：与 connect / client-api 一致，避免根 workspace 吞掉 path 依赖解析。
+[workspace]
+
+[dependencies]
+serde_json = "1"

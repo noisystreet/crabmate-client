@@ -26,8 +26,8 @@ crabmate-turn-layout = { path = "../crates/crabmate-turn-layout" }
 | W1.1 | ✅ | 拷贝 `LLM_API_BASE_PRESETS`；去掉 `crabmate-types` 直接依赖 |
 | W1.2 | ✅ 跳过 | 保留 `api-contract::StatusShellView`（OpenAPI 同源；拷贝会漂） |
 | W1.3 | ✅ | 钉清单 / lockfile |
-| W2.1 | ⬜ | 迁入 `crates/crabmate-tool-card`；frontend path |
-| W2.2 | ⬜ | `check-no-main-path.sh` 仍禁 Server path |
+| W2.1 | ✅ | 迁入 `crates/crabmate-tool-card`；frontend path |
+| W2.2 | ✅ | `check-no-main-path.sh` 仍禁 Server path |
 | W3.1 | ⬜ | 迁入 `crates/crabmate-turn-layout` + `turn_project_*.jsonl` |
 | W3.2 | ⬜ | frontend path；`golden_turn_web_stored_sync` |
 | W3.3 | ⬜ | CI job：`cargo test -p crabmate-turn-layout` 金样 |
@@ -40,10 +40,10 @@ crabmate-turn-layout = { path = "../crates/crabmate-turn-layout" }
 
 ```bash
 bash scripts/check-no-main-path.sh
-# W2 后：
-cargo test -p crabmate-tool-card
+# W2 后（本仓无根 workspace，勿用 cargo test -p）：
+cd crates/crabmate-tool-card && cargo test
 # W3 后：
-cargo test -p crabmate-turn-layout
+cd crates/crabmate-turn-layout && cargo test
 cd frontend && cargo test --lib
 # 既有：
 make frontend-check   # 若环境已装

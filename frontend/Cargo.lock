@@ -329,7 +329,6 @@ dependencies = [
 [[package]]
 name = "crabmate-tool-card"
 version = "0.1.0"
-source = "git+https://github.com/noisystreet/CrabMate?tag=v0.3.0#3ecde9186e4b7601d2667cce65632fd55fa71ad8"
 dependencies = [
  "serde_json",
 ]

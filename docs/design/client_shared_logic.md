@@ -34,7 +34,7 @@ desktop/mobile ──path──► crabmate-connect ──reqwest──► serve
 crabmate-tui ──► crabmate-tui-core ──reqwest──► serve (/health, /chat/stream, …)
                       │
 frontend & tui-core ──┴── crabmate-sse-protocol 等线契约（Server git tag）
-                         展示 crate（tool-card / turn-layout）计划改本仓 path
+                         展示 crate：tool-card 已本仓 path（W2）；turn-layout 仍计划改本仓 path
                          见 display_crate_sink.md
 ```
 
@@ -54,6 +54,7 @@ frontend & tui-core ──┴── crabmate-sse-protocol 等线契约（Server 
 ```text
 crates/
   crabmate-client-api/   # S1–S4 已建：纯逻辑（url / auth / secrets / approval / workspace / sessions / chat_body）
+  crabmate-tool-card/    # W2：工具卡 compact/detail（frontend path；不进 tui-core）
   crabmate-connect/      # 保持：Tauri commands + keyring IO + CORS + handoff（可选依赖 client-api）
   crabmate-tui-core/     # 变薄：reqwest ServeClient 调用 client-api
   crabmate-tui/          # CLI / TTY / slash 宿主
