@@ -2,6 +2,7 @@
 
 > **权威发版策略**：Server 主仓 [`client_contract_versioning.md`](https://github.com/noisystreet/CrabMate/blob/main/docs/design/client_contract_versioning.md)  
 > **展示 crate 下沉**：Server [`client_display_crate_sink.md`](https://github.com/noisystreet/CrabMate/blob/main/docs/design/client_display_crate_sink.md)；本仓勾选 [`display_crate_sink.md`](./display_crate_sink.md)  
+> **单包 crates.io（下一渠道）**：Server [`crates_io_single_package.md`](https://github.com/noisystreet/CrabMate/blob/main/docs/design/crates_io_single_package.md) — S3 起钉 `crabmate` + `features = ["protocol"]`，不再钉 `crabmate-sse-protocol` 等包名。  
 > **UI 迁出计划**：[`frontend_migrate_plan.md`](https://github.com/noisystreet/CrabMate/blob/main/docs/design/frontend_migrate_plan.md) Phase B（本仓已迁入 `frontend/`）  
 > **本仓职责**：消费侧钉法 + 禁止 path 回主开发树。
 
@@ -38,6 +39,8 @@ crabmate-chat-export = { git = "https://github.com/noisystreet/CrabMate", tag = 
 ```
 
 `crabmate-tool-card` 已改为本仓 path（W2：`crates/crabmate-tool-card`）；勿再 git 钉 Server 该包。
+
+单包 `crabmate` `0.4.0` 落地前，继续上表 git tag。落地后改为一条依赖，见 Server ADR §2.2；`v0.3.0` 旧钉点保留给未升级的 Client。
 
 `crabmate-types` 不再由 `frontend` **直接**依赖（W1：网关预设表在 `frontend/src/client_llm_presets.rs`）。lockfile 里仍可能作为 `api-contract` / `sse-protocol` 的传递依赖出现。
 
