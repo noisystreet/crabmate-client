@@ -372,6 +372,40 @@ mod tests {
         assert_eq!(out[0].reasoning_text, "tool: git_status\nok");
     }
 
+    /// W2b：Server 快照不再填工具 `display_*`；水合须用本仓 tool-card 从信封生成 compact/detail。
+    #[test]
+    fn hydrates_tool_envelope_without_snapshot_display_fields() {
+        let envelope = r#"{"crabmate_tool":{"v":1,"name":"read_file","summary":"读：a.rs","ok":true,"output":"content"}}"#;
+        let msgs = vec![json!({
+            "role": "tool",
+            "name": "read_file",
+            "content": envelope,
+        })];
+        let out = stored_messages_from_conversation_api_with_base(&msgs, 0);
+        assert_eq!(out.len(), 1);
+        assert!(out[0].is_tool);
+        assert!(
+            !out[0].text.contains("crabmate_tool"),
+            "compact={:?}",
+            out[0].text
+        );
+        assert!(
+            out[0].text.contains("读取文件") || out[0].text.contains("读：a.rs"),
+            "compact={:?}",
+            out[0].text
+        );
+        assert!(
+            !out[0].reasoning_text.contains("crabmate_tool"),
+            "detail={:?}",
+            out[0].reasoning_text
+        );
+        assert!(
+            out[0].reasoning_text.contains("读：a.rs"),
+            "detail={:?}",
+            out[0].reasoning_text
+        );
+    }
+
     #[test]
     fn assistant_hydrate_ignores_raw_reasoning_when_display_content_present() {
         let plan_json = r#"{ "type": "agent_reply_plan", "version": 1, "steps": [ { "id": "x", "description": "d" } ] }"#;

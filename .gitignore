@@ -35,6 +35,7 @@ desktop-tauri/src-tauri/target/
 mobile-tauri/src-tauri/target/
 crates/crabmate-connect/target/
 crates/crabmate-client-api/target/
+crates/crabmate-tool-card/target/
 crates/crabmate-tui-core/target/
 crates/crabmate-tui/target/
 crates/crabmate-web-host/target/

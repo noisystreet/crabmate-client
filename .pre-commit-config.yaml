@@ -20,11 +20,12 @@ repos:
         stages: [pre-commit]
 
       - id: cargo-fmt
-        name: cargo fmt (desktop + mobile + client-api + connect + tui + web-host + frontend)
+        name: cargo fmt (desktop + mobile + client-api + tool-card + connect + tui + web-host + frontend)
         entry: >-
           bash -c 'cd desktop-tauri/src-tauri && cargo fmt --all -- --check
           && cd ../../mobile-tauri/src-tauri && cargo fmt --all -- --check
           && cd ../../crates/crabmate-client-api && cargo fmt --all -- --check
+          && cd ../crabmate-tool-card && cargo fmt --all -- --check
           && cd ../crabmate-connect && cargo fmt --all -- --check
           && cd ../crabmate-tui-core && cargo fmt --all -- --check
           && cd ../crabmate-tui && cargo fmt --all -- --check
@@ -62,6 +63,14 @@ repos:
       - id: client-api-clippy
         name: crabmate-client-api clippy (-D warnings)
         entry: bash -c 'cd crates/crabmate-client-api && cargo clippy --all-targets -- -D warnings'
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
+
+      - id: tool-card-clippy
+        name: crabmate-tool-card clippy (-D warnings)
+        entry: bash -c 'cd crates/crabmate-tool-card && cargo clippy --all-targets -- -D warnings'
         language: system
         pass_filenames: false
         always_run: true
