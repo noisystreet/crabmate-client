@@ -42,8 +42,8 @@
 
 - **Forbidden**: `path = "../crabmate_agent/..."` or any Cargo path dependency back into the Server monorepo tree
 - **Forbidden**: shell spawning / bundling a `crabmate serve` sidecar
-- Contract crates only via git **tag** (`vX.Y.Z` product release, or `client-contract-vX.Y.Z`) or `rev` pinned to Server (see `frontend/Cargo.toml`; current pin: **`client-contract-v0.1.1`**)
-- Playwright E2E CI checkouts Server `serve` at the same contract pin (**`client-contract-v0.1.1`**; see `docs/design/contract_pin.md`)
+- Contract crates only via git **tag** (`vX.Y.Z` product release, or `client-contract-vX.Y.Z`) or `rev` pinned to Server (see `frontend/Cargo.toml`; current pin: **`v0.3.0`**)
+- Playwright E2E CI checkouts Server `serve` at the same contract pin (**`v0.3.0`**; see `docs/design/contract_pin.md`)
 - `crabmate-connect` is in-repo path only (`crates/crabmate-connect`)
 - `crabmate-client-api` is in-repo path only (`crates/crabmate-client-api`); no Tauri / `web-sys` / `reqwest` / `tokio`
 - Web Bearer ≠ model `API_KEY`（Web Bearer：官方壳仅内存 + 本机钥匙串/Android Keystore，**禁止**明文 `localStorage`；model keys 同样走钥匙串/Keystore；chat 经 HTTPS 发送 `client_llm.api_key` — do not `PUT /user-data/secrets/client-llm` from the UI；plain browser may keep weak localStorage with an explicit warning）

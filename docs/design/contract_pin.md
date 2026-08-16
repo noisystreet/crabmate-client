@@ -20,8 +20,8 @@
 | 项 | 值 |
 |----|-----|
 | 源码迁入自 | 主仓 `eb0048bf…`（见 `frontend/SOURCE.md`） |
-| 契约 `tag` | **`client-contract-v0.1.1`**（主仓契约专用 tag，指向 `9a78a182`） |
-| Playwright `serve` checkout | **`client-contract-v0.1.1`**（与契约钉点对齐） |
+| 契约 `tag` | **`v0.3.0`**（Server 产品 tag，指向 `3ecde918`） |
+| Playwright `serve` checkout | **`v0.3.0`**（与契约钉点对齐） |
 | lock | 提交 `frontend/Cargo.lock`、`crates/crabmate-tui-core/Cargo.lock` |
 
 壳打包 UI 同步：`make desktop-release` / `before-desktop-build.sh` 默认 **`trunk build --release`** 再同步本仓 `frontend/dist`（拒绝 debug 大 WASM）；`CM_PREPARE_SKIP_FRONTEND=1` 或 `CRABMATE_FRONTEND_DIST=-` 跳过；同级主仓回落需 `CRABMATE_ALLOW_SIBLING_FRONTEND=1`。
@@ -29,18 +29,18 @@
 ## 钉主仓契约
 
 ```toml
-crabmate-api-contract = { git = "https://github.com/noisystreet/CrabMate", tag = "client-contract-v0.1.1", package = "crabmate-api-contract" }
-crabmate-sse-protocol = { git = "https://github.com/noisystreet/CrabMate", tag = "client-contract-v0.1.1", package = "crabmate-sse-protocol" }
-crabmate-types = { git = "https://github.com/noisystreet/CrabMate", tag = "client-contract-v0.1.1", package = "crabmate-types" }
-crabmate-display-rules = { git = "https://github.com/noisystreet/CrabMate", tag = "client-contract-v0.1.1", package = "crabmate-display-rules" }
-crabmate-turn-layout = { git = "https://github.com/noisystreet/CrabMate", tag = "client-contract-v0.1.1", package = "crabmate-turn-layout" }
-crabmate-tool-card = { git = "https://github.com/noisystreet/CrabMate", tag = "client-contract-v0.1.1", package = "crabmate-tool-card" }
-crabmate-chat-export = { git = "https://github.com/noisystreet/CrabMate", tag = "client-contract-v0.1.1", package = "crabmate-chat-export" }
+crabmate-api-contract = { git = "https://github.com/noisystreet/CrabMate", tag = "v0.3.0", package = "crabmate-api-contract" }
+crabmate-sse-protocol = { git = "https://github.com/noisystreet/CrabMate", tag = "v0.3.0", package = "crabmate-sse-protocol" }
+crabmate-types = { git = "https://github.com/noisystreet/CrabMate", tag = "v0.3.0", package = "crabmate-types" }
+crabmate-display-rules = { git = "https://github.com/noisystreet/CrabMate", tag = "v0.3.0", package = "crabmate-display-rules" }
+crabmate-turn-layout = { git = "https://github.com/noisystreet/CrabMate", tag = "v0.3.0", package = "crabmate-turn-layout" }
+crabmate-tool-card = { git = "https://github.com/noisystreet/CrabMate", tag = "v0.3.0", package = "crabmate-tool-card" }
+crabmate-chat-export = { git = "https://github.com/noisystreet/CrabMate", tag = "v0.3.0", package = "crabmate-chat-export" }
 ```
 
-开发期可用 `rev = "<sha>"` 或产品 tag `vX.Y.Z` 代替契约专用 tag。打标签前主仓须绿：`bash scripts/check-client-contract.sh`。
+开发期可用 `rev = "<sha>"` 或契约专用 tag `client-contract-vX.Y.Z` 代替产品 tag。打标签前主仓须绿：`bash scripts/check-client-contract.sh`。
 
-当前消费侧对齐 Server 契约专用 tag **`client-contract-v0.1.1`**（契约 tag ≠ 安装包版本，见主仓 versioning 文档）。
+当前消费侧对齐 Server 产品 tag **`v0.3.0`**（尚无 `client-contract-v0.3.0`；产品 tag 与契约专用 tag 均可，见主仓 versioning 文档）。
 
 **禁止**：`path = "../crabmate_agent/crates/..."` 或任何回主开发树的 Cargo path。
 
