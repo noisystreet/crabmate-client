@@ -11,7 +11,7 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Changed
 
-- Pin Server line contract to single crate **`crabmate`** (`features = ["protocol"]`, git rev `27c1fd3a…` / #855). Drop git packages `crabmate-sse-protocol` / `api-contract` / `display-rules` / `turn-layout` / `chat-export`. Playwright / Victauri `serve` checkout uses the same rev. `use` paths are `crabmate::cm_*` only.
+- Pin line contract to crates.io **`crabmate` 0.4.0** (`features = ["protocol"]`). Playwright / Victauri `serve` checkout uses git tag **`v0.4.0`**.
 - Vendor `crabmate-tool-card` as `crates/crabmate-tool-card` (in-repo path). Frontend no longer git-depends on Server `crabmate-types`; LLM gateway presets live in `frontend/src/client_llm_presets.rs`.
 
 ### Security

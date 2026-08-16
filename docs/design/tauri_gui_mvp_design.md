@@ -47,7 +47,7 @@ MVP 历史验收（部分已废弃）：
 | `desktop-tauri/src-tauri/src/desktop_lifecycle.rs` | 单实例、托盘、最小化隐藏 |
 | `desktop-tauri/scripts/prepare-sidecar.sh` | 同步 connect（及可选遗留 splash）；默认本仓 `frontend/dist`；`CM_PREPARE_SKIP_FRONTEND=1` 可跳过 |
 | `desktop-tauri/scripts/before-desktop-build.sh` | release 构建：`trunk --release` + prepare；拒绝 debug 大 WASM |
-| `frontend/` | 业务 UI（Leptos CSR）；契约 git `rev`/`tag` |
+| `frontend/` | 业务 UI（Leptos CSR）；契约 crates.io `crabmate` 0.4.0 + `protocol` |
 | `mobile-tauri/` | Android 薄壳（流式前台保活 / 审批通知见 [ADR-0002](../adr/0002-android-approval-notification-foreground-keepalive.md)） |
 | `crates/crabmate-connect/` | 探测 / Bearer / 钥匙串 |
 

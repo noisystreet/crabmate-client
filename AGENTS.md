@@ -19,7 +19,7 @@
 ├── crates/crabmate-web-host/   # binary crabmate-web (loopback static UI host)
 ├── desktop-tauri/
 ├── mobile-tauri/
-├── frontend/                # Business UI; contract git rev/tag
+├── frontend/                # Business UI; contract crates.io crabmate 0.4.0 + protocol
 ├── e2e/                     # Playwright (browser UI)
 ├── scripts/                 # sync-connect, victauri-e2e, e2e-playwright, check.sh
 ├── docs/
@@ -43,8 +43,8 @@
 
 - **Forbidden**: `path = "../crabmate_agent/..."` or any Cargo path dependency back into the Server monorepo tree
 - **Forbidden**: shell spawning / bundling a `crabmate serve` sidecar
-- Contract crate: one git **`crabmate`** with `default-features = false, features = ["protocol"]` (`rev` until crates.io `0.4.0`; see `frontend/Cargo.toml`; current pin: **`27c1fd3a`** / Server #855). Do not pin old package names (`crabmate-sse-protocol`, …) and do not enable `server`.
-- Playwright E2E CI checkouts Server `serve` at the same **`rev`** (see `docs/design/contract_pin.md`)
+- Contract crate: crates.io **`crabmate` `0.4.0`** with `default-features = false, features = ["protocol"]` (see `frontend/Cargo.toml`). Do not pin old package names (`crabmate-sse-protocol`, …) and do not enable `server`.
+- Playwright E2E CI checkouts Server `serve` at git tag **`v0.4.0`** (same commit as the crates.io package; see `docs/design/contract_pin.md`)
 - `crabmate-connect` is in-repo path only (`crates/crabmate-connect`)
 - `crabmate-client-api` is in-repo path only (`crates/crabmate-client-api`); no Tauri / `web-sys` / `reqwest` / `tokio`
 - `crabmate-tool-card` is in-repo path only (`crates/crabmate-tool-card`); do not git-pin Server `crabmate-tool-card`
