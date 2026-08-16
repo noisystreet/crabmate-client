@@ -32,12 +32,13 @@
 ```toml
 crabmate-api-contract = { git = "https://github.com/noisystreet/CrabMate", tag = "v0.3.0", package = "crabmate-api-contract" }
 crabmate-sse-protocol = { git = "https://github.com/noisystreet/CrabMate", tag = "v0.3.0", package = "crabmate-sse-protocol" }
-crabmate-types = { git = "https://github.com/noisystreet/CrabMate", tag = "v0.3.0", package = "crabmate-types" }
 crabmate-display-rules = { git = "https://github.com/noisystreet/CrabMate", tag = "v0.3.0", package = "crabmate-display-rules" }
 crabmate-turn-layout = { git = "https://github.com/noisystreet/CrabMate", tag = "v0.3.0", package = "crabmate-turn-layout" }
 crabmate-tool-card = { git = "https://github.com/noisystreet/CrabMate", tag = "v0.3.0", package = "crabmate-tool-card" }
 crabmate-chat-export = { git = "https://github.com/noisystreet/CrabMate", tag = "v0.3.0", package = "crabmate-chat-export" }
 ```
+
+`crabmate-types` 不再由 `frontend` **直接**依赖（W1：网关预设表在 `frontend/src/client_llm_presets.rs`）。lockfile 里仍可能作为 `api-contract` / `sse-protocol` 的传递依赖出现。
 
 开发期可用 `rev = "<sha>"` 或契约专用 tag `client-contract-vX.Y.Z` 代替产品 tag。打标签前主仓须绿：`bash scripts/check-client-contract.sh`。
 

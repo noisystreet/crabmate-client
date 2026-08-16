@@ -368,7 +368,6 @@ dependencies = [
  "crabmate-sse-protocol",
  "crabmate-tool-card",
  "crabmate-turn-layout",
- "crabmate-types",
  "futures-util",
  "gloo-timers",
  "js-sys",
