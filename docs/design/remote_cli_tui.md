@@ -30,7 +30,7 @@
 | 形态 | **远程客户端**（同 Tauri 壳）：只认 `serve` API |
 | 二进制名 | **`crabmate-tui`**（避免与 Server 包名 `crabmate` / Desktop `crabmate-desktop` 冲突） |
 | 子命令（终态） | `connect`（探测）· `chat`（单轮/管道）· `repl`（交互行编辑）· `tui`（全屏，后置） |
-| 契约 | git tag 钉 `crabmate-sse-protocol` / `crabmate-api-contract` 等（同 `frontend`） |
+| 契约 | 单包 `crabmate` + `protocol`（与 `frontend` 同一 git `rev`） |
 | HTTP 客户端 | `reqwest` + rustls；SSE 解析对齐协议 crate |
 | 连接配置 | 复用/对齐 connect 键：`api_base`、Web Bearer（钥匙串账户可与壳同源或 `tui_*` 前缀，实现时定一） |
 | GitHub | 原生端：钥匙串槽 `github` + `X-CrabMate-GitHub-Token`；无浏览器 Cookie 路径 |

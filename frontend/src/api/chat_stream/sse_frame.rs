@@ -1,4 +1,4 @@
-use crabmate_sse_protocol::{
+use crabmate::cm_sse_protocol::{
     StreamEndReason, extract_stream_ended_reason, is_sse_done_sentinel, join_sse_data_lines,
     parse_sse_event_id,
 };

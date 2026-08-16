@@ -5,7 +5,7 @@
 //! 由 [`decide_done_bubble_action`] 返回 [`DoneBubbleAction`]；
 //! [`super::builders::chat_stream_on_done_builder`] 仅负责读信号、**`ChatStreamCallbackCtx::update_bound_session`**（`stream_session_access` 上实现）、`scratch` 等、执行动作。
 
-use crabmate_sse_protocol::StreamEndReason;
+use crabmate::cm_sse_protocol::StreamEndReason;
 
 use super::helpers::should_show_missing_final_summary_hint;
 

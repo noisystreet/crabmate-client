@@ -1,6 +1,6 @@
 //! v2 布局：流式 delta → loading overlay preview；已关闭 commentary 按工具键不可变落盘。
 
-use crabmate_turn_layout::{ASSISTANT_COMMENTARY, project_turn_projection};
+use crabmate::cm_turn_layout::{ASSISTANT_COMMENTARY, project_turn_projection};
 
 use crate::message_loading::is_loading_plain_assistant;
 use crate::storage::{V2_COMMENTARY_ROW_ID_PREFIX, V2_FINAL_ANSWER_ROW_ID};

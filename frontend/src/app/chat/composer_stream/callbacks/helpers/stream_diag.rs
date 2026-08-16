@@ -1,6 +1,6 @@
 //! 空回复诊断、流式错误文案与「最终总结缺失」启发式。
 
-use crabmate_sse_protocol::StreamEndReason;
+use crabmate::cm_sse_protocol::StreamEndReason;
 
 use crate::i18n;
 use crate::i18n::Locale;

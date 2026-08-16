@@ -8,7 +8,7 @@ use web_sys::{Request, RequestInit, Response};
 
 use crate::i18n::Locale;
 
-use crabmate_api_contract::StatusShellView;
+use crabmate::cm_api_contract::StatusShellView;
 
 use super::browser::{
     api_url, auth_headers, format_fetch_transport_error, prepare_api_auth, window,
@@ -51,7 +51,7 @@ pub struct TasksData {
     pub items: Vec<TaskItem>,
 }
 
-/// `GET /status?view=shell` 响应（与 [`crabmate_api_contract::StatusShellView`] 一致）。
+/// `GET /status?view=shell` 响应（与 [`crabmate::cm_api_contract::StatusShellView`] 一致）。
 pub type StatusData = StatusShellView;
 
 #[derive(Debug, Clone, Deserialize, Default)]

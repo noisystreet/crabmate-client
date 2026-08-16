@@ -2,7 +2,7 @@
 
 use web_sys::Response;
 
-use crabmate_sse_protocol::StreamEndReason;
+use crabmate::cm_sse_protocol::StreamEndReason;
 
 use crate::i18n::Locale;
 

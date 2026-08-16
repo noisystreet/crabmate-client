@@ -5,7 +5,9 @@ mod tests {
     use std::fs;
     use std::path::PathBuf;
 
-    use crabmate_turn_layout::{ASSISTANT_COMMENTARY, SegmentKind, TurnEvent, project_turn_web_v2};
+    use crabmate::cm_turn_layout::{
+        ASSISTANT_COMMENTARY, SegmentKind, TurnEvent, project_turn_web_v2,
+    };
     use serde::Deserialize;
 
     use super::super::super::super::turn_canonical::{
@@ -161,14 +163,15 @@ mod tests {
 
             if let Some(ref preview) = case.expect_open_preview {
                 assert_eq!(
-                    crabmate_turn_layout::streaming_commentary_block_text(turn.turn_ref())
+                    crabmate::cm_turn_layout::streaming_commentary_block_text(turn.turn_ref())
                         .unwrap_or_default(),
                     preview.as_str(),
                     "case {} canonical open segment text",
                     case.id
                 );
                 // Phase B：带 before_tool_call_id 的 open 旁白不进 loading overlay。
-                if crabmate_turn_layout::streaming_commentary_before_tool(turn.turn_ref()).is_some()
+                if crabmate::cm_turn_layout::streaming_commentary_before_tool(turn.turn_ref())
+                    .is_some()
                 {
                     assert!(
                         TurnRowQueue::loading_preview_text(&turn, None, None).is_empty(),
@@ -236,7 +239,7 @@ mod tests {
         turn.on_tool_call("tc_read", "read_file", "read INSTALL");
         turn.on_tool_phase_end();
         assert!(
-            crabmate_turn_layout::streaming_commentary_block_text(turn.turn_ref()).is_none(),
+            crabmate::cm_turn_layout::streaming_commentary_block_text(turn.turn_ref()).is_none(),
             "open preview must be closed after tool_phase_end"
         );
 

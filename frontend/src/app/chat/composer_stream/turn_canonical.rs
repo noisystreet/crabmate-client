@@ -1,9 +1,9 @@
-//! Canonical turn 归约（[`crabmate_turn_layout`]）与 `messages` 布局同步。
+//! Canonical turn 归约（[`crabmate::cm_turn_layout`]）与 `messages` 布局同步。
 //!
 //! 解决「旁注 delta 晚于 `tool_call` SSE」时气泡顺序错乱：段锚点 + reducer 投影后再 upsert
 //! 带 `tool_call_id` 锚点的可见 assistant 行（置于对应工具之前）。
 
-use crabmate_turn_layout::{
+use crabmate::cm_turn_layout::{
     PENDING_STREAM_COMMENTARY_SEGMENT_ID, SegmentKind, Turn, TurnEvent,
     batch_narration_text as closed_commentary_text, commentary_for_tool, reduce_event,
     streaming_commentary_block_text,
@@ -155,7 +155,7 @@ impl TurnCanonicalState {
 
     /// `tool_phase_end` 已发生但仍有 open 段时的兜底（流结束投影前）。
     pub(super) fn close_open_commentary_for_projection(&mut self) {
-        crabmate_turn_layout::close_open_commentary_segments(&mut self.turn);
+        crabmate::cm_turn_layout::close_open_commentary_segments(&mut self.turn);
     }
 
     pub(super) fn on_tool_call(&mut self, tool_call_id: &str, name: &str, summary: &str) {
@@ -522,7 +522,7 @@ mod tests {
         });
         assert!(turn.try_apply_commentary_delta("工具前旁注。"));
         assert_eq!(
-            crabmate_turn_layout::streaming_commentary_block_text(turn.turn_ref()).as_deref(),
+            crabmate::cm_turn_layout::streaming_commentary_block_text(turn.turn_ref()).as_deref(),
             Some("工具前旁注。")
         );
         turn.on_tool_phase_end();

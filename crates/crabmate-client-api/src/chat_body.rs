@@ -1,7 +1,7 @@
 //! `POST /chat/stream` **核心**字段（message / `client_sse_protocol` / conversation_id / approval_session_id）。
 //!
 //! 图像、`stream_resume`、`client_llm`、温度等仍由各端自行追加。
-//! `client_sse_protocol` 取值由调用方传入（通常为 `crabmate_sse_protocol::SSE_PROTOCOL_VERSION`），
+//! `client_sse_protocol` 取值由调用方传入（通常为 `crabmate::cm_sse_protocol::SSE_PROTOCOL_VERSION`），
 //! 本 crate **不**依赖 sse-protocol，以免拖进契约 git 依赖。
 
 use serde_json::{Value, json};

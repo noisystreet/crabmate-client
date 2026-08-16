@@ -20,7 +20,7 @@ fi
 if [[ -n "${hits}" ]]; then
   echo "error: 发现 path 依赖回 Server monorepo（禁止）：" >&2
   echo "${hits}" >&2
-  echo "契约请钉 git tag client-contract-vX.Y.Z（或 rev）；connect 仅用本仓 path。" >&2
+  echo "契约请钉 git crabmate + protocol（rev / 日后 crates.io 0.4.0）；connect 仅用本仓 path。" >&2
   exit 1
 fi
 

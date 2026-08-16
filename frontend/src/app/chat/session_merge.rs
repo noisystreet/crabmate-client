@@ -20,7 +20,7 @@ fn messages_contain_loading(messages: &[StoredMessage]) -> bool {
 fn is_plain_user_bubble(m: &StoredMessage) -> bool {
     m.role == "user"
         && !m.is_tool
-        && !crabmate_display_rules::user_message_should_hide_for_chat_display(m.text.as_str())
+        && !crabmate::cm_display_rules::user_message_should_hide_for_chat_display(m.text.as_str())
 }
 
 fn local_plain_user_bubbles_preserved(
@@ -55,7 +55,9 @@ fn inject_preserved_plain_users(
     }
     server.retain(|m| {
         !(m.role == "user"
-            && crabmate_display_rules::user_message_should_hide_for_chat_display(m.text.as_str()))
+            && crabmate::cm_display_rules::user_message_should_hide_for_chat_display(
+                m.text.as_str(),
+            ))
     });
     if let Some(pos) = server.iter().position(|m| m.role == "user") {
         for (i, u) in preserved.iter().enumerate() {
@@ -419,7 +421,7 @@ mod golden {
         const REAL: &str = "用户真实诉求";
         let reject = format!(
             "{} 请仅输出 JSON",
-            crabmate_display_rules::STAGED_PLANNER_TOOL_CALL_REJECT_PREFIX
+            crabmate::cm_display_rules::STAGED_PLANNER_TOOL_CALL_REJECT_PREFIX
         );
         let server = vec![user_msg("srv-inj", &reject), assistant_msg("a1", "ok")];
         let local = vec![user_msg("local-u", REAL)];
@@ -430,7 +432,7 @@ mod golden {
                 .any(|m| m.role == "user" && m.text.contains(REAL))
         );
         assert!(!merged.iter().any(|m| {
-            crabmate_display_rules::is_planner_tool_call_reject_injected_user_content(
+            crabmate::cm_display_rules::is_planner_tool_call_reject_injected_user_content(
                 m.text.as_str(),
             )
         }));

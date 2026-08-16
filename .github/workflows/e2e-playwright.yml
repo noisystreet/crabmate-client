@@ -36,8 +36,8 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: noisystreet/CrabMate
-          # 与契约钉点一致：产品 tag（含 --with-web + 默认壳 CORS）
-          ref: v0.3.0
+          # 与契约钉点一致：单包 crabmate + protocol 的 Server rev（#855）
+          ref: 27c1fd3ae2f770a9ac115f567f6ad140b70631c9
           path: crabmate-server
 
       - name: Install system deps (OpenSSL / libssh2)

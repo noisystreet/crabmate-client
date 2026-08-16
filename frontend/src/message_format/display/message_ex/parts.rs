@@ -1,6 +1,6 @@
 //! 角色正文管道的共用片段（剥前缀、用户过滤、层级子目标裁剪）。
 
-use crabmate_display_rules::user_message_should_hide_for_chat_display;
+use crabmate::cm_display_rules::user_message_should_hide_for_chat_display;
 
 use crate::i18n::Locale;
 use crate::message_format::display::plan_fence::assistant_text_for_display;

@@ -1,10 +1,10 @@
-//! 浏览器内导出会话：schema / 展示投影信封来自 [`crabmate_chat_export`]（`projection=display`）；
+//! 浏览器内导出会话：schema / 展示投影信封来自 [`crabmate::cm_chat_export`]（`projection=display`）；
 //! 消息正文为展示过滤结果；下载壳为浏览器 / Tauri。
 //!
-//! 与 CLI/TUI **`projection=raw`** 的完整 [`crabmate_chat_export::ChatSessionFile`] 区分：
+//! 与 CLI/TUI **`projection=raw`** 的完整 [`crabmate::cm_chat_export::ChatSessionFile`] 区分：
 //! Web JSON **不可**直接作为 `tool-replay` 输入。
 
-use crabmate_chat_export::{
+use crabmate::cm_chat_export::{
     DisplayChatSessionFile, DisplayExportMessage, ExportMdLocale, markdown_from_role_bodies,
 };
 use gloo_timers::callback::Timeout;
@@ -17,10 +17,10 @@ use crate::message_format::{message_text_for_display_ex, stored_tool_message_det
 use crate::storage::{ChatSession, StoredMessage};
 use crate::visible_messages::visible_message_indices_for_export;
 
-pub use crabmate_chat_export::display_session_to_json_pretty;
+pub use crabmate::cm_chat_export::display_session_to_json_pretty;
 
 #[cfg(test)]
-use crabmate_chat_export::{
+use crabmate::cm_chat_export::{
     CHAT_EXPORT_PROJECTION_DISPLAY, CHAT_EXPORT_SCHEMA_ID, CHAT_EXPORT_SCHEMA_VERSION,
     CHAT_SESSION_FILE_VERSION,
 };
@@ -187,7 +187,7 @@ pub fn session_to_markdown(
     let messages =
         stored_messages_to_export(&session.messages, loc, apply_assistant_display_filters);
     markdown_from_export_messages(
-        crabmate_chat_export::export_md_title_full(export_md_locale(loc)),
+        crabmate::cm_chat_export::export_md_title_full(export_md_locale(loc)),
         &messages,
         loc,
     )
@@ -212,7 +212,7 @@ pub fn stored_messages_by_ids_to_markdown(
         .collect();
     let messages = stored_messages_to_export(&subset, loc, apply_assistant_display_filters);
     markdown_from_export_messages(
-        crabmate_chat_export::export_md_title_selection(export_md_locale(loc)),
+        crabmate::cm_chat_export::export_md_title_selection(export_md_locale(loc)),
         &messages,
         loc,
     )

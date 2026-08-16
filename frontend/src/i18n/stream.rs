@@ -1,5 +1,5 @@
 use super::Locale;
-use crabmate_sse_protocol::StreamEndReason;
+use crabmate::cm_sse_protocol::StreamEndReason;
 
 // --- 流式 / 停止 ---
 
