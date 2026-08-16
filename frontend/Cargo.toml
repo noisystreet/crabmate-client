@@ -15,7 +15,6 @@ crabmate-chat-export = { git = "https://github.com/noisystreet/CrabMate", tag = 
 crabmate-api-contract = { git = "https://github.com/noisystreet/CrabMate", tag = "v0.3.0", package = "crabmate-api-contract" }
 crabmate-display-rules = { git = "https://github.com/noisystreet/CrabMate", tag = "v0.3.0", package = "crabmate-display-rules" }
 crabmate-tool-card = { git = "https://github.com/noisystreet/CrabMate", tag = "v0.3.0", package = "crabmate-tool-card" }
-crabmate-types = { git = "https://github.com/noisystreet/CrabMate", tag = "v0.3.0", package = "crabmate-types" }
 crabmate-sse-protocol = { git = "https://github.com/noisystreet/CrabMate", tag = "v0.3.0", package = "crabmate-sse-protocol" }
 crabmate-turn-layout = { git = "https://github.com/noisystreet/CrabMate", tag = "v0.3.0", package = "crabmate-turn-layout" }
 crabmate-client-api = { path = "../crates/crabmate-client-api" }

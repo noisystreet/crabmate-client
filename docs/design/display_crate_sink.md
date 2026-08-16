@@ -22,10 +22,10 @@ crabmate-turn-layout = { path = "../crates/crabmate-turn-layout" }
 
 | ID | 状态 | Client 动作 |
 |----|------|-------------|
-| W0.2 | ⬜ | 本文 + 更新 [`contract_pin.md`](./contract_pin.md) |
-| W1.1 | ⬜ | 拷贝 `LLM_API_BASE_PRESETS`；去掉 `crabmate-types` |
-| W1.2 | ⬜ | `StatusShellView` 本地化或保留 `api-contract`（可跳过） |
-| W1.3 | ⬜ | 钉清单 / lockfile |
+| W0.2 | ✅ | 本文 + 更新 [`contract_pin.md`](./contract_pin.md) |
+| W1.1 | ✅ | 拷贝 `LLM_API_BASE_PRESETS`；去掉 `crabmate-types` 直接依赖 |
+| W1.2 | ✅ 跳过 | 保留 `api-contract::StatusShellView`（OpenAPI 同源；拷贝会漂） |
+| W1.3 | ✅ | 钉清单 / lockfile |
 | W2.1 | ⬜ | 迁入 `crates/crabmate-tool-card`；frontend path |
 | W2.2 | ⬜ | `check-no-main-path.sh` 仍禁 Server path |
 | W3.1 | ⬜ | 迁入 `crates/crabmate-turn-layout` + `turn_project_*.jsonl` |
