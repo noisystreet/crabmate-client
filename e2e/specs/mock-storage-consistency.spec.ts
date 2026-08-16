@@ -197,6 +197,7 @@ test("多轮助手正文不应合并为一条 stored_message", async ({ page, br
   const secondPage = await secondContext.newPage();
   await secondPage.goto("/", { waitUntil: "networkidle", timeout: 20_000 });
   await secondPage.waitForSelector('[data-testid="chat-composer-input"]');
+  await openSessionInRail(secondPage, sid);
   for (const signature of TEXT_SIGNATURES) {
     await expect(
       secondPage.locator("section.chat-tui-turn--assistant").filter({

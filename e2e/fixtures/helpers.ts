@@ -108,7 +108,9 @@ export async function seedSession(page: Page, sid: string) {
 
 /** 冷启动不再恢复上次活动会话；点开会话轨上的指定会话（水合 / 历史用例）。 */
 export async function openSessionInRail(page: Page, sid: string) {
-  await page.getByTestId(`nav-session-${sid}`).click();
+  const row = page.getByTestId(`nav-session-${sid}`);
+  await expect(row).toBeVisible({ timeout: 15_000 });
+  await row.click();
 }
 
 /** 在页面中发送消息（填值 + Enter）。*/
