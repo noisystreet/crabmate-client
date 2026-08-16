@@ -11,6 +11,8 @@
 use serde_json::Value;
 use victauri_test::e2e_test;
 
+mod common;
+
 const PAGINATE_CONV_ID: &str = "e2e-paginate-conv";
 const PAGINATE_TOTAL: usize = 100;
 const PAGINATE_PAGE_LIMIT: usize = 80;
@@ -203,6 +205,7 @@ e2e_test!(
             .wait_for("network_idle", Some(""), Some(15000), Some(500))
             .await
             .ok();
+        common::open_session_in_rail(&mut client, "s_e2e_hydrate").await;
 
         // 尾页最新消息应可见
         client

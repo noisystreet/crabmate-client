@@ -10,6 +10,8 @@
 
 use victauri_test::e2e_test;
 
+mod common;
+
 /// 播种指定消息列表到会话中，然后刷新页面。
 /// 消息 JSON 格式：`[{id,role,text,reasoning_text?,state?,is_tool?}, ...]`
 async fn seed_messages_and_goto(
@@ -43,6 +45,7 @@ async fn seed_messages_and_goto(
         .wait_for("network_idle", Some(""), Some(15000), Some(500))
         .await
         .ok();
+    common::open_session_in_rail(client, session_id).await;
 }
 
 /// 获取聊天层中可见的 assistant 回合数量（TUI `section.chat-tui-turn--assistant`）。

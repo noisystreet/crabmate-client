@@ -14,9 +14,10 @@ use crate::chat_session_state::ChatSessionSignals;
 
 use super::session_hydrate::bump_session_hydrate_nonce;
 use crate::api::client_llm_storage::hydrate_client_llm_from_server;
-use crate::i18n::{self, Locale};
-use crate::session_workspace_partition::record_memory_sessions_partition;
-use crate::storage::{clear_stale_stream_loading_states, ensure_at_least_one};
+use crate::i18n::Locale;
+use crate::session_workspace_partition::{
+    prepare_cold_start_session_list, record_memory_sessions_partition,
+};
 use crate::stream_text_overlay::sessions_snapshot_with_stream_overlay_merged;
 use crate::user_data_bootstrap::load_web_sessions;
 use crate::user_prefs_sync::wire_load_user_prefs_from_server;
@@ -48,7 +49,7 @@ pub(crate) fn persist_chat_sessions_at_stream_end(chat: ChatSessionSignals, loc:
     });
 }
 
-/// 首次渲染时从 `/user-data` 加载会话列表并设活动会话与草稿。
+/// 首次渲染时从 `/user-data` 加载会话列表；活动会话固定为空聊天（不恢复上次会话 / 工作区绑定）。
 pub fn wire_initial_sessions_from_storage(app: crate::app::app_signals::AppSignals) {
     let initialized = app.initialized;
     let sessions = app.chat.sessions;
@@ -66,7 +67,7 @@ pub fn wire_initial_sessions_from_storage(app: crate::app::app_signals::AppSigna
         let loc = locale.get_untracked();
         spawn_local(async move {
             // LLM 覆盖 / 密钥状态 与 会话列表并行，缩短门闸；prefs（含只读 TTL）另路由行。
-            let ((), ((list, aid), ws_outcome)) = futures_util::future::join(
+            let ((), ((list, _aid), ws_outcome)) = futures_util::future::join(
                 hydrate_client_llm_from_server(loc),
                 futures_util::future::join(load_web_sessions(loc), fetch_workspace(None, loc)),
             )
@@ -77,20 +78,7 @@ pub fn wire_initial_sessions_from_storage(app: crate::app::app_signals::AppSigna
                 // 工作区探测失败也登记空路径桶，避免 initialized 后误走破坏性同仓 GET。
                 record_memory_sessions_partition("");
             }
-            let (mut list, def_id) =
-                ensure_at_least_one(list, i18n::default_session_title(loc).to_string());
-            for s in &mut list {
-                s.normalize_layout_schema_version();
-                clear_stale_stream_loading_states(&mut s.messages, loc);
-            }
-            let pick = aid
-                .filter(|id| list.iter().any(|s| s.id == *id))
-                .unwrap_or(def_id);
-            let d = list
-                .iter()
-                .find(|s| s.id == pick)
-                .map(|s| s.draft.clone())
-                .unwrap_or_default();
+            let (list, pick, d) = prepare_cold_start_session_list(list, loc);
             sessions.set(list);
             active_id.set(pick);
             draft.set(d);

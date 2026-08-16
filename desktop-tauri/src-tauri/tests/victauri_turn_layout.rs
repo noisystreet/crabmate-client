@@ -8,6 +8,8 @@ use std::time::{Duration, Instant};
 use victauri_test::e2e_test;
 use victauri_test::locator::Locator;
 
+mod common;
+
 /// 与前端 [`crabmate_web::app_prefs::STICKY_BOTTOM_THRESHOLD_PX`] 对齐，留 4px 容差。
 const FOLLOW_GAP_MAX_PX: i32 = 84;
 
@@ -170,6 +172,7 @@ e2e_test!(
             .wait_for("network_idle", Some(""), Some(15000), Some(500))
             .await
             .ok();
+        common::open_session_in_rail(&mut client, "s_e2e_no_tool_final").await;
         client
             .wait_for(
                 "text",

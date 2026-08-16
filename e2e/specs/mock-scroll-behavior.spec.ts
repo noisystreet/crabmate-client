@@ -1,6 +1,7 @@
 import { expect, Page, test } from "@playwright/test";
 import {
   installDelayedMockSse,
+  openSessionInRail,
   seedSession,
   sendMessage,
   waitForText,
@@ -38,6 +39,7 @@ async function seedScrollableSession(page: Page, sid: string, count = 50) {
   );
   await page.reload({ waitUntil: "networkidle", timeout: 15_000 });
   await page.waitForSelector('[data-testid="chat-composer-input"]');
+  await openSessionInRail(page, sid);
 }
 
 async function prepareScrollableSession(page: Page, prefix: string) {

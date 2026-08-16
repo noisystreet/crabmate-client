@@ -161,8 +161,12 @@ pub fn ws_path_empty(l: Locale) -> &'static str {
 
 pub fn ws_path_title_hint(l: Locale) -> &'static str {
     match l {
-        Locale::ZhHans => "用「项目 → 选择工作区」、项目列表或最近列表设置",
-        Locale::En => "Set via Project → Open workspace, project list, or Recent",
+        Locale::ZhHans => {
+            "尚未在本机选择文件夹；工具仍使用服务器当前工作目录。请用「项目」打开工作区。"
+        }
+        Locale::En => {
+            "No folder chosen in this client; tools still use the server working directory. Open a workspace from Project."
+        }
     }
 }
 

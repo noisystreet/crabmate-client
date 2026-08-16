@@ -20,6 +20,7 @@ import {
 } from "../fixtures/session_assertions";
 import {
   ensureRealLlmModelCredential,
+  openSessionInRail,
   resolveOptionalApiKeyFromEnvOrToml,
   sendMessage,
   setupRealLLMSessionPreferringKeyring,
@@ -259,6 +260,7 @@ test.describe("真实 LLM：流式后消息结构", () => {
     await page.waitForSelector('[data-testid="chat-composer-input"]', {
       timeout: 15000,
     });
+    await openSessionInRail(page, SID);
     const messagesAfter = await waitForStableSessionMessages(
       page,
       SID,

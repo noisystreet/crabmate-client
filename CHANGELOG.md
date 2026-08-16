@@ -11,6 +11,7 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Changed
 
+- Cold start opens a **new empty chat** (does not restore the last `active_session_id`, and does not rewrite an existing blank session’s `workspace_root` / draft). The Workspace side panel does not auto-`GET` the last tree when it is already visible. Clicking an old session still restores that session’s bound folder; Refresh / opening Workspace later still loads the server’s current tree. The empty topbar title explains that tools still use the **server working directory** until the user picks a folder (`POST /workspace` is not cleared on startup, so session buckets stay put).
 - Pin line contract to crates.io **`crabmate` 0.4.0** (`features = ["protocol"]`). Playwright / Victauri `serve` checkout uses git tag **`v0.4.0`**.
 - Vendor `crabmate-tool-card` as `crates/crabmate-tool-card` (in-repo path). Frontend no longer git-depends on Server `crabmate-types`; LLM gateway presets live in `frontend/src/client_llm_presets.rs`.
 

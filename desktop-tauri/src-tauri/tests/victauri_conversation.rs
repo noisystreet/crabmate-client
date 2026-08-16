@@ -10,6 +10,8 @@
 use victauri_test::e2e_test;
 use victauri_test::locator::Locator;
 
+mod common;
+
 const PAGINATE_CONV_ID: &str = "e2e-paginate-conv";
 const PAGINATE_TOTAL: usize = 100;
 
@@ -70,6 +72,7 @@ async fn seed_paginated_conversation(client: &mut victauri_test::VictauriClient,
         .wait_for("network_idle", Some(""), Some(15000), Some(500))
         .await
         .ok();
+    common::open_session_in_rail(client, session_id).await;
 }
 
 // ---------------------------------------------------------------------------

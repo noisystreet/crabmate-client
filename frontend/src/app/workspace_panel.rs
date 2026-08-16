@@ -100,18 +100,86 @@ pub(super) fn make_insert_workspace_path_into_composer(
     })
 }
 
-/// 初始化完成且侧栏为 Workspace 时拉取一次。
+/// 侧栏变为 Workspace 时是否应自动 `GET /workspace`。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct WorkspaceVisibleRefreshState {
+    pub was_initialized: bool,
+    pub skip_cold_start_fetch: bool,
+}
+
+/// 冷启动时侧栏已是 Workspace：跳过第一次自动拉取（不打开上次目录树）。
+/// 之后从其它视图切回 Workspace，或启动时侧栏不是 Workspace 再打开，仍刷新。
+#[must_use]
+pub(crate) fn take_workspace_visible_auto_refresh(
+    initialized: bool,
+    is_workspace_panel: bool,
+    state: &mut WorkspaceVisibleRefreshState,
+) -> bool {
+    let just_initialized = initialized && !state.was_initialized;
+    if just_initialized && is_workspace_panel {
+        state.skip_cold_start_fetch = true;
+    }
+    state.was_initialized = initialized;
+    if !initialized || !is_workspace_panel {
+        return false;
+    }
+    if state.skip_cold_start_fetch {
+        state.skip_cold_start_fetch = false;
+        return false;
+    }
+    true
+}
+
+/// 初始化完成且侧栏为 Workspace 时拉取一次（冷启动已是 Workspace 则跳过）。
 pub(super) fn wire_workspace_refresh_when_visible(
     side_panel_view: RwSignal<SidePanelView>,
     initialized: RwSignal<bool>,
     refresh_workspace: Arc<dyn Fn() + Send + Sync>,
 ) {
+    let refresh_state = StoredValue::new(WorkspaceVisibleRefreshState::default());
     Effect::new({
         let refresh_workspace = Arc::clone(&refresh_workspace);
         move |_| {
-            if matches!(side_panel_view.get(), SidePanelView::Workspace) && initialized.get() {
+            let mut state = refresh_state.get_value();
+            let should = take_workspace_visible_auto_refresh(
+                initialized.get(),
+                matches!(side_panel_view.get(), SidePanelView::Workspace),
+                &mut state,
+            );
+            refresh_state.set_value(state);
+            if should {
                 refresh_workspace();
             }
         }
     });
+}
+
+#[cfg(test)]
+mod workspace_visible_refresh_tests {
+    use super::{WorkspaceVisibleRefreshState, take_workspace_visible_auto_refresh};
+
+    #[test]
+    fn skips_first_workspace_fetch_when_already_open_at_init() {
+        let mut state = WorkspaceVisibleRefreshState::default();
+        assert!(!take_workspace_visible_auto_refresh(
+            false, true, &mut state
+        ));
+        assert!(!take_workspace_visible_auto_refresh(true, true, &mut state));
+        assert!(!take_workspace_visible_auto_refresh(
+            true, false, &mut state
+        ));
+        assert!(take_workspace_visible_auto_refresh(true, true, &mut state));
+    }
+
+    #[test]
+    fn refreshes_when_workspace_opened_after_init() {
+        let mut state = WorkspaceVisibleRefreshState::default();
+        assert!(!take_workspace_visible_auto_refresh(
+            false, false, &mut state
+        ));
+        assert!(!take_workspace_visible_auto_refresh(
+            true, false, &mut state
+        ));
+        assert!(take_workspace_visible_auto_refresh(true, true, &mut state));
+    }
 }

@@ -14,6 +14,8 @@
 use std::time::{Duration, Instant};
 use victauri_test::e2e_test;
 
+mod common;
+
 /// Phase 2 播种模式：通过 webview `fetch()` 调用后端 PUT API 写入 40 条消息。
 async fn seed_sessions_with_messages(
     client: &mut victauri_test::VictauriClient,
@@ -53,6 +55,7 @@ async fn seed_sessions_with_messages(
         .wait_for("network_idle", Some(""), Some(15000), Some(500))
         .await
         .ok();
+    common::open_session_in_rail(client, session_id).await;
 }
 
 // ---------------------------------------------------------------------------

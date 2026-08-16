@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import {
   installDelayedMockSse,
+  openSessionInRail,
   seedSession,
   sendMessage,
 } from "../fixtures/helpers";
@@ -126,6 +127,7 @@ test("终端流：失败助手右键菜单可点重试", async ({ page }) => {
   await page.waitForSelector('[data-testid="chat-composer-input"]', {
     timeout: 15_000,
   });
+  await openSessionInRail(page, `${SID}-retry`);
 
   const failWrap = page.locator(
     '.chat-tui-turn-wrap[data-tui-wrap-id="a-fail"]',
