@@ -21,6 +21,7 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Added
 
+- Workspace file tree: right-click a file → **Save to this device** (Desktop native save dialog; browser/Android download). Uses the open IDE buffer if that path is already open; otherwise `GET /workspace/file`. Hidden for folders. Text files only (same limit as the IDE reader).
 - Design: coding-agent client plan (`docs/design/coding_agent_client.md`): review/revert loop over a full IDE; Wave 1 is `chat_ui_todo.md` P2; Waves 2–3 need Server contracts for restore / structured changelog
 - Chat P2: in-place edit user messages (context menu → branch/regen); queue the next composer send while a turn is streaming; find hits highlight inside bubbles (`<mark>`); Ask/Plan/Act moved from the status bar onto the composer action row
 - Design: chat UI follow-ups (`docs/design/chat_ui_todo.md`); P1 keyboard/ARIA and P2 chat loop are done; remaining is P3 chat code highlighting

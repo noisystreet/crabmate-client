@@ -98,6 +98,109 @@ fn delete_confirm_message(locale: Locale, path: &str, is_dir: bool) -> String {
     }
 }
 
+fn workspace_ctx_has_target(menu: RwSignal<Option<WorkspaceContextAnchor>>) -> bool {
+    menu.get().and_then(|a| a.target_rel).is_some()
+}
+
+fn workspace_ctx_target_is_file(menu: RwSignal<Option<WorkspaceContextAnchor>>) -> bool {
+    menu.get()
+        .is_some_and(|a| a.target_rel.is_some() && !a.target_is_dir)
+}
+
+fn start_create_from_open_menu(
+    menu: RwSignal<Option<WorkspaceContextAnchor>>,
+    kind: WorkspaceInlineCreateKind,
+    chrome: WorkspaceTreeChromeSignals,
+    subtree_expanded: RwSignal<HashSet<String>>,
+    subtree_cache: RwSignal<HashMap<String, crate::api::WorkspaceData>>,
+    subtree_loading: RwSignal<HashSet<String>>,
+    locale: RwSignal<Locale>,
+) {
+    let Some(anchor) = menu.get() else {
+        return;
+    };
+    begin_workspace_inline_create(
+        anchor.parent_rel,
+        kind,
+        chrome,
+        subtree_expanded,
+        subtree_cache,
+        subtree_loading,
+        locale,
+    );
+}
+
+fn save_open_menu_file_to_device(
+    menu: RwSignal<Option<WorkspaceContextAnchor>>,
+    locale: RwSignal<Locale>,
+    workspace_err: RwSignal<Option<String>>,
+    actions: StoredValue<WorkspaceContextMenuActions>,
+) {
+    let Some(anchor) = menu.get() else {
+        return;
+    };
+    if anchor.target_is_dir {
+        return;
+    }
+    let Some(rel) = anchor.target_rel.clone() else {
+        return;
+    };
+    menu.set(None);
+    crate::workspace_fs_ops::spawn_save_workspace_file_to_device(
+        rel,
+        locale,
+        workspace_err,
+        actions.get_value(),
+    );
+}
+
+fn delete_item_label(menu: RwSignal<Option<WorkspaceContextAnchor>>, locale: Locale) -> String {
+    match menu.get() {
+        Some(a) if a.target_is_dir => {
+            crate::i18n::workspace_tree_ctx_delete_dir(locale).to_string()
+        }
+        Some(_) => crate::i18n::workspace_tree_ctx_delete_file(locale).to_string(),
+        None => String::new(),
+    }
+}
+
+fn confirm_and_delete_from_menu(
+    menu: RwSignal<Option<WorkspaceContextAnchor>>,
+    locale: RwSignal<Locale>,
+    workspace_err: RwSignal<Option<String>>,
+    actions: StoredValue<WorkspaceContextMenuActions>,
+) {
+    let Some(anchor) = menu.get() else {
+        return;
+    };
+    let Some(rel) = anchor.target_rel.clone() else {
+        return;
+    };
+    menu.set(None);
+    let loc = locale.get_untracked();
+    let msg = delete_confirm_message(loc, rel.as_str(), anchor.target_is_dir);
+    let is_dir = anchor.target_is_dir;
+    let actions = actions.get_value();
+    spawn_local(async move {
+        if !confirm_user_message(
+            &msg,
+            crate::i18n::confirm_delete_ok(loc),
+            crate::i18n::ide_confirm_cancel(loc),
+        )
+        .await
+        {
+            return;
+        }
+        crate::workspace_fs_ops::spawn_delete_workspace_entry(
+            rel,
+            is_dir,
+            locale,
+            workspace_err,
+            actions,
+        );
+    });
+}
+
 #[component]
 pub fn WorkspaceContextMenuLayer(
     workspace_context_menu: RwSignal<Option<WorkspaceContextAnchor>>,
@@ -137,11 +240,8 @@ pub fn WorkspaceContextMenuLayer(
                         class="session-ctx-item"
                         role="menuitem"
                         on:click=move |_| {
-                            let Some(anchor) = workspace_context_menu.get() else {
-                                return;
-                            };
-                            begin_workspace_inline_create(
-                                anchor.parent_rel,
+                            start_create_from_open_menu(
+                                workspace_context_menu,
                                 WorkspaceInlineCreateKind::File,
                                 chrome,
                                 subtree_expanded,
@@ -158,11 +258,8 @@ pub fn WorkspaceContextMenuLayer(
                         class="session-ctx-item"
                         role="menuitem"
                         on:click=move |_| {
-                            let Some(anchor) = workspace_context_menu.get() else {
-                                return;
-                            };
-                            begin_workspace_inline_create(
-                                anchor.parent_rel,
+                            start_create_from_open_menu(
+                                workspace_context_menu,
                                 WorkspaceInlineCreateKind::Dir,
                                 chrome,
                                 subtree_expanded,
@@ -174,60 +271,38 @@ pub fn WorkspaceContextMenuLayer(
                     >
                         {move || crate::i18n::workspace_tree_ctx_new_dir(locale.get())}
                     </button>
-                    <Show when=move || {
-                        workspace_context_menu
-                            .get()
-                            .and_then(|a| a.target_rel)
-                            .is_some()
-                    }>
+                    <Show when=move || workspace_ctx_target_is_file(workspace_context_menu)>
+                        <button
+                            type="button"
+                            class="session-ctx-item"
+                            role="menuitem"
+                            on:click=move |_| {
+                                save_open_menu_file_to_device(
+                                    workspace_context_menu,
+                                    locale,
+                                    workspace_err,
+                                    actions,
+                                );
+                            }
+                        >
+                            {move || crate::i18n::workspace_tree_ctx_save_to_device(locale.get())}
+                        </button>
+                    </Show>
+                    <Show when=move || workspace_ctx_has_target(workspace_context_menu)>
                         <button
                             type="button"
                             class="session-ctx-item session-ctx-item-danger"
                             role="menuitem"
                             on:click=move |_| {
-                                let Some(anchor) = workspace_context_menu.get() else {
-                                    return;
-                                };
-                                let Some(rel) = anchor.target_rel.clone() else {
-                                    return;
-                                };
-                                workspace_context_menu.set(None);
-                                let loc = locale.get_untracked();
-                                let msg = delete_confirm_message(loc, rel.as_str(), anchor.target_is_dir);
-                                let is_dir = anchor.target_is_dir;
-                                let actions = actions.get_value();
-                                spawn_local(async move {
-                                    if !confirm_user_message(
-                                        &msg,
-                                        crate::i18n::confirm_delete_ok(loc),
-                                        crate::i18n::ide_confirm_cancel(loc),
-                                    )
-                                    .await
-                                    {
-                                        return;
-                                    }
-                                    crate::workspace_fs_ops::spawn_delete_workspace_entry(
-                                        rel,
-                                        is_dir,
-                                        locale,
-                                        workspace_err,
-                                        actions,
-                                    );
-                                });
+                                confirm_and_delete_from_menu(
+                                    workspace_context_menu,
+                                    locale,
+                                    workspace_err,
+                                    actions,
+                                );
                             }
                         >
-                            {move || {
-                                let loc = locale.get();
-                                match workspace_context_menu.get() {
-                                    Some(a) if a.target_is_dir => {
-                                        crate::i18n::workspace_tree_ctx_delete_dir(loc).to_string()
-                                    }
-                                    Some(_) => {
-                                        crate::i18n::workspace_tree_ctx_delete_file(loc).to_string()
-                                    }
-                                    None => String::new(),
-                                }
-                            }}
+                            {move || delete_item_label(workspace_context_menu, locale.get())}
                         </button>
                     </Show>
                 </crate::app::focusable_menu::FocusableRoleMenu>
