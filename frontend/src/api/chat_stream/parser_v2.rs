@@ -8,7 +8,7 @@ use crate::sse_dispatch::{
     ThinkingTraceInfo, TimelineLogInfo, ToolOutputChunkInfo, ToolResultInfo, TurnSegmentStartInfo,
 };
 
-use crabmate_sse_protocol::{AgUiParseDispatch, classify_ag_ui_sse_data};
+use crabmate::cm_sse_protocol::{AgUiParseDispatch, classify_ag_ui_sse_data};
 
 use super::sse_parser::SseParser;
 
@@ -494,7 +494,7 @@ mod tests {
         }
     }
 
-    /// AG-UI 金样在 [`crabmate_sse_protocol::ag_ui_classify`] 单测中维护；此处保留行为回归用例。
+    /// AG-UI 金样在 [`crabmate::cm_sse_protocol::ag_ui_classify`] 单测中维护；此处保留行为回归用例。
     #[test]
     fn golden_ag_ui_v2_parser_matches_expected() {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));

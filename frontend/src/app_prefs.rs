@@ -272,7 +272,7 @@ mod theme_slug_tests {
 mod status_baseline_prompt_tokens_tests {
     use std::collections::BTreeMap;
 
-    use crabmate_api_contract::StatusShellView;
+    use crabmate::cm_api_contract::StatusShellView;
 
     use super::{
         status_bar_context_used_tokens_without_hydrate,

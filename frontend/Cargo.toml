@@ -4,18 +4,14 @@ version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
 description = "CrabMate Web UI (Leptos CSR + WASM)"
-# 契约钉版本：Server 产品 tag v*（见 docs/design/contract_pin.md）
+# 契约钉版本：单包 crabmate + protocol（见 docs/design/contract_pin.md）
 
 [lib]
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-# Server 线契约（禁止 path 回本地 crabmate_agent）
-crabmate-chat-export = { git = "https://github.com/noisystreet/CrabMate", tag = "v0.3.0", package = "crabmate-chat-export" }
-crabmate-api-contract = { git = "https://github.com/noisystreet/CrabMate", tag = "v0.3.0", package = "crabmate-api-contract" }
-crabmate-display-rules = { git = "https://github.com/noisystreet/CrabMate", tag = "v0.3.0", package = "crabmate-display-rules" }
-crabmate-sse-protocol = { git = "https://github.com/noisystreet/CrabMate", tag = "v0.3.0", package = "crabmate-sse-protocol" }
-crabmate-turn-layout = { git = "https://github.com/noisystreet/CrabMate", tag = "v0.3.0", package = "crabmate-turn-layout" }
+# Server 线契约（禁止 path 回本地 crabmate_agent；勿开 server feature）
+crabmate = { git = "https://github.com/noisystreet/CrabMate", rev = "27c1fd3ae2f770a9ac115f567f6ad140b70631c9", package = "crabmate", default-features = false, features = ["protocol"] }
 # 本仓 path（展示 crate / 共享逻辑；勿 path 回 Server）
 crabmate-tool-card = { path = "../crates/crabmate-tool-card" }
 crabmate-client-api = { path = "../crates/crabmate-client-api" }

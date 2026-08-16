@@ -281,24 +281,15 @@ dependencies = [
 ]
 
 [[package]]
-name = "crabmate-api-contract"
-version = "0.1.0"
-source = "git+https://github.com/noisystreet/CrabMate?tag=v0.3.0#3ecde9186e4b7601d2667cce65632fd55fa71ad8"
+name = "crabmate"
+version = "0.3.0"
+source = "git+https://github.com/noisystreet/CrabMate?rev=27c1fd3ae2f770a9ac115f567f6ad140b70631c9#27c1fd3ae2f770a9ac115f567f6ad140b70631c9"
 dependencies = [
- "crabmate-types",
+ "log",
  "schemars",
  "serde",
  "serde_json",
-]
-
-[[package]]
-name = "crabmate-chat-export"
-version = "0.1.0"
-source = "git+https://github.com/noisystreet/CrabMate?tag=v0.3.0#3ecde9186e4b7601d2667cce65632fd55fa71ad8"
-dependencies = [
- "crabmate-types",
- "serde",
- "serde_json",
+ "thiserror 2.0.20",
 ]
 
 [[package]]
@@ -310,48 +301,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "crabmate-display-rules"
-version = "0.1.0"
-source = "git+https://github.com/noisystreet/CrabMate?tag=v0.3.0#3ecde9186e4b7601d2667cce65632fd55fa71ad8"
-
-[[package]]
-name = "crabmate-sse-protocol"
-version = "0.1.0"
-source = "git+https://github.com/noisystreet/CrabMate?tag=v0.3.0#3ecde9186e4b7601d2667cce65632fd55fa71ad8"
-dependencies = [
- "crabmate-types",
- "log",
- "serde",
- "serde_json",
- "tokio",
-]
-
-[[package]]
 name = "crabmate-tool-card"
 version = "0.1.0"
 dependencies = [
  "serde_json",
-]
-
-[[package]]
-name = "crabmate-turn-layout"
-version = "0.1.0"
-source = "git+https://github.com/noisystreet/CrabMate?tag=v0.3.0#3ecde9186e4b7601d2667cce65632fd55fa71ad8"
-dependencies = [
- "log",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "crabmate-types"
-version = "0.1.0"
-source = "git+https://github.com/noisystreet/CrabMate?tag=v0.3.0#3ecde9186e4b7601d2667cce65632fd55fa71ad8"
-dependencies = [
- "crabmate-display-rules",
- "serde",
- "serde_json",
- "thiserror 2.0.20",
 ]
 
 [[package]]
@@ -360,13 +313,9 @@ version = "0.1.0"
 dependencies = [
  "ammonia",
  "console_error_panic_hook",
- "crabmate-api-contract",
- "crabmate-chat-export",
+ "crabmate",
  "crabmate-client-api",
- "crabmate-display-rules",
- "crabmate-sse-protocol",
  "crabmate-tool-card",
- "crabmate-turn-layout",
  "futures-util",
  "gloo-timers",
  "js-sys",
@@ -1986,15 +1935,6 @@ checksum = "c8323304221c2a851516f22236c5722a72eaa19749016521d6dff0824447d96d"
 dependencies = [
  "displaydoc",
  "zerovec",
-]
-
-[[package]]
-name = "tokio"
-version = "1.53.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "202caea871b69668250d242070849eb495be178ed697a3e98aebce5bc81a0bed"
-dependencies = [
- "pin-project-lite",
 ]
 
 [[package]]

@@ -1,10 +1,10 @@
-//! 将 [`crabmate_turn_layout::TurnProjection`] 落到 `StoredMessage`，并承接 loading 行生命周期
+//! 将 [`crabmate::cm_turn_layout::TurnProjection`] 落到 `StoredMessage`，并承接 loading 行生命周期
 //! （peel / finalize / rotate / 工具后新壳）的纯消息列表操作。
 //!
 //! Phase D：定稿旁白、锚定 active、终答 flush、工具占位插入均经本模块；
 //! [`super::TurnLayout`] 只做 scratch / overlay / lane 编排。Loading 句柄不承载旁白/终答正文。
 
-use crabmate_turn_layout::{ASSISTANT_COMMENTARY, TurnProjection, project_turn_projection};
+use crabmate::cm_turn_layout::{ASSISTANT_COMMENTARY, TurnProjection, project_turn_projection};
 
 use crate::message_loading::{
     is_finalized_plain_assistant, is_loading_plain_assistant, is_loading_streaming_assistant_id,

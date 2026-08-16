@@ -83,7 +83,7 @@ fn apply_post_tool_plain_delta(
             return;
         }
         if let Some((commentary_part, final_part)) =
-            crabmate_turn_layout::try_split_combined_post_tool_answer(chunk)
+            crabmate::cm_turn_layout::try_split_combined_post_tool_answer(chunk)
         {
             if !commentary_part.is_empty() {
                 let _ = stream_ctx

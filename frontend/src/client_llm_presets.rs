@@ -1,6 +1,6 @@
 //! Web「设置」中 `client_llm.api_base` 网关预设。
 //!
-//! 与 Server [`crabmate-types` `llm_gateway_presets`](https://github.com/noisystreet/CrabMate/blob/main/crates/crabmate-types/src/llm_gateway_presets.rs)
+//! 与 Server [`cm_types::llm_gateway_presets`](https://github.com/noisystreet/CrabMate/blob/main/src/cm_types/llm_gateway_presets.rs)
 //! 同源拷贝（展示 crate 下沉 W1）；改 URL / 建议模型时请两仓同步。
 
 /// 单条预设：`id` 用于 UI；`url` 写入 `api_base`（空串表示「沿用服务端 / 自定义」占位）。

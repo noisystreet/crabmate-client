@@ -1,7 +1,7 @@
 use super::super::projection_reconciler;
 use super::*;
 use crate::sse_dispatch::TurnSegmentStartInfo;
-use crabmate_turn_layout::project_turn_projection;
+use crabmate::cm_turn_layout::project_turn_projection;
 
 fn flush_commentary(msgs: &mut Vec<crate::storage::StoredMessage>, turn: &TurnCanonicalState) {
     let projection = project_turn_projection(turn.turn_ref());
@@ -39,7 +39,7 @@ fn loading_preview_during_tool_phase_skips_anchored_open_commentary() {
     });
     assert!(turn.try_apply_commentary_delta("步骤 B。"));
     assert_eq!(
-        crabmate_turn_layout::commentary_for_tool(turn.turn_ref(), "tc_a").as_deref(),
+        crabmate::cm_turn_layout::commentary_for_tool(turn.turn_ref(), "tc_a").as_deref(),
         Some("步骤 A。")
     );
     assert!(

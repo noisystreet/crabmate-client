@@ -1,8 +1,8 @@
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{Request, RequestInit, RequestMode, Response};
 
+use crabmate::cm_sse_protocol::SSE_PROTOCOL_VERSION;
 use crabmate_client_api::{ChatStreamCoreFields, merge_chat_stream_core_fields};
-use crabmate_sse_protocol::SSE_PROTOCOL_VERSION;
 
 use crate::i18n::Locale;
 

@@ -46,7 +46,7 @@ Connects to a compatible **`crabmate serve`** (local or remote). Does **not** sp
 | Topic | Status |
 |-------|--------|
 | Shell + connect + business UI | Maintained **here** |
-| Contract crates | Published from Server; UI pins git `rev` / `client-contract-vX.Y.Z` (see [contract_pin.md](docs/design/contract_pin.md)) |
+| Contract crate | Single package `crabmate` + `protocol` from Server (git `rev` until crates.io `0.4.0`; see [contract_pin.md](docs/design/contract_pin.md)) |
 | Server `serve` | Server repo; start locally or remotely — shell does not spawn it |
 | Server `frontend/` / Playwright | UI and Playwright live **here**; after Server Phase C, Server has no `frontend/` sources |
 
