@@ -11,7 +11,7 @@ publish = false
 
 [dependencies]
 crabmate-client-api = { path = "../crabmate-client-api" }
-crabmate = { git = "https://github.com/noisystreet/CrabMate", rev = "27c1fd3ae2f770a9ac115f567f6ad140b70631c9", package = "crabmate", default-features = false, features = ["protocol"] }
+crabmate = { version = "0.4.0", default-features = false, features = ["protocol"] }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
 serde = { version = "1", features = ["derive"] }

@@ -35,7 +35,7 @@ Connects to a compatible **`crabmate serve`** (local or remote). Does **not** sp
 ├── crates/crabmate-web-host/  # Binary crabmate-web (loopback static UI host)
 ├── desktop-tauri/             # Desktop Linux (Tauri 2)
 ├── mobile-tauri/              # Android (Tauri 2)
-├── frontend/                  # Business UI (Leptos CSR + WASM; contracts via git rev/tag)
+├── frontend/                  # Business UI (Leptos CSR + WASM; contracts via crates.io crabmate)
 ├── e2e/                       # Playwright (browser UI; mock SSE in CI)
 ├── scripts/                   # check / connect sync / Victauri / Playwright
 └── .github/workflows/         # CI (check + frontend tests + Playwright + desktop deb + Victauri nightly + dependency-security)
@@ -46,7 +46,7 @@ Connects to a compatible **`crabmate serve`** (local or remote). Does **not** sp
 | Topic | Status |
 |-------|--------|
 | Shell + connect + business UI | Maintained **here** |
-| Contract crate | Single package `crabmate` + `protocol` from Server (git `rev` until crates.io `0.4.0`; see [contract_pin.md](docs/design/contract_pin.md)) |
+| Contract crate | crates.io `crabmate` `0.4.0` + `protocol` (see [contract_pin.md](docs/design/contract_pin.md)) |
 | Server `serve` | Server repo; start locally or remotely — shell does not spawn it |
 | Server `frontend/` / Playwright | UI and Playwright live **here**; after Server Phase C, Server has no `frontend/` sources |
 

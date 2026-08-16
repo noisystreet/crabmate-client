@@ -35,7 +35,7 @@
 ├── crates/crabmate-web-host/  # 二进制 crabmate-web（回环静态 UI 托管）
 ├── desktop-tauri/             # Desktop Linux（Tauri 2）
 ├── mobile-tauri/              # Android（Tauri 2）
-├── frontend/                  # 业务 UI（Leptos CSR + WASM；契约 git rev/tag）
+├── frontend/                  # 业务 UI（Leptos CSR + WASM；契约 crates.io crabmate）
 ├── e2e/                       # Playwright（浏览器 UI；mock SSE CI）
 ├── scripts/                   # check / connect 同步 / Victauri / Playwright
 └── .github/workflows/         # CI（check + frontend 单测 + Playwright + desktop deb + Victauri nightly + dependency-security）
@@ -46,7 +46,7 @@
 | 项 | 现状 |
 |----|------|
 | 壳 + connect + 业务 UI | **本仓**维护 |
-| 契约 crate | 主仓单包 `crabmate` + `protocol`（crates.io `0.4.0` 前钉 git `rev`；见 [contract_pin.md](docs/design/contract_pin.md)） |
+| 契约 crate | crates.io `crabmate` `0.4.0` + `protocol`（见 [contract_pin.md](docs/design/contract_pin.md)） |
 | Server `serve` | 主仓；本机或远程启动，壳不 spawn |
 | 主仓 `frontend/` / Playwright | UI 与 Playwright **在本仓**；主仓 Phase C 后无 `frontend/` 源码 |
 
