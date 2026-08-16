@@ -3,7 +3,7 @@
 > **状态**：Wave 1（对话 P2）已落地；Wave 2–3 未开工  
 > **范围**：本仓 `frontend/`（对话、变更集、工作区/IDE 审查面）；官方壳只做连接与保活  
 > **读者**：本仓贡献者；Wave 2 还原/结构化 changelog 需 Server 仓配合  
-> **关联**：[`chat_ui_todo.md`](./chat_ui_todo.md)（Wave 1 勾选权威）、[`ui_issue_todo.md`](./ui_issue_todo.md)、[`tauri_gui_mvp_design.md`](./tauri_gui_mvp_design.md)；路径 A：[client_shell_split.md](https://github.com/noisystreet/CrabMate/blob/main/docs/design/client_shell_split.md)
+> **关联**：[`chat_ui_todo.md`](./chat_ui_todo.md)（Wave 1 勾选权威）、[`ui_issue_todo.md`](./ui_issue_todo.md)、[`tauri_gui_mvp_design.md`](./tauri_gui_mvp_design.md)、[`ADR-0003`](../adr/0003-chat-file-context-inject-cards.md)（从文件注入的上下文卡；非本规划 Wave 2）；路径 A：[client_shell_split.md](https://github.com/noisystreet/CrabMate/blob/main/docs/design/client_shell_split.md)
 
 本文是**产品与落地顺序**，不是 HTTP/SSE 契约。契约、错误码、changelog JSON、还原 API 的权威定义在 **Server** 仓；本仓只写 Client 需要什么、先做什么。
 

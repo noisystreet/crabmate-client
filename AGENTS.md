@@ -89,6 +89,7 @@ When updating docs:
 | UI build / trunk | `frontend/README.md` |
 | Shell architecture / lifecycle / connect model | `docs/design/tauri_gui_mvp_design.md` |
 | Android stream FGS / approval notifications | `docs/adr/0002-android-approval-notification-foreground-keepalive.md` (Accepted) |
+| Chat cards for file-backed context inject / skill path | `docs/adr/0003-chat-file-context-inject-cards.md` (Proposed — no fake cards without Server metadata; slash skill path is Client-only) |
 | Shared pure logic extract (WASM / connect / tui) | `docs/design/client_shared_logic.md` |
 | Chat UI follow-ups (composer / transcript / a11y) | `docs/design/chat_ui_todo.md` |
 | Coding-agent client (review / revert loop; not full IDE) | `docs/design/coding_agent_client.md` (Wave 1 checkboxes stay in `chat_ui_todo.md`; restore/changelog JSON authority is Server) |
