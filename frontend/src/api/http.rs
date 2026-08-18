@@ -420,6 +420,28 @@ pub async fn fetch_status(loc: Locale) -> Result<StatusData, String> {
     fetch_json("GET", "/status?view=shell", None, loc).await
 }
 
+/// `GET /tools/jobs/{id}`：轮询后台任务状态（`run_command` 的 `async:true`）。
+/// `404`/`410`（不存在/已过期）与网络错误均以 `Err` 返回，由调用方停止轮询。
+pub async fn fetch_tool_job_status(
+    tool_job_id: &str,
+    loc: Locale,
+) -> Result<crate::sse_dispatch::ToolJobState, String> {
+    let url = format!("/tools/jobs/{tool_job_id}");
+    fetch_json("GET", &url, None, loc).await
+}
+
+/// `POST /tools/jobs/{id}/cancel`：取消后台任务。返回取消后状态
+/// （`cancelled`）；已是 `cancelled` 幂等 200，其它终态 409 不覆盖。
+pub async fn post_tool_job_cancel(tool_job_id: &str, loc: Locale) -> Result<String, String> {
+    #[derive(Deserialize)]
+    struct CancelBody {
+        status: String,
+    }
+    let url = format!("/tools/jobs/{tool_job_id}/cancel");
+    let body: CancelBody = fetch_json_with_body("POST", &url, "{}", loc).await?;
+    Ok(body.status)
+}
+
 /// `POST /config/reload`：热重载服务端 `AgentConfig`（与 REPL `/config reload` 同源）。
 pub async fn post_config_reload(loc: Locale) -> Result<String, String> {
     #[derive(Deserialize)]

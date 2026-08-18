@@ -3,6 +3,7 @@
 use leptos::ev;
 use leptos::prelude::*;
 use wasm_bindgen::JsCast;
+use wasm_bindgen_futures::spawn_local;
 
 use super::find_highlight::{
     FindRestoreScope, apply_chat_find_highlights, find_restore_scope,
@@ -26,11 +27,13 @@ use super::tui_transcript_sync::{PlanTuiSyncArgs, TuiMountState, TuiSyncPlan, pl
 use super::user_message_edit::{
     UserEditClick, mount_user_message_editor, try_handle_user_edit_click, try_sync_user_edit_draft,
 };
+use crate::api::post_tool_job_cancel;
 use crate::chat_session_state::ChatSessionSignals;
 use crate::i18n::{self, Locale};
 use crate::md_code_copy::try_copy_md_code_block;
 use crate::session_ops::set_user_message_text;
 use crate::session_search::normalize_search_query;
+use crate::sse_dispatch::ToolJobState;
 use crate::storage::ChatSession;
 use crate::stream_text_overlay::StreamTextOverlay;
 use std::collections::HashMap;
@@ -44,6 +47,7 @@ struct PlanActiveSessionArgs<'a> {
     apply_filters: bool,
     markdown_render: bool,
     tool_chunks: &'a HashMap<String, String>,
+    tool_jobs: &'a HashMap<String, ToolJobState>,
 }
 
 fn plan_for_active_session(args: PlanActiveSessionArgs<'_>) -> TuiSyncPlan {
@@ -56,6 +60,7 @@ fn plan_for_active_session(args: PlanActiveSessionArgs<'_>) -> TuiSyncPlan {
         apply_filters,
         markdown_render,
         tool_chunks,
+        tool_jobs,
     } = args;
     match sessions.iter().find(|session| session.id == active_id) {
         None => plan_tui_sync(PlanTuiSyncArgs {
@@ -67,6 +72,7 @@ fn plan_for_active_session(args: PlanActiveSessionArgs<'_>) -> TuiSyncPlan {
             apply_assistant_display_filters: apply_filters,
             markdown_render,
             tool_chunks,
+            tool_jobs,
         }),
         Some(session) => plan_tui_sync(PlanTuiSyncArgs {
             prev,
@@ -77,6 +83,7 @@ fn plan_for_active_session(args: PlanActiveSessionArgs<'_>) -> TuiSyncPlan {
             apply_assistant_display_filters: apply_filters,
             markdown_render,
             tool_chunks,
+            tool_jobs,
         }),
     }
 }
@@ -377,6 +384,7 @@ fn sync_chat_tui_stream_dom(
     scroll_shell: ChatScrollShellSignals,
 ) -> (FindRestoreScope, Option<String>) {
     let tool_chunks = chat.tool_output_chunks.get();
+    let tool_jobs = chat.tool_job_states.get();
     let active_id = chat.active_id.get();
     let overlay = chat.stream_text_overlay.get();
     let live_id = overlay.as_ref().map(|o| o.message_id.clone());
@@ -391,6 +399,7 @@ fn sync_chat_tui_stream_dom(
             apply_filters,
             markdown_render: md_on,
             tool_chunks: &tool_chunks,
+            tool_jobs: &tool_jobs,
         })
     });
 
@@ -412,11 +421,51 @@ fn sync_chat_tui_stream_dom(
                 apply_filters,
                 markdown_render: md_on,
                 tool_chunks: &tool_chunks,
+                tool_jobs: &tool_jobs,
             })
         })
     });
     follow_after_content_paint(scroll_shell);
     (scope, live_id)
+}
+
+/// 后台任务取消按钮点击（`.chat-tui-tool-job-cancel`）：消费点击、禁用按钮并 POST 取消，
+/// 成功后把任务状态落为返回值（`cancelled` 或当前终态）。返回是否已消费该点击。
+fn try_handle_tool_job_cancel_click(
+    ev: &web_sys::MouseEvent,
+    chat: ChatSessionSignals,
+    locale: Locale,
+) -> bool {
+    let Some(btn) = ev
+        .target()
+        .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
+        .and_then(|el| el.closest(".chat-tui-tool-job-cancel").ok().flatten())
+    else {
+        return false;
+    };
+    let Some(job_id) = btn.get_attribute("data-tool-job-id") else {
+        return false;
+    };
+    let job_id = job_id.trim().to_string();
+    if job_id.is_empty() {
+        return false;
+    }
+    ev.prevent_default();
+    if let Ok(b) = btn.dyn_into::<web_sys::HtmlButtonElement>() {
+        let _ = b.set_attribute("disabled", "");
+    }
+    let states = chat.tool_job_states;
+    spawn_local(async move {
+        if let Ok(status) = post_tool_job_cancel(&job_id, locale).await {
+            states.update(|m| {
+                if let Some(state) = m.values_mut().find(|s| s.id == job_id) {
+                    state.status = status;
+                }
+            });
+        }
+        // 失败时下一次响应式渲染会重建按钮（不禁用态持久化）。
+    });
+    true
 }
 
 fn transcript_html_el(transcript_ref: NodeRef<leptos::html::Div>) -> Option<web_sys::HtmlElement> {
@@ -702,6 +751,9 @@ pub(crate) fn ChatTuiStreamView(
                     try_sync_user_edit_draft(&ev, editing_user_message);
                 }
                 on:click=move |ev| {
+                    if try_handle_tool_job_cancel_click(&ev, chat, locale.get_untracked()) {
+                        return;
+                    }
                     match try_handle_user_edit_click(&ev, editing_user_message) {
                         UserEditClick::None => {}
                         UserEditClick::Cancel => return,

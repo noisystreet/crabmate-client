@@ -10,6 +10,7 @@ fn sync(
     overlay: Option<&StreamTextOverlay>,
     tool_chunks: &HashMap<String, String>,
 ) -> TuiSyncPlan {
+    let empty_jobs = HashMap::new();
     plan_tui_sync(PlanTuiSyncArgs {
         prev,
         messages,
@@ -19,6 +20,7 @@ fn sync(
         apply_assistant_display_filters: false,
         markdown_render: true,
         tool_chunks,
+        tool_jobs: &empty_jobs,
     })
 }
 
@@ -147,6 +149,7 @@ fn finished_assistant_bold_becomes_strong() {
         false,
         true,
         &HashMap::new(),
+        &HashMap::new(),
     );
     assert!(output.contains("data-tui-msg-id"), "got {output}");
     assert!(output.contains("chat-tui-turn--user"), "got {output}");
@@ -182,6 +185,7 @@ fn tool_turn_uses_tool_modifier_without_generic_role_word() {
         Locale::ZhHans,
         false,
         true,
+        &HashMap::new(),
         &HashMap::new(),
     );
     assert!(output.contains("chat-tui-turn--tool"), "got {output}");
@@ -273,6 +277,7 @@ fn skill_slash_chip_stays_on_same_line_as_task() {
         false,
         true,
         &empty,
+        &HashMap::new(),
     );
     assert!(html.contains("msg-skill-invoke"), "{html}");
     assert!(html.contains("rust-style"), "{html}");
@@ -306,6 +311,7 @@ fn file_ref_chip_stays_on_same_line_as_following_text() {
         false,
         true,
         &empty,
+        &HashMap::new(),
     );
     assert!(html.contains("msg-file-ref"), "{html}");
     assert!(html.contains(".gitignore"), "{html}");

@@ -5,6 +5,7 @@ use crate::markdown::plaintext_to_safe_html;
 use crate::message_format::{
     stored_tool_message_compact_text, stored_tool_message_detail_text, strip_ansi_codes,
 };
+use crate::sse_dispatch::ToolJobState;
 use crate::storage::{StoredMessage, StoredMessageState};
 use crate::timeline_scan::timeline_tool_ok;
 use crabmate_tool_card::{
@@ -240,15 +241,50 @@ pub(crate) fn tool_row_live_fields(
 }
 
 /// 工具回合 body 内层 HTML（折叠态单行固定高度；详情展开后才增高）。
+/// `job` 为后台任务（`run_command` 的 `async:true`）轮询快照：非终态显示状态徽标与取消按钮，
+/// 终态在详情中追加输出/错误；无 job 时与普通工具行为一致。
 #[must_use]
 pub(crate) fn tool_process_body_html(
     message: &StoredMessage,
     locale: Locale,
     live_output_overlay: Option<&str>,
+    job: Option<&ToolJobState>,
 ) -> String {
     let id = tool_id(message);
     let label = tool_row_label(message, locale);
-    let fields = tool_row_live_fields(message, locale, live_output_overlay);
+    let mut fields = tool_row_live_fields(message, locale, live_output_overlay);
+    let mut job_bar = String::new();
+    if let Some(job) = job {
+        let terminal = job.is_terminal();
+        if terminal {
+            fields.status = if job.status == "succeeded" {
+                "✅".to_string()
+            } else {
+                "⚠️".to_string()
+            };
+        } else {
+            fields.status = "⏳".to_string();
+        }
+        fields.status_label = i18n::tool_job_status_label(locale, &job.status);
+        let job_line = i18n::tool_job_detail_line(locale, &job.id, &job.status);
+        if let Some(detail) = fields.detail.as_mut() {
+            if !detail.contains(&job_line) {
+                detail.push('\n');
+                detail.push_str(&job_line);
+            }
+        } else {
+            fields.detail = Some(job_line);
+        }
+        if !terminal {
+            job_bar = format!(
+                "<button class=\"chat-tui-tool-job-cancel\" type=\"button\" \
+                 data-tool-job-id=\"{jid}\" data-tool-call-id=\"{tid}\">{label}</button>",
+                jid = plaintext_to_safe_html(&job.id),
+                tid = plaintext_to_safe_html(message.tool_call_id.as_deref().unwrap_or("")),
+                label = plaintext_to_safe_html(i18n::tool_job_cancel_button(locale)),
+            );
+        }
+    }
     let emoji = i18n::tool_kind_emoji_curated(&id)
         .map(|e| format!("<span class=\"chat-tui-tool-emoji\" aria-hidden=\"true\">{e}</span>"))
         .unwrap_or_default();
@@ -275,6 +311,7 @@ pub(crate) fn tool_process_body_html(
         )));
         html.push_str("\">");
         html.push_str(&row_inner);
+        html.push_str(&job_bar);
         html.push_str("<span class=\"chat-tui-tool-expand\" aria-hidden=\"true\">▸</span>");
         html.push_str("</summary>");
         html.push_str("<pre class=\"chat-tui-tool-detail-body\">");
@@ -283,6 +320,7 @@ pub(crate) fn tool_process_body_html(
     } else {
         html.push_str("<div class=\"chat-tui-tool-row\">");
         html.push_str(&row_inner);
+        html.push_str(&job_bar);
         html.push_str("</div>");
     }
     html.push_str("</div>");
@@ -319,7 +357,7 @@ mod tests {
             "{}",
             fields.status_label
         );
-        let html = tool_process_body_html(&m, Locale::ZhHans, None);
+        let html = tool_process_body_html(&m, Locale::ZhHans, None, None);
         assert!(html.contains("chat-tui-tool-process"), "{html}");
         assert!(html.contains("chat-tui-tool-row"), "{html}");
         assert!(html.contains("读取文件"), "{html}");
@@ -356,7 +394,7 @@ mod tests {
             "fn main() {\n    println!(\"hi\");\n}",
             false,
         );
-        let html = tool_process_body_html(&m, Locale::ZhHans, None);
+        let html = tool_process_body_html(&m, Locale::ZhHans, None, None);
         assert!(html.contains("chat-tui-tool-one-line"), "{html}");
         assert!(
             html.contains("summary class=\"chat-tui-tool-row\""),
@@ -412,7 +450,7 @@ mod tests {
     #[test]
     fn live_overlay_fills_empty_compact() {
         let m = tool_msg("run_command", "", "", true);
-        let html = tool_process_body_html(&m, Locale::ZhHans, Some("line1\nline2"));
+        let html = tool_process_body_html(&m, Locale::ZhHans, Some("line1\nline2"), None);
         assert!(html.contains("line1"), "{html}");
     }
 
@@ -437,7 +475,7 @@ mod tests {
         );
         let fields = tool_row_live_fields(&m, Locale::ZhHans, None);
         assert_eq!(fields.one_line, "(working)");
-        let html = tool_process_body_html(&m, Locale::ZhHans, None);
+        let html = tool_process_body_html(&m, Locale::ZhHans, None, None);
         assert!(html.contains("title=\"git_diff_stat\""), "{html}");
         // 长尾工具无 curated emoji，避免随机哈希图标。
         assert!(
@@ -457,7 +495,7 @@ mod tests {
             "ok",
             false,
         );
-        let html = tool_process_body_html(&m, Locale::ZhHans, None);
+        let html = tool_process_body_html(&m, Locale::ZhHans, None, None);
         assert!(html.contains(">命令执行<"), "{html}");
         assert!(html.contains("title=\"run_command\""), "{html}");
         assert!(html.contains("chat-tui-tool-emoji"), "{html}");
@@ -497,5 +535,75 @@ mod tests {
             "{detail}"
         );
         assert!(detail.contains("extra detail line"), "{detail}");
+    }
+
+    fn job_state(status: &str) -> ToolJobState {
+        ToolJobState {
+            id: "tooljob_0123".into(),
+            status: status.into(),
+            exit_code: None,
+            stdout: None,
+            stderr: None,
+            summary: None,
+            error_code: None,
+            failure_category: None,
+            workspace_changed: false,
+        }
+    }
+
+    #[test]
+    fn tool_job_running_shows_badge_and_cancel_button() {
+        let m = tool_msg("run_command", "后台任务：cargo test", "cargo test", false);
+        let html = tool_process_body_html(&m, Locale::ZhHans, None, Some(&job_state("running")));
+        assert!(html.contains("⏳"), "{html}");
+        assert!(html.contains("后台任务运行中"), "{html}");
+        assert!(html.contains("后台任务 tooljob_0123：running"), "{html}");
+        assert!(
+            html.contains("class=\"chat-tui-tool-job-cancel\""),
+            "{html}"
+        );
+        assert!(html.contains("data-tool-job-id=\"tooljob_0123\""), "{html}");
+        assert!(html.contains("data-tool-call-id=\"tc1\""), "{html}");
+        assert!(html.contains(">取消<"), "{html}");
+    }
+
+    #[test]
+    fn tool_job_queued_also_shows_cancel_button() {
+        let m = tool_msg("run_command", "排队中", "", false);
+        let html = tool_process_body_html(&m, Locale::ZhHans, None, Some(&job_state("queued")));
+        assert!(html.contains("⏳"), "{html}");
+        assert!(html.contains("后台任务排队中"), "{html}");
+        assert!(html.contains("chat-tui-tool-job-cancel"), "{html}");
+    }
+
+    #[test]
+    fn tool_job_terminal_drops_cancel_button() {
+        let m = tool_msg("run_command", "完成", "", false);
+        let html = tool_process_body_html(&m, Locale::ZhHans, None, Some(&job_state("succeeded")));
+        assert!(html.contains("✅"), "{html}");
+        assert!(html.contains("后台任务成功"), "{html}");
+        assert!(!html.contains("chat-tui-tool-job-cancel"), "{html}");
+
+        let failed = tool_process_body_html(&m, Locale::ZhHans, None, Some(&job_state("failed")));
+        assert!(failed.contains("⚠️"), "{failed}");
+        assert!(failed.contains("后台任务失败"), "{failed}");
+        assert!(!failed.contains("chat-tui-tool-job-cancel"), "{failed}");
+
+        let cancelled =
+            tool_process_body_html(&m, Locale::ZhHans, None, Some(&job_state("cancelled")));
+        assert!(cancelled.contains("⚠️"), "{cancelled}");
+        assert!(cancelled.contains("后台任务已取消"), "{cancelled}");
+        assert!(
+            !cancelled.contains("chat-tui-tool-job-cancel"),
+            "{cancelled}"
+        );
+    }
+
+    #[test]
+    fn no_job_keeps_plain_tool_row() {
+        let m = tool_msg("run_command", "命令执行 ls", "ok", false);
+        let html = tool_process_body_html(&m, Locale::ZhHans, None, None);
+        assert!(!html.contains("chat-tui-tool-job-cancel"), "{html}");
+        assert!(!html.contains("后台任务"), "{html}");
     }
 }

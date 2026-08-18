@@ -18,5 +18,8 @@ pub fn tool_result_to_card_input(info: &ToolResultInfo) -> ToolCardInput {
         error_code: info.error_code.clone(),
         failure_category: info.failure_category.clone(),
         structured_preview: info.structured_preview.clone(),
+        tool_job_id: info.tool_job_id.clone(),
+        tool_job_poll_url: info.tool_job_poll_url.clone(),
+        tool_job_status: info.tool_job_status.clone(),
     }
 }

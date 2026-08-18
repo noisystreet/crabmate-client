@@ -30,6 +30,7 @@ use leptos::prelude::*;
 use crate::conversation_hydrate::TiktokenPromptTokensSnapshot;
 use crate::message_loading::{is_stream_attach_loading_conflict, messages_have_loading_tool};
 use crate::session_sync::SessionSyncState;
+use crate::sse_dispatch::ToolJobState;
 use crate::storage::ChatSession;
 use crate::stream_text_overlay::StreamTextOverlay;
 
@@ -234,6 +235,8 @@ pub struct ChatSessionSignals {
     pub stream_overlay_revision: RwSignal<u64>,
     /// 工具输出流式累积（tool_call_id → 文本），避免每 chunk 写 sessions。
     pub tool_output_chunks: RwSignal<HashMap<String, String>>,
+    /// 后台任务（`run_command` 的 `async:true`）运行态快照（tool_call_id → 轮询结果）。
+    pub tool_job_states: RwSignal<HashMap<String, ToolJobState>>,
     /// 最近一次成功水合的 tiktoken prompt 计数（与 [`ConversationPromptTokenHydrate::conversation_id`] 对齐，防串会话）。
     pub conversation_prompt_tokens: RwSignal<Option<ConversationPromptTokenHydrate>>,
     /// 正在拉取更早一页历史（`GET /conversation/messages?before_index=`）。

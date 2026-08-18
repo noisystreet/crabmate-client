@@ -16,6 +16,10 @@ pub struct ToolCardInput {
     pub error_code: Option<String>,
     pub failure_category: Option<String>,
     pub structured_preview: Option<Value>,
+    /// 后台任务启动帧软字段（`run_command` 的 `async:true`；持久化 `crabmate_tool` 信封同源）。
+    pub tool_job_id: Option<String>,
+    pub tool_job_poll_url: Option<String>,
+    pub tool_job_status: Option<String>,
 }
 
 /// 主仓 `tool_result::NormalizedToolEnvelope` 同名字段（避免 `from_*` 超长参数列表）。
@@ -63,6 +67,10 @@ impl ToolCardInput {
             error_code,
             failure_category,
             structured_preview: structured_payload,
+            // 归一化信封路径暂不含后台任务软字段（SSE/持久化路径才带）。
+            tool_job_id: None,
+            tool_job_poll_url: None,
+            tool_job_status: None,
         }
     }
 }

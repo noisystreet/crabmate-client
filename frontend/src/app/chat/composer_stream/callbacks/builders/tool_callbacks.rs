@@ -1,15 +1,20 @@
 //! 工具相关 SSE 回调工厂（`on_tool_output_chunk` / `on_tool_result` / `on_tool_call`）。
 
+use std::collections::HashMap;
 use std::rc::Rc;
 
+use gloo_timers::future::TimeoutFuture;
 use leptos::prelude::*;
+use wasm_bindgen_futures::spawn_local;
 
 use super::super::turn_layout::{ResultOnlyToolStep, TurnLayout};
 use crate::api::OnToolCallFn;
+use crate::api::fetch_tool_job_status;
 use crate::i18n;
+use crate::i18n::Locale;
 use crate::message_format::tool_stored_text_from_result_info;
 use crate::session_ops::{make_message_id, message_created_ms};
-use crate::sse_dispatch::{ToolOutputChunkInfo, ToolResultInfo};
+use crate::sse_dispatch::{ToolJobState, ToolOutputChunkInfo, ToolResultInfo};
 use crate::storage::{StoredMessage, StoredMessageState};
 use crate::timeline_scan::timeline_state_tool;
 
@@ -17,6 +22,37 @@ use super::super::super::context::ChatStreamCallbackCtx;
 use super::super::super::per_stream_accum::PerStreamAccum;
 use super::super::super::stream_control_reducer::StreamControlEvent;
 use super::super::helpers::*;
+
+/// 后台任务轮询（指数退避，`200ms << min(attempt,5)`；终态或错误即停止）。
+/// 更新 `tool_job_states` map（tool_call_id → 快照），供气泡状态/取消按钮响应式刷新。
+fn spawn_tool_job_polling(
+    tool_call_id: String,
+    job_id: String,
+    loc: Locale,
+    states: RwSignal<HashMap<String, ToolJobState>>,
+) {
+    spawn_local(async move {
+        let mut attempt: u32 = 0;
+        loop {
+            match fetch_tool_job_status(&job_id, loc).await {
+                Ok(state) => {
+                    let terminal = state.is_terminal();
+                    states.update(|m| {
+                        m.insert(tool_call_id.clone(), state);
+                    });
+                    if terminal {
+                        break;
+                    }
+                }
+                // 404/410（不存在/过期）或网络错误：停止轮询，保留最后一次已知快照。
+                Err(_) => break,
+            }
+            attempt = attempt.saturating_add(1);
+            let ms = 200u64.saturating_mul(1u64 << attempt.min(5));
+            TimeoutFuture::new(ms as u32).await;
+        }
+    });
+}
 
 pub(in super::super) fn make_on_tool_output_chunk(
     stream_ctx: Rc<ChatStreamCallbackCtx>,
@@ -46,6 +82,43 @@ pub(in super::super) fn make_on_tool_output_chunk(
                 });
         });
     })
+}
+
+/// 后台任务（`run_command` 的 `async:true`）：登记初始快照并启动轮询（终态落定后停止）。
+/// 无 `tool_job_id` 或无 `tool_call_id` 时直接返回（普通工具结果不受影响）。
+fn register_background_tool_job(
+    states: RwSignal<HashMap<String, ToolJobState>>,
+    info: &ToolResultInfo,
+    loc: Locale,
+) {
+    let Some(job_id) = info.tool_job_id.as_deref().filter(|s| !s.is_empty()) else {
+        return;
+    };
+    let Some(tid) = info
+        .tool_call_id
+        .as_deref()
+        .filter(|t| !t.trim().is_empty())
+    else {
+        return;
+    };
+    let initial = ToolJobState {
+        id: job_id.to_string(),
+        status: info
+            .tool_job_status
+            .clone()
+            .unwrap_or_else(|| "queued".to_string()),
+        exit_code: None,
+        stdout: None,
+        stderr: None,
+        summary: None,
+        error_code: None,
+        failure_category: None,
+        workspace_changed: false,
+    };
+    states.update(|m| {
+        m.insert(tid.to_string(), initial);
+    });
+    spawn_tool_job_polling(tid.to_string(), job_id.to_string(), loc, states);
 }
 
 pub(in super::super) fn make_on_tool_result(
@@ -126,6 +199,8 @@ pub(in super::super) fn make_on_tool_result(
                 m.remove(tid);
             });
         }
+        // 后台任务（`run_command` 的 `async:true`）：登记初始快照并启动轮询（终态落定后停止）。
+        register_background_tool_job(stream_ctx.chat.tool_job_states, &info, loc);
         if inserted_new_tool {
             let tool_name = non_empty_trimmed_tool_name(&info.name).unwrap_or_default();
             let declared = info
