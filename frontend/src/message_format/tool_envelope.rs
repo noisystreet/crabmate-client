@@ -26,6 +26,9 @@ pub fn tool_result_info_from_stored_content(
         error_code: input.error_code,
         failure_category: input.failure_category,
         structured_preview: input.structured_preview,
+        tool_job_id: input.tool_job_id,
+        tool_job_poll_url: input.tool_job_poll_url,
+        tool_job_status: input.tool_job_status,
     })
 }
 

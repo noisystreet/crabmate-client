@@ -19,6 +19,9 @@ fn mk(summary: &str) -> ToolCardInput {
         error_code: None,
         failure_category: None,
         structured_preview: None,
+        tool_job_id: None,
+        tool_job_poll_url: None,
+        tool_job_status: None,
     }
 }
 

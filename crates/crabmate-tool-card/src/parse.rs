@@ -63,5 +63,23 @@ pub fn parse_tool_envelope(raw: &str, fallback_name: Option<&str>) -> Option<Too
             .filter(|s| !s.is_empty())
             .map(String::from),
         structured_preview: ct.get("structured_payload").cloned(),
+        tool_job_id: ct
+            .get("tool_job_id")
+            .and_then(|x| x.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(String::from),
+        tool_job_poll_url: ct
+            .get("tool_job_poll_url")
+            .and_then(|x| x.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(String::from),
+        tool_job_status: ct
+            .get("tool_job_status")
+            .and_then(|x| x.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(String::from),
     })
 }

@@ -123,6 +123,96 @@ pub struct ToolResultInfo {
     pub failure_category: Option<String>,
     /// 可选：与 `read_file` / `read_dir` / `list_tree` 工具输出首行 **`crabmate_tool_output`** 同源（SSE 侧复制），便于 UI 表格化。
     pub structured_preview: Option<Value>,
+    /// 后台任务启动帧软字段（`run_command` 的 `async:true`；契约 `background_tool_jobs_contract.md` §2）。
+    pub tool_job_id: Option<String>,
+    pub tool_job_poll_url: Option<String>,
+    /// 发起时恒为 `queued`；后续经轮询端点更新。
+    pub tool_job_status: Option<String>,
+}
+
+/// 后台工具任务（`run_command` 的 `async:true`）运行态快照（轮询 `GET /tools/jobs/{id}` 结果）。
+/// 与契约 §3.1 响应体逐字段对齐；`tool_job_poll_url` 仅存在于启动帧（[`ToolResultInfo`]），不在轮询响应中。
+#[derive(Debug, Clone, PartialEq, serde::Deserialize)]
+pub struct ToolJobState {
+    #[serde(rename = "tool_job_id")]
+    pub id: String,
+    /// `queued` | `running` | `succeeded` | `failed` | `cancelled` | `timed_out`。
+    pub status: String,
+    pub exit_code: Option<i64>,
+    pub stdout: Option<String>,
+    pub stderr: Option<String>,
+    pub summary: Option<String>,
+    pub error_code: Option<String>,
+    pub failure_category: Option<String>,
+    pub workspace_changed: bool,
+}
+
+impl ToolJobState {
+    #[must_use]
+    pub fn is_terminal(&self) -> bool {
+        !matches!(self.status.as_str(), "queued" | "running")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 契约 `background_tool_jobs_contract.md` §3.1 轮询响应样例：
+    /// 无 `tool_job_poll_url` 字段，必须能反序列化（曾因该字段缺失而 missing field 失败）。
+    #[test]
+    fn tool_job_state_deserializes_from_contract_poll_response() {
+        let raw = r#"{
+            "tool_job_id": "tooljob_0123456789abcdef0123456789abcdef",
+            "status": "succeeded",
+            "exit_code": 0,
+            "stdout": "out",
+            "stderr": "",
+            "summary": "cmd",
+            "error_code": null,
+            "failure_category": null,
+            "workspace_changed": true,
+            "result_version": 1
+        }"#;
+        let state: ToolJobState =
+            serde_json::from_str(raw).expect("poll response must deserialize");
+        assert_eq!(state.id, "tooljob_0123456789abcdef0123456789abcdef");
+        assert_eq!(state.status, "succeeded");
+        assert_eq!(state.exit_code, Some(0));
+        assert!(state.is_terminal());
+    }
+
+    #[test]
+    fn tool_job_state_non_terminal_statuses() {
+        for s in ["queued", "running"] {
+            let state = ToolJobState {
+                id: "job-1".into(),
+                status: s.into(),
+                exit_code: None,
+                stdout: None,
+                stderr: None,
+                summary: None,
+                error_code: None,
+                failure_category: None,
+                workspace_changed: false,
+            };
+            assert!(!state.is_terminal(), "{s} should be non-terminal");
+        }
+        for s in ["succeeded", "failed", "cancelled", "timed_out"] {
+            let state = ToolJobState {
+                id: "job-1".into(),
+                status: s.into(),
+                exit_code: None,
+                stdout: None,
+                stderr: None,
+                summary: None,
+                error_code: None,
+                failure_category: None,
+                workspace_changed: false,
+            };
+            assert!(state.is_terminal(), "{s} should be terminal");
+        }
+    }
 }
 
 /// `clarification_questionnaire`：Web 表单用字段子集。

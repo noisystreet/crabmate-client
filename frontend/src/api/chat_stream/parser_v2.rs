@@ -240,6 +240,18 @@ fn dispatch_tool_call_result(val: &serde_json::Value, sink: &mut SseControlSink<
                 .map(str::to_string),
             result_version: 1,
             structured_preview: None,
+            tool_job_id: metadata
+                .and_then(|m| m.get("toolJobId"))
+                .and_then(|j| j.as_str())
+                .map(str::to_string),
+            tool_job_poll_url: metadata
+                .and_then(|m| m.get("toolJobPollUrl"))
+                .and_then(|j| j.as_str())
+                .map(str::to_string),
+            tool_job_status: metadata
+                .and_then(|m| m.get("toolJobStatus"))
+                .and_then(|j| j.as_str())
+                .map(str::to_string),
         };
         if let Some(hook) = sink.workspace_tool.on_tool_result.as_mut() {
             hook(result_info);
@@ -641,6 +653,69 @@ mod tests {
         let data = r#"{"type":"TOOL_CALL_RESULT","toolCallId":"tc-1","content":"done"}"#;
         let dispatch = parser.parse(data, &mut sink);
         assert_eq!(dispatch, SseDispatch::Handled);
+    }
+
+    #[test]
+    fn tool_call_result_carries_tool_job_metadata() {
+        let parser = V2Parser;
+        let got = Rc::new(RefCell::new(None::<ToolResultInfo>));
+        let got2 = Rc::clone(&got);
+        let mut on_result = move |info: ToolResultInfo| *got2.borrow_mut() = Some(info);
+        let mut sink = SseControlSink {
+            on_error: &mut |_| {},
+            on_delta: None,
+            workspace_tool: SseWorkspaceToolHooks {
+                on_tool_result: Some(&mut on_result),
+                ..SseWorkspaceToolHooks::default()
+            },
+            turn_phase: SseTurnPhaseHooks::default(),
+            clarify_trace: SseClarifyTraceHooks::default(),
+            notice_timeline: SseNoticeTimelineHooks::default(),
+        };
+        let data = concat!(
+            r#"{"type":"TOOL_CALL_RESULT","toolCallId":"tc-2","content":"已创建后台任务","#,
+            r#""metadata":{"name":"run_command","ok":true,"toolJobId":"tooljob_0123","#,
+            r#""toolJobPollUrl":"/tools/jobs/tooljob_0123","toolJobStatus":"queued"}}"#
+        );
+        let dispatch = parser.parse(data, &mut sink);
+        assert_eq!(dispatch, SseDispatch::Handled);
+        let got_borrow = got.borrow();
+        let info = got_borrow.as_ref().expect("on_tool_result should fire");
+        assert_eq!(info.tool_call_id.as_deref(), Some("tc-2"));
+        assert_eq!(info.tool_job_id.as_deref(), Some("tooljob_0123"));
+        assert_eq!(
+            info.tool_job_poll_url.as_deref(),
+            Some("/tools/jobs/tooljob_0123")
+        );
+        assert_eq!(info.tool_job_status.as_deref(), Some("queued"));
+    }
+
+    #[test]
+    fn tool_call_result_without_tool_job_metadata_keeps_none() {
+        let parser = V2Parser;
+        let got = Rc::new(RefCell::new(None::<ToolResultInfo>));
+        let got2 = Rc::clone(&got);
+        let mut on_result = move |info: ToolResultInfo| *got2.borrow_mut() = Some(info);
+        let mut sink = SseControlSink {
+            on_error: &mut |_| {},
+            on_delta: None,
+            workspace_tool: SseWorkspaceToolHooks {
+                on_tool_result: Some(&mut on_result),
+                ..SseWorkspaceToolHooks::default()
+            },
+            turn_phase: SseTurnPhaseHooks::default(),
+            clarify_trace: SseClarifyTraceHooks::default(),
+            notice_timeline: SseNoticeTimelineHooks::default(),
+        };
+        let data = r#"{"type":"TOOL_CALL_RESULT","toolCallId":"tc-3","content":"done","metadata":{"name":"read_file","ok":true}}"#;
+        let dispatch = parser.parse(data, &mut sink);
+        assert_eq!(dispatch, SseDispatch::Handled);
+        let got_borrow = got.borrow();
+        let info = got_borrow.as_ref().expect("on_tool_result should fire");
+        assert_eq!(info.tool_call_id.as_deref(), Some("tc-3"));
+        assert_eq!(info.tool_job_id, None);
+        assert_eq!(info.tool_job_poll_url, None);
+        assert_eq!(info.tool_job_status, None);
     }
 
     #[test]

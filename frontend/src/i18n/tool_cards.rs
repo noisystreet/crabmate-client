@@ -16,6 +16,59 @@ pub fn tool_card_fallback(l: Locale) -> &'static str {
     }
 }
 
+// --- 后台任务（run_command `async:true`）气泡 ---
+
+/// 后台任务状态徽标可读文案（如「后台任务排队中」）。
+pub fn tool_job_status_label(l: Locale, status: &str) -> String {
+    let s = match status {
+        "queued" => match l {
+            Locale::ZhHans => "排队中",
+            Locale::En => "queued",
+        },
+        "running" => match l {
+            Locale::ZhHans => "运行中",
+            Locale::En => "running",
+        },
+        "succeeded" => match l {
+            Locale::ZhHans => "成功",
+            Locale::En => "succeeded",
+        },
+        "failed" => match l {
+            Locale::ZhHans => "失败",
+            Locale::En => "failed",
+        },
+        "cancelled" => match l {
+            Locale::ZhHans => "已取消",
+            Locale::En => "cancelled",
+        },
+        "timed_out" => match l {
+            Locale::ZhHans => "超时",
+            Locale::En => "timed out",
+        },
+        other => other,
+    };
+    match l {
+        Locale::ZhHans => format!("后台任务{s}"),
+        Locale::En => format!("background job {s}"),
+    }
+}
+
+/// 非终态后台任务的取消按钮文案。
+pub fn tool_job_cancel_button(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "取消",
+        Locale::En => "Cancel",
+    }
+}
+
+/// 后台任务详情行（折叠展开后首行：任务 id 与状态）。
+pub fn tool_job_detail_line(l: Locale, job_id: &str, status: &str) -> String {
+    match l {
+        Locale::ZhHans => format!("后台任务 {job_id}：{status}"),
+        Locale::En => format!("background job {job_id}: {status}"),
+    }
+}
+
 pub fn plan_generated(l: Locale) -> &'static str {
     match l {
         Locale::ZhHans => "已生成分阶段规划。",

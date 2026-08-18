@@ -4,6 +4,7 @@ use std::collections::HashMap;
 
 use crate::i18n::Locale;
 use crate::markdown::plaintext_to_safe_html;
+use crate::sse_dispatch::ToolJobState;
 use crate::storage::{StoredMessage, StoredMessageState};
 use crate::stream_text_overlay::{
     StreamTextOverlay, message_text_for_display_including_stream_overlay,
@@ -314,8 +315,12 @@ fn user_text_body_chunks(
 fn message_body_chunks(message: &StoredMessage, ctx: &TuiRenderCtx<'_>) -> TuiBodyChunks {
     if message.is_tool {
         let live = tool_live_overlay(message, ctx.tool_chunks);
+        let job = message
+            .tool_call_id
+            .as_deref()
+            .and_then(|tid| ctx.tool_jobs.get(tid));
         return TuiBodyChunks {
-            closed: vec![tool_process_body_html(message, ctx.locale, live)],
+            closed: vec![tool_process_body_html(message, ctx.locale, live, job)],
             open_plain: None,
             // 工具 HTML 不走 MD，仍记录全局开关以免与 Incremental 前缀比较漂移。
             markdown_render: ctx.markdown_render,
@@ -410,6 +415,7 @@ fn turn_section_html(args: TurnSectionArgs<'_>) -> String {
 }
 
 #[must_use]
+#[allow(clippy::too_many_arguments)] // 与 full_rebuild_plan 同构；重构为 ctx struct 属大改动
 pub(crate) fn build_tui_transcript_html(
     messages: &[StoredMessage],
     session_id: &str,
@@ -418,6 +424,7 @@ pub(crate) fn build_tui_transcript_html(
     apply_assistant_display_filters: bool,
     markdown_render: bool,
     tool_chunks: &HashMap<String, String>,
+    tool_jobs: &HashMap<String, ToolJobState>,
 ) -> String {
     let turns = mountable_turns(messages, session_id, overlay);
     if turns.is_empty() {
@@ -430,6 +437,7 @@ pub(crate) fn build_tui_transcript_html(
         apply_filters: apply_assistant_display_filters,
         markdown_render,
         tool_chunks,
+        tool_jobs,
     };
     let live_id = live_message_id(messages, overlay);
     let mut html = String::new();
@@ -477,6 +485,7 @@ fn live_tool_has_details_flag(
     Some(tool_row_live_fields(message, locale, live).wants_details())
 }
 
+#[allow(clippy::too_many_arguments)] // 与 build_tui_transcript_html 同构；保持两者签名一致便于透传
 fn full_rebuild_plan(
     messages: &[StoredMessage],
     session_id: &str,
@@ -485,6 +494,7 @@ fn full_rebuild_plan(
     apply_assistant_display_filters: bool,
     markdown_render: bool,
     tool_chunks: &HashMap<String, String>,
+    tool_jobs: &HashMap<String, ToolJobState>,
 ) -> TuiSyncPlan {
     let turns = mountable_turns(messages, session_id, overlay);
     let live_id = live_message_id(messages, overlay);
@@ -497,6 +507,7 @@ fn full_rebuild_plan(
         apply_filters: apply_assistant_display_filters,
         markdown_render,
         tool_chunks,
+        tool_jobs,
     };
     let live_body = live_id.as_ref().and_then(|id| {
         // 仅当 live 已可挂载时缓存 body（空壳未挂载则无 live_body）
@@ -524,6 +535,7 @@ fn full_rebuild_plan(
             apply_assistant_display_filters,
             markdown_render,
             tool_chunks,
+            tool_jobs,
         )),
         promote_id: None,
         append_sections: Vec::new(),
@@ -560,6 +572,7 @@ struct TuiRenderCtx<'a> {
     apply_filters: bool,
     markdown_render: bool,
     tool_chunks: &'a HashMap<String, String>,
+    tool_jobs: &'a HashMap<String, ToolJobState>,
 }
 
 fn append_new_turn_sections(
@@ -753,6 +766,7 @@ pub(crate) struct PlanTuiSyncArgs<'a> {
     pub apply_assistant_display_filters: bool,
     pub markdown_render: bool,
     pub tool_chunks: &'a HashMap<String, String>,
+    pub tool_jobs: &'a HashMap<String, ToolJobState>,
 }
 
 /// 规划 transcript DOM 更新。
@@ -767,6 +781,7 @@ pub(crate) fn plan_tui_sync(args: PlanTuiSyncArgs<'_>) -> TuiSyncPlan {
         apply_assistant_display_filters,
         markdown_render,
         tool_chunks,
+        tool_jobs,
     } = args;
     let turns = mountable_turns(messages, session_id, overlay);
     let Some(prev) = prev else {
@@ -778,6 +793,7 @@ pub(crate) fn plan_tui_sync(args: PlanTuiSyncArgs<'_>) -> TuiSyncPlan {
             apply_assistant_display_filters,
             markdown_render,
             tool_chunks,
+            tool_jobs,
         );
     };
     if must_full_rebuild(prev, &turns, session_id) {
@@ -789,6 +805,7 @@ pub(crate) fn plan_tui_sync(args: PlanTuiSyncArgs<'_>) -> TuiSyncPlan {
             apply_assistant_display_filters,
             markdown_render,
             tool_chunks,
+            tool_jobs,
         );
     }
 
@@ -799,6 +816,7 @@ pub(crate) fn plan_tui_sync(args: PlanTuiSyncArgs<'_>) -> TuiSyncPlan {
         apply_filters: apply_assistant_display_filters,
         markdown_render,
         tool_chunks,
+        tool_jobs,
     };
     let live_id = live_message_id(messages, overlay);
     let committed_key = committed_fingerprint(&turns, live_id.as_deref());
