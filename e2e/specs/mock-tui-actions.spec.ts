@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 import {
+  apiUrl,
+  homeUrlWithOptionalWebBearer,
   installDelayedMockSse,
   openSessionInRail,
   seedSession,
@@ -75,53 +77,62 @@ test("终端流：右键菜单含复制/再生/分支并可复制助手正文", 
 });
 
 test("终端流：失败助手右键菜单可点重试", async ({ page }) => {
-  await page.goto("/", { waitUntil: "networkidle", timeout: 20_000 });
+  await page.goto(homeUrlWithOptionalWebBearer("/"), {
+    waitUntil: "networkidle",
+    timeout: 20_000,
+  });
   await page.waitForSelector('[data-testid="chat-composer-input"]', {
     timeout: 15_000,
   });
 
-  await page.evaluate((s: string) => {
-    const body = JSON.stringify({
-      sessions: [
-        {
-          id: s,
-          title: "e2e-retry",
-          draft: "",
-          messages: [
-            {
-              id: "u-fail",
-              role: "user",
-              text: "会失败",
-              reasoning_text: "",
-              image_urls: [],
-              state: null,
-              is_tool: false,
-              created_at: Date.now(),
-            },
-            {
-              id: "a-fail",
-              role: "assistant",
-              text: "上一轮失败",
-              reasoning_text: "",
-              image_urls: [],
-              state: "error",
-              is_tool: false,
-              created_at: Date.now(),
-            },
-          ],
-          updated_at: Date.now(),
-          pinned: false,
-          starred: false,
-        },
-      ],
-      active_session_id: s,
-    });
-    return fetch("/user-data/workspaces/current/sessions", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body,
-    }).catch(() => {});
-  }, `${SID}-retry`);
+  await page.evaluate(
+    ({ url, s }: { url: string; s: string }) => {
+      const body = JSON.stringify({
+        sessions: [
+          {
+            id: s,
+            title: "e2e-retry",
+            draft: "",
+            messages: [
+              {
+                id: "u-fail",
+                role: "user",
+                text: "会失败",
+                reasoning_text: "",
+                image_urls: [],
+                state: null,
+                is_tool: false,
+                created_at: Date.now(),
+              },
+              {
+                id: "a-fail",
+                role: "assistant",
+                text: "上一轮失败",
+                reasoning_text: "",
+                image_urls: [],
+                state: "error",
+                is_tool: false,
+                created_at: Date.now(),
+              },
+            ],
+            updated_at: Date.now(),
+            pinned: false,
+            starred: false,
+          },
+        ],
+        active_session_id: s,
+      });
+      return fetch(url, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body,
+      }).catch(() => {});
+    },
+    {
+      url: apiUrl("/user-data/workspaces/current/sessions"),
+      s: `${SID}-retry`,
+    },
+  );
 
   await page.reload({ waitUntil: "networkidle", timeout: 20_000 });
   await page.waitForSelector('[data-testid="chat-composer-input"]', {

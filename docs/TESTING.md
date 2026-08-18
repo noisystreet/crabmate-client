@@ -8,7 +8,7 @@ make test            # frontend → tauri → tui → web-host
 ```
 
 Victauri 全量 E2E（需 WebView / 外部 serve）另跑：`make victauri-e2e`。  
-Playwright（浏览器 UI，需 `serve --with-web`）：`make e2e-playwright`。
+Playwright（浏览器 UI，需纯 API `serve` + 客户端 `crabmate-web` 自托管）：`make e2e-playwright`。
 
 ## pre-commit
 
@@ -56,7 +56,7 @@ bash scripts/check.sh
 | `CI` / `build-desktop-deb` | `CM_PREPARE_SKIP_FRONTEND=1` + stub；`make desktop-release`；校验 `Package: crabmate-desktop`、无 serve sidecar、无 `/etc/crabmate` |
 | `CI` / `build-web-deb` | `CM_WEB_SKIP_FRONTEND=1` + stub dist；`make web-release`；校验 `Package: crabmate-web`、菜单图标、无 serve sidecar、无 `/etc/crabmate` |
 | `CI` / `build-tui-deb` | `make tui-release`；校验 `Package: crabmate-tui`、仅 `/usr/bin/crabmate-tui`、无图标/配置、无 serve sidecar、无 `/etc/crabmate` |
-| `E2E Playwright` | 本仓 `make frontend` + checkout Server 编 `serve`；mock SSE 基线 |
+| `E2E Playwright` | 本仓 `make frontend` + checkout Server 编纯 API `serve` + 本仓编 `crabmate-web`（回环托管 UI）；mock SSE 基线 |
 | `Victauri E2E Nightly` | `make frontend` + Server `serve` + `./scripts/victauri-e2e.sh all`（xvfb；不含 `real_llm`）；失败上传桌面/serve 日志 |
 | `code-complexity` | 独立门禁：`lizard-rust` / `fn-param` / `fn-nloc` |
 | `Dependency security` | 各 Cargo workspace：`cargo audit` + `cargo deny check licenses bans sources`（`deny.toml`）；**不进** pre-commit |
@@ -97,7 +97,7 @@ make dependency-security
 
 ## Playwright（浏览器 Web UI E2E）
 
-权威目录：本仓 [`e2e/`](../e2e/)。一键（起 `serve --with-web` + 跑测）：
+权威目录：本仓 [`e2e/`](../e2e/)。一键（起纯 API `serve` + `crabmate-web` 托管 UI + 跑测）：
 
 ```bash
 make frontend
@@ -105,7 +105,9 @@ make frontend
 # 或指定用例：./scripts/e2e-playwright.sh specs/mock-overlay-timing.spec.ts
 ```
 
-`serve` 解析顺序：`CRABMATE_BIN` → `PATH` 的 `crabmate` → 同级 Server `target/{debug,release}/crabmate` → 同级仓 `cargo run`。正式 CI checkout `noisystreet/CrabMate` 钉 git tag **`v0.4.0`**（与 crates.io `crabmate` 0.4.0 同源；见 [`contract_pin.md`](design/contract_pin.md)）。托管 SPA 时脚本/CI **始终传 `--with-web`**（Server 默认纯 API）。
+`serve` 解析顺序：`CRABMATE_BIN` → `PATH` 的 `crabmate` → 同级 Server `target/{debug,release}/crabmate` → 同级仓 `cargo run`。正式 CI checkout `noisystreet/CrabMate` 钉 git tag **`v0.4.0`**（与 crates.io `crabmate` 0.4.0 同源；见 [`contract_pin.md`](design/contract_pin.md)）。
+
+**UI 托管**：Server 默认纯 API（脚本/CI **不传 `--with-web`**）；SPA 由客户端自托管 `crabmate-web`（本仓 `crates/crabmate-web-host`，默认 `127.0.0.1:4173`，`--api-base` 指向纯 API serve）。页面经 `#cm_api_base=` hash 交接把 API 指向 serve；serve 须经 `CM_WEB_CORS_ALLOWED_ORIGINS` 放行 web Origin（脚本自动追加 `http://127.0.0.1:$CRABMATE_WEB_PORT`）。跨 Origin 直连 API 与 `crabmate-web --api-base` 的真实使用路径一致。
 
 真实 LLM 规格仅本地：本机钥匙串/E2E 注入已有 `client_llm` 时可不必 `API_KEY`；启用 Web Bearer 时设 `CM_WEB_API_BEARER_TOKEN`。  
 `cd e2e && no_proxy=127.0.0.1,localhost,api.deepseek.com npx playwright test specs/real-llm-*.spec.ts`  
@@ -119,7 +121,7 @@ make frontend
 REAL_LLM_E2E=1 ./scripts/victauri-e2e.sh real_llm
 ```
 
-`serve` 二进制解析顺序：`CM_DESKTOP_BACKEND_BIN` → `PATH` 中的 `crabmate` → 同级 `../crabmate_agent/target/debug/crabmate`（仅本地双轨）。正式验收应钉已发布/`PATH` 中的 `serve`。脚本启动 `serve` 时传 **`--with-web`**（尽量挂本仓 `frontend/dist`）。
+`serve` 二进制解析顺序：`CM_DESKTOP_BACKEND_BIN` → `PATH` 中的 `crabmate` → 同级 `../crabmate_agent/target/debug/crabmate`（仅本地双轨）。正式验收应钉已发布/`PATH` 中的 `serve`。壳加载**包内** UI（Phase 2），脚本启动 `serve` 时**不传** `--with-web`（纯 API 即可）。
 
 脚本在构建前会**临时**写入 `victauri:default` capability（JS bridge 必需），退出时恢复；**勿**把该权限长期留在无 `--features victauri` 的 `capabilities/default.json`（否则普通 `cargo check` 会失败）。
 

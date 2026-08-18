@@ -15,6 +15,7 @@ import { test, expect, type Page } from "@playwright/test";
 import * as fs from "fs";
 import * as path from "path";
 import {
+  apiUrl,
   ensureRealLlmModelCredential,
   resolveOptionalApiKeyFromEnvOrToml,
   sendMessage,
@@ -38,22 +39,25 @@ async function ensureTempWorkspace(page: Page): Promise<string> {
     "# e2e tool-call workspace\n",
   );
 
-  const result = await page.evaluate(async (dir: string) => {
-    const response = await fetch("/workspace", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path: dir }),
-    });
-    const data = (await response.json().catch(() => ({}))) as {
-      path?: unknown;
-      error?: unknown;
-    };
-    return {
-      ok: response.ok,
-      path: typeof data.path === "string" ? data.path.trim() : "",
-      error: typeof data.error === "string" ? data.error.trim() : "",
-    };
-  }, wsDir);
+  const result = await page.evaluate(
+    async ({ url, dir }: { url: string; dir: string }) => {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: dir }),
+      });
+      const data = (await response.json().catch(() => ({}))) as {
+        path?: unknown;
+        error?: unknown;
+      };
+      return {
+        ok: response.ok,
+        path: typeof data.path === "string" ? data.path.trim() : "",
+        error: typeof data.error === "string" ? data.error.trim() : "",
+      };
+    },
+    { url: apiUrl("/workspace"), dir: wsDir },
+  );
 
   if (!result.ok || result.error || !result.path) {
     throw new Error(
@@ -84,28 +88,31 @@ test.describe("真实 LLM：工具调用场景", () => {
     }
     const wsDir = await ensureTempWorkspace(page);
     try {
-      const putOk = await page.evaluate(async (s: string) => {
-        const body = JSON.stringify({
-          sessions: [
-            {
-              id: s,
-              title: "e2e-real-tool-call",
-              draft: "",
-              messages: [],
-              updated_at: Date.now(),
-              pinned: false,
-              starred: false,
-            },
-          ],
-          active_session_id: s,
-        });
-        const response = await fetch("/user-data/workspaces/current/sessions", {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body,
-        });
-        return response.ok;
-      }, uniqueSid);
+      const putOk = await page.evaluate(
+        async ({ url, s }: { url: string; s: string }) => {
+          const body = JSON.stringify({
+            sessions: [
+              {
+                id: s,
+                title: "e2e-real-tool-call",
+                draft: "",
+                messages: [],
+                updated_at: Date.now(),
+                pinned: false,
+                starred: false,
+              },
+            ],
+            active_session_id: s,
+          });
+          const response = await fetch(url, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body,
+          });
+          return response.ok;
+        },
+        { url: apiUrl("/user-data/workspaces/current/sessions"), s: uniqueSid },
+      );
       if (!putOk) {
         throw new Error("PUT /user-data/workspaces/current/sessions 失败");
       }
@@ -162,8 +169,8 @@ test.describe("真实 LLM：工具调用场景", () => {
     const pollInterval = 500;
     for (let elapsed = 0; elapsed < pollTimeout; elapsed += pollInterval) {
       const fetched: unknown[] = await page.evaluate(
-        (sid: string) =>
-          fetch("/user-data/workspaces/current/sessions")
+        ({ url, sid }: { url: string; sid: string }) =>
+          fetch(url)
             .then((r) => r.json())
             .then((d) => {
               const list = d.current?.sessions || d.sessions || [];
@@ -172,7 +179,10 @@ test.describe("真实 LLM：工具调用场景", () => {
                 : null;
               return s ? s.messages || [] : [];
             }),
-        uniqueSidPersist,
+        {
+          url: apiUrl("/user-data/workspaces/current/sessions"),
+          sid: uniqueSidPersist,
+        },
       );
       if (fetched.length >= 2) {
         messages = fetched;

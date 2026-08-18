@@ -6,7 +6,7 @@
  * 本模块提供 **就绪后立刻** 可跑的检查，不依赖 server_revision 稳定。
  */
 import { expect, type Page } from "@playwright/test";
-import { openSessionInRail } from "./helpers";
+import { apiUrl, openSessionInRail } from "./helpers";
 
 export type PersistedMessage = {
   id?: string;
@@ -27,15 +27,18 @@ export async function fetchPersistedSession(
   page: Page,
   sid: string,
 ): Promise<PersistedSession | null> {
-  return page.evaluate(async (sessionId) => {
-    const response = await fetch("/user-data/workspaces/current/sessions");
-    const data = await response.json();
-    const list =
-      (data.current?.sessions as PersistedSession[] | undefined) ??
-      (data.sessions as PersistedSession[] | undefined) ??
-      [];
-    return list.find((session) => session.id === sessionId) ?? null;
-  }, sid);
+  return page.evaluate(
+    async ({ url, sessionId }) => {
+      const response = await fetch(url);
+      const data = await response.json();
+      const list =
+        (data.current?.sessions as PersistedSession[] | undefined) ??
+        (data.sessions as PersistedSession[] | undefined) ??
+        [];
+      return list.find((session) => session.id === sessionId) ?? null;
+    },
+    { url: apiUrl("/user-data/workspaces/current/sessions"), sessionId: sid },
+  );
 }
 
 /** DOM：含 needle 的助手气泡。 */

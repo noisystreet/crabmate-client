@@ -72,7 +72,7 @@ help:
 	@echo "  make fmt                 九包 cargo fmt（含 client-api / tool-card / frontend / tui / web-host）"
 	@echo "  make clippy              九包 clippy -D warnings"
 	@echo "  make victauri-e2e        全量 Victauri（需外部 crabmate serve）"
-	@echo "  make e2e-playwright      Playwright（需 frontend/dist + serve --with-web）"
+	@echo "  make e2e-playwright      Playwright（需 frontend/dist + 纯 API serve + crabmate-web 托管 UI）"
 	@echo ""
 	@echo "清理："
 	@echo "  make clean               清理 desktop/mobile/connect/frontend 产物"

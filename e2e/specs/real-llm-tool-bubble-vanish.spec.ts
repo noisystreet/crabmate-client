@@ -15,6 +15,8 @@ import { expect, test, type Page } from "@playwright/test";
 import * as fs from "fs";
 import * as path from "path";
 import {
+  apiBase,
+  apiUrl,
   ensureRealLlmModelCredential,
   resolveOptionalApiKeyFromEnvOrToml,
   sendMessage,
@@ -83,38 +85,44 @@ add_executable(demo main.cpp)
 }
 
 async function bindWorkspaceAndSession(page: Page, wsDir: string, sid: string) {
-  await page.evaluate((dir: string) => {
-    return fetch("/workspace", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path: dir }),
-    });
-  }, wsDir);
+  await page.evaluate(
+    ({ url, dir }: { url: string; dir: string }) => {
+      return fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: dir }),
+      });
+    },
+    { url: apiUrl("/workspace"), dir: wsDir },
+  );
   await page.reload({ waitUntil: "networkidle", timeout: 20_000 });
   await page.waitForSelector('[data-testid="chat-composer-input"]', {
     timeout: 15_000,
   });
-  await page.evaluate((s: string) => {
-    const body = JSON.stringify({
-      sessions: [
-        {
-          id: s,
-          title: "e2e-real-vanish",
-          draft: "",
-          messages: [],
-          updated_at: Date.now(),
-          pinned: false,
-          starred: false,
-        },
-      ],
-      active_session_id: s,
-    });
-    return fetch("/user-data/workspaces/current/sessions", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body,
-    });
-  }, sid);
+  await page.evaluate(
+    ({ url, s }: { url: string; s: string }) => {
+      const body = JSON.stringify({
+        sessions: [
+          {
+            id: s,
+            title: "e2e-real-vanish",
+            draft: "",
+            messages: [],
+            updated_at: Date.now(),
+            pinned: false,
+            starred: false,
+          },
+        ],
+        active_session_id: s,
+      });
+      return fetch(url, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body,
+      });
+    },
+    { url: apiUrl("/user-data/workspaces/current/sessions"), s: sid },
+  );
   await page.reload({ waitUntil: "networkidle", timeout: 20_000 });
   await page.waitForSelector('[data-testid="chat-composer-input"]', {
     timeout: 15_000,
@@ -144,7 +152,8 @@ async function waitForReadyWhileApproving(page: Page, timeoutMs: number) {
 
 test.describe("真实 LLM：工具回合气泡闪没", () => {
   test("源码分析多工具流：助手气泡不得出现后消失", async ({ page }) => {
-    const baseUrl = `http://127.0.0.1:${process.env.CRABMATE_PORT || "8080"}`;
+    const baseUrl =
+      apiBase() || `http://127.0.0.1:${process.env.CRABMATE_PORT || "8080"}`;
     await waitForHealth(baseUrl);
 
     const sid = `s_e2e_real_vanish_${Date.now()}`;

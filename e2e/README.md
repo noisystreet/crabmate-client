@@ -27,22 +27,30 @@
 make frontend
 export CM_WEB_STATIC_DIR="$PWD/frontend/dist"
 
-# 启动 Server（同级主仓或 PATH 中的 crabmate；默认纯 API，托管 UI 须 --with-web）：
-#   ../crabmate_agent 下: cargo run -- serve --with-web
-# 或一键：./scripts/e2e-playwright.sh
+# 启动纯 API Server（同级主仓或 PATH 中的 crabmate；默认纯 API，不传 --with-web）：
+#   ../crabmate_agent 下: cargo run -- serve
+# UI 由客户端自托管 crabmate-web（本仓 crates/crabmate-web-host）托管。
+# 或一键：./scripts/e2e-playwright.sh（自动起 serve + crabmate-web）
 ```
 
 ## 快速开始
 
 ```bash
-# 推荐：一键（会起 serve + 跑测试）
+# 推荐：一键（会起纯 API serve + crabmate-web 托管 UI + 跑测试）
 ./scripts/e2e-playwright.sh
 
-# 或手动（serve 已在跑、dist 已就绪）
+# 或手动（serve 纯 API + crabmate-web 已在跑、dist 已就绪）
 cd e2e
 npm ci
-no_proxy=127.0.0.1,localhost npx playwright test
+CRABMATE_API_BASE=http://127.0.0.1:8080 \
+  no_proxy=127.0.0.1,localhost \
+  npx playwright test
 ```
+
+> 页面由 `crabmate-web`（默认 `127.0.0.1:4173`）托管，API 走 `CRABMATE_API_BASE`
+> 指向的纯 API `serve`。脚本自动起两者并在 `CM_WEB_CORS_ALLOWED_ORIGINS`
+> 放行 web Origin；手动跑时请自行配置（`serve` 启动前设
+> `CM_WEB_CORS_ALLOWED_ORIGINS=http://127.0.0.1:4173`）。
 
 ### 常用选项
 
@@ -165,7 +173,9 @@ x-stream-job-id: 1
 ### 本地运行
 
 ```bash
-# 确保后端运行（钥匙串已有 client_llm 时可不必 export API_KEY）
+# 确保后端运行：纯 API serve + crabmate-web 托管 UI（一键：./scripts/e2e-playwright.sh
+# 或手动起两者；跨 Origin 时设 CRABMATE_API_BASE + serve 的 CM_WEB_CORS_ALLOWED_ORIGINS）
+# 钥匙串已有 client_llm 时可不必 export API_KEY
 # 若启用 Web Bearer：
 #   export CM_WEB_API_BEARER_TOKEN='…'
 no_proxy=api.deepseek.com,localhost,127.0.0.1
@@ -212,7 +222,7 @@ REAL_LLM_E2E=1 npx playwright test specs/real-llm-three-turn-scroll.spec.ts
 
 ## CI 集成
 
-GitHub Actions：本仓 `.github/workflows/e2e-playwright.yml`（PR → `main`；checkout Server 编 `serve`）。当前跑布局回归基线（流中采样）+ overlay：
+GitHub Actions：本仓 `.github/workflows/e2e-playwright.yml`（PR → `main`；checkout Server 编纯 API `serve` + 本仓编 `crabmate-web` 回环托管 UI）。当前跑布局回归基线（流中采样）+ overlay：
 
 - `specs/mock-overlay-timing.spec.ts`
 - `specs/mock-mid-process-commentary-duplicate.spec.ts`
@@ -225,15 +235,17 @@ GitHub Actions：本仓 `.github/workflows/e2e-playwright.yml`（PR → `main`�
 - `specs/mock-storage-consistency.spec.ts`
 - `specs/mock-v2-multi-turn-boundaries.spec.ts`
 
-本地全量 mock：`make frontend` 后 `./scripts/e2e-playwright.sh`（或自行起 `serve` 再 `cd e2e && no_proxy=127.0.0.1,localhost npx playwright test`）。
+本地全量 mock：`make frontend` 后 `./scripts/e2e-playwright.sh`（自动起纯 API serve + `crabmate-web`；或手动起两者后 `cd e2e && CRABMATE_API_BASE=http://127.0.0.1:8080 no_proxy=127.0.0.1,localhost npx playwright test`）。
 
-权威 workflow：`.github/workflows/e2e-playwright.yml`（本仓 UI + checkout `noisystreet/CrabMate` 编 `serve`）。
+权威 workflow：`.github/workflows/e2e-playwright.yml`（本仓 UI + checkout `noisystreet/CrabMate` 编纯 API `serve` + 本仓 `crabmate-web`）。
 
 ## 故障排除
 
 | 问题 | 原因 | 解决 |
 |------|------|------|
-| `net::ERR_CONNECTION_REFUSED` | 后端未运行 | `./scripts/e2e-playwright.sh` 或外部 `crabmate serve` |
+| `net::ERR_CONNECTION_REFUSED` | 后端（serve / crabmate-web）未运行 | `./scripts/e2e-playwright.sh`；或外部起纯 API `crabmate serve` + `crabmate-web` |
+| 页面能开但 API 404 | 页面（4173）的 `/user-data` 等请求打到了静态 host（未设 `CRABMATE_API_BASE`，页面未带 `#cm_api_base=`） | 用脚本起环境或导出 `CRABMATE_API_BASE=http://127.0.0.1:8080` |
+| 跨 Origin 请求被 CORS 拦 | `serve` 未放行页面 Origin | 启动 `serve` 前设 `CM_WEB_CORS_ALLOWED_ORIGINS=http://127.0.0.1:4173` |
 | 测试超时 20s+ | 状态栏卡住或 SSE mock 未生效 | 检查响应头是否包含 `x-conversation-id` |
 | `waitForFunction` timeout | 终答内容未出现 | 确认 SSE 使用 AG-UI V2 格式 |
 | proxy 干扰（浏览器） | 环境变量 `http_proxy` 使浏览器无法访问本地后端 | `no_proxy=127.0.0.1,localhost` |

@@ -20,6 +20,7 @@ import {
 } from "../fixtures/session_assertions";
 import {
   ensureRealLlmModelCredential,
+  apiUrl,
   openSessionInRail,
   resolveOptionalApiKeyFromEnvOrToml,
   sendMessage,
@@ -48,8 +49,8 @@ async function fetchSessionSnapshot(
   sid: string,
 ): Promise<StoredSessionSnapshot> {
   return page.evaluate(
-    (s: string) =>
-      fetch("/user-data/workspaces/current/sessions")
+    ({ url, s }: { url: string; s: string }) =>
+      fetch(url)
         .then((r: Response) => r.json())
         .then((d: any) => {
           const list = d.current?.sessions || d.sessions || [];
@@ -61,7 +62,7 @@ async function fetchSessionSnapshot(
             serverRevision: session?.server_revision,
           };
         }),
-    sid,
+    { url: apiUrl("/user-data/workspaces/current/sessions"), s: sid },
   );
 }
 
@@ -168,39 +169,45 @@ test.describe("真实 LLM：流式后消息结构", () => {
       );
       return;
     }
-    await page.evaluate((dir: string) => {
-      return fetch("/workspace", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ path: dir }),
-      });
-    }, wsDir);
+    await page.evaluate(
+      ({ url, dir }: { url: string; dir: string }) => {
+        return fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ path: dir }),
+        });
+      },
+      { url: apiUrl("/workspace"), dir: wsDir },
+    );
     await page.reload({ waitUntil: "networkidle", timeout: 20000 });
     await page.waitForSelector('[data-testid="chat-composer-input"]', {
       timeout: 15000,
     });
     // 重新创建空会话（工作区变更后旧会话不在新工作区中）
-    await page.evaluate((s: string) => {
-      const body = JSON.stringify({
-        sessions: [
-          {
-            id: s,
-            title: "e2e-bubble",
-            draft: "",
-            messages: [],
-            updated_at: Date.now(),
-            pinned: false,
-            starred: false,
-          },
-        ],
-        active_session_id: s,
-      });
-      return fetch("/user-data/workspaces/current/sessions", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body,
-      });
-    }, SID);
+    await page.evaluate(
+      ({ url, s }: { url: string; s: string }) => {
+        const body = JSON.stringify({
+          sessions: [
+            {
+              id: s,
+              title: "e2e-bubble",
+              draft: "",
+              messages: [],
+              updated_at: Date.now(),
+              pinned: false,
+              starred: false,
+            },
+          ],
+          active_session_id: s,
+        });
+        return fetch(url, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body,
+        });
+      },
+      { url: apiUrl("/user-data/workspaces/current/sessions"), s: SID },
+    );
     await page.reload({ waitUntil: "networkidle", timeout: 20000 });
     await page.waitForSelector('[data-testid="chat-composer-input"]', {
       timeout: 15000,

@@ -1,5 +1,6 @@
 import { expect, Page, Route, test } from "@playwright/test";
 import {
+  apiUrl,
   openSessionInRail,
   seedSession,
   sendMessage,
@@ -67,15 +68,18 @@ async function installSequentialStreams(page: Page, streams: string[]) {
 }
 
 async function persistedSession(page: Page, sid: string) {
-  return page.evaluate(async (sessionId) => {
-    const response = await fetch("/user-data/workspaces/current/sessions");
-    const data = await response.json();
-    return (
-      (data.sessions as PersistedSession[] | undefined)?.find(
-        (session) => session.id === sessionId,
-      ) ?? null
-    );
-  }, sid);
+  return page.evaluate(
+    async ({ url, sessionId }) => {
+      const response = await fetch(url);
+      const data = await response.json();
+      return (
+        (data.sessions as PersistedSession[] | undefined)?.find(
+          (session) => session.id === sessionId,
+        ) ?? null
+      );
+    },
+    { url: apiUrl("/user-data/workspaces/current/sessions"), sessionId: sid },
+  );
 }
 
 async function waitForAnswer(page: Page, answer: string) {
@@ -158,8 +162,8 @@ test.describe("v2 多回合边界", () => {
       }),
     );
     await page.evaluate(
-      async ({ sessionId, cid }) => {
-        await fetch("/user-data/workspaces/current/sessions", {
+      async ({ url, sessionId, cid }) => {
+        await fetch(url, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -196,7 +200,11 @@ test.describe("v2 多回合边界", () => {
           }),
         });
       },
-      { sessionId: sid, cid: conversationId },
+      {
+        url: apiUrl("/user-data/workspaces/current/sessions"),
+        sessionId: sid,
+        cid: conversationId,
+      },
     );
 
     await page.reload({ waitUntil: "networkidle", timeout: 20_000 });

@@ -14,7 +14,8 @@ export default defineConfig({
     ["html", { outputFolder: "playwright-report", open: "never" }],
   ],
   use: {
-    baseURL: `http://127.0.0.1:${process.env.CRABMATE_PORT || "8080"}`,
+    // 页面由客户端自托管 crabmate-web 提供；API 走 CRABMATE_API_BASE（纯 API serve）。
+    baseURL: `http://127.0.0.1:${process.env.CRABMATE_WEB_PORT || "4173"}`,
     headless: true,
     viewport: { width: 1280, height: 840 },
     actionTimeout: 15_000,
