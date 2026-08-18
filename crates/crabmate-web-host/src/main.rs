@@ -3,6 +3,9 @@
 //! **不是** `crabmate serve`：不提供聊天 API。API 仍指向外部 `serve`
 //!（`--api-base` / `CRABMATE_API_BASE`）。浏览器 Origin 须加入 serve 的
 //! `CM_WEB_CORS_ALLOWED_ORIGINS`。
+//!
+//! 服务层用 `std::net`（见 [`crate::static_files`]）：每个连接单请求 + `Connection: close`，
+//! 避免浏览器 reload 复用 keep-alive 连接时的挂起竞态。
 
 mod open;
 mod root;
@@ -12,13 +15,13 @@ use std::io::ErrorKind;
 use std::net::{SocketAddr, TcpListener};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::thread;
 
 use anyhow::{Context, Result, bail};
 use clap::Parser;
-use tiny_http::Server;
 
 use crate::root::{page_url, page_url_for_log, resolve_web_root};
-use crate::static_files::{handle_request, require_index};
+use crate::static_files::{require_index, serve_connection};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -45,7 +48,7 @@ struct Cli {
 }
 
 enum Bind {
-    Listening(Server),
+    Listening(TcpListener),
     AlreadyRunning,
 }
 
@@ -69,21 +72,22 @@ fn run() -> Result<()> {
 
     let open_url = page_url(cli.listen, cli.api_base.as_deref(), cli.bearer.as_deref());
     let log_url = page_url_for_log(cli.listen, cli.api_base.as_deref(), cli.bearer.as_deref());
-    match bind_server(cli.listen)? {
+    match bind_listener(cli.listen)? {
         Bind::AlreadyRunning => reopen_existing(cli.listen, &open_url, &log_url, cli.no_open),
-        Bind::Listening(server) => {
-            serve_forever(server, &root, cli.listen, &open_url, &log_url, cli.no_open)
-        }
+        Bind::Listening(listener) => serve_forever(
+            listener,
+            &root,
+            cli.listen,
+            &open_url,
+            &log_url,
+            cli.no_open,
+        ),
     }
 }
 
-fn bind_server(listen: SocketAddr) -> Result<Bind> {
+fn bind_listener(listen: SocketAddr) -> Result<Bind> {
     match TcpListener::bind(listen) {
-        Ok(listener) => {
-            let server = Server::from_listener(listener, None)
-                .map_err(|e| anyhow::anyhow!("listen {listen}: {e}"))?;
-            Ok(Bind::Listening(server))
-        }
+        Ok(listener) => Ok(Bind::Listening(listener)),
         Err(e) if e.kind() == ErrorKind::AddrInUse => Ok(Bind::AlreadyRunning),
         Err(e) => bail!("bind {listen}: {e}"),
     }
@@ -97,7 +101,7 @@ fn reopen_existing(listen: SocketAddr, open_url: &str, log_url: &str, no_open: b
 }
 
 fn serve_forever(
-    server: Server,
+    listener: TcpListener,
     root: &Path,
     listen: SocketAddr,
     open_url: &str,
@@ -114,9 +118,19 @@ fn serve_forever(
         listen.port()
     );
     maybe_open_browser(open_url, no_open);
-    for request in server.incoming_requests() {
-        if let Err(e) = handle_request(root, request) {
-            eprintln!("warn: {e:#}");
+    let root = root.to_path_buf();
+    for stream in listener.incoming() {
+        match stream {
+            Ok(stream) => {
+                // 每连接单请求（`Connection: close`），stuck 连接有 10s 读写超时兜底。
+                let root = root.clone();
+                thread::spawn(move || {
+                    if let Err(e) = serve_connection(stream, &root) {
+                        eprintln!("warn: {e:#}");
+                    }
+                });
+            }
+            Err(e) => eprintln!("warn: accept: {e}"),
         }
     }
     bail!("server loop ended")
@@ -146,7 +160,7 @@ mod tests {
     fn second_bind_reports_already_running() {
         let held = TcpListener::bind("127.0.0.1:0").expect("hold port");
         let addr = held.local_addr().expect("local addr");
-        match bind_server(addr).expect("bind_server") {
+        match bind_listener(addr).expect("bind_listener") {
             Bind::AlreadyRunning => {}
             Bind::Listening(_) => panic!("expected AlreadyRunning"),
         }
