@@ -155,6 +155,11 @@ fn warn_if_public_bind(listen: SocketAddr) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::io::{ErrorKind, Read, Write};
+    use std::net::TcpStream;
+    use std::path::PathBuf;
+    use std::time::Duration;
 
     #[test]
     fn second_bind_reports_already_running() {
@@ -164,5 +169,77 @@ mod tests {
             Bind::AlreadyRunning => {}
             Bind::Listening(_) => panic!("expected AlreadyRunning"),
         }
+    }
+
+    fn temp_dist(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "crabmate-web-host-conn-{tag}-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("mkdir");
+        fs::write(dir.join("index.html"), "<html>ok</html>").expect("index");
+        dir
+    }
+
+    fn start_server() -> (SocketAddr, PathBuf) {
+        let dist = temp_dist("regression");
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let addr = listener.local_addr().expect("local addr");
+        let root = dist.clone();
+        std::thread::spawn(move || {
+            let _ = serve_forever(listener, &root, addr, "", "", true);
+        });
+        (addr, dist)
+    }
+
+    /// 回归：浏览器 reload 复用被丢弃的 keep-alive 连接不得挂起。
+    /// 每连接恰好一个请求后关闭（`Connection: close`）；旧 tiny_http 按请求头
+    /// 保持 keep-alive，本用例会在第一次 `read_to_end` 处 5s 超时失败。
+    #[test]
+    fn one_request_per_connection_then_close() {
+        let (addr, dist) = start_server();
+        let mut stream = TcpStream::connect(addr).expect("connect");
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .expect("read timeout");
+        stream
+            .write_all(b"GET / HTTP/1.1\r\nHost: x\r\nConnection: keep-alive\r\n\r\n")
+            .expect("write req");
+        let mut buf = Vec::new();
+        stream.read_to_end(&mut buf).expect("read resp");
+        let head = String::from_utf8_lossy(&buf);
+        assert!(head.starts_with("HTTP/1.1 200"), "head={head:?}");
+        assert!(
+            head.to_ascii_lowercase().contains("connection: close"),
+            "missing Connection: close: {head:?}"
+        );
+
+        // 同一连接再发第二个请求：服务端已关闭，必须快速 EOF / RST，不得挂起。
+        stream.write_all(b"GET / HTTP/1.1\r\nHost: x\r\n\r\n").ok();
+        match stream.read_to_end(&mut Vec::new()) {
+            Ok(_) => {}
+            Err(e) if matches!(e.kind(), ErrorKind::ConnectionReset | ErrorKind::BrokenPipe) => {}
+            Err(e) => panic!("reuse read should EOF/RST promptly, got: {e}"),
+        }
+        let _ = fs::remove_dir_all(&dist);
+    }
+
+    /// 新连接仍可正常服务（单请求模型不影响普通请求）。
+    #[test]
+    fn fresh_connection_serves_index() {
+        let (addr, dist) = start_server();
+        let mut stream = TcpStream::connect(addr).expect("connect");
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .expect("read timeout");
+        stream
+            .write_all(b"GET /index.html HTTP/1.1\r\nHost: x\r\n\r\n")
+            .expect("write req");
+        let mut buf = Vec::new();
+        stream.read_to_end(&mut buf).expect("read resp");
+        let body = String::from_utf8_lossy(&buf);
+        assert!(body.contains("<html>ok</html>"));
+        let _ = fs::remove_dir_all(&dist);
     }
 }

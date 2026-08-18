@@ -50,6 +50,7 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Fixed
 
+- Loopback web host (`crabmate-web`): each connection serves exactly one request and closes (`Connection: close`, with 10s read/write timeouts), so a browser reload that reuses a dropped keep-alive connection no longer hangs (page stuck on the boot splash). The serve path now uses `std::net` directly instead of tiny_http
 - Chat P2 follow-up: in-place edit save is refused while a turn is in flight or another follow-up is queued; switching sessions parks a queued composer line back onto that session’s draft; transcript sync no longer re-runs on every edit keystroke, and find `<mark>` wrapping does not walk the full transcript on each stream token
 - Shell a11y (P1): approval modal traps Tab and Escape submits `deny`; confirm / new-file dialogs trap focus (Escape closes even from the path field); image attach is a real button; context menus take focus and arrow keys; session/file/message/IDE-tab Shift+F10; IDE tabs Left/Right; workspace file rows are keyboard-activatable; Ask/Plan/Act and side-view items are `menuitemradio`; current session `aria-current`; pin/star/unsaved names are announced
 - IDE: entering the editor no longer keeps the stale “rebuild the frontend” banner. CodeMirror load status is an explicit state machine; the warning is reactive and only shows after that load fails. A failed `<script>` is removed so leaving and re-entering IDE can retry (Tauri packaged UI with hash handoff included)
