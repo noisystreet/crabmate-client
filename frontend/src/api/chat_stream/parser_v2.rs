@@ -110,9 +110,9 @@ fn dispatch_run_error(val: &serde_json::Value, sink: &mut SseControlSink<'_>) {
         .and_then(|r| r.as_str());
     let line = format_user_error_with_meta(msg, code, request_id);
     (sink.on_error)(line);
-    if let Some(hook) = sink.notice_timeline.on_run_finished.as_mut() {
-        hook(None);
-    }
+    // 注意：**不**调用 `on_run_finished`——该钩子会把终态合成 `stream_ended=completed`，
+    // 将失败回合误标为"完成"（导出/诊断显示 `stream_ended=完成` 掩盖真实错误）。
+    // 回合收口由 `on_error`（气泡写错误文案 + 释放 turn）负责。
 }
 
 /// 用户可读错误：`message (CODE) [request_id=…]`（缺省字段省略）。
@@ -644,6 +644,35 @@ mod tests {
         let dispatch = parser.parse(data, &mut sink);
         assert_eq!(dispatch, SseDispatch::StreamEnded);
         assert_eq!(*got.borrow(), "fail (ERR) [request_id=cm-1]");
+    }
+
+    #[test]
+    fn run_error_does_not_synthesize_run_finished() {
+        let parser = V2Parser;
+        let called = Rc::new(std::cell::Cell::new(false));
+        let called2 = Rc::clone(&called);
+        let mut on_fin =
+            move |_tik: Option<crate::conversation_hydrate::TiktokenPromptTokensSnapshot>| {
+                called2.set(true);
+            };
+        let mut sink = SseControlSink {
+            on_error: &mut |_| {},
+            on_delta: None,
+            workspace_tool: SseWorkspaceToolHooks::default(),
+            turn_phase: SseTurnPhaseHooks::default(),
+            clarify_trace: SseClarifyTraceHooks::default(),
+            notice_timeline: SseNoticeTimelineHooks {
+                on_run_finished: Some(&mut on_fin),
+                ..SseNoticeTimelineHooks::default()
+            },
+        };
+        let data = r#"{"type":"RUN_ERROR","error":{"message":"fail","code":"ERR"}}"#;
+        let dispatch = parser.parse(data, &mut sink);
+        assert_eq!(dispatch, SseDispatch::StreamEnded);
+        assert!(
+            !called.get(),
+            "RUN_ERROR 不得触发 on_run_finished（会合成 stream_ended=completed 掩盖错误）"
+        );
     }
 
     #[test]

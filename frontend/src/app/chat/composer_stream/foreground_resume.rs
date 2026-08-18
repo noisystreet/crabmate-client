@@ -119,7 +119,9 @@ pub(crate) fn spawn_foreground_stream_resume(args: ForegroundStreamResumeArgs) {
             .apply_release_turn_and_stream_run(gen_snapshot);
         match stream_result {
             Ok(()) => {}
-            Err(e) if user_cancelled_flag(&shell_for_stream) || e == "stream stopped" => {}
+            Err(e)
+                if user_cancelled_flag(&shell_for_stream)
+                    || crate::i18n::is_stream_stopped_error(&e) => {}
             Err(e) => {
                 shell_for_stream.stream.status_err.set(Some(e.clone()));
                 on_error_spawn(e);

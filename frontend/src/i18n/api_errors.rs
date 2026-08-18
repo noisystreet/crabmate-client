@@ -188,6 +188,17 @@ pub fn api_err_stream_stopped(l: Locale) -> String {
     }
 }
 
+/// 判断是否为「流已停止」哨兵错误（解析器在 `RUN_ERROR` 等事件后中断流的错误）。
+///
+/// 该错误由 [`api_err_stream_stopped`] 按语言本地化（"流已停止" / "Stream stopped"），
+/// 消费方据此静默收尾、避免按普通错误二次触发 `on_error` 覆盖已写好的错误文案。
+/// 历史上消费方与硬编码小写英文 `"stream stopped"` 比较，任何语言下都不匹配
+/// （英文为 `"Stream stopped"`），导致二次触发 `on_error`；此处按大小写不敏感收敛。
+pub fn is_stream_stopped_error(e: &str) -> bool {
+    let t = e.trim();
+    t == "流已停止" || t.eq_ignore_ascii_case("stream stopped")
+}
+
 pub fn api_err_stream_read(e: &wasm_bindgen::JsValue) -> String {
     format!("read await: {:?}", e)
 }
@@ -212,5 +223,22 @@ pub fn api_err_body_type(l: Locale) -> &'static str {
     match l {
         Locale::ZhHans => "响应体类型错误",
         Locale::En => "Unexpected body type",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 哨兵识别须与 [`api_err_stream_stopped`] 的两种语言一致，否则中文环境下
+    /// 消费方按普通错误二次触发 `on_error`，覆盖已写好的错误文案。
+    #[test]
+    fn stream_stopped_sentinel_matches_both_locales() {
+        assert!(is_stream_stopped_error(&api_err_stream_stopped(
+            Locale::ZhHans
+        )));
+        assert!(is_stream_stopped_error(&api_err_stream_stopped(Locale::En)));
+        assert!(!is_stream_stopped_error("other error"));
+        assert!(!is_stream_stopped_error(""));
     }
 }
