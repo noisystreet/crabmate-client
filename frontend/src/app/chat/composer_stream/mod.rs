@@ -131,7 +131,7 @@ pub(super) fn make_attach_chat_stream(h: ComposerStreamHandles) -> AttachChatStr
                         crate::mobile_stream_keepalive::on_stream_attach_finished();
                         return;
                     }
-                    if e == "stream stopped" {
+                    if crate::i18n::is_stream_stopped_error(&e) {
                         crate::mobile_stream_keepalive::on_stream_attach_finished();
                         return;
                     }
