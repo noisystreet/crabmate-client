@@ -159,13 +159,14 @@ Default listen is `127.0.0.1:4173`. `--no-open` skips `xdg-open`. Bearer: `--bea
 
 Expose only `api.…` → Caddy → loopback `serve` (no `--with-web`); the shell uses packaged UI against `https://api.…/` + Bearer. Steps: [`docs/design/personal_cloud_runbook.md`](docs/design/personal_cloud_runbook.md). VPS/systemd/Caddy: Server [`个人VPS部署指南.md`](https://github.com/noisystreet/CrabMate/blob/main/docs/个人VPS部署指南.md).
 
-## Quick start (business UI via browser + serve)
+## Quick start (Playwright / browser E2E)
 
-For Playwright / same-origin browser testing only (not the Desktop/Android path):
+Playwright runs against the **client self-hosted** web UI: a pure-API `serve` plus `crabmate-web` (loopback static host, default `127.0.0.1:4173`). The script starts both and allows the web Origin via `CM_WEB_CORS_ALLOWED_ORIGINS`; no `serve --with-web` is needed (Server stays API-only).
 
 ```bash
 make frontend
-CM_WEB_STATIC_DIR="$PWD/frontend/dist" crabmate serve --with-web --host 127.0.0.1 --port 8080
+./scripts/e2e-playwright.sh
+# or run a single spec: ./scripts/e2e-playwright.sh specs/mock-overlay-timing.spec.ts
 ```
 
 ## Quick start (Android)

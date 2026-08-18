@@ -2,7 +2,7 @@
  * Issue #26：服务端 messages 非空但客户端解析为 0 条时须显示水合错误、保留本地时间线、可重试。
  */
 import { expect, type Page, test } from "@playwright/test";
-import { openSessionInRail, seedSession } from "../fixtures/helpers";
+import { apiUrl, openSessionInRail, seedSession } from "../fixtures/helpers";
 
 const LOCAL_USER = "e2e-local-user-before-hydrate";
 
@@ -36,8 +36,8 @@ test("hydration parse failure shows error, keeps local messages, retry refetches
   await installUnparsableHistoryRoute(page, conversationId, 2);
 
   await page.evaluate(
-    async ({ sessionId, cid, localText }) => {
-      await fetch("/user-data/workspaces/current/sessions", {
+    async ({ url, sessionId, cid, localText }) => {
+      await fetch(url, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -67,7 +67,12 @@ test("hydration parse failure shows error, keeps local messages, retry refetches
         }),
       });
     },
-    { sessionId: sid, cid: conversationId, localText: LOCAL_USER },
+    {
+      url: apiUrl("/user-data/workspaces/current/sessions"),
+      sessionId: sid,
+      cid: conversationId,
+      localText: LOCAL_USER,
+    },
   );
 
   await page.reload({ waitUntil: "networkidle", timeout: 20_000 });

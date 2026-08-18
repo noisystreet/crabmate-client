@@ -19,6 +19,8 @@
 
 import { test, expect } from "@playwright/test";
 import {
+  apiUrl,
+  homeUrlWithOptionalWebBearer,
   seedSession,
   sendMessage,
   installMockSse,
@@ -167,19 +169,25 @@ test("多轮助手正文不应合并为一条 stored_message", async ({ page, br
   await expect
     .poll(
       () =>
-        page.evaluate((sessionId) => {
-          return fetch("/user-data/workspaces/current/sessions")
-            .then((response) => response.json())
-            .then((data) => {
-              const session = (data.sessions ?? []).find(
-                (candidate: { id?: string }) => candidate.id === sessionId,
-              );
-              return {
-                layoutSchemaVersion: session?.layout_schema_version ?? 0,
-                messages: session?.messages ?? [],
-              };
-            });
-        }, sid),
+        page.evaluate(
+          ({ url, sessionId }) => {
+            return fetch(url)
+              .then((response) => response.json())
+              .then((data) => {
+                const session = (data.sessions ?? []).find(
+                  (candidate: { id?: string }) => candidate.id === sessionId,
+                );
+                return {
+                  layoutSchemaVersion: session?.layout_schema_version ?? 0,
+                  messages: session?.messages ?? [],
+                };
+              });
+          },
+          {
+            url: apiUrl("/user-data/workspaces/current/sessions"),
+            sessionId: sid,
+          },
+        ),
       { timeout: 10_000 },
     )
     .toMatchObject({
@@ -193,9 +201,13 @@ test("多轮助手正文不应合并为一条 stored_message", async ({ page, br
     });
 
   // 独立浏览器上下文从同一服务端缓存加载，v2 ready 行不经 legacy pool 重排。
+  // 新上下文 localStorage 为空：须带 `#cm_api_base=` 交接（跨 Origin 时 API 不在本页 Origin）。
   const secondContext = await browser.newContext();
   const secondPage = await secondContext.newPage();
-  await secondPage.goto("/", { waitUntil: "networkidle", timeout: 20_000 });
+  await secondPage.goto(homeUrlWithOptionalWebBearer("/"), {
+    waitUntil: "networkidle",
+    timeout: 20_000,
+  });
   await secondPage.waitForSelector('[data-testid="chat-composer-input"]');
   await openSessionInRail(secondPage, sid);
   for (const signature of TEXT_SIGNATURES) {

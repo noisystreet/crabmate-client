@@ -3,7 +3,8 @@
 # mock SSE 基线（不依赖 LLM）。真实 LLM 仅本地：
 #   cd e2e && npx playwright test specs/real-llm-*.spec.ts
 #
-# CI：本仓 make frontend + checkout Server 编 serve，经 CM_WEB_STATIC_DIR + --with-web 托管。
+# CI：本仓 make frontend + checkout Server 编纯 API serve + 本仓编 crabmate-web
+#（回环托管 UI；serve 不传 --with-web，CORS 放行 web Origin）。
 
 name: E2E Playwright
 
@@ -113,6 +114,7 @@ jobs:
         working-directory: e2e
         env:
           no_proxy: 127.0.0.1,localhost
+          CRABMATE_API_BASE: http://127.0.0.1:8080
 
       - name: Upload Playwright report
         if: always()

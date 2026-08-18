@@ -4,7 +4,7 @@
 
 - 本仓 `make web-release` / `crabmate-web` 在回环上托管，并用系统浏览器打开（不是 Tauri，也不是 `crabmate serve`）
 - 本仓桌面壳 `prepare-sidecar` 同步进 `desktop-tauri/dist`
-- 外部 `crabmate serve --with-web` 经 **`CM_WEB_STATIC_DIR`** 托管（Server 默认纯 API，须显式开启；仅 Playwright / 同 Origin 调试）
+- Playwright E2E 用**客户端自托管**：纯 API `serve` + 本仓 `crabmate-web` 回环托管（`./scripts/e2e-playwright.sh`；不依赖 `serve --with-web`，跨 Origin 靠 `CM_WEB_CORS_ALLOWED_ORIGINS` 放行）
 
 契约 crate 钉 crates.io **`crabmate` 0.4.0** + `protocol`，禁止 `path` 回本地 `crabmate_agent`（见 [`../docs/design/contract_pin.md`](../docs/design/contract_pin.md)）。
 

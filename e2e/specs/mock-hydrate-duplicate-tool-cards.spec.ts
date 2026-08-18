@@ -26,7 +26,7 @@
  *     specs/mock-hydrate-duplicate-tool-cards.spec.ts
  */
 import { expect, type Page, test } from "@playwright/test";
-import { seedSession, openSessionInRail } from "../fixtures/helpers";
+import { apiUrl, seedSession, openSessionInRail } from "../fixtures/helpers";
 import {
   fetchPersistedSession,
   type PersistedMessage,
@@ -145,8 +145,8 @@ test.describe("水合双工具卡 / 终答夹心（export 20260808）", () => {
     await installOpenAiHistoryRoute(page, conversationId, 1);
 
     await page.evaluate(
-      async ({ sessionId, cid }) => {
-        await fetch("/user-data/workspaces/current/sessions", {
+      async ({ url, sessionId, cid }) => {
+        await fetch(url, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -169,7 +169,11 @@ test.describe("水合双工具卡 / 终答夹心（export 20260808）", () => {
           }),
         });
       },
-      { sessionId: sid, cid: conversationId },
+      {
+        url: apiUrl("/user-data/workspaces/current/sessions"),
+        sessionId: sid,
+        cid: conversationId,
+      },
     );
 
     await page.reload({ waitUntil: "networkidle", timeout: 20_000 });
@@ -222,6 +226,7 @@ test.describe("水合双工具卡 / 终答夹心（export 20260808）", () => {
 
     await page.evaluate(
       async ({
+        url,
         sessionId,
         cid,
         callCard,
@@ -229,7 +234,7 @@ test.describe("水合双工具卡 / 终答夹心（export 20260808）", () => {
         resultBody,
         userPrompt,
       }) => {
-        await fetch("/user-data/workspaces/current/sessions", {
+        await fetch(url, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -280,6 +285,7 @@ test.describe("水合双工具卡 / 终答夹心（export 20260808）", () => {
         void callCard;
       },
       {
+        url: apiUrl("/user-data/workspaces/current/sessions"),
         sessionId: sid,
         cid: conversationId,
         callCard: CALL_CARD_TEXT,

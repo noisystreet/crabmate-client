@@ -9,7 +9,7 @@
  *   cd e2e && no_proxy=127.0.0.1,localhost npx playwright test specs/mock-late-commentary.spec.ts
  */
 import { expect, test } from "@playwright/test";
-import { seedSession, sendMessage } from "../fixtures/helpers";
+import { apiUrl, seedSession, sendMessage } from "../fixtures/helpers";
 
 const STREAM_DELAY_MS = 70;
 const CONV_ID = "e2e-late-commentary";
@@ -136,15 +136,18 @@ async function persistedSession(
   page: import("@playwright/test").Page,
   sid: string,
 ) {
-  return page.evaluate(async (sessionId) => {
-    const response = await fetch("/user-data/workspaces/current/sessions");
-    const data = await response.json();
-    return (
-      (data.sessions as PersistedSession[] | undefined)?.find(
-        (session) => session.id === sessionId,
-      ) ?? null
-    );
-  }, sid);
+  return page.evaluate(
+    async ({ url, sessionId }) => {
+      const response = await fetch(url);
+      const data = await response.json();
+      return (
+        (data.sessions as PersistedSession[] | undefined)?.find(
+          (session) => session.id === sessionId,
+        ) ?? null
+      );
+    },
+    { url: apiUrl("/user-data/workspaces/current/sessions"), sessionId: sid },
+  );
 }
 
 test("late commentary after tool_call still sits before its tool exactly once", async ({

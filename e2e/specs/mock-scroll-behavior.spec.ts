@@ -1,5 +1,6 @@
 import { expect, Page, test } from "@playwright/test";
 import {
+  apiUrl,
   installDelayedMockSse,
   openSessionInRail,
   seedSession,
@@ -16,8 +17,8 @@ async function seedScrollableSession(page: Page, sid: string, count = 50) {
     text: `scroll-test-line-${index}`,
   }));
   await page.evaluate(
-    ({ sessionId, seededMessages }) =>
-      fetch("/user-data/workspaces/current/sessions", {
+    ({ url, sessionId, seededMessages }) =>
+      fetch(url, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -35,7 +36,11 @@ async function seedScrollableSession(page: Page, sid: string, count = 50) {
           active_session_id: sessionId,
         }),
       }),
-    { sessionId: sid, seededMessages: messages },
+    {
+      url: apiUrl("/user-data/workspaces/current/sessions"),
+      sessionId: sid,
+      seededMessages: messages,
+    },
   );
   await page.reload({ waitUntil: "networkidle", timeout: 15_000 });
   await page.waitForSelector('[data-testid="chat-composer-input"]');

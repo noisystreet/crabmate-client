@@ -17,6 +17,7 @@
 
 import { test, expect } from "@playwright/test";
 import {
+  apiUrl,
   ensureRealLlmModelCredential,
   resolveOptionalApiKeyFromEnvOrToml,
   sendMessage,
@@ -76,8 +77,8 @@ test.describe("真实 LLM：无工具终答场景", () => {
     const pollInterval = 500;
     for (let elapsed = 0; elapsed < pollTimeout; elapsed += pollInterval) {
       const fetched: unknown[] = await page.evaluate(
-        (sid: string) =>
-          fetch("/user-data/workspaces/current/sessions")
+        ({ url, sid }: { url: string; sid: string }) =>
+          fetch(url)
             .then((r) => r.json())
             .then((d) => {
               const list = d.current?.sessions || d.sessions || [];
@@ -86,7 +87,10 @@ test.describe("真实 LLM：无工具终答场景", () => {
                 : null;
               return s ? s.messages || [] : [];
             }),
-        SID + "_persist",
+        {
+          url: apiUrl("/user-data/workspaces/current/sessions"),
+          sid: SID + "_persist",
+        },
       );
       const hasAssistantText = (
         fetched as Array<{ role: string; text: string }>

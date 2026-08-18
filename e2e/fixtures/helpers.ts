@@ -6,6 +6,22 @@ import * as path from "path";
 // 辅助函数：seed 会话 & prefs，mock SSE 拦截
 // ---------------------------------------------------------------------------
 
+/**
+ * 远程 serve API 基址（无尾 `/`）；空 = 同 Origin。
+ * crabmate-web 托管页面（4173）时，API 走独立纯 API serve（8080），
+ * 由脚本导出 `CRABMATE_API_BASE` 注入；同 Origin 手动模式为空串。
+ */
+export function apiBase(): string {
+  return (process.env.CRABMATE_API_BASE || "").trim().replace(/\/+$/, "");
+}
+
+/** 把 API 相对路径拼到 API 基址；同 Origin 时原样返回。 */
+export function apiUrl(path: string): string {
+  const base = apiBase();
+  if (!base) return path;
+  return `${base}${path}`;
+}
+
 /** 设置 prefs、session，再导航一次等待输入框就绪（避免 SPA 防抖 PUT 盖住 seed）。*/
 export async function seedSession(page: Page, sid: string) {
   await applyWebApiBearerHeaders(page);
@@ -42,7 +58,7 @@ export async function seedSession(page: Page, sid: string) {
   };
 
   // 用 APIRequestContext 写入，不先加载旧桶进 WASM，杜绝「旧列表防抖回写」竞态。
-  const prefsRes = await page.request.put("/user-data/prefs", {
+  const prefsRes = await page.request.put(apiUrl("/user-data/prefs"), {
     data: prefs,
     headers: jsonHeaders,
   });
@@ -51,7 +67,7 @@ export async function seedSession(page: Page, sid: string) {
   );
 
   const putRes = await page.request.put(
-    "/user-data/workspaces/current/sessions",
+    apiUrl("/user-data/workspaces/current/sessions"),
     {
       data: sessionsBody,
       headers: jsonHeaders,
@@ -59,9 +75,12 @@ export async function seedSession(page: Page, sid: string) {
   );
   expect(putRes.ok(), `seedSession sessions PUT ${putRes.status()}`).toBe(true);
 
-  const got = await page.request.get("/user-data/workspaces/current/sessions", {
-    headers: bearer ? { Authorization: `Bearer ${bearer}` } : undefined,
-  });
+  const got = await page.request.get(
+    apiUrl("/user-data/workspaces/current/sessions"),
+    {
+      headers: bearer ? { Authorization: `Bearer ${bearer}` } : undefined,
+    },
+  );
   expect(got.ok(), `seedSession sessions GET ${got.status()}`).toBe(true);
   const before = (await got.json()) as {
     sessions?: { id?: string }[];
@@ -86,7 +105,7 @@ export async function seedSession(page: Page, sid: string) {
     .poll(
       async () => {
         const r = await page.request.get(
-          "/user-data/workspaces/current/sessions",
+          apiUrl("/user-data/workspaces/current/sessions"),
           {
             headers: bearer ? { Authorization: `Bearer ${bearer}` } : undefined,
           },
@@ -258,12 +277,21 @@ export function resolveWebApiBearerToken(): string {
   return (process.env.CM_WEB_API_BEARER_TOKEN || "").trim();
 }
 
-/** 首页 URL；若设了 `CM_WEB_API_BEARER_TOKEN` 则带上 hash 交接（供 WASM 鉴权层）。 */
+/** 首页 URL；跨 Origin 时带 `#cm_api_base=` 交接（WASM 消费后写入 localStorage 供刷新），
+ * 设了 `CM_WEB_API_BEARER_TOKEN` 时再带 Bearer 交接。 */
 export function homeUrlWithOptionalWebBearer(pathname = "/"): string {
+  const parts: string[] = [];
+  const api = apiBase();
+  if (api) {
+    parts.push(`cm_api_base=${encodeURIComponent(api)}`);
+  }
   const bearer = resolveWebApiBearerToken();
-  if (!bearer) return pathname;
+  if (bearer) {
+    parts.push(`cm_web_api_bearer=${encodeURIComponent(bearer)}`);
+  }
+  if (parts.length === 0) return pathname;
   const sep = pathname.includes("#") ? "&" : "#";
-  return `${pathname}${sep}cm_web_api_bearer=${encodeURIComponent(bearer)}`;
+  return `${pathname}${sep}${parts.join("&")}`;
 }
 
 /**
@@ -387,13 +415,8 @@ export async function setupRealLLMSession(
 
   // 设置 LLM 覆盖配置
   await page.evaluate(
-    (c: {
-      apiBase: string;
-      model: string;
-      contextTokens: string;
-      thinkingMode: string;
-    }) =>
-      fetch("/user-data/llm-overrides", {
+    ({ url, c }: { url: string; c: typeof cfg }) =>
+      fetch(url, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -405,47 +428,52 @@ export async function setupRealLLMSession(
           },
         }),
       }),
-    cfg,
+    { url: apiUrl("/user-data/llm-overrides"), c: cfg },
   );
 
   // 设置 prefs
-  await page.evaluate(() =>
-    fetch("/user-data/prefs", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        locale: "zh",
-        theme: "light",
-        side_panel_view: "hidden",
-        side_width: 280,
-        editor_layout_mode: false,
-        status_bar_visible: true,
-      }),
-    }).catch(() => {}),
+  await page.evaluate(
+    (url: string) =>
+      fetch(url, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          locale: "zh",
+          theme: "light",
+          side_panel_view: "hidden",
+          side_width: 280,
+          editor_layout_mode: false,
+          status_bar_visible: true,
+        }),
+      }).catch(() => {}),
+    apiUrl("/user-data/prefs"),
   );
 
   // 创建空会话
-  await page.evaluate((s: string) => {
-    const body = JSON.stringify({
-      sessions: [
-        {
-          id: s,
-          title: "e2e-real-llm",
-          draft: "",
-          messages: [],
-          updated_at: Date.now(),
-          pinned: false,
-          starred: false,
-        },
-      ],
-      active_session_id: s,
-    });
-    return fetch("/user-data/workspaces/current/sessions", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body,
-    }).catch(() => {});
-  }, sid);
+  await page.evaluate(
+    ({ url, s }: { url: string; s: string }) => {
+      const body = JSON.stringify({
+        sessions: [
+          {
+            id: s,
+            title: "e2e-real-llm",
+            draft: "",
+            messages: [],
+            updated_at: Date.now(),
+            pinned: false,
+            starred: false,
+          },
+        ],
+        active_session_id: s,
+      });
+      return fetch(url, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body,
+      }).catch(() => {});
+    },
+    { url: apiUrl("/user-data/workspaces/current/sessions"), s: sid },
+  );
 
   // 重载等待 UI（Bearer 已在首屏 hash 交接后写入本页存储）
   await page.reload({ waitUntil: "networkidle", timeout: 20000 });
@@ -486,13 +514,8 @@ export async function setupRealLLMSessionPreferringKeyring(
   });
 
   await page.evaluate(
-    (c: {
-      apiBase: string;
-      model: string;
-      contextTokens: string;
-      thinkingMode: string;
-    }) =>
-      fetch("/user-data/llm-overrides", {
+    ({ url, c }: { url: string; c: typeof cfg }) =>
+      fetch(url, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -504,45 +527,50 @@ export async function setupRealLLMSessionPreferringKeyring(
           },
         }),
       }),
-    cfg,
+    { url: apiUrl("/user-data/llm-overrides"), c: cfg },
   );
 
-  await page.evaluate(() =>
-    fetch("/user-data/prefs", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        locale: "zh",
-        theme: "light",
-        side_panel_view: "hidden",
-        side_width: 280,
-        editor_layout_mode: false,
-        status_bar_visible: true,
-      }),
-    }).catch(() => {}),
+  await page.evaluate(
+    (url: string) =>
+      fetch(url, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          locale: "zh",
+          theme: "light",
+          side_panel_view: "hidden",
+          side_width: 280,
+          editor_layout_mode: false,
+          status_bar_visible: true,
+        }),
+      }).catch(() => {}),
+    apiUrl("/user-data/prefs"),
   );
 
-  await page.evaluate((s: string) => {
-    const body = JSON.stringify({
-      sessions: [
-        {
-          id: s,
-          title: "e2e-real-llm",
-          draft: "",
-          messages: [],
-          updated_at: Date.now(),
-          pinned: false,
-          starred: false,
-        },
-      ],
-      active_session_id: s,
-    });
-    return fetch("/user-data/workspaces/current/sessions", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body,
-    }).catch(() => {});
-  }, sid);
+  await page.evaluate(
+    ({ url, s }: { url: string; s: string }) => {
+      const body = JSON.stringify({
+        sessions: [
+          {
+            id: s,
+            title: "e2e-real-llm",
+            draft: "",
+            messages: [],
+            updated_at: Date.now(),
+            pinned: false,
+            starred: false,
+          },
+        ],
+        active_session_id: s,
+      });
+      return fetch(url, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body,
+      }).catch(() => {});
+    },
+    { url: apiUrl("/user-data/workspaces/current/sessions"), s: sid },
+  );
 
   await page.reload({ waitUntil: "networkidle", timeout: 20_000 });
   await page.waitForSelector('[data-testid="chat-composer-input"]', {

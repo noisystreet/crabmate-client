@@ -13,6 +13,7 @@
 
 import { test, expect, Page } from "@playwright/test";
 import {
+  apiUrl,
   applyWebApiBearerHeaders,
   homeUrlWithOptionalWebBearer,
   resolveWebApiBearerToken,
@@ -70,7 +71,7 @@ async function seedTwoSessions(page: Page) {
 
   expect(
     (
-      await page.request.put("/user-data/prefs", {
+      await page.request.put(apiUrl("/user-data/prefs"), {
         data: prefs,
         headers: jsonHeaders,
       })
@@ -78,7 +79,7 @@ async function seedTwoSessions(page: Page) {
   ).toBe(true);
   expect(
     (
-      await page.request.put("/user-data/workspaces/current/sessions", {
+      await page.request.put(apiUrl("/user-data/workspaces/current/sessions"), {
         data: sessionsBody,
         headers: jsonHeaders,
       })
@@ -98,7 +99,7 @@ async function seedTwoSessions(page: Page) {
     .poll(
       async () => {
         const r = await page.request.get(
-          "/user-data/workspaces/current/sessions",
+          apiUrl("/user-data/workspaces/current/sessions"),
           {
             headers: bearer ? { Authorization: `Bearer ${bearer}` } : undefined,
           },

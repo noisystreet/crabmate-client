@@ -158,13 +158,14 @@ crabmate-web --api-base http://127.0.0.1:8080
 
 公网只暴露 `api.…` → Caddy → 本机 `serve`（不要 `--with-web`）；壳用包内 UI 连接 `https://api.…/` + Bearer。步骤与勾选见 [`docs/design/personal_cloud_runbook.md`](docs/design/personal_cloud_runbook.md)。VPS/systemd/Caddy 见 Server [`个人VPS部署指南.md`](https://github.com/noisystreet/CrabMate/blob/main/docs/个人VPS部署指南.md)。
 
-## 快速开始（浏览器 + serve 托管 UI）
+## 快速开始（Playwright / 浏览器 E2E）
 
-仅用于 Playwright / 同 Origin 浏览器调试（非 Desktop/Android 主路径）：
+Playwright 跑在**客户端自托管**的 Web UI 上：纯 API `serve` + `crabmate-web`（回环静态服务，默认 `127.0.0.1:4173`）。脚本自动起两者，并经 `CM_WEB_CORS_ALLOWED_ORIGINS` 放行 web Origin；不再依赖 `serve --with-web`（Server 保持纯 API）。
 
 ```bash
 make frontend
-CM_WEB_STATIC_DIR="$PWD/frontend/dist" crabmate serve --with-web --host 127.0.0.1 --port 8080
+./scripts/e2e-playwright.sh
+# 或指定用例：./scripts/e2e-playwright.sh specs/mock-overlay-timing.spec.ts
 ```
 
 ## 快速开始（Android）
