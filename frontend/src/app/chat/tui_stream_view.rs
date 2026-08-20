@@ -27,6 +27,9 @@ use super::tui_transcript_sync::{PlanTuiSyncArgs, TuiMountState, TuiSyncPlan, pl
 use super::user_message_edit::{
     UserEditClick, mount_user_message_editor, try_handle_user_edit_click, try_sync_user_edit_draft,
 };
+use super::workspace_image_hydrate::{
+    revoke_workspace_image_blobs, schedule_workspace_image_hydrate,
+};
 use crate::api::post_tool_job_cancel;
 use crate::chat_session_state::ChatSessionSignals;
 use crate::i18n::{self, Locale};
@@ -194,6 +197,7 @@ fn apply_body_patch(
 ) -> bool {
     match patch {
         TuiBodyPatch::ReplaceAll { chunks } => {
+            revoke_workspace_image_blobs(body);
             body.set_inner_html(&chunks.to_inner_html());
             true
         }
@@ -333,13 +337,19 @@ fn apply_tui_body_and_action_patches(
 
 fn apply_tui_sync_plan(transcript: &web_sys::HtmlElement, plan: &TuiSyncPlan) -> bool {
     if let Some(html) = &plan.full_html {
+        revoke_workspace_image_blobs(transcript);
         transcript.set_inner_html(html);
+        schedule_workspace_image_hydrate(transcript);
         return true;
     }
     if !apply_tui_promote_and_appends(transcript, plan) {
         return false;
     }
-    apply_tui_body_and_action_patches(transcript, plan)
+    if !apply_tui_body_and_action_patches(transcript, plan) {
+        return false;
+    }
+    schedule_workspace_image_hydrate(transcript);
+    true
 }
 
 fn find_restore_scope_from_plan(plan: &TuiSyncPlan) -> FindRestoreScope {

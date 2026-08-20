@@ -6,6 +6,7 @@ mod autolink;
 mod code_block;
 mod sanitize;
 mod stream_inline;
+pub(crate) mod workspace_image;
 
 use pulldown_cmark::{Options, Parser, html};
 
@@ -802,6 +803,24 @@ mod tests {
         assert!(h.contains("<img"), "got {h:?}");
         assert!(h.contains("referrerpolicy=\"no-referrer\""), "got {h:?}");
         assert!(h.contains("https://example.com/p.png"), "got {h:?}");
+    }
+
+    #[test]
+    fn relative_workspace_png_rewrites_to_raw_api() {
+        let h = to_safe_html("![x](plots/a.png)");
+        assert!(h.contains("<img"), "got {h:?}");
+        assert!(h.contains("/workspace/file/raw?path="), "got {h:?}");
+        assert!(
+            !h.contains("plots/a.png\""),
+            "raw dest should be query-encoded, got {h:?}"
+        );
+    }
+
+    #[test]
+    fn relative_svg_image_is_stripped() {
+        let h = to_safe_html("![x](plots/a.svg)");
+        let lower = h.to_lowercase();
+        assert!(!lower.contains("<img"), "got {h:?}");
     }
 
     #[test]

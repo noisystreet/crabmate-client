@@ -38,6 +38,7 @@ pub(crate) mod turn_lifecycle;
 mod user_message_edit;
 pub(crate) mod wire_chat_domain;
 pub(crate) mod wire_chat_session_lifecycle;
+mod workspace_image_hydrate;
 pub use handles::{ChatColumnShell, ComposerStreamShell};
 
 pub(crate) use handles::ChatComposerWires;
