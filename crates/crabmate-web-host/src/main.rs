@@ -182,8 +182,8 @@ mod tests {
         dir
     }
 
-    fn start_server() -> (SocketAddr, PathBuf) {
-        let dist = temp_dist("regression");
+    fn start_server(tag: &str) -> (SocketAddr, PathBuf) {
+        let dist = temp_dist(tag);
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
         let addr = listener.local_addr().expect("local addr");
         let root = dist.clone();
@@ -198,7 +198,7 @@ mod tests {
     /// 保持 keep-alive，本用例会在第一次 `read_to_end` 处 5s 超时失败。
     #[test]
     fn one_request_per_connection_then_close() {
-        let (addr, dist) = start_server();
+        let (addr, dist) = start_server("one-request");
         let mut stream = TcpStream::connect(addr).expect("connect");
         stream
             .set_read_timeout(Some(Duration::from_secs(5)))
@@ -228,7 +228,7 @@ mod tests {
     /// 新连接仍可正常服务（单请求模型不影响普通请求）。
     #[test]
     fn fresh_connection_serves_index() {
-        let (addr, dist) = start_server();
+        let (addr, dist) = start_server("fresh-connection");
         let mut stream = TcpStream::connect(addr).expect("connect");
         stream
             .set_read_timeout(Some(Duration::from_secs(5)))
