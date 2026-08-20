@@ -14,6 +14,7 @@ pub(crate) mod github_secrets_local;
 mod http;
 mod http_workspace_clone;
 mod http_workspace_projects;
+mod http_workspace_raw;
 pub(crate) mod llm_secrets_local;
 mod saved_models;
 mod session_store;
@@ -58,6 +59,7 @@ pub use http_workspace_clone::{
     post_workspace_clone_stream,
 };
 pub use http_workspace_projects::{fetch_workspace_projects, post_workspace_project};
+pub use http_workspace_raw::put_workspace_file_raw;
 pub use llm_secrets_local::PersistKind;
 pub use saved_models::{
     ExecutorLlmDraftSignals, MainLlmDraftSignals, SavedModelPreset,

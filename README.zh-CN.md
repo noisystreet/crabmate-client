@@ -134,6 +134,8 @@ make desktop-dev
 
 连接页填写服务器地址与可选 Web Bearer（**不是**模型 `API_KEY`）。连接成功后加载**包内** `index.html`，API 指向该 `serve`。
 
+工作区侧栏（或 IDE 文件树）可把**本机文件**拖到文件夹上上传（先确认；支持文本与二进制）。走 **`PUT /workspace/file/raw`**，需要当前 Server 构建（不是 crates.io / git **`v0.4.0`** 的 `serve`）。目标已存在时会再问是否覆盖；取消覆盖则**中止本批剩余文件**。
+
 ## 快速开始（系统浏览器里的 Web UI）
 
 不是 Tauri：本机回环静态服务打开默认浏览器。仍然**不是** `crabmate serve` — API 要另开，并在 CORS 里放行页面 Origin。

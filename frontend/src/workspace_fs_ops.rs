@@ -248,5 +248,7 @@ mod tests {
             workspace_tree_ctx_save_to_device(Locale::En),
             "Save to this device…"
         );
+        assert_eq!(crate::i18n::workspace_upload_ok(Locale::ZhHans), "上传");
+        assert_eq!(crate::i18n::workspace_upload_ok(Locale::En), "Upload");
     }
 }

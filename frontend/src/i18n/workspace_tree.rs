@@ -119,3 +119,53 @@ pub fn workspace_tree_inline_name_ph_dir(l: Locale) -> &'static str {
         Locale::En => "Folder name",
     }
 }
+
+pub fn workspace_upload_ok(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "上传",
+        Locale::En => "Upload",
+    }
+}
+
+pub fn workspace_upload_overwrite_ok(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "覆盖",
+        Locale::En => "Overwrite",
+    }
+}
+
+pub fn workspace_upload_confirm(l: Locale, dest: &str, names: &str, n: usize) -> String {
+    let dest = if dest.is_empty() { "." } else { dest };
+    match l {
+        Locale::ZhHans => format!("将 {n} 个文件（{names}）上传到 {dest}？"),
+        Locale::En => format!("Upload {n} file(s) ({names}) to {dest}?"),
+    }
+}
+
+pub fn workspace_upload_overwrite_confirm(l: Locale, rel: &str) -> String {
+    match l {
+        Locale::ZhHans => format!("{rel} 已存在，要覆盖吗？"),
+        Locale::En => format!("{rel} already exists. Overwrite?"),
+    }
+}
+
+pub fn workspace_upload_overwrite_cancelled(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "已取消覆盖，其余文件未上传",
+        Locale::En => "Overwrite cancelled; remaining files were not uploaded",
+    }
+}
+
+pub fn workspace_upload_too_many(l: Locale, max: usize) -> String {
+    match l {
+        Locale::ZhHans => format!("一次最多上传 {max} 个文件"),
+        Locale::En => format!("At most {max} files per drop"),
+    }
+}
+
+pub fn workspace_upload_too_large(l: Locale, name: &str) -> String {
+    match l {
+        Locale::ZhHans => format!("{name} 超过 16 MiB，无法上传"),
+        Locale::En => format!("{name} is over 16 MiB and cannot be uploaded"),
+    }
+}

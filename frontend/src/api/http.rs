@@ -514,7 +514,7 @@ pub(crate) async fn fetch_json_with_body<T: for<'de> Deserialize<'de>>(
     do_fetch_json(req, loc).await
 }
 
-fn http_error_detail_from_body(body: &str) -> String {
+pub(crate) fn http_error_detail_from_body(body: &str) -> String {
     let trimmed = body.trim();
     if trimmed.is_empty() {
         return String::new();

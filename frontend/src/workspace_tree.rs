@@ -16,6 +16,8 @@ use crate::workspace_context_menu::{
     WorkspaceContextMenuActions, WorkspaceInlineCreateKind, WorkspacePendingCreate,
     WorkspaceTreeChromeSignals,
 };
+use crate::workspace_file_drop::WorkspaceDropHighlight;
+use crate::workspace_file_drop_io::{handle_workspace_os_file_drop, workspace_os_file_dragover};
 use crate::workspace_fs_ops::commit_inline_create;
 use crate::workspace_shell::{workspace_list_row_class, workspace_list_row_icon};
 
@@ -449,6 +451,7 @@ fn WorkspaceTreeFileRow(
             role="treeitem"
             tabindex="0"
             draggable="true"
+            data-ws-drop-dest=parent_for_menu.clone()
             prop:aria-label=move || {
                 i18n::workspace_tree_file_row_aria(locale.get(), name_aria.as_str())
             }
@@ -661,12 +664,14 @@ fn WorkspaceTreeDirectoryNode(
     let subtree = env.subtree;
     let chrome = env.chrome;
     let rel_show = rel.clone();
+    let rel_drop = rel.clone();
     let rel_for_children = StoredValue::new(rel.clone());
     let env_nested = env;
     view! {
         <li
             class=format!("{row_class} workspace-dir-node")
             style=format!("--list-stagger: {stagger}")
+            data-ws-drop-dest=rel_drop
         >
             <WorkspaceTreeDirHead
                 name=name
@@ -724,9 +729,11 @@ pub fn WorkspaceFilesystemTree(input: WorkspaceFilesystemTreeInput) -> impl Into
         on_file_single_click,
         workspace_err,
     };
+    let drop_hl = WorkspaceDropHighlight::new();
     view! {
         <ul
             data-testid="workspace-file-tree"
+            data-ws-drop-dest=""
             role="tree"
             prop:aria-label=move || i18n::workspace_tree_aria(locale.get())
             prop:title=move || i18n::workspace_tree_insert_file_title(locale.get())
@@ -740,7 +747,32 @@ pub fn WorkspaceFilesystemTree(input: WorkspaceFilesystemTreeInput) -> impl Into
                     .pending_create
                     .get()
                     .is_some_and(|p| p.parent_rel.is_empty());
-                workspace_filesystem_ul_class(entries.is_empty(), pending_root)
+                let base = workspace_filesystem_ul_class(entries.is_empty(), pending_root);
+                if drop_hl.is_active() {
+                    format!("{base} workspace-drop-active")
+                } else {
+                    base.to_string()
+                }
+            }
+            on:dragenter=move |ev: web_sys::DragEvent| {
+                if workspace_os_file_dragover(&ev) {
+                    drop_hl.bump();
+                }
+            }
+            on:dragover=move |ev: web_sys::DragEvent| {
+                let _ = workspace_os_file_dragover(&ev);
+            }
+            on:dragleave=move |_ev: web_sys::DragEvent| {
+                drop_hl.drop_one();
+            }
+            on:drop=move |ev: web_sys::DragEvent| {
+                drop_hl.clear();
+                handle_workspace_os_file_drop(
+                    ev,
+                    locale,
+                    workspace_err,
+                    create_actions.get_value(),
+                );
             }
         >
             {move || {
