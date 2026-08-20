@@ -13,26 +13,22 @@ where
 {
     let mut out = Vec::new();
     let mut skip = 0u32;
+    let mut drop_empty_image = false;
     for ev in events {
-        apply_event(&mut out, &mut skip, ev);
+        apply_event(&mut out, &mut skip, &mut drop_empty_image, ev);
     }
     out
 }
 
-fn apply_event<'a>(out: &mut Vec<Event<'a>>, skip: &mut u32, ev: Event<'a>) {
+fn apply_event<'a>(
+    out: &mut Vec<Event<'a>>,
+    skip: &mut u32,
+    drop_empty_image: &mut bool,
+    ev: Event<'a>,
+) {
     match ev {
-        Event::Start(tag) => {
-            if skip_start(&tag) {
-                *skip = skip.saturating_add(1);
-            }
-            out.push(Event::Start(tag));
-        }
-        Event::End(end) => {
-            if skip_end(&end) {
-                *skip = skip.saturating_sub(1);
-            }
-            out.push(Event::End(end));
-        }
+        Event::Start(tag) => push_start(out, skip, drop_empty_image, tag),
+        Event::End(end) => push_end(out, skip, drop_empty_image, end),
         Event::SoftBreak => out.push(Event::HardBreak),
         Event::Text(text) if *skip == 0 => {
             if next_http_url(text.as_ref(), 0).is_none() {
@@ -42,6 +38,62 @@ fn apply_event<'a>(out: &mut Vec<Event<'a>>, skip: &mut u32, ev: Event<'a>) {
             }
         }
         other => out.push(other),
+    }
+}
+
+fn push_start<'a>(
+    out: &mut Vec<Event<'a>>,
+    skip: &mut u32,
+    drop_empty_image: &mut bool,
+    tag: Tag<'a>,
+) {
+    let Some(tag) = rewrite_image_dest(tag) else {
+        *drop_empty_image = true;
+        *skip = skip.saturating_add(1);
+        return;
+    };
+    if skip_start(&tag) {
+        *skip = skip.saturating_add(1);
+    }
+    out.push(Event::Start(tag));
+}
+
+fn push_end<'a>(
+    out: &mut Vec<Event<'a>>,
+    skip: &mut u32,
+    drop_empty_image: &mut bool,
+    end: TagEnd,
+) {
+    if skip_end(&end) {
+        *skip = skip.saturating_sub(1);
+    }
+    if *drop_empty_image && end == TagEnd::Image {
+        *drop_empty_image = false;
+        return;
+    }
+    out.push(Event::End(end));
+}
+
+fn rewrite_image_dest(tag: Tag<'_>) -> Option<Tag<'_>> {
+    match tag {
+        Tag::Image {
+            link_type,
+            dest_url,
+            title,
+            id,
+        } => {
+            let dest = super::workspace_image::rewrite_chat_image_dest(dest_url.as_ref());
+            if dest.is_empty() {
+                return None;
+            }
+            Some(Tag::Image {
+                link_type,
+                dest_url: CowStr::from(dest),
+                title,
+                id,
+            })
+        }
+        other => Some(other),
     }
 }
 

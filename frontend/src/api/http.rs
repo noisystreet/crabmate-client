@@ -800,6 +800,55 @@ pub async fn submit_chat_approval(
     Ok(())
 }
 
+/// `GET /workspace/file/raw`：鉴权拉取图片并生成 blob URL（供聊天气泡 `<img>`）。
+/// 只接受相对路径，避免把 Bearer 发到任意 `http(s)` 地址。
+pub(crate) async fn fetch_workspace_image_blob_url(src: &str) -> Option<String> {
+    let src = workspace_raw_relative_src(src)?;
+    let resp = fetch_ok_response(src).await?;
+    if !response_is_raster_image(&resp) {
+        return None;
+    }
+    blob_object_url(resp).await
+}
+
+fn workspace_raw_relative_src(src: &str) -> Option<&str> {
+    let src = src.trim();
+    if src.starts_with("/workspace/file/raw?") && !src.contains("..") {
+        Some(src)
+    } else {
+        None
+    }
+}
+
+async fn fetch_ok_response(src: &str) -> Option<Response> {
+    let init = RequestInit::new();
+    init.set_method("GET");
+    prepare_api_auth(&init).await;
+    let req = Request::new_with_str_and_init(&api_url(src), &init).ok()?;
+    let resp_val = JsFuture::from(window()?.fetch_with_request(&req))
+        .await
+        .ok()?;
+    let resp: Response = resp_val.dyn_into().ok()?;
+    resp.ok().then_some(resp)
+}
+
+fn response_is_raster_image(resp: &Response) -> bool {
+    let ctype = resp
+        .headers()
+        .get("content-type")
+        .ok()
+        .flatten()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    ctype.starts_with("image/") && !ctype.contains("svg")
+}
+
+async fn blob_object_url(resp: Response) -> Option<String> {
+    let blob = JsFuture::from(resp.blob().ok()?).await.ok()?;
+    let blob: web_sys::Blob = blob.dyn_into().ok()?;
+    web_sys::Url::create_object_url_with_blob(&blob).ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::http_error_detail_from_body;

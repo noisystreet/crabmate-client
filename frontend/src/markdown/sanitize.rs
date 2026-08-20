@@ -86,11 +86,21 @@ fn chat_ammonia_builder() -> ammonia::Builder<'static> {
     builder.set_tag_attribute_value("input", "disabled", "disabled");
     builder.set_tag_attribute_value("a", "target", "_blank");
     builder.set_tag_attribute_value("img", "referrerpolicy", "no-referrer");
+    builder.url_relative(ammonia::UrlRelative::Custom(Box::new(
+        allow_workspace_raw_relative,
+    )));
     builder.add_tag_attributes("code", ["class"]);
     builder.add_tag_attributes("pre", ["class"]);
     builder.add_tag_attributes("blockquote", ["class"]);
     builder.attribute_filter(filter_safe_classes);
     builder
+}
+
+fn allow_workspace_raw_relative(url: &str) -> Option<Cow<'_, str>> {
+    let ok = url.starts_with("/workspace/file/raw?")
+        && super::workspace_image::is_workspace_raw_img_src(url)
+        && !url.contains("..");
+    ok.then_some(Cow::Borrowed(url))
 }
 
 fn filter_safe_classes<'u>(el: &str, attr: &str, val: &'u str) -> Option<Cow<'u, str>> {
@@ -190,6 +200,12 @@ mod tests {
         let h = clean_chat_html("<a href=\"https://example.com\">x</a>");
         assert!(h.contains("<a"), "got {h:?}");
         assert!(h.contains("https://example.com"), "got {h:?}");
+    }
+
+    #[test]
+    fn relative_non_workspace_href_is_stripped() {
+        let h = clean_chat_html("<a href=\"../secret\">x</a>");
+        assert!(!h.contains("href=\"../secret\""), "got {h:?}");
     }
 
     #[test]

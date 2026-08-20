@@ -42,6 +42,7 @@
 - [x] **GFM alert**：pulldown-cmark 0.13 的 `ENABLE_GFM` 目前覆盖 `[!NOTE]` / `[!TIP]` / `[!IMPORTANT]` / `[!WARNING]` / `[!CAUTION]`。模型常用；需同步 ammonia 放行 `blockquote` 上的 `markdown-alert-*` class，并补 CSS。不要顺手打开 `ENABLE_SMART_PUNCTUATION`。
 - [x] **安全回归**：`markdown.rs` 仅测 `<script>` 剥离。补 `javascript:` / `data:` 链接与图片用例（scheme 应被拦）；评估远程 `![img](https://…)`（跟踪像素）是否加 `referrerpolicy=no-referrer` 或默认不加载。`chat_links_open_in_new_tab` 是字符串替换，改白名单时一并收紧，避免漏 `target`。
   - 落地：ammonia `a[target=_blank]` + `img[referrerpolicy=no-referrer]`；测 `javascript:` 链接与 `data:` 图被剥。
+- [x] **工作区工具图**：闭合 Markdown `![alt](plots/a.png)` 改写为 `/workspace/file/raw?path=`；ammonia 仅放行该相对 URL（仍剥 `../` 与 `data:`）；聊天 DOM 用 Bearer fetch 后换成 `blob:`（`<img>` 不带鉴权头）。不含 svg。
 
 ## P2 · 清理与语义
 
