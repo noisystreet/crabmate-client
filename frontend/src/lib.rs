@@ -58,6 +58,8 @@ mod user_prefs_sync;
 mod user_prefs_sync_state;
 mod visible_messages;
 mod workspace_context_menu;
+mod workspace_file_drop;
+mod workspace_file_drop_io;
 mod workspace_fs_ops;
 mod workspace_shell;
 mod workspace_tree;

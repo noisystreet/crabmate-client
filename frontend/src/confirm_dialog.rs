@@ -87,3 +87,8 @@ pub async fn confirm_user_message(message: &str, ok_label: &str, cancel_label: &
     }
     confirm_via_shell_or_window(message, ok_label, cancel_label).await
 }
+
+/// 仅用页内确认框（不走 Tauri「删除会话」原生对话框），以便自定义按钮文案。
+pub async fn confirm_in_page(message: &str, ok_label: &str, cancel_label: &str) -> bool {
+    confirm_via_shell_or_window(message, ok_label, cancel_label).await
+}
