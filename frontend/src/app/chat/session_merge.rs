@@ -34,12 +34,10 @@ fn local_plain_user_bubbles_preserved(
                 return false;
             }
             let t = m.text.trim();
-            if t.is_empty() {
+            if t.is_empty() && m.image_urls.is_empty() {
                 return false;
             }
-            !server_msgs
-                .iter()
-                .any(|s| s.role == "user" && s.text.trim() == t)
+            !server_msgs.iter().any(|s| user_rows_align(s, m))
         })
         .cloned()
         .collect()
@@ -116,6 +114,36 @@ fn push_once(out: &mut Vec<StoredMessage>, placed_ids: &mut HashSet<String>, msg
     }
 }
 
+fn user_rows_align(server: &StoredMessage, local: &StoredMessage) -> bool {
+    if server.role != "user" {
+        return false;
+    }
+    if server.text.trim() != local.text.trim() {
+        return false;
+    }
+    if local.text.trim().is_empty() {
+        return image_url_set_eq(&server.image_urls, &local.image_urls);
+    }
+    true
+}
+
+fn image_url_set_eq(a: &[String], b: &[String]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    a.iter().all(|u| b.iter().any(|v| v == u))
+}
+
+fn merge_user_image_urls(primary: &[String], extra: &[String]) -> Vec<String> {
+    let mut out = Vec::with_capacity(primary.len().saturating_add(extra.len()));
+    for u in primary.iter().chain(extra) {
+        if !u.trim().is_empty() && !out.iter().any(|x| x == u) {
+            out.push(u.clone());
+        }
+    }
+    out
+}
+
 fn matching_server_user(
     server: &[StoredMessage],
     placed_ids: &HashSet<String>,
@@ -123,10 +151,13 @@ fn matching_server_user(
 ) -> Option<StoredMessage> {
     server
         .iter()
-        .find(|h| {
-            h.role == "user" && !placed_ids.contains(&h.id) && h.text.trim() == local.text.trim()
-        })
+        .find(|h| !placed_ids.contains(&h.id) && user_rows_align(h, local))
         .cloned()
+}
+
+fn with_local_user_images(mut chosen: StoredMessage, local: &StoredMessage) -> StoredMessage {
+    chosen.image_urls = merge_user_image_urls(&chosen.image_urls, &local.image_urls);
+    chosen
 }
 
 fn hydrated_or_matching_user(
@@ -135,11 +166,12 @@ fn hydrated_or_matching_user(
     placed_ids: &HashSet<String>,
     local: &StoredMessage,
 ) -> StoredMessage {
-    hydrated_by_id
+    let chosen = hydrated_by_id
         .get(&local.id)
         .cloned()
         .or_else(|| matching_server_user(server, placed_ids, local))
-        .unwrap_or_else(|| local.clone())
+        .unwrap_or_else(|| local.clone());
+    with_local_user_images(chosen, local)
 }
 
 fn push_next_from_pool(
@@ -446,6 +478,17 @@ mod golden {
         assert_eq!(roles(&merged), vec!["user", "assistant"]);
         assert_eq!(merged[0].text, "你好");
         assert_eq!(merged[1].id, "a1");
+    }
+
+    #[test]
+    fn merge_unions_local_chat_images_onto_text_matched_server_user() {
+        let mut local_u = user_msg("u1", "看图");
+        local_u.image_urls = vec!["/uploads/a.png".into()];
+        let local = vec![local_u, assistant_msg("a-local", "ok")];
+        let server = vec![user_msg("u1", "看图"), assistant_msg("a-srv", "ok")];
+        let merged = merge_session_tail(server, &local);
+        let user = merged.iter().find(|m| m.role == "user").expect("user");
+        assert_eq!(user.image_urls, vec!["/uploads/a.png".to_string()]);
     }
 
     #[test]

@@ -36,6 +36,7 @@ mod tui_tool_process;
 mod tui_transcript_sync;
 pub(crate) mod turn_lifecycle;
 mod user_message_edit;
+mod user_upload_images;
 pub(crate) mod wire_chat_domain;
 pub(crate) mod wire_chat_session_lifecycle;
 mod workspace_image_hydrate;
