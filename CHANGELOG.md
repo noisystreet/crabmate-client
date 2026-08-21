@@ -18,6 +18,7 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Fixed
 
+- Chat images: user-bubble attachments **and** markdown `<img>` use a viewport-based `max-width` (fit-content bubbles cannot resolve `max-width: 100%`). Assistant / changelist prose images keep column `max-width: 100%` and add `max-height` (`min(240px, 40vh)`, tighter on narrow viewports). Lightbox respects safe-area insets.
 - Connect page: a newly entered server URL is recorded in 「最近连接」 before the WebView leaves `connect.html`, and the shell also persists the list in app data after a successful probe. A failed probe rolls back last-URL and recent entries so auto-login does not switch to a server that never connected. Clearing the list waits for the shell file to clear and restores on IPC failure. The desktop suggested loopback URL is omitted from the list (other loopback ports can still appear); last-URL still skips all loopback when a suggested URL is set.
 
 ### Security
