@@ -350,7 +350,11 @@ fn message_body_chunks(message: &StoredMessage, ctx: &TuiRenderCtx<'_>) -> TuiBo
             ctx.markdown_render,
             ctx.locale,
         );
-        super::user_upload_images::append_user_upload_images(&mut chunks, &message.image_urls);
+        super::user_upload_images::append_user_upload_images(
+            &mut chunks,
+            &message.image_urls,
+            ctx.locale,
+        );
         return chunks;
     }
     if message.role == "user" {
@@ -359,7 +363,11 @@ fn message_body_chunks(message: &StoredMessage, ctx: &TuiRenderCtx<'_>) -> TuiBo
             message_finalize_open_block(message),
             ctx.markdown_render,
         );
-        super::user_upload_images::append_user_upload_images(&mut chunks, &message.image_urls);
+        super::user_upload_images::append_user_upload_images(
+            &mut chunks,
+            &message.image_urls,
+            ctx.locale,
+        );
         return chunks;
     }
     parse_tui_body_chunks_with(

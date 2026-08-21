@@ -6,6 +6,7 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{Request, RequestInit, Response};
 
+use crate::chat_upload_src::relative_auth_image_src;
 use crate::i18n::Locale;
 
 use crabmate::cm_api_contract::StatusShellView;
@@ -800,24 +801,15 @@ pub async fn submit_chat_approval(
     Ok(())
 }
 
-/// `GET /workspace/file/raw`：鉴权拉取图片并生成 blob URL（供聊天气泡 `<img>`）。
+/// 鉴权拉取光栅图并生成 blob URL（工作区 raw 或 `/uploads/`）。
 /// 只接受相对路径，避免把 Bearer 发到任意 `http(s)` 地址。
-pub(crate) async fn fetch_workspace_image_blob_url(src: &str) -> Option<String> {
-    let src = workspace_raw_relative_src(src)?;
+pub(crate) async fn fetch_auth_raster_image_blob_url(src: &str) -> Option<String> {
+    let src = relative_auth_image_src(src)?;
     let resp = fetch_ok_response(src).await?;
     if !response_is_raster_image(&resp) {
         return None;
     }
     blob_object_url(resp).await
-}
-
-fn workspace_raw_relative_src(src: &str) -> Option<&str> {
-    let src = src.trim();
-    if src.starts_with("/workspace/file/raw?") && !src.contains("..") {
-        Some(src)
-    } else {
-        None
-    }
 }
 
 async fn fetch_ok_response(src: &str) -> Option<Response> {

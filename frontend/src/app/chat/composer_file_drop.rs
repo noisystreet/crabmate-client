@@ -255,6 +255,83 @@ fn upload_image_files_from_list(
     });
 }
 
+fn append_image_items_to_form(
+    items: &web_sys::DataTransferItemList,
+    form: &web_sys::FormData,
+) -> bool {
+    let n = items.length();
+    let mut any = false;
+    for i in 0..n {
+        let Some(item) = items.get(i) else {
+            continue;
+        };
+        if item.kind() != "file" {
+            continue;
+        }
+        let Ok(Some(f)) = item.get_as_file() else {
+            continue;
+        };
+        if !file_looks_like_image(&f) {
+            continue;
+        }
+        let name = f.name();
+        let _ = form.append_with_blob_and_filename("file", &f, &name);
+        any = true;
+    }
+    any
+}
+
+/// 网页复制常同时带 `text/plain` 与预览图；有非空纯文本时放行默认粘贴。
+#[must_use]
+pub(crate) fn should_intercept_image_paste(plain_text: &str, has_image: bool) -> bool {
+    has_image && plain_text.trim().is_empty()
+}
+
+/// 剪贴板只有图（截图）时拦截默认粘贴并当附图上传。
+pub(crate) fn handle_composer_image_paste(
+    ev: web_sys::ClipboardEvent,
+    locale: RwSignal<Locale>,
+    pending_images: RwSignal<Vec<String>>,
+    status_err: RwSignal<Option<String>>,
+) {
+    let Some(dt) = ev.clipboard_data() else {
+        return;
+    };
+    let form = web_sys::FormData::new().expect("FormData");
+    let mut any = false;
+    if let Some(files) = dt.files() {
+        any = append_image_files_to_form(&files, &form);
+    }
+    if !any {
+        any = append_image_items_to_form(&dt.items(), &form);
+    }
+    let plain = dt.get_data("text/plain").unwrap_or_default();
+    if !should_intercept_image_paste(&plain, any) {
+        return;
+    }
+    ev.prevent_default();
+    spawn_local(async move {
+        match upload_files_multipart(&form, locale.get_untracked()).await {
+            Ok(urls) => {
+                pending_images.update(|v| {
+                    for u in urls {
+                        if v.len() >= 6 {
+                            break;
+                        }
+                        if !v.contains(&u) {
+                            v.push(u);
+                        }
+                    }
+                });
+                status_err.set(None);
+            }
+            Err(e) => {
+                status_err.set(Some(e));
+            }
+        }
+    });
+}
+
 fn file_list_image_flags(files: &web_sys::FileList) -> (bool, bool) {
     let n = files.length();
     let mut has_image = false;
@@ -393,5 +470,13 @@ mod tests {
             normalize_explicit_file_ref_token("file:///src/a.rs"),
             Some("src/a.rs".into())
         );
+    }
+
+    #[test]
+    fn paste_steals_only_image_without_plain_text() {
+        assert!(should_intercept_image_paste("", true));
+        assert!(should_intercept_image_paste("  \n", true));
+        assert!(!should_intercept_image_paste("hello", true));
+        assert!(!should_intercept_image_paste("", false));
     }
 }

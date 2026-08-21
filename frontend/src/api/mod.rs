@@ -41,7 +41,7 @@ pub use client_llm_storage::{
     persist_executor_llm_to_storage, persist_readonly_tool_ttl_cache_follow_server,
 };
 pub use connect_handoff::consume_mobile_connect_handoff;
-pub(crate) use http::fetch_workspace_image_blob_url;
+pub(crate) use http::fetch_auth_raster_image_blob_url;
 #[allow(unused_imports)]
 pub use http::{
     ChatBranchError, GithubRepoContextData, SkillListItem, SkillsListData, StatusData, TaskItem,

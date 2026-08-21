@@ -12,6 +12,7 @@ mod app;
 mod app_prefs;
 mod chat_actions;
 mod chat_session_state;
+mod chat_upload_src;
 mod clarification_form;
 mod client_llm_presets;
 mod confirm_dialog;

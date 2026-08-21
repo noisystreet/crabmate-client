@@ -347,7 +347,8 @@ fn user_bubble_shows_chat_upload_images() {
         &HashMap::new(),
     );
     assert!(html.contains("chat-tui-user-images"), "{html}");
-    assert!(html.contains("/uploads/u1_2_3.png"), "{html}");
+    assert!(html.contains("src=\"/uploads/u1_2_3.png\""), "{html}");
+    assert!(html.contains("alt=\"附图 u1_2_3.png\""), "{html}");
     assert!(!html.contains("/uploads/../x"), "{html}");
 }
 
