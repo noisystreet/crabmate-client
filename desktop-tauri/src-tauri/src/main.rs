@@ -90,6 +90,74 @@ async fn save_text_file_via_dialog(
     Ok(true)
 }
 
+const MAX_SAVE_BYTES: usize = 16 * 1024 * 1024;
+
+fn save_dialog_basename(name: &str) -> String {
+    let Some(last) = name.rsplit(['/', '\\']).find(|s| !s.is_empty()) else {
+        return String::new();
+    };
+    last.chars()
+        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
+        .take(80)
+        .collect()
+}
+
+#[tauri::command]
+async fn save_bytes_file_via_dialog(
+    app: tauri::AppHandle,
+    default_name: String,
+    content_base64: String,
+) -> Result<bool, String> {
+    let name = save_dialog_basename(&default_name);
+    let name = if name.is_empty() {
+        "image.png".to_string()
+    } else {
+        name
+    };
+    let bytes = decode_save_payload(&content_base64)?;
+    let (tx, rx) = tokio::sync::oneshot::channel::<Option<FilePath>>();
+    app.dialog()
+        .file()
+        .set_file_name(&name)
+        .save_file(move |picked| {
+            let _ = tx.send(picked);
+        });
+
+    let picked = rx
+        .await
+        .map_err(|e| format!("save dialog channel failed: {e}"))?;
+    let Some(file_path) = picked else {
+        return Ok(false);
+    };
+
+    let path = match file_path {
+        FilePath::Path(p) => p,
+        FilePath::Url(url) => url
+            .to_file_path()
+            .map_err(|_| "save dialog returned a non-file URL".to_string())?,
+    };
+    std::fs::write(&path, bytes).map_err(|e| format!("write file failed: {e}"))?;
+    Ok(true)
+}
+
+fn decode_save_payload(content_base64: &str) -> Result<Vec<u8>, String> {
+    if content_base64.len() > MAX_SAVE_BYTES.saturating_mul(2) {
+        return Err("image too large".to_string());
+    }
+    let bytes = decode_save_base64(content_base64)?;
+    if bytes.len() > MAX_SAVE_BYTES {
+        return Err("image too large".to_string());
+    }
+    Ok(bytes)
+}
+
+fn decode_save_base64(s: &str) -> Result<Vec<u8>, String> {
+    use base64::Engine as _;
+    base64::engine::general_purpose::STANDARD
+        .decode(s.trim())
+        .map_err(|e| format!("invalid base64: {e}"))
+}
+
 #[tauri::command]
 async fn pick_workspace_folder_via_dialog(app: tauri::AppHandle) -> Result<Option<String>, String> {
     let (tx, rx) = tokio::sync::oneshot::channel::<Option<FilePath>>();
@@ -235,6 +303,7 @@ fn main() {
     builder
         .invoke_handler(tauri::generate_handler![
             save_text_file_via_dialog,
+            save_bytes_file_via_dialog,
             pick_workspace_folder_via_dialog,
             confirm_delete_session_via_dialog,
             open_external_url,
@@ -294,5 +363,12 @@ mod tests {
         assert!(flags.contains(StateFlags::SIZE));
         assert!(flags.contains(StateFlags::POSITION));
         assert!(flags.contains(StateFlags::MAXIMIZED));
+    }
+
+    #[test]
+    fn save_dialog_basename_strips_path() {
+        assert_eq!(super::save_dialog_basename("a/b/c.png"), "c.png");
+        assert_eq!(super::save_dialog_basename("../x.png"), "x.png");
+        assert!(super::save_dialog_basename("///").is_empty());
     }
 }

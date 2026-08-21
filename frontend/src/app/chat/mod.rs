@@ -2,6 +2,8 @@
 //!
 //! 对应 `docs/frontend/ARCHITECTURE.md` 中 **`app/chat_*`** 域；[`ChatSessionSignals`](crate::chat_session_state::ChatSessionSignals) 仍在 crate 根以便与会话模态等共用。
 
+mod chat_image_blob_io;
+mod chat_image_filename;
 mod chat_image_lightbox;
 mod column;
 mod column_keyboard;
