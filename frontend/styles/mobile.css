@@ -233,6 +233,23 @@ html[data-cm-mobile-shell] .composer-input--mirror-overlay {
     max-width: min(98%, 100%);
   }
 
+  .chat-tui-line img,
+  .chat-tui-line video,
+  .msg-md-prose img {
+    max-height: min(36vh, 220px);
+  }
+
+  .chat-tui-turn--user .chat-tui-line img,
+  .chat-tui-turn--user .chat-tui-line video,
+  .chat-tui-turn--user .chat-tui-user-img,
+  .chat-tui-user-img {
+    max-width: min(
+      280px,
+      calc(100vw - 2rem - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px))
+    );
+    max-height: min(36vh, 220px);
+  }
+
   /* —— Composer：紧凑输入条（圆角对齐 --radius-btn，勿用半高胶囊） —— */
   .composer-ds,
   .composer.composer-ds {
