@@ -805,6 +805,22 @@
   display: block;
 }
 
+.chat-tui-user-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.chat-tui-user-img {
+  max-width: min(100%, 320px);
+  max-height: 240px;
+  object-fit: contain;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-subtle);
+  display: block;
+}
+
 .composer-pending-img-remove {
   position: absolute;
   top: 2px;

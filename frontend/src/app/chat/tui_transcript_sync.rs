@@ -142,6 +142,13 @@ pub(crate) fn committed_fingerprint(
         fingerprint = fingerprint.wrapping_add(message.text.len() as u64);
         fingerprint = fingerprint.wrapping_add(message.reasoning_text.len() as u64);
         fingerprint = fingerprint.wrapping_add(u64::from(message.is_tool));
+        fingerprint = fingerprint.wrapping_add(message.image_urls.len() as u64);
+        for url in &message.image_urls {
+            fingerprint = fingerprint.wrapping_add(url.len() as u64);
+            for ch in url.bytes() {
+                fingerprint = fingerprint.wrapping_mul(31).wrapping_add(u64::from(ch));
+            }
+        }
         if let Some(state) = &message.state {
             fingerprint = fingerprint.wrapping_add(state.to_wire().len() as u64);
         }
@@ -336,20 +343,24 @@ fn message_body_chunks(message: &StoredMessage, ctx: &TuiRenderCtx<'_>) -> TuiBo
     if message.role == "user"
         && let Some((skill_id, task)) = crate::message_format::parse_user_skill_slash(&text)
     {
-        return skill_slash_body_chunks(
+        let mut chunks = skill_slash_body_chunks(
             &skill_id,
             &task,
             message_finalize_open_block(message),
             ctx.markdown_render,
             ctx.locale,
         );
+        super::user_upload_images::append_user_upload_images(&mut chunks, &message.image_urls);
+        return chunks;
     }
     if message.role == "user" {
-        return user_text_body_chunks(
+        let mut chunks = user_text_body_chunks(
             &text,
             message_finalize_open_block(message),
             ctx.markdown_render,
         );
+        super::user_upload_images::append_user_upload_images(&mut chunks, &message.image_urls);
+        return chunks;
     }
     parse_tui_body_chunks_with(
         &text,

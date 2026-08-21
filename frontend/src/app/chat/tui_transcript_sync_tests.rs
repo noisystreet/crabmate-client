@@ -330,3 +330,33 @@ fn file_ref_chip_stays_on_same_line_as_following_text() {
     // 占位符不得泄漏到最终 HTML。
     assert!(!html.contains("CMFR"), "{html}");
 }
+
+#[test]
+fn user_bubble_shows_chat_upload_images() {
+    let mut user = message("u1", "user", "看图");
+    user.image_urls = vec!["/uploads/u1_2_3.png".into(), "/uploads/../x".into()];
+    let empty = HashMap::new();
+    let html = build_tui_transcript_html(
+        std::slice::from_ref(&user),
+        "s1",
+        None,
+        Locale::ZhHans,
+        false,
+        true,
+        &empty,
+        &HashMap::new(),
+    );
+    assert!(html.contains("chat-tui-user-images"), "{html}");
+    assert!(html.contains("/uploads/u1_2_3.png"), "{html}");
+    assert!(!html.contains("/uploads/../x"), "{html}");
+}
+
+#[test]
+fn committed_fingerprint_includes_user_image_urls() {
+    let plain = message("u1", "user", "看图");
+    let mut with_img = plain.clone();
+    with_img.image_urls = vec!["/uploads/a.png".into()];
+    let a = committed_fingerprint(&[(0, &plain)], None);
+    let b = committed_fingerprint(&[(0, &with_img)], None);
+    assert_ne!(a, b);
+}
