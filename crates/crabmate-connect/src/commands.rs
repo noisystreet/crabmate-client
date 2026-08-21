@@ -1,5 +1,6 @@
 //! Tauri 命令：连接 / 断开 / 读取建议 URL 与钥匙串 Bearer。
 
+use std::path::PathBuf;
 use std::sync::Mutex;
 
 use tauri::{AppHandle, Manager, State, Url};
@@ -11,6 +12,7 @@ use crate::keyring_bearer::{read_connect_bearer, write_connect_bearer_unchecked}
 use crate::keyring_llm::{LlmSecretSlot, read_llm_secret, write_llm_secret};
 use crate::navigation::is_app_origin;
 use crate::probe::probe_server;
+use crate::recent_urls::{self, RECENT_FILE_NAME};
 
 /// Android 默认资产源（`useHttpsScheme=false`）；桌面 Tauri 2 亦常用此 origin。
 const DEFAULT_CONNECT_HOME: &str = "http://tauri.localhost/connect.html";
@@ -76,6 +78,7 @@ pub async fn connect_remote(
     let api_base = normalize_base_url(&url)?;
     enforce_cleartext_connect_policy(&api_base)?;
     probe_server(&api_base, &bearer).await?;
+    persist_recent_after_probe(&app, &api_base);
 
     if let Some(allowed) = app.try_state::<AllowedServeOrigin>() {
         allowed.set_from_url(&api_base);
@@ -119,10 +122,49 @@ pub async fn disconnect_remote(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+fn recent_connect_urls_path(app: &AppHandle) -> Result<PathBuf, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("app data dir: {e}"))?;
+    Ok(dir.join(RECENT_FILE_NAME))
+}
+
+fn suggested_url_value(app: &AppHandle) -> Option<String> {
+    app.try_state::<SuggestedServerUrl>()
+        .and_then(|s| s.0.lock().ok().and_then(|g| g.clone()))
+}
+
+fn persist_recent_after_probe(app: &AppHandle, api_base: &Url) {
+    let Ok(path) = recent_connect_urls_path(app) else {
+        return;
+    };
+    recent_urls::record_success(
+        &path,
+        api_base.as_str(),
+        suggested_url_value(app).as_deref(),
+    );
+}
+
 /// 连接页预填建议地址（桌面默认本机 `8080`）；移动端通常为 `null`。
 #[tauri::command]
 pub fn get_suggested_server_url(state: State<'_, SuggestedServerUrl>) -> Option<String> {
     state.0.lock().ok().and_then(|g| g.clone())
+}
+
+/// 探测成功后记下的最近服务器地址（应用数据目录；与 `connect.html` 的 localStorage 合并展示）。
+#[tauri::command]
+pub fn get_recent_connect_urls(app: AppHandle) -> Vec<String> {
+    recent_connect_urls_path(&app)
+        .map(|p| recent_urls::load_from_path(&p))
+        .unwrap_or_default()
+}
+
+/// 清空壳侧最近连接列表（连接页「清空」）。
+#[tauri::command]
+pub fn clear_recent_connect_urls(app: AppHandle) -> Result<(), String> {
+    let path = recent_connect_urls_path(&app)?;
+    recent_urls::save_to_path(&path, &[])
 }
 
 /// 系统钥匙串中的连接 Bearer（若有）。

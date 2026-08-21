@@ -16,6 +16,10 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 - Playwright E2E no longer depends on `serve --with-web`: the client self-hosts the UI with **`crabmate-web`** (loopback static host, default `127.0.0.1:4173`) against a pure-API `serve`. Pages reach the API via the `#cm_api_base=` hash handoff (same path as `crabmate-web --api-base`); `serve` allows the web Origin through `CM_WEB_CORS_ALLOWED_ORIGINS` (`scripts/e2e-playwright.sh` + CI updated; `CRABMATE_WEB_PORT` / `CRABMATE_API_BASE` env vars).
 - Vendor `crabmate-tool-card` as `crates/crabmate-tool-card` (in-repo path). Frontend no longer git-depends on Server `crabmate-types`; LLM gateway presets live in `frontend/src/client_llm_presets.rs`.
 
+### Fixed
+
+- Connect page: a newly entered server URL is recorded in 「最近连接」 before the WebView leaves `connect.html`, and the shell also persists the list in app data after a successful probe. A failed probe rolls back last-URL and recent entries so auto-login does not switch to a server that never connected. Clearing the list waits for the shell file to clear and restores on IPC failure. The desktop suggested loopback URL is omitted from the list (other loopback ports can still appear); last-URL still skips all loopback when a suggested URL is set.
+
 ### Security
 
 - Chat markdown: remote images get `referrerpolicy=no-referrer`; `javascript:` / `data:` href/src stay stripped; anchors that lose `href` unwrap to text; links use ammonia `target=_blank` instead of a post-pass string replace
