@@ -803,6 +803,7 @@
   height: 100%;
   object-fit: cover;
   display: block;
+  cursor: zoom-in;
 }
 
 .chat-tui-user-images {
@@ -819,6 +820,55 @@
   border-radius: var(--radius-md);
   border: 1px solid var(--border-subtle);
   display: block;
+  cursor: zoom-in;
+}
+
+img[data-cm-ws-hydrated="1"] {
+  cursor: zoom-in;
+}
+
+.chat-tui-img-missing {
+  min-width: 96px;
+  min-height: 64px;
+  background: var(--surface-muted, color-mix(in srgb, var(--fg) 8%, transparent));
+  cursor: default;
+}
+
+.chat-image-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 220;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: color-mix(in srgb, #000 62%, transparent);
+  cursor: zoom-out;
+}
+
+.chat-image-lightbox-img {
+  max-width: min(96vw, 1200px);
+  max-height: 92vh;
+  object-fit: contain;
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 32px color-mix(in srgb, #000 40%, transparent);
+  cursor: default;
+}
+
+.chat-image-lightbox-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  font-size: 22px;
+  line-height: 34px;
+  border: none;
+  border-radius: var(--radius-btn);
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  color: var(--text);
+  cursor: pointer;
 }
 
 .composer-pending-img-remove {

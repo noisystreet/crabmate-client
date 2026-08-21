@@ -135,7 +135,7 @@ make desktop-dev
 
 On the connect page, enter the server URL and optional Web API Bearer (**not** the model `API_KEY`). The shell loads **local** `index.html` and points API calls at `serve`.
 
-In the Workspace side panel (or IDE tree), you can **drop local files** onto a folder to upload them (confirm first; text and binary). This calls **`PUT /workspace/file/raw`** and needs a current Server build (not crates.io / git **`v0.4.0`** `serve`). If a target already exists, you confirm overwrite; cancelling stops the rest of that drop. Images attached in the **chat composer** (`POST /upload`) show in the user bubble after you send; upload files sit in a temp dir on the server and may expire.
+In the Workspace side panel (or IDE tree), you can **drop local files** onto a folder to upload them (confirm first; text and binary). This calls **`PUT /workspace/file/raw`** and needs a current Server build (not crates.io / git **`v0.4.0`** `serve`). If a target already exists, you confirm overwrite; cancelling stops the rest of that drop. Images attached in the **chat composer** (`POST /upload`, file picker / drop / paste) show in the user bubble after you send; the shell loads them with the Web Bearer. Click a loaded image to enlarge. Paste attaches only when the clipboard has an image and **no** non-empty `text/plain` (so copying a web page does not steal the text). Upload files sit in a temp dir on the server and may expire (the bubble then shows a placeholder).
 
 ## Quick start (web UI in the system browser)
 

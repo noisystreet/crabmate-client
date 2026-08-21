@@ -110,6 +110,34 @@ pub fn composer_attach_image_aria(l: Locale) -> &'static str {
     }
 }
 
+pub fn chat_image_attachment_alt(l: Locale, filename: &str) -> String {
+    match l {
+        Locale::ZhHans => format!("附图 {filename}"),
+        Locale::En => format!("Attachment {filename}"),
+    }
+}
+
+pub fn chat_image_unavailable(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "图片无法加载（可能已过期）",
+        Locale::En => "Image unavailable (it may have expired)",
+    }
+}
+
+pub fn chat_image_lightbox_aria(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "图片预览",
+        Locale::En => "Image preview",
+    }
+}
+
+pub fn chat_image_lightbox_close(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "关闭预览",
+        Locale::En => "Close preview",
+    }
+}
+
 pub fn composer_slash_menu_aria(l: Locale) -> &'static str {
     match l {
         Locale::ZhHans => "斜杠命令与技能",
@@ -331,5 +359,17 @@ pub fn debug_console_empty_hint(l: Locale) -> &'static str {
         Locale::En => {
             "After a streamed reply, reasoning deltas and tool context summaries appear here (unless the server disabled traces with `CM_THINKING_TRACE_ENABLED=0`)."
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lightbox_copy_is_bilingual() {
+        assert!(chat_image_lightbox_aria(Locale::En).contains("preview"));
+        assert!(chat_image_lightbox_close(Locale::ZhHans).contains("关闭"));
+        assert!(chat_image_unavailable(Locale::En).contains("expired"));
     }
 }

@@ -11,9 +11,11 @@ use wasm_bindgen::prelude::Closure;
 use super::column_keyboard::ChatColumnHomeEndNav;
 use super::composer_file_drop::{
     ComposerDropHighlight, composer_accept_drag_over, handle_composer_file_drop,
+    handle_composer_image_paste,
 };
 use super::composer_follow_up::ComposerStreamFollowUp;
 use super::composer_input_stack::ComposerInputStack;
+use super::composer_pending_images::ComposerPendingImagesRow;
 use super::handles::{
     ChatColumnShell, ChatComposerPaneSignals, ChatFindOverlaySignals, ChatMessagesPaneSignals,
 };
@@ -288,42 +290,6 @@ fn ComposerImageInput(
                 handle_composer_image_input_change(ev, locale, pending_images, status_err);
             }
         />
-    }
-}
-
-#[component]
-fn ComposerPendingImagesRow(
-    locale: RwSignal<crate::i18n::Locale>,
-    pending_images: RwSignal<Vec<String>>,
-) -> impl IntoView {
-    view! {
-        <div class="composer-pending-images" data-testid="composer-pending-images">
-            {move || {
-                let imgs = pending_images.get();
-                if imgs.is_empty() {
-                    return view! { <span></span> }.into_any();
-                }
-                imgs.iter()
-                    .map(|url| {
-                        let u = crate::api::api_url(url);
-                        let u_rm = url.clone();
-                        view! {
-                            <div class="composer-pending-img-wrap">
-                                <img class="composer-pending-img" src=u alt="" />
-                                <button
-                                    type="button"
-                                    class="composer-pending-img-remove"
-                                    prop:aria-label=move || i18n::composer_remove_image_aria(locale.get())
-                                    on:click=move |_| pending_images.update(|v| v.retain(|x| x != &u_rm))
-                                >"×"</button>
-                            </div>
-                        }
-                        .into_any()
-                    })
-                    .collect_view()
-                    .into_any()
-            }}
-        </div>
     }
 }
 
@@ -660,6 +626,9 @@ fn ChatComposerPane(signals: ChatComposerPaneSignals) -> impl IntoView {
                     pending_images,
                     status_err,
                 );
+            }
+            on:paste:capture=move |ev: web_sys::ClipboardEvent| {
+                handle_composer_image_paste(ev, locale, pending_images, status_err);
             }
         >
             <div class="composer-inner-ds">
