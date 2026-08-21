@@ -138,6 +138,27 @@ pub fn chat_image_lightbox_close(l: Locale) -> &'static str {
     }
 }
 
+pub fn chat_image_lightbox_copy(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "复制图像",
+        Locale::En => "Copy image",
+    }
+}
+
+pub fn chat_image_lightbox_save(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "保存图像",
+        Locale::En => "Save image",
+    }
+}
+
+pub fn chat_image_save_failed(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "保存图像失败。",
+        Locale::En => "Could not save the image.",
+    }
+}
+
 pub fn composer_slash_menu_aria(l: Locale) -> &'static str {
     match l {
         Locale::ZhHans => "斜杠命令与技能",
@@ -370,6 +391,8 @@ mod tests {
     fn lightbox_copy_is_bilingual() {
         assert!(chat_image_lightbox_aria(Locale::En).contains("preview"));
         assert!(chat_image_lightbox_close(Locale::ZhHans).contains("关闭"));
+        assert!(chat_image_lightbox_copy(Locale::En).contains("Copy"));
+        assert!(chat_image_lightbox_save(Locale::ZhHans).contains("保存"));
         assert!(chat_image_unavailable(Locale::En).contains("expired"));
     }
 }

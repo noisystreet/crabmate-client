@@ -8,7 +8,7 @@ use leptos::task::spawn_local;
 use wasm_bindgen::JsCast;
 use web_sys::Url;
 
-use super::chat_image_lightbox::{img_opens_lightbox, open_chat_image_lightbox};
+use super::chat_image_lightbox::{img_opens_lightbox, open_chat_image_lightbox_from_img};
 use crate::api::fetch_auth_raster_image_blob_url;
 use crate::chat_upload_src::chat_upload_filename;
 use crate::i18n::{self, Locale};
@@ -59,6 +59,7 @@ fn ComposerPendingThumb(locale: RwSignal<Locale>, path: String) -> impl IntoView
         <img
             class="composer-pending-img"
             class:chat-tui-img-missing=move || missing.get()
+            attr:data-cm-ws-raw=path.clone()
             prop:src=move || blob.get().unwrap_or_default()
             prop:alt=move || pending_thumb_alt(locale.get(), missing.get(), &path_alt)
             on:click=on_pending_thumb_click
@@ -110,5 +111,5 @@ fn on_pending_thumb_click(ev: web_sys::MouseEvent) {
     if !img_opens_lightbox(&img) {
         return;
     }
-    open_chat_image_lightbox(&img.src(), &img.alt());
+    open_chat_image_lightbox_from_img(&img);
 }

@@ -5,7 +5,7 @@ use wasm_bindgen::closure::Closure;
 use wasm_bindgen_futures::spawn_local;
 use web_sys::{Element, HtmlImageElement, MouseEvent, Url};
 
-use super::chat_image_lightbox::{img_opens_lightbox, open_chat_image_lightbox};
+use super::chat_image_lightbox::{img_opens_lightbox, open_chat_image_lightbox_from_img};
 use crate::api::fetch_auth_raster_image_blob_url;
 use crate::chat_upload_src::relative_auth_image_src;
 use crate::i18n::{self, Locale};
@@ -53,7 +53,7 @@ fn bind_lightbox_once(root: &Element) {
         if !img_opens_lightbox(&img) {
             return;
         }
-        open_chat_image_lightbox(&img.src(), &img.alt());
+        open_chat_image_lightbox_from_img(&img);
     }) as Box<dyn FnMut(MouseEvent)>);
     let _ = root.add_event_listener_with_callback("click", on_click.as_ref().unchecked_ref());
     on_click.forget();

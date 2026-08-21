@@ -47,6 +47,8 @@ class MainActivity : TauriActivity() {
   @Volatile
   private var cachedWebViewUrl: String? = null
 
+  private val chatImageShare = ChatImageShare()
+
   /**
    * 系统返回键：弹确认框（退出 / 回连接页），不走 WebView.goBack。
    *
@@ -568,6 +570,32 @@ class MainActivity : TauriActivity() {
           // 无浏览器或非法 URL：静默忽略
         }
       }
+    }
+
+    /** 聊天灯箱：开始接收分块 base64（仅包内 App Origin）。 */
+    @JavascriptInterface
+    fun beginChatImageSave(filename: String): Boolean {
+      if (!allowSecureBearerBridge()) {
+        return false
+      }
+      return chatImageShare.begin(true, filename)
+    }
+
+    @JavascriptInterface
+    fun appendChatImageSave(chunk: String): Boolean {
+      if (!allowSecureBearerBridge()) {
+        return false
+      }
+      return chatImageShare.append(true, chunk)
+    }
+
+    @JavascriptInterface
+    fun finishChatImageSave(): Boolean {
+      if (!allowSecureBearerBridge()) {
+        chatImageShare.cancel()
+        return false
+      }
+      return chatImageShare.finish(this@MainActivity, true)
     }
   }
 
