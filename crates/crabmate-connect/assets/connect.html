@@ -476,6 +476,8 @@
           urlInput.value = suggestedServerUrl;
         }
 
+        await mergeRecentFromShell();
+
         // 首次升级：仅在尚未初始化历史时，把既存的“上次地址”纳入最近连接。
         if (savedUrl && !hasRecentHistory()) {
           rememberRecentUrl(savedUrl);
@@ -531,16 +533,70 @@
         return core.invoke("connect_remote", { url, bearer: bearer || "" });
       }
 
-      function persistUrl(href) {
+      function isSuggestedUrl(href) {
+        const n = normalizeRecentUrl(href);
+        const s = normalizeRecentUrl(suggestedServerUrl);
+        return !!(n && s && n === s);
+      }
+
+      function readStorageItem(key) {
         try {
-          // 本机随机端口不落盘，避免下次自动连到已退出的旧端口。
+          return localStorage.getItem(key);
+        } catch (_) {
+          return null;
+        }
+      }
+
+      function writeStorageItem(key, value) {
+        try {
+          if (value === null) localStorage.removeItem(key);
+          else localStorage.setItem(key, value);
+        } catch (_) {}
+      }
+
+      function snapshotConnectPersist() {
+        return {
+          url: readStorageItem(URL_KEY),
+          legacy: readStorageItem(URL_KEY_LEGACY_MOBILE),
+          recent: readStorageItem(RECENT_KEY),
+        };
+      }
+
+      function restoreConnectPersist(snap) {
+        writeStorageItem(URL_KEY, snap.url);
+        writeStorageItem(URL_KEY_LEGACY_MOBILE, snap.legacy);
+        writeStorageItem(RECENT_KEY, snap.recent);
+        renderRecent();
+      }
+
+      function persistLastServerUrl(href) {
+        try {
+          // 上次地址（自动登录）：有桌面建议时任意回环都不落盘，避免连到已退出的本机端口。
+          // 最近列表只跳过「与建议 URL 完全相同」的那条，其它回环端口仍可出现在历史上。
           if (suggestedServerUrl && isLoopbackUrl(href)) {
             return;
           }
           localStorage.setItem(URL_KEY, href);
-          // 兼容旧移动端键，避免升级后丢地址
           localStorage.setItem(URL_KEY_LEGACY_MOBILE, href);
-          rememberRecentUrl(href);
+        } catch (_) {}
+      }
+
+      async function mergeRecentFromShell() {
+        try {
+          const remote = await invoke("get_recent_connect_urls");
+          if (!Array.isArray(remote)) return;
+          const merged = [];
+          const add = function (raw) {
+            const href = normalizeRecentUrl(raw);
+            if (!href || merged.indexOf(href) !== -1) return;
+            if (merged.length >= MAX_RECENT) return;
+            merged.push(href);
+          };
+          remote.forEach(add);
+          readRecentUrls().forEach(add);
+          if (merged.length || remote.length || hasRecentHistory()) {
+            writeRecentUrls(merged);
+          }
         } catch (_) {}
       }
 
@@ -590,9 +646,14 @@
         }
         connectInFlight = true;
         setBusy(true, fromAuto ? "已记住连接，正在自动登录…" : "正在探测服务器…");
+        const persistSnap = snapshotConnectPersist();
         try {
+          // 卸页前先写；失败则还原，避免把没连上的地址当成下次自动登录目标。
+          if (!isSuggestedUrl(u.href)) {
+            rememberRecentUrl(u.href);
+          }
+          persistLastServerUrl(u.href);
           await invokeConnect(u.href, bearer);
-          persistUrl(u.href);
           persistBearerFallback(bearer);
           if (!fromAuto) {
             notifyAutofillSuccess();
@@ -600,6 +661,7 @@
           setBusy(true, "已连接，正在打开界面…");
           return true;
         } catch (ex) {
+          restoreConnectPersist(persistSnap);
           connectInFlight = false;
           if (!fromAuto) {
             notifyAutofillFailure();
@@ -625,10 +687,17 @@
         });
       });
 
-      document.getElementById("recent-clear").addEventListener("click", function () {
+      document.getElementById("recent-clear").addEventListener("click", async function () {
+        const prev = snapshotConnectPersist();
         // 写空数组（而非删除键），避免下次加载又触发“首次升级”种子。
         writeRecentUrls([]);
         renderRecent();
+        try {
+          await invoke("clear_recent_connect_urls");
+        } catch (_) {
+          restoreConnectPersist(prev);
+          err.textContent = "无法清空最近连接，请重试";
+        }
       });
 
       (async function boot() {
