@@ -59,7 +59,7 @@
 ```bash
 make help
 make frontend                # trunk → frontend/dist
-make check                   # or pre-commit run --all-files (includes frontend wasm + ktlint)
+make check                   # or pre-commit run --all-files (includes frontend wasm32 clippy + ktlint)
 make dependency-security     # cargo audit + cargo deny (all workspaces; not in pre-commit)
 make ktlint-android          # hand-maintained Android Kotlin only (`edu/crabmate`)
 make test

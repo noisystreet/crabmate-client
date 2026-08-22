@@ -57,7 +57,7 @@ jobs:
       - name: Forbid path deps back to Server monorepo
         run: bash scripts/check-no-main-path.sh
 
-      - name: scripts/check.sh (fmt + clippy + frontend wasm + complexity + ktlint)
+      - name: scripts/check.sh (fmt + clippy + frontend wasm32 clippy + complexity + ktlint)
         run: bash scripts/check.sh
 
       - name: Install trunk (frontend smoke)
