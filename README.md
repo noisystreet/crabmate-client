@@ -188,7 +188,7 @@ See [ADR-0002](docs/adr/0002-android-approval-notification-foreground-keepalive.
 
 ## Conventions
 
-- `crabmate-connect`: in-repo `path = "../../crates/crabmate-connect"`
+- `crabmate-connect`: in-repo `path = "../../crates/crabmate-connect"`; shells must enable `features = ["tauri"]` (default features have no Tauri)
 - `frontend` contracts: git tag / `rev`; do not `path` back to the Server tree
 - Secret boundary matches Server ADR §2.3: cross-origin traffic accepts only Web Bearer + CORS
 

@@ -12,12 +12,12 @@ Server 侧契约发版策略（`api-contract` / `sse-protocol`）：
 
 - Crate **`version`**：本目录 `Cargo.toml`（semver）
 - **`publish = false`**：随本仓发版；不强制 crates.io
-- **Tauri**：依赖 **`tauri = "2"`**；与官方壳 major 对齐
+- **Tauri**：可选 feature **`tauri`**（`tauri = "2"`）。默认关闭，probe / handoff / keyring 测试不编 GTK/WebKit。Desktop / Android 须 `features = ["tauri"]`
 
 本仓壳：
 
 ```toml
-crabmate-connect = { path = "../../crates/crabmate-connect" }
+crabmate-connect = { path = "../../crates/crabmate-connect", features = ["tauri"] }
 ```
 
 ## 能力边界

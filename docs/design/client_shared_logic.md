@@ -40,7 +40,7 @@ frontend & tui-core ──┴── crabmate（protocol feature；crates.io 0.4.
 
 | 已共享 | 谁用 | 覆盖 |
 |--------|------|------|
-| `crabmate-connect` | Desktop / Android | 探测、hash 交接、钥匙串 Bearer/LLM 槽、导航白名单 |
+| `crabmate-connect` | Desktop / Android | 探测、hash 交接、钥匙串 Bearer/LLM 槽、导航白名单（导航钩子 / invoke 需 feature `tauri`） |
 | `frontend/` | 两壳包内 UI | 业务 HTTP/SSE、设置、会话、审批 UI |
 | `crabmate-tui-core` | 仅 `crabmate-tui` | 远程终端 HTTP/SSE 核心 |
 | Server 契约 git tag | frontend（多 crate）；tui-core（sse-protocol） | SSE 分类等 |
@@ -55,7 +55,7 @@ frontend & tui-core ──┴── crabmate（protocol feature；crates.io 0.4.
 crates/
   crabmate-client-api/   # S1–S4 + `handoff`：纯逻辑（url / auth / secrets / approval / workspace / sessions / chat_body / hash 键名）
   crabmate-tool-card/    # W2：工具卡 compact/detail（frontend path；不进 tui-core）
-  crabmate-connect/      # 保持：Tauri commands + keyring IO + CORS；hash 拼装委托 client-api
+  crabmate-connect/      # 默认无 Tauri（probe / keyring）；壳 `features = ["tauri"]`；hash 拼装委托 client-api
   crabmate-tui-core/     # 变薄：reqwest ServeClient 调用 client-api
   crabmate-tui/          # CLI / TTY / slash 宿主
 frontend/                # wasm fetch 适配器 + UI；S1–S4 已用 client-api 核心字段/解析

@@ -10,7 +10,7 @@
 
 | 依赖 | 本仓做法 |
 |------|----------|
-| `crabmate-connect` | **本仓** `path = "../../crates/crabmate-connect"`（已迁入；勿再 git+path 回主仓旧路径） |
+| `crabmate-connect` | **本仓** `path = "../../crates/crabmate-connect"`（已迁入；勿再 git+path 回主仓旧路径）。壳启用 `features = ["tauri"]` |
 | 业务 UI（`frontend/`） | **本仓**；线契约一条 `crabmate`（`protocol`），见 `frontend/Cargo.toml` |
 | 远程终端（`crabmate-tui-core`） | 同一 `crabmate` + `protocol`（**不要**开 `server`） |
 | 壳二进制本身 | 暂不直接依赖主仓契约 crate（只经 WebView 加载 UI + HTTP/SSE） |
