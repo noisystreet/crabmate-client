@@ -2,7 +2,7 @@
 
 > **状态**：S1–S4 **已落地**（`url` / `auth` / `secrets` / `approval` / `workspace` / `sessions` / `chat_body`）；hash 交接键名已上收；S5 其余（health / 斜杠）可选未开工  
 > **范围**：`frontend`（WASM）、`crabmate-connect`（Desktop/Android 壳）、`crabmate-tui` / `crabmate-tui-core`（远程终端）之间的重复逻辑  
-> **关联**：[remote_cli_tui.md](./remote_cli_tui.md)、[tauri_gui_mvp_design.md](./tauri_gui_mvp_design.md)、[contract_pin.md](./contract_pin.md)；Server [`client_shell_split.md`](https://github.com/noisystreet/CrabMate/blob/main/docs/design/client_shell_split.md)
+> **关联**：[remote_cli_tui.md](./remote_cli_tui.md)、[tauri_gui_mvp_design.md](./tauri_gui_mvp_design.md)、[contract_pin.md](./contract_pin.md)、产品面对照 [client_capability_matrix.md](./client_capability_matrix.md)；Server [`client_shell_split.md`](https://github.com/noisystreet/CrabMate/blob/main/docs/design/client_shell_split.md)
 
 ---
 

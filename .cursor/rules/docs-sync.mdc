@@ -19,6 +19,7 @@ alwaysApply: true
 - Agent / contributor constraints → **`AGENTS.md`** (English only)
 - Connect model, lifecycle, tray / single-instance → `docs/design/tauri_gui_mvp_design.md`
 - Coding-agent client plan (review / revert; not full IDE) → `docs/design/coding_agent_client.md` (Wave 1 checkboxes: `chat_ui_todo.md`; restore/changelog JSON: Server)
+- Desktop / Android / Web / TUI capability cells → `docs/design/client_capability_matrix.md` (same PR as the capability change)
 - Manual shell smoke steps → `docs/design/shell_smoke_runbook.md`
 - Test / check entrypoints → `docs/TESTING.md`, `AGENTS.md` Required Commands
 - User/maintainer release notes → `CHANGELOG.md` (English; `[Unreleased]`; move into a version section when tagging)
