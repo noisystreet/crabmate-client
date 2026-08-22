@@ -9,11 +9,10 @@
 
 use super::browser::{set_api_base_url, set_web_api_bearer_token, window};
 
-/// Hash 参数名（与 `crabmate-connect` 一致）。
-pub const CM_WEB_API_BEARER_HASH_KEY: &str = "cm_web_api_bearer";
-
-/// API 基址 hash 键（指向远程 `serve`）。
-pub const CM_API_BASE_HASH_KEY: &str = "cm_api_base";
+/// Hash 参数名（与 [`crabmate_client_api::handoff`] 一致）。
+pub use crabmate_client_api::{
+    API_BASE_HASH_KEY as CM_API_BASE_HASH_KEY, BEARER_HASH_KEY as CM_WEB_API_BEARER_HASH_KEY,
+};
 
 /// 从 `location.hash`（`#a=1&b=2`）解析键值；值已做 URL 解码。
 #[must_use]
@@ -44,7 +43,7 @@ pub fn parse_hash_params(hash: &str) -> Vec<(String, String)> {
 }
 
 fn is_handoff_key(k: &str) -> bool {
-    k == CM_WEB_API_BEARER_HASH_KEY || k == CM_API_BASE_HASH_KEY
+    crabmate_client_api::is_handoff_hash_key(k)
 }
 
 /// 去掉交接敏感键后重建 hash（无参数时返回空串，不含 `#`）。

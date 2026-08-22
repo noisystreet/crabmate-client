@@ -278,7 +278,8 @@ export function resolveWebApiBearerToken(): string {
 }
 
 /** 首页 URL；跨 Origin 时带 `#cm_api_base=` 交接（WASM 消费后写入 localStorage 供刷新），
- * 设了 `CM_WEB_API_BEARER_TOKEN` 时再带 Bearer 交接。 */
+ * 设了 `CM_WEB_API_BEARER_TOKEN` 时再带 Bearer 交接。
+ * 键名须与 `crabmate-client-api` `API_BASE_HASH_KEY` / `BEARER_HASH_KEY` 一致。 */
 export function homeUrlWithOptionalWebBearer(pathname = "/"): string {
   const parts: string[] = [];
   const api = apiBase();
