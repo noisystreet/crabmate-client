@@ -49,12 +49,68 @@ export function invokeTauriPickWorkspaceFolder() {
   }
   return invoke("pick_workspace_folder_via_dialog", {});
 }
+
+function utf8ToBase64(str) {
+  const bytes = new TextEncoder().encode(str);
+  let binary = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunk)));
+  }
+  return btoa(binary);
+}
+
+export function hasAndroidDeviceFileSave() {
+  try {
+    const b = globalThis.CrabMateMobile;
+    return !!(
+      b &&
+      typeof b.beginDeviceFileSave === "function" &&
+      typeof b.appendDeviceFileSave === "function" &&
+      typeof b.finishDeviceFileSave === "function"
+    );
+  } catch (_) {
+    return false;
+  }
+}
+
+function cancelAndroidDeviceFileSave() {
+  const b = globalThis.CrabMateMobile;
+  if (b && typeof b.cancelDeviceFileSave === "function") {
+    b.cancelDeviceFileSave();
+  }
+}
+
+export async function saveUtf8ViaAndroidShare(filename, body) {
+  const b64 = utf8ToBase64(body);
+  if (!globalThis.CrabMateMobile.beginDeviceFileSave(filename)) {
+    throw new Error("beginDeviceFileSave");
+  }
+  try {
+    const step = 240000;
+    for (let i = 0; i < b64.length; i += step) {
+      if (!globalThis.CrabMateMobile.appendDeviceFileSave(b64.slice(i, i + step))) {
+        throw new Error("appendDeviceFileSave");
+      }
+    }
+    if (!globalThis.CrabMateMobile.finishDeviceFileSave()) {
+      throw new Error("finishDeviceFileSave");
+    }
+  } catch (e) {
+    cancelAndroidDeviceFileSave();
+    throw e;
+  }
+}
 "#)]
 extern "C" {
     #[wasm_bindgen(js_name = invokeTauriSaveTextFile)]
     fn invoke_tauri_save_text_file(default_name: &str, body: &str) -> js_sys::Promise;
     #[wasm_bindgen(js_name = invokeTauriPickWorkspaceFolder)]
     fn invoke_tauri_pick_workspace_folder() -> js_sys::Promise;
+    #[wasm_bindgen(js_name = hasAndroidDeviceFileSave)]
+    fn js_has_android_device_file_save() -> bool;
+    #[wasm_bindgen(js_name = saveUtf8ViaAndroidShare)]
+    fn js_save_utf8_via_android_share(filename: &str, body: &str) -> js_sys::Promise;
 }
 
 /// 打开系统文件夹对话框；取消返回 `Ok(None)`。
@@ -239,10 +295,34 @@ pub fn trigger_download(
     body: &str,
     loc: crate::i18n::Locale,
 ) -> Result<(), String> {
+    if js_has_android_device_file_save() {
+        return trigger_download_via_android(filename, body, loc);
+    }
     if crate::tauri_shell::tauri_shell_available() {
         return trigger_download_via_tauri(filename, body, loc);
     }
     trigger_download_via_anchor(filename, mime, body)
+}
+
+fn trigger_download_via_android(
+    filename: &str,
+    body: &str,
+    loc: crate::i18n::Locale,
+) -> Result<(), String> {
+    let default_name = filename.to_string();
+    let content = body.to_string();
+    let Some(w) = web_sys::window() else {
+        return Err("no window".to_string());
+    };
+    spawn_local(async move {
+        match JsFuture::from(js_save_utf8_via_android_share(&default_name, &content)).await {
+            Ok(_) => {}
+            Err(_) => {
+                let _ = w.alert_with_message(crate::i18n::export_android_share_failed(loc));
+            }
+        }
+    });
+    Ok(())
 }
 
 fn trigger_download_via_tauri(

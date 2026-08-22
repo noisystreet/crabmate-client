@@ -7,6 +7,7 @@ use gloo_timers::callback::Timeout;
 use leptos::prelude::*;
 use wasm_bindgen::JsCast;
 
+use crate::session_ops::clamp_session_ctx_menu_pos;
 use crate::workspace_context_menu::WorkspaceContextAnchor;
 
 const LONG_PRESS_MS: u32 = 480;
@@ -40,6 +41,7 @@ pub(crate) fn open_workspace_context_menu_at(
     y: f64,
     target: WorkspaceRowPressTarget,
 ) {
+    let (x, y) = clamp_session_ctx_menu_pos(x as i32, y as i32);
     workspace_context_menu.set(Some(WorkspaceContextAnchor {
         x,
         y,

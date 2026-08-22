@@ -15,13 +15,17 @@ internal class ChatImageShare {
   fun begin(
     originOk: Boolean,
     rawName: String,
+    asImage: Boolean = true,
   ): Boolean {
     if (!originOk) {
       return false
     }
     synchronized(lock) {
+      if (buf != null) {
+        return false
+      }
       buf = StringBuilder()
-      filename = safeFileName(rawName)
+      filename = if (asImage) safeImageFileName(rawName) else safeFileName(rawName)
     }
     return true
   }
@@ -72,7 +76,7 @@ internal class ChatImageShare {
       } catch (_: Exception) {
         return false
       }
-    if (bytes.isEmpty() || bytes.size > MAX_DECODED_BYTES) {
+    if (bytes.size > MAX_DECODED_BYTES) {
       return false
     }
     return shareBytes(activity, payload.second, bytes)
@@ -86,32 +90,78 @@ internal class ChatImageShare {
 
   companion object {
     const val DEFAULT_NAME: String = "image.png"
+    const val DEFAULT_FILE_NAME: String = "download.txt"
     const val MAX_DECODED_BYTES: Int = 16 * 1024 * 1024
     const val MAX_B64_CHARS: Int = MAX_DECODED_BYTES * 2
     const val MAX_CHUNK_CHARS: Int = 240_000
 
-    fun safeFileName(raw: String): String {
+    /** `isLetterOrDigit` keeps CJK; spaces become `_`. Empty / dots-only → [fallback]. */
+    fun safeFileName(
+      raw: String,
+      fallback: String = DEFAULT_FILE_NAME,
+    ): String {
       val last =
         raw
           .replace('\\', '/')
           .substringAfterLast('/')
+          .replace(Regex("\\s+"), "_")
           .filter { it.isLetterOrDigit() || it == '.' || it == '-' || it == '_' }
           .take(80)
           .trim('.')
       if (last.isEmpty()) {
-        return DEFAULT_NAME
+        return fallback
       }
+      return last
+    }
+
+    fun safeImageFileName(raw: String): String {
+      val last = safeFileName(raw, DEFAULT_NAME)
       return if (hasRasterExt(last)) last else "$last.png"
     }
 
     fun mimeForName(name: String): String {
       val ext = name.substringAfterLast('.', "").lowercase()
-      return when (ext) {
-        "jpg", "jpeg" -> "image/jpeg"
-        "webp" -> "image/webp"
-        "gif" -> "image/gif"
-        else -> "image/png"
+      if (ext == "jpg" || ext == "jpeg") {
+        return "image/jpeg"
       }
+      if (ext == "png") {
+        return "image/png"
+      }
+      if (ext == "webp") {
+        return "image/webp"
+      }
+      if (ext == "gif") {
+        return "image/gif"
+      }
+      return mimeForNonImageExt(ext)
+    }
+
+    private fun mimeForNonImageExt(ext: String): String {
+      val text =
+        setOf(
+          "txt",
+          "md",
+          "rs",
+          "toml",
+          "json",
+          "css",
+          "html",
+          "xml",
+          "yml",
+          "yaml",
+          "sh",
+          "py",
+          "ts",
+          "js",
+          "kt",
+          "kts",
+          "c",
+          "h",
+          "cpp",
+          "go",
+          "java",
+        )
+      return if (ext in text) "text/plain" else "application/octet-stream"
     }
 
     private fun hasRasterExt(name: String): Boolean {
