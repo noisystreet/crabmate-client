@@ -137,6 +137,9 @@ internal class ChatImageShare {
     }
 
     private fun mimeForNonImageExt(ext: String): String {
+      if (ext == "pdf") {
+        return "application/pdf"
+      }
       val text =
         setOf(
           "txt",

@@ -6,16 +6,17 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 
 use crate::api::{
-    delete_workspace_dir, delete_workspace_file, fetch_workspace_file, post_workspace_dir,
+    delete_workspace_dir, delete_workspace_file, fetch_workspace_file_download, post_workspace_dir,
     post_workspace_file_write_opts,
 };
 use crate::i18n::Locale;
 use crate::ide_save::spawn_create_and_open_file;
 use crate::ide_tabs::{force_close_tabs_for_deleted_entry, ide_tab_basename};
-use crate::session_export::trigger_download;
+use crate::session_export::trigger_download_bytes;
 use crate::workspace_context_menu::{
     WorkspaceContextMenuActions, WorkspaceInlineCreateKind, WorkspaceTreeRefreshHint,
 };
+use crate::workspace_file_drop::WORKSPACE_UPLOAD_MAX_BYTES;
 use crate::workspace_tree::workspace_parent_rel;
 
 fn refresh_after_create(actions: &WorkspaceContextMenuActions, parent_rel: String) {
@@ -93,23 +94,20 @@ fn open_tab_text_for_path(actions: &WorkspaceContextMenuActions, rel: &str) -> O
         .map(|t| t.text)
 }
 
-async fn workspace_text_for_local_save(
+async fn workspace_bytes_for_local_save(
     rel: &str,
     loc: Locale,
     actions: &WorkspaceContextMenuActions,
-) -> Result<String, String> {
+) -> Result<Vec<u8>, String> {
     if let Some(text) = open_tab_text_for_path(actions, rel) {
-        return Ok(text);
+        return Ok(text.into_bytes());
     }
-    let d = fetch_workspace_file(rel, None, loc).await?;
-    match d.error {
-        Some(e) => Err(e),
-        None => Ok(d.content),
-    }
+    fetch_workspace_file_download(rel, loc).await
 }
 
-/// 把工作区文本文件下载到本机（桌面另存为；Android 系统分享；浏览器 `<a download>`）。
-/// 若该路径已在 IDE 打开，用当前缓冲区（含未写回 serve 的编辑）。
+/// 把工作区文件下载到本机（桌面另存为；Android 系统分享；浏览器 `<a download>`）。
+/// 磁盘内容走 `GET /workspace/file/download`（原样字节：PDF/二进制/文本）。
+/// 若该路径已在 IDE 打开，用当前缓冲区的 UTF-8 字节（含未写回 serve 的编辑）。
 pub fn spawn_save_workspace_file_to_device(
     rel: String,
     locale: RwSignal<Locale>,
@@ -119,14 +117,21 @@ pub fn spawn_save_workspace_file_to_device(
     spawn_local(async move {
         let loc = locale.get_untracked();
         let filename = workspace_download_basename(rel.as_str());
-        let content = match workspace_text_for_local_save(rel.as_str(), loc, &actions).await {
+        let content = match workspace_bytes_for_local_save(rel.as_str(), loc, &actions).await {
             Ok(c) => c,
             Err(e) => {
                 workspace_err.set(Some(e));
                 return;
             }
         };
-        match trigger_download(&filename, "text/plain;charset=utf-8", &content, loc) {
+        if content.len() as u64 > WORKSPACE_UPLOAD_MAX_BYTES {
+            workspace_err.set(Some(crate::i18n::workspace_save_too_large(
+                loc,
+                filename.as_str(),
+            )));
+            return;
+        }
+        match trigger_download_bytes(&filename, &content, loc) {
             Ok(()) => workspace_err.set(None),
             Err(e) => workspace_err.set(Some(e)),
         }
@@ -231,6 +236,12 @@ mod tests {
     }
 
     #[test]
+    fn download_basename_keeps_cjk() {
+        assert_eq!(workspace_download_basename("笔记/说明.txt"), "说明.txt");
+        assert_eq!(workspace_download_basename("你好"), "你好");
+    }
+
+    #[test]
     fn download_basename_rejects_empty_and_dots() {
         assert_eq!(workspace_download_basename(""), "download");
         assert_eq!(workspace_download_basename("/"), "download");
@@ -247,6 +258,14 @@ mod tests {
         assert_eq!(
             workspace_tree_ctx_save_to_device(Locale::En),
             "Save to this device…"
+        );
+        assert_eq!(
+            crate::i18n::workspace_save_too_large(Locale::ZhHans, "说明.txt"),
+            "说明.txt 超过 16 MiB，无法保存到本机"
+        );
+        assert_eq!(
+            crate::i18n::workspace_save_too_large(Locale::En, "说明.txt"),
+            "说明.txt is over 16 MiB and cannot be saved to this device"
         );
         assert_eq!(crate::i18n::workspace_upload_ok(Locale::ZhHans), "上传");
         assert_eq!(crate::i18n::workspace_upload_ok(Locale::En), "Upload");

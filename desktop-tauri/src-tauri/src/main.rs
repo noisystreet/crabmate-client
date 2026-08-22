@@ -97,7 +97,7 @@ fn save_dialog_basename(name: &str) -> String {
         return String::new();
     };
     last.chars()
-        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
+        .filter(|c| !c.is_control() && !matches!(c, '<' | '>' | ':' | '"' | '|' | '?' | '*'))
         .take(80)
         .collect()
 }
@@ -370,5 +370,11 @@ mod tests {
         assert_eq!(super::save_dialog_basename("a/b/c.png"), "c.png");
         assert_eq!(super::save_dialog_basename("../x.png"), "x.png");
         assert!(super::save_dialog_basename("///").is_empty());
+    }
+
+    #[test]
+    fn save_dialog_basename_keeps_cjk() {
+        assert_eq!(super::save_dialog_basename("笔记/说明.txt"), "说明.txt");
+        assert_eq!(super::save_dialog_basename("你好"), "你好");
     }
 }

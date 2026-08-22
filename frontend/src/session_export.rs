@@ -51,13 +51,36 @@ export function invokeTauriPickWorkspaceFolder() {
 }
 
 function utf8ToBase64(str) {
-  const bytes = new TextEncoder().encode(str);
+  return bytesToBase64(new TextEncoder().encode(str));
+}
+
+function bytesToBase64(bytes) {
   let binary = "";
   const chunk = 0x8000;
   for (let i = 0; i < bytes.length; i += chunk) {
     binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunk)));
   }
   return btoa(binary);
+}
+
+function asUint8Array(bytes) {
+  return bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+}
+
+export function invokeTauriSaveBytesFile(defaultName, bytes) {
+  const invoke =
+    (globalThis.__TAURI__ && globalThis.__TAURI__.core && globalThis.__TAURI__.core.invoke) ||
+    (globalThis.__TAURI_INTERNALS__ && globalThis.__TAURI_INTERNALS__.invoke);
+  if (typeof invoke !== "function") {
+    throw new Error("Tauri invoke unavailable");
+  }
+  const b64 = bytesToBase64(asUint8Array(bytes));
+  return invoke("save_bytes_file_via_dialog", {
+    default_name: defaultName,
+    defaultName,
+    content_base64: b64,
+    contentBase64: b64
+  });
 }
 
 export function hasAndroidDeviceFileSave() {
@@ -82,7 +105,14 @@ function cancelAndroidDeviceFileSave() {
 }
 
 export async function saveUtf8ViaAndroidShare(filename, body) {
-  const b64 = utf8ToBase64(body);
+  return saveB64ViaAndroidShare(filename, utf8ToBase64(body));
+}
+
+export async function saveBytesViaAndroidShare(filename, bytes) {
+  return saveB64ViaAndroidShare(filename, bytesToBase64(asUint8Array(bytes)));
+}
+
+async function saveB64ViaAndroidShare(filename, b64) {
   if (!globalThis.CrabMateMobile.beginDeviceFileSave(filename)) {
     throw new Error("beginDeviceFileSave");
   }
@@ -101,6 +131,20 @@ export async function saveUtf8ViaAndroidShare(filename, body) {
     throw e;
   }
 }
+
+export function saveBytesViaAnchor(filename, bytes) {
+  const blob = new Blob([asUint8Array(bytes)], { type: "application/octet-stream" });
+  const u = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = u;
+  a.download = filename;
+  a.rel = "noopener";
+  a.style.display = "none";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(u), 2000);
+}
 "#)]
 extern "C" {
     #[wasm_bindgen(js_name = invokeTauriSaveTextFile)]
@@ -111,6 +155,12 @@ extern "C" {
     fn js_has_android_device_file_save() -> bool;
     #[wasm_bindgen(js_name = saveUtf8ViaAndroidShare)]
     fn js_save_utf8_via_android_share(filename: &str, body: &str) -> js_sys::Promise;
+    #[wasm_bindgen(js_name = invokeTauriSaveBytesFile)]
+    fn invoke_tauri_save_bytes_file(default_name: &str, bytes: &[u8]) -> js_sys::Promise;
+    #[wasm_bindgen(js_name = saveBytesViaAndroidShare)]
+    fn js_save_bytes_via_android_share(filename: &str, bytes: &[u8]) -> js_sys::Promise;
+    #[wasm_bindgen(js_name = saveBytesViaAnchor)]
+    fn js_save_bytes_via_anchor(filename: &str, bytes: &[u8]);
 }
 
 /// 打开系统文件夹对话框；取消返回 `Ok(None)`。
@@ -302,6 +352,72 @@ pub fn trigger_download(
         return trigger_download_via_tauri(filename, body, loc);
     }
     trigger_download_via_anchor(filename, mime, body)
+}
+
+/// 把原始字节保存到本机（不经 UTF-8 文本 API）。桌面走 `save_bytes_file_via_dialog`。
+pub fn trigger_download_bytes(
+    filename: &str,
+    bytes: &[u8],
+    loc: crate::i18n::Locale,
+) -> Result<(), String> {
+    if js_has_android_device_file_save() {
+        return trigger_bytes_via_android(filename, bytes, loc);
+    }
+    if crate::tauri_shell::tauri_shell_available() {
+        return trigger_bytes_via_tauri(filename, bytes, loc);
+    }
+    js_save_bytes_via_anchor(filename, bytes);
+    Ok(())
+}
+
+fn trigger_bytes_via_android(
+    filename: &str,
+    bytes: &[u8],
+    loc: crate::i18n::Locale,
+) -> Result<(), String> {
+    let default_name = filename.to_string();
+    let content = bytes.to_vec();
+    let Some(w) = web_sys::window() else {
+        return Err("no window".to_string());
+    };
+    spawn_local(async move {
+        match JsFuture::from(js_save_bytes_via_android_share(&default_name, &content)).await {
+            Ok(_) => {}
+            Err(_) => {
+                let _ = w.alert_with_message(crate::i18n::export_android_share_failed(loc));
+            }
+        }
+    });
+    Ok(())
+}
+
+fn trigger_bytes_via_tauri(
+    filename: &str,
+    bytes: &[u8],
+    loc: crate::i18n::Locale,
+) -> Result<(), String> {
+    let default_name = filename.to_string();
+    let content = bytes.to_vec();
+    let Some(w) = web_sys::window() else {
+        return Err("no window".to_string());
+    };
+    spawn_local(async move {
+        let p = invoke_tauri_save_bytes_file(&default_name, &content);
+        match JsFuture::from(p).await {
+            Ok(v) => {
+                let cancelled = v.as_bool().is_some_and(|saved| !saved);
+                if cancelled {
+                    let _ =
+                        w.alert_with_message(crate::i18n::export_tauri_save_cancelled_alert(loc));
+                }
+            }
+            Err(e) => {
+                let msg = crate::i18n::export_tauri_save_failed_alert(loc, &format!("{e:?}"));
+                let _ = w.alert_with_message(&msg);
+            }
+        }
+    });
+    Ok(())
 }
 
 fn trigger_download_via_android(

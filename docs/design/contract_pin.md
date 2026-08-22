@@ -26,7 +26,7 @@
 | Playwright `serve` checkout | git tag **`v0.4.0`**（与 crates.io 包同源） |
 | lock | 提交 `frontend/Cargo.lock`、`crates/crabmate-tui-core/Cargo.lock`、`crates/crabmate-tool-card/Cargo.lock` |
 
-`PUT /workspace/file/raw`（工作区本机文件拖放上传）是 **HTTP 路由**，不在 crates.io `protocol` 面里。官方 UI 对接 **当前 Server 源码 / 新于 `v0.4.0` 的 serve**；Playwright 默认仍 checkout **`v0.4.0`**，该用例不覆盖拖放上传。
+`PUT /workspace/file/raw`（工作区本机文件拖放上传）与 **`GET /workspace/file/download`**（侧栏保存到本机，任意类型含 PDF）是 **HTTP 路由**，不在 crates.io `protocol` 面里。官方 UI 对接 **当前 Server 源码 / 新于 `v0.4.0` 的 serve**；Playwright 默认仍 checkout **`v0.4.0`**，上述用例不覆盖。`GET /workspace/file/raw` 仍仅为聊天图片（png/jpg/jpeg/webp/gif）。
 
 壳打包 UI 同步：`make desktop-release` / `before-desktop-build.sh` 默认 **`trunk build --release`** 再同步本仓 `frontend/dist`（拒绝 debug 大 WASM）；`CM_PREPARE_SKIP_FRONTEND=1` 或 `CRABMATE_FRONTEND_DIST=-` 跳过；同级主仓回落需 `CRABMATE_ALLOW_SIBLING_FRONTEND=1`。
 

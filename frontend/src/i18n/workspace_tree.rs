@@ -169,3 +169,10 @@ pub fn workspace_upload_too_large(l: Locale, name: &str) -> String {
         Locale::En => format!("{name} is over 16 MiB and cannot be uploaded"),
     }
 }
+
+pub fn workspace_save_too_large(l: Locale, name: &str) -> String {
+    match l {
+        Locale::ZhHans => format!("{name} 超过 16 MiB，无法保存到本机"),
+        Locale::En => format!("{name} is over 16 MiB and cannot be saved to this device"),
+    }
+}
