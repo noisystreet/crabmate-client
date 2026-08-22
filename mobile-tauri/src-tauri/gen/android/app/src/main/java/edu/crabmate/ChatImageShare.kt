@@ -133,6 +133,9 @@ internal class ChatImageShare {
       if (ext == "pdf") {
         return "application/pdf"
       }
+      if (ext == "zip") {
+        return "application/zip"
+      }
       val text =
         setOf(
           "txt",

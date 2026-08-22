@@ -202,6 +202,7 @@ fn SideColumnWorkspaceCard(
     changelist_fetch_nonce: RwSignal<u64>,
     insert_workspace_file_ref: StoredValue<Arc<dyn Fn(String) + Send + Sync>>,
     is_narrow_viewport: RwSignal<bool>,
+    chat: crate::chat_session_state::ChatSessionSignals,
 ) -> impl IntoView {
     let insert_sv = insert_workspace_file_ref;
     let on_file_single_click = StoredValue::new(Arc::new(move |rel: String| {
@@ -215,6 +216,7 @@ fn SideColumnWorkspaceCard(
         refresh_after_mutation,
         ide_tabs: None,
         ide_confirm: None,
+        conversation_id: crate::workspace_context_menu::conversation_id_from_chat(chat),
     });
     view! {
         <div class="side-pane" style:flex="1" style:min-width="0">
@@ -300,6 +302,7 @@ pub fn side_column_view(signals: SideColumnViewSignals) -> impl IntoView {
         insert_workspace_file_ref,
         thinking_trace_log,
         is_narrow_viewport,
+        chat,
     } = signals;
     let tasks_data = status_tasks.tasks_data;
     let tasks_err = status_tasks.tasks_err;
@@ -345,6 +348,7 @@ pub fn side_column_view(signals: SideColumnViewSignals) -> impl IntoView {
                         changelist_fetch_nonce=changelist_fetch_nonce
                         insert_workspace_file_ref=insert_workspace_file_ref
                         is_narrow_viewport=is_narrow_viewport
+                        chat=chat
                     />
                 </Show>
                 <Show when=move || matches!(side_panel_view.get(), SidePanelView::Tasks)>

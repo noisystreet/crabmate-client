@@ -6,12 +6,16 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 
 use crate::api::{
-    delete_workspace_dir, delete_workspace_file, fetch_workspace_file_download, post_workspace_dir,
+    delete_workspace_dir, delete_workspace_file, fetch_workspace_dir_archive,
+    fetch_workspace_file_download, post_workspace_dir, post_workspace_file_move,
     post_workspace_file_write_opts,
 };
 use crate::i18n::Locale;
 use crate::ide_save::spawn_create_and_open_file;
-use crate::ide_tabs::{force_close_tabs_for_deleted_entry, ide_tab_basename};
+use crate::ide_tabs::{
+    force_close_tabs_for_deleted_entry, ide_tab_basename, retarget_tabs_after_file_move,
+    tab_list_path_is_dirty,
+};
 use crate::session_export::trigger_download_bytes;
 use crate::workspace_context_menu::{
     WorkspaceContextMenuActions, WorkspaceInlineCreateKind, WorkspaceTreeRefreshHint,
@@ -138,6 +142,149 @@ pub fn spawn_save_workspace_file_to_device(
     });
 }
 
+/// 目录 zip 下载文件名：根为 `workspace.zip`；目录名后加 `.zip`（不剥已有 `.zip` 后缀）。
+#[must_use]
+pub fn workspace_archive_download_name(rel: &str) -> String {
+    let stem = workspace_download_basename(rel);
+    if rel.trim().trim_matches('/').is_empty() {
+        return "workspace.zip".to_string();
+    }
+    if stem.ends_with(".zip") {
+        stem
+    } else {
+        format!("{stem}.zip")
+    }
+}
+
+/// 把工作区目录下载为 zip（`GET /workspace/dir/archive`）。空 `rel` 为工作区根。
+pub fn spawn_save_workspace_dir_to_device(
+    rel: String,
+    locale: RwSignal<Locale>,
+    workspace_err: RwSignal<Option<String>>,
+    _actions: WorkspaceContextMenuActions,
+) {
+    spawn_local(async move {
+        let loc = locale.get_untracked();
+        let filename = workspace_archive_download_name(rel.as_str());
+        let content = match fetch_workspace_dir_archive(rel.as_str(), loc).await {
+            Ok(c) => c,
+            Err(e) => {
+                workspace_err.set(Some(e));
+                return;
+            }
+        };
+        if content.len() as u64 > WORKSPACE_UPLOAD_MAX_BYTES {
+            workspace_err.set(Some(crate::i18n::workspace_save_too_large(
+                loc,
+                filename.as_str(),
+            )));
+            return;
+        }
+        match trigger_download_bytes(&filename, &content, loc) {
+            Ok(()) => workspace_err.set(None),
+            Err(e) => workspace_err.set(Some(e)),
+        }
+    });
+}
+
+fn refresh_after_rename(actions: &WorkspaceContextMenuActions, from_rel: &str, to_rel: &str) {
+    if let Some((tabs, editor)) = actions.ide_tabs {
+        retarget_tabs_after_file_move(tabs, from_rel, to_rel, editor);
+    }
+    let parent_rel = workspace_parent_rel(from_rel);
+    (actions.refresh_after_mutation)(WorkspaceTreeRefreshHint {
+        parent_rel,
+        deleted_rel: Some(from_rel.to_string()),
+    });
+}
+
+fn dest_tab_is_dirty(actions: &WorkspaceContextMenuActions, to_rel: &str) -> bool {
+    let Some((tabs, editor)) = actions.ide_tabs else {
+        return false;
+    };
+    tabs.persist_editor_into_active(editor.ide_text, editor.ide_baseline);
+    tab_list_path_is_dirty(&tabs.tabs.get_untracked(), to_rel)
+}
+
+fn rename_overwrite_confirm_message(loc: Locale, to_rel: &str, dest_dirty: bool) -> String {
+    if dest_dirty {
+        crate::i18n::workspace_tree_rename_overwrite_dirty_confirm(loc, to_rel)
+    } else {
+        crate::i18n::workspace_tree_rename_overwrite_confirm(loc, to_rel)
+    }
+}
+
+async fn overwrite_move_after_confirm(
+    from_rel: &str,
+    to_rel: &str,
+    cid: Option<&str>,
+    loc: Locale,
+    actions: &WorkspaceContextMenuActions,
+) -> Result<bool, String> {
+    let dest_dirty = dest_tab_is_dirty(actions, to_rel);
+    if !crate::confirm_dialog::confirm_in_page(
+        rename_overwrite_confirm_message(loc, to_rel, dest_dirty).as_str(),
+        crate::i18n::workspace_tree_rename_overwrite_ok(loc),
+        crate::i18n::ide_confirm_cancel(loc),
+    )
+    .await
+    {
+        return Ok(false);
+    }
+    post_workspace_file_move(from_rel, to_rel, true, cid, loc)
+        .await
+        .map_err(|e| e.message)?;
+    Ok(true)
+}
+
+/// 工作区内重命名文件（`POST /workspace/file/move`）。目标已存在时确认覆盖。
+pub fn spawn_rename_workspace_file(
+    from_rel: String,
+    to_rel: String,
+    locale: RwSignal<Locale>,
+    workspace_err: RwSignal<Option<String>>,
+    actions: WorkspaceContextMenuActions,
+) {
+    spawn_local(async move {
+        let loc = locale.get_untracked();
+        if from_rel == to_rel {
+            workspace_err.set(None);
+            return;
+        }
+        let cid = actions.bound_conversation_id();
+        let moved = post_workspace_file_move(
+            from_rel.as_str(),
+            to_rel.as_str(),
+            false,
+            cid.as_deref(),
+            loc,
+        )
+        .await;
+        let result = match moved {
+            Ok(()) => Ok(true),
+            Err(e) if e.is_conflict() => {
+                overwrite_move_after_confirm(
+                    from_rel.as_str(),
+                    to_rel.as_str(),
+                    cid.as_deref(),
+                    loc,
+                    &actions,
+                )
+                .await
+            }
+            Err(e) => Err(e.message),
+        };
+        match result {
+            Ok(true) => {
+                workspace_err.set(None);
+                refresh_after_rename(&actions, from_rel.as_str(), to_rel.as_str());
+            }
+            Ok(false) => {}
+            Err(e) => workspace_err.set(Some(e)),
+        }
+    });
+}
+
 pub fn spawn_delete_workspace_entry(
     rel: String,
     is_dir: bool,
@@ -250,6 +397,15 @@ mod tests {
     }
 
     #[test]
+    fn archive_download_name_root_and_dir() {
+        use super::workspace_archive_download_name;
+        assert_eq!(workspace_archive_download_name(""), "workspace.zip");
+        assert_eq!(workspace_archive_download_name("src"), "src.zip");
+        assert_eq!(workspace_archive_download_name("笔记/docs"), "docs.zip");
+        assert_eq!(workspace_archive_download_name("notes.zip"), "notes.zip");
+    }
+
+    #[test]
     fn save_to_device_label_is_bilingual() {
         assert_eq!(
             workspace_tree_ctx_save_to_device(Locale::ZhHans),
@@ -258,6 +414,30 @@ mod tests {
         assert_eq!(
             workspace_tree_ctx_save_to_device(Locale::En),
             "Save to this device…"
+        );
+        assert_eq!(
+            crate::i18n::workspace_tree_ctx_rename_file(Locale::ZhHans),
+            "重命名…"
+        );
+        assert_eq!(
+            crate::i18n::workspace_tree_ctx_rename_file(Locale::En),
+            "Rename…"
+        );
+        assert_eq!(
+            crate::i18n::workspace_tree_rename_overwrite_confirm(Locale::ZhHans, "b.rs"),
+            "b.rs 已存在，要覆盖吗？"
+        );
+        assert_eq!(
+            crate::i18n::workspace_tree_rename_overwrite_confirm(Locale::En, "b.rs"),
+            "b.rs already exists. Overwrite?"
+        );
+        assert!(
+            crate::i18n::workspace_tree_rename_overwrite_dirty_confirm(Locale::ZhHans, "b.rs")
+                .contains("未保存")
+        );
+        assert!(
+            crate::i18n::workspace_tree_rename_overwrite_dirty_confirm(Locale::En, "b.rs")
+                .contains("unsaved")
         );
         assert_eq!(
             crate::i18n::workspace_save_too_large(Locale::ZhHans, "说明.txt"),

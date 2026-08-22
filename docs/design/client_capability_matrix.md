@@ -66,6 +66,8 @@ Blank cells are forbidden.
 | `GET`/`POST /workspace` (set root) | yes | yes | yes | yes | TUI: `/workspace` `/cd`. |
 | File tree + wide-layout IDE | yes | no | reduced | no | Android / narrow: **locked off** ([`chat_ui_todo.md`](./chat_ui_todo.md), [`coding_agent_client.md`](./coding_agent_client.md)). Web: same WASM; IDE only when the viewport is wide. |
 | Save file to this device | yes | yes | yes | no | Desktop: native save dialog. Android: SAF `ACTION_CREATE_DOCUMENT` (not the share sheet; Xiaomi/MIUI often has no Files target). Web: browser download. Bytes via `GET /workspace/file/download` (PDF/binary). `GET /workspace/file/raw` is chat images only. Open IDE tab uses the buffer as UTF-8. Needs current `serve`. |
+| Save folder to this device | yes | yes | yes | no | Right-click a folder (or empty tree area = workspace root) → zip via `GET /workspace/dir/archive` (16 MiB uncompressed / 256 files on Server). Same save dialogs as files. Needs Server **#898**. |
+| Rename file in tree | yes | yes | yes | no | Inline rename → `POST /workspace/file/move`. Directories are not renamed. 409 prompts overwrite (warns if the destination IDE tab is dirty). Needs Server **#898**. |
 | Changelog modal (read-only) | yes | reduced | yes | no | Android: list/summary only; do not unlock IDE to “match Desktop”. Restore/rollback: **planned**, blocked on Server. |
 | Git clone UI | yes | yes | yes | no | |
 | Drop local files onto tree (`PUT …/file/raw`) | yes | yes | yes | no | Needs a `serve` newer than crates.io **0.4.0**. |

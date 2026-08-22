@@ -65,6 +65,13 @@ pub fn workspace_tree_ctx_save_to_device(l: Locale) -> &'static str {
     }
 }
 
+pub fn workspace_tree_ctx_rename_file(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "重命名…",
+        Locale::En => "Rename…",
+    }
+}
+
 pub fn workspace_tree_ctx_delete_file(l: Locale) -> &'static str {
     match l {
         Locale::ZhHans => "删除文件",
@@ -146,6 +153,31 @@ pub fn workspace_upload_overwrite_confirm(l: Locale, rel: &str) -> String {
     match l {
         Locale::ZhHans => format!("{rel} 已存在，要覆盖吗？"),
         Locale::En => format!("{rel} already exists. Overwrite?"),
+    }
+}
+
+pub fn workspace_tree_rename_overwrite_ok(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "覆盖",
+        Locale::En => "Overwrite",
+    }
+}
+
+pub fn workspace_tree_rename_overwrite_confirm(l: Locale, rel: &str) -> String {
+    match l {
+        Locale::ZhHans => format!("{rel} 已存在，要覆盖吗？"),
+        Locale::En => format!("{rel} already exists. Overwrite?"),
+    }
+}
+
+pub fn workspace_tree_rename_overwrite_dirty_confirm(l: Locale, rel: &str) -> String {
+    match l {
+        Locale::ZhHans => {
+            format!("{rel} 已存在，且编辑器中有未保存的修改；覆盖后这些修改会丢失。要覆盖吗？")
+        }
+        Locale::En => format!(
+            "{rel} already exists and has unsaved editor changes. Overwrite will discard those changes. Continue?"
+        ),
     }
 }
 
