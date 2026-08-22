@@ -2,7 +2,7 @@
 
 > **状态**：人工勾选；默认不进 pre-commit。  
 > **Server 侧全量三端清单**（CLI/TUI/Web/契约）：主仓 [`client_turn_smoke_runbook.md`](https://github.com/noisystreet/CrabMate/blob/main/docs/design/client_turn_smoke_runbook.md)。  
-> **本文件**：只覆盖 **壳仓** 步骤（对应主仓 runbook §4.4 / §4.5 / Client 矩阵 C3–C5）。
+> **本文件**：只覆盖 **壳仓** 步骤（对应主仓 runbook §4.4 / §4.5 / Client 矩阵 C3–C5）。端能力「有 / 不做」见 [`client_capability_matrix.md`](./client_capability_matrix.md)。
 
 ## 1. 前置
 

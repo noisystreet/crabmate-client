@@ -1,0 +1,85 @@
+# Client surface capability matrix
+
+> **Audience**: contributors aligning Desktop / Android / Web / TUI.  
+> **Not**: HTTP/SSE contracts (Server) or crate-extract planning ([`client_shared_logic.md`](./client_shared_logic.md)).  
+> **Maintenance**: a PR that changes a surface’s user-visible capability **must** update the matching cell here in the same change.
+
+## Surfaces (columns)
+
+| Column | What it is |
+|--------|------------|
+| **Desktop** | Linux Tauri shell + packaged `frontend/` WASM |
+| **Android** | Tauri shell + **same** WASM; extra Kotlin / FGS |
+| **Web** | Same WASM hosted by `crabmate-web` (or equivalent) in a normal browser |
+| **TUI** | `crabmate-tui` / `crabmate-tui-core` (HTTP/SSE; not the WASM UI) |
+
+Desktop, Android, and Web share one UI crate. Do not treat them as three independent products. TUI is a separate client. Execution stays on a running `crabmate serve`.
+
+## Cell vocabulary
+
+| Token | Meaning |
+|-------|---------|
+| **yes** | Shipped on this surface |
+| **reduced** | Shipped with a documented downgrade (see Notes) |
+| **no** | Intentional non-goal — do not “align” other surfaces to match |
+| **planned** | Written in a design doc; not shipped |
+
+Blank cells are forbidden.
+
+## Matrix
+
+### Connect and shell
+
+| Capability | Desktop | Android | Web | TUI | Notes |
+|------------|---------|---------|-----|-----|-------|
+| Connect to remote `serve` (`/health`, Bearer) | yes | yes | yes | yes | WASM: connect page + hash handoff. TUI: `--api-base` / `--bearer`. |
+| Packaged UI after connect | yes | yes | yes | no | TUI has no WebView. |
+| Tray + single-instance | yes | no | no | no | Desktop lifecycle only. |
+| Stream FGS + approval notification | no | yes | no | no | [ADR-0002](../adr/0002-android-approval-notification-foreground-keepalive.md). |
+| Extra CORS Origin for browser | no | no | yes | no | Official shell Origins are default on Server; Web needs `CM_WEB_CORS_ALLOWED_ORIGINS`. |
+
+### Auth and secrets
+
+| Capability | Desktop | Android | Web | TUI | Notes |
+|------------|---------|---------|-----|-----|-------|
+| Web API Bearer (≠ model `API_KEY`) | yes | yes | yes | yes | Official shells: memory + keyring/Keystore, **no** plaintext `localStorage`. |
+| Persist Bearer on device | yes | yes | reduced | no | Web: weak `localStorage` with an explicit warning. TUI: flags/env only ([`remote_cli_tui.md`](./remote_cli_tui.md) may add keyring later). |
+| Model `client_llm` key on device | yes | yes | reduced | planned | Chat sends `client_llm.api_key` over HTTPS; do not `PUT /user-data/secrets/client-llm` from UI. TUI not wired. |
+| GitHub Device Flow | yes | yes | reduced | no | Native shells: Keystore/keyring slot + `X-CrabMate-GitHub-Token`. Browser: HttpOnly cookie path. |
+
+### Chat and tools
+
+| Capability | Desktop | Android | Web | TUI | Notes |
+|------------|---------|---------|-----|-----|-------|
+| `POST /chat/stream` + command approval | yes | yes | yes | yes | Android: notification keep-alive. TUI: TTY menu or `--yes`. |
+| Tool-card compact/detail | yes | yes | yes | no | TUI prints classified SSE as text (`crabmate-tool-card` is WASM-only). |
+| Chat image attach / lightbox | yes | yes | yes | no | |
+| Ask / Plan / Act in composer | yes | yes | yes | no | |
+| Control slashes (not sent to the model) | yes | yes | yes | reduced | Shared names: `help` / `workspace` / `cd`. Web has more (`export`, `model`, …). TUI: `/conv` `/quit`. |
+| Web session list + resume by `server_conversation_id` | yes | yes | yes | reduced | TUI: `/conv list` / `use`; no full WASM session CRUD/export. |
+| In-app stream resume after background | yes | yes | reduced | planned | TUI records `last_event_id` but does not send `Last-Event-ID` / `stream_resume`. |
+
+### Workspace and IDE
+
+| Capability | Desktop | Android | Web | TUI | Notes |
+|------------|---------|---------|-----|-----|-------|
+| `GET`/`POST /workspace` (set root) | yes | yes | yes | yes | TUI: `/workspace` `/cd`. |
+| File tree + wide-layout IDE | yes | no | reduced | no | Android / narrow: **locked off** ([`chat_ui_todo.md`](./chat_ui_todo.md), [`coding_agent_client.md`](./coding_agent_client.md)). Web: same WASM; IDE only when the viewport is wide. |
+| Changelog modal (read-only) | yes | reduced | yes | no | Android: list/summary only; do not unlock IDE to “match Desktop”. Restore/rollback: **planned**, blocked on Server. |
+| Git clone UI | yes | yes | yes | no | |
+| Drop local files onto tree (`PUT …/file/raw`) | yes | yes | yes | no | Needs a `serve` newer than crates.io **0.4.0**. |
+
+### Coding-agent extras (not full IDE)
+
+| Capability | Desktop | Android | Web | TUI | Notes |
+|------------|---------|---------|-----|-----|-------|
+| Open changelog/tool path in IDE | planned | no | planned | no | Wave 2; wide layout only. |
+| Session restore / accept-reject hunks | planned | planned | planned | no | Server contract first; no fake buttons. |
+| Git status / commit / open PR from review | planned | no | planned | no | Wave 3; Android stays list-oriented. |
+
+## Out of this matrix
+
+- Per-route API inventory (`GET /workspace/file`, …) — follow Server OpenAPI / pin.
+- Shared crate modules — [`client_shared_logic.md`](./client_shared_logic.md).
+- Manual Desktop/Android clicks — [`shell_smoke_runbook.md`](./shell_smoke_runbook.md).
+- Server in-process `crabmate chat|repl|tui` — Server docs; official remote terminal is `crabmate-tui`.

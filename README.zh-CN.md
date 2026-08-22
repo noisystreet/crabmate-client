@@ -113,6 +113,7 @@ crabmate-tui --api-base http://127.0.0.1:8080 repl
 | [docs/design/shell_smoke_runbook.md](./docs/design/shell_smoke_runbook.md) | Desktop/Android 人工冒烟 |
 | [docs/design/remote_cli_tui.md](./docs/design/remote_cli_tui.md) | 远程终端 crabmate-tui |
 | [docs/design/client_shared_logic.md](./docs/design/client_shared_logic.md) | 多端共用纯逻辑抽取规划 |
+| [docs/design/client_capability_matrix.md](./docs/design/client_capability_matrix.md) | Desktop / Android / Web / TUI 能力对照 |
 | [docs/design/coding_agent_client.md](./docs/design/coding_agent_client.md) | 编程 Agent 客户端规划（审查 / 还原；Wave 1–3） |
 | [docs/design/contract_pin.md](./docs/design/contract_pin.md) | 契约 git tag / rev 钉法 |
 | [frontend/README.md](./frontend/README.md) | UI 构建（trunk） |

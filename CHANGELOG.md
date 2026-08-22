@@ -30,6 +30,7 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Added
 
+- Design: Desktop / Android / Web / TUI capability matrix (`docs/design/client_capability_matrix.md`); update the matching cell in the same PR as a surface capability change
 - Chat composer image attachments (`POST /upload`) appear in the **user bubble** after send. Official shells fetch `/uploads/` with the Web Bearer and show a `blob:` thumbnail (same as workspace tool images). Failed or expired files show a placeholder. Click a loaded image to enlarge (Escape / close / backdrop; above the top bar). Paste attaches only when the clipboard has an image and no non-empty plain text. Composer pending thumbnails revoke `blob:` URLs on unmount. Files live in the server temp uploads dir and may expire; they are not stored as bytes in the session.
 - Design: chat cards for **file-backed** context injection ([ADR-0003](docs/adr/0003-chat-file-context-inject-cards.md); Proposed — compact path list, not full injected user bubbles; L6/auto skills wait on Server metadata; slash skill `path` is Client-only)
 - Workspace file tree: right-click a file → **Save to this device** (Desktop native save dialog; browser/Android download). Uses the open IDE buffer if that path is already open; otherwise `GET /workspace/file`. Hidden for folders. Text files only (same limit as the IDE reader).

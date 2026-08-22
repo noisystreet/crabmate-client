@@ -114,6 +114,7 @@ crabmate-tui --api-base http://127.0.0.1:8080 repl
 | [docs/design/shell_smoke_runbook.md](./docs/design/shell_smoke_runbook.md) | Desktop/Android manual smoke |
 | [docs/design/remote_cli_tui.md](./docs/design/remote_cli_tui.md) | Remote terminal crabmate-tui |
 | [docs/design/client_shared_logic.md](./docs/design/client_shared_logic.md) | Shared pure logic extract (WASM / connect / tui) |
+| [docs/design/client_capability_matrix.md](./docs/design/client_capability_matrix.md) | Desktop / Android / Web / TUI capability matrix |
 | [docs/design/coding_agent_client.md](./docs/design/coding_agent_client.md) | Coding-agent client plan (review / revert; Waves 1–3) |
 | [docs/design/contract_pin.md](./docs/design/contract_pin.md) | Contract git tag / rev pinning |
 | [frontend/README.md](./frontend/README.md) | UI build (trunk) |

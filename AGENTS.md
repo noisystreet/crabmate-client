@@ -28,6 +28,7 @@
 │       ├── tauri_gui_mvp_design.md
 │       ├── contract_pin.md
 │       ├── personal_cloud_runbook.md
+│       ├── client_capability_matrix.md # Desktop / Android / Web / TUI capability cells
 │       ├── remote_cli_tui.md   # remote crabmate-tui (HTTP/SSE; not in-process Agent)
 │       ├── client_shared_logic.md  # extract shared pure logic across WASM / connect / tui
 │       ├── coding_agent_client.md  # coding-agent review/revert plan (Waves 1–3)
@@ -91,6 +92,7 @@ When updating docs:
 | Android stream FGS / approval notifications | `docs/adr/0002-android-approval-notification-foreground-keepalive.md` (Accepted) |
 | Chat cards for file-backed context inject / skill path | `docs/adr/0003-chat-file-context-inject-cards.md` (Proposed — no fake cards without Server metadata; slash skill path is Client-only) |
 | Shared pure logic extract (WASM / connect / tui) | `docs/design/client_shared_logic.md` |
+| Desktop / Android / Web / TUI capability alignment | `docs/design/client_capability_matrix.md` (update the cell in the same PR as the capability) |
 | Chat UI follow-ups (composer / transcript / a11y) | `docs/design/chat_ui_todo.md` |
 | Coding-agent client (review / revert loop; not full IDE) | `docs/design/coding_agent_client.md` (Wave 1 checkboxes stay in `chat_ui_todo.md`; restore/changelog JSON authority is Server) |
 | Manual shell smoke steps | `docs/design/shell_smoke_runbook.md` |
