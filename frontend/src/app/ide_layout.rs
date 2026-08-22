@@ -196,6 +196,7 @@ pub fn IdeLayoutView(shell: IdeLayoutShellSignals) -> impl IntoView {
         refresh_after_mutation,
         ide_tabs: Some((tabs, tab_editor)),
         ide_confirm: Some(confirm),
+        conversation_id: crate::workspace_context_menu::conversation_id_from_chat(chat),
     });
 
     let save_ctx = IdeSaveContext {

@@ -106,13 +106,16 @@ pub async fn put_workspace_file_raw(
 
 /// `GET /workspace/file/download`：原样字节（PDF 等任意类型；不要走图片专用 `GET …/file/raw`）。
 pub async fn fetch_workspace_file_download(path: &str, loc: Locale) -> Result<Vec<u8>, String> {
+    fetch_workspace_get_bytes(&workspace_file_download_url(path), loc).await
+}
+
+pub(crate) async fn fetch_workspace_get_bytes(url: &str, loc: Locale) -> Result<Vec<u8>, String> {
     let w = window().ok_or_else(|| crate::i18n::api_err_no_window(loc).to_string())?;
-    let url = workspace_file_download_url(path);
     let init = RequestInit::new();
     init.set_method("GET");
     prepare_api_auth(&init).await;
     init.set_headers(&auth_headers());
-    let req = Request::new_with_str_and_init(&api_url(&url), &init)
+    let req = Request::new_with_str_and_init(&api_url(url), &init)
         .map_err(|e| format!("request: {:?}", e))?;
     let resp_val = JsFuture::from(w.fetch_with_request(&req))
         .await
@@ -127,7 +130,7 @@ pub async fn fetch_workspace_file_download(path: &str, loc: Locale) -> Result<Ve
     response_body_bytes(resp).await
 }
 
-async fn raw_get_status_message(resp: Response, status: u16, loc: Locale) -> String {
+pub(crate) async fn raw_get_status_message(resp: Response, status: u16, loc: Locale) -> String {
     let Ok(text_p) = resp.text() else {
         return crate::i18n::api_err_http_status(loc, status, "");
     };

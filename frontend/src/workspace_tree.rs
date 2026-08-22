@@ -18,19 +18,26 @@ use crate::workspace_context_menu::{
 };
 use crate::workspace_file_drop::WorkspaceDropHighlight;
 use crate::workspace_file_drop_io::{handle_workspace_os_file_drop, workspace_os_file_dragover};
-use crate::workspace_fs_ops::commit_inline_create;
+use crate::workspace_fs_ops::{
+    commit_inline_create, spawn_rename_workspace_file, workspace_download_basename,
+};
 use crate::workspace_shell::{workspace_list_row_class, workspace_list_row_icon};
 
-fn try_commit_inline_create_row(
+struct InlineCommitInput {
     name: String,
-    parent_rel: &str,
+    parent_rel: String,
     kind: WorkspaceInlineCreateKind,
+    rename_from_rel: Option<String>,
+}
+
+fn try_commit_inline_create_row(
+    commit: InlineCommitInput,
     chrome: WorkspaceTreeChromeSignals,
     locale: RwSignal<Locale>,
     workspace_err: RwSignal<Option<String>>,
     create_actions: WorkspaceContextMenuActions,
 ) {
-    let name = name.trim().to_string();
+    let name = commit.name.trim().to_string();
     if name.is_empty() {
         chrome.pending_create.set(None);
         workspace_err.set(None);
@@ -43,10 +50,15 @@ fn try_commit_inline_create_row(
         return;
     }
     chrome.pending_create.set(None);
+    if let Some(from_rel) = commit.rename_from_rel {
+        let to_rel = workspace_child_rel(commit.parent_rel.as_str(), &name);
+        spawn_rename_workspace_file(from_rel, to_rel, locale, workspace_err, create_actions);
+        return;
+    }
     commit_inline_create(
         name,
-        parent_rel,
-        kind,
+        commit.parent_rel.as_str(),
+        commit.kind,
         locale,
         workspace_err,
         create_actions,
@@ -224,6 +236,7 @@ struct WorkspaceTreeEnv {
 fn WorkspaceTreeInlineCreateRow(
     parent_rel: String,
     kind: WorkspaceInlineCreateKind,
+    rename_from_rel: Option<String>,
     env: WorkspaceTreeEnv,
 ) -> impl IntoView {
     let WorkspaceTreeEnv {
@@ -234,11 +247,16 @@ fn WorkspaceTreeInlineCreateRow(
         ..
     } = env;
     let locale = subtree.locale;
-    let draft = RwSignal::new(String::new());
+    let initial = rename_from_rel
+        .as_deref()
+        .map(workspace_download_basename)
+        .unwrap_or_default();
+    let draft = RwSignal::new(initial);
     let input_ref = NodeRef::<Input>::new();
-    let is_dir = kind == WorkspaceInlineCreateKind::Dir;
+    let is_dir = kind == WorkspaceInlineCreateKind::Dir && rename_from_rel.is_none();
     let row_class = workspace_list_row_class(is_dir, "");
     let parent_for_commit = StoredValue::new(parent_rel);
+    let rename_from_sv = StoredValue::new(rename_from_rel);
 
     Effect::new(move |_| {
         let _ = chrome.pending_create.get();
@@ -289,9 +307,12 @@ fn WorkspaceTreeInlineCreateRow(
                         ev.prevent_default();
                         ev.stop_propagation();
                         try_commit_inline_create_row(
-                            draft.get_untracked(),
-                            parent_for_commit.get_value().as_str(),
-                            kind,
+                            InlineCommitInput {
+                                name: draft.get_untracked(),
+                                parent_rel: parent_for_commit.get_value(),
+                                kind,
+                                rename_from_rel: rename_from_sv.get_value(),
+                            },
                             chrome,
                             locale,
                             workspace_err,
@@ -311,9 +332,12 @@ fn WorkspaceTreeInlineCreateRow(
                             return;
                         }
                         try_commit_inline_create_row(
-                            draft.get_untracked(),
-                            parent.get_value().as_str(),
-                            kind,
+                            InlineCommitInput {
+                                name: draft.get_untracked(),
+                                parent_rel: parent.get_value(),
+                                kind,
+                                rename_from_rel: rename_from_sv.get_value(),
+                            },
                             chrome,
                             locale,
                             workspace_err,
@@ -333,7 +357,11 @@ fn pending_create_at_parent(
     chrome
         .pending_create
         .get()
-        .filter(|p| p.parent_rel == parent_rel)
+        .filter(|p| p.rename_from_rel.is_none() && p.parent_rel == parent_rel)
+}
+
+fn pending_rename_rel(chrome: WorkspaceTreeChromeSignals) -> Option<String> {
+    chrome.pending_create.get().and_then(|p| p.rename_from_rel)
 }
 
 #[component]
@@ -357,18 +385,39 @@ fn WorkspaceTreeNodes(
                     let rel = workspace_child_rel(parent_for_inline.get_value().as_str(), &name);
                     let parent_for_row = parent_for_inline.get_value();
                     if !is_dir {
+                        let rel_for_rename = StoredValue::new(rel.clone());
+                        let rel_for_file = StoredValue::new(rel.clone());
+                        let parent_rename = parent_for_row.clone();
                         view! {
-                            <WorkspaceTreeFileRow
-                                row_class=row_class
-                                stagger=stagger
-                                name=name
-                                rel=rel
-                                parent_rel=parent_for_row
-                                chrome=env.chrome
-                                locale=env.subtree.locale
-                                on_file_double_click=env.on_file_double_click
-                                on_file_single_click=env.on_file_single_click
-                            />
+                            <>
+                                <Show when=move || {
+                                    pending_rename_rel(env.chrome).as_deref()
+                                        == Some(rel_for_rename.get_value().as_str())
+                                }>
+                                    <WorkspaceTreeInlineCreateRow
+                                        parent_rel=parent_rename.clone()
+                                        kind=WorkspaceInlineCreateKind::File
+                                        rename_from_rel=Some(rel_for_rename.get_value())
+                                        env=env
+                                    />
+                                </Show>
+                                <Show when=move || {
+                                    pending_rename_rel(env.chrome).as_deref()
+                                        != Some(rel_for_file.get_value().as_str())
+                                }>
+                                    <WorkspaceTreeFileRow
+                                        row_class=row_class.clone()
+                                        stagger=stagger.clone()
+                                        name=name.clone()
+                                        rel=rel.clone()
+                                        parent_rel=parent_for_row.clone()
+                                        chrome=env.chrome
+                                        locale=env.subtree.locale
+                                        on_file_double_click=env.on_file_double_click
+                                        on_file_single_click=env.on_file_single_click
+                                    />
+                                </Show>
+                            </>
                         }
                         .into_any()
                     } else {
@@ -401,6 +450,7 @@ fn WorkspaceTreeNodes(
                         <WorkspaceTreeInlineCreateRow
                             parent_rel=parent_for_inline.get_value()
                             kind=pending.kind
+                            rename_from_rel=None
                             env=env
                         />
                     })

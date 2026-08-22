@@ -52,6 +52,7 @@ class ChatImageShareTest {
   fun mimeForNameMapsTextAndBinary() {
     assertEquals("text/plain", ChatImageShare.mimeForName("lib.rs"))
     assertEquals("application/pdf", ChatImageShare.mimeForName("说明.pdf"))
+    assertEquals("application/zip", ChatImageShare.mimeForName("src.zip"))
     assertEquals("application/octet-stream", ChatImageShare.mimeForName("blob.bin"))
   }
 }

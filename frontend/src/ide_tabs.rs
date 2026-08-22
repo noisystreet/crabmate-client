@@ -498,6 +498,76 @@ pub fn force_close_tabs_for_deleted_entry(
     }
 }
 
+/// 磁盘文件移动/重命名后：关掉被覆盖路径的标签，并把源路径标签改到新路径。
+pub fn retarget_tabs_after_file_move(
+    tabs: IdeTabsHandle,
+    from_rel: &str,
+    to_rel: &str,
+    editor: IdeTabsEditorSignals,
+) {
+    let IdeTabsEditorSignals {
+        ide_path,
+        ide_text,
+        ide_baseline,
+    } = editor;
+    tabs.persist_editor_into_active(ide_text, ide_baseline);
+    let from = from_rel.trim().trim_end_matches('/');
+    let to = to_rel.trim().trim_end_matches('/');
+    if from.is_empty() || to.is_empty() {
+        return;
+    }
+    let (new_list, new_active) = map_tabs_after_file_move(
+        tabs.tabs.get_untracked(),
+        tabs.active.get_untracked(),
+        from,
+        to,
+    );
+    tabs.tabs.set(new_list);
+    tabs.active.set(new_active);
+    tabs.load_active_into_editor(ide_path, ide_text, ide_baseline);
+    if new_active.is_none() {
+        tabs.err.set(None);
+    }
+}
+
+#[must_use]
+pub(crate) fn map_tabs_after_file_move(
+    old_list: Vec<IdeTab>,
+    prev_active: Option<usize>,
+    from: &str,
+    to: &str,
+) -> (Vec<IdeTab>, Option<usize>) {
+    if from == to {
+        return (old_list, prev_active);
+    }
+    let mut new_list = Vec::with_capacity(old_list.len());
+    let mut new_active = None;
+    let mut retargeted_idx = None;
+    for (i, mut tab) in old_list.into_iter().enumerate() {
+        if tab.path == to {
+            continue;
+        }
+        if tab.path == from {
+            tab.path = to.to_string();
+            retargeted_idx = Some(new_list.len());
+        }
+        if prev_active == Some(i) {
+            new_active = Some(new_list.len());
+        }
+        new_list.push(tab);
+    }
+    if new_active.is_none() {
+        new_active = retargeted_idx;
+    }
+    (new_list, new_active)
+}
+
+#[must_use]
+pub(crate) fn tab_list_path_is_dirty(tabs: &[IdeTab], path: &str) -> bool {
+    let path = path.trim().trim_end_matches('/');
+    tabs.iter().any(|t| t.path == path && t.text != t.baseline)
+}
+
 pub fn make_ide_open_file_handler(
     locale: RwSignal<Locale>,
     tabs: IdeTabsHandle,
@@ -565,4 +635,55 @@ fn apply_fetch_result(
         return;
     }
     apply_fetch_to_new_tab(tabs, rel, d.content, ide_path, ide_text, ide_baseline);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{IdeTab, map_tabs_after_file_move};
+
+    fn tab(path: &str) -> IdeTab {
+        IdeTab {
+            path: path.to_string(),
+            text: String::new(),
+            baseline: String::new(),
+            pinned: false,
+        }
+    }
+
+    #[test]
+    fn file_move_retargets_source_tab_path() {
+        let (list, active) =
+            map_tabs_after_file_move(vec![tab("a.rs"), tab("b.rs")], Some(0), "a.rs", "c.rs");
+        assert_eq!(list[0].path, "c.rs");
+        assert_eq!(list[1].path, "b.rs");
+        assert_eq!(active, Some(0));
+    }
+
+    #[test]
+    fn file_move_overwrite_drops_dest_tab() {
+        let (list, active) =
+            map_tabs_after_file_move(vec![tab("a.rs"), tab("b.rs")], Some(1), "a.rs", "b.rs");
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].path, "b.rs");
+        assert_eq!(active, Some(0));
+    }
+
+    #[test]
+    fn file_move_same_path_is_noop() {
+        let tabs = vec![tab("a.rs")];
+        let (list, active) = map_tabs_after_file_move(tabs.clone(), Some(0), "a.rs", "a.rs");
+        assert_eq!(list, tabs);
+        assert_eq!(active, Some(0));
+    }
+
+    #[test]
+    fn tab_list_path_is_dirty_compares_text_to_baseline() {
+        use super::tab_list_path_is_dirty;
+        let clean = tab("b.rs");
+        let mut dirty = tab("b.rs");
+        dirty.text = "edited".into();
+        assert!(!tab_list_path_is_dirty(&[clean], "b.rs"));
+        assert!(tab_list_path_is_dirty(&[dirty], "b.rs"));
+        assert!(!tab_list_path_is_dirty(&[tab("b.rs")], "a.rs"));
+    }
 }
