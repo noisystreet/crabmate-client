@@ -46,11 +46,8 @@ echo "[check] cargo clippy crabmate-tui"
 echo "[check] cargo clippy crabmate-web-host"
 (cd crates/crabmate-web-host && cargo clippy --all-targets -- -D warnings)
 
-echo "[check] frontend wasm check"
-rustup target add wasm32-unknown-unknown 2>/dev/null || true
-(cd frontend && cargo check --target wasm32-unknown-unknown --all-targets)
-
 echo "[check] cargo clippy frontend (wasm32)"
+rustup target add wasm32-unknown-unknown 2>/dev/null || true
 (cd frontend && cargo clippy --target wasm32-unknown-unknown --all-targets --all-features -- -D warnings)
 
 echo "[check] lizard / fn-param / fn-nloc"

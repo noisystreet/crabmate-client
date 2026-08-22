@@ -58,7 +58,7 @@ help:
 	@echo "  make all                 desktop-release"
 	@echo ""
 	@echo "质检："
-	@echo "  make check               bash scripts/check.sh（含 frontend wasm check、ktlint）"
+	@echo "  make check               bash scripts/check.sh（含 frontend wasm32 clippy、ktlint）"
 	@echo "  make dependency-security cargo audit + cargo deny（各 workspace；不进 pre-commit）"
 	@echo "  make frontend-check      cargo check --target wasm32-unknown-unknown"
 	@echo "  make frontend-clippy     frontend clippy -D warnings"

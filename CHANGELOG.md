@@ -12,6 +12,7 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 ### Changed
 
 - `crabmate-connect` no longer depends on Tauri by default. Probe / handoff / keyring tests skip GTK/WebKit; Desktop and Android enable `features = ["tauri"]` for invoke commands and WebView navigation hooks.
+- `pre-commit` / `scripts/check.sh` no longer run a separate frontend `cargo check --target wasm32`; wasm32 **clippy** remains the typecheck gate (`make frontend-check` is unchanged for a check-only local run).
 - Hash handoff keys (`cm_api_base` / `cm_web_api_bearer`) and fragment encoding live in `crabmate-client-api`; Desktop/Android connect, `crabmate-web`, and the WASM consumer share them.
 - Cold start opens a **new empty chat** (does not restore the last `active_session_id`, and does not rewrite an existing blank session’s `workspace_root` / draft). The Workspace side panel does not auto-`GET` the last tree when it is already visible. Clicking an old session still restores that session’s bound folder; Refresh / opening Workspace later still loads the server’s current tree. The empty topbar title explains that tools still use the **server working directory** until the user picks a folder (`POST /workspace` is not cleared on startup, so session buckets stay put).
 - Pin line contract to crates.io **`crabmate` 0.4.0** (`features = ["protocol"]`). Playwright / Victauri `serve` checkout uses git tag **`v0.4.0`**.

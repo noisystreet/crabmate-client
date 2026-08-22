@@ -51,6 +51,6 @@ crates.io **`crabmate` 0.4.0** 为默认渠道。未升级的 Client 仍可钉�
 ## 冒烟清单
 
 1. `bash scripts/check-no-main-path.sh`
-2. `bash scripts/check.sh`（含 frontend wasm check / clippy）
+2. `bash scripts/check.sh`（含 frontend wasm32 clippy）
 3. `make frontend` → `trunk build`；产物在 `frontend/dist`
 4. 外部 `crabmate serve --with-web` + `CM_WEB_STATIC_DIR=$PWD/frontend/dist`，或 `make prepare-sidecar` 后桌面壳一轮对话（[`shell_smoke_runbook.md`](./shell_smoke_runbook.md)）
