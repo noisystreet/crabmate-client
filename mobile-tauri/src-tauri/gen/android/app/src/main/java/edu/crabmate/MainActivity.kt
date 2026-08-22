@@ -48,6 +48,7 @@ class MainActivity : TauriActivity() {
   private var cachedWebViewUrl: String? = null
 
   private val chatImageShare = ChatImageShare()
+  private val deviceFileShare = ChatImageShare()
 
   /**
    * 系统返回键：弹确认框（退出 / 回连接页），不走 WebView.goBack。
@@ -578,7 +579,41 @@ class MainActivity : TauriActivity() {
       if (!allowSecureBearerBridge()) {
         return false
       }
-      return chatImageShare.begin(true, filename)
+      return chatImageShare.begin(true, filename, asImage = true)
+    }
+
+    /** 工作区「保存到本机」等文本/任意文件：系统分享（WebView 无可靠 `<a download>`）。 */
+    @JavascriptInterface
+    fun beginDeviceFileSave(filename: String): Boolean {
+      if (!allowSecureBearerBridge()) {
+        return false
+      }
+      return deviceFileShare.begin(true, filename, asImage = false)
+    }
+
+    @JavascriptInterface
+    fun appendDeviceFileSave(chunk: String): Boolean {
+      if (!allowSecureBearerBridge()) {
+        return false
+      }
+      return deviceFileShare.append(true, chunk)
+    }
+
+    @JavascriptInterface
+    fun finishDeviceFileSave(): Boolean {
+      if (!allowSecureBearerBridge()) {
+        deviceFileShare.cancel()
+        return false
+      }
+      return deviceFileShare.finish(this@MainActivity, true)
+    }
+
+    @JavascriptInterface
+    fun cancelDeviceFileSave() {
+      if (!allowSecureBearerBridge()) {
+        return
+      }
+      deviceFileShare.cancel()
     }
 
     @JavascriptInterface

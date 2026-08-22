@@ -15,3 +15,10 @@ pub fn export_tauri_save_failed_alert(l: Locale, err: &str) -> String {
         Locale::En => format!("Export failed (Tauri save dialog): {err}"),
     }
 }
+
+pub fn export_android_share_failed(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "无法调起系统分享，文件未保存到本机。",
+        Locale::En => "Could not open the system share sheet; the file was not saved.",
+    }
+}

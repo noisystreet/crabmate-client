@@ -65,6 +65,7 @@ Blank cells are forbidden.
 |------------|---------|---------|-----|-----|-------|
 | `GET`/`POST /workspace` (set root) | yes | yes | yes | yes | TUI: `/workspace` `/cd`. |
 | File tree + wide-layout IDE | yes | no | reduced | no | Android / narrow: **locked off** ([`chat_ui_todo.md`](./chat_ui_todo.md), [`coding_agent_client.md`](./coding_agent_client.md)). Web: same WASM; IDE only when the viewport is wide. |
+| Save file to this device | yes | reduced | yes | no | Desktop: native save dialog. Android: system share sheet (WebView `<a download>` is unreliable). Web: browser download. Text files only. |
 | Changelog modal (read-only) | yes | reduced | yes | no | Android: list/summary only; do not unlock IDE to “match Desktop”. Restore/rollback: **planned**, blocked on Server. |
 | Git clone UI | yes | yes | yes | no | |
 | Drop local files onto tree (`PUT …/file/raw`) | yes | yes | yes | no | Needs a `serve` newer than crates.io **0.4.0**. |
