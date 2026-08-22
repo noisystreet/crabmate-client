@@ -384,7 +384,7 @@ fn trigger_bytes_via_android(
         match JsFuture::from(js_save_bytes_via_android_share(&default_name, &content)).await {
             Ok(_) => {}
             Err(_) => {
-                let _ = w.alert_with_message(crate::i18n::export_android_share_failed(loc));
+                let _ = w.alert_with_message(crate::i18n::export_android_save_failed(loc));
             }
         }
     });
@@ -434,7 +434,7 @@ fn trigger_download_via_android(
         match JsFuture::from(js_save_utf8_via_android_share(&default_name, &content)).await {
             Ok(_) => {}
             Err(_) => {
-                let _ = w.alert_with_message(crate::i18n::export_android_share_failed(loc));
+                let _ = w.alert_with_message(crate::i18n::export_android_save_failed(loc));
             }
         }
     });

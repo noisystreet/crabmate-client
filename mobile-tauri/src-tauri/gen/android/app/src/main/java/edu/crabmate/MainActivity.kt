@@ -49,6 +49,12 @@ class MainActivity : TauriActivity() {
 
   private val chatImageShare = ChatImageShare()
   private val deviceFileShare = ChatImageShare()
+  private val pendingDeviceSave by lazy { PendingDeviceSave(cacheDir) }
+
+  private val createDocumentLauncher =
+    registerForActivityResult(CreateNamedDocument()) { uri ->
+      pendingDeviceSave.complete(uri, applicationContext.contentResolver)
+    }
 
   /**
    * 系统返回键：弹确认框（退出 / 回连接页），不走 WebView.goBack。
@@ -86,6 +92,33 @@ class MainActivity : TauriActivity() {
     super.onPause()
     // Tauri 基类 pause 可能 pauseTimers；保活期间立刻恢复，让 fetch/SSE 回调继续。
     resumeWebViewTimersIfKeepAlive()
+  }
+
+  private fun finishDecodedSave(share: ChatImageShare): Boolean {
+    val decoded = share.finish(true) ?: return false
+    return queueCreateDocument(decoded.first, decoded.second)
+  }
+
+  private fun queueCreateDocument(
+    filename: String,
+    bytes: ByteArray,
+  ): Boolean {
+    if (!pendingDeviceSave.tryBeginWrite(bytes)) {
+      return false
+    }
+    val req =
+      CreateNamedDocument.Request(
+        mime = ChatImageShare.mimeForName(filename),
+        displayName = filename,
+      )
+    runOnUiThread {
+      try {
+        createDocumentLauncher.launch(req)
+      } catch (_: Exception) {
+        pendingDeviceSave.abort()
+      }
+    }
+    return true
   }
 
   /** 必须在 UI 线程调用。 */
@@ -582,7 +615,7 @@ class MainActivity : TauriActivity() {
       return chatImageShare.begin(true, filename, asImage = true)
     }
 
-    /** 工作区「保存到本机」等文本/任意文件：系统分享（WebView 无可靠 `<a download>`）。 */
+    /** 工作区「保存到本机」等：系统另存为（WebView 无可靠 `<a download>`）。 */
     @JavascriptInterface
     fun beginDeviceFileSave(filename: String): Boolean {
       if (!allowSecureBearerBridge()) {
@@ -605,7 +638,7 @@ class MainActivity : TauriActivity() {
         deviceFileShare.cancel()
         return false
       }
-      return deviceFileShare.finish(this@MainActivity, true)
+      return this@MainActivity.finishDecodedSave(deviceFileShare)
     }
 
     @JavascriptInterface
@@ -630,7 +663,7 @@ class MainActivity : TauriActivity() {
         chatImageShare.cancel()
         return false
       }
-      return chatImageShare.finish(this@MainActivity, true)
+      return this@MainActivity.finishDecodedSave(chatImageShare)
     }
   }
 
