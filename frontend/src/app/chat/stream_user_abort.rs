@@ -9,7 +9,6 @@
 //!
 //! 会话目标与 SSE 写入一致：使用 [`crate::chat_session_state::ChatSessionSignals::effective_stream_message_session_id`]。
 
-use crate::api::post_chat_stream_cancel;
 use crate::app::turn_lifecycle::turn_lifecycle_stream_turn_busy;
 use crate::chat_session_state::{ChatSessionSignals, session_has_loading_tool_message};
 use crate::i18n;
@@ -20,9 +19,10 @@ use crate::message_loading::{
 use crate::storage::StoredMessage;
 use crate::stream_text_overlay::stream_overlay_take_into_stored_message;
 use leptos::prelude::GetUntracked;
-use leptos::task::spawn_local;
 
-use super::composer_stream::{clear_abort_slot, user_cancel_in_flight_stream};
+use super::composer_stream::{
+    abort_in_flight_stream, mark_user_cancelled, spawn_post_chat_stream_cancel,
+};
 use super::handles::ComposerStreamShell;
 
 /// 新一轮 `/chat/stream` 已排队且已 `push` 新尾条 `loading` 助手时，将**同会话内**其它仍处 `loading` 的助手占位收口为「已中断」，
@@ -74,9 +74,18 @@ pub(crate) fn stream_ui_inflight_untracked(
     )
 }
 
+/// 尚无 `x-stream-job-id` 时不要 abort SSE，否则永远拿不到 `job_id`、无法 POST cancel。
+#[cfg(test)]
+#[must_use]
+pub(crate) fn should_defer_sse_abort_until_job_id(job_id: Option<u64>) -> bool {
+    job_id.is_none()
+}
+
 /// 用户从 Web 主列点击「停止」时的**唯一**收口（`cancel_stream` 闭包仅调用此处）。
 ///
-/// 1. 若 [`stream_ui_inflight_untracked`] 为真：先 **`POST /chat/stream/{job_id}/cancel`**（无 `job_id` 或旧服务端失败则忽略），再尽力 `abort` 在途 HTTP，收口助手/工具 `Loading`，dispatch lifecycle 收尾。
+/// 1. 若 [`stream_ui_inflight_untracked`] 为真：置取消标志；已有 `job_id` 则 POST cancel 并 abort SSE。
+///    尚无 `job_id` 则**保持** fetch，等响应头 `on_stream_job_id` 再 cancel+abort。
+///    然后收口助手/工具 `Loading`，dispatch lifecycle 收尾。
 /// 2. 否则若仍有僵尸工具 `Loading`（流已结束未配对 `tool_result`、或重启后残留）：仅收口工具占位，返回 `true`。
 /// 3. 皆无则返回 `false`。
 ///
@@ -88,12 +97,14 @@ pub(crate) fn apply_user_abort_of_inflight_stream(
     loc: Locale,
 ) -> bool {
     if stream_ui_inflight_untracked(chat, shell) {
-        if let Some((_, Some(jid))) = chat.stream_bound_resume_handles_untracked() {
-            spawn_local(async move {
-                let _ = post_chat_stream_cancel(jid, loc).await;
-            });
+        mark_user_cancelled(shell);
+        if let Some(jid) = chat
+            .stream_bound_resume_handles_untracked()
+            .and_then(|(_, jid)| jid)
+        {
+            spawn_post_chat_stream_cancel(jid, loc);
+            abort_in_flight_stream(shell);
         }
-        let _ = user_cancel_in_flight_stream(shell);
         let sid = chat.effective_stream_message_session_id();
         finalize_loading_placeholders_after_user_abort_on_session(chat, &sid, loc);
         let attach_gen = chat.stream_attach_generation_untracked();
@@ -103,7 +114,6 @@ pub(crate) fn apply_user_abort_of_inflight_stream(
             },
         );
         shell.stream.apply_release_turn_and_stream_run(attach_gen);
-        clear_abort_slot(shell);
         crate::mobile_stream_keepalive::on_stream_attach_finished();
         return true;
     }
@@ -191,7 +201,7 @@ pub(crate) fn finalize_loading_tool_placeholders_to_stopped(
 
 #[cfg(test)]
 mod tests {
-    use super::apply_abort_finalization_to_messages;
+    use super::{apply_abort_finalization_to_messages, should_defer_sse_abort_until_job_id};
     use crate::i18n::Locale;
     use crate::storage::{StoredMessage, StoredMessageState};
 
@@ -232,5 +242,11 @@ mod tests {
         assert!(!msgs[0].state.as_ref().is_some_and(|s| s.is_loading()));
         assert!(msgs[0].reasoning_text.contains("interrupted (stale)"));
         assert!(msgs[0].text.contains("已中断"));
+    }
+
+    #[test]
+    fn defers_sse_abort_until_stream_job_id_header() {
+        assert!(should_defer_sse_abort_until_job_id(None));
+        assert!(!should_defer_sse_abort_until_job_id(Some(1)));
     }
 }

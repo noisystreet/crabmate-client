@@ -144,4 +144,6 @@ pub(super) fn make_attach_chat_stream(h: ComposerStreamHandles) -> AttachChatStr
     })
 }
 
-pub(crate) use shell_abort::{clear_abort_slot, user_cancel_in_flight_stream};
+pub(crate) use shell_abort::{
+    abort_in_flight_stream, mark_user_cancelled, spawn_post_chat_stream_cancel,
+};

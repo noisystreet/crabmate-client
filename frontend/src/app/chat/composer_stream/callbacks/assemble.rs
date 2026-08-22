@@ -12,6 +12,7 @@ use crate::sse_dispatch::{
 };
 
 use super::super::context::ChatStreamCallbackCtx;
+use super::super::shell_abort;
 use super::builders::*;
 use super::delta_apply::chat_stream_on_delta_builder;
 use super::turn_layout::TurnLayout;
@@ -78,6 +79,11 @@ pub(crate) fn build_chat_stream_callbacks(
                 .chat
                 .stream_transport
                 .update(|t| t.set_stream_job_id(jid));
+            if shell_abort::user_cancelled_flag(&stream_ctx.shell) {
+                let loc = stream_ctx.locale.get_untracked();
+                shell_abort::spawn_post_chat_stream_cancel(jid, loc);
+                shell_abort::abort_in_flight_stream(&stream_ctx.shell);
+            }
         })
     };
 
