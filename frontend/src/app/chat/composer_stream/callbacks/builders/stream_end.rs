@@ -13,7 +13,9 @@ use crate::stream_text_overlay::{
 
 use super::super::super::context::ChatStreamCallbackCtx;
 use super::super::super::per_stream_accum::PerStreamAccum;
-use super::super::super::shell_abort::{clear_abort_slot, user_cancelled_flag};
+use super::super::super::shell_abort::{
+    abort_in_flight_stream, clear_abort_slot, user_cancelled_flag,
+};
 use super::super::super::stream_control_reducer::StreamControlEvent;
 use super::super::done_session::apply_stream_done_to_loading_assistant;
 use super::super::error_session::apply_stream_error_on_messages;
@@ -28,7 +30,7 @@ pub(in super::super) fn chat_stream_on_done_builder(
     Rc::new(move || {
         if user_cancelled_flag(&stream_ctx.shell) {
             stream_ctx.scratch.clear_followup_pending();
-            clear_abort_slot(&stream_ctx.shell);
+            abort_in_flight_stream(&stream_ctx.shell);
             stream_ctx.scratch.apply_stream_control_event(
                 &stream_ctx.shell.stream,
                 StreamControlEvent::StreamUserAbort,
@@ -105,7 +107,7 @@ pub(in super::super) fn chat_stream_on_error_builder(
 ) -> Rc<dyn Fn(String)> {
     Rc::new(move |msg: String| {
         if user_cancelled_flag(&stream_ctx.shell) {
-            clear_abort_slot(&stream_ctx.shell);
+            abort_in_flight_stream(&stream_ctx.shell);
             stream_ctx.scratch.apply_stream_control_event(
                 &stream_ctx.shell.stream,
                 StreamControlEvent::StreamUserAbort,

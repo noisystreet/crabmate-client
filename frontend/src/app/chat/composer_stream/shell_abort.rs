@@ -25,6 +25,12 @@ pub(crate) fn reset_abort_state_for_new_attach(shell: &ComposerStreamShell) {
     *shell.stream.user_cancelled_stream.lock().unwrap() = false;
 }
 
+/// 只置用户取消标志并 bump epoch（**不** abort）。尚无 `job_id` 时用来等 `x-stream-job-id`。
+pub(crate) fn mark_user_cancelled(shell: &ComposerStreamShell) {
+    *shell.stream.user_cancelled_stream.lock().unwrap() = true;
+    bump_stream_abort_epoch(shell);
+}
+
 pub(super) fn store_abort_controller(shell: &ComposerStreamShell, ac: web_sys::AbortController) {
     *shell.stream.abort_cell.lock().unwrap() = Some(ac);
     bump_stream_abort_epoch(shell);
@@ -37,19 +43,20 @@ pub(crate) fn clear_abort_slot(shell: &ComposerStreamShell) {
     }
 }
 
-pub(crate) fn user_cancelled_flag(shell: &ComposerStreamShell) -> bool {
-    *shell.stream.user_cancelled_stream.lock().unwrap()
-}
-
-/// 用户点击停止：若当前无在途流则返回 `false`；否则置取消标志、取出并 `abort` 控制器。
-pub(crate) fn user_cancel_in_flight_stream(shell: &ComposerStreamShell) -> bool {
-    if shell.stream.abort_cell.lock().unwrap().is_none() {
-        return false;
-    }
-    *shell.stream.user_cancelled_stream.lock().unwrap() = true;
+/// 取出并 `abort` 在途控制器（幂等）。
+pub(crate) fn abort_in_flight_stream(shell: &ComposerStreamShell) {
     if let Some(ac) = shell.stream.abort_cell.lock().unwrap().take() {
         ac.abort();
         bump_stream_abort_epoch(shell);
     }
-    true
+}
+
+pub(crate) fn user_cancelled_flag(shell: &ComposerStreamShell) -> bool {
+    *shell.stream.user_cancelled_stream.lock().unwrap()
+}
+
+pub(crate) fn spawn_post_chat_stream_cancel(job_id: u64, loc: crate::i18n::Locale) {
+    leptos::task::spawn_local(async move {
+        let _ = crate::api::post_chat_stream_cancel(job_id, loc).await;
+    });
 }
