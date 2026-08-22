@@ -27,7 +27,7 @@
 
 ```text
 .
-├── crates/crabmate-client-api/ # 多端共用纯逻辑（URL / 鉴权 / 密钥槽 / 审批 / workspace / sessions / chat body；无 IO）
+├── crates/crabmate-client-api/ # 多端共用纯逻辑（URL / 鉴权 / 密钥槽 / 审批 / workspace / sessions / chat body / hash / health JSON；无 IO）
 ├── crates/crabmate-tool-card/  # 工具卡 compact/detail（W2 起本仓 path；勿再 git 钉 Server）
 ├── crates/crabmate-connect/   # 连接页逻辑（本仓 path；勿再 path 回主仓）
 ├── crates/crabmate-tui-core/  # 远程终端 HTTP/SSE 核心

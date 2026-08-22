@@ -27,7 +27,7 @@ Connects to a compatible **`crabmate serve`** (local or remote). Does **not** sp
 
 ```text
 .
-├── crates/crabmate-client-api/ # Shared pure logic (URL / auth / secrets / approval / workspace / sessions / chat body; no IO)
+├── crates/crabmate-client-api/ # Shared pure logic (URL / auth / secrets / approval / workspace / sessions / chat body / hash / health JSON; no IO)
 ├── crates/crabmate-tool-card/  # Tool-card compact/detail (in-repo path after W2; not git-pinned to Server)
 ├── crates/crabmate-connect/   # Connect-page logic (path dep in this repo; do not path back to Server)
 ├── crates/crabmate-tui-core/  # Remote terminal HTTP/SSE core
