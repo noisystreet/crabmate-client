@@ -1,7 +1,7 @@
 //! `reqwest` 封装：鉴权头 + 健康探测 + 审批提交。
 
 use crabmate_client_api::auth::{HEADER_X_API_KEY, web_api_credential_pair};
-use crabmate_client_api::{ApprovalDecision, ApprovalPostBody};
+use crabmate_client_api::{ApprovalDecision, ApprovalPostBody, health_degraded_note};
 use reqwest::Client;
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue};
 
@@ -55,7 +55,7 @@ impl ServeClient {
         api_url(&self.cfg.api_base, path)
     }
 
-    /// `GET /health`：连通性探测。
+    /// `GET /health`：连通性探测。`degraded` 时在 stderr 打印失败检查摘要，仍视为成功。
     pub async fn probe_health(&self) -> Result<(), TermError> {
         let url = self.url("/health")?;
         let resp = self
@@ -64,7 +64,18 @@ impl ServeClient {
             .headers(self.auth_headers()?)
             .send()
             .await?;
-        Self::ensure_success(resp).await
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        if !status.is_success() {
+            return Err(TermError::Http {
+                status: status.as_u16(),
+                body: body.trim().chars().take(400).collect(),
+            });
+        }
+        if let Some(note) = health_degraded_note(&body) {
+            eprintln!("[crabmate-tui] /health degraded (optional checks failed): {note}");
+        }
+        Ok(())
     }
 
     /// `POST /chat/approval`：放行/拒绝非白名单命令（流仍挂在 `/chat/stream`）。

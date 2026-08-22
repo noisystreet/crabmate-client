@@ -1,6 +1,6 @@
 # 多端 Client 共用逻辑抽取（规划）
 
-> **状态**：S1–S4 **已落地**（`url` / `auth` / `secrets` / `approval` / `workspace` / `sessions` / `chat_body`）；hash 交接键名已上收；S5 其余（health / 斜杠）可选未开工  
+> **状态**：S1–S4 **已落地**；hash 交接键名已上收；**S5 health JSON 子集已落地**；斜杠名字表仍可选未开工  
 > **范围**：`frontend`（WASM）、`crabmate-connect`（Desktop/Android 壳）、`crabmate-tui` / `crabmate-tui-core`（远程终端）之间的重复逻辑  
 > **关联**：[remote_cli_tui.md](./remote_cli_tui.md)、[tauri_gui_mvp_design.md](./tauri_gui_mvp_design.md)、[contract_pin.md](./contract_pin.md)、产品面对照 [client_capability_matrix.md](./client_capability_matrix.md)；Server [`client_shell_split.md`](https://github.com/noisystreet/CrabMate/blob/main/docs/design/client_shell_split.md)
 
@@ -53,7 +53,7 @@ frontend & tui-core ──┴── crabmate（protocol feature；crates.io 0.4.
 
 ```text
 crates/
-  crabmate-client-api/   # S1–S4 + `handoff`：纯逻辑（url / auth / secrets / approval / workspace / sessions / chat_body / hash 键名）
+  crabmate-client-api/   # S1–S4 + handoff + health JSON：纯逻辑（无 IO）
   crabmate-tool-card/    # W2：工具卡 compact/detail（frontend path；不进 tui-core）
   crabmate-connect/      # 默认无 Tauri（probe / keyring）；壳 `features = ["tauri"]`；hash 拼装委托 client-api
   crabmate-tui-core/     # 变薄：reqwest ServeClient 调用 client-api
@@ -73,7 +73,7 @@ frontend/                # wasm fetch 适配器 + UI；S1–S4 已用 client-api
 | `chat_body` | `POST /chat/stream` **核心**字段（message / `client_sse_protocol` / conversation_id / approval_session_id） |
 | `secrets` | `LlmSecretSlot` / Bearer 账户等**名字常量**（无 IO） |
 | `handoff` | `#cm_api_base=` / `#cm_web_api_bearer=` 键名、RFC3986 分量编码、fragment 拼装（无 `history` / 无查询串） |
-| `health`（可选） | `/health` degraded 等 JSON 解析子集（不含壳 CORS） |
+| `health` | `/health` degraded 检查摘要（不含壳 CORS） |
 
 ---
 
@@ -134,14 +134,14 @@ GitHub：`X-CrabMate-GitHub-Token` 目前主要在 frontend（+ 壳钥匙串槽�
 
 最多共享控制命令**名字表**（`help` / `workspace` / `cd`…）；handler 分端。
 
-### 4.7 Health 探测子集
+### 4.7 Health 探测子集（已落地）
 
 | 端 | 行为 |
 |----|------|
-| connect | `/health` → prefs → **壳 CORS**（`probe.rs`） |
-| tui-core | 仅 `GET /health` |
+| connect | `/health` → prefs → **壳 CORS**（`probe.rs`）；degraded 文案用 `health_degraded_note` |
+| tui-core | `GET /health`；2xx 时同样解析 degraded 并打 stderr，不失败 |
 
-共享：health GET 语义 / degraded 解析。CORS / Origin 常量属壳专用。
+共享：`crabmate_client_api::health_degraded_note`。CORS / Origin 常量仍属壳专用。
 
 ### 4.8 Hash 交接键名（已落地）
 
@@ -181,9 +181,10 @@ GitHub：`X-CrabMate-GitHub-Token` 目前主要在 frontend（+ 壳钥匙串槽�
 | **S3** ✅ | `workspace` set 解析 + `sessions` 瘦模型 | tui `/workspace` `/conv list` 与 Web 字段一致 |
 | **S4** ✅ | `chat_body` 核心字段 builder | `client_sse_protocol` 钉点不易漏 |
 | **S5a** ✅ | hash 交接键名 + fragment 拼装；connect / frontend / `crabmate-web` 改依赖 | 键名与 `%2F` 编码单测对齐 |
-| **S5**（可选） | health 子集；斜杠名字表；frontend 其余纯逻辑继续上收 | WASM 体积与编译时间可接受 |
+| **S5 health** ✅ | `health_degraded_note`；connect / tui-core 改依赖 | degraded JSON 单测；CORS 仍留 connect |
+| **S5 slash**（可选） | 斜杠名字表；frontend 其余纯逻辑继续上收 | WASM 体积与编译时间可接受 |
 
-**建议开工顺序**：S0 → S1–S4（已完成）→ S5a（已完成）→ 可选 S5 其余。
+**建议开工顺序**：S0 → S1–S4（已完成）→ S5a / S5 health（已完成）→ 可选斜杠名字表。
 
 ---
 
@@ -205,7 +206,7 @@ GitHub：`X-CrabMate-GitHub-Token` 目前主要在 frontend（+ 壳钥匙串槽�
 | 共享形态 | 新建 **`crabmate-client-api`**（纯逻辑），不是扩大 `connect` 或 `tui-core` |
 | 依赖 | frontend / tui-core / connect / `crabmate-web` → client-api |
 | IO | 仍分端：`fetch` vs `reqwest` vs keyring |
-| 下一步 | 可选 **S5**（health 子集 / 斜杠名字表）或功能并行 |
+| 下一步 | 可选斜杠名字表，或功能并行 |
 
 ---
 

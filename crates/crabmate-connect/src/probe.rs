@@ -4,6 +4,7 @@
 use std::time::Duration;
 
 use crabmate_client_api::auth::{HEADER_X_API_KEY, web_api_credential_pair};
+use crabmate_client_api::health_degraded_note;
 use url::Url;
 
 const PROBE_TIMEOUT: Duration = Duration::from_secs(8);
@@ -194,40 +195,11 @@ pub async fn probe_server(base: &Url, bearer: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// 解析 `/health` JSON：`status=degraded` 时返回失败检查名摘要（不含密钥等敏感值）。
-fn health_degraded_note(body: &str) -> Option<String> {
-    let v: serde_json::Value = serde_json::from_str(body).ok()?;
-    if v.get("status").and_then(|s| s.as_str()) != Some("degraded") {
-        return None;
-    }
-    let checks = v.get("checks")?.as_object()?;
-    let mut failed = Vec::new();
-    for (name, check) in checks {
-        let ok = check.get("ok").and_then(|x| x.as_bool()).unwrap_or(true);
-        if !ok {
-            let detail = check
-                .get("detail")
-                .and_then(|d| d.as_str())
-                .map(str::trim)
-                .filter(|s| !s.is_empty());
-            match detail {
-                Some(d) => failed.push(format!("{name}: {d}")),
-                None => failed.push(name.clone()),
-            }
-        }
-    }
-    if failed.is_empty() {
-        Some("status=degraded".into())
-    } else {
-        Some(failed.join("; "))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
         SHELL_WEBVIEW_FETCH_ORIGIN, SHELL_WEBVIEW_ORIGIN, acao_allows_requested_origin,
-        cors_allows_shell_origin, health_degraded_note, probe_redirect_host_allowed,
+        cors_allows_shell_origin, probe_redirect_host_allowed,
     };
     use url::Url;
 
@@ -264,21 +236,6 @@ mod tests {
         assert!(cors_allows_shell_origin(" * "));
         assert!(!cors_allows_shell_origin("http://127.0.0.1:8080"));
         assert!(!cors_allows_shell_origin(""));
-    }
-
-    #[test]
-    fn degraded_note_lists_failed_checks() {
-        let body = r#"{"status":"degraded","checks":{"dep_bc":{"ok":false,"detail":"未安装"},"api_key":{"ok":true}}}"#;
-        let note = health_degraded_note(body).expect("note");
-        assert!(note.contains("dep_bc"));
-        assert!(note.contains("未安装"));
-        assert!(!note.contains("api_key"));
-    }
-
-    #[test]
-    fn ok_status_yields_no_note() {
-        let body = r#"{"status":"ok","checks":{}}"#;
-        assert!(health_degraded_note(body).is_none());
     }
 
     #[test]

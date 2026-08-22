@@ -11,6 +11,7 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Changed
 
+- `GET /health` `degraded` check summary parsing lives in `crabmate-client-api` (`health_degraded_note`); Desktop/Android connect and `crabmate-tui` share it (TUI logs on stderr and still treats 2xx as success). CORS probe stays in connect.
 - `crabmate-connect` no longer depends on Tauri by default. Probe / handoff / keyring tests skip GTK/WebKit; Desktop and Android enable `features = ["tauri"]` for invoke commands and WebView navigation hooks.
 - `pre-commit` / `scripts/check.sh` no longer run a separate frontend `cargo check --target wasm32`; wasm32 **clippy** remains the typecheck gate (`make frontend-check` is unchanged for a check-only local run).
 - Hash handoff keys (`cm_api_base` / `cm_web_api_bearer`) and fragment encoding live in `crabmate-client-api`; Desktop/Android connect, `crabmate-web`, and the WASM consumer share them.
