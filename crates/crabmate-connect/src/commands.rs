@@ -1,64 +1,18 @@
 //! Tauri 命令：连接 / 断开 / 读取建议 URL 与钥匙串 Bearer。
 
 use std::path::PathBuf;
-use std::sync::Mutex;
 
-use tauri::{AppHandle, Manager, State, Url};
+use tauri::{AppHandle, Manager, State};
+use url::Url;
 
 use crate::allowed_origin::AllowedServeOrigin;
 use crate::cleartext::enforce_cleartext_connect_policy;
+use crate::connect_home::{SuggestedServerUrl, connect_home_url, remember_connect_home};
 use crate::handoff::{build_local_ui_handoff_url, local_business_ui_url, normalize_base_url};
 use crate::keyring_bearer::{read_connect_bearer, write_connect_bearer_unchecked};
 use crate::keyring_llm::{LlmSecretSlot, read_llm_secret, write_llm_secret};
-use crate::navigation::is_app_origin;
 use crate::probe::probe_server;
 use crate::recent_urls::{self, RECENT_FILE_NAME};
-
-/// Android 默认资产源（`useHttpsScheme=false`）；桌面 Tauri 2 亦常用此 origin。
-const DEFAULT_CONNECT_HOME: &str = "http://tauri.localhost/connect.html";
-
-static CONNECT_HOME: Mutex<Option<Url>> = Mutex::new(None);
-
-/// 连接页预填的建议服务器 URL；桌面默认本机 `8080`，移动端保持 `None` 直至用户填写。
-#[derive(Debug, Default)]
-pub struct SuggestedServerUrl(pub Mutex<Option<String>>);
-
-impl SuggestedServerUrl {
-    pub fn new(url: Option<String>) -> Self {
-        Self(Mutex::new(url))
-    }
-
-    pub fn set(&self, url: Option<String>) {
-        if let Ok(mut g) = self.0.lock() {
-            *g = url;
-        }
-    }
-}
-
-fn remember_connect_home(url: &Url) {
-    if !is_app_origin(url) {
-        return;
-    }
-    let mut home = url.clone();
-    home.set_fragment(None);
-    // 保留路径（桌面 / 移动均为 /connect.html）；disconnect 时再设 manual query。
-    if let Ok(mut g) = CONNECT_HOME.lock() {
-        *g = Some(home);
-    }
-}
-
-fn connect_home_url() -> Url {
-    CONNECT_HOME
-        .lock()
-        .ok()
-        .and_then(|g| g.clone())
-        .unwrap_or_else(|| Url::parse(DEFAULT_CONNECT_HOME).expect("DEFAULT_CONNECT_HOME"))
-}
-
-/// 在打开连接页后调用，确保断开时能回到正确的 App 资产 URL（`/connect.html`）。
-pub fn seed_connect_home(url: &Url) {
-    remember_connect_home(url);
-}
 
 fn main_window(app: &AppHandle) -> Result<tauri::WebviewWindow, String> {
     app.get_webview_window("main")
@@ -209,18 +163,4 @@ pub fn set_llm_secret(slot: String, value: String) -> Result<(), String> {
     let s =
         LlmSecretSlot::parse(&slot).ok_or_else(|| format!("unknown llm secret slot: {slot}"))?;
     write_llm_secret(s, &value)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::navigation::is_app_origin;
-
-    #[test]
-    fn app_origin_detects_tauri_localhost() {
-        let u = Url::parse("http://tauri.localhost/connect.html").unwrap();
-        assert!(is_app_origin(&u));
-        let remote = Url::parse("http://192.168.1.10:8080/").unwrap();
-        assert!(!is_app_origin(&remote));
-    }
 }

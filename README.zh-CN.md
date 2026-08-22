@@ -187,7 +187,7 @@ Android 壳默认隐藏应用内底部状态栏；仍可从侧栏工具条重新
 
 ## 开发约定
 
-- `crabmate-connect`：本仓 `path = "../../crates/crabmate-connect"`
+- `crabmate-connect`：本仓 `path = "../../crates/crabmate-connect"`；壳须启用 `features = ["tauri"]`（默认 feature 不含 Tauri）
 - `frontend` 契约：git tag / `rev`；勿 `path` 回主仓
 - 密钥边界与主仓 ADR §2.3 一致：跨 Origin 只认 Web Bearer + CORS
 

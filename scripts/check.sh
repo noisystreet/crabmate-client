@@ -34,7 +34,7 @@ echo "[check] cargo clippy crabmate-client-api"
 echo "[check] cargo clippy crabmate-tool-card"
 (cd crates/crabmate-tool-card && cargo clippy --all-targets -- -D warnings)
 
-echo "[check] cargo clippy connect"
+echo "[check] cargo clippy connect (no Tauri; shells compile feature tauri)"
 (cd crates/crabmate-connect && cargo clippy --all-targets -- -D warnings)
 
 echo "[check] cargo clippy crabmate-tui-core"

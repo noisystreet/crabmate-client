@@ -46,7 +46,7 @@
 - **Forbidden**: shell spawning / bundling a `crabmate serve` sidecar
 - Contract crate: crates.io **`crabmate` `0.4.0`** with `default-features = false, features = ["protocol"]` (see `frontend/Cargo.toml`). Do not pin old package names (`crabmate-sse-protocol`, …) and do not enable `server`.
 - Playwright E2E CI checkouts Server `serve` at git tag **`v0.4.0`** (same commit as the crates.io package; see `docs/design/contract_pin.md`)
-- `crabmate-connect` is in-repo path only (`crates/crabmate-connect`)
+- `crabmate-connect` is in-repo path only (`crates/crabmate-connect`); default features have **no** Tauri. Desktop/Android enable `features = ["tauri"]`
 - `crabmate-client-api` is in-repo path only (`crates/crabmate-client-api`); no Tauri / `web-sys` / `reqwest` / `tokio`
 - `crabmate-tool-card` is in-repo path only (`crates/crabmate-tool-card`); do not git-pin Server `crabmate-tool-card`
 - Web Bearer ≠ model `API_KEY`（Web Bearer：官方壳仅内存 + 本机钥匙串/Android Keystore，**禁止**明文 `localStorage`；model keys 同样走钥匙串/Keystore；chat 经 HTTPS 发送 `client_llm.api_key` — do not `PUT /user-data/secrets/client-llm` from the UI；plain browser may keep weak localStorage with an explicit warning）

@@ -1,8 +1,11 @@
 //! WebView 导航白名单（壳层共用决策；桌面另有外开行为，移动端默认拦截）。
 
-use tauri::{AppHandle, Manager, Runtime, Webview};
 use url::Url;
 
+#[cfg(feature = "tauri")]
+use tauri::{AppHandle, Manager, Runtime, Webview};
+
+#[cfg(feature = "tauri")]
 use crate::allowed_origin::AllowedServeOrigin;
 
 /// 是否为壳内连接页 / App 资产 Origin（按 scheme + host，禁止路径子串误判）。
@@ -73,6 +76,7 @@ pub fn decide_shell_navigation(
     }
 }
 
+#[cfg(feature = "tauri")]
 fn clear_allowed_serve_origin<R: Runtime>(app: &AppHandle<R>) {
     if let Some(allowed) = app.try_state::<AllowedServeOrigin>() {
         allowed.clear();
@@ -85,6 +89,7 @@ fn clear_allowed_serve_origin<R: Runtime>(app: &AppHandle<R>) {
 /// 而 `on_navigation` 已在 MainPipe looper 回调内执行；再发 `GetUrl` 会超时，随后
 /// `tx.send().unwrap()` panic → `abort_on_panic` 闪退（wryCreate / 导航路径）。
 /// 同 Origin 内跳转依赖连接成功后的 [`AllowedServeOrigin`]（与目标 Origin 匹配即可）。
+#[cfg(feature = "tauri")]
 #[must_use]
 pub fn allow_shell_navigation<R: Runtime>(webview: &Webview<R>, url: &Url) -> bool {
     let app = webview.app_handle();
@@ -106,6 +111,7 @@ pub fn allow_shell_navigation<R: Runtime>(webview: &Webview<R>, url: &Url) -> bo
 ///
 /// Android 侧 `WebView.loadUrl` 有时不走 `on_navigation`；断开回连接页须在 page load 再清一次，
 /// 避免旧 serve Origin 仍被放行。加载包内业务 UI **不会**清空。
+#[cfg(feature = "tauri")]
 pub fn clear_allowed_if_app_origin_loaded<R: Runtime>(app: &AppHandle<R>, url: &Url) {
     if is_connect_page_url(url) {
         clear_allowed_serve_origin(app);
