@@ -60,34 +60,14 @@ pub fn browse_host(listen: SocketAddr) -> String {
     }
 }
 
-#[must_use]
-pub fn percent_encode(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for b in s.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(b as char);
-            }
-            _ => out.push_str(&format!("%{b:02X}")),
-        }
-    }
-    out
-}
-
 /// 打开 UI 的 URL；可选 hash 交接 `cm_api_base` / `cm_web_api_bearer`（与壳 connect 页相同）。
 #[must_use]
 pub fn page_url(listen: SocketAddr, api_base: Option<&str>, bearer: Option<&str>) -> String {
     let mut url = format!("http://{}/", browse_host(listen));
-    let mut parts: Vec<String> = Vec::new();
-    if let Some(base) = api_base.map(str::trim).filter(|s| !s.is_empty()) {
-        parts.push(format!("cm_api_base={}", percent_encode(base)));
-    }
-    if let Some(token) = bearer.map(str::trim).filter(|s| !s.is_empty()) {
-        parts.push(format!("cm_web_api_bearer={}", percent_encode(token)));
-    }
-    if !parts.is_empty() {
+    let frag = crabmate_client_api::handoff_hash_fragment(api_base, bearer);
+    if !frag.is_empty() {
         url.push('#');
-        url.push_str(&parts.join("&"));
+        url.push_str(&frag);
     }
     url
 }

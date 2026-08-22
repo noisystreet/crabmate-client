@@ -1,12 +1,13 @@
 //! 多端 Client 共用纯逻辑（无 Tauri / `web-sys` / `reqwest` / `tokio`）。
 //!
-//! 见 `docs/design/client_shared_logic.md`（S1–S4）。
+//! 见 `docs/design/client_shared_logic.md`（S1–S4 + hash 交接键名）。
 
 #![forbid(unsafe_code)]
 
 pub mod approval;
 pub mod auth;
 pub mod chat_body;
+pub mod handoff;
 pub mod secrets;
 pub mod sessions;
 pub mod url;
@@ -22,6 +23,10 @@ pub use auth::{
 };
 pub use chat_body::{
     ChatStreamCoreFields, build_chat_stream_core_body, merge_chat_stream_core_fields,
+};
+pub use handoff::{
+    API_BASE_HASH_KEY, BEARER_HASH_KEY, handoff_hash_fragment, is_handoff_hash_key,
+    percent_encode_unreserved,
 };
 pub use secrets::{KEYRING_SERVICE, SecretSlot, WEB_API_BEARER_KEYRING_ACCOUNT, secret_slot_names};
 pub use sessions::{

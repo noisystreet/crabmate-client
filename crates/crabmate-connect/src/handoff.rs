@@ -1,12 +1,11 @@
 //! URL 规范化与本地 UI 交接（Bearer + API 基址 hash）。
+//!
+//! Hash 键名与 fragment 编码见 [`crabmate_client_api::handoff`]。
 
+use crabmate_client_api::handoff_hash_fragment;
 use url::Url;
 
-/// 与前端 [`frontend/src/api/connect_handoff.rs`] 一致。
-pub const BEARER_HASH_KEY: &str = "cm_web_api_bearer";
-
-/// 本地业务 UI 启动时写入的 API 基址（指向远程 `serve` 根）。
-pub const API_BASE_HASH_KEY: &str = "cm_api_base";
+pub use crabmate_client_api::{API_BASE_HASH_KEY, BEARER_HASH_KEY};
 
 fn is_unspecified_connect_host(host: &str) -> bool {
     let h = host
@@ -61,14 +60,10 @@ pub fn local_business_ui_url(connect_home: &Url) -> Url {
 /// 在本地 UI URL 上写入 API 基址；Bearer 非空时一并写入（空 Bearer 不写，避免清掉页内已有凭证）。
 #[must_use]
 pub fn build_local_ui_handoff_url(mut ui: Url, api_base: &Url, bearer: &str) -> Url {
-    let mut parts: Vec<String> = Vec::with_capacity(2);
     let api = api_base.as_str().trim_end_matches('/');
-    parts.push(format!("{API_BASE_HASH_KEY}={}", urlencoding::encode(api)));
     let b = bearer.trim();
-    if !b.is_empty() {
-        parts.push(format!("{BEARER_HASH_KEY}={}", urlencoding::encode(b)));
-    }
-    ui.set_fragment(Some(&parts.join("&")));
+    let bearer = if b.is_empty() { None } else { Some(b) };
+    ui.set_fragment(Some(&handoff_hash_fragment(Some(api), bearer)));
     ui
 }
 
@@ -76,11 +71,11 @@ pub fn build_local_ui_handoff_url(mut ui: Url, api_base: &Url, bearer: &str) -> 
 #[must_use]
 pub fn build_handoff_url(mut base: Url, bearer: &str) -> Url {
     let b = bearer.trim();
-    if b.is_empty() {
+    let frag = handoff_hash_fragment(None, Some(b));
+    if frag.is_empty() {
         base.set_fragment(None);
     } else {
-        let enc = urlencoding::encode(b);
-        base.set_fragment(Some(&format!("{BEARER_HASH_KEY}={enc}")));
+        base.set_fragment(Some(&frag));
     }
     base
 }

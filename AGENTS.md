@@ -11,7 +11,7 @@
 
 ```text
 .
-├── crates/crabmate-client-api/ # shared pure logic (URL / auth / secrets / approval / workspace / sessions / chat body)
+├── crates/crabmate-client-api/ # shared pure logic (URL / auth / secrets / approval / workspace / sessions / chat body / hash handoff keys)
 ├── crates/crabmate-tool-card/  # tool-card compact/detail (W2: in-repo path; not git-pinned to Server)
 ├── crates/crabmate-connect/
 ├── crates/crabmate-tui-core/   # remote terminal HTTP/SSE core
