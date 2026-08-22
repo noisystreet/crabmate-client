@@ -1,12 +1,8 @@
 package edu.crabmate
 
-import android.app.Activity
-import android.content.Intent
 import android.util.Base64
-import androidx.core.content.FileProvider
-import java.io.File
 
-/** 聊天灯箱：分块接收 base64，经 FileProvider 调起系统分享（避开 JS 桥 ~1MiB 限制）。 */
+/** 聊天灯箱 / 工作区保存：分块接收 base64（避开 JS 桥 ~1MiB 限制），再交系统另存为。 */
 internal class ChatImageShare {
   private val lock = Any()
   private var buf: StringBuilder? = null
@@ -54,13 +50,10 @@ internal class ChatImageShare {
     return true
   }
 
-  fun finish(
-    activity: Activity,
-    originOk: Boolean,
-  ): Boolean {
+  fun finish(originOk: Boolean): Pair<String, ByteArray>? {
     if (!originOk) {
       cancel()
-      return false
+      return null
     }
     val payload =
       synchronized(lock) {
@@ -69,17 +62,17 @@ internal class ChatImageShare {
         val name = filename
         Pair(b, name)
       }
-    val b64 = payload.first ?: return false
+    val b64 = payload.first ?: return null
     val bytes =
       try {
         Base64.decode(b64, Base64.DEFAULT)
       } catch (_: Exception) {
-        return false
+        return null
       }
     if (bytes.size > MAX_DECODED_BYTES) {
-      return false
+      return null
     }
-    return shareBytes(activity, payload.second, bytes)
+    return Pair(payload.second, bytes)
   }
 
   fun cancel() {
@@ -174,49 +167,6 @@ internal class ChatImageShare {
       }
       val stem = name.substringBeforeLast('.')
       return stem.isNotEmpty() && ext in setOf("png", "jpg", "jpeg", "webp", "gif")
-    }
-
-    private fun shareBytes(
-      activity: Activity,
-      name: String,
-      bytes: ByteArray,
-    ): Boolean {
-      val dir = File(activity.cacheDir, "chat-share")
-      if (!dir.exists() && !dir.mkdirs()) {
-        return false
-      }
-      val file = File(dir, name)
-      return try {
-        file.writeBytes(bytes)
-        activity.runOnUiThread { startShareChooser(activity, file, name) }
-        true
-      } catch (_: Exception) {
-        false
-      }
-    }
-
-    private fun startShareChooser(
-      activity: Activity,
-      file: File,
-      name: String,
-    ) {
-      try {
-        val uri =
-          FileProvider.getUriForFile(
-            activity,
-            "${activity.packageName}.fileprovider",
-            file,
-          )
-        val send =
-          Intent(Intent.ACTION_SEND).apply {
-            type = mimeForName(name)
-            putExtra(Intent.EXTRA_STREAM, uri)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-          }
-        activity.startActivity(Intent.createChooser(send, name))
-      } catch (_: Exception) {
-        // 无分享目标时忽略
-      }
     }
   }
 }

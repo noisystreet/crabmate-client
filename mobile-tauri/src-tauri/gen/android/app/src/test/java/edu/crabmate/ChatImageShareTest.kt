@@ -33,6 +33,15 @@ class ChatImageShareTest {
   }
 
   @Test
+  fun finishRejectsWhenOriginNotOk() {
+    val share = ChatImageShare()
+    assertTrue(share.begin(true, "a.txt", asImage = false))
+    assertTrue(share.append(true, "aGVsbG8="))
+    assertEquals(null, share.finish(false))
+    assertTrue(share.begin(true, "b.txt", asImage = false))
+  }
+
+  @Test
   fun mimeForNameMapsRasterExt() {
     assertEquals("image/jpeg", ChatImageShare.mimeForName("x.jpg"))
     assertEquals("image/png", ChatImageShare.mimeForName("x.png"))

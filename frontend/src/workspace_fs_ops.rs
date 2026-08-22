@@ -105,7 +105,7 @@ async fn workspace_bytes_for_local_save(
     fetch_workspace_file_download(rel, loc).await
 }
 
-/// 把工作区文件下载到本机（桌面另存为；Android 系统分享；浏览器 `<a download>`）。
+/// 把工作区文件下载到本机（桌面另存为；Android 系统另存为；浏览器 `<a download>`）。
 /// 磁盘内容走 `GET /workspace/file/download`（原样字节：PDF/二进制/文本）。
 /// 若该路径已在 IDE 打开，用当前缓冲区的 UTF-8 字节（含未写回 serve 的编辑）。
 pub fn spawn_save_workspace_file_to_device(
@@ -272,14 +272,14 @@ mod tests {
     }
 
     #[test]
-    fn android_share_failed_alert_is_bilingual() {
+    fn android_save_failed_alert_is_bilingual() {
         assert_eq!(
-            crate::i18n::export_android_share_failed(Locale::ZhHans),
-            "无法调起系统分享，文件未保存到本机。"
+            crate::i18n::export_android_save_failed(Locale::ZhHans),
+            "无法打开系统保存对话框，文件未保存到本机。"
         );
         assert_eq!(
-            crate::i18n::export_android_share_failed(Locale::En),
-            "Could not open the system share sheet; the file was not saved."
+            crate::i18n::export_android_save_failed(Locale::En),
+            "Could not open the system save dialog; the file was not saved."
         );
     }
 }
