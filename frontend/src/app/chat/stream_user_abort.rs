@@ -4,11 +4,12 @@
 //!
 //! **与其它收尾路径的关系**（与 [`crate::chat_session_state::make_chat_stream_busy_memos`] 同源）：
 //! - **正常结束**：工具时间线占位通常已由 SSE（如 `tool_result`）消化；`on_done` 再 [`ShellReleased`](crate::app::turn_lifecycle::TurnLifecycleEvent::ShellReleased) 并清 abort 槽。
-//! - **用户中止**：本模块 [`apply_user_abort_of_inflight_stream`] 同时收口助手/工具 **`Loading`** 行并 dispatch lifecycle 收尾。
+//! - **用户中止**：本模块 [`apply_user_abort_of_inflight_stream`] 同时 **`POST /chat/stream/{job_id}/cancel`**（停服务端回合）、收口助手/工具 **`Loading`** 行并 dispatch lifecycle 收尾。
 //! - **SSE/HTTP 错误**：`on_error` 对会话 `messages` 的写回应经 `callbacks::error_session::apply_stream_error_on_messages`（助手尾泡 + **`Loading`** 工具行），不能只清 lifecycle，否则时间线卡与谓词长期不一致。
 //!
 //! 会话目标与 SSE 写入一致：使用 [`crate::chat_session_state::ChatSessionSignals::effective_stream_message_session_id`]。
 
+use crate::api::post_chat_stream_cancel;
 use crate::app::turn_lifecycle::turn_lifecycle_stream_turn_busy;
 use crate::chat_session_state::{ChatSessionSignals, session_has_loading_tool_message};
 use crate::i18n;
@@ -19,6 +20,7 @@ use crate::message_loading::{
 use crate::storage::StoredMessage;
 use crate::stream_text_overlay::stream_overlay_take_into_stored_message;
 use leptos::prelude::GetUntracked;
+use leptos::task::spawn_local;
 
 use super::composer_stream::{clear_abort_slot, user_cancel_in_flight_stream};
 use super::handles::ComposerStreamShell;
@@ -74,7 +76,7 @@ pub(crate) fn stream_ui_inflight_untracked(
 
 /// 用户从 Web 主列点击「停止」时的**唯一**收口（`cancel_stream` 闭包仅调用此处）。
 ///
-/// 1. 若 [`stream_ui_inflight_untracked`] 为真：尽力 `abort` 在途 HTTP，收口助手/工具 `Loading`，dispatch lifecycle 收尾。
+/// 1. 若 [`stream_ui_inflight_untracked`] 为真：先 **`POST /chat/stream/{job_id}/cancel`**（无 `job_id` 或旧服务端失败则忽略），再尽力 `abort` 在途 HTTP，收口助手/工具 `Loading`，dispatch lifecycle 收尾。
 /// 2. 否则若仍有僵尸工具 `Loading`（流已结束未配对 `tool_result`、或重启后残留）：仅收口工具占位，返回 `true`。
 /// 3. 皆无则返回 `false`。
 ///
@@ -86,6 +88,11 @@ pub(crate) fn apply_user_abort_of_inflight_stream(
     loc: Locale,
 ) -> bool {
     if stream_ui_inflight_untracked(chat, shell) {
+        if let Some((_, Some(jid))) = chat.stream_bound_resume_handles_untracked() {
+            spawn_local(async move {
+                let _ = post_chat_stream_cancel(jid, loc).await;
+            });
+        }
         let _ = user_cancel_in_flight_stream(shell);
         let sid = chat.effective_stream_message_session_id();
         finalize_loading_placeholders_after_user_abort_on_session(chat, &sid, loc);

@@ -443,6 +443,23 @@ pub async fn post_tool_job_cancel(tool_job_id: &str, loc: Locale) -> Result<Stri
     Ok(body.status)
 }
 
+/// `POST /chat/stream/{job_id}/cancel`：停止服务端回合（仅 abort SSE 不够）。
+/// 旧服务端无此路由时失败，由调用方忽略。任务已结束为 **410** `STREAM_JOB_GONE`。
+pub async fn post_chat_stream_cancel(job_id: u64, loc: Locale) -> Result<(), String> {
+    #[derive(Deserialize)]
+    struct CancelBody {
+        #[serde(default)]
+        cancelled: bool,
+    }
+    let url = format!("/chat/stream/{job_id}/cancel");
+    let body: CancelBody = fetch_json_with_body("POST", &url, "{}", loc).await?;
+    if body.cancelled {
+        Ok(())
+    } else {
+        Err("stream cancel rejected".into())
+    }
+}
+
 /// `POST /config/reload`：热重载服务端 `AgentConfig`（与 REPL `/config reload` 同源）。
 pub async fn post_config_reload(loc: Locale) -> Result<String, String> {
     #[derive(Deserialize)]
