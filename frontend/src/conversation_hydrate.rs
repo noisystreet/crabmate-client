@@ -26,6 +26,9 @@ pub struct ConversationMessagesResponse {
     pub active_session_mode: Option<String>,
     #[serde(default)]
     pub tiktoken_prompt_tokens: Option<TiktokenPromptTokensSnapshot>,
+    /// 会话级布局；B3 双读观测差分。省略或 GET 还原历史时仍走 legacy 行 id（不 stamp 流式活键）。
+    #[serde(default)]
+    pub layout: Option<crate::conversation_hydrate_layout::ConversationLayoutMeta>,
     pub messages: Vec<Value>,
     /// 过滤后可见消息总数。
     #[serde(default)]
@@ -509,6 +512,7 @@ mod tests {
             active_agent_role: None,
             active_session_mode: None,
             tiktoken_prompt_tokens: None,
+            layout: None,
             messages: raw,
             total_count: 2,
             window_start_index: 0,

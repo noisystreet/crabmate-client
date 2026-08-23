@@ -33,6 +33,19 @@ pub(crate) fn note_empty_shell_skip() {
     }
 }
 
+/// B3 hydration 双读脱敏观测（行数 / 角色序 / hash；不含正文）。
+#[inline]
+pub(crate) fn note_hydration_dual_read(detail: &str) {
+    #[cfg(debug_assertions)]
+    {
+        log_debug(format!("[layout_debug] hydration_dual_read {detail}"));
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        let _ = detail;
+    }
+}
+
 /// I14 **兼容**：清空非空 `loading.text`（与定稿同文）时调用；overlay-only 收口不计。
 #[inline]
 pub(crate) fn note_commentary_handoff() {

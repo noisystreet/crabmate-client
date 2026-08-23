@@ -17,6 +17,7 @@ mod clarification_form;
 mod client_llm_presets;
 mod confirm_dialog;
 mod conversation_hydrate;
+mod conversation_hydrate_layout;
 mod conversation_hydrate_timeline;
 mod conversation_messages_page;
 mod conversation_prompt_tokens_apply;

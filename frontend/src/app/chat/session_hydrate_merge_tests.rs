@@ -38,6 +38,7 @@ fn revision_response(revision: u64) -> ConversationMessagesResponse {
         active_agent_role: None,
         active_session_mode: None,
         tiktoken_prompt_tokens: None,
+        layout: None,
     }
 }
 
@@ -222,6 +223,7 @@ fn merge_tail_page_replays_server_answer_over_local_draft() {
         active_agent_role: None,
         active_session_mode: None,
         tiktoken_prompt_tokens: None,
+        layout: None,
     };
     let merged = merge_tail_page_into_session_messages(&session, hydrated, &resp);
     let ids: Vec<_> = merged.iter().map(|m| m.id.as_str()).collect();
@@ -266,10 +268,44 @@ fn merge_tail_page_keeps_user_when_server_omits_user() {
         active_agent_role: None,
         active_session_mode: None,
         tiktoken_prompt_tokens: None,
+        layout: None,
     };
     let merged = merge_tail_page_into_session_messages(&session, hydrated, &resp);
     let roles: Vec<_> = merged.iter().map(|m| m.role.as_str()).collect();
     assert_eq!(roles, vec!["user", "assistant"]);
     assert_eq!(merged[0].text, "你好");
     assert_eq!(merged[1].id, "a-srv");
+}
+
+#[test]
+fn empty_cache_with_v2_layout_keeps_legacy_ids_and_schema() {
+    use crate::conversation_hydrate_layout::{ConversationLayoutMeta, ConversationLayoutSegment};
+
+    let mut session = revision_session(vec![], Some(0));
+    let hydrated = vec![
+        plain_message("u", "user", "go"),
+        plain_message("h_a", "assistant", "先读。"),
+        StoredMessage {
+            is_tool: true,
+            tool_call_id: Some("tc1".into()),
+            ..plain_message("h_t", "tool", "read")
+        },
+    ];
+    let mut resp = revision_response(4);
+    resp.layout = Some(ConversationLayoutMeta {
+        layout_schema_version: CURRENT_LAYOUT_SCHEMA_VERSION,
+        projection_hash: Some("ab".into()),
+        segments: vec![ConversationLayoutSegment {
+            turn_id: Some("u0".into()),
+            segment_id: "seg-before-tc1".into(),
+            segment_kind: "assistant_commentary".into(),
+            before_tool_call_id: Some("tc1".into()),
+            sequence: 0,
+        }],
+    });
+    apply_hydrated_tail_if_newer(&mut session, hydrated, &resp);
+    assert_eq!(session.layout_schema_version, LEGACY_LAYOUT_SCHEMA_VERSION);
+    assert_eq!(session.messages[1].id, "h_a");
+    assert_eq!(session.messages[2].id, "h_t");
+    assert!(!session.has_v2_finalized_rows());
 }

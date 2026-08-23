@@ -26,6 +26,7 @@ use crate::chat_session_state::ChatSessionSignals;
 use crate::conversation_hydrate::{
     ConversationMessagesResponse, stored_messages_for_hydration_or_parse_failed,
 };
+use crate::conversation_hydrate_layout::observe_hydration_dual_read;
 use crate::i18n::{self, Locale};
 use crate::message_loading::messages_have_any_loading;
 use crate::session_ops::title_from_user_prompt;
@@ -217,9 +218,16 @@ pub(crate) fn apply_hydrated_tail_if_newer(
         session.has_v2_layout_projection() && session.has_v2_finalized_rows();
     session.messages = merge_tail_page_into_session_messages(session, hydrated, resp);
     if !preserved_v2_projection {
-        // `/conversation/messages` 暂无 segment projection key；空缓存或 v1 缓存走 legacy adapter。
-        session.layout_schema_version = LEGACY_LAYOUT_SCHEMA_VERSION;
+        apply_hydration_layout_schema(session, resp);
     }
+}
+
+/// B3 双读：消费 `layout` 记差分；GET 还原的历史行保持 legacy id / schema。
+/// 流式活键不得 stamp 到持久化水合行。same-revision 守卫仍由
+/// [`should_merge_hydrated_messages`] 负责（E4 前不删）。
+fn apply_hydration_layout_schema(session: &mut ChatSession, resp: &ConversationMessagesResponse) {
+    let _ = observe_hydration_dual_read(&session.messages, resp.layout.as_ref());
+    session.layout_schema_version = LEGACY_LAYOUT_SCHEMA_VERSION;
 }
 
 fn prepend_older_page_into_session(
@@ -235,6 +243,7 @@ fn prepend_older_page_into_session(
     let mut combined = older;
     combined.append(&mut session.messages);
     session.messages = combined;
+    let _ = observe_hydration_dual_read(&session.messages, resp.layout.as_ref());
     apply_history_meta_from_response(session, resp);
 }
 
