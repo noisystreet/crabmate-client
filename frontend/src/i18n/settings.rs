@@ -162,18 +162,18 @@ pub fn settings_block_chat_transcript(l: Locale) -> &'static str {
 
 pub fn settings_show_turn_context_inject(l: Locale) -> &'static str {
     match l {
-        Locale::ZhHans => "显示每轮注入与窗口裁剪信息",
-        Locale::En => "Show per-turn inject and context-trim info",
+        Locale::ZhHans => "显示每轮上下文注入与压缩信息",
+        Locale::En => "Show per-turn context inject and compression info",
     }
 }
 
 pub fn settings_show_turn_context_inject_hint(l: Locale) -> &'static str {
     match l {
         Locale::ZhHans => {
-            "默认关闭。打开后主列会显示本轮 skill/上下文注入与窗口裁剪摘要（timeline_log）。"
+            "默认关闭。打开后主列会显示本轮 skill/上下文注入与压缩摘要（timeline_log）。"
         }
         Locale::En => {
-            "Off by default. When on, the transcript shows per-turn skill/context inject and window-trim summaries (timeline_log)."
+            "Off by default. When on, the transcript shows per-turn skill/context inject and compression summaries (timeline_log)."
         }
     }
 }
