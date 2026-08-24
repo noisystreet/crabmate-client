@@ -24,6 +24,7 @@ pub struct SettingsModalDialogInput {
     pub appearance_locale: RwSignal<Locale>,
     pub appearance_theme: RwSignal<String>,
     pub appearance_bg_decor: RwSignal<bool>,
+    pub show_turn_context_inject: RwSignal<bool>,
     pub dirty: Memo<bool>,
     pub discard: Arc<dyn Fn() + Send + Sync>,
     pub close_modal: Arc<dyn Fn() + Send + Sync>,
@@ -101,6 +102,7 @@ fn SettingsModalDialogBody(input: SettingsModalDialogInput) -> impl IntoView {
         appearance_locale,
         appearance_theme,
         appearance_bg_decor,
+        show_turn_context_inject,
         llm_settings_feedback,
         llm_api_base_draft,
         llm_api_base_preset_select,
@@ -147,6 +149,7 @@ fn SettingsModalDialogBody(input: SettingsModalDialogInput) -> impl IntoView {
                 appearance_locale=appearance_locale
                 appearance_theme=appearance_theme
                 appearance_bg_decor=appearance_bg_decor
+                show_turn_context_inject=show_turn_context_inject
                 theme_select_id="settings-modal-appearance-theme"
             />
             <SettingsModelsRegistryPanel bundle=SettingsModelsRegistryBundle {

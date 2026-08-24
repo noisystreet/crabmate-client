@@ -114,6 +114,7 @@ pub(super) fn SettingsPageNavRail(
 pub(super) struct SettingsPagePanelDrafts {
     pub appearance_theme: RwSignal<String>,
     pub appearance_bg_decor: RwSignal<bool>,
+    pub show_turn_context_inject: RwSignal<bool>,
     pub llm_api_base_draft: RwSignal<String>,
     pub llm_api_base_preset_select: RwSignal<String>,
     pub llm_model_draft: RwSignal<String>,
@@ -169,6 +170,7 @@ pub(super) fn SettingsPageContentPanels(
     let SettingsPagePanelDrafts {
         appearance_theme,
         appearance_bg_decor,
+        show_turn_context_inject,
         llm_api_base_draft,
         llm_api_base_preset_select,
         llm_model_draft,
@@ -222,6 +224,7 @@ pub(super) fn SettingsPageContentPanels(
                     appearance_locale=appearance_locale
                     appearance_theme=appearance_theme
                     appearance_bg_decor=appearance_bg_decor
+                    show_turn_context_inject=show_turn_context_inject
                     theme_select_id="settings-page-appearance-theme"
                 />
             </Show>

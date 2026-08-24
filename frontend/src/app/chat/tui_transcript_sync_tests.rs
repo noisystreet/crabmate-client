@@ -19,6 +19,7 @@ fn sync(
         locale: Locale::ZhHans,
         apply_assistant_display_filters: false,
         markdown_render: true,
+        show_turn_context_inject: false,
         tool_chunks,
         tool_jobs: &empty_jobs,
     })
@@ -148,6 +149,7 @@ fn finished_assistant_bold_becomes_strong() {
         Locale::ZhHans,
         false,
         true,
+        false,
         &HashMap::new(),
         &HashMap::new(),
     );
@@ -185,6 +187,7 @@ fn tool_turn_uses_tool_modifier_without_generic_role_word() {
         Locale::ZhHans,
         false,
         true,
+        false,
         &HashMap::new(),
         &HashMap::new(),
     );
@@ -276,6 +279,7 @@ fn skill_slash_chip_stays_on_same_line_as_task() {
         Locale::ZhHans,
         false,
         true,
+        false,
         &empty,
         &HashMap::new(),
     );
@@ -310,6 +314,7 @@ fn file_ref_chip_stays_on_same_line_as_following_text() {
         Locale::ZhHans,
         false,
         true,
+        false,
         &empty,
         &HashMap::new(),
     );
@@ -343,6 +348,7 @@ fn user_bubble_shows_chat_upload_images() {
         Locale::ZhHans,
         false,
         true,
+        false,
         &empty,
         &HashMap::new(),
     );

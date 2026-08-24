@@ -18,6 +18,60 @@ fn is_orchestration_route_timeline_text(text: &str) -> bool {
     text.trim_start().starts_with("编排路由：")
 }
 
+/// Server `timeline_log.kind`：本轮注入 / 窗口裁剪摘要（软字段；默认不进主列）。
+#[must_use]
+pub fn is_turn_context_inject_kind(kind: &str) -> bool {
+    matches!(kind.trim(), "context_inject" | "context_trim")
+}
+
+fn json_object_kind_is_inject(text: &str) -> bool {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(text.trim()) else {
+        return false;
+    };
+    v.get("kind")
+        .and_then(|k| k.as_str())
+        .is_some_and(is_turn_context_inject_kind)
+}
+
+fn json_looks_like_context_inject_detail(text: &str) -> bool {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(text.trim()) else {
+        return false;
+    };
+    let Some(obj) = v.as_object() else {
+        return false;
+    };
+    (obj.contains_key("skills") && obj.contains_key("forced"))
+        || (obj.contains_key("count_hit") && obj.contains_key("n_before"))
+}
+
+/// 水合 `crabmate_timeline` 正文或流式旁注拼接（title + `\n` + detail JSON）。
+#[must_use]
+pub fn is_turn_context_inject_timeline_text(text: &str) -> bool {
+    let t = text.trim();
+    if t.is_empty() {
+        return false;
+    }
+    if json_object_kind_is_inject(t) {
+        return true;
+    }
+    if json_looks_like_context_inject_detail(t) {
+        return true;
+    }
+    let Some((_, rest)) = t.split_once('\n') else {
+        return false;
+    };
+    json_object_kind_is_inject(rest) || json_looks_like_context_inject_detail(rest)
+}
+
+/// 主列 / 导出：本轮注入或裁剪旁注（system 水合行或 assistant 本地 snapshot）。
+#[must_use]
+pub fn is_turn_context_inject_timeline_message(m: &StoredMessage) -> bool {
+    if m.is_tool {
+        return false;
+    }
+    is_turn_context_inject_timeline_text(&m.text)
+}
+
 /// 已落盘的编排路由旁注：导出与聊天列均跳过。
 pub fn is_orchestration_route_timeline_message(m: &StoredMessage) -> bool {
     !m.is_tool && is_orchestration_route_timeline_text(&m.text)
@@ -307,6 +361,23 @@ pub fn is_ephemeral_timeline_assistant_for_export(
 mod tests {
     use super::*;
     use crate::storage::{StoredMessage, StoredMessageState};
+
+    #[test]
+    fn context_inject_kind_and_json_body_detected() {
+        assert!(is_turn_context_inject_kind("context_inject"));
+        assert!(is_turn_context_inject_kind(" context_trim "));
+        assert!(!is_turn_context_inject_kind("final_response"));
+        assert!(is_turn_context_inject_timeline_text(
+            r#"{"kind":"context_inject","title":"inject"}"#
+        ));
+        assert!(is_turn_context_inject_timeline_text(
+            "本轮注入\n{\"skills\":[\"rust-style\"],\"forced\":false}"
+        ));
+        assert!(is_turn_context_inject_timeline_text(
+            r#"{"count_hit":true,"n_before":40,"n_after":12}"#
+        ));
+        assert!(!is_turn_context_inject_timeline_text("hello"));
+    }
 
     #[test]
     fn legacy_local_snapshot_dropped_when_server_has_same_assistant_text() {

@@ -11,6 +11,8 @@ use crate::i18n::Locale;
 pub struct ShellUISignals {
     pub theme: RwSignal<String>,
     pub bg_decor: RwSignal<bool>,
+    /// 聊天主列是否展示本轮注入 / 窗口裁剪 `timeline_log`（默认关；经 `/user-data/prefs` 持久化）。
+    pub show_turn_context_inject: RwSignal<bool>,
     pub locale: RwSignal<Locale>,
     pub view_menu_open: RwSignal<bool>,
     /// 顶栏「项目 / 编辑 / 视图」任一下拉打开时为 `true`（对话与 IDE 共用；供全局 Escape 关闭）。
@@ -51,6 +53,7 @@ impl ShellUISignals {
         Self {
             theme: RwSignal::new(s.theme),
             bg_decor: RwSignal::new(s.bg_decor),
+            show_turn_context_inject: RwSignal::new(s.show_turn_context_inject),
             locale: RwSignal::new(s.locale),
             view_menu_open: RwSignal::new(false),
             ide_menubar_dropdown_open: RwSignal::new(false),

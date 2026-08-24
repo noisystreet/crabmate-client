@@ -93,6 +93,7 @@ pub fn build_prefs_dto(app: &AppSignals) -> UserPrefsDto {
         ide_editor_word_wrap: Some(app.ide_editor.word_wrap.get_untracked()),
         ide_editor_tab_size: Some(app.ide_editor.tab_size.get_untracked() as u32),
         bg_decor: Some(app.shell_ui.bg_decor.get_untracked()),
+        show_turn_context_inject: Some(app.shell_ui.show_turn_context_inject.get_untracked()),
         status_bar_visible,
         cm_role: app
             .llm_settings
@@ -134,6 +135,9 @@ fn apply_shell_appearance_prefs(app: &AppSignals, dto: &UserPrefsDto) {
     }
     if let Some(b) = dto.bg_decor {
         app.shell_ui.bg_decor.set(b);
+    }
+    if let Some(b) = dto.show_turn_context_inject {
+        app.shell_ui.show_turn_context_inject.set(b);
     }
     if let Some(ref loc) = dto.locale {
         app.shell_ui.locale.set(Locale::from_storage_slug(loc));
@@ -392,6 +396,7 @@ pub fn wire_persist_user_prefs_to_server(app: AppSignals) {
         }
         let _ = app.shell_ui.theme.get();
         let _ = app.shell_ui.bg_decor.get();
+        let _ = app.shell_ui.show_turn_context_inject.get();
         let _ = app.shell_ui.locale.get();
         let _ = app.shell_ui.status_bar_visible.get();
         let _ = app.shell_ui.side_panel_view.get();

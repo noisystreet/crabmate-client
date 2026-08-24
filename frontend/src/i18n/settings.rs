@@ -153,6 +153,31 @@ pub fn settings_bg_glow(l: Locale) -> &'static str {
     }
 }
 
+pub fn settings_block_chat_transcript(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "对话",
+        Locale::En => "Chat",
+    }
+}
+
+pub fn settings_show_turn_context_inject(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "显示每轮注入与窗口裁剪信息",
+        Locale::En => "Show per-turn inject and context-trim info",
+    }
+}
+
+pub fn settings_show_turn_context_inject_hint(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => {
+            "默认关闭。打开后主列会显示本轮 skill/上下文注入与窗口裁剪摘要（timeline_log）。"
+        }
+        Locale::En => {
+            "Off by default. When on, the transcript shows per-turn skill/context inject and window-trim summaries (timeline_log)."
+        }
+    }
+}
+
 pub fn settings_block_web_api_bearer(l: Locale) -> &'static str {
     match l {
         Locale::ZhHans => "Web API 共享密钥",

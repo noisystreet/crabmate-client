@@ -174,6 +174,7 @@ fn ChatMessagesPane(signals: ChatMessagesPaneSignals) -> impl IntoView {
         locale,
         apply_assistant_display_filters,
         markdown_render,
+        show_turn_context_inject,
         stream_follow_up,
         stream_turn_busy_ui,
         status_err,
@@ -200,6 +201,7 @@ fn ChatMessagesPane(signals: ChatMessagesPaneSignals) -> impl IntoView {
                 locale=locale
                 apply_assistant_display_filters=apply_assistant_display_filters
                 markdown_render=markdown_render
+                show_turn_context_inject=show_turn_context_inject
                 scroll_shell=scroll_shell
                 action_handlers=action_handlers
                 find=ChatFindOverlaySignals {

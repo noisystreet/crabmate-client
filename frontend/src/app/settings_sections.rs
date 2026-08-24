@@ -5,6 +5,7 @@ use leptos::task::spawn_local;
 use leptos_dom::helpers::event_target_value;
 use wasm_bindgen::JsCast;
 
+use super::settings_toggle_switch::SettingsToggleSwitch;
 use crate::api::MainLlmDraftSignals;
 use crate::app_prefs::THEME_SLUGS;
 use crate::i18n::{self, Locale};
@@ -108,6 +109,25 @@ fn SettingsBgDecorBlock(
     }
 }
 
+#[component]
+fn SettingsChatTranscriptBlock(
+    locale: RwSignal<Locale>,
+    show_turn_context_inject: RwSignal<bool>,
+) -> impl IntoView {
+    view! {
+        <div class="settings-block">
+            <h3 class="settings-block-title">{move || i18n::settings_block_chat_transcript(locale.get())}</h3>
+            <SettingsToggleSwitch
+                checked=Signal::derive(move || show_turn_context_inject.get())
+                label=Signal::derive(move || i18n::settings_show_turn_context_inject(locale.get()).to_string())
+                on_toggle=move || show_turn_context_inject.update(|v| *v = !*v)
+                test_id="settings-show-turn-context-inject"
+            />
+            <p class="settings-field-hint">{move || i18n::settings_show_turn_context_inject_hint(locale.get())}</p>
+        </div>
+    }
+}
+
 /// 外观：语言 / 主题 / 背景装饰（`theme_select_id`：设置页与弹窗须不同 id）。
 #[component]
 pub(crate) fn SettingsAppearanceBlock(
@@ -115,6 +135,7 @@ pub(crate) fn SettingsAppearanceBlock(
     appearance_locale: RwSignal<Locale>,
     appearance_theme: RwSignal<String>,
     appearance_bg_decor: RwSignal<bool>,
+    show_turn_context_inject: RwSignal<bool>,
     theme_select_id: &'static str,
 ) -> impl IntoView {
     view! {
@@ -125,6 +146,10 @@ pub(crate) fn SettingsAppearanceBlock(
             theme_select_id=theme_select_id
         />
         <SettingsBgDecorBlock locale=locale appearance_bg_decor=appearance_bg_decor />
+        <SettingsChatTranscriptBlock
+            locale=locale
+            show_turn_context_inject=show_turn_context_inject
+        />
     }
 }
 

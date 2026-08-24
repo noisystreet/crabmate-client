@@ -100,6 +100,15 @@ fn timeline_log_dispatch_default_body(stream_ctx: &ChatStreamCallbackCtx, info: 
     push_assistant_timeline_bubble(stream_ctx, body, state);
 }
 
+fn timeline_log_dispatch_context_inject(
+    stream_ctx: &ChatStreamCallbackCtx,
+    info: &TimelineLogInfo,
+) {
+    if stream_ctx.shell.show_turn_context_inject.get_untracked() {
+        timeline_log_dispatch_default_body(stream_ctx, info);
+    }
+}
+
 fn timeline_log_dispatch_body(
     stream_ctx: &ChatStreamCallbackCtx,
     accum: &PerStreamAccum,
@@ -110,6 +119,9 @@ fn timeline_log_dispatch_body(
         "final_response" => timeline_log_dispatch_final_response(stream_ctx, accum, &info),
         "planner_tool_call_rejected" | "orchestration_route" => {}
         "tool_step_started" | "tool_step_finished" => {}
+        kind if crate::timeline_scan::is_turn_context_inject_kind(kind) => {
+            timeline_log_dispatch_context_inject(stream_ctx, &info);
+        }
         _ => timeline_log_dispatch_default_body(stream_ctx, &info),
     }
 }

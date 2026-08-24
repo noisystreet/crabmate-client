@@ -22,11 +22,14 @@ fn mountable_turns<'a>(
     messages: &'a [StoredMessage],
     session_id: &str,
     overlay: Option<&StreamTextOverlay>,
+    show_turn_context_inject: bool,
 ) -> Vec<(usize, &'a StoredMessage)> {
     messages
         .iter()
         .enumerate()
-        .filter(|(_, m)| tui_should_render_message(m, messages, session_id, overlay))
+        .filter(|(_, m)| {
+            tui_should_render_message(m, messages, session_id, overlay, show_turn_context_inject)
+        })
         .collect()
 }
 
@@ -442,10 +445,11 @@ pub(crate) fn build_tui_transcript_html(
     locale: Locale,
     apply_assistant_display_filters: bool,
     markdown_render: bool,
+    show_turn_context_inject: bool,
     tool_chunks: &HashMap<String, String>,
     tool_jobs: &HashMap<String, ToolJobState>,
 ) -> String {
-    let turns = mountable_turns(messages, session_id, overlay);
+    let turns = mountable_turns(messages, session_id, overlay, show_turn_context_inject);
     if turns.is_empty() {
         return empty_transcript_html(locale);
     }
@@ -512,10 +516,11 @@ fn full_rebuild_plan(
     locale: Locale,
     apply_assistant_display_filters: bool,
     markdown_render: bool,
+    show_turn_context_inject: bool,
     tool_chunks: &HashMap<String, String>,
     tool_jobs: &HashMap<String, ToolJobState>,
 ) -> TuiSyncPlan {
-    let turns = mountable_turns(messages, session_id, overlay);
+    let turns = mountable_turns(messages, session_id, overlay, show_turn_context_inject);
     let live_id = live_message_id(messages, overlay);
     let committed_key = committed_fingerprint(&turns, live_id.as_deref());
     let mounted_ids: Vec<String> = turns.iter().map(|(_, m)| m.id.clone()).collect();
@@ -553,6 +558,7 @@ fn full_rebuild_plan(
             locale,
             apply_assistant_display_filters,
             markdown_render,
+            show_turn_context_inject,
             tool_chunks,
             tool_jobs,
         )),
@@ -784,6 +790,7 @@ pub(crate) struct PlanTuiSyncArgs<'a> {
     pub locale: Locale,
     pub apply_assistant_display_filters: bool,
     pub markdown_render: bool,
+    pub show_turn_context_inject: bool,
     pub tool_chunks: &'a HashMap<String, String>,
     pub tool_jobs: &'a HashMap<String, ToolJobState>,
 }
@@ -799,10 +806,11 @@ pub(crate) fn plan_tui_sync(args: PlanTuiSyncArgs<'_>) -> TuiSyncPlan {
         locale,
         apply_assistant_display_filters,
         markdown_render,
+        show_turn_context_inject,
         tool_chunks,
         tool_jobs,
     } = args;
-    let turns = mountable_turns(messages, session_id, overlay);
+    let turns = mountable_turns(messages, session_id, overlay, show_turn_context_inject);
     let Some(prev) = prev else {
         return full_rebuild_plan(
             messages,
@@ -811,6 +819,7 @@ pub(crate) fn plan_tui_sync(args: PlanTuiSyncArgs<'_>) -> TuiSyncPlan {
             locale,
             apply_assistant_display_filters,
             markdown_render,
+            show_turn_context_inject,
             tool_chunks,
             tool_jobs,
         );
@@ -823,6 +832,7 @@ pub(crate) fn plan_tui_sync(args: PlanTuiSyncArgs<'_>) -> TuiSyncPlan {
             locale,
             apply_assistant_display_filters,
             markdown_render,
+            show_turn_context_inject,
             tool_chunks,
             tool_jobs,
         );
