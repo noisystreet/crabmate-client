@@ -160,7 +160,9 @@ fn status_bar_context_chip_visible(chat: ChatSessionSignals) -> bool {
     !chat.active_id.get().is_empty()
 }
 
-fn status_bar_context_used_for_active_session(chat: ChatSessionSignals) -> Option<u32> {
+fn status_bar_context_snapshot_for_active_session(
+    chat: ChatSessionSignals,
+) -> Option<crate::conversation_hydrate::TiktokenPromptTokensSnapshot> {
     let snap = chat.conversation_prompt_tokens.get()?;
     let aid = chat.active_id.get_untracked();
     let cid_matches = chat.sessions.with_untracked(|list| {
@@ -172,7 +174,12 @@ fn status_bar_context_used_for_active_session(chat: ChatSessionSignals) -> Optio
     if cid_matches != Some(true) {
         return None;
     }
-    snap.tiktoken.as_ref().map(|t| t.prompt_tokens)
+    snap.tiktoken
+}
+
+fn status_bar_context_used_for_active_session(chat: ChatSessionSignals) -> Option<u32> {
+    let snap = status_bar_context_snapshot_for_active_session(chat)?;
+    snap.used_input_tokens.or(Some(snap.prompt_tokens))
 }
 
 fn active_session_has_server_conversation_id(chat: ChatSessionSignals) -> bool {
@@ -217,7 +224,10 @@ fn status_bar_context_cap_and_used(
     let _tick = client_llm_storage_tick.get();
     let sd = st.status_data.get();
     let (_, _, _, stored_ctx, _) = load_client_llm_text_fields_from_storage();
-    let cap = status_bar_effective_llm_context_tokens(sd.as_ref(), stored_ctx.as_str());
+    let fallback_cap = status_bar_effective_llm_context_tokens(sd.as_ref(), stored_ctx.as_str());
+    let cap = status_bar_context_snapshot_for_active_session(chat)
+        .and_then(|snapshot| snapshot.max_input_tokens)
+        .unwrap_or(fallback_cap);
     let role_sel = selected_agent_role.get();
     let role = role_sel.as_deref().map(str::trim).filter(|s| !s.is_empty());
     let used = status_bar_context_effective_used(chat, st, role);

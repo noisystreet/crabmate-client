@@ -48,7 +48,11 @@ mod tests {
         let camel = json!({
             "tiktokenPromptTokens": {
                 "prompt_tokens": 1200,
-                "tiktoken_model": "gpt-4o"
+                "tiktoken_model": "gpt-4o",
+                "used_input_tokens": 1500,
+                "max_input_tokens": 9000,
+                "counting_source": "provider_usage",
+                "provider_input_tokens": 1500
             }
         });
         let snake = json!({
@@ -60,6 +64,9 @@ mod tests {
         let a = tiktoken_from_ag_ui_object(&camel).expect("camel");
         assert_eq!(a.prompt_tokens, 1200);
         assert_eq!(a.tiktoken_model, "gpt-4o");
+        assert_eq!(a.used_input_tokens, Some(1500));
+        assert_eq!(a.max_input_tokens, Some(9000));
+        assert_eq!(a.counting_source.as_deref(), Some("provider_usage"));
         let b = tiktoken_from_ag_ui_object(&snake).expect("snake");
         assert_eq!(b.prompt_tokens, 99);
         assert!(tiktoken_from_ag_ui_object(&json!({"revision": 1})).is_none());
