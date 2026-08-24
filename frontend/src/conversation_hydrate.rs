@@ -29,6 +29,10 @@ pub struct ConversationMessagesResponse {
     /// 会话级布局；B3 双读观测差分。省略或 GET 还原历史时仍走 legacy 行 id（不 stamp 流式活键）。
     #[serde(default)]
     pub layout: Option<crate::conversation_hydrate_layout::ConversationLayoutMeta>,
+    /// Phase 3 模型视图回放配方；当前 UI 不展示，保留供诊断/重放工具使用。
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub context_artifacts: Vec<Value>,
     pub messages: Vec<Value>,
     /// 过滤后可见消息总数。
     #[serde(default)]
@@ -44,6 +48,22 @@ pub struct ConversationMessagesResponse {
 pub struct TiktokenPromptTokensSnapshot {
     pub prompt_tokens: u32,
     pub tiktoken_model: String,
+    #[serde(default)]
+    pub used_input_tokens: Option<u32>,
+    #[serde(default)]
+    pub max_input_tokens: Option<u32>,
+    #[serde(default)]
+    pub reserved_output_tokens: Option<u32>,
+    #[serde(default)]
+    pub message_tokens: Option<u32>,
+    #[serde(default)]
+    pub tool_schema_tokens: Option<u32>,
+    #[serde(default)]
+    pub attachment_tokens: Option<u32>,
+    #[serde(default)]
+    pub counting_source: Option<String>,
+    #[serde(default)]
+    pub provider_input_tokens: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -513,6 +533,7 @@ mod tests {
             active_session_mode: None,
             tiktoken_prompt_tokens: None,
             layout: None,
+            context_artifacts: vec![],
             messages: raw,
             total_count: 2,
             window_start_index: 0,

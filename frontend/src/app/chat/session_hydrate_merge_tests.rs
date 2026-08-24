@@ -39,6 +39,7 @@ fn revision_response(revision: u64) -> ConversationMessagesResponse {
         active_session_mode: None,
         tiktoken_prompt_tokens: None,
         layout: None,
+        context_artifacts: vec![],
     }
 }
 
@@ -224,6 +225,7 @@ fn merge_tail_page_replays_server_answer_over_local_draft() {
         active_session_mode: None,
         tiktoken_prompt_tokens: None,
         layout: None,
+        context_artifacts: vec![],
     };
     let merged = merge_tail_page_into_session_messages(&session, hydrated, &resp);
     let ids: Vec<_> = merged.iter().map(|m| m.id.as_str()).collect();
@@ -269,6 +271,7 @@ fn merge_tail_page_keeps_user_when_server_omits_user() {
         active_session_mode: None,
         tiktoken_prompt_tokens: None,
         layout: None,
+        context_artifacts: vec![],
     };
     let merged = merge_tail_page_into_session_messages(&session, hydrated, &resp);
     let roles: Vec<_> = merged.iter().map(|m| m.role.as_str()).collect();
