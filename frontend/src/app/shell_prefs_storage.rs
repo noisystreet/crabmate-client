@@ -22,6 +22,8 @@ use crate::session_typography_prefs::{session_chat_font_stack_css, session_ui_fo
 pub(crate) struct ShellUiInitialSnapshot {
     pub theme: String,
     pub bg_decor: bool,
+    /// 聊天主列是否展示本轮注入 / 裁剪时间线（首屏默认关）。
+    pub show_turn_context_inject: bool,
     pub locale: Locale,
     pub status_bar_visible: bool,
     pub side_panel_view: SidePanelView,
@@ -92,6 +94,7 @@ pub(crate) fn read_shell_ui_initial_snapshot() -> ShellUiInitialSnapshot {
     ShellUiInitialSnapshot {
         theme: "light".to_string(),
         bg_decor: true,
+        show_turn_context_inject: false,
         locale: Locale::ZhHans,
         status_bar_visible: false,
         side_panel_view: SidePanelView::Workspace,

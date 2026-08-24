@@ -59,6 +59,7 @@ Blank cells are forbidden.
 | Control slashes (not sent to the model) | yes | yes | yes | reduced | Shared names: `help` / `workspace` / `cd`. Web has more (`export`, `model`, …). TUI: `/conv` `/quit`. |
 | Web session list + resume by `server_conversation_id` | yes | yes | yes | reduced | TUI: `/conv list` / `use`; no full WASM session CRUD/export. |
 | In-app stream resume after background | yes | yes | reduced | planned | TUI records `last_event_id` but does not send `Last-Event-ID` / `stream_resume`. |
+| Per-turn inject / trim transcript notes | yes | yes | yes | no | WASM: Server `timeline_log` `context_inject` / `context_trim`; **hidden by default**; Settings → Appearance. Export never includes them. TUI prints classified SSE as text (no toggle). |
 
 ### Workspace and IDE
 

@@ -67,6 +67,7 @@ pub(super) fn SettingsPageChrome(ctx: SettingsPageChromeCtx) -> impl IntoView {
         locale,
         theme,
         bg_decor,
+        show_turn_context_inject: _,
         llm_api_base_draft,
         llm_api_base_preset_select,
         llm_model_draft,
@@ -168,6 +169,7 @@ pub(super) fn SettingsPageChrome(ctx: SettingsPageChromeCtx) -> impl IntoView {
                         drafts=SettingsPagePanelDrafts {
                             appearance_theme,
                             appearance_bg_decor,
+                            show_turn_context_inject: form.show_turn_context_inject,
                             llm_api_base_draft,
                             llm_api_base_preset_select,
                             llm_model_draft,

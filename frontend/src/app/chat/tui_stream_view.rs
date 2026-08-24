@@ -49,6 +49,7 @@ struct PlanActiveSessionArgs<'a> {
     locale: Locale,
     apply_filters: bool,
     markdown_render: bool,
+    show_turn_context_inject: bool,
     tool_chunks: &'a HashMap<String, String>,
     tool_jobs: &'a HashMap<String, ToolJobState>,
 }
@@ -62,6 +63,7 @@ fn plan_for_active_session(args: PlanActiveSessionArgs<'_>) -> TuiSyncPlan {
         locale,
         apply_filters,
         markdown_render,
+        show_turn_context_inject,
         tool_chunks,
         tool_jobs,
     } = args;
@@ -74,6 +76,7 @@ fn plan_for_active_session(args: PlanActiveSessionArgs<'_>) -> TuiSyncPlan {
             locale,
             apply_assistant_display_filters: apply_filters,
             markdown_render,
+            show_turn_context_inject,
             tool_chunks,
             tool_jobs,
         }),
@@ -85,6 +88,7 @@ fn plan_for_active_session(args: PlanActiveSessionArgs<'_>) -> TuiSyncPlan {
             locale,
             apply_assistant_display_filters: apply_filters,
             markdown_render,
+            show_turn_context_inject,
             tool_chunks,
             tool_jobs,
         }),
@@ -384,11 +388,16 @@ fn apply_or_rebuild_tui_mount(
     FindRestoreScope::None
 }
 
-fn sync_chat_tui_stream_dom(
-    chat: ChatSessionSignals,
+struct TuiStreamDisplayOpts {
     locale: Locale,
     apply_filters: bool,
-    md_on: bool,
+    markdown_render: bool,
+    show_turn_context_inject: bool,
+}
+
+fn sync_chat_tui_stream_dom(
+    chat: ChatSessionSignals,
+    display: TuiStreamDisplayOpts,
     transcript_ref: NodeRef<leptos::html::Div>,
     mount_state: RwSignal<Option<TuiMountState>>,
     scroll_shell: ChatScrollShellSignals,
@@ -405,9 +414,10 @@ fn sync_chat_tui_stream_dom(
             active_id: &active_id,
             prev: prev.as_ref(),
             overlay: overlay.as_ref(),
-            locale,
-            apply_filters,
-            markdown_render: md_on,
+            locale: display.locale,
+            apply_filters: display.apply_filters,
+            markdown_render: display.markdown_render,
+            show_turn_context_inject: display.show_turn_context_inject,
             tool_chunks: &tool_chunks,
             tool_jobs: &tool_jobs,
         })
@@ -427,9 +437,10 @@ fn sync_chat_tui_stream_dom(
                 active_id: &active_id,
                 prev: None,
                 overlay: overlay.as_ref(),
-                locale,
-                apply_filters,
-                markdown_render: md_on,
+                locale: display.locale,
+                apply_filters: display.apply_filters,
+                markdown_render: display.markdown_render,
+                show_turn_context_inject: display.show_turn_context_inject,
                 tool_chunks: &tool_chunks,
                 tool_jobs: &tool_jobs,
             })
@@ -647,6 +658,7 @@ pub(crate) fn ChatTuiStreamView(
     locale: RwSignal<Locale>,
     apply_assistant_display_filters: RwSignal<bool>,
     markdown_render: RwSignal<bool>,
+    show_turn_context_inject: RwSignal<bool>,
     scroll_shell: ChatScrollShellSignals,
     action_handlers: TuiTurnActionHandlers,
     find: ChatFindOverlaySignals,
@@ -684,11 +696,15 @@ pub(crate) fn ChatTuiStreamView(
         let loc = locale.get();
         let apply_filters = apply_assistant_display_filters.get();
         let md_on = markdown_render.get();
+        let show_inject = show_turn_context_inject.get();
         let (scope, live_id) = sync_chat_tui_stream_dom(
             chat,
-            loc,
-            apply_filters,
-            md_on,
+            TuiStreamDisplayOpts {
+                locale: loc,
+                apply_filters,
+                markdown_render: md_on,
+                show_turn_context_inject: show_inject,
+            },
             transcript_ref,
             mount_state,
             scroll_shell,

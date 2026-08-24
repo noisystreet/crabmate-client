@@ -76,6 +76,8 @@ pub struct ComposerStreamShell {
     pub modal: ComposerStreamModalSignals,
     pub ide: ComposerStreamIdeSignals,
     pub refresh_workspace: Arc<dyn Fn() + Send + Sync>,
+    /// 设置页开关：是否把本轮 `context_inject` / `context_trim` 旁注画进主列（默认关）。
+    pub show_turn_context_inject: RwSignal<bool>,
 }
 
 impl ComposerStreamShell {
@@ -100,6 +102,7 @@ impl ComposerStreamShell {
                 ide_sync_disk_nonce: app.shell_ui.ide_sync_disk_nonce,
             },
             refresh_workspace,
+            show_turn_context_inject: app.shell_ui.show_turn_context_inject,
         }
     }
 }
@@ -112,6 +115,8 @@ pub(crate) struct ChatMessagesPaneSignals {
     pub apply_assistant_display_filters: RwSignal<bool>,
     /// 与 `GET /web-ui` 的 `markdown_render` / `CM_WEB_DISABLE_MARKDOWN` 对齐（主列 TUI 流亦须尊重）。
     pub markdown_render: RwSignal<bool>,
+    /// 是否展示本轮注入 / 裁剪 `timeline_log`（设置页开关；默认关）。
+    pub show_turn_context_inject: RwSignal<bool>,
     pub scroll_shell: ChatScrollShellSignals,
     pub stream_follow_up: RwSignal<super::composer_follow_up::ComposerStreamFollowUp>,
     pub stream_turn_busy_ui: Memo<bool>,
@@ -191,6 +196,7 @@ impl ChatColumnShell {
             chat: app.chat,
             apply_assistant_display_filters: su.apply_assistant_display_filters,
             markdown_render: su.markdown_render,
+            show_turn_context_inject: su.show_turn_context_inject,
             scroll_shell: ChatScrollShellSignals::from_composer(&cc),
             stream_follow_up: self.stream_follow_up,
             stream_turn_busy_ui: self.stream_busy_memos.stream_turn_busy_ui,

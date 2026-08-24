@@ -10,10 +10,14 @@
 use crate::storage::StoredMessage;
 use crate::timeline_scan::{
     is_ephemeral_timeline_assistant_for_chat_ui, is_ephemeral_timeline_assistant_for_export,
+    is_turn_context_inject_timeline_message,
 };
 
 /// 导出路径是否应隐藏该条。
 fn is_message_hidden_from_export(m: &StoredMessage, messages: &[StoredMessage]) -> bool {
+    if is_turn_context_inject_timeline_message(m) {
+        return true;
+    }
     if is_ephemeral_timeline_assistant_for_export(m, messages) {
         return true;
     }
@@ -29,6 +33,22 @@ pub(crate) fn is_empty_assistant_body(m: &StoredMessage) -> bool {
         && m.reasoning_text.trim().is_empty()
 }
 
+fn tui_hides_inject_unless_pref(m: &StoredMessage, show_turn_context_inject: bool) -> bool {
+    !show_turn_context_inject && is_turn_context_inject_timeline_message(m)
+}
+
+fn tui_empty_shell_has_overlay_text(
+    m: &StoredMessage,
+    session_id: &str,
+    overlay: Option<&crate::stream_text_overlay::StreamTextOverlay>,
+) -> bool {
+    overlay.is_some_and(|o| {
+        o.session_id == session_id
+            && o.message_id == m.id
+            && (!o.answer.trim().is_empty() || !o.reasoning.trim().is_empty())
+    })
+}
+
 /// TUI 主列是否应挂载该消息。
 ///
 /// - 工具 / 非助手行：始终挂载；
@@ -40,7 +60,11 @@ pub(crate) fn tui_should_render_message(
     messages: &[StoredMessage],
     session_id: &str,
     overlay: Option<&crate::stream_text_overlay::StreamTextOverlay>,
+    show_turn_context_inject: bool,
 ) -> bool {
+    if tui_hides_inject_unless_pref(m, show_turn_context_inject) {
+        return false;
+    }
     if m.is_tool || m.role != "assistant" {
         return true;
     }
@@ -50,11 +74,7 @@ pub(crate) fn tui_should_render_message(
     if !is_empty_assistant_body(m) {
         return true;
     }
-    let show = overlay.is_some_and(|o| {
-        o.session_id == session_id
-            && o.message_id == m.id
-            && (!o.answer.trim().is_empty() || !o.reasoning.trim().is_empty())
-    });
+    let show = tui_empty_shell_has_overlay_text(m, session_id, overlay);
     if !show {
         crate::layout_debug_counters::note_empty_shell_skip();
     }
@@ -102,7 +122,7 @@ mod tests {
     fn tui_visible_ids(messages: &[StoredMessage]) -> Vec<&str> {
         messages
             .iter()
-            .filter(|m| tui_should_render_message(m, messages, "s", None))
+            .filter(|m| tui_should_render_message(m, messages, "s", None, false))
             .map(|m| m.id.as_str())
             .collect()
     }
@@ -167,7 +187,8 @@ mod tests {
             &load,
             &messages,
             "s1",
-            Some(&overlay)
+            Some(&overlay),
+            false
         ));
     }
 
@@ -274,6 +295,30 @@ mod tests {
             tui_visible_ids(&messages),
             ["u", "p1", "a1"],
             "TUI still shows planner round for in-chat formatting"
+        );
+    }
+
+    #[test]
+    fn tui_hides_context_inject_unless_pref_on() {
+        let inject = msg(
+            "inj",
+            "system",
+            r#"{"kind":"context_inject","title":"inject"}"#,
+            false,
+        );
+        let messages = vec![
+            msg("u", "user", "q", false),
+            inject.clone(),
+            msg("a1", "assistant", "终答", false),
+        ];
+        assert_eq!(tui_visible_ids(&messages), ["u", "a1"]);
+        assert!(tui_should_render_message(
+            &inject, &messages, "s", None, true
+        ));
+        assert_eq!(
+            visible_message_indices_for_export(&messages).len(),
+            2,
+            "export always omits inject summaries"
         );
     }
 }
