@@ -6,7 +6,7 @@
 - 本仓桌面壳 `prepare-sidecar` 同步进 `desktop-tauri/dist`
 - Playwright E2E 用**客户端自托管**：纯 API `serve` + 本仓 `crabmate-web` 回环托管（`./scripts/e2e-playwright.sh`；不依赖 `serve --with-web`，跨 Origin 靠 `CM_WEB_CORS_ALLOWED_ORIGINS` 放行）
 
-契约 crate 钉 crates.io **`crabmate` 0.4.0** + `protocol`，禁止 `path` 回本地 `crabmate_agent`（见 [`../docs/design/contract_pin.md`](../docs/design/contract_pin.md)）。
+契约 crate 钉 crates.io **`crabmate` 0.5.0** + `protocol`，禁止 `path` 回本地 `crabmate_agent`（见 [`../docs/design/contract_pin.md`](../docs/design/contract_pin.md)）。
 
 ## 依赖
 

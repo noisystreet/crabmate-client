@@ -20,7 +20,7 @@ fi
 if [[ -n "${hits}" ]]; then
   echo "error: 发现 path 依赖回 Server monorepo（禁止）：" >&2
   echo "${hits}" >&2
-  echo "契约请钉 crates.io crabmate 0.4.0 + protocol；connect 仅用本仓 path。" >&2
+  echo "契约请钉 crates.io crabmate 0.5.0 + protocol；connect 仅用本仓 path。" >&2
   exit 1
 fi
 

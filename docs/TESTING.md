@@ -105,7 +105,7 @@ make frontend
 # 或指定用例：./scripts/e2e-playwright.sh specs/mock-overlay-timing.spec.ts
 ```
 
-`serve` 解析顺序：`CRABMATE_BIN` → `PATH` 的 `crabmate` → 同级 Server `target/{debug,release}/crabmate` → 同级仓 `cargo run`。正式 CI checkout `noisystreet/CrabMate` 钉 git tag **`v0.4.0`**（与 crates.io `crabmate` 0.4.0 同源；见 [`contract_pin.md`](design/contract_pin.md)）。
+`serve` 解析顺序：`CRABMATE_BIN` → `PATH` 的 `crabmate` → 同级 Server `target/{debug,release}/crabmate` → 同级仓 `cargo run`。正式 CI checkout `noisystreet/CrabMate` 钉 git tag **`v0.5.0`**（与 crates.io `crabmate` 0.5.0 同源；见 [`contract_pin.md`](design/contract_pin.md)）。
 
 **UI 托管**：Server 默认纯 API（脚本/CI **不传 `--with-web`**）；SPA 由客户端自托管 `crabmate-web`（本仓 `crates/crabmate-web-host`，默认 `127.0.0.1:4173`，`--api-base` 指向纯 API serve）。页面经 `#cm_api_base=` hash 交接把 API 指向 serve；serve 须经 `CM_WEB_CORS_ALLOWED_ORIGINS` 放行 web Origin（脚本自动追加 `http://127.0.0.1:$CRABMATE_WEB_PORT`）。跨 Origin 直连 API 与 `crabmate-web --api-base` 的真实使用路径一致。
 
