@@ -1425,6 +1425,9 @@ html[lang="zh-CN"] .md-code-block__copy-zh {
   /* 与底层镜像层一致：避免多行在部分引擎下继承错误 bidi/对齐，出现「首行左、续行右」 */
   text-align: left;
   direction: ltr;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .composer-input-stack .composer-input-highlight {

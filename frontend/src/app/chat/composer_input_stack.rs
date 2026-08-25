@@ -28,12 +28,19 @@ pub(crate) fn autosize_composer_textarea(ta: &HtmlTextAreaElement) {
     }
 }
 
-fn composer_on_input(ev: web_sys::Event, draft: RwSignal<String>) {
+fn composer_on_input(
+    ev: web_sys::Event,
+    draft: RwSignal<String>,
+    composer_mirror_scroll_top: RwSignal<f64>,
+) {
     let v = event_target_value(&ev);
     if let Some(t) = ev.target()
         && let Ok(ta) = t.dyn_into::<HtmlTextAreaElement>()
     {
         autosize_composer_textarea(&ta);
+        // Android WebView 不保证内容增长引起的 scrollTop 变化会派发 scroll；
+        // 每次输入后直接读取，避免透明 textarea 的 caret 与可见镜像层错位。
+        composer_mirror_scroll_top.set(ta.scroll_top() as f64);
     }
     draft.set(v);
 }
@@ -132,7 +139,9 @@ pub fn ComposerInputStack(
                 prop:aria-label=move || i18n::composer_ph(locale.get())
                 prop:aria-expanded=move || menu_open.get()
                 node_ref=composer_input_ref
-                on:input=move |ev| composer_on_input(ev, draft)
+                on:input=move |ev| {
+                    composer_on_input(ev, draft, composer_mirror_scroll_top)
+                }
                 on:focus=move |ev: web_sys::FocusEvent| composer_on_focus(ev)
                 on:keydown={
                     let r = Arc::clone(&run_send_message);

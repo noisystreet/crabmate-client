@@ -149,7 +149,6 @@ pub(crate) fn wire_draft_sync_to_mirror_and_textarea(
         move |_| {
             let d = draft_for_stale.get();
             composer_mirror_html.set(composer_workspace_at_refs_html(&d));
-            composer_mirror_scroll_top.set(0.0);
             let d_for_dom = d.clone();
             let cref = composer_input_ref.clone();
             spawn_local(async move {
@@ -161,6 +160,7 @@ pub(crate) fn wire_draft_sync_to_mirror_and_textarea(
                     return;
                 };
                 if el.value() == d_for_dom {
+                    composer_mirror_scroll_top.set(el.scroll_top() as f64);
                     return;
                 }
                 TimeoutFuture::new(1).await;
@@ -171,10 +171,12 @@ pub(crate) fn wire_draft_sync_to_mirror_and_textarea(
                     return;
                 };
                 if el.value() == d_for_dom {
+                    composer_mirror_scroll_top.set(el.scroll_top() as f64);
                     return;
                 }
                 sync_textarea_dom_from_draft_if_still_stale(&el, &d_for_dom);
                 autosize_composer_textarea(&el);
+                composer_mirror_scroll_top.set(el.scroll_top() as f64);
             });
         }
     });

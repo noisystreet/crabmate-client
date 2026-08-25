@@ -1082,10 +1082,12 @@ img[data-cm-ws-hydrated="1"] {
 
 .app-shell-ds .composer-input-stack .composer-input-fake-ph {
   padding: 8px 4px;
+  line-height: 1.35;
 }
 
 .app-shell-ds .composer-input-stack .composer-input-highlight-inner {
   padding: 8px 4px;
+  line-height: 1.35;
   text-align: left;
   direction: ltr;
 }
