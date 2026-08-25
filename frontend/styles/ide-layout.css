@@ -347,6 +347,14 @@
   text-align: center;
 }
 
+/* 新建文件模态：非法路径错误提示 */
+.ide-new-file-error {
+  margin: var(--space-2) 0 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--danger, var(--error, #c98c9b));
+}
+
 .ide-confirm-modal .modal-footer.actions {
   display: flex;
   flex-wrap: wrap;

@@ -25,6 +25,25 @@ pub struct IdeNewFileModalInput {
 fn close_new_file_modal(chrome: IdeChromeSignals) {
     chrome.new_file_modal_open.set(false);
     chrome.new_file_path_draft.set(String::new());
+    chrome.new_file_error.set(None);
+}
+
+/// 新建文件相对路径校验：非空、无空白、无 `..` 越界段、无前导 `/` 或 `\`。
+fn new_file_rel_valid(rel: &str) -> bool {
+    let t = rel.trim();
+    if t.is_empty() || t != rel {
+        return false;
+    }
+    if rel.chars().any(|c| c.is_whitespace()) {
+        return false;
+    }
+    if rel.starts_with('/') || rel.contains('\\') {
+        return false;
+    }
+    if rel.split('/').any(|seg| seg.is_empty() || seg == "..") {
+        return false;
+    }
+    true
 }
 
 fn submit_new_file(input: IdeNewFileModalInput) {
@@ -34,9 +53,13 @@ fn submit_new_file(input: IdeNewFileModalInput) {
         .get_untracked()
         .trim()
         .to_string();
-    if rel.is_empty() || rel.chars().any(|c| c.is_whitespace()) {
+    if !new_file_rel_valid(&rel) {
+        input.chrome.new_file_error.set(Some(
+            i18n::ide_new_file_invalid_path(input.locale.get_untracked()).to_string(),
+        ));
         return;
     }
+    input.chrome.new_file_error.set(None);
     close_new_file_modal(input.chrome);
     let parent = workspace_parent_rel(rel.as_str());
     let refresh =
@@ -90,11 +113,19 @@ fn IdeNewFileModalPanel(input: IdeNewFileModalInput) -> impl IntoView {
                     data-testid="ide-new-file-path-input"
                     prop:placeholder=move || i18n::ide_new_file_placeholder(locale.get())
                     prop:value=move || chrome.new_file_path_draft.get()
-                    on:input=move |ev| chrome.new_file_path_draft.set(event_target_value(&ev))
+                    on:input=move |ev| {
+                        chrome.new_file_path_draft.set(event_target_value(&ev));
+                        chrome.new_file_error.set(None);
+                    }
                     on:keydown=move |ev: web_sys::KeyboardEvent| {
                         on_new_file_path_keydown(ev, input);
                     }
                 />
+                <Show when=move || chrome.new_file_error.get().is_some()>
+                    <p class="ide-new-file-error" role="alert" data-testid="ide-new-file-error">
+                        {move || chrome.new_file_error.get().unwrap_or_default()}
+                    </p>
+                </Show>
             </div>
             <div class="modal-footer actions">
                 <button

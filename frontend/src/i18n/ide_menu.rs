@@ -162,6 +162,16 @@ pub fn ide_new_file_prompt(l: Locale) -> &'static str {
     }
 }
 
+/// 新建文件路径非法：空 / 含空白 / 含 `..` 越界、前导 `/` 或 `\`。
+pub fn ide_new_file_invalid_path(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "路径不能为空，且不能含空白、`..`、前导 `/` 或 `\\`",
+        Locale::En => {
+            "Path must be non-empty and must not contain whitespace, `..`, a leading `/`, or `\\`"
+        }
+    }
+}
+
 pub fn ide_disk_reload_confirm(l: Locale) -> &'static str {
     match l {
         Locale::ZhHans => "磁盘上的文件已被外部修改。重载将丢弃当前未保存的编辑，是否继续？",

@@ -31,6 +31,7 @@ use super::app_shell_effects::{
     wire_sync_theme_to_storage_and_dom, wire_visual_viewport_keyboard_inset,
 };
 use super::app_signals::AppSignals;
+use super::approval_modal::ApprovalModalSignals;
 use super::chat::ChatComposerWires;
 use super::chat::{
     ComposerStreamShell,
@@ -195,8 +196,12 @@ fn wire_phase3_escape_layered_dismiss(app: &AppSignals) {
         settings_page: app.modal.settings_page,
         ide_settings_page: app.modal.ide_settings_page,
         session_modal: app.modal.session_modal,
-        pending_approval: app.approval.pending_approval,
-        locale: app.shell_ui.locale,
+        approval: ApprovalModalSignals {
+            pending_approval: app.approval.pending_approval,
+            busy: app.approval.approval_busy,
+            error: app.approval.approval_error,
+            locale: app.shell_ui.locale,
+        },
     };
     wire_escape_key_layered_dismiss(shell_escape);
     wire_session_delete_hotkey(SessionDeleteHotkeySignals {

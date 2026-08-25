@@ -5,9 +5,8 @@ use leptos_dom::helpers::window_event_listener;
 use wasm_bindgen::JsCast;
 
 use crate::app::app_signals::IdeChromeSignals;
-use crate::app::approval_modal::deny_pending_approval;
+use crate::app::approval_modal::{ApprovalModalSignals, deny_pending_approval};
 use crate::app::settings_page::navigate_to_chat;
-use crate::i18n::Locale;
 use crate::ide_confirm::{IdeConfirmSignals, dismiss_ide_confirm};
 use crate::session_ops::SessionContextAnchor;
 
@@ -37,8 +36,7 @@ pub struct ShellEscapeSignals {
     pub ide_settings_page: RwSignal<bool>,
     pub session_modal: RwSignal<bool>,
     /// 命令审批弹窗：Escape 提交 `deny`（即使焦点在按钮上）。
-    pub pending_approval: RwSignal<Option<(String, String, String)>>,
-    pub locale: RwSignal<Locale>,
+    pub approval: ApprovalModalSignals,
 }
 
 /// 焦点在可编辑控件上时不应触发全局快捷键（与 [`super::session_delete_hotkey`] 共用）。
@@ -63,12 +61,13 @@ pub(crate) fn keyboard_event_target_is_text_entry(ev: &web_sys::KeyboardEvent) -
 fn close_ide_new_file_modal(chrome: IdeChromeSignals) {
     chrome.new_file_modal_open.set(false);
     chrome.new_file_path_draft.set(String::new());
+    chrome.new_file_error.set(None);
 }
 
 /// 阻塞对话框：即使焦点在输入框里，Escape 也关闭（审批视为拒绝）。
 fn dismiss_blocking_dialog_escape(shell: ShellEscapeSignals) -> bool {
-    if shell.pending_approval.get_untracked().is_some() {
-        deny_pending_approval(shell.pending_approval, shell.locale);
+    if shell.approval.pending_approval.get_untracked().is_some() {
+        deny_pending_approval(shell.approval);
         return true;
     }
     if shell.shell_confirm.pending.get_untracked().is_some() {
@@ -159,11 +158,16 @@ fn dismiss_modal_escape_layers(shell: ShellEscapeSignals) -> bool {
         return true;
     }
     if shell.settings_modal.get_untracked() {
-        shell.settings_modal.set(false);
+        // 脏表单先确认「放弃未保存更改」，未注册处理器时回退为直接关闭。
+        if !crate::app::settings_close_guard::request_settings_modal_close() {
+            shell.settings_modal.set(false);
+        }
         return true;
     }
     if shell.settings_page.get_untracked() {
-        navigate_to_chat(shell.settings_page);
+        if !crate::app::settings_close_guard::request_settings_page_close() {
+            navigate_to_chat(shell.settings_page);
+        }
         return true;
     }
     if shell.ide_settings_page.get_untracked() {

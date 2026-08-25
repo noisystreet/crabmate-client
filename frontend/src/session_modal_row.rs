@@ -1,6 +1,7 @@
 //! 「管理会话」模态框中的单行。
 
 use leptos::prelude::*;
+use leptos_dom::helpers::event_target_value;
 
 use crate::chat_session_state::ChatSessionSignals;
 use crate::i18n::{self, Locale};
@@ -50,27 +51,14 @@ fn session_pin_action_title(loc: Locale, pinned: bool) -> &'static str {
     }
 }
 
-fn apply_session_rename_from_prompt(
+fn commit_session_rename(
     sessions: RwSignal<Vec<crate::storage::ChatSession>>,
     session_id: &str,
-    loc: Locale,
+    editing: RwSignal<bool>,
+    rename_draft: RwSignal<String>,
 ) {
-    let default_title = sessions.with(|list| {
-        list.iter()
-            .find(|s| s.id == session_id)
-            .map(|s| s.title.clone())
-            .unwrap_or_default()
-    });
-    let Some(w) = web_sys::window() else {
-        return;
-    };
-    let raw = match w
-        .prompt_with_message_and_default(i18n::session_prompt_title_label(loc), &default_title)
-    {
-        Ok(Some(s)) => s,
-        Ok(None) | Err(_) => return,
-    };
-    let t = raw.trim().to_string();
+    let t = rename_draft.get_untracked().trim().to_string();
+    editing.set(false);
     if t.is_empty() {
         return;
     }
@@ -83,7 +71,66 @@ fn apply_session_rename_from_prompt(
 }
 
 #[component]
-fn SessionModalRowOpenButton(bundle: SessionModalRowBundle) -> impl IntoView {
+fn SessionModalRowRenameForm(
+    chat: ChatSessionSignals,
+    session_id: String,
+    locale: RwSignal<Locale>,
+    editing: RwSignal<bool>,
+    rename_draft: RwSignal<String>,
+) -> impl IntoView {
+    let id_input = session_id.clone();
+    view! {
+        <div class="session-row-rename">
+            <input
+                type="text"
+                class="settings-field-input session-row-rename-input"
+                data-testid=format!("session-modal-rename-input-{id_input}")
+                prop:placeholder=move || i18n::session_prompt_title_label(locale.get())
+                prop:value=move || rename_draft.get()
+                on:input=move |ev| rename_draft.set(event_target_value(&ev))
+                on:keydown={
+                    let id = session_id.clone();
+                    move |ev: web_sys::KeyboardEvent| {
+                        if ev.key() == "Enter" {
+                            ev.prevent_default();
+                            commit_session_rename(chat.sessions, &id, editing, rename_draft);
+                        } else if ev.key() == "Escape" {
+                            ev.prevent_default();
+                            editing.set(false);
+                        }
+                    }
+                }
+            />
+            <button
+                type="button"
+                class="btn btn-primary btn-sm"
+                data-testid=format!("session-modal-rename-ok-{}", session_id)
+                on:click={
+                    let id = session_id.clone();
+                    move |_| {
+                        commit_session_rename(chat.sessions, &id, editing, rename_draft);
+                    }
+                }
+            >
+                {move || i18n::session_rename_confirm(locale.get())}
+            </button>
+            <button
+                type="button"
+                class="btn btn-ghost btn-sm"
+                on:click=move |_| editing.set(false)
+            >
+                {move || i18n::ide_confirm_cancel(locale.get())}
+            </button>
+        </div>
+    }
+}
+
+#[component]
+fn SessionModalRowOpenButton(
+    bundle: SessionModalRowBundle,
+    editing: RwSignal<bool>,
+    rename_draft: RwSignal<String>,
+) -> impl IntoView {
     let SessionModalRowBundle {
         id,
         title,
@@ -95,30 +142,48 @@ fn SessionModalRowOpenButton(bundle: SessionModalRowBundle) -> impl IntoView {
         active,
         ..
     } = bundle;
+    let id_open = id.clone();
+    let id_rename = id.clone();
     view! {
-        <button
-            type="button"
-            class="session-open"
-            data-testid=format!("session-modal-open-{id}")
-            prop:aria-current=move || crate::a11y::aria_current_true_or_false(active)
-            on:click={
-                let id = id.clone();
-                move |_| {
-                    switch_active_session_after_composer_flush(chat, draft, &id, true);
-                    session_modal.set(false);
+        <Show when=move || !editing.get()>
+            <button
+                type="button"
+                class="session-open"
+                data-testid=format!("session-modal-open-{id_open}")
+                prop:aria-current=move || crate::a11y::aria_current_true_or_false(active)
+                on:click={
+                    let id = id_open.clone();
+                    move |_| {
+                        switch_active_session_after_composer_flush(chat, draft, &id, true);
+                        session_modal.set(false);
+                    }
                 }
-            }
-        >
-            <span class="session-title">
-                {move || i18n::session_title_for_display(&title, locale.get())}
-            </span>
-            <span class="session-meta">{move || i18n::session_row_msg_count(locale.get(), message_count)}</span>
-        </button>
+            >
+                <span class="session-title">
+                    {let t = title.clone();
+                        move || i18n::session_title_for_display(&t, locale.get())}
+                </span>
+                <span class="session-meta">{move || i18n::session_row_msg_count(locale.get(), message_count)}</span>
+            </button>
+        </Show>
+        <Show when=move || editing.get()>
+            <SessionModalRowRenameForm
+                chat=chat
+                session_id=id_rename.clone()
+                locale=locale
+                editing
+                rename_draft=rename_draft
+            />
+        </Show>
     }
 }
 
 #[component]
-fn SessionModalRowActions(bundle: SessionModalRowBundle) -> impl IntoView {
+fn SessionModalRowActions(
+    bundle: SessionModalRowBundle,
+    editing: RwSignal<bool>,
+    rename_draft: RwSignal<String>,
+) -> impl IntoView {
     let SessionModalRowBundle {
         id,
         pinned,
@@ -173,7 +238,15 @@ fn SessionModalRowActions(bundle: SessionModalRowBundle) -> impl IntoView {
                     let sessions = chat.sessions;
                     let id = id_rename.clone();
                     move |_| {
-                        apply_session_rename_from_prompt(sessions, &id, locale.get_untracked());
+                        let cur = sessions
+                            .with(|list| {
+                                list.iter()
+                                    .find(|s| s.id == id)
+                                    .map(|s| s.title.clone())
+                                    .unwrap_or_default()
+                            });
+                        rename_draft.set(cur);
+                        editing.set(true);
                     }
                 }
             >
@@ -251,10 +324,12 @@ fn SessionModalRowActions(bundle: SessionModalRowBundle) -> impl IntoView {
 pub fn SessionModalRow(row: SessionModalRowBundle) -> impl IntoView {
     let row_open = row.clone();
     let row_actions = row.clone();
+    let editing = RwSignal::new(false);
+    let rename_draft = RwSignal::new(String::new());
     view! {
         <div class=session_row_outer_class(row.active)>
-            <SessionModalRowOpenButton bundle=row_open />
-            <SessionModalRowActions bundle=row_actions />
+            <SessionModalRowOpenButton bundle=row_open editing rename_draft=rename_draft />
+            <SessionModalRowActions bundle=row_actions editing rename_draft=rename_draft />
         </div>
     }
 }

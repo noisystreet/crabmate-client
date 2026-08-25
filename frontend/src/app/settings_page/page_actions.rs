@@ -67,6 +67,8 @@ pub(crate) fn discard_to_baselines(ctx: DiscardToBaselinesCtx) {
 #[derive(Clone, Copy)]
 pub(crate) struct SaveAllSettingsCtx {
     pub dirty: Memo<bool>,
+    /// 保存进行中：防止并发重复提交，并驱动「保存中」禁用态。
+    pub save_busy: RwSignal<bool>,
     pub appearance_locale: RwSignal<Locale>,
     pub locale: RwSignal<Locale>,
     pub theme: RwSignal<String>,
@@ -82,6 +84,7 @@ pub(crate) struct SaveAllSettingsCtx {
 pub(crate) fn try_save_all_settings(ctx: SaveAllSettingsCtx) {
     let SaveAllSettingsCtx {
         dirty,
+        save_busy,
         appearance_locale,
         locale,
         theme,
@@ -94,6 +97,9 @@ pub(crate) fn try_save_all_settings(ctx: SaveAllSettingsCtx) {
         mcp,
     } = ctx;
 
+    if save_busy.get_untracked() {
+        return;
+    }
     llm_settings_feedback.set(None);
     executor_llm_settings_feedback.set(None);
     if !dirty.get() {
@@ -124,6 +130,7 @@ pub(crate) fn try_save_all_settings(ctx: SaveAllSettingsCtx) {
         let clear_client = drafts.clear_client_key_intent.get();
         let clear_executor = drafts.clear_executor_key_intent.get();
         let saved_presets_owned = drafts.saved_model_presets.get();
+        save_busy.set(true);
         leptos::task::spawn_local(async move {
             let result = commit_all_settings(CommitAllSettingsInput {
                 ui_locale,
@@ -175,6 +182,7 @@ pub(crate) fn try_save_all_settings(ctx: SaveAllSettingsCtx) {
                     llm_settings_feedback.set(Some(e));
                 }
             }
+            save_busy.set(false);
         });
         return;
     }

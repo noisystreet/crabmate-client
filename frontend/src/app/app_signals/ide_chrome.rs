@@ -16,6 +16,8 @@ pub struct IdeChromeSignals {
     pub confirm_result: RwSignal<Option<IdeConfirmResult>>,
     pub new_file_modal_open: RwSignal<bool>,
     pub new_file_path_draft: RwSignal<String>,
+    /// 新建文件路径非法时在模态内回显的错误（输入变化 / 关闭时清除）。
+    pub new_file_error: RwSignal<Option<String>>,
 }
 
 impl IdeChromeSignals {
@@ -31,6 +33,7 @@ impl IdeChromeSignals {
             confirm_result: RwSignal::new(None),
             new_file_modal_open: RwSignal::new(false),
             new_file_path_draft: RwSignal::new(String::new()),
+            new_file_error: RwSignal::new(None),
         }
     }
 

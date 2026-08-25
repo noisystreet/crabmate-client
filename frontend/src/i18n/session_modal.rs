@@ -47,6 +47,14 @@ pub fn session_prompt_title_label(l: Locale) -> &'static str {
     }
 }
 
+/// 内联重命名确认按钮（替代不可靠的 `window.prompt`）。
+pub fn session_rename_confirm(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "重命名",
+        Locale::En => "Rename",
+    }
+}
+
 pub fn session_row_export_json_title(l: Locale) -> &'static str {
     match l {
         Locale::ZhHans => "导出 JSON（display 投影；非 tool-replay）",
