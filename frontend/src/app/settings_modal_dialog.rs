@@ -26,8 +26,10 @@ pub struct SettingsModalDialogInput {
     pub appearance_bg_decor: RwSignal<bool>,
     pub show_turn_context_inject: RwSignal<bool>,
     pub dirty: Memo<bool>,
+    /// 显式「放弃更改」：不关闭弹窗，仅把草稿恢复到已提交 baseline。
     pub discard: Arc<dyn Fn() + Send + Sync>,
-    pub close_modal: Arc<dyn Fn() + Send + Sync>,
+    /// 「保存全部」进行中：禁用保存按钮，防止并发重复提交。
+    pub save_busy: RwSignal<bool>,
     pub save_all: Arc<dyn Fn() + Send + Sync>,
     pub llm_settings_feedback: RwSignal<Option<String>>,
     pub llm_api_base_draft: RwSignal<String>,
@@ -57,7 +59,7 @@ fn SettingsModalDialogHead(
     appearance_locale: RwSignal<Locale>,
     dirty: Memo<bool>,
     discard: Arc<dyn Fn() + Send + Sync>,
-    close_modal: Arc<dyn Fn() + Send + Sync>,
+    save_busy: RwSignal<bool>,
     save_all: Arc<dyn Fn() + Send + Sync>,
 ) -> impl IntoView {
     view! {
@@ -74,22 +76,24 @@ fn SettingsModalDialogHead(
             }>
                 {move || i18n::settings_discard_changes(appearance_locale.get())}
             </button>
-            <button type="button" class="btn btn-primary btn-sm" prop:disabled=move || !dirty.get() on:click={
-                let save_all = save_all.clone();
-                move |_| save_all()
-            }>
+            <button
+                type="button"
+                class="btn btn-primary btn-sm"
+                prop:disabled=move || !dirty.get() || save_busy.get()
+                on:click={
+                    let save_all = save_all.clone();
+                    move |_| save_all()
+                }
+            >
                 {move || i18n::settings_save_all(appearance_locale.get())}
             </button>
-            <button type="button" class="btn btn-ghost btn-sm" on:click={
-                let discard = discard.clone();
-                let close_modal = close_modal.clone();
-                move |_| {
-                    if dirty.get() {
-                        discard();
-                    }
-                    close_modal();
+            <button
+                type="button"
+                class="btn btn-ghost btn-sm"
+                on:click=move |_| {
+                    crate::app::settings_close_guard::request_settings_modal_close();
                 }
-            }>
+            >
                 {move || i18n::settings_close(appearance_locale.get())}
             </button>
         </div>
@@ -223,23 +227,20 @@ pub fn settings_modal_dialog(input: SettingsModalDialogInput) -> impl IntoView {
         appearance_locale,
         dirty,
         discard,
-        close_modal,
+        save_busy,
         save_all,
         ..
     } = input;
 
     view! {
         <Show when=move || settings_modal.get()>
-            <div class="modal-backdrop" on:click={
-                let discard = discard.clone();
-                let close_modal = close_modal.clone();
-                move |_| {
-                    if dirty.get() {
-                        discard();
-                    }
-                    close_modal();
+            <div
+                class="modal-backdrop"
+                on:click=move |_| {
+                    // 脏表单先确认「放弃未保存更改」，避免静默丢弃整份草稿。
+                    crate::app::settings_close_guard::request_settings_modal_close();
                 }
-            }>
+            >
                 <div
                     class="modal"
                     node_ref=settings_dialog_ref
@@ -260,7 +261,7 @@ pub fn settings_modal_dialog(input: SettingsModalDialogInput) -> impl IntoView {
                         appearance_locale
                         dirty
                         discard=discard.clone()
-                        close_modal=close_modal.clone()
+                        save_busy
                         save_all=save_all.clone()
                     />
                     <SettingsModalDialogBody input=body_input.clone() />

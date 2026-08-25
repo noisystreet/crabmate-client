@@ -257,20 +257,17 @@ pub fn format_fetch_transport_error(e: &wasm_bindgen::JsValue) -> String {
         })
         .unwrap_or_else(|| format!("{e:?}"));
     let base = api_base_url();
-    let mut msg = format!("fetch 失败: {detail}");
+    let loc = crate::i18n::load_locale_from_storage();
+    let mut msg = crate::i18n::api_err_transport_fetch_failed(loc, &detail);
     if base.is_empty() {
-        msg.push_str(
-            "。当前无 API 基址（相对路径会打到 tauri.localhost）。请从连接页重新连接，确认 hash 含 cm_api_base。",
-        );
+        msg.push_str(crate::i18n::api_err_transport_no_base_hint(loc));
     } else {
         let lower = detail.to_ascii_lowercase();
         if lower.contains("load failed")
             || lower.contains("failed to fetch")
             || lower.contains("networkerror")
         {
-            msg.push_str(&format!(
-                "。请确认 serve 可达（基址 {base}），且 CORS 放行 Linux WebView Origin `tauri://localhost`（及 `http://tauri.localhost`）；当前 Server 默认已含二者——若你显式清空了 CM_WEB_CORS_ALLOWED_ORIGINS 请 unset；勿用 0.0.0.0 作连接地址。"
-            ));
+            msg.push_str(&crate::i18n::api_err_transport_unreachable_hint(loc, &base));
         }
     }
     msg

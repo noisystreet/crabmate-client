@@ -29,6 +29,7 @@ mod layout_mode_segment;
 mod mobile_shell_header;
 mod session_list_modal;
 pub(crate) mod session_mode_defaults;
+mod settings_close_guard;
 mod settings_commit;
 mod settings_form_state;
 mod settings_github_block;

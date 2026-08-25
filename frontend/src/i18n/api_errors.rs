@@ -212,6 +212,39 @@ pub fn api_err_no_window(l: Locale) -> String {
     }
 }
 
+// --- fetch 传输错误（`format_fetch_transport_error`）---
+
+pub fn api_err_transport_fetch_failed(l: Locale, detail: &str) -> String {
+    match l {
+        Locale::ZhHans => format!("fetch 失败: {detail}"),
+        Locale::En => format!("fetch failed: {detail}"),
+    }
+}
+
+/// 无 API 基址（同 Origin 相对路径）时附加的指引。
+pub fn api_err_transport_no_base_hint(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => {
+            "。当前无 API 基址（相对路径会打到 tauri.localhost）。请从连接页重新连接，确认 hash 含 cm_api_base。"
+        }
+        Locale::En => {
+            ". No API base is set (relative paths resolve to tauri.localhost). Reconnect from the connect page and confirm the hash includes cm_api_base."
+        }
+    }
+}
+
+/// 常见「不可达 / CORS」错误串时的附加指引。
+pub fn api_err_transport_unreachable_hint(l: Locale, base: &str) -> String {
+    match l {
+        Locale::ZhHans => format!(
+            "。请确认 serve 可达（基址 {base}），且 CORS 放行 Linux WebView Origin `tauri://localhost`（及 `http://tauri.localhost`）；当前 Server 默认已含二者——若你显式清空了 CM_WEB_CORS_ALLOWED_ORIGINS 请 unset；勿用 0.0.0.0 作连接地址。"
+        ),
+        Locale::En => format!(
+            ". Please confirm serve is reachable (base {base}) and CORS allows the Linux WebView origin `tauri://localhost` (and `http://tauri.localhost`); the Server includes both by default — if you explicitly cleared CM_WEB_CORS_ALLOWED_ORIGINS, unset it; do not use 0.0.0.0 as the connect address."
+        ),
+    }
+}
+
 pub fn api_err_response_type(l: Locale) -> &'static str {
     match l {
         Locale::ZhHans => "响应类型错误",

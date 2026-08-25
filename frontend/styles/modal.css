@@ -865,6 +865,21 @@
   background: color-mix(in srgb, var(--accent-dim) 55%, var(--bg));
 }
 
+/* 「管理会话」行内重命名（替代不可靠的 window.prompt） */
+.session-row-rename {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 14px;
+  min-width: 0;
+}
+
+.session-row-rename-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .hidden-input {
   display: none;
 }

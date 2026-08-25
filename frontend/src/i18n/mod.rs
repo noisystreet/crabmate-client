@@ -41,7 +41,7 @@ pub use ide_editor::*;
 pub use ide_layout::*;
 pub use ide_menu::*;
 pub use ide_settings::*;
-pub use locale_storage::{Locale, load_locale_from_storage, store_locale_slug};
+pub use locale_storage::{Locale, load_locale_from_storage, set_current_locale, store_locale_slug};
 pub use messages::*;
 pub use session_modal::*;
 pub use settings::*;

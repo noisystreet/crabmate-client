@@ -10,6 +10,7 @@ use crate::i18n::{self, Locale};
 pub(super) fn SettingsPageHeader(
     appearance_locale: RwSignal<Locale>,
     dirty: Memo<bool>,
+    save_busy: RwSignal<bool>,
     on_back: Rc<dyn Fn()>,
     on_discard: Rc<dyn Fn()>,
     on_save: Rc<dyn Fn()>,
@@ -55,7 +56,7 @@ pub(super) fn SettingsPageHeader(
                     type="button"
                     class="btn btn-primary btn-sm"
                     data-testid="settings-save-all"
-                    prop:disabled=move || !dirty.get()
+                    prop:disabled=move || !dirty.get() || save_busy.get()
                     on:click=move |_| on_save()
                 >
                     {move || i18n::settings_save_all(appearance_locale.get())}

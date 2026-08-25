@@ -111,10 +111,7 @@ impl MessageRowActionSignals {
                                 ChatBranchError::Conflict => {
                                     chat.session_sync.update(|s| s.mark_branch_conflict());
                                     status_err.set(Some(
-                                        crate::i18n::api_err_branch_failed(
-                                            crate::i18n::Locale::ZhHans,
-                                        )
-                                        .to_string(),
+                                        crate::i18n::api_err_branch_failed(loc).to_string(),
                                     ));
                                 }
                                 ChatBranchError::Other(_) => {
@@ -183,8 +180,7 @@ impl MessageRowActionSignals {
                             let err_display = match &e {
                                 ChatBranchError::NotFound => {
                                     chat.session_sync.update(|s| s.invalidate_conversation_id());
-                                    crate::i18n::api_err_branch_failed(crate::i18n::Locale::ZhHans)
-                                        .to_string()
+                                    crate::i18n::api_err_branch_failed(loc_b).to_string()
                                 }
                                 ChatBranchError::Conflict | ChatBranchError::Other(_) => {
                                     chat.session_sync.update(|s| s.mark_branch_conflict());

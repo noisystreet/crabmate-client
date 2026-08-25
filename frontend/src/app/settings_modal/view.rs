@@ -131,18 +131,13 @@ pub fn settings_modal_view(signals: SettingsModalSignals) -> impl IntoView {
     // 弹窗无 MCP 子页；占位态永不 dirty，仅满足「保存全部」共用路径。
     let mcp = McpSettingsPageState::new();
 
-    let close_modal = {
-        let settings_modal = settings_modal;
-        move || {
-            settings_modal.set(false);
-        }
-    };
-
+    let save_busy = RwSignal::new(false);
     let save_all = {
         let dirty = dirty;
         move || {
             try_save_all_settings(SaveAllSettingsCtx {
                 dirty,
+                save_busy,
                 appearance_locale,
                 locale,
                 theme,
@@ -158,8 +153,33 @@ pub fn settings_modal_view(signals: SettingsModalSignals) -> impl IntoView {
     };
 
     let discard_rc: Arc<dyn Fn() + Send + Sync> = discard_arc;
-    let close_modal_rc: Arc<dyn Fn() + Send + Sync> = Arc::new(close_modal);
     let save_all_rc: Arc<dyn Fn() + Send + Sync> = Arc::new(save_all);
+
+    // 关闭弹窗（X / 遮罩 / Escape）：脏表单先确认「放弃未保存更改」。
+    let close_modal_guarded: Arc<dyn Fn() + Send + Sync> = Arc::new({
+        let dirty = dirty;
+        let discard = discard_rc.clone();
+        let settings_modal = settings_modal;
+        let appearance_locale = appearance_locale;
+        move || {
+            if !dirty.get_untracked() {
+                settings_modal.set(false);
+                return;
+            }
+            let loc = appearance_locale.get_untracked();
+            let discard = discard.clone();
+            let settings_modal = settings_modal;
+            leptos::task::spawn_local(async move {
+                if crate::app::settings_close_guard::confirm_discard_unsaved(loc).await {
+                    discard();
+                    settings_modal.set(false);
+                }
+            });
+        }
+    });
+    crate::app::settings_close_guard::register_settings_modal_close_handler(Arc::clone(
+        &close_modal_guarded,
+    ));
 
     settings_modal_dialog(SettingsModalDialogInput {
         settings_modal,
@@ -170,7 +190,7 @@ pub fn settings_modal_view(signals: SettingsModalSignals) -> impl IntoView {
         show_turn_context_inject,
         dirty,
         discard: discard_rc,
-        close_modal: close_modal_rc,
+        save_busy,
         save_all: save_all_rc,
         llm_settings_feedback,
         llm_api_base_draft,

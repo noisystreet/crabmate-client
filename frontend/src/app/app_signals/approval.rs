@@ -12,6 +12,10 @@ pub struct ApprovalSignals {
     pub last_approval_sid: RwSignal<String>,
     pub pending_clarification: RwSignal<Option<PendingClarificationForm>>,
     pub thinking_trace_log: RwSignal<Vec<ThinkingTraceInfo>>,
+    /// 审批决定提交中：提交期间按钮禁用，避免连击重复请求。
+    pub approval_busy: RwSignal<bool>,
+    /// 审批决定提交失败（弹窗保留，允许重试）。
+    pub approval_error: RwSignal<Option<String>>,
 }
 
 impl ApprovalSignals {
@@ -22,6 +26,8 @@ impl ApprovalSignals {
             last_approval_sid: RwSignal::new(String::new()),
             pending_clarification: RwSignal::new(None),
             thinking_trace_log: RwSignal::new(Vec::new()),
+            approval_busy: RwSignal::new(false),
+            approval_error: RwSignal::new(None),
         }
     }
 }

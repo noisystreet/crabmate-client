@@ -44,6 +44,14 @@ pub fn settings_discard_changes(l: Locale) -> &'static str {
     }
 }
 
+/// 关闭设置页 / 弹窗（存在未保存更改）前的确认文案。
+pub fn settings_discard_unsaved_confirm(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "有未保存的更改。放弃更改并关闭？",
+        Locale::En => "Discard unsaved changes and close?",
+    }
+}
+
 pub fn settings_unsaved_badge(l: Locale) -> &'static str {
     match l {
         Locale::ZhHans => "未保存",

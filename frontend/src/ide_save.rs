@@ -80,6 +80,26 @@ pub fn spawn_save_active_tab(ctx: IdeSaveContext, locale: RwSignal<Locale>) {
     spawn_save_one(ctx, path, body, locale);
 }
 
+/// 将成功保存的标签写回 baseline（含活动标签编辑器缓冲）。
+fn apply_saved_tab_baselines(ctx: IdeSaveContext, saved_paths: &[String]) {
+    if saved_paths.is_empty() {
+        return;
+    }
+    ctx.tabs.tabs.update(|list| {
+        for tab in list.iter_mut() {
+            if saved_paths.contains(&tab.path) {
+                tab.baseline = tab.text.clone();
+            }
+        }
+    });
+    if let Some(i) = ctx.tabs.active.get_untracked()
+        && let Some(tab) = ctx.tabs.tabs.get_untracked().get(i)
+        && saved_paths.contains(&tab.path)
+    {
+        ctx.ide_baseline.set(tab.baseline.clone());
+    }
+}
+
 /// 保存全部未保存标签（含非活动标签缓冲）。
 pub fn spawn_save_all_dirty_tabs(ctx: IdeSaveContext, locale: RwSignal<Locale>) {
     if ctx.tabs.load_busy.get_untracked() || ctx.tabs.save_busy.get_untracked() {
@@ -89,7 +109,7 @@ pub fn spawn_save_all_dirty_tabs(ctx: IdeSaveContext, locale: RwSignal<Locale>) 
         .persist_editor_into_active(ctx.ide_text, ctx.ide_baseline);
 
     let active = ctx.tabs.active.get_untracked();
-    let mut jobs: Vec<(String, String)> = ctx
+    let jobs: Vec<(String, String)> = ctx
         .tabs
         .tabs
         .get_untracked()
@@ -117,25 +137,22 @@ pub fn spawn_save_all_dirty_tabs(ctx: IdeSaveContext, locale: RwSignal<Locale>) 
     spawn_local(async move {
         let loc = locale.get_untracked();
         let mut first_err: Option<String> = None;
-        for (path, content) in jobs.drain(..) {
-            if let Err(e) = save_path_content(path, content, true, loc).await {
-                first_err = Some(e);
-                break;
+        // 逐标签保存：失败不中断其余脏标签，仅记录首个错误；
+        // 成功标签单独更新 baseline，避免「一个失败导致全部脏标记残留」。
+        let mut saved_paths: Vec<String> = Vec::new();
+        for (path, content) in jobs {
+            match save_path_content(path.clone(), content, true, loc).await {
+                Ok(()) => saved_paths.push(path),
+                Err(e) => {
+                    if first_err.is_none() {
+                        first_err = Some(e);
+                    }
+                }
             }
         }
+        apply_saved_tab_baselines(ctx, &saved_paths);
         if let Some(e) = first_err {
             ctx.ide_err.set(Some(e));
-        } else {
-            ctx.tabs.tabs.update(|list| {
-                for tab in list.iter_mut() {
-                    tab.baseline = tab.text.clone();
-                }
-            });
-            if let Some(i) = ctx.tabs.active.get_untracked() {
-                if let Some(tab) = ctx.tabs.tabs.get_untracked().get(i) {
-                    ctx.ide_baseline.set(tab.baseline.clone());
-                }
-            }
         }
         ctx.tabs.save_busy.set(false);
     });

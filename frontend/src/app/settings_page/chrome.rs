@@ -4,6 +4,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use leptos::prelude::*;
+use leptos::task::spawn_local;
 
 use super::form_signals::SettingsPageFormSignals;
 use super::form_snapshot::{SettingsPageDraftSignals, form_current_tracked};
@@ -41,6 +42,26 @@ pub(crate) struct SettingsPageChromeCtx {
     pub status_data: RwSignal<Option<crate::api::StatusData>>,
     pub refresh_status: StoredValue<Arc<dyn Fn() + Send + Sync>>,
     pub mcp: McpSettingsPageState,
+}
+
+/// 关闭设置页：脏表单先确认「放弃未保存更改」，确认后放弃并离开；否则直接离开。
+fn close_settings_page_guarded(
+    settings_page: RwSignal<bool>,
+    dirty: Memo<bool>,
+    discard: Arc<dyn Fn() + Send + Sync>,
+    locale: RwSignal<Locale>,
+) {
+    if !dirty.get_untracked() {
+        navigate_to_chat(settings_page);
+        return;
+    }
+    let loc = locale.get_untracked();
+    spawn_local(async move {
+        if crate::app::settings_close_guard::confirm_discard_unsaved(loc).await {
+            discard();
+            navigate_to_chat(settings_page);
+        }
+    });
 }
 
 #[component]
@@ -102,7 +123,7 @@ pub(super) fn SettingsPageChrome(ctx: SettingsPageChromeCtx) -> impl IntoView {
         form_dirty || mcp.is_dirty_tracked()
     });
 
-    let discard_rc: Rc<dyn Fn()> = Rc::new(move || {
+    let discard_send: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
         discard_to_baselines(DiscardToBaselinesCtx {
             baselines,
             drafts,
@@ -111,12 +132,18 @@ pub(super) fn SettingsPageChrome(ctx: SettingsPageChromeCtx) -> impl IntoView {
         });
         mcp.discard_to_baseline();
     });
+    let discard_rc: Rc<dyn Fn()> = {
+        let discard_send = Arc::clone(&discard_send);
+        Rc::new(move || discard_send())
+    };
 
+    let save_busy = RwSignal::new(false);
     let save_rc: Rc<dyn Fn()> = {
         let dirty = dirty;
         Rc::new(move || {
             try_save_all_settings(SaveAllSettingsCtx {
                 dirty,
+                save_busy,
                 appearance_locale,
                 locale,
                 theme,
@@ -133,14 +160,34 @@ pub(super) fn SettingsPageChrome(ctx: SettingsPageChromeCtx) -> impl IntoView {
 
     let on_back: Rc<dyn Fn()> = {
         let dirty = dirty;
-        let discard_rc = Rc::clone(&discard_rc);
+        let discard_send = Arc::clone(&discard_send);
+        let settings_page = settings_page;
+        let appearance_locale = appearance_locale;
         Rc::new(move || {
-            if dirty.get() {
-                discard_rc();
-            }
-            navigate_to_chat(settings_page);
+            close_settings_page_guarded(
+                settings_page,
+                dirty,
+                Arc::clone(&discard_send),
+                appearance_locale,
+            );
         })
     };
+
+    // 全局 Escape 关闭设置页也走同一套「脏表单先确认」语义。
+    crate::app::settings_close_guard::register_settings_page_close_handler(Arc::new({
+        let dirty = dirty;
+        let discard_send = Arc::clone(&discard_send);
+        let settings_page = settings_page;
+        let appearance_locale = appearance_locale;
+        move || {
+            close_settings_page_guarded(
+                settings_page,
+                dirty,
+                Arc::clone(&discard_send),
+                appearance_locale,
+            );
+        }
+    }));
 
     view! {
         <div
@@ -151,6 +198,7 @@ pub(super) fn SettingsPageChrome(ctx: SettingsPageChromeCtx) -> impl IntoView {
             <SettingsPageHeader
                 appearance_locale=appearance_locale
                 dirty=dirty
+                save_busy=save_busy
                 on_back=on_back
                 on_discard=discard_rc
                 on_save=save_rc

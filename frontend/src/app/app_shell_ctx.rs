@@ -376,6 +376,8 @@ impl AppShellCtx {
     pub fn approval_modal_signals(&self) -> ApprovalModalSignals {
         ApprovalModalSignals {
             pending_approval: self.signals.approval.pending_approval,
+            busy: self.signals.approval.approval_busy,
+            error: self.signals.approval.approval_error,
             locale: self.signals.shell_ui.locale,
         }
     }

@@ -140,7 +140,9 @@ fn apply_shell_appearance_prefs(app: &AppSignals, dto: &UserPrefsDto) {
         app.shell_ui.show_turn_context_inject.set(b);
     }
     if let Some(ref loc) = dto.locale {
-        app.shell_ui.locale.set(Locale::from_storage_slug(loc));
+        let l = Locale::from_storage_slug(loc);
+        app.shell_ui.locale.set(l);
+        crate::i18n::set_current_locale(l);
     }
 }
 
