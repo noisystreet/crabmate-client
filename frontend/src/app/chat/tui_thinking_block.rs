@@ -8,6 +8,7 @@ use crate::storage::StoredMessage;
 use crate::stream_text_overlay::{
     StreamTextOverlay, message_think_answer_for_display_including_stream_overlay,
 };
+use wasm_bindgen::JsCast;
 
 use super::tui_line_markdown::ThinkBlock;
 
@@ -70,17 +71,45 @@ pub(super) fn update_think_section(
         return true;
     };
     if let Some(existing) = wrap.query_selector(".chat-tui-turn--think").ok().flatten() {
-        // 保留 section 属性（data-tui-msg-id 等），只替换正文容器内容。
-        match existing
-            .query_selector(".chat-tui-body--think")
+        // 定向更新而非整段重建：思考完成收起 / 手动展开时只翻转 open 属性，
+        // 避免 WebKit 下 set_inner_html 重建 <details> 造成的闪烁（消息块先消失再出现）。
+        let Some(details) = existing
+            .query_selector(".chat-tui-think")
             .ok()
             .flatten()
-        {
-            Some(body) => body.set_inner_html(&block.to_details_html()),
-            None => existing.set_inner_html(&format!(
+            .and_then(|n| n.dyn_into::<web_sys::HtmlElement>().ok())
+        else {
+            // DOM 结构异常（缺 details）→ 整段重建兜底。
+            existing.set_inner_html(&format!(
                 "<div class=\"chat-tui-body chat-tui-body--think\">{}</div>",
                 block.to_details_html()
-            )),
+            ));
+            return true;
+        };
+        if block.open {
+            let _ = details.set_attribute("open", "");
+        } else {
+            let _ = details.remove_attribute("open");
+        }
+        if let Some(summary) = details
+            .query_selector(".chat-tui-think-summary")
+            .ok()
+            .flatten()
+            .and_then(|n| n.dyn_into::<web_sys::Element>().ok())
+            && summary.outer_html() != block.summary_html
+        {
+            // summary 变化（如 i18n 切换）时按需同步，通常不发生。
+            summary.set_outer_html(&block.summary_html);
+        }
+        if let Some(body) = details
+            .query_selector(".chat-tui-think-body")
+            .ok()
+            .flatten()
+            .and_then(|n| n.dyn_into::<web_sys::HtmlElement>().ok())
+            && body.inner_html() != block.body_html
+        {
+            // 思考正文变化（刷新/重读）时按需更新；finalize 收起时通常与流式一致。
+            body.set_inner_html(&block.body_html);
         }
         return true;
     }

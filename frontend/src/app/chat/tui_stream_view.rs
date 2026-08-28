@@ -20,9 +20,8 @@ use super::scroll_shell::ChatScrollShellSignals;
 use super::session_hydrate::try_load_older_messages_for_active_session;
 use super::stream_follow_up_gates::user_edit_save_blocked;
 use super::tui_actions_bar::TuiTurnActionHandlers;
-use super::tui_line_markdown::{
-    TuiBodyPatch, open_active_block_class, open_block_is_fence_buffer, render_open_active_html,
-};
+use super::tui_body_dom::{apply_incremental_tail, find_answer_body, reconcile_answer_hidden};
+use super::tui_line_markdown::TuiBodyPatch;
 use super::tui_transcript_sync::{PlanTuiSyncArgs, TuiMountState, TuiSyncPlan, plan_tui_sync};
 use super::user_message_edit::{
     UserEditClick, mount_user_message_editor, try_handle_user_edit_click, try_sync_user_edit_draft,
@@ -99,50 +98,6 @@ fn plan_for_active_session(args: PlanActiveSessionArgs<'_>) -> TuiSyncPlan {
     }
 }
 
-fn ensure_open_block(body: &web_sys::HtmlElement) -> Option<web_sys::HtmlElement> {
-    if let Some(existing) = body
-        .query_selector(".chat-tui-line--plain, .chat-tui-line--active")
-        .ok()
-        .flatten()
-        .and_then(|n| n.dyn_into::<web_sys::HtmlElement>().ok())
-    {
-        return Some(existing);
-    }
-    let document = body.owner_document()?;
-    let block = document
-        .create_element("div")
-        .ok()?
-        .dyn_into::<web_sys::HtmlElement>()
-        .ok()?;
-    block.set_class_name("chat-tui-line chat-tui-line--active");
-    let _ = body.append_child(&block);
-    Some(block)
-}
-
-fn remove_open_block(body: &web_sys::HtmlElement) {
-    if let Some(block) = body
-        .query_selector(".chat-tui-line--plain, .chat-tui-line--active")
-        .ok()
-        .flatten()
-    {
-        block.remove();
-    }
-}
-
-fn apply_open_active_block(body: &web_sys::HtmlElement, text: &str, markdown_render: bool) -> bool {
-    let Some(block) = ensure_open_block(body) else {
-        return false;
-    };
-    block.set_class_name(open_active_block_class(text, markdown_render));
-    // 未闭合围栏：textContent 避免半截 HTML；关 MD / 行内增强走统一入口。
-    if markdown_render && open_block_is_fence_buffer(text) {
-        block.set_text_content(Some(text));
-    } else {
-        block.set_inner_html(&render_open_active_html(text, markdown_render));
-    }
-    true
-}
-
 fn apply_tool_row_patch(
     body: &web_sys::HtmlElement,
     status: &str,
@@ -198,30 +153,6 @@ fn apply_tool_row_patch(
     true
 }
 
-/// Incremental / ThinkBody 共用的「追加闭合块 + 更新活跃块」尾部应用。
-fn apply_incremental_tail(
-    body: &web_sys::HtmlElement,
-    append_closed: &[String],
-    open_plain: Option<&str>,
-    markdown_render: bool,
-) -> bool {
-    if !append_closed.is_empty() {
-        remove_open_block(body);
-        for chunk in append_closed {
-            if body.insert_adjacent_html("beforeend", chunk).is_err() {
-                return false;
-            }
-        }
-    }
-    match open_plain {
-        Some(text) => apply_open_active_block(body, text, markdown_render),
-        None => {
-            remove_open_block(body);
-            true
-        }
-    }
-}
-
 fn apply_body_patch(
     wrap: &web_sys::HtmlElement,
     patch: TuiBodyPatch,
@@ -236,23 +167,37 @@ fn apply_body_patch(
             let Some(body) = find_answer_body(wrap) else {
                 return false;
             };
-            revoke_workspace_image_blobs(&body);
-            body.set_inner_html(&chunks.answer_to_inner_html());
+            let answer_html = chunks.answer_to_inner_html();
+            // 内容相同时跳过整段重建（finalize 时正文与流式末帧一致），避免 WebKit 闪烁。
+            if body.inner_html() != answer_html {
+                revoke_workspace_image_blobs(&body);
+                body.set_inner_html(&answer_html);
+            }
+            reconcile_answer_hidden(wrap, answer_html.trim().is_empty());
             true
         }
         TuiBodyPatch::Incremental {
             append_closed,
             open_plain,
         } => {
+            if append_closed.is_empty() && open_plain.is_none() {
+                // 无正文增量：维持正文段现状（含 hidden 状态）。
+                return true;
+            }
             let Some(body) = find_answer_body(wrap) else {
                 return false;
             };
-            apply_incremental_tail(
+            let applied = apply_incremental_tail(
                 &body,
                 &append_closed,
                 open_plain.as_deref(),
                 markdown_render,
-            )
+            );
+            if applied {
+                // 增量路径正文只增不减：有增量即非空，解除隐藏（避免逐帧序列化 innerHTML）。
+                reconcile_answer_hidden(wrap, false);
+            }
+            applied
         }
         TuiBodyPatch::ThinkBody {
             body_html,
@@ -273,12 +218,21 @@ fn apply_body_patch(
             let Some(body) = find_answer_body(wrap) else {
                 return false;
             };
-            apply_incremental_tail(
+            if append_closed.is_empty() && open_plain.is_none() {
+                // 纯思考流式：正文尚未开始，维持隐藏状态（若有）。
+                return true;
+            }
+            let applied = apply_incremental_tail(
                 &body,
                 &append_closed,
                 open_plain.as_deref(),
                 markdown_render,
-            )
+            );
+            if applied {
+                // 同 Incremental：有正文增量即非空，解除隐藏。
+                reconcile_answer_hidden(wrap, false);
+            }
+            applied
         }
         TuiBodyPatch::ToolRow {
             status,
@@ -301,14 +255,6 @@ fn find_turn_wrap(
     let selector = format!(".chat-tui-turn-wrap[data-tui-wrap-id=\"{message_id}\"]");
     transcript
         .query_selector(&selector)
-        .ok()
-        .flatten()
-        .and_then(|n| n.dyn_into::<web_sys::HtmlElement>().ok())
-}
-
-/// 回合 wrap 内的**正文段** body（思考段独立成段后，增量/工具 patch 只作用于正文段）。
-fn find_answer_body(wrap: &web_sys::HtmlElement) -> Option<web_sys::HtmlElement> {
-    wrap.query_selector(".chat-tui-body--answer")
         .ok()
         .flatten()
         .and_then(|n| n.dyn_into::<web_sys::HtmlElement>().ok())

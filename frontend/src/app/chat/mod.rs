@@ -34,6 +34,7 @@ mod stream_follow_up_gates;
 mod stream_user_abort;
 mod stream_visibility_resume;
 mod tui_actions_bar;
+mod tui_body_dom;
 mod tui_line_markdown;
 mod tui_stream_view;
 mod tui_thinking_block;
