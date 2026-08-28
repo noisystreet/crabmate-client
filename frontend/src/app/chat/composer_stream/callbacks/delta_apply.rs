@@ -139,11 +139,18 @@ pub(super) fn apply_chat_stream_text_delta(
         return;
     }
 
-    if matches!(
-        lane,
-        StreamModelOutputLane::Reasoning | StreamModelOutputLane::AnsweringCommentaryBeforeTools
-    ) {
+    // 工具相后、终答门开前的旁注（真实 LLM 把已流出正文降级为旁注）。
+    if matches!(lane, StreamModelOutputLane::AnsweringCommentaryBeforeTools) {
         apply_commentary_lane_delta(stream_ctx, chunk);
+        return;
+    }
+
+    // 纯推理车道（正文相前）：直接写 overlay.reasoning，让思考折叠块实时流式；
+    // 不进入 canonical commentary（工具相前的推理本就不该当正文/旁注展示），
+    // 收尾时经 `stream_overlay_take_into_stored_message` 落盘 stored `reasoning_text`。
+    if matches!(lane, StreamModelOutputLane::Reasoning) {
+        let mid = stream_ctx.scratch.borrow_assistant_id();
+        stream_ctx.append_assistant_chunk(mid.as_str(), chunk, true);
         return;
     }
 
@@ -177,6 +184,27 @@ pub(super) fn chat_stream_on_delta_builder(
 #[cfg(test)]
 mod tests {
     use super::super::super::stream_turn_state::StreamModelOutputLane;
+
+    #[test]
+    fn reasoning_lane_routes_to_reasoning_overlay_not_commentary() {
+        // 正文相前的纯推理车道：不写终答、不进 commentary（避免思考延迟到收尾才显示），
+        // 应走 overlay.reasoning 让折叠块实时流式。
+        let lane = StreamModelOutputLane::Reasoning;
+        let post_tool = false;
+        let routed_to_post_tool =
+            post_tool && lane != StreamModelOutputLane::AnsweringCommentaryBeforeTools;
+        let routed_to_commentary =
+            matches!(lane, StreamModelOutputLane::AnsweringCommentaryBeforeTools);
+        assert!(
+            !routed_to_post_tool,
+            "reasoning must not enter post-tool path"
+        );
+        assert!(
+            !routed_to_commentary,
+            "reasoning must not enter commentary path"
+        );
+        assert_eq!(lane, StreamModelOutputLane::Reasoning);
+    }
 
     #[test]
     fn post_tool_lane_routes_to_commentary_while_tool_phase_open() {
