@@ -315,7 +315,7 @@ mod tests {
     #[test]
     fn no_inline_split_when_disabled() {
         let raw = concat!("<", "think", ">", "x", "</", "think", ">", "y",);
-        let (think, ans) = assistant_thinking_body_and_answer_raw("", raw, false);
+        let (think, ans) = assistant_thinking_body_and_answer_raw("", raw, false, false);
         assert!(think.is_empty());
         assert_eq!(ans, raw);
     }
@@ -470,7 +470,7 @@ mod tests {
             ">",
             "\n\n**Answer** tail.",
         );
-        let (think, ans) = assistant_thinking_body_and_answer_raw("", raw, true);
+        let (think, ans) = assistant_thinking_body_and_answer_raw("", raw, true, false);
         assert_eq!(think.trim(), "plan here");
         assert!(ans.contains("Answer"));
         assert!(!ans.contains("plan here"));
@@ -479,7 +479,7 @@ mod tests {
     #[test]
     fn stored_reasoning_text_wins_over_inline_tags() {
         let inline = concat!("`<", "think", ">`x`</", "think", ">`y");
-        let (think, ans) = assistant_thinking_body_and_answer_raw("from_sse", inline, true);
+        let (think, ans) = assistant_thinking_body_and_answer_raw("from_sse", inline, true, false);
         assert_eq!(think, "from_sse");
         assert_eq!(ans, inline);
     }

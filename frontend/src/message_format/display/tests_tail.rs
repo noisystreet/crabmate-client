@@ -327,3 +327,87 @@ fn think_answer_split_never_leaks_plan_json_into_thinking_block() {
     );
     assert!(ans.contains("补充说明"), "{ans:?}");
 }
+
+#[test]
+fn inline_think_extracted_by_split_but_stripped_by_joined_when_filters_on() {
+    use super::{
+        assistant_message_text_for_display_ex_with_body_strings,
+        assistant_message_think_answer_for_display_ex_with_body_strings,
+    };
+    let inline = concat!(
+        "<",
+        "think",
+        ">",
+        "计划步骤",
+        "</",
+        "think",
+        ">",
+        "\n\n答案是 A"
+    );
+    let (think, ans) = assistant_message_think_answer_for_display_ex_with_body_strings(
+        inline,
+        "",
+        None,
+        Locale::ZhHans,
+        true,
+    );
+    assert_eq!(think, "计划步骤");
+    assert_eq!(ans, "答案是 A");
+    // 纯文本消费方（搜索/复制/导出）保持旧行为：内联 think 仍被剥离。
+    let joined = assistant_message_text_for_display_ex_with_body_strings(
+        inline,
+        "",
+        None,
+        Locale::ZhHans,
+        true,
+    );
+    assert_eq!(joined, "答案是 A");
+}
+
+#[test]
+fn inline_think_unclosed_streaming_goes_to_thinking_not_answer() {
+    use super::assistant_message_think_answer_for_display_ex_with_body_strings;
+    use crate::storage::StoredMessageState;
+    let state = Some(StoredMessageState::Loading);
+    let (think, ans) = assistant_message_think_answer_for_display_ex_with_body_strings(
+        concat!("<", "think", ">", "正在推理片段"),
+        "",
+        state.as_ref(),
+        Locale::ZhHans,
+        true,
+    );
+    assert_eq!(think, "正在推理片段");
+    assert!(ans.is_empty());
+}
+
+#[test]
+fn no_think_tag_goes_to_answer() {
+    use super::assistant_message_think_answer_for_display_ex_with_body_strings;
+    // 无内联思考标签的普通文本：全部进终答，思维链为空。
+    let (think, ans) = assistant_message_think_answer_for_display_ex_with_body_strings(
+        "前置文本",
+        "",
+        None,
+        Locale::ZhHans,
+        true,
+    );
+    assert!(think.is_empty());
+    assert_eq!(ans, "前置文本");
+}
+
+#[test]
+fn inline_think_unclosed_finalized_keeps_whole_text_in_answer() {
+    use super::assistant_message_think_answer_for_display_ex_with_body_strings;
+    // 终态（非流式）畸形输入：未闭合 `<think>` 不吞正文（开标签前文本不得丢失），
+    // 与旧 joined 行为完全一致（残片随 answer 侧剥除，前缀保留）；仅流式残片才归入思维链。
+    let (think, ans) = assistant_message_think_answer_for_display_ex_with_body_strings(
+        "前置<think>残片",
+        "",
+        None,
+        Locale::ZhHans,
+        true,
+    );
+    assert!(think.is_empty());
+    assert_eq!(ans, "前置", "prefix before open tag must survive");
+    assert!(!ans.contains("残片"), "{ans:?}");
+}

@@ -214,9 +214,33 @@ fn push_pending_line(pending: &mut String, line: &str) {
     pending.push_str(line);
 }
 
-/// 按块解析结果：闭合块 HTML 列表（冻结）+ 可选活跃块**源文本**（渲染见 [`render_open_active_html`]）。
+/// 思维链折叠块（`<details>`）渲染数据：`open` 默认展开，`summary_html` 携带 i18n 标签，`body_html` 为已转义思考正文。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ThinkBlock {
+    pub open: bool,
+    pub summary_html: String,
+    pub body_html: String,
+}
+
+impl ThinkBlock {
+    /// 完整 `<details>` 元素 HTML（`to_inner_html` 用）。
+    #[must_use]
+    pub fn to_details_html(&self) -> String {
+        let open_attr = if self.open { " open" } else { "" };
+        format!(
+            "<details class=\"chat-tui-think\"{open_attr}>{}\
+             <div class=\"chat-tui-think-body msg-md-prose\">{}</div>\
+             </details>",
+            self.summary_html, self.body_html
+        )
+    }
+}
+
+/// 按块解析结果：思维链折叠块 + 闭合块 HTML 列表（冻结）+ 可选活跃块**源文本**（渲染见 [`render_open_active_html`]）。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TuiBodyChunks {
+    /// 思维链折叠块（`<details>`）；无思考时为 `None`。
+    pub think: Option<ThinkBlock>,
     pub closed: Vec<String>,
     /// 活跃块源文本；围栏缓冲以 \`\`\` / `~~~`（可带最多 3 空格缩进）开头。DOM 用 [`render_open_active_html`] 写入。
     pub open_plain: Option<String>,
@@ -227,6 +251,7 @@ pub struct TuiBodyChunks {
 impl Default for TuiBodyChunks {
     fn default() -> Self {
         Self {
+            think: None,
             closed: Vec::new(),
             open_plain: None,
             markdown_render: true,
@@ -238,6 +263,9 @@ impl TuiBodyChunks {
     #[must_use]
     pub fn to_inner_html(&self) -> String {
         let mut out = String::new();
+        if let Some(think) = &self.think {
+            out.push_str(&think.to_details_html());
+        }
         for chunk in &self.closed {
             out.push_str(chunk);
         }
@@ -261,6 +289,13 @@ pub enum TuiBodyPatch {
     Incremental {
         append_closed: Vec<String>,
         /// 活跃块源文本（非 HTML）；`None` 表示移除活跃块节点。
+        open_plain: Option<String>,
+    },
+    /// 思维链流式：只更新 `.chat-tui-think-body` 的 innerHTML（思考正文逐帧变化时不整块替换）；
+    /// 若同帧还有新闭合块/活跃块则一并应用（思维链冻结与终答开头的过渡帧）。
+    ThinkBody {
+        body_html: String,
+        append_closed: Vec<String>,
         open_plain: Option<String>,
     },
     /// 工具折叠行：只改文案，不重写 HTML（高度与结构保持不变）。
@@ -467,6 +502,7 @@ pub fn parse_tui_body_chunks_with(
     };
 
     TuiBodyChunks {
+        think: None,
         closed: state.closed,
         open_plain,
         markdown_render,
@@ -475,7 +511,9 @@ pub fn parse_tui_body_chunks_with(
 
 /// 对比上一帧 closed 前缀：可增量则 append，否则整段替换。
 ///
-/// Incremental 不携带 `markdown_render`；应用侧从 [`TuiBodyChunks::markdown_render`]（`next`）读取。
+/// Incremental / ThinkBody 不携带 `markdown_render`；应用侧从 [`TuiBodyChunks::markdown_render`]（`next`）读取。
+/// 思维链：`open` 与 `summary_html` 稳定时，正文变化走定向 [`TuiBodyPatch::ThinkBody`]（不整块替换）；
+/// `open` 翻转（回合结束收起）等结构变化仍整段替换。
 #[must_use]
 pub fn plan_tui_body_patch(prev: Option<&TuiBodyChunks>, next: &TuiBodyChunks) -> TuiBodyPatch {
     let Some(prev) = prev else {
@@ -483,13 +521,30 @@ pub fn plan_tui_body_patch(prev: Option<&TuiBodyChunks>, next: &TuiBodyChunks) -
             chunks: next.clone(),
         };
     };
+    let think_head_match = match (&prev.think, &next.think) {
+        (Some(p), Some(n)) => p.open == n.open && p.summary_html == n.summary_html,
+        (None, None) => true,
+        _ => false,
+    };
     if next.markdown_render == prev.markdown_render
+        && think_head_match
         && next.closed.len() >= prev.closed.len()
         && next.closed[..prev.closed.len()] == prev.closed[..]
     {
+        let append_closed = next.closed[prev.closed.len()..].to_vec();
+        let open_plain = next.open_plain.clone();
+        let think_body_changed =
+            prev.think.as_ref().map(|t| &t.body_html) != next.think.as_ref().map(|t| &t.body_html);
+        if think_body_changed && let Some(think) = &next.think {
+            return TuiBodyPatch::ThinkBody {
+                body_html: think.body_html.clone(),
+                append_closed,
+                open_plain,
+            };
+        }
         return TuiBodyPatch::Incremental {
-            append_closed: next.closed[prev.closed.len()..].to_vec(),
-            open_plain: next.open_plain.clone(),
+            append_closed,
+            open_plain,
         };
     }
     TuiBodyPatch::ReplaceAll {
@@ -782,3 +837,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "tui_line_markdown_tests.rs"]
+mod think_patch_tests;

@@ -10,6 +10,7 @@ use super::super::plan_fence::{
 };
 use super::super::thinking_strip::{
     assistant_thinking_body_and_answer_raw, filter_assistant_thinking_markers_for_display,
+    filter_redacted_thinking_for_display,
 };
 pub(super) fn assistant_message_text_for_display_ex(
     m: &StoredMessage,
@@ -48,21 +49,30 @@ pub(super) fn assistant_message_text_for_display_ex_with_body(
     loc: Locale,
     apply_assistant_display_filters: bool,
 ) -> String {
-    let (think, answer) = assistant_message_think_answer_for_display_ex_with_body(
-        text,
+    let is_streaming = state.as_ref().is_some_and(|s| s.is_loading());
+    let (r, t) = filter_display_inputs(
         reasoning_text,
-        state,
+        text,
+        is_streaming,
+        apply_assistant_display_filters,
+        false,
+    );
+    let (think, answer) = compute_think_answer_parts(
+        r.as_ref(),
+        t.as_ref(),
+        is_streaming,
         loc,
         apply_assistant_display_filters,
     );
     join_think_answer_for_display(think, answer)
 }
 
-/// 与 [`assistant_message_text_for_display_ex`] 相同展示语义，但返回**拆分后的**（思维链， 终答）。
+/// 与 [`assistant_message_text_for_display_ex`] 相同展示语义，但返回**拆分后的**（思维链, 终答）。
 ///
-/// 供聊天气泡渲染折叠思考块：思维链不再与终答拼成同一段纯文本。
-/// 对纯文本消费方（搜索/导出/复制等），用 [`assistant_message_text_for_display_ex_with_body`] 拿拼接串，
-/// 二者由 [`join_think_answer_for_display`] 保证终态字符串完全一致。
+/// 供聊天气泡渲染折叠思考块：思维链不再与终答拼成同一段纯文本。**text 轨保留内联 `<think>`**
+/// 供拆分提取（Qwen / vLLM 等把思考塞进 content 的网关也能进折叠块）；`redacted_thinking` 隐私块仍剥离。
+/// 纯文本消费方（搜索/导出/复制等）用 [`assistant_message_text_for_display_ex_with_body`]，其**继续剥掉**
+/// 内联 `<think>`（旧行为，输出不变）。
 pub(super) fn assistant_message_think_answer_for_display_ex_with_body(
     text: &str,
     reasoning_text: &str,
@@ -70,36 +80,63 @@ pub(super) fn assistant_message_think_answer_for_display_ex_with_body(
     loc: Locale,
     apply_assistant_display_filters: bool,
 ) -> (String, String) {
-    let is_streaming_last_assistant = state.as_ref().is_some_and(|s| s.is_loading());
-    let reasoning_for_split: Cow<str> = if apply_assistant_display_filters {
-        Cow::Owned(filter_assistant_thinking_markers_for_display(
-            reasoning_text,
-            is_streaming_last_assistant,
-        ))
-    } else {
-        Cow::Borrowed(reasoning_text)
-    };
-    let text_for_split: Cow<str> = if apply_assistant_display_filters {
-        Cow::Owned(filter_assistant_thinking_markers_for_display(
-            text,
-            is_streaming_last_assistant,
-        ))
-    } else {
-        Cow::Borrowed(text)
-    };
-    let (r_body, t_body) = assistant_thinking_body_and_answer_raw(
-        reasoning_for_split.as_ref(),
-        text_for_split.as_ref(),
+    let is_streaming = state.as_ref().is_some_and(|s| s.is_loading());
+    let (r, t) = filter_display_inputs(
+        reasoning_text,
+        text,
+        is_streaming,
         apply_assistant_display_filters,
+        true,
     );
-    let answer = assistant_text_for_display(
-        t_body,
-        is_streaming_last_assistant,
+    compute_think_answer_parts(
+        r.as_ref(),
+        t.as_ref(),
+        is_streaming,
         loc,
         apply_assistant_display_filters,
+    )
+}
+
+/// 按 `apply_assistant_display_filters` 过滤两轨输入。
+///
+/// `keep_inline_think=true`（气泡拆分路径）：text 轨只剥 `redacted_thinking`，保留 `<think>` 供拆分；
+/// `false`（纯文本拼接路径）：两轨都剥 think/redacted 标记，与旧输出完全一致。
+fn filter_display_inputs<'a>(
+    reasoning: &'a str,
+    text: &'a str,
+    streaming: bool,
+    apply_filters: bool,
+    keep_inline_think: bool,
+) -> (Cow<'a, str>, Cow<'a, str>) {
+    if !apply_filters {
+        return (Cow::Borrowed(reasoning), Cow::Borrowed(text));
+    }
+    let r = filter_assistant_thinking_markers_for_display(reasoning, streaming);
+    let t = if keep_inline_think {
+        filter_redacted_thinking_for_display(text, streaming)
+    } else {
+        filter_assistant_thinking_markers_for_display(text, streaming)
+    };
+    (Cow::Owned(r), Cow::Owned(t))
+}
+
+/// 过滤后的两轨 → 拆分（思维链, 终答）并套用 filters/无 filters 分支。
+fn compute_think_answer_parts(
+    reasoning_for_split: &str,
+    text_for_split: &str,
+    is_streaming: bool,
+    loc: Locale,
+    apply_filters: bool,
+) -> (String, String) {
+    let (r_body, t_body) = assistant_thinking_body_and_answer_raw(
+        reasoning_for_split,
+        text_for_split,
+        apply_filters,
+        is_streaming,
     );
-    if apply_assistant_display_filters {
-        assistant_body_with_filters(loc, is_streaming_last_assistant, r_body, t_body, answer)
+    let answer = assistant_text_for_display(t_body, is_streaming, loc, apply_filters);
+    if apply_filters {
+        assistant_body_with_filters(loc, is_streaming, r_body, t_body, answer)
     } else {
         assistant_body_without_filters(r_body, answer)
     }

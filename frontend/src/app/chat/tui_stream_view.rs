@@ -198,6 +198,30 @@ fn apply_tool_row_patch(
     true
 }
 
+/// Incremental / ThinkBody 共用的「追加闭合块 + 更新活跃块」尾部应用。
+fn apply_incremental_tail(
+    body: &web_sys::HtmlElement,
+    append_closed: &[String],
+    open_plain: Option<&str>,
+    markdown_render: bool,
+) -> bool {
+    if !append_closed.is_empty() {
+        remove_open_block(body);
+        for chunk in append_closed {
+            if body.insert_adjacent_html("beforeend", chunk).is_err() {
+                return false;
+            }
+        }
+    }
+    match open_plain {
+        Some(text) => apply_open_active_block(body, text, markdown_render),
+        None => {
+            remove_open_block(body);
+            true
+        }
+    }
+}
+
 fn apply_body_patch(
     body: &web_sys::HtmlElement,
     patch: TuiBodyPatch,
@@ -212,22 +236,23 @@ fn apply_body_patch(
         TuiBodyPatch::Incremental {
             append_closed,
             open_plain,
+        } => apply_incremental_tail(body, &append_closed, open_plain.as_deref(), markdown_render),
+        TuiBodyPatch::ThinkBody {
+            body_html,
+            append_closed,
+            open_plain,
         } => {
-            if !append_closed.is_empty() {
-                remove_open_block(body);
-                for chunk in &append_closed {
-                    if body.insert_adjacent_html("beforeend", chunk).is_err() {
-                        return false;
-                    }
-                }
-            }
-            match open_plain {
-                Some(text) => apply_open_active_block(body, &text, markdown_render),
-                None => {
-                    remove_open_block(body);
-                    true
-                }
-            }
+            let Some(think_body) = body
+                .query_selector(".chat-tui-think-body")
+                .ok()
+                .flatten()
+                .and_then(|n| n.dyn_into::<web_sys::HtmlElement>().ok())
+            else {
+                // DOM 尚无思考块（结构已变）→ 交由全量重建
+                return false;
+            };
+            think_body.set_inner_html(&body_html);
+            apply_incremental_tail(body, &append_closed, open_plain.as_deref(), markdown_render)
         }
         TuiBodyPatch::ToolRow {
             status,

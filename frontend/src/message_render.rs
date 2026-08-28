@@ -29,8 +29,10 @@ pub fn assistant_body_plain_for_stream(
         None
     };
     let (thinking_raw, answer_raw) = match &filtered_reasoning_and_text {
-        Some((rs, tx)) => assistant_thinking_body_and_answer_raw(rs.as_str(), tx.as_str(), true),
-        None => assistant_thinking_body_and_answer_raw(reasoning_text, text, false),
+        Some((rs, tx)) => {
+            assistant_thinking_body_and_answer_raw(rs.as_str(), tx.as_str(), true, is_loading)
+        }
+        None => assistant_thinking_body_and_answer_raw(reasoning_text, text, false, is_loading),
     };
     let r_trim = thinking_raw.trim();
     let answer_display = assistant_text_for_display(
