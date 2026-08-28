@@ -14,7 +14,7 @@ use super::tui_line_markdown::{
     TuiBodyChunks, TuiBodyPatch, open_active_block_class, parse_tui_body_chunks_with,
     plan_tui_body_patch, render_open_active_html,
 };
-use super::tui_thinking_block::{message_think_answer_display_text, thinking_details_html};
+use super::tui_thinking_block::{build_think_block, message_think_answer_display_text};
 use super::tui_tool_process::{tool_process_body_html, tool_row_live_fields};
 use crate::visible_messages::tui_should_render_message;
 
@@ -235,6 +235,7 @@ fn skill_slash_body_chunks(
     );
     if task.is_empty() {
         return TuiBodyChunks {
+            think: None,
             closed: vec![format!(
                 "<div class=\"chat-tui-line chat-tui-line--block\">{chip}</div>"
             )],
@@ -257,6 +258,7 @@ fn skill_slash_body_chunks(
         return task_chunks;
     }
     TuiBodyChunks {
+        think: None,
         closed: vec![format!(
             "<div class=\"chat-tui-line chat-tui-line--block\">{chip}</div>"
         )],
@@ -331,6 +333,7 @@ fn message_body_chunks(message: &StoredMessage, ctx: &TuiRenderCtx<'_>) -> TuiBo
             .as_deref()
             .and_then(|tid| ctx.tool_jobs.get(tid));
         return TuiBodyChunks {
+            think: None,
             closed: vec![tool_process_body_html(message, ctx.locale, live, job)],
             open_plain: None,
             // 工具 HTML 不走 MD，仍记录全局开关以免与 Incremental 前缀比较漂移。
@@ -391,10 +394,12 @@ fn message_body_chunks(message: &StoredMessage, ctx: &TuiRenderCtx<'_>) -> TuiBo
             .as_ref()
             .is_some_and(StoredMessageState::is_loading);
         let open = auto_open || ctx.think_open.contains(&message.id);
-        chunks.closed.insert(
-            0,
-            thinking_details_html(&thinking, open, ctx.markdown_render, ctx.locale),
-        );
+        chunks.think = Some(build_think_block(
+            &thinking,
+            open,
+            ctx.markdown_render,
+            ctx.locale,
+        ));
     }
     chunks
 }

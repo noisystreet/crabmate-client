@@ -11,7 +11,7 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Added
 
-- Chat bubbles now render the assistant’s thinking stream (`reasoning_text` SSE track, plus inline `<think>` splits when display filters are off) as a **collapsible "Thinking" block** above the answer: it stays open while streaming and collapses when the turn finishes; clicking the summary toggles it manually. Plain-text consumers (search / copy / export) keep the previous joined output.
+- Chat bubbles now render the assistant’s thinking as a **collapsible "Thinking" block** above the answer: it stays open while streaming and collapses when the turn finishes; clicking the summary toggles it manually and the state survives refreshes. Both the `reasoning_text` SSE track and inline `<think>` content (Qwen / vLLM gateways) feed the block; while thinking streams, only the block body updates (no full-bubble re-render). Plain-text consumers (search / copy / export) keep the previous joined output (inline `<think>` stays stripped there).
 
 ### Changed
 

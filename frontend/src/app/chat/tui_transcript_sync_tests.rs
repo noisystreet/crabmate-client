@@ -350,6 +350,16 @@ fn build_html(
     overlay: Option<&StreamTextOverlay>,
     think_open: &HashSet<String>,
 ) -> String {
+    build_html_opts(messages, overlay, think_open, false, true)
+}
+
+fn build_html_opts(
+    messages: &[StoredMessage],
+    overlay: Option<&StreamTextOverlay>,
+    think_open: &HashSet<String>,
+    apply_filters: bool,
+    markdown_render: bool,
+) -> String {
     let tool_chunks = HashMap::new();
     let tool_jobs = HashMap::new();
     build_tui_transcript_html(
@@ -358,8 +368,8 @@ fn build_html(
             session_id: "s1",
             overlay,
             locale: Locale::ZhHans,
-            apply_filters: false,
-            markdown_render: true,
+            apply_filters,
+            markdown_render,
             show_turn_context_inject: false,
             tool_chunks: &tool_chunks,
             tool_jobs: &tool_jobs,
@@ -424,8 +434,8 @@ fn user_message_has_no_thinking_block() {
 }
 
 #[test]
-fn reasoning_streaming_patch_replaces_details_body() {
-    // 思维链在 `<details>` 内，逐帧变化走整块 ReplaceAll（终答阶段恢复 Incremental）。
+fn reasoning_streaming_uses_think_body_patch_not_replace_all() {
+    // 思维链流式：只定向更新 `.chat-tui-think-body`，不再整块 ReplaceAll（消除每 token 重渲）。
     let m = assistant_with_reasoning("a1", "", "", true);
     let messages = vec![m.clone()];
     let overlay1 = StreamTextOverlay {
@@ -448,18 +458,22 @@ fn reasoning_streaming_patch_replaces_details_body() {
     assert!(plan2.full_html.is_none());
     let live = plan2.live.expect("live patch");
     match live.patch {
-        TuiBodyPatch::ReplaceAll { chunks } => {
-            let html = chunks.to_inner_html();
-            assert!(html.contains("chat-tui-think"), "got {html}");
-            assert!(html.contains("第二步"), "got {html}");
+        TuiBodyPatch::ThinkBody {
+            body_html,
+            append_closed,
+            open_plain,
+        } => {
+            assert!(body_html.contains("第二步"), "got {body_html}");
+            assert!(append_closed.is_empty());
+            assert_eq!(open_plain, None);
         }
-        other => panic!("expected ReplaceAll for streaming thinking, got {other:?}"),
+        other => panic!("expected ThinkBody for streaming thinking, got {other:?}"),
     }
 }
 
 #[test]
 fn reasoning_transition_to_answer_is_incremental_after_freeze() {
-    // 思维链冻结后，终答增量恢复 Incremental（closed[0] 的 details 不再变化）。
+    // 思维链冻结后，终答增量恢复 Incremental（think 不再变化，closed/open_plain 走增量）。
     let m = assistant_with_reasoning("a1", "推理完毕", "", true);
     let messages = vec![m.clone()];
     let empty = HashMap::new();
@@ -571,4 +585,41 @@ fn non_opened_thinking_stays_collapsed_after_turn_content_refresh() {
         }
         other => panic!("expected ReplaceAll refresh, got {other:?}"),
     }
+}
+
+#[test]
+fn inline_think_extracted_into_thinking_block_when_filters_on() {
+    // filters=true（默认）时，内联 `<think>`（Qwen / vLLM 网关）也要进折叠块。
+    let mut m = message("a1", "assistant", "<think>步骤甲</think>\n\n这是答案");
+    m.state = None;
+    let html = build_html_opts(std::slice::from_ref(&m), None, &HashSet::new(), true, true);
+    assert!(
+        html.contains("<details class=\"chat-tui-think\">"),
+        "inline think must render a thinking block: {html}"
+    );
+    assert!(html.contains("步骤甲"), "thinking body, got {html}");
+    assert!(html.contains("这是答案"), "answer body, got {html}");
+    assert!(!html.contains("<think>"), "raw tag must not leak: {html}");
+}
+
+#[test]
+fn markdown_off_thinking_block_escapes_markup() {
+    let m = assistant_with_reasoning("a1", "**加粗** 与 <script>", "答案", false);
+    let html = build_html_opts(
+        std::slice::from_ref(&m),
+        None,
+        &HashSet::new(),
+        false,
+        false,
+    );
+    assert!(html.contains("chat-tui-think"), "got {html}");
+    assert!(
+        !html.contains("<strong>"),
+        "markdown off must not render bold in thinking: {html}"
+    );
+    assert!(!html.contains("<script"), "must escape markup: {html}");
+    assert!(
+        html.contains("加粗") || html.contains("&#42;"),
+        "literal thinking should remain: {html}"
+    );
 }

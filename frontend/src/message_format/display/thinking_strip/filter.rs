@@ -106,6 +106,23 @@ fn first_inline_thinking_close(raw: &str) -> Option<(usize, &'static str)> {
     best
 }
 
+/// 最早出现的内联思考开标签跨度（`<think>` / 反引号包裹等变体）。
+fn first_inline_thinking_open_span(raw: &str) -> Option<(usize, usize)> {
+    let mut best: Option<(usize, usize)> = None;
+    for pre in INLINE_THINKING_OPEN_PREFIXES {
+        if let Some(i) = raw.find(pre) {
+            let end = i + pre.len();
+            best = match best {
+                None => Some((i, end)),
+                Some((bi, _be)) if i < bi => Some((i, end)),
+                Some((bi, be)) if i == bi && end > be => Some((i, end)),
+                o => o,
+            };
+        }
+    }
+    best
+}
+
 fn trim_inline_thinking_openers(mut s: &str) -> &str {
     s = s.trim();
     loop {
@@ -125,10 +142,14 @@ fn trim_inline_thinking_openers(mut s: &str) -> &str {
 }
 
 /// 优先已存 `reasoning_text`；否则尝试从 `text` 中按内联闭合标记拆出思维链与终答原文（供 Markdown 与折叠长度用）。
+///
+/// `streaming=true` 时未闭合 `<think>` 开标签视为思维链残片（归入思维链，不泄漏裸标签）；
+/// 非流式（终态）畸形输入按旧行为整体进终答，避免丢失开标签前的正文。
 pub(crate) fn assistant_thinking_body_and_answer_raw<'a>(
     reasoning_text_stored: &'a str,
     text_stored: &'a str,
     split_inline_thinking: bool,
+    streaming: bool,
 ) -> (&'a str, &'a str) {
     let rs = reasoning_text_stored.trim();
     if !rs.is_empty() {
@@ -138,6 +159,11 @@ pub(crate) fn assistant_thinking_body_and_answer_raw<'a>(
         return ("", text_stored);
     }
     let Some((idx, tag)) = first_inline_thinking_close(text_stored) else {
+        // 流式残片：闭合标记未到但开标签已出现 → 剩余全部视为思维链，
+        // 避免裸 `<think>` 标签泄漏进终答正文（气泡折叠块继续流式显示思考）。
+        if streaming && let Some((_, o_end)) = first_inline_thinking_open_span(text_stored) {
+            return (text_stored[o_end..].trim_start(), "");
+        }
         return ("", text_stored);
     };
     let after = text_stored[idx + tag.len()..].trim_start();
