@@ -19,7 +19,9 @@ use leptos::prelude::*;
 use crate::i18n::Locale;
 use crate::message_dedupe::assistant_texts_fuzzy_duplicate;
 use crate::message_format::{
-    assistant_message_text_for_display_ex_with_body_strings, message_text_for_display_ex,
+    assistant_message_text_for_display_ex_with_body_strings,
+    assistant_message_think_answer_for_display_ex_with_body_strings, message_text_for_display_ex,
+    message_think_answer_for_display_ex,
 };
 use crate::storage::{ChatSession, StoredMessage};
 
@@ -256,6 +258,33 @@ pub fn message_text_for_display_including_stream_overlay(
         }
     }
     message_text_for_display_ex(m, locale, apply_assistant_display_filters)
+}
+
+/// 与 [`message_text_for_display_including_stream_overlay`] 相同，但返回拆分后的（思维链, 终答）。
+///
+/// 供聊天气泡渲染折叠思考块：`parent_session_id` 语义与合并规则与拼接版完全一致。
+#[must_use]
+pub fn message_think_answer_for_display_including_stream_overlay(
+    m: &StoredMessage,
+    overlay: Option<&StreamTextOverlay>,
+    parent_session_id: &str,
+    locale: Locale,
+    apply_assistant_display_filters: bool,
+) -> (String, String) {
+    if m.role == "assistant" {
+        if let Some((text, reasoning)) =
+            stream_overlay_merged_text_reasoning_owned(m, overlay, parent_session_id)
+        {
+            return assistant_message_think_answer_for_display_ex_with_body_strings(
+                text.as_str(),
+                reasoning.as_str(),
+                m.state.as_ref(),
+                locale,
+                apply_assistant_display_filters,
+            );
+        }
+    }
+    message_think_answer_for_display_ex(m, locale, apply_assistant_display_filters)
 }
 
 /// 持久化前把 overlay 合并进克隆列表，避免落盘缺尾段。

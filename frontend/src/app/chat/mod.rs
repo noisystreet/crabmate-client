@@ -36,6 +36,7 @@ mod stream_visibility_resume;
 mod tui_actions_bar;
 mod tui_line_markdown;
 mod tui_stream_view;
+mod tui_thinking_block;
 mod tui_tool_process;
 mod tui_transcript_sync;
 pub(crate) mod turn_lifecycle;

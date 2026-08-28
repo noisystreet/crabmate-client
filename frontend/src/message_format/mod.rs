@@ -18,8 +18,9 @@ pub(crate) use crabmate_tool_card::strip_ansi_codes;
 #[cfg(test)]
 pub(crate) use display::assistant_text_for_display;
 pub(crate) use display::{
-    assistant_message_text_for_display_ex_with_body_strings, message_text_for_display_ex,
-    stored_message_is_staged_planner_round,
+    assistant_message_text_for_display_ex_with_body_strings,
+    assistant_message_think_answer_for_display_ex_with_body_strings, message_text_for_display_ex,
+    message_think_answer_for_display_ex, stored_message_is_staged_planner_round,
 };
 #[cfg(test)]
 pub(crate) use display::{

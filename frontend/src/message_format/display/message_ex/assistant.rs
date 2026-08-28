@@ -25,6 +25,21 @@ pub(super) fn assistant_message_text_for_display_ex(
     )
 }
 
+/// 与 [`assistant_message_text_for_display_ex`] 相同，但返回拆分后的（思维链, 终答）。
+pub(super) fn assistant_message_think_answer_for_display_ex(
+    m: &StoredMessage,
+    loc: Locale,
+    apply_assistant_display_filters: bool,
+) -> (String, String) {
+    assistant_message_think_answer_for_display_ex_with_body(
+        m.text.as_str(),
+        m.reasoning_text.as_str(),
+        m.state.as_ref(),
+        loc,
+        apply_assistant_display_filters,
+    )
+}
+
 /// 与 [`assistant_message_text_for_display_ex`] 相同语义，但正文/思维链来自调用方字符串（例如 Web 流式 overlay 合并），避免为展示克隆整条 [`StoredMessage`]。
 pub(super) fn assistant_message_text_for_display_ex_with_body(
     text: &str,
@@ -33,6 +48,28 @@ pub(super) fn assistant_message_text_for_display_ex_with_body(
     loc: Locale,
     apply_assistant_display_filters: bool,
 ) -> String {
+    let (think, answer) = assistant_message_think_answer_for_display_ex_with_body(
+        text,
+        reasoning_text,
+        state,
+        loc,
+        apply_assistant_display_filters,
+    );
+    join_think_answer_for_display(think, answer)
+}
+
+/// 与 [`assistant_message_text_for_display_ex`] 相同展示语义，但返回**拆分后的**（思维链， 终答）。
+///
+/// 供聊天气泡渲染折叠思考块：思维链不再与终答拼成同一段纯文本。
+/// 对纯文本消费方（搜索/导出/复制等），用 [`assistant_message_text_for_display_ex_with_body`] 拿拼接串，
+/// 二者由 [`join_think_answer_for_display`] 保证终态字符串完全一致。
+pub(super) fn assistant_message_think_answer_for_display_ex_with_body(
+    text: &str,
+    reasoning_text: &str,
+    state: Option<&StoredMessageState>,
+    loc: Locale,
+    apply_assistant_display_filters: bool,
+) -> (String, String) {
     let is_streaming_last_assistant = state.as_ref().is_some_and(|s| s.is_loading());
     let reasoning_for_split: Cow<str> = if apply_assistant_display_filters {
         Cow::Owned(filter_assistant_thinking_markers_for_display(
@@ -68,13 +105,24 @@ pub(super) fn assistant_message_text_for_display_ex_with_body(
     }
 }
 
+/// 把拆分后的（思维链, 终答）按旧语义拼回单段字符串（`\n\n` 分隔），保证纯文本消费方终态一致。
+fn join_think_answer_for_display(think: String, answer: String) -> String {
+    if think.trim().is_empty() {
+        return answer;
+    }
+    if answer.trim().is_empty() {
+        return think;
+    }
+    format!("{think}\n\n{answer}")
+}
+
 fn assistant_body_with_filters(
     loc: Locale,
     is_streaming_last_assistant: bool,
     r_body: &str,
     t_body: &str,
     answer: String,
-) -> String {
+) -> (String, String) {
     let r = r_body.trim();
     let a = answer.trim();
     let t_trim = t_body.trim();
@@ -83,6 +131,7 @@ fn assistant_body_with_filters(
 
     // 任一侧含规划 JSON 时合并后再剥离，避免 reasoning 与 text 分轨写入时拼接泄漏原始 JSON
     // （如水合后 `display_content` 已可读化而 `reasoning_content` 仍为原文）。
+    // 合并剥离后视作终答（思维链无法单独成块），与旧拼接行为一致。
     if reasoning_looks_like_plan_json || text_looks_like_plan_json {
         let merged = if r.is_empty() {
             t_body.trim().to_string()
@@ -95,28 +144,28 @@ fn assistant_body_with_filters(
             assistant_text_for_display(&merged, is_streaming_last_assistant, loc, true);
         let mv = merged_out.trim();
         if mv.is_empty() && !a.is_empty() {
-            return answer;
+            return (String::new(), answer);
         }
-        return merged_out;
+        return (String::new(), merged_out);
     }
 
     if r.is_empty() {
-        answer
+        (String::new(), answer)
     } else if a.is_empty() {
-        r.to_string()
+        (r.to_string(), String::new())
     } else {
-        format!("{r}\n\n{answer}")
+        (r.to_string(), answer)
     }
 }
 
-fn assistant_body_without_filters(r_body: &str, answer: String) -> String {
+fn assistant_body_without_filters(r_body: &str, answer: String) -> (String, String) {
     let r_empty = r_body.trim().is_empty();
     let a_empty = answer.trim().is_empty();
     if r_empty {
-        answer
+        (String::new(), answer)
     } else if a_empty {
-        r_body.to_string()
+        (r_body.to_string(), String::new())
     } else {
-        format!("{r_body}\n\n{answer}")
+        (r_body.to_string(), answer)
     }
 }

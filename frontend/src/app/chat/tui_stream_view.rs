@@ -39,7 +39,7 @@ use crate::session_search::normalize_search_query;
 use crate::sse_dispatch::ToolJobState;
 use crate::storage::ChatSession;
 use crate::stream_text_overlay::StreamTextOverlay;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 struct PlanActiveSessionArgs<'a> {
     sessions: &'a [ChatSession],
@@ -52,6 +52,7 @@ struct PlanActiveSessionArgs<'a> {
     show_turn_context_inject: bool,
     tool_chunks: &'a HashMap<String, String>,
     tool_jobs: &'a HashMap<String, ToolJobState>,
+    think_open: &'a HashSet<String>,
 }
 
 fn plan_for_active_session(args: PlanActiveSessionArgs<'_>) -> TuiSyncPlan {
@@ -66,6 +67,7 @@ fn plan_for_active_session(args: PlanActiveSessionArgs<'_>) -> TuiSyncPlan {
         show_turn_context_inject,
         tool_chunks,
         tool_jobs,
+        think_open,
     } = args;
     match sessions.iter().find(|session| session.id == active_id) {
         None => plan_tui_sync(PlanTuiSyncArgs {
@@ -79,6 +81,7 @@ fn plan_for_active_session(args: PlanActiveSessionArgs<'_>) -> TuiSyncPlan {
             show_turn_context_inject,
             tool_chunks,
             tool_jobs,
+            think_open,
         }),
         Some(session) => plan_tui_sync(PlanTuiSyncArgs {
             prev,
@@ -91,6 +94,7 @@ fn plan_for_active_session(args: PlanActiveSessionArgs<'_>) -> TuiSyncPlan {
             show_turn_context_inject,
             tool_chunks,
             tool_jobs,
+            think_open,
         }),
     }
 }
@@ -401,6 +405,7 @@ fn sync_chat_tui_stream_dom(
     transcript_ref: NodeRef<leptos::html::Div>,
     mount_state: RwSignal<Option<TuiMountState>>,
     scroll_shell: ChatScrollShellSignals,
+    think_open: &HashSet<String>,
 ) -> (FindRestoreScope, Option<String>) {
     let tool_chunks = chat.tool_output_chunks.get();
     let tool_jobs = chat.tool_job_states.get();
@@ -420,6 +425,7 @@ fn sync_chat_tui_stream_dom(
             show_turn_context_inject: display.show_turn_context_inject,
             tool_chunks: &tool_chunks,
             tool_jobs: &tool_jobs,
+            think_open,
         })
     });
 
@@ -443,11 +449,54 @@ fn sync_chat_tui_stream_dom(
                 show_turn_context_inject: display.show_turn_context_inject,
                 tool_chunks: &tool_chunks,
                 tool_jobs: &tool_jobs,
+                think_open,
             })
         })
     });
     follow_after_content_paint(scroll_shell);
     (scope, live_id)
+}
+
+/// 思维链折叠块 summary 点击：记录该 message 的**手动展开状态**（原生 `<details>` 已自行切换，
+/// 此处仅持久化到 [`think_manually_open`]，供后续 body 重建时保持；流式自动展开/结束后收起不受影响）。
+fn try_handle_think_toggle_click(
+    ev: &web_sys::MouseEvent,
+    think_manually_open: RwSignal<HashSet<String>>,
+) -> bool {
+    let Some(target) = ev
+        .target()
+        .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
+    else {
+        return false;
+    };
+    if target
+        .closest(".chat-tui-think-summary")
+        .ok()
+        .flatten()
+        .is_none()
+    {
+        return false;
+    }
+    let Some(section) = target.closest("[data-tui-msg-id]").ok().flatten() else {
+        return false;
+    };
+    let Some(message_id) = section.get_attribute("data-tui-msg-id") else {
+        return false;
+    };
+    // 点击已触发原生 toggle，此刻 `open` 属性反映**新**状态。
+    let now_open = section
+        .query_selector(".chat-tui-think")
+        .ok()
+        .flatten()
+        .is_some_and(|el| el.has_attribute("open"));
+    think_manually_open.update(|set| {
+        if now_open {
+            set.insert(message_id);
+        } else {
+            set.remove(&message_id);
+        }
+    });
+    true
 }
 
 /// 后台任务取消按钮点击（`.chat-tui-tool-job-cancel`）：消费点击、禁用按钮并 POST 取消，
@@ -667,6 +716,8 @@ pub(crate) fn ChatTuiStreamView(
     let editing_user_message = action_handlers.editing_user_message;
     let transcript_ref = NodeRef::<leptos::html::Div>::new();
     let mount_state = RwSignal::new(None::<TuiMountState>);
+    // 用户手动展开的思维链折叠块（message id 集合）：原生 toggle 后记录，body 重建时保持展开。
+    let think_manually_open = RwSignal::new(HashSet::<String>::new());
     let turn_menu = RwSignal::new(None::<MessageTurnMenuAnchor>);
     let press = build_message_turn_press_handlers(chat, turn_menu);
     let on_contextmenu = press.on_contextmenu.clone();
@@ -697,6 +748,8 @@ pub(crate) fn ChatTuiStreamView(
         let apply_filters = apply_assistant_display_filters.get();
         let md_on = markdown_render.get();
         let show_inject = show_turn_context_inject.get();
+        // untracked 快照：toggle 时 DOM 已原生生效，无需因此重渲染；仅在后续 body 重建时读取。
+        let think_open = think_manually_open.get_untracked();
         let (scope, live_id) = sync_chat_tui_stream_dom(
             chat,
             TuiStreamDisplayOpts {
@@ -708,6 +761,7 @@ pub(crate) fn ChatTuiStreamView(
             transcript_ref,
             mount_state,
             scroll_shell,
+            &think_open,
         );
         restore_overlays_after_tui_sync(
             transcript_ref,
@@ -777,6 +831,9 @@ pub(crate) fn ChatTuiStreamView(
                     try_sync_user_edit_draft(&ev, editing_user_message);
                 }
                 on:click=move |ev| {
+                    if try_handle_think_toggle_click(&ev, think_manually_open) {
+                        return;
+                    }
                     if try_handle_tool_job_cancel_click(&ev, chat, locale.get_untracked()) {
                         return;
                     }

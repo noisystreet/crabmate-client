@@ -9,6 +9,14 @@ pub fn chat_tui_empty(l: Locale) -> &'static str {
     }
 }
 
+/// 助手气泡内「思维链折叠块」的摘要文案。
+pub fn chat_thinking_label(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "思考过程",
+        Locale::En => "Thinking",
+    }
+}
+
 pub fn chat_tui_tool_status_done(l: Locale) -> &'static str {
     match l {
         Locale::ZhHans => "完成",

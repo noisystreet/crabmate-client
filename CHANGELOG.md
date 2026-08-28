@@ -9,6 +9,10 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ## [Unreleased]
 
+### Added
+
+- Chat bubbles now render the assistant’s thinking stream (`reasoning_text` SSE track, plus inline `<think>` splits when display filters are off) as a **collapsible "Thinking" block** above the answer: it stays open while streaming and collapses when the turn finishes; clicking the summary toggles it manually. Plain-text consumers (search / copy / export) keep the previous joined output.
+
 ### Changed
 
 - Context meter now prefers the Server’s `used_input_tokens / max_input_tokens` safe-input contract (including tools, attachments, reservation, and provider usage when available), while retaining the legacy `prompt_tokens / configured context window` fallback for older Servers.
