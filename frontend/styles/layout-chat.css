@@ -436,6 +436,11 @@
   display: none;
 }
 
+/* 展示层去重剥空正文（思考回显）：整段隐藏（保留 DOM 供流式定位），正文开始流式后解除 */
+.chat-tui-turn--hidden {
+  display: none !important;
+}
+
 /* —— 系统 —— */
 .chat-tui-turn--system,
 .chat-tui-turn--other {

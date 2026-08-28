@@ -643,6 +643,33 @@ fn echo_thinking_section_not_duplicated_in_answer_bubble() {
 }
 
 #[test]
+fn echo_only_answer_hides_empty_answer_section() {
+    // 模型正文**只有**思考回显章节（无真实结论）：剥除后正文段保留 DOM（供流式定位）
+    // 但整段 hidden，不渲染出空正文气泡，思考仍只出现一次。
+    let mut m = message("a1", "assistant", "### 思考过程\n推理内容\n---\n");
+    m.reasoning_text = "推理内容".to_string();
+    let html = build_html_opts(std::slice::from_ref(&m), None, &HashSet::new(), true, true);
+    assert!(
+        html.contains("chat-tui-turn--think"),
+        "think section: {html}"
+    );
+    assert!(
+        html.contains("chat-tui-body--answer"),
+        "answer section stays for streaming: {html}"
+    );
+    assert!(
+        html.contains("chat-tui-turn--hidden"),
+        "stripped-empty answer section must be hidden: {html}"
+    );
+    assert_eq!(
+        html.matches("推理内容").count(),
+        1,
+        "thinking shown exactly once (in the block): {html}"
+    );
+    assert!(!html.contains("### 思考过程"), "echo stripped: {html}");
+}
+
+#[test]
 fn thinking_rendered_as_own_section_above_answer() {
     // 思考过程单独成段（独立气泡），正文段紧随其后，同一 wrap 内两个 section。
     let m = assistant_with_reasoning("a1", "思考内容", "答案内容", false);

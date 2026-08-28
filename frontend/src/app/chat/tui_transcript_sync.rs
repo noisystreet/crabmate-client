@@ -446,24 +446,38 @@ fn turn_section_html(args: TurnSectionArgs<'_>) -> String {
     let id_esc = plaintext_to_safe_html(&message.id);
     // 思考块单独成段（独立气泡），正文段紧随其后；无思考时保持单段。
     let sections = if let Some(think) = &chunks.think {
+        let answer_html = chunks.answer_to_inner_html();
+        // 展示层去重可能剥空正文：正文段保留 DOM（供流式/增量定位）但隐藏，避免空气泡。
+        let answer_hidden = if answer_html.trim().is_empty() {
+            " chat-tui-turn--hidden"
+        } else {
+            ""
+        };
         format!(
             "<section class=\"chat-tui-turn {role_class} {THINK_SECTION_CLASS}{live_class}{loading_class}\" \
              data-tui-msg-id=\"{id_esc}\"{live_attr}>\
              <div class=\"chat-tui-body chat-tui-body--think\">{}</div>\
              </section>\
-             <section class=\"chat-tui-turn {role_class}{live_class}{loading_class}\" \
+             <section class=\"chat-tui-turn {role_class}{live_class}{loading_class}{answer_hidden}\" \
              data-tui-msg-id=\"{id_esc}\"{live_attr}>\
              <div class=\"chat-tui-body chat-tui-body--answer\">{}</div>\
              </section>",
             think.to_details_html(),
-            chunks.answer_to_inner_html(),
+            answer_html,
         )
     } else {
+        let answer_html = chunks.answer_to_inner_html();
+        // 无思考且正文为空（如模型仅输出推理）时同样整段隐藏，避免空卡片。
+        let answer_hidden = if answer_html.trim().is_empty() {
+            " chat-tui-turn--hidden"
+        } else {
+            ""
+        };
         format!(
-            "<section class=\"chat-tui-turn {role_class}{live_class}{loading_class}\" data-tui-msg-id=\"{id_esc}\"{live_attr}>\
+            "<section class=\"chat-tui-turn {role_class}{live_class}{loading_class}{answer_hidden}\" data-tui-msg-id=\"{id_esc}\"{live_attr}>\
              <div class=\"chat-tui-body chat-tui-body--answer\">{}</div>\
              </section>",
-            chunks.answer_to_inner_html(),
+            answer_html,
         )
     };
     let wrap_align = if role_class == "chat-tui-turn--user" {
