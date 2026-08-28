@@ -411,3 +411,84 @@ fn inline_think_unclosed_finalized_keeps_whole_text_in_answer() {
     assert_eq!(ans, "前置", "prefix before open tag must survive");
     assert!(!ans.contains("残片"), "{ans:?}");
 }
+
+#[test]
+fn echo_section_stripped_when_matches_thinking() {
+    use super::{
+        assistant_message_text_for_display_ex_with_body_strings,
+        assistant_message_think_answer_for_display_ex_with_body_strings,
+    };
+    // 模型在正文回显「### 思考过程」章节且内容与 reasoning 一致 → 展示层剥除，终答不重复。
+    let reasoning = "先检查 A，再检查 B。";
+    let text = "### 思考过程\n先检查 A，再检查 B。\n---\n最终答案";
+    let (think, ans) = assistant_message_think_answer_for_display_ex_with_body_strings(
+        text,
+        reasoning,
+        None,
+        Locale::ZhHans,
+        true,
+    );
+    assert_eq!(think, "先检查 A，再检查 B。");
+    assert_eq!(ans, "最终答案", "echo section must be stripped: {ans:?}");
+    assert!(!ans.contains("思考过程"), "{ans:?}");
+    // joined（搜索/复制/导出）同样去重。
+    let joined = assistant_message_text_for_display_ex_with_body_strings(
+        text,
+        reasoning,
+        None,
+        Locale::ZhHans,
+        true,
+    );
+    assert_eq!(joined, "先检查 A，再检查 B。\n\n最终答案");
+    assert_eq!(joined.matches("先检查 A").count(), 1, "{joined:?}");
+}
+
+#[test]
+fn echo_section_kept_when_content_differs() {
+    use super::assistant_message_think_answer_for_display_ex_with_body_strings;
+    // 回显章节内容与 reasoning 不一致 → 保守不剥，按原文展示。
+    let text = "### 思考过程\n完全不同的内容\n---\n答案";
+    let (think, ans) = assistant_message_think_answer_for_display_ex_with_body_strings(
+        text,
+        "推理甲",
+        None,
+        Locale::ZhHans,
+        true,
+    );
+    assert_eq!(think, "推理甲");
+    assert!(ans.contains("### 思考过程"), "{ans:?}");
+    assert!(ans.contains("完全不同的内容"), "{ans:?}");
+}
+
+#[test]
+fn echo_section_kept_without_separator() {
+    use super::assistant_message_think_answer_for_display_ex_with_body_strings;
+    // 无 `---` 分隔 → 无法界定回显章节边界，保守不剥。
+    let text = "### 思考过程\n推理甲\n答案";
+    let (think, ans) = assistant_message_think_answer_for_display_ex_with_body_strings(
+        text,
+        "推理甲",
+        None,
+        Locale::ZhHans,
+        true,
+    );
+    assert_eq!(think, "推理甲");
+    assert!(ans.contains("### 思考过程"), "{ans:?}");
+}
+
+#[test]
+fn echo_strip_handles_whitespace_diff() {
+    use super::assistant_message_think_answer_for_display_ex_with_body_strings;
+    // 回显与 reasoning 空白排版不同（\n\n vs \n）仍视为重复并剥除。
+    let reasoning = "第一段。\n\n第二段。";
+    let text = "### 思考过程\n第一段。\n第二段。\n---\n答案";
+    let (think, ans) = assistant_message_think_answer_for_display_ex_with_body_strings(
+        text,
+        reasoning,
+        None,
+        Locale::ZhHans,
+        true,
+    );
+    assert_eq!(think, "第一段。\n\n第二段。");
+    assert_eq!(ans, "答案", "{ans:?}");
+}

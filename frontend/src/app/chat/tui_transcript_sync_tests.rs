@@ -625,6 +625,24 @@ fn markdown_off_thinking_block_escapes_markup() {
 }
 
 #[test]
+fn echo_thinking_section_not_duplicated_in_answer_bubble() {
+    // 模型在正文回显「### 思考过程」章节且与 reasoning 一致 → 正文段剥除，思考块只留一份。
+    let mut m = message("a1", "assistant", "### 思考过程\n推理内容\n---\n这是答案");
+    m.reasoning_text = "推理内容".to_string();
+    let html = build_html_opts(std::slice::from_ref(&m), None, &HashSet::new(), true, true);
+    assert!(
+        html.contains("chat-tui-think"),
+        "thinking block expected: {html}"
+    );
+    assert!(html.contains("推理内容"), "thinking in block: {html}");
+    assert!(
+        !html.contains("### 思考过程"),
+        "echo section must be stripped from the answer body: {html}"
+    );
+    assert!(html.contains("这是答案"), "real answer kept: {html}");
+}
+
+#[test]
 fn thinking_rendered_as_own_section_above_answer() {
     // 思考过程单独成段（独立气泡），正文段紧随其后，同一 wrap 内两个 section。
     let m = assistant_with_reasoning("a1", "思考内容", "答案内容", false);

@@ -141,6 +141,65 @@ fn trim_inline_thinking_openers(mut s: &str) -> &str {
     s
 }
 
+/// 模型在 `content` 里回显思考章节的标题形态（与 SSE `reasoning_text` 分轨并存导致展示重复）。
+const ECHO_SECTION_HEADINGS: &[&str] = &[
+    "### 思考过程",
+    "### Thinking",
+    "**思考过程**",
+    "**Thinking**",
+    "思考过程：",
+];
+
+fn is_thematic_break_line(line: &str) -> bool {
+    let t = line.trim();
+    if t.len() < 3 {
+        return false;
+    }
+    let marker = t.as_bytes()[0];
+    if marker != b'-' && marker != b'*' && marker != b'_' {
+        return false;
+    }
+    t.bytes().all(|b| b == marker || b == b' ')
+}
+
+/// **展示层去重**：终答开头若为与 `thinking` 内容一致的「思考回显」章节（标题 + 正文 + `---`），
+/// 则剥除该段，避免 `reasoning_text` 与正文回显重复展示。只影响展示，不改存储。
+///
+/// 保守判定：标题须在（trim 后）开头；须存在 `---` 分隔行；章节正文须与 `thinking`
+/// 模糊一致（空白归一后互相包含/相等）；任一不满足则原样返回。
+pub(crate) fn strip_echoed_thinking_section(answer: &str, thinking: &str) -> String {
+    let trimmed = answer.trim_start();
+    if thinking.trim().is_empty() {
+        return answer.to_string();
+    }
+    let Some(heading) = ECHO_SECTION_HEADINGS
+        .iter()
+        .find(|h| trimmed.starts_with(**h))
+    else {
+        return answer.to_string();
+    };
+    let after_heading = trimmed[heading.len()..]
+        .strip_prefix('\n')
+        .unwrap_or(&trimmed[heading.len()..]);
+    let Some(sep_idx) = after_heading.lines().position(is_thematic_break_line) else {
+        return answer.to_string();
+    };
+    let section_body = after_heading
+        .lines()
+        .take(sep_idx)
+        .collect::<Vec<_>>()
+        .join("\n");
+    if !crate::message_dedupe::assistant_texts_fuzzy_duplicate(&section_body, thinking) {
+        return answer.to_string();
+    }
+    let rest = after_heading
+        .lines()
+        .skip(sep_idx + 1)
+        .collect::<Vec<_>>()
+        .join("\n");
+    rest.trim_start().to_string()
+}
+
 /// 优先已存 `reasoning_text`；否则尝试从 `text` 中按内联闭合标记拆出思维链与终答原文（供 Markdown 与折叠长度用）。
 ///
 /// `streaming=true` 时未闭合 `<think>` 开标签视为思维链残片（归入思维链，不泄漏裸标签）；

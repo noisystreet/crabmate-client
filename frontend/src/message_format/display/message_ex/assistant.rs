@@ -135,10 +135,17 @@ fn compute_think_answer_parts(
         is_streaming,
     );
     let answer = assistant_text_for_display(t_body, is_streaming, loc, apply_filters);
-    if apply_filters {
+    let (think, ans) = if apply_filters {
         assistant_body_with_filters(loc, is_streaming, r_body, t_body, answer)
     } else {
         assistant_body_without_filters(r_body, answer)
+    };
+    // 展示层去重：模型在正文回显的「### 思考过程」章节与 reasoning 重复时剥除（不动存储）。
+    if apply_filters {
+        let ans = super::super::thinking_strip::strip_echoed_thinking_section(&ans, &think);
+        (think, ans)
+    } else {
+        (think, ans)
     }
 }
 
