@@ -412,6 +412,30 @@
   word-break: break-word;
 }
 
+/* —— 思考段（独立气泡）：弱化卡片，内嵌 details 不再自带边框 —— */
+.chat-tui-turn--think {
+  padding: var(--space-1, 0.25rem) var(--space-inset-msg, 0.85rem);
+  background: color-mix(in srgb, var(--surface) 88%, var(--bg-elevated));
+  border-color: color-mix(in srgb, var(--border-subtle) 72%, var(--surface));
+  box-shadow: none;
+}
+
+.app-shell-ds .chat-tui-turn--think {
+  background: color-mix(in srgb, var(--surface) 92%, var(--bg));
+  border-color: color-mix(in srgb, var(--border-subtle) 66%, var(--surface));
+}
+
+.chat-tui-turn--think .chat-tui-think {
+  border: none;
+  background: transparent;
+  margin-bottom: 0;
+}
+
+/* 思考阶段正文尚未开始：隐藏空的正文气泡，首个正文块到达时自动显示 */
+.chat-tui-body--answer:empty {
+  display: none;
+}
+
 /* —— 系统 —— */
 .chat-tui-turn--system,
 .chat-tui-turn--other {

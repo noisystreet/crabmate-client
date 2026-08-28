@@ -260,12 +260,24 @@ impl Default for TuiBodyChunks {
 }
 
 impl TuiBodyChunks {
+    /// 完整 HTML（思维链折叠块 + 终答）。思考块单独成段后 lib 不再使用，仅测试断言旧组合输出。
     #[must_use]
+    #[cfg(test)]
     pub fn to_inner_html(&self) -> String {
         let mut out = String::new();
         if let Some(think) = &self.think {
             out.push_str(&think.to_details_html());
         }
+        out.push_str(&self.answer_to_inner_html());
+        out
+    }
+
+    /// 仅终答部分（闭合块 + 活跃块，不含思维链折叠块）。
+    ///
+    /// 思考块单独成段渲染（独立气泡）时，正文段用此输出。
+    #[must_use]
+    pub fn answer_to_inner_html(&self) -> String {
+        let mut out = String::new();
         for chunk in &self.closed {
             out.push_str(chunk);
         }
