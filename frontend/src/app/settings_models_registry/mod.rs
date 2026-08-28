@@ -271,6 +271,8 @@ fn SettingsModelsRegistryAddFormPrimaryFields(s: RegistryAddFormPrimarySignals) 
 #[derive(Clone)]
 struct RegistryAddFormDetailSignals {
     locale: RwSignal<Locale>,
+    dialog_mode: RwSignal<Option<RegistryPresetDialogKind>>,
+    saved_model_presets: RwSignal<Vec<SavedModelPreset>>,
     new_api_key: RwSignal<String>,
     new_ctx_tokens: RwSignal<String>,
     new_temperature: RwSignal<String>,
@@ -286,6 +288,8 @@ struct RegistryAddFormDetailSignals {
 fn SettingsModelsRegistryAddFormDetailFields(s: RegistryAddFormDetailSignals) -> impl IntoView {
     let RegistryAddFormDetailSignals {
         locale,
+        dialog_mode,
+        saved_model_presets,
         new_api_key,
         new_ctx_tokens,
         new_temperature,
@@ -295,6 +299,17 @@ fn SettingsModelsRegistryAddFormDetailFields(s: RegistryAddFormDetailSignals) ->
         id_temp,
         id_thinking,
     } = s;
+    // 编辑已有密钥的预设时提示「留空保持不变」，避免用户误以为必须重新输入。
+    let api_key_placeholder = Memo::new(move |_| match dialog_mode.get() {
+        Some(RegistryPresetDialogKind::Edit(i)) => {
+            let has_key = saved_model_presets
+                .get()
+                .get(i)
+                .is_some_and(|p| p.has_api_key);
+            has_key.then(|| i18n::settings_models_ph_api_key_keep(locale.get()))
+        }
+        _ => None,
+    });
     view! {
         <LlmTemperatureFieldWithId
             locale
@@ -345,6 +360,7 @@ fn SettingsModelsRegistryAddFormDetailFields(s: RegistryAddFormDetailSignals) ->
                 id=id_key.clone()
                 data-testid="settings-models-new-key"
                 prop:value=move || new_api_key.get()
+                prop:placeholder=move || api_key_placeholder.get().unwrap_or_default()
                 on:input=move |ev| new_api_key.set(event_target_value(&ev))
             />
         </div>
@@ -456,6 +472,8 @@ fn SettingsModelsRegistryAddForm(s: RegistryAddFormSignals) -> impl IntoView {
             } />
             <SettingsModelsRegistryAddFormDetailFields s=RegistryAddFormDetailSignals {
                 locale,
+                dialog_mode,
+                saved_model_presets,
                 new_api_key,
                 new_ctx_tokens,
                 new_temperature,
