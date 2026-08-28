@@ -699,6 +699,14 @@ pub fn settings_models_label_api_key(l: Locale) -> &'static str {
     }
 }
 
+/// 编辑已保存模型且本机已有该预设密钥时：提示留空保持不变。
+pub fn settings_models_ph_api_key_keep(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "已设置密钥，留空则保持不变",
+        Locale::En => "Key already set; leave empty to keep it",
+    }
+}
+
 pub fn settings_models_label_context_tokens(l: Locale) -> &'static str {
     match l {
         Locale::ZhHans => "上下文 token（可选）",
