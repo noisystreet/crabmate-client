@@ -1,6 +1,6 @@
 //! TUI transcript：每回合独立 wrap（section + 操作条）；工具为一行摘要；流式只对 live 按块 patch（闭合冻结、活跃块行内增强）。
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::i18n::Locale;
 use crate::markdown::plaintext_to_safe_html;
@@ -14,6 +14,7 @@ use super::tui_line_markdown::{
     TuiBodyChunks, TuiBodyPatch, open_active_block_class, parse_tui_body_chunks_with,
     plan_tui_body_patch, render_open_active_html,
 };
+use super::tui_thinking_block::{message_think_answer_display_text, thinking_details_html};
 use super::tui_tool_process::{tool_process_body_html, tool_row_live_fields};
 use crate::visible_messages::tui_should_render_message;
 
@@ -336,31 +337,29 @@ fn message_body_chunks(message: &StoredMessage, ctx: &TuiRenderCtx<'_>) -> TuiBo
             markdown_render: ctx.markdown_render,
         };
     }
-    let text = message_display_text(
-        message,
-        ctx.session_id,
-        ctx.overlay,
-        ctx.locale,
-        ctx.apply_filters,
-    );
-    if message.role == "user"
-        && let Some((skill_id, task)) = crate::message_format::parse_user_skill_slash(&text)
-    {
-        let mut chunks = skill_slash_body_chunks(
-            &skill_id,
-            &task,
-            message_finalize_open_block(message),
-            ctx.markdown_render,
-            ctx.locale,
-        );
-        super::user_upload_images::append_user_upload_images(
-            &mut chunks,
-            &message.image_urls,
-            ctx.locale,
-        );
-        return chunks;
-    }
     if message.role == "user" {
+        let text = message_display_text(
+            message,
+            ctx.session_id,
+            ctx.overlay,
+            ctx.locale,
+            ctx.apply_filters,
+        );
+        if let Some((skill_id, task)) = crate::message_format::parse_user_skill_slash(&text) {
+            let mut chunks = skill_slash_body_chunks(
+                &skill_id,
+                &task,
+                message_finalize_open_block(message),
+                ctx.markdown_render,
+                ctx.locale,
+            );
+            super::user_upload_images::append_user_upload_images(
+                &mut chunks,
+                &message.image_urls,
+                ctx.locale,
+            );
+            return chunks;
+        }
         let mut chunks = user_text_body_chunks(
             &text,
             message_finalize_open_block(message),
@@ -373,11 +372,31 @@ fn message_body_chunks(message: &StoredMessage, ctx: &TuiRenderCtx<'_>) -> TuiBo
         );
         return chunks;
     }
-    parse_tui_body_chunks_with(
-        &text,
+    // 助手/其他：思维链折叠块 + 终答正文（非助手角色思维链为空，行为不变）。
+    let (thinking, answer) = message_think_answer_display_text(
+        message,
+        ctx.session_id,
+        ctx.overlay,
+        ctx.locale,
+        ctx.apply_filters,
+    );
+    let mut chunks = parse_tui_body_chunks_with(
+        &answer,
         message_finalize_open_block(message),
         ctx.markdown_render,
-    )
+    );
+    if !thinking.trim().is_empty() {
+        let auto_open = message
+            .state
+            .as_ref()
+            .is_some_and(StoredMessageState::is_loading);
+        let open = auto_open || ctx.think_open.contains(&message.id);
+        chunks.closed.insert(
+            0,
+            thinking_details_html(&thinking, open, ctx.markdown_render, ctx.locale),
+        );
+    }
+    chunks
 }
 
 struct TurnSectionArgs<'a> {
@@ -437,32 +456,17 @@ fn turn_section_html(args: TurnSectionArgs<'_>) -> String {
 }
 
 #[must_use]
-#[allow(clippy::too_many_arguments)] // 与 full_rebuild_plan 同构；重构为 ctx struct 属大改动
-pub(crate) fn build_tui_transcript_html(
-    messages: &[StoredMessage],
-    session_id: &str,
-    overlay: Option<&StreamTextOverlay>,
-    locale: Locale,
-    apply_assistant_display_filters: bool,
-    markdown_render: bool,
-    show_turn_context_inject: bool,
-    tool_chunks: &HashMap<String, String>,
-    tool_jobs: &HashMap<String, ToolJobState>,
-) -> String {
-    let turns = mountable_turns(messages, session_id, overlay, show_turn_context_inject);
+fn build_tui_transcript_html(messages: &[StoredMessage], ctx: &TuiRenderCtx<'_>) -> String {
+    let turns = mountable_turns(
+        messages,
+        ctx.session_id,
+        ctx.overlay,
+        ctx.show_turn_context_inject,
+    );
     if turns.is_empty() {
-        return empty_transcript_html(locale);
+        return empty_transcript_html(ctx.locale);
     }
-    let ctx = TuiRenderCtx {
-        session_id,
-        overlay,
-        locale,
-        apply_filters: apply_assistant_display_filters,
-        markdown_render,
-        tool_chunks,
-        tool_jobs,
-    };
-    let live_id = live_message_id(messages, overlay);
+    let live_id = live_message_id(messages, ctx.overlay);
     let mut html = String::new();
     for &(msg_idx, message) in &turns {
         let is_live = live_id.as_deref() == Some(message.id.as_str());
@@ -470,7 +474,7 @@ pub(crate) fn build_tui_transcript_html(
             message,
             msg_idx,
             is_live,
-            ctx: &ctx,
+            ctx,
         }));
     }
     html
@@ -508,60 +512,35 @@ fn live_tool_has_details_flag(
     Some(tool_row_live_fields(message, locale, live).wants_details())
 }
 
-#[allow(clippy::too_many_arguments)] // 与 build_tui_transcript_html 同构；保持两者签名一致便于透传
-fn full_rebuild_plan(
-    messages: &[StoredMessage],
-    session_id: &str,
-    overlay: Option<&StreamTextOverlay>,
-    locale: Locale,
-    apply_assistant_display_filters: bool,
-    markdown_render: bool,
-    show_turn_context_inject: bool,
-    tool_chunks: &HashMap<String, String>,
-    tool_jobs: &HashMap<String, ToolJobState>,
-) -> TuiSyncPlan {
-    let turns = mountable_turns(messages, session_id, overlay, show_turn_context_inject);
-    let live_id = live_message_id(messages, overlay);
+fn full_rebuild_plan(messages: &[StoredMessage], ctx: &TuiRenderCtx<'_>) -> TuiSyncPlan {
+    let turns = mountable_turns(
+        messages,
+        ctx.session_id,
+        ctx.overlay,
+        ctx.show_turn_context_inject,
+    );
+    let live_id = live_message_id(messages, ctx.overlay);
     let committed_key = committed_fingerprint(&turns, live_id.as_deref());
     let mounted_ids: Vec<String> = turns.iter().map(|(_, m)| m.id.clone()).collect();
-    let ctx = TuiRenderCtx {
-        session_id,
-        overlay,
-        locale,
-        apply_filters: apply_assistant_display_filters,
-        markdown_render,
-        tool_chunks,
-        tool_jobs,
-    };
     let live_body = live_id.as_ref().and_then(|id| {
         // 仅当 live 已可挂载时缓存 body（空壳未挂载则无 live_body）
         turns
             .iter()
             .find(|(_, m)| m.id == *id)
-            .map(|(_, m)| message_body_chunks(m, &ctx))
+            .map(|(_, m)| message_body_chunks(m, ctx))
     });
     let live_tool_has_details =
-        live_tool_has_details_flag(messages, live_id.as_deref(), locale, tool_chunks);
+        live_tool_has_details_flag(messages, live_id.as_deref(), ctx.locale, ctx.tool_chunks);
     TuiSyncPlan {
         next: TuiMountState {
-            session_id: session_id.to_string(),
+            session_id: ctx.session_id.to_string(),
             mounted_ids,
             committed_key,
             live_id,
             live_body,
             live_tool_has_details,
         },
-        full_html: Some(build_tui_transcript_html(
-            messages,
-            session_id,
-            overlay,
-            locale,
-            apply_assistant_display_filters,
-            markdown_render,
-            show_turn_context_inject,
-            tool_chunks,
-            tool_jobs,
-        )),
+        full_html: Some(build_tui_transcript_html(messages, ctx)),
         promote_id: None,
         append_sections: Vec::new(),
         refresh_bodies: Vec::new(),
@@ -596,8 +575,11 @@ struct TuiRenderCtx<'a> {
     locale: Locale,
     apply_filters: bool,
     markdown_render: bool,
+    show_turn_context_inject: bool,
     tool_chunks: &'a HashMap<String, String>,
     tool_jobs: &'a HashMap<String, ToolJobState>,
+    /// 用户**手动展开**的思维链折叠块（message id 集合；`refresh` 重建 body 时保持展开）。
+    think_open: &'a HashSet<String>,
 }
 
 fn append_new_turn_sections(
@@ -793,6 +775,8 @@ pub(crate) struct PlanTuiSyncArgs<'a> {
     pub show_turn_context_inject: bool,
     pub tool_chunks: &'a HashMap<String, String>,
     pub tool_jobs: &'a HashMap<String, ToolJobState>,
+    /// 用户**手动展开**的思维链折叠块（message id 集合）。
+    pub think_open: &'a HashSet<String>,
 }
 
 /// 规划 transcript DOM 更新。
@@ -809,44 +793,27 @@ pub(crate) fn plan_tui_sync(args: PlanTuiSyncArgs<'_>) -> TuiSyncPlan {
         show_turn_context_inject,
         tool_chunks,
         tool_jobs,
+        think_open,
     } = args;
     let turns = mountable_turns(messages, session_id, overlay, show_turn_context_inject);
-    let Some(prev) = prev else {
-        return full_rebuild_plan(
-            messages,
-            session_id,
-            overlay,
-            locale,
-            apply_assistant_display_filters,
-            markdown_render,
-            show_turn_context_inject,
-            tool_chunks,
-            tool_jobs,
-        );
-    };
-    if must_full_rebuild(prev, &turns, session_id) {
-        return full_rebuild_plan(
-            messages,
-            session_id,
-            overlay,
-            locale,
-            apply_assistant_display_filters,
-            markdown_render,
-            show_turn_context_inject,
-            tool_chunks,
-            tool_jobs,
-        );
-    }
-
     let ctx = TuiRenderCtx {
         session_id,
         overlay,
         locale,
         apply_filters: apply_assistant_display_filters,
         markdown_render,
+        show_turn_context_inject,
         tool_chunks,
         tool_jobs,
+        think_open,
     };
+    let Some(prev) = prev else {
+        return full_rebuild_plan(messages, &ctx);
+    };
+    if must_full_rebuild(prev, &turns, session_id) {
+        return full_rebuild_plan(messages, &ctx);
+    }
+
     let live_id = live_message_id(messages, overlay);
     let committed_key = committed_fingerprint(&turns, live_id.as_deref());
     let append_sections = append_new_turn_sections(prev, &turns, live_id.as_deref(), &ctx);

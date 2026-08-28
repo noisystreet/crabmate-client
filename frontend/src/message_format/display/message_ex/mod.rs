@@ -9,6 +9,8 @@ use crate::storage::{StoredMessage, StoredMessageState};
 
 use assistant::{
     assistant_message_text_for_display_ex, assistant_message_text_for_display_ex_with_body,
+    assistant_message_think_answer_for_display_ex,
+    assistant_message_think_answer_for_display_ex_with_body,
 };
 use parts::{system_text_for_chat_display, user_text_for_chat_display};
 
@@ -35,6 +37,31 @@ pub fn message_text_for_display_ex(
     }
 }
 
+/// 与 [`message_text_for_display_ex`] 相同，但助手消息返回拆分后的（思维链, 终答）；其余角色返回（空, 正文）。
+///
+/// 非助手消息的拆分结果与 `message_text_for_display_ex` 拼接结果完全一致（空思维链直接返回正文）。
+pub(crate) fn message_think_answer_for_display_ex(
+    m: &StoredMessage,
+    loc: Locale,
+    apply_assistant_display_filters: bool,
+) -> (String, String) {
+    if m.is_tool {
+        return (String::new(), stored_tool_message_compact_text(m, loc));
+    }
+    if m.role == "assistant" {
+        assistant_message_think_answer_for_display_ex(m, loc, apply_assistant_display_filters)
+    } else if m.role == "user" {
+        (String::new(), user_text_for_chat_display(&m.text))
+    } else if m.role == "system" {
+        (
+            String::new(),
+            system_text_for_chat_display(m.text.as_str(), loc),
+        )
+    } else {
+        (String::new(), m.text.clone())
+    }
+}
+
 /// 助手展示管道：与 [`assistant_message_text_for_display_ex`] 一致，但允许调用方传入合并后的正文/思维链（如 Web SSE overlay），避免克隆整条消息。
 pub(crate) fn assistant_message_text_for_display_ex_with_body_strings(
     text: &str,
@@ -44,6 +71,23 @@ pub(crate) fn assistant_message_text_for_display_ex_with_body_strings(
     apply_assistant_display_filters: bool,
 ) -> String {
     assistant_message_text_for_display_ex_with_body(
+        text,
+        reasoning_text,
+        state,
+        loc,
+        apply_assistant_display_filters,
+    )
+}
+
+/// 与 [`assistant_message_text_for_display_ex_with_body_strings`] 相同语义，但返回拆分后的（思维链, 终答）。
+pub(crate) fn assistant_message_think_answer_for_display_ex_with_body_strings(
+    text: &str,
+    reasoning_text: &str,
+    state: Option<&StoredMessageState>,
+    loc: Locale,
+    apply_assistant_display_filters: bool,
+) -> (String, String) {
+    assistant_message_think_answer_for_display_ex_with_body(
         text,
         reasoning_text,
         state,

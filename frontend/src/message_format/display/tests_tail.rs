@@ -253,3 +253,77 @@ fn incomplete_plan_json_not_streaming_is_hidden() {
         "incomplete plan json should not leak when not streaming: {out}"
     );
 }
+
+#[test]
+fn think_answer_split_matches_joined_for_reasoning_and_answer() {
+    use super::{
+        assistant_message_text_for_display_ex_with_body_strings,
+        assistant_message_think_answer_for_display_ex_with_body_strings,
+    };
+    let (think, ans) = assistant_message_think_answer_for_display_ex_with_body_strings(
+        "这是回答\n第二段",
+        "先思考一下",
+        None,
+        Locale::ZhHans,
+        true,
+    );
+    assert_eq!(think, "先思考一下");
+    assert_eq!(ans, "这是回答\n第二段");
+    let joined = assistant_message_text_for_display_ex_with_body_strings(
+        "这是回答\n第二段",
+        "先思考一下",
+        None,
+        Locale::ZhHans,
+        true,
+    );
+    assert_eq!(joined, "先思考一下\n\n这是回答\n第二段");
+}
+
+#[test]
+fn think_answer_split_answers_only_when_no_reasoning() {
+    use super::{
+        assistant_message_text_for_display_ex_with_body_strings,
+        assistant_message_think_answer_for_display_ex_with_body_strings,
+    };
+    let (think, ans) = assistant_message_think_answer_for_display_ex_with_body_strings(
+        "纯回答",
+        "",
+        None,
+        Locale::ZhHans,
+        true,
+    );
+    assert_eq!(think, "");
+    assert_eq!(ans, "纯回答");
+    assert_eq!(
+        assistant_message_text_for_display_ex_with_body_strings(
+            "纯回答",
+            "",
+            None,
+            Locale::ZhHans,
+            true
+        ),
+        "纯回答",
+    );
+}
+
+#[test]
+fn think_answer_split_never_leaks_plan_json_into_thinking_block() {
+    use super::assistant_message_think_answer_for_display_ex_with_body_strings;
+    let reasoning = r#"{ "type": "agent_reply_plan", "version": 1, "steps": [ { "id": "a", "description": "步一" } ] }"#;
+    let (think, ans) = assistant_message_think_answer_for_display_ex_with_body_strings(
+        "补充说明",
+        reasoning,
+        None,
+        Locale::ZhHans,
+        true,
+    );
+    assert!(
+        think.is_empty(),
+        "plan json must not become a thinking block: {think:?}"
+    );
+    assert!(
+        !ans.contains("agent_reply_plan"),
+        "raw json must not leak into answer: {ans:?}"
+    );
+    assert!(ans.contains("补充说明"), "{ans:?}");
+}

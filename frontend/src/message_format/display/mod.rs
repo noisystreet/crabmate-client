@@ -7,7 +7,9 @@ mod plan_fence;
 mod thinking_strip;
 
 pub(crate) use message_ex::{
-    assistant_message_text_for_display_ex_with_body_strings, message_text_for_display_ex,
+    assistant_message_text_for_display_ex_with_body_strings,
+    assistant_message_think_answer_for_display_ex_with_body_strings, message_text_for_display_ex,
+    message_think_answer_for_display_ex,
 };
 #[cfg(test)]
 pub(crate) use plan_fence::assistant_text_for_display;

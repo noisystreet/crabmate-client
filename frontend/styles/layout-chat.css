@@ -356,6 +356,62 @@
   box-shadow: none;
 }
 
+/* —— 思维链折叠块（reasoning_text / <think> 标签拆出） —— */
+.chat-tui-think {
+  box-sizing: border-box;
+  margin-bottom: var(--space-2, 0.5rem);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md, 8px);
+  background: color-mix(in srgb, var(--bg-elevated) 58%, transparent);
+}
+
+.chat-tui-think-summary {
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  padding: 0.35rem 0.6rem;
+  font-size: var(--text-xs, 12px);
+  font-weight: var(--font-weight-label, 600);
+  letter-spacing: 0.04em;
+  color: color-mix(in srgb, var(--muted) 88%, transparent);
+}
+
+/* 隐藏默认三角，用「思维」前缀 + 展开/收起指示符替代 */
+.chat-tui-think-summary::-webkit-details-marker {
+  display: none;
+}
+
+.chat-tui-think-summary::before {
+  content: "◈";
+  font-size: 0.85em;
+  color: color-mix(in srgb, var(--accent) 72%, var(--muted));
+}
+
+.chat-tui-think-summary::after {
+  content: "▾";
+  margin-left: auto;
+  font-size: 0.8em;
+  color: color-mix(in srgb, var(--muted) 60%, transparent);
+  transition: transform 0.18s ease;
+}
+
+.chat-tui-think[open] > .chat-tui-think-summary::after {
+  transform: rotate(180deg);
+}
+
+.chat-tui-think-body {
+  padding: 0.2rem 0.7rem 0.6rem;
+  border-top: 1px solid color-mix(in srgb, var(--border-subtle) 62%, transparent);
+  color: color-mix(in srgb, var(--text) 82%, var(--muted));
+  font-size: var(--text-xs, 12px);
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 /* —— 系统 —— */
 .chat-tui-turn--system,
 .chat-tui-turn--other {

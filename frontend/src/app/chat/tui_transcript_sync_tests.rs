@@ -1,7 +1,7 @@
 use super::*;
 use crate::storage::StoredMessageState;
 use crate::stream_text_overlay::StreamTextOverlay;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 fn sync(
     prev: Option<&TuiMountState>,
@@ -9,6 +9,24 @@ fn sync(
     session_id: &str,
     overlay: Option<&StreamTextOverlay>,
     tool_chunks: &HashMap<String, String>,
+) -> TuiSyncPlan {
+    sync_with_think(
+        prev,
+        messages,
+        session_id,
+        overlay,
+        tool_chunks,
+        &HashSet::new(),
+    )
+}
+
+fn sync_with_think(
+    prev: Option<&TuiMountState>,
+    messages: &[StoredMessage],
+    session_id: &str,
+    overlay: Option<&StreamTextOverlay>,
+    tool_chunks: &HashMap<String, String>,
+    think_open: &HashSet<String>,
 ) -> TuiSyncPlan {
     let empty_jobs = HashMap::new();
     plan_tui_sync(PlanTuiSyncArgs {
@@ -22,6 +40,7 @@ fn sync(
         show_turn_context_inject: false,
         tool_chunks,
         tool_jobs: &empty_jobs,
+        think_open,
     })
 }
 
@@ -142,17 +161,7 @@ fn finished_assistant_bold_becomes_strong() {
         message("u1", "user", "你好"),
         message("a1", "assistant", "**原样**"),
     ];
-    let output = build_tui_transcript_html(
-        &messages,
-        "s1",
-        None,
-        Locale::ZhHans,
-        false,
-        true,
-        false,
-        &HashMap::new(),
-        &HashMap::new(),
-    );
+    let output = build_html(&messages, None, &HashSet::new());
     assert!(output.contains("data-tui-msg-id"), "got {output}");
     assert!(output.contains("chat-tui-turn--user"), "got {output}");
     assert!(output.contains("chat-tui-turn--assistant"), "got {output}");
@@ -180,17 +189,7 @@ fn tool_turn_uses_tool_modifier_without_generic_role_word() {
     let mut tool = message("t1", "assistant", "ok");
     tool.is_tool = true;
     tool.tool_name = Some("read_file".to_string());
-    let output = build_tui_transcript_html(
-        &[tool],
-        "s1",
-        None,
-        Locale::ZhHans,
-        false,
-        true,
-        false,
-        &HashMap::new(),
-        &HashMap::new(),
-    );
+    let output = build_html(&[tool], None, &HashSet::new());
     assert!(output.contains("chat-tui-turn--tool"), "got {output}");
     assert!(output.contains("chat-tui-tool-process"), "got {output}");
     assert!(output.contains("read_file"), "got {output}");
@@ -271,18 +270,7 @@ fn live_tool_chunk_uses_tool_row_patch_not_replace_all() {
 #[test]
 fn skill_slash_chip_stays_on_same_line_as_task() {
     let user = message("u1", "user", "/rust-style 分析一下");
-    let empty = HashMap::new();
-    let html = build_tui_transcript_html(
-        std::slice::from_ref(&user),
-        "s1",
-        None,
-        Locale::ZhHans,
-        false,
-        true,
-        false,
-        &empty,
-        &HashMap::new(),
-    );
+    let html = build_html(std::slice::from_ref(&user), None, &HashSet::new());
     assert!(html.contains("msg-skill-invoke"), "{html}");
     assert!(html.contains("rust-style"), "{html}");
     assert!(html.contains("分析一下"), "{html}");
@@ -306,18 +294,7 @@ fn skill_slash_chip_stays_on_same_line_as_task() {
 #[test]
 fn file_ref_chip_stays_on_same_line_as_following_text() {
     let user = message("u1", "user", "@.gitignore 这个文件是什么");
-    let empty = HashMap::new();
-    let html = build_tui_transcript_html(
-        std::slice::from_ref(&user),
-        "s1",
-        None,
-        Locale::ZhHans,
-        false,
-        true,
-        false,
-        &empty,
-        &HashMap::new(),
-    );
+    let html = build_html(std::slice::from_ref(&user), None, &HashSet::new());
     assert!(html.contains("msg-file-ref"), "{html}");
     assert!(html.contains(".gitignore"), "{html}");
     assert!(html.contains("这个文件是什么"), "{html}");
@@ -340,18 +317,7 @@ fn file_ref_chip_stays_on_same_line_as_following_text() {
 fn user_bubble_shows_chat_upload_images() {
     let mut user = message("u1", "user", "看图");
     user.image_urls = vec!["/uploads/u1_2_3.png".into(), "/uploads/../x".into()];
-    let empty = HashMap::new();
-    let html = build_tui_transcript_html(
-        std::slice::from_ref(&user),
-        "s1",
-        None,
-        Locale::ZhHans,
-        false,
-        true,
-        false,
-        &empty,
-        &HashMap::new(),
-    );
+    let html = build_html(std::slice::from_ref(&user), None, &HashSet::new());
     assert!(html.contains("chat-tui-user-images"), "{html}");
     assert!(html.contains("src=\"/uploads/u1_2_3.png\""), "{html}");
     assert!(html.contains("alt=\"附图 u1_2_3.png\""), "{html}");
@@ -366,4 +332,243 @@ fn committed_fingerprint_includes_user_image_urls() {
     let a = committed_fingerprint(&[(0, &plain)], None);
     let b = committed_fingerprint(&[(0, &with_img)], None);
     assert_ne!(a, b);
+}
+
+fn assistant_with_reasoning(id: &str, reasoning: &str, text: &str, loading: bool) -> StoredMessage {
+    let mut m = message(id, "assistant", text);
+    m.reasoning_text = reasoning.to_string();
+    m.state = if loading {
+        Some(StoredMessageState::Loading)
+    } else {
+        None
+    };
+    m
+}
+
+fn build_html(
+    messages: &[StoredMessage],
+    overlay: Option<&StreamTextOverlay>,
+    think_open: &HashSet<String>,
+) -> String {
+    let tool_chunks = HashMap::new();
+    let tool_jobs = HashMap::new();
+    build_tui_transcript_html(
+        messages,
+        &TuiRenderCtx {
+            session_id: "s1",
+            overlay,
+            locale: Locale::ZhHans,
+            apply_filters: false,
+            markdown_render: true,
+            show_turn_context_inject: false,
+            tool_chunks: &tool_chunks,
+            tool_jobs: &tool_jobs,
+            think_open,
+        },
+    )
+}
+
+fn render_one(m: &StoredMessage, overlay: Option<&StreamTextOverlay>) -> String {
+    render_one_with_think(m, overlay, &HashSet::new())
+}
+
+fn render_one_with_think(
+    m: &StoredMessage,
+    overlay: Option<&StreamTextOverlay>,
+    think_open: &HashSet<String>,
+) -> String {
+    build_html(std::slice::from_ref(m), overlay, think_open)
+}
+
+#[test]
+fn assistant_reasoning_renders_collapsed_thinking_details() {
+    let m = assistant_with_reasoning("a1", "先检查类型\n再写实现", "这是答案", false);
+    let html = render_one(&m, None);
+    assert!(html.contains("chat-tui-think"), "got {html}");
+    assert!(
+        html.contains("<details class=\"chat-tui-think\">"),
+        "finalized details must be collapsed (no open attr): {html}"
+    );
+    assert!(html.contains("思考过程"), "summary label, got {html}");
+    assert!(html.contains("先检查类型"), "thinking body, got {html}");
+    assert!(html.contains("这是答案"), "answer body, got {html}");
+}
+
+#[test]
+fn loading_assistant_reasoning_details_open_and_overlay_streams() {
+    let m = assistant_with_reasoning("a1", "", "", true);
+    let overlay = StreamTextOverlay {
+        session_id: "s1".to_string(),
+        message_id: "a1".to_string(),
+        answer: "正在回答".to_string(),
+        reasoning: "逐步推理中".to_string(),
+    };
+    let html = render_one(&m, Some(&overlay));
+    assert!(
+        html.contains("<details class=\"chat-tui-think\" open>"),
+        "live details must be open: {html}"
+    );
+    assert!(
+        html.contains("逐步推理中"),
+        "streamed reasoning, got {html}"
+    );
+    assert!(html.contains("正在回答"), "streamed answer, got {html}");
+    assert!(m.reasoning_text.is_empty(), "fixture sanity");
+}
+
+#[test]
+fn user_message_has_no_thinking_block() {
+    let u = message("u1", "user", "你好");
+    let html = render_one(&u, None);
+    assert!(!html.contains("chat-tui-think"), "got {html}");
+}
+
+#[test]
+fn reasoning_streaming_patch_replaces_details_body() {
+    // 思维链在 `<details>` 内，逐帧变化走整块 ReplaceAll（终答阶段恢复 Incremental）。
+    let m = assistant_with_reasoning("a1", "", "", true);
+    let messages = vec![m.clone()];
+    let overlay1 = StreamTextOverlay {
+        session_id: "s1".to_string(),
+        message_id: "a1".to_string(),
+        answer: String::new(),
+        reasoning: "推理第一步".to_string(),
+    };
+    let empty = HashMap::new();
+    let plan1 = sync(None, &messages, "s1", Some(&overlay1), &empty);
+    assert!(plan1.full_html.is_some());
+
+    let overlay2 = StreamTextOverlay {
+        session_id: "s1".to_string(),
+        message_id: "a1".to_string(),
+        answer: String::new(),
+        reasoning: "推理第一步，第二步".to_string(),
+    };
+    let plan2 = sync(Some(&plan1.next), &messages, "s1", Some(&overlay2), &empty);
+    assert!(plan2.full_html.is_none());
+    let live = plan2.live.expect("live patch");
+    match live.patch {
+        TuiBodyPatch::ReplaceAll { chunks } => {
+            let html = chunks.to_inner_html();
+            assert!(html.contains("chat-tui-think"), "got {html}");
+            assert!(html.contains("第二步"), "got {html}");
+        }
+        other => panic!("expected ReplaceAll for streaming thinking, got {other:?}"),
+    }
+}
+
+#[test]
+fn reasoning_transition_to_answer_is_incremental_after_freeze() {
+    // 思维链冻结后，终答增量恢复 Incremental（closed[0] 的 details 不再变化）。
+    let m = assistant_with_reasoning("a1", "推理完毕", "", true);
+    let messages = vec![m.clone()];
+    let empty = HashMap::new();
+    let overlay1 = StreamTextOverlay {
+        session_id: "s1".to_string(),
+        message_id: "a1".to_string(),
+        answer: "答".to_string(),
+        reasoning: "推理完毕".to_string(),
+    };
+    let plan1 = sync(None, &messages, "s1", Some(&overlay1), &empty);
+    assert!(plan1.full_html.is_some());
+
+    let overlay2 = StreamTextOverlay {
+        session_id: "s1".to_string(),
+        message_id: "a1".to_string(),
+        answer: "答案二".to_string(),
+        reasoning: "推理完毕".to_string(),
+    };
+    let plan2 = sync(Some(&plan1.next), &messages, "s1", Some(&overlay2), &empty);
+    assert!(plan2.full_html.is_none());
+    let live = plan2.live.expect("live patch");
+    match live.patch {
+        TuiBodyPatch::Incremental {
+            append_closed,
+            open_plain,
+        } => {
+            assert!(append_closed.is_empty());
+            assert_eq!(open_plain.as_deref(), Some("答案二"));
+        }
+        other => panic!("expected Incremental after thinking froze, got {other:?}"),
+    }
+}
+
+#[test]
+fn manually_opened_thinking_kept_open_after_turn_content_refresh() {
+    // 用户手动展开历史回合的思考块后，`plan_refresh_bodies` 重建 body 必须保持 `open`。
+    let a1 = assistant_with_reasoning("a1", "历史推理", "历史答案", false);
+    let messages = vec![a1];
+    let empty = HashMap::new();
+    let plan1 = sync(None, &messages, "s1", None, &empty);
+    assert!(plan1.full_html.is_some());
+    assert!(
+        plan1
+            .full_html
+            .as_ref()
+            .unwrap()
+            .contains("<details class=\"chat-tui-think\">"),
+        "finalized turn must start collapsed: {plan1:?}"
+    );
+
+    let mut think_open = HashSet::new();
+    think_open.insert("a1".to_string());
+    // 内容变化（committed_key 改变）→ 走 refresh_bodies 而非结构 no-op。
+    let a1_changed = assistant_with_reasoning("a1", "历史推理", "历史答案（更新）", false);
+    let plan2 = sync_with_think(
+        Some(&plan1.next),
+        std::slice::from_ref(&a1_changed),
+        "s1",
+        None,
+        &empty,
+        &think_open,
+    );
+    assert!(plan2.full_html.is_none());
+    let refreshed = plan2
+        .refresh_bodies
+        .iter()
+        .find(|p| p.message_id == "a1")
+        .expect("a1 body must be refreshed");
+    match &refreshed.patch {
+        TuiBodyPatch::ReplaceAll { chunks } => {
+            let html = chunks.to_inner_html();
+            assert!(
+                html.contains("<details class=\"chat-tui-think\" open>"),
+                "manually opened thinking must survive refresh: {html}"
+            );
+            assert!(html.contains("历史答案（更新）"), "got {html}");
+        }
+        other => panic!("expected ReplaceAll refresh, got {other:?}"),
+    }
+}
+
+#[test]
+fn non_opened_thinking_stays_collapsed_after_turn_content_refresh() {
+    // 未手动展开的回合，刷新后仍保持收起（默认行为不回退）。
+    // committed_fingerprint 按 text.len() 计，fixture 须让内容长度变化以触发 refresh。
+    let a1 = assistant_with_reasoning("a1", "推理", "答案 v1", false);
+    let empty = HashMap::new();
+    let plan1 = sync(None, std::slice::from_ref(&a1), "s1", None, &empty);
+    let a1_changed = assistant_with_reasoning("a1", "推理", "答案 v2 更长的尾巴", false);
+    let plan2 = sync(
+        Some(&plan1.next),
+        std::slice::from_ref(&a1_changed),
+        "s1",
+        None,
+        &empty,
+    );
+    let refreshed = plan2
+        .refresh_bodies
+        .iter()
+        .find(|p| p.message_id == "a1")
+        .expect("a1 body must be refreshed");
+    match &refreshed.patch {
+        TuiBodyPatch::ReplaceAll { chunks } => {
+            let html = chunks.to_inner_html();
+            assert!(
+                html.contains("<details class=\"chat-tui-think\">"),
+                "non-manual turn must stay collapsed: {html}"
+            );
+        }
+        other => panic!("expected ReplaceAll refresh, got {other:?}"),
+    }
 }
