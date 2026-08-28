@@ -223,56 +223,75 @@ fn apply_incremental_tail(
 }
 
 fn apply_body_patch(
-    body: &web_sys::HtmlElement,
+    wrap: &web_sys::HtmlElement,
     patch: TuiBodyPatch,
     markdown_render: bool,
 ) -> bool {
     match patch {
         TuiBodyPatch::ReplaceAll { chunks } => {
-            revoke_workspace_image_blobs(body);
-            body.set_inner_html(&chunks.to_inner_html());
+            // 思考段独立成段：先同步思考段（出现/消失/open 翻转），再整段替换正文段。
+            if !super::tui_thinking_block::update_think_section(wrap, chunks.think.as_ref()) {
+                return false;
+            }
+            let Some(body) = find_answer_body(wrap) else {
+                return false;
+            };
+            revoke_workspace_image_blobs(&body);
+            body.set_inner_html(&chunks.answer_to_inner_html());
             true
         }
         TuiBodyPatch::Incremental {
             append_closed,
             open_plain,
-        } => apply_incremental_tail(body, &append_closed, open_plain.as_deref(), markdown_render),
+        } => {
+            let Some(body) = find_answer_body(wrap) else {
+                return false;
+            };
+            apply_incremental_tail(
+                &body,
+                &append_closed,
+                open_plain.as_deref(),
+                markdown_render,
+            )
+        }
         TuiBodyPatch::ThinkBody {
             body_html,
             append_closed,
             open_plain,
         } => {
-            let Some(think_body) = body
-                .query_selector(".chat-tui-think-body")
+            // 只更新思考段正文（open/summary 稳定，不重渲整个 details）。
+            let Some(think_body) = wrap
+                .query_selector(".chat-tui-body--think .chat-tui-think-body")
                 .ok()
                 .flatten()
                 .and_then(|n| n.dyn_into::<web_sys::HtmlElement>().ok())
             else {
-                // DOM 尚无思考块（结构已变）→ 交由全量重建
+                // DOM 尚无思考段（结构已变）→ 交由全量重建
                 return false;
             };
             think_body.set_inner_html(&body_html);
-            apply_incremental_tail(body, &append_closed, open_plain.as_deref(), markdown_render)
+            let Some(body) = find_answer_body(wrap) else {
+                return false;
+            };
+            apply_incremental_tail(
+                &body,
+                &append_closed,
+                open_plain.as_deref(),
+                markdown_render,
+            )
         }
         TuiBodyPatch::ToolRow {
             status,
             status_label,
             one_line,
             detail,
-        } => apply_tool_row_patch(body, &status, &status_label, &one_line, detail.as_deref()),
+        } => {
+            let Some(body) = find_answer_body(wrap) else {
+                return false;
+            };
+            apply_tool_row_patch(&body, &status, &status_label, &one_line, detail.as_deref())
+        }
     }
-}
-
-fn find_turn_section(
-    transcript: &web_sys::HtmlElement,
-    message_id: &str,
-) -> Option<web_sys::HtmlElement> {
-    let selector = format!("section.chat-tui-turn[data-tui-msg-id=\"{message_id}\"]");
-    transcript
-        .query_selector(&selector)
-        .ok()
-        .flatten()
-        .and_then(|n| n.dyn_into::<web_sys::HtmlElement>().ok())
 }
 
 fn find_turn_wrap(
@@ -287,13 +306,9 @@ fn find_turn_wrap(
         .and_then(|n| n.dyn_into::<web_sys::HtmlElement>().ok())
 }
 
-fn find_turn_body(
-    transcript: &web_sys::HtmlElement,
-    message_id: &str,
-) -> Option<web_sys::HtmlElement> {
-    let section = find_turn_section(transcript, message_id)?;
-    section
-        .query_selector(".chat-tui-body")
+/// 回合 wrap 内的**正文段** body（思考段独立成段后，增量/工具 patch 只作用于正文段）。
+fn find_answer_body(wrap: &web_sys::HtmlElement) -> Option<web_sys::HtmlElement> {
+    wrap.query_selector(".chat-tui-body--answer")
         .ok()
         .flatten()
         .and_then(|n| n.dyn_into::<web_sys::HtmlElement>().ok())
@@ -314,11 +329,21 @@ fn apply_actions_html(transcript: &web_sys::HtmlElement, message_id: &str, html:
 
 fn apply_tui_promote_and_appends(transcript: &web_sys::HtmlElement, plan: &TuiSyncPlan) -> bool {
     if let Some(promote_id) = &plan.promote_id
-        && let Some(section) = find_turn_section(transcript, promote_id)
+        && let Some(wrap) = find_turn_wrap(transcript, promote_id)
+        && let Ok(sections) = wrap.query_selector_all("section.chat-tui-turn")
     {
-        let _ = section.remove_attribute("data-tui-live");
-        let _ = section.class_list().remove_1("chat-tui-turn--live");
-        let _ = section.class_list().remove_1("is-loading");
+        // 思考段 + 正文段同属一个 wrap，需一并摘掉 live/loading 标记。
+        for i in 0..sections.length() {
+            let Some(node) = sections.get(i) else {
+                continue;
+            };
+            let Ok(section) = node.dyn_into::<web_sys::Element>() else {
+                continue;
+            };
+            let _ = section.remove_attribute("data-tui-live");
+            let _ = section.class_list().remove_1("chat-tui-turn--live");
+            let _ = section.class_list().remove_1("is-loading");
+        }
     }
 
     if plan.append_sections.is_empty() {
@@ -343,19 +368,19 @@ fn apply_tui_body_and_action_patches(
     plan: &TuiSyncPlan,
 ) -> bool {
     if let Some(live) = &plan.live {
-        let Some(body) = find_turn_body(transcript, &live.message_id) else {
+        let Some(wrap) = find_turn_wrap(transcript, &live.message_id) else {
             return false;
         };
-        if !apply_body_patch(&body, live.patch.clone(), live.markdown_render) {
+        if !apply_body_patch(&wrap, live.patch.clone(), live.markdown_render) {
             return false;
         }
     }
 
     for refresh in &plan.refresh_bodies {
-        let Some(body) = find_turn_body(transcript, &refresh.message_id) else {
+        let Some(wrap) = find_turn_wrap(transcript, &refresh.message_id) else {
             return false;
         };
-        if !apply_body_patch(&body, refresh.patch.clone(), refresh.markdown_render) {
+        if !apply_body_patch(&wrap, refresh.patch.clone(), refresh.markdown_render) {
             return false;
         }
     }

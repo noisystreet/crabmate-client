@@ -14,7 +14,9 @@ use super::tui_line_markdown::{
     TuiBodyChunks, TuiBodyPatch, open_active_block_class, parse_tui_body_chunks_with,
     plan_tui_body_patch, render_open_active_html,
 };
-use super::tui_thinking_block::{build_think_block, message_think_answer_display_text};
+use super::tui_thinking_block::{
+    THINK_SECTION_CLASS, build_think_block, message_think_answer_display_text,
+};
 use super::tui_tool_process::{tool_process_body_html, tool_row_live_fields};
 use crate::visible_messages::tui_should_render_message;
 
@@ -420,7 +422,7 @@ fn turn_section_html(args: TurnSectionArgs<'_>) -> String {
     } = args;
     let locale = ctx.locale;
     let role = tui_role_label(message, locale);
-    let body = message_body_chunks(message, ctx).to_inner_html();
+    let chunks = message_body_chunks(message, ctx);
     let role_class = tui_turn_role_class(message);
     let live_class = if is_live { " chat-tui-turn--live" } else { "" };
     let loading_class = if message
@@ -442,12 +444,28 @@ fn turn_section_html(args: TurnSectionArgs<'_>) -> String {
         )
     };
     let id_esc = plaintext_to_safe_html(&message.id);
-    // 角色字样在卡片外（wrap 内、section 上），与气泡 msg-meta 外置一致。
-    let section = format!(
-        "<section class=\"chat-tui-turn {role_class}{live_class}{loading_class}\" data-tui-msg-id=\"{id_esc}\"{live_attr}>\
-         <div class=\"chat-tui-body\">{body}</div>\
-         </section>"
-    );
+    // 思考块单独成段（独立气泡），正文段紧随其后；无思考时保持单段。
+    let sections = if let Some(think) = &chunks.think {
+        format!(
+            "<section class=\"chat-tui-turn {role_class} {THINK_SECTION_CLASS}{live_class}{loading_class}\" \
+             data-tui-msg-id=\"{id_esc}\"{live_attr}>\
+             <div class=\"chat-tui-body chat-tui-body--think\">{}</div>\
+             </section>\
+             <section class=\"chat-tui-turn {role_class}{live_class}{loading_class}\" \
+             data-tui-msg-id=\"{id_esc}\"{live_attr}>\
+             <div class=\"chat-tui-body chat-tui-body--answer\">{}</div>\
+             </section>",
+            think.to_details_html(),
+            chunks.answer_to_inner_html(),
+        )
+    } else {
+        format!(
+            "<section class=\"chat-tui-turn {role_class}{live_class}{loading_class}\" data-tui-msg-id=\"{id_esc}\"{live_attr}>\
+             <div class=\"chat-tui-body chat-tui-body--answer\">{}</div>\
+             </section>",
+            chunks.answer_to_inner_html(),
+        )
+    };
     let wrap_align = if role_class == "chat-tui-turn--user" {
         " chat-tui-turn-wrap--user"
     } else {
@@ -456,7 +474,7 @@ fn turn_section_html(args: TurnSectionArgs<'_>) -> String {
     // 操作改为右键 / 长按菜单；idx 供菜单分发 regen/branch。
     format!(
         "<div class=\"chat-tui-turn-wrap{wrap_align}\" data-tui-wrap-id=\"{id_esc}\" \
-         data-tui-msg-idx=\"{msg_idx}\">{role_block}{section}</div>"
+         data-tui-msg-idx=\"{msg_idx}\">{role_block}{sections}</div>"
     )
 }
 

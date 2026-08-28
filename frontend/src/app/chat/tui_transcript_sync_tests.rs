@@ -623,3 +623,38 @@ fn markdown_off_thinking_block_escapes_markup() {
         "literal thinking should remain: {html}"
     );
 }
+
+#[test]
+fn thinking_rendered_as_own_section_above_answer() {
+    // 思考过程单独成段（独立气泡），正文段紧随其后，同一 wrap 内两个 section。
+    let m = assistant_with_reasoning("a1", "思考内容", "答案内容", false);
+    let html = render_one(&m, None);
+    assert_eq!(
+        html.matches("<section class=\"chat-tui-turn").count(),
+        2,
+        "thinking + answer sections expected: {html}"
+    );
+    let think_at = html.find("chat-tui-turn--think").expect("think section");
+    let answer_at = html.find("chat-tui-body--answer").expect("answer section");
+    assert!(
+        think_at < answer_at,
+        "think bubble must sit above answer: {html}"
+    );
+    let think_part = &html[..answer_at];
+    assert!(think_part.contains("思考内容"), "think body, got {html}");
+    assert!(
+        !think_part.contains("答案内容"),
+        "answer must not be inside the think section: {html}"
+    );
+    assert!(html.contains("答案内容"), "answer body present: {html}");
+    assert!(!html.contains("<think>"), "raw tag must not leak: {html}");
+
+    // 无思考消息保持单段。
+    let u = message("u1", "user", "你好");
+    let html_u = render_one(&u, None);
+    assert_eq!(
+        html_u.matches("<section class=\"chat-tui-turn").count(),
+        1,
+        "no-think message keeps a single section: {html_u}"
+    );
+}

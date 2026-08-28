@@ -51,3 +51,56 @@ pub(super) fn build_think_block(
         body_html,
     }
 }
+
+/// 思考段（独立气泡）section 的 class 标识。
+pub(super) const THINK_SECTION_CLASS: &str = "chat-tui-turn--think";
+
+/// 更新/创建回合 wrap 内的思考段；`None` 时移除思考段。
+///
+/// 仅被 `TuiBodyPatch::ReplaceAll`（结构变化：think 出现/消失、open 翻转、刷新）调用；
+/// 流式正文走定向 `ThinkBody`（不经过此处）。返回是否成功。
+pub(super) fn update_think_section(
+    wrap: &web_sys::HtmlElement,
+    block: Option<&ThinkBlock>,
+) -> bool {
+    let Some(block) = block else {
+        if let Some(existing) = wrap.query_selector(".chat-tui-turn--think").ok().flatten() {
+            existing.remove();
+        }
+        return true;
+    };
+    if let Some(existing) = wrap.query_selector(".chat-tui-turn--think").ok().flatten() {
+        // 保留 section 属性（data-tui-msg-id 等），只替换正文容器内容。
+        match existing
+            .query_selector(".chat-tui-body--think")
+            .ok()
+            .flatten()
+        {
+            Some(body) => body.set_inner_html(&block.to_details_html()),
+            None => existing.set_inner_html(&format!(
+                "<div class=\"chat-tui-body chat-tui-body--think\">{}</div>",
+                block.to_details_html()
+            )),
+        }
+        return true;
+    }
+    // 首次插入（think 流式中途出现）：带上 data-tui-msg-id，保持点击/菜单定位一致。
+    let id_attr = wrap
+        .get_attribute("data-tui-wrap-id")
+        .filter(|id| !id.is_empty())
+        .map(|id| format!(" data-tui-msg-id=\"{}\"", plaintext_to_safe_html(&id)))
+        .unwrap_or_default();
+    let section_html = format!(
+        "<section class=\"chat-tui-turn chat-tui-turn--assistant {THINK_SECTION_CLASS}\"{id_attr}>\
+         <div class=\"chat-tui-body chat-tui-body--think\">{}</div>\
+         </section>",
+        block.to_details_html()
+    );
+    // 插到 role 块之后（正文段之前）。
+    match wrap.query_selector(".chat-tui-role").ok().flatten() {
+        Some(role) => role.insert_adjacent_html("afterend", &section_html).is_ok(),
+        None => wrap
+            .insert_adjacent_html("afterbegin", &section_html)
+            .is_ok(),
+    }
+}
