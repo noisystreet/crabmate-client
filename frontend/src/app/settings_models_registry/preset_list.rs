@@ -129,7 +129,7 @@ fn SettingsModelsRegistryPresetEditBtn(
     view! {
         <button
             type="button"
-            class="btn btn-ghost settings-model-registry-edit"
+            class="btn btn-ghost btn-icon settings-model-registry-edit"
             prop:aria-label=move || i18n::settings_models_row_edit_aria(locale.get())
             prop:title=move || i18n::settings_models_row_edit_btn(locale.get())
             on:click=move |_| {
@@ -187,7 +187,7 @@ fn SettingsModelsRegistryPresetDeleteSlot(
                 view! {
         <button
             type="button"
-            class="btn btn-ghost settings-model-registry-edit settings-model-registry-trash"
+            class="btn btn-ghost btn-icon settings-model-registry-edit settings-model-registry-trash"
             prop:aria-label=move || i18n::settings_saved_models_remove(loc_fb.get())
             prop:title=move || i18n::settings_models_delete_confirm(loc_fb.get())
             on:click=move |_| {
