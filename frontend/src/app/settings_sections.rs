@@ -68,7 +68,7 @@ fn SettingsThemeSelectBlock(
 ) -> impl IntoView {
     view! {
         <div class="settings-block">
-            <label class="settings-block-title" for=theme_select_id>
+            <label class="settings-field-label" for=theme_select_id>
                 {move || i18n::settings_block_theme(locale.get())}
             </label>
             <select
@@ -123,7 +123,7 @@ fn SettingsChatTranscriptBlock(
                 on_toggle=move || show_turn_context_inject.update(|v| *v = !*v)
                 test_id="settings-show-turn-context-inject"
             />
-            <p class="settings-field-hint">{move || i18n::settings_show_turn_context_inject_hint(locale.get())}</p>
+            <p class="settings-hint">{move || i18n::settings_show_turn_context_inject_hint(locale.get())}</p>
         </div>
     }
 }
@@ -224,7 +224,7 @@ pub(crate) fn SettingsWebApiBearerBlock(
             <h3 class="settings-block-title">
                 {move || i18n::settings_block_web_api_bearer(locale.get())}
             </h3>
-            <p class="settings-muted" data-testid="settings-web-api-bearer-status">
+            <p class="settings-status-line" data-testid="settings-web-api-bearer-status">
                 {move || bearer_status_label(locale.get(), present.get())}
             </p>
             <div class="settings-field">
@@ -233,7 +233,7 @@ pub(crate) fn SettingsWebApiBearerBlock(
                 </label>
                 <input
                     id=input_id
-                    class="input"
+                    class="settings-text-input"
                     type="password"
                     autocomplete="off"
                     data-testid="settings-web-api-bearer-input"
@@ -259,7 +259,7 @@ pub(crate) fn SettingsWebApiBearerBlock(
                 {move || i18n::settings_web_api_bearer_save(locale.get())}
             </button>
             <Show when=move || feedback.get().is_some()>
-                <p class="settings-muted" role="status" data-testid="settings-web-api-bearer-feedback">
+                <p class="settings-save-feedback" role="status" data-testid="settings-web-api-bearer-feedback">
                     {move || feedback.get().unwrap_or_default()}
                 </p>
             </Show>
@@ -282,12 +282,12 @@ pub(crate) fn SettingsApiBaseBlock(
             class="settings-block settings-block--api-base"
             data-testid="settings-api-base-block"
         >
-            <label class="settings-block-title" for=input_id>
+            <label class="settings-field-label" for=input_id>
                 {move || i18n::settings_block_api_base(locale.get())}
             </label>
             <input
                 id=input_id
-                class="input"
+                class="settings-text-input"
                 type="url"
                 autocomplete="off"
                 placeholder="http://127.0.0.1:8080"
@@ -324,7 +324,7 @@ pub(crate) fn SettingsApiBaseBlock(
                 {move || i18n::settings_api_base_save(locale.get())}
             </button>
             <Show when=move || feedback.get().is_some()>
-                <p class="settings-muted" role="status" data-testid="settings-api-base-feedback">
+                <p class="settings-save-feedback" role="status" data-testid="settings-api-base-feedback">
                     {move || feedback.get().unwrap_or_default()}
                 </p>
             </Show>
