@@ -476,6 +476,51 @@ fn spawn_session_sqlite_toggle(
     });
 }
 
+/// 会话存储开关的 checked 信号（从状态数据派生）。
+fn session_storage_active_signal(status: RwSignal<Option<crate::api::StatusData>>) -> Signal<bool> {
+    Signal::derive(move || {
+        status
+            .get()
+            .map(|s| s.conversation_store_sqlite_active)
+            .unwrap_or(false)
+    })
+}
+
+/// 会话存储开关的 disabled 信号（请求中或未配置 sqlite 路径时禁用）。
+fn session_storage_disabled_signal(
+    status: RwSignal<Option<crate::api::StatusData>>,
+    busy: RwSignal<bool>,
+) -> Signal<bool> {
+    Signal::derive(move || {
+        busy.get()
+            || !status
+                .get()
+                .map(|s| s.conversation_store_sqlite_path_configured)
+                .unwrap_or(false)
+    })
+}
+
+/// 会话存储开关切换：计算目标状态并发起切换请求。
+fn toggle_session_storage(
+    status: RwSignal<Option<crate::api::StatusData>>,
+    locale: RwSignal<Locale>,
+    refresh_status: Arc<dyn Fn() + Send + Sync>,
+    session_switch_busy: RwSignal<bool>,
+    session_switch_feedback: RwSignal<Option<String>>,
+) {
+    let next = !status
+        .get()
+        .map(|s| s.conversation_store_sqlite_active)
+        .unwrap_or(false);
+    spawn_session_sqlite_toggle(
+        next,
+        locale.get_untracked(),
+        refresh_status,
+        session_switch_busy,
+        session_switch_feedback,
+    );
+}
+
 #[component]
 fn SettingsSessionStorageBlock(
     locale: RwSignal<Locale>,
@@ -488,33 +533,16 @@ fn SettingsSessionStorageBlock(
         <div class="settings-block">
             <h3 class="settings-block-title">{move || i18n::settings_block_session_storage(locale.get())}</h3>
             <SettingsToggleSwitch
-                checked=Signal::derive(move || {
-                    status_data
-                        .get()
-                        .map(|s| s.conversation_store_sqlite_active)
-                        .unwrap_or(false)
-                })
+                checked=session_storage_active_signal(status_data)
                 label=Signal::derive(move || {
                     i18n::settings_session_sqlite_toggle_label(locale.get()).to_string()
                 })
-                disabled=Signal::derive(move || {
-                    session_switch_busy.get()
-                        || !status_data
-                            .get()
-                            .map(|s| s.conversation_store_sqlite_path_configured)
-                            .unwrap_or(false)
-                })
+                disabled=session_storage_disabled_signal(status_data, session_switch_busy)
                 on_toggle=move || {
-                    let loc = locale.get_untracked();
-                    let refresh = Arc::clone(&refresh_status);
-                    let next = !status_data
-                        .get()
-                        .map(|s| s.conversation_store_sqlite_active)
-                        .unwrap_or(false);
-                    spawn_session_sqlite_toggle(
-                        next,
-                        loc,
-                        refresh,
+                    toggle_session_storage(
+                        status_data,
+                        locale,
+                        Arc::clone(&refresh_status),
                         session_switch_busy,
                         session_switch_feedback,
                     );

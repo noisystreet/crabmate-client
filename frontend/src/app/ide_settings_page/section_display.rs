@@ -7,6 +7,23 @@ use crate::app::app_signals::IdeEditorSignals;
 use crate::app::settings_toggle_switch::SettingsToggleSwitch;
 use crate::i18n::{self, Locale};
 
+/// 单个布尔编辑偏好开关（避免组件内重复闭包抬高 CCN）。
+#[component]
+fn IdeEditorBoolToggle(
+    checked: RwSignal<bool>,
+    label: Signal<String>,
+    test_id: &'static str,
+) -> impl IntoView {
+    view! {
+        <SettingsToggleSwitch
+            checked=Signal::derive(move || checked.get())
+            label
+            on_toggle=move || checked.update(|v| *v = !*v)
+            test_id=test_id
+        />
+    }
+}
+
 #[component]
 pub(super) fn IdeSettingsDisplayBlock(
     locale: RwSignal<Locale>,
@@ -17,16 +34,14 @@ pub(super) fn IdeSettingsDisplayBlock(
     view! {
         <div class="settings-block">
             <h3 class="settings-block-title">{move || i18n::ide_settings_block_display(locale.get())}</h3>
-            <SettingsToggleSwitch
-                checked=Signal::derive(move || editor.line_numbers.get())
+            <IdeEditorBoolToggle
+                checked=editor.line_numbers
                 label=Signal::derive(move || i18n::ide_settings_line_numbers(locale.get()).to_string())
-                on_toggle=move || editor.line_numbers.update(|v| *v = !*v)
                 test_id="ide-settings-line-numbers"
             />
-            <SettingsToggleSwitch
-                checked=Signal::derive(move || editor.word_wrap.get())
+            <IdeEditorBoolToggle
+                checked=editor.word_wrap
                 label=Signal::derive(move || i18n::ide_settings_word_wrap(locale.get()).to_string())
-                on_toggle=move || editor.word_wrap.update(|v| *v = !*v)
                 test_id="ide-settings-word-wrap"
             />
             <div class="settings-field">
