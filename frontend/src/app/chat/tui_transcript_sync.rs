@@ -391,11 +391,8 @@ fn message_body_chunks(message: &StoredMessage, ctx: &TuiRenderCtx<'_>) -> TuiBo
         ctx.markdown_render,
     );
     if !thinking.trim().is_empty() {
-        let auto_open = message
-            .state
-            .as_ref()
-            .is_some_and(StoredMessageState::is_loading);
-        let open = auto_open || ctx.think_open.contains(&message.id);
+        // 默认折叠：流式生成时也不自动展开，避免渲染过程视觉跳动；用户点击 summary 展开。
+        let open = ctx.think_open.contains(&message.id);
         chunks.think = Some(build_think_block(
             &thinking,
             open,

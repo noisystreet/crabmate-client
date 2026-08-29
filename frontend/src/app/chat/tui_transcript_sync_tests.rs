@@ -399,13 +399,13 @@ fn assistant_reasoning_renders_collapsed_thinking_details() {
         html.contains("<details class=\"chat-tui-think\">"),
         "finalized details must be collapsed (no open attr): {html}"
     );
-    assert!(html.contains("思考过程"), "summary label, got {html}");
+    assert!(html.contains("思考"), "summary label, got {html}");
     assert!(html.contains("先检查类型"), "thinking body, got {html}");
     assert!(html.contains("这是答案"), "answer body, got {html}");
 }
 
 #[test]
-fn loading_assistant_reasoning_details_open_and_overlay_streams() {
+fn loading_assistant_reasoning_details_collapsed_and_overlay_streams() {
     let m = assistant_with_reasoning("a1", "", "", true);
     let overlay = StreamTextOverlay {
         session_id: "s1".to_string(),
@@ -415,8 +415,12 @@ fn loading_assistant_reasoning_details_open_and_overlay_streams() {
     };
     let html = render_one(&m, Some(&overlay));
     assert!(
-        html.contains("<details class=\"chat-tui-think\" open>"),
-        "live details must be open: {html}"
+        html.contains("<details class=\"chat-tui-think\">"),
+        "live details must stay collapsed by default: {html}"
+    );
+    assert!(
+        !html.contains("<details class=\"chat-tui-think\" open>"),
+        "must not auto-open while streaming: {html}"
     );
     assert!(
         html.contains("逐步推理中"),
