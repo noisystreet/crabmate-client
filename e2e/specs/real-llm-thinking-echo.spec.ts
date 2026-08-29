@@ -260,33 +260,39 @@ test.describe("真实 LLM：思考回显复现", () => {
     await sendMessage(page, QUESTION_ONE_PLUS_ONE);
     await waitForReadyWhileApproving(page, 240_000);
 
-    // 折叠思考块（summary 标签「思考过程」）应存在。
+    // 折叠思考块（summary 标签「思考」）应存在。
     const thinkSummary = page.locator(".chat-tui-think-summary");
     await expect(thinkSummary).toBeVisible({ timeout: 10_000 });
 
     // 正文是否回显思考章节：若持久化正文包含标题，展示层应已剥除回显——
-    // 气泡里「思考过程」只出现在折叠块摘要一次（修复后的行为）。
+    // 「思考」只出现在独立思考段一次，正文段不再含回显标题（修复后的行为）。
     const assistant = await fetchAssistantForQuestion(
       page,
       QUESTION_ONE_PLUS_ONE,
     );
     const text = (assistant?.text ?? "").trim();
     if (hasEchoHeading(text)) {
-      const bodies = await page.evaluate(() =>
+      const thinkSectionCount = await page.evaluate(
+        () =>
+          document.querySelectorAll<HTMLElement>("section.chat-tui-turn--think")
+            .length,
+      );
+      expect(
+        thinkSectionCount,
+        `回显章节应被展示层剥除，「思考」只在折叠块出现一次（思考段数量应为 1）`,
+      ).toBe(1);
+      const echoedInAnswer = await page.evaluate(() =>
         [
           ...document.querySelectorAll<HTMLElement>(
             "section.chat-tui-turn--assistant",
           ),
         ]
-          .map((el) => (el.innerText ?? "").replace(/\s+/g, " ").trim())
-          .filter((t) => t.includes("思考过程")),
+          .filter((el) => !el.classList.contains("chat-tui-turn--think"))
+          .some((el) => (el.innerText ?? "").includes("### 思考过程")),
       );
-      expect(
-        bodies.length,
-        `回显章节应被展示层剥除，「思考过程」只在折叠块出现一次：${JSON.stringify(
-          bodies,
-        )}`,
-      ).toBe(1);
+      expect(echoedInAnswer, "正文段不应再包含回显的「### 思考过程」标题").toBe(
+        false,
+      );
     } else {
       test.info().annotations.push({
         type: "info",

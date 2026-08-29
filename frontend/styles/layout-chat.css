@@ -412,23 +412,52 @@
   word-break: break-word;
 }
 
-/* —— 思考段（独立气泡）：弱化卡片，内嵌 details 不再自带边框 —— */
+/* —— 思考段（独立气泡）：扁平弱化，参考工具消息卡片 —— */
 .chat-tui-turn--think {
-  padding: var(--space-1, 0.25rem) var(--space-inset-msg, 0.85rem);
-  background: color-mix(in srgb, var(--surface) 88%, var(--bg-elevated));
-  border-color: color-mix(in srgb, var(--border-subtle) 72%, var(--surface));
+  align-self: stretch;
+  width: auto;
+  max-width: none;
+  box-sizing: border-box;
+  padding: 2px var(--space-inset-msg, 0.85rem);
+  background: transparent;
+  border: none;
   box-shadow: none;
-}
-
-.app-shell-ds .chat-tui-turn--think {
-  background: color-mix(in srgb, var(--surface) 92%, var(--bg));
-  border-color: color-mix(in srgb, var(--border-subtle) 66%, var(--surface));
 }
 
 .chat-tui-turn--think .chat-tui-think {
   border: none;
   background: transparent;
   margin-bottom: 0;
+}
+
+/* 生成中呼吸灯：蓝色科技感（与工具执行的成功绿区分） */
+.chat-tui-turn--think.is-loading,
+.chat-tui-turn--think.chat-tui-turn--live.is-loading {
+  border-radius: var(--radius-md);
+  border: 1px solid color-mix(in srgb, var(--info) 34%, var(--border-subtle));
+  background: color-mix(in srgb, var(--surface) 93%, var(--info) 7%);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--info) 12%, transparent),
+    0 2px 10px color-mix(in srgb, var(--info) 10%, transparent);
+  animation: think-breathe-border 2.2s ease-in-out infinite;
+}
+
+@keyframes think-breathe-border {
+  0%,
+  100% {
+    border-color: color-mix(in srgb, var(--info) 26%, var(--border-subtle));
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--info) 8%, transparent),
+      0 1px 6px color-mix(in srgb, var(--info) 6%, transparent);
+  }
+
+  50% {
+    border-color: color-mix(in srgb, var(--info) 52%, var(--border-subtle));
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--info) 28%, transparent),
+      0 0 16px color-mix(in srgb, var(--info) 22%, transparent),
+      0 2px 12px color-mix(in srgb, var(--info) 14%, transparent);
+  }
 }
 
 /* 思考阶段正文尚未开始：隐藏空的正文气泡，首个正文块到达时自动显示 */

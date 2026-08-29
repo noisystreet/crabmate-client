@@ -8,7 +8,7 @@ use super::*;
 fn think(open: bool, body: &str) -> ThinkBlock {
     ThinkBlock {
         open,
-        summary_html: "<summary class=\"chat-tui-think-summary\">思考过程</summary>".to_string(),
+        summary_html: "<summary class=\"chat-tui-think-summary\">思考</summary>".to_string(),
         body_html: body.to_string(),
     }
 }
