@@ -202,6 +202,12 @@
   color: color-mix(in srgb, var(--muted) 72%, transparent);
 }
 
+.btn-secondary.active {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+}
+
 .btn-muted {
   background: transparent;
   border-color: var(--border);

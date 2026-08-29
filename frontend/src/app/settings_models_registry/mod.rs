@@ -457,7 +457,7 @@ fn SettingsModelsRegistryAddForm(s: RegistryAddFormSignals) -> impl IntoView {
     view! {
         <div class="settings-model-registry-dialog-form">
             <Show when=move || form_error.get().is_some()>
-                <p class="settings-form-error" role="alert">
+                <p class="settings-error" role="alert">
                     {move || form_error.get().unwrap_or_default()}
                 </p>
             </Show>
