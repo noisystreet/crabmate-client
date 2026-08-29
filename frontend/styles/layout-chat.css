@@ -359,6 +359,8 @@
 /* —— 思维链折叠块（reasoning_text / <think> 标签拆出） —— */
 .chat-tui-think {
   box-sizing: border-box;
+  width: fit-content;
+  max-width: 100%;
   margin-bottom: var(--space-2, 0.5rem);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md, 8px);
@@ -424,21 +426,25 @@
   box-shadow: none;
 }
 
+/* 桌面壳（app-shell-ds）下 assistant 白渐变会覆盖透明底，须显式重置 */
+.app-shell-ds .chat-tui-turn--think {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+
 .chat-tui-turn--think .chat-tui-think {
   border: none;
   background: transparent;
   margin-bottom: 0;
 }
 
-/* 生成中呼吸灯：蓝色科技感（与工具执行的成功绿区分） */
-.chat-tui-turn--think.is-loading,
-.chat-tui-turn--think.chat-tui-turn--live.is-loading {
-  border-radius: var(--radius-md);
+/* 生成中呼吸灯：蓝色科技感（与工具执行的成功绿区分），围绕紧凑的思考块 */
+.chat-tui-turn--think.is-loading .chat-tui-think,
+.chat-tui-turn--think.chat-tui-turn--live.is-loading .chat-tui-think {
   border: 1px solid color-mix(in srgb, var(--info) 34%, var(--border-subtle));
+  border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--surface) 93%, var(--info) 7%);
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--info) 12%, transparent),
-    0 2px 10px color-mix(in srgb, var(--info) 10%, transparent);
   animation: think-breathe-border 2.2s ease-in-out infinite;
 }
 
