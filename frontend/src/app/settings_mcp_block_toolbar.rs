@@ -28,7 +28,7 @@ fn SettingsMcpTimeoutField(
             <input
                 type="number"
                 min="1"
-                class="settings-input"
+                class="settings-text-input"
                 data-testid="settings-mcp-timeout"
                 prop:value=move || file.get().tool_timeout_secs.to_string()
                 on:input=move |ev| {

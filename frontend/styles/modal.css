@@ -507,15 +507,6 @@
   margin: 0;
 }
 
-.settings-model-registry-head .settings-model-registry-add {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 1.75rem;
-  padding-left: 0.45rem;
-  padding-right: 0.45rem;
-}
-
 .settings-model-registry-head .settings-model-registry-add svg {
   width: 14px;
   height: 14px;
@@ -632,23 +623,14 @@
   color: var(--text);
 }
 
+/* 图标按钮：尺寸/内边距由 .btn-icon 提供（32×32），仅保留防挤压与图标尺寸 */
 .settings-model-registry-edit {
   flex-shrink: 0;
-  box-sizing: content-box;
-  width: 1em;
-  height: 1em;
-  min-width: 1em;
-  min-height: 1em;
-  padding: 2px;
-  margin: 0;
-  line-height: 1;
-  font-size: inherit;
-  border-width: 0;
 }
 
 .settings-model-registry-edit svg {
-  width: 1em;
-  height: 1em;
+  width: 16px;
+  height: 16px;
   display: block;
 }
 
@@ -743,11 +725,6 @@
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
-}
-
-.settings-font-size-stepper-btn {
-  min-width: 2rem;
-  justify-content: center;
 }
 
 .settings-font-size-stepper-value {
@@ -1110,27 +1087,11 @@ html[data-cm-mobile-shell] .settings-page-header {
   color: var(--muted);
 }
 
+/* 导航项：基于 .btn-ghost（hover/active 由 .btn-ghost(.active) 提供），仅保留导航布局属性 */
 .settings-nav-item {
   width: 100%;
+  justify-content: flex-start;
   text-align: left;
-  font-size: 13px;
-  color: var(--muted);
-  border: 1px solid transparent;
-  border-radius: var(--radius-btn);
-  padding: 8px 10px;
-  background: transparent;
-  cursor: pointer;
-}
-
-.settings-nav-item:hover {
-  background: var(--surface-hover);
-  color: var(--text);
-}
-
-.settings-nav-item.active {
-  background: var(--accent-dim);
-  color: var(--accent);
-  border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
 }
 
 .settings-content {
@@ -1151,37 +1112,6 @@ html[data-cm-mobile-shell] .settings-page-header {
   margin: 6px 0 0;
   color: var(--muted);
   font-size: 13px;
-}
-
-/* MCP 设置：与 .settings-text-input 对齐的通用输入框 */
-.settings-input {
-  width: 100%;
-  box-sizing: border-box;
-  padding: 8px 10px;
-  font-size: 13px;
-  border-radius: var(--radius-input);
-  border: 1px solid var(--border);
-  background: var(--surface);
-  color: var(--text);
-}
-
-.settings-input:hover {
-  border-color: color-mix(in srgb, var(--border) 70%, var(--accent));
-}
-
-.settings-input:focus {
-  outline: none;
-  border-color: var(--accent);
-}
-
-.settings-input:focus-visible {
-  box-shadow: 0 0 0 var(--focus-ring-width) color-mix(in srgb, var(--accent) 28%, transparent);
-}
-
-.settings-input-mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
-    "Courier New", monospace;
-  font-size: 12px;
 }
 
 .settings-mcp-import .settings-intro {

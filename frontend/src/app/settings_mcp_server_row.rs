@@ -55,7 +55,7 @@ fn SettingsMcpRemoteBearer(
             </span>
             <input
                 type="password"
-                class="settings-input"
+                class="settings-text-input"
                 autocomplete="off"
                 data-testid="settings-mcp-bearer-input"
                 prop:value=move || bearer_draft.get()
@@ -165,7 +165,7 @@ pub(crate) fn SettingsMcpServerRow(server_id: String, ctx: McpSettingsSignals) -
                 <span class="settings-field-label">{move || i18n::settings_mcp_name_label(locale.get())}</span>
                 <input
                     type="text"
-                    class="settings-input"
+                    class="settings-text-input"
                     prop:value=move || server_field(&file.get(), &id_name_val, |s| s.name.clone())
                     on:input=move |ev| {
                         let v = event_input_value(&ev).unwrap_or_default();

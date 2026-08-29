@@ -643,7 +643,7 @@ fn SettingsSessionTypographyBlock(
                 >
                     <button
                         type="button"
-                        class="btn btn-secondary btn-sm settings-font-size-stepper-btn"
+                        class="btn btn-secondary btn-icon settings-font-size-stepper-btn"
                         prop:disabled=move || {
                             session_chat_font_size.get()
                                 <= crate::session_typography_prefs::SESSION_CHAT_FONT_SIZE_MIN
@@ -671,7 +671,7 @@ fn SettingsSessionTypographyBlock(
                     </output>
                     <button
                         type="button"
-                        class="btn btn-secondary btn-sm settings-font-size-stepper-btn"
+                        class="btn btn-secondary btn-icon settings-font-size-stepper-btn"
                         prop:disabled=move || {
                             session_chat_font_size.get()
                                 >= crate::session_typography_prefs::SESSION_CHAT_FONT_SIZE_MAX

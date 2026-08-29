@@ -91,7 +91,7 @@ pub(crate) fn SettingsMcpJsonImportPanel(
         <div class="settings-block settings-mcp-import" data-testid="settings-mcp-import-panel">
             <h3 class="settings-block-title">{move || i18n::settings_mcp_import_title(locale.get())}</h3>
             <textarea
-                class="settings-input settings-mcp-import-json"
+                class="settings-text-input settings-mcp-import-json"
                 rows="16"
                 data-testid="settings-mcp-import-json"
                 prop:placeholder=move || i18n::settings_mcp_import_placeholder(locale.get())

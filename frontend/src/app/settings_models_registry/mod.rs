@@ -96,7 +96,7 @@ fn SettingsModelsRegistryToolbar(s: RegistryToolbarSignals) -> impl IntoView {
             <h3 class="settings-block-title">{move || i18n::settings_saved_models_block_title(locale.get())}</h3>
             <button
                 type="button"
-                class="btn btn-secondary btn-sm settings-model-registry-add"
+                class="btn btn-secondary btn-icon settings-model-registry-add"
                 data-testid="settings-models-add"
                 prop:aria-label=move || i18n::settings_models_add_open_aria(locale.get())
                 prop:title=move || i18n::settings_models_add_open_aria(locale.get())

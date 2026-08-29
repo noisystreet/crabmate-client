@@ -29,7 +29,7 @@ fn SettingsNavItem(
     view! {
         <button
             type="button"
-            class="settings-nav-item"
+            class="btn btn-ghost settings-nav-item"
             data-testid=testid
             class:active=move || active_section.get() == section
             on:click=move |_| {
