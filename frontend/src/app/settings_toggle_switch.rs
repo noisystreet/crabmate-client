@@ -8,7 +8,9 @@ pub(crate) fn SettingsToggleSwitch(
     label: Signal<String>,
     on_toggle: impl Fn() + Send + Sync + 'static,
     #[prop(optional)] test_id: Option<&'static str>,
+    #[prop(optional)] disabled: Option<Signal<bool>>,
 ) -> impl IntoView {
+    let is_disabled = Signal::derive(move || disabled.is_some_and(|d| d.get()));
     view! {
         <div class="settings-toggle-row">
             <span class="settings-toggle-label">{move || label.get()}</span>
@@ -17,6 +19,7 @@ pub(crate) fn SettingsToggleSwitch(
                 class="settings-model-toggle"
                 role="switch"
                 class:settings-model-toggle-on=move || checked.get()
+                prop:disabled=move || is_disabled.get()
                 prop:aria-checked=move || checked.get()
                 prop:aria-label=move || label.get()
                 data-testid=test_id

@@ -3,7 +3,6 @@ use std::sync::Arc;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 use leptos_dom::helpers::event_target_value;
-use wasm_bindgen::JsCast;
 
 use super::settings_toggle_switch::SettingsToggleSwitch;
 use crate::api::MainLlmDraftSignals;
@@ -97,14 +96,12 @@ fn SettingsBgDecorBlock(
     view! {
         <div class="settings-block">
             <h3 class="settings-block-title">{move || i18n::settings_block_bg(locale.get())}</h3>
-            <label class="settings-checkbox-label">
-                <input
-                    type="checkbox"
-                    prop:checked=move || appearance_bg_decor.get()
-                    on:change=move |_| appearance_bg_decor.update(|v| *v = !*v)
-                />
-                <span>{move || i18n::settings_bg_glow(locale.get())}</span>
-            </label>
+            <SettingsToggleSwitch
+                checked=Signal::derive(move || appearance_bg_decor.get())
+                label=Signal::derive(move || i18n::settings_bg_glow(locale.get()).to_string())
+                on_toggle=move || appearance_bg_decor.update(|v| *v = !*v)
+                test_id="settings-bg-glow"
+            />
         </div>
     }
 }
@@ -432,16 +429,16 @@ pub(crate) fn SettingsToolsBlock(
     view! {
         <div class="settings-block">
             <h3 class="settings-block-title">{move || i18n::settings_tools_readonly_ttl_block_title(locale.get())}</h3>
-            <label class="settings-checkbox-label">
-                <input
-                    type="checkbox"
-                    prop:checked=move || readonly_tool_ttl_cache_follow_server.get()
-                    on:change=move |_| {
-                        readonly_tool_ttl_cache_follow_server.update(|v| *v = !*v);
-                    }
-                />
-                <span>{move || i18n::settings_tools_readonly_ttl_cache_label(locale.get())}</span>
-            </label>
+            <SettingsToggleSwitch
+                checked=Signal::derive(move || readonly_tool_ttl_cache_follow_server.get())
+                label=Signal::derive(move || {
+                    i18n::settings_tools_readonly_ttl_cache_label(locale.get()).to_string()
+                })
+                on_toggle=move || {
+                    readonly_tool_ttl_cache_follow_server.update(|v| *v = !*v);
+                }
+                test_id="settings-tools-ttl-follow-server"
+            />
         </div>
     }
 }
@@ -490,41 +487,40 @@ fn SettingsSessionStorageBlock(
     view! {
         <div class="settings-block">
             <h3 class="settings-block-title">{move || i18n::settings_block_session_storage(locale.get())}</h3>
-            <label class="settings-checkbox-label">
-                <input
-                    type="checkbox"
-                    prop:disabled=move || {
-                        session_switch_busy.get()
-                            || !status_data
-                                .get()
-                                .map(|s| s.conversation_store_sqlite_path_configured)
-                                .unwrap_or(false)
-                    }
-                    prop:checked=move || {
-                        status_data
+            <SettingsToggleSwitch
+                checked=Signal::derive(move || {
+                    status_data
+                        .get()
+                        .map(|s| s.conversation_store_sqlite_active)
+                        .unwrap_or(false)
+                })
+                label=Signal::derive(move || {
+                    i18n::settings_session_sqlite_toggle_label(locale.get()).to_string()
+                })
+                disabled=Signal::derive(move || {
+                    session_switch_busy.get()
+                        || !status_data
                             .get()
-                            .map(|s| s.conversation_store_sqlite_active)
+                            .map(|s| s.conversation_store_sqlite_path_configured)
                             .unwrap_or(false)
-                    }
-                    on:change=move |ev: leptos::ev::Event| {
-                        let checked = ev
-                            .target()
-                            .and_then(|t| t.dyn_into::<web_sys::HtmlInputElement>().ok())
-                            .map(|el| el.checked())
-                            .unwrap_or(false);
-                        let loc = locale.get_untracked();
-                        let refresh = Arc::clone(&refresh_status);
-                        spawn_session_sqlite_toggle(
-                            checked,
-                            loc,
-                            refresh,
-                            session_switch_busy,
-                            session_switch_feedback,
-                        );
-                    }
-                />
-                <span>{move || i18n::settings_session_sqlite_toggle_label(locale.get())}</span>
-            </label>
+                })
+                on_toggle=move || {
+                    let loc = locale.get_untracked();
+                    let refresh = Arc::clone(&refresh_status);
+                    let next = !status_data
+                        .get()
+                        .map(|s| s.conversation_store_sqlite_active)
+                        .unwrap_or(false);
+                    spawn_session_sqlite_toggle(
+                        next,
+                        loc,
+                        refresh,
+                        session_switch_busy,
+                        session_switch_feedback,
+                    );
+                }
+                test_id="settings-session-storage"
+            />
             <Show when=move || {
                 !status_data
                     .get()
