@@ -25,6 +25,23 @@ use super::super::helpers::*;
 /// 客户端本地输出保留上限（服务端环形 ≤256 KiB；此处兜底，防长时间任务跨轮累积无界）。
 const LOCAL_OUTPUT_MAX_BYTES: usize = 1024 * 1024;
 
+/// 轮询节奏：有新输出（活跃）用快档；连续空闲按 ×2 退避到 `idle_cap`。
+const MIN_LIVE_MS: u32 = 500;
+/// 实时流开启时的空闲退避上限（有输出立即回快档；接近"实时"且空闲不空转）。
+const MAX_IDLE_MS: u32 = 30_000;
+/// 兼容回退（旧 serve 无 `/output`）时的空闲退避上限：无输出事件信号，故收紧以保
+/// 持终态/取消按钮延迟可感知（历史指数退避最坏 ~6.4s，此处封顶 5s）。
+const MAX_FALLBACK_MS: u32 = 5_000;
+
+/// 下一轮等待时长：本 tick 有新输出 → 回到快档；否则 ×2 退避（封顶）。
+fn next_poll_interval(current_ms: u32, got_new: bool, fast_ms: u32, idle_cap_ms: u32) -> u32 {
+    if got_new {
+        fast_ms
+    } else {
+        current_ms.saturating_mul(2).min(idle_cap_ms)
+    }
+}
+
 /// 把 `/output` 本 tick 增量并入本地窗口并执行上限裁剪（超限丢最旧、标 `truncated`）。
 /// 独立成小函数以控制轮询循环复杂度（lizard CCN ≤ 10）。
 fn append_output_window(
@@ -45,8 +62,9 @@ fn append_output_window(
     }
 }
 
-/// 后台任务轮询：`running`/`queued` 时固定 ~500ms 拉 `GET /tools/jobs/{id}/output`
-/// 实时输出增量（`tail -f` 体感）；终态后**无间隔**继续排水直到 `eof=true` 再停止。
+/// 后台任务轮询：**自适应退避**——有输出时 ~500ms 快档实时滚动（`tail -f` 体感），
+/// 连续空闲按 ×2 退避到 30s（旧 serve 回退路径封顶 5s），收到新输出立即回快档；
+/// 终态后**无间隔**继续排水直到 `eof=true` 再停止。
 /// 每轮同时取一次状态快照（终态 `exit_code`/`summary`、取消按钮可见性由响应式重建保证）。
 /// 更新 `tool_job_states` map（tool_call_id → 快照），供气泡输出/状态/取消按钮响应式刷新。
 ///
@@ -59,7 +77,6 @@ fn spawn_tool_job_polling(
     loc: Locale,
     states: RwSignal<HashMap<String, ToolJobState>>,
 ) {
-    const LIVE_POLL_MS: u32 = 500;
     spawn_local(async move {
         let mut cursor: Option<u64> = None;
         let mut lines: Vec<crate::sse_dispatch::ToolJobOutputLine> = Vec::new();
@@ -68,6 +85,8 @@ fn spawn_tool_job_polling(
         let mut truncated = false;
         let mut output_ok = true;
         let mut saw_output = false;
+        let mut delay_ms = MIN_LIVE_MS;
+        let mut idle_cap = MAX_IDLE_MS;
         loop {
             // 1) 实时输出增量（游标续读；环形截断时服务端标 truncated）。
             let poll = if output_ok {
@@ -81,6 +100,7 @@ fn spawn_tool_job_polling(
                     Err(_) => {
                         if !saw_output {
                             output_ok = false;
+                            idle_cap = MAX_FALLBACK_MS;
                         }
                         None
                     }
@@ -88,6 +108,7 @@ fn spawn_tool_job_polling(
             } else {
                 None
             };
+            let got_new = poll.as_ref().is_some_and(|p| !p.items.is_empty());
             let poll_present = poll.is_some();
             // 2) 状态快照（终态 exit/summary 等；与输出增量合并后整体入 map）。
             let state = match fetch_tool_job_status(&job_id, loc).await {
@@ -116,7 +137,8 @@ fn spawn_tool_job_polling(
                 break;
             }
             if !terminal {
-                TimeoutFuture::new(LIVE_POLL_MS).await;
+                delay_ms = next_poll_interval(delay_ms, got_new, MIN_LIVE_MS, idle_cap);
+                TimeoutFuture::new(delay_ms).await;
             }
         }
     });
