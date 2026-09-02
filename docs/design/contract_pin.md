@@ -23,10 +23,10 @@
 |----|-----|
 | 源码迁入自 | 主仓 `eb0048bf…`（见 `frontend/SOURCE.md`） |
 | 契约 | crates.io **`crabmate` `0.5.0`** + `features = ["protocol"]` |
-| Playwright `serve` checkout | git tag **`v0.5.0`**（与 crates.io 包同源） |
+| Playwright `serve` checkout | git tag **`v0.5.1`**（与 crates.io 包同源） |
 | lock | 提交 `frontend/Cargo.lock`、`crates/crabmate-tui-core/Cargo.lock`、`crates/crabmate-tool-card/Cargo.lock` |
 
-`PUT /workspace/file/raw`（工作区本机文件拖放上传）、**`GET /workspace/file/download`**（侧栏保存文件到本机）与 **`GET /workspace/dir/archive`**（保存文件夹为 zip）、**`POST /workspace/file/move`**（树内重命名文件）是 **HTTP 路由**，不在 crates.io `protocol` 面里。官方 UI 对接 **当前 Server 源码 / `v0.5.0` 的 serve**；Playwright 默认 checkout **`v0.5.0`**。`GET /workspace/file/raw` 仍仅为聊天图片（png/jpg/jpeg/webp/gif）。
+`PUT /workspace/file/raw`（工作区本机文件拖放上传）、**`GET /workspace/file/download`**（侧栏保存文件到本机）与 **`GET /workspace/dir/archive`**（保存文件夹为 zip）、**`POST /workspace/file/move`**（树内重命名文件）是 **HTTP 路由**，不在 crates.io `protocol` 面里。官方 UI 对接 **当前 Server 源码 / `v0.5.1` 的 serve**；Playwright 默认 checkout **`v0.5.1`**。`GET /workspace/file/raw` 仍仅为聊天图片（png/jpg/jpeg/webp/gif）。
 
 壳打包 UI 同步：`make desktop-release` / `before-desktop-build.sh` 默认 **`trunk build --release`** 再同步本仓 `frontend/dist`（拒绝 debug 大 WASM）；`CM_PREPARE_SKIP_FRONTEND=1` 或 `CRABMATE_FRONTEND_DIST=-` 跳过；同级主仓回落需 `CRABMATE_ALLOW_SIBLING_FRONTEND=1`。
 
