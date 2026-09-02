@@ -240,6 +240,44 @@ pub(crate) fn tool_row_live_fields(
     }
 }
 
+/// 后台任务实时输出区 HTML（`/output` 增量累积，`seq` 升序）：一行一 span，stderr 走差异化
+/// 配色；环形缓冲丢早段（`truncated`）时附常驻提示；空输出返回空串不占位。
+/// 独立成函数以控制 `tool_process_body_html` 的复杂度（lizard CCN ≤ 10）。
+#[must_use]
+fn job_output_block_html(job: &ToolJobState, locale: Locale) -> String {
+    if job.output_lines.is_empty() && !job.output_truncated {
+        return String::new();
+    }
+    let mut html = String::new();
+    html.push_str("<div class=\"chat-tui-tool-job-output\" role=\"log\" aria-label=\"");
+    html.push_str(&plaintext_to_safe_html(i18n::tool_job_output_label(locale)));
+    html.push_str("\" data-testid=\"chat-tui-tool-job-output\">");
+    if !job.output_lines.is_empty() {
+        html.push_str("<pre>");
+        for it in &job.output_lines {
+            let cls = if it.stream == "stderr" {
+                "chat-tui-tool-job-line chat-tui-tool-job-stderr"
+            } else {
+                "chat-tui-tool-job-line"
+            };
+            html.push_str(&format!(
+                "<span class=\"{cls}\">{}</span>",
+                plaintext_to_safe_html(&it.text)
+            ));
+        }
+        html.push_str("</pre>");
+    }
+    if job.output_truncated {
+        html.push_str("<div class=\"chat-tui-tool-job-truncated\">");
+        html.push_str(&plaintext_to_safe_html(
+            &i18n::tool_job_output_truncated_hint(locale),
+        ));
+        html.push_str("</div>");
+    }
+    html.push_str("</div>");
+    html
+}
+
 /// 工具回合 body 内层 HTML（折叠态单行固定高度；详情展开后才增高）。
 /// `job` 为后台任务（`run_command` 的 `async:true`）轮询快照：非终态显示状态徽标与取消按钮，
 /// 终态在详情中追加输出/错误；无 job 时与普通工具行为一致。
@@ -254,6 +292,7 @@ pub(crate) fn tool_process_body_html(
     let label = tool_row_label(message, locale);
     let mut fields = tool_row_live_fields(message, locale, live_output_overlay);
     let mut job_bar = String::new();
+    let mut job_output_html = String::new();
     if let Some(job) = job {
         let terminal = job.is_terminal();
         if terminal {
@@ -284,6 +323,8 @@ pub(crate) fn tool_process_body_html(
                 label = plaintext_to_safe_html(i18n::tool_job_cancel_button(locale)),
             );
         }
+        // 实时输出（`/output` 增量累积）渲染由 `job_output_block_html` 承担（控制本函数 CCN）。
+        job_output_html = job_output_block_html(job, locale);
     }
     let emoji = i18n::tool_kind_emoji_curated(&id)
         .map(|e| format!("<span class=\"chat-tui-tool-emoji\" aria-hidden=\"true\">{e}</span>"))
@@ -323,6 +364,7 @@ pub(crate) fn tool_process_body_html(
         html.push_str(&job_bar);
         html.push_str("</div>");
     }
+    html.push_str(&job_output_html);
     html.push_str("</div>");
     html
 }
@@ -548,7 +590,31 @@ mod tests {
             error_code: None,
             failure_category: None,
             workspace_changed: false,
+            output_lines: Vec::new(),
+            next_output_cursor: 0,
+            output_truncated: false,
+            output_eof: false,
         }
+    }
+
+    fn job_state_with_output(status: &str, truncated: bool) -> ToolJobState {
+        let mut s = job_state(status);
+        s.output_lines = vec![
+            crate::sse_dispatch::ToolJobOutputLine {
+                seq: 1,
+                stream: "stdout".into(),
+                text: "  Compiling foo v0.1.0\n".into(),
+            },
+            crate::sse_dispatch::ToolJobOutputLine {
+                seq: 2,
+                stream: "stderr".into(),
+                text: "warning: unused variable `x`\n".into(),
+            },
+        ];
+        s.next_output_cursor = 3;
+        s.output_truncated = truncated;
+        s.output_eof = status != "running" && status != "queued";
+        s
     }
 
     #[test]
@@ -605,5 +671,47 @@ mod tests {
         let html = tool_process_body_html(&m, Locale::ZhHans, None, None);
         assert!(!html.contains("chat-tui-tool-job-cancel"), "{html}");
         assert!(!html.contains("后台任务"), "{html}");
+    }
+
+    #[test]
+    fn tool_job_renders_live_output_with_stderr_mark_and_truncated_hint() {
+        let m = tool_msg("run_command", "后台任务：cargo test", "cargo test", false);
+        let html = tool_process_body_html(
+            &m,
+            Locale::ZhHans,
+            None,
+            Some(&job_state_with_output("running", true)),
+        );
+        assert!(
+            html.contains("data-testid=\"chat-tui-tool-job-output\""),
+            "{html}"
+        );
+        assert!(html.contains("chat-tui-tool-job-stderr"), "{html}");
+        assert!(html.contains("Compiling foo v0.1.0"), "{html}");
+        assert!(html.contains("warning: unused variable"), "{html}");
+        // 转义安全：文本不被当作 HTML 注入。
+        assert!(
+            !html.contains("<script"),
+            "output text must be escaped: {html}"
+        );
+        assert!(html.contains("输出过长已截断"), "截断提示应显示: {html}");
+        // 非终态仍保留取消按钮。
+        assert!(html.contains("chat-tui-tool-job-cancel"), "{html}");
+    }
+
+    #[test]
+    fn tool_job_terminal_keeps_tail_output_without_cancel() {
+        let m = tool_msg("run_command", "完成", "", false);
+        let html = tool_process_body_html(
+            &m,
+            Locale::ZhHans,
+            None,
+            Some(&job_state_with_output("succeeded", false)),
+        );
+        assert!(html.contains("✅"), "{html}");
+        assert!(html.contains("Compiling foo v0.1.0"), "{html}");
+        assert!(html.contains("warning: unused variable"), "{html}");
+        assert!(!html.contains("chat-tui-tool-job-cancel"), "{html}");
+        assert!(!html.contains("输出过长已截断"), "{html}");
     }
 }

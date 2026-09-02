@@ -8,8 +8,7 @@ use leptos::prelude::*;
 use wasm_bindgen_futures::spawn_local;
 
 use super::super::turn_layout::{ResultOnlyToolStep, TurnLayout};
-use crate::api::OnToolCallFn;
-use crate::api::fetch_tool_job_status;
+use crate::api::{OnToolCallFn, fetch_tool_job_output, fetch_tool_job_status};
 use crate::i18n;
 use crate::i18n::Locale;
 use crate::message_format::tool_stored_text_from_result_info;
@@ -23,33 +22,102 @@ use super::super::super::per_stream_accum::PerStreamAccum;
 use super::super::super::stream_control_reducer::StreamControlEvent;
 use super::super::helpers::*;
 
-/// 后台任务轮询（指数退避，`200ms << min(attempt,5)`；终态或错误即停止）。
-/// 更新 `tool_job_states` map（tool_call_id → 快照），供气泡状态/取消按钮响应式刷新。
+/// 客户端本地输出保留上限（服务端环形 ≤256 KiB；此处兜底，防长时间任务跨轮累积无界）。
+const LOCAL_OUTPUT_MAX_BYTES: usize = 1024 * 1024;
+
+/// 把 `/output` 本 tick 增量并入本地窗口并执行上限裁剪（超限丢最旧、标 `truncated`）。
+/// 独立成小函数以控制轮询循环复杂度（lizard CCN ≤ 10）。
+fn append_output_window(
+    poll: &crate::sse_dispatch::ToolJobOutputPoll,
+    lines: &mut Vec<crate::sse_dispatch::ToolJobOutputLine>,
+    head: &mut usize,
+    out_bytes: &mut usize,
+    truncated: &mut bool,
+) {
+    for it in &poll.items {
+        *out_bytes += it.text.len();
+        lines.push(it.clone());
+    }
+    while *out_bytes > LOCAL_OUTPUT_MAX_BYTES && lines.len() > *head + 1 {
+        *out_bytes = out_bytes.saturating_sub(lines[*head].text.len());
+        *head += 1;
+        *truncated = true;
+    }
+}
+
+/// 后台任务轮询：`running`/`queued` 时固定 ~500ms 拉 `GET /tools/jobs/{id}/output`
+/// 实时输出增量（`tail -f` 体感）；终态后**无间隔**继续排水直到 `eof=true` 再停止。
+/// 每轮同时取一次状态快照（终态 `exit_code`/`summary`、取消按钮可见性由响应式重建保证）。
+/// 更新 `tool_job_states` map（tool_call_id → 快照），供气泡输出/状态/取消按钮响应式刷新。
+///
+/// **兼容回退**：旧服务端无 `/output` 路由（404）时实时流自动关闭，回退到纯状态轮询
+/// （行为同历史版本：拉到终态即停）；`404`/`410`（不存在/过期）与网络错误仍停止，保留
+/// 最后一次已知快照。本 tick 取不到输出且已终态时立即停止，避免「无 eof 的空转忙轮询」。
 fn spawn_tool_job_polling(
     tool_call_id: String,
     job_id: String,
     loc: Locale,
     states: RwSignal<HashMap<String, ToolJobState>>,
 ) {
+    const LIVE_POLL_MS: u32 = 500;
     spawn_local(async move {
-        let mut attempt: u32 = 0;
+        let mut cursor: Option<u64> = None;
+        let mut lines: Vec<crate::sse_dispatch::ToolJobOutputLine> = Vec::new();
+        let mut head: usize = 0;
+        let mut out_bytes: usize = 0;
+        let mut truncated = false;
+        let mut output_ok = true;
+        let mut saw_output = false;
         loop {
-            match fetch_tool_job_status(&job_id, loc).await {
-                Ok(state) => {
-                    let terminal = state.is_terminal();
-                    states.update(|m| {
-                        m.insert(tool_call_id.clone(), state);
-                    });
-                    if terminal {
-                        break;
+            // 1) 实时输出增量（游标续读；环形截断时服务端标 truncated）。
+            let poll = if output_ok {
+                match fetch_tool_job_output(&job_id, cursor, loc).await {
+                    Ok(p) => {
+                        saw_output = true;
+                        Some(p)
+                    }
+                    // 首拉即失败（旧服务端无 `/output`）：永久回退状态轮询；
+                    // 已成功过则视为瞬时抖动：本 tick 跳过输出，下 tick 自愈。
+                    Err(_) => {
+                        if !saw_output {
+                            output_ok = false;
+                        }
+                        None
                     }
                 }
-                // 404/410（不存在/过期）或网络错误：停止轮询，保留最后一次已知快照。
+            } else {
+                None
+            };
+            let poll_present = poll.is_some();
+            // 2) 状态快照（终态 exit/summary 等；与输出增量合并后整体入 map）。
+            let state = match fetch_tool_job_status(&job_id, loc).await {
+                Ok(s) => s,
                 Err(_) => break,
+            };
+            let terminal = state.is_terminal();
+            let mut merged = state;
+            merged.output_lines = lines[head..].to_vec();
+            merged.output_truncated = truncated;
+            let mut drained = false;
+            if let Some(p) = poll {
+                cursor = Some(p.cursor);
+                truncated |= p.truncated;
+                drained = p.eof;
+                append_output_window(&p, &mut lines, &mut head, &mut out_bytes, &mut truncated);
+                merged.output_lines = lines[head..].to_vec();
+                merged.next_output_cursor = p.cursor;
+                merged.output_truncated = truncated;
+                merged.output_eof = p.eof;
             }
-            attempt = attempt.saturating_add(1);
-            let ms = 200u64.saturating_mul(1u64 << attempt.min(5));
-            TimeoutFuture::new(ms as u32).await;
+            states.update(|m| {
+                m.insert(tool_call_id.clone(), merged);
+            });
+            if drained || (terminal && !poll_present) {
+                break;
+            }
+            if !terminal {
+                TimeoutFuture::new(LIVE_POLL_MS).await;
+            }
         }
     });
 }
@@ -114,6 +182,10 @@ fn register_background_tool_job(
         error_code: None,
         failure_category: None,
         workspace_changed: false,
+        output_lines: Vec::new(),
+        next_output_cursor: 0,
+        output_truncated: false,
+        output_eof: false,
     };
     states.update(|m| {
         m.insert(tid.to_string(), initial);

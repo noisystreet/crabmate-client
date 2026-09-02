@@ -132,6 +132,10 @@ pub struct ToolResultInfo {
 
 /// 后台工具任务（`run_command` 的 `async:true`）运行态快照（轮询 `GET /tools/jobs/{id}` 结果）。
 /// 与契约 §3.1 响应体逐字段对齐；`tool_job_poll_url` 仅存在于启动帧（[`ToolResultInfo`]），不在轮询响应中。
+///
+/// 实时输出（`GET /tools/jobs/{id}/output` 增量轮询）在 Client 侧按 `output_*` 字段**累积**：
+/// 轮询循环每次把 `/output` 的 `items` 追加进 `output_lines`、推进 `next_output_cursor`；
+/// 状态快照写入时保留这些聚合字段（`#[serde(default)]`，服务端轮询响应无这些键）。
 #[derive(Debug, Clone, PartialEq, serde::Deserialize)]
 pub struct ToolJobState {
     #[serde(rename = "tool_job_id")]
@@ -145,6 +149,46 @@ pub struct ToolJobState {
     pub error_code: Option<String>,
     pub failure_category: Option<String>,
     pub workspace_changed: bool,
+    /// 实时输出累积（`/output` 增量合并，`seq` 升序；终态含裁剪尾部）。
+    #[serde(default)]
+    pub output_lines: Vec<ToolJobOutputLine>,
+    /// 下次 `/output` 请求应携带的游标。
+    #[serde(default)]
+    pub next_output_cursor: u64,
+    /// 环形缓冲已丢早段（有间隙，UI 显示"输出已截断"）。
+    #[serde(default)]
+    pub output_truncated: bool,
+    /// 终态且输出已全部取回（可停止轮询）。
+    #[serde(default)]
+    pub output_eof: bool,
+}
+
+/// `/output` 增量轮询中的一条输出（契约 `background_tool_jobs_output_streaming_contract.md` §2.2）。
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+pub struct ToolJobOutputLine {
+    /// 全局单调序号。
+    pub seq: u64,
+    /// `stdout` | `stderr`。
+    pub stream: String,
+    /// lossy UTF-8 文本（可含换行）。
+    pub text: String,
+}
+
+/// `GET /tools/jobs/{id}/output?cursor=` 的 200 响应（增量轮询；`tail -f` 语义）。
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+pub struct ToolJobOutputPoll {
+    #[serde(rename = "tool_job_id")]
+    pub tool_job_id: String,
+    /// 读取时刻状态（同状态端点词汇）。
+    pub status: String,
+    /// 下次请求应携带的游标。
+    pub cursor: u64,
+    /// `true` = 有输出被环形丢弃，本次从最早可用重放。
+    pub truncated: bool,
+    /// `true` = 任务已终态且输出已全部返回 → 可停止。
+    pub eof: bool,
+    /// 自游标起的保留元素（升序；单次至多 500 条）。
+    pub items: Vec<ToolJobOutputLine>,
 }
 
 impl ToolJobState {
@@ -195,6 +239,10 @@ mod tests {
                 error_code: None,
                 failure_category: None,
                 workspace_changed: false,
+                output_lines: Vec::new(),
+                next_output_cursor: 0,
+                output_truncated: false,
+                output_eof: false,
             };
             assert!(!state.is_terminal(), "{s} should be non-terminal");
         }
@@ -209,9 +257,60 @@ mod tests {
                 error_code: None,
                 failure_category: None,
                 workspace_changed: false,
+                output_lines: Vec::new(),
+                next_output_cursor: 0,
+                output_truncated: false,
+                output_eof: false,
             };
             assert!(state.is_terminal(), "{s} should be terminal");
         }
+    }
+
+    /// 契约 `background_tool_jobs_output_streaming_contract.md` §2.2 的 `/output` 响应可反序列化。
+    #[test]
+    fn tool_job_output_poll_deserializes_from_contract() {
+        let raw = r#"{
+            "tool_job_id": "tooljob_0123456789abcdef0123456789abcdef",
+            "status": "running",
+            "cursor": 3,
+            "truncated": false,
+            "eof": false,
+            "items": [
+                { "seq": 1, "stream": "stdout", "text": "  Compiling foo\n" },
+                { "seq": 2, "stream": "stderr", "text": "warning: x\n" }
+            ]
+        }"#;
+        let poll: ToolJobOutputPoll =
+            serde_json::from_str(raw).expect("output poll response must deserialize");
+        assert_eq!(poll.tool_job_id, "tooljob_0123456789abcdef0123456789abcdef");
+        assert_eq!(poll.status, "running");
+        assert_eq!(poll.cursor, 3);
+        assert!(!poll.truncated && !poll.eof);
+        assert_eq!(poll.items.len(), 2);
+        assert_eq!(poll.items[1].stream, "stderr");
+        assert_eq!(poll.items[1].seq, 2);
+    }
+
+    /// 状态轮询响应（无 `output_*` 键）→ 聚合字段走默认空值。
+    #[test]
+    fn tool_job_state_output_fields_default_absent() {
+        let raw = r#"{
+            "tool_job_id": "tooljob_abc",
+            "status": "running",
+            "exit_code": null,
+            "stdout": null,
+            "stderr": null,
+            "summary": null,
+            "error_code": null,
+            "failure_category": null,
+            "workspace_changed": false,
+            "result_version": 1
+        }"#;
+        let state: ToolJobState =
+            serde_json::from_str(raw).expect("status response must deserialize");
+        assert!(state.output_lines.is_empty());
+        assert_eq!(state.next_output_cursor, 0);
+        assert!(!state.output_truncated && !state.output_eof);
     }
 }
 

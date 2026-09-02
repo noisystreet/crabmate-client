@@ -69,6 +69,22 @@ pub fn tool_job_detail_line(l: Locale, job_id: &str, status: &str) -> String {
     }
 }
 
+/// 实时输出区可读标签（无障碍 `role="log"`）。
+pub fn tool_job_output_label(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "后台任务输出",
+        Locale::En => "background job output",
+    }
+}
+
+/// 实时输出因环形缓冲上限被丢弃早段的提示（`/output` 响应 `truncated=true`）。
+pub fn tool_job_output_truncated_hint(l: Locale) -> String {
+    match l {
+        Locale::ZhHans => "输出过长已截断，仅保留最近一部分。".to_string(),
+        Locale::En => "Output truncated; only the recent tail is kept.".to_string(),
+    }
+}
+
 pub fn plan_generated(l: Locale) -> &'static str {
     match l {
         Locale::ZhHans => "已生成分阶段规划。",
