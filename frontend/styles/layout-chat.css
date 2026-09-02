@@ -724,6 +724,42 @@
   border-radius: var(--radius-md);
 }
 
+/* 后台任务实时输出（/output 增量；常驻气泡下方，终端滚动区） */
+.chat-tui-tool-job-output {
+  margin-top: 6px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.chat-tui-tool-job-output > pre {
+  margin: 0;
+  padding: 8px 10px;
+  max-height: 12rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  line-height: 1.45;
+  background: color-mix(in srgb, var(--surface) 88%, var(--bg));
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  border-radius: var(--radius-md);
+}
+
+.chat-tui-tool-job-line {
+  display: inline;
+}
+
+.chat-tui-tool-job-stderr {
+  color: color-mix(in srgb, var(--danger, #c0392b) 85%, var(--text));
+}
+
+.chat-tui-tool-job-truncated {
+  margin-top: 3px;
+  font-size: 0.85em;
+  color: var(--text-muted, var(--muted));
+}
+
 .chat-tui-empty {
   color: var(--text-muted);
   white-space: pre-wrap;

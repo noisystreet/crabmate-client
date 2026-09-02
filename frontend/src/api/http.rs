@@ -431,6 +431,21 @@ pub async fn fetch_tool_job_status(
     fetch_json("GET", &url, None, loc).await
 }
 
+/// `GET /tools/jobs/{id}/output?cursor=`：后台任务实时输出增量轮询（`tail -f`）。
+/// `cursor=None` 从最早可用起；服务端按 `cursor` 返回 `items`/`truncated`/`eof`。
+/// `404`/`410`（不存在/已过期）与网络错误均以 `Err` 返回，由调用方停止轮询。
+pub async fn fetch_tool_job_output(
+    tool_job_id: &str,
+    cursor: Option<u64>,
+    loc: Locale,
+) -> Result<crate::sse_dispatch::ToolJobOutputPoll, String> {
+    let url = match cursor {
+        Some(c) => format!("/tools/jobs/{tool_job_id}/output?cursor={c}"),
+        None => format!("/tools/jobs/{tool_job_id}/output"),
+    };
+    fetch_json("GET", &url, None, loc).await
+}
+
 /// `POST /tools/jobs/{id}/cancel`：取消后台任务。返回取消后状态
 /// （`cancelled`）；已是 `cancelled` 幂等 200，其它终态 409 不覆盖。
 pub async fn post_tool_job_cancel(tool_job_id: &str, loc: Locale) -> Result<String, String> {
