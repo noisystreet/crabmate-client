@@ -97,6 +97,8 @@ A bearer-mode `serve` without a server-side model `API_KEY` returns `LLM_API_KEY
   chat "hello"
 ```
 
+Missing `--bearer` or `--llm-api-key` (and their env vars) falls back to the **Desktop shell's saved secrets** in the same OS keyring (`com.crabmate.credentials` / `tauri_connect_web_api_bearer` / `tauri_client_llm_api_key`, read-only); `--no-keyring` disables the fallback.
+
 Piping the message into `chat` (no argv) consumes stdin, so a later approval prompt cannot read a decision — use **`--yes`**, or pass the message as an argument:
 
 ```bash

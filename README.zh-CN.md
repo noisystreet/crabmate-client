@@ -97,6 +97,8 @@ bearer 鉴权但服务端未设模型 `API_KEY` 的 serve 会返回 `LLM_API_KEY
   chat "你好"
 ```
 
+`--bearer` / `--llm-api-key`（或其 env）缺省时，会 **read-only 回退读取桌面壳已保存在同一系统钥匙串里的密钥**（`com.crabmate.credentials` / `tauri_connect_web_api_bearer` / `tauri_client_llm_api_key`）；`--no-keyring` 可关闭回退。
+
 管道把消息喂给 `chat`（无 argv）会读尽 stdin，后续审批无法再读决策，应加 **`--yes`**，或把消息写在参数里：
 
 ```bash

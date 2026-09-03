@@ -32,7 +32,7 @@
 | 子命令（终态） | `connect`（探测）· `chat`（单轮/管道）· `repl`（交互行编辑）· `tui`（全屏，后置） |
 | 契约 | crates.io `crabmate` `0.5.0` + `protocol`（与 `frontend` 同一钉点） |
 | HTTP 客户端 | `reqwest` + rustls；SSE 解析对齐协议 crate |
-| 连接配置 | 复用/对齐 connect 键：`api_base`、Web Bearer（钥匙串账户可与壳同源或 `tui_*` 前缀，实现时定一） |
+| 连接配置 | 复用/对齐 connect 键：`api_base`、Web Bearer；密钥读取与壳**同源**（read-only 回退，见 §4），不写壳槽位 |
 | GitHub | 原生端：钥匙串槽 `github` + `X-CrabMate-GitHub-Token`；无浏览器 Cookie 路径 |
 | 审批 | `POST /chat/approval`；TTY 用菜单/读行；`--yes` 对齐 Server `chat --yes` 语义（仅远程放行决策，执行仍在 serve） |
 
@@ -73,10 +73,10 @@ crates/
 | 斜杠 /skills | 同进程 | 经 stream 内置命令或后续 REST |
 | 工作区 | 本地 path | `POST /workspace`、`GET /workspace/...` |
 | 会话列表/分支 | SQLite 同库 | `/user-data/.../sessions`、`POST /chat/branch` |
-| 模型密钥 | 本机 keyring → 回合注入 | 每轮请求体 `client_llm.{api_key,model,api_base}`（同 WASM UI 设置子集）；CLI/env 提供，keyring 后置 |
+| 模型密钥 | 本机 keyring → 回合注入 | 每轮请求体 `client_llm.{api_key,model,api_base}`（同 WASM UI 设置子集）；CLI/env 提供，缺省时 read-only 回退壳钥匙串 |
 | GitHub token | 现已请求作用域 | 头 `X-CrabMate-GitHub-Token` |
 
-> **模型密钥（CLI/env，P3 已落地）**：`crabmate-tui chat|repl` 支持 `--llm-api-key` / `--llm-model` / `--llm-api-base`（env 沿用 serve 侧模型 env 名：`CM_API_KEY` / `CM_MODEL` / `CM_API_BASE`），有任一非空时随 `POST /chat/stream` 发送 `client_llm.{api_key,model,api_base}`，语义同 WASM UI「设置 → API 密钥/模型」——供 bearer 鉴权且服务端未设 `API_KEY` 的 serve（如个人云）使用；密钥仅存进程内、不落盘。`--bearer` 仍是 Web Bearer（≠ 模型 API_KEY）。
+> **模型密钥 / Web Bearer（CLI/env + 壳钥匙串回退，P3 已落地）**：`crabmate-tui chat|repl` 支持 `--llm-api-key` / `--llm-model` / `--llm-api-base`（env 沿用 serve 侧模型 env 名：`CM_API_KEY` / `CM_MODEL` / `CM_API_BASE`），有任一非空时随 `POST /chat/stream` 发送 `client_llm.{api_key,model,api_base}`，语义同 WASM UI「设置 → API 密钥/模型」——供 bearer 鉴权且服务端未设 `API_KEY` 的 serve（如个人云）使用；密钥仅存进程内、不落盘。`--bearer` 仍是 Web Bearer（≠ 模型 API_KEY）。**`--bearer` / `--llm-api-key`（或对应 env）缺省时**，TUI read-only 回退读取桌面壳已写入同一系统钥匙串（service `com.crabmate.credentials`）的槽位：`tauri_connect_web_api_bearer` / `tauri_client_llm_api_key`，不写壳槽位；`--no-keyring` 关闭回退（无条目或钥匙串不可用时静默跳过）。
 
 ---
 
