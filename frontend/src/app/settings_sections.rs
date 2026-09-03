@@ -264,6 +264,32 @@ pub(crate) fn SettingsWebApiBearerBlock(
     }
 }
 
+/// 校验（http/https 前缀）并保存 API 基址；反馈与 dirty nonce 一并更新。
+fn save_api_base_click(
+    locale: RwSignal<Locale>,
+    draft: RwSignal<String>,
+    feedback: RwSignal<Option<String>>,
+    save_nonce: RwSignal<u64>,
+) {
+    let loc = locale.get_untracked();
+    let raw = draft.get_untracked();
+    let trimmed = raw.trim();
+    if !trimmed.is_empty() && !(trimmed.starts_with("http://") || trimmed.starts_with("https://")) {
+        feedback.set(Some(i18n::settings_api_base_invalid(loc).to_string()));
+        return;
+    }
+    crate::api::set_api_base_url(trimmed);
+    let normalized = crate::api::api_base_url();
+    draft.set(normalized.clone());
+    let cleared = normalized.is_empty();
+    feedback.set(Some(if cleared {
+        i18n::settings_api_base_cleared(loc).to_string()
+    } else {
+        i18n::settings_api_base_saved(loc).to_string()
+    }));
+    save_nonce.update(|n| *n = n.saturating_add(1));
+}
+
 /// 跨 Origin：指向远程 `serve` 的 API 基址（空 = 同 Origin）。
 #[component]
 pub(crate) fn SettingsApiBaseBlock(
@@ -297,25 +323,7 @@ pub(crate) fn SettingsApiBaseBlock(
                 class="btn btn-primary btn-sm"
                 data-testid="settings-api-base-save"
                 on:click=move |_| {
-                    let loc = locale.get_untracked();
-                    let raw = draft.get_untracked();
-                    let trimmed = raw.trim();
-                    if !trimmed.is_empty()
-                        && !(trimmed.starts_with("http://") || trimmed.starts_with("https://"))
-                    {
-                        feedback.set(Some(i18n::settings_api_base_invalid(loc).to_string()));
-                        return;
-                    }
-                    crate::api::set_api_base_url(trimmed);
-                    let normalized = crate::api::api_base_url();
-                    draft.set(normalized.clone());
-                    let cleared = normalized.is_empty();
-                    feedback.set(Some(if cleared {
-                        i18n::settings_api_base_cleared(loc).to_string()
-                    } else {
-                        i18n::settings_api_base_saved(loc).to_string()
-                    }));
-                    save_nonce.update(|n| *n = n.saturating_add(1));
+                    save_api_base_click(locale, draft, feedback, save_nonce);
                 }
             >
                 {move || i18n::settings_api_base_save(locale.get())}

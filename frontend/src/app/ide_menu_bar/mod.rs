@@ -59,6 +59,25 @@ pub fn IdeMenuBarTopbarContent(bridge: IdeMenuBarBridge) -> impl IntoView {
     }
 }
 
+/// 当前文件是否有未保存编辑（供 save 使能 Memo 在反应式作用域内求值）。
+fn ide_file_edits_pending(signals: &IdeMenuBarSignals) -> bool {
+    signals.ide_path.get().is_some()
+        && !signals.ide_load_busy.get()
+        && !signals.ide_save_busy.get()
+        && signals.ide_text.get() != signals.ide_baseline.get()
+}
+
+/// 是否存在「非当前活动 Tab」的未保存修改。
+fn ide_inactive_tabs_dirty(signals: &IdeMenuBarSignals, active: Option<usize>) -> bool {
+    signals
+        .tabs
+        .tabs
+        .get()
+        .iter()
+        .enumerate()
+        .any(|(i, tab)| active != Some(i) && tab.text != tab.baseline)
+}
+
 /// 注册 IDE 顶栏桥接状态，并在布局卸载时清除。
 pub fn wire_ide_menu_bar_bridge(
     bridge_slot: RwSignal<Option<IdeMenuBarBridge>>,
@@ -73,25 +92,14 @@ pub fn wire_ide_menu_bar_bridge(
         }
     });
 
-    let save_enabled = Memo::new(move |_| {
-        signals.ide_path.get().is_some()
-            && !signals.ide_load_busy.get()
-            && !signals.ide_save_busy.get()
-            && signals.ide_text.get() != signals.ide_baseline.get()
-    });
+    let save_enabled = Memo::new(move |_| ide_file_edits_pending(&signals));
 
     let save_all_enabled = Memo::new(move |_| {
         if signals.ide_load_busy.get() || signals.ide_save_busy.get() {
             return false;
         }
         let active = signals.tabs.active.get();
-        let dirty_inactive = signals.tabs.tabs.get().iter().enumerate().any(|(i, tab)| {
-            if active == Some(i) {
-                return false;
-            }
-            tab.text != tab.baseline
-        });
-        dirty_inactive || save_enabled.get()
+        ide_inactive_tabs_dirty(&signals, active) || save_enabled.get()
     });
 
     let sync_bridge = move || {

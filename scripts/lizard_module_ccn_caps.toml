@@ -21,5 +21,5 @@ frozen_modules = ["desktop-tauri"]
 "crates/crabmate-web-host" = 0
 # 禁止抬高：desktop-tauri CCN>10 函数个数上限（可随实测下调）
 "desktop-tauri" = 0
-"frontend" = 51
+"frontend" = 26
 "mobile-tauri" = 0

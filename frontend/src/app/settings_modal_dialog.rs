@@ -54,6 +54,50 @@ pub struct SettingsModalDialogInput {
     pub github_auth_refresh_nonce: RwSignal<u64>,
 }
 
+/// 弹窗头部操作（丢弃 / 保存 / 关闭），独立以降低 head CCN。
+#[component]
+fn SettingsModalDialogHeadActions(
+    appearance_locale: RwSignal<Locale>,
+    dirty: Memo<bool>,
+    discard: Arc<dyn Fn() + Send + Sync>,
+    save_busy: RwSignal<bool>,
+    save_all: Arc<dyn Fn() + Send + Sync>,
+) -> impl IntoView {
+    view! {
+        <button
+            type="button"
+            class="btn btn-secondary btn-sm"
+            prop:disabled=move || !dirty.get()
+            on:click={
+                let discard = discard.clone();
+                move |_| discard()
+            }
+        >
+            {move || i18n::settings_discard_changes(appearance_locale.get())}
+        </button>
+        <button
+            type="button"
+            class="btn btn-primary btn-sm"
+            prop:disabled=move || !dirty.get() || save_busy.get()
+            on:click={
+                let save_all = save_all.clone();
+                move |_| save_all()
+            }
+        >
+            {move || i18n::settings_save_all(appearance_locale.get())}
+        </button>
+        <button
+            type="button"
+            class="btn btn-ghost btn-sm"
+            on:click=move |_| {
+                crate::app::settings_close_guard::request_settings_modal_close();
+            }
+        >
+            {move || i18n::settings_close(appearance_locale.get())}
+        </button>
+    }
+}
+
 #[component]
 fn SettingsModalDialogHead(
     appearance_locale: RwSignal<Locale>,
@@ -70,32 +114,13 @@ fn SettingsModalDialogHead(
                 <span class="settings-unsaved-pill">{move || i18n::settings_unsaved_badge(appearance_locale.get())}</span>
             </Show>
             <span class="modal-head-spacer"></span>
-            <button type="button" class="btn btn-secondary btn-sm" prop:disabled=move || !dirty.get() on:click={
-                let discard = discard.clone();
-                move |_| discard()
-            }>
-                {move || i18n::settings_discard_changes(appearance_locale.get())}
-            </button>
-            <button
-                type="button"
-                class="btn btn-primary btn-sm"
-                prop:disabled=move || !dirty.get() || save_busy.get()
-                on:click={
-                    let save_all = save_all.clone();
-                    move |_| save_all()
-                }
-            >
-                {move || i18n::settings_save_all(appearance_locale.get())}
-            </button>
-            <button
-                type="button"
-                class="btn btn-ghost btn-sm"
-                on:click=move |_| {
-                    crate::app::settings_close_guard::request_settings_modal_close();
-                }
-            >
-                {move || i18n::settings_close(appearance_locale.get())}
-            </button>
+            <SettingsModalDialogHeadActions
+                appearance_locale=appearance_locale
+                dirty=dirty
+                discard=discard.clone()
+                save_busy=save_busy
+                save_all=save_all.clone()
+            />
         </div>
     }
 }

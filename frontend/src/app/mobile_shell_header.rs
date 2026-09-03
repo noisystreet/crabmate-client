@@ -8,6 +8,7 @@ use crate::mobile_remote::mobile_remote_client;
 use crate::tauri_shell::tauri_shell_available;
 
 use super::app_shell_ctx::MobileShellHeaderSignals;
+use super::ide_layout_switch::IdeLayoutToggleSignals;
 use super::ide_menu_bar::{
     IdeMenuBarBridge, IdeMenuBarTopbarContent, IdeMenuId, ShellTopbarFileMenu,
     ShellTopbarMenuBackdrop,
@@ -108,6 +109,47 @@ fn ShellTopbarFileStatusSlot(
     }
 }
 
+/// 顶栏 leading 槽：窄屏布局切换 + IDE/会话菜单（按 editor 模式二选一）。
+#[component]
+fn ShellTopbarLeadingSlot(
+    locale: RwSignal<Locale>,
+    editor_layout_mode: RwSignal<bool>,
+    is_narrow_viewport: RwSignal<bool>,
+    layout_toggle: IdeLayoutToggleSignals,
+    workspace_pick: WorkspaceRootPickHandle,
+    ide_menu_bar_bridge: RwSignal<Option<IdeMenuBarBridge>>,
+    ide_menubar_dropdown_open: RwSignal<bool>,
+) -> impl IntoView {
+    let show_layout_toggle = move || !is_narrow_viewport.get() && !mobile_remote_client();
+    view! {
+        <div class="shell-topbar-leading">
+            <Show when=show_layout_toggle>
+                <div class="shell-topbar-start shell-topbar-layout-start">
+                    <LayoutModeSegment
+                        locale=locale
+                        layout_toggle=layout_toggle
+                        extra_class="shell-topbar-layout-toggle"
+                    />
+                </div>
+            </Show>
+            <Show
+                when=move || editor_layout_mode.get()
+                fallback=move || {
+                    view! {
+                        <ShellTopbarChatMenus
+                            locale=locale
+                            workspace_pick=workspace_pick
+                            menubar_dropdown_open=ide_menubar_dropdown_open
+                        />
+                    }
+                }
+            >
+                <ShellTopbarIdeMenus ide_menu_bar_bridge=ide_menu_bar_bridge />
+            </Show>
+        </div>
+    }
+}
+
 pub fn mobile_shell_header_view(signals: MobileShellHeaderSignals) -> impl IntoView {
     let MobileShellHeaderSignals {
         locale,
@@ -118,7 +160,6 @@ pub fn mobile_shell_header_view(signals: MobileShellHeaderSignals) -> impl IntoV
         workspace_pick,
         ide_menubar_dropdown_open,
     } = signals;
-    let show_layout_toggle = move || !is_narrow_viewport.get() && !mobile_remote_client();
     view! {
         <header
             class="shell-main-header-mobile shell-topbar"
@@ -127,31 +168,15 @@ pub fn mobile_shell_header_view(signals: MobileShellHeaderSignals) -> impl IntoV
             data-testid=move || shell_topbar_a11y(editor_layout_mode.get(), locale.get()).1
             prop:aria-label=move || shell_topbar_a11y(editor_layout_mode.get(), locale.get()).2
         >
-            <div class="shell-topbar-leading">
-                <Show when=show_layout_toggle>
-                    <div class="shell-topbar-start shell-topbar-layout-start">
-                        <LayoutModeSegment
-                            locale=locale
-                            layout_toggle=layout_toggle
-                            extra_class="shell-topbar-layout-toggle"
-                        />
-                    </div>
-                </Show>
-                <Show
-                    when=move || editor_layout_mode.get()
-                    fallback=move || {
-                        view! {
-                            <ShellTopbarChatMenus
-                                locale=locale
-                                workspace_pick=workspace_pick
-                                menubar_dropdown_open=ide_menubar_dropdown_open
-                            />
-                        }
-                    }
-                >
-                    <ShellTopbarIdeMenus ide_menu_bar_bridge=ide_menu_bar_bridge />
-                </Show>
-            </div>
+            <ShellTopbarLeadingSlot
+                locale=locale
+                editor_layout_mode=editor_layout_mode
+                is_narrow_viewport=is_narrow_viewport
+                layout_toggle=layout_toggle
+                workspace_pick=workspace_pick
+                ide_menu_bar_bridge=ide_menu_bar_bridge
+                ide_menubar_dropdown_open=ide_menubar_dropdown_open
+            />
             <ShellTopbarWorkspaceRoot pick=workspace_pick />
             <div class="shell-topbar-trailing">
                 <ShellTopbarFileStatusSlot

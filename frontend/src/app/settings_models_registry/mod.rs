@@ -213,6 +213,125 @@ struct RegistryAddFormPrimarySignals {
     id_model: String,
 }
 
+/// 单行文本字段（label + reactive value/placeholder/input），供多个区块复用，避免每个区块重复内联字段闭包。
+#[component]
+fn SettingsModelsTextInputField(
+    locale: RwSignal<Locale>,
+    value: RwSignal<String>,
+    input_id: String,
+    test_id: &'static str,
+    label_text: fn(Locale) -> &'static str,
+    placeholder_text: Option<fn(Locale) -> &'static str>,
+) -> impl IntoView {
+    view! {
+        <div class="settings-field">
+            <label class="settings-field-label" for=input_id.clone()>
+                {move || label_text(locale.get())}
+            </label>
+            <input
+                type="text"
+                class="settings-text-input"
+                id=input_id.clone()
+                data-testid=test_id
+                prop:placeholder=move || placeholder_text.map_or("", |f| f(locale.get()))
+                prop:value=move || value.get()
+                on:input=move |ev| value.set(event_target_value(&ev))
+            />
+        </div>
+    }
+}
+
+#[component]
+fn SettingsModelsContextTokensField(
+    locale: RwSignal<Locale>,
+    new_ctx_tokens: RwSignal<String>,
+    id_ctx: String,
+) -> impl IntoView {
+    view! {
+        <div class="settings-field">
+            <label class="settings-field-label" for=id_ctx.clone()>
+                {move || i18n::settings_models_label_context_tokens(locale.get())}
+            </label>
+            <input
+                type="text"
+                class="settings-text-input"
+                id=id_ctx.clone()
+                prop:value=move || new_ctx_tokens.get()
+                on:input=move |ev| new_ctx_tokens.set(event_target_value(&ev))
+            />
+        </div>
+    }
+}
+
+#[component]
+fn SettingsModelsThinkingModeField(
+    locale: RwSignal<Locale>,
+    new_thinking_mode: RwSignal<String>,
+    id_thinking: String,
+) -> impl IntoView {
+    view! {
+        <div class="settings-field">
+            <label class="settings-field-label" for=id_thinking.clone()>
+                {move || i18n::settings_label_llm_thinking_mode(locale.get())}
+            </label>
+            <select
+                id=id_thinking.clone()
+                class="settings-select"
+                prop:value=move || new_thinking_mode.get()
+                on:change=move |ev| new_thinking_mode.set(event_target_value(&ev))
+            >
+                <option value="server">
+                    {move || i18n::settings_thinking_mode_server(locale.get())}
+                </option>
+                <option value="on">
+                    {move || i18n::settings_thinking_mode_on(locale.get())}
+                </option>
+                <option value="off">
+                    {move || i18n::settings_thinking_mode_off(locale.get())}
+                </option>
+            </select>
+        </div>
+    }
+}
+
+#[component]
+fn SettingsModelsApiKeyField(
+    locale: RwSignal<Locale>,
+    dialog_mode: RwSignal<Option<RegistryPresetDialogKind>>,
+    saved_model_presets: RwSignal<Vec<SavedModelPreset>>,
+    new_api_key: RwSignal<String>,
+    id_key: String,
+) -> impl IntoView {
+    // 编辑已有密钥的预设时提示「留空保持不变」，避免用户误以为必须重新输入。
+    let api_key_placeholder = Memo::new(move |_| match dialog_mode.get() {
+        Some(RegistryPresetDialogKind::Edit(i)) => {
+            let has_key = saved_model_presets
+                .get()
+                .get(i)
+                .is_some_and(|p| p.has_api_key);
+            has_key.then(|| i18n::settings_models_ph_api_key_keep(locale.get()))
+        }
+        _ => None,
+    });
+    view! {
+        <div class="settings-field">
+            <label class="settings-field-label" for=id_key.clone()>
+                {move || i18n::settings_models_label_api_key(locale.get())}
+            </label>
+            <input
+                type="password"
+                class="settings-text-input"
+                autocomplete="off"
+                id=id_key.clone()
+                data-testid="settings-models-new-key"
+                prop:value=move || new_api_key.get()
+                prop:placeholder=move || api_key_placeholder.get().unwrap_or_default()
+                on:input=move |ev| new_api_key.set(event_target_value(&ev))
+            />
+        </div>
+    }
+}
+
 #[component]
 fn SettingsModelsRegistryAddFormPrimaryFields(s: RegistryAddFormPrimarySignals) -> impl IntoView {
     let RegistryAddFormPrimarySignals {
@@ -225,46 +344,30 @@ fn SettingsModelsRegistryAddFormPrimaryFields(s: RegistryAddFormPrimarySignals) 
         id_model,
     } = s;
     view! {
-        <div class="settings-field">
-            <label class="settings-field-label" for=id_label.clone()>
-                {move || i18n::settings_models_label_name(locale.get())}
-            </label>
-            <input
-                type="text"
-                class="settings-text-input"
-                id=id_label.clone()
-                data-testid="settings-models-new-label"
-                prop:value=move || new_label.get()
-                on:input=move |ev| new_label.set(event_target_value(&ev))
-            />
-        </div>
-        <div class="settings-field">
-            <label class="settings-field-label" for=id_base_url.clone()>
-                {move || i18n::settings_models_label_base_url(locale.get())}
-            </label>
-            <input
-                type="text"
-                class="settings-text-input"
-                id=id_base_url.clone()
-                data-testid="settings-models-new-base"
-                prop:value=move || new_api_base.get()
-                on:input=move |ev| new_api_base.set(event_target_value(&ev))
-            />
-        </div>
-        <div class="settings-field">
-            <label class="settings-field-label" for=id_model.clone()>
-                {move || i18n::settings_models_label_model_id(locale.get())}
-            </label>
-            <input
-                type="text"
-                class="settings-text-input"
-                id=id_model.clone()
-                data-testid="settings-models-new-model"
-                prop:value=move || new_model_id.get()
-                prop:placeholder=move || i18n::settings_models_ph_model_id(locale.get())
-                on:input=move |ev| new_model_id.set(event_target_value(&ev))
-            />
-        </div>
+        <SettingsModelsTextInputField
+            locale
+            value=new_label
+            input_id=id_label.clone()
+            test_id="settings-models-new-label"
+            label_text=i18n::settings_models_label_name
+            placeholder_text=None
+        />
+        <SettingsModelsTextInputField
+            locale
+            value=new_api_base
+            input_id=id_base_url.clone()
+            test_id="settings-models-new-base"
+            label_text=i18n::settings_models_label_base_url
+            placeholder_text=None
+        />
+        <SettingsModelsTextInputField
+            locale
+            value=new_model_id
+            input_id=id_model.clone()
+            test_id="settings-models-new-model"
+            label_text=i18n::settings_models_label_model_id
+            placeholder_text={Some(i18n::settings_models_ph_model_id)}
+        />
     }
 }
 
@@ -299,71 +402,29 @@ fn SettingsModelsRegistryAddFormDetailFields(s: RegistryAddFormDetailSignals) ->
         id_temp,
         id_thinking,
     } = s;
-    // 编辑已有密钥的预设时提示「留空保持不变」，避免用户误以为必须重新输入。
-    let api_key_placeholder = Memo::new(move |_| match dialog_mode.get() {
-        Some(RegistryPresetDialogKind::Edit(i)) => {
-            let has_key = saved_model_presets
-                .get()
-                .get(i)
-                .is_some_and(|p| p.has_api_key);
-            has_key.then(|| i18n::settings_models_ph_api_key_keep(locale.get()))
-        }
-        _ => None,
-    });
     view! {
         <LlmTemperatureFieldWithId
             locale
             temperature_draft=new_temperature
             input_id=id_temp.clone()
         />
-        <div class="settings-field">
-            <label class="settings-field-label" for=id_ctx.clone()>
-                {move || i18n::settings_models_label_context_tokens(locale.get())}
-            </label>
-            <input
-                type="text"
-                class="settings-text-input"
-                id=id_ctx.clone()
-                prop:value=move || new_ctx_tokens.get()
-                on:input=move |ev| new_ctx_tokens.set(event_target_value(&ev))
-            />
-        </div>
-        <div class="settings-field">
-            <label class="settings-field-label" for=id_thinking.clone()>
-                {move || i18n::settings_label_llm_thinking_mode(locale.get())}
-            </label>
-            <select
-                id=id_thinking.clone()
-                class="settings-select"
-                prop:value=move || new_thinking_mode.get()
-                on:change=move |ev| new_thinking_mode.set(event_target_value(&ev))
-            >
-                <option value="server">
-                    {move || i18n::settings_thinking_mode_server(locale.get())}
-                </option>
-                <option value="on">
-                    {move || i18n::settings_thinking_mode_on(locale.get())}
-                </option>
-                <option value="off">
-                    {move || i18n::settings_thinking_mode_off(locale.get())}
-                </option>
-            </select>
-        </div>
-        <div class="settings-field">
-            <label class="settings-field-label" for=id_key.clone()>
-                {move || i18n::settings_models_label_api_key(locale.get())}
-            </label>
-            <input
-                type="password"
-                class="settings-text-input"
-                autocomplete="off"
-                id=id_key.clone()
-                data-testid="settings-models-new-key"
-                prop:value=move || new_api_key.get()
-                prop:placeholder=move || api_key_placeholder.get().unwrap_or_default()
-                on:input=move |ev| new_api_key.set(event_target_value(&ev))
-            />
-        </div>
+        <SettingsModelsContextTokensField
+            locale
+            new_ctx_tokens
+            id_ctx=id_ctx.clone()
+        />
+        <SettingsModelsThinkingModeField
+            locale
+            new_thinking_mode
+            id_thinking=id_thinking.clone()
+        />
+        <SettingsModelsApiKeyField
+            locale
+            dialog_mode
+            saved_model_presets
+            new_api_key
+            id_key=id_key.clone()
+        />
     }
 }
 
@@ -503,6 +564,77 @@ fn SettingsModelsRegistryAddForm(s: RegistryAddFormSignals) -> impl IntoView {
     }
 }
 
+/// 弹窗头部：标题（随 Add/Edit 变化）与关闭按钮。
+#[component]
+fn SettingsModelsRegistryDialogHead(
+    locale: RwSignal<Locale>,
+    dialog_mode: RwSignal<Option<RegistryPresetDialogKind>>,
+    title_id: String,
+    on_close: Arc<dyn Fn() + Send + Sync>,
+) -> impl IntoView {
+    view! {
+        <div class="modal-head">
+            <h2 class="modal-title" id=title_id.clone()>
+                {move || match dialog_mode.get() {
+                    Some(RegistryPresetDialogKind::Edit(_)) => {
+                        i18n::settings_models_edit_dialog_title(locale.get())
+                    }
+                    _ => i18n::settings_models_add_dialog_title(locale.get()),
+                }}
+            </h2>
+            <span class="modal-head-spacer"></span>
+            <button
+                type="button"
+                class="btn btn-ghost btn-sm"
+                on:click={
+                    let on_close = on_close.clone();
+                    move |_| on_close()
+                }
+            >
+                {move || i18n::settings_close(locale.get())}
+            </button>
+        </div>
+    }
+}
+
+/// 弹窗打开后把焦点移入容器（异步等待首帧）。
+fn schedule_dialog_initial_focus(
+    dialog_mode: RwSignal<Option<RegistryPresetDialogKind>>,
+    dialog_ref: NodeRef<Div>,
+) {
+    Effect::new(move |_| {
+        if dialog_mode.get().is_none() {
+            return;
+        }
+        let r = dialog_ref.clone();
+        spawn_local(async move {
+            TimeoutFuture::new(0).await;
+            if let Some(el) = r.get() {
+                focus_first_in_modal_container(el.as_ref());
+            }
+        });
+    });
+}
+
+/// Tab 在弹窗内循环聚焦；Escape 复位并关闭。
+fn handle_add_model_dialog_keydown(
+    ev: &web_sys::KeyboardEvent,
+    dialog_ref: &NodeRef<Div>,
+    cancel: &(dyn Fn() + Send + Sync),
+) {
+    if ev.key() == "Tab" {
+        if let Some(el) = dialog_ref.get() {
+            trap_tab_in_container(ev, el.as_ref());
+        }
+        return;
+    }
+    if ev.key() == "Escape" {
+        ev.prevent_default();
+        ev.stop_propagation();
+        cancel();
+    }
+}
+
 #[component]
 fn SettingsModelsRegistryAddModelDialog(s: RegistryAddFormSignals) -> impl IntoView {
     let RegistryAddFormSignals {
@@ -522,46 +654,43 @@ fn SettingsModelsRegistryAddModelDialog(s: RegistryAddFormSignals) -> impl IntoV
     let dialog_ref = NodeRef::<Div>::new();
     let title_id_for_aria = dialog_title_id.clone();
     let title_id_for_heading = dialog_title_id.clone();
-    let reset_fields = move || {
-        new_api_base.set(String::new());
-        new_label.set(String::new());
-        new_model_id.set(String::new());
-        new_api_key.set(String::new());
-        new_ctx_tokens.set(String::new());
-        new_temperature.set("0.7".to_string());
-        new_thinking_mode.set("server".to_string());
-    };
-    let close_dialog = move || {
-        dialog_mode.set(None);
-        form_error.set(None);
-    };
-
-    Effect::new({
-        let dialog_ref = dialog_ref.clone();
+    let cancel_dialog = {
         let dialog_mode = dialog_mode;
-        move |_| {
-            if dialog_mode.get().is_none() {
-                return;
-            }
-            let r = dialog_ref.clone();
-            spawn_local(async move {
-                TimeoutFuture::new(0).await;
-                if let Some(el) = r.get() {
-                    focus_first_in_modal_container(el.as_ref());
-                }
-            });
-        }
-    });
+        let form_error = form_error;
+        Arc::new(move || {
+            new_api_base.set(String::new());
+            new_label.set(String::new());
+            new_model_id.set(String::new());
+            new_api_key.set(String::new());
+            new_ctx_tokens.set(String::new());
+            new_temperature.set("0.7".to_string());
+            new_thinking_mode.set("server".to_string());
+            dialog_mode.set(None);
+            form_error.set(None);
+        }) as Arc<dyn Fn() + Send + Sync>
+    };
+    let close_only = {
+        let dialog_mode = dialog_mode;
+        let form_error = form_error;
+        Arc::new(move || {
+            dialog_mode.set(None);
+            form_error.set(None);
+        }) as Arc<dyn Fn() + Send + Sync>
+    };
+    schedule_dialog_initial_focus(dialog_mode, dialog_ref);
 
     view! {
         <Show when=move || dialog_mode.get().is_some()>
             <div
                 class="modal-backdrop settings-model-add-dialog-backdrop"
-                on:click=move |ev: leptos::ev::MouseEvent| {
-                    if !mouse_event_target_is_current_target(&ev) {
-                        return;
+                on:click={
+                    let close_only = close_only.clone();
+                    move |ev: leptos::ev::MouseEvent| {
+                        if !mouse_event_target_is_current_target(&ev) {
+                            return;
+                        }
+                        close_only();
                     }
-                    close_dialog();
                 }
             >
                 <div
@@ -573,42 +702,23 @@ fn SettingsModelsRegistryAddModelDialog(s: RegistryAddFormSignals) -> impl IntoV
                     tabindex="-1"
                     on:pointerdown=|ev: leptos::ev::PointerEvent| ev.stop_propagation()
                     on:click=|ev: leptos::ev::MouseEvent| ev.stop_propagation()
-                    on:keydown=move |ev: web_sys::KeyboardEvent| {
-                        if ev.key() == "Tab" {
-                            if let Some(el) = dialog_ref.get() {
-                                trap_tab_in_container(&ev, el.as_ref());
-                            }
-                            return;
-                        }
-                        if ev.key() == "Escape" {
-                            ev.prevent_default();
-                            ev.stop_propagation();
-                            reset_fields();
-                            close_dialog();
+                    on:keydown={
+                        let cancel_dialog = cancel_dialog.clone();
+                        move |ev: web_sys::KeyboardEvent| {
+                            handle_add_model_dialog_keydown(
+                                &ev,
+                                &dialog_ref,
+                                cancel_dialog.as_ref(),
+                            );
                         }
                     }
                 >
-                    <div class="modal-head">
-                        <h2 class="modal-title" id=title_id_for_heading.clone()>
-                            {move || match dialog_mode.get() {
-                                Some(RegistryPresetDialogKind::Edit(_)) => {
-                                    i18n::settings_models_edit_dialog_title(locale.get())
-                                }
-                                _ => i18n::settings_models_add_dialog_title(locale.get()),
-                            }}
-                        </h2>
-                        <span class="modal-head-spacer"></span>
-                        <button
-                            type="button"
-                            class="btn btn-ghost btn-sm"
-                            on:click=move |_| {
-                                reset_fields();
-                                close_dialog();
-                            }
-                        >
-                            {move || i18n::settings_close(locale.get())}
-                        </button>
-                    </div>
+                    <SettingsModelsRegistryDialogHead
+                        locale
+                        dialog_mode
+                        title_id=title_id_for_heading.clone()
+                        on_close=cancel_dialog.clone()
+                    />
                     <div class="modal-body">
                         <SettingsModelsRegistryAddForm s=s.clone() />
                     </div>

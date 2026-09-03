@@ -130,6 +130,27 @@ fn saved_preset_select_value(
     idx.map(|i| i.to_string()).unwrap_or_default()
 }
 
+/// select change：解析序号并在条目有效时应用预设到主/执行器草稿。
+fn pick_saved_preset_on_change(
+    v: &str,
+    pick_target: LlmSavedPresetApplyTarget,
+    saved_model_presets: RwSignal<Vec<crate::api::SavedModelPreset>>,
+) {
+    if v.trim().is_empty() {
+        return;
+    }
+    let Ok(i) = v.parse::<usize>() else {
+        return;
+    };
+    let Some(preset) = saved_model_presets.with_untracked(|list| list.get(i).cloned()) else {
+        return;
+    };
+    if !preset.enabled {
+        return;
+    }
+    apply_saved_pick(pick_target, &preset);
+}
+
 /// 从「已保存模型」列表选择一条，写入主模型或执行器草稿（含 API Key 与 `has_saved_key`）。
 #[component]
 pub(crate) fn LlmSavedPresetPicker(
@@ -156,21 +177,7 @@ pub(crate) fn LlmSavedPresetPicker(
                 }
                 on:change=move |ev| {
                     let v = event_target_value(&ev);
-                    if v.trim().is_empty() {
-                        return;
-                    }
-                    let Ok(i) = v.parse::<usize>() else {
-                        return;
-                    };
-                    let Some(preset) = saved_model_presets
-                        .with_untracked(|list| list.get(i).cloned())
-                    else {
-                        return;
-                    };
-                    if !preset.enabled {
-                        return;
-                    }
-                    apply_saved_pick(pick_target, &preset);
+                    pick_saved_preset_on_change(&v, pick_target, saved_model_presets);
                 }
             >
                 <option value="">

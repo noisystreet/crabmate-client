@@ -118,6 +118,50 @@ pub(crate) fn ShellMenuCloneRepoItem(
     }
 }
 
+/// 最近工作区飞出列表（右侧子菜单项）。
+#[component]
+fn ShellMenuRecentWorkspaceFlyout(
+    workspace_pick: WorkspaceRootPickHandle,
+    open_menu: RwSignal<Option<IdeMenuId>>,
+    menubar_dropdown_open: RwSignal<bool>,
+    submenu_open: RwSignal<bool>,
+) -> impl IntoView {
+    view! {
+        <div class="ide-menu-submenu-flyout" role="menu">
+            <For
+                each=move || workspace_pick.ws.recent_workspace_roots.get()
+                key=|p| p.clone()
+                let:path
+            >
+                {
+                    let path_for_click = path.clone();
+                    let path_for_title = path.clone();
+                    let path_for_label = path.clone();
+                    let path_for_test = path.clone();
+                    view! {
+                        <button
+                            type="button"
+                            class="ide-menu-item ide-menu-item-recent"
+                            role="menuitem"
+                            data-testid="shell-menu-recent-workspace"
+                            prop:data-path=path_for_test
+                            prop:disabled=move || workspace_pick.pick_busy_tracked()
+                            prop:title=path_for_title
+                            on:click=move |_| {
+                                workspace_pick.spawn_open_recent(path_for_click.clone());
+                                submenu_open.set(false);
+                                close_menus(open_menu, menubar_dropdown_open);
+                            }
+                        >
+                            {workspace_recent_menu_label(&path_for_label)}
+                        </button>
+                    }
+                }
+            </For>
+        </div>
+    }
+}
+
 /// 「最近的工作区」级联子菜单（右侧飞出列表）。
 #[component]
 pub(crate) fn ShellMenuRecentWorkspaces(
@@ -165,38 +209,12 @@ pub(crate) fn ShellMenuRecentWorkspaces(
                     <span class="ide-menu-submenu-chevron" aria-hidden="true">"›"</span>
                 </button>
                 <Show when=move || submenu_open.get()>
-                    <div class="ide-menu-submenu-flyout" role="menu">
-                        <For
-                            each=move || recent.get()
-                            key=|p| p.clone()
-                            let:path
-                        >
-                            {
-                                let path_for_click = path.clone();
-                                let path_for_title = path.clone();
-                                let path_for_label = path.clone();
-                                let path_for_test = path.clone();
-                                view! {
-                                    <button
-                                        type="button"
-                                        class="ide-menu-item ide-menu-item-recent"
-                                        role="menuitem"
-                                        data-testid="shell-menu-recent-workspace"
-                                        prop:data-path=path_for_test
-                                        prop:disabled=move || workspace_pick.pick_busy_tracked()
-                                        prop:title=path_for_title
-                                        on:click=move |_| {
-                                            workspace_pick.spawn_open_recent(path_for_click.clone());
-                                            submenu_open.set(false);
-                                            close_menus(open_menu, menubar_dropdown_open);
-                                        }
-                                    >
-                                        {workspace_recent_menu_label(&path_for_label)}
-                                    </button>
-                                }
-                            }
-                        </For>
-                    </div>
+                    <ShellMenuRecentWorkspaceFlyout
+                        workspace_pick=workspace_pick
+                        open_menu=open_menu
+                        menubar_dropdown_open=menubar_dropdown_open
+                        submenu_open=submenu_open
+                    />
                 </Show>
             </div>
             <Show when=move || trailing_separator>

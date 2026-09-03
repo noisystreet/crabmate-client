@@ -6,6 +6,38 @@ use leptos::prelude::*;
 
 use crate::i18n::{self, Locale};
 
+/// 顶栏右侧操作（丢弃 / 保存，含 dirty/busy 禁用态），独立以降低 header CCN。
+#[component]
+fn SettingsPageHeaderActions(
+    appearance_locale: RwSignal<Locale>,
+    dirty: Memo<bool>,
+    save_busy: RwSignal<bool>,
+    on_discard: Rc<dyn Fn()>,
+    on_save: Rc<dyn Fn()>,
+) -> impl IntoView {
+    view! {
+        <div class="settings-page-header-actions">
+            <button
+                type="button"
+                class="btn btn-secondary btn-sm"
+                prop:disabled=move || !dirty.get()
+                on:click=move |_| on_discard()
+            >
+                {move || i18n::settings_discard_changes(appearance_locale.get())}
+            </button>
+            <button
+                type="button"
+                class="btn btn-primary btn-sm"
+                data-testid="settings-save-all"
+                prop:disabled=move || !dirty.get() || save_busy.get()
+                on:click=move |_| on_save()
+            >
+                {move || i18n::settings_save_all(appearance_locale.get())}
+            </button>
+        </div>
+    }
+}
+
 #[component]
 pub(super) fn SettingsPageHeader(
     appearance_locale: RwSignal<Locale>,
@@ -43,25 +75,13 @@ pub(super) fn SettingsPageHeader(
                 <span class="settings-unsaved-pill">{move || i18n::settings_unsaved_badge(appearance_locale.get())}</span>
             </Show>
             <span class="settings-page-head-spacer"></span>
-            <div class="settings-page-header-actions">
-                <button
-                    type="button"
-                    class="btn btn-secondary btn-sm"
-                    prop:disabled=move || !dirty.get()
-                    on:click=move |_| on_discard()
-                >
-                    {move || i18n::settings_discard_changes(appearance_locale.get())}
-                </button>
-                <button
-                    type="button"
-                    class="btn btn-primary btn-sm"
-                    data-testid="settings-save-all"
-                    prop:disabled=move || !dirty.get() || save_busy.get()
-                    on:click=move |_| on_save()
-                >
-                    {move || i18n::settings_save_all(appearance_locale.get())}
-                </button>
-            </div>
+            <SettingsPageHeaderActions
+                appearance_locale=appearance_locale
+                dirty=dirty
+                save_busy=save_busy
+                on_discard=on_discard
+                on_save=on_save
+            />
         </div>
     }
 }

@@ -596,6 +596,37 @@ fn SettingsGithubBlockActions(
     }
 }
 
+/// GitHub 区块可选标题（设置页全屏时由外层已有分区标题，可隐藏）。
+#[component]
+fn SettingsGithubBlockTitle(locale: RwSignal<Locale>) -> impl IntoView {
+    view! {
+        <h3 class="settings-block-title">
+            {move || i18n::settings_github_block_title(locale.get())}
+        </h3>
+    }
+}
+
+/// GitHub 连接状态（标签 + pill），独立以降低 view CCN。
+#[component]
+fn SettingsGithubConnectionStatus(locale: RwSignal<Locale>, ui: GithubUiSignals) -> impl IntoView {
+    view! {
+        <>
+            <div class="settings-field-label">
+                {move || i18n::settings_github_connection_label(locale.get())}
+            </div>
+            <div class="settings-status-line">
+                <span
+                    class=move || status_pill_class(ui.github_set.get())
+                    role="status"
+                    data-testid="settings-github-connection-status"
+                >
+                    {move || connection_label(locale.get(), ui.github_set.get())}
+                </span>
+            </div>
+        </>
+    }
+}
+
 #[component]
 fn SettingsGithubBlockView(
     locale: RwSignal<Locale>,
@@ -609,22 +640,11 @@ fn SettingsGithubBlockView(
     view! {
         <div class="settings-block" data-testid="settings-github-block">
             <Show when=move || show_title>
-                <h3 class="settings-block-title">{move || i18n::settings_github_block_title(locale.get())}</h3>
+                <SettingsGithubBlockTitle locale=locale />
             </Show>
             <SettingsGithubClientIdBlock locale=locale ui=ui input_id=input_id />
             <div class="settings-field" data-testid="settings-github-connection">
-                <div class="settings-field-label">
-                    {move || i18n::settings_github_connection_label(locale.get())}
-                </div>
-                <div class="settings-status-line">
-                    <span
-                        class=move || status_pill_class(ui.github_set.get())
-                        role="status"
-                        data-testid="settings-github-connection-status"
-                    >
-                        {move || connection_label(locale.get(), ui.github_set.get())}
-                    </span>
-                </div>
+                <SettingsGithubConnectionStatus locale=locale ui=ui />
                 <Show when=move || ui.user_code.get().is_some()>
                     <p class="settings-github-user-code" data-testid="settings-github-user-code">
                         {move || ui.user_code.get().unwrap_or_default()}

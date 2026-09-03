@@ -5,7 +5,7 @@ use super::settings_mcp_status::McpSettingsSignals;
 use super::settings_mcp_tools_list::SettingsMcpServerToolsList;
 use super::settings_toggle_switch::SettingsToggleSwitch;
 use crate::api::user_data::McpServersFileDto;
-use crate::i18n;
+use crate::i18n::{self, Locale};
 use leptos::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::spawn_local;
@@ -124,6 +124,44 @@ fn SettingsMcpRemoteBearer(
     }
 }
 
+/// 传输提示文案：远程 URL / stdio 命令。
+fn mcp_row_transport_hint(
+    loc: Locale,
+    f: &crate::api::user_data::McpServersFileDto,
+    sid: &str,
+) -> String {
+    match f.servers.iter().find(|s| s.id == sid) {
+        Some(s) if s.has_url => i18n::settings_mcp_transport_remote(loc).to_string(),
+        Some(s) if s.has_command => i18n::settings_mcp_transport_stdio(loc).to_string(),
+        _ => String::new(),
+    }
+}
+
+/// 行内改名（写入草稿文件）。
+fn mcp_row_set_name(
+    set_file: WriteSignal<crate::api::user_data::McpServersFileDto>,
+    sid: String,
+    v: String,
+) {
+    set_file.update(|f| {
+        if let Some(row) = f.servers.iter_mut().find(|s| s.id == sid) {
+            row.name = v;
+        }
+    });
+}
+
+/// 行内启用开关。
+fn mcp_row_toggle_enabled(
+    set_file: WriteSignal<crate::api::user_data::McpServersFileDto>,
+    sid: &str,
+) {
+    set_file.update(|f| {
+        if let Some(row) = f.servers.iter_mut().find(|s| s.id == sid) {
+            row.enabled = !row.enabled;
+        }
+    });
+}
+
 #[component]
 pub(crate) fn SettingsMcpServerRow(server_id: String, ctx: McpSettingsSignals) -> impl IntoView {
     let McpSettingsSignals {
@@ -169,12 +207,7 @@ pub(crate) fn SettingsMcpServerRow(server_id: String, ctx: McpSettingsSignals) -
                     prop:value=move || server_field(&file.get(), &id_name_val, |s| s.name.clone())
                     on:input=move |ev| {
                         let v = event_input_value(&ev).unwrap_or_default();
-                        let sid = id_name_in.clone();
-                        set_file.update(|f| {
-                            if let Some(row) = f.servers.iter_mut().find(|s| s.id == sid) {
-                                row.name = v;
-                            }
-                        });
+                        mcp_row_set_name(set_file, id_name_in.clone(), v);
                     }
                 />
             </label>
@@ -186,17 +219,7 @@ pub(crate) fn SettingsMcpServerRow(server_id: String, ctx: McpSettingsSignals) -
                 expanded=tools_expanded
             />
             <p class="settings-muted" data-testid="mcp-server-transport-hint">
-                {move || {
-                    let f = file.get();
-                    let row = f.servers.iter().find(|s| s.id == id_hint);
-                    match row {
-                        Some(s) if s.has_url => i18n::settings_mcp_transport_remote(locale.get())
-                            .to_string(),
-                        Some(s) if s.has_command => i18n::settings_mcp_transport_stdio(locale.get())
-                            .to_string(),
-                        _ => String::new(),
-                    }
-                }}
+                {move || mcp_row_transport_hint(locale.get(), &file.get(), &id_hint)}
             </p>
             <Show when=move || show_bearer.get()>
                 <SettingsMcpRemoteBearer
@@ -223,13 +246,7 @@ pub(crate) fn SettingsMcpServerRow(server_id: String, ctx: McpSettingsSignals) -
                 })
                 on_toggle={
                     let sid = id_enabled_in.clone();
-                    move || {
-                        set_file.update(|f| {
-                            if let Some(row) = f.servers.iter_mut().find(|s| s.id == sid) {
-                                row.enabled = !row.enabled;
-                            }
-                        });
-                    }
+                    move || mcp_row_toggle_enabled(set_file, &sid)
                 }
             />
             <SettingsMcpServerRowActions locale=locale server_id=id_tools ctx=ctx />

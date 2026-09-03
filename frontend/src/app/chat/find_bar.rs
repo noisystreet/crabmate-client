@@ -54,6 +54,43 @@ fn scroll_adjacent_find_match(
     scroll_message_into_view(&ids[idx]);
 }
 
+/// 输入区（label + 搜索框 + 命中计数），独立以降低工具条 CCN。
+#[component]
+fn ChatFindBarInputs(
+    locale: RwSignal<Locale>,
+    query: RwSignal<String>,
+    match_ids: RwSignal<Vec<String>>,
+    cursor: RwSignal<usize>,
+) -> impl IntoView {
+    view! {
+        <>
+            <label class="chat-find-label" for="chat-find-input">
+                {move || i18n::chat_find_label(locale.get())}
+            </label>
+            <input
+                id="chat-find-input"
+                type="search"
+                class="chat-find-input"
+                prop:placeholder=move || i18n::chat_find_ph(locale.get())
+                prop:value=move || query.get()
+                on:input=move |ev| {
+                    query.set(event_target_value(&ev));
+                }
+            />
+            <span class="chat-find-meta" aria-live="polite">
+                {move || {
+                    chat_find_meta_line(
+                        locale.get(),
+                        &query.get(),
+                        &match_ids.get(),
+                        cursor.get(),
+                    )
+                }}
+            </span>
+        </>
+    }
+}
+
 #[component]
 pub fn ChatFindBar() -> impl IntoView {
     let shell = expect_chat_shell_ctx();
@@ -67,27 +104,12 @@ pub fn ChatFindBar() -> impl IntoView {
     view! {
         <div class="chat-find-wrap">
             <div class="chat-find-bar" role="search" prop:aria-label=move || i18n::chat_find_region(locale.get())>
-                <label class="chat-find-label" for="chat-find-input">{move || i18n::chat_find_label(locale.get())}</label>
-                <input
-                    id="chat-find-input"
-                    type="search"
-                    class="chat-find-input"
-                    prop:placeholder=move || i18n::chat_find_ph(locale.get())
-                    prop:value=move || chat_find_query.get()
-                    on:input=move |ev| {
-                        chat_find_query.set(event_target_value(&ev));
-                    }
+                <ChatFindBarInputs
+                    locale=locale
+                    query=chat_find_query
+                    match_ids=chat_find_match_ids
+                    cursor=chat_find_cursor
                 />
-                <span class="chat-find-meta" aria-live="polite">
-                    {move || {
-                        chat_find_meta_line(
-                            locale.get(),
-                            &chat_find_query.get(),
-                            &chat_find_match_ids.get(),
-                            chat_find_cursor.get(),
-                        )
-                    }}
-                </span>
                 <button
                     type="button"
                     class="btn btn-muted btn-sm chat-find-nav"

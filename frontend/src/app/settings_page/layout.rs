@@ -147,6 +147,28 @@ pub(super) struct SettingsPageContentRegistryWire {
     pub session_switch_busy: RwSignal<bool>,
 }
 
+/// 设置内容区标题 + 描述（无描述不渲染），独立以降低内容面板 CCN。
+#[component]
+fn SettingsContentIntro(
+    active_section: RwSignal<SettingsSection>,
+    appearance_locale: RwSignal<Locale>,
+) -> impl IntoView {
+    view! {
+        <header class="settings-content-header">
+            <h2 class="settings-content-title">
+                {move || section_title(active_section.get(), appearance_locale.get())}
+            </h2>
+            <Show when=move || {
+                !section_desc(active_section.get(), appearance_locale.get()).is_empty()
+            }>
+                <p class="settings-content-desc">{move || {
+                    section_desc(active_section.get(), appearance_locale.get())
+                }}</p>
+            </Show>
+        </header>
+    }
+}
+
 #[component]
 pub(super) fn SettingsPageContentPanels(
     active_section: RwSignal<SettingsSection>,
@@ -196,16 +218,10 @@ pub(super) fn SettingsPageContentPanels(
 
     view! {
         <section class="settings-content">
-            <header class="settings-content-header">
-                <h2 class="settings-content-title">{move || section_title(active_section.get(), appearance_locale.get())}</h2>
-                <Show when=move || {
-                    !section_desc(active_section.get(), appearance_locale.get()).is_empty()
-                }>
-                    <p class="settings-content-desc">{move || {
-                        section_desc(active_section.get(), appearance_locale.get())
-                    }}</p>
-                </Show>
-            </header>
+            <SettingsContentIntro
+                active_section=active_section
+                appearance_locale=appearance_locale
+            />
             <Show when=move || active_section.get() == SettingsSection::Connection>
                 <SettingsWebApiBearerBlock
                     locale=appearance_locale
