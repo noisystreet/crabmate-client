@@ -66,16 +66,14 @@ fn normalize_one_input_line(line: &str) -> String {
 }
 
 /// CommonMark ATX 标题：`#`…`#`（1–6 个）后须有空格或行尾；模型常写成 `###标题`。
-fn fix_atx_heading_missing_space(line: &str) -> String {
+/// 定位「正文起始字节」；不满足（无井号 / 井号超长 / 行尾 / 后随空格·制表符·#）返回 `None`。
+fn atx_heading_split_byte(line: &str) -> Option<usize> {
     let chars: Vec<(usize, char)> = line.char_indices().collect();
     let mut idx = 0usize;
     let mut indent = 0usize;
     while idx < chars.len() && indent < 3 && chars[idx].1 == ' ' {
         indent += 1;
         idx += 1;
-    }
-    if idx >= chars.len() {
-        return line.to_string();
     }
     let hash_start = idx;
     let mut hash_end = idx;
@@ -84,17 +82,22 @@ fn fix_atx_heading_missing_space(line: &str) -> String {
     }
     let n = hash_end - hash_start;
     if n == 0 || n > 6 {
-        return line.to_string();
+        return None;
     }
     if hash_end >= chars.len() {
-        return line.to_string();
+        return None;
     }
     match chars[hash_end].1 {
-        ' ' | '\t' | '#' => return line.to_string(),
-        _ => {}
+        ' ' | '\t' | '#' => None,
+        _ => Some(chars[hash_end].0),
     }
-    let split_byte = chars[hash_end].0;
-    insert_space_at(line, split_byte)
+}
+
+fn fix_atx_heading_missing_space(line: &str) -> String {
+    match atx_heading_split_byte(line) {
+        Some(split_byte) => insert_space_at(line, split_byte),
+        None => line.to_string(),
+    }
 }
 
 fn insert_space_at(line: &str, byte: usize) -> String {
@@ -206,6 +209,23 @@ fn normalize_line_recursive(line: &str) -> String {
     normalize_trailing_orphan_fence(&after_sticky)
 }
 
+/// 在表头行字节流中找首个「`||` 合并点」；仅在左段像表头、右段像分隔行时命中。
+fn merged_table_split(body: &str) -> Option<(usize, usize)> {
+    let b = body.as_bytes();
+    let mut i = 0usize;
+    while i + 1 < b.len() {
+        if b[i] == b'|' && b[i + 1] == b'|' {
+            let header_body = body.get(..i)?;
+            let rest = body.get(i + 2..)?;
+            if table_row_looks_like_header(header_body) && looks_like_table_delimiter_row(rest) {
+                return Some((i, i + 2));
+            }
+        }
+        i += 1;
+    }
+    None
+}
+
 /// `| 列1 | 列2 ||------|------|` → 表头 + 对齐行（`pulldown_cmark` 要求分隔行独占一行）。
 fn split_merged_table_header_separator_line(line: &str) -> Option<(String, String)> {
     if fence_starts_line(line) {
@@ -217,27 +237,18 @@ fn split_merged_table_header_separator_line(line: &str) -> Option<(String, Strin
         return None;
     }
     let indent = line.get(..sp).unwrap_or("");
-    let b = body.as_bytes();
-    let mut i = 0usize;
-    while i + 1 < b.len() {
-        if b[i] == b'|' && b[i + 1] == b'|' {
-            let header_body = body.get(..i)?;
-            let rest = body.get(i + 2..)?;
-            if table_row_looks_like_header(header_body) && looks_like_table_delimiter_row(rest) {
-                let header = format!("{indent}{}", header_body.trim_end());
-                let delim_trim = rest.trim_start();
-                let delim_body = if delim_trim.starts_with('|') {
-                    delim_trim.to_string()
-                } else {
-                    format!("|{delim_trim}")
-                };
-                let delim = format!("{indent}{delim_body}");
-                return Some((header, delim));
-            }
-        }
-        i += 1;
-    }
-    None
+    let (header_end, rest_start) = merged_table_split(body)?;
+    let header_body = body.get(..header_end)?;
+    let rest = body.get(rest_start..)?;
+    let header = format!("{indent}{}", header_body.trim_end());
+    let delim_trim = rest.trim_start();
+    let delim_body = if delim_trim.starts_with('|') {
+        delim_trim.to_string()
+    } else {
+        format!("|{delim_trim}")
+    };
+    let delim = format!("{indent}{delim_body}");
+    Some((header, delim))
 }
 
 fn table_row_looks_like_header(row: &str) -> bool {

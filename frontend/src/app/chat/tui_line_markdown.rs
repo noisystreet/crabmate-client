@@ -330,6 +330,18 @@ enum FenceMode {
     },
 }
 
+/// 该行是否与上一条属于同一可续块（同类型，或列表/段落的续行）。
+fn same_block_continuation(prev: BlockKind, kind: BlockKind, line: &str) -> bool {
+    prev == kind
+        || (prev == BlockKind::List && is_block_continuation(line))
+        || (prev == BlockKind::Paragraph && is_block_continuation(line))
+}
+
+/// ATX 标题或分隔线（整行直接闭合输出）。
+fn is_atx_heading_or_thematic_line(line: &str) -> bool {
+    is_atx_heading_line(line) || is_thematic_break_line(line)
+}
+
 struct BlockAbsorbState {
     closed: Vec<String>,
     pending: String,
@@ -428,7 +440,7 @@ impl BlockAbsorbState {
             self.closed.push(blank_line_html());
             return;
         }
-        if is_atx_heading_line(line) || is_thematic_break_line(line) {
+        if is_atx_heading_or_thematic_line(line) {
             self.flush_pending();
             self.closed.push(closed_md_html(line, self.markdown_render));
             return;
@@ -439,11 +451,7 @@ impl BlockAbsorbState {
                 push_pending_line(&mut self.pending, line);
                 self.pending_kind = Some(kind);
             }
-            Some(prev)
-                if prev == kind
-                    || (prev == BlockKind::List && is_block_continuation(line))
-                    || (prev == BlockKind::Paragraph && is_block_continuation(line)) =>
-            {
+            Some(prev) if same_block_continuation(prev, kind, line) => {
                 push_pending_line(&mut self.pending, line);
             }
             Some(_) => {

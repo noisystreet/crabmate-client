@@ -100,28 +100,21 @@ fn formatted_structured_plan_from_json_body(body: &str, loc: Locale) -> Option<S
         .or_else(|| format_agent_reply_plan_json_for_display(b, "", loc))
 }
 
+/// 语言标签后紧跟分隔符或 JSON 开括号（`json\n` / `json{` / `json` 行尾等形态）。
+fn jsonish_lang_label_tail(next: Option<char>) -> bool {
+    matches!(next, None | Some('\n' | '\r' | ' ' | '\t' | '{' | '['))
+}
+
 fn fenced_body_after_optional_jsonish_lang_label(inner: &str) -> Option<&str> {
     let s = inner.trim_start_matches(['\n', '\r', ' ', '\t']);
     if s.is_empty() {
         return Some("");
     }
     for label in ["json", "markdown", "md"] {
-        if let Some(rest) = s.strip_prefix(label) {
-            let mut chars = rest.chars();
-            let next = chars.next();
-            // 兼容两种形态：
-            // 1) ```json\n{...}
-            // 2) ```json{...}
-            if next.is_none()
-                || next == Some('\n')
-                || next == Some('\r')
-                || next == Some(' ')
-                || next == Some('\t')
-                || next == Some('{')
-                || next == Some('[')
-            {
-                return Some(rest.trim_start_matches(['\n', '\r', ' ', '\t']));
-            }
+        if let Some(rest) = s.strip_prefix(label)
+            && jsonish_lang_label_tail(rest.chars().next())
+        {
+            return Some(rest.trim_start_matches(['\n', '\r', ' ', '\t']));
         }
     }
     None
@@ -266,6 +259,20 @@ fn drop_first_segment_before_hidden_agent_reply_plan_fence(segment: &str) -> boo
     true
 }
 
+/// 首个围栏段前的正文是否可省略（无标题/分区标记且非空才保留场景由上层保证）。
+fn first_fence_prose_is_omittable(is_first_code_fence: bool, segment: &str) -> bool {
+    is_first_code_fence && drop_first_segment_before_hidden_agent_reply_plan_fence(segment)
+}
+
+fn out_needs_separating_newline(out: &str) -> bool {
+    !out.is_empty() && !out.ends_with('\n')
+}
+
+/// 末尾未闭合围栏且其内容为空白（多行连续围栏边界）时停止追加。
+fn should_stop_on_blank_trailing_fence(unclosed: bool, at_end: bool, inner: &str) -> bool {
+    unclosed && at_end && inner.trim().is_empty()
+}
+
 fn strip_agent_reply_plan_fence_blocks_for_display(content: &str, loc: Locale) -> String {
     let parts: Vec<&str> = content.split("```").collect();
     let unclosed_trailing_fence = parts.len().is_multiple_of(2);
@@ -282,13 +289,12 @@ fn strip_agent_reply_plan_fence_blocks_for_display(content: &str, loc: Locale) -
         let inner = parts[i];
         i += 1;
         if let Some(disp) = try_fence_inner_structured_plan_display(inner, loc) {
-            let skip_segment = is_first_code_fence
-                && drop_first_segment_before_hidden_agent_reply_plan_fence(segment);
+            let skip_segment = first_fence_prose_is_omittable(is_first_code_fence, segment);
             if !skip_segment {
                 out.push_str(segment);
             }
             if !disp.trim().is_empty() {
-                if !out.is_empty() && !out.ends_with('\n') {
+                if out_needs_separating_newline(&out) {
                     out.push('\n');
                 }
                 out.push_str(disp.trim());
@@ -298,7 +304,7 @@ fn strip_agent_reply_plan_fence_blocks_for_display(content: &str, loc: Locale) -
         }
         is_first_code_fence = false;
         out.push_str(segment);
-        if unclosed_trailing_fence && i >= parts.len() && inner.trim().is_empty() {
+        if should_stop_on_blank_trailing_fence(unclosed_trailing_fence, i >= parts.len(), inner) {
             break;
         }
         out.push_str("```");
@@ -367,6 +373,21 @@ pub(crate) fn assistant_text_for_display(
     filter_assistant_thinking_markers_for_display(&inner, is_streaming_last_assistant)
 }
 
+/// 流式末条 + 尚无完整 JSON 时先显示围栏前的说明文本。
+fn should_buffer_streaming_plan_prose(is_streaming_last_assistant: bool, trimmed: &str) -> bool {
+    is_streaming_last_assistant && should_buffer_agent_reply_plan_stream(trimmed)
+}
+
+fn contains_plan_blob_marker(s: &str) -> bool {
+    s.contains("\"agent_reply_plan\"") || s.contains("\"plan_summary\"")
+}
+
+/// 不完整且解析失败的裸 `agent_reply_plan` 片段（流式残留），不应回显。
+fn is_incomplete_unparsed_plan(t: &str) -> bool {
+    looks_like_incomplete_agent_reply_plan_whole_json(t)
+        && serde_json::from_str::<Value>(t).is_err()
+}
+
 fn assistant_text_for_display_inner(
     raw: &str,
     is_streaming_last_assistant: bool,
@@ -380,7 +401,7 @@ fn assistant_text_for_display_inner(
         return filter_assistant_thinking_markers_for_display(&tail, is_streaming_last_assistant);
     }
 
-    if is_streaming_last_assistant && should_buffer_agent_reply_plan_stream(trimmed) {
+    if should_buffer_streaming_plan_prose(is_streaming_last_assistant, trimmed) {
         // 须与 `assistant_text_for_display` 外套的 `filter_assistant_thinking_markers_for_display` 一致。
         return filter_assistant_thinking_markers_for_display(
             &prose_before_first_fence(trimmed),
@@ -388,8 +409,8 @@ fn assistant_text_for_display_inner(
         );
     }
 
-    if let Some(display) = formatted_structured_plan_from_json_body(trimmed, loc)
-        && !display.trim().is_empty()
+    if let Some(display) =
+        formatted_structured_plan_from_json_body(trimmed, loc).filter(|d| !d.trim().is_empty())
     {
         return filter_assistant_thinking_markers_for_display(
             &display,
@@ -401,17 +422,13 @@ fn assistant_text_for_display_inner(
     let stripped_fences = strip_agent_reply_plan_fence_blocks_for_display(&content, loc);
     let stripped_trim = stripped_fences.trim();
     if stripped_trim != trimmed {
-        if stripped_trim.is_empty()
-            && (content.contains("\"agent_reply_plan\"") || content.contains("\"plan_summary\""))
-        {
+        if stripped_trim.is_empty() && contains_plan_blob_marker(&content) {
             return crate::i18n::plan_generated(loc).to_string();
         }
         return stripped_trim.to_string();
     }
 
-    if looks_like_incomplete_agent_reply_plan_whole_json(trimmed)
-        && serde_json::from_str::<Value>(trimmed).is_err()
-    {
+    if is_incomplete_unparsed_plan(trimmed) {
         return String::new();
     }
 

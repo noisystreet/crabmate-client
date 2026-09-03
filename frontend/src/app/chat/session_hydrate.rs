@@ -247,6 +247,41 @@ fn prepend_older_page_into_session(
     apply_history_meta_from_response(session, resp);
 }
 
+/// 响应的 `active_agent_role` / `active_session_mode` 仅在用户未手动覆盖时写回底栏。
+fn apply_persisted_session_meta(
+    resp: &ConversationMessagesResponse,
+    agent_role_user_override: RwSignal<bool>,
+    session_mode_user_override: RwSignal<bool>,
+    selected_agent_role: RwSignal<Option<String>>,
+    selected_session_mode: RwSignal<String>,
+    default_agent_role_id: Option<&str>,
+) {
+    if !agent_role_user_override.get_untracked()
+        && let Some(role) = resp
+            .active_agent_role
+            .as_deref()
+            .map(str::trim)
+            .filter(|r| !r.is_empty())
+    {
+        selected_agent_role.set(status_bar_selected_agent_role_from_persisted(
+            Some(role),
+            default_agent_role_id,
+        ));
+    }
+    if !session_mode_user_override.get_untracked()
+        && let Some(mode) = resp
+            .active_session_mode
+            .as_deref()
+            .map(str::trim)
+            .filter(|m| !m.is_empty())
+    {
+        let m = mode.to_ascii_lowercase();
+        if matches!(m.as_str(), "ask" | "plan" | "act") {
+            selected_session_mode.set(m);
+        }
+    }
+}
+
 fn merge_hydration_into_active_session(
     args: MergeHydrationIntoActiveSessionArgs<'_>,
 ) -> SessionHydrationMergeOutcome {
@@ -286,30 +321,14 @@ fn merge_hydration_into_active_session(
         resp.revision,
     ));
     if apply_persisted_meta {
-        if !agent_role_user_override.get_untracked()
-            && let Some(role) = resp
-                .active_agent_role
-                .as_deref()
-                .map(str::trim)
-                .filter(|r| !r.is_empty())
-        {
-            selected_agent_role.set(status_bar_selected_agent_role_from_persisted(
-                Some(role),
-                default_agent_role_id,
-            ));
-        }
-        if !session_mode_user_override.get_untracked()
-            && let Some(mode) = resp
-                .active_session_mode
-                .as_deref()
-                .map(str::trim)
-                .filter(|m| !m.is_empty())
-        {
-            let m = mode.to_ascii_lowercase();
-            if matches!(m.as_str(), "ask" | "plan" | "act") {
-                selected_session_mode.set(m);
-            }
-        }
+        apply_persisted_session_meta(
+            resp,
+            agent_role_user_override,
+            session_mode_user_override,
+            selected_agent_role,
+            selected_session_mode,
+            default_agent_role_id,
+        );
     }
     let user_count = session.messages.iter().filter(|m| m.role == "user").count();
     if user_count == 1 && i18n::is_default_session_title(&session.title) {
