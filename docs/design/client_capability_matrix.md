@@ -44,7 +44,7 @@ Blank cells are forbidden.
 |------------|---------|---------|-----|-----|-------|
 | Web API Bearer (≠ model `API_KEY`) | yes | yes | yes | yes | Official shells: memory + keyring/Keystore, **no** plaintext `localStorage`. |
 | Persist Bearer on device | yes | yes | reduced | no | Web: weak `localStorage` with an explicit warning. TUI: flags/env only ([`remote_cli_tui.md`](./remote_cli_tui.md) may add keyring later). |
-| Model `client_llm` key on device | yes | yes | reduced | planned | Chat sends `client_llm.api_key` over HTTPS; do not `PUT /user-data/secrets/client-llm` from UI. TUI not wired. |
+| Model `client_llm` key on device | yes | yes | reduced | per-turn flags/env | Chat sends `client_llm.{api_key,model,api_base}` over HTTPS; do not `PUT /user-data/secrets/client-llm` from UI. TUI: `--llm-api-key` / `--llm-model` / `--llm-api-base` (`CM_API_KEY` / `CM_MODEL` / `CM_API_BASE`), no device keyring yet. |
 | GitHub Device Flow | yes | yes | reduced | no | Native shells: Keystore/keyring slot + `X-CrabMate-GitHub-Token`. Browser: HttpOnly cookie path. |
 
 ### Chat and tools

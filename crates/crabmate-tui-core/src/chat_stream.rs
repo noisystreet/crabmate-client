@@ -25,12 +25,27 @@ pub struct ChatStreamOutcome {
     pub last_event_id: u64,
 }
 
+/// 随 `/chat/stream` 发送的 `client_llm` 覆盖（同 WASM UI「设置 → API 密钥/模型」的子集）。
+///
+/// 字段与请求体键一一对应；空白值不发送，全空时整块省略。
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ClientLlm<'a> {
+    /// 模型 API 密钥 → `client_llm.api_key`（serve 无服务端 `API_KEY` 时的客户端自带密钥）。
+    pub api_key: Option<&'a str>,
+    /// 模型名 → `client_llm.model`。
+    pub model: Option<&'a str>,
+    /// 模型供应商 base URL → `client_llm.api_base`。
+    pub api_base: Option<&'a str>,
+}
+
 /// `run_chat_stream` 入参。
 #[derive(Debug, Clone, Copy)]
 pub struct ChatStreamArgs<'a> {
     pub message: &'a str,
     pub conversation_id: Option<&'a str>,
     pub approval_session_id: &'a str,
+    /// 有值时随请求体发送 `client_llm`；`None` / 全空白等价于不发送。
+    pub client_llm: Option<ClientLlm<'a>>,
 }
 
 /// 运行一轮流式对话：正文写到 `out`，思维链等写到 `err`。
@@ -90,12 +105,37 @@ async fn post_chat_stream(
 }
 
 fn chat_stream_body(args: ChatStreamArgs<'_>) -> Value {
-    build_chat_stream_core_body(ChatStreamCoreFields {
+    let mut body = build_chat_stream_core_body(ChatStreamCoreFields {
         message: args.message,
         client_sse_protocol: SSE_PROTOCOL_VERSION,
         approval_session_id: Some(args.approval_session_id),
         conversation_id: args.conversation_id,
-    })
+    });
+    if let Some(cl) = args.client_llm
+        && let Some(obj) = client_llm_json(cl)
+    {
+        body["client_llm"] = obj;
+    }
+    body
+}
+
+/// 仅含非空（trim 后）字段的 `client_llm` 对象；全空返回 `None`（不发送整块）。
+fn client_llm_json(llm: ClientLlm<'_>) -> Option<Value> {
+    let mut map = serde_json::Map::new();
+    insert_trimmed(&mut map, "api_base", llm.api_base);
+    insert_trimmed(&mut map, "model", llm.model);
+    insert_trimmed(&mut map, "api_key", llm.api_key);
+    if map.is_empty() {
+        None
+    } else {
+        Some(Value::Object(map))
+    }
+}
+
+fn insert_trimmed(map: &mut serde_json::Map<String, Value>, key: &str, value: Option<&str>) {
+    if let Some(v) = value.map(str::trim).filter(|s| !s.is_empty()) {
+        map.insert(key.into(), Value::String(v.to_string()));
+    }
 }
 
 fn conversation_id_from_headers(resp: &Response) -> Option<String> {
@@ -394,5 +434,47 @@ mod tests {
         };
         assert_eq!(g.decide(&req).unwrap(), ApprovalDecision::Deny);
         assert_eq!(g.seen.len(), 1);
+    }
+
+    #[test]
+    fn chat_body_includes_client_llm_fields() {
+        let body = chat_stream_body(ChatStreamArgs {
+            message: "hi",
+            conversation_id: Some("c1"),
+            approval_session_id: "a1",
+            client_llm: Some(ClientLlm {
+                api_key: Some(" sk-abc "),
+                model: Some("gpt-x"),
+                api_base: None,
+            }),
+        });
+        assert_eq!(body["message"], "hi");
+        assert_eq!(body["client_sse_protocol"], SSE_PROTOCOL_VERSION);
+        assert_eq!(body["client_llm"]["api_key"], "sk-abc");
+        assert_eq!(body["client_llm"]["model"], "gpt-x");
+        assert!(body["client_llm"].get("api_base").is_none());
+    }
+
+    #[test]
+    fn chat_body_omits_client_llm_when_empty() {
+        let base = chat_stream_body(ChatStreamArgs {
+            message: "hi",
+            conversation_id: None,
+            approval_session_id: "a1",
+            client_llm: None,
+        });
+        assert!(base.get("client_llm").is_none());
+
+        let blank = chat_stream_body(ChatStreamArgs {
+            message: "hi",
+            conversation_id: None,
+            approval_session_id: "a1",
+            client_llm: Some(ClientLlm {
+                api_key: Some("   "),
+                model: None,
+                api_base: Some(""),
+            }),
+        });
+        assert_eq!(blank, base);
     }
 }

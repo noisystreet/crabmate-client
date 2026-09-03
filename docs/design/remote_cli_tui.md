@@ -72,8 +72,10 @@ crates/
 | 斜杠 /skills | 同进程 | 经 stream 内置命令或后续 REST |
 | 工作区 | 本地 path | `POST /workspace`、`GET /workspace/...` |
 | 会话列表/分支 | SQLite 同库 | `/user-data/.../sessions`、`POST /chat/branch` |
-| 模型密钥 | 本机 keyring → 回合注入 | 本机 keyring → 请求体 `client_llm.api_key`（同 WASM UI） |
+| 模型密钥 | 本机 keyring → 回合注入 | 每轮请求体 `client_llm.{api_key,model,api_base}`（同 WASM UI 设置子集）；CLI/env 提供，keyring 后置 |
 | GitHub token | 现已请求作用域 | 头 `X-CrabMate-GitHub-Token` |
+
+> **模型密钥（CLI/env，P3 已落地）**：`crabmate-tui chat|repl` 支持 `--llm-api-key` / `--llm-model` / `--llm-api-base`（env 沿用 serve 侧模型 env 名：`CM_API_KEY` / `CM_MODEL` / `CM_API_BASE`），有任一非空时随 `POST /chat/stream` 发送 `client_llm.{api_key,model,api_base}`，语义同 WASM UI「设置 → API 密钥/模型」——供 bearer 鉴权且服务端未设 `API_KEY` 的 serve（如个人云）使用；密钥仅存进程内、不落盘。`--bearer` 仍是 Web Bearer（≠ 模型 API_KEY）。
 
 ---
 

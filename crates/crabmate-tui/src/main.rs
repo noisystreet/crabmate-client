@@ -10,8 +10,8 @@ use std::process::ExitCode;
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 use crabmate_tui_core::{
-    ApprovalDecision, ApprovalGate, AutoAllowOnce, ChatStreamOutcome, CommandApprovalRequest,
-    ConnectionConfig, ServeClient, TermError,
+    ApprovalDecision, ApprovalGate, AutoAllowOnce, ChatStreamOutcome, ClientLlm,
+    CommandApprovalRequest, ConnectionConfig, ServeClient, TermError,
 };
 use reedline::{DefaultPrompt, DefaultPromptSegment, Reedline, Signal};
 
@@ -33,6 +33,19 @@ struct Cli {
     /// Web API Bearer (`CM_WEB_API_BEARER_TOKEN` on serve). Not the model API_KEY.
     #[arg(long = "bearer", env = "CM_WEB_API_BEARER_TOKEN", global = true)]
     bearer: Option<String>,
+
+    /// 随每轮 chat 发送的 `client_llm.api_key`（同 WASM UI「设置 → API 密钥」；
+    /// 供 serve 无服务端模型 `API_KEY` 时使用，如 bearer 模式个人云）。
+    #[arg(long = "llm-api-key", env = "CM_API_KEY", global = true)]
+    llm_api_key: Option<String>,
+
+    /// 模型名覆盖 → `client_llm.model`。
+    #[arg(long = "llm-model", env = "CM_MODEL", global = true)]
+    llm_model: Option<String>,
+
+    /// 模型供应商 base URL 覆盖 → `client_llm.api_base`。
+    #[arg(long = "llm-api-base", env = "CM_API_BASE", global = true)]
+    llm_api_base: Option<String>,
 
     /// Auto-approve non-allowlisted commands (`allow_once`). Dangerous.
     #[arg(long = "yes", global = true)]
@@ -108,18 +121,48 @@ async fn main() -> ExitCode {
 async fn run() -> Result<()> {
     let cli = Cli::parse();
     let client = build_client(&cli)?;
-    match cli.command {
+    let Cli {
+        llm_api_key,
+        llm_model,
+        llm_api_base,
+        yes,
+        command,
+        ..
+    } = cli;
+    let llm = client_llm_overrides(
+        llm_api_key.as_deref(),
+        llm_model.as_deref(),
+        llm_api_base.as_deref(),
+    );
+    match command {
         Commands::Connect => run_connect(&client).await,
         Commands::Chat {
             message,
             conversation_id,
             no_probe,
-        } => run_chat(&client, message, conversation_id, no_probe, cli.yes).await,
+        } => run_chat(&client, message, conversation_id, no_probe, yes, llm).await,
         Commands::Repl {
             conversation_id,
             no_probe,
-        } => run_repl(&client, conversation_id, no_probe, cli.yes).await,
+        } => run_repl(&client, conversation_id, no_probe, yes, llm).await,
     }
+}
+
+/// 三个 `client_llm` 覆盖中任一非空才构造；全空返回 `None`（不发送 `client_llm` 整块）。
+fn client_llm_overrides<'a>(
+    api_key: Option<&'a str>,
+    model: Option<&'a str>,
+    api_base: Option<&'a str>,
+) -> Option<ClientLlm<'a>> {
+    let llm = ClientLlm {
+        api_key,
+        model,
+        api_base,
+    };
+    let any = [api_key, model, api_base]
+        .into_iter()
+        .any(|v| v.is_some_and(|s| !s.trim().is_empty()));
+    any.then_some(llm)
 }
 
 fn build_client(cli: &Cli) -> Result<ServeClient> {
@@ -148,6 +191,7 @@ async fn run_chat(
     conversation_id: Option<String>,
     no_probe: bool,
     yes: bool,
+    llm: Option<ClientLlm<'_>>,
 ) -> Result<()> {
     maybe_probe(client, no_probe).await?;
     let text = resolve_message(message)?;
@@ -155,7 +199,7 @@ async fn run_chat(
         bail!("empty message");
     }
     let mut gate = make_gate(yes);
-    let outcome = run_turn(client, &text, conversation_id.as_deref(), &mut gate).await?;
+    let outcome = run_turn(client, &text, conversation_id.as_deref(), llm, &mut gate).await?;
     finish_turn_stdout(&outcome);
     Ok(())
 }
@@ -165,6 +209,7 @@ async fn run_repl(
     conversation_id: Option<String>,
     no_probe: bool,
     yes: bool,
+    llm: Option<ClientLlm<'_>>,
 ) -> Result<()> {
     ensure_repl_tty()?;
     maybe_probe(client, no_probe).await?;
@@ -178,7 +223,7 @@ async fn run_repl(
     loop {
         match editor.read_line(&prompt) {
             Ok(Signal::Success(line)) => {
-                if !dispatch_repl_line(client, &line, &mut conversation_id, yes).await? {
+                if !dispatch_repl_line(client, &line, &mut conversation_id, llm, yes).await? {
                     break;
                 }
             }
@@ -216,6 +261,7 @@ async fn dispatch_repl_line(
     client: &ServeClient,
     line: &str,
     conversation_id: &mut Option<String>,
+    llm: Option<ClientLlm<'_>>,
     yes: bool,
 ) -> Result<bool> {
     let text = line.trim();
@@ -232,7 +278,7 @@ async fn dispatch_repl_line(
         };
     }
     let mut gate = make_gate(yes);
-    match run_turn(client, text, conversation_id.as_deref(), &mut gate).await {
+    match run_turn(client, text, conversation_id.as_deref(), llm, &mut gate).await {
         Ok(outcome) => {
             finish_turn_stdout(&outcome);
             if let Some(cid) = outcome.conversation_id {
