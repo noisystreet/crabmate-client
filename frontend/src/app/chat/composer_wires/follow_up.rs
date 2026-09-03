@@ -26,6 +26,15 @@ pub(super) struct StreamFollowUpWiring {
     pub tool_timeline_busy_ui: Memo<bool>,
 }
 
+/// 跟随动作的门闸：未初始化或任一「进行中」UI 状态时忽略。
+fn follow_up_blocked(
+    initialized: RwSignal<bool>,
+    stream_turn_busy_ui: Memo<bool>,
+    tool_timeline_busy_ui: Memo<bool>,
+) -> bool {
+    !initialized.get() || stream_turn_busy_ui.get() || tool_timeline_busy_ui.get()
+}
+
 pub(super) fn wire_stream_follow_up_effect(args: StreamFollowUpWiring) {
     let StreamFollowUpWiring {
         initialized,
@@ -48,10 +57,7 @@ pub(super) fn wire_stream_follow_up_effect(args: StreamFollowUpWiring) {
             match pending {
                 ComposerStreamFollowUp::Idle => {}
                 ComposerStreamFollowUp::RetryFailedAssistant { failed_asst_id } => {
-                    if !initialized.get()
-                        || stream_turn_busy_ui.get()
-                        || tool_timeline_busy_ui.get()
-                    {
+                    if follow_up_blocked(initialized, stream_turn_busy_ui, tool_timeline_busy_ui) {
                         return;
                     }
                     stream_follow_up.set(ComposerStreamFollowUp::Idle);
@@ -88,10 +94,7 @@ pub(super) fn wire_stream_follow_up_effect(args: StreamFollowUpWiring) {
                     user_text,
                     user_imgs,
                 } => {
-                    if !initialized.get()
-                        || stream_turn_busy_ui.get()
-                        || tool_timeline_busy_ui.get()
-                    {
+                    if follow_up_blocked(initialized, stream_turn_busy_ui, tool_timeline_busy_ui) {
                         return;
                     }
                     if chat.active_id.get() != session_id {

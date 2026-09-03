@@ -87,7 +87,7 @@ pub(crate) fn build_workspace_row_press_handlers(
         let long_press_timer = Rc::clone(&long_press_timer);
         let press_origin = Rc::clone(&press_origin);
         Rc::new(move |ev: web_sys::PointerEvent| {
-            if ev.pointer_type() == "mouse" || ev.button() != 0 {
+            if pointer_press_should_be_ignored(&ev.pointer_type(), ev.button()) {
                 return;
             }
             let x = ev.client_x();
@@ -121,7 +121,7 @@ pub(crate) fn build_workspace_row_press_handlers(
             };
             let dx = (f64::from(ev.client_x()) - ox).abs();
             let dy = (f64::from(ev.client_y()) - oy).abs();
-            if dx > MOVE_CANCEL_PX || dy > MOVE_CANCEL_PX {
+            if pointer_drift_exceeds_move_cancel(dx, dy) {
                 clear_long_press();
             }
         }) as Rc<dyn Fn(web_sys::PointerEvent)>
@@ -149,6 +149,16 @@ pub(crate) fn build_workspace_row_press_handlers(
         on_pointer_end: clear_long_press,
         try_consume_suppress_click,
     }
+}
+
+/// 非主键/鼠标指针（触控笔的按钮语义等）不启动长按。
+fn pointer_press_should_be_ignored(pointer_type: &str, button: i16) -> bool {
+    pointer_type == "mouse" || button != 0
+}
+
+/// 指针位移超过「取消长按」阈值。
+fn pointer_drift_exceeds_move_cancel(dx: f64, dy: f64) -> bool {
+    dx > MOVE_CANCEL_PX || dy > MOVE_CANCEL_PX
 }
 
 /// 空白处长按：仅在目标不是树行 `li` 时打开根目录新建菜单。
@@ -193,7 +203,7 @@ pub(crate) fn build_workspace_blank_press_handlers(
         let press_origin = Rc::clone(&press_origin);
         let blank_target = blank_target.clone();
         Rc::new(move |ev: web_sys::PointerEvent| {
-            if ev.pointer_type() == "mouse" || ev.button() != 0 {
+            if pointer_press_should_be_ignored(&ev.pointer_type(), ev.button()) {
                 return;
             }
             if blank_press_should_ignore(ev.target()) {
@@ -230,7 +240,7 @@ pub(crate) fn build_workspace_blank_press_handlers(
             };
             let dx = (f64::from(ev.client_x()) - ox).abs();
             let dy = (f64::from(ev.client_y()) - oy).abs();
-            if dx > MOVE_CANCEL_PX || dy > MOVE_CANCEL_PX {
+            if pointer_drift_exceeds_move_cancel(dx, dy) {
                 clear_long_press();
             }
         }) as Rc<dyn Fn(web_sys::PointerEvent)>

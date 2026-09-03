@@ -16,14 +16,61 @@ use super::composer_follow_up::ComposerStreamFollowUp;
 use super::composer_slash_control::{WebSlashControlCtx, try_handle_web_control_slash};
 use super::composer_stream::{ComposerStreamHandles, make_attach_chat_stream};
 use super::handles::{
-    ChatComposerWires, WireComposerStreamsArgs, WireComposerStreamsSessionSlice,
-    WireComposerStreamsStreamSlice,
+    ChatComposerWires, ComposerStreamShell, WireComposerStreamsArgs,
+    WireComposerStreamsSessionSlice, WireComposerStreamsStreamSlice,
 };
 use super::stream_follow_up_gates::{ComposerSendDecision, decide_composer_send};
 use super::stream_user_abort::apply_user_abort_of_inflight_stream;
+use crate::chat_session_state::ChatSessionSignals;
 use crate::session_ops::{flush_active_composer_draft, flush_composer_draft_to_session};
 use crate::session_sync::SessionSyncState;
 use crate::storage::{ChatSession, DEFAULT_CHAT_SESSION_TITLE, make_session_id};
+
+/// 发送路径所需的会话草稿上下文（Copy；供斜杠命令拦截判定与闭包捕获共用）。
+#[derive(Clone, Copy)]
+struct ComposerSendCtx {
+    chat: ChatSessionSignals,
+    locale: RwSignal<crate::i18n::Locale>,
+    draft: RwSignal<String>,
+    selected_agent_role: RwSignal<Option<String>>,
+    agent_role_user_override: RwSignal<bool>,
+    apply_assistant_display_filters: RwSignal<bool>,
+}
+
+/// 流正在忙且有待澄清问题时不允许发送。
+fn send_blocked_by_busy_clarification(busy: bool, shell: &ComposerStreamShell) -> bool {
+    busy && shell.approval.pending_clarification.get().is_some()
+}
+
+/// Web 控制斜杠命令是否消费了本次发送（仅无附图时）。
+fn web_slash_intercepts_send(
+    imgs_empty: bool,
+    text: &str,
+    shell: &ComposerStreamShell,
+    ctx: ComposerSendCtx,
+) -> bool {
+    let ComposerSendCtx {
+        chat,
+        locale,
+        draft,
+        selected_agent_role,
+        agent_role_user_override,
+        apply_assistant_display_filters,
+    } = ctx;
+    imgs_empty
+        && try_handle_web_control_slash(
+            text,
+            shell,
+            WebSlashControlCtx {
+                chat,
+                locale,
+                draft,
+                selected_agent_role,
+                agent_role_user_override,
+                apply_assistant_display_filters,
+            },
+        )
+}
 
 pub(crate) fn wire_chat_composer_streams(args: WireComposerStreamsArgs) -> ChatComposerWires {
     let WireComposerStreamsArgs { session, stream } = args;
@@ -46,6 +93,15 @@ pub(crate) fn wire_chat_composer_streams(args: WireComposerStreamsArgs) -> ChatC
         pending_images,
     } = stream;
 
+    let send_ctx = ComposerSendCtx {
+        chat,
+        locale,
+        draft,
+        selected_agent_role,
+        agent_role_user_override,
+        apply_assistant_display_filters,
+    };
+
     let stream_shell_for_attach = stream_shell.clone();
     let attach_chat_stream = make_attach_chat_stream(ComposerStreamHandles {
         chat,
@@ -65,29 +121,17 @@ pub(crate) fn wire_chat_composer_streams(args: WireComposerStreamsArgs) -> ChatC
         let scroll_shell = scroll_shell;
         let shell = stream_shell.clone();
         let locale_sig = locale;
+        let send_ctx = send_ctx;
         let stream_follow_up = stream_follow_up;
         move || {
             let text = draft.get_untracked().trim().to_string();
             let imgs = pending_images.get();
             let loc = locale_sig.get();
-            if imgs.is_empty()
-                && try_handle_web_control_slash(
-                    &text,
-                    &shell,
-                    WebSlashControlCtx {
-                        chat,
-                        locale: locale_sig,
-                        draft,
-                        selected_agent_role,
-                        agent_role_user_override,
-                        apply_assistant_display_filters,
-                    },
-                )
-            {
+            if web_slash_intercepts_send(imgs.is_empty(), &text, &shell, send_ctx) {
                 return;
             }
             let busy = stream_turn_busy_ui.get() || tool_timeline_busy_ui.get();
-            if busy && shell.approval.pending_clarification.get().is_some() {
+            if send_blocked_by_busy_clarification(busy, &shell) {
                 return;
             }
             let Some((user_line, clarify_json)) =

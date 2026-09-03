@@ -373,6 +373,37 @@ pub(super) fn install_slash_menu_effects(
     }
 }
 
+/// 方向键步进选中（环形；`len==0` 时保持）。
+fn slash_step_selection(slash: SlashMenuSignals, len: usize, delta: i32) {
+    if len == 0 {
+        return;
+    }
+    slash.selected_idx.update(|i| {
+        *i = ((*i as i32 + delta).rem_euclid(len as i32)) as usize;
+    });
+}
+
+/// Tab / Enter：接受当前选中项（越界则忽略）。
+fn slash_accept_selected(
+    slash: SlashMenuSignals,
+    draft: RwSignal<String>,
+    composer_input_ref: NodeRef<Textarea>,
+) {
+    if let Some(item) = slash
+        .filtered
+        .get_untracked()
+        .get(slash.selected_idx.get_untracked())
+    {
+        apply_slash_item(
+            draft,
+            slash.selected_idx,
+            slash.menu_dismissed,
+            composer_input_ref,
+            item,
+        );
+    }
+}
+
 /// 处理浮层打开时的键盘；返回 `true` 表示已消费事件（含空列表时的 Enter/Tab 防误发）。
 pub(super) fn handle_slash_menu_keydown(
     ev: &web_sys::KeyboardEvent,
@@ -388,40 +419,19 @@ pub(super) fn handle_slash_menu_keydown(
     if key == "Escape" {
         ev.prevent_default();
         slash.menu_dismissed.set(true);
-        return true;
-    }
-    if key == "ArrowDown" {
+    } else if key == "ArrowDown" {
         ev.prevent_default();
-        if !items.is_empty() {
-            let n = items.len();
-            slash.selected_idx.update(|i| *i = (*i + 1) % n);
-        }
-        return true;
-    }
-    if key == "ArrowUp" {
+        slash_step_selection(slash, items.len(), 1);
+    } else if key == "ArrowUp" {
         ev.prevent_default();
-        if !items.is_empty() {
-            let n = items.len();
-            slash
-                .selected_idx
-                .update(|i| *i = if *i == 0 { n - 1 } else { *i - 1 });
-        }
-        return true;
-    }
-    if key == "Tab" || (key == "Enter" && !ev.shift_key()) {
+        slash_step_selection(slash, items.len(), -1);
+    } else if key == "Tab" || (key == "Enter" && !ev.shift_key()) {
         ev.prevent_default();
-        if let Some(item) = items.get(slash.selected_idx.get_untracked()) {
-            apply_slash_item(
-                draft,
-                slash.selected_idx,
-                slash.menu_dismissed,
-                composer_input_ref,
-                item,
-            );
-        }
-        return true;
+        slash_accept_selected(slash, draft, composer_input_ref);
+    } else {
+        return false;
     }
-    false
+    true
 }
 
 #[component]
@@ -457,6 +467,93 @@ fn slash_empty_hint(locale: Locale, cache: Option<&SkillsListData>, loading: boo
     i18n::composer_slash_menu_empty(locale)
 }
 
+/// 顶部横幅：错误 / 加载中 / 技能未启用（空列表提示由调用方负责）。
+fn slash_menu_banner(
+    loc: Locale,
+    cache: Option<&SkillsListData>,
+    loading: bool,
+    err: Option<String>,
+) -> Option<AnyView> {
+    if let Some(err) = err {
+        return Some(
+            view! {
+                <div class="composer-slash-menu-banner composer-slash-menu-banner--err">{err}</div>
+            }
+            .into_any(),
+        );
+    }
+    if loading && cache.is_none() {
+        return Some(
+            view! {
+                <div class="composer-slash-menu-banner">
+                    {i18n::composer_slash_menu_loading(loc)}
+                </div>
+            }
+            .into_any(),
+        );
+    }
+    if let Some(c) = cache
+        && !c.enabled
+    {
+        return Some(
+            view! {
+                <div class="composer-slash-menu-banner">
+                    {i18n::composer_slash_menu_skills_disabled(loc)}
+                </div>
+            }
+            .into_any(),
+        );
+    }
+    None
+}
+
+fn slash_section_title(loc: Locale, kind: SlashItemKind) -> &'static str {
+    match kind {
+        SlashItemKind::Builtin => i18n::composer_slash_section_commands(loc),
+        SlashItemKind::Skill => i18n::composer_slash_section_skills(loc),
+    }
+}
+
+fn slash_menu_item_view(
+    item: &SlashMenuItem,
+    i: usize,
+    sel: usize,
+    draft: RwSignal<String>,
+    selected_idx: RwSignal<usize>,
+    menu_dismissed: RwSignal<bool>,
+    composer_input_ref: NodeRef<Textarea>,
+) -> AnyView {
+    let active = i == sel;
+    let item_btn = item.clone();
+    let kind_class = match item.kind {
+        SlashItemKind::Builtin => "composer-slash-menu-item composer-slash-menu-item--builtin",
+        SlashItemKind::Skill => "composer-slash-menu-item composer-slash-menu-item--skill",
+    };
+    view! {
+        <button
+            type="button"
+            class=kind_class
+            class:composer-slash-menu-item--active=active
+            role="option"
+            prop:aria-selected=active
+            on:mousedown=move |ev| {
+                ev.prevent_default();
+                apply_slash_item(
+                    draft,
+                    selected_idx,
+                    menu_dismissed,
+                    composer_input_ref,
+                    &item_btn,
+                );
+            }
+        >
+            <span class="composer-slash-menu-id">{item.label.clone()}</span>
+            <span class="composer-slash-menu-desc">{item.description.clone()}</span>
+        </button>
+    }
+    .into_any()
+}
+
 fn slash_menu_body(
     locale: RwSignal<Locale>,
     slash: SlashMenuSignals,
@@ -486,31 +583,8 @@ fn slash_menu_body(
     }
 
     let mut views: Vec<AnyView> = Vec::new();
-    if let Some(err) = err {
-        views.push(
-            view! { <div class="composer-slash-menu-banner composer-slash-menu-banner--err">{err}</div> }
-                .into_any(),
-        );
-    } else if loading && cache.is_none() {
-        views.push(
-            view! {
-                <div class="composer-slash-menu-banner">
-                    {i18n::composer_slash_menu_loading(loc)}
-                </div>
-            }
-            .into_any(),
-        );
-    } else if let Some(ref c) = cache
-        && !c.enabled
-    {
-        views.push(
-            view! {
-                <div class="composer-slash-menu-banner">
-                    {i18n::composer_slash_menu_skills_disabled(loc)}
-                </div>
-            }
-            .into_any(),
-        );
+    if let Some(banner) = slash_menu_banner(loc, cache.as_ref(), loading, err) {
+        views.push(banner);
     }
 
     let has_builtin = items.iter().any(|i| i.kind == SlashItemKind::Builtin);
@@ -521,47 +595,22 @@ fn slash_menu_body(
 
     for (i, item) in items.into_iter().enumerate() {
         if show_sections && last_kind != Some(item.kind) {
-            let title = match item.kind {
-                SlashItemKind::Builtin => i18n::composer_slash_section_commands(loc),
-                SlashItemKind::Skill => i18n::composer_slash_section_skills(loc),
-            };
+            let title = slash_section_title(loc, item.kind);
             views.push(
                 view! { <div class="composer-slash-menu-section" role="presentation">{title}</div> }
                     .into_any(),
             );
             last_kind = Some(item.kind);
         }
-        let active = i == sel;
-        let item_btn = item.clone();
-        let kind_class = match item.kind {
-            SlashItemKind::Builtin => "composer-slash-menu-item composer-slash-menu-item--builtin",
-            SlashItemKind::Skill => "composer-slash-menu-item composer-slash-menu-item--skill",
-        };
-        views.push(
-            view! {
-                <button
-                    type="button"
-                    class=kind_class
-                    class:composer-slash-menu-item--active=active
-                    role="option"
-                    prop:aria-selected=active
-                    on:mousedown=move |ev| {
-                        ev.prevent_default();
-                        apply_slash_item(
-                            draft,
-                            selected_idx,
-                            menu_dismissed,
-                            composer_input_ref,
-                            &item_btn,
-                        );
-                    }
-                >
-                    <span class="composer-slash-menu-id">{item.label.clone()}</span>
-                    <span class="composer-slash-menu-desc">{item.description.clone()}</span>
-                </button>
-            }
-            .into_any(),
-        );
+        views.push(slash_menu_item_view(
+            &item,
+            i,
+            sel,
+            draft,
+            selected_idx,
+            menu_dismissed,
+            composer_input_ref,
+        ));
     }
 
     views.collect_view().into_any()

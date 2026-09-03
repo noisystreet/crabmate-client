@@ -146,6 +146,26 @@ async fn fetch_json<T: for<'de> Deserialize<'de>>(
     fetch_request_json(&init, url, loc).await
 }
 
+/// PUT 失败：尽力读服务器错误体并组装「HTTP {status}[: detail]」消息。
+async fn put_no_content_error(resp: Response, loc: Locale) -> Result<String, String> {
+    let status = resp.status();
+    let detail = JsFuture::from(resp.text().map_err(|e| format!("text: {e:?}"))?)
+        .await
+        .ok()
+        .and_then(|t| t.as_string())
+        .unwrap_or_default();
+    let msg = if detail.trim().is_empty() {
+        format!("{} ({status})", crate::i18n::api_err_request_failed(loc))
+    } else {
+        format!(
+            "{} ({status}): {}",
+            crate::i18n::api_err_request_failed(loc),
+            detail.trim()
+        )
+    };
+    Ok(msg)
+}
+
 async fn put_json_no_content_with_keepalive(
     url: &str,
     body: &str,
@@ -179,24 +199,7 @@ async fn put_json_no_content_with_keepalive(
     if resp.ok() {
         Ok(())
     } else {
-        let status = resp.status();
-        let detail = JsFuture::from(resp.text().map_err(|e| format!("text: {e:?}"))?)
-            .await
-            .ok()
-            .and_then(|t| t.as_string())
-            .unwrap_or_default();
-        if detail.trim().is_empty() {
-            Err(format!(
-                "{} ({status})",
-                crate::i18n::api_err_request_failed(loc)
-            ))
-        } else {
-            Err(format!(
-                "{} ({status}): {}",
-                crate::i18n::api_err_request_failed(loc),
-                detail.trim()
-            ))
-        }
+        Err(put_no_content_error(resp, loc).await?)
     }
 }
 

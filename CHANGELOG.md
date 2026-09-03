@@ -16,6 +16,7 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Changed
 
+- Lizard complexity gate simplified to one global rule: any Rust function with **CCN > 10** fails the check (hits are listed); the per-module caps table (`scripts/lizard_module_ccn_caps.toml`) and `--write-caps` ratchet are removed (`scripts/lizard_rust_metrics.py`).
 - Context meter now prefers the Server’s `used_input_tokens / max_input_tokens` safe-input contract (including tools, attachments, reservation, and provider usage when available), while retaining the legacy `prompt_tokens / configured context window` fallback for older Servers.
 - `GET /health` `degraded` check summary parsing lives in `crabmate-client-api` (`health_degraded_note`); Desktop/Android connect and `crabmate-tui` share it (TUI logs on stderr and still treats 2xx as success). CORS probe stays in connect.
 - `crabmate-connect` no longer depends on Tauri by default. Probe / handoff / keyring tests skip GTK/WebKit; Desktop and Android enable `features = ["tauri"]` for invoke commands and WebView navigation hooks.
