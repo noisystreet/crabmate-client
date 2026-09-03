@@ -22,6 +22,10 @@ use crate::error::TermError;
 #[derive(Debug, Clone, Default)]
 pub struct ChatStreamOutcome {
     pub conversation_id: Option<String>,
+    /// 响应头 `x-stream-job-id`（供 `POST /chat/stream/{job_id}/cancel` 与后续续传）。
+    pub job_id: Option<u64>,
+    /// 用户 Ctrl+C 打断并已尽力让 serve 停掉该回合。
+    pub cancelled_by_user: bool,
     pub last_event_id: u64,
 }
 
@@ -60,6 +64,7 @@ pub async fn run_chat_stream(
     let mut outcome = ChatStreamOutcome {
         conversation_id: conversation_id_from_headers(&resp)
             .or_else(|| args.conversation_id.map(str::to_string)),
+        job_id: job_id_from_headers(&resp),
         ..ChatStreamOutcome::default()
     };
     consume_sse_response(
@@ -147,6 +152,19 @@ fn conversation_id_from_headers(resp: &Response) -> Option<String> {
         .map(str::to_string)
 }
 
+/// 响应头 `x-stream-job-id`：SSE 事件的 job 归属（供 cancel / 续传）。
+fn job_id_from_headers(resp: &Response) -> Option<u64> {
+    resp.headers()
+        .get("x-stream-job-id")
+        .and_then(|v| v.to_str().ok())
+        .and_then(parse_stream_job_id)
+}
+
+/// 解析 `x-stream-job-id` 数值；空 / 非数字返回 `None`。
+fn parse_stream_job_id(raw: &str) -> Option<u64> {
+    raw.trim().parse::<u64>().ok()
+}
+
 async fn consume_sse_response(
     client: &ServeClient,
     approval_session_id: &str,
@@ -162,6 +180,10 @@ async fn consume_sse_response(
         let chunk = tokio::select! {
             biased;
             _ = tokio::signal::ctrl_c() => {
+                if interrupt_stream(client, outcome, err).await? {
+                    return Ok(());
+                }
+                // 旧 serve 无 `x-stream-job-id`：无法 cancel，保持原中断语义。
                 return Err(TermError::Interrupted);
             }
             next = stream.next() => next,
@@ -192,6 +214,41 @@ async fn consume_sse_response(
         approval,
     )
     .await
+}
+
+/// Ctrl+C：job_id 已知时先 `POST /chat/stream/{job}/cancel` 让 serve 停掉回合。
+///
+/// 返回 `Ok(true)` = 已取消并干净收尾；`Ok(false)` = 无 job_id（旧 serve），
+/// 调用方按原中断语义处理。取消请求进行中再按一次 Ctrl+C = 强退（130）。
+async fn interrupt_stream(
+    client: &ServeClient,
+    outcome: &mut ChatStreamOutcome,
+    err: &mut dyn Write,
+) -> Result<bool, TermError> {
+    let Some(job_id) = outcome.job_id else {
+        return Ok(false);
+    };
+    let cancel = tokio::select! {
+        biased;
+        _ = tokio::signal::ctrl_c() => return Err(TermError::Interrupted),
+        r = client.cancel_chat_stream(job_id) => r,
+    };
+    match cancel {
+        Ok(()) => {
+            let _ = writeln!(
+                err,
+                "\n[crabmate-tui] stopped by Ctrl+C (job {job_id} cancelled on serve)"
+            );
+        }
+        Err(e) => {
+            let _ = writeln!(
+                err,
+                "\n[crabmate-tui] cancel job {job_id} failed: {e}; 后台回合可能仍在 serve 上运行"
+            );
+        }
+    }
+    outcome.cancelled_by_user = true;
+    Ok(true)
 }
 
 async fn flush_sse_tail(
@@ -476,5 +533,13 @@ mod tests {
             }),
         });
         assert_eq!(blank, base);
+    }
+
+    #[test]
+    fn parses_stream_job_id() {
+        assert_eq!(parse_stream_job_id(" 42 "), Some(42));
+        assert_eq!(parse_stream_job_id("12"), Some(12));
+        assert_eq!(parse_stream_job_id("abc"), None);
+        assert_eq!(parse_stream_job_id(""), None);
     }
 }

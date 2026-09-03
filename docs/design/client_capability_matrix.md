@@ -52,7 +52,7 @@ Blank cells are forbidden.
 | Capability | Desktop | Android | Web | TUI | Notes |
 |------------|---------|---------|-----|-----|-------|
 | `POST /chat/stream` + command approval | yes | yes | yes | yes | Android: notification keep-alive. TUI: TTY menu or `--yes`. |
-| Stop in-flight turn (`POST …/cancel`) | yes | yes | yes | no | WASM Stop POSTs cancel; if `job_id` is not in yet, SSE stays open until `x-stream-job-id`. Needs Server **#900**. TUI does not call cancel yet. |
+| Stop in-flight turn (`POST …/cancel`) | yes | yes | yes | yes | WASM Stop POSTs cancel; if `job_id` is not in yet, SSE stays open until `x-stream-job-id`. TUI: first Ctrl+C cancels the turn (`x-stream-job-id` → `POST …/cancel`) and returns to the prompt; a second Ctrl+C force-quits. `serve` without the cancel route degrades to a local interrupt. |
 | Tool-card compact/detail | yes | yes | yes | no | TUI prints classified SSE as text (`crabmate-tool-card` is WASM-only). |
 | Chat image attach / lightbox | yes | yes | yes | no | |
 | Ask / Plan / Act in composer | yes | yes | yes | no | |
