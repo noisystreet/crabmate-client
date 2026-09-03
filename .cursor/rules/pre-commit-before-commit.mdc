@@ -32,6 +32,6 @@ bash scripts/check.sh
 
 ## 与本仓对应
 
-钩子见 **`.pre-commit-config.yaml`**（对齐主仓：分项 fmt/clippy、`check-no-main-path`、lizard（各模块 CCN>10 函数个数，实测须等于 cap；变小须调低 cap / `--write-caps`）/ fn-param / fn-nloc、可选 taplo、`ktlint-android`、typos、commit-msg）。  
+钩子见 **`.pre-commit-config.yaml`**（对齐主仓：分项 fmt/clippy、`check-no-main-path`、lizard（任何函数 CCN>10 即失败；无按模块 caps）/ fn-param / fn-nloc、可选 taplo、`ktlint-android`、typos、commit-msg）。  
 **不含** Server 主仓的 frontend wasm、全 workspace clippy、Playwright。  
 **`cargo test` / Victauri E2E 不在 pre-commit**（见 CI 与 `docs/TESTING.md`）。

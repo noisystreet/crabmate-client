@@ -148,29 +148,13 @@ fn check_stream_ended(
     None
 }
 
-/// 单帧 SSE 块解析与分发。
-pub(super) fn handle_sse_block(
-    block: &str,
-    last_event_id: &mut u64,
-    saw_stream_ended: &mut bool,
+/// 构造控制 sink 并对 `data` 做 AG-UI 解析分发（含 stream stopped 终止语义）。
+fn parse_and_dispatch_sse_frame(
+    data: &str,
     cbs: &ChatStreamCallbacks,
+    saw_stream_ended: &mut bool,
     loc: Locale,
 ) -> Result<SseFrameKind, String> {
-    if let Some(id) = parse_sse_event_id(block) {
-        *last_event_id = id;
-        (cbs.on_last_sse_event_id)(id);
-    }
-    let Some(data) = join_sse_data_lines(block) else {
-        return Ok(SseFrameKind::Ignored);
-    };
-    // 勿对 `data` 全文 `trim`：模型/代理可能把词间空格单独打成一段 SSE，trim 会导致单词粘在一起。
-    if data.is_empty() || is_sse_done_sentinel(&data) {
-        return Ok(SseFrameKind::Ignored);
-    }
-    if let Some(kind) = check_stream_ended(&data, saw_stream_ended, cbs) {
-        return Ok(kind);
-    }
-
     let mut stop = false;
     let mut on_err = |msg: String| {
         stop = true;
@@ -246,30 +230,47 @@ pub(super) fn handle_sse_block(
             on_state_snapshot: None,
         },
     };
-    match default_parser().parse(&data, &mut cbs2) {
-        crate::sse_dispatch::SseDispatch::Handled => {
-            if stop {
-                Err(crate::i18n::api_err_stream_stopped(loc).to_string())
-            } else {
-                Ok(SseFrameKind::Control)
-            }
-        }
+    let result = default_parser().parse(data, &mut cbs2);
+    if stop {
+        return Err(crate::i18n::api_err_stream_stopped(loc).to_string());
+    }
+    match result {
+        crate::sse_dispatch::SseDispatch::Handled => Ok(SseFrameKind::Control),
         crate::sse_dispatch::SseDispatch::Plain => {
-            if stop {
-                return Err(crate::i18n::api_err_stream_stopped(loc).to_string());
-            }
-            (cbs.on_delta)(data);
+            (cbs.on_delta)(data.to_string());
             Ok(SseFrameKind::TextDelta)
         }
         crate::sse_dispatch::SseDispatch::StreamEnded => {
             // RUN_FINISHED / RUN_ERROR 进入 Draining；旧序下 body 尾部仍可能有 conversation_saved。
             // 新序下 saved 已在终态前到达。`on_done` 由 body 消费完成后的 send_helpers 统一调用。
-            if stop {
-                return Err(crate::i18n::api_err_stream_stopped(loc).to_string());
-            }
             Ok(SseFrameKind::StreamEnded)
         }
     }
+}
+
+/// 单帧 SSE 块解析与分发。
+pub(super) fn handle_sse_block(
+    block: &str,
+    last_event_id: &mut u64,
+    saw_stream_ended: &mut bool,
+    cbs: &ChatStreamCallbacks,
+    loc: Locale,
+) -> Result<SseFrameKind, String> {
+    if let Some(id) = parse_sse_event_id(block) {
+        *last_event_id = id;
+        (cbs.on_last_sse_event_id)(id);
+    }
+    let Some(data) = join_sse_data_lines(block) else {
+        return Ok(SseFrameKind::Ignored);
+    };
+    // 勿对 `data` 全文 `trim`：模型/代理可能把词间空格单独打成一段 SSE，trim 会导致单词粘在一起。
+    if data.is_empty() || is_sse_done_sentinel(&data) {
+        return Ok(SseFrameKind::Ignored);
+    }
+    if let Some(kind) = check_stream_ended(&data, saw_stream_ended, cbs) {
+        return Ok(kind);
+    }
+    parse_and_dispatch_sse_frame(&data, cbs, saw_stream_ended, loc)
 }
 
 #[cfg(test)]

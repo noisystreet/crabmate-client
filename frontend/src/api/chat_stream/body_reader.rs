@@ -188,6 +188,37 @@ async fn process_stream_chunk_value(
     Ok(StreamChunkLoop::Continue)
 }
 
+/// 未收到 `stream_ended` 且超过空闲上限（防连接挂死）。
+fn payload_idle_timeout_expired(
+    saw_stream_ended: bool,
+    now: f64,
+    last_meaningful_payload_ms: f64,
+) -> bool {
+    !saw_stream_ended && now - last_meaningful_payload_ms > SSE_ANY_PAYLOAD_IDLE_TIMEOUT_MS
+}
+
+/// 消费结束收尾：补 raw 残留字节、flush 尾部 SSE，并据 `saw_stream_ended` 归一化结束标志。
+fn finish_consume_stream_tail(
+    raw: &mut Vec<u8>,
+    buffer: &mut String,
+    last_event_id: &mut u64,
+    saw_stream_ended: &mut bool,
+    stream_finished_normally: bool,
+    cbs: &ChatStreamCallbacks,
+    loc: Locale,
+) -> Result<ChatStreamBodyConsumeResult, String> {
+    if !raw.is_empty() {
+        buffer.push_str(&String::from_utf8_lossy(raw));
+        raw.clear();
+    }
+    let _tail_progress = flush_sse_tail(buffer, last_event_id, saw_stream_ended, cbs, loc)?;
+    let finished = stream_finished_normally || *saw_stream_ended;
+    Ok(ChatStreamBodyConsumeResult {
+        stream_finished_normally: finished,
+        saw_stream_ended: *saw_stream_ended,
+    })
+}
+
 /// 消费 `/chat/stream` 响应体：UTF-8 重组、SSE 分帧与尾部 flush（与断线重连时的读失败语义一致）。
 pub(super) async fn consume_chat_stream_response_body(
     rb: web_sys::ReadableStream,
@@ -204,7 +235,7 @@ pub(super) async fn consume_chat_stream_response_body(
 
     let mut raw: Vec<u8> = Vec::new();
     let mut buffer = String::new();
-    let mut stream_finished_normally;
+    let stream_finished_normally;
     let mut saw_stream_ended = false;
     let mut last_meaningful_payload_ms = js_sys::Date::now();
     loop {
@@ -214,13 +245,11 @@ pub(super) async fn consume_chat_stream_response_body(
                 saw_stream_ended,
             });
         }
-        if !saw_stream_ended {
-            let now = js_sys::Date::now();
-            if now - last_meaningful_payload_ms > SSE_ANY_PAYLOAD_IDLE_TIMEOUT_MS {
-                reader.release_lock();
-                stream_finished_normally = true;
-                break;
-            }
+        let now = js_sys::Date::now();
+        if payload_idle_timeout_expired(saw_stream_ended, now, last_meaningful_payload_ms) {
+            reader.release_lock();
+            stream_finished_normally = true;
+            break;
         }
         let chunk: wasm_bindgen::JsValue =
             match poll_readable_stream_chunk(&reader, saw_stream_ended, stream_resume_job_id)
@@ -257,19 +286,15 @@ pub(super) async fn consume_chat_stream_response_body(
             }
         }
     }
-    if !raw.is_empty() {
-        buffer.push_str(&String::from_utf8_lossy(&raw));
-        raw.clear();
-    }
-    let _tail_progress =
-        flush_sse_tail(&mut buffer, last_event_id, &mut saw_stream_ended, cbs, loc)?;
-    if saw_stream_ended {
-        stream_finished_normally = true;
-    }
-    Ok(ChatStreamBodyConsumeResult {
+    finish_consume_stream_tail(
+        &mut raw,
+        &mut buffer,
+        last_event_id,
+        &mut saw_stream_ended,
         stream_finished_normally,
-        saw_stream_ended,
-    })
+        cbs,
+        loc,
+    )
 }
 
 #[cfg(test)]

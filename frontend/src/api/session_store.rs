@@ -18,6 +18,15 @@ pub struct SessionConversationStoreResponse {
     pub message: String,
 }
 
+/// 读取会话存储响应文本（`resp.text()` + await + 转 String）。
+async fn session_store_read_text(resp: &Response, loc: Locale) -> Result<String, String> {
+    let text = JsFuture::from(resp.text().map_err(|e| format!("text: {:?}", e))?)
+        .await
+        .map_err(|e| format!("read body: {:?}", e))?;
+    text.as_string()
+        .ok_or_else(|| crate::i18n::api_err_body_type(loc).to_string())
+}
+
 async fn session_store_post_json_value(body: &str, loc: Locale) -> Result<(u16, Value), String> {
     let init = RequestInit::new();
     init.set_method("POST");
@@ -36,12 +45,7 @@ async fn session_store_post_json_value(body: &str, loc: Locale) -> Result<(u16, 
         .dyn_into()
         .map_err(|_| crate::i18n::api_err_response_type(loc))?;
     let status = resp.status();
-    let text = JsFuture::from(resp.text().map_err(|e| format!("text: {:?}", e))?)
-        .await
-        .map_err(|e| format!("read body: {:?}", e))?;
-    let s = text
-        .as_string()
-        .ok_or_else(|| crate::i18n::api_err_body_type(loc).to_string())?;
+    let s = session_store_read_text(&resp, loc).await?;
     let v: Value =
         serde_json::from_str(&s).map_err(|_| crate::i18n::api_err_request_failed(loc))?;
     Ok((status, v))

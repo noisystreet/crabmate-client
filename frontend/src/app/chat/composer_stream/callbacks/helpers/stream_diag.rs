@@ -47,6 +47,20 @@ pub(crate) fn build_empty_reply_with_diagnostic(
     )
 }
 
+/// API Key / 鉴权相关错误提示关键词。
+fn is_api_key_hint_text(low: &str) -> bool {
+    low.contains("llm_api_key_required")
+        || low.contains("api key")
+        || low.contains("api_key")
+        || low.contains("unauthorized")
+        || low.contains("401")
+}
+
+/// 超时相关错误提示关键词。
+fn is_timeout_hint_text(low: &str) -> bool {
+    low.contains("timeout") || low.contains("timed out") || low.contains("408")
+}
+
 pub(crate) fn build_stream_error_with_suggestion(raw: &str, loc: Locale) -> String {
     let msg = raw.trim();
     if msg.is_empty() {
@@ -58,17 +72,12 @@ pub(crate) fn build_stream_error_with_suggestion(raw: &str, loc: Locale) -> Stri
             i18n::stream_err_impact_web_api_bearer(loc),
             i18n::stream_err_hint_web_api_bearer(loc),
         )
-    } else if low.contains("llm_api_key_required")
-        || low.contains("api key")
-        || low.contains("api_key")
-        || low.contains("unauthorized")
-        || low.contains("401")
-    {
+    } else if is_api_key_hint_text(&low) {
         (
             i18n::stream_err_impact_api_key(loc),
             i18n::stream_err_hint_api_key(loc),
         )
-    } else if low.contains("timeout") || low.contains("timed out") || low.contains("408") {
+    } else if is_timeout_hint_text(&low) {
         (
             i18n::stream_err_impact_timeout(loc),
             i18n::stream_err_hint_timeout(loc),

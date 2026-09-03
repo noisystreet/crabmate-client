@@ -583,6 +583,21 @@ fn format_api_error_detail(message: &str, code: Option<&str>, request_id: Option
     out
 }
 
+/// 读取响应文本（`resp.text()` + await + 转 String），错误信息与各调用点一致。
+async fn read_response_text(resp: &Response, loc: Locale) -> Result<String, String> {
+    let text = JsFuture::from(resp.text().map_err(|e| format!("text: {:?}", e))?)
+        .await
+        .map_err(|e| format!("read body: {:?}", e))?;
+    text.as_string()
+        .ok_or_else(|| crate::i18n::api_err_body_type(loc).to_string())
+}
+
+/// 错误响应时的尽力读取：读不到（await 失败 / 非文本）就返回空串（供直接回显服务器错误体）。
+async fn response_text_fallback(resp: &Response) -> Result<String, String> {
+    let text = JsFuture::from(resp.text().map_err(|e| format!("text: {:?}", e))?).await;
+    Ok(text.ok().and_then(|v| v.as_string()).unwrap_or_default())
+}
+
 async fn do_fetch_json<T: for<'de> Deserialize<'de>>(
     req: Request,
     loc: Locale,
@@ -596,12 +611,7 @@ async fn do_fetch_json<T: for<'de> Deserialize<'de>>(
         .dyn_into()
         .map_err(|_| crate::i18n::api_err_response_type(loc))?;
     let status = resp.status();
-    let text = JsFuture::from(resp.text().map_err(|e| format!("text: {:?}", e))?)
-        .await
-        .map_err(|e| format!("read body: {:?}", e))?;
-    let s = text
-        .as_string()
-        .ok_or_else(|| crate::i18n::api_err_body_type(loc).to_string())?;
+    let s = read_response_text(&resp, loc).await?;
     if !(200..300).contains(&status) {
         return Err(crate::i18n::api_err_http_status(
             loc,
@@ -659,19 +669,13 @@ pub async fn upload_files_multipart_raw(
         .dyn_into()
         .map_err(|_| crate::i18n::api_err_response_type(loc))?;
     if !resp.ok() {
-        let text = JsFuture::from(resp.text().map_err(|e| format!("text: {:?}", e))?)
-            .await
-            .ok()
-            .and_then(|v| v.as_string())
-            .unwrap_or_default();
+        let text = match response_text_fallback(&resp).await {
+            Ok(s) => s,
+            Err(e) => return Err(e),
+        };
         return Err(text);
     }
-    let text = JsFuture::from(resp.text().map_err(|e| format!("text: {:?}", e))?)
-        .await
-        .map_err(|e| format!("read body: {:?}", e))?;
-    let s = text
-        .as_string()
-        .ok_or_else(|| crate::i18n::api_err_body_type(loc).to_string())?;
+    let s = read_response_text(&resp, loc).await?;
     let body: UploadResponseBody = serde_json::from_str(&s).map_err(|e| e.to_string())?;
     Ok(body.files)
 }

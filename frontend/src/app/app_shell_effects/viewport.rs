@@ -73,6 +73,51 @@ fn on_viewport_narrow_change(
     // 无暂存时保留当前 prefs（勿强制 Workspace，以免覆盖用户隐藏）。
 }
 
+/// 监听窄屏媒体查询 `change` 并走统一窄屏切换逻辑。
+fn watch_media_query_change(
+    query: String,
+    is_narrow_viewport: RwSignal<bool>,
+    side_panel_view: RwSignal<SidePanelView>,
+    stashed_panel: StoredValue<Option<SidePanelView>>,
+    layout_toggle: IdeLayoutToggleSignals,
+) {
+    let Some(window) = web_sys::window() else {
+        return;
+    };
+    let Ok(f) = js_sys::Reflect::get(
+        window.as_ref(),
+        &wasm_bindgen::JsValue::from_str("matchMedia"),
+    ) else {
+        return;
+    };
+    let Ok(f) = f.dyn_into::<js_sys::Function>() else {
+        return;
+    };
+    let Ok(mql_v) = f.call1(window.as_ref(), &wasm_bindgen::JsValue::from_str(&query)) else {
+        return;
+    };
+    if mql_v.is_null() || mql_v.is_undefined() {
+        return;
+    }
+    let Ok(mql) = mql_v.dyn_into::<web_sys::EventTarget>() else {
+        return;
+    };
+
+    let cb = Closure::<dyn FnMut(web_sys::Event)>::new(move |_| {
+        if let Some(matches) = media_query_matches(&query) {
+            on_viewport_narrow_change(
+                matches,
+                is_narrow_viewport,
+                side_panel_view,
+                stashed_panel,
+                layout_toggle,
+            );
+        }
+    });
+    let _ = mql.add_event_listener_with_callback("change", cb.as_ref().unchecked_ref());
+    cb.forget();
+}
+
 pub fn wire_narrow_viewport_layout(sig: WireNarrowViewportSignals) {
     let is_narrow_viewport = sig.is_narrow_viewport;
     let side_panel_view = sig.side_panel_view;
@@ -87,9 +132,6 @@ pub fn wire_narrow_viewport_layout(sig: WireNarrowViewportSignals) {
     });
 
     Effect::new(move |_| {
-        let Some(window) = web_sys::window() else {
-            return;
-        };
         let query = mobile_layout_media_query();
         if let Some(initial) = media_query_matches(query.as_str()) {
             let collapse = initial || mobile_remote_client();
@@ -113,41 +155,12 @@ pub fn wire_narrow_viewport_layout(sig: WireNarrowViewportSignals) {
         } else if mobile_remote_client() {
             side_panel_view.set(SidePanelView::None);
         }
-
-        let Ok(f) = js_sys::Reflect::get(
-            window.as_ref(),
-            &wasm_bindgen::JsValue::from_str("matchMedia"),
-        ) else {
-            return;
-        };
-        let Ok(f) = f.dyn_into::<js_sys::Function>() else {
-            return;
-        };
-        let Ok(mql_v) = f.call1(
-            window.as_ref(),
-            &wasm_bindgen::JsValue::from_str(query.as_str()),
-        ) else {
-            return;
-        };
-        if mql_v.is_null() || mql_v.is_undefined() {
-            return;
-        }
-        let Ok(mql) = mql_v.dyn_into::<web_sys::EventTarget>() else {
-            return;
-        };
-
-        let cb = Closure::<dyn FnMut(web_sys::Event)>::new(move |_| {
-            if let Some(matches) = media_query_matches(query.as_str()) {
-                on_viewport_narrow_change(
-                    matches,
-                    is_narrow_viewport,
-                    side_panel_view,
-                    stashed_panel,
-                    layout_toggle,
-                );
-            }
-        });
-        let _ = mql.add_event_listener_with_callback("change", cb.as_ref().unchecked_ref());
-        cb.forget();
+        watch_media_query_change(
+            query,
+            is_narrow_viewport,
+            side_panel_view,
+            stashed_panel,
+            layout_toggle,
+        );
     });
 }

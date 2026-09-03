@@ -2,16 +2,10 @@
 # 对 `crates/`、`desktop-tauri/.../src`、`mobile-tauri/.../src`、`frontend/src` 做圈复杂度（CCN）扫描，使用 lizard（https://github.com/terryyin/lizard）。
 # 未安装时：pip install lizard
 #
-# 规则（与 scripts/lizard_rust_metrics.py 一致）：按模块统计 CCN>10（可配）的函数个数，
-# 各模块独立个数上限见 scripts/lizard_module_ccn_caps.toml。
-# 棘轮：实测必须等于 cap；个数变小则检查失败，须调低 cap（--write-caps）。
-# --write-caps 与 --module 联用时合并更新该模块，不会截断其余 [modules]。
+# 门禁（与 scripts/lizard_rust_metrics.py 一致）：全局 CCN>10 的函数个数必须为 0，
+# 出现即失败并列出函数；没有按模块的个数上限配置。
 # 额外参数原样传给 Python，例如：
-#   bash scripts/lizard-rust.sh --list-modules
-#   bash scripts/lizard-rust.sh --module crates/crabmate-connect
 #   bash scripts/lizard-rust.sh --list-above 10
-#   bash scripts/lizard-rust.sh --write-caps
-#   bash scripts/lizard-rust.sh --module frontend --write-caps
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 if ! python3 -c "import lizard" 2>/dev/null; then

@@ -28,7 +28,7 @@ pre-commit run --all-files
 | `desktop-dist-stubs` → **`tauri-dist-stubs`** | 为 **desktop/mobile** `frontendDist` 建占位（`scripts/ensure-tauri-dist-stubs.sh`；与 CI `check.sh` 共用） |
 | `desktop-clippy` / `mobile-clippy` / `connect-clippy` / `tui-clippy` / `web-host-clippy` | `-D warnings` |
 | `frontend-clippy` | wasm32 clippy（含类型检查；不再单独 `cargo check`） |
-| `lizard-rust` | 按模块限制 CCN>10 函数个数（含 `frontend`；见 `lizard_module_ccn_caps.toml`）。实测必须等于 cap；变小则失败，须调低 cap 或 `bash scripts/lizard-rust.sh --write-caps` |
+| `lizard-rust` | 全局硬门禁：任何函数 **CCN>10** 即失败（列出命中；无按模块的个数上限配置） |
 | `fn-param-ratchet` | 形参 ≤ 9 |
 | `fn-nloc-ratchet` | 函数 nloc ≤ 200、单文件 ≤ 920 |
 | `taplo-format` / `taplo-lint` | 有 `taplo` 才跑，否则跳过 |
@@ -82,7 +82,7 @@ bash scripts/fn-param-ratchet.sh
 bash scripts/fn-nloc-ratchet.sh
 ```
 
-Lizard 个数棘轮：重构后若某模块 `CCN>10` 函数变少，pre-commit / `lizard-rust` 会失败并要求把 `scripts/lizard_module_ccn_caps.toml` 中该模块上限调低到实测值（推荐 `bash scripts/lizard-rust.sh --write-caps`）。不得长期保留偏高的 cap。
+Lizard 全局硬门禁：重构目标是把所有函数的 CCN 压到 ≤10；一旦出现 `CCN>10`，pre-commit / `lizard-rust` 会失败并列出命中，需继续拆分，不存在按模块的个数上限或 `--write-caps`。
 
 ## 依赖安全与许可证
 
