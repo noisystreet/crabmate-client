@@ -43,8 +43,8 @@ Blank cells are forbidden.
 | Capability | Desktop | Android | Web | TUI | Notes |
 |------------|---------|---------|-----|-----|-------|
 | Web API Bearer (≠ model `API_KEY`) | yes | yes | yes | yes | Official shells: memory + keyring/Keystore, **no** plaintext `localStorage`. |
-| Persist Bearer on device | yes | yes | reduced | no | Web: weak `localStorage` with an explicit warning. TUI: flags/env only ([`remote_cli_tui.md`](./remote_cli_tui.md) may add keyring later). |
-| Model `client_llm` key on device | yes | yes | reduced | per-turn flags/env | Chat sends `client_llm.{api_key,model,api_base}` over HTTPS; do not `PUT /user-data/secrets/client-llm` from UI. TUI: `--llm-api-key` / `--llm-model` / `--llm-api-base` (`CM_API_KEY` / `CM_MODEL` / `CM_API_BASE`), no device keyring yet. |
+| Persist Bearer on device | yes | yes | reduced | reduced | Web: weak `localStorage` with an explicit warning. TUI: flags/env; missing `--bearer` falls back to the desktop shell keyring slot `com.crabmate.credentials` / `tauri_connect_web_api_bearer` (read-only; `--no-keyring` disables). |
+| Model `client_llm` key on device | yes | yes | reduced | reduced | Chat sends `client_llm.{api_key,model,api_base}` over HTTPS; do not `PUT /user-data/secrets/client-llm` from UI. TUI: `--llm-api-key` / `--llm-model` / `--llm-api-base` (`CM_API_KEY` / `CM_MODEL` / `CM_API_BASE`); missing API key falls back to the shell `client_llm` keyring slot (read-only), no TUI-side keyring writes. |
 | GitHub Device Flow | yes | yes | reduced | no | Native shells: Keystore/keyring slot + `X-CrabMate-GitHub-Token`. Browser: HttpOnly cookie path. |
 
 ### Chat and tools
