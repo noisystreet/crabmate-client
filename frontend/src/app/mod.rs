@@ -96,6 +96,21 @@ use workspace_project_modal::workspace_project_modal_view;
 
 use leptos::prelude::*;
 
+/// 根容器类名：随折叠 / 贴边 / IDE 布局变化（集中计算，减少 App 内 reactive 闭包数）。
+fn app_root_class_name(collapsed: bool, snap: bool, ide_layout: bool) -> String {
+    let mut c = String::from("app-root app-shell-ds");
+    if collapsed {
+        c.push_str(" sidebar-rail-collapsed");
+    }
+    if snap {
+        c.push_str(" sidebar-rail-snap");
+    }
+    if ide_layout {
+        c.push_str(" app-root--ide-layout");
+    }
+    c
+}
+
 #[component]
 fn SidebarRailRevealBtn(
     sidebar_rail_collapsed: RwSignal<bool>,
@@ -138,10 +153,13 @@ pub fn App() -> impl IntoView {
 
     view! {
         <div
-            class="app-root app-shell-ds"
-            class:sidebar-rail-collapsed=move || app_ctx.signals.sidebar.sidebar_rail_collapsed.get()
-            class:sidebar-rail-snap=move || app_ctx.signals.sidebar.sidebar_rail_snap.get()
-            class:app-root--ide-layout=move || app_ctx.signals.shell_ui.editor_layout_mode.get()
+            class=move || {
+                app_root_class_name(
+                    app_ctx.signals.sidebar.sidebar_rail_collapsed.get(),
+                    app_ctx.signals.sidebar.sidebar_rail_snap.get(),
+                    app_ctx.signals.shell_ui.editor_layout_mode.get(),
+                )
+            }
         >
             {sidebar_nav_view(sidebar_nav_signals)}
 

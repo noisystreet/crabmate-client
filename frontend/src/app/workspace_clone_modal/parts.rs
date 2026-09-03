@@ -47,6 +47,116 @@ fn WorkspaceCloneShallowCheck(locale: RwSignal<Locale>, shallow: RwSignal<bool>)
     }
 }
 
+/// Clone URL 输入：自动推断项目名（空时回填），独立成子组件以降低表单区 CCN。
+#[component]
+fn WorkspaceCloneUrlField(
+    locale: RwSignal<Locale>,
+    url: RwSignal<String>,
+    name: RwSignal<String>,
+) -> impl IntoView {
+    view! {
+        <label class="workspace-clone-field">
+            <span>{move || i18n::ws_clone_url_label(locale.get())}</span>
+            <input
+                type="text"
+                data-testid="workspace-clone-url"
+                prop:value=move || url.get()
+                prop:placeholder="https://github.com/org/repo.git"
+                on:input=move |ev| {
+                    let v = event_target_value(&ev);
+                    url.set(v.clone());
+                    if name.get_untracked().trim().is_empty() {
+                        name.set(infer_project_name_from_clone_url(&v));
+                    }
+                }
+            />
+        </label>
+    }
+}
+
+/// 进度条：状态文案 + 进度条 + 日志（后端阶段文案占位）。
+#[component]
+fn WorkspaceCloneProgressPane(
+    status_text: RwSignal<String>,
+    log_lines: RwSignal<Vec<String>>,
+    percent: RwSignal<Option<u8>>,
+) -> impl IntoView {
+    view! {
+        <p class="workspace-clone-status" data-testid="workspace-clone-status">
+            {move || status_text.get()}
+        </p>
+        <div
+            class="workspace-clone-bar"
+            class:workspace-clone-bar--indeterminate=move || percent.get().is_none()
+            role="progressbar"
+            prop:aria-valuenow=move || percent.get().map(|p| p.to_string()).unwrap_or_default()
+        >
+            <div
+                class="workspace-clone-bar-fill"
+                style=move || {
+                    percent
+                        .get()
+                        .map(|p| format!("width:{p}%"))
+                        .unwrap_or_else(|| "width:30%".into())
+                }
+            ></div>
+        </div>
+        <pre class="workspace-clone-log" data-testid="workspace-clone-log">
+            {move || log_lines.get().join("\n")}
+        </pre>
+    }
+}
+
+/// 失败态操作：返回表单；GitHub 连接诉求时给出「去连接 GitHub」。
+#[component]
+fn WorkspaceCloneFailedActions(
+    locale: RwSignal<Locale>,
+    ui_phase: RwSignal<CloneUiPhase>,
+    form_err: RwSignal<Option<String>>,
+    clone_open: RwSignal<bool>,
+    settings_page: RwSignal<bool>,
+) -> impl IntoView {
+    let show_github_cta = move || {
+        form_err
+            .get()
+            .as_deref()
+            .is_some_and(|e| e.starts_with("CLONE_AUTH_REQUIRED"))
+    };
+    view! {
+        <Show when=move || ui_phase.get() == CloneUiPhase::Failed>
+            <div class="workspace-clone-actions">
+                <button
+                    type="button"
+                    class="btn btn-secondary"
+                    data-testid="workspace-clone-back"
+                    on:click=move |_| {
+                        ui_phase.set(CloneUiPhase::Form);
+                        form_err.set(None);
+                    }
+                >
+                    {move || i18n::ws_clone_back(locale.get())}
+                </button>
+                <Show when=show_github_cta>
+                    <button
+                        type="button"
+                        class="btn btn-primary"
+                        data-testid="workspace-clone-connect-github"
+                        on:click=move |_| {
+                            clone_open.set(false);
+                            crate::app::settings_page::navigate_to_settings(
+                                settings_page,
+                                crate::app::settings_page::SettingsSection::Github,
+                            );
+                        }
+                    >
+                        {move || i18n::ws_clone_connect_github(locale.get())}
+                    </button>
+                </Show>
+            </div>
+        </Show>
+    }
+}
+
 #[component]
 pub(super) fn WorkspaceCloneFormBody(s: CloneFormViewSignals) -> impl IntoView {
     let CloneFormViewSignals {
@@ -65,22 +175,7 @@ pub(super) fn WorkspaceCloneFormBody(s: CloneFormViewSignals) -> impl IntoView {
     } = s;
     view! {
         <div class="modal-body workspace-clone-form">
-            <label class="workspace-clone-field">
-                <span>{move || i18n::ws_clone_url_label(locale.get())}</span>
-                <input
-                    type="text"
-                    data-testid="workspace-clone-url"
-                    prop:value=move || url.get()
-                    prop:placeholder="https://github.com/org/repo.git"
-                    on:input=move |ev| {
-                        let v = event_target_value(&ev);
-                        url.set(v.clone());
-                        if name.get_untracked().trim().is_empty() {
-                            name.set(infer_project_name_from_clone_url(&v));
-                        }
-                    }
-                />
-            </label>
+            <WorkspaceCloneUrlField locale=locale url=url name=name />
             <label class="workspace-clone-field">
                 <span>{move || i18n::ws_clone_name_label(locale.get())}</span>
                 <input
@@ -149,72 +244,21 @@ pub(super) fn WorkspaceCloneProgressBody(
     clone_open: RwSignal<bool>,
     settings_page: RwSignal<bool>,
 ) -> impl IntoView {
-    let show_github_cta = move || {
-        form_err
-            .get()
-            .as_deref()
-            .is_some_and(|e| e.starts_with("CLONE_AUTH_REQUIRED"))
-    };
     view! {
         <div class="modal-body workspace-clone-progress" data-testid="workspace-clone-progress">
-            <p class="workspace-clone-status" data-testid="workspace-clone-status">
-                {move || status_text.get()}
-            </p>
-            <div
-                class="workspace-clone-bar"
-                class:workspace-clone-bar--indeterminate=move || percent.get().is_none()
-                role="progressbar"
-                prop:aria-valuenow=move || percent.get().map(|p| p.to_string()).unwrap_or_default()
-            >
-                <div
-                    class="workspace-clone-bar-fill"
-                    style=move || {
-                        percent
-                            .get()
-                            .map(|p| format!("width:{p}%"))
-                            .unwrap_or_else(|| "width:30%".into())
-                    }
-                ></div>
-            </div>
-            <pre class="workspace-clone-log" data-testid="workspace-clone-log">
-                {move || log_lines.get().join("\n")}
-            </pre>
+            <WorkspaceCloneProgressPane status_text=status_text log_lines=log_lines percent=percent />
             <Show when=move || form_err.get().is_some()>
                 <p class="workspace-project-error" role="alert">
                     {move || form_err.get().unwrap_or_default()}
                 </p>
             </Show>
-            <Show when=move || ui_phase.get() == CloneUiPhase::Failed>
-                <div class="workspace-clone-actions">
-                    <button
-                        type="button"
-                        class="btn btn-secondary"
-                        data-testid="workspace-clone-back"
-                        on:click=move |_| {
-                            ui_phase.set(CloneUiPhase::Form);
-                            form_err.set(None);
-                        }
-                    >
-                        {move || i18n::ws_clone_back(locale.get())}
-                    </button>
-                    <Show when=show_github_cta>
-                        <button
-                            type="button"
-                            class="btn btn-primary"
-                            data-testid="workspace-clone-connect-github"
-                            on:click=move |_| {
-                                clone_open.set(false);
-                                crate::app::settings_page::navigate_to_settings(
-                                    settings_page,
-                                    crate::app::settings_page::SettingsSection::Github,
-                                );
-                            }
-                        >
-                            {move || i18n::ws_clone_connect_github(locale.get())}
-                        </button>
-                    </Show>
-                </div>
-            </Show>
+            <WorkspaceCloneFailedActions
+                locale=locale
+                ui_phase=ui_phase
+                form_err=form_err
+                clone_open=clone_open
+                settings_page=settings_page
+            />
         </div>
     }
 }

@@ -55,6 +55,25 @@ pub(crate) fn deny_pending_approval(signals: ApprovalModalSignals) {
     submit_pending_approval_decision(signals, "deny");
 }
 
+/// 弹窗出现后聚焦首元素（异步等待首帧）。
+fn schedule_approval_modal_focus(
+    pending_approval: RwSignal<Option<(String, String, String)>>,
+    dialog_ref: NodeRef<Div>,
+) {
+    Effect::new(move |_| {
+        if pending_approval.get().is_none() {
+            return;
+        }
+        let r = dialog_ref;
+        spawn_local(async move {
+            TimeoutFuture::new(0).await;
+            if let Some(el) = r.get() {
+                focus_first_in_modal_container(el.as_ref());
+            }
+        });
+    });
+}
+
 /// `pending_approval`: `(approval_session_id, command, args)`
 #[component]
 pub fn ApprovalModal(signals: ApprovalModalSignals) -> impl IntoView {
@@ -66,21 +85,7 @@ pub fn ApprovalModal(signals: ApprovalModalSignals) -> impl IntoView {
     } = signals;
     let dialog_ref = NodeRef::<Div>::new();
 
-    Effect::new({
-        let dialog_ref = dialog_ref;
-        move |_| {
-            if pending_approval.get().is_none() {
-                return;
-            }
-            let r = dialog_ref;
-            spawn_local(async move {
-                TimeoutFuture::new(0).await;
-                if let Some(el) = r.get() {
-                    focus_first_in_modal_container(el.as_ref());
-                }
-            });
-        }
-    });
+    schedule_approval_modal_focus(pending_approval, dialog_ref);
 
     let deny = move |_| {
         deny_pending_approval(signals);

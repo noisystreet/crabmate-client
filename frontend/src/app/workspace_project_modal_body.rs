@@ -9,16 +9,14 @@ use crate::i18n::{self, Locale};
 
 use super::workspace_project_modal_parts::WorkspaceProjectListRows;
 
+/// 顶部横幅区（池路径 + 各类错误），独立以降低 body CCN。
 #[component]
-pub(crate) fn WorkspaceProjectModalBody(
+fn WorkspaceProjectModalBanners(
     locale: RwSignal<Locale>,
-    ws: WorkspacePanelSignals,
-    projects: RwSignal<Vec<String>>,
     pool_path: RwSignal<Option<String>>,
     loading: RwSignal<bool>,
     load_err: RwSignal<Option<String>>,
     action_err: RwSignal<Option<String>>,
-    on_open: Arc<dyn Fn(String) + Send + Sync>,
 ) -> impl IntoView {
     view! {
         <Show when=move || pool_path.get().is_some()>
@@ -39,6 +37,28 @@ pub(crate) fn WorkspaceProjectModalBody(
         <Show when=move || loading.get()>
             <p class="modal-hint">{move || i18n::ws_project_loading(locale.get())}</p>
         </Show>
+    }
+}
+
+#[component]
+pub(crate) fn WorkspaceProjectModalBody(
+    locale: RwSignal<Locale>,
+    ws: WorkspacePanelSignals,
+    projects: RwSignal<Vec<String>>,
+    pool_path: RwSignal<Option<String>>,
+    loading: RwSignal<bool>,
+    load_err: RwSignal<Option<String>>,
+    action_err: RwSignal<Option<String>>,
+    on_open: Arc<dyn Fn(String) + Send + Sync>,
+) -> impl IntoView {
+    view! {
+        <WorkspaceProjectModalBanners
+            locale=locale
+            pool_path=pool_path
+            loading=loading
+            load_err=load_err
+            action_err=action_err
+        />
         <Show when=move || !loading.get() && load_err.get().is_none()>
             <WorkspaceProjectListRows
                 locale=locale

@@ -227,6 +227,53 @@ fn reset_clone_form_state(form: CloneFormSignals, progress: CloneProgressSignals
     progress.percent.set(None);
 }
 
+/// 弹窗头部：标题与关闭（Running 阶段禁用关闭）。
+#[component]
+fn WorkspaceCloneModalHead(
+    locale: RwSignal<Locale>,
+    ui_phase: RwSignal<CloneUiPhase>,
+    open: RwSignal<bool>,
+) -> impl IntoView {
+    view! {
+        <div class="modal-head">
+            <h2 class="modal-title" id="workspace-clone-modal-title">
+                {move || i18n::ws_clone_modal_title(locale.get())}
+            </h2>
+            <span class="modal-head-spacer"></span>
+            <button
+                type="button"
+                class="btn btn-ghost btn-sm"
+                prop:disabled=move || ui_phase.get() == CloneUiPhase::Running
+                on:click=move |_| {
+                    if ui_phase.get_untracked() != CloneUiPhase::Running {
+                        open.set(false);
+                    }
+                }
+            >
+                {move || i18n::settings_close(locale.get())}
+            </button>
+        </div>
+    }
+}
+
+/// Escape 尝试关闭（Running 时忽略）；Tab 在弹窗内循环聚焦。
+fn handle_clone_modal_keydown(
+    ev: &web_sys::KeyboardEvent,
+    dialog_ref: &NodeRef<Div>,
+    ui_phase: RwSignal<CloneUiPhase>,
+    open: RwSignal<bool>,
+) {
+    if ev.key() == "Escape" {
+        if ui_phase.get_untracked() != CloneUiPhase::Running {
+            open.set(false);
+        }
+    } else if ev.key() == "Tab" {
+        if let Some(el) = dialog_ref.get() {
+            trap_tab_in_container(ev, el.as_ref());
+        }
+    }
+}
+
 #[component]
 fn WorkspaceCloneModalPanel(signals: WorkspaceCloneModalSignals) -> impl IntoView {
     let WorkspaceCloneModalSignals {
@@ -276,13 +323,6 @@ fn WorkspaceCloneModalPanel(signals: WorkspaceCloneModalSignals) -> impl IntoVie
         });
     });
 
-    let try_close = move || {
-        if ui_phase.get_untracked() == CloneUiPhase::Running {
-            return;
-        }
-        open.set(false);
-    };
-
     let form_signals = CloneFormViewSignals {
         locale,
         workspace_pick,
@@ -309,29 +349,10 @@ fn WorkspaceCloneModalPanel(signals: WorkspaceCloneModalSignals) -> impl IntoVie
             node_ref=dialog_ref
             on:click=|ev: leptos::ev::MouseEvent| ev.stop_propagation()
             on:keydown=move |ev: web_sys::KeyboardEvent| {
-                if ev.key() == "Escape" {
-                    try_close();
-                } else if ev.key() == "Tab" {
-                    if let Some(el) = dialog_ref.get() {
-                        trap_tab_in_container(&ev, el.as_ref());
-                    }
-                }
+                handle_clone_modal_keydown(&ev, &dialog_ref, ui_phase, open);
             }
         >
-            <div class="modal-head">
-                <h2 class="modal-title" id="workspace-clone-modal-title">
-                    {move || i18n::ws_clone_modal_title(locale.get())}
-                </h2>
-                <span class="modal-head-spacer"></span>
-                <button
-                    type="button"
-                    class="btn btn-ghost btn-sm"
-                    prop:disabled=move || ui_phase.get() == CloneUiPhase::Running
-                    on:click=move |_| try_close()
-                >
-                    {move || i18n::settings_close(locale.get())}
-                </button>
-            </div>
+            <WorkspaceCloneModalHead locale=locale ui_phase=ui_phase open=open />
             <Show when=move || matches!(ui_phase.get(), CloneUiPhase::Form)>
                 <WorkspaceCloneFormBody s=form_signals />
             </Show>

@@ -247,6 +247,40 @@ fn status_bar_context_value_text(cap: u32, used: Option<u32>, baseline_estimate:
     }
 }
 
+/// 上下文用量条：仅在 cap>0 且有用量时渲染（一次反应式闭包集中计算，降低 chip CCN）。
+#[component]
+fn StatusBarContextMeter(
+    chat: ChatSessionSignals,
+    st: StatusTasksSignals,
+    client_llm_storage_tick: RwSignal<u64>,
+    selected_agent_role: RwSignal<Option<String>>,
+) -> impl IntoView {
+    move || {
+        let (cap, used) =
+            status_bar_context_cap_and_used(chat, st, client_llm_storage_tick, selected_agent_role);
+        if cap > 0 && used.is_some() {
+            let u = used.unwrap_or(0);
+            let pct = ((u as f64 / cap as f64) * 100.0).min(100.0);
+            let full_pct = (u as f64 / cap as f64) * 100.0;
+            let fill_class = if status_bar_context_is_baseline_estimate(chat, used) {
+                "status-context-meter-fill status-context-meter-fill--estimate"
+            } else if full_pct >= 90.0 {
+                "status-context-meter-fill status-context-meter-fill--warn"
+            } else {
+                "status-context-meter-fill"
+            };
+            view! {
+                <div class="status-context-meter" style=format!("--status-context-pct: {pct:.2}%")>
+                    <div class=fill_class></div>
+                </div>
+            }
+            .into_any()
+        } else {
+            ().into_any()
+        }
+    }
+}
+
 #[component]
 fn StatusBarContextChip(
     st: StatusTasksSignals,
@@ -276,50 +310,12 @@ fn StatusBarContextChip(
                         status_bar_context_value_text(cap, used, baseline)
                     }}</span>
                 </span>
-                <Show when=move || {
-                    let (cap, used) = status_bar_context_cap_and_used(
-                        chat,
-                        st,
-                        client_llm_storage_tick,
-                        selected_agent_role,
-                    );
-                    cap > 0 && used.is_some()
-                }>
-                    <div
-                        class="status-context-meter"
-                        style=move || {
-                            let (cap, used) = status_bar_context_cap_and_used(
-                                chat,
-                                st,
-                                client_llm_storage_tick,
-                                selected_agent_role,
-                            );
-                            let u = used.unwrap_or(0);
-                            let pct = ((u as f64 / cap as f64) * 100.0).min(100.0);
-                            format!("--status-context-pct: {pct:.2}%")
-                        }
-                    >
-                        <div class=move || {
-                            let (cap, used) = status_bar_context_cap_and_used(
-                                chat,
-                                st,
-                                client_llm_storage_tick,
-                                selected_agent_role,
-                            );
-                            let u = used.unwrap_or(0);
-                            let pct = (u as f64 / cap as f64) * 100.0;
-                            let baseline =
-                                status_bar_context_is_baseline_estimate(chat, used);
-                            if baseline {
-                                "status-context-meter-fill status-context-meter-fill--estimate".to_string()
-                            } else if pct >= 90.0 {
-                                "status-context-meter-fill status-context-meter-fill--warn".to_string()
-                            } else {
-                                "status-context-meter-fill".to_string()
-                            }
-                        }></div>
-                    </div>
-                </Show>
+                <StatusBarContextMeter
+                    chat=chat
+                    st=st
+                    client_llm_storage_tick=client_llm_storage_tick
+                    selected_agent_role=selected_agent_role
+                />
             </span>
         </Show>
     }
@@ -496,6 +492,43 @@ fn StatusBarChipsRow(
     }
 }
 
+/// 运行指示器状态归类（error / tool / running / ready）。
+fn run_indicator_kind(
+    st: StatusTasksSignals,
+    status_err: RwSignal<Option<String>>,
+    stream_busy_memos: ChatStreamBusyMemos,
+) -> &'static str {
+    if st.status_fetch_err.get().is_some() || status_err.get().is_some() {
+        "error"
+    } else if stream_busy_memos.tool_timeline_busy_ui.get() {
+        "tool"
+    } else if stream_busy_memos.model_status_busy.get() {
+        "running"
+    } else {
+        "ready"
+    }
+}
+
+/// 运行指示器文案（错误 / 工具阶段 / 生成中 / 就绪）。
+fn run_indicator_text(
+    loc: Locale,
+    st: StatusTasksSignals,
+    status_err: RwSignal<Option<String>>,
+    stream_busy_memos: ChatStreamBusyMemos,
+) -> String {
+    if st.status_fetch_err.get().is_some() {
+        i18n::status_unavailable(loc).to_string()
+    } else if let Some(e) = status_err.get() {
+        format!("{}{e}", i18n::status_error_prefix(loc))
+    } else if stream_busy_memos.tool_timeline_busy_ui.get() {
+        i18n::status_tool_running(loc).to_string()
+    } else if stream_busy_memos.model_status_busy.get() {
+        i18n::status_model_running(loc).to_string()
+    } else {
+        i18n::status_ready(loc).to_string()
+    }
+}
+
 #[component]
 fn StatusBarRunIndicator(
     st: StatusTasksSignals,
@@ -505,31 +538,12 @@ fn StatusBarRunIndicator(
 ) -> impl IntoView {
     view! {
         <span class=move || {
-            let kind = if st.status_fetch_err.get().is_some() || status_err.get().is_some() {
-                "error"
-            } else if stream_busy_memos.tool_timeline_busy_ui.get() {
-                "tool"
-            } else if stream_busy_memos.model_status_busy.get() {
-                "running"
-            } else {
-                "ready"
-            };
+            let kind = run_indicator_kind(st, status_err, stream_busy_memos);
             format!("status-run status-run-{kind}")
         }>
             <span class="status-run-dot" aria-hidden="true"></span>
             <span>{move || {
-                let loc = locale.get();
-                if st.status_fetch_err.get().is_some() {
-                    i18n::status_unavailable(loc).to_string()
-                } else if let Some(e) = status_err.get() {
-                    format!("{}{e}", i18n::status_error_prefix(loc))
-                } else if stream_busy_memos.tool_timeline_busy_ui.get() {
-                    i18n::status_tool_running(loc).to_string()
-                } else if stream_busy_memos.model_status_busy.get() {
-                    i18n::status_model_running(loc).to_string()
-                } else {
-                    i18n::status_ready(loc).to_string()
-                }
+                run_indicator_text(locale.get(), st, status_err, stream_busy_memos)
             }}</span>
         </span>
     }

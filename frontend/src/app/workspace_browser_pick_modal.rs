@@ -123,6 +123,19 @@ fn WorkspaceBrowserPickRecentList(
     }
 }
 
+/// 路径输入框 Enter：提交当前草稿（阻止默认换行）。
+fn path_input_on_keydown(
+    ev: &web_sys::KeyboardEvent,
+    open: RwSignal<bool>,
+    pick: WorkspaceRootPickHandle,
+    path_draft: RwSignal<String>,
+) {
+    if ev.key() == "Enter" {
+        ev.prevent_default();
+        submit_path(open, pick, path_draft);
+    }
+}
+
 #[component]
 fn WorkspaceBrowserPickPathForm(
     locale: RwSignal<crate::i18n::Locale>,
@@ -153,10 +166,7 @@ fn WorkspaceBrowserPickPathForm(
                     prop:disabled=move || pick.pick_busy_tracked()
                     on:input=move |ev| path_draft.set(event_target_value(&ev))
                     on:keydown=move |ev: web_sys::KeyboardEvent| {
-                        if ev.key() == "Enter" {
-                            ev.prevent_default();
-                            submit_path(open, pick, path_draft);
-                        }
+                        path_input_on_keydown(&ev, open, pick, path_draft);
                     }
                 />
                 <button

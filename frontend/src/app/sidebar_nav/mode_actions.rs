@@ -26,6 +26,51 @@ fn focus_nav_session_filter() {
     });
 }
 
+/// 搜索开关按钮（active / aria / 焦点逻辑独立，降低 brand actions CCN）。
+#[component]
+fn NavRailSearchToggle(
+    locale: RwSignal<Locale>,
+    sidebar_search_panel_open: RwSignal<bool>,
+) -> impl IntoView {
+    view! {
+        <button
+            type="button"
+            class="btn btn-icon btn-nav-toggle-search"
+            class:active=move || sidebar_search_panel_open.get()
+            data-testid="nav-toggle-search"
+            prop:title=move || {
+                i18n::nav_toggle_search_panel_aria(
+                    locale.get(),
+                    sidebar_search_panel_open.get(),
+                )
+            }
+            prop:aria-label=move || {
+                i18n::nav_toggle_search_panel_aria(
+                    locale.get(),
+                    sidebar_search_panel_open.get(),
+                )
+            }
+            aria-expanded=move || {
+                if sidebar_search_panel_open.get() {
+                    "true"
+                } else {
+                    "false"
+                }
+            }
+            prop:aria-controls="nav-rail-search-panel"
+            on:click=move |_| {
+                let opening = !sidebar_search_panel_open.get_untracked();
+                sidebar_search_panel_open.set(opening);
+                if opening {
+                    focus_nav_session_filter();
+                }
+            }
+        >
+            <span aria-hidden="true">"⌕"</span>
+        </button>
+    }
+}
+
 #[component]
 pub(super) fn NavRailBrandActions(
     locale: RwSignal<Locale>,
@@ -43,41 +88,10 @@ pub(super) fn NavRailBrandActions(
     };
     view! {
         <div class="nav-rail-brand-actions">
-            <button
-                type="button"
-                class="btn btn-icon btn-nav-toggle-search"
-                class:active=move || sidebar_search_panel_open.get()
-                data-testid="nav-toggle-search"
-                prop:title=move || {
-                    i18n::nav_toggle_search_panel_aria(
-                        locale.get(),
-                        sidebar_search_panel_open.get(),
-                    )
-                }
-                prop:aria-label=move || {
-                    i18n::nav_toggle_search_panel_aria(
-                        locale.get(),
-                        sidebar_search_panel_open.get(),
-                    )
-                }
-                aria-expanded=move || {
-                    if sidebar_search_panel_open.get() {
-                        "true"
-                    } else {
-                        "false"
-                    }
-                }
-                prop:aria-controls="nav-rail-search-panel"
-                on:click=move |_| {
-                    let opening = !sidebar_search_panel_open.get_untracked();
-                    sidebar_search_panel_open.set(opening);
-                    if opening {
-                        focus_nav_session_filter();
-                    }
-                }
-            >
-                <span aria-hidden="true">"⌕"</span>
-            </button>
+            <NavRailSearchToggle
+                locale=locale
+                sidebar_search_panel_open=sidebar_search_panel_open
+            />
             <button
                 type="button"
                 class="btn btn-primary btn-icon btn-nav-new-chat"
