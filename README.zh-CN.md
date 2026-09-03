@@ -87,6 +87,16 @@ make tui
 # repl 内：/help · /workspace [path] · /conv list|new|use <id>
 ```
 
+bearer 鉴权但服务端未设模型 `API_KEY` 的 serve 会返回 `LLM_API_KEY_REQUIRED`；可像壳 UI「设置 → API 密钥」那样每轮自带模型密钥（三个参数同样支持 env，沿用 serve 侧模型 env 名：`CM_API_KEY` / `CM_MODEL` / `CM_API_BASE`）：
+
+```bash
+./crates/crabmate-tui/target/debug/crabmate-tui \
+  --api-base https://api.example.com \
+  --bearer "$CM_WEB_API_BEARER_TOKEN" \
+  --llm-api-key "$MY_LLM_API_KEY" \
+  chat "你好"
+```
+
 管道把消息喂给 `chat`（无 argv）会读尽 stdin，后续审批无法再读决策，应加 **`--yes`**，或把消息写在参数里：
 
 ```bash

@@ -87,6 +87,16 @@ make tui
 # In repl: /help · /workspace [path] · /conv list|new|use <id>
 ```
 
+A bearer-mode `serve` without a server-side model `API_KEY` returns `LLM_API_KEY_REQUIRED`; send a client-owned LLM key per chat like the shell UI's Settings → API key (flags also accept the serve-side model env names `CM_API_KEY` / `CM_MODEL` / `CM_API_BASE`):
+
+```bash
+./crates/crabmate-tui/target/debug/crabmate-tui \
+  --api-base https://api.example.com \
+  --bearer "$CM_WEB_API_BEARER_TOKEN" \
+  --llm-api-key "$MY_LLM_API_KEY" \
+  chat "hello"
+```
+
 Piping the message into `chat` (no argv) consumes stdin, so a later approval prompt cannot read a decision — use **`--yes`**, or pass the message as an argument:
 
 ```bash
