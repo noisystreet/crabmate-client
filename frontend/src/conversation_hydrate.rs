@@ -180,20 +180,33 @@ struct HydrateSpecialLine<'a> {
     t: &'a mut i64,
 }
 
+fn is_role_name(role: &str, name: &str, expect_role: &str, expect_name: &str) -> bool {
+    role == expect_role && name == expect_name
+}
+
+/// 助手消息无正文且无 reasoning（仅可能携带 tool_calls）。
+fn assistant_has_empty_body(text: &str, reasoning: &str) -> bool {
+    text.trim().is_empty() && reasoning.trim().is_empty()
+}
+
 fn hydrate_try_special_cases(line: HydrateSpecialLine<'_>) -> bool {
-    if line.role == "system" && line.name == "crabmate_ui_sep" {
+    if is_role_name(line.role, line.name, "system", "crabmate_ui_sep") {
         return true;
     }
-    if line.role == "user" && line.name == CRABMATE_FIRST_TURN_WORKSPACE_CONTEXT_NAME {
+    if is_role_name(
+        line.role,
+        line.name,
+        "user",
+        CRABMATE_FIRST_TURN_WORKSPACE_CONTEXT_NAME,
+    ) {
         return true;
     }
-    if line.role == "system" && line.name == "crabmate_timeline" {
+    if is_role_name(line.role, line.name, "system", "crabmate_timeline") {
         append_crabmate_timeline_system_message(line.text, line.base_ms, line.out, line.t);
         return true;
     }
     if line.role == "assistant"
-        && line.text.trim().is_empty()
-        && line.reasoning.trim().is_empty()
+        && assistant_has_empty_body(line.text, line.reasoning)
         && let Some(ref tc) = line.parsed.tool_calls
     {
         // 有对应 tool 结果时只保留结果卡（见 chat_export_20260808 双「## 工具」）。

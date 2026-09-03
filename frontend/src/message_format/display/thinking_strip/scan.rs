@@ -258,16 +258,8 @@ pub(super) fn find_earliest_think_close_span(rest: &str) -> Option<(usize, usize
     )
 }
 
-pub(super) fn strip_trailing_partial_open_generic<'a>(
-    s: &'a str,
-    streaming: bool,
-    pairs: &[(&str, &str)],
-    tag_inner_lower: &[u8],
-) -> &'a str {
-    if !streaming || s.is_empty() {
-        return s;
-    }
-    let b = s.as_bytes();
+/// 文本尾部与任意开放标签前缀重叠的最大长度（`</th` 之类半截闭合标签）。
+fn longest_tail_matching_open_tag_prefix(b: &[u8], pairs: &[(&str, &str)]) -> usize {
     let mut longest = 0usize;
     for (open, _) in pairs {
         let ob = open.as_bytes();
@@ -277,6 +269,12 @@ pub(super) fn strip_trailing_partial_open_generic<'a>(
             }
         }
     }
+    longest
+}
+
+/// 文本尾部疑似截断的 `<think…` 开放标签半截长度。
+fn longest_tail_generic_open_tag(b: &[u8], tag_inner_lower: &[u8]) -> usize {
+    let mut longest = 0usize;
     for k in 1..=(1 + tag_inner_lower.len()).min(b.len()) {
         let start = b.len() - k;
         if b[start] != b'<' {
@@ -292,9 +290,70 @@ pub(super) fn strip_trailing_partial_open_generic<'a>(
             longest = longest.max(k);
         }
     }
+    longest
+}
+
+pub(super) fn strip_trailing_partial_open_generic<'a>(
+    s: &'a str,
+    streaming: bool,
+    pairs: &[(&str, &str)],
+    tag_inner_lower: &[u8],
+) -> &'a str {
+    if !streaming || s.is_empty() {
+        return s;
+    }
+    let b = s.as_bytes();
+    let longest = longest_tail_matching_open_tag_prefix(b, pairs)
+        .max(longest_tail_generic_open_tag(b, tag_inner_lower));
     if longest > 0 {
         &s[..s.len() - longest]
     } else {
         s
+    }
+}
+
+#[cfg(test)]
+mod strip_partial_open_tests {
+    use super::*;
+
+    fn strip(s: &str, streaming: bool) -> &str {
+        strip_trailing_partial_open_generic(
+            s,
+            streaming,
+            THINK_LIKE_PAIRS,
+            THINK_TAG_INNER_ASCII_LOWER,
+        )
+    }
+
+    #[test]
+    fn strip_trailing_partial_open_generic_non_streaming_keeps_tail() {
+        assert_eq!(strip("say <think", false), "say <think");
+        assert_eq!(strip("<", false), "<");
+    }
+
+    #[test]
+    fn strip_trailing_partial_open_generic_empty_and_plain_unchanged() {
+        assert_eq!(strip("", true), "");
+        assert_eq!(strip("hello world 42", true), "hello world 42");
+        // 普通文本尾部不是 `<…` 前缀，不得误删。
+        assert_eq!(strip("ok < th", true), "ok < th");
+    }
+
+    #[test]
+    fn strip_trailing_partial_open_generic_drops_partial_think_tag() {
+        assert_eq!(strip("say <think", true), "say ");
+        // 反引号包裹的开标签半截（字面量切片避免 typos 误报）。
+        let backtick_partial = format!("abc{}", &"`<think"[..5]);
+        assert_eq!(strip(&backtick_partial, true), "abc");
+        // 仅剩一个 `<` 也视作截断前缀。
+        assert_eq!(strip("a <", true), "a ");
+    }
+
+    #[test]
+    fn strip_trailing_partial_open_generic_matches_case_insensitively() {
+        let upper_partial = format!("x{}", &"<THINK"[..4]);
+        assert_eq!(strip(&upper_partial, true), "x");
+        // 仅匹配 `<` 开头（开放标签）的半截；`</…` 闭合标签半截不在本函数处理范围。
+        assert_eq!(strip("x</THINK", true), "x</THINK");
     }
 }

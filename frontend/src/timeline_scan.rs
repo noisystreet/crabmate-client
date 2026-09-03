@@ -142,6 +142,15 @@ fn is_bare_shell_command_residue(text: &str) -> bool {
             || lower.contains('='))
 }
 
+/// 常见的压缩包 / 归档扩展名（`.tar.gz` 等）。
+fn bare_archive_or_compressed_suffix(lower: &str) -> bool {
+    lower.ends_with(".tar.gz")
+        || lower.ends_with(".tgz")
+        || lower.ends_with(".tar")
+        || lower.ends_with(".zip")
+        || lower.ends_with(".gz")
+}
+
 fn is_bare_tool_path_arg_residue(text: &str) -> bool {
     let t = text.trim();
     if t.is_empty() || t.lines().count() != 1 || t.contains(char::is_whitespace) {
@@ -151,12 +160,7 @@ fn is_bare_tool_path_arg_residue(text: &str) -> bool {
         return false;
     }
     let lower = t.to_lowercase();
-    lower.ends_with(".tar.gz")
-        || lower.ends_with(".tgz")
-        || lower.ends_with(".tar")
-        || lower.ends_with(".zip")
-        || lower.ends_with(".gz")
-        || is_bare_single_line_path_residue(t)
+    bare_archive_or_compressed_suffix(&lower) || is_bare_single_line_path_residue(t)
 }
 
 /// 单行、无扩展名或疑似截断的文件路径（如 `.../INSTALLe`）——多为工具参数残留。

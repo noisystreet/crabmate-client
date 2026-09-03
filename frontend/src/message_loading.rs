@@ -28,6 +28,21 @@ impl ToolLoadingFinalizeKind {
     }
 }
 
+/// 收口时替换/补写 reasoning 的 `status: running` 行（state 清空后靠它区分完成与中断）。
+fn apply_tool_status_line(reasoning: &mut String, status_line: &str) {
+    if reasoning.contains("status: running") {
+        *reasoning = reasoning.replace("status: running", status_line);
+    } else if !reasoning.contains("status: stopped (user)")
+        && !reasoning.contains("status: interrupted (stale)")
+    {
+        if reasoning.trim().is_empty() {
+            *reasoning = status_line.to_string();
+        } else {
+            *reasoning = format!("{}\n{status_line}", reasoning.trim_end());
+        }
+    }
+}
+
 /// 将仍处 `Loading` 的工具时间线占位收口（清 `Loading`、替换「执行中」文案与 `status: running`）。
 pub fn finalize_loading_tool_placeholders(
     messages: &mut [StoredMessage],
@@ -42,18 +57,7 @@ pub fn finalize_loading_tool_placeholders(
             continue;
         }
         m.state = None;
-        // 须写入/替换 status 行：`tool_status_label` 在 `state` 清空后靠 reasoning 区分完成与中断。
-        if m.reasoning_text.contains("status: running") {
-            m.reasoning_text = m.reasoning_text.replace("status: running", status_line);
-        } else if !m.reasoning_text.contains("status: stopped (user)")
-            && !m.reasoning_text.contains("status: interrupted (stale)")
-        {
-            if m.reasoning_text.trim().is_empty() {
-                m.reasoning_text = status_line.to_string();
-            } else {
-                m.reasoning_text = format!("{}\n{status_line}", m.reasoning_text.trim_end());
-            }
-        }
+        apply_tool_status_line(&mut m.reasoning_text, status_line);
         if m.text.contains(running_label) {
             m.text = m.text.replacen(running_label, replacement, 1);
         } else if m.text.trim().is_empty() {
