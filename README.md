@@ -84,7 +84,7 @@ make tui
 ./crates/crabmate-tui/target/debug/crabmate-tui \
   --api-base http://127.0.0.1:8080 \
   repl
-# In repl: /help · /workspace [path] · /conv list|new|use <id>
+# In repl: /help · /workspace [path] · /conv list|new|use <id> · Ctrl+C stops the turn (twice quits)
 ```
 
 A bearer-mode `serve` without a server-side model `API_KEY` returns `LLM_API_KEY_REQUIRED`; send a client-owned LLM key per chat like the shell UI's Settings → API key (flags also accept the serve-side model env names `CM_API_KEY` / `CM_MODEL` / `CM_API_BASE`):

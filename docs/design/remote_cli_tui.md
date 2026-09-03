@@ -69,6 +69,7 @@ crates/
 | 一轮对话 | `run_agent_turn` | `POST /chat/stream`（主路径）或 `/chat` |
 | 断线续传 | TUI SSE mirror | `Last-Event-ID` + `stream_resume` |
 | 审批 | 进程内 dialoguer | SSE 控制面 + `POST /chat/approval` |
+| 回合取消 | 进程内中断 | Ctrl+C → `POST /chat/stream/{job_id}/cancel`（job 取响应头 `x-stream-job-id`；旧 serve 无路由时降级为本地中断） |
 | 斜杠 /skills | 同进程 | 经 stream 内置命令或后续 REST |
 | 工作区 | 本地 path | `POST /workspace`、`GET /workspace/...` |
 | 会话列表/分支 | SQLite 同库 | `/user-data/.../sessions`、`POST /chat/branch` |

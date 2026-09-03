@@ -200,6 +200,10 @@ async fn run_chat(
     }
     let mut gate = make_gate(yes);
     let outcome = run_turn(client, &text, conversation_id.as_deref(), llm, &mut gate).await?;
+    // 单轮 chat：Ctrl+C 取消后保持 SIGINT 语义（130），而不是静默 0 退出。
+    if outcome.cancelled_by_user {
+        return Err(TermError::Interrupted.into());
+    }
     finish_turn_stdout(&outcome);
     Ok(())
 }

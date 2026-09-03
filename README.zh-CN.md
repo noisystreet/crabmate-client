@@ -84,7 +84,7 @@ make tui
 ./crates/crabmate-tui/target/debug/crabmate-tui \
   --api-base http://127.0.0.1:8080 \
   repl
-# repl 内：/help · /workspace [path] · /conv list|new|use <id>
+# repl 内：/help · /workspace [path] · /conv list|new|use <id> · Ctrl+C 停止本轮（连按两次退出）
 ```
 
 bearer 鉴权但服务端未设模型 `API_KEY` 的 serve 会返回 `LLM_API_KEY_REQUIRED`；可像壳 UI「设置 → API 密钥」那样每轮自带模型密钥（三个参数同样支持 env，沿用 serve 侧模型 env 名：`CM_API_KEY` / `CM_MODEL` / `CM_API_BASE`）：
