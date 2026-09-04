@@ -1,4 +1,4 @@
-//! repl 控制斜杠（不经模型）：`/help` `/workspace` `/conv` 等。
+//! repl 控制斜杠（不经模型）：`/help` `/workspace` `/conv` `/status` 等。
 
 use std::io::{self, Write};
 
@@ -6,6 +6,7 @@ use anyhow::Result;
 use crabmate_tui_core::{
     ServeClient, conversation_id_for_resume, fetch_web_sessions, fetch_workspace, set_workspace,
 };
+use serde_json::Value;
 
 /// 是否为本端控制斜杠（应拦截，不发送给模型）。
 #[must_use]
@@ -15,7 +16,7 @@ pub fn is_control_slash(trimmed: &str) -> bool {
     };
     matches!(
         head.as_str(),
-        "help" | "?" | "workspace" | "cd" | "conv" | "quit" | "exit" | "q"
+        "help" | "?" | "workspace" | "cd" | "conv" | "status" | "quit" | "exit" | "q"
     )
 }
 
@@ -34,6 +35,10 @@ pub async fn handle_control_slash(
             print_help();
             Ok(true)
         }
+        "status" => {
+            handle_status(client).await?;
+            Ok(true)
+        }
         "workspace" | "cd" => {
             handle_workspace(client, &args, conversation_id).await?;
             Ok(true)
@@ -47,6 +52,38 @@ pub async fn handle_control_slash(
             Ok(true)
         }
     }
+}
+
+/// `GET /status?view=shell`：打印 serve 当前模型 / 端点 / 会话模式等。
+async fn handle_status(client: &ServeClient) -> Result<()> {
+    let v: Value = client.get_json("/status?view=shell").await?;
+    let str_field = |k: &str| {
+        v.get(k)
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+            .unwrap_or("-")
+            .to_string()
+    };
+    let num_field = |k: &str| {
+        v.get(k)
+            .and_then(Value::as_u64)
+            .map_or_else(|| "-".to_string(), |n| n.to_string())
+    };
+    println!("status:               {}", str_field("status"));
+    println!("model:                {}", str_field("model"));
+    println!("api_base:             {}", str_field("api_base"));
+    println!(
+        "default_agent_role:   {}",
+        str_field("default_agent_role_id")
+    );
+    println!(
+        "default_session_mode: {}",
+        str_field("default_session_mode")
+    );
+    println!("executor_model:       {}", str_field("executor_model"));
+    println!("llm_context_tokens:   {}", num_field("llm_context_tokens"));
+    println!("context_char_budget:  {}", num_field("context_char_budget"));
+    Ok(())
 }
 
 fn slash_head(trimmed: &str) -> Option<String> {
@@ -64,6 +101,8 @@ fn print_help() {
     eprintln!(
         "control slashes (not sent to the model):\n\
   /help                 this text\n\
+  /status               show serve model / endpoint / session mode (GET /status)\n\
+  /model [name]         set client-side model override for later turns (off to clear)\n\
   /resume               resume the last interrupted run (network drop)\n\
   /workspace [path]     show or set serve workspace root (/cd alias)\n\
   /conv                 show current conversation_id\n\
