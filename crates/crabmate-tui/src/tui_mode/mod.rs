@@ -1,9 +1,10 @@
-//! `crabmate-tui tui`：全屏模式入口（M1 MVP）。
+//! `crabmate-tui tui`：全屏模式（M2）。
 //!
-//! 布局：状态行 + 主区流式 transcript + 底栏单行输入。回合在独立线程的
-//! current-thread tokio runtime 中执行（`run_chat_stream_sink`），避免全屏
-//! 事件循环与 SSE 消费互相阻塞；raw mode 下 Ctrl+C 是按键事件，取消经
-//! [`StreamCancel`] 走"外部取消"通道，不复用文本模式的 `ctrl_c` 信号路径。
+//! 布局：状态行 + 左栏会话 + 主区流式 transcript + 底栏输入。
+//! 回合/拉取在持久 worker 线程的 current-thread tokio runtime 中串行执行
+//! （`run_chat_stream_sink` / `fetch_web_sessions` / `/status`），避免全屏事件循环
+//! 与 IO 互相阻塞。raw mode 下 Ctrl+C 是按键事件，取消经 [`StreamCancel`] 走
+//! "外部取消"通道，不复用文本模式的 `ctrl_c` 信号路径。
 
 mod render;
 mod state;
@@ -25,15 +26,14 @@ use ratatui::backend::CrosstermBackend;
 use crabmate_tui_core::{
     ApprovalDecision, ApprovalGate, AutoAllowOnce, ChatStreamOptions, ChatStreamOutcome,
     ClientLlmFields, CommandApprovalRequest, ServeClient, StreamCancel, StreamSink, TermError,
-    new_approval_session_id, run_chat_stream_sink,
+    WebSessionsList, fetch_web_sessions, new_approval_session_id, run_chat_stream_sink,
 };
 
-use super::SessionPrefs;
-use state::{LineKind, UiState};
-
 use self::render::StatusInfo;
+use super::SessionPrefs;
+use state::{Focus, LineKind, ServeDefaults, UiState};
 
-/// UI 事件（键盘线程与回合线程共同的生产者）。
+/// UI 事件（键盘线程与回合/拉取线程共同的生产者）。
 enum UiEvent {
     Key(KeyEvent),
     Text(String),
@@ -47,6 +47,22 @@ enum UiEvent {
         outcome: ChatStreamOutcome,
         error: Option<String>,
     },
+    Sessions(Result<WebSessionsList, String>),
+    Status(Result<ServeDefaults, String>),
+}
+
+/// 回合后台任务：由持久 worker 线程串行消费。
+struct TurnRequest {
+    opts: ChatStreamOptions,
+    cancel: StreamCancel,
+    yes: bool,
+}
+
+/// worker 任务：回合 / 会话刷新 / 状态刷新（复用同一 runtime 与连接池）。
+enum WorkerJob {
+    Turn(Box<TurnRequest>),
+    RefreshSessions,
+    RefreshStatus,
 }
 
 /// 全屏模式 sink：把流事件发往 UI 事件通道。
@@ -83,7 +99,7 @@ impl StreamSink for UiSink {
     }
 }
 
-/// M1 审批 gate：非白名单命令一律拒绝，并把被拒命令通知 UI 显示。
+/// M2 审批 gate：非白名单命令一律拒绝，并把被拒命令通知 UI 显示。
 /// （真正的浮层审批属 M3；这里避免回合悬挂又给用户可见反馈。）
 struct DenyNotifyGate {
     tx: Sender<UiEvent>,
@@ -116,63 +132,100 @@ fn spawn_key_reader(tx: Sender<UiEvent>) {
     });
 }
 
-/// 回合后台任务：由持久 worker 线程串行消费。
-struct TurnRequest {
-    opts: ChatStreamOptions,
-    cancel: StreamCancel,
-    yes: bool,
-}
-
-/// 持久回合 worker：单 current-thread runtime 串行执行 `/chat/stream`，
+/// 持久 worker：单 current-thread runtime 串行执行回合与刷新任务，
 /// 避免同一 `reqwest::Client` 跨多个临时 runtime 复用的连接池问题；
-/// 每回合结束发 `TurnDone`，UI 退出（job_tx drop）后 worker 自行退出。
-fn spawn_turn_worker(client: ServeClient, tx: Sender<UiEvent>) -> Sender<TurnRequest> {
-    let (job_tx, job_rx) = mpsc::channel::<TurnRequest>();
+/// UI 退出（job_tx drop）后 worker 自行退出。
+fn spawn_worker(client: ServeClient, tx: Sender<UiEvent>) -> Sender<WorkerJob> {
+    let (job_tx, job_rx) = mpsc::channel::<WorkerJob>();
     thread::spawn(move || {
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
-            .expect("turn runtime");
+            .expect("worker runtime");
         while let Ok(job) = job_rx.recv() {
-            let result = rt.block_on(async {
-                let mut sink = UiSink { tx: tx.clone() };
-                let mut gate: Box<dyn ApprovalGate> = if job.yes {
-                    Box::new(AutoAllowOnce)
-                } else {
-                    Box::new(DenyNotifyGate { tx: tx.clone() })
-                };
-                run_chat_stream_sink(
-                    &client,
-                    &job.opts,
-                    &mut sink,
-                    gate.as_mut(),
-                    Some(&job.cancel),
-                )
-                .await
-            });
-            let (outcome, error) = match result {
-                Ok(o) => (o, None),
-                Err(TermError::Interrupted) => (ChatStreamOutcome::default(), None),
-                Err(e) => (ChatStreamOutcome::default(), Some(e.to_string())),
-            };
-            if tx.send(UiEvent::TurnDone { outcome, error }).is_err() {
-                break;
+            match job {
+                WorkerJob::Turn(job) => run_turn_job(&rt, &client, *job, &tx),
+                WorkerJob::RefreshSessions => {
+                    let result = rt.block_on(fetch_web_sessions(&client));
+                    let event = UiEvent::Sessions(match result {
+                        Ok(list) => Ok(list),
+                        Err(e) => Err(e.to_string()),
+                    });
+                    if tx.send(event).is_err() {
+                        break;
+                    }
+                }
+                WorkerJob::RefreshStatus => {
+                    let result = rt.block_on(fetch_serve_defaults(&client));
+                    if tx.send(UiEvent::Status(result)).is_err() {
+                        break;
+                    }
+                }
             }
         }
     });
     job_tx
 }
 
+fn run_turn_job(
+    rt: &tokio::runtime::Runtime,
+    client: &ServeClient,
+    job: TurnRequest,
+    tx: &Sender<UiEvent>,
+) {
+    let result = rt.block_on(async {
+        let mut sink = UiSink { tx: tx.clone() };
+        let mut gate: Box<dyn ApprovalGate> = if job.yes {
+            Box::new(AutoAllowOnce)
+        } else {
+            Box::new(DenyNotifyGate { tx: tx.clone() })
+        };
+        run_chat_stream_sink(
+            client,
+            &job.opts,
+            &mut sink,
+            gate.as_mut(),
+            Some(&job.cancel),
+        )
+        .await
+    });
+    let (outcome, error) = match result {
+        Ok(o) => (o, None),
+        Err(TermError::Interrupted) => (ChatStreamOutcome::default(), None),
+        Err(e) => (ChatStreamOutcome::default(), Some(e.to_string())),
+    };
+    let _ = tx.send(UiEvent::TurnDone { outcome, error });
+}
+
+async fn fetch_serve_defaults(client: &ServeClient) -> Result<ServeDefaults, String> {
+    let v: serde_json::Value = client
+        .get_json("/status?view=shell")
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(ServeDefaults::from_status(&v))
+}
+
 /// 全屏会话的共享 UI 状态与依赖。
 struct TuiApp<'a> {
     client: &'a ServeClient,
-    overrides: &'a SessionPrefs,
+    overrides: &'a mut SessionPrefs,
     yes: bool,
     st: UiState,
     rx: Receiver<UiEvent>,
-    job_tx: Sender<TurnRequest>,
+    job_tx: Sender<WorkerJob>,
     cancel: Option<StreamCancel>,
     exit: bool,
+}
+
+/// 控制斜杠（本地处理，不发给模型）。`/` 开头的未知命令视为普通消息。
+enum Control {
+    Quit,
+    Model(Option<String>),
+    Mode(Option<String>),
+    Role(Option<String>),
+    Status,
+    ConvNew,
+    ConvRefresh,
 }
 
 fn is_ctrl_c(key: &KeyEvent) -> bool {
@@ -181,6 +234,73 @@ fn is_ctrl_c(key: &KeyEvent) -> bool {
 
 fn is_ctrl_o(key: &KeyEvent) -> bool {
     key.code == KeyCode::Char('o') && key.modifiers.contains(KeyModifiers::CONTROL)
+}
+
+fn clear_word(arg: &str) -> bool {
+    matches!(arg, "off" | "none" | "clear")
+}
+
+/// 设置/查询一个字符串型 override 槽，返回给用户看的回显。
+fn set_override_field(slot: &mut Option<String>, arg: Option<String>, name: &str) -> String {
+    match arg {
+        Some(v) if clear_word(&v) => {
+            *slot = None;
+            format!("{name} override cleared")
+        }
+        Some(v) => {
+            *slot = Some(v.clone());
+            format!("{name} override: {v}")
+        }
+        None => match slot.as_deref() {
+            Some(v) if !v.trim().is_empty() => format!("{name} override: {v}"),
+            _ => format!("{name} override: (none — 使用 serve 默认；/{name} <值> 设置)"),
+        },
+    }
+}
+
+/// 设置 `/mode` override（校验 ask/plan/act），返回给用户看的回显。
+fn set_mode_field(slot: &mut Option<String>, arg: Option<String>) -> String {
+    match arg {
+        Some(v) if clear_word(&v) => {
+            *slot = None;
+            "mode override cleared".to_string()
+        }
+        Some(v) if matches!(v.as_str(), "ask" | "plan" | "act") => {
+            *slot = Some(v.clone());
+            format!("mode override: {v}")
+        }
+        Some(v) => format!("invalid session mode '{v}'; 可选 ask / plan / act（off 清除）"),
+        None => match slot.as_deref() {
+            Some(v) if !v.trim().is_empty() => format!("mode override: {v}"),
+            _ => "mode override: (serve 默认；/mode ask|plan|act 设置)".to_string(),
+        },
+    }
+}
+
+/// 解析控制斜杠：`/model [x]` `/mode [ask|plan|act]` `/role [id]` `/status`
+/// `/conv`(刷新) `/conv new` `/quit`。返回 `None` 表示按普通消息处理。
+fn parse_control(text: &str) -> Option<Control> {
+    let t = text.trim();
+    let rest = t.strip_prefix('/')?.trim();
+    let (head, arg) = match rest.split_once(char::is_whitespace) {
+        Some((h, a)) => (h.trim(), a.trim().to_string()),
+        None => (rest, String::new()),
+    };
+    let head = head.to_ascii_lowercase();
+    let arg_opt = (!arg.is_empty()).then_some(arg);
+    match head.as_str() {
+        "quit" | "exit" | "q" => Some(Control::Quit),
+        "model" => Some(Control::Model(arg_opt)),
+        "mode" => Some(Control::Mode(arg_opt)),
+        "role" => Some(Control::Role(arg_opt)),
+        "status" => Some(Control::Status),
+        "conv" => match arg_opt.as_deref() {
+            None => Some(Control::ConvRefresh),
+            Some("new") | Some("clear") => Some(Control::ConvNew),
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 impl TuiApp<'_> {
@@ -201,21 +321,76 @@ impl TuiApp<'_> {
         }
     }
 
-    /// 回车 / Ctrl+O：提交输入（`/quit` `/exit` 直接退出）。
+    fn use_selected(&mut self) {
+        if self.st.running {
+            self.st
+                .push_line(LineKind::System, "回合进行中：结束后再切换会话");
+            return;
+        }
+        let Some(resume) = self.st.selected_resume() else {
+            self.st.push_line(
+                LineKind::System,
+                "该会话尚无 server conversation_id（先在 Web 端聊一轮绑定）",
+            );
+            return;
+        };
+        let title = self
+            .st
+            .sessions
+            .get(self.st.selected)
+            .map(|r| r.title.trim())
+            .filter(|s| !s.is_empty())
+            .unwrap_or("(untitled)")
+            .to_string();
+        self.st.conversation_id = Some(resume);
+        self.st.reset_transcript();
+        self.st.focus = Focus::Input;
+        self.st.push_line(
+            LineKind::System,
+            &format!("已切换到会话「{title}」（新对话从空开始）"),
+        );
+    }
+
+    fn new_session(&mut self) {
+        if self.st.running {
+            self.st
+                .push_line(LineKind::System, "回合进行中：结束后再新建会话");
+            return;
+        }
+        self.st.conversation_id = None;
+        self.st.reset_transcript();
+        self.st.focus = Focus::Input;
+        self.st
+            .push_line(LineKind::System, "已开始新会话（conversation_id 已清空）");
+    }
+
+    fn refresh_sessions(&mut self) {
+        if self.job_tx.send(WorkerJob::RefreshSessions).is_err() {
+            self.st
+                .push_line(LineKind::System, "刷新会话失败：worker 已退出");
+        }
+    }
+
+    fn refresh_status(&mut self) {
+        if self.job_tx.send(WorkerJob::RefreshStatus).is_err() {
+            self.st
+                .push_line(LineKind::System, "刷新状态失败：worker 已退出");
+        }
+    }
+
+    /// 回车 / Ctrl+O：先按控制斜杠处理，否则提交消息（回合在跑则提示）。
     fn on_submit(&mut self) {
         let text = self.st.current_input();
         let trimmed = text.trim().to_string();
         if trimmed.is_empty() {
             return;
         }
-        if matches!(trimmed.as_str(), "/quit" | "/exit") {
-            if self.st.running {
-                self.st.cancel_sent = true;
-                if let Some(c) = &self.cancel {
-                    c.cancel();
-                }
+        self.st.take_input();
+        if let Some(control) = parse_control(&trimmed) {
+            let quit = self.apply_control(control);
+            if quit {
+                self.exit = true;
             }
-            self.exit = true;
             return;
         }
         if self.st.running {
@@ -226,11 +401,46 @@ impl TuiApp<'_> {
         self.start_turn(&trimmed);
     }
 
-    fn on_scroll(&mut self, up: bool) {
-        if up {
-            self.st.view_offset = self.st.view_offset.saturating_add(3);
-        } else {
-            self.st.view_offset = self.st.view_offset.saturating_sub(3);
+    fn apply_control(&mut self, control: Control) -> bool {
+        match control {
+            Control::Quit => {
+                if self.st.running {
+                    self.st.cancel_sent = true;
+                    if let Some(c) = &self.cancel {
+                        c.cancel();
+                    }
+                }
+                true
+            }
+            Control::Model(arg) => {
+                let echo = set_override_field(&mut self.overrides.model, arg, "model");
+                self.st.push_line(LineKind::System, &echo);
+                false
+            }
+            Control::Mode(arg) => {
+                let echo = set_mode_field(&mut self.overrides.session_mode, arg);
+                self.st.push_line(LineKind::System, &echo);
+                false
+            }
+            Control::Role(arg) => {
+                let echo = set_override_field(&mut self.overrides.agent_role, arg, "role");
+                self.st.push_line(LineKind::System, &echo);
+                false
+            }
+            Control::Status => {
+                self.refresh_status();
+                self.st.push_line(LineKind::System, "正在刷新 serve 状态…");
+                false
+            }
+            Control::ConvNew => {
+                self.new_session();
+                false
+            }
+            Control::ConvRefresh => {
+                self.refresh_sessions();
+                self.st.push_line(LineKind::System, "正在刷新会话列表…");
+                false
+            }
         }
     }
 
@@ -239,11 +449,43 @@ impl TuiApp<'_> {
             self.on_ctrl_c();
             return;
         }
+        if self.st.focus == Focus::Sidebar {
+            self.on_sidebar_key(key);
+            return;
+        }
+        self.on_input_key(key);
+    }
+
+    fn on_sidebar_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Tab | KeyCode::BackTab | KeyCode::Esc => self.st.focus = Focus::Input,
+            KeyCode::Up => self.st.move_selection(true),
+            KeyCode::Down => self.st.move_selection(false),
+            KeyCode::Enter => self.use_selected(),
+            KeyCode::Char('n') => self.new_session(),
+            KeyCode::Char('r') => self.refresh_sessions(),
+            _ => {}
+        }
+    }
+
+    fn on_input_key(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Enter => self.on_submit(),
             KeyCode::Char('o') if is_ctrl_o(&key) => self.on_submit(),
             KeyCode::Char('c') | KeyCode::Char('d') | KeyCode::Char('z')
                 if key.modifiers.contains(KeyModifiers::CONTROL) => {}
+            KeyCode::Tab => {
+                let wide_enough = self.st.sidebar_visible;
+                if wide_enough && !self.st.sessions.is_empty() {
+                    self.st.selected = self
+                        .st
+                        .sessions
+                        .iter()
+                        .position(|r| self.st.row_in_use(r))
+                        .unwrap_or(0);
+                    self.st.focus = Focus::Sidebar;
+                }
+            }
             KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.st.insert_char(ch);
             }
@@ -258,6 +500,14 @@ impl TuiApp<'_> {
         }
     }
 
+    fn on_scroll(&mut self, up: bool) {
+        if up {
+            self.st.view_offset = self.st.view_offset.saturating_add(3);
+        } else {
+            self.st.view_offset = self.st.view_offset.saturating_sub(3);
+        }
+    }
+
     fn on_turn_done(&mut self, outcome: ChatStreamOutcome, error: Option<String>) {
         self.st.running = false;
         self.st.cancel_sent = false;
@@ -269,6 +519,8 @@ impl TuiApp<'_> {
             self.st
                 .push_line(LineKind::System, &format!("回合出错：{msg}"));
         }
+        // 回合后会话列表可能变化（新会话绑定 id / 标题），静默刷新。
+        self.refresh_sessions();
     }
 
     fn on_msg(&mut self, msg: UiEvent) {
@@ -287,6 +539,23 @@ impl TuiApp<'_> {
                     .push_line(LineKind::System, &format!("已拒绝命令审批：{preview}"));
             }
             UiEvent::TurnDone { outcome, error } => self.on_turn_done(outcome, error),
+            UiEvent::Sessions(result) => match result {
+                Ok(list) => {
+                    self.st.active_session_id = list.active_session_id;
+                    self.st.replace_sessions(list.sessions);
+                }
+                Err(e) => {
+                    self.st
+                        .push_line(LineKind::System, &format!("拉取会话列表失败：{e}"));
+                }
+            },
+            UiEvent::Status(result) => match result {
+                Ok(defaults) => self.st.serve_defaults = Some(defaults),
+                Err(e) => {
+                    self.st
+                        .push_line(LineKind::System, &format!("拉取 serve 状态失败：{e}"));
+                }
+            },
         }
     }
 
@@ -306,7 +575,6 @@ impl TuiApp<'_> {
             stream_resume: None,
         };
         self.st.push_line(LineKind::User, message);
-        self.st.take_input();
         self.st.running = true;
         self.st.cancel_sent = false;
         let cancel = StreamCancel::new();
@@ -316,18 +584,36 @@ impl TuiApp<'_> {
             cancel,
             yes: self.yes,
         };
-        if self.job_tx.send(job).is_err() {
+        if self.job_tx.send(WorkerJob::Turn(Box::new(job))).is_err() {
             self.st.running = false;
             self.st.push_line(LineKind::System, "回合 worker 已退出");
         }
     }
 
-    fn status_info(&self) -> StatusInfo<'_> {
+    /// 状态行显示值：本地 override 优先（`*` 标记），否则回退 serve 默认。
+    fn status_info(&self) -> StatusInfo {
+        let overrides = &self.overrides;
+        let defaults = self.st.serve_defaults.as_ref();
+        let effective = |local: Option<&str>, remote: Option<&String>| -> Option<String> {
+            match local.filter(|s| !s.trim().is_empty()) {
+                Some(v) => Some(format!("{v}*")),
+                None => remote.cloned(),
+            }
+        };
         StatusInfo {
-            api_base: self.client.config().api_base.as_str(),
-            model: non_empty(self.overrides.model.as_deref()),
-            role: non_empty(self.overrides.agent_role.as_deref()),
-            mode: non_empty(self.overrides.session_mode.as_deref()),
+            api_base: self.client.config().api_base.clone(),
+            model: effective(
+                overrides.model.as_deref(),
+                defaults.and_then(|d| d.model.as_ref()),
+            ),
+            role: effective(
+                overrides.agent_role.as_deref(),
+                defaults.and_then(|d| d.role.as_ref()),
+            ),
+            mode: effective(
+                overrides.session_mode.as_deref(),
+                defaults.and_then(|d| d.mode.as_ref()),
+            ),
             running: self.st.running,
             cancel_sent: self.st.cancel_sent,
         }
@@ -347,17 +633,14 @@ impl TuiApp<'_> {
                     return Ok(());
                 }
             }
+            let info = self.status_info();
             terminal
-                .draw(|f| render::draw(f, &self.st, &self.status_info()))
+                .draw(|f| render::draw(f, &mut self.st, &info))
                 .context("tui draw failed")?;
             let _ = io::stdout().flush();
             thread::sleep(Duration::from_millis(if any { 2 } else { 50 }));
         }
     }
-}
-
-fn non_empty(v: Option<&str>) -> Option<&str> {
-    v.map(str::trim).filter(|s| !s.is_empty())
 }
 
 /// raw mode + 备用屏幕的 RAII 复原。
@@ -370,8 +653,8 @@ impl Drop for ScreenGuard {
     }
 }
 
-/// 全屏 TUI 入口（M1）：状态行 + 流式 transcript + 单行输入 + 发送/取消。
-pub async fn run_tui(client: &ServeClient, overrides: &SessionPrefs, yes: bool) -> Result<()> {
+/// 全屏 TUI 入口（M2）：状态行 + 左栏会话 + 流式 transcript + 单行输入。
+pub async fn run_tui(client: &ServeClient, overrides: &mut SessionPrefs, yes: bool) -> Result<()> {
     enable_raw_mode().context("enable raw mode")?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen).context("enter alternate screen")?;
@@ -380,7 +663,11 @@ pub async fn run_tui(client: &ServeClient, overrides: &SessionPrefs, yes: bool) 
 
     let (tx, rx) = mpsc::channel::<UiEvent>();
     spawn_key_reader(tx.clone());
-    let job_tx = spawn_turn_worker(client.clone(), tx.clone());
+    let job_tx = spawn_worker(client.clone(), tx.clone());
+    // 启动即拉一次会话与 serve 默认状态（失败以系统行提示）。
+    let _ = job_tx.send(WorkerJob::RefreshSessions);
+    let _ = job_tx.send(WorkerJob::RefreshStatus);
+
     let mut app = TuiApp {
         client,
         overrides,
@@ -393,4 +680,66 @@ pub async fn run_tui(client: &ServeClient, overrides: &SessionPrefs, yes: bool) 
     };
     terminal.clear().context("clear screen")?;
     app.run_loop(&mut terminal)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_control_known_slashes() {
+        assert!(matches!(parse_control("/quit"), Some(Control::Quit)));
+        assert!(matches!(parse_control("/EXIT"), Some(Control::Quit)));
+        assert!(matches!(parse_control("/status"), Some(Control::Status)));
+        assert!(matches!(parse_control("/conv"), Some(Control::ConvRefresh)));
+        assert!(matches!(parse_control("/conv new"), Some(Control::ConvNew)));
+        assert!(matches!(
+            parse_control("/model gpt-x"),
+            Some(Control::Model(Some(v))) if v == "gpt-x"
+        ));
+        assert!(matches!(
+            parse_control("/model"),
+            Some(Control::Model(None))
+        ));
+        assert!(matches!(
+            parse_control("/mode act"),
+            Some(Control::Mode(Some(v))) if v == "act"
+        ));
+        assert!(matches!(
+            parse_control("/role coder"),
+            Some(Control::Role(Some(v))) if v == "coder"
+        ));
+    }
+
+    #[test]
+    fn parse_control_passes_plain_through() {
+        assert!(parse_control("hello").is_none());
+        assert!(parse_control("/my-skill").is_none());
+        assert!(parse_control("/conv use c1").is_none());
+        assert!(parse_control(" /model ").is_some());
+    }
+
+    #[test]
+    fn override_field_set_clear_query() {
+        let mut slot = None;
+        let echo = set_override_field(&mut slot, Some("gpt-x".into()), "model");
+        assert!(echo.contains("gpt-x"));
+        assert_eq!(slot.as_deref(), Some("gpt-x"));
+        let echo = set_override_field(&mut slot, Some("off".into()), "model");
+        assert!(echo.contains("cleared"));
+        assert!(slot.is_none());
+        let echo = set_override_field(&mut slot, None, "model");
+        assert!(echo.contains("(none"));
+    }
+
+    #[test]
+    fn mode_field_validates() {
+        let mut slot = None;
+        let bad = set_mode_field(&mut slot, Some("bogus".into()));
+        assert!(bad.contains("invalid"));
+        assert!(slot.is_none());
+        let ok = set_mode_field(&mut slot, Some("plan".into()));
+        assert!(ok.contains("plan"));
+        assert_eq!(slot.as_deref(), Some("plan"));
+    }
 }
