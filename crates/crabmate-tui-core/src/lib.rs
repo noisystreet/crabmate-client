@@ -16,7 +16,9 @@ pub use approval::{
     ApprovalDecision, ApprovalGate, AutoAllowOnce, CommandApprovalRequest, new_approval_session_id,
     parse_command_approval_data,
 };
-pub use chat_stream::{ChatStreamArgs, ChatStreamOutcome, ClientLlm, run_chat_stream};
+pub use chat_stream::{
+    ChatStreamArgs, ChatStreamOutcome, ClientLlm, StreamResume, run_chat_stream,
+};
 pub use client::ServeClient;
 pub use config::ConnectionConfig;
 pub use error::TermError;

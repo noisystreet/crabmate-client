@@ -67,7 +67,7 @@ crates/
 | 能力 | Server 现状 | 远程 `crabmate-tui` |
 |------|-------------|----------------------|
 | 一轮对话 | `run_agent_turn` | `POST /chat/stream`（主路径）或 `/chat` |
-| 断线续传 | TUI SSE mirror | `Last-Event-ID` + `stream_resume` |
+| 断线续传 | TUI SSE mirror | repl `/resume`：`stream_resume:{job_id,after_seq}`（job 取响应头 `x-stream-job-id`；cancel 已送达的回合不可续，cancel 未送达时 job 可能仍在跑、仍可续） |
 | 审批 | 进程内 dialoguer | SSE 控制面 + `POST /chat/approval` |
 | 回合取消 | 进程内中断 | Ctrl+C → `POST /chat/stream/{job_id}/cancel`（job 取响应头 `x-stream-job-id`；旧 serve 无路由时降级为本地中断） |
 | 斜杠 /skills | 同进程 | 经 stream 内置命令或后续 REST |

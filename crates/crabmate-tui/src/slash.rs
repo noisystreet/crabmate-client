@@ -64,6 +64,7 @@ fn print_help() {
     eprintln!(
         "control slashes (not sent to the model):\n\
   /help                 this text\n\
+  /resume               resume the last interrupted run (network drop)\n\
   /workspace [path]     show or set serve workspace root (/cd alias)\n\
   /conv                 show current conversation_id\n\
   /conv list            list Web sessions (user-data)\n\

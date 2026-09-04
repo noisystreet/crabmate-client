@@ -15,6 +15,13 @@ pub enum TermError {
     RunError(String),
     #[error("interrupted")]
     Interrupted,
+    /// 流在完成前中断（网络/传输错误），且已拿到 job 句柄可续传。
+    #[error("stream interrupted at seq {after_seq} (job {job_id}): {cause}")]
+    InterruptedStream {
+        job_id: u64,
+        after_seq: u64,
+        cause: String,
+    },
     #[error("{0}")]
     Message(String),
 }
