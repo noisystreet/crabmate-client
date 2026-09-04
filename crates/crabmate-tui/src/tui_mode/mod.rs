@@ -15,6 +15,7 @@ use std::thread;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
+use crossterm::cursor::SetCursorStyle;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{
@@ -695,6 +696,8 @@ pub async fn run_tui(client: &ServeClient, overrides: &mut SessionPrefs, yes: bo
     enable_raw_mode().context("enable raw mode")?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen).context("enter alternate screen")?;
+    // 输入行只显示文本，用闪烁竖条光标提示输入位置。
+    execute!(stdout, SetCursorStyle::BlinkingBar).context("set cursor style")?;
     let _guard = ScreenGuard;
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout)).context("init terminal")?;
 
