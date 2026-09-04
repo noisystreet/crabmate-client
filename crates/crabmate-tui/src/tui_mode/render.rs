@@ -14,8 +14,15 @@ use super::state::{Focus, LineKind, UiState};
 pub const SIDEBAR_MIN_WIDTH: u16 = 120;
 /// 左栏宽度。
 const SIDEBAR_WIDTH: u16 = 26;
-const INPUT_PROMPT: &str = "crabmate> ";
 const SIDEBAR_HINT: &str = "↑↓选 Enter用 n新建 r刷新";
+
+/// 区域色块（对齐 Desktop 面板观感：主体聊天深底 + 亮灰会话侧栏 +
+/// 略亮输入条 + 底部蓝色状态栏）。
+const STATUS_BG: Color = Color::Blue;
+const STATUS_FG: Color = Color::White;
+const SIDEBAR_BG: Color = Color::Indexed(240);
+const CHAT_BG: Color = Color::Indexed(235);
+const COMPOSER_BG: Color = Color::Indexed(237);
 
 /// 状态行展示信息（mod 层组装好的显示值，含 override 标记）。
 pub struct StatusInfo {
@@ -29,14 +36,17 @@ pub struct StatusInfo {
 }
 
 fn kind_style(kind: LineKind) -> (String, Style) {
+    // 亮系前景（聊天区为深底色，保证可读）。
     match kind {
         LineKind::User => (
             "[你] ".to_string(),
-            Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            Style::new()
+                .fg(Color::LightCyan)
+                .add_modifier(Modifier::BOLD),
         ),
-        LineKind::Assistant => ("[助手] ".to_string(), Style::new().fg(Color::Green)),
-        LineKind::Thinking => ("[思考] ".to_string(), Style::new().fg(Color::DarkGray)),
-        LineKind::System => ("[!] ".to_string(), Style::new().fg(Color::Yellow)),
+        LineKind::Assistant => ("[助手] ".to_string(), Style::new().fg(Color::LightGreen)),
+        LineKind::Thinking => ("[思考] ".to_string(), Style::new().fg(Color::Gray)),
+        LineKind::System => ("[!] ".to_string(), Style::new().fg(Color::LightYellow)),
     }
 }
 
@@ -143,12 +153,12 @@ fn sidebar_rows(st: &UiState, width: usize) -> Vec<Line<'static>> {
     let title = format!("会话 [{}]", st.sessions.len());
     rows.push(Line::from(Span::styled(
         truncate_display(&title, width),
-        Style::new().fg(Color::Blue).add_modifier(Modifier::BOLD),
+        Style::new().fg(Color::White).add_modifier(Modifier::BOLD),
     )));
     if st.sessions.is_empty() {
         rows.push(Line::from(Span::styled(
             truncate_display("（空）发一条消息后出现", width),
-            Style::new().fg(Color::DarkGray),
+            Style::new().fg(Color::Gray),
         )));
         return rows;
     }
@@ -199,36 +209,47 @@ fn sidebar_view<'a>(rows: &[Line<'a>], height: usize, selected: usize) -> Vec<Li
     out
 }
 
-/// 渲染一帧。左栏显隐由事件循环按 `SIDEBAR_MIN_WIDTH` 写入 `st.sidebar_visible`。
+/// 给一块区域整体铺背景色（先于文字绘制，杜绝段落内容不足时的底色缺口）。
+fn paint_bg(frame: &mut Frame, rect: ratatui::layout::Rect, color: Color) {
+    if rect.is_empty() {
+        return;
+    }
+    frame.buffer_mut().set_style(rect, Style::new().bg(color));
+}
+
+/// 渲染一帧。对齐 Desktop：整屏 = 主体 + 底部状态栏；主体内左会话列与右聊天列
+/// 各自贯通，composer 只位于聊天列底部（会话列下方不出现输入框）。
 pub fn draw(frame: &mut Frame, st: &UiState, info: &StatusInfo) {
     let area = frame.area();
-    let chunks = Layout::vertical([
-        Constraint::Length(1),
-        Constraint::Min(1),
-        Constraint::Length(1),
-    ])
-    .split(area);
-    let status_area = chunks[0];
-    let body_area = chunks[1];
-    let input_area = chunks[2];
-
-    let status = Paragraph::new(status_text(
-        info,
-        st.conversation_id.as_deref(),
-        status_area.width as usize,
-    ));
-    frame.render_widget(status, status_area);
+    let chunks = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(area);
+    let body_area = chunks[0];
+    let status_area = chunks[1];
 
     if st.sidebar_visible {
         let cols = Layout::horizontal([Constraint::Length(SIDEBAR_WIDTH), Constraint::Min(0)])
             .split(body_area);
+        paint_bg(frame, cols[0], SIDEBAR_BG);
         render_sidebar(frame, st, cols[0]);
-        render_body(frame, st, cols[1]);
+        render_chat_column(frame, st, cols[1]);
     } else {
-        render_body(frame, st, body_area);
+        render_chat_column(frame, st, body_area);
     }
 
-    render_input(frame, st, input_area);
+    paint_bg(frame, status_area, STATUS_BG);
+    let status = Paragraph::new(status_text(
+        info,
+        st.conversation_id.as_deref(),
+        status_area.width as usize,
+    ))
+    .style(Style::new().fg(STATUS_FG).add_modifier(Modifier::BOLD));
+    frame.render_widget(status, status_area);
+}
+
+/// 聊天列：上为主区消息（滚动 transcript），底部为 composer 输入行。
+fn render_chat_column(frame: &mut Frame, st: &UiState, area: ratatui::layout::Rect) {
+    let parts = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(area);
+    render_body(frame, st, parts[0]);
+    render_input(frame, st, parts[1]);
 }
 
 fn render_sidebar(frame: &mut Frame, st: &UiState, area: ratatui::layout::Rect) {
@@ -239,16 +260,22 @@ fn render_sidebar(frame: &mut Frame, st: &UiState, area: ratatui::layout::Rect) 
     let list_area = cols[0];
     let rows = sidebar_rows(st, area.width.saturating_sub(1) as usize);
     let shown = sidebar_view(&rows, list_area.height as usize, st.selected);
-    frame.render_widget(Paragraph::new(shown), list_area);
+    let list = Paragraph::new(shown).style(Style::new().fg(Color::White));
+    frame.render_widget(list, list_area);
+    // 提示行底色由整列 paint 保证；仅在聚焦左栏时显示按键提示。
     if cols[1].height > 0 && st.focus == Focus::Sidebar {
-        let hint = Paragraph::new(Span::styled(SIDEBAR_HINT, Style::new().fg(Color::DarkGray)));
+        let hint = Paragraph::new(Span::styled(SIDEBAR_HINT, Style::new().fg(Color::Gray)));
         frame.render_widget(hint, cols[1]);
     }
 }
 
 fn render_body(frame: &mut Frame, st: &UiState, area: ratatui::layout::Rect) {
+    paint_bg(frame, area, CHAT_BG);
     if st.lines.is_empty() {
-        let hint = Paragraph::new("（空）输入消息开始对话 · Ctrl+C 退出 · Tab 切到会话列表");
+        let hint = Paragraph::new(Span::styled(
+            "（空）输入消息开始对话 · Ctrl+C 退出 · Tab 切到会话列表",
+            Style::new().fg(Color::White),
+        ));
         frame.render_widget(hint, area);
         return;
     }
@@ -263,12 +290,12 @@ fn render_body(frame: &mut Frame, st: &UiState, area: ratatui::layout::Rect) {
 }
 
 /// 输入区可视内容与光标列：Input 聚焦时光标跟随（超宽水平滚动），
-/// 否则显示内容开头（无光标）。
+/// 否则显示内容开头（无光标）。输入行不显示提示前缀，仅输入文本 + 闪烁光标。
 fn input_window(st: &UiState, width: usize) -> (String, usize) {
     let before = st.input_before_cursor();
-    let full = format!("{INPUT_PROMPT}{}", st.current_input());
+    let full = st.current_input();
     let cursor_cell = if st.focus == Focus::Input {
-        UnicodeWidthStr::width(INPUT_PROMPT) + UnicodeWidthStr::width(before.as_str())
+        UnicodeWidthStr::width(before.as_str())
     } else {
         0
     };
@@ -276,9 +303,12 @@ fn input_window(st: &UiState, width: usize) -> (String, usize) {
 }
 
 fn render_input(frame: &mut Frame, st: &UiState, area: ratatui::layout::Rect) {
+    paint_bg(frame, area, COMPOSER_BG);
     let visible_w = area.width.saturating_sub(1) as usize;
     let (shown, shown_cursor) = input_window(st, visible_w);
-    frame.render_widget(Paragraph::new(Line::from(Span::raw(shown))), area);
+    let paragraph =
+        Paragraph::new(Line::from(Span::raw(shown))).style(Style::new().fg(Color::White));
+    frame.render_widget(paragraph, area);
     if st.focus != Focus::Input {
         return;
     }
@@ -500,11 +530,8 @@ mod tests {
             st.insert_char(ch);
         }
         let (shown, cursor) = input_window(&st, 6);
-        // 超宽时窗口滚到光标附近：不再显示开头，光标列在可视区右缘。
-        assert!(
-            !shown.starts_with("crab"),
-            "window should scroll to the cursor"
-        );
+        // 超宽时窗口滚到光标附近：开头字符滚走，光标列在可视区右缘。
+        assert!(!shown.contains('你'), "window should scroll to the cursor");
         assert!(!shown.is_empty());
         assert_eq!(cursor, 6);
     }
@@ -517,7 +544,7 @@ mod tests {
         }
         st.focus = Focus::Sidebar;
         let (shown, cursor) = input_window(&st, 6);
-        assert!(shown.starts_with("crab"));
+        assert!(shown.starts_with('你'));
         assert_eq!(cursor, 0);
     }
 }
