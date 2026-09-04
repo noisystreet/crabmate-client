@@ -12,7 +12,7 @@ use clap::{Parser, Subcommand};
 use crabmate_client_api::secrets::{KEYRING_SERVICE, SecretSlot, WEB_API_BEARER_KEYRING_ACCOUNT};
 use crabmate_tui_core::{
     ApprovalDecision, ApprovalGate, AutoAllowOnce, ChatStreamOutcome, ClientLlm,
-    CommandApprovalRequest, ConnectionConfig, ServeClient, TermError,
+    CommandApprovalRequest, ConnectionConfig, ServeClient, StreamResume, TermError,
 };
 use reedline::{DefaultPrompt, DefaultPromptSegment, Reedline, Signal};
 
@@ -90,6 +90,14 @@ enum Commands {
 enum AnyApprovalGate {
     Auto(AutoAllowOnce),
     Tty(TtyApprovalGate),
+}
+
+/// 最近一次「serve 侧仍在跑但本端断开」的回合断点（供 `/resume` 续流）。
+struct ResumePoint {
+    message: String,
+    conversation_id: Option<String>,
+    job_id: u64,
+    after_seq: u64,
 }
 
 impl ApprovalGate for AnyApprovalGate {
@@ -274,7 +282,15 @@ async fn run_chat(
         bail!("empty message");
     }
     let mut gate = make_gate(yes);
-    let outcome = run_turn(client, &text, conversation_id.as_deref(), llm, &mut gate).await?;
+    let outcome = run_turn(
+        client,
+        &text,
+        conversation_id.as_deref(),
+        llm,
+        None,
+        &mut gate,
+    )
+    .await?;
     // 单轮 chat：Ctrl+C 取消后保持 SIGINT 语义（130），而不是静默 0 退出。
     if outcome.cancelled_by_user {
         return Err(TermError::Interrupted.into());
@@ -294,6 +310,7 @@ async fn run_repl(
     maybe_probe(client, no_probe).await?;
     print_repl_banner(client, conversation_id.as_deref());
     let mut conversation_id = conversation_id;
+    let mut resume: Option<ResumePoint> = None;
     let mut editor = Reedline::create();
     let prompt = DefaultPrompt::new(
         DefaultPromptSegment::Basic("crabmate> ".to_string()),
@@ -302,7 +319,9 @@ async fn run_repl(
     loop {
         match editor.read_line(&prompt) {
             Ok(Signal::Success(line)) => {
-                if !dispatch_repl_line(client, &line, &mut conversation_id, llm, yes).await? {
+                if !dispatch_repl_line(client, &line, &mut conversation_id, &mut resume, llm, yes)
+                    .await?
+                {
                     break;
                 }
             }
@@ -340,12 +359,16 @@ async fn dispatch_repl_line(
     client: &ServeClient,
     line: &str,
     conversation_id: &mut Option<String>,
+    resume: &mut Option<ResumePoint>,
     llm: Option<ClientLlm<'_>>,
     yes: bool,
 ) -> Result<bool> {
     let text = line.trim();
     if text.is_empty() {
         return Ok(true);
+    }
+    if text.eq_ignore_ascii_case("/resume") {
+        return resume_turn(client, conversation_id, resume, llm, yes).await;
     }
     if is_control_slash(text) {
         return match handle_control_slash(client, text, conversation_id).await {
@@ -357,8 +380,18 @@ async fn dispatch_repl_line(
         };
     }
     let mut gate = make_gate(yes);
-    match run_turn(client, text, conversation_id.as_deref(), llm, &mut gate).await {
+    match run_turn(
+        client,
+        text,
+        conversation_id.as_deref(),
+        llm,
+        None,
+        &mut gate,
+    )
+    .await
+    {
         Ok(outcome) => {
+            after_turn_outcome(&outcome, text, conversation_id, resume);
             finish_turn_stdout(&outcome);
             if let Some(cid) = outcome.conversation_id {
                 *conversation_id = Some(cid);
@@ -368,9 +401,108 @@ async fn dispatch_repl_line(
         Err(e) if is_interrupted(&e) => Err(e),
         Err(e) => {
             eprintln!("error: {e:#}");
+            if capture_resume_point(resume, text, conversation_id.as_deref(), &e) {
+                eprintln!("hint: /resume 可续传该回合（serve 端 job 仍在跑时）");
+            }
             Ok(true)
         }
     }
+}
+
+/// 回合正常返回后的断点处置：Ctrl+C **cancel 未送达**（job 可能仍在跑）时把断点更新为
+/// 本回合，允许 `/resume`；其余（正常完成 / cancel 已送达 / 无 job）清空断点。
+fn after_turn_outcome(
+    outcome: &ChatStreamOutcome,
+    text: &str,
+    conversation_id: &Option<String>,
+    resume: &mut Option<ResumePoint>,
+) {
+    if cancel_failed_keeps_resume(outcome.cancelled_by_user, outcome.cancel_acknowledged)
+        && let Some(job_id) = outcome.job_id
+    {
+        *resume = Some(ResumePoint {
+            message: text.to_string(),
+            conversation_id: conversation_id.as_deref().map(str::to_string),
+            job_id,
+            after_seq: outcome.last_event_id,
+        });
+        eprintln!("hint: cancel 未送达，job 可能仍在 serve 上跑；可 /resume 续传");
+        return;
+    }
+    *resume = None;
+}
+
+/// Ctrl+C 取消请求未送达（cancel 失败）时保留续流点。
+fn cancel_failed_keeps_resume(cancelled_by_user: bool, cancel_acknowledged: bool) -> bool {
+    cancelled_by_user && !cancel_acknowledged
+}
+
+/// `/resume`：用记录的断点重发 `stream_resume:{job_id,after_seq}` 续流。
+async fn resume_turn(
+    client: &ServeClient,
+    conversation_id: &mut Option<String>,
+    resume: &mut Option<ResumePoint>,
+    llm: Option<ClientLlm<'_>>,
+    yes: bool,
+) -> Result<bool> {
+    let Some(point) = resume.take() else {
+        eprintln!("nothing to resume (上次回合已正常跑完，或从未产生可续断点)");
+        return Ok(true);
+    };
+    let mut gate = make_gate(yes);
+    let stream_resume = StreamResume {
+        job_id: point.job_id,
+        after_seq: point.after_seq,
+    };
+    match run_turn(
+        client,
+        &point.message,
+        point.conversation_id.as_deref(),
+        llm,
+        Some(stream_resume),
+        &mut gate,
+    )
+    .await
+    {
+        Ok(outcome) => {
+            after_turn_outcome(&outcome, &point.message, conversation_id, resume);
+            finish_turn_stdout(&outcome);
+            if let Some(cid) = outcome.conversation_id {
+                *conversation_id = Some(cid);
+            }
+            Ok(true)
+        }
+        Err(e) if is_interrupted(&e) => Err(e),
+        Err(e) => {
+            eprintln!("error: {e:#}");
+            if capture_resume_point(resume, &point.message, point.conversation_id.as_deref(), &e) {
+                eprintln!("hint: /resume 可再试");
+            }
+            Ok(true)
+        }
+    }
+}
+
+/// 错误为 `TermError::InterruptedStream`（网络中断但 serve 侧 job 仍在跑）时记录续流点。
+fn capture_resume_point(
+    resume: &mut Option<ResumePoint>,
+    message: &str,
+    conversation_id: Option<&str>,
+    err: &anyhow::Error,
+) -> bool {
+    let Some(TermError::InterruptedStream {
+        job_id, after_seq, ..
+    }) = err.root_cause().downcast_ref::<TermError>()
+    else {
+        return false;
+    };
+    *resume = Some(ResumePoint {
+        message: message.to_string(),
+        conversation_id: conversation_id.map(str::to_string),
+        job_id: *job_id,
+        after_seq: *after_seq,
+    });
+    true
 }
 
 async fn maybe_probe(client: &ServeClient, no_probe: bool) -> Result<()> {
@@ -405,7 +537,12 @@ fn is_interrupted(err: &anyhow::Error) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::with_shell_keyring_fallback;
+    use super::{
+        ResumePoint, TermError, after_turn_outcome, cancel_failed_keeps_resume,
+        capture_resume_point, with_shell_keyring_fallback,
+    };
+    use anyhow::anyhow;
+    use crabmate_tui_core::ChatStreamOutcome;
 
     #[test]
     fn explicit_value_wins_over_keyring() {
@@ -436,5 +573,76 @@ mod tests {
     fn missing_entry_yields_none() {
         let v = with_shell_keyring_fallback(None, false, || None);
         assert!(v.is_none());
+    }
+
+    #[test]
+    fn interrupted_stream_error_records_resume_point() {
+        let err = anyhow!(TermError::InterruptedStream {
+            job_id: 11,
+            after_seq: 5,
+            cause: "connection reset".into(),
+        });
+        let mut resume = None;
+        assert!(capture_resume_point(&mut resume, "hi", Some("c1"), &err));
+        let p = resume.expect("point");
+        assert_eq!(p.job_id, 11);
+        assert_eq!(p.after_seq, 5);
+        assert_eq!(p.message, "hi");
+        assert_eq!(p.conversation_id.as_deref(), Some("c1"));
+    }
+
+    #[test]
+    fn plain_stream_error_does_not_record_resume_point() {
+        let err = anyhow!(TermError::Stream("boom".into()));
+        let mut resume = None;
+        assert!(!capture_resume_point(&mut resume, "hi", None, &err));
+        assert!(resume.is_none());
+    }
+
+    #[test]
+    fn cancel_failure_keeps_resume_flag() {
+        assert!(cancel_failed_keeps_resume(true, false));
+        assert!(!cancel_failed_keeps_resume(true, true));
+        assert!(!cancel_failed_keeps_resume(false, false));
+        assert!(!cancel_failed_keeps_resume(false, true));
+    }
+
+    #[test]
+    fn after_cancel_failure_records_current_run() {
+        let outcome = ChatStreamOutcome {
+            cancelled_by_user: true,
+            cancel_acknowledged: false,
+            job_id: Some(5),
+            last_event_id: 2,
+            ..ChatStreamOutcome::default()
+        };
+        let mut resume = None;
+        let conv = Some("c9".to_string());
+        after_turn_outcome(&outcome, "hello", &conv, &mut resume);
+        let p = resume.expect("resume point kept on cancel failure");
+        assert_eq!(p.job_id, 5);
+        assert_eq!(p.after_seq, 2);
+        assert_eq!(p.message, "hello");
+        assert_eq!(p.conversation_id.as_deref(), Some("c9"));
+    }
+
+    #[test]
+    fn after_clean_or_acked_finish_clears_resume() {
+        for (cancelled, acked) in [(false, false), (true, true)] {
+            let outcome = ChatStreamOutcome {
+                cancelled_by_user: cancelled,
+                cancel_acknowledged: acked,
+                job_id: Some(5),
+                ..ChatStreamOutcome::default()
+            };
+            let mut resume = Some(ResumePoint {
+                message: "old".into(),
+                conversation_id: None,
+                job_id: 1,
+                after_seq: 0,
+            });
+            after_turn_outcome(&outcome, "hi", &None, &mut resume);
+            assert!(resume.is_none(), "case {cancelled}/{acked} should clear");
+        }
     }
 }

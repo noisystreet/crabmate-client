@@ -24,8 +24,10 @@ pub struct ChatStreamOutcome {
     pub conversation_id: Option<String>,
     /// 响应头 `x-stream-job-id`（供 `POST /chat/stream/{job_id}/cancel` 与后续续传）。
     pub job_id: Option<u64>,
-    /// 用户 Ctrl+C 打断并已尽力让 serve 停掉该回合。
+    /// 用户 Ctrl+C 打断（已尽力让 serve 停掉该回合）。
     pub cancelled_by_user: bool,
+    /// cancel 请求是否送达（`cancelled_by_user=true` 且此字段为 `false` 时 job 可能仍在跑，可续传）。
+    pub cancel_acknowledged: bool,
     pub last_event_id: u64,
 }
 
@@ -42,6 +44,13 @@ pub struct ClientLlm<'a> {
     pub api_base: Option<&'a str>,
 }
 
+/// `stream_resume` 续流点：serve 侧仍在跑的 job + 本端已消费到的 SSE 序号。
+#[derive(Debug, Clone, Copy)]
+pub struct StreamResume {
+    pub job_id: u64,
+    pub after_seq: u64,
+}
+
 /// `run_chat_stream` 入参。
 #[derive(Debug, Clone, Copy)]
 pub struct ChatStreamArgs<'a> {
@@ -50,6 +59,8 @@ pub struct ChatStreamArgs<'a> {
     pub approval_session_id: &'a str,
     /// 有值时随请求体发送 `client_llm`；`None` / 全空白等价于不发送。
     pub client_llm: Option<ClientLlm<'a>>,
+    /// 续传已中断回合（`stream_resume:{job_id, after_seq}`）。
+    pub stream_resume: Option<StreamResume>,
 }
 
 /// 运行一轮流式对话：正文写到 `out`，思维链等写到 `err`。
@@ -121,6 +132,12 @@ fn chat_stream_body(args: ChatStreamArgs<'_>) -> Value {
     {
         body["client_llm"] = obj;
     }
+    if let Some(r) = args.stream_resume {
+        body["stream_resume"] = serde_json::json!({
+            "job_id": r.job_id,
+            "after_seq": r.after_seq,
+        });
+    }
     body
 }
 
@@ -165,6 +182,18 @@ fn parse_stream_job_id(raw: &str) -> Option<u64> {
     raw.trim().parse::<u64>().ok()
 }
 
+/// 流读取失败：已拿到 job 句柄时带出续流点（供调用方 `/resume`）。
+fn stream_read_error(outcome: &ChatStreamOutcome, cause: &str) -> TermError {
+    match outcome.job_id {
+        Some(job_id) => TermError::InterruptedStream {
+            job_id,
+            after_seq: outcome.last_event_id,
+            cause: cause.to_string(),
+        },
+        None => TermError::Stream(cause.to_string()),
+    }
+}
+
 async fn consume_sse_response(
     client: &ServeClient,
     approval_session_id: &str,
@@ -191,7 +220,10 @@ async fn consume_sse_response(
         let Some(chunk) = chunk else {
             break;
         };
-        let chunk = chunk.map_err(|e| TermError::Stream(e.to_string()))?;
+        let chunk = match chunk {
+            Ok(c) => c,
+            Err(e) => return Err(stream_read_error(outcome, &e.to_string())),
+        };
         buffer.push_str(&String::from_utf8_lossy(&chunk));
         drain_sse_buffer(
             client,
@@ -235,6 +267,7 @@ async fn interrupt_stream(
     };
     match cancel {
         Ok(()) => {
+            outcome.cancel_acknowledged = true;
             let _ = writeln!(
                 err,
                 "\n[crabmate-tui] stopped by Ctrl+C (job {job_id} cancelled on serve)"
@@ -243,7 +276,7 @@ async fn interrupt_stream(
         Err(e) => {
             let _ = writeln!(
                 err,
-                "\n[crabmate-tui] cancel job {job_id} failed: {e}; 后台回合可能仍在 serve 上运行"
+                "\n[crabmate-tui] cancel job {job_id} failed: {e}; 后台回合可能仍在 serve 上运行（可 /resume）"
             );
         }
     }
@@ -504,12 +537,14 @@ mod tests {
                 model: Some("gpt-x"),
                 api_base: None,
             }),
+            stream_resume: None,
         });
         assert_eq!(body["message"], "hi");
         assert_eq!(body["client_sse_protocol"], SSE_PROTOCOL_VERSION);
         assert_eq!(body["client_llm"]["api_key"], "sk-abc");
         assert_eq!(body["client_llm"]["model"], "gpt-x");
         assert!(body["client_llm"].get("api_base").is_none());
+        assert!(body.get("stream_resume").is_none());
     }
 
     #[test]
@@ -519,6 +554,7 @@ mod tests {
             conversation_id: None,
             approval_session_id: "a1",
             client_llm: None,
+            stream_resume: None,
         });
         assert!(base.get("client_llm").is_none());
 
@@ -531,8 +567,44 @@ mod tests {
                 model: None,
                 api_base: Some(""),
             }),
+            stream_resume: None,
         });
         assert_eq!(blank, base);
+    }
+
+    #[test]
+    fn chat_body_includes_stream_resume() {
+        let body = chat_stream_body(ChatStreamArgs {
+            message: "hi",
+            conversation_id: Some("c1"),
+            approval_session_id: "a1",
+            client_llm: None,
+            stream_resume: Some(StreamResume {
+                job_id: 42,
+                after_seq: 7,
+            }),
+        });
+        assert_eq!(body["stream_resume"]["job_id"], 42);
+        assert_eq!(body["stream_resume"]["after_seq"], 7);
+        assert!(body.get("client_llm").is_none());
+    }
+
+    #[test]
+    fn stream_error_keeps_resume_point_when_job_known() {
+        let outcome = ChatStreamOutcome {
+            job_id: Some(9),
+            last_event_id: 3,
+            ..ChatStreamOutcome::default()
+        };
+        match stream_read_error(&outcome, "synthetic stream error") {
+            TermError::InterruptedStream {
+                job_id, after_seq, ..
+            } => {
+                assert_eq!(job_id, 9);
+                assert_eq!(after_seq, 3);
+            }
+            other => panic!("unexpected {other:?}"),
+        }
     }
 
     #[test]

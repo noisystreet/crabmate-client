@@ -4,7 +4,7 @@ use std::io;
 
 use anyhow::Result;
 use crabmate_tui_core::{
-    ApprovalGate, ChatStreamArgs, ChatStreamOutcome, ClientLlm, ServeClient,
+    ApprovalGate, ChatStreamArgs, ChatStreamOutcome, ClientLlm, ServeClient, StreamResume,
     new_approval_session_id, run_chat_stream,
 };
 
@@ -13,6 +13,7 @@ pub async fn run_turn(
     message: &str,
     conversation_id: Option<&str>,
     client_llm: Option<ClientLlm<'_>>,
+    stream_resume: Option<StreamResume>,
     approval: &mut dyn ApprovalGate,
 ) -> Result<ChatStreamOutcome> {
     let approval_session_id = new_approval_session_id();
@@ -26,6 +27,7 @@ pub async fn run_turn(
             conversation_id,
             approval_session_id: &approval_session_id,
             client_llm,
+            stream_resume,
         },
         &mut stdout,
         &mut stderr,
