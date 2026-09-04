@@ -508,6 +508,7 @@ dependencies = [
  "crabmate-tui-core",
  "keyring",
  "reedline",
+ "serde_json",
  "tokio",
 ]
 

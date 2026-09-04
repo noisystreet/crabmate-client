@@ -100,6 +100,36 @@ struct ResumePoint {
     after_seq: u64,
 }
 
+/// `client_llm` 覆盖（owned，供 repl 内 `/model` 运行时切换；chat 一次性用 `client_llm()` 派生）。
+struct LlmOverrides {
+    api_key: Option<String>,
+    model: Option<String>,
+    api_base: Option<String>,
+}
+
+impl LlmOverrides {
+    fn from_options(
+        api_key: Option<String>,
+        model: Option<String>,
+        api_base: Option<String>,
+    ) -> Self {
+        Self {
+            api_key,
+            model,
+            api_base,
+        }
+    }
+
+    /// 有任一非空字段时生成随本轮发送的 `client_llm`（空白值不发送）。
+    fn client_llm(&self) -> Option<ClientLlm<'_>> {
+        client_llm_overrides(
+            self.api_key.as_deref(),
+            self.model.as_deref(),
+            self.api_base.as_deref(),
+        )
+    }
+}
+
 impl ApprovalGate for AnyApprovalGate {
     fn decide(&mut self, req: &CommandApprovalRequest) -> Result<ApprovalDecision, TermError> {
         match self {
@@ -145,22 +175,18 @@ async fn run() -> Result<()> {
         ..
     } = cli;
     let llm_key = resolve_llm_key(llm_api_key.as_deref(), no_keyring);
-    let llm = client_llm_overrides(
-        llm_key.as_deref(),
-        llm_model.as_deref(),
-        llm_api_base.as_deref(),
-    );
+    let mut overrides = LlmOverrides::from_options(llm_key, llm_model, llm_api_base);
     match command {
         Commands::Connect => run_connect(&client).await,
         Commands::Chat {
             message,
             conversation_id,
             no_probe,
-        } => run_chat(&client, message, conversation_id, no_probe, yes, llm).await,
+        } => run_chat(&client, message, conversation_id, no_probe, yes, &overrides).await,
         Commands::Repl {
             conversation_id,
             no_probe,
-        } => run_repl(&client, conversation_id, no_probe, yes, llm).await,
+        } => run_repl(&client, conversation_id, no_probe, yes, &mut overrides).await,
     }
 }
 
@@ -274,7 +300,7 @@ async fn run_chat(
     conversation_id: Option<String>,
     no_probe: bool,
     yes: bool,
-    llm: Option<ClientLlm<'_>>,
+    overrides: &LlmOverrides,
 ) -> Result<()> {
     maybe_probe(client, no_probe).await?;
     let text = resolve_message(message)?;
@@ -282,6 +308,7 @@ async fn run_chat(
         bail!("empty message");
     }
     let mut gate = make_gate(yes);
+    let llm = overrides.client_llm();
     let outcome = run_turn(
         client,
         &text,
@@ -304,7 +331,7 @@ async fn run_repl(
     conversation_id: Option<String>,
     no_probe: bool,
     yes: bool,
-    llm: Option<ClientLlm<'_>>,
+    overrides: &mut LlmOverrides,
 ) -> Result<()> {
     ensure_repl_tty()?;
     maybe_probe(client, no_probe).await?;
@@ -319,8 +346,15 @@ async fn run_repl(
     loop {
         match editor.read_line(&prompt) {
             Ok(Signal::Success(line)) => {
-                if !dispatch_repl_line(client, &line, &mut conversation_id, &mut resume, llm, yes)
-                    .await?
+                if !dispatch_repl_line(
+                    client,
+                    &line,
+                    &mut conversation_id,
+                    &mut resume,
+                    overrides,
+                    yes,
+                )
+                .await?
                 {
                     break;
                 }
@@ -360,15 +394,23 @@ async fn dispatch_repl_line(
     line: &str,
     conversation_id: &mut Option<String>,
     resume: &mut Option<ResumePoint>,
-    llm: Option<ClientLlm<'_>>,
+    overrides: &mut LlmOverrides,
     yes: bool,
 ) -> Result<bool> {
     let text = line.trim();
     if text.is_empty() {
         return Ok(true);
     }
-    if text.eq_ignore_ascii_case("/resume") {
-        return resume_turn(client, conversation_id, resume, llm, yes).await;
+    // 仅形如 `/resume` `/model` 的控制输入才拦截；普通消息即使首词为 model/resume 也要发给模型。
+    match repl_control_head(text) {
+        Some("resume") => {
+            return resume_turn(client, conversation_id, resume, overrides, yes).await;
+        }
+        Some("model") => {
+            handle_model_slash(text, overrides);
+            return Ok(true);
+        }
+        _ => {}
     }
     if is_control_slash(text) {
         return match handle_control_slash(client, text, conversation_id).await {
@@ -380,6 +422,7 @@ async fn dispatch_repl_line(
         };
     }
     let mut gate = make_gate(yes);
+    let llm = overrides.client_llm();
     match run_turn(
         client,
         text,
@@ -442,7 +485,7 @@ async fn resume_turn(
     client: &ServeClient,
     conversation_id: &mut Option<String>,
     resume: &mut Option<ResumePoint>,
-    llm: Option<ClientLlm<'_>>,
+    overrides: &LlmOverrides,
     yes: bool,
 ) -> Result<bool> {
     let Some(point) = resume.take() else {
@@ -450,6 +493,7 @@ async fn resume_turn(
         return Ok(true);
     };
     let mut gate = make_gate(yes);
+    let llm = overrides.client_llm();
     let stream_resume = StreamResume {
         job_id: point.job_id,
         after_seq: point.after_seq,
@@ -505,6 +549,56 @@ fn capture_resume_point(
     true
 }
 
+/// 识别 main 层拦截的 repl 控制斜杠（仅 `/` 开头才返回命令名；普通消息不拦截）。
+fn repl_control_head(text: &str) -> Option<&'static str> {
+    let t = text.trim();
+    let rest = t.strip_prefix('/')?;
+    match rest
+        .split_whitespace()
+        .next()
+        .unwrap_or("")
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "resume" => Some("resume"),
+        "model" => Some("model"),
+        _ => None,
+    }
+}
+
+/// `/model [name]`：查看或设置 repl 会话内的 `client_llm.model` 覆盖（`off`/`none`/`clear` 清除）。
+fn handle_model_slash(text: &str, overrides: &mut LlmOverrides) {
+    let arg = text
+        .split_whitespace()
+        .skip(1)
+        .collect::<Vec<_>>()
+        .join(" ")
+        .trim()
+        .to_string();
+    if arg.is_empty() {
+        match overrides
+            .model
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            Some(model) => println!("model override: {model}"),
+            None => println!("model override: (none — 使用 serve 默认模型；/model <name> 设置)"),
+        }
+        return;
+    }
+    if matches!(arg.as_str(), "off" | "none" | "clear") {
+        overrides.model = None;
+        println!("model override cleared");
+        return;
+    }
+    overrides.model = Some(arg);
+    println!(
+        "model override: {}",
+        overrides.model.as_deref().unwrap_or_default()
+    );
+}
+
 async fn maybe_probe(client: &ServeClient, no_probe: bool) -> Result<()> {
     if no_probe {
         return Ok(());
@@ -538,8 +632,8 @@ fn is_interrupted(err: &anyhow::Error) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        ResumePoint, TermError, after_turn_outcome, cancel_failed_keeps_resume,
-        capture_resume_point, with_shell_keyring_fallback,
+        LlmOverrides, ResumePoint, TermError, after_turn_outcome, cancel_failed_keeps_resume,
+        capture_resume_point, handle_model_slash, repl_control_head, with_shell_keyring_fallback,
     };
     use anyhow::anyhow;
     use crabmate_tui_core::ChatStreamOutcome;
@@ -644,5 +738,33 @@ mod tests {
             after_turn_outcome(&outcome, "hi", &None, &mut resume);
             assert!(resume.is_none(), "case {cancelled}/{acked} should clear");
         }
+    }
+
+    #[test]
+    fn llm_overrides_empty_yields_no_client_llm() {
+        let o = LlmOverrides::from_options(None, None, None);
+        assert!(o.client_llm().is_none());
+    }
+
+    #[test]
+    fn model_slash_sets_and_clears_override() {
+        let mut o = LlmOverrides::from_options(None, None, None);
+        handle_model_slash("/model deepseek-chat", &mut o);
+        assert_eq!(o.model.as_deref(), Some("deepseek-chat"));
+        assert!(o.client_llm().is_some());
+        handle_model_slash("/model off", &mut o);
+        assert!(o.model.is_none());
+        assert!(o.client_llm().is_none());
+    }
+
+    #[test]
+    fn plain_messages_are_not_swallowed_as_control() {
+        assert_eq!(repl_control_head("model gpt-5 please"), None);
+        assert_eq!(repl_control_head("resume where we left"), None);
+        assert_eq!(repl_control_head("  model  "), None);
+        assert_eq!(repl_control_head("/model gpt-5"), Some("model"));
+        assert_eq!(repl_control_head("/RESUME"), Some("resume"));
+        assert_eq!(repl_control_head("/models"), None);
+        assert_eq!(repl_control_head("/status"), None);
     }
 }
