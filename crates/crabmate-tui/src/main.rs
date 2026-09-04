@@ -2,6 +2,7 @@
 
 mod approval_tty;
 mod slash;
+mod tui_mode;
 mod turn;
 
 use std::io::{self, IsTerminal, Write};
@@ -81,6 +82,12 @@ enum Commands {
         /// Optional conversation id to resume.
         #[arg(long = "conversation-id")]
         conversation_id: Option<String>,
+        /// Skip `/health` probe before first turn.
+        #[arg(long = "no-probe")]
+        no_probe: bool,
+    },
+    /// Full-screen TUI (ratatui): status bar + streaming transcript + input bar.
+    Tui {
         /// Skip `/health` probe before first turn.
         #[arg(long = "no-probe")]
         no_probe: bool,
@@ -201,7 +208,19 @@ async fn run() -> Result<()> {
             conversation_id,
             no_probe,
         } => run_repl(&client, conversation_id, no_probe, yes, &mut overrides).await,
+        Commands::Tui { no_probe } => run_tui_cmd(&client, no_probe, yes, &overrides).await,
     }
+}
+
+async fn run_tui_cmd(
+    client: &ServeClient,
+    no_probe: bool,
+    yes: bool,
+    overrides: &SessionPrefs,
+) -> Result<()> {
+    ensure_tty()?;
+    maybe_probe(client, no_probe).await?;
+    tui_mode::run_tui(client, overrides, yes).await
 }
 
 /// 三个 `client_llm` 覆盖中任一非空才构造；全空返回 `None`（不发送 `client_llm` 整块）。
@@ -347,7 +366,7 @@ async fn run_repl(
     yes: bool,
     overrides: &mut SessionPrefs,
 ) -> Result<()> {
-    ensure_repl_tty()?;
+    ensure_tty()?;
     maybe_probe(client, no_probe).await?;
     print_repl_banner(client, conversation_id.as_deref());
     let mut conversation_id = conversation_id;
@@ -385,11 +404,11 @@ async fn run_repl(
     Ok(())
 }
 
-fn ensure_repl_tty() -> Result<()> {
+fn ensure_tty() -> Result<()> {
     if io::stdin().is_terminal() && io::stdout().is_terminal() {
         return Ok(());
     }
-    bail!("repl requires interactive stdin/stdout TTY")
+    bail!("repl/tui requires interactive stdin/stdout TTY")
 }
 
 fn print_repl_banner(client: &ServeClient, conversation_id: Option<&str>) {

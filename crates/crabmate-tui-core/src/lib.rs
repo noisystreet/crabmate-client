@@ -17,7 +17,8 @@ pub use approval::{
     parse_command_approval_data,
 };
 pub use chat_stream::{
-    ChatStreamArgs, ChatStreamOutcome, ClientLlm, StreamResume, run_chat_stream,
+    ChatStreamArgs, ChatStreamOptions, ChatStreamOutcome, ClientLlm, ClientLlmFields, StreamCancel,
+    StreamResume, StreamSink, run_chat_stream, run_chat_stream_sink,
 };
 pub use client::ServeClient;
 pub use config::ConnectionConfig;

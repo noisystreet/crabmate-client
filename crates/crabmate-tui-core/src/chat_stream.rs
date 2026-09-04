@@ -11,6 +11,7 @@ use futures_util::StreamExt;
 use reqwest::Response;
 use reqwest::header::{ACCEPT, CONTENT_TYPE, HeaderValue};
 use serde_json::Value;
+use tokio::sync::watch;
 
 use crate::approval::{
     ApprovalDecision, ApprovalGate, CommandApprovalRequest, parse_command_approval_data,
@@ -67,7 +68,96 @@ pub struct ChatStreamArgs<'a> {
     pub stream_resume: Option<StreamResume>,
 }
 
+/// `run_chat_stream_sink` 的完整请求参数（owned；供后台任务使用，无借用生命周期）。
+#[derive(Debug, Clone, Default)]
+pub struct ChatStreamOptions {
+    pub message: String,
+    pub approval_session_id: String,
+    pub conversation_id: Option<String>,
+    pub client_llm: Option<ClientLlmFields>,
+    pub agent_role: Option<String>,
+    pub session_mode: Option<String>,
+    pub stream_resume: Option<StreamResume>,
+}
+
+/// `client_llm` 覆盖的 owned 字段；空白值不发送（规则与 [`ClientLlm`] 一致）。
+#[derive(Debug, Clone, Default)]
+pub struct ClientLlmFields {
+    pub api_key: Option<String>,
+    pub model: Option<String>,
+    pub api_base: Option<String>,
+}
+
+impl From<&ChatStreamArgs<'_>> for ChatStreamOptions {
+    fn from(a: &ChatStreamArgs<'_>) -> Self {
+        Self {
+            message: a.message.to_string(),
+            approval_session_id: a.approval_session_id.to_string(),
+            conversation_id: a.conversation_id.map(str::to_string),
+            client_llm: a.client_llm.map(|cl| ClientLlmFields {
+                api_key: cl.api_key.map(str::to_string),
+                model: cl.model.map(str::to_string),
+                api_base: cl.api_base.map(str::to_string),
+            }),
+            agent_role: a.agent_role.map(str::to_string),
+            session_mode: a.session_mode.map(str::to_string),
+            stream_resume: a.stream_resume,
+        }
+    }
+}
+
+/// 流增量 → 事件回调。文本模式（`chat`/`repl`）用写回 stdout/stderr 的实现；
+/// 全屏 `tui` 用一个发往 UI 事件通道的实现。
+pub trait StreamSink {
+    /// 助手正文增量（`TEXT_MESSAGE_CONTENT` / 未分类 Plain 行）。
+    fn on_text(&mut self, delta: &str) -> Result<(), TermError>;
+    /// 思维链增量（`REASONING_MESSAGE_CONTENT`）。
+    fn on_reasoning(&mut self, delta: &str) -> Result<(), TermError>;
+    /// 系统行（如 Ctrl+C 停止提示）；文本模式写 stderr，全屏显示为 transcript 系统行。
+    fn on_system(&mut self, _line: &str) -> Result<(), TermError> {
+        Ok(())
+    }
+    /// 流收尾（flush 等）。
+    fn on_finished(&mut self) -> Result<(), TermError> {
+        Ok(())
+    }
+}
+
+/// SSE 消费期间的外部取消句柄（全屏 TUI 用；文本模式仍由内部 `ctrl_c` 信号驱动）。
+///
+/// 计数语义对齐文本模式的 Ctrl+C：第 1 次 = 取消当前回合（job 已知则
+/// `POST /chat/stream/{job}/cancel`；cancel 未送达保留续流断点）；
+/// 第 2 次 = 强退（等同二次 Ctrl+C）。
+#[derive(Debug, Clone)]
+pub struct StreamCancel {
+    tx: watch::Sender<u8>,
+    rx: watch::Receiver<u8>,
+}
+
+impl Default for StreamCancel {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl StreamCancel {
+    #[must_use]
+    pub fn new() -> Self {
+        let (tx, rx) = watch::channel(0);
+        Self { tx, rx }
+    }
+
+    /// 请求取消当前回合；第 2 次调用 = 强退。
+    pub fn cancel(&self) {
+        let n = *self.tx.borrow();
+        let _ = self.tx.send(n.saturating_add(1));
+    }
+}
+
 /// 运行一轮流式对话：正文写到 `out`，思维链等写到 `err`。
+///
+/// 文本模式入口：内部经 `TextStreamSink` 委托 [`run_chat_stream_sink`]，
+/// 保持历史 stdout/stderr 行为与 Ctrl+C 语义不变。
 pub async fn run_chat_stream(
     client: &ServeClient,
     args: ChatStreamArgs<'_>,
@@ -75,34 +165,73 @@ pub async fn run_chat_stream(
     err: &mut dyn Write,
     approval: &mut dyn ApprovalGate,
 ) -> Result<ChatStreamOutcome, TermError> {
-    let resp = post_chat_stream(client, args).await?;
+    let opts = ChatStreamOptions::from(&args);
+    let mut sink = TextStreamSink { out, err };
+    run_chat_stream_sink(client, &opts, &mut sink, approval, None).await
+}
+
+/// 事件回调版：文本/思维增量经 `sink` 送达；取消由外部 `cancel` 触发。
+///
+/// - `cancel = None`：沿用文本模式语义（SSE 循环内监听 `ctrl_c`，一次=取消、二次=强退）。
+/// - `cancel = Some(&token)`：由调用方（如全屏 TUI 事件循环）调 `StreamCancel::cancel()`
+///   驱动，全屏 raw mode 下 ^C 是按键事件、不会产生 SIGINT。
+pub async fn run_chat_stream_sink(
+    client: &ServeClient,
+    opts: &ChatStreamOptions,
+    sink: &mut dyn StreamSink,
+    approval: &mut dyn ApprovalGate,
+    cancel: Option<&StreamCancel>,
+) -> Result<ChatStreamOutcome, TermError> {
+    let resp = post_chat_stream(client, opts).await?;
     let mut outcome = ChatStreamOutcome {
         conversation_id: conversation_id_from_headers(&resp)
-            .or_else(|| args.conversation_id.map(str::to_string)),
+            .or_else(|| opts.conversation_id.clone()),
         job_id: job_id_from_headers(&resp),
         ..ChatStreamOutcome::default()
     };
-    consume_sse_response(
-        client,
-        args.approval_session_id,
-        resp,
-        &mut outcome,
-        out,
-        err,
-        approval,
-    )
-    .await?;
-    let _ = out.flush();
-    let _ = err.flush();
+    consume_sse_response(client, opts, resp, &mut outcome, sink, approval, cancel).await?;
+    sink.on_finished()?;
     Ok(outcome)
+}
+
+/// 文本模式 sink：正文 → stdout，思维链/系统行 → stderr（历史行为）。
+struct TextStreamSink<'a> {
+    out: &'a mut dyn Write,
+    err: &'a mut dyn Write,
+}
+
+impl StreamSink for TextStreamSink<'_> {
+    fn on_text(&mut self, delta: &str) -> Result<(), TermError> {
+        write_out(self.out, delta)
+    }
+
+    fn on_reasoning(&mut self, delta: &str) -> Result<(), TermError> {
+        if !delta.is_empty() {
+            let _ = self.err.write_all(delta.as_bytes());
+        }
+        Ok(())
+    }
+
+    fn on_system(&mut self, line: &str) -> Result<(), TermError> {
+        if !line.is_empty() {
+            let _ = writeln!(self.err, "{line}");
+        }
+        Ok(())
+    }
+
+    fn on_finished(&mut self) -> Result<(), TermError> {
+        let _ = self.out.flush();
+        let _ = self.err.flush();
+        Ok(())
+    }
 }
 
 async fn post_chat_stream(
     client: &ServeClient,
-    args: ChatStreamArgs<'_>,
+    opts: &ChatStreamOptions,
 ) -> Result<Response, TermError> {
     let url = client.url("/chat/stream")?;
-    let body = chat_stream_body(args);
+    let body = chat_stream_body(opts);
     let mut headers = client.auth_headers()?;
     headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
     headers.insert(ACCEPT, HeaderValue::from_static("text/event-stream"));
@@ -124,23 +253,23 @@ async fn post_chat_stream(
     })
 }
 
-fn chat_stream_body(args: ChatStreamArgs<'_>) -> Value {
+fn chat_stream_body(opts: &ChatStreamOptions) -> Value {
     let mut body = build_chat_stream_core_body(ChatStreamCoreFields {
-        message: args.message,
+        message: &opts.message,
         client_sse_protocol: SSE_PROTOCOL_VERSION,
-        approval_session_id: Some(args.approval_session_id),
-        conversation_id: args.conversation_id,
+        approval_session_id: Some(&opts.approval_session_id),
+        conversation_id: opts.conversation_id.as_deref(),
     });
-    if let Some(cl) = args.client_llm
+    if let Some(cl) = opts.client_llm.as_ref()
         && let Some(obj) = client_llm_json(cl)
     {
         body["client_llm"] = obj;
     }
     if let Some(map) = body.as_object_mut() {
-        insert_trimmed(map, "agent_role", args.agent_role);
-        insert_trimmed(map, "session_mode", args.session_mode);
+        insert_trimmed(map, "agent_role", opts.agent_role.as_deref());
+        insert_trimmed(map, "session_mode", opts.session_mode.as_deref());
     }
-    if let Some(r) = args.stream_resume {
+    if let Some(r) = opts.stream_resume {
         body["stream_resume"] = serde_json::json!({
             "job_id": r.job_id,
             "after_seq": r.after_seq,
@@ -150,11 +279,11 @@ fn chat_stream_body(args: ChatStreamArgs<'_>) -> Value {
 }
 
 /// 仅含非空（trim 后）字段的 `client_llm` 对象；全空返回 `None`（不发送整块）。
-fn client_llm_json(llm: ClientLlm<'_>) -> Option<Value> {
+fn client_llm_json(llm: &ClientLlmFields) -> Option<Value> {
     let mut map = serde_json::Map::new();
-    insert_trimmed(&mut map, "api_base", llm.api_base);
-    insert_trimmed(&mut map, "model", llm.model);
-    insert_trimmed(&mut map, "api_key", llm.api_key);
+    insert_trimmed(&mut map, "api_base", llm.api_base.as_deref());
+    insert_trimmed(&mut map, "model", llm.model.as_deref());
+    insert_trimmed(&mut map, "api_key", llm.api_key.as_deref());
     if map.is_empty() {
         None
     } else {
@@ -204,20 +333,20 @@ fn stream_read_error(outcome: &ChatStreamOutcome, cause: &str) -> TermError {
 
 async fn consume_sse_response(
     client: &ServeClient,
-    approval_session_id: &str,
+    opts: &ChatStreamOptions,
     resp: Response,
     outcome: &mut ChatStreamOutcome,
-    out: &mut dyn Write,
-    err: &mut dyn Write,
+    sink: &mut dyn StreamSink,
     approval: &mut dyn ApprovalGate,
+    cancel: Option<&StreamCancel>,
 ) -> Result<(), TermError> {
     let mut buffer = String::new();
     let mut stream = resp.bytes_stream();
     loop {
         let chunk = tokio::select! {
             biased;
-            _ = tokio::signal::ctrl_c() => {
-                if interrupt_stream(client, outcome, err).await? {
+            _ = wait_for_cancel(cancel) => {
+                if cancel_current_run(client, outcome, sink, cancel).await? {
                     return Ok(());
                 }
                 // 旧 serve 无 `x-stream-job-id`：无法 cancel，保持原中断语义。
@@ -233,59 +362,69 @@ async fn consume_sse_response(
             Err(e) => return Err(stream_read_error(outcome, &e.to_string())),
         };
         buffer.push_str(&String::from_utf8_lossy(&chunk));
-        drain_sse_buffer(
-            client,
-            approval_session_id,
-            &mut buffer,
-            outcome,
-            out,
-            err,
-            approval,
-        )
-        .await?;
+        drain_sse_buffer(client, opts, &mut buffer, outcome, sink, approval).await?;
     }
-    flush_sse_tail(
-        client,
-        approval_session_id,
-        &mut buffer,
-        outcome,
-        out,
-        err,
-        approval,
-    )
-    .await
+    flush_sse_tail(client, opts, &mut buffer, outcome, sink, approval).await
 }
 
-/// Ctrl+C：job_id 已知时先 `POST /chat/stream/{job}/cancel` 让 serve 停掉回合。
+/// 等待取消源：`cancel = None`（文本模式）监听 `ctrl_c` 信号；
+/// `Some`（全屏 TUI）等待 [`StreamCancel`] 计数 ≥ 1。
+async fn wait_for_cancel(cancel: Option<&StreamCancel>) {
+    match cancel {
+        None => {
+            let _ = tokio::signal::ctrl_c().await;
+        }
+        Some(c) => {
+            let mut rx = c.rx.clone();
+            while *rx.borrow_and_update() < 1 && rx.changed().await.is_ok() {}
+        }
+    }
+}
+
+/// Ctrl+C / 外部取消：job_id 已知时先 `POST /chat/stream/{job}/cancel` 让 serve 停掉回合。
 ///
 /// 返回 `Ok(true)` = 已取消并干净收尾；`Ok(false)` = 无 job_id（旧 serve），
-/// 调用方按原中断语义处理。取消请求进行中再按一次 Ctrl+C = 强退（130）。
-async fn interrupt_stream(
+/// 调用方按原中断语义处理。取消请求进行中再次触发（文本二次 Ctrl+C /
+/// [`StreamCancel`] 计数 ≥ 2）= 强退（130 / `TermError::Interrupted`）。
+async fn cancel_current_run(
     client: &ServeClient,
     outcome: &mut ChatStreamOutcome,
-    err: &mut dyn Write,
+    sink: &mut dyn StreamSink,
+    cancel: Option<&StreamCancel>,
 ) -> Result<bool, TermError> {
     let Some(job_id) = outcome.job_id else {
         return Ok(false);
     };
-    let cancel = tokio::select! {
+    if cancel.is_some_and(|c| *c.rx.borrow() >= 2) {
+        return Err(TermError::Interrupted);
+    }
+    let force_quit = async {
+        match cancel {
+            None => {
+                let _ = tokio::signal::ctrl_c().await;
+            }
+            Some(c) => {
+                let mut rx = c.rx.clone();
+                while *rx.borrow_and_update() < 2 && rx.changed().await.is_ok() {}
+            }
+        }
+    };
+    let cancel_result = tokio::select! {
         biased;
-        _ = tokio::signal::ctrl_c() => return Err(TermError::Interrupted),
+        _ = force_quit => return Err(TermError::Interrupted),
         r = client.cancel_chat_stream(job_id) => r,
     };
-    match cancel {
+    match cancel_result {
         Ok(()) => {
             outcome.cancel_acknowledged = true;
-            let _ = writeln!(
-                err,
+            sink.on_system(&format!(
                 "\n[crabmate-tui] stopped by Ctrl+C (job {job_id} cancelled on serve)"
-            );
+            ))?;
         }
         Err(e) => {
-            let _ = writeln!(
-                err,
+            sink.on_system(&format!(
                 "\n[crabmate-tui] cancel job {job_id} failed: {e}; 后台回合可能仍在 serve 上运行（可 /resume）"
-            );
+            ))?;
         }
     }
     outcome.cancelled_by_user = true;
@@ -294,11 +433,10 @@ async fn interrupt_stream(
 
 async fn flush_sse_tail(
     client: &ServeClient,
-    approval_session_id: &str,
+    opts: &ChatStreamOptions,
     buffer: &mut String,
     outcome: &mut ChatStreamOutcome,
-    out: &mut dyn Write,
-    err: &mut dyn Write,
+    sink: &mut dyn StreamSink,
     approval: &mut dyn ApprovalGate,
 ) -> Result<(), TermError> {
     if buffer.trim().is_empty() {
@@ -307,25 +445,15 @@ async fn flush_sse_tail(
     if !buffer.ends_with("\n\n") {
         buffer.push_str("\n\n");
     }
-    drain_sse_buffer(
-        client,
-        approval_session_id,
-        buffer,
-        outcome,
-        out,
-        err,
-        approval,
-    )
-    .await
+    drain_sse_buffer(client, opts, buffer, outcome, sink, approval).await
 }
 
 async fn drain_sse_buffer(
     client: &ServeClient,
-    approval_session_id: &str,
+    opts: &ChatStreamOptions,
     buffer: &mut String,
     outcome: &mut ChatStreamOutcome,
-    out: &mut dyn Write,
-    err: &mut dyn Write,
+    sink: &mut dyn StreamSink,
     approval: &mut dyn ApprovalGate,
 ) -> Result<(), TermError> {
     while let Some(idx) = buffer.find("\n\n") {
@@ -340,17 +468,16 @@ async fn drain_sse_buffer(
         let Some(data) = join_sse_data_lines(&block) else {
             continue;
         };
-        handle_sse_data(client, approval_session_id, &data, out, err, approval).await?;
+        handle_sse_data(client, opts, &data, sink, approval).await?;
     }
     Ok(())
 }
 
 async fn handle_sse_data(
     client: &ServeClient,
-    approval_session_id: &str,
+    opts: &ChatStreamOptions,
     data: &str,
-    out: &mut dyn Write,
-    err: &mut dyn Write,
+    sink: &mut dyn StreamSink,
     approval: &mut dyn ApprovalGate,
 ) -> Result<(), TermError> {
     if is_sse_done_sentinel(data) {
@@ -363,14 +490,12 @@ async fn handle_sse_data(
         }
         match classify_line(line)? {
             LineAction::Skip => {}
-            LineAction::WriteOut(s) => write_out(out, &s)?,
-            LineAction::WriteErr(s) => {
-                let _ = write!(err, "{s}");
-            }
+            LineAction::WriteOut(s) => sink.on_text(&s)?,
+            LineAction::WriteErr(s) => sink.on_reasoning(&s)?,
             LineAction::Approve(req) => {
-                resolve_approval(client, approval_session_id, req, approval).await?;
+                resolve_approval(client, &opts.approval_session_id, req, approval).await?;
             }
-            LineAction::Plain(s) => write_out(out, &s)?,
+            LineAction::Plain(s) => sink.on_text(&s)?,
         }
     }
     Ok(())
@@ -534,20 +659,24 @@ mod tests {
         assert_eq!(g.seen.len(), 1);
     }
 
+    fn base_opts() -> ChatStreamOptions {
+        ChatStreamOptions {
+            message: "hi".into(),
+            approval_session_id: "a1".into(),
+            ..ChatStreamOptions::default()
+        }
+    }
+
     #[test]
     fn chat_body_includes_client_llm_fields() {
-        let body = chat_stream_body(ChatStreamArgs {
-            message: "hi",
-            conversation_id: Some("c1"),
-            approval_session_id: "a1",
-            client_llm: Some(ClientLlm {
-                api_key: Some(" sk-abc "),
-                model: Some("gpt-x"),
+        let body = chat_stream_body(&ChatStreamOptions {
+            conversation_id: Some("c1".into()),
+            client_llm: Some(ClientLlmFields {
+                api_key: Some(" sk-abc ".into()),
+                model: Some("gpt-x".into()),
                 api_base: None,
             }),
-            agent_role: None,
-            session_mode: None,
-            stream_resume: None,
+            ..base_opts()
         });
         assert_eq!(body["message"], "hi");
         assert_eq!(body["client_sse_protocol"], SSE_PROTOCOL_VERSION);
@@ -559,46 +688,29 @@ mod tests {
 
     #[test]
     fn chat_body_omits_client_llm_when_empty() {
-        let base = chat_stream_body(ChatStreamArgs {
-            message: "hi",
-            conversation_id: None,
-            approval_session_id: "a1",
-            client_llm: None,
-            agent_role: None,
-            session_mode: None,
-            stream_resume: None,
-        });
+        let base = chat_stream_body(&base_opts());
         assert!(base.get("client_llm").is_none());
 
-        let blank = chat_stream_body(ChatStreamArgs {
-            message: "hi",
-            conversation_id: None,
-            approval_session_id: "a1",
-            client_llm: Some(ClientLlm {
-                api_key: Some("   "),
+        let blank = chat_stream_body(&ChatStreamOptions {
+            client_llm: Some(ClientLlmFields {
+                api_key: Some("   ".into()),
                 model: None,
-                api_base: Some(""),
+                api_base: Some(String::new()),
             }),
-            agent_role: None,
-            session_mode: None,
-            stream_resume: None,
+            ..base_opts()
         });
         assert_eq!(blank, base);
     }
 
     #[test]
     fn chat_body_includes_stream_resume() {
-        let body = chat_stream_body(ChatStreamArgs {
-            message: "hi",
-            conversation_id: Some("c1"),
-            approval_session_id: "a1",
-            client_llm: None,
-            agent_role: None,
-            session_mode: None,
+        let body = chat_stream_body(&ChatStreamOptions {
+            conversation_id: Some("c1".into()),
             stream_resume: Some(StreamResume {
                 job_id: 42,
                 after_seq: 7,
             }),
+            ..base_opts()
         });
         assert_eq!(body["stream_resume"]["job_id"], 42);
         assert_eq!(body["stream_resume"]["after_seq"], 7);
@@ -607,14 +719,10 @@ mod tests {
 
     #[test]
     fn chat_body_includes_agent_role_and_session_mode() {
-        let body = chat_stream_body(ChatStreamArgs {
-            message: "hi",
-            conversation_id: None,
-            approval_session_id: "a1",
-            client_llm: None,
-            agent_role: Some(" coder "),
-            session_mode: Some("plan"),
-            stream_resume: None,
+        let body = chat_stream_body(&ChatStreamOptions {
+            agent_role: Some(" coder ".into()),
+            session_mode: Some("plan".into()),
+            ..base_opts()
         });
         assert_eq!(body["agent_role"], "coder");
         assert_eq!(body["session_mode"], "plan");
@@ -622,17 +730,21 @@ mod tests {
 
     #[test]
     fn chat_body_omits_mode_and_role_when_unset() {
-        let body = chat_stream_body(ChatStreamArgs {
-            message: "hi",
-            conversation_id: None,
-            approval_session_id: "a1",
-            client_llm: None,
-            agent_role: None,
-            session_mode: Some("   "),
-            stream_resume: None,
+        let body = chat_stream_body(&ChatStreamOptions {
+            session_mode: Some("   ".into()),
+            ..base_opts()
         });
         assert!(body.get("agent_role").is_none());
         assert!(body.get("session_mode").is_none());
+    }
+
+    #[test]
+    fn chat_body_default_omits_optional_blocks() {
+        let body = chat_stream_body(&base_opts());
+        assert!(body.get("client_llm").is_none());
+        assert!(body.get("agent_role").is_none());
+        assert!(body.get("session_mode").is_none());
+        assert!(body.get("stream_resume").is_none());
     }
 
     #[test]
@@ -659,5 +771,15 @@ mod tests {
         assert_eq!(parse_stream_job_id("12"), Some(12));
         assert_eq!(parse_stream_job_id("abc"), None);
         assert_eq!(parse_stream_job_id(""), None);
+    }
+
+    #[test]
+    fn stream_cancel_counts_first_then_force_quit() {
+        let c = StreamCancel::new();
+        assert_eq!(*c.rx.borrow(), 0);
+        c.cancel();
+        assert_eq!(*c.rx.borrow(), 1);
+        c.cancel();
+        assert_eq!(*c.rx.borrow(), 2);
     }
 }
