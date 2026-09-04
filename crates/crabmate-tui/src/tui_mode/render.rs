@@ -1,4 +1,5 @@
-//! 全屏 TUI 渲染：状态行 / 主区 transcript / 底栏输入。纯函数为主，便于单测。
+//! 全屏 TUI 渲染：状态行 / 左栏会话 / 主区 transcript / 底栏输入。
+//! 布局纯函数为主，便于单测。
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout};
@@ -7,20 +8,25 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-use super::state::{LineKind, UiState};
+use super::state::{Focus, LineKind, UiState};
 
-/// 状态行展示所需信息（从 main 层配置派生）。
-#[derive(Debug, Clone, Copy)]
-pub struct StatusInfo<'a> {
-    pub api_base: &'a str,
-    pub model: Option<&'a str>,
-    pub role: Option<&'a str>,
-    pub mode: Option<&'a str>,
+/// 低于此宽度隐藏左栏（等价 repl 布局）。
+const SIDEBAR_MIN_WIDTH: u16 = 120;
+/// 左栏宽度。
+const SIDEBAR_WIDTH: u16 = 26;
+const INPUT_PROMPT: &str = "crabmate> ";
+const SIDEBAR_HINT: &str = "↑↓选 Enter用 n新建 r刷新";
+
+/// 状态行展示信息（mod 层组装好的显示值，含 override 标记）。
+pub struct StatusInfo {
+    pub api_base: String,
+    /// 生效模型；本地 override 时带 `*` 后缀。
+    pub model: Option<String>,
+    pub role: Option<String>,
+    pub mode: Option<String>,
     pub running: bool,
     pub cancel_sent: bool,
 }
-
-const INPUT_PROMPT: &str = "crabmate> ";
 
 fn kind_style(kind: LineKind) -> (String, Style) {
     match kind {
@@ -106,17 +112,17 @@ fn truncate_display(text: &str, width: usize) -> String {
     out
 }
 
-/// 状态行内容（单行）。
+/// 状态行内容（单行）。conv 为当前 conversation_id。
 fn status_text(info: &StatusInfo, conv: Option<&str>, width: usize) -> String {
     let mut parts: Vec<String> = Vec::new();
     parts.push(format!("serve {}", info.api_base));
-    if let Some(m) = info.model {
+    if let Some(m) = info.model.as_deref() {
         parts.push(format!("model {m}"));
     }
-    if let Some(r) = info.role {
+    if let Some(r) = info.role.as_deref() {
         parts.push(format!("role {r}"));
     }
-    if let Some(mode) = info.mode {
+    if let Some(mode) = info.mode.as_deref() {
         parts.push(format!("mode {mode}"));
     }
     parts.push(match conv {
@@ -131,9 +137,72 @@ fn status_text(info: &StatusInfo, conv: Option<&str>, width: usize) -> String {
     truncate_display(&parts.join(" | "), width)
 }
 
-/// 渲染一帧。光标位置限制在输入区右侧，超出时收尾。
-pub fn draw(frame: &mut Frame, st: &UiState, info: &StatusInfo) {
+/// 左栏内容行：首行标题，其后每会话一行（`>` 当前，`*` serve 活跃，选中高亮）。
+fn sidebar_rows(st: &UiState, width: usize) -> Vec<Line<'static>> {
+    let mut rows: Vec<Line<'static>> = Vec::new();
+    let title = format!("会话 [{}]", st.sessions.len());
+    rows.push(Line::from(Span::styled(
+        truncate_display(&title, width),
+        Style::new().fg(Color::Blue).add_modifier(Modifier::BOLD),
+    )));
+    if st.sessions.is_empty() {
+        rows.push(Line::from(Span::styled(
+            truncate_display("（空）发一条消息后出现", width),
+            Style::new().fg(Color::DarkGray),
+        )));
+        return rows;
+    }
+    for (i, row) in st.sessions.iter().enumerate() {
+        let mark = if st.row_in_use(row) {
+            ">"
+        } else if st.active_session_id.as_deref() == Some(row.id.as_str()) {
+            "*"
+        } else {
+            " "
+        };
+        let title = if row.title.trim().is_empty() {
+            "(untitled)"
+        } else {
+            row.title.trim()
+        };
+        let text = truncate_display(&format!("{mark} {title}"), width);
+        let style = match (st.focus, st.selected == i) {
+            (Focus::Sidebar, true) => Style::new().add_modifier(Modifier::REVERSED),
+            (Focus::Input, true) => Style::new().add_modifier(Modifier::BOLD),
+            _ => Style::new(),
+        };
+        rows.push(Line::from(Span::styled(text, style)));
+    }
+    rows
+}
+
+/// 对左栏内容做窗口裁剪：标题固定，条目区尽量让选中行可见。
+fn sidebar_view<'a>(rows: &[Line<'a>], height: usize, selected: usize) -> Vec<Line<'a>> {
+    if height == 0 {
+        return Vec::new();
+    }
+    if rows.len() <= height {
+        return rows.to_vec();
+    }
+    let mut out = Vec::with_capacity(height);
+    out.push(rows[0].clone());
+    let item_max = height - 1;
+    let items_len = rows.len() - 1;
+    let sel = selected.min(items_len.saturating_sub(1));
+    let start = if sel < item_max {
+        0
+    } else {
+        sel + 1 - item_max
+    };
+    let end = (start + item_max).min(items_len);
+    out.extend(rows[start + 1..end + 1].iter().cloned());
+    out
+}
+
+/// 渲染一帧。光标列按显示宽度并支持超宽水平滚动。
+pub fn draw(frame: &mut Frame, st: &mut UiState, info: &StatusInfo) {
     let area = frame.area();
+    st.sidebar_visible = area.width >= SIDEBAR_MIN_WIDTH;
     let chunks = Layout::vertical([
         Constraint::Length(1),
         Constraint::Min(1),
@@ -151,36 +220,68 @@ pub fn draw(frame: &mut Frame, st: &UiState, info: &StatusInfo) {
     ));
     frame.render_widget(status, status_area);
 
-    if st.lines.is_empty() {
-        let hint = Paragraph::new("（空）输入消息开始对话 · Ctrl+C 退出");
-        frame.render_widget(hint, body_area);
+    if st.sidebar_visible {
+        let cols = Layout::horizontal([Constraint::Length(SIDEBAR_WIDTH), Constraint::Min(0)])
+            .split(body_area);
+        render_sidebar(frame, st, cols[0]);
+        render_body(frame, st, cols[1]);
     } else {
-        let mut rows = display_lines(st, (body_area.width as usize).saturating_sub(1));
-        let rows_total = rows.len();
-        let viewport = (body_area.height as usize).saturating_sub(1);
-        let back = st.view_offset.min(rows_total.saturating_sub(viewport));
-        let end = rows_total.saturating_sub(back);
-        let start = end.saturating_sub(viewport);
-        let shown = rows.split_off(start);
-        frame.render_widget(Paragraph::new(shown), body_area);
+        render_body(frame, st, body_area);
     }
 
+    render_input(frame, st, input_area);
+}
+
+fn render_sidebar(frame: &mut Frame, st: &UiState, area: ratatui::layout::Rect) {
+    if area.height == 0 {
+        return;
+    }
+    let cols = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(area);
+    let list_area = cols[0];
+    let rows = sidebar_rows(st, area.width.saturating_sub(1) as usize);
+    let shown = sidebar_view(&rows, list_area.height as usize, st.selected);
+    frame.render_widget(Paragraph::new(shown), list_area);
+    if cols[1].height > 0 && st.focus == Focus::Sidebar {
+        let hint = Paragraph::new(Span::styled(SIDEBAR_HINT, Style::new().fg(Color::DarkGray)));
+        frame.render_widget(hint, cols[1]);
+    }
+}
+
+fn render_body(frame: &mut Frame, st: &UiState, area: ratatui::layout::Rect) {
+    if st.lines.is_empty() {
+        let hint = Paragraph::new("（空）输入消息开始对话 · Ctrl+C 退出 · Tab 切到会话列表");
+        frame.render_widget(hint, area);
+        return;
+    }
+    let mut rows = display_lines(st, (area.width as usize).saturating_sub(1));
+    let rows_total = rows.len();
+    let viewport = (area.height as usize).saturating_sub(1);
+    let back = st.view_offset.min(rows_total.saturating_sub(viewport));
+    let end = rows_total.saturating_sub(back);
+    let start = end.saturating_sub(viewport);
+    let shown = rows.split_off(start);
+    frame.render_widget(Paragraph::new(shown), area);
+}
+
+fn render_input(frame: &mut Frame, st: &UiState, area: ratatui::layout::Rect) {
     let input = st.current_input();
     let before = st.input_before_cursor();
     let full = format!("{INPUT_PROMPT}{input}");
-    let visible_w = input_area.width.saturating_sub(1) as usize;
+    let visible_w = area.width.saturating_sub(1) as usize;
+    let paragraph = Paragraph::new(Line::from(Span::raw(visible_window(&full, 0, visible_w).0)));
+    frame.render_widget(paragraph, area);
+    if st.focus != Focus::Input {
+        return;
+    }
     // 光标用显示列（CJK=2 列），不是字符数。
     let cursor_cell =
         UnicodeWidthStr::width(INPUT_PROMPT) + UnicodeWidthStr::width(before.as_str());
-    let (shown, shown_cursor) = visible_window(&full, cursor_cell, visible_w);
-    let paragraph = Paragraph::new(Line::from(Span::raw(shown)));
-    frame.render_widget(paragraph, input_area);
-    let col = input_area.x.saturating_add(shown_cursor as u16).min(
-        input_area
-            .x
-            .saturating_add(input_area.width.saturating_sub(1)),
-    );
-    frame.set_cursor_position((col, input_area.y));
+    let (_, shown_cursor) = visible_window(&full, cursor_cell, visible_w);
+    let col = area
+        .x
+        .saturating_add(shown_cursor as u16)
+        .min(area.x.saturating_add(area.width.saturating_sub(1)));
+    frame.set_cursor_position((col, area.y));
 }
 
 /// 输入行水平窗口：内容不超宽原样返回；超宽时滚动窗口使光标保持可见。
@@ -224,6 +325,7 @@ fn cell_window(text: &str, start: usize, cells: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crabmate_tui_core::SessionListItem;
 
     #[test]
     fn wrap_splits_wide_chars() {
@@ -257,7 +359,6 @@ mod tests {
         let mut st = UiState::new();
         st.push_line(LineKind::Assistant, "一二三四五六七八九十");
         let lines = display_lines(&st, 4);
-        // 前缀只在首物理行：首行 2 个 span，续行 1 个 span
         assert!(lines.len() >= 2);
         assert_eq!(lines[0].spans.len(), 2);
         assert_eq!(lines[1].spans.len(), 1);
@@ -266,16 +367,16 @@ mod tests {
     #[test]
     fn status_line_lists_overrides() {
         let info = StatusInfo {
-            api_base: "http://127.0.0.1:8080",
-            model: Some("gpt-x"),
-            role: Some("coder"),
-            mode: Some("plan"),
+            api_base: "http://127.0.0.1:8080".into(),
+            model: Some("gpt-x*".into()),
+            role: Some("coder".into()),
+            mode: Some("plan".into()),
             running: false,
             cancel_sent: false,
         };
         let s = status_text(&info, Some("c1"), 200);
         assert!(s.contains("serve http://127.0.0.1:8080"));
-        assert!(s.contains("model gpt-x"));
+        assert!(s.contains("model gpt-x*"));
         assert!(s.contains("role coder"));
         assert!(s.contains("mode plan"));
         assert!(s.contains("conv c1"));
@@ -285,7 +386,7 @@ mod tests {
     #[test]
     fn status_shows_running_state() {
         let info = StatusInfo {
-            api_base: "http://x",
+            api_base: "http://x".into(),
             model: None,
             role: None,
             mode: None,
@@ -293,6 +394,70 @@ mod tests {
             cancel_sent: true,
         };
         assert!(status_text(&info, None, 80).contains("…取消中"));
+    }
+
+    #[test]
+    fn status_uses_serve_defaults_when_no_override() {
+        let info = StatusInfo {
+            api_base: "http://x".into(),
+            model: Some("deepseek".into()),
+            role: None,
+            mode: None,
+            running: false,
+            cancel_sent: false,
+        };
+        let s = status_text(&info, None, 200);
+        assert!(s.contains("model deepseek"));
+        assert!(!s.contains("mode "));
+    }
+
+    fn row(id: &str, title: &str, conv: Option<&str>) -> SessionListItem {
+        SessionListItem {
+            id: id.to_string(),
+            title: title.to_string(),
+            server_conversation_id: conv.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn sidebar_rows_marks_current_and_active() {
+        let mut st = UiState::new();
+        st.replace_sessions(vec![
+            row("a", "Alpha", Some("c1")),
+            row("b", "Beta", Some("c2")),
+        ]);
+        st.conversation_id = Some("c1".into());
+        st.active_session_id = Some("b".into());
+        let rows = sidebar_rows(&st, 20);
+        assert_eq!(rows.len(), 3);
+        assert!(rows[1].to_string().contains("> Alpha"));
+        assert!(rows[2].to_string().contains("* Beta"));
+    }
+
+    #[test]
+    fn sidebar_rows_untitled_and_truncate() {
+        let mut st = UiState::new();
+        st.replace_sessions(vec![row("a", "这是一个很长的会话标题标题", None)]);
+        let rows = sidebar_rows(&st, 10);
+        assert!(rows[1].to_string().contains("(untitled)") || rows[1].to_string().contains("…"));
+    }
+
+    #[test]
+    fn sidebar_view_keeps_selected_visible() {
+        let mut rows: Vec<Line<'static>> = vec![Line::from("header")];
+        rows.extend((0..10).map(|i| Line::from(format!("item{i}"))));
+        let v = sidebar_view(&rows, 4, 7);
+        assert_eq!(v.len(), 4);
+        assert!(v.last().unwrap().to_string().contains("item7"));
+        assert!(v.first().unwrap().to_string().contains("header"));
+    }
+
+    #[test]
+    fn sidebar_view_fits_without_window() {
+        let mut rows: Vec<Line<'static>> = vec![Line::from("header")];
+        rows.extend((0..3).map(|i| Line::from(format!("item{i}"))));
+        let v = sidebar_view(&rows, 5, 1);
+        assert_eq!(v.len(), 4);
     }
 
     #[test]
@@ -310,7 +475,6 @@ mod tests {
 
     #[test]
     fn visible_window_scrolls_to_cursor_on_right() {
-        // 内容宽 8 > 宽 4；光标在末尾：窗口滚到 content 尾部，光标贴右缘。
         let (s, c) = visible_window("abcdefgh", 8, 4);
         assert_eq!(s, "efgh");
         assert_eq!(c, 4);

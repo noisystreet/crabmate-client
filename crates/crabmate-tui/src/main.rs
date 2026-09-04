@@ -208,7 +208,7 @@ async fn run() -> Result<()> {
             conversation_id,
             no_probe,
         } => run_repl(&client, conversation_id, no_probe, yes, &mut overrides).await,
-        Commands::Tui { no_probe } => run_tui_cmd(&client, no_probe, yes, &overrides).await,
+        Commands::Tui { no_probe } => run_tui_cmd(&client, no_probe, yes, &mut overrides).await,
     }
 }
 
@@ -216,7 +216,7 @@ async fn run_tui_cmd(
     client: &ServeClient,
     no_probe: bool,
     yes: bool,
-    overrides: &SessionPrefs,
+    overrides: &mut SessionPrefs,
 ) -> Result<()> {
     ensure_tty()?;
     maybe_probe(client, no_probe).await?;
