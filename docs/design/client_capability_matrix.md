@@ -51,13 +51,14 @@ Blank cells are forbidden.
 
 | Capability | Desktop | Android | Web | TUI | Notes |
 |------------|---------|---------|-----|-----|-------|
+| Full-screen TUI (ratatui) | no | no | no | yes | `crabmate-tui tui`: status bar + streaming transcript + single-line input + Ctrl+C cancel (M1); session sidebar with use/new + `/status` serve-default linkage (M2). Sidebar hidden below 120 columns; switching sessions starts a fresh transcript (no history replay). Approval overlay is M3. |
 | `POST /chat/stream` + command approval | yes | yes | yes | yes | Android: notification keep-alive. TUI: TTY menu or `--yes`. |
-| Stop in-flight turn (`POST …/cancel`) | yes | yes | yes | yes | WASM Stop POSTs cancel; if `job_id` is not in yet, SSE stays open until `x-stream-job-id`. TUI: first Ctrl+C cancels the turn (`x-stream-job-id` → `POST …/cancel`) and returns to the prompt; a second Ctrl+C force-quits. `serve` without the cancel route degrades to a local interrupt. |
+| Stop in-flight turn (`POST …/cancel`) | yes | yes | yes | yes | WASM Stop POSTs cancel; if `job_id` is not in yet, SSE stays open until `x-stream-job-id`. TUI: first Ctrl+C cancels the turn (`x-stream-job-id` → `POST …/cancel`) and returns to the prompt; a second Ctrl+C force-quits. Full-screen `tui` uses the same semantics through an external-cancel channel (raw mode has no SIGINT). `serve` without the cancel route degrades to a local interrupt. |
 | Tool-card compact/detail | yes | yes | yes | no | TUI prints classified SSE as text (`crabmate-tool-card` is WASM-only). |
 | Chat image attach / lightbox | yes | yes | yes | no | |
 | Ask / Plan / Act in composer | yes | yes | yes | yes | TUI: `/mode ask|plan|act` sets `session_mode`; `/role <id>` sets `agent_role` for later turns. |
 | Control slashes (not sent to the model) | yes | yes | yes | reduced | Shared names: `help` / `workspace` / `cd` / `status` / `model` / `mode` / `role` / `resume`. Web has more (`export`, …). TUI: `/conv` `/quit` and more. |
-| Web session list + resume by `server_conversation_id` | yes | yes | yes | reduced | TUI: `/conv list` / `use`; no full WASM session CRUD/export. |
+| Web session list + resume by `server_conversation_id` | yes | yes | yes | reduced | TUI: repl `/conv list` / `use`; full-screen `tui` shows the list in a sidebar (Tab → ↑/↓ select, Enter use, n new, r refresh). No full WASM session CRUD/export. |
 | In-app stream resume after background | yes | yes | reduced | yes | TUI: repl records a dropped run's `x-stream-job-id` + `last_event_id` and `/resume` re-attaches with `stream_resume:{job_id,after_seq}`. Ctrl+C stops the run; if the cancel request is not acknowledged the job may stay alive and `/resume` still applies. Cleanly finished turns are not resumable. |
 | Per-turn inject / trim transcript notes | yes | yes | yes | no | WASM: Server `timeline_log` `context_inject` / `context_trim`; **hidden by default**; Settings → Appearance. Export never includes them. TUI prints classified SSE as text (no toggle). |
 

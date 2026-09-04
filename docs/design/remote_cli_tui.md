@@ -1,6 +1,6 @@
 # 远程 CLI / TUI（路径 B）
 
-> **状态**：方案（已拍板走 **远程客户端**；**P3 已落地** `repl` 斜杠 `/help` `/workspace` `/conv`）  
+> **状态**：方案（已拍板走 **远程客户端**；**P3 已落地** `repl` 斜杠 `/help` `/workspace` `/conv`；**P4 M1–M2 已落地**：全屏 `tui` 流式 transcript + 状态行 + 单行输入 + Ctrl+C 取消，以及左栏会话列表/切换与 `/status` 状态行联动）  
 > **范围**：`crabmate-client` 新增终端面；`crabmate serve` 仍为执行权威  
 > **关联**：Server [`client_shell_split.md`](https://github.com/noisystreet/CrabMate/blob/main/docs/design/client_shell_split.md)、[`命令行与路由.md`](https://github.com/noisystreet/CrabMate/blob/main/docs/命令行与路由.md)、本仓 [`contract_pin.md`](./contract_pin.md) / [`personal_cloud_runbook.md`](./personal_cloud_runbook.md)
 
@@ -29,7 +29,7 @@
 |----|------|
 | 形态 | **远程客户端**（同 Tauri 壳）：只认 `serve` API |
 | 二进制名 | **`crabmate-tui`**（避免与 Server 包名 `crabmate` / Desktop `crabmate-desktop` 冲突） |
-| 子命令（终态） | `connect`（探测）· `chat`（单轮/管道）· `repl`（交互行编辑）· `tui`（全屏，后置） |
+| 子命令（终态） | `connect`（探测）· `chat`（单轮/管道）· `repl`（交互行编辑）· `tui`（全屏，M1–M2 已落地） |
 | 契约 | crates.io `crabmate` `0.5.0` + `protocol`（与 `frontend` 同一钉点） |
 | HTTP 客户端 | `reqwest` + rustls；SSE 解析对齐协议 crate |
 | 连接配置 | 复用/对齐 connect 键：`api_base`、Web Bearer；密钥读取与壳**同源**（read-only 回退，见 §4），不写壳槽位 |
@@ -88,7 +88,7 @@ crates/
 | **P1** | `crabmate-tui`：`chat` 单轮 + Bearer + `/chat/stream` 文本输出 | 对本地 `serve` 跑通一轮；CI 可选 smoke |
 | **P2** | 交互 `repl`（reedline 或最小行编辑）+ 审批 TTY + 会话 id 续聊 | 非白名单命令可审批；Ctrl+C 干净退出 |
 | **P3** | 工作区/会话斜杠子集与 WASM 设置对齐的常用操作 | `/workspace`、列会话等 |
-| **P4** | 实验性 `tui`（ratatui）：流式中区 + 底栏输入；布局可简化 | TTY 全屏可用；不要求三栏齐全 |
+| **P4** | 实验性 `tui`（ratatui）：流式 transcript + 底栏输入（**M1 已落地**）；左栏会话 + 状态行联动（**M2 已落地**）；审批浮层 / thinking 折叠 / 滚动搜索等收尾（M3） | TTY 全屏可用；窄终端（<120 列）自动隐藏左栏 |
 | **P5** | 文档 / `.deb` 或 cargo 安装说明；Server 侧标注同进程 CLI「过渡 / deprecate 窗口」 | README 双语文案同步；Client `make tui-release` 产出仅二进制的 `crabmate-tui_*.deb`（无图标、无配置） |
 
 **建议开工顺序**：P1 → P2；P4 可与 P3 并行但不要阻塞 P2。
@@ -114,7 +114,7 @@ crates/
 | 策略 | **B：远程 CLI/TUI 进 Client 仓** |
 | 同进程 Agent CLI | **不**迁入；Server 可暂留 |
 | 执行权威 | 仅 `serve` |
-| 下一步 | 实现 **P4**（实验性全屏 `tui`）或发版向 **P5** |
+| 下一步 | P4 收尾（全屏 `tui` 审批浮层 / thinking 折叠 / 滚动搜索 / 多行输入）或发版向 P5 |
 
 ---
 

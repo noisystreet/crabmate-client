@@ -31,7 +31,7 @@ Connects to a compatible **`crabmate serve`** (local or remote). Does **not** sp
 ├── crates/crabmate-tool-card/  # Tool-card compact/detail (in-repo path after W2; not git-pinned to Server)
 ├── crates/crabmate-connect/   # Connect-page logic (path dep in this repo; do not path back to Server)
 ├── crates/crabmate-tui-core/  # Remote terminal HTTP/SSE core
-├── crates/crabmate-tui/       # Binary crabmate-tui (P3: chat / repl + slashes)
+├── crates/crabmate-tui/       # Binary crabmate-tui (chat / repl / full-screen tui)
 ├── crates/crabmate-web-host/  # Binary crabmate-web (loopback static UI host)
 ├── desktop-tauri/             # Desktop Linux (Tauri 2)
 ├── mobile-tauri/              # Android (Tauri 2)
@@ -112,6 +112,19 @@ Design: [docs/design/remote_cli_tui.md](./docs/design/remote_cli_tui.md). Releas
 make tui-release
 sudo dpkg -i crates/crabmate-tui/target/debian/crabmate-tui_*.deb
 crabmate-tui --api-base http://127.0.0.1:8080 repl
+```
+
+Full-screen `tui` (ratatui; shows a session sidebar on terminals ≥ 120 columns wide):
+
+```bash
+./crates/crabmate-tui/target/debug/crabmate-tui \
+  --api-base http://127.0.0.1:8080 \
+  tui
+# Layout: status bar | session sidebar | streaming transcript | input bar
+# Ctrl+C cancels the in-flight turn (twice force-quits; idle exits)
+# Tab → session list (↑/↓ select · Enter use · n new · r refresh · Esc back)
+# Slashes: /model /mode /role /status /conv [new] /quit  (status bar shows serve defaults,
+# local overrides are marked with `*`; switching sessions starts a fresh transcript)
 ```
 
 ## Docs
