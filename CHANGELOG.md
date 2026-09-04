@@ -18,6 +18,7 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 - `crabmate-tui` reuses the **desktop shell's saved secrets** when flags/env are missing: without `--bearer` it reads the shell Web Bearer keyring slot (`com.crabmate.credentials` / `tauri_connect_web_api_bearer`), and without `--llm-api-key` / `CM_API_KEY` it reads the shell `client_llm` model-key slot (`tauri_client_llm_api_key`) — read-only, same OS keyring the Desktop shell writes. `--no-keyring` disables the fallback.
 - `crabmate-tui` repl can **resume a dropped run**: a network/stream interruption keeps the serve-side job alive and repl remembers its `x-stream-job-id` + last SSE sequence; `/resume` re-attaches with `stream_resume:{job_id,after_seq}`. Cleanly finished turns are not resumable; a Ctrl+C whose cancel request was not acknowledged (job may still run) keeps the resume point.
 - `crabmate-tui` repl adds **`/status`** (`GET /status?view=shell`: serve model / api_base / agent role / session mode / context budgets) and **`/model [name]`** (client-side `client_llm.model` override for later turns; `off` clears), all without restarting.
+- `crabmate-tui` repl can set **`/mode ask|plan|act`** (requested `session_mode`) and **`/role <id>`** (`agent_role`) for subsequent turns, aligning with the Desktop composer; `off` clears either.
 
 ### Changed
 

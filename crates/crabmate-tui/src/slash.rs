@@ -16,7 +16,17 @@ pub fn is_control_slash(trimmed: &str) -> bool {
     };
     matches!(
         head.as_str(),
-        "help" | "?" | "workspace" | "cd" | "conv" | "status" | "quit" | "exit" | "q"
+        "help"
+            | "?"
+            | "workspace"
+            | "cd"
+            | "conv"
+            | "status"
+            | "mode"
+            | "role"
+            | "quit"
+            | "exit"
+            | "q"
     )
 }
 
@@ -103,6 +113,8 @@ fn print_help() {
   /help                 this text\n\
   /status               show serve model / endpoint / session mode (GET /status)\n\
   /model [name]         set client-side model override for later turns (off to clear)\n\
+  /mode ask|plan|act    set session mode for later turns (off to clear)\n\
+  /role <id>            set agent role for later turns (off to clear; list via /status)\n\
   /resume               resume the last interrupted run (network drop)\n\
   /workspace [path]     show or set serve workspace root (/cd alias)\n\
   /conv                 show current conversation_id\n\
