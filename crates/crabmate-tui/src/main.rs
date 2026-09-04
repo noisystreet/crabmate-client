@@ -18,7 +18,7 @@ use reedline::{DefaultPrompt, DefaultPromptSegment, Reedline, Signal};
 
 use crate::approval_tty::TtyApprovalGate;
 use crate::slash::{handle_control_slash, is_control_slash};
-use crate::turn::run_turn;
+use crate::turn::{TurnPrefs, run_turn};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -100,14 +100,17 @@ struct ResumePoint {
     after_seq: u64,
 }
 
-/// `client_llm` 覆盖（owned，供 repl 内 `/model` 运行时切换；chat 一次性用 `client_llm()` 派生）。
-struct LlmOverrides {
+/// repl 会话内可变的偏好：`client_llm` 覆盖（model/api_base/api_key）+ agent role + session mode。
+/// chat 一次性用 `prefs()` 派生；空白值在发送层自动省略。
+struct SessionPrefs {
     api_key: Option<String>,
     model: Option<String>,
     api_base: Option<String>,
+    agent_role: Option<String>,
+    session_mode: Option<String>,
 }
 
-impl LlmOverrides {
+impl SessionPrefs {
     fn from_options(
         api_key: Option<String>,
         model: Option<String>,
@@ -117,6 +120,8 @@ impl LlmOverrides {
             api_key,
             model,
             api_base,
+            agent_role: None,
+            session_mode: None,
         }
     }
 
@@ -127,6 +132,15 @@ impl LlmOverrides {
             self.model.as_deref(),
             self.api_base.as_deref(),
         )
+    }
+
+    /// 随本轮发送的完整偏好（client_llm + agent_role + session_mode）。
+    fn prefs(&self) -> TurnPrefs<'_> {
+        TurnPrefs {
+            client_llm: self.client_llm(),
+            agent_role: self.agent_role.as_deref(),
+            session_mode: self.session_mode.as_deref(),
+        }
     }
 }
 
@@ -175,7 +189,7 @@ async fn run() -> Result<()> {
         ..
     } = cli;
     let llm_key = resolve_llm_key(llm_api_key.as_deref(), no_keyring);
-    let mut overrides = LlmOverrides::from_options(llm_key, llm_model, llm_api_base);
+    let mut overrides = SessionPrefs::from_options(llm_key, llm_model, llm_api_base);
     match command {
         Commands::Connect => run_connect(&client).await,
         Commands::Chat {
@@ -300,7 +314,7 @@ async fn run_chat(
     conversation_id: Option<String>,
     no_probe: bool,
     yes: bool,
-    overrides: &LlmOverrides,
+    overrides: &SessionPrefs,
 ) -> Result<()> {
     maybe_probe(client, no_probe).await?;
     let text = resolve_message(message)?;
@@ -308,12 +322,12 @@ async fn run_chat(
         bail!("empty message");
     }
     let mut gate = make_gate(yes);
-    let llm = overrides.client_llm();
+    let prefs = overrides.prefs();
     let outcome = run_turn(
         client,
         &text,
         conversation_id.as_deref(),
-        llm,
+        prefs,
         None,
         &mut gate,
     )
@@ -331,7 +345,7 @@ async fn run_repl(
     conversation_id: Option<String>,
     no_probe: bool,
     yes: bool,
-    overrides: &mut LlmOverrides,
+    overrides: &mut SessionPrefs,
 ) -> Result<()> {
     ensure_repl_tty()?;
     maybe_probe(client, no_probe).await?;
@@ -394,20 +408,28 @@ async fn dispatch_repl_line(
     line: &str,
     conversation_id: &mut Option<String>,
     resume: &mut Option<ResumePoint>,
-    overrides: &mut LlmOverrides,
+    overrides: &mut SessionPrefs,
     yes: bool,
 ) -> Result<bool> {
     let text = line.trim();
     if text.is_empty() {
         return Ok(true);
     }
-    // 仅形如 `/resume` `/model` 的控制输入才拦截；普通消息即使首词为 model/resume 也要发给模型。
+    // 仅形如 `/resume` `/model` 等控制输入才拦截；普通消息即使首词为 model/resume 也要发给模型。
     match repl_control_head(text) {
         Some("resume") => {
             return resume_turn(client, conversation_id, resume, overrides, yes).await;
         }
         Some("model") => {
             handle_model_slash(text, overrides);
+            return Ok(true);
+        }
+        Some("mode") => {
+            handle_mode_slash(text, overrides);
+            return Ok(true);
+        }
+        Some("role") => {
+            handle_role_slash(text, overrides);
             return Ok(true);
         }
         _ => {}
@@ -422,12 +444,12 @@ async fn dispatch_repl_line(
         };
     }
     let mut gate = make_gate(yes);
-    let llm = overrides.client_llm();
+    let prefs = overrides.prefs();
     match run_turn(
         client,
         text,
         conversation_id.as_deref(),
-        llm,
+        prefs,
         None,
         &mut gate,
     )
@@ -485,7 +507,7 @@ async fn resume_turn(
     client: &ServeClient,
     conversation_id: &mut Option<String>,
     resume: &mut Option<ResumePoint>,
-    overrides: &LlmOverrides,
+    overrides: &SessionPrefs,
     yes: bool,
 ) -> Result<bool> {
     let Some(point) = resume.take() else {
@@ -493,7 +515,7 @@ async fn resume_turn(
         return Ok(true);
     };
     let mut gate = make_gate(yes);
-    let llm = overrides.client_llm();
+    let prefs = overrides.prefs();
     let stream_resume = StreamResume {
         job_id: point.job_id,
         after_seq: point.after_seq,
@@ -502,7 +524,7 @@ async fn resume_turn(
         client,
         &point.message,
         point.conversation_id.as_deref(),
-        llm,
+        prefs,
         Some(stream_resume),
         &mut gate,
     )
@@ -562,19 +584,29 @@ fn repl_control_head(text: &str) -> Option<&'static str> {
     {
         "resume" => Some("resume"),
         "model" => Some("model"),
+        "mode" => Some("mode"),
+        "role" => Some("role"),
         _ => None,
     }
 }
 
-/// `/model [name]`：查看或设置 repl 会话内的 `client_llm.model` 覆盖（`off`/`none`/`clear` 清除）。
-fn handle_model_slash(text: &str, overrides: &mut LlmOverrides) {
-    let arg = text
-        .split_whitespace()
+/// 取斜杠后的参数（trim；无参为空串）。
+fn slash_arg(text: &str) -> String {
+    text.split_whitespace()
         .skip(1)
         .collect::<Vec<_>>()
         .join(" ")
         .trim()
-        .to_string();
+        .to_string()
+}
+
+fn clear_word(arg: &str) -> bool {
+    matches!(arg, "off" | "none" | "clear")
+}
+
+/// `/model [name]`：查看或设置 repl 会话内的 `client_llm.model` 覆盖（`off`/`none`/`clear` 清除）。
+fn handle_model_slash(text: &str, overrides: &mut SessionPrefs) {
+    let arg = slash_arg(text);
     if arg.is_empty() {
         match overrides
             .model
@@ -587,7 +619,7 @@ fn handle_model_slash(text: &str, overrides: &mut LlmOverrides) {
         }
         return;
     }
-    if matches!(arg.as_str(), "off" | "none" | "clear") {
+    if clear_word(&arg) {
         overrides.model = None;
         println!("model override cleared");
         return;
@@ -596,6 +628,54 @@ fn handle_model_slash(text: &str, overrides: &mut LlmOverrides) {
     println!(
         "model override: {}",
         overrides.model.as_deref().unwrap_or_default()
+    );
+}
+
+/// `/mode ask|plan|act`：查看或设置本轮 `session_mode`（`off` 清除；无效值给出提示）。
+fn handle_mode_slash(text: &str, overrides: &mut SessionPrefs) {
+    let arg = slash_arg(text);
+    if arg.is_empty() {
+        match overrides.session_mode.as_deref() {
+            Some(m) if !m.trim().is_empty() => println!("session mode: {m}"),
+            _ => println!("session mode: (serve 默认；/mode ask|plan|act 设置)"),
+        }
+        return;
+    }
+    if clear_word(&arg) {
+        overrides.session_mode = None;
+        println!("session mode cleared");
+        return;
+    }
+    if !matches!(arg.as_str(), "ask" | "plan" | "act") {
+        eprintln!("invalid session mode '{arg}'; 可选 ask / plan / act（off 清除）");
+        return;
+    }
+    overrides.session_mode = Some(arg);
+    println!(
+        "session mode: {}",
+        overrides.session_mode.as_deref().unwrap_or_default()
+    );
+}
+
+/// `/role <id>`：查看或设置本轮 `agent_role`（`off` 清除）。可用 role 见 `/status`。
+fn handle_role_slash(text: &str, overrides: &mut SessionPrefs) {
+    let arg = slash_arg(text);
+    if arg.is_empty() {
+        match overrides.agent_role.as_deref() {
+            Some(r) if !r.trim().is_empty() => println!("agent role: {r}"),
+            _ => println!("agent role: (serve 默认；/role <id> 设置，可用列表见 /status)"),
+        }
+        return;
+    }
+    if clear_word(&arg) {
+        overrides.agent_role = None;
+        println!("agent role cleared");
+        return;
+    }
+    overrides.agent_role = Some(arg);
+    println!(
+        "agent role: {}",
+        overrides.agent_role.as_deref().unwrap_or_default()
     );
 }
 
@@ -632,8 +712,9 @@ fn is_interrupted(err: &anyhow::Error) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        LlmOverrides, ResumePoint, TermError, after_turn_outcome, cancel_failed_keeps_resume,
-        capture_resume_point, handle_model_slash, repl_control_head, with_shell_keyring_fallback,
+        ResumePoint, SessionPrefs, TermError, after_turn_outcome, cancel_failed_keeps_resume,
+        capture_resume_point, handle_mode_slash, handle_model_slash, handle_role_slash,
+        repl_control_head, with_shell_keyring_fallback,
     };
     use anyhow::anyhow;
     use crabmate_tui_core::ChatStreamOutcome;
@@ -742,13 +823,13 @@ mod tests {
 
     #[test]
     fn llm_overrides_empty_yields_no_client_llm() {
-        let o = LlmOverrides::from_options(None, None, None);
+        let o = SessionPrefs::from_options(None, None, None);
         assert!(o.client_llm().is_none());
     }
 
     #[test]
     fn model_slash_sets_and_clears_override() {
-        let mut o = LlmOverrides::from_options(None, None, None);
+        let mut o = SessionPrefs::from_options(None, None, None);
         handle_model_slash("/model deepseek-chat", &mut o);
         assert_eq!(o.model.as_deref(), Some("deepseek-chat"));
         assert!(o.client_llm().is_some());
@@ -762,9 +843,50 @@ mod tests {
         assert_eq!(repl_control_head("model gpt-5 please"), None);
         assert_eq!(repl_control_head("resume where we left"), None);
         assert_eq!(repl_control_head("  model  "), None);
+        assert_eq!(repl_control_head("mode act now"), None);
+        assert_eq!(repl_control_head("role coder please"), None);
         assert_eq!(repl_control_head("/model gpt-5"), Some("model"));
+        assert_eq!(repl_control_head("/mode plan"), Some("mode"));
+        assert_eq!(repl_control_head("/ROLE coder"), Some("role"));
         assert_eq!(repl_control_head("/RESUME"), Some("resume"));
         assert_eq!(repl_control_head("/models"), None);
         assert_eq!(repl_control_head("/status"), None);
+    }
+
+    #[test]
+    fn mode_slash_validates_sets_and_clears() {
+        let mut p = SessionPrefs::from_options(None, None, None);
+        handle_mode_slash("/mode act", &mut p);
+        assert_eq!(p.session_mode.as_deref(), Some("act"));
+        handle_mode_slash("/mode plan", &mut p);
+        assert_eq!(p.session_mode.as_deref(), Some("plan"));
+        handle_mode_slash("/mode bogus", &mut p);
+        assert_eq!(
+            p.session_mode.as_deref(),
+            Some("plan"),
+            "invalid mode ignored"
+        );
+        handle_mode_slash("/mode off", &mut p);
+        assert!(p.session_mode.is_none());
+    }
+
+    #[test]
+    fn role_slash_sets_and_clears() {
+        let mut p = SessionPrefs::from_options(None, None, None);
+        handle_role_slash("/role coder", &mut p);
+        assert_eq!(p.agent_role.as_deref(), Some("coder"));
+        handle_role_slash("/role clear", &mut p);
+        assert!(p.agent_role.is_none());
+    }
+
+    #[test]
+    fn prefs_carry_role_and_mode() {
+        let mut p = SessionPrefs::from_options(Some("k".into()), None, None);
+        handle_role_slash("/role coder", &mut p);
+        handle_mode_slash("/mode ask", &mut p);
+        let t = p.prefs();
+        assert_eq!(t.agent_role, Some("coder"));
+        assert_eq!(t.session_mode, Some("ask"));
+        assert!(t.client_llm.is_some());
     }
 }

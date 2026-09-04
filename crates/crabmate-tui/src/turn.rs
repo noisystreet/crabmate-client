@@ -8,11 +8,19 @@ use crabmate_tui_core::{
     new_approval_session_id, run_chat_stream,
 };
 
+/// 每轮附加配置：`client_llm` 覆盖 + agent role + 会话模式（由调用方从持久状态派生）。
+#[derive(Debug, Clone, Copy)]
+pub struct TurnPrefs<'a> {
+    pub client_llm: Option<ClientLlm<'a>>,
+    pub agent_role: Option<&'a str>,
+    pub session_mode: Option<&'a str>,
+}
+
 pub async fn run_turn(
     client: &ServeClient,
     message: &str,
     conversation_id: Option<&str>,
-    client_llm: Option<ClientLlm<'_>>,
+    prefs: TurnPrefs<'_>,
     stream_resume: Option<StreamResume>,
     approval: &mut dyn ApprovalGate,
 ) -> Result<ChatStreamOutcome> {
@@ -26,7 +34,9 @@ pub async fn run_turn(
             message,
             conversation_id,
             approval_session_id: &approval_session_id,
-            client_llm,
+            client_llm: prefs.client_llm,
+            agent_role: prefs.agent_role,
+            session_mode: prefs.session_mode,
             stream_resume,
         },
         &mut stdout,

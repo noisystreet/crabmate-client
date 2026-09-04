@@ -59,6 +59,10 @@ pub struct ChatStreamArgs<'a> {
     pub approval_session_id: &'a str,
     /// 有值时随请求体发送 `client_llm`；`None` / 全空白等价于不发送。
     pub client_llm: Option<ClientLlm<'a>>,
+    /// agent role id（`agent_role`；缺省用 serve 默认）。
+    pub agent_role: Option<&'a str>,
+    /// 会话模式（`session_mode`：ask / plan / act；缺省用 serve 默认）。
+    pub session_mode: Option<&'a str>,
     /// 续传已中断回合（`stream_resume:{job_id, after_seq}`）。
     pub stream_resume: Option<StreamResume>,
 }
@@ -131,6 +135,10 @@ fn chat_stream_body(args: ChatStreamArgs<'_>) -> Value {
         && let Some(obj) = client_llm_json(cl)
     {
         body["client_llm"] = obj;
+    }
+    if let Some(map) = body.as_object_mut() {
+        insert_trimmed(map, "agent_role", args.agent_role);
+        insert_trimmed(map, "session_mode", args.session_mode);
     }
     if let Some(r) = args.stream_resume {
         body["stream_resume"] = serde_json::json!({
@@ -537,6 +545,8 @@ mod tests {
                 model: Some("gpt-x"),
                 api_base: None,
             }),
+            agent_role: None,
+            session_mode: None,
             stream_resume: None,
         });
         assert_eq!(body["message"], "hi");
@@ -554,6 +564,8 @@ mod tests {
             conversation_id: None,
             approval_session_id: "a1",
             client_llm: None,
+            agent_role: None,
+            session_mode: None,
             stream_resume: None,
         });
         assert!(base.get("client_llm").is_none());
@@ -567,6 +579,8 @@ mod tests {
                 model: None,
                 api_base: Some(""),
             }),
+            agent_role: None,
+            session_mode: None,
             stream_resume: None,
         });
         assert_eq!(blank, base);
@@ -579,6 +593,8 @@ mod tests {
             conversation_id: Some("c1"),
             approval_session_id: "a1",
             client_llm: None,
+            agent_role: None,
+            session_mode: None,
             stream_resume: Some(StreamResume {
                 job_id: 42,
                 after_seq: 7,
@@ -587,6 +603,36 @@ mod tests {
         assert_eq!(body["stream_resume"]["job_id"], 42);
         assert_eq!(body["stream_resume"]["after_seq"], 7);
         assert!(body.get("client_llm").is_none());
+    }
+
+    #[test]
+    fn chat_body_includes_agent_role_and_session_mode() {
+        let body = chat_stream_body(ChatStreamArgs {
+            message: "hi",
+            conversation_id: None,
+            approval_session_id: "a1",
+            client_llm: None,
+            agent_role: Some(" coder "),
+            session_mode: Some("plan"),
+            stream_resume: None,
+        });
+        assert_eq!(body["agent_role"], "coder");
+        assert_eq!(body["session_mode"], "plan");
+    }
+
+    #[test]
+    fn chat_body_omits_mode_and_role_when_unset() {
+        let body = chat_stream_body(ChatStreamArgs {
+            message: "hi",
+            conversation_id: None,
+            approval_session_id: "a1",
+            client_llm: None,
+            agent_role: None,
+            session_mode: Some("   "),
+            stream_resume: None,
+        });
+        assert!(body.get("agent_role").is_none());
+        assert!(body.get("session_mode").is_none());
     }
 
     #[test]
