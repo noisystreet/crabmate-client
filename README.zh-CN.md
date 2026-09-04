@@ -31,7 +31,7 @@
 ├── crates/crabmate-tool-card/  # 工具卡 compact/detail（W2 起本仓 path；勿再 git 钉 Server）
 ├── crates/crabmate-connect/   # 连接页逻辑（本仓 path；勿再 path 回主仓）
 ├── crates/crabmate-tui-core/  # 远程终端 HTTP/SSE 核心
-├── crates/crabmate-tui/       # 二进制 crabmate-tui（P3：chat / repl + 斜杠）
+├── crates/crabmate-tui/       # 二进制 crabmate-tui（chat / repl / 全屏 tui）
 ├── crates/crabmate-web-host/  # 二进制 crabmate-web（回环静态 UI 托管）
 ├── desktop-tauri/             # Desktop Linux（Tauri 2）
 ├── mobile-tauri/              # Android（Tauri 2）
@@ -112,6 +112,19 @@ crabmate-tui --api-base http://127.0.0.1:8080 chat "你好"
 make tui-release
 sudo dpkg -i crates/crabmate-tui/target/debian/crabmate-tui_*.deb
 crabmate-tui --api-base http://127.0.0.1:8080 repl
+```
+
+全屏 `tui`（ratatui；终端 ≥120 列时显示左栏会话列表）：
+
+```bash
+./crates/crabmate-tui/target/debug/crabmate-tui \
+  --api-base http://127.0.0.1:8080 \
+  tui
+# 布局：状态行 | 左栏会话 | 流式 transcript | 底栏输入
+# Ctrl+C 取消在途回合（再按一次强退；空闲时退出）
+# Tab 切到会话列表（↑↓ 选择 · Enter 使用 · n 新建 · r 刷新 · Esc 返回）
+# 斜杠：/model /mode /role /status /conv [new] /quit（状态行回退显示 serve 默认，
+# 本地 override 以 `*` 标记；切换会话后从空 transcript 开始新一轮）
 ```
 
 ## 文档
