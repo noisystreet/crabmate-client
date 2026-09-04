@@ -11,7 +11,7 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 use super::state::{Focus, LineKind, UiState};
 
 /// 低于此宽度隐藏左栏（等价 repl 布局）。
-const SIDEBAR_MIN_WIDTH: u16 = 120;
+pub const SIDEBAR_MIN_WIDTH: u16 = 120;
 /// 左栏宽度。
 const SIDEBAR_WIDTH: u16 = 26;
 const INPUT_PROMPT: &str = "crabmate> ";
@@ -199,10 +199,9 @@ fn sidebar_view<'a>(rows: &[Line<'a>], height: usize, selected: usize) -> Vec<Li
     out
 }
 
-/// 渲染一帧。光标列按显示宽度并支持超宽水平滚动。
-pub fn draw(frame: &mut Frame, st: &mut UiState, info: &StatusInfo) {
+/// 渲染一帧。左栏显隐由事件循环按 `SIDEBAR_MIN_WIDTH` 写入 `st.sidebar_visible`。
+pub fn draw(frame: &mut Frame, st: &UiState, info: &StatusInfo) {
     let area = frame.area();
-    st.sidebar_visible = area.width >= SIDEBAR_MIN_WIDTH;
     let chunks = Layout::vertical([
         Constraint::Length(1),
         Constraint::Min(1),
@@ -263,20 +262,26 @@ fn render_body(frame: &mut Frame, st: &UiState, area: ratatui::layout::Rect) {
     frame.render_widget(Paragraph::new(shown), area);
 }
 
-fn render_input(frame: &mut Frame, st: &UiState, area: ratatui::layout::Rect) {
-    let input = st.current_input();
+/// 输入区可视内容与光标列：Input 聚焦时光标跟随（超宽水平滚动），
+/// 否则显示内容开头（无光标）。
+fn input_window(st: &UiState, width: usize) -> (String, usize) {
     let before = st.input_before_cursor();
-    let full = format!("{INPUT_PROMPT}{input}");
+    let full = format!("{INPUT_PROMPT}{}", st.current_input());
+    let cursor_cell = if st.focus == Focus::Input {
+        UnicodeWidthStr::width(INPUT_PROMPT) + UnicodeWidthStr::width(before.as_str())
+    } else {
+        0
+    };
+    visible_window(&full, cursor_cell, width)
+}
+
+fn render_input(frame: &mut Frame, st: &UiState, area: ratatui::layout::Rect) {
     let visible_w = area.width.saturating_sub(1) as usize;
-    let paragraph = Paragraph::new(Line::from(Span::raw(visible_window(&full, 0, visible_w).0)));
-    frame.render_widget(paragraph, area);
+    let (shown, shown_cursor) = input_window(st, visible_w);
+    frame.render_widget(Paragraph::new(Line::from(Span::raw(shown))), area);
     if st.focus != Focus::Input {
         return;
     }
-    // 光标用显示列（CJK=2 列），不是字符数。
-    let cursor_cell =
-        UnicodeWidthStr::width(INPUT_PROMPT) + UnicodeWidthStr::width(before.as_str());
-    let (_, shown_cursor) = visible_window(&full, cursor_cell, visible_w);
     let col = area
         .x
         .saturating_add(shown_cursor as u16)
@@ -486,5 +491,33 @@ mod tests {
         let (s, c) = visible_window("crabmate> 你好", 14, 6);
         assert!(s.contains('好'));
         assert_eq!(c, 6);
+    }
+
+    #[test]
+    fn input_window_follows_cursor_when_wide() {
+        let mut st = UiState::new();
+        for ch in "你好world".chars() {
+            st.insert_char(ch);
+        }
+        let (shown, cursor) = input_window(&st, 6);
+        // 超宽时窗口滚到光标附近：不再显示开头，光标列在可视区右缘。
+        assert!(
+            !shown.starts_with("crab"),
+            "window should scroll to the cursor"
+        );
+        assert!(!shown.is_empty());
+        assert_eq!(cursor, 6);
+    }
+
+    #[test]
+    fn input_window_shows_head_when_not_focused() {
+        let mut st = UiState::new();
+        for ch in "你好world".chars() {
+            st.insert_char(ch);
+        }
+        st.focus = Focus::Sidebar;
+        let (shown, cursor) = input_window(&st, 6);
+        assert!(shown.starts_with("crab"));
+        assert_eq!(cursor, 0);
     }
 }

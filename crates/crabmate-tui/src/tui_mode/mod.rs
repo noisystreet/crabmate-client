@@ -21,7 +21,7 @@ use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
 use ratatui::Terminal;
-use ratatui::backend::CrosstermBackend;
+use ratatui::backend::{Backend, CrosstermBackend};
 
 use crabmate_tui_core::{
     ApprovalDecision, ApprovalGate, AutoAllowOnce, ChatStreamOptions, ChatStreamOutcome,
@@ -29,7 +29,7 @@ use crabmate_tui_core::{
     WebSessionsList, fetch_web_sessions, new_approval_session_id, run_chat_stream_sink,
 };
 
-use self::render::StatusInfo;
+use self::render::{SIDEBAR_MIN_WIDTH, StatusInfo};
 use super::SessionPrefs;
 use state::{Focus, LineKind, ServeDefaults, UiState};
 
@@ -215,6 +215,8 @@ struct TuiApp<'a> {
     job_tx: Sender<WorkerJob>,
     cancel: Option<StreamCancel>,
     exit: bool,
+    /// `/quit` 请求在回合结束后退出（回合进行中先取消并等待）。
+    quit_pending: bool,
 }
 
 /// 控制斜杠（本地处理，不发给模型）。`/` 开头的未知命令视为普通消息。
@@ -226,6 +228,8 @@ enum Control {
     Status,
     ConvNew,
     ConvRefresh,
+    ConvUse(String),
+    ConvUnknown(String),
 }
 
 fn is_ctrl_c(key: &KeyEvent) -> bool {
@@ -294,11 +298,18 @@ fn parse_control(text: &str) -> Option<Control> {
         "mode" => Some(Control::Mode(arg_opt)),
         "role" => Some(Control::Role(arg_opt)),
         "status" => Some(Control::Status),
-        "conv" => match arg_opt.as_deref() {
-            None => Some(Control::ConvRefresh),
-            Some("new") | Some("clear") => Some(Control::ConvNew),
-            _ => None,
-        },
+        "conv" => Some(match arg_opt {
+            None => Control::ConvRefresh,
+            Some(a) => match a.split_whitespace().next().unwrap_or("") {
+                "new" | "clear" => Control::ConvNew,
+                "list" | "ls" | "show" => Control::ConvRefresh,
+                "use" | "switch" => match a.split_whitespace().nth(1) {
+                    Some(id) if !id.is_empty() => Control::ConvUse(id.to_string()),
+                    _ => Control::ConvUnknown(a),
+                },
+                _ => Control::ConvUnknown(a),
+            },
+        }),
         _ => None,
     }
 }
@@ -322,11 +333,6 @@ impl TuiApp<'_> {
     }
 
     fn use_selected(&mut self) {
-        if self.st.running {
-            self.st
-                .push_line(LineKind::System, "回合进行中：结束后再切换会话");
-            return;
-        }
         let Some(resume) = self.st.selected_resume() else {
             self.st.push_line(
                 LineKind::System,
@@ -342,12 +348,23 @@ impl TuiApp<'_> {
             .filter(|s| !s.is_empty())
             .unwrap_or("(untitled)")
             .to_string();
+        self.switch_to_conv(resume, Some(&title));
+    }
+
+    /// 切到指定 `conversation_id`：回合在跑时拒绝；否则清 transcript 从空开始。
+    fn switch_to_conv(&mut self, resume: String, title: Option<&str>) {
+        if self.st.running {
+            self.st
+                .push_line(LineKind::System, "回合进行中：结束后再切换会话");
+            return;
+        }
         self.st.conversation_id = Some(resume);
         self.st.reset_transcript();
         self.st.focus = Focus::Input;
+        let label = title.unwrap_or("(by id)");
         self.st.push_line(
             LineKind::System,
-            &format!("已切换到会话「{title}」（新对话从空开始）"),
+            &format!("已切换到会话「{label}」（新对话从空开始）"),
         );
     }
 
@@ -378,19 +395,16 @@ impl TuiApp<'_> {
         }
     }
 
-    /// 回车 / Ctrl+O：先按控制斜杠处理，否则提交消息（回合在跑则提示）。
+    /// 回车 / Ctrl+O：先按控制斜杠处理，否则提交消息（回合在跑则保留输入并提示）。
     fn on_submit(&mut self) {
         let text = self.st.current_input();
         let trimmed = text.trim().to_string();
         if trimmed.is_empty() {
             return;
         }
-        self.st.take_input();
         if let Some(control) = parse_control(&trimmed) {
-            let quit = self.apply_control(control);
-            if quit {
-                self.exit = true;
-            }
+            self.st.take_input();
+            self.apply_control(control);
             return;
         }
         if self.st.running {
@@ -398,48 +412,62 @@ impl TuiApp<'_> {
                 .push_line(LineKind::System, "回合进行中：Ctrl+C 可取消，完成后再发送");
             return;
         }
+        self.st.take_input();
         self.start_turn(&trimmed);
     }
 
-    fn apply_control(&mut self, control: Control) -> bool {
+    fn apply_control(&mut self, control: Control) {
         match control {
             Control::Quit => {
                 if self.st.running {
-                    self.st.cancel_sent = true;
-                    if let Some(c) = &self.cancel {
-                        c.cancel();
+                    if !self.st.cancel_sent {
+                        self.st.cancel_sent = true;
+                        if let Some(c) = &self.cancel {
+                            c.cancel();
+                        }
+                        self.st.push_line(
+                            LineKind::System,
+                            "正在取消回合…完成后退出（再按一次 Ctrl+C 强退）",
+                        );
+                    } else {
+                        self.exit = true;
                     }
+                    self.quit_pending = true;
+                } else {
+                    self.exit = true;
                 }
-                true
             }
             Control::Model(arg) => {
                 let echo = set_override_field(&mut self.overrides.model, arg, "model");
                 self.st.push_line(LineKind::System, &echo);
-                false
             }
             Control::Mode(arg) => {
                 let echo = set_mode_field(&mut self.overrides.session_mode, arg);
                 self.st.push_line(LineKind::System, &echo);
-                false
             }
             Control::Role(arg) => {
                 let echo = set_override_field(&mut self.overrides.agent_role, arg, "role");
                 self.st.push_line(LineKind::System, &echo);
-                false
             }
             Control::Status => {
                 self.refresh_status();
                 self.st.push_line(LineKind::System, "正在刷新 serve 状态…");
-                false
             }
             Control::ConvNew => {
                 self.new_session();
-                false
             }
             Control::ConvRefresh => {
                 self.refresh_sessions();
                 self.st.push_line(LineKind::System, "正在刷新会话列表…");
-                false
+            }
+            Control::ConvUse(id) => {
+                self.switch_to_conv(id, None);
+            }
+            Control::ConvUnknown(arg) => {
+                self.st.push_line(
+                    LineKind::System,
+                    &format!("不支持的 /conv 子命令：{arg}（支持 new / list / use <id>）"),
+                );
             }
         }
     }
@@ -521,6 +549,9 @@ impl TuiApp<'_> {
         }
         // 回合后会话列表可能变化（新会话绑定 id / 标题），静默刷新。
         self.refresh_sessions();
+        if self.quit_pending {
+            self.exit = true;
+        }
     }
 
     fn on_msg(&mut self, msg: UiEvent) {
@@ -625,6 +656,12 @@ impl TuiApp<'_> {
             if self.exit {
                 return Ok(());
             }
+            // 每帧读取终端尺寸：窄屏隐藏左栏；若焦点滞留已隐藏的左栏则收回输入框。
+            let size = terminal.backend().size().context("terminal size")?;
+            self.st.sidebar_visible = size.width >= SIDEBAR_MIN_WIDTH;
+            if !self.st.sidebar_visible && self.st.focus == Focus::Sidebar {
+                self.st.focus = Focus::Input;
+            }
             let mut any = false;
             while let Ok(msg) = self.rx.try_recv() {
                 any = true;
@@ -635,7 +672,7 @@ impl TuiApp<'_> {
             }
             let info = self.status_info();
             terminal
-                .draw(|f| render::draw(f, &mut self.st, &info))
+                .draw(|f| render::draw(f, &self.st, &info))
                 .context("tui draw failed")?;
             let _ = io::stdout().flush();
             thread::sleep(Duration::from_millis(if any { 2 } else { 50 }));
@@ -677,6 +714,7 @@ pub async fn run_tui(client: &ServeClient, overrides: &mut SessionPrefs, yes: bo
         job_tx,
         cancel: None,
         exit: false,
+        quit_pending: false,
     };
     terminal.clear().context("clear screen")?;
     app.run_loop(&mut terminal)
@@ -712,10 +750,25 @@ mod tests {
     }
 
     #[test]
+    fn parse_control_conv_use_and_unknown() {
+        assert!(matches!(
+            parse_control("/conv use c1"),
+            Some(Control::ConvUse(v)) if v == "c1"
+        ));
+        assert!(matches!(
+            parse_control("/conv bogus"),
+            Some(Control::ConvUnknown(_))
+        ));
+        assert!(matches!(
+            parse_control("/conv use"),
+            Some(Control::ConvUnknown(_))
+        ));
+    }
+
+    #[test]
     fn parse_control_passes_plain_through() {
         assert!(parse_control("hello").is_none());
         assert!(parse_control("/my-skill").is_none());
-        assert!(parse_control("/conv use c1").is_none());
         assert!(parse_control(" /model ").is_some());
     }
 
