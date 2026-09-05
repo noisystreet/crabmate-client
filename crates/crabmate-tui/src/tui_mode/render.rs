@@ -10,6 +10,7 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use super::md;
 use super::state::{Focus, LineKind, UiState};
+use super::ws_sidebar::sidebar_view;
 
 /// 低于此宽度隐藏左栏（等价 repl 布局）。
 pub const SIDEBAR_MIN_WIDTH: u16 = 120;
@@ -25,7 +26,7 @@ pub(crate) fn chat_body_width(sidebar_visible: bool, terminal_width: u16) -> usi
     };
     (col as usize).saturating_sub(1)
 }
-const SIDEBAR_HINT: &str = "↑↓选 Enter用 n新建 r刷新";
+pub(super) const SIDEBAR_HINT: &str = "↑↓选 Enter用 n新建 r刷新";
 /// composer 最多展开行数（多行输入）。
 const MAX_COMPOSER_ROWS: usize = 4;
 /// 审批浮层宽高上限。
@@ -237,7 +238,7 @@ fn display_lines(st: &UiState, width: usize) -> Vec<Line<'static>> {
 }
 
 /// 按显示宽度截断（用于状态行），尾部补 `…`。
-fn truncate_display(text: &str, width: usize) -> String {
+pub(super) fn truncate_display(text: &str, width: usize) -> String {
     if width == 0 {
         return String::new();
     }
@@ -256,7 +257,7 @@ fn truncate_display(text: &str, width: usize) -> String {
 }
 
 /// 工作区展示名：路径 basename（根目录/空串回退原路径文本）。
-fn workspace_basename(path: &str) -> String {
+pub(super) fn workspace_basename(path: &str) -> String {
     let p = path.trim_end_matches('/');
     match p.rsplit('/').next().filter(|s| !s.is_empty()) {
         Some(base) => base.to_string(),
@@ -313,7 +314,7 @@ fn status_text(info: &StatusInfo, conv: Option<&str>, width: usize) -> String {
 }
 
 /// 左栏内容行：首行标题，其后每会话一行（`>` 当前，`*` serve 活跃，选中高亮）。
-fn sidebar_rows(st: &UiState, width: usize) -> Vec<Line<'static>> {
+pub(super) fn sidebar_rows(st: &UiState, width: usize) -> Vec<Line<'static>> {
     let mut rows: Vec<Line<'static>> = Vec::new();
     let title = format!("会话 [{}]", st.sessions.len());
     rows.push(Line::from(Span::styled(
@@ -349,29 +350,6 @@ fn sidebar_rows(st: &UiState, width: usize) -> Vec<Line<'static>> {
         rows.push(Line::from(Span::styled(text, style)));
     }
     rows
-}
-
-/// 对左栏内容做窗口裁剪：标题固定，条目区尽量让选中行可见。
-fn sidebar_view<'a>(rows: &[Line<'a>], height: usize, selected: usize) -> Vec<Line<'a>> {
-    if height == 0 {
-        return Vec::new();
-    }
-    if rows.len() <= height {
-        return rows.to_vec();
-    }
-    let mut out = Vec::with_capacity(height);
-    out.push(rows[0].clone());
-    let item_max = height - 1;
-    let items_len = rows.len() - 1;
-    let sel = selected.min(items_len.saturating_sub(1));
-    let start = if sel < item_max {
-        0
-    } else {
-        sel + 1 - item_max
-    };
-    let end = (start + item_max).min(items_len);
-    out.extend(rows[start + 1..end + 1].iter().cloned());
-    out
 }
 
 /// 给一块区域整体铺背景色（先于文字绘制，杜绝段落内容不足时的底色缺口）。
@@ -439,25 +417,27 @@ fn composer_rows(st: &UiState) -> u16 {
     st.input_line_count().clamp(1, MAX_COMPOSER_ROWS) as u16
 }
 
+/// 左栏分发给会话或工作区树并做窗口裁剪；内容行构建在 [`super::ws_sidebar`]。
 fn render_sidebar(frame: &mut Frame, st: &UiState, area: Rect) {
     if area.height == 0 {
         return;
     }
     let cols = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(area);
-    let list_area = cols[0];
-    let rows = sidebar_rows(st, area.width.saturating_sub(1) as usize);
-    let shown = sidebar_view(&rows, list_area.height as usize, st.selected);
+    let (rows, cursor, hint) =
+        super::ws_sidebar::sidebar_content(st, area.width.saturating_sub(1) as usize);
+    let shown = sidebar_view(&rows, cols[0].height as usize, cursor);
     let list = Paragraph::new(shown).style(Style::new().fg(Color::White));
-    frame.render_widget(list, list_area);
-    // 提示行底色由整列 paint 保证；仅在聚焦左栏时显示按键提示。
-    if cols[1].height > 0 && st.focus == Focus::Sidebar {
-        let hint = Paragraph::new(Span::styled(SIDEBAR_HINT, Style::new().fg(Color::Gray)));
-        frame.render_widget(hint, cols[1]);
+    frame.render_widget(list, cols[0]);
+    if cols[1].height > 0
+        && let Some(text) = hint
+    {
+        let hint_p = Paragraph::new(Span::styled(text, Style::new().fg(Color::Gray)));
+        frame.render_widget(hint_p, cols[1]);
     }
 }
 
 /// 空 transcript 时的快捷键引导。
-const BODY_EMPTY_HINT: &str = "输入消息开始对话 · Alt+Enter 换行 · Ctrl+E 思考展开 · PgUp/PgDn 滚动 · /find 搜索 · Ctrl+C 退出 · /help";
+const BODY_EMPTY_HINT: &str = "输入消息开始对话 · Alt+Enter 换行 · Ctrl+E 思考 · Ctrl+W 工作区树 · PgUp/PgDn 滚动 · /find 搜索 · Ctrl+C 退出 · /help";
 
 fn render_body(frame: &mut Frame, st: &UiState, area: Rect, prepared: &[BodyRow]) {
     paint_bg(frame, area, CHAT_BG);
@@ -862,24 +842,6 @@ mod tests {
         st.replace_sessions(vec![row("a", "这是一个很长的会话标题标题", None)]);
         let rows = sidebar_rows(&st, 10);
         assert!(rows[1].to_string().contains("(untitled)") || rows[1].to_string().contains("…"));
-    }
-
-    #[test]
-    fn sidebar_view_keeps_selected_visible() {
-        let mut rows: Vec<Line<'static>> = vec![Line::from("header")];
-        rows.extend((0..10).map(|i| Line::from(format!("item{i}"))));
-        let v = sidebar_view(&rows, 4, 7);
-        assert_eq!(v.len(), 4);
-        assert!(v.last().unwrap().to_string().contains("item7"));
-        assert!(v.first().unwrap().to_string().contains("header"));
-    }
-
-    #[test]
-    fn sidebar_view_fits_without_window() {
-        let mut rows: Vec<Line<'static>> = vec![Line::from("header")];
-        rows.extend((0..3).map(|i| Line::from(format!("item{i}"))));
-        let v = sidebar_view(&rows, 5, 1);
-        assert_eq!(v.len(), 4);
     }
 
     #[test]

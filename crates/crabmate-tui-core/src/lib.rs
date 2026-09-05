@@ -28,4 +28,7 @@ pub use sessions::{
     SessionListItem, WebSessionsList, conversation_id_for_resume, fetch_web_sessions,
 };
 pub use url::{api_url, normalize_api_base};
-pub use workspace::{WorkspaceInfo, fetch_workspace, set_workspace};
+pub use workspace::{
+    WorkspaceDirData, WorkspaceDirEntry, WorkspaceInfo, fetch_workspace, fetch_workspace_dir,
+    set_workspace,
+};

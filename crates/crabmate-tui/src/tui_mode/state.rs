@@ -1,11 +1,17 @@
 //! 全屏 TUI 的 UI 状态：transcript 行 + 输入缓冲 + 回合/会话指示 +
 //! 审批浮层 / 工具行 / 搜索 / thinking 折叠等交互状态。
+//!
+//! 工作区目录树的状态逻辑在 [`super::workspace_tree`]（拆分以控制单文件行数）。
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::Sender;
 
-use crabmate_tui_core::{ApprovalDecision, CommandApprovalRequest, SessionListItem};
-use serde_json::Value;
+use crabmate_tui_core::{
+    ApprovalDecision, CommandApprovalRequest, SessionListItem, WorkspaceDirEntry,
+};
+
+use super::serve_defaults::ServeDefaults;
+use super::workspace_tree::WsRow;
 
 /// transcript 行类别（决定前缀与配色）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -17,12 +23,15 @@ pub enum LineKind {
     System,
 }
 
-/// 键盘焦点：底栏输入框或左栏会话列表。
+/// 键盘焦点：底栏输入框、左栏会话列表或左栏工作区目录树。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Focus {
     #[default]
     Input,
+    /// 左栏会话列表。
     Sidebar,
+    /// 左栏工作区目录树（`GET /workspace[?path=]`，仿 Desktop 工作区侧栏）。
+    Workspace,
 }
 
 /// 审批浮层：serve 等待决策期间 SSE 回合任务阻塞在应答通道上，
@@ -46,33 +55,6 @@ impl ApprovalOverlay {
             cmd.to_string()
         } else {
             format!("{cmd} {args}")
-        }
-    }
-}
-
-/// serve 默认偏好（`GET /status?view=shell`），override 未设置时状态行回退显示。
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct ServeDefaults {
-    pub model: Option<String>,
-    pub role: Option<String>,
-    pub mode: Option<String>,
-}
-
-impl ServeDefaults {
-    /// 从 `/status?view=shell` 的 JSON 提取默认 model/role/mode。
-    #[must_use]
-    pub fn from_status(v: &Value) -> Self {
-        let field = |k: &str| {
-            v.get(k)
-                .and_then(Value::as_str)
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .map(str::to_string)
-        };
-        Self {
-            model: field("model"),
-            role: field("default_agent_role_id"),
-            mode: field("default_session_mode"),
         }
     }
 }
@@ -133,6 +115,22 @@ pub struct UiState {
     pub sidebar_visible: bool,
     /// 当前工作区路径（`GET /workspace`；顶栏显示，未获取为 None）。
     pub workspace_path: Option<String>,
+    /// 工作区目录树：根列表是否已成功加载（false 时渲染占位）。
+    pub ws_ready: bool,
+    /// 是否有根目录拉取在途（避免重复入队）。
+    pub ws_root_pending: bool,
+    /// 根目录最近一次拉取失败文案（侧栏占位提示；成功后清空）。
+    pub ws_root_err: Option<String>,
+    /// 目录相对路径 → 已加载子条目缓存（`""` = 根）。
+    pub ws_dir_cache: HashMap<String, Vec<WorkspaceDirEntry>>,
+    /// 已展开的目录相对路径。
+    pub ws_expanded: HashSet<String>,
+    /// 子目录列表在途的路径（防重复请求）。
+    pub ws_loading: HashSet<String>,
+    /// 扁平化后的可见树行（数据/展开态变化后重算）。
+    pub ws_rows: Vec<WsRow>,
+    /// 树光标（`ws_rows` 下标，超界时渲染前收敛）。
+    pub ws_cursor: usize,
     /// 审批浮层（回合暂停等待决策）。
     pub approval: Option<ApprovalOverlay>,
     /// 工具调用 id → transcript 行号（结果到达时原位更新摘要行）。

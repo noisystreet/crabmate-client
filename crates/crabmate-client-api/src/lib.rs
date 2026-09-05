@@ -41,6 +41,6 @@ pub use sessions::{
 };
 pub use url::{ApiUrlError, join_api_path, normalize_api_base};
 pub use workspace::{
-    WorkspaceInfo, WorkspaceSetError, WorkspaceSetErrorKind, parse_workspace_set_ok_body,
-    workspace_set_http_error_message,
+    WorkspaceDirData, WorkspaceDirEntry, WorkspaceInfo, WorkspaceSetError, WorkspaceSetErrorKind,
+    parse_workspace_set_ok_body, workspace_set_http_error_message,
 };
