@@ -35,7 +35,7 @@ use crabmate_tui_core::{
 
 use self::approve::{ApprovalPrompt, OverlayApprovalGate, decision_for_key, decision_summary};
 use self::controls::{Control, clear_word, parse_control, set_mode_field, set_override_field};
-use self::render::{SIDEBAR_MIN_WIDTH, StatusInfo};
+use self::render::{BodyRow, SIDEBAR_MIN_WIDTH, StatusInfo, build_body_rows, chat_body_width};
 use super::SessionPrefs;
 use state::{Focus, LineKind, ServeDefaults, UiState};
 
@@ -241,6 +241,25 @@ async fn fetch_serve_defaults(client: &ServeClient) -> Result<ServeDefaults, Str
     Ok(ServeDefaults::from_status(&v))
 }
 
+/// body 物理行 memo 的失效键：内容代数（`content_rev`）+ 宽度 + 搜索词/锚点。
+/// `view_offset`/焦点/审批等"draw 期"因素不在此列（窗口裁剪每帧实时做）。
+#[derive(PartialEq, Debug)]
+struct BodyMemoKey {
+    width: usize,
+    rev: u64,
+    needle: Option<String>,
+    cursor: Option<usize>,
+}
+
+fn body_memo_key(st: &UiState, terminal_width: u16) -> BodyMemoKey {
+    BodyMemoKey {
+        width: chat_body_width(st.sidebar_visible, terminal_width),
+        rev: st.content_rev,
+        needle: st.search_term().map(str::to_string),
+        cursor: st.search_cursor,
+    }
+}
+
 /// 全屏会话的共享 UI 状态与依赖。
 struct TuiApp<'a> {
     client: &'a ServeClient,
@@ -253,6 +272,20 @@ struct TuiApp<'a> {
     exit: bool,
     /// `/quit` 请求在回合结束后退出（回合进行中先取消并等待）。
     quit_pending: bool,
+    /// 帧间 memo：内容/宽度/搜索未变时复用，避免每帧全量 tokenize+wrap。
+    prepared: Vec<BodyRow>,
+    body_key: Option<BodyMemoKey>,
+}
+
+impl TuiApp<'_> {
+    /// 计算当前帧的 body 行：memo 命中直接复用；否则重建。
+    fn prepare_body(&mut self, terminal_width: u16) {
+        let key = body_memo_key(&self.st, terminal_width);
+        if self.body_key.as_ref() != Some(&key) {
+            self.prepared = build_body_rows(&self.st, key.width);
+            self.body_key = Some(key);
+        }
+    }
 }
 
 fn is_ctrl_c(key: &KeyEvent) -> bool {
@@ -733,8 +766,10 @@ impl TuiApp<'_> {
                 }
             }
             let info = self.status_info();
+            // 内容/宽度/搜索未变时复用已构建的 body 物理行，避免每帧全量 tokenize+wrap。
+            self.prepare_body(size.width);
             terminal
-                .draw(|f| render::draw(f, &self.st, &info))
+                .draw(|f| render::draw(f, &self.st, &info, &self.prepared))
                 .context("tui draw failed")?;
             let _ = io::stdout().flush();
             thread::sleep(Duration::from_millis(if any { 2 } else { 50 }));
@@ -779,7 +814,38 @@ pub async fn run_tui(client: &ServeClient, overrides: &mut SessionPrefs, yes: bo
         cancel: None,
         exit: false,
         quit_pending: false,
+        prepared: Vec::new(),
+        body_key: None,
     };
     terminal.clear().context("clear screen")?;
     app.run_loop(&mut terminal)
+}
+
+#[cfg(test)]
+mod memo_tests {
+    use super::*;
+    use state::LineKind;
+
+    #[test]
+    fn memo_key_changes_on_render_inputs() {
+        let mut s = UiState::new();
+        let k0 = body_memo_key(&s, 120);
+        s.push_line(LineKind::User, "a");
+        assert_ne!(body_memo_key(&s, 120), k0, "新增行应失效");
+        let k1 = body_memo_key(&s, 120);
+        s.stream_delta(LineKind::Assistant, "b");
+        assert_ne!(body_memo_key(&s, 120), k1, "流式追加应失效");
+        let k2 = body_memo_key(&s, 120);
+        s.start_search("b");
+        assert_ne!(body_memo_key(&s, 120), k2, "搜索词/锚点应失效");
+        let k3 = body_memo_key(&s, 120);
+        s.toggle_thinking();
+        assert_ne!(body_memo_key(&s, 120), k3, "折叠切换应失效");
+        // draw 期因素（滚动）不应失效
+        let k4 = body_memo_key(&s, 120);
+        s.view_offset = 5;
+        assert_eq!(body_memo_key(&s, 120), k4, "滚动不应失效");
+        // 宽度变化应失效
+        assert_ne!(body_memo_key(&s, 120), body_memo_key(&s, 121), "宽度应失效");
+    }
 }

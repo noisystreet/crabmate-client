@@ -14,7 +14,17 @@ use super::state::{Focus, LineKind, UiState};
 /// 低于此宽度隐藏左栏（等价 repl 布局）。
 pub const SIDEBAR_MIN_WIDTH: u16 = 120;
 /// 左栏宽度。
-const SIDEBAR_WIDTH: u16 = 26;
+pub(crate) const SIDEBAR_WIDTH: u16 = 26;
+
+/// 计算 build_body_rows 使用的聊天区宽度（与 draw 里传给 render_body 的区域一致）。
+pub(crate) fn chat_body_width(sidebar_visible: bool, terminal_width: u16) -> usize {
+    let col = if sidebar_visible {
+        terminal_width.saturating_sub(SIDEBAR_WIDTH)
+    } else {
+        terminal_width
+    };
+    (col as usize).saturating_sub(1)
+}
 const SIDEBAR_HINT: &str = "↑↓选 Enter用 n新建 r刷新";
 /// composer 最多展开行数（多行输入）。
 const MAX_COMPOSER_ROWS: usize = 4;
@@ -71,39 +81,6 @@ fn kind_style(kind: LineKind) -> (String, Style) {
     }
 }
 
-/// 按显示宽度断行；`\n` 强制断行，控制字符丢弃。
-fn wrap_physical(text: &str, width: usize) -> Vec<String> {
-    let mut rows: Vec<String> = Vec::new();
-    let mut row = String::new();
-    let mut row_width = 0usize;
-    for ch in text.chars() {
-        if ch == '\n' {
-            if !row.is_empty() {
-                rows.push(std::mem::take(&mut row));
-                row_width = 0;
-            }
-            continue;
-        }
-        if ch.is_control() {
-            continue;
-        }
-        let cw = ch.width().unwrap_or(0);
-        if !row.is_empty() && row_width + cw > width {
-            rows.push(std::mem::take(&mut row));
-            row_width = 0;
-        }
-        row.push(ch);
-        row_width += cw;
-    }
-    if !row.is_empty() {
-        rows.push(row);
-    }
-    if rows.is_empty() {
-        rows.push(String::new());
-    }
-    rows
-}
-
 /// thinking 折叠行的单行预览：首行截断 + `…`（占位不超 content_width）。
 fn fold_thinking(text: &str, content_width: usize) -> String {
     if content_width == 0 {
@@ -121,7 +98,8 @@ fn fold_thinking(text: &str, content_width: usize) -> String {
 
 /// 把 transcript 转成可渲染的物理行（含搜索高亮标记）；逻辑行首带前缀，
 /// 仅作用于其第一物理行。thinking 折叠时只出一行预览。
-fn body_rows(st: &UiState, width: usize) -> Vec<BodyRow> {
+/// 供事件循环做帧间 memo（内容/宽度/搜索未变时复用），渲染层拿结果直接裁剪。
+pub(crate) fn build_body_rows(st: &UiState, width: usize) -> Vec<BodyRow> {
     let needle = st.search_term();
     let target = st.search_cursor;
     let mut out: Vec<BodyRow> = Vec::new();
@@ -173,7 +151,7 @@ fn plain_body_rows(
 ) -> Vec<BodyRow> {
     let mut rows = Vec::new();
     let mut first = true;
-    for phys in wrap_physical(text, content_width) {
+    for phys in md::wrap_physical(text, content_width) {
         let mut spans: Vec<Span<'static>> = Vec::new();
         let mut row_style = style;
         if anchor_log && first {
@@ -233,6 +211,12 @@ fn assistant_body_rows(
         });
     }
     rows
+}
+
+/// 测试便捷名（仅测试引用 build_body_rows）。
+#[cfg(test)]
+fn body_rows(st: &UiState, width: usize) -> Vec<BodyRow> {
+    build_body_rows(st, width)
 }
 
 /// 测试辅助：兼容旧接口的纯行视图。
@@ -389,7 +373,8 @@ fn paint_bg(frame: &mut Frame, rect: Rect, color: Color) {
 
 /// 渲染一帧。对齐 Desktop：整屏 = 顶栏(工作区) + 主体 + 底部状态栏；主体内
 /// 左会话列与右聊天列各自贯通，composer 只位于聊天列底部（会话列下方不出现输入框）。
-pub fn draw(frame: &mut Frame, st: &UiState, info: &StatusInfo) {
+/// `prepared` 为事件循环按（宽度/内容指纹/搜索）memo 好的 transcript 物理行。
+pub fn draw(frame: &mut Frame, st: &UiState, info: &StatusInfo, prepared: &[BodyRow]) {
     let area = frame.area();
     let chunks = Layout::vertical([
         Constraint::Length(1),
@@ -411,9 +396,9 @@ pub fn draw(frame: &mut Frame, st: &UiState, info: &StatusInfo) {
             .split(body_area);
         paint_bg(frame, cols[0], SIDEBAR_BG);
         render_sidebar(frame, st, cols[0]);
-        render_chat_column(frame, st, cols[1]);
+        render_chat_column(frame, st, cols[1], prepared);
     } else {
-        render_chat_column(frame, st, body_area);
+        render_chat_column(frame, st, body_area, prepared);
     }
 
     paint_bg(frame, status_area, STATUS_BG);
@@ -427,11 +412,11 @@ pub fn draw(frame: &mut Frame, st: &UiState, info: &StatusInfo) {
 }
 
 /// 聊天列：上为主区消息（滚动 transcript），底部为 composer 输入区。
-fn render_chat_column(frame: &mut Frame, st: &UiState, area: Rect) {
+fn render_chat_column(frame: &mut Frame, st: &UiState, area: Rect, prepared: &[BodyRow]) {
     let rows = composer_rows(st).min(area.height);
     let parts = Layout::vertical([Constraint::Min(1), Constraint::Length(rows)]).split(area);
     let body_area = parts[0];
-    render_body(frame, st, body_area);
+    render_body(frame, st, body_area, prepared);
     if st.approval.is_some() {
         render_approval_overlay(frame, st, body_area);
     }
@@ -463,14 +448,14 @@ fn render_sidebar(frame: &mut Frame, st: &UiState, area: Rect) {
 /// 空 transcript 时的快捷键引导。
 const BODY_EMPTY_HINT: &str = "输入消息开始对话 · Alt+Enter 换行 · Ctrl+E 思考展开 · PgUp/PgDn 滚动 · /find 搜索 · Ctrl+C 退出 · /help";
 
-fn render_body(frame: &mut Frame, st: &UiState, area: Rect) {
+fn render_body(frame: &mut Frame, st: &UiState, area: Rect, prepared: &[BodyRow]) {
     paint_bg(frame, area, CHAT_BG);
     if st.lines.is_empty() {
         let hint = Paragraph::new(Span::styled(BODY_EMPTY_HINT, Style::new().fg(Color::White)));
         frame.render_widget(hint, area);
         return;
     }
-    let rows = body_rows(st, (area.width as usize).saturating_sub(1));
+    let rows = prepared;
     let rows_total = rows.len();
     let viewport = (area.height as usize).saturating_sub(1).max(1);
     let max_back = rows_total.saturating_sub(viewport);
@@ -490,11 +475,9 @@ fn render_body(frame: &mut Frame, st: &UiState, area: Rect) {
     let back = back.min(max_back);
     let end = rows_total.saturating_sub(back);
     let start = end.saturating_sub(viewport);
-    let shown = rows
-        .into_iter()
-        .skip(start)
-        .take(end.saturating_sub(start))
-        .map(|r| r.line)
+    let shown = rows[start..end.min(rows_total)]
+        .iter()
+        .map(|r| r.line.clone())
         .collect::<Vec<_>>();
     frame.render_widget(Paragraph::new(shown), area);
 }
@@ -654,26 +637,6 @@ mod tests {
     use crabmate_tui_core::SessionListItem;
 
     #[test]
-    fn wrap_splits_wide_chars() {
-        let rows = wrap_physical("你好世界abc", 5);
-        assert_eq!(rows, vec!["你好", "世界a", "bc"]);
-        assert_eq!(wrap_physical("你好世界", 4), vec!["你好", "世界"]);
-    }
-
-    #[test]
-    fn wrap_handles_newline() {
-        let rows = wrap_physical("a\nbcd", 10);
-        assert_eq!(rows, vec!["a", "bcd"]);
-    }
-
-    #[test]
-    fn wrap_drops_control_chars() {
-        let rows = wrap_physical("a\u{1b}[31mb", 10);
-        assert_eq!(rows, vec!["a[31mb"]);
-        assert!(!rows[0].contains('\u{1b}'));
-    }
-
-    #[test]
     fn truncate_appends_ellipsis() {
         assert_eq!(truncate_display("abcdef", 4), "abcd…");
         assert_eq!(truncate_display("你好", 3), "你…");
@@ -739,6 +702,12 @@ mod tests {
         st.push_line(LineKind::Tool, "exec ✓");
         let rows = body_rows(&st, 60);
         assert!(rows[0].line.to_string().contains("[工具] exec ✓"));
+    }
+
+    #[test]
+    fn chat_body_width_matches_layout() {
+        assert_eq!(chat_body_width(false, 100), 99);
+        assert_eq!(chat_body_width(true, 100), 100 - SIDEBAR_WIDTH as usize - 1);
     }
 
     #[test]

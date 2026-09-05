@@ -145,6 +145,9 @@ pub struct UiState {
     pub search_cursor: Option<usize>,
     /// 当前搜索命中的逻辑行数（状态行提示用）。
     pub search_total: usize,
+    /// transcript 内容代数（任何影响渲染的行内容/折叠/清空变化都会递增）。
+    /// 供 body 行帧间 memo 作失效键（O(1)，对原位同长编辑也免疫）。
+    pub content_rev: u64,
 }
 
 impl UiState {
@@ -161,6 +164,7 @@ impl UiState {
         let collapsed = kind == LineKind::Thinking && !self.thinking_visible;
         self.lines.push(LogLine::new(kind, text, collapsed));
         self.refresh_search_meta();
+        self.bump();
     }
 
     /// 流式增量：若最后一条同类（Assistant/Thinking）则续接，否则开新行。
@@ -175,6 +179,12 @@ impl UiState {
             self.push_line(kind, delta);
         }
         self.refresh_search_meta();
+        self.bump();
+    }
+
+    /// 内容/折叠变化代数 +1（body memo 失效用）。
+    fn bump(&mut self) {
+        self.content_rev = self.content_rev.wrapping_add(1);
     }
 
     // ── 输入缓冲（单行/多行统一） ─────────────────────────────
@@ -374,6 +384,7 @@ impl UiState {
         self.search = None;
         self.search_cursor = None;
         self.search_total = 0;
+        self.bump();
     }
 
     // ── 审批浮层 ─────────────────────────────────────────────
@@ -406,6 +417,7 @@ impl UiState {
         self.tool_pending
             .insert(tool_call_id.to_string(), self.lines.len() - 1);
         self.refresh_search_meta();
+        self.bump();
     }
 
     /// 工具结果：更新对应摘要行；找不到 start（如续流中段）则补一行收尾。
@@ -446,6 +458,7 @@ impl UiState {
             }
         }
         self.refresh_search_meta();
+        self.bump();
     }
 
     /// 回合开始时清理上轮工具行映射。
@@ -463,6 +476,7 @@ impl UiState {
                 line.collapsed = !visible;
             }
         }
+        self.bump();
     }
 
     pub fn thinking_visible(&self) -> bool {
