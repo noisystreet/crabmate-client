@@ -1,13 +1,18 @@
-//! `GET|POST /workspace`：查询 / 切换工作区根；`GET /workspace[?path=]` 目录列表。
+//! `GET|POST /workspace`：查询 / 切换工作区根；`GET /workspace[?path=]` 目录列表；
+//! `GET/POST /workspace/projects`：项目池查询与切换。
 
 use serde_json::json;
 
-use crabmate_client_api::{parse_workspace_set_ok_body, percent_encode_unreserved};
+use crabmate_client_api::{
+    parse_workspace_project_open_body, parse_workspace_set_ok_body, percent_encode_unreserved,
+};
 
 use crate::client::ServeClient;
 use crate::error::TermError;
 
-pub use crabmate_client_api::{WorkspaceDirData, WorkspaceDirEntry, WorkspaceInfo};
+pub use crabmate_client_api::{
+    WorkspaceDirData, WorkspaceDirEntry, WorkspaceInfo, WorkspaceProjectsData,
+};
 
 /// 当前工作区根（`GET /workspace`）。
 pub async fn fetch_workspace(client: &ServeClient) -> Result<WorkspaceInfo, TermError> {
@@ -45,6 +50,23 @@ pub async fn set_workspace(client: &ServeClient, path: &str) -> Result<String, T
     let body = json!({ "path": path });
     let val = client.post_json("/workspace", &body).await?;
     parse_workspace_set_ok_body(&val).map_err(|e| TermError::Message(e.message))
+}
+
+/// `GET /workspace/projects`：服务端项目池（enabled / pool_path / projects 名字）。
+pub async fn fetch_workspace_projects(
+    client: &ServeClient,
+) -> Result<WorkspaceProjectsData, TermError> {
+    client.get_json("/workspace/projects").await
+}
+
+/// `POST /workspace/projects`：切到项目池内已存在的项目（create=false）。
+pub async fn switch_workspace_project(
+    client: &ServeClient,
+    name: &str,
+) -> Result<String, TermError> {
+    let body = json!({ "name": name, "create": false });
+    let val = client.post_json("/workspace/projects", &body).await?;
+    parse_workspace_project_open_body(&val).map_err(|e| TermError::Message(e.message))
 }
 
 #[cfg(test)]

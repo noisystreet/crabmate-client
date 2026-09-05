@@ -12,6 +12,10 @@ use super::workspace_tree::WsRow;
 
 /// 工作区树聚焦时的按键提示（占位性质，超宽即裁）。
 const WORKSPACE_HINT: &str = "↑↓选 Enter/→展开 ◀收起 r刷新 w会话";
+/// 工作区未设置（顶栏路径为空）时的按键提示。
+const WORKSPACE_UNSET_HINT: &str = "未设置：p 从项目池选择 · r刷新";
+/// 项目池「选择工作区」子视图的按键提示。
+const WORKSPACE_PICK_HINT: &str = "↑↓选 Enter切换 r刷新 Esc返回";
 
 /// 工作区侧栏标题：`工作区 <basename>`（未获取时占位）。
 fn workspace_title(st: &UiState, width: usize) -> String {
@@ -120,17 +124,78 @@ pub(super) fn sidebar_view<'a>(rows: &[Line<'a>], height: usize, selected: usize
     out
 }
 
+/// 项目池「选择工作区」内容行：首行标题，其后为候选项目（加载中/未启用/错误占位）。
+fn workspace_pick_rows(st: &UiState, width: usize) -> Vec<Line<'static>> {
+    let mut rows: Vec<Line<'static>> = Vec::new();
+    rows.push(Line::from(Span::styled(
+        truncate_display("选择工作区（项目池）", width),
+        Style::new().fg(Color::White).add_modifier(Modifier::BOLD),
+    )));
+    let Some(pick) = st.ws_pick.as_ref() else {
+        return rows;
+    };
+    let highlight_first = st.focus == Focus::Workspace && st.ws_cursor == 0;
+    if pick.loading {
+        push_sidebar_line(
+            &mut rows,
+            truncate_display("（加载中…）", width),
+            Color::Gray,
+            highlight_first,
+        );
+    } else if let Some(e) = pick.error.as_deref() {
+        push_sidebar_line(
+            &mut rows,
+            truncate_display(&format!("（失败：{e}）"), width),
+            Color::LightRed,
+            highlight_first,
+        );
+    } else if !pick.enabled {
+        push_sidebar_line(
+            &mut rows,
+            truncate_display("（项目池未启用：服务端配置后可用）", width),
+            Color::Gray,
+            highlight_first,
+        );
+    } else if pick.projects.is_empty() {
+        push_sidebar_line(
+            &mut rows,
+            truncate_display("（无可用项目）", width),
+            Color::Gray,
+            highlight_first,
+        );
+    } else {
+        for (i, name) in pick.projects.iter().enumerate() {
+            push_sidebar_line(
+                &mut rows,
+                truncate_display(name, width),
+                Color::White,
+                st.focus == Focus::Workspace && i == st.ws_cursor,
+            );
+        }
+    }
+    rows
+}
+
 /// 左栏可视内容（会话 / 工作区树共列分发）：返回（行、光标、聚焦时提示文案）。
 pub(super) fn sidebar_content(
     st: &UiState,
     width: usize,
 ) -> (Vec<Line<'static>>, usize, Option<&'static str>) {
     if st.focus == Focus::Workspace {
-        (
-            workspace_sidebar_rows(st, width),
-            st.ws_cursor,
-            Some(WORKSPACE_HINT),
-        )
+        if st.ws_pick.is_some() {
+            (
+                workspace_pick_rows(st, width),
+                st.ws_cursor,
+                Some(WORKSPACE_PICK_HINT),
+            )
+        } else {
+            let hint = if st.workspace_path.is_none() {
+                WORKSPACE_UNSET_HINT
+            } else {
+                WORKSPACE_HINT
+            };
+            (workspace_sidebar_rows(st, width), st.ws_cursor, Some(hint))
+        }
     } else {
         let hint = (st.focus == Focus::Sidebar).then_some(SIDEBAR_HINT);
         (sidebar_rows(st, width), st.selected, hint)
@@ -274,5 +339,77 @@ mod tests {
         rows.extend((0..3).map(|i| Line::from(format!("item{i}"))));
         let v = sidebar_view(&rows, 5, 1);
         assert_eq!(v.len(), 4);
+    }
+
+    #[test]
+    fn pick_rows_loading_error_disabled() {
+        let mut st = UiState::new();
+        st.focus = Focus::Workspace;
+        assert_eq!(workspace_pick_rows(&st, 60).len(), 1, "无 pick 态仅标题");
+        st.ws_pick = Some(super::super::workspace_tree::WsPickState {
+            loading: true,
+            ..Default::default()
+        });
+        assert!(
+            workspace_pick_rows(&st, 60)[1]
+                .to_string()
+                .contains("加载中")
+        );
+        st.ws_pick = Some(super::super::workspace_tree::WsPickState::default());
+        assert!(
+            workspace_pick_rows(&st, 60)[1]
+                .to_string()
+                .contains("项目池未启用")
+        );
+        st.ws_pick = Some(super::super::workspace_tree::WsPickState {
+            enabled: true,
+            error: Some("e".to_string()),
+            ..Default::default()
+        });
+        assert!(workspace_pick_rows(&st, 60)[1].to_string().contains("失败"));
+    }
+
+    #[test]
+    fn pick_rows_highlight_cursor() {
+        let mut st = UiState::new();
+        st.focus = Focus::Workspace;
+        st.ws_cursor = 1;
+        st.ws_pick = Some(super::super::workspace_tree::WsPickState {
+            enabled: true,
+            projects: vec!["proj-a".to_string(), "proj-b".to_string()],
+            ..Default::default()
+        });
+        let rows = workspace_pick_rows(&st, 60);
+        assert_eq!(rows.len(), 3);
+        assert!(
+            !rows[1].spans[0]
+                .style
+                .add_modifier
+                .contains(Modifier::REVERSED),
+            "非光标行不反色"
+        );
+        assert!(
+            rows[2].spans[0]
+                .style
+                .add_modifier
+                .contains(Modifier::REVERSED),
+            "光标行反色"
+        );
+    }
+
+    #[test]
+    fn sidebar_content_unset_and_pick_hints() {
+        let mut st = UiState::new();
+        st.focus = Focus::Workspace;
+        let (_, _, hint) = sidebar_content(&st, 60);
+        assert!(hint.unwrap().contains("未设置"), "路径为空给未设置提示");
+        st.workspace_path = Some("/data/proj".to_string());
+        st.ws_ready = true;
+        let (_, _, hint) = sidebar_content(&st, 60);
+        assert!(hint.unwrap().contains("Enter/→展开"), "正常树给树提示");
+        st.ws_pick = Some(super::super::workspace_tree::WsPickState::default());
+        let (rows, _, hint) = sidebar_content(&st, 60);
+        assert!(rows[0].to_string().contains("选择工作区"));
+        assert!(hint.unwrap().contains("Enter切换"));
     }
 }

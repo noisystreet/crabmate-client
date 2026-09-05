@@ -210,6 +210,20 @@ impl TuiApp<'_> {
         }
     }
 
+    fn fetch_ws_projects(&mut self) {
+        if self.job_tx.send(WorkerJob::WsProjects).is_err() {
+            self.st
+                .push_line(LineKind::System, "拉取项目池失败：worker 已退出");
+        }
+    }
+
+    fn switch_ws_project(&mut self, name: String) {
+        if self.job_tx.send(WorkerJob::WsSwitchProject(name)).is_err() {
+            self.st
+                .push_line(LineKind::System, "切换项目失败：worker 已退出");
+        }
+    }
+
     /// 进入工作区目录树视图（Ctrl+W / 会话栏 w）；根列表未就绪时先拉一次。
     fn focus_workspace(&mut self) {
         if !self.st.ws_ready && !self.st.ws_root_pending {
@@ -314,6 +328,7 @@ impl TuiApp<'_> {
             "/conv list 刷新 · /conv use <id> 切换 · /conv new 新会话",
             "按键：Alt+Enter 换行 · Ctrl+E 思考展开/折叠 · Ctrl+W 工作区目录树 · PgUp/PgDn 翻页 · Ctrl+End 回底部",
             "工作区树：↑↓选 Enter/→展开 ◀收起/回父 r刷新 w回会话列表 Tab/Esc 回输入",
+            "工作区未设置：按 p 从项目池选择（选择视图：↑↓选 Enter切换 r刷新 Esc 返回）",
             "审批浮层：Enter=一次 · a=始终 · Esc/n=拒绝 · Ctrl+C 先拒绝、回合随后继续需再按取消",
         ] {
             self.st.push_line(LineKind::System, line);
@@ -408,6 +423,10 @@ impl TuiApp<'_> {
 
     /// 工作区目录树视图按键：浏览目录层级（Enter/→ 展开，← 收起或回父目录）。
     fn on_workspace_key(&mut self, key: KeyEvent) {
+        if self.st.ws_pick.is_some() {
+            self.on_workspace_pick_key(key);
+            return;
+        }
         match key.code {
             KeyCode::Tab | KeyCode::BackTab | KeyCode::Esc => self.st.focus = Focus::Input,
             KeyCode::Up => self.st.ws_move(true),
@@ -424,6 +443,37 @@ impl TuiApp<'_> {
             }
             // w：回到左栏会话列表（w 两侧对称切换）。
             KeyCode::Char('w') => self.st.focus = Focus::Sidebar,
+            // 工作区未设置（顶栏路径为空）时：p 进入项目池「选择工作区」。
+            KeyCode::Char('p') if self.st.workspace_path.is_none() && self.st.ws_open_pick() => {
+                self.fetch_ws_projects();
+            }
+            _ => {}
+        }
+    }
+
+    /// 项目池「选择工作区」子视图按键。
+    fn on_workspace_pick_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc | KeyCode::Tab | KeyCode::BackTab => self.st.ws_close_pick(),
+            KeyCode::Up => self.st.ws_pick_move(true),
+            KeyCode::Down => self.st.ws_pick_move(false),
+            KeyCode::Char('r') => {
+                if self.st.ws_pick_refresh() {
+                    self.fetch_ws_projects();
+                }
+            }
+            KeyCode::Enter | KeyCode::Right => {
+                if let Some(name) = self.st.ws_pick_begin_switch() {
+                    self.st
+                        .push_line(LineKind::System, &format!("正在切换到项目「{name}」…"));
+                    self.switch_ws_project(name);
+                }
+            }
+            // w：关闭选择并回到左栏会话。
+            KeyCode::Char('w') => {
+                self.st.ws_close_pick();
+                self.st.focus = Focus::Sidebar;
+            }
             _ => {}
         }
     }
@@ -557,6 +607,20 @@ impl TuiApp<'_> {
                     }
                 }
             },
+            UiEvent::WsProjects(result) => self.st.ws_pick_projects(result),
+            UiEvent::WsProjectSwitch(result) => self.on_ws_project_switch(result),
+        }
+    }
+
+    /// 项目池切换结果：成功打印路径、关闭选择视图并刷新根列表；失败留在视图提示。
+    fn on_ws_project_switch(&mut self, result: Result<String, String>) {
+        if let Ok(path) = &result {
+            self.st
+                .push_line(LineKind::System, &format!("已切换到工作区：{path}"));
+        }
+        self.st.ws_pick_switch_result(result);
+        if self.st.ws_pick.is_none() {
+            self.refresh_workspace();
         }
     }
 

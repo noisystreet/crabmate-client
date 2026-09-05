@@ -5,9 +5,24 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crabmate_tui_core::{WorkspaceDirData, WorkspaceDirEntry};
+use crabmate_tui_core::{WorkspaceDirData, WorkspaceDirEntry, WorkspaceProjectsData};
 
 use super::state::UiState;
+
+/// 项目池「选择工作区」子视图状态（工作区未设置/根为空时可借此切换；关闭后为 `None`）。
+#[derive(Debug, Clone, Default)]
+pub struct WsPickState {
+    /// `GET /workspace/projects` 的 `enabled`（false 时提示池未启用）。
+    pub enabled: bool,
+    /// 池内项目名字列表。
+    pub projects: Vec<String>,
+    /// 列表拉取中。
+    pub loading: bool,
+    /// 切换请求在途（避免重复提交）。
+    pub busy: bool,
+    /// 拉取/切换错误文案（就地提示）。
+    pub error: Option<String>,
+}
 
 /// 工作区目录树展开后的单个可见行（由各目录缓存扁平化而来，供绘制与光标移动共用）。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -227,6 +242,101 @@ impl UiState {
         }
         was_expanded
     }
+
+    // ── 项目池「选择工作区」（工作区未设置时切换） ──────────
+
+    /// 进入选择子视图（已在选择中不重复）；返回是否需要拉项目池。
+    pub fn ws_open_pick(&mut self) -> bool {
+        if self.ws_pick.is_some() {
+            return false;
+        }
+        self.ws_pick = Some(WsPickState {
+            loading: true,
+            ..WsPickState::default()
+        });
+        self.ws_cursor = 0;
+        true
+    }
+
+    /// 关闭选择子视图（Esc / 切换成功后回到目录树）。
+    pub fn ws_close_pick(&mut self) {
+        self.ws_pick = None;
+    }
+
+    /// 手动刷新项目池（选择中且空闲）；返回是否需要拉取。
+    pub fn ws_pick_refresh(&mut self) -> bool {
+        let Some(st) = self.ws_pick.as_mut() else {
+            return false;
+        };
+        if st.busy || st.loading {
+            return false;
+        }
+        st.loading = true;
+        st.error = None;
+        true
+    }
+
+    /// 项目池列表到达（拉取失败也在就地错误里体现）。
+    pub fn ws_pick_projects(&mut self, result: Result<WorkspaceProjectsData, String>) {
+        let Some(st) = self.ws_pick.as_mut() else {
+            return;
+        };
+        st.loading = false;
+        match result {
+            Ok(d) => {
+                st.enabled = d.enabled;
+                st.projects = d.projects;
+                st.error = None;
+            }
+            Err(e) => {
+                st.enabled = false;
+                st.projects.clear();
+                st.error = Some(e);
+            }
+        }
+    }
+
+    /// 选择视图内上/下移动光标（列表内收敛）。
+    pub fn ws_pick_move(&mut self, up: bool) {
+        let Some(st) = self.ws_pick.as_ref() else {
+            return;
+        };
+        let n = st.projects.len();
+        if n == 0 {
+            return;
+        }
+        if up {
+            self.ws_cursor = self.ws_cursor.saturating_sub(1);
+        } else if self.ws_cursor + 1 < n {
+            self.ws_cursor += 1;
+        }
+    }
+
+    /// 光标所在项目发起切换；返回其名字（忙/空列表不动作）。
+    pub fn ws_pick_begin_switch(&mut self) -> Option<String> {
+        let st = self.ws_pick.as_mut()?;
+        if st.busy {
+            return None;
+        }
+        let name = st.projects.get(self.ws_cursor)?.clone();
+        st.busy = true;
+        Some(name)
+    }
+
+    /// 切换结果：成功关闭选择回目录树；失败留在选择视图提示。
+    pub fn ws_pick_switch_result(&mut self, result: Result<String, String>) {
+        let Some(st) = self.ws_pick.as_mut() else {
+            return;
+        };
+        st.busy = false;
+        match result {
+            Ok(_) => {
+                self.ws_pick = None;
+                self.ws_cursor = 0;
+            }
+            Err(e) => st.error = Some(e),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -422,5 +532,74 @@ mod tests {
         assert!(s.ws_dir_failed("a"));
         assert_eq!(s.ws_rows.len(), 1);
         assert_eq!(s.ws_rows[s.ws_cursor].rel, "a", "占位行消失后回到目录行");
+    }
+
+    fn pool(enabled: bool, projects: Vec<&str>) -> WorkspaceProjectsData {
+        WorkspaceProjectsData {
+            enabled,
+            pool_path: None,
+            projects: projects.into_iter().map(str::to_string).collect(),
+        }
+    }
+
+    #[test]
+    fn ws_pick_open_close_and_projects() {
+        let mut s = UiState::new();
+        assert!(s.ws_open_pick(), "首次进入应拉项目池");
+        assert!(s.ws_pick.as_ref().unwrap().loading);
+        assert!(!s.ws_open_pick(), "已在选择中不重复进入");
+        s.ws_pick_projects(Ok(pool(true, vec!["proj-a", "proj-b"])));
+        let st = s.ws_pick.as_ref().unwrap();
+        assert!(!st.loading);
+        assert_eq!(
+            st.projects,
+            vec!["proj-a".to_string(), "proj-b".to_string()]
+        );
+        assert!(st.enabled);
+        s.ws_close_pick();
+        assert!(s.ws_pick.is_none());
+    }
+
+    #[test]
+    fn ws_pick_error_and_refresh_gating() {
+        let mut s = UiState::new();
+        s.ws_open_pick();
+        s.ws_pick_projects(Err("boom".to_string()));
+        assert_eq!(s.ws_pick.as_ref().unwrap().error.as_deref(), Some("boom"));
+        assert!(s.ws_pick_refresh());
+        assert!(!s.ws_pick_refresh(), "加载中不重复拉取");
+        s.ws_pick_projects(Ok(pool(true, Vec::new())));
+        assert_eq!(s.ws_pick.as_ref().unwrap().error, None);
+    }
+
+    #[test]
+    fn ws_pick_switch_success_closes_failure_keeps() {
+        let mut s = UiState::new();
+        s.ws_open_pick();
+        s.ws_pick_projects(Ok(pool(true, vec!["proj-a", "proj-b"])));
+        s.ws_pick_move(false);
+        assert_eq!(s.ws_cursor, 1);
+        assert_eq!(s.ws_pick_begin_switch(), Some("proj-b".to_string()));
+        assert!(s.ws_pick_begin_switch().is_none(), "切换在途不重复");
+        s.ws_pick_switch_result(Ok("/pool/proj-b".to_string()));
+        assert!(s.ws_pick.is_none(), "成功关闭选择视图");
+
+        s.ws_open_pick();
+        s.ws_pick_projects(Ok(pool(true, vec!["proj-x"])));
+        assert_eq!(s.ws_pick_begin_switch(), Some("proj-x".to_string()));
+        s.ws_pick_switch_result(Err("denied".to_string()));
+        assert!(s.ws_pick.is_some(), "失败留在选择视图");
+        assert_eq!(s.ws_pick.as_ref().unwrap().error.as_deref(), Some("denied"));
+        assert!(!s.ws_pick.as_ref().unwrap().busy);
+    }
+
+    #[test]
+    fn ws_pick_move_clamps_to_project_list() {
+        let mut s = UiState::new();
+        s.ws_open_pick();
+        s.ws_pick_move(false); // 空列表不越界
+        s.ws_pick_projects(Ok(pool(true, vec!["only"])));
+        s.ws_pick_move(false);
+        assert_eq!(s.ws_cursor, 0, "单项目不越界");
     }
 }

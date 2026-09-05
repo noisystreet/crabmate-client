@@ -37,6 +37,53 @@ impl WorkspaceDirData {
     }
 }
 
+/// `GET /workspace/projects`：服务端项目池是否启用与已有项目列表。
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct WorkspaceProjectsData {
+    pub enabled: bool,
+    #[serde(default)]
+    pub pool_path: Option<String>,
+    #[serde(default)]
+    pub projects: Vec<String>,
+}
+
+/// `POST /workspace/projects` 的切换响应子集。
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct WorkspaceProjectOpenData {
+    pub ok: bool,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub path: String,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+/// 解析 **HTTP 已成功（2xx）** 的 `POST /workspace/projects` JSON：要求 `ok: true`，返回 `path`。
+pub fn parse_workspace_project_open_body(val: &Value) -> Result<String, WorkspaceSetError> {
+    if val.get("ok").and_then(|v| v.as_bool()) != Some(true) {
+        return match val
+            .get("error")
+            .and_then(|e| e.as_str())
+            .filter(|s| !s.is_empty())
+        {
+            Some(msg) => Err(WorkspaceSetError {
+                kind: WorkspaceSetErrorKind::RejectedWithDetail,
+                message: msg.to_string(),
+            }),
+            None => Err(WorkspaceSetError {
+                kind: WorkspaceSetErrorKind::RejectedWithoutDetail,
+                message: "workspace project switch failed".into(),
+            }),
+        };
+    }
+    Ok(val
+        .get("path")
+        .and_then(|p| p.as_str())
+        .unwrap_or("")
+        .to_string())
+}
+
 /// `POST /workspace` 在 HTTP 2xx 下 JSON 语义失败的原因。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorkspaceSetErrorKind {
@@ -162,5 +209,37 @@ mod tests {
         let d: WorkspaceDirData =
             serde_json::from_value(json!({"path": "/x", "error": "busy"})).unwrap();
         assert_eq!(d.error_text(), Some("busy"));
+    }
+
+    #[test]
+    fn projects_data_parses_pool() {
+        let d: WorkspaceProjectsData = serde_json::from_value(json!({
+            "enabled": true,
+            "pool_path": "/data/pool",
+            "projects": ["proj-a", "proj-b"]
+        }))
+        .unwrap();
+        assert!(d.enabled);
+        assert_eq!(d.pool_path.as_deref(), Some("/data/pool"));
+        assert_eq!(d.projects, vec!["proj-a".to_string(), "proj-b".to_string()]);
+        let d: WorkspaceProjectsData = serde_json::from_value(json!({"enabled": false})).unwrap();
+        assert!(!d.enabled);
+        assert!(d.projects.is_empty());
+    }
+
+    #[test]
+    fn project_open_ok_returns_path() {
+        let path = parse_workspace_project_open_body(&json!({"ok": true, "path": "/p/a"})).unwrap();
+        assert_eq!(path, "/p/a");
+    }
+
+    #[test]
+    fn project_open_false_uses_error() {
+        let e = parse_workspace_project_open_body(&json!({"ok": false, "error": "no such"}))
+            .unwrap_err();
+        assert_eq!(e.kind, WorkspaceSetErrorKind::RejectedWithDetail);
+        assert_eq!(e.message, "no such");
+        let e = parse_workspace_project_open_body(&json!({"ok": false})).unwrap_err();
+        assert_eq!(e.kind, WorkspaceSetErrorKind::RejectedWithoutDetail);
     }
 }
