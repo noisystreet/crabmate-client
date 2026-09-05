@@ -1,6 +1,6 @@
 # 远程 CLI / TUI（路径 B）
 
-> **状态**：方案（已拍板走 **远程客户端**；**P3 已落地** `repl` 斜杠 `/help` `/workspace` `/conv`；**P4 已落地（M1–M3）**：全屏 `tui` 流式 transcript + 状态行 + 单行/多行输入 + Ctrl+C 取消 + 左栏会话与 `/status` 联动 + 审批浮层 + thinking 折叠 + 工具行摘要 + `/find` 搜索 + 翻页滚动）  
+> **状态**：方案（已拍板走 **远程客户端**；**P3 已落地** `repl` 斜杠 `/help` `/workspace` `/conv`；**P4 已落地（M1–M3）**：全屏 `tui` 流式 transcript + 状态行 + 单行/多行输入 + Ctrl+C 取消 + 左栏会话与 `/status` 联动 + 审批浮层 + thinking 折叠 + 工具行摘要 + `/find` 搜索 + 翻页滚动 + 顶栏工作区 + 助手正文行内 Markdown 轻渲染）  
 > **范围**：`crabmate-client` 新增终端面；`crabmate serve` 仍为执行权威  
 > **关联**：Server [`client_shell_split.md`](https://github.com/noisystreet/CrabMate/blob/main/docs/design/client_shell_split.md)、[`命令行与路由.md`](https://github.com/noisystreet/CrabMate/blob/main/docs/命令行与路由.md)、本仓 [`contract_pin.md`](./contract_pin.md) / [`personal_cloud_runbook.md`](./personal_cloud_runbook.md)
 

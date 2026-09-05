@@ -130,6 +130,7 @@ crabmate-tui --api-base http://127.0.0.1:8080 repl
 # 非白名单命令弹出审批浮层（Enter=一次 · a=始终 · Esc/n=拒绝）
 # 工具调用渲染为单行摘要，结果到达原位补 ✓/✗ + 说明
 # /find <词> 高亮并跳转 · /find 空参跳下一处 · /find off 清除
+# 助手正文渲染行内 Markdown（粗体/斜体/行内码/链接/删除线）；代码围栏内容保持纯文本
 # 斜杠：/model /mode /role /status /find /conv [new] /quit · /help 查看全部
 #   （状态行回退显示 serve 默认，本地 override 以 `*` 标记；
 #     切换会话后从空 transcript 开始新一轮）
