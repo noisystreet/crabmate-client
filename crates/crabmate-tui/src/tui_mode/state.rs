@@ -131,6 +131,8 @@ pub struct UiState {
     pub active_session_id: Option<String>,
     /// 当前是否宽到显示左栏（由渲染层每帧刷新）。
     pub sidebar_visible: bool,
+    /// 当前工作区路径（`GET /workspace`；顶栏显示，未获取为 None）。
+    pub workspace_path: Option<String>,
     /// 审批浮层（回合暂停等待决策）。
     pub approval: Option<ApprovalOverlay>,
     /// 工具调用 id → transcript 行号（结果到达时原位更新摘要行）。

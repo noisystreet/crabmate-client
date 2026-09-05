@@ -28,6 +28,8 @@ const STATUS_FG: Color = Color::White;
 const SIDEBAR_BG: Color = Color::Indexed(240);
 const CHAT_BG: Color = Color::Indexed(235);
 const COMPOSER_BG: Color = Color::Indexed(237);
+/// 顶栏背景（工作区名称；对齐 Desktop 顶部标题栏观感）。
+const TOPBAR_BG: Color = Color::Indexed(238);
 
 /// 状态行展示信息（mod 层组装好的显示值，含 override 标记）。
 pub struct StatusInfo {
@@ -184,6 +186,28 @@ fn truncate_display(text: &str, width: usize) -> String {
     out
 }
 
+/// 工作区展示名：路径 basename（根目录/空串回退原路径文本）。
+fn workspace_basename(path: &str) -> String {
+    let p = path.trim_end_matches('/');
+    match p.rsplit('/').next().filter(|s| !s.is_empty()) {
+        Some(base) => base.to_string(),
+        None => path.to_string(),
+    }
+}
+
+/// 顶栏内容：`工作区 <basename> · <完整路径>`（超宽截断，名称始终在左侧可见）。
+fn top_text(st: &UiState, width: usize) -> String {
+    let Some(path) = st
+        .workspace_path
+        .as_deref()
+        .filter(|s| !s.trim().is_empty())
+    else {
+        return truncate_display("工作区:（未获取）…", width);
+    };
+    let name = workspace_basename(path);
+    truncate_display(&format!("工作区: {name} · {path}"), width)
+}
+
 /// 状态行内容（单行）。conv 为当前 conversation_id。
 fn status_text(info: &StatusInfo, conv: Option<&str>, width: usize) -> String {
     let mut parts: Vec<String> = Vec::new();
@@ -289,13 +313,24 @@ fn paint_bg(frame: &mut Frame, rect: Rect, color: Color) {
     frame.buffer_mut().set_style(rect, Style::new().bg(color));
 }
 
-/// 渲染一帧。对齐 Desktop：整屏 = 主体 + 底部状态栏；主体内左会话列与右聊天列
-/// 各自贯通，composer 只位于聊天列底部（会话列下方不出现输入框）。
+/// 渲染一帧。对齐 Desktop：整屏 = 顶栏(工作区) + 主体 + 底部状态栏；主体内
+/// 左会话列与右聊天列各自贯通，composer 只位于聊天列底部（会话列下方不出现输入框）。
 pub fn draw(frame: &mut Frame, st: &UiState, info: &StatusInfo) {
     let area = frame.area();
-    let chunks = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(area);
-    let body_area = chunks[0];
-    let status_area = chunks[1];
+    let chunks = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Min(1),
+        Constraint::Length(1),
+    ])
+    .split(area);
+    let top_area = chunks[0];
+    let body_area = chunks[1];
+    let status_area = chunks[2];
+
+    paint_bg(frame, top_area, TOPBAR_BG);
+    let top = Paragraph::new(top_text(st, top_area.width as usize))
+        .style(Style::new().fg(Color::White).add_modifier(Modifier::BOLD));
+    frame.render_widget(top, top_area);
 
     if st.sidebar_visible {
         let cols = Layout::horizontal([Constraint::Length(SIDEBAR_WIDTH), Constraint::Min(0)])
@@ -638,6 +673,29 @@ mod tests {
         st.push_line(LineKind::Tool, "exec ✓");
         let rows = body_rows(&st, 60);
         assert!(rows[0].line.to_string().contains("[工具] exec ✓"));
+    }
+
+    #[test]
+    fn workspace_basename_derives_name() {
+        assert_eq!(workspace_basename("/data/proj"), "proj");
+        assert_eq!(workspace_basename("/data/proj/"), "proj");
+        assert_eq!(workspace_basename("/"), "/");
+        assert_eq!(workspace_basename(""), "");
+    }
+
+    #[test]
+    fn top_text_shows_name_and_full_path() {
+        let mut st = UiState::new();
+        st.workspace_path = Some("/data/proj".into());
+        let s = top_text(&st, 80);
+        assert!(s.contains("工作区: proj"));
+        assert!(s.contains("/data/proj"));
+    }
+
+    #[test]
+    fn top_text_placeholder_before_workspace_known() {
+        let st = UiState::new();
+        assert!(top_text(&st, 40).contains("未获取"));
     }
 
     #[test]
