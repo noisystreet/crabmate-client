@@ -184,7 +184,7 @@ Desktop 设置共 8 个分区（`settings_page`；`settings_modal` 旧弹窗已�
 
 ### 6.4 随轮发送
 
-保存到 user-data 后，新一轮回合仍按 Desktop 同规则随 body 发送（空值不发送）：`client_llm.{api_key?,api_base,model,llm_thinking_mode?}`、顶层 `temperature?`、`readonly_tool_ttl_cache_secs?`。**已实现部分**：`crabmate-tui-core` 请求体装配已加顶层 `temperature`（f64，仅 0.0..=2.0）与 `client_llm.llm_thinking_mode`（仅 on/off）；`llm_context_tokens` / `readonly_tool_ttl_cache_secs` 待 W2 剩余项，字段名与校验区间以契约 `crabmate 0.5.0` 与前端 `http_request.rs` L77-86 为准。
+保存到 user-data 后，新一轮回合仍按 Desktop 同规则随 body 发送（空值不发送）：`client_llm.{api_key?,api_base,model,llm_context_tokens?,llm_thinking_mode?}`、顶层 `temperature?`、`readonly_tool_ttl_cache_secs?`。**已实现**：顶层 `temperature`（f64，仅 0.0..=2.0）、`client_llm.llm_thinking_mode`（仅 on/off）与 `client_llm.llm_context_tokens`（仅 >0 的 JSON 数值）、顶层 `readonly_tool_ttl_cache_secs`（缓存开关关时 = 0）均已随 W2 落地；字段名与校验区间以契约 `crabmate 0.5.0` 与前端 `http_request.rs` L77-86 / `client_llm_storage.rs`（`client_llm_json_for_chat_body`、`readonly_tool_ttl_cache_secs_for_chat_body`）为准。
 
 ---
 
@@ -193,7 +193,7 @@ Desktop 设置共 8 个分区（`settings_page`；`settings_modal` 旧弹窗已�
 | Wave | 交付 | 验收 |
 |---|---|---|
 | **W1 面板骨架 + 模型/会话扁平字段** | `/settings` + F2 浮层；分区导航；三层显示；字段编辑：模型名、网关/api_base（预设表随 §6.4 对齐）、role、mode；`S` 保存（`llm-overrides` / `prefs` 合并 PUT）；`Esc`/脏确认；回合中只读；F2 加入 `/help` 与「快捷键」分区；斜杠 `/model /mode /role` 保留 | 连本地 serve 冒烟：面板改 model/role/mode → 保存 → `/status` 与 Desktop 设置页可见 → 下一轮请求体带 `client_llm.model`；重启 TUI 后值仍在（user-data 层） |
-| **W2 完整 LLM 字段 + 密钥 + 工具开关** | 温度/思考模式字段与 API 密钥写钥匙串槽 **已随面板一并落地**（校验区间对齐；密钥重启后从同一槽位回读；矩阵 auth Notes 已同步）；剩：上下文 tokens、只读工具缓存开关、网关预设下拉（与 `client_llm_presets.rs` 同名表；跨仓同步纪律见 §8） | 校验区间对齐；密钥保存后重启可回读；关缓存开关后请求体出现 `readonly_tool_ttl_cache_secs: 0` |
+| **W2 完整 LLM 字段 + 密钥 + 工具开关** | 温度/思考模式字段与 API 密钥写钥匙串槽 **已随面板一并落地**（校验区间对齐；密钥重启后从同一槽位回读；矩阵 auth Notes 已同步）；上下文 tokens、只读工具缓存开关、网关预设下拉（与 `client_llm_presets.rs` 同名表，双端同步注释已加；跨仓同步纪律见 §8）**已随收尾落地** | 校验区间对齐；密钥保存后重启可回读；上下文 tokens >0 随轮 `client_llm.llm_context_tokens`；关缓存开关后请求体出现 `readonly_tool_ttl_cache_secs: 0` |
 | **W3 后置项（契约核对后）** | MCP 全局开关 + `tool_timeout_secs`（`/user-data/mcp-servers` 系端点）；Session SQLite 会话存储开关（`/status` 布尔 + POST） | 开关读/写与 Desktop 设置页同源一致；不实现服务器行管理 |
 
 各 Wave 内**一项用户可见行为一个 PR**（引用 `coding_agent_client.md` 约束第 5 条的小步纪律）。

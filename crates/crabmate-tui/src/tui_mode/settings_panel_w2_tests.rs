@@ -110,7 +110,7 @@ fn thinking_enum_cycles_and_commits_on_off_clear() {
     let o = overrides(None, None, None, None);
     let c = ctx(&o, None);
     let mut p = SettingsPanel::new(false);
-    for _ in 0..3 {
+    for _ in 0..4 {
         p.handle_key(&key(KeyCode::Down), &c); // 思考模式行
     }
     assert_eq!(p.current_field(), FieldId::ThinkingMode);
@@ -150,7 +150,7 @@ fn api_key_staging_and_save_effect_carries_secret() {
     let o = overrides(None, None, None, None);
     let c = ctx(&o, None);
     let mut p = SettingsPanel::new(false);
-    for _ in 0..4 {
+    for _ in 0..5 {
         p.handle_key(&key(KeyCode::Down), &c); // API 密钥行
     }
     assert_eq!(p.current_field(), FieldId::ApiKey);
@@ -172,7 +172,7 @@ fn api_key_staging_and_save_effect_carries_secret() {
     assert!(p.is_dirty());
     // S → Save 效果带 secret（llm/prefs 均空）
     let (llm, prefs, secret) = match p.handle_key(&key(KeyCode::Char('s')), &c) {
-        PanelEffect::Save { llm, prefs, secret } => (llm, prefs, secret),
+        PanelEffect::Save { llm, prefs, secret } => (*llm, *prefs, secret),
         _ => panic!("expected save"),
     };
     assert!(!llm.any());
@@ -205,6 +205,7 @@ fn secret_set_display_text_and_secret_saved_callback() {
     assert!(text.iter().any(|l| l.contains("已设（钥匙串）")));
     assert!(!text.iter().any(|l| l.contains("未设（跟随 serve）")));
     // secret_saved(true)：清 staged 且已设
+    p.handle_key(&key(KeyCode::Down), &c);
     p.handle_key(&key(KeyCode::Down), &c);
     p.handle_key(&key(KeyCode::Down), &c);
     p.handle_key(&key(KeyCode::Down), &c);
@@ -252,7 +253,7 @@ fn save_group_result_clears_stage_on_ok_and_keeps_on_error() {
     p.handle_key(&key(KeyCode::Enter), &c);
     assert!(p.is_dirty());
     let (llm, prefs) = match p.handle_key(&key(KeyCode::Char('s')), &c) {
-        PanelEffect::Save { llm, prefs, .. } => (llm, prefs),
+        PanelEffect::Save { llm, prefs, .. } => (*llm, *prefs),
         _ => panic!("expected save"),
     };
     assert!(p.is_saving());

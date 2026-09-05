@@ -12,7 +12,8 @@ use super::render::{cell_window, horizontal_window, truncate_display};
 use super::serve_defaults::ServeDefaults;
 use super::settings::{
     EffectiveView, FieldAction, Layer, LlmSave, PersistedSettings, PrefsSave, SESSION_MODES,
-    THINKING_MODES, effective_value, is_valid_temperature, normalize_str, validate_api_base,
+    THINKING_MODES, TOOL_CACHE_DISABLED, effective_value, is_valid_context_tokens,
+    is_valid_temperature, normalize_str, validate_api_base,
 };
 
 /// 会话模式编辑选项长度 =「跟随 server」+ [`SESSION_MODES`]。
@@ -38,6 +39,68 @@ fn think_options() -> [Option<&'static str>; THINK_OPTIONS_LEN] {
     }
     out
 }
+
+/// 只读工具缓存编辑选项长度 = 开（跟随 server） + 关（禁用）。
+const TOOL_OPTIONS_LEN: usize = 2;
+
+/// 只读工具缓存编辑选项（`None` = 开/跟随 server，即清除 prefs 键；`Some("off")` = 关/禁用）。
+fn tool_options() -> [Option<&'static str>; TOOL_OPTIONS_LEN] {
+    [None, Some(TOOL_CACHE_DISABLED)]
+}
+
+/// 网关预设（与 `frontend/src/client_llm_presets.rs` 的 `CLIENT_LLM_API_BASE_PRESETS`
+/// **同源拷贝**；改 URL / 增删条目需两仓同步，避免漂移）。
+/// TUI 只回写 `api_base`，不按预设自动填建议模型名（模型名仍保持「空 = 跟随 server」）。
+#[derive(Clone, Copy)]
+struct ApiPreset {
+    id: &'static str,
+    url: &'static str,
+}
+
+const API_BASE_PRESETS: &[ApiPreset] = &[
+    ApiPreset {
+        id: "server",
+        url: "",
+    },
+    ApiPreset {
+        id: "ollama",
+        url: "http://127.0.0.1:11434/v1",
+    },
+    ApiPreset {
+        id: "deepseek",
+        url: "https://api.deepseek.com/v1",
+    },
+    ApiPreset {
+        id: "minimax",
+        url: "https://api.minimaxi.com/v1",
+    },
+    ApiPreset {
+        id: "zhipu",
+        url: "https://open.bigmodel.cn/api/paas/v4",
+    },
+    ApiPreset {
+        id: "moonshot",
+        url: "https://api.moonshot.cn/v1",
+    },
+    ApiPreset {
+        id: "custom",
+        url: "",
+    },
+];
+
+const GATEWAY_SERVER_ID: &str = "server";
+const GATEWAY_CUSTOM_ID: &str = "custom";
+
+/// 网关预设选项下标 → 值（对应 [`API_BASE_PRESETS`]；`server` 是首位，`custom` 是末位）。
+fn gateway_pick_of(value: Option<&str>) -> usize {
+    match value.map(str::trim).filter(|s| !s.is_empty()) {
+        None => 0,
+        Some(v) => API_BASE_PRESETS
+            .iter()
+            .position(|p| p.id != GATEWAY_SERVER_ID && p.id != GATEWAY_CUSTOM_ID && p.url == v)
+            .unwrap_or(API_BASE_PRESETS.len() - 1),
+    }
+}
 /// 字段行标签列宽（cell；含标签与值之间间隔）。
 const LABEL_PAD: usize = 13;
 
@@ -46,7 +109,7 @@ pub(super) fn is_f2_key(key: &KeyEvent) -> bool {
     key.code == KeyCode::F(2) && !key.modifiers.contains(KeyModifiers::CONTROL)
 }
 
-/// 面板分区：模型 / 会话（W1 只管理这两个分区的扁平字段）。
+/// 面板分区：模型 / 会话（扁平字段，写 serve user-data）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Section {
     Llm,
@@ -69,25 +132,29 @@ impl Section {
                 FieldId::Model,
                 FieldId::ApiBase,
                 FieldId::Temperature,
+                FieldId::ContextTokens,
                 FieldId::ThinkingMode,
                 FieldId::ApiKey,
             ],
-            Section::Session => &[FieldId::Role, FieldId::SessionMode],
+            Section::Session => &[FieldId::Role, FieldId::SessionMode, FieldId::ToolCache],
         }
     }
 }
 
-/// 面板管理的字段：模型分区 5 个 + 会话分区 2 个（`Temperature/ThinkingMode` 写
-/// user-data `client_llm.*`；`ApiKey` 只写本机钥匙串，见 TuiApp 接线）。
+/// 面板管理的字段：模型分区 6 个 + 会话分区 3 个。`Temperature/ThinkingMode/
+/// ContextTokens` 写 user-data `client_llm.*`；`ApiKey` 只写本机钥匙串（见 TuiApp
+/// 接线）；`ToolCache` 写 prefs `disable_readonly_tool_ttl_cache`。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FieldId {
     Model,
     ApiBase,
     Temperature,
+    ContextTokens,
     ThinkingMode,
     ApiKey,
     Role,
     SessionMode,
+    ToolCache,
 }
 
 const fn field_label(field: FieldId) -> &'static str {
@@ -95,10 +162,12 @@ const fn field_label(field: FieldId) -> &'static str {
         FieldId::Model => "模型名",
         FieldId::ApiBase => "API Base",
         FieldId::Temperature => "温度",
+        FieldId::ContextTokens => "上下文 tokens",
         FieldId::ThinkingMode => "思考模式",
         FieldId::ApiKey => "API 密钥",
         FieldId::Role => "Agent role",
         FieldId::SessionMode => "会话模式",
+        FieldId::ToolCache => "只读工具缓存",
     }
 }
 
@@ -109,7 +178,7 @@ pub enum SaveGroup {
     Prefs,
 }
 
-/// 行编辑状态：文本编辑（含缓冲与光标）或枚举循环（会话模式 / 思考模式）。
+/// 行编辑状态：文本编辑（含缓冲与光标）、模式/思考/工具缓存枚举循环、网关预设循环。
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Editing {
     Text {
@@ -123,6 +192,15 @@ enum Editing {
     Think {
         pick: usize,
     },
+    Tool {
+        pick: usize,
+    },
+    /// 网关预设循环：`pick` 对应 [`API_BASE_PRESETS`]；`prefill` 在选「自定义 URL」时
+    /// 作为文本编辑初值（当前生效值，避免重输长 URL）。
+    Gateway {
+        pick: usize,
+        prefill: String,
+    },
 }
 
 /// 编辑态按键动作（先在不可变借用下解析，再执行以避开自引用借用）。
@@ -131,6 +209,8 @@ enum EditAction {
     CommitText,
     CommitMode,
     CommitThink,
+    CommitTool,
+    CommitGateway,
     Insert(char),
     Backspace,
     MoveLeft,
@@ -141,10 +221,11 @@ enum EditAction {
 #[derive(Debug)]
 pub(super) enum PanelEffect {
     None,
-    /// 请求保存（三组可能各有动作；空组由调用方跳过）。
+    /// 请求保存（三组可能各有动作；空组由调用方跳过）。负载走 Box：字段数涨到
+    /// 超 clippy large-enum-variant 阈值，而该 effect 只是 UI→app 的一次性传递。
     Save {
-        llm: LlmSave,
-        prefs: PrefsSave,
+        llm: Box<LlmSave>,
+        prefs: Box<PrefsSave>,
         /// API 密钥保存动作（写钥匙串，不进 `LlmSave`；`Skip` = 无动作）。
         secret: FieldAction,
     },
@@ -238,10 +319,12 @@ impl SettingsPanel {
             FieldId::Model => &self.llm.model,
             FieldId::ApiBase => &self.llm.api_base,
             FieldId::Temperature => &self.llm.temperature,
+            FieldId::ContextTokens => &self.llm.context_tokens,
             FieldId::ThinkingMode => &self.llm.thinking,
             FieldId::ApiKey => &self.secret,
             FieldId::Role => &self.prefs.role,
             FieldId::SessionMode => &self.prefs.session_mode,
+            FieldId::ToolCache => &self.prefs.tool_cache,
         }
     }
 
@@ -250,10 +333,12 @@ impl SettingsPanel {
             FieldId::Model => self.llm.model = action,
             FieldId::ApiBase => self.llm.api_base = action,
             FieldId::Temperature => self.llm.temperature = action,
+            FieldId::ContextTokens => self.llm.context_tokens = action,
             FieldId::ThinkingMode => self.llm.thinking = action,
             FieldId::ApiKey => self.secret = action,
             FieldId::Role => self.prefs.role = action,
             FieldId::SessionMode => self.prefs.session_mode = action,
+            FieldId::ToolCache => self.prefs.tool_cache = action,
         }
     }
 
@@ -368,7 +453,8 @@ impl SettingsPanel {
         self.row = 0;
     }
 
-    /// Enter：进入当前字段的编辑（文本缓冲预填生效值；模式/思考进枚举循环；密钥从空开始）。
+    /// Enter：进入当前字段的编辑（文本缓冲预填生效值；会话模式/思考模式/工具缓存/网关
+    /// 预设进枚举循环；API 密钥从空开始；自定义网关在预设循环里 Enter 落到文本编辑）。
     fn begin_edit(&mut self, ctx: &PanelCtx<'_>) {
         if self.read_only {
             self.set_note(
@@ -400,6 +486,30 @@ impl SettingsPanel {
                 },
             };
             self.editing = Some(Editing::Think { pick });
+            return;
+        }
+        if field == FieldId::ToolCache {
+            let pick = match self.staged(field) {
+                FieldAction::Write(Some(v)) => tool_index_of(Some(v)),
+                FieldAction::Write(None) => 0,
+                FieldAction::Skip => match ctx.effective(field).value {
+                    Some(v) => tool_index_of(Some(&v)),
+                    None => 0,
+                },
+            };
+            self.editing = Some(Editing::Tool { pick });
+            return;
+        }
+        // API Base：网关预设循环（server / ollama / … / 自定义 URL）。自定义在预设里 Enter
+        // 后落到文本编辑（缓冲预填当前生效值，免重输长 URL）。
+        if field == FieldId::ApiBase {
+            let prefill = match self.staged(field) {
+                FieldAction::Write(Some(v)) => v.clone(),
+                FieldAction::Write(None) => String::new(),
+                FieldAction::Skip => ctx.effective(field).value.unwrap_or_default(),
+            };
+            let pick = gateway_pick_of(Some(&prefill));
+            self.editing = Some(Editing::Gateway { pick, prefill });
             return;
         }
         // API 密钥不在三层合成内：编辑缓冲总从空开始（不回显既有值/已设态）。
@@ -451,6 +561,20 @@ impl SettingsPanel {
                 KeyCode::Right => Some(EditAction::MoveRight),
                 _ => None,
             },
+            Some(Editing::Tool { .. }) => match key.code {
+                KeyCode::Esc => Some(EditAction::Cancel),
+                KeyCode::Enter => Some(EditAction::CommitTool),
+                KeyCode::Left => Some(EditAction::MoveLeft),
+                KeyCode::Right => Some(EditAction::MoveRight),
+                _ => None,
+            },
+            Some(Editing::Gateway { .. }) => match key.code {
+                KeyCode::Esc => Some(EditAction::Cancel),
+                KeyCode::Enter => Some(EditAction::CommitGateway),
+                KeyCode::Left => Some(EditAction::MoveLeft),
+                KeyCode::Right => Some(EditAction::MoveRight),
+                _ => None,
+            },
             None => None,
         };
         let Some(action) = action else {
@@ -461,6 +585,8 @@ impl SettingsPanel {
             EditAction::CommitText => self.commit_text(),
             EditAction::CommitMode => self.commit_mode(),
             EditAction::CommitThink => self.commit_think(),
+            EditAction::CommitTool => self.commit_tool(),
+            EditAction::CommitGateway => self.commit_gateway(),
             EditAction::Insert(c) => self.edit_insert(c),
             EditAction::Backspace => self.edit_backspace(),
             EditAction::MoveLeft => self.edit_move(true),
@@ -468,8 +594,9 @@ impl SettingsPanel {
         }
     }
 
-    /// 文本字段提交：trim 后空串 = 清除；API Base 需 http(s):// 前缀、
-    /// 温度需 0.0..=2.0（非法则留在编辑态提示）；密钥空提交 = 清除。
+    /// 文本字段提交：trim 后空串 = 清除；API Base 需 http(s):// 前缀、温度需
+    /// 0.0..=2.0、上下文 tokens 需 ≤ 10_000_000 整数（非法则留在编辑态提示）；
+    /// 密钥空提交 = 清除。
     fn commit_text(&mut self) {
         let Some(Editing::Text { field, buf, .. }) = self.editing.take() else {
             return;
@@ -489,6 +616,16 @@ impl SettingsPanel {
             self.editing = Some(Editing::Text { field, buf, cursor });
             self.set_note(
                 "温度需 0.0..=2.0（留空保存 = 跟随 server）".to_string(),
+                Color::LightRed,
+            );
+            return;
+        }
+        if field == FieldId::ContextTokens && !is_valid_context_tokens(&text) {
+            let buf: Vec<char> = text.chars().collect();
+            let cursor = buf.len();
+            self.editing = Some(Editing::Text { field, buf, cursor });
+            self.set_note(
+                "上下文需 0..=10_000_000 整数（留空保存 = 跟随 server）".to_string(),
                 Color::LightRed,
             );
             return;
@@ -513,6 +650,36 @@ impl SettingsPanel {
         };
         let value = think_options()[pick].map(str::to_string);
         self.set_staged(FieldId::ThinkingMode, FieldAction::Write(value));
+    }
+
+    /// 只读工具缓存确认：写入当前选项（`None` = 开/跟随 server；`off` = 关/禁用）。
+    fn commit_tool(&mut self) {
+        let Some(Editing::Tool { pick }) = self.editing.take() else {
+            return;
+        };
+        let value = tool_options()[pick].map(str::to_string);
+        self.set_staged(FieldId::ToolCache, FieldAction::Write(value));
+    }
+
+    /// 网关预设确认：`server` = 清除（跟随 server）；具名预设写其 URL；`custom`
+    /// 转文本编辑（缓冲预填当前生效值，Enter 后再走 URL 校验）。
+    fn commit_gateway(&mut self) {
+        let Some(Editing::Gateway { pick, prefill }) = self.editing.take() else {
+            return;
+        };
+        let preset = API_BASE_PRESETS[pick];
+        if preset.id == GATEWAY_CUSTOM_ID {
+            let buf: Vec<char> = prefill.chars().collect();
+            let cursor = buf.len();
+            self.editing = Some(Editing::Text {
+                field: FieldId::ApiBase,
+                buf,
+                cursor,
+            });
+            return;
+        }
+        let value = (preset.id != GATEWAY_SERVER_ID).then(|| preset.url.to_string());
+        self.set_staged(FieldId::ApiBase, FieldAction::Write(value));
     }
 
     /// 文本编辑：光标处插入字符。
@@ -540,7 +707,7 @@ impl SettingsPanel {
         }
     }
 
-    /// 编辑态 ←/→：文本字段移动光标；模式/思考枚举循环选项（↑↓ 不动）。
+    /// 编辑态 ←/→：文本字段移动光标；模式/思考/工具/网关枚举循环切选项（↑↓ 不动）。
     fn edit_move(&mut self, left: bool) {
         match &mut self.editing {
             Some(Editing::Text { buf, cursor, .. }) => {
@@ -550,20 +717,7 @@ impl SettingsPanel {
                     *cursor += 1;
                 }
             }
-            Some(Editing::Mode { pick }) => {
-                if left {
-                    *pick = pick.saturating_sub(1);
-                } else if *pick + 1 < mode_options().len() {
-                    *pick += 1;
-                }
-            }
-            Some(Editing::Think { pick }) => {
-                if left {
-                    *pick = pick.saturating_sub(1);
-                } else if *pick + 1 < think_options().len() {
-                    *pick += 1;
-                }
-            }
+            Some(other) => move_cycle_pick(other, left),
             None => {}
         }
     }
@@ -583,7 +737,31 @@ impl SettingsPanel {
         let secret = self.secret.clone();
         self.saving_llm = llm.any();
         self.saving_prefs = prefs.any();
-        PanelEffect::Save { llm, prefs, secret }
+        PanelEffect::Save {
+            llm: Box::new(llm),
+            prefs: Box::new(prefs),
+            secret,
+        }
+    }
+}
+
+/// ←/→ 移动循环类编辑的光标（Mode / Think / Tool / Gateway）。
+fn move_cycle_pick(editing: &mut Editing, left: bool) {
+    match editing {
+        Editing::Mode { pick } => move_pick(pick, left, mode_options().len()),
+        Editing::Think { pick } => move_pick(pick, left, think_options().len()),
+        Editing::Tool { pick } => move_pick(pick, left, tool_options().len()),
+        Editing::Gateway { pick, .. } => move_pick(pick, left, API_BASE_PRESETS.len()),
+        Editing::Text { .. } => {}
+    }
+}
+
+/// 把 `pick` 在 `0..len` 里按方向移动一格（clamp，不循环回卷）。
+fn move_pick(pick: &mut usize, left: bool, len: usize) {
+    if left {
+        *pick = pick.saturating_sub(1);
+    } else if *pick + 1 < len {
+        *pick += 1;
     }
 }
 
@@ -599,6 +777,11 @@ fn think_index_of(v: Option<&str>) -> usize {
         .map_or(0, |i| i + 1)
 }
 
+/// 只读工具缓存选项下标 → 值（`off` → 1 = 禁用；其它（含 None）回 0 = 开/跟随 server）。
+fn tool_index_of(v: Option<&str>) -> usize {
+    usize::from(v == Some(TOOL_CACHE_DISABLED))
+}
+
 /// 面板显示所需的三层上下文（override / 持久层 / serve 默认）。
 pub struct PanelCtx<'a> {
     pub overrides: &'a SessionPrefs,
@@ -608,14 +791,19 @@ pub struct PanelCtx<'a> {
 
 impl PanelCtx<'_> {
     /// 字段的三层来源（override、user-data、serve 默认；空白由合成时归一），供合成/预填共用。
-    /// 温度/思考无本地 override（TUI 无斜杠）与 serve 默认；API 密钥不参与三层（走钥匙串）。
+    /// 温度/上下文/思考/工具缓存无本地 override（TUI 无斜杠）与 serve 默认；API 密钥不参与
+    /// 三层（走钥匙串）。
     fn sources(&self, field: FieldId) -> (Option<&str>, Option<&str>, Option<&str>) {
         let p = self.persisted;
         let d = self.serve_defaults;
         let local = match field {
             FieldId::Model => self.overrides.model.as_deref(),
             FieldId::ApiBase => self.overrides.api_base.as_deref(),
-            FieldId::Temperature | FieldId::ThinkingMode | FieldId::ApiKey => None,
+            FieldId::Temperature
+            | FieldId::ContextTokens
+            | FieldId::ThinkingMode
+            | FieldId::ToolCache
+            | FieldId::ApiKey => None,
             FieldId::Role => self.overrides.agent_role.as_deref(),
             FieldId::SessionMode => self.overrides.session_mode.as_deref(),
         };
@@ -623,17 +811,25 @@ impl PanelCtx<'_> {
             FieldId::Model => p.and_then(|p| p.model.as_deref()),
             FieldId::ApiBase => p.and_then(|p| p.api_base.as_deref()),
             FieldId::Temperature => p.and_then(|p| p.temperature.as_deref()),
+            FieldId::ContextTokens => p.and_then(|p| p.context_tokens.as_deref()),
             FieldId::ThinkingMode => p.and_then(|p| p.thinking.as_deref()),
             FieldId::ApiKey => None,
             FieldId::Role => p.and_then(|p| p.role.as_deref()),
             FieldId::SessionMode => p.and_then(|p| p.session_mode.as_deref()),
+            // 工具缓存：禁用（disable=true）记为 "off"，其余（None/Some(false)）= 跟随 server。
+            FieldId::ToolCache => p
+                .and_then(|p| p.tool_cache_disabled)
+                .and_then(|d| d.then_some(TOOL_CACHE_DISABLED)),
         };
         let remote = match field {
             FieldId::Model => d.and_then(|d| d.model.as_deref()),
-            // API Base / 温度 / 思考没有 /status 默认来源：三层只到 user-data。
-            FieldId::ApiBase | FieldId::Temperature | FieldId::ThinkingMode | FieldId::ApiKey => {
-                None
-            }
+            // API Base / 温度 / 上下文 / 思考 / 工具缓存没有 /status 默认来源：三层只到 user-data。
+            FieldId::ApiBase
+            | FieldId::Temperature
+            | FieldId::ContextTokens
+            | FieldId::ThinkingMode
+            | FieldId::ToolCache
+            | FieldId::ApiKey => None,
             FieldId::Role => d.and_then(|d| d.role.as_deref()),
             FieldId::SessionMode => d.and_then(|d| d.mode.as_deref()),
         };
@@ -661,238 +857,9 @@ fn pad_cells(s: &str, cells: usize) -> String {
     format!("{s}{}", " ".repeat(pad))
 }
 
-impl SettingsPanel {
-    /// 构建一帧面板内容：分区导航 + 标记说明 + 字段行 + 底栏。
-    pub fn content(&self, ctx: &PanelCtx<'_>, width: usize) -> PanelContent {
-        let mut lines: Vec<Line<'static>> = Vec::new();
-        lines.push(nav_line(self, width));
-        lines.push(Line::from(Span::styled(
-            truncate_display(
-                "标记：* = override · ~ = 未保存 · 留空保存 = 跟随 server",
-                width,
-            ),
-            Style::new().fg(Color::DarkGray),
-        )));
-        let mut cursor = None;
-        for (i, field) in self.section.fields().iter().enumerate() {
-            let selected = i == self.row;
-            let (line, edit_col) = self.field_line(ctx, *field, width, selected);
-            if let Some(col) = edit_col {
-                cursor = Some((lines.len(), col));
-            }
-            lines.push(line);
-        }
-        // 字段行与底栏之间留一空行。
-        lines.push(Line::from(""));
-        lines.extend(footer_lines(self, width));
-        PanelContent { lines, cursor }
-    }
-
-    /// 单字段行：标签 + 值（编辑中的文本字段显示缓冲并给出光标列）。
-    fn field_line(
-        &self,
-        ctx: &PanelCtx<'_>,
-        field: FieldId,
-        width: usize,
-        selected: bool,
-    ) -> (Line<'static>, Option<usize>) {
-        let label = pad_cells(field_label(field), LABEL_PAD);
-        let area = width.saturating_sub(LABEL_PAD);
-        let base = if selected {
-            Style::new().add_modifier(Modifier::REVERSED)
-        } else {
-            Style::new()
-        };
-        let label_span = Span::styled(label.clone(), base.fg(Color::Gray));
-        if let Some(Editing::Text {
-            field: ef,
-            buf,
-            cursor,
-        }) = &self.editing
-            && *ef == field
-        {
-            let full: String = buf.iter().collect();
-            let prefix: String = buf[..*cursor].iter().collect();
-            let cursor_cell = UnicodeWidthStr::width(prefix.as_str());
-            let (hstart, shown_cursor) = horizontal_window(&full, cursor_cell, area);
-            let visible = cell_window(&full, hstart, area);
-            let value_span = Span::styled(visible, base.fg(Color::White));
-            let line = Line::from(vec![label_span, value_span]);
-            return (line, Some(LABEL_PAD + shown_cursor));
-        }
-        let (text, color) = self.value_cell(ctx, field);
-        let visible = truncate_display(&text, area);
-        let value_span = Span::styled(visible, base.fg(color));
-        (Line::from(vec![label_span, value_span]), None)
-    }
-
-    /// 字段值列文本与颜色：staged（~）＞ override（*）＞ user-data ＞ serve 默认 ＞ 跟随 server。
-    /// API 密钥不走三层合成：staged / 已设态（钥匙串）两态显示。
-    fn value_cell(&self, ctx: &PanelCtx<'_>, field: FieldId) -> (String, Color) {
-        if field == FieldId::ApiKey {
-            return self.secret_cell();
-        }
-        match self.staged(field) {
-            FieldAction::Write(Some(v)) => (format!("{v}~"), Color::LightYellow),
-            FieldAction::Write(None) => {
-                // 清除后回落：显示 serve 默认（若有）。
-                let (_, _, remote) = ctx.sources(field);
-                match remote.and_then(normalize_str) {
-                    Some(v) => (format!("{v}~"), Color::LightYellow),
-                    None => ("(跟随 server)~".to_string(), Color::LightYellow),
-                }
-            }
-            FieldAction::Skip => match ctx.effective(field) {
-                EffectiveView {
-                    layer: Layer::Override,
-                    value,
-                } => (format!("{}*", value.unwrap_or_default()), Color::LightCyan),
-                EffectiveView {
-                    layer: Layer::Stored,
-                    value,
-                } => (value.unwrap_or_default(), Color::White),
-                EffectiveView {
-                    layer: Layer::Default,
-                    value,
-                } => (value.unwrap_or_default(), Color::Gray),
-                EffectiveView {
-                    layer: Layer::Follow,
-                    value: _,
-                } => ("(跟随 server)".to_string(), Color::DarkGray),
-            },
-        }
-    }
-
-    /// API 密钥行值：staged 写 = 掩码 + `~`；staged 清除 = `清除~`；未编辑按已设态显示。
-    fn secret_cell(&self) -> (String, Color) {
-        match &self.secret {
-            FieldAction::Write(Some(v)) => (
-                format!("••••（{} 字符）~", v.chars().count()),
-                Color::LightYellow,
-            ),
-            FieldAction::Write(None) => ("清除~".to_string(), Color::LightYellow),
-            FieldAction::Skip if self.secret_set => ("已设（钥匙串）".to_string(), Color::White),
-            FieldAction::Skip => ("未设（跟随 serve）".to_string(), Color::DarkGray),
-        }
-    }
-}
-
-/// 分区导航（选中项高亮反色）。
-fn nav_line(panel: &SettingsPanel, width: usize) -> Line<'static> {
-    let mut parts = vec![Span::styled("分区：", Style::new().fg(Color::DarkGray))];
-    for section in Section::ALL {
-        let selected = section == panel.section;
-        let mark = if selected { "▸ " } else { "  " };
-        let text = format!("{mark}{}   ", section.label());
-        let style = if selected {
-            Style::new()
-                .fg(Color::White)
-                .add_modifier(Modifier::BOLD | Modifier::REVERSED)
-        } else {
-            Style::new().fg(Color::DarkGray)
-        };
-        parts.push(Span::styled(truncate_display(&text, width), style));
-    }
-    Line::from(parts)
-}
-
-/// 面板底栏两行：动态提示 + 按键说明（每行文案各自独立成函数，控制 CCN ≤ 10）。
-fn footer_lines(panel: &SettingsPanel, width: usize) -> Vec<Line<'static>> {
-    let hint = footer_hint(panel);
-    let (msg, mcolor) = footer_msg(panel);
-    let mut out = vec![Line::from(Span::styled(
-        truncate_display(&msg, width),
-        Style::new().fg(mcolor),
-    ))];
-    out.push(Line::from(Span::styled(
-        truncate_display(&hint, width),
-        Style::new().fg(Color::DarkGray),
-    )));
-    out
-}
-
-/// 底栏按键说明（按状态取一行）。
-fn footer_hint(panel: &SettingsPanel) -> String {
-    if panel.confirm_close {
-        return "[y] 放弃并关闭  [Esc] 返回".to_string();
-    }
-    if panel.is_saving() {
-        return String::new();
-    }
-    match &panel.editing {
-        Some(Editing::Mode { .. }) | Some(Editing::Think { .. }) => {
-            "[←/→] 循环  [Enter] 确定  [Esc] 取消".to_string()
-        }
-        Some(Editing::Text { .. }) => "[Enter] 确定  [Esc] 取消编辑".to_string(),
-        None if panel.read_only => "[↑↓] 浏览  [Tab] 分区  [Esc/F2] 关闭".to_string(),
-        None => "[↑↓] 移动  [Enter] 编辑  [Tab] 分区  [S] 保存  [Esc/F2] 关闭".to_string(),
-    }
-}
-
-/// 底栏动态提示（枚举循环预览 / 编辑引导 / 浏览态状态）。
-fn footer_msg(panel: &SettingsPanel) -> (String, Color) {
-    match &panel.editing {
-        Some(Editing::Mode { pick }) => mode_cycle_text(*pick),
-        Some(Editing::Think { pick }) => think_cycle_text(*pick),
-        Some(Editing::Text { field, .. }) => match &panel.note {
-            Some((note, color)) => (note.clone(), *color),
-            None => (
-                format!("编辑「{}」：输入 · Backspace · ←→", field_label(*field)),
-                Color::Gray,
-            ),
-        },
-        None => browse_msg(panel),
-    }
-}
-
-/// 会话模式 ←→ 循环的可视化预览。
-fn mode_cycle_text(pick: usize) -> (String, Color) {
-    let mut text = String::from("会话模式：");
-    for (i, opt) in mode_options().iter().enumerate() {
-        if i == pick {
-            text.push('▸');
-        }
-        text.push_str(opt.unwrap_or("(跟随 server)"));
-        text.push(' ');
-    }
-    (text, Color::Gray)
-}
-
-/// 思考模式 ←→ 循环的可视化预览。
-fn think_cycle_text(pick: usize) -> (String, Color) {
-    let mut text = String::from("思考模式：");
-    for (i, opt) in think_options().iter().enumerate() {
-        if i == pick {
-            text.push('▸');
-        }
-        text.push_str(opt.unwrap_or("(跟随 server)"));
-        text.push(' ');
-    }
-    (text, Color::Gray)
-}
-
-/// 浏览态提示行（非编辑、非模式循环时）。
-fn browse_msg(panel: &SettingsPanel) -> (String, Color) {
-    if panel.confirm_close {
-        return ("未保存改动：y 放弃 / Esc 返回".to_string(), Color::Yellow);
-    }
-    if panel.is_saving() {
-        return ("保存中…".to_string(), Color::LightCyan);
-    }
-    if let Some((note, color)) = &panel.note {
-        return (note.clone(), *color);
-    }
-    if panel.read_only {
-        return (
-            "回合进行中：只读（结束后自动解锁）".to_string(),
-            Color::LightYellow,
-        );
-    }
-    if panel.is_dirty() {
-        return ("未保存改动：S 保存".to_string(), Color::LightYellow);
-    }
-    ("留空保存 = 清除（跟随 server）".to_string(), Color::Gray)
-}
+// 内容构建与行渲染（content / field_line / 值列 / 导航 / 底栏文案）独立成文件：压行数门禁。
+#[path = "settings_panel_draw.rs"]
+mod draw;
 
 #[path = "settings_app.rs"]
 mod app;
@@ -906,3 +873,8 @@ mod tests;
 #[cfg(test)]
 #[path = "settings_panel_w2_tests.rs"]
 mod tests_w2;
+
+// W2 收尾字段（上下文 tokens / 只读工具缓存 / 网关预设）单测独立成文件（同上）。
+#[cfg(test)]
+#[path = "settings_panel_w3_tests.rs"]
+mod tests_w3;

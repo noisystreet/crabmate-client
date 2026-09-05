@@ -78,6 +78,9 @@ pub struct ChatStreamOptions {
     /// 顶层 `temperature`（f64；仅 `Some` 且有限且 `0.0..=2.0` 时随 body 发送，
     /// 语义对齐 Desktop `chat_temperature_override_from_storage`）。
     pub temperature: Option<f64>,
+    /// 顶层 `readonly_tool_ttl_cache_secs`（只读工具 TTL 缓存关闭时发 `0`；
+    /// 跟随 server 时 `None` 不发，语义对齐 Desktop `readonly_tool_ttl_cache_secs_for_chat_body`）。
+    pub readonly_tool_ttl_cache_secs: Option<u64>,
     pub stream_resume: Option<StreamResume>,
 }
 
@@ -90,6 +93,9 @@ pub struct ClientLlmFields {
     /// 思考模式（`client_llm.llm_thinking_mode`）；仅值为 `on` / `off` 时随块发送，
     /// `server` / 空 / 其它值不发送（回落 serve 默认，对齐 Desktop `client_llm_json_for_chat_body`）。
     pub llm_thinking_mode: Option<String>,
+    /// 上下文窗口 tokens（`client_llm.llm_context_tokens`）；仅非空数字且 > 0 时
+    /// 随块发送为 JSON 数值（空/0/非数字不发送，对齐 Desktop 同函数）。
+    pub llm_context_tokens: Option<String>,
 }
 
 impl From<&ChatStreamArgs<'_>> for ChatStreamOptions {
@@ -103,10 +109,14 @@ impl From<&ChatStreamArgs<'_>> for ChatStreamOptions {
                 model: cl.model.map(str::to_string),
                 api_base: cl.api_base.map(str::to_string),
                 llm_thinking_mode: None,
+                // 借用的 `ClientLlm`（repl/chat 的 CLI 覆盖）不携带该键；全屏 `tui` 直构
+                // `ChatStreamOptions` 时才从持久层带上，转换路径固定为 None。
+                llm_context_tokens: None,
             }),
             agent_role: a.agent_role.map(str::to_string),
             session_mode: a.session_mode.map(str::to_string),
             temperature: None,
+            readonly_tool_ttl_cache_secs: None,
             stream_resume: a.stream_resume,
         }
     }
@@ -297,6 +307,9 @@ fn chat_stream_body(opts: &ChatStreamOptions) -> Value {
     {
         body["temperature"] = serde_json::json!(t);
     }
+    if let Some(secs) = opts.readonly_tool_ttl_cache_secs {
+        body["readonly_tool_ttl_cache_secs"] = serde_json::json!(secs);
+    }
     if let Some(r) = opts.stream_resume {
         body["stream_resume"] = serde_json::json!({
             "job_id": r.job_id,
@@ -316,6 +329,15 @@ fn client_llm_json(llm: &ClientLlmFields) -> Option<Value> {
         && (t == "on" || t == "off")
     {
         map.insert("llm_thinking_mode".into(), Value::String(t.to_string()));
+    }
+    if let Some(n) = llm
+        .llm_context_tokens
+        .as_deref()
+        .map(str::trim)
+        .and_then(|s| s.parse::<u64>().ok())
+        .filter(|n| *n > 0)
+    {
+        map.insert("llm_context_tokens".into(), Value::Number(n.into()));
     }
     if map.is_empty() {
         None
@@ -646,6 +668,7 @@ mod tests {
                 model: Some("gpt-x".into()),
                 api_base: None,
                 llm_thinking_mode: None,
+                llm_context_tokens: None,
             }),
             ..base_opts()
         });
@@ -727,6 +750,47 @@ mod tests {
     }
 
     #[test]
+    fn chat_body_context_tokens_only_positive_number() {
+        let body = chat_stream_body(&ChatStreamOptions {
+            client_llm: Some(ClientLlmFields {
+                model: Some("m".into()),
+                llm_context_tokens: Some(" 8000 ".into()),
+                ..ClientLlmFields::default()
+            }),
+            ..base_opts()
+        });
+        assert_eq!(body["client_llm"]["llm_context_tokens"], 8000);
+
+        // 0 / 非数字 / 空 → 键省略（client_llm 仍因 model 存在而发送）。
+        for silent in [Some("0".to_string()), Some("abc".to_string()), None] {
+            let body = chat_stream_body(&ChatStreamOptions {
+                client_llm: Some(ClientLlmFields {
+                    model: Some("m".into()),
+                    llm_context_tokens: silent.clone(),
+                    ..ClientLlmFields::default()
+                }),
+                ..base_opts()
+            });
+            assert!(
+                body["client_llm"].get("llm_context_tokens").is_none(),
+                "0/非数字/空不发送 {silent:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn chat_body_readonly_ttl_secs_sends_zero_when_disabled() {
+        let body = chat_stream_body(&ChatStreamOptions {
+            readonly_tool_ttl_cache_secs: Some(0),
+            ..base_opts()
+        });
+        assert_eq!(body["readonly_tool_ttl_cache_secs"], 0);
+
+        let base = chat_stream_body(&base_opts());
+        assert!(base.get("readonly_tool_ttl_cache_secs").is_none());
+    }
+
+    #[test]
     fn chat_body_omits_client_llm_when_empty() {
         let base = chat_stream_body(&base_opts());
         assert!(base.get("client_llm").is_none());
@@ -737,6 +801,7 @@ mod tests {
                 model: None,
                 api_base: Some(String::new()),
                 llm_thinking_mode: Some("server".into()),
+                llm_context_tokens: None,
             }),
             ..base_opts()
         });

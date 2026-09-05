@@ -5,7 +5,7 @@
 //! user-data ＞ serve 默认"的生效值合成、以及"先 GET 再改自己管理的键再全量 PUT"
 //! 所需的 DTO 合并函数。UI 状态机见 [`super::settings_panel`]。
 
-use crabmate_tui_core::{LlmOverridesDto, UserPrefsDto};
+use crabmate_tui_core::{ClientLlmFields, LlmOverridesDto, UserPrefsDto};
 
 /// 会话模式枚举的合法取值（与 `/mode` 斜杠一致；面板枚举与校验共用，避免漂移）。
 pub const SESSION_MODES: [&str; 3] = ["ask", "plan", "act"];
@@ -17,7 +17,18 @@ pub const THINKING_SERVER: &str = "server";
 /// 思考模式除 `server`（跟随）外的显式取值（对齐 Desktop `client_llm.llm_thinking_mode`）。
 pub const THINKING_MODES: [&str; 2] = ["on", "off"];
 
-/// 一个键的保存动作（面板管理键：model / api_base / temperature / thinking / cm_role / session_mode）。
+/// 上下文 tokens 上限（对齐前端 `settings_commit.rs` 的 `validate_llm_context_tokens_override`）。
+pub const CONTEXT_TOKENS_MAX: u64 = 10_000_000;
+
+/// 只读工具缓存"禁用"的 staged 值（写 prefs `disable_readonly_tool_ttl_cache = true`，
+/// 随轮发 `readonly_tool_ttl_cache_secs: 0`）；空 / 其它值 = 清除键 = 跟随 server。
+///
+/// 注意持久化表示与 Desktop 的差异（读取语义等价）：Desktop「跟随」显式写
+/// `Some(false)`；TUI 用删除键（`None`）表示，缺省即跟随，两端行为一致。
+pub const TOOL_CACHE_DISABLED: &str = "off";
+
+/// 一个键的保存动作（面板管理键：model / api_base / temperature / thinking /
+/// context_tokens / cm_role / session_mode / tool_cache）。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum FieldAction {
     /// 未编辑：合并时跳过该键（user-data 现值原样保留）。
@@ -42,7 +53,8 @@ impl FieldAction {
     }
 }
 
-/// `/user-data/llm-overrides` 的 `client_llm.{model,api_base,temperature,llm_thinking_mode}` 保存动作。
+/// `/user-data/llm-overrides` 的 `client_llm.{model,api_base,temperature,llm_thinking_mode,
+/// llm_context_tokens}` 保存动作。
 /// （密钥不在此列：`api_key` 只写本机钥匙串，见面板与 TuiApp 接线。）
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LlmSave {
@@ -52,6 +64,8 @@ pub struct LlmSave {
     pub temperature: FieldAction,
     /// 思考模式覆盖（`client_llm.llm_thinking_mode`；`Write(None)` = server / 跟随）。
     pub thinking: FieldAction,
+    /// 上下文 tokens 覆盖（`client_llm.llm_context_tokens`；空/`Write(None)` = 清除，回落 serve 默认）。
+    pub context_tokens: FieldAction,
 }
 
 impl LlmSave {
@@ -62,6 +76,7 @@ impl LlmSave {
             || self.api_base.is_write()
             || self.temperature.is_write()
             || self.thinking.is_write()
+            || self.context_tokens.is_write()
     }
 
     /// 清空全部动作（保存成功落地后调用）。
@@ -70,35 +85,40 @@ impl LlmSave {
         self.api_base = FieldAction::Skip;
         self.temperature = FieldAction::Skip;
         self.thinking = FieldAction::Skip;
+        self.context_tokens = FieldAction::Skip;
     }
 }
 
-/// `/user-data/prefs` 的 `cm_role / session_mode` 保存动作。
+/// `/user-data/prefs` 的 `cm_role / session_mode / disable_readonly_tool_ttl_cache` 保存动作。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PrefsSave {
     pub role: FieldAction,
     pub session_mode: FieldAction,
+    /// 只读工具缓存：`Write(Some("off"))` = 禁用（disable=true，随轮发 ttl=0）；
+    /// `Write(None)` / 空 = 清除键（跟随 server）。见 [`TOOL_CACHE_DISABLED`]。
+    pub tool_cache: FieldAction,
 }
 
 impl PrefsSave {
-    /// 两组字段是否有任一待保存动作。
+    /// 各组字段是否有任一待保存动作。
     #[must_use]
     pub fn any(&self) -> bool {
-        self.role.is_write() || self.session_mode.is_write()
+        self.role.is_write() || self.session_mode.is_write() || self.tool_cache.is_write()
     }
 
     /// 清空全部动作（保存成功落地后调用）。
     pub fn clear(&mut self) {
         self.role = FieldAction::Skip;
         self.session_mode = FieldAction::Skip;
+        self.tool_cache = FieldAction::Skip;
     }
 }
 
 /// user-data 持久层快照（启动拉取 / 保存成功后更新）。
 ///
 /// 连同一 serve 时与 Desktop/Web 共享：`client_llm.{model,api_base,temperature,
-/// llm_thinking_mode}` + prefs 的 `cm_role/session_mode`。空白值一律归一为 `None`
-/// （= 未设置 / 跟随 server）。
+/// llm_thinking_mode,llm_context_tokens}` + prefs 的 `cm_role/session_mode/
+/// disable_readonly_tool_ttl_cache`。空白值一律归一为 `None`（= 未设置 / 跟随 server）。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PersistedSettings {
     pub model: Option<String>,
@@ -107,8 +127,13 @@ pub struct PersistedSettings {
     pub temperature: Option<String>,
     /// 思考模式（仅 `on`/`off`；`server`/空 → `None` = 跟随 server）。
     pub thinking: Option<String>,
+    /// 上下文 tokens（trim 后存原文；非法/空 → `None` = 跟随 server；随轮仅 > 0 发送）。
+    pub context_tokens: Option<String>,
     pub role: Option<String>,
     pub session_mode: Option<String>,
+    /// 只读工具 TTL 缓存禁用标记（镜像 prefs `disable_readonly_tool_ttl_cache`：
+    /// `Some(true)` = 禁用 / 随轮发 ttl=0；`None`/`Some(false)` = 跟随 server）。
+    pub tool_cache_disabled: Option<bool>,
 }
 
 impl PersistedSettings {
@@ -123,9 +148,12 @@ impl PersistedSettings {
             // 只保留显式 on/off；server（跟随）/空/非法旧值 → None = 回落 serve 默认。
             thinking: normalize(&llm.client_llm.llm_thinking_mode)
                 .filter(|m| is_valid_thinking_mode(m) && m.as_str() != THINKING_SERVER),
+            context_tokens: normalize(&llm.client_llm.llm_context_tokens)
+                .filter(|v| is_valid_context_tokens(v)),
             role: normalize(&prefs.cm_role),
             session_mode: normalize(&prefs.session_mode)
                 .filter(|m| is_valid_session_mode(m.as_str())),
+            tool_cache_disabled: prefs.disable_readonly_tool_ttl_cache,
         }
     }
 
@@ -135,12 +163,14 @@ impl PersistedSettings {
         apply_slot(&mut self.api_base, &save.api_base);
         apply_slot(&mut self.temperature, &save.temperature);
         apply_slot(&mut self.thinking, &save.thinking);
+        apply_slot(&mut self.context_tokens, &save.context_tokens);
     }
 
     /// prefs 侧保存成功后在内存做同样更新（未编辑的键不动）。
     pub fn apply_prefs_saved(&mut self, save: &PrefsSave) {
         apply_slot(&mut self.role, &save.role);
         apply_slot(&mut self.session_mode, &save.session_mode);
+        apply_tool_cache_action(&mut self.tool_cache_disabled, &save.tool_cache);
     }
 }
 
@@ -168,6 +198,21 @@ fn apply_slot(slot: &mut Option<String>, action: &FieldAction) {
     }
     if let FieldAction::Write(v) = action {
         *slot = v.as_deref().and_then(normalize_str);
+    }
+}
+
+/// 把工具缓存动作写进 bool 槽（`Write(Some("off"))` → `true` = 禁用；
+/// `Write(None)` / 空 / 其它 = 清除键 = 跟随 server）。
+fn apply_tool_cache_action(slot: &mut Option<bool>, action: &FieldAction) {
+    if action.is_skip() {
+        return;
+    }
+    if let FieldAction::Write(v) = action
+        && v.as_deref().map(str::trim) == Some(TOOL_CACHE_DISABLED)
+    {
+        *slot = Some(true);
+    } else {
+        *slot = None;
     }
 }
 
@@ -204,6 +249,17 @@ pub fn is_valid_temperature(v: &str) -> bool {
 pub fn is_valid_thinking_mode(v: &str) -> bool {
     let t = v.trim();
     t.is_empty() || t == THINKING_SERVER || THINKING_MODES.contains(&t)
+}
+
+/// 上下文 tokens 是否合法（对齐 Desktop `settings_commit.rs`）：trim 后空 = 合法（未设置）；
+/// 非空需解析为 `u64` 且 ≤ [`CONTEXT_TOKENS_MAX`]（`0` 可存但不随轮发送，同 Desktop）。
+#[must_use]
+pub fn is_valid_context_tokens(v: &str) -> bool {
+    let t = v.trim();
+    if t.is_empty() {
+        return true;
+    }
+    matches!(t.parse::<u64>(), Ok(n) if n <= CONTEXT_TOKENS_MAX)
 }
 
 /// 单字段生效值的来源层（面板行显示用）。
@@ -264,376 +320,84 @@ pub fn merge_turn(local: &Option<String>, stored: Option<&str>) -> Option<String
     normalize(local).or_else(|| stored.and_then(normalize_str))
 }
 
+/// 随轮 `client_llm.llm_context_tokens` 值：持久层存原文，仅 > 0 时发送为规范化数字串
+/// （对齐 Desktop 只发正数；空/0/非数字 → `None` 不发送该键）。
+#[must_use]
+pub fn turn_context_tokens(stored: Option<&str>) -> Option<String> {
+    stored
+        .and_then(normalize_str)
+        .and_then(|s| s.parse::<u64>().ok())
+        .filter(|n| *n > 0)
+        .map(|n| n.to_string())
+}
+
+/// 随轮顶层 `readonly_tool_ttl_cache_secs`：仅缓存禁用（disable=`Some(true)`）时发 `0`；
+/// 跟随 server（`None` / `Some(false)`）不发送。
+#[must_use]
+pub fn turn_tool_cache_secs(disabled: Option<bool>) -> Option<u64> {
+    (disabled == Some(true)).then_some(0)
+}
+
+/// 随轮 `client_llm` 装配：override 已归一（model / api_base / api_key）与持久层
+/// user-data（thinking 仅 on/off、context_tokens 仅 > 0）合成；全空返回 `None`
+/// （不发送整块，回落 serve 默认）。供全屏 `tui` 每轮 `POST /chat/stream` 使用。
+#[must_use]
+pub fn build_turn_client_llm(
+    model: Option<&str>,
+    api_base: Option<&str>,
+    api_key: Option<&str>,
+    thinking: Option<&str>,
+    context_tokens: Option<&str>,
+) -> Option<ClientLlmFields> {
+    let api_key = api_key
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+    let thinking = thinking
+        .map(str::trim)
+        .filter(|m| *m == "on" || *m == "off")
+        .map(str::to_string);
+    let context_tokens = turn_context_tokens(context_tokens);
+    (model.is_some()
+        || api_base.is_some()
+        || api_key.is_some()
+        || thinking.is_some()
+        || context_tokens.is_some())
+    .then_some(ClientLlmFields {
+        api_key,
+        model: model.map(str::to_string),
+        api_base: api_base.map(str::to_string),
+        llm_thinking_mode: thinking,
+        llm_context_tokens: context_tokens,
+    })
+}
+
 /// 合并写回 `/user-data/llm-overrides`：只改 `client_llm.{model,api_base,temperature,
-/// llm_thinking_mode}`，`executor_llm / saved_models / execution_mode` 原样保留（合并保真）。
+/// llm_thinking_mode,llm_context_tokens}`，`executor_llm / saved_models / execution_mode`
+/// 原样保留（合并保真）。
 #[must_use]
 pub fn merge_llm_save(mut base: LlmOverridesDto, save: &LlmSave) -> LlmOverridesDto {
     apply_slot(&mut base.client_llm.model, &save.model);
     apply_slot(&mut base.client_llm.api_base, &save.api_base);
     apply_slot(&mut base.client_llm.temperature, &save.temperature);
     apply_slot(&mut base.client_llm.llm_thinking_mode, &save.thinking);
+    apply_slot(
+        &mut base.client_llm.llm_context_tokens,
+        &save.context_tokens,
+    );
     base
 }
 
-/// 合并写回 `/user-data/prefs`：只改 `cm_role / session_mode`，
+/// 合并写回 `/user-data/prefs`：只改 `cm_role / session_mode / disable_readonly_tool_ttl_cache`，
 /// `locale / theme / 布局 / IDE` 等字段原样保留（合并保真）。
 #[must_use]
 pub fn merge_prefs_save(mut base: UserPrefsDto, save: &PrefsSave) -> UserPrefsDto {
     apply_slot(&mut base.cm_role, &save.role);
     apply_slot(&mut base.session_mode, &save.session_mode);
+    apply_tool_cache_action(&mut base.disable_readonly_tool_ttl_cache, &save.tool_cache);
     base
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crabmate_tui_core::LlmEndpointOverrideDto;
-    use serde_json::json;
-
-    #[test]
-    fn normalize_trims_and_drops_blank() {
-        assert_eq!(normalize(&Some("  x ".into())), Some("x".to_string()));
-        assert_eq!(normalize(&Some("   ".into())), None);
-        assert_eq!(normalize(&None), None);
-    }
-
-    #[test]
-    fn effective_prefers_override_then_stored_then_default() {
-        let local = Some("local".to_string());
-        let stored = Some("stored".to_string());
-        let remote = Some("remote".to_string());
-        let v = effective_value(local.as_deref(), stored.as_deref(), remote.as_deref());
-        assert_eq!(
-            (v.layer, v.value.as_deref()),
-            (Layer::Override, Some("local"))
-        );
-        let v = effective_value(None, stored.as_deref(), remote.as_deref());
-        assert_eq!(
-            (v.layer, v.value.as_deref()),
-            (Layer::Stored, Some("stored"))
-        );
-        let v = effective_value(None, None, remote.as_deref());
-        assert_eq!(
-            (v.layer, v.value.as_deref()),
-            (Layer::Default, Some("remote"))
-        );
-        let v = effective_value(None, None, None);
-        assert_eq!((v.layer, v.value), (Layer::Follow, None));
-    }
-
-    #[test]
-    fn effective_skips_blank_override_and_stored() {
-        let local = Some("  ".to_string());
-        let stored = Some("stored".to_string());
-        let v = effective_value(local.as_deref(), stored.as_deref(), None);
-        assert_eq!(
-            (v.layer, v.value.as_deref()),
-            (Layer::Stored, Some("stored"))
-        );
-        let stored = Some("  ".to_string());
-        let remote = Some("d".to_string());
-        let v = effective_value(None, stored.as_deref(), remote.as_deref());
-        assert_eq!((v.layer, v.value.as_deref()), (Layer::Default, Some("d")));
-    }
-
-    #[test]
-    fn api_base_validation_accepts_empty_and_http_schemes() {
-        assert!(validate_api_base(""));
-        assert!(validate_api_base("   "));
-        assert!(validate_api_base("http://127.0.0.1:8080"));
-        assert!(validate_api_base("https://api.example.com/v1"));
-        assert!(validate_api_base("HTTPS://example.com"), "前缀大小写不敏感");
-        assert!(!validate_api_base("ftp://x"));
-        assert!(!validate_api_base("example.com/v1"), "缺少 http(s):// 前缀");
-        assert!(!validate_api_base("localhost:8080"));
-    }
-
-    #[test]
-    fn session_mode_validation_matches_slash_modes() {
-        assert!(is_valid_session_mode("ask"));
-        assert!(is_valid_session_mode("plan"));
-        assert!(is_valid_session_mode("act"));
-        assert!(!is_valid_session_mode("bogus"));
-        assert!(!is_valid_session_mode(""));
-    }
-
-    #[test]
-    fn temperature_validation_matches_desktop_range() {
-        assert!(is_valid_temperature("0.5"));
-        assert!(is_valid_temperature(" 0.7 "), "trim 后解析");
-        assert!(is_valid_temperature("0"));
-        assert!(is_valid_temperature("2.0"), "区间右闭");
-        assert!(is_valid_temperature(""), "空 = 未设置");
-        assert!(is_valid_temperature("   "));
-        assert!(!is_valid_temperature("2.1"), "超过上限");
-        assert!(!is_valid_temperature("-0.1"), "低于下限");
-        assert!(!is_valid_temperature("abc"));
-        assert!(!is_valid_temperature("inf"));
-        assert!(!is_valid_temperature("nan"));
-    }
-
-    #[test]
-    fn thinking_mode_validation_accepts_server_and_blank() {
-        assert!(is_valid_thinking_mode("on"));
-        assert!(is_valid_thinking_mode("off"));
-        assert!(is_valid_thinking_mode("server"));
-        assert!(is_valid_thinking_mode(""));
-        assert!(is_valid_thinking_mode("  on  "));
-        assert!(!is_valid_thinking_mode("bogus"));
-        assert!(!is_valid_thinking_mode("auto"));
-        assert_eq!(THINKING_MODES, ["on", "off"]);
-        assert_eq!(THINKING_SERVER, "server");
-    }
-
-    #[test]
-    fn merge_turn_prefers_override_and_drops_blank() {
-        assert_eq!(
-            merge_turn(&Some("local".into()), Some("stored")),
-            Some("local".to_string())
-        );
-        assert_eq!(
-            merge_turn(&None, Some("stored")),
-            Some("stored".to_string())
-        );
-        assert_eq!(merge_turn(&None, None), None);
-        assert_eq!(
-            merge_turn(&Some("  ".into()), None),
-            None,
-            "空白 override 不发送"
-        );
-    }
-
-    fn llm_base() -> LlmOverridesDto {
-        LlmOverridesDto {
-            client_llm: LlmEndpointOverrideDto {
-                model: Some("old".into()),
-                api_base: Some("http://old/v1".into()),
-                temperature: Some("0.7".into()),
-                llm_context_tokens: Some("8000".into()),
-                ..Default::default()
-            },
-            executor_llm: LlmEndpointOverrideDto {
-                model: Some("exec".into()),
-                ..Default::default()
-            },
-            execution_mode: Some("autonomous".into()),
-            saved_models: vec![json!({"label": "mine"})],
-        }
-    }
-
-    #[test]
-    fn merge_llm_save_rewrites_only_managed_keys() {
-        let save = LlmSave {
-            model: FieldAction::Write(Some("deepseek-chat".into())),
-            api_base: FieldAction::Write(Some("https://x.example/v1".into())),
-            ..Default::default()
-        };
-        let out = merge_llm_save(llm_base(), &save);
-        assert_eq!(out.client_llm.model.as_deref(), Some("deepseek-chat"));
-        assert_eq!(
-            out.client_llm.api_base.as_deref(),
-            Some("https://x.example/v1")
-        );
-        // 未编辑（Skip）的管理字段与非管理字段原样保留
-        assert_eq!(out.client_llm.temperature.as_deref(), Some("0.7"));
-        assert_eq!(out.client_llm.llm_thinking_mode, None);
-        assert_eq!(out.client_llm.llm_context_tokens.as_deref(), Some("8000"));
-        assert_eq!(out.executor_llm.model.as_deref(), Some("exec"));
-        assert_eq!(out.execution_mode.as_deref(), Some("autonomous"));
-        assert_eq!(out.saved_models.len(), 1);
-    }
-
-    #[test]
-    fn merge_llm_save_writes_and_clears_temperature_and_thinking() {
-        let save = LlmSave {
-            temperature: FieldAction::Write(Some(" 1.25 ".into())),
-            thinking: FieldAction::Write(Some("off".into())),
-            ..Default::default()
-        };
-        let out = merge_llm_save(llm_base(), &save);
-        assert_eq!(out.client_llm.temperature.as_deref(), Some("1.25"));
-        assert_eq!(out.client_llm.llm_thinking_mode.as_deref(), Some("off"));
-        assert_eq!(out.client_llm.model.as_deref(), Some("old"), "Skip 键不动");
-
-        let save = LlmSave {
-            temperature: FieldAction::Write(None),
-            thinking: FieldAction::Write(Some("   ".into())),
-            ..Default::default()
-        };
-        let out = merge_llm_save(out, &save);
-        assert_eq!(out.client_llm.temperature, None, "Write(None) 清除温度");
-        assert_eq!(
-            out.client_llm.llm_thinking_mode, None,
-            "空白 thinking 写入等价清除"
-        );
-    }
-
-    #[test]
-    fn merge_llm_save_clears_to_null_and_skips() {
-        let save = LlmSave {
-            model: FieldAction::Write(None),
-            api_base: FieldAction::Skip,
-            ..Default::default()
-        };
-        let out = merge_llm_save(llm_base(), &save);
-        assert_eq!(out.client_llm.model, None, "清除键写 null");
-        assert_eq!(
-            out.client_llm.api_base.as_deref(),
-            Some("http://old/v1"),
-            "Skip 键保留现值"
-        );
-    }
-
-    #[test]
-    fn merge_llm_save_normalizes_blank_write_to_clear() {
-        let save = LlmSave {
-            model: FieldAction::Write(Some("   ".into())),
-            api_base: FieldAction::Write(Some("  deepseek  ".into())),
-            ..Default::default()
-        };
-        let out = merge_llm_save(llm_base(), &save);
-        assert_eq!(out.client_llm.model, None, "空白写入等价清除");
-        assert_eq!(out.client_llm.api_base.as_deref(), Some("deepseek"));
-    }
-
-    #[test]
-    fn merge_prefs_save_preserves_unrelated_keys() {
-        let base = UserPrefsDto {
-            locale: Some("zh-CN".into()),
-            theme: Some("dark".into()),
-            cm_role: Some("coder".into()),
-            session_mode: Some("ask".into()),
-            disable_readonly_tool_ttl_cache: Some(true),
-            ..Default::default()
-        };
-        let save = PrefsSave {
-            role: FieldAction::Write(Some("architect".into())),
-            session_mode: FieldAction::Write(None),
-        };
-        let out = merge_prefs_save(base, &save);
-        assert_eq!(out.cm_role.as_deref(), Some("architect"));
-        assert_eq!(out.session_mode, None, "Write(None) 清除该键");
-        assert_eq!(out.locale.as_deref(), Some("zh-CN"), "locale 原样保留");
-        assert_eq!(out.theme.as_deref(), Some("dark"));
-        assert_eq!(out.disable_readonly_tool_ttl_cache, Some(true));
-    }
-
-    #[test]
-    fn persisted_snapshot_picks_fields_and_trims_blanks() {
-        let prefs = UserPrefsDto {
-            cm_role: Some(" coder ".into()),
-            session_mode: Some("   ".into()),
-            locale: Some("zh-CN".into()),
-            ..Default::default()
-        };
-        let llm = LlmOverridesDto {
-            client_llm: LlmEndpointOverrideDto {
-                model: Some("gpt-x".into()),
-                api_base: Some("".into()),
-                temperature: Some(" 0.7 ".into()),
-                llm_thinking_mode: Some("off".into()),
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-        let p = PersistedSettings::from_snapshot(&prefs, &llm);
-        assert_eq!(p.role.as_deref(), Some("coder"), "cm_role 归一化后保留");
-        assert_eq!(p.session_mode, None, "空白 session_mode 视为未设置");
-        assert_eq!(p.model.as_deref(), Some("gpt-x"));
-        assert_eq!(p.api_base, None, "空 api_base 视为未设置");
-        assert_eq!(p.temperature.as_deref(), Some("0.7"), "温度 trim 后存原文");
-        assert_eq!(p.thinking.as_deref(), Some("off"));
-    }
-
-    #[test]
-    fn snapshot_drops_invalid_temperature_and_thinking() {
-        let llm = LlmOverridesDto {
-            client_llm: LlmEndpointOverrideDto {
-                temperature: Some("9.9".into()),
-                llm_thinking_mode: Some("server".into()),
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-        let p = PersistedSettings::from_snapshot(&UserPrefsDto::default(), &llm);
-        assert_eq!(p.temperature, None, "超区间温度回落 serve 默认");
-        assert_eq!(p.thinking, None, "server/空思考模式 = 跟随 server");
-
-        let llm = LlmOverridesDto {
-            client_llm: LlmEndpointOverrideDto {
-                temperature: Some("   ".into()),
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-        let p = PersistedSettings::from_snapshot(&UserPrefsDto::default(), &llm);
-        assert_eq!(p.temperature, None, "空白温度视为未设置");
-    }
-
-    #[test]
-    fn snapshot_drops_invalid_session_mode() {
-        let prefs = UserPrefsDto {
-            session_mode: Some("Bogus".into()),
-            ..Default::default()
-        };
-        let p = PersistedSettings::from_snapshot(&prefs, &LlmOverridesDto::default());
-        assert_eq!(p.session_mode, None, "非法 session_mode 回落 serve 默认");
-    }
-
-    #[test]
-    fn persisted_apply_saved_updates_only_written_keys() {
-        let mut p = PersistedSettings {
-            model: Some("old".into()),
-            role: Some("coder".into()),
-            ..Default::default()
-        };
-        p.apply_llm_saved(&LlmSave {
-            model: FieldAction::Write(Some("new".into())),
-            api_base: FieldAction::Write(None),
-            temperature: FieldAction::Write(Some("1.1".into())),
-            thinking: FieldAction::Write(None),
-        });
-        assert_eq!(p.model.as_deref(), Some("new"));
-        assert_eq!(p.api_base, None);
-        assert_eq!(p.temperature.as_deref(), Some("1.1"));
-        assert_eq!(p.thinking, None);
-        p.apply_prefs_saved(&PrefsSave {
-            role: FieldAction::Skip,
-            session_mode: FieldAction::Write(Some("plan".into())),
-        });
-        assert_eq!(p.role.as_deref(), Some("coder"), "Skip 键不动");
-        assert_eq!(p.session_mode.as_deref(), Some("plan"));
-    }
-
-    #[test]
-    fn save_payload_any_and_clear() {
-        let mut s = LlmSave::default();
-        assert!(!s.any());
-        s.temperature = FieldAction::Write(Some("1.0".into()));
-        assert!(s.any());
-        s.clear();
-        assert!(!s.any());
-        s.thinking = FieldAction::Write(None);
-        assert!(s.any());
-        s.clear();
-        assert!(!s.any());
-        s.model = FieldAction::Write(None);
-        assert!(s.any());
-        s.clear();
-        assert!(!s.any());
-        let mut p = PrefsSave::default();
-        assert!(!p.any());
-        p.session_mode = FieldAction::Write(Some("act".into()));
-        assert!(p.any());
-        p.clear();
-        assert!(!p.any());
-    }
-
-    #[test]
-    fn field_action_predicates() {
-        assert!(FieldAction::Skip.is_skip());
-        assert!(FieldAction::Write(Some("x".into())).is_write());
-        assert!(FieldAction::Write(None).is_write());
-        assert!(!FieldAction::Write(None).is_skip());
-    }
-}
+#[path = "settings_tests.rs"]
+mod tests;

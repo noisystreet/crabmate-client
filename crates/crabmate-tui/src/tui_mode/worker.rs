@@ -323,7 +323,8 @@ fn job_load_user_settings(
     let _ = tx.send(UiEvent::UserData(result));
 }
 
-/// 保存 llm-overrides：先 GET 现值，只改 `client_llm.{model,api_base}` 再全量 PUT
+/// 保存 llm-overrides：先 GET 现值，只改 `client_llm.{model,api_base,temperature,
+/// llm_thinking_mode,llm_context_tokens}` 再全量 PUT
 /// （合并保真，不覆盖 `executor_llm/saved_models/execution_mode`）。
 fn job_save_llm(
     rt: &tokio::runtime::Runtime,
@@ -343,8 +344,8 @@ fn job_save_llm(
     let _ = tx.send(UiEvent::SavedLlm(result));
 }
 
-/// 保存 prefs：先 GET 现值，只改 `cm_role/session_mode` 再全量 PUT
-/// （合并保真，不覆盖 `locale/theme/布局/IDE` 等字段）。
+/// 保存 prefs：先 GET 现值，只改 `cm_role/session_mode/disable_readonly_tool_ttl_cache`
+/// 再全量 PUT（合并保真，不覆盖 `locale/theme/布局/IDE` 等字段）。
 fn job_save_prefs(
     rt: &tokio::runtime::Runtime,
     client: &ServeClient,

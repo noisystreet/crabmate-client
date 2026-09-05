@@ -106,6 +106,7 @@ fn tab_cycles_section_and_arrows_move_row() {
     for expected in [
         FieldId::ApiBase,
         FieldId::Temperature,
+        FieldId::ContextTokens,
         FieldId::ThinkingMode,
         FieldId::ApiKey,
     ] {
@@ -119,6 +120,12 @@ fn tab_cycles_section_and_arrows_move_row() {
     p.handle_key(&key(KeyCode::Tab), &c);
     assert_eq!(p.section, Section::Session);
     assert_eq!(p.current_field(), FieldId::Role);
+    for expected in [FieldId::SessionMode, FieldId::ToolCache] {
+        p.handle_key(&key(KeyCode::Down), &c);
+        assert_eq!(p.current_field(), expected);
+    }
+    p.handle_key(&key(KeyCode::Down), &c);
+    assert_eq!(p.current_field(), FieldId::ToolCache, "会话分区底行 clamp");
     p.handle_key(&key(KeyCode::BackTab), &c);
     assert_eq!(p.section, Section::Llm);
 }
@@ -146,7 +153,7 @@ fn edit_text_prefills_override_and_save_payload() {
     ));
     // S → Save 效果（llm 组含 model；prefs 组为空；secret 见 W2 测试）
     let (llm, prefs) = match p.handle_key(&key(KeyCode::Char('s')), &c) {
-        PanelEffect::Save { llm, prefs, .. } => (llm, prefs),
+        PanelEffect::Save { llm, prefs, .. } => (*llm, *prefs),
         _ => panic!("expected save effect"),
     };
     assert!(matches!(llm.model, FieldAction::Write(Some(v)) if v == "deepseek-chatx"));
@@ -174,12 +181,25 @@ fn empty_text_commit_means_clear_and_s_noop_when_clean() {
 }
 
 #[test]
-fn api_base_invalid_commit_keeps_editing_with_note() {
+fn api_base_custom_url_invalid_commit_keeps_editing_with_note() {
     let o = overrides(None, None, None, None);
     let c = ctx(&o, None);
     let mut p = SettingsPanel::new(false);
     p.handle_key(&key(KeyCode::Down), &c); // API Base 行
     p.handle_key(&key(KeyCode::Enter), &c);
+    // 预设循环 → → → → → → 到「自定义 URL」→ Enter 落文本编辑
+    assert!(matches!(&p.editing, Some(Editing::Gateway { pick: 0, .. })));
+    for _ in 0..6 {
+        p.handle_key(&key(KeyCode::Right), &c);
+    }
+    p.handle_key(&key(KeyCode::Enter), &c);
+    assert!(matches!(
+        &p.editing,
+        Some(Editing::Text {
+            field: FieldId::ApiBase,
+            ..
+        })
+    ));
     for ch in "localhost:1".chars() {
         p.handle_key(&key(KeyCode::Char(ch)), &c);
     }
