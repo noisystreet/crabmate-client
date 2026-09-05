@@ -36,6 +36,40 @@ fn span_text(span: &InlineSpan) -> &str {
     }
 }
 
+/// 按显示宽度断行（普通纯文本路径用；规则同 styled 版）。
+/// `\n` 强制断行，控制字符丢弃，空输入产出单个空行。
+pub(crate) fn wrap_physical(text: &str, width: usize) -> Vec<String> {
+    let mut rows: Vec<String> = Vec::new();
+    let mut row = String::new();
+    let mut row_width = 0usize;
+    for ch in text.chars() {
+        if ch == '\n' {
+            if !row.is_empty() {
+                rows.push(std::mem::take(&mut row));
+                row_width = 0;
+            }
+            continue;
+        }
+        if ch.is_control() {
+            continue;
+        }
+        let cw = ch.width().unwrap_or(0);
+        if !row.is_empty() && row_width + cw > width {
+            rows.push(std::mem::take(&mut row));
+            row_width = 0;
+        }
+        row.push(ch);
+        row_width += cw;
+    }
+    if !row.is_empty() {
+        rows.push(row);
+    }
+    if rows.is_empty() {
+        rows.push(String::new());
+    }
+    rows
+}
+
 /// 单段（不含换行）行内文本 → 带 markdown 样式的字符流。
 pub(crate) fn inline_styled_chars(part: &str) -> Vec<(Style, char)> {
     let mut out = Vec::new();
@@ -245,5 +279,25 @@ mod tests {
         assert!(!styled('*'));
         let joined: String = chars.iter().map(|(_, ch)| *ch).collect();
         assert!(joined.contains("ls *.rs **x** `t`"), "got {joined:?}");
+    }
+
+    #[test]
+    fn wrap_splits_wide_chars() {
+        let rows = wrap_physical("你好世界abc", 5);
+        assert_eq!(rows, vec!["你好", "世界a", "bc"]);
+        assert_eq!(wrap_physical("你好世界", 4), vec!["你好", "世界"]);
+    }
+
+    #[test]
+    fn wrap_handles_newline() {
+        let rows = wrap_physical("a\nbcd", 10);
+        assert_eq!(rows, vec!["a", "bcd"]);
+    }
+
+    #[test]
+    fn wrap_drops_control_chars() {
+        let rows = wrap_physical("a\u{1b}[31mb", 10);
+        assert_eq!(rows, vec!["a[31mb"]);
+        assert!(!rows[0].contains('\u{1b}'));
     }
 }
