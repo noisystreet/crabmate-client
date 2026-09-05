@@ -3,6 +3,7 @@
 //! **不**内嵌 Agent，**不** spawn `serve`。
 
 mod approval;
+mod chat_classify;
 mod chat_stream;
 mod client;
 mod config;

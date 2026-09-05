@@ -3,8 +3,7 @@
 use std::io::{self, Write};
 
 use crabmate::cm_sse_protocol::{
-    AgUiParseDispatch, SSE_PROTOCOL_VERSION, classify_ag_ui_sse_data, is_sse_done_sentinel,
-    join_sse_data_lines, parse_sse_event_id,
+    SSE_PROTOCOL_VERSION, is_sse_done_sentinel, join_sse_data_lines, parse_sse_event_id,
 };
 use crabmate_client_api::{ChatStreamCoreFields, build_chat_stream_core_body};
 use futures_util::StreamExt;
@@ -13,9 +12,8 @@ use reqwest::header::{ACCEPT, CONTENT_TYPE, HeaderValue};
 use serde_json::Value;
 use tokio::sync::watch;
 
-use crate::approval::{
-    ApprovalDecision, ApprovalGate, CommandApprovalRequest, parse_command_approval_data,
-};
+use crate::approval::{ApprovalDecision, ApprovalGate, CommandApprovalRequest};
+use crate::chat_classify::{LineAction, classify_line};
 use crate::client::ServeClient;
 use crate::error::TermError;
 
@@ -115,6 +113,22 @@ pub trait StreamSink {
     fn on_reasoning(&mut self, delta: &str) -> Result<(), TermError>;
     /// 系统行（如 Ctrl+C 停止提示）；文本模式写 stderr，全屏显示为 transcript 系统行。
     fn on_system(&mut self, _line: &str) -> Result<(), TermError> {
+        Ok(())
+    }
+    /// 工具开始（AG-UI `TOOL_CALL_START`，serve v2 协议）。文本模式默认忽略；
+    /// 全屏 TUI 用它渲染"工具行摘要"的开始态。
+    fn on_tool_start(&mut self, _tool_call_id: &str, _name: &str) -> Result<(), TermError> {
+        Ok(())
+    }
+    /// 工具结果（`TOOL_CALL_RESULT`；非 partial 收尾帧）。`ok=None` = 无结果标记；
+    /// `note` 为 serve 摘要（`metadata.summary`），缺省回退输出内容截断。
+    fn on_tool_end(
+        &mut self,
+        _tool_call_id: &str,
+        _name: &str,
+        _ok: Option<bool>,
+        _note: Option<&str>,
+    ) -> Result<(), TermError> {
         Ok(())
     }
     /// 流收尾（flush 等）。
@@ -488,77 +502,37 @@ async fn handle_sse_data(
         if line.is_empty() {
             continue;
         }
-        match classify_line(line)? {
-            LineAction::Skip => {}
-            LineAction::WriteOut(s) => sink.on_text(&s)?,
-            LineAction::WriteErr(s) => sink.on_reasoning(&s)?,
-            LineAction::Approve(req) => {
-                resolve_approval(client, &opts.approval_session_id, req, approval).await?;
-            }
-            LineAction::Plain(s) => sink.on_text(&s)?,
-        }
+        let action = classify_line(line)?;
+        dispatch_line_action(client, &opts.approval_session_id, action, sink, approval).await?;
     }
     Ok(())
 }
 
-#[derive(Debug)]
-enum LineAction {
-    Skip,
-    WriteOut(String),
-    WriteErr(String),
-    Approve(CommandApprovalRequest),
-    Plain(String),
-}
-
-fn classify_line(line: &str) -> Result<LineAction, TermError> {
-    if let Some(action) = classify_ag_ui_line(line)? {
-        return Ok(action);
+/// 单行动作的副作用分派：审批需异步回传，其余直接推进 sink。
+async fn dispatch_line_action(
+    client: &ServeClient,
+    approval_session_id: &str,
+    action: LineAction,
+    sink: &mut dyn StreamSink,
+    approval: &mut dyn ApprovalGate,
+) -> Result<(), TermError> {
+    match action {
+        LineAction::Skip => {}
+        LineAction::WriteOut(s) => sink.on_text(&s)?,
+        LineAction::WriteErr(s) => sink.on_reasoning(&s)?,
+        LineAction::Plain(s) => sink.on_text(&s)?,
+        LineAction::Approve(req) => {
+            resolve_approval(client, approval_session_id, req, approval).await?;
+        }
+        LineAction::ToolStart { tool_call_id, name } => sink.on_tool_start(&tool_call_id, &name)?,
+        LineAction::ToolResult {
+            tool_call_id,
+            name,
+            ok,
+            note,
+        } => sink.on_tool_end(&tool_call_id, &name, ok, note.as_deref())?,
     }
-    Ok(match classify_ag_ui_sse_data(line) {
-        AgUiParseDispatch::Plain => LineAction::Plain(line.to_string()),
-        AgUiParseDispatch::Handled | AgUiParseDispatch::StreamEnded => LineAction::Skip,
-    })
-}
-
-fn classify_ag_ui_line(line: &str) -> Result<Option<LineAction>, TermError> {
-    let Ok(val) = serde_json::from_str::<Value>(line) else {
-        return Ok(None);
-    };
-    let Some(t) = val.get("type").and_then(|x| x.as_str()) else {
-        return Ok(None);
-    };
-    Ok(Some(match t {
-        "TEXT_MESSAGE_CONTENT" => LineAction::WriteOut(delta_string(&val)),
-        "REASONING_MESSAGE_CONTENT" => LineAction::WriteErr(delta_string(&val)),
-        "RUN_FINISHED" => LineAction::Skip,
-        "RUN_ERROR" => return Err(run_error_from_value(&val)),
-        "CUSTOM" => classify_custom(&val),
-        _ => LineAction::Skip,
-    }))
-}
-
-fn classify_custom(val: &Value) -> LineAction {
-    if val.get("customType").and_then(|n| n.as_str()) != Some("command_approval") {
-        return LineAction::Skip;
-    }
-    let data = val.get("data").cloned().unwrap_or(Value::Null);
-    LineAction::Approve(parse_command_approval_data(&data))
-}
-
-fn delta_string(val: &Value) -> String {
-    val.get("delta")
-        .and_then(|d| d.as_str())
-        .unwrap_or("")
-        .to_string()
-}
-
-fn run_error_from_value(val: &Value) -> TermError {
-    let msg = val
-        .get("error")
-        .and_then(|e| e.get("message"))
-        .and_then(|m| m.as_str())
-        .unwrap_or("RUN_ERROR");
-    TermError::RunError(msg.to_string())
+    Ok(())
 }
 
 async fn resolve_approval(
@@ -607,29 +581,6 @@ mod tests {
         fn decide(&mut self, req: &CommandApprovalRequest) -> Result<ApprovalDecision, TermError> {
             self.seen.push(req.clone());
             Ok(self.decision)
-        }
-    }
-
-    #[test]
-    fn extracts_text_message_content() {
-        let data = r#"{"type":"TEXT_MESSAGE_CONTENT","delta":"你好"}"#;
-        let mut out = Vec::new();
-        match classify_line(data).unwrap() {
-            LineAction::WriteOut(s) => write_out(&mut out, &s).unwrap(),
-            other => panic!("unexpected {other:?}"),
-        }
-        assert_eq!(String::from_utf8(out).unwrap(), "你好");
-    }
-
-    #[test]
-    fn classifies_command_approval() {
-        let data = r#"{"type":"CUSTOM","customType":"command_approval","data":{"command":"rm","args":"-f"}}"#;
-        match classify_line(data).unwrap() {
-            LineAction::Approve(req) => {
-                assert_eq!(req.command, "rm");
-                assert_eq!(req.args, "-f");
-            }
-            other => panic!("unexpected {other:?}"),
         }
     }
 
