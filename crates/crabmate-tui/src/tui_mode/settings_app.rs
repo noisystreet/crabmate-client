@@ -21,10 +21,8 @@ impl TuiApp<'_> {
             self.load_user_settings();
         }
         if read_only {
-            self.st.push_line(
-                LineKind::System,
-                "回合进行中：设置面板为只读（可浏览；结束回合后自动解锁）",
-            );
+            self.st
+                .push_line(LineKind::System, "回合进行中：设置面板只读，结束后自动解锁");
         }
     }
 

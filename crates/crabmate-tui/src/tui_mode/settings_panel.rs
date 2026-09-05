@@ -231,10 +231,7 @@ impl SettingsPanel {
     pub(super) fn unlock_after_turn(&mut self) {
         if self.read_only {
             self.read_only = false;
-            self.set_note(
-                "回合已结束：面板已解锁（可继续编辑）".to_string(),
-                Color::LightGreen,
-            );
+            self.set_note("回合结束：面板已解锁".to_string(), Color::LightGreen);
         }
     }
 
@@ -319,7 +316,7 @@ impl SettingsPanel {
     fn begin_edit(&mut self, ctx: &PanelCtx<'_>) {
         if self.read_only {
             self.set_note(
-                "回合进行中：设置只读（回合结束后自动解锁）".to_string(),
+                "回合进行中：只读（结束后自动解锁）".to_string(),
                 Color::LightYellow,
             );
             return;
@@ -397,10 +394,7 @@ impl SettingsPanel {
             let buf: Vec<char> = text.chars().collect();
             let cursor = buf.len();
             self.editing = Some(Editing::Text { field, buf, cursor });
-            self.set_note(
-                "API Base 需以 http(s):// 开头（留空 = 清除，跟随 server）".to_string(),
-                Color::LightRed,
-            );
+            self.set_note("API Base 需 http(s):// 开头".to_string(), Color::LightRed);
             return;
         }
         let value = if text.is_empty() { None } else { Some(text) };
@@ -465,14 +459,11 @@ impl SettingsPanel {
     /// S 保存：staged 全空时提示；否则标记在途并返回保存请求（含两组暂存动作）。
     fn request_save(&mut self) -> PanelEffect {
         if self.read_only {
-            self.set_note(
-                "回合进行中：设置只读（不能保存）".to_string(),
-                Color::LightYellow,
-            );
+            self.set_note("回合进行中：不能保存".to_string(), Color::LightYellow);
             return PanelEffect::None;
         }
         if !self.is_dirty() {
-            self.set_note("没有可保存的改动".to_string(), Color::LightYellow);
+            self.set_note("无改动可保存".to_string(), Color::LightYellow);
             return PanelEffect::None;
         }
         let llm = self.llm.clone();
@@ -545,14 +536,13 @@ fn pad_cells(s: &str, cells: usize) -> String {
 }
 
 impl SettingsPanel {
-    /// 构建一帧面板内容：提示行 + 分区行 + 生效说明 + 字段行 + 底栏。
+    /// 构建一帧面板内容：分区导航 + 标记说明 + 字段行 + 底栏。
     pub fn content(&self, ctx: &PanelCtx<'_>, width: usize) -> PanelContent {
         let mut lines: Vec<Line<'static>> = Vec::new();
-        lines.push(tip_line(width));
         lines.push(nav_line(self, width));
         lines.push(Line::from(Span::styled(
             truncate_display(
-                "当前生效：override* ＞ user-data ＞ serve 默认（无则跟随 server）· ~ = 未保存",
+                "标记：* = override · ~ = 未保存 · 留空保存 = 跟随 server",
                 width,
             ),
             Style::new().fg(Color::DarkGray),
@@ -644,16 +634,7 @@ impl SettingsPanel {
     }
 }
 
-/// 面板第 1 行：通用说明（状态提示放在底栏）。
-fn tip_line(width: usize) -> Line<'static> {
-    let text = "设置面板：模型与会话字段保存在 serve user-data（与 Desktop/Web 同源共享）";
-    Line::from(Span::styled(
-        truncate_display(text, width),
-        Style::new().fg(Color::DarkGray),
-    ))
-}
-
-/// 面板第 2 行：分区导航（选中项高亮反色）。
+/// 分区导航（选中项高亮反色）。
 fn nav_line(panel: &SettingsPanel, width: usize) -> Line<'static> {
     let mut parts = vec![Span::styled("分区：", Style::new().fg(Color::DarkGray))];
     for section in Section::ALL {
@@ -710,10 +691,7 @@ fn footer_msg(panel: &SettingsPanel) -> (String, Color) {
         Some(Editing::Text { field, .. }) => match &panel.note {
             Some((note, color)) => (note.clone(), *color),
             None => (
-                format!(
-                    "编辑「{}」：字符输入 · Backspace 删除 · ←→ 移动光标",
-                    field_label(*field)
-                ),
+                format!("编辑「{}」：输入 · Backspace · ←→", field_label(*field)),
                 Color::Gray,
             ),
         },
@@ -737,30 +715,24 @@ fn mode_cycle_text(pick: usize) -> (String, Color) {
 /// 浏览态提示行（非编辑、非模式循环时）。
 fn browse_msg(panel: &SettingsPanel) -> (String, Color) {
     if panel.confirm_close {
-        return ("有未保存的改动：按 y 放弃并关闭".to_string(), Color::Yellow);
+        return ("未保存改动：y 放弃 / Esc 返回".to_string(), Color::Yellow);
     }
     if panel.is_saving() {
-        return ("保存中：请稍候…".to_string(), Color::LightCyan);
+        return ("保存中…".to_string(), Color::LightCyan);
     }
     if let Some((note, color)) = &panel.note {
         return (note.clone(), *color);
     }
     if panel.read_only {
         return (
-            "回合进行中：设置只读（结束回合后重开可编辑）".to_string(),
+            "回合进行中：只读（结束后自动解锁）".to_string(),
             Color::LightYellow,
         );
     }
     if panel.is_dirty() {
-        return (
-            "改动未保存：按 S 保存（写入 serve user-data）".to_string(),
-            Color::LightYellow,
-        );
+        return ("未保存改动：S 保存".to_string(), Color::LightYellow);
     }
-    (
-        "编辑后按 S 保存；留空 = 清除（跟随 server）".to_string(),
-        Color::Gray,
-    )
+    ("留空保存 = 清除（跟随 server）".to_string(), Color::Gray)
 }
 
 #[path = "settings_app.rs"]
