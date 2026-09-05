@@ -120,13 +120,13 @@ Full-screen `tui` (ratatui; shows a session sidebar on terminals ≥ 120 columns
 ./crates/crabmate-tui/target/debug/crabmate-tui \
   --api-base http://127.0.0.1:8080 \
   tui
-# Layout: top bar (workspace) | session sidebar | streaming transcript | composer | status bar
+# Layout (Desktop-style): top bar (workspace) | session sidebar | streaming transcript | workspace tree sidebar | composer | status bar
 # Ctrl+C cancels the in-flight turn (twice force-quits; idle exits)
 #   while an approval overlay is open the first Ctrl+C only denies that command —
 #   the turn keeps running and a following Ctrl+C cancels it
 # Tab → session list (↑/↓ select · Enter use · n new · r refresh · Esc back)
-# Ctrl+W → workspace directory tree (in the left column: ↑/↓ select · Enter/→ expand a dir · ← collapse/parent · r refresh · w sessions · Esc back)
-# When no workspace is set the sidebar shows "not set: press p to pick from the project pool"; p lists the serve project pool (↑/↓ · Enter switch · Esc back)
+# The workspace tree is the RIGHT sidebar, shown by default on wide (≥120 cols) terminals; Ctrl+W focuses it (↑/↓ select · Enter/→ expand · ← collapse/parent · r refresh · w sessions · Esc back)
+# When no workspace is set the right sidebar shows "not set: press p to pick from the project pool"; p lists the serve project pool (↑/↓ · Enter switch · Esc back)
 # Alt+Enter inserts a newline (multi-line compose); Enter / Ctrl+O send
 # PgUp / PgDn / Ctrl+Home / Ctrl+End scroll the transcript (↑/↓ when single-line input)
 # Ctrl+E expands/collapses the thinking rows (folded to one line by default)

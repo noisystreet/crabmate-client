@@ -1,9 +1,10 @@
 //! `crabmate-tui tui`：全屏模式（M3–M4）。
 //!
-//! 布局：顶栏(工作区) + 左栏（会话 / Ctrl+W 工作区目录树）+ 主区流式 transcript +
-//! 底栏（多行）输入 + 审批浮层 + 底部状态行。回合/拉取在持久 worker 线程的
-//! current-thread tokio runtime 中串行执行（`run_chat_stream_sink` / `fetch_web_sessions`
-//! / `fetch_workspace_dir` / `/status`），避免全屏事件循环与 IO 互相阻塞。raw mode 下
+//! 布局（仿 Desktop）：顶栏(工作区) + 左栏会话 + 主区流式 transcript +
+//! **右栏工作区目录树（宽屏默认显示；Ctrl+W 聚焦右栏浏览）** + 底栏（多行）输入 +
+//! 审批浮层 + 底部状态栏。回合/拉取在持久 worker 线程的 current-thread tokio runtime 中
+//! 串行执行（`run_chat_stream_sink` / `fetch_web_sessions` / `fetch_workspace_dir` /
+//! `fetch_workspace_projects` / `/status`），避免全屏事件循环与 IO 互相阻塞。raw mode 下
 //! Ctrl+C 是按键事件，取消经 [`StreamCancel`] 走"外部取消"通道，不复用文本模式的
 //! `ctrl_c` 信号路径。
 
@@ -13,6 +14,7 @@ mod md;
 mod render;
 mod serve_defaults;
 mod state;
+mod tool_summary;
 mod worker;
 mod workspace_tree;
 mod ws_sidebar;
@@ -224,7 +226,7 @@ impl TuiApp<'_> {
         }
     }
 
-    /// 进入工作区目录树视图（Ctrl+W / 会话栏 w）；根列表未就绪时先拉一次。
+    /// 聚焦右栏工作区目录树（Ctrl+W / 会话栏 w）；根列表未就绪时先拉一次。
     fn focus_workspace(&mut self) {
         if !self.st.ws_ready && !self.st.ws_root_pending {
             self.st.ws_begin_root_fetch();
@@ -415,7 +417,7 @@ impl TuiApp<'_> {
             KeyCode::Enter => self.use_selected(),
             KeyCode::Char('n') => self.new_session(),
             KeyCode::Char('r') => self.refresh_sessions(),
-            // w：切到工作区目录树（与工作区视图内的 w 互逆）。
+            // w：聚焦右栏工作区目录树（与工作区视图内的 w 互逆）。
             KeyCode::Char('w') => self.focus_workspace(),
             _ => {}
         }
@@ -483,7 +485,7 @@ impl TuiApp<'_> {
             KeyCode::Enter if is_alt_enter(&key) => self.st.insert_newline(),
             KeyCode::Enter => self.on_submit(),
             KeyCode::Char('o') if is_ctrl_o(&key) => self.on_submit(),
-            // Ctrl+W：宽屏时进入工作区目录树（窄屏忽略，侧栏本就隐藏）。
+            // Ctrl+W：宽屏时聚焦右栏工作区目录树（窄屏忽略，侧栏本就隐藏）。
             KeyCode::Char('w') if is_ctrl_w(&key) && self.st.sidebar_visible => {
                 self.focus_workspace();
             }

@@ -1,8 +1,8 @@
-//! 全屏 TUI 渲染：状态行 / 左栏会话 / 主区 transcript / 底栏输入 /
-//! 审批浮层。布局纯函数为主，便于单测。
+//! 全屏 TUI 渲染：状态行 / 左栏会话 / 右栏工作区目录树（仿 Desktop 默认显示）/
+//! 主区 transcript / 底栏输入 / 审批浮层。布局纯函数为主，便于单测。
 
 use ratatui::Frame;
-use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::layout::{Alignment, Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
@@ -10,17 +10,18 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use super::md;
 use super::state::{Focus, LineKind, UiState};
-use super::ws_sidebar::sidebar_view;
+use super::ws_sidebar::{sessions_content, sidebar_view, workspace_content};
 
-/// 低于此宽度隐藏左栏（等价 repl 布局）。
+/// 低于此宽度隐藏左右栏（等价 repl 布局）。
 pub const SIDEBAR_MIN_WIDTH: u16 = 120;
-/// 左栏宽度。
+/// 左会话列 / 右工作区列宽度。
 pub(crate) const SIDEBAR_WIDTH: u16 = 26;
 
-/// 计算 build_body_rows 使用的聊天区宽度（与 draw 里传给 render_body 的区域一致）。
+/// 计算 build_body_rows 使用的聊天区宽度（与 draw 里传给 render_body 的区域一致：
+/// 宽屏时左右各占一列）。
 pub(crate) fn chat_body_width(sidebar_visible: bool, terminal_width: u16) -> usize {
     let col = if sidebar_visible {
-        terminal_width.saturating_sub(SIDEBAR_WIDTH)
+        terminal_width.saturating_sub(SIDEBAR_WIDTH * 2)
     } else {
         terminal_width
     };
@@ -44,6 +45,7 @@ const COMPOSER_BG: Color = Color::Indexed(237);
 const TOPBAR_BG: Color = Color::Indexed(238);
 
 /// 状态行展示信息（mod 层组装好的显示值，含 override 标记）。
+#[derive(Clone)]
 pub struct StatusInfo {
     pub api_base: String,
     /// 生效模型；本地 override 时带 `*` 后缀。
@@ -265,21 +267,23 @@ pub(super) fn workspace_basename(path: &str) -> String {
     }
 }
 
-/// 顶栏内容：`工作区 <basename> · <完整路径>`（超宽截断，名称始终在左侧可见）。
+/// 顶栏内容：仅工作区名（`basename`，对齐 Desktop 标题栏：不显示“工作区: ”前缀与
+/// 绝对路径；未获取时占位）。
 fn top_text(st: &UiState, width: usize) -> String {
     let Some(path) = st
         .workspace_path
         .as_deref()
         .filter(|s| !s.trim().is_empty())
     else {
-        return truncate_display("工作区:（未获取）…", width);
+        return truncate_display("（未获取）…", width);
     };
     let name = workspace_basename(path);
-    truncate_display(&format!("工作区: {name} · {path}"), width)
+    truncate_display(&name, width)
 }
 
-/// 状态行内容（单行）。conv 为当前 conversation_id。
-fn status_text(info: &StatusInfo, conv: Option<&str>, width: usize) -> String {
+/// 状态行左侧内容：serve / model / role / mode / conv 与搜索、回看标记
+/// （不含运行态——运行态在整行右缘右对齐，仿 Desktop 状态栏）。
+fn status_left_text(info: &StatusInfo, conv: Option<&str>) -> String {
     let mut parts: Vec<String> = Vec::new();
     parts.push(format!("serve {}", info.api_base));
     if let Some(m) = info.model.as_deref() {
@@ -295,11 +299,6 @@ fn status_text(info: &StatusInfo, conv: Option<&str>, width: usize) -> String {
         Some(c) => format!("conv {c}"),
         None => "conv (new)".to_string(),
     });
-    parts.push(match (info.running, info.cancel_sent) {
-        (true, true) => "…取消中".to_string(),
-        (true, false) => "● 运行中".to_string(),
-        (false, _) => "○ 空闲".to_string(),
-    });
     if let Some(term) = info.search_term.as_deref() {
         if info.search_total == 0 {
             parts.push(format!("find 「{term}」 无匹配"));
@@ -310,7 +309,36 @@ fn status_text(info: &StatusInfo, conv: Option<&str>, width: usize) -> String {
     if info.view_offset > 0 {
         parts.push(format!("↑{}", info.view_offset));
     }
-    truncate_display(&parts.join(" | "), width)
+    parts.join(" | ")
+}
+
+/// 状态行右侧运行态指示（空闲 / 生成中 / 取消中）。
+fn status_running_text(info: &StatusInfo) -> &'static str {
+    match (info.running, info.cancel_sent) {
+        (true, true) => "… 取消中",
+        (true, false) => "● 生成中",
+        (false, _) => "○ 空闲",
+    }
+}
+
+/// 把 `right` 显示列宽感知地对齐到整行右缘（`left` 先截断，避免挤压右缘指示）。
+fn pad_right(left: &str, right: &str, width: usize) -> String {
+    if width == 0 {
+        return String::new();
+    }
+    let right_w = UnicodeWidthStr::width(right);
+    let cut = truncate_display(left, width.saturating_sub(right_w));
+    let pad = width.saturating_sub(UnicodeWidthStr::width(cut.as_str()) + right_w);
+    format!("{cut}{}{right}", " ".repeat(pad))
+}
+
+/// 状态行内容（单行）：左侧上下文 + 右对齐的空闲/生成中指示（仿 Desktop）。
+fn status_text(info: &StatusInfo, conv: Option<&str>, width: usize) -> String {
+    pad_right(
+        &status_left_text(info, conv),
+        status_running_text(info),
+        width,
+    )
 }
 
 /// 左栏内容行：首行标题，其后每会话一行（`>` 当前，`*` serve 活跃，选中高亮）。
@@ -360,8 +388,8 @@ fn paint_bg(frame: &mut Frame, rect: Rect, color: Color) {
     frame.buffer_mut().set_style(rect, Style::new().bg(color));
 }
 
-/// 渲染一帧。对齐 Desktop：整屏 = 顶栏(工作区) + 主体 + 底部状态栏；主体内
-/// 左会话列与右聊天列各自贯通，composer 只位于聊天列底部（会话列下方不出现输入框）。
+/// 渲染一帧。对齐 Desktop：整屏 = 顶栏(工作区) + 主体 + 底部状态栏；宽屏主体为
+/// 左会话列 | 聊天列 | 右工作区目录树（右栏默认显示），composer 只位于聊天列底部。
 /// `prepared` 为事件循环按（宽度/内容指纹/搜索）memo 好的 transcript 物理行。
 pub fn draw(frame: &mut Frame, st: &UiState, info: &StatusInfo, prepared: &[BodyRow]) {
     let area = frame.area();
@@ -376,15 +404,25 @@ pub fn draw(frame: &mut Frame, st: &UiState, info: &StatusInfo, prepared: &[Body
     let status_area = chunks[2];
 
     paint_bg(frame, top_area, TOPBAR_BG);
+    // 顶栏工作区名称居中（对齐 Desktop 标题栏观感）。
     let top = Paragraph::new(top_text(st, top_area.width as usize))
+        .alignment(Alignment::Center)
         .style(Style::new().fg(Color::White).add_modifier(Modifier::BOLD));
     frame.render_widget(top, top_area);
 
     if st.sidebar_visible {
-        let cols = Layout::horizontal([Constraint::Length(SIDEBAR_WIDTH), Constraint::Min(0)])
-            .split(body_area);
+        let cols = Layout::horizontal([
+            Constraint::Length(SIDEBAR_WIDTH),
+            Constraint::Min(0),
+            Constraint::Length(SIDEBAR_WIDTH),
+        ])
+        .split(body_area);
+        let (rows, cursor, hint) = sessions_content(st, cols[0].width.saturating_sub(2) as usize);
         paint_bg(frame, cols[0], SIDEBAR_BG);
-        render_sidebar(frame, st, cols[0]);
+        render_pane(frame, cols[0], rows, cursor, hint);
+        let (rows, cursor, hint) = workspace_content(st, cols[2].width.saturating_sub(2) as usize);
+        paint_bg(frame, cols[2], SIDEBAR_BG);
+        render_pane(frame, cols[2], rows, cursor, hint);
         render_chat_column(frame, st, cols[1], prepared);
     } else {
         render_chat_column(frame, st, body_area, prepared);
@@ -417,14 +455,20 @@ fn composer_rows(st: &UiState) -> u16 {
     st.input_line_count().clamp(1, MAX_COMPOSER_ROWS) as u16
 }
 
-/// 左栏分发给会话或工作区树并做窗口裁剪；内容行构建在 [`super::ws_sidebar`]。
-fn render_sidebar(frame: &mut Frame, st: &UiState, area: Rect) {
-    if area.height == 0 {
+/// 通用固定列渲染：内容窗口裁剪（含提示行）。内容行/光标/提示由 [`super::ws_sidebar`] 提供。
+/// 列内左右各留 1 列空隙（对齐聊天区观感），行宽按 `width - 2` 截断。
+fn render_pane(
+    frame: &mut Frame,
+    area: Rect,
+    rows: Vec<Line<'static>>,
+    cursor: usize,
+    hint: Option<&'static str>,
+) {
+    if area.width <= 1 || area.height == 0 {
         return;
     }
-    let cols = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(area);
-    let (rows, cursor, hint) =
-        super::ws_sidebar::sidebar_content(st, area.width.saturating_sub(1) as usize);
+    let inner = Rect::new(area.x + 1, area.y, area.width - 1, area.height);
+    let cols = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(inner);
     let shown = sidebar_view(&rows, cols[0].height as usize, cursor);
     let list = Paragraph::new(shown).style(Style::new().fg(Color::White));
     frame.render_widget(list, cols[0]);
@@ -639,244 +683,5 @@ fn render_input(frame: &mut Frame, st: &UiState, area: Rect) {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crabmate_tui_core::SessionListItem;
-
-    #[test]
-    fn truncate_appends_ellipsis() {
-        assert_eq!(truncate_display("abcdef", 4), "abcd…");
-        assert_eq!(truncate_display("你好", 3), "你…");
-        assert_eq!(truncate_display("", 4), "");
-    }
-
-    #[test]
-    fn display_lines_prefix_only_first_physical() {
-        let mut st = UiState::new();
-        st.push_line(LineKind::Assistant, "一二三四五六七八九十");
-        let lines = display_lines(&st, 4);
-        assert!(lines.len() >= 2);
-        assert_eq!(lines[0].spans.len(), 2);
-        assert_eq!(lines[1].spans.len(), 1);
-    }
-
-    #[test]
-    fn thinking_collapsed_shows_single_fold_row() {
-        let mut st = UiState::new();
-        st.stream_delta(LineKind::Thinking, "第一行思考\n第二行很长很长的思考内容");
-        let rows = body_rows(&st, 60);
-        assert_eq!(rows.len(), 1, "折叠后仅一行预览");
-        assert!(rows[0].line.to_string().contains('…'));
-    }
-
-    #[test]
-    fn thinking_expanded_wraps_multirow() {
-        let mut st = UiState::new();
-        st.stream_delta(LineKind::Thinking, "第一行思考\n第二行思考");
-        st.toggle_thinking();
-        let rows = body_rows(&st, 60);
-        assert!(rows.len() >= 2, "展开后至少两行");
-    }
-
-    #[test]
-    fn search_marks_and_anchors_rows() {
-        let mut st = UiState::new();
-        st.push_line(LineKind::Assistant, "hello world");
-        st.push_line(LineKind::User, "bye");
-        st.start_search("hello");
-        let rows = body_rows(&st, 60);
-        // 锚定行第一物理行以黄底反色突出
-        assert!(
-            rows[0]
-                .line
-                .spans
-                .iter()
-                .any(|s| s.style.bg == Some(Color::Yellow))
-        );
-        // 非命中行不带黄色前景
-        assert!(
-            rows[1]
-                .line
-                .spans
-                .iter()
-                .all(|s| s.style.fg != Some(Color::Yellow))
-        );
-    }
-
-    #[test]
-    fn chat_body_width_matches_layout() {
-        assert_eq!(chat_body_width(false, 100), 99);
-        assert_eq!(chat_body_width(true, 100), 100 - SIDEBAR_WIDTH as usize - 1);
-    }
-
-    #[test]
-    fn adjacent_message_bubbles_get_blank_separator() {
-        let mut st = UiState::new();
-        st.push_line(LineKind::User, "q");
-        st.stream_delta(LineKind::Assistant, "a");
-        let rows = body_rows(&st, 80);
-        assert!(
-            rows.windows(2).any(|w| {
-                w[0].line.to_string().contains('q') && w[1].line.to_string().is_empty()
-            }),
-            "用户块与助手块之间应有一个空行: {:?}",
-            rows.iter().map(|r| r.line.to_string()).collect::<Vec<_>>()
-        );
-    }
-
-    #[test]
-    fn thinking_and_answer_do_not_add_blank_between() {
-        let mut st = UiState::new();
-        st.push_line(LineKind::User, "q");
-        st.stream_delta(LineKind::Thinking, "想");
-        st.stream_delta(LineKind::Assistant, "答");
-        let rows = body_rows(&st, 80);
-        assert!(
-            rows.iter().all(|r| !r.line.to_string().is_empty()),
-            "思考行与正文同回合不应插入空行: {:?}",
-            rows.iter().map(|r| r.line.to_string()).collect::<Vec<_>>()
-        );
-    }
-
-    #[test]
-    fn workspace_basename_derives_name() {
-        assert_eq!(workspace_basename("/data/proj"), "proj");
-        assert_eq!(workspace_basename("/data/proj/"), "proj");
-        assert_eq!(workspace_basename("/"), "/");
-        assert_eq!(workspace_basename(""), "");
-    }
-
-    #[test]
-    fn top_text_shows_name_and_full_path() {
-        let mut st = UiState::new();
-        st.workspace_path = Some("/data/proj".into());
-        let s = top_text(&st, 80);
-        assert!(s.contains("工作区: proj"));
-        assert!(s.contains("/data/proj"));
-    }
-
-    #[test]
-    fn status_line_lists_overrides() {
-        let info = StatusInfo {
-            api_base: "http://127.0.0.1:8080".into(),
-            model: Some("gpt-x*".into()),
-            role: Some("coder".into()),
-            mode: Some("plan".into()),
-            running: false,
-            cancel_sent: false,
-            view_offset: 0,
-            search_term: None,
-            search_total: 0,
-        };
-        let s = status_text(&info, Some("c1"), 200);
-        assert!(s.contains("serve http://127.0.0.1:8080"));
-        assert!(s.contains("model gpt-x*"));
-        assert!(s.contains("role coder"));
-        assert!(s.contains("mode plan"));
-        assert!(s.contains("conv c1"));
-        assert!(s.contains("○ 空闲"));
-    }
-
-    #[test]
-    fn status_uses_serve_defaults_when_no_override() {
-        let info = StatusInfo {
-            api_base: "http://x".into(),
-            model: Some("deepseek".into()),
-            role: None,
-            mode: None,
-            running: false,
-            cancel_sent: false,
-            view_offset: 0,
-            search_term: None,
-            search_total: 0,
-        };
-        let s = status_text(&info, None, 200);
-        assert!(s.contains("model deepseek"));
-        assert!(!s.contains("mode "));
-    }
-
-    #[test]
-    fn status_shows_search_and_view_back() {
-        let info = StatusInfo {
-            api_base: "http://x".into(),
-            model: None,
-            role: None,
-            mode: None,
-            running: false,
-            cancel_sent: false,
-            view_offset: 12,
-            search_term: Some("grep".into()),
-            search_total: 2,
-        };
-        let s = status_text(&info, None, 200);
-        assert!(s.contains("find 「grep」"));
-        assert!(s.contains("↑12"));
-    }
-
-    fn row(id: &str, title: &str, conv: Option<&str>) -> SessionListItem {
-        SessionListItem {
-            id: id.to_string(),
-            title: title.to_string(),
-            server_conversation_id: conv.map(str::to_string),
-        }
-    }
-
-    #[test]
-    fn sidebar_rows_marks_current_and_active() {
-        let mut st = UiState::new();
-        st.replace_sessions(vec![
-            row("a", "Alpha", Some("c1")),
-            row("b", "Beta", Some("c2")),
-        ]);
-        st.conversation_id = Some("c1".into());
-        st.active_session_id = Some("b".into());
-        let rows = sidebar_rows(&st, 20);
-        assert_eq!(rows.len(), 3);
-        assert!(rows[1].to_string().contains("> Alpha"));
-        assert!(rows[2].to_string().contains("* Beta"));
-    }
-
-    #[test]
-    fn sidebar_rows_untitled_and_truncate() {
-        let mut st = UiState::new();
-        st.replace_sessions(vec![row("a", "这是一个很长的会话标题标题", None)]);
-        let rows = sidebar_rows(&st, 10);
-        assert!(rows[1].to_string().contains("(untitled)") || rows[1].to_string().contains("…"));
-    }
-
-    #[test]
-    fn cell_window_keeps_wide_char_boundary() {
-        assert_eq!(cell_window("你好世界", 2, 4), "好世");
-        assert_eq!(cell_window("你a好b", 3, 3), "好b");
-    }
-
-    #[test]
-    fn visible_window_scrolls_to_cursor_on_right() {
-        let (start, c) = horizontal_window("abcdefgh", 8, 4);
-        assert_eq!(cell_window("abcdefgh", start, 4), "efgh");
-        assert_eq!(c, 4);
-    }
-
-    #[test]
-    fn visible_window_wide_char_cursor() {
-        // 光标在末尾(14)，可视宽 6 → 滚到光标附近。
-        let content = "crabmate> 你好";
-        let (start, c) = horizontal_window(content, 14, 6);
-        let shown = cell_window(content, start, 6);
-        assert!(shown.contains('好'));
-        assert_eq!(c, 6);
-    }
-
-    #[test]
-    fn composer_window_multiline_follows_cursor_line() {
-        let mut st = UiState::new();
-        for ch in "a\nb\nc\nd\ne".chars() {
-            st.insert_char(ch);
-        }
-        let (shown, disp_row, _, _) = composer_window(&st, 40, 4);
-        assert_eq!(shown.len(), 4);
-        // 光标在末行 e（行 4），窗口顶移 2，末行可见
-        assert_eq!(shown.last().map(String::as_str), Some("e"));
-        assert_eq!(disp_row, 3);
-    }
-}
+#[path = "render_tests.rs"]
+mod tests;
