@@ -1,6 +1,10 @@
-//! 全屏 TUI 的 UI 状态：transcript 行 + 单行输入缓冲 + 回合/会话指示。
+//! 全屏 TUI 的 UI 状态：transcript 行 + 输入缓冲 + 回合/会话指示 +
+//! 审批浮层 / 工具行 / 搜索 / thinking 折叠等交互状态。
 
-use crabmate_tui_core::SessionListItem;
+use std::collections::HashMap;
+use std::sync::mpsc::Sender;
+
+use crabmate_tui_core::{ApprovalDecision, CommandApprovalRequest, SessionListItem};
 use serde_json::Value;
 
 /// transcript 行类别（决定前缀与配色）。
@@ -9,6 +13,7 @@ pub enum LineKind {
     User,
     Assistant,
     Thinking,
+    Tool,
     System,
 }
 
@@ -18,6 +23,31 @@ pub enum Focus {
     #[default]
     Input,
     Sidebar,
+}
+
+/// 审批浮层：serve 等待决策期间 SSE 回合任务阻塞在应答通道上，
+/// UI 事件循环保持运行收按键（双向握手，Esc=n 拒绝 / Enter=y 一次 / a 始终）。
+#[derive(Debug)]
+pub struct ApprovalOverlay {
+    pub command: String,
+    pub args: String,
+    pub allowlist_key: Option<String>,
+    /// 决策回传通道（worker 的 gate 阻塞在对应 recv 上）。
+    pub answer: Sender<ApprovalDecision>,
+}
+
+impl ApprovalOverlay {
+    /// 构造决策前的展示文本（与 repl 提示一致）。
+    #[must_use]
+    pub fn preview(&self) -> String {
+        let cmd = self.command.trim();
+        let args = self.args.trim();
+        if args.is_empty() {
+            cmd.to_string()
+        } else {
+            format!("{cmd} {args}")
+        }
+    }
 }
 
 /// serve 默认偏好（`GET /status?view=shell`），override 未设置时状态行回退显示。
@@ -52,9 +82,19 @@ impl ServeDefaults {
 pub struct LogLine {
     pub kind: LineKind,
     pub text: String,
+    /// thinking 折叠态（默认折叠；Ctrl+E 切换全局展开）。
+    pub collapsed: bool,
 }
 
 impl LogLine {
+    fn new(kind: LineKind, text: &str) -> Self {
+        Self {
+            kind,
+            text: text.to_string(),
+            collapsed: kind == LineKind::Thinking,
+        }
+    }
+
     fn append(&mut self, delta: &str) {
         self.text.push_str(delta);
     }
@@ -64,7 +104,7 @@ impl LogLine {
 #[derive(Debug, Default)]
 pub struct UiState {
     pub lines: Vec<LogLine>,
-    /// 输入缓冲（Vec<char> 便于光标插入）。
+    /// 输入缓冲（Vec<char> 便于光标插入；含 `\n` 即多行编辑）。
     input: Vec<char>,
     /// 输入光标位置（字符下标）。
     cursor: usize,
@@ -75,6 +115,8 @@ pub struct UiState {
     pub cancel_sent: bool,
     /// 从底部回看的物理行数（0 = 跟随最新）。
     pub view_offset: usize,
+    /// PgUp/PgDn 页步（由事件循环按终端高度刷新）。
+    pub page_rows: usize,
     /// 键盘焦点（输入框 / 左栏会话）。
     pub focus: Focus,
     /// 左栏会话列表（`fetch_web_sessions` 快照，未经本地转换）。
@@ -87,19 +129,31 @@ pub struct UiState {
     pub active_session_id: Option<String>,
     /// 当前是否宽到显示左栏（由渲染层每帧刷新）。
     pub sidebar_visible: bool,
+    /// 审批浮层（回合暂停等待决策）。
+    pub approval: Option<ApprovalOverlay>,
+    /// 工具调用 id → transcript 行号（结果到达时原位更新摘要行）。
+    tool_pending: HashMap<String, usize>,
+    /// 全局 thinking 展开开关（默认折叠）。
+    thinking_visible: bool,
+    /// 搜索词（/find；lowercase，trim）。
+    search: Option<String>,
+    /// 当前搜索锚定的逻辑行下标（None = 无锚点，随手动滚动释放）。
+    pub search_cursor: Option<usize>,
+    /// 当前搜索命中的逻辑行数（状态行提示用）。
+    pub search_total: usize,
 }
 
 impl UiState {
     #[must_use]
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            page_rows: 12,
+            ..Self::default()
+        }
     }
 
     pub fn push_line(&mut self, kind: LineKind, text: &str) {
-        self.lines.push(LogLine {
-            kind,
-            text: text.to_string(),
-        });
+        self.lines.push(LogLine::new(kind, text));
     }
 
     /// 流式增量：若最后一条同类（Assistant/Thinking）则续接，否则开新行。
@@ -115,8 +169,16 @@ impl UiState {
         }
     }
 
+    // ── 输入缓冲（单行/多行统一） ─────────────────────────────
+
     pub fn current_input(&self) -> String {
         self.input.iter().collect()
+    }
+
+    /// 输入缓冲是否多行（含 `\n`）。
+    #[must_use]
+    pub fn is_multiline(&self) -> bool {
+        self.input.contains(&'\n')
     }
 
     /// 取走输入并清空（发送后调用）。
@@ -134,6 +196,11 @@ impl UiState {
             self.input.insert(self.cursor, c);
             self.cursor += 1;
         }
+    }
+
+    /// 光标处插入换行（Alt+Enter 多行编辑）。
+    pub fn insert_newline(&mut self) {
+        self.insert_char('\n');
     }
 
     pub fn backspace(&mut self) {
@@ -155,20 +222,102 @@ impl UiState {
         }
     }
 
+    /// Home：当前行首（单行输入等价整串开头）。
     pub fn cursor_home(&mut self) {
-        self.cursor = 0;
+        if let Some(line_start) = self.cursor_line_start() {
+            self.cursor = line_start;
+        } else {
+            self.cursor = 0;
+        }
     }
 
+    /// End：当前行尾（不含行尾 `\n`）。
     pub fn cursor_end(&mut self) {
-        self.cursor = self.input.len();
+        if let Some(line_end) = self.cursor_line_end() {
+            self.cursor = line_end;
+        } else {
+            self.cursor = self.input.len();
+        }
     }
 
-    /// 光标前内容（渲染输入时在光标位置切分）。
-    #[must_use]
-    pub fn input_before_cursor(&self) -> String {
+    /// 光标行起始字符下标。
+    fn cursor_line_start(&self) -> Option<usize> {
         self.input[..self.cursor.min(self.input.len())]
             .iter()
+            .rposition(|&c| c == '\n')
+            .map_or(Some(0), |nl| Some(nl + 1))
+    }
+
+    /// 光标行结束字符下标（不含行尾 `\n`）。
+    fn cursor_line_end(&self) -> Option<usize> {
+        let start = self.cursor_line_start()?;
+        let rest = &self.input[start.min(self.input.len())..];
+        rest.iter()
+            .position(|&c| c == '\n')
+            .map_or_else(|| Some(self.input.len()), |nl| Some(start + nl))
+    }
+
+    /// 光标所在行号与行内字符列。
+    #[must_use]
+    pub fn cursor_line_col(&self) -> (usize, usize) {
+        let mut line = 0;
+        let mut col = 0;
+        for (i, &c) in self.input.iter().enumerate() {
+            if i >= self.cursor {
+                break;
+            }
+            if c == '\n' {
+                line += 1;
+                col = 0;
+            } else {
+                col += 1;
+            }
+        }
+        (line, col)
+    }
+
+    /// 每行行首字符下标（含空串行）。
+    fn line_starts(&self) -> Vec<usize> {
+        let mut starts = vec![0usize];
+        for (i, &c) in self.input.iter().enumerate() {
+            if c == '\n' {
+                starts.push(i + 1);
+            }
+        }
+        starts
+    }
+
+    /// 按 `\n` 拆分输入为各行（不含换行符）。
+    #[must_use]
+    pub fn input_lines(&self) -> Vec<String> {
+        self.input
+            .split(|&c| c == '\n')
+            .map(|s| s.iter().collect())
             .collect()
+    }
+
+    /// 输入总行数。
+    #[must_use]
+    pub fn input_line_count(&self) -> usize {
+        self.input.iter().filter(|&&c| c == '\n').count() + 1
+    }
+
+    /// 上/下行移动光标（列尽量保持，超出 clamp 到行尾）。
+    pub fn move_cursor_vert(&mut self, up: bool) {
+        let (line, col) = self.cursor_line_col();
+        let count = self.input_line_count();
+        if (up && line == 0) || (!up && line + 1 >= count) {
+            return;
+        }
+        let starts = self.line_starts();
+        let target = if up { line - 1 } else { line + 1 };
+        let start = starts[target];
+        let end = starts.get(target + 1).copied().unwrap_or(self.input.len());
+        let line_cols = self.input[start..end.min(self.input.len())]
+            .iter()
+            .take_while(|&&c| c != '\n')
+            .count();
+        self.cursor = start + col.min(line_cols);
     }
 
     /// 替换会话列表并 clamp 选中项。
@@ -212,7 +361,211 @@ impl UiState {
     /// 会话切换 / 新建：清空 transcript 回最新视图（v1 无历史回放）。
     pub fn reset_transcript(&mut self) {
         self.lines.clear();
+        self.tool_pending.clear();
         self.view_offset = 0;
+        self.search = None;
+        self.search_cursor = None;
+        self.search_total = 0;
+    }
+
+    // ── 审批浮层 ─────────────────────────────────────────────
+
+    /// 收到命令审批请求：记录浮层（供渲染 + 按键应答）。
+    pub fn begin_approval(
+        &mut self,
+        req: &CommandApprovalRequest,
+        answer: Sender<ApprovalDecision>,
+    ) {
+        self.approval = Some(ApprovalOverlay {
+            command: req.command.clone(),
+            args: req.args.clone(),
+            allowlist_key: req.allowlist_key.clone(),
+            answer,
+        });
+    }
+
+    // ── 工具行摘要 ───────────────────────────────────────────
+
+    /// 工具开始：记录一个摘要行，RESULT 到达时原位补结果标记。
+    pub fn tool_start(&mut self, tool_call_id: &str, name: &str) {
+        let display = if name.trim().is_empty() { "tool" } else { name };
+        if tool_call_id.is_empty() {
+            self.push_line(LineKind::Tool, display);
+            return;
+        }
+        self.lines.push(LogLine::new(LineKind::Tool, display));
+        self.tool_pending
+            .insert(tool_call_id.to_string(), self.lines.len() - 1);
+    }
+
+    /// 工具结果：更新对应摘要行；找不到 start（如续流中段）则补一行收尾。
+    pub fn tool_end(
+        &mut self,
+        tool_call_id: &str,
+        name: &str,
+        ok: Option<bool>,
+        note: Option<&str>,
+    ) {
+        let idx = self.tool_pending.remove(tool_call_id);
+        let mut text = match idx {
+            Some(i) if self.lines.get(i).is_some_and(|l| l.kind == LineKind::Tool) => {
+                self.lines[i].text.clone()
+            }
+            _ => {
+                let fallback = if name.trim().is_empty() { "tool" } else { name };
+                self.push_line(LineKind::Tool, fallback);
+                fallback.to_string()
+            }
+        };
+        text.push_str(match ok {
+            Some(true) => " ✓",
+            Some(false) => " ✗",
+            None => " (done)",
+        });
+        if let Some(n) = note.map(str::trim).filter(|s| !s.is_empty()) {
+            text.push_str(" — ");
+            text.push_str(n);
+        }
+        match idx {
+            Some(i) if i < self.lines.len() => self.lines[i].text = text,
+            _ => {
+                // 上面 fallback push 的行就是最后一行
+                if let Some(last) = self.lines.last_mut() {
+                    last.text = text;
+                }
+            }
+        }
+    }
+
+    /// 回合开始时清理上轮工具行映射。
+    pub fn reset_run_tools(&mut self) {
+        self.tool_pending.clear();
+    }
+
+    // ── thinking 折叠 ────────────────────────────────────────
+
+    /// 全局展开 / 折叠所有 thinking 行（桌面语义默认折叠）。
+    pub fn set_thinking_visible(&mut self, visible: bool) {
+        self.thinking_visible = visible;
+        for line in &mut self.lines {
+            if line.kind == LineKind::Thinking {
+                line.collapsed = !visible;
+            }
+        }
+    }
+
+    pub fn thinking_visible(&self) -> bool {
+        self.thinking_visible
+    }
+
+    /// Ctrl+E：切换 thinking 展开/折叠。
+    pub fn toggle_thinking(&mut self) {
+        self.set_thinking_visible(!self.thinking_visible);
+    }
+
+    // ── 搜索（/find） ────────────────────────────────────────
+
+    fn needle(&self) -> Option<&str> {
+        self.search.as_deref()
+    }
+
+    fn log_matches(&self, idx: usize, needle: &str) -> bool {
+        self.lines
+            .get(idx)
+            .is_some_and(|l| l.text.to_lowercase().contains(needle))
+    }
+
+    /// 命中搜索的逻辑行下标（升序）。
+    fn matches(&self) -> Vec<usize> {
+        let Some(needle) = self.needle() else {
+            return Vec::new();
+        };
+        (0..self.lines.len())
+            .filter(|&i| self.log_matches(i, needle))
+            .collect()
+    }
+
+    /// 设置新搜索词并从首条命中跳转；返回命中数。
+    pub fn start_search(&mut self, term: &str) -> usize {
+        self.search = Some(term.trim().to_lowercase());
+        self.search_cursor = None;
+        self.search_total = 0;
+        let hits = self.matches();
+        self.search_total = hits.len();
+        if let Some(&first) = hits.first() {
+            self.search_cursor = Some(first);
+        }
+        hits.len()
+    }
+
+    /// 跳到下一个命中（循环）；无命中返回 `None`。
+    pub fn next_search_hit(&mut self) -> Option<usize> {
+        let hits = self.matches();
+        self.search_total = hits.len();
+        if hits.is_empty() {
+            return None;
+        }
+        let after = self.search_cursor.unwrap_or(0);
+        let next = hits
+            .iter()
+            .copied()
+            .find(|&i| i > after)
+            .or_else(|| hits.first().copied());
+        if let Some(n) = next {
+            self.search_cursor = Some(n);
+        }
+        next
+    }
+
+    /// 手动滚动后释放锚点（保留搜索词与高亮）。
+    pub fn release_search_anchor(&mut self) {
+        self.search_cursor = None;
+    }
+
+    /// 清除搜索（去掉高亮与锚点）。
+    pub fn clear_search(&mut self) {
+        self.search = None;
+        self.search_cursor = None;
+        self.search_total = 0;
+    }
+
+    #[must_use]
+    pub fn search_active(&self) -> bool {
+        self.search.is_some()
+    }
+
+    #[must_use]
+    pub fn search_term(&self) -> Option<&str> {
+        self.search.as_deref()
+    }
+
+    pub fn scroll_page(&mut self, up: bool) {
+        let step = self.page_rows.max(1);
+        if up {
+            self.view_offset = self.view_offset.saturating_add(step);
+        } else {
+            self.view_offset = self.view_offset.saturating_sub(step);
+        }
+        self.release_search_anchor();
+    }
+
+    pub fn scroll_top(&mut self) {
+        self.view_offset = usize::MAX / 4;
+        self.release_search_anchor();
+    }
+
+    pub fn scroll_bottom(&mut self) {
+        self.view_offset = 0;
+        self.release_search_anchor();
+    }
+
+    pub fn scroll_lines(&mut self, up: bool, by: usize) {
+        if up {
+            self.view_offset = self.view_offset.saturating_add(by);
+        } else {
+            self.view_offset = self.view_offset.saturating_sub(by);
+        }
+        self.release_search_anchor();
     }
 }
 
@@ -259,6 +612,71 @@ mod tests {
         s.cursor_left();
         s.backspace();
         assert_eq!(s.current_input(), "Xb");
+    }
+
+    #[test]
+    fn multiline_insert_newline_and_lines() {
+        let mut s = UiState::new();
+        for ch in "ab".chars() {
+            s.insert_char(ch);
+        }
+        s.insert_newline();
+        for ch in "cd".chars() {
+            s.insert_char(ch);
+        }
+        assert_eq!(s.current_input(), "ab\ncd");
+        assert_eq!(s.input_line_count(), 2);
+        assert_eq!(s.input_lines(), vec!["ab", "cd"]);
+        assert_eq!(s.cursor_line_col(), (1, 2));
+    }
+
+    #[test]
+    fn multiline_home_end_per_line() {
+        let mut s = UiState::new();
+        for ch in "ab\ncd".chars() {
+            s.insert_char(ch);
+        }
+        // 光标在第 1 行 "cd" 末尾
+        s.cursor_home();
+        assert_eq!(s.cursor_line_col(), (1, 0));
+        s.cursor_end();
+        assert_eq!(s.cursor_line_col(), (1, 2));
+        s.cursor_left();
+        assert_eq!(s.cursor_line_col(), (1, 1));
+    }
+
+    #[test]
+    fn multiline_cursor_vertical_moves_and_clamps() {
+        let mut s = UiState::new();
+        for ch in "abc\nde\nfgh".chars() {
+            s.insert_char(ch);
+        }
+        // 从光标行（行 2）行首出发，一路 Home 到行 0
+        s.cursor_home();
+        assert_eq!(s.cursor_line_col(), (2, 0));
+        s.move_cursor_vert(true);
+        assert_eq!(s.cursor_line_col(), (1, 0));
+        s.move_cursor_vert(true);
+        assert_eq!(s.cursor_line_col(), (0, 0));
+        // 顶部再上移不变
+        s.move_cursor_vert(true);
+        assert_eq!(s.cursor_line_col(), (0, 0));
+        // 行尾(0,3)下移 → 行1 col min(3,2)=2；上移回到行0 col2
+        s.cursor_end();
+        s.move_cursor_vert(false);
+        assert_eq!(s.cursor_line_col(), (1, 2));
+        s.move_cursor_vert(true);
+        assert_eq!(s.cursor_line_col(), (0, 2));
+        // 一路下到行 2，行底再下移不变
+        s.cursor_end();
+        s.move_cursor_vert(false);
+        assert_eq!(s.cursor_line_col(), (1, 2));
+        s.move_cursor_vert(false);
+        assert_eq!(s.cursor_line_col(), (2, 2));
+        s.cursor_end();
+        assert_eq!(s.cursor_line_col(), (2, 3));
+        s.move_cursor_vert(false);
+        assert_eq!(s.cursor_line_col(), (2, 3), "bottom clamps");
     }
 
     #[test]
@@ -325,9 +743,67 @@ mod tests {
         let mut s = UiState::new();
         s.push_line(LineKind::User, "hi");
         s.view_offset = 3;
+        s.tool_start("tc-1", "exec");
+        s.start_search("hi");
         s.reset_transcript();
         assert!(s.lines.is_empty());
         assert_eq!(s.view_offset, 0);
+        assert!(!s.search_active());
+    }
+
+    #[test]
+    fn thinking_collapsed_by_default_and_toggles() {
+        let mut s = UiState::new();
+        s.push_line(LineKind::Thinking, "deep thought");
+        assert!(s.lines[0].collapsed);
+        assert!(!s.thinking_visible());
+        s.toggle_thinking();
+        assert!(s.thinking_visible());
+        assert!(!s.lines[0].collapsed);
+        s.toggle_thinking();
+        assert!(s.lines[0].collapsed);
+    }
+
+    #[test]
+    fn tool_row_start_then_end_updates_in_place() {
+        let mut s = UiState::new();
+        s.tool_start("tc-9", "exec");
+        assert_eq!(s.lines.last().unwrap().kind, LineKind::Tool);
+        assert_eq!(s.lines.last().unwrap().text, "exec");
+        s.tool_end("tc-9", "exec", Some(true), Some("exit 0"));
+        assert_eq!(s.lines.last().unwrap().text, "exec ✓ — exit 0");
+        assert_eq!(s.lines.len(), 1);
+    }
+
+    #[test]
+    fn tool_end_without_start_pushes_fallback_row() {
+        let mut s = UiState::new();
+        s.tool_end("tc-miss", "patch", Some(false), Some("rejected"));
+        assert_eq!(s.lines.last().unwrap().text, "patch ✗ — rejected");
+    }
+
+    #[test]
+    fn search_start_finds_and_highlights_roundtrip() {
+        let mut s = UiState::new();
+        s.push_line(LineKind::User, "alpha");
+        s.push_line(LineKind::Assistant, "Beta beta");
+        s.push_line(LineKind::System, "gamma");
+        assert_eq!(s.start_search("beta"), 1);
+        assert_eq!(s.search_cursor, Some(1));
+        assert_eq!(s.search_total, 1);
+        // 下一个命中循环回第一个
+        assert_eq!(s.next_search_hit(), Some(1));
+        s.clear_search();
+        assert!(!s.search_active());
+    }
+
+    #[test]
+    fn search_skips_non_matching_lines() {
+        let mut s = UiState::new();
+        s.push_line(LineKind::User, "x");
+        s.push_line(LineKind::Assistant, "你好世界");
+        assert_eq!(s.start_search("世界"), 1);
+        assert_eq!(s.search_cursor, Some(1));
     }
 
     #[test]

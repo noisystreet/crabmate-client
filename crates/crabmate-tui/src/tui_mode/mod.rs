@@ -1,11 +1,13 @@
-//! `crabmate-tui tui`：全屏模式（M2）。
+//! `crabmate-tui tui`：全屏模式（M3）。
 //!
-//! 布局：状态行 + 左栏会话 + 主区流式 transcript + 底栏输入。
+//! 布局：状态行 + 左栏会话 + 主区流式 transcript + 底栏（多行）输入 + 审批浮层。
 //! 回合/拉取在持久 worker 线程的 current-thread tokio runtime 中串行执行
 //! （`run_chat_stream_sink` / `fetch_web_sessions` / `/status`），避免全屏事件循环
 //! 与 IO 互相阻塞。raw mode 下 Ctrl+C 是按键事件，取消经 [`StreamCancel`] 走
 //! "外部取消"通道，不复用文本模式的 `ctrl_c` 信号路径。
 
+mod approve;
+mod controls;
 mod render;
 mod state;
 
@@ -26,10 +28,12 @@ use ratatui::backend::{Backend, CrosstermBackend};
 
 use crabmate_tui_core::{
     ApprovalDecision, ApprovalGate, AutoAllowOnce, ChatStreamOptions, ChatStreamOutcome,
-    ClientLlmFields, CommandApprovalRequest, ServeClient, StreamCancel, StreamSink, TermError,
-    WebSessionsList, fetch_web_sessions, new_approval_session_id, run_chat_stream_sink,
+    ClientLlmFields, ServeClient, StreamCancel, StreamSink, TermError, WebSessionsList,
+    fetch_web_sessions, new_approval_session_id, run_chat_stream_sink,
 };
 
+use self::approve::{ApprovalPrompt, OverlayApprovalGate, decision_for_key, decision_summary};
+use self::controls::{Control, clear_word, parse_control, set_mode_field, set_override_field};
 use self::render::{SIDEBAR_MIN_WIDTH, StatusInfo};
 use super::SessionPrefs;
 use state::{Focus, LineKind, ServeDefaults, UiState};
@@ -40,9 +44,18 @@ enum UiEvent {
     Text(String),
     Thinking(String),
     System(String),
-    Denied {
-        command: String,
-        args: String,
+    ToolStart {
+        tool_call_id: String,
+        name: String,
+    },
+    ToolEnd {
+        tool_call_id: String,
+        name: String,
+        ok: Option<bool>,
+        note: Option<String>,
+    },
+    Approval {
+        prompt: ApprovalPrompt,
     },
     TurnDone {
         outcome: ChatStreamOutcome,
@@ -98,21 +111,31 @@ impl StreamSink for UiSink {
         }
         Ok(())
     }
-}
 
-/// M2 审批 gate：非白名单命令一律拒绝，并把被拒命令通知 UI 显示。
-/// （真正的浮层审批属 M3；这里避免回合悬挂又给用户可见反馈。）
-struct DenyNotifyGate {
-    tx: Sender<UiEvent>,
-}
+    fn on_tool_start(&mut self, tool_call_id: &str, name: &str) -> Result<(), TermError> {
+        self.tx
+            .send(UiEvent::ToolStart {
+                tool_call_id: tool_call_id.to_string(),
+                name: name.to_string(),
+            })
+            .map_err(|_| TermError::Message("ui channel closed".into()))
+    }
 
-impl ApprovalGate for DenyNotifyGate {
-    fn decide(&mut self, req: &CommandApprovalRequest) -> Result<ApprovalDecision, TermError> {
-        let _ = self.tx.send(UiEvent::Denied {
-            command: req.command.clone(),
-            args: req.args.clone(),
-        });
-        Ok(ApprovalDecision::Deny)
+    fn on_tool_end(
+        &mut self,
+        tool_call_id: &str,
+        name: &str,
+        ok: Option<bool>,
+        note: Option<&str>,
+    ) -> Result<(), TermError> {
+        self.tx
+            .send(UiEvent::ToolEnd {
+                tool_call_id: tool_call_id.to_string(),
+                name: name.to_string(),
+                ok,
+                note: note.map(str::to_string),
+            })
+            .map_err(|_| TermError::Message("ui channel closed".into()))
     }
 }
 
@@ -179,7 +202,7 @@ fn run_turn_job(
         let mut gate: Box<dyn ApprovalGate> = if job.yes {
             Box::new(AutoAllowOnce)
         } else {
-            Box::new(DenyNotifyGate { tx: tx.clone() })
+            Box::new(OverlayApprovalGate { tx: tx.clone() })
         };
         run_chat_stream_sink(
             client,
@@ -220,19 +243,6 @@ struct TuiApp<'a> {
     quit_pending: bool,
 }
 
-/// 控制斜杠（本地处理，不发给模型）。`/` 开头的未知命令视为普通消息。
-enum Control {
-    Quit,
-    Model(Option<String>),
-    Mode(Option<String>),
-    Role(Option<String>),
-    Status,
-    ConvNew,
-    ConvRefresh,
-    ConvUse(String),
-    ConvUnknown(String),
-}
-
 fn is_ctrl_c(key: &KeyEvent) -> bool {
     key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL)
 }
@@ -241,78 +251,16 @@ fn is_ctrl_o(key: &KeyEvent) -> bool {
     key.code == KeyCode::Char('o') && key.modifiers.contains(KeyModifiers::CONTROL)
 }
 
-fn clear_word(arg: &str) -> bool {
-    matches!(arg, "off" | "none" | "clear")
+fn is_ctrl_e(key: &KeyEvent) -> bool {
+    key.code == KeyCode::Char('e') && key.modifiers.contains(KeyModifiers::CONTROL)
 }
 
-/// 设置/查询一个字符串型 override 槽，返回给用户看的回显。
-fn set_override_field(slot: &mut Option<String>, arg: Option<String>, name: &str) -> String {
-    match arg {
-        Some(v) if clear_word(&v) => {
-            *slot = None;
-            format!("{name} override cleared")
-        }
-        Some(v) => {
-            *slot = Some(v.clone());
-            format!("{name} override: {v}")
-        }
-        None => match slot.as_deref() {
-            Some(v) if !v.trim().is_empty() => format!("{name} override: {v}"),
-            _ => format!("{name} override: (none — 使用 serve 默认；/{name} <值> 设置)"),
-        },
-    }
+fn is_ctrl(key: &KeyEvent, code: KeyCode) -> bool {
+    key.code == code && key.modifiers.contains(KeyModifiers::CONTROL)
 }
 
-/// 设置 `/mode` override（校验 ask/plan/act），返回给用户看的回显。
-fn set_mode_field(slot: &mut Option<String>, arg: Option<String>) -> String {
-    match arg {
-        Some(v) if clear_word(&v) => {
-            *slot = None;
-            "mode override cleared".to_string()
-        }
-        Some(v) if matches!(v.as_str(), "ask" | "plan" | "act") => {
-            *slot = Some(v.clone());
-            format!("mode override: {v}")
-        }
-        Some(v) => format!("invalid session mode '{v}'; 可选 ask / plan / act（off 清除）"),
-        None => match slot.as_deref() {
-            Some(v) if !v.trim().is_empty() => format!("mode override: {v}"),
-            _ => "mode override: (serve 默认；/mode ask|plan|act 设置)".to_string(),
-        },
-    }
-}
-
-/// 解析控制斜杠：`/model [x]` `/mode [ask|plan|act]` `/role [id]` `/status`
-/// `/conv`(刷新) `/conv new` `/quit`。返回 `None` 表示按普通消息处理。
-fn parse_control(text: &str) -> Option<Control> {
-    let t = text.trim();
-    let rest = t.strip_prefix('/')?.trim();
-    let (head, arg) = match rest.split_once(char::is_whitespace) {
-        Some((h, a)) => (h.trim(), a.trim().to_string()),
-        None => (rest, String::new()),
-    };
-    let head = head.to_ascii_lowercase();
-    let arg_opt = (!arg.is_empty()).then_some(arg);
-    match head.as_str() {
-        "quit" | "exit" | "q" => Some(Control::Quit),
-        "model" => Some(Control::Model(arg_opt)),
-        "mode" => Some(Control::Mode(arg_opt)),
-        "role" => Some(Control::Role(arg_opt)),
-        "status" => Some(Control::Status),
-        "conv" => Some(match arg_opt {
-            None => Control::ConvRefresh,
-            Some(a) => match a.split_whitespace().next().unwrap_or("") {
-                "new" | "clear" => Control::ConvNew,
-                "list" | "ls" | "show" => Control::ConvRefresh,
-                "use" | "switch" => match a.split_whitespace().nth(1) {
-                    Some(id) if !id.is_empty() => Control::ConvUse(id.to_string()),
-                    _ => Control::ConvUnknown(a),
-                },
-                _ => Control::ConvUnknown(a),
-            },
-        }),
-        _ => None,
-    }
+fn is_alt_enter(key: &KeyEvent) -> bool {
+    key.code == KeyCode::Enter && key.modifiers.contains(KeyModifiers::ALT)
 }
 
 impl TuiApp<'_> {
@@ -438,6 +386,8 @@ impl TuiApp<'_> {
                     self.exit = true;
                 }
             }
+            Control::Help => self.show_help(),
+            Control::Find(arg) => self.do_find(arg),
             Control::Model(arg) => {
                 let echo = set_override_field(&mut self.overrides.model, arg, "model");
                 self.st.push_line(LineKind::System, &echo);
@@ -473,7 +423,56 @@ impl TuiApp<'_> {
         }
     }
 
+    /// `/help`：向 transcript 打印本地命令与快捷键说明。
+    fn show_help(&mut self) {
+        for line in [
+            "本地命令：/quit /help /status /mode /role /model /find /conv",
+            "/mode ask|plan|act · /role <id> · /model <name>（off 清除，随对话生效）",
+            "/find <词> 搜索并高亮 · /find（空参）跳下一处 · /find off 清除",
+            "/conv list 刷新 · /conv use <id> 切换 · /conv new 新会话",
+            "按键：Alt+Enter 换行 · Ctrl+E 思考展开/折叠 · PgUp/PgDn 翻页 · Ctrl+End 回底部",
+        ] {
+            self.st.push_line(LineKind::System, line);
+        }
+    }
+
+    /// `/find`：设置搜索词/跳下一处/清除（Ctrl+E 之外的本地只读命令）。
+    fn do_find(&mut self, arg: Option<String>) {
+        match arg {
+            Some(t) if clear_word(&t) => {
+                self.st.clear_search();
+                self.st.push_line(LineKind::System, "搜索已清除");
+            }
+            Some(term) => {
+                if self.st.start_search(&term) == 0 {
+                    let needle = self.st.search_term().unwrap_or(&term);
+                    self.st.push_line(
+                        LineKind::System,
+                        &format!("「{needle}」无匹配（新内容到达后可再 /find 跳转）"),
+                    );
+                }
+            }
+            None => {
+                if !self.st.search_active() {
+                    self.st.push_line(
+                        LineKind::System,
+                        "当前无搜索词：/find <词> 开始搜索（/find 空参跳下一处）",
+                    );
+                } else if self.st.next_search_hit().is_none() {
+                    self.st.push_line(LineKind::System, "无更多匹配行");
+                }
+            }
+        }
+    }
+
     fn on_key(&mut self, key: KeyEvent) {
+        // 审批浮层优先：只认决策键，忽略其它输入（防多重审批叠栈）。
+        if self.st.approval.is_some() {
+            if let Some(decision) = decision_for_key(&key) {
+                self.answer_approval(decision);
+            }
+            return;
+        }
         if is_ctrl_c(&key) {
             self.on_ctrl_c();
             return;
@@ -483,6 +482,18 @@ impl TuiApp<'_> {
             return;
         }
         self.on_input_key(key);
+    }
+
+    /// 关闭审批浮层并把决策回传 SSE gate；写一条结果系统行。
+    fn answer_approval(&mut self, decision: ApprovalDecision) {
+        let Some(overlay) = self.st.approval.take() else {
+            return;
+        };
+        let preview = overlay.preview();
+        let _ = overlay.answer.send(decision);
+        let summary = decision_summary(&decision);
+        self.st
+            .push_line(LineKind::System, &format!("{summary}命令审批：{preview}"));
     }
 
     fn on_sidebar_key(&mut self, key: KeyEvent) {
@@ -499,8 +510,21 @@ impl TuiApp<'_> {
 
     fn on_input_key(&mut self, key: KeyEvent) {
         match key.code {
+            KeyCode::Enter if is_alt_enter(&key) => self.st.insert_newline(),
             KeyCode::Enter => self.on_submit(),
             KeyCode::Char('o') if is_ctrl_o(&key) => self.on_submit(),
+            KeyCode::Char('e') if is_ctrl_e(&key) => {
+                self.st.toggle_thinking();
+                let state = if self.st.thinking_visible() {
+                    "展开"
+                } else {
+                    "折叠"
+                };
+                self.st.push_line(
+                    LineKind::System,
+                    &format!("思考内容已{state}（Ctrl+E 切换）"),
+                );
+            }
             KeyCode::Char('c') | KeyCode::Char('d') | KeyCode::Char('z')
                 if key.modifiers.contains(KeyModifiers::CONTROL) => {}
             KeyCode::Tab => {
@@ -521,19 +545,18 @@ impl TuiApp<'_> {
             KeyCode::Backspace => self.st.backspace(),
             KeyCode::Left => self.st.cursor_left(),
             KeyCode::Right => self.st.cursor_right(),
+            KeyCode::Home if is_ctrl(&key, KeyCode::Home) => self.st.scroll_top(),
+            KeyCode::End if is_ctrl(&key, KeyCode::End) => self.st.scroll_bottom(),
             KeyCode::Home => self.st.cursor_home(),
             KeyCode::End => self.st.cursor_end(),
-            KeyCode::Up => self.on_scroll(true),
-            KeyCode::Down => self.on_scroll(false),
+            KeyCode::PageUp => self.st.scroll_page(true),
+            KeyCode::PageDown => self.st.scroll_page(false),
+            // 多行编辑时 ↑/↓ 走行内光标；单行仍保留"滚动 transcript"的旧行为。
+            KeyCode::Up if self.st.is_multiline() => self.st.move_cursor_vert(true),
+            KeyCode::Down if self.st.is_multiline() => self.st.move_cursor_vert(false),
+            KeyCode::Up => self.st.scroll_lines(true, 3),
+            KeyCode::Down => self.st.scroll_lines(false, 3),
             _ => {}
-        }
-    }
-
-    fn on_scroll(&mut self, up: bool) {
-        if up {
-            self.st.view_offset = self.st.view_offset.saturating_add(3);
-        } else {
-            self.st.view_offset = self.st.view_offset.saturating_sub(3);
         }
     }
 
@@ -561,14 +584,15 @@ impl TuiApp<'_> {
             UiEvent::Text(delta) => self.st.stream_delta(LineKind::Assistant, &delta),
             UiEvent::Thinking(delta) => self.st.stream_delta(LineKind::Thinking, &delta),
             UiEvent::System(line) => self.st.push_line(LineKind::System, line.trim()),
-            UiEvent::Denied { command, args } => {
-                let preview = if args.trim().is_empty() {
-                    command
-                } else {
-                    format!("{command} {args}")
-                };
-                self.st
-                    .push_line(LineKind::System, &format!("已拒绝命令审批：{preview}"));
+            UiEvent::ToolStart { tool_call_id, name } => self.st.tool_start(&tool_call_id, &name),
+            UiEvent::ToolEnd {
+                tool_call_id,
+                name,
+                ok,
+                note,
+            } => self.st.tool_end(&tool_call_id, &name, ok, note.as_deref()),
+            UiEvent::Approval { prompt } => {
+                self.st.begin_approval(&prompt.req, prompt.answer);
             }
             UiEvent::TurnDone { outcome, error } => self.on_turn_done(outcome, error),
             UiEvent::Sessions(result) => match result {
@@ -606,6 +630,10 @@ impl TuiApp<'_> {
             session_mode: prefs.session_mode.map(str::to_string),
             stream_resume: None,
         };
+        // 新回合：清上轮工具行映射并回到最新视图（搜索词保留、锚点释放）。
+        self.st.reset_run_tools();
+        self.st.view_offset = 0;
+        self.st.release_search_anchor();
         self.st.push_line(LineKind::User, message);
         self.st.running = true;
         self.st.cancel_sent = false;
@@ -648,6 +676,9 @@ impl TuiApp<'_> {
             ),
             running: self.st.running,
             cancel_sent: self.st.cancel_sent,
+            view_offset: self.st.view_offset,
+            search_term: self.st.search_term().map(str::to_string),
+            search_total: self.st.search_total,
         }
     }
 
@@ -660,6 +691,8 @@ impl TuiApp<'_> {
             // 每帧读取终端尺寸：窄屏隐藏左栏；若焦点滞留已隐藏的左栏则收回输入框。
             let size = terminal.backend().size().context("terminal size")?;
             self.st.sidebar_visible = size.width >= SIDEBAR_MIN_WIDTH;
+            // PgUp/PgDn 页步 ≈ 聊天可视区行数（状态行 + composer 占几行）。
+            self.st.page_rows = (size.height as usize).saturating_sub(4).max(1);
             if !self.st.sidebar_visible && self.st.focus == Focus::Sidebar {
                 self.st.focus = Focus::Input;
             }
@@ -721,81 +754,4 @@ pub async fn run_tui(client: &ServeClient, overrides: &mut SessionPrefs, yes: bo
     };
     terminal.clear().context("clear screen")?;
     app.run_loop(&mut terminal)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parse_control_known_slashes() {
-        assert!(matches!(parse_control("/quit"), Some(Control::Quit)));
-        assert!(matches!(parse_control("/EXIT"), Some(Control::Quit)));
-        assert!(matches!(parse_control("/status"), Some(Control::Status)));
-        assert!(matches!(parse_control("/conv"), Some(Control::ConvRefresh)));
-        assert!(matches!(parse_control("/conv new"), Some(Control::ConvNew)));
-        assert!(matches!(
-            parse_control("/model gpt-x"),
-            Some(Control::Model(Some(v))) if v == "gpt-x"
-        ));
-        assert!(matches!(
-            parse_control("/model"),
-            Some(Control::Model(None))
-        ));
-        assert!(matches!(
-            parse_control("/mode act"),
-            Some(Control::Mode(Some(v))) if v == "act"
-        ));
-        assert!(matches!(
-            parse_control("/role coder"),
-            Some(Control::Role(Some(v))) if v == "coder"
-        ));
-    }
-
-    #[test]
-    fn parse_control_conv_use_and_unknown() {
-        assert!(matches!(
-            parse_control("/conv use c1"),
-            Some(Control::ConvUse(v)) if v == "c1"
-        ));
-        assert!(matches!(
-            parse_control("/conv bogus"),
-            Some(Control::ConvUnknown(_))
-        ));
-        assert!(matches!(
-            parse_control("/conv use"),
-            Some(Control::ConvUnknown(_))
-        ));
-    }
-
-    #[test]
-    fn parse_control_passes_plain_through() {
-        assert!(parse_control("hello").is_none());
-        assert!(parse_control("/my-skill").is_none());
-        assert!(parse_control(" /model ").is_some());
-    }
-
-    #[test]
-    fn override_field_set_clear_query() {
-        let mut slot = None;
-        let echo = set_override_field(&mut slot, Some("gpt-x".into()), "model");
-        assert!(echo.contains("gpt-x"));
-        assert_eq!(slot.as_deref(), Some("gpt-x"));
-        let echo = set_override_field(&mut slot, Some("off".into()), "model");
-        assert!(echo.contains("cleared"));
-        assert!(slot.is_none());
-        let echo = set_override_field(&mut slot, None, "model");
-        assert!(echo.contains("(none"));
-    }
-
-    #[test]
-    fn mode_field_validates() {
-        let mut slot = None;
-        let bad = set_mode_field(&mut slot, Some("bogus".into()));
-        assert!(bad.contains("invalid"));
-        assert!(slot.is_none());
-        let ok = set_mode_field(&mut slot, Some("plan".into()));
-        assert!(ok.contains("plan"));
-        assert_eq!(slot.as_deref(), Some("plan"));
-    }
 }

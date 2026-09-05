@@ -1,11 +1,11 @@
-//! 全屏 TUI 渲染：状态行 / 左栏会话 / 主区 transcript / 底栏输入。
-//! 布局纯函数为主，便于单测。
+//! 全屏 TUI 渲染：状态行 / 左栏会话 / 主区 transcript / 底栏输入 /
+//! 审批浮层。布局纯函数为主，便于单测。
 
 use ratatui::Frame;
-use ratatui::layout::{Constraint, Layout};
+use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::Paragraph;
+use ratatui::widgets::{Block, Borders, Paragraph};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use super::state::{Focus, LineKind, UiState};
@@ -15,6 +15,11 @@ pub const SIDEBAR_MIN_WIDTH: u16 = 120;
 /// 左栏宽度。
 const SIDEBAR_WIDTH: u16 = 26;
 const SIDEBAR_HINT: &str = "↑↓选 Enter用 n新建 r刷新";
+/// composer 最多展开行数（多行输入）。
+const MAX_COMPOSER_ROWS: usize = 4;
+/// 审批浮层宽高上限。
+const OVERLAY_MAX_WIDTH: u16 = 78;
+const OVERLAY_HEIGHT: u16 = 8;
 
 /// 区域色块（对齐 Desktop 面板观感：主体聊天深底 + 亮灰会话侧栏 +
 /// 略亮输入条 + 底部蓝色状态栏）。
@@ -33,6 +38,18 @@ pub struct StatusInfo {
     pub mode: Option<String>,
     pub running: bool,
     pub cancel_sent: bool,
+    /// transcript 回看行数（>0 时显示 ↑N）。
+    pub view_offset: usize,
+    /// 活跃搜索词（/find）。
+    pub search_term: Option<String>,
+    /// 搜索命中逻辑行数。
+    pub search_total: usize,
+}
+
+/// 一条可渲染的 transcript 物理行（附所属逻辑行下标，供搜索锚点定位）。
+pub struct BodyRow {
+    pub log_index: usize,
+    pub line: Line<'static>,
 }
 
 fn kind_style(kind: LineKind) -> (String, Style) {
@@ -46,6 +63,7 @@ fn kind_style(kind: LineKind) -> (String, Style) {
         ),
         LineKind::Assistant => ("[助手] ".to_string(), Style::new().fg(Color::LightGreen)),
         LineKind::Thinking => ("[思考] ".to_string(), Style::new().fg(Color::Gray)),
+        LineKind::Tool => ("[工具] ".to_string(), Style::new().fg(Color::LightMagenta)),
         LineKind::System => ("[!] ".to_string(), Style::new().fg(Color::LightYellow)),
     }
 }
@@ -83,24 +101,68 @@ fn wrap_physical(text: &str, width: usize) -> Vec<String> {
     rows
 }
 
-/// 把 transcript 转成可渲染的物理行；逻辑行首带前缀，仅作用于其第一物理行。
-fn display_lines(st: &UiState, width: usize) -> Vec<Line<'static>> {
-    let mut out: Vec<Line<'static>> = Vec::new();
-    for log in &st.lines {
+/// thinking 折叠行的单行预览：首行截断 + `…`（占位不超 content_width）。
+fn fold_thinking(text: &str, content_width: usize) -> String {
+    if content_width == 0 {
+        return String::new();
+    }
+    let head = text.lines().next().unwrap_or("").trim();
+    if head.is_empty() {
+        return "…".to_string();
+    }
+    let budget = content_width.saturating_sub(2).max(1);
+    let mut s = truncate_display(head, budget);
+    s.push('…');
+    s
+}
+
+/// 把 transcript 转成可渲染的物理行（含搜索高亮标记）；逻辑行首带前缀，
+/// 仅作用于其第一物理行。thinking 折叠时只出一行预览。
+fn body_rows(st: &UiState, width: usize) -> Vec<BodyRow> {
+    let needle = st.search_term();
+    let target = st.search_cursor;
+    let mut out: Vec<BodyRow> = Vec::new();
+    for (idx, log) in st.lines.iter().enumerate() {
         let (prefix, style) = kind_style(log.kind);
-        let content_width = width.saturating_sub(prefix.chars().count());
+        let prefix_w = prefix.chars().count();
+        let content_width = width.saturating_sub(prefix_w);
+        let matched = needle.is_some_and(|n| log.text.to_lowercase().contains(n));
         let mut first = true;
-        for phys in wrap_physical(&log.text, content_width) {
+        let text = if log.kind == LineKind::Thinking && log.collapsed {
+            fold_thinking(&log.text, content_width)
+        } else {
+            log.text.clone()
+        };
+        for phys in wrap_physical(&text, content_width) {
             let mut spans: Vec<Span<'static>> = Vec::new();
-            if first {
-                spans.push(Span::styled(prefix.clone(), style));
+            let mut row_style = style;
+            if matched && target == Some(idx) && first {
+                // 锚定命中行反色突出；其余命中行仅改前景。
+                row_style = Style::new()
+                    .fg(Color::Black)
+                    .bg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD);
+            } else if matched {
+                row_style = Style::new().fg(Color::Yellow);
             }
-            spans.push(Span::styled(phys, style));
-            out.push(Line::from(spans));
+            if first {
+                spans.push(Span::styled(prefix.clone(), row_style));
+            }
+            spans.push(Span::styled(phys, row_style));
+            out.push(BodyRow {
+                log_index: idx,
+                line: Line::from(spans),
+            });
             first = false;
         }
     }
     out
+}
+
+/// 测试辅助：兼容旧接口的纯行视图。
+#[cfg(test)]
+fn display_lines(st: &UiState, width: usize) -> Vec<Line<'static>> {
+    body_rows(st, width).into_iter().map(|r| r.line).collect()
 }
 
 /// 按显示宽度截断（用于状态行），尾部补 `…`。
@@ -144,6 +206,16 @@ fn status_text(info: &StatusInfo, conv: Option<&str>, width: usize) -> String {
         (true, false) => "● 运行中".to_string(),
         (false, _) => "○ 空闲".to_string(),
     });
+    if let Some(term) = info.search_term.as_deref() {
+        if info.search_total == 0 {
+            parts.push(format!("find 「{term}」 无匹配"));
+        } else {
+            parts.push(format!("find 「{term}」 {}处", info.search_total));
+        }
+    }
+    if info.view_offset > 0 {
+        parts.push(format!("↑{}", info.view_offset));
+    }
     truncate_display(&parts.join(" | "), width)
 }
 
@@ -210,7 +282,7 @@ fn sidebar_view<'a>(rows: &[Line<'a>], height: usize, selected: usize) -> Vec<Li
 }
 
 /// 给一块区域整体铺背景色（先于文字绘制，杜绝段落内容不足时的底色缺口）。
-fn paint_bg(frame: &mut Frame, rect: ratatui::layout::Rect, color: Color) {
+fn paint_bg(frame: &mut Frame, rect: Rect, color: Color) {
     if rect.is_empty() {
         return;
     }
@@ -245,14 +317,24 @@ pub fn draw(frame: &mut Frame, st: &UiState, info: &StatusInfo) {
     frame.render_widget(status, status_area);
 }
 
-/// 聊天列：上为主区消息（滚动 transcript），底部为 composer 输入行。
-fn render_chat_column(frame: &mut Frame, st: &UiState, area: ratatui::layout::Rect) {
-    let parts = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(area);
-    render_body(frame, st, parts[0]);
+/// 聊天列：上为主区消息（滚动 transcript），底部为 composer 输入区。
+fn render_chat_column(frame: &mut Frame, st: &UiState, area: Rect) {
+    let rows = composer_rows(st).min(area.height);
+    let parts = Layout::vertical([Constraint::Min(1), Constraint::Length(rows)]).split(area);
+    let body_area = parts[0];
+    render_body(frame, st, body_area);
+    if st.approval.is_some() {
+        render_approval_overlay(frame, st, body_area);
+    }
     render_input(frame, st, parts[1]);
 }
 
-fn render_sidebar(frame: &mut Frame, st: &UiState, area: ratatui::layout::Rect) {
+/// composer 高度：随输入行数增长，最多 `MAX_COMPOSER_ROWS`（单行恒为 1）。
+fn composer_rows(st: &UiState) -> u16 {
+    st.input_line_count().clamp(1, MAX_COMPOSER_ROWS) as u16
+}
+
+fn render_sidebar(frame: &mut Frame, st: &UiState, area: Rect) {
     if area.height == 0 {
         return;
     }
@@ -269,46 +351,161 @@ fn render_sidebar(frame: &mut Frame, st: &UiState, area: ratatui::layout::Rect) 
     }
 }
 
-fn render_body(frame: &mut Frame, st: &UiState, area: ratatui::layout::Rect) {
+/// 空 transcript 时的快捷键引导。
+const BODY_EMPTY_HINT: &str = "输入消息开始对话 · Alt+Enter 换行 · Ctrl+E 思考展开 · PgUp/PgDn 滚动 · /find 搜索 · Ctrl+C 退出 · /help";
+
+fn render_body(frame: &mut Frame, st: &UiState, area: Rect) {
     paint_bg(frame, area, CHAT_BG);
     if st.lines.is_empty() {
-        let hint = Paragraph::new(Span::styled(
-            "（空）输入消息开始对话 · Ctrl+C 退出 · Tab 切到会话列表",
-            Style::new().fg(Color::White),
-        ));
+        let hint = Paragraph::new(Span::styled(BODY_EMPTY_HINT, Style::new().fg(Color::White)));
         frame.render_widget(hint, area);
         return;
     }
-    let mut rows = display_lines(st, (area.width as usize).saturating_sub(1));
+    let rows = body_rows(st, (area.width as usize).saturating_sub(1));
     let rows_total = rows.len();
-    let viewport = (area.height as usize).saturating_sub(1);
-    let back = st.view_offset.min(rows_total.saturating_sub(viewport));
+    let viewport = (area.height as usize).saturating_sub(1).max(1);
+    let max_back = rows_total.saturating_sub(viewport);
+    let back = if let Some(target) = st.search_cursor {
+        // 搜索锚定：目标逻辑行置于视口上 1/3 处。
+        match rows.iter().position(|r| r.log_index == target) {
+            Some(pos) => {
+                let want_start = pos.saturating_sub(viewport / 3);
+                let end = (want_start + viewport).min(rows_total);
+                rows_total.saturating_sub(end)
+            }
+            None => st.view_offset.min(max_back),
+        }
+    } else {
+        st.view_offset.min(max_back)
+    };
+    let back = back.min(max_back);
     let end = rows_total.saturating_sub(back);
     let start = end.saturating_sub(viewport);
-    let shown = rows.split_off(start);
+    let shown = rows
+        .into_iter()
+        .skip(start)
+        .take(end.saturating_sub(start))
+        .map(|r| r.line)
+        .collect::<Vec<_>>();
     frame.render_widget(Paragraph::new(shown), area);
 }
 
-/// 输入区可视内容与光标列：Input 聚焦时光标跟随（超宽水平滚动），
-/// 否则显示内容开头（无光标）。输入行不显示提示前缀，仅输入文本 + 闪烁光标。
-fn input_window(st: &UiState, width: usize) -> (String, usize) {
-    let before = st.input_before_cursor();
-    let full = st.current_input();
+/// 审批浮层：命令预览 + 按键提示，置于聊天主体底部（composer 之上）。
+fn render_approval_overlay(frame: &mut Frame, st: &UiState, area: Rect) {
+    let Some(ap) = &st.approval else {
+        return;
+    };
+    let width = area.width.saturating_sub(4).min(OVERLAY_MAX_WIDTH);
+    if width == 0 || area.height < OVERLAY_HEIGHT {
+        return;
+    }
+    let x = area.x.saturating_add(area.width.saturating_sub(width) / 2);
+    let y = area
+        .y
+        .saturating_add(area.height.saturating_sub(OVERLAY_HEIGHT));
+    let rect = Rect::new(x, y, width, OVERLAY_HEIGHT);
+    paint_bg(frame, rect, Color::Indexed(236));
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::new().fg(Color::Yellow))
+        .title(Span::styled(" 命令审批 ", Style::new().fg(Color::Yellow)));
+    let inner = block.inner(rect);
+    let preview = truncate_display(&ap.preview(), inner.width.saturating_sub(2) as usize);
+    let mut lines: Vec<Line<'static>> = vec![Line::from(Span::styled(
+        preview,
+        Style::new().fg(Color::White).add_modifier(Modifier::BOLD),
+    ))];
+    if let Some(key) = ap
+        .allowlist_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        lines.push(Line::from(Span::styled(
+            format!("allowlist: {key}"),
+            Style::new().fg(Color::Gray),
+        )));
+    }
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        "回合已暂停，等待你的决策",
+        Style::new().fg(Color::Gray),
+    )));
+    lines.push(Line::from(Span::styled(
+        "[Enter] 仅此一次  [a] 始终允许  [Esc/n] 拒绝",
+        Style::new().fg(Color::LightYellow),
+    )));
+    frame.render_widget(Paragraph::new(lines).block(block), rect);
+}
+
+/// composer 可视窗口：返回（可视各行、光标所在显示行、光标显示列、水平滚动起点）。
+/// 仅显示光标附近的行；宽行按光标做水平滚动（与旧单行行为一致）。
+fn composer_window(
+    st: &UiState,
+    width: usize,
+    max_rows: usize,
+) -> (Vec<String>, usize, usize, usize) {
+    let lines = st.input_lines();
+    let total = lines.len();
+    let rows = total.min(max_rows).max(1);
+    let (cursor_line, cursor_col) = st.cursor_line_col();
+    // 光标行尽量保持在末行；行数溢出时向上滚动窗口。
+    let top = (cursor_line + 1).saturating_sub(rows);
+    let disp_row = cursor_line - top;
+    let visible: Vec<String> = lines[top..top + rows].to_vec();
+    let before: String = visible[disp_row].chars().take(cursor_col).collect();
     let cursor_cell = if st.focus == Focus::Input {
         UnicodeWidthStr::width(before.as_str())
     } else {
         0
     };
-    visible_window(&full, cursor_cell, width)
+    let (hstart, shown_cursor) = horizontal_window(&visible[disp_row], cursor_cell, width);
+    let shown: Vec<String> = visible
+        .iter()
+        .map(|l| cell_window(l, hstart, width))
+        .collect();
+    (shown, disp_row, shown_cursor, hstart)
 }
 
-fn render_input(frame: &mut Frame, st: &UiState, area: ratatui::layout::Rect) {
+/// 输入行水平窗口起点与光标在可见文本中的显示列。
+fn horizontal_window(content: &str, cursor_cell: usize, width: usize) -> (usize, usize) {
+    let total = UnicodeWidthStr::width(content);
+    if total <= width || width == 0 {
+        return (0, cursor_cell.min(total));
+    }
+    // 光标贴右缘前留 1 列：需要窗口起点 = cursor+1-width，再收尾 clamp 到 total-width。
+    let start = cursor_cell
+        .saturating_add(1)
+        .saturating_sub(width)
+        .min(total.saturating_sub(width));
+    (start, cursor_cell.saturating_sub(start))
+}
+
+/// 测试辅助：单行可视文本与光标列（兼容旧接口）。
+#[cfg(test)]
+fn input_window(st: &UiState, width: usize) -> (String, usize) {
+    let (shown, disp_row, cursor, _) = composer_window(st, width, 1);
+    let text = shown.get(disp_row).cloned().unwrap_or_default();
+    (text, cursor)
+}
+
+fn render_input(frame: &mut Frame, st: &UiState, area: Rect) {
+    if area.is_empty() {
+        return;
+    }
     paint_bg(frame, area, COMPOSER_BG);
     let visible_w = area.width.saturating_sub(1) as usize;
-    let (shown, shown_cursor) = input_window(st, visible_w);
-    let paragraph =
-        Paragraph::new(Line::from(Span::raw(shown))).style(Style::new().fg(Color::White));
-    frame.render_widget(paragraph, area);
+    let rows = (composer_rows(st) as usize).min(area.height as usize);
+    let (shown, disp_row, shown_cursor, _hstart) = composer_window(st, visible_w, rows);
+    for (i, text) in shown.iter().enumerate() {
+        if i >= area.height as usize {
+            break;
+        }
+        let row_area = Rect::new(area.x, area.y.saturating_add(i as u16), area.width, 1);
+        let paragraph = Paragraph::new(Line::from(Span::raw(text.as_str())))
+            .style(Style::new().fg(Color::White));
+        frame.render_widget(paragraph, row_area);
+    }
     if st.focus != Focus::Input {
         return;
     }
@@ -316,25 +513,11 @@ fn render_input(frame: &mut Frame, st: &UiState, area: ratatui::layout::Rect) {
         .x
         .saturating_add(shown_cursor as u16)
         .min(area.x.saturating_add(area.width.saturating_sub(1)));
-    frame.set_cursor_position((col, area.y));
-}
-
-/// 输入行水平窗口：内容不超宽原样返回；超宽时滚动窗口使光标保持可见。
-/// 返回（可见文本，光标在可见文本中的显示列）。
-fn visible_window(content: &str, cursor_cell: usize, width: usize) -> (String, usize) {
-    let total = UnicodeWidthStr::width(content);
-    if total <= width || width == 0 {
-        return (content.to_string(), cursor_cell.min(total));
-    }
-    // 光标贴右缘前留 1 列：需要窗口起点 = cursor+1-width，再收尾 clamp 到 total-width。
-    let start = cursor_cell
-        .saturating_add(1)
-        .saturating_sub(width)
-        .min(total.saturating_sub(width));
-    (
-        cell_window(content, start, width),
-        cursor_cell.saturating_sub(start),
-    )
+    let row = area
+        .y
+        .saturating_add(disp_row as u16)
+        .min(area.y.saturating_add(area.height.saturating_sub(1)));
+    frame.set_cursor_position((col, row));
 }
 
 /// 从显示列 `start` 起取 `cells` 列的可见串；宽字符整体跳/取，不切半字。
@@ -400,6 +583,57 @@ mod tests {
     }
 
     #[test]
+    fn thinking_collapsed_shows_single_fold_row() {
+        let mut st = UiState::new();
+        st.stream_delta(LineKind::Thinking, "第一行思考\n第二行很长很长的思考内容");
+        let rows = body_rows(&st, 60);
+        assert_eq!(rows.len(), 1, "折叠后仅一行预览");
+        assert!(rows[0].line.to_string().contains('…'));
+    }
+
+    #[test]
+    fn thinking_expanded_wraps_multirow() {
+        let mut st = UiState::new();
+        st.stream_delta(LineKind::Thinking, "第一行思考\n第二行思考");
+        st.toggle_thinking();
+        let rows = body_rows(&st, 60);
+        assert!(rows.len() >= 2, "展开后至少两行");
+    }
+
+    #[test]
+    fn search_marks_and_anchors_rows() {
+        let mut st = UiState::new();
+        st.push_line(LineKind::Assistant, "hello world");
+        st.push_line(LineKind::User, "bye");
+        st.start_search("hello");
+        let rows = body_rows(&st, 60);
+        // 锚定行第一物理行以黄底反色突出
+        assert!(
+            rows[0]
+                .line
+                .spans
+                .iter()
+                .any(|s| s.style.bg == Some(Color::Yellow))
+        );
+        // 非命中行不带黄色前景
+        assert!(
+            rows[1]
+                .line
+                .spans
+                .iter()
+                .all(|s| s.style.fg != Some(Color::Yellow))
+        );
+    }
+
+    #[test]
+    fn tool_rows_carry_tool_kind_style() {
+        let mut st = UiState::new();
+        st.push_line(LineKind::Tool, "exec ✓");
+        let rows = body_rows(&st, 60);
+        assert!(rows[0].line.to_string().contains("[工具] exec ✓"));
+    }
+
+    #[test]
     fn status_line_lists_overrides() {
         let info = StatusInfo {
             api_base: "http://127.0.0.1:8080".into(),
@@ -408,6 +642,9 @@ mod tests {
             mode: Some("plan".into()),
             running: false,
             cancel_sent: false,
+            view_offset: 0,
+            search_term: None,
+            search_total: 0,
         };
         let s = status_text(&info, Some("c1"), 200);
         assert!(s.contains("serve http://127.0.0.1:8080"));
@@ -427,6 +664,9 @@ mod tests {
             mode: None,
             running: true,
             cancel_sent: true,
+            view_offset: 0,
+            search_term: None,
+            search_total: 0,
         };
         assert!(status_text(&info, None, 80).contains("…取消中"));
     }
@@ -440,10 +680,31 @@ mod tests {
             mode: None,
             running: false,
             cancel_sent: false,
+            view_offset: 0,
+            search_term: None,
+            search_total: 0,
         };
         let s = status_text(&info, None, 200);
         assert!(s.contains("model deepseek"));
         assert!(!s.contains("mode "));
+    }
+
+    #[test]
+    fn status_shows_search_and_view_back() {
+        let info = StatusInfo {
+            api_base: "http://x".into(),
+            model: None,
+            role: None,
+            mode: None,
+            running: false,
+            cancel_sent: false,
+            view_offset: 12,
+            search_term: Some("grep".into()),
+            search_total: 2,
+        };
+        let s = status_text(&info, None, 200);
+        assert!(s.contains("find 「grep」"));
+        assert!(s.contains("↑12"));
     }
 
     fn row(id: &str, title: &str, conv: Option<&str>) -> SessionListItem {
@@ -503,23 +764,26 @@ mod tests {
 
     #[test]
     fn visible_window_keeps_fit_content() {
-        let (s, c) = visible_window("ab", 2, 10);
-        assert_eq!(s, "ab");
+        let (start, c) = horizontal_window("ab", 2, 10);
+        assert_eq!(start, 0);
         assert_eq!(c, 2);
+        assert_eq!(cell_window("ab", start, 10), "ab");
     }
 
     #[test]
     fn visible_window_scrolls_to_cursor_on_right() {
-        let (s, c) = visible_window("abcdefgh", 8, 4);
-        assert_eq!(s, "efgh");
+        let (start, c) = horizontal_window("abcdefgh", 8, 4);
+        assert_eq!(cell_window("abcdefgh", start, 4), "efgh");
         assert_eq!(c, 4);
     }
 
     #[test]
     fn visible_window_wide_char_cursor() {
-        // "crabmate> " =10 列 + 你好 =4 列，总宽 14；光标在末尾(14)，可视宽 6 → 滚到光标附近。
-        let (s, c) = visible_window("crabmate> 你好", 14, 6);
-        assert!(s.contains('好'));
+        // 光标在末尾(14)，可视宽 6 → 滚到光标附近。
+        let content = "crabmate> 你好";
+        let (start, c) = horizontal_window(content, 14, 6);
+        let shown = cell_window(content, start, 6);
+        assert!(shown.contains('好'));
         assert_eq!(c, 6);
     }
 
@@ -546,5 +810,18 @@ mod tests {
         let (shown, cursor) = input_window(&st, 6);
         assert!(shown.starts_with('你'));
         assert_eq!(cursor, 0);
+    }
+
+    #[test]
+    fn composer_window_multiline_follows_cursor_line() {
+        let mut st = UiState::new();
+        for ch in "a\nb\nc\nd\ne".chars() {
+            st.insert_char(ch);
+        }
+        let (shown, disp_row, _, _) = composer_window(&st, 40, 4);
+        assert_eq!(shown.len(), 4);
+        // 光标在末行 e（行 4），窗口顶移 2，末行可见
+        assert_eq!(shown.last().map(String::as_str), Some("e"));
+        assert_eq!(disp_row, 3);
     }
 }
