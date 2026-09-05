@@ -37,14 +37,16 @@ use ratatui::Terminal;
 use ratatui::backend::{Backend, CrosstermBackend};
 
 use crabmate_tui_core::{
-    ApprovalDecision, ChatStreamOptions, ChatStreamOutcome, ClientLlmFields, ServeClient,
-    StreamCancel, new_approval_session_id,
+    ApprovalDecision, ChatStreamOptions, ChatStreamOutcome, ServeClient, StreamCancel,
+    new_approval_session_id,
 };
 
 use self::approve::{decision_for_key, decision_summary};
 use self::controls::{Control, clear_word, parse_control, set_mode_field, set_override_field};
 use self::render::{BodyRow, SIDEBAR_MIN_WIDTH, StatusInfo, build_body_rows, chat_body_width};
-use self::settings::{PersistedSettings, merge_turn, normalize};
+use self::settings::{
+    PersistedSettings, build_turn_client_llm, merge_turn, normalize, turn_tool_cache_secs,
+};
 use self::settings_panel::{SettingsPanel, is_f2_key};
 use self::worker::{TurnRequest, UiEvent, WorkerJob, spawn_key_reader, spawn_worker};
 use super::SessionPrefs;
@@ -695,32 +697,23 @@ impl TuiApp<'_> {
             &self.overrides.session_mode,
             stored.and_then(|p| p.session_mode.as_deref()),
         );
-        let api_key: Option<String> = self
-            .overrides
-            .api_key
-            .as_deref()
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .map(str::to_string);
-        // 思考模式只读持久层（无本地 override；仅 on/off 发送，server/空 = 跟随 serve）。
-        let thinking = stored
-            .and_then(|p| p.thinking.as_deref())
-            .map(str::trim)
-            .filter(|m| *m == "on" || *m == "off")
-            .map(str::to_string);
-        let client_llm =
-            (api_key.is_some() || model.is_some() || api_base.is_some() || thinking.is_some())
-                .then_some(ClientLlmFields {
-                    api_key,
-                    model,
-                    api_base,
-                    llm_thinking_mode: thinking,
-                });
+        // 随轮 client_llm：override（model/api_base/api_key）＞ user-data（thinking/context）；
+        // 装配纯逻辑见 `settings::build_turn_client_llm`（空白不发送，回落 serve 默认）。
+        let client_llm = build_turn_client_llm(
+            model.as_deref(),
+            api_base.as_deref(),
+            self.overrides.api_key.as_deref(),
+            stored.and_then(|p| p.thinking.as_deref()),
+            stored.and_then(|p| p.context_tokens.as_deref()),
+        );
         // 温度（顶层 body.temperature，对齐 Desktop）：persisted 存原文，parse 有效才发送。
         let temperature = stored
             .and_then(|p| p.temperature.as_deref())
             .and_then(|s| s.trim().parse::<f64>().ok())
             .filter(|t| t.is_finite() && (0.0..=2.0).contains(t));
+        // 只读工具缓存禁用（prefs disable=true）时顶层发 `readonly_tool_ttl_cache_secs: 0`。
+        let readonly_tool_ttl_cache_secs =
+            turn_tool_cache_secs(stored.and_then(|p| p.tool_cache_disabled));
         let opts = ChatStreamOptions {
             message: message.to_string(),
             approval_session_id: new_approval_session_id(),
@@ -729,6 +722,7 @@ impl TuiApp<'_> {
             agent_role: role,
             session_mode,
             temperature,
+            readonly_tool_ttl_cache_secs,
             stream_resume: None,
         };
         // 新回合：清上轮工具行映射并回到最新视图（搜索词保留、锚点释放）。

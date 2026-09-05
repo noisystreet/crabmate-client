@@ -74,7 +74,7 @@ impl TuiApp<'_> {
                 self.panel = None;
             }
             PanelEffect::Save { llm, prefs, secret } => {
-                self.submit_settings_save(llm, prefs, secret)
+                self.submit_settings_save(*llm, *prefs, secret)
             }
         }
     }
@@ -277,6 +277,9 @@ fn llm_saved_names(save: &LlmSave) -> Vec<&'static str> {
     if save.temperature.is_write() {
         v.push(field_label(FieldId::Temperature));
     }
+    if save.context_tokens.is_write() {
+        v.push(field_label(FieldId::ContextTokens));
+    }
     if save.thinking.is_write() {
         v.push(field_label(FieldId::ThinkingMode));
     }
@@ -290,6 +293,9 @@ fn prefs_saved_names(save: &PrefsSave) -> Vec<&'static str> {
     }
     if save.session_mode.is_write() {
         v.push(field_label(FieldId::SessionMode));
+    }
+    if save.tool_cache.is_write() {
+        v.push(field_label(FieldId::ToolCache));
     }
     v
 }

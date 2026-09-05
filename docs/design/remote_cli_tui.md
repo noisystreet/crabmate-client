@@ -88,7 +88,7 @@ crates/
 | **P1** | `crabmate-tui`：`chat` 单轮 + Bearer + `/chat/stream` 文本输出 | 对本地 `serve` 跑通一轮；CI 可选 smoke |
 | **P2** | 交互 `repl`（reedline 或最小行编辑）+ 审批 TTY + 会话 id 续聊 | 非白名单命令可审批；Ctrl+C 干净退出 |
 | **P3** | 工作区/会话斜杠子集与 WASM 设置对齐的常用操作 | `/workspace`、列会话等 |
-| **P4** | 实验性 `tui`（ratatui）：流式 transcript + 状态行 + 左栏会话 + 多行底栏输入（**M1 已落地**）；左栏会话 + 状态行联动（**M2 已落地**）；审批浮层 / thinking 折叠 / 工具行摘要 / 滚动搜索 / 多行输入（**M3 已落地**）；工作区目录树浏览（**M4 已落地**：右栏仿 Desktop 默认显示，未设置时 p 从项目池选择）；设置面板（**W1+ 已落地**：`/settings` / F2，模型名 / API Base / 温度 / 思考模式 / Agent role / 会话模式三层显示并合并保存到 serve user-data；API 密钥写本机钥匙串，见 [tui_settings_panel.md](./tui_settings_panel.md)） | TTY 全屏可用；非白名单命令浮层审批（Esc=拒绝）；长对话可滚动；多行可编辑发送；窄终端（<120 列）自动隐藏左右栏；Ctrl+W 聚焦右栏工作区目录树（↑↓ 选择 · Enter/→ 展开 · ← 收起/回父 · r 刷新 · w 回会话）；工作区未设置时提示并可 p 从服务端项目池切换 |
+| **P4** | 实验性 `tui`（ratatui）：流式 transcript + 状态行 + 左栏会话 + 多行底栏输入（**M1 已落地**）；左栏会话 + 状态行联动（**M2 已落地**）；审批浮层 / thinking 折叠 / 工具行摘要 / 滚动搜索 / 多行输入（**M3 已落地**）；工作区目录树浏览（**M4 已落地**：右栏仿 Desktop 默认显示，未设置时 p 从项目池选择）；设置面板（**W1+W2 已全部落地**：`/settings` / F2，模型名 / API Base（网关预设下拉 + 自定义 URL）/ 温度 / 上下文 tokens / 思考模式 / Agent role / 会话模式 / 只读工具缓存开关，三层显示并合并保存到 serve user-data；API 密钥写本机钥匙串，见 [tui_settings_panel.md](./tui_settings_panel.md)） | TTY 全屏可用；非白名单命令浮层审批（Esc=拒绝）；长对话可滚动；多行可编辑发送；窄终端（<120 列）自动隐藏左右栏；Ctrl+W 聚焦右栏工作区目录树（↑↓ 选择 · Enter/→ 展开 · ← 收起/回父 · r 刷新 · w 回会话）；工作区未设置时提示并可 p 从服务端项目池切换 |
 | **P5** | 文档 / `.deb` 或 cargo 安装说明；Server 侧标注同进程 CLI「过渡 / deprecate 窗口」 | README 双语文案同步；Client `make tui-release` 产出仅二进制的 `crabmate-tui_*.deb`（无图标、无配置） |
 
 **建议开工顺序**：P1 → P2；P4 可与 P3 并行但不要阻塞 P2。
@@ -114,7 +114,7 @@ crates/
 | 策略 | **B：远程 CLI/TUI 进 Client 仓** |
 | 同进程 Agent CLI | **不**迁入；Server 可暂留 |
 | 执行权威 | 仅 `serve` |
-| 下一步 | P4 持续收尾：M4 工作区目录树浏览已落地、设置面板 W1+ 已落地（温度/思考模式/API 密钥随设置面板已合入；剩 W2：上下文 tokens / 工具缓存开关 / 网关预设，见 `tui_settings_panel.md` §7）；文档/发版向 P5（README 双语、`.deb` 安装说明；Server 侧标注过渡窗口） |
+| 下一步 | P4 持续收尾：M4 工作区目录树浏览已落地、设置面板 **W1+W2 已全部落地**（温度/思考模式/API 密钥、上下文 tokens / 只读工具缓存开关 / 网关预设，见 `tui_settings_panel.md` §7）；文档/发版向 P5（README 双语、`.deb` 安装说明；Server 侧标注过渡窗口） |
 
 ---
 
