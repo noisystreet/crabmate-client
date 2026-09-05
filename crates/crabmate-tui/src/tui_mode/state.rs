@@ -132,7 +132,7 @@ pub struct UiState {
     pub ws_rows: Vec<WsRow>,
     /// 树光标（`ws_rows` 下标，超界时渲染前收敛）。
     pub ws_cursor: usize,
-    /// 项目池「选择工作区」子视图（`Some` 时工作区列改列候选项目）。
+    /// 项目池「选择/切换工作区」子视图（`Some` 时工作区列改列候选项目）。
     pub ws_pick: Option<WsPickState>,
     /// 审批浮层（回合暂停等待决策）。
     pub approval: Option<ApprovalOverlay>,
