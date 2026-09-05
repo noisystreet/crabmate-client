@@ -137,7 +137,8 @@ Full-screen `tui` (ratatui; shows a session sidebar on terminals ≥ 120 columns
 # Slashes: /model /mode /role /status /find /conv [new] /quit · /help lists everything
 #   (status bar shows serve defaults; local overrides are marked with `*`;
 #    switching sessions starts a fresh transcript)
-# /settings (or F2) opens a settings panel: edit model name / API Base / Agent role / session mode,
+# /settings (or F2) opens a settings panel: edit model name / API Base / temperature / thinking mode /
+#   Agent role / session mode and the model API key (stored in the local keyring, never on serve);
 #   S saves to the serve user-data (GET→merge→PUT, shared with Desktop/Web settings); saved values
 #   survive restarts and stay in the three-layer view (local override `*` > user-data > serve default)
 ```

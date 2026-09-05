@@ -136,9 +136,9 @@ crabmate-tui --api-base http://127.0.0.1:8080 repl
 # 斜杠：/model /mode /role /status /find /conv [new] /quit · /help 查看全部
 #   （状态行回退显示 serve 默认，本地 override 以 `*` 标记；
 #     切换会话后从空 transcript 开始新一轮）
-# /settings（或 F2）打开设置面板：可改模型名 / API Base / Agent role / 会话模式，
-#   S 保存到 serve user-data（先 GET 合并再 PUT，与 Desktop/Web 设置同源共享）；保存后重启仍在，
-#   面板按三层显示（本进程 override `*` ＞ user-data 已存值 ＞ serve 默认）
+# /settings（或 F2）打开设置面板：可改模型名 / API Base / 温度 / 思考模式 / Agent role / 会话模式
+#   与模型 API 密钥（只存本机钥匙串，不写 serve）；S 保存到 serve user-data（先 GET 合并再 PUT，
+#   与 Desktop/Web 设置同源共享）；保存后重启仍在，面板按三层显示（override `*` ＞ user-data ＞ serve 默认）
 ```
 
 ## 文档
