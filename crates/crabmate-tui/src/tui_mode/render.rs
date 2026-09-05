@@ -9,6 +9,7 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use super::md;
+use super::settings_panel::PanelContent;
 use super::state::{Focus, LineKind, UiState};
 use super::ws_sidebar::{sessions_content, sidebar_view, workspace_content};
 
@@ -390,8 +391,15 @@ fn paint_bg(frame: &mut Frame, rect: Rect, color: Color) {
 
 /// 渲染一帧。对齐 Desktop：整屏 = 顶栏(工作区) + 主体 + 底部状态栏；宽屏主体为
 /// 左会话列 | 聊天列 | 右工作区目录树（右栏默认显示），composer 只位于聊天列底部。
-/// `prepared` 为事件循环按（宽度/内容指纹/搜索）memo 好的 transcript 物理行。
-pub fn draw(frame: &mut Frame, st: &UiState, info: &StatusInfo, prepared: &[BodyRow]) {
+/// `prepared` 为事件循环按（宽度/内容指纹/搜索）memo 好的 transcript 物理行；
+/// `panel` 为设置面板内容（`Some` 时最后绘制全屏浮层并隐藏 composer 光标）。
+pub fn draw(
+    frame: &mut Frame,
+    st: &UiState,
+    info: &StatusInfo,
+    prepared: &[BodyRow],
+    panel: Option<&PanelContent>,
+) {
     let area = frame.area();
     let chunks = Layout::vertical([
         Constraint::Length(1),
@@ -423,9 +431,9 @@ pub fn draw(frame: &mut Frame, st: &UiState, info: &StatusInfo, prepared: &[Body
         let (rows, cursor, hint) = workspace_content(st, cols[2].width.saturating_sub(2) as usize);
         paint_bg(frame, cols[2], SIDEBAR_BG);
         render_pane(frame, cols[2], rows, cursor, hint);
-        render_chat_column(frame, st, cols[1], prepared);
+        render_chat_column(frame, st, cols[1], prepared, panel.is_none());
     } else {
-        render_chat_column(frame, st, body_area, prepared);
+        render_chat_column(frame, st, body_area, prepared, panel.is_none());
     }
 
     paint_bg(frame, status_area, STATUS_BG);
@@ -436,10 +444,21 @@ pub fn draw(frame: &mut Frame, st: &UiState, info: &StatusInfo, prepared: &[Body
     ))
     .style(Style::new().fg(STATUS_FG).add_modifier(Modifier::BOLD));
     frame.render_widget(status, status_area);
+
+    // 设置面板浮层：整屏覆盖（含顶栏/状态栏），最后绘制压住全部内容。
+    if let Some(content) = panel {
+        render_settings_overlay(frame, area, content);
+    }
 }
 
 /// 聊天列：上为主区消息（滚动 transcript），底部为 composer 输入区。
-fn render_chat_column(frame: &mut Frame, st: &UiState, area: Rect, prepared: &[BodyRow]) {
+fn render_chat_column(
+    frame: &mut Frame,
+    st: &UiState,
+    area: Rect,
+    prepared: &[BodyRow],
+    cursor_allowed: bool,
+) {
     let rows = composer_rows(st).min(area.height);
     let parts = Layout::vertical([Constraint::Min(1), Constraint::Length(rows)]).split(area);
     let body_area = parts[0];
@@ -447,7 +466,7 @@ fn render_chat_column(frame: &mut Frame, st: &UiState, area: Rect, prepared: &[B
     if st.approval.is_some() {
         render_approval_overlay(frame, st, body_area);
     }
-    render_input(frame, st, parts[1]);
+    render_input(frame, st, parts[1], cursor_allowed);
 }
 
 /// composer 高度：随输入行数增长，最多 `MAX_COMPOSER_ROWS`（单行恒为 1）。
@@ -582,6 +601,40 @@ fn render_approval_overlay(frame: &mut Frame, st: &UiState, area: Rect) {
     frame.render_widget(Paragraph::new(lines).block(block), rect);
 }
 
+/// 设置面板浮层：整屏 Clear + 独立色块 + 边框块（模板同审批浮层），
+/// 内容行由 [`super::settings_panel`] 构建（已按内宽截断），编辑时给出硬件光标位。
+fn render_settings_overlay(frame: &mut Frame, area: Rect, content: &PanelContent) {
+    let bg = Color::Indexed(234);
+    frame.render_widget(Clear, area);
+    paint_bg(frame, area, bg);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::new().fg(Color::Yellow))
+        .title(Span::styled(
+            " 设置（模型 / 会话） ",
+            Style::new().fg(Color::Yellow),
+        ));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    if inner.width == 0 || inner.height == 0 {
+        return;
+    }
+    let shown: Vec<Line<'static>> = content
+        .lines
+        .iter()
+        .take(inner.height as usize)
+        .cloned()
+        .collect();
+    frame.render_widget(Paragraph::new(shown), inner);
+    // 文本编辑光标：内容行下标 + cell 列（仅在浮层内可见区域落位）。
+    if let Some((row, col)) = content.cursor
+        && (row as u16) < inner.height
+        && (col as u16) < inner.width
+    {
+        frame.set_cursor_position((inner.x + col as u16, inner.y + row as u16));
+    }
+}
+
 /// composer 可视窗口：返回（可视各行、光标所在显示行、光标显示列、水平滚动起点）。
 /// 仅显示光标附近的行；宽行按光标做水平滚动（与旧单行行为一致）。
 fn composer_window(
@@ -611,8 +664,8 @@ fn composer_window(
     (shown, disp_row, shown_cursor, hstart)
 }
 
-/// 输入行水平窗口起点与光标在可见文本中的显示列。
-fn horizontal_window(content: &str, cursor_cell: usize, width: usize) -> (usize, usize) {
+/// 输入行水平窗口起点与光标在可见文本中的显示列（设置面板文本编辑复用）。
+pub(super) fn horizontal_window(content: &str, cursor_cell: usize, width: usize) -> (usize, usize) {
     let total = UnicodeWidthStr::width(content);
     if total <= width || width == 0 {
         return (0, cursor_cell.min(total));
@@ -626,7 +679,7 @@ fn horizontal_window(content: &str, cursor_cell: usize, width: usize) -> (usize,
 }
 
 /// 从显示列 `start` 起取 `cells` 列的可见串；宽字符整体跳/取，不切半字。
-fn cell_window(text: &str, start: usize, cells: usize) -> String {
+pub(super) fn cell_window(text: &str, start: usize, cells: usize) -> String {
     let mut out = String::new();
     let mut skipped = 0usize;
     let mut taken = 0usize;
@@ -645,7 +698,7 @@ fn cell_window(text: &str, start: usize, cells: usize) -> String {
     out
 }
 
-fn render_input(frame: &mut Frame, st: &UiState, area: Rect) {
+fn render_input(frame: &mut Frame, st: &UiState, area: Rect, cursor_allowed: bool) {
     if area.width <= 1 || area.height == 0 {
         return;
     }
@@ -667,7 +720,8 @@ fn render_input(frame: &mut Frame, st: &UiState, area: Rect) {
             .style(Style::new().fg(Color::White));
         frame.render_widget(paragraph, row_area);
     }
-    if st.focus != Focus::Input {
+    // 全屏浮层（设置面板）打开时不需要 composer 硬件光标，避免光标漏到浮层外。
+    if st.focus != Focus::Input || !cursor_allowed {
         return;
     }
     let col = area

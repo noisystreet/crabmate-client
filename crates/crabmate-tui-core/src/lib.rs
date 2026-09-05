@@ -11,6 +11,7 @@ mod error;
 mod json_api;
 mod sessions;
 mod url;
+mod user_data;
 mod workspace;
 
 pub use approval::{
@@ -28,6 +29,10 @@ pub use sessions::{
     SessionListItem, WebSessionsList, conversation_id_for_resume, fetch_web_sessions,
 };
 pub use url::{api_url, normalize_api_base};
+pub use user_data::{
+    LlmEndpointOverrideDto, LlmOverridesDto, UserPrefsDto, fetch_llm_overrides,
+    fetch_user_data_prefs, put_llm_overrides, put_user_data_prefs,
+};
 pub use workspace::{
     WorkspaceDirData, WorkspaceDirEntry, WorkspaceInfo, WorkspaceProjectsData, fetch_workspace,
     fetch_workspace_dir, fetch_workspace_projects, set_workspace, switch_workspace_project,
