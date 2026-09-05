@@ -5,7 +5,7 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use super::state::{Focus, LineKind, UiState};
@@ -404,6 +404,9 @@ fn render_approval_overlay(frame: &mut Frame, st: &UiState, area: Rect) {
         .y
         .saturating_add(area.height.saturating_sub(OVERLAY_HEIGHT));
     let rect = Rect::new(x, y, width, OVERLAY_HEIGHT);
+    // 先清空矩形内字形，再整体铺底色：浮层必须是独立色块，
+    // 不能与底下聊天区残留文本/上一帧内容视觉重叠。
+    frame.render_widget(Clear, rect);
     paint_bg(frame, rect, Color::Indexed(236));
     let block = Block::default()
         .borders(Borders::ALL)
