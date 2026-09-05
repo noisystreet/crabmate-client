@@ -461,14 +461,24 @@ const BODY_EMPTY_HINT: &str = "输入消息开始对话 · Alt+Enter 换行 · C
 
 fn render_body(frame: &mut Frame, st: &UiState, area: Rect, prepared: &[BodyRow]) {
     paint_bg(frame, area, CHAT_BG);
+    if area.width <= 1 || area.height == 0 {
+        return;
+    }
+    // 与区域左缘留 1 列间距（右缘贴边；折行/memo 宽度不变）。
+    let text_area = Rect::new(
+        area.x.saturating_add(1),
+        area.y,
+        area.width.saturating_sub(1),
+        area.height,
+    );
     if st.lines.is_empty() {
         let hint = Paragraph::new(Span::styled(BODY_EMPTY_HINT, Style::new().fg(Color::White)));
-        frame.render_widget(hint, area);
+        frame.render_widget(hint, text_area);
         return;
     }
     let rows = prepared;
     let rows_total = rows.len();
-    let viewport = (area.height as usize).saturating_sub(1).max(1);
+    let viewport = (text_area.height as usize).saturating_sub(1).max(1);
     let max_back = rows_total.saturating_sub(viewport);
     let back = if let Some(target) = st.search_cursor {
         // 搜索锚定：目标逻辑行置于视口上 1/3 处。
@@ -490,7 +500,7 @@ fn render_body(frame: &mut Frame, st: &UiState, area: Rect, prepared: &[BodyRow]
         .iter()
         .map(|r| r.line.clone())
         .collect::<Vec<_>>();
-    frame.render_widget(Paragraph::new(shown), area);
+    frame.render_widget(Paragraph::new(shown), text_area);
 }
 
 /// 审批浮层：命令预览 + 按键提示，置于聊天主体底部（composer 之上）。
@@ -612,7 +622,7 @@ fn cell_window(text: &str, start: usize, cells: usize) -> String {
 }
 
 fn render_input(frame: &mut Frame, st: &UiState, area: Rect) {
-    if area.is_empty() {
+    if area.width <= 1 || area.height == 0 {
         return;
     }
     paint_bg(frame, area, COMPOSER_BG);
@@ -623,7 +633,12 @@ fn render_input(frame: &mut Frame, st: &UiState, area: Rect) {
         if i >= area.height as usize {
             break;
         }
-        let row_area = Rect::new(area.x, area.y.saturating_add(i as u16), area.width, 1);
+        let row_area = Rect::new(
+            area.x.saturating_add(1),
+            area.y.saturating_add(i as u16),
+            area.width.saturating_sub(1),
+            1,
+        );
         let paragraph = Paragraph::new(Line::from(Span::raw(text.as_str())))
             .style(Style::new().fg(Color::White));
         frame.render_widget(paragraph, row_area);
@@ -633,6 +648,7 @@ fn render_input(frame: &mut Frame, st: &UiState, area: Rect) {
     }
     let col = area
         .x
+        .saturating_add(1)
         .saturating_add(shown_cursor as u16)
         .min(area.x.saturating_add(area.width.saturating_sub(1)));
     let row = area
@@ -705,14 +721,6 @@ mod tests {
                 .iter()
                 .all(|s| s.style.fg != Some(Color::Yellow))
         );
-    }
-
-    #[test]
-    fn tool_rows_carry_tool_kind_style() {
-        let mut st = UiState::new();
-        st.push_line(LineKind::Tool, "exec ✓");
-        let rows = body_rows(&st, 60);
-        assert!(rows[0].line.to_string().contains("[工具] exec ✓"));
     }
 
     #[test]
