@@ -432,8 +432,12 @@ fn render_approval_overlay(frame: &mut Frame, st: &UiState, area: Rect) {
         Style::new().fg(Color::Gray),
     )));
     lines.push(Line::from(Span::styled(
-        "[Enter] 仅此一次  [a] 始终允许  [Esc/n] 拒绝",
+        "[Enter] 仅此一次  [a] 始终允许  [Esc/n] 拒绝  [Ctrl+C] 拒绝",
         Style::new().fg(Color::LightYellow),
+    )));
+    lines.push(Line::from(Span::styled(
+        "Ctrl+C 只拒绝本命令；回合继续，取消需再按一次 Ctrl+C",
+        Style::new().fg(Color::Gray),
     )));
     frame.render_widget(Paragraph::new(lines).block(block), rect);
 }

@@ -87,11 +87,13 @@ pub struct LogLine {
 }
 
 impl LogLine {
-    fn new(kind: LineKind, text: &str) -> Self {
+    /// `collapsed` 由调用方按全局 thinking 展开态传入（thinking 默认折叠，
+    /// 用户 Ctrl+E 展开后新建的 thinking 行也应保持展开）。
+    fn new(kind: LineKind, text: &str, collapsed: bool) -> Self {
         Self {
             kind,
             text: text.to_string(),
-            collapsed: kind == LineKind::Thinking,
+            collapsed,
         }
     }
 
@@ -153,7 +155,10 @@ impl UiState {
     }
 
     pub fn push_line(&mut self, kind: LineKind, text: &str) {
-        self.lines.push(LogLine::new(kind, text));
+        // thinking 默认折叠；但"全局展开"开启时新建的 thinking 行也应保持展开。
+        let collapsed = kind == LineKind::Thinking && !self.thinking_visible;
+        self.lines.push(LogLine::new(kind, text, collapsed));
+        self.refresh_search_meta();
     }
 
     /// 流式增量：若最后一条同类（Assistant/Thinking）则续接，否则开新行。
@@ -167,6 +172,7 @@ impl UiState {
         } else {
             self.push_line(kind, delta);
         }
+        self.refresh_search_meta();
     }
 
     // ── 输入缓冲（单行/多行统一） ─────────────────────────────
@@ -393,9 +399,11 @@ impl UiState {
             self.push_line(LineKind::Tool, display);
             return;
         }
-        self.lines.push(LogLine::new(LineKind::Tool, display));
+        self.lines
+            .push(LogLine::new(LineKind::Tool, display, false));
         self.tool_pending
             .insert(tool_call_id.to_string(), self.lines.len() - 1);
+        self.refresh_search_meta();
     }
 
     /// 工具结果：更新对应摘要行；找不到 start（如续流中段）则补一行收尾。
@@ -435,6 +443,7 @@ impl UiState {
                 }
             }
         }
+        self.refresh_search_meta();
     }
 
     /// 回合开始时清理上轮工具行映射。
@@ -483,6 +492,18 @@ impl UiState {
         (0..self.lines.len())
             .filter(|&i| self.log_matches(i, needle))
             .collect()
+    }
+
+    /// 内容变化后同步命中计数（仅搜索激活时扫描，开销与 transcript 长度线性）。
+    fn refresh_search_meta(&mut self) {
+        if self.search.is_none() {
+            self.search_total = 0;
+            return;
+        }
+        self.search_total = self.matches().len();
+        if self.search_total == 0 {
+            self.search_cursor = None;
+        }
     }
 
     /// 设置新搜索词并从首条命中跳转；返回命中数。
@@ -765,6 +786,29 @@ mod tests {
     }
 
     #[test]
+    fn new_thinking_rows_follow_global_expand_state() {
+        let mut s = UiState::new();
+        s.push_line(LineKind::User, "q");
+        // 先展开（此时还没有 thinking 行）
+        s.toggle_thinking();
+        // User 行之后新开的 thinking 块应保持展开
+        s.stream_delta(LineKind::Thinking, "思考a");
+        assert!(!s.lines.last().unwrap().collapsed);
+        // 同块续接仍展开
+        s.stream_delta(LineKind::Thinking, "思考b");
+        assert!(!s.lines.last().unwrap().collapsed);
+        // 跨 Tool 行后再次出现的 thinking 块也应展开
+        s.push_line(LineKind::Tool, "exec");
+        s.stream_delta(LineKind::Thinking, "思考c");
+        assert!(!s.lines.last().unwrap().collapsed);
+        // 折叠后新建的 thinking 块恢复默认折叠
+        s.toggle_thinking();
+        s.push_line(LineKind::System, "x");
+        s.stream_delta(LineKind::Thinking, "思考d");
+        assert!(s.lines.last().unwrap().collapsed);
+    }
+
+    #[test]
     fn tool_row_start_then_end_updates_in_place() {
         let mut s = UiState::new();
         s.tool_start("tc-9", "exec");
@@ -804,6 +848,26 @@ mod tests {
         s.push_line(LineKind::Assistant, "你好世界");
         assert_eq!(s.start_search("世界"), 1);
         assert_eq!(s.search_cursor, Some(1));
+    }
+
+    #[test]
+    fn search_total_refreshes_on_new_content() {
+        let mut s = UiState::new();
+        s.push_line(LineKind::User, "x");
+        assert_eq!(s.start_search("boom"), 0);
+        assert_eq!(s.search_total, 0);
+        // 流式新内容命中：状态行计数应立刻刷新（跳转仍需用户 /find）
+        s.stream_delta(LineKind::Assistant, "boom now");
+        assert_eq!(s.search_total, 1);
+        assert_eq!(s.search_cursor, None);
+        // 同块续接命中次数不变
+        s.stream_delta(LineKind::Assistant, " boom");
+        assert_eq!(s.search_total, 1);
+        // 工具行摘要更新为命中（原位文本变更也刷新）
+        s.push_line(LineKind::Tool, "exec");
+        assert_eq!(s.search_total, 1);
+        s.tool_end("tc-1", "exec", Some(true), Some("boom done"));
+        assert_eq!(s.search_total, 2);
     }
 
     #[test]
