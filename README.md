@@ -122,6 +122,8 @@ Full-screen `tui` (ratatui; shows a session sidebar on terminals ≥ 120 columns
   tui
 # Layout: status bar | session sidebar | streaming transcript | composer
 # Ctrl+C cancels the in-flight turn (twice force-quits; idle exits)
+#   while an approval overlay is open the first Ctrl+C only denies that command —
+#   the turn keeps running and a following Ctrl+C cancels it
 # Tab → session list (↑/↓ select · Enter use · n new · r refresh · Esc back)
 # Alt+Enter inserts a newline (multi-line compose); Enter / Ctrl+O send
 # PgUp / PgDn / Ctrl+Home / Ctrl+End scroll the transcript (↑/↓ when single-line input)

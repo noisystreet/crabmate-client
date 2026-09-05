@@ -247,6 +247,12 @@ fn is_ctrl_c(key: &KeyEvent) -> bool {
     key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL)
 }
 
+/// Ctrl+C / Ctrl+D（审批浮层里的"中断式拒绝"；回合取消需在浮层关闭后再按一次）。
+fn is_ctrl_abort(key: &KeyEvent) -> bool {
+    key.modifiers.contains(KeyModifiers::CONTROL)
+        && matches!(key.code, KeyCode::Char('c') | KeyCode::Char('d'))
+}
+
 fn is_ctrl_o(key: &KeyEvent) -> bool {
     key.code == KeyCode::Char('o') && key.modifiers.contains(KeyModifiers::CONTROL)
 }
@@ -431,6 +437,7 @@ impl TuiApp<'_> {
             "/find <词> 搜索并高亮 · /find（空参）跳下一处 · /find off 清除",
             "/conv list 刷新 · /conv use <id> 切换 · /conv new 新会话",
             "按键：Alt+Enter 换行 · Ctrl+E 思考展开/折叠 · PgUp/PgDn 翻页 · Ctrl+End 回底部",
+            "审批浮层：Enter=一次 · a=始终 · Esc/n=拒绝 · Ctrl+C 先拒绝、回合随后继续需再按取消",
         ] {
             self.st.push_line(LineKind::System, line);
         }
@@ -469,7 +476,8 @@ impl TuiApp<'_> {
         // 审批浮层优先：只认决策键，忽略其它输入（防多重审批叠栈）。
         if self.st.approval.is_some() {
             if let Some(decision) = decision_for_key(&key) {
-                self.answer_approval(decision);
+                let via_ctrl_abort = is_ctrl_abort(&key);
+                self.answer_approval(decision, via_ctrl_abort);
             }
             return;
         }
@@ -485,7 +493,8 @@ impl TuiApp<'_> {
     }
 
     /// 关闭审批浮层并把决策回传 SSE gate；写一条结果系统行。
-    fn answer_approval(&mut self, decision: ApprovalDecision) {
+    /// `via_ctrl_abort`：Ctrl+C/D 触发的拒绝不等于取消回合，提示用户还需再按一次。
+    fn answer_approval(&mut self, decision: ApprovalDecision, via_ctrl_abort: bool) {
         let Some(overlay) = self.st.approval.take() else {
             return;
         };
@@ -494,6 +503,12 @@ impl TuiApp<'_> {
         let summary = decision_summary(&decision);
         self.st
             .push_line(LineKind::System, &format!("{summary}命令审批：{preview}"));
+        if matches!(decision, ApprovalDecision::Deny) && via_ctrl_abort {
+            self.st.push_line(
+                LineKind::System,
+                "回合仍在跑：再按一次 Ctrl+C 可取消当前回合",
+            );
+        }
     }
 
     fn on_sidebar_key(&mut self, key: KeyEvent) {
