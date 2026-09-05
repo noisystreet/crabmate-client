@@ -8,18 +8,24 @@ use ratatui::text::{Line, Span};
 use unicode_width::UnicodeWidthStr;
 
 use super::SessionPrefs;
-use super::TuiApp;
 use super::render::{cell_window, horizontal_window, truncate_display};
 use super::serve_defaults::ServeDefaults;
 use super::settings::{
-    EffectiveView, FieldAction, Layer, LlmSave, PersistedSettings, PrefsSave, effective_value,
-    normalize_str, validate_api_base,
+    EffectiveView, FieldAction, Layer, LlmSave, PersistedSettings, PrefsSave, SESSION_MODES,
+    effective_value, normalize_str, validate_api_base,
 };
-use super::state::LineKind;
-use super::worker::WorkerJob;
 
-/// 会话模式编辑选项（`None` = 跟随 server，即清除存储键）。
-const MODE_OPTIONS: [Option<&'static str>; 4] = [None, Some("ask"), Some("plan"), Some("act")];
+/// 会话模式编辑选项长度 =「跟随 server」+ [`SESSION_MODES`]。
+const MODE_OPTIONS_LEN: usize = SESSION_MODES.len() + 1;
+
+/// 会话模式编辑选项（`None` = 跟随 server，即清除存储键）；取值以 [`SESSION_MODES`] 为单一来源。
+fn mode_options() -> [Option<&'static str>; MODE_OPTIONS_LEN] {
+    let mut out = [None; MODE_OPTIONS_LEN];
+    for (i, m) in SESSION_MODES.iter().copied().enumerate() {
+        out[i + 1] = Some(m);
+    }
+    out
+}
 /// 字段行标签列宽（cell；含标签与值之间间隔）。
 const LABEL_PAD: usize = 13;
 
@@ -220,6 +226,18 @@ impl SettingsPanel {
         !self.is_saving()
     }
 
+    /// 回合结束（`TurnDone`）：若是回合进行中打开的只读面板，转为可编辑并提示；
+    /// 已编辑过的面板不受影响。
+    pub(super) fn unlock_after_turn(&mut self) {
+        if self.read_only {
+            self.read_only = false;
+            self.set_note(
+                "回合已结束：面板已解锁（可继续编辑）".to_string(),
+                Color::LightGreen,
+            );
+        }
+    }
+
     /// 浏览态按键：↑↓ 移动行、Tab 切分区、Enter 编辑、S 保存、Esc/F2 关闭（脏先确认）。
     pub(super) fn handle_key(&mut self, key: &KeyEvent, ctx: &PanelCtx<'_>) -> PanelEffect {
         if self.editing.is_some() {
@@ -301,7 +319,7 @@ impl SettingsPanel {
     fn begin_edit(&mut self, ctx: &PanelCtx<'_>) {
         if self.read_only {
             self.set_note(
-                "回合进行中：设置只读（结束回合后重开可编辑）".to_string(),
+                "回合进行中：设置只读（回合结束后自动解锁）".to_string(),
                 Color::LightYellow,
             );
             return;
@@ -394,7 +412,7 @@ impl SettingsPanel {
         let Some(Editing::Mode { pick }) = self.editing.take() else {
             return;
         };
-        let value = MODE_OPTIONS[pick].map(str::to_string);
+        let value = mode_options()[pick].map(str::to_string);
         self.set_staged(FieldId::SessionMode, FieldAction::Write(value));
     }
 
@@ -436,7 +454,7 @@ impl SettingsPanel {
             Some(Editing::Mode { pick }) => {
                 if left {
                     *pick = pick.saturating_sub(1);
-                } else if *pick + 1 < MODE_OPTIONS.len() {
+                } else if *pick + 1 < mode_options().len() {
                     *pick += 1;
                 }
             }
@@ -465,14 +483,10 @@ impl SettingsPanel {
     }
 }
 
-/// 会话模式选项下标 → 值（`ask/plan/act`；其余（含 None）回 0 = 跟随 server）。
+/// 会话模式选项下标 → 值（按 [`SESSION_MODES`] 顺序；其余（含 None）回 0 = 跟随 server）。
 fn mode_index_of(v: Option<&str>) -> usize {
-    match v {
-        Some("ask") => 1,
-        Some("plan") => 2,
-        Some("act") => 3,
-        _ => 0,
-    }
+    v.and_then(|m| SESSION_MODES.iter().position(|x| *x == m))
+        .map_or(0, |i| i + 1)
 }
 
 /// 面板显示所需的三层上下文（override / 持久层 / serve 默认）。
@@ -710,7 +724,7 @@ fn footer_msg(panel: &SettingsPanel) -> (String, Color) {
 /// 会话模式 ←→ 循环的可视化预览。
 fn mode_cycle_text(pick: usize) -> (String, Color) {
     let mut text = String::from("会话模式：");
-    for (i, opt) in MODE_OPTIONS.iter().enumerate() {
+    for (i, opt) in mode_options().iter().enumerate() {
         if i == pick {
             text.push('▸');
         }
@@ -749,166 +763,8 @@ fn browse_msg(panel: &SettingsPanel) -> (String, Color) {
     )
 }
 
-// ── TuiApp 接线：开/关面板、保存提交与结果回写 ──────────────────────────
-
-impl TuiApp<'_> {
-    /// 打开设置面板（`/settings` / F2）。回合进行中打开为只读并提示。
-    pub(super) fn open_settings(&mut self) {
-        let read_only = self.st.running;
-        self.panel = Some(SettingsPanel::new(read_only));
-        if read_only {
-            self.st.push_line(
-                LineKind::System,
-                "回合进行中：设置面板为只读（可浏览；结束回合后重开可编辑）",
-            );
-        }
-    }
-
-    /// 面板打开期间的全部分发（在 approval / Ctrl+C 之后调用）。
-    pub(super) fn on_settings_key(&mut self, key: KeyEvent) {
-        let effect = {
-            let Some(panel) = self.panel.as_mut() else {
-                return;
-            };
-            let ctx = PanelCtx {
-                overrides: self.overrides,
-                persisted: self.persisted.as_ref(),
-                serve_defaults: self.st.serve_defaults.as_ref(),
-            };
-            panel.handle_key(&key, &ctx)
-        };
-        match effect {
-            PanelEffect::None => {}
-            PanelEffect::Close => {
-                self.panel = None;
-            }
-            PanelEffect::Save { llm, prefs } => self.submit_settings_save(llm, prefs),
-        }
-    }
-
-    /// 面板当前帧内容（供 render 画全屏浮层）；面板未打开返回 `None`。
-    pub(super) fn settings_content(&self, width: usize) -> Option<PanelContent> {
-        let panel = self.panel.as_ref()?;
-        let ctx = PanelCtx {
-            overrides: self.overrides,
-            persisted: self.persisted.as_ref(),
-            serve_defaults: self.st.serve_defaults.as_ref(),
-        };
-        Some(panel.content(&ctx, width))
-    }
-
-    /// 保存请求：staged 分组 → worker 任务（先 GET 再合并改自己管理的键再全量 PUT）。
-    fn submit_settings_save(&mut self, llm: LlmSave, prefs: PrefsSave) {
-        if llm.any() {
-            let _ = self.job_tx.send(WorkerJob::SaveLlm(llm));
-        }
-        if prefs.any() {
-            let _ = self.job_tx.send(WorkerJob::SavePrefs(prefs));
-        }
-        self.st
-            .push_line(LineKind::System, "正在保存设置到 serve user-data…");
-    }
-
-    /// llm-overrides 保存结果：成功 → 内存持久层同样更新 + 清本地 override + 面板落地。
-    pub(super) fn on_settings_saved_llm(&mut self, result: Result<LlmSave, String>) {
-        match result {
-            Ok(save) => {
-                self.persisted
-                    .get_or_insert_with(PersistedSettings::default)
-                    .apply_llm_saved(&save);
-                if save.model.is_write() {
-                    self.overrides.model = None;
-                }
-                if save.api_base.is_write() {
-                    self.overrides.api_base = None;
-                }
-                let names = llm_saved_names(&save);
-                self.st.push_line(
-                    LineKind::System,
-                    &format!(
-                        "设置已保存：{}（serve user-data；本进程 override 已清除）",
-                        names.join("、")
-                    ),
-                );
-                if let Some(panel) = self.panel.as_mut() {
-                    panel.save_group_result(SaveGroup::Llm, true);
-                    panel.set_note("已保存到 serve user-data".to_string(), Color::LightGreen);
-                }
-            }
-            Err(e) => {
-                self.st.push_line(
-                    LineKind::System,
-                    &format!("保存模型设置失败：{e}（面板保留改动，可按 S 重试）"),
-                );
-                if let Some(panel) = self.panel.as_mut() {
-                    panel.save_group_result(SaveGroup::Llm, false);
-                    panel.set_note("保存失败：改动保留，按 S 重试".to_string(), Color::LightRed);
-                }
-            }
-        }
-    }
-
-    /// prefs 保存结果（同 llm 侧语义）。
-    pub(super) fn on_settings_saved_prefs(&mut self, result: Result<PrefsSave, String>) {
-        match result {
-            Ok(save) => {
-                self.persisted
-                    .get_or_insert_with(PersistedSettings::default)
-                    .apply_prefs_saved(&save);
-                if save.role.is_write() {
-                    self.overrides.agent_role = None;
-                }
-                if save.session_mode.is_write() {
-                    self.overrides.session_mode = None;
-                }
-                let names = prefs_saved_names(&save);
-                self.st.push_line(
-                    LineKind::System,
-                    &format!(
-                        "设置已保存：{}（serve user-data；本进程 override 已清除）",
-                        names.join("、")
-                    ),
-                );
-                if let Some(panel) = self.panel.as_mut() {
-                    panel.save_group_result(SaveGroup::Prefs, true);
-                    panel.set_note("已保存到 serve user-data".to_string(), Color::LightGreen);
-                }
-            }
-            Err(e) => {
-                self.st.push_line(
-                    LineKind::System,
-                    &format!("保存会话设置失败：{e}（面板保留改动，可按 S 重试）"),
-                );
-                if let Some(panel) = self.panel.as_mut() {
-                    panel.save_group_result(SaveGroup::Prefs, false);
-                    panel.set_note("保存失败：改动保留，按 S 重试".to_string(), Color::LightRed);
-                }
-            }
-        }
-    }
-}
-
-fn llm_saved_names(save: &LlmSave) -> Vec<&'static str> {
-    let mut v = Vec::new();
-    if save.model.is_write() {
-        v.push(field_label(FieldId::Model));
-    }
-    if save.api_base.is_write() {
-        v.push(field_label(FieldId::ApiBase));
-    }
-    v
-}
-
-fn prefs_saved_names(save: &PrefsSave) -> Vec<&'static str> {
-    let mut v = Vec::new();
-    if save.role.is_write() {
-        v.push(field_label(FieldId::Role));
-    }
-    if save.session_mode.is_write() {
-        v.push(field_label(FieldId::SessionMode));
-    }
-    v
-}
+#[path = "settings_app.rs"]
+mod app;
 
 #[cfg(test)]
 #[path = "settings_panel_tests.rs"]

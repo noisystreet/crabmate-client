@@ -578,6 +578,10 @@ impl TuiApp<'_> {
         self.st.running = false;
         self.st.cancel_sent = false;
         self.cancel = None;
+        // 只读的设置面板随回合结束自动解锁（保留面板，不需重开）。
+        if let Some(panel) = self.panel.as_mut() {
+            panel.unlock_after_turn();
+        }
         if let Some(cid) = outcome.conversation_id {
             self.st.conversation_id = Some(cid);
         }
@@ -652,15 +656,7 @@ impl TuiApp<'_> {
             },
             UiEvent::WsProjects(result) => self.st.ws_pick_projects(result),
             UiEvent::WsProjectSwitch(result) => self.on_ws_project_switch(result),
-            UiEvent::UserData(result) => match result {
-                Ok(persisted) => self.persisted = Some(persisted),
-                Err(e) => {
-                    self.st.push_line(
-                        LineKind::System,
-                        &format!("拉取 user-data 设置失败：{e}（回退 override 与 serve 默认）"),
-                    );
-                }
-            },
+            UiEvent::UserData(result) => self.on_user_data(result),
             UiEvent::SavedLlm(result) => self.on_settings_saved_llm(result),
             UiEvent::SavedPrefs(result) => self.on_settings_saved_prefs(result),
         }

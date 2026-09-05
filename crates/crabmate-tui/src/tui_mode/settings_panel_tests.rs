@@ -318,3 +318,25 @@ fn panel_footer_lines_contain_key_hints() {
     assert!(text.iter().any(|l| l.contains("[S] 保存")));
     assert!(text.iter().any(|l| l.contains("[Tab] 分区")));
 }
+
+#[test]
+fn turn_done_unlocks_read_only_panel() {
+    let o = overrides(None, None, None, None);
+    let c = ctx(&o, None);
+    let mut p = SettingsPanel::new(true);
+    assert!(matches!(
+        p.handle_key(&key(KeyCode::Enter), &c),
+        PanelEffect::None
+    ));
+    assert!(p.editing.is_none(), "只读不能编辑");
+    p.unlock_after_turn();
+    assert!(matches!(
+        p.handle_key(&key(KeyCode::Enter), &c),
+        PanelEffect::None
+    ));
+    assert!(p.editing.is_some(), "解锁后可进入编辑");
+    // 已可编辑的面板解锁后不覆盖既有提示。
+    let mut p = SettingsPanel::new(false);
+    p.unlock_after_turn();
+    assert!(p.note.is_none(), "非只读面板解锁不应写提示");
+}
