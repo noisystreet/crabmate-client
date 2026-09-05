@@ -2,6 +2,8 @@
 //!
 //! 拆到独立模块以压住 `mod.rs` 行数/CCN 门禁；`apply_control` 仍在事件循环层。
 
+use super::settings::SESSION_MODES;
+
 /// 控制斜杠（本地处理，不发给模型）。`/` 开头的未知命令视为普通消息。
 pub enum Control {
     Quit,
@@ -48,7 +50,7 @@ pub fn set_mode_field(slot: &mut Option<String>, arg: Option<String>) -> String 
             *slot = None;
             "mode override cleared".to_string()
         }
-        Some(v) if matches!(v.as_str(), "ask" | "plan" | "act") => {
+        Some(v) if SESSION_MODES.contains(&v.as_str()) => {
             *slot = Some(v.clone());
             format!("mode override: {v}")
         }

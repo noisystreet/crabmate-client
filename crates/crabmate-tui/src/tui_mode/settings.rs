@@ -7,8 +7,7 @@
 
 use crabmate_tui_core::{LlmOverridesDto, UserPrefsDto};
 
-/// 会话模式枚举的合法取值（与 `/mode` 斜杠一致；单测与斜杠解析共用）。
-#[cfg(test)]
+/// 会话模式枚举的合法取值（与 `/mode` 斜杠一致；面板枚举与校验共用，避免漂移）。
 pub const SESSION_MODES: [&str; 3] = ["ask", "plan", "act"];
 
 /// 一个键的保存动作（W1 只管理 4 个键：model / api_base / cm_role / session_mode）。
@@ -91,14 +90,16 @@ pub struct PersistedSettings {
 }
 
 impl PersistedSettings {
-    /// 从 user-data 快照（prefs + llm-overrides）合成持久层；空白视为未设置。
+    /// 从 user-data 快照（prefs + llm-overrides）合成持久层；空白视为未设置，
+    /// 非法会话模式值（旧文件遗留）丢弃并回落 serve 默认。
     #[must_use]
     pub fn from_snapshot(prefs: &UserPrefsDto, llm: &LlmOverridesDto) -> Self {
         Self {
             model: normalize(&llm.client_llm.model),
             api_base: normalize(&llm.client_llm.api_base),
             role: normalize(&prefs.cm_role),
-            session_mode: normalize(&prefs.session_mode),
+            session_mode: normalize(&prefs.session_mode)
+                .filter(|m| is_valid_session_mode(m.as_str())),
         }
     }
 
@@ -153,8 +154,7 @@ pub fn validate_api_base(v: &str) -> bool {
     lower.starts_with("http://") || lower.starts_with("https://")
 }
 
-/// 会话模式是否合法取值（ask / plan / act；与 `/mode` 一致；单测用）。
-#[cfg(test)]
+/// 会话模式是否合法取值（ask / plan / act；与 `/mode` 一致）。
 #[must_use]
 pub fn is_valid_session_mode(v: &str) -> bool {
     SESSION_MODES.contains(&v)
@@ -434,6 +434,16 @@ mod tests {
         assert_eq!(p.session_mode, None, "空白 session_mode 视为未设置");
         assert_eq!(p.model.as_deref(), Some("gpt-x"));
         assert_eq!(p.api_base, None, "空 api_base 视为未设置");
+    }
+
+    #[test]
+    fn snapshot_drops_invalid_session_mode() {
+        let prefs = UserPrefsDto {
+            session_mode: Some("Bogus".into()),
+            ..Default::default()
+        };
+        let p = PersistedSettings::from_snapshot(&prefs, &LlmOverridesDto::default());
+        assert_eq!(p.session_mode, None, "非法 session_mode 回落 serve 默认");
     }
 
     #[test]
