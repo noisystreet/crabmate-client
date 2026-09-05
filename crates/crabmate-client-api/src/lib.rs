@@ -9,6 +9,7 @@ pub mod auth;
 pub mod chat_body;
 pub mod handoff;
 pub mod health;
+pub mod markdown_normalize;
 pub mod secrets;
 pub mod sessions;
 pub mod url;
@@ -30,6 +31,7 @@ pub use handoff::{
     percent_encode_unreserved,
 };
 pub use health::health_degraded_note;
+pub use markdown_normalize::normalize_markdown_for_render;
 pub use secrets::{KEYRING_SERVICE, SecretSlot, WEB_API_BEARER_KEYRING_ACCOUNT, secret_slot_names};
 pub use sessions::{
     SessionListItem, conversation_id_for_resume, parse_session_list_rows,
