@@ -74,6 +74,8 @@ struct TuiApp<'a> {
     client: &'a ServeClient,
     overrides: &'a mut SessionPrefs,
     yes: bool,
+    /// `--no-keyring`：设置面板里 API 密钥行禁写（也不参与 key_set 判定）。
+    no_keyring: bool,
     st: UiState,
     rx: Receiver<UiEvent>,
     job_tx: Sender<WorkerJob>,
@@ -343,7 +345,7 @@ impl TuiApp<'_> {
         for line in [
             "本地命令：/quit /help /status /settings /mode /role /model /find /conv",
             "/mode ask|plan|act · /role <id> · /model <name>（off 清除，随对话生效）",
-            "/settings（或 F2）：设置面板（模型名/API Base/Agent role/会话模式；S 保存到 serve）",
+            "/settings（或 F2）：设置面板（模型名/API Base/温度/思考模式/API 密钥/Agent role/会话模式；S 保存）",
             "/find <词> 搜索并高亮 · /find（空参）跳下一处 · /find off 清除",
             "/conv list 刷新 · /conv use <id> 切换 · /conv new 新会话",
             "按键：Alt+Enter 换行 · Ctrl+E 思考展开/折叠 · Ctrl+W 工作区目录树 · PgUp/PgDn 翻页 · Ctrl+End 回底部",
@@ -700,13 +702,25 @@ impl TuiApp<'_> {
             .map(str::trim)
             .filter(|s| !s.is_empty())
             .map(str::to_string);
-        let client_llm = (api_key.is_some() || model.is_some() || api_base.is_some()).then_some(
-            ClientLlmFields {
-                api_key,
-                model,
-                api_base,
-            },
-        );
+        // 思考模式只读持久层（无本地 override；仅 on/off 发送，server/空 = 跟随 serve）。
+        let thinking = stored
+            .and_then(|p| p.thinking.as_deref())
+            .map(str::trim)
+            .filter(|m| *m == "on" || *m == "off")
+            .map(str::to_string);
+        let client_llm =
+            (api_key.is_some() || model.is_some() || api_base.is_some() || thinking.is_some())
+                .then_some(ClientLlmFields {
+                    api_key,
+                    model,
+                    api_base,
+                    llm_thinking_mode: thinking,
+                });
+        // 温度（顶层 body.temperature，对齐 Desktop）：persisted 存原文，parse 有效才发送。
+        let temperature = stored
+            .and_then(|p| p.temperature.as_deref())
+            .and_then(|s| s.trim().parse::<f64>().ok())
+            .filter(|t| t.is_finite() && (0.0..=2.0).contains(t));
         let opts = ChatStreamOptions {
             message: message.to_string(),
             approval_session_id: new_approval_session_id(),
@@ -714,6 +728,7 @@ impl TuiApp<'_> {
             client_llm,
             agent_role: role,
             session_mode,
+            temperature,
             stream_resume: None,
         };
         // 新回合：清上轮工具行映射并回到最新视图（搜索词保留、锚点释放）。
@@ -827,7 +842,12 @@ impl Drop for ScreenGuard {
 }
 
 /// 全屏 TUI 入口（M2）：状态行 + 左栏会话 + 流式 transcript + 单行输入。
-pub async fn run_tui(client: &ServeClient, overrides: &mut SessionPrefs, yes: bool) -> Result<()> {
+pub async fn run_tui(
+    client: &ServeClient,
+    overrides: &mut SessionPrefs,
+    yes: bool,
+    no_keyring: bool,
+) -> Result<()> {
     enable_raw_mode().context("enable raw mode")?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen).context("enter alternate screen")?;
@@ -844,6 +864,7 @@ pub async fn run_tui(client: &ServeClient, overrides: &mut SessionPrefs, yes: bo
         client,
         overrides,
         yes,
+        no_keyring,
         st: UiState::new(),
         rx,
         job_tx,

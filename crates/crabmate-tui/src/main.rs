@@ -208,19 +208,22 @@ async fn run() -> Result<()> {
             conversation_id,
             no_probe,
         } => run_repl(&client, conversation_id, no_probe, yes, &mut overrides).await,
-        Commands::Tui { no_probe } => run_tui_cmd(&client, no_probe, yes, &mut overrides).await,
+        Commands::Tui { no_probe } => {
+            run_tui_cmd(&client, no_probe, no_keyring, yes, &mut overrides).await
+        }
     }
 }
 
 async fn run_tui_cmd(
     client: &ServeClient,
     no_probe: bool,
+    no_keyring: bool,
     yes: bool,
     overrides: &mut SessionPrefs,
 ) -> Result<()> {
     ensure_tty()?;
     maybe_probe(client, no_probe).await?;
-    tui_mode::run_tui(client, overrides, yes).await
+    tui_mode::run_tui(client, overrides, yes, no_keyring).await
 }
 
 /// 三个 `client_llm` 覆盖中任一非空才构造；全空返回 `None`（不发送 `client_llm` 整块）。

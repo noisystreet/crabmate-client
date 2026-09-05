@@ -10,7 +10,14 @@ use crabmate_tui_core::{LlmOverridesDto, UserPrefsDto};
 /// 会话模式枚举的合法取值（与 `/mode` 斜杠一致；面板枚举与校验共用，避免漂移）。
 pub const SESSION_MODES: [&str; 3] = ["ask", "plan", "act"];
 
-/// 一个键的保存动作（W1 只管理 4 个键：model / api_base / cm_role / session_mode）。
+/// 思考模式「跟随 server」的显式 user-data 值（Desktop 校验允许；TUI 持久层归一为
+/// `None` = 跟随 server，随轮不发送该键）。
+pub const THINKING_SERVER: &str = "server";
+
+/// 思考模式除 `server`（跟随）外的显式取值（对齐 Desktop `client_llm.llm_thinking_mode`）。
+pub const THINKING_MODES: [&str; 2] = ["on", "off"];
+
+/// 一个键的保存动作（面板管理键：model / api_base / temperature / thinking / cm_role / session_mode）。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub enum FieldAction {
     /// 未编辑：合并时跳过该键（user-data 现值原样保留）。
@@ -35,24 +42,34 @@ impl FieldAction {
     }
 }
 
-/// `/user-data/llm-overrides` 的 `client_llm.{model,api_base}` 保存动作。
+/// `/user-data/llm-overrides` 的 `client_llm.{model,api_base,temperature,llm_thinking_mode}` 保存动作。
+/// （密钥不在此列：`api_key` 只写本机钥匙串，见面板与 TuiApp 接线。）
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LlmSave {
     pub model: FieldAction,
     pub api_base: FieldAction,
+    /// 温度覆盖（`client_llm.temperature`；空/`Write(None)` = 清除，回落 serve 默认）。
+    pub temperature: FieldAction,
+    /// 思考模式覆盖（`client_llm.llm_thinking_mode`；`Write(None)` = server / 跟随）。
+    pub thinking: FieldAction,
 }
 
 impl LlmSave {
-    /// 两组字段是否有任一待保存动作。
+    /// 各字段是否有任一待保存动作。
     #[must_use]
     pub fn any(&self) -> bool {
-        self.model.is_write() || self.api_base.is_write()
+        self.model.is_write()
+            || self.api_base.is_write()
+            || self.temperature.is_write()
+            || self.thinking.is_write()
     }
 
     /// 清空全部动作（保存成功落地后调用）。
     pub fn clear(&mut self) {
         self.model = FieldAction::Skip;
         self.api_base = FieldAction::Skip;
+        self.temperature = FieldAction::Skip;
+        self.thinking = FieldAction::Skip;
     }
 }
 
@@ -79,12 +96,17 @@ impl PrefsSave {
 
 /// user-data 持久层快照（启动拉取 / 保存成功后更新）。
 ///
-/// 连同一 serve 时与 Desktop/Web 共享：`client_llm.{model,api_base}` +
-/// prefs 的 `cm_role/session_mode`。空白值一律归一为 `None`（= 未设置）。
+/// 连同一 serve 时与 Desktop/Web 共享：`client_llm.{model,api_base,temperature,
+/// llm_thinking_mode}` + prefs 的 `cm_role/session_mode`。空白值一律归一为 `None`
+/// （= 未设置 / 跟随 server）。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PersistedSettings {
     pub model: Option<String>,
     pub api_base: Option<String>,
+    /// 温度（trim 后存原文，如 `"0.7"`；非法/空 → `None` = 跟随 server）。
+    pub temperature: Option<String>,
+    /// 思考模式（仅 `on`/`off`；`server`/空 → `None` = 跟随 server）。
+    pub thinking: Option<String>,
     pub role: Option<String>,
     pub session_mode: Option<String>,
 }
@@ -97,6 +119,10 @@ impl PersistedSettings {
         Self {
             model: normalize(&llm.client_llm.model),
             api_base: normalize(&llm.client_llm.api_base),
+            temperature: normalize(&llm.client_llm.temperature).filter(|v| is_valid_temperature(v)),
+            // 只保留显式 on/off；server（跟随）/空/非法旧值 → None = 回落 serve 默认。
+            thinking: normalize(&llm.client_llm.llm_thinking_mode)
+                .filter(|m| is_valid_thinking_mode(m) && m.as_str() != THINKING_SERVER),
             role: normalize(&prefs.cm_role),
             session_mode: normalize(&prefs.session_mode)
                 .filter(|m| is_valid_session_mode(m.as_str())),
@@ -107,6 +133,8 @@ impl PersistedSettings {
     pub fn apply_llm_saved(&mut self, save: &LlmSave) {
         apply_slot(&mut self.model, &save.model);
         apply_slot(&mut self.api_base, &save.api_base);
+        apply_slot(&mut self.temperature, &save.temperature);
+        apply_slot(&mut self.thinking, &save.thinking);
     }
 
     /// prefs 侧保存成功后在内存做同样更新（未编辑的键不动）。
@@ -158,6 +186,24 @@ pub fn validate_api_base(v: &str) -> bool {
 #[must_use]
 pub fn is_valid_session_mode(v: &str) -> bool {
     SESSION_MODES.contains(&v)
+}
+
+/// 温度是否合法（对齐 Desktop）：trim 后空 = 合法（未设置）；非空需 `parse::<f64>`
+/// 成功、`is_finite` 且在 `0.0..=2.0` 区间内。
+#[must_use]
+pub fn is_valid_temperature(v: &str) -> bool {
+    let t = v.trim();
+    if t.is_empty() {
+        return true;
+    }
+    matches!(t.parse::<f64>(), Ok(n) if n.is_finite() && (0.0..=2.0).contains(&n))
+}
+
+/// 思考模式是否合法取值（对齐 Desktop）：空（未设置）/ `server` / `on` / `off`。
+#[must_use]
+pub fn is_valid_thinking_mode(v: &str) -> bool {
+    let t = v.trim();
+    t.is_empty() || t == THINKING_SERVER || THINKING_MODES.contains(&t)
 }
 
 /// 单字段生效值的来源层（面板行显示用）。
@@ -218,12 +264,14 @@ pub fn merge_turn(local: &Option<String>, stored: Option<&str>) -> Option<String
     normalize(local).or_else(|| stored.and_then(normalize_str))
 }
 
-/// 合并写回 `/user-data/llm-overrides`：只改 `client_llm.{model,api_base}`，
-/// `executor_llm / saved_models / execution_mode` 原样保留（合并保真）。
+/// 合并写回 `/user-data/llm-overrides`：只改 `client_llm.{model,api_base,temperature,
+/// llm_thinking_mode}`，`executor_llm / saved_models / execution_mode` 原样保留（合并保真）。
 #[must_use]
 pub fn merge_llm_save(mut base: LlmOverridesDto, save: &LlmSave) -> LlmOverridesDto {
     apply_slot(&mut base.client_llm.model, &save.model);
     apply_slot(&mut base.client_llm.api_base, &save.api_base);
+    apply_slot(&mut base.client_llm.temperature, &save.temperature);
+    apply_slot(&mut base.client_llm.llm_thinking_mode, &save.thinking);
     base
 }
 
@@ -310,6 +358,34 @@ mod tests {
     }
 
     #[test]
+    fn temperature_validation_matches_desktop_range() {
+        assert!(is_valid_temperature("0.5"));
+        assert!(is_valid_temperature(" 0.7 "), "trim 后解析");
+        assert!(is_valid_temperature("0"));
+        assert!(is_valid_temperature("2.0"), "区间右闭");
+        assert!(is_valid_temperature(""), "空 = 未设置");
+        assert!(is_valid_temperature("   "));
+        assert!(!is_valid_temperature("2.1"), "超过上限");
+        assert!(!is_valid_temperature("-0.1"), "低于下限");
+        assert!(!is_valid_temperature("abc"));
+        assert!(!is_valid_temperature("inf"));
+        assert!(!is_valid_temperature("nan"));
+    }
+
+    #[test]
+    fn thinking_mode_validation_accepts_server_and_blank() {
+        assert!(is_valid_thinking_mode("on"));
+        assert!(is_valid_thinking_mode("off"));
+        assert!(is_valid_thinking_mode("server"));
+        assert!(is_valid_thinking_mode(""));
+        assert!(is_valid_thinking_mode("  on  "));
+        assert!(!is_valid_thinking_mode("bogus"));
+        assert!(!is_valid_thinking_mode("auto"));
+        assert_eq!(THINKING_MODES, ["on", "off"]);
+        assert_eq!(THINKING_SERVER, "server");
+    }
+
+    #[test]
     fn merge_turn_prefers_override_and_drops_blank() {
         assert_eq!(
             merge_turn(&Some("local".into()), Some("stored")),
@@ -350,6 +426,7 @@ mod tests {
         let save = LlmSave {
             model: FieldAction::Write(Some("deepseek-chat".into())),
             api_base: FieldAction::Write(Some("https://x.example/v1".into())),
+            ..Default::default()
         };
         let out = merge_llm_save(llm_base(), &save);
         assert_eq!(out.client_llm.model.as_deref(), Some("deepseek-chat"));
@@ -357,8 +434,9 @@ mod tests {
             out.client_llm.api_base.as_deref(),
             Some("https://x.example/v1")
         );
-        // 非管理字段原样保留
+        // 未编辑（Skip）的管理字段与非管理字段原样保留
         assert_eq!(out.client_llm.temperature.as_deref(), Some("0.7"));
+        assert_eq!(out.client_llm.llm_thinking_mode, None);
         assert_eq!(out.client_llm.llm_context_tokens.as_deref(), Some("8000"));
         assert_eq!(out.executor_llm.model.as_deref(), Some("exec"));
         assert_eq!(out.execution_mode.as_deref(), Some("autonomous"));
@@ -366,10 +444,36 @@ mod tests {
     }
 
     #[test]
+    fn merge_llm_save_writes_and_clears_temperature_and_thinking() {
+        let save = LlmSave {
+            temperature: FieldAction::Write(Some(" 1.25 ".into())),
+            thinking: FieldAction::Write(Some("off".into())),
+            ..Default::default()
+        };
+        let out = merge_llm_save(llm_base(), &save);
+        assert_eq!(out.client_llm.temperature.as_deref(), Some("1.25"));
+        assert_eq!(out.client_llm.llm_thinking_mode.as_deref(), Some("off"));
+        assert_eq!(out.client_llm.model.as_deref(), Some("old"), "Skip 键不动");
+
+        let save = LlmSave {
+            temperature: FieldAction::Write(None),
+            thinking: FieldAction::Write(Some("   ".into())),
+            ..Default::default()
+        };
+        let out = merge_llm_save(out, &save);
+        assert_eq!(out.client_llm.temperature, None, "Write(None) 清除温度");
+        assert_eq!(
+            out.client_llm.llm_thinking_mode, None,
+            "空白 thinking 写入等价清除"
+        );
+    }
+
+    #[test]
     fn merge_llm_save_clears_to_null_and_skips() {
         let save = LlmSave {
             model: FieldAction::Write(None),
             api_base: FieldAction::Skip,
+            ..Default::default()
         };
         let out = merge_llm_save(llm_base(), &save);
         assert_eq!(out.client_llm.model, None, "清除键写 null");
@@ -385,6 +489,7 @@ mod tests {
         let save = LlmSave {
             model: FieldAction::Write(Some("   ".into())),
             api_base: FieldAction::Write(Some("  deepseek  ".into())),
+            ..Default::default()
         };
         let out = merge_llm_save(llm_base(), &save);
         assert_eq!(out.client_llm.model, None, "空白写入等价清除");
@@ -425,6 +530,8 @@ mod tests {
             client_llm: LlmEndpointOverrideDto {
                 model: Some("gpt-x".into()),
                 api_base: Some("".into()),
+                temperature: Some(" 0.7 ".into()),
+                llm_thinking_mode: Some("off".into()),
                 ..Default::default()
             },
             ..Default::default()
@@ -434,6 +541,33 @@ mod tests {
         assert_eq!(p.session_mode, None, "空白 session_mode 视为未设置");
         assert_eq!(p.model.as_deref(), Some("gpt-x"));
         assert_eq!(p.api_base, None, "空 api_base 视为未设置");
+        assert_eq!(p.temperature.as_deref(), Some("0.7"), "温度 trim 后存原文");
+        assert_eq!(p.thinking.as_deref(), Some("off"));
+    }
+
+    #[test]
+    fn snapshot_drops_invalid_temperature_and_thinking() {
+        let llm = LlmOverridesDto {
+            client_llm: LlmEndpointOverrideDto {
+                temperature: Some("9.9".into()),
+                llm_thinking_mode: Some("server".into()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let p = PersistedSettings::from_snapshot(&UserPrefsDto::default(), &llm);
+        assert_eq!(p.temperature, None, "超区间温度回落 serve 默认");
+        assert_eq!(p.thinking, None, "server/空思考模式 = 跟随 server");
+
+        let llm = LlmOverridesDto {
+            client_llm: LlmEndpointOverrideDto {
+                temperature: Some("   ".into()),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let p = PersistedSettings::from_snapshot(&UserPrefsDto::default(), &llm);
+        assert_eq!(p.temperature, None, "空白温度视为未设置");
     }
 
     #[test]
@@ -456,9 +590,13 @@ mod tests {
         p.apply_llm_saved(&LlmSave {
             model: FieldAction::Write(Some("new".into())),
             api_base: FieldAction::Write(None),
+            temperature: FieldAction::Write(Some("1.1".into())),
+            thinking: FieldAction::Write(None),
         });
         assert_eq!(p.model.as_deref(), Some("new"));
         assert_eq!(p.api_base, None);
+        assert_eq!(p.temperature.as_deref(), Some("1.1"));
+        assert_eq!(p.thinking, None);
         p.apply_prefs_saved(&PrefsSave {
             role: FieldAction::Skip,
             session_mode: FieldAction::Write(Some("plan".into())),
@@ -470,6 +608,14 @@ mod tests {
     #[test]
     fn save_payload_any_and_clear() {
         let mut s = LlmSave::default();
+        assert!(!s.any());
+        s.temperature = FieldAction::Write(Some("1.0".into()));
+        assert!(s.any());
+        s.clear();
+        assert!(!s.any());
+        s.thinking = FieldAction::Write(None);
+        assert!(s.any());
+        s.clear();
         assert!(!s.any());
         s.model = FieldAction::Write(None);
         assert!(s.any());
