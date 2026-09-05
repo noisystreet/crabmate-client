@@ -1,4 +1,5 @@
-//! 工作区侧栏可视行构建：标题 / 目录树行 / 占位与反色高亮；左侧会话/工作区共列分发。
+//! 侧栏可视行构建：左栏会话列表 + 右栏工作区目录树（仿 Desktop：工作区在右侧，
+//! 宽屏默认显示），含标题/树行/占位与反色高亮。
 //!
 //! 拆出本模块以控制 `render.rs` 单文件行数（fn-nloc 门禁 ≤ 920）；数据侧见
 //! [`super::workspace_tree`]。
@@ -17,7 +18,7 @@ const WORKSPACE_UNSET_HINT: &str = "未设置：p 从项目池选择 · r刷新"
 /// 项目池「选择工作区」子视图的按键提示。
 const WORKSPACE_PICK_HINT: &str = "↑↓选 Enter切换 r刷新 Esc返回";
 
-/// 工作区侧栏标题：`工作区 <basename>`（未获取时占位）。
+/// 工作区侧栏标题：仅 `basename`（对齐 Desktop，不带“工作区: ”前缀；未获取时占位）。
 fn workspace_title(st: &UiState, width: usize) -> String {
     let name = st
         .workspace_path
@@ -26,8 +27,8 @@ fn workspace_title(st: &UiState, width: usize) -> String {
         .map(workspace_basename)
         .filter(|n| !n.is_empty());
     match name {
-        Some(n) => truncate_display(&format!("工作区: {n}"), width),
-        None => truncate_display("工作区: (未获取)", width),
+        Some(n) => truncate_display(&n, width),
+        None => truncate_display("（未获取）", width),
     }
 }
 
@@ -176,29 +177,38 @@ fn workspace_pick_rows(st: &UiState, width: usize) -> Vec<Line<'static>> {
     rows
 }
 
-/// 左栏可视内容（会话 / 工作区树共列分发）：返回（行、光标、聚焦时提示文案）。
-pub(super) fn sidebar_content(
+/// 左栏会话可视内容：返回（行、光标、聚焦时提示文案）。
+pub(super) fn sessions_content(
     st: &UiState,
     width: usize,
 ) -> (Vec<Line<'static>>, usize, Option<&'static str>) {
-    if st.focus == Focus::Workspace {
-        if st.ws_pick.is_some() {
-            (
-                workspace_pick_rows(st, width),
-                st.ws_cursor,
-                Some(WORKSPACE_PICK_HINT),
-            )
-        } else {
-            let hint = if st.workspace_path.is_none() {
+    let hint = (st.focus == Focus::Sidebar).then_some(SIDEBAR_HINT);
+    (sidebar_rows(st, width), st.selected, hint)
+}
+
+/// 右栏工作区可视内容：返回（行、光标、聚焦时提示文案）。
+/// 右栏宽屏默认显示；光标反色与按键提示仅在 `Focus::Workspace` 聚焦时出现。
+pub(super) fn workspace_content(
+    st: &UiState,
+    width: usize,
+) -> (Vec<Line<'static>>, usize, Option<&'static str>) {
+    if st.ws_pick.is_some() {
+        (
+            workspace_pick_rows(st, width),
+            st.ws_cursor,
+            (st.focus == Focus::Workspace).then_some(WORKSPACE_PICK_HINT),
+        )
+    } else {
+        let hint = if st.focus == Focus::Workspace {
+            Some(if st.workspace_path.is_none() {
                 WORKSPACE_UNSET_HINT
             } else {
                 WORKSPACE_HINT
-            };
-            (workspace_sidebar_rows(st, width), st.ws_cursor, Some(hint))
-        }
-    } else {
-        let hint = (st.focus == Focus::Sidebar).then_some(SIDEBAR_HINT);
-        (sidebar_rows(st, width), st.selected, hint)
+            })
+        } else {
+            None
+        };
+        (workspace_sidebar_rows(st, width), st.ws_cursor, hint)
     }
 }
 
@@ -234,10 +244,11 @@ mod tests {
     fn workspace_title_shows_basename_or_placeholder() {
         let mut st = ready_ws_state();
         let rows = workspace_sidebar_rows(&st, 60);
-        assert!(rows[0].to_string().contains("工作区: proj"));
+        assert!(rows[0].to_string().contains("proj"));
+        assert!(!rows[0].to_string().contains("工作区:"), "标题不带前缀");
         st.workspace_path = None;
         let rows = workspace_sidebar_rows(&st, 60);
-        assert!(rows[0].to_string().contains("(未获取)"));
+        assert!(rows[0].to_string().contains("未获取"));
     }
 
     #[test]
@@ -310,15 +321,20 @@ mod tests {
     }
 
     #[test]
-    fn sidebar_content_dispatches_sessions_vs_workspace() {
+    fn panes_content_workspace_always_rows_sessions_only_left() {
         let mut st = ready_ws_state();
         st.focus = Focus::Workspace;
-        let (rows, cursor, hint) = sidebar_content(&st, 60);
+        let (rows, cursor, hint) = workspace_content(&st, 60);
         assert_eq!(cursor, st.ws_cursor);
         assert_eq!(rows.len(), 4);
         assert!(hint.is_some());
+        // 默认（Input）右栏同样渲染树行，只是不给按键提示
+        st.focus = Focus::Input;
+        let (rows, _, hint) = workspace_content(&st, 60);
+        assert_eq!(rows.len(), 4, "工作区树默认可见");
+        assert!(hint.is_none());
         st.focus = Focus::Sidebar;
-        let (rows, _, hint) = sidebar_content(&st, 60);
+        let (rows, _, hint) = sessions_content(&st, 60);
         assert!(rows[0].to_string().contains("会话"));
         assert!(hint.is_some());
     }
@@ -398,17 +414,17 @@ mod tests {
     }
 
     #[test]
-    fn sidebar_content_unset_and_pick_hints() {
+    fn workspace_content_unset_and_pick_hints() {
         let mut st = UiState::new();
         st.focus = Focus::Workspace;
-        let (_, _, hint) = sidebar_content(&st, 60);
+        let (_, _, hint) = workspace_content(&st, 60);
         assert!(hint.unwrap().contains("未设置"), "路径为空给未设置提示");
         st.workspace_path = Some("/data/proj".to_string());
         st.ws_ready = true;
-        let (_, _, hint) = sidebar_content(&st, 60);
+        let (_, _, hint) = workspace_content(&st, 60);
         assert!(hint.unwrap().contains("Enter/→展开"), "正常树给树提示");
         st.ws_pick = Some(super::super::workspace_tree::WsPickState::default());
-        let (rows, _, hint) = sidebar_content(&st, 60);
+        let (rows, _, hint) = workspace_content(&st, 60);
         assert!(rows[0].to_string().contains("选择工作区"));
         assert!(hint.unwrap().contains("Enter切换"));
     }

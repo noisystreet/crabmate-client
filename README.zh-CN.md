@@ -120,12 +120,12 @@ crabmate-tui --api-base http://127.0.0.1:8080 repl
 ./crates/crabmate-tui/target/debug/crabmate-tui \
   --api-base http://127.0.0.1:8080 \
   tui
-# 布局：顶栏（工作区）| 左栏会话 | 流式 transcript | 底栏输入区 | 状态行
+# 布局（仿 Desktop）：顶栏（工作区）| 左栏会话 | 流式 transcript | 右栏工作区目录树 | 底栏输入区 | 状态行
 # Ctrl+C 取消在途回合（再按一次强退；空闲时退出）
 #   审批浮层打开时第一次 Ctrl+C 只拒绝该命令——回合随后继续，需再按一次才会取消
 # Tab 切到会话列表（↑↓ 选择 · Enter 使用 · n 新建 · r 刷新 · Esc 返回）
-# Ctrl+W 切到工作区目录树（左栏内：↑↓ 选择 · Enter/→ 展开目录 · ← 收起/回父 · r 刷新 · w 回会话 · Esc 返回输入）
-# 工作区未设置时左栏提示“未设置：p 从项目池选择”，按 p 列出服务端项目池（↑↓ 选 · Enter 切换 · Esc 返回）
+# 右栏工作区目录树宽屏（≥120 列）默认显示；Ctrl+W 聚焦右栏浏览（↑↓ 选择 · Enter/→ 展开 · ← 收起/回父 · r 刷新 · w 回会话 · Esc 返回输入）
+# 工作区未设置时右栏提示“未设置：p 从项目池选择”，按 p 列出服务端项目池（↑↓ 选 · Enter 切换 · Esc 返回）
 # Alt+Enter 换行（多行输入）；Enter / Ctrl+O 发送
 # PgUp / PgDn / Ctrl+Home / Ctrl+End 滚动 transcript（单行输入时 ↑↓ 也可滚动）
 # Ctrl+E 展开/折叠思考行（默认折叠为一行预览）

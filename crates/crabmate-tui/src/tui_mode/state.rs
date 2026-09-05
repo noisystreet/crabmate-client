@@ -11,6 +11,7 @@ use crabmate_tui_core::{
 };
 
 use super::serve_defaults::ServeDefaults;
+use super::tool_summary::tool_end_text;
 use super::workspace_tree::{WsPickState, WsRow};
 
 /// transcript 行类别（决定前缀与配色）。
@@ -420,7 +421,8 @@ impl UiState {
         self.bump();
     }
 
-    /// 工具结果：更新对应摘要行；找不到 start（如续流中段）则补一行收尾。
+    /// 工具结果：更新对应摘要行（note 与工具名重复时省略前缀，如 `✓ read file: hello.cpp`）；
+    /// 找不到 start（如续流中段）则补一行收尾。
     pub fn tool_end(
         &mut self,
         tool_call_id: &str,
@@ -428,34 +430,14 @@ impl UiState {
         ok: Option<bool>,
         note: Option<&str>,
     ) {
+        let display = if name.trim().is_empty() { "tool" } else { name };
+        let text = tool_end_text(display, ok, note);
         let idx = self.tool_pending.remove(tool_call_id);
-        let mut text = match idx {
-            Some(i) if self.lines.get(i).is_some_and(|l| l.kind == LineKind::Tool) => {
-                self.lines[i].text.clone()
-            }
-            _ => {
-                let fallback = if name.trim().is_empty() { "tool" } else { name };
-                self.push_line(LineKind::Tool, fallback);
-                fallback.to_string()
-            }
-        };
-        text.push_str(match ok {
-            Some(true) => " ✓",
-            Some(false) => " ✗",
-            None => " (done)",
-        });
-        if let Some(n) = note.map(str::trim).filter(|s| !s.is_empty()) {
-            text.push_str(" — ");
-            text.push_str(n);
-        }
         match idx {
-            Some(i) if i < self.lines.len() => self.lines[i].text = text,
-            _ => {
-                // 上面 fallback push 的行就是最后一行
-                if let Some(last) = self.lines.last_mut() {
-                    last.text = text;
-                }
+            Some(i) if self.lines.get(i).is_some_and(|l| l.kind == LineKind::Tool) => {
+                self.lines[i].text = text;
             }
+            _ => self.push_line(LineKind::Tool, &text),
         }
         self.refresh_search_meta();
         self.bump();
