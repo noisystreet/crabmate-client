@@ -353,7 +353,7 @@ impl TuiApp<'_> {
             "按键：Alt+Enter 换行 · Ctrl+E 思考展开/折叠 · Ctrl+W 工作区目录树 · PgUp/PgDn 翻页 · Ctrl+End 回底部",
             "设置面板：↑↓ 移动 · Enter 编辑 · Tab 切分区 · S 保存 · Esc/F2 关闭（有改动 Esc 先确认）",
             "工作区树：↑↓选 Enter/→展开 ◀收起/回父 r刷新 w回会话列表 Tab/Esc 回输入",
-            "工作区未设置：按 p 从项目池选择（选择视图：↑↓选 Enter切换 r刷新 Esc 返回）",
+            "工作区切换：按 p 从项目池选择/切换（未设置=选择，已设置=切到另一项目；↑↓选 Enter切换 r刷新 Esc 返回）",
             "审批浮层：Enter=一次 · a=始终 · Esc/n=拒绝 · Ctrl+C 先拒绝、回合随后继续需再按取消",
         ] {
             self.st.push_line(LineKind::System, line);
@@ -487,15 +487,15 @@ impl TuiApp<'_> {
             }
             // w：回到左栏会话列表（w 两侧对称切换）。
             KeyCode::Char('w') => self.st.focus = Focus::Sidebar,
-            // 工作区未设置（顶栏路径为空）时：p 进入项目池「选择工作区」。
-            KeyCode::Char('p') if self.st.workspace_path.is_none() && self.st.ws_open_pick() => {
+            // p：项目池「选择/切换工作区」（未设置=首次选择；已设置=切到另一项目）。
+            KeyCode::Char('p') if self.st.ws_open_pick() => {
                 self.fetch_ws_projects();
             }
             _ => {}
         }
     }
 
-    /// 项目池「选择工作区」子视图按键。
+    /// 项目池「选择/切换工作区」子视图按键。
     fn on_workspace_pick_key(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Esc | KeyCode::Tab | KeyCode::BackTab => self.st.ws_close_pick(),

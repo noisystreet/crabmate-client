@@ -12,10 +12,10 @@ use super::state::{Focus, UiState};
 use super::workspace_tree::WsRow;
 
 /// 工作区树聚焦时的按键提示（占位性质，超宽即裁）。
-const WORKSPACE_HINT: &str = "↑↓选 Enter/→展开 ◀收起 r刷新 w会话";
+const WORKSPACE_HINT: &str = "↑↓选 Enter/→展开 ◀收起 p项目池 r刷新 w会话";
 /// 工作区未设置（顶栏路径为空）时的按键提示。
 const WORKSPACE_UNSET_HINT: &str = "未设置：p 从项目池选择 · r刷新";
-/// 项目池「选择工作区」子视图的按键提示。
+/// 项目池「选择/切换工作区」子视图的按键提示。
 const WORKSPACE_PICK_HINT: &str = "↑↓选 Enter切换 r刷新 Esc返回";
 
 /// 工作区侧栏标题：仅 `basename`（对齐 Desktop，不带“工作区: ”前缀；未获取时占位）。
@@ -125,11 +125,11 @@ pub(super) fn sidebar_view<'a>(rows: &[Line<'a>], height: usize, selected: usize
     out
 }
 
-/// 项目池「选择工作区」内容行：首行标题，其后为候选项目（加载中/未启用/错误占位）。
+/// 项目池「选择/切换工作区」内容行：首行标题，其后为候选项目（加载中/未启用/错误占位）。
 fn workspace_pick_rows(st: &UiState, width: usize) -> Vec<Line<'static>> {
     let mut rows: Vec<Line<'static>> = Vec::new();
     rows.push(Line::from(Span::styled(
-        truncate_display("选择工作区（项目池）", width),
+        truncate_display("项目池（选择/切换工作区）", width),
         Style::new().fg(Color::White).add_modifier(Modifier::BOLD),
     )));
     let Some(pick) = st.ws_pick.as_ref() else {
@@ -422,10 +422,12 @@ mod tests {
         st.workspace_path = Some("/data/proj".to_string());
         st.ws_ready = true;
         let (_, _, hint) = workspace_content(&st, 60);
-        assert!(hint.unwrap().contains("Enter/→展开"), "正常树给树提示");
+        let hint = hint.unwrap();
+        assert!(hint.contains("Enter/→展开"), "正常树给树提示");
+        assert!(hint.contains('p'), "已设置工作区也可提示 p 切换项目");
         st.ws_pick = Some(super::super::workspace_tree::WsPickState::default());
         let (rows, _, hint) = workspace_content(&st, 60);
-        assert!(rows[0].to_string().contains("选择工作区"));
+        assert!(rows[0].to_string().contains("项目池"));
         assert!(hint.unwrap().contains("Enter切换"));
     }
 }

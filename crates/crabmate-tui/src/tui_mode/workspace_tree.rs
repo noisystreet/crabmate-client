@@ -9,7 +9,8 @@ use crabmate_tui_core::{WorkspaceDirData, WorkspaceDirEntry, WorkspaceProjectsDa
 
 use super::state::UiState;
 
-/// 项目池「选择工作区」子视图状态（工作区未设置/根为空时可借此切换；关闭后为 `None`）。
+/// 项目池「选择/切换工作区」子视图状态（未设置=首次选择，已设置=切到另一项目；
+/// 关闭后为 `None`）。
 #[derive(Debug, Clone, Default)]
 pub struct WsPickState {
     /// `GET /workspace/projects` 的 `enabled`（false 时提示池未启用）。
@@ -243,7 +244,7 @@ impl UiState {
         was_expanded
     }
 
-    // ── 项目池「选择工作区」（工作区未设置时切换） ──────────
+    // ── 项目池「选择/切换工作区」（未设置=首次选择，已设置=切到另一项目） ──────────
 
     /// 进入选择子视图（已在选择中不重复）；返回是否需要拉项目池。
     pub fn ws_open_pick(&mut self) -> bool {
