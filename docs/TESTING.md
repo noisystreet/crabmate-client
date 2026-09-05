@@ -56,6 +56,7 @@ bash scripts/check.sh
 | `CI` / `build-desktop-deb` | `CM_PREPARE_SKIP_FRONTEND=1` + stub；`make desktop-release`；校验 `Package: crabmate-desktop`、无 serve sidecar、无 `/etc/crabmate` |
 | `CI` / `build-web-deb` | `CM_WEB_SKIP_FRONTEND=1` + stub dist；`make web-release`；校验 `Package: crabmate-web`、菜单图标、无 serve sidecar、无 `/etc/crabmate` |
 | `CI` / `build-tui-deb` | `make tui-release`；校验 `Package: crabmate-tui`、仅 `/usr/bin/crabmate-tui`、无图标/配置、无 serve sidecar、无 `/etc/crabmate` |
+| `Release`（推 `v*` tag） | guard：tag 须可达自 `origin/main` → `build-frontend`（`make frontend-release`，真实 UI，装 trunk + wasm-opt）→ 分别 `make desktop-release`（`CRABMATE_FRONTEND_DIST` 复用 dist）/ `make web-release`（`CM_WEB_SKIP_FRONTEND=1` + 真 dist）/ `make tui-release`；校验同 CI 三个 deb job → 上传三 .deb，notes 取 `CHANGELOG.md` 对应版本段发 GitHub Release（`.github/workflows/release.yml`） |
 | `E2E Playwright` | 本仓 `make frontend` + checkout Server 编纯 API `serve` + 本仓编 `crabmate-web`（回环托管 UI）；mock SSE 基线 |
 | `Victauri E2E Nightly` | `make frontend` + Server `serve` + `./scripts/victauri-e2e.sh all`（xvfb；不含 `real_llm`）；失败上传桌面/serve 日志 |
 | `code-complexity` | 独立门禁：`lizard-rust` / `fn-param` / `fn-nloc` |
