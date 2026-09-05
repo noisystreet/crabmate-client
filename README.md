@@ -131,6 +131,7 @@ Full-screen `tui` (ratatui; shows a session sidebar on terminals ≥ 120 columns
 # Non-allowlisted commands raise an approval overlay (Enter/once · a/always · Esc/n/deny)
 # Tool calls render as one-line summaries, updated in place with ✓/✗ + a note
 # /find <word> highlights and jumps · /find cycles to the next match · /find off clears
+# Assistant text renders inline Markdown (bold/italic/code/link/strike); code fences stay plain
 # Slashes: /model /mode /role /status /find /conv [new] /quit · /help lists everything
 #   (status bar shows serve defaults; local overrides are marked with `*`;
 #    switching sessions starts a fresh transcript)

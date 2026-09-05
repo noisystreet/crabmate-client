@@ -8,6 +8,7 @@
 
 mod approve;
 mod controls;
+mod md;
 mod render;
 mod state;
 

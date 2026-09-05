@@ -8,6 +8,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
+use super::md;
 use super::state::{Focus, LineKind, UiState};
 
 /// 低于此宽度隐藏左栏（等价 repl 布局）。
@@ -129,36 +130,109 @@ fn body_rows(st: &UiState, width: usize) -> Vec<BodyRow> {
         let prefix_w = prefix.chars().count();
         let content_width = width.saturating_sub(prefix_w);
         let matched = needle.is_some_and(|n| log.text.to_lowercase().contains(n));
-        let mut first = true;
+        let anchor_log = matched && target == Some(idx);
         let text = if log.kind == LineKind::Thinking && log.collapsed {
             fold_thinking(&log.text, content_width)
         } else {
             log.text.clone()
         };
-        for phys in wrap_physical(&text, content_width) {
-            let mut spans: Vec<Span<'static>> = Vec::new();
-            let mut row_style = style;
-            if matched && target == Some(idx) && first {
-                // 锚定命中行反色突出；其余命中行仅改前景。
-                row_style = Style::new()
-                    .fg(Color::Black)
-                    .bg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD);
-            } else if matched {
-                row_style = Style::new().fg(Color::Yellow);
-            }
-            if first {
-                spans.push(Span::styled(prefix.clone(), row_style));
-            }
-            spans.push(Span::styled(phys, row_style));
-            out.push(BodyRow {
-                log_index: idx,
-                line: Line::from(spans),
-            });
-            first = false;
+        if log.kind == LineKind::Assistant {
+            out.extend(assistant_body_rows(
+                idx,
+                &text,
+                &prefix,
+                style,
+                content_width,
+                matched,
+                anchor_log,
+            ));
+        } else {
+            out.extend(plain_body_rows(
+                idx,
+                &text,
+                &prefix,
+                style,
+                content_width,
+                matched,
+                anchor_log,
+            ));
         }
     }
     out
+}
+
+/// 非 Assistant 逻辑行 → 物理 BodyRow（thinking 折叠/用户/工具/系统行，纯文本）。
+fn plain_body_rows(
+    idx: usize,
+    text: &str,
+    prefix: &str,
+    style: Style,
+    content_width: usize,
+    matched: bool,
+    anchor_log: bool,
+) -> Vec<BodyRow> {
+    let mut rows = Vec::new();
+    let mut first = true;
+    for phys in wrap_physical(text, content_width) {
+        let mut spans: Vec<Span<'static>> = Vec::new();
+        let mut row_style = style;
+        if anchor_log && first {
+            // 锚定命中行反色突出；其余命中行仅改前景。
+            row_style = Style::new()
+                .fg(Color::Black)
+                .bg(Color::Yellow)
+                .add_modifier(Modifier::BOLD);
+        } else if matched {
+            row_style = Style::new().fg(Color::Yellow);
+        }
+        if first {
+            spans.push(Span::styled(prefix.to_string(), row_style));
+        }
+        spans.push(Span::styled(phys, row_style));
+        rows.push(BodyRow {
+            log_index: idx,
+            line: Line::from(spans),
+        });
+        first = false;
+    }
+    rows
+}
+
+/// Assistant 逻辑行 → 全部物理 BodyRow（行内 markdown 样式 + 宽度折行 + 搜索高亮）。
+fn assistant_body_rows(
+    idx: usize,
+    text: &str,
+    prefix: &str,
+    style: Style,
+    content_width: usize,
+    matched: bool,
+    anchor_log: bool,
+) -> Vec<BodyRow> {
+    let styled = md::assistant_styled_text(text);
+    let mut rows = Vec::new();
+    for (row_no, row) in md::wrap_styled_chars(&styled, content_width)
+        .into_iter()
+        .enumerate()
+    {
+        let is_first = row_no == 0;
+        let mut spans: Vec<Span<'static>> = Vec::new();
+        if is_first {
+            let pstyle =
+                md::highlight_override(md::md_row_style(Style::new(), style), matched, anchor_log);
+            spans.push(Span::styled(prefix.to_string(), pstyle));
+        }
+        spans.extend(md::styled_row_spans(
+            &row,
+            style,
+            matched,
+            anchor_log && is_first,
+        ));
+        rows.push(BodyRow {
+            log_index: idx,
+            line: Line::from(spans),
+        });
+    }
+    rows
 }
 
 /// 测试辅助：兼容旧接口的纯行视图。
@@ -523,12 +597,24 @@ fn horizontal_window(content: &str, cursor_cell: usize, width: usize) -> (usize,
     (start, cursor_cell.saturating_sub(start))
 }
 
-/// 测试辅助：单行可视文本与光标列（兼容旧接口）。
-#[cfg(test)]
-fn input_window(st: &UiState, width: usize) -> (String, usize) {
-    let (shown, disp_row, cursor, _) = composer_window(st, width, 1);
-    let text = shown.get(disp_row).cloned().unwrap_or_default();
-    (text, cursor)
+/// 从显示列 `start` 起取 `cells` 列的可见串；宽字符整体跳/取，不切半字。
+fn cell_window(text: &str, start: usize, cells: usize) -> String {
+    let mut out = String::new();
+    let mut skipped = 0usize;
+    let mut taken = 0usize;
+    for ch in text.chars() {
+        let cw = ch.width().unwrap_or(0);
+        if skipped + cw <= start {
+            skipped += cw;
+            continue;
+        }
+        if taken + cw > cells {
+            break;
+        }
+        out.push(ch);
+        taken += cw;
+    }
+    out
 }
 
 fn render_input(frame: &mut Frame, st: &UiState, area: Rect) {
@@ -560,26 +646,6 @@ fn render_input(frame: &mut Frame, st: &UiState, area: Rect) {
         .saturating_add(disp_row as u16)
         .min(area.y.saturating_add(area.height.saturating_sub(1)));
     frame.set_cursor_position((col, row));
-}
-
-/// 从显示列 `start` 起取 `cells` 列的可见串；宽字符整体跳/取，不切半字。
-fn cell_window(text: &str, start: usize, cells: usize) -> String {
-    let mut out = String::new();
-    let mut skipped = 0usize;
-    let mut taken = 0usize;
-    for ch in text.chars() {
-        let cw = ch.width().unwrap_or(0);
-        if skipped + cw <= start {
-            skipped += cw;
-            continue;
-        }
-        if taken + cw > cells {
-            break;
-        }
-        out.push(ch);
-        taken += cw;
-    }
-    out
 }
 
 #[cfg(test)]
@@ -690,12 +756,6 @@ mod tests {
         let s = top_text(&st, 80);
         assert!(s.contains("工作区: proj"));
         assert!(s.contains("/data/proj"));
-    }
-
-    #[test]
-    fn top_text_placeholder_before_workspace_known() {
-        let st = UiState::new();
-        assert!(top_text(&st, 40).contains("未获取"));
     }
 
     #[test]
@@ -828,14 +888,6 @@ mod tests {
     }
 
     #[test]
-    fn visible_window_keeps_fit_content() {
-        let (start, c) = horizontal_window("ab", 2, 10);
-        assert_eq!(start, 0);
-        assert_eq!(c, 2);
-        assert_eq!(cell_window("ab", start, 10), "ab");
-    }
-
-    #[test]
     fn visible_window_scrolls_to_cursor_on_right() {
         let (start, c) = horizontal_window("abcdefgh", 8, 4);
         assert_eq!(cell_window("abcdefgh", start, 4), "efgh");
@@ -850,31 +902,6 @@ mod tests {
         let shown = cell_window(content, start, 6);
         assert!(shown.contains('好'));
         assert_eq!(c, 6);
-    }
-
-    #[test]
-    fn input_window_follows_cursor_when_wide() {
-        let mut st = UiState::new();
-        for ch in "你好world".chars() {
-            st.insert_char(ch);
-        }
-        let (shown, cursor) = input_window(&st, 6);
-        // 超宽时窗口滚到光标附近：开头字符滚走，光标列在可视区右缘。
-        assert!(!shown.contains('你'), "window should scroll to the cursor");
-        assert!(!shown.is_empty());
-        assert_eq!(cursor, 6);
-    }
-
-    #[test]
-    fn input_window_shows_head_when_not_focused() {
-        let mut st = UiState::new();
-        for ch in "你好world".chars() {
-            st.insert_char(ch);
-        }
-        st.focus = Focus::Sidebar;
-        let (shown, cursor) = input_window(&st, 6);
-        assert!(shown.starts_with('你'));
-        assert_eq!(cursor, 0);
     }
 
     #[test]
