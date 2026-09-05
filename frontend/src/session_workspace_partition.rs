@@ -380,14 +380,15 @@ fn memory_stream_busy(chat: ChatSessionSignals) -> bool {
         || chat.stream_bound_resume_handles_untracked().is_some()
 }
 
+/// 是否应判定为「分桶切换」。`persist_blocked` 由调用方读取进程级门闩传入，
+/// 便于单测直接传值、避免与改写该全局状态的测试产生竞态。
 fn partition_switch_context(
     force_empty_gate: bool,
     prev_norm: Option<&str>,
     next_norm: &str,
+    persist_blocked: bool,
 ) -> bool {
-    force_empty_gate
-        || prev_norm.is_some_and(|p| p != next_norm)
-        || SESSION_PERSIST_BLOCKED.load(Ordering::SeqCst)
+    force_empty_gate || prev_norm.is_some_and(|p| p != next_norm) || persist_blocked
 }
 
 fn commit_partition_sessions(
@@ -594,7 +595,12 @@ pub fn wire_workspace_session_storage_partition(args: WireWorkspaceSessionPartit
             ) {
                 return;
             }
-            partition_switch_context(force_empty_gate, prev_slot.as_deref(), norm.as_str())
+            partition_switch_context(
+                force_empty_gate,
+                prev_slot.as_deref(),
+                norm.as_str(),
+                SESSION_PERSIST_BLOCKED.load(Ordering::SeqCst),
+            )
         };
 
         let my_gen = PARTITION_LOAD_GEN
@@ -655,8 +661,13 @@ mod tests {
         assert!(!persist_put_ok_parts(true, 4, 3));
     }
 
+    /// 以下测试会改写进程级静态状态（`SESSION_PERSIST_BLOCKED` / 内存分桶登记），
+    /// 并行执行时会互相覆盖导致偶发失败，故用同一把锁串行化。
+    static PERSIST_STATE_TEST_LOCK: Mutex<()> = Mutex::new(());
+
     #[test]
     fn record_memory_partition_makes_memory_match_workspace() {
+        let _guard = PERSIST_STATE_TEST_LOCK.lock().expect("persist test lock");
         record_memory_sessions_partition("/tmp/proj/");
         assert!(memory_sessions_match_workspace("/tmp/proj"));
         assert!(!memory_sessions_match_workspace("/other"));
@@ -664,6 +675,7 @@ mod tests {
 
     #[test]
     fn note_memory_partition_keeps_persist_block() {
+        let _guard = PERSIST_STATE_TEST_LOCK.lock().expect("persist test lock");
         SESSION_PERSIST_BLOCKED.store(true, Ordering::SeqCst);
         note_memory_sessions_partition("/tmp/proj/");
         assert!(memory_sessions_match_workspace("/tmp/proj"));
@@ -764,9 +776,11 @@ mod tests {
 
     #[test]
     fn partition_switch_context_detects_path_change_and_gate() {
-        assert!(!partition_switch_context(false, Some("/a"), "/a"));
-        assert!(partition_switch_context(false, Some("/a"), "/b"));
-        assert!(partition_switch_context(true, Some("/a"), "/a"));
-        assert!(!partition_switch_context(false, None, "/a"));
+        assert!(!partition_switch_context(false, Some("/a"), "/a", false));
+        assert!(partition_switch_context(false, Some("/a"), "/b", false));
+        assert!(partition_switch_context(true, Some("/a"), "/a", false));
+        assert!(!partition_switch_context(false, None, "/a", false));
+        // persist 门闩未解除时同路径也判定为切换。
+        assert!(partition_switch_context(false, Some("/a"), "/a", true));
     }
 }
