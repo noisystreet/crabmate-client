@@ -86,6 +86,130 @@ fn is_fence_switch(line: &str) -> bool {
     s.starts_with("```") || s.starts_with("~~~")
 }
 
+/// 行首至多 3 个空格的缩进宽度（字节数）。
+fn leading_indent(line: &str) -> usize {
+    line.bytes().take(3).take_while(|&b| b == b' ').count()
+}
+
+/// `b` 起点是否为合法 UTF-8 边界并取首字符；调用方保证切片从 ASCII 边界开始。
+fn first_char(b: &[u8]) -> Option<char> {
+    std::str::from_utf8(b).ok().and_then(|s| s.chars().next())
+}
+
+/// 标记后紧贴的 CJK 等非 ASCII 字母正文（对应共享 normalize 的 `-规范`/`1.下一步` 规则）。
+fn glued_cjk_body(b: &[u8]) -> bool {
+    first_char(b).is_some_and(|c| c.is_alphabetic() && !c.is_ascii())
+}
+
+/// 行首 ATX 标题匹配：返回（`#` 个数, 内容起始字节偏移）。
+/// 与 normalize 语义对齐：`#` 后可跟空格/tab，也允许紧贴正文（`###规范`/`#Title`）。
+fn heading_match(rest: &[u8]) -> Option<(usize, usize)> {
+    let mut h = 0usize;
+    while h < rest.len() && h < 6 && rest[h] == b'#' {
+        h += 1;
+    }
+    if h == 0 {
+        return None;
+    }
+    match rest.get(h) {
+        None => Some((h, h)),
+        Some(b' ') | Some(b'\t') => Some((h, h + 1)),
+        Some(b'#') => None,
+        Some(_) => Some((h, h)),
+    }
+}
+
+/// 引用 `>` 匹配：`>正文`（紧贴）/ `> 正文`（分隔）都可。
+fn quote_match(rest: &[u8]) -> Option<(usize, usize)> {
+    if rest.first() != Some(&b'>') {
+        return None;
+    }
+    Some((
+        1,
+        match rest.get(1) {
+            Some(b' ') | Some(b'\t') => 2,
+            _ => 1,
+        },
+    ))
+}
+
+/// 无序列表 `-`/`+`（CJK 紧贴放行）；`*` 仅空格/tab 分隔（紧贴按斜体语义）。
+fn unordered_match(rest: &[u8]) -> Option<(usize, usize)> {
+    let c0 = *rest.first()?;
+    if matches!(c0, b'-' | b'+') {
+        return match rest.get(1) {
+            Some(b' ') | Some(b'\t') => Some((1, 2)),
+            Some(_) if glued_cjk_body(&rest[1..]) => Some((1, 1)),
+            _ => None,
+        };
+    }
+    if c0 == b'*' {
+        return match rest.get(1) {
+            Some(b' ') | Some(b'\t') => Some((1, 2)),
+            _ => None,
+        };
+    }
+    None
+}
+
+/// 有序列表 `1. `/`1) `（≤9 位；CJK 紧贴放行）。
+fn ordered_match(rest: &[u8]) -> Option<(usize, usize)> {
+    let mut d = 0usize;
+    while d < rest.len() && d < 9 && rest[d].is_ascii_digit() {
+        d += 1;
+    }
+    if d == 0 || !matches!(rest.get(d), Some(b'.') | Some(b')')) {
+        return None;
+    }
+    match rest.get(d + 1) {
+        Some(b' ') | Some(b'\t') => Some((d + 1, d + 2)),
+        Some(_) if glued_cjk_body(&rest[d + 1..]) => Some((d + 1, d + 1)),
+        _ => None,
+    }
+}
+
+/// 行首列表/引用匹配：返回（标记字节数, 内容起始字节偏移）。
+fn list_or_quote_match(rest: &[u8]) -> Option<(usize, usize)> {
+    quote_match(rest)
+        .or_else(|| unordered_match(rest))
+        .or_else(|| ordered_match(rest))
+}
+
+/// 单行：行首标记（标题/列表/引用）轻渲染 + 其余部分行内 md。
+/// 标记弱化为灰色；标题正文整体加粗（行内样式叠加）。宽容识别只影响样式判定，
+/// 不增删字符（分隔空格/tab 原样保留；tab 仅会在折行时被丢弃）。
+fn styled_part_chars(part: &str) -> Vec<(Style, char)> {
+    let indent = leading_indent(part);
+    let rest = &part.as_bytes()[indent..];
+    let (marker_len, content_at, heading) = if let Some((h, ca)) = heading_match(rest) {
+        (h, ca, true)
+    } else if let Some((m, ca)) = list_or_quote_match(rest) {
+        (m, ca, false)
+    } else {
+        return inline_styled_chars(part);
+    };
+    let mut out: Vec<(Style, char)> = Vec::new();
+    out.extend(part[..indent].chars().map(|c| (Style::new(), c)));
+    let marker: String = part[indent..indent + marker_len].to_string();
+    out.extend(marker.chars().map(|c| (Style::new().fg(Color::Gray), c)));
+    if content_at > marker_len {
+        out.push((
+            Style::new(),
+            rest.get(marker_len).copied().unwrap_or(b' ') as char,
+        ));
+    }
+    let body = inline_styled_chars(&part[indent + content_at..]);
+    if heading {
+        out.extend(
+            body.into_iter()
+                .map(|(s, c)| (s.add_modifier(Modifier::BOLD), c)),
+        );
+    } else {
+        out.extend(body);
+    }
+    out
+}
+
 /// 整段助手文本 → 带样式的字符流（段间补 `\n` 作强制断行，标记不跨段解析）。
 /// 处于 `` ``` `` / `~~~` 围栏内的行整行按纯文本，避免代码内容里的 `**`/反引号/
 /// `[t](u)` 等被误当成行内样式而吞字符。
@@ -104,7 +228,7 @@ pub(crate) fn assistant_styled_text(text: &str) -> Vec<(Style, char)> {
         if toggles || in_fence {
             out.extend(part.chars().map(|c| (Style::new(), c)));
         } else {
-            out.extend(inline_styled_chars(part));
+            out.extend(styled_part_chars(part));
         }
         first = false;
     }
@@ -299,5 +423,100 @@ mod tests {
         let rows = wrap_physical("a\u{1b}[31mb", 10);
         assert_eq!(rows, vec!["a[31mb"]);
         assert!(!rows[0].contains('\u{1b}'));
+    }
+
+    fn has_gray(chars: &[(Style, char)], c: char) -> bool {
+        chars
+            .iter()
+            .any(|(s, ch)| *ch == c && s.fg == Some(Color::Gray))
+    }
+
+    fn has_bold(chars: &[(Style, char)], c: char) -> bool {
+        chars
+            .iter()
+            .any(|(s, ch)| *ch == c && s.add_modifier.contains(Modifier::BOLD))
+    }
+
+    #[test]
+    fn heading_is_bold_and_marker_gray() {
+        let chars = assistant_styled_text("# 标题");
+        assert!(has_gray(&chars, '#'));
+        assert!(has_bold(&chars, '标'));
+        assert!(has_bold(&chars, '题'));
+    }
+
+    #[test]
+    fn list_and_quote_markers_are_gray_content_plain() {
+        let ul = assistant_styled_text("- 项目");
+        assert!(has_gray(&ul, '-'));
+        assert!(!has_bold(&ul, '项'));
+        let ol = assistant_styled_text("1. 有序");
+        assert!(has_gray(&ol, '1'));
+        assert!(has_gray(&ol, '.'));
+        let quote = assistant_styled_text("> 引用");
+        assert!(has_gray(&quote, '>'));
+        // 完整文本原样保留（标记字符仍在、未被样式吞掉）
+        let joined: String = quote.iter().map(|(_, ch)| *ch).collect();
+        assert_eq!(joined, "> 引用");
+    }
+
+    #[test]
+    fn heading_keeps_inline_code_and_no_marker_loss() {
+        let chars = assistant_styled_text("# 看 `x` 用");
+        assert!(chars.iter().any(|(s, ch)| {
+            *ch == 'x' && s.fg == Some(Color::Cyan) && s.add_modifier.contains(Modifier::BOLD)
+        }));
+        let joined: String = chars.iter().map(|(_, ch)| *ch).collect();
+        assert_eq!(joined, "# 看 x 用");
+    }
+
+    #[test]
+    fn spaced_asterisks_mid_line_not_treated_as_list() {
+        let chars = assistant_styled_text("a * b * c");
+        let joined: String = chars.iter().map(|(_, ch)| *ch).collect();
+        assert_eq!(joined, "a * b * c");
+        assert!(!has_bold(&chars, 'b') && !chars.iter().any(|(s, _)| s.fg == Some(Color::Gray)));
+    }
+
+    #[test]
+    fn glued_markers_match_desktop_normalize_semantics() {
+        // `###规范` / `-规范` / `1.下一步` / `>正文`：与共享 normalize 补空格后的效果一致
+        let h = assistant_styled_text("###规范");
+        assert!(has_gray(&h, '#'));
+        assert!(has_bold(&h, '规'));
+        let ul = assistant_styled_text("-规范");
+        assert!(has_gray(&ul, '-'));
+        let ol = assistant_styled_text("1.下一步");
+        assert!(has_gray(&ol, '1'));
+        assert!(has_gray(&ol, '.'));
+        let q = assistant_styled_text(">正文");
+        assert!(has_gray(&q, '>'));
+        // 文本逐字保留（不增删字符）
+        for input in ["###规范", "-规范", "1.下一步", ">正文"] {
+            let chars = assistant_styled_text(input);
+            let joined: String = chars.iter().map(|(_, ch)| *ch).collect();
+            assert_eq!(joined, input, "原文应逐字保留: {input}");
+        }
+    }
+
+    #[test]
+    fn ascii_flags_and_asterisk_emphasis_stay_untouched() {
+        // normalize 对 ASCII 粘连不补空格：`-rf` 不是列表
+        let rf = assistant_styled_text("-rf");
+        assert!(!rf.iter().any(|(s, _)| s.fg == Some(Color::Gray)));
+        // 行首 `*强调*` 走斜体而非列表
+        let em = assistant_styled_text("*强调*");
+        assert!(
+            em.iter()
+                .any(|(s, ch)| *ch == '强' && s.add_modifier.contains(Modifier::ITALIC))
+        );
+        assert!(!em.iter().any(|(s, _)| s.fg == Some(Color::Gray)));
+    }
+
+    #[test]
+    fn heading_tab_separator_accepted() {
+        let chars = assistant_styled_text("#\t标题");
+        assert!(has_gray(&chars, '#'));
+        assert!(has_bold(&chars, '标'));
     }
 }
