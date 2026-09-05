@@ -62,6 +62,12 @@ Blank cells are forbidden.
 | In-app stream resume after background | yes | yes | reduced | yes | TUI: repl records a dropped run's `x-stream-job-id` + `last_event_id` and `/resume` re-attaches with `stream_resume:{job_id,after_seq}`. Ctrl+C stops the run; if the cancel request is not acknowledged the job may stay alive and `/resume` still applies. Cleanly finished turns are not resumable. |
 | Per-turn inject / trim transcript notes | yes | yes | yes | no | WASM: Server `timeline_log` `context_inject` / `context_trim`; **hidden by default**; Settings → Appearance. Export never includes them. TUI prints classified SSE as text (no toggle). |
 
+### Settings (serve user-data, Desktop-aligned)
+
+| Capability | Desktop | Android | Web | TUI | Notes |
+|------------|---------|---------|-----|-----|-------|
+| Settings panel editing serve user-data files | yes | yes | yes | reduced | Full-screen `tui` `/settings` / F2 (W1): edit **model name / API Base / Agent role / session mode**; rows show three layers (local override `*` > serve user-data > `/status` defaults; blank = follow server). S saves with GET→merge→PUT into the same `/user-data/llm-overrides` (`client_llm.{model,api_base}`) and `/user-data/prefs` (`cm_role`/`session_mode`) the Desktop/Web settings use, preserving non-managed keys (`executor_llm` / `saved_models` / locale / theme / …), so values survive restarts and are shared across shells. A running turn opens the panel read-only; Esc/F2 closes (dirty edits confirm first). W2: temperature / context tokens / thinking mode / API key (keyring write, flips the auth Notes below) / tool-TTL switch / gateway presets. |
+
 ### Workspace and IDE
 
 | Capability | Desktop | Android | Web | TUI | Notes |

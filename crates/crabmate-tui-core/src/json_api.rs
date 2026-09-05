@@ -44,6 +44,26 @@ impl ServeClient {
         Err(http_error_from_body(status.as_u16(), &text))
     }
 
+    /// `PUT` 无内容响应端点（如 `/user-data/*` 全量保存）：2xx 即成功，不解析 body。
+    pub async fn put_json_no_content(&self, path: &str, body: &Value) -> Result<(), TermError> {
+        let url = self.url(path)?;
+        let mut headers = self.auth_headers()?;
+        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+        let resp = self
+            .http()
+            .put(&url)
+            .headers(headers)
+            .json(body)
+            .send()
+            .await?;
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        if status.is_success() {
+            return Ok(());
+        }
+        Err(http_error_from_body(status.as_u16(), &text))
+    }
+
     async fn read_success_text(resp: reqwest::Response) -> Result<String, TermError> {
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();

@@ -13,6 +13,8 @@ mod controls;
 mod md;
 mod render;
 mod serve_defaults;
+mod settings;
+mod settings_panel;
 mod state;
 mod tool_summary;
 mod worker;
@@ -42,6 +44,8 @@ use crabmate_tui_core::{
 use self::approve::{decision_for_key, decision_summary};
 use self::controls::{Control, clear_word, parse_control, set_mode_field, set_override_field};
 use self::render::{BodyRow, SIDEBAR_MIN_WIDTH, StatusInfo, build_body_rows, chat_body_width};
+use self::settings::{PersistedSettings, merge_turn, normalize};
+use self::settings_panel::{SettingsPanel, is_f2_key};
 use self::worker::{TurnRequest, UiEvent, WorkerJob, spawn_key_reader, spawn_worker};
 use super::SessionPrefs;
 use state::{Focus, LineKind, UiState};
@@ -80,6 +84,10 @@ struct TuiApp<'a> {
     /// 帧间 memo：内容/宽度/搜索未变时复用，避免每帧全量 tokenize+wrap。
     prepared: Vec<BodyRow>,
     body_key: Option<BodyMemoKey>,
+    /// 设置面板（`/settings` / F2 打开；`None` = 关闭）。
+    panel: Option<SettingsPanel>,
+    /// serve user-data 设置快照（启动拉取 / 保存成功后更新；随轮与状态行合成用）。
+    persisted: Option<PersistedSettings>,
 }
 
 impl TuiApp<'_> {
@@ -242,6 +250,14 @@ impl TuiApp<'_> {
         }
     }
 
+    /// 启动时拉取一次 user-data 设置快照（prefs + llm-overrides）→ 持久层。
+    fn load_user_settings(&mut self) {
+        if self.job_tx.send(WorkerJob::LoadUserSettings).is_err() {
+            self.st
+                .push_line(LineKind::System, "拉取设置失败：worker 已退出");
+        }
+    }
+
     /// 回车 / Ctrl+O：先按控制斜杠处理，否则提交消息（回合在跑则保留输入并提示）。
     fn on_submit(&mut self) {
         let text = self.st.current_input();
@@ -302,6 +318,7 @@ impl TuiApp<'_> {
                 self.refresh_status();
                 self.st.push_line(LineKind::System, "正在刷新 serve 状态…");
             }
+            Control::Settings => self.open_settings(),
             Control::ConvNew => {
                 self.new_session();
             }
@@ -324,11 +341,13 @@ impl TuiApp<'_> {
     /// `/help`：向 transcript 打印本地命令与快捷键说明。
     fn show_help(&mut self) {
         for line in [
-            "本地命令：/quit /help /status /mode /role /model /find /conv",
+            "本地命令：/quit /help /status /settings /mode /role /model /find /conv",
             "/mode ask|plan|act · /role <id> · /model <name>（off 清除，随对话生效）",
+            "/settings（或 F2）：设置面板（模型名/API Base/Agent role/会话模式；S 保存到 serve）",
             "/find <词> 搜索并高亮 · /find（空参）跳下一处 · /find off 清除",
             "/conv list 刷新 · /conv use <id> 切换 · /conv new 新会话",
             "按键：Alt+Enter 换行 · Ctrl+E 思考展开/折叠 · Ctrl+W 工作区目录树 · PgUp/PgDn 翻页 · Ctrl+End 回底部",
+            "设置面板：↑↓ 移动 · Enter 编辑 · Tab 切分区 · S 保存 · Esc/F2 关闭（有改动 Esc 先确认）",
             "工作区树：↑↓选 Enter/→展开 ◀收起/回父 r刷新 w回会话列表 Tab/Esc 回输入",
             "工作区未设置：按 p 从项目池选择（选择视图：↑↓选 Enter切换 r刷新 Esc 返回）",
             "审批浮层：Enter=一次 · a=始终 · Esc/n=拒绝 · Ctrl+C 先拒绝、回合随后继续需再按取消",
@@ -379,6 +398,16 @@ impl TuiApp<'_> {
             self.on_ctrl_c();
             return;
         }
+        // F2：设置面板开关（打开时等同 Esc 的关闭语义，脏字段先确认）。
+        if is_f2_key(&key) {
+            self.toggle_settings();
+            return;
+        }
+        // 设置面板打开：按键全部交给面板（不再走 Workspace/Sidebar/输入分发）。
+        if self.panel.is_some() {
+            self.on_settings_key(key);
+            return;
+        }
         if self.st.focus == Focus::Workspace {
             self.on_workspace_key(key);
             return;
@@ -388,6 +417,15 @@ impl TuiApp<'_> {
             return;
         }
         self.on_input_key(key);
+    }
+
+    /// F2 开关设置面板：关闭时若脏字段则先弹确认（Esc 同语义）。
+    fn toggle_settings(&mut self) {
+        if self.panel.is_none() {
+            self.open_settings();
+        } else {
+            self.on_settings_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        }
     }
 
     /// 关闭审批浮层并把决策回传 SSE gate；写一条结果系统行。
@@ -568,6 +606,9 @@ impl TuiApp<'_> {
                 note,
             } => self.st.tool_end(&tool_call_id, &name, ok, note.as_deref()),
             UiEvent::Approval { prompt } => {
+                // 审批浮层优先级高于设置面板：面板（只读）开着时先关掉再弹审批，
+                // 避免按键被面板截走导致审批悬挂。
+                self.panel = None;
                 self.st.begin_approval(&prompt.req, prompt.answer);
             }
             UiEvent::TurnDone { outcome, error } => self.on_turn_done(outcome, error),
@@ -611,6 +652,17 @@ impl TuiApp<'_> {
             },
             UiEvent::WsProjects(result) => self.st.ws_pick_projects(result),
             UiEvent::WsProjectSwitch(result) => self.on_ws_project_switch(result),
+            UiEvent::UserData(result) => match result {
+                Ok(persisted) => self.persisted = Some(persisted),
+                Err(e) => {
+                    self.st.push_line(
+                        LineKind::System,
+                        &format!("拉取 user-data 设置失败：{e}（回退 override 与 serve 默认）"),
+                    );
+                }
+            },
+            UiEvent::SavedLlm(result) => self.on_settings_saved_llm(result),
+            UiEvent::SavedPrefs(result) => self.on_settings_saved_prefs(result),
         }
     }
 
@@ -627,18 +679,45 @@ impl TuiApp<'_> {
     }
 
     fn start_turn(&mut self, message: &str) {
-        let prefs = self.overrides.prefs();
+        // override ＞ user-data 合成随轮字段；空白不发送（回落 serve 默认）。
+        let stored = self.persisted.as_ref();
+        let model = merge_turn(
+            &self.overrides.model,
+            stored.and_then(|p| p.model.as_deref()),
+        );
+        let api_base = merge_turn(
+            &self.overrides.api_base,
+            stored.and_then(|p| p.api_base.as_deref()),
+        );
+        let role = merge_turn(
+            &self.overrides.agent_role,
+            stored.and_then(|p| p.role.as_deref()),
+        );
+        let session_mode = merge_turn(
+            &self.overrides.session_mode,
+            stored.and_then(|p| p.session_mode.as_deref()),
+        );
+        let api_key: Option<String> = self
+            .overrides
+            .api_key
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
+        let client_llm = (api_key.is_some() || model.is_some() || api_base.is_some()).then_some(
+            ClientLlmFields {
+                api_key,
+                model,
+                api_base,
+            },
+        );
         let opts = ChatStreamOptions {
             message: message.to_string(),
             approval_session_id: new_approval_session_id(),
             conversation_id: self.st.conversation_id.clone(),
-            client_llm: prefs.client_llm.map(|cl| ClientLlmFields {
-                api_key: cl.api_key.map(str::to_string),
-                model: cl.model.map(str::to_string),
-                api_base: cl.api_base.map(str::to_string),
-            }),
-            agent_role: prefs.agent_role.map(str::to_string),
-            session_mode: prefs.session_mode.map(str::to_string),
+            client_llm,
+            agent_role: role,
+            session_mode,
             stream_resume: None,
         };
         // 新回合：清上轮工具行映射并回到最新视图（搜索词保留、锚点释放）。
@@ -661,29 +740,40 @@ impl TuiApp<'_> {
         }
     }
 
-    /// 状态行显示值：本地 override 优先（`*` 标记），否则回退 serve 默认。
+    /// 状态行显示值：override（`*`）＞ user-data 已存值 ＞ serve 默认。
     fn status_info(&self) -> StatusInfo {
         let overrides = &self.overrides;
+        let stored = self.persisted.as_ref();
         let defaults = self.st.serve_defaults.as_ref();
-        let effective = |local: Option<&str>, remote: Option<&String>| -> Option<String> {
-            match local.filter(|s| !s.trim().is_empty()) {
+        let show =
+            |local: &Option<String>, stored: Option<&str>, remote: Option<&str>| match normalize(
+                local,
+            ) {
                 Some(v) => Some(format!("{v}*")),
-                None => remote.cloned(),
-            }
-        };
+                None => match stored.map(str::trim).filter(|s| !s.is_empty()) {
+                    Some(v) => Some(v.to_string()),
+                    None => remote
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                        .map(str::to_string),
+                },
+            };
         StatusInfo {
             api_base: self.client.config().api_base.clone(),
-            model: effective(
-                overrides.model.as_deref(),
-                defaults.and_then(|d| d.model.as_ref()),
+            model: show(
+                &overrides.model,
+                stored.and_then(|p| p.model.as_deref()),
+                defaults.and_then(|d| d.model.as_deref()),
             ),
-            role: effective(
-                overrides.agent_role.as_deref(),
-                defaults.and_then(|d| d.role.as_ref()),
+            role: show(
+                &overrides.agent_role,
+                stored.and_then(|p| p.role.as_deref()),
+                defaults.and_then(|d| d.role.as_deref()),
             ),
-            mode: effective(
-                overrides.session_mode.as_deref(),
-                defaults.and_then(|d| d.mode.as_ref()),
+            mode: show(
+                &overrides.session_mode,
+                stored.and_then(|p| p.session_mode.as_deref()),
+                defaults.and_then(|d| d.mode.as_deref()),
             ),
             running: self.st.running,
             cancel_sent: self.st.cancel_sent,
@@ -720,8 +810,9 @@ impl TuiApp<'_> {
             let info = self.status_info();
             // 内容/宽度/搜索未变时复用已构建的 body 物理行，避免每帧全量 tokenize+wrap。
             self.prepare_body(size.width);
+            let panel = self.settings_content((size.width as usize).saturating_sub(2));
             terminal
-                .draw(|f| render::draw(f, &self.st, &info, &self.prepared))
+                .draw(|f| render::draw(f, &self.st, &info, &self.prepared, panel.as_ref()))
                 .context("tui draw failed")?;
             let _ = io::stdout().flush();
             thread::sleep(Duration::from_millis(if any { 2 } else { 50 }));
@@ -765,13 +856,16 @@ pub async fn run_tui(client: &ServeClient, overrides: &mut SessionPrefs, yes: bo
         quit_pending: false,
         prepared: Vec::new(),
         body_key: None,
+        panel: None,
+        persisted: None,
     };
     terminal.clear().context("clear screen")?;
-    // 启动即拉一次会话 / 工作区根 / serve 默认状态（失败以系统行提示）。
+    // 启动即拉一次会话 / 工作区根 / serve 默认状态 / user-data 设置快照（失败以系统行提示）。
     app.refresh_sessions();
     app.st.ws_begin_root_fetch();
     app.refresh_workspace();
     app.refresh_status();
+    app.load_user_settings();
     app.run_loop(&mut terminal)
 }
 

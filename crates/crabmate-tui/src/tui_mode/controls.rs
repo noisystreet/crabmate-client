@@ -10,6 +10,8 @@ pub enum Control {
     Mode(Option<String>),
     Role(Option<String>),
     Status,
+    /// `/settings`：打开设置面板（等同 F2）。
+    Settings,
     Find(Option<String>),
     ConvNew,
     ConvRefresh,
@@ -76,6 +78,7 @@ pub fn parse_control(text: &str) -> Option<Control> {
         "mode" => Some(Control::Mode(arg_opt)),
         "role" => Some(Control::Role(arg_opt)),
         "status" => Some(Control::Status),
+        "settings" => Some(Control::Settings),
         "find" | "search" | "grep" => Some(Control::Find(arg_opt)),
         "conv" => Some(match arg_opt {
             None => Control::ConvRefresh,
@@ -102,6 +105,10 @@ mod tests {
         assert!(matches!(parse_control("/quit"), Some(Control::Quit)));
         assert!(matches!(parse_control("/EXIT"), Some(Control::Quit)));
         assert!(matches!(parse_control("/status"), Some(Control::Status)));
+        assert!(matches!(
+            parse_control("/settings"),
+            Some(Control::Settings)
+        ));
         assert!(matches!(parse_control("/conv"), Some(Control::ConvRefresh)));
         assert!(matches!(parse_control("/conv new"), Some(Control::ConvNew)));
         assert!(matches!(

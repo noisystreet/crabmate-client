@@ -11,12 +11,14 @@ use crossterm::event::{self, Event, KeyEvent};
 use crabmate_tui_core::{
     ApprovalGate, AutoAllowOnce, ChatStreamOptions, ChatStreamOutcome, ServeClient, StreamCancel,
     StreamSink, TermError, WebSessionsList, WorkspaceDirData, WorkspaceProjectsData,
-    fetch_web_sessions, fetch_workspace, fetch_workspace_dir, fetch_workspace_projects,
+    fetch_llm_overrides, fetch_user_data_prefs, fetch_web_sessions, fetch_workspace,
+    fetch_workspace_dir, fetch_workspace_projects, put_llm_overrides, put_user_data_prefs,
     run_chat_stream_sink, switch_workspace_project,
 };
 
 use super::approve::{ApprovalPrompt, OverlayApprovalGate};
 use super::serve_defaults::ServeDefaults;
+use super::settings::{LlmSave, PersistedSettings, PrefsSave, merge_llm_save, merge_prefs_save};
 
 /// UI 事件（键盘线程与回合/拉取线程共同的生产者）。
 pub(super) enum UiEvent {
@@ -56,6 +58,12 @@ pub(super) enum UiEvent {
     WsProjects(Result<WorkspaceProjectsData, String>),
     /// 项目切换（`POST /workspace/projects`）结果：成功为 serve 端工作区路径。
     WsProjectSwitch(Result<String, String>),
+    /// 启动时 user-data 设置快照（prefs + llm-overrides）拉取结果（合成持久层）。
+    UserData(Result<PersistedSettings, String>),
+    /// `llm-overrides` 保存结果：`Ok` 回传已应用动作（面板据此清 staged）。
+    SavedLlm(Result<LlmSave, String>),
+    /// `prefs` 保存结果：`Ok` 回传已应用动作（面板据此清 staged）。
+    SavedPrefs(Result<PrefsSave, String>),
 }
 
 /// 回合后台任务：由持久 worker 线程串行消费。
@@ -77,6 +85,12 @@ pub(super) enum WorkerJob {
     WsProjects,
     /// 切换项目池内项目（`POST /workspace/projects`）。
     WsSwitchProject(String),
+    /// 拉取 user-data 设置快照（prefs + llm-overrides）→ 持久层。
+    LoadUserSettings,
+    /// 保存 llm-overrides：先 GET 再改 `client_llm.{model,api_base}` 再全量 PUT。
+    SaveLlm(LlmSave),
+    /// 保存 prefs：先 GET 再改 `cm_role/session_mode` 再全量 PUT。
+    SavePrefs(PrefsSave),
 }
 
 /// 全屏模式 sink：把流事件发往 UI 事件通道。
@@ -175,6 +189,9 @@ pub(super) fn spawn_worker(client: ServeClient, tx: Sender<UiEvent>) -> Sender<W
                 WorkerJob::RefreshStatus => job_refresh_status(&rt, &client, &tx),
                 WorkerJob::WsProjects => job_ws_projects(&rt, &client, &tx),
                 WorkerJob::WsSwitchProject(name) => job_ws_switch_project(&rt, &client, &name, &tx),
+                WorkerJob::LoadUserSettings => job_load_user_settings(&rt, &client, &tx),
+                WorkerJob::SaveLlm(save) => job_save_llm(&rt, &client, save, &tx),
+                WorkerJob::SavePrefs(save) => job_save_prefs(&rt, &client, save, &tx),
             }
         }
     });
@@ -285,4 +302,63 @@ fn job_ws_switch_project(
         .block_on(switch_workspace_project(client, name))
         .map_err(|e| e.to_string());
     let _ = tx.send(UiEvent::WsProjectSwitch(result));
+}
+
+/// 启动时拉取 user-data 设置快照（`GET /user-data/prefs` + `GET /user-data/llm-overrides`）
+/// 并合成持久层；任一失败整体报错（面板/合成回退 override 与 serve 默认）。
+fn job_load_user_settings(
+    rt: &tokio::runtime::Runtime,
+    client: &ServeClient,
+    tx: &Sender<UiEvent>,
+) {
+    let result: Result<PersistedSettings, String> = rt.block_on(async {
+        let prefs = fetch_user_data_prefs(client)
+            .await
+            .map_err(|e| e.to_string())?;
+        let llm = fetch_llm_overrides(client)
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(PersistedSettings::from_snapshot(&prefs, &llm))
+    });
+    let _ = tx.send(UiEvent::UserData(result));
+}
+
+/// 保存 llm-overrides：先 GET 现值，只改 `client_llm.{model,api_base}` 再全量 PUT
+/// （合并保真，不覆盖 `executor_llm/saved_models/execution_mode`）。
+fn job_save_llm(
+    rt: &tokio::runtime::Runtime,
+    client: &ServeClient,
+    save: LlmSave,
+    tx: &Sender<UiEvent>,
+) {
+    let result: Result<LlmSave, String> = rt.block_on(async {
+        let dto = fetch_llm_overrides(client)
+            .await
+            .map_err(|e| e.to_string())?;
+        put_llm_overrides(client, &merge_llm_save(dto, &save))
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(save)
+    });
+    let _ = tx.send(UiEvent::SavedLlm(result));
+}
+
+/// 保存 prefs：先 GET 现值，只改 `cm_role/session_mode` 再全量 PUT
+/// （合并保真，不覆盖 `locale/theme/布局/IDE` 等字段）。
+fn job_save_prefs(
+    rt: &tokio::runtime::Runtime,
+    client: &ServeClient,
+    save: PrefsSave,
+    tx: &Sender<UiEvent>,
+) {
+    let result: Result<PrefsSave, String> = rt.block_on(async {
+        let dto = fetch_user_data_prefs(client)
+            .await
+            .map_err(|e| e.to_string())?;
+        put_user_data_prefs(client, &merge_prefs_save(dto, &save))
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(save)
+    });
+    let _ = tx.send(UiEvent::SavedPrefs(result));
 }

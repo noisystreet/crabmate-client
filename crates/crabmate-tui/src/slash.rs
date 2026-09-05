@@ -115,6 +115,7 @@ fn print_help() {
   /model [name]         set client-side model override for later turns (off to clear)\n\
   /mode ask|plan|act    set session mode for later turns (off to clear)\n\
   /role <id>            set agent role for later turns (off to clear; list via /status)\n\
+  settings panel        full-screen settings panel: run `crabmate-tui tui` then /settings or F2\n\
   /resume               resume the last interrupted run (network drop)\n\
   /workspace [path]     show or set serve workspace root (/cd alias)\n\
   /conv                 show current conversation_id\n\
