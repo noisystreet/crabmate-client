@@ -120,11 +120,18 @@ Full-screen `tui` (ratatui; shows a session sidebar on terminals ≥ 120 columns
 ./crates/crabmate-tui/target/debug/crabmate-tui \
   --api-base http://127.0.0.1:8080 \
   tui
-# Layout: status bar | session sidebar | streaming transcript | input bar
+# Layout: status bar | session sidebar | streaming transcript | composer
 # Ctrl+C cancels the in-flight turn (twice force-quits; idle exits)
 # Tab → session list (↑/↓ select · Enter use · n new · r refresh · Esc back)
-# Slashes: /model /mode /role /status /conv [new] /quit  (status bar shows serve defaults,
-# local overrides are marked with `*`; switching sessions starts a fresh transcript)
+# Alt+Enter inserts a newline (multi-line compose); Enter / Ctrl+O send
+# PgUp / PgDn / Ctrl+Home / Ctrl+End scroll the transcript (↑/↓ when single-line input)
+# Ctrl+E expands/collapses the thinking rows (folded to one line by default)
+# Non-allowlisted commands raise an approval overlay (Enter/once · a/always · Esc/n/deny)
+# Tool calls render as one-line summaries, updated in place with ✓/✗ + a note
+# /find <word> highlights and jumps · /find cycles to the next match · /find off clears
+# Slashes: /model /mode /role /status /find /conv [new] /quit · /help lists everything
+#   (status bar shows serve defaults; local overrides are marked with `*`;
+#    switching sessions starts a fresh transcript)
 ```
 
 ## Docs
