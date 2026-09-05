@@ -1,9 +1,9 @@
 //! `crabmate-tui tui`：全屏模式（M3）。
 //!
-//! 布局：状态行 + 左栏会话 + 主区流式 transcript + 底栏（多行）输入 + 审批浮层。
-//! 回合/拉取在持久 worker 线程的 current-thread tokio runtime 中串行执行
-//! （`run_chat_stream_sink` / `fetch_web_sessions` / `/status`），避免全屏事件循环
-//! 与 IO 互相阻塞。raw mode 下 Ctrl+C 是按键事件，取消经 [`StreamCancel`] 走
+//! 布局：顶栏(工作区) + 左栏会话 + 主区流式 transcript + 底栏（多行）输入 + 审批浮层 +
+//! 底部状态行。回合/拉取在持久 worker 线程的 current-thread tokio runtime 中串行执行
+//! （`run_chat_stream_sink` / `fetch_web_sessions` / `/status` / `/workspace`），避免全屏
+//! 事件循环与 IO 互相阻塞。raw mode 下 Ctrl+C 是按键事件，取消经 [`StreamCancel`] 走
 //! "外部取消"通道，不复用文本模式的 `ctrl_c` 信号路径。
 
 mod approve;
@@ -29,7 +29,7 @@ use ratatui::backend::{Backend, CrosstermBackend};
 use crabmate_tui_core::{
     ApprovalDecision, ApprovalGate, AutoAllowOnce, ChatStreamOptions, ChatStreamOutcome,
     ClientLlmFields, ServeClient, StreamCancel, StreamSink, TermError, WebSessionsList,
-    fetch_web_sessions, new_approval_session_id, run_chat_stream_sink,
+    fetch_web_sessions, fetch_workspace, new_approval_session_id, run_chat_stream_sink,
 };
 
 use self::approve::{ApprovalPrompt, OverlayApprovalGate, decision_for_key, decision_summary};
@@ -63,6 +63,8 @@ enum UiEvent {
     },
     Sessions(Result<WebSessionsList, String>),
     Status(Result<ServeDefaults, String>),
+    /// 工作区路径（`GET /workspace`）；失败为 None（顶栏显示占位）。
+    Workspace(Option<String>),
 }
 
 /// 回合后台任务：由持久 worker 线程串行消费。
@@ -72,7 +74,7 @@ struct TurnRequest {
     yes: bool,
 }
 
-/// worker 任务：回合 / 会话刷新 / 状态刷新（复用同一 runtime 与连接池）。
+/// worker 任务：回合 / 会话与工作区刷新 / 状态刷新（复用同一 runtime 与连接池）。
 enum WorkerJob {
     Turn(Box<TurnRequest>),
     RefreshSessions,
@@ -176,6 +178,15 @@ fn spawn_worker(client: ServeClient, tx: Sender<UiEvent>) -> Sender<WorkerJob> {
                         Err(e) => Err(e.to_string()),
                     });
                     if tx.send(event).is_err() {
+                        break;
+                    }
+                    // 顺带刷新工作区路径（顶栏显示）；失败静默置 None。
+                    let ws = rt.block_on(fetch_workspace(&client)).ok();
+                    let path = ws.and_then(|w| {
+                        let p = w.path.trim();
+                        (!p.is_empty()).then(|| p.to_string())
+                    });
+                    if tx.send(UiEvent::Workspace(path)).is_err() {
                         break;
                     }
                 }
@@ -627,6 +638,7 @@ impl TuiApp<'_> {
                         .push_line(LineKind::System, &format!("拉取 serve 状态失败：{e}"));
                 }
             },
+            UiEvent::Workspace(path) => self.st.workspace_path = path,
         }
     }
 

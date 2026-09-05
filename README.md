@@ -120,7 +120,7 @@ Full-screen `tui` (ratatui; shows a session sidebar on terminals ≥ 120 columns
 ./crates/crabmate-tui/target/debug/crabmate-tui \
   --api-base http://127.0.0.1:8080 \
   tui
-# Layout: status bar | session sidebar | streaming transcript | composer
+# Layout: top bar (workspace) | session sidebar | streaming transcript | composer | status bar
 # Ctrl+C cancels the in-flight turn (twice force-quits; idle exits)
 #   while an approval overlay is open the first Ctrl+C only denies that command —
 #   the turn keeps running and a following Ctrl+C cancels it
