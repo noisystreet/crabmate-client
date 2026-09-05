@@ -47,6 +47,8 @@ frontend & tui-core ──┴── crabmate（protocol feature；crates.io 0.4.
 
 设计 [`remote_cli_tui.md`](./remote_cli_tui.md) §3 已允许：connect 与 tui 重叠的「纯 HTTP 探测」可逐步上收；**不**阻塞终端分期。
 
+**2026-09**：Markdown 渲染前的文本规范化（原 `frontend/src/markdown.rs::normalize_markdown_for_render` 及全部 CJK/围栏/标题/列表补丁）下沉为 `crabmate-client-api::markdown_normalize`（纯逻辑、零新依赖），`frontend` 改为消费共享实现（行为不变）；TUI 后续轻渲染直接复用同一入口。
+
 ---
 
 ## 3. 拟建布局
