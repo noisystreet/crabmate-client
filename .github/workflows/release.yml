@@ -1,0 +1,298 @@
+# crabmate-client 发布打包：推 v* tag → 真实 UI 的 desktop/web/tui .deb → GitHub Release
+# 与 CI（stub 门禁）不同：这里用 trunk build --release 产出的真实 frontend/dist 打正式安装包。
+# 发布纪律：tag 必须可达自 origin/main；Release notes 取自 CHANGELOG.md 对应版本段（规则见 CHANGELOG 头注）。
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  guard:
+    name: Guard (tag reachable from main)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Require tag commit on origin/main
+        run: |
+          git fetch origin main
+          if git merge-base --is-ancestor HEAD FETCH_HEAD; then
+            echo "ok: ${{ github.ref_name }} is reachable from origin/main"
+          else
+            echo "error: tag ${{ github.ref_name }} is not on origin/main (push tags only after merge)" >&2
+            exit 1
+          fi
+
+  # 只跑一次真实 UI：desktop 经 CRABMATE_FRONTEND_DIST 复用；web 直接落 frontend/dist。
+  build-frontend:
+    name: release UI (trunk --release)
+    needs: guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force 2>/dev/null || true
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            frontend
+
+      - name: Install trunk
+        run: cargo install trunk --locked
+
+      - name: Install wasm-opt (binaryen; trunk --release 需要，否则产出空 .wasm)
+        run: sudo apt-get update && sudo apt-get install -y binaryen
+
+      - name: Build release UI
+        run: make frontend-release
+
+      - name: Sanity-check dist
+        run: |
+          set -euo pipefail
+          test -f frontend/dist/index.html
+          mapfile -t wasm < <(find frontend/dist -type f -name '*.wasm')
+          test "${#wasm[@]}" -gt 0
+          for w in "${wasm[@]}"; do
+            test -s "$w"
+          done
+          ls -lh frontend/dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist
+          retention-days: 1
+
+  build-desktop-deb:
+    name: desktop .deb (real UI)
+    needs: build-frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force 2>/dev/null || true
+
+      - name: Install system deps (GTK / WebKit / bundler)
+        run: |
+          sudo apt-get update && sudo apt-get install -y \
+            libssl-dev libssh2-1-dev \
+            libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev \
+            librsvg2-dev patchelf
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            desktop-tauri/src-tauri
+            crates/crabmate-connect
+
+      - name: Install tauri-cli
+        run: cargo install tauri-cli --version "^2" --locked
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: dist-ui
+
+      - name: Locate downloaded dist (v4 下载布局)
+        run: |
+          if [[ -f dist-ui/index.html ]]; then
+            echo "FRONTEND_DIST=$GITHUB_WORKSPACE/dist-ui" >> "$GITHUB_ENV"
+          elif [[ -f dist-ui/frontend-dist/index.html ]]; then
+            echo "FRONTEND_DIST=$GITHUB_WORKSPACE/dist-ui/frontend-dist" >> "$GITHUB_ENV"
+          else
+            echo "error: frontend-dist download has no index.html" >&2
+            exit 1
+          fi
+
+      - name: cargo tauri build (.deb with real UI)
+        # before-desktop-build.sh：CRABMATE_FRONTEND_DIST 命中后不重建 trunk，仅同步 + 体积门禁
+        run: |
+          export CRABMATE_FRONTEND_DIST="$FRONTEND_DIST"
+          make desktop-release
+
+      - name: Verify deb package
+        run: |
+          set -euo pipefail
+          DEB=$(ls desktop-tauri/src-tauri/target/release/bundle/deb/crabmate-desktop_*.deb | head -1)
+          test -f "$DEB"
+          ls -lh "$DEB"
+          # Debian Package 名须与 Server 主仓 crabmate.deb 区分
+          dpkg-deb -I "$DEB" | grep -E '^ Package: crabmate-desktop$'
+          dpkg-deb -c "$DEB" | grep -E 'usr/bin/crabmate-desktop$'
+          dpkg-deb -c "$DEB" | grep -E 'usr/share/applications/crabmate-desktop\.desktop$'
+          # /etc/crabmate 归 Server 包；桌面壳不得占用
+          if dpkg-deb -c "$DEB" | grep -E 'etc/crabmate/'; then
+            echo "error: desktop deb must not ship /etc/crabmate (owned by server package)" >&2
+            exit 1
+          fi
+          # 不得再打进 serve sidecar
+          if dpkg-deb -c "$DEB" | grep -E 'usr/bin/crabmate$'; then
+            echo "error: deb must not contain crabmate serve sidecar" >&2
+            exit 1
+          fi
+          echo "deb package OK: $DEB"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-deb
+          path: desktop-tauri/src-tauri/target/release/bundle/deb/crabmate-desktop_*.deb
+          retention-days: 7
+
+  build-web-deb:
+    name: web .deb (real UI)
+    needs: build-frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force 2>/dev/null || true
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            crates/crabmate-web-host
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: ui-dist
+
+      # 复用已构建的真实 dist：CM_WEB_SKIP_FRONTEND=1 跳过 trunk，仍打包 frontend/dist
+      - name: Place real dist under frontend/dist
+        run: |
+          set -euo pipefail
+          src="ui-dist"
+          [[ -f "${src}/index.html" ]] || src="ui-dist/frontend-dist"
+          test -f "${src}/index.html"
+          rm -rf frontend/dist
+          mkdir -p frontend/dist
+          cp -a "${src}/." frontend/dist/
+          ls -lh frontend/dist
+
+      - name: make web-release (.deb with real UI)
+        env:
+          CM_WEB_SKIP_FRONTEND: "1"
+        run: make web-release
+
+      - name: Verify web deb package
+        run: bash scripts/verify-web-deb.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-deb
+          path: crates/crabmate-web-host/target/debian/crabmate-web_*.deb
+          retention-days: 7
+
+  build-tui-deb:
+    name: tui .deb
+    needs: guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force 2>/dev/null || true
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            crates/crabmate-tui
+            crates/crabmate-tui-core
+            crates/crabmate-client-api
+
+      - name: make tui-release
+        run: make tui-release
+
+      - name: Verify tui deb package
+        run: bash scripts/verify-tui-deb.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tui-deb
+          path: crates/crabmate-tui/target/debian/crabmate-tui_*.deb
+          retention-days: 7
+
+  publish:
+    name: Publish GitHub Release
+    needs: [build-desktop-deb, build-web-deb, build-tui-deb]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: List artifacts
+        run: ls -lh artifacts/
+
+      - name: Extract CHANGELOG section for this tag
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          python3 - "$TAG" <<'PY'
+          import re, sys
+
+          tag = sys.argv[1]
+          version = tag[1:] if tag.startswith("v") else tag
+          text = open("CHANGELOG.md", encoding="utf-8").read()
+          pattern = re.compile(r"^## \[\s*" + re.escape(version) + r"\s*\]", re.MULTILINE)
+          m = pattern.search(text)
+          if m:
+              rest = text[m.end():]
+              nxt = re.search(r"^## ", rest, re.MULTILINE)
+              body = rest[: nxt.start()] if nxt else rest
+              out = body.strip() + "\n\n---\n"
+              out += "Artifacts: crabmate-desktop / crabmate-web / crabmate-tui .deb (amd64).\n"
+          else:
+              out = (
+                  f"No `CHANGELOG.md` section `## [{version}]` found.\n\n"
+                  "Before tagging, move the `[Unreleased]` entries into a `## [<version>] - <date>` "
+                  "section (see the CHANGELOG header), or edit these release notes.\n"
+              )
+          with open("/tmp/release-notes.md", "w", encoding="utf-8") as f:
+              f.write(out)
+          PY
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          body_path: /tmp/release-notes.md
+          files: artifacts/*.deb
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          fail_on_unmatched_files: true
