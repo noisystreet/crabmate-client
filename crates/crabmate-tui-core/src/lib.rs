@@ -29,6 +29,6 @@ pub use sessions::{
 };
 pub use url::{api_url, normalize_api_base};
 pub use workspace::{
-    WorkspaceDirData, WorkspaceDirEntry, WorkspaceInfo, fetch_workspace, fetch_workspace_dir,
-    set_workspace,
+    WorkspaceDirData, WorkspaceDirEntry, WorkspaceInfo, WorkspaceProjectsData, fetch_workspace,
+    fetch_workspace_dir, fetch_workspace_projects, set_workspace, switch_workspace_project,
 };

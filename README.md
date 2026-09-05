@@ -126,6 +126,7 @@ Full-screen `tui` (ratatui; shows a session sidebar on terminals ≥ 120 columns
 #   the turn keeps running and a following Ctrl+C cancels it
 # Tab → session list (↑/↓ select · Enter use · n new · r refresh · Esc back)
 # Ctrl+W → workspace directory tree (in the left column: ↑/↓ select · Enter/→ expand a dir · ← collapse/parent · r refresh · w sessions · Esc back)
+# When no workspace is set the sidebar shows "not set: press p to pick from the project pool"; p lists the serve project pool (↑/↓ · Enter switch · Esc back)
 # Alt+Enter inserts a newline (multi-line compose); Enter / Ctrl+O send
 # PgUp / PgDn / Ctrl+Home / Ctrl+End scroll the transcript (↑/↓ when single-line input)
 # Ctrl+E expands/collapses the thinking rows (folded to one line by default)

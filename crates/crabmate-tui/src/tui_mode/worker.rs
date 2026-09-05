@@ -10,8 +10,9 @@ use crossterm::event::{self, Event, KeyEvent};
 
 use crabmate_tui_core::{
     ApprovalGate, AutoAllowOnce, ChatStreamOptions, ChatStreamOutcome, ServeClient, StreamCancel,
-    StreamSink, TermError, WebSessionsList, WorkspaceDirData, fetch_web_sessions, fetch_workspace,
-    fetch_workspace_dir, run_chat_stream_sink,
+    StreamSink, TermError, WebSessionsList, WorkspaceDirData, WorkspaceProjectsData,
+    fetch_web_sessions, fetch_workspace, fetch_workspace_dir, fetch_workspace_projects,
+    run_chat_stream_sink, switch_workspace_project,
 };
 
 use super::approve::{ApprovalPrompt, OverlayApprovalGate};
@@ -51,6 +52,10 @@ pub(super) enum UiEvent {
         rel: String,
         result: Result<WorkspaceDirData, String>,
     },
+    /// 项目池列表（`GET /workspace/projects`）。
+    WsProjects(Result<WorkspaceProjectsData, String>),
+    /// 项目切换（`POST /workspace/projects`）结果：成功为 serve 端工作区路径。
+    WsProjectSwitch(Result<String, String>),
 }
 
 /// 回合后台任务：由持久 worker 线程串行消费。
@@ -68,6 +73,10 @@ pub(super) enum WorkerJob {
     /// 展开目录 → 拉取该目录子列表。
     WorkspaceDir(String),
     RefreshStatus,
+    /// 项目池列表（`GET /workspace/projects`）。
+    WsProjects,
+    /// 切换项目池内项目（`POST /workspace/projects`）。
+    WsSwitchProject(String),
 }
 
 /// 全屏模式 sink：把流事件发往 UI 事件通道。
@@ -164,6 +173,8 @@ pub(super) fn spawn_worker(client: ServeClient, tx: Sender<UiEvent>) -> Sender<W
                 WorkerJob::RefreshWorkspace => job_refresh_workspace_root(&rt, &client, &tx),
                 WorkerJob::WorkspaceDir(rel) => job_workspace_dir(&rt, &client, &rel, &tx),
                 WorkerJob::RefreshStatus => job_refresh_status(&rt, &client, &tx),
+                WorkerJob::WsProjects => job_ws_projects(&rt, &client, &tx),
+                WorkerJob::WsSwitchProject(name) => job_ws_switch_project(&rt, &client, &name, &tx),
             }
         }
     });
@@ -253,4 +264,25 @@ fn job_workspace_dir(
 fn job_refresh_status(rt: &tokio::runtime::Runtime, client: &ServeClient, tx: &Sender<UiEvent>) {
     let result = rt.block_on(fetch_serve_defaults(client));
     let _ = tx.send(UiEvent::Status(result));
+}
+
+/// 项目池列表（`GET /workspace/projects`）。
+fn job_ws_projects(rt: &tokio::runtime::Runtime, client: &ServeClient, tx: &Sender<UiEvent>) {
+    let result = rt
+        .block_on(fetch_workspace_projects(client))
+        .map_err(|e| e.to_string());
+    let _ = tx.send(UiEvent::WsProjects(result));
+}
+
+/// 切换项目池内项目（`POST /workspace/projects`）。
+fn job_ws_switch_project(
+    rt: &tokio::runtime::Runtime,
+    client: &ServeClient,
+    name: &str,
+    tx: &Sender<UiEvent>,
+) {
+    let result = rt
+        .block_on(switch_workspace_project(client, name))
+        .map_err(|e| e.to_string());
+    let _ = tx.send(UiEvent::WsProjectSwitch(result));
 }
