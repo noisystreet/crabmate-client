@@ -1,16 +1,21 @@
-//! `crabmate-tui tui`：全屏模式（M3）。
+//! `crabmate-tui tui`：全屏模式（M3–M4）。
 //!
-//! 布局：顶栏(工作区) + 左栏会话 + 主区流式 transcript + 底栏（多行）输入 + 审批浮层 +
-//! 底部状态行。回合/拉取在持久 worker 线程的 current-thread tokio runtime 中串行执行
-//! （`run_chat_stream_sink` / `fetch_web_sessions` / `/status` / `/workspace`），避免全屏
-//! 事件循环与 IO 互相阻塞。raw mode 下 Ctrl+C 是按键事件，取消经 [`StreamCancel`] 走
-//! "外部取消"通道，不复用文本模式的 `ctrl_c` 信号路径。
+//! 布局：顶栏(工作区) + 左栏（会话 / Ctrl+W 工作区目录树）+ 主区流式 transcript +
+//! 底栏（多行）输入 + 审批浮层 + 底部状态行。回合/拉取在持久 worker 线程的
+//! current-thread tokio runtime 中串行执行（`run_chat_stream_sink` / `fetch_web_sessions`
+//! / `fetch_workspace_dir` / `/status`），避免全屏事件循环与 IO 互相阻塞。raw mode 下
+//! Ctrl+C 是按键事件，取消经 [`StreamCancel`] 走"外部取消"通道，不复用文本模式的
+//! `ctrl_c` 信号路径。
 
 mod approve;
 mod controls;
 mod md;
 mod render;
+mod serve_defaults;
 mod state;
+mod worker;
+mod workspace_tree;
+mod ws_sidebar;
 
 use std::io::{self, Write};
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -19,7 +24,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use crossterm::cursor::SetCursorStyle;
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
@@ -28,218 +33,16 @@ use ratatui::Terminal;
 use ratatui::backend::{Backend, CrosstermBackend};
 
 use crabmate_tui_core::{
-    ApprovalDecision, ApprovalGate, AutoAllowOnce, ChatStreamOptions, ChatStreamOutcome,
-    ClientLlmFields, ServeClient, StreamCancel, StreamSink, TermError, WebSessionsList,
-    fetch_web_sessions, fetch_workspace, new_approval_session_id, run_chat_stream_sink,
+    ApprovalDecision, ChatStreamOptions, ChatStreamOutcome, ClientLlmFields, ServeClient,
+    StreamCancel, new_approval_session_id,
 };
 
-use self::approve::{ApprovalPrompt, OverlayApprovalGate, decision_for_key, decision_summary};
+use self::approve::{decision_for_key, decision_summary};
 use self::controls::{Control, clear_word, parse_control, set_mode_field, set_override_field};
 use self::render::{BodyRow, SIDEBAR_MIN_WIDTH, StatusInfo, build_body_rows, chat_body_width};
+use self::worker::{TurnRequest, UiEvent, WorkerJob, spawn_key_reader, spawn_worker};
 use super::SessionPrefs;
-use state::{Focus, LineKind, ServeDefaults, UiState};
-
-/// UI 事件（键盘线程与回合/拉取线程共同的生产者）。
-enum UiEvent {
-    Key(KeyEvent),
-    Text(String),
-    Thinking(String),
-    System(String),
-    ToolStart {
-        tool_call_id: String,
-        name: String,
-    },
-    ToolEnd {
-        tool_call_id: String,
-        name: String,
-        ok: Option<bool>,
-        note: Option<String>,
-    },
-    Approval {
-        prompt: ApprovalPrompt,
-    },
-    TurnDone {
-        outcome: ChatStreamOutcome,
-        error: Option<String>,
-    },
-    Sessions(Result<WebSessionsList, String>),
-    Status(Result<ServeDefaults, String>),
-    /// 工作区路径（`GET /workspace`）；失败为 None（顶栏显示占位）。
-    Workspace(Option<String>),
-}
-
-/// 回合后台任务：由持久 worker 线程串行消费。
-struct TurnRequest {
-    opts: ChatStreamOptions,
-    cancel: StreamCancel,
-    yes: bool,
-}
-
-/// worker 任务：回合 / 会话与工作区刷新 / 状态刷新（复用同一 runtime 与连接池）。
-enum WorkerJob {
-    Turn(Box<TurnRequest>),
-    RefreshSessions,
-    RefreshStatus,
-}
-
-/// 全屏模式 sink：把流事件发往 UI 事件通道。
-struct UiSink {
-    tx: Sender<UiEvent>,
-}
-
-impl StreamSink for UiSink {
-    fn on_text(&mut self, delta: &str) -> Result<(), TermError> {
-        if !delta.is_empty() {
-            self.tx
-                .send(UiEvent::Text(delta.to_string()))
-                .map_err(|_| TermError::Message("ui channel closed".into()))?;
-        }
-        Ok(())
-    }
-
-    fn on_reasoning(&mut self, delta: &str) -> Result<(), TermError> {
-        if !delta.is_empty() {
-            self.tx
-                .send(UiEvent::Thinking(delta.to_string()))
-                .map_err(|_| TermError::Message("ui channel closed".into()))?;
-        }
-        Ok(())
-    }
-
-    fn on_system(&mut self, line: &str) -> Result<(), TermError> {
-        if !line.is_empty() {
-            self.tx
-                .send(UiEvent::System(line.to_string()))
-                .map_err(|_| TermError::Message("ui channel closed".into()))?;
-        }
-        Ok(())
-    }
-
-    fn on_tool_start(&mut self, tool_call_id: &str, name: &str) -> Result<(), TermError> {
-        self.tx
-            .send(UiEvent::ToolStart {
-                tool_call_id: tool_call_id.to_string(),
-                name: name.to_string(),
-            })
-            .map_err(|_| TermError::Message("ui channel closed".into()))
-    }
-
-    fn on_tool_end(
-        &mut self,
-        tool_call_id: &str,
-        name: &str,
-        ok: Option<bool>,
-        note: Option<&str>,
-    ) -> Result<(), TermError> {
-        self.tx
-            .send(UiEvent::ToolEnd {
-                tool_call_id: tool_call_id.to_string(),
-                name: name.to_string(),
-                ok,
-                note: note.map(str::to_string),
-            })
-            .map_err(|_| TermError::Message("ui channel closed".into()))
-    }
-}
-
-/// 键盘读取线程：阻塞在 `event::read()`，按键转为 `UiEvent::Key`。
-fn spawn_key_reader(tx: Sender<UiEvent>) {
-    thread::spawn(move || {
-        loop {
-            match event::read() {
-                Ok(Event::Key(key)) => {
-                    if tx.send(UiEvent::Key(key)).is_err() {
-                        break;
-                    }
-                }
-                Ok(_) => {}
-                Err(_) => break,
-            }
-        }
-    });
-}
-
-/// 持久 worker：单 current-thread runtime 串行执行回合与刷新任务，
-/// 避免同一 `reqwest::Client` 跨多个临时 runtime 复用的连接池问题；
-/// UI 退出（job_tx drop）后 worker 自行退出。
-fn spawn_worker(client: ServeClient, tx: Sender<UiEvent>) -> Sender<WorkerJob> {
-    let (job_tx, job_rx) = mpsc::channel::<WorkerJob>();
-    thread::spawn(move || {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("worker runtime");
-        while let Ok(job) = job_rx.recv() {
-            match job {
-                WorkerJob::Turn(job) => run_turn_job(&rt, &client, *job, &tx),
-                WorkerJob::RefreshSessions => {
-                    let result = rt.block_on(fetch_web_sessions(&client));
-                    let event = UiEvent::Sessions(match result {
-                        Ok(list) => Ok(list),
-                        Err(e) => Err(e.to_string()),
-                    });
-                    if tx.send(event).is_err() {
-                        break;
-                    }
-                    // 顺带刷新工作区路径（顶栏显示）；失败静默置 None。
-                    let ws = rt.block_on(fetch_workspace(&client)).ok();
-                    let path = ws.and_then(|w| {
-                        let p = w.path.trim();
-                        (!p.is_empty()).then(|| p.to_string())
-                    });
-                    if tx.send(UiEvent::Workspace(path)).is_err() {
-                        break;
-                    }
-                }
-                WorkerJob::RefreshStatus => {
-                    let result = rt.block_on(fetch_serve_defaults(&client));
-                    if tx.send(UiEvent::Status(result)).is_err() {
-                        break;
-                    }
-                }
-            }
-        }
-    });
-    job_tx
-}
-
-fn run_turn_job(
-    rt: &tokio::runtime::Runtime,
-    client: &ServeClient,
-    job: TurnRequest,
-    tx: &Sender<UiEvent>,
-) {
-    let result = rt.block_on(async {
-        let mut sink = UiSink { tx: tx.clone() };
-        let mut gate: Box<dyn ApprovalGate> = if job.yes {
-            Box::new(AutoAllowOnce)
-        } else {
-            Box::new(OverlayApprovalGate { tx: tx.clone() })
-        };
-        run_chat_stream_sink(
-            client,
-            &job.opts,
-            &mut sink,
-            gate.as_mut(),
-            Some(&job.cancel),
-        )
-        .await
-    });
-    let (outcome, error) = match result {
-        Ok(o) => (o, None),
-        Err(TermError::Interrupted) => (ChatStreamOutcome::default(), None),
-        Err(e) => (ChatStreamOutcome::default(), Some(e.to_string())),
-    };
-    let _ = tx.send(UiEvent::TurnDone { outcome, error });
-}
-
-async fn fetch_serve_defaults(client: &ServeClient) -> Result<ServeDefaults, String> {
-    let v: serde_json::Value = client
-        .get_json("/status?view=shell")
-        .await
-        .map_err(|e| e.to_string())?;
-    Ok(ServeDefaults::from_status(&v))
-}
+use state::{Focus, LineKind, UiState};
 
 /// body 物理行 memo 的失效键：内容代数（`content_rev`）+ 宽度 + 搜索词/锚点。
 /// `view_offset`/焦点/审批等"draw 期"因素不在此列（窗口裁剪每帧实时做）。
@@ -300,6 +103,11 @@ fn is_ctrl_abort(key: &KeyEvent) -> bool {
 
 fn is_ctrl_o(key: &KeyEvent) -> bool {
     key.code == KeyCode::Char('o') && key.modifiers.contains(KeyModifiers::CONTROL)
+}
+
+/// Ctrl+W：输入焦点下进入左栏工作区目录树。
+fn is_ctrl_w(key: &KeyEvent) -> bool {
+    key.code == KeyCode::Char('w') && key.modifiers.contains(KeyModifiers::CONTROL)
 }
 
 fn is_ctrl_e(key: &KeyEvent) -> bool {
@@ -386,6 +194,29 @@ impl TuiApp<'_> {
             self.st
                 .push_line(LineKind::System, "刷新会话失败：worker 已退出");
         }
+    }
+
+    fn refresh_workspace(&mut self) {
+        if self.job_tx.send(WorkerJob::RefreshWorkspace).is_err() {
+            self.st
+                .push_line(LineKind::System, "刷新工作区失败：worker 已退出");
+        }
+    }
+
+    fn fetch_ws_dir(&mut self, rel: String) {
+        if self.job_tx.send(WorkerJob::WorkspaceDir(rel)).is_err() {
+            self.st
+                .push_line(LineKind::System, "拉取目录失败：worker 已退出");
+        }
+    }
+
+    /// 进入工作区目录树视图（Ctrl+W / 会话栏 w）；根列表未就绪时先拉一次。
+    fn focus_workspace(&mut self) {
+        if !self.st.ws_ready && !self.st.ws_root_pending {
+            self.st.ws_begin_root_fetch();
+            self.refresh_workspace();
+        }
+        self.st.focus = Focus::Workspace;
     }
 
     fn refresh_status(&mut self) {
@@ -481,7 +312,8 @@ impl TuiApp<'_> {
             "/mode ask|plan|act · /role <id> · /model <name>（off 清除，随对话生效）",
             "/find <词> 搜索并高亮 · /find（空参）跳下一处 · /find off 清除",
             "/conv list 刷新 · /conv use <id> 切换 · /conv new 新会话",
-            "按键：Alt+Enter 换行 · Ctrl+E 思考展开/折叠 · PgUp/PgDn 翻页 · Ctrl+End 回底部",
+            "按键：Alt+Enter 换行 · Ctrl+E 思考展开/折叠 · Ctrl+W 工作区目录树 · PgUp/PgDn 翻页 · Ctrl+End 回底部",
+            "工作区树：↑↓选 Enter/→展开 ◀收起/回父 r刷新 w回会话列表 Tab/Esc 回输入",
             "审批浮层：Enter=一次 · a=始终 · Esc/n=拒绝 · Ctrl+C 先拒绝、回合随后继续需再按取消",
         ] {
             self.st.push_line(LineKind::System, line);
@@ -530,6 +362,10 @@ impl TuiApp<'_> {
             self.on_ctrl_c();
             return;
         }
+        if self.st.focus == Focus::Workspace {
+            self.on_workspace_key(key);
+            return;
+        }
         if self.st.focus == Focus::Sidebar {
             self.on_sidebar_key(key);
             return;
@@ -564,6 +400,30 @@ impl TuiApp<'_> {
             KeyCode::Enter => self.use_selected(),
             KeyCode::Char('n') => self.new_session(),
             KeyCode::Char('r') => self.refresh_sessions(),
+            // w：切到工作区目录树（与工作区视图内的 w 互逆）。
+            KeyCode::Char('w') => self.focus_workspace(),
+            _ => {}
+        }
+    }
+
+    /// 工作区目录树视图按键：浏览目录层级（Enter/→ 展开，← 收起或回父目录）。
+    fn on_workspace_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Tab | KeyCode::BackTab | KeyCode::Esc => self.st.focus = Focus::Input,
+            KeyCode::Up => self.st.ws_move(true),
+            KeyCode::Down => self.st.ws_move(false),
+            KeyCode::Enter | KeyCode::Right => {
+                if let Some(rel) = self.st.ws_toggle_dir() {
+                    self.fetch_ws_dir(rel);
+                }
+            }
+            KeyCode::Left => self.st.ws_left(),
+            KeyCode::Char('r') => {
+                self.st.push_line(LineKind::System, "正在刷新工作区目录…");
+                self.refresh_workspace();
+            }
+            // w：回到左栏会话列表（w 两侧对称切换）。
+            KeyCode::Char('w') => self.st.focus = Focus::Sidebar,
             _ => {}
         }
     }
@@ -573,6 +433,10 @@ impl TuiApp<'_> {
             KeyCode::Enter if is_alt_enter(&key) => self.st.insert_newline(),
             KeyCode::Enter => self.on_submit(),
             KeyCode::Char('o') if is_ctrl_o(&key) => self.on_submit(),
+            // Ctrl+W：宽屏时进入工作区目录树（窄屏忽略，侧栏本就隐藏）。
+            KeyCode::Char('w') if is_ctrl_w(&key) && self.st.sidebar_visible => {
+                self.focus_workspace();
+            }
             KeyCode::Char('e') if is_ctrl_e(&key) => {
                 self.st.toggle_thinking();
                 let state = if self.st.thinking_visible() {
@@ -672,7 +536,27 @@ impl TuiApp<'_> {
                         .push_line(LineKind::System, &format!("拉取 serve 状态失败：{e}"));
                 }
             },
-            UiEvent::Workspace(path) => self.st.workspace_path = path,
+            UiEvent::WorkspacePath(path) => self.st.workspace_path = path,
+            UiEvent::Workspace(result) => match result {
+                Ok(data) => self.st.ws_root_replace(data),
+                Err(e) => {
+                    if self.st.ws_root_failed(&e) && self.st.focus == Focus::Workspace {
+                        self.st
+                            .push_line(LineKind::System, &format!("拉取工作区失败：{e}"));
+                    }
+                }
+            },
+            UiEvent::WorkspaceDir { rel, result } => match result {
+                Ok(data) => self.st.ws_dir_ok(&rel, data),
+                Err(e) => {
+                    if self.st.ws_dir_failed(&rel) {
+                        self.st.push_line(
+                            LineKind::System,
+                            &format!("展开 {rel} 失败：{e}（← 可重试）"),
+                        );
+                    }
+                }
+            },
         }
     }
 
@@ -754,7 +638,9 @@ impl TuiApp<'_> {
             self.st.sidebar_visible = size.width >= SIDEBAR_MIN_WIDTH;
             // PgUp/PgDn 页步 ≈ 聊天可视区行数（状态行 + composer 占几行）。
             self.st.page_rows = (size.height as usize).saturating_sub(4).max(1);
-            if !self.st.sidebar_visible && self.st.focus == Focus::Sidebar {
+            if !self.st.sidebar_visible
+                && matches!(self.st.focus, Focus::Sidebar | Focus::Workspace)
+            {
                 self.st.focus = Focus::Input;
             }
             let mut any = false;
@@ -800,9 +686,6 @@ pub async fn run_tui(client: &ServeClient, overrides: &mut SessionPrefs, yes: bo
     let (tx, rx) = mpsc::channel::<UiEvent>();
     spawn_key_reader(tx.clone());
     let job_tx = spawn_worker(client.clone(), tx.clone());
-    // 启动即拉一次会话与 serve 默认状态（失败以系统行提示）。
-    let _ = job_tx.send(WorkerJob::RefreshSessions);
-    let _ = job_tx.send(WorkerJob::RefreshStatus);
 
     let mut app = TuiApp {
         client,
@@ -818,6 +701,11 @@ pub async fn run_tui(client: &ServeClient, overrides: &mut SessionPrefs, yes: bo
         body_key: None,
     };
     terminal.clear().context("clear screen")?;
+    // 启动即拉一次会话 / 工作区根 / serve 默认状态（失败以系统行提示）。
+    app.refresh_sessions();
+    app.st.ws_begin_root_fetch();
+    app.refresh_workspace();
+    app.refresh_status();
     app.run_loop(&mut terminal)
 }
 

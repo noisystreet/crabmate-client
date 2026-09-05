@@ -7,7 +7,7 @@ use std::sync::mpsc::{self, Sender};
 use crabmate_tui_core::{ApprovalDecision, ApprovalGate, CommandApprovalRequest, TermError};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use super::UiEvent;
+use super::worker::UiEvent;
 
 /// 一条待 UI 决策的审批请求（携带回传通道）。
 pub struct ApprovalPrompt {
