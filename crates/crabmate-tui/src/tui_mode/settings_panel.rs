@@ -12,16 +12,28 @@ use super::render::{cell_window, horizontal_window, truncate_display};
 use super::serve_defaults::ServeDefaults;
 use super::settings::{
     EffectiveView, FieldAction, Layer, LlmSave, PersistedSettings, PrefsSave, SESSION_MODES,
-    effective_value, normalize_str, validate_api_base,
+    THINKING_MODES, effective_value, is_valid_temperature, normalize_str, validate_api_base,
 };
 
 /// 会话模式编辑选项长度 =「跟随 server」+ [`SESSION_MODES`]。
 const MODE_OPTIONS_LEN: usize = SESSION_MODES.len() + 1;
 
+/// 思考模式编辑选项长度 =「跟随 server」+ [`THINKING_MODES`]。
+const THINK_OPTIONS_LEN: usize = THINKING_MODES.len() + 1;
+
 /// 会话模式编辑选项（`None` = 跟随 server，即清除存储键）；取值以 [`SESSION_MODES`] 为单一来源。
 fn mode_options() -> [Option<&'static str>; MODE_OPTIONS_LEN] {
     let mut out = [None; MODE_OPTIONS_LEN];
     for (i, m) in SESSION_MODES.iter().copied().enumerate() {
+        out[i + 1] = Some(m);
+    }
+    out
+}
+
+/// 思考模式编辑选项（`None` = 跟随 server，即清除存储键）；取值以 [`THINKING_MODES`] 为单一来源。
+fn think_options() -> [Option<&'static str>; THINK_OPTIONS_LEN] {
+    let mut out = [None; THINK_OPTIONS_LEN];
+    for (i, m) in THINKING_MODES.iter().copied().enumerate() {
         out[i + 1] = Some(m);
     }
     out
@@ -53,17 +65,27 @@ impl Section {
 
     const fn fields(self) -> &'static [FieldId] {
         match self {
-            Section::Llm => &[FieldId::Model, FieldId::ApiBase],
+            Section::Llm => &[
+                FieldId::Model,
+                FieldId::ApiBase,
+                FieldId::Temperature,
+                FieldId::ThinkingMode,
+                FieldId::ApiKey,
+            ],
             Section::Session => &[FieldId::Role, FieldId::SessionMode],
         }
     }
 }
 
-/// W1 管理的四个字段。
+/// 面板管理的字段：模型分区 5 个 + 会话分区 2 个（`Temperature/ThinkingMode` 写
+/// user-data `client_llm.*`；`ApiKey` 只写本机钥匙串，见 TuiApp 接线）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FieldId {
     Model,
     ApiBase,
+    Temperature,
+    ThinkingMode,
+    ApiKey,
     Role,
     SessionMode,
 }
@@ -72,6 +94,9 @@ const fn field_label(field: FieldId) -> &'static str {
     match field {
         FieldId::Model => "模型名",
         FieldId::ApiBase => "API Base",
+        FieldId::Temperature => "温度",
+        FieldId::ThinkingMode => "思考模式",
+        FieldId::ApiKey => "API 密钥",
         FieldId::Role => "Agent role",
         FieldId::SessionMode => "会话模式",
     }
@@ -84,7 +109,7 @@ pub enum SaveGroup {
     Prefs,
 }
 
-/// 行编辑状态：文本编辑（含缓冲与光标）或会话模式枚举循环。
+/// 行编辑状态：文本编辑（含缓冲与光标）或枚举循环（会话模式 / 思考模式）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Editing {
     Text {
@@ -95,6 +120,9 @@ enum Editing {
     Mode {
         pick: usize,
     },
+    Think {
+        pick: usize,
+    },
 }
 
 /// 编辑态按键动作（先在不可变借用下解析，再执行以避开自引用借用）。
@@ -102,6 +130,7 @@ enum EditAction {
     Cancel,
     CommitText,
     CommitMode,
+    CommitThink,
     Insert(char),
     Backspace,
     MoveLeft,
@@ -112,10 +141,12 @@ enum EditAction {
 #[derive(Debug)]
 pub(super) enum PanelEffect {
     None,
-    /// 请求保存（两组可能各有 ≥1 个 Write；空组由调用方跳过）。
+    /// 请求保存（三组可能各有动作；空组由调用方跳过）。
     Save {
         llm: LlmSave,
         prefs: PrefsSave,
+        /// API 密钥保存动作（写钥匙串，不进 `LlmSave`；`Skip` = 无动作）。
+        secret: FieldAction,
     },
     /// 请求关闭面板（已通过脏确认或本来干净）。
     Close,
@@ -133,6 +164,10 @@ pub struct SettingsPanel {
     llm: LlmSave,
     /// 已编辑（staged）的 prefs 侧字段；`Write` = 待保存。
     prefs: PrefsSave,
+    /// 已编辑（staged）的 API 密钥动作（不随 `LlmSave` 走 user-data，见 TuiApp）。
+    secret: FieldAction,
+    /// API 密钥当前是否已设（CLI/env override 或钥匙串有值）；只读显示用。
+    secret_set: bool,
     /// 正在编辑的字段（None = 浏览态）。
     editing: Option<Editing>,
     /// 有关闭确认待答复（脏字段时 Esc/F2 先弹确认）。
@@ -160,6 +195,8 @@ impl SettingsPanel {
             row: 0,
             llm: LlmSave::default(),
             prefs: PrefsSave::default(),
+            secret: FieldAction::Skip,
+            secret_set: false,
             editing: None,
             confirm_close: false,
             saving_llm: false,
@@ -173,10 +210,23 @@ impl SettingsPanel {
         self.saving_llm || self.saving_prefs
     }
 
-    /// 是否有未保存的 staged 改动。
+    /// 是否有未保存的 staged 改动（含 API 密钥动作）。
     #[must_use]
     pub fn is_dirty(&self) -> bool {
-        self.llm.any() || self.prefs.any()
+        self.llm.any() || self.prefs.any() || self.secret.is_write()
+    }
+
+    /// API 密钥行当前是否"已设"（CLI/env override 或钥匙串有值）；由 TuiApp 打开
+    /// 面板及密钥保存成功后调用。只影响显示与清除提示，不代表 staged。
+    pub(super) fn set_secret_set(&mut self, v: bool) {
+        self.secret_set = v;
+    }
+
+    /// API 密钥保存动作落地后回调（`written` = 钥匙串里当前是否有值）：清 staged 并
+    /// 同步"已设"显示；失败时改动保留（由 TuiApp 提示，可重试）。
+    pub(super) fn secret_saved(&mut self, written: bool) {
+        self.secret = FieldAction::Skip;
+        self.secret_set = written;
     }
 
     fn current_field(&self) -> FieldId {
@@ -187,6 +237,9 @@ impl SettingsPanel {
         match field {
             FieldId::Model => &self.llm.model,
             FieldId::ApiBase => &self.llm.api_base,
+            FieldId::Temperature => &self.llm.temperature,
+            FieldId::ThinkingMode => &self.llm.thinking,
+            FieldId::ApiKey => &self.secret,
             FieldId::Role => &self.prefs.role,
             FieldId::SessionMode => &self.prefs.session_mode,
         }
@@ -196,6 +249,9 @@ impl SettingsPanel {
         match field {
             FieldId::Model => self.llm.model = action,
             FieldId::ApiBase => self.llm.api_base = action,
+            FieldId::Temperature => self.llm.temperature = action,
+            FieldId::ThinkingMode => self.llm.thinking = action,
+            FieldId::ApiKey => self.secret = action,
             FieldId::Role => self.prefs.role = action,
             FieldId::SessionMode => self.prefs.session_mode = action,
         }
@@ -312,7 +368,7 @@ impl SettingsPanel {
         self.row = 0;
     }
 
-    /// Enter：进入当前字段的编辑（文本缓冲预填生效值；会话模式进枚举循环）。
+    /// Enter：进入当前字段的编辑（文本缓冲预填生效值；模式/思考进枚举循环；密钥从空开始）。
     fn begin_edit(&mut self, ctx: &PanelCtx<'_>) {
         if self.read_only {
             self.set_note(
@@ -332,6 +388,27 @@ impl SettingsPanel {
                 },
             };
             self.editing = Some(Editing::Mode { pick });
+            return;
+        }
+        if field == FieldId::ThinkingMode {
+            let pick = match self.staged(field) {
+                FieldAction::Write(Some(v)) => think_index_of(Some(v)),
+                FieldAction::Write(None) => 0,
+                FieldAction::Skip => match ctx.effective(field).value {
+                    Some(v) => think_index_of(Some(&v)),
+                    None => 0,
+                },
+            };
+            self.editing = Some(Editing::Think { pick });
+            return;
+        }
+        // API 密钥不在三层合成内：编辑缓冲总从空开始（不回显既有值/已设态）。
+        if field == FieldId::ApiKey {
+            self.editing = Some(Editing::Text {
+                field,
+                buf: Vec::new(),
+                cursor: 0,
+            });
             return;
         }
         let prefill = match self.staged(field) {
@@ -367,6 +444,13 @@ impl SettingsPanel {
                 KeyCode::Right => Some(EditAction::MoveRight),
                 _ => None,
             },
+            Some(Editing::Think { .. }) => match key.code {
+                KeyCode::Esc => Some(EditAction::Cancel),
+                KeyCode::Enter => Some(EditAction::CommitThink),
+                KeyCode::Left => Some(EditAction::MoveLeft),
+                KeyCode::Right => Some(EditAction::MoveRight),
+                _ => None,
+            },
             None => None,
         };
         let Some(action) = action else {
@@ -376,6 +460,7 @@ impl SettingsPanel {
             EditAction::Cancel => self.editing = None,
             EditAction::CommitText => self.commit_text(),
             EditAction::CommitMode => self.commit_mode(),
+            EditAction::CommitThink => self.commit_think(),
             EditAction::Insert(c) => self.edit_insert(c),
             EditAction::Backspace => self.edit_backspace(),
             EditAction::MoveLeft => self.edit_move(true),
@@ -383,7 +468,8 @@ impl SettingsPanel {
         }
     }
 
-    /// 文本字段提交：trim 后空串 = 清除；API Base 需 http(s):// 前缀（非法则留在编辑态提示）。
+    /// 文本字段提交：trim 后空串 = 清除；API Base 需 http(s):// 前缀、
+    /// 温度需 0.0..=2.0（非法则留在编辑态提示）；密钥空提交 = 清除。
     fn commit_text(&mut self) {
         let Some(Editing::Text { field, buf, .. }) = self.editing.take() else {
             return;
@@ -397,6 +483,16 @@ impl SettingsPanel {
             self.set_note("API Base 需 http(s):// 开头".to_string(), Color::LightRed);
             return;
         }
+        if field == FieldId::Temperature && !is_valid_temperature(&text) {
+            let buf: Vec<char> = text.chars().collect();
+            let cursor = buf.len();
+            self.editing = Some(Editing::Text { field, buf, cursor });
+            self.set_note(
+                "温度需 0.0..=2.0（留空保存 = 跟随 server）".to_string(),
+                Color::LightRed,
+            );
+            return;
+        }
         let value = if text.is_empty() { None } else { Some(text) };
         self.set_staged(field, FieldAction::Write(value));
     }
@@ -408,6 +504,15 @@ impl SettingsPanel {
         };
         let value = mode_options()[pick].map(str::to_string);
         self.set_staged(FieldId::SessionMode, FieldAction::Write(value));
+    }
+
+    /// 思考模式枚举确认：写入当前选项（`None` = server / 跟随）。
+    fn commit_think(&mut self) {
+        let Some(Editing::Think { pick }) = self.editing.take() else {
+            return;
+        };
+        let value = think_options()[pick].map(str::to_string);
+        self.set_staged(FieldId::ThinkingMode, FieldAction::Write(value));
     }
 
     /// 文本编辑：光标处插入字符。
@@ -435,7 +540,7 @@ impl SettingsPanel {
         }
     }
 
-    /// 编辑态 ←/→：文本字段移动光标；会话模式枚举循环选项（↑↓ 不动）。
+    /// 编辑态 ←/→：文本字段移动光标；模式/思考枚举循环选项（↑↓ 不动）。
     fn edit_move(&mut self, left: bool) {
         match &mut self.editing {
             Some(Editing::Text { buf, cursor, .. }) => {
@@ -452,11 +557,18 @@ impl SettingsPanel {
                     *pick += 1;
                 }
             }
+            Some(Editing::Think { pick }) => {
+                if left {
+                    *pick = pick.saturating_sub(1);
+                } else if *pick + 1 < think_options().len() {
+                    *pick += 1;
+                }
+            }
             None => {}
         }
     }
 
-    /// S 保存：staged 全空时提示；否则标记在途并返回保存请求（含两组暂存动作）。
+    /// S 保存：staged 全空时提示；否则标记在途并返回保存请求（含两组暂存动作 + 密钥）。
     fn request_save(&mut self) -> PanelEffect {
         if self.read_only {
             self.set_note("回合进行中：不能保存".to_string(), Color::LightYellow);
@@ -468,15 +580,22 @@ impl SettingsPanel {
         }
         let llm = self.llm.clone();
         let prefs = self.prefs.clone();
+        let secret = self.secret.clone();
         self.saving_llm = llm.any();
         self.saving_prefs = prefs.any();
-        PanelEffect::Save { llm, prefs }
+        PanelEffect::Save { llm, prefs, secret }
     }
 }
 
 /// 会话模式选项下标 → 值（按 [`SESSION_MODES`] 顺序；其余（含 None）回 0 = 跟随 server）。
 fn mode_index_of(v: Option<&str>) -> usize {
     v.and_then(|m| SESSION_MODES.iter().position(|x| *x == m))
+        .map_or(0, |i| i + 1)
+}
+
+/// 思考模式选项下标 → 值（按 [`THINKING_MODES`] 顺序；其余（含 None）回 0 = server/跟随）。
+fn think_index_of(v: Option<&str>) -> usize {
+    v.and_then(|m| THINKING_MODES.iter().position(|x| *x == m))
         .map_or(0, |i| i + 1)
 }
 
@@ -489,25 +608,32 @@ pub struct PanelCtx<'a> {
 
 impl PanelCtx<'_> {
     /// 字段的三层来源（override、user-data、serve 默认；空白由合成时归一），供合成/预填共用。
+    /// 温度/思考无本地 override（TUI 无斜杠）与 serve 默认；API 密钥不参与三层（走钥匙串）。
     fn sources(&self, field: FieldId) -> (Option<&str>, Option<&str>, Option<&str>) {
         let p = self.persisted;
         let d = self.serve_defaults;
         let local = match field {
             FieldId::Model => self.overrides.model.as_deref(),
             FieldId::ApiBase => self.overrides.api_base.as_deref(),
+            FieldId::Temperature | FieldId::ThinkingMode | FieldId::ApiKey => None,
             FieldId::Role => self.overrides.agent_role.as_deref(),
             FieldId::SessionMode => self.overrides.session_mode.as_deref(),
         };
         let stored = match field {
             FieldId::Model => p.and_then(|p| p.model.as_deref()),
             FieldId::ApiBase => p.and_then(|p| p.api_base.as_deref()),
+            FieldId::Temperature => p.and_then(|p| p.temperature.as_deref()),
+            FieldId::ThinkingMode => p.and_then(|p| p.thinking.as_deref()),
+            FieldId::ApiKey => None,
             FieldId::Role => p.and_then(|p| p.role.as_deref()),
             FieldId::SessionMode => p.and_then(|p| p.session_mode.as_deref()),
         };
         let remote = match field {
             FieldId::Model => d.and_then(|d| d.model.as_deref()),
-            // API Base 没有 /status 默认来源：三层只到 user-data。
-            FieldId::ApiBase => None,
+            // API Base / 温度 / 思考没有 /status 默认来源：三层只到 user-data。
+            FieldId::ApiBase | FieldId::Temperature | FieldId::ThinkingMode | FieldId::ApiKey => {
+                None
+            }
             FieldId::Role => d.and_then(|d| d.role.as_deref()),
             FieldId::SessionMode => d.and_then(|d| d.mode.as_deref()),
         };
@@ -601,7 +727,11 @@ impl SettingsPanel {
     }
 
     /// 字段值列文本与颜色：staged（~）＞ override（*）＞ user-data ＞ serve 默认 ＞ 跟随 server。
+    /// API 密钥不走三层合成：staged / 已设态（钥匙串）两态显示。
     fn value_cell(&self, ctx: &PanelCtx<'_>, field: FieldId) -> (String, Color) {
+        if field == FieldId::ApiKey {
+            return self.secret_cell();
+        }
         match self.staged(field) {
             FieldAction::Write(Some(v)) => (format!("{v}~"), Color::LightYellow),
             FieldAction::Write(None) => {
@@ -630,6 +760,19 @@ impl SettingsPanel {
                     value: _,
                 } => ("(跟随 server)".to_string(), Color::DarkGray),
             },
+        }
+    }
+
+    /// API 密钥行值：staged 写 = 掩码 + `~`；staged 清除 = `清除~`；未编辑按已设态显示。
+    fn secret_cell(&self) -> (String, Color) {
+        match &self.secret {
+            FieldAction::Write(Some(v)) => (
+                format!("••••（{} 字符）~", v.chars().count()),
+                Color::LightYellow,
+            ),
+            FieldAction::Write(None) => ("清除~".to_string(), Color::LightYellow),
+            FieldAction::Skip if self.secret_set => ("已设（钥匙串）".to_string(), Color::White),
+            FieldAction::Skip => ("未设（跟随 serve）".to_string(), Color::DarkGray),
         }
     }
 }
@@ -677,17 +820,20 @@ fn footer_hint(panel: &SettingsPanel) -> String {
         return String::new();
     }
     match &panel.editing {
-        Some(Editing::Mode { .. }) => "[←/→] 循环  [Enter] 确定  [Esc] 取消".to_string(),
+        Some(Editing::Mode { .. }) | Some(Editing::Think { .. }) => {
+            "[←/→] 循环  [Enter] 确定  [Esc] 取消".to_string()
+        }
         Some(Editing::Text { .. }) => "[Enter] 确定  [Esc] 取消编辑".to_string(),
         None if panel.read_only => "[↑↓] 浏览  [Tab] 分区  [Esc/F2] 关闭".to_string(),
         None => "[↑↓] 移动  [Enter] 编辑  [Tab] 分区  [S] 保存  [Esc/F2] 关闭".to_string(),
     }
 }
 
-/// 底栏动态提示（模式循环预览 / 编辑引导 / 浏览态状态）。
+/// 底栏动态提示（枚举循环预览 / 编辑引导 / 浏览态状态）。
 fn footer_msg(panel: &SettingsPanel) -> (String, Color) {
     match &panel.editing {
         Some(Editing::Mode { pick }) => mode_cycle_text(*pick),
+        Some(Editing::Think { pick }) => think_cycle_text(*pick),
         Some(Editing::Text { field, .. }) => match &panel.note {
             Some((note, color)) => (note.clone(), *color),
             None => (
@@ -703,6 +849,19 @@ fn footer_msg(panel: &SettingsPanel) -> (String, Color) {
 fn mode_cycle_text(pick: usize) -> (String, Color) {
     let mut text = String::from("会话模式：");
     for (i, opt) in mode_options().iter().enumerate() {
+        if i == pick {
+            text.push('▸');
+        }
+        text.push_str(opt.unwrap_or("(跟随 server)"));
+        text.push(' ');
+    }
+    (text, Color::Gray)
+}
+
+/// 思考模式 ←→ 循环的可视化预览。
+fn think_cycle_text(pick: usize) -> (String, Color) {
+    let mut text = String::from("思考模式：");
+    for (i, opt) in think_options().iter().enumerate() {
         if i == pick {
             text.push('▸');
         }
@@ -741,3 +900,9 @@ mod app;
 #[cfg(test)]
 #[path = "settings_panel_tests.rs"]
 mod tests;
+
+// W2 新增字段（温度/思考模式/API 密钥）单测独立成文件：控制 tests 文件规模，避免
+// lizard 对超大测试文件的函数体合并跨度超过 fn-nloc 门禁。
+#[cfg(test)]
+#[path = "settings_panel_w2_tests.rs"]
+mod tests_w2;

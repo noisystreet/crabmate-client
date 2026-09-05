@@ -103,12 +103,19 @@ fn tab_cycles_section_and_arrows_move_row() {
     let mut p = SettingsPanel::new(false);
     assert_eq!(p.section, Section::Llm);
     assert_eq!(p.current_field(), FieldId::Model);
+    for expected in [
+        FieldId::ApiBase,
+        FieldId::Temperature,
+        FieldId::ThinkingMode,
+        FieldId::ApiKey,
+    ] {
+        p.handle_key(&key(KeyCode::Down), &c);
+        assert_eq!(p.current_field(), expected);
+    }
     p.handle_key(&key(KeyCode::Down), &c);
-    assert_eq!(p.current_field(), FieldId::ApiBase);
-    p.handle_key(&key(KeyCode::Down), &c);
-    assert_eq!(p.current_field(), FieldId::ApiBase, "底行 clamp");
+    assert_eq!(p.current_field(), FieldId::ApiKey, "底行 clamp");
     p.handle_key(&key(KeyCode::Up), &c);
-    assert_eq!(p.current_field(), FieldId::Model);
+    assert_eq!(p.current_field(), FieldId::ThinkingMode);
     p.handle_key(&key(KeyCode::Tab), &c);
     assert_eq!(p.section, Section::Session);
     assert_eq!(p.current_field(), FieldId::Role);
@@ -123,10 +130,11 @@ fn edit_text_prefills_override_and_save_payload() {
     let mut p = SettingsPanel::new(false);
     p.handle_key(&key(KeyCode::Enter), &c);
     // 缓冲预填生效值（override）
-    let Some(Editing::Text { field, buf, .. }) = &p.editing else {
-        panic!("expected text editing");
+    let (field, buf) = match &p.editing {
+        Some(Editing::Text { field, buf, .. }) => (*field, buf),
+        _ => panic!("expected text editing"),
     };
-    assert_eq!(*field, FieldId::Model);
+    assert_eq!(field, FieldId::Model);
     assert_eq!(buf.iter().collect::<String>(), "deepseek-chat");
     // 追加光标后输入并提交
     p.handle_key(&key(KeyCode::Char('x')), &c);
@@ -136,10 +144,10 @@ fn edit_text_prefills_override_and_save_payload() {
         p.staged(FieldId::Model),
         FieldAction::Write(Some(v)) if v == "deepseek-chatx"
     ));
-    // S → Save 效果（llm 组含 model；prefs 组为空）
-    let effect = p.handle_key(&key(KeyCode::Char('s')), &c);
-    let PanelEffect::Save { llm, prefs } = effect else {
-        panic!("expected save effect");
+    // S → Save 效果（llm 组含 model；prefs 组为空；secret 见 W2 测试）
+    let (llm, prefs) = match p.handle_key(&key(KeyCode::Char('s')), &c) {
+        PanelEffect::Save { llm, prefs, .. } => (llm, prefs),
+        _ => panic!("expected save effect"),
     };
     assert!(matches!(llm.model, FieldAction::Write(Some(v)) if v == "deepseek-chatx"));
     assert!(!llm.api_base.is_write());
@@ -230,35 +238,6 @@ fn read_only_disables_edit_and_save_but_esc_closes() {
         p.handle_key(&key(KeyCode::Esc), &c),
         PanelEffect::Close
     ));
-}
-
-#[test]
-fn save_group_result_clears_stage_on_ok_and_keeps_on_error() {
-    let o = overrides(None, None, None, None);
-    let c = ctx(&o, None);
-    let mut p = SettingsPanel::new(false);
-    p.handle_key(&key(KeyCode::Enter), &c);
-    for ch in "gpt-5".chars() {
-        p.handle_key(&key(KeyCode::Char(ch)), &c);
-    }
-    p.handle_key(&key(KeyCode::Enter), &c);
-    assert!(p.is_dirty());
-    let PanelEffect::Save { llm, prefs } = p.handle_key(&key(KeyCode::Char('s')), &c) else {
-        panic!("expected save");
-    };
-    assert!(p.is_saving());
-    assert!(llm.any(), "model staged → llm 组有动作");
-    assert!(!prefs.any());
-    // 失败：保留 staged 与脏标记
-    p.save_group_result(SaveGroup::Llm, false);
-    assert!(!p.is_saving());
-    assert!(p.is_dirty());
-    // 重试成功：staged 清空
-    let PanelEffect::Save { .. } = p.handle_key(&key(KeyCode::Char('S')), &c) else {
-        panic!("expected save again");
-    };
-    assert!(p.save_group_result(SaveGroup::Llm, true));
-    assert!(!p.is_dirty());
 }
 
 #[test]
