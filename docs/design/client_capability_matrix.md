@@ -51,10 +51,10 @@ Blank cells are forbidden.
 
 | Capability | Desktop | Android | Web | TUI | Notes |
 |------------|---------|---------|-----|-----|-------|
-| Full-screen TUI (ratatui) | no | no | no | yes | `crabmate-tui tui`: status bar + streaming transcript + single-line input + Ctrl+C cancel (M1); session sidebar with use/new + `/status` serve-default linkage (M2). Sidebar hidden below 120 columns; switching sessions starts a fresh transcript (no history replay). Approval overlay is M3. |
-| `POST /chat/stream` + command approval | yes | yes | yes | yes | Android: notification keep-alive. TUI: TTY menu or `--yes`. |
+| Full-screen TUI (ratatui) | no | no | no | yes | `crabmate-tui tui`: status bar + session sidebar + streaming transcript + composer. M1: stream + Ctrl+C cancel; M2: session sidebar with use/new + `/status` serve-default linkage; M3: approval overlay (Esc=deny), thinking fold (Ctrl+E), one-line tool summaries, `/find` search, paged scroll, multi-line input (Alt+Enter). Sidebar hidden below 120 columns; switching sessions starts a fresh transcript (no history replay). |
+| `POST /chat/stream` + command approval | yes | yes | yes | yes | Android: notification keep-alive. TUI: repl TTY prompt; full-screen approval overlay (Enter/once · a/always · Esc/n/deny) or `--yes`. |
 | Stop in-flight turn (`POST …/cancel`) | yes | yes | yes | yes | WASM Stop POSTs cancel; if `job_id` is not in yet, SSE stays open until `x-stream-job-id`. TUI: first Ctrl+C cancels the turn (`x-stream-job-id` → `POST …/cancel`) and returns to the prompt; a second Ctrl+C force-quits. Full-screen `tui` uses the same semantics through an external-cancel channel (raw mode has no SIGINT). `serve` without the cancel route degrades to a local interrupt. |
-| Tool-card compact/detail | yes | yes | yes | no | TUI prints classified SSE as text (`crabmate-tool-card` is WASM-only). |
+| Tool-card compact/detail | yes | yes | yes | no | TUI shows tool calls as one-line summaries updated with ✓/✗ + serve summary; `crabmate-tool-card` cards remain WASM-only. |
 | Chat image attach / lightbox | yes | yes | yes | no | |
 | Ask / Plan / Act in composer | yes | yes | yes | yes | TUI: `/mode ask|plan|act` sets `session_mode`; `/role <id>` sets `agent_role` for later turns. |
 | Control slashes (not sent to the model) | yes | yes | yes | reduced | Shared names: `help` / `workspace` / `cd` / `status` / `model` / `mode` / `role` / `resume`. Web has more (`export`, …). TUI: `/conv` `/quit` and more. |

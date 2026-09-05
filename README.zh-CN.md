@@ -120,11 +120,18 @@ crabmate-tui --api-base http://127.0.0.1:8080 repl
 ./crates/crabmate-tui/target/debug/crabmate-tui \
   --api-base http://127.0.0.1:8080 \
   tui
-# 布局：状态行 | 左栏会话 | 流式 transcript | 底栏输入
+# 布局：状态行 | 左栏会话 | 流式 transcript | 底栏输入区
 # Ctrl+C 取消在途回合（再按一次强退；空闲时退出）
 # Tab 切到会话列表（↑↓ 选择 · Enter 使用 · n 新建 · r 刷新 · Esc 返回）
-# 斜杠：/model /mode /role /status /conv [new] /quit（状态行回退显示 serve 默认，
-# 本地 override 以 `*` 标记；切换会话后从空 transcript 开始新一轮）
+# Alt+Enter 换行（多行输入）；Enter / Ctrl+O 发送
+# PgUp / PgDn / Ctrl+Home / Ctrl+End 滚动 transcript（单行输入时 ↑↓ 也可滚动）
+# Ctrl+E 展开/折叠思考行（默认折叠为一行预览）
+# 非白名单命令弹出审批浮层（Enter=一次 · a=始终 · Esc/n=拒绝）
+# 工具调用渲染为单行摘要，结果到达原位补 ✓/✗ + 说明
+# /find <词> 高亮并跳转 · /find 空参跳下一处 · /find off 清除
+# 斜杠：/model /mode /role /status /find /conv [new] /quit · /help 查看全部
+#   （状态行回退显示 serve 默认，本地 override 以 `*` 标记；
+#     切换会话后从空 transcript 开始新一轮）
 ```
 
 ## 文档
