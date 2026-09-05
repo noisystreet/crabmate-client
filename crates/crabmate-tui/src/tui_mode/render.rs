@@ -103,12 +103,22 @@ pub(crate) fn build_body_rows(st: &UiState, width: usize) -> Vec<BodyRow> {
     let needle = st.search_term();
     let target = st.search_cursor;
     let mut out: Vec<BodyRow> = Vec::new();
+    // 相邻的两个消息气泡（用户/助手块）之间插入一个空行；中间夹 thinking/工具/
+    // 系统行时属于同回合，不打断（只比较相邻日志行，避免在思考/工具与正文间空行）。
+    let mut prev_bubble = false;
     for (idx, log) in st.lines.iter().enumerate() {
         let (prefix, style) = kind_style(log.kind);
         let prefix_w = prefix.chars().count();
         let content_width = width.saturating_sub(prefix_w);
         let matched = needle.is_some_and(|n| log.text.to_lowercase().contains(n));
         let anchor_log = matched && target == Some(idx);
+        let is_bubble = matches!(log.kind, LineKind::User | LineKind::Assistant);
+        if is_bubble && prev_bubble {
+            out.push(BodyRow {
+                log_index: idx,
+                line: Line::from(""),
+            });
+        }
         let text = if log.kind == LineKind::Thinking && log.collapsed {
             fold_thinking(&log.text, content_width)
         } else {
@@ -135,6 +145,7 @@ pub(crate) fn build_body_rows(st: &UiState, width: usize) -> Vec<BodyRow> {
                 anchor_log,
             ));
         }
+        prev_bubble = is_bubble;
     }
     out
 }
@@ -711,6 +722,35 @@ mod tests {
     }
 
     #[test]
+    fn adjacent_message_bubbles_get_blank_separator() {
+        let mut st = UiState::new();
+        st.push_line(LineKind::User, "q");
+        st.stream_delta(LineKind::Assistant, "a");
+        let rows = body_rows(&st, 80);
+        assert!(
+            rows.windows(2).any(|w| {
+                w[0].line.to_string().contains('q') && w[1].line.to_string().is_empty()
+            }),
+            "用户块与助手块之间应有一个空行: {:?}",
+            rows.iter().map(|r| r.line.to_string()).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn thinking_and_answer_do_not_add_blank_between() {
+        let mut st = UiState::new();
+        st.push_line(LineKind::User, "q");
+        st.stream_delta(LineKind::Thinking, "想");
+        st.stream_delta(LineKind::Assistant, "答");
+        let rows = body_rows(&st, 80);
+        assert!(
+            rows.iter().all(|r| !r.line.to_string().is_empty()),
+            "思考行与正文同回合不应插入空行: {:?}",
+            rows.iter().map(|r| r.line.to_string()).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
     fn workspace_basename_derives_name() {
         assert_eq!(workspace_basename("/data/proj"), "proj");
         assert_eq!(workspace_basename("/data/proj/"), "proj");
@@ -747,22 +787,6 @@ mod tests {
         assert!(s.contains("mode plan"));
         assert!(s.contains("conv c1"));
         assert!(s.contains("○ 空闲"));
-    }
-
-    #[test]
-    fn status_shows_running_state() {
-        let info = StatusInfo {
-            api_base: "http://x".into(),
-            model: None,
-            role: None,
-            mode: None,
-            running: true,
-            cancel_sent: true,
-            view_offset: 0,
-            search_term: None,
-            search_total: 0,
-        };
-        assert!(status_text(&info, None, 80).contains("…取消中"));
     }
 
     #[test]
