@@ -1,6 +1,6 @@
 # 远程 CLI / TUI（路径 B）
 
-> **状态**：方案（已拍板走 **远程客户端**；**P3 已落地** `repl` 斜杠 `/help` `/workspace` `/conv`；**P4 已落地（M1–M4）**：全屏 `tui` 流式 transcript + 状态行 + 单行/多行输入 + Ctrl+C 取消 + 左栏会话与 `/status` 联动 + 审批浮层 + thinking 折叠 + 工具行摘要 + `/find` 搜索 + 翻页滚动 + 顶栏工作区 + 助手正文行内 Markdown 轻渲染 + 工作区目录树浏览（右栏仿 Desktop 默认显示；Ctrl+W 聚焦，含未设置时按 p 从项目池选择））  
+> **状态**：方案（已拍板走 **远程客户端**；**P3 已落地** `repl` 斜杠 `/help` `/workspace` `/conv`；**P4 已落地（M1–M4）**：全屏 `tui` 流式 transcript + 状态行 + 单行/多行输入 + Ctrl+C 取消 + 左栏会话与 `/status` 联动 + 审批浮层 + thinking 折叠 + 工具行摘要 + `/find` 搜索 + 翻页滚动 + 顶栏工作区 + 助手正文行内 Markdown 轻渲染 + 工作区目录树浏览（右栏仿 Desktop 默认显示；Ctrl+W 聚焦，含未设置时按 p 从项目池选择）；设置面板 W1+W2 已落地；**P5 已落地**：README 双语安装/用法同步，`make tui-release` 产出仅二进制的 `crabmate-tui_*.deb`（无图标、无配置；v* tag 的 GitHub Release 亦附带））  
 > **范围**：`crabmate-client` 新增终端面；`crabmate serve` 仍为执行权威  
 > **关联**：Server [`client_shell_split.md`](https://github.com/noisystreet/CrabMate/blob/main/docs/design/client_shell_split.md)、[`命令行与路由.md`](https://github.com/noisystreet/CrabMate/blob/main/docs/命令行与路由.md)、本仓 [`contract_pin.md`](./contract_pin.md) / [`personal_cloud_runbook.md`](./personal_cloud_runbook.md)
 
@@ -89,7 +89,7 @@ crates/
 | **P2** | 交互 `repl`（reedline 或最小行编辑）+ 审批 TTY + 会话 id 续聊 | 非白名单命令可审批；Ctrl+C 干净退出 |
 | **P3** | 工作区/会话斜杠子集与 WASM 设置对齐的常用操作 | `/workspace`、列会话等 |
 | **P4** | 实验性 `tui`（ratatui）：流式 transcript + 状态行 + 左栏会话 + 多行底栏输入（**M1 已落地**）；左栏会话 + 状态行联动（**M2 已落地**）；审批浮层 / thinking 折叠 / 工具行摘要 / 滚动搜索 / 多行输入（**M3 已落地**）；工作区目录树浏览（**M4 已落地**：右栏仿 Desktop 默认显示；目录树聚焦时可按 p 从项目池选择/切换工作区）；设置面板（**W1+W2 已全部落地**：`/settings` / F2，模型名 / API Base（网关预设下拉 + 自定义 URL）/ 温度 / 上下文 tokens / 思考模式 / Agent role / 会话模式 / 只读工具缓存开关，三层显示并合并保存到 serve user-data；API 密钥写本机钥匙串，见 [tui_settings_panel.md](./tui_settings_panel.md)） | TTY 全屏可用；非白名单命令浮层审批（Esc=拒绝）；长对话可滚动；多行可编辑发送；窄终端（<120 列）自动隐藏左右栏；Ctrl+W 聚焦右栏工作区目录树（↑↓ 选择 · Enter/→ 展开 · ← 收起/回父 · r 刷新 · w 回会话）；工作区目录树聚焦时按 p 从服务端项目池选择/切换（未设置=选择，已设置=切到另一项目） |
-| **P5** | 文档 / `.deb` 或 cargo 安装说明；Server 侧标注同进程 CLI「过渡 / deprecate 窗口」 | README 双语文案同步；Client `make tui-release` 产出仅二进制的 `crabmate-tui_*.deb`（无图标、无配置） |
+| **P5** | 文档 / `.deb` 安装说明；Server 侧标注同进程 CLI「过渡 / deprecate 窗口」 | **已落地**：README 双语安装/用法同步；Client `make tui-release` 产出仅二进制的 `crabmate-tui_*.deb`（无图标、无配置；v* tag 的 GitHub Release 亦附带）。Server 侧「过渡窗口」标注为**主仓事项**（见 §8） |
 
 **建议开工顺序**：P1 → P2；P4 可与 P3 并行但不要阻塞 P2。
 
@@ -114,7 +114,7 @@ crates/
 | 策略 | **B：远程 CLI/TUI 进 Client 仓** |
 | 同进程 Agent CLI | **不**迁入；Server 可暂留 |
 | 执行权威 | 仅 `serve` |
-| 下一步 | P4 持续收尾：M4 工作区目录树浏览已落地、设置面板 **W1+W2 已全部落地**（温度/思考模式/API 密钥、上下文 tokens / 只读工具缓存开关 / 网关预设，见 `tui_settings_panel.md` §7）；文档/发版向 P5（README 双语、`.deb` 安装说明；Server 侧标注过渡窗口） |
+| 下一步 | P4/P5 已收尾：M1–M4、设置面板 W1+W2、README 双语与 `.deb` 发版均落地；后续按使用频率迭代；Server 侧标注同进程 CLI 过渡窗口（§8） |
 
 ---
 

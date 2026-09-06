@@ -69,7 +69,7 @@ make tui-release        # crabmate-tui_*.deb (binary only; no icon, no config)
 make clean
 ```
 
-## Remote terminal (P3)
+## Remote terminal
 
 Start `crabmate serve`, then:
 
@@ -113,6 +113,8 @@ make tui-release
 sudo dpkg -i crates/crabmate-tui/target/debian/crabmate-tui_*.deb
 crabmate-tui --api-base http://127.0.0.1:8080 repl
 ```
+
+No Rust toolchain? The same binary-only `.deb` is also attached to each `v*` GitHub Release (built by CI), ready to download and `dpkg -i`.
 
 Full-screen `tui` (ratatui; shows a session sidebar on terminals ≥ 120 columns wide):
 
