@@ -22,17 +22,20 @@ fn main_window(app: &AppHandle) -> Result<tauri::WebviewWindow, String> {
 /// 探测 `/health` + `/user-data/prefs` 后加载**包内业务 UI**，经 hash 交接 API 基址与 Bearer。
 ///
 /// 成功连接后写入系统钥匙串（非空覆盖；空串删除条目）。
+/// `manual` 标记本次是否为用户手动提交（连接页自动登录为 `false`）：
+/// 仅**自动登录**到建议服务器地址时不落最近连接；手动填写（含恰好等于建议地址）也记录。
 #[tauri::command]
 pub async fn connect_remote(
     app: AppHandle,
     url: String,
     bearer: Option<String>,
+    manual: Option<bool>,
 ) -> Result<(), String> {
     let bearer = bearer.unwrap_or_default();
     let api_base = normalize_base_url(&url)?;
     enforce_cleartext_connect_policy(&api_base)?;
     probe_server(&api_base, &bearer).await?;
-    persist_recent_after_probe(&app, &api_base);
+    persist_recent_after_probe(&app, &api_base, manual.unwrap_or(false));
 
     if let Some(allowed) = app.try_state::<AllowedServeOrigin>() {
         allowed.set_from_url(&api_base);
@@ -89,15 +92,18 @@ fn suggested_url_value(app: &AppHandle) -> Option<String> {
         .and_then(|s| s.0.lock().ok().and_then(|g| g.clone()))
 }
 
-fn persist_recent_after_probe(app: &AppHandle, api_base: &Url) {
+fn persist_recent_after_probe(app: &AppHandle, api_base: &Url, manual: bool) {
     let Ok(path) = recent_connect_urls_path(app) else {
         return;
     };
-    recent_urls::record_success(
-        &path,
-        api_base.as_str(),
-        suggested_url_value(app).as_deref(),
-    );
+    // 自动登录到建议地址不落历史（避免每次重启把本机默认端口顶到最前）；
+    // 手动提交则视为用户主动连接，即使等于建议地址也记录。
+    let suggested = if manual {
+        None
+    } else {
+        suggested_url_value(app)
+    };
+    recent_urls::record_success(&path, api_base.as_str(), suggested.as_deref());
 }
 
 /// 连接页预填建议地址（桌面默认本机 `8080`）；移动端通常为 `null`。

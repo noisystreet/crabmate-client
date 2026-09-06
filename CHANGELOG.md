@@ -12,6 +12,7 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 ### Added
 
 - Connect page: each recent server entry now has its own delete button (removes that single URL from both the `localStorage` list and the shell-side `recent_connect_urls.json`; the whole-list clear action stays)
+- Connect page: manually connecting to the shell's suggested server URL now records it in recent servers too (only the per-launch auto-login to that suggested URL stays excluded, matching the shell-side policy)
 
 ## [0.5.1-alpha.0] - 2026-09-05
 
