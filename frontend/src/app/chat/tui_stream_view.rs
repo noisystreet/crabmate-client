@@ -403,54 +403,56 @@ fn sync_chat_tui_stream_dom(
     scroll_shell: ChatScrollShellSignals,
     think_open: &HashSet<String>,
 ) -> (FindRestoreScope, Option<String>) {
-    let tool_chunks = chat.tool_output_chunks.get();
-    let tool_jobs = chat.tool_job_states.get();
-    let active_id = chat.active_id.get();
-    let overlay = chat.stream_text_overlay.get();
-    let live_id = overlay.as_ref().map(|o| o.message_id.clone());
-    let prev = mount_state.get_untracked();
-    let plan = chat.sessions.with(|sessions| {
-        plan_for_active_session(PlanActiveSessionArgs {
-            sessions,
-            active_id: &active_id,
-            prev: prev.as_ref(),
-            overlay: overlay.as_ref(),
-            locale: display.locale,
-            apply_filters: display.apply_filters,
-            markdown_render: display.markdown_render,
-            show_turn_context_inject: display.show_turn_context_inject,
-            tool_chunks: &tool_chunks,
-            tool_jobs: &tool_jobs,
-            think_open,
-        })
-    });
-
     let Some(node) = transcript_ref.get() else {
-        return (FindRestoreScope::None, live_id);
+        return (FindRestoreScope::None, None);
     };
     let Some(el) = node.dyn_ref::<web_sys::HtmlElement>() else {
-        return (FindRestoreScope::None, live_id);
+        return (FindRestoreScope::None, None);
     };
-
-    let scope = apply_or_rebuild_tui_mount(el, plan, mount_state, || {
-        chat.sessions.with(|sessions| {
-            plan_for_active_session(PlanActiveSessionArgs {
-                sessions,
-                active_id: &active_id,
-                prev: None,
-                overlay: overlay.as_ref(),
-                locale: display.locale,
-                apply_filters: display.apply_filters,
-                markdown_render: display.markdown_render,
-                show_turn_context_inject: display.show_turn_context_inject,
-                tool_chunks: &tool_chunks,
-                tool_jobs: &tool_jobs,
-                think_open,
+    let active_id = chat.active_id.get();
+    let prev = mount_state.get_untracked();
+    chat.sessions.with(|sessions| {
+        chat.stream_text_overlay.with(|overlay| {
+            chat.tool_output_chunks.with(|tool_chunks| {
+                chat.tool_job_states.with(|tool_jobs| {
+                    // 嵌套 with 零拷贝借用：避免每 token 把整份 overlay（含累计正文/思维链）
+                    // 与两个工具 HashMap `.get()` 深克隆出来（O(累计文本)）。
+                    let overlay = overlay.as_ref();
+                    let live_id = overlay.map(|o| o.message_id.clone());
+                    let plan = plan_for_active_session(PlanActiveSessionArgs {
+                        sessions,
+                        active_id: &active_id,
+                        prev: prev.as_ref(),
+                        overlay,
+                        locale: display.locale,
+                        apply_filters: display.apply_filters,
+                        markdown_render: display.markdown_render,
+                        show_turn_context_inject: display.show_turn_context_inject,
+                        tool_chunks,
+                        tool_jobs,
+                        think_open,
+                    });
+                    let scope = apply_or_rebuild_tui_mount(el, plan, mount_state, || {
+                        plan_for_active_session(PlanActiveSessionArgs {
+                            sessions,
+                            active_id: &active_id,
+                            prev: None,
+                            overlay,
+                            locale: display.locale,
+                            apply_filters: display.apply_filters,
+                            markdown_render: display.markdown_render,
+                            show_turn_context_inject: display.show_turn_context_inject,
+                            tool_chunks,
+                            tool_jobs,
+                            think_open,
+                        })
+                    });
+                    follow_after_content_paint(scroll_shell);
+                    (scope, live_id)
+                })
             })
         })
-    });
-    follow_after_content_paint(scroll_shell);
-    (scope, live_id)
+    })
 }
 
 /// 思维链折叠块 summary 点击：记录该 message 的**手动展开状态**（原生 `<details>` 已自行切换，
