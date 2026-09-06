@@ -151,6 +151,8 @@ pub struct StatusBarFooterSignals {
     pub agent_role_user_override: RwSignal<bool>,
     pub selected_session_mode: RwSignal<String>,
     pub session_mode_user_override: RwSignal<bool>,
+    /// 底栏「思考模式」开关（`on` / `off`；`server` 视为关）。与设置页 `llm_thinking_mode` 同源。
+    pub llm_thinking_mode: RwSignal<String>,
     pub refresh_status: Arc<dyn Fn() + Send + Sync>,
     pub user_prefs_reload_nonce: RwSignal<u64>,
     pub user_prefs_sync_phase: RwSignal<crate::user_prefs_sync_state::UserPrefsSyncPhase>,
@@ -331,6 +333,7 @@ impl AppShellCtx {
             agent_role_user_override: self.signals.llm_settings.agent_role_user_override,
             selected_session_mode: self.signals.llm_settings.selected_session_mode,
             session_mode_user_override: self.signals.llm_settings.session_mode_user_override,
+            llm_thinking_mode: self.signals.llm_settings.llm_thinking_mode_draft,
             refresh_status: Arc::clone(&self.refresh_status),
             user_prefs_reload_nonce: self.signals.workspace.user_prefs_reload_nonce,
             user_prefs_sync_phase: self.signals.workspace.user_prefs_sync_phase,
