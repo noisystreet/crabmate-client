@@ -121,6 +121,14 @@ pub fn clear_recent_connect_urls(app: AppHandle) -> Result<(), String> {
     recent_urls::save_to_path(&path, &[])
 }
 
+/// 从壳侧最近连接列表移除单条（连接页每条「删除」）。
+#[tauri::command]
+pub fn remove_recent_connect_url(app: AppHandle, url: String) -> Result<(), String> {
+    let path = recent_connect_urls_path(&app)?;
+    let next = recent_urls::remove_recent(recent_urls::load_from_path(&path), &url);
+    recent_urls::save_to_path(&path, &next)
+}
+
 /// 系统钥匙串中的连接 Bearer（若有）。
 #[tauri::command]
 pub fn get_connect_bearer() -> Option<String> {

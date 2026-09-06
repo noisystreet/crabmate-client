@@ -54,6 +54,19 @@ pub fn push_recent(existing: Vec<String>, href: &str) -> Vec<String> {
     out
 }
 
+/// 从列表移除指定地址（规范化后精确匹配；找不到视为无操作）。
+#[must_use]
+pub fn remove_recent(existing: Vec<String>, href: &str) -> Vec<String> {
+    let Ok(u) = normalize_base_url(href) else {
+        return canonicalize_list(existing);
+    };
+    let key = u.as_str().to_string();
+    canonicalize_list(existing)
+        .into_iter()
+        .filter(|item| item != &key)
+        .collect()
+}
+
 #[must_use]
 pub fn parse_recent_json(raw: &str) -> Vec<String> {
     let Ok(arr) = serde_json::from_str::<Vec<String>>(raw) else {
@@ -120,6 +133,41 @@ mod tests {
                 "http://192.168.1.10:8080/".to_string()
             ]
         );
+    }
+
+    #[test]
+    fn remove_recent_drops_exact_entry() {
+        let list = vec![
+            "http://192.168.1.10:8080/".into(),
+            "http://10.0.0.2:8080/".into(),
+        ];
+        let out = remove_recent(list, "http://10.0.0.2:8080");
+        assert_eq!(out, vec!["http://192.168.1.10:8080/".to_string()]);
+    }
+
+    #[test]
+    fn remove_recent_missing_keeps_list_and_order() {
+        let list = vec![
+            "http://192.168.1.10:8080/".into(),
+            "http://10.0.0.2:8080/".into(),
+        ];
+        let out = remove_recent(list, "https://serve.example:8443");
+        assert_eq!(
+            out,
+            vec![
+                "http://192.168.1.10:8080/".to_string(),
+                "http://10.0.0.2:8080/".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn remove_recent_clears_last_entry() {
+        let out = remove_recent(
+            vec!["http://10.0.0.2:8080/".into()],
+            "http://10.0.0.2:8080/",
+        );
+        assert!(out.is_empty());
     }
 
     #[test]
