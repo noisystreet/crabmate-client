@@ -69,7 +69,7 @@ make tui-release        # 产出 crabmate-tui_*.deb（仅二进制；无图标�
 make clean
 ```
 
-## 远程终端（P3）
+## 远程终端
 
 先启动 `crabmate serve`，再：
 
@@ -113,6 +113,8 @@ make tui-release
 sudo dpkg -i crates/crabmate-tui/target/debian/crabmate-tui_*.deb
 crabmate-tui --api-base http://127.0.0.1:8080 repl
 ```
+
+没有 Rust 工具链？同一个仅二进制的 `.deb` 也由 CI 构建并随每个 `v*` 的 GitHub Release 附上，可直接下载后 `dpkg -i` 安装。
 
 全屏 `tui`（ratatui；终端 ≥120 列时显示左栏会话列表）：
 
