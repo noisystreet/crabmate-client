@@ -151,6 +151,7 @@ struct StatusBarChipsSignals {
     agent_role_user_override: RwSignal<bool>,
     selected_session_mode: RwSignal<String>,
     session_mode_user_override: RwSignal<bool>,
+    llm_thinking_mode: RwSignal<String>,
     locale: RwSignal<Locale>,
     settings_page: RwSignal<bool>,
 }
@@ -345,6 +346,54 @@ fn StatusBarChipsSkeleton(locale: RwSignal<Locale>) -> impl IntoView {
     }
 }
 
+/// 状态栏「思考模式」两态开关（`on` / `off`；`server` 视为关）。
+///
+/// 点击切换后立即写入本机存储并同步 `/user-data/llm-overrides`，与设置页 `llm_thinking_mode` 同源。
+#[component]
+fn StatusBarThinkingToggle(
+    llm_thinking_mode: RwSignal<String>,
+    locale: RwSignal<Locale>,
+) -> impl IntoView {
+    let is_on = move || llm_thinking_mode.get() == "on";
+    view! {
+        <button
+            type="button"
+            class="status-chip status-chip-thinking"
+            class:status-chip-thinking--on=move || is_on()
+            data-testid="status-thinking-toggle"
+            prop:title=move || i18n::status_thinking_tooltip(locale.get())
+            prop:aria-pressed=is_on
+            on:click=move |_| {
+                let next = if is_on() { "off" } else { "on" };
+                llm_thinking_mode.set(next.to_string());
+                let loc = locale.get_untracked();
+                let (base, model, temp, ctx_tok, _old_think) =
+                    load_client_llm_text_fields_from_storage();
+                let _ = crate::api::persist_client_llm_to_storage(
+                    &base,
+                    &model,
+                    &temp,
+                    &ctx_tok,
+                    next,
+                    None,
+                    loc,
+                );
+            }
+        >
+            <span class="status-chip-label">
+                {move || i18n::status_chip_thinking(locale.get())}
+            </span>
+            <span class="status-chip-value">{move || {
+                if is_on() {
+                    i18n::status_thinking_on(locale.get())
+                } else {
+                    i18n::status_thinking_off(locale.get())
+                }
+            }}</span>
+        </button>
+    }
+}
+
 #[component]
 fn StatusBarChipsLoaded(
     st: StatusTasksSignals,
@@ -353,6 +402,7 @@ fn StatusBarChipsLoaded(
     agent_role_user_override: RwSignal<bool>,
     selected_session_mode: RwSignal<String>,
     session_mode_user_override: RwSignal<bool>,
+    llm_thinking_mode: RwSignal<String>,
     locale: RwSignal<Locale>,
     role_menu_open: RwSignal<bool>,
 ) -> impl IntoView {
@@ -388,6 +438,10 @@ fn StatusBarChipsLoaded(
                     menu_open: role_menu_open,
                 } />
             </span>
+            <StatusBarThinkingToggle
+                llm_thinking_mode=llm_thinking_mode
+                locale=locale
+            />
             <StatusBarContextChip
                 st=st
                 chat=chat
@@ -417,6 +471,7 @@ fn StatusBarChipsRow(
         agent_role_user_override,
         selected_session_mode,
         session_mode_user_override,
+        llm_thinking_mode,
         locale,
         settings_page,
     } = chips;
@@ -481,6 +536,7 @@ fn StatusBarChipsRow(
                             agent_role_user_override=agent_role_user_override
                             selected_session_mode=selected_session_mode
                             session_mode_user_override=session_mode_user_override
+                            llm_thinking_mode=llm_thinking_mode
                             locale=locale
                             role_menu_open=role_menu_open
                         />
@@ -560,6 +616,7 @@ fn StatusBarFooterBody(signals: StatusBarFooterSignals) -> impl IntoView {
         agent_role_user_override,
         selected_session_mode,
         session_mode_user_override,
+        llm_thinking_mode,
         refresh_status,
         user_prefs_reload_nonce,
         user_prefs_sync_phase,
@@ -583,6 +640,7 @@ fn StatusBarFooterBody(signals: StatusBarFooterSignals) -> impl IntoView {
         agent_role_user_override,
         selected_session_mode,
         session_mode_user_override,
+        llm_thinking_mode,
         locale,
         settings_page,
     };

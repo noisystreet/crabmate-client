@@ -77,6 +77,42 @@ pub fn status_role_label(l: Locale) -> &'static str {
     }
 }
 
+/// 状态栏「思考模式」开关标签。
+pub fn status_chip_thinking(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "思考",
+        Locale::En => "Think",
+    }
+}
+
+/// 状态栏「思考模式」开关：开启态文案。
+pub fn status_thinking_on(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "开",
+        Locale::En => "On",
+    }
+}
+
+/// 状态栏「思考模式」开关：关闭态文案。
+pub fn status_thinking_off(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "关",
+        Locale::En => "Off",
+    }
+}
+
+/// 状态栏「思考模式」开关 `title`（悬停提示）。
+pub fn status_thinking_tooltip(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => {
+            "思考模式：开启时请求模型启用 thinking（随聊天请求发送 llm_thinking_mode=on）"
+        }
+        Locale::En => {
+            "Thinking mode: on requests model thinking (sends llm_thinking_mode=on with chat)"
+        }
+    }
+}
+
 pub fn status_mode_label(l: Locale) -> &'static str {
     match l {
         Locale::ZhHans => "模式",

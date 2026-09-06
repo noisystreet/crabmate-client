@@ -76,6 +76,29 @@
   overflow: visible;
 }
 
+/* 状态栏「思考模式」两态开关 */
+.status-chip-thinking {
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-elevated) 86%, var(--surface));
+  color: var(--muted);
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+
+.status-chip-thinking:hover {
+  border-color: color-mix(in srgb, var(--border) 60%, var(--text));
+}
+
+.status-chip-thinking--on {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  background: color-mix(in srgb, var(--accent) 14%, var(--bg-elevated));
+  color: var(--text);
+}
+
+.status-chip-thinking--on .status-chip-value {
+  color: var(--accent);
+}
+
 .status-session-mode-seg {
   display: inline-flex;
   align-items: stretch;
