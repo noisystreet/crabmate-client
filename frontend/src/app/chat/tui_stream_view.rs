@@ -403,12 +403,6 @@ fn sync_chat_tui_stream_dom(
     scroll_shell: ChatScrollShellSignals,
     think_open: &HashSet<String>,
 ) -> (FindRestoreScope, Option<String>) {
-    let Some(node) = transcript_ref.get() else {
-        return (FindRestoreScope::None, None);
-    };
-    let Some(el) = node.dyn_ref::<web_sys::HtmlElement>() else {
-        return (FindRestoreScope::None, None);
-    };
     let active_id = chat.active_id.get();
     let prev = mount_state.get_untracked();
     chat.sessions.with(|sessions| {
@@ -417,8 +411,13 @@ fn sync_chat_tui_stream_dom(
                 chat.tool_job_states.with(|tool_jobs| {
                     // 嵌套 with 零拷贝借用：避免每 token 把整份 overlay（含累计正文/思维链）
                     // 与两个工具 HashMap `.get()` 深克隆出来（O(累计文本)）。
+                    //
+                    // 约束：此借用块内只能**读**这 4 个信号并把副作用限制在 DOM/滚动上；
+                    // 若未来有代码在同一信号上 `update()`（会重入），必须先把数据拷出借用块。
                     let overlay = overlay.as_ref();
                     let live_id = overlay.map(|o| o.message_id.clone());
+                    // plan 在 with 内先算：即使 transcript DOM 暂缺，Effect 也先建立对这 4 个信号的
+                    // 依赖，之后再取节点；DOM 容器在组件挂载时即存在，节点缺失仅是很窄的窗口。
                     let plan = plan_for_active_session(PlanActiveSessionArgs {
                         sessions,
                         active_id: &active_id,
@@ -432,6 +431,12 @@ fn sync_chat_tui_stream_dom(
                         tool_jobs,
                         think_open,
                     });
+                    let Some(node) = transcript_ref.get() else {
+                        return (FindRestoreScope::None, live_id);
+                    };
+                    let Some(el) = node.dyn_ref::<web_sys::HtmlElement>() else {
+                        return (FindRestoreScope::None, live_id);
+                    };
                     let scope = apply_or_rebuild_tui_mount(el, plan, mount_state, || {
                         plan_for_active_session(PlanActiveSessionArgs {
                             sessions,
