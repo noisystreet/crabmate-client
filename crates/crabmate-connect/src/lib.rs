@@ -48,8 +48,8 @@ pub use probe::{
 #[cfg(feature = "tauri")]
 pub use commands::{
     clear_recent_connect_urls, connect_remote, disconnect_remote, get_connect_bearer,
-    get_llm_secret, get_recent_connect_urls, get_suggested_server_url, set_connect_bearer,
-    set_llm_secret,
+    get_llm_secret, get_recent_connect_urls, get_suggested_server_url, remove_recent_connect_url,
+    set_connect_bearer, set_llm_secret,
 };
 #[cfg(feature = "tauri")]
 pub use navigation::{allow_shell_navigation, clear_allowed_if_app_origin_loaded};

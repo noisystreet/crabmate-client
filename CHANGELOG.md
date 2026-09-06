@@ -9,6 +9,10 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ## [Unreleased]
 
+### Added
+
+- Connect page: each recent server entry now has its own delete button (removes that single URL from both the `localStorage` list and the shell-side `recent_connect_urls.json`; the whole-list clear action stays)
+
 ## [0.5.1-alpha.0] - 2026-09-05
 
 Alpha preview of the 0.5 line: the client is aligned with the Server contract pin `crabmate` 0.5.1 (`docs/design/contract_pin.md`). Covers everything accumulated in `[Unreleased]` since the 0.1.0 milestone.

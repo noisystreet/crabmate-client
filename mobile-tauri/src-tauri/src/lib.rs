@@ -29,6 +29,7 @@ pub fn run() {
             crabmate_connect::get_suggested_server_url,
             crabmate_connect::get_recent_connect_urls,
             crabmate_connect::clear_recent_connect_urls,
+            crabmate_connect::remove_recent_connect_url,
             crabmate_connect::get_connect_bearer,
             crabmate_connect::set_connect_bearer,
             crabmate_connect::get_llm_secret,

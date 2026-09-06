@@ -155,21 +155,50 @@
         gap: 0.35rem;
       }
       .recent-item {
+        display: flex;
+        align-items: stretch;
         width: 100%;
+        background: var(--field);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-btn);
+        overflow: hidden;
+      }
+      .recent-item:hover {
+        border-color: rgba(123, 144, 196, 0.5);
+      }
+      .recent-pick {
+        flex: 1 1 auto;
+        min-width: 0;
         text-align: left;
         padding: 0.5rem 0.7rem;
         font-size: 0.82rem;
         font-weight: 500;
         color: var(--fg);
-        background: var(--field);
-        border: 1px solid var(--border);
-        border-radius: var(--radius-btn);
+        background: transparent;
+        border: none;
+        border-radius: 0;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
       }
-      .recent-item:hover {
-        border-color: rgba(123, 144, 196, 0.5);
+      .recent-pick:hover {
+        background: rgba(123, 144, 196, 0.08);
+      }
+      .recent-del {
+        flex: 0 0 auto;
+        width: 2.3rem;
+        padding: 0;
+        font-size: 0.95rem;
+        font-weight: 400;
+        color: var(--muted);
+        background: transparent;
+        border: none;
+        border-left: 1px solid var(--border);
+        border-radius: 0;
+      }
+      .recent-del:hover {
+        color: var(--fg);
+        background: rgba(123, 144, 196, 0.12);
       }
       .err {
         color: #e8c4cc;
@@ -388,6 +417,22 @@
         renderRecent();
       }
 
+      /** 删除单条最近记录：先乐观更新 localStorage，再同步壳侧文件；失败则回滚。 */
+      async function deleteRecentUrl(href) {
+        const norm = normalizeRecentUrl(href);
+        if (!norm) return;
+        const prev = readRecentUrls();
+        writeRecentUrls(prev.filter((h) => h !== norm));
+        renderRecent();
+        try {
+          await invoke("remove_recent_connect_url", { url: norm });
+        } catch (_) {
+          writeRecentUrls(prev);
+          renderRecent();
+          err.textContent = "无法删除该地址，请重试";
+        }
+      }
+
       function renderRecent() {
         const section = document.getElementById("recent");
         const listEl = document.getElementById("recent-list");
@@ -402,16 +447,27 @@
         listEl.innerHTML = "";
         list.forEach((href) => {
           const li = document.createElement("li");
-          const btn = document.createElement("button");
-          btn.type = "button";
-          btn.className = "recent-item";
-          btn.textContent = href;
-          btn.title = href;
-          btn.addEventListener("click", function () {
+          li.className = "recent-item";
+          const pick = document.createElement("button");
+          pick.type = "button";
+          pick.className = "recent-pick";
+          pick.textContent = href;
+          pick.title = href;
+          pick.addEventListener("click", function () {
             urlInput.value = href;
             bearerInput.focus();
           });
-          li.appendChild(btn);
+          const del = document.createElement("button");
+          del.type = "button";
+          del.className = "recent-del";
+          del.setAttribute("aria-label", "删除该地址");
+          del.title = "删除该地址";
+          del.textContent = "✕";
+          del.addEventListener("click", function () {
+            deleteRecentUrl(href);
+          });
+          li.appendChild(pick);
+          li.appendChild(del);
           listEl.appendChild(li);
         });
       }
