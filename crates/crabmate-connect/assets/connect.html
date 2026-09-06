@@ -579,14 +579,18 @@
         } catch (_) {}
       }
 
-      function invokeConnect(url, bearer) {
+      function invokeConnect(url, bearer, manual) {
         const core = tauriCore();
         if (!core || typeof core.invoke !== "function") {
           return Promise.reject(
             "Tauri IPC 不可用：请在桌面/移动壳内连接（勿在普通浏览器直接打开连接页）"
           );
         }
-        return core.invoke("connect_remote", { url, bearer: bearer || "" });
+        return core.invoke("connect_remote", {
+          url,
+          bearer: bearer || "",
+          manual: !!manual,
+        });
       }
 
       function isSuggestedUrl(href) {
@@ -705,11 +709,12 @@
         const persistSnap = snapshotConnectPersist();
         try {
           // 卸页前先写；失败则还原，避免把没连上的地址当成下次自动登录目标。
-          if (!isSuggestedUrl(u.href)) {
+          // 自动登录到「建议地址」不记历史（壳侧同样跳过）；手动提交即使等于建议地址也记录。
+          if (!(fromAuto && isSuggestedUrl(u.href))) {
             rememberRecentUrl(u.href);
           }
           persistLastServerUrl(u.href);
-          await invokeConnect(u.href, bearer);
+          await invokeConnect(u.href, bearer, !fromAuto);
           persistBearerFallback(bearer);
           if (!fromAuto) {
             notifyAutofillSuccess();
