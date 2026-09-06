@@ -24,6 +24,8 @@ fn main_window(app: &AppHandle) -> Result<tauri::WebviewWindow, String> {
 /// 成功连接后写入系统钥匙串（非空覆盖；空串删除条目）。
 /// `manual` 标记本次是否为用户手动提交（连接页自动登录为 `false`）：
 /// 仅**自动登录**到建议服务器地址时不落最近连接；手动填写（含恰好等于建议地址）也记录。
+/// 最近连接**在导航成功后才落盘**：若 navigate 失败，页面会回滚 localStorage，
+/// 壳侧文件也不再记录，避免下次启动把一条“没连上过”的记录合并回来。
 #[tauri::command]
 pub async fn connect_remote(
     app: AppHandle,
@@ -35,7 +37,6 @@ pub async fn connect_remote(
     let api_base = normalize_base_url(&url)?;
     enforce_cleartext_connect_policy(&api_base)?;
     probe_server(&api_base, &bearer).await?;
-    persist_recent_after_probe(&app, &api_base, manual.unwrap_or(false));
 
     if let Some(allowed) = app.try_state::<AllowedServeOrigin>() {
         allowed.set_from_url(&api_base);
@@ -56,6 +57,8 @@ pub async fn connect_remote(
     window
         .navigate(target)
         .map_err(|e| format!("无法打开本地界面: {e}"))?;
+
+    persist_recent_on_success(&app, &api_base, manual.unwrap_or(false));
     Ok(())
 }
 
@@ -92,7 +95,7 @@ fn suggested_url_value(app: &AppHandle) -> Option<String> {
         .and_then(|s| s.0.lock().ok().and_then(|g| g.clone()))
 }
 
-fn persist_recent_after_probe(app: &AppHandle, api_base: &Url, manual: bool) {
+fn persist_recent_on_success(app: &AppHandle, api_base: &Url, manual: bool) {
     let Ok(path) = recent_connect_urls_path(app) else {
         return;
     };
