@@ -346,6 +346,24 @@ fn StatusBarChipsSkeleton(locale: RwSignal<Locale>) -> impl IntoView {
     }
 }
 
+/// 状态栏「思考模式」开关：当前值是否为「开」。
+///
+/// 仅 `on` 视为开；`off` 与 `server`（跟随服务端）都视为关。
+fn thinking_mode_is_on(current: &str) -> bool {
+    current == "on"
+}
+
+/// 状态栏「思考模式」开关：点击后的目标值（两态）。
+///
+/// 当前为 `on` → `off`；否则（`off` / `server`）→ `on`。
+fn next_thinking_mode(current: &str) -> &'static str {
+    if thinking_mode_is_on(current) {
+        "off"
+    } else {
+        "on"
+    }
+}
+
 /// 状态栏「思考模式」两态开关（`on` / `off`；`server` 视为关）。
 ///
 /// 点击切换后立即写入本机存储并同步 `/user-data/llm-overrides`，与设置页 `llm_thinking_mode` 同源。
@@ -354,7 +372,7 @@ fn StatusBarThinkingToggle(
     llm_thinking_mode: RwSignal<String>,
     locale: RwSignal<Locale>,
 ) -> impl IntoView {
-    let is_on = move || llm_thinking_mode.get() == "on";
+    let is_on = move || thinking_mode_is_on(&llm_thinking_mode.get());
     view! {
         <button
             type="button"
@@ -364,7 +382,7 @@ fn StatusBarThinkingToggle(
             prop:title=move || i18n::status_thinking_tooltip(locale.get())
             prop:aria-pressed=is_on
             on:click=move |_| {
-                let next = if is_on() { "off" } else { "on" };
+                let next = next_thinking_mode(&llm_thinking_mode.get_untracked());
                 llm_thinking_mode.set(next.to_string());
                 let loc = locale.get_untracked();
                 let (base, model, temp, ctx_tok, _old_think) =
@@ -683,5 +701,42 @@ pub fn status_bar_footer_view(signals: StatusBarFooterSignals) -> impl IntoView 
         <Show when=move || status_bar_visible.get()>
             <StatusBarFooterBody signals=signals.clone() />
         </Show>
+    }
+}
+
+#[cfg(test)]
+mod thinking_toggle_tests {
+    use super::{next_thinking_mode, thinking_mode_is_on};
+
+    #[test]
+    fn on_is_considered_on() {
+        assert!(thinking_mode_is_on("on"));
+    }
+
+    #[test]
+    fn off_is_considered_off() {
+        assert!(!thinking_mode_is_on("off"));
+    }
+
+    #[test]
+    fn server_is_considered_off() {
+        // `server`（跟随服务端）在状态栏两态开关中视为「关」。
+        assert!(!thinking_mode_is_on("server"));
+    }
+
+    #[test]
+    fn next_from_on_is_off() {
+        assert_eq!(next_thinking_mode("on"), "off");
+    }
+
+    #[test]
+    fn next_from_off_is_on() {
+        assert_eq!(next_thinking_mode("off"), "on");
+    }
+
+    #[test]
+    fn next_from_server_is_on() {
+        // 从「跟随服务端」点击开关 → 切到「开」。
+        assert_eq!(next_thinking_mode("server"), "on");
     }
 }
