@@ -26,7 +26,7 @@ MVP 历史验收（部分已废弃）：
 薄壳 + 远程权威：
 
 1. 用户启动 `crabmate serve`（本机 / LAN / VPS）
-2. Tauri 打开连接页（预填 `CM_DESKTOP_SUGGESTED_URL` 或默认 `http://127.0.0.1:8080/`）
+2. Tauri 打开连接页（默认预填最近一次成功连接的地址，含本机端口；无历史时用 `CM_DESKTOP_SUGGESTED_URL` 或默认 `http://127.0.0.1:8080/`）
 3. 探测 `GET /health`；可选 Web Bearer 经 `#cm_web_api_bearer=` 交接
 4. 导航到该 `serve` 的 UI（静态资源通常来自本仓 `frontend/dist` + `CM_WEB_STATIC_DIR` + **`--with-web`**）
 

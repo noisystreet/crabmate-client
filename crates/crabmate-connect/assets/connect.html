@@ -287,24 +287,6 @@
         }
       }
 
-      function isLoopbackHost(host) {
-        const h = (host || "").toLowerCase();
-        return (
-          h === "127.0.0.1" ||
-          h === "localhost" ||
-          h === "::1" ||
-          h === "[::1]"
-        );
-      }
-
-      function isLoopbackUrl(href) {
-        try {
-          return isLoopbackHost(new URL(href).hostname);
-        } catch (_) {
-          return false;
-        }
-      }
-
       function tauriCore() {
         return window.__TAURI__ && window.__TAURI__.core;
       }
@@ -523,10 +505,9 @@
         suggestedServerUrl = (suggested || "").trim();
 
         const savedUrl = readLegacyUrl();
-        // 有建议地址且已存为回环（或尚无已存）时用建议值，避免旧端口残留。
-        if (suggestedServerUrl && (!savedUrl || isLoopbackUrl(savedUrl))) {
-          urlInput.value = suggestedServerUrl;
-        } else if (savedUrl) {
+        // 默认项 = 最近一次成功连接的地址（含本机回环端口）；
+        // 尚无历史时才用建议地址（桌面 CM_DESKTOP_SUGGESTED_URL / 默认 8080）。
+        if (savedUrl) {
           urlInput.value = savedUrl;
         } else if (suggestedServerUrl) {
           urlInput.value = suggestedServerUrl;
@@ -631,11 +612,9 @@
 
       function persistLastServerUrl(href) {
         try {
-          // 上次地址（自动登录）：有桌面建议时任意回环都不落盘，避免连到已退出的本机端口。
-          // 最近列表只跳过「与建议 URL 完全相同」的那条，其它回环端口仍可出现在历史上。
-          if (suggestedServerUrl && isLoopbackUrl(href)) {
-            return;
-          }
+          // 最近一次成功连接的地址（含回环）：作为连接页默认预填与重启自动登录目标。
+          // 失败路径由调用方按快照还原，不会把没连上的地址固化为默认。
+          // 「最近列表」仍只跳过与建议 URL 完全相同的条目（见 should_record_recent）。
           localStorage.setItem(URL_KEY, href);
           localStorage.setItem(URL_KEY_LEGACY_MOBILE, href);
         } catch (_) {}
@@ -770,7 +749,7 @@
         let target = "";
         let shouldAuto = false;
         if (suggestedServerUrl) {
-          // 桌面：优先建议/输入框；已存远程地址则沿用。
+          // 桌面：优先最近一次成功连接的地址（已预填进输入框）；无历史时才落到建议地址。
           target = urlInput.value || suggestedServerUrl;
           shouldAuto = !!target;
         } else if (saved) {

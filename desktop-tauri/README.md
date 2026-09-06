@@ -7,7 +7,7 @@
 ## 启动流程（与代码一致）
 
 1. **单窗启动**：主窗口先 `visible(false)`，连接页阶段**铺满主屏工作区**（`connect.html` 内 flex 居中卡片），再显示——不依赖合成器对小窗的 `center()`，避免左上角闪一下。
-2. **默认**：主窗口展示与移动端共用的**连接页**（`crates/crabmate-connect/assets/connect.html`）。预填建议地址为 **`CM_DESKTOP_SUGGESTED_URL`**，未设时为 **`http://127.0.0.1:8080/`**。用户填写 **服务器地址** + 可选 **Web API Bearer**，探测 `GET /health` 成功后导航到**包内** `index.html`，并用 hash 交接 **API 基址** + Bearer。
+2. **默认**：主窗口展示与移动端共用的**连接页**（`crates/crabmate-connect/assets/connect.html`）。地址框默认预填**最近一次成功连接的地址**（含本机回环端口，作为重启自动登录目标）；尚无任何历史时才预填建议地址 **`CM_DESKTOP_SUGGESTED_URL`**（未设时为 **`http://127.0.0.1:8080/`**）。用户填写 **服务器地址** + 可选 **Web API Bearer**，探测 `GET /health` 成功后导航到**包内** `index.html`，并用 hash 交接 **API 基址** + Bearer。
 3. 成功连接后写入系统钥匙串（非空覆盖；空串删除；账户 `tauri_connect_web_api_bearer`）。包内业务 UI 仅内存持有 Bearer，并从钥匙串水合，**不**写明文 `localStorage`。断开连接会清除钥匙串槽（下次需重新填写）。设置页模型 `API_KEY` 亦写入本机钥匙串（`get_llm_secret` / `set_llm_secret`），不落明文 `localStorage`。GitHub user token 使用同一接口的 `github` 槽，经 `X-CrabMate-GitHub-Token` 出站。
 4. 桌面应用保持单实例：再次启动会显示并聚焦已有主窗口。
 5. 关闭主窗口会结束应用；系统托盘可用时，最小化按钮会隐藏主窗口，托盘「显示/隐藏」可恢复。托盘初始化失败时保留普通最小化。
@@ -41,7 +41,7 @@ cargo tauri dev
 ```
 
 - **`prepare-sidecar.sh`**（名称历史遗留）会把 **`connect.html`** 拷进 **`desktop-tauri/dist/`**（若存在亦同步遗留 `splash.html`）；业务 UI 优先本仓 **`frontend/dist`**。**`make desktop-release` / `cargo tauri build`** 经 **`before-desktop-build.sh`** 先跑 **`trunk build --release`**（需 **`wasm-opt`**），并拒绝把 debug 大体积 WASM 打进包。开发可用 **`make frontend`**；覆盖路径用 **`CRABMATE_FRONTEND_DIST`**；**`CM_PREPARE_SKIP_FRONTEND=1`** 或 **`CRABMATE_FRONTEND_DIST=-`** 跳过 UI 同步（CI stub）。
-- 可选：**`CM_DESKTOP_SUGGESTED_URL`** 覆盖连接页预填。
+- 可选：**`CM_DESKTOP_SUGGESTED_URL`** 作为**无连接历史时**的地址框预填与自动登录兜底。
 
 ## 打包
 
