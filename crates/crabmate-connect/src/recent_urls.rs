@@ -9,7 +9,8 @@ pub const RECENT_FILE_NAME: &str = "recent_connect_urls.json";
 
 /// 与桌面建议地址（通常为 `http://127.0.0.1:8080/`）相同的目标不记入最近列表，
 /// 避免每次自动登录把本机默认端口顶到最前。其它地址（含其它回环端口）都记。
-/// 连接页「上次地址」更严：有建议 URL 时任意回环都不落盘（见 `connect.html` persistLastServerUrl）。
+/// 连接页「上次地址」单独持久化最近一次成功连接的地址（含回环），
+/// 作为默认预填与重启自动登录目标（见 `connect.html` persistLastServerUrl）。
 #[must_use]
 pub fn should_record_recent(href: &str, suggested: Option<&str>) -> bool {
     let Ok(url) = normalize_base_url(href) else {

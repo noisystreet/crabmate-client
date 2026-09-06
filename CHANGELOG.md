@@ -13,6 +13,7 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 - Connect page: each recent server entry now has its own delete button (removes that single URL from both the `localStorage` list and the shell-side `recent_connect_urls.json`; the whole-list clear action stays)
 - Connect page: manually connecting to the shell's suggested server URL now records it in recent servers too (only the per-launch auto-login to that suggested URL stays excluded, matching the shell-side policy)
+- Connect page (desktop): the **last successfully connected server URL** is now the default address-box prefill and the restart auto-login target (loopback ports included); the shell suggested URL (`CM_DESKTOP_SUGGESTED_URL` / `http://127.0.0.1:8080/`) is only the fallback when no connection history exists
 
 ## [0.5.1-alpha.0] - 2026-09-05
 

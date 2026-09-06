@@ -24,7 +24,7 @@ CM_WEB_STATIC_DIR=../crabmate-client/frontend/dist \
   cargo run -- serve --with-web --host 127.0.0.1 --port 8080
 ```
 
-然后启动壳：打开共用**连接页**，预填 **`CM_DESKTOP_SUGGESTED_URL`**（默认 **`http://127.0.0.1:8080/`**）；用户确认后导航到 `serve` UI。
+然后启动壳：打开共用**连接页**，地址框默认预填**最近一次成功连接的地址**（含本机端口）；无历史时预填 **`CM_DESKTOP_SUGGESTED_URL`**（默认 **`http://127.0.0.1:8080/`**）；用户确认后导航到 `serve` UI。
 
 **跳过连接页**须同时满足：
 
@@ -41,7 +41,7 @@ Victauri E2E（`--features victauri`）另需 **`victauri:default`** 权限，�
 
 | 变量 | 说明 |
 | --- | --- |
-| `CM_DESKTOP_SUGGESTED_URL` | 连接页预填（默认 `http://127.0.0.1:8080/`） |
+| `CM_DESKTOP_SUGGESTED_URL` | 无连接历史时的连接页预填与自动登录兜底（默认 `http://127.0.0.1:8080/`） |
 | `CM_DESKTOP_SERVE_URL` | 跳过连接页时必填的已运行 `serve` URL |
 | `CM_DESKTOP_SKIP_CONNECT` | 非空且非 `0` 时跳过连接页（须配合上一行） |
 | `CM_E2E_FIXTURES` | Victauri E2E：跳过连接页（须 `CM_DESKTOP_SERVE_URL`）；默认还会隐藏窗口 |
