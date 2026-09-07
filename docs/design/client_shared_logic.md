@@ -81,7 +81,9 @@ frontend/                # wasm fetch 适配器 + UI；S1–S4 已用 client-api
 
 ## 4. 高价值抽取对照（现状路径）
 
-**2026-09**：契约镜像瘦身落地——`crabmate-client-api` 不再本地镜像 Server 协议 DTO；`CommandApprovalData` / `ApprovalDecision` / `SessionListRow` / 审批 POST body / workspace 响应视图等改从契约 crate `crabmate`（0.5.2，`features=["protocol"]`）消费并按需 re-export（§4.3–4.5、§4.7 的「共享」类型即此来源）。client-api 仅保留产品逻辑：续聊 id 只认 `server_conversation_id`、degraded 文案、chat body 键集对照契约测试。SSE `command_approval` 数据形状不符契约（缺 `command`/`args`）时 TUI / Web 均跳过该事件、不弹审批。
+**2026-09**：契约镜像瘦身落地——`crabmate-client-api` 不再本地镜像 Server 协议 DTO；`CommandApprovalData` / `ApprovalDecision` / `SessionListRow` / 审批 POST body / workspace 响应视图等改从契约 crate `crabmate`（0.5.2，`features=["protocol"]`）消费并按需 re-export（§4.3–4.5、§4.7 的「共享」类型即此来源）。client-api 仅保留产品逻辑：续聊 id 只认 `server_conversation_id`、degraded 文案、chat body 键集对照契约测试。SSE `command_approval` 数据形状不符契约（缺 `command`/`args`）时不弹审批：全屏 TUI 打印一条系统提示行（提醒回合可能无响应），Web 静默跳过。
+
+**P3 收尾**：lib.rs 顶层 `pub use` 收窄为消费方实际使用的项（未收进顶层的项仍可经 `url::` / `workspace::` 等模块路径取用）；HTTP 状态 → 用户文案这类 display 层拼装移入 `messages` 模块（不属契约，Server 不依赖），后续新增用户文案优先落这里。
 
 ### 4.1 API 基址 + 路径拼接（优先）
 

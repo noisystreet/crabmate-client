@@ -8,6 +8,7 @@ use crabmate::cm_api_contract::HealthReportView;
 /// 解析 `/health` JSON：`status=degraded` 时返回失败检查名摘要（不含密钥等敏感值）。
 ///
 /// 非 JSON、非 `degraded`、或形状不符契约（如单项缺 `ok`）时返回 `None`。
+/// degraded 但缺 `checks` 键（契约 default 为空 map）视为无失败项，返回 `Some("status=degraded")`。
 #[must_use]
 pub fn health_degraded_note(body: &str) -> Option<String> {
     let v: HealthReportView = serde_json::from_str(body).ok()?;

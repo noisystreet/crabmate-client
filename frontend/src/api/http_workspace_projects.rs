@@ -114,7 +114,7 @@ fn parse_workspace_set_response(
             }
         });
     }
-    Err(crabmate_client_api::workspace_set_http_error_message(
+    Err(crabmate_client_api::workspace_http_error_message(
         &v, status,
     ))
 }
