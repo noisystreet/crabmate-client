@@ -76,9 +76,9 @@ dependencies = [
 
 [[package]]
 name = "crabmate"
-version = "0.5.0"
+version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4f2ea29d4a225e6effe851cd23279f789056cceeeb1b808e34fe3ffa4d05336c"
+checksum = "34ab35d704d184b57cbd7f5d3d46b129ce4ec59a3e72980aea1bd70b999c43e0"
 dependencies = [
  "getrandom 0.4.3",
  "log",
@@ -92,6 +92,7 @@ dependencies = [
 name = "crabmate-client-api"
 version = "0.5.1-alpha.0"
 dependencies = [
+ "crabmate",
  "serde",
  "serde_json",
 ]

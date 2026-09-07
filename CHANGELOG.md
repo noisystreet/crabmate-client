@@ -15,6 +15,10 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 - Connect page: manually connecting to the shell's suggested server URL now records it in recent servers too (only the per-launch auto-login to that suggested URL stays excluded, matching the shell-side policy)
 - Connect page (desktop): the **last successfully connected server URL** is now the default address-box prefill and the restart auto-login target (loopback ports included); the shell suggested URL (`CM_DESKTOP_SUGGESTED_URL` / `http://127.0.0.1:8080/`) is only the fallback when no connection history exists
 
+### Changed
+
+- Contract pin bumped to crates.io **`crabmate` 0.5.2** (`features = ["protocol"]`; see `docs/design/contract_pin.md`); Playwright / Victauri E2E `serve` checkout moved to git tag **`v0.5.2`**. This Server release exposes the protocol surface required for the client-api mirror thinning (workspace / sessions / health / approval-data DTOs become consumable from the protocol crate).
+
 ## [0.5.1-alpha.0] - 2026-09-05
 
 Alpha preview of the 0.5 line: the client is aligned with the Server contract pin `crabmate` 0.5.1 (`docs/design/contract_pin.md`). Covers everything accumulated in `[Unreleased]` since the 0.1.0 milestone.
