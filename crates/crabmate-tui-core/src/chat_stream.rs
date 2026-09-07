@@ -561,6 +561,7 @@ async fn dispatch_line_action(
         LineAction::Skip => {}
         LineAction::WriteOut(s) => sink.on_text(&s)?,
         LineAction::WriteErr(s) => sink.on_reasoning(&s)?,
+        LineAction::System(s) => sink.on_system(&s)?,
         LineAction::Plain(s) => sink.on_text(&s)?,
         LineAction::Approve(req) => {
             resolve_approval(client, approval_session_id, req, approval).await?;

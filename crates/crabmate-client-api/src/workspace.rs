@@ -5,8 +5,8 @@
 //! `Debug`/`Default`，tui `UiState` / worker 事件枚举依赖），且 client 需要缺省容错
 //! （`entries`/`name`/`path`/`error` 有 default，缺键不炸）。契约对齐由
 //! `contract_roundtrip_*` 测试用契约类型钉住：契约字段改名/移位时测试即失败。
-//! `parse_workspace_*_body` / `workspace_set_http_error_message` 是 client 错误分类
-//! 与文案逻辑，不属于契约。
+//! `parse_workspace_*_body`（client 错误分类）与 `messages::workspace_http_error_message`
+//! （用户文案）不属于契约。
 
 use serde::Deserialize;
 use serde_json::Value;
@@ -141,15 +141,6 @@ pub fn parse_workspace_set_ok_body(val: &Value) -> Result<String, WorkspaceSetEr
         .to_string())
 }
 
-/// HTTP 非 2xx：优先 body `error`，否则 `HTTP {status}`。
-#[must_use]
-pub fn workspace_set_http_error_message(val: &Value, status: u16) -> String {
-    val.get("error")
-        .and_then(|e| e.as_str())
-        .map(str::to_string)
-        .unwrap_or_else(|| format!("HTTP {status}"))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -172,18 +163,6 @@ mod tests {
     fn set_missing_ok_is_error() {
         let e = parse_workspace_set_ok_body(&json!({"path":"/tmp"})).unwrap_err();
         assert_eq!(e.kind, WorkspaceSetErrorKind::RejectedWithoutDetail);
-    }
-
-    #[test]
-    fn http_error_prefers_body() {
-        assert_eq!(
-            workspace_set_http_error_message(&json!({"error":"forbidden"}), 403),
-            "forbidden"
-        );
-        assert_eq!(
-            workspace_set_http_error_message(&json!({}), 502),
-            "HTTP 502"
-        );
     }
 
     #[test]

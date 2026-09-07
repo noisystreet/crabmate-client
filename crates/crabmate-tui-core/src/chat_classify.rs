@@ -14,6 +14,8 @@ pub(crate) enum LineAction {
     Skip,
     WriteOut(String),
     WriteErr(String),
+    /// 系统提示行（stderr / 全屏 System 事件），如畸形审批数据提醒。
+    System(String),
     Approve(CommandApprovalData),
     /// `TOOL_CALL_START`：工具开始（显示工具行开始态）。
     ToolStart {
@@ -116,8 +118,12 @@ fn classify_custom(val: &Value) -> LineAction {
     let data = val.get("data").cloned().unwrap_or(Value::Null);
     match serde_json::from_value::<CommandApprovalData>(data) {
         Ok(parsed) => LineAction::Approve(parsed),
-        // 形状不符契约（缺 command/args）时不弹审批，跳过该行。
-        Err(_) => LineAction::Skip,
+        // 形状不符契约（缺 command/args）时不弹审批；给一行系统提示，
+        // 否则 serve 端审批等待无超时，回合会静默挂起直到用户停止。
+        Err(_) => LineAction::System(
+            "[crabmate-tui] command_approval 数据形状不符契约，已跳过审批；如回合无响应请停止该回合"
+                .to_string(),
+        ),
     }
 }
 
@@ -163,9 +169,15 @@ mod tests {
     }
 
     #[test]
-    fn malformed_approval_data_skipped() {
+    fn malformed_approval_data_surfaces_system_line() {
         let data = r#"{"type":"CUSTOM","customType":"command_approval","data":{}}"#;
-        assert!(matches!(classify_line(data).unwrap(), LineAction::Skip));
+        match classify_line(data).unwrap() {
+            LineAction::System(s) => {
+                assert!(s.contains("command_approval"));
+                assert!(s.contains("已跳过审批"));
+            }
+            other => panic!("unexpected {other:?}"),
+        }
     }
 
     #[test]

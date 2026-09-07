@@ -11,6 +11,7 @@ pub mod handoff;
 pub mod health;
 pub mod markdown_inline;
 pub mod markdown_normalize;
+pub mod messages;
 pub mod secrets;
 pub mod sessions;
 pub mod url;
@@ -18,11 +19,11 @@ pub mod workspace;
 
 pub use approval::{
     ApprovalDecision, ApprovalDecisionApi, ChatApprovalRequestBody, CommandApprovalData,
-    approval_session_id_is_valid, is_approval_session_id_char,
+    approval_session_id_is_valid,
 };
 pub use auth::{
-    HEADER_AUTHORIZATION, HEADER_GITHUB_TOKEN, HEADER_X_API_KEY, WebApiCredentialPair,
-    github_token_header_value, web_api_credential_pair,
+    HEADER_AUTHORIZATION, HEADER_GITHUB_TOKEN, HEADER_X_API_KEY, github_token_header_value,
+    web_api_credential_pair,
 };
 pub use chat_body::{
     ChatStreamCoreFields, build_chat_stream_core_body, merge_chat_stream_core_fields,
@@ -34,14 +35,13 @@ pub use handoff::{
 pub use health::health_degraded_note;
 pub use markdown_inline::{InlineSpan, parse_inline_markdown};
 pub use markdown_normalize::normalize_markdown_for_render;
-pub use secrets::{KEYRING_SERVICE, SecretSlot, WEB_API_BEARER_KEYRING_ACCOUNT, secret_slot_names};
+pub use messages::workspace_http_error_message;
+pub use secrets::{KEYRING_SERVICE, SecretSlot, WEB_API_BEARER_KEYRING_ACCOUNT};
 pub use sessions::{
     SessionListRow, conversation_id_for_resume, session_row_conversation_id_for_resume,
 };
-pub use url::{ApiUrlError, join_api_path, normalize_api_base};
+pub use url::normalize_api_base;
 pub use workspace::{
-    WorkspaceDirData, WorkspaceDirEntry, WorkspaceInfo, WorkspaceProjectOpenData,
-    WorkspaceProjectsData, WorkspaceSetError, WorkspaceSetErrorKind,
-    parse_workspace_project_open_body, parse_workspace_set_ok_body,
-    workspace_set_http_error_message,
+    WorkspaceDirData, WorkspaceDirEntry, WorkspaceInfo, WorkspaceProjectsData,
+    WorkspaceSetErrorKind, parse_workspace_project_open_body, parse_workspace_set_ok_body,
 };

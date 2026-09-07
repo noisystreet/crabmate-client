@@ -9,6 +9,7 @@ use crate::sse_dispatch::{
 };
 
 use crabmate::cm_sse_protocol::{AgUiParseDispatch, classify_ag_ui_sse_data};
+use serde::Deserialize;
 
 use super::sse_parser::SseParser;
 
@@ -333,9 +334,7 @@ fn dispatch_tool_custom(custom_type: &str, val: &serde_json::Value, sink: &mut S
         "command_approval" => {
             if let Some(data) = val.get("data") {
                 // 形状不符契约（缺 command/args）时不弹审批，跳过该事件。
-                if let Ok(req) =
-                    serde_json::from_value::<crabmate_client_api::CommandApprovalData>(data.clone())
-                {
+                if let Ok(req) = crabmate_client_api::CommandApprovalData::deserialize(data) {
                     if let Some(hook) = sink.workspace_tool.on_command_approval_request.as_mut() {
                         hook(req);
                     }
