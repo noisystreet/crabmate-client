@@ -5,7 +5,7 @@
 use crabmate::cm_sse_protocol::{AgUiParseDispatch, classify_ag_ui_sse_data};
 use serde_json::Value;
 
-use crate::approval::{CommandApprovalRequest, parse_command_approval_data};
+use crate::approval::CommandApprovalData;
 use crate::error::TermError;
 
 /// 一行 AG-UI SSE 的处置动作（与 Web `parser_v2` / `sse_dispatch` 语义对齐的子集）。
@@ -14,7 +14,7 @@ pub(crate) enum LineAction {
     Skip,
     WriteOut(String),
     WriteErr(String),
-    Approve(CommandApprovalRequest),
+    Approve(CommandApprovalData),
     /// `TOOL_CALL_START`：工具开始（显示工具行开始态）。
     ToolStart {
         tool_call_id: String,
@@ -114,7 +114,11 @@ fn classify_custom(val: &Value) -> LineAction {
         return LineAction::Skip;
     }
     let data = val.get("data").cloned().unwrap_or(Value::Null);
-    LineAction::Approve(parse_command_approval_data(&data))
+    match serde_json::from_value::<CommandApprovalData>(data) {
+        Ok(parsed) => LineAction::Approve(parsed),
+        // 形状不符契约（缺 command/args）时不弹审批，跳过该行。
+        Err(_) => LineAction::Skip,
+    }
 }
 
 fn delta_string(val: &Value) -> String {
@@ -156,6 +160,12 @@ mod tests {
             }
             other => panic!("unexpected {other:?}"),
         }
+    }
+
+    #[test]
+    fn malformed_approval_data_skipped() {
+        let data = r#"{"type":"CUSTOM","customType":"command_approval","data":{}}"#;
+        assert!(matches!(classify_line(data).unwrap(), LineAction::Skip));
     }
 
     #[test]

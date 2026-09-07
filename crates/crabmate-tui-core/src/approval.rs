@@ -4,13 +4,11 @@ use crabmate_client_api::approval_session_id_is_valid;
 
 use crate::error::TermError;
 
-pub use crabmate_client_api::{
-    ApprovalDecision, CommandApprovalRequest, parse_command_approval_data,
-};
+pub use crabmate_client_api::{ApprovalDecision, ApprovalDecisionApi, CommandApprovalData};
 
 /// 同步审批闸门：在 SSE 消费循环中调用（服务端会阻塞等待 `POST /chat/approval`）。
 pub trait ApprovalGate {
-    fn decide(&mut self, req: &CommandApprovalRequest) -> Result<ApprovalDecision, TermError>;
+    fn decide(&mut self, req: &CommandApprovalData) -> Result<ApprovalDecision, TermError>;
 }
 
 /// `--yes`：非白名单命令一律 `allow_once`（执行仍在 serve）。
@@ -18,7 +16,7 @@ pub trait ApprovalGate {
 pub struct AutoAllowOnce;
 
 impl ApprovalGate for AutoAllowOnce {
-    fn decide(&mut self, _req: &CommandApprovalRequest) -> Result<ApprovalDecision, TermError> {
+    fn decide(&mut self, _req: &CommandApprovalData) -> Result<ApprovalDecision, TermError> {
         Ok(ApprovalDecision::AllowOnce)
     }
 }
@@ -46,7 +44,7 @@ mod tests {
     #[test]
     fn parses_via_shared() {
         let data = json!({"command":"rm","args":"-rf","allowlistKey":"rm"});
-        let req = parse_command_approval_data(&data);
+        let req: CommandApprovalData = serde_json::from_value(data).expect("valid approval data");
         assert_eq!(req.command, "rm");
         assert_eq!(req.allowlist_key.as_deref(), Some("rm"));
     }

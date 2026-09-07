@@ -6,9 +6,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::Sender;
 
-use crabmate_tui_core::{
-    ApprovalDecision, CommandApprovalRequest, SessionListItem, WorkspaceDirEntry,
-};
+use crabmate_tui_core::{ApprovalDecision, CommandApprovalData, SessionListRow, WorkspaceDirEntry};
 
 use super::serve_defaults::ServeDefaults;
 use super::tool_summary::tool_end_text;
@@ -105,7 +103,7 @@ pub struct UiState {
     /// 键盘焦点（输入框 / 左栏会话）。
     pub focus: Focus,
     /// 左栏会话列表（`fetch_web_sessions` 快照，未经本地转换）。
-    pub sessions: Vec<SessionListItem>,
+    pub sessions: Vec<SessionListRow>,
     /// 左栏选中项下标。
     pub selected: usize,
     /// serve 默认偏好（`/status` 拉取）。
@@ -340,7 +338,7 @@ impl UiState {
     }
 
     /// 替换会话列表并 clamp 选中项。
-    pub fn replace_sessions(&mut self, sessions: Vec<SessionListItem>) {
+    pub fn replace_sessions(&mut self, sessions: Vec<SessionListRow>) {
         self.sessions = sessions;
         self.selected = self.selected.min(self.sessions.len().saturating_sub(1));
     }
@@ -371,7 +369,7 @@ impl UiState {
 
     /// 会话行是否正是当前 `conversation_id`（左栏标记 `>`）。
     #[must_use]
-    pub fn row_in_use(&self, row: &SessionListItem) -> bool {
+    pub fn row_in_use(&self, row: &SessionListRow) -> bool {
         self.conversation_id
             .as_deref()
             .is_some_and(|c| row.server_conversation_id.as_deref() == Some(c))
@@ -391,11 +389,7 @@ impl UiState {
     // ── 审批浮层 ─────────────────────────────────────────────
 
     /// 收到命令审批请求：记录浮层（供渲染 + 按键应答）。
-    pub fn begin_approval(
-        &mut self,
-        req: &CommandApprovalRequest,
-        answer: Sender<ApprovalDecision>,
-    ) {
+    pub fn begin_approval(&mut self, req: &CommandApprovalData, answer: Sender<ApprovalDecision>) {
         self.approval = Some(ApprovalOverlay {
             command: req.command.clone(),
             args: req.args.clone(),
@@ -706,11 +700,16 @@ mod tests {
         assert_eq!(s.current_input(), "");
     }
 
-    fn session(id: &str, conv: Option<&str>) -> SessionListItem {
-        SessionListItem {
+    fn session(id: &str, conv: Option<&str>) -> SessionListRow {
+        SessionListRow {
             id: id.to_string(),
             title: String::new(),
+            updated_at: 0,
+            pinned: false,
+            starred: false,
             server_conversation_id: conv.map(str::to_string),
+            server_revision: None,
+            workspace_root: None,
         }
     }
 

@@ -13,7 +13,7 @@ use clap::{Parser, Subcommand};
 use crabmate_client_api::secrets::{KEYRING_SERVICE, SecretSlot, WEB_API_BEARER_KEYRING_ACCOUNT};
 use crabmate_tui_core::{
     ApprovalDecision, ApprovalGate, AutoAllowOnce, ChatStreamOutcome, ClientLlm,
-    CommandApprovalRequest, ConnectionConfig, ServeClient, StreamResume, TermError,
+    CommandApprovalData, ConnectionConfig, ServeClient, StreamResume, TermError,
 };
 use reedline::{DefaultPrompt, DefaultPromptSegment, Reedline, Signal};
 
@@ -152,7 +152,7 @@ impl SessionPrefs {
 }
 
 impl ApprovalGate for AnyApprovalGate {
-    fn decide(&mut self, req: &CommandApprovalRequest) -> Result<ApprovalDecision, TermError> {
+    fn decide(&mut self, req: &CommandApprovalData) -> Result<ApprovalDecision, TermError> {
         match self {
             Self::Auto(g) => g.decide(req),
             Self::Tty(g) => g.decide(req),

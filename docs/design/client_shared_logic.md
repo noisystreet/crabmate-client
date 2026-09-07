@@ -81,6 +81,8 @@ frontend/                # wasm fetch 适配器 + UI；S1–S4 已用 client-api
 
 ## 4. 高价值抽取对照（现状路径）
 
+**2026-09**：契约镜像瘦身落地——`crabmate-client-api` 不再本地镜像 Server 协议 DTO；`CommandApprovalData` / `ApprovalDecision` / `SessionListRow` / 审批 POST body / workspace 响应视图等改从契约 crate `crabmate`（0.5.2，`features=["protocol"]`）消费并按需 re-export（§4.3–4.5、§4.7 的「共享」类型即此来源）。client-api 仅保留产品逻辑：续聊 id 只认 `server_conversation_id`、degraded 文案、chat body 键集对照契约测试。SSE `command_approval` 数据形状不符契约（缺 `command`/`args`）时 TUI / Web 均跳过该事件、不弹审批。
+
 ### 4.1 API 基址 + 路径拼接（优先）
 
 | 端 | 路径 |

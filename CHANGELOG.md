@@ -18,6 +18,7 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 ### Changed
 
 - Contract pin bumped to crates.io **`crabmate` 0.5.2** (`features = ["protocol"]`; see `docs/design/contract_pin.md`); Playwright / Victauri E2E `serve` checkout moved to git tag **`v0.5.2`**. This Server release exposes the protocol surface required for the client-api mirror thinning (workspace / sessions / health / approval-data DTOs become consumable from the protocol crate).
+- **client-api mirror thinning**: `crabmate-client-api` no longer duplicates Server protocol DTOs. Approval (`CommandApprovalData` / decision), session list rows (`SessionListRow`), the approval POST body, and workspace response views are now consumed from the contract crate and re-exported to the client crates; pure client-side product logic stays in client-api (resume id only via `server_conversation_id`, degraded-health note, chat-body key-set check against the contract). Edge-case behavior change: SSE `command_approval` data that does not match the contract shape (missing `command`/`args`) is now skipped without surfacing an approval prompt (full-screen TUI + web UI).
 
 ## [0.5.1-alpha.0] - 2026-09-05
 

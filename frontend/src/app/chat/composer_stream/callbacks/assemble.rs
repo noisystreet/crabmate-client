@@ -7,9 +7,7 @@ use leptos::prelude::*;
 use crate::api::ChatStreamCallbacks;
 use crate::clarification_form::PendingClarificationForm;
 use crate::conversation_hydrate::TiktokenPromptTokensSnapshot;
-use crate::sse_dispatch::{
-    ClarificationQuestionnaireInfo, CommandApprovalRequest, ThinkingTraceInfo,
-};
+use crate::sse_dispatch::{ClarificationQuestionnaireInfo, CommandApprovalData, ThinkingTraceInfo};
 
 use super::super::context::ChatStreamCallbackCtx;
 use super::super::shell_abort;
@@ -40,9 +38,9 @@ pub(crate) fn build_chat_stream_callbacks(
 
     let on_tool_output_chunk = make_on_tool_output_chunk(Rc::clone(&stream_ctx));
 
-    let on_approval: Rc<dyn Fn(CommandApprovalRequest)> = {
+    let on_approval: Rc<dyn Fn(CommandApprovalData)> = {
         let stream_ctx = Rc::clone(&stream_ctx);
-        Rc::new(move |req: CommandApprovalRequest| {
+        Rc::new(move |req: CommandApprovalData| {
             if stream_ctx.is_stale() {
                 return;
             }

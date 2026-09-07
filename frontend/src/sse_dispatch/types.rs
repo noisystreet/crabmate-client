@@ -4,7 +4,7 @@ use serde_json::Value;
 
 use crate::conversation_hydrate::TiktokenPromptTokensSnapshot;
 
-pub use crabmate_client_api::CommandApprovalRequest;
+pub use crabmate_client_api::CommandApprovalData;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SseDispatch {
@@ -35,7 +35,7 @@ pub struct SseWorkspaceToolHooks<'a> {
     /// `tool_output_chunk`：工具执行中的输出片段（如 PTY）；最终以 `tool_result` 收束。
     pub on_tool_output_chunk: Option<&'a mut dyn FnMut(ToolOutputChunkInfo)>,
     pub on_tool_result: Option<&'a mut dyn FnMut(ToolResultInfo)>,
-    pub on_command_approval_request: Option<&'a mut dyn FnMut(CommandApprovalRequest)>,
+    pub on_command_approval_request: Option<&'a mut dyn FnMut(CommandApprovalData)>,
 }
 
 /// `assistant_answer_phase` 与回合约边界事件（终答相位 / 段落锚点；非已删 staged 编排）。

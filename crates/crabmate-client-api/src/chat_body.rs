@@ -1,8 +1,10 @@
 //! `POST /chat/stream` **核心**字段（message / `client_sse_protocol` / conversation_id / approval_session_id）。
 //!
-//! 图像、`stream_resume`、`client_llm`、温度等仍由各端自行追加。
-//! `client_sse_protocol` 取值由调用方传入（通常为 `crabmate::cm_sse_protocol::SSE_PROTOCOL_VERSION`），
-//! 本 crate **不**依赖 sse-protocol，以免拖进契约 git 依赖。
+//! 图像、`stream_resume`、`client_llm`、温度等仍由各端自行追加。核心键集以契约
+//! `crabmate::cm_api_contract::chat_keys::CHAT_REQUEST_BODY_ALLOWED_KEYS` 为单一
+//! 来源（测试钉住）；出站仍保留薄 `json!` builder（0.5.2 `ChatRequestBodyWire` 是
+//! 入站线型，client 出站无现成 builder 可复用）。
+//! `client_sse_protocol` 取值由调用方传入（通常为 `crabmate::cm_sse_protocol::SSE_PROTOCOL_VERSION`）。
 
 use serde_json::{Value, json};
 
@@ -97,5 +99,25 @@ mod tests {
         assert_eq!(body["conversation_id"], "c1");
         assert!(body.get("approval_session_id").is_none());
         assert_eq!(body["agent_role"], "default");
+    }
+
+    #[test]
+    fn core_keys_are_within_contract_allowed_keys() {
+        // 0.5.2：核心键集必须是契约 `CHAT_REQUEST_BODY_ALLOWED_KEYS` 的子集；
+        // 契约改名 / 收窄白名单时此测试失败。
+        let v = build_chat_stream_core_body(ChatStreamCoreFields {
+            message: "hi",
+            client_sse_protocol: 2,
+            approval_session_id: Some("appr_1"),
+            conversation_id: Some("c1"),
+        });
+        let keys: Vec<&str> = v.as_object().unwrap().keys().map(String::as_str).collect();
+        assert_eq!(keys.len(), 4);
+        for k in keys {
+            assert!(
+                crabmate::cm_api_contract::chat_keys::CHAT_REQUEST_BODY_ALLOWED_KEYS.contains(&k),
+                "key `{k}` not in contract CHAT_REQUEST_BODY_ALLOWED_KEYS"
+            );
+        }
     }
 }

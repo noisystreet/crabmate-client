@@ -2,7 +2,7 @@
 
 use std::io::{self, IsTerminal, Write};
 
-use crabmate_tui_core::{ApprovalDecision, ApprovalGate, CommandApprovalRequest, TermError};
+use crabmate_tui_core::{ApprovalDecision, ApprovalGate, CommandApprovalData, TermError};
 
 /// 在 stderr 提示，从 stdin 读一行决策。
 #[derive(Debug, Default)]
@@ -16,13 +16,13 @@ impl TtyApprovalGate {
 }
 
 impl ApprovalGate for TtyApprovalGate {
-    fn decide(&mut self, req: &CommandApprovalRequest) -> Result<ApprovalDecision, TermError> {
+    fn decide(&mut self, req: &CommandApprovalData) -> Result<ApprovalDecision, TermError> {
         print_prompt(req)?;
         read_decision()
     }
 }
 
-fn print_prompt(req: &CommandApprovalRequest) -> Result<(), TermError> {
+fn print_prompt(req: &CommandApprovalData) -> Result<(), TermError> {
     let mut err = io::stderr().lock();
     let cmd = req.command.trim();
     let args = req.args.trim();
