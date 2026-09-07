@@ -1,28 +1,32 @@
 //! `GET /health` JSON 子集（无 HTTP；不含壳 CORS）。
+//!
+//! 镜像瘦身（0.5.2）：响应形状直接使用契约 `HealthReportView`（不进 client-api 公开面），
+//! client 仅保留 degraded 摘要文案逻辑。
+
+use crabmate::cm_api_contract::HealthReportView;
 
 /// 解析 `/health` JSON：`status=degraded` 时返回失败检查名摘要（不含密钥等敏感值）。
 ///
-/// 非 JSON、非 `degraded`、或缺 `checks` 对象时返回 `None`。
+/// 非 JSON、非 `degraded`、或形状不符契约（如单项缺 `ok`）时返回 `None`。
 #[must_use]
 pub fn health_degraded_note(body: &str) -> Option<String> {
-    let v: serde_json::Value = serde_json::from_str(body).ok()?;
-    if v.get("status").and_then(|s| s.as_str()) != Some("degraded") {
+    let v: HealthReportView = serde_json::from_str(body).ok()?;
+    if v.status != "degraded" {
         return None;
     }
-    let checks = v.get("checks")?.as_object()?;
     let mut failed = Vec::new();
-    for (name, check) in checks {
-        let ok = check.get("ok").and_then(|x| x.as_bool()).unwrap_or(true);
-        if !ok {
-            let detail = check
-                .get("detail")
-                .and_then(|d| d.as_str())
-                .map(str::trim)
-                .filter(|s| !s.is_empty());
-            match detail {
-                Some(d) => failed.push(format!("{name}: {d}")),
-                None => failed.push(name.clone()),
-            }
+    for (name, check) in &v.checks {
+        if check.ok {
+            continue;
+        }
+        let detail = check
+            .detail
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+        match detail {
+            Some(d) => failed.push(format!("{name}: {d}")),
+            None => failed.push(name.clone()),
         }
     }
     if failed.is_empty() {

@@ -17,8 +17,8 @@ pub mod url;
 pub mod workspace;
 
 pub use approval::{
-    ApprovalDecision, ApprovalPostBody, CommandApprovalRequest, approval_post_body_json,
-    approval_session_id_is_valid, is_approval_session_id_char, parse_command_approval_data,
+    ApprovalDecision, ApprovalDecisionApi, ChatApprovalRequestBody, CommandApprovalData,
+    approval_session_id_is_valid, is_approval_session_id_char,
 };
 pub use auth::{
     HEADER_AUTHORIZATION, HEADER_GITHUB_TOKEN, HEADER_X_API_KEY, WebApiCredentialPair,
@@ -36,8 +36,7 @@ pub use markdown_inline::{InlineSpan, parse_inline_markdown};
 pub use markdown_normalize::normalize_markdown_for_render;
 pub use secrets::{KEYRING_SERVICE, SecretSlot, WEB_API_BEARER_KEYRING_ACCOUNT, secret_slot_names};
 pub use sessions::{
-    SessionListItem, conversation_id_for_resume, parse_session_list_rows,
-    session_item_conversation_id_for_resume,
+    SessionListRow, conversation_id_for_resume, session_row_conversation_id_for_resume,
 };
 pub use url::{ApiUrlError, join_api_path, normalize_api_base};
 pub use workspace::{

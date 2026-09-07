@@ -32,7 +32,7 @@ pub struct ChatStreamCallbacks {
     pub on_tool_status: std::rc::Rc<dyn Fn(bool)>,
     pub on_tool_output_chunk: std::rc::Rc<dyn Fn(crate::sse_dispatch::ToolOutputChunkInfo)>,
     pub on_tool_result: std::rc::Rc<dyn Fn(crate::sse_dispatch::ToolResultInfo)>,
-    pub on_approval: std::rc::Rc<dyn Fn(crate::sse_dispatch::CommandApprovalRequest)>,
+    pub on_approval: std::rc::Rc<dyn Fn(crate::sse_dispatch::CommandApprovalData)>,
     pub on_conversation_id: std::rc::Rc<dyn Fn(String)>,
     /// SSE `conversation_saved.revision` 与可选 tiktoken，供 `POST /chat/branch` 与底栏用量。
     pub on_conversation_revision:

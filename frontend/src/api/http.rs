@@ -811,9 +811,10 @@ pub async fn submit_chat_approval(
     decision: &str,
     loc: Locale,
 ) -> Result<(), String> {
-    let body = serde_json::to_string(&crabmate_client_api::ApprovalPostBody::from_decision_str(
-        session_id, decision,
-    ))
+    let body = serde_json::to_string(&crabmate_client_api::ChatApprovalRequestBody {
+        approval_session_id: session_id.to_string(),
+        decision: decision.to_string(),
+    })
     .map_err(|e| e.to_string())?;
     let init = RequestInit::new();
     init.set_method("POST");

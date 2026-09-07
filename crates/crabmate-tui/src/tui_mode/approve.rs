@@ -4,14 +4,14 @@
 
 use std::sync::mpsc::{self, Sender};
 
-use crabmate_tui_core::{ApprovalDecision, ApprovalGate, CommandApprovalRequest, TermError};
+use crabmate_tui_core::{ApprovalDecision, ApprovalGate, CommandApprovalData, TermError};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::worker::UiEvent;
 
 /// 一条待 UI 决策的审批请求（携带回传通道）。
 pub struct ApprovalPrompt {
-    pub req: CommandApprovalRequest,
+    pub req: CommandApprovalData,
     pub answer: Sender<ApprovalDecision>,
 }
 
@@ -24,7 +24,7 @@ pub struct OverlayApprovalGate {
 }
 
 impl ApprovalGate for OverlayApprovalGate {
-    fn decide(&mut self, req: &CommandApprovalRequest) -> Result<ApprovalDecision, TermError> {
+    fn decide(&mut self, req: &CommandApprovalData) -> Result<ApprovalDecision, TermError> {
         let (answer_tx, answer_rx) = mpsc::channel::<ApprovalDecision>();
         self.tx
             .send(UiEvent::Approval {
@@ -70,8 +70,8 @@ mod tests {
     use crossterm::event::KeyModifiers;
     use std::sync::mpsc;
 
-    fn req(command: &str) -> CommandApprovalRequest {
-        CommandApprovalRequest {
+    fn req(command: &str) -> CommandApprovalData {
+        CommandApprovalData {
             command: command.to_string(),
             args: "".to_string(),
             allowlist_key: None,

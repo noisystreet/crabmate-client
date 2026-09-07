@@ -332,9 +332,13 @@ fn dispatch_tool_custom(custom_type: &str, val: &serde_json::Value, sink: &mut S
         }
         "command_approval" => {
             if let Some(data) = val.get("data") {
-                let req = crabmate_client_api::parse_command_approval_data(data);
-                if let Some(hook) = sink.workspace_tool.on_command_approval_request.as_mut() {
-                    hook(req);
+                // 形状不符契约（缺 command/args）时不弹审批，跳过该事件。
+                if let Ok(req) =
+                    serde_json::from_value::<crabmate_client_api::CommandApprovalData>(data.clone())
+                {
+                    if let Some(hook) = sink.workspace_tool.on_command_approval_request.as_mut() {
+                        hook(req);
+                    }
                 }
             }
         }

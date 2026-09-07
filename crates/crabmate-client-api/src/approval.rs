@@ -1,28 +1,30 @@
-//! 命令审批：决策串、`command_approval` data 解析、`POST /chat/approval` body 形状。
+//! 命令审批：契约类型 re-export、决策串映射扩展、`POST /chat/approval` body 形状、
+//! `approval_session_id` 校验。
+//!
+//! 镜像瘦身（0.5.2）：`CommandApprovalData` / `CommandApprovalDecision` /
+//! `ChatApprovalRequestBody` 均为 Server 契约类型 re-export，client 不再持有本地镜像；
+//! 仅保留 0.5.2 契约面没有的产品逻辑（决策串映射、session id 字符集校验）。
 
-use serde::Serialize;
-use serde_json::Value;
+pub use crabmate::cm_api_contract::chat::ChatApprovalRequestBody;
+pub use crabmate::cm_sse_protocol::CommandApprovalData;
+pub use crabmate::cm_types::CommandApprovalDecision as ApprovalDecision;
 
-/// SSE `command_approval` 控制面请求（字段名与 AG-UI CUSTOM `data` 对齐）。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CommandApprovalRequest {
-    pub command: String,
-    pub args: String,
-    pub allowlist_key: Option<String>,
-}
-
-/// 投递给 `POST /chat/approval` 的决策。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ApprovalDecision {
-    Deny,
-    AllowOnce,
-    AllowAlways,
-}
-
-impl ApprovalDecision {
-    /// 服务端契约字符串。
+/// [`ApprovalDecision`]（契约 `CommandApprovalDecision`）的 client 扩展：0.5.2 枚举
+/// 无方法无 serde，这里补 API 决策串映射，保持消费端 `as_api_str()` / `parse()` 语法不变。
+pub trait ApprovalDecisionApi: Copy {
+    /// 服务端契约字符串（`POST /chat/approval` body 的 `decision` 字段）。
     #[must_use]
-    pub fn as_api_str(self) -> &'static str {
+    fn as_api_str(self) -> &'static str;
+
+    /// 解析决策串；未知值返回 `None`（容忍首尾空白）。
+    #[must_use]
+    fn parse(raw: &str) -> Option<Self>
+    where
+        Self: Sized;
+}
+
+impl ApprovalDecisionApi for ApprovalDecision {
+    fn as_api_str(self) -> &'static str {
         match self {
             Self::Deny => "deny",
             Self::AllowOnce => "allow_once",
@@ -30,9 +32,7 @@ impl ApprovalDecision {
         }
     }
 
-    /// 解析决策串；未知值返回 `None`。
-    #[must_use]
-    pub fn parse(raw: &str) -> Option<Self> {
+    fn parse(raw: &str) -> Option<Self> {
         match raw.trim() {
             "deny" => Some(Self::Deny),
             "allow_once" => Some(Self::AllowOnce),
@@ -40,39 +40,6 @@ impl ApprovalDecision {
             _ => None,
         }
     }
-}
-
-/// `POST /chat/approval` JSON body。
-#[derive(Debug, Clone, Copy, Serialize)]
-pub struct ApprovalPostBody<'a> {
-    pub approval_session_id: &'a str,
-    pub decision: &'a str,
-}
-
-impl<'a> ApprovalPostBody<'a> {
-    #[must_use]
-    pub fn new(approval_session_id: &'a str, decision: ApprovalDecision) -> Self {
-        Self {
-            approval_session_id,
-            decision: decision.as_api_str(),
-        }
-    }
-
-    #[must_use]
-    pub fn from_decision_str(approval_session_id: &'a str, decision: &'a str) -> Self {
-        Self {
-            approval_session_id,
-            decision,
-        }
-    }
-}
-
-/// 序列化审批 POST body。
-pub fn approval_post_body_json(
-    approval_session_id: &str,
-    decision: ApprovalDecision,
-) -> Result<String, serde_json::Error> {
-    serde_json::to_string(&ApprovalPostBody::new(approval_session_id, decision))
 }
 
 /// `approval_session_id` 允许的字符（字母数字 / `-_.:`）。
@@ -88,33 +55,10 @@ pub fn approval_session_id_is_valid(id: &str) -> bool {
     !t.is_empty() && t.len() <= 128 && t.chars().all(is_approval_session_id_char)
 }
 
-/// 从 AG-UI CUSTOM `command_approval` 的 `data` 对象解析请求。
-///
-/// 识别 camelCase `allowlistKey`（与 serve 下发一致）。
-#[must_use]
-pub fn parse_command_approval_data(data: &Value) -> CommandApprovalRequest {
-    CommandApprovalRequest {
-        command: data
-            .get("command")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string(),
-        args: data
-            .get("args")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string(),
-        allowlist_key: data
-            .get("allowlistKey")
-            .and_then(|v| v.as_str())
-            .map(str::to_string),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use serde_json::{Value, json};
 
     #[test]
     fn decision_roundtrip() {
@@ -133,20 +77,26 @@ mod tests {
     }
 
     #[test]
-    fn parses_approval_data_allowlist_key() {
+    fn parses_approval_data_camel_case() {
         let data = json!({"command":"rm","args":"-rf","allowlistKey":"rm"});
-        let req = parse_command_approval_data(&data);
+        let req: CommandApprovalData = serde_json::from_value(data).unwrap();
         assert_eq!(req.command, "rm");
         assert_eq!(req.args, "-rf");
         assert_eq!(req.allowlist_key.as_deref(), Some("rm"));
-        let empty = parse_command_approval_data(&json!({}));
-        assert_eq!(empty.command, "");
-        assert!(empty.allowlist_key.is_none());
+        let no_key: CommandApprovalData =
+            serde_json::from_value(json!({"command":"ls","args":"-l"})).unwrap();
+        assert!(no_key.allowlist_key.is_none());
+        // 契约 command/args 必填：缺键解析失败（0.5.2 类型无宽容 default；SSE 线上恒有）。
+        assert!(serde_json::from_value::<CommandApprovalData>(json!({})).is_err());
     }
 
     #[test]
     fn post_body_shape() {
-        let s = approval_post_body_json("approval_1", ApprovalDecision::Deny).unwrap();
+        let body = ChatApprovalRequestBody {
+            approval_session_id: "approval_1".to_string(),
+            decision: ApprovalDecision::Deny.as_api_str().to_string(),
+        };
+        let s = serde_json::to_string(&body).unwrap();
         let v: Value = serde_json::from_str(&s).unwrap();
         assert_eq!(v["approval_session_id"], "approval_1");
         assert_eq!(v["decision"], "deny");

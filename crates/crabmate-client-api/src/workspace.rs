@@ -1,4 +1,12 @@
-//! `POST /workspace` 响应解析（纯 JSON；无 HTTP 客户端）。
+//! `/workspace*` 响应视图与错误文案（client UI 投影；无 HTTP 客户端）。
+//!
+//! 镜像瘦身（0.5.2）例外：线形状权威是契约 `crabmate::cm_api_contract::workspace`，
+//! 但 client 保留本地视图结构体——0.5.2 契约 DTO 仅 `Serialize + Deserialize`（无
+//! `Debug`/`Default`，tui `UiState` / worker 事件枚举依赖），且 client 需要缺省容错
+//! （`entries`/`name`/`path`/`error` 有 default，缺键不炸）。契约对齐由
+//! `contract_roundtrip_*` 测试用契约类型钉住：契约字段改名/移位时测试即失败。
+//! `parse_workspace_*_body` / `workspace_set_http_error_message` 是 client 错误分类
+//! 与文案逻辑，不属于契约。
 
 use serde::Deserialize;
 use serde_json::Value;
@@ -241,5 +249,82 @@ mod tests {
         assert_eq!(e.message, "no such");
         let e = parse_workspace_project_open_body(&json!({"ok": false})).unwrap_err();
         assert_eq!(e.kind, WorkspaceSetErrorKind::RejectedWithoutDetail);
+    }
+
+    // —— 契约对齐钉（0.5.2 `cm_api_contract::workspace`）——
+    // client 视图结构体与契约线形状 1:1；契约字段改名/移位时以下测试失败。
+
+    #[test]
+    fn contract_roundtrip_dir_data() {
+        use crabmate::cm_api_contract::workspace as ws;
+        let resp = ws::WorkspaceResponse {
+            path: "/data/proj".into(),
+            entries: vec![ws::WorkspaceEntry {
+                name: "src".into(),
+                is_dir: true,
+            }],
+            error: None,
+        };
+        let d: WorkspaceDirData = serde_json::from_value(serde_json::to_value(&resp).unwrap())
+            .expect("contract dir response parses into client view");
+        assert_eq!(d.path, "/data/proj");
+        assert_eq!(d.entries.len(), 1);
+        assert_eq!(d.entries[0].name, "src");
+        assert!(d.entries[0].is_dir);
+        assert_eq!(d.error_text(), None);
+
+        let resp = ws::WorkspaceResponse {
+            path: "/x".into(),
+            entries: vec![],
+            error: Some("busy".into()),
+        };
+        let d: WorkspaceDirData = serde_json::from_value(serde_json::to_value(&resp).unwrap())
+            .expect("contract dir response with error parses");
+        assert_eq!(d.error_text(), Some("busy"));
+    }
+
+    #[test]
+    fn contract_roundtrip_projects_data() {
+        use crabmate::cm_api_contract::workspace as ws;
+        let resp = ws::WorkspaceProjectsListResponse {
+            enabled: true,
+            pool_path: Some("/data/pool".into()),
+            projects: vec!["proj-a".into(), "proj-b".into()],
+        };
+        let d: WorkspaceProjectsData = serde_json::from_value(serde_json::to_value(&resp).unwrap())
+            .expect("contract projects response parses into client view");
+        assert!(d.enabled);
+        assert_eq!(d.pool_path.as_deref(), Some("/data/pool"));
+        assert_eq!(d.projects, vec!["proj-a".to_string(), "proj-b".to_string()]);
+
+        // 契约对空 projects / 无 pool_path 刻意 skip 出站：client 缺省容错补空。
+        let resp = ws::WorkspaceProjectsListResponse {
+            enabled: false,
+            pool_path: None,
+            projects: vec![],
+        };
+        let d: WorkspaceProjectsData = serde_json::from_value(serde_json::to_value(&resp).unwrap())
+            .expect("contract projects response with skips parses");
+        assert!(!d.enabled);
+        assert!(d.pool_path.is_none());
+        assert!(d.projects.is_empty());
+    }
+
+    #[test]
+    fn contract_roundtrip_project_open_data() {
+        use crabmate::cm_api_contract::workspace as ws;
+        let resp = ws::WorkspaceProjectPostResponse {
+            ok: true,
+            name: "a".into(),
+            path: "/p/a".into(),
+            error: None,
+        };
+        let d: WorkspaceProjectOpenData =
+            serde_json::from_value(serde_json::to_value(&resp).unwrap())
+                .expect("contract project open response parses into client view");
+        assert!(d.ok);
+        assert_eq!(d.name, "a");
+        assert_eq!(d.path, "/p/a");
+        assert!(d.error.is_none());
     }
 }

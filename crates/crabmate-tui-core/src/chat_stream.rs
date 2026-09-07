@@ -12,7 +12,7 @@ use reqwest::header::{ACCEPT, CONTENT_TYPE, HeaderValue};
 use serde_json::Value;
 use tokio::sync::watch;
 
-use crate::approval::{ApprovalDecision, ApprovalGate, CommandApprovalRequest};
+use crate::approval::{ApprovalDecision, ApprovalGate, CommandApprovalData};
 use crate::chat_classify::{LineAction, classify_line};
 use crate::client::ServeClient;
 use crate::error::TermError;
@@ -579,7 +579,7 @@ async fn dispatch_line_action(
 async fn resolve_approval(
     client: &ServeClient,
     approval_session_id: &str,
-    req: CommandApprovalRequest,
+    req: CommandApprovalData,
     approval: &mut dyn ApprovalGate,
 ) -> Result<(), TermError> {
     match approval.decide(&req) {
@@ -614,12 +614,12 @@ mod tests {
     use crate::approval::{ApprovalDecision, AutoAllowOnce};
 
     struct CaptureGate {
-        seen: Vec<CommandApprovalRequest>,
+        seen: Vec<CommandApprovalData>,
         decision: ApprovalDecision,
     }
 
     impl ApprovalGate for CaptureGate {
-        fn decide(&mut self, req: &CommandApprovalRequest) -> Result<ApprovalDecision, TermError> {
+        fn decide(&mut self, req: &CommandApprovalData) -> Result<ApprovalDecision, TermError> {
             self.seen.push(req.clone());
             Ok(self.decision)
         }
@@ -628,7 +628,7 @@ mod tests {
     #[test]
     fn auto_allow_once_gate() {
         let mut g = AutoAllowOnce;
-        let req = CommandApprovalRequest {
+        let req = CommandApprovalData {
             command: "x".into(),
             args: String::new(),
             allowlist_key: None,
@@ -642,7 +642,7 @@ mod tests {
             seen: Vec::new(),
             decision: ApprovalDecision::Deny,
         };
-        let req = CommandApprovalRequest {
+        let req = CommandApprovalData {
             command: "df".into(),
             args: "-h".into(),
             allowlist_key: Some("df".into()),

@@ -1,7 +1,9 @@
 //! `reqwest` 封装：鉴权头 + 健康探测 + 审批提交 + 回合取消。
 
 use crabmate_client_api::auth::{HEADER_X_API_KEY, web_api_credential_pair};
-use crabmate_client_api::{ApprovalDecision, ApprovalPostBody, health_degraded_note};
+use crabmate_client_api::{
+    ApprovalDecision, ApprovalDecisionApi, ChatApprovalRequestBody, health_degraded_note,
+};
 use reqwest::Client;
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue};
 use serde::Deserialize;
@@ -95,7 +97,10 @@ impl ServeClient {
         let url = self.url("/chat/approval")?;
         let mut headers = self.auth_headers()?;
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-        let body = ApprovalPostBody::new(approval_session_id, decision);
+        let body = ChatApprovalRequestBody {
+            approval_session_id: approval_session_id.to_string(),
+            decision: decision.as_api_str().to_string(),
+        };
         let resp = self
             .http
             .post(&url)

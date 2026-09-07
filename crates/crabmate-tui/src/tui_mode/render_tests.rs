@@ -1,5 +1,5 @@
 use super::*;
-use crabmate_tui_core::SessionListItem;
+use crabmate_tui_core::SessionListRow;
 
 #[test]
 fn truncate_appends_ellipsis() {
@@ -216,11 +216,16 @@ fn status_shows_search_and_view_back() {
     assert!(s.contains("↑12"));
 }
 
-fn row(id: &str, title: &str, conv: Option<&str>) -> SessionListItem {
-    SessionListItem {
+fn row(id: &str, title: &str, conv: Option<&str>) -> SessionListRow {
+    SessionListRow {
         id: id.to_string(),
         title: title.to_string(),
+        updated_at: 0,
+        pinned: false,
+        starred: false,
         server_conversation_id: conv.map(str::to_string),
+        server_revision: None,
+        workspace_root: None,
     }
 }
 
