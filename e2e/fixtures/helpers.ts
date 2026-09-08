@@ -405,6 +405,18 @@ export async function setupRealLLMSession(
     ).__CRABMATE_E2E_CLIENT_LLM_KEY = key.trim();
   }, apiKey);
 
+  // 思考模式为本机两态（on/off），存 webview localStorage；服务端 llm-overrides 不再存储。
+  await page.addInitScript((mode: string) => {
+    try {
+      localStorage.setItem(
+        "crabmate-llm-thinking-mode",
+        mode.trim() === "on" ? "on" : "off",
+      );
+    } catch {
+      /* ignore */
+    }
+  }, cfg.thinkingMode);
+
   await applyWebApiBearerHeaders(page);
   await page.goto(homeUrlWithOptionalWebBearer("/"), {
     waitUntil: "networkidle",
@@ -504,6 +516,18 @@ export async function setupRealLLMSessionPreferringKeyring(
     contextTokens: llmConfig?.contextTokens ?? "1000000",
     thinkingMode: llmConfig?.thinkingMode ?? "off",
   };
+
+  // 思考模式为本机两态（on/off），存 webview localStorage；服务端 llm-overrides 不再存储。
+  await page.addInitScript((mode: string) => {
+    try {
+      localStorage.setItem(
+        "crabmate-llm-thinking-mode",
+        mode.trim() === "on" ? "on" : "off",
+      );
+    } catch {
+      /* ignore */
+    }
+  }, cfg.thinkingMode);
 
   await applyWebApiBearerHeaders(page);
   await page.goto(homeUrlWithOptionalWebBearer("/"), {

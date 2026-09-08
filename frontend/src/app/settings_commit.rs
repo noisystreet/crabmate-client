@@ -40,7 +40,7 @@ fn validate_llm_context_tokens_override(raw: &str, loc: Locale) -> Result<(), St
 
 fn validate_llm_thinking_mode_override(raw: &str, loc: Locale) -> Result<(), String> {
     let t = raw.trim();
-    if t.is_empty() || t == "server" || t == "on" || t == "off" {
+    if t == "on" || t == "off" {
         return Ok(());
     }
     Err(crate::i18n::settings_err_thinking_mode_invalid(loc).to_string())

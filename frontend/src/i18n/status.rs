@@ -105,10 +105,10 @@ pub fn status_thinking_off(l: Locale) -> &'static str {
 pub fn status_thinking_tooltip(l: Locale) -> &'static str {
     match l {
         Locale::ZhHans => {
-            "思考模式：开启时请求模型启用 thinking（随聊天请求发送 llm_thinking_mode=on）"
+            "思考模式：仅本机生效（on/off）；开启时随聊天请求发送 llm_thinking_mode=on"
         }
         Locale::En => {
-            "Thinking mode: on requests model thinking (sends llm_thinking_mode=on with chat)"
+            "Thinking mode: local-only (on/off); sends llm_thinking_mode=on with chat when on"
         }
     }
 }

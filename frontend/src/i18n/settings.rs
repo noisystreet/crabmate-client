@@ -288,13 +288,6 @@ pub fn settings_label_llm_thinking_mode(l: Locale) -> &'static str {
     }
 }
 
-pub fn settings_thinking_mode_server(l: Locale) -> &'static str {
-    match l {
-        Locale::ZhHans => "跟随服务端配置",
-        Locale::En => "Follow server config",
-    }
-}
-
 pub fn settings_thinking_mode_on(l: Locale) -> &'static str {
     match l {
         Locale::ZhHans => "开启（请求启用 thinking）",
