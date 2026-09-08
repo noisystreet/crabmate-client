@@ -9,6 +9,10 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ## [Unreleased]
 
+### Fixed
+
+- Chat: paginated long conversations no longer permanently skip hydration with the `SkippedHydratedUserRegression` guard. The guard compared the **full** local user-bubble count against the 80-message tail page, so any session with more turns than the tail page covers always "regressed", hydration was skipped forever, the tiktoken context snapshot was never written back, and the status-bar context chip stayed at `— / cap`. The guard now compares user counts only within the tail-page overwrite range (v2-projection merges are append-only and skip the compare; window metadata scopes it to the local tail; no window metadata keeps the conservative full compare).
+
 ### Added
 
 - Connect page: each recent server entry now has its own delete button (removes that single URL from both the `localStorage` list and the shell-side `recent_connect_urls.json`; the whole-list clear action stays)

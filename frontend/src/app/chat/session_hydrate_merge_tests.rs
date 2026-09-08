@@ -1,5 +1,6 @@
+use super::hydration_content_guard_outcome;
 use crate::app::chat::session_hydrate::{
-    apply_hydrated_tail_if_newer, hydration_response_meta_is_fresh,
+    SessionHydrationMergeOutcome, apply_hydrated_tail_if_newer, hydration_response_meta_is_fresh,
     hydration_revision_after_response, merge_tail_page_into_session_messages,
     should_merge_hydrated_messages,
 };
@@ -311,4 +312,100 @@ fn empty_cache_with_v2_layout_keeps_legacy_ids_and_schema() {
     assert_eq!(session.messages[1].id, "h_a");
     assert_eq!(session.messages[2].id, "h_t");
     assert!(!session.has_v2_finalized_rows());
+}
+
+/// 每回合 1 user + 9 assistant 的长会话块。
+fn turn_block(turn: usize) -> Vec<StoredMessage> {
+    let mut block = vec![plain_message(
+        &format!("u{turn}"),
+        "user",
+        &format!("q{turn}"),
+    )];
+    for i in 0..9 {
+        block.push(plain_message(
+            &format!("a{turn}_{i}"),
+            "assistant",
+            "answer",
+        ));
+    }
+    block
+}
+
+fn messages_from_turns(turns: std::ops::Range<usize>) -> Vec<StoredMessage> {
+    turns.flat_map(turn_block).collect()
+}
+
+fn precheck_response(window_start_index: u32, total_count: u32) -> ConversationMessagesResponse {
+    let mut resp = revision_response(8);
+    resp.total_count = total_count;
+    resp.window_start_index = window_start_index;
+    resp
+}
+
+/// 分页长会话（本地全量 user > 尾页 user，但尾页覆盖范围内一致）不得触发回退守卫：
+/// 否则水合被永久跳过，tiktoken 快照无法写回，状态栏上下文将一直显示 `— / cap`。
+#[test]
+fn paginated_long_session_hydration_passes_user_regression_guard() {
+    // 10 回合 = 10 user / 100 条；尾页 60 条（window_start=40）覆盖 turn4..turn9 = 6 user。
+    let session = {
+        let mut s = revision_session(messages_from_turns(0..10), Some(7));
+        s.history_window_start = Some(0);
+        s
+    };
+    let hydrated = messages_from_turns(4..10);
+    assert_eq!(
+        hydration_content_guard_outcome(&session, &hydrated, &precheck_response(40, 100)),
+        None
+    );
+}
+
+/// 尾页覆盖范围内 user 数真实减少（服务端快照缺回合）仍须拦截。
+#[test]
+fn genuine_user_regression_within_tail_page_still_skipped() {
+    let session = {
+        let mut s = revision_session(messages_from_turns(0..10), Some(7));
+        s.history_window_start = Some(0);
+        s
+    };
+    // 尾页窗口应有 6 user（turn4..turn9），服务端只回了 3 user（turn4..turn6）。
+    let hydrated = messages_from_turns(4..7);
+    assert_eq!(
+        hydration_content_guard_outcome(&session, &hydrated, &precheck_response(40, 100)),
+        Some(SessionHydrationMergeOutcome::SkippedHydratedUserRegression)
+    );
+}
+
+/// v2 projection 合并只追加服务端新回合，本地行不替换 → 不做回退比较。
+#[test]
+fn v2_projection_hydration_bypasses_user_regression_guard() {
+    let mut session = revision_session(
+        vec![
+            plain_message("u1", "user", "q1"),
+            plain_message("turn-final-answer", "assistant", "ans1"),
+            plain_message("u2", "user", "q2"),
+            plain_message("turn-final-answer-2", "assistant", "ans2"),
+        ],
+        Some(7),
+    );
+    session.layout_schema_version = CURRENT_LAYOUT_SCHEMA_VERSION;
+    let hydrated = vec![
+        plain_message("u3", "user", "q3"),
+        plain_message("a3", "assistant", "ans3"),
+    ];
+    assert_eq!(
+        hydration_content_guard_outcome(&session, &hydrated, &precheck_response(0, 6)),
+        None
+    );
+}
+
+/// 无窗口信息时整个本地列表都处于覆盖范围，维持全量比较的保守旧行为。
+#[test]
+fn no_window_meta_falls_back_to_full_local_user_compare() {
+    let mut session = revision_session(messages_from_turns(0..10), Some(7));
+    session.history_window_start = None;
+    let hydrated = messages_from_turns(4..10);
+    assert_eq!(
+        hydration_content_guard_outcome(&session, &hydrated, &precheck_response(40, 100)),
+        Some(SessionHydrationMergeOutcome::SkippedHydratedUserRegression)
+    );
 }
