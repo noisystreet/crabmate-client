@@ -81,36 +81,63 @@ struct MergeHydrationIntoActiveSessionArgs<'a> {
     default_agent_role_id: Option<&'a str>,
 }
 
+/// 尾页合并（[`merge_tail_page_into_session_messages`]）会用服务端快照替换的本地范围：
+/// v2 projection 合并只追加服务端新回合（本地行不替换，返回空）；有窗口信息时仅返回
+/// `window_start_index` 之后的本地尾部；无窗口信息时整个本地列表都可能被覆盖。
+fn local_tail_within_hydration_overwrite_range<'a>(
+    session: &'a ChatSession,
+    resp: &ConversationMessagesResponse,
+) -> &'a [StoredMessage] {
+    if session.has_v2_layout_projection() && session.has_v2_finalized_rows() {
+        return &[];
+    }
+    if let Some(local_start) = session.history_window_start
+        && resp.window_start_index >= local_start
+    {
+        let keep = ((resp.window_start_index - local_start) as usize).min(session.messages.len());
+        return &session.messages[keep..];
+    }
+    &session.messages
+}
+
+/// 内容对比类守卫（空快照 / user 回退）：user 回退比较限定在尾页覆盖范围内，
+/// 否则分页长会话必然误判（本地全量 user 数 > 尾页 user 数）而永久跳过水合，
+/// tiktoken 快照无法写回。返回 `Some(skip)` 时调用方应直接短路。
+fn hydration_content_guard_outcome(
+    session: &ChatSession,
+    hydrated: &[StoredMessage],
+    resp: &ConversationMessagesResponse,
+) -> Option<SessionHydrationMergeOutcome> {
+    if !session.messages.is_empty() && hydrated.is_empty() {
+        return Some(SessionHydrationMergeOutcome::SkippedEmptyHydrateAgainstLocalMessages);
+    }
+    let local_users =
+        count_user_role_bubbles(local_tail_within_hydration_overwrite_range(session, resp));
+    let hydrated_users = count_user_role_bubbles(hydrated);
+    if local_users > 0 && hydrated_users < local_users {
+        return Some(SessionHydrationMergeOutcome::SkippedHydratedUserRegression);
+    }
+    None
+}
+
 /// 水合合并前的**有序守卫**：返回 `Err(skip)` 时调用方应直接返回对应 [`SessionHydrationMergeOutcome`]。
 fn try_hydration_merge_precheck(
-    session: &ChatSession,
-    aid: &str,
-    cid: &str,
-    hydrated: &[StoredMessage],
-    nonce_at_start: u64,
-    current_nonce: u64,
-    active_id: &str,
+    args: &MergeHydrationIntoActiveSessionArgs<'_>,
 ) -> Result<(), SessionHydrationMergeOutcome> {
-    if active_id != aid {
+    if args.active_id != args.aid {
         return Err(SessionHydrationMergeOutcome::SkippedActiveSessionMismatch);
     }
-    if messages_have_any_loading(&session.messages) {
+    if messages_have_any_loading(&args.session.messages) {
         return Err(SessionHydrationMergeOutcome::SkippedLoadingPlaceholders);
     }
-    let still = session.trimmed_server_conversation_id();
-    if still != Some(cid) {
+    if args.session.trimmed_server_conversation_id() != Some(args.cid) {
         return Err(SessionHydrationMergeOutcome::SkippedConversationIdMismatch);
     }
-    if current_nonce != nonce_at_start {
+    if args.current_nonce != args.nonce_at_start {
         return Err(SessionHydrationMergeOutcome::SkippedHydrateNonceMismatch);
     }
-    let local_users = count_user_role_bubbles(&session.messages);
-    let hydrated_users = count_user_role_bubbles(hydrated);
-    if !session.messages.is_empty() && hydrated.is_empty() {
-        return Err(SessionHydrationMergeOutcome::SkippedEmptyHydrateAgainstLocalMessages);
-    }
-    if local_users > 0 && hydrated_users < local_users {
-        return Err(SessionHydrationMergeOutcome::SkippedHydratedUserRegression);
+    if let Some(out) = hydration_content_guard_outcome(args.session, &args.hydrated, args.resp) {
+        return Err(out);
     }
     Ok(())
 }
@@ -285,32 +312,20 @@ fn apply_persisted_session_meta(
 fn merge_hydration_into_active_session(
     args: MergeHydrationIntoActiveSessionArgs<'_>,
 ) -> SessionHydrationMergeOutcome {
+    if let Err(out) = try_hydration_merge_precheck(&args) {
+        return out;
+    }
     let MergeHydrationIntoActiveSessionArgs {
         session,
-        aid,
-        cid,
         hydrated,
         resp,
-        nonce_at_start,
-        current_nonce,
-        active_id,
         selected_agent_role,
         agent_role_user_override,
         selected_session_mode,
         session_mode_user_override,
         default_agent_role_id,
+        ..
     } = args;
-    if let Err(out) = try_hydration_merge_precheck(
-        session,
-        aid,
-        cid,
-        &hydrated,
-        nonce_at_start,
-        current_nonce,
-        active_id,
-    ) {
-        return out;
-    }
     apply_hydrated_tail_if_newer(session, hydrated, resp);
     apply_history_meta_from_response(session, resp);
     // 过期响应（revision 低于本地）仍可能通过 nonce 门闸；勿用其 role/mode 覆盖底栏。
