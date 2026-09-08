@@ -44,7 +44,7 @@ impl LLMSettingsSignals {
             llm_model_draft: RwSignal::new(String::new()),
             llm_temperature_draft: RwSignal::new(String::new()),
             llm_context_tokens_draft: RwSignal::new(String::new()),
-            llm_thinking_mode_draft: RwSignal::new("server".to_string()),
+            llm_thinking_mode_draft: RwSignal::new(crate::api::load_llm_thinking_mode_initial()),
             llm_api_key_draft: RwSignal::new(String::new()),
             llm_has_saved_key: RwSignal::new(false),
             llm_settings_feedback: RwSignal::new(None),

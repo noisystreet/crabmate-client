@@ -37,7 +37,6 @@ fn sync_llm_to_server_async(loc: Locale) {
                 m.model.clone(),
                 m.temperature.clone(),
                 m.llm_context_tokens.clone(),
-                m.llm_thinking_mode.clone(),
                 m.executor_api_base.clone(),
                 m.executor_model.clone(),
                 m.execution_mode.clone(),
@@ -49,11 +48,11 @@ fn sync_llm_to_server_async(loc: Locale) {
         file.client_llm.model = opt_trim(&snap.1);
         file.client_llm.temperature = opt_trim(&snap.2);
         file.client_llm.llm_context_tokens = opt_trim(&snap.3);
-        file.client_llm.llm_thinking_mode = opt_trim(&snap.4);
-        file.executor_llm.api_base = opt_trim(&snap.5);
-        file.executor_llm.model = opt_trim(&snap.6);
-        file.execution_mode = opt_trim(&snap.7);
-        file.saved_models = snap.8;
+        // `llm_thinking_mode` 本机两态，服务端不再存储，PUT 不携带。
+        file.executor_llm.api_base = opt_trim(&snap.4);
+        file.executor_llm.model = opt_trim(&snap.5);
+        file.execution_mode = opt_trim(&snap.6);
+        file.saved_models = snap.7;
         let _ = put_llm_overrides(&file, loc).await;
     });
 }
@@ -103,6 +102,8 @@ pub async fn persist_client_llm_to_storage_async(
         m.llm_context_tokens = llm_context_tokens.trim().to_string();
         m.llm_thinking_mode = llm_thinking_mode.trim().to_string();
     });
+    // 思考模式本机两态：同步写 webview `localStorage`（非机密偏好，不经服务端）。
+    client_llm_cache::persist_llm_thinking_mode_local(llm_thinking_mode);
     sync_llm_to_server_async(loc);
     if let Some(k) = api_key_update {
         let kind = set_client_llm_api_key_async(k).await?;
@@ -132,6 +133,8 @@ pub fn persist_client_llm_to_storage(
             m.api_key = k.trim().to_string();
         }
     });
+    // 思考模式本机两态：同步写 webview `localStorage`（非机密偏好，不经服务端）。
+    client_llm_cache::persist_llm_thinking_mode_local(llm_thinking_mode);
     sync_llm_to_server_async(loc);
     if let Some(k) = api_key_update {
         let key = k.to_string();
@@ -172,10 +175,9 @@ pub fn client_llm_json_for_chat_body() -> Option<Value> {
                 map.insert("llm_context_tokens".into(), Value::Number(n.into()));
             }
         }
-        let tm = m.llm_thinking_mode.trim();
-        if tm == "on" || tm == "off" {
-            map.insert("llm_thinking_mode".into(), Value::String(tm.to_string()));
-        }
+        // 两态恒注入（mem 已由 `normalize_llm_thinking_mode` 归一），UI 展示与请求保持一致。
+        let tm = client_llm_cache::normalize_llm_thinking_mode(&m.llm_thinking_mode);
+        map.insert("llm_thinking_mode".into(), Value::String(tm.to_string()));
         let key = if m.api_key.trim().is_empty() {
             super::llm_secrets_local::client_llm_api_key()
         } else {

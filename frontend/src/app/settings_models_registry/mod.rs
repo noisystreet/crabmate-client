@@ -156,11 +156,8 @@ pub(super) fn try_build_manual_saved_preset(
         temp.to_string()
     };
     let think = d.thinking_mode.trim();
-    let llm_thinking_mode = match think {
-        "on" => "on".to_string(),
-        "off" => "off".to_string(),
-        _ => "server".to_string(),
-    };
+    // 本机两态：非 `on` 一律视为 `off`（含旧版 `server` 残留）。
+    let llm_thinking_mode = if think == "on" { "on" } else { "off" }.to_string();
     Ok(SavedModelPreset {
         label: lab.to_string(),
         api_base: base.to_string(),
@@ -280,9 +277,6 @@ fn SettingsModelsThinkingModeField(
                 prop:value=move || new_thinking_mode.get()
                 on:change=move |ev| new_thinking_mode.set(event_target_value(&ev))
             >
-                <option value="server">
-                    {move || i18n::settings_thinking_mode_server(locale.get())}
-                </option>
                 <option value="on">
                     {move || i18n::settings_thinking_mode_on(locale.get())}
                 </option>
@@ -448,7 +442,7 @@ fn SettingsModelsRegistryAddFormActions(s: RegistryAddFormActionSignals) -> impl
         new_api_key.set(String::new());
         new_ctx_tokens.set(String::new());
         new_temperature.set("0.7".to_string());
-        new_thinking_mode.set("server".to_string());
+        new_thinking_mode.set("off".to_string());
         dialog_mode.set(None);
         form_error.set(None);
     });
@@ -664,7 +658,7 @@ fn SettingsModelsRegistryAddModelDialog(s: RegistryAddFormSignals) -> impl IntoV
             new_api_key.set(String::new());
             new_ctx_tokens.set(String::new());
             new_temperature.set("0.7".to_string());
-            new_thinking_mode.set("server".to_string());
+            new_thinking_mode.set("off".to_string());
             dialog_mode.set(None);
             form_error.set(None);
         }) as Arc<dyn Fn() + Send + Sync>
@@ -752,7 +746,7 @@ pub(crate) fn SettingsModelsRegistryPanel(bundle: SettingsModelsRegistryBundle) 
     let new_api_key = RwSignal::new(String::new());
     let new_ctx_tokens = RwSignal::new(String::new());
     let new_temperature = RwSignal::new("0.7".to_string());
-    let new_thinking_mode = RwSignal::new("server".to_string());
+    let new_thinking_mode = RwSignal::new("off".to_string());
 
     let id_root = format!("{form_id_prefix}-models-new");
     let id_label = format!("{id_root}-label");
@@ -779,7 +773,7 @@ pub(crate) fn SettingsModelsRegistryPanel(bundle: SettingsModelsRegistryBundle) 
             new_api_key.set(String::new());
             new_ctx_tokens.set(String::new());
             new_temperature.set("0.7".to_string());
-            new_thinking_mode.set("server".to_string());
+            new_thinking_mode.set("off".to_string());
         }) as Arc<dyn Fn() + Send + Sync>
     };
 

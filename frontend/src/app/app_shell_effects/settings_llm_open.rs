@@ -83,12 +83,8 @@ pub fn wire_settings_modal_llm_drafts_on_open(s: WireSettingsModalLlmDraftsSigna
             stored_ctx_tokens
         };
         llm_context_tokens_draft.set(ctx_tokens);
-        let thinking = stored_thinking.trim();
-        if thinking == "on" || thinking == "off" {
-            llm_thinking_mode_draft.set(thinking.to_string());
-        } else {
-            llm_thinking_mode_draft.set("server".to_string());
-        }
+        // 思考模式本机两态（`on` / `off`），读取侧已归一。
+        llm_thinking_mode_draft.set(stored_thinking);
         llm_api_key_draft.set(String::new());
         llm_has_saved_key.set(client_llm_storage_has_api_key());
         llm_settings_feedback.set(None);

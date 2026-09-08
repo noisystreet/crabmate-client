@@ -246,7 +246,7 @@ mod settings_form_ui_phase_tests {
             llm_model_draft: llm_model_draft.into(),
             llm_temperature_draft: String::new(),
             llm_context_tokens_draft: String::new(),
-            llm_thinking_mode_draft: "server".into(),
+            llm_thinking_mode_draft: "off".into(),
             llm_has_saved_key: false,
             executor_llm_api_base_draft: String::new(),
             executor_llm_api_base_preset_select: "server".into(),

@@ -346,16 +346,14 @@ fn StatusBarChipsSkeleton(locale: RwSignal<Locale>) -> impl IntoView {
     }
 }
 
-/// 状态栏「思考模式」开关：当前值是否为「开」。
-///
-/// 仅 `on` 视为开；`off` 与 `server`（跟随服务端）都视为关。
+/// 状态栏「思考模式」开关：当前值是否为「开」（本机两态，仅 `on` 为开）。
 fn thinking_mode_is_on(current: &str) -> bool {
     current == "on"
 }
 
 /// 状态栏「思考模式」开关：点击后的目标值（两态）。
 ///
-/// 当前为 `on` → `off`；否则（`off` / `server`）→ `on`。
+/// 当前为 `on` → `off`；否则（`off`）→ `on`。
 fn next_thinking_mode(current: &str) -> &'static str {
     if thinking_mode_is_on(current) {
         "off"
@@ -364,9 +362,9 @@ fn next_thinking_mode(current: &str) -> &'static str {
     }
 }
 
-/// 状态栏「思考模式」两态开关（`on` / `off`；`server` 视为关）。
+/// 状态栏「思考模式」两态开关（`on` / `off`，本机 `localStorage` 持久化）。
 ///
-/// 点击切换后立即写入本机存储并同步 `/user-data/llm-overrides`，与设置页 `llm_thinking_mode` 同源。
+/// 点击切换后写入本机存储（进程内缓存 + `localStorage`），与设置页 `llm_thinking_mode` 同源。
 #[component]
 fn StatusBarThinkingToggle(
     llm_thinking_mode: RwSignal<String>,

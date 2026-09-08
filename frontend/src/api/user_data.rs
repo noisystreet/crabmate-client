@@ -71,8 +71,7 @@ pub struct LlmEndpointOverrideDto {
     pub temperature: Option<String>,
     #[serde(default)]
     pub llm_context_tokens: Option<String>,
-    #[serde(default)]
-    pub llm_thinking_mode: Option<String>,
+    // `llm_thinking_mode` 已改为本机两态（webview `localStorage`），服务端不再存储。
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

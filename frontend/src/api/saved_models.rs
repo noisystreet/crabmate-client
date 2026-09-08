@@ -4,7 +4,7 @@ use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::client_llm_cache::{with_mem, with_mem_mut};
+use super::client_llm_cache::{normalize_llm_thinking_mode, with_mem, with_mem_mut};
 use super::client_llm_storage;
 use super::llm_secrets_local::{
     PersistKind, get_saved_preset_api_key, saved_preset_api_key_is_set, set_client_llm_api_key,
@@ -62,6 +62,9 @@ pub async fn migrate_saved_models_secrets_to_local(mut saved: Vec<Value>) -> Vec
         }
         preset.has_api_key =
             saved_preset_api_key_is_set(&preset.label, &preset.api_base, &preset.model);
+        // 思考模式本机两态：清洗旧版遗留的 `server` 值。
+        preset.llm_thinking_mode =
+            normalize_llm_thinking_mode(&preset.llm_thinking_mode).to_string();
         if let Ok(cleaned) = serde_json::to_value(&preset) {
             *v = cleaned;
         }
@@ -94,6 +97,7 @@ pub fn load_saved_model_presets_from_storage() -> Vec<SavedModelPreset> {
             .filter_map(|v| serde_json::from_value::<SavedModelPreset>(v.clone()).ok())
             .map(|mut p| {
                 p.has_api_key = saved_preset_api_key_is_set(&p.label, &p.api_base, &p.model);
+                p.llm_thinking_mode = normalize_llm_thinking_mode(&p.llm_thinking_mode).to_string();
                 p.api_key.clear();
                 p
             })

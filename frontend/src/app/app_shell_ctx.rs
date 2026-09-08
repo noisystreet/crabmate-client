@@ -151,7 +151,7 @@ pub struct StatusBarFooterSignals {
     pub agent_role_user_override: RwSignal<bool>,
     pub selected_session_mode: RwSignal<String>,
     pub session_mode_user_override: RwSignal<bool>,
-    /// 底栏「思考模式」开关（`on` / `off`；`server` 视为关）。与设置页 `llm_thinking_mode` 同源。
+    /// 底栏「思考模式」开关（本机两态 `on` / `off`）。与设置页 `llm_thinking_mode` 同源。
     pub llm_thinking_mode: RwSignal<String>,
     pub refresh_status: Arc<dyn Fn() + Send + Sync>,
     pub user_prefs_reload_nonce: RwSignal<u64>,
