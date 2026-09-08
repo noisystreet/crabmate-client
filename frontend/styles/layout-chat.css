@@ -218,6 +218,10 @@
   flex: 0 0 auto;
   /* 气泡宽度百分比以此列为参照，随中部聊天区伸缩 */
   min-width: 0;
+  /* 超宽屏收窄对话内容，避免长行文本拉得过长影响阅读 */
+  width: 100%;
+  max-width: min(72rem, 100%);
+  margin-inline: auto;
 }
 
 .chat-tui-inner {
