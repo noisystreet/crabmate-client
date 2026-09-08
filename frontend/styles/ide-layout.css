@@ -58,6 +58,12 @@
     max-height: min(42vh, 360px);
     flex-shrink: 0;
   }
+
+  /* 窄屏纵向堆叠时给编辑器保留足够高度，避免被左栏压得过矮 */
+  .ide-layout-right {
+    flex: 1;
+    min-height: min(48vh, 320px);
+  }
 }
 
 .ide-layout-root {
