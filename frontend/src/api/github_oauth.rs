@@ -33,6 +33,17 @@ pub struct GithubDeviceStatusDto {
     /// 仅壳在带 `X-CrabMate-GitHub-Token-Delivery: body` 时收到；浏览器路径无此字段。
     #[serde(default)]
     pub access_token: Option<String>,
+    /// 壳 body 投递：一次性 refresh_token（GitHub App 才有；浏览器在 HttpOnly Cookie）。
+    #[serde(default)]
+    pub refresh_token: Option<String>,
+    /// access token 有效期（秒）；仅壳 body 投递时收到。
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub expires_in: Option<u64>,
+    /// refresh token 有效期（秒）；仅壳 body 投递时收到。
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub refresh_token_expires_in: Option<u64>,
 }
 
 async fn fetch_github_response(
@@ -133,4 +144,42 @@ pub async fn post_github_oauth_device_cancel(loc: Locale) -> Result<(), String> 
 /// 清浏览器 HttpOnly Cookie；壳断开时亦应调用（幂等）。
 pub async fn post_github_oauth_device_logout(loc: Locale) -> Result<(), String> {
     post_empty_ok("/github/oauth/device/logout", loc).await
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct GithubTokenRefreshDto {
+    pub access_token: String,
+    /// 轮换后的新 refresh_token（服务端保证有值；缺失时壳沿用旧值）。
+    #[serde(default)]
+    pub refresh_token: Option<String>,
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub expires_in: Option<u64>,
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub refresh_token_expires_in: Option<u64>,
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub scope: Option<String>,
+}
+
+/// 用 refresh_token 换新 access token：壳传 JSON body（`refresh_token` + `client_id`）；
+/// 浏览器传 `{}`，凭服务端 HttpOnly Cookie `crabmate_github_refresh` 刷新并接收新 Set-Cookie。
+pub async fn post_github_oauth_token_refresh(
+    body: &str,
+    loc: Locale,
+) -> Result<GithubTokenRefreshDto, String> {
+    let init = RequestInit::new();
+    init.set_method("POST");
+    prepare_api_auth(&init).await;
+    let h = auth_headers();
+    let _ = h.set("Content-Type", "application/json");
+    init.set_headers(&h);
+    init.set_body(&wasm_bindgen::JsValue::from_str(body));
+    let resp = fetch_github_response(&init, "/github/oauth/token/refresh", loc).await?;
+    let s = response_body_text(&resp, loc).await?;
+    if !resp.ok() {
+        return Err(err_from_json_body_or_request_failed(&s, loc));
+    }
+    serde_json::from_str(&s).map_err(|e| e.to_string())
 }

@@ -86,6 +86,7 @@ struct TerminalDeviceOutcome {
     state: String,
     error: Option<String>,
     access_token: Option<String>,
+    refresh_token: Option<String>,
     login: Option<String>,
 }
 
@@ -99,8 +100,12 @@ async fn persist_device_success_if_current(
     if !gate.active() {
         return;
     }
-    let persist =
-        on_device_flow_success(outcome.access_token.as_deref(), outcome.login.as_deref()).await;
+    let persist = on_device_flow_success(
+        outcome.access_token.as_deref(),
+        outcome.refresh_token.as_deref(),
+        outcome.login.as_deref(),
+    )
+    .await;
     match persist {
         Ok(()) => {
             if should_rollback_stale_device_token(true, gate.active()) {
@@ -241,6 +246,7 @@ async fn poll_until_device_done(
                             state: st.state,
                             error: st.error,
                             access_token: st.access_token,
+                            refresh_token: st.refresh_token,
                             login: st.login,
                         },
                         ui,

@@ -3,6 +3,8 @@
 //! - Client ID：各端 `localStorage`；仅发起 Device Flow 时需要
 //! - User token：壳写入钥匙串槽 `github`，请求头 `X-CrabMate-GitHub-Token`；
 //!   纯浏览器依赖服务端 `Set-Cookie`（HttpOnly），**禁止** LS/内存持久化 token
+//! - Refresh token：壳写入槽 `github_refresh`（GitHub App 轮换语义，access 过期 / 401 时换新）；
+//!   纯浏览器凭服务端 HttpOnly Cookie `crabmate_github_refresh`，本地同样不落盘
 
 use std::cell::RefCell;
 
@@ -22,8 +24,14 @@ fn slot_github() -> &'static str {
     SecretSlot::Github.as_str()
 }
 
+fn slot_github_refresh() -> &'static str {
+    SecretSlot::GithubRefresh.as_str()
+}
+
 thread_local! {
     static TOKEN: RefCell<String> = const { RefCell::new(String::new()) };
+    /// 壳端 refresh token（仅内存镜像；持久化在 `github_refresh` 槽）。
+    static REFRESH: RefCell<String> = const { RefCell::new(String::new()) };
     /// 壳安全槽水合已尝试（成功或确认空）；避免无 GitHub 连接时每个 API 请求重跑长重试。
     static SECURE_HYDRATE_DONE: RefCell<bool> = const { RefCell::new(false) };
 }
@@ -124,6 +132,7 @@ fn sync_request_header_from_memory() {
 
 fn wipe_local_github_session_state() {
     TOKEN.with(|c| *c.borrow_mut() = String::new());
+    REFRESH.with(|c| *c.borrow_mut() = String::new());
     clear_request_github_token();
     write_ls(LS_SESSION_LOGIN, "");
     // 断开后允许再次 ensure/hydrate（例如同会话重新 Device Flow）。
@@ -141,6 +150,10 @@ pub async fn hydrate_github_secrets_from_secure_store() {
         .await
         .unwrap_or_default();
     TOKEN.with(|c| *c.borrow_mut() = loaded);
+    let loaded_refresh = bridge_load_secure_slot(slot_github_refresh())
+        .await
+        .unwrap_or_default();
+    REFRESH.with(|c| *c.borrow_mut() = loaded_refresh);
     sync_request_header_from_memory();
     SECURE_HYDRATE_DONE.with(|h| *h.borrow_mut() = true);
 }
@@ -158,6 +171,21 @@ pub async fn ensure_github_token_hydrated() {
         return;
     }
     hydrate_github_secrets_from_secure_store().await;
+}
+
+/// 壳端内存无 refresh token 时从钥匙串补读一次（幂等）。
+async fn ensure_refresh_token_loaded() {
+    if !github_token_secure_backend_available() {
+        return;
+    }
+    let empty = REFRESH.with(|c| c.borrow().trim().is_empty());
+    if !empty {
+        return;
+    }
+    let loaded = bridge_load_secure_slot(slot_github_refresh())
+        .await
+        .unwrap_or_default();
+    REFRESH.with(|c| *c.borrow_mut() = loaded);
 }
 
 /// 壳端写入 `github` 槽并读回校验；失败不更新内存 token。
@@ -178,9 +206,26 @@ async fn persist_github_token_durable(token: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Device Flow 成功后：壳写入钥匙串；浏览器只记 login（token 在 Cookie）。
+/// 壳端写入 `github_refresh` 槽并读回校验；失败不更新内存 refresh token。
+async fn persist_github_refresh_token_durable(token: &str) -> Result<(), String> {
+    let kind = bridge_persist_secure_slot(slot_github_refresh(), token).await?;
+    if kind != PersistKind::Durable {
+        return Err("GitHub refresh token 未能写入本机安全存储".into());
+    }
+    let loaded = bridge_load_secure_slot(slot_github_refresh())
+        .await
+        .unwrap_or_default();
+    if loaded.trim() != token.trim() {
+        return Err("GitHub refresh token 写入后读回校验失败".into());
+    }
+    REFRESH.with(|c| *c.borrow_mut() = loaded);
+    Ok(())
+}
+
+/// Device Flow 成功后：壳写入钥匙串（access + refresh）；浏览器只记 login（token 在 Cookie）。
 pub async fn on_device_flow_success(
     access_token: Option<&str>,
+    refresh_token: Option<&str>,
     login: Option<&str>,
 ) -> Result<(), String> {
     if github_token_secure_backend_available() {
@@ -190,6 +235,10 @@ pub async fn on_device_flow_success(
             .ok_or_else(|| {
                 "壳端未收到 access_token（请确认 X-CrabMate-GitHub-Token-Delivery）".to_string()
             })?;
+        // 先落盘 refresh token（新对优先），access token 落盘失败时可凭其重试刷新。
+        if let Some(rt) = refresh_token.map(str::trim).filter(|s| !s.is_empty()) {
+            persist_github_refresh_token_durable(rt).await?;
+        }
         persist_github_token_durable(t).await?;
         if let Some(login_t) = login.map(str::trim).filter(|s| !s.is_empty()) {
             write_ls(LS_SESSION_LOGIN, login_t);
@@ -216,10 +265,20 @@ pub async fn clear_github_connection_local() -> Result<(), String> {
     if !github_token_secure_backend_available() {
         return Ok(());
     }
-    bridge_persist_secure_slot(slot_github(), "")
-        .await
-        .map(|_| ())
-        .map_err(|e| format!("本机钥匙串未能清除 GitHub token: {e}"))
+    let mut errs: Vec<String> = Vec::new();
+    for slot in [slot_github(), slot_github_refresh()] {
+        if let Err(e) = bridge_persist_secure_slot(slot, "").await {
+            errs.push(format!("{slot}: {e}"));
+        }
+    }
+    if errs.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "本机钥匙串未能清除 GitHub 凭据: {}",
+            errs.join("；")
+        ))
+    }
 }
 
 #[must_use]
@@ -230,7 +289,7 @@ pub fn github_token_is_set() -> bool {
     read_ls(LS_SESSION_LOGIN).is_some()
 }
 
-fn looks_like_github_auth_failure(msg: &str) -> bool {
+pub(crate) fn looks_like_github_auth_failure(msg: &str) -> bool {
     let low = msg.to_ascii_lowercase();
     const NEEDLES: &[&str] = &[
         "401",
@@ -256,6 +315,81 @@ fn looks_like_github_auth_failure(msg: &str) -> bool {
     low.contains("失效") && low.contains("token") && low.contains("gh")
 }
 
+/// 刷新失败是否为会话终局：仅服务端明确拒绝（`GITHUB_REFRESH_TOKEN_REJECTED`）或
+/// 401（GitHub 侧 `bad_refresh_token` / `expired_refresh_token`）。网络中断、5xx、
+/// 缺 Cookie（`GITHUB_REFRESH_TOKEN_REQUIRED`）等按瞬时处理，避免误清仍可能有效的凭据。
+pub(crate) fn refresh_failure_is_terminal(err: &str) -> bool {
+    let low = err.to_ascii_lowercase();
+    low.contains("rejected") || low.contains("401")
+}
+
+/// 用 refresh token 换新 access token（GitHub App 轮换语义）。
+///
+/// 壳：body 携带钥匙串中的 refresh_token + client_id，成功后重写两枚槽（先 refresh 后 access）。
+/// 浏览器：body 为 `{}`，凭服务端 HttpOnly Cookie 刷新并接收新 Set-Cookie。
+pub(crate) async fn try_refresh_github_token(loc: Locale) -> Result<(), String> {
+    let body = if github_token_secure_backend_available() {
+        ensure_refresh_token_loaded().await;
+        let rt = REFRESH.with(|c| c.borrow().trim().to_string());
+        if rt.is_empty() {
+            return Err("no local refresh token".to_string());
+        }
+        serde_json::json!({
+            "refresh_token": rt,
+            "client_id": github_oauth_client_id(),
+        })
+        .to_string()
+    } else {
+        "{}".to_string()
+    };
+    let resp = super::github_oauth::post_github_oauth_token_refresh(&body, loc).await?;
+    if github_token_secure_backend_available() {
+        if let Some(new_rt) = resp
+            .refresh_token
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            persist_github_refresh_token_durable(new_rt).await?;
+        }
+        persist_github_token_durable(resp.access_token.trim()).await?;
+    }
+    Ok(())
+}
+
+/// 浏览器鉴权失效补救：凭 HttpOnly refresh Cookie 刷新并重探 `repo-context`。
+///
+/// 返回 `true` 视为仍已连接（刷新成功且探活未再鉴权失败）；仅当明确拒绝
+/// （刷新 401 / rejected，或刷新成功后探活仍鉴权失败）才清浏览器连接标记并返回 `false`。
+async fn reconnect_browser_after_auth_failure(loc: Locale) -> bool {
+    if let Err(e) = try_refresh_github_token(loc).await {
+        if refresh_failure_is_terminal(&e) {
+            wipe_local_github_session_state();
+        }
+        return false;
+    }
+    match super::http::fetch_github_repo_context(loc).await {
+        Ok(ctx) if ctx.connected => true,
+        Ok(ctx) => {
+            let auth_dead = ctx
+                .error
+                .as_deref()
+                .is_some_and(looks_like_github_auth_failure);
+            if auth_dead {
+                wipe_local_github_session_state();
+            }
+            !auth_dead
+        }
+        Err(e) => {
+            let auth_dead = looks_like_github_auth_failure(&e);
+            if auth_dead {
+                wipe_local_github_session_state();
+            }
+            !auth_dead
+        }
+    }
+}
+
 /// 刷新连接态：壳在内存无 token 时先从钥匙串/Keystore 水合再判定；浏览器在有 session 标记时用 `repo-context` 探活，鉴权失败则清标记。
 pub async fn reconcile_github_connection_status(loc: Locale) -> bool {
     if github_token_secure_backend_available() {
@@ -277,15 +411,13 @@ pub async fn reconcile_github_connection_status(loc: Locale) -> bool {
             if let Some(err) = ctx.error.as_deref()
                 && looks_like_github_auth_failure(err)
             {
-                wipe_local_github_session_state();
-                return false;
+                return reconnect_browser_after_auth_failure(loc).await;
             }
             // 非 git 仓 / gh 不可用等：保留「曾成功授权」乐观态，避免误踢。
             true
         }
         Err(e) if looks_like_github_auth_failure(&e) => {
-            wipe_local_github_session_state();
-            false
+            reconnect_browser_after_auth_failure(loc).await
         }
         Err(_) => true,
     }
@@ -293,7 +425,10 @@ pub async fn reconcile_github_connection_status(loc: Locale) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{github_oauth_client_id_is_valid, looks_like_github_auth_failure};
+    use super::{
+        github_oauth_client_id_is_valid, looks_like_github_auth_failure,
+        refresh_failure_is_terminal,
+    };
 
     #[test]
     fn github_client_id_validation_matches_server_contract() {
@@ -314,6 +449,19 @@ mod tests {
         ));
         assert!(!looks_like_github_auth_failure(
             "workspace not a git repository"
+        ));
+    }
+
+    #[test]
+    fn refresh_failure_terminal_only_when_explicitly_rejected() {
+        assert!(refresh_failure_is_terminal("GITHUB_REFRESH_TOKEN_REJECTED"));
+        assert!(refresh_failure_is_terminal("Request failed (401): bad"));
+        assert!(!refresh_failure_is_terminal("GITHUB_TOKEN_REFRESH_FAILED"));
+        assert!(!refresh_failure_is_terminal(
+            "GITHUB_REFRESH_TOKEN_REQUIRED"
+        ));
+        assert!(!refresh_failure_is_terminal(
+            "fetch: JsValue(TypeError: Failed to fetch)"
         ));
     }
 }
