@@ -5,10 +5,28 @@ use std::sync::Arc;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
+use crate::api::github_secrets_local::{looks_like_github_auth_failure, try_refresh_github_token};
 use crate::api::{WorkspaceData, fetch_github_repo_context};
 use crate::i18n::Locale;
 
 use super::status_tasks_state::StatusTasksSignals;
+
+/// 拉取仓库上下文；鉴权失效（如壳钥匙串 `ghu_` 过期）时先用 refresh token 换新再重试一次。
+async fn fetch_github_repo_context_with_refresh(
+    locale: Locale,
+) -> Result<crate::api::GithubRepoContextData, String> {
+    let first = fetch_github_repo_context(locale).await;
+    let Err(err) = first else {
+        return first;
+    };
+    if !looks_like_github_auth_failure(&err) {
+        return Err(err);
+    }
+    if try_refresh_github_token(locale).await.is_err() {
+        return Err(err);
+    }
+    fetch_github_repo_context(locale).await
+}
 
 /// 刷新侧栏 GitHub 仓库按钮上下文。
 pub fn make_refresh_github_repo_context(
@@ -17,7 +35,7 @@ pub fn make_refresh_github_repo_context(
 ) -> Arc<dyn Fn() + Send + Sync> {
     Arc::new(move || {
         spawn_local(async move {
-            match fetch_github_repo_context(locale).await {
+            match fetch_github_repo_context_with_refresh(locale).await {
                 Ok(d) => st.github_repo.set(Some(d)),
                 Err(_) => st.github_repo.set(None),
             }

@@ -14,7 +14,7 @@ import javax.crypto.spec.GCMParameterSpec
 
 /**
  * 模型 API 密钥：Android Keystore AES-GCM + SharedPreferences。
- * 槽位：`client_llm` / `executor_llm` / `saved_models` / `github`（与桌面钥匙串账户对应）。
+ * 槽位：`client_llm` / `executor_llm` / `saved_models` / `github` / `github_refresh`（与桌面钥匙串账户对应）。
  *
  * 全部入口同步，避免 WebView JS 桥并发 `generateKey` 竞态（Key already exists → 写入失败）。
  */
@@ -28,7 +28,8 @@ internal object SecureLlmSecretStore {
   private const val TAG = "SecureLlmSecretStore"
   private const val WRITE_ATTEMPTS = 3
 
-  private val allowedSlots = setOf("client_llm", "executor_llm", "saved_models", "github")
+  private val allowedSlots =
+    setOf("client_llm", "executor_llm", "saved_models", "github", "github_refresh")
   private val lock = Any()
 
   fun read(

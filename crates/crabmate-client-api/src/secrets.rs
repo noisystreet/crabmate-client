@@ -14,6 +14,8 @@ pub enum SecretSlot {
     SavedModels,
     /// Device Flow 成功后的 GitHub user access token（壳专用；浏览器走 HttpOnly Cookie）。
     Github,
+    /// GitHub OAuth refresh token（壳专用；每次刷新轮换；浏览器走 HttpOnly Cookie）。
+    GithubRefresh,
 }
 
 impl SecretSlot {
@@ -25,6 +27,7 @@ impl SecretSlot {
             Self::ExecutorLlm => "executor_llm",
             Self::SavedModels => "saved_models",
             Self::Github => "github",
+            Self::GithubRefresh => "github_refresh",
         }
     }
 
@@ -35,6 +38,7 @@ impl SecretSlot {
             "executor_llm" => Some(Self::ExecutorLlm),
             "saved_models" => Some(Self::SavedModels),
             "github" => Some(Self::Github),
+            "github_refresh" => Some(Self::GithubRefresh),
             _ => None,
         }
     }
@@ -47,18 +51,20 @@ impl SecretSlot {
             Self::ExecutorLlm => "tauri_executor_llm_api_key",
             Self::SavedModels => "tauri_saved_model_api_keys",
             Self::Github => "tauri_github_access_token",
+            Self::GithubRefresh => "tauri_github_refresh_token",
         }
     }
 }
 
 /// 全部桥槽短名（文档 / 测试用）。
 #[must_use]
-pub fn secret_slot_names() -> [&'static str; 4] {
+pub fn secret_slot_names() -> [&'static str; 5] {
     [
         SecretSlot::ClientLlm.as_str(),
         SecretSlot::ExecutorLlm.as_str(),
         SecretSlot::SavedModels.as_str(),
         SecretSlot::Github.as_str(),
+        SecretSlot::GithubRefresh.as_str(),
     ]
 }
 
