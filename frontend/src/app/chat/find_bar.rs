@@ -3,6 +3,7 @@
 use leptos::prelude::*;
 use leptos_dom::helpers::event_target_value;
 
+use crate::a11y::{capture_focus, restore_focus_to};
 use crate::app::shell_runtime_context::expect_chat_shell_ctx;
 use crate::i18n::{self, Locale};
 use crate::session_search::scroll_message_into_view;
@@ -62,6 +63,12 @@ fn ChatFindBarInputs(
     match_ids: RwSignal<Vec<String>>,
     cursor: RwSignal<usize>,
 ) -> impl IntoView {
+    let input_ref = NodeRef::<leptos::html::Input>::new();
+    Effect::new(move |_| {
+        if let Some(el) = input_ref.get() {
+            let _ = el.focus();
+        }
+    });
     view! {
         <>
             <label class="chat-find-label" for="chat-find-input">
@@ -69,6 +76,7 @@ fn ChatFindBarInputs(
             </label>
             <input
                 id="chat-find-input"
+                node_ref=input_ref
                 type="search"
                 class="chat-find-input"
                 prop:placeholder=move || i18n::chat_find_ph(locale.get())
@@ -101,6 +109,10 @@ pub fn ChatFindBar() -> impl IntoView {
     let chat_find_match_ids = c.chat_find_match_ids;
     let chat_find_cursor = c.chat_find_cursor;
     let auto_scroll_chat = c.auto_scroll_chat;
+    let restore_target = StoredValue::new(capture_focus());
+    on_cleanup(move || {
+        restore_focus_to(restore_target.get_value().as_ref());
+    });
     view! {
         <div class="chat-find-wrap">
             <div class="chat-find-bar" role="search" prop:aria-label=move || i18n::chat_find_region(locale.get())>

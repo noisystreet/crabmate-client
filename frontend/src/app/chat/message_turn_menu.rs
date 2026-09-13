@@ -331,6 +331,7 @@ pub(crate) fn MessageTurnContextMenuLayer(
                 <crate::app::focusable_menu::FocusableRoleMenu
                     class="session-ctx-menu"
                     menu_style=menu_style
+                    on_escape=Callback::new(move |_| menu.set(None))
                 >
                     {move || {
                         let Some(anchor) = menu.get() else {

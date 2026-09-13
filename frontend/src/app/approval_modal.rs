@@ -5,7 +5,9 @@ use leptos::html::Div;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
-use crate::a11y::{focus_first_in_modal_container, handle_modal_layer_keydown};
+use crate::a11y::{
+    capture_focus, focus_first_in_modal_container, handle_modal_layer_keydown, restore_focus_to,
+};
 use crate::api::submit_chat_approval;
 use crate::i18n::{self, Locale};
 
@@ -55,14 +57,22 @@ pub(crate) fn deny_pending_approval(signals: ApprovalModalSignals) {
     submit_pending_approval_decision(signals, "deny");
 }
 
-/// 弹窗出现后聚焦首元素（异步等待首帧）。
+/// 弹窗出现后聚焦首元素（异步等待首帧）；关闭时把焦点归还给打开前的元素。
+/// `ApprovalModal` 常驻创建，故按信号转换（None→Some 捕获 / Some→None 归还）处理；
+/// 仅在未捕获时捕获，避免 Some→Some 替换时把弹窗内焦点记为归还目标。
 fn schedule_approval_modal_focus(
     pending_approval: RwSignal<Option<(String, String, String)>>,
     dialog_ref: NodeRef<Div>,
 ) {
+    let restore_target = StoredValue::new(None::<web_sys::HtmlElement>);
     Effect::new(move |_| {
         if pending_approval.get().is_none() {
+            restore_focus_to(restore_target.get_value().as_ref());
+            restore_target.set_value(None);
             return;
+        }
+        if restore_target.get_value().is_none() {
+            restore_target.set_value(capture_focus());
         }
         let r = dialog_ref;
         spawn_local(async move {

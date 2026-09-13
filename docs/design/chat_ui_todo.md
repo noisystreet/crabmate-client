@@ -32,6 +32,8 @@
 - [x] 顶栏 / 底栏菜单：`menubar` 包裹聊天「项目」触发器；Ask/Plan/Act 与侧栏视图用 `menuitemradio` + `aria-checked`
 - [x] IDE 标签栏方向键切换；文件树文件行 `tabindex=0` + Enter
 - [x] 当前会话 `aria-current`；置顶 / 星标 / 未保存进入可访问名
+- [x] 聊天图片 lightbox：Tab 循环 + 关闭归还焦点；hydrate / 待传 / uploads 图片键盘可达（Enter / Space 打开）
+- [x] 聊天查找栏自动聚焦、关闭归还焦点；消息菜单等 `FocusableRoleMenu` 调用点 Esc 可关并归还焦点
 
 ## P2 · 对话产品缺口
 

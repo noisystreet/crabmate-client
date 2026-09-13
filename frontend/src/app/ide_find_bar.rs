@@ -3,6 +3,7 @@
 use leptos::prelude::*;
 use leptos_dom::helpers::event_target_value;
 
+use crate::a11y::{capture_focus, restore_focus_to};
 use crate::app::app_signals::IdeChromeSignals;
 use crate::i18n::{self, Locale};
 use crate::ide_codemirror::IdeEditorHost;
@@ -65,6 +66,19 @@ fn find_bar_on_keydown(ev: web_sys::KeyboardEvent, input: IdeFindBarInput) {
     find_nav(input, if ev.shift_key() { -1 } else { 1 });
 }
 
+/// 面板挂载时聚焦输入框；卸载（关闭）时把焦点归还给打开前捕获的元素。
+fn wire_find_bar_focus(input_ref: NodeRef<leptos::html::Input>) {
+    let restore_target = StoredValue::new(capture_focus());
+    on_cleanup(move || {
+        restore_focus_to(restore_target.get_value().as_ref());
+    });
+    Effect::new(move |_| {
+        if let Some(el) = input_ref.get() {
+            let _ = el.focus();
+        }
+    });
+}
+
 #[component]
 fn IdeFindNavCluster(
     locale: RwSignal<Locale>,
@@ -100,6 +114,8 @@ fn IdeFindBarPanel(
     input: IdeFindBarInput,
     match_count: Memo<usize>,
 ) -> impl IntoView {
+    let input_ref = NodeRef::<leptos::html::Input>::new();
+    wire_find_bar_focus(input_ref.clone());
     view! {
         <div
             class="ide-find-bar"
@@ -112,6 +128,7 @@ fn IdeFindBarPanel(
             </label>
             <input
                 id="ide-find-input"
+                node_ref=input_ref
                 type="search"
                 class="ide-find-input"
                 data-testid="ide-find-input"
@@ -183,6 +200,63 @@ fn submit_goto_line(chrome: IdeChromeSignals, host: IdeEditorHost) {
     chrome.goto_panel_open.set(false);
 }
 
+fn goto_bar_on_keydown(
+    ev: web_sys::KeyboardEvent,
+    chrome: IdeChromeSignals,
+    editor_host: IdeEditorHost,
+) {
+    if ev.key() != "Enter" {
+        return;
+    }
+    ev.prevent_default();
+    submit_goto_line(chrome, editor_host);
+}
+
+#[component]
+fn IdeGotoLineBarPanel(
+    locale: RwSignal<Locale>,
+    chrome: IdeChromeSignals,
+    editor_host: IdeEditorHost,
+) -> impl IntoView {
+    let input_ref = NodeRef::<leptos::html::Input>::new();
+    wire_find_bar_focus(input_ref.clone());
+    view! {
+        <div
+            class="ide-find-bar ide-goto-bar"
+            role="search"
+            data-testid="ide-goto-bar"
+            prop:aria-label=move || i18n::ide_goto_region(locale.get())
+        >
+            <label class="ide-find-label" for="ide-goto-input">
+                {move || i18n::ide_goto_label(locale.get())}
+            </label>
+            <input
+                id="ide-goto-input"
+                node_ref=input_ref
+                type="text"
+                inputmode="numeric"
+                class="ide-find-input"
+                data-testid="ide-goto-input"
+                prop:placeholder=move || i18n::ide_goto_ph(locale.get())
+                prop:value=move || chrome.goto_line.get()
+                on:input=move |ev| chrome.goto_line.set(event_target_value(&ev))
+                on:keydown=move |ev: web_sys::KeyboardEvent| {
+                    goto_bar_on_keydown(ev, chrome, editor_host);
+                }
+            />
+            <button
+                type="button"
+                class="btn btn-ghost btn-sm ide-find-close"
+                prop:title=move || i18n::ide_goto_close_title(locale.get())
+                prop:aria-label=move || i18n::ide_goto_close_aria(locale.get())
+                on:click=move |_| chrome.goto_panel_open.set(false)
+            >
+                "×"
+            </button>
+        </div>
+    }
+}
+
 #[component]
 pub fn IdeGotoLineBar(input: IdeFindBarInput) -> impl IntoView {
     let IdeFindBarInput {
@@ -194,41 +268,7 @@ pub fn IdeGotoLineBar(input: IdeFindBarInput) -> impl IntoView {
 
     view! {
         <Show when=move || chrome.goto_panel_open.get()>
-            <div
-                class="ide-find-bar ide-goto-bar"
-                role="search"
-                data-testid="ide-goto-bar"
-                prop:aria-label=move || i18n::ide_goto_region(locale.get())
-            >
-                <label class="ide-find-label" for="ide-goto-input">
-                    {move || i18n::ide_goto_label(locale.get())}
-                </label>
-                <input
-                    id="ide-goto-input"
-                    type="text"
-                    inputmode="numeric"
-                    class="ide-find-input"
-                    data-testid="ide-goto-input"
-                    prop:placeholder=move || i18n::ide_goto_ph(locale.get())
-                    prop:value=move || chrome.goto_line.get()
-                    on:input=move |ev| chrome.goto_line.set(event_target_value(&ev))
-                    on:keydown=move |ev: web_sys::KeyboardEvent| {
-                        if ev.key() == "Enter" {
-                            ev.prevent_default();
-                            submit_goto_line(chrome, editor_host);
-                        }
-                    }
-                />
-                <button
-                    type="button"
-                    class="btn btn-ghost btn-sm ide-find-close"
-                    prop:title=move || i18n::ide_goto_close_title(locale.get())
-                    prop:aria-label=move || i18n::ide_goto_close_aria(locale.get())
-                    on:click=move |_| chrome.goto_panel_open.set(false)
-                >
-                    "×"
-                </button>
-            </div>
+            <IdeGotoLineBarPanel locale chrome editor_host />
         </Show>
     }
 }

@@ -18,6 +18,7 @@ struct LightboxBind {
     on_click: MouseCb,
     on_close: MouseCb,
     on_ctx: MouseCb,
+    restore_target: Option<HtmlElement>,
 }
 
 thread_local! {
@@ -54,6 +55,7 @@ fn unbind_lightbox(bind: LightboxBind) {
             .remove_event_listener_with_callback("click", bind.on_close.as_ref().unchecked_ref());
     }
     bind.overlay.remove();
+    crate::a11y::restore_focus_to(bind.restore_target.as_ref());
 }
 
 /// 从已水合 `<img>` 打开全屏预览（`data-cm-ws-raw` 用于另存文件名）。
@@ -68,6 +70,7 @@ fn open_chat_image_lightbox_named(blob_url: &str, alt: &str, raw_src: Option<&st
         return;
     }
     close_lightbox();
+    let restore_target = crate::a11y::capture_focus();
     let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
         return;
     };
@@ -90,11 +93,14 @@ fn open_chat_image_lightbox_named(blob_url: &str, alt: &str, raw_src: Option<&st
     }) as Box<dyn FnMut(MouseEvent)>);
     let _ =
         overlay.add_event_listener_with_callback("contextmenu", on_ctx.as_ref().unchecked_ref());
-    let on_key = Closure::wrap(Box::new(move |ev: KeyboardEvent| {
-        if ev.key() == "Escape" {
+    let overlay_for_key = overlay.clone();
+    let on_key = Closure::wrap(Box::new(move |ev: KeyboardEvent| match ev.key().as_str() {
+        "Escape" => {
             ev.prevent_default();
             close_lightbox();
         }
+        "Tab" => crate::a11y::trap_tab_in_container(&ev, &overlay_for_key),
+        _ => {}
     }) as Box<dyn FnMut(KeyboardEvent)>);
     if let Some(w) = web_sys::window() {
         let _ = w.add_event_listener_with_callback("keydown", on_key.as_ref().unchecked_ref());
@@ -110,6 +116,7 @@ fn open_chat_image_lightbox_named(blob_url: &str, alt: &str, raw_src: Option<&st
             on_click,
             on_close,
             on_ctx,
+            restore_target,
         });
     });
 }

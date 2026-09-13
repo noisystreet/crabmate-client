@@ -91,6 +91,7 @@ fn IdeTabContextMenuLayer(
                 <crate::app::focusable_menu::FocusableRoleMenu
                     class="session-ctx-menu"
                     menu_style=menu_style
+                    on_escape=Callback::new(move |_| ctx_menu.set(None))
                 >
                     <button
                         type="button"

@@ -3,7 +3,7 @@
 use wasm_bindgen::JsCast;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen_futures::spawn_local;
-use web_sys::{Element, HtmlImageElement, MouseEvent, Url};
+use web_sys::{Element, HtmlImageElement, KeyboardEvent, MouseEvent, Url};
 
 use super::chat_image_lightbox::{img_opens_lightbox, open_chat_image_lightbox_from_img};
 use crate::api::fetch_auth_raster_image_blob_url;
@@ -57,6 +57,29 @@ fn bind_lightbox_once(root: &Element) {
     }) as Box<dyn FnMut(MouseEvent)>);
     let _ = root.add_event_listener_with_callback("click", on_click.as_ref().unchecked_ref());
     on_click.forget();
+    let on_key = Closure::wrap(Box::new(move |ev: KeyboardEvent| {
+        if ev.key() != "Enter" && ev.key() != " " {
+            return;
+        }
+        let Some(t) = ev.target() else {
+            return;
+        };
+        let Ok(img) = t.dyn_into::<HtmlImageElement>() else {
+            return;
+        };
+        if !img_opens_lightbox(&img) {
+            return;
+        }
+        ev.prevent_default();
+        open_chat_image_lightbox_from_img(&img);
+    }) as Box<dyn FnMut(KeyboardEvent)>);
+    let _ = root.add_event_listener_with_callback("keydown", on_key.as_ref().unchecked_ref());
+    on_key.forget();
+}
+
+/// 可打开 lightbox 的图标记为键盘可达（Tab 可聚焦，Enter/Space 激活由委托处理）。
+fn mark_img_keyboard_activatable(img: &HtmlImageElement) {
+    let _ = img.set_attribute("tabindex", "0");
 }
 
 async fn hydrate_auth_images(root: &Element) {
@@ -64,7 +87,10 @@ async fn hydrate_auth_images(root: &Element) {
     let loc = locale_from_document();
     for (img, src) in jobs {
         match fetch_auth_raster_image_blob_url(&src).await {
-            Some(blob_url) => img.set_src(&blob_url),
+            Some(blob_url) => {
+                img.set_src(&blob_url);
+                mark_img_keyboard_activatable(&img);
+            }
             None => mark_img_unavailable(&img, loc),
         }
     }
@@ -83,6 +109,9 @@ fn collect_hydrate_jobs(root: &Element) -> Vec<(HtmlImageElement, String)> {
             continue;
         };
         let src = img.get_attribute("src").unwrap_or_default();
+        if img_opens_lightbox(&img) {
+            mark_img_keyboard_activatable(&img);
+        }
         let Some(rel) = relative_auth_image_src(&src) else {
             continue;
         };

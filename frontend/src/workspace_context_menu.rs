@@ -421,6 +421,7 @@ pub fn WorkspaceContextMenuLayer(
                 <crate::app::focusable_menu::FocusableRoleMenu
                     class="session-ctx-menu workspace-ctx-menu"
                     menu_style=menu_style
+                    on_escape=Callback::new(move |_| workspace_context_menu.set(None))
                 >
                     <WorkspaceContextMenuBody input=body />
                 </crate::app::focusable_menu::FocusableRoleMenu>

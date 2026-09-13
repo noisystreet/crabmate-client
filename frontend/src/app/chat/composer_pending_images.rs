@@ -60,9 +60,11 @@ fn ComposerPendingThumb(locale: RwSignal<Locale>, path: String) -> impl IntoView
             class="composer-pending-img"
             class:chat-tui-img-missing=move || missing.get()
             attr:data-cm-ws-raw=path.clone()
+            tabindex="0"
             prop:src=move || blob.get().unwrap_or_default()
             prop:alt=move || pending_thumb_alt(locale.get(), missing.get(), &path_alt)
             on:click=on_pending_thumb_click
+            on:keydown=on_pending_thumb_keydown
         />
     }
 }
@@ -111,5 +113,22 @@ fn on_pending_thumb_click(ev: web_sys::MouseEvent) {
     if !img_opens_lightbox(&img) {
         return;
     }
+    open_chat_image_lightbox_from_img(&img);
+}
+
+fn on_pending_thumb_keydown(ev: web_sys::KeyboardEvent) {
+    if ev.key() != "Enter" && ev.key() != " " {
+        return;
+    }
+    let Some(img) = ev
+        .current_target()
+        .and_then(|t| t.dyn_into::<web_sys::HtmlImageElement>().ok())
+    else {
+        return;
+    };
+    if !img_opens_lightbox(&img) {
+        return;
+    }
+    ev.prevent_default();
     open_chat_image_lightbox_from_img(&img);
 }

@@ -5,7 +5,9 @@ use leptos::html::Div;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
-use crate::a11y::{focus_first_in_modal_container, trap_tab_in_container};
+use crate::a11y::{
+    capture_focus, focus_first_in_modal_container, restore_focus_to, trap_tab_in_container,
+};
 use crate::i18n;
 use crate::session_modal_row::{SessionModalRow, SessionModalRowBundle};
 use crate::session_sort::sorted_sessions_clone;
@@ -21,6 +23,10 @@ fn SessionListModalPanel(session_modal: RwSignal<bool>) -> impl IntoView {
     let locale = shell.locale;
     let apply_assistant_display_filters = shell.apply_assistant_display_filters;
     let dialog_ref = NodeRef::<Div>::new();
+
+    // 面板在 `<Show>` 内创建：挂载即捕获打开前焦点，卸载（关闭）时归还。
+    let restore_target = StoredValue::new(capture_focus());
+    on_cleanup(move || restore_focus_to(restore_target.get_value().as_ref()));
 
     Effect::new({
         let dialog_ref = dialog_ref.clone();

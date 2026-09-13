@@ -11,6 +11,7 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Fixed
 
+- Chat / shell a11y **focus loop closure**: the chat image lightbox now traps Tab inside the overlay and restores focus to the triggering element on close; workspace-auth-hydrated, uploads and composer pending images are keyboard-activatable (`tabindex=0`, Enter/Space open the lightbox); every `FocusableRoleMenu` context/dropdown menu (session/rail/message/tab/menubar call sites) closes on Escape and returns focus to the opener; the chat and IDE find bars and the IDE goto-line bar autofocus their input on open (IDE bars restore focus on close); the changelist modal closes on Escape; the session-list, approval, settings and changelist modals restore focus to the element focused before they opened.
 - Chat: paginated long conversations no longer permanently skip hydration with the `SkippedHydratedUserRegression` guard. The guard compared the **full** local user-bubble count against the 80-message tail page, so any session with more turns than the tail page covers always "regressed", hydration was skipped forever, the tiktoken context snapshot was never written back, and the status-bar context chip stayed at `— / cap`. The guard now compares user counts only within the tail-page overwrite range (v2-projection merges are append-only and skip the compare; window metadata scopes it to the local tail; no window metadata keeps the conservative full compare).
 
 ### Added

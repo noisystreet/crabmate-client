@@ -13,6 +13,7 @@
 - [x] 部分对话框缺焦点陷阱：`ide_new_file_modal.rs`、`shell_confirm_dialog.rs`、`ide_confirm_dialog.rs`。
 - [x] 键盘不可达：图片附件 `<label>`（`column.rs`）、右键/长按上下文菜单、顶部/底栏菜单、IDE 标签页（缺方向键）、工作区文件树文件行。
 - [x] 语义缺口：聊天模式 `role="menuitem"` 孤儿节点；单选/当前会话缺 `aria-checked` / `aria-current`；未保存/置顶/星标状态对屏幕阅读器不可见。
+- [x] 焦点归还闭环缺失：图片 lightbox 无 Tab 循环、关闭不还焦；hydrate / 待传 / uploads 图片键盘不可达；右键 / 下拉菜单（`FocusableRoleMenu` 全部调用点）不能 Esc 关闭、关闭不还焦；聊天 / IDE 查找栏与 IDE 跳转行栏不自动聚焦；`changelist_modal` 缺 Esc；`session_list` / `approval` / `settings` 模态关闭不还焦。
 
 ## P2 · 移动端边界与体验
 

@@ -40,7 +40,10 @@ fn IdeMenuEditDropdown(
     } = signals;
 
     view! {
-        <crate::app::focusable_menu::FocusableRoleMenu class="ide-menu-dropdown">
+        <crate::app::focusable_menu::FocusableRoleMenu
+            class="ide-menu-dropdown"
+            on_escape=Callback::new(move |_| close_menus(open_menu, ide_menubar_dropdown_open))
+        >
             <button
                 type="button"
                 class="ide-menu-item"

@@ -8,7 +8,9 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use wasm_bindgen::JsCast;
 
-use crate::a11y::{focus_first_in_modal_container, trap_tab_in_container};
+use crate::a11y::{
+    capture_focus, focus_first_in_modal_container, handle_modal_layer_keydown, restore_focus_to,
+};
 use crate::api::fetch_workspace_changelog;
 use crate::i18n::{self, load_locale_from_storage};
 use crate::md_code_copy::try_copy_md_code_block;
@@ -231,14 +233,18 @@ pub fn changelist_modal_view(signals: ChangelistModalSignals) -> impl IntoView {
         changelist_body_ref,
     } = signals;
     let dialog_ref = NodeRef::<Div>::new();
+    let restore_target = StoredValue::new(None::<web_sys::HtmlElement>);
 
     Effect::new({
         let dialog_ref = dialog_ref.clone();
         let open = changelist_modal_open;
         move |_| {
             if !open.get() {
+                restore_focus_to(restore_target.get_value().as_ref());
+                restore_target.set_value(None);
                 return;
             }
+            restore_target.set_value(capture_focus());
             let r = dialog_ref.clone();
             spawn_local(async move {
                 TimeoutFuture::new(0).await;
@@ -266,10 +272,12 @@ pub fn changelist_modal_view(signals: ChangelistModalSignals) -> impl IntoView {
                         tabindex="-1"
                         on:click=|ev: leptos::ev::MouseEvent| ev.stop_propagation()
                         on:keydown=move |ev: web_sys::KeyboardEvent| {
-                            if ev.key() == "Tab" {
-                                if let Some(el) = dialog_ref.get() {
-                                    trap_tab_in_container(&ev, el.as_ref());
-                                }
+                            if let Some(el) = dialog_ref.get() {
+                                handle_modal_layer_keydown(
+                                    &ev,
+                                    el.as_ref(),
+                                    move || changelist_modal_open.set(false),
+                                );
                             }
                         }
                     >
