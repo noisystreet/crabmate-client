@@ -203,6 +203,23 @@ pub fn trap_tab_in_container(ev: &web_sys::KeyboardEvent, container: &web_sys::E
     focus_next_in_tab_trap(&els, idx_opt, ev.shift_key());
 }
 
+/// 打开浮层前捕获当前焦点元素（供关闭后归还；焦点在 body 时视为无可归还）。
+#[must_use]
+pub fn capture_focus() -> Option<web_sys::HtmlElement> {
+    let el = document_active_html_element()?;
+    if el.tag_name().eq_ignore_ascii_case("BODY") {
+        return None;
+    }
+    Some(el)
+}
+
+/// 将焦点归还给 `capture_focus()` 捕获的元素（`None` 时不动作）。
+pub fn restore_focus_to(target: Option<&web_sys::HtmlElement>) {
+    if let Some(el) = target {
+        let _ = el.focus();
+    }
+}
+
 fn document_active_html_element() -> Option<web_sys::HtmlElement> {
     leptos_dom::helpers::document()
         .active_element()?
@@ -228,9 +245,22 @@ fn move_menu_focus(els: &[web_sys::HtmlElement], delta: i32) {
     focus_menu_item_at(els, wrapping_index(els.len(), cur, delta));
 }
 
-/// 菜单内 `ArrowUp`/`ArrowDown`/`Home`/`End` 移动焦点；`Tab` 仍循环陷阱。
-pub fn handle_menu_keyboard(ev: &web_sys::KeyboardEvent, container: &web_sys::Element) {
+/// 菜单内 `ArrowUp`/`ArrowDown`/`Home`/`End` 移动焦点；`Tab` 仍循环陷阱；`Escape` 交给 `on_escape`。
+/// IME 组合中的按键（候选窗操作）不响应。
+pub fn handle_menu_keyboard(
+    ev: &web_sys::KeyboardEvent,
+    container: &web_sys::Element,
+    on_escape: impl FnOnce(),
+) {
+    if ev.is_composing() {
+        return;
+    }
     match ev.key().as_str() {
+        "Escape" => {
+            ev.prevent_default();
+            ev.stop_propagation();
+            on_escape();
+        }
         "Tab" => trap_tab_in_container(ev, container),
         "ArrowDown" => {
             ev.prevent_default();
@@ -268,6 +298,9 @@ pub fn handle_modal_layer_keydown(
     container: &web_sys::Element,
     on_escape: impl FnOnce(),
 ) {
+    if ev.is_composing() {
+        return;
+    }
     if ev.key() == "Escape" {
         ev.prevent_default();
         ev.stop_propagation();

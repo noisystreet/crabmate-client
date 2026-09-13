@@ -172,6 +172,7 @@ fn StatusSessionModeMenuPortal(props: SessionModeMenuPortalProps) -> impl IntoVi
                 class="status-mode-menu status-mode-menu--fixed status-mode-menu--portal"
                 menu_style=menu_style
                 aria_label=aria_label
+                on_escape=Callback::new(move |_| close_mode_menu(menu_open, menu_fixed_style))
             >
                 {MODES
                     .into_iter()

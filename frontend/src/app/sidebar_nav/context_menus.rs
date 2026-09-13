@@ -36,6 +36,7 @@ pub(super) fn SessionContextMenuLayer(
                 <crate::app::focusable_menu::FocusableRoleMenu
                     class="session-ctx-menu"
                     menu_style=menu_style
+                    on_escape=Callback::new(move |_| session_context_menu.set(None))
                 >
                     <button
                         type="button"
@@ -221,6 +222,7 @@ pub(super) fn RailContextMenuLayer(
                 <crate::app::focusable_menu::FocusableRoleMenu
                     class="session-ctx-menu"
                     menu_style=menu_style
+                    on_escape=Callback::new(move |_| sidebar_rail_ctx_menu.set(None))
                 >
                     <button
                         type="button"

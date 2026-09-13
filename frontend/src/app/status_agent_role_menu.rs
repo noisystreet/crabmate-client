@@ -175,6 +175,7 @@ fn StatusAgentRoleMenuPortal(props: AgentRoleMenuPortalProps) -> impl IntoView {
                 class="status-agent-role-menu status-agent-role-menu--fixed status-agent-role-menu--portal"
                 menu_style=menu_style
                 aria_label=aria_label
+                on_escape=Callback::new(move |_| close_role_menu(menu_open, menu_fixed_style))
             >
                 <button
                     type="button"

@@ -184,7 +184,10 @@ fn SidePanelViewPickerMenu(props: SidePanelViewPickerProps) -> impl IntoView {
     } = props;
     view! {
         <div prop:aria-label=move || i18n::side_view_menu_aria(locale.get())>
-            <crate::app::focusable_menu::FocusableRoleMenu class="toolbar-view-menu">
+            <crate::app::focusable_menu::FocusableRoleMenu
+                class="toolbar-view-menu"
+                on_escape=Callback::new(move |_| view_menu_open.set(false))
+            >
                 <SidePanelViewMenuItem bundle=SidePanelViewMenuItemBundle {
                     locale,
                     side_panel_view,
