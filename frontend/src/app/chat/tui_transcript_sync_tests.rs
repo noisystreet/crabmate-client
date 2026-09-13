@@ -29,6 +29,7 @@ fn sync_with_think(
     think_open: &HashSet<String>,
 ) -> TuiSyncPlan {
     let empty_jobs = HashMap::new();
+    let empty_paths = HashMap::new();
     plan_tui_sync(PlanTuiSyncArgs {
         prev,
         messages,
@@ -40,6 +41,8 @@ fn sync_with_think(
         show_turn_context_inject: false,
         tool_chunks,
         tool_jobs: &empty_jobs,
+        tool_file_paths: &empty_paths,
+        open_file_enabled: false,
         think_open,
     })
 }
@@ -362,6 +365,7 @@ fn build_html_opts(
 ) -> String {
     let tool_chunks = HashMap::new();
     let tool_jobs = HashMap::new();
+    let tool_file_paths = HashMap::new();
     build_tui_transcript_html(
         messages,
         &TuiRenderCtx {
@@ -373,6 +377,8 @@ fn build_html_opts(
             show_turn_context_inject: false,
             tool_chunks: &tool_chunks,
             tool_jobs: &tool_jobs,
+            tool_file_paths: &tool_file_paths,
+            open_file_enabled: false,
             think_open,
         },
     )

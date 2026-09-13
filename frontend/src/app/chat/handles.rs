@@ -125,6 +125,7 @@ pub(crate) struct ChatMessagesPaneSignals {
     pub chat_find_match_ids: RwSignal<Vec<String>>,
     pub chat_find_cursor: RwSignal<usize>,
     pub chat_find_panel_open: RwSignal<bool>,
+    pub ide_open_file: IdeOpenFileBridgeSignals,
 }
 
 /// 主列查找高亮（缩短 [`super::tui_stream_view::ChatTuiStreamView`] 形参）。
@@ -134,6 +135,18 @@ pub(crate) struct ChatFindOverlaySignals {
     pub match_ids: RwSignal<Vec<String>>,
     pub cursor: RwSignal<usize>,
     pub panel_open: RwSignal<bool>,
+}
+
+/// 工具卡「打开此文件」跨布局桥接：点击经 nonce+path 通知 IDE 布局 Effect 打开文件
+/// （`ShellUISignals` 同源信号；窄屏 / 移动远端无 IDE 布局，不渲染也不处理按钮）。
+#[derive(Clone, Copy)]
+pub(crate) struct IdeOpenFileBridgeSignals {
+    /// 递增即打开 [`Self::path`]（`ShellUISignals::ide_open_file_nonce`）。
+    pub nonce: RwSignal<u64>,
+    /// 配对目标路径（消费后清空，防布局切换重放）。
+    pub path: RwSignal<Option<String>>,
+    /// 窄屏判定（`ShellUISignals::is_narrow_viewport`）。
+    pub narrow: RwSignal<bool>,
 }
 
 /// 输入区与发送条所需信号（与 [`ChatMessagesPaneSignals`] 对称，由 [`ChatColumnShell`] 单点组装）。
@@ -205,6 +218,11 @@ impl ChatColumnShell {
             chat_find_match_ids: cc.chat_find_match_ids,
             chat_find_cursor: cc.chat_find_cursor,
             chat_find_panel_open: cc.chat_find_panel_open,
+            ide_open_file: IdeOpenFileBridgeSignals {
+                nonce: su.ide_open_file_nonce,
+                path: su.ide_open_file_path,
+                narrow: su.is_narrow_viewport,
+            },
         }
     }
 

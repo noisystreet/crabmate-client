@@ -61,6 +61,14 @@ pub fn tool_job_cancel_button(l: Locale) -> &'static str {
     }
 }
 
+/// 写盘工具卡「打开此文件」按钮文案（宽屏 IDE 布局可用）。
+pub fn tool_open_file_button(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "打开此文件",
+        Locale::En => "Open this file",
+    }
+}
+
 /// 后台任务详情行（折叠展开后首行：任务 id 与状态）。
 pub fn tool_job_detail_line(l: Locale, job_id: &str, status: &str) -> String {
     match l {

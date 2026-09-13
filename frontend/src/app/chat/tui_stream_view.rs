@@ -9,7 +9,7 @@ use super::find_highlight::{
     FindRestoreScope, apply_chat_find_highlights, find_restore_scope,
     reapply_chat_find_highlight_on_wrap,
 };
-use super::handles::ChatFindOverlaySignals;
+use super::handles::{ChatFindOverlaySignals, IdeOpenFileBridgeSignals};
 use super::message_row_actions::MessageRowActionSignals;
 use super::message_turn_menu::{
     MessageTurnContextMenuLayer, MessageTurnMenuAnchor, build_message_turn_press_handlers,
@@ -51,6 +51,8 @@ struct PlanActiveSessionArgs<'a> {
     show_turn_context_inject: bool,
     tool_chunks: &'a HashMap<String, String>,
     tool_jobs: &'a HashMap<String, ToolJobState>,
+    tool_file_paths: &'a HashMap<String, String>,
+    open_file_enabled: bool,
     think_open: &'a HashSet<String>,
 }
 
@@ -66,6 +68,8 @@ fn plan_for_active_session(args: PlanActiveSessionArgs<'_>) -> TuiSyncPlan {
         show_turn_context_inject,
         tool_chunks,
         tool_jobs,
+        tool_file_paths,
+        open_file_enabled,
         think_open,
     } = args;
     match sessions.iter().find(|session| session.id == active_id) {
@@ -80,6 +84,8 @@ fn plan_for_active_session(args: PlanActiveSessionArgs<'_>) -> TuiSyncPlan {
             show_turn_context_inject,
             tool_chunks,
             tool_jobs,
+            tool_file_paths,
+            open_file_enabled,
             think_open,
         }),
         Some(session) => plan_tui_sync(PlanTuiSyncArgs {
@@ -93,6 +99,8 @@ fn plan_for_active_session(args: PlanActiveSessionArgs<'_>) -> TuiSyncPlan {
             show_turn_context_inject,
             tool_chunks,
             tool_jobs,
+            tool_file_paths,
+            open_file_enabled,
             think_open,
         }),
     }
@@ -393,6 +401,8 @@ struct TuiStreamDisplayOpts {
     apply_filters: bool,
     markdown_render: bool,
     show_turn_context_inject: bool,
+    /// 宽屏判定（窄屏 / 移动远端无 IDE 布局，不注入「打开此文件」按钮）。
+    open_file_enabled: bool,
 }
 
 fn sync_chat_tui_stream_dom(
@@ -409,39 +419,20 @@ fn sync_chat_tui_stream_dom(
         chat.stream_text_overlay.with(|overlay| {
             chat.tool_output_chunks.with(|tool_chunks| {
                 chat.tool_job_states.with(|tool_jobs| {
-                    // 嵌套 with 零拷贝借用：避免每 token 把整份 overlay（含累计正文/思维链）
-                    // 与两个工具 HashMap `.get()` 深克隆出来（O(累计文本)）。
-                    //
-                    // 约束：此借用块内只能**读**这 4 个信号并把副作用限制在 DOM/滚动上；
-                    // 若未来有代码在同一信号上 `update()`（会重入），必须先把数据拷出借用块。
-                    let overlay = overlay.as_ref();
-                    let live_id = overlay.map(|o| o.message_id.clone());
-                    // plan 在 with 内先算：即使 transcript DOM 暂缺，Effect 也先建立对这 4 个信号的
-                    // 依赖，之后再取节点；DOM 容器在组件挂载时即存在，节点缺失仅是很窄的窗口。
-                    let plan = plan_for_active_session(PlanActiveSessionArgs {
-                        sessions,
-                        active_id: &active_id,
-                        prev: prev.as_ref(),
-                        overlay,
-                        locale: display.locale,
-                        apply_filters: display.apply_filters,
-                        markdown_render: display.markdown_render,
-                        show_turn_context_inject: display.show_turn_context_inject,
-                        tool_chunks,
-                        tool_jobs,
-                        think_open,
-                    });
-                    let Some(node) = transcript_ref.get() else {
-                        return (FindRestoreScope::None, live_id);
-                    };
-                    let Some(el) = node.dyn_ref::<web_sys::HtmlElement>() else {
-                        return (FindRestoreScope::None, live_id);
-                    };
-                    let scope = apply_or_rebuild_tui_mount(el, plan, mount_state, || {
-                        plan_for_active_session(PlanActiveSessionArgs {
+                    chat.tool_file_paths.with(|tool_file_paths| {
+                        // 嵌套 with 零拷贝借用：避免每 token 把整份 overlay（含累计正文/思维链）
+                        // 与各工具 HashMap `.get()` 深克隆出来（O(累计文本)）。
+                        //
+                        // 约束：此借用块内只能**读**这些信号并把副作用限制在 DOM/滚动上；
+                        // 若未来有代码在同一信号上 `update()`（会重入），必须先把数据拷出借用块。
+                        let overlay = overlay.as_ref();
+                        let live_id = overlay.map(|o| o.message_id.clone());
+                        // plan 在 with 内先算：即使 transcript DOM 暂缺，Effect 也先建立对这些信号的
+                        // 依赖，之后再取节点；DOM 容器在组件挂载时即存在，节点缺失仅是很窄的窗口。
+                        let plan = plan_for_active_session(PlanActiveSessionArgs {
                             sessions,
                             active_id: &active_id,
-                            prev: None,
+                            prev: prev.as_ref(),
                             overlay,
                             locale: display.locale,
                             apply_filters: display.apply_filters,
@@ -449,11 +440,36 @@ fn sync_chat_tui_stream_dom(
                             show_turn_context_inject: display.show_turn_context_inject,
                             tool_chunks,
                             tool_jobs,
+                            tool_file_paths,
+                            open_file_enabled: display.open_file_enabled,
                             think_open,
-                        })
-                    });
-                    follow_after_content_paint(scroll_shell);
-                    (scope, live_id)
+                        });
+                        let Some(node) = transcript_ref.get() else {
+                            return (FindRestoreScope::None, live_id);
+                        };
+                        let Some(el) = node.dyn_ref::<web_sys::HtmlElement>() else {
+                            return (FindRestoreScope::None, live_id);
+                        };
+                        let scope = apply_or_rebuild_tui_mount(el, plan, mount_state, || {
+                            plan_for_active_session(PlanActiveSessionArgs {
+                                sessions,
+                                active_id: &active_id,
+                                prev: None,
+                                overlay,
+                                locale: display.locale,
+                                apply_filters: display.apply_filters,
+                                markdown_render: display.markdown_render,
+                                show_turn_context_inject: display.show_turn_context_inject,
+                                tool_chunks,
+                                tool_jobs,
+                                tool_file_paths,
+                                open_file_enabled: display.open_file_enabled,
+                                think_open,
+                            })
+                        });
+                        follow_after_content_paint(scroll_shell);
+                        (scope, live_id)
+                    })
                 })
             })
         })
@@ -538,6 +554,32 @@ fn try_handle_tool_job_cancel_click(
         }
         // 失败时下一次响应式渲染会重建按钮（不禁用态持久化）。
     });
+    true
+}
+
+/// 工具卡「打开此文件」点击（`.chat-tui-tool-open-file`）：消费点击并把工作区相对路径
+/// 经 nonce+path 桥接给 IDE 布局 Effect。返回是否已消费该点击。
+fn try_handle_tool_open_file_click(
+    ev: &web_sys::MouseEvent,
+    bridge: IdeOpenFileBridgeSignals,
+) -> bool {
+    let Some(btn) = ev
+        .target()
+        .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
+        .and_then(|el| el.closest(".chat-tui-tool-open-file").ok().flatten())
+    else {
+        return false;
+    };
+    let Some(path) = btn.get_attribute("data-file-path") else {
+        return false;
+    };
+    let path = path.trim().to_string();
+    if path.is_empty() {
+        return false;
+    }
+    ev.prevent_default();
+    bridge.path.set(Some(path));
+    bridge.nonce.update(|n| *n = n.wrapping_add(1));
     true
 }
 
@@ -714,6 +756,7 @@ pub(crate) fn ChatTuiStreamView(
     scroll_shell: ChatScrollShellSignals,
     action_handlers: TuiTurnActionHandlers,
     find: ChatFindOverlaySignals,
+    ide_open_file: IdeOpenFileBridgeSignals,
 ) -> impl IntoView {
     let status_err = action_handlers.status_err;
     let editing_user_message = action_handlers.editing_user_message;
@@ -753,6 +796,10 @@ pub(crate) fn ChatTuiStreamView(
         let show_inject = show_turn_context_inject.get();
         // untracked 快照：toggle 时 DOM 已原生生效，无需因此重渲染；仅在后续 body 重建时读取。
         let think_open = think_manually_open.get_untracked();
+        // 宽屏才注入「打开此文件」；窄屏 / 移动远端无 IDE 布局。tracked 读取（有意）：
+        // resize 跨阈值时按钮即时出现/消失，无需等下一个 token。
+        let open_file_enabled =
+            !ide_open_file.narrow.get() && !crate::mobile_remote::mobile_remote_client();
         let (scope, live_id) = sync_chat_tui_stream_dom(
             chat,
             TuiStreamDisplayOpts {
@@ -760,6 +807,7 @@ pub(crate) fn ChatTuiStreamView(
                 apply_filters,
                 markdown_render: md_on,
                 show_turn_context_inject: show_inject,
+                open_file_enabled,
             },
             transcript_ref,
             mount_state,
@@ -838,6 +886,9 @@ pub(crate) fn ChatTuiStreamView(
                         return;
                     }
                     if try_handle_tool_job_cancel_click(&ev, chat, locale.get_untracked()) {
+                        return;
+                    }
+                    if try_handle_tool_open_file_click(&ev, ide_open_file) {
                         return;
                     }
                     match try_handle_user_edit_click(&ev, editing_user_message) {

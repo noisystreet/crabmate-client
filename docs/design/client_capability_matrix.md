@@ -85,7 +85,8 @@ Blank cells are forbidden.
 
 | Capability | Desktop | Android | Web | TUI | Notes |
 |------------|---------|---------|-----|-----|-------|
-| Open changelog/tool path in IDE | planned | no | planned | no | Wave 2; wide layout only. |
+| Open write-tool-card path in IDE | yes | no | reduced | no | Wave 2.2: **Open this file** button on write-path tool cards (`path` tools / `copy_file`·`move_file` destination / `apply_patch` diff header). Wide layout only; path captured at SSE time into a runtime overlay — cards after reload/hydration render no button (no fake buttons). Web: same WASM, wide viewport only. |
+| Open changelog path in IDE | planned | no | planned | no | Wave 2.1; wide layout only. |
 | Session restore / accept-reject hunks | planned | planned | planned | no | Server contract first; no fake buttons. |
 | Git status / commit / open PR from review | planned | no | planned | no | Wave 3; Android stays list-oriented. |
 

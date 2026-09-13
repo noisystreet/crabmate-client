@@ -237,6 +237,11 @@ pub struct ChatSessionSignals {
     pub tool_output_chunks: RwSignal<HashMap<String, String>>,
     /// 后台任务（`run_command` 的 `async:true`）运行态快照（tool_call_id → 轮询结果）。
     pub tool_job_states: RwSignal<HashMap<String, ToolJobState>>,
+    /// 写盘工具卡「打开此文件」目标（tool_call_id → 工作区相对路径；SSE 期从结构化 arguments 捕获）。
+    ///
+    /// 运行时 overlay（同 [`Self::tool_output_chunks`]）：服务端持久化信封不含 arguments，
+    /// 重载/水合后无路径 → 不渲染按钮（不做假按钮）。
+    pub tool_file_paths: RwSignal<HashMap<String, String>>,
     /// 最近一次成功水合的 tiktoken prompt 计数（与 [`ConversationPromptTokenHydrate::conversation_id`] 对齐，防串会话）。
     pub conversation_prompt_tokens: RwSignal<Option<ConversationPromptTokenHydrate>>,
     /// 正在拉取更早一页历史（`GET /conversation/messages?before_index=`）。

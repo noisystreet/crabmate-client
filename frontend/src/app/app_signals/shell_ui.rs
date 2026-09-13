@@ -33,6 +33,10 @@ pub struct ShellUISignals {
     pub ide_save_all_nonce: RwSignal<u64>,
     /// 递增时 IDE 布局从磁盘重载已打开文件（`workspace_changed` 等）。
     pub ide_sync_disk_nonce: RwSignal<u64>,
+    /// 递增时 IDE 布局打开 [`Self::ide_open_file_path`] 指向的工作区相对文件（工具卡「打开此文件」）。
+    pub ide_open_file_nonce: RwSignal<u64>,
+    /// 与 [`Self::ide_open_file_nonce`] 配对的目标路径；消费后清空，防布局切换重放。
+    pub ide_open_file_path: RwSignal<Option<String>>,
     /// 设置中保存/清除 Web API Bearer 后递增，触发 `/status` 等恢复拉取。
     pub web_api_bearer_save_nonce: RwSignal<u64>,
     /// Device Flow 授权成功或断开后递增，触发侧栏 `GET /github/repo-context` 刷新。
@@ -68,6 +72,8 @@ impl ShellUISignals {
             ide_save_active_nonce: RwSignal::new(0),
             ide_save_all_nonce: RwSignal::new(0),
             ide_sync_disk_nonce: RwSignal::new(0),
+            ide_open_file_nonce: RwSignal::new(0),
+            ide_open_file_path: RwSignal::new(None),
             web_api_bearer_save_nonce: RwSignal::new(0),
             github_auth_refresh_nonce: RwSignal::new(0),
             session_ui_font: RwSignal::new(s.session_ui_font),

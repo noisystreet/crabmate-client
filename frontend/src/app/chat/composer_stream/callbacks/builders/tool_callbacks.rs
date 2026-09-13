@@ -314,6 +314,26 @@ pub(in super::super) fn make_on_tool_result(
     })
 }
 
+/// 「打开此文件」：SSE 期从结构化 arguments 提取工作区相对路径，记入运行时 overlay
+/// （tool_call_id → path）；重载/水合后无路径 → 不渲染按钮（不做假按钮）。
+fn capture_write_tool_file_path(
+    stream_ctx: &ChatStreamCallbackCtx,
+    tcid: Option<&str>,
+    name: &str,
+    preview: Option<&str>,
+    full: Option<&str>,
+) {
+    let Some(tcid) = tcid else {
+        return;
+    };
+    let Some(path) = write_tool_file_path(name, preview, full) else {
+        return;
+    };
+    stream_ctx.chat.tool_file_paths.update(|m| {
+        m.insert(tcid.to_string(), path);
+    });
+}
+
 pub(in super::super) fn chat_stream_on_tool_call_builder(
     stream_ctx: Rc<ChatStreamCallbackCtx>,
     accum: Rc<PerStreamAccum>,
@@ -368,6 +388,13 @@ pub(in super::super) fn chat_stream_on_tool_call_builder(
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
                 .map(str::to_string);
+            capture_write_tool_file_path(
+                stream_ctx.as_ref(),
+                tcid.as_deref(),
+                name.as_str(),
+                preview.as_deref(),
+                full.as_deref(),
+            );
             let tool_msg = StoredMessage {
                 id: id.clone(),
                 role: "system".to_string(),
