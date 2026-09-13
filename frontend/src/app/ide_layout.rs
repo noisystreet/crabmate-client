@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use leptos::prelude::*;
+use leptos::task::spawn_local;
 
 use crate::app::app_signals::{IdeChromeSignals, IdeEditorSignals, ShellUISignals};
 use crate::chat_session_state::ChatSessionSignals;
@@ -238,6 +239,23 @@ pub fn IdeLayoutView(shell: IdeLayoutShellSignals) -> impl IntoView {
         }
         let _ = shell_ui.ide_sync_disk_nonce.get();
         spawn_sync_ide_tabs_from_disk(tabs, tab_editor, locale, confirm);
+    });
+
+    // 工具卡「打开此文件」：nonce 递增时打开配对的工作区相对文件（消费即清空路径，
+    // 防止下次进入 IDE 布局时重放旧目标）。点击发生在对话布局（IDE 未激活），
+    // 故不能以 `editor_visible` 作门禁——非 IDE 布局先切进去再打开。
+    Effect::new(move |_| {
+        let _ = shell_ui.ide_open_file_nonce.get();
+        let Some(path) = shell_ui.ide_open_file_path.get_untracked() else {
+            return;
+        };
+        shell_ui.ide_open_file_path.set(None);
+        if !editor_visible.get_untracked() {
+            super::ide_layout_switch::enter_editor_layout(layout_toggle);
+        }
+        spawn_local(async move {
+            (open_sv.get_value())(path);
+        });
     });
 
     Effect::new(move |_| {

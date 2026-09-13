@@ -7,9 +7,11 @@ mod run_command_card;
 mod stream_diag;
 mod text_format;
 mod timeline_tail;
+mod write_file_path;
 
 pub(crate) use indices::*;
 pub(crate) use run_command_card::run_command_card_invocation_line;
 pub(crate) use stream_diag::*;
 pub(crate) use text_format::*;
 pub(crate) use timeline_tail::*;
+pub(crate) use write_file_path::write_tool_file_path;

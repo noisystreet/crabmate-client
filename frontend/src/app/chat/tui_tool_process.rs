@@ -278,15 +278,30 @@ fn job_output_block_html(job: &ToolJobState, locale: Locale) -> String {
     html
 }
 
+/// 「打开此文件」行内按钮 HTML（宽屏且 SSE 期捕获到路径才渲染；路径入 `data-file-path` 与 `title`）。
+fn open_file_bar_html(path: Option<&str>, locale: Locale) -> String {
+    let Some(path) = path.map(str::trim).filter(|p| !p.is_empty()) else {
+        return String::new();
+    };
+    format!(
+        "<button class=\"chat-tui-tool-open-file\" type=\"button\" \
+         data-file-path=\"{p}\" title=\"{p}\">{label}</button>",
+        p = plaintext_to_safe_html(path),
+        label = plaintext_to_safe_html(i18n::tool_open_file_button(locale)),
+    )
+}
+
 /// 工具回合 body 内层 HTML（折叠态单行固定高度；详情展开后才增高）。
 /// `job` 为后台任务（`run_command` 的 `async:true`）轮询快照：非终态显示状态徽标与取消按钮，
 /// 终态在详情中追加输出/错误；无 job 时与普通工具行为一致。
+/// `open_file_path` 为「打开此文件」目标（工作区相对路径；宽屏且有路径时注入按钮）。
 #[must_use]
 pub(crate) fn tool_process_body_html(
     message: &StoredMessage,
     locale: Locale,
     live_output_overlay: Option<&str>,
     job: Option<&ToolJobState>,
+    open_file_path: Option<&str>,
 ) -> String {
     let id = tool_id(message);
     let label = tool_row_label(message, locale);
@@ -329,6 +344,7 @@ pub(crate) fn tool_process_body_html(
     let emoji = i18n::tool_kind_emoji_curated(&id)
         .map(|e| format!("<span class=\"chat-tui-tool-emoji\" aria-hidden=\"true\">{e}</span>"))
         .unwrap_or_default();
+    let open_file_bar = open_file_bar_html(open_file_path, locale);
     let row_inner = format!(
         "<span class=\"chat-tui-tool-status\" aria-label=\"{aria}\" title=\"{aria}\">{status}</span>\
          {emoji}\
@@ -353,6 +369,7 @@ pub(crate) fn tool_process_body_html(
         html.push_str("\">");
         html.push_str(&row_inner);
         html.push_str(&job_bar);
+        html.push_str(&open_file_bar);
         html.push_str("<span class=\"chat-tui-tool-expand\" aria-hidden=\"true\">▸</span>");
         html.push_str("</summary>");
         html.push_str("<pre class=\"chat-tui-tool-detail-body\">");
@@ -362,6 +379,7 @@ pub(crate) fn tool_process_body_html(
         html.push_str("<div class=\"chat-tui-tool-row\">");
         html.push_str(&row_inner);
         html.push_str(&job_bar);
+        html.push_str(&open_file_bar);
         html.push_str("</div>");
     }
     html.push_str(&job_output_html);
@@ -399,7 +417,7 @@ mod tests {
             "{}",
             fields.status_label
         );
-        let html = tool_process_body_html(&m, Locale::ZhHans, None, None);
+        let html = tool_process_body_html(&m, Locale::ZhHans, None, None, None);
         assert!(html.contains("chat-tui-tool-process"), "{html}");
         assert!(html.contains("chat-tui-tool-row"), "{html}");
         assert!(html.contains("读取文件"), "{html}");
@@ -436,7 +454,7 @@ mod tests {
             "fn main() {\n    println!(\"hi\");\n}",
             false,
         );
-        let html = tool_process_body_html(&m, Locale::ZhHans, None, None);
+        let html = tool_process_body_html(&m, Locale::ZhHans, None, None, None);
         assert!(html.contains("chat-tui-tool-one-line"), "{html}");
         assert!(
             html.contains("summary class=\"chat-tui-tool-row\""),
@@ -492,7 +510,7 @@ mod tests {
     #[test]
     fn live_overlay_fills_empty_compact() {
         let m = tool_msg("run_command", "", "", true);
-        let html = tool_process_body_html(&m, Locale::ZhHans, Some("line1\nline2"), None);
+        let html = tool_process_body_html(&m, Locale::ZhHans, Some("line1\nline2"), None, None);
         assert!(html.contains("line1"), "{html}");
     }
 
@@ -517,7 +535,7 @@ mod tests {
         );
         let fields = tool_row_live_fields(&m, Locale::ZhHans, None);
         assert_eq!(fields.one_line, "(working)");
-        let html = tool_process_body_html(&m, Locale::ZhHans, None, None);
+        let html = tool_process_body_html(&m, Locale::ZhHans, None, None, None);
         assert!(html.contains("title=\"git_diff_stat\""), "{html}");
         // 长尾工具无 curated emoji，避免随机哈希图标。
         assert!(
@@ -537,7 +555,7 @@ mod tests {
             "ok",
             false,
         );
-        let html = tool_process_body_html(&m, Locale::ZhHans, None, None);
+        let html = tool_process_body_html(&m, Locale::ZhHans, None, None, None);
         assert!(html.contains(">命令执行<"), "{html}");
         assert!(html.contains("title=\"run_command\""), "{html}");
         assert!(html.contains("chat-tui-tool-emoji"), "{html}");
@@ -620,7 +638,8 @@ mod tests {
     #[test]
     fn tool_job_running_shows_badge_and_cancel_button() {
         let m = tool_msg("run_command", "后台任务：cargo test", "cargo test", false);
-        let html = tool_process_body_html(&m, Locale::ZhHans, None, Some(&job_state("running")));
+        let html =
+            tool_process_body_html(&m, Locale::ZhHans, None, Some(&job_state("running")), None);
         assert!(html.contains("⏳"), "{html}");
         assert!(html.contains("后台任务运行中"), "{html}");
         assert!(html.contains("后台任务 tooljob_0123：running"), "{html}");
@@ -636,7 +655,8 @@ mod tests {
     #[test]
     fn tool_job_queued_also_shows_cancel_button() {
         let m = tool_msg("run_command", "排队中", "", false);
-        let html = tool_process_body_html(&m, Locale::ZhHans, None, Some(&job_state("queued")));
+        let html =
+            tool_process_body_html(&m, Locale::ZhHans, None, Some(&job_state("queued")), None);
         assert!(html.contains("⏳"), "{html}");
         assert!(html.contains("后台任务排队中"), "{html}");
         assert!(html.contains("chat-tui-tool-job-cancel"), "{html}");
@@ -645,18 +665,30 @@ mod tests {
     #[test]
     fn tool_job_terminal_drops_cancel_button() {
         let m = tool_msg("run_command", "完成", "", false);
-        let html = tool_process_body_html(&m, Locale::ZhHans, None, Some(&job_state("succeeded")));
+        let html = tool_process_body_html(
+            &m,
+            Locale::ZhHans,
+            None,
+            Some(&job_state("succeeded")),
+            None,
+        );
         assert!(html.contains("✅"), "{html}");
         assert!(html.contains("后台任务成功"), "{html}");
         assert!(!html.contains("chat-tui-tool-job-cancel"), "{html}");
 
-        let failed = tool_process_body_html(&m, Locale::ZhHans, None, Some(&job_state("failed")));
+        let failed =
+            tool_process_body_html(&m, Locale::ZhHans, None, Some(&job_state("failed")), None);
         assert!(failed.contains("⚠️"), "{failed}");
         assert!(failed.contains("后台任务失败"), "{failed}");
         assert!(!failed.contains("chat-tui-tool-job-cancel"), "{failed}");
 
-        let cancelled =
-            tool_process_body_html(&m, Locale::ZhHans, None, Some(&job_state("cancelled")));
+        let cancelled = tool_process_body_html(
+            &m,
+            Locale::ZhHans,
+            None,
+            Some(&job_state("cancelled")),
+            None,
+        );
         assert!(cancelled.contains("⚠️"), "{cancelled}");
         assert!(cancelled.contains("后台任务已取消"), "{cancelled}");
         assert!(
@@ -668,9 +700,26 @@ mod tests {
     #[test]
     fn no_job_keeps_plain_tool_row() {
         let m = tool_msg("run_command", "命令执行 ls", "ok", false);
-        let html = tool_process_body_html(&m, Locale::ZhHans, None, None);
+        let html = tool_process_body_html(&m, Locale::ZhHans, None, None, None);
         assert!(!html.contains("chat-tui-tool-job-cancel"), "{html}");
         assert!(!html.contains("后台任务"), "{html}");
+    }
+
+    #[test]
+    fn open_file_button_renders_only_with_path() {
+        let m = tool_msg("create_file", "新建文件 src/lib.rs", "", false);
+        let html = tool_process_body_html(&m, Locale::ZhHans, None, None, Some("src/lib.rs"));
+        assert!(
+            html.contains("chat-tui-tool-open-file"),
+            "有路径应渲染按钮: {html}"
+        );
+        assert!(html.contains("data-file-path=\"src/lib.rs\""), "{html}");
+        assert!(html.contains(">打开此文件<"), "{html}");
+        let bare = tool_process_body_html(&m, Locale::ZhHans, None, None, None);
+        assert!(
+            !bare.contains("chat-tui-tool-open-file"),
+            "无路径不应渲染按钮: {bare}"
+        );
     }
 
     #[test]
@@ -681,6 +730,7 @@ mod tests {
             Locale::ZhHans,
             None,
             Some(&job_state_with_output("running", true)),
+            None,
         );
         assert!(
             html.contains("data-testid=\"chat-tui-tool-job-output\""),
@@ -707,6 +757,7 @@ mod tests {
             Locale::ZhHans,
             None,
             Some(&job_state_with_output("succeeded", false)),
+            None,
         );
         assert!(html.contains("✅"), "{html}");
         assert!(html.contains("Compiling foo v0.1.0"), "{html}");

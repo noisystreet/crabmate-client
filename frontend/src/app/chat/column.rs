@@ -182,6 +182,7 @@ fn ChatMessagesPane(signals: ChatMessagesPaneSignals) -> impl IntoView {
         chat_find_match_ids,
         chat_find_cursor,
         chat_find_panel_open,
+        ide_open_file,
     } = signals;
     let editing_user_message = RwSignal::new(None::<UserMessageEdit>);
     let action_handlers = TuiTurnActionHandlers {
@@ -210,6 +211,7 @@ fn ChatMessagesPane(signals: ChatMessagesPaneSignals) -> impl IntoView {
                     cursor: chat_find_cursor,
                     panel_open: chat_find_panel_open,
                 }
+                ide_open_file=ide_open_file
             />
         </ChatMessagesScrollShell>
     }
