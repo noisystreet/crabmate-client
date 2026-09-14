@@ -383,28 +383,34 @@ fn slash_step_selection(slash: SlashMenuSignals, len: usize, delta: i32) {
     });
 }
 
-/// Tab / Enter：接受当前选中项（越界则忽略）。
+/// Tab / Enter：接受当前选中项；无选中时 Tab 仍吞掉（防焦点跳出），Enter 不消费（放行发送）。
 fn slash_accept_selected(
+    ev: &web_sys::KeyboardEvent,
     slash: SlashMenuSignals,
     draft: RwSignal<String>,
     composer_input_ref: NodeRef<Textarea>,
-) {
-    if let Some(item) = slash
+) -> bool {
+    match slash
         .filtered
         .get_untracked()
         .get(slash.selected_idx.get_untracked())
     {
-        apply_slash_item(
-            draft,
-            slash.selected_idx,
-            slash.menu_dismissed,
-            composer_input_ref,
-            item,
-        );
+        Some(item) => {
+            apply_slash_item(
+                draft,
+                slash.selected_idx,
+                slash.menu_dismissed,
+                composer_input_ref,
+                item,
+            );
+            true
+        }
+        None => ev.key() != "Enter",
     }
 }
 
-/// 处理浮层打开时的键盘；返回 `true` 表示已消费事件（含空列表时的 Enter/Tab 防误发）。
+/// 处理浮层打开时的键盘；返回 `true` 表示已消费事件。
+/// 空列表时 Enter 不消费，交还 composer 走发送路径。
 pub(super) fn handle_slash_menu_keydown(
     ev: &web_sys::KeyboardEvent,
     slash: SlashMenuSignals,
@@ -427,7 +433,7 @@ pub(super) fn handle_slash_menu_keydown(
         slash_step_selection(slash, items.len(), -1);
     } else if key == "Tab" || (key == "Enter" && !ev.shift_key()) {
         ev.prevent_default();
-        slash_accept_selected(slash, draft, composer_input_ref);
+        return slash_accept_selected(ev, slash, draft, composer_input_ref);
     } else {
         return false;
     }

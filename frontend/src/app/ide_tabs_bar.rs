@@ -25,9 +25,7 @@ fn tab_keydown_target_is_tab(ev: &web_sys::KeyboardEvent) -> bool {
 fn on_ide_tablist_keydown(
     ev: web_sys::KeyboardEvent,
     tabs: IdeTabsHandle,
-    locale: RwSignal<Locale>,
     editor: IdeTabsEditorSignals,
-    confirm: IdeConfirmSignals,
 ) {
     if !tab_keydown_target_is_tab(&ev) {
         return;
@@ -37,17 +35,15 @@ fn on_ide_tablist_keydown(
         return;
     };
     ev.prevent_default();
-    spawn_local(async move {
-        if !try_switch_tab(tabs, next, locale, editor, confirm).await {
-            return;
-        }
-        let id = format!("ide-tab-{next}");
-        if let Some(el) = leptos_dom::helpers::document().get_element_by_id(&id)
-            && let Ok(html) = el.dyn_into::<web_sys::HtmlElement>()
-        {
-            let _ = html.focus();
-        }
-    });
+    if !try_switch_tab(tabs, next, editor) {
+        return;
+    }
+    let id = format!("ide-tab-{next}");
+    if let Some(el) = leptos_dom::helpers::document().get_element_by_id(&id)
+        && let Ok(html) = el.dyn_into::<web_sys::HtmlElement>()
+    {
+        let _ = html.focus();
+    }
 }
 
 /// 标签栏右键菜单锚点（`position: fixed` 使用视口坐标）。
@@ -255,9 +251,7 @@ fn IdeTabStripItem(bundle: IdeTabStripItemBundle, index: usize, tab: IdeTab) -> 
                 }
                 data-testid=format!("ide-tab-{}", index)
                 on:click=move |_| {
-                    spawn_local(async move {
-                        let _ = try_switch_tab(tabs, index, locale, editor, confirm).await;
-                    });
+                    let _ = try_switch_tab(tabs, index, editor);
                 }
             >
                 <Show when=move || is_pinned>
@@ -323,7 +317,7 @@ pub fn IdeTabsBar(input: IdeTabsBarInput) -> impl IntoView {
                 role="tablist"
                 prop:aria-label=move || i18n::ide_tabs_aria(locale.get())
                 on:keydown=move |ev: web_sys::KeyboardEvent| {
-                    on_ide_tablist_keydown(ev, tabs, locale, editor, confirm);
+                    on_ide_tablist_keydown(ev, tabs, editor);
                 }
             >
                 <For

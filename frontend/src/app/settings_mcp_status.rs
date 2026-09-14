@@ -225,16 +225,20 @@ pub(crate) fn spawn_reload_mcp(loc: Locale, state: McpSettingsPageState) {
         baseline,
         set_status,
         set_probing,
+        set_feedback,
         ..
     } = state;
     spawn_local(async move {
         set_probing.set(true);
-        if let Ok(f) = crate::api::user_data::fetch_mcp_servers(loc).await {
-            set_file.set(f.clone());
-            baseline.set(f.clone());
-            if let Some(st) = refresh_mcp_status_with_probe(loc, &f).await {
-                set_status.set(Some(st));
+        match crate::api::user_data::fetch_mcp_servers(loc).await {
+            Ok(f) => {
+                set_file.set(f.clone());
+                baseline.set(f.clone());
+                if let Some(st) = refresh_mcp_status_with_probe(loc, &f).await {
+                    set_status.set(Some(st));
+                }
             }
+            Err(e) => set_feedback.set(Some(e)),
         }
         set_probing.set(false);
     });
