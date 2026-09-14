@@ -42,6 +42,11 @@
 - [x] 聊天查找：命中高亮落在气泡内（wrap 描边 + `<mark>`）
 - [x] Ask / Plan / Act 在 composer 附近可见（从底栏移到输入条）
 
+### 2026-09-13 复核新增
+
+- [ ] 排队芯片点 × 直接丢弃排队正文、不写回草稿（`queued_draft_to_park` 仅「新建会话」路径在用）：`frontend/src/app/chat/column.rs`
+- [ ] 查找导航缺 Enter / Shift+Enter（下一 / 上一条匹配）：`frontend/src/app/chat/find_bar.rs`
+
 ## P3 · 体积敏感
 
 - [ ] 聊天闭合代码块语法高亮（语言标签 + 复制已有；高亮单独评估 WASM）
