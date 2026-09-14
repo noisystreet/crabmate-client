@@ -187,7 +187,7 @@ pub fn IdeLayoutView(shell: IdeLayoutShellSignals) -> impl IntoView {
         ide_baseline,
     };
 
-    let open_file = make_ide_open_file_handler(locale, tabs, tab_editor, confirm);
+    let open_file = make_ide_open_file_handler(locale, tabs, tab_editor);
     let open_sv = StoredValue::new(open_file);
 
     let refresh_after_mutation =

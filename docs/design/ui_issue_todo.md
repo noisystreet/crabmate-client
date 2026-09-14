@@ -1,6 +1,8 @@
 # UI 问题待办清单
 
 由 UI 功能体检整理，按优先级排序；修复后逐项勾选（`- [x]`）或移除。
+2026-09-13 复核：原报告 P0 与 P1 键盘/焦点均已修复（PR #135），剩余项已并入本清单。
+2026-09-14：P1「语义与反馈」四项已修复并勾选；剩余为 P1 对比度、P2 与 P3。
 
 ## P0 · 明确缺陷
 
@@ -15,6 +17,21 @@
 - [x] 语义缺口：聊天模式 `role="menuitem"` 孤儿节点；单选/当前会话缺 `aria-checked` / `aria-current`；未保存/置顶/星标状态对屏幕阅读器不可见。
 - [x] 焦点归还闭环缺失：图片 lightbox 无 Tab 循环、关闭不还焦；hydrate / 待传 / uploads 图片键盘不可达；右键 / 下拉菜单（`FocusableRoleMenu` 全部调用点）不能 Esc 关闭、关闭不还焦；聊天 / IDE 查找栏与 IDE 跳转行栏不自动聚焦；`changelist_modal` 缺 Esc；`session_list` / `approval` / `settings` 模态关闭不还焦。
 
+## P1 · 语义与反馈
+
+- [x] slash 浮层打开且无匹配项时 Enter 被吞（`prevent_default` 后 accept 空转），以 `/` 开头的正文无法键盘发送且无反馈：`frontend/src/app/chat/composer_slash_menu.rs`。已修：无选中项时 Enter 不消费，交还 composer 走发送路径（Tab 仍吞掉防焦点跳出）。
+- [x] IDE 标签纯切换（内容已在缓冲、不丢失）也弹「放弃未保存更改」确认，确认框语义与行为不符，且每次带脏切换都被强制拦截：`frontend/src/ide_tabs.rs`（`try_switch_tab`）。已修：`switch_to` 先把编辑器内容 persist 回原标签，纯切换无损，移除确认（打开新文件路径同型确认一并移除；关闭标签的确认保留——persist 后标签被删，内容确会丢失）。
+- [x] MCP 配置加载失败被静默吞掉（`if let Ok` 忽略 Err，仅 probing 复位、无错误反馈）：`frontend/src/app/settings_mcp_status.rs`（`spawn_reload_mcp`）。已修：Err 写入设置页 `feedback` 通道展示。
+- [x] `ide_confirm_user` 并发第二个确认请求仍使第一个等待方静默返回 `false`（id 机制已防误取他人结果，但请求不排队）：`frontend/src/ide_confirm.rs`。已修：`pending` 改 FIFO 请求队列，UI 只消费队首，应答按队首 `id` 回写，等待方按自身 `id` 匹配结果。
+
+## P1 · 对比度与焦点可见性
+
+- [ ] light 主题主按钮白字 ≈3.2–3.9:1，低于 AA 小字（12px/500 需 4.5:1）：`frontend/styles/components.css`、`frontend/styles/themes/light.css`。
+- [ ] light 主题 `--muted` 小字 ≈3.4:1，仍用于 10–11px 大写标签：`frontend/styles/themes/light.css`、`components.css`、`status.css`、`modal.css`、`shell-topbar.css`。
+- [ ] `.ide-editor-textarea:focus` `outline: none` 且无 `:focus-visible` 替代，键盘焦点只剩 caret：`frontend/styles/ide-layout.css`。
+- [ ] lightbox 操作 / 关闭按钮无 `:hover` 与 `:focus-visible`：`frontend/styles/shell-ds.css`。
+- [ ] 顶栏菜单条 `min-width:max-content`，窄屏可能与中间路径、右侧控件重叠（需实机验证）：`frontend/styles/shell-topbar.css`、`mobile.css`。
+
 ## P2 · 移动端边界与体验
 
 - [ ] Android `adjustResize` 生效设备上 IME 可能双倍抬高 composer：`MainActivity.kt` 的 `--cm-ime-inset` 与 `--vv-keyboard-inset` 取 `max`，窗口已压缩时 `ime` 仍非零。
@@ -23,8 +40,44 @@
 - [ ] 未定义 token 硬编码 fallback（`--shell-border` / `--surface-1` / `--accent-muted` / `--accent-warn` 等），切主题时这些位置颜色不变。
 - [ ] 纯浏览器宽屏触控平板（>768px 非壳）软键盘不抬高 composer。
 
+## P2 · IDE 与工作区
+
+- [ ] 标签 `For` 的 key 含 `idx`，任意关闭/钉住都会令其后所有标签 DOM 重建、键盘焦点丢失，`prop:id` 随之漂移：`frontend/src/app/ide_tabs_bar.rs`。
+- [ ] 标签栏仅 `overflow-x:auto`，多标签溢出不自动滚到活动标签：`frontend/styles/ide-layout.css`。
+- [ ] 磁盘同步对多个脏标签逐个弹确认，无法一次性「全部取消」：`frontend/src/ide_disk_sync.rs`。
+- [ ] 语法高亮语言表缺 `.css/.html/.kt/.java` 等常见后缀（文件树图标分类已含）：`frontend/src/ide_syntax_highlight.rs`。
+- [ ] 跳转行输入非法（非数字/超界）静默 no-op：`frontend/src/app/ide_find_bar.rs`。
+- [ ] 手动「刷新列表」清空 `subtree_expanded`，已展开目录全部折叠：`frontend/src/workspace_shell.rs`。
+- [ ] 嵌套空目录展开后无空态提示（根级有，子目录没有）：`frontend/src/workspace_tree.rs`。
+
+## P2 · 空态与确认
+
+- [ ] 空态缺失：会话列表标题过滤无结果（`sidebar_nav/session_rail.rs`）、「管理会话」无会话（`session_list_modal.rs`）、任务列表空 `<ul>`（`side_column.rs`）、MCP 服务器列表（`settings_mcp_block.rs`）、模型预设列表（`settings_models_registry/preset_list.rs`）。
+- [ ] 审批「允许始终」用 `btn-primary` 而「拒绝」用 `btn-danger`，持久授权的高影响操作视觉权重倒置：`frontend/src/app/approval_modal.rs`。
+- [ ] 模型预设新增弹窗温度/上下文 token 无范围校验，与「保存全部」的 `validate_temperature_override` 不一致：`frontend/src/app/settings_models_registry/submit.rs`。
+- [ ] 破坏性操作无确认：MCP 行删除（`settings_mcp_server_row_actions.rs`）、GitHub「断开」（`settings_github_block.rs`）、Web Bearer 空输入点保存=清除 token 无二次确认（`settings_sections.rs`）。
+- [ ] 保存语义混合（预设开关/删除、Bearer、API base、MCP 导入立即落盘 vs 主题/语言/LLM 需「保存全部」）；MCP「应用导入」绕过保存全部直接写服务端且无确认：`frontend/src/app/settings_mcp_json_import.rs`。
+
+## P2 · 样式与 token
+
+- [ ] 未定义 token：`--text-muted` / `--surface-muted` / `--surface-2` / `--panel` / `--fg` / `--warning`；`status.css` 的 `color-mix(… var(--panel) …)` 因变量失效整句作废。
+- [ ] API 层窄路径硬编码中文错误串：`frontend/src/api/http.rs`、`github_secrets_local.rs`、`llm_secrets_local.rs`、`web_api_bearer_local.rs`、`user_data.rs`。
+- [ ] 启动 splash 硬编码深色 `#0a0d12`，浅色用户首帧深闪：`frontend/index.html`。
+
 ## P3 · 次要
 
 - [ ] `prefers-reduced-motion` 漏 2 处无限动画：会话流式徽章脉冲、克隆进度条。
 - [ ] 首屏主题快照硬编码 `light`，深色用户有短暂浅色闪烁。
 - [ ] 对比度风险点 `frontend/styles/shell-ds.css:303`（`--muted` 再稀释），需实测验证。
+- [ ] 死代码：`approval_bar.rs` 的 `ApprovalBar`（已被 approval_modal 替代、全仓无引用）；`layout-chat.css` `.chat-find-toggle`（无 Rust 引用）。
+- [ ] `save_busy/load_busy` 期间 Ctrl+S 被静默吞掉：`frontend/src/ide_save.rs`。
+- [ ] 同步期间关闭标签，快照索引写回可能命中错误标签：`frontend/src/ide_disk_sync.rs`。
+- [ ] 空编辑器只有 aria-label，无可见占位文本：`frontend/src/app/ide_editor_pane.rs`。
+- [ ] `ide_find` 每次按键对全文 lowercase 并分配，大文件下查找输入可能卡顿：`frontend/src/ide_find.rs`。
+- [ ] composer `resize: vertical` 与 autosize 两个高度机制打架：`frontend/styles/layout-chat.css`、`frontend/src/app/chat/composer_input_stack.rs`。
+- [ ] transcript 整区 `aria-live="polite"`，工具行频繁 status 更新持续触发读屏播报（权衡项）：`frontend/src/app/chat/tui_stream_view.rs`。
+- [ ] `cm-boot-spin` 无限旋转未纳入 `prefers-reduced-motion`：`frontend/index.html`。
+- [ ] 设置页 900px 断点与主 768px 体系并存且无注释：`frontend/styles/modal.css`。
+- [ ] MCP 超时输入非法字符静默保留旧值：`frontend/src/app/settings_mcp_block_toolbar.rs`。
+- [ ] MCP 远端 bearer placeholder 硬编码 `••••••••`：`frontend/src/app/settings_mcp_server_row.rs`。
+- [ ] 文件树不支持树内拖拽移动（能力矩阵未承诺，可选增强）：`frontend/src/workspace_file_drop.rs`。

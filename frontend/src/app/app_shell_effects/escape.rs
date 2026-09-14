@@ -70,11 +70,11 @@ fn dismiss_blocking_dialog_escape(shell: ShellEscapeSignals) -> bool {
         deny_pending_approval(shell.approval);
         return true;
     }
-    if shell.shell_confirm.pending.get_untracked().is_some() {
+    if !shell.shell_confirm.pending.get_untracked().is_empty() {
         dismiss_ide_confirm(shell.shell_confirm);
         return true;
     }
-    if shell.ide_chrome.confirm_pending.get_untracked().is_some() {
+    if !shell.ide_chrome.confirm_pending.get_untracked().is_empty() {
         dismiss_ide_confirm(shell.ide_chrome.confirm_signals());
         return true;
     }

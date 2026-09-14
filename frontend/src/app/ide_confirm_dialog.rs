@@ -39,7 +39,7 @@ fn IdeConfirmDialogPanel(locale: RwSignal<Locale>, chrome: IdeChromeSignals) -> 
             </div>
             <div class="modal-body">
                 <p class="modal-hint">
-                    {move || prompt_message(chrome.confirm_pending.get())}
+                    {move || prompt_message(chrome.confirm_pending.get().first().cloned())}
                 </p>
             </div>
             <div class="modal-footer actions">
@@ -49,7 +49,9 @@ fn IdeConfirmDialogPanel(locale: RwSignal<Locale>, chrome: IdeChromeSignals) -> 
                     data-testid="ide-confirm-cancel"
                     on:click=move |_| resolve_ide_confirm(confirm, false)
                 >
-                    {move || prompt_cancel_label(chrome.confirm_pending.get(), locale.get())}
+                    {move || {
+                        prompt_cancel_label(chrome.confirm_pending.get().first().cloned(), locale.get())
+                    }}
                 </button>
                 <button
                     type="button"
@@ -57,7 +59,9 @@ fn IdeConfirmDialogPanel(locale: RwSignal<Locale>, chrome: IdeChromeSignals) -> 
                     data-testid="ide-confirm-ok"
                     on:click=move |_| resolve_ide_confirm(confirm, true)
                 >
-                    {move || prompt_ok_label(chrome.confirm_pending.get(), locale.get())}
+                    {move || {
+                        prompt_ok_label(chrome.confirm_pending.get().first().cloned(), locale.get())
+                    }}
                 </button>
             </div>
         </FocusableModalPanel>
@@ -67,7 +71,7 @@ fn IdeConfirmDialogPanel(locale: RwSignal<Locale>, chrome: IdeChromeSignals) -> 
 #[component]
 pub fn IdeConfirmDialog(locale: RwSignal<Locale>, chrome: IdeChromeSignals) -> impl IntoView {
     view! {
-        <Show when=move || chrome.confirm_pending.get().is_some()>
+        <Show when=move || !chrome.confirm_pending.get().is_empty()>
             <div class="modal-backdrop" data-testid="ide-confirm-dialog">
                 <IdeConfirmDialogPanel locale chrome />
             </div>

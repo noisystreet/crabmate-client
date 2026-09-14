@@ -74,7 +74,7 @@ fn ide_hotkey_allowed(
     if ide_settings_page.get_untracked() {
         return false;
     }
-    if chrome.confirm_pending.get_untracked().is_some()
+    if !chrome.confirm_pending.get_untracked().is_empty()
         || chrome.new_file_modal_open.get_untracked()
     {
         return false;

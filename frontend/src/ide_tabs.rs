@@ -345,13 +345,9 @@ pub fn wire_ide_editor_sync_to_active_tab(
     });
 }
 
-pub async fn try_switch_tab(
-    tabs: IdeTabsHandle,
-    index: usize,
-    locale: RwSignal<Locale>,
-    editor: IdeTabsEditorSignals,
-    confirm: IdeConfirmSignals,
-) -> bool {
+/// 切换到指定标签。`switch_to` 会先把当前编辑器内容 persist 回原标签，
+/// 纯切换不丢内容，因此无需「放弃未保存更改」确认。
+pub fn try_switch_tab(tabs: IdeTabsHandle, index: usize, editor: IdeTabsEditorSignals) -> bool {
     let IdeTabsEditorSignals {
         ide_path,
         ide_text,
@@ -359,11 +355,6 @@ pub async fn try_switch_tab(
     } = editor;
     if tabs.active.get_untracked() == Some(index) {
         return true;
-    }
-    if tabs.active_editor_is_dirty(ide_text, ide_baseline)
-        && !confirm_discard(locale.get_untracked(), confirm).await
-    {
-        return false;
     }
     tabs.switch_to(index, ide_path, ide_text, ide_baseline);
     true
@@ -572,7 +563,6 @@ pub fn make_ide_open_file_handler(
     locale: RwSignal<Locale>,
     tabs: IdeTabsHandle,
     editor: IdeTabsEditorSignals,
-    confirm: IdeConfirmSignals,
 ) -> Arc<dyn Fn(String) + Send + Sync> {
     let IdeTabsEditorSignals {
         ide_path,
@@ -583,21 +573,17 @@ pub fn make_ide_open_file_handler(
         if tabs.load_busy.get_untracked() || tabs.save_busy.get_untracked() {
             return;
         }
+        // 打开新文件不丢活动标签内容：persist 先行写回原标签，故不做丢弃确认。
+        if let Some(idx) = tabs.index_of_path(&rel) {
+            let _ = try_switch_tab(tabs, idx, editor);
+            return;
+        }
+        tabs.persist_editor_into_active(ide_text, ide_baseline);
+        tabs.load_busy.set(true);
+        tabs.err.set(None);
+        let loc = locale.get_untracked();
+        let rel_c = rel.clone();
         spawn_local(async move {
-            if let Some(idx) = tabs.index_of_path(&rel) {
-                let _ = try_switch_tab(tabs, idx, locale, editor, confirm).await;
-                return;
-            }
-            if tabs.active_editor_is_dirty(ide_text, ide_baseline)
-                && !confirm_discard(locale.get_untracked(), confirm).await
-            {
-                return;
-            }
-            tabs.persist_editor_into_active(ide_text, ide_baseline);
-            tabs.load_busy.set(true);
-            tabs.err.set(None);
-            let loc = locale.get_untracked();
-            let rel_c = rel.clone();
             match fetch_workspace_file(rel_c.as_str(), None, loc).await {
                 Ok(d) => apply_fetch_result(tabs, d, rel_c, ide_path, ide_text, ide_baseline),
                 Err(e) => apply_fetch_error(tabs, e, ide_path),

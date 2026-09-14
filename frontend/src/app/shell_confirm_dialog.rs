@@ -39,7 +39,7 @@ fn ShellConfirmDialogPanel(locale: RwSignal<Locale>, modal: ModalSignals) -> imp
             </div>
             <div class="modal-body">
                 <p class="modal-hint">
-                    {move || prompt_message(modal.confirm_pending.get())}
+                    {move || prompt_message(modal.confirm_pending.get().first().cloned())}
                 </p>
             </div>
             <div class="modal-footer actions">
@@ -49,7 +49,9 @@ fn ShellConfirmDialogPanel(locale: RwSignal<Locale>, modal: ModalSignals) -> imp
                     data-testid="shell-confirm-cancel"
                     on:click=move |_| resolve_ide_confirm(confirm, false)
                 >
-                    {move || prompt_cancel_label(modal.confirm_pending.get(), locale.get())}
+                    {move || {
+                        prompt_cancel_label(modal.confirm_pending.get().first().cloned(), locale.get())
+                    }}
                 </button>
                 <button
                     type="button"
@@ -57,7 +59,9 @@ fn ShellConfirmDialogPanel(locale: RwSignal<Locale>, modal: ModalSignals) -> imp
                     data-testid="shell-confirm-ok"
                     on:click=move |_| resolve_ide_confirm(confirm, true)
                 >
-                    {move || prompt_ok_label(modal.confirm_pending.get(), locale.get())}
+                    {move || {
+                        prompt_ok_label(modal.confirm_pending.get().first().cloned(), locale.get())
+                    }}
                 </button>
             </div>
         </FocusableModalPanel>
@@ -67,7 +71,7 @@ fn ShellConfirmDialogPanel(locale: RwSignal<Locale>, modal: ModalSignals) -> imp
 #[component]
 pub fn ShellConfirmDialog(locale: RwSignal<Locale>, modal: ModalSignals) -> impl IntoView {
     view! {
-        <Show when=move || modal.confirm_pending.get().is_some()>
+        <Show when=move || !modal.confirm_pending.get().is_empty()>
             <div
                 class="modal-backdrop shell-confirm-backdrop"
                 data-testid="shell-confirm-dialog"
