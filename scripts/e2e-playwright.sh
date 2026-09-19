@@ -19,6 +19,11 @@
 #   CM_E2E_BUILD_FRONTEND  为 1 且 dist 缺失时执行 make frontend
 #   E2E_DIR                Playwright 目录（默认 e2e/）
 #
+# 鉴权隔离：serve 在 TOML/env 未设置 bearer 时会回读系统钥匙串（与桌面端同源），
+# 导致本机钥匙串残留 token 时 E2E 稳定 401。因此默认生成一次性
+# `CM_WEB_API_BEARER_TOKEN`（env 优先于 keyring），serve 与 Playwright 同源继承；
+# 已显式设置时尊重调用方值。helpers.ts 会读取同名 env 注入 Authorization。
+#
 # 说明：Server 默认纯 API（不传 --with-web）；SPA 由客户端自托管 `crabmate-web`
 # 在回环上托管，经 `#cm_api_base=` 交接指向纯 API serve（跨 Origin，靠
 # CM_WEB_CORS_ALLOWED_ORIGINS 放行 web Origin）。
@@ -95,6 +100,10 @@ else
 fi
 
 export RUST_LOG="${CM_E2E_RUST_LOG:-warn}"
+if [[ -z "${CM_WEB_API_BEARER_TOKEN:-}" ]]; then
+  export CM_WEB_API_BEARER_TOKEN="e2e-$(head -c16 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+fi
+echo ">>> Web API Bearer: 已注入（${CM_WEB_API_BEARER_TOKEN:0:8}…，env 优先于系统钥匙串）"
 SERVER_DIR="$(resolve_server_dir)"
 
 start_backend() {
