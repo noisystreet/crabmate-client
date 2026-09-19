@@ -15,6 +15,8 @@ TUI_DIR := $(ROOT)/crates/crabmate-tui
 WEB_HOST_DIR := $(ROOT)/crates/crabmate-web-host
 FRONTEND_DIR := $(ROOT)/frontend
 CARGO ?= cargo
+# 全仓 Rust 包单一列表（fmt/clippy/clean 与 scripts/check.sh、check-boundaries.sh 共用；新增包只改该文件）
+RUST_PKG_DIRS := $(shell grep -v -e '^#' -e '^$$' "$(ROOT)/scripts/rust-pkg-dirs.txt")
 
 # Android ABI：aarch64 | armv7 | i686 | x86_64（传给 build-apk.sh）
 MOBILE_ANDROID_TARGET ?= aarch64
@@ -69,13 +71,13 @@ help:
 	@echo "  make test-tool-card      crabmate-tool-card 金样（独立 workspace）"
 	@echo "  make test                test-frontend 然后 test-tauri 然后 test-tui 然后 test-web-host 然后 test-tool-card"
 	@echo "  make ktlint-android      手改 Android Kotlin ktlint（edu/crabmate）"
-	@echo "  make fmt                 九包 cargo fmt（含 client-api / tool-card / frontend / tui / web-host）"
-	@echo "  make clippy              九包 clippy -D warnings"
+	@echo "  make fmt                 全部 Rust 包 cargo fmt（列表见 scripts/rust-pkg-dirs.txt）"
+	@echo "  make clippy              全部 Rust 包 clippy -D warnings（frontend 走 wasm32）"
 	@echo "  make victauri-e2e        全量 Victauri（需外部 crabmate serve）"
 	@echo "  make e2e-playwright      Playwright（需 frontend/dist + 纯 API serve + crabmate-web 托管 UI）"
 	@echo ""
 	@echo "清理："
-	@echo "  make clean               清理 desktop/mobile/connect/frontend 产物"
+	@echo "  make clean               清理全部 Rust 包 target + desktop/frontend dist 产物"
 	@echo "  make clean-desktop       desktop dist + Tauri target"
 	@echo "  make clean-mobile        mobile Tauri target"
 	@echo "  make clean-connect       connect target"
@@ -217,25 +219,15 @@ ktlint-android:
 	bash "$(ROOT)/scripts/ktlint-android.sh"
 
 fmt:
-	cd "$(TAURI_DIR)" && $(CARGO) fmt --all
-	cd "$(MOBILE_TAURI_DIR)" && $(CARGO) fmt --all
-	cd "$(CLIENT_API_DIR)" && $(CARGO) fmt --all
-	cd "$(TOOL_CARD_DIR)" && $(CARGO) fmt --all
-	cd "$(CONNECT_DIR)" && $(CARGO) fmt --all
-	cd "$(TUI_CORE_DIR)" && $(CARGO) fmt --all
-	cd "$(TUI_DIR)" && $(CARGO) fmt --all
-	cd "$(WEB_HOST_DIR)" && $(CARGO) fmt --all
-	cd "$(FRONTEND_DIR)" && $(CARGO) fmt --all
+	@for dir in $(RUST_PKG_DIRS); do \
+		$(CARGO) fmt --manifest-path "$(ROOT)/$$dir/Cargo.toml" --all || exit 1; \
+	done
 
 clippy: prepare-sidecar
-	cd "$(TAURI_DIR)" && $(CARGO) clippy --all-targets -- -D warnings
-	cd "$(MOBILE_TAURI_DIR)" && $(CARGO) clippy --all-targets -- -D warnings
-	cd "$(CLIENT_API_DIR)" && $(CARGO) clippy --all-targets -- -D warnings
-	cd "$(TOOL_CARD_DIR)" && $(CARGO) clippy --all-targets -- -D warnings
-	cd "$(CONNECT_DIR)" && $(CARGO) clippy --all-targets -- -D warnings
-	cd "$(TUI_CORE_DIR)" && $(CARGO) clippy --all-targets -- -D warnings
-	cd "$(TUI_DIR)" && $(CARGO) clippy --all-targets -- -D warnings
-	cd "$(WEB_HOST_DIR)" && $(CARGO) clippy --all-targets -- -D warnings
+	@for dir in $(RUST_PKG_DIRS); do \
+		if [ "$$dir" = "frontend" ]; then continue; fi; \
+		$(CARGO) clippy --manifest-path "$(ROOT)/$$dir/Cargo.toml" --all-targets -- -D warnings || exit 1; \
+	done
 	rustup target add wasm32-unknown-unknown 2>/dev/null || true
 	cd "$(FRONTEND_DIR)" && $(CARGO) clippy --target wasm32-unknown-unknown --all-targets --all-features -- -D warnings
 
@@ -250,7 +242,12 @@ e2e-playwright:
 
 # --- 清理 ---
 
-clean: clean-desktop clean-mobile clean-connect clean-client-api clean-tool-card clean-tui clean-web-host clean-frontend
+clean:
+	@for dir in $(RUST_PKG_DIRS); do \
+		$(CARGO) clean --manifest-path "$(ROOT)/$$dir/Cargo.toml" || exit 1; \
+	done
+	rm -rf "$(DESKTOP_ROOT)/dist" "$(DESKTOP_ROOT)/binaries"
+	rm -rf "$(FRONTEND_DIR)/dist"
 
 clean-desktop:
 	rm -rf "$(DESKTOP_ROOT)/dist" "$(DESKTOP_ROOT)/binaries"

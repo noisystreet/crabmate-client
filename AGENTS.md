@@ -21,7 +21,7 @@
 ├── mobile-tauri/
 ├── frontend/                # Business UI; contract crates.io crabmate 0.5.2 + protocol
 ├── e2e/                     # Playwright (browser UI)
-├── scripts/                 # sync-connect, victauri-e2e, e2e-playwright, check.sh
+├── scripts/                 # sync-connect, victauri-e2e, e2e-playwright, check.sh, check-boundaries.sh, set-version.sh; rust-pkg-dirs.txt = package list single source
 ├── docs/
 │   ├── TESTING.md
 │   └── design/
@@ -49,6 +49,9 @@
 - `crabmate-connect` is in-repo path only (`crates/crabmate-connect`); default features have **no** Tauri. Desktop/Android enable `features = ["tauri"]`
 - `crabmate-client-api` is in-repo path only (`crates/crabmate-client-api`); no Tauri / `web-sys` / `reqwest` / `tokio`
 - `crabmate-tool-card` is in-repo path only (`crates/crabmate-tool-card`); do not git-pin Server `crabmate-tool-card`
+- Boundary rules above are **mechanically enforced** by `scripts/check-boundaries.sh` (pre-commit hook + `scripts/check.sh`): client-api dependency purity, `crabmate-connect` default features stay Tauri-free, exact contract-pin shape across all manifests, and version consistency across all Rust packages
+- Package versions move in **lockstep** across all Rust packages; bump via `bash scripts/set-version.sh <semver>` (never hand-edit one Cargo.toml version)
+- Package list **single source**: `scripts/rust-pkg-dirs.txt` — consumed by the `Makefile` `fmt` / `clippy` / `clean` loops, `scripts/check.sh`, and `scripts/check-boundaries.sh`; adding a package only touches this file (plus Makefile `test-*` grouping / CI cache if needed)
 - Web Bearer ≠ model `API_KEY`（Web Bearer：官方壳仅内存 + 本机钥匙串/Android Keystore，**禁止**明文 `localStorage`；model keys 同样走钥匙串/Keystore；chat 经 HTTPS 发送 `client_llm.api_key` — do not `PUT /user-data/secrets/client-llm` from the UI；plain browser may keep weak localStorage with an explicit warning）
 - **Split decision / contracts / SSE / CORS** are authoritative in the Server repo; this repo documents shell behavior and links out
 - Scratch drafts go in **`agent_space/`** (gitignored); **do not** treat `agent_space/` as committed documentation
@@ -68,6 +71,8 @@ make desktop-release         # .deb (auto trunk --release UI)
 make web-release             # crabmate-web .deb (trunk --release + loopback static host)
 make tui-release             # crabmate-tui .deb (binary only; no icon, no config)
 bash scripts/check-no-main-path.sh
+bash scripts/check-boundaries.sh         # mechanical boundary rules (client-api purity / connect default features / contract pin shape / version sync)
+bash scripts/set-version.sh 0.5.1        # bump all Rust package versions (+ Cargo.locks) in one step
 bash scripts/lizard-rust.sh              # any function with CCN>10 fails (global zero rule; no per-module caps)
 bash scripts/dependency-security.sh      # cargo audit + cargo deny; not in pre-commit / check.sh
 bash scripts/ktlint-android.sh           # needs java; `--format` to fix
@@ -92,6 +97,7 @@ When updating docs:
 | Android stream FGS / approval notifications | `docs/adr/0002-android-approval-notification-foreground-keepalive.md` (Accepted) |
 | Chat cards for file-backed context inject / skill path | `docs/adr/0003-chat-file-context-inject-cards.md` (Proposed — no fake cards without Server metadata; slash skill path is Client-only) |
 | Shared pure logic extract (WASM / connect / tui) | `docs/design/client_shared_logic.md` |
+| Multi-client repo maintenance (single-workspace trade-off, boundary guards, version bump) | `docs/adr/0004-multi-client-repo-maintenance.md` (Proposed) |
 | Desktop / Android / Web / TUI capability alignment | `docs/design/client_capability_matrix.md` (update the cell in the same PR as the capability) |
 | Chat UI follow-ups (composer / transcript / a11y) | `docs/design/chat_ui_todo.md` |
 | Coding-agent client (review / revert loop; not full IDE) | `docs/design/coding_agent_client.md` (Wave 1 checkboxes stay in `chat_ui_todo.md`; restore/changelog JSON authority is Server) |

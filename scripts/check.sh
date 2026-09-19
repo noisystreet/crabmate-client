@@ -5,46 +5,30 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+# 全仓 Rust 包单一列表（与 Makefile fmt/clippy/clean、check-boundaries.sh 共用）
+RUST_PKG_DIRS="$(grep -v -e '^#' -e '^$' "$ROOT/scripts/rust-pkg-dirs.txt")"
+
 echo "[check] forbid path deps back to Server monorepo"
 bash "$ROOT/scripts/check-no-main-path.sh"
 
-echo "[check] cargo fmt (desktop + mobile + client-api + tool-card + connect + tui + web-host + frontend)"
-(cd desktop-tauri/src-tauri && cargo fmt --all -- --check)
-(cd mobile-tauri/src-tauri && cargo fmt --all -- --check)
-(cd crates/crabmate-client-api && cargo fmt --all -- --check)
-(cd crates/crabmate-tool-card && cargo fmt --all -- --check)
-(cd crates/crabmate-connect && cargo fmt --all -- --check)
-(cd crates/crabmate-tui-core && cargo fmt --all -- --check)
-(cd crates/crabmate-tui && cargo fmt --all -- --check)
-(cd crates/crabmate-web-host && cargo fmt --all -- --check)
-(cd frontend && cargo fmt --all -- --check)
+echo "[check] dependency boundary rules (client-api purity / connect default / contract pin / version sync)"
+bash "$ROOT/scripts/check-boundaries.sh"
+
+echo "[check] cargo fmt (all packages in scripts/rust-pkg-dirs.txt)"
+while IFS= read -r dir; do
+  echo "[check] cargo fmt $dir"
+  (cd "$dir" && cargo fmt --all -- --check)
+done <<< "$RUST_PKG_DIRS"
 
 echo "[check] ensure desktop/mobile dist stubs for tauri codegen"
 bash "$ROOT/scripts/ensure-tauri-dist-stubs.sh"
 
-echo "[check] cargo clippy desktop"
-(cd desktop-tauri/src-tauri && cargo clippy --all-targets -- -D warnings)
-
-echo "[check] cargo clippy mobile"
-(cd mobile-tauri/src-tauri && cargo clippy --all-targets -- -D warnings)
-
-echo "[check] cargo clippy crabmate-client-api"
-(cd crates/crabmate-client-api && cargo clippy --all-targets -- -D warnings)
-
-echo "[check] cargo clippy crabmate-tool-card"
-(cd crates/crabmate-tool-card && cargo clippy --all-targets -- -D warnings)
-
-echo "[check] cargo clippy connect (no Tauri; shells compile feature tauri)"
-(cd crates/crabmate-connect && cargo clippy --all-targets -- -D warnings)
-
-echo "[check] cargo clippy crabmate-tui-core"
-(cd crates/crabmate-tui-core && cargo clippy --all-targets -- -D warnings)
-
-echo "[check] cargo clippy crabmate-tui"
-(cd crates/crabmate-tui && cargo clippy --all-targets -- -D warnings)
-
-echo "[check] cargo clippy crabmate-web-host"
-(cd crates/crabmate-web-host && cargo clippy --all-targets -- -D warnings)
+echo "[check] cargo clippy (all packages except frontend; frontend uses wasm32 toolchain)"
+while IFS= read -r dir; do
+  if [ "$dir" = "frontend" ]; then continue; fi
+  echo "[check] cargo clippy $dir"
+  (cd "$dir" && cargo clippy --all-targets -- -D warnings)
+done <<< "$RUST_PKG_DIRS"
 
 echo "[check] cargo clippy frontend (wasm32)"
 rustup target add wasm32-unknown-unknown 2>/dev/null || true

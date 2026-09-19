@@ -24,7 +24,8 @@ pre-commit run --all-files
 | 钩子 | 说明 |
 |------|------|
 | `check-no-main-path` | 禁止 Cargo path 回主仓 |
-| `cargo-fmt` | desktop / mobile / connect / tui / web-host / frontend |
+| `check-boundaries` | 依赖边界机械检查：client-api 纯度（禁 reqwest / tokio / tauri / web-sys / wasm-bindgen）、connect 默认 feature 无 Tauri、契约钉形状唯一、全部包版本一致（`scripts/check-boundaries.sh`） |
+| `cargo-fmt` | 全部 Rust 包循环（单一列表 `scripts/rust-pkg-dirs.txt`；fmt 与工具链无关，frontend 同循环处理） |
 | `desktop-dist-stubs` → **`tauri-dist-stubs`** | 为 **desktop/mobile** `frontendDist` 建占位（`scripts/ensure-tauri-dist-stubs.sh`；与 CI `check.sh` 共用） |
 | `desktop-clippy` / `mobile-clippy` / `connect-clippy` / `tui-clippy` / `web-host-clippy` | `-D warnings` |
 | `frontend-clippy` | wasm32 clippy（含类型检查；不再单独 `cargo check`） |
@@ -51,7 +52,7 @@ bash scripts/check.sh
 
 | Job / 工作流 | 内容 |
 |--------------|------|
-| `CI` / `check` | `check-no-main-path`、`scripts/check.sh`（含 frontend wasm32 clippy + 复杂度）、`make frontend`（trunk）、`make test-frontend`、`make test-tui`、`make test-web-host`、connect/desktop **unit** test（desktop `cargo test --bins`）、mobile check |
+| `CI` / `check` | `check-no-main-path`、`scripts/check.sh`（含 `check-boundaries` 边界检查 + frontend wasm32 clippy + 复杂度）、`make frontend`（trunk）、`make test-frontend`、`make test-tui`、`make test-web-host`、connect/desktop **unit** test（desktop `cargo test --bins`）、mobile check |
 | `CI` / `victauri-e2e` | **Skipped**（`if: false`）；壳 E2E 见 nightly |
 | `CI` / `build-desktop-deb` | `CM_PREPARE_SKIP_FRONTEND=1` + stub；`make desktop-release`；校验 `Package: crabmate-desktop`、无 serve sidecar、无 `/etc/crabmate` |
 | `CI` / `build-web-deb` | `CM_WEB_SKIP_FRONTEND=1` + stub dist；`make web-release`；校验 `Package: crabmate-web`、菜单图标、无 serve sidecar、无 `/etc/crabmate` |
@@ -95,6 +96,17 @@ make dependency-security
 ```
 
 策略见仓库根 **`deny.toml`**。对全部 7 个 Cargo workspace 各跑一遍（各有独立 `Cargo.lock`）。**不进** pre-commit，避免每次提交都拉 RustSec advisory DB。CI 不含 `advisories` deny 检查（与 `cargo audit` 重复，且会把 unmaintained 与漏洞混为一谈）。
+
+## 多端维护脚本（包列表 / 边界 / 版本）
+
+全部 Rust 包目录的单一来源是 **`scripts/rust-pkg-dirs.txt`**（`#` 为注释行）：Makefile `fmt` / `clippy` / `clean`、`scripts/check.sh`、`scripts/check-boundaries.sh` 都从它取包列表，**新增包只改该文件**（再按需补 Makefile `test-*` 分组与 CI rust-cache 目录）。背景决策（为何不合并单一 Cargo workspace）见 [`docs/adr/0004-multi-client-repo-maintenance.md`](adr/0004-multi-client-repo-maintenance.md)。
+
+```bash
+bash scripts/check-boundaries.sh   # 边界机械检查（也是 pre-commit 钩子 + check.sh 一环）
+bash scripts/set-version.sh 0.5.1  # 一次改全部包版本 + 各自 Cargo.lock
+```
+
+`check-boundaries` 守护四件事：`crabmate-client-api` 纯度（禁 reqwest / tokio / tauri / web-sys / wasm-bindgen）、`crabmate-connect` 默认 feature 不含 Tauri、crates.io `crabmate` 契约钉形状唯一（`default-features = false, features = ["protocol"]`；禁旧包名 `crabmate-sse-protocol`）、全部包版本一致。改版本必须走 `set-version.sh`，手改单个 Cargo.toml 会被该检查拒绝。
 
 ## Playwright（浏览器 Web UI E2E）
 
