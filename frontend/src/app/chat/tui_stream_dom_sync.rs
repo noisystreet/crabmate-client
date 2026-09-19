@@ -619,6 +619,16 @@ pub(super) fn wire_tui_stream_sync_effect(s: TuiStreamSyncSignals) {
         // 宽屏才注入「打开此文件」；窄屏 / 移动远端无 IDE 布局。tracked 读取（有意）：
         // resize 跨阈值时按钮即时出现/消失，无需等下一个 token。
         let _ = ide_narrow.get();
+        // rAF 合帧前必须显式 tracked 读全量依赖：sync_chat_tui_stream_dom 内部对这些信号的
+        // 读取已随 DOM 同步移入 rAF 回调（非响应式上下文），若不在此建立依赖，
+        // sessions / overlay / tool_* 更新将不再触发同步（transcript 停留在旧内容）。
+        let _ = chat.active_id.get();
+        chat.sessions.with(|_| ());
+        chat.stream_text_overlay.with(|_| ());
+        chat.tool_output_chunks.with(|_| ());
+        chat.tool_job_states.with(|_| ());
+        chat.tool_file_paths.with(|_| ());
+        let _ = transcript_ref.get();
         if sync_scheduled.get_value() {
             return;
         }
