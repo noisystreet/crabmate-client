@@ -17,7 +17,9 @@ publish = false
 [dependencies]
 crabmate-client-api = { path = "../crabmate-client-api" }
 keyring = "4.1.5"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+# 0.13 与 Tauri 2.11 内置 reqwest 同大版本，避免双 HTTP 栈（hyper/rustls 两套）。
+# 0.13 移除 rustls-tls；"rustls" = aws-lc-rs 提供者 + 平台证书验证器（默认 TLS 后端）。
+reqwest = { version = "0.13", default-features = false, features = ["rustls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri = { version = "2", optional = true }
