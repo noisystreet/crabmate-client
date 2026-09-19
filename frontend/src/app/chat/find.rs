@@ -37,10 +37,12 @@ pub(crate) fn wire_chat_find_matches(
             let loc = locale.get();
             let apply = apply_assistant_display_filters.get();
             let q = normalize_search_query(&chat_find_query.get());
-            let overlay = stream_text_overlay.get();
+            // overlay 仅在查询非空时读取：空查询时匹配列表恒为空，
+            // 流式 overlay 每 token 更新不必触发本 Effect 空转。
             let ids = if q.is_empty() {
                 Vec::new()
             } else {
+                let overlay = stream_text_overlay.get();
                 sessions.with(|list| {
                     list.iter()
                         .find(|s| s.id == aid)

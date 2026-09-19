@@ -114,6 +114,8 @@ fn timeline_log_dispatch_body(
     accum: &PerStreamAccum,
     info: TimelineLogInfo,
 ) {
+    // 调试日志仅 debug 构建：release 下每条 timeline 日志省去 format + console 调用。
+    #[cfg(debug_assertions)]
     web_sys::console::log_1(&format!("[TL] kind={} title={}", info.kind, info.title).into());
     match info.kind.as_str() {
         "final_response" => timeline_log_dispatch_final_response(stream_ctx, accum, &info),

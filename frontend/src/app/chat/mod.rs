@@ -37,6 +37,7 @@ mod tui_actions_bar;
 mod tui_body_chunks;
 mod tui_body_dom;
 mod tui_line_markdown;
+mod tui_stream_dom_sync;
 mod tui_stream_view;
 mod tui_thinking_block;
 mod tui_tool_process;
