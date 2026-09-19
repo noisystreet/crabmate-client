@@ -95,8 +95,9 @@ pub(super) fn process_sse_buffer_step(
     let Some(pos) = buffer.find("\n\n") else {
         return Ok(None);
     };
+    // 就地移除已消费前缀，避免对剩余缓冲再整段分配拷贝一次。
     let block = buffer[..pos].to_string();
-    *buffer = buffer[pos + 2..].to_string();
+    buffer.drain(..pos + 2);
     handle_sse_block(&block, last_event_id, saw_stream_ended, cbs, loc).map(Some)
 }
 

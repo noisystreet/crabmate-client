@@ -475,6 +475,7 @@ fn plan_live_patch(
     messages: &[StoredMessage],
     live_id: Option<&str>,
     promote_id: Option<&str>,
+    live_chunks: Option<TuiBodyChunks>,
     ctx: &TuiRenderCtx<'_>,
 ) -> Option<LiveBodyPlan> {
     if let Some(id) = live_id {
@@ -482,7 +483,9 @@ fn plan_live_patch(
         if !prev.mounted_ids.iter().any(|mid| mid == id) {
             return None;
         }
-        let next_chunks = message_body_chunks(message, ctx);
+        // chunks 由调用方算好传入：plan_tui_sync 与 next_mount_state 共用同一次解析，
+        // 避免流式每 token 对同一 live 消息重复跑 markdown/块解析（O(累计正文)）。
+        let next_chunks = live_chunks?;
         if message.is_tool && prev.live_id.as_deref() == Some(id) {
             return Some(plan_live_tool_patch(prev, message, id, next_chunks, ctx));
         }
@@ -531,14 +534,23 @@ fn next_mount_state(
     messages: &[StoredMessage],
     live_id: Option<String>,
     committed_key: u64,
+    live_chunks: Option<TuiBodyChunks>,
     ctx: &TuiRenderCtx<'_>,
 ) -> TuiMountState {
-    let live_body = live_id.as_ref().and_then(|id| {
-        turns
-            .iter()
-            .find(|(_, m)| m.id == *id)
-            .map(|(_, m)| message_body_chunks(m, ctx))
-    });
+    // live chunks 由调用方算好传入（与 plan_live_patch 共用一次解析）；
+    // 仅当 live 消息确实可挂载时才采用，保持与旧实现（turns 内查找）一致的边界。
+    let live_body = live_id
+        .as_ref()
+        .filter(|id| turns.iter().any(|(_, m)| m.id == **id))
+        .and(live_chunks)
+        .or_else(|| {
+            live_id.as_ref().and_then(|id| {
+                turns
+                    .iter()
+                    .find(|(_, m)| m.id == *id)
+                    .map(|(_, m)| message_body_chunks(m, ctx))
+            })
+        });
     let live_tool_has_details =
         live_tool_has_details_flag(messages, live_id.as_deref(), ctx.locale, ctx.tool_chunks);
     TuiMountState {
@@ -612,6 +624,14 @@ pub(crate) fn plan_tui_sync(args: PlanTuiSyncArgs<'_>) -> TuiSyncPlan {
 
     let live_id = live_message_id(messages, overlay);
     let committed_key = committed_fingerprint(&turns, live_id.as_deref());
+    // live body chunks 只解析一次：plan_live_patch 与 next_mount_state 共用，
+    // 流式每 token 省去一次对同一 live 消息的重复 markdown/块解析。
+    let live_chunks = live_id.as_deref().and_then(|id| {
+        messages
+            .iter()
+            .find(|m| m.id == id)
+            .map(|m| message_body_chunks(m, &ctx))
+    });
     let append_sections = append_new_turn_sections(prev, &turns, live_id.as_deref(), &ctx);
     let promote_id = promote_id_from(prev, live_id.as_deref());
     let live = plan_live_patch(
@@ -619,9 +639,17 @@ pub(crate) fn plan_tui_sync(args: PlanTuiSyncArgs<'_>) -> TuiSyncPlan {
         messages,
         live_id.as_deref(),
         promote_id.as_deref(),
+        live_chunks.clone(),
         &ctx,
     );
-    let next = next_mount_state(&turns, messages, live_id.clone(), committed_key, &ctx);
+    let next = next_mount_state(
+        &turns,
+        messages,
+        live_id.clone(),
+        committed_key,
+        live_chunks,
+        &ctx,
+    );
 
     let structural_noop = append_sections.is_empty() && promote_id.is_none();
     if structural_noop && prev.committed_key == committed_key && prev.live_id == live_id {

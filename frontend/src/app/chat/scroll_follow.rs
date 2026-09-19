@@ -12,11 +12,18 @@
 use gloo_timers::callback::Timeout;
 use leptos::prelude::*;
 use leptos_dom::helpers::request_animation_frame;
+use std::cell::Cell;
 
 use crate::app::chat::scroll_shell::{ChatScrollShellSignals, stick_pin, stick_unpin};
 use crate::chat_session_state::ChatSessionSignals;
 use crate::session_ops::messages_scroller_has_non_collapsed_selection;
 use crate::storage::ChatSession;
+
+thread_local! {
+    /// 每帧延迟贴底去重标志：同帧多个触发源（DOM paint 回调 / 内容信号 Effect）
+    /// 只保留最早调度的一次 rAF + 失焦兜底，避免每 token 多次强制布局读。
+    static FOLLOW_SNAP_SCHEDULED: Cell<bool> = const { Cell::new(false) };
+}
 
 fn snap_to_bottom(shell: ChatScrollShellSignals) {
     let Some(el) = shell.messages_scroller.get_untracked() else {
@@ -40,6 +47,35 @@ fn scroll_to_bottom(shell: ChatScrollShellSignals) {
     request_animation_frame(move || {
         snap_to_bottom_if_following(shell);
         // Tauri/WebKitGTK 失焦时 rAF 可能不触发，setTimeout 兜底
+        Timeout::new(100, move || {
+            snap_to_bottom_if_following(shell);
+        })
+        .forget();
+    });
+}
+
+/// 延迟贴底：rAF 等布局完成，setTimeout 作 Tauri 失焦兜底；同帧多次调用合并为一次。
+///
+/// 失焦（Tauri/WebKitGTK rAF 停摆）时挂起的 rAF 不执行，标志会卡在 `true` 且
+/// rAF 内安排的兜底 Timeout 永不运行；因此同步路径再安排一个自愈 Timeout：
+/// 到期时若 rAF 尚未跑完则复位标志并直接兜底贴底（setTimeout 失焦仍会触发）。
+fn schedule_follow_snap(shell: ChatScrollShellSignals) {
+    if FOLLOW_SNAP_SCHEDULED.with(Cell::get) {
+        return;
+    }
+    FOLLOW_SNAP_SCHEDULED.with(|p| p.set(true));
+    // 自愈：rAF 停摆时复位去重标志并兜底贴底；rAF 正常执行时此分支为 no-op。
+    Timeout::new(200, move || {
+        if FOLLOW_SNAP_SCHEDULED.with(Cell::get) {
+            FOLLOW_SNAP_SCHEDULED.with(|p| p.set(false));
+            snap_to_bottom_if_following(shell);
+        }
+    })
+    .forget();
+    request_animation_frame(move || {
+        FOLLOW_SNAP_SCHEDULED.with(|p| p.set(false));
+        snap_to_bottom_if_following(shell);
+        // setTimeout 只作 Tauri/WebKitGTK 失焦兜底；执行时重新检查用户是否已上滚。
         Timeout::new(100, move || {
             snap_to_bottom_if_following(shell);
         })
@@ -89,16 +125,10 @@ pub(crate) fn disengage_follow_and_scroll_top(shell: ChatScrollShellSignals) {
 
 /// Markdown/纯文本已实际写入 DOM 后跟底，避免先读旧 `scrollHeight` 再发生内容增高。
 ///
-/// 同步 snap 一次（尽快贴底），再 rAF + 短延迟兜底布局完成（工具追加 / 助手行闭合常见）。
+/// 同步 snap 一次（尽快贴底）；后续 rAF + 兜底经每帧去重，与内容信号 Effect 合并。
 pub(crate) fn follow_after_content_paint(shell: ChatScrollShellSignals) {
     snap_to_bottom_if_following(shell);
-    request_animation_frame(move || {
-        snap_to_bottom_if_following(shell);
-        Timeout::new(50, move || {
-            snap_to_bottom_if_following(shell);
-        })
-        .forget();
-    });
+    schedule_follow_snap(shell);
 }
 
 /// 内容根尺寸变化且仍 Pinned 时贴底（ResizeObserver）。
@@ -154,14 +184,7 @@ pub(crate) fn wire_content_follow_scroll(chat: ChatSessionSignals, shell: ChatSc
         if !shell.auto_scroll_chat.get() {
             return;
         }
-        // rAF 等布局完成再读 scrollHeight（Leptos 批处理 + 浏览器布局）
-        request_animation_frame(move || {
-            snap_to_bottom_if_following(shell);
-        });
-        // setTimeout 只作失焦兜底；执行时重新检查用户是否已上滚。
-        Timeout::new(100, move || {
-            snap_to_bottom_if_following(shell);
-        })
-        .forget();
+        // 与 DOM paint 回调共用每帧去重的延迟贴底（rAF 等布局完成再读 scrollHeight）
+        schedule_follow_snap(shell);
     });
 }
