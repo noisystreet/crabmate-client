@@ -1,6 +1,7 @@
 //! TUI 会话 DOM 同步执行域：把 [`TuiSyncPlan`] 应用到 transcript DOM，
 //! 并提供每 token 合帧的同步 Effect 调度（组件只负责挂载与事件）。
 
+use gloo_timers::callback::Timeout;
 use leptos::prelude::*;
 use leptos_dom::helpers::request_animation_frame;
 use wasm_bindgen::JsCast;
@@ -581,6 +582,7 @@ fn restore_overlays_after_tui_sync(
 }
 
 /// 主同步 Effect 的信号与句柄集合（打包传参以守 fn-param 上限）。
+#[derive(Clone)]
 pub(super) struct TuiStreamSyncSignals {
     pub(super) chat: ChatSessionSignals,
     pub(super) locale: RwSignal<Locale>,
@@ -596,80 +598,89 @@ pub(super) struct TuiStreamSyncSignals {
     pub(super) find: ChatFindOverlaySignals,
 }
 
+/// 执行一次 transcript DOM 同步 + overlay 恢复（rAF 合帧回调与失焦自愈共用）。
+fn run_tui_stream_dom_sync_once(s: &TuiStreamSyncSignals) {
+    let loc = s.locale.get_untracked();
+    let opts = TuiStreamDisplayOpts {
+        locale: loc,
+        apply_filters: s.apply_assistant_display_filters.get_untracked(),
+        markdown_render: s.markdown_render.get_untracked(),
+        show_turn_context_inject: s.show_turn_context_inject.get_untracked(),
+        open_file_enabled: !s.ide_narrow.get_untracked()
+            && !crate::mobile_remote::mobile_remote_client(),
+    };
+    // untracked 快照：toggle 时 DOM 已原生生效，无需因此重渲染；仅在 body 重建时读取。
+    let think_open = s.think_manually_open.get_untracked();
+    let (scope, live_id) = sync_chat_tui_stream_dom(
+        s.chat,
+        opts,
+        s.transcript_ref,
+        s.mount_state,
+        s.scroll_shell,
+        &think_open,
+    );
+    restore_overlays_after_tui_sync(
+        s.transcript_ref,
+        scope,
+        live_id.as_deref(),
+        s.editing_user_message,
+        loc,
+        s.find,
+    );
+}
+
 /// 主同步 Effect：tracked 读建立依赖，同帧多次触发合并到一次 rAF 内做 DOM 同步。
 /// 独立函数以隔离闭包复杂度（lizard CCN≤10），并保持组件函数轻量。
 pub(super) fn wire_tui_stream_sync_effect(s: TuiStreamSyncSignals) {
-    let TuiStreamSyncSignals {
-        chat,
-        locale,
-        apply_assistant_display_filters,
-        markdown_render,
-        show_turn_context_inject,
-        ide_narrow,
-        think_manually_open,
-        transcript_ref,
-        mount_state,
-        scroll_shell,
-        editing_user_message,
-        find,
-    } = s;
     // 每 token 合帧：同帧多次触发只在 rAF 回调中执行最后一次 DOM 同步，
     // 避免每个 SSE token 各跑一次全量 plan + DOM patch + 贴底。
     let sync_scheduled = StoredValue::new(false);
+    // 调度代次号：失焦自愈 Timeout 只复位自己所属的代，避免误复位新代标志。
+    let sync_generation = StoredValue::new(0u32);
     Effect::new(move |_| {
         // tracked 读建立依赖；值在 rAF 回调中 untracked 重读，保证用同帧最新状态。
-        let _ = chat.stream_overlay_revision.get();
-        let _ = locale.get();
-        let _ = apply_assistant_display_filters.get();
-        let _ = markdown_render.get();
-        let _ = show_turn_context_inject.get();
+        let _ = s.chat.stream_overlay_revision.get();
+        let _ = s.locale.get();
+        let _ = s.apply_assistant_display_filters.get();
+        let _ = s.markdown_render.get();
+        let _ = s.show_turn_context_inject.get();
         // 宽屏才注入「打开此文件」；窄屏 / 移动远端无 IDE 布局。tracked 读取（有意）：
         // resize 跨阈值时按钮即时出现/消失，无需等下一个 token。
-        let _ = ide_narrow.get();
+        let _ = s.ide_narrow.get();
         // rAF 合帧前必须显式 tracked 读全量依赖：sync_chat_tui_stream_dom 内部对这些信号的
         // 读取已随 DOM 同步移入 rAF 回调（非响应式上下文），若不在此建立依赖，
         // sessions / overlay / tool_* 更新将不再触发同步（transcript 停留在旧内容）。
-        let _ = chat.active_id.get();
-        chat.sessions.with(|_| ());
-        chat.stream_text_overlay.with(|_| ());
-        chat.tool_output_chunks.with(|_| ());
-        chat.tool_job_states.with(|_| ());
-        chat.tool_file_paths.with(|_| ());
-        let _ = transcript_ref.get();
+        let _ = s.chat.active_id.get();
+        s.chat.sessions.with(|_| ());
+        s.chat.stream_text_overlay.with(|_| ());
+        s.chat.tool_output_chunks.with(|_| ());
+        s.chat.tool_job_states.with(|_| ());
+        s.chat.tool_file_paths.with(|_| ());
+        let _ = s.transcript_ref.get();
         if sync_scheduled.get_value() {
             return;
         }
         sync_scheduled.set_value(true);
+        sync_generation.update_value(|g| {
+            *g = g.wrapping_add(1);
+        });
+        let generation = sync_generation.get_value();
+        // 失焦自愈：Tauri/WebKitGTK 失焦时 rAF 停摆，去重标志卡 true、合帧回调滞留，
+        // 气泡会长期不更新（E2E raf-stall-repro）；setTimeout 失焦仍会触发，到期若
+        // rAF 尚未执行则复位标志并直接兜底同步（与 scroll_follow 自愈同型）。
+        // 携带代次号：本代已被 rAF 结束且又开启新调度时，旧自愈到期不得干扰新代。
+        let s_heal = s.clone();
+        Timeout::new(200, move || {
+            if sync_generation.get_value() == generation && sync_scheduled.get_value() {
+                sync_scheduled.set_value(false);
+                run_tui_stream_dom_sync_once(&s_heal);
+            }
+        })
+        .forget();
+        let s_frame = s.clone();
         request_animation_frame(move || {
             sync_scheduled.set_value(false);
-            // rAF 回调不在响应式上下文中：untracked 取当下最新值即可。
-            let loc = locale.get_untracked();
-            let opts = TuiStreamDisplayOpts {
-                locale: loc,
-                apply_filters: apply_assistant_display_filters.get_untracked(),
-                markdown_render: markdown_render.get_untracked(),
-                show_turn_context_inject: show_turn_context_inject.get_untracked(),
-                open_file_enabled: !ide_narrow.get_untracked()
-                    && !crate::mobile_remote::mobile_remote_client(),
-            };
-            // untracked 快照：toggle 时 DOM 已原生生效，无需因此重渲染；仅在 body 重建时读取。
-            let think_open = think_manually_open.get_untracked();
-            let (scope, live_id) = sync_chat_tui_stream_dom(
-                chat,
-                opts,
-                transcript_ref,
-                mount_state,
-                scroll_shell,
-                &think_open,
-            );
-            restore_overlays_after_tui_sync(
-                transcript_ref,
-                scope,
-                live_id.as_deref(),
-                editing_user_message,
-                loc,
-                find,
-            );
+            run_tui_stream_dom_sync_once(&s_frame);
         });
     });
 }
