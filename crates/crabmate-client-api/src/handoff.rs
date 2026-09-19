@@ -65,6 +65,32 @@ mod tests {
         assert!(!is_handoff_hash_key("cm_shell"));
     }
 
+    /// checked-in golden：键名单一来源，`e2e/fixtures/helpers.ts` 读同一份文件，
+    /// 两侧防漂移（改常量必须同步 golden，反之亦然）。
+    #[test]
+    fn golden_file_matches_constants() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/golden/handoff_keys.json"
+        );
+        let raw = std::fs::read_to_string(path)
+            .unwrap_or_else(|e| panic!("读取 golden 失败 {path}: {e}"));
+        let golden: serde_json::Value = serde_json::from_str(&raw)
+            .unwrap_or_else(|e| panic!("golden JSON 解析失败 {path}: {e}"));
+        assert_eq!(
+            golden.get("api_base_hash_key").and_then(|v| v.as_str()),
+            Some(API_BASE_HASH_KEY),
+            "golden 与 API_BASE_HASH_KEY 漂移：改常量须同步 tests/golden/handoff_keys.json"
+        );
+        assert_eq!(
+            golden
+                .get("web_api_bearer_hash_key")
+                .and_then(|v| v.as_str()),
+            Some(BEARER_HASH_KEY),
+            "golden 与 BEARER_HASH_KEY 漂移：改常量须同步 tests/golden/handoff_keys.json"
+        );
+    }
+
     #[test]
     fn encodes_slash_and_colon() {
         assert_eq!(percent_encode_unreserved("a/b"), "a%2Fb");

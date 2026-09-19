@@ -1,0 +1,13 @@
+# 单一事实来源：本仓全部 Rust 包目录（crates + 壳 + 前端 WASM workspace）。
+# Makefile（fmt/clippy/clean）、scripts/check.sh、scripts/check-boundaries.sh 共用；
+# 新增包只改这里，并按需补 Makefile test-* 分组与 CI rust-cache 目录。
+# 注：frontend 用 wasm32 工具链（fmt 循环内一致；clippy 在 Makefile/check.sh 单列处理）。
+desktop-tauri/src-tauri
+mobile-tauri/src-tauri
+crates/crabmate-client-api
+crates/crabmate-tool-card
+crates/crabmate-connect
+crates/crabmate-tui-core
+crates/crabmate-tui
+crates/crabmate-web-host
+frontend

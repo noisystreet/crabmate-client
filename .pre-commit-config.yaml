@@ -19,18 +19,21 @@ repos:
         always_run: true
         stages: [pre-commit]
 
+      - id: check-boundaries
+        name: dependency boundary rules (client-api purity / connect default features / contract pin shape / version sync)
+        entry: bash scripts/check-boundaries.sh
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
+
       - id: cargo-fmt
-        name: cargo fmt (desktop + mobile + client-api + tool-card + connect + tui + web-host + frontend)
-        entry: >-
-          bash -c 'cd desktop-tauri/src-tauri && cargo fmt --all -- --check
-          && cd ../../mobile-tauri/src-tauri && cargo fmt --all -- --check
-          && cd ../../crates/crabmate-client-api && cargo fmt --all -- --check
-          && cd ../crabmate-tool-card && cargo fmt --all -- --check
-          && cd ../crabmate-connect && cargo fmt --all -- --check
-          && cd ../crabmate-tui-core && cargo fmt --all -- --check
-          && cd ../crabmate-tui && cargo fmt --all -- --check
-          && cd ../crabmate-web-host && cargo fmt --all -- --check
-          && cd ../../frontend && cargo fmt --all -- --check'
+        name: cargo fmt (all packages in scripts/rust-pkg-dirs.txt)
+        entry: |
+          bash -c 'while IFS= read -r dir; do
+            case "$dir" in "#"*|"") continue ;; esac
+            (cd "$dir" && cargo fmt --all -- --check) || exit 1
+          done < scripts/rust-pkg-dirs.txt'
         language: system
         pass_filenames: false
         always_run: true

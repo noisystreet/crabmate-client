@@ -1,0 +1,4 @@
+{
+  "api_base_hash_key": "cm_api_base",
+  "web_api_bearer_hash_key": "cm_web_api_bearer"
+}
