@@ -336,8 +336,9 @@ fn apply_tui_body_and_action_patches(
 
 /// plan 是否会写入可能携带工作区图 / `/uploads/` 附图的新 DOM（需要 hydrate 扫描）。
 ///
-/// 流式每 token 的纯文本增量（活跃块更新）与工具行 / 思维链正文不含新 img；
-/// 全量重建、新回合追加、body 重建（ReplaceAll）以及携带新闭合块的增量才需要扫描。
+/// 流式每 token 的纯文本增量（活跃块更新）与工具行文案不含新 img；全量重建、
+/// 新回合追加、body 重建（ReplaceAll）、携带新闭合块的增量以及思维链正文
+/// 流式重写（markdown 渲染下 `body_html` 可含工作区图）需要扫描。
 fn plan_touches_images(plan: &TuiSyncPlan) -> bool {
     if plan.full_html.is_some()
         || !plan.append_sections.is_empty()
@@ -351,8 +352,14 @@ fn plan_touches_images(plan: &TuiSyncPlan) -> bool {
     match &live.patch {
         TuiBodyPatch::ReplaceAll { .. } => true,
         // 新闭合块由 markdown 渲染（可能含 img）；活跃块未闭合不成图
-        TuiBodyPatch::Incremental { append_closed, .. }
-        | TuiBodyPatch::ThinkBody { append_closed, .. } => !append_closed.is_empty(),
+        TuiBodyPatch::Incremental { append_closed, .. } => !append_closed.is_empty(),
+        // ThinkBody 每帧整块重写思维链正文 innerHTML，img 节点会被重建并丢失
+        // hydrate 标记；body_html 含 img 标记时必须重新扫描（纯文本阶段跳过）。
+        TuiBodyPatch::ThinkBody {
+            body_html,
+            append_closed,
+            ..
+        } => !append_closed.is_empty() || body_html.contains("<img"),
         // 工具行只 set_text_content，绝不引入 img
         TuiBodyPatch::ToolRow { .. } => false,
     }
@@ -762,6 +769,13 @@ mod tests {
             with_live(TuiBodyPatch::ThinkBody {
                 body_html: "<p>t</p>".to_string(),
                 append_closed: vec!["<pre><code>t</code></pre>".to_string()],
+                open_plain: None,
+            }),
+            // 回归用例：纯思维链流式阶段（append_closed 为空）但 body_html 含图，
+            // 必须扫描——ThinkBody 每帧重写 innerHTML 会丢掉已有 hydrate 标记。
+            with_live(TuiBodyPatch::ThinkBody {
+                body_html: "<p><img src=\"/workspace/file/raw?path=a.png\"></p>".to_string(),
+                append_closed: vec![],
                 open_plain: None,
             }),
         ] {

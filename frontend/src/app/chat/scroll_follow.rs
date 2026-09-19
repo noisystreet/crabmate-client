@@ -23,6 +23,8 @@ thread_local! {
     /// 每帧延迟贴底去重标志：同帧多个触发源（DOM paint 回调 / 内容信号 Effect）
     /// 只保留最早调度的一次 rAF + 失焦兜底，避免每 token 多次强制布局读。
     static FOLLOW_SNAP_SCHEDULED: Cell<bool> = const { Cell::new(false) };
+    /// 调度代次号：自愈 Timeout 只复位自己所属的代，避免跨调度窗口误复位新代标志。
+    static FOLLOW_SNAP_GENERATION: Cell<u32> = const { Cell::new(0) };
 }
 
 fn snap_to_bottom(shell: ChatScrollShellSignals) {
@@ -64,9 +66,16 @@ fn schedule_follow_snap(shell: ChatScrollShellSignals) {
         return;
     }
     FOLLOW_SNAP_SCHEDULED.with(|p| p.set(true));
+    let generation = FOLLOW_SNAP_GENERATION.with(|g| {
+        g.set(g.get().wrapping_add(1));
+        g.get()
+    });
     // 自愈：rAF 停摆时复位去重标志并兜底贴底；rAF 正常执行时此分支为 no-op。
+    // 携带代次号：本代已被 rAF 结束且又开启了新调度时，旧自愈到期不得复位新代标志。
     Timeout::new(200, move || {
-        if FOLLOW_SNAP_SCHEDULED.with(Cell::get) {
+        if FOLLOW_SNAP_GENERATION.with(|g| g.get()) == generation
+            && FOLLOW_SNAP_SCHEDULED.with(Cell::get)
+        {
             FOLLOW_SNAP_SCHEDULED.with(|p| p.set(false));
             snap_to_bottom_if_following(shell);
         }
