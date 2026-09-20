@@ -1,5 +1,6 @@
 //! `POST /workspace/clone/stream`：消费 SSE 进度事件。
 
+use crabmate_client_api::{http_error_text, paths};
 use serde::Deserialize;
 use serde_json::json;
 use wasm_bindgen::JsCast;
@@ -105,12 +106,7 @@ fn http_error_from_json_body(status: u16, s: &str) -> String {
             .and_then(|x| x.as_str())
             .unwrap_or("CLONE_HTTP")
             .to_string();
-        let message = v
-            .get("error")
-            .and_then(|x| x.as_str())
-            .or_else(|| v.get("message").and_then(|x| x.as_str()))
-            .unwrap_or(s)
-            .to_string();
+        let message = http_error_text(&v).unwrap_or_else(|| s.to_string());
         return format!("{code}: {message} (HTTP {status})");
     }
     format!("HTTP {status}: {s}")
@@ -194,7 +190,7 @@ async fn open_clone_sse_response(
     init.set_headers(&h);
     init.set_body(&JsValue::from_str(&body_s));
 
-    let request = Request::new_with_str_and_init(&api_url("/workspace/clone/stream"), &init)
+    let request = Request::new_with_str_and_init(&api_url(paths::WORKSPACE_CLONE_STREAM), &init)
         .map_err(|e| format!("request: {:?}", e))?;
     let w = window().ok_or_else(|| crate::i18n::api_err_no_window(loc).to_string())?;
     let resp_val = JsFuture::from(w.fetch_with_request(&request))

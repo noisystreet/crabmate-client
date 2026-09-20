@@ -1,5 +1,6 @@
 //! `/workspace/projects` 与项目池相关 API。
 
+use crabmate_client_api::paths;
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::JsCast;
 use wasm_bindgen::JsValue;
@@ -49,7 +50,7 @@ pub struct WorkspaceProjectPostResponse {
 pub async fn fetch_workspace_projects(
     loc: Locale,
 ) -> Result<WorkspaceProjectsListResponse, String> {
-    fetch_json("GET", "/workspace/projects", None, loc).await
+    fetch_json("GET", paths::WORKSPACE_PROJECTS, None, loc).await
 }
 
 /// `POST /workspace/projects`：创建（可选）并切换到命名项目工作区。
@@ -63,7 +64,7 @@ pub async fn post_workspace_project(
         create,
     })
     .map_err(|e| e.to_string())?;
-    fetch_json_with_body("POST", "/workspace/projects", &body, loc).await
+    fetch_json_with_body("POST", paths::WORKSPACE_PROJECTS, &body, loc).await
 }
 
 /// `POST /workspace` 原始响应：`(resp.ok(), status, body text)`。
@@ -75,7 +76,7 @@ async fn post_workspace_raw(body: &str, loc: Locale) -> Result<(bool, u16, Strin
     let _ = h.set("Content-Type", "application/json");
     init.set_headers(&h);
     init.set_body(&JsValue::from_str(body));
-    let req = Request::new_with_str_and_init(&api_url("/workspace"), &init)
+    let req = Request::new_with_str_and_init(&api_url(paths::WORKSPACE), &init)
         .map_err(|e| format!("request: {:?}", e))?;
     let w = window().ok_or_else(|| crate::i18n::api_err_no_window(loc).to_string())?;
     let resp_val = JsFuture::from(w.fetch_with_request(&req))
@@ -114,9 +115,7 @@ fn parse_workspace_set_response(
             }
         });
     }
-    Err(crabmate_client_api::workspace_http_error_message(
-        &v, status,
-    ))
+    Err(crabmate_client_api::http_error_message(&v, status))
 }
 
 /// `POST /workspace`（支持 `project` 字段）。

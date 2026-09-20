@@ -1,5 +1,6 @@
 //! Web composer：`/` 浮层（内建命令 + skill）状态与菜单组件。
 
+use crabmate_client_api::slash;
 use leptos::html::Textarea;
 use leptos::prelude::*;
 
@@ -47,14 +48,14 @@ fn web_builtin_slash_items(locale: Locale) -> Vec<SlashMenuItem> {
     vec![
         SlashMenuItem {
             kind: SlashItemKind::Builtin,
-            match_key: "help".to_string(),
+            match_key: slash::HELP.to_string(),
             insert: "/help".to_string(),
             label: "/help".to_string(),
             description: i18n::composer_slash_builtin_help(locale).to_string(),
         },
         SlashMenuItem {
             kind: SlashItemKind::Builtin,
-            match_key: "workspace".to_string(),
+            match_key: slash::WORKSPACE.to_string(),
             insert: "/workspace ".to_string(),
             label: "/workspace".to_string(),
             description: i18n::composer_slash_builtin_workspace(locale).to_string(),
@@ -68,7 +69,7 @@ fn web_builtin_slash_items(locale: Locale) -> Vec<SlashMenuItem> {
         },
         SlashMenuItem {
             kind: SlashItemKind::Builtin,
-            match_key: "model".to_string(),
+            match_key: slash::MODEL.to_string(),
             insert: "/model ".to_string(),
             label: "/model".to_string(),
             description: i18n::composer_slash_builtin_model(locale).to_string(),

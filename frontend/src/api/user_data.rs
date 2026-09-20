@@ -1,5 +1,6 @@
 //! `GET` / `PUT` / `POST` **`/user-data/*`**（本机用户数据目录，见 `docs/design/user_data_dir.md`）。
 
+use crabmate_client_api::paths;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use wasm_bindgen::JsCast;
@@ -207,21 +208,21 @@ async fn put_json_no_content(url: &str, body: &str, loc: Locale) -> Result<(), S
 }
 
 pub async fn fetch_user_data_prefs(loc: Locale) -> Result<UserPrefsDto, String> {
-    fetch_json("GET", "/user-data/prefs", loc).await
+    fetch_json("GET", paths::USER_DATA_PREFS, loc).await
 }
 
 pub async fn put_user_data_prefs(prefs: &UserPrefsDto, loc: Locale) -> Result<(), String> {
     let body = serde_json::to_string(prefs).map_err(|e| e.to_string())?;
-    put_json_no_content("/user-data/prefs", &body, loc).await
+    put_json_no_content(paths::USER_DATA_PREFS, &body, loc).await
 }
 
 pub async fn fetch_llm_overrides(loc: Locale) -> Result<LlmOverridesDto, String> {
-    fetch_json("GET", "/user-data/llm-overrides", loc).await
+    fetch_json("GET", paths::USER_DATA_LLM_OVERRIDES, loc).await
 }
 
 pub async fn put_llm_overrides(file: &LlmOverridesDto, loc: Locale) -> Result<(), String> {
     let body = serde_json::to_string(file).map_err(|e| e.to_string())?;
-    put_json_no_content("/user-data/llm-overrides", &body, loc).await
+    put_json_no_content(paths::USER_DATA_LLM_OVERRIDES, &body, loc).await
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -397,8 +398,7 @@ pub async fn put_mcp_server_remote_auth(
 pub async fn fetch_current_web_sessions(
     loc: Locale,
 ) -> Result<(Vec<ChatSession>, Option<String>), String> {
-    let dto: WebSessionsDto =
-        fetch_json("GET", "/user-data/workspaces/current/sessions", loc).await?;
+    let dto: WebSessionsDto = fetch_json("GET", paths::USER_DATA_WORKSPACE_SESSIONS, loc).await?;
     let sessions: Vec<ChatSession> = match dto.sessions {
         Value::Array(arr) => {
             let mut out = Vec::new();
@@ -425,7 +425,7 @@ pub async fn put_current_web_sessions(
         active_session_id: active_id.map(str::to_string),
     };
     let json = serde_json::to_string(&body).map_err(|e| e.to_string())?;
-    put_json_no_content("/user-data/workspaces/current/sessions", &json, loc).await
+    put_json_no_content(paths::USER_DATA_WORKSPACE_SESSIONS, &json, loc).await
 }
 
 /// 流结束边界的 best-effort 持久化；`keepalive` 允许页面立即刷新时继续发送小型会话快照。
@@ -440,6 +440,5 @@ pub async fn put_current_web_sessions_keepalive(
         active_session_id: active_id.map(str::to_string),
     };
     let json = serde_json::to_string(&body).map_err(|e| e.to_string())?;
-    put_json_no_content_with_keepalive("/user-data/workspaces/current/sessions", &json, loc, true)
-        .await
+    put_json_no_content_with_keepalive(paths::USER_DATA_WORKSPACE_SESSIONS, &json, loc, true).await
 }

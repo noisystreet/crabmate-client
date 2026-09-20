@@ -4,7 +4,8 @@
 use serde_json::json;
 
 use crabmate_client_api::{
-    parse_workspace_project_open_body, parse_workspace_set_ok_body, percent_encode_unreserved,
+    parse_workspace_project_open_body, parse_workspace_set_ok_body, paths,
+    percent_encode_unreserved,
 };
 
 use crate::client::ServeClient;
@@ -16,7 +17,7 @@ pub use crabmate_client_api::{
 
 /// 当前工作区根（`GET /workspace`）。
 pub async fn fetch_workspace(client: &ServeClient) -> Result<WorkspaceInfo, TermError> {
-    let info: WorkspaceInfo = client.get_json("/workspace").await?;
+    let info: WorkspaceInfo = client.get_json(paths::WORKSPACE).await?;
     if let Some(err) = info.error.as_deref().filter(|s| !s.is_empty()) {
         return Err(TermError::Message(err.to_string()));
     }
@@ -27,8 +28,8 @@ pub async fn fetch_workspace(client: &ServeClient) -> Result<WorkspaceInfo, Term
 #[must_use]
 pub fn workspace_dir_path(rel: Option<&str>) -> String {
     match rel.map(str::trim).filter(|s| !s.is_empty()) {
-        Some(r) => format!("/workspace?path={}", percent_encode_unreserved(r)),
-        None => "/workspace".to_string(),
+        Some(r) => format!("{}?path={}", paths::WORKSPACE, percent_encode_unreserved(r)),
+        None => paths::WORKSPACE.to_string(),
     }
 }
 
@@ -48,7 +49,7 @@ pub async fn fetch_workspace_dir(
 /// 切换工作区根（`POST /workspace`，body.path）。空串表示恢复 serve 默认。
 pub async fn set_workspace(client: &ServeClient, path: &str) -> Result<String, TermError> {
     let body = json!({ "path": path });
-    let val = client.post_json("/workspace", &body).await?;
+    let val = client.post_json(paths::WORKSPACE, &body).await?;
     parse_workspace_set_ok_body(&val).map_err(|e| TermError::Message(e.message))
 }
 
@@ -56,7 +57,7 @@ pub async fn set_workspace(client: &ServeClient, path: &str) -> Result<String, T
 pub async fn fetch_workspace_projects(
     client: &ServeClient,
 ) -> Result<WorkspaceProjectsData, TermError> {
-    client.get_json("/workspace/projects").await
+    client.get_json(paths::WORKSPACE_PROJECTS).await
 }
 
 /// `POST /workspace/projects`：切到项目池内已存在的项目（create=false）。
@@ -65,7 +66,7 @@ pub async fn switch_workspace_project(
     name: &str,
 ) -> Result<String, TermError> {
     let body = json!({ "name": name, "create": false });
-    let val = client.post_json("/workspace/projects", &body).await?;
+    let val = client.post_json(paths::WORKSPACE_PROJECTS, &body).await?;
     parse_workspace_project_open_body(&val).map_err(|e| TermError::Message(e.message))
 }
 

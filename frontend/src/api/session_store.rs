@@ -1,5 +1,6 @@
 //! Web 会话存储切换（`POST /config/session/conversation-store`）。
 
+use crabmate_client_api::{http_error_message, paths};
 use serde::Deserialize;
 use serde_json::Value;
 use wasm_bindgen::JsCast;
@@ -35,8 +36,9 @@ async fn session_store_post_json_value(body: &str, loc: Locale) -> Result<(u16, 
     let _ = h.set("Content-Type", "application/json");
     init.set_headers(&h);
     init.set_body(&JsValue::from_str(body));
-    let req = Request::new_with_str_and_init(&api_url("/config/session/conversation-store"), &init)
-        .map_err(|e| format!("request: {:?}", e))?;
+    let req =
+        Request::new_with_str_and_init(&api_url(paths::CONFIG_SESSION_CONVERSATION_STORE), &init)
+            .map_err(|e| format!("request: {:?}", e))?;
     let w = window().ok_or_else(|| crate::i18n::api_err_no_window(loc).to_string())?;
     let resp_val = JsFuture::from(w.fetch_with_request(&req))
         .await
@@ -51,18 +53,6 @@ async fn session_store_post_json_value(body: &str, loc: Locale) -> Result<(u16, 
     Ok((status, v))
 }
 
-fn session_store_error_message(v: &Value, status: u16) -> String {
-    v.get("message")
-        .and_then(|x| x.as_str())
-        .map(std::string::ToString::to_string)
-        .or_else(|| {
-            v.get("error")
-                .and_then(|x| x.as_str())
-                .map(std::string::ToString::to_string)
-        })
-        .unwrap_or_else(|| format!("HTTP {status}"))
-}
-
 pub async fn post_session_conversation_store(
     sqlite: bool,
     loc: Locale,
@@ -71,7 +61,7 @@ pub async fn post_session_conversation_store(
         .map_err(|e| e.to_string())?;
     let (status, v) = session_store_post_json_value(&body, loc).await?;
     if !(200..300).contains(&status) {
-        return Err(session_store_error_message(&v, status));
+        return Err(http_error_message(&v, status));
     }
     let r: SessionConversationStoreResponse =
         serde_json::from_value(v).map_err(|e| e.to_string())?;

@@ -4,6 +4,7 @@
 //! 非机密设置。**PUT 为全量 DTO**，调用方必须先 GET 再改自己管理的键后回写（合并保真），
 //! 避免覆盖 Desktop 独有的字段。
 
+use crabmate_client_api::paths;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -91,7 +92,7 @@ pub struct LlmOverridesDto {
 
 /// `GET /user-data/prefs`。
 pub async fn fetch_user_data_prefs(client: &ServeClient) -> Result<UserPrefsDto, TermError> {
-    client.get_json("/user-data/prefs").await
+    client.get_json(paths::USER_DATA_PREFS).await
 }
 
 /// `PUT /user-data/prefs`（全量 DTO；2xx 即成功，不解析响应体）。
@@ -101,7 +102,7 @@ pub async fn put_user_data_prefs(
 ) -> Result<(), TermError> {
     client
         .put_json_no_content(
-            "/user-data/prefs",
+            paths::USER_DATA_PREFS,
             &serde_json::to_value(prefs).map_err(|e| TermError::Message(e.to_string()))?,
         )
         .await
@@ -109,7 +110,7 @@ pub async fn put_user_data_prefs(
 
 /// `GET /user-data/llm-overrides`。
 pub async fn fetch_llm_overrides(client: &ServeClient) -> Result<LlmOverridesDto, TermError> {
-    client.get_json("/user-data/llm-overrides").await
+    client.get_json(paths::USER_DATA_LLM_OVERRIDES).await
 }
 
 /// `PUT /user-data/llm-overrides`（全量 DTO；2xx 即成功，不解析响应体）。
@@ -119,7 +120,7 @@ pub async fn put_llm_overrides(
 ) -> Result<(), TermError> {
     client
         .put_json_no_content(
-            "/user-data/llm-overrides",
+            paths::USER_DATA_LLM_OVERRIDES,
             &serde_json::to_value(overrides).map_err(|e| TermError::Message(e.to_string()))?,
         )
         .await

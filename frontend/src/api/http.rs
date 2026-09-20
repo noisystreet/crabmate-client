@@ -10,6 +10,7 @@ use crate::chat_upload_src::relative_auth_image_src;
 use crate::i18n::Locale;
 
 use crabmate::cm_api_contract::StatusShellView;
+use crabmate_client_api::{http_error_text, paths};
 
 use super::browser::{
     api_url, auth_headers, format_fetch_transport_error, prepare_api_auth, window,
@@ -101,8 +102,10 @@ pub struct WebUiConfig {
 
 pub async fn fetch_workspace(path: Option<&str>, loc: Locale) -> Result<WorkspaceData, String> {
     let url = match path {
-        Some(p) if !p.trim().is_empty() => format!("/workspace?path={}", urlencoding::encode(p)),
-        _ => "/workspace".to_string(),
+        Some(p) if !p.trim().is_empty() => {
+            format!("{}?path={}", paths::WORKSPACE, urlencoding::encode(p))
+        }
+        _ => paths::WORKSPACE.to_string(),
     };
     fetch_json("GET", &url, None, loc).await
 }
@@ -418,7 +421,7 @@ pub async fn fetch_tasks(loc: Locale) -> Result<TasksData, String> {
 }
 
 pub async fn fetch_status(loc: Locale) -> Result<StatusData, String> {
-    fetch_json("GET", "/status?view=shell", None, loc).await
+    fetch_json("GET", paths::STATUS_SHELL, None, loc).await
 }
 
 /// `GET /tools/jobs/{id}`：轮询后台任务状态（`run_command` 的 `async:true`）。
@@ -466,7 +469,7 @@ pub async fn post_chat_stream_cancel(job_id: u64, loc: Locale) -> Result<(), Str
         #[serde(default)]
         cancelled: bool,
     }
-    let url = format!("/chat/stream/{job_id}/cancel");
+    let url = paths::chat_stream_cancel(&job_id.to_string());
     let body: CancelBody = fetch_json_with_body("POST", &url, "{}", loc).await?;
     if body.cancelled {
         Ok(())
@@ -553,16 +556,10 @@ pub(crate) fn http_error_detail_from_body(body: &str) -> String {
         return String::new();
     }
     if let Ok(v) = serde_json::from_str::<Value>(trimmed) {
-        if let Some(msg) = v
-            .get("error")
-            .or_else(|| v.get("message"))
-            .and_then(|x| x.as_str())
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-        {
+        if let Some(msg) = http_error_text(&v) {
             let code = v.get("code").and_then(|x| x.as_str());
             let request_id = v.get("request_id").and_then(|x| x.as_str());
-            return format_api_error_detail(msg, code, request_id);
+            return format_api_error_detail(&msg, code, request_id);
         }
     }
     if trimmed.len() <= 240 {
@@ -791,7 +788,7 @@ pub async fn post_chat_branch(
     let _ = h.set("Content-Type", "application/json");
     init.set_headers(&h);
     init.set_body(&wasm_bindgen::JsValue::from_str(&body));
-    let req = Request::new_with_str_and_init(&api_url("/chat/branch"), &init)
+    let req = Request::new_with_str_and_init(&api_url(paths::CHAT_BRANCH), &init)
         .map_err(|e| ChatBranchError::Other(format!("req: {:?}", e)))?;
     let resp_val = JsFuture::from(w.fetch_with_request(&req))
         .await
@@ -823,7 +820,7 @@ pub async fn submit_chat_approval(
     let _ = h.set("Content-Type", "application/json");
     init.set_headers(&h);
     init.set_body(&wasm_bindgen::JsValue::from_str(&body));
-    let req = Request::new_with_str_and_init(&api_url("/chat/approval"), &init)
+    let req = Request::new_with_str_and_init(&api_url(paths::CHAT_APPROVAL), &init)
         .map_err(|e| format!("req: {:?}", e))?;
     let w = window().ok_or_else(|| crate::i18n::api_err_no_window(loc).to_string())?;
     let resp_val = JsFuture::from(w.fetch_with_request(&req))

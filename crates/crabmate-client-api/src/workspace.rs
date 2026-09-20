@@ -5,7 +5,7 @@
 //! `Debug`/`Default`，tui `UiState` / worker 事件枚举依赖），且 client 需要缺省容错
 //! （`entries`/`name`/`path`/`error` 有 default，缺键不炸）。契约对齐由
 //! `contract_roundtrip_*` 测试用契约类型钉住：契约字段改名/移位时测试即失败。
-//! `parse_workspace_*_body`（client 错误分类）与 `messages::workspace_http_error_message`
+//! `parse_workspace_*_body`（client 错误分类）与 `messages::http_error_message`
 //! （用户文案）不属于契约。
 
 use serde::Deserialize;
