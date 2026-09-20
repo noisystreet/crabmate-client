@@ -5,26 +5,54 @@
 
 use serde_json::Value;
 
-/// `POST /workspace*` HTTP 非 2xx：优先 body `error`，否则 `HTTP {status}`。
+/// 从 JSON 错误体提取结构化文本：优先 `error`，其次 `message`；trim 后非空才采用。
 #[must_use]
-pub fn workspace_http_error_message(val: &Value, status: u16) -> String {
-    val.get("error")
-        .and_then(|e| e.as_str())
-        .map(str::to_string)
-        .unwrap_or_else(|| format!("HTTP {status}"))
+pub fn http_error_text(val: &Value) -> Option<String> {
+    ["error", "message"].iter().find_map(|key| {
+        val.get(*key)
+            .and_then(|x| x.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+    })
+}
+
+/// HTTP 非 2xx JSON 错误体的通用用户文案：`error` → `message` → `HTTP {status}`。
+#[must_use]
+pub fn http_error_message(val: &Value, status: u16) -> String {
+    http_error_text(val).unwrap_or_else(|| format!("HTTP {status}"))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::workspace_http_error_message;
+    use super::{http_error_message, http_error_text};
     use serde_json::json;
 
     #[test]
-    fn http_error_prefers_body() {
+    fn http_error_prefers_error_over_message() {
         assert_eq!(
-            workspace_http_error_message(&json!({"error":"forbidden"}), 403),
+            http_error_message(&json!({"error": "forbidden"}), 403),
             "forbidden"
         );
-        assert_eq!(workspace_http_error_message(&json!({}), 502), "HTTP 502");
+        assert_eq!(
+            http_error_message(&json!({"error": "a", "message": "b"}), 403),
+            "a"
+        );
+    }
+
+    #[test]
+    fn http_error_falls_back_to_message_then_status() {
+        assert_eq!(http_error_message(&json!({"message": "m"}), 502), "m");
+        assert_eq!(http_error_message(&json!({}), 502), "HTTP 502");
+    }
+
+    #[test]
+    fn http_error_text_skips_blank_and_non_string() {
+        assert_eq!(http_error_text(&json!({"error": "  "})), None);
+        assert_eq!(
+            http_error_text(&json!({"error": "  ", "message": " x "})).as_deref(),
+            Some("x")
+        );
+        assert_eq!(http_error_text(&json!({"error": 1})), None);
     }
 }

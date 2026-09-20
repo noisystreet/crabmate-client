@@ -2,7 +2,7 @@
 
 use crabmate_client_api::auth::{HEADER_X_API_KEY, web_api_credential_pair};
 use crabmate_client_api::{
-    ApprovalDecision, ApprovalDecisionApi, ChatApprovalRequestBody, health_degraded_note,
+    ApprovalDecision, ApprovalDecisionApi, ChatApprovalRequestBody, health_degraded_note, paths,
 };
 use reqwest::Client;
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue};
@@ -67,7 +67,7 @@ impl ServeClient {
 
     /// `GET /health`：连通性探测。`degraded` 时在 stderr 打印失败检查摘要，仍视为成功。
     pub async fn probe_health(&self) -> Result<(), TermError> {
-        let url = self.url("/health")?;
+        let url = self.url(paths::HEALTH)?;
         let resp = self
             .http
             .get(&url)
@@ -94,7 +94,7 @@ impl ServeClient {
         approval_session_id: &str,
         decision: ApprovalDecision,
     ) -> Result<(), TermError> {
-        let url = self.url("/chat/approval")?;
+        let url = self.url(paths::CHAT_APPROVAL)?;
         let mut headers = self.auth_headers()?;
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
         let body = ChatApprovalRequestBody {
@@ -115,7 +115,7 @@ impl ServeClient {
     ///
     /// 任务已结束（410 `STREAM_JOB_GONE`）视为成功；其余失败留给调用方提示。
     pub async fn cancel_chat_stream(&self, job_id: u64) -> Result<(), TermError> {
-        let url = self.url(&format!("/chat/stream/{job_id}/cancel"))?;
+        let url = self.url(&paths::chat_stream_cancel(&job_id.to_string()))?;
         let mut headers = self.auth_headers()?;
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
         let resp = self

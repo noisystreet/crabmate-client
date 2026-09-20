@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use crabmate_client_api::slash;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
@@ -37,14 +38,14 @@ pub(super) fn is_web_control_slash(trimmed: &str) -> bool {
         .to_ascii_lowercase();
     matches!(
         head.as_str(),
-        "help"
-            | "?"
-            | "workspace"
-            | "cd"
+        slash::HELP
+            | slash::HELP_Q
+            | slash::WORKSPACE
+            | slash::CD
+            | slash::MODEL
             | "agent"
             | "export"
             | "config"
-            | "model"
             | "api-base"
             | "apibase"
             | "context"
@@ -84,7 +85,7 @@ pub(super) fn try_handle_web_control_slash(
     let args: Vec<&str> = parts.into_iter().skip(1).collect();
 
     match head.as_str() {
-        "help" | "?" => {
+        slash::HELP | slash::HELP_Q => {
             set_ok(
                 ctx.chat,
                 shell,
@@ -115,11 +116,11 @@ pub(super) fn try_handle_web_control_slash(
             ctx.draft.set(String::new());
             set_ok(ctx.chat, shell, "已清空当前会话消息。");
         }
-        "workspace" | "cd" => handle_workspace(&args, shell, ctx.chat, loc),
+        slash::WORKSPACE | slash::CD => handle_workspace(&args, shell, ctx.chat, loc),
         "agent" => handle_agent(&args, shell, ctx),
         "export" => handle_export(&args, shell, ctx, loc),
         "config" => handle_config(&args, shell, ctx.chat, loc),
-        "model" => handle_model(&args, shell, ctx.chat, loc),
+        slash::MODEL => handle_model(&args, shell, ctx.chat, loc),
         "api-base" | "apibase" => handle_api_base(&args, shell, ctx.chat, loc),
         "context" => handle_context(shell, ctx.chat, loc),
         "skills" => handle_skills(shell, ctx.chat, loc),

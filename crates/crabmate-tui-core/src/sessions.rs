@@ -5,6 +5,7 @@ use serde_json::Value;
 
 pub use crabmate_client_api::SessionListRow;
 
+use crabmate_client_api::paths;
 use crabmate_client_api::session_row_conversation_id_for_resume;
 
 use crate::client::ServeClient;
@@ -26,9 +27,7 @@ struct WebSessionsDto {
 
 /// 拉取当前工作区绑定的 Web 会话快照。
 pub async fn fetch_web_sessions(client: &ServeClient) -> Result<WebSessionsList, TermError> {
-    let dto: WebSessionsDto = client
-        .get_json("/user-data/workspaces/current/sessions")
-        .await?;
+    let dto: WebSessionsDto = client.get_json(paths::USER_DATA_WORKSPACE_SESSIONS).await?;
     Ok(WebSessionsList {
         sessions: SessionListRow::parse_rows(&dto.sessions),
         active_session_id: dto.active_session_id,

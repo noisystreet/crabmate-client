@@ -5,7 +5,7 @@ use std::io::{self, Write};
 use crabmate::cm_sse_protocol::{
     SSE_PROTOCOL_VERSION, is_sse_done_sentinel, join_sse_data_lines, parse_sse_event_id,
 };
-use crabmate_client_api::{ChatStreamCoreFields, build_chat_stream_core_body};
+use crabmate_client_api::{ChatStreamCoreFields, build_chat_stream_core_body, paths};
 use futures_util::StreamExt;
 use reqwest::Response;
 use reqwest::header::{ACCEPT, CONTENT_TYPE, HeaderValue};
@@ -262,7 +262,7 @@ async fn post_chat_stream(
     client: &ServeClient,
     opts: &ChatStreamOptions,
 ) -> Result<Response, TermError> {
-    let url = client.url("/chat/stream")?;
+    let url = client.url(paths::CHAT_STREAM)?;
     let body = chat_stream_body(opts);
     let mut headers = client.auth_headers()?;
     headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));

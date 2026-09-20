@@ -2,7 +2,7 @@ use wasm_bindgen_futures::JsFuture;
 use web_sys::{Request, RequestInit, RequestMode, Response};
 
 use crabmate::cm_sse_protocol::SSE_PROTOCOL_VERSION;
-use crabmate_client_api::{ChatStreamCoreFields, merge_chat_stream_core_fields};
+use crabmate_client_api::{ChatStreamCoreFields, merge_chat_stream_core_fields, paths};
 
 use crate::i18n::Locale;
 
@@ -116,7 +116,7 @@ pub(super) async fn build_chat_stream_fetch_request(
     }
     init.set_headers(&h);
     init.set_body(&wasm_bindgen::JsValue::from_str(body_json));
-    Request::new_with_str_and_init(&browser::api_url("/chat/stream"), &init)
+    Request::new_with_str_and_init(&browser::api_url(paths::CHAT_STREAM), &init)
         .map_err(|e| format!("req: {:?}", e))
 }
 

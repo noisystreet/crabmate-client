@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use crabmate_client_api::auth::{HEADER_X_API_KEY, web_api_credential_pair};
 use crabmate_client_api::health_degraded_note;
+use crabmate_client_api::paths;
 use url::Url;
 
 const PROBE_TIMEOUT: Duration = Duration::from_secs(8);
@@ -170,8 +171,8 @@ async fn probe_health(client: &reqwest::Client, base: &Url, bearer: &str) -> Res
     let health = base
         .join("health")
         .map_err(|e| format!("无法构造 /health: {e}"))?;
-    let health_resp = probe_get(client, health, bearer, "/health").await?;
-    map_auth_or_status(health_resp.status(), "/health")?;
+    let health_resp = probe_get(client, health, bearer, paths::HEALTH).await?;
+    map_auth_or_status(health_resp.status(), paths::HEALTH)?;
     maybe_log_health_degraded(health_resp).await;
     Ok(())
 }
@@ -180,8 +181,8 @@ async fn probe_prefs(client: &reqwest::Client, base: &Url, bearer: &str) -> Resu
     let prefs = base
         .join("user-data/prefs")
         .map_err(|e| format!("无法构造 /user-data/prefs: {e}"))?;
-    let prefs_resp = probe_get(client, prefs, bearer, "/user-data/prefs").await?;
-    map_auth_or_status(prefs_resp.status(), "/user-data/prefs")
+    let prefs_resp = probe_get(client, prefs, bearer, paths::USER_DATA_PREFS).await?;
+    map_auth_or_status(prefs_resp.status(), paths::USER_DATA_PREFS)
 }
 
 /// 先探 `/health`（可达性；`degraded` 时给出可读失败检查摘要但仍允许继续），

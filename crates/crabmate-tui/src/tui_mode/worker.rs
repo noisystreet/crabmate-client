@@ -8,6 +8,8 @@ use std::thread;
 
 use crossterm::event::{self, Event, KeyEvent};
 
+use crabmate_client_api::paths;
+
 use crabmate_tui_core::{
     ApprovalGate, AutoAllowOnce, ChatStreamOptions, ChatStreamOutcome, ServeClient, StreamCancel,
     StreamSink, TermError, WebSessionsList, WorkspaceDirData, WorkspaceProjectsData,
@@ -230,7 +232,7 @@ fn run_turn_job(
 
 async fn fetch_serve_defaults(client: &ServeClient) -> Result<ServeDefaults, String> {
     let v: serde_json::Value = client
-        .get_json("/status?view=shell")
+        .get_json(paths::STATUS_SHELL)
         .await
         .map_err(|e| e.to_string())?;
     Ok(ServeDefaults::from_status(&v))

@@ -3,6 +3,7 @@
 //! 拆到独立模块以压住 `mod.rs` 行数/CCN 门禁；`apply_control` 仍在事件循环层。
 
 use super::settings::SESSION_MODES;
+use crabmate_client_api::slash;
 
 /// 控制斜杠（本地处理，不发给模型）。`/` 开头的未知命令视为普通消息。
 pub enum Control {
@@ -74,15 +75,15 @@ pub fn parse_control(text: &str) -> Option<Control> {
     let head = head.to_ascii_lowercase();
     let arg_opt = (!arg.is_empty()).then_some(arg);
     match head.as_str() {
-        "quit" | "exit" | "q" => Some(Control::Quit),
-        "help" | "h" => Some(Control::Help),
-        "model" => Some(Control::Model(arg_opt)),
-        "mode" => Some(Control::Mode(arg_opt)),
-        "role" => Some(Control::Role(arg_opt)),
-        "status" => Some(Control::Status),
+        slash::QUIT | slash::QUIT_EXIT | slash::QUIT_Q => Some(Control::Quit),
+        slash::HELP | "h" => Some(Control::Help),
+        slash::MODEL => Some(Control::Model(arg_opt)),
+        slash::MODE => Some(Control::Mode(arg_opt)),
+        slash::ROLE => Some(Control::Role(arg_opt)),
+        slash::STATUS => Some(Control::Status),
         "settings" => Some(Control::Settings),
         "find" | "search" | "grep" => Some(Control::Find(arg_opt)),
-        "conv" => Some(match arg_opt {
+        slash::CONV => Some(match arg_opt {
             None => Control::ConvRefresh,
             Some(a) => match a.split_whitespace().next().unwrap_or("") {
                 "new" | "clear" => Control::ConvNew,

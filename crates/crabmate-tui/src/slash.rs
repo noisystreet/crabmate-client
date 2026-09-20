@@ -3,6 +3,7 @@
 use std::io::{self, Write};
 
 use anyhow::Result;
+use crabmate_client_api::{paths, slash};
 use crabmate_tui_core::{
     ServeClient, conversation_id_for_resume, fetch_web_sessions, fetch_workspace, set_workspace,
 };
@@ -16,17 +17,17 @@ pub fn is_control_slash(trimmed: &str) -> bool {
     };
     matches!(
         head.as_str(),
-        "help"
-            | "?"
-            | "workspace"
-            | "cd"
-            | "conv"
-            | "status"
-            | "mode"
-            | "role"
-            | "quit"
-            | "exit"
-            | "q"
+        slash::HELP
+            | slash::HELP_Q
+            | slash::WORKSPACE
+            | slash::CD
+            | slash::CONV
+            | slash::STATUS
+            | slash::MODE
+            | slash::ROLE
+            | slash::QUIT
+            | slash::QUIT_EXIT
+            | slash::QUIT_Q
     )
 }
 
@@ -40,20 +41,20 @@ pub async fn handle_control_slash(
     let head = slash_head(line).unwrap_or_default();
     let args: Vec<&str> = parts.into_iter().skip(1).collect();
     match head.as_str() {
-        "quit" | "exit" | "q" => Ok(false),
-        "help" | "?" => {
+        slash::QUIT | slash::QUIT_EXIT | slash::QUIT_Q => Ok(false),
+        slash::HELP | slash::HELP_Q => {
             print_help();
             Ok(true)
         }
-        "status" => {
+        slash::STATUS => {
             handle_status(client).await?;
             Ok(true)
         }
-        "workspace" | "cd" => {
+        slash::WORKSPACE | slash::CD => {
             handle_workspace(client, &args, conversation_id).await?;
             Ok(true)
         }
-        "conv" => {
+        slash::CONV => {
             handle_conv(client, &args, conversation_id).await?;
             Ok(true)
         }
@@ -66,7 +67,7 @@ pub async fn handle_control_slash(
 
 /// `GET /status?view=shell`：打印 serve 当前模型 / 端点 / 会话模式等。
 async fn handle_status(client: &ServeClient) -> Result<()> {
-    let v: Value = client.get_json("/status?view=shell").await?;
+    let v: Value = client.get_json(paths::STATUS_SHELL).await?;
     let str_field = |k: &str| {
         v.get(k)
             .and_then(Value::as_str)

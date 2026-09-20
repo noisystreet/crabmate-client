@@ -1,6 +1,6 @@
 # 多端 Client 共用逻辑抽取（规划）
 
-> **状态**：S1–S4 **已落地**；hash 交接键名已上收；**S5 health JSON 子集已落地**；斜杠名字表仍可选未开工  
+> **状态**：S1–S4 **已落地**；hash 交接键名、S5 health JSON 子集、**斜杠名字表**、**端点路径常量（`paths`）**、**通用 HTTP 错误文案（`messages`）** 均已落地  
 > **范围**：`frontend`（WASM）、`crabmate-connect`（Desktop/Android 壳）、`crabmate-tui` / `crabmate-tui-core`（远程终端）之间的重复逻辑  
 > **关联**：[remote_cli_tui.md](./remote_cli_tui.md)、[tauri_gui_mvp_design.md](./tauri_gui_mvp_design.md)、[contract_pin.md](./contract_pin.md)、产品面对照 [client_capability_matrix.md](./client_capability_matrix.md)；Server [`client_shell_split.md`](https://github.com/noisystreet/CrabMate/blob/main/docs/design/client_shell_split.md)
 
@@ -76,6 +76,9 @@ frontend/                # wasm fetch 适配器 + UI；S1–S4 已用 client-api
 | `secrets` | `LlmSecretSlot` / Bearer 账户等**名字常量**（无 IO） |
 | `handoff` | `#cm_api_base=` / `#cm_web_api_bearer=` 键名、RFC3986 分量编码、fragment 拼装（无 `history` / 无查询串） |
 | `health` | `/health` degraded 检查摘要（不含壳 CORS） |
+| `paths` | 跨端共用的端点路径常量与动态段构造器（≥2 端实际共用才收） |
+| `slash` | 跨端共用的斜杠控制命令名字表（handler 分端） |
+| `messages` | HTTP 错误体通用取错（`error` → `message` → `HTTP {status}`），display 层不属契约 |
 
 ---
 
@@ -131,14 +134,14 @@ GitHub：`X-CrabMate-GitHub-Token` 目前主要在 frontend（+ 壳钥匙串槽�
 
 共享核心字段；图像 / resume / `client_llm` 注入 / 温度等仍留 WASM。
 
-### 4.6 斜杠（低优先级）
+### 4.6 斜杠名字表（已落地）
 
 | 端 | 路径 |
 |----|------|
-| tui | `crates/crabmate-tui/src/slash.rs` |
-| frontend | `frontend/src/app/chat/composer_slash_control.rs` |
+| tui | `crates/crabmate-tui/src/slash.rs`、`tui_mode/controls.rs` |
+| frontend | `frontend/src/app/chat/composer_slash_control.rs`、`composer_slash_menu.rs` |
 
-最多共享控制命令**名字表**（`help` / `workspace` / `cd`…）；handler 分端。
+共享：`crabmate_client_api::slash` 常量（`help` / `?` / `workspace` / `cd` / `model` / `conv` / `status` / `mode` / `role` / `quit` / `exit` / `q`）——只收 **≥2 端共用**的命令 head；handler 分端。单端命令（web 的 `agent` / `export` / `config` / `api-base` / `clear` / `api-key` / `skills` 等，tui-mode 的 `settings` / `find`）与 handler 一起留端，避免「拦截了但没 handler」的超集误伤。
 
 ### 4.7 Health 探测子集（已落地）
 
@@ -159,6 +162,16 @@ GitHub：`X-CrabMate-GitHub-Token` 目前主要在 frontend（+ 壳钥匙串槽�
 | Playwright | `e2e/fixtures/helpers.ts`（TS 不能依赖 crate；字面量须与常量一致） |
 
 共享：`API_BASE_HASH_KEY` / `BEARER_HASH_KEY`、`percent_encode_unreserved`、`handoff_hash_fragment`。`history.replaceState`、hash 解析解码仍留 WASM（`urlencoding`）。
+
+### 4.9 端点路径常量（已落地）
+
+共享：`crabmate_client_api::paths`——只收 **≥2 端实际共用**的端点（`/health`、`/status?view=shell`、`/upload`、`/chat/stream`、`/chat/approval`、`/chat/branch`、`/workspace*`、`/user-data/{prefs,llm-overrides,workspaces/current/sessions}`、`/config/session/conversation-store`）；动态段用构造器（如 `chat_stream_cancel(job_id)`）。消费方：frontend `api/*`、tui-core `client.rs` / `sessions.rs` / `user_data.rs` / `workspace.rs` / `chat_stream.rs`、connect `probe.rs`、tui。单端端点（workspace `file*`、mcp-servers 等）与 `/uploads/` 静态资产不收，仍留各端字面量。
+
+### 4.10 通用 HTTP 错误文案（已落地）
+
+共享：`messages::http_error_text`（body `error` → `message`，trim 后非空才采用）+ `messages::http_error_message`（→ `HTTP {status}` 兜底）。消费方：frontend `http.rs`（`http_error_detail_from_body`）、`http_workspace_clone.rs`、`http_workspace_projects.rs`、`session_store.rs`（原 message 优先统一为 error 优先）。
+
+留端（display 层差异）：code + `request_id` 拼装与 240 字符截断（frontend `http.rs`）、clone 的 `{code}: … (HTTP {status})` 包装、i18n 前缀与 401/403 特判文案（connect `probe.rs`、frontend `user_data.rs`）、tui-core `error.rs` 的类型化 `thiserror` Display。`http_error_status_code` 的括号反解状态码模式暂保留（消除需错误携带结构化 status，改动面大，另行处理）。
 
 ---
 
@@ -188,9 +201,10 @@ GitHub：`X-CrabMate-GitHub-Token` 目前主要在 frontend（+ 壳钥匙串槽�
 | **S4** ✅ | `chat_body` 核心字段 builder | `client_sse_protocol` 钉点不易漏 |
 | **S5a** ✅ | hash 交接键名 + fragment 拼装；connect / frontend / `crabmate-web` 改依赖 | 键名与 `%2F` 编码单测对齐 |
 | **S5 health** ✅ | `health_degraded_note`；connect / tui-core 改依赖 | degraded JSON 单测；CORS 仍留 connect |
-| **S5 slash**（可选） | 斜杠名字表；frontend 其余纯逻辑继续上收 | WASM 体积与编译时间可接受 |
+| **S5 slash** ✅ | 斜杠名字表（`slash` 常量；单端命令与 handler 留端） | tui / web 控制命令匹配一致；WASM 体积与编译时间可接受 |
+| **S5 paths/messages** ✅ | 端点路径常量（`paths`）+ 通用 HTTP 取错（`messages`） | 40 处路径替换零字面量漂移；错误文案取值顺序统一 error 优先 |
 
-**建议开工顺序**：S0 → S1–S4（已完成）→ S5a / S5 health（已完成）→ 可选斜杠名字表。
+**建议开工顺序**：S0 → S1–S4 → S5a / S5 health → S5 slash / paths / messages（均已完成）。
 
 ---
 
@@ -212,7 +226,7 @@ GitHub：`X-CrabMate-GitHub-Token` 目前主要在 frontend（+ 壳钥匙串槽�
 | 共享形态 | 新建 **`crabmate-client-api`**（纯逻辑），不是扩大 `connect` 或 `tui-core` |
 | 依赖 | frontend / tui-core / connect / `crabmate-web` → client-api |
 | IO | 仍分端：`fetch` vs `reqwest` vs keyring |
-| 下一步 | 可选斜杠名字表，或功能并行 |
+| 下一步 | 功能并行；剩余单端逻辑不强行上收 |
 
 ---
 
