@@ -11,7 +11,7 @@ CONNECT_DIR := $(ROOT)/crates/crabmate-connect
 CLIENT_API_DIR := $(ROOT)/crates/crabmate-client-api
 TOOL_CARD_DIR := $(ROOT)/crates/crabmate-tool-card
 TUI_DIR := $(ROOT)/crates/crabmate-tui
-WEB_HOST_DIR := $(ROOT)/crates/crabmate-web-host
+WEB_HOST_DIR := $(ROOT)/web-host
 FRONTEND_DIR := $(ROOT)/frontend
 CARGO ?= cargo
 # 全仓 Rust 包单一列表（fmt/clippy/clean 与 scripts/check.sh、check-boundaries.sh 共用；新增包只改该文件）

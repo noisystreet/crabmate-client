@@ -17,4 +17,4 @@ path = "src/main.rs"
 [dependencies]
 anyhow = "1"
 clap = { version = "4", features = ["derive", "env"] }
-crabmate-client-api = { path = "../crabmate-client-api" }
+crabmate-client-api = { path = "../crates/crabmate-client-api" }

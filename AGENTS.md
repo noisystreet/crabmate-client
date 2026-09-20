@@ -15,9 +15,9 @@
 ├── crates/crabmate-tool-card/  # tool-card compact/detail (W2: in-repo path; not git-pinned to Server)
 ├── crates/crabmate-connect/
 ├── crates/crabmate-tui/        # binary crabmate-tui (remote terminal HTTP/SSE serve client in src/serve)
-├── crates/crabmate-web-host/   # binary crabmate-web (loopback static UI host)
 ├── desktop-tauri/
 ├── mobile-tauri/
+├── web-host/                # binary crabmate-web (loopback static UI host)
 ├── frontend/                # Business UI; contract crates.io crabmate 0.5.2 + protocol
 ├── e2e/                     # Playwright (browser UI)
 ├── scripts/                 # sync-connect, victauri-e2e, e2e-playwright, check.sh, check-boundaries.sh, set-version.sh; rust-pkg-dirs.txt = package list single source

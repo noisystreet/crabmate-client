@@ -8,5 +8,5 @@ crates/crabmate-client-api
 crates/crabmate-tool-card
 crates/crabmate-connect
 crates/crabmate-tui
-crates/crabmate-web-host
+web-host
 frontend

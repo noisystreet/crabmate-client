@@ -31,9 +31,9 @@ Connects to a compatible **`crabmate serve`** (local or remote). Does **not** sp
 ├── crates/crabmate-tool-card/  # Tool-card compact/detail (in-repo path after W2; not git-pinned to Server)
 ├── crates/crabmate-connect/   # Connect-page logic (path dep in this repo; do not path back to Server)
 ├── crates/crabmate-tui/       # Binary crabmate-tui (chat / repl / full-screen tui; HTTP/SSE serve client in src/serve)
-├── crates/crabmate-web-host/  # Binary crabmate-web (loopback static UI host)
 ├── desktop-tauri/             # Desktop Linux (Tauri 2)
 ├── mobile-tauri/              # Android (Tauri 2)
+├── web-host/                  # Binary crabmate-web (loopback static UI host)
 ├── frontend/                  # Business UI (Leptos CSR + WASM; contracts via crates.io crabmate)
 ├── e2e/                       # Playwright (browser UI; mock SSE in CI)
 ├── scripts/                   # check / connect sync / Victauri / Playwright
@@ -192,10 +192,10 @@ crabmate serve --host 127.0.0.1 --port 8080
 
 # Terminal B — this repo
 make web-release
-sudo dpkg -i crates/crabmate-web-host/target/debian/crabmate-web_*.deb
+sudo dpkg -i web-host/target/debian/crabmate-web_*.deb
 crabmate-web --api-base http://127.0.0.1:8080
 # or without installing:
-#   cargo run --release --manifest-path crates/crabmate-web-host/Cargo.toml -- --root frontend/dist --api-base http://127.0.0.1:8080
+#   cargo run --release --manifest-path web-host/Cargo.toml -- --root frontend/dist --api-base http://127.0.0.1:8080
 ```
 
 Default listen is `127.0.0.1:4173`. `--no-open` skips `xdg-open`. Bearer: `--bearer` / `CM_WEB_API_BEARER_TOKEN` (plain browser stores it in `localStorage`). The `.deb` adds a **CrabMate Web** menu entry using the same icon as Desktop. A second launch on the same port reopens the browser instead of failing.

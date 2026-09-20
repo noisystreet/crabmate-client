@@ -3,7 +3,7 @@
 # CI 打包门禁可设 CM_WEB_SKIP_FRONTEND=1，跳过 trunk，只用已有/stub 的 frontend/dist。
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-HOST_DIR="${ROOT}/crates/crabmate-web-host"
+HOST_DIR="${ROOT}/web-host"
 
 if [[ "${CM_WEB_SKIP_FRONTEND:-0}" == "1" ]]; then
   echo "skipping trunk (CM_WEB_SKIP_FRONTEND=1)" >&2
