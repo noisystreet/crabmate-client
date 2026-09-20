@@ -49,7 +49,7 @@ frontend & tui (serve/) ──┴── crabmate（protocol feature；crates.io 
 
 **2026-09**：`crabmate-tui-core` 已整体并入 `crabmate-tui`（`crates/crabmate-tui/src/serve/`，模块名 `serve`；依赖与 `Cargo.lock` 同步吸收）；下文 §1/§3/§6/§8 为历史规划叙述保留原文，涉及 tui-core 的现状路径均按 `serve/` 新位置理解。
 
-**2026-09**：Markdown 渲染前的文本规范化（原 `frontend/src/markdown.rs::normalize_markdown_for_render` 及全部 CJK/围栏/标题/列表补丁）下沉为 `crabmate-client-api::markdown_normalize`（纯逻辑、零新依赖），`frontend` 改为消费共享实现（行为不变）；TUI 后续轻渲染直接复用同一入口。
+**2026-09**：Markdown 渲染前的文本规范化（原 `frontend/src/markdown.rs::normalize_markdown_for_render` 及全部 CJK/围栏/标题/列表补丁）下沉为 `crabmate-client-api::markdown_normalize`（纯逻辑、零新依赖），`frontend` 改为消费共享实现（行为不变）；TUI `tui_mode/md.rs::assistant_styled_text` 已接入同一入口（先 normalize 再逐行轻渲染，渲染文本与 normalize 输出逐字一致）。
 
 ---
 

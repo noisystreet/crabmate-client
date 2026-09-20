@@ -1,14 +1,16 @@
 //! 助手正文的**行内 Markdown 轻渲染**辅助（ratatui span 层，无 transcript 状态）。
 //!
-//! token 由共享 [`crabmate_client_api::markdown_inline`] 提供；这里把 token 映射成
-//! 样式并折成按显示宽度的物理行。搜索高亮叠加规则也在此统一（锚定整行反色、
+//! 文本先经共享 [`crabmate_client_api::normalize_markdown_for_render`] 规范化（与
+//! desktop/web 同一入口，修粘连围栏 / 标题与列表缺空格等），再由共享
+//! [`crabmate_client_api::markdown_inline`] 提供 token；这里把 token 映射成样式并
+//! 折成按显示宽度的物理行。搜索高亮叠加规则也在此统一（锚定整行反色、
 //! 命中改黄前景且保留修饰位），保证与普通行的高亮观感一致。
 
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Span;
 use unicode_width::UnicodeWidthChar;
 
-use crabmate_client_api::{InlineSpan, parse_inline_markdown};
+use crabmate_client_api::{InlineSpan, normalize_markdown_for_render, parse_inline_markdown};
 
 /// 行内 markdown 片段 → 渲染样式（前景仅在需要区分时给出，其余随基色）。
 pub(crate) fn md_span_style(span: &InlineSpan) -> Style {
@@ -211,9 +213,11 @@ fn styled_part_chars(part: &str) -> Vec<(Style, char)> {
 }
 
 /// 整段助手文本 → 带样式的字符流（段间补 `\n` 作强制断行，标记不跨段解析）。
-/// 处于 `` ``` `` / `~~~` 围栏内的行整行按纯文本，避免代码内容里的 `**`/反引号/
-/// `[t](u)` 等被误当成行内样式而吞字符。
+/// 先过共享 [`crabmate_client_api::normalize_markdown_for_render`]（与 desktop/web
+/// 同一入口），再逐行渲染；处于 `` ``` `` / `~~~` 围栏内的行整行按纯文本，
+/// 避免代码内容里的 `**`/反引号/`[t](u)` 等被误当成行内样式而吞字符。
 pub(crate) fn assistant_styled_text(text: &str) -> Vec<(Style, char)> {
+    let text = normalize_markdown_for_render(text);
     let mut out = Vec::new();
     let mut first = true;
     let mut in_fence = false;
@@ -323,200 +327,11 @@ pub(crate) fn styled_row_spans(
     spans
 }
 
+// 测试拆到独立文件：避免 lizard 函数体合并跨度超 fn-nloc 门禁（同 render / settings_panel 惯例）。
 #[cfg(test)]
-mod tests {
-    use super::*;
+#[path = "md_tests.rs"]
+mod tests;
 
-    #[test]
-    fn bold_code_and_link_get_expected_styles() {
-        let chars = inline_styled_chars("a **b** `c` [d](https://e)");
-        assert!(
-            chars
-                .iter()
-                .any(|(s, ch)| { s.add_modifier.contains(Modifier::BOLD) && *ch == 'b' })
-        );
-        assert!(
-            chars
-                .iter()
-                .any(|(s, ch)| s.fg == Some(Color::Cyan) && *ch == 'c')
-        );
-        assert!(
-            chars
-                .iter()
-                .any(|(s, ch)| { s.add_modifier.contains(Modifier::UNDERLINED) && *ch == 'd' })
-        );
-        assert!(!chars.iter().any(|(_, ch)| *ch == 'h' || *ch == 't'));
-    }
-
-    #[test]
-    fn unterminated_marker_has_no_bold() {
-        let chars = inline_styled_chars("尾 **未闭合");
-        assert!(
-            chars
-                .iter()
-                .all(|(s, _)| !s.add_modifier.contains(Modifier::BOLD))
-        );
-        let rows = wrap_styled_chars(&chars, 200);
-        let spans = styled_row_spans(&rows[0], Style::new(), false, false);
-        let joined: String = spans.iter().map(|s| s.content.as_ref()).collect();
-        assert!(joined.contains("**未闭合"));
-    }
-
-    #[test]
-    fn matched_highlight_keeps_bold_but_turns_yellow() {
-        let chars = inline_styled_chars("a **b** c");
-        let rows = wrap_styled_chars(&chars, 200);
-        let spans = styled_row_spans(&rows[0], Style::new().fg(Color::LightGreen), true, false);
-        assert!(spans.iter().any(|s| s.style.fg == Some(Color::Yellow)
-            && s.style.add_modifier.contains(Modifier::BOLD)
-            && s.to_string().contains('b')));
-    }
-
-    #[test]
-    fn anchor_row_overrides_whole_row() {
-        let chars = inline_styled_chars("**b**");
-        let rows = wrap_styled_chars(&chars, 200);
-        let spans = styled_row_spans(&rows[0], Style::new(), false, true);
-        assert!(
-            spans
-                .iter()
-                .all(|s| s.style.bg == Some(Color::Yellow) && s.style.fg == Some(Color::Black))
-        );
-    }
-
-    #[test]
-    fn code_fence_content_is_plain_and_literal() {
-        let text = "前 **A**\n```\nls *.rs **x** `t`\n```\n后 **B**";
-        let chars = assistant_styled_text(text);
-        let styled = |c: char| {
-            chars
-                .iter()
-                .filter(|(_, ch)| *ch == c)
-                .any(|(s, _)| !s.add_modifier.is_empty() || s.fg.is_some())
-        };
-        // 围栏外强调生效
-        assert!(styled('A'));
-        assert!(styled('B'));
-        // 围栏内整行纯文本：星号/反引号原样保留、无样式
-        assert!(!styled('x'));
-        assert!(!styled('`'));
-        assert!(!styled('*'));
-        let joined: String = chars.iter().map(|(_, ch)| *ch).collect();
-        assert!(joined.contains("ls *.rs **x** `t`"), "got {joined:?}");
-    }
-
-    #[test]
-    fn wrap_splits_wide_chars() {
-        let rows = wrap_physical("你好世界abc", 5);
-        assert_eq!(rows, vec!["你好", "世界a", "bc"]);
-        assert_eq!(wrap_physical("你好世界", 4), vec!["你好", "世界"]);
-    }
-
-    #[test]
-    fn wrap_handles_newline() {
-        let rows = wrap_physical("a\nbcd", 10);
-        assert_eq!(rows, vec!["a", "bcd"]);
-    }
-
-    #[test]
-    fn wrap_drops_control_chars() {
-        let rows = wrap_physical("a\u{1b}[31mb", 10);
-        assert_eq!(rows, vec!["a[31mb"]);
-        assert!(!rows[0].contains('\u{1b}'));
-    }
-
-    fn has_gray(chars: &[(Style, char)], c: char) -> bool {
-        chars
-            .iter()
-            .any(|(s, ch)| *ch == c && s.fg == Some(Color::Gray))
-    }
-
-    fn has_bold(chars: &[(Style, char)], c: char) -> bool {
-        chars
-            .iter()
-            .any(|(s, ch)| *ch == c && s.add_modifier.contains(Modifier::BOLD))
-    }
-
-    #[test]
-    fn heading_is_bold_and_marker_gray() {
-        let chars = assistant_styled_text("# 标题");
-        assert!(has_gray(&chars, '#'));
-        assert!(has_bold(&chars, '标'));
-        assert!(has_bold(&chars, '题'));
-    }
-
-    #[test]
-    fn list_and_quote_markers_are_gray_content_plain() {
-        let ul = assistant_styled_text("- 项目");
-        assert!(has_gray(&ul, '-'));
-        assert!(!has_bold(&ul, '项'));
-        let ol = assistant_styled_text("1. 有序");
-        assert!(has_gray(&ol, '1'));
-        assert!(has_gray(&ol, '.'));
-        let quote = assistant_styled_text("> 引用");
-        assert!(has_gray(&quote, '>'));
-        // 完整文本原样保留（标记字符仍在、未被样式吞掉）
-        let joined: String = quote.iter().map(|(_, ch)| *ch).collect();
-        assert_eq!(joined, "> 引用");
-    }
-
-    #[test]
-    fn heading_keeps_inline_code_and_no_marker_loss() {
-        let chars = assistant_styled_text("# 看 `x` 用");
-        assert!(chars.iter().any(|(s, ch)| {
-            *ch == 'x' && s.fg == Some(Color::Cyan) && s.add_modifier.contains(Modifier::BOLD)
-        }));
-        let joined: String = chars.iter().map(|(_, ch)| *ch).collect();
-        assert_eq!(joined, "# 看 x 用");
-    }
-
-    #[test]
-    fn spaced_asterisks_mid_line_not_treated_as_list() {
-        let chars = assistant_styled_text("a * b * c");
-        let joined: String = chars.iter().map(|(_, ch)| *ch).collect();
-        assert_eq!(joined, "a * b * c");
-        assert!(!has_bold(&chars, 'b') && !chars.iter().any(|(s, _)| s.fg == Some(Color::Gray)));
-    }
-
-    #[test]
-    fn glued_markers_match_desktop_normalize_semantics() {
-        // `###规范` / `-规范` / `1.下一步` / `>正文`：与共享 normalize 补空格后的效果一致
-        let h = assistant_styled_text("###规范");
-        assert!(has_gray(&h, '#'));
-        assert!(has_bold(&h, '规'));
-        let ul = assistant_styled_text("-规范");
-        assert!(has_gray(&ul, '-'));
-        let ol = assistant_styled_text("1.下一步");
-        assert!(has_gray(&ol, '1'));
-        assert!(has_gray(&ol, '.'));
-        let q = assistant_styled_text(">正文");
-        assert!(has_gray(&q, '>'));
-        // 文本逐字保留（不增删字符）
-        for input in ["###规范", "-规范", "1.下一步", ">正文"] {
-            let chars = assistant_styled_text(input);
-            let joined: String = chars.iter().map(|(_, ch)| *ch).collect();
-            assert_eq!(joined, input, "原文应逐字保留: {input}");
-        }
-    }
-
-    #[test]
-    fn ascii_flags_and_asterisk_emphasis_stay_untouched() {
-        // normalize 对 ASCII 粘连不补空格：`-rf` 不是列表
-        let rf = assistant_styled_text("-rf");
-        assert!(!rf.iter().any(|(s, _)| s.fg == Some(Color::Gray)));
-        // 行首 `*强调*` 走斜体而非列表
-        let em = assistant_styled_text("*强调*");
-        assert!(
-            em.iter()
-                .any(|(s, ch)| *ch == '强' && s.add_modifier.contains(Modifier::ITALIC))
-        );
-        assert!(!em.iter().any(|(s, _)| s.fg == Some(Color::Gray)));
-    }
-
-    #[test]
-    fn heading_tab_separator_accepted() {
-        let chars = assistant_styled_text("#\t标题");
-        assert!(has_gray(&chars, '#'));
-        assert!(has_bold(&chars, '标'));
-    }
-}
+#[cfg(test)]
+#[path = "md_marker_tests.rs"]
+mod tests_marker;
