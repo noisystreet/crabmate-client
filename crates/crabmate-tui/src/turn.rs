@@ -2,11 +2,11 @@
 
 use std::io;
 
-use anyhow::Result;
-use crabmate_tui_core::{
+use crate::serve::{
     ApprovalGate, ChatStreamArgs, ChatStreamOutcome, ClientLlm, ServeClient, StreamResume,
     new_approval_session_id, run_chat_stream,
 };
+use anyhow::Result;
 
 /// 每轮附加配置：`client_llm` 覆盖 + agent role + 会话模式（由调用方从持久状态派生）。
 #[derive(Debug, Clone, Copy)]

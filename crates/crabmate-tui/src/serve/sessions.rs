@@ -8,8 +8,8 @@ pub use crabmate_client_api::SessionListRow;
 use crabmate_client_api::paths;
 use crabmate_client_api::session_row_conversation_id_for_resume;
 
-use crate::client::ServeClient;
-use crate::error::TermError;
+use crate::serve::client::ServeClient;
+use crate::serve::error::TermError;
 
 #[derive(Debug, Clone)]
 pub struct WebSessionsList {

@@ -5,7 +5,7 @@
 //! user-data ＞ serve 默认"的生效值合成、以及"先 GET 再改自己管理的键再全量 PUT"
 //! 所需的 DTO 合并函数。UI 状态机见 [`super::settings_panel`]。
 
-use crabmate_tui_core::{ClientLlmFields, LlmOverridesDto, UserPrefsDto};
+use crate::serve::{ClientLlmFields, LlmOverridesDto, UserPrefsDto};
 
 /// 会话模式枚举的合法取值（与 `/mode` 斜杠一致；面板枚举与校验共用，避免漂移）。
 pub const SESSION_MODES: [&str; 3] = ["ask", "plan", "act"];

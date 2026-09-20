@@ -8,9 +8,9 @@ use reqwest::Client;
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue};
 use serde::Deserialize;
 
-use crate::config::ConnectionConfig;
-use crate::error::TermError;
-use crate::url::api_url;
+use crate::serve::config::ConnectionConfig;
+use crate::serve::error::TermError;
+use crate::serve::url::api_url;
 
 /// `POST /chat/stream/{job_id}/cancel` 的响应体。
 #[derive(Deserialize)]

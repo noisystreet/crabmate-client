@@ -10,7 +10,7 @@ use crossterm::event::{self, Event, KeyEvent};
 
 use crabmate_client_api::paths;
 
-use crabmate_tui_core::{
+use crate::serve::{
     ApprovalGate, AutoAllowOnce, ChatStreamOptions, ChatStreamOutcome, ServeClient, StreamCancel,
     StreamSink, TermError, WebSessionsList, WorkspaceDirData, WorkspaceProjectsData,
     fetch_llm_overrides, fetch_user_data_prefs, fetch_web_sessions, fetch_workspace,

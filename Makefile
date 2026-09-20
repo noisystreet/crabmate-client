@@ -10,7 +10,6 @@ MOBILE_TAURI_DIR := $(MOBILE_ROOT)/src-tauri
 CONNECT_DIR := $(ROOT)/crates/crabmate-connect
 CLIENT_API_DIR := $(ROOT)/crates/crabmate-client-api
 TOOL_CARD_DIR := $(ROOT)/crates/crabmate-tool-card
-TUI_CORE_DIR := $(ROOT)/crates/crabmate-tui-core
 TUI_DIR := $(ROOT)/crates/crabmate-tui
 WEB_HOST_DIR := $(ROOT)/crates/crabmate-web-host
 FRONTEND_DIR := $(ROOT)/frontend
@@ -66,7 +65,7 @@ help:
 	@echo "  make frontend-clippy     frontend clippy -D warnings"
 	@echo "  make test-frontend       frontend：wasm check + lib 单测（与 Tauri 分开）"
 	@echo "  make test-tauri          connect + desktop unit tests (--bins) + mobile check（不含 Victauri E2E）"
-	@echo "  make test-tui            crabmate-tui-core + crabmate-tui 测试"
+	@echo "  make test-tui            crabmate-tui 测试"
 	@echo "  make test-web-host       crabmate-web 回环静态服务单测"
 	@echo "  make test-tool-card      crabmate-tool-card 金样（独立 workspace）"
 	@echo "  make test                test-frontend 然后 test-tauri 然后 test-tui 然后 test-web-host 然后 test-tool-card"
@@ -198,7 +197,6 @@ test-tauri:
 	cd "$(MOBILE_TAURI_DIR)" && $(CARGO) check --tests
 
 test-tui:
-	cd "$(TUI_CORE_DIR)" && $(CARGO) test -- --nocapture
 	cd "$(TUI_DIR)" && $(CARGO) check
 
 test-web-host:
@@ -266,7 +264,6 @@ clean-tool-card:
 	$(CARGO) clean --manifest-path "$(TOOL_CARD_DIR)/Cargo.toml"
 
 clean-tui:
-	$(CARGO) clean --manifest-path "$(TUI_CORE_DIR)/Cargo.toml"
 	$(CARGO) clean --manifest-path "$(TUI_DIR)/Cargo.toml"
 
 clean-web-host:

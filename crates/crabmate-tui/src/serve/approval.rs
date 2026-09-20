@@ -2,9 +2,9 @@
 
 use crabmate_client_api::approval_session_id_is_valid;
 
-use crate::error::TermError;
+use crate::serve::error::TermError;
 
-pub use crabmate_client_api::{ApprovalDecision, ApprovalDecisionApi, CommandApprovalData};
+pub use crabmate_client_api::{ApprovalDecision, CommandApprovalData};
 
 /// 同步审批闸门：在 SSE 消费循环中调用（服务端会阻塞等待 `POST /chat/approval`）。
 pub trait ApprovalGate {
@@ -39,6 +39,7 @@ pub fn new_approval_session_id() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crabmate_client_api::ApprovalDecisionApi;
     use serde_json::json;
 
     #[test]

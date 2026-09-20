@@ -5,7 +5,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crabmate_tui_core::{WorkspaceDirData, WorkspaceDirEntry, WorkspaceProjectsData};
+use crate::serve::{WorkspaceDirData, WorkspaceDirEntry, WorkspaceProjectsData};
 
 use super::state::UiState;
 

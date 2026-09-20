@@ -14,8 +14,7 @@
 ├── crates/crabmate-client-api/ # shared pure logic (URL / auth / secrets / approval / workspace / sessions / chat body / hash handoff / health JSON; no IO)
 ├── crates/crabmate-tool-card/  # tool-card compact/detail (W2: in-repo path; not git-pinned to Server)
 ├── crates/crabmate-connect/
-├── crates/crabmate-tui-core/   # remote terminal HTTP/SSE core
-├── crates/crabmate-tui/        # binary crabmate-tui
+├── crates/crabmate-tui/        # binary crabmate-tui (remote terminal HTTP/SSE serve client in src/serve)
 ├── crates/crabmate-web-host/   # binary crabmate-web (loopback static UI host)
 ├── desktop-tauri/
 ├── mobile-tauri/

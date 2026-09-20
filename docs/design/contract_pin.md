@@ -12,19 +12,19 @@
 |------|----------|
 | `crabmate-connect` | **本仓** `path = "../../crates/crabmate-connect"`（已迁入；勿再 git+path 回主仓旧路径）。壳启用 `features = ["tauri"]` |
 | 业务 UI（`frontend/`） | **本仓**；线契约一条 `crabmate`（`protocol`），见 `frontend/Cargo.toml` |
-| 远程终端（`crabmate-tui-core`） | 同一 `crabmate` + `protocol`（**不要**开 `server`） |
+| 远程终端（`crabmate-tui` `serve/` 模块，原 `crabmate-tui-core`） | 同一 `crabmate` + `protocol`（**不要**开 `server`） |
 | 壳二进制本身 | 暂不直接依赖主仓契约 crate（只经 WebView 加载 UI + HTTP/SSE） |
 
 本地门禁：`bash scripts/check-no-main-path.sh`（需 `rg` 或 `grep`；CI 装 ripgrep）。
 
-当前 UI / tui 钉点（与 `frontend/Cargo.toml`、`crates/crabmate-tui-core/Cargo.toml` 一致）：
+当前 UI / tui 钉点（与 `frontend/Cargo.toml`、`crates/crabmate-tui/Cargo.toml` 一致）：
 
 | 项 | 值 |
 |----|-----|
 | 源码迁入自 | 主仓 `eb0048bf…`（见 `frontend/SOURCE.md`） |
 | 契约 | crates.io **`crabmate` `0.5.2`** + `features = ["protocol"]` |
 | Playwright `serve` checkout | git tag **`v0.5.2`**（与 crates.io 包同源） |
-| lock | 提交 `frontend/Cargo.lock`、`crates/crabmate-tui-core/Cargo.lock`、`crates/crabmate-tool-card/Cargo.lock` |
+| lock | 提交 `frontend/Cargo.lock`、`crates/crabmate-tui/Cargo.lock`、`crates/crabmate-tool-card/Cargo.lock` |
 
 `PUT /workspace/file/raw`（工作区本机文件拖放上传）、**`GET /workspace/file/download`**（侧栏保存文件到本机）与 **`GET /workspace/dir/archive`**（保存文件夹为 zip）、**`POST /workspace/file/move`**（树内重命名文件）是 **HTTP 路由**，不在 crates.io `protocol` 面里。官方 UI 对接 **当前 Server 源码 / `v0.5.2` 的 serve**；Playwright 默认 checkout **`v0.5.2`**。`GET /workspace/file/raw` 仍仅为聊天图片（png/jpg/jpeg/webp/gif）。
 

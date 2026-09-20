@@ -1,4 +1,4 @@
-//! 远程终端客户端核心：连接已运行的 `crabmate serve`（HTTP + SSE）。
+//! 远程 serve 访问层（原 `crabmate-tui-core` crate 并入）：连接已运行的 `crabmate serve`（HTTP + SSE）。
 //!
 //! **不**内嵌 Agent，**不** spawn `serve`。
 
@@ -11,12 +11,11 @@ mod error;
 mod json_api;
 mod sessions;
 mod url;
-mod user_data;
+pub(crate) mod user_data;
 mod workspace;
 
 pub use approval::{
-    ApprovalDecision, ApprovalDecisionApi, ApprovalGate, AutoAllowOnce, CommandApprovalData,
-    new_approval_session_id,
+    ApprovalDecision, ApprovalGate, AutoAllowOnce, CommandApprovalData, new_approval_session_id,
 };
 pub use chat_stream::{
     ChatStreamArgs, ChatStreamOptions, ChatStreamOutcome, ClientLlm, ClientLlmFields, StreamCancel,
@@ -28,12 +27,11 @@ pub use error::TermError;
 pub use sessions::{
     SessionListRow, WebSessionsList, conversation_id_for_resume, fetch_web_sessions,
 };
-pub use url::{api_url, normalize_api_base};
 pub use user_data::{
-    LlmEndpointOverrideDto, LlmOverridesDto, UserPrefsDto, fetch_llm_overrides,
-    fetch_user_data_prefs, put_llm_overrides, put_user_data_prefs,
+    LlmOverridesDto, UserPrefsDto, fetch_llm_overrides, fetch_user_data_prefs, put_llm_overrides,
+    put_user_data_prefs,
 };
 pub use workspace::{
-    WorkspaceDirData, WorkspaceDirEntry, WorkspaceInfo, WorkspaceProjectsData, fetch_workspace,
+    WorkspaceDirData, WorkspaceDirEntry, WorkspaceProjectsData, fetch_workspace,
     fetch_workspace_dir, fetch_workspace_projects, set_workspace, switch_workspace_project,
 };

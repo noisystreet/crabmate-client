@@ -229,7 +229,6 @@ jobs:
         with:
           workspaces: |
             crates/crabmate-tui
-            crates/crabmate-tui-core
             crates/crabmate-client-api
 
       - name: make tui-release

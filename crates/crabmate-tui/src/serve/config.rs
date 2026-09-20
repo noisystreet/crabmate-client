@@ -1,6 +1,6 @@
 //! 连接配置与错误类型。
 
-use crate::url::normalize_api_base;
+use crate::serve::url::normalize_api_base;
 
 /// 指向远程 `serve` 的连接参数。
 #[derive(Debug, Clone)]

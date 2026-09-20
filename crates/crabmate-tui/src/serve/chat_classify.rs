@@ -5,8 +5,8 @@
 use crabmate::cm_sse_protocol::{AgUiParseDispatch, classify_ag_ui_sse_data};
 use serde_json::Value;
 
-use crate::approval::CommandApprovalData;
-use crate::error::TermError;
+use crate::serve::approval::CommandApprovalData;
+use crate::serve::error::TermError;
 
 /// 一行 AG-UI SSE 的处置动作（与 Web `parser_v2` / `sse_dispatch` 语义对齐的子集）。
 #[derive(Debug)]

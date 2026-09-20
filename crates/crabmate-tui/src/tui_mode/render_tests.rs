@@ -1,5 +1,5 @@
 use super::*;
-use crabmate_tui_core::SessionListRow;
+use crate::serve::SessionListRow;
 
 #[test]
 fn truncate_appends_ellipsis() {

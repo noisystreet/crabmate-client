@@ -30,8 +30,7 @@ Connects to a compatible **`crabmate serve`** (local or remote). Does **not** sp
 ├── crates/crabmate-client-api/ # Shared pure logic (URL / auth / secrets / approval / workspace / sessions / chat body / hash / health JSON; no IO)
 ├── crates/crabmate-tool-card/  # Tool-card compact/detail (in-repo path after W2; not git-pinned to Server)
 ├── crates/crabmate-connect/   # Connect-page logic (path dep in this repo; do not path back to Server)
-├── crates/crabmate-tui-core/  # Remote terminal HTTP/SSE core
-├── crates/crabmate-tui/       # Binary crabmate-tui (chat / repl / full-screen tui)
+├── crates/crabmate-tui/       # Binary crabmate-tui (chat / repl / full-screen tui; HTTP/SSE serve client in src/serve)
 ├── crates/crabmate-web-host/  # Binary crabmate-web (loopback static UI host)
 ├── desktop-tauri/             # Desktop Linux (Tauri 2)
 ├── mobile-tauri/              # Android (Tauri 2)

@@ -2,11 +2,11 @@
 
 use std::io::{self, Write};
 
-use anyhow::Result;
-use crabmate_client_api::{paths, slash};
-use crabmate_tui_core::{
+use crate::serve::{
     ServeClient, conversation_id_for_resume, fetch_web_sessions, fetch_workspace, set_workspace,
 };
+use anyhow::Result;
+use crabmate_client_api::{paths, slash};
 use serde_json::Value;
 
 /// 是否为本端控制斜杠（应拦截，不发送给模型）。

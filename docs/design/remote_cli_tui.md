@@ -58,6 +58,8 @@ crates/
 - 可逐步把 `crabmate-connect` 里与「纯 HTTP 探测」重叠的逻辑抽到共用模块；**不**阻塞 P1（P1 可先在 `tui-core` 内复制最小 probe）。
 - 多端（WASM / connect / tui）共用纯逻辑的边界与分期见 [`client_shared_logic.md`](./client_shared_logic.md)（拟建 `crabmate-client-api`）。
 
+> **2026-09**：`crabmate-tui-core` 已并入 `crabmate-tui`（`src/serve/` 模块）；上述「仓内布局（拟定）」为规划期记录，现状以 [`client_shared_logic.md`](./client_shared_logic.md) §2 为准。
+
 禁止：`path = "../crabmate_agent/..."`。
 
 ---

@@ -11,7 +11,7 @@
 | **Desktop** | Linux Tauri shell + packaged `frontend/` WASM |
 | **Android** | Tauri shell + **same** WASM; extra Kotlin / FGS |
 | **Web** | Same WASM hosted by `crabmate-web` (or equivalent) in a normal browser |
-| **TUI** | `crabmate-tui` / `crabmate-tui-core` (HTTP/SSE; not the WASM UI) |
+| **TUI** | `crabmate-tui` (HTTP/SSE serve client in `src/serve`; not the WASM UI) |
 
 Desktop, Android, and Web share one UI crate. Do not treat them as three independent products. TUI is a separate client. Execution stays on a running `crabmate serve`.
 

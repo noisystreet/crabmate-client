@@ -30,8 +30,7 @@
 ├── crates/crabmate-client-api/ # 多端共用纯逻辑（URL / 鉴权 / 密钥槽 / 审批 / workspace / sessions / chat body / hash / health JSON；无 IO）
 ├── crates/crabmate-tool-card/  # 工具卡 compact/detail（W2 起本仓 path；勿再 git 钉 Server）
 ├── crates/crabmate-connect/   # 连接页逻辑（本仓 path；勿再 path 回主仓）
-├── crates/crabmate-tui-core/  # 远程终端 HTTP/SSE 核心
-├── crates/crabmate-tui/       # 二进制 crabmate-tui（chat / repl / 全屏 tui）
+├── crates/crabmate-tui/       # 二进制 crabmate-tui（chat / repl / 全屏 tui；HTTP/SSE serve 客户端在 src/serve）
 ├── crates/crabmate-web-host/  # 二进制 crabmate-web（回环静态 UI 托管）
 ├── desktop-tauri/             # Desktop Linux（Tauri 2）
 ├── mobile-tauri/              # Android（Tauri 2）

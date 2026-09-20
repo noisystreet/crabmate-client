@@ -6,7 +6,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::Sender;
 
-use crabmate_tui_core::{ApprovalDecision, CommandApprovalData, SessionListRow, WorkspaceDirEntry};
+use crate::serve::{ApprovalDecision, CommandApprovalData, SessionListRow, WorkspaceDirEntry};
 
 use super::serve_defaults::ServeDefaults;
 use super::tool_summary::tool_end_text;

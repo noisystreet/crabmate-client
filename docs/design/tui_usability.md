@@ -99,7 +99,7 @@
 
 - **参照**：Desktop `session_hydrate.rs` 水合 + 顶部「加载更早」prepend 且滚动锚定不跳（`scroll_shell.rs::compensate_after_prepend`）。
 - **方案**：切换会话（Enter/`/conv use`）时按需拉最近一页历史渲染（复用行模型，thinking/工具行转摘要）；顶部「↑ 加载更早」翻页；prepend 时视口补偿。更新矩阵 L53 描述。
-- **落点**：`state.rs`、`mod.rs`、`worker.rs`、`render.rs`；契约侧 `crabmate-tui-core`。
+- **落点**：`state.rs`、`mod.rs`、`worker.rs`、`render.rs`；契约侧 tui `serve/` 模块（原 `crabmate-tui-core`）。
 - **依赖**：serve 消息分页端点；行模型需能承载多页（`lines` 追加 + `prepend` 区）。
 
 #### W2.2 会话重命名/删除（G5 的一部分）

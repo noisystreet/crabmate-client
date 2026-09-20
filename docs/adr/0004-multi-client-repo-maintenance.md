@@ -6,7 +6,7 @@ Proposed
 
 ## Context
 
-本仓是**多端薄壳仓**：Desktop Tauri、Android Tauri、Web（`crabmate-web` 回环托管 Leptos CSR）、远程 `crabmate-tui` 四种交付形态，由 9 个 Rust 包组成（`desktop-tauri/src-tauri`、`mobile-tauri/src-tauri`、`crates/{crabmate-client-api,crabmate-tool-card,crabmate-connect,crabmate-tui-core,crabmate-tui,crabmate-web-host}`、`frontend`）。
+本仓是**多端薄壳仓**：Desktop Tauri、Android Tauri、Web（`crabmate-web` 回环托管 Leptos CSR）、远程 `crabmate-tui` 四种交付形态，由 8 个 Rust 包组成（`desktop-tauri/src-tauri`、`mobile-tauri/src-tauri`、`crates/{crabmate-client-api,crabmate-tool-card,crabmate-connect,crabmate-tui,crabmate-web-host}`、`frontend`；原 `crabmate-tui-core` 已并入 `crabmate-tui` `src/serve/`）。
 
 历史上每个包都是**独立单包 workspace**（各有自己的 `[workspace]` 与 `Cargo.lock`），这带来真实收益：
 

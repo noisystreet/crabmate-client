@@ -2,7 +2,7 @@
 
 use super::*;
 
-use crabmate_tui_core::LlmEndpointOverrideDto;
+use crate::serve::user_data::LlmEndpointOverrideDto;
 use serde_json::json;
 
 #[test]

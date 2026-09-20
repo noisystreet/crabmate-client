@@ -13,7 +13,7 @@ crabmate = { version = "0.5.2", default-features = false, features = ["protocol"
 crabmate-tool-card = { path = "../crates/crabmate-tool-card" }
 ```
 
-`crabmate-tui-core` 同样只开 `protocol`，不要开 `server`。
+`crabmate-tui`（`serve/` 模块，原 `crabmate-tui-core`）同样只开 `protocol`，不要开 `server`。
 
 ## 勾选（与 Server 波次同 ID）
 

@@ -2,7 +2,7 @@
 
 use crabmate_client_api::url::{self, ApiUrlError};
 
-use crate::error::TermError;
+use crate::serve::error::TermError;
 
 /// 去掉尾斜杠；拒绝相对路径。
 #[must_use]

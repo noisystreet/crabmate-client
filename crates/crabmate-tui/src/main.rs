@@ -1,6 +1,7 @@
 //! `crabmate-tui`：连接远程 `crabmate serve` 的终端客户端（P3：chat / repl / 斜杠）。
 
 mod approval_tty;
+mod serve;
 mod slash;
 mod tui_mode;
 mod turn;
@@ -8,13 +9,13 @@ mod turn;
 use std::io::{self, IsTerminal, Write};
 use std::process::ExitCode;
 
-use anyhow::{Context, Result, bail};
-use clap::{Parser, Subcommand};
-use crabmate_client_api::secrets::{KEYRING_SERVICE, SecretSlot, WEB_API_BEARER_KEYRING_ACCOUNT};
-use crabmate_tui_core::{
+use crate::serve::{
     ApprovalDecision, ApprovalGate, AutoAllowOnce, ChatStreamOutcome, ClientLlm,
     CommandApprovalData, ConnectionConfig, ServeClient, StreamResume, TermError,
 };
+use anyhow::{Context, Result, bail};
+use clap::{Parser, Subcommand};
+use crabmate_client_api::secrets::{KEYRING_SERVICE, SecretSlot, WEB_API_BEARER_KEYRING_ACCOUNT};
 use reedline::{DefaultPrompt, DefaultPromptSegment, Reedline, Signal};
 
 use crate::approval_tty::TtyApprovalGate;
@@ -738,8 +739,8 @@ mod tests {
         capture_resume_point, handle_mode_slash, handle_model_slash, handle_role_slash,
         repl_control_head, with_shell_keyring_fallback,
     };
+    use crate::serve::ChatStreamOutcome;
     use anyhow::anyhow;
-    use crabmate_tui_core::ChatStreamOutcome;
 
     #[test]
     fn explicit_value_wins_over_keyring() {

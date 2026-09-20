@@ -209,7 +209,7 @@ Desktop 设置共 8 个分区（`settings_page`；`settings_modal` 旧弹窗已�
 | 用户可见 shell 行为 / 启动项变化 | `README.md` ↔ `README.zh-CN.md` **双语同改**（若新增默认持久化行为/新命令） |
 | 发布记录 | `CHANGELOG.md` `[Unreleased]`（英文） |
 | 网关预设常量跨仓重复 | `frontend/src/client_llm_presets.rs` 与 TUI 同名表需在 W2 PR 内加同步注释（两侧引用同一 doc），避免漂移 |
-| 契约字段扩展（温度/上下文/思考/ttl） | 属本仓 `tui-core` 请求体装配，不改钉点 tag；字段名以契约 crate + 前端 `http_request.rs` 为准 |
+| 契约字段扩展（温度/上下文/思考/ttl） | 属本仓 tui `serve/` 模块（原 `tui-core`）请求体装配，不改钉点 tag；字段名以契约 crate + 前端 `http_request.rs` 为准 |
 
 ---
 
