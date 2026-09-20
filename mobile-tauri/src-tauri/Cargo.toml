@@ -15,6 +15,12 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 crabmate-connect = { path = "../../crates/crabmate-connect", features = ["tauri"] }
 
+# Android：reqwest 的 rustls 后端用 rustls-platform-verifier 校验系统证书库，
+# 须经 JNI 注入 Context（见 src/android_tls.rs）；jni 版本与上游要求一致（0.22）。
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.22"
+rustls-platform-verifier = "0.7"
+
 [lib]
 name = "crabmate_mobile_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]

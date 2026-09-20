@@ -13,6 +13,7 @@
 
 # Wry 通过虚方法回调壳 Activity；勿混淆 override
 -keep class edu.crabmate.MainActivity { *; }
+-keep class edu.crabmate.RustlsPlatformVerifier { *; }
 -keep class edu.crabmate.SecureBearerStore { *; }
 -keep class edu.crabmate.StreamKeepAliveService { *; }
 -keep class edu.crabmate.StreamKeepAliveText { *; }
@@ -23,6 +24,9 @@
    int getId();
    java.lang.String getVersion();
 }
+
+# rustls-platform-verifier 的 Android 验证器只经 JNI 反射调用，R8 会当成死代码裁掉
+-keep, includedescriptorclasses class org.rustls.platformverifier.** { *; }
 
 # Uncomment this to preserve the line number information for
 # debugging stack traces.
