@@ -66,6 +66,9 @@ class MainActivity : TauriActivity() {
   private var backPressedCallback: OnBackPressedCallback? = null
 
   override fun onCreate(savedInstanceState: Bundle?) {
+    // 平台证书验证器须在任何 TLS 请求（连接页探测 serve）之前完成 JNI 注入，
+    // 否则首个请求 panic 并 abort（连接页永久停留）。放在最前，早于 Tauri 原生初始化。
+    RustlsPlatformVerifier.nativeInitRustlsPlatformVerifier(applicationContext)
     // 不要 enableEdgeToEdge()：Android WebView 通常不提供 CSS safe-area-inset-*，
     // 铺满状态栏后会与远程 Web 顶栏按钮重叠、无法点击。
     WindowCompat.setDecorFitsSystemWindows(window, true)

@@ -4,6 +4,9 @@
 use tauri::Manager;
 use tauri::plugin::Builder as PluginBuilder;
 
+#[cfg(target_os = "android")]
+mod android_tls;
+
 /// 接线 [`crabmate_connect::AllowedServeOrigin`]：拦截跨 Origin 乱跳；回连接页时清空白名单。
 fn navigation_guard_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
     PluginBuilder::new("crabmate-shell-navigation")
