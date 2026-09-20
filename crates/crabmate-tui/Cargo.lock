@@ -653,29 +653,19 @@ version = "0.5.1-alpha.0"
 dependencies = [
  "anyhow",
  "clap",
+ "crabmate",
  "crabmate-client-api",
- "crabmate-tui-core",
  "crossterm",
+ "futures-util",
  "keyring",
  "ratatui",
  "reedline",
- "serde_json",
- "tokio",
- "unicode-width",
-]
-
-[[package]]
-name = "crabmate-tui-core"
-version = "0.5.1-alpha.0"
-dependencies = [
- "crabmate",
- "crabmate-client-api",
- "futures-util",
  "reqwest",
  "serde",
  "serde_json",
  "thiserror 2.0.20",
  "tokio",
+ "unicode-width",
 ]
 
 [[package]]

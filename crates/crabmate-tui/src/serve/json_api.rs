@@ -4,8 +4,8 @@ use reqwest::header::{CONTENT_TYPE, HeaderValue};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
-use crate::client::ServeClient;
-use crate::error::TermError;
+use crate::serve::client::ServeClient;
+use crate::serve::error::TermError;
 
 impl ServeClient {
     pub async fn get_json<T: DeserializeOwned>(&self, path: &str) -> Result<T, TermError> {

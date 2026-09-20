@@ -87,14 +87,6 @@ repos:
         always_run: true
         stages: [pre-commit]
 
-      - id: tui-core-clippy
-        name: crabmate-tui-core clippy (-D warnings)
-        entry: bash -c 'cd crates/crabmate-tui-core && cargo clippy --all-targets -- -D warnings'
-        language: system
-        pass_filenames: false
-        always_run: true
-        stages: [pre-commit]
-
       - id: tui-clippy
         name: crabmate-tui clippy (-D warnings)
         entry: bash -c 'cd crates/crabmate-tui && cargo clippy --all-targets -- -D warnings'

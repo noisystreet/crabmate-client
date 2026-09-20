@@ -4,7 +4,7 @@
 
 use std::sync::mpsc::{self, Sender};
 
-use crabmate_tui_core::{ApprovalDecision, ApprovalGate, CommandApprovalData, TermError};
+use crate::serve::{ApprovalDecision, ApprovalGate, CommandApprovalData, TermError};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::worker::UiEvent;

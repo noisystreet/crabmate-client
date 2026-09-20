@@ -8,8 +8,8 @@ use crabmate_client_api::paths;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::client::ServeClient;
-use crate::error::TermError;
+use crate::serve::client::ServeClient;
+use crate::serve::error::TermError;
 
 /// `GET/PUT /user-data/prefs` 的完整 DTO（镜像前端 `UserPrefsDto`）。
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

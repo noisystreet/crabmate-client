@@ -8,8 +8,8 @@ use crabmate_client_api::{
     percent_encode_unreserved,
 };
 
-use crate::client::ServeClient;
-use crate::error::TermError;
+use crate::serve::client::ServeClient;
+use crate::serve::error::TermError;
 
 pub use crabmate_client_api::{
     WorkspaceDirData, WorkspaceDirEntry, WorkspaceInfo, WorkspaceProjectsData,

@@ -36,7 +36,7 @@ use crossterm::terminal::{
 use ratatui::Terminal;
 use ratatui::backend::{Backend, CrosstermBackend};
 
-use crabmate_tui_core::{
+use crate::serve::{
     ApprovalDecision, ChatStreamOptions, ChatStreamOutcome, ServeClient, StreamCancel,
     new_approval_session_id,
 };

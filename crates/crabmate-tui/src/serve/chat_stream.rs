@@ -12,10 +12,10 @@ use reqwest::header::{ACCEPT, CONTENT_TYPE, HeaderValue};
 use serde_json::Value;
 use tokio::sync::watch;
 
-use crate::approval::{ApprovalDecision, ApprovalGate, CommandApprovalData};
-use crate::chat_classify::{LineAction, classify_line};
-use crate::client::ServeClient;
-use crate::error::TermError;
+use crate::serve::approval::{ApprovalDecision, ApprovalGate, CommandApprovalData};
+use crate::serve::chat_classify::{LineAction, classify_line};
+use crate::serve::client::ServeClient;
+use crate::serve::error::TermError;
 
 /// 一轮 `/chat/stream` 结束后的摘要。
 #[derive(Debug, Clone, Default)]
@@ -612,7 +612,7 @@ fn write_out(out: &mut dyn Write, s: &str) -> Result<(), TermError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::approval::{ApprovalDecision, AutoAllowOnce};
+    use crate::serve::approval::{ApprovalDecision, AutoAllowOnce};
 
     struct CaptureGate {
         seen: Vec<CommandApprovalData>,

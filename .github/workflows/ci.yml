@@ -41,7 +41,6 @@ jobs:
             mobile-tauri/src-tauri
             crates/crabmate-connect
             crates/crabmate-tool-card
-            crates/crabmate-tui-core
             crates/crabmate-tui
             crates/crabmate-web-host
             frontend
@@ -178,7 +177,6 @@ jobs:
         with:
           workspaces: |
             crates/crabmate-tui
-            crates/crabmate-tui-core
             crates/crabmate-client-api
 
       - name: make tui-release

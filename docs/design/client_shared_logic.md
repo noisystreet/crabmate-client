@@ -1,7 +1,7 @@
 # 多端 Client 共用逻辑抽取（规划）
 
 > **状态**：S1–S4 **已落地**；hash 交接键名、S5 health JSON 子集、**斜杠名字表**、**端点路径常量（`paths`）**、**通用 HTTP 错误文案（`messages`）** 均已落地  
-> **范围**：`frontend`（WASM）、`crabmate-connect`（Desktop/Android 壳）、`crabmate-tui` / `crabmate-tui-core`（远程终端）之间的重复逻辑  
+> **范围**：`frontend`（WASM）、`crabmate-connect`（Desktop/Android 壳）、`crabmate-tui`（远程终端）之间的重复逻辑（原 `crabmate-tui-core` 已并入 `crabmate-tui` `src/serve/`，见 §2 注记）  
 > **关联**：[remote_cli_tui.md](./remote_cli_tui.md)、[tauri_gui_mvp_design.md](./tauri_gui_mvp_design.md)、[contract_pin.md](./contract_pin.md)、产品面对照 [client_capability_matrix.md](./client_capability_matrix.md)；Server [`client_shell_split.md`](https://github.com/noisystreet/CrabMate/blob/main/docs/design/client_shell_split.md)
 
 ---
@@ -31,21 +31,23 @@ desktop/mobile ──path──► crabmate-connect ──reqwest──► serve
        │
        └──── WebView ──► frontend (WASM fetch) ──► serve (全 API / SSE)
 
-crabmate-tui ──► crabmate-tui-core ──reqwest──► serve (/health, /chat/stream, …)
-                      │
-frontend & tui-core ──┴── crabmate（protocol feature；crates.io 0.4.0）
-                         展示 crate：tool-card 已本仓 path（W2）；turn-layout 仍计划改本仓 path
-                         见 display_crate_sink.md
+crabmate-tui (serve/) ──reqwest──► serve (/health, /chat/stream, …)
+        │
+frontend & tui (serve/) ──┴── crabmate（protocol feature；crates.io 0.5.2）
+                            展示 crate：tool-card 已本仓 path（W2）；turn-layout 仍计划改本仓 path
+                            见 display_crate_sink.md
 ```
 
 | 已共享 | 谁用 | 覆盖 |
 |--------|------|------|
 | `crabmate-connect` | Desktop / Android | 探测、hash 交接、钥匙串 Bearer/LLM 槽、导航白名单（导航钩子 / invoke 需 feature `tauri`） |
 | `frontend/` | 两壳包内 UI | 业务 HTTP/SSE、设置、会话、审批 UI |
-| `crabmate-tui-core` | 仅 `crabmate-tui` | 远程终端 HTTP/SSE 核心 |
-| Server 契约 git tag | frontend（多 crate）；tui-core（sse-protocol） | SSE 分类等 |
+| `crabmate-tui` `serve/` 模块 | 仅 `crabmate-tui` | 远程终端 HTTP/SSE 核心（原 `crabmate-tui-core`） |
+| Server 契约 git tag | frontend（多 crate）；tui `serve/`（protocol） | SSE 分类等 |
 
 设计 [`remote_cli_tui.md`](./remote_cli_tui.md) §3 已允许：connect 与 tui 重叠的「纯 HTTP 探测」可逐步上收；**不**阻塞终端分期。
+
+**2026-09**：`crabmate-tui-core` 已整体并入 `crabmate-tui`（`crates/crabmate-tui/src/serve/`，模块名 `serve`；依赖与 `Cargo.lock` 同步吸收）；下文 §1/§3/§6/§8 为历史规划叙述保留原文，涉及 tui-core 的现状路径均按 `serve/` 新位置理解。
 
 **2026-09**：Markdown 渲染前的文本规范化（原 `frontend/src/markdown.rs::normalize_markdown_for_render` 及全部 CJK/围栏/标题/列表补丁）下沉为 `crabmate-client-api::markdown_normalize`（纯逻辑、零新依赖），`frontend` 改为消费共享实现（行为不变）；TUI 后续轻渲染直接复用同一入口。
 
@@ -93,7 +95,7 @@ frontend/                # wasm fetch 适配器 + UI；S1–S4 已用 client-api
 | 端 | 路径 |
 |----|------|
 | frontend | `frontend/src/api/browser.rs` → `normalize_api_base_url` / `api_url` |
-| tui-core | `crates/crabmate-tui-core/src/url.rs` → `normalize_api_base` / `api_url` |
+| tui (serve) | `crates/crabmate-tui/src/serve/url.rs` → `normalize_api_base` / `api_url` |
 
 **注意**：`crabmate-connect` `handoff.rs` 的 `normalize_base_url` 语义不同（可补 `http://`、拒 `0.0.0.0` 等）。共享层只收**严格绝对基址**子集；连接页输入规范化仍留 connect。
 
@@ -102,7 +104,7 @@ frontend/                # wasm fetch 适配器 + UI；S1–S4 已用 client-api
 | 端 | 路径 |
 |----|------|
 | connect | `crates/crabmate-connect/src/probe.rs` → `attach_bearer` |
-| tui-core | `crates/crabmate-tui-core/src/client.rs` → `auth_headers` |
+| tui (serve) | `crates/crabmate-tui/src/serve/client.rs` → `auth_headers` |
 | frontend | `frontend/src/api/browser.rs` → `auth_headers` |
 
 GitHub：`X-CrabMate-GitHub-Token` 目前主要在 frontend（+ 壳钥匙串槽）；tui 尚未接线——共享**头名常量**即可。
@@ -111,17 +113,17 @@ GitHub：`X-CrabMate-GitHub-Token` 目前主要在 frontend（+ 壳钥匙串槽�
 
 | 端 | 路径 |
 |----|------|
-| tui-core | `approval.rs`、`client.rs` → `submit_chat_approval` |
+| tui (serve) | `serve/approval.rs`、`serve/client.rs` → `submit_chat_approval` |
 | frontend | `sse_dispatch/types.rs`、`chat_stream/parser_v2.rs`、`api/http.rs` → `submit_chat_approval` |
 
 共享：决策枚举、SSE `allowlistKey` 解析、body 形状。`approval_session_id` **生成器**可分端（`tui_…` vs `approval_…`），只共享合法字符约束若需要。
 
 ### 4.4 Workspace / Sessions
 
-| 能力 | tui-core | frontend |
+| 能力 | tui (serve) | frontend |
 |------|----------|----------|
-| workspace | `workspace.rs` | `http.rs` / `http_workspace_projects.rs` |
-| sessions | `sessions.rs`（瘦 DTO） | `user_data.rs`（完整 `ChatSession` + PUT） |
+| workspace | `serve/workspace.rs` | `http.rs` / `http_workspace_projects.rs` |
+| sessions | `serve/sessions.rs`（瘦 DTO） | `user_data.rs`（完整 `ChatSession` + PUT） |
 
 共享：set 响应解析、list 行子集、`conversation_id_for_resume`（无本地 Web `id` 冒充）。file/dir/projects/clone、PUT 水合留 frontend。
 
@@ -129,7 +131,7 @@ GitHub：`X-CrabMate-GitHub-Token` 目前主要在 frontend（+ 壳钥匙串槽�
 
 | 端 | 路径 |
 |----|------|
-| tui-core | `chat_stream.rs` → `chat_stream_body` |
+| tui (serve) | `serve/chat_stream.rs` → `chat_stream_body` |
 | frontend | `chat_stream/http_request.rs` → `build_chat_stream_post_body` |
 
 共享核心字段；图像 / resume / `client_llm` 注入 / 温度等仍留 WASM。
@@ -148,7 +150,7 @@ GitHub：`X-CrabMate-GitHub-Token` 目前主要在 frontend（+ 壳钥匙串槽�
 | 端 | 行为 |
 |----|------|
 | connect | `/health` → prefs → **壳 CORS**（`probe.rs`）；degraded 文案用 `health_degraded_note` |
-| tui-core | `GET /health`；2xx 时同样解析 degraded 并打 stderr，不失败 |
+| tui (serve) | `GET /health`；2xx 时同样解析 degraded 并打 stderr，不失败 |
 
 共享：`crabmate_client_api::health_degraded_note`。CORS / Origin 常量仍属壳专用。
 
@@ -165,13 +167,13 @@ GitHub：`X-CrabMate-GitHub-Token` 目前主要在 frontend（+ 壳钥匙串槽�
 
 ### 4.9 端点路径常量（已落地）
 
-共享：`crabmate_client_api::paths`——只收 **≥2 端实际共用**的端点（`/health`、`/status?view=shell`、`/upload`、`/chat/stream`、`/chat/approval`、`/chat/branch`、`/workspace*`、`/user-data/{prefs,llm-overrides,workspaces/current/sessions}`、`/config/session/conversation-store`）；动态段用构造器（如 `chat_stream_cancel(job_id)`）。消费方：frontend `api/*`、tui-core `client.rs` / `sessions.rs` / `user_data.rs` / `workspace.rs` / `chat_stream.rs`、connect `probe.rs`、tui。单端端点（workspace `file*`、mcp-servers 等）与 `/uploads/` 静态资产不收，仍留各端字面量。
+共享：`crabmate_client_api::paths`——只收 **≥2 端实际共用**的端点（`/health`、`/status?view=shell`、`/upload`、`/chat/stream`、`/chat/approval`、`/chat/branch`、`/workspace*`、`/user-data/{prefs,llm-overrides,workspaces/current/sessions}`、`/config/session/conversation-store`）；动态段用构造器（如 `chat_stream_cancel(job_id)`）。消费方：frontend `api/*`、tui `serve/`（`client.rs` / `sessions.rs` / `user_data.rs` / `workspace.rs` / `chat_stream.rs`）、connect `probe.rs`、tui CLI。单端端点（workspace `file*`、mcp-servers 等）与 `/uploads/` 静态资产不收，仍留各端字面量。
 
 ### 4.10 通用 HTTP 错误文案（已落地）
 
 共享：`messages::http_error_text`（body `error` → `message`，trim 后非空才采用）+ `messages::http_error_message`（→ `HTTP {status}` 兜底）。消费方：frontend `http.rs`（`http_error_detail_from_body`）、`http_workspace_clone.rs`、`http_workspace_projects.rs`、`session_store.rs`（原 message 优先统一为 error 优先）。
 
-留端（display 层差异）：code + `request_id` 拼装与 240 字符截断（frontend `http.rs`）、clone 的 `{code}: … (HTTP {status})` 包装、i18n 前缀与 401/403 特判文案（connect `probe.rs`、frontend `user_data.rs`）、tui-core `error.rs` 的类型化 `thiserror` Display。`http_error_status_code` 的括号反解状态码模式暂保留（消除需错误携带结构化 status，改动面大，另行处理）。
+留端（display 层差异）：code + `request_id` 拼装与 240 字符截断（frontend `http.rs`）、clone 的 `{code}: … (HTTP {status})` 包装、i18n 前缀与 401/403 特判文案（connect `probe.rs`、frontend `user_data.rs`）、tui `serve/error.rs` 的类型化 `thiserror` Display。`http_error_status_code` 的括号反解状态码模式暂保留（消除需错误携带结构化 status，改动面大，另行处理）。
 
 ---
 

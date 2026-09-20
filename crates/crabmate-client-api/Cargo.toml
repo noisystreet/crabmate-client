@@ -7,7 +7,7 @@ description = "Pure shared client logic for CrabMate (URL / auth / secrets / app
 repository = "https://github.com/noisystreet/crabmate-client"
 publish = false
 
-# 独立单包 workspace：与 connect / tui-core 一致，避免根 workspace 吞掉 path 依赖解析。
+# 独立单包 workspace：与 connect / tui 一致，避免根 workspace 吞掉 path 依赖解析。
 [workspace]
 
 [dependencies]

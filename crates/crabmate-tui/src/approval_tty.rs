@@ -2,7 +2,7 @@
 
 use std::io::{self, IsTerminal, Write};
 
-use crabmate_tui_core::{ApprovalDecision, ApprovalGate, CommandApprovalData, TermError};
+use crate::serve::{ApprovalDecision, ApprovalGate, CommandApprovalData, TermError};
 
 /// 在 stderr 提示，从 stdin 读一行决策。
 #[derive(Debug, Default)]
