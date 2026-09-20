@@ -42,7 +42,7 @@ jobs:
             crates/crabmate-connect
             crates/crabmate-tool-card
             crates/crabmate-tui
-            crates/crabmate-web-host
+            web-host
             frontend
 
       - name: Install lizard (complexity via check.sh)
@@ -201,7 +201,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
-            crates/crabmate-web-host
+            web-host
 
       # 打包门禁不跑 trunk：stub dist 只用来校验 .deb 布局（含菜单图标）
       - name: make web-release (stub UI)

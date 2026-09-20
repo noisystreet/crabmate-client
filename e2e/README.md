@@ -29,7 +29,7 @@ export CM_WEB_STATIC_DIR="$PWD/frontend/dist"
 
 # 启动纯 API Server（同级主仓或 PATH 中的 crabmate；默认纯 API，不传 --with-web）：
 #   ../crabmate_agent 下: cargo run -- serve
-# UI 由客户端自托管 crabmate-web（本仓 crates/crabmate-web-host）托管。
+# UI 由客户端自托管 crabmate-web（本仓 web-host/）托管。
 # 或一键：./scripts/e2e-playwright.sh（自动起 serve + crabmate-web）
 ```
 

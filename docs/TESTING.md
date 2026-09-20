@@ -120,7 +120,7 @@ make frontend
 
 `serve` 解析顺序：`CRABMATE_BIN` → `PATH` 的 `crabmate` → 同级 Server `target/{debug,release}/crabmate` → 同级仓 `cargo run`。正式 CI checkout `noisystreet/CrabMate` 钉 git tag **`v0.5.2`**（与 crates.io `crabmate` 0.5.2 同源；见 [`contract_pin.md`](design/contract_pin.md)）。
 
-**UI 托管**：Server 默认纯 API（脚本/CI **不传 `--with-web`**）；SPA 由客户端自托管 `crabmate-web`（本仓 `crates/crabmate-web-host`，默认 `127.0.0.1:4173`，`--api-base` 指向纯 API serve）。页面经 `#cm_api_base=` hash 交接把 API 指向 serve；serve 须经 `CM_WEB_CORS_ALLOWED_ORIGINS` 放行 web Origin（脚本自动追加 `http://127.0.0.1:$CRABMATE_WEB_PORT`）。跨 Origin 直连 API 与 `crabmate-web --api-base` 的真实使用路径一致。
+**UI 托管**：Server 默认纯 API（脚本/CI **不传 `--with-web`**）；SPA 由客户端自托管 `crabmate-web`（本仓 `web-host/`，默认 `127.0.0.1:4173`，`--api-base` 指向纯 API serve）。页面经 `#cm_api_base=` hash 交接把 API 指向 serve；serve 须经 `CM_WEB_CORS_ALLOWED_ORIGINS` 放行 web Origin（脚本自动追加 `http://127.0.0.1:$CRABMATE_WEB_PORT`）。跨 Origin 直连 API 与 `crabmate-web --api-base` 的真实使用路径一致。
 
 真实 LLM 规格仅本地：本机钥匙串/E2E 注入已有 `client_llm` 时可不必 `API_KEY`；启用 Web Bearer 时设 `CM_WEB_API_BEARER_TOKEN`。  
 `cd e2e && no_proxy=127.0.0.1,localhost,api.deepseek.com npx playwright test specs/real-llm-*.spec.ts`  

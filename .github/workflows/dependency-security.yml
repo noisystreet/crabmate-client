@@ -34,7 +34,7 @@ jobs:
             crates/crabmate-connect
             crates/crabmate-tool-card
             crates/crabmate-tui
-            crates/crabmate-web-host
+            web-host
             frontend
 
       - uses: taiki-e/install-action@v2

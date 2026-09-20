@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEB="${1:-}"
 if [[ -z "${DEB}" ]]; then
-  DEB="$(ls "${ROOT}/crates/crabmate-web-host/target/debian/crabmate-web_"*.deb | head -1)"
+  DEB="$(ls "${ROOT}/web-host/target/debian/crabmate-web_"*.deb | head -1)"
 fi
 test -f "${DEB}"
 ls -lh "${DEB}"

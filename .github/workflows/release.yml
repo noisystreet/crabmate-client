@@ -178,7 +178,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
-            crates/crabmate-web-host
+            web-host
 
       - uses: actions/download-artifact@v4
         with:
@@ -208,7 +208,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: web-deb
-          path: crates/crabmate-web-host/target/debian/crabmate-web_*.deb
+          path: web-host/target/debian/crabmate-web_*.deb
           retention-days: 7
 
   build-tui-deb:

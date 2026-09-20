@@ -165,8 +165,8 @@ resolve_web_bin() {
     return
   fi
   for cand in \
-    "${ROOT}/crates/crabmate-web-host/target/debug/crabmate-web" \
-    "${ROOT}/crates/crabmate-web-host/target/release/crabmate-web"; do
+    "${ROOT}/web-host/target/debug/crabmate-web" \
+    "${ROOT}/web-host/target/release/crabmate-web"; do
     if [[ -x "$cand" ]]; then
       echo "$cand"
       return
@@ -176,11 +176,11 @@ resolve_web_bin() {
 }
 
 build_web_bin() {
-  local host_dir="${ROOT}/crates/crabmate-web-host"
+  local host_dir="${ROOT}/web-host"
   if [[ ! -f "$host_dir/Cargo.toml" ]]; then
     return 1
   fi
-  echo ">>> 构建 crabmate-web（本仓 crates/crabmate-web-host）..."
+  echo ">>> 构建 crabmate-web（本仓 web-host/）..."
   (cd "$host_dir" && cargo build --bin crabmate-web)
 }
 
@@ -190,7 +190,7 @@ start_web_host() {
   if [[ -z "$bin" ]]; then
     if ! build_web_bin; then
       echo "错误: 未找到 crabmate-web。" >&2
-      echo "      设置 CRABMATE_WEB_BIN=/path/to/crabmate-web，或先构建本仓 crates/crabmate-web-host。" >&2
+      echo "      设置 CRABMATE_WEB_BIN=/path/to/crabmate-web，或先构建本仓 web-host/。" >&2
       exit 1
     fi
     bin="$(resolve_web_bin)"

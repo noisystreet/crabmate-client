@@ -37,7 +37,7 @@ crates/crabmate-connect/target/
 crates/crabmate-client-api/target/
 crates/crabmate-tool-card/target/
 crates/crabmate-tui/target/
-crates/crabmate-web-host/target/
+web-host/target/
 frontend/target/
 frontend/dist/
 frontend/node_modules/

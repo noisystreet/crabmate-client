@@ -3,7 +3,7 @@
 # 不是 Tauri，也不内嵌 crabmate serve。
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-HOST_DIR="${ROOT}/crates/crabmate-web-host"
+HOST_DIR="${ROOT}/web-host"
 FRONTEND_DIST="${CRABMATE_FRONTEND_DIST:-${ROOT}/frontend/dist}"
 BIN="${HOST_DIR}/target/release/crabmate-web"
 MAX_WASM_BYTES=$((40 * 1024 * 1024))

@@ -97,7 +97,7 @@ repos:
 
       - id: web-host-clippy
         name: crabmate-web-host clippy (-D warnings)
-        entry: bash -c 'cd crates/crabmate-web-host && cargo clippy --all-targets -- -D warnings'
+        entry: bash -c 'cd web-host && cargo clippy --all-targets -- -D warnings'
         language: system
         pass_filenames: false
         always_run: true

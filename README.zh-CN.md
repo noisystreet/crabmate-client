@@ -31,9 +31,9 @@
 ├── crates/crabmate-tool-card/  # 工具卡 compact/detail（W2 起本仓 path；勿再 git 钉 Server）
 ├── crates/crabmate-connect/   # 连接页逻辑（本仓 path；勿再 path 回主仓）
 ├── crates/crabmate-tui/       # 二进制 crabmate-tui（chat / repl / 全屏 tui；HTTP/SSE serve 客户端在 src/serve）
-├── crates/crabmate-web-host/  # 二进制 crabmate-web（回环静态 UI 托管）
 ├── desktop-tauri/             # Desktop Linux（Tauri 2）
 ├── mobile-tauri/              # Android（Tauri 2）
+├── web-host/                  # 二进制 crabmate-web（回环静态 UI 托管）
 ├── frontend/                  # 业务 UI（Leptos CSR + WASM；契约 crates.io crabmate）
 ├── e2e/                       # Playwright（浏览器 UI；mock SSE CI）
 ├── scripts/                   # check / connect 同步 / Victauri / Playwright
@@ -189,10 +189,10 @@ crabmate serve --host 127.0.0.1 --port 8080
 
 # 终端 B — 本仓
 make web-release
-sudo dpkg -i crates/crabmate-web-host/target/debian/crabmate-web_*.deb
+sudo dpkg -i web-host/target/debian/crabmate-web_*.deb
 crabmate-web --api-base http://127.0.0.1:8080
 # 不安装时：
-#   cargo run --release --manifest-path crates/crabmate-web-host/Cargo.toml -- --root frontend/dist --api-base http://127.0.0.1:8080
+#   cargo run --release --manifest-path web-host/Cargo.toml -- --root frontend/dist --api-base http://127.0.0.1:8080
 ```
 
 默认监听 `127.0.0.1:4173`。`--no-open` 跳过 `xdg-open`。Bearer：`--bearer` / `CM_WEB_API_BEARER_TOKEN`（纯浏览器会弱持久化到 `localStorage`）。`.deb` 会安装 **CrabMate Web** 菜单项，图标与 Desktop 壳相同。同一端口上再次启动会打开已有实例，而不是报错退出。

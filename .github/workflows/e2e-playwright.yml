@@ -53,7 +53,7 @@ jobs:
           workspaces: |
             frontend
             crabmate-server
-            crates/crabmate-web-host
+            web-host
 
       - name: Install trunk
         run: cargo install trunk --locked
@@ -69,7 +69,7 @@ jobs:
 
       - name: Build crabmate-web
         run: cargo build --bin crabmate-web
-        working-directory: crates/crabmate-web-host
+        working-directory: web-host
 
       - name: Start API server and crabmate-web
         env:
@@ -77,7 +77,7 @@ jobs:
         run: |
           # Server 默认纯 API；SPA 由客户端 crabmate-web 回环托管（与 scripts/e2e-playwright.sh 一致）
           ./crabmate-server/target/debug/crabmate serve &
-          ./crates/crabmate-web-host/target/debug/crabmate-web \
+          ./web-host/target/debug/crabmate-web \
             --listen 127.0.0.1:4173 \
             --root "${GITHUB_WORKSPACE}/frontend/dist" \
             --api-base http://127.0.0.1:8080 \
