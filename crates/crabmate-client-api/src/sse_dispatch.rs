@@ -38,6 +38,11 @@ pub struct SseWorkspaceToolHooks<'a> {
     pub on_tool_output_chunk: Option<&'a mut dyn FnMut(ToolOutputChunkInfo)>,
     pub on_tool_result: Option<&'a mut dyn FnMut(ToolResultInfo)>,
     pub on_command_approval_request: Option<&'a mut dyn FnMut(CommandApprovalData)>,
+    /// `CUSTOM command_approval` 载荷形状不符契约（缺 `command` / `args`）时触发。
+    ///
+    /// 该分支**不**调用 `on_command_approval_request`；消费方可据此提示（TUI 提示"已跳过
+    /// 审批"以免回合静默挂起，Web 端未注册 → 保持静默）。
+    pub on_command_approval_invalid: Option<&'a mut dyn FnMut()>,
 }
 
 /// `assistant_answer_phase` 与回合约边界事件（终答相位 / 段落锚点；非已删 staged 编排）。
@@ -88,9 +93,15 @@ pub struct SseNoticeTimelineHooks<'a> {
 /// SSE 控制面分发入口：按领域分组回调，V2Parser 分发至此。
 pub struct SseControlSink<'a> {
     pub on_error: &'a mut dyn FnMut(String),
-    /// AG-UI TEXT_MESSAGE_CONTENT / REASONING_MESSAGE_CONTENT 的正文增量。
+    /// AG-UI TEXT_MESSAGE_CONTENT 的正文增量（未注册 `on_reasoning_delta` 时也承接
+    /// REASONING_MESSAGE_CONTENT，见下）。
     /// V1 路径不经此回调。
     pub on_delta: Option<&'a mut dyn FnMut(String)>,
+    /// AG-UI `REASONING_MESSAGE_CONTENT` 的思维链增量。
+    ///
+    /// `None` 时回落 `on_delta`（Web 端把思维链与正文交给同一信道 + 相位信号区分）；
+    /// 终端希望分流展示时注册本钩子。
+    pub on_reasoning_delta: Option<&'a mut dyn FnMut(String)>,
     pub workspace_tool: SseWorkspaceToolHooks<'a>,
     pub turn_phase: SseTurnPhaseHooks<'a>,
     pub clarify_trace: SseClarifyTraceHooks<'a>,

@@ -203,6 +203,8 @@ fn parse_and_dispatch_sse_frame(
     let mut cbs2 = SseControlSink {
         on_error: &mut on_err,
         on_delta: Some(&mut on_ag_ui_delta),
+        // Web 端思维链与正文共用 `on_delta` 信道（相位信号区分），不注册分流钩子。
+        on_reasoning_delta: None,
         workspace_tool: SseWorkspaceToolHooks {
             on_workspace_changed: Some(&mut on_ws),
             on_tool_call: Some(&mut on_tool_call),
@@ -211,6 +213,8 @@ fn parse_and_dispatch_sse_frame(
             on_tool_output_chunk: Some(&mut on_tool_chunk),
             on_tool_result: Some(&mut on_tool_res),
             on_command_approval_request: Some(&mut on_appr),
+            // Web 端不提示畸形审批载荷，保持静默（TUI 注册该钩子以免回合静默挂起）。
+            on_command_approval_invalid: None,
         },
         turn_phase: SseTurnPhaseHooks {
             on_assistant_answer_phase: Some(&mut on_phase),
