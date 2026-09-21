@@ -335,26 +335,24 @@ fn dispatch_tool_custom(custom_type: &str, val: &serde_json::Value, sink: &mut S
                 hook();
             }
         }
-        "command_approval" => {
-            if let Some(data) = val.get("data") {
-                // 形状不符契约（缺 command/args）时不弹审批，跳过该事件并通知消费方。
-                match crate::approval::CommandApprovalData::deserialize(data) {
-                    Ok(req) => {
-                        if let Some(hook) = sink.workspace_tool.on_command_approval_request.as_mut()
-                        {
-                            hook(req);
-                        }
-                    }
-                    Err(_) => {
-                        if let Some(hook) = sink.workspace_tool.on_command_approval_invalid.as_mut()
-                        {
-                            hook();
-                        }
-                    }
-                }
-            }
-        }
+        "command_approval" => dispatch_command_approval(val, sink),
         _ => {}
+    }
+}
+
+/// `command_approval`：只有 `data` 存在且字段完整才弹审批；`data` 缺失或字段不符契约
+/// （缺 `command` / `args`）同属畸形载荷，一律只通知消费方跳过——serve 端审批等待无
+/// 超时，静默丢弃会让终端回合挂起直到用户停止。
+fn dispatch_command_approval(val: &serde_json::Value, sink: &mut SseControlSink<'_>) {
+    let req = val
+        .get("data")
+        .and_then(|d| crate::approval::CommandApprovalData::deserialize(d).ok());
+    if let Some(req) = req {
+        if let Some(hook) = sink.workspace_tool.on_command_approval_request.as_mut() {
+            hook(req);
+        }
+    } else if let Some(hook) = sink.workspace_tool.on_command_approval_invalid.as_mut() {
+        hook();
     }
 }
 
@@ -878,33 +876,39 @@ mod tests {
         assert_eq!(*body.borrow(), "think", "未注册思维链钩子时回落 on_delta");
     }
 
+    /// 载荷形状不符契约（`data` 缺失，或 `data` 存在但缺 `command` / `args`）只触发
+    /// invalid 提示钩子：不得弹出审批，也不得静默丢弃。
     #[test]
     fn malformed_command_approval_triggers_invalid_hook_only() {
-        let invalid = Rc::new(RefCell::new(false));
-        let asked = Rc::new(RefCell::new(false));
-        let invalid2 = Rc::clone(&invalid);
-        let asked2 = Rc::clone(&asked);
-        let mut on_invalid = move || *invalid2.borrow_mut() = true;
-        let mut on_request = move |_r: crate::approval::CommandApprovalData| {
-            *asked2.borrow_mut() = true;
-        };
-        let mut sink = SseControlSink {
-            on_error: &mut |_| {},
-            on_delta: None,
-            on_reasoning_delta: None,
-            workspace_tool: SseWorkspaceToolHooks {
-                on_command_approval_request: Some(&mut on_request),
-                on_command_approval_invalid: Some(&mut on_invalid),
-                ..SseWorkspaceToolHooks::default()
-            },
-            turn_phase: SseTurnPhaseHooks::default(),
-            clarify_trace: SseClarifyTraceHooks::default(),
-            notice_timeline: SseNoticeTimelineHooks::default(),
-        };
-        let data = r#"{"type":"CUSTOM","customType":"command_approval","data":{"foo":1}}"#;
-        let dispatch = parse_ag_ui_line(data, &mut sink);
-        assert_eq!(dispatch, SseDispatch::Handled);
-        assert!(*invalid.borrow(), "畸形审批载荷应触发 invalid 提示钩子");
-        assert!(!*asked.borrow(), "畸形审批不得弹出审批");
+        for data in [
+            r#"{"type":"CUSTOM","customType":"command_approval"}"#,
+            r#"{"type":"CUSTOM","customType":"command_approval","data":{"foo":1}}"#,
+        ] {
+            let invalid = Rc::new(RefCell::new(false));
+            let asked = Rc::new(RefCell::new(false));
+            let invalid2 = Rc::clone(&invalid);
+            let asked2 = Rc::clone(&asked);
+            let mut on_invalid = move || *invalid2.borrow_mut() = true;
+            let mut on_request = move |_r: crate::approval::CommandApprovalData| {
+                *asked2.borrow_mut() = true;
+            };
+            let mut sink = SseControlSink {
+                on_error: &mut |_| {},
+                on_delta: None,
+                on_reasoning_delta: None,
+                workspace_tool: SseWorkspaceToolHooks {
+                    on_command_approval_request: Some(&mut on_request),
+                    on_command_approval_invalid: Some(&mut on_invalid),
+                    ..SseWorkspaceToolHooks::default()
+                },
+                turn_phase: SseTurnPhaseHooks::default(),
+                clarify_trace: SseClarifyTraceHooks::default(),
+                notice_timeline: SseNoticeTimelineHooks::default(),
+            };
+            let dispatch = parse_ag_ui_line(data, &mut sink);
+            assert_eq!(dispatch, SseDispatch::Handled);
+            assert!(*invalid.borrow(), "{data} 应触发 invalid 提示钩子");
+            assert!(!*asked.borrow(), "{data} 不得弹出审批");
+        }
     }
 }

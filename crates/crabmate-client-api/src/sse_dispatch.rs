@@ -38,7 +38,8 @@ pub struct SseWorkspaceToolHooks<'a> {
     pub on_tool_output_chunk: Option<&'a mut dyn FnMut(ToolOutputChunkInfo)>,
     pub on_tool_result: Option<&'a mut dyn FnMut(ToolResultInfo)>,
     pub on_command_approval_request: Option<&'a mut dyn FnMut(CommandApprovalData)>,
-    /// `CUSTOM command_approval` 载荷形状不符契约（缺 `command` / `args`）时触发。
+    /// `CUSTOM command_approval` 载荷形状不符契约时触发：`data` 字段整体缺失，或 `data`
+    /// 存在但缺 `command` / `args`。
     ///
     /// 该分支**不**调用 `on_command_approval_request`；消费方可据此提示（TUI 提示"已跳过
     /// 审批"以免回合静默挂起，Web 端未注册 → 保持静默）。

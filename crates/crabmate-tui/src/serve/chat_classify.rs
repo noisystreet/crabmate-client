@@ -253,6 +253,19 @@ mod tests {
         }
     }
 
+    /// `data` 字段整体缺失同样提示（不得静默跳过导致回合挂起）。
+    #[test]
+    fn approval_without_data_surfaces_system_line() {
+        let data = r#"{"type":"CUSTOM","customType":"command_approval"}"#;
+        match classify_line(data).unwrap() {
+            LineAction::System(s) => {
+                assert!(s.contains("command_approval"));
+                assert!(s.contains("已跳过审批"));
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
     #[test]
     fn tool_call_start_parses_name_and_id() {
         let data = r#"{"type":"TOOL_CALL_START","toolCallId":"tc-1","name":"exec","parentMessageId":"m1"}"#;
