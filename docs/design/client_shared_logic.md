@@ -1,6 +1,6 @@
 # 多端 Client 共用逻辑抽取（规划）
 
-> **状态**：S1–S4 **已落地**；hash 交接键名、S5 health JSON 子集、**斜杠名字表**、**端点路径常量（`paths`）**、**通用 HTTP 错误文案（`messages`）** 均已落地  
+> **状态**：S1–S4 **已落地**；hash 交接键名、S5 health JSON 子集、**斜杠名字表**、**端点路径常量（`paths`）**、**通用 HTTP 错误文案（`messages`）** 均已落地；**S6（SSE / AG-UI 纯解析下沉）进行中**（S6a `prompt_tokens` 已落地，见 §4.11 / §6）  
 > **范围**：`frontend`（WASM）、`crabmate-connect`（Desktop/Android 壳）、`crabmate-tui`（远程终端）之间的重复逻辑（原 `crabmate-tui-core` 已并入 `crabmate-tui` `src/serve/`，见 §2 注记）  
 > **关联**：[remote_cli_tui.md](./remote_cli_tui.md)、[tauri_gui_mvp_design.md](./tauri_gui_mvp_design.md)、[contract_pin.md](./contract_pin.md)、产品面对照 [client_capability_matrix.md](./client_capability_matrix.md)；Server [`client_shell_split.md`](https://github.com/noisystreet/CrabMate/blob/main/docs/design/client_shell_split.md)
 
@@ -16,7 +16,7 @@
 
 ### 非目标
 
-- **不**统一 SSE 全量 UI 分发（工具卡、时间线、澄清问卷）。
+- **不**统一 SSE 全量 UI 分发（工具卡、时间线、澄清问卷）——但 **AG-UI 纯解析与 DTO** 属共享范围（见 §4.11 / S6）；「解析」与「钩子实现」分界见该节。
 - **不**统一 HTTP 客户端实现（WASM `fetch` vs `reqwest`）。
 - **不**把钥匙串 / Keystore / `localStorage` 读写抽进共享层（只共享**槽名常量**）。
 - **不**让 `frontend` 依赖 `crabmate-tui-core`，或让 `tui`/`frontend` 依赖 `crabmate-connect`。
@@ -81,6 +81,9 @@ frontend/                # wasm fetch 适配器 + UI；S1–S4 已用 client-api
 | `paths` | 跨端共用的端点路径常量与动态段构造器（≥2 端实际共用才收） |
 | `slash` | 跨端共用的斜杠控制命令名字表（handler 分端） |
 | `messages` | HTTP 错误体通用取错（`error` → `message` → `HTTP {status}`），display 层不属契约 |
+| `prompt_tokens`（S6a） | tiktoken 快照 DTO + camelCase/snake_case 双键解析（无 IO） |
+| `sse_dispatch`（S6b） | AG-UI 控制面 DTO + `SseControlSink` 钩子组签名 + `SseDispatch` 三态（钩子实现留端） |
+| `ag_ui_parser`（S6c） | AG-UI 单行 JSON → 控制面分发（`parse_ag_ui_line`；仅 `serde_json` + `cm_sse_protocol`） |
 
 ---
 
@@ -175,6 +178,36 @@ GitHub：`X-CrabMate-GitHub-Token` 目前主要在 frontend（+ 壳钥匙串槽�
 
 留端（display 层差异）：code + `request_id` 拼装与 240 字符截断（frontend `http.rs`）、clone 的 `{code}: … (HTTP {status})` 包装、i18n 前缀与 401/403 特判文案（connect `probe.rs`、frontend `user_data.rs`）、tui `serve/error.rs` 的类型化 `thiserror` Display。`http_error_status_code` 的括号反解状态码模式暂保留（消除需错误携带结构化 status，改动面大，另行处理）。
 
+### 4.11 SSE / AG-UI 纯解析（S6，进行中；S6a 已落地）
+
+**现状重复面**（2026-09 实测）：
+
+| 端 | 路径 | 行数 | 性质 |
+|----|------|------|------|
+| frontend | `frontend/src/sse_dispatch/types.rs` | 351 | 纯 DTO + `Option<&mut dyn FnMut(..)>` 钩子组；**零** `i18n` / `Locale` / `wasm-bindgen` |
+| frontend | `frontend/src/api/chat_stream/parser_v2.rs` | 830（非测试约 490） | 纯 AG-UI JSON → 控制面分发；仅依赖 `serde_json` + `crabmate::cm_sse_protocol` + 上述 DTO |
+| tui | `crates/crabmate-tui/src/serve/chat_classify.rs` | 244 | 同语义的**自建子集**（文件头自述"与 Web parser_v2 对齐的子集"） |
+| frontend | `conversation_hydrate.rs` → `TiktokenPromptTokensSnapshot` | 21 | 纯 serde DTO（被 Sink 签名引用，须随迁） |
+| frontend | `conversation_prompt_tokens_apply.rs` → `parse_tiktoken_prompt_tokens_value` / `tiktoken_from_ag_ui_object` | 23 | 纯函数（同文件 `apply_conversation_prompt_tokens_from_sse` 绑 leptos 信号，**留端**） |
+
+TUI 侧判据：`serve/chat_stream.rs:5-8` 已 `use crabmate::cm_sse_protocol::…; use crabmate_client_api::{ChatStreamCoreFields, build_chat_stream_core_body, paths};` —— 依赖通道已通，收敛分类器**无需新增跨包依赖**。
+
+**下沉目标**：`crabmate-client-api` 新增 `sse_dispatch`（DTO + 钩子组）、`ag_ui_parser`（`parse_ag_ui_line` / `SseDispatch` 三态）、`prompt_tokens`（tiktoken DTO + 解析）。
+
+**必须留端**：
+
+| 留端项 | 原因 |
+|--------|------|
+| 钩子**实现**（写 leptos `RwSignal` / TUI 终端态） | `types.rs` 只定义签名；实现属产品 UI |
+| `ChatStreamCallbacks`（`Rc<dyn Fn>` 组合）+ `send_chat_stream` | 与 wasm `fetch` 同处 `chat_stream/mod.rs` |
+| WASM `fetch` / `ReadableStream` 帧读取 | 浏览器运行时（`body_reader.rs`） |
+| `Locale` 参数与错误文案 | i18n 不回退；`handle_sse_block` 3 处调用留端 |
+| 工具**跨帧累积** | 两端 `TOOL_CALL_ARGS` / `TOOL_CALL_END` 均为显式空实现；实际累积在 `app/chat/composer_stream/callbacks/builders/tool_callbacks.rs`，写 `RwSignal<HashMap<…>>` |
+
+**风险控制**：`sse_dispatch::` 现有 **25 个** frontend 消费文件、`TiktokenPromptTokensSnapshot` **10 个**（不含定义处）。为免大范围改 import，`frontend/src/sse_dispatch/mod.rs` 保留为 `pub use crabmate_client_api::sse_dispatch::*;` 转发壳，消费方路径 `crate::sse_dispatch::X` 不变。
+
+**TUI 收敛方式**：`chat_classify.rs` 的自建 `classify_line`（244 行）改为「`SseControlSink` 收集器 → `LineAction`」适配器（约 60–80 行），未消费的子类仍回落 `Skip`（保持现状语义）。
+
 ---
 
 ## 5. 明确不共享
@@ -185,8 +218,8 @@ GitHub：`X-CrabMate-GitHub-Token` 目前主要在 frontend（+ 壳钥匙串槽�
 | 壳 CORS 探测 | 仅包内 UI | `probe_shell_cors`、`SHELL_WEBVIEW_*` |
 | Desktop 生命周期 | 托盘、单实例 | `desktop-tauri` |
 | Android Keystore / 返回键 | Kotlin 桥 | `Secure*Store.kt`、`MainActivity.kt` |
-| WASM `fetch` / AbortSignal / LS | 浏览器运行时 | `frontend/src/api/browser.rs`、`chat_stream/*` |
-| 全量 SSE UI 分发 | 产品 UI | `sse_dispatch/*`、`parser_v2.rs` |
+| WASM `fetch` / AbortSignal / LS | 浏览器运行时 | `frontend/src/api/browser.rs`、`chat_stream/mod.rs`、`body_reader.rs` |
+| SSE **钩子实现**（非解析） | 产品 UI（写信号 / 终端态） | `app/chat/composer_stream/callbacks/**`、`sse_dispatch` 的钩子实现、`tui_mode/*` |
 | TTY 审批 / reedline | 终端交互 | `approval_tty.rs`、`crabmate-tui` main |
 | 工作区文件树 / clone SSE | 仅 Web | `http.rs` file/dir、`http_workspace_clone.rs` |
 
@@ -205,8 +238,15 @@ GitHub：`X-CrabMate-GitHub-Token` 目前主要在 frontend（+ 壳钥匙串槽�
 | **S5 health** ✅ | `health_degraded_note`；connect / tui-core 改依赖 | degraded JSON 单测；CORS 仍留 connect |
 | **S5 slash** ✅ | 斜杠名字表（`slash` 常量；单端命令与 handler 留端） | tui / web 控制命令匹配一致；WASM 体积与编译时间可接受 |
 | **S5 paths/messages** ✅ | 端点路径常量（`paths`）+ 通用 HTTP 取错（`messages`） | 40 处路径替换零字面量漂移；错误文案取值顺序统一 error 优先 |
+| **S6a** ✅ | `prompt_tokens`：`TiktokenPromptTokensSnapshot` + `parse_tiktoken_prompt_tokens_value` / `tiktoken_from_ag_ui_object` 下沉；frontend 侧 re-export | 既有 camelCase/snake_case 用例随迁通过；`apply_conversation_prompt_tokens_from_sse` 留端；frontend `wasm32` check |
+| **S6b** 🅿️ | `sse_dispatch`：DTO + 4 组钩子 + `SseDispatch` 下沉；`frontend/src/sse_dispatch/mod.rs` 改 `pub use crabmate_client_api::sse_dispatch::*;` | 25 个消费方零 import 改动；`ToolJobState` 契约轮询样例单测随迁通过；`wasm32` check |
+| **S6c** 🅿️ | `ag_ui_parser`：`parser_v2.rs` 非测试部分下沉；frontend `V2Parser` 退化为薄壳（仅实现本地 `SseParser`） | `golden_ag_ui_v2_parser_matches_expected` / `RUN_FINISHED` / `RUN_ERROR` / `tool_call_result` / `multi_line_tool_call_splits` 等单测随迁并通过 |
+| **S6d** 🅿️ | TUI `serve/chat_classify.rs` 改为共享解析适配器（Sink 收集器 → `LineAction`，约 60–80 行） | TUI 单测；未消费子类仍回落 `Skip`；`scripts/lizard-rust.sh` CCN ≤10 / 行数 ≤920；`docs/design/shell_smoke_runbook.md` 手工 smoke |
+| **S6e**（可选，缓做） | `sse_frame` 帧切分（`SseFrameKind` / `SseBufferProgress` / `process_sse_buffer_step` / `flush_sse_tail`）下沉 | 需先拆 `ChatStreamCallbacks` 出 `chat_stream/mod.rs` 并把 `Locale` 参数化；改动面大于 S6a–d，收益更低（`\n\n` 切分已部分委托 `cm_sse_protocol`） |
 
-**建议开工顺序**：S0 → S1–S4 → S5a / S5 health → S5 slash / paths / messages（均已完成）。
+**建议开工顺序**：S0 → S1–S4 → S5a / S5 health → S5 slash / paths / messages（均已完成）→ **S6a → S6b → S6c → S6d**（S6e 视 S6a–d 收益再定）。
+
+每步独立小 PR，均**不新增 crate**、不动 `scripts/rust-pkg-dirs.txt`；每步以 `make check`（含 frontend `wasm32` clippy）+ `make test` 收口。
 
 ---
 
@@ -229,6 +269,8 @@ GitHub：`X-CrabMate-GitHub-Token` 目前主要在 frontend（+ 壳钥匙串槽�
 | 依赖 | frontend / tui-core / connect / `crabmate-web` → client-api |
 | IO | 仍分端：`fetch` vs `reqwest` vs keyring |
 | 下一步 | 功能并行；剩余单端逻辑不强行上收 |
+| SSE 解析边界（S6） | **纯解析 + DTO** 下沉 `crabmate-client-api`（`sse_dispatch` / `ag_ui_parser` / `prompt_tokens`）；**钩子实现 / wasm 帧读取 / i18n 文案 / 工具跨帧累积** 留端 |
+| S6 不新增 crate | 全部落 `crabmate-client-api` 现有边界内；`crates/` 布局与 `rust-pkg-dirs.txt` 不变 |
 
 ---
 
