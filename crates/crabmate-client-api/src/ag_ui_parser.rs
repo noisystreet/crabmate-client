@@ -1,0 +1,802 @@
+//! AG-UI 协议解析：单行 JSON → 控制面回调分发（纯逻辑，无 IO / 无平台依赖）。
+//!
+//! 对应后端 `V2Encoder`：接收形如 `{"type":"EVENT_NAME",...}` 的 AG-UI 事件，
+//! 映射到 [`SseControlSink`] 的 `on_*` 钩子；钩子实现（写 UI 状态）留在各端。
+//!
+//! 前端 `V2Parser` 与 TUI 远端分类器共用本模块，避免各自维护一份子集。
+
+use crate::sse_dispatch::{
+    ClarificationFormField, ClarificationQuestionnaireInfo, SseControlSink, SseDispatch,
+    ThinkingTraceInfo, TimelineLogInfo, ToolOutputChunkInfo, ToolResultInfo, TurnSegmentStartInfo,
+};
+
+use crabmate::cm_sse_protocol::{AgUiParseDispatch, classify_ag_ui_sse_data};
+use serde::Deserialize;
+
+fn ag_ui_dispatch_to_sse(dispatch: AgUiParseDispatch) -> SseDispatch {
+    match dispatch {
+        AgUiParseDispatch::Handled => SseDispatch::Handled,
+        AgUiParseDispatch::Plain => SseDispatch::Plain,
+        AgUiParseDispatch::StreamEnded => SseDispatch::StreamEnded,
+    }
+}
+
+/// 解析单行 AG-UI JSON 事件并分发到 [`SseControlSink`] 回调。
+pub fn parse_ag_ui_line(data: &str, sink: &mut SseControlSink<'_>) -> SseDispatch {
+    // 先尝试 AG-UI 格式解析：逐行处理 JSON，按 type 字段分发
+    for line in data.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let Ok(val) = serde_json::from_str::<serde_json::Value>(line) else {
+            // 不是合法 JSON → 按纯文本 delta 回落
+            return SseDispatch::Plain;
+        };
+        let Some(type_str) = val.get("type").and_then(|v| v.as_str()) else {
+            // 无 type 字段 → Plain 回落（AG-UI 协议依赖 type 字段区分类别）
+            return SseDispatch::Plain;
+        };
+        match type_str {
+            // ── 生命周期 ──
+            "RUN_FINISHED" => {
+                dispatch_run_finished(&val, sink);
+                return SseDispatch::StreamEnded;
+            }
+            "RUN_ERROR" => {
+                dispatch_run_error(&val, sink);
+                return SseDispatch::StreamEnded;
+            }
+
+            // ── 工具调用 ──
+            "TOOL_CALL_START" => dispatch_tool_call_start(&val, sink),
+            "TOOL_CALL_ARGS" => dispatch_tool_call_args(&val, sink),
+            "TOOL_CALL_END" => dispatch_tool_call_end(&val, sink),
+            "TOOL_CALL_RESULT" => dispatch_tool_call_result(&val, sink),
+
+            // ── CUSTOM 事件 ──
+            "CUSTOM" => dispatch_custom(&val, sink),
+
+            // ── 尚未实现的 AG-UI 标准事件（不当作 Plain 回落）──
+            "RUN_STARTED"
+            | "TEXT_MESSAGE_START"
+            | "TEXT_MESSAGE_END"
+            | "REASONING_MESSAGE_START"
+            | "REASONING_MESSAGE_END" => {}
+
+            // ── 正文增量 ──
+            "TEXT_MESSAGE_CONTENT" => dispatch_text_message_content(&val, sink),
+            "REASONING_MESSAGE_CONTENT" => dispatch_text_message_content(&val, sink),
+
+            // ── 状态同步 ──
+            "STATE_SNAPSHOT" => dispatch_state_snapshot(&val, sink),
+            "STATE_DELTA" => {} // STATE_DELTA 预留，当前不处理
+
+            // 未知 type → Plain 回落（可能是纯文本增量）
+            _ => return ag_ui_dispatch_to_sse(classify_ag_ui_sse_data(data)),
+        }
+    }
+    ag_ui_dispatch_to_sse(classify_ag_ui_sse_data(data))
+}
+
+// ── 生命周期 ──
+
+fn dispatch_run_finished(val: &serde_json::Value, sink: &mut SseControlSink<'_>) {
+    // RUN_FINISHED → 进入 Draining；on_done 由响应体消费完成后统一触发。
+    // 可选 `tiktokenPromptTokens`：成功路径通常已由 conversation_saved 更新底栏，此处作后备。
+    let tiktoken = crate::prompt_tokens::tiktoken_from_ag_ui_object(val);
+    if let Some(hook) = sink.notice_timeline.on_run_finished.as_mut() {
+        hook(tiktoken);
+    }
+}
+
+fn dispatch_run_error(val: &serde_json::Value, sink: &mut SseControlSink<'_>) {
+    let err = val.get("error");
+    let msg = err
+        .and_then(|e| e.get("message"))
+        .and_then(|m| m.as_str())
+        .unwrap_or("AG-UI run error");
+    let code = err.and_then(|e| e.get("code")).and_then(|c| c.as_str());
+    let request_id = err
+        .and_then(|e| e.get("requestId").or_else(|| e.get("request_id")))
+        .and_then(|r| r.as_str());
+    let line = format_user_error_with_meta(msg, code, request_id);
+    (sink.on_error)(line);
+    // 注意：**不**调用 `on_run_finished`——该钩子会把终态合成 `stream_ended=completed`，
+    // 将失败回合误标为"完成"（导出/诊断显示 `stream_ended=完成` 掩盖真实错误）。
+    // 回合收口由 `on_error`（气泡写错误文案 + 释放 turn）负责。
+}
+
+/// 用户可读错误：`message (CODE) [request_id=…]`（缺省字段省略）。
+pub fn format_user_error_with_meta(
+    message: &str,
+    code: Option<&str>,
+    request_id: Option<&str>,
+) -> String {
+    let mut out = message.trim().to_string();
+    if let Some(c) = code.map(str::trim).filter(|s| !s.is_empty()) {
+        out.push_str(&format!(" ({c})"));
+    }
+    if let Some(r) = request_id.map(str::trim).filter(|s| !s.is_empty()) {
+        out.push_str(&format!(" [request_id={r}]"));
+    }
+    out
+}
+
+// ── 状态同步 ──
+
+fn dispatch_state_snapshot(val: &serde_json::Value, sink: &mut SseControlSink<'_>) {
+    // AG-UI STATE_SNAPSHOT：完整 agent state。Client 默认不注册 hook（会话对齐靠 REST 水合）；
+    // 若将来需要，在 `SseNoticeTimelineHooks::on_state_snapshot` 接线即可。
+    let Some(hook) = sink.notice_timeline.on_state_snapshot.as_mut() else {
+        return;
+    };
+    let state = val.get("state").cloned().unwrap_or(serde_json::Value::Null);
+    hook(state);
+}
+
+// ── 工具调用 ──
+
+fn dispatch_tool_call_start(val: &serde_json::Value, sink: &mut SseControlSink<'_>) {
+    let tool_call_id = val.get("toolCallId").and_then(|v| v.as_str()).unwrap_or("");
+    let name = val.get("name").and_then(|v| v.as_str()).unwrap_or("");
+    let summary = val.get("summary").and_then(|v| v.as_str()).unwrap_or("");
+    let arguments = val
+        .get("arguments")
+        .and_then(|v| v.as_str())
+        .or_else(|| val.get("argsPreview").and_then(|v| v.as_str()));
+    let goal_id = val.get("goalId").and_then(|v| v.as_str());
+    if let Some(hook) = sink.workspace_tool.on_tool_call.as_mut() {
+        hook(
+            name.to_string(),
+            summary.to_string(),
+            arguments.map(str::to_string),
+            None, // args (full)
+            goal_id.map(str::to_string),
+            if tool_call_id.is_empty() {
+                None
+            } else {
+                Some(tool_call_id.to_string())
+            },
+        );
+    }
+}
+
+fn dispatch_tool_call_args(_val: &serde_json::Value, _sink: &mut SseControlSink<'_>) {
+    // TOOL_CALL_ARGS: 当前前端无专用回调，可后续扩展
+}
+
+fn dispatch_tool_call_end(_val: &serde_json::Value, _sink: &mut SseControlSink<'_>) {
+    // TOOL_CALL_END: 当前前端无专用回调，可后续扩展
+}
+
+fn dispatch_tool_call_result(val: &serde_json::Value, sink: &mut SseControlSink<'_>) {
+    let tool_call_id = val.get("toolCallId").and_then(|v| v.as_str());
+    let content = val.get("content").and_then(|v| v.as_str()).unwrap_or("");
+    let metadata = val.get("metadata");
+
+    // 检查 partial 标记：若为 partial 输出片段，走 on_tool_output_chunk
+    let is_partial = metadata
+        .and_then(|m| m.get("partial"))
+        .and_then(|p| p.as_bool())
+        .unwrap_or(false);
+
+    if is_partial {
+        let chunk_info = ToolOutputChunkInfo {
+            tool_call_id: tool_call_id.unwrap_or("").to_string(),
+            name: metadata
+                .and_then(|m| m.get("name"))
+                .and_then(|n| n.as_str())
+                .map(str::to_string),
+            seq: metadata
+                .and_then(|m| m.get("seq"))
+                .and_then(|s| s.as_u64())
+                .unwrap_or(0),
+            chunk: content.to_string(),
+            stream: metadata
+                .and_then(|m| m.get("stream"))
+                .and_then(|s| s.as_str())
+                .map(str::to_string),
+        };
+        if let Some(hook) = sink.workspace_tool.on_tool_output_chunk.as_mut() {
+            hook(chunk_info);
+        }
+    } else {
+        let result_info = ToolResultInfo {
+            tool_call_id: tool_call_id.map(str::to_string),
+            name: metadata
+                .and_then(|m| m.get("name"))
+                .and_then(|n| n.as_str())
+                .unwrap_or("")
+                .to_string(),
+            goal_id: metadata
+                .and_then(|m| m.get("goalId"))
+                .and_then(|g| g.as_str())
+                .map(str::to_string),
+            output: content.to_string(),
+            ok: metadata.and_then(|m| m.get("ok")).and_then(|o| o.as_bool()),
+            summary: metadata
+                .and_then(|m| m.get("summary"))
+                .and_then(|s| s.as_str())
+                .map(str::to_string),
+            exit_code: metadata
+                .and_then(|m| m.get("exitCode"))
+                .and_then(|e| e.as_i64()),
+            error_code: metadata
+                .and_then(|m| m.get("errorCode"))
+                .and_then(|e| e.as_str())
+                .map(str::to_string),
+            failure_category: metadata
+                .and_then(|m| m.get("failureCategory"))
+                .and_then(|f| f.as_str())
+                .map(str::to_string),
+            result_version: 1,
+            structured_preview: None,
+            tool_job_id: metadata
+                .and_then(|m| m.get("toolJobId"))
+                .and_then(|j| j.as_str())
+                .map(str::to_string),
+            tool_job_poll_url: metadata
+                .and_then(|m| m.get("toolJobPollUrl"))
+                .and_then(|j| j.as_str())
+                .map(str::to_string),
+            tool_job_status: metadata
+                .and_then(|m| m.get("toolJobStatus"))
+                .and_then(|j| j.as_str())
+                .map(str::to_string),
+        };
+        if let Some(hook) = sink.workspace_tool.on_tool_result.as_mut() {
+            hook(result_info);
+        }
+    }
+}
+
+// ── 正文增量 ──
+
+fn dispatch_text_message_content(val: &serde_json::Value, sink: &mut SseControlSink<'_>) {
+    let delta = val.get("delta").and_then(|v| v.as_str()).unwrap_or("");
+    if !delta.is_empty()
+        && let Some(cb) = sink.on_delta.as_mut()
+    {
+        cb(delta.to_string());
+    }
+}
+
+// ── CUSTOM 事件分发 ──
+
+fn dispatch_custom(val: &serde_json::Value, sink: &mut SseControlSink<'_>) {
+    let Some(custom_type) = val.get("customType").and_then(|v| v.as_str()) else {
+        return;
+    };
+    match custom_type {
+        "tool_running" | "parsing_tool_calls" | "workspace_changed" | "command_approval" => {
+            dispatch_tool_custom(custom_type, val, sink);
+        }
+        "assistant_answer_phase"
+        | "turn_segment_start"
+        | "turn_segment_end"
+        | "turn_tool_phase_end" => {
+            dispatch_plan_custom(custom_type, val, sink);
+        }
+        "stream_draining" => {
+            // 非终态：进入收尾文案；`on_done` / `saw_stream_ended` 仍由 RUN_FINISHED 与 body 完成驱动。
+            if let Some(hook) = sink.notice_timeline.on_stream_draining.as_mut() {
+                hook();
+            }
+        }
+        "clarification_questionnaire"
+        | "thinking_trace"
+        | "timeline_log"
+        | "conversation_saved" => {
+            dispatch_info_custom(custom_type, val, sink);
+        }
+        _ => {}
+    }
+}
+
+/// 工具类 CUSTOM 事件分发。
+fn dispatch_tool_custom(custom_type: &str, val: &serde_json::Value, sink: &mut SseControlSink<'_>) {
+    match custom_type {
+        "tool_running" => {
+            let running = val
+                .get("data")
+                .and_then(|d| d.get("running"))
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            if let Some(hook) = sink.workspace_tool.on_tool_status_change.as_mut() {
+                hook(running);
+            }
+        }
+        "parsing_tool_calls" => {
+            let parsing = val
+                .get("data")
+                .and_then(|d| d.get("parsing"))
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            if let Some(hook) = sink.workspace_tool.on_parsing_tool_calls_change.as_mut() {
+                hook(parsing);
+            }
+        }
+        "workspace_changed" => {
+            if let Some(hook) = sink.workspace_tool.on_workspace_changed.as_mut() {
+                hook();
+            }
+        }
+        "command_approval" => {
+            if let Some(data) = val.get("data") {
+                // 形状不符契约（缺 command/args）时不弹审批，跳过该事件。
+                if let Ok(req) = crate::approval::CommandApprovalData::deserialize(data)
+                    && let Some(hook) = sink.workspace_tool.on_command_approval_request.as_mut()
+                {
+                    hook(req);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// 阶段/规划类 CUSTOM 事件分发。
+fn dispatch_plan_custom(custom_type: &str, val: &serde_json::Value, sink: &mut SseControlSink<'_>) {
+    match custom_type {
+        "assistant_answer_phase" => {
+            if let Some(hook) = sink.turn_phase.on_assistant_answer_phase.as_mut() {
+                hook();
+            }
+        }
+        "turn_segment_start" => {
+            if let Some(data) = val.get("data") {
+                let info = TurnSegmentStartInfo {
+                    segment_id: data
+                        .get("segmentId")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    kind: data
+                        .get("kind")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    before_tool_call_id: data
+                        .get("beforeToolCallId")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_string),
+                };
+                if let Some(hook) = sink.turn_phase.on_turn_segment_start.as_mut() {
+                    hook(info);
+                }
+            }
+        }
+        "turn_segment_end" => {
+            let segment_id = val
+                .get("data")
+                .and_then(|d| d.get("segmentId"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            if let Some(hook) = sink.turn_phase.on_turn_segment_end.as_mut() {
+                hook(segment_id);
+            }
+        }
+        "turn_tool_phase_end" => {
+            if let Some(hook) = sink.turn_phase.on_turn_tool_phase_end.as_mut() {
+                hook();
+            }
+        }
+        _ => {}
+    }
+}
+
+/// 信息类 CUSTOM 事件分发（澄清问卷、思维迹、时间线旁注、会话保存）。
+fn json_str_field(data: &serde_json::Value, key: &str) -> String {
+    data.get(key)
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string()
+}
+
+fn json_opt_str_field(data: &serde_json::Value, key: &str) -> Option<String> {
+    data.get(key).and_then(|v| v.as_str()).map(str::to_string)
+}
+
+fn parse_clarification_questionnaire(data: &serde_json::Value) -> ClarificationQuestionnaireInfo {
+    let fields: Vec<ClarificationFormField> = data
+        .get("questions")
+        .and_then(|q| q.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|f| {
+                    Some(ClarificationFormField {
+                        id: f.get("id")?.as_str()?.to_string(),
+                        label: f.get("label")?.as_str()?.to_string(),
+                        hint: f.get("hint")?.as_str().map(str::to_string),
+                        required: f.get("required").and_then(|r| r.as_bool()).unwrap_or(false),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    ClarificationQuestionnaireInfo {
+        questionnaire_id: json_str_field(data, "questionnaireId"),
+        intro: json_str_field(data, "intro"),
+        fields,
+    }
+}
+
+fn parse_thinking_trace(data: &serde_json::Value) -> ThinkingTraceInfo {
+    ThinkingTraceInfo {
+        op: json_str_field(data, "op"),
+        node_id: json_opt_str_field(data, "nodeId"),
+        parent_id: json_opt_str_field(data, "parentId"),
+        title: json_opt_str_field(data, "title"),
+        chunk: json_opt_str_field(data, "chunk"),
+        context_snapshot: json_opt_str_field(data, "contextSnapshot"),
+    }
+}
+
+fn parse_timeline_log(data: &serde_json::Value) -> TimelineLogInfo {
+    TimelineLogInfo {
+        kind: json_str_field(data, "kind"),
+        title: json_str_field(data, "title"),
+        detail: json_opt_str_field(data, "detail"),
+    }
+}
+
+fn dispatch_info_custom(custom_type: &str, val: &serde_json::Value, sink: &mut SseControlSink<'_>) {
+    let Some(data) = val.get("data") else {
+        return;
+    };
+    match custom_type {
+        "clarification_questionnaire" => {
+            let info = parse_clarification_questionnaire(data);
+            if let Some(hook) = sink.clarify_trace.on_clarification_questionnaire.as_mut() {
+                hook(info);
+            }
+        }
+        "thinking_trace" => {
+            let info = parse_thinking_trace(data);
+            if let Some(hook) = sink.clarify_trace.on_thinking_trace.as_mut() {
+                hook(info);
+            }
+        }
+        "timeline_log" => {
+            let info = parse_timeline_log(data);
+            if let Some(hook) = sink.notice_timeline.on_timeline_log.as_mut() {
+                hook(info);
+            }
+        }
+        "conversation_saved" => {
+            let revision = data.get("revision").and_then(|v| v.as_u64()).unwrap_or(0);
+            let tiktoken = crate::prompt_tokens::tiktoken_from_ag_ui_object(data);
+            if let Some(hook) = sink.notice_timeline.on_conversation_saved_revision.as_mut() {
+                hook(revision, tiktoken);
+            }
+        }
+        _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::prompt_tokens::TiktokenPromptTokensSnapshot;
+    use crate::sse_dispatch::{
+        SseClarifyTraceHooks, SseNoticeTimelineHooks, SseTurnPhaseHooks, SseWorkspaceToolHooks,
+    };
+    use std::cell::RefCell;
+    use std::path::PathBuf;
+    use std::rc::Rc;
+
+    fn dummy_sink() -> SseControlSink<'static> {
+        // 使用 Box::leak 创建静态闭包，避免临时引用生命周期问题
+        let on_err: &'static mut dyn FnMut(String) = Box::leak(Box::new(|_| {}));
+        SseControlSink {
+            on_error: on_err,
+            on_delta: None,
+            workspace_tool: SseWorkspaceToolHooks::default(),
+            turn_phase: SseTurnPhaseHooks::default(),
+            clarify_trace: SseClarifyTraceHooks::default(),
+            notice_timeline: SseNoticeTimelineHooks::default(),
+        }
+    }
+
+    /// AG-UI 金样在 [`crabmate::cm_sse_protocol::ag_ui_classify`] 单测中维护；此处保留行为回归用例。
+    #[test]
+    fn golden_ag_ui_v2_parser_matches_expected() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let path = root.join("../../fixtures/sse_ag_ui_golden.jsonl");
+        let raw = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+        for (line_no, line) in raw.lines().enumerate() {
+            let t = line.trim();
+            if t.is_empty() || t.starts_with('#') {
+                continue;
+            }
+            let parts: Vec<&str> = t.splitn(3, '\t').collect();
+            assert!(
+                parts.len() == 3,
+                "{}:{}: expected 3 tab columns, got {}",
+                path.display(),
+                line_no + 1,
+                parts.len(),
+            );
+            let json_line = parts[1].trim();
+            let want = parts[2].trim();
+            let mut sink = dummy_sink();
+            let dispatch = parse_ag_ui_line(json_line, &mut sink);
+            let got = match dispatch {
+                SseDispatch::Handled => "handled",
+                SseDispatch::Plain => "plain",
+                SseDispatch::StreamEnded => "stream_ended",
+            };
+            assert_eq!(
+                got,
+                want,
+                "{}:{}: V2Parser dispatch mismatch\n  desc: {}\n  json: {json_line}\n  want: {want}\n  got:  {got}",
+                path.display(),
+                line_no + 1,
+                parts[0],
+            );
+        }
+    }
+
+    #[test]
+    fn run_finished_returns_stream_ended() {
+        let mut sink = dummy_sink();
+        let data = r#"{"type":"RUN_FINISHED","threadId":"th-1","runId":"run-1"}"#;
+        let dispatch = parse_ag_ui_line(data, &mut sink);
+        assert_eq!(dispatch, SseDispatch::StreamEnded);
+    }
+
+    #[test]
+    fn conversation_saved_forwards_tiktoken_prompt_tokens() {
+        let got = Rc::new(RefCell::new(None::<(u64, Option<u32>)>));
+        let got2 = Rc::clone(&got);
+        let mut on_saved = move |rev: u64, tik: Option<TiktokenPromptTokensSnapshot>| {
+            *got2.borrow_mut() = Some((rev, tik.map(|t| t.prompt_tokens)));
+        };
+        let mut sink = SseControlSink {
+            on_error: &mut |_| {},
+            on_delta: None,
+            workspace_tool: SseWorkspaceToolHooks::default(),
+            turn_phase: SseTurnPhaseHooks::default(),
+            clarify_trace: SseClarifyTraceHooks::default(),
+            notice_timeline: SseNoticeTimelineHooks {
+                on_conversation_saved_revision: Some(&mut on_saved),
+                ..SseNoticeTimelineHooks::default()
+            },
+        };
+        let data = concat!(
+            r#"{"type":"CUSTOM","customType":"conversation_saved","data":{"revision":11,"#,
+            r#""tiktokenPromptTokens":{"prompt_tokens":1500,"tiktoken_model":"gpt-4o"}}}"#
+        );
+        let dispatch = parse_ag_ui_line(data, &mut sink);
+        assert_eq!(dispatch, SseDispatch::Handled);
+        assert_eq!(*got.borrow(), Some((11, Some(1500))));
+    }
+
+    #[test]
+    fn run_finished_forwards_tiktoken_prompt_tokens() {
+        let got = Rc::new(RefCell::new(None::<Option<u32>>));
+        let got2 = Rc::clone(&got);
+        let mut on_fin = move |tik: Option<TiktokenPromptTokensSnapshot>| {
+            *got2.borrow_mut() = Some(tik.map(|t| t.prompt_tokens));
+        };
+        let mut sink = SseControlSink {
+            on_error: &mut |_| {},
+            on_delta: None,
+            workspace_tool: SseWorkspaceToolHooks::default(),
+            turn_phase: SseTurnPhaseHooks::default(),
+            clarify_trace: SseClarifyTraceHooks::default(),
+            notice_timeline: SseNoticeTimelineHooks {
+                on_run_finished: Some(&mut on_fin),
+                ..SseNoticeTimelineHooks::default()
+            },
+        };
+        let data = concat!(
+            r#"{"type":"RUN_FINISHED","threadId":"","runId":"3","#,
+            r#""tiktokenPromptTokens":{"prompt_tokens":88,"tiktoken_model":"gpt-4"}}"#
+        );
+        let dispatch = parse_ag_ui_line(data, &mut sink);
+        assert_eq!(dispatch, SseDispatch::StreamEnded);
+        assert_eq!(*got.borrow(), Some(Some(88)));
+    }
+
+    #[test]
+    fn run_error_returns_stream_ended() {
+        let mut sink = dummy_sink();
+        let data = r#"{"type":"RUN_ERROR","error":{"message":"fail","code":"ERR"}}"#;
+        let dispatch = parse_ag_ui_line(data, &mut sink);
+        assert_eq!(dispatch, SseDispatch::StreamEnded);
+    }
+
+    #[test]
+    fn run_error_formats_request_id() {
+        let got = Rc::new(RefCell::new(String::new()));
+        let got2 = Rc::clone(&got);
+        let mut on_error = move |s: String| *got2.borrow_mut() = s;
+        let mut sink = SseControlSink {
+            on_error: &mut on_error,
+            on_delta: None,
+            workspace_tool: SseWorkspaceToolHooks::default(),
+            turn_phase: SseTurnPhaseHooks::default(),
+            clarify_trace: SseClarifyTraceHooks::default(),
+            notice_timeline: SseNoticeTimelineHooks::default(),
+        };
+        let data =
+            r#"{"type":"RUN_ERROR","error":{"message":"fail","code":"ERR","requestId":"cm-1"}}"#;
+        let dispatch = parse_ag_ui_line(data, &mut sink);
+        assert_eq!(dispatch, SseDispatch::StreamEnded);
+        assert_eq!(*got.borrow(), "fail (ERR) [request_id=cm-1]");
+    }
+
+    #[test]
+    fn run_error_does_not_synthesize_run_finished() {
+        let called = Rc::new(std::cell::Cell::new(false));
+        let called2 = Rc::clone(&called);
+        let mut on_fin = move |_tik: Option<TiktokenPromptTokensSnapshot>| {
+            called2.set(true);
+        };
+        let mut sink = SseControlSink {
+            on_error: &mut |_| {},
+            on_delta: None,
+            workspace_tool: SseWorkspaceToolHooks::default(),
+            turn_phase: SseTurnPhaseHooks::default(),
+            clarify_trace: SseClarifyTraceHooks::default(),
+            notice_timeline: SseNoticeTimelineHooks {
+                on_run_finished: Some(&mut on_fin),
+                ..SseNoticeTimelineHooks::default()
+            },
+        };
+        let data = r#"{"type":"RUN_ERROR","error":{"message":"fail","code":"ERR"}}"#;
+        let dispatch = parse_ag_ui_line(data, &mut sink);
+        assert_eq!(dispatch, SseDispatch::StreamEnded);
+        assert!(
+            !called.get(),
+            "RUN_ERROR 不得触发 on_run_finished（会合成 stream_ended=completed 掩盖错误）"
+        );
+    }
+
+    #[test]
+    fn tool_call_result_is_handled() {
+        let mut sink = dummy_sink();
+        let data = r#"{"type":"TOOL_CALL_RESULT","toolCallId":"tc-1","content":"done"}"#;
+        let dispatch = parse_ag_ui_line(data, &mut sink);
+        assert_eq!(dispatch, SseDispatch::Handled);
+    }
+
+    #[test]
+    fn tool_call_result_carries_tool_job_metadata() {
+        let got = Rc::new(RefCell::new(None::<ToolResultInfo>));
+        let got2 = Rc::clone(&got);
+        let mut on_result = move |info: ToolResultInfo| *got2.borrow_mut() = Some(info);
+        let mut sink = SseControlSink {
+            on_error: &mut |_| {},
+            on_delta: None,
+            workspace_tool: SseWorkspaceToolHooks {
+                on_tool_result: Some(&mut on_result),
+                ..SseWorkspaceToolHooks::default()
+            },
+            turn_phase: SseTurnPhaseHooks::default(),
+            clarify_trace: SseClarifyTraceHooks::default(),
+            notice_timeline: SseNoticeTimelineHooks::default(),
+        };
+        let data = concat!(
+            r#"{"type":"TOOL_CALL_RESULT","toolCallId":"tc-2","content":"已创建后台任务","#,
+            r#""metadata":{"name":"run_command","ok":true,"toolJobId":"tooljob_0123","#,
+            r#""toolJobPollUrl":"/tools/jobs/tooljob_0123","toolJobStatus":"queued"}}"#
+        );
+        let dispatch = parse_ag_ui_line(data, &mut sink);
+        assert_eq!(dispatch, SseDispatch::Handled);
+        let got_borrow = got.borrow();
+        let info = got_borrow.as_ref().expect("on_tool_result should fire");
+        assert_eq!(info.tool_call_id.as_deref(), Some("tc-2"));
+        assert_eq!(info.tool_job_id.as_deref(), Some("tooljob_0123"));
+        assert_eq!(
+            info.tool_job_poll_url.as_deref(),
+            Some("/tools/jobs/tooljob_0123")
+        );
+        assert_eq!(info.tool_job_status.as_deref(), Some("queued"));
+    }
+
+    #[test]
+    fn tool_call_result_without_tool_job_metadata_keeps_none() {
+        let got = Rc::new(RefCell::new(None::<ToolResultInfo>));
+        let got2 = Rc::clone(&got);
+        let mut on_result = move |info: ToolResultInfo| *got2.borrow_mut() = Some(info);
+        let mut sink = SseControlSink {
+            on_error: &mut |_| {},
+            on_delta: None,
+            workspace_tool: SseWorkspaceToolHooks {
+                on_tool_result: Some(&mut on_result),
+                ..SseWorkspaceToolHooks::default()
+            },
+            turn_phase: SseTurnPhaseHooks::default(),
+            clarify_trace: SseClarifyTraceHooks::default(),
+            notice_timeline: SseNoticeTimelineHooks::default(),
+        };
+        let data = r#"{"type":"TOOL_CALL_RESULT","toolCallId":"tc-3","content":"done","metadata":{"name":"read_file","ok":true}}"#;
+        let dispatch = parse_ag_ui_line(data, &mut sink);
+        assert_eq!(dispatch, SseDispatch::Handled);
+        let got_borrow = got.borrow();
+        let info = got_borrow.as_ref().expect("on_tool_result should fire");
+        assert_eq!(info.tool_call_id.as_deref(), Some("tc-3"));
+        assert_eq!(info.tool_job_id, None);
+        assert_eq!(info.tool_job_poll_url, None);
+        assert_eq!(info.tool_job_status, None);
+    }
+
+    #[test]
+    fn custom_tool_running_triggers_hook() {
+        let called = Rc::new(RefCell::new(false));
+        let called2 = Rc::clone(&called);
+        let mut on_tool = |b: bool| *called2.borrow_mut() = b;
+        let mut sink = SseControlSink {
+            on_error: &mut |_| {},
+            on_delta: None,
+            workspace_tool: SseWorkspaceToolHooks {
+                on_tool_status_change: Some(&mut on_tool),
+                ..SseWorkspaceToolHooks::default()
+            },
+            turn_phase: SseTurnPhaseHooks::default(),
+            clarify_trace: SseClarifyTraceHooks::default(),
+            notice_timeline: SseNoticeTimelineHooks::default(),
+        };
+        let data = r#"{"type":"CUSTOM","customType":"tool_running","data":{"running":true}}"#;
+        let dispatch = parse_ag_ui_line(data, &mut sink);
+        assert_eq!(dispatch, SseDispatch::Handled);
+        assert!(*called.borrow());
+    }
+
+    #[test]
+    fn unknown_type_falls_back_to_plain() {
+        let mut sink = dummy_sink();
+        let data = r#"{"type":"UNKNOWN","foo":"bar"}"#;
+        let dispatch = parse_ag_ui_line(data, &mut sink);
+        assert_eq!(dispatch, SseDispatch::Plain);
+    }
+
+    #[test]
+    fn non_json_falls_back_to_plain() {
+        let mut sink = dummy_sink();
+        let data = "hello world";
+        let dispatch = parse_ag_ui_line(data, &mut sink);
+        assert_eq!(dispatch, SseDispatch::Plain);
+    }
+
+    #[test]
+    fn multi_line_tool_call_splits() {
+        let called = Rc::new(RefCell::new(0u32));
+        let called2 = Rc::clone(&called);
+        let mut on_tc = |_n: String,
+                         _s: String,
+                         _p: Option<String>,
+                         _a: Option<String>,
+                         _g: Option<String>,
+                         _tid: Option<String>| {
+            *called2.borrow_mut() += 1;
+        };
+        let mut sink = SseControlSink {
+            on_error: &mut |_| {},
+            on_delta: None,
+            workspace_tool: SseWorkspaceToolHooks {
+                on_tool_call: Some(&mut on_tc),
+                ..SseWorkspaceToolHooks::default()
+            },
+            turn_phase: SseTurnPhaseHooks::default(),
+            clarify_trace: SseClarifyTraceHooks::default(),
+            notice_timeline: SseNoticeTimelineHooks::default(),
+        };
+        let data = concat!(
+            r#"{"type":"TOOL_CALL_START","toolCallId":"tc-1","name":"read_file"}"#,
+            "\n",
+            r#"{"type":"TOOL_CALL_ARGS","toolCallId":"tc-1","args":"path=/etc/hosts"}"#,
+            "\n",
+            r#"{"type":"TOOL_CALL_END","toolCallId":"tc-1"}"#,
+        );
+        let dispatch = parse_ag_ui_line(data, &mut sink);
+        assert_eq!(dispatch, SseDispatch::Handled);
+        // TOOL_CALL_START should trigger on_tool_call once
+        assert_eq!(*called.borrow(), 1);
+    }
+}

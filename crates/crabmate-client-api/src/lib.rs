@@ -4,6 +4,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod ag_ui_parser;
 pub mod approval;
 pub mod auth;
 pub mod chat_body;
@@ -21,6 +22,7 @@ pub mod sse_dispatch;
 pub mod url;
 pub mod workspace;
 
+pub use ag_ui_parser::{format_user_error_with_meta, parse_ag_ui_line};
 pub use approval::{
     ApprovalDecision, ApprovalDecisionApi, ChatApprovalRequestBody, CommandApprovalData,
     approval_session_id_is_valid,

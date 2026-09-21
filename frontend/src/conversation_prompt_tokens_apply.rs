@@ -8,9 +8,7 @@ use leptos::prelude::Set;
 use crate::chat_session_state::{ChatSessionSignals, ConversationPromptTokenHydrate};
 use crabmate_client_api::prompt_tokens::TiktokenPromptTokensSnapshot;
 
-pub use crabmate_client_api::prompt_tokens::{
-    parse_tiktoken_prompt_tokens_value, tiktoken_from_ag_ui_object,
-};
+pub use crabmate_client_api::prompt_tokens::parse_tiktoken_prompt_tokens_value;
 
 /// 流式回合结束或 `conversation_saved` 携带的 tiktoken；`conversation_id` 须与当前绑定会话一致。
 pub fn apply_conversation_prompt_tokens_from_sse(
