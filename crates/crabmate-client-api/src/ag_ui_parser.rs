@@ -66,7 +66,7 @@ pub fn parse_ag_ui_line(data: &str, sink: &mut SseControlSink<'_>) -> SseDispatc
 
             // ── 正文增量 ──
             "TEXT_MESSAGE_CONTENT" => dispatch_text_message_content(&val, sink),
-            "REASONING_MESSAGE_CONTENT" => dispatch_text_message_content(&val, sink),
+            "REASONING_MESSAGE_CONTENT" => dispatch_reasoning_message_content(&val, sink),
 
             // ── 状态同步 ──
             "STATE_SNAPSHOT" => dispatch_state_snapshot(&val, sink),
@@ -262,6 +262,19 @@ fn dispatch_text_message_content(val: &serde_json::Value, sink: &mut SseControlS
     }
 }
 
+/// 思维链增量：优先走 `on_reasoning_delta`；未注册时回落 `on_delta`（Web 端同信道 + 相位信号区分）。
+fn dispatch_reasoning_message_content(val: &serde_json::Value, sink: &mut SseControlSink<'_>) {
+    let delta = val.get("delta").and_then(|v| v.as_str()).unwrap_or("");
+    if delta.is_empty() {
+        return;
+    }
+    if let Some(cb) = sink.on_reasoning_delta.as_mut() {
+        cb(delta.to_string());
+    } else if let Some(cb) = sink.on_delta.as_mut() {
+        cb(delta.to_string());
+    }
+}
+
 // ── CUSTOM 事件分发 ──
 
 fn dispatch_custom(val: &serde_json::Value, sink: &mut SseControlSink<'_>) {
@@ -324,11 +337,20 @@ fn dispatch_tool_custom(custom_type: &str, val: &serde_json::Value, sink: &mut S
         }
         "command_approval" => {
             if let Some(data) = val.get("data") {
-                // 形状不符契约（缺 command/args）时不弹审批，跳过该事件。
-                if let Ok(req) = crate::approval::CommandApprovalData::deserialize(data)
-                    && let Some(hook) = sink.workspace_tool.on_command_approval_request.as_mut()
-                {
-                    hook(req);
+                // 形状不符契约（缺 command/args）时不弹审批，跳过该事件并通知消费方。
+                match crate::approval::CommandApprovalData::deserialize(data) {
+                    Ok(req) => {
+                        if let Some(hook) = sink.workspace_tool.on_command_approval_request.as_mut()
+                        {
+                            hook(req);
+                        }
+                    }
+                    Err(_) => {
+                        if let Some(hook) = sink.workspace_tool.on_command_approval_invalid.as_mut()
+                        {
+                            hook();
+                        }
+                    }
                 }
             }
         }
@@ -493,6 +515,7 @@ mod tests {
         SseControlSink {
             on_error: on_err,
             on_delta: None,
+            on_reasoning_delta: None,
             workspace_tool: SseWorkspaceToolHooks::default(),
             turn_phase: SseTurnPhaseHooks::default(),
             clarify_trace: SseClarifyTraceHooks::default(),
@@ -558,6 +581,7 @@ mod tests {
         let mut sink = SseControlSink {
             on_error: &mut |_| {},
             on_delta: None,
+            on_reasoning_delta: None,
             workspace_tool: SseWorkspaceToolHooks::default(),
             turn_phase: SseTurnPhaseHooks::default(),
             clarify_trace: SseClarifyTraceHooks::default(),
@@ -585,6 +609,7 @@ mod tests {
         let mut sink = SseControlSink {
             on_error: &mut |_| {},
             on_delta: None,
+            on_reasoning_delta: None,
             workspace_tool: SseWorkspaceToolHooks::default(),
             turn_phase: SseTurnPhaseHooks::default(),
             clarify_trace: SseClarifyTraceHooks::default(),
@@ -618,6 +643,7 @@ mod tests {
         let mut sink = SseControlSink {
             on_error: &mut on_error,
             on_delta: None,
+            on_reasoning_delta: None,
             workspace_tool: SseWorkspaceToolHooks::default(),
             turn_phase: SseTurnPhaseHooks::default(),
             clarify_trace: SseClarifyTraceHooks::default(),
@@ -640,6 +666,7 @@ mod tests {
         let mut sink = SseControlSink {
             on_error: &mut |_| {},
             on_delta: None,
+            on_reasoning_delta: None,
             workspace_tool: SseWorkspaceToolHooks::default(),
             turn_phase: SseTurnPhaseHooks::default(),
             clarify_trace: SseClarifyTraceHooks::default(),
@@ -673,6 +700,7 @@ mod tests {
         let mut sink = SseControlSink {
             on_error: &mut |_| {},
             on_delta: None,
+            on_reasoning_delta: None,
             workspace_tool: SseWorkspaceToolHooks {
                 on_tool_result: Some(&mut on_result),
                 ..SseWorkspaceToolHooks::default()
@@ -707,6 +735,7 @@ mod tests {
         let mut sink = SseControlSink {
             on_error: &mut |_| {},
             on_delta: None,
+            on_reasoning_delta: None,
             workspace_tool: SseWorkspaceToolHooks {
                 on_tool_result: Some(&mut on_result),
                 ..SseWorkspaceToolHooks::default()
@@ -734,6 +763,7 @@ mod tests {
         let mut sink = SseControlSink {
             on_error: &mut |_| {},
             on_delta: None,
+            on_reasoning_delta: None,
             workspace_tool: SseWorkspaceToolHooks {
                 on_tool_status_change: Some(&mut on_tool),
                 ..SseWorkspaceToolHooks::default()
@@ -779,6 +809,7 @@ mod tests {
         let mut sink = SseControlSink {
             on_error: &mut |_| {},
             on_delta: None,
+            on_reasoning_delta: None,
             workspace_tool: SseWorkspaceToolHooks {
                 on_tool_call: Some(&mut on_tc),
                 ..SseWorkspaceToolHooks::default()
@@ -798,5 +829,82 @@ mod tests {
         assert_eq!(dispatch, SseDispatch::Handled);
         // TOOL_CALL_START should trigger on_tool_call once
         assert_eq!(*called.borrow(), 1);
+    }
+
+    #[test]
+    fn reasoning_delta_prefers_reasoning_hook() {
+        let reason = Rc::new(RefCell::new(String::new()));
+        let body = Rc::new(RefCell::new(String::new()));
+        let reason2 = Rc::clone(&reason);
+        let body2 = Rc::clone(&body);
+        let mut on_reason = move |s: String| reason2.borrow_mut().push_str(&s);
+        let mut on_body = move |s: String| body2.borrow_mut().push_str(&s);
+        let mut sink = SseControlSink {
+            on_error: &mut |_| {},
+            on_delta: Some(&mut on_body),
+            on_reasoning_delta: Some(&mut on_reason),
+            workspace_tool: SseWorkspaceToolHooks::default(),
+            turn_phase: SseTurnPhaseHooks::default(),
+            clarify_trace: SseClarifyTraceHooks::default(),
+            notice_timeline: SseNoticeTimelineHooks::default(),
+        };
+        let data = r#"{"type":"REASONING_MESSAGE_CONTENT","delta":"think"}"#;
+        let dispatch = parse_ag_ui_line(data, &mut sink);
+        assert_eq!(dispatch, SseDispatch::Handled);
+        assert_eq!(*reason.borrow(), "think");
+        assert!(
+            body.borrow().is_empty(),
+            "注册 on_reasoning_delta 后正文信道不得收到思维链"
+        );
+    }
+
+    #[test]
+    fn reasoning_delta_falls_back_to_on_delta() {
+        let body = Rc::new(RefCell::new(String::new()));
+        let body2 = Rc::clone(&body);
+        let mut on_body = move |s: String| body2.borrow_mut().push_str(&s);
+        let mut sink = SseControlSink {
+            on_error: &mut |_| {},
+            on_delta: Some(&mut on_body),
+            on_reasoning_delta: None,
+            workspace_tool: SseWorkspaceToolHooks::default(),
+            turn_phase: SseTurnPhaseHooks::default(),
+            clarify_trace: SseClarifyTraceHooks::default(),
+            notice_timeline: SseNoticeTimelineHooks::default(),
+        };
+        let data = r#"{"type":"REASONING_MESSAGE_CONTENT","delta":"think"}"#;
+        let dispatch = parse_ag_ui_line(data, &mut sink);
+        assert_eq!(dispatch, SseDispatch::Handled);
+        assert_eq!(*body.borrow(), "think", "未注册思维链钩子时回落 on_delta");
+    }
+
+    #[test]
+    fn malformed_command_approval_triggers_invalid_hook_only() {
+        let invalid = Rc::new(RefCell::new(false));
+        let asked = Rc::new(RefCell::new(false));
+        let invalid2 = Rc::clone(&invalid);
+        let asked2 = Rc::clone(&asked);
+        let mut on_invalid = move || *invalid2.borrow_mut() = true;
+        let mut on_request = move |_r: crate::approval::CommandApprovalData| {
+            *asked2.borrow_mut() = true;
+        };
+        let mut sink = SseControlSink {
+            on_error: &mut |_| {},
+            on_delta: None,
+            on_reasoning_delta: None,
+            workspace_tool: SseWorkspaceToolHooks {
+                on_command_approval_request: Some(&mut on_request),
+                on_command_approval_invalid: Some(&mut on_invalid),
+                ..SseWorkspaceToolHooks::default()
+            },
+            turn_phase: SseTurnPhaseHooks::default(),
+            clarify_trace: SseClarifyTraceHooks::default(),
+            notice_timeline: SseNoticeTimelineHooks::default(),
+        };
+        let data = r#"{"type":"CUSTOM","customType":"command_approval","data":{"foo":1}}"#;
+        let dispatch = parse_ag_ui_line(data, &mut sink);
+        assert_eq!(dispatch, SseDispatch::Handled);
+        assert!(*invalid.borrow(), "畸形审批载荷应触发 invalid 提示钩子");
+        assert!(!*asked.borrow(), "畸形审批不得弹出审批");
     }
 }
