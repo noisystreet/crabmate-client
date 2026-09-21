@@ -286,7 +286,10 @@ html[data-cm-mobile-shell] .composer-input--mirror-overlay {
     background: var(--surface);
     /* 勿给 stack 左右 padding：镜像高亮 / fake-ph 为 inset:0，与 textarea 必须同盒对齐 */
     padding: 0;
-    overflow: hidden;
+    /* 勿 overflow:hidden：`.composer-slash-menu` 绝对定位于 stack 上方（bottom:100%+6px），
+       会被裁掉 → 窄屏 / Android 上输入 `/` 看不到内置命令与 skill 浮层。
+       stack 内没有需要裁剪的溢出：textarea 透明无边框，镜像高亮自带 overflow:hidden + 圆角。 */
+    overflow: visible;
     box-sizing: border-box;
   }
 
