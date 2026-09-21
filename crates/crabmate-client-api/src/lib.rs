@@ -17,6 +17,7 @@ pub mod prompt_tokens;
 pub mod secrets;
 pub mod sessions;
 pub mod slash;
+pub mod sse_dispatch;
 pub mod url;
 pub mod workspace;
 

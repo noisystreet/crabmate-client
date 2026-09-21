@@ -1,17 +1,19 @@
-//! SSE 控制面载荷形状与回调分组类型（与 **`dispatch`** 子模块中 **`try_dispatch_sse_control_payload`** 的消费契约一致）。
+//! SSE 控制面载荷形状与回调分组类型（各端 `SseControlSink` 消费契约一致）。
+//!
+//! 纯数据 + 回调签名：不触碰 leptos 信号，也不做 IO；V2 解析器把事件分发到这些钩子。
 
 use serde_json::Value;
 
-use crate::conversation_hydrate::TiktokenPromptTokensSnapshot;
+use crate::prompt_tokens::TiktokenPromptTokensSnapshot;
 
-pub use crabmate_client_api::CommandApprovalData;
+pub use crate::approval::CommandApprovalData;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SseDispatch {
     Handled,
     Plain,
-    /// 用于 V2Parser 通知 `RUN_FINISHED` / `RUN_ERROR`：`handle_sse_block` 据此设置
-    /// `saw_stream_ended` 并触发 `on_stream_ended` / `on_done` / `on_error` 等回调。
+    /// 用于 V2Parser 通知 `RUN_FINISHED` / `RUN_ERROR`：调用方据此设置 `saw_stream_ended`
+    /// 并触发 `on_stream_ended` / `on_done` / `on_error` 等回调。
     StreamEnded,
 }
 
@@ -198,6 +200,42 @@ impl ToolJobState {
     }
 }
 
+/// `clarification_questionnaire`：Web 表单用字段子集。
+#[derive(Debug, Clone)]
+pub struct ClarificationQuestionnaireInfo {
+    pub questionnaire_id: String,
+    pub intro: String,
+    pub fields: Vec<ClarificationFormField>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ClarificationFormField {
+    pub id: String,
+    pub label: String,
+    pub hint: Option<String>,
+    pub required: bool,
+}
+
+/// `thinking_trace`：Web 调试台用（不进聊天正文）。
+#[derive(Debug, Clone)]
+pub struct ThinkingTraceInfo {
+    pub op: String,
+    pub node_id: Option<String>,
+    pub parent_id: Option<String>,
+    pub title: Option<String>,
+    pub chunk: Option<String>,
+    pub context_snapshot: Option<String>,
+}
+
+/// `timeline_log`：Web 时间线旁注（审批结果等；不进聊天正文）。
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct TimelineLogInfo {
+    pub kind: String,
+    pub title: String,
+    pub detail: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -312,40 +350,4 @@ mod tests {
         assert_eq!(state.next_output_cursor, 0);
         assert!(!state.output_truncated && !state.output_eof);
     }
-}
-
-/// `clarification_questionnaire`：Web 表单用字段子集。
-#[derive(Debug, Clone)]
-pub struct ClarificationQuestionnaireInfo {
-    pub questionnaire_id: String,
-    pub intro: String,
-    pub fields: Vec<ClarificationFormField>,
-}
-
-#[derive(Debug, Clone)]
-pub struct ClarificationFormField {
-    pub id: String,
-    pub label: String,
-    pub hint: Option<String>,
-    pub required: bool,
-}
-
-/// `thinking_trace`：Web 调试台用（不进聊天正文）。
-#[derive(Debug, Clone)]
-pub struct ThinkingTraceInfo {
-    pub op: String,
-    pub node_id: Option<String>,
-    pub parent_id: Option<String>,
-    pub title: Option<String>,
-    pub chunk: Option<String>,
-    pub context_snapshot: Option<String>,
-}
-
-/// `timeline_log`：Web 时间线旁注（审批结果等；不进聊天正文）。
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub struct TimelineLogInfo {
-    pub kind: String,
-    pub title: String,
-    pub detail: Option<String>,
 }
