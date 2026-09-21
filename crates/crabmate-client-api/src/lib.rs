@@ -13,6 +13,7 @@ pub mod markdown_inline;
 pub mod markdown_normalize;
 pub mod messages;
 pub mod paths;
+pub mod prompt_tokens;
 pub mod secrets;
 pub mod sessions;
 pub mod slash;
@@ -38,6 +39,9 @@ pub use health::health_degraded_note;
 pub use markdown_inline::{InlineSpan, parse_inline_markdown};
 pub use markdown_normalize::normalize_markdown_for_render;
 pub use messages::{http_error_message, http_error_text};
+pub use prompt_tokens::{
+    TiktokenPromptTokensSnapshot, parse_tiktoken_prompt_tokens_value, tiktoken_from_ag_ui_object,
+};
 pub use secrets::{KEYRING_SERVICE, SecretSlot, WEB_API_BEARER_KEYRING_ACCOUNT};
 pub use sessions::{
     SessionListRow, conversation_id_for_resume, session_row_conversation_id_for_resume,

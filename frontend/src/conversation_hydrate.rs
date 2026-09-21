@@ -44,27 +44,9 @@ pub struct ConversationMessagesResponse {
     pub has_older: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-pub struct TiktokenPromptTokensSnapshot {
-    pub prompt_tokens: u32,
-    pub tiktoken_model: String,
-    #[serde(default)]
-    pub used_input_tokens: Option<u32>,
-    #[serde(default)]
-    pub max_input_tokens: Option<u32>,
-    #[serde(default)]
-    pub reserved_output_tokens: Option<u32>,
-    #[serde(default)]
-    pub message_tokens: Option<u32>,
-    #[serde(default)]
-    pub tool_schema_tokens: Option<u32>,
-    #[serde(default)]
-    pub attachment_tokens: Option<u32>,
-    #[serde(default)]
-    pub counting_source: Option<String>,
-    #[serde(default)]
-    pub provider_input_tokens: Option<u64>,
-}
+/// tiktoken 用量快照现由共享层提供（[`crabmate_client_api::prompt_tokens`]）；此处转发以保持
+/// `crate::conversation_hydrate::TiktokenPromptTokensSnapshot` 既有引用路径。
+pub use crabmate_client_api::prompt_tokens::TiktokenPromptTokensSnapshot;
 
 #[derive(Debug, Deserialize)]
 struct ApiMessage {
