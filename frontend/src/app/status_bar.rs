@@ -21,6 +21,63 @@ use super::status_agent_role_menu::{AgentRoleMenuProps, StatusAgentRoleMenu};
 use super::status_fetch_state::status_bar_should_show_skeleton;
 use super::status_tasks_state::StatusTasksSignals;
 
+// ---- 类名契约（状态 → 类名）----
+// 集中构造，避免同一类名在多个组件里就地手写；与 `styles/status.css` 选择器一一对应，改动须同步下方单测。
+
+/// 底栏整体类名：任一异常态叠加 `status-bar-fetch-error`。
+fn status_bar_footer_class(
+    fetch_failed: bool,
+    prefs_load_failed: bool,
+    hydration_failed: bool,
+) -> &'static str {
+    if fetch_failed || prefs_load_failed || hydration_failed {
+        "status-bar status-bar-fetch-error"
+    } else {
+        "status-bar"
+    }
+}
+
+/// 错误面板类名：`--prefs-save` 区分「保存失败」（无重试按钮，与拉取失败共用基类样式）。
+fn status_fetch_error_class(is_save_error: bool) -> &'static str {
+    if is_save_error {
+        "status-fetch-error status-fetch-error--prefs-save"
+    } else {
+        "status-fetch-error"
+    }
+}
+
+/// 上下文用量条填充类名：估算基线优先于告警阈值（两者互斥，先判基线）。
+fn status_context_meter_fill_class(is_baseline_estimate: bool, full_pct: f64) -> &'static str {
+    if is_baseline_estimate {
+        "status-context-meter-fill status-context-meter-fill--estimate"
+    } else if full_pct >= 90.0 {
+        "status-context-meter-fill status-context-meter-fill--warn"
+    } else {
+        "status-context-meter-fill"
+    }
+}
+
+/// 运行指示器状态：唯一决定 `status-run-<kind>` 类名后缀。
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum RunIndicatorKind {
+    Ready,
+    Running,
+    Tool,
+    Error,
+}
+
+impl RunIndicatorKind {
+    /// 运行指示器类名：`status-run` + `status-run-{ready|running|tool|error}`。
+    fn class(self) -> &'static str {
+        match self {
+            Self::Ready => "status-run status-run-ready",
+            Self::Running => "status-run status-run-running",
+            Self::Tool => "status-run status-run-tool",
+            Self::Error => "status-run status-run-error",
+        }
+    }
+}
+
 #[component]
 fn ConversationHydrationErrorPanel(
     hydration_err: String,
@@ -31,7 +88,7 @@ fn ConversationHydrationErrorPanel(
     let hydration_err_for_body = hydration_err.clone();
     view! {
         <div
-            class="status-fetch-error"
+            class=status_fetch_error_class(false)
             role="status"
             aria-live="polite"
             data-testid="hydration-parse-error"
@@ -61,7 +118,7 @@ fn UserPrefsLoadErrorPanel(
     let fetch_err_for_body = fetch_err.clone();
     view! {
         <div
-            class="status-fetch-error"
+            class=status_fetch_error_class(false)
             role="status"
             aria-live="polite"
             data-testid="prefs-load-error"
@@ -89,7 +146,7 @@ fn UserPrefsSaveErrorPanel(save_err: String, locale: RwSignal<Locale>) -> impl I
     let save_err_for_body = save_err.clone();
     view! {
         <div
-            class="status-fetch-error status-fetch-error--prefs-save"
+            class=status_fetch_error_class(true)
             role="status"
             aria-live="polite"
             data-testid="prefs-save-error"
@@ -113,7 +170,7 @@ fn StatusFetchErrorPanel(
     let show_web_bearer_cta = crate::api::is_web_api_credential_error(&fetch_err);
     view! {
         <div
-            class="status-fetch-error"
+            class=status_fetch_error_class(false)
             role="status"
             aria-live="polite"
         >
@@ -263,13 +320,10 @@ fn StatusBarContextMeter(
             let u = used.unwrap_or(0);
             let pct = ((u as f64 / cap as f64) * 100.0).min(100.0);
             let full_pct = (u as f64 / cap as f64) * 100.0;
-            let fill_class = if status_bar_context_is_baseline_estimate(chat, used) {
-                "status-context-meter-fill status-context-meter-fill--estimate"
-            } else if full_pct >= 90.0 {
-                "status-context-meter-fill status-context-meter-fill--warn"
-            } else {
-                "status-context-meter-fill"
-            };
+            let fill_class = status_context_meter_fill_class(
+                status_bar_context_is_baseline_estimate(chat, used),
+                full_pct,
+            );
             view! {
                 <div class="status-context-meter" style=format!("--status-context-pct: {pct:.2}%")>
                     <div class=fill_class></div>
@@ -569,15 +623,15 @@ fn run_indicator_kind(
     st: StatusTasksSignals,
     status_err: RwSignal<Option<String>>,
     stream_busy_memos: ChatStreamBusyMemos,
-) -> &'static str {
+) -> RunIndicatorKind {
     if st.status_fetch_err.get().is_some() || status_err.get().is_some() {
-        "error"
+        RunIndicatorKind::Error
     } else if stream_busy_memos.tool_timeline_busy_ui.get() {
-        "tool"
+        RunIndicatorKind::Tool
     } else if stream_busy_memos.model_status_busy.get() {
-        "running"
+        RunIndicatorKind::Running
     } else {
-        "ready"
+        RunIndicatorKind::Ready
     }
 }
 
@@ -610,8 +664,7 @@ fn StatusBarRunIndicator(
 ) -> impl IntoView {
     view! {
         <span class=move || {
-            let kind = run_indicator_kind(st, status_err, stream_busy_memos);
-            format!("status-run status-run-{kind}")
+            run_indicator_kind(st, status_err, stream_busy_memos).class()
         }>
             <span class="status-run-dot" aria-hidden="true"></span>
             <span>{move || {
@@ -664,14 +717,11 @@ fn StatusBarFooterBody(signals: StatusBarFooterSignals) -> impl IntoView {
         <footer
             data-testid="status-bar"
             class=move || {
-            if st.status_fetch_err.get().is_some()
-                || user_prefs_sync_phase.get() == UserPrefsSyncPhase::LoadFailed
-                || conversation_hydration_err.get().is_some()
-            {
-                "status-bar status-bar-fetch-error"
-            } else {
-                "status-bar"
-            }
+            status_bar_footer_class(
+                st.status_fetch_err.get().is_some(),
+                user_prefs_sync_phase.get() == UserPrefsSyncPhase::LoadFailed,
+                conversation_hydration_err.get().is_some(),
+            )
         }>
             <StatusBarChipsRow
                 chips=chips
@@ -736,5 +786,82 @@ mod thinking_toggle_tests {
     fn next_from_server_is_on() {
         // 从「跟随服务端」点击开关 → 切到「开」。
         assert_eq!(next_thinking_mode("server"), "on");
+    }
+}
+
+#[cfg(test)]
+mod status_bar_class_tests {
+    use super::{
+        RunIndicatorKind, status_bar_footer_class, status_context_meter_fill_class,
+        status_fetch_error_class,
+    };
+
+    #[test]
+    fn footer_class_is_base_when_healthy() {
+        assert_eq!(status_bar_footer_class(false, false, false), "status-bar");
+    }
+
+    #[test]
+    fn footer_class_marks_any_error_state() {
+        // 三个异常来源任一命中都叠加 `-fetch-error`（victauri 用例依赖该后缀）。
+        assert_eq!(
+            status_bar_footer_class(true, false, false),
+            "status-bar status-bar-fetch-error"
+        );
+        assert_eq!(
+            status_bar_footer_class(false, true, false),
+            "status-bar status-bar-fetch-error"
+        );
+        assert_eq!(
+            status_bar_footer_class(false, false, true),
+            "status-bar status-bar-fetch-error"
+        );
+    }
+
+    #[test]
+    fn fetch_error_class_is_base_unless_save_failure() {
+        assert_eq!(status_fetch_error_class(false), "status-fetch-error");
+        assert_eq!(
+            status_fetch_error_class(true),
+            "status-fetch-error status-fetch-error--prefs-save"
+        );
+    }
+
+    #[test]
+    fn context_meter_fill_prefers_estimate_over_warn() {
+        // 估算基线即使已过 90% 也只出 `--estimate`，两个修饰位互斥。
+        assert_eq!(
+            status_context_meter_fill_class(true, 95.0),
+            "status-context-meter-fill status-context-meter-fill--estimate"
+        );
+    }
+
+    #[test]
+    fn context_meter_fill_warns_at_threshold() {
+        assert_eq!(
+            status_context_meter_fill_class(false, 90.0),
+            "status-context-meter-fill status-context-meter-fill--warn"
+        );
+        assert_eq!(
+            status_context_meter_fill_class(false, 89.9),
+            "status-context-meter-fill"
+        );
+    }
+
+    #[test]
+    fn run_indicator_class_matches_every_kind() {
+        assert_eq!(
+            RunIndicatorKind::Ready.class(),
+            "status-run status-run-ready"
+        );
+        assert_eq!(
+            RunIndicatorKind::Running.class(),
+            "status-run status-run-running"
+        );
+        assert_eq!(RunIndicatorKind::Tool.class(), "status-run status-run-tool");
+        assert_eq!(
+            RunIndicatorKind::Error.class(),
+            "status-run status-run-error"
+        );
     }
 }
