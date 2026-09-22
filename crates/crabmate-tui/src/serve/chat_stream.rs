@@ -1,6 +1,7 @@
 //! `POST /chat/stream`：消费 AG-UI SSE，输出助手正文增量；流中处理命令审批。
 
 use std::io::{self, Write};
+use std::time::Duration;
 
 use crabmate::cm_sse_protocol::{
     SSE_PROTOCOL_VERSION, is_sse_done_sentinel, join_sse_data_lines, parse_sse_event_id,
@@ -386,6 +387,11 @@ fn stream_read_error(outcome: &ChatStreamOutcome, cause: &str) -> TermError {
     }
 }
 
+/// SSE 字节级空闲上限：serve 的 SSE 走 axum `KeepAlive::default()`（约 15s 一个注释帧），
+/// 正常回合不会静默这么久。超过即判定连接已被 NAT / 中间代理黑洞（TCP 未断但无数据），
+/// 中断本轮；已拿到 job 句柄时解析为 [`TermError::InterruptedStream`] 以便续流。
+const SSE_IDLE_TIMEOUT: Duration = Duration::from_secs(90);
+
 async fn consume_sse_response(
     client: &ServeClient,
     opts: &ChatStreamOptions,
@@ -398,6 +404,8 @@ async fn consume_sse_response(
     let mut buffer = String::new();
     let mut stream = resp.bytes_stream();
     loop {
+        // 每次迭代重建：任何字节到达都会重置空闲计时。
+        let idle = tokio::time::sleep(SSE_IDLE_TIMEOUT);
         let chunk = tokio::select! {
             biased;
             _ = wait_for_cancel(cancel) => {
@@ -406,6 +414,15 @@ async fn consume_sse_response(
                 }
                 // 旧 serve 无 `x-stream-job-id`：无法 cancel，保持原中断语义。
                 return Err(TermError::Interrupted);
+            }
+            () = idle => {
+                return Err(stream_read_error(
+                    outcome,
+                    &format!(
+                        "no SSE bytes for {}s (serve keep-alive stopped; connection stalled)",
+                        SSE_IDLE_TIMEOUT.as_secs()
+                    ),
+                ));
             }
             next = stream.next() => next,
         };
