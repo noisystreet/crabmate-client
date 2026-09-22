@@ -69,7 +69,7 @@ crates/
 | 能力 | Server 现状 | 远程 `crabmate-tui` |
 |------|-------------|----------------------|
 | 一轮对话 | `run_agent_turn` | `POST /chat/stream`（主路径）或 `/chat` |
-| 断线续传 | TUI SSE mirror | repl `/resume`：`stream_resume:{job_id,after_seq}`（job 取响应头 `x-stream-job-id`；cancel 已送达的回合不可续，cancel 未送达时 job 可能仍在跑、仍可续） |
+| 断线续传 | TUI SSE mirror | 传输层中断（`TermError::InterruptedStream`，已拿到 job 句柄）时**自动续流**：`chat` / `repl` 自动重发 `stream_resume:{job_id,after_seq}`，上限 2 次、退避 `0.5s × 第 n 次`（`src/turn.rs`）；用尽后仍可 repl `/resume` 手动续（job 取响应头 `x-stream-job-id`；cancel 已送达的回合不可续，cancel 未送达时 job 可能仍在跑、仍可续） |
 | 审批 | 进程内 dialoguer | SSE 控制面 + `POST /chat/approval` |
 | 回合取消 | 进程内中断 | Ctrl+C → `POST /chat/stream/{job_id}/cancel`（job 取响应头 `x-stream-job-id`；旧 serve 无路由时降级为本地中断） |
 | 斜杠 /skills | 同进程 | 经 stream 内置命令或后续 REST |
@@ -77,6 +77,8 @@ crates/
 | 会话列表/分支 | SQLite 同库 | `/user-data/.../sessions`、`POST /chat/branch` |
 | 模型密钥 | 本机 keyring → 回合注入 | 每轮请求体 `client_llm.{api_key,model,api_base}`（同 WASM UI 设置子集）；CLI/env 提供，缺省时 read-only 回退壳钥匙串 |
 | GitHub token | 现已请求作用域 | 头 `X-CrabMate-GitHub-Token` |
+
+> **HTTP / SSE 超时预算（TUI 侧）**：建连 10s、非流式请求（health / 审批 / JSON API）30s、取消 5s（`src/serve/client.rs`、`src/serve/json_api.rs`）；`/chat/stream` **不设**请求级总超时（长回合会被掐断），改由字节级空闲上限 90s（≈ serve `KeepAlive` 6 个心跳）判定 NAT / 代理黑洞，并在已拿 `x-stream-job-id` 时按上表「断线续传」自动续流（`src/serve/chat_stream.rs`）。
 
 > **模型密钥 / Web Bearer（CLI/env + 壳钥匙串回退，P3 已落地）**：`crabmate-tui chat|repl` 支持 `--llm-api-key` / `--llm-model` / `--llm-api-base`（env 沿用 serve 侧模型 env 名：`CM_API_KEY` / `CM_MODEL` / `CM_API_BASE`），有任一非空时随 `POST /chat/stream` 发送 `client_llm.{api_key,model,api_base}`，语义同 WASM UI「设置 → API 密钥/模型」——供 bearer 鉴权且服务端未设 `API_KEY` 的 serve（如个人云）使用；密钥仅存进程内、不落盘。`--bearer` 仍是 Web Bearer（≠ 模型 API_KEY）。**`--bearer` / `--llm-api-key`（或对应 env）缺省时**，TUI read-only 回退读取桌面壳已写入同一系统钥匙串（service `com.crabmate.credentials`）的槽位：`tauri_connect_web_api_bearer` / `tauri_client_llm_api_key`，不写壳槽位；`--no-keyring` 关闭回退（无条目或钥匙串不可用时静默跳过）。
 
