@@ -1,25 +1,4 @@
-/* —— 顶栏 —— */
-.topbar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  height: var(--topbar-h);
-  padding: 0 16px 0 14px;
-  border-bottom: 1px solid var(--border-subtle);
-  background: color-mix(in srgb, var(--surface) 88%, transparent);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  flex-shrink: 0;
-  box-shadow: var(--shadow-sm);
-}
-
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  min-width: 0;
-}
-
+/* —— 品牌标（`.nav-rail-brand` 内使用）—— */
 .brand-mark {
   width: 24px;
   height: 24px;
@@ -34,44 +13,6 @@
     0 1px 0 color-mix(in srgb, #fff 10%, transparent) inset,
     0 2px 8px color-mix(in srgb, var(--accent) 20%, transparent);
   flex-shrink: 0;
-}
-
-.brand-text {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  min-width: 0;
-}
-
-.topbar h1 {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 760;
-  letter-spacing: -0.018em;
-  line-height: 1.15;
-  color: var(--text);
-}
-
-.brand-sub {
-  font-size: 10.5px;
-  color: var(--muted);
-  font-weight: 560;
-  letter-spacing: 0.055em;
-  text-transform: uppercase;
-  opacity: 0.9;
-}
-
-.topbar-spacer {
-  flex: 1;
-}
-
-.topbar-actions {
-  display: flex;
-  flex-wrap: nowrap;
-  align-items: center;
-  gap: var(--space-2);
-  min-width: 0;
-  position: relative;
 }
 
 /* —— 按钮体系 —— */
@@ -141,8 +82,7 @@
   border-color: transparent;
 }
 
-.btn-ghost.active,
-.topbar-actions .btn.active {
+.btn-ghost.active {
   color: var(--accent);
   background: var(--accent-dim);
   border-color: color-mix(in srgb, var(--accent) 40%, var(--border));

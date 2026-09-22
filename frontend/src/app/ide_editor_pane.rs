@@ -37,11 +37,7 @@ pub fn IdeEditorPane(
     );
 
     view! {
-        <div
-            id="ide-editor-panel"
-            class="ide-editor-pane"
-            class:ide-editor-pane--wrap=move || editor.word_wrap.get()
-        >
+        <div id="ide-editor-panel" class="ide-editor-pane">
             <Show when=move || {
                 cm_script_state.get().show_missing_banner(editor_visible.get())
             }>

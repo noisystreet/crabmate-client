@@ -37,13 +37,6 @@
     transform: none;
   }
 
-  /* 与 list-stagger 同理：空会话占位曾用 both 填充，显式终态避免闪隐或位移残留 */
-  .messages-empty {
-    animation: none;
-    opacity: 1;
-    transform: none;
-  }
-
   .main-row-chat-layer,
   .main-row-ide-layer {
     transition: none;

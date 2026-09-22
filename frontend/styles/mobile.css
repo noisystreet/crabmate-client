@@ -173,7 +173,6 @@ html[data-cm-mobile-shell] .composer-input--mirror-overlay {
 /* —— Phase 2：safe-area 底部 + 紧凑输入条 / 状态栏 + 软键盘避让 —— */
 @media (max-width: 768px) {
   /* —— 状态栏：单行紧凑，去掉上下大空隙 —— */
-  .status-bar-footer,
   .status-bar {
     padding: 2px 8px;
     gap: 6px;
@@ -181,8 +180,7 @@ html[data-cm-mobile-shell] .composer-input--mirror-overlay {
     font-size: 11px;
   }
 
-  html[data-cm-mobile-shell] .status-bar,
-  html[data-cm-mobile-shell] .status-bar-footer {
+  html[data-cm-mobile-shell] .status-bar {
     padding: 2px 8px 4px;
   }
 
@@ -205,12 +203,6 @@ html[data-cm-mobile-shell] .composer-input--mirror-overlay {
   .status-run-dot {
     width: 6px;
     height: 6px;
-  }
-
-  .status-session-mode-btn {
-    padding: 1px 6px;
-    font-size: 0.72rem;
-    line-height: 1.25;
   }
 
   /* 消息贴近屏缘：收紧 thread / transcript 左右空隙（仍尊重 safe-area） */
@@ -361,7 +353,6 @@ html[data-cm-mobile-shell] .composer-input--mirror-overlay {
   .shell-topbar .btn-icon,
   .shell-topbar .btn,
   /* 消息操作已改右键/长按菜单；保留触控尺寸以防残留 DOM */
-  .msg-action-btn,
   .chat-tui-turn-actions .btn,
   .nav-rail-brand-actions .btn {
     min-width: 44px;
@@ -377,10 +368,6 @@ html[data-cm-mobile-shell] .composer-input--mirror-overlay {
 
   .shell-topbar-workspace-title {
     font-size: 12px;
-  }
-
-  .shell-topbar-layout-start .layout-mode-segment {
-    font-size: 11px;
   }
 
   /* 窄屏：隐藏会话/IDE 切换，固定会话模式 */

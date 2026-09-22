@@ -83,9 +83,8 @@ html[data-cm-mobile-shell] .shell-topbar {
   min-width: max-content;
 }
 
-/* 会话 / IDE 菜单条（历史类名 ide-menu-bar-menus 作别名） */
-.shell-topbar-menus,
-.ide-menu-bar-menus {
+/* 会话 / IDE 菜单条 */
+.shell-topbar-menus {
   display: flex;
   align-items: center;
   gap: 0.1rem;
@@ -165,8 +164,7 @@ html[data-cm-mobile-shell] .shell-topbar {
   width: auto;
 }
 
-.shell-topbar-file-path,
-.ide-menu-bar-path {
+.shell-topbar-file-path {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -194,10 +192,6 @@ html[data-cm-mobile-shell] .shell-topbar {
   padding: 0;
   line-height: 1;
   flex-shrink: 0;
-}
-
-.shell-topbar-end--hidden {
-  display: none;
 }
 
 .shell-topbar .tauri-window-controls {

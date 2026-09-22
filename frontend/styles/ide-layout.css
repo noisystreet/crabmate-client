@@ -253,58 +253,6 @@
   overflow: hidden;
 }
 
-.ide-line-gutter {
-  flex-shrink: 0;
-  margin: 0;
-  padding: 0.65rem 0.55rem 0.65rem 0.75rem;
-  border: none;
-  border-right: 1px solid var(--shell-border, rgba(0, 0, 0, 0.08));
-  background: var(--surface-1, rgba(0, 0, 0, 0.02));
-  color: var(--muted, rgba(0, 0, 0, 0.45));
-  font-family: var(--ide-editor-font-family, var(--font-mono, "JetBrains Mono", ui-monospace, monospace));
-  font-size: var(--ide-editor-font-size, 14px);
-  line-height: 1.45;
-  tab-size: var(--ide-editor-tab-size, 4);
-  text-align: right;
-  white-space: pre;
-  overflow: hidden;
-  user-select: none;
-  min-width: 2.5rem;
-}
-
-.ide-editor-textarea {
-  flex: 1;
-  min-height: 0;
-  width: 100%;
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0.65rem 0.75rem;
-  border: none;
-  resize: none;
-  font-family: var(--ide-editor-font-family, var(--font-mono, "JetBrains Mono", ui-monospace, monospace));
-  font-size: var(--ide-editor-font-size, 14px);
-  line-height: 1.45;
-  tab-size: var(--ide-editor-tab-size, 4);
-  background: var(--surface-editor, transparent);
-  color: inherit;
-  white-space: pre;
-  overflow: auto;
-}
-
-.ide-editor-pane--wrap .ide-editor-textarea {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  word-break: break-word;
-}
-
-.ide-editor-textarea:focus {
-  outline: none;
-}
-
-.ide-editor-textarea:disabled {
-  opacity: 0.55;
-}
-
 .ide-find-bar {
   display: flex;
   flex-wrap: wrap;
