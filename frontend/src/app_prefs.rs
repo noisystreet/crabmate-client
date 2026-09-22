@@ -107,7 +107,8 @@ pub const MAX_SIDE_WIDTH: f64 = 560.0;
 /// 为左侧对话列预留的最小宽度（视口过窄时仍允许侧栏拖到 `MIN_SIDE_WIDTH`，由 flex 挤压主列）。
 pub const MIN_CHAT_RESERVE_PX: f64 = 240.0;
 
-/// 移动端布局断点（与 `styles/mobile.css` 中 `@media (max-width: …)` 一致）。
+/// 响应式主断点（单源）：窄屏 `@media (max-width: 本值)`、互补 `@media (min-width: 本值 + 1)`。
+/// 样式层无法在 `@media` 条件里用 `var()`，故允许受约束的重复，由 `scripts/check-css-breakpoints.sh` 门禁校验。
 pub const MOBILE_LAYOUT_BREAKPOINT_PX: u32 = 768;
 
 /// `matchMedia` 查询串，供壳层窄屏检测与 DOM `data-narrow-viewport` 同步。

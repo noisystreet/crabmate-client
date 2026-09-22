@@ -14,6 +14,9 @@ bash "$ROOT/scripts/check-no-main-path.sh"
 echo "[check] dependency boundary rules (client-api purity / connect default / contract pin / version sync)"
 bash "$ROOT/scripts/check-boundaries.sh"
 
+echo "[check] responsive breakpoints single source (matches MOBILE_LAYOUT_BREAKPOINT_PX)"
+bash "$ROOT/scripts/check-css-breakpoints.sh"
+
 echo "[check] cargo fmt (all packages in scripts/rust-pkg-dirs.txt)"
 while IFS= read -r dir; do
   echo "[check] cargo fmt $dir"
