@@ -26,6 +26,7 @@ pre-commit run --all-files
 | `check-no-main-path` | 禁止 Cargo path 回主仓 |
 | `check-boundaries` | 依赖边界机械检查：client-api 纯度（禁 reqwest / tokio / tauri / web-sys / wasm-bindgen）、connect 默认 feature 无 Tauri、契约钉形状唯一、全部包版本一致（`scripts/check-boundaries.sh`） |
 | `check-css-breakpoints` | 响应式断点单源检查：样式层 `@media` 窄屏 `max-width: N` 与互补 `min-width: N+1` 必须匹配 `frontend/src/app_prefs.rs` 的 `MOBILE_LAYOUT_BREAKPOINT_PX`；其他断点须在脚本 `EXTRA_BREAKPOINTS` 登记；e2e 移动视口须落在窄屏侧（`scripts/check-css-breakpoints.sh`） |
+| `check-css-contract` | 类名契约门禁：本仓 Rust / HTML 消费方产出的类名必须在同作用域 CSS（frontend / connect / splash；第三方 vendor JS 运行时类名不在契约内）有规则，否则须在 `scripts/css_contract_allowlist.txt` 登记并写理由；白名单失效（CSS 已定义 / 消费方已移除 / scope 笔误）同样失败（`scripts/check-css-contract.sh`） |
 | `cargo-fmt` | 全部 Rust 包循环（单一列表 `scripts/rust-pkg-dirs.txt`；fmt 与工具链无关，frontend 同循环处理） |
 | `desktop-dist-stubs` → **`tauri-dist-stubs`** | 为 **desktop/mobile** `frontendDist` 建占位（`scripts/ensure-tauri-dist-stubs.sh`；与 CI `check.sh` 共用） |
 | `desktop-clippy` / `mobile-clippy` / `connect-clippy` / `tui-clippy` / `web-host-clippy` | `-D warnings` |
