@@ -20,7 +20,7 @@
 ├── web-host/                # binary crabmate-web (loopback static UI host)
 ├── frontend/                # Business UI; contract crates.io crabmate 0.5.2 + protocol
 ├── e2e/                     # Playwright (browser UI)
-├── scripts/                 # sync-connect, victauri-e2e, e2e-playwright, check.sh, check-boundaries.sh, set-version.sh; rust-pkg-dirs.txt = package list single source
+├── scripts/                 # sync-connect, victauri-e2e, e2e-playwright, check.sh, check-boundaries.sh, check-css-breakpoints.sh, set-version.sh; rust-pkg-dirs.txt = package list single source
 ├── docs/
 │   ├── TESTING.md
 │   └── design/
@@ -51,6 +51,7 @@
 - Boundary rules above are **mechanically enforced** by `scripts/check-boundaries.sh` (pre-commit hook + `scripts/check.sh`): client-api dependency purity, `crabmate-connect` default features stay Tauri-free, exact contract-pin shape across all manifests, and version consistency across all Rust packages
 - Package versions move in **lockstep** across all Rust packages; bump via `bash scripts/set-version.sh <semver>` (never hand-edit one Cargo.toml version)
 - Package list **single source**: `scripts/rust-pkg-dirs.txt` — consumed by the `Makefile` `fmt` / `clippy` / `clean` loops, `scripts/check.sh`, and `scripts/check-boundaries.sh`; adding a package only touches this file (plus Makefile `test-*` grouping / CI cache if needed)
+- Responsive breakpoint **single source**: `MOBILE_LAYOUT_BREAKPOINT_PX` in `frontend/src/app_prefs.rs`; `@media` cannot use `var()`, so CSS repeats the value under constraint — narrow `max-width: N` pairs with complementary `min-width: N + 1` (never cross-written) and other breakpoints are registered in `scripts/check-css-breakpoints.sh`; enforced by that hook + `scripts/check.sh`
 - Web Bearer ≠ model `API_KEY`（Web Bearer：官方壳仅内存 + 本机钥匙串/Android Keystore，**禁止**明文 `localStorage`；model keys 同样走钥匙串/Keystore；chat 经 HTTPS 发送 `client_llm.api_key` — do not `PUT /user-data/secrets/client-llm` from the UI；plain browser may keep weak localStorage with an explicit warning）
 - **Split decision / contracts / SSE / CORS** are authoritative in the Server repo; this repo documents shell behavior and links out
 - Scratch drafts go in **`agent_space/`** (gitignored); **do not** treat `agent_space/` as committed documentation
@@ -71,6 +72,7 @@ make web-release             # crabmate-web .deb (trunk --release + loopback sta
 make tui-release             # crabmate-tui .deb (binary only; no icon, no config)
 bash scripts/check-no-main-path.sh
 bash scripts/check-boundaries.sh         # mechanical boundary rules (client-api purity / connect default features / contract pin shape / version sync)
+bash scripts/check-css-breakpoints.sh    # responsive breakpoints must match MOBILE_LAYOUT_BREAKPOINT_PX (single source)
 bash scripts/set-version.sh 0.5.1        # bump all Rust package versions (+ Cargo.locks) in one step
 bash scripts/lizard-rust.sh              # any function with CCN>10 fails (global zero rule; no per-module caps)
 bash scripts/dependency-security.sh      # cargo audit + cargo deny; not in pre-commit / check.sh
