@@ -20,6 +20,9 @@ bash "$ROOT/scripts/check-css-breakpoints.sh"
 echo "[check] class-name contract (consumer classes must have CSS rules or be allowlisted)"
 bash "$ROOT/scripts/check-css-contract.sh"
 
+echo "[check] design tokens (referenced tokens must be defined; no color literal in var() fallback)"
+bash "$ROOT/scripts/check-css-tokens.sh"
+
 echo "[check] cargo fmt (all packages in scripts/rust-pkg-dirs.txt)"
 while IFS= read -r dir; do
   echo "[check] cargo fmt $dir"

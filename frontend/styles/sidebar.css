@@ -128,9 +128,9 @@
 }
 
 .workspace-list.workspace-drop-active {
-  outline: 2px dashed color-mix(in srgb, var(--accent, #3b82f6) 75%, transparent);
+  outline: 2px dashed color-mix(in srgb, var(--accent) 75%, transparent);
   outline-offset: -2px;
-  background: color-mix(in srgb, var(--accent, #3b82f6) 10%, transparent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
 }
 
 .workspace-list-refresh {

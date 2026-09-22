@@ -3,7 +3,7 @@
 由 UI 功能体检整理，按优先级排序；修复后逐项勾选（`- [x]`）或移除。
 2026-09-13 复核：原报告 P0 与 P1 键盘/焦点均已修复（PR #135），剩余项已并入本清单。
 2026-09-14：P1「语义与反馈」四项已修复并勾选；剩余为 P1 对比度、P2 与 P3。
-2026-09-22 复核：P2「768px 断点重复硬编码」与 P3「900px 断点无登记」已由 `scripts/check-css-breakpoints.sh` 收口，P1 缺失类名 / P4 死 CSS 已由 `scripts/check-css-contract.sh` 一类门禁固化（两者均进 pre-commit 与 `scripts/check.sh`），相应条目已勾选；未定义 token 仍待补（尚无 token 门禁）。
+2026-09-22 复核：P2「768px 断点重复硬编码」与 P3「900px 断点无登记」已由 `scripts/check-css-breakpoints.sh` 收口，P1 缺失类名 / P4 死 CSS 已由 `scripts/check-css-contract.sh` 一类门禁固化（两者均进 pre-commit 与 `scripts/check.sh`），相应条目已勾选；未定义 token 引用与 `var()` 浅色兜底已由 `scripts/check-css-tokens.sh` 收口（同进 pre-commit 与 `scripts/check.sh`）。
 
 ## P0 · 明确缺陷
 
@@ -38,7 +38,7 @@
 - [ ] Android `adjustResize` 生效设备上 IME 可能双倍抬高 composer：`MainActivity.kt` 的 `--cm-ime-inset` 与 `--vv-keyboard-inset` 取 `max`，窗口已压缩时 `ime` 仍非零。
 - [ ] 左侧 20px 点击盲区：`frontend/styles/shell-ds.css` `.nav-rail-edge-hit` 为 `pointer-events:auto` 且无点击处理（右侧感应条为 `none`，左右不对称）。
 - [x] 768px 断点在 Rust（`app_prefs.rs`）与多份 CSS 重复硬编码，无单一来源/校验，改漏会脱节。已修：权威值仍是 `MOBILE_LAYOUT_BREAKPOINT_PX`，新增 `scripts/check-css-breakpoints.sh` 强制窄屏 `max-width: N` 与互补 `min-width: N+1` 成对（禁交叉书写）、二级断点须登记、e2e 移动视口须落窄屏侧。
-- [ ] 未定义 token 硬编码 fallback（`--shell-border` / `--surface-1` / `--accent-muted` / `--accent-warn` 等），切主题时这些位置颜色不变。
+- [x] 未定义 token 硬编码 fallback（`--shell-border` / `--surface-1` / `--accent-muted` / `--accent-warn` 等），切主题时这些位置颜色不变。已修：未定义 token 引用统一改指已有 token（不加别名），并剥离全部 `var()` 内浅色兜底字面量——token 缺失时立刻暴露而非静默渲染固定浅色；新增 `scripts/check-css-tokens.sh` 门禁（未定义引用、`var()` 颜色兜底、白名单失效三项必须为零，运行时注入属性登记 `scripts/css_tokens_allowlist.txt`），已进 pre-commit 与 `scripts/check.sh`。
 - [ ] 纯浏览器宽屏触控平板（>768px 非壳）软键盘不抬高 composer。
 
 ## P2 · IDE 与工作区
@@ -61,7 +61,7 @@
 
 ## P2 · 样式与 token
 
-- [ ] 未定义 token：`--text-muted` / `--surface-muted` / `--surface-2` / `--panel` / `--fg` / `--warning`；`status.css` 的 `color-mix(… var(--panel) …)` 因变量失效整句作废。2026-09-22 复核：`--panel` 那条 `color-mix` 已随 P4 死 CSS 清理移除，`--panel` 全仓不再引用；其余五个仍未定义（`--fg` 仅在 `splash.html` / `connect.html` 两个独立页定义），业务 UI 多处靠字面量 fallback 兜底，切主题不变色。
+- [x] 未定义 token：`--text-muted` / `--surface-muted` / `--surface-2` / `--panel` / `--fg` / `--warning`；`status.css` 的 `color-mix(… var(--panel) …)` 因变量失效整句作废。已修（2026-09-22）：`--panel` 那条 `color-mix` 随 P4 死 CSS 清理移除；其余五个的引用统一改指已有 token（`--fg` 仅保留在 `splash.html` / `connect.html` 两个独立页自持定义），`frontend/styles` + `frontend/themes` 内已无未定义引用、无 `var()` 浅色兜底，由 `scripts/check-css-tokens.sh` 固化。
 - [ ] API 层窄路径硬编码中文错误串：`frontend/src/api/http.rs`、`github_secrets_local.rs`、`llm_secrets_local.rs`、`web_api_bearer_local.rs`、`user_data.rs`。
 - [ ] 启动 splash 硬编码深色 `#0a0d12`，浅色用户首帧深闪：`frontend/index.html`。
 
