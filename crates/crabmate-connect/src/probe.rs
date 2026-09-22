@@ -124,8 +124,9 @@ fn shell_cors_env_hint() -> String {
 const REQUIRED_SHELL_FETCH_ORIGINS: &[&str] = &[SHELL_WEBVIEW_FETCH_ORIGIN, SHELL_WEBVIEW_ORIGIN];
 
 /// 包内 UI 跨 Origin 调 API：逐一探测必需 Origin（两端壳都覆盖）。
-pub async fn probe_shell_cors(base: &Url) -> Result<(), String> {
-    let client = build_client(base)?;
+///
+/// `client` 由调用方传入（与 `/health`、`/user-data/prefs` 探测复用同一连接池与 TLS 会话）。
+pub async fn probe_shell_cors(client: &reqwest::Client, base: &Url) -> Result<(), String> {
     let health = base
         .join("health")
         .map_err(|e| format!("无法构造 /health: {e}"))?;
@@ -192,7 +193,7 @@ pub async fn probe_server(base: &Url, bearer: &str) -> Result<(), String> {
     let client = build_client(base)?;
     probe_health(&client, base, bearer).await?;
     probe_prefs(&client, base, bearer).await?;
-    probe_shell_cors(base).await?;
+    probe_shell_cors(&client, base).await?;
     Ok(())
 }
 
