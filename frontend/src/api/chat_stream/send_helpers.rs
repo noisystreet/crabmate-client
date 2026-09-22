@@ -10,11 +10,28 @@ use super::{
     ChatStreamCallbacks, body_reader, body_reader::ChatStreamBodyConsumeResult, http_request,
 };
 
+/// 尚无 `job_id`（首轮请求）时 `fetch` 被拒的重试上限。
+///
+/// 此处无法续流：重试会原样重发整个提问，若上一次请求其实已到达 serve 并跑完，
+/// 重发就会多出一个回合。故只给很小的预算，按 [`sleep_chat_stream_retry_backoff`] 退避（约 400ms）。
+const PRE_JOB_FETCH_MAX_ATTEMPTS: u32 = 2;
+/// 已持有 `job_id`（`stream_resume` 续流）时 `fetch` 被拒的重试上限；重发只续传 `after_seq` 之后的事件。
+const RESUME_FETCH_MAX_ATTEMPTS: u32 = 6;
+
+/// 判断 `fetch` 拒绝（连接未建立 / DNS 抖动 / 连接被重置）是否已耗尽重试。
+///
+/// 首轮曾直接判耗尽，导致一次瞬时网络抖动即上报传输错误、用户需手动重发；现按是否已持有
+/// `job_id` 采用不同预算（见上方常量）。
 pub(super) fn chat_stream_fetch_retry_exhausted(
     stream_resume_job_id: Option<u64>,
     attempt: u32,
 ) -> bool {
-    stream_resume_job_id.is_none() || attempt >= 6
+    let max_attempts = if stream_resume_job_id.is_some() {
+        RESUME_FETCH_MAX_ATTEMPTS
+    } else {
+        PRE_JOB_FETCH_MAX_ATTEMPTS
+    };
+    attempt >= max_attempts
 }
 
 pub(super) async fn chat_stream_http_error_message(
@@ -136,8 +153,25 @@ pub(super) async fn run_chat_stream_http_round(
 
 #[cfg(test)]
 mod tests {
-    use super::dispatch_finished_round_callbacks;
+    use super::{chat_stream_fetch_retry_exhausted, dispatch_finished_round_callbacks};
     use std::cell::Cell;
+
+    #[test]
+    fn pre_job_fetch_failure_retries_once_before_exhaustion() {
+        assert!(
+            !chat_stream_fetch_retry_exhausted(None, 0),
+            "首轮 fetch 失败应先退避重试，而不是立即上报传输错误"
+        );
+        assert!(!chat_stream_fetch_retry_exhausted(None, 1));
+        assert!(chat_stream_fetch_retry_exhausted(None, 2));
+    }
+
+    #[test]
+    fn resume_fetch_failure_keeps_wider_budget() {
+        assert!(!chat_stream_fetch_retry_exhausted(Some(7), 0));
+        assert!(!chat_stream_fetch_retry_exhausted(Some(7), 5));
+        assert!(chat_stream_fetch_retry_exhausted(Some(7), 6));
+    }
 
     #[test]
     fn body_completion_dispatches_done_exactly_once_after_run_finished() {
