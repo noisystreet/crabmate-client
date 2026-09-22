@@ -3,6 +3,7 @@
 由 UI 功能体检整理，按优先级排序；修复后逐项勾选（`- [x]`）或移除。
 2026-09-13 复核：原报告 P0 与 P1 键盘/焦点均已修复（PR #135），剩余项已并入本清单。
 2026-09-14：P1「语义与反馈」四项已修复并勾选；剩余为 P1 对比度、P2 与 P3。
+2026-09-22 复核：P2「768px 断点重复硬编码」与 P3「900px 断点无登记」已由 `scripts/check-css-breakpoints.sh` 收口，P1 缺失类名 / P4 死 CSS 已由 `scripts/check-css-contract.sh` 一类门禁固化（两者均进 pre-commit 与 `scripts/check.sh`），相应条目已勾选；未定义 token 仍待补（尚无 token 门禁）。
 
 ## P0 · 明确缺陷
 
@@ -36,7 +37,7 @@
 
 - [ ] Android `adjustResize` 生效设备上 IME 可能双倍抬高 composer：`MainActivity.kt` 的 `--cm-ime-inset` 与 `--vv-keyboard-inset` 取 `max`，窗口已压缩时 `ime` 仍非零。
 - [ ] 左侧 20px 点击盲区：`frontend/styles/shell-ds.css` `.nav-rail-edge-hit` 为 `pointer-events:auto` 且无点击处理（右侧感应条为 `none`，左右不对称）。
-- [ ] 768px 断点在 Rust（`app_prefs.rs`）与多份 CSS 重复硬编码，无单一来源/校验，改漏会脱节。
+- [x] 768px 断点在 Rust（`app_prefs.rs`）与多份 CSS 重复硬编码，无单一来源/校验，改漏会脱节。已修：权威值仍是 `MOBILE_LAYOUT_BREAKPOINT_PX`，新增 `scripts/check-css-breakpoints.sh` 强制窄屏 `max-width: N` 与互补 `min-width: N+1` 成对（禁交叉书写）、二级断点须登记、e2e 移动视口须落窄屏侧。
 - [ ] 未定义 token 硬编码 fallback（`--shell-border` / `--surface-1` / `--accent-muted` / `--accent-warn` 等），切主题时这些位置颜色不变。
 - [ ] 纯浏览器宽屏触控平板（>768px 非壳）软键盘不抬高 composer。
 
@@ -60,7 +61,7 @@
 
 ## P2 · 样式与 token
 
-- [ ] 未定义 token：`--text-muted` / `--surface-muted` / `--surface-2` / `--panel` / `--fg` / `--warning`；`status.css` 的 `color-mix(… var(--panel) …)` 因变量失效整句作废。
+- [ ] 未定义 token：`--text-muted` / `--surface-muted` / `--surface-2` / `--panel` / `--fg` / `--warning`；`status.css` 的 `color-mix(… var(--panel) …)` 因变量失效整句作废。2026-09-22 复核：`--panel` 那条 `color-mix` 已随 P4 死 CSS 清理移除，`--panel` 全仓不再引用；其余五个仍未定义（`--fg` 仅在 `splash.html` / `connect.html` 两个独立页定义），业务 UI 多处靠字面量 fallback 兜底，切主题不变色。
 - [ ] API 层窄路径硬编码中文错误串：`frontend/src/api/http.rs`、`github_secrets_local.rs`、`llm_secrets_local.rs`、`web_api_bearer_local.rs`、`user_data.rs`。
 - [ ] 启动 splash 硬编码深色 `#0a0d12`，浅色用户首帧深闪：`frontend/index.html`。
 
@@ -77,7 +78,7 @@
 - [ ] composer `resize: vertical` 与 autosize 两个高度机制打架：`frontend/styles/layout-chat.css`、`frontend/src/app/chat/composer_input_stack.rs`。
 - [ ] transcript 整区 `aria-live="polite"`，工具行频繁 status 更新持续触发读屏播报（权衡项）：`frontend/src/app/chat/tui_stream_view.rs`。
 - [ ] `cm-boot-spin` 无限旋转未纳入 `prefers-reduced-motion`：`frontend/index.html`。
-- [ ] 设置页 900px 断点与主 768px 体系并存且无注释：`frontend/styles/modal.css`。
+- [x] 设置页 900px 断点与主 768px 体系并存且无注释：`frontend/styles/modal.css`。已修：900px 作为与主断点语义独立的二级断点，在 `scripts/check-css-breakpoints.sh` 的 `EXTRA_BREAKPOINTS` 显式登记并写明用途（设置弹窗 `.settings-layout` 双列转单列）。
 - [ ] MCP 超时输入非法字符静默保留旧值：`frontend/src/app/settings_mcp_block_toolbar.rs`。
 - [ ] MCP 远端 bearer placeholder 硬编码 `••••••••`：`frontend/src/app/settings_mcp_server_row.rs`。
 - [ ] 文件树不支持树内拖拽移动（能力矩阵未承诺，可选增强）：`frontend/src/workspace_file_drop.rs`。
