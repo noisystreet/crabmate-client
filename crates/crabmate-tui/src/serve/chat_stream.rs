@@ -529,8 +529,9 @@ async fn drain_sse_buffer(
     approval: &mut dyn ApprovalGate,
 ) -> Result<(), TermError> {
     while let Some(idx) = buffer.find("\n\n") {
+        // 先取出本帧，再就地移除已消费前缀；避免对剩余缓冲整段重建（O(n²)）。
         let block = buffer[..idx].to_string();
-        *buffer = buffer[idx + 2..].to_string();
+        buffer.drain(..idx + 2);
         if block.trim().is_empty() {
             continue;
         }
