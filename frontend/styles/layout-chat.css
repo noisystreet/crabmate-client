@@ -64,35 +64,6 @@
   min-width: 0;
 }
 
-/* 折叠态：脱离文档流，避免在 shell-main 里占一整行造成「空白条」 */
-.chat-find-toggle {
-  position: absolute;
-  top: max(8px, env(safe-area-inset-top, 0px));
-  right: max(calc(var(--space-3) + 6px), env(safe-area-inset-right, 0px));
-  z-index: 4;
-  width: 2.25rem;
-  height: 2.25rem;
-  padding: 0;
-  border-radius: var(--radius-btn);
-  border: 1px solid var(--border-subtle);
-  background: color-mix(in srgb, var(--surface) 88%, var(--bg));
-  color: var(--text);
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: var(--shadow-sm);
-}
-
-.chat-find-toggle:hover {
-  border-color: color-mix(in srgb, var(--accent) 42%, var(--border-subtle));
-}
-
-.chat-find-icon {
-  width: 1.125rem;
-  height: 1.125rem;
-}
-
 .chat-find-close {
   min-width: 2rem;
 }
@@ -904,97 +875,6 @@ mark.chat-find-mark--current {
   color: var(--text-muted);
 }
 
-.messages-virtual-top,
-.messages-virtual-bottom {
-  flex-shrink: 0;
-  width: 100%;
-  pointer-events: none;
-}
-
-/* 空会话：在可视区内垂直居中占位，避免大片留白 */
-.messages-inner:has(> .messages-empty) {
-  flex: 1 1 auto;
-  min-height: 0;
-  justify-content: center;
-  align-items: center;
-  gap: 0;
-}
-
-.messages-empty {
-  width: 100%;
-  max-width: 400px;
-  padding: var(--space-4) var(--space-3);
-  animation: messages-empty-in 0.45s var(--ease-out-soft) both;
-}
-
-@keyframes messages-empty-in {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.messages-empty-card {
-  padding: var(--space-5) var(--space-5) var(--space-4);
-  border-radius: var(--radius-lg);
-  border: 1px solid var(--border-subtle);
-  background: color-mix(in srgb, var(--surface) 72%, transparent);
-  box-shadow: var(--shadow-sm);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  position: relative;
-  overflow: hidden;
-}
-
-.messages-empty-card::before {
-  content: "";
-  position: absolute;
-  inset: 0 0 auto 0;
-  height: 3px;
-  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
-  background: linear-gradient(
-    90deg,
-    color-mix(in srgb, var(--accent) 55%, transparent),
-    color-mix(in srgb, var(--accent) 18%, transparent)
-  );
-  pointer-events: none;
-}
-
-.messages-empty-title {
-  margin: 0 0 var(--space-2);
-  font-size: 18px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  color: var(--text);
-}
-
-.messages-empty-lead {
-  margin: 0 0 var(--space-4);
-  font-size: 13px;
-  line-height: 1.55;
-  color: var(--muted);
-}
-
-.messages-empty-tips {
-  margin: 0;
-  padding-left: 1.15rem;
-  font-size: 12px;
-  line-height: 1.55;
-  color: color-mix(in srgb, var(--muted) 94%, var(--text));
-}
-
-.messages-empty-tips li {
-  margin-bottom: var(--space-2);
-}
-
-.messages-empty-tips li:last-child {
-  margin-bottom: 0;
-}
-
 /* 消息区/侧栏/弹窗统一滚动条风格 */
 .messages,
 .side-pane,
@@ -1052,56 +932,6 @@ mark.chat-find-mark--current {
   white-space: normal;
   /* 勿用 contain：layout/style；部分环境下会恶化选区命中与复制体验 */
   user-select: text;
-}
-
-.msg-actions {
-  display: flex;
-  flex-direction: row;
-  flex-wrap: nowrap;
-  align-items: center;
-  gap: var(--space-2);
-  margin-top: var(--space-2);
-  opacity: 0.92;
-}
-
-/* 气泡外的操作条：紧贴回合下沿 */
-.msg-actions.msg-actions-below {
-  margin-top: 6px;
-  width: max-content;
-  max-width: 100%;
-  box-sizing: border-box;
-}
-
-.chat-tui-turn-wrap--user .msg-actions-below {
-  justify-content: flex-end;
-}
-
-.chat-tui-turn-wrap:not(.chat-tui-turn-wrap--user) .msg-actions-below {
-  justify-content: flex-start;
-}
-
-.msg-action-btn {
-  font-size: 12px;
-  padding: 0.2rem 0.5rem;
-}
-
-/* 消息操作：仅图标（复制、从此处重试、分支对话等） */
-.msg-action-icon-btn {
-  flex-shrink: 0;
-  min-width: 1.75rem;
-  width: 1.75rem;
-  height: 1.75rem;
-  padding: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.msg-action-icon {
-  width: 1rem;
-  height: 1rem;
-  display: block;
-  flex-shrink: 0;
 }
 
 .msg-md-prose :first-child {
@@ -1343,10 +1173,6 @@ html[lang="zh-CN"] .md-code-block__copy-zh {
 /* 勿用 fit-content/max-content：部分引擎会收成窄条；用列宽百分比给出确定宽度 */
 
 /* 显式 `/<skill-id>`：内联「使用 xxx skill」 */
-.msg-skill-slash-body {
-  white-space: normal;
-}
-
 .msg-skill-invoke {
   display: inline-flex;
   align-items: baseline;
@@ -1370,11 +1196,6 @@ html[lang="zh-CN"] .md-code-block__copy-zh {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-weight: 700;
   color: var(--text);
-}
-
-.msg-skill-invoke-task {
-  display: inline;
-  white-space: pre-wrap;
 }
 
 .chat-tui-turn--user .msg-skill-invoke {
@@ -1674,16 +1495,5 @@ html[lang="zh-CN"] .md-code-block__copy-zh {
   -webkit-box-decoration-break: clone;
   background: var(--composer-ws-ref-bg);
   box-shadow: var(--composer-ws-ref-box-shadow);
-}
-
-.composer-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  flex-shrink: 0;
-}
-
-.composer-actions .btn {
-  min-width: 76px;
 }
 

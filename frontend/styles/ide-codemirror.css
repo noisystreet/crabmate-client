@@ -71,8 +71,7 @@
   color: var(--ide-hl-type, #93c5fd);
 }
 
-.ide-cm-host .tok-propertyName,
-.ide-cm-host .tok-attributeName {
+.ide-cm-host .tok-propertyName {
   color: var(--ide-hl-attribute, #f0abfc);
 }
 

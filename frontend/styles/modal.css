@@ -395,14 +395,7 @@
   background: color-mix(in srgb, var(--muted) 10%, var(--surface));
 }
 
-.settings-status-pill--info {
-  color: var(--info);
-  background: var(--info-bg);
-  border-color: color-mix(in srgb, var(--info) 35%, var(--border));
-}
-
-.settings-hint,
-.settings-error {
+.settings-field .settings-github-user-code {
   margin: 0 14px var(--space-2);
   font-size: 12px;
   line-height: 1.4;
@@ -430,10 +423,6 @@
 .settings-field .settings-github-user-code {
   margin-left: 0;
   margin-right: 0;
-}
-
-.settings-field-nested-hint {
-  margin: 0 14px var(--space-2);
 }
 
 .settings-field {
@@ -728,14 +717,6 @@
   color: var(--text);
 }
 
-.settings-actions-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  align-items: center;
-  padding: 0 14px var(--space-2);
-}
-
 .settings-save-feedback {
   margin: var(--space-1) 14px 0;
   padding: 6px 8px;
@@ -847,10 +828,6 @@
 .session-row-rename-input {
   flex: 1 1 auto;
   min-width: 0;
-}
-
-.hidden-input {
-  display: none;
 }
 
 /* —— 设置页面 —— */
@@ -996,54 +973,6 @@ html[data-cm-mobile-shell] .settings-page-header {
   box-sizing: border-box;
 }
 
-/* —— GitHub 嵌入页（浏览器模式 overlay）—— */
-.github-embed-page.settings-page {
-  background: var(--bg);
-  overflow: hidden;
-  inset: 0;
-  width: 100vw;
-  height: 100vh;
-  height: 100dvh;
-  position: fixed;
-}
-
-.github-embed-page-header {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 2;
-  flex-shrink: 0;
-  pointer-events: auto;
-  background: color-mix(in srgb, var(--bg) 96%, var(--surface));
-}
-
-.github-embed-page-body {
-  display: none;
-}
-
-.github-embed-browser-fallback {
-  position: absolute;
-  top: var(--github-embed-header-h, var(--shell-chrome-top, var(--shell-topbar-h, 2.5rem)));
-  left: 0;
-  right: 0;
-  z-index: 1;
-  padding: var(--space-4) var(--space-5);
-  margin: 0;
-  font-size: 13px;
-  line-height: 1.55;
-  color: var(--muted);
-  border-bottom: 1px solid var(--border-subtle);
-  background: var(--bg);
-}
-
-.github-embed-page-title {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .settings-intro {
   margin: 0 0 var(--space-5);
   font-size: 13px;
@@ -1068,15 +997,6 @@ html[data-cm-mobile-shell] .settings-page-header {
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--surface) 86%, var(--bg));
-}
-
-.settings-nav-group-label {
-  margin: 6px 6px 2px;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--muted);
 }
 
 /* 导航项：基于 .btn-ghost（hover/active 由 .btn-ghost(.active) 提供），仅保留导航布局属性 */
@@ -1321,10 +1241,5 @@ html[data-cm-mobile-shell] .settings-page-header {
 
   .settings-nav-item {
     width: auto;
-  }
-
-  .settings-nav-group-label {
-    width: 100%;
-    margin-top: 2px;
   }
 }

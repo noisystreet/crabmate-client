@@ -19,16 +19,6 @@
   transition: none;
 }
 
-.side-column-collapsed {
-  border-left-color: transparent;
-  opacity: 0;
-  pointer-events: none;
-}
-
-.main-row-side-collapsed .chat-column {
-  border-right-color: transparent;
-}
-
 /* 隐藏侧栏时：不占宽，工具栏改为 fixed 浮动（见 shell-ds.css） */
 .side-column-rail-only .side-body {
   display: none;
@@ -482,16 +472,9 @@
 }
 
 .workspace-tree-loading,
-.workspace-tree-err,
-.workspace-tree-placeholder {
+.workspace-tree-err {
   margin: 4px 8px 6px 1.75rem;
   font-size: 12px;
-}
-
-.workspace-tree-placeholder {
-  margin: 0;
-  padding: 0;
-  min-height: 0;
 }
 
 .sr-only {
@@ -589,20 +572,11 @@
   max-width: 100%;
 }
 
-.skeleton-block {
-  width: 100%;
-}
-
 .skeleton-stack {
   display: flex;
   flex-direction: column;
   gap: 10px;
   min-height: 0;
-}
-
-.skeleton-ws-path {
-  height: 38px;
-  border-radius: var(--radius-sm);
 }
 
 .skeleton-ws-row {
