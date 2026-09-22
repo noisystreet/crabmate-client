@@ -30,6 +30,13 @@
   flex-wrap: wrap;
 }
 
+.approval-modal-error {
+  margin: var(--space-3) 0 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--error);
+}
+
 /* —— 弹窗 —— */
 .modal-backdrop {
   position: fixed;
@@ -633,6 +640,12 @@
   font-size: 12px;
   color: var(--muted);
   word-break: break-all;
+}
+
+/* 模型注册弹窗表单容器：字段自带 0 14px 内缩，这里只负责纵向排布 */
+.settings-model-registry-dialog-form {
+  display: flex;
+  flex-direction: column;
 }
 
 .settings-text-input {

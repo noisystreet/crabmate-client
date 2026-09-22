@@ -109,7 +109,7 @@ fn IdeNewFileModalPanel(input: IdeNewFileModalInput) -> impl IntoView {
                 <input
                     id="ide-new-file-path"
                     type="text"
-                    class="settings-field-input"
+                    class="settings-text-input"
                     data-testid="ide-new-file-path-input"
                     prop:placeholder=move || i18n::ide_new_file_placeholder(locale.get())
                     prop:value=move || chrome.new_file_path_draft.get()

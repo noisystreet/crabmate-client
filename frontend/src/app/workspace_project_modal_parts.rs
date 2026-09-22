@@ -151,7 +151,7 @@ pub(crate) fn WorkspaceProjectNewRow(
 ) -> impl IntoView {
     view! {
         <div class="workspace-project-new">
-            <label class="settings-label" for="workspace-project-new-input">
+            <label class="settings-field-label" for="workspace-project-new-input">
                 {move || i18n::ws_project_new_label(locale.get())}
             </label>
             <div class="workspace-project-new-row">

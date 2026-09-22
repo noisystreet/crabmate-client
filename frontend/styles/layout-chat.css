@@ -1530,6 +1530,11 @@ html[lang="zh-CN"] .md-code-block__copy-zh {
   color: var(--accent, #0969da);
 }
 
+/* 技能项：id 沿用别处 skill 的等宽字体，与内置命令的 accent 着色区分 */
+.composer-slash-menu-item--skill .composer-slash-menu-id {
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+
 .composer-slash-menu-section {
   padding: 8px 10px 4px;
   font-size: 0.72em;
