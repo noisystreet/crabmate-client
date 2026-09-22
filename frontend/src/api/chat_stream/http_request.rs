@@ -151,7 +151,67 @@ pub(super) async fn chat_stream_read_error_body(
         .unwrap_or_else(|| crate::i18n::api_err_request_failed(loc).to_string()))
 }
 
+/// 退避基数：`base = 200ms * 2^attempt`（attempt 从 1 起 → 400/800/1600/3200/6400ms）。
+const RETRY_BACKOFF_BASE_MS: u64 = 200;
+
+/// 退避指数的封顶位移：`2^5` → 单次最长 6400ms。
+const RETRY_BACKOFF_MAX_SHIFT: u32 = 5;
+
+/// 退避抖动幅度（千分比）：±20%，打散多客户端同时断线后的齐步重连。
+const RETRY_BACKOFF_JITTER_PERMILLE: u64 = 200;
+
+/// 退避毫秒数（含 ±20% 抖动）。`unit` ∈ [0, 1)（生产传 `Math.random()`）；
+/// `unit = 0.5` 时无抖动偏移，便于单测断言基数。
+fn chat_stream_retry_backoff_ms_with_jitter(attempt: u32, unit: f64) -> u64 {
+    let base = RETRY_BACKOFF_BASE_MS.saturating_mul(1u64 << attempt.min(RETRY_BACKOFF_MAX_SHIFT));
+    let span = 2 * RETRY_BACKOFF_JITTER_PERMILLE;
+    let offset = (unit.clamp(0.0, 1.0) * span as f64) as u64;
+    base.saturating_mul(1000 - RETRY_BACKOFF_JITTER_PERMILLE + offset) / 1000
+}
+
 pub(super) async fn sleep_chat_stream_retry_backoff(attempt: u32) {
-    let ms = (200u64).saturating_mul(1u64 << attempt.min(5));
+    let ms = chat_stream_retry_backoff_ms_with_jitter(attempt, js_sys::Math::random());
     gloo_timers::future::TimeoutFuture::new(ms as u32).await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{RETRY_BACKOFF_BASE_MS, chat_stream_retry_backoff_ms_with_jitter};
+
+    /// `unit = 0.5` 落在抖动区间中点：退避即为无抖动基数。
+    #[test]
+    fn backoff_center_is_unjittered_base() {
+        assert_eq!(chat_stream_retry_backoff_ms_with_jitter(0, 0.5), 200);
+        assert_eq!(chat_stream_retry_backoff_ms_with_jitter(1, 0.5), 400);
+        assert_eq!(chat_stream_retry_backoff_ms_with_jitter(2, 0.5), 800);
+        assert_eq!(chat_stream_retry_backoff_ms_with_jitter(5, 0.5), 6400);
+        // 指数封顶后不再增长
+        assert_eq!(chat_stream_retry_backoff_ms_with_jitter(9, 0.5), 6400);
+    }
+
+    /// 抖动边界：`unit` 取端点时恰为 ±20%，且永不超出区间。
+    #[test]
+    fn backoff_jitter_stays_within_20_percent() {
+        for attempt in 1..=4u32 {
+            let base = RETRY_BACKOFF_BASE_MS
+                .saturating_mul(1u64 << attempt.min(super::RETRY_BACKOFF_MAX_SHIFT));
+            assert_eq!(
+                chat_stream_retry_backoff_ms_with_jitter(attempt, 0.0),
+                base * 80 / 100
+            );
+            assert_eq!(
+                chat_stream_retry_backoff_ms_with_jitter(attempt, 1.0),
+                base * 120 / 100
+            );
+        }
+        // 越界 unit 被夹紧，不得产生负值 / 溢出
+        assert_eq!(
+            chat_stream_retry_backoff_ms_with_jitter(3, -5.0),
+            1600 * 80 / 100
+        );
+        assert_eq!(
+            chat_stream_retry_backoff_ms_with_jitter(3, 9.0),
+            1600 * 120 / 100
+        );
+    }
 }
