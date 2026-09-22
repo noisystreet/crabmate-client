@@ -4,7 +4,7 @@ use reqwest::header::{CONTENT_TYPE, HeaderValue};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
-use crate::serve::client::ServeClient;
+use crate::serve::client::{REQUEST_TIMEOUT, ServeClient};
 use crate::serve::error::TermError;
 
 impl ServeClient {
@@ -14,6 +14,7 @@ impl ServeClient {
             .http()
             .get(&url)
             .headers(self.auth_headers()?)
+            .timeout(REQUEST_TIMEOUT)
             .send()
             .await?;
         let text = Self::read_success_text(resp).await?;
@@ -30,6 +31,7 @@ impl ServeClient {
             .post(&url)
             .headers(headers)
             .json(body)
+            .timeout(REQUEST_TIMEOUT)
             .send()
             .await?;
         let status = resp.status();
@@ -54,6 +56,7 @@ impl ServeClient {
             .put(&url)
             .headers(headers)
             .json(body)
+            .timeout(REQUEST_TIMEOUT)
             .send()
             .await?;
         let status = resp.status();
