@@ -91,6 +91,13 @@
   padding: 10px 10px 12px;
 }
 
+/* 任务卡片加载完成后的包裹层：正文区是块级滚动容器，这里只做纵向排布 */
+.side-card-loaded {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
 /* 工作区卡片：正文区滚动，「刷新列表」固定在卡片底部（右列侧栏可视区内） */
 .side-card-body.workspace-side-card-body {
   display: flex;

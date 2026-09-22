@@ -163,7 +163,6 @@ pub fn mobile_shell_header_view(signals: MobileShellHeaderSignals) -> impl IntoV
     view! {
         <header
             class="shell-main-header-mobile shell-topbar"
-            class:ide-menu-bar=move || editor_layout_mode.get()
             role=move || shell_topbar_a11y(editor_layout_mode.get(), locale.get()).0
             data-testid=move || shell_topbar_a11y(editor_layout_mode.get(), locale.get()).1
             prop:aria-label=move || shell_topbar_a11y(editor_layout_mode.get(), locale.get()).2

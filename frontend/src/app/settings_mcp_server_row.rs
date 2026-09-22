@@ -65,7 +65,7 @@ fn SettingsMcpRemoteBearer(
                 }
             />
         </label>
-        <p class="settings-muted" data-testid="settings-mcp-bearer-hint">
+        <p class="settings-hint" data-testid="settings-mcp-bearer-hint">
             {move || {
                 let sid = id_hint.clone();
                 let set = file
@@ -118,7 +118,7 @@ fn SettingsMcpRemoteBearer(
         >
             {move || i18n::settings_mcp_bearer_save(locale.get())}
         </button>
-        <p class="settings-muted" data-testid="settings-mcp-bearer-feedback">
+        <p class="settings-hint" data-testid="settings-mcp-bearer-feedback">
             {move || bearer_feedback.get().unwrap_or_default()}
         </p>
     }
@@ -218,7 +218,7 @@ pub(crate) fn SettingsMcpServerRow(server_id: String, ctx: McpSettingsSignals) -
                 probing=probing
                 expanded=tools_expanded
             />
-            <p class="settings-muted" data-testid="mcp-server-transport-hint">
+            <p class="settings-hint" data-testid="mcp-server-transport-hint">
                 {move || mcp_row_transport_hint(locale.get(), &file.get(), &id_hint)}
             </p>
             <Show when=move || show_bearer.get()>

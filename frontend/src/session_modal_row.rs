@@ -83,7 +83,7 @@ fn SessionModalRowRenameForm(
         <div class="session-row-rename">
             <input
                 type="text"
-                class="settings-field-input session-row-rename-input"
+                class="settings-text-input session-row-rename-input"
                 data-testid=format!("session-modal-rename-input-{id_input}")
                 prop:placeholder=move || i18n::session_prompt_title_label(locale.get())
                 prop:value=move || rename_draft.get()

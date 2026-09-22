@@ -439,6 +439,17 @@
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent);
 }
 
+/* 置顶 / 星标：行级强调。用 background-image 叠加左侧色条，
+   避免覆盖 .is-active 的底色与描边（hover 亦保留） */
+.nav-session-item.is-pinned,
+.nav-session-item.is-starred {
+  background-image: linear-gradient(
+    to right,
+    color-mix(in srgb, var(--accent) 52%, transparent) 0 3px,
+    transparent 3px
+  );
+}
+
 .nav-session-title-row {
   display: flex;
   align-items: center;
