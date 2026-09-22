@@ -1,0 +1,16 @@
+# CSS 设计 token 白名单（门禁：scripts/check-css-tokens.sh）
+#
+# 格式：--<name>   # <理由>
+#   - 缺 '# 理由' / 重复登记 / 名字不是 --<name>：门禁报格式错误；
+#   - 条目「已在 CSS 定义」或「已无任何 var() 引用」：门禁报白名单失效，须删除。
+#
+# 只登记「有意使用、样式表内不可能定义」的运行时注入属性；能在 tokens.css 定义的 token 不属于这里。
+
+--cm-ime-inset              # Android 壳 IME 高度：mobile-tauri MainActivity.kt 注入（targetSdk 35+ adjustResize 兜底）
+--cm-safe-bottom            # iOS 安全区底：frontend/src/mobile_remote.rs 用 style.setProperty 写入
+--vv-keyboard-inset         # visualViewport 键盘内缩高度：frontend/src/app/app_shell_effects/keyboard_inset.rs 写入
+--crabmate-ui-font-family   # 界面字体族：设置页选择后由 shell_prefs_storage.rs 写到 <html>
+--crabmate-chat-font-family # 聊天列字体族：同上，仅作用于聊天列
+--crabmate-chat-font-size   # 聊天列字号：同上，仅作用于聊天列
+--list-stagger              # 列表逐项入场动画延迟：渲染时按索引内联 style="--list-stagger: N"
+--status-context-pct        # 上下文占用百分比：status_bar.rs 按运行时数据内联写入

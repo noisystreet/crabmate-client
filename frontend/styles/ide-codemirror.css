@@ -13,7 +13,7 @@
   flex: 1;
   min-height: 0;
   height: 100%;
-  background: var(--surface-editor, transparent);
+  background: var(--bg);
   color: var(--text);
 }
 
@@ -22,17 +22,17 @@
 }
 
 .ide-cm-host .cm-gutters {
-  background: var(--surface-1, rgba(0, 0, 0, 0.02));
-  color: var(--muted, rgba(0, 0, 0, 0.45));
-  border-right: 1px solid var(--shell-border, rgba(0, 0, 0, 0.08));
+  background: var(--surface);
+  color: var(--muted);
+  border-right: 1px solid var(--border);
 }
 
 .ide-cm-host .cm-activeLineGutter {
-  background: var(--surface-hover, rgba(0, 0, 0, 0.04));
+  background: var(--surface-hover);
 }
 
 .ide-cm-host .cm-activeLine {
-  background: var(--surface-hover, rgba(0, 0, 0, 0.03));
+  background: var(--surface-hover);
 }
 
 .ide-cm-host--disabled {
@@ -43,18 +43,18 @@
 .ide-editor-cm-missing {
   margin: 0.65rem 0.75rem;
   font-size: 0.85rem;
-  color: var(--accent-warn, #c27a00);
+  color: var(--warn);
 }
 
 /* Lezer 高亮 token → 沿用 IDE 变量（fallback 与 tokens.css 深色默认一致） */
 .ide-cm-host .tok-keyword {
-  color: var(--ide-hl-keyword, #c4b5fd);
+  color: var(--ide-hl-keyword);
   font-weight: 500;
 }
 
 .ide-cm-host .tok-string,
 .ide-cm-host .tok-string2 {
-  color: var(--ide-hl-string, #5eead4);
+  color: var(--ide-hl-string);
 }
 
 .ide-cm-host .tok-comment {
@@ -63,16 +63,16 @@
 }
 
 .ide-cm-host .tok-number {
-  color: var(--ide-hl-number, #fdba74);
+  color: var(--ide-hl-number);
 }
 
 .ide-cm-host .tok-typeName,
 .ide-cm-host .tok-className {
-  color: var(--ide-hl-type, #93c5fd);
+  color: var(--ide-hl-type);
 }
 
 .ide-cm-host .tok-propertyName {
-  color: var(--ide-hl-attribute, #f0abfc);
+  color: var(--ide-hl-attribute);
 }
 
 .ide-cm-host .tok-variableName {

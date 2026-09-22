@@ -454,7 +454,7 @@
 }
 
 .nav-session-badge-star {
-  color: color-mix(in srgb, var(--accent) 72%, var(--warning, #f5a623));
+  color: color-mix(in srgb, var(--accent) 72%, var(--warn));
 }
 
 .nav-session-badge-pin {
@@ -828,10 +828,7 @@ img[data-cm-ws-hydrated="1"] {
 .chat-tui-img-missing {
   min-width: 96px;
   min-height: 64px;
-  background: var(
-    --surface-muted,
-    color-mix(in srgb, var(--fg) 8%, transparent)
-  );
+  background: var(--surface-hover);
   cursor: default;
 }
 
@@ -977,7 +974,7 @@ img[data-cm-ws-hydrated="1"] {
 .composer-clarification-intro {
   margin: 0;
   font-size: 0.88rem;
-  color: var(--text-muted);
+  color: var(--muted);
   line-height: 1.45;
 }
 
@@ -1000,7 +997,7 @@ img[data-cm-ws-hydrated="1"] {
 
 .composer-clarification-hint {
   font-size: 0.8rem;
-  color: var(--text-muted);
+  color: var(--muted);
 }
 
 .composer-clarification-input {
@@ -1033,7 +1030,7 @@ img[data-cm-ws-hydrated="1"] {
 .composer.composer-ds.composer-drop-active {
   outline: 2px solid color-mix(in srgb, var(--accent) 55%, var(--border));
   outline-offset: 2px;
-  border-radius: var(--radius-panel, 10px);
+  border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--accent) 8%, var(--surface));
 }
 
