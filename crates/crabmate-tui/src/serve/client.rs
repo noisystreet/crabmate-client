@@ -1,5 +1,7 @@
 //! `reqwest` 封装：鉴权头 + 健康探测 + 审批提交 + 回合取消。
 
+use std::time::Duration;
+
 use crabmate_client_api::auth::{HEADER_X_API_KEY, web_api_credential_pair};
 use crabmate_client_api::{
     ApprovalDecision, ApprovalDecisionApi, ChatApprovalRequestBody, health_degraded_note, paths,
@@ -11,6 +13,21 @@ use serde::Deserialize;
 use crate::serve::config::ConnectionConfig;
 use crate::serve::error::TermError;
 use crate::serve::url::api_url;
+
+/// 建连（TCP + TLS）超时：serve 不可达 / 被防火墙黑洞时快速失败。
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// 非流式请求总超时。**不**设在 [`Client`] 上——同一 client 也承载 `/chat/stream`
+/// 长流，总超时会掐断进行中的回合。新增非流式请求须自行 `.timeout(REQUEST_TIMEOUT)`。
+pub(super) const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// 空闲连接在池中的保留时长：短于 serve / 中间代理的 keep-alive 上限，
+/// 避免复用已被对端关闭的连接（首次写入即报错）。
+const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// `/chat/stream/{job}/cancel` 的超时：交互打断路径，短于 [`REQUEST_TIMEOUT`]，
+/// 失败时尽快回落到「后台回合可能仍在跑，可 /resume」提示。
+const CANCEL_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// `POST /chat/stream/{job_id}/cancel` 的响应体。
 #[derive(Deserialize)]
@@ -30,6 +47,10 @@ impl ServeClient {
     pub fn new(cfg: ConnectionConfig) -> Result<Self, TermError> {
         let http = Client::builder()
             .user_agent(concat!("crabmate-tui/", env!("CARGO_PKG_VERSION")))
+            .connect_timeout(CONNECT_TIMEOUT)
+            .pool_idle_timeout(POOL_IDLE_TIMEOUT)
+            // 交互式逐 token 流：禁用 Nagle，避免小帧被合并延迟。
+            .tcp_nodelay(true)
             .build()?;
         Ok(Self { http, cfg })
     }
@@ -72,6 +93,7 @@ impl ServeClient {
             .http
             .get(&url)
             .headers(self.auth_headers()?)
+            .timeout(REQUEST_TIMEOUT)
             .send()
             .await?;
         let status = resp.status();
@@ -106,6 +128,7 @@ impl ServeClient {
             .post(&url)
             .headers(headers)
             .json(&body)
+            .timeout(REQUEST_TIMEOUT)
             .send()
             .await?;
         Self::ensure_success(resp).await
@@ -123,6 +146,8 @@ impl ServeClient {
             .post(&url)
             .headers(headers)
             .body("{}")
+            // 取消是交互中打断路径：失败要尽快回落到「后台可能仍在跑」提示，而不是卡 30s。
+            .timeout(CANCEL_TIMEOUT)
             .send()
             .await?;
         let status = resp.status();
