@@ -1,6 +1,5 @@
 use crabmate::cm_sse_protocol::{
-    StreamEndReason, extract_stream_ended_reason, is_sse_done_sentinel, join_sse_data_lines,
-    parse_sse_event_id,
+    StreamEndReason, is_sse_done_sentinel, join_sse_data_lines, parse_sse_event_id,
 };
 
 use crate::i18n::Locale;
@@ -56,17 +55,6 @@ impl SseBufferProgress {
     }
 }
 
-fn stream_ended_tiktoken_from_data(
-    data: &str,
-) -> Option<crate::conversation_hydrate::TiktokenPromptTokensSnapshot> {
-    let v = serde_json::from_str::<serde_json::Value>(data).ok()?;
-    v.get("stream_ended").and_then(|ended| {
-        ended
-            .get("tiktoken_prompt_tokens")
-            .and_then(crate::conversation_prompt_tokens_apply::parse_tiktoken_prompt_tokens_value)
-    })
-}
-
 #[allow(dead_code)]
 pub(super) fn process_sse_buffer(
     buffer: &mut String,
@@ -119,34 +107,27 @@ pub(super) fn flush_sse_tail(
 }
 
 /// 检查数据是否为 stream_ended 事件；若是则更新状态并返回 `StreamEnded`。
+///
+/// 单次 JSON 解析同时取 `reason` 与 `tiktoken_prompt_tokens`：高频 token 流下，
+/// 同一帧此前要被解析两次（主路径 + 兜底），此处合并为一次。
 fn check_stream_ended(
     data: &str,
     saw_stream_ended: &mut bool,
     cbs: &ChatStreamCallbacks,
 ) -> Option<SseFrameKind> {
-    if let Some(reason) = extract_stream_ended_reason(data) {
-        *saw_stream_ended = true;
-        let tiktoken = stream_ended_tiktoken_from_data(data);
-        (cbs.on_stream_ended)(reason, tiktoken);
-        return Some(SseFrameKind::StreamEnded);
-    }
-    if let Ok(v) = serde_json::from_str::<serde_json::Value>(data)
-        && let Some(ended) = v.get("stream_ended")
-        && !ended.is_null()
-    {
-        let reason = ended
-            .get("reason")
-            .and_then(|x| x.as_str())
-            .map(str::to_string)
-            .unwrap_or_else(|| StreamEndReason::Completed.to_string());
-        *saw_stream_ended = true;
-        let tiktoken = ended
-            .get("tiktoken_prompt_tokens")
-            .and_then(crate::conversation_prompt_tokens_apply::parse_tiktoken_prompt_tokens_value);
-        (cbs.on_stream_ended)(reason, tiktoken);
-        return Some(SseFrameKind::StreamEnded);
-    }
-    None
+    let v = serde_json::from_str::<serde_json::Value>(data).ok()?;
+    let ended = v.get("stream_ended").filter(|ended| !ended.is_null())?;
+    let reason = ended
+        .get("reason")
+        .and_then(|x| x.as_str())
+        .map(str::to_string)
+        .unwrap_or_else(|| StreamEndReason::Completed.to_string());
+    let tiktoken = ended
+        .get("tiktoken_prompt_tokens")
+        .and_then(crate::conversation_prompt_tokens_apply::parse_tiktoken_prompt_tokens_value);
+    *saw_stream_ended = true;
+    (cbs.on_stream_ended)(reason, tiktoken);
+    Some(SseFrameKind::StreamEnded)
 }
 
 /// 构造控制 sink 并对 `data` 做 AG-UI 解析分发（含 stream stopped 终止语义）。
