@@ -43,7 +43,7 @@ const PRE_STREAM_ENDED_READ_STALL_TIMEOUT_MS: u32 = 180_000;
 
 /// 两次「含 `data:` 的有效负载」之间的最大间隔（毫秒）。代理可能周期性下发不含 `data:` 的注释帧，
 /// 使 `read()` 频繁返回，从而永远不触发 [`PRE_STREAM_ENDED_READ_STALL_TIMEOUT_MS`]；此上限仍可结束悬挂流。
-/// 断线重连路径亦依赖此项（该路径不设单次 read 超时）。
+/// 断线重连路径亦依赖此项（该路径的单次 read 上限与之同为 [`PRE_STREAM_ENDED_READ_STALL_TIMEOUT_MS`]）。
 const SSE_ANY_PAYLOAD_IDLE_TIMEOUT_MS: f64 = 180_000.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -106,9 +106,15 @@ async fn poll_readable_stream_chunk(
             }
         }
     } else {
-        match JsFuture::from(reader.read()).await {
-            Ok(c) => Ok(ReadableChunkPoll::Chunk(c)),
-            Err(_) => Ok(ReadableChunkPoll::Break {
+        // 续流路径：不 `release_lock`（上层会重新 fetch 重连），读失败或读悬挂都交回上层重连。
+        match select(
+            JsFuture::from(reader.read()),
+            TimeoutFuture::new(PRE_STREAM_ENDED_READ_STALL_TIMEOUT_MS),
+        )
+        .await
+        {
+            Either::Left((Ok(c), _)) => Ok(ReadableChunkPoll::Chunk(c)),
+            Either::Left((Err(_), _)) | Either::Right(((), _)) => Ok(ReadableChunkPoll::Break {
                 stream_finished_normally: false,
             }),
         }
