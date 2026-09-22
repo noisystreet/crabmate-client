@@ -10,20 +10,14 @@ use crate::sse_dispatch::{
     ThinkingTraceInfo, TimelineLogInfo, ToolOutputChunkInfo, ToolResultInfo, TurnSegmentStartInfo,
 };
 
-use crabmate::cm_sse_protocol::{AgUiParseDispatch, classify_ag_ui_sse_data};
 use serde::Deserialize;
-
-fn ag_ui_dispatch_to_sse(dispatch: AgUiParseDispatch) -> SseDispatch {
-    match dispatch {
-        AgUiParseDispatch::Handled => SseDispatch::Handled,
-        AgUiParseDispatch::Plain => SseDispatch::Plain,
-        AgUiParseDispatch::StreamEnded => SseDispatch::StreamEnded,
-    }
-}
 
 /// 解析单行 AG-UI JSON 事件并分发到 [`SseControlSink`] 回调。
 pub fn parse_ag_ui_line(data: &str, sink: &mut SseControlSink<'_>) -> SseDispatch {
-    // 先尝试 AG-UI 格式解析：逐行处理 JSON，按 type 字段分发
+    // 先尝试 AG-UI 格式解析：逐行处理 JSON，按 type 字段分发。
+    // 逐行解析的 type 集合与契约 `classify_ag_ui_sse_data` 一致，故分类直接取本轮结果，
+    // 不再对整段 `data` 二次解析（高频 token 流下单行载荷可少一次全量 `from_str`）。
+    let mut handled_any = false;
     for line in data.lines() {
         let line = line.trim();
         if line.is_empty() {
@@ -73,10 +67,15 @@ pub fn parse_ag_ui_line(data: &str, sink: &mut SseControlSink<'_>) -> SseDispatc
             "STATE_DELTA" => {} // STATE_DELTA 预留，当前不处理
 
             // 未知 type → Plain 回落（可能是纯文本增量）
-            _ => return ag_ui_dispatch_to_sse(classify_ag_ui_sse_data(data)),
+            _ => return SseDispatch::Plain,
         }
+        handled_any = true;
     }
-    ag_ui_dispatch_to_sse(classify_ag_ui_sse_data(data))
+    if handled_any {
+        SseDispatch::Handled
+    } else {
+        SseDispatch::Plain
+    }
 }
 
 // ── 生命周期 ──
