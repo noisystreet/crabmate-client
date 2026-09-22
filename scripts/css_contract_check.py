@@ -10,9 +10,9 @@
                消费方   = frontend/src/**/*.rs + frontend/index.html
    - connect ：自包含页面（内联 style + 自身 class 消费）
    - splash  ：自包含页面（内联 style + 自身 class 消费）
-2. 采集启发式与 P0 审计（agent_space/ui_css_audit/audit_class_contract.py）同源：不猜测
-   「全量 kebab 字符串」，只采信带证据的候选（attr / tuple / cond / fnbody / cooc / isstate）；
-   只作 data-* 属性值的 token 记为噪声，不判违规。
+2. 采集启发式：不猜测「全量 kebab 字符串」，只采信带证据的候选
+   （attr / tuple / cond / fnbody / cooc / isstate）；只作 data-* 属性值的 token 记为噪声，
+   不判违规。
 3. 作用域边界（有意为之）：第三方 vendor JS 运行时生成的类名（CodeMirror 的 cm-* 等）
    不在契约内，故消费方只收本仓自有 Rust / HTML。
 4. 白名单 scripts/css_contract_allowlist.txt 登记「有意不写规则」的类名；失效条目
