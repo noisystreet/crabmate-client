@@ -11,7 +11,9 @@
   --border: #e2ddd6;
   --border-subtle: #ede9e3;
   --text: #1e1b16;
-  --muted: #8a8278;
+  /* 次要文字：暖灰加深至 #6f675c，在 --bg / --surface-hover / --surface 上分别约 4.99 / 4.90 / 5.57:1，
+     覆盖 10–11px 大写标签（正文小字 AA 需 4.5:1）；浅色下勿再调浅。 */
+  --muted: #6f675c;
   /* 主色：鼠尾草绿，低饱和高级感 */
   --accent: #7a8c7a;
   --accent-dim: color-mix(in srgb, var(--accent) 15%, var(--surface));
@@ -54,14 +56,16 @@
     radial-gradient(ellipse 100% 60% at 100% 0%, var(--accent-glow), transparent 62%),
     radial-gradient(ellipse 60% 40% at 0% 100%, color-mix(in srgb, var(--accent) 3%, transparent), transparent 54%);
   --nav-rail-bg: color-mix(in srgb, var(--bg-elevated) 90%, var(--bg));
+  /* `.btn-primary` 的文字在 components.css 固定为 #fff：渐变整体压深，最亮的顶部也 ≈6.3:1，
+     `:hover` 的 brightness(1.07) 提亮后仍有 ≈5.7:1（浅色主题原先仅 ≈3.2:1）。 */
   --btn-primary-bg: linear-gradient(
     180deg,
-    color-mix(in srgb, var(--accent) 92%, #fff) 0%,
-    color-mix(in srgb, var(--accent) 94%, #0f172a) 100%
+    color-mix(in srgb, var(--accent) 68%, #0a0c10) 0%,
+    color-mix(in srgb, var(--accent) 60%, #0a0c10) 100%
   );
-  --btn-primary-border: color-mix(in srgb, var(--accent) 72%, #1e293b);
+  --btn-primary-border: color-mix(in srgb, var(--accent) 58%, #0a0c10);
   --modal-backdrop-bg: rgba(30, 27, 22, 0.30);
-  --status-agent-select-bg-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='%238a8278' d='M0 0h10L5 6z'/%3E%3C/svg%3E");
+  --status-agent-select-bg-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='%236f675c' d='M0 0h10L5 6z'/%3E%3C/svg%3E");
   --composer-bar-box-shadow:
     0 -1px 0 color-mix(in srgb, #fff 72%, transparent) inset,
     0 -6px 26px color-mix(in srgb, var(--border) 10%, transparent);

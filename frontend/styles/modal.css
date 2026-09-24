@@ -1223,7 +1223,7 @@ html[data-cm-mobile-shell] .settings-page-header {
 
 .settings-mcp-tool-openai {
   font-size: 10px;
-  color: color-mix(in srgb, var(--muted) 90%, transparent);
+  color: var(--muted);
   word-break: break-all;
 }
 
