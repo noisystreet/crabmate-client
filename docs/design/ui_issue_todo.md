@@ -64,7 +64,7 @@
 
 - [x] 未定义 token：`--text-muted` / `--surface-muted` / `--surface-2` / `--panel` / `--fg` / `--warning`；`status.css` 的 `color-mix(… var(--panel) …)` 因变量失效整句作废。已修（2026-09-22）：`--panel` 那条 `color-mix` 随 P4 死 CSS 清理移除；其余五个的引用统一改指已有 token（`--fg` 仅保留在 `splash.html` / `connect.html` 两个独立页自持定义），`frontend/styles` + `frontend/themes` 内已无未定义引用、无 `var()` 浅色兜底，由 `scripts/check-css-tokens.sh` 固化。
 - [ ] API 层窄路径硬编码中文错误串：`frontend/src/api/http.rs`、`github_secrets_local.rs`、`llm_secrets_local.rs`、`web_api_bearer_local.rs`、`user_data.rs`。
-- [ ] 启动 splash 硬编码深色 `#0a0d12`，浅色用户首帧深闪：`frontend/index.html`。
+- [ ] 启动 splash 硬编码深色 `#07090e`，浅色用户首帧深闪：`frontend/index.html`（同值亦见于 `desktop-tauri/splash.html`、`crates/crabmate-connect/assets/connect.html` 与 Android `values*/themes.xml`）。
 
 ## P3 · 次要
 
