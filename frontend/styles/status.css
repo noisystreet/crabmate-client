@@ -2,7 +2,7 @@
 .status-bar {
   flex-shrink: 0;
   padding: 4px 12px;
-  font-size: 12px;
+  font-size: var(--text-md);
   border-top: 1px solid var(--border-subtle);
   background: color-mix(in srgb, var(--bg) 68%, var(--bg-elevated));
   color: var(--muted);
@@ -43,7 +43,7 @@
 }
 
 .status-chip-label {
-  font-size: 10px;
+  font-size: var(--text-xs);
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--muted);
@@ -176,7 +176,7 @@
   background: transparent;
   color: var(--text);
   font: inherit;
-  font-size: 11px;
+  font-size: var(--text-sm);
   font-weight: 500;
   text-align: left;
   white-space: nowrap;
@@ -279,7 +279,7 @@
   background: transparent;
   color: var(--text);
   font: inherit;
-  font-size: 11px;
+  font-size: var(--text-sm);
   font-weight: 500;
   text-align: left;
   white-space: nowrap;
@@ -357,7 +357,7 @@
       9px 5px;
   color: var(--text);
   font-family: inherit;
-  font-size: 11px;
+  font-size: var(--text-sm);
   font-weight: 500;
   cursor: pointer;
 }
@@ -479,6 +479,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12px;
+  font-size: var(--text-md);
   line-height: 1.35;
 }

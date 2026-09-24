@@ -39,13 +39,13 @@ html[data-cm-mobile-shell] .tauri-window-controls {
 }
 
 .tauri-win-ctrl-glyph {
-  font-size: 0.85rem;
+  font-size: var(--text-md);
   line-height: 1;
   pointer-events: none;
 }
 
 .tauri-win-ctrl-close .tauri-win-ctrl-glyph {
-  font-size: 1rem;
+  font-size: var(--text-lg);
 }
 
 /* 顶栏共用：Tauri 无边框窗口拖拽 */

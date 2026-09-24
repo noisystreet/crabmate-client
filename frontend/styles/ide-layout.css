@@ -113,12 +113,12 @@
 
 .ide-pane-title {
   font-weight: 600;
-  font-size: 0.9rem;
+  font-size: var(--text-base);
 }
 
 .ide-open-hint {
   margin: 0.35rem 0 0;
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   opacity: 0.78;
   line-height: 1.35;
 }
@@ -177,7 +177,7 @@
   border: none;
   background: transparent;
   font: inherit;
-  font-size: 0.8rem;
+  font-size: var(--text-sm);
   color: inherit;
   cursor: pointer;
   text-align: left;
@@ -195,7 +195,7 @@
 
 .ide-tab-dirty {
   color: var(--warn);
-  font-size: 0.65rem;
+  font-size: var(--text-2xs);
   flex-shrink: 0;
 }
 
@@ -226,7 +226,7 @@
   background: transparent;
   color: inherit;
   cursor: pointer;
-  font-size: 0.95rem;
+  font-size: var(--text-base);
   opacity: 0.65;
 }
 
@@ -264,7 +264,7 @@
 }
 
 .ide-find-label {
-  font-size: 0.8rem;
+  font-size: var(--text-sm);
   color: var(--muted);
 }
 
@@ -274,13 +274,13 @@
   padding: 0.25rem 0.45rem;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm, 4px);
-  font-size: 0.85rem;
+  font-size: var(--text-md);
   background: var(--bg);
   color: inherit;
 }
 
 .ide-find-meta {
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   color: var(--muted);
   min-width: 3rem;
   text-align: center;
@@ -304,7 +304,7 @@
 /* 新建文件模态：非法路径错误提示 */
 .ide-new-file-error {
   margin: var(--space-2) 0 0;
-  font-size: 12px;
+  font-size: var(--text-md);
   line-height: 1.4;
   color: var(--danger);
 }

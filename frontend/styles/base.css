@@ -39,7 +39,7 @@ body {
   background: var(--bg);
   background-attachment: fixed;
   color: var(--text);
-  font-size: 14px;
+  font-size: var(--text-lg);
   line-height: var(--line-body);
   -webkit-font-smoothing: antialiased;
 }
