@@ -117,7 +117,7 @@ html[data-cm-mobile-shell] .shell-topbar {
   margin: 0;
   padding: 0.2rem 0.5rem;
   font-family: var(--font-mono);
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   line-height: 1.25;
   color: var(--muted);
   text-align: center;
@@ -135,7 +135,7 @@ html[data-cm-mobile-shell] .shell-topbar {
 .shell-topbar-workspace-error {
   margin: 0;
   padding: 0 0.35rem;
-  font-size: 0.65rem;
+  font-size: var(--text-2xs);
   line-height: 1.2;
   color: var(--danger);
   overflow: hidden;
@@ -155,7 +155,7 @@ html[data-cm-mobile-shell] .shell-topbar {
   justify-content: flex-end;
   gap: 0.35rem;
   overflow: hidden;
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   color: var(--muted);
 }
 
@@ -209,7 +209,7 @@ html[data-cm-mobile-shell] .shell-topbar {
 .shell-topbar .ide-menu-trigger,
 .ide-menu-trigger {
   font: inherit;
-  font-size: 0.8125rem;
+  font-size: var(--text-sm);
   line-height: 1.25;
   padding: 0.28rem 0.65rem;
   border: none;
@@ -264,7 +264,7 @@ html[data-cm-mobile-shell] .shell-topbar {
 .ide-menu-submenu-chevron {
   flex-shrink: 0;
   margin-left: 0.75rem;
-  font-size: 0.95rem;
+  font-size: var(--text-base);
   line-height: 1;
   color: var(--muted);
 }
@@ -301,7 +301,7 @@ html[data-cm-mobile-shell] .shell-topbar {
   border: none;
   background: transparent;
   font: inherit;
-  font-size: 0.8rem;
+  font-size: var(--text-sm);
   text-align: left;
   color: inherit;
   cursor: pointer;
@@ -331,7 +331,7 @@ html[data-cm-mobile-shell] .shell-topbar {
   width: 1rem;
   flex-shrink: 0;
   text-align: center;
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
 }
 
 /* Portal → body；须低于 .shell-topbar (90)，高于主内容，才能点空白收起且不挡菜单 */
@@ -348,7 +348,7 @@ html[data-cm-mobile-shell] .shell-topbar {
 
 .ide-dirty-dot {
   color: var(--warn);
-  font-size: 0.75rem;
+  font-size: var(--text-sm);
   line-height: 1;
 }
 

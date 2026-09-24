@@ -7,18 +7,14 @@
 #   - 实际值必须等于预算值：写多写少都 fail（清理后不同步下调，条目就成了「隐性豁免」）；
 #   - 未登记的文件预算视为 0；两项均为 0 的条目、或文件已不存在的条目，报预算失效，须删除。
 #
-# 目标是把存量逐文件清到 0（颜色优先：它直接破坏主题化），清理一处就下调一处预算。
+# 目标是把存量逐文件清到 0，清理一处就下调一处预算。
+# 当前进度：font-size 已全量清到 0（Phase 1a，字号统一走 tokens.css 的 --text-* 档），故仅剩颜色条目。
 
-frontend/styles/approval.css        font-size=5   color=0    # 字号直写 px，待逐处迁 --text-* 档
-frontend/styles/base.css            font-size=1   color=0    # 字号直写 px（1 处），待迁 --text-* 档
-frontend/styles/components.css      font-size=3   color=6    # 字号待迁 --text-*；#fff 为深底 inset 高光与主按钮白字，待新增高光 / 前景 token
-frontend/styles/ide-codemirror.css  font-size=1   color=0    # 字号直写 px（CodeMirror 壳），待迁 --text-* 档
-frontend/styles/ide-layout.css      font-size=9   color=0    # 字号待迁 --text-*（标签 / 树 / 编辑器）
-frontend/styles/layout-chat.css     font-size=39  color=10   # 字号待迁 --text-*；颜色：#fff inset 高光 + alert 五色硬编码（#3b82f6 / #22c55e / #a855f7 / #f59e0b / #ef4444）与 rgba 阴影 / 错误底，待 token 化
-frontend/styles/mobile.css          font-size=10  color=1    # 字号待迁 --text-*；1 处 rgba(0,0,0,.48) 抽屉遮罩待 token 化
-frontend/styles/modal.css           font-size=42  color=1    # 字号待迁 --text-*（设置页为主）；1 处 rgb(0 0 0 / 18%) 浮层阴影待 token 化
-frontend/styles/shell-ds.css        font-size=30  color=3    # 字号待迁 --text-*；颜色 2 处 color-mix(#000 …) 阴影 + 1 处 rgba(0,0,0,.48) 遮罩待 token 化
-frontend/styles/shell-topbar.css    font-size=8   color=2    # 字号待迁 --text-*；2 处 rgba(0,0,0,.12) 浮层阴影待 token 化
-frontend/styles/sidebar.css         font-size=10  color=1    # 字号待迁 --text-*；1 处 rgba(0,0,0,.5) 遮罩待 token 化
-frontend/styles/status.css          font-size=6   color=0    # 字号直写 px，待逐处迁 --text-* 档
-frontend/styles/tauri-shell.css     font-size=2   color=2    # 字号待迁 --text-*；#c42b1c / #fff 为 Windows 关闭键红底白字，壳层专用
+frontend/styles/components.css      font-size=0   color=6    # #fff 为深底 inset 高光与主按钮白字，待新增高光 / 前景 token
+frontend/styles/layout-chat.css     font-size=0   color=10   # alert 五色硬编码（#3b82f6 / #22c55e / #a855f7 / #f59e0b / #ef4444）+ rgba 阴影 / 错误底 + #fff inset 高光，待 token 化
+frontend/styles/mobile.css          font-size=0   color=1    # 1 处 rgba(0,0,0,.48) 抽屉遮罩待 token 化
+frontend/styles/modal.css           font-size=0   color=1    # 1 处 rgb(0 0 0 / 18%) 浮层阴影待 token 化
+frontend/styles/shell-ds.css        font-size=0   color=3    # 2 处 color-mix(#000 …) 阴影 + 1 处 rgba(0,0,0,.48) 遮罩待 token 化
+frontend/styles/shell-topbar.css    font-size=0   color=2    # 2 处 rgba(0,0,0,.12) 浮层阴影待 token 化
+frontend/styles/sidebar.css         font-size=0   color=1    # 1 处 rgba(0,0,0,.5) 遮罩待 token 化
+frontend/styles/tauri-shell.css     font-size=0   color=2    # #c42b1c / #fff 为 Windows 关闭键红底白字，壳层专用

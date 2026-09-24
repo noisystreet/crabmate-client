@@ -177,7 +177,7 @@ html[data-cm-mobile-shell] .composer-input--mirror-overlay {
     padding: 2px 8px;
     gap: 6px;
     min-height: 0;
-    font-size: 11px;
+    font-size: var(--text-sm);
   }
 
   html[data-cm-mobile-shell] .status-bar {
@@ -189,11 +189,11 @@ html[data-cm-mobile-shell] .composer-input--mirror-overlay {
     height: 20px;
     padding: 0 6px;
     gap: 4px;
-    font-size: 11px;
+    font-size: var(--text-sm);
   }
 
   .status-chip-label {
-    font-size: 9px;
+    font-size: var(--text-2xs);
   }
 
   .status-chip-value {
@@ -295,7 +295,7 @@ html[data-cm-mobile-shell] .composer-input--mirror-overlay {
   .app-shell-ds .composer-ds .composer-input,
   .composer-ds .composer-input-stack .composer-input-fake-ph,
   .composer-ds .composer-input-stack .composer-input-highlight-inner {
-    font-size: 16px; /* 避免 iOS 聚焦时自动缩放 */
+    font-size: var(--text-2xl); /* 避免 iOS 聚焦时自动缩放 */
     line-height: 1.35;
   }
 
@@ -367,7 +367,7 @@ html[data-cm-mobile-shell] .composer-input--mirror-overlay {
   }
 
   .shell-topbar-workspace-title {
-    font-size: 12px;
+    font-size: var(--text-md);
   }
 
   /* 窄屏：隐藏会话/IDE 切换，固定会话模式 */
@@ -410,7 +410,7 @@ html[data-cm-mobile-shell] .composer-input--mirror-overlay {
     min-height: 44px;
     justify-content: center;
     padding-inline: 6px;
-    font-size: 13px;
+    font-size: var(--text-base);
     white-space: normal;
     text-align: center;
     line-height: 1.25;
@@ -418,7 +418,7 @@ html[data-cm-mobile-shell] .composer-input--mirror-overlay {
 
   .approval-modal-command {
     max-height: min(40vh, 280px);
-    font-size: 12px;
+    font-size: var(--text-md);
   }
 
   .modal-footer.actions .btn {
@@ -443,12 +443,12 @@ html[data-cm-mobile-shell] .composer-input--mirror-overlay {
 
   #workspace-browser-pick-path,
   .workspace-browser-pick-path-row .settings-text-input {
-    font-size: 16px;
+    font-size: var(--text-2xl);
   }
 
   /* —— 右抽屉内容触控化：工作区树 / 任务 / Debug —— */
   .side-column .workspace-list {
-    font-size: 13px;
+    font-size: var(--text-base);
   }
 
   .side-column .workspace-list li.file,
@@ -469,7 +469,7 @@ html[data-cm-mobile-shell] .composer-input--mirror-overlay {
     height: 44px;
     min-width: 44px;
     min-height: 44px;
-    font-size: 0.75rem;
+    font-size: var(--text-sm);
   }
 
   .side-column .tasks-list li {
