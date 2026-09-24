@@ -3,26 +3,30 @@
  * 见 themes/README.md：增删预设时请同步 Rust 白名单（app_prefs::THEME_SLUGS）与 index.html 引用链。
  */
 :root[data-theme="light"] {
-  /* 暖白底：米灰基调，告别冷灰工具感 */
-  --bg: #f5f2ed;
-  --bg-elevated: #faf8f5;
-  --surface: #ffffff;
-  --surface-hover: #f3f0eb;
-  --border: #e2ddd6;
-  --border-subtle: #ede9e3;
-  --text: #1e1b16;
-  /* 次要文字：暖灰加深至 #6f675c，在 --bg / --surface-hover / --surface 上分别约 4.99 / 4.90 / 5.57:1，
+  /* 暖纸底：米灰基调，告别冷灰工具感；表面不再用纯白，避免白卡压在暖底上「贴上去」的冷暖冲突 */
+  --bg: #f4f1ea;
+  --bg-elevated: #faf8f3;
+  --surface: #fffdfa;
+  --surface-hover: #f0ece2;
+  --border: #e2ddd1;
+  --border-subtle: #ebe7dc;
+  --text: #1c1913;
+  /* 次要文字：在 --bg / --surface-hover / --surface 上分别约 5.25 / 5.02 / 5.83:1，
      覆盖 10–11px 大写标签（正文小字 AA 需 4.5:1）；浅色下勿再调浅。 */
-  --muted: #6f675c;
-  /* 主色：鼠尾草绿，低饱和高级感 */
-  --accent: #7a8c7a;
+  --muted: #6b6357;
+  /* 主色：鼠尾草绿。
+     `--accent` / `--info` / `--success` / `--warn` / `--error` 在 styles 下有 30+ 处被直接当文字色
+     （`color: var(--…)`），所以每一个都必须在 --bg / --surface-hover / --surface 三层底色上 ≥4.5:1
+     （小字 AA）。改这些值前请重新实算，勿只凭观感调浅——旧值全部只有 3.0–4.1:1。 */
+  --accent: #55705b;
   --accent-dim: color-mix(in srgb, var(--accent) 15%, var(--surface));
   --accent-glow: color-mix(in srgb, var(--accent) 7%, transparent);
 
-  --info: #7a8c7a;
-  --success: #6b8f6b;
-  --warn: #9a8b5a;
-  --error: #b06a6a;
+  /* 信息态独立取青：不再与 --accent 同值（旧版两者同为 #7a8c7a，信息与品牌同形、语义折叠） */
+  --info: #3a6e83;
+  --success: #4a7454;
+  --warn: #836628;
+  --error: #a0524f;
 
   --info-bg: color-mix(in srgb, var(--info) 10%, var(--surface));
   --success-bg: color-mix(in srgb, var(--success) 10%, var(--surface));
@@ -56,16 +60,16 @@
     radial-gradient(ellipse 100% 60% at 100% 0%, var(--accent-glow), transparent 62%),
     radial-gradient(ellipse 60% 40% at 0% 100%, color-mix(in srgb, var(--accent) 3%, transparent), transparent 54%);
   --nav-rail-bg: color-mix(in srgb, var(--bg-elevated) 90%, var(--bg));
-  /* `.btn-primary` 的文字在 components.css 固定为 #fff：渐变整体压深，最亮的顶部也 ≈6.3:1，
-     `:hover` 的 brightness(1.07) 提亮后仍有 ≈5.7:1（浅色主题原先仅 ≈3.2:1）。 */
+  /* `.btn-primary` 的文字在 components.css 固定为 #fff：渐变只轻微压深（保留鼠尾草绿而不是压成近黑），
+     最亮的顶部仍有 ≈6.1:1，`:hover` 的 brightness(1.07) 提亮后 ≈5.5:1；`:disabled` 见 components.css。 */
   --btn-primary-bg: linear-gradient(
     180deg,
-    color-mix(in srgb, var(--accent) 68%, #0a0c10) 0%,
-    color-mix(in srgb, var(--accent) 60%, #0a0c10) 100%
+    color-mix(in srgb, var(--accent) 92%, #0a0c10) 0%,
+    color-mix(in srgb, var(--accent) 84%, #0a0c10) 100%
   );
-  --btn-primary-border: color-mix(in srgb, var(--accent) 58%, #0a0c10);
-  --modal-backdrop-bg: rgba(30, 27, 22, 0.30);
-  --status-agent-select-bg-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='%236f675c' d='M0 0h10L5 6z'/%3E%3C/svg%3E");
+  --btn-primary-border: color-mix(in srgb, var(--accent) 86%, #0a0c10);
+  --modal-backdrop-bg: rgba(28, 25, 19, 0.30);
+  --status-agent-select-bg-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='%236b6357' d='M0 0h10L5 6z'/%3E%3C/svg%3E");
   --composer-bar-box-shadow:
     0 -1px 0 color-mix(in srgb, #fff 72%, transparent) inset,
     0 -6px 26px color-mix(in srgb, var(--border) 10%, transparent);
