@@ -9,13 +9,14 @@
     <title>CrabMate</title>
     <style>
       :root {
-        --bg0: #0a0d12;
-        --bg1: #121820;
-        --fg: #e8ecf1;
-        --muted: #909dad;
-        --accent: #7b90c4;
-        --field: #1a222d;
-        --border: #2a3340;
+        /* 与 frontend/styles/tokens.css 默认深色同一套「深空靛蓝」；改动须与 index.html / splash.html / Android 同步 */
+        --bg0: #07090e;
+        --bg1: #0f111c;
+        --fg: #eef1f6;
+        --muted: #9099b4;
+        --accent: #8fa4ea;
+        --field: #161727;
+        --border: #2a2b40;
         --danger: #c98c9b;
         --radius-btn: 5px;
         --font: "DM Sans", "Segoe UI", "PingFang SC", "Noto Sans SC", system-ui, sans-serif;
@@ -28,7 +29,7 @@
         min-height: 100dvh;
         height: 100%;
         font-family: var(--font);
-        background: radial-gradient(120% 80% at 50% 0%, #1a222d 0%, var(--bg0) 55%);
+        background: radial-gradient(120% 80% at 50% 0%, #1c1f33 0%, var(--bg0) 55%);
         color: var(--fg);
       }
       body {
@@ -59,12 +60,12 @@
         width: 40px;
         height: 40px;
         border-radius: 10px;
-        background: linear-gradient(145deg, #232c38, #121820);
-        border: 1px solid var(--border);
+        background: linear-gradient(145deg, #2a2b40, #161727);
+        border: 1px solid #37384e;
         display: grid;
         place-items: center;
         margin-bottom: 0.5rem;
-        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+        box-shadow: 0 8px 24px rgba(2, 4, 10, 0.45);
       }
       .mark span {
         font-size: 1.25rem;
@@ -96,15 +97,15 @@
         margin-bottom: 0.5rem;
       }
       input:focus {
-        outline: 2px solid rgba(123, 144, 196, 0.4);
+        outline: 2px solid rgba(143, 164, 234, 0.4);
         outline-offset: 1px;
       }
       button {
         width: 100%;
         padding: 0.65rem 1rem;
-        border: 1px solid rgba(78, 93, 123, 1);
+        border: 1px solid #4a4c78;
         border-radius: var(--radius-btn);
-        background: rgb(47, 58, 78);
+        background: #33355a;
         color: var(--fg);
         font-size: 0.92rem;
         font-weight: 600;
@@ -164,7 +165,7 @@
         overflow: hidden;
       }
       .recent-item:hover {
-        border-color: rgba(123, 144, 196, 0.5);
+        border-color: rgba(143, 164, 234, 0.5);
       }
       .recent-pick {
         flex: 1 1 auto;
@@ -182,7 +183,7 @@
         white-space: nowrap;
       }
       .recent-pick:hover {
-        background: rgba(123, 144, 196, 0.08);
+        background: rgba(143, 164, 234, 0.08);
       }
       .recent-del {
         flex: 0 0 auto;
@@ -198,7 +199,7 @@
       }
       .recent-del:hover {
         color: var(--fg);
-        background: rgba(123, 144, 196, 0.12);
+        background: rgba(143, 164, 234, 0.12);
       }
       .err {
         color: #e8c4cc;

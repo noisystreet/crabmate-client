@@ -6,13 +6,14 @@
 <title>CrabMate</title>
 <style>
   :root {
-    --bg0: #0a0d12;
-    --bg1: #121820;
-    --fg: #e8ecf1;
-    --muted: #909dad;
-    --accent: #7b90c4;
-    --accent-dim: rgba(123, 144, 196, 0.3);
-    --border: #2a3340;
+    /* 与 frontend/styles/tokens.css 默认深色同一套「深空靛蓝」；改动须与 index.html / connect.html / Android 同步 */
+    --bg0: #07090e;
+    --bg1: #0f111c;
+    --fg: #eef1f6;
+    --muted: #9099b4;
+    --accent: #8fa4ea;
+    --accent-dim: rgba(143, 164, 234, 0.32);
+    --border: #2a2b40;
     --danger: #c98c9b;
     --danger-bg: rgba(201, 140, 155, 0.14);
     --radius-btn: 5px;
@@ -22,7 +23,7 @@
   html, body {
     margin: 0;
     height: 100%;
-    background: radial-gradient(120% 80% at 50% 0%, #1a222d 0%, var(--bg0) 55%);
+    background: radial-gradient(120% 80% at 50% 0%, #1c1f33 0%, var(--bg0) 55%);
     color: var(--fg);
     font-family: var(--font);
     -webkit-user-select: none;
@@ -45,12 +46,12 @@
     width: 48px;
     height: 48px;
     border-radius: 12px;
-    background: linear-gradient(145deg, #232c38, #121820);
-    border: 1px solid var(--border);
+    background: linear-gradient(145deg, #2a2b40, #161727);
+    border: 1px solid #37384e;
     display: grid;
     place-items: center;
     margin-bottom: 0.85rem;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+    box-shadow: 0 8px 24px rgba(2, 4, 10, 0.45);
   }
   .mark span {
     font-size: 1.35rem;
@@ -134,8 +135,8 @@
   }
   button:hover { border-color: var(--accent); }
   button.primary {
-    background: rgb(47, 58, 78);
-    border-color: rgb(78, 93, 123);
+    background: #33355a;
+    border-color: #4a4c78;
     color: var(--fg);
   }
   .hint {
@@ -145,7 +146,8 @@
     right: 0;
     text-align: center;
     font-size: 0.7rem;
-    color: #5c6570;
+    /* 226° 靛蓝灰：旧 #5c6570 在 #07090e 上仅 3.37:1；此值 5.22:1，仍暗于 --muted 保持低调 */
+    color: #7b8299;
   }
   body.is-error .hint { display: none; }
 </style>
