@@ -8,6 +8,11 @@ token（CSS 自定义属性）是深色 / 浅色 / 高对比主题的颜色与�
      界面看起来只是「有点怪」，没有任何提示；
   2. **var() 兜底里含颜色字面量**：`var(--surface, #fff)` 的兜底在 token 已定义时永不生效，
      一旦 token 缺失就渲染出固定浅色 —— 主题化背景下这是最容易被忽略的视觉回归。
+  3. **主题覆盖不完整**：某个 `data-theme` 预设覆盖过的 token，其余预设若未显式覆盖，就会在该主题下
+     静默沿用 `tokens.css` 的默认深色值（浅色主题里冒出深色卡片 / 终端块），同样不报错、只「有点怪」。
+     规则按并集机械推导，无需手工维护必填清单：**任一同级主题定义过的 token，其余主题都必须定义**；
+     唯一例外是**主题身份变量**（见 `THEME_IDENTITY_TOKENS`，如字体族 / 圆角档 —— 差异本身即设计意图）。
+     `themes/*.example.css` 模板未进构建，不参与校验。
 
 「有意使用、样式表内不可能定义」的运行时注入属性（Rust `style.setProperty` / Android IME 注入 /
 渲染期内联 `style="--x: ..."`）登记在 `scripts/css_tokens_allowlist.txt`，须写理由；
@@ -20,13 +25,23 @@ token（CSS 自定义属性）是深色 / 浅色 / 高对比主题的颜色与�
 from __future__ import annotations
 
 import difflib
+import fnmatch
 import re
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 CSS_DIRS = ("frontend/styles", "frontend/themes")
+THEMES_DIR = ROOT / "frontend" / "themes"
 ALLOWLIST = ROOT / "scripts" / "css_tokens_allowlist.txt"
+
+# 主题身份变量：随主题刻意变化（字体族 / 圆角档），不参与「覆盖完整性」校验。
+THEME_IDENTITY_TOKENS = (
+    "--font-sans",  # 各主题自带字体族（Material 用 Roboto 等）
+    "--radius-*",  # 圆角档随主题变（Material 用 M3 圆角档）
+)
+# themes/ 下的示例模板未在 index.html 引用、不进构建，不参与覆盖完整性校验。
+THEME_EXCLUDED = "*.example.css"
 
 COMMENT_RE = re.compile(r"/\*.*?\*/", re.S)
 DEF_RE = re.compile(r"(--[A-Za-z0-9_-]+)\s*:")
@@ -91,6 +106,31 @@ def collect() -> tuple[dict[str, str], dict[str, list[str]], list[tuple[str, int
     return defined, used, bad_fallback
 
 
+def theme_files() -> list[Path]:
+    """参与覆盖完整性校验的主题文件（排除示例模板）。"""
+    if not THEMES_DIR.is_dir():
+        return []
+    return [
+        f for f in sorted(THEMES_DIR.glob("*.css")) if not fnmatch.fnmatch(f.name, THEME_EXCLUDED)
+    ]
+
+
+def is_theme_identity(name: str) -> bool:
+    return any(fnmatch.fnmatch(name, pat) for pat in THEME_IDENTITY_TOKENS)
+
+
+def theme_gaps() -> list[tuple[str, list[str]]]:
+    """返回 [(主题文件, 缺失 token 列表)]：某主题覆盖过的 token，其余主题必须同样显式覆盖。"""
+    defs: dict[str, set[str]] = {}
+    for f in theme_files():
+        text = strip_comments(f.read_text(encoding="utf-8"))
+        defs[f.relative_to(ROOT).as_posix()] = {m.group(1) for m in DEF_RE.finditer(text)}
+    if len(defs) < 2:
+        return []
+    required = {n for n in set().union(*defs.values()) if not is_theme_identity(n)}
+    return [(rel, sorted(required - names)) for rel, names in defs.items() if required - names]
+
+
 class AllowlistError(Exception):
     pass
 
@@ -119,6 +159,7 @@ def report(
     undefined: dict[str, list[str]],
     violations: list[str],
     bad_fallback: list[tuple[str, int, str, str]],
+    theme_missing: list[tuple[str, list[str]]],
     stale: list[str],
     allow: dict[str, tuple[str, int]],
     defined: dict[str, str],
@@ -149,6 +190,19 @@ def report(
             "  → 颜色一律由 token 提供：去掉整个兜底（var(--x)），或把兜底换成已有 token",
             file=sys.stderr,
         )
+    if theme_missing:
+        print(
+            "[check-css-tokens] 违规：主题覆盖不完整"
+            "（某个主题覆盖过的 token，其余主题必须同样显式覆盖，否则该主题下静默沿用默认深色值）：",
+            file=sys.stderr,
+        )
+        for rel, names in theme_missing:
+            print(f"  {rel}  缺少 {len(names)} 个：{' '.join(names)}", file=sys.stderr)
+        print(
+            "  → 在缺失的主题块内补齐同名 token；确属「主题身份差异」（字体族 / 圆角档等）请登记到 "
+            "scripts/css_tokens_check.py 的 THEME_IDENTITY_TOKENS 并写明理由",
+            file=sys.stderr,
+        )
     if stale:
         print(
             "[check-css-tokens] 白名单失效（CSS 已定义 / 已无引用 / 拼写笔误），请删除下列条目：",
@@ -174,14 +228,15 @@ def main() -> int:
     # 白名单只赦免「未定义但被引用」；已定义或已无引用都算失效条目。
     violations = sorted(n for n in undefined if n not in allow)
     stale = sorted(k for k in allow if k in defined or k not in used)
+    theme_missing = theme_gaps()
 
-    if violations or bad_fallback or stale:
-        report(undefined, violations, bad_fallback, stale, allow, defined)
+    if violations or bad_fallback or theme_missing or stale:
+        report(undefined, violations, bad_fallback, theme_missing, stale, allow, defined)
         return 1
 
     print(
         f"[check-css-tokens] ok（已定义 {len(defined)} 个 token，引用 {len(used)} 个；"
-        f"未定义引用 0，颜色兜底 0；白名单 {len(allow)} 条）"
+        f"未定义引用 0，颜色兜底 0，主题覆盖缺口 0；白名单 {len(allow)} 条）"
     )
     return 0
 

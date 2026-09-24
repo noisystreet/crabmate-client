@@ -40,6 +40,10 @@
     0 10px 40px rgba(0, 0, 0, 0.65);
   --shadow-sm: var(--shadow-raised);
   --shadow-md: var(--shadow-overlay);
+  /* 卡片级极浅阴影：本主题用描边而非投影区分层级（与 tokens.css / light.css 同档） */
+  --shadow-card:
+    0 0 0 1px color-mix(in srgb, var(--border) 35%, transparent) inset,
+    0 2px 8px rgba(0, 0, 0, 0.45);
 
   --selection-bg: #f0f0f0;
   --selection-color: #0a0a0a;
@@ -56,6 +60,11 @@
     0 -8px 28px rgba(0, 0, 0, 0.55);
   --composer-ws-ref-bg: #2a2a2a;
   --composer-ws-ref-box-shadow: 0 0 0 2px var(--accent);
+
+  /* 聊天内嵌终端面板：所有主题保留深色沉浸区（与 tokens.css / light.css 同值） */
+  --terminal-panel-bg: #0c0e12;
+  --terminal-panel-border: #30363d;
+  --terminal-panel-fg: #c8d1dc;
 
   --ide-hl-keyword: var(--text);
   --ide-hl-string: #e2e2e2;
