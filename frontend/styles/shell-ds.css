@@ -283,7 +283,7 @@
   font-weight: 650;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: color-mix(in srgb, var(--muted) 88%, transparent);
+  color: var(--muted);
 }
 
 .nav-session-search-input,
@@ -382,7 +382,7 @@
   font-weight: 650;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: color-mix(in srgb, var(--muted) 88%, transparent);
+  color: var(--muted);
   padding: 8px 8px 6px;
 }
 

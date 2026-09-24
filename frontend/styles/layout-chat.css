@@ -248,7 +248,7 @@
   font-size: var(--text-2xs);
   letter-spacing: 0.05em;
   text-transform: uppercase;
-  color: color-mix(in srgb, var(--muted) 88%, transparent);
+  color: var(--muted);
   font-weight: var(--font-weight-label, 600);
   line-height: var(--line-tight, 1.25);
   white-space: nowrap;
@@ -353,7 +353,7 @@
   font-size: var(--text-xs, 12px);
   font-weight: var(--font-weight-label, 600);
   letter-spacing: 0.04em;
-  color: color-mix(in srgb, var(--muted) 88%, transparent);
+  color: var(--muted);
 }
 
 /* 隐藏默认三角，用「思维」前缀 + 展开/收起指示符替代 */

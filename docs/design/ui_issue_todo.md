@@ -4,6 +4,7 @@
 2026-09-13 复核：原报告 P0 与 P1 键盘/焦点均已修复（PR #135），剩余项已并入本清单。
 2026-09-14：P1「语义与反馈」四项已修复并勾选；剩余为 P1 对比度、P2 与 P3。
 2026-09-22 复核：P2「768px 断点重复硬编码」与 P3「900px 断点无登记」已由 `scripts/check-css-breakpoints.sh` 收口，P1 缺失类名 / P4 死 CSS 已由 `scripts/check-css-contract.sh` 一类门禁固化（两者均进 pre-commit 与 `scripts/check.sh`），相应条目已勾选；未定义 token 引用与 `var()` 浅色兜底已由 `scripts/check-css-tokens.sh` 收口（同进 pre-commit 与 `scripts/check.sh`）。
+2026-09-24：P1「对比度与焦点可见性」前两条（light 主题主按钮白字、`--muted` 小字）与 P3「首屏主题快照硬编码 `light`」「`shell-ds.css` `--muted` 再稀释」已修（浅色覆层加深 + 首屏默认改 `dark`），详见条目内注记；同期修正条目里的主题路径笔误（真实路径为 `frontend/themes/*.css`）。
 
 ## P0 · 明确缺陷
 
@@ -27,8 +28,8 @@
 
 ## P1 · 对比度与焦点可见性
 
-- [ ] light 主题主按钮白字 ≈3.2–3.9:1，低于 AA 小字（12px/500 需 4.5:1）：`frontend/styles/components.css`、`frontend/styles/themes/light.css`。
-- [ ] light 主题 `--muted` 小字 ≈3.4:1，仍用于 10–11px 大写标签：`frontend/styles/themes/light.css`、`components.css`、`status.css`、`modal.css`、`shell-topbar.css`。
+- [x] light 主题主按钮白字 ≈3.2–3.9:1，低于 AA 小字（12px/500 需 4.5:1）：`frontend/styles/components.css`、`frontend/themes/light.css`。已修（2026-09-24）：`.btn-primary { color: #fff }` 为三主题共用，故只改 light 覆层——`--btn-primary-bg` 渐变改为 `color-mix(--accent 68%, #0a0c10)` → `color-mix(--accent 60%, #0a0c10)`（最亮顶部 ≈6.3:1），`--btn-primary-border` 同步压深；`:hover` 的 `brightness(1.07)` 提亮后仍 ≈5.7:1。
+- [x] light 主题 `--muted` 小字 ≈3.4:1，仍用于 10–11px 大写标签：`frontend/themes/light.css`、`components.css`、`status.css`、`modal.css`、`shell-topbar.css`。已修（2026-09-24）：`--muted` `#8a8278` → `#6f675c`，在 `--bg` / `--surface-hover` / `--surface` 上分别为 4.99 / 4.90 / 5.57:1（`--status-agent-select-bg-image` 的 SVG fill 同步）；`components.css` 中 muted 半透明只出现在 `:disabled`（WCAG 对比度豁免），未改；`status.css` / `shell-topbar.css` 的 10–11px 标签本就用纯 `var(--muted)`，随 token 加深即达标。
 - [ ] `.ide-editor-textarea:focus` `outline: none` 且无 `:focus-visible` 替代，键盘焦点只剩 caret：`frontend/styles/ide-layout.css`。
 - [ ] lightbox 操作 / 关闭按钮无 `:hover` 与 `:focus-visible`：`frontend/styles/shell-ds.css`。
 - [ ] 顶栏菜单条 `min-width:max-content`，窄屏可能与中间路径、右侧控件重叠（需实机验证）：`frontend/styles/shell-topbar.css`、`mobile.css`。
@@ -68,8 +69,8 @@
 ## P3 · 次要
 
 - [ ] `prefers-reduced-motion` 漏 2 处无限动画：会话流式徽章脉冲、克隆进度条。
-- [ ] 首屏主题快照硬编码 `light`，深色用户有短暂浅色闪烁。
-- [ ] 对比度风险点 `frontend/styles/shell-ds.css:303`（`--muted` 再稀释），需实测验证。
+- [x] 首屏主题快照硬编码 `light`，深色用户有短暂浅色闪烁。已修（2026-09-24）：`frontend/src/app/shell_prefs_storage.rs` 的 `read_shell_ui_initial_snapshot()` 默认改 `dark`，与 splash（`index.html` 内联深色）、桌面窗口底色（`BOOT_SHELL_BG`）及 `tokens.css` 的 `:root` 默认深色对齐（偏好要等 `GET /user-data/prefs` 才到，改 `system` 此时拿不到 OS 明暗会退回 light，故不用）；首帧值不会写回服务端覆盖用户偏好——`UserPrefsSyncPhase` 在偏好加载完成前禁止 PUT。
+- [x] 对比度风险点 `frontend/styles/shell-ds.css:303`（`--muted` 再稀释），需实测验证。已修（2026-09-24）：实为 `.nav-rail-search-label` / `.nav-rail-scroll-label`（10px 大写，`color-mix(--muted 88%, transparent)`，行号已漂移至 285 / 384）——`--muted` 加深后 88% 半透明仍只 ≈3.9:1，两处改为纯 `var(--muted)`；同类小号文字稀释一并去半透明：`layout-chat.css` `.chat-tui-role` / `.chat-tui-think-summary`、`modal.css` `.settings-mcp-tool-openai`（装饰符 `▾`、`::placeholder`、`:disabled` 保持原样）。
 - [ ] 死代码：`approval_bar.rs` 的 `ApprovalBar`（已被 approval_modal 替代、全仓无引用）。
 - [ ] `save_busy/load_busy` 期间 Ctrl+S 被静默吞掉：`frontend/src/ide_save.rs`。
 - [ ] 同步期间关闭标签，快照索引写回可能命中错误标签：`frontend/src/ide_disk_sync.rs`。

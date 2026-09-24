@@ -92,7 +92,11 @@ pub(crate) fn apply_platform_shell_ui_on_entry(app: &AppSignals) {
 #[must_use]
 pub(crate) fn read_shell_ui_initial_snapshot() -> ShellUiInitialSnapshot {
     ShellUiInitialSnapshot {
-        theme: "light".to_string(),
+        // 首帧主题须与 splash（`index.html` 内联深色）、桌面窗口底色（`BOOT_SHELL_BG`）及
+        // `tokens.css` 的 `:root` 默认深色一致：偏好要等 `GET /user-data/prefs` 才到，
+        // 若默认 `light`，深色用户开屏会闪一帧浅色。首帧值不会写回服务端覆盖偏好——
+        // `UserPrefsSyncPhase` 在偏好加载完成前禁止 PUT。
+        theme: "dark".to_string(),
         bg_decor: true,
         show_turn_context_inject: false,
         locale: Locale::ZhHans,

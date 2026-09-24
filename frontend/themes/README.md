@@ -13,7 +13,7 @@ Trunk 在 **`frontend/index.html`** 中于 **`styles/tokens.css` 之后** 链接
 2. **`index.html`**：追加一行 `<link data-trunk rel="css" href="themes/your-slug.css" />`（须在 `tokens.css` 之后）。
 3. **Rust 白名单**：`frontend/src/app_prefs.rs` 中 **`THEME_SLUGS`**（偏好，可含 **`system`**）与 **`THEME_CSS_SLUGS`**（`data-theme` CSS）加入 slug；未知存储值会回退为 `light`。**`system` 无对应 CSS 文件**，由 **`resolve_data_theme_slug`** 映射到 `dark`/`light`。
 4. **文案**：`frontend/src/i18n/settings.rs` 中 **`settings_theme_preset_label`**（或等价函数）增加显示名。
-5. **文档**：`docs/design/web_theme_presets.md` 可作设计延伸参考。
+5. **变更记录**：用户可见的外观变化按仓库约定写入 **`CHANGELOG.md`** 的 `[Unreleased]`（英文）；本文件即主题的权威维护说明，构建 / 引入方式见 **`frontend/README.md`**。
 
 ## 本地自定义（不提交仓库）
 
@@ -23,7 +23,7 @@ Trunk 在 **`frontend/index.html`** 中于 **`styles/tokens.css` 之后** 链接
 
 | 文件 | `data-theme` | 说明 |
 |------|----------------|------|
-| `light.css` | `light` | 浅色纸灰 + 钢蓝点缀 |
+| `light.css` | `light` | 浅色纸灰 + 鼠尾草绿点缀（次要文字已加深至 AA 对比度） |
 | `material.css` | `material` | Material 圆角 + 中性灰深色 |
 | `high-contrast.css` | `high-contrast` | 深灰底 + 白字 + 黑白灰强调（无彩色，可读性优先） |
 
