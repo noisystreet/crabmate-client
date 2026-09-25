@@ -10,7 +10,7 @@
     center / 20px 20px
     no-repeat;
   box-shadow:
-    0 1px 0 color-mix(in srgb, #fff 10%, transparent) inset,
+    0 1px 0 color-mix(in srgb, var(--inset-highlight) 10%, transparent) inset,
     0 2px 8px color-mix(in srgb, var(--accent) 20%, transparent);
   flex-shrink: 0;
 }
@@ -91,14 +91,14 @@
 .btn-primary {
   background: var(--btn-primary-bg);
   border-color: var(--btn-primary-border);
-  color: #fff;
-  box-shadow: 0 1px 0 color-mix(in srgb, #fff 12%, transparent) inset;
+  color: var(--on-accent);
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--inset-highlight) 12%, transparent) inset;
 }
 
 .btn-primary:hover:not(:disabled) {
   filter: brightness(1.07) saturate(1.03);
   box-shadow:
-    0 1px 0 color-mix(in srgb, #fff 14%, transparent) inset,
+    0 1px 0 color-mix(in srgb, var(--inset-highlight) 14%, transparent) inset,
     0 5px 14px color-mix(in srgb, var(--accent) 24%, transparent);
 }
 
@@ -106,14 +106,14 @@
   filter: brightness(0.98) saturate(0.98);
   transform: translateY(1px);
   box-shadow:
-    0 1px 0 color-mix(in srgb, #fff 10%, transparent) inset,
+    0 1px 0 color-mix(in srgb, var(--inset-highlight) 10%, transparent) inset,
     0 1px 4px color-mix(in srgb, var(--accent) 18%, transparent);
 }
 
 .btn-primary:disabled {
   background: color-mix(in srgb, var(--accent) 38%, var(--surface));
   border-color: color-mix(in srgb, var(--accent) 24%, var(--border));
-  color: color-mix(in srgb, #fff 75%, transparent);
+  color: color-mix(in srgb, var(--on-accent) 75%, transparent);
 }
 
 .btn-secondary {

@@ -288,7 +288,7 @@
   );
   border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
   box-shadow:
-    0 1px 0 color-mix(in srgb, #fff 8%, transparent) inset,
+    0 1px 0 color-mix(in srgb, var(--inset-highlight) 8%, transparent) inset,
     0 2px 8px color-mix(in srgb, var(--accent) 10%, transparent);
 }
 
@@ -311,7 +311,7 @@
   );
   border-color: color-mix(in srgb, var(--border) 42%, var(--muted));
   box-shadow:
-    0 1px 0 color-mix(in srgb, #fff 6%, transparent) inset,
+    0 1px 0 color-mix(in srgb, var(--inset-highlight) 6%, transparent) inset,
     0 2px 10px color-mix(in srgb, var(--bg) 38%, transparent);
 }
 
@@ -1191,7 +1191,7 @@ html[lang="zh-CN"] .md-code-block__copy-zh {
   color: color-mix(in srgb, var(--accent) 88%, var(--text));
   background: color-mix(in srgb, var(--accent) 18%, var(--surface));
   border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--border));
-  box-shadow: 0 1px 0 color-mix(in srgb, #fff 10%, transparent) inset;
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--inset-highlight) 10%, transparent) inset;
 }
 
 .msg-skill-invoke-id {
