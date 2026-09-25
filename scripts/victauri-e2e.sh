@@ -333,11 +333,14 @@ if [ "$TEST" = "real_llm" ]; then
     fi
 elif [ "$TEST" = "all" ]; then
     cargo test --features victauri --no-fail-fast --no-run 2>/dev/null || true
+    # 清单不含 victauri_two_turn（其多轮用例已由 Playwright
+    # `mock-multi-turn` / `mock-v2-multi-turn-boundaries` 等价覆盖，见 e2e/README.md 分工），
+    # 也不含 victauri_real_llm（需 REAL_LLM_E2E + 本机密钥，用 `./scripts/victauri-e2e.sh real_llm` 单跑）。
     for name in victauri_e2e victauri_session_crud victauri_prefs_theme victauri_status_bar \
         victauri_settings victauri_settings2 victauri_keyboard victauri_conversation \
         victauri_user_data victauri_pagination victauri_visible_messages \
         victauri_sse_stub victauri_sse_more victauri_scroll_send victauri_ide_layout \
-        victauri_two_turn victauri_turn_layout victauri_real_llm; do
+        victauri_turn_layout; do
         BIN=$(find_test_bin "$name")
         if [ -n "$BIN" ]; then
             echo ">>> $name"

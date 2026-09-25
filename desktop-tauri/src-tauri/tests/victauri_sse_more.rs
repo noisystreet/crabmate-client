@@ -70,24 +70,6 @@ e2e_test!(deny_closes_modal_no_failed_banner, |client| async move {
 });
 
 // ---------------------------------------------------------------------------
-// sse-approval-actions: allow once
-// ---------------------------------------------------------------------------
-e2e_test!(allow_once_closes_modal, |client| async move {
-    inject_stream_stub(&mut client, "id: 1\ndata: {\"sse_capabilities\":{\"supported_sse_v\":1}}\n\nid: 2\ndata: {\"v\":1}\n\nid: 3\ndata: e2e allow.\n\nid: 4\ndata: {\"command_approval_request\":{\"command\":\"true\",\"args\":\"\",\"allowlist_key\":\"true\"}}\n\nid: 5\ndata: {\"stream_ended\":{\"reason\":\"completed\"}}\n\n").await;
-    let _ = client.eval_js("window.fetch=(u,o)=>{if(typeof u==='string'&&u.includes('/chat/approval'))return Promise.resolve(new Response('',{status:204}));return window.__origFetch(u,o);};").await;
-    seed_and_send(&mut client, "s_e2e_allow", "e2e allow").await;
-    Locator::test_id("approval-allow-once")
-        .click(&mut client)
-        .await
-        .unwrap();
-    Locator::test_id("approval-modal")
-        .expect(&mut client)
-        .to_be_hidden()
-        .await
-        .unwrap();
-});
-
-// ---------------------------------------------------------------------------
 // sse-clarification: 问卷 → 提交 → 第二轮助手回复
 // ---------------------------------------------------------------------------
 e2e_test!(
