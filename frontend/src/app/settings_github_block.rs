@@ -18,6 +18,8 @@ use crate::api::{
     post_github_oauth_device_logout, post_github_oauth_device_start,
 };
 use crate::i18n::{self, Locale};
+
+use super::settings_sections::SettingsInstantApplyHint;
 use crate::tauri_shell::tauri_open_external_url;
 
 #[derive(Clone, Copy)]
@@ -652,6 +654,7 @@ fn SettingsGithubBlockView(
             <Show when=move || show_title>
                 <SettingsGithubBlockTitle locale=locale />
             </Show>
+            <SettingsInstantApplyHint locale=locale />
             <SettingsGithubClientIdBlock locale=locale ui=ui input_id=input_id />
             <div class="settings-field" data-testid="settings-github-connection">
                 <SettingsGithubConnectionStatus locale=locale ui=ui />

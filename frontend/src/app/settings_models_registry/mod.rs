@@ -17,6 +17,8 @@ use crate::i18n::{self, Locale};
 use crate::icon::Icon;
 use submit::{RegistryAddFormActionSignals, submit_registry_add_form};
 
+use super::settings_sections::SettingsInstantApplyHint;
+
 /// 模型注册表接线（单组件形参，满足 fn-param 棘轮）。
 #[derive(Clone)]
 pub(crate) struct SettingsModelsRegistryBundle {
@@ -756,6 +758,7 @@ pub(crate) fn SettingsModelsRegistryPanel(bundle: SettingsModelsRegistryBundle) 
                 clear_form_for_add: clear_form_for_add.clone(),
                 pending_delete_row_key,
             } />
+            <SettingsInstantApplyHint locale=locale />
             <SettingsModelsRegistryAddModelDialog s=RegistryAddFormSignals {
                 locale,
                 saved_model_presets,

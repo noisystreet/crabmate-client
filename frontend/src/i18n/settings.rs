@@ -43,6 +43,21 @@ pub fn settings_save_all(l: Locale) -> &'static str {
     }
 }
 
+/// 立即落盘区块的标注：说明该区块改动即时生效，不需要点「保存全部」。
+///
+/// 设置页里有两套保存语义并存：多数区块是草稿 + 顶栏「保存全部」，
+/// 而少量区块（自带保存按钮 / 开关即写 / 防抖自动 PUT）改完立即落盘。
+/// 不标注会让用户以为它们也被「保存全部」覆盖。
+pub fn settings_applies_immediately(l: Locale) -> String {
+    match l {
+        Locale::ZhHans => format!("即时生效，无需点「{}」。", settings_save_all(l)),
+        Locale::En => format!(
+            "Applies immediately; no need to click {}.",
+            settings_save_all(l)
+        ),
+    }
+}
+
 pub fn settings_discard_changes(l: Locale) -> &'static str {
     match l {
         Locale::ZhHans => "放弃更改",
