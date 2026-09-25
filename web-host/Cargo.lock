@@ -132,7 +132,7 @@ dependencies = [
 
 [[package]]
 name = "crabmate-client-api"
-version = "0.5.1-alpha.0"
+version = "0.5.2"
 dependencies = [
  "crabmate",
  "serde",
@@ -141,7 +141,7 @@ dependencies = [
 
 [[package]]
 name = "crabmate-web-host"
-version = "0.5.1-alpha.0"
+version = "0.5.2"
 dependencies = [
  "anyhow",
  "clap",
