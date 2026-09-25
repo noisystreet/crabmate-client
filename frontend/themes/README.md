@@ -26,5 +26,7 @@ Trunk 在 **`frontend/index.html`** 中于 **`styles/tokens.css` 之后** 链接
 | `light.css` | `light` | 浅色纸灰 + 鼠尾草绿点缀（次要文字已加深至 AA 对比度） |
 | `material.css` | `material` | Material 圆角 + 中性灰深色 |
 | `high-contrast.css` | `high-contrast` | 深灰底 + 白字 + 黑白灰强调（无彩色，可读性优先） |
+| `shadcn.css` | `shadcn` | zinc 中性近黑层级 + 1px 细边框 + 克制蓝强调 + Inter（借 shadcn/ui 设计语言，不引组件库） |
+| `shadcn-light.css` | `shadcn-light` | 上一项的浅色变体（shadcn 实际默认观感）：zinc-50 底 + 白卡 + zinc-200 边框 + blue-600 强调 + Inter |
 
 **`dark`** 仍由根目录 **`styles/tokens.css`** 中 `:root` 提供，无需单独文件；若希望「深色也单独成文件」便于 fork，可从 `:root` 复制变量到 `dark.css` 并改用 `:root[data-theme="dark"]`（须与 `tokens.css` 避免重复定义）。

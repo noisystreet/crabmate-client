@@ -5,10 +5,25 @@ use std::sync::atomic::{AtomicI8, Ordering};
 use crate::api::StatusData;
 
 /// 偏好里可选的主题（含 **`system`**＝跟随 OS 明暗；解析到 CSS 见 [`resolve_data_theme_slug`]）。
-pub const THEME_SLUGS: &[&str] = &["system", "dark", "light", "material", "high-contrast"];
+pub const THEME_SLUGS: &[&str] = &[
+    "system",
+    "dark",
+    "light",
+    "material",
+    "high-contrast",
+    "shadcn",
+    "shadcn-light",
+];
 
 /// 可写在 `<html data-theme>` 上的 CSS 预设（**不含** `system`）。
-pub const THEME_CSS_SLUGS: &[&str] = &["dark", "light", "material", "high-contrast"];
+pub const THEME_CSS_SLUGS: &[&str] = &[
+    "dark",
+    "light",
+    "material",
+    "high-contrast",
+    "shadcn",
+    "shadcn-light",
+];
 
 pub const THEME_SYSTEM: &str = "system";
 
@@ -247,6 +262,17 @@ mod theme_slug_tests {
     #[test]
     fn high_contrast_accepted() {
         assert_eq!(normalize_theme_slug("high-contrast"), "high-contrast");
+    }
+
+    #[test]
+    fn shadcn_accepted() {
+        assert_eq!(normalize_theme_slug("shadcn"), "shadcn");
+    }
+
+    #[test]
+    fn shadcn_light_accepted() {
+        assert_eq!(normalize_theme_slug("shadcn-light"), "shadcn-light");
+        assert!(THEME_CSS_SLUGS.contains(&"shadcn-light"));
     }
 
     #[test]
