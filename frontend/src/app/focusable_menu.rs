@@ -52,11 +52,17 @@ pub(crate) fn FocusableRoleMenu(
 }
 
 /// 确认框 / 新建文件等模态面板：挂载聚焦 + Tab 陷阱 + Escape；关闭后焦点归还触发元素（须放 `<Show>` 内）。
+///
+/// `labelledby` 用 `#[prop(into)] String`：标题 id 既可为静态字面量，也可为按会话 / 模式拼出的动态 id。
+/// `stop_pointerdown` 默认关：仅个别弹窗需要吞掉 `pointerdown`，避免文档级手势（窄屏边缘滑动切抽屉）
+/// 或顶栏菜单的 window 级 `pointerdown` 在点弹窗内部时被触发。
 #[component]
 pub(crate) fn FocusableModalPanel(
     #[prop(optional)] class: &'static str,
     #[prop(default = "alertdialog")] dialog_role: &'static str,
-    labelledby: &'static str,
+    #[prop(into)] labelledby: String,
+    #[prop(optional)] testid: Option<&'static str>,
+    #[prop(optional)] stop_pointerdown: bool,
     on_escape: Callback<()>,
     children: Children,
 ) -> impl IntoView {
@@ -75,7 +81,13 @@ pub(crate) fn FocusableModalPanel(
             role=dialog_role
             aria-modal="true"
             aria-labelledby=labelledby
+            attr:data-testid=testid
             tabindex="-1"
+            on:pointerdown=move |ev: leptos::ev::PointerEvent| {
+                if stop_pointerdown {
+                    ev.stop_propagation();
+                }
+            }
             on:click=|ev: leptos::ev::MouseEvent| ev.stop_propagation()
             on:keydown=move |ev: web_sys::KeyboardEvent| {
                 if let Some(el) = dialog_ref.get() {

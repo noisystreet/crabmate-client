@@ -1,13 +1,8 @@
 //! 管理会话模态框。
 
-use gloo_timers::future::TimeoutFuture;
-use leptos::html::Div;
 use leptos::prelude::*;
-use leptos::task::spawn_local;
 
-use crate::a11y::{
-    capture_focus, focus_first_in_modal_container, restore_focus_to, trap_tab_in_container,
-};
+use crate::app::focusable_menu::FocusableModalPanel;
 use crate::i18n;
 use crate::session_modal_row::{SessionModalRow, SessionModalRowBundle};
 use crate::session_sort::sorted_sessions_clone;
@@ -22,45 +17,14 @@ fn SessionListModalPanel(session_modal: RwSignal<bool>) -> impl IntoView {
     let draft = shell.composer.draft;
     let locale = shell.locale;
     let apply_assistant_display_filters = shell.apply_assistant_display_filters;
-    let dialog_ref = NodeRef::<Div>::new();
-
-    // 面板在 `<Show>` 内创建：挂载即捕获打开前焦点，卸载（关闭）时归还。
-    let restore_target = StoredValue::new(capture_focus());
-    on_cleanup(move || restore_focus_to(restore_target.get_value().as_ref()));
-
-    Effect::new({
-        let dialog_ref = dialog_ref.clone();
-        move |_| {
-            if !session_modal.get() {
-                return;
-            }
-            let r = dialog_ref.clone();
-            spawn_local(async move {
-                TimeoutFuture::new(0).await;
-                if let Some(el) = r.get() {
-                    focus_first_in_modal_container(el.as_ref());
-                }
-            });
-        }
-    });
 
     view! {
-        <div
+        <FocusableModalPanel
             class="modal"
-            node_ref=dialog_ref
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="session-list-modal-title"
-            data-testid="session-list-modal"
-            tabindex="-1"
-            on:click=|ev: leptos::ev::MouseEvent| ev.stop_propagation()
-            on:keydown=move |ev: web_sys::KeyboardEvent| {
-                if ev.key() == "Tab" {
-                    if let Some(el) = dialog_ref.get() {
-                        trap_tab_in_container(&ev, el.as_ref());
-                    }
-                }
-            }
+            dialog_role="dialog"
+            labelledby="session-list-modal-title"
+            testid="session-list-modal"
+            on_escape=Callback::new(move |_| session_modal.set(false))
         >
             <div class="modal-head">
                 <h2 class="modal-title" id="session-list-modal-title">{move || i18n::session_modal_title(locale.get())}</h2>
@@ -99,7 +63,7 @@ fn SessionListModalPanel(session_modal: RwSignal<bool>) -> impl IntoView {
                         .collect_view()
                 }}
             </div>
-        </div>
+        </FocusableModalPanel>
     }
 }
 

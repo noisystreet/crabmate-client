@@ -3,10 +3,9 @@
 use std::sync::Arc;
 use std::vec::Vec;
 
-use leptos::html::Div;
 use leptos::prelude::*;
 
-use crate::a11y::trap_tab_in_container;
+use crate::app::focusable_menu::FocusableModalPanel;
 use crate::i18n::{self, Locale};
 
 use super::settings_models_registry::{SettingsModelsRegistryBundle, SettingsModelsRegistryPanel};
@@ -20,7 +19,6 @@ use super::settings_sections::{
 #[derive(Clone)]
 pub struct SettingsModalDialogInput {
     pub settings_modal: RwSignal<bool>,
-    pub settings_dialog_ref: NodeRef<Div>,
     pub appearance_locale: RwSignal<Locale>,
     pub appearance_theme: RwSignal<String>,
     pub appearance_bg_decor: RwSignal<bool>,
@@ -243,12 +241,47 @@ fn SettingsModalDialogBody(input: SettingsModalDialogInput) -> impl IntoView {
     }
 }
 
+/// 弹窗面板本体。
+///
+/// 单独成组件是 `FocusableModalPanel` 的 `children`（`FnOnce` 装箱闭包）所要求的：
+/// 若把面板直接写在 `<Show>` 的 children 里，`discard` / `save_all` / `body_input`
+/// 这些非 `Copy` 值会被内层 `move` 闭包按值捕获并从 `<Show>` 闭包环境移出，
+/// 使 `Show` 的 children 退化为 `FnOnce`（`Show` 只接受 `Fn`）。
+#[component]
+fn SettingsModalDialogPanel(
+    appearance_locale: RwSignal<Locale>,
+    dirty: Memo<bool>,
+    discard: Arc<dyn Fn() + Send + Sync>,
+    save_busy: RwSignal<bool>,
+    save_all: Arc<dyn Fn() + Send + Sync>,
+    body_input: SettingsModalDialogInput,
+) -> impl IntoView {
+    view! {
+        <FocusableModalPanel
+            class="modal"
+            dialog_role="dialog"
+            labelledby="settings-modal-title"
+            on_escape=Callback::new(move |_| {
+                crate::app::settings_close_guard::request_settings_modal_close();
+            })
+        >
+            <SettingsModalDialogHead
+                appearance_locale
+                dirty
+                discard=discard.clone()
+                save_busy
+                save_all=save_all.clone()
+            />
+            <SettingsModalDialogBody input=body_input />
+        </FocusableModalPanel>
+    }
+}
+
 /// 弹窗可见时的整棵 DOM（与原先一致：内含 `Show`）。
 pub fn settings_modal_dialog(input: SettingsModalDialogInput) -> impl IntoView {
     let body_input = input.clone();
     let SettingsModalDialogInput {
         settings_modal,
-        settings_dialog_ref,
         appearance_locale,
         dirty,
         discard,
@@ -266,31 +299,14 @@ pub fn settings_modal_dialog(input: SettingsModalDialogInput) -> impl IntoView {
                     crate::app::settings_close_guard::request_settings_modal_close();
                 }
             >
-                <div
-                    class="modal"
-                    node_ref=settings_dialog_ref
-                    role="dialog"
-                    aria-modal="true"
-                    aria-labelledby="settings-modal-title"
-                    tabindex="-1"
-                    on:click=|ev: leptos::ev::MouseEvent| ev.stop_propagation()
-                    on:keydown=move |ev: web_sys::KeyboardEvent| {
-                        if ev.key() == "Tab" {
-                            if let Some(el) = settings_dialog_ref.get() {
-                                trap_tab_in_container(&ev, el.as_ref());
-                            }
-                        }
-                    }
-                >
-                    <SettingsModalDialogHead
-                        appearance_locale
-                        dirty
-                        discard=discard.clone()
-                        save_busy
-                        save_all=save_all.clone()
-                    />
-                    <SettingsModalDialogBody input=body_input.clone() />
-                </div>
+                <SettingsModalDialogPanel
+                    appearance_locale=appearance_locale
+                    dirty=dirty
+                    discard=discard.clone()
+                    save_busy=save_busy
+                    save_all=save_all.clone()
+                    body_input=body_input.clone()
+                />
             </div>
         </Show>
     }

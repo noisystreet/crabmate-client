@@ -3,15 +3,14 @@
 mod parts;
 
 use gloo_timers::future::TimeoutFuture;
-use leptos::html::Div;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
-use crate::a11y::{focus_first_in_modal_container, trap_tab_in_container};
 use crate::api::{
     WorkspaceCloneRequest, WorkspaceCloneSseEvent, fetch_workspace_projects,
     post_workspace_clone_stream,
 };
+use crate::app::focusable_menu::FocusableModalPanel;
 use crate::app::workspace_root_actions::{
     WorkspaceRootPickHandle, WorkspaceSessionHandoff, finish_workspace_root_ui,
     flush_current_workspace_sessions, workspace_inputs_blocked,
@@ -256,24 +255,6 @@ fn WorkspaceCloneModalHead(
     }
 }
 
-/// Escape 尝试关闭（Running 时忽略）；Tab 在弹窗内循环聚焦。
-fn handle_clone_modal_keydown(
-    ev: &web_sys::KeyboardEvent,
-    dialog_ref: &NodeRef<Div>,
-    ui_phase: RwSignal<CloneUiPhase>,
-    open: RwSignal<bool>,
-) {
-    if ev.key() == "Escape" {
-        if ui_phase.get_untracked() != CloneUiPhase::Running {
-            open.set(false);
-        }
-    } else if ev.key() == "Tab" {
-        if let Some(el) = dialog_ref.get() {
-            trap_tab_in_container(ev, el.as_ref());
-        }
-    }
-}
-
 #[component]
 fn WorkspaceCloneModalPanel(signals: WorkspaceCloneModalSignals) -> impl IntoView {
     let WorkspaceCloneModalSignals {
@@ -291,7 +272,6 @@ fn WorkspaceCloneModalPanel(signals: WorkspaceCloneModalSignals) -> impl IntoVie
     let log_lines = RwSignal::new(Vec::<String>::new());
     let percent = RwSignal::new(None::<u8>);
     let form_err = RwSignal::new(None::<String>);
-    let dialog_ref = NodeRef::<Div>::new();
 
     Effect::new(move |_| {
         if !open.get() {
@@ -314,13 +294,6 @@ fn WorkspaceCloneModalPanel(signals: WorkspaceCloneModalSignals) -> impl IntoVie
                 form_err,
             },
         );
-        let r = dialog_ref;
-        spawn_local(async move {
-            TimeoutFuture::new(0).await;
-            if let Some(el) = r.get() {
-                focus_first_in_modal_container(el.as_ref());
-            }
-        });
     });
 
     let form_signals = CloneFormViewSignals {
@@ -339,18 +312,16 @@ fn WorkspaceCloneModalPanel(signals: WorkspaceCloneModalSignals) -> impl IntoVie
     };
 
     view! {
-        <div
+        <FocusableModalPanel
             class="modal workspace-clone-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="workspace-clone-modal-title"
-            data-testid="workspace-clone-modal"
-            tabindex="-1"
-            node_ref=dialog_ref
-            on:click=|ev: leptos::ev::MouseEvent| ev.stop_propagation()
-            on:keydown=move |ev: web_sys::KeyboardEvent| {
-                handle_clone_modal_keydown(&ev, &dialog_ref, ui_phase, open);
-            }
+            dialog_role="dialog"
+            labelledby="workspace-clone-modal-title"
+            testid="workspace-clone-modal"
+            on_escape=Callback::new(move |_| {
+                if ui_phase.get_untracked() != CloneUiPhase::Running {
+                    open.set(false);
+                }
+            })
         >
             <WorkspaceCloneModalHead locale=locale ui_phase=ui_phase open=open />
             <Show when=move || matches!(ui_phase.get(), CloneUiPhase::Form)>
@@ -368,7 +339,7 @@ fn WorkspaceCloneModalPanel(signals: WorkspaceCloneModalSignals) -> impl IntoVie
                     settings_page=settings_page
                 />
             </Show>
-        </div>
+        </FocusableModalPanel>
     }
 }
 

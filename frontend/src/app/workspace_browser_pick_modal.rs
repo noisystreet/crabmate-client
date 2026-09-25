@@ -1,11 +1,11 @@
 //! 浏览器（非 Tauri / 无项目池）：最近工作区列表 + 绝对路径输入，替代 `window.prompt`。
 
 use gloo_timers::future::TimeoutFuture;
-use leptos::html::{Div, Input};
+use leptos::html::Input;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
-use crate::a11y::{focus_first_in_modal_container, trap_tab_in_container};
+use crate::app::focusable_menu::FocusableModalPanel;
 use crate::app::workspace_root_actions::{
     WorkspaceRootPickHandle, commit_workspace_root, workspace_inputs_blocked,
 };
@@ -201,7 +201,6 @@ fn WorkspaceBrowserPickModalPanel(signals: WorkspaceBrowserPickModalSignals) -> 
     let locale = workspace_pick.locale;
     let recent = workspace_pick.ws.recent_workspace_roots;
     let path_draft = RwSignal::new(String::new());
-    let dialog_ref = NodeRef::<Div>::new();
     let path_input_ref = NodeRef::<Input>::new();
 
     Effect::new(move |_| {
@@ -211,14 +210,11 @@ fn WorkspaceBrowserPickModalPanel(signals: WorkspaceBrowserPickModalSignals) -> 
         workspace_pick.ws.workspace_set_err.set(None);
         let current = workspace_pick.ws.workspace_path_draft.get_untracked();
         path_draft.set(current);
-        let r = dialog_ref;
         let input = path_input_ref;
         spawn_local(async move {
             TimeoutFuture::new(0).await;
             if let Some(el) = input.get() {
                 let _ = el.focus();
-            } else if let Some(el) = r.get() {
-                focus_first_in_modal_container(el.as_ref());
             }
         });
     });
@@ -226,24 +222,12 @@ fn WorkspaceBrowserPickModalPanel(signals: WorkspaceBrowserPickModalSignals) -> 
     let close = move || open.set(false);
 
     view! {
-        <div
+        <FocusableModalPanel
             class="modal"
-            node_ref=dialog_ref
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="workspace-browser-pick-modal-title"
-            data-testid="workspace-browser-pick-modal"
-            tabindex="-1"
-            on:click=|ev: leptos::ev::MouseEvent| ev.stop_propagation()
-            on:keydown=move |ev: web_sys::KeyboardEvent| {
-                if ev.key() == "Escape" {
-                    close();
-                } else if ev.key() == "Tab" {
-                    if let Some(el) = dialog_ref.get() {
-                        trap_tab_in_container(&ev, el.as_ref());
-                    }
-                }
-            }
+            dialog_role="dialog"
+            labelledby="workspace-browser-pick-modal-title"
+            testid="workspace-browser-pick-modal"
+            on_escape=Callback::new(move |_| close())
         >
             <div class="modal-head">
                 <h2 class="modal-title" id="workspace-browser-pick-modal-title">
@@ -269,7 +253,7 @@ fn WorkspaceBrowserPickModalPanel(signals: WorkspaceBrowserPickModalSignals) -> 
                     open=open
                 />
             </div>
-        </div>
+        </FocusableModalPanel>
     }
 }
 
