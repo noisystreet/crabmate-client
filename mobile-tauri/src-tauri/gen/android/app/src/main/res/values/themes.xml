@@ -7,4 +7,29 @@
         <item name="android:statusBarColor">#07090E</item>
         <item name="android:navigationBarColor">#07090E</item>
     </style>
+
+    <!-- 退出确认框（原生 Material AlertDialog）主题覆盖：配色/圆角对齐 Web 端弹窗，去掉 Material 默认浅色与紫调。
+         组件风格门禁只覆盖 Web 侧 styles/themes，此处为 Android res，不受其约束。 -->
+    <style name="ThemeOverlay.crabmate_mobile.ExitDialog" parent="ThemeOverlay.MaterialComponents.MaterialAlertDialog">
+        <item name="colorSurface">@color/cm_dialog_surface</item>
+        <item name="colorOnSurface">@color/cm_dialog_on_surface</item>
+        <item name="colorPrimary">@color/cm_dialog_accent</item>
+        <item name="shapeAppearanceMediumComponent">@style/ShapeAppearance.crabmate_mobile.Dialog</item>
+        <item name="materialAlertDialogTitleTextStyle">@style/TextAppearance.crabmate_mobile.DialogTitle</item>
+        <item name="materialAlertDialogBodyTextStyle">@style/TextAppearance.crabmate_mobile.DialogBody</item>
+    </style>
+
+    <!-- 圆角对齐 Web 端模态令牌 radius lg（14px）。 -->
+    <style name="ShapeAppearance.crabmate_mobile.Dialog" parent="ShapeAppearance.MaterialComponents.MediumComponent">
+        <item name="cornerFamily">rounded</item>
+        <item name="cornerSize">14dp</item>
+    </style>
+
+    <style name="TextAppearance.crabmate_mobile.DialogTitle" parent="MaterialAlertDialog.MaterialComponents.Title.Text">
+        <item name="android:textColor">@color/cm_dialog_on_surface</item>
+    </style>
+
+    <style name="TextAppearance.crabmate_mobile.DialogBody" parent="MaterialAlertDialog.MaterialComponents.Body.Text">
+        <item name="android:textColor">@color/cm_dialog_muted</item>
+    </style>
 </resources>

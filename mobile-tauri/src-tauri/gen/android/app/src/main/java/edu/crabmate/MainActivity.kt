@@ -13,6 +13,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import kotlin.math.roundToInt
 
 class MainActivity : TauriActivity() {
@@ -193,7 +194,8 @@ class MainActivity : TauriActivity() {
   }
 
   /**
-   * 系统返回键确认框。
+   * 系统返回键确认框。用 Material 对话框套 [R.style.ThemeOverlay_crabmate_mobile_ExitDialog]，
+   * 使配色/圆角/文字跟随 App 深色设计令牌，而非 Material 默认浅色与紫调。
    * @param offerReturnToConnect 业务 UI 时额外提供「返回连接页」。
    */
   private fun showExitConfirmDialog(offerReturnToConnect: Boolean) {
@@ -201,8 +203,7 @@ class MainActivity : TauriActivity() {
       return
     }
     val builder =
-      AlertDialog
-        .Builder(this)
+      MaterialAlertDialogBuilder(this, R.style.ThemeOverlay_crabmate_mobile_ExitDialog)
         .setTitle(R.string.exit_confirm_title)
         .setMessage(
           if (offerReturnToConnect) {
@@ -219,7 +220,15 @@ class MainActivity : TauriActivity() {
     if (offerReturnToConnect) {
       builder.setNeutralButton(R.string.exit_confirm_to_connect) { _, _ -> loadConnectPage() }
     }
-    exitConfirmDialog = builder.show()
+    val dialog = builder.show()
+    // 主题覆盖只统一底色/圆角/正文；按钮文字仍取 accent，这里按语义区分，对齐 Web 端
+    // 弹窗的 btn-danger / btn-secondary / btn-primary（退出=危险，取消=次要，返回连接页=主色）。
+    dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.setTextColor(getColor(R.color.cm_dialog_danger))
+    dialog.getButton(AlertDialog.BUTTON_NEGATIVE)?.setTextColor(getColor(R.color.cm_dialog_muted))
+    if (offerReturnToConnect) {
+      dialog.getButton(AlertDialog.BUTTON_NEUTRAL)?.setTextColor(getColor(R.color.cm_dialog_accent))
+    }
+    exitConfirmDialog = dialog
   }
 
   override fun onStart() {

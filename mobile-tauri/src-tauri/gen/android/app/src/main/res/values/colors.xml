@@ -7,4 +7,11 @@
     <color name="teal_700">#FF018786</color>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+
+    <!-- 退出确认框配色，对齐 Web 端设计令牌（tokens.css）：surface / text / muted / accent / error -->
+    <color name="cm_dialog_surface">#FF161727</color>
+    <color name="cm_dialog_on_surface">#FFEEF1F6</color>
+    <color name="cm_dialog_muted">#FF9099B4</color>
+    <color name="cm_dialog_accent">#FF8FA4EA</color>
+    <color name="cm_dialog_danger">#FFC98C9B</color>
 </resources>
