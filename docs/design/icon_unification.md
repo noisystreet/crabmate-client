@@ -144,7 +144,7 @@ fn svg_common() -> (&'static str, &'static str, &'static str, &'static str, &'st
 - `--icon-md` = `0.875rem`（12.25px，用于 `chevron` 一类的中间档；**新增档位需先确认无现成值可复用**）
 - `--icon-lg` = `1.125rem`（15.75px，现状 6 个类）
 
-把现状字面量改为 `var(--icon-*)`。因四主题同值，视觉应零变化——**须逐主题肉眼比对确认**。
+把现状字面量改为 `var(--icon-*)`。因六套主题同值，视觉应零变化——**须逐主题肉眼比对确认**。
 
 ### 第 3 步：决定文本字形（机制 3）的去留
 
@@ -155,7 +155,7 @@ fn svg_common() -> (&'static str, &'static str, &'static str, &'static str, &'st
 
 判据：**能进 DOM 且需要随主题变色的 → 换 SVG；作为排版符号或伪元素内容的 → 保留**。
 
-风险：`×` 的 JS 侧那处（`chat_image_lightbox.rs:270`）在 WASM 外的 JS 片段里，替换时需确认该处能否访问 Leptos 组件（不能的话保持文本，或改为内联 SVG 字符串）。
+风险：`×` 的原生 DOM 那处（`chat_image_lightbox.rs:270`）——「在 WASM 外的 JS 片段里」的判断**有误**，实测是 WASM 内的 `web_sys` 建 DOM（`doc.create_element("button")` + `set_text_content(Some("×"))`），与 Leptos 同 crate，`Icon` 组件可达。但替换需在命令式子树里挂载 Leptos 视图，`UnmountHandle` 的类型参数是 `icon_x` 的 `impl IntoView::State`、**无法命名**从而存不进 `LightboxBind`，只能 `.forget()`（每次开灯箱泄漏一个 Owner）或用 `create_element_ns` 手写第二份模板；而该按钮已有 `aria-label`（字形仅装饰）、颜色经 `color: var(--text)` 已随主题变化，故**保留文本**。完整权衡见「实施记录 · 第 3 步」。
 
 ### 第 4 步：CSS mask 替代 data-URI
 
@@ -171,29 +171,37 @@ fn svg_common() -> (&'static str, &'static str, &'static str, &'static str, &'st
 
 这样 data-URI 只需定义 **1 份**（不再随主题复制），颜色由 `currentColor` 跟随主题。
 
-**前置条件（待实测，不可断言支持）**：
+**前置条件（本轮完成 WebKitGTK 侧版本核对；实机渲染转手工，见「实施记录 · 第 4 步」）**：
 
 - `mask-image` 在 **WebKitGTK**（Desktop Linux 壳）与 **Android WebView** 上需确认支持与 `-webkit-` 前缀行为；
-- `mask` 的 `size` / `position` / `no-repeat` 简写兼容性；
+- `mask` 的 `size` / `position` / `no-repeat` 简写兼容性（建议一律写长名属性 + `-webkit-` / 无前缀成对声明，绕开简写差异）；
 - 若任一平台不支持，则退回「保持每主题一份 data-URI」，并把第 4 步从方案中移除，仅保留第 1–3 步。
 
 ## 验证与门禁
 
-复用现有五道 CSS 门禁，不新增体系：
+复用现有 CSS 门禁，并新增一道图标门禁：
 
 - `bash scripts/check-css-contract.sh` —— 改了类名就跑（第 1、3 步主要风险点）。
-- `bash scripts/check-css-tokens.sh` —— 新增 `--icon-*` 后确认四主题覆盖完整（union 规则要求所有主题覆盖同一 token 集）。
+- `bash scripts/check-css-tokens.sh` —— 新增 `--icon-*` 后确认六套主题覆盖完整（union 规则要求所有主题覆盖同一 token 集）。
 - `bash scripts/check-css-literals.sh` —— 尺寸字面量不在其预算内，但改动若顺带动了 `font-size` / 颜色须同步 `scripts/css_literals_budget.txt`。
 - `bash scripts/check-css-breakpoints.sh` —— 图标若在响应式块内有尺寸覆写，须与 `MOBILE_LAYOUT_BREAKPOINT_PX` 一致。
+- `bash scripts/check-icons.sh` —— 图标门禁（本轮新增，见下）。
 - `bash scripts/check.sh` —— 全量。
 
-可选：新增 `check-icons.sh`（与既有 `check-css-*.sh` 同范式，`scripts/check-icons.sh` + `scripts/icons_check.py`）强制「内联 SVG 一律走共享组件」与「无裸 `1.125rem` 图标尺寸」。是否值得加，取决于第 1、2 步落地后是否仍有回归空间——**建议先在 pre-commit 观察，稳定后再固化为门禁**。
+**图标门禁（已落地）**：`scripts/check-icons.sh` + `scripts/icons_check.py`（与既有 `check-css-*.sh` 同范式，已接入 `scripts/check.sh` 与 `.pre-commit-config.yaml`），两条规则：
+
+1. `frontend/src/**/*.rs`（除 `icon.rs`）不得出现字面 `<svg` —— 内联 SVG 一律走共享组件，顺带堵住「在 HTML 字符串里内联一份 `<svg>`」这条捷径；
+2. `frontend/styles/*.css` 里 `svg` 类型选择器规则的 `width` / `height`（含 `min-` / `max-`）必须是 `var(--icon-*)` —— 尺寸只有一个来源。
+
+有意例外在规则所在行写 `icon-gate: allow <理由>`（Rust 该行 / CSS 该规则的前置注释）。
+
+**已知盲区**：本门禁**不**校验「类名与元素是否同体」。若把容器类名直接挂到 `<svg>` 上，`.container svg` 这类**永不匹配的后代选择器**仍会为 `.container` 提供「类名已覆盖」的假证据（`check-css-contract.sh` 只查类名是否出现过），本门禁也看不到 —— 2026-09-25 的 `workspace-tree-chevron` 回归即属此类，需靠 code review 兜住。
 
 **必做实测项**（非门禁能覆盖）：
 
 1. 第 2 步后逐主题比对图标尺寸，确认零视觉变化。
 2. 第 3 步后逐个替换点确认键盘可达性（关闭按钮多为 `<button>`，换 SVG 后 `aria-label` 须保留）。
-3. 第 4 步在 WebKitGTK + Android WebView 实机确认 mask 渲染。
+3. 第 4 步在 WebKitGTK + Android WebView 实机确认 mask 渲染（**本轮未做，已转手工**；自动化探测因缺 `python3-gi-cairo` 放弃，版本核对结论见「实施记录 · 第 4 步」）。
 
 ## 附：与既有文档的关系
 
@@ -235,23 +243,42 @@ fn svg_common() -> (&'static str, &'static str, &'static str, &'static str, &'st
 - **保留字形**（含 3 处对文档清单的修正 + 审查阶段补登记的同类项）：
   1. `…` @ `ide_layout.rs:112` —— 文档记为「更多」图标有误，实测是加载省略号且为 `role="status"` 的**唯一可访问名**，换 SVG 会令读屏失去内容 → 保留。
   2. `…` @ `chat/tui_stream_dom_sync.rs:747` —— 文档清单此处有误，实测是 `#[test]` 内的测试桩数据 → 保留。
-  3. `×` @ `chat/chat_image_lightbox.rs:270` —— WASM 外原生 DOM 构建，无法访问 Leptos 组件（文档第 158 行已允许保持文本）→ 保留。
+  3. `×` @ `chat/chat_image_lightbox.rs:270` —— 命令式 `web_sys` 建 DOM。原文档（第 158 行）记为「WASM 外的 JS 片段、可能访问不到组件」**有误**：该函数是 WASM 内的 Rust，与 Leptos 同 crate、组件可达。但实测替换代价高于收益，故仍保留文本，理由见下方「第 3 步补：原生 DOM 路径复评」。
   4. `●`（脏标记，本质小圆点）、`—`（空值占位，排版符号）、CSS `content` 的 `◈`（`layout-chat.css:365`）与 `▾`（`layout-chat.css:371`，伪元素放不下 SVG）。
-  5. 文档盘点未列、审查阶段一并登记为「保留」的同类项：`▸` @ [chat/tui_tool_process.rs:373](file:///home/gzz/crabmate/client/frontend/src/app/chat/tui_tool_process.rs#L373)（**HTML 字符串**写进原生 DOM，与第 3 条同因；`layout-chat.css` 靠 `transform: rotate(90deg)` 表达展开态）、` ✓` @ [settings_mcp_status.rs:304](file:///home/gzz/crabmate/client/frontend/src/app/settings_mcp_status.rs#L304)（保存成功反馈文案的后缀排版符号）、`⚙️` 等工具卡 emoji @ [i18n/tool_cards.rs:196](file:///home/gzz/crabmate/client/frontend/src/i18n/tool_cards.rs#L196)（工具种类的彩色 emoji 体系，属另一议题）。
+  5. 文档盘点未列、审查阶段一并登记为「保留」的同类项：`▸` @ [chat/tui_tool_process.rs:373](file:///home/gzz/crabmate/client/frontend/src/app/chat/tui_tool_process.rs#L373)（**HTML 字符串**经 `set_inner_html` 注入，无元素句柄；`layout-chat.css` 靠 `transform: rotate(90deg)` 表达展开态，复评见下）、` ✓` @ [settings_mcp_status.rs:304](file:///home/gzz/crabmate/client/frontend/src/app/settings_mcp_status.rs#L304)（保存成功反馈文案的后缀排版符号）、`⚙️` 等工具卡 emoji @ [i18n/tool_cards.rs:196](file:///home/gzz/crabmate/client/frontend/src/i18n/tool_cards.rs#L196)（工具种类的彩色 emoji 体系，属另一议题）。
 
-### 第 4 步：CSS mask —— 未实施（按方案指示退回）
+### 第 3 步补：原生 DOM 路径的 `×` / `▸` 复评 —— 结论为「保留文本」
 
-前置条件（`mask-image` / `-webkit-mask-*` 在 **WebKitGTK** 与 **Android WebView** 的实机支持与简写行为）在本机无法验证。依文档第 178 行「若任一平台不支持，则退回」的指示：**保留现状「每主题一份 data-URI」**（`--status-agent-select-bg-image` 共 6 份），第 4 步从本轮方案移除，待有实机验证条件后再议。
+第 3 步把两处判为「保留」时给的**理由是错的**（「在 WASM 外 / 访问不到 Leptos」）。本轮复评按实际代码重新定论，结论不变但依据更换：
+
+- **`×` @ [chat_image_lightbox.rs:270](file:///home/gzz/crabmate/client/frontend/src/app/chat/chat_image_lightbox.rs#L270)**（`btn.set_text_content(Some("×"))`）：`build_overlay` 是 WASM 内的 Rust 函数（`doc.create_element("button")` + `set_text_content`），**组件可达**。可用且仅有三条替换路径，各有一处硬伤：
+  1. `leptos::mount::mount_to(btn_html_element, || icon_x(""))` —— 复用组件、零重复，但返回的 `UnmountHandle` 类型参数是 `icon_x` 的 `impl IntoView::State`，**无法命名**，因而存不进 `LightboxBind` 以随灯箱关闭而释放；只能 `.forget()`，即每次打开灯箱永久泄漏一个 reactive `Owner`。
+  2. `create_element_ns(svg_ns, "svg")` 手搭 —— 又把属性模板抄了第二份（门禁也看不到，因为它不是字面 `<svg`），正是本方案要消除的东西。
+  3. `set_inner_html("<svg …>")` 字符串常量 —— 同上，第二份模板来源。
+  另加两条削弱替换收益的事实：该按钮已有 `aria-label`（字形纯装饰，无信息量），且 `shell-ds.css:951` 的 `color: var(--text)` 使字形**已经随主题变色**——判据「需要随主题变色」由文本颜色即已满足。故**保留文本**，不为一个装饰字形引入生命周期 hack 或第二份模板。
+- **`▸` @ [tui_tool_process.rs:373](file:///home/gzz/crabmate/client/frontend/src/app/chat/tui_tool_process.rs#L373)**（`html.push_str("<span …>▸</span>")`）：该处是**纯字符串拼接**，产物经 `set_inner_html` 注入且随流式同步反复重建——函数内没有元素句柄可挂载，只能走上面第 2 / 3 条（第二份模板）。且本门禁规则 1 会直接拦下内联 `<svg` 字面量，使这条捷径在评审时显性化。故**保留文本**（展开/收起由 `layout-chat.css` 的 `transform: rotate(90deg)` 表达）。
+
+> 小结：这两处与 `i18n/tool_cards.rs` 的 emoji 同属「Leptos 组件树之外」的渲染路径；共享 `Icon` 组件的适用边界就是**组件树内**。本方案不为此扩张组件的适用面。
+
+### 第 4 步：CSS mask —— 未实施（本轮仅闭合 WebKitGTK 侧版本核对；实机渲染转手工）
+
+前置条件核对进展：
+
+- **WebKitGTK 侧（Desktop Linux 壳）—— 版本门槛已闭合**：本机 `libwebkit2gtk-4.1 = 2.52.6`（Debian 13 trixie，`pkg-config webkit2gtk-4.1` 同为 2.52.6）。无前缀 `mask` / `mask-image` 与 `mask-size` / `mask-position` / `mask-repeat` / `mask-mode` / `mask-composite` 长名属性自 **Safari 15.4**（2022-03，与 WebKitGTK 2.36 同期）起支持，2.52.6 远高于该门槛；`-webkit-mask-image` 更早在 Safari 4 / 早期 WebKitGTK 即可用。故文档第 177 行「若任一平台不支持则退回」的退回条件在 WebKitGTK 侧**不成立**。
+- **Android WebView 侧 —— 结论有分叉，仍未闭合**：Android System WebView 跟随 Chromium，无前缀 `mask-image` 需 **Chrome / WebView 120+**（2023-12），`-webkit-mask-image` 自 Chrome 4 起可用（长名属性仅子集）。本项目 `minSdk = 24`，WebView 版本随 Play 商店自更新，**构建期无法断言**——只能实机抽查，或直接接受「`-webkit-` + 无前缀成对声明」的写法兜住旧版。
+- **实机渲染确认：本轮不做，转手工**。曾尝试自动化（WebKitGTK 经 `WebKit2.WebView.get_snapshot` 采像素）未成：本机缺 `python3-gi-cairo`，`gi.require_foreign("cairo")` 报 `No module named 'gi._gi_cairo'`，临时探测脚本已删除、不入库。若推进第 4 步，须由人工在 desktop 壳与 Android 实机确认渲染与简写行为（见「必做实测项」第 3 条）。
+
+结论：**仍按文档指示退回，保留现状「每主题一份 data-URI」**（`--status-agent-select-bg-image` 共 6 份），第 4 步从本轮方案移除。WebKitGTK 侧门槛已闭合；Android 侧版本与两端实机渲染留待有实机条件时再议。
 
 ### 验证
 
-- `bash scripts/check.sh` 全绿：`check-no-main-path` / `check-boundaries` / `check-css-breakpoints` / `check-css-contract` / `check-css-tokens` / `check-css-literals` / `check-xml-comments` / `cargo fmt` / `cargo clippy`（含 frontend wasm32）/ `lizard`（CCN>10 = 0）/ `ktlint-android`。
+- `bash scripts/check.sh` 全绿：`check-no-main-path` / `check-boundaries` / `check-css-breakpoints` / `check-css-contract` / `check-css-tokens` / `check-css-literals` / **`check-icons`（本轮新增）** / `check-xml-comments` / `cargo fmt` / `cargo clippy`（含 frontend wasm32）/ `lizard`（CCN>10 = 0）/ `ktlint-android`。
 - `make test-frontend`：681 passed / 0 failed。
-- 门禁脚本未新增（文档第 190 行的可选 `check-icons.sh`）：按「先在 pre-commit 观察，稳定后再固化」的建议，本轮不引入。
+- **图标门禁本轮落地**（原「先在 pre-commit 观察，稳定后再固化」的建议被推翻：观察期内的 `workspace-tree-chevron` 回归证明回归空间是真实的，且有门禁也未必够——见下条盲区）：新增 `scripts/check-icons.sh` + `scripts/icons_check.py`，两条规则「`icon.rs` 之外无字面 `<svg`」与「`svg` 选择器规则的尺寸须为 `var(--icon-*)`」，已接入 `scripts/check.sh` 与 `.pre-commit-config.yaml`，并在 `AGENTS.md` 登记。规则 1 还顺带堵住了「在 HTML 字符串 / `set_inner_html` 里内联一份 `<svg>`」这条绕过共享组件的捷径。落地时按当前代码实测零违规（`<svg` 字面量仅存在于 `icon.rs`）。
 - **审查阶段发现并修复的回归**：`workspace_tree.rs` 的树节点折叠箭头换 SVG 时丢掉了外层 `<span class="workspace-tree-chevron">`，类名落到 `<svg>` 本体 —— `sidebar.css` / `mobile.css` 里 `.workspace-tree-chevron svg` 这类**后代**选择器永不匹配（`--icon-sm` 丢失），而 `.workspace-tree-chevron` 自身的盒尺寸（桌面 20px / 窄屏 44px 触控区）直接压到 svg 上。修法是恢复 wrapper `<span>`（与 `.ide-menu-check` 同构，CSS 零改动）。
-- **门禁盲区（本轮未闭合）**：`check-css-contract.sh` 只校验「消费者类名是否在 CSS 中出现过」，`.foo svg` 这类**永不匹配的后代选择器**照样为 `.foo` 提供证据，因此「类名与元素同体」这类回归无法被拦下 —— 上述 `workspace-tree-chevron` 回归正是这类。文档第 190 行的可选 `check-icons.sh`（图标尺寸规则须为 `svg` 选择器而非其容器）是闭合该盲区的方向，仍留待后续。
+- **门禁盲区（本轮未闭合，已登记进 `check-icons.sh` 文档串与 `AGENTS.md`）**：`check-css-contract.sh` 只校验「消费者类名是否在 CSS 中出现过」，`.foo svg` 这类**永不匹配的后代选择器**照样为 `.foo` 提供证据；新增的 `check-icons.sh` 也只看「`svg` 规则尺寸是否为 token」，同样不校验「类名与元素是否同体」。因此上述 `workspace-tree-chevron` 这类回归仍无法被机械拦下，**须靠 code review 兜住**——这也是本轮在文档与脚本里都显式写明盲区的原因。
 
 ### 遗留（非本方案范围）
 
-- **工具卡 emoji**（`i18n/tool_cards.rs` 按工具种类给彩色 emoji）与**原生 DOM 字符串路径的图标**（`▸` @ `tui_tool_process.rs`、`×` @ `chat_image_lightbox.rs`、` ✓` @ `settings_mcp_status.rs`）：前者是独立视觉体系，后者在 Leptos 组件树之外没有替换点，均按判据保留，见第 3 步清单第 3、5 条。
+- **工具卡 emoji**（`i18n/tool_cards.rs` 按工具种类给彩色 emoji）与**原生 DOM 字符串路径的图标**（`▸` @ `tui_tool_process.rs`、`×` @ `chat_image_lightbox.rs`、` ✓` @ `settings_mcp_status.rs`）：前者是独立视觉体系；后者在 Leptos 组件树之外，替换要么需要生命周期 hack、要么再造一份属性模板（见「第 3 步补」），均按判据保留，清单见第 3 步第 3、5 条。
 - **图标尺寸字面量已清零**：`frontend/styles` 内不再有图标尺寸的 px / rem 字面量（原 `.settings-page-back svg` 的 16px 已在审查阶段收进 `--icon-lg`）；第 2 步补收范围见上。
