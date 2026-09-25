@@ -26,6 +26,9 @@ bash "$ROOT/scripts/check-css-tokens.sh"
 echo "[check] css literals budget (per-file font-size / color literals in frontend/styles must match css_literals_budget.txt)"
 bash "$ROOT/scripts/check-css-literals.sh"
 
+echo "[check] xml comments (no double-dash inside XML comments)"
+bash "$ROOT/scripts/check-xml-comments.sh"
+
 echo "[check] cargo fmt (all packages in scripts/rust-pkg-dirs.txt)"
 while IFS= read -r dir; do
   echo "[check] cargo fmt $dir"
