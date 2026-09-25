@@ -1,0 +1,96 @@
+/*
+ * shadcn 风格浅色（data-theme="shadcn-light"）：zinc 中性浅底 + 1px 细边框 + 克制的蓝强调 + Inter 字体。
+ * 与 `shadcn.css` 同一套设计语言，只是把层级翻到浅色侧（shadcn/ui 的实际默认即浅色 zinc）。
+ * 只借用 shadcn/ui 的设计语言（配色 / 圆角 / 层级），不引入 Tailwind 或组件库；见 themes/README.md。
+ */
+:root[data-theme="shadcn-light"] {
+  --font-sans: "Inter", "DM Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  /* 与 shadcn.css 同一档圆角：lg = shadcn --radius 0.5rem（8px），xl = radius + 4 */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-btn: 6px;
+
+  /* zinc 中性灰阶：页面留一点锌灰，卡片回到纯白，让层级靠 1px 边框读出来 */
+  --bg: #fafafa;
+  --bg-elevated: #ffffff;
+  --surface: #ffffff;
+  --surface-hover: #f4f4f5;
+  --border: #e4e4e7;
+  --border-subtle: #f1f1f2;
+  --text: #09090b;
+  /* 次要文字：在 --bg / --surface-hover / --surface 上分别约 5.21 / 4.95 / 5.44:1，
+     覆盖 10–11px 大写标签（小字 AA 需 4.5:1）；勿直接用 zinc-500（#71717a）——它在本主题三层上只有 ≈4.40:1。 */
+  --muted: #696971;
+  /* 强调：blue-600。
+     `--accent` / `--info` / `--success` / `--warn` / `--error` 在 styles 下有 30+ 处被直接当文字色
+     （`color: var(--…)`），所以每一个都必须在 --bg / --surface-hover / --surface 三层底色上 ≥4.5:1
+     （小字 AA）。改这些值前请重新实算，勿只凭观感调浅。 */
+  --accent: #2563eb;
+  --accent-dim: color-mix(in srgb, var(--accent) 15%, var(--surface));
+  /* 页面光晕关闭（与 shadcn.css 一致）：shadcn 是纯平底色；本 token 属并集必填，保留定义但不再被背景消费 */
+  --accent-glow: color-mix(in srgb, var(--accent) 7%, transparent);
+
+  /* 语义色在同一层级取更深的档，保证在三层浅底上均可读 */
+  --info: #0369a1; /* ≈5.69 / 5.40 / 5.93:1 */
+  --success: #047857; /* ≈5.25 / 4.99 / 5.48:1 */
+  --warn: #b45309; /* ≈4.81 / 4.57 / 5.02:1 */
+  --error: #b91c1c; /* ≈6.20 / 5.89 / 6.47:1 */
+
+  --info-bg: color-mix(in srgb, var(--info) 13%, var(--surface));
+  --success-bg: color-mix(in srgb, var(--success) 13%, var(--surface));
+  --warn-bg: color-mix(in srgb, var(--warn) 14%, var(--surface));
+  --error-bg: color-mix(in srgb, var(--error) 13%, var(--surface));
+
+  /* 阴影：shadcn 浅色用极浅的纯黑投影（shadow-sm / md / lg 档），层级主要交给 1px 边框 */
+  --shadow-raised:
+    0 1px 2px rgba(0, 0, 0, 0.06),
+    0 4px 6px -1px rgba(0, 0, 0, 0.08),
+    0 2px 4px -2px rgba(0, 0, 0, 0.06);
+  --shadow-overlay:
+    0 10px 15px -3px rgba(0, 0, 0, 0.1),
+    0 4px 6px -4px rgba(0, 0, 0, 0.08);
+  --shadow-sm: var(--shadow-raised);
+  --shadow-md: var(--shadow-overlay);
+  --shadow-card:
+    0 1px 2px rgba(0, 0, 0, 0.05),
+    0 1px 1px rgba(0, 0, 0, 0.04);
+
+  --selection-bg: color-mix(in srgb, var(--accent) 20%, transparent);
+  --selection-color: var(--text);
+  --page-bg-decor-html: none;
+  --page-bg-decor-body: none;
+  --nav-rail-bg: color-mix(in srgb, var(--bg) 60%, var(--surface-hover));
+  /* `.btn-primary` 文字取 --on-accent（本主题 #fff）：blue-600 渐变压深后顶部 ≈5.8:1，
+     :hover brightness(1.07) 后仍 ≈5.3:1；:disabled 走 components.css 的 accent 38% + surface 混色。 */
+  --on-accent: #fff;
+  --btn-primary-bg: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--accent) 92%, #0a0c10) 0%,
+    color-mix(in srgb, var(--accent) 84%, #0a0c10) 100%
+  );
+  --btn-primary-border: color-mix(in srgb, var(--accent) 86%, #0a0c10);
+  --modal-backdrop-bg: rgba(9, 9, 11, 0.3);
+  --status-agent-select-bg-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='%23696971' d='M0 0h10L5 6z'/%3E%3C/svg%3E");
+  --composer-bar-box-shadow: 0 -6px 26px color-mix(in srgb, var(--border) 12%, transparent);
+  --composer-ws-ref-bg: color-mix(in srgb, var(--accent) 10%, var(--bg));
+  --composer-ws-ref-box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 22%, var(--border));
+
+  /* 聊天内嵌终端面板：所有主题保留深色沉浸区（与 tokens.css / shadcn.css 同值） */
+  --terminal-panel-bg: #0c0e12;
+  --terminal-panel-border: #30363d;
+  --terminal-panel-fg: #c8d1dc;
+
+  /* 语法高亮：浅底上取深色档（与 light.css 同组值），`--ide-hl-comment` 跟随 --muted */
+  --ide-hl-keyword: #7c3aed;
+  --ide-hl-string: #0d9488;
+  --ide-hl-comment: var(--muted);
+  --ide-hl-number: #b45309;
+  --ide-hl-type: #2563eb;
+  --ide-hl-attribute: #c026d3;
+  --ide-hl-macro: #ea580c;
+  --ide-hl-key: #0369a1;
+}

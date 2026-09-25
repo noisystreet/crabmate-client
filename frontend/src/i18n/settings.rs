@@ -136,6 +136,20 @@ pub fn settings_theme_high_contrast(l: Locale) -> &'static str {
     }
 }
 
+pub fn settings_theme_shadcn(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "Shadcn",
+        Locale::En => "Shadcn",
+    }
+}
+
+pub fn settings_theme_shadcn_light(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "Shadcn 浅色",
+        Locale::En => "Shadcn Light",
+    }
+}
+
 pub fn settings_theme_preset_label(l: Locale, slug: &str) -> &'static str {
     match slug {
         "system" => settings_theme_system(l),
@@ -143,6 +157,8 @@ pub fn settings_theme_preset_label(l: Locale, slug: &str) -> &'static str {
         "light" => settings_theme_light(l),
         "material" => settings_theme_material(l),
         "high-contrast" => settings_theme_high_contrast(l),
+        "shadcn" => settings_theme_shadcn(l),
+        "shadcn-light" => settings_theme_shadcn_light(l),
         _ => settings_theme_dark(l),
     }
 }
