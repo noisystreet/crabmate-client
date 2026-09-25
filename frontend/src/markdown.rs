@@ -375,6 +375,21 @@ mod tests {
     }
 
     #[test]
+    fn orphan_closing_bold_marker_on_next_paragraph_still_bolds() {
+        let h = to_safe_html("**1. 单一事实来源（核心重构）\n\n**");
+        assert!(h.contains("<strong>"), "got {h:?}");
+        assert!(!h.contains("**"), "stray asterisks leaked, got {h:?}");
+        assert!(h.contains("单一事实来源（核心重构）"), "got {h:?}");
+    }
+
+    #[test]
+    fn bold_ending_right_after_fullwidth_bracket_stays_bold() {
+        let h = to_safe_html("**1. 单一事实来源（核心重构）**");
+        assert!(h.contains("<strong>"), "got {h:?}");
+        assert!(!h.contains("**"), "stray asterisks leaked, got {h:?}");
+    }
+
+    #[test]
     fn atx_h1_is_demoted_to_h3() {
         let h = to_safe_html("# Only");
         assert!(h.contains("<h3"), "got {h:?}");

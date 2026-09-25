@@ -11,15 +11,85 @@ fn normalize_glued_markdown_blocks(md: &str) -> String {
     s = s.replace("：```", "：\n```");
     s = s.replace("：~~~", "：\n~~~");
     // 句末 / 右括号后紧贴下一小节 `**标题**`：拆成独立段，便于分段与列表式阅读。
-    s = s.replace("）**", "）\n\n**");
-    s = s.replace("。**", "。\n\n**");
-    s = s.replace("！**", "！\n\n**");
-    s = s.replace("？**", "？\n\n**");
+    s = split_new_bold_after_sentence_end(&s);
+    // 收尾 `**` 被写到下一段（可隔空行）：并回上一段，避免两边 `**` 变字面量。
+    s = merge_orphan_bold_closer(&s);
     // 句末紧贴引用：避免 `结束。> 引用` 被收进同一段落。
     s = s.replace("。>", "。\n\n>");
     s = s.replace("！>", "！\n\n>");
     s = s.replace("？>", "？\n\n>");
     s
+}
+
+/// 句末 / 右括号后紧贴 `**` 的两个来源：**新开**下一小节粗体（要拆段）与上一段粗体的**收尾**
+/// （不能拆，拆了 CommonMark 强调跨空行失效、`**` 直接显示为字面量）。只有 `**` 后同行还有正文、
+/// 且其前同段 `**` 已配平时才认定是新开。
+fn split_new_bold_after_sentence_end(md: &str) -> String {
+    md.split('\n')
+        .map(split_new_bold_in_line)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// 逐行扫描「全角句末标点 + `**`」，仅新开粗体时插空行（其余原样保留）。
+fn split_new_bold_in_line(line: &str) -> String {
+    let mut out = String::with_capacity(line.len());
+    let mut rest = line;
+    // 当前段落（拆段后重新计数）已扫描到的 `**` 数量：奇数为有未闭合开符。
+    let mut bold_runs = 0usize;
+    while let Some((punct_len, at)) = find_glued_bold_punct(rest) {
+        let (head, tail) = rest.split_at(at + punct_len);
+        bold_runs += head.matches("**").count();
+        let after = &tail[2..];
+        let opens_bold =
+            bold_runs.is_multiple_of(2) && !after.is_empty() && !after.starts_with([' ', '\t']);
+        out.push_str(head);
+        if opens_bold {
+            out.push_str("\n\n**");
+        } else {
+            out.push_str("**");
+        }
+        bold_runs += 1;
+        rest = after;
+    }
+    out.push_str(rest);
+    out
+}
+
+/// 行内首个「全角句末标点 / 右括号 + `**`」，返回 `(标点字节长度, 标点起始字节)`。
+fn find_glued_bold_punct(s: &str) -> Option<(usize, usize)> {
+    const PUNCT: [char; 4] = ['）', '。', '！', '？'];
+    s.char_indices().find_map(|(i, c)| {
+        let after = i + c.len_utf8();
+        (PUNCT.contains(&c) && s.get(after..)?.starts_with("**")).then_some((c.len_utf8(), i))
+    })
+}
+
+/// 行内容仅为 `**`、且上一非空段存在未闭合的 `**` 时，删掉中间空行并并回该段
+/// （模型常把收尾 `**` 另起一行或空一行写）。
+fn merge_orphan_bold_closer(md: &str) -> String {
+    let mut out: Vec<String> = Vec::new();
+    for line in md.split('\n') {
+        if line.trim() == "**" && last_paragraph_has_open_bold(&out) {
+            while out.last().is_some_and(|l| l.trim().is_empty()) {
+                out.pop();
+            }
+            if let Some(prev) = out.last_mut() {
+                prev.push_str("**");
+            }
+            continue;
+        }
+        out.push(line.to_string());
+    }
+    out.join("\n")
+}
+
+/// 末尾非空行里 `**` 计数为奇数（存在未闭合的粗体开符）。
+fn last_paragraph_has_open_bold(out: &[String]) -> bool {
+    out.iter()
+        .rev()
+        .find(|l| !l.trim().is_empty())
+        .is_some_and(|l| l.matches("**").count() % 2 == 1)
 }
 
 /// 在 `pulldown_cmark` 解析前做轻量规范化（单行规则，不解析嵌套结构）。
@@ -485,6 +555,24 @@ mod tests {
         assert_eq!(
             normalize_markdown_for_render(line),
             "~~~rust\n// comment here"
+        );
+    }
+
+    /// 收尾 `**` 被模型写到下一段（甚至隔空行）：行内容仅 `**` 时并回上行，否则会渲染出字面量 `**`。
+    #[test]
+    fn normalize_merges_orphan_closing_bold_marker() {
+        assert_eq!(
+            normalize_markdown_for_render("**1. 单一事实来源（核心重构）\n\n**"),
+            "**1. 单一事实来源（核心重构）**"
+        );
+        assert_eq!(
+            normalize_markdown_for_render("**1. 单一事实来源（核心重构）**"),
+            "**1. 单一事实来源（核心重构）**"
+        );
+        // 上一行 `**` 已配平：孤立的 `**` 与它无关，保持原样（不硬凑成粗体）。
+        assert_eq!(
+            normalize_markdown_for_render("**甲**\n\n**"),
+            "**甲**\n\n**"
         );
     }
 
