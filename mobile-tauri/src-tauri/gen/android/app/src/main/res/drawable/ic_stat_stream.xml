@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 通知小图标（对话进行中）：三条递减横杠，呼应应用内的信息条语义。
+     状态栏小图标只取 alpha 通道、由系统统一着色，故必须是单色白剪影；
+     不可复用启动图标位图，那会被渲染成一块白方块。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M3,6h18v2.6H3zM3,10.7h12v2.6H3zM3,15.4h6.5v2.6H3z" />
+</vector>

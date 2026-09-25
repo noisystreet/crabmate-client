@@ -1,17 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="purple_200">#FFBB86FC</color>
-    <color name="purple_500">#FF6200EE</color>
-    <color name="purple_700">#FF3700B3</color>
-    <color name="teal_200">#FF03DAC5</color>
-    <color name="teal_700">#FF018786</color>
-    <color name="black">#FF000000</color>
-    <color name="white">#FFFFFFFF</color>
-
-    <!-- 退出确认框配色，对齐 Web 端设计令牌（tokens.css）：surface / text / muted / accent / error -->
-    <color name="cm_dialog_surface">#FF161727</color>
-    <color name="cm_dialog_on_surface">#FFEEF1F6</color>
-    <color name="cm_dialog_muted">#FF9099B4</color>
-    <color name="cm_dialog_accent">#FF8FA4EA</color>
-    <color name="cm_dialog_danger">#FFC98C9B</color>
+    <!-- 原生层设计令牌：与 Web 端 frontend/styles/tokens.css 的 :root 逐项一一对应，
+         命名映射为 cm_<token>（下划线代替连字符），色值刻意重复书写一份。
+         两侧一致性由 scripts/check-token-mirrors.sh 机械校验；改一处必须同时改另一处。
+         本文件只放这类镜像令牌，不放裸颜色。 -->
+    <color name="cm_bg">#FF07090E</color>
+    <color name="cm_surface">#FF161727</color>
+    <color name="cm_text">#FFEEF1F6</color>
+    <color name="cm_muted">#FF9099B4</color>
+    <color name="cm_accent">#FF8FA4EA</color>
+    <color name="cm_error">#FFC98C9B</color>
 </resources>

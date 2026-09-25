@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 通知小图标（等待命令审批）：警示三角，惊叹号用 evenOdd 挖空。
+     小图标只看 alpha、由系统着色，所以惊叹号不能靠「画成深色」区分，只能挖成透明。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M12,3.2L22.4,21.2H1.6zM10.9,9.6h2.2v5.6h-2.2zM10.9,16.6h2.2v2.2h-2.2z" />
+</vector>

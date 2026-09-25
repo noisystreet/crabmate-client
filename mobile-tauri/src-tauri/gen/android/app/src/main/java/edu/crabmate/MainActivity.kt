@@ -223,10 +223,10 @@ class MainActivity : TauriActivity() {
     val dialog = builder.show()
     // 主题覆盖只统一底色/圆角/正文；按钮文字仍取 accent，这里按语义区分，对齐 Web 端
     // 弹窗的 btn-danger / btn-secondary / btn-primary（退出=危险，取消=次要，返回连接页=主色）。
-    dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.setTextColor(getColor(R.color.cm_dialog_danger))
-    dialog.getButton(AlertDialog.BUTTON_NEGATIVE)?.setTextColor(getColor(R.color.cm_dialog_muted))
+    dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.setTextColor(getColor(R.color.cm_error))
+    dialog.getButton(AlertDialog.BUTTON_NEGATIVE)?.setTextColor(getColor(R.color.cm_muted))
     if (offerReturnToConnect) {
-      dialog.getButton(AlertDialog.BUTTON_NEUTRAL)?.setTextColor(getColor(R.color.cm_dialog_accent))
+      dialog.getButton(AlertDialog.BUTTON_NEUTRAL)?.setTextColor(getColor(R.color.cm_accent))
     }
     exitConfirmDialog = dialog
   }
@@ -242,8 +242,8 @@ class MainActivity : TauriActivity() {
     appWebView = webView
     WindowCompat.setDecorFitsSystemWindows(window, true)
     window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
-    // 与前端 `--bg` 对齐：HTML/WASM 未就绪前避免系统默认纯黑空页。
-    webView.setBackgroundColor(android.graphics.Color.parseColor("#07090E"))
+    // 与前端 `--bg` 对齐：HTML/WASM 未就绪前避免系统默认纯黑空页。走 cm_bg 令牌，勿写色值字面量。
+    webView.setBackgroundColor(getColor(R.color.cm_bg))
     // 允许系统 Autofill / 密码管理器填充连接页的 URL+Bearer
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
       webView.importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_YES
