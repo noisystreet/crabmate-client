@@ -5,6 +5,11 @@
 //! user-data ＞ serve 默认"的生效值合成、以及"先 GET 再改自己管理的键再全量 PUT"
 //! 所需的 DTO 合并函数。UI 状态机见 [`super::settings_panel`]。
 
+use crabmate_client_api::{
+    llm_context_tokens_for_chat_body, readonly_tool_ttl_cache_secs_for_chat_body,
+    temperature_for_chat_body,
+};
+
 use crate::serve::{ClientLlmFields, LlmOverridesDto, UserPrefsDto};
 
 /// 会话模式枚举的合法取值（与 `/mode` 斜杠一致；面板枚举与校验共用，避免漂移）。
@@ -322,20 +327,29 @@ pub fn merge_turn(local: &Option<String>, stored: Option<&str>) -> Option<String
 
 /// 随轮 `client_llm.llm_context_tokens` 值：持久层存原文，仅 > 0 时发送为规范化数字串
 /// （对齐 Desktop 只发正数；空/0/非数字 → `None` 不发送该键）。
+/// 取值规则见 [`llm_context_tokens_for_chat_body`]（共享）。
 #[must_use]
 pub fn turn_context_tokens(stored: Option<&str>) -> Option<String> {
-    stored
-        .and_then(normalize_str)
-        .and_then(|s| s.parse::<u64>().ok())
-        .filter(|n| *n > 0)
-        .map(|n| n.to_string())
+    llm_context_tokens_for_chat_body(stored).map(|n| n.to_string())
 }
 
 /// 随轮顶层 `readonly_tool_ttl_cache_secs`：仅缓存禁用（disable=`Some(true)`）时发 `0`；
-/// 跟随 server（`None` / `Some(false)`）不发送。
+/// 跟随 server（`None` / `Some(false)`）不发送。取值规则见
+/// [`readonly_tool_ttl_cache_secs_for_chat_body`]（共享）。
 #[must_use]
 pub fn turn_tool_cache_secs(disabled: Option<bool>) -> Option<u64> {
-    (disabled == Some(true)).then_some(0)
+    readonly_tool_ttl_cache_secs_for_chat_body(disabled != Some(true))
+}
+
+/// 随轮顶层 `temperature`：持久层存原文，`trim` 后能解析成区间内有限数才发送
+/// （对齐 Desktop）。取值规则见 [`temperature_for_chat_body`]（共享）。
+#[must_use]
+pub fn turn_temperature(stored: Option<&str>) -> Option<f64> {
+    temperature_for_chat_body(
+        stored
+            .and_then(normalize_str)
+            .and_then(|s| s.parse::<f64>().ok()),
+    )
 }
 
 /// 随轮 `client_llm` 装配：override 已归一（model / api_base / api_key）与持久层

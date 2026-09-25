@@ -1,9 +1,12 @@
-//! `POST /chat/stream` **核心**字段（message / `client_sse_protocol` / conversation_id / approval_session_id）。
+//! `POST /chat/stream` **核心**字段（message / `client_sse_protocol` / conversation_id / approval_session_id）
+//! 与**可选块取值规则**（`client_llm` 子字段、顶层 `temperature` / `readonly_tool_ttl_cache_secs`）。
 //!
-//! 图像、`stream_resume`、`client_llm`、温度等仍由各端自行追加。核心键集以契约
-//! `crabmate::cm_api_contract::chat_keys::CHAT_REQUEST_BODY_ALLOWED_KEYS` 为单一
-//! 来源（测试钉住）；出站仍保留薄 `json!` builder（0.5.2 `ChatRequestBodyWire` 是
-//! 入站线型，client 出站无现成 builder 可复用）。
+//! 图像、`stream_resume`、`llm_thinking_mode`、`executor_llm` 等仍由各端自行追加
+//! （取值来源是本端存储 / 本端语义，见 `docs/design/client_shared_logic.md` §4.5）。
+//! 核心键集以契约
+//! `crabmate::cm_api_contract::chat_keys::CHAT_REQUEST_BODY_ALLOWED_KEYS` 为单一来源（测试钉住）；
+//! 出站仍保留薄 `json!` builder（0.5.2 `ChatRequestBodyWire` 是入站线型，
+//! client 出站无现成 builder 可复用）。
 //! `client_sse_protocol` 取值由调用方传入（通常为 `crabmate::cm_sse_protocol::SSE_PROTOCOL_VERSION`）。
 
 use serde_json::{Value, json};
@@ -58,6 +61,38 @@ fn apply_optional_id(body: &mut Value, key: &str, raw: Option<&str>) {
             map.remove(key);
         }
     }
+}
+
+/// 可选字符串键的取值规则：`trim` 后非空才写入（写入 `trim` 后的值）。
+///
+/// 用于 `client_llm` / `executor_llm` 子字段与 `agent_role` / `session_mode` 等可省略键；
+/// 空值不写键（而非写 `null`），避免 serve 侧把空串当成显式覆盖。
+pub fn insert_trimmed_str(
+    map: &mut serde_json::Map<String, Value>,
+    key: &str,
+    value: Option<&str>,
+) {
+    if let Some(v) = value.map(str::trim).filter(|s| !s.is_empty()) {
+        map.insert(key.to_string(), Value::String(v.to_string()));
+    }
+}
+
+/// `client_llm.llm_context_tokens`：仅 `trim` 后为非空数字且 `> 0` 时发送。
+pub fn llm_context_tokens_for_chat_body(raw: Option<&str>) -> Option<u64> {
+    raw.map(str::trim)
+        .and_then(|s| s.parse::<u64>().ok())
+        .filter(|n| *n > 0)
+}
+
+/// 顶层 `temperature`：仅有限且落在 `0.0..=2.0` 时才发送（越界 / `NaN` / `inf` 省略）。
+pub fn temperature_for_chat_body(raw: Option<f64>) -> Option<f64> {
+    raw.filter(|t| t.is_finite() && (0.0..=2.0).contains(t))
+}
+
+/// 顶层 `readonly_tool_ttl_cache_secs`：关闭缓存时发 `0`；跟随 serve 时省略键。
+#[must_use]
+pub fn readonly_tool_ttl_cache_secs_for_chat_body(follow_server: bool) -> Option<u64> {
+    (!follow_server).then_some(0)
 }
 
 #[cfg(test)]
@@ -116,6 +151,62 @@ mod tests {
         for k in keys {
             assert!(
                 crabmate::cm_api_contract::chat_keys::CHAT_REQUEST_BODY_ALLOWED_KEYS.contains(&k),
+                "key `{k}` not in contract CHAT_REQUEST_BODY_ALLOWED_KEYS"
+            );
+        }
+    }
+
+    #[test]
+    fn insert_trimmed_str_skips_blank_and_writes_trimmed() {
+        let mut map = serde_json::Map::new();
+        insert_trimmed_str(&mut map, "agent_role", Some("  default  "));
+        insert_trimmed_str(&mut map, "session_mode", Some("   "));
+        insert_trimmed_str(&mut map, "client_llm", None);
+        assert_eq!(map["agent_role"], "default");
+        assert!(map.get("session_mode").is_none());
+        assert!(map.get("client_llm").is_none());
+    }
+
+    #[test]
+    fn llm_context_tokens_only_positive_number() {
+        assert_eq!(llm_context_tokens_for_chat_body(Some(" 8192 ")), Some(8192));
+        assert_eq!(llm_context_tokens_for_chat_body(Some("0")), None);
+        assert_eq!(llm_context_tokens_for_chat_body(Some("-1")), None);
+        assert_eq!(llm_context_tokens_for_chat_body(Some("abc")), None);
+        assert_eq!(llm_context_tokens_for_chat_body(Some("")), None);
+        assert_eq!(llm_context_tokens_for_chat_body(None), None);
+    }
+
+    #[test]
+    fn temperature_only_finite_in_range() {
+        assert_eq!(temperature_for_chat_body(Some(0.0)), Some(0.0));
+        assert_eq!(temperature_for_chat_body(Some(2.0)), Some(2.0));
+        assert_eq!(temperature_for_chat_body(Some(1.25)), Some(1.25));
+        assert_eq!(temperature_for_chat_body(Some(-0.1)), None);
+        assert_eq!(temperature_for_chat_body(Some(2.1)), None);
+        assert_eq!(temperature_for_chat_body(Some(f64::NAN)), None);
+        assert_eq!(temperature_for_chat_body(Some(f64::INFINITY)), None);
+        assert_eq!(temperature_for_chat_body(None), None);
+    }
+
+    #[test]
+    fn readonly_ttl_sends_zero_only_when_not_following_server() {
+        assert_eq!(readonly_tool_ttl_cache_secs_for_chat_body(false), Some(0));
+        assert_eq!(readonly_tool_ttl_cache_secs_for_chat_body(true), None);
+    }
+
+    #[test]
+    fn optional_block_keys_are_within_contract_allowed_keys() {
+        // 0.5.2：可选块产出的键也必须是契约白名单子集；契约改名 / 收窄时此测试失败。
+        let mut map = serde_json::Map::new();
+        insert_trimmed_str(&mut map, "agent_role", Some("default"));
+        insert_trimmed_str(&mut map, "session_mode", Some("agent"));
+        insert_trimmed_str(&mut map, "temperature", Some("0.7"));
+        insert_trimmed_str(&mut map, "readonly_tool_ttl_cache_secs", Some("0"));
+        for k in map.keys() {
+            assert!(
+                crabmate::cm_api_contract::chat_keys::CHAT_REQUEST_BODY_ALLOWED_KEYS
+                    .contains(&k.as_str()),
                 "key `{k}` not in contract CHAT_REQUEST_BODY_ALLOWED_KEYS"
             );
         }

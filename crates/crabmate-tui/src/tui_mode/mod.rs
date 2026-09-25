@@ -45,7 +45,8 @@ use self::approve::{decision_for_key, decision_summary};
 use self::controls::{Control, clear_word, parse_control, set_mode_field, set_override_field};
 use self::render::{BodyRow, SIDEBAR_MIN_WIDTH, StatusInfo, build_body_rows, chat_body_width};
 use self::settings::{
-    PersistedSettings, build_turn_client_llm, merge_turn, normalize, turn_tool_cache_secs,
+    PersistedSettings, build_turn_client_llm, merge_turn, normalize, turn_temperature,
+    turn_tool_cache_secs,
 };
 use self::settings_panel::{SettingsPanel, is_f2_key};
 use self::worker::{TurnRequest, UiEvent, WorkerJob, spawn_key_reader, spawn_worker};
@@ -707,10 +708,7 @@ impl TuiApp<'_> {
             stored.and_then(|p| p.context_tokens.as_deref()),
         );
         // 温度（顶层 body.temperature，对齐 Desktop）：persisted 存原文，parse 有效才发送。
-        let temperature = stored
-            .and_then(|p| p.temperature.as_deref())
-            .and_then(|s| s.trim().parse::<f64>().ok())
-            .filter(|t| t.is_finite() && (0.0..=2.0).contains(t));
+        let temperature = turn_temperature(stored.and_then(|p| p.temperature.as_deref()));
         // 只读工具缓存禁用（prefs disable=true）时顶层发 `readonly_tool_ttl_cache_secs: 0`。
         let readonly_tool_ttl_cache_secs =
             turn_tool_cache_secs(stored.and_then(|p| p.tool_cache_disabled));
