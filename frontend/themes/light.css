@@ -3,6 +3,9 @@
  * 见 themes/README.md：增删预设时请同步 Rust 白名单（app_prefs::THEME_SLUGS）与 index.html 引用链。
  */
 :root[data-theme="light"] {
+  /* 原生控件（`<select>` 弹层、滚动条、表单）随浅色；否则会继承 tokens.css `:root` 的 dark 基线 */
+  color-scheme: light;
+
   /* 暖纸底：米灰基调，告别冷灰工具感；表面不再用纯白，避免白卡压在暖底上「贴上去」的冷暖冲突 */
   --bg: #f4f1ea;
   --bg-elevated: #faf8f3;

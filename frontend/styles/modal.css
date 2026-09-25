@@ -1037,8 +1037,7 @@ html[data-cm-mobile-shell] .settings-page-header {
   max-height: min(70vh, 36rem);
   margin: 0 0 var(--space-3);
   padding: 10px 12px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
-    "Courier New", monospace;
+  font-family: var(--font-mono, ui-monospace, monospace);
   font-size: var(--text-md);
   line-height: 1.45;
   resize: vertical;
@@ -1205,8 +1204,7 @@ html[data-cm-mobile-shell] .settings-page-header {
 }
 
 .settings-mcp-tool-name {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
-    "Courier New", monospace;
+  font-family: var(--font-mono, ui-monospace, monospace);
   font-size: var(--text-md);
   font-weight: 600;
   color: var(--text);
