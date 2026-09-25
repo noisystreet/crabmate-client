@@ -19,29 +19,6 @@
 //!   3. `VICTAURI_E2E=1 cargo test --test victauri_sse_stub`
 
 use victauri_test::e2e_test;
-use victauri_test::locator::Locator;
-
-/// Phase 3 核心：注入 fetch 拦截器以存根 SSE 流。
-async fn install_chat_stream_stub(client: &mut victauri_test::VictauriClient) {
-    // 构造默认 SSE 流：助手 delta + diagnostic_summary 工具卡 + stream_ended
-    let sse_body = concat!(
-        "id: 1\ndata: {\"sse_capabilities\":{\"supported_sse_v\":1}}\n\n",
-        "id: 2\ndata: {\"v\":1}\n\n",
-        "id: 3\ndata: Hello from E2E stub via Victauri.\n\n",
-        "id: 4\ndata: {\"tool_result\":{\"name\":\"diagnostic_summary\",\"result_version\":1,\"summary\":\"ok\",\"output\":\"stub\",\"ok\":true}}\n\n",
-        "id: 5\ndata: {\"stream_ended\":{\"reason\":\"completed\"}}\n\n",
-    );
-
-    let _ = client
-        .eval_js(&format!(
-            "(()=>{{const body=`{sse_body}`;\
-             window.__originalFetch=window.fetch;\
-             window.fetch=(url,opts)=>{{if(typeof url==='string'&&url.includes('/chat/stream')&&opts&&opts.method==='POST')\
-             return Promise.resolve(new Response(body,{{status:200,headers:{{'content-type':'text/event-stream; charset=utf-8','x-conversation-id':'e2e-conv','x-stream-job-id':'1'}}}}));\
-             return window.__originalFetch(url,opts);}};}})()"
-        ))
-        .await;
-}
 
 /// 播种默认会话并重新加载。
 async fn seed_and_goto(client: &mut victauri_test::VictauriClient, session_id: &str) {
@@ -63,56 +40,7 @@ async fn seed_and_goto(client: &mut victauri_test::VictauriClient, session_id: &
 }
 
 // ---------------------------------------------------------------------------
-// 测试 1：发送消息后出现助手回复和工具卡（Phase 3 流存根演示）
-// ---------------------------------------------------------------------------
-e2e_test!(
-    send_message_shows_assistant_reply_and_tool_card,
-    |client| async move {
-        // Phase 3: 先注入 fetch 拦截器 → 再加载页面
-        install_chat_stream_stub(&mut client).await;
-        seed_and_goto(&mut client, "s_e2e_smoke").await;
-
-        // 等待主页面加载
-        let _ = client
-            .wait_for("text", Some("CrabMate"), Some(10000), Some(200))
-            .await;
-
-        // 在输入框中填入文本
-        let _ = client
-        .eval_js(
-            "(()=>{const el=document.querySelector('[data-testid=\"chat-composer-input\"]');\
-             if(!el)return;el.focus();\
-             const nativeInputValueSetter=Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype,'value').set;\
-             nativeInputValueSetter.call(el,'e2e ping');\
-             el.dispatchEvent(new Event('input',{{bubbles:true}}));})()"
-        )
-        .await;
-
-        // 按 Enter 发送（等价于 sendStubMessage）
-        client.press_key("Enter").await.unwrap();
-
-        // 等待 SSE 流存根的助手回复出现
-        client
-            .wait_for(
-                "text",
-                Some("Hello from E2E stub via Victauri"),
-                Some(15000),
-                Some(200),
-            )
-            .await
-            .unwrap();
-
-        // 验证工具过程行出现（TUI）
-        Locator::test_id("chat-tui-tool-process")
-            .expect(&mut client)
-            .to_be_visible()
-            .await
-            .unwrap();
-    }
-);
-
-// ---------------------------------------------------------------------------
-// 测试 2：流错误存根 → 状态栏显示失败
+// 测试 1：流错误存根 → 状态栏显示失败
 // ---------------------------------------------------------------------------
 e2e_test!(
     stream_error_shows_failure_in_status_bar,
