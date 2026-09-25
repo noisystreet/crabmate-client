@@ -238,7 +238,7 @@ html[data-cm-mobile-shell] .shell-topbar {
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--bg);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
+  box-shadow: var(--shadow-menu);
 }
 
 .ide-menu-separator {
@@ -288,7 +288,7 @@ html[data-cm-mobile-shell] .shell-topbar {
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--bg);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
+  box-shadow: var(--shadow-menu);
 }
 
 .ide-menu-item {
