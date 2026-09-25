@@ -116,6 +116,12 @@ test("多轮助手正文不应合并为一条 stored_message", async ({ page, br
   await page.waitForSelector('[data-testid="chat-composer-input"]');
   await openSessionInRail(page, sid);
 
+  // 会话切换后的 transcript 重建是异步的：点击后立刻单次采样会抢在重渲染之前，
+  // 拿到「非工具行数: 0 / 工具卡数: 0」的假失败（CI 上约 20% 概率）。先等首个回合挂载。
+  await expect(page.locator("section.chat-tui-turn").first()).toBeAttached({
+    timeout: 15_000,
+  });
+
   // ── DOM 快照（TUI transcript section；旧 chat-message-row / chat-tool-card 已退役）──
   const domState = await page.evaluate(() => {
     const sections = [
