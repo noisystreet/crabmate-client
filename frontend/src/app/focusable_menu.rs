@@ -81,7 +81,7 @@ pub(crate) fn FocusableModalPanel(
             role=dialog_role
             aria-modal="true"
             aria-labelledby=labelledby
-            attr:data-testid=testid
+            data-testid=testid
             tabindex="-1"
             on:pointerdown=move |ev: leptos::ev::PointerEvent| {
                 if stop_pointerdown {
