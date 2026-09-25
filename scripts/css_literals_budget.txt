@@ -9,10 +9,10 @@
 #
 # 目标是把存量逐文件清到 0，清理一处就下调一处预算。
 # 当前进度：font-size 已全量清到 0（Phase 1a，字号统一走 tokens.css 的 --text-* 档）；
-# 颜色已清 alert 五色与 --danger 兼容别名（Phase 1b，语义色归一），故仅剩高光 / 前景与遮罩阴影。
+# 颜色已清 alert 五色、--danger 兼容别名（Phase 1b，语义色归一）与 inset 高光 / 强调底前景
+# （Phase 1c，走 --inset-highlight / --on-accent），故仅剩遮罩与浮层阴影。
 
-frontend/styles/components.css      font-size=0   color=6    # #fff 为深底 inset 高光与主按钮白字，待新增高光 / 前景 token
-frontend/styles/layout-chat.css     font-size=0   color=4    # 3 处 #fff inset 高光待高光 token；1 处 rgba(0,0,0,.12) 浮层阴影待阴影 token
+frontend/styles/layout-chat.css     font-size=0   color=1    # 1 处 rgba(0,0,0,.12) 浮层阴影待阴影 token
 frontend/styles/mobile.css          font-size=0   color=1    # 1 处 rgba(0,0,0,.48) 抽屉遮罩待 token 化
 frontend/styles/modal.css           font-size=0   color=1    # 1 处 rgb(0 0 0 / 18%) 浮层阴影待 token 化
 frontend/styles/shell-ds.css        font-size=0   color=3    # 2 处 color-mix(#000 …) 阴影 + 1 处 rgba(0,0,0,.48) 遮罩待 token 化

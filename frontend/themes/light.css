@@ -57,7 +57,9 @@
     radial-gradient(ellipse 100% 60% at 100% 0%, var(--accent-glow), transparent 62%),
     radial-gradient(ellipse 60% 40% at 0% 100%, color-mix(in srgb, var(--accent) 3%, transparent), transparent 54%);
   --nav-rail-bg: color-mix(in srgb, var(--bg-elevated) 90%, var(--bg));
-  /* `.btn-primary` 的文字在 components.css 固定为 #fff：渐变只轻微压深（保留鼠尾草绿而不是压成近黑），
+  /* 实心强调色底上用白字（与 tokens.css 同值，仅为满足主题覆盖门禁显式登记） */
+  --on-accent: #fff;
+  /* `.btn-primary` 的文字由 --on-accent（本主题 #fff）决定：渐变只轻微压深（保留鼠尾草绿而不是压成近黑），
      最亮的顶部仍有 ≈6.1:1，`:hover` 的 brightness(1.07) 提亮后 ≈5.5:1；`:disabled` 见 components.css。 */
   --btn-primary-bg: linear-gradient(
     180deg,

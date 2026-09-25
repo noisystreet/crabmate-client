@@ -57,6 +57,9 @@
     radial-gradient(ellipse 100% 58% at 98% 2%, var(--accent-glow), transparent 60%),
     radial-gradient(ellipse 58% 40% at 2% 98%, color-mix(in srgb, var(--accent) 2.5%, transparent), transparent 54%);
   --nav-rail-bg: color-mix(in srgb, var(--bg) 88%, var(--surface));
+  /* 主按钮浅灰底上用深字：--btn-primary-bg 顶停 ≈#cfd1d8 / 底停 ≈#7b7d83，
+     沿用 tokens.css 的白字只有 ≈1.5:1 / ≈3.4:1；#0a0a0a 为 ≈13.0:1 / ≈4.8:1。 */
+  --on-accent: #0a0a0a;
   --btn-primary-bg: linear-gradient(
     180deg,
     color-mix(in srgb, var(--accent) 78%, #fff) 0%,
@@ -86,14 +89,8 @@
   --ide-hl-key: #7dd3fc;
 }
 
-/* 主按钮浅灰底上用深字：--btn-primary-bg 顶停 ≈#cfd1d8 / 底停 ≈#7b7d83，
-   沿用 components.css 的白字只有 ≈1.5:1 / ≈3.4:1；#0a0a0a 为 ≈13.0:1 / ≈4.8:1。 */
-:root[data-theme="material"] .btn-primary {
-  color: #0a0a0a;
-}
-
-/* 必须显式覆写：本文件先于 components.css 加载，上面的深字（0,2,1）会盖掉
-   .btn-primary:disabled（0,2,0）的白字，使禁用态深字落在深底上（≈2.9:1）。 */
+/* 禁用态底色是 accent 38% 混 surface 的浅灰（不是 --btn-primary-bg 渐变），
+   --on-accent 的深字落在它上面只有 ≈2.9:1，故这里显式回到白字。 */
 :root[data-theme="material"] .btn-primary:disabled {
   color: color-mix(in srgb, #fff 75%, transparent);
 }
