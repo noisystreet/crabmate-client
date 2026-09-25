@@ -121,7 +121,6 @@ fn SettingsChatTranscriptBlock(
                 on_toggle=move || show_turn_context_inject.update(|v| *v = !*v)
                 test_id="settings-show-turn-context-inject"
             />
-            <p class="settings-hint">{move || i18n::settings_show_turn_context_inject_hint(locale.get())}</p>
         </div>
     }
 }

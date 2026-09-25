@@ -191,17 +191,6 @@ pub fn settings_show_turn_context_inject(l: Locale) -> &'static str {
     }
 }
 
-pub fn settings_show_turn_context_inject_hint(l: Locale) -> &'static str {
-    match l {
-        Locale::ZhHans => {
-            "默认关闭。打开后主列会显示本轮 skill/上下文注入与压缩摘要（timeline_log）。"
-        }
-        Locale::En => {
-            "Off by default. When on, the transcript shows per-turn skill/context inject and compression summaries (timeline_log)."
-        }
-    }
-}
-
 pub fn settings_block_web_api_bearer(l: Locale) -> &'static str {
     match l {
         Locale::ZhHans => "Web API 共享密钥",
@@ -211,15 +200,15 @@ pub fn settings_block_web_api_bearer(l: Locale) -> &'static str {
 
 pub fn settings_web_api_bearer_label(l: Locale) -> &'static str {
     match l {
-        Locale::ZhHans => "共享密钥（Bearer）",
-        Locale::En => "Shared secret (Bearer)",
+        Locale::ZhHans => "共享密钥",
+        Locale::En => "Shared secret",
     }
 }
 
 pub fn settings_web_api_bearer_save(l: Locale) -> &'static str {
     match l {
-        Locale::ZhHans => "保存 Web Bearer",
-        Locale::En => "Save Web Bearer",
+        Locale::ZhHans => "保存",
+        Locale::En => "Save",
     }
 }
 
@@ -233,10 +222,10 @@ pub fn settings_web_api_bearer_saved(l: Locale) -> &'static str {
 pub fn settings_web_api_bearer_saved_browser_insecure(l: Locale) -> &'static str {
     match l {
         Locale::ZhHans => {
-            "已保存。当前不在桌面/移动壳内：Web Bearer 仅弱持久化在本浏览器（明文 localStorage）。正式使用请用 Desktop / Android 壳。"
+            "已保存（本浏览器弱持久化：明文 localStorage）。正式使用请用 Desktop / Android 壳。"
         }
         Locale::En => {
-            "Saved. Not running in the Desktop/Android shell: Web Bearer is weakly persisted in this browser (plaintext localStorage). Prefer the official shell for keyring/Keystore storage."
+            "Saved (weakly persisted in this browser as plaintext localStorage). Prefer the official shell."
         }
     }
 }
@@ -250,15 +239,15 @@ pub fn settings_web_api_bearer_cleared(l: Locale) -> &'static str {
 
 pub fn settings_web_api_bearer_status_set(l: Locale) -> &'static str {
     match l {
-        Locale::ZhHans => "本页已配置 Web Bearer",
-        Locale::En => "Web Bearer is set for this page",
+        Locale::ZhHans => "已配置",
+        Locale::En => "Set",
     }
 }
 
 pub fn settings_web_api_bearer_status_unset(l: Locale) -> &'static str {
     match l {
-        Locale::ZhHans => "本页尚未配置 Web Bearer",
-        Locale::En => "Web Bearer not set on this page",
+        Locale::ZhHans => "未配置",
+        Locale::En => "Not set",
     }
 }
 
@@ -603,10 +592,8 @@ pub fn settings_models_delete_apply_btn(l: Locale) -> &'static str {
 
 pub fn settings_models_presets_persist_failed(l: Locale) -> &'static str {
     match l {
-        Locale::ZhHans => "无法保存已保存模型列表（本机存储不可用或写入失败）。",
-        Locale::En => {
-            "Could not save the saved model list (local storage unavailable or write failed)."
-        }
+        Locale::ZhHans => "无法保存模型列表（本机存储不可用或写入失败）。",
+        Locale::En => "Could not save the model list (local storage unavailable or write failed).",
     }
 }
 

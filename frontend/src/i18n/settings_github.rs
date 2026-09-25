@@ -50,10 +50,8 @@ pub fn settings_github_client_id_required(l: Locale) -> &'static str {
 
 pub fn settings_github_client_id_invalid(l: Locale) -> &'static str {
     match l {
-        Locale::ZhHans => "Client ID 格式无效：最多 128 字节，仅允许字母、数字、点、下划线和连字符",
-        Locale::En => {
-            "Invalid Client ID: use at most 128 bytes containing only letters, digits, dot, underscore, or hyphen"
-        }
+        Locale::ZhHans => "Client ID 无效：最多 128 字节，仅限字母、数字、. _ -",
+        Locale::En => "Invalid Client ID: at most 128 bytes; only letters, digits, . _ -",
     }
 }
 
