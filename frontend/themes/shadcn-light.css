@@ -4,6 +4,9 @@
  * 只借用 shadcn/ui 的设计语言（配色 / 圆角 / 层级），不引入 Tailwind 或组件库；见 themes/README.md。
  */
 :root[data-theme="shadcn-light"] {
+  /* 原生控件（`<select>` 弹层、滚动条、表单）随浅色；否则会继承 tokens.css `:root` 的 dark 基线 */
+  color-scheme: light;
+
   --font-sans: "Inter", "DM Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
     "Helvetica Neue", Arial, sans-serif;
   /* 与 shadcn.css 同一档圆角：lg = shadcn --radius 0.5rem（8px），xl = radius + 4 */

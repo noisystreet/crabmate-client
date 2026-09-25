@@ -1195,7 +1195,7 @@ html[lang="zh-CN"] .md-code-block__copy-zh {
 }
 
 .msg-skill-invoke-id {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--font-mono, ui-monospace, monospace);
   font-weight: 700;
   color: var(--text);
 }
@@ -1222,7 +1222,7 @@ html[lang="zh-CN"] .md-code-block__copy-zh {
   padding: 0.05em 0.35em;
   margin: 0 0.05em;
   border-radius: var(--radius-input, 4px);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--font-mono, ui-monospace, monospace);
   font-size: calc(var(--crabmate-chat-font-size, 14px) * 0.92);
   font-weight: 600;
   line-height: inherit;
