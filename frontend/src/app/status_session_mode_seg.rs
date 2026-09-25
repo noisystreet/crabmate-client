@@ -12,6 +12,7 @@ use wasm_bindgen::JsCast;
 
 use crate::chat_session_state::ChatSessionSignals;
 use crate::i18n::{self, Locale};
+use crate::icon::icon_chevron_down;
 use crate::session_ops::{make_message_id, message_created_ms, patch_active_session};
 use crate::storage::StoredMessage;
 
@@ -257,18 +258,7 @@ pub fn StatusSessionModeSeg(props: SessionModeSegProps) -> impl IntoView {
                 <span class="status-mode-trigger-label">{move || {
                     mode_trigger_label(locale.get(), selected_session_mode.get().as_str())
                 }}</span>
-                <svg
-                    class="status-mode-chevron"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    aria-hidden="true"
-                >
-                    <polyline points="6 9 12 15 18 9" />
-                </svg>
+                {icon_chevron_down("status-mode-chevron")}
             </button>
             <Show when=move || menu_open.get()>
                 <StatusSessionModeMenuPortal props=SessionModeMenuPortalProps {

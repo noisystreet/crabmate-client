@@ -13,6 +13,7 @@ use wasm_bindgen::JsCast;
 use crate::app::status_tasks_state::StatusTasksSignals;
 use crate::chat_session_state::ChatSessionSignals;
 use crate::i18n::{self, Locale};
+use crate::icon::icon_chevron_down;
 
 #[derive(Clone, Copy)]
 pub struct AgentRoleMenuProps {
@@ -300,18 +301,7 @@ pub fn StatusAgentRoleMenu(props: AgentRoleMenuProps) -> impl IntoView {
                 <span class="status-agent-role-trigger-label">{move || {
                     role_trigger_label(st, locale.get(), selected_agent_role.get())
                 }}</span>
-                <svg
-                    class="status-agent-role-chevron"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    aria-hidden="true"
-                >
-                    <polyline points="6 9 12 15 18 9" />
-                </svg>
+                {icon_chevron_down("status-agent-role-chevron")}
             </button>
             <Show when=move || menu_open.get()>
                 <StatusAgentRoleMenuPortal props=AgentRoleMenuPortalProps {

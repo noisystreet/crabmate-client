@@ -43,6 +43,13 @@
   --line-tight: 1.35;
   /* 正文默认行高（base.css body）；略放大以利长文阅读 */
   --line-body: 1.55;
+  /* 图标尺寸档（唯一口径）：消费点一律 `width/height: var(--icon-*)`，禁止再写字面量。
+     与 `--text-*` 同锚点（1rem = 14px）：--icon-sm = 8.75px、--icon-md = 12.25px、--icon-lg = 15.75px。
+     三档对应文本字形被替换前的渲染量级：9-11px 字号（sm）/ 12-14px 字号（md）/ 16-18px 字号（lg）。
+     门禁：scripts/check-css-tokens.sh（var 必须已定义）。 */
+  --icon-sm: 0.625rem; /* 行内指示：状态栏 chevron、查找栏翻页、工作区树展开、菜单勾选 */
+  --icon-md: 0.875rem; /* 小按钮图形：窗口控制、标签页关闭、待发送图删除、字号步进 +/- */
+  --icon-lg: 1.125rem; /* 工具栏 / 发送 / 附件 / 工作区文件类型图标、主操作按钮 */
   /* 动效 */
   --dur-fast: 0.15s;
   --dur-sidebar: 0.26s;

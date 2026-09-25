@@ -11,6 +11,7 @@ use crate::app::app_signals::IdeChromeSignals;
 use crate::app::ide_layout_switch::{IdeLayoutToggleSignals, exit_editor_layout};
 use crate::app::workspace_root_actions::WorkspaceRootPickHandle;
 use crate::i18n::{self, Locale};
+use crate::icon::icon_chevron_right;
 use crate::ide_save::{IdeSaveContext, spawn_save_active_tab, spawn_save_all_dirty_tabs};
 use crate::user_data_bootstrap::workspace_recent_menu_label;
 
@@ -206,7 +207,7 @@ pub(crate) fn ShellMenuRecentWorkspaces(
                     <span class="ide-menu-submenu-label">
                         {move || i18n::ide_menu_recent_workspaces(locale.get())}
                     </span>
-                    <span class="ide-menu-submenu-chevron" aria-hidden="true">"›"</span>
+                    {icon_chevron_right("ide-menu-submenu-chevron")}
                 </button>
                 <Show when=move || submenu_open.get()>
                     <ShellMenuRecentWorkspaceFlyout

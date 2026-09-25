@@ -12,6 +12,7 @@ use leptos_dom::helpers::event_target_value;
 
 use crate::api::{WorkspaceData, WorkspaceEntry, fetch_workspace};
 use crate::i18n::{self, Locale};
+use crate::icon::{icon_chevron_down, icon_chevron_right};
 use crate::workspace_context_menu::{
     WorkspaceContextMenuActions, WorkspaceInlineCreateKind, WorkspacePendingCreate,
     WorkspaceTreeChromeSignals,
@@ -634,9 +635,9 @@ fn WorkspaceTreeDirHead(
             <span class="workspace-tree-chevron" aria-hidden="true">
                 {move || {
                     if subtree_expanded.get().contains(&rel_glyph) {
-                        "▾"
+                        icon_chevron_down("").into_any()
                     } else {
-                        "▸"
+                        icon_chevron_right("").into_any()
                     }
                 }}
             </span>

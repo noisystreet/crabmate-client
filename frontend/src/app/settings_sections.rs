@@ -8,6 +8,7 @@ use super::settings_toggle_switch::SettingsToggleSwitch;
 use crate::api::MainLlmDraftSignals;
 use crate::app_prefs::THEME_SLUGS;
 use crate::i18n::{self, Locale};
+use crate::icon::{icon_minus, icon_plus};
 use crate::session_typography_prefs::{SESSION_CHAT_FONT_SLUGS, SESSION_UI_FONT_SLUGS};
 use crate::settings_llm_fields::{LlmSavedPresetApplyTarget, LlmSavedPresetPicker};
 
@@ -690,7 +691,7 @@ fn SettingsSessionTypographyBlock(
                             );
                         }
                     >
-                        "−"
+                        {icon_minus("")}
                     </button>
                     <output
                         id=chat_size_value_id
@@ -718,7 +719,7 @@ fn SettingsSessionTypographyBlock(
                             );
                         }
                     >
-                        "+"
+                        {icon_plus("")}
                     </button>
                 </div>
             </div>

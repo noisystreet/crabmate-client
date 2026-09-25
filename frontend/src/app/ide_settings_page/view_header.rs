@@ -5,6 +5,7 @@ use std::rc::Rc;
 use leptos::prelude::*;
 
 use crate::i18n::{self, Locale};
+use crate::icon::icon_chevron_left;
 
 #[component]
 pub(super) fn IdeSettingsPageHeader(
@@ -21,17 +22,7 @@ pub(super) fn IdeSettingsPageHeader(
                 class="btn btn-ghost settings-page-back"
                 on:click=move |_| on_back()
             >
-                <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    aria-hidden="true"
-                >
-                    <polyline points="15 18 9 12 15 6" />
-                </svg>
+                {icon_chevron_left("")}
                 <span>{move || i18n::ide_settings_back(locale.get())}</span>
             </button>
             <h1 class="settings-page-title">{move || i18n::ide_settings_title(locale.get())}</h1>

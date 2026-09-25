@@ -18,6 +18,7 @@ use crate::settings_llm_fields::{LlmSavedPresetApplyTarget, LlmTemperatureFieldW
 
 use crate::api::SavedModelPreset;
 use crate::i18n::{self, Locale};
+use crate::icon::Icon;
 use submit::{RegistryAddFormActionSignals, submit_registry_add_form};
 
 /// 模型注册表接线（单组件形参，满足 fn-param 棘轮）。
@@ -107,17 +108,9 @@ fn SettingsModelsRegistryToolbar(s: RegistryToolbarSignals) -> impl IntoView {
                     form_error.set(None);
                 }
             >
-                <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    aria-hidden="true"
-                >
+                <Icon>
                     <path d="M12 5v14M5 12h14" />
-                </svg>
+                </Icon>
             </button>
         </div>
     }

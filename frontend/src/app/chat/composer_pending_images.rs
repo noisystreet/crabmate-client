@@ -12,6 +12,7 @@ use super::chat_image_lightbox::{img_opens_lightbox, open_chat_image_lightbox_fr
 use crate::api::fetch_auth_raster_image_blob_url;
 use crate::chat_upload_src::chat_upload_filename;
 use crate::i18n::{self, Locale};
+use crate::icon::icon_x;
 
 #[component]
 pub fn ComposerPendingImagesRow(
@@ -33,7 +34,7 @@ pub fn ComposerPendingImagesRow(
                                 class="composer-pending-img-remove"
                                 prop:aria-label=move || i18n::composer_remove_image_aria(locale.get())
                                 on:click=move |_| pending_images.update(|v| v.retain(|x| x != &u_rm))
-                            >"×"</button>
+                            >{icon_x("")}</button>
                         </div>
                     }
                 }

@@ -263,9 +263,9 @@ html[data-cm-mobile-shell] .shell-topbar {
 
 .ide-menu-submenu-chevron {
   flex-shrink: 0;
+  width: var(--icon-md);
+  height: var(--icon-md);
   margin-left: 0.75rem;
-  font-size: var(--text-base);
-  line-height: 1;
   color: var(--muted);
 }
 
@@ -327,11 +327,16 @@ html[data-cm-mobile-shell] .shell-topbar {
 }
 
 .ide-menu-check {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 1rem;
   flex-shrink: 0;
-  text-align: center;
-  font-size: var(--text-sm);
+}
+
+.ide-menu-check svg {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
 }
 
 /* Portal → body；须低于 .shell-topbar (90)，高于主内容，才能点空白收起且不挡菜单 */

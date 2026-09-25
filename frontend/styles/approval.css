@@ -56,7 +56,8 @@
 
 .approval-bar-chevron {
   flex-shrink: 0;
-  font-size: var(--text-xs);
+  width: var(--icon-sm);
+  height: var(--icon-sm);
   color: var(--muted);
   transition: transform var(--dur-fast) ease;
 }

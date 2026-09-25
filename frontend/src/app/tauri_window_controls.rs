@@ -3,6 +3,7 @@
 use leptos::prelude::*;
 
 use crate::i18n::{self, Locale};
+use crate::icon::{icon_maximize, icon_minus, icon_x};
 use crate::tauri_shell::{
     tauri_main_window_close, tauri_main_window_minimize, tauri_main_window_toggle_maximize,
 };
@@ -26,7 +27,7 @@ pub fn TauriWindowControls(locale: RwSignal<Locale>) -> impl IntoView {
                     prop:aria-label=move || i18n::ide_tauri_window_minimize(locale.get())
                     on:click=move |_| tauri_main_window_minimize()
                 >
-                    <span class="tauri-win-ctrl-glyph" aria-hidden="true">"−"</span>
+                    {icon_minus("tauri-win-ctrl-glyph")}
                 </button>
                 <button
                     type="button"
@@ -34,7 +35,7 @@ pub fn TauriWindowControls(locale: RwSignal<Locale>) -> impl IntoView {
                     prop:aria-label=move || i18n::ide_tauri_window_toggle_maximize(locale.get())
                     on:click=move |_| tauri_main_window_toggle_maximize()
                 >
-                    <span class="tauri-win-ctrl-glyph" aria-hidden="true">"□"</span>
+                    {icon_maximize("tauri-win-ctrl-glyph")}
                 </button>
                 <button
                     type="button"
@@ -42,7 +43,7 @@ pub fn TauriWindowControls(locale: RwSignal<Locale>) -> impl IntoView {
                     prop:aria-label=move || i18n::ide_tauri_window_close(locale.get())
                     on:click=move |_| tauri_main_window_close()
                 >
-                    <span class="tauri-win-ctrl-glyph" aria-hidden="true">"×"</span>
+                    {icon_x("tauri-win-ctrl-glyph")}
                 </button>
             </div>
         </Show>
