@@ -76,10 +76,6 @@
   --warn-bg: color-mix(in srgb, var(--warn) 15%, var(--surface));
   --error-bg: color-mix(in srgb, var(--error) 12%, var(--surface));
 
-  /* 兼容历史变量（逐步迁移） */
-  --danger: var(--error);
-  --danger-bg: var(--error-bg);
-  --ok: var(--success);
   /* 圆角分档：xs 标签/高亮块，sm 次要块，md 卡片/气泡/侧栏卡，lg 菜单容器，xl 保留档，pill 徽章；输入圆角见 --radius-input */
   --radius-xs: 4px;
   --radius-sm: 6px;

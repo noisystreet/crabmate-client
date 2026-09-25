@@ -33,9 +33,6 @@
   --warn-bg: color-mix(in srgb, var(--warn) 12%, var(--surface));
   --error-bg: color-mix(in srgb, var(--error) 10%, var(--surface));
 
-  --danger: var(--error);
-  --danger-bg: var(--error-bg);
-  --ok: var(--success);
   /* 暖调柔和阴影，避免冷蓝灰 */
   --shadow-raised:
     0 1px 2px rgba(0, 0, 0, 0.04),

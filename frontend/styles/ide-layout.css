@@ -306,7 +306,7 @@
   margin: var(--space-2) 0 0;
   font-size: var(--text-md);
   line-height: 1.4;
-  color: var(--danger);
+  color: var(--error);
 }
 
 .ide-confirm-modal .modal-footer.actions {

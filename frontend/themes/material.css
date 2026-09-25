@@ -34,10 +34,6 @@
   --warn-bg: color-mix(in srgb, var(--warn) 14%, var(--surface));
   --error-bg: color-mix(in srgb, var(--error) 12%, var(--surface));
 
-  --danger: var(--error);
-  --danger-bg: var(--error-bg);
-  --ok: var(--success);
-
   --shadow-raised:
     0 1px 0 rgba(255, 255, 255, 0.042) inset,
     0 2px 8px rgba(0, 0, 0, 0.14),

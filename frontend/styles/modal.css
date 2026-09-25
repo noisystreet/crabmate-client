@@ -145,7 +145,7 @@
   margin: 0 14px 10px;
   font-size: var(--text-md);
   line-height: 1.45;
-  color: var(--danger);
+  color: var(--error);
 }
 
 /* —— 项目池 Clone 远程仓库 —— */
@@ -1150,7 +1150,7 @@ html[data-cm-mobile-shell] .settings-page-header {
 }
 
 .settings-mcp-tools-error {
-  color: color-mix(in srgb, var(--danger) 82%, var(--text));
+  color: color-mix(in srgb, var(--error) 82%, var(--text));
 }
 
 .settings-mcp-tools-table {
