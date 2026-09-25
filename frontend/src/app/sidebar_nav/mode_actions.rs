@@ -7,6 +7,7 @@ use leptos_dom::helpers::request_animation_frame;
 use wasm_bindgen::JsCast;
 
 use crate::i18n::{self, Locale};
+use crate::icon::{icon_chevron_left, icon_plus, icon_search};
 
 fn focus_nav_session_filter() {
     // Show 挂载后再聚焦；双 rAF 覆盖一批微任务未刷完 DOM 的情况
@@ -66,7 +67,7 @@ fn NavRailSearchToggle(
                 }
             }
         >
-            <span aria-hidden="true">"⌕"</span>
+            <span aria-hidden="true">{icon_search("")}</span>
         </button>
     }
 }
@@ -100,7 +101,7 @@ pub(super) fn NavRailBrandActions(
                 prop:aria-label=move || i18n::nav_new_chat_aria(locale.get())
                 on:click=on_new_chat
             >
-                <span aria-hidden="true">"+"</span>
+                <span aria-hidden="true">{icon_plus("")}</span>
             </button>
             <button
                 type="button"
@@ -109,7 +110,7 @@ pub(super) fn NavRailBrandActions(
                 aria-expanded=move || if !sidebar_rail_collapsed.get() { "true" } else { "false" }
                 on:click=move |_| sidebar_rail_collapsed.set(true)
             >
-                "‹"
+                {icon_chevron_left("")}
             </button>
         </div>
     }

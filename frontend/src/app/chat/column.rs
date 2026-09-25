@@ -32,6 +32,7 @@ use crate::api::upload_files_multipart;
 use crate::app::status_session_mode_seg::{SessionModeSegProps, StatusSessionModeSeg};
 use crate::chat_session_state::ChatSessionSignals;
 use crate::i18n;
+use crate::icon::{Icon, IconStyle};
 
 type ScrollSentinelCallback =
     Closure<dyn Fn(Vec<wasm_bindgen::JsValue>, web_sys::IntersectionObserver)>;
@@ -523,15 +524,9 @@ fn ComposerBarActions(
                     prop:title=move || i18n::composer_stop(locale.get())
                     prop:aria-label=move || i18n::composer_stop(locale.get())
                 >
-                    <svg
-                        class="btn-send-icon-svg"
-                        viewBox="0 0 24 24"
-                        fill="currentColor"
-                        xmlns="http://www.w3.org/2000/svg"
-                        aria-hidden="true"
-                    >
+                    <Icon class="btn-send-icon-svg" style=IconStyle::Fill>
                         <rect x="6" y="6" width="12" height="12" rx="2" />
-                    </svg>
+                    </Icon>
                 </button>
             </Show>
             <button
@@ -558,20 +553,10 @@ fn ComposerBarActions(
                     }
                 }
             >
-                <svg
-                    class="btn-send-icon-svg"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    xmlns="http://www.w3.org/2000/svg"
-                    aria-hidden="true"
-                >
+                <Icon class="btn-send-icon-svg">
                     <path d="M22 2 11 13" />
                     <path d="M22 2 15 22 11 13 2 9 22 2Z" />
-                </svg>
+                </Icon>
             </button>
         </div>
     }
@@ -658,20 +643,11 @@ fn ChatComposerPane(signals: ChatComposerPaneSignals) -> impl IntoView {
                         prop:aria-label=move || i18n::composer_attach_image_aria(locale.get())
                         on:click=move |_| click_hidden_composer_image_input()
                     >
-                        <svg
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="2"
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            class="composer-attach-icon"
-                            aria-hidden="true"
-                        >
+                        <Icon class="composer-attach-icon">
                             <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
                             <circle cx="8.5" cy="8.5" r="1.5" />
                             <path d="m21 15-3.5-3.5a2 2 0 0 0-2.83 0L6 21" />
-                        </svg>
+                        </Icon>
                     </button>
                     <ComposerInputStack
                         composer_input_ref=composer_input_ref

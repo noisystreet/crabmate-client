@@ -6,6 +6,7 @@ use leptos_dom::helpers::event_target_value;
 use crate::a11y::{capture_focus, restore_focus_to};
 use crate::app::shell_runtime_context::expect_chat_shell_ctx;
 use crate::i18n::{self, Locale};
+use crate::icon::{icon_arrow_down, icon_arrow_up, icon_x};
 use crate::session_search::scroll_message_into_view;
 
 enum ChatFindNavDir {
@@ -139,7 +140,7 @@ pub fn ChatFindBar() -> impl IntoView {
                         );
                     }
                 >
-                    "↑"
+                    {icon_arrow_up("")}
                 </button>
                 <button
                     type="button"
@@ -158,7 +159,7 @@ pub fn ChatFindBar() -> impl IntoView {
                         );
                     }
                 >
-                    "↓"
+                    {icon_arrow_down("")}
                 </button>
                 <button
                     type="button"
@@ -167,7 +168,7 @@ pub fn ChatFindBar() -> impl IntoView {
                     prop:aria-label=move || i18n::chat_find_close_aria(locale.get())
                     on:click=move |_| chat_find_panel_open.set(false)
                 >
-                    "×"
+                    {icon_x("")}
                 </button>
             </div>
         </div>

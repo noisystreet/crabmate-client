@@ -478,8 +478,8 @@
 }
 
 .settings-model-registry-head .settings-model-registry-add svg {
-  width: 14px;
-  height: 14px;
+  width: var(--icon-md);
+  height: var(--icon-md);
   display: block;
 }
 
@@ -604,8 +604,8 @@
 }
 
 .settings-model-registry-edit svg {
-  width: 16px;
-  height: 16px;
+  width: var(--icon-lg);
+  height: var(--icon-lg);
   display: block;
 }
 
@@ -715,6 +715,12 @@
   font-size: var(--text-base);
   font-variant-numeric: tabular-nums;
   color: var(--text);
+}
+
+/* 走容器选择器：`.settings-font-size-stepper-btn` 是白名单里的语义标识（无自身规则） */
+.settings-font-size-stepper svg {
+  width: var(--icon-md);
+  height: var(--icon-md);
 }
 
 .settings-save-feedback {
@@ -900,8 +906,8 @@ html[data-cm-mobile-shell] .settings-page-header {
 }
 
 .settings-page-back svg {
-  width: 16px;
-  height: 16px;
+  width: var(--icon-lg);
+  height: var(--icon-lg);
   flex-shrink: 0;
 }
 

@@ -6,6 +6,7 @@ use super::menu_id::IdeMenuId;
 use super::props::IdeMenuBarSignals;
 use crate::app::app_signals::IdeEditorSignals;
 use crate::i18n::{self, Locale};
+use crate::icon::icon_check;
 
 fn toggle_view_menu(
     open_menu: RwSignal<Option<IdeMenuId>>,
@@ -59,9 +60,9 @@ fn IdeMenuViewDropdown(
                     close_menus(open_menu, ide_menubar_dropdown_open);
                 }
             >
-                <span class="ide-menu-check" aria-hidden="true">{move || {
-                    if editor.line_numbers.get() { "✓" } else { "" }
-                }}</span>
+                <span class="ide-menu-check" aria-hidden="true">
+                    {move || editor.line_numbers.get().then(|| icon_check("").into_any())}
+                </span>
                 {move || i18n::ide_menu_toggle_line_numbers(locale.get())}
             </button>
             <button
@@ -74,9 +75,9 @@ fn IdeMenuViewDropdown(
                     close_menus(open_menu, ide_menubar_dropdown_open);
                 }
             >
-                <span class="ide-menu-check" aria-hidden="true">{move || {
-                    if editor.word_wrap.get() { "✓" } else { "" }
-                }}</span>
+                <span class="ide-menu-check" aria-hidden="true">
+                    {move || editor.word_wrap.get().then(|| icon_check("").into_any())}
+                </span>
                 {move || i18n::ide_menu_toggle_word_wrap(locale.get())}
             </button>
         </crate::app::focusable_menu::FocusableRoleMenu>

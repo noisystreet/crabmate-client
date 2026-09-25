@@ -5,6 +5,7 @@ use leptos::task::spawn_local;
 
 use crate::a11y::{context_menu_keydown_anchor, tablist_index_after_key};
 use crate::i18n::{self, Locale};
+use crate::icon::icon_x;
 use crate::ide_confirm::IdeConfirmSignals;
 use crate::ide_tabs::{
     IdeTab, IdeTabsEditorSignals, IdeTabsHandle, close_all_tabs, close_other_tabs_at, close_tab_at,
@@ -280,7 +281,7 @@ fn IdeTabStripItem(bundle: IdeTabStripItemBundle, index: usize, tab: IdeTab) -> 
                     });
                 }
             >
-                <span aria-hidden="true">"×"</span>
+                {icon_x("")}
             </button>
         </div>
     }

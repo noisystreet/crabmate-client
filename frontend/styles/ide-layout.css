@@ -226,8 +226,12 @@
   background: transparent;
   color: inherit;
   cursor: pointer;
-  font-size: var(--text-base);
   opacity: 0.65;
+}
+
+.ide-tab-close svg {
+  width: var(--icon-md);
+  height: var(--icon-md);
 }
 
 .ide-tab-close:hover {
@@ -289,6 +293,12 @@
 .ide-find-nav,
 .ide-find-close {
   flex-shrink: 0;
+}
+
+.ide-find-nav svg,
+.ide-find-close svg {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
 }
 
 .ide-confirm-modal .modal-hint {

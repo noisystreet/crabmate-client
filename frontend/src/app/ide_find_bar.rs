@@ -6,6 +6,7 @@ use leptos_dom::helpers::event_target_value;
 use crate::a11y::{capture_focus, restore_focus_to};
 use crate::app::app_signals::IdeChromeSignals;
 use crate::i18n::{self, Locale};
+use crate::icon::{icon_chevron_left, icon_chevron_right, icon_x};
 use crate::ide_codemirror::IdeEditorHost;
 use crate::ide_find::{apply_editor_selection, find_match_ranges, goto_line_in_editor};
 
@@ -93,7 +94,7 @@ fn IdeFindNavCluster(
             prop:disabled=move || match_count.get() == 0
             on:click=move |_| find_nav(input, -1)
         >
-            "‹"
+            {icon_chevron_left("")}
         </button>
         <button
             type="button"
@@ -102,7 +103,7 @@ fn IdeFindNavCluster(
             prop:disabled=move || match_count.get() == 0
             on:click=move |_| find_nav(input, 1)
         >
-            "›"
+            {icon_chevron_right("")}
         </button>
     }
 }
@@ -158,7 +159,7 @@ fn IdeFindBarPanel(
                 prop:aria-label=move || i18n::ide_find_close_aria(locale.get())
                 on:click=move |_| chrome.find_panel_open.set(false)
             >
-                "×"
+                {icon_x("")}
             </button>
         </div>
     }
@@ -251,7 +252,7 @@ fn IdeGotoLineBarPanel(
                 prop:aria-label=move || i18n::ide_goto_close_aria(locale.get())
                 on:click=move |_| chrome.goto_panel_open.set(false)
             >
-                "×"
+                {icon_x("")}
             </button>
         </div>
     }

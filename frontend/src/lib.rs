@@ -23,6 +23,7 @@ mod conversation_messages_page;
 mod conversation_prompt_tokens_apply;
 mod debounce_schedule;
 mod i18n;
+mod icon;
 mod ide_codemirror;
 mod ide_confirm;
 mod ide_disk_sync;

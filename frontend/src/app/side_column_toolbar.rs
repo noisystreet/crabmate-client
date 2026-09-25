@@ -8,6 +8,7 @@ use crate::app::github_embed_page::{github_repo_can_open, try_open_github_embed_
 use crate::app::settings_page::{SettingsSection, navigate_to_settings};
 use crate::app_prefs::SidePanelView;
 use crate::i18n::{self, Locale};
+use crate::icon::{Icon, icon_chevron_down};
 use crate::workspace_shell::begin_side_column_resize;
 
 use super::status_tasks_state::StatusTasksSignals;
@@ -85,29 +86,11 @@ fn SidePanelViewPickerTrigger(props: SidePanelViewPickerProps) -> impl IntoView 
             prop:aria-label=move || i18n::side_view_menu_aria(locale.get())
         >
             <span class="toolbar-view-trigger-inner" aria-hidden="true">
-                <svg
-                    class="shell-toolbar-icon"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                >
+                <Icon class="shell-toolbar-icon">
                     <rect x="3" y="3" width="7" height="18" rx="1" ry="1" />
                     <rect x="14" y="3" width="7" height="18" rx="1" ry="1" />
-                </svg>
-                <svg
-                    class="toolbar-view-chevron"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                >
-                    <polyline points="6 9 12 15 18 9" />
-                </svg>
+                </Icon>
+                {icon_chevron_down("toolbar-view-chevron")}
             </span>
         </button>
     }
@@ -297,18 +280,9 @@ fn SideToolbarGithubRepoBtn(
                 }
             }
         >
-            <svg
-                class="shell-toolbar-icon"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                aria-hidden="true"
-            >
+            <Icon class="shell-toolbar-icon">
                 <path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-.1.58-.18 1-.26.18-.04.36-.1.55-.18.06 0 .12-.01.18-.02A4 4 0 0 0 12 2c-1.74 0-3.24.89-4.12 2.24.06.01.12.02.18.02.19.08.37.14.55.18.42.08.72.16 1 .26-.73 1.02-1.08 2.25-1 3.5.01 3.5 3 5.5 6 5.5a4.8 4.8 0 0 0-1 3.5v4" />
-            </svg>
+            </Icon>
         </button>
     }
 }
@@ -344,18 +318,9 @@ fn StatusBarToggleBtn(
             prop:title=move || i18n::side_status_btn_title(locale.get())
             prop:aria-label=move || i18n::side_status_btn_title(locale.get())
         >
-            <svg
-                class="shell-toolbar-icon"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                aria-hidden="true"
-            >
+            <Icon class="shell-toolbar-icon">
                 <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
-            </svg>
+            </Icon>
         </button>
     }
 }
@@ -373,19 +338,10 @@ fn SettingsToolbarBtn(locale: RwSignal<Locale>, settings_page: RwSignal<bool>) -
             prop:title=move || i18n::side_settings_title(locale.get())
             prop:aria-label=move || i18n::side_settings_title(locale.get())
         >
-            <svg
-                class="shell-toolbar-icon"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                aria-hidden="true"
-            >
+            <Icon class="shell-toolbar-icon">
                 <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
                 <circle cx="12" cy="12" r="3" />
-            </svg>
+            </Icon>
         </button>
     }
 }
@@ -402,20 +358,11 @@ fn DisconnectToolbarBtn(locale: RwSignal<Locale>, view_menu_open: RwSignal<bool>
                 prop:title=move || i18n::mobile_disconnect_server(locale.get())
                 prop:aria-label=move || i18n::mobile_disconnect_server_aria(locale.get())
             >
-                <svg
-                    class="shell-toolbar-icon"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    aria-hidden="true"
-                >
+                <Icon class="shell-toolbar-icon">
                     <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
                     <polyline points="16 17 21 12 16 7" />
                     <line x1="21" x2="9" y1="12" y2="12" />
-                </svg>
+                </Icon>
             </button>
         </Show>
     }

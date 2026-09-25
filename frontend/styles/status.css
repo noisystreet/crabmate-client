@@ -131,8 +131,8 @@
 }
 
 .status-agent-role-chevron {
-  width: 0.625rem;
-  height: 0.625rem;
+  width: var(--icon-sm);
+  height: var(--icon-sm);
   flex-shrink: 0;
   opacity: 0.75;
   transition: transform 0.15s ease;
@@ -234,8 +234,8 @@
 }
 
 .status-mode-chevron {
-  width: 0.625rem;
-  height: 0.625rem;
+  width: var(--icon-sm);
+  height: var(--icon-sm);
   flex-shrink: 0;
   opacity: 0.75;
   transition: transform 0.15s ease;

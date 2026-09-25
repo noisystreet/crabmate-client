@@ -4,23 +4,15 @@ use leptos::prelude::*;
 
 use crate::app::ide_layout_switch::{IdeLayoutToggleSignals, toggle_editor_layout};
 use crate::i18n::{self, Locale};
+use crate::icon::Icon;
 
 /// 目标为编辑器布局时显示的代码括号图标。
 fn layout_mode_editor_icon() -> AnyView {
     view! {
-        <svg
-            class="layout-mode-toggle-icon"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            aria-hidden="true"
-        >
+        <Icon class="layout-mode-toggle-icon">
             <polyline points="16 18 22 12 16 6" />
             <polyline points="8 6 2 12 8 18" />
-        </svg>
+        </Icon>
     }
     .into_any()
 }
@@ -28,18 +20,9 @@ fn layout_mode_editor_icon() -> AnyView {
 /// 目标为对话布局时显示的消息气泡图标。
 fn layout_mode_chat_icon() -> AnyView {
     view! {
-        <svg
-            class="layout-mode-toggle-icon"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            aria-hidden="true"
-        >
+        <Icon class="layout-mode-toggle-icon">
             <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-        </svg>
+        </Icon>
     }
     .into_any()
 }

@@ -5,6 +5,7 @@ use leptos::task::spawn_local;
 
 use crate::api::submit_chat_approval;
 use crate::i18n::{self, Locale};
+use crate::icon::icon_chevron_down;
 
 /// `pending_approval`: `(approval_session_id, command, args)`
 #[component]
@@ -37,7 +38,7 @@ pub fn ApprovalBar(
                                 {move || i18n::approval_toggle_label(locale.get())}
                             </span>
                             <span class="approval-bar-toggle-preview">{preview_short}{preview_tail}</span>
-                            <span class="approval-bar-chevron" aria-hidden="true">"▾"</span>
+                            {icon_chevron_down("approval-bar-chevron")}
                         </button>
                         <div class=move || {
                             if approval_expanded.get() {

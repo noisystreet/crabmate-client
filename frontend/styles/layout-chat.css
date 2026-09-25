@@ -68,6 +68,11 @@
   min-width: 2rem;
 }
 
+.chat-find-close svg {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+}
+
 .chat-find-label {
   font-size: var(--text-sm);
   font-weight: 650;
@@ -102,6 +107,11 @@
 
 .chat-find-nav {
   min-width: 2rem;
+}
+
+.chat-find-nav svg {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
 }
 
 /* 调试台内容在右列 side-card-body 内复用工作区窗格宽度 */

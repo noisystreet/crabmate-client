@@ -5,6 +5,7 @@ use std::rc::Rc;
 use leptos::prelude::*;
 
 use crate::i18n::{self, Locale};
+use crate::icon::icon_chevron_left;
 
 /// 顶栏右侧操作（丢弃 / 保存，含 dirty/busy 禁用态），独立以降低 header CCN。
 #[component]
@@ -56,17 +57,7 @@ pub(super) fn SettingsPageHeader(
                 prop:aria-label=move || i18n::settings_back_aria(appearance_locale.get())
                 on:click=move |_| on_back()
             >
-                <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    aria-hidden="true"
-                >
-                    <polyline points="15 18 9 12 15 6" />
-                </svg>
+                {icon_chevron_left("")}
                 <span>{move || i18n::settings_back(appearance_locale.get())}</span>
             </button>
             <h1 class="settings-page-title">{move || i18n::settings_title(appearance_locale.get())}</h1>

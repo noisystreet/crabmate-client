@@ -72,6 +72,7 @@ mod workspace_project_modal_parts;
 mod workspace_root_actions;
 
 use crate::i18n::{self, Locale};
+use crate::icon::icon_chevron_right;
 use app_shell_init::init_app_shell;
 use approval_modal::ApprovalModal;
 use changelist_modal::changelist_modal_view;
@@ -125,7 +126,7 @@ fn SidebarRailRevealBtn(
                 prop:aria-label=move || i18n::nav_sidebar_expand_aria(locale.get())
                 on:click=move |_| sidebar_rail_collapsed.set(false)
             >
-                "›"
+                {icon_chevron_right("")}
             </button>
         </Show>
     }

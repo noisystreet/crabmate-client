@@ -346,8 +346,8 @@ html[data-cm-mobile-shell] .composer-input--mirror-overlay {
   }
 
   .composer-ds .btn-send-icon-svg {
-    width: 1.125rem;
-    height: 1.125rem;
+    width: var(--icon-lg);
+    height: var(--icon-lg);
   }
 
   .shell-topbar .btn-icon,
@@ -469,7 +469,6 @@ html[data-cm-mobile-shell] .composer-input--mirror-overlay {
     height: 44px;
     min-width: 44px;
     min-height: 44px;
-    font-size: var(--text-sm);
   }
 
   .side-column .tasks-list li {

@@ -13,6 +13,7 @@ use leptos_dom::helpers::window_event_listener;
 use crate::api::{WorkspaceData, fetch_workspace};
 use crate::app_prefs::{SidePanelView, clamp_side_width_for_viewport};
 use crate::i18n::Locale;
+use crate::icon::Icon;
 use crate::workspace_context_menu::WorkspaceTreeRefreshHint;
 
 /// 并发 `GET /workspace` 的世代号：新刷新递增，仅「仍为最新」的异步结果写回 UI，避免首屏多路刷新互相覆盖造成路径闪烁。
@@ -113,36 +114,11 @@ pub fn workspace_list_row_class(is_dir: bool, name: &str) -> String {
     }
 }
 
-fn svg_common() -> (
-    &'static str,
-    &'static str,
-    &'static str,
-    &'static str,
-    &'static str,
-    &'static str,
-) {
-    (
-        "workspace-entry-icon workspace-entry-svg",
-        "0 0 24 24",
-        "none",
-        "http://www.w3.org/2000/svg",
-        "currentColor",
-        "2",
-    )
-}
-
 fn workspace_dir_row_svg() -> AnyView {
-    let (cls, vb, fill, xmlns, stroke, sw) = svg_common();
     view! {
-        <svg class=cls viewBox=vb fill=fill xmlns=xmlns aria-hidden="true">
-            <path
-                d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"
-                stroke=stroke
-                stroke-width=sw
-                stroke-linecap="round"
-                stroke-linejoin="round"
-            />
-        </svg>
+        <Icon class="workspace-entry-icon workspace-entry-svg">
+            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+        </Icon>
     }
     .into_any()
 }
@@ -152,193 +128,84 @@ pub fn workspace_list_row_icon(is_dir: bool, name: &str) -> AnyView {
     let kind = workspace_list_row_kind(is_dir, name);
     match kind {
         WorkspaceListRowKind::Dir => workspace_dir_row_svg(),
-        WorkspaceListRowKind::File(fk) => {
-            let (cls, vb, fill, xmlns, stroke, sw) = svg_common();
-            match fk {
+        WorkspaceListRowKind::File(fk) => match fk {
             WorkspaceFileKind::Generic => view! {
-                <svg class=cls viewBox=vb fill=fill xmlns=xmlns aria-hidden="true">
-                    <path
-                        d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"
-                        stroke=stroke
-                        stroke-width=sw
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                    />
-                    <polyline
-                        points="14 2 14 8 20 8"
-                        stroke=stroke
-                        stroke-width=sw
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                    />
-                </svg>
+                <Icon class="workspace-entry-icon workspace-entry-svg">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                    <polyline points="14 2 14 8 20 8" />
+                </Icon>
             }
             .into_any(),
             WorkspaceFileKind::Code => view! {
-                <svg class=cls viewBox=vb fill=fill xmlns=xmlns aria-hidden="true">
-                    <path
-                        d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"
-                        stroke=stroke
-                        stroke-width=sw
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                    />
-                    <path d="M14 2v4h4" stroke=stroke stroke-width=sw stroke-linecap="round" stroke-linejoin="round" />
-                    <path d="m10 12-2 2 2 2" stroke=stroke stroke-width=sw stroke-linecap="round" stroke-linejoin="round" />
-                    <path d="m14 16 2-2-2-2" stroke=stroke stroke-width=sw stroke-linecap="round" stroke-linejoin="round" />
-                </svg>
+                <Icon class="workspace-entry-icon workspace-entry-svg">
+                    <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />
+                    <path d="M14 2v4h4" />
+                    <path d="m10 12-2 2 2 2" />
+                    <path d="m14 16 2-2-2-2" />
+                </Icon>
             }
             .into_any(),
             WorkspaceFileKind::Data => view! {
-                <svg class=cls viewBox=vb fill=fill xmlns=xmlns aria-hidden="true">
-                    <path
-                        d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"
-                        stroke=stroke
-                        stroke-width=sw
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                    />
-                    <path d="M14 2v4h4" stroke=stroke stroke-width=sw stroke-linecap="round" stroke-linejoin="round" />
-                    <path d="M10 12h2" stroke=stroke stroke-width=sw stroke-linecap="round" />
-                    <path d="M10 15h6" stroke=stroke stroke-width=sw stroke-linecap="round" />
-                    <path d="M10 18h4" stroke=stroke stroke-width=sw stroke-linecap="round" />
-                </svg>
+                <Icon class="workspace-entry-icon workspace-entry-svg">
+                    <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />
+                    <path d="M14 2v4h4" />
+                    <path d="M10 12h2" />
+                    <path d="M10 15h6" />
+                    <path d="M10 18h4" />
+                </Icon>
             }
             .into_any(),
             WorkspaceFileKind::Markdown => view! {
-                <svg class=cls viewBox=vb fill=fill xmlns=xmlns aria-hidden="true">
-                    <path
-                        d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"
-                        stroke=stroke
-                        stroke-width=sw
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                    />
-                    <path d="M14 2v4h4" stroke=stroke stroke-width=sw stroke-linecap="round" stroke-linejoin="round" />
-                    <path
-                        d="M9 17V9l3 3 3-3v8"
-                        stroke=stroke
-                        stroke-width=sw
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                    />
-                </svg>
+                <Icon class="workspace-entry-icon workspace-entry-svg">
+                    <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />
+                    <path d="M14 2v4h4" />
+                    <path d="M9 17V9l3 3 3-3v8" />
+                </Icon>
             }
             .into_any(),
             WorkspaceFileKind::Image => view! {
-                <svg class=cls viewBox=vb fill=fill xmlns=xmlns aria-hidden="true">
-                    <rect
-                        x="3"
-                        y="3"
-                        width="18"
-                        height="18"
-                        rx="2"
-                        ry="2"
-                        stroke=stroke
-                        stroke-width=sw
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                    />
-                    <circle
-                        cx="8.5"
-                        cy="8.5"
-                        r="1.5"
-                        fill="none"
-                        stroke=stroke
-                        stroke-width=sw
-                    />
-                    <path
-                        d="m21 15-3.5-3.5a2 2 0 0 0-2.83 0L6 21"
-                        stroke=stroke
-                        stroke-width=sw
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                    />
-                </svg>
+                <Icon class="workspace-entry-icon workspace-entry-svg">
+                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                    <circle cx="8.5" cy="8.5" r="1.5" />
+                    <path d="m21 15-3.5-3.5a2 2 0 0 0-2.83 0L6 21" />
+                </Icon>
             }
             .into_any(),
             WorkspaceFileKind::Shell => view! {
-                <svg class=cls viewBox=vb fill=fill xmlns=xmlns aria-hidden="true">
-                    <path
-                        d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"
-                        stroke=stroke
-                        stroke-width=sw
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                    />
-                    <path d="M14 2v4h4" stroke=stroke stroke-width=sw stroke-linecap="round" stroke-linejoin="round" />
-                    <path d="M8 14h8" stroke=stroke stroke-width=sw stroke-linecap="round" />
-                    <path d="m10 17 2 2 4-4" stroke=stroke stroke-width=sw stroke-linecap="round" stroke-linejoin="round" />
-                </svg>
+                <Icon class="workspace-entry-icon workspace-entry-svg">
+                    <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />
+                    <path d="M14 2v4h4" />
+                    <path d="M8 14h8" />
+                    <path d="m10 17 2 2 4-4" />
+                </Icon>
             }
             .into_any(),
             WorkspaceFileKind::Web => view! {
-                <svg class=cls viewBox=vb fill=fill xmlns=xmlns aria-hidden="true">
-                    <path
-                        d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"
-                        stroke=stroke
-                        stroke-width=sw
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                    />
-                    <path d="M14 2v4h4" stroke=stroke stroke-width=sw stroke-linecap="round" stroke-linejoin="round" />
-                    <path
-                        d="M8 13h8M10 10h4M10 16h4"
-                        stroke=stroke
-                        stroke-width=sw
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                    />
-                </svg>
+                <Icon class="workspace-entry-icon workspace-entry-svg">
+                    <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />
+                    <path d="M14 2v4h4" />
+                    <path d="M8 13h8M10 10h4M10 16h4" />
+                </Icon>
             }
             .into_any(),
             WorkspaceFileKind::Lock => view! {
-                <svg class=cls viewBox=vb fill=fill xmlns=xmlns aria-hidden="true">
-                    <path
-                        d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"
-                        stroke=stroke
-                        stroke-width=sw
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                    />
-                    <path d="M14 2v4h4" stroke=stroke stroke-width=sw stroke-linecap="round" stroke-linejoin="round" />
-                    <rect
-                        x="8"
-                        y="11"
-                        width="8"
-                        height="7"
-                        rx="1"
-                        stroke=stroke
-                        stroke-width=sw
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                    />
-                    <path
-                        d="M10 11V9a2 2 0 0 1 4 0v2"
-                        stroke=stroke
-                        stroke-width=sw
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                    />
-                </svg>
+                <Icon class="workspace-entry-icon workspace-entry-svg">
+                    <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />
+                    <path d="M14 2v4h4" />
+                    <rect x="8" y="11" width="8" height="7" rx="1" />
+                    <path d="M10 11V9a2 2 0 0 1 4 0v2" />
+                </Icon>
             }
             .into_any(),
             WorkspaceFileKind::Text => view! {
-                <svg class=cls viewBox=vb fill=fill xmlns=xmlns aria-hidden="true">
-                    <path
-                        d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"
-                        stroke=stroke
-                        stroke-width=sw
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                    />
-                    <path d="M14 2v4h4" stroke=stroke stroke-width=sw stroke-linecap="round" stroke-linejoin="round" />
-                    <path d="M9 12h7M9 15h6M9 18h8" stroke=stroke stroke-width=sw stroke-linecap="round" />
-                </svg>
+                <Icon class="workspace-entry-icon workspace-entry-svg">
+                    <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />
+                    <path d="M14 2v4h4" />
+                    <path d="M9 12h7M9 15h6M9 18h8" />
+                </Icon>
             }
             .into_any(),
-            }
-        }
+        },
     }
 }
 
