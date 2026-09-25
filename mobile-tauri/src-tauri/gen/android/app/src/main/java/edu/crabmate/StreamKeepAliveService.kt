@@ -108,21 +108,54 @@ class StreamKeepAliveService : Service() {
       return
     }
     val mgr = getSystemService(NotificationManager::class.java) ?: return
+    // 渠道名 / 描述在系统设置里可见，语言判定与通知正文保持一致：跟随应用内语言
+    // （localeSlug），而非系统语言。重复 createNotificationChannel 会更新 name / 描述
+    // （只有 importance 等行为在首次创建后不可改），故语言切换后这里能刷新。
+    val english = StreamKeepAliveText.isEnglish(localeSlug)
     mgr.createNotificationChannel(
       NotificationChannel(
         CHANNEL_STREAM,
-        getString(R.string.stream_keepalive_channel_stream),
+        pickLanguage(
+          english,
+          R.string.stream_keepalive_channel_stream,
+          R.string.stream_keepalive_channel_stream_en,
+        ),
         NotificationManager.IMPORTANCE_DEFAULT,
-      ).apply { description = getString(R.string.stream_keepalive_channel_stream_desc) },
+      ).apply {
+        description =
+          pickLanguage(
+            english,
+            R.string.stream_keepalive_channel_stream_desc,
+            R.string.stream_keepalive_channel_stream_desc_en,
+          )
+      },
     )
     mgr.createNotificationChannel(
       NotificationChannel(
         CHANNEL_APPROVAL,
-        getString(R.string.stream_keepalive_channel_approval),
+        pickLanguage(
+          english,
+          R.string.stream_keepalive_channel_approval,
+          R.string.stream_keepalive_channel_approval_en,
+        ),
         NotificationManager.IMPORTANCE_HIGH,
-      ).apply { description = getString(R.string.stream_keepalive_channel_approval_desc) },
+      ).apply {
+        description =
+          pickLanguage(
+            english,
+            R.string.stream_keepalive_channel_approval_desc,
+            R.string.stream_keepalive_channel_approval_desc_en,
+          )
+      },
     )
   }
+
+  /** 渠道文案的中英二选一；英文资源统一用 `<name>_en` 命名（与通知正文同一套约定）。 */
+  private fun pickLanguage(
+    english: Boolean,
+    chinese: Int,
+    englishRes: Int,
+  ): String = getString(if (english) englishRes else chinese)
 
   private fun buildNotification(): Notification {
     val english = StreamKeepAliveText.isEnglish(localeSlug)

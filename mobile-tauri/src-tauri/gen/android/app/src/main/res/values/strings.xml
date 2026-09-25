@@ -8,9 +8,13 @@
     <string name="exit_confirm_ok">退出</string>
     <string name="exit_confirm_to_connect">返回连接页</string>
     <string name="stream_keepalive_channel_stream">后台对话</string>
+    <string name="stream_keepalive_channel_stream_en">Background chat</string>
     <string name="stream_keepalive_channel_stream_desc">保持与服务器的连接，接收流式回复</string>
+    <string name="stream_keepalive_channel_stream_desc_en">Keeps the server connection alive for streamed replies</string>
     <string name="stream_keepalive_channel_approval">命令审批</string>
+    <string name="stream_keepalive_channel_approval_en">Command approval</string>
     <string name="stream_keepalive_channel_approval_desc">需要你允许或拒绝命令时提醒</string>
+    <string name="stream_keepalive_channel_approval_desc_en">Alerts you when a command needs to be allowed or denied</string>
     <string name="stream_keepalive_stream_title">对话进行中</string>
     <string name="stream_keepalive_stream_title_en">Chat in progress</string>
     <string name="stream_keepalive_stream_body">CrabMate 正在保持与服务器的连接</string>
