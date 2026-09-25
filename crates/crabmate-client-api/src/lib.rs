@@ -32,7 +32,9 @@ pub use auth::{
     web_api_credential_pair,
 };
 pub use chat_body::{
-    ChatStreamCoreFields, build_chat_stream_core_body, merge_chat_stream_core_fields,
+    ChatStreamCoreFields, build_chat_stream_core_body, insert_trimmed_str,
+    llm_context_tokens_for_chat_body, merge_chat_stream_core_fields,
+    readonly_tool_ttl_cache_secs_for_chat_body, temperature_for_chat_body,
 };
 pub use handoff::{
     API_BASE_HASH_KEY, BEARER_HASH_KEY, handoff_hash_fragment, is_handoff_hash_key,

@@ -1,6 +1,6 @@
 # 多端 Client 共用逻辑抽取（规划）
 
-> **状态**：S1–S4 **已落地**；hash 交接键名、S5 health JSON 子集、**斜杠名字表**、**端点路径常量（`paths`）**、**通用 HTTP 错误文案（`messages`）** 均已落地；**S6（SSE / AG-UI 纯解析下沉）S6a–S6d 已落地**（S6a `prompt_tokens`、S6b `sse_dispatch`、S6c `ag_ui_parser`、S6d TUI 分类器适配器；S6e 可选缓做，见 §4.11 / §6）  
+> **状态**：S1–S4 **已落地**；hash 交接键名、S5 health JSON 子集、**斜杠名字表**、**端点路径常量（`paths`）**、**通用 HTTP 错误文案（`messages`）** 均已落地；**S6（SSE / AG-UI 纯解析下沉）S6a–S6d 已落地**（S6a `prompt_tokens`、S6b `sse_dispatch`、S6c `ag_ui_parser`、S6d TUI 分类器适配器；S6e 可选缓做，见 §4.11 / §6）；**S7a（chat body 可选块取值规则）已落地**（见 §4.12 / §6）  
 > **范围**：`frontend`（WASM）、`crabmate-connect`（Desktop/Android 壳）、`crabmate-tui`（远程终端）之间的重复逻辑（原 `crabmate-tui-core` 已并入 `crabmate-tui` `src/serve/`，见 §2 注记）  
 > **关联**：[remote_cli_tui.md](./remote_cli_tui.md)、[tauri_gui_mvp_design.md](./tauri_gui_mvp_design.md)、[contract_pin.md](./contract_pin.md)、产品面对照 [client_capability_matrix.md](./client_capability_matrix.md)；Server [`client_shell_split.md`](https://github.com/noisystreet/CrabMate/blob/main/docs/design/client_shell_split.md)
 
@@ -74,7 +74,7 @@ frontend/                # wasm fetch 适配器 + UI；S1–S4 已用 client-api
 | `approval` | `deny` / `allow_once` / `allow_always`；`command_approval` data 解析；approval POST body 形状 |
 | `workspace` | `POST /workspace` 响应 `ok`/`path`/`error` 解析；可选瘦 `WorkspaceInfo` |
 | `sessions` | 瘦 list 行 + **仅** `server_conversation_id` 可作续聊 id |
-| `chat_body` | `POST /chat/stream` **核心**字段（message / `client_sse_protocol` / conversation_id / approval_session_id） |
+| `chat_body` | `POST /chat/stream` **核心**字段（message / `client_sse_protocol` / conversation_id / approval_session_id）+ **可选块取值规则**（`insert_trimmed_str` / `temperature_for_chat_body` / `readonly_tool_ttl_cache_secs_for_chat_body` / `llm_context_tokens_for_chat_body`，S7a） |
 | `secrets` | `LlmSecretSlot` / Bearer 账户等**名字常量**（无 IO） |
 | `handoff` | `#cm_api_base=` / `#cm_web_api_bearer=` 键名、RFC3986 分量编码、fragment 拼装（无 `history` / 无查询串） |
 | `health` | `/health` degraded 检查摘要（不含壳 CORS） |
@@ -137,7 +137,7 @@ GitHub：`X-CrabMate-GitHub-Token` 目前主要在 frontend（+ 壳钥匙串槽�
 | tui (serve) | `serve/chat_stream.rs` → `chat_stream_body` |
 | frontend | `chat_stream/http_request.rs` → `build_chat_stream_post_body` |
 
-共享核心字段；图像 / resume / `client_llm` 注入 / 温度等仍留 WASM。
+共享核心字段（S4）与**可选块取值规则**（S7a，见 §4.12）；图像 / `stream_resume` / `llm_thinking_mode` / `executor_llm` 等仍留各端（取值来源是本端存储 / 本端语义）。
 
 ### 4.6 斜杠名字表（已落地）
 
@@ -208,6 +208,34 @@ TUI 侧判据：`serve/chat_stream.rs:5-8` 已 `use crabmate::cm_sse_protocol::�
 
 **TUI 收敛方式**（S6d 已落地）：`chat_classify.rs` 的自建 `classify_line` 改为「`SseControlSink` 收集器 → `LineAction`」适配器：7 个钩子闭包只往 `RefCell<Collected>` 写槽位（永不失败，故无需 `?` 传播），随后 `resolve()` 把槽位映射回 `LineAction` / `TermError::RunError`；未消费的子类仍回落 `Skip`（保持现状语义）。为此共享层补两处钩子：`SseControlSink::on_reasoning_delta`（终端把思维链分流到 stderr；`None` 回落 `on_delta`，Web 端不注册）与 `SseWorkspaceToolHooks::on_command_approval_invalid`（畸形审批载荷提示行，避免终端回合静默挂起；Web 端不注册 → 保持静默）。`LineAction` 与 `classify_line` 签名未变，`serve/chat_stream.rs` 零改动。
 
+### 4.12 chat body 可选块取值规则（S7a 已落地）
+
+| 端 | 路径 |
+|----|------|
+| tui (serve) | `serve/chat_stream.rs` → `chat_stream_body` / `client_llm_json`（原私有 `insert_trimmed` 已删） |
+| tui (mode) | `tui_mode/settings.rs` → `turn_context_tokens` / `turn_tool_cache_secs` / `turn_temperature`（薄包装）；`tui_mode/mod.rs` 装配点 |
+| frontend | `api/client_llm_storage.rs` → `client_llm_json_for_chat_body` / `executor_llm_json_for_chat_body` / `chat_temperature_override_from_storage` / `readonly_tool_ttl_cache_secs_for_chat_body` |
+
+共享四条纯规则（`crabmate_client_api::chat_body`）：
+
+| 函数 | 规则 |
+|------|------|
+| `insert_trimmed_str` | `trim` 后非空才写入，且**写入 trim 后的值**（空值不写键，而非写 `null`） |
+| `llm_context_tokens_for_chat_body` | `trim` 后为非空数字且 `> 0` 才发送 |
+| `temperature_for_chat_body` | 有限且落在 `0.0..=2.0` 才发送 |
+| `readonly_tool_ttl_cache_secs_for_chat_body` | `follow_server` 时省略键；否则发 `0` |
+
+语义收敛点：frontend 原实现判空用 `trim`、**写入原值**，TUI 写入 `trim` 后的值；统一为 **trim-on-write**（与同模块 `apply_optional_id` 先例一致）。frontend mem 在持久化边界已 trim，实际出站行为不变；唯一差异是钥匙串回落 key 也会被 trim（严格性提升，与 TUI 一致）。
+
+**留端**（取值来源是本端语义，不在本次范围）：
+
+| 留端项 | 原因 |
+|--------|------|
+| `llm_thinking_mode` | 两端**真实语义分叉**：frontend 两态恒注入（`server` 先归一为 `off`），TUI 仅字面 `on` / `off` 才发、`server` 回落 serve 默认；需先定权威口径（见 §6 S7b） |
+| `executor_llm` 整块是否发送 | 官方 Client 强制主轮/执行轮同身份，属产品语义 |
+| `stream_resume` / 图像 | 本端存储与终端能力 |
+| 校验类（`is_valid_temperature`、`validate_temperature_override`、`validate_llm_context_tokens_override`） | 是**保存期校验**（空视为合法 + 出文案），非出站取值规则，混用易漂移 |
+
 ---
 
 ## 5. 明确不共享
@@ -243,8 +271,11 @@ TUI 侧判据：`serve/chat_stream.rs:5-8` 已 `use crabmate::cm_sse_protocol::�
 | **S6c** ✅ | `ag_ui_parser`：`parser_v2.rs` 非测试部分下沉；frontend `V2Parser` 退化为 16 行薄壳（仅实现本地 `SseParser`） | `golden_ag_ui_v2_parser_matches_expected` / `RUN_FINISHED` / `RUN_ERROR` / `tool_call_result` / `multi_line_tool_call_splits` 等 14 个单测随迁至 client-api 并通过；frontend `wasm32` clippy |
 | **S6d** ✅ | TUI `serve/chat_classify.rs` 改为共享解析适配器（Sink 收集器 → `LineAction`）；共享层补 `on_reasoning_delta` / `on_command_approval_invalid` 两钩子 | TUI 213 单测通过（`chat_classify` 14 项含 unknown type / 非 AG-UI 回落 / RUN_ERROR 三项新增）；未消费子类仍回落 `Skip`；`scripts/lizard-rust.sh` CCN ≤10；`scripts/check-boundaries.sh` ok；`serve/chat_stream.rs` 零改动 |
 | **S6e**（可选，缓做） | `sse_frame` 帧切分（`SseFrameKind` / `SseBufferProgress` / `process_sse_buffer_step` / `flush_sse_tail`）下沉 | 需先拆 `ChatStreamCallbacks` 出 `chat_stream/mod.rs` 并把 `Locale` 参数化；改动面大于 S6a–d，收益更低（`\n\n` 切分已部分委托 `cm_sse_protocol`） |
+| **S7a** ✅ | `chat_body` 可选块取值规则下沉：`insert_trimmed_str` / `temperature_for_chat_body` / `readonly_tool_ttl_cache_secs_for_chat_body` / `llm_context_tokens_for_chat_body`；frontend 与 tui 改委托并删本地重复实现（TUI 私有 `insert_trimmed` 删除） | 两端语义统一为 trim-on-write（frontend 原写原值 → 写 trim 值，持久化边界已 trim 故出站不变）；两端既有相关单测全通过（frontend 679 / tui 217 / 契约 86）；`wasm32` clippy；`lizard` CCN ≤10；`check-boundaries.sh` ok |
+| **S7b**（待拍板） | `llm_thinking_mode` 分叉定权威口径（frontend 两态恒注入 vs TUI 仅字面 `on`/`off`） | 需先确认 Server / Desktop 权威语义，再统一两端取值与单测 |
+| **S7c**（可选） | C3：错误携带结构化 HTTP status，消除 `http_error_status_code` 括号反解（见 §4.10） | 改动面中，收益低中 |
 
-**建议开工顺序**：S0 → S1–S4 → S5a / S5 health → S5 slash / paths / messages（均已完成）→ **S6a → S6b → S6c → S6d**（均已完成；S6e 视 S6a–d 收益再定）。
+**建议开工顺序**：S0 → S1–S4 → S5a / S5 health → S5 slash / paths / messages（均已完成）→ **S6a → S6b → S6c → S6d**（均已完成；S6e 视 S6a–d 收益再定）→ **S7a**（已完成）→ S7b（需先拍板）。
 
 每步独立小 PR，均**不新增 crate**、不动 `scripts/rust-pkg-dirs.txt`；每步以 `make check`（含 frontend `wasm32` clippy）+ `make test` 收口。
 

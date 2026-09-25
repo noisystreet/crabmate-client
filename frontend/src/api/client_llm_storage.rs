@@ -1,5 +1,10 @@
 //! 侧栏「本机模型」：进程内缓存 + 非机密覆盖文件；API 密钥存本机钥匙串/Keystore。
 
+use crabmate_client_api::{
+    insert_trimmed_str, llm_context_tokens_for_chat_body,
+    readonly_tool_ttl_cache_secs_for_chat_body as readonly_tool_ttl_cache_secs_rule,
+    temperature_for_chat_body,
+};
 use serde_json::Value;
 
 use crate::i18n::Locale;
@@ -164,16 +169,10 @@ pub fn clear_client_llm_api_key_storage(loc: Locale) -> Result<(), String> {
 pub fn client_llm_json_for_chat_body() -> Option<Value> {
     with_mem(|m| {
         let mut map = serde_json::Map::new();
-        if !m.api_base.trim().is_empty() {
-            map.insert("api_base".into(), Value::String(m.api_base.clone()));
-        }
-        if !m.model.trim().is_empty() {
-            map.insert("model".into(), Value::String(m.model.clone()));
-        }
-        if let Ok(n) = m.llm_context_tokens.trim().parse::<u64>() {
-            if n > 0 {
-                map.insert("llm_context_tokens".into(), Value::Number(n.into()));
-            }
+        insert_trimmed_str(&mut map, "api_base", Some(&m.api_base));
+        insert_trimmed_str(&mut map, "model", Some(&m.model));
+        if let Some(n) = llm_context_tokens_for_chat_body(Some(&m.llm_context_tokens)) {
+            map.insert("llm_context_tokens".into(), Value::Number(n.into()));
         }
         // 两态恒注入（mem 已由 `normalize_llm_thinking_mode` 归一），UI 展示与请求保持一致。
         let tm = client_llm_cache::normalize_llm_thinking_mode(&m.llm_thinking_mode);
@@ -183,9 +182,7 @@ pub fn client_llm_json_for_chat_body() -> Option<Value> {
         } else {
             m.api_key.clone()
         };
-        if !key.trim().is_empty() {
-            map.insert("api_key".into(), Value::String(key));
-        }
+        insert_trimmed_str(&mut map, "api_key", Some(&key));
         if map.is_empty() {
             None
         } else {
@@ -196,11 +193,7 @@ pub fn client_llm_json_for_chat_body() -> Option<Value> {
 
 pub fn chat_temperature_override_from_storage() -> Option<f64> {
     let raw = with_mem(|m| m.temperature.clone());
-    let parsed = raw.trim().parse::<f64>().ok()?;
-    if !parsed.is_finite() || !(0.0..=2.0).contains(&parsed) {
-        return None;
-    }
-    Some(parsed)
+    temperature_for_chat_body(raw.trim().parse::<f64>().ok())
 }
 
 pub fn executor_llm_json_for_chat_body() -> Option<Value> {
@@ -208,20 +201,14 @@ pub fn executor_llm_json_for_chat_body() -> Option<Value> {
         let mut map = serde_json::Map::new();
         // 官方 Client 的执行轮与主轮强制共用同一模型身份，避免工具后切换到陈旧的
         // executor 密钥或端点；服务端仍保留兼容字段供其它调用方使用。
-        if !m.api_base.trim().is_empty() {
-            map.insert("api_base".into(), Value::String(m.api_base.clone()));
-        }
-        if !m.model.trim().is_empty() {
-            map.insert("model".into(), Value::String(m.model.clone()));
-        }
+        insert_trimmed_str(&mut map, "api_base", Some(&m.api_base));
+        insert_trimmed_str(&mut map, "model", Some(&m.model));
         let key = if m.api_key.trim().is_empty() {
             super::llm_secrets_local::client_llm_api_key()
         } else {
             m.api_key.clone()
         };
-        if !key.trim().is_empty() {
-            map.insert("api_key".into(), Value::String(key));
-        }
+        insert_trimmed_str(&mut map, "api_key", Some(&key));
         if map.is_empty() {
             None
         } else {
@@ -323,11 +310,7 @@ pub fn load_readonly_tool_ttl_cache_follow_server_from_storage() -> bool {
 
 /// 合并进 `/chat/stream` 的 `readonly_tool_ttl_cache_secs`（关闭时返回 `Some(0)`）。
 pub fn readonly_tool_ttl_cache_secs_for_chat_body() -> Option<u64> {
-    if load_readonly_tool_ttl_cache_follow_server_from_memory() {
-        None
-    } else {
-        Some(0)
-    }
+    readonly_tool_ttl_cache_secs_rule(load_readonly_tool_ttl_cache_follow_server_from_memory())
 }
 
 /// 供设置「保存全部」汇总密钥落盘结果。

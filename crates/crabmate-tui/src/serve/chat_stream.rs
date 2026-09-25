@@ -6,7 +6,10 @@ use std::time::Duration;
 use crabmate::cm_sse_protocol::{
     SSE_PROTOCOL_VERSION, is_sse_done_sentinel, join_sse_data_lines, parse_sse_event_id,
 };
-use crabmate_client_api::{ChatStreamCoreFields, build_chat_stream_core_body, paths};
+use crabmate_client_api::{
+    ChatStreamCoreFields, build_chat_stream_core_body, insert_trimmed_str,
+    llm_context_tokens_for_chat_body, paths, temperature_for_chat_body,
+};
 use futures_util::StreamExt;
 use reqwest::Response;
 use reqwest::header::{ACCEPT, CONTENT_TYPE, HeaderValue};
@@ -299,13 +302,10 @@ fn chat_stream_body(opts: &ChatStreamOptions) -> Value {
         body["client_llm"] = obj;
     }
     if let Some(map) = body.as_object_mut() {
-        insert_trimmed(map, "agent_role", opts.agent_role.as_deref());
-        insert_trimmed(map, "session_mode", opts.session_mode.as_deref());
+        insert_trimmed_str(map, "agent_role", opts.agent_role.as_deref());
+        insert_trimmed_str(map, "session_mode", opts.session_mode.as_deref());
     }
-    if let Some(t) = opts.temperature
-        && t.is_finite()
-        && (0.0..=2.0).contains(&t)
-    {
+    if let Some(t) = temperature_for_chat_body(opts.temperature) {
         body["temperature"] = serde_json::json!(t);
     }
     if let Some(secs) = opts.readonly_tool_ttl_cache_secs {
@@ -323,33 +323,21 @@ fn chat_stream_body(opts: &ChatStreamOptions) -> Value {
 /// 仅含非空（trim 后）字段的 `client_llm` 对象；全空返回 `None`（不发送整块）。
 fn client_llm_json(llm: &ClientLlmFields) -> Option<Value> {
     let mut map = serde_json::Map::new();
-    insert_trimmed(&mut map, "api_base", llm.api_base.as_deref());
-    insert_trimmed(&mut map, "model", llm.model.as_deref());
-    insert_trimmed(&mut map, "api_key", llm.api_key.as_deref());
+    insert_trimmed_str(&mut map, "api_base", llm.api_base.as_deref());
+    insert_trimmed_str(&mut map, "model", llm.model.as_deref());
+    insert_trimmed_str(&mut map, "api_key", llm.api_key.as_deref());
     if let Some(t) = llm.llm_thinking_mode.as_deref().map(str::trim)
         && (t == "on" || t == "off")
     {
         map.insert("llm_thinking_mode".into(), Value::String(t.to_string()));
     }
-    if let Some(n) = llm
-        .llm_context_tokens
-        .as_deref()
-        .map(str::trim)
-        .and_then(|s| s.parse::<u64>().ok())
-        .filter(|n| *n > 0)
-    {
+    if let Some(n) = llm_context_tokens_for_chat_body(llm.llm_context_tokens.as_deref()) {
         map.insert("llm_context_tokens".into(), Value::Number(n.into()));
     }
     if map.is_empty() {
         None
     } else {
         Some(Value::Object(map))
-    }
-}
-
-fn insert_trimmed(map: &mut serde_json::Map<String, Value>, key: &str, value: Option<&str>) {
-    if let Some(v) = value.map(str::trim).filter(|s| !s.is_empty()) {
-        map.insert(key.into(), Value::String(v.to_string()));
     }
 }
 
