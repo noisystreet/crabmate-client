@@ -14,7 +14,14 @@
      crates/crabmate-connect/assets/connect.html 的 bg0 变量，必须等于 --bg；否则首帧会闪出
      另一种深色（未来令牌改浅色时则闪黑）。
 
-三条规则都是「精确相等」，没有白名单：要改值就必须同时改两侧。
+另外两处「抄漏也静默生效」的缺口一并堵上：
+
+  4. **主题里的颜色引用必须真实存在**：res/values*/themes.xml 出现的 @color/<name> 要在
+     res/values*/colors.xml 里有定义 —— 拼错（cm_textt）只在 AAPT 构建期报错，门禁先行拦下。
+  5. **手写 Kotlin 只能消费镜像令牌**：app/src/main/java/edu/crabmate 下的 Kotlin 若直接用
+     R.color.<非 cm_*>，就绕开了镜像比对（值可以随便写），故一并禁止。
+
+五条规则都是「精确相等」，没有白名单：要改值就必须同时改两侧。
 """
 
 from __future__ import annotations
@@ -25,7 +32,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 TOKENS_CSS = ROOT / "frontend" / "styles" / "tokens.css"
-ANDROID_RES = ROOT / "mobile-tauri" / "src-tauri" / "gen" / "android" / "app" / "src" / "main" / "res"
+ANDROID_SRC = ROOT / "mobile-tauri" / "src-tauri" / "gen" / "android" / "app" / "src" / "main"
+ANDROID_RES = ANDROID_SRC / "res"
+# 手写 Kotlin 的范围与 scripts/ktlint-android.sh 一致（edu/crabmate，排除 Tauri 生成的 generated/）。
+ANDROID_KOTLIN = ANDROID_SRC / "java" / "edu" / "crabmate"
 COLORS_XML = ANDROID_RES / "values" / "colors.xml"
 APP_THEME = "Theme.crabmate_mobile"
 
@@ -57,6 +67,10 @@ XML_COMMENT_RE = re.compile(r"<!--.*?-->", re.S)
 COLOR_LITERAL_RE = re.compile(r"#[0-9a-fA-F]{3,8}\b|\brgba?\(|\bhsla?\(")
 HEX6_RE = re.compile(r"^#([0-9a-fA-F]{6})$")
 ANDROID_COLOR_RE = re.compile(r'<color\s+name="([^"]+)"\s*>\s*([^<]+?)\s*</color>')
+COLOR_REF_RE = re.compile(r"@color/([A-Za-z0-9_]+)")
+KOTLIN_COLOR_RE = re.compile(r"R\.color\.([A-Za-z0-9_]+)")
+KOTLIN_BLOCK_COMMENT_RE = re.compile(r"/\*.*?\*/", re.S)
+KOTLIN_LINE_COMMENT_RE = re.compile(r"//[^\n]*")
 STYLE_RE = re.compile(r'<style\s+name="%s"[^>]*>(.*?)</style>' % re.escape(APP_THEME), re.S)
 ITEM_RE = re.compile(r'<item\s+name="([^"]+)"[^>]*>\s*([^<]*?)\s*</item>', re.S)
 
@@ -76,6 +90,12 @@ def strip_xml_comments(text: str) -> str:
 
 def strip_css_comments(text: str) -> str:
     return CSS_COMMENT_RE.sub(lambda m: " " * len(m.group(0)), text)
+
+
+def strip_kotlin_comments(text: str) -> str:
+    """块注释先抹（等长空格保行号），再抹行注释——注释掉的 R.color.* 不该算消费点。"""
+    without_blocks = KOTLIN_BLOCK_COMMENT_RE.sub(lambda m: " " * len(m.group(0)), text)
+    return KOTLIN_LINE_COMMENT_RE.sub(lambda m: " " * len(m.group(0)), without_blocks)
 
 
 def iter_root_blocks(css: str):
@@ -125,6 +145,14 @@ def android_color(raw: str) -> str | None:
     return "#" + body.lower()
 
 
+def declared_color_names() -> set[str]:
+    """res/values*/colors.xml 里 <color name="..."> 声明的名字（night 变体一并算入）。"""
+    names: set[str] = set()
+    for path in sorted(ANDROID_RES.glob("values*/colors.xml")):
+        names |= {name for name, _ in ANDROID_COLOR_RE.findall(read(path))}
+    return names
+
+
 def check_colors_xml(tokens: dict[str, str], failures: list[str]) -> None:
     if not COLORS_XML.is_file():
         failures.append(f"{rel(COLORS_XML)} 不存在")
@@ -147,7 +175,7 @@ def check_colors_xml(tokens: dict[str, str], failures: list[str]) -> None:
             failures.append(f"{name} = {got} 与 tokens.css 的 {token} = {want} 不一致")
 
 
-def check_themes(failures: list[str]) -> None:
+def check_themes(declared: set[str], failures: list[str]) -> None:
     files = sorted(ANDROID_RES.glob("values*/themes.xml"))
     if not files:
         failures.append(f"{rel(ANDROID_RES)}/values*/themes.xml 一个都没有")
@@ -157,6 +185,12 @@ def check_themes(failures: list[str]) -> None:
         text = strip_xml_comments(read(path))
         for hit in COLOR_LITERAL_RE.findall(text):
             failures.append(f"{where} 出现颜色字面量 {hit!r}；主题必须引用 @color/ 令牌")
+        for name in sorted(set(COLOR_REF_RE.findall(text))):
+            if name not in declared:
+                failures.append(
+                    f"{where} 引用了 @color/{name}，但 res/values*/colors.xml 没有定义"
+                    "（拼错只会到 AAPT 构建期才报）"
+                )
         blocks = STYLE_RE.findall(text)
         if len(blocks) != 1:
             failures.append(f"{where} 里 {APP_THEME} 定义数 = {len(blocks)}，应为 1")
@@ -192,6 +226,22 @@ def check_boot_backgrounds(tokens: dict[str, str], failures: list[str]) -> None:
             failures.append(f"{relative} 首绘底色 {hits[0]} 与 --bg {want} 不一致")
 
 
+def check_kotlin_color_consumption(failures: list[str]) -> None:
+    """手写 Kotlin 只能消费 cm_* 镜像令牌；直接用别的颜色资源即绕过整条镜像链。"""
+    files = sorted(p for p in ANDROID_KOTLIN.glob("**/*.kt") if "generated" not in p.parts)
+    if not files:
+        failures.append(f"{rel(ANDROID_KOTLIN)} 下没有 Kotlin 文件；消费点检查会静默失效")
+        return
+    allowed = {f"cm_{token}" for token in MIRRORED_TOKENS}
+    for path in files:
+        for name in sorted(set(KOTLIN_COLOR_RE.findall(strip_kotlin_comments(read(path))))):
+            if name not in allowed:
+                failures.append(
+                    f"{rel(path)} 消费了 R.color.{name}；手写 Kotlin 的颜色必须走 cm_* 镜像令牌"
+                    f"（当前镜像集：{'、'.join(sorted(allowed))}）"
+                )
+
+
 def main() -> int:
     if not TOKENS_CSS.is_file():
         print(f"{rel(TOKENS_CSS)} 不存在", file=sys.stderr)
@@ -199,8 +249,9 @@ def main() -> int:
     tokens = root_token_colors(read(TOKENS_CSS))
     failures: list[str] = []
     check_colors_xml(tokens, failures)
-    check_themes(failures)
+    check_themes(declared_color_names(), failures)
     check_boot_backgrounds(tokens, failures)
+    check_kotlin_color_consumption(failures)
     if failures:
         print("设计令牌镜像门禁失败（单一来源 = frontend/styles/tokens.css 的 :root）：", file=sys.stderr)
         for item in failures:
