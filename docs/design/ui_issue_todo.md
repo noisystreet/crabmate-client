@@ -10,6 +10,7 @@
 2026-09-25（续 2）：**Phase 1b 语义色归一**——GFM alert 五色（硬编码 Tailwind 色板）改为 `--info` / `--success` / `--accent` / `--warn` / `--error`，slash 菜单错误条底色改 `--error-bg`，并删除 `--danger` / `--danger-bg` / `--ok` 三个兼容别名（6 处消费点统一改指 `--error`）；`frontend/styles` 颜色字面量 26 → 20 处，`layout-chat.css` 预算 10 → 4（余 3 处 `#fff` inset 高光 + 1 处浮层阴影，转 Phase 1c）。
 2026-09-25（续 3）：**Phase 1c 高光 / 前景 token**——新增 `--inset-highlight`（inset 亮线颜色，只在 `tokens.css` 定义，四主题同值故视觉零变化）与 `--on-accent`（实心强调色底上的前景，light `#fff` / material 与 high-contrast `#0a0a0a`），`components.css` 6 处与 `layout-chat.css` 3 处 `#fff` 字面量改走 token；material / high-contrast 的 `.btn-primary { color }` 覆写块随之删除，改由 `--on-accent` 驱动——high-contrast 的 `:disabled` 标签原为 `#737373`，与禁用底色 `color-mix(#f5f5f5 38%, #242424)` 算出的 `#737373` 同值（此前不可见），删除后回到基规则 `color-mix(var(--on-accent) 75%, transparent)` 的深字，可见性恢复。`frontend/styles` 颜色字面量 20 → 11 处（余 11 处均为遮罩与浮层阴影，转 Phase 1d；`tauri-shell.css` 的 2 处为固定红底白字，语义不随主题，长期保留预算）。
 2026-09-25（续 4）：**Phase 1d 遮罩 / 浮层阴影 token**——新增 `--scrim-bg`（局部遮罩，`rgba(0,0,0,.5)`，抽屉 ×2 与面板遮罩 ×1 共用，两处 .48 归并到 .5）、`--shadow-menu`（浮层菜单，0 8px 24px / 12% 黑，菜单条 2 处 + slash 菜单 1 处共用）、`--shadow-media`（灯箱图片单层柔影）与 `--shadow-knob`（拨杆滑块贴合阴影）；灯箱整屏遮罩由固定 `color-mix(#000 62%)` 改用它本就该用的主题化 `--modal-backdrop-bg`（light 0.30 暖调 / 深色 0.54 / material 0.56 / high-contrast 0.72）。`frontend/styles` 颜色字面量 11 → 2 处，且这 2 处（`tauri-shell.css` 的 Windows 关闭键红底白字，固定色语义不随主题）为**有意长期保留**，预算表仅余该条；颜色字面量清理到此收尾。
+2026-09-25（续 5）：**模态骨架收敛**——`frontend/src/app/focusable_menu.rs` 的 `FocusableModalPanel` 从 3 处扩到 12 处消费点，余下 9 处手抄模态根（IDE 新建文件 / 工作区克隆 / 审批 / 设置 / 工作区项目 / 会话管理 / 移动端变更清单 / 模型注册新增弹窗 / 工作区文件选择）全部迁入，`role` / `aria-modal` / 焦点陷阱 / Escape / 焦点归还只声明一次；壳新增 `dialog_role`（默认 `alertdialog`，普通弹窗传 `dialog`）、`labelledby`、`testid`（渲染 `data-testid`，原为会话管理弹窗的接口缺口）、`stop_pointerdown`、`on_escape` 五个 prop。并发一道 `scripts/check-modal-shell.sh` 门禁（见 P1 新增条目）。唯一语义变化：设置弹窗**新增** Escape 关闭（经既有脏表单守卫 `request_settings_modal_close`，未保存草稿仍先确认）；克隆弹窗在 Running 期间依旧吞掉 Escape。迁出过程中遇到两个 `E0525`（`Show` 的 children 必须是 `Fn`，而内联手抄面板会让闭包按值捕获 `Arc` 回调 / 表单信号并降级为 `FnOnce`），处置方式是每处面板抽成独立 `#[component]`。图片灯箱是唯一仍在壳外的模态根（`create_element` / `set_attribute` 命令式建 DOM，非 Leptos 视图），已就地豁免。
 
 ## P0 · 明确缺陷
 
@@ -23,6 +24,8 @@
 - [x] 键盘不可达：图片附件 `<label>`（`column.rs`）、右键/长按上下文菜单、顶部/底栏菜单、IDE 标签页（缺方向键）、工作区文件树文件行。
 - [x] 语义缺口：聊天模式 `role="menuitem"` 孤儿节点；单选/当前会话缺 `aria-checked` / `aria-current`；未保存/置顶/星标状态对屏幕阅读器不可见。
 - [x] 焦点归还闭环缺失：图片 lightbox 无 Tab 循环、关闭不还焦；hydrate / 待传 / uploads 图片键盘不可达；右键 / 下拉菜单（`FocusableRoleMenu` 全部调用点）不能 Esc 关闭、关闭不还焦；聊天 / IDE 查找栏与 IDE 跳转行栏不自动聚焦；`changelist_modal` 缺 Esc；`session_list` / `approval` / `settings` 模态关闭不还焦。
+
+- [x] 模态根 12 处各写一遍 `role="dialog"` / `aria-modal` / 焦点陷阱 / Escape / 焦点归还，语义已静默分叉（`stop_pointerdown` 有无、`prevent_default` 有无、Escape 是否经脏守卫）。已修（2026-09-25）：余下 9 处手抄模态根迁入 `FocusableModalPanel`，壳补齐 `dialog_role` / `labelledby` / `testid` / `stop_pointerdown` / `on_escape`；并由新增的 `scripts/check-modal-shell.sh` 固化——`frontend/src/**/*.rs` 除 `app/focusable_menu.rs` 外不得出现 `role="dialog"` / `"alertdialog"` / `set_attribute("role", …)` / `aria-modal`，有意例外就地写 `modal-gate: allow <理由>`（当前仅图片灯箱一条）。门禁已进 pre-commit 与 `scripts/check.sh`。
 
 ## P1 · 语义与反馈
 
@@ -80,6 +83,7 @@
 - [x] 首屏主题快照硬编码 `light`，深色用户有短暂浅色闪烁。已修（2026-09-24）：`frontend/src/app/shell_prefs_storage.rs` 的 `read_shell_ui_initial_snapshot()` 默认改 `dark`，与 splash（`index.html` 内联深色）、桌面窗口底色（`BOOT_SHELL_BG`）及 `tokens.css` 的 `:root` 默认深色对齐（偏好要等 `GET /user-data/prefs` 才到，改 `system` 此时拿不到 OS 明暗会退回 light，故不用）；首帧值不会写回服务端覆盖用户偏好——`UserPrefsSyncPhase` 在偏好加载完成前禁止 PUT。
 - [x] 对比度风险点 `frontend/styles/shell-ds.css:303`（`--muted` 再稀释），需实测验证。已修（2026-09-24）：实为 `.nav-rail-search-label` / `.nav-rail-scroll-label`（10px 大写，`color-mix(--muted 88%, transparent)`，行号已漂移至 285 / 384）——`--muted` 加深后 88% 半透明仍只 ≈3.9:1，两处改为纯 `var(--muted)`；同类小号文字稀释一并去半透明：`layout-chat.css` `.chat-tui-role` / `.chat-tui-think-summary`、`modal.css` `.settings-mcp-tool-openai`（装饰符 `▾`、`::placeholder`、`:disabled` 保持原样）。
 - [ ] 死代码：`approval_bar.rs` 的 `ApprovalBar`（已被 approval_modal 替代、全仓无引用）。
+- [ ] `.modal-backdrop` 遮罩层仍有 13 处重复模板，且「点击自身关闭」判定已分叉（裸 `on:click` vs. `mouse_event_target_is_current_target`），未纳入模态骨架收敛（本轮只收敛了面板本体 `FocusableModalPanel`）。
 - [ ] `save_busy/load_busy` 期间 Ctrl+S 被静默吞掉：`frontend/src/ide_save.rs`。
 - [ ] 同步期间关闭标签，快照索引写回可能命中错误标签：`frontend/src/ide_disk_sync.rs`。
 - [ ] 空编辑器只有 aria-label，无可见占位文本：`frontend/src/app/ide_editor_pane.rs`。

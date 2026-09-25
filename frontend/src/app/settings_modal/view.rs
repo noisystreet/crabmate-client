@@ -1,12 +1,11 @@
 //! 设置弹窗视图与业务闭包（壳级 `Effect` 见 [`super::effects`]）。
 
-use leptos::html::Div;
 use leptos::prelude::*;
 use std::sync::Arc;
 
 use super::effects::{
     SettingsModalWireBundle, wire_settings_modal_appearance_preview_effect,
-    wire_settings_modal_focus_first_effect, wire_settings_modal_open_close_baseline_effect,
+    wire_settings_modal_open_close_baseline_effect,
 };
 use crate::app::app_shell_ctx::SettingsModalSignals;
 use crate::app::settings_form_state::{
@@ -49,8 +48,6 @@ pub fn settings_modal_view(signals: SettingsModalSignals) -> impl IntoView {
         web_api_bearer_save_nonce,
         github_auth_refresh_nonce,
     } = signals;
-
-    let settings_dialog_ref = NodeRef::<Div>::new();
 
     let appearance_locale = RwSignal::new(locale.get_untracked());
     let appearance_theme = RwSignal::new(theme.get_untracked());
@@ -118,7 +115,6 @@ pub fn settings_modal_view(signals: SettingsModalSignals) -> impl IntoView {
     let discard_arc: Arc<dyn Fn() + Send + Sync> = Arc::new(discard);
     wire_settings_modal_open_close_baseline_effect(bundle, Arc::clone(&discard_arc));
     wire_settings_modal_appearance_preview_effect(bundle);
-    wire_settings_modal_focus_first_effect(settings_modal, settings_dialog_ref.clone());
 
     let dirty = Memo::new(move |_| {
         let current = form_current_tracked(drafts);
@@ -183,7 +179,6 @@ pub fn settings_modal_view(signals: SettingsModalSignals) -> impl IntoView {
 
     settings_modal_dialog(SettingsModalDialogInput {
         settings_modal,
-        settings_dialog_ref,
         appearance_locale,
         appearance_theme,
         appearance_bg_decor,

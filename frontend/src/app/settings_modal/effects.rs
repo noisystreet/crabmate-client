@@ -5,11 +5,9 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use gloo_timers::future::TimeoutFuture;
-use leptos::html::Div;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
-use crate::a11y::{capture_focus, focus_first_in_modal_container, restore_focus_to};
 use crate::app::settings_form_state::{SettingsDirtyBaselines, sync_appearance_drafts_from_shell};
 use crate::app::settings_page::dom_preview::{
     apply_bg_decor_preview_to_dom, apply_theme_preview_to_dom,
@@ -90,31 +88,5 @@ pub(super) fn wire_settings_modal_appearance_preview_effect(b: SettingsModalWire
         }
         apply_theme_preview_to_dom(b.appearance_theme.get().as_str());
         apply_bg_decor_preview_to_dom(b.appearance_bg_decor.get());
-    });
-}
-
-/// 打开弹窗后聚焦首元素；关闭时把焦点归还给打开前的元素（按信号转换捕获/归还）。
-pub(super) fn wire_settings_modal_focus_first_effect(
-    settings_modal: RwSignal<bool>,
-    settings_dialog_ref: NodeRef<Div>,
-) {
-    let restore_target = StoredValue::new(None::<web_sys::HtmlElement>);
-    Effect::new({
-        let settings_dialog_ref = settings_dialog_ref.clone();
-        move |_| {
-            if !settings_modal.get() {
-                restore_focus_to(restore_target.get_value().as_ref());
-                restore_target.set_value(None);
-                return;
-            }
-            restore_target.set_value(capture_focus());
-            let r = settings_dialog_ref.clone();
-            spawn_local(async move {
-                TimeoutFuture::new(0).await;
-                if let Some(el) = r.get() {
-                    focus_first_in_modal_container(el.as_ref());
-                }
-            });
-        }
     });
 }

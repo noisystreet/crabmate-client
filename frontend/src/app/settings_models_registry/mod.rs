@@ -4,16 +4,12 @@ mod delete_confirm;
 mod persist;
 mod submit;
 
-use gloo_timers::future::TimeoutFuture;
-use leptos::html::Div;
 use leptos::prelude::*;
-use leptos::task::spawn_local;
 use leptos_dom::helpers::event_target_value;
 use std::sync::Arc;
 
-use crate::a11y::{
-    focus_first_in_modal_container, mouse_event_target_is_current_target, trap_tab_in_container,
-};
+use crate::a11y::mouse_event_target_is_current_target;
+use crate::app::focusable_menu::FocusableModalPanel;
 use crate::settings_llm_fields::{LlmSavedPresetApplyTarget, LlmTemperatureFieldWithId};
 
 use crate::api::SavedModelPreset;
@@ -584,48 +580,49 @@ fn SettingsModelsRegistryDialogHead(
     }
 }
 
-/// 弹窗打开后把焦点移入容器（异步等待首帧）。
-fn schedule_dialog_initial_focus(
-    dialog_mode: RwSignal<Option<RegistryPresetDialogKind>>,
-    dialog_ref: NodeRef<Div>,
-) {
-    Effect::new(move |_| {
-        if dialog_mode.get().is_none() {
-            return;
-        }
-        let r = dialog_ref.clone();
-        spawn_local(async move {
-            TimeoutFuture::new(0).await;
-            if let Some(el) = r.get() {
-                focus_first_in_modal_container(el.as_ref());
-            }
-        });
-    });
-}
+/// 添加 / 编辑模型弹窗的面板本体。
+///
+/// 抽成组件的原因同 `settings_modal_dialog.rs` 的 `SettingsModalDialogPanel`：
+/// `FocusableModalPanel` 的 `children` 是 `FnOnce` 装箱闭包，若面板直接写在
+/// `<Show>` 的 children 里，非 `Copy` 值（`s` / `dialog_title_id` / `cancel_dialog`）
+/// 会被该闭包按值捕获并从 `<Show>` 闭包环境移出，使 `Show` 的 children 退化为 `FnOnce`。
+#[component]
+fn SettingsModelsRegistryAddModelDialogPanel(
+    s: RegistryAddFormSignals,
+    dialog_title_id: String,
+    cancel_dialog: Arc<dyn Fn() + Send + Sync>,
+) -> impl IntoView {
+    let RegistryAddFormSignals {
+        locale,
+        dialog_mode,
+        ..
+    } = s.clone();
+    let cancel_for_escape = cancel_dialog.clone();
 
-/// Tab 在弹窗内循环聚焦；Escape 复位并关闭。
-fn handle_add_model_dialog_keydown(
-    ev: &web_sys::KeyboardEvent,
-    dialog_ref: &NodeRef<Div>,
-    cancel: &(dyn Fn() + Send + Sync),
-) {
-    if ev.key() == "Tab" {
-        if let Some(el) = dialog_ref.get() {
-            trap_tab_in_container(ev, el.as_ref());
-        }
-        return;
-    }
-    if ev.key() == "Escape" {
-        ev.prevent_default();
-        ev.stop_propagation();
-        cancel();
+    view! {
+        <FocusableModalPanel
+            class="modal settings-model-add-dialog"
+            dialog_role="dialog"
+            labelledby=dialog_title_id.clone()
+            stop_pointerdown=true
+            on_escape=Callback::new(move |_| cancel_for_escape())
+        >
+            <SettingsModelsRegistryDialogHead
+                locale
+                dialog_mode
+                title_id=dialog_title_id
+                on_close=cancel_dialog
+            />
+            <div class="modal-body">
+                <SettingsModelsRegistryAddForm s=s />
+            </div>
+        </FocusableModalPanel>
     }
 }
 
 #[component]
 fn SettingsModelsRegistryAddModelDialog(s: RegistryAddFormSignals) -> impl IntoView {
     let RegistryAddFormSignals {
-        locale,
         dialog_mode,
         form_error,
         dialog_title_id,
@@ -638,9 +635,6 @@ fn SettingsModelsRegistryAddModelDialog(s: RegistryAddFormSignals) -> impl IntoV
         new_thinking_mode,
         ..
     } = s.clone();
-    let dialog_ref = NodeRef::<Div>::new();
-    let title_id_for_aria = dialog_title_id.clone();
-    let title_id_for_heading = dialog_title_id.clone();
     let cancel_dialog = {
         let dialog_mode = dialog_mode;
         let form_error = form_error;
@@ -664,7 +658,6 @@ fn SettingsModelsRegistryAddModelDialog(s: RegistryAddFormSignals) -> impl IntoV
             form_error.set(None);
         }) as Arc<dyn Fn() + Send + Sync>
     };
-    schedule_dialog_initial_focus(dialog_mode, dialog_ref);
 
     view! {
         <Show when=move || dialog_mode.get().is_some()>
@@ -680,36 +673,11 @@ fn SettingsModelsRegistryAddModelDialog(s: RegistryAddFormSignals) -> impl IntoV
                     }
                 }
             >
-                <div
-                    class="modal settings-model-add-dialog"
-                    node_ref=dialog_ref
-                    role="dialog"
-                    aria-modal="true"
-                    aria-labelledby=title_id_for_aria.clone()
-                    tabindex="-1"
-                    on:pointerdown=|ev: leptos::ev::PointerEvent| ev.stop_propagation()
-                    on:click=|ev: leptos::ev::MouseEvent| ev.stop_propagation()
-                    on:keydown={
-                        let cancel_dialog = cancel_dialog.clone();
-                        move |ev: web_sys::KeyboardEvent| {
-                            handle_add_model_dialog_keydown(
-                                &ev,
-                                &dialog_ref,
-                                cancel_dialog.as_ref(),
-                            );
-                        }
-                    }
-                >
-                    <SettingsModelsRegistryDialogHead
-                        locale
-                        dialog_mode
-                        title_id=title_id_for_heading.clone()
-                        on_close=cancel_dialog.clone()
-                    />
-                    <div class="modal-body">
-                        <SettingsModelsRegistryAddForm s=s.clone() />
-                    </div>
-                </div>
+                <SettingsModelsRegistryAddModelDialogPanel
+                    s=s.clone()
+                    dialog_title_id=dialog_title_id.clone()
+                    cancel_dialog=cancel_dialog.clone()
+                />
             </div>
         </Show>
     }

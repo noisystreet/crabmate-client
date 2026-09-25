@@ -29,6 +29,9 @@ bash "$ROOT/scripts/check-css-literals.sh"
 echo "[check] icons (no literal <svg> outside icon.rs; svg rule sizes must be var(--icon-*))"
 bash "$ROOT/scripts/check-icons.sh"
 
+echo "[check] modal shell (role / aria-modal only emitted by focusable_menu.rs)"
+bash "$ROOT/scripts/check-modal-shell.sh"
+
 echo "[check] xml comments (no double-dash inside XML comments)"
 bash "$ROOT/scripts/check-xml-comments.sh"
 

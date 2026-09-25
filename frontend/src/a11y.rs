@@ -109,11 +109,26 @@ pub fn schedule_focus_first_menu_item(container: &web_sys::Element) {
     });
 }
 
+/// 焦点是否已在 `container` 内（含容器自身）。
+#[must_use]
+pub fn active_element_inside(container: &web_sys::Element) -> bool {
+    let Some(active) = leptos_dom::helpers::document().active_element() else {
+        return false;
+    };
+    container.contains(Some(active.unchecked_ref::<web_sys::Node>()))
+}
+
 /// 对话框刚打开时把焦点移到第一个可 Tab 停驻节点（下一帧，等 DOM 挂上）。
+///
+/// 若下一帧时活动焦点已落在容器内（消费方自己把焦点放到了某个输入框），则不再抢焦点，
+/// 否则会覆盖消费方的初始聚焦意图。
 pub fn schedule_focus_first_in_modal(container: &web_sys::Element) {
     let container = container.clone();
     spawn_local(async move {
         TimeoutFuture::new(0).await;
+        if active_element_inside(&container) {
+            return;
+        }
         focus_first_in_modal_container(&container);
     });
 }

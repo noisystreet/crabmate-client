@@ -8,10 +8,8 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use wasm_bindgen::JsCast;
 
-use crate::a11y::{
-    capture_focus, focus_first_in_modal_container, handle_modal_layer_keydown, restore_focus_to,
-};
 use crate::api::fetch_workspace_changelog;
+use crate::app::focusable_menu::FocusableModalPanel;
 use crate::i18n::{self, load_locale_from_storage};
 use crate::md_code_copy::try_copy_md_code_block;
 use crate::message_render::fragment_to_chat_safe_html;
@@ -232,28 +230,6 @@ pub fn changelist_modal_view(signals: ChangelistModalSignals) -> impl IntoView {
         changelist_fetch_nonce,
         changelist_body_ref,
     } = signals;
-    let dialog_ref = NodeRef::<Div>::new();
-    let restore_target = StoredValue::new(None::<web_sys::HtmlElement>);
-
-    Effect::new({
-        let dialog_ref = dialog_ref.clone();
-        let open = changelist_modal_open;
-        move |_| {
-            if !open.get() {
-                restore_focus_to(restore_target.get_value().as_ref());
-                restore_target.set_value(None);
-                return;
-            }
-            restore_target.set_value(capture_focus());
-            let r = dialog_ref.clone();
-            spawn_local(async move {
-                TimeoutFuture::new(0).await;
-                if let Some(el) = r.get() {
-                    focus_first_in_modal_container(el.as_ref());
-                }
-            });
-        }
-    });
 
     view! {
             <Show when=move || changelist_modal_open.get()>
@@ -263,23 +239,11 @@ pub fn changelist_modal_view(signals: ChangelistModalSignals) -> impl IntoView {
                         aria-hidden="true"
                         on:click=move |_| changelist_modal_open.set(false)
                     ></div>
-                    <div
+                    <FocusableModalPanel
                         class="changelist-modal"
-                        node_ref=dialog_ref
-                        role="dialog"
-                        aria-modal="true"
-                        aria-labelledby="changelist-modal-title"
-                        tabindex="-1"
-                        on:click=|ev: leptos::ev::MouseEvent| ev.stop_propagation()
-                        on:keydown=move |ev: web_sys::KeyboardEvent| {
-                            if let Some(el) = dialog_ref.get() {
-                                handle_modal_layer_keydown(
-                                    &ev,
-                                    el.as_ref(),
-                                    move || changelist_modal_open.set(false),
-                                );
-                            }
-                        }
+                        dialog_role="dialog"
+                        labelledby="changelist-modal-title"
+                        on_escape=Callback::new(move |_| changelist_modal_open.set(false))
                     >
                         {changelist_modal_head(
                             locale,
@@ -292,7 +256,7 @@ pub fn changelist_modal_view(signals: ChangelistModalSignals) -> impl IntoView {
                             changelist_modal_body,
                             changelist_body_ref,
                         )}
-                    </div>
+                    </FocusableModalPanel>
                 </div>
             </Show>
     }

@@ -3,11 +3,11 @@
 use std::sync::Arc;
 
 use gloo_timers::future::TimeoutFuture;
-use leptos::html::{Div, Input};
+use leptos::html::Input;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
-use crate::a11y::{focus_first_in_modal_container, trap_tab_in_container};
+use crate::app::focusable_menu::FocusableModalPanel;
 use crate::app::workspace_root_actions::WorkspaceRootPickHandle;
 use crate::i18n;
 
@@ -44,7 +44,6 @@ fn WorkspaceProjectModalPanel(signals: WorkspaceProjectModalSignals) -> impl Int
     let load_err = RwSignal::new(None::<String>);
     let action_err = RwSignal::new(None::<String>);
     let new_name = RwSignal::new(String::new());
-    let dialog_ref = NodeRef::<Div>::new();
     let name_input_ref = NodeRef::<Input>::new();
 
     Effect::new(move |_| {
@@ -53,14 +52,11 @@ fn WorkspaceProjectModalPanel(signals: WorkspaceProjectModalSignals) -> impl Int
         }
         action_err.set(None);
         spawn_reload_workspace_projects(locale, projects, pool_path, loading, load_err);
-        let r = dialog_ref.clone();
         let name_ref = name_input_ref.clone();
         spawn_local(async move {
             TimeoutFuture::new(0).await;
             if let Some(el) = name_ref.get() {
                 let _ = el.focus();
-            } else if let Some(el) = r.get() {
-                focus_first_in_modal_container(el.as_ref());
             }
         });
     });
@@ -82,24 +78,12 @@ fn WorkspaceProjectModalPanel(signals: WorkspaceProjectModalSignals) -> impl Int
     });
 
     view! {
-        <div
+        <FocusableModalPanel
             class="modal"
-            node_ref=dialog_ref
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="workspace-project-modal-title"
-            data-testid="workspace-project-modal"
-            tabindex="-1"
-            on:click=|ev: leptos::ev::MouseEvent| ev.stop_propagation()
-            on:keydown=move |ev: web_sys::KeyboardEvent| {
-                if ev.key() == "Escape" {
-                    close();
-                } else if ev.key() == "Tab" {
-                    if let Some(el) = dialog_ref.get() {
-                        trap_tab_in_container(&ev, el.as_ref());
-                    }
-                }
-            }
+            dialog_role="dialog"
+            labelledby="workspace-project-modal-title"
+            testid="workspace-project-modal"
+            on_escape=Callback::new(move |_| close())
         >
             <div class="modal-head">
                 <h2 class="modal-title" id="workspace-project-modal-title">
@@ -129,7 +113,7 @@ fn WorkspaceProjectModalPanel(signals: WorkspaceProjectModalSignals) -> impl Int
                     on_create=on_create.clone()
                 />
             </div>
-        </div>
+        </FocusableModalPanel>
     }
 }
 

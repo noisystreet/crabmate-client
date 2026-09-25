@@ -253,8 +253,9 @@ fn build_overlay(
 ) -> Option<(Element, MouseCb)> {
     let overlay = doc.create_element("div").ok()?;
     overlay.set_class_name("chat-image-lightbox");
-    let _ = overlay.set_attribute("role", "dialog");
-    let _ = overlay.set_attribute("aria-modal", "true");
+    // 灯箱用命令式 DOM 建在 document body 上，不走 Leptos 组件树，无法用 FocusableModalPanel。
+    let _ = overlay.set_attribute("role", "dialog"); // modal-gate: allow 命令式建 DOM
+    let _ = overlay.set_attribute("aria-modal", "true"); // modal-gate: allow 同上
     let _ = overlay.set_attribute("aria-label", i18n::chat_image_lightbox_aria(loc));
     let _ = overlay.set_attribute("tabindex", "0");
     let img = doc.create_element("img").ok()?;
