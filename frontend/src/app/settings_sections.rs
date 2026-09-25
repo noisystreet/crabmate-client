@@ -115,6 +115,7 @@ fn SettingsChatTranscriptBlock(
     view! {
         <div class="settings-block">
             <h3 class="settings-block-title">{move || i18n::settings_block_chat_transcript(locale.get())}</h3>
+            <SettingsInstantApplyHint locale=locale />
             <SettingsToggleSwitch
                 checked=Signal::derive(move || show_turn_context_inject.get())
                 label=Signal::derive(move || i18n::settings_show_turn_context_inject(locale.get()).to_string())
@@ -147,6 +148,16 @@ pub(crate) fn SettingsAppearanceBlock(
             locale=locale
             show_turn_context_inject=show_turn_context_inject
         />
+    }
+}
+
+/// 「即时生效」标注：用于不参与「保存全部」、改完立即落盘的区块。
+#[component]
+pub(crate) fn SettingsInstantApplyHint(locale: RwSignal<Locale>) -> impl IntoView {
+    view! {
+        <p class="settings-hint">
+            {move || i18n::settings_applies_immediately(locale.get())}
+        </p>
     }
 }
 
@@ -221,6 +232,7 @@ pub(crate) fn SettingsWebApiBearerBlock(
             <h3 class="settings-block-title">
                 {move || i18n::settings_block_web_api_bearer(locale.get())}
             </h3>
+            <SettingsInstantApplyHint locale=locale />
             <p class="settings-status-line" data-testid="settings-web-api-bearer-status">
                 {move || bearer_status_label(locale.get(), present.get())}
             </p>
@@ -308,6 +320,7 @@ pub(crate) fn SettingsApiBaseBlock(
             <label class="settings-field-label" for=input_id>
                 {move || i18n::settings_block_api_base(locale.get())}
             </label>
+            <SettingsInstantApplyHint locale=locale />
             <input
                 id=input_id
                 class="settings-text-input"
@@ -540,6 +553,7 @@ fn SettingsSessionStorageBlock(
     view! {
         <div class="settings-block">
             <h3 class="settings-block-title">{move || i18n::settings_block_session_storage(locale.get())}</h3>
+            <SettingsInstantApplyHint locale=locale />
             <SettingsToggleSwitch
                 checked=session_storage_active_signal(status_data)
                 label=Signal::derive(move || {
@@ -652,6 +666,7 @@ fn SettingsSessionTypographyBlock(
     view! {
         <div class="settings-block">
             <h3 class="settings-block-title">{move || i18n::settings_block_session_typography(locale.get())}</h3>
+            <SettingsInstantApplyHint locale=locale />
             <SettingsSessionFontSelectRow
                 locale=locale
                 kind=SessionFontFieldKind::Ui

@@ -69,7 +69,8 @@
 - [ ] 审批「允许始终」用 `btn-primary` 而「拒绝」用 `btn-danger`，持久授权的高影响操作视觉权重倒置：`frontend/src/app/approval_modal.rs`。
 - [x] 模型预设新增弹窗温度/上下文 token 无范围校验，与「保存全部」的 `validate_temperature_override` 不一致：`frontend/src/app/settings_models_registry/submit.rs`。已修（2026-09-25）：`validate_temperature_override` / `validate_llm_context_tokens_override` 提为 `pub(crate)`，弹窗在 `try_build_manual_saved_preset` 成功后复用同一对校验（越界即写 `form_error` 且不提交）。
 - [ ] 破坏性操作无确认：MCP 行删除（`settings_mcp_server_row_actions.rs`）、GitHub「断开」（`settings_github_block.rs`）、Web Bearer 空输入点保存=清除 token 无二次确认（`settings_sections.rs`）。
-- [ ] 保存语义混合（预设开关/删除、Bearer、API base、MCP 导入立即落盘 vs 主题/语言/LLM 需「保存全部」）；MCP「应用导入」绕过保存全部直接写服务端且无确认：`frontend/src/app/settings_mcp_json_import.rs`。
+- [x] 保存语义混合（预设开关/删除、Bearer、API base、MCP 导入立即落盘 vs 主题/语言/LLM 需「保存全部」）。已修（2026-09-25，**只标注不动逻辑**）：先只读核实逐区块落盘路径，结论是**不存在「改完静默丢弃」**——凡不参与 `dirty` 的区块都自带立即落盘通道（按钮 / 开关即写 / 400ms 防抖 PUT），两种语义并存而非缺陷，故不改保存逻辑，只就地标注。新增 `i18n::settings_applies_immediately`（文案复用 `settings_save_all` 作为按钮名单唯一来源）+ 共享组件 `SettingsInstantApplyHint`，插入 7 个**整块**立即生效的区块：聊天记录注入开关、Web API Bearer、API base、会话存储、会话排版、GitHub、模型列表。**未标注**：MCP 区块是混合语义（MCP 文件草稿参与「保存全部」，只有行内 remote bearer「保存」与 JSON「应用」立即落盘），加区块级标注会误导，而那两处是显式按钮、语义已自明。
+- [ ] MCP「应用导入」绕过保存全部直接写服务端且无确认：`frontend/src/app/settings_mcp_json_import.rs`（与「破坏性操作无确认」一并留待后续）。
 
 ## P2 · 样式与 token
 
