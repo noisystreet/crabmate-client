@@ -7,7 +7,7 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{Request, RequestInit, Response};
 
-use crate::i18n::Locale;
+use crate::i18n::{self, Locale};
 use crate::storage::ChatSession;
 
 use super::browser::{api_url, auth_headers, prepare_api_auth, window};
@@ -335,9 +335,10 @@ pub async fn post_mcp_servers_import(
 ) -> Result<McpServersImportResponseDto, String> {
     let trimmed = json_text.trim();
     if trimmed.is_empty() {
-        return Err("JSON 为空".to_string());
+        return Err(i18n::api_err_json_empty(loc).to_string());
     }
-    let _: Value = serde_json::from_str(trimmed).map_err(|e| format!("JSON 解析失败: {e}"))?;
+    let _: Value = serde_json::from_str(trimmed)
+        .map_err(|e| i18n::api_err_json_parse_failed(loc, &e.to_string()))?;
     post_json_body("/user-data/mcp-servers/import", trimmed, loc).await
 }
 

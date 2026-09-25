@@ -517,6 +517,12 @@
   padding: 0;
 }
 
+.tasks-list-empty {
+  margin: 0;
+  font-size: var(--text-md);
+  color: var(--muted);
+}
+
 .tasks-list li {
   display: flex;
   align-items: flex-start;

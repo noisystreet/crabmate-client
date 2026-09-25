@@ -259,6 +259,134 @@ pub fn api_err_body_type(l: Locale) -> &'static str {
     }
 }
 
+// --- API 层本地化（原先硬编码中文，英文界面下外显中文）---
+
+pub fn api_err_json_empty(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "JSON 为空",
+        Locale::En => "JSON is empty",
+    }
+}
+
+pub fn api_err_json_parse_failed(l: Locale, detail: &str) -> String {
+    match l {
+        Locale::ZhHans => format!("JSON 解析失败: {detail}"),
+        Locale::En => format!("JSON parse failed: {detail}"),
+    }
+}
+
+pub fn api_err_dir_name_empty(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "目录名不能为空",
+        Locale::En => "Directory name cannot be empty",
+    }
+}
+
+pub fn api_err_stream_cancel_rejected(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "流式取消被拒绝",
+        Locale::En => "stream cancel rejected",
+    }
+}
+
+pub fn api_err_config_reload_ok(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "配置已热重载",
+        Locale::En => "Configuration hot-reloaded",
+    }
+}
+
+pub fn api_err_config_reload_failed(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "配置热重载失败",
+        Locale::En => "Configuration hot-reload failed",
+    }
+}
+
+/// 分支请求时服务端不认识该 conversation_id（HTTP 404）。
+pub fn api_err_branch_not_found(l: Locale) -> String {
+    match l {
+        Locale::ZhHans => "会话不存在或已过期".to_string(),
+        Locale::En => "Conversation not found or expired".to_string(),
+    }
+}
+
+/// 分支请求时 conversation revision 冲突（HTTP 409）。
+pub fn api_err_branch_conflict(l: Locale) -> String {
+    match l {
+        Locale::ZhHans => "会话 revision 冲突".to_string(),
+        Locale::En => "Conversation revision conflict".to_string(),
+    }
+}
+
+// --- 本机安全存储（钥匙串 / Android Keystore）---
+
+pub fn api_err_secure_store_unavailable(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "无本机安全存储后端",
+        Locale::En => "No local secure-storage backend",
+    }
+}
+
+pub fn api_err_keystore_write_llm_key_failed(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "Android Keystore 写入模型密钥失败",
+        Locale::En => "Failed to write the model API key to the Android Keystore",
+    }
+}
+
+pub fn api_err_keystore_write_bearer_failed(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "Android Keystore 写入 Web API Bearer 失败",
+        Locale::En => "Failed to write the Web API Bearer to the Android Keystore",
+    }
+}
+
+pub fn api_err_keychain_write_failed(l: Locale, detail: &str) -> String {
+    match l {
+        Locale::ZhHans => format!("系统钥匙串写入失败: {detail}"),
+        Locale::En => format!("Failed to write to the system keychain: {detail}"),
+    }
+}
+
+pub fn api_err_github_token_store_failed(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "GitHub token 未能写入本机安全存储",
+        Locale::En => "Failed to write the GitHub token to local secure storage",
+    }
+}
+
+pub fn api_err_github_token_readback_failed(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "GitHub token 写入后读回校验失败",
+        Locale::En => "GitHub token read-back verification failed after write",
+    }
+}
+
+pub fn api_err_github_refresh_token_store_failed(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "GitHub refresh token 未能写入本机安全存储",
+        Locale::En => "Failed to write the GitHub refresh token to local secure storage",
+    }
+}
+
+pub fn api_err_github_refresh_token_readback_failed(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "GitHub refresh token 写入后读回校验失败",
+        Locale::En => "GitHub refresh token read-back verification failed after write",
+    }
+}
+
+/// 设备流回调里壳端未拿到 `access_token`（Server 未按约定下发）。
+pub fn api_err_github_access_token_missing(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "壳端未收到 access_token（请确认 X-CrabMate-GitHub-Token-Delivery）",
+        Locale::En => {
+            "The shell did not receive access_token (check X-CrabMate-GitHub-Token-Delivery)"
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

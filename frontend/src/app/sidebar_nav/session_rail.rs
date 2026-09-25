@@ -117,6 +117,7 @@ pub(super) fn nav_rail_session_scroll_inner(s: NavRailSessionScrollSignals) -> i
             <div class="nav-search-hits" role="region" prop:aria-label=move || i18n::nav_search_hits_region(locale.get())>
                 {hit_views}
             </div>
+            {nav_rail_no_session_hits(!needle.is_empty(), v.is_empty(), locale)}
             {v.into_iter()
                 .map(|sess| {
                     nav_session_row_button(sess, hit_row_nav.clone())
@@ -141,6 +142,24 @@ fn session_row_accessible_label(
         parts.push(i18n::session_badge_star_aria(loc).to_string());
     }
     parts.join(", ")
+}
+
+/// 标题过滤后无命中时的占位（仅在搜索框有输入时才提示，空输入不视为「无结果」）。
+fn nav_rail_no_session_hits(
+    has_query: bool,
+    hits_empty: bool,
+    locale: RwSignal<crate::i18n::Locale>,
+) -> AnyView {
+    if has_query && hits_empty {
+        view! {
+            <div class="nav-search-hits-empty" role="status">
+                {i18n::nav_no_session_hits(locale.get())}
+            </div>
+        }
+        .into_any()
+    } else {
+        ().into_any()
+    }
 }
 
 fn nav_search_hit_button(h: MessageSearchHit, nav: NavRailHitRowNavSignals) -> impl IntoView {

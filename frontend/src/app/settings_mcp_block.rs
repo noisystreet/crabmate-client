@@ -7,7 +7,7 @@ use super::settings_mcp_json_import::SettingsMcpJsonImportPanel;
 use super::settings_mcp_server_row::SettingsMcpServerRow;
 use super::settings_mcp_status::McpSettingsPageState;
 use crate::api::user_data::McpServerEntryDto;
-use crate::i18n::Locale;
+use crate::i18n::{self, Locale};
 
 #[component]
 pub(crate) fn SettingsMcpBlock(
@@ -35,6 +35,11 @@ pub(crate) fn SettingsMcpBlock(
                 set_feedback=mcp.set_feedback
                 row_ctx=row_ctx
             />
+            <Show when=move || mcp.file.get().servers.is_empty()>
+                <p class="settings-list-empty" role="status">
+                    {move || i18n::settings_mcp_servers_empty(locale.get())}
+                </p>
+            </Show>
             <For
                 each=move || mcp.file.get().servers.clone()
                 key=|s| s.id.clone()

@@ -10,7 +10,7 @@ use crate::api::client_llm_storage::{
 use crate::api::{PersistKind, persist_saved_model_presets_to_storage_async};
 use crate::i18n::{self, Locale, store_locale_slug};
 
-fn validate_temperature_override(raw: &str, loc: Locale) -> Result<(), String> {
+pub(crate) fn validate_temperature_override(raw: &str, loc: Locale) -> Result<(), String> {
     let t = raw.trim();
     if t.is_empty() {
         return Ok(());
@@ -24,7 +24,7 @@ fn validate_temperature_override(raw: &str, loc: Locale) -> Result<(), String> {
     Ok(())
 }
 
-fn validate_llm_context_tokens_override(raw: &str, loc: Locale) -> Result<(), String> {
+pub(crate) fn validate_llm_context_tokens_override(raw: &str, loc: Locale) -> Result<(), String> {
     let t = raw.trim();
     if t.is_empty() {
         return Ok(());

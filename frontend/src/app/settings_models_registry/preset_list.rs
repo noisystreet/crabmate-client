@@ -307,8 +307,9 @@ pub(crate) struct RegistryPresetListSignals {
 #[component]
 pub(crate) fn SettingsModelsRegistryPresetList(s: RegistryPresetListSignals) -> impl IntoView {
     let saved_model_presets = s.saved_model_presets;
+    let locale = s.locale;
     let row_sig = RegistryPresetRowSignals {
-        locale: s.locale,
+        locale,
         saved_model_presets,
         dialog_mode: s.dialog_mode,
         form_error: s.form_error,
@@ -324,6 +325,11 @@ pub(crate) fn SettingsModelsRegistryPresetList(s: RegistryPresetListSignals) -> 
         pending_delete_row_key: s.pending_delete_row_key,
     };
     view! {
+        <Show when=move || saved_model_presets.get().is_empty()>
+            <p class="settings-list-empty" role="status">
+                {move || i18n::settings_saved_models_empty(locale.get())}
+            </p>
+        </Show>
         <ul class="settings-saved-models-list" role="list">
             <ForEnumerate
                 each=move || saved_model_presets.get()

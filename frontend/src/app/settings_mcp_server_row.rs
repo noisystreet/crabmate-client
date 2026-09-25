@@ -33,6 +33,30 @@ fn apply_has_bearer(file: &mut McpServersFileDto, server_id: &str, has_bearer: b
     }
 }
 
+fn server_has_bearer(file: &McpServersFileDto, server_id: &str) -> bool {
+    file.servers
+        .iter()
+        .find(|s| s.id == server_id)
+        .is_some_and(|s| s.has_bearer)
+}
+
+/// 掩码仅在确已保存时显示；未保存留空（否则会让人误以为已配置）。
+fn server_bearer_placeholder(file: &McpServersFileDto, server_id: &str) -> &'static str {
+    if server_has_bearer(file, server_id) {
+        i18n::SECRET_MASK_PLACEHOLDER
+    } else {
+        ""
+    }
+}
+
+fn server_bearer_hint(loc: Locale, file: &McpServersFileDto, server_id: &str) -> &'static str {
+    if server_has_bearer(file, server_id) {
+        i18n::settings_mcp_bearer_hint_set(loc)
+    } else {
+        i18n::settings_mcp_bearer_hint_unset(loc)
+    }
+}
+
 #[component]
 fn SettingsMcpRemoteBearer(
     server_id: String,
@@ -46,6 +70,7 @@ fn SettingsMcpRemoteBearer(
     let bearer_draft = RwSignal::new(String::new());
     let bearer_feedback = RwSignal::new(None::<String>);
     let id_hint = server_id.clone();
+    let id_placeholder = server_id.clone();
     let id_save = server_id;
 
     view! {
@@ -59,7 +84,10 @@ fn SettingsMcpRemoteBearer(
                 autocomplete="off"
                 data-testid="settings-mcp-bearer-input"
                 prop:value=move || bearer_draft.get()
-                placeholder="••••••••"
+                placeholder=move || {
+                    let sid = id_placeholder.clone();
+                    server_bearer_placeholder(&file.get(), &sid)
+                }
                 on:input=move |ev| {
                     bearer_draft.set(event_input_value(&ev).unwrap_or_default());
                 }
@@ -68,17 +96,7 @@ fn SettingsMcpRemoteBearer(
         <p class="settings-hint" data-testid="settings-mcp-bearer-hint">
             {move || {
                 let sid = id_hint.clone();
-                let set = file
-                    .get()
-                    .servers
-                    .iter()
-                    .find(|s| s.id == sid)
-                    .is_some_and(|s| s.has_bearer);
-                if set {
-                    i18n::settings_mcp_bearer_hint_set(locale.get())
-                } else {
-                    i18n::settings_mcp_bearer_hint_unset(locale.get())
-                }
+                server_bearer_hint(locale.get(), &file.get(), &sid)
             }}
         </p>
         <button

@@ -16,6 +16,13 @@ pub fn session_modal_badge(l: Locale) -> &'static str {
     }
 }
 
+pub fn session_modal_empty(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "还没有会话：发送一条消息即可创建。",
+        Locale::En => "No sessions yet: send a message to create one.",
+    }
+}
+
 pub fn session_row_msg_count(l: Locale, n: usize) -> String {
     match l {
         Locale::ZhHans => format!("{n} 条"),

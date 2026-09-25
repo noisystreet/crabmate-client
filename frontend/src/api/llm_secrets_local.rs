@@ -13,6 +13,7 @@ use wasm_bindgen_futures::JsFuture;
 use crabmate_client_api::SecretSlot;
 
 use super::browser::window;
+use crate::i18n::{self, load_locale_from_storage};
 
 const LEGACY_CLIENT_LS: &str = "crabmate-client-llm-api-key";
 const LEGACY_EXECUTOR_LS: &str = "crabmate-executor-llm-api-key";
@@ -237,7 +238,7 @@ pub(crate) async fn bridge_persist_secure_slot(
     value: &str,
 ) -> Result<PersistKind, String> {
     if !secure_llm_secret_backend_available() {
-        return Err("无本机安全存储后端".into());
+        return Err(i18n::api_err_secure_store_unavailable(load_locale_from_storage()).into());
     }
     persist_slot_async(slot, value).await
 }
@@ -263,12 +264,17 @@ pub async fn persist_slot_async(slot: &str, value: &str) -> Result<PersistKind, 
                 TimeoutFuture::new(*gap).await;
             }
         }
-        return Err("Android Keystore 写入模型密钥失败".into());
+        return Err(i18n::api_err_keystore_write_llm_key_failed(load_locale_from_storage()).into());
     }
     if bridge::has_tauri_llm_secret_invoke() {
         JsFuture::from(bridge::invoke_set_llm_secret(slot, v))
             .await
-            .map_err(|e| format!("系统钥匙串写入失败: {}", js_err_to_string(&e)))?;
+            .map_err(|e| {
+                i18n::api_err_keychain_write_failed(
+                    load_locale_from_storage(),
+                    &js_err_to_string(&e),
+                )
+            })?;
         return Ok(PersistKind::Durable);
     }
     // 纯浏览器：弱持久化，调用方应提示用户。

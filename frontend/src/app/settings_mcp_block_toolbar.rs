@@ -22,6 +22,7 @@ fn SettingsMcpTimeoutField(
     file: ReadSignal<McpServersFileDto>,
     set_file: WriteSignal<McpServersFileDto>,
 ) -> impl IntoView {
+    let invalid_hint = RwSignal::new(None::<String>);
     view! {
         <label class="settings-field">
             <span class="settings-field-label">{move || i18n::settings_mcp_timeout_label(locale.get())}</span>
@@ -32,14 +33,26 @@ fn SettingsMcpTimeoutField(
                 data-testid="settings-mcp-timeout"
                 prop:value=move || file.get().tool_timeout_secs.to_string()
                 on:input=move |ev| {
-                    if let Some(v) = event_input_value(&ev)
-                        && let Ok(n) = v.parse::<u64>()
-                    {
-                        set_file.update(|f| f.tool_timeout_secs = n.max(1));
+                    // 非法输入（空 / 非整数 / < 1）不再静默保留旧值：提示并说明当前生效值未变。
+                    let current = file.get_untracked().tool_timeout_secs;
+                    match event_input_value(&ev).and_then(|v| v.trim().parse::<u64>().ok()) {
+                        Some(n) if n >= 1 => {
+                            invalid_hint.set(None);
+                            set_file.update(|f| f.tool_timeout_secs = n);
+                        }
+                        _ => invalid_hint.set(Some(i18n::settings_mcp_timeout_invalid(
+                            locale.get_untracked(),
+                            current,
+                        ))),
                     }
                 }
             />
         </label>
+        <Show when=move || invalid_hint.get().is_some()>
+            <p class="settings-hint" role="status">
+                {move || invalid_hint.get().unwrap_or_default()}
+            </p>
+        </Show>
     }
 }
 

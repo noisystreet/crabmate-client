@@ -141,6 +141,12 @@
   word-break: break-all;
 }
 
+.session-modal-empty {
+  margin: 0;
+  font-size: var(--text-md);
+  color: var(--muted);
+}
+
 .workspace-project-error {
   margin: 0 14px 10px;
   font-size: var(--text-md);
@@ -442,6 +448,12 @@
   margin: 0 14px var(--space-3);
   padding: 0;
   list-style: none;
+}
+
+.settings-list-empty {
+  margin: 0 14px var(--space-3);
+  font-size: var(--text-md);
+  color: var(--muted);
 }
 
 .settings-saved-models-item {

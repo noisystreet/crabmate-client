@@ -13,7 +13,7 @@ use super::llm_secrets_local::{
     PersistKind, bridge_load_secure_slot, bridge_persist_secure_slot,
     secure_llm_secret_backend_available,
 };
-use crate::i18n::Locale;
+use crate::i18n::{self, Locale, load_locale_from_storage};
 use crabmate_client_api::SecretSlot;
 
 const LS_CLIENT_ID: &str = "crabmate-github-oauth-client-id";
@@ -192,13 +192,13 @@ async fn ensure_refresh_token_loaded() {
 async fn persist_github_token_durable(token: &str) -> Result<(), String> {
     let kind = bridge_persist_secure_slot(slot_github(), token).await?;
     if kind != PersistKind::Durable {
-        return Err("GitHub token 未能写入本机安全存储".into());
+        return Err(i18n::api_err_github_token_store_failed(load_locale_from_storage()).into());
     }
     let loaded = bridge_load_secure_slot(slot_github())
         .await
         .unwrap_or_default();
     if loaded.trim() != token.trim() {
-        return Err("GitHub token 写入后读回校验失败".into());
+        return Err(i18n::api_err_github_token_readback_failed(load_locale_from_storage()).into());
     }
     TOKEN.with(|c| *c.borrow_mut() = loaded);
     sync_request_header_from_memory();
@@ -210,13 +210,17 @@ async fn persist_github_token_durable(token: &str) -> Result<(), String> {
 async fn persist_github_refresh_token_durable(token: &str) -> Result<(), String> {
     let kind = bridge_persist_secure_slot(slot_github_refresh(), token).await?;
     if kind != PersistKind::Durable {
-        return Err("GitHub refresh token 未能写入本机安全存储".into());
+        return Err(
+            i18n::api_err_github_refresh_token_store_failed(load_locale_from_storage()).into(),
+        );
     }
     let loaded = bridge_load_secure_slot(slot_github_refresh())
         .await
         .unwrap_or_default();
     if loaded.trim() != token.trim() {
-        return Err("GitHub refresh token 写入后读回校验失败".into());
+        return Err(
+            i18n::api_err_github_refresh_token_readback_failed(load_locale_from_storage()).into(),
+        );
     }
     REFRESH.with(|c| *c.borrow_mut() = loaded);
     Ok(())
@@ -233,7 +237,7 @@ pub async fn on_device_flow_success(
             .map(str::trim)
             .filter(|s| !s.is_empty())
             .ok_or_else(|| {
-                "壳端未收到 access_token（请确认 X-CrabMate-GitHub-Token-Delivery）".to_string()
+                i18n::api_err_github_access_token_missing(load_locale_from_storage()).to_string()
             })?;
         // 先落盘 refresh token（新对优先），access token 落盘失败时可凭其重试刷新。
         if let Some(rt) = refresh_token.map(str::trim).filter(|s| !s.is_empty()) {
@@ -274,10 +278,9 @@ pub async fn clear_github_connection_local() -> Result<(), String> {
     if errs.is_empty() {
         Ok(())
     } else {
-        Err(format!(
-            "本机钥匙串未能清除 GitHub 凭据: {}",
-            errs.join("；")
-        ))
+        // 外层调用方（`settings_github_disconnect_partial`）自带本地化框架，
+        // 此处只回传槽位级明细，避免嵌套中文在英文界面下外显。
+        Err(errs.join("；"))
     }
 }
 

@@ -87,7 +87,7 @@ impl MessageRowActionSignals {
                         Err(e) => {
                             dbg_log_with("post_chat_branch err", e.as_deref());
                             match &e {
-                                ChatBranchError::NotFound => {
+                                ChatBranchError::NotFound(_) => {
                                     // 会话在服务端不存在（server 重启/过期）：清除绑定，直接本地重试。
                                     chat.session_sync.update(|s| s.invalidate_conversation_id());
                                     let mut prep: Option<(String, Vec<String>, String)> = None;
@@ -108,7 +108,7 @@ impl MessageRowActionSignals {
                                         );
                                     }
                                 }
-                                ChatBranchError::Conflict => {
+                                ChatBranchError::Conflict(_) => {
                                     chat.session_sync.update(|s| s.mark_branch_conflict());
                                     status_err.set(Some(
                                         crate::i18n::api_err_branch_failed(loc).to_string(),
@@ -178,11 +178,11 @@ impl MessageRowActionSignals {
                         }
                         Err(e) => {
                             let err_display = match &e {
-                                ChatBranchError::NotFound => {
+                                ChatBranchError::NotFound(_) => {
                                     chat.session_sync.update(|s| s.invalidate_conversation_id());
                                     crate::i18n::api_err_branch_failed(loc_b).to_string()
                                 }
-                                ChatBranchError::Conflict | ChatBranchError::Other(_) => {
+                                ChatBranchError::Conflict(_) | ChatBranchError::Other(_) => {
                                     chat.session_sync.update(|s| s.mark_branch_conflict());
                                     e.as_deref().to_string()
                                 }

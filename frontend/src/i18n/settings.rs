@@ -1,5 +1,11 @@
 use super::Locale;
 
+/// 已保存密钥的输入框掩码占位（各语言一致，故不接 `Locale`）。
+///
+/// MCP 远端 Bearer、GitHub client id、Web API Bearer 三处共用：既统一取值，
+/// 也统一语义——**仅当已保存时**才显示掩码，未保存留空（掩码会让人误以为已配置）。
+pub const SECRET_MASK_PLACEHOLDER: &str = "••••••••";
+
 // --- 设置弹窗 ---
 
 pub fn settings_title(l: Locale) -> &'static str {
@@ -565,6 +571,13 @@ pub fn settings_saved_models_block_title(l: Locale) -> &'static str {
     match l {
         Locale::ZhHans => "已保存模型",
         Locale::En => "Saved models",
+    }
+}
+
+pub fn settings_saved_models_empty(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "还没有已保存模型：点右上角「+」添加。",
+        Locale::En => "No saved models yet: use the + button above.",
     }
 }
 

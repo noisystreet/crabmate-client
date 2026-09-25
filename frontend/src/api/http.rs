@@ -7,7 +7,7 @@ use wasm_bindgen_futures::JsFuture;
 use web_sys::{Request, RequestInit, Response};
 
 use crate::chat_upload_src::relative_auth_image_src;
-use crate::i18n::Locale;
+use crate::i18n::{self, Locale};
 
 use crabmate::cm_api_contract::StatusShellView;
 use crabmate_client_api::{http_error_text, paths};
@@ -223,10 +223,7 @@ fn is_create_directory_field_unsupported(err: &str) -> bool {
 async fn post_workspace_dir_via_gitkeep(path: String, loc: Locale) -> Result<(), String> {
     let path = path.trim().trim_end_matches('/');
     if path.is_empty() {
-        return Err(match loc {
-            Locale::ZhHans => "目录名不能为空".to_string(),
-            Locale::En => "Directory name cannot be empty".to_string(),
-        });
+        return Err(i18n::api_err_dir_name_empty(loc).to_string());
     }
     let keep = format!("{path}/.gitkeep");
     match post_workspace_file_write_opts(keep, String::new(), true, false, loc).await {
@@ -474,7 +471,7 @@ pub async fn post_chat_stream_cancel(job_id: u64, loc: Locale) -> Result<(), Str
     if body.cancelled {
         Ok(())
     } else {
-        Err("stream cancel rejected".into())
+        Err(i18n::api_err_stream_cancel_rejected(loc).into())
     }
 }
 
@@ -490,13 +487,13 @@ pub async fn post_config_reload(loc: Locale) -> Result<String, String> {
     let body: Body = fetch_json_with_body("POST", "/config/reload", "{}", loc).await?;
     if body.ok {
         Ok(if body.message.trim().is_empty() {
-            "配置已热重载".into()
+            i18n::api_err_config_reload_ok(loc).into()
         } else {
             body.message
         })
     } else {
         Err(if body.message.trim().is_empty() {
-            "配置热重载失败".into()
+            i18n::api_err_config_reload_failed(loc).into()
         } else {
             body.message
         })
@@ -694,10 +691,10 @@ pub struct ChatBranchResponse {
 /// `POST /chat/branch` 可能返回的错误类型。
 #[derive(Debug, Clone)]
 pub enum ChatBranchError {
-    /// 后端不认识该 `conversation_id`（HTTP 404）。
-    NotFound,
-    /// revision 冲突（HTTP 409）。
-    Conflict,
+    /// 后端不认识该 `conversation_id`（HTTP 404），文案已本地化。
+    NotFound(String),
+    /// revision 冲突（HTTP 409），文案已本地化。
+    Conflict(String),
     /// 其它错误。
     Other(String),
 }
@@ -705,16 +702,15 @@ pub enum ChatBranchError {
 impl ChatBranchError {
     fn from_response(resp: &Response, loc: Locale) -> Self {
         match resp.status() {
-            404 => ChatBranchError::NotFound,
-            409 => ChatBranchError::Conflict,
+            404 => ChatBranchError::NotFound(i18n::api_err_branch_not_found(loc)),
+            409 => ChatBranchError::Conflict(i18n::api_err_branch_conflict(loc)),
             _ => ChatBranchError::Other(crate::i18n::api_err_request_failed(loc).to_string()),
         }
     }
 
     pub fn as_deref(&self) -> &str {
         match self {
-            ChatBranchError::NotFound => "会话不存在或已过期",
-            ChatBranchError::Conflict => "会话 revision 冲突",
+            ChatBranchError::NotFound(s) | ChatBranchError::Conflict(s) => s,
             ChatBranchError::Other(s) => s,
         }
     }

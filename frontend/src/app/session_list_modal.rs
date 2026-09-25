@@ -35,6 +35,11 @@ fn SessionListModalPanel(session_modal: RwSignal<bool>) -> impl IntoView {
                 </button>
             </div>
             <div class="modal-body">
+                <Show when=move || chat.sessions.get().is_empty()>
+                    <p class="session-modal-empty" role="status">
+                        {move || i18n::session_modal_empty(locale.get())}
+                    </p>
+                </Show>
                 {move || {
                     sorted_sessions_clone(&chat.sessions.get())
                         .into_iter()

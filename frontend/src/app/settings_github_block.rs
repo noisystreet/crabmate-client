@@ -477,7 +477,11 @@ fn clear_client_id_disabled(busy: bool, set: bool) -> bool {
 }
 
 fn client_id_input_placeholder(set: bool) -> &'static str {
-    if set { "••••••••" } else { "" }
+    if set {
+        i18n::SECRET_MASK_PLACEHOLDER
+    } else {
+        ""
+    }
 }
 
 #[component]
