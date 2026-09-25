@@ -53,7 +53,7 @@ async fn seed_and_reload(
 // prefs-theme.spec.ts: dark theme from user-data/prefs applies data-theme
 // ---------------------------------------------------------------------------
 e2e_test!(dark_theme_applies_data_theme_on_load, |client| async move {
-    seed_and_reload(&mut client, "s_e2e_theme", "dark", "hidden", 280).await;
+    seed_and_reload(&mut client, "s_e2e_theme", "crabmate-dark", "hidden", 280).await;
 
     // 等待页面重新加载
     client
@@ -69,7 +69,10 @@ e2e_test!(dark_theme_applies_data_theme_on_load, |client| async move {
         .as_str()
         .unwrap_or("")
         .to_string();
-    assert_eq!(theme, "dark", "expected data-theme='dark', got '{theme}'");
+    assert_eq!(
+        theme, "crabmate-dark",
+        "expected data-theme='crabmate-dark', got '{theme}'"
+    );
 });
 
 // ---------------------------------------------------------------------------
@@ -78,7 +81,14 @@ e2e_test!(dark_theme_applies_data_theme_on_load, |client| async move {
 e2e_test!(
     workspace_panel_opens_on_load_when_prefs_say_workspace,
     |client| async move {
-        seed_and_reload(&mut client, "s_e2e_side", "light", "workspace", 320).await;
+        seed_and_reload(
+            &mut client,
+            "s_e2e_side",
+            "crabmate-light",
+            "workspace",
+            320,
+        )
+        .await;
 
         // 等待主页面出现
         client

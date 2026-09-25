@@ -50,7 +50,7 @@ test.describe("状态栏 prefs 污染链（窄视口 echo PUT → server 整写�
     const seed = await page.request.put(apiUrl("/user-data/prefs"), {
       data: {
         locale: "zh-Hans",
-        theme: "light",
+        theme: "crabmate-light",
         side_panel_view: "hidden",
         side_width: 280,
         editor_layout_mode: false,

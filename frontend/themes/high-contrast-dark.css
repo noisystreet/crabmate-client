@@ -1,8 +1,8 @@
 /*
- * 高对比度深色（data-theme="high-contrast"）：浅于纯黑的底 + 白/灰字 + 无彩色强调（黑白灰），可读性仍高、避免荧光黄。
+ * 高对比度深色（data-theme="high-contrast-dark"）：浅于纯黑的底 + 白/灰字 + 无彩色强调（黑白灰），可读性仍高、避免荧光黄。
  * 见 themes/README.md。
  */
-:root[data-theme="high-contrast"] {
+:root[data-theme="high-contrast-dark"] {
   --bg: #161616;
   --bg-elevated: #1c1c1c;
   --surface: #242424;

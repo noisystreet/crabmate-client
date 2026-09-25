@@ -258,7 +258,7 @@ fn merge_llm_save_normalizes_blank_write_to_clear() {
 fn merge_prefs_save_preserves_unrelated_keys() {
     let base = UserPrefsDto {
         locale: Some("zh-CN".into()),
-        theme: Some("dark".into()),
+        theme: Some("crabmate-dark".into()),
         cm_role: Some("coder".into()),
         session_mode: Some("ask".into()),
         disable_readonly_tool_ttl_cache: Some(true),
@@ -273,7 +273,7 @@ fn merge_prefs_save_preserves_unrelated_keys() {
     assert_eq!(out.cm_role.as_deref(), Some("architect"));
     assert_eq!(out.session_mode, None, "Write(None) 清除该键");
     assert_eq!(out.locale.as_deref(), Some("zh-CN"), "locale 原样保留");
-    assert_eq!(out.theme.as_deref(), Some("dark"));
+    assert_eq!(out.theme.as_deref(), Some("crabmate-dark"));
     assert_eq!(out.disable_readonly_tool_ttl_cache, Some(true));
 }
 

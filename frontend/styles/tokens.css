@@ -1,13 +1,13 @@
 /* 设计 token：颜色、间距、排版、动效时长（业务样式见各模块文件）。
- * 默认 `:root` = 深色深空靛蓝（与 **`data-theme="dark"`** 一致；壳层写入该属性时不再额外覆盖）。
- * **`light` / `material` / `high-contrast`** 等离散预设见 **`frontend/themes/*.css`**（由 **`index.html`** 在本文之后加载）。
+ * 默认 `:root` = 深色深空靛蓝（与 **`data-theme="crabmate-dark"`** 一致；壳层写入该属性时不再额外覆盖）。
+ * **`crabmate-light` / `material-dark` / `high-contrast-dark`** 等离散预设见 **`frontend/themes/*.css`**（由 **`index.html`** 在本文之后加载）。
  * 主题覆层变量（--selection-bg、--page-bg-decor-*、--nav-rail-bg 等）在各主题块内赋值；新增预设见 **`themes/README.md`**。
  */
 
 :root {
   /* 原生控件（`<select>` 弹层、滚动条、表单）跟随的明暗基线：默认预设
-     （dark / material / high-contrast / shadcn）与 `:root` 同为深色，故这里写 dark；
-     浅色预设必须在自己的主题块内覆写为 `color-scheme: light`（见 themes/light.css）。
+     （crabmate-dark / material-dark / high-contrast-dark / shadcn-dark）与 `:root` 同为深色，故这里写 dark；
+     浅色预设必须在自己的主题块内覆写为 `color-scheme: light`（见 themes/crabmate-light.css）。
      它不是设计 token（不进并集校验），只在此处与浅色主题块出现。 */
   color-scheme: dark;
 

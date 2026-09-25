@@ -37,7 +37,7 @@ e2e_test!(get_put_prefs_roundtrip, |client| async move {
     // PUT 新 prefs
     let _ = client
         .eval_js(
-            "fetch('/user-data/prefs',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({locale:'en',theme:'dark',side_panel_view:'workspace',side_width:300})})"
+            "fetch('/user-data/prefs',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({locale:'en',theme:'crabmate-dark',side_panel_view:'workspace',side_width:300})})"
         )
         .await;
 
@@ -48,7 +48,7 @@ e2e_test!(get_put_prefs_roundtrip, |client| async move {
     )
     .await;
     assert_eq!(get1["locale"].as_str().unwrap_or(""), "en");
-    assert_eq!(get1["theme"].as_str().unwrap_or(""), "dark");
+    assert_eq!(get1["theme"].as_str().unwrap_or(""), "crabmate-dark");
     assert_eq!(get1["side_width"].as_i64().unwrap_or(0), 300);
 });
 

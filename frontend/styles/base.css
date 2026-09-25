@@ -53,7 +53,7 @@ body {
 }
 
 /* 极淡噪点纹理：仅浅色主题生效，增加纸质感 */
-:root[data-theme="light"] body::before {
+:root[data-theme="crabmate-light"] body::before {
   content: "";
   position: fixed;
   inset: 0;

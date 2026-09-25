@@ -1,8 +1,8 @@
 /*
- * 浅色主题（data-theme="light"）。
+ * CrabMate 浅色主题（data-theme="crabmate-light"）。
  * 见 themes/README.md：增删预设时请同步 Rust 白名单（app_prefs::THEME_SLUGS）与 index.html 引用链。
  */
-:root[data-theme="light"] {
+:root[data-theme="crabmate-light"] {
   /* 原生控件（`<select>` 弹层、滚动条、表单）随浅色；否则会继承 tokens.css `:root` 的 dark 基线 */
   color-scheme: light;
 
