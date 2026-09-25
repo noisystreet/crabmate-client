@@ -761,7 +761,7 @@
 }
 
 .chat-tui-tool-job-stderr {
-  color: color-mix(in srgb, var(--danger) 85%, var(--text));
+  color: color-mix(in srgb, var(--error) 85%, var(--text));
 }
 
 .chat-tui-tool-job-truncated {
@@ -1135,24 +1135,26 @@ html[lang="zh-CN"] .md-code-block__copy-zh {
   padding: 0.45em 0.75em;
 }
 
+/* GFM alert 五档 → 语义 token（note/tip/important/warning/caution）；混 --border 略降饱和，
+   但保留了各档色相，且随主题走（旧值硬编码 Tailwind 色板，切主题时五档边框不变）。 */
 .msg-md-prose blockquote.markdown-alert-note {
-  border-left-color: color-mix(in srgb, #3b82f6 70%, var(--border));
+  border-left-color: color-mix(in srgb, var(--info) 70%, var(--border));
 }
 
 .msg-md-prose blockquote.markdown-alert-tip {
-  border-left-color: color-mix(in srgb, #22c55e 70%, var(--border));
+  border-left-color: color-mix(in srgb, var(--success) 70%, var(--border));
 }
 
 .msg-md-prose blockquote.markdown-alert-important {
-  border-left-color: color-mix(in srgb, #a855f7 70%, var(--border));
+  border-left-color: color-mix(in srgb, var(--accent) 70%, var(--border));
 }
 
 .msg-md-prose blockquote.markdown-alert-warning {
-  border-left-color: color-mix(in srgb, #f59e0b 70%, var(--border));
+  border-left-color: color-mix(in srgb, var(--warn) 70%, var(--border));
 }
 
 .msg-md-prose blockquote.markdown-alert-caution {
-  border-left-color: color-mix(in srgb, #ef4444 70%, var(--border));
+  border-left-color: color-mix(in srgb, var(--error) 70%, var(--border));
 }
 
 /* GFM 任务列表：只读 checkbox（ammonia 强制 disabled；CSS 再禁指针） */
@@ -1376,8 +1378,8 @@ html[lang="zh-CN"] .md-code-block__copy-zh {
 }
 
 .composer-slash-menu-banner--err {
-  color: var(--danger);
-  background: rgba(207, 34, 46, 0.08);
+  color: var(--error);
+  background: var(--error-bg);
 }
 
 .composer-slash-menu-id {

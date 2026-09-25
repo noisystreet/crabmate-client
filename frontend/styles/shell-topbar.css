@@ -137,7 +137,7 @@ html[data-cm-mobile-shell] .shell-topbar {
   padding: 0 0.35rem;
   font-size: var(--text-2xs);
   line-height: 1.2;
-  color: var(--danger);
+  color: var(--error);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

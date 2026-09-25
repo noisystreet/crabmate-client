@@ -27,10 +27,6 @@
   --warn-bg: #282828;
   --error-bg: #2a2a2a;
 
-  --danger: var(--error);
-  --danger-bg: var(--error-bg);
-  --ok: var(--success);
-
   --shadow-raised:
     0 0 0 1px color-mix(in srgb, var(--border) 55%, transparent) inset,
     0 2px 0 rgba(255, 255, 255, 0.06) inset,
