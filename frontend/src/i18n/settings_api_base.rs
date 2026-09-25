@@ -40,10 +40,10 @@ pub fn settings_api_base_invalid(l: Locale) -> &'static str {
 pub fn settings_save_ok_browser_insecure_key(l: Locale) -> &'static str {
     match l {
         Locale::ZhHans => {
-            "已保存。当前不在桌面/移动壳内：模型密钥仅弱持久化在本浏览器（明文 localStorage），刷新后可用但不如系统钥匙串安全。正式使用请用 Desktop / Android 壳。"
+            "已保存（本浏览器弱持久化：明文 localStorage，不如系统钥匙串安全）。正式使用请用 Desktop / Android 壳。"
         }
         Locale::En => {
-            "Saved. Not running in the Desktop/Android shell: the model API key is weakly persisted in this browser (plaintext localStorage). Prefer the official shell for keyring/Keystore storage."
+            "Saved (plaintext localStorage in this browser; less safe than the system keyring). Prefer the official shell."
         }
     }
 }

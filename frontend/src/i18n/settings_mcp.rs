@@ -30,10 +30,10 @@ pub fn settings_mcp_timeout_label(l: Locale) -> &'static str {
 pub fn settings_mcp_enabled_missing_command(l: Locale, name: &str) -> String {
     match l {
         Locale::ZhHans => {
-            format!("已启用的服务器「{name}」须含 command 或 url，请用 JSON 导入或先禁用后再保存。")
+            format!("已启用服务器「{name}」缺 command/url：请用 JSON 导入或先禁用再保存。")
         }
         Locale::En => format!(
-            "Enabled server \"{name}\" needs a command or url; import via JSON or disable it before saving."
+            "Enabled server \"{name}\" lacks command/url: import via JSON or disable it before saving."
         ),
     }
 }
