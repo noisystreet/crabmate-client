@@ -113,14 +113,14 @@ class StreamKeepAliveService : Service() {
         CHANNEL_STREAM,
         getString(R.string.stream_keepalive_channel_stream),
         NotificationManager.IMPORTANCE_DEFAULT,
-      ),
+      ).apply { description = getString(R.string.stream_keepalive_channel_stream_desc) },
     )
     mgr.createNotificationChannel(
       NotificationChannel(
         CHANNEL_APPROVAL,
         getString(R.string.stream_keepalive_channel_approval),
         NotificationManager.IMPORTANCE_HIGH,
-      ),
+      ).apply { description = getString(R.string.stream_keepalive_channel_approval_desc) },
     )
   }
 
@@ -166,13 +166,15 @@ class StreamKeepAliveService : Service() {
       }
     val icon =
       if (awaitingApproval) {
-        android.R.drawable.stat_sys_warning
+        R.drawable.ic_stat_approval
       } else {
-        android.R.drawable.stat_notify_sync
+        R.drawable.ic_stat_stream
       }
     return NotificationCompat
       .Builder(this, channel)
       .setSmallIcon(icon)
+      // 通知强调色走设计令牌 cm_accent（同 Web 端 accent），不用系统默认品牌色。
+      .setColor(getColor(R.color.cm_accent))
       .setContentTitle(title)
       .setContentText(text)
       .setStyle(NotificationCompat.BigTextStyle().bigText(text))

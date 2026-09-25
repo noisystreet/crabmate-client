@@ -59,6 +59,14 @@ repos:
         always_run: true
         stages: [pre-commit]
 
+      - id: check-token-mirrors
+        name: design token mirrors (Android res / boot pages must mirror tokens.css :root)
+        entry: bash scripts/check-token-mirrors.sh
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
+
       - id: check-icons
         name: icons (no literal <svg> outside icon.rs; svg rule sizes must be var(--icon-*))
         entry: bash scripts/check-icons.sh

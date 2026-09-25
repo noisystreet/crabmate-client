@@ -1,19 +1,24 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
     <!-- Base application theme. -->
     <style name="Theme.crabmate_mobile" parent="Theme.MaterialComponents.DayNight.NoActionBar">
-        <!-- 与 Web 端 CSS 变量 bg（#07090E）对齐，冷启动 / 导航间隙不闪系统白或黑默认底。注意：XML 注释不允许出现连续两个减号，故不写变量名前的连字符 -->
-        <item name="android:windowBackground">#07090E</item>
-        <item name="android:colorBackground">#07090E</item>
-        <item name="android:statusBarColor">#07090E</item>
-        <item name="android:navigationBarColor">#07090E</item>
+        <!-- 底色一律引用设计令牌 cm_bg（同 Web 端 bg 令牌），冷启动 / 导航间隙不闪系统默认底。
+             注释内不写带连字符前缀的变量名：XML 注释禁止连续两个减号。 -->
+        <item name="android:windowBackground">@color/cm_bg</item>
+        <item name="android:colorBackground">@color/cm_bg</item>
+        <item name="android:statusBarColor">@color/cm_bg</item>
+        <item name="android:navigationBarColor">@color/cm_bg</item>
+        <!-- 系统栏恒为深色令牌底，故显式要求浅色（白色）系统栏图标。DayNight 的浅色变体默认用深色图标，
+             在深色状态栏上不可见；不依赖 parent 继承，避免换 parent 或删标志时静默回归。 -->
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="27">false</item>
     </style>
 
     <!-- 退出确认框（原生 Material AlertDialog）主题覆盖：配色/圆角对齐 Web 端弹窗，去掉 Material 默认浅色与紫调。
          组件风格门禁只覆盖 Web 侧 styles/themes，此处为 Android res，不受其约束。 -->
     <style name="ThemeOverlay.crabmate_mobile.ExitDialog" parent="ThemeOverlay.MaterialComponents.MaterialAlertDialog">
-        <item name="colorSurface">@color/cm_dialog_surface</item>
-        <item name="colorOnSurface">@color/cm_dialog_on_surface</item>
-        <item name="colorPrimary">@color/cm_dialog_accent</item>
+        <item name="colorSurface">@color/cm_surface</item>
+        <item name="colorOnSurface">@color/cm_text</item>
+        <item name="colorPrimary">@color/cm_accent</item>
         <item name="shapeAppearanceMediumComponent">@style/ShapeAppearance.crabmate_mobile.Dialog</item>
         <item name="materialAlertDialogTitleTextStyle">@style/TextAppearance.crabmate_mobile.DialogTitle</item>
         <item name="materialAlertDialogBodyTextStyle">@style/TextAppearance.crabmate_mobile.DialogBody</item>
@@ -26,10 +31,10 @@
     </style>
 
     <style name="TextAppearance.crabmate_mobile.DialogTitle" parent="MaterialAlertDialog.MaterialComponents.Title.Text">
-        <item name="android:textColor">@color/cm_dialog_on_surface</item>
+        <item name="android:textColor">@color/cm_text</item>
     </style>
 
     <style name="TextAppearance.crabmate_mobile.DialogBody" parent="MaterialAlertDialog.MaterialComponents.Body.Text">
-        <item name="android:textColor">@color/cm_dialog_muted</item>
+        <item name="android:textColor">@color/cm_muted</item>
     </style>
 </resources>

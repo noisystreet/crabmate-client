@@ -1,10 +1,16 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
-    <!-- Base application theme. -->
+    <!-- Base application theme（夜间限定目录：同名 style 是整体替换而非逐项合并，
+         故这里必须与 values/themes.xml 的应用主题保持逐项一致）。 -->
     <style name="Theme.crabmate_mobile" parent="Theme.MaterialComponents.DayNight.NoActionBar">
-        <!-- 与 Web 端 CSS 变量 bg（#07090E）对齐，冷启动 / 导航间隙不闪系统白或黑默认底。注意：XML 注释不允许出现连续两个减号，故不写变量名前的连字符 -->
-        <item name="android:windowBackground">#07090E</item>
-        <item name="android:colorBackground">#07090E</item>
-        <item name="android:statusBarColor">#07090E</item>
-        <item name="android:navigationBarColor">#07090E</item>
+        <!-- 底色一律引用设计令牌 cm_bg（同 Web 端 bg 令牌），冷启动 / 导航间隙不闪系统默认底。
+             注释内不写带连字符前缀的变量名：XML 注释禁止连续两个减号。 -->
+        <item name="android:windowBackground">@color/cm_bg</item>
+        <item name="android:colorBackground">@color/cm_bg</item>
+        <item name="android:statusBarColor">@color/cm_bg</item>
+        <item name="android:navigationBarColor">@color/cm_bg</item>
+        <!-- 系统栏恒为深色令牌底，故显式要求浅色（白色）系统栏图标。DayNight 的浅色变体默认用深色图标，
+             在深色状态栏上不可见；不依赖 parent 继承，避免换 parent 或删标志时静默回归。 -->
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar" tools:targetApi="27">false</item>
     </style>
 </resources>
