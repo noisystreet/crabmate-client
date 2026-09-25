@@ -172,7 +172,7 @@
 .changelist-modal-backdrop {
   position: absolute;
   inset: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: var(--scrim-bg);
   backdrop-filter: blur(3px);
   pointer-events: auto;
 }

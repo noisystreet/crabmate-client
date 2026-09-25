@@ -147,7 +147,7 @@ html[data-cm-mobile-shell] .composer-input--mirror-overlay {
     /* 仅覆盖抽屉左侧遮罩区，避免 Playwright/点击命中被 z-index:90 的抽屉挡住 */
     right: min(85vw, 22rem);
     z-index: 89;
-    background: rgba(0, 0, 0, 0.48);
+    background: var(--scrim-bg);
     backdrop-filter: blur(2px);
     animation: fade-in 0.2s ease;
   }

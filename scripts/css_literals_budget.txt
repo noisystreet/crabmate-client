@@ -9,13 +9,9 @@
 #
 # 目标是把存量逐文件清到 0，清理一处就下调一处预算。
 # 当前进度：font-size 已全量清到 0（Phase 1a，字号统一走 tokens.css 的 --text-* 档）；
-# 颜色已清 alert 五色、--danger 兼容别名（Phase 1b，语义色归一）与 inset 高光 / 强调底前景
-# （Phase 1c，走 --inset-highlight / --on-accent），故仅剩遮罩与浮层阴影。
+# 颜色已清 alert 五色、--danger 兼容别名（Phase 1b，语义色归一）、inset 高光 / 强调底前景
+# （Phase 1c，走 --inset-highlight / --on-accent）与遮罩 / 浮层阴影
+# （Phase 1d，走 --scrim-bg / --modal-backdrop-bg / --shadow-menu / --shadow-media / --shadow-knob），
+# 故仅剩壳层专用的固定红底白字不做 token 化（它的语义不随主题）。
 
-frontend/styles/layout-chat.css     font-size=0   color=1    # 1 处 rgba(0,0,0,.12) 浮层阴影待阴影 token
-frontend/styles/mobile.css          font-size=0   color=1    # 1 处 rgba(0,0,0,.48) 抽屉遮罩待 token 化
-frontend/styles/modal.css           font-size=0   color=1    # 1 处 rgb(0 0 0 / 18%) 浮层阴影待 token 化
-frontend/styles/shell-ds.css        font-size=0   color=3    # 2 处 color-mix(#000 …) 阴影 + 1 处 rgba(0,0,0,.48) 遮罩待 token 化
-frontend/styles/shell-topbar.css    font-size=0   color=2    # 2 处 rgba(0,0,0,.12) 浮层阴影待 token 化
-frontend/styles/sidebar.css         font-size=0   color=1    # 1 处 rgba(0,0,0,.5) 遮罩待 token 化
-frontend/styles/tauri-shell.css     font-size=0   color=2    # #c42b1c / #fff 为 Windows 关闭键红底白字，壳层专用
+frontend/styles/tauri-shell.css     font-size=0   color=2    # #c42b1c / #fff 为 Windows 关闭键红底白字，固定色语义不随主题，长期保留

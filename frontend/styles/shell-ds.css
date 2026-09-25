@@ -849,7 +849,7 @@ img[data-cm-ws-hydrated="1"] {
     max(24px, env(safe-area-inset-right, 0px))
     max(24px, env(safe-area-inset-bottom, 0px))
     max(24px, env(safe-area-inset-left, 0px));
-  background: color-mix(in srgb, #000 62%, transparent);
+  background: var(--modal-backdrop-bg);
   cursor: zoom-out;
 }
 
@@ -915,7 +915,7 @@ img[data-cm-ws-hydrated="1"] {
   max-height: 100%;
   object-fit: contain;
   border-radius: var(--radius-md);
-  box-shadow: 0 8px 32px color-mix(in srgb, #000 40%, transparent);
+  box-shadow: var(--shadow-media);
   cursor: default;
 }
 
@@ -1226,7 +1226,7 @@ img[data-cm-ws-hydrated="1"] {
     /* 仅覆盖抽屉右侧遮罩区，避免点击命中被 z-index:100 的 aside 挡住（与 .side-column-backdrop 同理） */
     left: min(var(--nav-rail-w), 88vw);
     z-index: 99;
-    background: rgba(0, 0, 0, 0.48);
+    background: var(--scrim-bg);
     backdrop-filter: blur(2px);
     animation: fade-in 0.2s ease;
   }
