@@ -27,6 +27,23 @@ pub fn settings_mcp_timeout_label(l: Locale) -> &'static str {
     }
 }
 
+/// MCP 工具调用超时输入非法（空 / 非整数 / < 1）：提示并说明未改动当前生效值。
+pub fn settings_mcp_timeout_invalid(l: Locale, current: u64) -> String {
+    match l {
+        Locale::ZhHans => format!("超时须为 ≥1 的整数秒，当前仍为 {current} 秒"),
+        Locale::En => {
+            format!("Timeout must be a whole number of seconds ≥ 1; still {current} s")
+        }
+    }
+}
+
+pub fn settings_mcp_servers_empty(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "还没有 MCP 服务器：在上方粘贴 JSON 后点「解析并添加到列表」导入。",
+        Locale::En => "No MCP servers yet: paste JSON above, then click Parse and add to list.",
+    }
+}
+
 pub fn settings_mcp_enabled_missing_command(l: Locale, name: &str) -> String {
     match l {
         Locale::ZhHans => {

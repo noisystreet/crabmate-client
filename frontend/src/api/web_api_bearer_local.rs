@@ -16,6 +16,7 @@ use super::browser::{
     write_local_storage_web_api_bearer,
 };
 use super::llm_secrets_local::PersistKind;
+use crate::i18n::{self, load_locale_from_storage};
 
 thread_local! {
     static SECURE_HYDRATE_DONE: RefCell<bool> = const { RefCell::new(false) };
@@ -179,12 +180,17 @@ async fn persist_secure_bearer(value: &str) -> Result<PersistKind, String> {
                 TimeoutFuture::new(60 * (attempt + 1)).await;
             }
         }
-        return Err("Android Keystore 写入 Web API Bearer 失败".into());
+        return Err(i18n::api_err_keystore_write_bearer_failed(load_locale_from_storage()).into());
     }
     if bridge::has_tauri_connect_bearer_invoke() {
         JsFuture::from(bridge::invoke_set_connect_bearer(v))
             .await
-            .map_err(|e| format!("系统钥匙串写入失败: {}", js_err_to_string(&e)))?;
+            .map_err(|e| {
+                i18n::api_err_keychain_write_failed(
+                    load_locale_from_storage(),
+                    &js_err_to_string(&e),
+                )
+            })?;
         return Ok(PersistKind::Durable);
     }
     write_local_storage_web_api_bearer(v);

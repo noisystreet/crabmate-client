@@ -109,6 +109,13 @@ pub fn tasks_title(l: Locale) -> &'static str {
     }
 }
 
+pub fn tasks_empty(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "暂无任务。",
+        Locale::En => "No tasks yet.",
+    }
+}
+
 pub fn tasks_loading(l: Locale) -> &'static str {
     changelist_loading(l)
 }

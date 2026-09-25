@@ -84,6 +84,13 @@ pub fn nav_no_message_hits(l: Locale) -> &'static str {
     }
 }
 
+pub fn nav_no_session_hits(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "无匹配会话",
+        Locale::En => "No matching sessions",
+    }
+}
+
 pub fn nav_search_hits_region(l: Locale) -> &'static str {
     match l {
         Locale::ZhHans => "消息搜索结果",

@@ -41,6 +41,13 @@ fn draft_from_form_signals(s: &RegistryAddFormActionSignals) -> ManualPresetDraf
     }
 }
 
+/// 复用「保存全部」的同一条温度 / 上下文 token 校验，避免弹窗写入越界值。
+fn validate_manual_preset_overrides(d: &ManualPresetDraft, loc: Locale) -> Result<(), String> {
+    crate::app::settings_commit::validate_temperature_override(&d.temperature, loc)?;
+    crate::app::settings_commit::validate_llm_context_tokens_override(&d.ctx_tokens, loc)?;
+    Ok(())
+}
+
 fn enabled_for_dialog_mode(
     mode: Option<RegistryPresetDialogKind>,
     presets: RwSignal<Vec<SavedModelPreset>>,
@@ -104,20 +111,24 @@ fn merge_preset_into_list(
 /// 校验并持久化；成功返回 `true`（调用方关闭弹窗并重置字段）。
 pub(super) fn submit_registry_add_form(s: &RegistryAddFormActionSignals) -> bool {
     let d = draft_from_form_signals(s);
+    let loc = s.locale.get_untracked();
     let mode = s.dialog_mode.get_untracked();
     let enabled = enabled_for_dialog_mode(mode, s.saved_model_presets);
     let mut preset = match try_build_manual_saved_preset(&d, enabled) {
         Ok(p) => p,
         Err(()) => {
             s.form_error.set(Some(
-                i18n::settings_models_validation_required(s.locale.get()).to_string(),
+                i18n::settings_models_validation_required(loc).to_string(),
             ));
             return false;
         }
     };
+    if let Err(msg) = validate_manual_preset_overrides(&d, loc) {
+        s.form_error.set(Some(msg));
+        return false;
+    }
     preserve_edit_has_api_key_if_blank(mode, s.saved_model_presets, &mut preset);
     s.form_error.set(None);
-    let loc = s.locale.get_untracked();
     let mut next = s.saved_model_presets.with_untracked(|v| v.clone());
     let applied = preset.clone();
     let should_apply = should_apply_saved_preset(mode, s.apply_on_save, s.saved_model_presets);

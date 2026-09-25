@@ -160,7 +160,7 @@ fn bearer_status_label(locale: Locale, present: bool) -> &'static str {
 
 fn bearer_placeholder(present: bool) -> &'static str {
     if present {
-        "••••••••"
+        i18n::SECRET_MASK_PLACEHOLDER
     } else {
         ""
     }

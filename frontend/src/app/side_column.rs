@@ -16,6 +16,7 @@ use crate::workspace_context_menu::WorkspaceContextMenuActions;
 
 #[component]
 fn SideColumnTasksLoadedPane(
+    locale: RwSignal<Locale>,
     tasks_err: RwSignal<Option<String>>,
     tasks_data: RwSignal<TasksData>,
     toggle_task: Arc<dyn Fn(String) + Send + Sync>,
@@ -24,6 +25,9 @@ fn SideColumnTasksLoadedPane(
         <div class="side-card-loaded">
             <Show when=move || tasks_err.get().is_some()>
                 <div class="msg-error">{move || tasks_err.get().unwrap_or_default()}</div>
+            </Show>
+            <Show when=move || tasks_data.get().items.is_empty() && tasks_err.get().is_none()>
+                <p class="tasks-list-empty" role="status">{move || i18n::tasks_empty(locale.get())}</p>
             </Show>
             <ul class=move || {
                 if tasks_data.get().items.is_empty() {
@@ -112,6 +116,7 @@ fn SideColumnTasksCard(
                     </Show>
                     <Show when=move || !tasks_loading.get()>
                         <SideColumnTasksLoadedPane
+                            locale=locale
                             tasks_err=tasks_err
                             tasks_data=tasks_data
                             toggle_task=toggle_task.clone()
