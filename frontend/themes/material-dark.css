@@ -1,8 +1,8 @@
 /*
- * Material 深色（data-theme="material"）：炭黑层级 + Roboto + M3 圆角档。
+ * Material 深色（data-theme="material-dark"）：炭黑层级 + Roboto + M3 圆角档。
  * 见 themes/README.md。
  */
-:root[data-theme="material"] {
+:root[data-theme="material-dark"] {
   --font-sans: "Roboto", "DM Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
     "Helvetica Neue", Arial, sans-serif;
   --radius-xs: 4px;
@@ -91,6 +91,6 @@
 
 /* 禁用态底色是 accent 38% 混 surface 的浅灰（不是 --btn-primary-bg 渐变），
    --on-accent 的深字落在它上面只有 ≈2.9:1，故这里显式回到白字。 */
-:root[data-theme="material"] .btn-primary:disabled {
+:root[data-theme="material-dark"] .btn-primary:disabled {
   color: color-mix(in srgb, #fff 75%, transparent);
 }

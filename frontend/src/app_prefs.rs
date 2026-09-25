@@ -5,25 +5,31 @@ use std::sync::atomic::{AtomicI8, Ordering};
 use crate::api::StatusData;
 
 /// 偏好里可选的主题（含 **`system`**＝跟随 OS 明暗；解析到 CSS 见 [`resolve_data_theme_slug`]）。
+///
+/// 命名约定：浅色 `xxx-light`、深色 `xxx-dark`；`system` 无深浅之分故不加后缀。
+/// 深色基线为 **`crabmate-dark`**，由 `styles/tokens.css` 的 `:root` 提供（无独立 CSS 文件）。
 pub const THEME_SLUGS: &[&str] = &[
     "system",
-    "dark",
-    "light",
-    "material",
-    "high-contrast",
-    "shadcn",
+    "crabmate-dark",
+    "crabmate-light",
+    "material-dark",
+    "high-contrast-dark",
+    "shadcn-dark",
     "shadcn-light",
 ];
 
 /// 可写在 `<html data-theme>` 上的 CSS 预设（**不含** `system`）。
 pub const THEME_CSS_SLUGS: &[&str] = &[
-    "dark",
-    "light",
-    "material",
-    "high-contrast",
-    "shadcn",
+    "crabmate-dark",
+    "crabmate-light",
+    "material-dark",
+    "high-contrast-dark",
+    "shadcn-dark",
     "shadcn-light",
 ];
+
+/// 默认主题：偏好缺失或非法值（含**已废弃的旧 slug**，如 `light` / `dark` / `shadcn`）时的回退。
+pub const DEFAULT_THEME_SLUG: &str = "shadcn-light";
 
 pub const THEME_SYSTEM: &str = "system";
 
@@ -47,7 +53,7 @@ pub fn normalize_theme_slug(raw: &str) -> String {
     if THEME_SLUGS.contains(&t) {
         t.to_string()
     } else {
-        "light".to_string()
+        DEFAULT_THEME_SLUG.to_string()
     }
 }
 
@@ -97,14 +103,14 @@ fn media_query_list_matches(mql: &js_sys::Object) -> bool {
         .unwrap_or(false)
 }
 
-/// 将偏好 slug 解析为 CSS `data-theme`（`system` → `dark` / `light`）。
+/// 将偏好 slug 解析为 CSS `data-theme`（`system` → `crabmate-dark` / `crabmate-light`）。
 #[must_use]
 pub fn resolve_data_theme_slug(pref: &str) -> String {
     let pref = normalize_theme_slug(pref);
     let css = if pref == THEME_SYSTEM {
         match system_prefers_color_scheme_dark() {
-            Some(true) => "dark".to_string(),
-            Some(false) | None => "light".to_string(),
+            Some(true) => "crabmate-dark".to_string(),
+            Some(false) | None => "crabmate-light".to_string(),
         }
     } else {
         pref
@@ -112,7 +118,7 @@ pub fn resolve_data_theme_slug(pref: &str) -> String {
     if THEME_CSS_SLUGS.contains(&css.as_str()) {
         css
     } else {
-        "light".to_string()
+        DEFAULT_THEME_SLUG.to_string()
     }
 }
 
@@ -242,31 +248,57 @@ pub fn clamp_side_width_for_viewport(w: f64) -> f64 {
 
 #[cfg(test)]
 mod theme_slug_tests {
-    use super::{THEME_CSS_SLUGS, THEME_SYSTEM, normalize_theme_slug, resolve_data_theme_slug};
+    use super::{
+        DEFAULT_THEME_SLUG, THEME_CSS_SLUGS, THEME_SYSTEM, normalize_theme_slug,
+        resolve_data_theme_slug,
+    };
 
     #[test]
-    fn unknown_theme_falls_back_to_light() {
-        assert_eq!(normalize_theme_slug("nope"), "light");
+    fn unknown_theme_falls_back_to_default() {
+        assert_eq!(normalize_theme_slug("nope"), DEFAULT_THEME_SLUG);
+    }
+
+    #[test]
+    fn legacy_theme_slug_falls_back_to_default() {
+        // 旧 slug 不兼容，直接回退新默认（约定见 `THEME_SLUGS` 文档）。
+        assert_eq!(normalize_theme_slug("light"), DEFAULT_THEME_SLUG);
+        assert_eq!(normalize_theme_slug("dark"), DEFAULT_THEME_SLUG);
+        assert_eq!(normalize_theme_slug("material"), DEFAULT_THEME_SLUG);
+        assert_eq!(normalize_theme_slug("high-contrast"), DEFAULT_THEME_SLUG);
+        assert_eq!(normalize_theme_slug("shadcn"), DEFAULT_THEME_SLUG);
     }
 
     #[test]
     fn trims_whitespace() {
-        assert_eq!(normalize_theme_slug(" dark \n"), "dark");
+        assert_eq!(normalize_theme_slug(" crabmate-dark \n"), "crabmate-dark");
     }
 
     #[test]
-    fn material_accepted() {
-        assert_eq!(normalize_theme_slug("material"), "material");
+    fn crabmate_dark_accepted() {
+        assert_eq!(normalize_theme_slug("crabmate-dark"), "crabmate-dark");
     }
 
     #[test]
-    fn high_contrast_accepted() {
-        assert_eq!(normalize_theme_slug("high-contrast"), "high-contrast");
+    fn crabmate_light_accepted() {
+        assert_eq!(normalize_theme_slug("crabmate-light"), "crabmate-light");
     }
 
     #[test]
-    fn shadcn_accepted() {
-        assert_eq!(normalize_theme_slug("shadcn"), "shadcn");
+    fn material_dark_accepted() {
+        assert_eq!(normalize_theme_slug("material-dark"), "material-dark");
+    }
+
+    #[test]
+    fn high_contrast_dark_accepted() {
+        assert_eq!(
+            normalize_theme_slug("high-contrast-dark"),
+            "high-contrast-dark"
+        );
+    }
+
+    #[test]
+    fn shadcn_dark_accepted() {
+        assert_eq!(normalize_theme_slug("shadcn-dark"), "shadcn-dark");
     }
 
     #[test]
@@ -282,15 +314,18 @@ mod theme_slug_tests {
 
     #[test]
     fn resolve_non_system_unchanged() {
-        assert_eq!(resolve_data_theme_slug("material"), "material");
-        assert!(THEME_CSS_SLUGS.contains(&"material"));
+        assert_eq!(resolve_data_theme_slug("material-dark"), "material-dark");
+        assert!(THEME_CSS_SLUGS.contains(&"material-dark"));
     }
 
     #[test]
     fn resolve_system_is_css_dark_or_light() {
-        // 非 wasm 测到无 window → light；wasm 浏览器测可能为 dark/light。
+        // 非 wasm 测到无 window → crabmate-light；wasm 浏览器测可能为 crabmate-dark/light。
         let resolved = resolve_data_theme_slug("system");
-        assert!(resolved == "dark" || resolved == "light", "got {resolved}");
+        assert!(
+            resolved == "crabmate-dark" || resolved == "crabmate-light",
+            "got {resolved}"
+        );
         assert!(!THEME_CSS_SLUGS.contains(&THEME_SYSTEM));
     }
 }

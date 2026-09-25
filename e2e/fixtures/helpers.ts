@@ -36,7 +36,7 @@ export async function seedSession(page: Page, sid: string) {
 
   const prefs = {
     locale: "zh",
-    theme: "light",
+    theme: "crabmate-light",
     side_panel_view: "hidden",
     side_width: 280,
     editor_layout_mode: false,
@@ -478,7 +478,7 @@ export async function setupRealLLMSession(
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           locale: "zh",
-          theme: "light",
+          theme: "crabmate-light",
           side_panel_view: "hidden",
           side_width: 280,
           editor_layout_mode: false,
@@ -588,7 +588,7 @@ export async function setupRealLLMSessionPreferringKeyring(
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           locale: "zh",
-          theme: "light",
+          theme: "crabmate-light",
           side_panel_view: "hidden",
           side_width: 280,
           editor_layout_mode: false,

@@ -12,7 +12,7 @@
 2. **CSS `data-URI`** —— 把 SVG 编码进自定义属性，再由 `background` 消费（1 个 token，主题各一份）。
 3. **文本字形** —— 用 Unicode 字符当图标（`×` `‹` `▾` `✓` `●` …）。
 
-三套机制各自可用，但当主题从 1 套（深色默认）扩到 6 套（`:root` + `light` / `material` / `high-contrast` / `shadcn` / `shadcn-light`）后，成本开始显性化：data-URI 每加一个主题就要复制一份并重新编码色值；内联 SVG 的属性模板手抄 18 次，任一处漏改就与其余不一致；文本字形的字形表现依赖系统字体，跨平台（WebKitGTK / Android WebView）不稳定。本方案给出收敛路径。
+三套机制各自可用，但当主题从 1 套（深色默认）扩到 6 套（`:root` + `crabmate-light` / `material-dark` / `high-contrast-dark` / `shadcn-dark` / `shadcn-light`）后，成本开始显性化：data-URI 每加一个主题就要复制一份并重新编码色值；内联 SVG 的属性模板手抄 18 次，任一处漏改就与其余不一致；文本字形的字形表现依赖系统字体，跨平台（WebKitGTK / Android WebView）不稳定。本方案给出收敛路径。
 
 ## 目标与非目标
 
@@ -71,10 +71,10 @@ fn svg_common() -> (&'static str, &'static str, &'static str, &'static str, &'st
 | 定义处 | 烧入色值 |
 |---|---|
 | [tokens.css](file:///home/gzz/crabmate/client/frontend/styles/tokens.css#L148)（默认深色） | `#9099b4` |
-| [light.css](file:///home/gzz/crabmate/client/frontend/themes/light.css#L74) | `#6b6357` |
-| [material.css](file:///home/gzz/crabmate/client/frontend/themes/material.css#L70) | `#97979f` |
-| [high-contrast.css](file:///home/gzz/crabmate/client/frontend/themes/high-contrast.css#L55) | `#c8c8c8` |
-| [shadcn.css](file:///home/gzz/crabmate/client/frontend/themes/shadcn.css#L75) | `#a1a1aa` |
+| [crabmate-light.css](file:///home/gzz/crabmate/client/frontend/themes/crabmate-light.css#L74) | `#6b6357` |
+| [material-dark.css](file:///home/gzz/crabmate/client/frontend/themes/material-dark.css#L70) | `#97979f` |
+| [high-contrast-dark.css](file:///home/gzz/crabmate/client/frontend/themes/high-contrast-dark.css#L55) | `#c8c8c8` |
+| [shadcn-dark.css](file:///home/gzz/crabmate/client/frontend/themes/shadcn-dark.css#L75) | `#a1a1aa` |
 | [shadcn-light.css](file:///home/gzz/crabmate/client/frontend/themes/shadcn-light.css#L80) | `#696971` |
 
 唯一消费点：[status.css:356](file:///home/gzz/crabmate/client/frontend/styles/status.css#L356)。**每新增一个主题就要复制一份。**

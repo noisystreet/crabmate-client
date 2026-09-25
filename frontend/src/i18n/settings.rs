@@ -129,38 +129,38 @@ pub fn settings_theme_system(l: Locale) -> &'static str {
     }
 }
 
-pub fn settings_theme_dark(l: Locale) -> &'static str {
+pub fn settings_theme_crabmate_dark(l: Locale) -> &'static str {
     match l {
-        Locale::ZhHans => "深色",
-        Locale::En => "Dark",
+        Locale::ZhHans => "CrabMate 深色",
+        Locale::En => "CrabMate Dark",
     }
 }
 
-pub fn settings_theme_light(l: Locale) -> &'static str {
+pub fn settings_theme_crabmate_light(l: Locale) -> &'static str {
     match l {
-        Locale::ZhHans => "浅色",
-        Locale::En => "Light",
+        Locale::ZhHans => "CrabMate 浅色",
+        Locale::En => "CrabMate Light",
     }
 }
 
-pub fn settings_theme_material(l: Locale) -> &'static str {
+pub fn settings_theme_material_dark(l: Locale) -> &'static str {
     match l {
-        Locale::ZhHans => "Material",
-        Locale::En => "Material",
+        Locale::ZhHans => "Material 深色",
+        Locale::En => "Material Dark",
     }
 }
 
-pub fn settings_theme_high_contrast(l: Locale) -> &'static str {
+pub fn settings_theme_high_contrast_dark(l: Locale) -> &'static str {
     match l {
-        Locale::ZhHans => "高对比度",
-        Locale::En => "High contrast",
+        Locale::ZhHans => "高对比度深色",
+        Locale::En => "High contrast dark",
     }
 }
 
-pub fn settings_theme_shadcn(l: Locale) -> &'static str {
+pub fn settings_theme_shadcn_dark(l: Locale) -> &'static str {
     match l {
-        Locale::ZhHans => "Shadcn",
-        Locale::En => "Shadcn",
+        Locale::ZhHans => "Shadcn 深色",
+        Locale::En => "Shadcn Dark",
     }
 }
 
@@ -174,13 +174,13 @@ pub fn settings_theme_shadcn_light(l: Locale) -> &'static str {
 pub fn settings_theme_preset_label(l: Locale, slug: &str) -> &'static str {
     match slug {
         "system" => settings_theme_system(l),
-        "dark" => settings_theme_dark(l),
-        "light" => settings_theme_light(l),
-        "material" => settings_theme_material(l),
-        "high-contrast" => settings_theme_high_contrast(l),
-        "shadcn" => settings_theme_shadcn(l),
+        "crabmate-dark" => settings_theme_crabmate_dark(l),
+        "crabmate-light" => settings_theme_crabmate_light(l),
+        "material-dark" => settings_theme_material_dark(l),
+        "high-contrast-dark" => settings_theme_high_contrast_dark(l),
+        "shadcn-dark" => settings_theme_shadcn_dark(l),
         "shadcn-light" => settings_theme_shadcn_light(l),
-        _ => settings_theme_dark(l),
+        _ => settings_theme_shadcn_light(l),
     }
 }
 

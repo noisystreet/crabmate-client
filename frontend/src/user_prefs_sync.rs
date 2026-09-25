@@ -128,11 +128,13 @@ pub fn build_prefs_dto(app: &AppSignals) -> UserPrefsDto {
 }
 
 fn apply_shell_appearance_prefs(app: &AppSignals, dto: &UserPrefsDto) {
-    if let Some(ref t) = dto.theme {
-        app.shell_ui
-            .theme
-            .set(crate::app_prefs::normalize_theme_slug(t));
-    }
+    // `theme` 缺失（新用户 / 服务端未存）时落默认主题：否则信号会停在首帧的深色基线，
+    // 新用户就得不到默认主题。
+    let theme = match dto.theme.as_deref() {
+        Some(t) => crate::app_prefs::normalize_theme_slug(t),
+        None => crate::app_prefs::DEFAULT_THEME_SLUG.to_string(),
+    };
+    app.shell_ui.theme.set(theme);
     if let Some(b) = dto.bg_decor {
         app.shell_ui.bg_decor.set(b);
     }

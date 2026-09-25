@@ -1,6 +1,6 @@
 /*
  * shadcn 风格浅色（data-theme="shadcn-light"）：zinc 中性浅底 + 1px 细边框 + 克制的蓝强调 + Inter 字体。
- * 与 `shadcn.css` 同一套设计语言，只是把层级翻到浅色侧（shadcn/ui 的实际默认即浅色 zinc）。
+ * 与 `shadcn-dark.css` 同一套设计语言，只是把层级翻到浅色侧（shadcn/ui 的实际默认即浅色 zinc）。
  * 只借用 shadcn/ui 的设计语言（配色 / 圆角 / 层级），不引入 Tailwind 或组件库；见 themes/README.md。
  */
 :root[data-theme="shadcn-light"] {
@@ -9,7 +9,7 @@
 
   --font-sans: "Inter", "DM Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
     "Helvetica Neue", Arial, sans-serif;
-  /* 与 shadcn.css 同一档圆角：lg = shadcn --radius 0.5rem（8px），xl = radius + 4 */
+  /* 与 shadcn-dark.css 同一档圆角：lg = shadcn --radius 0.5rem（8px），xl = radius + 4 */
   --radius-xs: 4px;
   --radius-sm: 6px;
   --radius-md: 8px;

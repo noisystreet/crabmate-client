@@ -239,7 +239,7 @@ mod settings_form_ui_phase_tests {
     fn sample_current(llm_model_draft: &str) -> SettingsFormCurrent {
         SettingsFormCurrent {
             appearance_locale: crate::i18n::Locale::ZhHans,
-            appearance_theme: "dark".into(),
+            appearance_theme: "crabmate-dark".into(),
             appearance_bg_decor: false,
             llm_api_base_draft: String::new(),
             llm_api_base_preset_select: "server".into(),

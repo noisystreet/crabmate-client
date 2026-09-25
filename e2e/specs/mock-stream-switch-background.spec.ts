@@ -38,7 +38,7 @@ async function seedTwoSessions(page: Page) {
 
   const prefs = {
     locale: "zh",
-    theme: "light",
+    theme: "crabmate-light",
     side_panel_view: "hidden",
     side_width: 280,
     editor_layout_mode: false,
