@@ -5,6 +5,5 @@ mod section_display;
 mod section_editor;
 mod section_font;
 mod view;
-mod view_header;
 
 pub use view::{IdeSettingsPageView, IdeSettingsPageViewInput};

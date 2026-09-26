@@ -8,7 +8,6 @@ use crate::ide_confirm::{IdeConfirmPrompt, IdeConfirmResult, IdeConfirmSignals};
 #[derive(Clone, Copy)]
 pub struct ModalSignals {
     pub session_modal: RwSignal<bool>,
-    pub settings_modal: RwSignal<bool>,
     pub settings_page: RwSignal<bool>,
     pub ide_settings_page: RwSignal<bool>,
     pub changelist_modal_open: RwSignal<bool>,
@@ -24,7 +23,6 @@ impl ModalSignals {
     pub fn new() -> Self {
         Self {
             session_modal: RwSignal::new(false),
-            settings_modal: RwSignal::new(false),
             settings_page: RwSignal::new(false),
             ide_settings_page: RwSignal::new(false),
             changelist_modal_open: RwSignal::new(false),

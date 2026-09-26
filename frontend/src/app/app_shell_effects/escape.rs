@@ -31,7 +31,6 @@ pub struct ShellEscapeSignals {
     pub side_panel_view: RwSignal<crate::app_prefs::SidePanelView>,
     pub is_narrow_viewport: RwSignal<bool>,
     pub changelist_modal_open: RwSignal<bool>,
-    pub settings_modal: RwSignal<bool>,
     pub settings_page: RwSignal<bool>,
     pub ide_settings_page: RwSignal<bool>,
     pub session_modal: RwSignal<bool>,
@@ -155,13 +154,6 @@ fn dismiss_shell_escape_layers(shell: ShellEscapeSignals) -> bool {
 fn dismiss_modal_escape_layers(shell: ShellEscapeSignals) -> bool {
     if shell.changelist_modal_open.get_untracked() {
         shell.changelist_modal_open.set(false);
-        return true;
-    }
-    if shell.settings_modal.get_untracked() {
-        // 脏表单先确认「放弃未保存更改」，未注册处理器时回退为直接关闭。
-        if !crate::app::settings_close_guard::request_settings_modal_close() {
-            shell.settings_modal.set(false);
-        }
         return true;
     }
     if shell.settings_page.get_untracked() {

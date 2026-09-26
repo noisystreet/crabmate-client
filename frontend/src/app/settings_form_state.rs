@@ -10,7 +10,7 @@ pub(crate) type AppearanceBaseline = (Locale, String, bool);
 pub(crate) type LlmBaseline = (String, String, String, String, String, String, bool);
 pub(crate) type ExecutorBaseline = (String, String, String, bool);
 
-/// 设置弹窗 / 设置页「已提交快照」：`StoredValue` 三元组打包，避免在 dirty / 放弃 / 保存成功路径上重复传三个句柄。
+/// 设置页「已提交快照」：`StoredValue` 三元组打包，避免在 dirty / 放弃 / 保存成功路径上重复传三个句柄。
 #[derive(Clone, Copy)]
 pub(crate) struct SettingsDirtyBaselines {
     pub appearance: StoredValue<AppearanceBaseline>,

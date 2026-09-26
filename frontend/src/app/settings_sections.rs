@@ -68,15 +68,16 @@ fn SettingsThemeSelectBlock(
 ) -> impl IntoView {
     view! {
         <div class="settings-block">
-            <label class="settings-field-label" for=theme_select_id>
-                {move || i18n::settings_block_theme(locale.get())}
-            </label>
-            <select
-                id=theme_select_id
-                class="settings-select"
-                prop:value=move || appearance_theme.get()
-                on:change=move |ev| appearance_theme.set(event_target_value(&ev))
-            >
+            <div class="settings-field">
+                <label class="settings-field-label" for=theme_select_id>
+                    {move || i18n::settings_block_theme(locale.get())}
+                </label>
+                <select
+                    id=theme_select_id
+                    class="settings-select"
+                    prop:value=move || appearance_theme.get()
+                    on:change=move |ev| appearance_theme.set(event_target_value(&ev))
+                >
                     {THEME_SLUGS.iter().copied().map(|slug| {
                         view! {
                             <option value=slug>
@@ -85,6 +86,7 @@ fn SettingsThemeSelectBlock(
                         }
                     }).collect_view()}
                 </select>
+            </div>
         </div>
     }
 }
@@ -226,7 +228,7 @@ pub(crate) fn SettingsWebApiBearerBlock(
 
     view! {
         <div
-            class="settings-block settings-block--web-api-auth"
+            class="settings-block settings-block--emphasis"
             data-testid="settings-web-api-bearer-block"
         >
             <h3 class="settings-block-title">
@@ -314,23 +316,25 @@ pub(crate) fn SettingsApiBaseBlock(
 
     view! {
         <div
-            class="settings-block settings-block--api-base"
+            class="settings-block settings-block--emphasis"
             data-testid="settings-api-base-block"
         >
-            <label class="settings-field-label" for=input_id>
-                {move || i18n::settings_block_api_base(locale.get())}
-            </label>
             <SettingsInstantApplyHint locale=locale />
-            <input
-                id=input_id
-                class="settings-text-input"
-                type="url"
-                autocomplete="off"
-                placeholder="http://127.0.0.1:8080"
-                data-testid="settings-api-base-input"
-                prop:value=move || draft.get()
-                on:input=move |ev| draft.set(event_target_value(&ev))
-            />
+            <div class="settings-field">
+                <label class="settings-field-label" for=input_id>
+                    {move || i18n::settings_block_api_base(locale.get())}
+                </label>
+                <input
+                    id=input_id
+                    class="settings-text-input"
+                    type="url"
+                    autocomplete="off"
+                    placeholder="http://127.0.0.1:8080"
+                    data-testid="settings-api-base-input"
+                    prop:value=move || draft.get()
+                    on:input=move |ev| draft.set(event_target_value(&ev))
+                />
+            </div>
             <button
                 type="button"
                 class="btn btn-primary btn-sm"
@@ -375,7 +379,7 @@ pub(crate) fn SettingsLlmBlock(bundle: SettingsLlmBlockBundle) -> impl IntoView 
         llm_thinking_mode_draft,
     };
     view! {
-        <div class="settings-block settings-block--llm-cloud">
+        <div class="settings-block">
             <h3 class="settings-block-title">{move || i18n::settings_block_llm(locale.get())}</h3>
             <LlmSavedPresetPicker
                 locale

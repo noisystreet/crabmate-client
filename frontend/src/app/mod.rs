@@ -40,8 +40,6 @@ mod settings_mcp_server_row;
 mod settings_mcp_server_row_actions;
 mod settings_mcp_status;
 mod settings_mcp_tools_list;
-mod settings_modal;
-mod settings_modal_dialog;
 mod settings_models_registry;
 mod settings_page;
 mod settings_sections;
@@ -84,7 +82,6 @@ use ide_layout_switch::IdeLayoutToggleSignals;
 use ide_settings_page::IdeSettingsPageView;
 use mobile_shell_header::mobile_shell_header_view;
 use session_list_modal::session_list_modal_view;
-use settings_modal::settings_modal_view;
 use settings_page::SettingsPageView;
 use shell_confirm_dialog::ShellConfirmDialog;
 use shell_runtime_context::ChatShellLeptosContext;
@@ -143,7 +140,6 @@ pub fn App() -> impl IntoView {
     let ide_settings_page_view_input = app_ctx.ide_settings_page_view_input();
     let mobile_shell_header_signals = app_ctx.mobile_shell_header_signals();
     let changelist_modal_signals = app_ctx.changelist_modal_signals();
-    let settings_modal_signals = app_ctx.settings_modal_signals();
     let session_list_modal_signals = app_ctx.session_list_modal_signals();
     let workspace_project_modal_signals = app_ctx.workspace_project_modal_signals();
     let workspace_clone_modal_signals = app_ctx.workspace_clone_modal_signals();
@@ -235,8 +231,6 @@ pub fn App() -> impl IntoView {
             {workspace_clone_modal_view(workspace_clone_modal_signals)}
 
             {workspace_browser_pick_modal_view(workspace_browser_pick_modal_signals)}
-
-            {settings_modal_view(settings_modal_signals)}
 
             {changelist_modal_view(changelist_modal_signals)}
 

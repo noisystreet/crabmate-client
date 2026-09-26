@@ -1,4 +1,4 @@
-//! 设置弹窗/页面打开时，用 **`localStorage`** 与 **`/status`** 快照填充 LLM 草稿（高频订阅 `settings_modal` / `settings_page`，**不**订阅 `sessions`）。
+//! 设置页面打开时，用 **`localStorage`** 与 **`/status`** 快照填充 LLM 草稿（高频订阅 `settings_page`，**不**订阅 `sessions`）。
 
 use leptos::prelude::*;
 
@@ -16,19 +16,17 @@ fn status_snapshot_for_llm_drafts(status_tasks: &StatusTasksSignals) -> Option<S
     status_tasks.status_data.get_untracked()
 }
 
-/// 打开设置弹窗或设置页面时，用 **`localStorage`** 与 **`/status`** 快照填充 LLM 草稿区（缩短 [`wire_settings_modal_llm_drafts_on_open`] 形参列表）。
+/// 打开设置页面时，用 **`localStorage`** 与 **`/status`** 快照填充 LLM 草稿区（缩短 [`wire_settings_llm_drafts_on_open`] 形参列表）。
 #[derive(Clone, Copy)]
-pub struct WireSettingsModalLlmDraftsSignals {
-    pub settings_modal: RwSignal<bool>,
+pub struct WireSettingsLlmDraftsSignals {
     pub settings_page: RwSignal<bool>,
     pub status_tasks: StatusTasksSignals,
     pub llm: LLMSettingsSignals,
 }
 
-/// 打开设置弹窗或设置页面时，用 **`localStorage`** 与 **`/status`** 快照填充 LLM 草稿区。
-pub fn wire_settings_modal_llm_drafts_on_open(s: WireSettingsModalLlmDraftsSignals) {
-    let WireSettingsModalLlmDraftsSignals {
-        settings_modal,
+/// 打开设置页面时，用 **`localStorage`** 与 **`/status`** 快照填充 LLM 草稿区。
+pub fn wire_settings_llm_drafts_on_open(s: WireSettingsLlmDraftsSignals) {
+    let WireSettingsLlmDraftsSignals {
         settings_page,
         status_tasks,
         llm:
@@ -53,7 +51,7 @@ pub fn wire_settings_modal_llm_drafts_on_open(s: WireSettingsModalLlmDraftsSigna
             },
     } = s;
     Effect::new(move |_| {
-        if !settings_modal.get() && !settings_page.get() {
+        if !settings_page.get() {
             return;
         }
         let (stored_base, stored_model, stored_temperature, stored_ctx_tokens, stored_thinking) =

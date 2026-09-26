@@ -12,40 +12,27 @@ use crate::app_prefs::THEME_SYSTEM;
 use crate::i18n::Locale;
 use crate::tauri_shell::{tauri_fetch_os_prefers_dark_hint, tauri_shell_available};
 
-/// 已提交主题 + 设置壳开关：OS `prefers-color-scheme` 变化时勿冲掉外观草稿预览。
+/// 已提交主题 + 设置页开关：OS `prefers-color-scheme` 变化时勿冲掉外观草稿预览。
 pub struct WireSyncThemeSignals {
     pub theme: RwSignal<String>,
-    pub settings_modal: RwSignal<bool>,
     pub settings_page: RwSignal<bool>,
 }
 
-fn settings_shell_open(settings_modal: RwSignal<bool>, settings_page: RwSignal<bool>) -> bool {
-    settings_modal.get_untracked() || settings_page.get_untracked()
+fn settings_shell_open(settings_page: RwSignal<bool>) -> bool {
+    settings_page.get_untracked()
 }
 
-fn should_refresh_system_theme(
-    theme: RwSignal<String>,
-    settings_modal: RwSignal<bool>,
-    settings_page: RwSignal<bool>,
-) -> bool {
-    theme.get_untracked() == THEME_SYSTEM && !settings_shell_open(settings_modal, settings_page)
+fn should_refresh_system_theme(theme: RwSignal<String>, settings_page: RwSignal<bool>) -> bool {
+    theme.get_untracked() == THEME_SYSTEM && !settings_shell_open(settings_page)
 }
 
-fn refresh_system_theme_dom_if_idle(
-    theme: RwSignal<String>,
-    settings_modal: RwSignal<bool>,
-    settings_page: RwSignal<bool>,
-) {
-    if should_refresh_system_theme(theme, settings_modal, settings_page) {
+fn refresh_system_theme_dom_if_idle(theme: RwSignal<String>, settings_page: RwSignal<bool>) {
+    if should_refresh_system_theme(theme, settings_page) {
         shell_prefs_storage::persist_theme_to_storage_and_dom(THEME_SYSTEM);
     }
 }
 
-fn attach_prefers_color_scheme_listener(
-    theme: RwSignal<String>,
-    settings_modal: RwSignal<bool>,
-    settings_page: RwSignal<bool>,
-) {
+fn attach_prefers_color_scheme_listener(theme: RwSignal<String>, settings_page: RwSignal<bool>) {
     let Some(window) = web_sys::window() else {
         return;
     };
@@ -71,7 +58,7 @@ fn attach_prefers_color_scheme_listener(
         return;
     };
     let cb = Closure::<dyn FnMut(web_sys::Event)>::new(move |_| {
-        if settings_shell_open(settings_modal, settings_page) {
+        if settings_shell_open(settings_page) {
             return;
         }
         if theme.get_untracked() != THEME_SYSTEM {
@@ -81,7 +68,7 @@ fn attach_prefers_color_scheme_listener(
         if tauri_shell_available() {
             spawn_local(async move {
                 let _ = tauri_fetch_os_prefers_dark_hint().await;
-                refresh_system_theme_dom_if_idle(theme, settings_modal, settings_page);
+                refresh_system_theme_dom_if_idle(theme, settings_page);
             });
         } else {
             shell_prefs_storage::persist_theme_to_storage_and_dom(THEME_SYSTEM);
@@ -94,7 +81,6 @@ fn attach_prefers_color_scheme_listener(
 
 pub fn wire_sync_theme_to_storage_and_dom(sig: WireSyncThemeSignals) {
     let theme = sig.theme;
-    let settings_modal = sig.settings_modal;
     let settings_page = sig.settings_page;
     Effect::new(move |_| {
         shell_prefs_storage::persist_theme_to_storage_and_dom(&theme.get());
@@ -103,14 +89,14 @@ pub fn wire_sync_theme_to_storage_and_dom(sig: WireSyncThemeSignals) {
     if tauri_shell_available() {
         spawn_local(async move {
             if tauri_fetch_os_prefers_dark_hint().await.is_some() {
-                refresh_system_theme_dom_if_idle(theme, settings_modal, settings_page);
+                refresh_system_theme_dom_if_idle(theme, settings_page);
             }
         });
     }
     // 一次性监听 OS 明暗；仅当偏好为 `system` 且设置未打开时重刷 `data-theme`。
     // 设置打开时由外观草稿 Effect 独占 DOM，避免预览被 OS 变化冲掉。
     Effect::new(move |_| {
-        attach_prefers_color_scheme_listener(theme, settings_modal, settings_page);
+        attach_prefers_color_scheme_listener(theme, settings_page);
     });
 }
 

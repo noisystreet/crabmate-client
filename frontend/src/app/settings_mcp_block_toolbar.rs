@@ -10,6 +10,9 @@ use super::settings_toggle_switch::SettingsToggleSwitch;
 use crate::api::user_data::McpServersFileDto;
 use crate::i18n::{self, Locale};
 
+/// 超时输入框 id（整个 MCP 块只渲染一次，用静态 id 即可让 label 关联到控件）。
+const TIMEOUT_INPUT_ID: &str = "settings-mcp-timeout-input";
+
 fn event_input_value(ev: &leptos::ev::Event) -> Option<String> {
     ev.target()
         .and_then(|t| t.dyn_into::<web_sys::HtmlInputElement>().ok())
@@ -24,9 +27,12 @@ fn SettingsMcpTimeoutField(
 ) -> impl IntoView {
     let invalid_hint = RwSignal::new(None::<String>);
     view! {
-        <label class="settings-field">
-            <span class="settings-field-label">{move || i18n::settings_mcp_timeout_label(locale.get())}</span>
+        <div class="settings-field">
+            <label class="settings-field-label" for=TIMEOUT_INPUT_ID>
+                {move || i18n::settings_mcp_timeout_label(locale.get())}
+            </label>
             <input
+                id=TIMEOUT_INPUT_ID
                 type="number"
                 min="1"
                 class="settings-text-input"
@@ -47,7 +53,7 @@ fn SettingsMcpTimeoutField(
                     }
                 }
             />
-        </label>
+        </div>
         <Show when=move || invalid_hint.get().is_some()>
             <p class="settings-hint" role="status">
                 {move || invalid_hint.get().unwrap_or_default()}

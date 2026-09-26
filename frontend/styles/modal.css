@@ -51,7 +51,7 @@
   animation: fade-in 0.2s ease;
 }
 
-/* 嵌在设置弹窗等之上，避免与全局 z-index 50 的遮罩叠在同一层 */
+/* 嵌在设置页之上，避免与全局 z-index 50 的遮罩叠在同一层 */
 .settings-model-add-dialog-backdrop.modal-backdrop {
   z-index: 55;
 }
@@ -323,7 +323,11 @@
   flex-shrink: 0;
 }
 
-/* —— 设置弹窗 —— */
+/* —— 设置页 —— */
+/* 横向版心只有一处：内容列 `.settings-content` 提供统一内边距，
+   页头标题 / 块 / 字段 / 列表 / 反馈都从那一根轴对齐。
+   块与字段自身不再带横向内边距，否则嵌套块（如 MCP JSON 导入面板）
+   会叠加出第二层缩进，且块标题与字段各自落在不同轴上。 */
 .settings-block {
   margin-bottom: var(--space-5);
 }
@@ -332,20 +336,17 @@
   margin-bottom: 0;
 }
 
-.settings-block--web-api-auth {
+/* 唯一的强调卡框：本机即时生效的端点 / 凭据区块共用它。
+   卡框是带边框的视觉容器，自带内边距，故卡内内容比同列文字再内缩一层。 */
+.settings-block--emphasis {
   padding: var(--space-3) var(--space-3) var(--space-4);
   border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
   border-radius: var(--radius-md, 8px);
   background: color-mix(in srgb, var(--accent) 6%, var(--surface));
 }
 
-.settings-block--web-api-auth .settings-block-title {
+.settings-block--emphasis .settings-block-title {
   color: var(--accent);
-}
-
-.settings-block--llm-cloud {
-  padding-top: var(--space-2);
-  border-top: 1px dashed var(--border);
 }
 
 .settings-block-title {
@@ -402,7 +403,6 @@
 }
 
 .settings-field .settings-github-user-code {
-  margin: 0 14px var(--space-2);
   font-size: var(--text-md);
   line-height: 1.4;
 }
@@ -416,7 +416,7 @@
 }
 
 .settings-github-user-code {
-  margin: 0 14px var(--space-2);
+  margin: 0 0 var(--space-2);
   font-family: var(--font-mono);
   font-size: var(--text-4xl);
   font-weight: 650;
@@ -424,16 +424,8 @@
   color: var(--text);
 }
 
-.settings-field .settings-hint,
-.settings-field .settings-error,
-.settings-field .settings-github-user-code {
-  margin-left: 0;
-  margin-right: 0;
-}
-
 .settings-field {
   margin-bottom: var(--space-3);
-  padding: 0 14px;
 }
 
 .settings-field-label {
@@ -445,13 +437,13 @@
 }
 
 .settings-saved-models-list {
-  margin: 0 14px var(--space-3);
+  margin: 0 0 var(--space-3);
   padding: 0;
   list-style: none;
 }
 
 .settings-list-empty {
-  margin: 0 14px var(--space-3);
+  margin: 0 0 var(--space-3);
   font-size: var(--text-md);
   color: var(--muted);
 }
@@ -481,7 +473,6 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--space-2);
-  padding: 0 14px;
   margin-bottom: var(--space-1);
 }
 
@@ -643,10 +634,12 @@
   word-break: break-all;
 }
 
-/* 模型注册弹窗表单容器：字段自带 0 14px 内缩，这里只负责纵向排布 */
+/* 模型注册弹窗表单容器：弹窗是固定定位浮层，不在内容列的版心内，
+   故自己提供横向内边距（与内容列同为 14px），字段不再各自缩进。 */
 .settings-model-registry-dialog-form {
   display: flex;
   flex-direction: column;
+  padding: 0 14px;
 }
 
 .settings-text-input {
@@ -736,7 +729,7 @@
 }
 
 .settings-save-feedback {
-  margin: var(--space-1) 14px 0;
+  margin: var(--space-1) 0 0;
   padding: 6px 8px;
   font-size: var(--text-md);
   line-height: 1.45;
@@ -1024,8 +1017,11 @@ html[data-cm-mobile-shell] .settings-page-header {
   text-align: left;
 }
 
+/* 内容列是设置页唯一的横向版心：页头标题与所有块共用这一层内缩，
+   块 / 字段 / 列表因此不再各自带横向内边距（见 `.settings-block` 注释）。 */
 .settings-content {
   min-width: 0;
+  padding: 0 14px;
 }
 
 .settings-content-header {

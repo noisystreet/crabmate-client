@@ -11,7 +11,6 @@ frontend:approval-modal-backdrop    # 与 .modal-backdrop 同元素，遮罩样�
 frontend:ide-goto-bar    # 与 .ide-find-bar 同元素，浮条布局来自基类；本类名区分「跳转行」与「查找」两种语义
 frontend:ide-new-file-modal    # 面板样式全部来自 .modal；本类名仅作面板语义标识（同名 data-testid 挂在遮罩上）
 frontend:message-turn-ctx-layer    # 与 .session-ctx-layer 同元素，层样式（含 pointer-events:none）来自基类；本类名标识消息轮次菜单来源
-frontend:settings-block--api-base    # BEM 修饰位，有意沿用 .settings-block 基础排版（对照 --web-api-auth / --llm-cloud 的强调、分隔样式）
 frontend:settings-font-size-stepper-btn    # 1dc7be5 已把 stepper 按钮尺寸收敛到 .btn-icon 并删除原自定义覆盖；本类名留作语义标识
 frontend:settings-mcp-tools-col-name    # 表头网格列，列宽由 .settings-mcp-tools-header 的 grid-template-columns 决定，无需独立规则
 frontend:settings-mcp-tools-col-desc    # 同上（表头第二列）

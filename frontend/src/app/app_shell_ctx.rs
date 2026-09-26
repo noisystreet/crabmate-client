@@ -57,71 +57,6 @@ pub struct ChangelistModalSignals {
     pub changelist_body_ref: NodeRef<Div>,
 }
 
-/// 设置弹窗所需句柄（阶段 B：避免向 `settings_modal_view` 传递整份 [`AppShellCtx`]）。
-#[derive(Clone, Copy)]
-pub struct SettingsModalSignals {
-    pub settings_modal: RwSignal<bool>,
-    pub locale: RwSignal<Locale>,
-    pub theme: RwSignal<String>,
-    pub bg_decor: RwSignal<bool>,
-    pub show_turn_context_inject: RwSignal<bool>,
-    pub llm_api_base_draft: RwSignal<String>,
-    pub llm_api_base_preset_select: RwSignal<String>,
-    pub llm_model_draft: RwSignal<String>,
-    pub llm_temperature_draft: RwSignal<String>,
-    pub llm_context_tokens_draft: RwSignal<String>,
-    pub llm_thinking_mode_draft: RwSignal<String>,
-    pub llm_api_key_draft: RwSignal<String>,
-    pub llm_has_saved_key: RwSignal<bool>,
-    pub llm_settings_feedback: RwSignal<Option<String>>,
-    pub executor_llm_api_base_draft: RwSignal<String>,
-    pub executor_llm_api_base_preset_select: RwSignal<String>,
-    pub executor_llm_model_draft: RwSignal<String>,
-    pub executor_llm_api_key_draft: RwSignal<String>,
-    pub executor_llm_has_saved_key: RwSignal<bool>,
-    pub executor_llm_settings_feedback: RwSignal<Option<String>>,
-    pub client_llm_storage_tick: RwSignal<u64>,
-    pub readonly_tool_ttl_cache_follow_server: RwSignal<bool>,
-    pub saved_model_presets: RwSignal<Vec<crate::api::SavedModelPreset>>,
-    pub web_api_bearer_save_nonce: RwSignal<u64>,
-    pub github_auth_refresh_nonce: RwSignal<u64>,
-}
-
-impl SettingsModalSignals {
-    /// 与 [`SettingsPageFormSignals::from_app_signals`] 同源 LLM / 外观草稿，另附弹层开关。
-    #[must_use]
-    pub fn from_app_signals(app: &AppSignals) -> Self {
-        let form = SettingsPageFormSignals::from_app_signals(app);
-        Self {
-            settings_modal: app.modal.settings_modal,
-            locale: form.locale,
-            theme: form.theme,
-            bg_decor: form.bg_decor,
-            show_turn_context_inject: form.show_turn_context_inject,
-            llm_api_base_draft: form.llm_api_base_draft,
-            llm_api_base_preset_select: form.llm_api_base_preset_select,
-            llm_model_draft: form.llm_model_draft,
-            llm_temperature_draft: form.llm_temperature_draft,
-            llm_context_tokens_draft: form.llm_context_tokens_draft,
-            llm_thinking_mode_draft: form.llm_thinking_mode_draft,
-            llm_api_key_draft: form.llm_api_key_draft,
-            llm_has_saved_key: form.llm_has_saved_key,
-            llm_settings_feedback: form.llm_settings_feedback,
-            executor_llm_api_base_draft: form.executor_llm_api_base_draft,
-            executor_llm_api_base_preset_select: form.executor_llm_api_base_preset_select,
-            executor_llm_model_draft: form.executor_llm_model_draft,
-            executor_llm_api_key_draft: form.executor_llm_api_key_draft,
-            executor_llm_has_saved_key: form.executor_llm_has_saved_key,
-            executor_llm_settings_feedback: form.executor_llm_settings_feedback,
-            client_llm_storage_tick: form.client_llm_storage_tick,
-            readonly_tool_ttl_cache_follow_server: form.readonly_tool_ttl_cache_follow_server,
-            saved_model_presets: form.saved_model_presets,
-            web_api_bearer_save_nonce: form.web_api_bearer_save_nonce,
-            github_auth_refresh_nonce: form.github_auth_refresh_nonce,
-        }
-    }
-}
-
 /// 会话列表模态所需句柄（阶段 B：避免向 `session_list_modal_view` 传递整份 [`AppShellCtx`]）。
 /// 会话 / 草稿 / 语言 / 过滤开关经 [`super::shell_runtime_context::ChatShellLeptosContext`]。
 #[derive(Clone, Copy)]
@@ -342,10 +277,6 @@ impl AppShellCtx {
             settings_page: self.signals.modal.settings_page,
             conversation_hydration_err: self.signals.chat.conversation_hydration_err,
         }
-    }
-
-    pub fn settings_modal_signals(&self) -> SettingsModalSignals {
-        SettingsModalSignals::from_app_signals(&self.signals)
     }
 
     pub fn changelist_modal_signals(&self) -> ChangelistModalSignals {

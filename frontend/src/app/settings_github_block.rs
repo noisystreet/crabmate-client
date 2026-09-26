@@ -547,7 +547,7 @@ fn SettingsGithubClientIdBlock(
             <SettingsGithubClientIdStatus locale=locale ui=ui />
             <input
                 id=input_id
-                class="input"
+                class="settings-text-input"
                 type="text"
                 autocomplete="off"
                 spellcheck="false"
@@ -623,9 +623,9 @@ fn SettingsGithubBlockTitle(locale: RwSignal<Locale>) -> impl IntoView {
 fn SettingsGithubConnectionStatus(locale: RwSignal<Locale>, ui: GithubUiSignals) -> impl IntoView {
     view! {
         <>
-            <div class="settings-field-label">
+            <span class="settings-field-label">
                 {move || i18n::settings_github_connection_label(locale.get())}
-            </div>
+            </span>
             <div class="settings-status-line">
                 <span
                     class=move || status_pill_class(ui.github_set.get())

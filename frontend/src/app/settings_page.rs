@@ -14,4 +14,6 @@ mod view;
 
 pub use form_signals::SettingsPageFormSignals;
 pub(crate) use hash_routing::{SettingsSection, navigate_to_chat, navigate_to_settings};
+pub(crate) use header::{SETTINGS_PAGE_HEADER_SPEC, SettingsPageHeader, SettingsPageHeaderSpec};
+pub(crate) use layout::{SettingsContentIntro, SettingsNavItem};
 pub use view::{SettingsPageView, SettingsPageViewInput};

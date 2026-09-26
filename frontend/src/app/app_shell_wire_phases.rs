@@ -21,14 +21,14 @@ use leptos::prelude::*;
 use super::app_shell_effects::{
     IdeEditorHotkeySignals, SessionDeleteHotkeySignals, ShellEscapeSignals,
     WireMobileNavEdgeSwipeSignals, WireMobileSideEdgeSwipeSignals, WireNarrowViewportSignals,
-    WireSettingsModalLlmDraftsSignals, WireSyncThemeSignals,
-    wire_approval_expanded_follows_pending, wire_close_shell_chrome_when_ide_layout,
-    wire_escape_key_layered_dismiss, wire_ide_editor_hotkeys, wire_mobile_nav_edge_swipe,
-    wire_mobile_side_edge_swipe, wire_narrow_viewport_layout, wire_session_delete_hotkey,
-    wire_settings_modal_llm_drafts_on_open, wire_sidebar_rail_when_ide_layout,
-    wire_sync_bg_decor_to_storage_and_dom, wire_sync_locale_html_lang,
-    wire_sync_session_typography_to_storage_and_dom, wire_sync_tauri_shell_dom,
-    wire_sync_theme_to_storage_and_dom, wire_visual_viewport_keyboard_inset,
+    WireSettingsLlmDraftsSignals, WireSyncThemeSignals, wire_approval_expanded_follows_pending,
+    wire_close_shell_chrome_when_ide_layout, wire_escape_key_layered_dismiss,
+    wire_ide_editor_hotkeys, wire_mobile_nav_edge_swipe, wire_mobile_side_edge_swipe,
+    wire_narrow_viewport_layout, wire_session_delete_hotkey, wire_settings_llm_drafts_on_open,
+    wire_sidebar_rail_when_ide_layout, wire_sync_bg_decor_to_storage_and_dom,
+    wire_sync_locale_html_lang, wire_sync_session_typography_to_storage_and_dom,
+    wire_sync_tauri_shell_dom, wire_sync_theme_to_storage_and_dom,
+    wire_visual_viewport_keyboard_inset,
 };
 use super::app_signals::AppSignals;
 use super::approval_modal::ApprovalModalSignals;
@@ -124,7 +124,7 @@ fn wire_phase1_chat_session_lifecycle(app: &AppSignals) {
     wire_chat_session_lifecycle_effects(WireChatSessionLifecycleEffectsArgs::from_app_signals(app));
 }
 
-/// 阶段 2：偏好写入 `/user-data/prefs`、与 `document` 同步、设置弹窗 LLM 草稿打开时填充。
+/// 阶段 2：偏好写入 `/user-data/prefs`、与 `document` 同步、设置页 LLM 草稿打开时填充。
 fn wire_phase2_persisted_prefs_dom_and_settings_hooks(app: &AppSignals) {
     crate::user_prefs_sync::wire_persist_user_prefs_to_server(app.clone());
     wire_sidebar_rail_when_ide_layout(IdeLayoutToggleSignals::from_app_signals(app));
@@ -140,7 +140,6 @@ fn wire_phase2_persisted_prefs_dom_and_settings_hooks(app: &AppSignals) {
     );
     wire_sync_theme_to_storage_and_dom(WireSyncThemeSignals {
         theme: app.shell_ui.theme,
-        settings_modal: app.modal.settings_modal,
         settings_page: app.modal.settings_page,
     });
     wire_sync_locale_html_lang(app.shell_ui.locale);
@@ -167,8 +166,7 @@ fn wire_phase2_persisted_prefs_dom_and_settings_hooks(app: &AppSignals) {
         mobile_nav_open: app.sidebar.mobile_nav_open,
     });
     wire_visual_viewport_keyboard_inset();
-    wire_settings_modal_llm_drafts_on_open(WireSettingsModalLlmDraftsSignals {
-        settings_modal: app.modal.settings_modal,
+    wire_settings_llm_drafts_on_open(WireSettingsLlmDraftsSignals {
         settings_page: app.modal.settings_page,
         status_tasks: app.to_status_tasks(),
         llm: app.llm_settings,
@@ -192,7 +190,6 @@ fn wire_phase3_escape_layered_dismiss(app: &AppSignals) {
         side_panel_view: app.shell_ui.side_panel_view,
         is_narrow_viewport: app.shell_ui.is_narrow_viewport,
         changelist_modal_open: app.modal.changelist_modal_open,
-        settings_modal: app.modal.settings_modal,
         settings_page: app.modal.settings_page,
         ide_settings_page: app.modal.ide_settings_page,
         session_modal: app.modal.session_modal,
@@ -209,7 +206,6 @@ fn wire_phase3_escape_layered_dismiss(app: &AppSignals) {
         draft: app.chat_composer.draft,
         locale: app.shell_ui.locale,
         session_modal: app.modal.session_modal,
-        settings_modal: app.modal.settings_modal,
         changelist_modal_open: app.modal.changelist_modal_open,
     });
     wire_ide_editor_hotkeys(IdeEditorHotkeySignals {

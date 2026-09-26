@@ -57,6 +57,38 @@ fn server_bearer_hint(loc: Locale, file: &McpServersFileDto, server_id: &str) ->
     }
 }
 
+/// 保存远端 bearer：成功后把 `has_bearer` 标记同步进草稿与基线，并清空输入框。
+fn mcp_bearer_save(
+    sid: String,
+    locale: RwSignal<Locale>,
+    draft: RwSignal<String>,
+    feedback: RwSignal<Option<String>>,
+    file: WriteSignal<McpServersFileDto>,
+    baseline: RwSignal<McpServersFileDto>,
+    busy: WriteSignal<bool>,
+) {
+    let loc = locale.get_untracked();
+    let token = draft.get_untracked();
+    busy.set(true);
+    spawn_local(async move {
+        match crate::api::user_data::put_mcp_server_remote_auth(&sid, &token, loc).await {
+            Ok(()) => {
+                let has_bearer = !token.trim().is_empty();
+                feedback.set(Some(if has_bearer {
+                    i18n::settings_mcp_bearer_saved(loc).to_string()
+                } else {
+                    i18n::settings_mcp_bearer_cleared(loc).to_string()
+                }));
+                draft.set(String::new());
+                file.update(|f| apply_has_bearer(f, &sid, has_bearer));
+                baseline.update(|f| apply_has_bearer(f, &sid, has_bearer));
+            }
+            Err(e) => feedback.set(Some(e)),
+        }
+        busy.set(false);
+    });
+}
+
 #[component]
 fn SettingsMcpRemoteBearer(
     server_id: String,
@@ -72,13 +104,15 @@ fn SettingsMcpRemoteBearer(
     let id_hint = server_id.clone();
     let id_placeholder = server_id.clone();
     let id_save = server_id;
+    let bearer_input_id = format!("settings-mcp-bearer-{id_save}");
 
     view! {
-        <label class="settings-field">
-            <span class="settings-field-label">
+        <div class="settings-field">
+            <label class="settings-field-label" for=bearer_input_id.clone()>
                 {move || i18n::settings_mcp_bearer_label(locale.get())}
-            </span>
+            </label>
             <input
+                id=bearer_input_id
                 type="password"
                 class="settings-text-input"
                 autocomplete="off"
@@ -92,7 +126,7 @@ fn SettingsMcpRemoteBearer(
                     bearer_draft.set(event_input_value(&ev).unwrap_or_default());
                 }
             />
-        </label>
+        </div>
         <p class="settings-hint" data-testid="settings-mcp-bearer-hint">
             {move || {
                 let sid = id_hint.clone();
@@ -107,30 +141,15 @@ fn SettingsMcpRemoteBearer(
             on:click={
                 let sid = id_save.clone();
                 move |_| {
-                    let loc = locale.get_untracked();
-                    let token = bearer_draft.get_untracked();
-                    let sid = sid.clone();
-                    set_busy.set(true);
-                    spawn_local(async move {
-                        match crate::api::user_data::put_mcp_server_remote_auth(&sid, &token, loc)
-                            .await
-                        {
-                            Ok(()) => {
-                                let cleared = token.trim().is_empty();
-                                let has_bearer = !cleared;
-                                bearer_feedback.set(Some(if cleared {
-                                    i18n::settings_mcp_bearer_cleared(loc).to_string()
-                                } else {
-                                    i18n::settings_mcp_bearer_saved(loc).to_string()
-                                }));
-                                bearer_draft.set(String::new());
-                                set_file.update(|f| apply_has_bearer(f, &sid, has_bearer));
-                                baseline.update(|f| apply_has_bearer(f, &sid, has_bearer));
-                            }
-                            Err(e) => bearer_feedback.set(Some(e)),
-                        }
-                        set_busy.set(false);
-                    });
+                    mcp_bearer_save(
+                        sid.clone(),
+                        locale,
+                        bearer_draft,
+                        bearer_feedback,
+                        set_file,
+                        baseline,
+                        set_busy,
+                    );
                 }
             }
         >
@@ -202,6 +221,7 @@ pub(crate) fn SettingsMcpServerRow(server_id: String, ctx: McpSettingsSignals) -
     let id_tools = server_id.clone();
     let id_remote = server_id.clone();
     let id_bearer = server_id;
+    let id_name_input = format!("settings-mcp-name-{id_bearer}");
     let tools_expanded = RwSignal::new(false);
     let show_bearer = Memo::new(move |_| {
         let sid = id_remote.clone();
@@ -217,9 +237,12 @@ pub(crate) fn SettingsMcpServerRow(server_id: String, ctx: McpSettingsSignals) -
             class="settings-mcp-server-row"
             data-testid=format!("mcp-server-row-{}", id_row)
         >
-            <label class="settings-field">
-                <span class="settings-field-label">{move || i18n::settings_mcp_name_label(locale.get())}</span>
+            <div class="settings-field">
+                <label class="settings-field-label" for=id_name_input.clone()>
+                    {move || i18n::settings_mcp_name_label(locale.get())}
+                </label>
                 <input
+                    id=id_name_input
                     type="text"
                     class="settings-text-input"
                     prop:value=move || server_field(&file.get(), &id_name_val, |s| s.name.clone())
@@ -228,7 +251,7 @@ pub(crate) fn SettingsMcpServerRow(server_id: String, ctx: McpSettingsSignals) -
                         mcp_row_set_name(set_file, id_name_in.clone(), v);
                     }
                 />
-            </label>
+            </div>
             <SettingsMcpServerToolsList
                 locale=locale
                 server_id=id_tools.clone()

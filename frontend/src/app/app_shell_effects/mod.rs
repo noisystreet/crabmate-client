@@ -6,7 +6,7 @@
 //!
 //! - **会话 JSON / 首启 / `GET /web-ui`**：已迁至 **`crate::app::chat::session_storage`**，由 **`chat::wire_chat_session_lifecycle`** 按序注册。
 //! - [`escape`]：`keydown` 回调内统一 **`get_untracked()`** 读面板开关，避免单个巨型 `Effect` 订阅全部 UI 状态。
-//! - [`settings_llm_open`]：仅在设置弹窗/页面打开时填充草稿；**`status_data` 用 `get_untracked`**，避免订阅 `/status` 刷新导致重复填充。
+//! - [`settings_llm_open`]：仅在设置页面打开时填充草稿；**`status_data` 用 `get_untracked`**，避免订阅 `/status` 刷新导致重复填充。
 //!
 //! **注册顺序**仍见 [`super::app_shell_bootstrap::bootstrap_app_shell`]（及 [`super::app_shell_init::init_app_shell`]）。
 
@@ -33,9 +33,7 @@ pub use persist_prefs::{
     wire_close_shell_chrome_when_ide_layout, wire_sidebar_rail_when_ide_layout,
 };
 pub use session_delete_hotkey::{SessionDeleteHotkeySignals, wire_session_delete_hotkey};
-pub use settings_llm_open::{
-    WireSettingsModalLlmDraftsSignals, wire_settings_modal_llm_drafts_on_open,
-};
+pub use settings_llm_open::{WireSettingsLlmDraftsSignals, wire_settings_llm_drafts_on_open};
 pub use sync_dom::{
     WireSyncThemeSignals, wire_sync_bg_decor_to_storage_and_dom, wire_sync_locale_html_lang,
     wire_sync_session_typography_to_storage_and_dom, wire_sync_tauri_shell_dom,

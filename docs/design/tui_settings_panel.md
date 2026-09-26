@@ -54,7 +54,7 @@ Desktop（`frontend/` Settings）的设置不是这样：**字段实体与持久
 
 ### 4.1 分区级结论
 
-Desktop 设置共 8 个分区（`settings_page`；`settings_modal` 旧弹窗已无开启点，只作参考）。逐区对齐结论：
+Desktop 设置共 8 个分区（`settings_page`）。逐区对齐结论：
 
 | Desktop 分区 | TUI 对齐结论 | 依据 / 理由 |
 |---|---|---|
