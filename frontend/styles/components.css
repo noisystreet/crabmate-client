@@ -41,7 +41,7 @@
 }
 
 .btn:focus-visible {
-  outline: var(--focus-ring-width) solid var(--accent);
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
   outline-offset: var(--focus-ring-offset);
 }
 
@@ -97,17 +97,13 @@
 
 .btn-primary:hover:not(:disabled) {
   filter: brightness(1.07) saturate(1.03);
-  box-shadow:
-    0 1px 0 color-mix(in srgb, var(--inset-highlight) 14%, transparent) inset,
-    0 5px 14px color-mix(in srgb, var(--accent) 24%, transparent);
+  box-shadow: var(--btn-primary-shadow-hover);
 }
 
 .btn-primary:active:not(:disabled) {
   filter: brightness(0.98) saturate(0.98);
   transform: translateY(1px);
-  box-shadow:
-    0 1px 0 color-mix(in srgb, var(--inset-highlight) 10%, transparent) inset,
-    0 1px 4px color-mix(in srgb, var(--accent) 18%, transparent);
+  box-shadow: var(--btn-primary-shadow-active);
 }
 
 .btn-primary:disabled {

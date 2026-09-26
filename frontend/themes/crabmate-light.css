@@ -70,6 +70,19 @@
     color-mix(in srgb, var(--accent) 84%, #0a0c10) 100%
   );
   --btn-primary-border: color-mix(in srgb, var(--accent) 86%, #0a0c10);
+  /* 组件观感 token（本主题与默认深色同观感，#fff / uppercase / 1 / 两条阴影均沿用默认值）：
+     因主题覆盖并集校验（scripts/check-css-tokens.sh）必须显式登记。
+     这里是「登记现值」，不是调参入口——要改观感请改 tokens.css 默认值或 shadcn 主题。 */
+  --inset-highlight: #fff;
+  --focus-ring-color: var(--accent);
+  --label-transform: uppercase;
+  --label-tracking-scale: 1;
+  --btn-primary-shadow-hover:
+    0 1px 0 color-mix(in srgb, var(--inset-highlight) 14%, transparent) inset,
+    0 5px 14px color-mix(in srgb, var(--accent) 24%, transparent);
+  --btn-primary-shadow-active:
+    0 1px 0 color-mix(in srgb, var(--inset-highlight) 10%, transparent) inset,
+    0 1px 4px color-mix(in srgb, var(--accent) 18%, transparent);
   --modal-backdrop-bg: rgba(28, 25, 19, 0.30);
   --status-agent-select-bg-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='%236b6357' d='M0 0h10L5 6z'/%3E%3C/svg%3E");
   --composer-bar-box-shadow:

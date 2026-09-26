@@ -40,6 +40,11 @@
   --text-6xl: 20px; /* 数值展示 */
   --text-7xl: 22px; /* 品牌字 */
   --font-weight-label: 650;
+  /* 小标签（区块标题 / 表头 / 分组名）的形态：默认大写 + 拉开字距。
+     各站点自己的字距比例留在样式文件里，写成 `calc(<原值> * var(--label-tracking-scale))`，
+     于是只需这一个系数就能整体收放（shadcn 主题写 `none` / `0`：标签用常规大小写、不加字距）。 */
+  --label-transform: uppercase;
+  --label-tracking-scale: 1;
   --line-tight: 1.35;
   /* 正文默认行高（base.css body）；略放大以利长文阅读 */
   --line-body: 1.55;
@@ -62,6 +67,9 @@
   --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
   --focus-ring-width: 2px;
   --focus-ring-offset: 2px;
+  /* 焦点环颜色：默认跟随 --accent（强调色也是「当前焦点」的语义色）；
+     shadcn 主题改为中性前景色——那里强调色只留给交互态，焦点环用 zinc 前景。 */
+  --focus-ring-color: var(--accent);
 
   /* 页面最深：深空靛蓝底。层级沿色相漂移（--bg 223° → elevated 231° → surface 236.5°；旧值三阶恒定在 214–218°），
      三阶读作纵深而非三层同色灰；亮度占位不变，--muted 在 surface-hover 上仍 ≥5.6:1（10–11px 标签）。 */
@@ -149,6 +157,14 @@
     color-mix(in srgb, var(--accent) 50%, #05070b) 100%
   );
   --btn-primary-border: color-mix(in srgb, var(--accent) 55%, #000);
+  /* 主按钮 hover / active 的阴影：默认 = inset 顶光 + accent 投色光晕（浮雕观感）。
+     整条 box-shadow 抽成 token，主题可整体改写（shadcn 写 `none`：不用内发光、不投色光晕）。 */
+  --btn-primary-shadow-hover:
+    0 1px 0 color-mix(in srgb, var(--inset-highlight) 14%, transparent) inset,
+    0 5px 14px color-mix(in srgb, var(--accent) 24%, transparent);
+  --btn-primary-shadow-active:
+    0 1px 0 color-mix(in srgb, var(--inset-highlight) 10%, transparent) inset,
+    0 1px 4px color-mix(in srgb, var(--accent) 18%, transparent);
   --modal-backdrop-bg: rgba(6, 8, 12, 0.54);
   /* 局部遮罩（抽屉 / 面板旁）：只压住一节内容而非整屏，故与整屏的 --modal-backdrop-bg 分开取值 */
   --scrim-bg: rgba(0, 0, 0, 0.5);

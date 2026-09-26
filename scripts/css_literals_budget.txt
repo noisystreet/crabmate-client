@@ -2,10 +2,10 @@
 #
 # 扫描范围：frontend/styles/*.css，排除 tokens.css（token 定义处）；themes/*.css 不扫描（本就定义颜色）。
 #
-# 格式：<相对路径>  font-size=<n>  color=<n>   # <理由 / 清理计划>
+# 格式：<相对路径>  font-size=<n>  color=<n>  border-radius=<n>   # <理由 / 清理计划>
 #   - 缺 '# 理由' / 重复登记 / 字段缺失：门禁报格式错误；
 #   - 实际值必须等于预算值：写多写少都 fail（清理后不同步下调，条目就成了「隐性豁免」）；
-#   - 未登记的文件预算视为 0；两项均为 0 的条目、或文件已不存在的条目，报预算失效，须删除。
+#   - 未登记的文件预算视为 0；三项均为 0 的条目、或文件已不存在的条目，报预算失效，须删除。
 #
 # 目标是把存量逐文件清到 0，清理一处就下调一处预算。
 # 当前进度：font-size 已全量清到 0（Phase 1a，字号统一走 tokens.css 的 --text-* 档）；
@@ -13,5 +13,12 @@
 # （Phase 1c，走 --inset-highlight / --on-accent）与遮罩 / 浮层阴影
 # （Phase 1d，走 --scrim-bg / --modal-backdrop-bg / --shadow-menu / --shadow-media / --shadow-knob），
 # 故仅剩壳层专用的固定红底白字不做 token 化（它的语义不随主题）。
+# border-radius 为 Phase 2 新增维度：可归入 --radius-* 阶梯的 8 处已收敛，
+# 余下是 var(--radius-*, N) 兜底（token 恒有定义、兜底不生效）与阶梯外的语义圆角（发丝 / 圆形 / 气泡 / 随字号）。
 
-frontend/styles/tauri-shell.css     font-size=0   color=2    # #c42b1c / #fff 为 Windows 关闭键红底白字，固定色语义不随主题，长期保留
+frontend/styles/tauri-shell.css     font-size=0   color=2    border-radius=0   # #c42b1c / #fff 为 Windows 关闭键红底白字，固定色语义不随主题，长期保留
+frontend/styles/ide-layout.css      font-size=0   color=0    border-radius=2   # .ide-tab-pin 的 1px 发丝圆角（0.45rem 菱形角点，不属 --radius-* 阶梯）+ var(--radius-sm, 4px) 兜底（token 恒有定义，兜底不生效）
+frontend/styles/layout-chat.css     font-size=0   color=0    border-radius=6   # .chat-tui-turn 气泡 12px、mark.chat-find-mark 2px、.composer-slash-menu 8px（均阶梯外语义圆角）+ 3 处 var(--radius-md|input, N) 兜底（不生效）
+frontend/styles/modal.css           font-size=0   color=0    border-radius=4   # .settings-model-toggle-track 的 0.6em（随字号的开关圆角）+ 3 处 var(--radius-md, N) 兜底（不生效）
+frontend/styles/shell-ds.css        font-size=0   color=0    border-radius=2   # 2 处 var(--radius-btn|input, N) 兜底（token 恒有定义，兜底不生效）
+frontend/styles/status.css          font-size=0   color=0    border-radius=1   # .status-context-meter 的 2px（3px 细条圆角，不属 --radius-* 阶梯）

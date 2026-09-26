@@ -49,6 +49,19 @@
   --nav-rail-bg: var(--bg-elevated);
   --btn-primary-bg: linear-gradient(180deg, #ffffff 0%, #ececec 48%, #d6d6d6 100%);
   --btn-primary-border: #ffffff;
+  /* 组件观感 token（本主题与默认深色同观感，#fff / uppercase / 1 / 两条阴影均沿用默认值）：
+     因主题覆盖并集校验（scripts/check-css-tokens.sh）必须显式登记。
+     这里是「登记现值」，不是调参入口——要改观感请改 tokens.css 默认值或 shadcn 主题。 */
+  --inset-highlight: #fff;
+  --focus-ring-color: var(--accent);
+  --label-transform: uppercase;
+  --label-tracking-scale: 1;
+  --btn-primary-shadow-hover:
+    0 1px 0 color-mix(in srgb, var(--inset-highlight) 14%, transparent) inset,
+    0 5px 14px color-mix(in srgb, var(--accent) 24%, transparent);
+  --btn-primary-shadow-active:
+    0 1px 0 color-mix(in srgb, var(--inset-highlight) 10%, transparent) inset,
+    0 1px 4px color-mix(in srgb, var(--accent) 18%, transparent);
   /* 主按钮浅白底上用黑字 */
   --on-accent: #0a0a0a;
   --modal-backdrop-bg: rgba(0, 0, 0, 0.72);

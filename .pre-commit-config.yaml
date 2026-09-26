@@ -52,7 +52,7 @@ repos:
         stages: [pre-commit]
 
       - id: check-css-literals
-        name: css literals budget (per-file font-size / color literals in frontend/styles must match css_literals_budget.txt)
+        name: css literals budget (per-file font-size / color / border-radius literals in frontend/styles must match css_literals_budget.txt)
         entry: bash scripts/check-css-literals.sh
         language: system
         pass_filenames: false

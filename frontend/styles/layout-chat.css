@@ -148,8 +148,8 @@
 
 .debug-trace-label {
   font-size: var(--text-2xs);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  text-transform: var(--label-transform);
+  letter-spacing: calc(0.04em * var(--label-tracking-scale));
   color: var(--muted);
   margin-bottom: 2px;
 }
@@ -256,8 +256,8 @@
   gap: var(--space-2);
   margin: 0 2px;
   font-size: var(--text-2xs);
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
+  letter-spacing: calc(0.05em * var(--label-tracking-scale));
+  text-transform: var(--label-transform);
   color: var(--muted);
   font-weight: var(--font-weight-label, 600);
   line-height: var(--line-tight, 1.25);
@@ -1192,7 +1192,7 @@ html[lang="zh-CN"] .md-code-block__copy-zh {
   max-width: 100%;
   padding: 0.12em 0.55em;
   margin-inline-end: 0.35em;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   font-size: calc(var(--crabmate-chat-font-size, 14px) * 0.86);
   font-weight: 600;
   letter-spacing: 0.01em;
@@ -1308,7 +1308,7 @@ html[lang="zh-CN"] .md-code-block__copy-zh {
 }
 
 .composer-input:focus-visible {
-  outline: var(--focus-ring-width) solid var(--accent);
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
   outline-offset: var(--focus-ring-offset);
 }
 
@@ -1346,7 +1346,7 @@ html[lang="zh-CN"] .md-code-block__copy-zh {
   margin: 0;
   padding: 8px 10px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: inherit;
   text-align: left;
@@ -1372,8 +1372,8 @@ html[lang="zh-CN"] .md-code-block__copy-zh {
   padding: 8px 10px 4px;
   font-size: var(--text-xs);
   font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  letter-spacing: calc(0.04em * var(--label-tracking-scale));
+  text-transform: var(--label-transform);
   opacity: 0.55;
   user-select: none;
 }
@@ -1383,7 +1383,7 @@ html[lang="zh-CN"] .md-code-block__copy-zh {
   margin-bottom: 2px;
   font-size: var(--text-sm);
   opacity: 0.8;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--surface-hover);
 }
 

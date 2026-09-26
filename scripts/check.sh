@@ -23,7 +23,7 @@ bash "$ROOT/scripts/check-css-contract.sh"
 echo "[check] design tokens (referenced tokens must be defined; no color literal in var() fallback; themes must cover the same tokens)"
 bash "$ROOT/scripts/check-css-tokens.sh"
 
-echo "[check] css literals budget (per-file font-size / color literals in frontend/styles must match css_literals_budget.txt)"
+echo "[check] css literals budget (per-file font-size / color / border-radius literals in frontend/styles must match css_literals_budget.txt)"
 bash "$ROOT/scripts/check-css-literals.sh"
 
 echo "[check] design token mirrors (Android res / boot pages must mirror tokens.css :root)"
