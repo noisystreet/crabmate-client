@@ -16,7 +16,6 @@ pub struct SessionDeleteHotkeySignals {
     pub draft: RwSignal<String>,
     pub locale: RwSignal<crate::i18n::Locale>,
     pub session_modal: RwSignal<bool>,
-    pub settings_modal: RwSignal<bool>,
     pub changelist_modal_open: RwSignal<bool>,
 }
 
@@ -41,7 +40,6 @@ pub fn wire_session_delete_hotkey(signals: SessionDeleteHotkeySignals) {
                 return;
             }
             if signals.session_modal.get_untracked()
-                || signals.settings_modal.get_untracked()
                 || signals.changelist_modal_open.get_untracked()
             {
                 return;

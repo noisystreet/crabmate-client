@@ -9,7 +9,6 @@ use leptos::task::spawn_local;
 use super::form_signals::SettingsPageFormSignals;
 use super::form_snapshot::{SettingsPageDraftSignals, form_current_tracked};
 use super::hash_routing::{SettingsSection, navigate_to_chat};
-use super::header::SettingsPageHeader;
 use super::layout::{
     SettingsPageContentPanels, SettingsPageContentRegistryWire, SettingsPageNavRail,
     SettingsPagePanelDrafts,
@@ -17,6 +16,7 @@ use super::layout::{
 use super::page_actions::{
     DiscardToBaselinesCtx, SaveAllSettingsCtx, discard_to_baselines, try_save_all_settings,
 };
+use super::{SETTINGS_PAGE_HEADER_SPEC, SettingsPageHeader};
 use crate::app::settings_form_state::{
     SettingsDirtyBaselines, SettingsFormCurrent, SettingsFormUiPhase, derive_settings_form_ui_phase,
 };
@@ -199,6 +199,7 @@ pub(super) fn SettingsPageChrome(ctx: SettingsPageChromeCtx) -> impl IntoView {
                 appearance_locale=appearance_locale
                 dirty=dirty
                 save_busy=save_busy
+                spec=SETTINGS_PAGE_HEADER_SPEC
                 on_back=on_back
                 on_discard=discard_rc
                 on_save=save_rc

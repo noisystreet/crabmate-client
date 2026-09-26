@@ -1,5 +1,6 @@
 //! 设置页导航轨与内容区（从 `settings_page` 拆出以降低 `SettingsPageView` 的 nloc 棘轮）。
 
+use std::rc::Rc;
 use std::sync::Arc;
 
 use leptos::prelude::*;
@@ -19,11 +20,12 @@ use super::hash_routing::{SettingsSection, write_settings_section_to_hash};
 use super::section_copy::{section_desc, section_title};
 use crate::i18n::{self, Locale};
 
+/// 设置页共用的导航项外观（常规设置页与 IDE 设置页同一套类名 / 点击语义）。
 #[component]
-fn SettingsNavItem(
-    active_section: RwSignal<SettingsSection>,
-    section: SettingsSection,
+pub(crate) fn SettingsNavItem(
+    active: Memo<bool>,
     testid: Option<&'static str>,
+    on_click: Rc<dyn Fn()>,
     children: Children,
 ) -> impl IntoView {
     view! {
@@ -31,14 +33,33 @@ fn SettingsNavItem(
             type="button"
             class="btn btn-ghost settings-nav-item"
             data-testid=testid
-            class:active=move || active_section.get() == section
-            on:click=move |_| {
-                active_section.set(section);
-                write_settings_section_to_hash(section);
-            }
+            class:active=move || active.get()
+            on:click=move |_| on_click()
         >
             {children()}
         </button>
+    }
+}
+
+/// 常规设置页的导航项：把「选中分区」信号包成 [`SettingsNavItem`] 的 `active` / `on_click`。
+#[component]
+fn SettingsNavSectionItem(
+    active_section: RwSignal<SettingsSection>,
+    section: SettingsSection,
+    testid: Option<&'static str>,
+    children: Children,
+) -> impl IntoView {
+    view! {
+        <SettingsNavItem
+            active=Memo::new(move |_| active_section.get() == section)
+            testid=testid
+            on_click=Rc::new(move || {
+                active_section.set(section);
+                write_settings_section_to_hash(section);
+            })
+        >
+            {children()}
+        </SettingsNavItem>
     }
 }
 
@@ -49,62 +70,62 @@ pub(super) fn SettingsPageNavRail(
 ) -> impl IntoView {
     view! {
         <nav class="settings-nav" prop:aria-label=move || i18n::settings_nav_aria(appearance_locale.get())>
-            <SettingsNavItem
+            <SettingsNavSectionItem
                 active_section=active_section
                 section=SettingsSection::Connection
                 testid=Some("settings-nav-connection")
             >
                 {move || i18n::settings_section_connection_title(appearance_locale.get())}
-            </SettingsNavItem>
-            <SettingsNavItem
+            </SettingsNavSectionItem>
+            <SettingsNavSectionItem
                 active_section=active_section
                 section=SettingsSection::Appearance
                 testid=Some("settings-nav-appearance")
             >
                 {move || i18n::settings_section_appearance_title(appearance_locale.get())}
-            </SettingsNavItem>
-            <SettingsNavItem
+            </SettingsNavSectionItem>
+            <SettingsNavSectionItem
                 active_section=active_section
                 section=SettingsSection::Llm
                 testid=Some("settings-nav-llm")
             >
                 {move || i18n::settings_section_llm_title(appearance_locale.get())}
-            </SettingsNavItem>
-            <SettingsNavItem
+            </SettingsNavSectionItem>
+            <SettingsNavSectionItem
                 active_section=active_section
                 section=SettingsSection::Tools
                 testid=Some("settings-nav-tools")
             >
                 {move || i18n::settings_section_tools_title(appearance_locale.get())}
-            </SettingsNavItem>
-            <SettingsNavItem
+            </SettingsNavSectionItem>
+            <SettingsNavSectionItem
                 active_section=active_section
                 section=SettingsSection::Github
                 testid=Some("settings-nav-github")
             >
                 {move || i18n::settings_section_github_title(appearance_locale.get())}
-            </SettingsNavItem>
-            <SettingsNavItem
+            </SettingsNavSectionItem>
+            <SettingsNavSectionItem
                 active_section=active_section
                 section=SettingsSection::Mcp
                 testid=Some("settings-nav-mcp")
             >
                 {move || i18n::settings_section_mcp_title(appearance_locale.get())}
-            </SettingsNavItem>
-            <SettingsNavItem
+            </SettingsNavSectionItem>
+            <SettingsNavSectionItem
                 active_section=active_section
                 section=SettingsSection::Session
                 testid=Some("settings-nav-session")
             >
                 {move || i18n::settings_section_session_title(appearance_locale.get())}
-            </SettingsNavItem>
-            <SettingsNavItem
+            </SettingsNavSectionItem>
+            <SettingsNavSectionItem
                 active_section=active_section
                 section=SettingsSection::Shortcuts
                 testid=None
             >
                 {move || i18n::settings_section_shortcuts_title(appearance_locale.get())}
-            </SettingsNavItem>
+            </SettingsNavSectionItem>
         </nav>
     }
 }
@@ -147,23 +168,17 @@ pub(super) struct SettingsPageContentRegistryWire {
     pub session_switch_busy: RwSignal<bool>,
 }
 
-/// 设置内容区标题 + 描述（无描述不渲染），独立以降低内容面板 CCN。
+/// 设置内容区标题 + 描述（描述为空则不渲染），常规设置页与 IDE 设置页共用。
 #[component]
-fn SettingsContentIntro(
-    active_section: RwSignal<SettingsSection>,
-    appearance_locale: RwSignal<Locale>,
+pub(crate) fn SettingsContentIntro(
+    title: Memo<&'static str>,
+    desc: Memo<&'static str>,
 ) -> impl IntoView {
     view! {
         <header class="settings-content-header">
-            <h2 class="settings-content-title">
-                {move || section_title(active_section.get(), appearance_locale.get())}
-            </h2>
-            <Show when=move || {
-                !section_desc(active_section.get(), appearance_locale.get()).is_empty()
-            }>
-                <p class="settings-content-desc">{move || {
-                    section_desc(active_section.get(), appearance_locale.get())
-                }}</p>
+            <h2 class="settings-content-title">{move || title.get()}</h2>
+            <Show when=move || !desc.get().is_empty()>
+                <p class="settings-content-desc">{move || desc.get()}</p>
             </Show>
         </header>
     }
@@ -215,13 +230,14 @@ pub(super) fn SettingsPageContentPanels(
     } = drafts;
 
     let sync_saved_presets_line = StoredValue::new(sync_saved_presets_baseline);
+    let content_title =
+        Memo::new(move |_| section_title(active_section.get(), appearance_locale.get()));
+    let content_desc =
+        Memo::new(move |_| section_desc(active_section.get(), appearance_locale.get()));
 
     view! {
         <section class="settings-content">
-            <SettingsContentIntro
-                active_section=active_section
-                appearance_locale=appearance_locale
-            />
+            <SettingsContentIntro title=content_title desc=content_desc />
             <Show when=move || active_section.get() == SettingsSection::Connection>
                 <SettingsWebApiBearerBlock
                     locale=appearance_locale

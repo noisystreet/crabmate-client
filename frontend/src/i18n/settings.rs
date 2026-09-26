@@ -6,7 +6,7 @@ use super::Locale;
 /// 也统一语义——**仅当已保存时**才显示掩码，未保存留空（掩码会让人误以为已配置）。
 pub const SECRET_MASK_PLACEHOLDER: &str = "••••••••";
 
-// --- 设置弹窗 ---
+// --- 设置页 ---
 
 pub fn settings_title(l: Locale) -> &'static str {
     match l {

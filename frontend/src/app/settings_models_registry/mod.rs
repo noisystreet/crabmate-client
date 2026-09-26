@@ -584,7 +584,7 @@ fn SettingsModelsRegistryDialogHead(
 
 /// 添加 / 编辑模型弹窗的面板本体。
 ///
-/// 抽成组件的原因同 `settings_modal_dialog.rs` 的 `SettingsModalDialogPanel`：
+/// 抽成组件的原因与其它 `FocusableModalPanel` 面板一致：
 /// `FocusableModalPanel` 的 `children` 是 `FnOnce` 装箱闭包，若面板直接写在
 /// `<Show>` 的 children 里，非 `Copy` 值（`s` / `dialog_title_id` / `cancel_dialog`）
 /// 会被该闭包按值捕获并从 `<Show>` 闭包环境移出，使 `Show` 的 children 退化为 `FnOnce`。

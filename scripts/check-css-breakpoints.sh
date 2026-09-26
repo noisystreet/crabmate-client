@@ -6,7 +6,7 @@
 # 本脚本把这份重复变成可机械校验的一致性约束：
 #   1. 主断点成对互补：窄屏 `@media (max-width: N)`，宽屏 `@media (min-width: N+1)`；禁止交叉书写
 #      （`max-width: N+1` 与主断点重叠，`min-width: N` 会让 N 自身归属歧义）；
-#   2. 其余断点语义独立（如设置弹窗的 900px），须在下方 EXTRA_BREAKPOINTS 显式登记；
+#   2. 其余断点语义独立（如设置页的 900px），须在下方 EXTRA_BREAKPOINTS 显式登记；
 #   3. e2e 声明的移动视口须落在窄屏侧，否则用例名不副实。
 #
 # 改主断点须同时改 frontend/src/app_prefs.rs —— 该常量同时驱动 matchMedia 查询与
@@ -20,7 +20,7 @@ CSS_DIRS=(frontend/styles frontend/themes)
 E2E_MOBILE_SPEC="e2e/specs/mock-mobile-shell.spec.ts"
 
 # 已登记的二级断点：与主断点语义独立，登记时须一并写明用途。
-#   900 — frontend/styles/modal.css：设置弹窗（.settings-layout）由双列转单列
+#   900 — frontend/styles/modal.css：设置页（.settings-layout）由双列转单列
 EXTRA_BREAKPOINTS=(900)
 
 bp="$(sed -n 's/^pub const MOBILE_LAYOUT_BREAKPOINT_PX: u32 = \([0-9][0-9]*\);.*$/\1/p' "$PREFS" | head -n 1)"
