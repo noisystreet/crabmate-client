@@ -42,7 +42,7 @@ PR 标题：Conventional Commits + 中英双语，例如：
 - [ ] 响应式断点仍与 `MOBILE_LAYOUT_BREAKPOINT_PX` 单一来源一致（`scripts/check-css-breakpoints.sh`）
 - [ ] 新增 / 修改的类名在同 scope 有 CSS 规则，或登记到 `scripts/css_contract_allowlist.txt`（`scripts/check-css-contract.sh`）
 - [ ] `var(--x)` 的 token 已定义、`var()` 兜底无颜色字面量、各主题覆盖齐备（`scripts/check-css-tokens.sh`）
-- [ ] 字号 / 颜色字面量预算已同步下调（`scripts/css_literals_budget.txt`，`scripts/check-css-literals.sh`）
+- [ ] 字号 / 颜色 / 圆角字面量预算已同步下调（`scripts/css_literals_budget.txt`，`scripts/check-css-literals.sh`）
 
 **文档 / Docs**
 

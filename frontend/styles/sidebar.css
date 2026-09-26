@@ -241,8 +241,8 @@
 .side-pane-title {
   font-size: var(--text-sm);
   font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
+  text-transform: var(--label-transform);
+  letter-spacing: calc(0.06em * var(--label-tracking-scale));
   color: var(--muted);
   margin: 0;
 }
@@ -460,8 +460,8 @@
 }
 
 .workspace-tree-chevron:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--accent) 45%, var(--border-subtle));
-  outline-offset: 1px;
+  outline: var(--focus-ring-width) solid color-mix(in srgb, var(--accent) 45%, var(--border-subtle));
+  outline-offset: var(--focus-ring-offset);
 }
 
 .workspace-list-nested {

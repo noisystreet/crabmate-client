@@ -20,6 +20,7 @@ Trunk 在 **`frontend/index.html`** 中于 **`styles/tokens.css` 之后** 链接
 ## 维护清单（新增或重命名主题时）
 
 1. **CSS**：在本目录新增 `your-slug.css`，内含完整的 `:root[data-theme="your-slug"] { … }` 色板与覆层变量（可复制 `crabmate-light.css` 再改值），**必须**定义全部 `--ide-hl-*`（keyword / string / comment / number / type / attribute / macro / key），否则 IDE 会落到 `tokens.css` 的深色字面量兜底。若新预设底色为浅色，**必须**在块内写 **`color-scheme: light`**（见上文「明暗基线」）。
+   此外还要满足**并集覆盖**：任一同级主题文件定义过的 token，本主题都必须显式定义（否则该主题会静默继承 `tokens.css` 的深色默认值）。除色板外，当前还包括组件观感类 token——`--focus-ring-color`、`--label-transform`、`--label-tracking-scale`、`--btn-primary-shadow-hover` / `--btn-primary-shadow-active`、`--inset-highlight` 等。漏定义会由 `scripts/check-css-tokens.sh` 机械拦截；最省事的做法仍是复制 `crabmate-light.css`（它已登记全部 token 的现值）。
 2. **`index.html`**：追加一行 `<link data-trunk rel="css" href="themes/your-slug.css" />`（须在 `tokens.css` 之后）。
 3. **Rust 白名单**：`frontend/src/app_prefs.rs` 中 **`THEME_SLUGS`**（偏好，可含 **`system`**）与 **`THEME_CSS_SLUGS`**（`data-theme` CSS）加入 slug；未知存储值（含已废弃的旧 slug）会回退为默认主题 **`DEFAULT_THEME_SLUG`**（`shadcn-light`）。**`system` 无对应 CSS 文件**，由 **`resolve_data_theme_slug`** 映射到 `crabmate-dark`/`crabmate-light`。
 4. **文案**：`frontend/src/i18n/settings.rs` 中 **`settings_theme_preset_label`**（或等价函数）增加显示名。

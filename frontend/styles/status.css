@@ -44,8 +44,8 @@
 
 .status-chip-label {
   font-size: var(--text-xs);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  letter-spacing: calc(0.04em * var(--label-tracking-scale));
+  text-transform: var(--label-transform);
   color: var(--muted);
 }
 
@@ -372,7 +372,7 @@
 }
 
 .status-agent-select:focus-visible {
-  outline: var(--focus-ring-width) solid var(--accent);
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
   outline-offset: var(--focus-ring-offset);
 }
 

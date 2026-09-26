@@ -16,6 +16,12 @@
   --radius-lg: 8px;
   --radius-xl: 12px;
   --radius-btn: 6px;
+  /* 标签形态：shadcn 的区块标题 / 表头是常规大小写、不加字距（本仓其它主题用大写小标签）。 */
+  --label-transform: none;
+  --label-tracking-scale: 0;
+  /* 焦点环取中性前景色（本主题 zinc-900，在 --bg #fafafa 上 ≈17:1）；
+     强调色在这里只留给交互态（链接 / 选中 / 按钮），不再兼任焦点语义。 */
+  --focus-ring-color: #18181b;
 
   /* zinc 中性灰阶：页面留一点锌灰，卡片回到纯白，让层级靠 1px 边框读出来 */
   --bg: #fafafa;
@@ -49,6 +55,7 @@
   --error-bg: color-mix(in srgb, var(--error) 13%, var(--surface));
 
   /* 阴影：shadcn 浅色用极浅的纯黑投影（shadow-sm / md / lg 档），层级主要交给 1px 边框 */
+  --inset-highlight: transparent;
   --shadow-raised:
     0 1px 2px rgba(0, 0, 0, 0.06),
     0 4px 6px -1px rgba(0, 0, 0, 0.08),
@@ -67,15 +74,15 @@
   --page-bg-decor-html: none;
   --page-bg-decor-body: none;
   --nav-rail-bg: color-mix(in srgb, var(--bg) 60%, var(--surface-hover));
-  /* `.btn-primary` 文字取 --on-accent（本主题 #fff）：blue-600 渐变压深后顶部 ≈5.8:1，
-     :hover brightness(1.07) 后仍 ≈5.3:1；:disabled 走 components.css 的 accent 38% + surface 混色。 */
+  /* `.btn-primary` 文字取 --on-accent（本主题 #fff）：改用平色填充（shadcn 按钮是纯色，不做渐变），
+     取原渐变的顶停值，对白字 ≈5.8:1；:hover brightness(1.07) 后仍 ≈5.3:1；
+     :disabled 走 components.css 的 accent 38% + surface 混色。 */
   --on-accent: #fff;
-  --btn-primary-bg: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--accent) 92%, #0a0c10) 0%,
-    color-mix(in srgb, var(--accent) 84%, #0a0c10) 100%
-  );
-  --btn-primary-border: color-mix(in srgb, var(--accent) 86%, #0a0c10);
+  --btn-primary-bg: color-mix(in srgb, var(--accent) 92%, #0a0c10);
+  /* shadcn 按钮不描边、不用 inset 顶光 / 投色光晕：悬浮与按下只靠 brightness 提亮 / 压暗。 */
+  --btn-primary-border: transparent;
+  --btn-primary-shadow-hover: none;
+  --btn-primary-shadow-active: none;
   --modal-backdrop-bg: rgba(9, 9, 11, 0.3);
   --status-agent-select-bg-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='%23696971' d='M0 0h10L5 6z'/%3E%3C/svg%3E");
   --composer-bar-box-shadow: 0 -6px 26px color-mix(in srgb, var(--border) 12%, transparent);

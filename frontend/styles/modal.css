@@ -111,8 +111,8 @@
 .modal-badge {
   font-size: var(--text-xs);
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+  text-transform: var(--label-transform);
+  letter-spacing: calc(0.05em * var(--label-tracking-scale));
   padding: 3px 8px;
   border-radius: var(--radius-pill);
   background: var(--accent-dim);
@@ -207,7 +207,7 @@
 
 .workspace-clone-bar {
   height: 6px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: color-mix(in srgb, var(--border) 70%, transparent);
   overflow: hidden;
 }
@@ -215,7 +215,7 @@
 .workspace-clone-bar-fill {
   height: 100%;
   background: var(--accent);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   transition: width 0.2s ease;
 }
 
@@ -295,8 +295,8 @@
   margin: 0 0 6px;
   font-size: var(--text-sm);
   font-weight: 650;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  letter-spacing: calc(0.04em * var(--label-tracking-scale));
+  text-transform: var(--label-transform);
   color: var(--muted);
 }
 
@@ -353,8 +353,8 @@
   margin: 0 0 var(--space-2);
   font-size: var(--text-sm);
   font-weight: 650;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
+  letter-spacing: calc(0.07em * var(--label-tracking-scale));
+  text-transform: var(--label-transform);
   color: var(--muted);
 }
 
@@ -797,7 +797,7 @@
 }
 
 .session-open:focus-visible {
-  outline: var(--focus-ring-width) solid var(--accent);
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
   outline-offset: 2px;
   border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
 }
@@ -938,8 +938,8 @@ html[data-cm-mobile-shell] .settings-page-header {
 .settings-page-badge {
   font-size: var(--text-xs);
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+  text-transform: var(--label-transform);
+  letter-spacing: calc(0.05em * var(--label-tracking-scale));
   padding: 3px 8px;
   border-radius: var(--radius-pill);
   background: var(--accent-dim);
@@ -1193,8 +1193,8 @@ html[data-cm-mobile-shell] .settings-page-header {
   z-index: 1;
   font-size: var(--text-sm);
   font-weight: 650;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
+  letter-spacing: calc(0.03em * var(--label-tracking-scale));
+  text-transform: var(--label-transform);
   color: var(--muted);
   background: color-mix(in srgb, var(--surface) 92%, var(--bg));
   border-bottom: 1px solid var(--border-subtle);

@@ -293,8 +293,8 @@
 .nav-rail-search-label {
   font-size: var(--text-xs);
   font-weight: 650;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  letter-spacing: calc(0.06em * var(--label-tracking-scale));
+  text-transform: var(--label-transform);
   color: var(--muted);
 }
 
@@ -392,8 +392,8 @@
 .nav-rail-scroll-label {
   font-size: var(--text-xs);
   font-weight: 650;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  letter-spacing: calc(0.08em * var(--label-tracking-scale));
+  text-transform: var(--label-transform);
   color: var(--muted);
   padding: 8px 8px 6px;
 }
@@ -1333,7 +1333,7 @@ img[data-cm-ws-hydrated="1"] {
 }
 
 .session-ctx-item:focus-visible {
-  outline: var(--focus-ring-width) solid var(--accent);
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
   outline-offset: var(--focus-ring-offset);
 }
 

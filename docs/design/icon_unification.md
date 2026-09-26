@@ -119,7 +119,7 @@ fn svg_common() -> (&'static str, &'static str, &'static str, &'static str, &'st
    - `0.625rem`（= 8.75px）出现在 **3 个类**：`status.css:134`、`status.css:237`、`shell-ds.css:584`。
    - `1.25rem` 容器：`sidebar.css:300`、`sidebar.css:440`。
 
-   注意 `frontend/styles/*.css` 存在**字面量预算棘轮**（`scripts/css_literals_budget.txt`，`scripts/check-css-literals.sh`）：把上面的尺寸改成 token 后，须同步下调对应文件的 `font-size` / 颜色计数预算之外的尺寸计数——该棘轮只管 `font-size` 与颜色两类，尺寸字面量不在其中，故本项**不触发**该门禁，但仍应把 `1.125rem` 收进 token 以免再度分叉。
+   注意 `frontend/styles/*.css` 存在**字面量预算棘轮**（`scripts/css_literals_budget.txt`，`scripts/check-css-literals.sh`）：把上面的尺寸改成 token 后，须同步下调对应文件的计数预算——该棘轮只管 `font-size` / 颜色 / `border-radius` 三类，`width` / `height` 尺寸字面量不在其中，故本项**不触发**该门禁，但仍应把 `1.125rem` 收进 token 以免再度分叉。
 
 6. **`stroke` / `stroke-width` 挂载位置两种策略**：`workspace_shell.rs` 放在**子 `path`** 上，其余 18 处放在 `<svg>` 元素上。两者渲染结果等价（`stroke` 可继承），但混用会让「改一处模板」的假设失效。
 
@@ -183,7 +183,7 @@ fn svg_common() -> (&'static str, &'static str, &'static str, &'static str, &'st
 
 - `bash scripts/check-css-contract.sh` —— 改了类名就跑（第 1、3 步主要风险点）。
 - `bash scripts/check-css-tokens.sh` —— 新增 `--icon-*` 后确认六套主题覆盖完整（union 规则要求所有主题覆盖同一 token 集）。
-- `bash scripts/check-css-literals.sh` —— 尺寸字面量不在其预算内，但改动若顺带动了 `font-size` / 颜色须同步 `scripts/css_literals_budget.txt`。
+- `bash scripts/check-css-literals.sh` —— `width` / `height` 尺寸字面量不在其预算内，但改动若顺带动了 `font-size` / 颜色 / `border-radius` 须同步 `scripts/css_literals_budget.txt`。
 - `bash scripts/check-css-breakpoints.sh` —— 图标若在响应式块内有尺寸覆写，须与 `MOBILE_LAYOUT_BREAKPOINT_PX` 一致。
 - `bash scripts/check-icons.sh` —— 图标门禁（本轮新增，见下）。
 - `bash scripts/check.sh` —— 全量。
