@@ -130,6 +130,13 @@ fn web_builtin_slash_items(locale: Locale) -> Vec<SlashMenuItem> {
             label: "/skills list".to_string(),
             description: i18n::composer_slash_builtin_skills_list(locale).to_string(),
         },
+        SlashMenuItem {
+            kind: SlashItemKind::Builtin,
+            match_key: "btw".to_string(),
+            insert: "/btw ".to_string(),
+            label: "/btw".to_string(),
+            description: i18n::composer_slash_builtin_btw(locale).to_string(),
+        },
     ]
 }
 
