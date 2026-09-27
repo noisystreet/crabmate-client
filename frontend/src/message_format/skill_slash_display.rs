@@ -10,6 +10,7 @@ fn is_reserved_slash_head(head: &str) -> bool {
             | "apikey"
             | "apibase"
             | "branch"
+            | "btw"
             | "cd"
             | "clear"
             | "config"

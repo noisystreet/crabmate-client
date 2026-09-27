@@ -239,6 +239,14 @@ pub fn composer_slash_builtin_skills_list(l: Locale) -> &'static str {
     }
 }
 
+/// Web 内建 `/btw`：旁路提问（结合上下文回答，不写入历史、不调用工具）。
+pub fn composer_slash_builtin_btw(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "旁路提问（结合上下文，不写入历史、不调用工具）",
+        Locale::En => "Side question (uses context; not saved, no tools)",
+    }
+}
+
 pub fn composer_slash_builtin_help(l: Locale) -> &'static str {
     match l {
         Locale::ZhHans => "控制命令帮助（不调用模型）",
