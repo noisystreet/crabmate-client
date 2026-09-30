@@ -100,6 +100,18 @@ export function scheduleCrabMateMobileSafeTop() {
   return false;
 }
 
+/**
+ * 系统状态栏 / 导航栏图标明暗跟随 Web 主题。
+ * `isLight=true`（浅色主题）→ 原生切深色图标；无桥时静默忽略（桌面 / 浏览器）。
+ */
+export function applyCrabMateMobileSystemBarIcons(isLight) {
+  try {
+    const b = globalThis.CrabMateMobile;
+    if (!b || typeof b.setSystemBarIconAppearance !== "function") return;
+    b.setSystemBarIconAppearance(!!isLight);
+  } catch (_) {}
+}
+
 export function crabMateMobileStartStreamKeepAlive(locale) {
   try {
     const b = globalThis.CrabMateMobile;
@@ -155,6 +167,8 @@ extern "C" {
     fn invoke_crabmate_mobile_open_external_url(url: &str);
     #[wasm_bindgen(js_name = scheduleCrabMateMobileSafeTop)]
     fn schedule_crabmate_mobile_safe_top() -> bool;
+    #[wasm_bindgen(js_name = applyCrabMateMobileSystemBarIcons)]
+    fn apply_crabmate_mobile_system_bar_icons(is_light: bool);
     #[wasm_bindgen(js_name = crabMateMobileStartStreamKeepAlive)]
     fn crabmate_mobile_start_stream_keep_alive(locale: &str) -> String;
     #[wasm_bindgen(js_name = crabMateMobileStopStreamKeepAlive)]
@@ -192,6 +206,9 @@ fn invoke_crabmate_mobile_open_external_url(_: &str) {}
 fn schedule_crabmate_mobile_safe_top() -> bool {
     false
 }
+
+#[cfg(not(target_arch = "wasm32"))]
+fn apply_crabmate_mobile_system_bar_icons(_: bool) {}
 
 #[cfg(not(target_arch = "wasm32"))]
 fn crabmate_mobile_start_stream_keep_alive(_: &str) -> String {
@@ -242,6 +259,12 @@ pub fn mobile_remote_open_external_url(url: &str) -> bool {
 /// 应用 Android 顶栏安全区 CSS 变量（尽早调用，并安排短延迟重试）。
 pub fn apply_mobile_remote_safe_top() {
     let _ = schedule_crabmate_mobile_safe_top();
+}
+
+/// 让 Android 系统状态栏 / 导航栏图标跟随 Web 主题明暗（`is_light=true` → 深色图标）。
+/// 桌面 / 浏览器为 no-op。
+pub fn apply_mobile_system_bar_icons(is_light: bool) {
+    apply_crabmate_mobile_system_bar_icons(is_light);
 }
 
 /// 启动 Android 流式前台保活。无桥返回空串；`ok` / `need_permission` 见原生实现。

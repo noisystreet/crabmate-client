@@ -13,6 +13,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import kotlin.math.roundToInt
 
@@ -301,6 +302,8 @@ class MainActivity : TauriActivity() {
 
   private fun loadConnectPage() {
     val view = appWebView ?: return
+    // 连接页硬编码深色底：系统栏图标回落到浅色（白），与深底一致。
+    applySystemBarIconAppearance(lightBackground = false)
     // 与工具栏断开一致：回连接页时清除 Keystore 中的连接 Bearer。
     try {
       SecureBearerStore.write(applicationContext, "")
@@ -371,6 +374,21 @@ class MainActivity : TauriActivity() {
     return (css + 8).coerceAtLeast(24)
   }
 
+  /**
+   * 切换系统状态栏 / 导航栏图标的明暗。
+   *
+   * `lightBackground=true`（Web 浅色主题）→ 深色图标；`false`（深色主题 / 连接页 / 启动页）→ 浅色图标。
+   *
+   * 只能在运行时切换：`themes.xml` 的 `windowLightStatusBar` / `windowLightNavigationBar`
+   * 门禁要求恒为 `false`（按深底设计），而 targetSdk 35+ 强制 edge-to-edge、状态栏透明，
+   * 顶栏露出的是 Web 主题底色（浅色主题近白 → 白图标不可见），故须随主题动态覆盖。
+   */
+  private fun applySystemBarIconAppearance(lightBackground: Boolean) {
+    val controller = WindowInsetsControllerCompat(window, window.decorView)
+    controller.isAppearanceLightStatusBars = lightBackground
+    controller.isAppearanceLightNavigationBars = lightBackground
+  }
+
   private fun resumeWebViewTimersIfKeepAlive() {
     if (!streamKeepAliveWanted && !StreamKeepAliveService.active) {
       return
@@ -438,6 +456,16 @@ class MainActivity : TauriActivity() {
     /** 底栏 / 系统导航安全区（CSS 像素）。 */
     @JavascriptInterface
     fun getNavBarInsetPx(): Int = navBarInsetCssPx()
+
+    /**
+     * 系统状态栏 / 导航栏图标明暗随 Web 主题切换。
+     * `lightBackground=true`（浅色主题）→ 深色图标；`false`（深色主题）→ 浅色图标。
+     * 纯观感、无 Origin 守卫（与 [getStatusBarInsetPx] / [getNavBarInsetPx] 一致）。
+     */
+    @JavascriptInterface
+    fun setSystemBarIconAppearance(lightBackground: Boolean) {
+      runOnUiThread { applySystemBarIconAppearance(lightBackground) }
+    }
 
     /**
      * 读取 Keystore AES-GCM 加密的连接 Bearer。包内 App Origin（连接页 / 业务 UI）。
