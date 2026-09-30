@@ -53,7 +53,7 @@ fn root_has_attr(name: &str) -> bool {
     root.has_attribute(name)
 }
 
-fn should_keep_composer_visible() -> bool {
+fn should_apply_keyboard_avoidance() -> bool {
     // 窄屏媒体查询，或 Android 远程壳（横屏可能 >768px）。
     root_has_attr("data-narrow-viewport") || root_has_attr("data-cm-mobile-shell")
 }
@@ -71,28 +71,31 @@ fn composer_bar_element(ta: &web_sys::HtmlTextAreaElement) -> web_sys::HtmlEleme
     ta.clone().into()
 }
 
-fn scroll_composer_into_view(ta: &web_sys::HtmlTextAreaElement) {
-    let bar = composer_bar_element(ta);
-    // false：尽量贴齐视口底边，避免软键盘动画期间把输入条滚出可见区上方。
-    bar.scroll_into_view_with_bool(false);
-}
-
-/// 窄屏 / 移动壳聚焦聊天输入时：立刻滚动 composer 入视口并重算键盘 inset（软键盘动画期间多次重试）。
-pub(crate) fn on_composer_focus_keep_visible(ta: &web_sys::HtmlTextAreaElement) {
-    if !should_keep_composer_visible() {
+/// 窄屏 / 移动壳聚焦输入元素时：立刻把可见容器滚入视口并重算键盘 inset（软键盘动画期间多次重试）。
+///
+/// `el` 传「需完整可见的容器」（如输入条 / 就地编辑表单），而非单个 `textarea`，
+/// 使同容器内的按钮也留在键盘之上。
+pub(crate) fn on_mobile_focus_keep_visible(el: &web_sys::HtmlElement) {
+    if !should_apply_keyboard_avoidance() {
         return;
     }
-    scroll_composer_into_view(ta);
+    // false：尽量贴齐视口底边，避免软键盘动画期间把容器滚出可见区上方。
+    el.scroll_into_view_with_bool(false);
     refresh_keyboard_inset();
 
-    let ta = ta.clone();
+    let el = el.clone();
     spawn_local(async move {
         for delay_ms in [50_u32, 150, 300, 500] {
             gloo_timers::future::TimeoutFuture::new(delay_ms).await;
-            scroll_composer_into_view(&ta);
+            el.scroll_into_view_with_bool(false);
             refresh_keyboard_inset();
         }
     });
+}
+
+/// 聊天输入条聚焦：以 `.composer-ds` 输入条为可见容器。
+pub(crate) fn on_composer_focus_keep_visible(ta: &web_sys::HtmlTextAreaElement) {
+    on_mobile_focus_keep_visible(&composer_bar_element(ta));
 }
 
 /// 订阅 `visualViewport` 的 resize/scroll，维护 `--vv-keyboard-inset`。

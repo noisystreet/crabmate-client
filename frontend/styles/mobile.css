@@ -15,8 +15,10 @@ html[data-cm-mobile-shell] .composer-ds .composer-input-stack .composer-input-fa
  * 软键盘避让：窄屏浏览器 + Android 壳（横屏可能 >768px）都要抬高底部。
  * `--vv-keyboard-inset`：visualViewport；`--cm-ime-inset`：Android 壳 WindowInsets IME（targetSdk 35+ 兜底）。
  * `max` 取较大值，避免两侧同时报高度时叠双倍（同为键盘高度时结果仍为一份）。
+ * 定义在 `:root`（而非 `.app-root`）：fixed 覆盖层（设置页 / 弹窗）不在 `.app-root` 子树内，
+ * 只有全局变量才能让它们取到同一个键盘高度。
  */
-.app-root.app-shell-ds {
+:root {
   --cm-keyboard-pad: max(var(--vv-keyboard-inset, 0px), var(--cm-ime-inset, 0px));
 }
 
@@ -37,6 +39,24 @@ html[data-cm-mobile-shell] .app-root.app-shell-ds {
   );
   box-sizing: border-box;
   transition: padding-bottom 0.12s ease-out;
+}
+
+/*
+ * fixed 覆盖层（`:root` 变量可达）：设置页与弹窗都是 `position: fixed; inset: 0`，
+ * 不继承 `.app-root` 的 padding-bottom，软键盘弹出时底部输入框会被盖住，需自行让位。
+ * 设置页 `overflow: auto`，padding-bottom 转为可滚动余量；无键盘时为 0，不改变既有布局。
+ */
+.settings-page {
+  padding-bottom: var(--cm-keyboard-pad, 0px);
+  box-sizing: border-box;
+}
+
+html[data-cm-mobile-shell] .modal-backdrop {
+  padding-bottom: calc(
+    var(--cm-keyboard-pad, 0px) +
+      max(var(--cm-safe-bottom, 24px), env(safe-area-inset-bottom, 0px))
+  );
+  box-sizing: border-box;
 }
 
 /* 仅 Android 壳：color:transparent 常导致 caret 不可见；用 text-fill 藏字（勿用于 Firefox 等窄屏浏览器） */
@@ -375,12 +395,12 @@ html[data-cm-mobile-shell] .composer-input--mirror-overlay {
     display: none !important;
   }
 
-  /* 窄屏通用弹窗居中，避开底部系统导航（审批同此，勿贴底以免被手势条/底栏遮挡） */
+  /* 窄屏通用弹窗居中，避开底部系统导航 + 软键盘（审批同此，勿贴底以免被手势条/底栏/键盘遮挡） */
   .modal-backdrop {
     align-items: center;
     justify-content: center;
     padding: max(12px, env(safe-area-inset-top, 0px)) 16px
-      max(24px, env(safe-area-inset-bottom, 0px));
+      calc(var(--cm-keyboard-pad, 0px) + max(24px, env(safe-area-inset-bottom, 0px)));
   }
 
   .modal-backdrop > .modal {
@@ -388,7 +408,7 @@ html[data-cm-mobile-shell] .composer-input--mirror-overlay {
     max-width: min(720px, 100%);
     margin: 0;
     border-radius: var(--radius-lg);
-    max-height: min(85vh, 85dvh);
+    max-height: min(85vh, 85dvh, 100%);
   }
 
   .modal.approval-modal {

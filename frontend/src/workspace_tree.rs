@@ -11,6 +11,7 @@ use leptos::task::spawn_local;
 use leptos_dom::helpers::event_target_value;
 
 use crate::api::{WorkspaceData, WorkspaceEntry, fetch_workspace};
+use crate::app::app_shell_effects::on_mobile_focus_keep_visible;
 use crate::i18n::{self, Locale};
 use crate::icon::{icon_chevron_down, icon_chevron_right};
 use crate::workspace_context_menu::{
@@ -267,6 +268,8 @@ fn WorkspaceTreeInlineCreateRow(
             if let Some(el) = node {
                 let _ = el.focus();
                 el.select();
+                // 窄屏 / 移动壳：内联新建行可能位于树滚动区底部，软键盘弹出需滚入视口。
+                on_mobile_focus_keep_visible(&el);
             }
         });
     });

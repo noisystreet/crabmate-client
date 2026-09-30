@@ -5,7 +5,7 @@
 mod app_bootstrap_phase;
 mod app_shell_bootstrap;
 mod app_shell_ctx;
-mod app_shell_effects;
+pub(crate) mod app_shell_effects;
 mod app_shell_init;
 mod app_shell_wire_phases;
 pub(crate) mod app_signals;

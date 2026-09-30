@@ -4,6 +4,7 @@ use leptos::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{HtmlElement, HtmlTextAreaElement};
 
+use crate::app::app_shell_effects::on_mobile_focus_keep_visible;
 use crate::i18n::{self, Locale};
 use crate::markdown::plaintext_to_safe_html;
 use crate::session_search::is_safe_dom_token;
@@ -61,6 +62,15 @@ pub(crate) fn mount_user_message_editor(
     {
         ta.set_value(&edit.draft);
         let _ = ta.focus();
+        // 就地编辑在滚动区内，软键盘弹出需把整块编辑表单滚入视口（同 composer）。
+        if let Some(form) = wrap
+            .query_selector(".chat-user-edit")
+            .ok()
+            .flatten()
+            .and_then(|n| n.dyn_into::<HtmlElement>().ok())
+        {
+            on_mobile_focus_keep_visible(&form);
+        }
     }
 }
 
