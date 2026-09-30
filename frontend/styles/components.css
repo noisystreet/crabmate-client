@@ -9,9 +9,7 @@
     url("../brand-mark.svg")
     center / 20px 20px
     no-repeat;
-  box-shadow:
-    0 1px 0 color-mix(in srgb, var(--inset-highlight) 10%, transparent) inset,
-    0 2px 8px color-mix(in srgb, var(--accent) 20%, transparent);
+  box-shadow: var(--brand-mark-shadow);
   flex-shrink: 0;
 }
 
@@ -21,7 +19,7 @@
   align-items: center;
   justify-content: center;
   gap: 6px;
-  padding: 7px 12px;
+  padding: var(--btn-pad-y) var(--btn-pad-x);
   font-family: inherit;
   font-size: var(--text-md);
   font-weight: 500;
@@ -54,7 +52,7 @@
 }
 
 .btn-sm {
-  padding: 5px 10px;
+  padding: calc(var(--btn-pad-y) - 2px) calc(var(--btn-pad-x) - 2px);
   font-size: var(--text-sm);
 }
 
@@ -73,7 +71,7 @@
 .btn-ghost:active:not(:disabled) {
   background: color-mix(in srgb, var(--surface-hover) 75%, var(--surface));
   border-color: color-mix(in srgb, var(--muted) 26%, var(--border-subtle));
-  transform: translateY(1px);
+  transform: var(--btn-press-transform);
 }
 
 .btn-ghost:disabled {
@@ -102,7 +100,7 @@
 
 .btn-primary:active:not(:disabled) {
   filter: brightness(0.98) saturate(0.98);
-  transform: translateY(1px);
+  transform: var(--btn-press-transform);
   box-shadow: var(--btn-primary-shadow-active);
 }
 
@@ -122,14 +120,14 @@
   border-color: var(--accent);
   color: var(--accent);
   background: color-mix(in srgb, var(--accent) 10%, var(--surface));
-  box-shadow: 0 1px 6px color-mix(in srgb, var(--accent) 12%, transparent);
+  box-shadow: var(--btn-secondary-shadow-hover);
 }
 
 .btn-secondary:active:not(:disabled) {
-  transform: translateY(1px);
+  transform: var(--btn-press-transform);
   border-color: color-mix(in srgb, var(--accent) 72%, var(--border));
   background: color-mix(in srgb, var(--accent) 14%, var(--surface));
-  box-shadow: 0 1px 3px color-mix(in srgb, var(--accent) 10%, transparent);
+  box-shadow: var(--btn-secondary-shadow-active);
 }
 
 .btn-secondary:disabled {
@@ -156,7 +154,7 @@
 }
 
 .btn-muted:active:not(:disabled) {
-  transform: translateY(1px);
+  transform: var(--btn-press-transform);
   background: color-mix(in srgb, var(--surface-hover) 72%, var(--surface));
   border-color: color-mix(in srgb, var(--muted) 32%, var(--border));
 }

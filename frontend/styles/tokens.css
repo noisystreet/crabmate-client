@@ -165,6 +165,18 @@
   --btn-primary-shadow-active:
     0 1px 0 color-mix(in srgb, var(--inset-highlight) 10%, transparent) inset,
     0 1px 4px color-mix(in srgb, var(--accent) 18%, transparent);
+  /* 按键内边距与按下位移：默认贴合既有紧凑观感；
+     shadcn 主题按 h-9 放宽内边距并取消按下位移（.btn-sm 自 .btn 派生，故只需这两个基准值）。 */
+  --btn-pad-y: 7px;
+  --btn-pad-x: 12px;
+  --btn-press-transform: translateY(1px);
+  /* 次按钮 hover / active 的投色光晕：默认给一点强调色辉光；shadcn 主题写 `none`（只用 1px 边框变色）。 */
+  --btn-secondary-shadow-hover: 0 1px 6px color-mix(in srgb, var(--accent) 12%, transparent);
+  --btn-secondary-shadow-active: 0 1px 3px color-mix(in srgb, var(--accent) 10%, transparent);
+  /* 品牌标投影（inset 顶光 + accent 投色光晕）：整条抽成 token，shadcn 主题写 `none`。 */
+  --brand-mark-shadow:
+    0 1px 0 color-mix(in srgb, var(--inset-highlight) 10%, transparent) inset,
+    0 2px 8px color-mix(in srgb, var(--accent) 20%, transparent);
   --modal-backdrop-bg: rgba(6, 8, 12, 0.54);
   /* 局部遮罩（抽屉 / 面板旁）：只压住一节内容而非整屏，故与整屏的 --modal-backdrop-bg 分开取值 */
   --scrim-bg: rgba(0, 0, 0, 0.5);
@@ -174,6 +186,18 @@
     0 -10px 40px color-mix(in srgb, var(--bg) 55%, transparent);
   --composer-ws-ref-bg: color-mix(in srgb, var(--accent) 14%, var(--surface));
   --composer-ws-ref-box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 28%, var(--border));
+  /* 聊天气泡观感（`app-shell-ds` 覆层实际生效，见 styles/layout-chat.css）：
+     默认助手上=近纯色微渐变 + 极浅阴影，用户=压深底 + 无阴影；
+     shadcn 主题改扁平纯色 + 1px 边框（去渐变 / 去阴影）。 */
+  --chat-turn-assistant-bg: linear-gradient(
+    168deg,
+    color-mix(in srgb, var(--surface) 96%, var(--bg)) 0%,
+    color-mix(in srgb, var(--surface) 98%, var(--bg-elevated)) 100%
+  );
+  --chat-turn-assistant-border: color-mix(in srgb, var(--border-subtle) 72%, var(--surface));
+  --chat-turn-assistant-shadow: var(--shadow-sm);
+  --chat-turn-user-bg: color-mix(in srgb, var(--surface) 90%, var(--bg));
+  --chat-turn-user-border: color-mix(in srgb, var(--border) 78%, var(--surface));
 
   /* 聊天内嵌终端面板（与深色 IDE 终端块一致；浅色主题亦保留深色沉浸区） */
   --terminal-panel-bg: #0c0e12;
