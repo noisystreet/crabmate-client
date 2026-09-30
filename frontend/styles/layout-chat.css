@@ -326,18 +326,14 @@
 }
 
 .app-shell-ds .chat-tui-turn--assistant {
-  background: linear-gradient(
-    168deg,
-    color-mix(in srgb, var(--surface) 96%, var(--bg)) 0%,
-    color-mix(in srgb, var(--surface) 98%, var(--bg-elevated)) 100%
-  );
-  border-color: color-mix(in srgb, var(--border-subtle) 72%, var(--surface));
-  box-shadow: var(--shadow-sm);
+  background: var(--chat-turn-assistant-bg);
+  border-color: var(--chat-turn-assistant-border);
+  box-shadow: var(--chat-turn-assistant-shadow);
 }
 
 .app-shell-ds .chat-tui-turn--user {
-  background: color-mix(in srgb, var(--surface) 90%, var(--bg));
-  border-color: color-mix(in srgb, var(--border) 78%, var(--surface));
+  background: var(--chat-turn-user-bg);
+  border-color: var(--chat-turn-user-border);
   box-shadow: none;
 }
 
