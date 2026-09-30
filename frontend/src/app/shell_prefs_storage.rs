@@ -171,6 +171,8 @@ pub(crate) fn persist_theme_to_storage_and_dom(theme_pref: &str) {
     {
         let _ = root.set_attribute("data-theme", &css);
     }
+    // Android：状态栏透明后露出的是 Web 顶栏底色，系统栏图标须随主题明暗切换（否则浅色主题下白图标不可见）。
+    crate::mobile_remote::apply_mobile_system_bar_icons(crate::app_prefs::theme_css_is_light(&css));
 }
 
 /// 将界面语言反映到 `<html lang>`（不写 `localStorage`；语言持久化在 i18n 路径）。

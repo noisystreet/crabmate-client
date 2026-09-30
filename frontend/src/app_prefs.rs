@@ -122,6 +122,14 @@ pub fn resolve_data_theme_slug(pref: &str) -> String {
     }
 }
 
+/// CSS 预设 slug 是否为浅色主题（命名约定 `xxx-light` / `xxx-dark`）。
+///
+/// 供 Android 壳切换系统状态栏 / 导航栏图标明暗：浅色主题需深色图标。
+#[must_use]
+pub fn theme_css_is_light(css_slug: &str) -> bool {
+    css_slug.ends_with("-light")
+}
+
 pub const DEFAULT_SIDE_WIDTH: f64 = 280.0;
 pub const MIN_SIDE_WIDTH: f64 = 200.0;
 pub const MAX_SIDE_WIDTH: f64 = 560.0;
@@ -250,7 +258,7 @@ pub fn clamp_side_width_for_viewport(w: f64) -> f64 {
 mod theme_slug_tests {
     use super::{
         DEFAULT_THEME_SLUG, THEME_CSS_SLUGS, THEME_SYSTEM, normalize_theme_slug,
-        resolve_data_theme_slug,
+        resolve_data_theme_slug, theme_css_is_light,
     };
 
     #[test]
@@ -327,6 +335,16 @@ mod theme_slug_tests {
             "got {resolved}"
         );
         assert!(!THEME_CSS_SLUGS.contains(&THEME_SYSTEM));
+    }
+
+    #[test]
+    fn theme_css_is_light_follows_slug_suffix() {
+        assert!(theme_css_is_light("shadcn-light"));
+        assert!(theme_css_is_light("crabmate-light"));
+        assert!(!theme_css_is_light("shadcn-dark"));
+        assert!(!theme_css_is_light("crabmate-dark"));
+        assert!(!theme_css_is_light("material-dark"));
+        assert!(!theme_css_is_light("high-contrast-dark"));
     }
 }
 
