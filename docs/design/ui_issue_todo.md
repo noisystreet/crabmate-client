@@ -43,8 +43,8 @@
 - [x] light 主题主按钮白字 ≈3.2–3.9:1，低于 AA 小字（12px/500 需 4.5:1）：`frontend/styles/components.css`、`frontend/themes/light.css`。已修（2026-09-24）：`.btn-primary { color: #fff }` 为三主题共用，故只改 light 覆层——`--btn-primary-bg` 渐变改为 `color-mix(--accent 68%, #0a0c10)` → `color-mix(--accent 60%, #0a0c10)`（最亮顶部 ≈6.3:1），`--btn-primary-border` 同步压深；`:hover` 的 `brightness(1.07)` 提亮后仍 ≈5.7:1。
 - [x] light 主题 `--muted` 小字 ≈3.4:1，仍用于 10–11px 大写标签：`frontend/themes/light.css`、`components.css`、`status.css`、`modal.css`、`shell-topbar.css`。已修（2026-09-24）：`--muted` `#8a8278` → `#6f675c`，在 `--bg` / `--surface-hover` / `--surface` 上分别为 4.99 / 4.90 / 5.57:1（`--status-agent-select-bg-image` 的 SVG fill 同步）；`components.css` 中 muted 半透明只出现在 `:disabled`（WCAG 对比度豁免），未改；`status.css` / `shell-topbar.css` 的 10–11px 标签本就用纯 `var(--muted)`，随 token 加深即达标。
 - [x] light 主题（出厂默认）五个语义色当文字色用时**全部低于 AA**，且 `--info` 与 `--accent` 同值、`--surface` 纯白压在暖底上冷暖冲突：`frontend/themes/light.css`。已修（2026-09-25，**取代上两条记录的数值**）：`--accent` `#7a8c7a`(3.58:1) → `#55705b`、`--info` → 独立取青 `#3a6e83`、`--success` → `#4a7454`、`--warn` → `#836628`、`--error` → `#a0524f`，在 `--bg` / `--surface-hover` / `--surface` 三层底色上最差 4.54:1（小字 AA 需 4.5:1）；`--surface` `#ffffff` → `#fffdfa`、`--bg` → `#f4f1ea`、`--surface-hover` → `#f0ece2`、`--border` → `#e2ddd1`、`--border-subtle` → `#ebe7dc`、`--text` → `#1c1913`、`--muted` → `#6b6357`(5.02–5.83:1，chevron SVG 同步)、`--modal-backdrop-bg` 随 `--text`；`--btn-primary-bg` 由 `--accent 68%/60%` 改 `92%/84%` 混 `#0a0c10`（旧比例在新 accent 下会压成近黑，白字 ≈8.7:1 但丢失主色身份），现顶部 ≈6.1:1、hover ≈5.5:1。仍需实算复核：`--nav-rail-bg` 仍为 `bg-elevated 90%`，侧栏略亮于页面（未在本次范围内）。
-- [ ] `.ide-editor-textarea:focus` `outline: none` 且无 `:focus-visible` 替代，键盘焦点只剩 caret：`frontend/styles/ide-layout.css`。
-- [ ] lightbox 操作 / 关闭按钮无 `:hover` 与 `:focus-visible`：`frontend/styles/shell-ds.css`。
+- [x] `.ide-editor-textarea:focus` `outline: none` 且无 `:focus-visible` 替代，键盘焦点只剩 caret：`frontend/styles/ide-layout.css`。**已失效（2026-10-01）**：该类名全仓已不存在——编辑器已迁 CodeMirror（`.ide-cm-host .cm-editor`），旧 textarea 随之移除，条目不再适用。
+- [x] lightbox 操作 / 关闭按钮无 `:hover` 与 `:focus-visible`：`frontend/styles/shell-ds.css`。已修（2026-10-01）：`.chat-image-lightbox-action` / `-close` 补 `:hover`（底色加深）与 `:focus-visible`（`--focus-ring-*` 焦点环），`.chat-image-lightbox-menu-item` 补 `:focus-visible`。
 - [ ] 顶栏菜单条 `min-width:max-content`，窄屏可能与中间路径、右侧控件重叠（需实机验证）：`frontend/styles/shell-topbar.css`、`mobile.css`。
 
 ## P2 · 移动端边界与体验
@@ -88,10 +88,10 @@
 
 ## P3 · 次要
 
-- [ ] `prefers-reduced-motion` 漏 2 处无限动画：会话流式徽章脉冲、克隆进度条。
+- [x] `prefers-reduced-motion` 漏 2 处无限动画：会话流式徽章脉冲、克隆进度条。已修（2026-10-01）：`motion.css` 补 `.nav-session-streaming-badge::before`（`nav-streaming-pulse`）与 `.workspace-clone-bar--indeterminate .workspace-clone-bar-fill`（`workspace-clone-indeterminate`）；`index.html` 内联样式补 `#cm-boot-splash .cm-boot-loader`（`cm-boot-spin`）。
 - [x] 首屏主题快照硬编码 `light`，深色用户有短暂浅色闪烁。已修（2026-09-24）：`frontend/src/app/shell_prefs_storage.rs` 的 `read_shell_ui_initial_snapshot()` 默认改 `dark`，与 splash（`index.html` 内联深色）、桌面窗口底色（`BOOT_SHELL_BG`）及 `tokens.css` 的 `:root` 默认深色对齐（偏好要等 `GET /user-data/prefs` 才到，改 `system` 此时拿不到 OS 明暗会退回 light，故不用）；首帧值不会写回服务端覆盖用户偏好——`UserPrefsSyncPhase` 在偏好加载完成前禁止 PUT。
 - [x] 对比度风险点 `frontend/styles/shell-ds.css:303`（`--muted` 再稀释），需实测验证。已修（2026-09-24）：实为 `.nav-rail-search-label` / `.nav-rail-scroll-label`（10px 大写，`color-mix(--muted 88%, transparent)`，行号已漂移至 285 / 384）——`--muted` 加深后 88% 半透明仍只 ≈3.9:1，两处改为纯 `var(--muted)`；同类小号文字稀释一并去半透明：`layout-chat.css` `.chat-tui-role` / `.chat-tui-think-summary`、`modal.css` `.settings-mcp-tool-openai`（装饰符 `▾`、`::placeholder`、`:disabled` 保持原样）。
-- [ ] 死代码：`approval_bar.rs` 的 `ApprovalBar`（已被 approval_modal 替代、全仓无引用）。
+- [x] 死代码：`approval_bar.rs` 的 `ApprovalBar`（已被 approval_modal 替代、全仓无引用）。已删（2026-10-01）：`approval_bar.rs` 实为不可编译的孤儿文件（`app/mod.rs` 无 `mod approval_bar`，且引用的 `i18n::approval_toggle_label` 全仓不存在）；连带删除其专属样式 `frontend/styles/approval.css`（整文件仅服务 `.approval-bar*`）、`index.html` 的 `<link>`、`motion.css` 的 `.approval-bar-*` 死规则，以及 victauri 中已失效的 `approval_bar_structure` 用例（断言 `[data-testid="approval-bar"]` 计数=1，而该组件永不渲染）。
 - [ ] `.modal-backdrop` 遮罩层仍有 13 处重复模板，且「点击自身关闭」判定已分叉（裸 `on:click` vs. `mouse_event_target_is_current_target`），未纳入模态骨架收敛（本轮只收敛了面板本体 `FocusableModalPanel`）。
 - [ ] `save_busy/load_busy` 期间 Ctrl+S 被静默吞掉：`frontend/src/ide_save.rs`。
 - [ ] 同步期间关闭标签，快照索引写回可能命中错误标签：`frontend/src/ide_disk_sync.rs`。
@@ -99,7 +99,7 @@
 - [ ] `ide_find` 每次按键对全文 lowercase 并分配，大文件下查找输入可能卡顿：`frontend/src/ide_find.rs`。
 - [ ] composer `resize: vertical` 与 autosize 两个高度机制打架：`frontend/styles/layout-chat.css`、`frontend/src/app/chat/composer_input_stack.rs`。
 - [ ] transcript 整区 `aria-live="polite"`，工具行频繁 status 更新持续触发读屏播报（权衡项）：`frontend/src/app/chat/tui_stream_view.rs`。
-- [ ] `cm-boot-spin` 无限旋转未纳入 `prefers-reduced-motion`：`frontend/index.html`。
+- [x] `cm-boot-spin` 无限旋转未纳入 `prefers-reduced-motion`：`frontend/index.html`。已修（2026-10-01）：内联样式补 `@media (prefers-reduced-motion: reduce)` 停用 `cm-boot-loader` 动画。
 - [x] 设置页 900px 断点与主 768px 体系并存且无注释：`frontend/styles/modal.css`。已修：900px 作为与主断点语义独立的二级断点，在 `scripts/check-css-breakpoints.sh` 的 `EXTRA_BREAKPOINTS` 显式登记并写明用途（设置弹窗 `.settings-layout` 双列转单列）。
 - [x] MCP 超时输入非法字符静默保留旧值：`frontend/src/app/settings_mcp_block_toolbar.rs`。已修（2026-09-25）：空 / 非整数 / `< 1` 三类非法输入改为 `settings-hint`（`role="status"`）提示，提示中带上当前生效值；只有合法值才写回 state，去掉原先 `n.max(1)` 的静默改写（不做 DOM 值回写——`<input type="number">` 对非数字通常返回空串，回写会与用户输入冲突）。
 - [x] MCP 远端 bearer placeholder 硬编码 `••••••••`：`frontend/src/app/settings_mcp_server_row.rs`。已修（2026-09-25）：掩码收成单一来源 `i18n::SECRET_MASK_PLACEHOLDER`（Web Bearer、GitHub client id 两处同改），并统一语义为仅 `has_bearer` 为真时显示（原先无条件显示会让人误以为已配置）。

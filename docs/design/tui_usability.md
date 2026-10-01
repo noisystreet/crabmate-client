@@ -25,7 +25,7 @@
 | G5 | 会话列表无 CRUD/过滤/导出：左栏仅 use/new/refresh（`mod.rs:454-466`）；repl `/conv list` 只读（`slash.rs:199-245`） | 排序 + 标题过滤 + 全文搜索 + 重命名/删除/导出（`session_rail.rs`、`session_list_modal.rs`） | 会话一多靠翻，无清理手段 |
 | G6 | 切换会话后 transcript 从空开始，**无历史回放**（矩阵 L53；`state.rs`「v1 无历史回放」） | 会话水合 + 顶部「加载更早」prepend（`session_hydrate.rs`、`tui_stream_view.rs`） | 续聊时看不到前文，须先切到别的壳回顾 |
 | G7 | 无 retry / regen / branch / 编辑用户消息 | 消息回合菜单（`message_row_actions.rs`、`user_message_edit.rs`） | 模型答错只能整轮重发或手动复制改写 |
-| G8 | 审批浮层命令预览截断（宽 78/高 8，`render.rs:550-562`） | 底部审批条可展开完整命令 + 失败保留重试（`approval_bar.rs`、`approval_modal.rs`） | 长命令看不到全貌，易误判 |
+| G8 | 审批浮层命令预览截断（宽 78/高 8，`render.rs:550-562`） | 底部审批条可展开完整命令 + 失败保留重试（`approval_modal.rs`） | 长命令看不到全貌，易误判 |
 
 另有与 Desktop 同步暂缓/不做项，见 §2 非目标（勿误当缺口）。
 
