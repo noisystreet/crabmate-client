@@ -11,7 +11,7 @@ use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderName, Header
 use serde::Deserialize;
 
 use crate::serve::config::ConnectionConfig;
-use crate::serve::error::TermError;
+use crate::serve::error::{TermError, http_error};
 use crate::serve::url::api_url;
 
 /// 建连（TCP + TLS）超时：serve 不可达 / 被防火墙黑洞时快速失败。
@@ -99,10 +99,7 @@ impl ServeClient {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
         if !status.is_success() {
-            return Err(TermError::Http {
-                status: status.as_u16(),
-                body: body.trim().chars().take(400).collect(),
-            });
+            return Err(http_error(status.as_u16(), &body));
         }
         if let Some(note) = health_degraded_note(&body) {
             eprintln!("[crabmate-tui] /health degraded (optional checks failed): {note}");
@@ -165,10 +162,7 @@ impl ServeClient {
         if status.as_u16() == 410 {
             return Ok(());
         }
-        Err(TermError::Http {
-            status: status.as_u16(),
-            body: body.trim().chars().take(400).collect(),
-        })
+        Err(http_error(status.as_u16(), &body))
     }
 
     async fn ensure_success(resp: reqwest::Response) -> Result<(), TermError> {
@@ -177,9 +171,6 @@ impl ServeClient {
             return Ok(());
         }
         let body = resp.text().await.unwrap_or_default();
-        Err(TermError::Http {
-            status: status.as_u16(),
-            body: body.trim().chars().take(400).collect(),
-        })
+        Err(http_error(status.as_u16(), &body))
     }
 }

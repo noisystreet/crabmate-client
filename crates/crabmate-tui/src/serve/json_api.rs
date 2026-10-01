@@ -5,7 +5,7 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 use crate::serve::client::{REQUEST_TIMEOUT, ServeClient};
-use crate::serve::error::TermError;
+use crate::serve::error::{TermError, http_error};
 
 impl ServeClient {
     pub async fn get_json<T: DeserializeOwned>(&self, path: &str) -> Result<T, TermError> {
@@ -85,25 +85,10 @@ impl ServeClient {
     }
 }
 
-/// 2xx 视为成功；否则按响应体组装错误（`http_error_from_body` 会优先提取 JSON `error` 字段）。
+/// 2xx 视为成功；否则按响应体组装错误（`http_error` 会优先提取 JSON `error` 字段）。
 fn ensure_ok(status: reqwest::StatusCode, text: &str) -> Result<(), TermError> {
     if status.is_success() {
         return Ok(());
     }
-    Err(http_error_from_body(status.as_u16(), text))
-}
-
-fn http_error_from_body(status: u16, text: &str) -> TermError {
-    if let Ok(v) = serde_json::from_str::<Value>(text)
-        && let Some(err) = v
-            .get("error")
-            .and_then(|e| e.as_str())
-            .filter(|s| !s.is_empty())
-    {
-        return TermError::Message(err.to_string());
-    }
-    TermError::Http {
-        status,
-        body: text.trim().chars().take(400).collect(),
-    }
+    Err(http_error(status.as_u16(), text))
 }
