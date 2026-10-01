@@ -36,14 +36,12 @@ impl ServeClient {
             .await?;
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
-        if status.is_success() {
-            if text.trim().is_empty() {
-                return Ok(Value::Null);
-            }
-            return serde_json::from_str(&text)
-                .map_err(|e| TermError::Message(format!("decode JSON from {path}: {e}")));
+        ensure_ok(status, &text)?;
+        if text.trim().is_empty() {
+            return Ok(Value::Null);
         }
-        Err(http_error_from_body(status.as_u16(), &text))
+        serde_json::from_str(&text)
+            .map_err(|e| TermError::Message(format!("decode JSON from {path}: {e}")))
     }
 
     /// `PUT` 无内容响应端点（如 `/user-data/*` 全量保存）：2xx 即成功，不解析 body。
@@ -61,10 +59,7 @@ impl ServeClient {
             .await?;
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
-        if status.is_success() {
-            return Ok(());
-        }
-        Err(http_error_from_body(status.as_u16(), &text))
+        ensure_ok(status, &text)
     }
 
     /// `DELETE` 无内容响应端点（如 `/conversation/{id}` 幂等 204）：2xx 即成功，不解析 body。
@@ -79,20 +74,23 @@ impl ServeClient {
             .await?;
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
-        if status.is_success() {
-            return Ok(());
-        }
-        Err(http_error_from_body(status.as_u16(), &text))
+        ensure_ok(status, &text)
     }
 
     async fn read_success_text(resp: reqwest::Response) -> Result<String, TermError> {
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
-        if status.is_success() {
-            return Ok(text);
-        }
-        Err(http_error_from_body(status.as_u16(), &text))
+        ensure_ok(status, &text)?;
+        Ok(text)
     }
+}
+
+/// 2xx 视为成功；否则按响应体组装错误（`http_error_from_body` 会优先提取 JSON `error` 字段）。
+fn ensure_ok(status: reqwest::StatusCode, text: &str) -> Result<(), TermError> {
+    if status.is_success() {
+        return Ok(());
+    }
+    Err(http_error_from_body(status.as_u16(), text))
 }
 
 fn http_error_from_body(status: u16, text: &str) -> TermError {

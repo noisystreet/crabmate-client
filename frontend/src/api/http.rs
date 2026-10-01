@@ -316,23 +316,13 @@ async fn delete_no_content(url: &str, loc: Locale) -> Result<(), String> {
     let url = api_url(url);
     let req =
         Request::new_with_str_and_init(&url, &init).map_err(|e| format!("request: {:?}", e))?;
-    let w = window().ok_or_else(|| crate::i18n::api_err_no_window(loc).to_string())?;
-    let resp_val = JsFuture::from(w.fetch_with_request(&req))
-        .await
-        .map_err(|e| format_fetch_transport_error(&e))?;
-    let resp: Response = resp_val
-        .dyn_into()
-        .map_err(|_| crate::i18n::api_err_response_type(loc))?;
+    let resp = do_fetch(&req, loc).await?;
     if resp.ok() {
         return Ok(());
     }
     let status = resp.status();
     let body = read_response_text(&resp, loc).await.unwrap_or_default();
-    Err(crate::i18n::api_err_http_status(
-        loc,
-        status,
-        http_error_detail_from_body(&body).as_str(),
-    ))
+    Err(http_status_error(status, &body, loc))
 }
 
 /// `DELETE /workspace/dir?path=…&confirm=true&recursive=…`：删除工作区目录。
@@ -626,26 +616,32 @@ async fn response_text_fallback(resp: &Response) -> Result<String, String> {
     Ok(text.ok().and_then(|v| v.as_string()).unwrap_or_default())
 }
 
-async fn do_fetch_json<T: for<'de> Deserialize<'de>>(
-    req: Request,
-    loc: Locale,
-) -> Result<T, String> {
+/// 执行 `Request` 并把 fetch 结果转成 `Response`（`do_fetch_json` / `delete_no_content` 共用）。
+async fn do_fetch(req: &Request, loc: Locale) -> Result<Response, String> {
     let w = window().ok_or_else(|| crate::i18n::api_err_no_window(loc).to_string())?;
-    let p = w.fetch_with_request(&req);
-    let resp_val = JsFuture::from(p)
+    let resp_val = JsFuture::from(w.fetch_with_request(req))
         .await
         .map_err(|e| format_fetch_transport_error(&e))?;
     let resp: Response = resp_val
         .dyn_into()
         .map_err(|_| crate::i18n::api_err_response_type(loc))?;
+    Ok(resp)
+}
+
+/// 非 2xx 响应的错误消息（`do_fetch_json` / `delete_no_content` 同源，含 `error` detail 提取）。
+fn http_status_error(status: u16, body: &str, loc: Locale) -> String {
+    crate::i18n::api_err_http_status(loc, status, http_error_detail_from_body(body).as_str())
+}
+
+async fn do_fetch_json<T: for<'de> Deserialize<'de>>(
+    req: Request,
+    loc: Locale,
+) -> Result<T, String> {
+    let resp = do_fetch(&req, loc).await?;
     let status = resp.status();
     let s = read_response_text(&resp, loc).await?;
     if !(200..300).contains(&status) {
-        return Err(crate::i18n::api_err_http_status(
-            loc,
-            status,
-            http_error_detail_from_body(&s).as_str(),
-        ));
+        return Err(http_status_error(status, &s, loc));
     }
     serde_json::from_str(&s).map_err(|e| e.to_string())
 }
