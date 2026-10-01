@@ -48,9 +48,9 @@ pub(crate) use http::fetch_auth_raster_image_blob_url;
 pub use http::{
     ChatBranchError, GithubRepoContextData, SkillListItem, SkillsListData, StatusData, TaskItem,
     TasksData, UploadedFileInfo, WebUiConfig, WorkspaceChangelogResponse, WorkspaceData,
-    WorkspaceEntry, WorkspaceFileReadData, delete_workspace_dir, delete_workspace_file,
-    fetch_conversation_messages, fetch_github_repo_context, fetch_skills, fetch_status,
-    fetch_tasks, fetch_tool_job_output, fetch_tool_job_status, fetch_web_ui_config,
+    WorkspaceEntry, WorkspaceFileReadData, delete_server_conversation, delete_workspace_dir,
+    delete_workspace_file, fetch_conversation_messages, fetch_github_repo_context, fetch_skills,
+    fetch_status, fetch_tasks, fetch_tool_job_output, fetch_tool_job_status, fetch_web_ui_config,
     fetch_workspace, fetch_workspace_changelog, fetch_workspace_file, post_chat_branch,
     post_chat_stream_cancel, post_config_reload, post_tool_job_cancel, post_workspace_dir,
     post_workspace_file_write, post_workspace_file_write_opts, post_workspace_set, save_tasks,

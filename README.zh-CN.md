@@ -83,7 +83,7 @@ make tui
 ./crates/crabmate-tui/target/debug/crabmate-tui \
   --api-base http://127.0.0.1:8080 \
   repl
-# repl 内：/help · /status 看模型 · /model 切换模型 · /mode ask|plan|act · /role <id> · /workspace [path] · /conv list|new|use <id> · Ctrl+C 停止本轮（连按两次退出）· /resume 续传断开的回合
+# repl 内：/help · /status 看模型 · /model 切换模型 · /mode ask|plan|act · /role <id> · /workspace [path] · /conv list|new|use <id>|delete [<id>] · /btw <问题>（旁路提问，不落库）· Ctrl+C 停止本轮（连按两次退出）· /resume 续传断开的回合
 ```
 
 bearer 鉴权但服务端未设模型 `API_KEY` 的 serve 会返回 `LLM_API_KEY_REQUIRED`；可像壳 UI「设置 → API 密钥」那样每轮自带模型密钥（三个参数同样支持 env，沿用 serve 侧模型 env 名：`CM_API_KEY` / `CM_MODEL` / `CM_API_BASE`）：
@@ -134,7 +134,7 @@ crabmate-tui --api-base http://127.0.0.1:8080 repl
 # 工具调用渲染为单行摘要，结果到达原位补 ✓/✗ + 说明
 # /find <词> 高亮并跳转 · /find 空参跳下一处 · /find off 清除
 # 助手正文渲染行内 Markdown（粗体/斜体/行内码/链接/删除线）；代码围栏内容保持纯文本
-# 斜杠：/model /mode /role /status /find /conv [new] /quit · /help 查看全部
+# 斜杠：/model /mode /role /status /find /conv [new] /btw <问题> /quit · /help 查看全部
 #   （状态行回退显示 serve 默认，本地 override 以 `*` 标记；
 #     切换会话后从空 transcript 开始新一轮）
 # /settings（或 F2）打开设置面板：可改模型名 / API Base / 温度 / 思考模式 / Agent role / 会话模式

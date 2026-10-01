@@ -37,9 +37,22 @@ pub fn chat_stream_cancel(job_id: &str) -> String {
     format!("/chat/stream/{job_id}/cancel")
 }
 
+/// 删除服务端已持久化会话（`DELETE`；tui / frontend）。
+///
+/// 服务端幂等（不存在 / 已过期也返回 204），非法 id 返回 400
+/// `INVALID_CONVERSATION_ID`；只删服务端记录，**不**级联 Client 侧栏索引。
+/// `conversation_id` 按路径段做百分号编码。
+#[must_use]
+pub fn conversation_delete(conversation_id: &str) -> String {
+    format!(
+        "/conversation/{}",
+        crate::handoff::percent_encode_unreserved(conversation_id)
+    )
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{CHAT_STREAM, HEALTH, WORKSPACE, chat_stream_cancel};
+    use super::{CHAT_STREAM, HEALTH, WORKSPACE, chat_stream_cancel, conversation_delete};
 
     #[test]
     fn constants_are_stable() {
@@ -51,5 +64,11 @@ mod tests {
     #[test]
     fn cancel_path_embeds_job_id() {
         assert_eq!(chat_stream_cancel("j1"), "/chat/stream/j1/cancel");
+    }
+
+    #[test]
+    fn conversation_delete_path_encodes_id() {
+        assert_eq!(conversation_delete("c1"), "/conversation/c1");
+        assert_eq!(conversation_delete("ws:a/b"), "/conversation/ws%3Aa%2Fb");
     }
 }

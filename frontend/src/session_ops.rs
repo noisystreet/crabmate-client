@@ -46,10 +46,24 @@ fn apply_delete_session(
         return;
     }
     let id = id.to_string();
+    // 下探服务端删除前取出 `server_conversation_id`（`retain` 后就取不到了）。
+    let server_conversation_id = sessions.with(|list| {
+        list.iter()
+            .find(|s| s.id == id)
+            .and_then(|s| s.server_conversation_id.clone())
+            .map(|c| c.trim().to_string())
+            .filter(|c| !c.is_empty())
+    });
     let was_active = active_id.get() == id;
     sessions.update(|list| {
         list.retain(|s| s.id != id);
     });
+    // Best-effort 下探：服务端幂等（不存在 / 已过期也 204）；失败静默，绝不阻塞本地删除。
+    if let Some(cid) = server_conversation_id {
+        spawn_local(async move {
+            let _ = crate::api::delete_server_conversation(&cid, locale).await;
+        });
+    }
     if sessions.with(|l| l.is_empty()) {
         let (list, def_id) = ensure_at_least_one(
             Vec::new(),
