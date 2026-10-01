@@ -890,6 +890,15 @@ img[data-cm-ws-hydrated="1"] {
   cursor: pointer;
 }
 
+.chat-image-lightbox-action:hover {
+  background: color-mix(in srgb, var(--bg) 72%, transparent);
+}
+
+.chat-image-lightbox-action:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+}
+
 .chat-image-lightbox-menu {
   position: fixed;
   z-index: 230;
@@ -921,6 +930,11 @@ img[data-cm-ws-hydrated="1"] {
   background: var(--surface-hover);
 }
 
+.chat-image-lightbox-menu-item:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: calc(-1 * var(--focus-ring-offset));
+}
+
 .chat-image-lightbox-img {
   /* 相对已含 safe-area 的 overlay 内容盒，勿再用 96vw（会抵消 padding） */
   max-width: min(100%, 1200px);
@@ -950,6 +964,15 @@ img[data-cm-ws-hydrated="1"] {
   background: color-mix(in srgb, var(--bg) 88%, transparent);
   color: var(--text);
   cursor: pointer;
+}
+
+.chat-image-lightbox-close:hover {
+  background: color-mix(in srgb, var(--bg) 72%, transparent);
+}
+
+.chat-image-lightbox-close:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
 }
 
 .composer-pending-img-remove {
