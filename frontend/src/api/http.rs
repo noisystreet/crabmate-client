@@ -301,6 +301,40 @@ pub async fn delete_workspace_file(path: &str, loc: Locale) -> Result<(), String
     Ok(())
 }
 
+/// `DELETE /conversation/{conversation_id}`：删除服务端已持久化会话（幂等 204）。
+///
+/// Best-effort：调用方在本地删除侧栏索引后发起，失败不得回滚本地删除。
+pub async fn delete_server_conversation(conversation_id: &str, loc: Locale) -> Result<(), String> {
+    delete_no_content(&paths::conversation_delete(conversation_id), loc).await
+}
+
+/// 无响应体 `DELETE`：2xx 即成功（如 `/conversation/{id}` 返回 204），不解析 body。
+async fn delete_no_content(url: &str, loc: Locale) -> Result<(), String> {
+    let init = RequestInit::new();
+    init.set_method("DELETE");
+    prepare_api_auth(&init).await;
+    let url = api_url(url);
+    let req =
+        Request::new_with_str_and_init(&url, &init).map_err(|e| format!("request: {:?}", e))?;
+    let w = window().ok_or_else(|| crate::i18n::api_err_no_window(loc).to_string())?;
+    let resp_val = JsFuture::from(w.fetch_with_request(&req))
+        .await
+        .map_err(|e| format_fetch_transport_error(&e))?;
+    let resp: Response = resp_val
+        .dyn_into()
+        .map_err(|_| crate::i18n::api_err_response_type(loc))?;
+    if resp.ok() {
+        return Ok(());
+    }
+    let status = resp.status();
+    let body = read_response_text(&resp, loc).await.unwrap_or_default();
+    Err(crate::i18n::api_err_http_status(
+        loc,
+        status,
+        http_error_detail_from_body(&body).as_str(),
+    ))
+}
+
 /// `DELETE /workspace/dir?path=…&confirm=true&recursive=…`：删除工作区目录。
 /// 旧后端无 `DELETE` 时回退为 `POST /workspace/dir`（JSON `delete=true`）。
 pub async fn delete_workspace_dir(path: &str, recursive: bool, loc: Locale) -> Result<(), String> {

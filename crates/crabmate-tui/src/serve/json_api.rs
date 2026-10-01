@@ -67,6 +67,24 @@ impl ServeClient {
         Err(http_error_from_body(status.as_u16(), &text))
     }
 
+    /// `DELETE` 无内容响应端点（如 `/conversation/{id}` 幂等 204）：2xx 即成功，不解析 body。
+    pub async fn delete_no_content(&self, path: &str) -> Result<(), TermError> {
+        let url = self.url(path)?;
+        let resp = self
+            .http()
+            .delete(&url)
+            .headers(self.auth_headers()?)
+            .timeout(REQUEST_TIMEOUT)
+            .send()
+            .await?;
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        if status.is_success() {
+            return Ok(());
+        }
+        Err(http_error_from_body(status.as_u16(), &text))
+    }
+
     async fn read_success_text(resp: reqwest::Response) -> Result<String, TermError> {
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();

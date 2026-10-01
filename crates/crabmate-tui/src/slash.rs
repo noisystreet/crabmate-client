@@ -123,7 +123,10 @@ fn print_help() {
   /conv list            list Web sessions (user-data)\n\
   /conv new             clear conversation_id (next turn starts fresh)\n\
   /conv use <id>        set conversation_id for continuation\n\
-  /quit                 exit repl"
+  /conv delete [<id>]   delete a server-persisted conversation (idempotent 204)\n\
+  /quit                 exit repl\n\
+model-side slash (sent to serve; serve short-circuits, nothing is persisted):\n\
+  /btw <question>       off-the-record side question (no tools, not added to history)"
     );
 }
 
@@ -182,8 +185,45 @@ async fn handle_conv(
             Ok(())
         }
         "list" | "ls" => list_web_sessions(client, conversation_id).await,
+        "delete" | "rm" => delete_conversation(client, args.get(1).copied(), conversation_id).await,
         other => anyhow::bail!("unknown /conv subcommand '{other}'; try /help"),
     }
+}
+
+/// `/conv delete [<id>|current]`：删除服务端已持久化会话（幂等 204）。
+///
+/// 缺省作用于当前 repl 的 `conversation_id`；只删服务端记录，**不**触碰
+/// Web 侧栏索引（那是 Client 本地数据）。
+async fn delete_conversation(
+    client: &ServeClient,
+    arg: Option<&str>,
+    conversation_id: &mut Option<String>,
+) -> Result<()> {
+    // `current` / 缺省都落到当前 repl 的 conversation_id。
+    let explicit = arg
+        .map(str::trim)
+        .filter(|s| !s.is_empty() && *s != "current")
+        .map(str::to_string);
+    let cid = match explicit.or_else(|| {
+        conversation_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+    }) {
+        Some(cid) => cid,
+        None => anyhow::bail!(
+            "usage: /conv delete <conversation_id> (or /conv use <id> first, or 'current')"
+        ),
+    };
+    client
+        .delete_no_content(&paths::conversation_delete(&cid))
+        .await?;
+    if conversation_id.as_deref().map(str::trim) == Some(cid.as_str()) {
+        *conversation_id = None;
+    }
+    println!("deleted server conversation {cid} (idempotent); local sidebar index untouched");
+    Ok(())
 }
 
 fn print_current_conv(conversation_id: &Option<String>) {
@@ -255,6 +295,9 @@ mod tests {
         assert!(is_control_slash("/HELP"));
         assert!(is_control_slash("/Workspace /tmp"));
         assert!(is_control_slash("/conv list"));
+        assert!(is_control_slash("/conv delete c1"));
+        // `/btw` 是服务端短路的模型面命令：**不**拦截，原样发给 serve。
+        assert!(!is_control_slash("/btw why"));
         assert!(!is_control_slash("/my-skill"));
         assert!(!is_control_slash("hello"));
     }

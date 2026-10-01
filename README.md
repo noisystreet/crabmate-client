@@ -83,7 +83,7 @@ make tui
 ./crates/crabmate-tui/target/debug/crabmate-tui \
   --api-base http://127.0.0.1:8080 \
   repl
-# In repl: /help · /status shows the model · /model switches model · /mode ask|plan|act · /role <id> · /workspace [path] · /conv list|new|use <id> · Ctrl+C stops the turn (twice quits) · /resume re-attaches a dropped run
+# In repl: /help · /status shows the model · /model switches model · /mode ask|plan|act · /role <id> · /workspace [path] · /conv list|new|use <id>|delete [<id>] · /btw <question> (off-the-record side question, not persisted) · Ctrl+C stops the turn (twice quits) · /resume re-attaches a dropped run
 ```
 
 A bearer-mode `serve` without a server-side model `API_KEY` returns `LLM_API_KEY_REQUIRED`; send a client-owned LLM key per chat like the shell UI's Settings → API key (flags also accept the serve-side model env names `CM_API_KEY` / `CM_MODEL` / `CM_API_BASE`):
@@ -135,7 +135,7 @@ Full-screen `tui` (ratatui; shows a session sidebar on terminals ≥ 120 columns
 # Tool calls render as one-line summaries, updated in place with ✓/✗ + a note
 # /find <word> highlights and jumps · /find cycles to the next match · /find off clears
 # Assistant text renders inline Markdown (bold/italic/code/link/strike); code fences stay plain
-# Slashes: /model /mode /role /status /find /conv [new] /quit · /help lists everything
+# Slashes: /model /mode /role /status /find /conv [new] /btw <question> /quit · /help lists everything
 #   (status bar shows serve defaults; local overrides are marked with `*`;
 #    switching sessions starts a fresh transcript)
 # /settings (or F2) opens a settings panel: edit model name / API Base / temperature / thinking mode /
