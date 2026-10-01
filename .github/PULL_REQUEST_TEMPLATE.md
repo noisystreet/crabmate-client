@@ -32,7 +32,7 @@ PR 标题：Conventional Commits + 中英双语，例如：
 **边界与契约 / Boundaries & contracts**
 
 - [ ] 未新增通往 Server 仓的 `path` 依赖；未捆绑 / 拉起 `crabmate serve` sidecar
-- [ ] 契约钉点未动（crates.io `crabmate` 0.5.2 + `default-features = false, features = ["protocol"]`）；确需改动时已同步 `docs/design/contract_pin.md`
+- [ ] 契约钉点未动（crates.io `crabmate` 0.6.0 + `default-features = false, features = ["protocol"]`）；确需改动时已同步 `docs/design/contract_pin.md`
 - [ ] 未手改单个 `Cargo.toml` 版本号（版本锁步走 `scripts/set-version.sh`）
 - [ ] 新增 Rust 包已登记到 `scripts/rust-pkg-dirs.txt`（如有）
 - [ ] `crabmate-client-api` 仍为纯逻辑（无 Tauri / `web-sys` / `reqwest` / `tokio`）；`crabmate-connect` 默认 features 仍无 Tauri

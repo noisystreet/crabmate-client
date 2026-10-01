@@ -33,7 +33,7 @@ desktop/mobile ──path──► crabmate-connect ──reqwest──► serve
 
 crabmate-tui (serve/) ──reqwest──► serve (/health, /chat/stream, …)
         │
-frontend & tui (serve/) ──┴── crabmate（protocol feature；crates.io 0.5.2）
+frontend & tui (serve/) ──┴── crabmate（protocol feature；crates.io 0.6.0）
                             展示 crate：tool-card 已本仓 path（W2）；turn-layout 仍计划改本仓 path
                             见 display_crate_sink.md
 ```

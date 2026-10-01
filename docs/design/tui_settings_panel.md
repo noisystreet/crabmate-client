@@ -221,7 +221,7 @@ Desktop 设置共 8 个分区（`settings_page`）。逐区对齐结论：
 | 保存覆盖窗口（Desktop/TUI 同时保存） | 先读后写合并；文档注明单写者优先，不引入锁 |
 | 钥匙串写路径改变矩阵格 | 实现 PR 同改矩阵 Notes（§6.3）；`--no-keyring` 语义保持不变（显式不读不写） |
 | 面板打开时机与现有浮层（审批）冲突 | 审批浮层打开时禁开面板（已有 overlay 优先级先例）；回合运行中只读 |
-| temperature/context/thinking 是否被契约 0.5.2 serve 接受 | 前端已在发同名键；实现期以契约 crate 为准，不被接受就回退「存 user-data 但不随轮发」，字段仍对齐 |
+| temperature/context/thinking 是否被契约 0.6.0 serve 接受 | 前端已在发同名键；实现期以契约 crate 为准，不被接受就回退「存 user-data 但不随轮发」，字段仍对齐 |
 | 可用 role/model 清单无枚举端点 | W1 先用文本 + `/status` 默认值提示；若后续 serve 提供列表再加下拉 |
 
 ---

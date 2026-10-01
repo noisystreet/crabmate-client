@@ -17,7 +17,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow = "1"
 clap = { version = "4", features = ["derive", "env"] }
-crabmate = { version = "0.5.2", default-features = false, features = ["protocol"] }
+crabmate = { version = "0.6.0", default-features = false, features = ["protocol"] }
 crabmate-client-api = { path = "../crabmate-client-api" }
 crossterm = "0.29"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
