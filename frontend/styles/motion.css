@@ -56,9 +56,15 @@
     transform: none;
   }
 
-  .approval-bar-detail,
-  .approval-bar-chevron {
-    transition: none;
+  /* 会话流式徽章脉冲 / 克隆进度条：无限动画在减少动效下停住 */
+  .nav-session-streaming-badge::before {
+    animation: none;
+    opacity: 1;
+  }
+
+  .workspace-clone-bar--indeterminate .workspace-clone-bar-fill {
+    animation: none;
+    transform: none;
   }
 
   /* 移动端抽屉式左栏 / 右栏：关闭 transform 过渡与入场动画 */

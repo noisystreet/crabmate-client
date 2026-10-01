@@ -89,7 +89,7 @@ fn svg_common() -> (&'static str, &'static str, &'static str, &'static str, &'st
 |---|---|---|
 | `×` | 关闭 | `ide_find_bar.rs:161,254`、`ide_tabs_bar.rs:283`、`chat/composer_pending_images.rs:36`、`chat/find_bar.rs:170`、`chat/chat_image_lightbox.rs:270`（**JS 侧** `set_text_content`）、`tauri_window_controls.rs:45`（`.tauri-win-ctrl-glyph`）——共 **7 处，跨 Rust 与 JS** |
 | `‹` `›` | 左右/前进后退 | `sidebar_nav/mode_actions.rs:112`、`app/mod.rs:128`、`ide_find_bar.rs:96,105`、`ide_menu_bar/file_menu.rs:209`（`.ide-menu-submenu-chevron`） |
-| `▾` | 展开 | `approval_bar.rs:40`、`workspace_tree.rs:637`、`layout-chat.css:371`（`content:`） |
+| `▾` | 展开 | `workspace_tree.rs:637`、`layout-chat.css:371`（`content:`） |
 | `▸` | 折叠 | `workspace_tree.rs:639` |
 | `✓` | 勾选 | `ide_menu_bar/view_menu.rs:63,78` |
 | `●` | 脏标记 | `ide_tabs_bar.rs:265`、`mobile_shell_header.rs:94` |

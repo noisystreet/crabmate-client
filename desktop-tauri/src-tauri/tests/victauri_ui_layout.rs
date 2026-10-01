@@ -139,12 +139,6 @@ e2e_test!(ide_layout_mode, |client| async move {
 });
 
 // ---------------------------------------------------------------------------
-// 测试 5：审批栏可见性
+// 测试 5：审批弹窗（原 approval_bar_structure 已随 ApprovalBar 死代码删除；
+// 审批 UI 现为 approval_modal，其可见性由 e2e/specs/mock-approval-scenarios.spec.ts 覆盖）
 // ---------------------------------------------------------------------------
-e2e_test!(approval_bar_structure, |client| async move {
-    stub_basic_routes(&mut client).await;
-
-    // 审批栏元素存在
-    let approval_count = count_elements(&mut client, "[data-testid=\"approval-bar\"]").await;
-    assert_eq!(approval_count, 1, "exactly one approval bar should exist");
-});
