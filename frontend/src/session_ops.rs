@@ -355,7 +355,38 @@ pub fn flush_active_composer_draft(
     flush_composer_draft_to_session(sessions, &prev, &draft.get_untracked());
 }
 
+/// 判断「上一个活动会话」是否为可自动清理的空白新会话：0 条消息、无服务端
+/// `conversation_id`（未真正发起过对话）、无草稿、非置顶/收藏。
+///
+/// 仅用于「离开该会话」的切换 / 新建会话路径，勿据此批量清理列表中其它空会话。
+#[must_use]
+fn is_disposable_blank_session(s: &ChatSession) -> bool {
+    crate::session_workspace_partition::session_is_blank_chat(s)
+        && s.draft.trim().is_empty()
+        && !s.pinned
+        && !s.starred
+}
+
+/// 从会话列表回收 `leaving_id` 指向的空白会话（判定见 `is_disposable_blank_session`）。
+///
+/// 供「切换离开」「新建会话」两条路径复用；`leaving_id` 为空或非空白会话时不动作。
+pub(crate) fn reclaim_disposable_blank_session(sessions: &mut Vec<ChatSession>, leaving_id: &str) {
+    if leaving_id.is_empty() {
+        return;
+    }
+    let disposable = sessions
+        .iter()
+        .find(|s| s.id == leaving_id)
+        .is_some_and(is_disposable_blank_session);
+    if disposable {
+        sessions.retain(|s| s.id != leaving_id);
+    }
+}
+
 /// 切换当前活跃会话：**先**将合成器草稿写入当前会话，再激活 `next_session_id` 并从会话条目载入草稿。
+///
+/// 若离开的是一个空白新会话（见 `is_disposable_blank_session`），顺带把它从列表中删除，
+/// 避免侧栏堆积「0 消息」的空会话。
 ///
 /// `reset_sync_to_local_only`：侧栏 /「管理会话」点选时为 `true`（与历史行为一致，`session_sync` 回到仅本地语义）。
 pub fn switch_active_session_after_composer_flush(
@@ -365,6 +396,11 @@ pub fn switch_active_session_after_composer_flush(
     reset_sync_to_local_only: bool,
 ) {
     flush_active_composer_draft(chat.sessions, chat.active_id, draft);
+    let prev_id = chat.active_id.get_untracked();
+    if prev_id != next_session_id {
+        chat.sessions
+            .update(|list| reclaim_disposable_blank_session(list, &prev_id));
+    }
     chat.active_id.set(next_session_id.to_string());
     draft.set(chat.sessions.with(|list| {
         list.iter()
@@ -717,8 +753,111 @@ pub fn clamp_session_ctx_menu_pos(cx: i32, cy: i32) -> (f64, f64) {
 
 #[cfg(test)]
 mod tests {
-    use super::title_from_user_prompt;
-    use crate::storage::DEFAULT_CHAT_SESSION_TITLE;
+    use super::{
+        is_disposable_blank_session, reclaim_disposable_blank_session, title_from_user_prompt,
+    };
+    use crate::storage::{ChatSession, DEFAULT_CHAT_SESSION_TITLE, StoredMessage};
+
+    fn blank_session() -> ChatSession {
+        ChatSession {
+            id: "s_test".into(),
+            layout_schema_version: crate::storage::CURRENT_LAYOUT_SCHEMA_VERSION,
+            title: DEFAULT_CHAT_SESSION_TITLE.to_string(),
+            draft: String::new(),
+            messages: vec![],
+            updated_at: 0,
+            pinned: false,
+            starred: false,
+            server_conversation_id: None,
+            server_revision: None,
+            workspace_root: None,
+            history_total: None,
+            history_window_start: None,
+            history_has_older: None,
+        }
+    }
+
+    fn sample_message() -> StoredMessage {
+        StoredMessage {
+            id: "m0".into(),
+            role: "user".into(),
+            text: "hi".into(),
+            reasoning_text: String::new(),
+            image_urls: vec![],
+            state: None,
+            is_tool: false,
+            tool_call_id: None,
+            tool_name: None,
+            created_at: 0,
+        }
+    }
+
+    #[test]
+    fn disposable_blank_session_only_for_untouched_unpinned_empty() {
+        assert!(is_disposable_blank_session(&blank_session()));
+
+        // 仅空白字符的草稿视同无草稿，仍可清理。
+        let whitespace_draft = ChatSession {
+            draft: "  ".into(),
+            ..blank_session()
+        };
+        assert!(is_disposable_blank_session(&whitespace_draft));
+
+        let drafted = ChatSession {
+            draft: "hello".into(),
+            ..blank_session()
+        };
+        assert!(!is_disposable_blank_session(&drafted));
+
+        let pinned = ChatSession {
+            pinned: true,
+            ..blank_session()
+        };
+        assert!(!is_disposable_blank_session(&pinned));
+
+        let starred = ChatSession {
+            starred: true,
+            ..blank_session()
+        };
+        assert!(!is_disposable_blank_session(&starred));
+
+        let linked = ChatSession {
+            server_conversation_id: Some("c_1".into()),
+            ..blank_session()
+        };
+        assert!(!is_disposable_blank_session(&linked));
+
+        let with_messages = ChatSession {
+            messages: vec![sample_message()],
+            ..blank_session()
+        };
+        assert!(!is_disposable_blank_session(&with_messages));
+    }
+
+    #[test]
+    fn reclaim_removes_only_the_disposable_leaving_session() {
+        let keep = ChatSession {
+            id: "s_keep".into(),
+            ..blank_session()
+        };
+        let mut list = vec![blank_session(), keep.clone()];
+
+        // 回收空白会话后，列表只剩非目标会话。
+        reclaim_disposable_blank_session(&mut list, "s_test");
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].id, "s_keep");
+
+        // 非空白会话（有草稿）不被回收；空 id 亦不动作。
+        let mut list = vec![ChatSession {
+            id: "s_draft".into(),
+            draft: "hi".into(),
+            ..blank_session()
+        }];
+        reclaim_disposable_blank_session(&mut list, "s_draft");
+        reclaim_disposable_blank_session(&mut list, "");
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].id, "s_draft");
+    }
 
     #[test]
     fn title_from_prompt_flattens_whitespace() {

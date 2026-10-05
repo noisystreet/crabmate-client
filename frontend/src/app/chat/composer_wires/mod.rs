@@ -22,7 +22,9 @@ use super::handles::{
 use super::stream_follow_up_gates::{ComposerSendDecision, decide_composer_send};
 use super::stream_user_abort::apply_user_abort_of_inflight_stream;
 use crate::chat_session_state::ChatSessionSignals;
-use crate::session_ops::{flush_active_composer_draft, flush_composer_draft_to_session};
+use crate::session_ops::{
+    flush_active_composer_draft, flush_composer_draft_to_session, reclaim_disposable_blank_session,
+};
 use crate::session_sync::SessionSyncState;
 use crate::storage::{ChatSession, DEFAULT_CHAT_SESSION_TITLE, make_session_id};
 
@@ -244,6 +246,9 @@ pub(crate) fn wire_chat_composer_streams(args: WireComposerStreamsArgs) -> ChatC
             };
             let id = s.id.clone();
             chat.update_sessions_composer(|list| {
+                // 新建前回收上一条空白会话（见 `reclaim_disposable_blank_session`），避免侧栏堆积
+                // 「0 消息」条目；有草稿 / 置顶 / 收藏 / 已绑定服务端会话的照常保留。
+                reclaim_disposable_blank_session(list, &prev_id);
                 list.insert(0, s);
             });
             chat.active_id.set(id);
