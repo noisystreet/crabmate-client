@@ -197,7 +197,7 @@ test-tauri:
 	cd "$(MOBILE_TAURI_DIR)" && $(CARGO) check --tests
 
 test-tui:
-	cd "$(TUI_DIR)" && $(CARGO) check
+	cd "$(TUI_DIR)" && $(CARGO) test -- --nocapture
 
 test-web-host:
 	cd "$(WEB_HOST_DIR)" && $(CARGO) test -- --nocapture

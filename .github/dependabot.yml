@@ -1,5 +1,103 @@
 version: 2
 updates:
+  # --- Rust（每个独立 workspace 一条；本仓无顶层 workspace，包各自独立）---
+  - package-ecosystem: cargo
+    directory: /desktop-tauri/src-tauri
+    schedule:
+      interval: weekly
+      day: monday
+      time: "02:20"
+      timezone: Asia/Shanghai
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - rust
+
+  - package-ecosystem: cargo
+    directory: /mobile-tauri/src-tauri
+    schedule:
+      interval: weekly
+      day: monday
+      time: "02:20"
+      timezone: Asia/Shanghai
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - rust
+
+  - package-ecosystem: cargo
+    directory: /crates/crabmate-client-api
+    schedule:
+      interval: weekly
+      day: monday
+      time: "02:20"
+      timezone: Asia/Shanghai
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - rust
+
+  - package-ecosystem: cargo
+    directory: /crates/crabmate-connect
+    schedule:
+      interval: weekly
+      day: monday
+      time: "02:20"
+      timezone: Asia/Shanghai
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - rust
+
+  - package-ecosystem: cargo
+    directory: /crates/crabmate-tool-card
+    schedule:
+      interval: weekly
+      day: monday
+      time: "02:20"
+      timezone: Asia/Shanghai
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - rust
+
+  - package-ecosystem: cargo
+    directory: /crates/crabmate-tui
+    schedule:
+      interval: weekly
+      day: monday
+      time: "02:20"
+      timezone: Asia/Shanghai
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - rust
+
+  - package-ecosystem: cargo
+    directory: /web-host
+    schedule:
+      interval: weekly
+      day: monday
+      time: "02:20"
+      timezone: Asia/Shanghai
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - rust
+
+  - package-ecosystem: cargo
+    directory: /frontend
+    schedule:
+      interval: weekly
+      day: monday
+      time: "02:20"
+      timezone: Asia/Shanghai
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - rust
+
+  # --- npm ---
   - package-ecosystem: npm
     directory: /e2e
     schedule:
@@ -11,3 +109,28 @@ updates:
     labels:
       - dependencies
       - npm
+
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+      day: monday
+      time: "02:20"
+      timezone: Asia/Shanghai
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - npm
+
+  # --- GitHub Actions ---
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "02:20"
+      timezone: Asia/Shanghai
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - github-actions

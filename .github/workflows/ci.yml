@@ -52,6 +52,11 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
+      - name: Install taplo (TOML format/lint gate in check.sh)
+        uses: taiki-e/install-action@v2
+        with:
+          tool: taplo-cli
+
 
       - name: Forbid path deps back to Server monorepo
         run: bash scripts/check-no-main-path.sh
