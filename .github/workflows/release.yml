@@ -288,7 +288,7 @@ jobs:
               f.write(out)
           PY
 
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           name: ${{ github.ref_name }}
           body_path: /tmp/release-notes.md
