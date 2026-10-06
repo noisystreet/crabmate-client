@@ -21,8 +21,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # 钉死版本：lizard 1.24.x 改变了 Rust 的 CCN 计算规则，同一份代码会被判出
+      # 大量 CCN>10（本地 1.23.0 为 0）。升级前须先评估 Rust 规则变化并同步本地。
       - name: Install lizard
-        run: pip install lizard
+        run: pip install lizard==1.23.0
 
       - name: Run lizard (Rust CCN>10 must be 0 globally)
         run: bash scripts/lizard-rust.sh

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 对 `crates/`、`desktop-tauri/.../src`、`mobile-tauri/.../src`、`frontend/src` 做圈复杂度（CCN）扫描，使用 lizard（https://github.com/terryyin/lizard）。
-# 未安装时：pip install lizard
+# 未安装时：pip install lizard==1.23.0（版本须与 CI 一致；1.24.x 改了 Rust CCN 规则）
 #
 # 门禁（与 scripts/lizard_rust_metrics.py 一致）：全局 CCN>10 的函数个数必须为 0，
 # 出现即失败并列出函数；没有按模块的个数上限配置。
