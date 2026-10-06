@@ -23,7 +23,7 @@ crossterm = "0.29"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 keyring = "4.1.5"
 ratatui = "0.30"
-reedline = { version = "0.49", default-features = false }
+reedline = { version = "0.52", default-features = false }
 # 0.13 移除 rustls-tls；"rustls" = aws-lc-rs + 平台证书验证器（与 connect 保持一致）
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls", "stream"] }
 serde = { version = "1", features = ["derive"] }
