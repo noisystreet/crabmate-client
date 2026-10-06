@@ -20,6 +20,6 @@
     "@codemirror/view": "6.38.1"
   },
   "devDependencies": {
-    "esbuild": "0.25.9"
+    "esbuild": "0.28.2"
   }
 }
