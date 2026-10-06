@@ -10,15 +10,15 @@ Proposed
 
 **现状架构事实**（`frontend/`）：
 
-- **单流模型**：[`ChatStreamTransport`](file:///home/gzz/crabmate/crabmate-client/frontend/src/chat_session_state.rs#L43-L99) 是单个 `RwSignal`，同一时刻至多一个 `/chat/stream` attach；`TurnLifecycleState`、`stream_text_overlay`、`session_sync` 均为全局单例。
-- **写回不串会话**：SSE 回调按 attach 时绑定的 `bound_stream_session_id` 定位 `sessions` 记录写入（[`stream_session_access.rs`](file:///home/gzz/crabmate/crabmate-client/frontend/src/app/chat/composer_stream/callbacks/stream_session_access.rs)），正文本身不会写进错误会话。
+- **单流模型**：[`ChatStreamTransport`](../../frontend/src/chat_session_state.rs) 是单个 `RwSignal`，同一时刻至多一个 `/chat/stream` attach；`TurnLifecycleState`、`stream_text_overlay`、`session_sync` 均为全局单例。
+- **写回不串会话**：SSE 回调按 attach 时绑定的 `bound_stream_session_id` 定位 `sessions` 记录写入（[`stream_session_access.rs`](../../frontend/src/app/chat/composer_stream/callbacks/stream_session_access.rs)），正文本身不会写进错误会话。
 - **水合被推迟**：流式或 overlay 未收尾时 `defers_conversation_hydration_untracked()` 为真，切换会话不会与水合竞态。
 - **新工作有全局门闸**：发送 / 分支 / 再生在忙时均被拦截，流式期间其它会话不能发起新 attach。
 
 **根因（代码事实）**：
 
-1. [`apply_shell_after_active_session_changed`](file:///home/gzz/crabmate/crabmate-client/frontend/src/app/chat/composer.rs#L36-L66) 在每次 `active_id` 变更时**无条件调用 `clear_stream_resume_handles()`**，把 Bound 车道打回 Idle 并清零 SSE 序号。后果：页面后台化后回前台时 [`spawn_foreground_stream_resume`](file:///home/gzz/crabmate/crabmate-client/frontend/src/app/chat/composer_stream/foreground_resume.rs#L50-L123) 读不到 `stream_bound_resume_handles_untracked()` → 流无法软续传，后台半成品、loading 卡死；同时破坏「Bound 会话 == attach 快照」调试不变量。
-2. [`on_cid` / `on_conv_rev`](file:///home/gzz/crabmate/crabmate-client/frontend/src/app/chat/composer_stream/callbacks/assemble.rs#L57-L95) 总是写入全局 `session_sync` 槽。用户切到 B 后，A 的流仍把 A 的 `conversation_id`/`revision` 写进全局槽；若 B 为纯本地会话，流结束后无人重置，B 的下一次发送会在 attach 处读到 **A 的 conversation_id**（[`composer_stream/mod.rs`](file:///home/gzz/crabmate/crabmate-client/frontend/src/app/chat/composer_stream/mod.rs#L80)）→ 错写 A 的服务器会话，即「状态错位 / 分支再生异常」。
+1. [`apply_shell_after_active_session_changed`](../../frontend/src/app/chat/composer.rs) 在每次 `active_id` 变更时**无条件调用 `clear_stream_resume_handles()`**，把 Bound 车道打回 Idle 并清零 SSE 序号。后果：页面后台化后回前台时 [`spawn_foreground_stream_resume`](../../frontend/src/app/chat/composer_stream/foreground_resume.rs) 读不到 `stream_bound_resume_handles_untracked()` → 流无法软续传，后台半成品、loading 卡死；同时破坏「Bound 会话 == attach 快照」调试不变量。
+2. [`on_cid` / `on_conv_rev`](../../frontend/src/app/chat/composer_stream/callbacks/assemble.rs) 总是写入全局 `session_sync` 槽。用户切到 B 后，A 的流仍把 A 的 `conversation_id`/`revision` 写进全局槽；若 B 为纯本地会话，流结束后无人重置，B 的下一次发送会在 attach 处读到 **A 的 conversation_id**（[`composer_stream/mod.rs`](../../frontend/src/app/chat/composer_stream/mod.rs)）→ 错写 A 的服务器会话，即「状态错位 / 分支再生异常」。
 3. 侧栏没有任何「哪个会话仍在生成」的指示。
 
 **约束**：
@@ -31,7 +31,7 @@ Proposed
 
 采用「**正式支持后台流**」而非「流式期间禁用切换」，共 5 项改动：
 
-1. **切换保留后台流重连句柄**：[`apply_shell_after_active_session_changed`](file:///home/gzz/crabmate/crabmate-client/frontend/src/app/chat/composer.rs#L36-L66) 仅当 `stream_bound_resume_handles_untracked().is_none()` 时才调用 `clear_stream_resume_handles()`；Bound 期间保留 `job_id`、SSE 序号与 overlay。流结束时由 `on_stream_ended` / `on_error` 自行清 lane，不残留状态。
+1. **切换保留后台流重连句柄**：[`apply_shell_after_active_session_changed`](../../frontend/src/app/chat/composer.rs) 仅当 `stream_bound_resume_handles_untracked().is_none()` 时才调用 `clear_stream_resume_handles()`；Bound 期间保留 `job_id`、SSE 序号与 overlay。流结束时由 `on_stream_ended` / `on_error` 自行清 lane，不残留状态。
 2. **全局 `session_sync` 槽与活跃会话隔离**：`on_cid` / `on_conv_rev` 总是写绑定会话记录（`server_conversation_id` / `server_revision`），**仅当 `bound_stream_session_id == active_id`** 时才同步写全局槽（`ChatStreamCallbackCtx::is_bound_session_active()`）；切回时由切换 Effect 从会话记录重推导全局槽，语义自洽。
 3. **侧栏「生成中」指示**：`session_row_item_class` 增加 `streaming` 参数 → 追加 `is-streaming` class；`nav_session_row_button` 在 `stream_transport.bound_session_id() == Some(row.id)` 时渲染 spinner + 「生成中…」badge（带 `data-testid` 供 E2E）。
 4. **删除会话守卫**：拒绝删除仍被 Bound 的会话（否则 SSE 的 `find(|s| s.id == sid)` 找不到写入目标，内容静默丢失）。
