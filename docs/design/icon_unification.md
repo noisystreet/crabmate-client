@@ -37,16 +37,16 @@
 
 | 文件 | 处数 | 说明 |
 |---|---|---|
-| [workspace_shell.rs](file:///home/gzz/crabmate/client/frontend/src/workspace_shell.rs) | 10 | 全部经 `svg_common()` 生成 |
-| [side_column_toolbar.rs](file:///home/gzz/crabmate/client/frontend/src/app/side_column_toolbar.rs) | 6 | 手写 |
-| [chat/column.rs](file:///home/gzz/crabmate/client/frontend/src/app/chat/column.rs) | 3 | 手写 |
-| [layout_mode_segment.rs](file:///home/gzz/crabmate/client/frontend/src/app/layout_mode_segment.rs) | 2 | 手写 |
-| [settings_models_registry/preset_list.rs](file:///home/gzz/crabmate/client/frontend/src/app/settings_models_registry/preset_list.rs) | 2 | 手写 |
-| [status_agent_role_menu.rs](file:///home/gzz/crabmate/client/frontend/src/app/status_agent_role_menu.rs) | 1 | 手写 |
-| [settings_page/header.rs](file:///home/gzz/crabmate/client/frontend/src/app/settings_page/header.rs) | 1 | 手写，**无 `class`** |
-| [ide_settings_page/view_header.rs](file:///home/gzz/crabmate/client/frontend/src/app/ide_settings_page/view_header.rs) | 1 | 手写，**无 `class`** |
-| [status_session_mode_seg.rs](file:///home/gzz/crabmate/client/frontend/src/app/status_session_mode_seg.rs) | 1 | 手写 |
-| [settings_models_registry/mod.rs](file:///home/gzz/crabmate/client/frontend/src/app/settings_models_registry/mod.rs) | 1 | 手写 |
+| [workspace_shell.rs](../../frontend/src/workspace_shell.rs) | 10 | 全部经 `svg_common()` 生成 |
+| [side_column_toolbar.rs](../../frontend/src/app/side_column_toolbar.rs) | 6 | 手写 |
+| [chat/column.rs](../../frontend/src/app/chat/column.rs) | 3 | 手写 |
+| [layout_mode_segment.rs](../../frontend/src/app/layout_mode_segment.rs) | 2 | 手写 |
+| [settings_models_registry/preset_list.rs](../../frontend/src/app/settings_models_registry/preset_list.rs) | 2 | 手写 |
+| [status_agent_role_menu.rs](../../frontend/src/app/status_agent_role_menu.rs) | 1 | 手写 |
+| [settings_page/header.rs](../../frontend/src/app/settings_page/header.rs) | 1 | 手写，**无 `class`** |
+| `ide_settings_page/view_header.rs`（已重构，现为 `ide_settings_page/view.rs` 等） | 1 | 手写，**无 `class`** |
+| [status_session_mode_seg.rs](../../frontend/src/app/status_session_mode_seg.rs) | 1 | 手写 |
+| [settings_models_registry/mod.rs](../../frontend/src/app/settings_models_registry/mod.rs) | 1 | 手写 |
 
 `workspace_shell.rs` 已有局部工厂函数，但只服务自己的 10 个图标：
 
@@ -70,14 +70,14 @@ fn svg_common() -> (&'static str, &'static str, &'static str, &'static str, &'st
 
 | 定义处 | 烧入色值 |
 |---|---|
-| [tokens.css](file:///home/gzz/crabmate/client/frontend/styles/tokens.css#L148)（默认深色） | `#9099b4` |
-| [crabmate-light.css](file:///home/gzz/crabmate/client/frontend/themes/crabmate-light.css#L74) | `#6b6357` |
-| [material-dark.css](file:///home/gzz/crabmate/client/frontend/themes/material-dark.css#L70) | `#97979f` |
-| [high-contrast-dark.css](file:///home/gzz/crabmate/client/frontend/themes/high-contrast-dark.css#L55) | `#c8c8c8` |
-| [shadcn-dark.css](file:///home/gzz/crabmate/client/frontend/themes/shadcn-dark.css#L75) | `#a1a1aa` |
-| [shadcn-light.css](file:///home/gzz/crabmate/client/frontend/themes/shadcn-light.css#L80) | `#696971` |
+| [tokens.css](../../frontend/styles/tokens.css)（默认深色） | `#9099b4` |
+| [crabmate-light.css](../../frontend/themes/crabmate-light.css) | `#6b6357` |
+| [material-dark.css](../../frontend/themes/material-dark.css) | `#97979f` |
+| [high-contrast-dark.css](../../frontend/themes/high-contrast-dark.css) | `#c8c8c8` |
+| [shadcn-dark.css](../../frontend/themes/shadcn-dark.css) | `#a1a1aa` |
+| [shadcn-light.css](../../frontend/themes/shadcn-light.css) | `#696971` |
 
-唯一消费点：[status.css:356](file:///home/gzz/crabmate/client/frontend/styles/status.css#L356)。**每新增一个主题就要复制一份。**
+唯一消费点：[status.css](../../frontend/styles/status.css)。**每新增一个主题就要复制一份。**
 
 > 排除项：`base.css:63` 的 data-URI 是 `feTurbulence` 噪点纹理（256×256），不是图标，不纳入本方案。`frontend/vendor/ide-codemirror.js` 内的 1 处属第三方 vendor，不在契约与改造范围内。
 
@@ -111,7 +111,7 @@ fn svg_common() -> (&'static str, &'static str, &'static str, &'static str, &'st
 
 3. **`xmlns` 有无不一**：`chat/column.rs:530`（`fill="currentColor"` 那处）与 `:569` 带 `xmlns`，`workspace_shell.rs` 带；其余手写多数**不带**。HTML5 解析器内联 SVG 可不写，但现状是无标准的随机分布。
 
-4. **2 处 SVG 完全没有 `class`**（[settings_page/header.rs:59](file:///home/gzz/crabmate/client/frontend/src/app/settings_page/header.rs#L59)、[ide_settings_page/view_header.rs:24](file:///home/gzz/crabmate/client/frontend/src/app/ide_settings_page/view_header.rs#L24)），靠父选择器 `.settings-page-back svg`（`modal.css:902`）命中。这两处还是**同一个左箭头 chevron**（`<polyline points="15 18 9 12 15 6" />`）的重复实现。注意此形态处于 `check-css-contract.sh` 的灰度区：消费者没有类名，门禁自然不报警。
+4. **2 处 SVG 完全没有 `class`**（`settings_page/header.rs`、`ide_settings_page/view_header.rs`，后者已重构为 `ide_settings_page/view.rs` 等），靠父选择器 `.settings-page-back svg`（`modal.css:902`）命中。这两处还是**同一个左箭头 chevron**（`<polyline points="15 18 9 12 15 6" />`）的重复实现。注意此形态处于 `check-css-contract.sh` 的灰度区：消费者没有类名，门禁自然不报警。
 
 5. **全仓无 `--icon-*` token**（`grep --icon-` 仅命中本方案新建的门禁脚本注释，正式代码 0 处）。图标尺寸是字面量且大量重复：
 
@@ -215,19 +215,19 @@ fn svg_common() -> (&'static str, &'static str, &'static str, &'static str, &'st
 
 ### 第 1 步：共享 `Icon` 组件 —— 完成
 
-新增 [frontend/src/icon.rs](file:///home/gzz/crabmate/client/frontend/src/icon.rs)：`Icon` 组件（`viewBox` / `fill` / `stroke` / `stroke-width` / 线帽端点 / `aria-hidden` 唯一来源，`IconStyle::Stroke` / `Fill` 二态）+ 11 个图形 helper（`icon_chevron_left` / `_right` / `_down`、`icon_x`、`icon_check`、`icon_minus`、`icon_plus`、`icon_maximize`、`icon_arrow_up` / `_down`、`icon_search`）。
+新增 [frontend/src/icon.rs](../../frontend/src/icon.rs)：`Icon` 组件（`viewBox` / `fill` / `stroke` / `stroke-width` / 线帽端点 / `aria-hidden` 唯一来源，`IconStyle::Stroke` / `Fill` 二态）+ 11 个图形 helper（`icon_chevron_left` / `_right` / `_down`、`icon_x`、`icon_check`、`icon_minus`、`icon_plus`、`icon_maximize`、`icon_arrow_up` / `_down`、`icon_search`）。
 
 - 迁移后全仓图标渲染点 **52 处**：29 处经 helper 调用 + 23 处直接 `<Icon>`（其中 `workspace_shell.rs` 的 10 个文件类型图标整组并入）。`git diff` 侧的证据：删除 28 行手写 `<svg>` 开标签、25 行文本字形。
 - 其中 2 处**无 `class`** 的设置页返回 chevron 合并为 `icon_chevron_left`。
 - 文档「机制 3」清单未列而实测存在的 `□`（窗口最大化）与 `+`（字号步进 / 新建对话）按同组一致性一并换 SVG。
-- 审查阶段补漏：`⌕`（[mode_actions.rs:70](file:///home/gzz/crabmate/client/frontend/src/app/sidebar_nav/mode_actions.rs#L70)，侧栏搜索面板开关）同为「文本字形图标」且不在文档清单内，换成第 11 个 helper `icon_search`。
+- 审查阶段补漏：`⌕`（[mode_actions.rs](../../frontend/src/app/sidebar_nav/mode_actions.rs)，侧栏搜索面板开关）同为「文本字形图标」且不在文档清单内，换成第 11 个 helper `icon_search`。
 - `workspace_shell.rs` 的 `svg_common()` **删除**，其 10 个文件类型图标全部并入 `<Icon class="workspace-entry-icon workspace-entry-svg">`（第 1 步文档允许的「逐步并入该组件」路径，`stroke` / `stroke-width` 因此从子元素移到 `<svg>`）。
 - `stroke` / `stroke-width` 挂载位置统一到 `<svg>`（文档第 136 行）。
 - 门禁联动结论：消费者类名沿用原有字面量；`Icon` 内部 `class=class` 是变量，不被 `check-css-contract.sh` 的 `RE_ATTR` 采集；无 class 处写 `icon_x("")`（函数调用），故 `css_contract_allowlist.txt` **无需新增条目**。
 
 ### 第 2 步：`--icon-*` 尺寸 token —— 完成
 
-[tokens.css](file:///home/gzz/crabmate/client/frontend/styles/tokens.css#L46-L52) 排版区新增三档（与文档规划一致，**未新增第四档**）：`--icon-sm` 0.625rem / `--icon-md` 0.875rem / `--icon-lg` 1.125rem，与 `--text-*` 同锚点（`1rem = --text-lg = 14px`）。
+[tokens.css](../../frontend/styles/tokens.css) 排版区新增三档（与文档规划一致，**未新增第四档**）：`--icon-sm` 0.625rem / `--icon-md` 0.875rem / `--icon-lg` 1.125rem，与 `--text-*` 同锚点（`1rem = --text-lg = 14px`）。
 
 - 档位映射：被替换前文本字形的渲染量级 —— 9–11px 字号 → `--icon-sm`；12–14px → `--icon-md`；16–18px → `--icon-lg`。
 - **文档第 185 行的主题覆盖预期修正**：`check-css-tokens.sh` 的「主题必须覆盖同一 token 集」union 规则**只扫 `frontend/themes/*.css`**。`--icon-*` 与 `--text-*` 同层定义在 `tokens.css`，六套主题自动继承，**不需要**逐主题复制，也不会触发主题覆盖缺口（实测缺口 0）。
@@ -245,18 +245,18 @@ fn svg_common() -> (&'static str, &'static str, &'static str, &'static str, &'st
   2. `…` @ `chat/tui_stream_dom_sync.rs:747` —— 文档清单此处有误，实测是 `#[test]` 内的测试桩数据 → 保留。
   3. `×` @ `chat/chat_image_lightbox.rs:270` —— 命令式 `web_sys` 建 DOM。原文档（第 158 行）记为「WASM 外的 JS 片段、可能访问不到组件」**有误**：该函数是 WASM 内的 Rust，与 Leptos 同 crate、组件可达。但实测替换代价高于收益，故仍保留文本，理由见下方「第 3 步补：原生 DOM 路径复评」。
   4. `●`（脏标记，本质小圆点）、`—`（空值占位，排版符号）、CSS `content` 的 `◈`（`layout-chat.css:365`）与 `▾`（`layout-chat.css:371`，伪元素放不下 SVG）。
-  5. 文档盘点未列、审查阶段一并登记为「保留」的同类项：`▸` @ [chat/tui_tool_process.rs:373](file:///home/gzz/crabmate/client/frontend/src/app/chat/tui_tool_process.rs#L373)（**HTML 字符串**经 `set_inner_html` 注入，无元素句柄；`layout-chat.css` 靠 `transform: rotate(90deg)` 表达展开态，复评见下）、` ✓` @ [settings_mcp_status.rs:304](file:///home/gzz/crabmate/client/frontend/src/app/settings_mcp_status.rs#L304)（保存成功反馈文案的后缀排版符号）、`⚙️` 等工具卡 emoji @ [i18n/tool_cards.rs:196](file:///home/gzz/crabmate/client/frontend/src/i18n/tool_cards.rs#L196)（工具种类的彩色 emoji 体系，属另一议题）。
+  5. 文档盘点未列、审查阶段一并登记为「保留」的同类项：`▸` @ [chat/tui_tool_process.rs](../../frontend/src/app/chat/tui_tool_process.rs)（**HTML 字符串**经 `set_inner_html` 注入，无元素句柄；`layout-chat.css` 靠 `transform: rotate(90deg)` 表达展开态，复评见下）、` ✓` @ [settings_mcp_status.rs](../../frontend/src/app/settings_mcp_status.rs)（保存成功反馈文案的后缀排版符号）、`⚙️` 等工具卡 emoji @ [i18n/tool_cards.rs](../../frontend/src/i18n/tool_cards.rs)（工具种类的彩色 emoji 体系，属另一议题）。
 
 ### 第 3 步补：原生 DOM 路径的 `×` / `▸` 复评 —— 结论为「保留文本」
 
 第 3 步把两处判为「保留」时给的**理由是错的**（「在 WASM 外 / 访问不到 Leptos」）。本轮复评按实际代码重新定论，结论不变但依据更换：
 
-- **`×` @ [chat_image_lightbox.rs:270](file:///home/gzz/crabmate/client/frontend/src/app/chat/chat_image_lightbox.rs#L270)**（`btn.set_text_content(Some("×"))`）：`build_overlay` 是 WASM 内的 Rust 函数（`doc.create_element("button")` + `set_text_content`），**组件可达**。可用且仅有三条替换路径，各有一处硬伤：
+- **`×` @ [chat_image_lightbox.rs](../../frontend/src/app/chat/chat_image_lightbox.rs)**（`btn.set_text_content(Some("×"))`）：`build_overlay` 是 WASM 内的 Rust 函数（`doc.create_element("button")` + `set_text_content`），**组件可达**。可用且仅有三条替换路径，各有一处硬伤：
   1. `leptos::mount::mount_to(btn_html_element, || icon_x(""))` —— 复用组件、零重复，但返回的 `UnmountHandle` 类型参数是 `icon_x` 的 `impl IntoView::State`，**无法命名**，因而存不进 `LightboxBind` 以随灯箱关闭而释放；只能 `.forget()`，即每次打开灯箱永久泄漏一个 reactive `Owner`。
   2. `create_element_ns(svg_ns, "svg")` 手搭 —— 又把属性模板抄了第二份（门禁也看不到，因为它不是字面 `<svg`），正是本方案要消除的东西。
   3. `set_inner_html("<svg …>")` 字符串常量 —— 同上，第二份模板来源。
   另加两条削弱替换收益的事实：该按钮已有 `aria-label`（字形纯装饰，无信息量），且 `shell-ds.css:951` 的 `color: var(--text)` 使字形**已经随主题变色**——判据「需要随主题变色」由文本颜色即已满足。故**保留文本**，不为一个装饰字形引入生命周期 hack 或第二份模板。
-- **`▸` @ [tui_tool_process.rs:373](file:///home/gzz/crabmate/client/frontend/src/app/chat/tui_tool_process.rs#L373)**（`html.push_str("<span …>▸</span>")`）：该处是**纯字符串拼接**，产物经 `set_inner_html` 注入且随流式同步反复重建——函数内没有元素句柄可挂载，只能走上面第 2 / 3 条（第二份模板）。且本门禁规则 1 会直接拦下内联 `<svg` 字面量，使这条捷径在评审时显性化。故**保留文本**（展开/收起由 `layout-chat.css` 的 `transform: rotate(90deg)` 表达）。
+- **`▸` @ [tui_tool_process.rs](../../frontend/src/app/chat/tui_tool_process.rs)**（`html.push_str("<span …>▸</span>")`）：该处是**纯字符串拼接**，产物经 `set_inner_html` 注入且随流式同步反复重建——函数内没有元素句柄可挂载，只能走上面第 2 / 3 条（第二份模板）。且本门禁规则 1 会直接拦下内联 `<svg` 字面量，使这条捷径在评审时显性化。故**保留文本**（展开/收起由 `layout-chat.css` 的 `transform: rotate(90deg)` 表达）。
 
 > 小结：这两处与 `i18n/tool_cards.rs` 的 emoji 同属「Leptos 组件树之外」的渲染路径；共享 `Icon` 组件的适用边界就是**组件树内**。本方案不为此扩张组件的适用面。
 

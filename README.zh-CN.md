@@ -16,11 +16,11 @@
   <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/rust-1.85%2B-orange?logo=rust" alt="Rust 1.85+" /></a>
 </p>
 
-官方 **Client** 仓（路径 A）：Desktop Linux / Android Tauri 壳 + 共用 `crabmate-connect` + 业务 UI `frontend/`。  
+官方 **Client** 仓（路径 A）：Desktop Linux / Android Tauri 壳 + 共用 `crabmate-connect` + 业务 UI `frontend/`。
 连接兼容的 **`crabmate serve`**（本机或远程），**不** spawn / 内嵌 Agent 进程。
 
-> **Server / 契约权威仓**：[noisystreet/CrabMate](https://github.com/noisystreet/CrabMate)（本机常见检出目录：`../crabmate_agent`）  
-> **决策**：[client_shell_split.md](https://github.com/noisystreet/CrabMate/blob/main/docs/design/client_shell_split.md)  
+> **Server / 契约权威仓**：[noisystreet/CrabMate](https://github.com/noisystreet/CrabMate)（本机常见检出目录：`../crabmate_agent`）
+> **决策**：[client_shell_split.md](https://github.com/noisystreet/CrabMate/blob/main/docs/design/client_shell_split.md)
 > **契约钉版本**：[client_contract_versioning.md](https://github.com/noisystreet/CrabMate/blob/main/docs/design/client_contract_versioning.md)
 
 ## 目录
@@ -49,98 +49,90 @@
 | Server `serve` | 主仓；本机或远程启动，壳不 spawn |
 | 主仓 `frontend/` / Playwright | UI 与 Playwright **在本仓**；主仓 Phase C 后无 `frontend/` 源码 |
 
-## Makefile
+## 快速开始
+
+各目标共同前置：已启动 **`crabmate serve`**（默认纯 API）。当前 Server 默认已放行官方壳 Origin（`tauri://localhost`、`http://tauri.localhost`），Desktop/Android **不必**再设 `CM_WEB_CORS_ALLOWED_ORIGINS`。
 
 ```bash
-make help
-make frontend           # trunk build → frontend/dist
-make frontend-check     # wasm32 cargo check
-make check              # 等同 scripts/check.sh（含 frontend）
-make dependency-security # cargo audit + cargo deny（各 workspace；不进 pre-commit）
-make test
-make desktop-dev        # 需已装 cargo-tauri ^2；另开终端跑 serve
-make desktop-release    # 产出 crabmate-desktop_*.deb（自动 trunk --release UI，勿用 debug dist）
-make desktop-bin-release
-make web-release        # 产出 crabmate-web_*.deb（trunk --release + 回环静态服务，系统浏览器）
-make apk                # Android；默认不建 frontend
-make tui                # 构建 crabmate-tui（远程终端）
-make tui-release        # 产出 crabmate-tui_*.deb（仅二进制；无图标、无配置）
-make clean
+# 终端 A — Server（壳路径不必 --with-web）
+crabmate serve --host 127.0.0.1 --port 8080
 ```
 
-## 远程终端
+### Desktop
+
+```bash
+# 终端 B — 本仓
+make frontend           # prepare-sidecar 会同步进 desktop-tauri/dist
+make desktop-dev
+```
+
+连接页填写服务器地址与可选 Web Bearer（**不是**模型 `API_KEY`）。连接成功后加载**包内** `index.html`，API 指向该 `serve`。工作区文件上传 / 下载 / 重命名与聊天附图见 [docs/design/tauri_gui_mvp_design.md](./docs/design/tauri_gui_mvp_design.md)。
+
+### 系统浏览器里的 Web UI
+
+不是 Tauri：本机回环静态服务打开默认浏览器。仍然**不是** `crabmate serve` — API 要另开，并在 CORS 里放行页面 Origin。
+
+```bash
+# 终端 A — API（放行 web-host Origin；Server ≥ v0.2.0 默认只放行 Tauri Origin）
+CM_WEB_CORS_ALLOWED_ORIGINS=http://127.0.0.1:4173 crabmate serve --host 127.0.0.1 --port 8080
+
+# 终端 B — 本仓
+make web-release
+sudo dpkg -i web-host/target/debian/crabmate-web_*.deb
+crabmate-web --api-base http://127.0.0.1:8080
+# 不安装时：
+#   cargo run --release --manifest-path web-host/Cargo.toml -- --root frontend/dist --api-base http://127.0.0.1:8080
+```
+
+默认监听 `127.0.0.1:4173`。`--no-open` 跳过 `xdg-open`。Bearer：`--bearer` / `CM_WEB_API_BEARER_TOKEN`（纯浏览器会弱持久化到 `localStorage`）。`.deb` 会安装 **CrabMate Web** 菜单项，图标与 Desktop 壳相同。同一端口上再次启动会打开已有实例，而不是报错退出。
+
+### Playwright / 浏览器 E2E
+
+Playwright 跑在**客户端自托管**的 Web UI 上：纯 API `serve` + `crabmate-web`（回环静态服务，默认 `127.0.0.1:4173`）。脚本自动起两者，并经 `CM_WEB_CORS_ALLOWED_ORIGINS` 放行 web Origin；不再依赖 `serve --with-web`（Server 保持纯 API）。
+
+```bash
+make frontend
+./scripts/e2e-playwright.sh
+# 或指定用例：./scripts/e2e-playwright.sh specs/mock-overlay-timing.spec.ts
+```
+
+### Android
+
+```bash
+make apk
+# 或：./mobile-tauri/scripts/build-apk.sh
+# 需要构建 UI 时：CM_MOBILE_BUILD_FRONTEND=1 make apk
+```
+
+Android 壳默认隐藏应用内底部状态栏；仍可从侧栏工具条重新开启。`/chat/stream` 期间的前台保活与审批通知见 [ADR-0002](docs/adr/0002-android-approval-notification-foreground-keepalive.md)。
+
+## 远程终端（crabmate-tui）
 
 先启动 `crabmate serve`，再：
 
 ```bash
 make tui
-./crates/crabmate-tui/target/debug/crabmate-tui \
-  --api-base http://127.0.0.1:8080 \
-  --bearer "$CM_WEB_API_BEARER_TOKEN" \
-  chat "你好"
-
-# 交互 REPL（会话 id 跨轮续聊；非白名单命令可 TTY 审批，或加 --yes 自动 allow_once）
-./crates/crabmate-tui/target/debug/crabmate-tui \
-  --api-base http://127.0.0.1:8080 \
-  repl
-# repl 内：/help · /status 看模型 · /model 切换模型 · /mode ask|plan|act · /role <id> · /workspace [path] · /conv list|new|use <id>|delete [<id>] · /btw <问题>（旁路提问，不落库）· Ctrl+C 停止本轮（连按两次退出）· /resume 续传断开的回合
+./crates/crabmate-tui/target/debug/crabmate-tui --api-base http://127.0.0.1:8080 --bearer "$CM_WEB_API_BEARER_TOKEN" chat "你好"
+./crates/crabmate-tui/target/debug/crabmate-tui --api-base http://127.0.0.1:8080 repl   # 交互 REPL
+./crates/crabmate-tui/target/debug/crabmate-tui --api-base http://127.0.0.1:8080 tui    # 全屏 TUI
 ```
 
-bearer 鉴权但服务端未设模型 `API_KEY` 的 serve 会返回 `LLM_API_KEY_REQUIRED`；可像壳 UI「设置 → API 密钥」那样每轮自带模型密钥（三个参数同样支持 env，沿用 serve 侧模型 env 名：`CM_API_KEY` / `CM_MODEL` / `CM_API_BASE`）：
+bearer 鉴权但服务端未设模型 `API_KEY` 的 serve 会返回 `LLM_API_KEY_REQUIRED`；可用 `--llm-api-key` 自带模型密钥（或 `CM_API_KEY` / `CM_MODEL` / `CM_API_BASE`）。`--bearer` / `--llm-api-key` 缺省时会 **read-only 回退读取桌面壳已保存在同一系统钥匙串里的密钥**（`--no-keyring` 可关闭回退）。
 
-```bash
-./crates/crabmate-tui/target/debug/crabmate-tui \
-  --api-base https://api.example.com \
-  --bearer "$CM_WEB_API_BEARER_TOKEN" \
-  --llm-api-key "$MY_LLM_API_KEY" \
-  chat "你好"
-```
-
-`--bearer` / `--llm-api-key`（或其 env）缺省时，会 **read-only 回退读取桌面壳已保存在同一系统钥匙串里的密钥**（`com.crabmate.credentials` / `tauri_connect_web_api_bearer` / `tauri_client_llm_api_key`）；`--no-keyring` 可关闭回退。
-
-管道把消息喂给 `chat`（无 argv）会读尽 stdin，后续审批无法再读决策，应加 **`--yes`**，或把消息写在参数里：
-
-```bash
-echo "你好" | crabmate-tui --api-base http://127.0.0.1:8080 --yes chat
-crabmate-tui --api-base http://127.0.0.1:8080 chat "你好"
-```
-
-设计见 [docs/design/remote_cli_tui.md](./docs/design/remote_cli_tui.md)。发版包（仅二进制，无菜单图标、无配置文件）：
+发版包（仅二进制，无菜单图标、无配置文件）：
 
 ```bash
 make tui-release
 sudo dpkg -i crates/crabmate-tui/target/debian/crabmate-tui_*.deb
-crabmate-tui --api-base http://127.0.0.1:8080 repl
 ```
 
 没有 Rust 工具链？同一个仅二进制的 `.deb` 也由 CI 构建并随每个 `v*` 的 GitHub Release 附上，可直接下载后 `dpkg -i` 安装。
 
-全屏 `tui`（ratatui；终端 ≥120 列时显示左栏会话列表）：
+键位、布局与设置面板见 [docs/design/remote_cli_tui.md](./docs/design/remote_cli_tui.md)。
 
-```bash
-./crates/crabmate-tui/target/debug/crabmate-tui \
-  --api-base http://127.0.0.1:8080 \
-  tui
-# 布局（仿 Desktop）：顶栏（工作区）| 左栏会话 | 流式 transcript | 右栏工作区目录树 | 底栏输入区 | 状态行
-# Ctrl+C 取消在途回合（再按一次强退；空闲时退出）
-#   审批浮层打开时第一次 Ctrl+C 只拒绝该命令——回合随后继续，需再按一次才会取消
-# Tab 切到会话列表（↑↓ 选择 · Enter 使用 · n 新建 · r 刷新 · Esc 返回）
-# 右栏工作区目录树宽屏（≥120 列）默认显示；Ctrl+W 聚焦右栏浏览（↑↓ 选择 · Enter/→ 展开 · ← 收起/回父 · r 刷新 · w 回会话 · Esc 返回输入）
-# 工作区目录树聚焦时按 p 打开服务端项目池（未设置=首次选择，已设置=切到另一项目；↑↓ 选 · Enter 切换 · Esc 返回）——切换后目录树与顶栏自动刷新
-# Alt+Enter 换行（多行输入）；Enter / Ctrl+O 发送
-# PgUp / PgDn / Ctrl+Home / Ctrl+End 滚动 transcript（单行输入时 ↑↓ 也可滚动）
-# Ctrl+E 展开/折叠思考行（默认折叠为一行预览）
-# 非白名单命令弹出审批浮层（Enter=一次 · a=始终 · Esc/n=拒绝）
-# 工具调用渲染为单行摘要，结果到达原位补 ✓/✗ + 说明
-# /find <词> 高亮并跳转 · /find 空参跳下一处 · /find off 清除
-# 助手正文渲染行内 Markdown（粗体/斜体/行内码/链接/删除线）；代码围栏内容保持纯文本
-# 斜杠：/model /mode /role /status /find /conv [new] /btw <问题> /quit · /help 查看全部
-#   （状态行回退显示 serve 默认，本地 override 以 `*` 标记；
-#     切换会话后从空 transcript 开始新一轮）
-# /settings（或 F2）打开设置面板：可改模型名 / API Base / 温度 / 思考模式 / Agent role / 会话模式
-#   与模型 API 密钥（只存本机钥匙串，不写 serve）；S 保存到 serve user-data（先 GET 合并再 PUT，
-#   与 Desktop/Web 设置同源共享）；保存后重启仍在，面板按三层显示（override `*` ＞ user-data ＞ serve 默认）
-```
+## 个人云（远程纯 API）
+
+公网只暴露 `api.…` → Caddy → 本机 `serve`（不要 `--with-web`）；壳用包内 UI 连接 `https://api.…/` + Bearer。步骤与勾选见 [`docs/design/personal_cloud_runbook.md`](docs/design/personal_cloud_runbook.md)。VPS/systemd/Caddy 见 Server [`个人VPS部署指南.md`](https://github.com/noisystreet/CrabMate/blob/main/docs/个人VPS部署指南.md)。
 
 ## 文档
 
@@ -159,71 +151,6 @@ crabmate-tui --api-base http://127.0.0.1:8080 repl
 | [frontend/README.md](./frontend/README.md) | UI 构建（trunk） |
 
 提交前：`pre-commit run --all-files` 或 `make check`。CI：`.github/workflows/ci.yml`（含 **frontend wasm**、**frontend/TUI 单测**、**desktop / web / tui release .deb**）；依赖审计：`.github/workflows/dependency-security.yml`（`make dependency-security`）；Victauri 壳 E2E：nightly 工作流或 `./scripts/victauri-e2e.sh`。
-
-## 快速开始（Desktop）
-
-前置：已启动 **`crabmate serve`**（默认纯 API）。当前 Server 默认已放行官方壳 Origin（`tauri://localhost`、`http://tauri.localhost`），Desktop/Android **不必**再设 `CM_WEB_CORS_ALLOWED_ORIGINS`。
-
-```bash
-# 终端 A — Server（壳路径不必 --with-web）
-crabmate serve --host 127.0.0.1 --port 8080
-
-# 终端 B — 本仓
-make frontend           # prepare-sidecar 会同步进 desktop-tauri/dist
-make desktop-dev
-```
-
-连接页填写服务器地址与可选 Web Bearer（**不是**模型 `API_KEY`）。连接成功后加载**包内** `index.html`，API 指向该 `serve`。
-
-工作区侧栏（或 IDE 文件树）可把**本机文件**拖到文件夹上上传（先确认；支持文本与二进制）。走 **`PUT /workspace/file/raw`**，需要当前 Server 构建（不是 crates.io / git **`v0.4.0`** 的 `serve`）。目标已存在时会再问是否覆盖；取消覆盖则**中止本批剩余文件**。右键「保存到本机」：文件走 **`GET /workspace/file/download`**，文件夹（或空白处=工作区根）走 **`GET /workspace/dir/archive`**（zip）。文件「重命名」走 **`POST /workspace/file/move`**（目标已存在会确认覆盖；若该路径在编辑器中有未保存修改会额外提示）。后两条需要 Server **#898**。聊天输入框附图（`POST /upload`，选文件 / 拖放 / 粘贴）发送后会显示在用户气泡里；壳用 Web Bearer 拉取。点已加载的图可放大。粘贴仅在剪贴板有图且**没有**非空 `text/plain` 时当附图（网页复制不会抢走正文）。文件在服务端临时目录，可能被清理（气泡会显示无法加载的占位）。
-
-## 快速开始（系统浏览器里的 Web UI）
-
-不是 Tauri：本机回环静态服务打开默认浏览器。仍然**不是** `crabmate serve` — API 要另开，并在 CORS 里放行页面 Origin。
-
-```bash
-# 终端 A — API
-crabmate serve --host 127.0.0.1 --port 8080
-# 放行 web-host Origin（Server ≥ v0.2.0 默认只放行 Tauri Origin）：
-#   CM_WEB_CORS_ALLOWED_ORIGINS=http://127.0.0.1:4173 crabmate serve …
-
-# 终端 B — 本仓
-make web-release
-sudo dpkg -i web-host/target/debian/crabmate-web_*.deb
-crabmate-web --api-base http://127.0.0.1:8080
-# 不安装时：
-#   cargo run --release --manifest-path web-host/Cargo.toml -- --root frontend/dist --api-base http://127.0.0.1:8080
-```
-
-默认监听 `127.0.0.1:4173`。`--no-open` 跳过 `xdg-open`。Bearer：`--bearer` / `CM_WEB_API_BEARER_TOKEN`（纯浏览器会弱持久化到 `localStorage`）。`.deb` 会安装 **CrabMate Web** 菜单项，图标与 Desktop 壳相同。同一端口上再次启动会打开已有实例，而不是报错退出。
-
-## 个人云（远程纯 API）
-
-公网只暴露 `api.…` → Caddy → 本机 `serve`（不要 `--with-web`）；壳用包内 UI 连接 `https://api.…/` + Bearer。步骤与勾选见 [`docs/design/personal_cloud_runbook.md`](docs/design/personal_cloud_runbook.md)。VPS/systemd/Caddy 见 Server [`个人VPS部署指南.md`](https://github.com/noisystreet/CrabMate/blob/main/docs/个人VPS部署指南.md)。
-
-## 快速开始（Playwright / 浏览器 E2E）
-
-Playwright 跑在**客户端自托管**的 Web UI 上：纯 API `serve` + `crabmate-web`（回环静态服务，默认 `127.0.0.1:4173`）。脚本自动起两者，并经 `CM_WEB_CORS_ALLOWED_ORIGINS` 放行 web Origin；不再依赖 `serve --with-web`（Server 保持纯 API）。
-
-```bash
-make frontend
-./scripts/e2e-playwright.sh
-# 或指定用例：./scripts/e2e-playwright.sh specs/mock-overlay-timing.spec.ts
-```
-
-## 快速开始（Android）
-
-```bash
-make apk
-# 或：./mobile-tauri/scripts/build-apk.sh
-# 需要构建 UI 时：CM_MOBILE_BUILD_FRONTEND=1 make apk
-```
-
-Android 壳默认隐藏应用内底部状态栏；仍可从侧栏工具条重新开启。
-
-`/chat/stream` 进行中时，壳会拉起前台服务（通知「对话进行中」），降低按 Home / 锁屏后 WebView 被系统冻结或杀进程的概率。服务端下发命令审批时，同一通知升级为「等待命令审批」（命令预览会截断）。点按通知回到应用内现有审批弹窗。Android 13+ 首次发送会请求通知权限；拒绝后保活/审批提醒不可用（状态栏提示）。部分厂商省电策略仍可能杀进程。
-
-详见 [ADR-0002](docs/adr/0002-android-approval-notification-foreground-keepalive.md)。
 
 ## 开发约定
 

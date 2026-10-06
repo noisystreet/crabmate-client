@@ -16,11 +16,11 @@
   <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/rust-1.85%2B-orange?logo=rust" alt="Rust 1.85+" /></a>
 </p>
 
-Official **Client** repository (path A): Desktop Linux / Android Tauri shells, shared `crabmate-connect`, and business UI in `frontend/`.  
+Official **Client** repository (path A): Desktop Linux / Android Tauri shells, shared `crabmate-connect`, and business UI in `frontend/`.
 Connects to a compatible **`crabmate serve`** (local or remote). Does **not** spawn or embed the Agent process.
 
-> **Server / contract source of truth**: [noisystreet/CrabMate](https://github.com/noisystreet/CrabMate) (local checkout is often `../crabmate_agent`)  
-> **Decision**: [client_shell_split.md](https://github.com/noisystreet/CrabMate/blob/main/docs/design/client_shell_split.md)  
+> **Server / contract source of truth**: [noisystreet/CrabMate](https://github.com/noisystreet/CrabMate) (local checkout is often `../crabmate_agent`)
+> **Decision**: [client_shell_split.md](https://github.com/noisystreet/CrabMate/blob/main/docs/design/client_shell_split.md)
 > **Contract pinning**: [client_contract_versioning.md](https://github.com/noisystreet/CrabMate/blob/main/docs/design/client_contract_versioning.md)
 
 ## Layout
@@ -49,100 +49,90 @@ Connects to a compatible **`crabmate serve`** (local or remote). Does **not** sp
 | Server `serve` | Server repo; start locally or remotely — shell does not spawn it |
 | Server `frontend/` / Playwright | UI and Playwright live **here**; after Server Phase C, Server has no `frontend/` sources |
 
-## Makefile
+## Quick start
+
+Prerequisite for every target: a running **`crabmate serve`** (API-only by default). Official shell Origins are allowed by default on current Server (`tauri://localhost`, `http://tauri.localhost`) — no `CM_WEB_CORS_ALLOWED_ORIGINS` needed for Desktop/Android.
 
 ```bash
-make help
-make frontend           # trunk build → frontend/dist
-make frontend-check     # wasm32 cargo check
-make check              # same as scripts/check.sh (includes frontend)
-make dependency-security # cargo audit + cargo deny (all workspaces; not in pre-commit)
-make test
-make desktop-dev        # needs cargo-tauri ^2; run serve in another terminal
-make desktop-release    # crabmate-desktop_*.deb (auto trunk --release UI; do not ship debug dist)
-make desktop-bin-release
-make web-release        # crabmate-web_*.deb (trunk --release + loopback static host; system browser)
-make apk                # Android; does not build frontend by default
-make tui                # build crabmate-tui (remote terminal)
-make tui-release        # crabmate-tui_*.deb (binary only; no icon, no config)
-make clean
+# Terminal A — Server (no --with-web needed for the shell)
+crabmate serve --host 127.0.0.1 --port 8080
 ```
 
-## Remote terminal
+### Desktop
+
+```bash
+# Terminal B — this repo
+make frontend           # sync UI into desktop-tauri/dist via prepare-sidecar
+make desktop-dev
+```
+
+On the connect page, enter the server URL and optional Web API Bearer (**not** the model `API_KEY`). The shell loads **local** `index.html` and points API calls at `serve`. Workspace file upload / download / rename and chat image attachments are documented in [docs/design/tauri_gui_mvp_design.md](./docs/design/tauri_gui_mvp_design.md).
+
+### Web UI in the system browser
+
+Not Tauri: a tiny loopback static server opens the default browser. Still **not** `crabmate serve` — start API separately and allow the page Origin on CORS.
+
+```bash
+# Terminal A — API (allow the web-host Origin; Server ≥ v0.2.0 allows Tauri Origins only)
+CM_WEB_CORS_ALLOWED_ORIGINS=http://127.0.0.1:4173 crabmate serve --host 127.0.0.1 --port 8080
+
+# Terminal B — this repo
+make web-release
+sudo dpkg -i web-host/target/debian/crabmate-web_*.deb
+crabmate-web --api-base http://127.0.0.1:8080
+# or without installing:
+#   cargo run --release --manifest-path web-host/Cargo.toml -- --root frontend/dist --api-base http://127.0.0.1:8080
+```
+
+Default listen is `127.0.0.1:4173`. `--no-open` skips `xdg-open`. Bearer: `--bearer` / `CM_WEB_API_BEARER_TOKEN` (plain browser stores it in `localStorage`). The `.deb` adds a **CrabMate Web** menu entry using the same icon as Desktop. A second launch on the same port reopens the browser instead of failing.
+
+### Playwright / browser E2E
+
+Playwright runs against the **client self-hosted** web UI: a pure-API `serve` plus `crabmate-web` (loopback static host, default `127.0.0.1:4173`). The script starts both and allows the web Origin via `CM_WEB_CORS_ALLOWED_ORIGINS`; no `serve --with-web` is needed (Server stays API-only).
+
+```bash
+make frontend
+./scripts/e2e-playwright.sh
+# or run a single spec: ./scripts/e2e-playwright.sh specs/mock-overlay-timing.spec.ts
+```
+
+### Android
+
+```bash
+make apk
+# or: ./mobile-tauri/scripts/build-apk.sh
+# to build UI as well: CM_MOBILE_BUILD_FRONTEND=1 make apk
+```
+
+The Android shell starts with the in-app bottom status bar hidden; it can still be enabled from the side toolbar. Foreground keep-alive and approval notifications during `/chat/stream` are covered by [ADR-0002](docs/adr/0002-android-approval-notification-foreground-keepalive.md).
+
+## Remote terminal (crabmate-tui)
 
 Start `crabmate serve`, then:
 
 ```bash
 make tui
-./crates/crabmate-tui/target/debug/crabmate-tui \
-  --api-base http://127.0.0.1:8080 \
-  --bearer "$CM_WEB_API_BEARER_TOKEN" \
-  chat "hello"
-
-# Interactive REPL (conversation id across turns; TTY approval or --yes for allow_once)
-./crates/crabmate-tui/target/debug/crabmate-tui \
-  --api-base http://127.0.0.1:8080 \
-  repl
-# In repl: /help · /status shows the model · /model switches model · /mode ask|plan|act · /role <id> · /workspace [path] · /conv list|new|use <id>|delete [<id>] · /btw <question> (off-the-record side question, not persisted) · Ctrl+C stops the turn (twice quits) · /resume re-attaches a dropped run
+./crates/crabmate-tui/target/debug/crabmate-tui --api-base http://127.0.0.1:8080 --bearer "$CM_WEB_API_BEARER_TOKEN" chat "hello"
+./crates/crabmate-tui/target/debug/crabmate-tui --api-base http://127.0.0.1:8080 repl   # interactive REPL
+./crates/crabmate-tui/target/debug/crabmate-tui --api-base http://127.0.0.1:8080 tui    # full-screen TUI
 ```
 
-A bearer-mode `serve` without a server-side model `API_KEY` returns `LLM_API_KEY_REQUIRED`; send a client-owned LLM key per chat like the shell UI's Settings → API key (flags also accept the serve-side model env names `CM_API_KEY` / `CM_MODEL` / `CM_API_BASE`):
+A bearer-mode `serve` without a server-side model `API_KEY` returns `LLM_API_KEY_REQUIRED`; pass a client-owned key with `--llm-api-key` (or `CM_API_KEY` / `CM_MODEL` / `CM_API_BASE`). Missing `--bearer` / `--llm-api-key` falls back to the Desktop shell's saved secrets in the same OS keyring (read-only; `--no-keyring` disables it).
 
-```bash
-./crates/crabmate-tui/target/debug/crabmate-tui \
-  --api-base https://api.example.com \
-  --bearer "$CM_WEB_API_BEARER_TOKEN" \
-  --llm-api-key "$MY_LLM_API_KEY" \
-  chat "hello"
-```
-
-Missing `--bearer` or `--llm-api-key` (and their env vars) falls back to the **Desktop shell's saved secrets** in the same OS keyring (`com.crabmate.credentials` / `tauri_connect_web_api_bearer` / `tauri_client_llm_api_key`, read-only); `--no-keyring` disables the fallback.
-
-Piping the message into `chat` (no argv) consumes stdin, so a later approval prompt cannot read a decision — use **`--yes`**, or pass the message as an argument:
-
-```bash
-echo "hello" | crabmate-tui --api-base http://127.0.0.1:8080 --yes chat
-crabmate-tui --api-base http://127.0.0.1:8080 chat "hello"
-```
-
-Design: [docs/design/remote_cli_tui.md](./docs/design/remote_cli_tui.md). Release package (binary only, no menu icon or config files):
+Release package (binary only, no menu icon or config files):
 
 ```bash
 make tui-release
 sudo dpkg -i crates/crabmate-tui/target/debian/crabmate-tui_*.deb
-crabmate-tui --api-base http://127.0.0.1:8080 repl
 ```
 
 No Rust toolchain? The same binary-only `.deb` is also attached to each `v*` GitHub Release (built by CI), ready to download and `dpkg -i`.
 
-Full-screen `tui` (ratatui; shows a session sidebar on terminals ≥ 120 columns wide):
+Keybindings, layout, and the settings panel: [docs/design/remote_cli_tui.md](./docs/design/remote_cli_tui.md).
 
-```bash
-./crates/crabmate-tui/target/debug/crabmate-tui \
-  --api-base http://127.0.0.1:8080 \
-  tui
-# Layout (Desktop-style): top bar (workspace) | session sidebar | streaming transcript | workspace tree sidebar | composer | status bar
-# Ctrl+C cancels the in-flight turn (twice force-quits; idle exits)
-#   while an approval overlay is open the first Ctrl+C only denies that command —
-#   the turn keeps running and a following Ctrl+C cancels it
-# Tab → session list (↑/↓ select · Enter use · n new · r refresh · Esc back)
-# The workspace tree is the RIGHT sidebar, shown by default on wide (≥120 cols) terminals; Ctrl+W focuses it (↑/↓ select · Enter/→ expand · ← collapse/parent · r refresh · w sessions · Esc back)
-# p in the workspace tree opens the serve project pool whether or not a root is set: no root = pick one (sidebar shows "not set: press p …" until then), root set = switch to another project (↑/↓ · Enter switch · Esc back); the tree and top bar refresh after switching
-# Alt+Enter inserts a newline (multi-line compose); Enter / Ctrl+O send
-# PgUp / PgDn / Ctrl+Home / Ctrl+End scroll the transcript (↑/↓ when single-line input)
-# Ctrl+E expands/collapses the thinking rows (folded to one line by default)
-# Non-allowlisted commands raise an approval overlay (Enter/once · a/always · Esc/n/deny)
-# Tool calls render as one-line summaries, updated in place with ✓/✗ + a note
-# /find <word> highlights and jumps · /find cycles to the next match · /find off clears
-# Assistant text renders inline Markdown (bold/italic/code/link/strike); code fences stay plain
-# Slashes: /model /mode /role /status /find /conv [new] /btw <question> /quit · /help lists everything
-#   (status bar shows serve defaults; local overrides are marked with `*`;
-#    switching sessions starts a fresh transcript)
-# /settings (or F2) opens a settings panel: edit model name / API Base / temperature / thinking mode /
-#   Agent role / session mode and the model API key (stored in the local keyring, never on serve);
-#   S saves to the serve user-data (GET→merge→PUT, shared with Desktop/Web settings); saved values
-#   survive restarts and stay in the three-layer view (local override `*` > user-data > serve default)
-```
+## Personal cloud (remote API-only)
+
+Expose only `api.…` → Caddy → loopback `serve` (no `--with-web`); the shell uses packaged UI against `https://api.…/` + Bearer. Steps: [`docs/design/personal_cloud_runbook.md`](docs/design/personal_cloud_runbook.md). VPS/systemd/Caddy: Server [`个人VPS部署指南.md`](https://github.com/noisystreet/CrabMate/blob/main/docs/个人VPS部署指南.md).
 
 ## Docs
 
@@ -162,71 +152,6 @@ Full-screen `tui` (ratatui; shows a session sidebar on terminals ≥ 120 columns
 | [frontend/README.md](./frontend/README.md) | UI build (trunk) |
 
 Before commit: `pre-commit run --all-files` or `make check`. CI: `.github/workflows/ci.yml` (includes **frontend wasm**, **frontend/TUI unit tests**, **desktop / web / tui release .deb**); dependency audit: `.github/workflows/dependency-security.yml` (`make dependency-security`); Victauri shell E2E: nightly workflow or `./scripts/victauri-e2e.sh`.
-
-## Quick start (Desktop)
-
-Prerequisite: **`crabmate serve`** (API-only by default) already running. Official shell Origins are allowed by default on current Server (`tauri://localhost`, `http://tauri.localhost`)—no `CM_WEB_CORS_ALLOWED_ORIGINS` needed for Desktop/Android.
-
-```bash
-# Terminal A — Server (no --with-web needed for the shell)
-crabmate serve --host 127.0.0.1 --port 8080
-
-# Terminal B — this repo
-make frontend           # sync UI into desktop-tauri/dist via prepare-sidecar
-make desktop-dev
-```
-
-On the connect page, enter the server URL and optional Web API Bearer (**not** the model `API_KEY`). The shell loads **local** `index.html` and points API calls at `serve`.
-
-In the Workspace side panel (or IDE tree), you can **drop local files** onto a folder to upload them (confirm first; text and binary). This calls **`PUT /workspace/file/raw`** and needs a current Server build (not crates.io / git **`v0.4.0`** `serve`). If a target already exists, you confirm overwrite; cancelling stops the rest of that drop. Right-click **Save to this device** on a file uses **`GET /workspace/file/download`**; on a folder (or empty tree area) it downloads a zip via **`GET /workspace/dir/archive`**. **Rename** on a file uses **`POST /workspace/file/move`** (overwrite confirm on 409; extra warning if the destination tab has unsaved edits). Those two routes need Server **#898**. Images attached in the **chat composer** (`POST /upload`, file picker / drop / paste) show in the user bubble after you send; the shell loads them with the Web Bearer. Click a loaded image to enlarge. Paste attaches only when the clipboard has an image and **no** non-empty `text/plain` (so copying a web page does not steal the text). Upload files sit in a temp dir on the server and may expire (the bubble then shows a placeholder).
-
-## Quick start (web UI in the system browser)
-
-Not Tauri: a tiny loopback static server opens the default browser. Still **not** `crabmate serve` — start API separately and allow the page Origin on CORS.
-
-```bash
-# Terminal A — API
-crabmate serve --host 127.0.0.1 --port 8080
-# allow the web-host Origin (Server ≥ v0.2.0 already allows Tauri Origins only):
-#   CM_WEB_CORS_ALLOWED_ORIGINS=http://127.0.0.1:4173 crabmate serve …
-
-# Terminal B — this repo
-make web-release
-sudo dpkg -i web-host/target/debian/crabmate-web_*.deb
-crabmate-web --api-base http://127.0.0.1:8080
-# or without installing:
-#   cargo run --release --manifest-path web-host/Cargo.toml -- --root frontend/dist --api-base http://127.0.0.1:8080
-```
-
-Default listen is `127.0.0.1:4173`. `--no-open` skips `xdg-open`. Bearer: `--bearer` / `CM_WEB_API_BEARER_TOKEN` (plain browser stores it in `localStorage`). The `.deb` adds a **CrabMate Web** menu entry using the same icon as Desktop. A second launch on the same port reopens the browser instead of failing.
-
-## Personal cloud (remote API-only)
-
-Expose only `api.…` → Caddy → loopback `serve` (no `--with-web`); the shell uses packaged UI against `https://api.…/` + Bearer. Steps: [`docs/design/personal_cloud_runbook.md`](docs/design/personal_cloud_runbook.md). VPS/systemd/Caddy: Server [`个人VPS部署指南.md`](https://github.com/noisystreet/CrabMate/blob/main/docs/个人VPS部署指南.md).
-
-## Quick start (Playwright / browser E2E)
-
-Playwright runs against the **client self-hosted** web UI: a pure-API `serve` plus `crabmate-web` (loopback static host, default `127.0.0.1:4173`). The script starts both and allows the web Origin via `CM_WEB_CORS_ALLOWED_ORIGINS`; no `serve --with-web` is needed (Server stays API-only).
-
-```bash
-make frontend
-./scripts/e2e-playwright.sh
-# or run a single spec: ./scripts/e2e-playwright.sh specs/mock-overlay-timing.spec.ts
-```
-
-## Quick start (Android)
-
-```bash
-make apk
-# or: ./mobile-tauri/scripts/build-apk.sh
-# to build UI as well: CM_MOBILE_BUILD_FRONTEND=1 make apk
-```
-
-The Android shell starts with the in-app bottom status bar hidden; it can still be enabled from the side toolbar.
-
-During an in-flight `/chat/stream`, the shell starts a foreground service (notification **Chat in progress**) so the WebView is less likely to be killed after Home or lock. When the server asks for command approval, that notification upgrades to **Command approval needed** (truncated command text). Tap it to return to the in-app approval dialog. Android 13+ will ask for notification permission on the first send; if you deny it, keep-alive alerts are unavailable (status-bar hint). OEM battery savers may still kill the process.
-
-See [ADR-0002](docs/adr/0002-android-approval-notification-foreground-keepalive.md).
 
 ## Conventions
 
