@@ -116,6 +116,12 @@ When updating docs:
 | Desktop / Android / Web / TUI capability alignment | `docs/design/client_capability_matrix.md` (update the cell in the same PR as the capability) |
 | Chat UI follow-ups (composer / transcript / a11y) | `docs/design/chat_ui_todo.md` |
 | Coding-agent client (review / revert loop; not full IDE) | `docs/design/coding_agent_client.md` (Wave 1 checkboxes stay in `chat_ui_todo.md`; restore/changelog JSON authority is Server) |
+| TUI usability plan (align with Desktop chat) | `docs/design/tui_usability.md` |
+| TUI settings panel (align with Desktop settings) | `docs/design/tui_settings_panel.md` |
+| Display-crate sink checklist (consumer side) | `docs/design/display_crate_sink.md` |
+| Icon unification (shared `Icon` component / `--icon-*` tokens) | `docs/design/icon_unification.md` |
+| Markdown rendering follow-ups | `docs/design/markdown_render_todo.md` |
+| UI issue backlog (shell-wide) | `docs/design/ui_issue_todo.md` |
 | Manual shell smoke steps | `docs/design/shell_smoke_runbook.md` |
 | Personal cloud (shell → remote API-only) | `docs/design/personal_cloud_runbook.md`; VPS/Caddy authority is Server |
 | Victauri / pre-commit / CI commands | `docs/TESTING.md` |

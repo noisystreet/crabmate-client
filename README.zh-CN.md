@@ -148,6 +148,13 @@ sudo dpkg -i crates/crabmate-tui/target/debian/crabmate-tui_*.deb
 | [docs/design/client_capability_matrix.md](./docs/design/client_capability_matrix.md) | Desktop / Android / Web / TUI 能力对照 |
 | [docs/design/coding_agent_client.md](./docs/design/coding_agent_client.md) | 编程 Agent 客户端规划（审查 / 还原；Wave 1–3） |
 | [docs/design/contract_pin.md](./docs/design/contract_pin.md) | 契约 git tag / rev 钉法 |
+| [docs/design/tui_usability.md](./docs/design/tui_usability.md) | TUI 易用性规划（对齐 Desktop 聊天） |
+| [docs/design/tui_settings_panel.md](./docs/design/tui_settings_panel.md) | TUI 设置面板（对齐 Desktop 设置） |
+| [docs/design/display_crate_sink.md](./docs/design/display_crate_sink.md) | 展示 crate 下沉本仓（消费侧清单） |
+| [docs/design/icon_unification.md](./docs/design/icon_unification.md) | 图标统一样式（共享 `Icon` 组件 / `--icon-*` token） |
+| [docs/design/markdown_render_todo.md](./docs/design/markdown_render_todo.md) | Markdown 渲染待办 |
+| [docs/design/chat_ui_todo.md](./docs/design/chat_ui_todo.md) | 对话界面待办（composer / transcript / 可访问性） |
+| [docs/design/ui_issue_todo.md](./docs/design/ui_issue_todo.md) | UI 问题待办清单（壳层通用） |
 | [frontend/README.md](./frontend/README.md) | UI 构建（trunk） |
 
 提交前：`pre-commit run --all-files` 或 `make check`。CI：`.github/workflows/ci.yml`（含 **frontend wasm**、**frontend/TUI 单测**、**desktop / web / tui release .deb**）；依赖审计：`.github/workflows/dependency-security.yml`（`make dependency-security`）；Victauri 壳 E2E：nightly 工作流或 `./scripts/victauri-e2e.sh`。

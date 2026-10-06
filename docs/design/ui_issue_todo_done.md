@@ -1,0 +1,102 @@
+# UI 问题待办清单 · 已完成归档
+
+本文件归档 [`ui_issue_todo.md`](./ui_issue_todo.md) 中已修复 / 已失效的条目（原 `- [x]`），保留修复记录供追溯。
+主清单只保留未完成项（`- [ ]`）。
+
+
+## P0 · 明确缺陷
+
+- [x] `theme=system` 在 Linux 非 GNOME（KDE / XFCE / 无 gsettings）下固定浅色：`desktop-tauri/src-tauri/src/os_theme.rs` 仅探测 GNOME 的 gsettings，无 portal / KDE 回退，双通道（窗口 `.theme()` + 前端 `TAURI_OS_DARK_HINT`）一起落到 light。
+
+- [x] IDE 语法高亮在 material / high-contrast（均为深色）下仍用浅色 token：`frontend/styles/ide-highlight.css`、`ide-codemirror.css` 仅覆盖 `[data-theme="dark"]`，且 `--ide-hl-*` 变量未定义、靠浅色字面量兜底。
+
+
+## P1 · 可访问性关键缺口
+
+- [x] 审批弹窗无焦点陷阱且无法 Esc 关闭：`frontend/src/app/approval_modal.rs`、`frontend/src/app/app_shell_effects/escape.rs` 未覆盖 `pending_approval`。
+
+- [x] 部分对话框缺焦点陷阱：`ide_new_file_modal.rs`、`shell_confirm_dialog.rs`、`ide_confirm_dialog.rs`。
+
+- [x] 键盘不可达：图片附件 `<label>`（`column.rs`）、右键/长按上下文菜单、顶部/底栏菜单、IDE 标签页（缺方向键）、工作区文件树文件行。
+
+- [x] 语义缺口：聊天模式 `role="menuitem"` 孤儿节点；单选/当前会话缺 `aria-checked` / `aria-current`；未保存/置顶/星标状态对屏幕阅读器不可见。
+
+- [x] 焦点归还闭环缺失：图片 lightbox 无 Tab 循环、关闭不还焦；hydrate / 待传 / uploads 图片键盘不可达；右键 / 下拉菜单（`FocusableRoleMenu` 全部调用点）不能 Esc 关闭、关闭不还焦；聊天 / IDE 查找栏与 IDE 跳转行栏不自动聚焦；`changelist_modal` 缺 Esc；`session_list` / `approval` / `settings` 模态关闭不还焦。
+
+- [x] 模态根 12 处各写一遍 `role="dialog"` / `aria-modal` / 焦点陷阱 / Escape / 焦点归还，语义已静默分叉（`stop_pointerdown` 有无、`prevent_default` 有无、Escape 是否经脏守卫）。已修（2026-09-25）：余下 9 处手抄模态根迁入 `FocusableModalPanel`，壳补齐 `dialog_role` / `labelledby` / `testid` / `stop_pointerdown` / `on_escape`；并由新增的 `scripts/check-modal-shell.sh` 固化——`frontend/src/**/*.rs` 除 `app/focusable_menu.rs` 外不得出现 `role="dialog"` / `"alertdialog"` / `set_attribute("role", …)` / `aria-modal`，有意例外就地写 `modal-gate: allow <理由>`（当前仅图片灯箱一条）。门禁已进 pre-commit 与 `scripts/check.sh`。
+
+
+## P1 · 语义与反馈
+
+- [x] slash 浮层打开且无匹配项时 Enter 被吞（`prevent_default` 后 accept 空转），以 `/` 开头的正文无法键盘发送且无反馈：`frontend/src/app/chat/composer_slash_menu.rs`。已修：无选中项时 Enter 不消费，交还 composer 走发送路径（Tab 仍吞掉防焦点跳出）。
+
+- [x] IDE 标签纯切换（内容已在缓冲、不丢失）也弹「放弃未保存更改」确认，确认框语义与行为不符，且每次带脏切换都被强制拦截：`frontend/src/ide_tabs.rs`（`try_switch_tab`）。已修：`switch_to` 先把编辑器内容 persist 回原标签，纯切换无损，移除确认（打开新文件路径同型确认一并移除；关闭标签的确认保留——persist 后标签被删，内容确会丢失）。
+
+- [x] MCP 配置加载失败被静默吞掉（`if let Ok` 忽略 Err，仅 probing 复位、无错误反馈）：`frontend/src/app/settings_mcp_status.rs`（`spawn_reload_mcp`）。已修：Err 写入设置页 `feedback` 通道展示。
+
+- [x] `ide_confirm_user` 并发第二个确认请求仍使第一个等待方静默返回 `false`（id 机制已防误取他人结果，但请求不排队）：`frontend/src/ide_confirm.rs`。已修：`pending` 改 FIFO 请求队列，UI 只消费队首，应答按队首 `id` 回写，等待方按自身 `id` 匹配结果。
+
+
+## P1 · 对比度与焦点可见性
+
+- [x] light 主题主按钮白字 ≈3.2–3.9:1，低于 AA 小字（12px/500 需 4.5:1）：`frontend/styles/components.css`、`frontend/themes/light.css`。已修（2026-09-24）：`.btn-primary { color: #fff }` 为三主题共用，故只改 light 覆层——`--btn-primary-bg` 渐变改为 `color-mix(--accent 68%, #0a0c10)` → `color-mix(--accent 60%, #0a0c10)`（最亮顶部 ≈6.3:1），`--btn-primary-border` 同步压深；`:hover` 的 `brightness(1.07)` 提亮后仍 ≈5.7:1。
+
+- [x] light 主题 `--muted` 小字 ≈3.4:1，仍用于 10–11px 大写标签：`frontend/themes/light.css`、`components.css`、`status.css`、`modal.css`、`shell-topbar.css`。已修（2026-09-24）：`--muted` `#8a8278` → `#6f675c`，在 `--bg` / `--surface-hover` / `--surface` 上分别为 4.99 / 4.90 / 5.57:1（`--status-agent-select-bg-image` 的 SVG fill 同步）；`components.css` 中 muted 半透明只出现在 `:disabled`（WCAG 对比度豁免），未改；`status.css` / `shell-topbar.css` 的 10–11px 标签本就用纯 `var(--muted)`，随 token 加深即达标。
+
+- [x] light 主题（出厂默认）五个语义色当文字色用时**全部低于 AA**，且 `--info` 与 `--accent` 同值、`--surface` 纯白压在暖底上冷暖冲突：`frontend/themes/light.css`。已修（2026-09-25，**取代上两条记录的数值**）：`--accent` `#7a8c7a`(3.58:1) → `#55705b`、`--info` → 独立取青 `#3a6e83`、`--success` → `#4a7454`、`--warn` → `#836628`、`--error` → `#a0524f`，在 `--bg` / `--surface-hover` / `--surface` 三层底色上最差 4.54:1（小字 AA 需 4.5:1）；`--surface` `#ffffff` → `#fffdfa`、`--bg` → `#f4f1ea`、`--surface-hover` → `#f0ece2`、`--border` → `#e2ddd1`、`--border-subtle` → `#ebe7dc`、`--text` → `#1c1913`、`--muted` → `#6b6357`(5.02–5.83:1，chevron SVG 同步)、`--modal-backdrop-bg` 随 `--text`；`--btn-primary-bg` 由 `--accent 68%/60%` 改 `92%/84%` 混 `#0a0c10`（旧比例在新 accent 下会压成近黑，白字 ≈8.7:1 但丢失主色身份），现顶部 ≈6.1:1、hover ≈5.5:1。仍需实算复核：`--nav-rail-bg` 仍为 `bg-elevated 90%`，侧栏略亮于页面（未在本次范围内）。
+
+- [x] `.ide-editor-textarea:focus` `outline: none` 且无 `:focus-visible` 替代，键盘焦点只剩 caret：`frontend/styles/ide-layout.css`。**已失效（2026-10-01）**：该类名全仓已不存在——编辑器已迁 CodeMirror（`.ide-cm-host .cm-editor`），旧 textarea 随之移除，条目不再适用。
+
+- [x] lightbox 操作 / 关闭按钮无 `:hover` 与 `:focus-visible`：`frontend/styles/shell-ds.css`。已修（2026-10-01）：`.chat-image-lightbox-action` / `-close` 补 `:hover`（底色加深）与 `:focus-visible`（`--focus-ring-*` 焦点环），`.chat-image-lightbox-menu-item` 补 `:focus-visible`。
+
+
+## P2 · 移动端边界与体验
+
+- [x] 768px 断点在 Rust（`app_prefs.rs`）与多份 CSS 重复硬编码，无单一来源/校验，改漏会脱节。已修：权威值仍是 `MOBILE_LAYOUT_BREAKPOINT_PX`，新增 `scripts/check-css-breakpoints.sh` 强制窄屏 `max-width: N` 与互补 `min-width: N+1` 成对（禁交叉书写）、二级断点须登记、e2e 移动视口须落窄屏侧。
+
+- [x] 未定义 token 硬编码 fallback（`--shell-border` / `--surface-1` / `--accent-muted` / `--accent-warn` 等），切主题时这些位置颜色不变。已修：未定义 token 引用统一改指已有 token（不加别名），并剥离全部 `var()` 内浅色兜底字面量——token 缺失时立刻暴露而非静默渲染固定浅色；新增 `scripts/check-css-tokens.sh` 门禁（未定义引用、`var()` 颜色兜底、白名单失效三项必须为零，运行时注入属性登记 `scripts/css_tokens_allowlist.txt`），已进 pre-commit 与 `scripts/check.sh`。
+
+- [x] Android 系统状态栏被 Web 顶栏底色遮挡、图标不可见（浅色主题下白图标压近白顶栏）。已修（2026-09-30）：根因是 targetSdk 36 → Android 15+ 强制 edge-to-edge 且 API 36 已无法退出，`statusBarColor` 失效（状态栏透明）后其下露出 Web 顶栏 `color-mix(surface 55%, transparent)`，而 Web 默认主题 `shadcn-light` 的 `--surface` 近白 + 原生 `windowLightStatusBar=false` 强制白图标 → 白压白不可见。因 `themes.xml` 两个 light 标志被镜像门禁冻结为 `false`、无法从资源层切换，改为**运行时动态跟随主题**：`frontend/src/app_prefs.rs` 新增 `theme_css_is_light()`（按 `xxx-light` 后缀判定），`frontend/src/app/shell_prefs_storage.rs` 的 `persist_theme_to_storage_and_dom()`（`data-theme` 唯一写点，覆盖加载 / 预览 / OS 明暗监听全部路径）写 `data-theme` 后经新 JS 桥 `apply_mobile_system_bar_icons` 调 `CrabMateMobile.setSystemBarIconAppearance`，原生 `MainActivity.applySystemBarIconAppearance()` 用 `WindowInsetsControllerCompat.isAppearanceLightStatusBars` / `isAppearanceLightNavigationBars` 切图标明暗；连接页 / 启动页回落 `false`（浅色图标，与深底一致）。桥方法纯观感、无 Origin 守卫（与 `getStatusBarInsetPx` 一致，避免水合早于 URL 缓存丢调用）。
+
+
+## P2 · 空态与确认
+
+- [x] 空态缺失：会话列表标题过滤无结果（`sidebar_nav/session_rail.rs`）、「管理会话」无会话（`session_list_modal.rs`）、任务列表空 `<ul>`（`side_column.rs`）、MCP 服务器列表（`settings_mcp_block.rs`）、模型预设列表（`settings_models_registry/preset_list.rs`）。已修（2026-09-25）：五处各补一条 `role="status"` 空态——会话过滤复用既有 `.nav-search-hits-empty`，其余新增 `.settings-list-empty` / `.session-modal-empty` / `.tasks-list-empty`（均为无字面量规则，不动 CSS 预算）；文案全部走 i18n（`settings_mcp_servers_empty` / `settings_saved_models_empty` / `nav_no_session_hits` / `session_modal_empty` / `tasks_empty`）。
+
+- [x] 模型预设新增弹窗温度/上下文 token 无范围校验，与「保存全部」的 `validate_temperature_override` 不一致：`frontend/src/app/settings_models_registry/submit.rs`。已修（2026-09-25）：`validate_temperature_override` / `validate_llm_context_tokens_override` 提为 `pub(crate)`，弹窗在 `try_build_manual_saved_preset` 成功后复用同一对校验（越界即写 `form_error` 且不提交）。
+
+- [x] 保存语义混合（预设开关/删除、Bearer、API base、MCP 导入立即落盘 vs 主题/语言/LLM 需「保存全部」）。已修（2026-09-25，**只标注不动逻辑**）：先只读核实逐区块落盘路径，结论是**不存在「改完静默丢弃」**——凡不参与 `dirty` 的区块都自带立即落盘通道（按钮 / 开关即写 / 400ms 防抖 PUT），两种语义并存而非缺陷，故不改保存逻辑，只就地标注。新增 `i18n::settings_applies_immediately`（文案复用 `settings_save_all` 作为按钮名单唯一来源）+ 共享组件 `SettingsInstantApplyHint`，插入 7 个**整块**立即生效的区块：聊天记录注入开关、Web API Bearer、API base、会话存储、会话排版、GitHub、模型列表。**未标注**：MCP 区块是混合语义（MCP 文件草稿参与「保存全部」，只有行内 remote bearer「保存」与 JSON「应用」立即落盘），加区块级标注会误导，而那两处是显式按钮、语义已自明。
+
+
+## P2 · 样式与 token
+
+- [x] 未定义 token：`--text-muted` / `--surface-muted` / `--surface-2` / `--panel` / `--fg` / `--warning`；`status.css` 的 `color-mix(… var(--panel) …)` 因变量失效整句作废。已修（2026-09-22）：`--panel` 那条 `color-mix` 随 P4 死 CSS 清理移除；其余五个的引用统一改指已有 token（`--fg` 仅保留在 `splash.html` / `connect.html` 两个独立页自持定义），`frontend/styles` + `frontend/themes` 内已无未定义引用、无 `var()` 浅色兜底，由 `scripts/check-css-tokens.sh` 固化。
+
+- [x] API 层窄路径硬编码中文错误串：`frontend/src/api/http.rs`、`github_secrets_local.rs`、`llm_secrets_local.rs`、`web_api_bearer_local.rs`、`user_data.rs`。已修（2026-09-25）：新增 17 条 `api_err_*` 文案落 `i18n/api_errors.rs`（本机安全存储错误也归此处，与设置页 UI 文案区分）；`http.rs` / `user_data.rs` 复用既有 `loc` 形参，三个 secret-store 模块**不改任何签名**、在错误分支内取 `load_locale_from_storage()`（与 `api/browser.rs` 既有先例一致，被吞错的 hydrate 路径无需透传 `Locale`）；`ChatBranchError::{NotFound,Conflict}` 改携带本地化 `String`，`message_row_actions.rs` 四处匹配随之改 `NotFound(_)` / `Conflict(_)`；`clear_github_connection_local` 删除嵌套中文包装，只回传槽位级明细，交外层 `settings_github_disconnect_partial` 的本地化框架包裹。
+
+- [x] `frontend/styles` 消费侧 `font-size` 字面量 166 处未 token 化（含 16 处 `em`）。已修（2026-09-25，**Phase 1a**）：新增 13 档字号 token（`--text-2xs…--text-7xl`，单位恒为 px，定义于 `tokens.css` 排版区；`--text-lg` = 14px 即根字号，`base.css` 的 `html, body { font-size: var(--text-lg) }` 是其唯一消费点，故 1rem = 14px），166 处按渲染 px 就近并档（±0.5px 内，平局取较大档，故 10.5px → `--text-sm`）；`em` 全部消灭——11 处按父级固定字号并入档，聊天列内 5 处（内联 code / skill chip / file-ref）改 `calc(var(--crabmate-chat-font-size, 14px) * <ratio>)` 以保留用户字号缩放。逐文件预算 `font-size` 全部下调为 0（5 个双零条目按规则删除），由 `scripts/check-css-literals.sh` 固化；四道 CSS 门禁全绿。残留颜色 26 处仍见下条。
+
+- [x] `frontend/styles` 消费侧颜色字面量已从 26 处清到 2 处（逐文件预算见 `scripts/css_literals_budget.txt`，现值为棘轮上限，新增即 fail）。已修（2026-09-25，**Phase 1b**）：GFM alert 五色 `#3b82f6 / #22c55e / #a855f7 / #f59e0b / #ef4444` 改 `--info / --success / --accent / --warn / --error`（`color-mix(… 70%, var(--border))` 保饱和），`layout-chat.css` 内联错误底 `rgba(207,34,46,.08)` 改 `var(--error-bg)`，并删除 `--danger / --danger-bg / --ok` 兼容别名（`tokens.css` + 三主题，6 处消费点改指 `--error`）。已修（2026-09-25，**Phase 1c**）：新增 `--inset-highlight`（inset 亮线，仅 `tokens.css` 定义、四主题同值）与 `--on-accent`（实心强调色底前景，light `#fff` / material 与 high-contrast `#0a0a0a`），收掉 `components.css` 6 处与 `layout-chat.css` 3 处 `#fff`；material / high-contrast 的 `.btn-primary { color }` 覆写块删除改用 `--on-accent`，其中 high-contrast 禁用态标签原 `#737373` 与其底色同值（不可见），删除后回到基规则深字。剩余：`layout-chat.css` 1 / `mobile.css` 1 / `modal.css` 1 / `shell-topbar.css` 2 / `shell-ds.css` 3 / `sidebar.css` 1（遮罩与浮层阴影，待阴影 token，转 Phase 1d）、`tauri-shell.css` 2（壳层关闭键红底白字，固定色语义不随主题，可长期留预算）。已修（2026-09-25，**Phase 1d**）：新增 `--scrim-bg`（局部遮罩）、`--shadow-menu`（浮层菜单阴影）、`--shadow-media`（灯箱图片柔影）、`--shadow-knob`（拨杆滑块阴影），收掉上述 9 处；灯箱整屏遮罩改走既有主题化 `--modal-backdrop-bg`（light 0.30 暖调 / 深色 0.54 / material 0.56 / high-contrast 0.72，light 下由固定 62% 黑变浅为有意统一）。至此 `frontend/styles` 颜色字面量 26 → 2 处，仅余 `tauri-shell.css` 的壳层关闭键红底白字（固定色语义不随主题，有意长期保留），预算表仅余该条。
+
+- [x] Android 壳原生层（WebView 之外）未跟随设计令牌：主题底色槽自持字面量、系统栏图标明暗未声明、通知图标 / 颜色用系统默认、模板残留布局与模板色未清。已修（2026-09-25）：`Theme.crabmate_mobile`（`values/` 与 `values-night/` 各自自包含——同名 style 是整体替换而非逐项合并）四个底色槽全改 `@color/cm_bg`，并显式声明 `android:windowLightStatusBar` / `android:windowLightNavigationBar = false`（底色恒深色，DayNight 浅色变体默认给深色图标→在深色状态栏上不可见；此前靠继承，换 parent 会静默回归，`windowLightNavigationBar` 加 `tools:targetApi="27"` 抑制 lint）；`StreamKeepAliveService` 两条通知渠道补 `description`、加 `setColor(getColor(R.color.cm_accent))`，小图标由框架 `stat_sys_warning` / `stat_notify_sync` 换成自绘单色 vector `ic_stat_stream`（三条递减横杠）/ `ic_stat_approval`（警示三角，惊叹号用 `evenOdd` 挖空——小图标只取 alpha，不能复用 launcher 位图否则渲染成白块）；`MainActivity` 的 WebView 预绘底色由 `parseColor("#07090E")` 改 `getColor(R.color.cm_bg)`，弹窗按钮色改指 `cm_error` / `cm_muted` / `cm_accent`；删除死文件 `res/layout/activity_main.xml`（全仓零引用）与未引用模板色（`purple_*` / `teal_*`）。新增 `scripts/check-token-mirrors.sh`（pre-commit + `scripts/check.sh`）冻结三条不变量（后续「续 7」扩到五条）：`colors.xml` 只放 `cm_*` 镜像且逐项等于 `tokens.css`；`values*/themes.xml` 无颜色字面量且应用主题四项底色 + 两项系统栏标志齐备；启动页三处首绘底色等于 `--bg` 且声明恰好命中一次。三条均精确相等、无白名单。
+
+- [x] 设置页「同一件事三种写法」：无入口的 `settings_modal` 弹窗表面与两个在用设置页并存 / IDE 页自持页头与常规页重复实现 / 表单有「`<div class="settings-field">` + `<label for>`」与「`<label>` 包裹组 + `<span>`」两套结构 / 块边界有虚线（`--llm-cloud`）、实线（`--web-api-auth`）、无样式修饰（`--api-base`）三种。已修（2026-09-26）：① `settings_modal`（`mod.rs` / `view.rs` / `effects.rs` + `settings_modal_dialog.rs`）整体删除，全仓零引用；② `ide_settings_page/view_header.rs` 删除，IDE 页复用常规页 `SettingsPageHeader`——新增 `SettingsPageHeaderSpec`（标题 / 返回 / 返回 aria / 本机标识徽章 / 未保存徽章 / 放弃 / 全部保存 / 两个 `data-testid`）承载两页差异，两页各自持有 testid（两页同时挂载，victauri `test_id` 取首个匹配，共用会让 IDE 断言命中常规页按钮），导航项与内容简介改用常规页的 `SettingsNavItem` / `SettingsContentIntro`（常规页原导航项改名 `SettingsNavSectionItem`）；③ 表单统一为一种结构：MCP 超时（静态 id `settings-mcp-timeout-input`）、MCP 行内 name / bearer（`settings-mcp-name-<id>` / `settings-mcp-bearer-<id>`）三处由 `<label>` 包裹组改为 `<div class="settings-field">` + `<label class="settings-field-label" for=…>`，GitHub client-id 输入框的无样式 `class="input"` 改 `settings-text-input`；④ 块边界收成一种：横向版心只放在内容列 `.settings-content`（`padding: 0 14px`——页头标题 / 块标题 / 字段 / 列表 / 保存反馈共一条对齐轴），`.settings-block` 与 `.settings-field` 都不再自持横向内边距（故嵌套块如 MCP JSON 导入面板不再叠加出第二层缩进；同时去掉列表 / 反馈各自的 `0 14px` 与 `.settings-model-registry-head` 的内边距），唯一强调卡框 `.settings-block--emphasis`（由原 `--web-api-auth` 卡框规则**改名**得到，Web API Bearer 与 API base 共用——**可见变化**：API base 块此前无卡框，其 `settings-block--api-base` 修饰位无 CSS 规则、原登记在 `scripts/css_contract_allowlist.txt`，该条目已删；LLM 块丢失 `--llm-cloud` 的虚线上分隔与附带的上内边距），模型注册弹窗是 `position: fixed` 浮层、不在内容列版心内，故在自己的表单容器上取回同一 14px。`SettingsMcpRemoteBearer` 的保存分支抽成 `mcp_bearer_save` 以守住 CCN≤10（lizard 门禁）。padding / border 不计入字面量预算，令牌与预算表均无变化。
+
+
+## P3 · 次要
+
+- [x] `prefers-reduced-motion` 漏 2 处无限动画：会话流式徽章脉冲、克隆进度条。已修（2026-10-01）：`motion.css` 补 `.nav-session-streaming-badge::before`（`nav-streaming-pulse`）与 `.workspace-clone-bar--indeterminate .workspace-clone-bar-fill`（`workspace-clone-indeterminate`）；`index.html` 内联样式补 `#cm-boot-splash .cm-boot-loader`（`cm-boot-spin`）。
+
+- [x] 首屏主题快照硬编码 `light`，深色用户有短暂浅色闪烁。已修（2026-09-24）：`frontend/src/app/shell_prefs_storage.rs` 的 `read_shell_ui_initial_snapshot()` 默认改 `dark`，与 splash（`index.html` 内联深色）、桌面窗口底色（`BOOT_SHELL_BG`）及 `tokens.css` 的 `:root` 默认深色对齐（偏好要等 `GET /user-data/prefs` 才到，改 `system` 此时拿不到 OS 明暗会退回 light，故不用）；首帧值不会写回服务端覆盖用户偏好——`UserPrefsSyncPhase` 在偏好加载完成前禁止 PUT。
+
+- [x] 对比度风险点 `frontend/styles/shell-ds.css:303`（`--muted` 再稀释），需实测验证。已修（2026-09-24）：实为 `.nav-rail-search-label` / `.nav-rail-scroll-label`（10px 大写，`color-mix(--muted 88%, transparent)`，行号已漂移至 285 / 384）——`--muted` 加深后 88% 半透明仍只 ≈3.9:1，两处改为纯 `var(--muted)`；同类小号文字稀释一并去半透明：`layout-chat.css` `.chat-tui-role` / `.chat-tui-think-summary`、`modal.css` `.settings-mcp-tool-openai`（装饰符 `▾`、`::placeholder`、`:disabled` 保持原样）。
+
+- [x] 死代码：`approval_bar.rs` 的 `ApprovalBar`（已被 approval_modal 替代、全仓无引用）。已删（2026-10-01）：`approval_bar.rs` 实为不可编译的孤儿文件（`app/mod.rs` 无 `mod approval_bar`，且引用的 `i18n::approval_toggle_label` 全仓不存在）；连带删除其专属样式 `frontend/styles/approval.css`（整文件仅服务 `.approval-bar*`）、`index.html` 的 `<link>`、`motion.css` 的 `.approval-bar-*` 死规则，以及 victauri 中已失效的 `approval_bar_structure` 用例（断言 `[data-testid="approval-bar"]` 计数=1，而该组件永不渲染）。
+
+- [x] `cm-boot-spin` 无限旋转未纳入 `prefers-reduced-motion`：`frontend/index.html`。已修（2026-10-01）：内联样式补 `@media (prefers-reduced-motion: reduce)` 停用 `cm-boot-loader` 动画。
+
+- [x] 设置页 900px 断点与主 768px 体系并存且无注释：`frontend/styles/modal.css`。已修：900px 作为与主断点语义独立的二级断点，在 `scripts/check-css-breakpoints.sh` 的 `EXTRA_BREAKPOINTS` 显式登记并写明用途（设置弹窗 `.settings-layout` 双列转单列）。
+
+- [x] MCP 超时输入非法字符静默保留旧值：`frontend/src/app/settings_mcp_block_toolbar.rs`。已修（2026-09-25）：空 / 非整数 / `< 1` 三类非法输入改为 `settings-hint`（`role="status"`）提示，提示中带上当前生效值；只有合法值才写回 state，去掉原先 `n.max(1)` 的静默改写（不做 DOM 值回写——`<input type="number">` 对非数字通常返回空串，回写会与用户输入冲突）。
+
+- [x] MCP 远端 bearer placeholder 硬编码 `••••••••`：`frontend/src/app/settings_mcp_server_row.rs`。已修（2026-09-25）：掩码收成单一来源 `i18n::SECRET_MASK_PLACEHOLDER`（Web Bearer、GitHub client id 两处同改），并统一语义为仅 `has_bearer` 为真时显示（原先无条件显示会让人误以为已配置）。

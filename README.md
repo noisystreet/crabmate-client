@@ -148,6 +148,13 @@ Expose only `api.…` → Caddy → loopback `serve` (no `--with-web`); the shel
 | [docs/design/client_shared_logic.md](./docs/design/client_shared_logic.md) | Shared pure logic extract (WASM / connect / tui) |
 | [docs/design/client_capability_matrix.md](./docs/design/client_capability_matrix.md) | Desktop / Android / Web / TUI capability matrix |
 | [docs/design/coding_agent_client.md](./docs/design/coding_agent_client.md) | Coding-agent client plan (review / revert; Waves 1–3) |
+| [docs/design/tui_usability.md](./docs/design/tui_usability.md) | TUI usability plan (align with Desktop chat) |
+| [docs/design/tui_settings_panel.md](./docs/design/tui_settings_panel.md) | TUI settings panel (align with Desktop settings) |
+| [docs/design/display_crate_sink.md](./docs/design/display_crate_sink.md) | Display-crate sink checklist (consumer side) |
+| [docs/design/icon_unification.md](./docs/design/icon_unification.md) | Icon unification (shared `Icon` component / `--icon-*` tokens) |
+| [docs/design/markdown_render_todo.md](./docs/design/markdown_render_todo.md) | Markdown rendering follow-ups |
+| [docs/design/chat_ui_todo.md](./docs/design/chat_ui_todo.md) | Chat UI follow-ups (composer / transcript / a11y) |
+| [docs/design/ui_issue_todo.md](./docs/design/ui_issue_todo.md) | UI issue backlog (shell-wide) |
 | [docs/design/contract_pin.md](./docs/design/contract_pin.md) | Contract git tag / rev pinning |
 | [frontend/README.md](./frontend/README.md) | UI build (trunk) |
 
