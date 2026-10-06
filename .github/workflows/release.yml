@@ -75,7 +75,7 @@ jobs:
           done
           ls -lh frontend/dist
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: frontend-dist
           path: frontend/dist
@@ -155,7 +155,7 @@ jobs:
           fi
           echo "deb package OK: $DEB"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: desktop-deb
           path: desktop-tauri/src-tauri/target/release/bundle/deb/crabmate-desktop_*.deb
@@ -205,7 +205,7 @@ jobs:
       - name: Verify web deb package
         run: bash scripts/verify-web-deb.sh
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: web-deb
           path: web-host/target/debian/crabmate-web_*.deb
@@ -237,7 +237,7 @@ jobs:
       - name: Verify tui deb package
         run: bash scripts/verify-tui-deb.sh
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: tui-deb
           path: crates/crabmate-tui/target/debian/crabmate-tui_*.deb
