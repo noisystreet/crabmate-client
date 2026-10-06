@@ -31,10 +31,10 @@ jobs:
     name: Playwright E2E
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Checkout CrabMate (serve)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: noisystreet/CrabMate
           # 与契约钉点一致：crates.io crabmate 0.6.0（git tag v0.6.0）
