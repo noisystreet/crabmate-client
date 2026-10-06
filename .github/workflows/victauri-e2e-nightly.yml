@@ -23,10 +23,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Checkout CrabMate (serve)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: noisystreet/CrabMate
           ref: v0.6.0

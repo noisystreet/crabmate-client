@@ -19,7 +19,7 @@ jobs:
     name: lizard · fn-param · fn-nloc
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # 钉死版本：lizard 1.24.x 改变了 Rust 的 CCN 计算规则，同一份代码会被判出
       # 大量 CCN>10（本地 1.23.0 为 0）。升级前须先评估 Rust 规则变化并同步本地。
