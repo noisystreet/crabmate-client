@@ -196,15 +196,7 @@ pub(crate) fn message_body_chunks(
             .tool_call_id
             .as_deref()
             .and_then(|tid| ctx.tool_jobs.get(tid));
-        let open_path = if ctx.open_file_enabled {
-            message
-                .tool_call_id
-                .as_deref()
-                .and_then(|tid| ctx.tool_file_paths.get(tid))
-                .map(String::as_str)
-        } else {
-            None
-        };
+        let open_path = ctx.tool_open_file_path(message);
         return TuiBodyChunks {
             think: None,
             closed: vec![tool_process_body_html(

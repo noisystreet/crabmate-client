@@ -292,7 +292,8 @@ fn live_tool_has_details_flag(
         return None;
     }
     let live = tool_live_overlay(message, tool_chunks);
-    Some(tool_row_live_fields(message, locale, live).wants_details())
+    // `wants_details()` 只依赖 detail（用未剥离的 summary 计算），与「打开此文件」路径无关，故不传路径。
+    Some(tool_row_live_fields(message, locale, live, None).wants_details())
 }
 
 fn full_rebuild_plan(messages: &[StoredMessage], ctx: &TuiRenderCtx<'_>) -> TuiSyncPlan {
@@ -370,6 +371,21 @@ pub(crate) struct TuiRenderCtx<'a> {
     pub(crate) think_open: &'a HashSet<String>,
 }
 
+impl<'a> TuiRenderCtx<'a> {
+    /// 写盘工具卡「打开此文件」目标路径（窄屏 / 非写盘工具 / 重载水合后无运行时路径 → `None`）。
+    /// 全量 body 与增量 patch 两条路径共用，保证 one-line 去重口径一致。
+    pub(crate) fn tool_open_file_path(&self, message: &StoredMessage) -> Option<&'a str> {
+        if !self.open_file_enabled {
+            return None;
+        }
+        message
+            .tool_call_id
+            .as_deref()
+            .and_then(|tid| self.tool_file_paths.get(tid))
+            .map(String::as_str)
+    }
+}
+
 fn append_new_turn_sections(
     prev: &TuiMountState,
     turns: &[(usize, &StoredMessage)],
@@ -413,7 +429,7 @@ fn plan_live_tool_patch(
     ctx: &TuiRenderCtx<'_>,
 ) -> LiveBodyPlan {
     let live = tool_live_overlay(message, ctx.tool_chunks);
-    let fields = tool_row_live_fields(message, ctx.locale, live);
+    let fields = tool_row_live_fields(message, ctx.locale, live, ctx.tool_open_file_path(message));
     let prev_has = prev.live_tool_has_details.unwrap_or(false);
     // 结构未变：只改 status / one-line 文案，避免 ReplaceAll 抖高。
     let md = next_chunks.markdown_render;

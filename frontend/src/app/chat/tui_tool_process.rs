@@ -216,14 +216,67 @@ impl ToolRowLiveFields {
     }
 }
 
-/// 从工具消息提取 live 行字段。
+/// 路径 token 尾随的标点（`,  ；：·|)` 等）：去掉后仍与目标路径相等即视为同一 token。
+fn is_path_token_trailing_punct(c: char) -> bool {
+    matches!(
+        c,
+        ',' | '，' | ';' | '；' | ':' | '：' | '·' | '|' | '｜' | ')' | '）'
+    )
+}
+
+fn path_token_matches(token: &str, path: &str) -> bool {
+    token == path || token.trim_end_matches(is_path_token_trailing_punct) == path
+}
+
+/// 纯分隔符 token（`·`、`→`、`|`、`,` 等，无实义）；路径剥离后残留的首尾分隔符一并去掉。
+fn is_separator_only_token(tok: &str) -> bool {
+    !tok.is_empty()
+        && tok.chars().all(|c| {
+            matches!(
+                c,
+                '·' | '｜' | '|' | ':' | '：' | ',' | '，' | ';' | '；' | '-' | '>' | '→' | '»'
+            )
+        })
+}
+
+/// 行尾已用同一路径作「打开此文件」链接时，从 one-line 摘要里剥掉该路径 token，
+/// 避免同一文件名在一行内连出两遍。仅在路径作为**独立 token**（可带尾随标点）出现时剥离；
+/// 否则原样返回，避免半截替换留下 `a/` 残片。
+fn strip_path_from_one_line(one_line: &str, open_file_path: Option<&str>) -> String {
+    let Some(path) = open_file_path.map(str::trim).filter(|p| !p.is_empty()) else {
+        return one_line.to_string();
+    };
+    let mut removed = false;
+    let mut kept: Vec<&str> = Vec::new();
+    for tok in one_line.split_whitespace() {
+        if path_token_matches(tok, path) {
+            removed = true;
+        } else {
+            kept.push(tok);
+        }
+    }
+    if !removed {
+        return one_line.to_string();
+    }
+    while kept.first().is_some_and(|t| is_separator_only_token(t)) {
+        kept.remove(0);
+    }
+    while kept.last().is_some_and(|t| is_separator_only_token(t)) {
+        kept.pop();
+    }
+    kept.join(" ")
+}
+
+/// 从工具消息提取 live 行字段；`open_file_path` 仅供 one-line 去重（详情判定与路径无关）。
 #[must_use]
 pub(crate) fn tool_row_live_fields(
     message: &StoredMessage,
     locale: Locale,
     live_output_overlay: Option<&str>,
+    open_file_path: Option<&str>,
 ) -> ToolRowLiveFields {
     let summary = tool_summary_line(message, locale, live_output_overlay);
+    // detail 用**未剥离**的 summary 计算，保持既有 scrub 行为不变。
     let detail = tool_detail_body(message, locale, live_output_overlay, &summary);
     let detail_trim = detail.trim();
     let detail = if !detail_trim.is_empty() && detail_trim != summary.trim() {
@@ -235,7 +288,7 @@ pub(crate) fn tool_row_live_fields(
     ToolRowLiveFields {
         status: outcome.mark().to_string(),
         status_label: outcome.aria_label(locale).to_string(),
-        one_line: summary,
+        one_line: strip_path_from_one_line(&summary, open_file_path),
         detail,
     }
 }
@@ -278,23 +331,24 @@ fn job_output_block_html(job: &ToolJobState, locale: Locale) -> String {
     html
 }
 
-/// 「打开此文件」行内按钮 HTML（宽屏且 SSE 期捕获到路径才渲染；路径入 `data-file-path` 与 `title`）。
+/// 「打开此文件」行尾控件 HTML（宽屏且 SSE 期捕获到路径才渲染）：链接文字即工作区相对路径，
+/// `title` 同样的完整路径（行内截断时悬停可见），`aria-label` 保留可读动作文案。
 fn open_file_bar_html(path: Option<&str>, locale: Locale) -> String {
     let Some(path) = path.map(str::trim).filter(|p| !p.is_empty()) else {
         return String::new();
     };
     format!(
         "<button class=\"chat-tui-tool-open-file\" type=\"button\" \
-         data-file-path=\"{p}\" title=\"{p}\">{label}</button>",
+         data-file-path=\"{p}\" title=\"{p}\" aria-label=\"{aria}\">{p}</button>",
         p = plaintext_to_safe_html(path),
-        label = plaintext_to_safe_html(i18n::tool_open_file_button(locale)),
+        aria = plaintext_to_safe_html(&format!("{} {path}", i18n::tool_open_file_button(locale))),
     )
 }
 
 /// 工具回合 body 内层 HTML（折叠态单行固定高度；详情展开后才增高）。
 /// `job` 为后台任务（`run_command` 的 `async:true`）轮询快照：非终态显示状态徽标与取消按钮，
 /// 终态在详情中追加输出/错误；无 job 时与普通工具行为一致。
-/// `open_file_path` 为「打开此文件」目标（工作区相对路径；宽屏且有路径时注入按钮）。
+/// `open_file_path` 为「打开此文件」目标（工作区相对路径；宽屏且有路径时行尾注入路径链接）。
 #[must_use]
 pub(crate) fn tool_process_body_html(
     message: &StoredMessage,
@@ -305,7 +359,7 @@ pub(crate) fn tool_process_body_html(
 ) -> String {
     let id = tool_id(message);
     let label = tool_row_label(message, locale);
-    let mut fields = tool_row_live_fields(message, locale, live_output_overlay);
+    let mut fields = tool_row_live_fields(message, locale, live_output_overlay, open_file_path);
     let mut job_bar = String::new();
     let mut job_output_html = String::new();
     if let Some(job) = job {
@@ -410,7 +464,7 @@ mod tests {
     #[test]
     fn loading_tool_shows_running_status() {
         let m = tool_msg("read_file", "读取中…", "", true);
-        let fields = tool_row_live_fields(&m, Locale::ZhHans, None);
+        let fields = tool_row_live_fields(&m, Locale::ZhHans, None, None);
         assert_eq!(fields.status, "⏳");
         assert!(
             fields.status_label.contains("执行中"),
@@ -441,7 +495,7 @@ mod tests {
             tool_name: Some("http_fetch".into()),
             created_at: 0,
         };
-        let fields = tool_row_live_fields(&message, Locale::ZhHans, None);
+        let fields = tool_row_live_fields(&message, Locale::ZhHans, None, None);
         assert_eq!(fields.status, "⚠️");
         assert_eq!(fields.status_label, "已中断");
     }
@@ -480,7 +534,7 @@ mod tests {
             tool_name: Some("run_command".into()),
             created_at: 0,
         };
-        let fields = tool_row_live_fields(&failed, Locale::ZhHans, None);
+        let fields = tool_row_live_fields(&failed, Locale::ZhHans, None, None);
         assert_eq!(fields.status, "⚠️");
         assert_eq!(fields.status_label, "失败");
     }
@@ -500,7 +554,7 @@ mod tests {
             tool_name: Some("cargo_check".into()),
             created_at: 0,
         };
-        let fields = tool_row_live_fields(&m, Locale::ZhHans, None);
+        let fields = tool_row_live_fields(&m, Locale::ZhHans, None, None);
         assert_eq!(fields.status, "⚠️");
         assert_eq!(fields.status_label, "失败");
         assert_eq!(fields.one_line, "cargo check (exit=101)");
@@ -517,7 +571,7 @@ mod tests {
     #[test]
     fn empty_compact_does_not_echo_tool_name_in_one_line() {
         let m = tool_msg("git_status", "", "", true);
-        let fields = tool_row_live_fields(&m, Locale::ZhHans, None);
+        let fields = tool_row_live_fields(&m, Locale::ZhHans, None, None);
         assert!(
             fields.one_line.is_empty(),
             "空 compact 不应回退成工具名: {:?}",
@@ -533,7 +587,7 @@ mod tests {
             "stat output",
             false,
         );
-        let fields = tool_row_live_fields(&m, Locale::ZhHans, None);
+        let fields = tool_row_live_fields(&m, Locale::ZhHans, None, None);
         assert_eq!(fields.one_line, "(working)");
         let html = tool_process_body_html(&m, Locale::ZhHans, None, None, None);
         assert!(html.contains("title=\"git_diff_stat\""), "{html}");
@@ -571,7 +625,7 @@ mod tests {
             "tool: run_command\nstatus: running\n$ cargo test --all -- --nocapture",
             true,
         );
-        let fields = tool_row_live_fields(&m, Locale::ZhHans, None);
+        let fields = tool_row_live_fields(&m, Locale::ZhHans, None, None);
         assert_eq!(fields.one_line, "cargo test --all -- --nocapture");
     }
 
@@ -583,7 +637,7 @@ mod tests {
             "命令执行\n\ncargo check\n\nextra detail line",
             false,
         );
-        let fields = tool_row_live_fields(&m, Locale::ZhHans, None);
+        let fields = tool_row_live_fields(&m, Locale::ZhHans, None, None);
         assert_eq!(fields.one_line, "cargo check");
         let detail = fields.detail.expect("should keep unique detail");
         assert!(!detail.contains("命令执行"), "{detail}");
@@ -714,12 +768,51 @@ mod tests {
             "有路径应渲染按钮: {html}"
         );
         assert!(html.contains("data-file-path=\"src/lib.rs\""), "{html}");
-        assert!(html.contains(">打开此文件<"), "{html}");
+        assert!(html.contains("title=\"src/lib.rs\""), "{html}");
+        assert!(
+            html.contains(">src/lib.rs<"),
+            "链接文字应为相对路径: {html}"
+        );
+        // 行尾已展示路径 → one-line 不再重复同一文件名。
+        assert!(
+            html.contains("chat-tui-tool-one-line\">新建文件</span>"),
+            "one-line 应剥掉与链接重复的路径: {html}"
+        );
         let bare = tool_process_body_html(&m, Locale::ZhHans, None, None, None);
         assert!(
             !bare.contains("chat-tui-tool-open-file"),
             "无路径不应渲染按钮: {bare}"
         );
+    }
+
+    #[test]
+    fn one_line_drops_path_already_shown_by_open_file_link() {
+        // 整行即路径 → 剥空（行尾链接已展示）。
+        assert_eq!(
+            strip_path_from_one_line("src/lib.rs", Some("src/lib.rs")),
+            ""
+        );
+        // 标题 + 路径 → 只留标题。
+        assert_eq!(
+            strip_path_from_one_line("创建文件 src/lib.rs", Some("src/lib.rs")),
+            "创建文件"
+        );
+        // 带尾随标点的路径 token 一并剥离。
+        assert_eq!(
+            strip_path_from_one_line("修改 src/lib.rs, 共 3 处", Some("src/lib.rs")),
+            "修改 共 3 处"
+        );
+        // 路径不是独立 token（子串/不同文件）→ 原样，避免半截替换。
+        assert_eq!(
+            strip_path_from_one_line("读取 a/src/lib.rs", Some("src/lib.rs")),
+            "读取 a/src/lib.rs"
+        );
+        assert_eq!(
+            strip_path_from_one_line("读取 a.rs", Some("src/lib.rs")),
+            "读取 a.rs"
+        );
+        // 无路径 → 原样。
+        assert_eq!(strip_path_from_one_line("src/lib.rs", None), "src/lib.rs");
     }
 
     #[test]

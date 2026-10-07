@@ -50,7 +50,7 @@
 | 变更集 | `GET /workspace/changelog` → Markdown 弹窗（[`changelist_modal.rs`](../../frontend/src/app/changelist_modal.rs)） | 只读摘要；不能点文件进 IDE；不能还原 |
 | 编辑器 | 宽屏轻量 CodeMirror；可写工作区文件 | 不是 LSP IDE；与变更集未打通 |
 | Git | 克隆弹窗、GitHub Device Flow | 无 status / 暂存 / 提交 / 从审查面开 PR |
-| 工具写盘 | `apply_patch` 等走 Server；UI 为工具卡；写盘卡有「打开此文件」（宽屏进 IDE，SSE 期捕获路径） | 卡上无「看 hunk」 |
+| 工具写盘 | `apply_patch` 等走 Server；UI 为工具卡；写盘卡行尾有「打开此文件」路径链接（宽屏进 IDE，SSE 期捕获路径）；摘要行不再重复同一路径 | 卡上无「看 hunk」 |
 
 编码闭环完整度（作者判断，0–10；不是基准测试）：提需求 8、模式 8、看清改动 4、打开核对 5、打回还原 1、再跑一轮 7、提交 PR 3。
 
@@ -132,7 +132,7 @@ Client **需要**的能力（验收语言，不是 schema）：
 ## 7. 验证
 
 - Wave 1：跟随 [`chat_ui_todo.md`](./chat_ui_todo.md)「验证」；手测就地编辑、排队、composer 旁模式。
-- Wave 2.1–2.2：宽屏点变更/工具卡打开对应 tab；窄屏列表不打开 IDE。2.2「打开此文件」已落地：单测覆盖路径提取与按钮渲染；SSE 捕获 → nonce 桥接 → IDE 打开的端到端链路需 Desktop 手测（点 `create_file` / `apply_patch` 卡按钮 → IDE 新 tab）。Playwright 能 mock changelog / 工具卡则补一条；不能替代 Desktop 手测。
+- Wave 2.1–2.2：宽屏点变更/工具卡打开对应 tab；窄屏列表不打开 IDE。2.2「打开此文件」已落地：行尾以工作区相对路径作链接文字，摘要行剥掉重复路径（全量渲染与增量 patch 两条路径共用同一去重口径），单测覆盖路径提取与渲染；SSE 捕获 → nonce 桥接 → IDE 打开的端到端链路需 Desktop 手测（点 `create_file` / `apply_patch` 卡上的路径链接 → IDE 新 tab）。Playwright 能 mock changelog / 工具卡则补一条；不能替代 Desktop 手测。
 - Wave 2.3：契约 pin 升级后的 mock + 一次真实 `serve` 还原手测（步骤进 [`shell_smoke_runbook.md`](./shell_smoke_runbook.md)）。
 - Wave 3：手测提交不把密钥写进 commit message UI 日志。
 
