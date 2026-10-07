@@ -26,6 +26,11 @@ pub type OnToolCallFn = std::rc::Rc<
 
 pub struct ChatStreamCallbacks {
     pub on_delta: std::rc::Rc<dyn Fn(String)>,
+    /// AG-UI `REASONING_MESSAGE_CONTENT`：思维链增量专用分流，写入尾泡 `reasoning_text`。
+    ///
+    /// 注册后思维链**不再**回落 [`Self::on_delta`]，因而即便 lane 已被 `assistant_answer_phase`
+    /// 推进到正文相（工具后第二轮），第二段 reasoning 仍渲染为折叠思考块而非正文气泡。
+    pub on_reasoning_delta: std::rc::Rc<dyn Fn(String)>,
     pub on_done: std::rc::Rc<dyn Fn()>,
     pub on_error: std::rc::Rc<dyn Fn(String)>,
     pub on_workspace_changed: std::rc::Rc<dyn Fn()>,
@@ -70,6 +75,7 @@ impl Clone for ChatStreamCallbacks {
     fn clone(&self) -> Self {
         Self {
             on_delta: std::rc::Rc::clone(&self.on_delta),
+            on_reasoning_delta: std::rc::Rc::clone(&self.on_reasoning_delta),
             on_done: std::rc::Rc::clone(&self.on_done),
             on_error: std::rc::Rc::clone(&self.on_error),
             on_workspace_changed: std::rc::Rc::clone(&self.on_workspace_changed),
