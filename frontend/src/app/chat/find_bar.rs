@@ -9,6 +9,8 @@ use crate::i18n::{self, Locale};
 use crate::icon::{icon_arrow_down, icon_arrow_up, icon_x};
 use crate::session_search::scroll_message_into_view;
 
+use super::composer_slash_menu::keydown_is_ime_composing;
+
 enum ChatFindNavDir {
     Prev,
     Next,
@@ -63,6 +65,7 @@ fn ChatFindBarInputs(
     query: RwSignal<String>,
     match_ids: RwSignal<Vec<String>>,
     cursor: RwSignal<usize>,
+    auto_scroll_chat: RwSignal<bool>,
 ) -> impl IntoView {
     let input_ref = NodeRef::<leptos::html::Input>::new();
     Effect::new(move |_| {
@@ -84,6 +87,20 @@ fn ChatFindBarInputs(
                 prop:value=move || query.get()
                 on:input=move |ev| {
                     query.set(event_target_value(&ev));
+                }
+                on:keydown=move |ev: web_sys::KeyboardEvent| {
+                    // IME 组字中不拦截 Enter，避免中文选词误触发跳转。
+                    if keydown_is_ime_composing(&ev) || ev.key() != "Enter" {
+                        return;
+                    }
+                    ev.prevent_default();
+                    let dir = if ev.shift_key() {
+                        ChatFindNavDir::Prev
+                    } else {
+                        ChatFindNavDir::Next
+                    };
+                    let ids = match_ids.get();
+                    scroll_adjacent_find_match(&ids, dir, cursor, auto_scroll_chat);
                 }
             />
             <span class="chat-find-meta" aria-live="polite">
@@ -122,6 +139,7 @@ pub fn ChatFindBar() -> impl IntoView {
                     query=chat_find_query
                     match_ids=chat_find_match_ids
                     cursor=chat_find_cursor
+                    auto_scroll_chat=auto_scroll_chat
                 />
                 <button
                     type="button"

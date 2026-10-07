@@ -33,6 +33,7 @@ use crate::app::status_session_mode_seg::{SessionModeSegProps, StatusSessionMode
 use crate::chat_session_state::ChatSessionSignals;
 use crate::i18n;
 use crate::icon::{Icon, IconStyle};
+use crate::session_ops::flush_composer_draft_to_session;
 
 type ScrollSentinelCallback =
     Closure<dyn Fn(Vec<wasm_bindgen::JsValue>, web_sys::IntersectionObserver)>;
@@ -458,6 +459,8 @@ fn ComposerClarificationPanel(
 #[component]
 fn ComposerQueuedChip(
     locale: RwSignal<crate::i18n::Locale>,
+    chat: ChatSessionSignals,
+    draft: RwSignal<String>,
     stream_follow_up: RwSignal<ComposerStreamFollowUp>,
 ) -> impl IntoView {
     view! {
@@ -482,7 +485,19 @@ fn ComposerQueuedChip(
                     class="btn btn-ghost btn-sm"
                     data-testid="composer-queued-dismiss"
                     prop:aria-label=move || i18n::composer_queued_dismiss(locale.get())
-                    on:click=move |_| stream_follow_up.set(ComposerStreamFollowUp::Idle)
+                    on:click=move |_| {
+                        let parked = stream_follow_up
+                            .get_untracked()
+                            .queued_draft_to_park()
+                            .map(|(sid, text)| (sid.to_string(), text.to_string()));
+                        stream_follow_up.set(ComposerStreamFollowUp::Idle);
+                        if let Some((sid, text)) = parked {
+                            flush_composer_draft_to_session(chat.sessions, &sid, &text);
+                            if sid == chat.active_id.get_untracked() {
+                                draft.set(text);
+                            }
+                        }
+                    }
                 >
                     {move || i18n::composer_queued_dismiss(locale.get())}
                 </button>
@@ -633,7 +648,12 @@ fn ChatComposerPane(signals: ChatComposerPaneSignals) -> impl IntoView {
                     stream_turn_busy_ui=stream_turn_busy_ui
                     run_send_clarify_sv=run_send_clarify_sv
                 />
-                <ComposerQueuedChip locale=locale stream_follow_up=stream_follow_up />
+                <ComposerQueuedChip
+                    locale=locale
+                    chat=chat
+                    draft=draft
+                    stream_follow_up=stream_follow_up
+                />
                 <div class="composer-input-row">
                     <button
                         type="button"

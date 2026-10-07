@@ -44,8 +44,8 @@
 
 ### 2026-09-13 复核新增
 
-- [ ] 排队芯片点 × 直接丢弃排队正文、不写回草稿（`queued_draft_to_park` 仅「新建会话」路径在用）：`frontend/src/app/chat/column.rs`
-- [ ] 查找导航缺 Enter / Shift+Enter（下一 / 上一条匹配）：`frontend/src/app/chat/find_bar.rs`
+- [x] 排队芯片点 × 把排队正文写回草稿并回填输入框（复用 `queued_draft_to_park`，不再丢弃）：`frontend/src/app/chat/column.rs`
+- [x] 查找导航 Enter / Shift+Enter（下一 / 上一条匹配）：`frontend/src/app/chat/find_bar.rs`
 
 ## P3 · 体积敏感
 
