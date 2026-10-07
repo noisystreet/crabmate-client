@@ -98,80 +98,139 @@ fn next_archived_row_id(messages: &[crate::storage::StoredMessage], row_id: &str
     }
 }
 
+/// 工具前**投影行**的内容种类。
+///
+/// 行 id、正文字段、锚定下标全部由本枚举收口：新增一种工具前投影行**只需加一个枚举值**
+/// （补 `row_id` / `anchor_index` / `text_slot` / `new_row` 各一臂），不必再复制
+/// 「归档 → upsert → 误落搬回」这套顺序敏感逻辑——那正是 thinking 气泡漂移 bug 的复发面。
+#[derive(Clone, Copy, Debug)]
+enum ProjectionRowKind {
+    /// 工具批说明（正文写 `text`），锚定在工具行**正前**。
+    Commentary,
+    /// 工具前思维链（正文写 `reasoning_text`），锚定在 commentary **之前**（无则工具行前）。
+    Reasoning,
+}
+
+impl ProjectionRowKind {
+    fn row_id(self, tool_call_id: &str) -> String {
+        match self {
+            Self::Commentary => commentary_row_id(tool_call_id),
+            Self::Reasoning => think_row_id(tool_call_id),
+        }
+    }
+
+    /// 新行 / 误落后搬回时应落的下标（均在工具行之前）。
+    fn anchor_index(
+        self,
+        messages: &[crate::storage::StoredMessage],
+        tool_call_id: &str,
+        tool_idx: usize,
+    ) -> Option<usize> {
+        match self {
+            // 说明块紧跟工具。
+            Self::Commentary => Some(tool_idx),
+            // 思维链在说明块之前；说明块尚未落盘时退回工具行前。
+            Self::Reasoning => anchor_before_tool_index(messages, tool_call_id),
+        }
+    }
+
+    fn text_slot(self, row: &mut crate::storage::StoredMessage) -> &mut String {
+        match self {
+            Self::Commentary => &mut row.text,
+            Self::Reasoning => &mut row.reasoning_text,
+        }
+    }
+
+    fn new_row(self, tool_call_id: &str, content: String) -> crate::storage::StoredMessage {
+        match self {
+            Self::Commentary => TurnRowQueue::new_assistant_projection_row(
+                self.row_id(tool_call_id),
+                content,
+                String::new(),
+            ),
+            Self::Reasoning => TurnRowQueue::new_assistant_projection_row(
+                self.row_id(tool_call_id),
+                String::new(),
+                content,
+            ),
+        }
+    }
+}
+
 /// 流式 preview / 边界 flush 队列。
 #[derive(Default, Debug)]
 pub(crate) struct TurnRowQueue;
 
 impl TurnRowQueue {
-    /// 将旁注 upsert 到锚定工具行之前（可更新正文；若误落在工具后则搬回）。
+    /// 将工具前投影行 upsert 到锚定工具行之前（可更新正文；若误落在工具后则搬回）。
+    ///
+    /// `kind` 决定行 id、正文字段与锚定位置（见 [`ProjectionRowKind`]）。返回是否已锚定。
+    fn upsert_projection_before_tool(
+        messages: &mut Vec<crate::storage::StoredMessage>,
+        kind: ProjectionRowKind,
+        tool_call_id: &str,
+        content: String,
+    ) -> bool {
+        if content.trim().is_empty() {
+            return false;
+        }
+        let Some(tool_idx) = current_turn_tool_position(messages, tool_call_id) else {
+            return false;
+        };
+        let row_id = kind.row_id(tool_call_id);
+        archive_stale_projection_rows(messages, row_id.as_str());
+        if let Some(idx) = current_turn_position(messages, row_id.as_str()) {
+            let slot = kind.text_slot(&mut messages[idx]);
+            if *slot != content {
+                *slot = content;
+            }
+            if idx > tool_idx {
+                let row = messages.remove(idx);
+                let new_idx = kind
+                    .anchor_index(messages, tool_call_id, tool_idx)
+                    .unwrap_or(tool_idx);
+                messages.insert(new_idx, row);
+            }
+            return true;
+        }
+        let Some(anchor) = kind.anchor_index(messages, tool_call_id, tool_idx) else {
+            return false;
+        };
+        messages.insert(anchor, kind.new_row(tool_call_id, content));
+        true
+    }
+
+    /// 工具批说明（commentary）upsert 到工具行前；见 [`Self::upsert_projection_before_tool`]。
     ///
     /// 用于：已关闭旁注 flush，以及晚到 open 旁注在工具行已存在时的流式预览。
-    /// 返回是否已把正文挂在工具前的 commentary 行上。
     pub(super) fn upsert_commentary_before_tool(
         messages: &mut Vec<crate::storage::StoredMessage>,
         tool_call_id: &str,
         text: String,
     ) -> bool {
-        let trimmed = text.trim();
-        if trimmed.is_empty() {
-            return false;
-        }
-        let Some(tool_idx) = current_turn_tool_position(messages, tool_call_id) else {
-            return false;
-        };
-        let row_id = commentary_row_id(tool_call_id);
-        archive_stale_projection_rows(messages, row_id.as_str());
-        if let Some(idx) = current_turn_position(messages, row_id.as_str()) {
-            if messages[idx].text != text {
-                messages[idx].text = text;
-            }
-            if idx > tool_idx {
-                let row = messages.remove(idx);
-                let new_tool_idx =
-                    current_turn_tool_position(messages, tool_call_id).unwrap_or(tool_idx);
-                messages.insert(new_tool_idx, row);
-            }
-            return true;
-        }
-        let row = Self::new_commentary_row(row_id, text);
-        messages.insert(tool_idx, row);
-        true
+        Self::upsert_projection_before_tool(
+            messages,
+            ProjectionRowKind::Commentary,
+            tool_call_id,
+            text,
+        )
     }
 
-    /// 将工具前思维链（reasoning）upsert 到锚定工具行之前（可更新；若误落工具后则搬回）。
+    /// 工具前思维链（reasoning）upsert 到工具行前；见 [`Self::upsert_projection_before_tool`]。
     ///
     /// 行 id 为 [`think_row_id`]，正文存于 `reasoning_text`（`text` 留空），故该行渲染为
-    /// 独立思考段气泡，且不参与 commentary / 终答的正文所有权判定。返回是否已锚定。
+    /// 独立思考段气泡，且不参与 commentary / 终答的正文所有权判定。
     pub(super) fn upsert_reasoning_before_tool(
         messages: &mut Vec<crate::storage::StoredMessage>,
         tool_call_id: &str,
         reasoning: String,
     ) -> bool {
-        if reasoning.trim().is_empty() {
-            return false;
-        }
-        let Some(tool_idx) = current_turn_tool_position(messages, tool_call_id) else {
-            return false;
-        };
-        let row_id = think_row_id(tool_call_id);
-        archive_stale_projection_rows(messages, row_id.as_str());
-        if let Some(idx) = current_turn_position(messages, row_id.as_str()) {
-            if messages[idx].reasoning_text != reasoning {
-                messages[idx].reasoning_text = reasoning;
-            }
-            if idx > tool_idx {
-                let row = messages.remove(idx);
-                let new_idx = anchor_before_tool_index(messages, tool_call_id).unwrap_or(tool_idx);
-                messages.insert(new_idx, row);
-            }
-            return true;
-        }
-        let Some(anchor) = anchor_before_tool_index(messages, tool_call_id) else {
-            return false;
-        };
-        let row = Self::new_assistant_projection_row(row_id, String::new(), reasoning);
-        messages.insert(anchor, row);
-        true
+        Self::upsert_projection_before_tool(
+            messages,
+            ProjectionRowKind::Reasoning,
+            tool_call_id,
+            reasoning,
+        )
     }
 
     fn new_commentary_row(row_id: String, text: String) -> crate::storage::StoredMessage {
