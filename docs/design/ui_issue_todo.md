@@ -15,6 +15,7 @@
 2026-09-25（续 7）：**镜像门禁补漏 + 通知渠道文案 i18n + 文档同步**——① `scripts/token_mirrors_check.py` 由三条不变量扩到**五条**：新增「`res/values*/themes.xml` 引用的每个 `@color/<name>` 必须在 `res/values*/colors.xml` 里有定义」（拼错此前只在 AAPT 构建期报错）与「手写 Kotlin（`java/edu/crabmate`，与 `scripts/ktlint-android.sh` 同范围、排除 Tauri 生成的 `generated/`）只许消费 `R.color.cm_*`」（此前可自带任意色值，绕过整条镜像链），两项均做双向验证；② 通知渠道名 / 描述补 `_en` 英文资源，`StreamKeepAliveService.ensureChannels()` 按**应用内语言**（`localeSlug`）二选一，与通知正文同一套约定（不新增 `values-en/`）；③ `mobile-tauri/README.md` 补注 Android 15+（targetSdk 35+）edge-to-edge 强制、`statusBarColor` / `navigationBarColor` 失效的机制变化并标注真机验证待做，`AGENTS.md` / `docs/TESTING.md` / `CHANGELOG.md` 同步为五条不变量。
 2026-09-26：**设置页面布局 / 组件风格统一**——① 删除无入口的 `settings_modal` 弹窗表面（`settings_modal/` 三文件 + `settings_modal_dialog.rs` 及全部引用），设置只留在常规页与 IDE 页；② IDE 设置页删掉自持页头（`ide_settings_page/view_header.rs`），改用常规页的 `SettingsPageHeader`（经新 `SettingsPageHeaderSpec` 声明页头八项，两页各自持有 `data-testid`——两页同时挂载且 victauri `test_id` 取首个匹配，故不能共用）与 `SettingsNavItem` / `SettingsContentIntro`；③ 表单统一为一种结构「`<div class="settings-field">` + 真 `<label for>`」（MCP 超时 / MCP 行内 name / bearer 三处由 label 包裹组改为显式 id 关联，GitHub client-id 的无样式 `class="input"` 改 `settings-text-input`）；④ 块边界由三种收成一种：横向版心只放在内容列 `.settings-content`（`padding: 0 14px`，页头标题 / 块标题 / 字段 / 列表 / 反馈共一条对齐轴），块与字段都不再自持横向内边距（嵌套块如 MCP JSON 导入面板不再叠加出第二层缩进），唯一强调卡框 `.settings-block--emphasis`（由原 `--web-api-auth` 卡框规则改名、两处即时生效块共用；`--llm-cloud` 虚线修饰删除，`--api-base` 旧修饰位无规则、原在白名单，条目一并删除）。详见 P2 新增条目。
 2026-09-30：**Android 系统栏图标随 Web 主题明暗切换**——修复浅色主题下顶栏系统图标不可见（白图标压近白顶栏），详见 P2「移动端边界与体验」新增条目。两个主题级 light 标志仍保持 `false`（镜像门禁要求），切换只在运行时经 `WindowInsetsControllerCompat` 覆盖。
+2026-10-07：**IDE / 工作区三处反馈补齐**——跳转行非法（非数字 / `0` / 超界）输入改为可见 `role="alert"` 提示（不再静默 no-op），嵌套空目录展开补空态提示，空编辑器补可见占位文本；三条已归档至 [`ui_issue_todo_done.md`](./ui_issue_todo_done.md)。
 
 > **已完成项已归档**：原 `- [x]` 条目移至 [`ui_issue_todo_done.md`](./ui_issue_todo_done.md)，本清单只保留未完成项。
 
@@ -52,11 +53,7 @@
 
 - [ ] 语法高亮语言表缺 `.css/.html/.kt/.java` 等常见后缀（文件树图标分类已含）：`frontend/src/ide_syntax_highlight.rs`。
 
-- [ ] 跳转行输入非法（非数字/超界）静默 no-op：`frontend/src/app/ide_find_bar.rs`。
-
 - [ ] 手动「刷新列表」清空 `subtree_expanded`，已展开目录全部折叠：`frontend/src/workspace_shell.rs`。
-
-- [ ] 嵌套空目录展开后无空态提示（根级有，子目录没有）：`frontend/src/workspace_tree.rs`。
 
 ## P2 · 空态与确认
 
@@ -77,8 +74,6 @@
 - [ ] `save_busy/load_busy` 期间 Ctrl+S 被静默吞掉：`frontend/src/ide_save.rs`。
 
 - [ ] 同步期间关闭标签，快照索引写回可能命中错误标签：`frontend/src/ide_disk_sync.rs`。
-
-- [ ] 空编辑器只有 aria-label，无可见占位文本：`frontend/src/app/ide_editor_pane.rs`。
 
 - [ ] `ide_find` 每次按键对全文 lowercase 并分配，大文件下查找输入可能卡顿：`frontend/src/ide_find.rs`。
 

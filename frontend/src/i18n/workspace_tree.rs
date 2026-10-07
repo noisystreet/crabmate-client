@@ -9,6 +9,13 @@ pub fn workspace_tree_no_data(l: Locale) -> &'static str {
     }
 }
 
+pub fn workspace_tree_empty_dir(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "（空文件夹）",
+        Locale::En => "(Empty folder)",
+    }
+}
+
 pub fn workspace_tree_aria(l: Locale) -> &'static str {
     match l {
         Locale::ZhHans => "工作区文件",
