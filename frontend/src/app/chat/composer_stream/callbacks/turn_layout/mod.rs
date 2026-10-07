@@ -31,6 +31,7 @@ use crate::message_loading::is_loading_plain_assistant;
 use crate::storage::StoredMessage;
 use crate::stream_text_overlay::{
     stream_overlay_answer_for_message, stream_overlay_clear_answer_for_message,
+    stream_overlay_clear_reasoning_for_message, stream_overlay_reasoning_for_message,
     stream_overlay_replace_answer_for_message, stream_overlay_take_into_stored_message,
 };
 
@@ -55,6 +56,17 @@ fn overlay_answer_for_loading_tail(
     loading_id: &str,
 ) -> Option<String> {
     stream_overlay_answer_for_message(
+        stream_ctx.chat.stream_text_overlay.get_untracked().as_ref(),
+        stream_ctx.bound_stream_session_id.as_str(),
+        loading_id,
+    )
+}
+
+fn overlay_reasoning_for_loading_tail(
+    stream_ctx: &ChatStreamCallbackCtx,
+    loading_id: &str,
+) -> Option<String> {
+    stream_overlay_reasoning_for_message(
         stream_ctx.chat.stream_text_overlay.get_untracked().as_ref(),
         stream_ctx.bound_stream_session_id.as_str(),
         loading_id,
@@ -230,9 +242,14 @@ impl TurnLayout {
         tool_msg: StoredMessage,
     ) {
         let mid = stream_ctx.scratch.clone_assistant_id();
+        let tool_call_id = tool_msg.tool_call_id.clone();
+        // pre-tool 思维链此刻仅存于 loading 尾泡 overlay：先摘出，工具行落盘后锚定到工具**之前**，
+        // 否则随后 pin_loading_tail 会把尾泡连同思维链移到工具之后（气泡漂移）。
+        let pre_tool_reasoning = overlay_reasoning_for_loading_tail(stream_ctx, mid.as_str());
         // 若此前已落盘终答行（模型在工具声明前预写了运行结果），将其降级为普通消息，
         // 避免终答出现在工具结果之后。
         Self::detach_final_answer_projection(stream_ctx);
+        let anchored = RefCell::new(false);
         stream_ctx.update_bound_session(|s| {
             // 仅 peel 已提前 finalize 的尾泡；loading 上仍有的旁白留给 projection 后再清，
             // 避免工具行出现前助手气泡被掏空。
@@ -241,7 +258,24 @@ impl TurnLayout {
                 mid.as_str(),
             );
             projection_reconciler::insert_declared_tool(&mut s.messages, tool_msg, mid.as_str());
+            if let (Some(tcid), Some(reasoning)) =
+                (tool_call_id.as_deref(), pre_tool_reasoning.as_deref())
+            {
+                *anchored.borrow_mut() = TurnRowQueue::upsert_reasoning_before_tool(
+                    &mut s.messages,
+                    tcid,
+                    reasoning.to_string(),
+                );
+            }
         });
+        if anchored.into_inner() {
+            stream_overlay_clear_reasoning_for_message(
+                stream_ctx.chat.stream_text_overlay,
+                stream_ctx.bound_stream_session_id.as_str(),
+                mid.as_str(),
+                Some(stream_ctx.chat.stream_overlay_revision),
+            );
+        }
     }
 
     /// 工具占位 + `sync_turn_projection` 之后：旁注行已落盘时的 loading 收口钩子。

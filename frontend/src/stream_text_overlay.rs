@@ -106,6 +106,21 @@ pub fn stream_overlay_answer_for_message(
     }
 }
 
+/// 读取当前 attach 内某 loading 助手行的 overlay 思维链（不 take、不 merge）。
+#[must_use]
+pub fn stream_overlay_reasoning_for_message(
+    overlay: Option<&StreamTextOverlay>,
+    session_id: &str,
+    message_id: &str,
+) -> Option<String> {
+    let o = overlay?;
+    if o.session_id == session_id && o.message_id == message_id && !o.reasoning.trim().is_empty() {
+        Some(o.reasoning.clone())
+    } else {
+        None
+    }
+}
+
 /// 投影已写入 `StoredMessage` 后，丢弃同 message 上冗余的 overlay 正文，避免 UI 双显。
 pub fn stream_overlay_clear_answer_for_message(
     overlay: RwSignal<Option<StreamTextOverlay>>,
@@ -119,6 +134,26 @@ pub fn stream_overlay_clear_answer_for_message(
         };
         if o.session_id == session_id && o.message_id == message_id {
             o.answer.clear();
+        }
+    });
+    if let Some(rev) = revision {
+        rev.update(|n| *n = n.wrapping_add(1));
+    }
+}
+
+/// 思维链已锚定进独立 `turn-think-*` 行后，丢弃同 message 上冗余的 overlay 思维链，避免 UI 双显。
+pub fn stream_overlay_clear_reasoning_for_message(
+    overlay: RwSignal<Option<StreamTextOverlay>>,
+    session_id: &str,
+    message_id: &str,
+    revision: Option<RwSignal<u64>>,
+) {
+    overlay.update(|opt| {
+        let Some(o) = opt.as_mut() else {
+            return;
+        };
+        if o.session_id == session_id && o.message_id == message_id {
+            o.reasoning.clear();
         }
     });
     if let Some(rev) = revision {
