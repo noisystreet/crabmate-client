@@ -18,9 +18,10 @@ pub(in super::super) fn make_on_turn_segment_start(
         // kind == "answer" 表示新一轮 LLM 调用开始（outer loop 非首轮），
         // 此时应结束当前 loading 气泡并创建新气泡。
         //
-        // 注意：此处用 Cleanup 语义（仅轮换，lane 保持 Reasoning），因为后端保证
-        // turn_segment_start(kind="answer") 之后必然跟随 assistant_answer_phase 事件，
-        // 由后者将 lane 推进到 Answering。若用 ContinueAnswering 会导致双重轮换：
+        // 注意：此处用 Cleanup 语义（仅轮换，lane 保持 Reasoning），不要把 lane 推进到
+        // Answering：后端在**本轮首个正文 delta** 时才下发 assistant_answer_phase，由后者
+        // 推进 lane，随后的 on_delta 消费轮换；若某轮只有 reasoning + tool_calls、没有正文，
+        // 则不发 phase，lane 保持 Reasoning（同样正确）。若用 ContinueAnswering 会导致双重轮换：
         //   1. turn_segment_start 中 ContinueAnswering 设置 lane = Answering
         //   2. 随后 assistant_answer_phase 事件将 lane 推进到 AnsweringPendingFollowupBubble
         //   3. 导致下一个 on_delta 触发第二次不必要的轮换
