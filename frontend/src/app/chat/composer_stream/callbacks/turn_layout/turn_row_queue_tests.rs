@@ -450,6 +450,129 @@ fn reused_tool_call_id_across_turns_keeps_rows_independent() {
     assert!(super::super::text_ownership::duplicate_commentary_row_ids(&msgs).is_empty());
 }
 
+fn projection_msg(
+    id: &str,
+    role: &str,
+    text: &str,
+    reasoning_text: &str,
+    is_tool: bool,
+    tool_call_id: Option<&str>,
+) -> crate::storage::StoredMessage {
+    crate::storage::StoredMessage {
+        id: id.into(),
+        role: role.into(),
+        text: text.into(),
+        reasoning_text: reasoning_text.into(),
+        image_urls: vec![],
+        state: None,
+        is_tool,
+        tool_call_id: tool_call_id.map(Into::into),
+        tool_name: None,
+        created_at: 0,
+    }
+}
+
+fn loading_tail_msg(id: &str) -> crate::storage::StoredMessage {
+    crate::storage::StoredMessage {
+        id: id.into(),
+        role: "assistant".into(),
+        text: String::new(),
+        reasoning_text: String::new(),
+        image_urls: vec![],
+        state: Some(crate::storage::StoredMessageState::Loading),
+        is_tool: false,
+        tool_call_id: None,
+        tool_name: None,
+        created_at: 0,
+    }
+}
+
+/// 工具前 reasoning 锚定进 `turn-think-{tcid}`（正文留空、`reasoning_text` 承载），
+/// 且其位置在随后插入的 commentary 与工具**之前**（保持 think → commentary → 工具）。
+#[test]
+fn reasoning_anchors_before_commentary_and_tool() {
+    let mut msgs = vec![
+        projection_msg("u", "user", "你有哪些技能", "", false, None),
+        projection_msg("tc_a", "system", "skill_manage", "", true, Some("tc_a")),
+        loading_tail_msg("load"),
+    ];
+
+    assert!(TurnRowQueue::upsert_reasoning_before_tool(
+        &mut msgs,
+        "tc_a",
+        "先想想要不要调用 skill_manage。".into(),
+    ));
+
+    let think = think_row_id("tc_a");
+    let think_idx = msgs.iter().position(|m| m.id == think).expect("think row");
+    assert_eq!(
+        msgs[think_idx].reasoning_text,
+        "先想想要不要调用 skill_manage。"
+    );
+    assert!(
+        msgs[think_idx].text.is_empty(),
+        "think 行正文须留空，避免参与 commentary / 终答的正文所有权判定"
+    );
+    assert!(
+        think_idx < msgs.iter().position(|m| m.id == "tc_a").expect("tool row"),
+        "think 行须落在工具行之前"
+    );
+
+    assert!(TurnRowQueue::upsert_commentary_before_tool(
+        &mut msgs,
+        "tc_a",
+        "我先列一下清单。".into(),
+    ));
+
+    let commentary = commentary_row_id("tc_a");
+    let order: Vec<usize> = ["u", think.as_str(), commentary.as_str(), "tc_a", "load"]
+        .iter()
+        .map(|id| {
+            msgs.iter()
+                .position(|m| m.id == *id)
+                .unwrap_or_else(|| panic!("row {id} missing"))
+        })
+        .collect();
+    assert!(
+        order.windows(2).all(|w| w[0] < w[1]),
+        "expected u < think < commentary < tool < loading, got {order:?}"
+    );
+}
+
+/// 模型跨回合复用同一 `tool_call_id`：`turn-think-{tcid}` 只在本回合内唯一，
+/// 上一回合的同键 think 行须让出规范键，其 `reasoning_text` 不被本回合改写。
+#[test]
+fn reused_tool_call_id_keeps_think_rows_independent() {
+    let think = think_row_id("tc_reused");
+    let mut msgs = vec![
+        projection_msg("u1", "user", "读取 alpha", "", false, None),
+        projection_msg(think.as_str(), "assistant", "", "第一轮思考", false, None),
+        projection_msg("t1", "system", "read alpha", "", true, Some("tc_reused")),
+        projection_msg("a1", "assistant", "第一轮完成。", "", false, None),
+        projection_msg("u2", "user", "读取 beta", "", false, None),
+        projection_msg("t2", "system", "read beta", "", true, Some("tc_reused")),
+    ];
+
+    assert!(TurnRowQueue::upsert_reasoning_before_tool(
+        &mut msgs,
+        "tc_reused",
+        "第二轮思考".into(),
+    ));
+
+    assert_eq!(msgs[1].id, format!("{think}#prev1"));
+    assert_eq!(
+        msgs[1].reasoning_text, "第一轮思考",
+        "归档行正文不得被本回合改写"
+    );
+    let new_idx = msgs
+        .iter()
+        .position(|m| m.id == think)
+        .expect("new think row");
+    let t2_idx = msgs.iter().position(|m| m.id == "t2").expect("t2");
+    assert!(new_idx < t2_idx, "本回合 think 须落在本回合工具之前");
+    assert_eq!(msgs[new_idx].reasoning_text, "第二轮思考");
+}
+
 #[test]
 fn flush_commentary_skips_without_tool_row() {
     let turn = make_turn_with_commentary();

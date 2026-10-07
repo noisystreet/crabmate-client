@@ -3,7 +3,7 @@
 use crabmate::cm_turn_layout::{ASSISTANT_COMMENTARY, project_turn_projection};
 
 use crate::message_loading::is_loading_plain_assistant;
-use crate::storage::{V2_COMMENTARY_ROW_ID_PREFIX, V2_FINAL_ANSWER_ROW_ID};
+use crate::storage::{V2_COMMENTARY_ROW_ID_PREFIX, V2_FINAL_ANSWER_ROW_ID, V2_THINK_ROW_ID_PREFIX};
 
 use super::super::super::turn_canonical::TurnCanonicalState;
 use super::projection_reconciler;
@@ -19,13 +19,18 @@ pub(crate) fn is_commentary_row_id(message_id: &str) -> bool {
     message_id.starts_with(V2_COMMENTARY_ROW_ID_PREFIX)
 }
 
-/// 上一回合遗留的同键旁注行的归档后缀。
+/// 工具前思维链（reasoning）的稳定行 id：锚定工具**之前**，避免随 loading 尾泡下移。
+pub(crate) fn think_row_id(tool_call_id: &str) -> String {
+    format!("{V2_THINK_ROW_ID_PREFIX}{tool_call_id}")
+}
+
+/// 上一回合遗留的同键投影行的归档后缀。
 ///
-/// `turn-commentary-{tool_call_id}` 只在**本回合**内唯一：模型跨回合复用同一
-/// `tool_call_id` 时，直接 upsert 会把上一回合的旁注正文改写成本回合的。仿
+/// `turn-commentary-{tool_call_id}` / `turn-think-{tool_call_id}` 只在**本回合**内唯一：
+/// 模型跨回合复用同一 `tool_call_id` 时，直接 upsert 会把上一回合的行改写成本回合的。仿
 /// [`super::TurnLayout::detach_final_answer_projection`] / [`super::projection_reconciler::detach_final_answer_row_in_messages`]，让历史行让出规范键；
-/// 仍保留 `turn-commentary-` 前缀，故 `is_commentary_row_id` 与 v2 缓存识别不受影响。
-const ARCHIVED_COMMENTARY_SUFFIX: &str = "#prev";
+/// 仍保留各自前缀，故 `is_commentary_row_id` 与 v2 缓存识别不受影响。
+const ARCHIVED_ROW_SUFFIX: &str = "#prev";
 
 /// 本回合起点（最后一条 user 行之后）。
 fn current_turn_start(messages: &[crate::storage::StoredMessage]) -> usize {
@@ -58,22 +63,34 @@ fn current_turn_tool_position(
         .map(|idx| idx + start)
 }
 
-/// 让上一回合遗留的同键旁注行让出规范键，避免本回合 upsert 覆盖其正文。
-fn archive_stale_commentary_rows(messages: &mut [crate::storage::StoredMessage], row_id: &str) {
+/// 新锚定的 think 行应落的下标：同键 commentary 行若已在工具前，则插入其前，以保持
+/// think → commentary → 工具的流式顺序；否则直接落在工具行前。
+fn anchor_before_tool_index(
+    messages: &[crate::storage::StoredMessage],
+    tool_call_id: &str,
+) -> Option<usize> {
+    let tool_idx = current_turn_tool_position(messages, tool_call_id)?;
+    let commentary_idx = current_turn_position(messages, commentary_row_id(tool_call_id).as_str())
+        .filter(|&idx| idx < tool_idx);
+    Some(commentary_idx.unwrap_or(tool_idx))
+}
+
+/// 让上一回合遗留的同键投影行让出规范键，避免本回合 upsert 覆盖其正文。
+fn archive_stale_projection_rows(messages: &mut [crate::storage::StoredMessage], row_id: &str) {
     let start = current_turn_start(messages);
     let stale: Vec<usize> = (0..start)
         .filter(|&idx| messages[idx].id == row_id)
         .collect();
     for idx in stale {
-        let archived = next_archived_commentary_id(messages, row_id);
+        let archived = next_archived_row_id(messages, row_id);
         messages[idx].id = archived;
     }
 }
 
-fn next_archived_commentary_id(messages: &[crate::storage::StoredMessage], row_id: &str) -> String {
+fn next_archived_row_id(messages: &[crate::storage::StoredMessage], row_id: &str) -> String {
     let mut seq = 1_usize;
     loop {
-        let candidate = format!("{row_id}{ARCHIVED_COMMENTARY_SUFFIX}{seq}");
+        let candidate = format!("{row_id}{ARCHIVED_ROW_SUFFIX}{seq}");
         if messages.iter().all(|m| m.id != candidate) {
             return candidate;
         }
@@ -103,7 +120,7 @@ impl TurnRowQueue {
             return false;
         };
         let row_id = commentary_row_id(tool_call_id);
-        archive_stale_commentary_rows(messages, row_id.as_str());
+        archive_stale_projection_rows(messages, row_id.as_str());
         if let Some(idx) = current_turn_position(messages, row_id.as_str()) {
             if messages[idx].text != text {
                 messages[idx].text = text;
@@ -121,12 +138,56 @@ impl TurnRowQueue {
         true
     }
 
+    /// 将工具前思维链（reasoning）upsert 到锚定工具行之前（可更新；若误落工具后则搬回）。
+    ///
+    /// 行 id 为 [`think_row_id`]，正文存于 `reasoning_text`（`text` 留空），故该行渲染为
+    /// 独立思考段气泡，且不参与 commentary / 终答的正文所有权判定。返回是否已锚定。
+    pub(super) fn upsert_reasoning_before_tool(
+        messages: &mut Vec<crate::storage::StoredMessage>,
+        tool_call_id: &str,
+        reasoning: String,
+    ) -> bool {
+        if reasoning.trim().is_empty() {
+            return false;
+        }
+        let Some(tool_idx) = current_turn_tool_position(messages, tool_call_id) else {
+            return false;
+        };
+        let row_id = think_row_id(tool_call_id);
+        archive_stale_projection_rows(messages, row_id.as_str());
+        if let Some(idx) = current_turn_position(messages, row_id.as_str()) {
+            if messages[idx].reasoning_text != reasoning {
+                messages[idx].reasoning_text = reasoning;
+            }
+            if idx > tool_idx {
+                let row = messages.remove(idx);
+                let new_idx = anchor_before_tool_index(messages, tool_call_id).unwrap_or(tool_idx);
+                messages.insert(new_idx, row);
+            }
+            return true;
+        }
+        let Some(anchor) = anchor_before_tool_index(messages, tool_call_id) else {
+            return false;
+        };
+        let row = Self::new_assistant_projection_row(row_id, String::new(), reasoning);
+        messages.insert(anchor, row);
+        true
+    }
+
     fn new_commentary_row(row_id: String, text: String) -> crate::storage::StoredMessage {
+        Self::new_assistant_projection_row(row_id, text, String::new())
+    }
+
+    fn new_assistant_projection_row(
+        row_id: String,
+        text: String,
+        reasoning_text: String,
+    ) -> crate::storage::StoredMessage {
         crate::storage::StoredMessage {
             id: row_id,
             role: "assistant".to_string(),
             text,
-            reasoning_text: String::new(),
+            reasoning_text,
             image_urls: vec![],
             state: None,
             is_tool: false,
@@ -161,7 +222,7 @@ impl TurnRowQueue {
             return Self::upsert_commentary_before_tool(messages, tool_call_id, text);
         }
         let row_id = commentary_row_id(tool_call_id);
-        archive_stale_commentary_rows(messages, row_id.as_str());
+        archive_stale_projection_rows(messages, row_id.as_str());
         let insert_idx = Self::insert_index_before_loading_tail(messages, loading_tail_id);
         if let Some(idx) = current_turn_position(messages, row_id.as_str()) {
             if messages[idx].text != text {

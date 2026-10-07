@@ -8,6 +8,8 @@ pub const LEGACY_LAYOUT_SCHEMA_VERSION: u32 = 1;
 pub const CURRENT_LAYOUT_SCHEMA_VERSION: u32 = 2;
 /// v2 closed commentary 的持久化消息 ID 前缀。
 pub const V2_COMMENTARY_ROW_ID_PREFIX: &str = "turn-commentary-";
+/// v2 工具前思维链（reasoning）的持久化消息 ID 前缀。
+pub const V2_THINK_ROW_ID_PREFIX: &str = "turn-think-";
 /// v2 终答的持久化消息 ID。
 pub const V2_FINAL_ANSWER_ROW_ID: &str = "turn-final-answer";
 
@@ -193,7 +195,9 @@ impl ChatSession {
     #[must_use]
     pub fn has_v2_finalized_rows(&self) -> bool {
         self.messages.iter().any(|m| {
-            m.id.starts_with(V2_COMMENTARY_ROW_ID_PREFIX) || m.id == V2_FINAL_ANSWER_ROW_ID
+            m.id.starts_with(V2_COMMENTARY_ROW_ID_PREFIX)
+                || m.id.starts_with(V2_THINK_ROW_ID_PREFIX)
+                || m.id == V2_FINAL_ANSWER_ROW_ID
         })
     }
 
