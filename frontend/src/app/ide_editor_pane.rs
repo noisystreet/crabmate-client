@@ -65,6 +65,26 @@ pub fn IdeEditorPane(
                 node_ref=host.container
                 data-testid="ide-editor-cm"
             ></div>
+            <IdeEditorEmptyHint locale ide_path />
         </div>
+    }
+}
+
+/// 未打开文件时的可见占位提示（覆盖在编辑区上方，不拦截指针）。
+#[component]
+fn IdeEditorEmptyHint(
+    locale: RwSignal<Locale>,
+    ide_path: RwSignal<Option<String>>,
+) -> impl IntoView {
+    view! {
+        <Show when=move || ide_path.get().is_none()>
+            <p
+                class="ide-editor-empty-hint"
+                data-testid="ide-editor-empty-hint"
+                aria-hidden="true"
+            >
+                {move || i18n::ide_no_file(locale.get())}
+            </p>
+        </Show>
     }
 }

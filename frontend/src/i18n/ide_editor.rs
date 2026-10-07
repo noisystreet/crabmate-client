@@ -76,6 +76,20 @@ pub fn ide_goto_ph(l: Locale) -> &'static str {
     }
 }
 
+pub fn ide_goto_invalid(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "请输入有效的行号",
+        Locale::En => "Enter a valid line number",
+    }
+}
+
+pub fn ide_goto_out_of_range(l: Locale, max: usize) -> String {
+    match l {
+        Locale::ZhHans => format!("行号超出范围（共 {max} 行）"),
+        Locale::En => format!("Line out of range (max {max})"),
+    }
+}
+
 pub fn ide_goto_close_title(l: Locale) -> &'static str {
     match l {
         Locale::ZhHans => "关闭跳转",

@@ -192,11 +192,33 @@ pub fn IdeFindBar(input: IdeFindBarInput) -> impl IntoView {
     }
 }
 
-fn submit_goto_line(chrome: IdeChromeSignals, host: IdeEditorHost) {
+/// 行数按换行符计算；空文本视为 1 行。
+fn ide_line_count(text: &str) -> usize {
+    if text.is_empty() {
+        1
+    } else {
+        text.matches('\n').count() + 1
+    }
+}
+
+fn submit_goto_line(
+    chrome: IdeChromeSignals,
+    host: IdeEditorHost,
+    ide_text: RwSignal<String>,
+    locale: Locale,
+    error: RwSignal<Option<String>>,
+) {
     let raw = chrome.goto_line.get_untracked();
     let Ok(line) = raw.trim().parse::<usize>() else {
+        error.set(Some(i18n::ide_goto_invalid(locale).to_string()));
         return;
     };
+    let max_line = ide_line_count(&ide_text.get_untracked());
+    if line == 0 || line > max_line {
+        error.set(Some(i18n::ide_goto_out_of_range(locale, max_line)));
+        return;
+    }
+    error.set(None);
     goto_line_in_editor(&host, line);
     chrome.goto_panel_open.set(false);
 }
@@ -205,12 +227,15 @@ fn goto_bar_on_keydown(
     ev: web_sys::KeyboardEvent,
     chrome: IdeChromeSignals,
     editor_host: IdeEditorHost,
+    ide_text: RwSignal<String>,
+    locale: Locale,
+    error: RwSignal<Option<String>>,
 ) {
     if ev.key() != "Enter" {
         return;
     }
     ev.prevent_default();
-    submit_goto_line(chrome, editor_host);
+    submit_goto_line(chrome, editor_host, ide_text, locale, error);
 }
 
 #[component]
@@ -218,8 +243,10 @@ fn IdeGotoLineBarPanel(
     locale: RwSignal<Locale>,
     chrome: IdeChromeSignals,
     editor_host: IdeEditorHost,
+    ide_text: RwSignal<String>,
 ) -> impl IntoView {
     let input_ref = NodeRef::<leptos::html::Input>::new();
+    let error = RwSignal::new(None::<String>);
     wire_find_bar_focus(input_ref.clone());
     view! {
         <div
@@ -240,9 +267,19 @@ fn IdeGotoLineBarPanel(
                 data-testid="ide-goto-input"
                 prop:placeholder=move || i18n::ide_goto_ph(locale.get())
                 prop:value=move || chrome.goto_line.get()
-                on:input=move |ev| chrome.goto_line.set(event_target_value(&ev))
+                on:input=move |ev| {
+                    chrome.goto_line.set(event_target_value(&ev));
+                    error.set(None);
+                }
                 on:keydown=move |ev: web_sys::KeyboardEvent| {
-                    goto_bar_on_keydown(ev, chrome, editor_host);
+                    goto_bar_on_keydown(
+                        ev,
+                        chrome,
+                        editor_host,
+                        ide_text,
+                        locale.get_untracked(),
+                        error,
+                    );
                 }
             />
             <button
@@ -254,6 +291,11 @@ fn IdeGotoLineBarPanel(
             >
                 {icon_x("")}
             </button>
+            <Show when=move || error.get().is_some()>
+                <p class="ide-goto-error" role="alert" data-testid="ide-goto-error">
+                    {move || error.get().unwrap_or_default()}
+                </p>
+            </Show>
         </div>
     }
 }
@@ -263,13 +305,13 @@ pub fn IdeGotoLineBar(input: IdeFindBarInput) -> impl IntoView {
     let IdeFindBarInput {
         locale,
         chrome,
+        ide_text,
         editor_host,
-        ..
     } = input;
 
     view! {
         <Show when=move || chrome.goto_panel_open.get()>
-            <IdeGotoLineBarPanel locale chrome editor_host />
+            <IdeGotoLineBarPanel locale chrome editor_host ide_text />
         </Show>
     }
 }

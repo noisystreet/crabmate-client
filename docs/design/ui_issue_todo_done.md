@@ -59,6 +59,13 @@
 - [x] Android 系统状态栏被 Web 顶栏底色遮挡、图标不可见（浅色主题下白图标压近白顶栏）。已修（2026-09-30）：根因是 targetSdk 36 → Android 15+ 强制 edge-to-edge 且 API 36 已无法退出，`statusBarColor` 失效（状态栏透明）后其下露出 Web 顶栏 `color-mix(surface 55%, transparent)`，而 Web 默认主题 `shadcn-light` 的 `--surface` 近白 + 原生 `windowLightStatusBar=false` 强制白图标 → 白压白不可见。因 `themes.xml` 两个 light 标志被镜像门禁冻结为 `false`、无法从资源层切换，改为**运行时动态跟随主题**：`frontend/src/app_prefs.rs` 新增 `theme_css_is_light()`（按 `xxx-light` 后缀判定），`frontend/src/app/shell_prefs_storage.rs` 的 `persist_theme_to_storage_and_dom()`（`data-theme` 唯一写点，覆盖加载 / 预览 / OS 明暗监听全部路径）写 `data-theme` 后经新 JS 桥 `apply_mobile_system_bar_icons` 调 `CrabMateMobile.setSystemBarIconAppearance`，原生 `MainActivity.applySystemBarIconAppearance()` 用 `WindowInsetsControllerCompat.isAppearanceLightStatusBars` / `isAppearanceLightNavigationBars` 切图标明暗；连接页 / 启动页回落 `false`（浅色图标，与深底一致）。桥方法纯观感、无 Origin 守卫（与 `getStatusBarInsetPx` 一致，避免水合早于 URL 缓存丢调用）。
 
 
+## P2 · IDE 与工作区
+
+- [x] 跳转行输入非法（非数字/超界）静默 no-op：`frontend/src/app/ide_find_bar.rs`。已修（2026-10-07）：`submit_goto_line` 先按 `ide_text` 计算总行数（空文本记 1 行），解析失败写 `ide_goto_invalid`、行号 `0` 或超上界写 `ide_goto_out_of_range`（文案带当前总行数），合法才跳转并关面板；面板内新增 `error` 信号，`on:input` 清错，经 `<Show>` 渲染 `.ide-goto-error`（`role="alert"`）；输入非法时不再「静默关闭」。
+
+- [x] 嵌套空目录展开后无空态提示（根级有，子目录没有）：`frontend/src/workspace_tree.rs`。已修（2026-10-07）：`workspace_tree_dir_children_view` 在加载 / 错误分支之后，若 `nested` 为空且无挂起的行内新建（`pending_here`），渲染一条 `.workspace-tree-empty-note`（i18n `workspace_tree_empty_dir`）。
+
+
 ## P2 · 空态与确认
 
 - [x] 空态缺失：会话列表标题过滤无结果（`sidebar_nav/session_rail.rs`）、「管理会话」无会话（`session_list_modal.rs`）、任务列表空 `<ul>`（`side_column.rs`）、MCP 服务器列表（`settings_mcp_block.rs`）、模型预设列表（`settings_models_registry/preset_list.rs`）。已修（2026-09-25）：五处各补一条 `role="status"` 空态——会话过滤复用既有 `.nav-search-hits-empty`，其余新增 `.settings-list-empty` / `.session-modal-empty` / `.tasks-list-empty`（均为无字面量规则，不动 CSS 预算）；文案全部走 i18n（`settings_mcp_servers_empty` / `settings_saved_models_empty` / `nav_no_session_hits` / `session_modal_empty` / `tasks_empty`）。
@@ -100,3 +107,5 @@
 - [x] MCP 超时输入非法字符静默保留旧值：`frontend/src/app/settings_mcp_block_toolbar.rs`。已修（2026-09-25）：空 / 非整数 / `< 1` 三类非法输入改为 `settings-hint`（`role="status"`）提示，提示中带上当前生效值；只有合法值才写回 state，去掉原先 `n.max(1)` 的静默改写（不做 DOM 值回写——`<input type="number">` 对非数字通常返回空串，回写会与用户输入冲突）。
 
 - [x] MCP 远端 bearer placeholder 硬编码 `••••••••`：`frontend/src/app/settings_mcp_server_row.rs`。已修（2026-09-25）：掩码收成单一来源 `i18n::SECRET_MASK_PLACEHOLDER`（Web Bearer、GitHub client id 两处同改），并统一语义为仅 `has_bearer` 为真时显示（原先无条件显示会让人误以为已配置）。
+
+- [x] 空编辑器只有 aria-label，无可见占位文本：`frontend/src/app/ide_editor_pane.rs`。已修（2026-10-07）：新增子组件 `IdeEditorEmptyHint`，`ide_path` 为 `None` 时在编辑区上方覆盖渲染 `.ide-editor-empty-hint`（绝对定位、`pointer-events: none`、`aria-hidden` 以免与 `.ide-cm-host` 既有同名 `aria-label` 重复播报），文案复用既有 `i18n::ide_no_file`；为避免 `IdeEditorPane` CCN 触顶，提示独立成组件。

@@ -694,6 +694,16 @@ fn workspace_tree_dir_children_view(rel: String, env: WorkspaceTreeEnv) -> AnyVi
         .as_ref()
         .map(|d| d.entries.clone())
         .unwrap_or_default();
+    if nested.is_empty() && !pending_here {
+        return view! {
+            <ul class="workspace-list workspace-list-nested" role="group">
+                <li class="workspace-tree-empty-note">
+                    {move || i18n::workspace_tree_empty_dir(locale.get())}
+                </li>
+            </ul>
+        }
+        .into_any();
+    }
     view! {
         <ul class="workspace-list workspace-list-nested" role="group">
             <WorkspaceTreeNodes

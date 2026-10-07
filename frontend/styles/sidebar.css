@@ -480,6 +480,12 @@
   font-size: var(--text-md);
 }
 
+.workspace-tree-empty-note {
+  margin: 4px 8px 6px 1.75rem;
+  font-size: var(--text-md);
+  color: var(--muted);
+}
+
 .sr-only {
   position: absolute;
   width: 1px;

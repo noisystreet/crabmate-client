@@ -255,6 +255,20 @@
   flex-direction: column;
   min-width: 0;
   overflow: hidden;
+  position: relative;
+}
+
+.ide-editor-empty-hint {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  font-size: var(--text-md);
+  color: var(--muted);
+  text-align: center;
+  pointer-events: none;
 }
 
 .ide-find-bar {
@@ -288,6 +302,12 @@
   color: var(--muted);
   min-width: 3rem;
   text-align: center;
+}
+
+.ide-goto-error {
+  flex-basis: 100%;
+  font-size: var(--text-sm);
+  color: var(--error);
 }
 
 .ide-find-nav,
