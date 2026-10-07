@@ -143,11 +143,9 @@ impl ProjectionRowKind {
 
     fn new_row(self, tool_call_id: &str, content: String) -> crate::storage::StoredMessage {
         match self {
-            Self::Commentary => TurnRowQueue::new_assistant_projection_row(
-                self.row_id(tool_call_id),
-                content,
-                String::new(),
-            ),
+            Self::Commentary => {
+                TurnRowQueue::new_commentary_row(self.row_id(tool_call_id), content)
+            }
             Self::Reasoning => TurnRowQueue::new_assistant_projection_row(
                 self.row_id(tool_call_id),
                 String::new(),
