@@ -86,7 +86,7 @@ Blank cells are forbidden.
 
 | Capability | Desktop | Android | Web | TUI | Notes |
 |------------|---------|---------|-----|-----|-------|
-| Open write-tool-card path in IDE | yes | no | reduced | no | Wave 2.2: **Open this file** button on write-path tool cards (`path` tools / `copy_file`·`move_file` destination / `apply_patch` diff header). Wide layout only; path captured at SSE time into a runtime overlay — cards after reload/hydration render no button (no fake buttons). Web: same WASM, wide viewport only. |
+| Open write-tool-card path in IDE | yes | no | reduced | no | Wave 2.2: the write-path tool card ends with the workspace-relative path itself as a link (`path` tools / `copy_file`·`move_file` destination / `apply_patch` diff header), with the full path in `title` for a truncated row. The row never prints the same path twice: when the path appears as a whole token in the compact one-line summary it is dropped from that summary, so the row reads *title + path link* rather than *title + path + path*. Wide layout only; path captured at SSE time into a runtime overlay — cards after reload/hydration render no link (no fake links). Web: same WASM, wide viewport only. |
 | Open changelog path in IDE | planned | no | planned | no | Wave 2.1; wide layout only. |
 | Session restore / accept-reject hunks | planned | planned | planned | no | Server contract first; no fake buttons. |
 | Git status / commit / open PR from review | planned | no | planned | no | Wave 3; Android stays list-oriented. |
