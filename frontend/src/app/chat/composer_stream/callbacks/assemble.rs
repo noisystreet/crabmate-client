@@ -12,7 +12,7 @@ use crate::sse_dispatch::{ClarificationQuestionnaireInfo, CommandApprovalData, T
 use super::super::context::ChatStreamCallbackCtx;
 use super::super::shell_abort;
 use super::builders::*;
-use super::delta_apply::chat_stream_on_delta_builder;
+use super::delta_apply::{chat_stream_on_delta_builder, chat_stream_on_reasoning_delta_builder};
 use super::turn_layout::TurnLayout;
 
 /// 由 [`super::super::make_attach_chat_stream`](super::super::make_attach_chat_stream) 调用；集中所有 `on_*` 闭包，降低父模块维护面。
@@ -22,6 +22,10 @@ pub(crate) fn build_chat_stream_callbacks(
     let accum = stream_ctx.scratch.accum();
     let on_delta: Rc<dyn Fn(String)> =
         chat_stream_on_delta_builder(Rc::clone(&stream_ctx), Rc::clone(&accum));
+
+    // 思维链专用分流：不与正文共享 `on_delta`，避免 lane 被提前推进后第二段思考落成正文。
+    let on_reasoning_delta: Rc<dyn Fn(String)> =
+        chat_stream_on_reasoning_delta_builder(Rc::clone(&stream_ctx));
 
     let on_done: Rc<dyn Fn()> =
         chat_stream_on_done_builder(Rc::clone(&stream_ctx), Rc::clone(&accum));
@@ -150,6 +154,7 @@ pub(crate) fn build_chat_stream_callbacks(
 
     ChatStreamCallbacks {
         on_delta,
+        on_reasoning_delta,
         on_done: on_done.clone(),
         on_error: on_error.clone(),
         on_workspace_changed: on_ws,

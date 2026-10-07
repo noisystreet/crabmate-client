@@ -180,12 +180,14 @@ fn parse_and_dispatch_sse_frame(
         (cbs.on_stream_draining)();
     };
     let mut on_ag_ui_delta = |text: String| (cbs.on_delta)(text);
+    let mut on_reasoning_delta = |text: String| (cbs.on_reasoning_delta)(text);
 
     let mut cbs2 = SseControlSink {
         on_error: &mut on_err,
         on_delta: Some(&mut on_ag_ui_delta),
-        // Web 端思维链与正文共用 `on_delta` 信道（相位信号区分），不注册分流钩子。
-        on_reasoning_delta: None,
+        // 思维链走专用分流钩子，不再与正文共用 `on_delta`：`assistant_answer_phase` 会把 lane
+        // 提前推进到正文相，共用信道会让工具后第二段 reasoning 被写进正文。
+        on_reasoning_delta: Some(&mut on_reasoning_delta),
         workspace_tool: SseWorkspaceToolHooks {
             on_workspace_changed: Some(&mut on_ws),
             on_tool_call: Some(&mut on_tool_call),
@@ -270,6 +272,7 @@ mod tests {
     fn callbacks_with_end_capture(ended: Rc<RefCell<Option<String>>>) -> ChatStreamCallbacks {
         ChatStreamCallbacks {
             on_delta: Rc::new(|_s| {}),
+            on_reasoning_delta: Rc::new(|_s| {}),
             on_done: Rc::new(|| {}),
             on_error: Rc::new(|_e| {}),
             on_workspace_changed: Rc::new(|| {}),
@@ -486,6 +489,7 @@ mod tests {
         let got2 = Rc::clone(&got);
         let cbs = ChatStreamCallbacks {
             on_delta: Rc::new(move |s| got2.borrow_mut().push_str(&s)),
+            on_reasoning_delta: Rc::new(|_s| {}),
             on_done: Rc::new(|| {}),
             on_error: Rc::new(|_e| {}),
             on_workspace_changed: Rc::new(|| {}),
@@ -521,6 +525,68 @@ mod tests {
         );
         assert!(res.is_ok());
         assert_eq!(got.borrow().as_str(), " ");
+    }
+
+    /// `REASONING_MESSAGE_CONTENT` 必须走专用 `on_reasoning_delta`，不得回落正文 `on_delta`。
+    #[test]
+    fn reasoning_content_routes_to_dedicated_hook_not_delta() {
+        let reasoning = Rc::new(RefCell::new(String::new()));
+        let content = Rc::new(RefCell::new(String::new()));
+        let reasoning_cb = Rc::clone(&reasoning);
+        let content_cb = Rc::clone(&content);
+        let cbs = ChatStreamCallbacks {
+            on_delta: Rc::new(move |s| content_cb.borrow_mut().push_str(&s)),
+            on_reasoning_delta: Rc::new(move |s| reasoning_cb.borrow_mut().push_str(&s)),
+            ..callbacks_with_end_capture(Rc::new(RefCell::new(None)))
+        };
+        let mut last_event_id = 0u64;
+        let mut saw_stream_ended = false;
+        let block = "data: {\"type\":\"REASONING_MESSAGE_CONTENT\",\"delta\":\"think\"}\n\n";
+        handle_sse_block(
+            block,
+            &mut last_event_id,
+            &mut saw_stream_ended,
+            &cbs,
+            Locale::ZhHans,
+        )
+        .expect("reasoning frame should parse");
+        assert_eq!(reasoning.borrow().as_str(), "think");
+        assert!(
+            content.borrow().is_empty(),
+            "reasoning must not fall back to on_delta: {}",
+            content.borrow()
+        );
+    }
+
+    /// `TEXT_MESSAGE_CONTENT` 仍走正文 `on_delta`，不得误入思维链钩子。
+    #[test]
+    fn text_content_routes_to_delta_not_reasoning() {
+        let reasoning = Rc::new(RefCell::new(String::new()));
+        let content = Rc::new(RefCell::new(String::new()));
+        let reasoning_cb = Rc::clone(&reasoning);
+        let content_cb = Rc::clone(&content);
+        let cbs = ChatStreamCallbacks {
+            on_delta: Rc::new(move |s| content_cb.borrow_mut().push_str(&s)),
+            on_reasoning_delta: Rc::new(move |s| reasoning_cb.borrow_mut().push_str(&s)),
+            ..callbacks_with_end_capture(Rc::new(RefCell::new(None)))
+        };
+        let mut last_event_id = 0u64;
+        let mut saw_stream_ended = false;
+        let block = "data: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"delta\":\"answer\"}\n\n";
+        handle_sse_block(
+            block,
+            &mut last_event_id,
+            &mut saw_stream_ended,
+            &cbs,
+            Locale::ZhHans,
+        )
+        .expect("text frame should parse");
+        assert_eq!(content.borrow().as_str(), "answer");
+        assert!(
+            reasoning.borrow().is_empty(),
+            "answer must not route to reasoning hook: {}",
+            reasoning.borrow()
+        );
     }
 
     /// process_sse_buffer: 空 buffer 返回 0。

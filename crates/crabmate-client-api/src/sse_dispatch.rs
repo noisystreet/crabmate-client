@@ -94,14 +94,13 @@ pub struct SseNoticeTimelineHooks<'a> {
 /// SSE 控制面分发入口：按领域分组回调，V2Parser 分发至此。
 pub struct SseControlSink<'a> {
     pub on_error: &'a mut dyn FnMut(String),
-    /// AG-UI TEXT_MESSAGE_CONTENT 的正文增量（未注册 `on_reasoning_delta` 时也承接
-    /// REASONING_MESSAGE_CONTENT，见下）。
+    /// AG-UI TEXT_MESSAGE_CONTENT 的正文增量。
     /// V1 路径不经此回调。
     pub on_delta: Option<&'a mut dyn FnMut(String)>,
     /// AG-UI `REASONING_MESSAGE_CONTENT` 的思维链增量。
     ///
-    /// `None` 时回落 `on_delta`（Web 端把思维链与正文交给同一信道 + 相位信号区分）；
-    /// 终端希望分流展示时注册本钩子。
+    /// 官方 Web / TUI 均注册本钩子，把思维链与正文分流（Web 写入尾泡 `reasoning_text`，
+    /// 终端分流到 stderr）。`None` 时回落 `on_delta` 仅为兜底。
     pub on_reasoning_delta: Option<&'a mut dyn FnMut(String)>,
     pub workspace_tool: SseWorkspaceToolHooks<'a>,
     pub turn_phase: SseTurnPhaseHooks<'a>,

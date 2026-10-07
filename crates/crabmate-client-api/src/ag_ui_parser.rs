@@ -261,7 +261,7 @@ fn dispatch_text_message_content(val: &serde_json::Value, sink: &mut SseControlS
     }
 }
 
-/// 思维链增量：优先走 `on_reasoning_delta`；未注册时回落 `on_delta`（Web 端同信道 + 相位信号区分）。
+/// 思维链增量：优先走 `on_reasoning_delta`；未注册时回落 `on_delta`（兜底路径；官方 Web / TUI 均已注册专用钩子）。
 fn dispatch_reasoning_message_content(val: &serde_json::Value, sink: &mut SseControlSink<'_>) {
     let delta = val.get("delta").and_then(|v| v.as_str()).unwrap_or("");
     if delta.is_empty() {

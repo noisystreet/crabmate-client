@@ -206,7 +206,7 @@ TUI 侧判据：`serve/chat_stream.rs:5-8` 已 `use crabmate::cm_sse_protocol::�
 
 **风险控制**：`sse_dispatch::` 实测 **27 个** frontend 消费文件（约 47 处引用）、`TiktokenPromptTokensSnapshot` **10 个**（不含定义处）。为免大范围改 import，`frontend/src/sse_dispatch/mod.rs` 保留为 `pub use crabmate_client_api::sse_dispatch::*;` 转发壳，消费方路径 `crate::sse_dispatch::X` 不变（含 `CommandApprovalData`）。S6c 后 frontend 仅 `parser_v2.rs` 一处经 `V2Parser` 调用共享解析，调用面已收窄到 1 个实现点。
 
-**TUI 收敛方式**（S6d 已落地）：`chat_classify.rs` 的自建 `classify_line` 改为「`SseControlSink` 收集器 → `LineAction`」适配器：7 个钩子闭包只往 `RefCell<Collected>` 写槽位（永不失败，故无需 `?` 传播），随后 `resolve()` 把槽位映射回 `LineAction` / `TermError::RunError`；未消费的子类仍回落 `Skip`（保持现状语义）。为此共享层补两处钩子：`SseControlSink::on_reasoning_delta`（终端把思维链分流到 stderr；`None` 回落 `on_delta`，Web 端不注册）与 `SseWorkspaceToolHooks::on_command_approval_invalid`（畸形审批载荷提示行，避免终端回合静默挂起；Web 端不注册 → 保持静默）。`LineAction` 与 `classify_line` 签名未变，`serve/chat_stream.rs` 零改动。
+**TUI 收敛方式**（S6d 已落地）：`chat_classify.rs` 的自建 `classify_line` 改为「`SseControlSink` 收集器 → `LineAction`」适配器：7 个钩子闭包只往 `RefCell<Collected>` 写槽位（永不失败，故无需 `?` 传播），随后 `resolve()` 把槽位映射回 `LineAction` / `TermError::RunError`；未消费的子类仍回落 `Skip`（保持现状语义）。为此共享层补两处钩子：`SseControlSink::on_reasoning_delta`（思维链与正文分流：终端把思维链分流到 stderr，Web 写入尾泡 `reasoning_text`；`None` 回落 `on_delta` 仅为兜底）与 `SseWorkspaceToolHooks::on_command_approval_invalid`（畸形审批载荷提示行，避免终端回合静默挂起；Web 端不注册 → 保持静默）。`LineAction` 与 `classify_line` 签名未变，`serve/chat_stream.rs` 零改动。
 
 ### 4.12 chat body 可选块取值规则（S7a 已落地）
 

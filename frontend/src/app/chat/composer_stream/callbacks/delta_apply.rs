@@ -181,6 +181,32 @@ pub(super) fn chat_stream_on_delta_builder(
     })
 }
 
+/// 将单块思维链增量写入当前尾泡 `reasoning_text`。
+///
+/// **不看 lane**：`REASONING_MESSAGE_CONTENT` 是专用帧，服务端仅在模型思维链阶段发出。
+/// 工具后第二轮 `assistant_answer_phase` 会把 lane 提前推到正文相，若仍按 lane 分流，
+/// 第二段思维链会被写进正文（`chat_export_20261007_171605.md` 的错位）。
+pub(super) fn apply_chat_stream_reasoning_delta(stream_ctx: &ChatStreamCallbackCtx, chunk: &str) {
+    let mid = stream_ctx.scratch.borrow_assistant_id();
+    stream_ctx.append_assistant_chunk(mid.as_str(), chunk, true);
+}
+
+/// 装配 `on_reasoning_delta` 闭包（思维链专用分流，见 [`apply_chat_stream_reasoning_delta`]）。
+pub(super) fn chat_stream_on_reasoning_delta_builder(
+    stream_ctx: Rc<ChatStreamCallbackCtx>,
+) -> Rc<dyn Fn(String)> {
+    Rc::new(move |chunk: String| {
+        if stream_ctx.is_stale() {
+            return;
+        }
+        stream_ctx.scratch.apply_stream_control_event(
+            &stream_ctx.shell.stream,
+            StreamControlEvent::ModelTextDelta,
+        );
+        apply_chat_stream_reasoning_delta(stream_ctx.as_ref(), &chunk);
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::super::stream_turn_state::StreamModelOutputLane;
