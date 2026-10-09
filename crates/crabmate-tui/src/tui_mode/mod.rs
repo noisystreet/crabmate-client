@@ -847,6 +847,10 @@ pub async fn run_tui(
     execute!(stdout, SetCursorStyle::BlinkingBar).context("set cursor style")?;
     let _guard = ScreenGuard;
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout)).context("init terminal")?;
+    // 必须在启动键盘读取线程前清屏：`clear()` 会查询光标位置（DSR），
+    // 需要 crossterm 的全局事件锁；而键盘线程已阻塞在 `event::read()` 持锁，
+    // 会导致清屏（及首帧绘制）一直等到用户第一次按键才完成。
+    terminal.clear().context("clear screen")?;
 
     let (tx, rx) = mpsc::channel::<UiEvent>();
     spawn_key_reader(tx.clone());
@@ -868,7 +872,6 @@ pub async fn run_tui(
         panel: None,
         persisted: None,
     };
-    terminal.clear().context("clear screen")?;
     // 启动即拉一次会话 / 工作区根 / serve 默认状态 / user-data 设置快照（失败以系统行提示）。
     app.refresh_sessions();
     app.st.ws_begin_root_fetch();
