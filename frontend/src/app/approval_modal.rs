@@ -137,7 +137,7 @@ where
         <div class="modal-footer actions approval-modal-actions">
             <button
                 type="button"
-                class="btn btn-danger"
+                class="btn btn-secondary"
                 data-testid="approval-deny"
                 prop:disabled=move || busy.get()
                 on:click=deny
@@ -146,7 +146,7 @@ where
             </button>
             <button
                 type="button"
-                class="btn btn-secondary"
+                class="btn btn-primary"
                 data-testid="approval-allow-once"
                 prop:disabled=move || busy.get()
                 on:click=allow_once
@@ -155,7 +155,7 @@ where
             </button>
             <button
                 type="button"
-                class="btn btn-primary"
+                class="btn btn-danger"
                 data-testid="approval-allow-always"
                 prop:disabled=move || busy.get()
                 on:click=allow_always
