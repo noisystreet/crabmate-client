@@ -117,15 +117,17 @@ fn timeline_log_dispatch_context_inject(
 /// [`timeline_log_dispatch_default_body`]。
 fn timeline_log_dispatch_context_trim(stream_ctx: &ChatStreamCallbackCtx, info: &TimelineLogInfo) {
     // 仅当本轮流正被查看时改全局水位，避免后台流污染活跃会话（与 apply 侧 key 同口径）。
-    if stream_ctx.is_bound_session_active()
-        && let Some(after) =
-            crate::timeline_scan::context_trim_after_used_tokens(info.detail.as_deref())
-        && let Some(cid) = stream_ctx.server_conversation_id_for_tokens()
-    {
+    let cid = stream_ctx.server_conversation_id_for_tokens();
+    let reset = crate::timeline_scan::context_trim_watermark_reset(
+        stream_ctx.is_bound_session_active(),
+        crate::timeline_scan::context_trim_after_used_tokens(info.detail.as_deref()),
+        cid.as_deref(),
+    );
+    if let Some((cid, after)) = reset {
         stream_ctx
             .chat
             .context_used_watermark
-            .update(|w| w.reset(&cid, after));
+            .update(|w| w.reset(cid, after));
     }
     if stream_ctx.shell.show_turn_context_inject.get_untracked() {
         timeline_log_dispatch_default_body(stream_ctx, info);

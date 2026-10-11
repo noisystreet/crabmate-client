@@ -113,6 +113,7 @@ When updating docs:
 | Chat cards for file-backed context inject / skill path | `docs/adr/0003-chat-file-context-inject-cards.md` (Proposed — no fake cards without Server metadata; slash skill path is Client-only) |
 | Shared pure logic extract (WASM / connect / tui) | `docs/design/client_shared_logic.md` |
 | Multi-client repo maintenance (single-workspace trade-off, boundary guards, version bump) | `docs/adr/0004-multi-client-repo-maintenance.md` (Proposed) |
+| Status bar conversation-context watermark (same-口径 fill + drop after compaction; late visibility is deliberate) | `docs/adr/0005-status-bar-context-watermark.md` (Accepted) |
 | Desktop / Android / Web / TUI capability alignment | `docs/design/client_capability_matrix.md` (update the cell in the same PR as the capability) |
 | Chat UI follow-ups (composer / transcript / a11y) | `docs/design/chat_ui_todo.md` |
 | Coding-agent client (review / revert loop; not full IDE) | `docs/design/coding_agent_client.md` (Wave 1 checkboxes stay in `chat_ui_todo.md`; restore/changelog JSON authority is Server) |

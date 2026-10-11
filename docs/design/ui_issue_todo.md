@@ -16,6 +16,7 @@
 2026-09-26：**设置页面布局 / 组件风格统一**——① 删除无入口的 `settings_modal` 弹窗表面（`settings_modal/` 三文件 + `settings_modal_dialog.rs` 及全部引用），设置只留在常规页与 IDE 页；② IDE 设置页删掉自持页头（`ide_settings_page/view_header.rs`），改用常规页的 `SettingsPageHeader`（经新 `SettingsPageHeaderSpec` 声明页头八项，两页各自持有 `data-testid`——两页同时挂载且 victauri `test_id` 取首个匹配，故不能共用）与 `SettingsNavItem` / `SettingsContentIntro`；③ 表单统一为一种结构「`<div class="settings-field">` + 真 `<label for>`」（MCP 超时 / MCP 行内 name / bearer 三处由 label 包裹组改为显式 id 关联，GitHub client-id 的无样式 `class="input"` 改 `settings-text-input`）；④ 块边界由三种收成一种：横向版心只放在内容列 `.settings-content`（`padding: 0 14px`，页头标题 / 块标题 / 字段 / 列表 / 反馈共一条对齐轴），块与字段都不再自持横向内边距（嵌套块如 MCP JSON 导入面板不再叠加出第二层缩进），唯一强调卡框 `.settings-block--emphasis`（由原 `--web-api-auth` 卡框规则改名、两处即时生效块共用；`--llm-cloud` 虚线修饰删除，`--api-base` 旧修饰位无规则、原在白名单，条目一并删除）。详见 P2 新增条目。
 2026-09-30：**Android 系统栏图标随 Web 主题明暗切换**——修复浅色主题下顶栏系统图标不可见（白图标压近白顶栏），详见 P2「移动端边界与体验」新增条目。两个主题级 light 标志仍保持 `false`（镜像门禁要求），切换只在运行时经 `WindowInsetsControllerCompat` 覆盖。
 2026-10-07：**IDE / 工作区三处反馈补齐**——跳转行非法（非数字 / `0` / 超界）输入改为可见 `role="alert"` 提示（不再静默 no-op），嵌套空目录展开补空态提示，空编辑器补可见占位文本；三条已归档至 [`ui_issue_todo_done.md`](./ui_issue_todo_done.md)。
+2026-10-11：**状态栏「会话上下文用量」芯片**落地同口径填充显示（灰段固定开销 + brand 段会话内容）与压缩 / 裁剪后水位回落；语义、不变式与「回落延迟到回合末是刻意」记入 [`ADR-0005`](../adr/0005-status-bar-context-watermark.md)，两项延迟项记入下方 P3。
 
 > **已完成项已归档**：原 `- [x]` 条目移至 [`ui_issue_todo_done.md`](./ui_issue_todo_done.md)，本清单只保留未完成项。
 
@@ -82,3 +83,7 @@
 - [ ] transcript 整区 `aria-live="polite"`，工具行频繁 status 更新持续触发读屏播报（权衡项）：`frontend/src/app/chat/tui_stream_view.rs`。
 
 - [ ] 文件树不支持树内拖拽移动（能力矩阵未承诺，可选增强）：`frontend/src/workspace_file_drop.rs`。
+
+- [ ] 状态栏上下文水位的回落延迟到回合末才可见（`context_trim` 回合中途到达，`axis.used` 回合末才刷新）；若需中途即可见，须为重算灰段固定开销 `F` 另想办法（ADR-0005 备选 C）：`frontend/src/app/status_context.rs`。
+
+- [ ] 状态栏上下文水位按会话单槽记忆，切换会话即重置，跨会话峰值不保留（ADR-0005 备选 D，按需再加）：`frontend/src/chat_session_state.rs`。
