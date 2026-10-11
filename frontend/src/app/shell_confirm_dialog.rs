@@ -3,7 +3,7 @@
 use leptos::prelude::*;
 
 use crate::app::app_signals::ModalSignals;
-use crate::app::focusable_menu::FocusableModalPanel;
+use crate::app::focusable_menu::{FocusableModalBackdrop, FocusableModalPanel};
 use crate::i18n::{self, Locale};
 use crate::ide_confirm::{IdeConfirmPrompt, resolve_ide_confirm};
 
@@ -72,12 +72,9 @@ fn ShellConfirmDialogPanel(locale: RwSignal<Locale>, modal: ModalSignals) -> imp
 pub fn ShellConfirmDialog(locale: RwSignal<Locale>, modal: ModalSignals) -> impl IntoView {
     view! {
         <Show when=move || !modal.confirm_pending.get().is_empty()>
-            <div
-                class="modal-backdrop shell-confirm-backdrop"
-                data-testid="shell-confirm-dialog"
-            >
+            <FocusableModalBackdrop class="shell-confirm-backdrop" testid="shell-confirm-dialog">
                 <ShellConfirmDialogPanel locale modal />
-            </div>
+            </FocusableModalBackdrop>
         </Show>
     }
 }

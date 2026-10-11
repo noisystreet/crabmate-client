@@ -3,7 +3,7 @@
 use leptos::prelude::*;
 
 use crate::app::app_signals::IdeChromeSignals;
-use crate::app::focusable_menu::FocusableModalPanel;
+use crate::app::focusable_menu::{FocusableModalBackdrop, FocusableModalPanel};
 use crate::i18n::{self, Locale};
 use crate::ide_confirm::{IdeConfirmPrompt, resolve_ide_confirm};
 
@@ -72,9 +72,9 @@ fn IdeConfirmDialogPanel(locale: RwSignal<Locale>, chrome: IdeChromeSignals) -> 
 pub fn IdeConfirmDialog(locale: RwSignal<Locale>, chrome: IdeChromeSignals) -> impl IntoView {
     view! {
         <Show when=move || !chrome.confirm_pending.get().is_empty()>
-            <div class="modal-backdrop" data-testid="ide-confirm-dialog">
+            <FocusableModalBackdrop testid="ide-confirm-dialog">
                 <IdeConfirmDialogPanel locale chrome />
-            </div>
+            </FocusableModalBackdrop>
         </Show>
     }
 }

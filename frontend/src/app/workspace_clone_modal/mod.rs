@@ -10,7 +10,7 @@ use crate::api::{
     WorkspaceCloneRequest, WorkspaceCloneSseEvent, fetch_workspace_projects,
     post_workspace_clone_stream,
 };
-use crate::app::focusable_menu::FocusableModalPanel;
+use crate::app::focusable_menu::{FocusableModalBackdrop, FocusableModalPanel};
 use crate::app::workspace_root_actions::{
     WorkspaceRootPickHandle, WorkspaceSessionHandoff, finish_workspace_root_ui,
     flush_current_workspace_sessions, workspace_inputs_blocked,
@@ -347,18 +347,17 @@ fn WorkspaceCloneModalPanel(signals: WorkspaceCloneModalSignals) -> impl IntoVie
 fn WorkspaceCloneModalBackdrop(signals: WorkspaceCloneModalSignals) -> impl IntoView {
     let open = signals.open;
     view! {
-        <div
-            class="modal-backdrop"
-            data-testid="workspace-clone-backdrop"
-            on:click=move |_| {
+        <FocusableModalBackdrop
+            testid="workspace-clone-backdrop"
+            on_dismiss=Callback::new(move |_| {
                 if signals.workspace_pick.ws.workspace_set_busy.get_untracked() {
                     return;
                 }
                 open.set(false);
-            }
+            })
         >
             <WorkspaceCloneModalPanel signals=signals />
-        </div>
+        </FocusableModalBackdrop>
     }
 }
 

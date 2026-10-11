@@ -2,7 +2,7 @@
 
 use leptos::prelude::*;
 
-use crate::app::focusable_menu::FocusableModalPanel;
+use crate::app::focusable_menu::{FocusableModalBackdrop, FocusableModalPanel};
 use crate::i18n;
 use crate::session_modal_row::{SessionModalRow, SessionModalRowBundle};
 use crate::session_sort::sorted_sessions_clone;
@@ -76,9 +76,9 @@ fn SessionListModalPanel(session_modal: RwSignal<bool>) -> impl IntoView {
 #[component]
 fn SessionListModalBackdrop(session_modal: RwSignal<bool>) -> impl IntoView {
     view! {
-        <div class="modal-backdrop" on:click=move |_| session_modal.set(false)>
+        <FocusableModalBackdrop on_dismiss=Callback::new(move |_| session_modal.set(false))>
             <SessionListModalPanel session_modal=session_modal />
-        </div>
+        </FocusableModalBackdrop>
     }
 }
 

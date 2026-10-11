@@ -92,6 +92,8 @@
 
 ## P3 · 次要
 
+- [x] `.modal-backdrop` 遮罩层 13 处重复模板，且「点击自身关闭」判定已分叉（裸 `on:click` 依赖面板 `stop_propagation`，vs. `mouse_event_target_is_current_target`），未纳入模态骨架收敛。已修（2026-10-11）：新增共享组件 `FocusableModalBackdrop`（`frontend/src/app/focusable_menu.rs`）——base 类名 `modal-backdrop` 与 `target == current_target` 判定只在此声明一次，`class`（附加分层 / 语义类）、`testid`、`on_dismiss: Option<Callback<()>>`（`None` = 遮罩不可点击关闭）保留各处差异；9 处手抄遮罩全部迁入（工作区项目 / 会话管理 / 工作区文件选择 / IDE 新建文件原为裸 `on:click`；壳确认 / 审批 / IDE 确认不可关闭；克隆弹窗保留 Running 期间 busy 守卫；模型注册新增弹窗原已用 `mouse_event_target_is_current_target`）。移动端变更清单遮罩（基类 `changelist-modal-backdrop`、不含 `modal-backdrop`）为兄弟浮层，不在本次范围。
+
 - [x] `prefers-reduced-motion` 漏 2 处无限动画：会话流式徽章脉冲、克隆进度条。已修（2026-10-01）：`motion.css` 补 `.nav-session-streaming-badge::before`（`nav-streaming-pulse`）与 `.workspace-clone-bar--indeterminate .workspace-clone-bar-fill`（`workspace-clone-indeterminate`）；`index.html` 内联样式补 `#cm-boot-splash .cm-boot-loader`（`cm-boot-spin`）。
 
 - [x] 首屏主题快照硬编码 `light`，深色用户有短暂浅色闪烁。已修（2026-09-24）：`frontend/src/app/shell_prefs_storage.rs` 的 `read_shell_ui_initial_snapshot()` 默认改 `dark`，与 splash（`index.html` 内联深色）、桌面窗口底色（`BOOT_SHELL_BG`）及 `tokens.css` 的 `:root` 默认深色对齐（偏好要等 `GET /user-data/prefs` 才到，改 `system` 此时拿不到 OS 明暗会退回 light，故不用）；首帧值不会写回服务端覆盖用户偏好——`UserPrefsSyncPhase` 在偏好加载完成前禁止 PUT。

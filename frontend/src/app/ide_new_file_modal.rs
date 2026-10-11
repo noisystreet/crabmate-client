@@ -6,7 +6,7 @@ use leptos::prelude::*;
 use leptos_dom::helpers::event_target_value;
 
 use crate::app::app_signals::IdeChromeSignals;
-use crate::app::focusable_menu::FocusableModalPanel;
+use crate::app::focusable_menu::{FocusableModalBackdrop, FocusableModalPanel};
 use crate::app::workspace_panel::make_refresh_workspace_after_mutation;
 use crate::app::workspace_panel_state::WorkspacePanelSignals;
 use crate::i18n::{self, Locale};
@@ -154,9 +154,9 @@ pub fn IdeNewFileModal(input: IdeNewFileModalInput) -> impl IntoView {
     let chrome = input.chrome;
     view! {
         <Show when=move || chrome.new_file_modal_open.get()>
-            <div class="modal-backdrop" data-testid="ide-new-file-modal">
+            <FocusableModalBackdrop testid="ide-new-file-modal">
                 <IdeNewFileModalPanel input />
-            </div>
+            </FocusableModalBackdrop>
         </Show>
     }
 }
