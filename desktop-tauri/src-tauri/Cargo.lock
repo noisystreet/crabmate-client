@@ -793,7 +793,7 @@ dependencies = [
 name = "crabmate-desktop"
 version = "0.5.2"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
  "crabmate-connect",
  "serde_json",
  "tauri",
