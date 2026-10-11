@@ -10,6 +10,7 @@ use std::sync::Arc;
 use super::app_shell_ctx::SideColumnViewSignals;
 use super::side_column_toolbar::{SideColumnResizeAndShellToolbar, SideColumnResizeToolbarSignals};
 use super::side_column_workspace_scroll::WorkspaceSideCardScrollInner;
+use super::status_bar::side_status_stack_view;
 use super::workspace_panel::make_refresh_workspace_after_mutation;
 use super::workspace_panel_state::WorkspacePanelSignals;
 use crate::workspace_context_menu::WorkspaceContextMenuActions;
@@ -295,10 +296,10 @@ pub fn side_column_view(signals: SideColumnViewSignals) -> impl IntoView {
         side_resize_session,
         side_resize_handles,
         view_menu_open,
-        status_bar_visible,
         settings_page,
         workspace_panel: ws,
         status_tasks,
+        status_bar,
         refresh_workspace,
         refresh_tasks,
         toggle_task,
@@ -312,6 +313,8 @@ pub fn side_column_view(signals: SideColumnViewSignals) -> impl IntoView {
     let tasks_data = status_tasks.tasks_data;
     let tasks_err = status_tasks.tasks_err;
     let tasks_loading = status_tasks.tasks_loading;
+    // 状态栈折叠态：在 `Show` 外一次创建；`Show` 的 children 会重复求值，不能就地 new。
+    let status_stack_collapsed = RwSignal::new(false);
     let resize_toolbar = SideColumnResizeToolbarSignals {
         locale,
         side_resize_dragging,
@@ -320,9 +323,10 @@ pub fn side_column_view(signals: SideColumnViewSignals) -> impl IntoView {
         side_resize_session,
         side_resize_handles,
         view_menu_open,
-        status_bar_visible,
         settings_page,
         status_tasks,
+        status_err: status_bar.status_err,
+        stream_busy_memos: status_bar.stream_busy_memos,
         is_narrow_viewport,
     };
     view! {
@@ -370,6 +374,12 @@ pub fn side_column_view(signals: SideColumnViewSignals) -> impl IntoView {
                     <SideColumnDebugConsoleCard locale=locale thinking_trace_log=thinking_trace_log />
                 </Show>
             </div>
+            // 状态栈固定在右列底部（`.side-body` flex:1 占满余量，栈自然贴底）。
+            // 常驻挂载（不因右列收起而卸载，保住 `[data-testid="status-bar"]` 的 DOM
+            // 与状态栈内的 watermark Effect）；右列收起时由
+            // `.side-column-rail-only .side-status-stack` 视觉隐藏，
+            // 兜底入口改为浮动 rail / 移动端顶栏的迷你运行点。
+            {side_status_stack_view(status_bar.clone(), locale, status_stack_collapsed)}
         </SideColumnResizeAndShellToolbar>
         </>
     }

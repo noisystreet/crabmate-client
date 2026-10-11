@@ -85,22 +85,6 @@ pub fn status_chip_thinking(l: Locale) -> &'static str {
     }
 }
 
-/// 状态栏「思考模式」开关：开启态文案。
-pub fn status_thinking_on(l: Locale) -> &'static str {
-    match l {
-        Locale::ZhHans => "开",
-        Locale::En => "On",
-    }
-}
-
-/// 状态栏「思考模式」开关：关闭态文案。
-pub fn status_thinking_off(l: Locale) -> &'static str {
-    match l {
-        Locale::ZhHans => "关",
-        Locale::En => "Off",
-    }
-}
-
 /// 状态栏「思考模式」开关 `title`（悬停提示）。
 pub fn status_thinking_tooltip(l: Locale) -> &'static str {
     match l {

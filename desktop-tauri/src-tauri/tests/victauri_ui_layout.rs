@@ -56,10 +56,10 @@ e2e_test!(core_layout_sections_exist, |client| async move {
         "chat column should be visible"
     );
 
-    // 状态栏存在
+    // 状态栈常驻 DOM（右列收起时视觉隐藏，仅浮动 rail 迷你运行点可见）
     assert!(
-        is_visible(&mut client, "[data-testid=\"status-bar\"]").await,
-        "status bar should be visible"
+        count_elements(&mut client, "[data-testid=\"status-bar\"]").await == 1,
+        "status bar should be present in DOM even when the side column is collapsed"
     );
 
     // 侧栏默认隐藏

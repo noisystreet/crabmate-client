@@ -7,10 +7,12 @@ use std::rc::Rc;
 use crate::app::github_embed_page::{github_repo_can_open, try_open_github_embed_from_repo};
 use crate::app::settings_page::{SettingsSection, navigate_to_settings};
 use crate::app_prefs::SidePanelView;
+use crate::chat_session_state::ChatStreamBusyMemos;
 use crate::i18n::{self, Locale};
 use crate::icon::{Icon, icon_chevron_down};
 use crate::workspace_shell::begin_side_column_resize;
 
+use super::status_bar::StatusRunDotButton;
 use super::status_tasks_state::StatusTasksSignals;
 
 /// 侧栏隐藏时工具栏是否以浮动条渲染（须脱出 `side-column-rail-only` 父节点）。
@@ -42,9 +44,10 @@ pub(super) struct SideColumnResizeToolbarSignals {
     pub side_resize_session: Rc<RefCell<Option<(f64, f64)>>>,
     pub side_resize_handles: SideResizeHandlesCell,
     pub view_menu_open: RwSignal<bool>,
-    pub status_bar_visible: RwSignal<bool>,
     pub settings_page: RwSignal<bool>,
     pub status_tasks: StatusTasksSignals,
+    pub status_err: RwSignal<Option<String>>,
+    pub stream_busy_memos: ChatStreamBusyMemos,
     pub is_narrow_viewport: RwSignal<bool>,
 }
 
@@ -53,9 +56,10 @@ pub(crate) struct ShellToolbarSharedSignals {
     pub locale: RwSignal<Locale>,
     pub side_panel_view: RwSignal<SidePanelView>,
     pub view_menu_open: RwSignal<bool>,
-    pub status_bar_visible: RwSignal<bool>,
     pub settings_page: RwSignal<bool>,
     pub status_tasks: StatusTasksSignals,
+    pub status_err: RwSignal<Option<String>>,
+    pub stream_busy_memos: ChatStreamBusyMemos,
 }
 
 #[derive(Clone, Copy)]
@@ -305,27 +309,6 @@ fn run_toolbar_disconnect(view_menu_open: RwSignal<bool>) {
 }
 
 #[component]
-fn StatusBarToggleBtn(
-    locale: RwSignal<Locale>,
-    status_bar_visible: RwSignal<bool>,
-) -> impl IntoView {
-    view! {
-        <button
-            type="button"
-            class="btn btn-secondary btn-sm shell-toolbar-icon-btn"
-            class:active=move || status_bar_visible.get()
-            on:click=move |_| status_bar_visible.update(|v| *v = !*v)
-            prop:title=move || i18n::side_status_btn_title(locale.get())
-            prop:aria-label=move || i18n::side_status_btn_title(locale.get())
-        >
-            <Icon class="shell-toolbar-icon">
-                <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
-            </Icon>
-        </button>
-    }
-}
-
-#[component]
 fn SettingsToolbarBtn(locale: RwSignal<Locale>, settings_page: RwSignal<bool>) -> impl IntoView {
     view! {
         <button
@@ -368,7 +351,7 @@ fn DisconnectToolbarBtn(locale: RwSignal<Locale>, view_menu_open: RwSignal<bool>
     }
 }
 
-/// GitHub / 工作区视图 / 状态栏 / 设置（及远程断开）：桌面贴右浮动；窄屏仅在右侧抽屉顶部。
+/// GitHub / 工作区视图 / 设置（及远程断开）：桌面贴右浮动；窄屏仅在右侧抽屉顶部。
 #[component]
 pub(crate) fn ShellToolbarIcons(
     #[prop(into)] rail_float: bool,
@@ -378,9 +361,10 @@ pub(crate) fn ShellToolbarIcons(
         locale,
         side_panel_view,
         view_menu_open,
-        status_bar_visible,
         settings_page,
         status_tasks,
+        status_err,
+        stream_busy_memos,
     } = shared;
     let picker = SidePanelViewPickerProps {
         locale,
@@ -412,7 +396,17 @@ pub(crate) fn ShellToolbarIcons(
                     <SidePanelViewPickerMenu props=picker />
                 </Show>
             </div>
-            <StatusBarToggleBtn locale=locale status_bar_visible=status_bar_visible />
+            <Show when=move || rail_float>
+                <StatusRunDotButton
+                    st=status_tasks
+                    status_err=status_err
+                    stream_busy_memos=stream_busy_memos
+                    locale=locale
+                    on_click=Callback::new(move |_| {
+                        side_panel_view.set(SidePanelView::Workspace)
+                    })
+                />
+            </Show>
             <SettingsToolbarBtn locale=locale settings_page=settings_page />
             <DisconnectToolbarBtn locale=locale view_menu_open=view_menu_open />
         </div>
@@ -464,18 +458,20 @@ pub(super) fn SideColumnResizeAndShellToolbar(
         side_resize_session,
         side_resize_handles,
         view_menu_open,
-        status_bar_visible,
         settings_page,
         status_tasks,
+        status_err,
+        stream_busy_memos,
         is_narrow_viewport,
     } = toolbar;
     let icons = ShellToolbarSharedSignals {
         locale,
         side_panel_view,
         view_menu_open,
-        status_bar_visible,
         settings_page,
         status_tasks,
+        status_err,
+        stream_busy_memos,
     };
     view! {
         <SideColumnResizeDragHandle

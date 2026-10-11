@@ -386,13 +386,13 @@ pub fn StatusBarContextChip(
                             }
                         }
                     }}</span>
+                    <StatusBarContextMeter
+                        chat=chat
+                        st=st
+                        client_llm_storage_tick=client_llm_storage_tick
+                        selected_agent_role=selected_agent_role
+                    />
                 </span>
-                <StatusBarContextMeter
-                    chat=chat
-                    st=st
-                    client_llm_storage_tick=client_llm_storage_tick
-                    selected_agent_role=selected_agent_role
-                />
             </span>
         </Show>
     }

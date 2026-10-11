@@ -2,7 +2,7 @@
 //!
 //! 全量壳层仍用 [`super::app_shell_ctx::AppShellCtx`]（含 `Rc` / `StoredValue` 等）；此处仅收敛满足
 //! `Send + Sync + 'static` 的聊天切片。典型消费方：**`sidebar_nav_view`**、**`session_list_modal_view`**、
-//! **`status_bar_footer_view`**、**`SessionContextMenuLayer`**、**[`crate::app::chat::find_bar::ChatFindBar`]**（见各自模块）。
+//! **`side_status_stack_view`**、**`SessionContextMenuLayer`**、**[`crate::app::chat::find_bar::ChatFindBar`]**（见各自模块）。
 //!
 //! 新增子树消费方优先 [`expect_chat_shell_ctx`]；单测或 Story 可在挂载前 [`provide_context`]，或改用
 //! [`try_chat_shell_ctx`] 做缺失分支。

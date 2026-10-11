@@ -19,7 +19,6 @@ pub struct ShellUISignals {
     pub ide_menubar_dropdown_open: RwSignal<bool>,
     /// IDE 布局挂载后由 [`IdeLayoutView`](crate::app::ide_layout::IdeLayoutView) 写入，供统一顶栏渲染菜单。
     pub ide_menu_bar_bridge: RwSignal<Option<IdeMenuBarBridge>>,
-    pub status_bar_visible: RwSignal<bool>,
     pub side_panel_view: RwSignal<SidePanelView>,
     pub side_width: RwSignal<f64>,
     pub web_ui_config_loaded: RwSignal<bool>,
@@ -62,7 +61,6 @@ impl ShellUISignals {
             view_menu_open: RwSignal::new(false),
             ide_menubar_dropdown_open: RwSignal::new(false),
             ide_menu_bar_bridge: RwSignal::new(None),
-            status_bar_visible: RwSignal::new(s.status_bar_visible),
             side_panel_view: RwSignal::new(s.side_panel_view),
             side_width: RwSignal::new(s.side_width),
             web_ui_config_loaded: RwSignal::new(false),

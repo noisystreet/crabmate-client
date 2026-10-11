@@ -225,7 +225,9 @@ test.describe("Mock：状态栏上下文用量百分比", () => {
       answer: "收到",
     };
     await installSequencedMockSse(page, [turn], "e2e-mock-ctx-1m");
-    await seedSession(page, "s_e2e_mock_ctx_1m");
+    await seedSession(page, "s_e2e_mock_ctx_1m", {
+      sidePanelView: "workspace",
+    });
     await runTurn(page, "请只回复两个字：收到", turn.answer);
 
     const reading = await readChip(page, turn.used);
@@ -271,7 +273,9 @@ test.describe("Mock：状态栏上下文用量百分比", () => {
       answer: "收到",
     };
     await installSequencedMockSse(page, [turn], "e2e-mock-ctx-small");
-    await seedSession(page, "s_e2e_mock_ctx_small");
+    await seedSession(page, "s_e2e_mock_ctx_small", {
+      sidePanelView: "workspace",
+    });
     await runTurn(page, "请只回复两个字：收到", turn.answer);
 
     const reading = await readChip(page, turn.used);
@@ -306,7 +310,9 @@ test.describe("Mock：状态栏上下文用量百分比", () => {
       answer: `第 ${i + 1} 轮回答。`,
     }));
     await installSequencedMockSse(page, turns, "e2e-mock-ctx-turns");
-    await seedSession(page, "s_e2e_mock_ctx_turns");
+    await seedSession(page, "s_e2e_mock_ctx_turns", {
+      sidePanelView: "workspace",
+    });
 
     const readings: ContextReading[] = [];
     let runningMax = 0;
@@ -371,7 +377,9 @@ test.describe("Mock：状态栏上下文用量百分比", () => {
       trimAfterTokens: 18_000,
     };
     await installSequencedMockSse(page, [before, after], "e2e-mock-ctx-trim");
-    await seedSession(page, "s_e2e_mock_ctx_trim");
+    await seedSession(page, "s_e2e_mock_ctx_trim", {
+      sidePanelView: "workspace",
+    });
 
     await runTurn(page, "第一轮问题", before.answer);
     const peak = await readChip(page, before.used);

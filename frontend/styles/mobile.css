@@ -225,6 +225,11 @@ html[data-cm-mobile-shell] .composer-input--mirror-overlay {
     height: 6px;
   }
 
+  /* 右列状态栈折叠头部：保证移动端触控热区 */
+  .side-status-stack-head {
+    min-height: 44px;
+  }
+
   /* 消息贴近屏缘：收紧 thread / transcript 左右空隙（仍尊重 safe-area） */
   .chat-thread {
     padding-left: max(var(--space-2), env(safe-area-inset-left, 0px));

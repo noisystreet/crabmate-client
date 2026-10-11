@@ -1,4 +1,7 @@
-//! 底栏状态：模型、角色、运行态。
+//! 状态栈：模型、角色、思考模式、会话用量、运行态。
+//!
+//! 原底部状态栏已迁入右侧工作区列，纵向堆叠且可折叠（[`side_status_stack_view`]）；
+//! 右列收起时由浮动 rail / 移动端顶栏的迷你运行点（[`StatusRunDotButton`]）兜底。
 
 use std::sync::Arc;
 
@@ -8,6 +11,7 @@ use crate::api::load_client_llm_text_fields_from_storage;
 use crate::app_prefs::status_bar_effective_model;
 use crate::chat_session_state::ChatStreamBusyMemos;
 use crate::i18n::{self, Locale};
+use crate::icon::icon_chevron_down;
 use crate::user_prefs_sync_state::UserPrefsSyncPhase;
 
 use super::app_shell_ctx::StatusBarFooterSignals;
@@ -254,10 +258,11 @@ fn StatusBarThinkingToggle(
         <button
             type="button"
             class="status-chip status-chip-thinking"
-            class:status-chip-thinking--on=move || is_on()
+            role="switch"
+            class:settings-model-toggle-on=move || is_on()
             data-testid="status-thinking-toggle"
             prop:title=move || i18n::status_thinking_tooltip(locale.get())
-            prop:aria-pressed=is_on
+            prop:aria-checked=is_on
             on:click=move |_| {
                 let next = next_thinking_mode(&llm_thinking_mode.get_untracked());
                 llm_thinking_mode.set(next.to_string());
@@ -278,13 +283,9 @@ fn StatusBarThinkingToggle(
             <span class="status-chip-label">
                 {move || i18n::status_chip_thinking(locale.get())}
             </span>
-            <span class="status-chip-value">{move || {
-                if is_on() {
-                    i18n::status_thinking_on(locale.get())
-                } else {
-                    i18n::status_thinking_off(locale.get())
-                }
-            }}</span>
+            <span class="settings-model-toggle-track" aria-hidden="true">
+                <span class="settings-model-toggle-thumb"></span>
+            </span>
         </button>
     }
 }
@@ -565,12 +566,68 @@ fn StatusBarFooterBody(signals: StatusBarFooterSignals) -> impl IntoView {
     }
 }
 
-pub fn status_bar_footer_view(signals: StatusBarFooterSignals) -> impl IntoView {
-    let status_bar_visible = signals.status_bar_visible;
+/// 右列状态栈：把原底栏的（模型 / 角色 / 思考 / 会话 / 运行态）纵向堆叠进右侧工作区列，可折叠展开。
+///
+/// - 是否挂载由调用方（右列）判定；挂载后常驻显示，仅由表头按钮折叠展开。
+/// - `data-testid="status-bar"` 保留在内部 [`StatusBarFooterBody`] 的 `<footer>` 上，e2e 锚点不变。
+/// - 折叠只切 CSS 类，`StatusBarFooterBody` 始终挂载，避免 `observe_context_watermark` Effect 因开合重建。
+pub fn side_status_stack_view(
+    signals: StatusBarFooterSignals,
+    locale: RwSignal<Locale>,
+    collapsed: RwSignal<bool>,
+) -> impl IntoView {
     view! {
-        <Show when=move || status_bar_visible.get()>
-            <StatusBarFooterBody signals=signals.clone() />
-        </Show>
+        <div
+            class="side-status-stack"
+            class:side-status-stack--collapsed=move || collapsed.get()
+            data-testid="side-status-stack"
+        >
+            <button
+                type="button"
+                class="side-status-stack-head"
+                data-testid="side-status-stack-toggle"
+                prop:aria-expanded=move || (!collapsed.get()).to_string()
+                prop:title=move || i18n::side_status_btn_title(locale.get())
+                prop:aria-label=move || i18n::side_status_btn_title(locale.get())
+                on:click=move |_| collapsed.update(|c| *c = !*c)
+            >
+                <span class="side-status-stack-title">
+                    {move || i18n::side_status_btn_title(locale.get())}
+                </span>
+                {icon_chevron_down("side-status-stack-chevron")}
+            </button>
+            <div class="side-status-stack-body">
+                <StatusBarFooterBody signals=signals.clone() />
+            </div>
+        </div>
+    }
+}
+
+/// 收起态迷你运行点按钮：仅展示运行态色点，点击展开右列状态栈。
+///
+/// 桌面浮动 rail 与移动端顶栏共用；`title` / `aria-label` 复用运行态文案（含错误信息）。
+#[component]
+pub fn StatusRunDotButton(
+    st: StatusTasksSignals,
+    status_err: RwSignal<Option<String>>,
+    stream_busy_memos: ChatStreamBusyMemos,
+    locale: RwSignal<Locale>,
+    on_click: Callback<()>,
+) -> impl IntoView {
+    let label = move || run_indicator_text(locale.get(), st, status_err, stream_busy_memos);
+    view! {
+        <button
+            type="button"
+            class="status-run-dot-btn"
+            data-testid="status-run-dot"
+            prop:title=label
+            prop:aria-label=label
+            on:click=move |_| on_click.run(())
+        >
+            <span class=move || { run_indicator_kind(st, status_err, stream_busy_memos).class() }>
+                <span class="status-run-dot" aria-hidden="true"></span>
+            </span>
+        </button>
     }
 }
 

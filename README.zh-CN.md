@@ -104,7 +104,7 @@ make apk
 # 需要构建 UI 时：CM_MOBILE_BUILD_FRONTEND=1 make apk
 ```
 
-Android 壳默认隐藏应用内底部状态栏；仍可从侧栏工具条重新开启。`/chat/stream` 期间的前台保活与审批通知见 [ADR-0002](docs/adr/0002-android-approval-notification-foreground-keepalive.md)。
+应用内状态元素（运行指示、agent 角色、会话模式、上下文芯片）现为右列（工作区列）底部、面板主体之下的可折叠纵栈，取代原底部状态栏；右列收起时该栈保留 DOM 但视觉隐藏，由浮动 rail 迷你运行点（窄屏 / 移动端为顶栏迷你点）显示运行状态并点击重新展开右列。Android 壳默认隐藏该栈；仍可从侧栏工具条重新开启。`/chat/stream` 期间的前台保活与审批通知见 [ADR-0002](docs/adr/0002-android-approval-notification-foreground-keepalive.md)。
 
 ## 远程终端（crabmate-tui）
 

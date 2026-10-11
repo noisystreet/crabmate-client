@@ -104,7 +104,7 @@ make apk
 # to build UI as well: CM_MOBILE_BUILD_FRONTEND=1 make apk
 ```
 
-The Android shell starts with the in-app bottom status bar hidden; it can still be enabled from the side toolbar. Foreground keep-alive and approval notifications during `/chat/stream` are covered by [ADR-0002](docs/adr/0002-android-approval-notification-foreground-keepalive.md).
+The in-app status elements (run indicator, agent role, session mode, context chip) now live in a collapsible vertical stack docked at the bottom of the right workspace column, below the panel body, instead of the old bottom bar; when the column is collapsed the stack keeps its DOM but is visually hidden, and a floating mini run-dot on the rail (or the mini dot in the mobile top bar) shows the run state and reopens the column on click. The Android shell starts with this stack hidden; it can still be enabled from the side toolbar. Foreground keep-alive and approval notifications during `/chat/stream` are covered by [ADR-0002](docs/adr/0002-android-approval-notification-foreground-keepalive.md).
 
 ## Remote terminal (crabmate-tui)
 
