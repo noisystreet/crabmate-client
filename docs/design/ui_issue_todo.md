@@ -18,6 +18,7 @@
 2026-10-07：**IDE / 工作区三处反馈补齐**——跳转行非法（非数字 / `0` / 超界）输入改为可见 `role="alert"` 提示（不再静默 no-op），嵌套空目录展开补空态提示，空编辑器补可见占位文本；三条已归档至 [`ui_issue_todo_done.md`](./ui_issue_todo_done.md)。
 2026-10-11：**状态栏「会话上下文用量」芯片**落地同口径填充显示（灰段固定开销 + brand 段会话内容）与压缩 / 裁剪后水位回落；语义、不变式与「回落延迟到回合末是刻意」记入 [`ADR-0005`](../adr/0005-status-bar-context-watermark.md)，两项延迟项记入下方 P3。
 2026-10-11（续）：**模态遮罩层收敛**——新增共享组件 `FocusableModalBackdrop`（`frontend/src/app/focusable_menu.rs`），base 类名 `modal-backdrop` 与「点击遮罩自身关闭」判定（`target == current_target`）只声明一次；9 处手抄遮罩模板全部迁入（可关闭的经 `on_dismiss`、不可关闭的缺省 `None`、克隆弹窗保留 busy 守卫、各自分层类名 / `data-testid` 原样保留），裸 `on:click` 与 `mouse_event_target_is_current_target` 的判定分叉随之消除。见 P3 已归档条目。
+2026-10-11（续 2）：**IDE 标签栏 key 去掉位置**——`frontend/src/app/ide_tabs_bar.rs` 的 `<For>` 原以 `format!("{idx}:{path}:{pinned}")` 作 key，关闭使后续索引左移、钉住触发重排，均令 key 变化 → 其后标签 DOM 重建（键盘焦点丢失）且 `prop:id` / `data-testid` 快照漂移；改用 `<ForEnumerate key=path>`（key 只含稳定身份），关闭/钉住只移动节点，组件内激活判定、`prop:id` / `data-testid`（合并为一个 `Memo<String>`）与各 `on:*` 全部改用 `ForEnumerate` 提供的实时索引，`pinned` 与脏标改由按 `path` 实时解析的 `Memo` / 跟踪读提供。见 P2「IDE 与工作区」已归档条目。
 
 > **已完成项已归档**：原 `- [x]` 条目移至 [`ui_issue_todo_done.md`](./ui_issue_todo_done.md)，本清单只保留未完成项。
 
@@ -46,8 +47,6 @@
 - [ ] 纯浏览器宽屏触控平板（>768px 非壳）软键盘不抬高 composer。
 
 ## P2 · IDE 与工作区
-
-- [ ] 标签 `For` 的 key 含 `idx`，任意关闭/钉住都会令其后所有标签 DOM 重建、键盘焦点丢失，`prop:id` 随之漂移：`frontend/src/app/ide_tabs_bar.rs`。
 
 - [ ] 标签栏仅 `overflow-x:auto`，多标签溢出不自动滚到活动标签：`frontend/styles/ide-layout.css`。
 

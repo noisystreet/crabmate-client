@@ -65,6 +65,8 @@
 
 - [x] 嵌套空目录展开后无空态提示（根级有，子目录没有）：`frontend/src/workspace_tree.rs`。已修（2026-10-07）：`workspace_tree_dir_children_view` 在加载 / 错误分支之后，若 `nested` 为空且无挂起的行内新建（`pending_here`），渲染一条 `.workspace-tree-empty-note`（i18n `workspace_tree_empty_dir`）。
 
+- [x] 标签 `For` 的 key 含 `idx`，任意关闭/钉住都会令其后所有标签 DOM 重建、键盘焦点丢失，`prop:id` 随之漂移：`frontend/src/app/ide_tabs_bar.rs`。已修（2026-10-11）：根因是原 `<For key=|(idx, tab)| format!("{}:{}:{}", idx, …)>` 把**位置**编进 key——关闭使后续索引左移、钉住触发 `reorder_tabs_pinned_first` 重排，key 随之变化，`keyed` 便销毁重建其后标签 DOM（焦点丢失），且 `prop:id` / `data-testid` 是创建期快照 `ide-tab-{index}`，重排后与实际索引漂移。改为 `<ForEnumerate each=|| tabs.tabs.get() key=|tab| tab.path.clone()>`：key 只含稳定身份（`path` 全局唯一），关闭/钉住仅移动 DOM 节点、不重建 children；组件改收 `index: ReadSignal<usize>`（`ForEnumerate` 在节点移动时也会 `set_index`），`is_active` / `is_dirty` / `prop:id` / `data-testid` / 各 `on:*` 全部改用**实时**索引，`prop:id` 与 `data-testid` 合并为一个 `Memo<String>`（`ide-tab-{index}`）随重排更新，键盘方向键 `get_element_by_id("ide-tab-{next}")` 因而始终命中正确按钮。`pinned` 因 key 不变时 children 不重跑，改由按 `path` 从 `tabs` 实时解析的 `Memo`（`tab_is_pinned`）提供；`tab_display_dirty` / `active_editor_is_dirty` 同步改为**跟踪读**，使复用后的 `<Show>` / `aria-label` 脏标能随信号变化刷新（异步只读调用点无响应式 owner，不受影响）。
+
 
 ## P2 · 空态与确认
 
