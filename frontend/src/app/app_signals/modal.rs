@@ -10,6 +10,8 @@ pub struct ModalSignals {
     pub session_modal: RwSignal<bool>,
     pub settings_page: RwSignal<bool>,
     pub ide_settings_page: RwSignal<bool>,
+    /// 上下文用量可视化页（全屏页，非模态）。
+    pub context_usage_page: RwSignal<bool>,
     pub changelist_modal_open: RwSignal<bool>,
     pub changelist_modal_body: RwSignal<ChangelistModalBodyState>,
     pub changelist_body_ref: NodeRef<leptos::html::Div>,
@@ -25,6 +27,7 @@ impl ModalSignals {
             session_modal: RwSignal::new(false),
             settings_page: RwSignal::new(false),
             ide_settings_page: RwSignal::new(false),
+            context_usage_page: RwSignal::new(false),
             changelist_modal_open: RwSignal::new(false),
             changelist_modal_body: RwSignal::new(ChangelistModalBodyState::default()),
             changelist_body_ref: NodeRef::new(),

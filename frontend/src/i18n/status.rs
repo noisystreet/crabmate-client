@@ -62,10 +62,10 @@ pub fn status_chip_context(l: Locale) -> &'static str {
 pub fn status_chip_context_tooltip(l: Locale) -> &'static str {
     match l {
         Locale::ZhHans => {
-            "当前用量 used_input_tokens（message + attachment + 每轮固定开销：工具 JSON + 网关开销，tiktoken 粗估）占模型原始上下文窗口 max_input_tokens 的比例。灰段为固定开销，brand 段为会话内容；分子分母都含固定开销，故百分比即「离窗口上限还有多远」。数值取会话内滚动峰值，故正常对话中单调不减，仅在切换会话或服务端压缩 / 裁剪历史后回落。与网关计费可能有偏差。"
+            "当前用量 used_input_tokens（message + attachment + 每轮固定开销：工具 JSON + 网关开销，tiktoken 粗估）占模型原始上下文窗口 max_input_tokens 的比例。灰段为固定开销，brand 段为会话内容；分子分母都含固定开销，故百分比即「离窗口上限还有多远」。数值取会话内滚动峰值，故正常对话中单调不减，仅在切换会话或服务端压缩 / 裁剪历史后回落。与网关计费可能有偏差。点击查看用量明细。"
         }
         Locale::En => {
-            "Current usage used_input_tokens (message + attachment + per-turn fixed overhead: tool JSON + provider overhead, tiktoken estimate) against the model's raw context window max_input_tokens. The grey bar is the fixed overhead, the brand bar is conversation content; both numerator and denominator include fixed overhead, so the percentage is literally how close the window is to its limit. The value is a per-session rolling peak, so it never decreases during normal chat and only drops on session switch or after the server compacts / trims the history. May differ from provider billing."
+            "Current usage used_input_tokens (message + attachment + per-turn fixed overhead: tool JSON + provider overhead, tiktoken estimate) against the model's raw context window max_input_tokens. The grey bar is the fixed overhead, the brand bar is conversation content; both numerator and denominator include fixed overhead, so the percentage is literally how close the window is to its limit. The value is a per-session rolling peak, so it never decreases during normal chat and only drops on session switch or after the server compacts / trims the history. May differ from provider billing. Click to view the detailed breakdown."
         }
     }
 }
@@ -219,5 +219,129 @@ pub fn android_stream_keepalive_notify_needed(l: Locale) -> &'static str {
         Locale::En => {
             "Notifications are off: background keep-alive and approval alerts are unavailable. Enable notifications in system settings."
         }
+    }
+}
+
+// --- 上下文用量可视化页 ---
+
+pub fn context_usage_title(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "上下文用量",
+        Locale::En => "Context usage",
+    }
+}
+
+pub fn context_usage_back(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "返回",
+        Locale::En => "Back",
+    }
+}
+
+pub fn context_usage_badge(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "只读",
+        Locale::En => "Read-only",
+    }
+}
+
+pub fn context_usage_no_data(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "无数据",
+        Locale::En => "No data",
+    }
+}
+
+pub fn context_usage_empty(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "当前会话暂无上下文用量数据。",
+        Locale::En => "No context usage data for the current session.",
+    }
+}
+
+pub fn context_usage_note_refresh(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => {
+            "数据随每轮对话刷新；固定开销（工具 JSON / 网关开销）为 tiktoken 粗估，可能与网关计费有偏差。"
+        }
+        Locale::En => {
+            "Refreshed each turn; fixed overhead (tool JSON / provider overhead) is a tiktoken estimate and may differ from provider billing."
+        }
+    }
+}
+
+pub fn context_usage_note_estimate(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "当前为基线估算（尚无精确用量），条以虚线标示。",
+        Locale::En => "Showing a baseline estimate (no precise usage yet); the bar is dashed.",
+    }
+}
+
+pub fn context_usage_note_reverse(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => {
+            "条为当前构成；虚线标出会话内滚动峰值，顶部数字取该峰值，正常对话中单调不减，仅在切换会话或服务端压缩 / 裁剪历史后回落。"
+        }
+        Locale::En => {
+            "The bar shows the current composition; the dashed line marks the session's rolling peak and the headline figure is that peak — monotonically non-decreasing during normal chat and only dropping on session switch or after the server compacts / trims the history."
+        }
+    }
+}
+
+pub fn context_usage_reserved_note(l: Locale, tokens: u32) -> String {
+    match l {
+        Locale::ZhHans => {
+            format!("已预留输出预算 {tokens} tokens（与窗口占用关系未确认，未计入条内）。")
+        }
+        Locale::En => format!(
+            "Reserved output budget {tokens} tokens (its relation to window occupancy is unconfirmed and not counted in the bar)."
+        ),
+    }
+}
+
+/// 条 `aria-label`：说明条为「当前构成」，并在存在峰值虚线时一并说明峰值。
+pub fn context_usage_bar_aria(l: Locale, current: &str, peak: Option<&str>) -> String {
+    match (l, peak) {
+        (Locale::ZhHans, Some(p)) => {
+            format!("上下文用量条：当前构成 {current}；虚线标出会话内峰值 {p}")
+        }
+        (Locale::ZhHans, None) => format!("上下文用量条：当前构成 {current}"),
+        (Locale::En, Some(p)) => format!(
+            "Context usage bar: current composition {current}; the dashed line marks the session peak {p}"
+        ),
+        (Locale::En, None) => format!("Context usage bar: current composition {current}"),
+    }
+}
+
+/// 分段名称（按 key 查表；未知 key 回退到「其他」）。
+pub fn context_usage_bucket_name(l: Locale, key: &str) -> String {
+    match l {
+        Locale::ZhHans => context_usage_bucket_name_zh(key),
+        Locale::En => context_usage_bucket_name_en(key),
+    }
+    .to_string()
+}
+
+fn context_usage_bucket_name_zh(key: &str) -> &'static str {
+    match key {
+        "tool-schema" => "工具定义",
+        "other-fixed" => "其他固定开销",
+        "message" => "会话内容",
+        "attachment" => "附件",
+        "used" => "已用",
+        "remaining" => "剩余",
+        _ => "其他",
+    }
+}
+
+fn context_usage_bucket_name_en(key: &str) -> &'static str {
+    match key {
+        "tool-schema" => "Tool schema",
+        "other-fixed" => "Other fixed",
+        "message" => "Messages",
+        "attachment" => "Attachments",
+        "used" => "Used",
+        "remaining" => "Remaining",
+        _ => "Other",
     }
 }

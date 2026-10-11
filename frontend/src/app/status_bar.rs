@@ -198,6 +198,7 @@ struct StatusBarChipsSignals {
     llm_thinking_mode: RwSignal<String>,
     locale: RwSignal<Locale>,
     settings_page: RwSignal<bool>,
+    context_usage_page: RwSignal<bool>,
 }
 
 #[component]
@@ -290,16 +291,21 @@ fn StatusBarThinkingToggle(
 
 #[component]
 fn StatusBarChipsLoaded(
-    st: StatusTasksSignals,
-    client_llm_storage_tick: RwSignal<u64>,
-    selected_agent_role: RwSignal<Option<String>>,
-    agent_role_user_override: RwSignal<bool>,
-    selected_session_mode: RwSignal<String>,
-    session_mode_user_override: RwSignal<bool>,
-    llm_thinking_mode: RwSignal<String>,
-    locale: RwSignal<Locale>,
+    chips: StatusBarChipsSignals,
     role_menu_open: RwSignal<bool>,
 ) -> impl IntoView {
+    let StatusBarChipsSignals {
+        st,
+        client_llm_storage_tick,
+        selected_agent_role,
+        agent_role_user_override,
+        selected_session_mode,
+        session_mode_user_override,
+        llm_thinking_mode,
+        locale,
+        context_usage_page,
+        ..
+    } = chips;
     let chat = expect_chat_shell_ctx().chat;
     view! {
         <>
@@ -342,6 +348,7 @@ fn StatusBarChipsLoaded(
                 client_llm_storage_tick=client_llm_storage_tick
                 selected_agent_role=selected_agent_role
                 locale=locale
+                context_usage_page=context_usage_page
             />
         </>
     }
@@ -360,14 +367,9 @@ fn StatusBarChipsRow(
 ) -> impl IntoView {
     let StatusBarChipsSignals {
         st,
-        client_llm_storage_tick,
-        selected_agent_role,
-        agent_role_user_override,
-        selected_session_mode,
-        session_mode_user_override,
-        llm_thinking_mode,
         locale,
         settings_page,
+        ..
     } = chips;
     let role_menu_open = RwSignal::new(false);
     view! {
@@ -423,17 +425,7 @@ fn StatusBarChipsRow(
                     .into_any()
                 } else {
                     view! {
-                        <StatusBarChipsLoaded
-                            st=st
-                            client_llm_storage_tick=client_llm_storage_tick
-                            selected_agent_role=selected_agent_role
-                            agent_role_user_override=agent_role_user_override
-                            selected_session_mode=selected_session_mode
-                            session_mode_user_override=session_mode_user_override
-                            llm_thinking_mode=llm_thinking_mode
-                            locale=locale
-                            role_menu_open=role_menu_open
-                        />
+                        <StatusBarChipsLoaded chips=chips role_menu_open=role_menu_open />
                     }
                     .into_any()
                 }
@@ -516,6 +508,7 @@ fn StatusBarFooterBody(signals: StatusBarFooterSignals) -> impl IntoView {
         user_prefs_load_err,
         user_prefs_save_err,
         settings_page,
+        context_usage_page,
         conversation_hydration_err,
         ..
     } = signals;
@@ -540,6 +533,7 @@ fn StatusBarFooterBody(signals: StatusBarFooterSignals) -> impl IntoView {
         llm_thinking_mode,
         locale,
         settings_page,
+        context_usage_page,
     };
     view! {
         <footer

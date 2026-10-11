@@ -192,6 +192,7 @@ fn wire_phase3_escape_layered_dismiss(app: &AppSignals) {
         changelist_modal_open: app.modal.changelist_modal_open,
         settings_page: app.modal.settings_page,
         ide_settings_page: app.modal.ide_settings_page,
+        context_usage_page: app.modal.context_usage_page,
         session_modal: app.modal.session_modal,
         approval: ApprovalModalSignals {
             pending_approval: app.approval.pending_approval,

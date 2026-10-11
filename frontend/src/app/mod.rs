@@ -13,6 +13,7 @@ mod approval_modal;
 mod changelist_modal;
 mod chat;
 pub(crate) use chat::turn_lifecycle;
+mod context_usage_page;
 pub(crate) mod focusable_menu;
 mod github_embed_page;
 mod github_wiring;
@@ -77,6 +78,7 @@ use approval_modal::ApprovalModal;
 use changelist_modal::changelist_modal_view;
 use chat::ChatFindBar;
 use chat::chat_column_view;
+use context_usage_page::ContextUsagePageView;
 use ide_confirm_dialog::IdeConfirmDialog;
 use ide_layout::{IdeLayoutShellSignals, IdeLayoutView};
 use ide_layout_switch::IdeLayoutToggleSignals;
@@ -110,6 +112,15 @@ fn app_root_class_name(collapsed: bool, snap: bool, ide_layout: bool) -> String 
     c
 }
 
+/// 主区是否被全屏页遮挡：设置 / IDE 设置 / 上下文用量三页任一打开即隐藏（集中计算，减少 App 内 reactive 闭包数）。
+fn shell_main_hidden(
+    settings_page: RwSignal<bool>,
+    ide_settings_page: RwSignal<bool>,
+    context_usage_page: RwSignal<bool>,
+) -> bool {
+    settings_page.get() || ide_settings_page.get() || context_usage_page.get()
+}
+
 #[component]
 fn SidebarRailRevealBtn(
     sidebar_rail_collapsed: RwSignal<bool>,
@@ -139,6 +150,7 @@ pub fn App() -> impl IntoView {
     let approval_modal_signals = app_ctx.approval_modal_signals();
     let settings_page_view_input = app_ctx.settings_page_view_input();
     let ide_settings_page_view_input = app_ctx.ide_settings_page_view_input();
+    let context_usage_page_view_input = app_ctx.context_usage_page_view_input();
     let mobile_shell_header_signals = app_ctx.mobile_shell_header_signals();
     let changelist_modal_signals = app_ctx.changelist_modal_signals();
     let session_list_modal_signals = app_ctx.session_list_modal_signals();
@@ -171,8 +183,11 @@ pub fn App() -> impl IntoView {
                 class="shell-main"
                 id="layout-mode-panel-main"
                 class:settings-page-hidden=move || {
-                    app_ctx.signals.modal.settings_page.get()
-                        || app_ctx.signals.modal.ide_settings_page.get()
+                    shell_main_hidden(
+                        app_ctx.signals.modal.settings_page,
+                        app_ctx.signals.modal.ide_settings_page,
+                        app_ctx.signals.modal.context_usage_page,
+                    )
                 }
                 class:shell-main--ide-layout=move || app_ctx.signals.shell_ui.editor_layout_mode.get()
             >
@@ -239,6 +254,7 @@ pub fn App() -> impl IntoView {
 
             <SettingsPageView input=settings_page_view_input />
             <IdeSettingsPageView input=ide_settings_page_view_input />
+            <ContextUsagePageView input=context_usage_page_view_input />
             <IdeConfirmDialog
                 locale=app_ctx.signals.shell_ui.locale
                 chrome=app_ctx.signals.ide_chrome

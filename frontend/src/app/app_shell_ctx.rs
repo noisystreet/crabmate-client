@@ -26,6 +26,7 @@ use crate::app_prefs::SidePanelView;
 
 use super::app_signals::AppSignals;
 use super::chat::ChatColumnShell;
+use super::context_usage_page::ContextUsagePageViewInput;
 use super::ide_layout_switch::IdeLayoutToggleSignals;
 use super::ide_settings_page::IdeSettingsPageViewInput;
 use super::settings_page::{SettingsPageFormSignals, SettingsPageViewInput};
@@ -95,6 +96,7 @@ pub struct StatusBarFooterSignals {
     pub user_prefs_save_err: RwSignal<Option<String>>,
     pub settings_page: RwSignal<bool>,
     pub conversation_hydration_err: RwSignal<Option<String>>,
+    pub context_usage_page: RwSignal<bool>,
 }
 
 type SideResizeHandlesCell = Rc<
@@ -276,6 +278,7 @@ impl AppShellCtx {
             user_prefs_save_err: self.signals.workspace.user_prefs_save_err,
             settings_page: self.signals.modal.settings_page,
             conversation_hydration_err: self.signals.chat.conversation_hydration_err,
+            context_usage_page: self.signals.modal.context_usage_page,
         }
     }
 
@@ -337,6 +340,18 @@ impl AppShellCtx {
             ide_settings_page: self.signals.modal.ide_settings_page,
             locale: self.signals.shell_ui.locale,
             editor: self.signals.ide_editor,
+        }
+    }
+
+    /// 上下文用量可视化全屏页入参（与状态栏「会话」芯片同源信号）。
+    pub fn context_usage_page_view_input(&self) -> ContextUsagePageViewInput {
+        ContextUsagePageViewInput {
+            context_usage_page: self.signals.modal.context_usage_page,
+            st: self.signals.to_status_tasks(),
+            chat: self.signals.chat,
+            client_llm_storage_tick: self.signals.llm_settings.client_llm_storage_tick,
+            selected_agent_role: self.signals.llm_settings.selected_agent_role,
+            locale: self.signals.shell_ui.locale,
         }
     }
 }

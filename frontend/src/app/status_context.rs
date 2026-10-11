@@ -31,7 +31,7 @@ fn status_bar_context_chip_visible(chat: ChatSessionSignals) -> bool {
     !chat.active_id.get().is_empty()
 }
 
-fn status_bar_context_snapshot_for_active_session(
+pub(super) fn status_bar_context_snapshot_for_active_session(
     chat: ChatSessionSignals,
 ) -> Option<TiktokenPromptTokensSnapshot> {
     let snap = chat.conversation_prompt_tokens.get()?;
@@ -90,7 +90,7 @@ fn status_bar_context_is_baseline_estimate(chat: ChatSessionSignals, used: Optio
         && !active_session_has_server_conversation_id(chat)
 }
 
-fn status_bar_context_cap_and_used(
+pub(super) fn status_bar_context_cap_and_used(
     chat: ChatSessionSignals,
     st: StatusTasksSignals,
     client_llm_storage_tick: RwSignal<u64>,
@@ -117,21 +117,30 @@ fn status_bar_context_cap_and_used(
 /// 与「会话连续增长的内容」分色。服务端每轮按当前 user 消息关键词重选 L5 Skills 正文会让 `used` 波动，
 /// 故对 `used` 取会话内滚动水位（见 `ContextUsedWatermark`）。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct ContextAxis {
+pub(super) struct ContextAxis {
     /// 当前用量 `used_input_tokens`（含固定开销；未施水位）。
-    used: u32,
+    pub(super) used: u32,
     /// 固定开销 F = `used − (message_tokens + attachment_tokens)`（用量条灰段）。
-    fixed: u32,
+    pub(super) fixed: u32,
     /// 服务端原始 `max_input_tokens`（文本分母 + 用量条刻度）。
-    raw_cap: u32,
+    pub(super) raw_cap: u32,
     /// 无服务端实测、仅有 system 基线估算（文本带 `~`）。
-    baseline_estimate: bool,
+    pub(super) baseline_estimate: bool,
 }
 
 /// 紧凑 token 文本：≥1 万用 `k`（一位小数，如 `116.9k`），否则原样整数。
-fn format_compact_tokens(n: u32) -> String {
+pub(super) fn format_compact_tokens(n: u32) -> String {
     if n >= 10_000 {
         format!("{:.1}k", f64::from(n) / 1000.0)
+    } else {
+        n.to_string()
+    }
+}
+
+/// 上限（`max_input_tokens`）紧凑文本：≥1 万用整 `k`、不带小数（如 `200k` / `1000k`），否则原样整数。
+pub(super) fn format_compact_cap_tokens(n: u32) -> String {
+    if n >= 10_000 {
+        format!("{:.0}k", f64::from(n) / 1000.0)
     } else {
         n.to_string()
     }
@@ -176,7 +185,7 @@ fn context_axis_from_snapshot(
 }
 
 /// 计算当前活动会话的上下文轴线（`None` = 无活动会话 / 无用量）。
-fn status_bar_context_axis(
+pub(super) fn status_bar_context_axis(
     chat: ChatSessionSignals,
     st: StatusTasksSignals,
     client_llm_storage_tick: RwSignal<u64>,
@@ -224,7 +233,10 @@ pub(super) fn observe_context_watermark(
 
 /// 施加用量水位（单调不减）：基线估算不施水位；水位归属 cid 与当前会话不一致时也不施，
 /// 避免切会话 / 重发流换 cid 的瞬间把旧峰值施加到新会话上。
-fn context_axis_apply_watermark(axis: ContextAxis, chat: ChatSessionSignals) -> ContextAxis {
+pub(super) fn context_axis_apply_watermark(
+    axis: ContextAxis,
+    chat: ChatSessionSignals,
+) -> ContextAxis {
     if axis.baseline_estimate {
         return axis;
     }
@@ -239,7 +251,7 @@ fn context_axis_apply_watermark(axis: ContextAxis, chat: ChatSessionSignals) -> 
 }
 
 /// 用量占比（`used / raw_cap`，百分比）；上限为 0 时返回 0。
-fn context_axis_used_pct(axis: ContextAxis) -> f64 {
+pub(super) fn context_axis_used_pct(axis: ContextAxis) -> f64 {
     if axis.raw_cap == 0 {
         0.0
     } else {
@@ -248,7 +260,7 @@ fn context_axis_used_pct(axis: ContextAxis) -> f64 {
 }
 
 /// 底栏文案：`[~]used_k / max_k (pct%)`；上限为 0 时省略百分比。
-fn status_bar_context_value_text(axis: ContextAxis) -> String {
+pub(super) fn status_bar_context_value_text(axis: ContextAxis) -> String {
     let prefix = if axis.baseline_estimate { "~" } else { "" };
     if axis.raw_cap == 0 {
         return format!("{prefix}{}", format_compact_tokens(axis.used));
@@ -256,15 +268,15 @@ fn status_bar_context_value_text(axis: ContextAxis) -> String {
     format!(
         "{prefix}{} / {} ({:.1}%)",
         format_compact_tokens(axis.used),
-        format_compact_tokens(axis.raw_cap),
+        format_compact_cap_tokens(axis.raw_cap),
         context_axis_used_pct(axis).min(999.9)
     )
 }
 
 /// 无轴线（无活动会话 / 无用量）时的占位文案：`— / B_k`（无上限则 `—`）。
-fn status_bar_context_placeholder_text(raw_cap: u32) -> String {
+pub(super) fn status_bar_context_placeholder_text(raw_cap: u32) -> String {
     if raw_cap > 0 {
-        format!("— / {}", format_compact_tokens(raw_cap))
+        format!("— / {}", format_compact_cap_tokens(raw_cap))
     } else {
         "—".to_string()
     }
@@ -309,6 +321,11 @@ fn StatusBarContextMeter(
     }
 }
 
+/// 「会话」芯片的键盘激活：Enter / Space 等价于点击（打开用量可视化页）。
+fn status_context_chip_activate_key(ev: &web_sys::KeyboardEvent) -> bool {
+    ev.key() == "Enter" || ev.key() == " "
+}
+
 #[component]
 pub fn StatusBarContextChip(
     st: StatusTasksSignals,
@@ -316,12 +333,24 @@ pub fn StatusBarContextChip(
     client_llm_storage_tick: RwSignal<u64>,
     selected_agent_role: RwSignal<Option<String>>,
     locale: RwSignal<Locale>,
+    context_usage_page: RwSignal<bool>,
 ) -> impl IntoView {
+    let open_page = move || context_usage_page.set(true);
     view! {
         <Show when=move || status_bar_context_chip_visible(chat)>
             <span
                 class="status-chip status-chip-context"
+                role="button"
+                tabindex="0"
                 prop:title=move || i18n::status_chip_context_tooltip(locale.get())
+                prop:aria-label=move || i18n::status_chip_context_tooltip(locale.get())
+                on:click=move |_| open_page()
+                on:keydown=move |ev: web_sys::KeyboardEvent| {
+                    if status_context_chip_activate_key(&ev) {
+                        ev.prevent_default();
+                        open_page();
+                    }
+                }
             >
                 <span class="status-chip-context-row">
                     <span class="status-chip-label">
@@ -363,7 +392,34 @@ pub fn StatusBarContextChip(
 
 #[cfg(test)]
 mod tests {
-    use super::status_context_meter_fill_class;
+    use super::{
+        ContextAxis, format_compact_cap_tokens, format_compact_tokens,
+        status_bar_context_value_text, status_context_meter_fill_class,
+    };
+
+    #[test]
+    fn cap_tokens_drop_decimal_while_used_keeps_it() {
+        // 上限用整 `k`：1000.0k → 1000k。
+        assert_eq!(format_compact_cap_tokens(1_000_000), "1000k");
+        assert_eq!(format_compact_cap_tokens(200_000), "200k");
+        assert_eq!(format_compact_cap_tokens(9_999), "9999");
+        // 已用仍保留一位小数。
+        assert_eq!(format_compact_tokens(116_900), "116.9k");
+    }
+
+    #[test]
+    fn value_text_renders_cap_without_decimal() {
+        let axis = ContextAxis {
+            used: 116_900,
+            fixed: 0,
+            raw_cap: 1_000_000,
+            baseline_estimate: false,
+        };
+        assert_eq!(
+            status_bar_context_value_text(axis),
+            "116.9k / 1000k (11.7%)"
+        );
+    }
 
     #[test]
     fn context_meter_fill_prefers_estimate_over_warn() {
