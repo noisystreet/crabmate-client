@@ -17,9 +17,12 @@ crabmate-connect = { path = "../../crates/crabmate-connect", features = ["tauri"
 
 # Android：reqwest 的 rustls 后端用 rustls-platform-verifier 校验系统证书库，
 # 须经 JNI 注入 Context（见 src/android_tls.rs）；jni 版本与上游要求一致（0.22）。
+# 固定 =0.7.0：0.7.1 起 Android AAR 不再随 crate 打包，改由上游 GitHub 分支的 Maven 仓库分发
+#（本机构建环境访问 github 不稳定）；0.7.0 的 AAR 仍随 crate 打包、可离线构建。
+# 0.7.1 仅新增主机名尾部 `.` 的跨平台兼容处理（非安全修复），降级无安全影响。
 [target.'cfg(target_os = "android")'.dependencies]
 jni = "0.22"
-rustls-platform-verifier = "0.7"
+rustls-platform-verifier = "=0.7.0"
 
 [lib]
 name = "crabmate_mobile_lib"
