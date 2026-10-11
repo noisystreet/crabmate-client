@@ -25,7 +25,6 @@ pub(crate) struct ShellUiInitialSnapshot {
     /// 聊天主列是否展示本轮注入 / 裁剪时间线（首屏默认关）。
     pub show_turn_context_inject: bool,
     pub locale: Locale,
-    pub status_bar_visible: bool,
     pub side_panel_view: SidePanelView,
     pub side_width: f64,
     pub editor_layout_mode: bool,
@@ -52,27 +51,20 @@ pub(crate) fn platform_side_panel_on_entry(
     current
 }
 
-/// Android 壳每次进入默认隐藏应用内底部状态栏；其它端沿用已存偏好。
-#[must_use]
-pub(crate) fn platform_status_bar_on_entry(mobile_remote: bool, current: bool) -> bool {
-    !mobile_remote && current
-}
-
-/// 移动 / 窄屏时侧栏与状态栏仅本端生效，不得经 `/user-data/prefs` 写回覆盖其它客户端。
+/// 移动 / 窄屏时侧栏仅本端生效，不得经 `/user-data/prefs` 写回覆盖其它客户端。
 #[must_use]
 pub(crate) fn narrow_or_mobile_shell_layout(narrow_viewport: bool) -> bool {
     crate::mobile_remote::mobile_remote_client() || narrow_viewport
 }
 
-/// 侧栏视图 / 应用内底部状态栏是否应与 `/user-data/prefs` 同步。
+/// 侧栏视图是否应与 `/user-data/prefs` 同步。
 #[must_use]
 pub(crate) fn shell_layout_prefs_sync_to_server(narrow_or_mobile: bool) -> bool {
     !narrow_or_mobile
 }
 
-/// 进入壳层后按端调整工作区侧栏与应用内底部状态栏。
+/// 进入壳层后按端调整工作区侧栏。
 pub(crate) fn apply_platform_shell_ui_on_entry(app: &AppSignals) {
-    let mobile = crate::mobile_remote::mobile_remote_client();
     let narrow = app.shell_ui.is_narrow_viewport.get_untracked();
     let narrow_or_mobile = narrow_or_mobile_shell_layout(narrow);
     let next = platform_side_panel_on_entry(
@@ -81,11 +73,6 @@ pub(crate) fn apply_platform_shell_ui_on_entry(app: &AppSignals) {
     );
     if next != app.shell_ui.side_panel_view.get_untracked() {
         app.shell_ui.side_panel_view.set(next);
-    }
-    let status_bar_visible =
-        platform_status_bar_on_entry(mobile, app.shell_ui.status_bar_visible.get_untracked());
-    if status_bar_visible != app.shell_ui.status_bar_visible.get_untracked() {
-        app.shell_ui.status_bar_visible.set(status_bar_visible);
     }
 }
 
@@ -100,7 +87,6 @@ pub(crate) fn read_shell_ui_initial_snapshot() -> ShellUiInitialSnapshot {
         bg_decor: true,
         show_turn_context_inject: false,
         locale: Locale::ZhHans,
-        status_bar_visible: false,
         side_panel_view: SidePanelView::Workspace,
         side_width: DEFAULT_SIDE_WIDTH,
         editor_layout_mode: false,
@@ -241,7 +227,7 @@ pub(crate) fn apply_narrow_viewport_dom_flag(narrow: bool) {
 #[cfg(test)]
 mod platform_shell_ui_tests {
     use super::{
-        narrow_or_mobile_shell_layout, platform_side_panel_on_entry, platform_status_bar_on_entry,
+        narrow_or_mobile_shell_layout, platform_side_panel_on_entry,
         shell_layout_prefs_sync_to_server,
     };
     use crate::app_prefs::SidePanelView;
@@ -272,18 +258,6 @@ mod platform_shell_ui_tests {
             platform_side_panel_on_entry(false, SidePanelView::DebugConsole),
             SidePanelView::DebugConsole
         );
-    }
-
-    #[test]
-    fn android_entry_hides_status_bar_regardless_of_saved_pref() {
-        assert!(!platform_status_bar_on_entry(true, true));
-        assert!(!platform_status_bar_on_entry(true, false));
-    }
-
-    #[test]
-    fn desktop_entry_keeps_saved_status_bar_visibility() {
-        assert!(platform_status_bar_on_entry(false, true));
-        assert!(!platform_status_bar_on_entry(false, false));
     }
 
     #[test]

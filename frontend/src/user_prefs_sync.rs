@@ -46,15 +46,11 @@ fn effective_sidebar_rail_collapsed_for_persist(app: &AppSignals) -> bool {
 fn shell_layout_fields_for_prefs_sync(
     narrow_or_mobile: bool,
     side_panel: SidePanelView,
-    status_bar_visible: bool,
-) -> (Option<String>, Option<bool>) {
+) -> Option<String> {
     if crate::app::shell_prefs_storage::shell_layout_prefs_sync_to_server(narrow_or_mobile) {
-        (
-            Some(side_panel_slug(side_panel).to_string()),
-            Some(status_bar_visible),
-        )
+        Some(side_panel_slug(side_panel).to_string())
     } else {
-        (None, None)
+        None
     }
 }
 
@@ -62,10 +58,9 @@ pub fn build_prefs_dto(app: &AppSignals) -> UserPrefsDto {
     let narrow_or_mobile = crate::app::shell_prefs_storage::narrow_or_mobile_shell_layout(
         app.shell_ui.is_narrow_viewport.get_untracked(),
     );
-    let (side_panel_view, status_bar_visible) = shell_layout_fields_for_prefs_sync(
+    let side_panel_view = shell_layout_fields_for_prefs_sync(
         narrow_or_mobile,
         app.shell_ui.side_panel_view.get_untracked(),
-        app.shell_ui.status_bar_visible.get_untracked(),
     );
     UserPrefsDto {
         locale: Some(
@@ -94,7 +89,6 @@ pub fn build_prefs_dto(app: &AppSignals) -> UserPrefsDto {
         ide_editor_tab_size: Some(app.ide_editor.tab_size.get_untracked() as u32),
         bg_decor: Some(app.shell_ui.bg_decor.get_untracked()),
         show_turn_context_inject: Some(app.shell_ui.show_turn_context_inject.get_untracked()),
-        status_bar_visible,
         cm_role: app
             .llm_settings
             .selected_agent_role
@@ -151,9 +145,6 @@ fn apply_shell_appearance_prefs(app: &AppSignals, dto: &UserPrefsDto) {
 fn apply_shell_layout_prefs(app: &AppSignals, dto: &UserPrefsDto) {
     let skip_server_layout = crate::mobile_remote::mobile_remote_client();
     if !skip_server_layout {
-        if let Some(v) = dto.status_bar_visible {
-            app.shell_ui.status_bar_visible.set(v);
-        }
         if let Some(ref sp) = dto.side_panel_view {
             app.shell_ui.side_panel_view.set(side_panel_from_slug(sp));
         }
@@ -402,7 +393,6 @@ pub fn wire_persist_user_prefs_to_server(app: AppSignals) {
         let _ = app.shell_ui.bg_decor.get();
         let _ = app.shell_ui.show_turn_context_inject.get();
         let _ = app.shell_ui.locale.get();
-        let _ = app.shell_ui.status_bar_visible.get();
         let _ = app.shell_ui.side_panel_view.get();
         let _ = app.shell_ui.side_width.get();
         let _ = app.shell_ui.editor_layout_mode.get();
@@ -479,45 +469,32 @@ mod tests {
     fn cross_client_get_platform_apply_put_omits_device_local_layout_on_mobile() {
         use super::shell_layout_fields_for_prefs_sync;
         use crate::app::shell_prefs_storage::{
-            platform_side_panel_on_entry, platform_status_bar_on_entry,
-            shell_layout_prefs_sync_to_server,
+            platform_side_panel_on_entry, shell_layout_prefs_sync_to_server,
         };
 
         let server_side = SidePanelView::Tasks;
-        let server_status = true;
         let narrow_or_mobile = true;
 
         assert!(!shell_layout_prefs_sync_to_server(narrow_or_mobile));
         let ui_side = platform_side_panel_on_entry(narrow_or_mobile, server_side);
-        let ui_status = platform_status_bar_on_entry(true, server_status);
         assert_eq!(ui_side, SidePanelView::None);
-        assert!(!ui_status);
 
-        let (dto_side, dto_status) =
-            shell_layout_fields_for_prefs_sync(narrow_or_mobile, ui_side, ui_status);
+        let dto_side = shell_layout_fields_for_prefs_sync(narrow_or_mobile, ui_side);
         assert!(dto_side.is_none());
-        assert!(dto_status.is_none());
     }
 
     #[test]
     fn desktop_layout_prefs_still_sync_to_server() {
         use super::shell_layout_fields_for_prefs_sync;
-        use crate::app::shell_prefs_storage::{
-            platform_side_panel_on_entry, platform_status_bar_on_entry,
-        };
+        use crate::app::shell_prefs_storage::platform_side_panel_on_entry;
 
         let server_side = SidePanelView::Tasks;
-        let server_status = true;
         let narrow_or_mobile = false;
 
         let ui_side = platform_side_panel_on_entry(narrow_or_mobile, server_side);
-        let ui_status = platform_status_bar_on_entry(false, server_status);
         assert_eq!(ui_side, SidePanelView::Tasks);
-        assert!(ui_status);
 
-        let (dto_side, dto_status) =
-            shell_layout_fields_for_prefs_sync(narrow_or_mobile, ui_side, ui_status);
+        let dto_side = shell_layout_fields_for_prefs_sync(narrow_or_mobile, ui_side);
         assert_eq!(dto_side.as_deref(), Some("tasks"));
-        assert_eq!(dto_status, Some(true));
     }
 }

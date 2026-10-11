@@ -3,6 +3,7 @@
 
 use leptos::prelude::*;
 
+use crate::app_prefs::SidePanelView;
 use crate::i18n::{self, Locale};
 use crate::mobile_remote::mobile_remote_client;
 use crate::tauri_shell::tauri_shell_available;
@@ -14,6 +15,7 @@ use super::ide_menu_bar::{
     ShellTopbarMenuBackdrop,
 };
 use super::layout_mode_segment::LayoutModeSegment;
+use super::status_bar::StatusRunDotButton;
 use super::tauri_window_controls::TauriWindowControls;
 use super::workspace_root_actions::{ShellTopbarWorkspaceRoot, WorkspaceRootPickHandle};
 
@@ -159,6 +161,10 @@ pub fn mobile_shell_header_view(signals: MobileShellHeaderSignals) -> impl IntoV
         layout_toggle,
         workspace_pick,
         ide_menubar_dropdown_open,
+        side_panel_view,
+        status_tasks,
+        status_err,
+        stream_busy_memos,
     } = signals;
     view! {
         <header
@@ -178,6 +184,17 @@ pub fn mobile_shell_header_view(signals: MobileShellHeaderSignals) -> impl IntoV
             />
             <ShellTopbarWorkspaceRoot pick=workspace_pick />
             <div class="shell-topbar-trailing">
+                <Show when=move || is_narrow_viewport.get()>
+                    <StatusRunDotButton
+                        st=status_tasks
+                        status_err=status_err
+                        stream_busy_memos=stream_busy_memos
+                        locale=locale
+                        on_click=Callback::new(move |_| {
+                            side_panel_view.set(SidePanelView::Workspace)
+                        })
+                    />
+                </Show>
                 <ShellTopbarFileStatusSlot
                     locale=locale
                     editor_layout_mode=editor_layout_mode

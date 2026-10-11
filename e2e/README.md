@@ -190,7 +190,7 @@ REAL_LLM_E2E=1 npx playwright test specs/real-llm-three-turn-scroll.spec.ts
 
 - **持久化验证**：mock SSE 不包含 `conversation_saved` 事件，无法验证消息持久化。持久化回归由 `victauri_turn_layout.rs` 覆盖。
 - **第二次 answer_phase**：无 delta 的第二次 `assistant_answer_phase` 后紧跟 `RUN_FINISHED`，可触发 `followup_pending` 在 `on_done` 中处理的路径（PR #678 修复二的精确场景）。
-- **状态栏等待**：使用 `[data-testid="status-bar"]` 包含文本 "就绪" 判断流完成。
+- **状态栏等待**：`[data-testid="status-bar"]` 现位于右列（工作区列）的状态栈内；栈在右列收起时保留 DOM 但视觉隐藏，故只用 `toContainText`（读 textContent，对隐藏元素仍生效）判断流完成。需要 `toBeVisible` / 点击的用例须先展开右列（`seedSession(..., { sidePanelView: "workspace" })`）。
 - **选择器偏好**：优先使用 `data-testid` 属性选择器，避免依赖文本或 CSS 类名。
 - **TUI 流式闪烁**：`specs/mock-tui-stream-flicker.spec.ts` 用 8ms 采样 + `innerHTML` 钩子检测「正文首次出现后短暂消失」；含 delayed `conversation_saved` → `GET /conversation/messages`（revision+1）竞态。`specs/mock-ready-bubble-stability.spec.ts` 冻结已定稿 `section.chat-tui-turn` 的 `data-tui-msg-id`，断言流式中不消失。
 - **助手正文清空再出现**：`specs/mock-assistant-content-blank.spec.ts` 冻结首次出现旁白的 `data-tui-msg-id`；旧 mid 移交后变空可接受，但旁白标记不得整段消失再出现。

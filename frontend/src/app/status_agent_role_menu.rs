@@ -68,15 +68,11 @@ fn apply_agent_role_selection(
 fn menu_fixed_style_for_trigger(trigger: &web_sys::HtmlElement) -> String {
     let el = trigger.unchecked_ref::<web_sys::Element>();
     let rect = el.get_bounding_client_rect();
-    let viewport_h = web_sys::window()
-        .and_then(|w| w.inner_height().ok())
-        .and_then(|v| v.as_f64())
-        .unwrap_or(0.0);
-    let bottom = (viewport_h - rect.top() + 4.0).max(0.0);
+    let top = (rect.bottom() + 4.0).max(0.0);
     format!(
-        "position:fixed;left:{}px;bottom:{}px;min-width:{}px;top:auto;z-index:201;",
+        "position:fixed;left:{}px;top:{}px;min-width:{}px;bottom:auto;z-index:201;",
         rect.left(),
-        bottom,
+        top,
         rect.width()
     )
 }

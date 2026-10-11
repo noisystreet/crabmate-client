@@ -22,8 +22,15 @@ export function apiUrl(path: string): string {
   return `${base}${path}`;
 }
 
-/** 设置 prefs、session，再导航一次等待输入框就绪（避免 SPA 防抖 PUT 盖住 seed）。*/
-export async function seedSession(page: Page, sid: string) {
+/** 设置 prefs、session，再导航一次等待输入框就绪（避免 SPA 防抖 PUT 盖住 seed）。
+ *
+ * `opts.sidePanelView` 覆盖 `side_panel_view`（默认 `"hidden"`，即右列收起；
+ * 需要状态栈可见的用例传 `"workspace"`）。*/
+export async function seedSession(
+  page: Page,
+  sid: string,
+  opts: { sidePanelView?: string } = {},
+) {
   await applyWebApiBearerHeaders(page);
 
   const bearer = resolveWebApiBearerToken();
@@ -37,7 +44,7 @@ export async function seedSession(page: Page, sid: string) {
   const prefs = {
     locale: "zh",
     theme: "crabmate-light",
-    side_panel_view: "hidden",
+    side_panel_view: opts.sidePanelView ?? "hidden",
     side_width: 280,
     editor_layout_mode: false,
     status_bar_visible: true,

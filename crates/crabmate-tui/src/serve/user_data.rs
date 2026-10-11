@@ -52,8 +52,6 @@ pub struct UserPrefsDto {
     /// 聊天主列是否展示本轮 `context_inject` / `context_trim` 旁注；缺省视为关。
     #[serde(default)]
     pub show_turn_context_inject: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub status_bar_visible: Option<bool>,
     #[serde(default)]
     pub cm_role: Option<String>,
     #[serde(default)]

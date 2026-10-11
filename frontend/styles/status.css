@@ -1,31 +1,115 @@
-/* —— 状态栏 —— */
+/* —— 状态栏（已迁入右列，纵向堆叠）—— */
 .status-bar {
-  flex-shrink: 0;
-  padding: 4px 12px;
+  padding: 8px 10px;
   font-size: var(--text-md);
-  border-top: 1px solid var(--border-subtle);
-  background: color-mix(in srgb, var(--bg) 68%, var(--bg-elevated));
   color: var(--muted);
   display: flex;
-  align-items: center;
-  gap: 10px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
   min-width: 0;
-  justify-content: space-between;
 }
 
 .status-chips {
   min-width: 0;
-  flex: 1 1 auto;
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  /* 四个 chip 统一撑满右列宽度（同宽），高度由各 chip 的 24px 统一。 */
+  align-items: stretch;
   gap: 6px;
-  overflow-x: auto;
-  overflow-y: hidden;
-  padding-bottom: 0;
+  overflow: visible;
 }
 
 .status-chips--role-menu-open {
   overflow-y: visible;
+}
+
+/* —— 右列状态栈容器（原底栏迁入；纵向堆叠 + 可折叠）—— */
+.side-status-stack {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  min-width: 0;
+  border-top: 1px solid var(--border-subtle);
+  background: color-mix(in srgb, var(--bg) 68%, var(--bg-elevated));
+}
+
+.side-status-stack-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 10px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.side-status-stack-head:hover {
+  color: var(--text);
+}
+
+.side-status-stack-head:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.side-status-stack-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-xs);
+  letter-spacing: calc(0.04em * var(--label-tracking-scale));
+  text-transform: var(--label-transform);
+}
+
+.side-status-stack-chevron {
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+  flex-shrink: 0;
+  opacity: 0.75;
+  transition: transform 0.15s ease;
+}
+
+.side-status-stack--collapsed .side-status-stack-chevron {
+  transform: rotate(-90deg);
+}
+
+.side-status-stack-body {
+  min-width: 0;
+}
+
+.side-status-stack--collapsed .side-status-stack-body {
+  display: none;
+}
+
+/* 收起态迷你运行点：桌面浮动 rail / 移动端顶栏的兜底入口 */
+.status-run-dot-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border: none;
+  border-radius: var(--radius-btn);
+  background: transparent;
+  cursor: pointer;
+}
+
+.status-run-dot-btn:hover {
+  background: var(--surface-hover);
+}
+
+/* 迷你点只用色点：压掉内部 chip 外框与内边距 */
+.status-run-dot-btn .status-run {
+  height: auto;
+  padding: 0;
+  border: none;
+  background: transparent;
 }
 
 .status-chip {
@@ -66,9 +150,11 @@
   z-index: 45;
 }
 
-/* 状态栏「思考模式」两态开关 */
+/* 状态栏「思考模式」两态开关（轨道 + 滑块沿用设置页 .settings-model-toggle-* 样式） */
 .status-chip-thinking {
   cursor: pointer;
+  justify-content: space-between;
+  font-size: var(--text-md);
   border: 1px solid var(--border);
   background: color-mix(in srgb, var(--bg-elevated) 86%, var(--surface));
   color: var(--muted);
@@ -77,16 +163,6 @@
 
 .status-chip-thinking:hover {
   border-color: color-mix(in srgb, var(--border) 60%, var(--text));
-}
-
-.status-chip-thinking--on {
-  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
-  background: color-mix(in srgb, var(--accent) 14%, var(--bg-elevated));
-  color: var(--text);
-}
-
-.status-chip-thinking--on .status-chip-value {
-  color: var(--accent);
 }
 
 .status-agent-role-wrap {
@@ -145,7 +221,7 @@
 .status-agent-role-menu {
   position: absolute;
   left: 0;
-  bottom: calc(100% + 4px);
+  top: calc(100% + 4px);
   z-index: 46;
   min-width: 100%;
   width: max-content;
@@ -163,7 +239,7 @@
 /* 打开时用 inline style 锚定视口（见 status_agent_role_menu.rs） */
 .status-agent-role-menu--fixed {
   position: fixed;
-  top: auto;
+  bottom: auto;
 }
 
 .status-agent-role-menu-item {
@@ -248,7 +324,7 @@
 .status-mode-menu {
   position: absolute;
   left: 0;
-  bottom: calc(100% + 4px);
+  top: calc(100% + 4px);
   z-index: 46;
   min-width: 100%;
   width: max-content;
@@ -266,7 +342,7 @@
 /* 打开时用 inline style 锚定视口（见 status_session_mode_seg.rs） */
 .status-mode-menu--fixed {
   position: fixed;
-  top: auto;
+  bottom: auto;
 }
 
 .status-mode-menu-item {
@@ -296,14 +372,7 @@
 }
 
 .status-chip-context {
-  flex-direction: column;
-  align-items: stretch;
-  gap: 3px;
-  height: auto;
-  min-height: 28px;
-  padding-top: 4px;
-  padding-bottom: 4px;
-  max-width: 220px;
+  /* 与其余 chip 等高（继承 .status-chip 的 24px）同行内联：label + value + 用量条一行。 */
   cursor: pointer;
 }
 
@@ -313,10 +382,12 @@
 }
 
 .status-chip-context-row {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 7px;
   min-width: 0;
+  /* 撑满 chip 宽度，让用量条吃掉剩余空间。 */
+  flex: 1 1 auto;
 }
 
 .status-chip-context .status-chip-value {
@@ -325,6 +396,7 @@
 
 .status-context-meter {
   display: flex;
+  flex: 1 1 auto;
   height: 3px;
   border-radius: 2px;
   background: color-mix(in srgb, var(--border) 55%, transparent);
@@ -477,7 +549,7 @@
 }
 
 .status-bar-fetch-error {
-  border-top-color: color-mix(in srgb, var(--warn) 28%, var(--border));
+  border-left: 2px solid color-mix(in srgb, var(--warn) 55%, var(--border));
   background: color-mix(in srgb, var(--warn) 10%, var(--bg-elevated));
 }
 

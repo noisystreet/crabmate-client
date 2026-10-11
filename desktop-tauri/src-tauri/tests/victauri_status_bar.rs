@@ -12,6 +12,9 @@ use victauri_test::e2e_test;
 use victauri_test::locator::Locator;
 
 /// 播种一个本地会话并刷新页面。
+///
+/// 状态栈现位于右列（`.side-column` 内）。右列收起（`side_panel_view:'hidden'`）
+/// 时栈保留 DOM 但视觉隐藏，故本文件断言可见性 / 点击时须展开右列（`workspace`）。
 async fn seed_and_goto(client: &mut victauri_test::VictauriClient, session_id: &str) {
     // eval_js 会 await 返回的 Promise；须 `return fetch(...)` 等 PUT 完成再 reload。
     let _ = client
@@ -19,7 +22,7 @@ async fn seed_and_goto(client: &mut victauri_test::VictauriClient, session_id: &
             r#"return fetch('/user-data/prefs', {
                 method: 'PUT',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({locale:'zh',theme:'crabmate-light',side_panel_view:'hidden',side_width:280,editor_layout_mode:false,status_bar_visible:true})
+                body: JSON.stringify({locale:'zh',theme:'crabmate-light',side_panel_view:'workspace',side_width:280,editor_layout_mode:false,status_bar_visible:true})
             }).then(r => r.status)"#,
         )
         .await;

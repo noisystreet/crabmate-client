@@ -24,6 +24,12 @@
   display: none;
 }
 
+/* 右列收起：状态栈保留 DOM（保住 testid 与 watermark Effect）但视觉隐藏，
+   由浮动 rail / 移动端顶栏的迷你运行点兜底。 */
+.side-column-rail-only .side-status-stack {
+  display: none;
+}
+
 /* 宽度为 0：不显示侧栏条；浮动工具栏脱出到 main-row 内，勿用 pointer-events:none（会阻断 WebKit 点击） */
 .side-column.side-column-rail-only {
   overflow: visible;

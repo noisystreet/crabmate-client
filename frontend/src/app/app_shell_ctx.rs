@@ -46,6 +46,11 @@ pub struct MobileShellHeaderSignals {
     pub layout_toggle: IdeLayoutToggleSignals,
     pub workspace_pick: super::workspace_root_actions::WorkspaceRootPickHandle,
     pub ide_menubar_dropdown_open: RwSignal<bool>,
+    /// 迷你运行点兜底：右列抽屉收起时在顶栏展示运行态色点，点击打开工作区抽屉。
+    pub side_panel_view: RwSignal<SidePanelView>,
+    pub status_tasks: StatusTasksSignals,
+    pub status_err: RwSignal<Option<String>>,
+    pub stream_busy_memos: ChatStreamBusyMemos,
 }
 
 /// 变更集预览模态所需句柄（阶段 B：避免向 `changelist_modal_view` 传递整份 [`AppShellCtx`]）。
@@ -74,11 +79,10 @@ impl SessionListModalSignals {
     }
 }
 
-/// 底栏状态条所需句柄（阶段 B：避免向 `status_bar_footer_view` 传递整份 [`AppShellCtx`]）。
+/// 底栏状态条所需句柄（阶段 B：避免向 `side_status_stack_view` 传递整份 [`AppShellCtx`]）。
 /// 会话句柄与界面语言经 [`super::shell_runtime_context::ChatShellLeptosContext`]（角色切换时清流式句柄等）。
 #[derive(Clone)]
 pub struct StatusBarFooterSignals {
-    pub status_bar_visible: RwSignal<bool>,
     pub status_tasks: StatusTasksSignals,
     pub status_err: RwSignal<Option<String>>,
     pub stream_busy_memos: ChatStreamBusyMemos,
@@ -135,7 +139,6 @@ pub struct SideColumnViewSignals {
     pub side_resize_session: Rc<RefCell<Option<(f64, f64)>>>,
     pub side_resize_handles: SideResizeHandlesCell,
     pub view_menu_open: RwSignal<bool>,
-    pub status_bar_visible: RwSignal<bool>,
     pub settings_page: RwSignal<bool>,
     pub workspace_panel: WorkspacePanelSignals,
     pub status_tasks: StatusTasksSignals,
@@ -148,6 +151,8 @@ pub struct SideColumnViewSignals {
     pub thinking_trace_log: RwSignal<Vec<ThinkingTraceInfo>>,
     pub is_narrow_viewport: RwSignal<bool>,
     pub chat: crate::chat_session_state::ChatSessionSignals,
+    /// 右列状态栈入参（原底栏；随右列展开挂载）。
+    pub status_bar: StatusBarFooterSignals,
 }
 
 /// 根壳 `App` 与侧栏、底栏、各模态之间共享的一组句柄（由 `App` 构造一次，按需 `clone()`）。
@@ -193,7 +198,6 @@ impl AppShellCtx {
             side_resize_session: Rc::clone(&self.signals.resize.side_resize_session),
             side_resize_handles: Rc::clone(&self.signals.resize.side_resize_handles),
             view_menu_open: self.signals.shell_ui.view_menu_open,
-            status_bar_visible: self.signals.shell_ui.status_bar_visible,
             settings_page: self.signals.modal.settings_page,
             workspace_panel: self.signals.to_workspace_panel(),
             status_tasks: self.signals.to_status_tasks(),
@@ -206,6 +210,7 @@ impl AppShellCtx {
             thinking_trace_log: self.signals.approval.thinking_trace_log,
             is_narrow_viewport: self.signals.shell_ui.is_narrow_viewport,
             chat: self.signals.chat,
+            status_bar: self.status_bar_footer_signals(),
         }
     }
 
@@ -261,7 +266,6 @@ impl AppShellCtx {
 
     pub fn status_bar_footer_signals(&self) -> StatusBarFooterSignals {
         StatusBarFooterSignals {
-            status_bar_visible: self.signals.shell_ui.status_bar_visible,
             status_tasks: self.signals.to_status_tasks(),
             status_err: self.signals.stream.status_err,
             stream_busy_memos: self.chat_column.stream_busy_memos,
@@ -307,6 +311,10 @@ impl AppShellCtx {
                 side_panel_view: self.signals.shell_ui.side_panel_view,
             },
             ide_menubar_dropdown_open: self.signals.shell_ui.ide_menubar_dropdown_open,
+            side_panel_view: self.signals.shell_ui.side_panel_view,
+            status_tasks: self.signals.to_status_tasks(),
+            status_err: self.signals.stream.status_err,
+            stream_busy_memos: self.chat_column.stream_busy_memos,
         }
     }
 
