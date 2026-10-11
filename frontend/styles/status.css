@@ -304,6 +304,12 @@
   padding-top: 4px;
   padding-bottom: 4px;
   max-width: 220px;
+  cursor: pointer;
+}
+
+.status-chip-context:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
 }
 
 .status-chip-context-row {
@@ -492,4 +498,175 @@
   white-space: nowrap;
   font-size: var(--text-md);
   line-height: 1.35;
+}
+
+/* ---------------------------------------------------------------- 上下文用量可视化页 */
+
+.context-usage {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.context-usage-empty {
+  color: var(--muted);
+}
+
+.context-usage-headline {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.context-usage-headline-value {
+  font-family: var(--font-mono);
+  font-size: var(--text-3xl);
+  color: var(--text);
+}
+
+/* 用量踩到告警阈值（≥90%）时数值转告警色，与条描红联动。 */
+.context-usage-headline-value--warn {
+  color: var(--warn);
+}
+
+/* 条与其刻度包一层列容器，让刻度紧贴条（不被外层 gap-4 拉大间距）。 */
+.context-usage-bar-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+/* 矩形堆叠条：段宽由内联 flex-basis 给出，占用比例即 raw_cap 归一化占比。 */
+.context-usage-bar {
+  display: flex;
+  align-items: stretch;
+  position: relative;
+  height: 64px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--border) 35%, transparent);
+}
+
+.context-usage-bar--warn {
+  border-color: color-mix(in srgb, var(--error) 70%, var(--border));
+}
+
+.context-usage-bar--estimate {
+  border-style: dashed;
+  border-color: color-mix(in srgb, var(--info) 65%, var(--border));
+}
+
+.context-usage-seg {
+  flex: 0 0 auto;
+  height: 100%;
+  min-width: 0;
+  transition: flex-basis var(--dur-fast) var(--ease-out-soft);
+}
+
+/* 相邻段间 1px 暗分隔：inset box-shadow 不占布局宽度，避免与内联 flex-basis 相加溢出。 */
+.context-usage-seg + .context-usage-seg {
+  box-shadow: inset 1px 0 0 0 color-mix(in srgb, var(--bg) 70%, transparent);
+}
+
+.context-usage-fill--tool-schema {
+  background: color-mix(in srgb, var(--success) 65%, var(--surface));
+}
+
+.context-usage-fill--other-fixed {
+  background: color-mix(in srgb, var(--border) 95%, var(--text));
+}
+
+.context-usage-fill--message {
+  background: color-mix(in srgb, var(--info) 82%, var(--text));
+}
+
+.context-usage-fill--used {
+  background: color-mix(in srgb, var(--info) 82%, var(--text));
+}
+
+.context-usage-fill--attachment {
+  background: color-mix(in srgb, var(--accent) 70%, var(--surface));
+}
+
+.context-usage-fill--remaining {
+  background: color-mix(in srgb, var(--border) 30%, transparent);
+}
+
+.context-usage-watermark {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-left: 2px dashed color-mix(in srgb, var(--warn) 80%, var(--text));
+  pointer-events: none;
+}
+
+/* 归一化刻度：0 / 50% / 100%（纯装饰，读屏信息由条的 aria-label 承担）。 */
+.context-usage-scale {
+  display: flex;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+
+.context-usage-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.context-usage-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.context-usage-legend-item--missing {
+  opacity: 0.55;
+}
+
+.context-usage-legend-swatch {
+  flex: 0 0 auto;
+  width: var(--icon-sm);
+  height: var(--icon-sm);
+  border-radius: var(--radius-xs);
+}
+
+.context-usage-legend-name {
+  color: var(--text);
+}
+
+.context-usage-legend-value {
+  font-family: var(--font-mono);
+  color: var(--muted);
+}
+
+.context-usage-notes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.context-usage-note {
+  margin: 0;
+  color: var(--muted);
+}
+
+/* 窄屏：headline 数值降一档，避免长摘要（如 ~123.4k / 200.0k (62%)）折行或溢出。 */
+@media (max-width: 768px) {
+  .context-usage-headline-value {
+    font-size: var(--text-2xl);
+  }
+}
+
+/* 段宽过渡可关：尊重系统的减少动效偏好。 */
+@media (prefers-reduced-motion: reduce) {
+  .context-usage-seg {
+    transition: none;
+  }
 }

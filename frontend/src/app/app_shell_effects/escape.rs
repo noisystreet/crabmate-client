@@ -33,6 +33,8 @@ pub struct ShellEscapeSignals {
     pub changelist_modal_open: RwSignal<bool>,
     pub settings_page: RwSignal<bool>,
     pub ide_settings_page: RwSignal<bool>,
+    /// 上下文用量可视化全屏页（无未保存态，Escape 直接关闭）。
+    pub context_usage_page: RwSignal<bool>,
     pub session_modal: RwSignal<bool>,
     /// 命令审批弹窗：Escape 提交 `deny`（即使焦点在按钮上）。
     pub approval: ApprovalModalSignals,
@@ -154,6 +156,10 @@ fn dismiss_shell_escape_layers(shell: ShellEscapeSignals) -> bool {
 fn dismiss_modal_escape_layers(shell: ShellEscapeSignals) -> bool {
     if shell.changelist_modal_open.get_untracked() {
         shell.changelist_modal_open.set(false);
+        return true;
+    }
+    if shell.context_usage_page.get_untracked() {
+        shell.context_usage_page.set(false);
         return true;
     }
     if shell.settings_page.get_untracked() {

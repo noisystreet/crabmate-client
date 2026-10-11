@@ -114,6 +114,7 @@ When updating docs:
 | Shared pure logic extract (WASM / connect / tui) | `docs/design/client_shared_logic.md` |
 | Multi-client repo maintenance (single-workspace trade-off, boundary guards, version bump) | `docs/adr/0004-multi-client-repo-maintenance.md` (Proposed) |
 | Status bar conversation-context watermark (same-口径 fill + drop after compaction; late visibility is deliberate) | `docs/adr/0005-status-bar-context-watermark.md` (Accepted) |
+| Context-usage visualization page (status-bar *Conversation* chip → read-only full-screen rectangular stacked bar; no protocol change) | `docs/design/context_usage_visualization.md` |
 | Desktop / Android / Web / TUI capability alignment | `docs/design/client_capability_matrix.md` (update the cell in the same PR as the capability) |
 | Chat UI follow-ups (composer / transcript / a11y) | `docs/design/chat_ui_todo.md` |
 | Coding-agent client (review / revert loop; not full IDE) | `docs/design/coding_agent_client.md` (Wave 1 checkboxes stay in `chat_ui_todo.md`; restore/changelog JSON authority is Server) |
