@@ -70,6 +70,8 @@
 
 ## P2 · 空态与确认
 
+- [x] 审批「允许始终」用 `btn-primary` 而「拒绝」用 `btn-danger`，持久授权的高影响操作视觉权重倒置：`frontend/src/app/approval_modal.rs`。已修（2026-10-11）：三按钮权重归位——拒绝改 `btn-secondary`（中性/取消）、允许一次改 `btn-primary`（肯定默认操作）、允许始终改 `btn-danger`（持久授权的高影响操作给危险色提醒）。
+
 - [x] 空态缺失：会话列表标题过滤无结果（`sidebar_nav/session_rail.rs`）、「管理会话」无会话（`session_list_modal.rs`）、任务列表空 `<ul>`（`side_column.rs`）、MCP 服务器列表（`settings_mcp_block.rs`）、模型预设列表（`settings_models_registry/preset_list.rs`）。已修（2026-09-25）：五处各补一条 `role="status"` 空态——会话过滤复用既有 `.nav-search-hits-empty`，其余新增 `.settings-list-empty` / `.session-modal-empty` / `.tasks-list-empty`（均为无字面量规则，不动 CSS 预算）；文案全部走 i18n（`settings_mcp_servers_empty` / `settings_saved_models_empty` / `nav_no_session_hits` / `session_modal_empty` / `tasks_empty`）。
 
 - [x] 模型预设新增弹窗温度/上下文 token 无范围校验，与「保存全部」的 `validate_temperature_override` 不一致：`frontend/src/app/settings_models_registry/submit.rs`。已修（2026-09-25）：`validate_temperature_override` / `validate_llm_context_tokens_override` 提为 `pub(crate)`，弹窗在 `try_build_manual_saved_preset` 成功后复用同一对校验（越界即写 `form_error` 且不提交）。
