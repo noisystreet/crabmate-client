@@ -41,6 +41,60 @@ pub struct ConversationPromptTokenHydrate {
     pub tiktoken: Option<TiktokenPromptTokensSnapshot>,
 }
 
+/// 上下文用量水位：同一会话内**服务端 `used_input_tokens`**（含固定开销，见 `status_bar::ContextAxis`）的滚动最大值。
+///
+/// 服务端每轮按当前 user 消息关键词重选 L5 Skills 正文覆盖 `seed.messages[0]`，系统提示正文字数会在
+/// 数千字符间跳变，令 `used` 出现「回落」假象（并未发生压缩 / 裁剪）。底栏改取会话内滚动最大值，
+/// 使显示**单调不减**；`key`（服务端 `conversation_id`）变化即重置。
+///
+/// key 取服务端 `conversation_id` 而非活动会话 id：芯片按 cid 匹配快照，水位须同口径归属，
+/// 否则重发流（`NotFound` → invalidate → 新 cid）时本地会话 id 不变、旧峰值会被一直沿用。
+///
+/// **回落时机**：真发生压缩 / 裁剪时，服务端会发 `timeline_log` `kind=context_trim`；[`Self::reset`]
+/// 借该信号把水位置回压缩后的 `used_input_tokens`（`detail.after_tokens`），令显示随之回落——
+/// 否则底栏会一直停在裁剪前的旧峰值。见 [`crate::timeline_scan::context_trim_after_used_tokens`]。
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct ContextUsedWatermark {
+    key: String,
+    max_used: u32,
+}
+
+impl ContextUsedWatermark {
+    /// 记录一次观测：`key` 变化（切会话 / 重发流换 cid）则重置为 `used`，否则取滚动最大。
+    pub fn observe(&mut self, key: &str, used: u32) {
+        if self.key != key {
+            self.key = key.to_string();
+            self.max_used = used;
+        } else if used > self.max_used {
+            self.max_used = used;
+        }
+    }
+
+    /// 压缩 / 裁剪后显式重置水位：`key` 与水位**无条件**置为本次观测值，**允许回落**。
+    ///
+    /// 与 [`Self::observe`] 的滚动最大不同，裁剪 / 压缩会令服务端 `used_input_tokens` 真实下降，
+    /// 若继续取滚动最大，底栏会停在裁剪前的旧峰值。`used` 取 `context_trim` 事件
+    /// `detail` 的 `after_tokens`（见 [`crate::timeline_scan::context_trim_after_used_tokens`]）。
+    pub fn reset(&mut self, key: &str, used: u32) {
+        self.key = key.to_string();
+        self.max_used = used;
+    }
+
+    /// 当前水位（服务端 `used_input_tokens`；未观测过为 0）。
+    #[must_use]
+    pub fn used(&self) -> u32 {
+        self.max_used
+    }
+
+    /// 水位归属的 `key`（服务端 `conversation_id`）；未观测过为空串。
+    ///
+    /// 读侧据此校验水位是否属于当前会话，避免切会话 / 重发流换 cid 的瞬间把旧峰值施加到新会话上。
+    #[must_use]
+    pub fn key(&self) -> &str {
+        &self.key
+    }
+}
+
 /// `/chat/stream` 传输层：单调 **`attach_generation`** 与 **`lane`**（Idle | 已绑定会话及重连句柄）。
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct ChatStreamTransport {
@@ -248,6 +302,8 @@ pub struct ChatSessionSignals {
     pub history_loading_older: RwSignal<bool>,
     /// 会话水合拉取/解析失败（与流式 `status_err` 分离，供底栏重试面板）。
     pub conversation_hydration_err: RwSignal<Option<String>>,
+    /// 底栏「上下文」水位（[`ContextUsedWatermark`]）：会话内服务端 `used_input_tokens` 的滚动最大值，单调不减。
+    pub context_used_watermark: RwSignal<ContextUsedWatermark>,
 }
 
 impl ChatSessionSignals {
@@ -562,5 +618,67 @@ mod resume_handles_clear_allowed_tests {
         t.bind_stream_session("s1".into());
         t.set_stream_job_id(7);
         assert!(!t.resume_handles_clear_allowed());
+    }
+}
+
+#[cfg(test)]
+mod context_used_watermark_tests {
+    use super::ContextUsedWatermark;
+
+    #[test]
+    fn unobserved_is_zero() {
+        assert_eq!(ContextUsedWatermark::default().used(), 0);
+    }
+
+    #[test]
+    fn takes_running_max_within_same_key() {
+        let mut w = ContextUsedWatermark::default();
+        w.observe("s1", 100);
+        assert_eq!(w.used(), 100);
+        // 回落观测（L5 Skills 正文变短）不改水位。
+        w.observe("s1", 40);
+        assert_eq!(w.used(), 100);
+        // 新高才推进。
+        w.observe("s1", 150);
+        assert_eq!(w.used(), 150);
+    }
+
+    #[test]
+    fn key_tracks_last_observed() {
+        let mut w = ContextUsedWatermark::default();
+        assert_eq!(w.key(), "");
+        w.observe("c1", 100);
+        assert_eq!(w.key(), "c1");
+        // 同 key 观测量不改变归属。
+        w.observe("c1", 40);
+        assert_eq!(w.key(), "c1");
+        w.observe("c2", 10);
+        assert_eq!(w.key(), "c2");
+    }
+
+    #[test]
+    fn session_switch_resets_to_new_key() {
+        let mut w = ContextUsedWatermark::default();
+        w.observe("s1", 500);
+        w.observe("s2", 30);
+        assert_eq!(w.used(), 30);
+        // 切回旧会话也重置（不记忆历史峰值）。
+        w.observe("s1", 60);
+        assert_eq!(w.used(), 60);
+    }
+
+    #[test]
+    fn reset_lowers_watermark_on_trim() {
+        let mut w = ContextUsedWatermark::default();
+        w.observe("s1", 500);
+        // 压缩 / 裁剪后重置：允许水位回落（区别于 observe 的滚动最大）。
+        w.reset("s1", 200);
+        assert_eq!(w.used(), 200);
+        assert_eq!(w.key(), "s1");
+        // 重置后继续滚动最大：新高才推进。
+        w.observe("s1", 150);
+        assert_eq!(w.used(), 200);
+        w.observe("s1", 260);
+        assert_eq!(w.used(), 260);
     }
 }

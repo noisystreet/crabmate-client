@@ -104,6 +104,9 @@ impl AppSignals {
             conversation_prompt_tokens: RwSignal::new(None),
             history_loading_older: RwSignal::new(false),
             conversation_hydration_err: RwSignal::new(None),
+            context_used_watermark: RwSignal::new(
+                crate::chat_session_state::ContextUsedWatermark::default(),
+            ),
         };
 
         Self {

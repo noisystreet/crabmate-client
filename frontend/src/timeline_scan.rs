@@ -24,6 +24,21 @@ pub fn is_turn_context_inject_kind(kind: &str) -> bool {
     matches!(kind.trim(), "context_inject" | "context_trim")
 }
 
+/// 从 `timeline_log` `context_trim` 的 `detail` JSON 取裁剪 / 压缩后服务端 `used_input_tokens`
+/// （字段 `after_tokens`，见 Server `context_timeline::trim_event`）。
+///
+/// 缺失 / 空 / 非 JSON / `null` / 非无符号数 → `None`（此时不重置
+/// [`ContextUsedWatermark`](crate::chat_session_state::ContextUsedWatermark) 水位）。
+#[must_use]
+pub fn context_trim_after_used_tokens(detail: Option<&str>) -> Option<u32> {
+    let raw = detail?.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    let v: serde_json::Value = serde_json::from_str(raw).ok()?;
+    u32::try_from(v.get("after_tokens")?.as_u64()?).ok()
+}
+
 fn json_object_kind_is_inject(text: &str) -> bool {
     let Ok(v) = serde_json::from_str::<serde_json::Value>(text.trim()) else {
         return false;
@@ -414,6 +429,28 @@ mod tests {
             &snap,
             &[snap.clone(), server[0].clone()]
         ));
+    }
+
+    #[test]
+    fn parses_context_trim_after_tokens() {
+        // 正常 `after_tokens`。
+        assert_eq!(
+            context_trim_after_used_tokens(Some(r#"{"count_hit":true,"after_tokens":1234}"#)),
+            Some(1234)
+        );
+        // 无 `after_tokens` / `null` / 缺 detail → 不重置。
+        assert_eq!(
+            context_trim_after_used_tokens(Some(r#"{"n_before":3}"#)),
+            None
+        );
+        assert_eq!(
+            context_trim_after_used_tokens(Some(r#"{"after_tokens":null}"#)),
+            None
+        );
+        assert_eq!(context_trim_after_used_tokens(None), None);
+        // 空串 / 非 JSON → 不重置。
+        assert_eq!(context_trim_after_used_tokens(Some("  ")), None);
+        assert_eq!(context_trim_after_used_tokens(Some("not json")), None);
     }
 
     #[test]

@@ -53,6 +53,7 @@ mod side_column_workspace_scroll;
 mod sidebar_nav;
 mod status_agent_role_menu;
 mod status_bar;
+mod status_context;
 mod status_fetch_state;
 mod status_session_mode_seg;
 mod status_tasks_state;

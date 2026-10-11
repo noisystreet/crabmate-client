@@ -318,6 +318,7 @@
 }
 
 .status-context-meter {
+  display: flex;
   height: 3px;
   border-radius: 2px;
   background: color-mix(in srgb, var(--border) 55%, transparent);
@@ -325,7 +326,17 @@
   min-width: 56px;
 }
 
+/* 固定开销段（每轮不变的 tool schema + 网关开销）：灰底衬，置内容段之前。 */
+.status-context-meter-fixed {
+  flex: 0 0 auto;
+  height: 100%;
+  width: var(--status-context-fixed-pct, 0%);
+  background: color-mix(in srgb, var(--border) 95%, var(--text));
+  transition: width 0.22s ease;
+}
+
 .status-context-meter-fill {
+  flex: 0 0 auto;
   height: 100%;
   width: var(--status-context-pct, 0%);
   border-radius: inherit;
