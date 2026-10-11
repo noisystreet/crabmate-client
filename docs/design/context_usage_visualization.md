@@ -42,7 +42,7 @@
 | 字段 | 含义 | 当前芯片是否使用 |
 |---|---|---|
 | `used_input_tokens` | 已用（同口径，含每轮固定开销） | ✅ 分子 |
-| `max_input_tokens` | 模型原始窗口（128k / 200k / 1M） | ✅ 分母 |
+| `max_input_tokens` | 服务端可用输入预算（= 上下文窗口 − 输出预留 − 安全余量） | ⚙️ 最后回退（仅当上下文窗口未知时） |
 | `message_tokens` | 会话消息累计 | ✅（经反推参与拆分） |
 | `attachment_tokens` | 附件注入 | ✅（经反推参与拆分） |
 | `tool_schema_tokens` | 工具定义占用 | ❌ **本方案新增展示** |
@@ -55,7 +55,7 @@
 - **固定开销** `F = used − (message_tokens + attachment_tokens)`（见 [`context_axis_split`](../../frontend/src/app/status_context.rs#L153-L160)）。服务端 `used = message + tool_schema + attachment + vendor_overhead`，但 DTO 不含 `vendor_overhead`，故只能反推。
 - **「其余固定开销」** = `F − tool_schema_tokens`（当 `tool_schema_tokens` 可用时）。**这是本方案相对现状的细分增量**：把原来一个灰段 `F` 再拆成「工具 schema（显式字段）」+「网关 / 其余开销（反推）」。
 
-> ⚠️ **待实现前确认**：`reserved_output_tokens` 与 `max_input_tokens` 的包含关系（是否已从 `raw_cap` 中扣除）需以 Server 口径为准；本仓不臆测。若已扣除，则「预留输出」段不在分母内，只能作为页面上的旁注指标，而非堆叠条的一段。
+> ✅ **已确认（Server 口径）**：`max_input_tokens = 上下文窗口 − reserved_output_tokens(max_tokens) − safety_margin`（见 Server `src/agent/context_compaction.rs` 的 `ContextTokenBudget::from_config`），即输出预留**已从 `max_input_tokens` 中扣除**。故「预留输出」**不**是堆叠条的一段，只能作为页面旁注指标。
 
 ### 不可得数据（决定了下钻做不了）
 
@@ -92,9 +92,11 @@
 
 页面不重算任何口径，直接调用现有实现，保证与状态栏芯片**同口径**：
 
-- [`status_bar_context_axis`](../../frontend/src/app/status_context.rs#L179-L198) → 取 `ContextAxis { used, fixed, raw_cap, baseline_estimate }`；
-- [`context_axis_apply_watermark`](../../frontend/src/app/status_context.rs#L227-L242) → 施加会话内滚动水位（单调不减）；
+- [`status_bar_context_axis`](../../frontend/src/app/status_context.rs#L194-L213) → 取 `ContextAxis { used, fixed, raw_cap, baseline_estimate }`；
+- [`context_axis_apply_watermark`](../../frontend/src/app/status_context.rs#L242-L257) → 施加会话内滚动水位（单调不减）；
 - 快照 [`TiktokenPromptTokensSnapshot`](../../crates/crabmate-client-api/src/prompt_tokens.rs) → 取 `tool_schema_tokens` / `reserved_output_tokens` 等附加桶。
+
+**分母口径（`raw_cap`）优先级**：本机设置「上下文 token 上限」(`client_llm.llm_context_tokens`) → `GET /status` 的 `llm_context_tokens` → 服务端 `max_input_tokens`。前两者都是「上下文窗口」口径（本机是用户设定，`/status` 是服务端同字段回读），服务端 `max_input_tokens` 则是「窗口 − 输出预留 − 安全余量」的派生预算、口径不同。若首轮前用窗口（如 `1000k`）、首轮后切成 `max_input_tokens`（如 `993k`），分母会在两值间跳变，引起困惑，也违背「最大可用量应恒定」的预期；故把 `max_input_tokens` 降为上限未知时的最后回退，让分母在整个会话内恒定。
 
 **刷新时机（须在页面注明）**：`used` 只在回合末（`RUN_FINISHED`）或水合时刷新；流式进行中显示的是**上一回合末快照**。这是 ADR-0005 的已知时序特性，页面应显式提示，避免用户误以为数字卡住。
 
@@ -102,10 +104,10 @@
 
 ### 主图：横向堆叠条（stacked bar）
 
-一条 100% 宽、固定高度的矩形条，宽度轴 = `max_input_tokens`（`raw_cap`）。从左到右分段，每段宽 = `该桶 / raw_cap × 100%`：
+一条 100% 宽、固定高度的矩形条，宽度轴 = `raw_cap`（**上下文窗口：本机设置「上下文 token 上限」优先，未设置时用 `/status` 的 `llm_context_tokens`**）。从左到右分段，每段宽 = `该桶 / raw_cap × 100%`：
 
 ```text
-├─────────────────────────── 100% = max_input_tokens ───────────────────────────┤
+├─────────────────────────────── 100% = raw_cap ────────────────────────────────┤
 [ 固定开销 F ][ 会话消息 ][ 附件 ][ 工具schema ][ 其余开销 ][ 预留输出 ][  剩余空间  ]
    （灰）      （brand）   （附色）  （附色）     （灰）      （斜纹）    （底衬）
 ```
@@ -119,8 +121,8 @@
 | 附件 | `attachment_tokens` | 注入附件 |
 | 工具 schema | `tool_schema_tokens` | 仅当 `F` 可拆时单列 |
 | 其余固定开销 | `F − tool_schema_tokens` | 反推的网关等开销 |
-| 预留输出 | `reserved_output_tokens` | **仅当确认其在 `raw_cap` 内**时作为一段；否则降级为旁注 |
-| 剩余空间 | `raw_cap − used`（再减去预留输出，若适用） | 底衬，非实占 |
+| 预留输出 | `reserved_output_tokens` | 已确认**不在** `raw_cap` 内，固定降级为页面旁注，不作段 |
+| 剩余空间 | `raw_cap − used` | 底衬，非实占 |
 
 约束：所有段宽之和不得超过 100%；任一段缺失（`None`）时该段宽度记 0 并在图例中标注「无数据」，**不隐藏图例**（隐藏会让用户误以为该桶为 0）。
 
@@ -183,7 +185,7 @@
 | 项 | 说明 | 处置 |
 |---|---|---|
 | 数据只到桶级 | 无法下钻，与 baobab 体验有本质差异 | 方案内明确为非目标；若产品确需下钻，须 Server 增字段（本仓不提） |
-| `reserved_output_tokens` 与 `raw_cap` 关系未确认 | 影响「预留输出」是段还是旁注 | 实现前以 Server 口径确认，不臆测 |
+| `reserved_output_tokens` 与 `raw_cap` 关系 | 已确认输出预留已从 `max_input_tokens` 扣除 | 固定作旁注，不作堆叠段 |
 | 刷新时机滞后 | 流式中显示上一回合末快照 | 页面注明；不为此改动水位逻辑（ADR-0005 明确不可删 `max`） |
 | 芯片从 span 改可点击 | 可能影响状态栏布局 | 先核 `.status-chip` 的 button 重置；必要时用 `role="button"` |
 | `tool_schema` 拆分的稳定性 | `F` 由反推得来，可能与真实分布有偏差 | 图例标注「反推」，与显式字段区分层级 |

@@ -1,4 +1,4 @@
-//! 底栏「会话」上下文芯片：`used / max_input_tokens` 用量、固定开销灰段、会话内滚动水位。
+//! 底栏「会话」上下文芯片：`used / 上限` 用量、固定开销灰段、会话内滚动水位。
 //!
 //! 从 `status_bar` 抽出，避免单文件越过行数门禁；契约面仅 `StatusBarContextChip` 与
 //! `observe_context_watermark`。
@@ -99,10 +99,17 @@ pub(super) fn status_bar_context_cap_and_used(
     let _tick = client_llm_storage_tick.get();
     let sd = st.status_data.get();
     let (_, _, _, stored_ctx, _) = load_client_llm_text_fields_from_storage();
-    let fallback_cap = status_bar_effective_llm_context_tokens(sd.as_ref(), stored_ctx.as_str());
-    let cap = status_bar_context_snapshot_for_active_session(chat)
-        .and_then(|snapshot| snapshot.max_input_tokens)
-        .unwrap_or(fallback_cap);
+    // 分母口径：上下文窗口（本机设置上限优先 → `/status`），会话内恒定、可预期。
+    // 若首轮前用窗口、首轮后切成服务端 `max_input_tokens`（= 窗口 − 输出预留 − 安全余量），
+    // 分母会在 1000k / 993k 之间跳变、引起困惑，故 `max_input_tokens` 仅作上限未知时的最后回退。
+    let window = status_bar_effective_llm_context_tokens(sd.as_ref(), stored_ctx.as_str());
+    let cap = if window > 0 {
+        window
+    } else {
+        status_bar_context_snapshot_for_active_session(chat)
+            .and_then(|snapshot| snapshot.max_input_tokens)
+            .unwrap_or(0)
+    };
     let role_sel = selected_agent_role.get();
     let role = role_sel.as_deref().map(str::trim).filter(|s| !s.is_empty());
     let used = status_bar_context_effective_used(chat, st, role);
@@ -111,8 +118,8 @@ pub(super) fn status_bar_context_cap_and_used(
 
 /// 上下文轴线：显示口径 `used / raw_cap`（分子分母都含每轮固定开销），用量条再拆出灰色底衬 `fixed`。
 ///
-/// 动机：`used_input_tokens` 与 `max_input_tokens` 才是「离爆窗还有多远」的同口径指标，且
-/// `max_input_tokens` 是模型可识别的原始窗口（1M / 200k / 128k），故分子分母都含固定开销，与 Server 口径一致。
+/// 分母 `raw_cap` 取上下文窗口（本机设置「上下文 token 上限」优先 → `GET /status`），会话内恒定、可预期，
+/// 避免首轮前后在两个口径间跳变；仅当窗口未知时才退回服务端 `max_input_tokens`（= 窗口减输出预留与安全余量）。
 /// 固定开销 `F = used − (message_tokens + attachment_tokens)` 仍单独拆出，仅用于用量条把「每轮都付的底衬」
 /// 与「会话连续增长的内容」分色。服务端每轮按当前 user 消息关键词重选 L5 Skills 正文会让 `used` 波动，
 /// 故对 `used` 取会话内滚动水位（见 `ContextUsedWatermark`）。
@@ -122,7 +129,7 @@ pub(super) struct ContextAxis {
     pub(super) used: u32,
     /// 固定开销 F = `used − (message_tokens + attachment_tokens)`（用量条灰段）。
     pub(super) fixed: u32,
-    /// 服务端原始 `max_input_tokens`（文本分母 + 用量条刻度）。
+    /// 文本分母 + 用量条刻度（上下文窗口：本机设置上限优先，否则 `/status`）。
     pub(super) raw_cap: u32,
     /// 无服务端实测、仅有 system 基线估算（文本带 `~`）。
     pub(super) baseline_estimate: bool,
@@ -156,15 +163,15 @@ fn context_axis_whole(raw_cap: u32, used: u32, baseline_estimate: bool) -> Conte
     }
 }
 
-/// 从快照拆出 `(used, F, raw_cap)`；任一关键字段缺失返回 `None`（调用方回退为固定开销记 0）。
+/// 从快照拆出 `(used, F)`；缺 `used_input_tokens` / `message_tokens` 返回 `None`（调用方回退为固定开销记 0）。
 ///
 /// DTO 无 `vendor_overhead_tokens`，故 F 反推为 `used − (message + attachment)`（不硬编码常量）。
-fn context_axis_split(snap: &TiktokenPromptTokensSnapshot) -> Option<(u32, u32, u32)> {
+/// 刻度 `raw_cap` 由调用方给定（本机设置上限优先），不取快照自身的 `max_input_tokens`。
+fn context_axis_split(snap: &TiktokenPromptTokensSnapshot) -> Option<(u32, u32)> {
     let used = snap.used_input_tokens?;
     let message = snap.message_tokens?;
-    let raw_cap = snap.max_input_tokens?;
     let content = message.saturating_add(snap.attachment_tokens.unwrap_or(0));
-    Some((used, used.saturating_sub(content), raw_cap))
+    Some((used, used.saturating_sub(content)))
 }
 
 /// 快照 → 轴线：能拆则拆出固定开销灰段，否则固定开销记 0。
@@ -174,10 +181,10 @@ fn context_axis_from_snapshot(
     used: u32,
 ) -> ContextAxis {
     match context_axis_split(snap) {
-        Some((used, fixed, raw)) => ContextAxis {
+        Some((used, fixed)) => ContextAxis {
             used,
             fixed,
-            raw_cap: raw,
+            raw_cap,
             baseline_estimate: false,
         },
         None => context_axis_whole(raw_cap, used, false),
@@ -284,7 +291,8 @@ pub(super) fn status_bar_context_placeholder_text(raw_cap: u32) -> String {
 
 /// 上下文用量条：灰段=固定开销 F，brand 段=会话内容 `used − F`（含水位）。
 ///
-/// 两段同轴叠加，刻度为原始 `max_input_tokens`；两段之和 `used / max` 与文本刻意同归一化；
+/// 两段同轴叠加，刻度为同一 `raw_cap`（上下文窗口：本机设置上限优先，否则 `/status`）；
+/// 两段之和 `used / raw_cap` 与文本刻意同归一化；
 /// 仅在有用量时渲染。
 #[component]
 fn StatusBarContextMeter(
