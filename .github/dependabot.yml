@@ -1,27 +1,19 @@
 version: 2
 updates:
-  # --- Rust（每个独立 workspace 一条；本仓无顶层 workspace，包各自独立）---
+  # --- Rust（一条多目录条目；本仓无顶层 workspace，包各自独立 Cargo.lock）---
+  # 仅 tokio 用 group-by: dependency-name 做「跨目录同名依赖合并」——同一次 tokio
+  # 升级只出一条 PR（覆盖所有含 tokio 的包），其余依赖仍按目录各自出 PR。
+  # tauri 生态保持「一族一起升」的既有分组。
   - package-ecosystem: cargo
-    directory: /desktop-tauri/src-tauri
-    schedule:
-      interval: weekly
-      day: monday
-      time: "02:20"
-      timezone: Asia/Shanghai
-    open-pull-requests-limit: 5
-    # Tauri 生态须版本对齐（tauri / tauri-build / tauri-plugin-* / victauri*），
-    # 一条 PR 升一组，避免单包 PR 互相拆散与 lockstep 手工对齐。
-    groups:
-      tauri-ecosystem:
-        patterns:
-          - "tauri*"
-          - "victauri*"
-    labels:
-      - dependencies
-      - rust
-
-  - package-ecosystem: cargo
-    directory: /mobile-tauri/src-tauri
+    directories:
+      - /desktop-tauri/src-tauri
+      - /mobile-tauri/src-tauri
+      - /crates/crabmate-client-api
+      - /crates/crabmate-connect
+      - /crates/crabmate-tool-card
+      - /crates/crabmate-tui
+      - /web-host
+      - /frontend
     schedule:
       interval: weekly
       day: monday
@@ -29,82 +21,17 @@ updates:
       timezone: Asia/Shanghai
     open-pull-requests-limit: 5
     groups:
+      # tokio 跨全部目录收敛为一条 PR（本仓曾一次开出 4 条同名 patch PR）。
+      tokio:
+        patterns:
+          - "tokio"
+        group-by: dependency-name
+      # Tauri 生态须版本对齐（tauri / tauri-build / tauri-plugin-* / victauri*），
+      # 一条 PR 升一组，避免单包 PR 互相拆散与 lockstep 手工对齐。
       tauri-ecosystem:
         patterns:
           - "tauri*"
           - "victauri*"
-    labels:
-      - dependencies
-      - rust
-
-  - package-ecosystem: cargo
-    directory: /crates/crabmate-client-api
-    schedule:
-      interval: weekly
-      day: monday
-      time: "02:20"
-      timezone: Asia/Shanghai
-    open-pull-requests-limit: 5
-    labels:
-      - dependencies
-      - rust
-
-  - package-ecosystem: cargo
-    directory: /crates/crabmate-connect
-    schedule:
-      interval: weekly
-      day: monday
-      time: "02:20"
-      timezone: Asia/Shanghai
-    open-pull-requests-limit: 5
-    labels:
-      - dependencies
-      - rust
-
-  - package-ecosystem: cargo
-    directory: /crates/crabmate-tool-card
-    schedule:
-      interval: weekly
-      day: monday
-      time: "02:20"
-      timezone: Asia/Shanghai
-    open-pull-requests-limit: 5
-    labels:
-      - dependencies
-      - rust
-
-  - package-ecosystem: cargo
-    directory: /crates/crabmate-tui
-    schedule:
-      interval: weekly
-      day: monday
-      time: "02:20"
-      timezone: Asia/Shanghai
-    open-pull-requests-limit: 5
-    labels:
-      - dependencies
-      - rust
-
-  - package-ecosystem: cargo
-    directory: /web-host
-    schedule:
-      interval: weekly
-      day: monday
-      time: "02:20"
-      timezone: Asia/Shanghai
-    open-pull-requests-limit: 5
-    labels:
-      - dependencies
-      - rust
-
-  - package-ecosystem: cargo
-    directory: /frontend
-    schedule:
-      interval: weekly
-      day: monday
-      time: "02:20"
-      timezone: Asia/Shanghai
-    open-pull-requests-limit: 5
     labels:
       - dependencies
       - rust
