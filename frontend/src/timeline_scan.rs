@@ -39,6 +39,27 @@ pub fn context_trim_after_used_tokens(detail: Option<&str>) -> Option<u32> {
     u32::try_from(v.get("after_tokens")?.as_u64()?).ok()
 }
 
+/// 判定 `context_trim` 事件是否应重置当前会话的上下文水位，并返回归属 `(conversation_id, after_tokens)`。
+///
+/// 纯函数（仅依赖入参，便于单测）；三条件缺一不可，任一缺失 → `None`：
+/// - `bound_active`：本轮流正被查看——后台流不得改全局水位（与 apply 侧 key 同口径）；
+/// - `after`：能从 `detail` 解析出裁剪后 `used_input_tokens`（[`context_trim_after_used_tokens`]）；
+/// - `cid`：存在服务端 `conversation_id`，水位以它归属。
+///
+/// 水位「会话内单调、压缩 / 裁剪后回落、回落延迟到回合末快照」的语义与理由见
+/// `docs/adr/0005-status-bar-context-watermark.md`。
+#[must_use]
+pub fn context_trim_watermark_reset(
+    bound_active: bool,
+    after: Option<u32>,
+    cid: Option<&str>,
+) -> Option<(&str, u32)> {
+    if !bound_active {
+        return None;
+    }
+    Some((cid?, after?))
+}
+
 fn json_object_kind_is_inject(text: &str) -> bool {
     let Ok(v) = serde_json::from_str::<serde_json::Value>(text.trim()) else {
         return false;
@@ -451,6 +472,31 @@ mod tests {
         // 空串 / 非 JSON → 不重置。
         assert_eq!(context_trim_after_used_tokens(Some("  ")), None);
         assert_eq!(context_trim_after_used_tokens(Some("not json")), None);
+    }
+
+    #[test]
+    fn context_trim_watermark_reset_requires_all_conditions() {
+        // 三条件齐备 → 返回归属与回落值（0 亦为合法回落）。
+        assert_eq!(
+            context_trim_watermark_reset(true, Some(18000), Some("cid-1")),
+            Some(("cid-1", 18000))
+        );
+        assert_eq!(
+            context_trim_watermark_reset(true, Some(0), Some("cid-1")),
+            Some(("cid-1", 0))
+        );
+        // 后台流（本轮不被查看）→ 不重置，避免污染活跃会话。
+        assert_eq!(
+            context_trim_watermark_reset(false, Some(18000), Some("cid-1")),
+            None
+        );
+        // 解析不出 after_tokens → 不重置。
+        assert_eq!(
+            context_trim_watermark_reset(true, None, Some("cid-1")),
+            None
+        );
+        // 无服务端 conversation_id → 不重置。
+        assert_eq!(context_trim_watermark_reset(true, Some(18000), None), None);
     }
 
     #[test]
