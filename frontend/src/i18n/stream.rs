@@ -24,20 +24,43 @@ pub fn stream_empty_reply_no_delta(l: Locale) -> &'static str {
     }
 }
 
+/// 契约钉尚未包含、但服务端已可下发的 `stream_ended.reason` 本地化兜底。
+///
+/// 服务端在 `StreamEndReason` 上新增 `Truncated`（`"truncated"`）后，客户端若仍钉旧版
+/// crate，`parse::<StreamEndReason>()` 会失败、把该 reason 当未知原样回显。此表在契约钉
+/// 升级（`parse` 能命中）之前提供同一文案，升级后可整表删除。
+fn future_stream_end_reason_label(l: Locale, raw: &str) -> Option<&'static str> {
+    match raw {
+        "truncated" => Some(match l {
+            Locale::ZhHans => "输出被截断",
+            Locale::En => "truncated",
+        }),
+        _ => None,
+    }
+}
+
+/// 将 `stream_ended.reason` 原始字符串转成当前语言的本地化标签。
+///
+/// 顺序：契约钉枚举解析 → 本地向前兼容表 → 原样回显；`None` 回退为 `"unknown"`。
+pub fn stream_end_reason_label_from_raw(l: Locale, raw: Option<&str>) -> String {
+    let Some(raw) = raw else {
+        return "unknown".to_string();
+    };
+    if let Ok(reason) = raw.parse::<StreamEndReason>() {
+        return stream_end_reason_label(l, reason);
+    }
+    future_stream_end_reason_label(l, raw)
+        .map(str::to_string)
+        .unwrap_or_else(|| raw.to_string())
+}
+
 pub fn stream_empty_reply_diag_line(
     l: Locale,
     stream_end_reason: Option<&str>,
     answer_phase: bool,
     delta_chars: usize,
 ) -> String {
-    let reason = stream_end_reason
-        .and_then(|s| s.parse::<StreamEndReason>().ok())
-        .map(|r| stream_end_reason_label(l, r))
-        .unwrap_or_else(|| {
-            stream_end_reason
-                .map(str::to_string)
-                .unwrap_or_else(|| "unknown".to_string())
-        });
+    let reason = stream_end_reason_label_from_raw(l, stream_end_reason);
     match l {
         Locale::ZhHans => format!(
             "诊断：stream_ended={reason}, answer_phase={answer_phase}, delta_chars={delta_chars}"
@@ -160,5 +183,55 @@ pub fn stream_err_hint_generic(l: Locale) -> &'static str {
     match l {
         Locale::ZhHans => "点击“重试”；若仍失败，请补充报错上下文以便排查。",
         Locale::En => "Click Retry; if it persists, share more error context.",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `"truncated"` 在旧契约钉下须仍本地化，文案与服务端 `label_*` 一致，
+    /// 避免回落成未知 reason 原样回显。
+    #[test]
+    fn truncated_reason_is_localized_locally() {
+        assert_eq!(
+            stream_end_reason_label_from_raw(Locale::ZhHans, Some("truncated")),
+            "输出被截断"
+        );
+        assert_eq!(
+            stream_end_reason_label_from_raw(Locale::En, Some("truncated")),
+            "truncated"
+        );
+    }
+
+    /// 契约钉已能解析的 reason 仍走枚举标签（此处与服务端语义比对，不写死文案）。
+    #[test]
+    fn known_reason_uses_enum_label() {
+        for l in [Locale::ZhHans, Locale::En] {
+            assert_eq!(
+                stream_end_reason_label_from_raw(l, Some("completed")),
+                stream_end_reason_label(l, StreamEndReason::Completed)
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_reason_is_echoed_and_none_is_unknown() {
+        assert_eq!(
+            stream_end_reason_label_from_raw(Locale::ZhHans, Some("future_reason")),
+            "future_reason"
+        );
+        assert_eq!(
+            stream_end_reason_label_from_raw(Locale::En, None),
+            "unknown"
+        );
+    }
+
+    /// 诊断行是 truncated 唯一用户可见落点，须带上本地化标签而非原始串。
+    #[test]
+    fn diag_line_shows_localized_truncated_label() {
+        let line = stream_empty_reply_diag_line(Locale::ZhHans, Some("truncated"), true, 0);
+        assert!(line.contains("输出被截断"), "{line}");
+        assert!(!line.contains("truncated"), "{line}");
     }
 }
