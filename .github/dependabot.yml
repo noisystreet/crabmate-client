@@ -9,6 +9,13 @@ updates:
       time: "02:20"
       timezone: Asia/Shanghai
     open-pull-requests-limit: 5
+    # Tauri 生态须版本对齐（tauri / tauri-build / tauri-plugin-* / victauri*），
+    # 一条 PR 升一组，避免单包 PR 互相拆散与 lockstep 手工对齐。
+    groups:
+      tauri-ecosystem:
+        patterns:
+          - "tauri*"
+          - "victauri*"
     labels:
       - dependencies
       - rust
@@ -21,6 +28,11 @@ updates:
       time: "02:20"
       timezone: Asia/Shanghai
     open-pull-requests-limit: 5
+    groups:
+      tauri-ecosystem:
+        patterns:
+          - "tauri*"
+          - "victauri*"
     labels:
       - dependencies
       - rust
@@ -106,6 +118,12 @@ updates:
       time: "02:20"
       timezone: Asia/Shanghai
     open-pull-requests-limit: 5
+    # e2e 工具链（playwright / typescript / prettier / @types/*）非发布依赖，
+    # 合成一条 PR，减少独立 CI 触发。
+    groups:
+      e2e-tooling:
+        patterns:
+          - "*"
     labels:
       - dependencies
       - npm
@@ -118,6 +136,13 @@ updates:
       time: "02:20"
       timezone: Asia/Shanghai
     open-pull-requests-limit: 5
+    # CodeMirror 生态包须版本对齐，一条 PR 升一组。
+    groups:
+      codemirror:
+        patterns:
+          - "@codemirror/*"
+          - "codemirror"
+          - "@lezer/*"
     labels:
       - dependencies
       - npm
@@ -131,6 +156,10 @@ updates:
       time: "02:20"
       timezone: Asia/Shanghai
     open-pull-requests-limit: 5
+    groups:
+      actions:
+        patterns:
+          - "*"
     labels:
       - dependencies
       - github-actions
