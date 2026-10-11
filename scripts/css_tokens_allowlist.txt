@@ -13,4 +13,5 @@
 --crabmate-chat-font-family # 聊天列字体族：同上，仅作用于聊天列
 --crabmate-chat-font-size   # 聊天列字号：同上，仅作用于聊天列
 --list-stagger              # 列表逐项入场动画延迟：渲染时按索引内联 style="--list-stagger: N"
---status-context-pct        # 上下文占用百分比：status_bar.rs 按运行时数据内联写入
+--status-context-pct        # 上下文占用百分比：frontend/src/app/status_context.rs 按运行时数据内联写入
+--status-context-fixed-pct  # 上下文固定开销段宽度百分比：frontend/src/app/status_context.rs 按运行时数据内联写入

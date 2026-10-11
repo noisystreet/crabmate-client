@@ -2,7 +2,7 @@
 
 use std::rc::Rc;
 
-use leptos::prelude::GetUntracked;
+use leptos::prelude::{GetUntracked, Update};
 
 use crate::app::turn_lifecycle::TurnLifecycleEvent;
 use crate::sse_dispatch::TimelineLogInfo;
@@ -109,6 +109,29 @@ fn timeline_log_dispatch_context_inject(
     }
 }
 
+/// `kind=context_trim`：服务端压缩 / 裁剪窗口（含工具输出压缩、摘要）后，把当前会话上下文水位
+/// **回落**到 `detail.after_tokens`（见 [`crate::timeline_scan::context_trim_after_used_tokens`]）。
+///
+/// 与 `context_inject` 共用「旁注仅开关开启时显示」的既有行为（原经
+/// [`crate::timeline_scan::is_turn_context_inject_kind`] 命中），故此处仍需落回
+/// [`timeline_log_dispatch_default_body`]。
+fn timeline_log_dispatch_context_trim(stream_ctx: &ChatStreamCallbackCtx, info: &TimelineLogInfo) {
+    // 仅当本轮流正被查看时改全局水位，避免后台流污染活跃会话（与 apply 侧 key 同口径）。
+    if stream_ctx.is_bound_session_active()
+        && let Some(after) =
+            crate::timeline_scan::context_trim_after_used_tokens(info.detail.as_deref())
+        && let Some(cid) = stream_ctx.server_conversation_id_for_tokens()
+    {
+        stream_ctx
+            .chat
+            .context_used_watermark
+            .update(|w| w.reset(&cid, after));
+    }
+    if stream_ctx.shell.show_turn_context_inject.get_untracked() {
+        timeline_log_dispatch_default_body(stream_ctx, info);
+    }
+}
+
 fn timeline_log_dispatch_body(
     stream_ctx: &ChatStreamCallbackCtx,
     accum: &PerStreamAccum,
@@ -121,6 +144,7 @@ fn timeline_log_dispatch_body(
         "final_response" => timeline_log_dispatch_final_response(stream_ctx, accum, &info),
         "planner_tool_call_rejected" | "orchestration_route" => {}
         "tool_step_started" | "tool_step_finished" => {}
+        "context_trim" => timeline_log_dispatch_context_trim(stream_ctx, &info),
         kind if crate::timeline_scan::is_turn_context_inject_kind(kind) => {
             timeline_log_dispatch_context_inject(stream_ctx, &info);
         }

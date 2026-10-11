@@ -53,19 +53,19 @@ pub fn status_chip_model(l: Locale) -> &'static str {
 
 pub fn status_chip_context(l: Locale) -> &'static str {
     match l {
-        Locale::ZhHans => "上下文",
-        Locale::En => "Context",
+        Locale::ZhHans => "会话",
+        Locale::En => "Conversation",
     }
 }
 
-/// 状态栏「上下文」芯片 `title`：说明 tiktoken 粗估与上限含义。
+/// 状态栏「会话」芯片 `title`：说明 `used / max_input` 用量、灰段含义与水位语义。
 pub fn status_chip_context_tooltip(l: Locale) -> &'static str {
     match l {
         Locale::ZhHans => {
-            "prompt tokens（tiktoken 粗估）相对 llm_context_tokens 上限。新会话在落盘前为 system 预估值（~）；流式结束或水合后为消息体实测。均不含工具 JSON，与网关计费可能有偏差。"
+            "当前用量 used_input_tokens（message + attachment + 每轮固定开销：工具 JSON + 网关开销，tiktoken 粗估）占模型原始上下文窗口 max_input_tokens 的比例。灰段为固定开销，brand 段为会话内容；分子分母都含固定开销，故百分比即「离窗口上限还有多远」。数值取会话内滚动峰值，故正常对话中单调不减，仅在切换会话或服务端压缩 / 裁剪历史后回落。与网关计费可能有偏差。"
         }
         Locale::En => {
-            "Prompt tokens (tiktoken estimate) vs llm_context_tokens cap. New sessions show a system-only baseline (~) until measured; after stream end or hydrate, message-body totals. Excludes tool JSON; may differ from provider billing."
+            "Current usage used_input_tokens (message + attachment + per-turn fixed overhead: tool JSON + provider overhead, tiktoken estimate) against the model's raw context window max_input_tokens. The grey bar is the fixed overhead, the brand bar is conversation content; both numerator and denominator include fixed overhead, so the percentage is literally how close the window is to its limit. The value is a per-session rolling peak, so it never decreases during normal chat and only drops on session switch or after the server compacts / trims the history. May differ from provider billing."
         }
     }
 }

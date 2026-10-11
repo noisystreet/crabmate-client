@@ -150,6 +150,14 @@ export async function sendMessage(page: Page, text: string) {
   await page.keyboard.press("Enter");
 }
 
+/** 跨 Origin mock 响应头：让浏览器把自定义响应头暴露给 JS。
+ * serve 侧对应 `access-control-expose-headers: x-conversation-id,x-stream-job-id`；
+ * Playwright `route.fulfill` 只自动补 `access-control-allow-origin`（不含 Expose），
+ * 缺此头时 `x-conversation-id` 对前端不可读，会话无法绑定 server_conversation_id。 */
+export const MOCK_SSE_CORS_EXPOSE = {
+  "access-control-expose-headers": "x-conversation-id,x-stream-job-id",
+} as const;
+
 /** 注册 page.route 拦截 /chat/stream POST -> 返回 mock SSE 正文。
  * 必须携带 x-conversation-id / x-stream-job-id 头，前端据此初始化流式会话。 */
 export function installMockSse(
@@ -165,6 +173,7 @@ export function installMockSse(
       status: 200,
       headers: {
         "content-type": "text/event-stream; charset=utf-8",
+        ...MOCK_SSE_CORS_EXPOSE,
         "x-conversation-id": convId,
         "x-stream-job-id": "1",
       },

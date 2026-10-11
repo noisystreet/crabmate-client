@@ -5,11 +5,8 @@ use std::sync::Arc;
 use leptos::prelude::*;
 
 use crate::api::load_client_llm_text_fields_from_storage;
-use crate::app_prefs::{
-    status_bar_context_used_tokens_without_hydrate, status_bar_effective_llm_context_tokens,
-    status_bar_effective_model,
-};
-use crate::chat_session_state::{ChatSessionSignals, ChatStreamBusyMemos};
+use crate::app_prefs::status_bar_effective_model;
+use crate::chat_session_state::ChatStreamBusyMemos;
 use crate::i18n::{self, Locale};
 use crate::user_prefs_sync_state::UserPrefsSyncPhase;
 
@@ -18,6 +15,7 @@ use super::chat::bump_session_hydrate_nonce;
 use super::settings_page::{SettingsSection, navigate_to_settings};
 use super::shell_runtime_context::expect_chat_shell_ctx;
 use super::status_agent_role_menu::{AgentRoleMenuProps, StatusAgentRoleMenu};
+use super::status_context::{StatusBarContextChip, observe_context_watermark};
 use super::status_fetch_state::status_bar_should_show_skeleton;
 use super::status_tasks_state::StatusTasksSignals;
 
@@ -43,17 +41,6 @@ fn status_fetch_error_class(is_save_error: bool) -> &'static str {
         "status-fetch-error status-fetch-error--prefs-save"
     } else {
         "status-fetch-error"
-    }
-}
-
-/// 上下文用量条填充类名：估算基线优先于告警阈值（两者互斥，先判基线）。
-fn status_context_meter_fill_class(is_baseline_estimate: bool, full_pct: f64) -> &'static str {
-    if is_baseline_estimate {
-        "status-context-meter-fill status-context-meter-fill--estimate"
-    } else if full_pct >= 90.0 {
-        "status-context-meter-fill status-context-meter-fill--warn"
-    } else {
-        "status-context-meter-fill"
     }
 }
 
@@ -211,169 +198,6 @@ struct StatusBarChipsSignals {
     llm_thinking_mode: RwSignal<String>,
     locale: RwSignal<Locale>,
     settings_page: RwSignal<bool>,
-}
-
-/// 有活动会话即展示「上下文」芯片；用量在水合完成前显示 `— / 上限`。
-fn status_bar_context_chip_visible(chat: ChatSessionSignals) -> bool {
-    !chat.active_id.get().is_empty()
-}
-
-fn status_bar_context_snapshot_for_active_session(
-    chat: ChatSessionSignals,
-) -> Option<crate::conversation_hydrate::TiktokenPromptTokensSnapshot> {
-    let snap = chat.conversation_prompt_tokens.get()?;
-    let aid = chat.active_id.get_untracked();
-    let cid_matches = chat.sessions.with_untracked(|list| {
-        list.iter().find(|s| s.id == aid).and_then(|s| {
-            s.trimmed_server_conversation_id()
-                .map(|c| c == snap.conversation_id.as_str())
-        })
-    });
-    if cid_matches != Some(true) {
-        return None;
-    }
-    snap.tiktoken
-}
-
-fn status_bar_context_used_for_active_session(chat: ChatSessionSignals) -> Option<u32> {
-    let snap = status_bar_context_snapshot_for_active_session(chat)?;
-    snap.used_input_tokens.or(Some(snap.prompt_tokens))
-}
-
-fn active_session_has_server_conversation_id(chat: ChatSessionSignals) -> bool {
-    let aid = chat.active_id.get_untracked();
-    chat.sessions.with_untracked(|list| {
-        list.iter()
-            .find(|s| s.id == aid)
-            .and_then(|s| s.trimmed_server_conversation_id())
-            .is_some()
-    })
-}
-
-fn status_bar_context_effective_used(
-    chat: ChatSessionSignals,
-    st: StatusTasksSignals,
-    selected_agent_role: Option<&str>,
-) -> Option<u32> {
-    if let Some(n) = status_bar_context_used_for_active_session(chat) {
-        return Some(n);
-    }
-    let role = selected_agent_role.map(str::trim).filter(|s| !s.is_empty());
-    status_bar_context_used_tokens_without_hydrate(
-        active_session_has_server_conversation_id(chat),
-        st.status_data.get().as_ref(),
-        role,
-    )
-}
-
-/// 新会话、尚无服务端实测 tiktoken 时，展示 `GET /status` 的 system 基线（带 `~` 前缀）。
-fn status_bar_context_is_baseline_estimate(chat: ChatSessionSignals, used: Option<u32>) -> bool {
-    used.is_some()
-        && status_bar_context_used_for_active_session(chat).is_none()
-        && !active_session_has_server_conversation_id(chat)
-}
-
-fn status_bar_context_cap_and_used(
-    chat: ChatSessionSignals,
-    st: StatusTasksSignals,
-    client_llm_storage_tick: RwSignal<u64>,
-    selected_agent_role: RwSignal<Option<String>>,
-) -> (u32, Option<u32>) {
-    let _tick = client_llm_storage_tick.get();
-    let sd = st.status_data.get();
-    let (_, _, _, stored_ctx, _) = load_client_llm_text_fields_from_storage();
-    let fallback_cap = status_bar_effective_llm_context_tokens(sd.as_ref(), stored_ctx.as_str());
-    let cap = status_bar_context_snapshot_for_active_session(chat)
-        .and_then(|snapshot| snapshot.max_input_tokens)
-        .unwrap_or(fallback_cap);
-    let role_sel = selected_agent_role.get();
-    let role = role_sel.as_deref().map(str::trim).filter(|s| !s.is_empty());
-    let used = status_bar_context_effective_used(chat, st, role);
-    (cap, used)
-}
-
-fn status_bar_context_value_text(cap: u32, used: Option<u32>, baseline_estimate: bool) -> String {
-    let prefix = if baseline_estimate { "~" } else { "" };
-    match (used, cap > 0) {
-        (Some(u), true) => {
-            let pct = (u as f64 / cap as f64) * 100.0;
-            format!("{prefix}{u} / {cap} ({:.1}%)", pct.min(999.9))
-        }
-        (Some(u), false) => format!("{prefix}{u}"),
-        (None, true) => format!("— / {cap}"),
-        (None, false) => "—".to_string(),
-    }
-}
-
-/// 上下文用量条：仅在 cap>0 且有用量时渲染（一次反应式闭包集中计算，降低 chip CCN）。
-#[component]
-fn StatusBarContextMeter(
-    chat: ChatSessionSignals,
-    st: StatusTasksSignals,
-    client_llm_storage_tick: RwSignal<u64>,
-    selected_agent_role: RwSignal<Option<String>>,
-) -> impl IntoView {
-    move || {
-        let (cap, used) =
-            status_bar_context_cap_and_used(chat, st, client_llm_storage_tick, selected_agent_role);
-        if cap > 0 && used.is_some() {
-            let u = used.unwrap_or(0);
-            let pct = ((u as f64 / cap as f64) * 100.0).min(100.0);
-            let full_pct = (u as f64 / cap as f64) * 100.0;
-            let fill_class = status_context_meter_fill_class(
-                status_bar_context_is_baseline_estimate(chat, used),
-                full_pct,
-            );
-            view! {
-                <div class="status-context-meter" style=format!("--status-context-pct: {pct:.2}%")>
-                    <div class=fill_class></div>
-                </div>
-            }
-            .into_any()
-        } else {
-            ().into_any()
-        }
-    }
-}
-
-#[component]
-fn StatusBarContextChip(
-    st: StatusTasksSignals,
-    chat: ChatSessionSignals,
-    client_llm_storage_tick: RwSignal<u64>,
-    selected_agent_role: RwSignal<Option<String>>,
-    locale: RwSignal<Locale>,
-) -> impl IntoView {
-    view! {
-        <Show when=move || status_bar_context_chip_visible(chat)>
-            <span
-                class="status-chip status-chip-context"
-                prop:title=move || i18n::status_chip_context_tooltip(locale.get())
-            >
-                <span class="status-chip-context-row">
-                    <span class="status-chip-label">
-                        {move || i18n::status_chip_context(locale.get())}
-                    </span>
-                    <span class="status-chip-value">{move || {
-                        let (cap, used) = status_bar_context_cap_and_used(
-                            chat,
-                            st,
-                            client_llm_storage_tick,
-                            selected_agent_role,
-                        );
-                        let baseline = status_bar_context_is_baseline_estimate(chat, used);
-                        status_bar_context_value_text(cap, used, baseline)
-                    }}</span>
-                </span>
-                <StatusBarContextMeter
-                    chat=chat
-                    st=st
-                    client_llm_storage_tick=client_llm_storage_tick
-                    selected_agent_role=selected_agent_role
-                />
-            </span>
-        </Show>
-    }
 }
 
 #[component]
@@ -697,6 +521,10 @@ fn StatusBarFooterBody(signals: StatusBarFooterSignals) -> impl IntoView {
     } = signals;
     let locale = expect_chat_shell_ctx().locale;
     let chat = expect_chat_shell_ctx().chat;
+    // 会话内容水位：随快照刷新观测同口径内容用量，令底栏显示单调不减（会话切换即重置）。
+    Effect::new(move |_| {
+        observe_context_watermark(chat, st, client_llm_storage_tick, selected_agent_role);
+    });
     let hydration_retry: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
         status_err.set(None);
         chat.conversation_hydration_err.set(None);
@@ -791,10 +619,7 @@ mod thinking_toggle_tests {
 
 #[cfg(test)]
 mod status_bar_class_tests {
-    use super::{
-        RunIndicatorKind, status_bar_footer_class, status_context_meter_fill_class,
-        status_fetch_error_class,
-    };
+    use super::{RunIndicatorKind, status_bar_footer_class, status_fetch_error_class};
 
     #[test]
     fn footer_class_is_base_when_healthy() {
@@ -824,27 +649,6 @@ mod status_bar_class_tests {
         assert_eq!(
             status_fetch_error_class(true),
             "status-fetch-error status-fetch-error--prefs-save"
-        );
-    }
-
-    #[test]
-    fn context_meter_fill_prefers_estimate_over_warn() {
-        // 估算基线即使已过 90% 也只出 `--estimate`，两个修饰位互斥。
-        assert_eq!(
-            status_context_meter_fill_class(true, 95.0),
-            "status-context-meter-fill status-context-meter-fill--estimate"
-        );
-    }
-
-    #[test]
-    fn context_meter_fill_warns_at_threshold() {
-        assert_eq!(
-            status_context_meter_fill_class(false, 90.0),
-            "status-context-meter-fill status-context-meter-fill--warn"
-        );
-        assert_eq!(
-            status_context_meter_fill_class(false, 89.9),
-            "status-context-meter-fill"
         );
     }
 
