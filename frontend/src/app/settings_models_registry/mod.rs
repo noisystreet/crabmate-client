@@ -8,8 +8,7 @@ use leptos::prelude::*;
 use leptos_dom::helpers::event_target_value;
 use std::sync::Arc;
 
-use crate::a11y::mouse_event_target_is_current_target;
-use crate::app::focusable_menu::FocusableModalPanel;
+use crate::app::focusable_menu::{FocusableModalBackdrop, FocusableModalPanel};
 use crate::settings_llm_fields::{LlmSavedPresetApplyTarget, LlmTemperatureFieldWithId};
 
 use crate::api::SavedModelPreset;
@@ -663,24 +662,26 @@ fn SettingsModelsRegistryAddModelDialog(s: RegistryAddFormSignals) -> impl IntoV
 
     view! {
         <Show when=move || dialog_mode.get().is_some()>
-            <div
-                class="modal-backdrop settings-model-add-dialog-backdrop"
-                on:click={
-                    let close_only = close_only.clone();
-                    move |ev: leptos::ev::MouseEvent| {
-                        if !mouse_event_target_is_current_target(&ev) {
-                            return;
-                        }
-                        close_only();
-                    }
+            {
+                let s = s.clone();
+                let dialog_title_id = dialog_title_id.clone();
+                let cancel_dialog = cancel_dialog.clone();
+                view! {
+                    <FocusableModalBackdrop
+                        class="settings-model-add-dialog-backdrop"
+                        on_dismiss=Callback::new({
+                            let close_only = close_only.clone();
+                            move |_| close_only()
+                        })
+                    >
+                        <SettingsModelsRegistryAddModelDialogPanel
+                            s=s
+                            dialog_title_id=dialog_title_id
+                            cancel_dialog=cancel_dialog
+                        />
+                    </FocusableModalBackdrop>
                 }
-            >
-                <SettingsModelsRegistryAddModelDialogPanel
-                    s=s.clone()
-                    dialog_title_id=dialog_title_id.clone()
-                    cancel_dialog=cancel_dialog.clone()
-                />
-            </div>
+            }
         </Show>
     }
 }

@@ -17,6 +17,7 @@
 2026-09-30：**Android 系统栏图标随 Web 主题明暗切换**——修复浅色主题下顶栏系统图标不可见（白图标压近白顶栏），详见 P2「移动端边界与体验」新增条目。两个主题级 light 标志仍保持 `false`（镜像门禁要求），切换只在运行时经 `WindowInsetsControllerCompat` 覆盖。
 2026-10-07：**IDE / 工作区三处反馈补齐**——跳转行非法（非数字 / `0` / 超界）输入改为可见 `role="alert"` 提示（不再静默 no-op），嵌套空目录展开补空态提示，空编辑器补可见占位文本；三条已归档至 [`ui_issue_todo_done.md`](./ui_issue_todo_done.md)。
 2026-10-11：**状态栏「会话上下文用量」芯片**落地同口径填充显示（灰段固定开销 + brand 段会话内容）与压缩 / 裁剪后水位回落；语义、不变式与「回落延迟到回合末是刻意」记入 [`ADR-0005`](../adr/0005-status-bar-context-watermark.md)，两项延迟项记入下方 P3。
+2026-10-11（续）：**模态遮罩层收敛**——新增共享组件 `FocusableModalBackdrop`（`frontend/src/app/focusable_menu.rs`），base 类名 `modal-backdrop` 与「点击遮罩自身关闭」判定（`target == current_target`）只声明一次；9 处手抄遮罩模板全部迁入（可关闭的经 `on_dismiss`、不可关闭的缺省 `None`、克隆弹窗保留 busy 守卫、各自分层类名 / `data-testid` 原样保留），裸 `on:click` 与 `mouse_event_target_is_current_target` 的判定分叉随之消除。见 P3 已归档条目。
 
 > **已完成项已归档**：原 `- [x]` 条目移至 [`ui_issue_todo_done.md`](./ui_issue_todo_done.md)，本清单只保留未完成项。
 
@@ -69,8 +70,6 @@
 - [ ] 启动 splash 硬编码深色 `#07090e`，浅色用户首帧深闪：`frontend/index.html`（同值亦见于 `desktop-tauri/splash.html`、`crates/crabmate-connect/assets/connect.html` 与 Android `values*/themes.xml`）。**部分修（2026-09-25）**：色值已收成单一来源并加门禁——Android 侧四个底色槽全部改引用镜像令牌 `@color/cm_bg`（`res/values/colors.xml` 的 `cm_*` 逐项等于 `tokens.css` 的 `--<token>`），启动页三处 `#07090e` 与 `--bg` 同值且「声明必须恰好命中一次」，由 `scripts/check-token-mirrors.sh` 冻结（见下条）。**未修（需独立行为改动）**：浅色偏好用户的首帧深闪——`data-theme` 由 WASM 水合后才写入，`index.html` 内联样式在 trunk 注入的 `<link>` 之前，故首绘恒深色；正解是在 `index.html` 加预绘脚本、从 localStorage 快照同步读出主题再写 `data-theme`，属独立后续项。
 
 ## P3 · 次要
-
-- [ ] `.modal-backdrop` 遮罩层仍有 13 处重复模板，且「点击自身关闭」判定已分叉（裸 `on:click` vs. `mouse_event_target_is_current_target`），未纳入模态骨架收敛（本轮只收敛了面板本体 `FocusableModalPanel`）。
 
 - [ ] `save_busy/load_busy` 期间 Ctrl+S 被静默吞掉：`frontend/src/ide_save.rs`。
 

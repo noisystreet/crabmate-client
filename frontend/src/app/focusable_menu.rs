@@ -4,8 +4,9 @@ use leptos::html::Div;
 use leptos::prelude::*;
 
 use crate::a11y::{
-    capture_focus, handle_menu_keyboard, handle_modal_layer_keydown, restore_focus_to,
-    schedule_focus_first_in_modal, schedule_focus_first_menu_item,
+    capture_focus, handle_menu_keyboard, handle_modal_layer_keydown,
+    mouse_event_target_is_current_target, restore_focus_to, schedule_focus_first_in_modal,
+    schedule_focus_first_menu_item,
 };
 
 /// 自定义上下文 / 下拉菜单面板（须放在 `<Show>` 内，挂载时聚焦；关闭后焦点归还触发元素）。
@@ -43,6 +44,41 @@ pub(crate) fn FocusableRoleMenu(
             on:keydown=move |ev: web_sys::KeyboardEvent| {
                 if let Some(el) = menu_ref.get() {
                     handle_menu_keyboard(&ev, el.as_ref(), move || on_escape.run(()));
+                }
+            }
+        >
+            {children()}
+        </div>
+    }
+}
+
+/// 模态遮罩层：统一 `.modal-backdrop` 模板与「点击遮罩自身关闭」判定（须放 `<Show>` 内）。
+///
+/// 面板（`FocusableModalPanel`）作为 `children` 传入；点击落在**遮罩自身**（而非面板或其子节点）
+/// 时才触发 `on_dismiss`——`on_dismiss` 缺省（`None`）表示遮罩不可点击关闭。`class` 用于附加
+/// 语义 / 分层类名（如 `shell-confirm-backdrop`），base `modal-backdrop` 由本组件唯一声明。
+#[component]
+pub(crate) fn FocusableModalBackdrop(
+    #[prop(optional)] class: &'static str,
+    #[prop(optional)] testid: Option<&'static str>,
+    #[prop(optional)] on_dismiss: Option<Callback<()>>,
+    children: Children,
+) -> impl IntoView {
+    let extra = class.trim();
+    let class_attr = if extra.is_empty() {
+        "modal-backdrop".to_owned()
+    } else {
+        format!("modal-backdrop {extra}")
+    };
+    view! {
+        <div
+            class=class_attr
+            data-testid=testid
+            on:click=move |ev: leptos::ev::MouseEvent| {
+                if let Some(cb) = on_dismiss
+                    && mouse_event_target_is_current_target(&ev)
+                {
+                    cb.run(());
                 }
             }
         >

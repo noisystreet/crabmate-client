@@ -4,7 +4,7 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 
 use crate::api::submit_chat_approval;
-use crate::app::focusable_menu::FocusableModalPanel;
+use crate::app::focusable_menu::{FocusableModalBackdrop, FocusableModalPanel};
 use crate::i18n::{self, Locale};
 
 /// 审批弹窗入参聚合（阶段 B：`App` 单行传入）。
@@ -75,7 +75,7 @@ pub fn ApprovalModal(signals: ApprovalModalSignals) -> impl IntoView {
 
     view! {
         <Show when=move || pending_approval.get().is_some()>
-            <div class="modal-backdrop approval-modal-backdrop">
+            <FocusableModalBackdrop class="approval-modal-backdrop">
                 <FocusableModalPanel
                     class="modal approval-modal"
                     dialog_role="dialog"
@@ -115,7 +115,7 @@ pub fn ApprovalModal(signals: ApprovalModalSignals) -> impl IntoView {
                         allow_always=allow_always
                     />
                 </FocusableModalPanel>
-            </div>
+            </FocusableModalBackdrop>
         </Show>
     }
 }

@@ -7,7 +7,7 @@ use leptos::html::Input;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
-use crate::app::focusable_menu::FocusableModalPanel;
+use crate::app::focusable_menu::{FocusableModalBackdrop, FocusableModalPanel};
 use crate::app::workspace_root_actions::WorkspaceRootPickHandle;
 use crate::i18n;
 
@@ -121,9 +121,9 @@ fn WorkspaceProjectModalPanel(signals: WorkspaceProjectModalSignals) -> impl Int
 fn WorkspaceProjectModalBackdrop(signals: WorkspaceProjectModalSignals) -> impl IntoView {
     let open = signals.open;
     view! {
-        <div class="modal-backdrop" on:click=move |_| open.set(false)>
+        <FocusableModalBackdrop on_dismiss=Callback::new(move |_| open.set(false))>
             <WorkspaceProjectModalPanel signals=signals />
-        </div>
+        </FocusableModalBackdrop>
     }
 }
 

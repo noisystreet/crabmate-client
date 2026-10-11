@@ -5,7 +5,7 @@ use leptos::html::Input;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
-use crate::app::focusable_menu::FocusableModalPanel;
+use crate::app::focusable_menu::{FocusableModalBackdrop, FocusableModalPanel};
 use crate::app::workspace_root_actions::{
     WorkspaceRootPickHandle, commit_workspace_root, workspace_inputs_blocked,
 };
@@ -261,9 +261,9 @@ fn WorkspaceBrowserPickModalPanel(signals: WorkspaceBrowserPickModalSignals) -> 
 fn WorkspaceBrowserPickModalBackdrop(signals: WorkspaceBrowserPickModalSignals) -> impl IntoView {
     let open = signals.open;
     view! {
-        <div class="modal-backdrop" on:click=move |_| open.set(false)>
+        <FocusableModalBackdrop on_dismiss=Callback::new(move |_| open.set(false))>
             <WorkspaceBrowserPickModalPanel signals=signals />
-        </div>
+        </FocusableModalBackdrop>
     }
 }
 
