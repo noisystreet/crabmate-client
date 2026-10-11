@@ -197,8 +197,16 @@ fn open_ide_tab_context_menu(
     ctx_menu.set(Some(IdeTabContextAnchor { x, y, tab_index }));
 }
 
+fn tab_is_pinned(tabs: IdeTabsHandle, path: &str) -> bool {
+    tabs.tabs.get().iter().any(|t| t.path == path && t.pinned)
+}
+
 #[component]
-fn IdeTabStripItem(bundle: IdeTabStripItemBundle, index: usize, tab: IdeTab) -> impl IntoView {
+fn IdeTabStripItem(
+    bundle: IdeTabStripItemBundle,
+    index: ReadSignal<usize>,
+    tab: IdeTab,
+) -> impl IntoView {
     let IdeTabStripItemBundle {
         locale,
         tabs,
@@ -214,20 +222,26 @@ fn IdeTabStripItem(bundle: IdeTabStripItemBundle, index: usize, tab: IdeTab) -> 
     let path = tab.path.clone();
     let label = ide_tab_basename(&path);
     let label_aria = label.clone();
-    let is_pinned = tab.pinned;
-    let is_active = move || tabs.active.get() == Some(index);
-    let is_dirty = move || tabs.tab_display_dirty(index, ide_text, ide_baseline);
+    // `index` 由 `<ForEnumerate>` 提供实时索引：关闭/钉住只移动 DOM 节点、不重跑 children，
+    // 因此必须用实时索引而非创建时的快照，否则 `prop:id`/激活判定会漂移。
+    // `pinned` 同理：key（path）未变时 children 不重跑，按值捕获的 `tab.pinned` 会陈旧，
+    // 改为按 path 从 `tabs` 实时解析。
+    let pinned_path = path.clone();
+    let is_pinned = Memo::new(move |_| tab_is_pinned(tabs, &pinned_path));
+    let tab_id = Memo::new(move |_| format!("ide-tab-{}", index.get()));
+    let is_active = move || tabs.active.get() == Some(index.get());
+    let is_dirty = move || tabs.tab_display_dirty(index.get(), ide_text, ide_baseline);
     view! {
         <div
             class="ide-tab"
             class:ide-tab-active=is_active
-            class:ide-tab-pinned=move || is_pinned
+            class:ide-tab-pinned=move || is_pinned.get()
             role="presentation"
             on:contextmenu=move |ev: web_sys::MouseEvent| {
                 ev.prevent_default();
                 open_ide_tab_context_menu(
                     ctx_menu,
-                    index,
+                    index.get_untracked(),
                     ev.client_x() as f64,
                     ev.client_y() as f64,
                 );
@@ -236,26 +250,36 @@ fn IdeTabStripItem(bundle: IdeTabStripItemBundle, index: usize, tab: IdeTab) -> 
                 let Some((x, y)) = context_menu_keydown_anchor(&ev) else {
                     return;
                 };
-                open_ide_tab_context_menu(ctx_menu, index, f64::from(x), f64::from(y));
+                open_ide_tab_context_menu(
+                    ctx_menu,
+                    index.get_untracked(),
+                    f64::from(x),
+                    f64::from(y),
+                );
             }
         >
             <button
                 type="button"
                 class="ide-tab-select"
                 role="tab"
-                prop:id=format!("ide-tab-{}", index)
+                prop:id=tab_id
                 prop:aria-selected=move || is_active().to_string()
                 prop:aria-controls="ide-editor-panel"
                 prop:title=path.clone()
                 prop:aria-label=move || {
-                    i18n::ide_tab_select_aria(&label_aria, is_dirty(), is_pinned, locale.get())
+                    i18n::ide_tab_select_aria(
+                        &label_aria,
+                        is_dirty(),
+                        is_pinned.get(),
+                        locale.get(),
+                    )
                 }
-                data-testid=format!("ide-tab-{}", index)
+                data-testid=tab_id
                 on:click=move |_| {
-                    let _ = try_switch_tab(tabs, index, editor);
+                    let _ = try_switch_tab(tabs, index.get_untracked(), editor);
                 }
             >
-                <Show when=move || is_pinned>
+                <Show when=move || is_pinned.get()>
                     <span
                         class="ide-tab-pin"
                         aria-hidden="true"
@@ -276,8 +300,9 @@ fn IdeTabStripItem(bundle: IdeTabStripItemBundle, index: usize, tab: IdeTab) -> 
                 }
                 on:click=move |ev| {
                     ev.stop_propagation();
+                    let idx = index.get_untracked();
                     spawn_local(async move {
-                        close_tab_at(tabs, index, locale, editor, confirm).await;
+                        close_tab_at(tabs, idx, locale, editor, confirm).await;
                     });
                 }
             >
@@ -321,18 +346,12 @@ pub fn IdeTabsBar(input: IdeTabsBarInput) -> impl IntoView {
                     on_ide_tablist_keydown(ev, tabs, editor);
                 }
             >
-                <For
-                    each=move || {
-                        tabs.tabs
-                            .get()
-                            .into_iter()
-                            .enumerate()
-                            .collect::<Vec<_>>()
-                    }
-                    key=|(idx, tab)| format!("{}:{}:{}", idx, tab.path, tab.pinned)
-                    children=move |(index, tab)| {
+                <ForEnumerate
+                    each=move || tabs.tabs.get()
+                    key=|tab| tab.path.clone()
+                    children={move |index: ReadSignal<usize>, tab: IdeTab| {
                         view! { <IdeTabStripItem bundle=strip index tab /> }
-                    }
+                    }}
                 />
             </div>
         </Show>

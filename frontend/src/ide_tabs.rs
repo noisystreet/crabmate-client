@@ -110,23 +110,23 @@ impl IdeTabsHandle {
         ide_text: RwSignal<String>,
         ide_baseline: RwSignal<String>,
     ) -> bool {
-        self.active.get_untracked().is_some()
-            && ide_text.get_untracked() != ide_baseline.get_untracked()
+        self.active.get().is_some() && ide_text.get() != ide_baseline.get()
     }
 
+    /// 注意：这里刻意使用**跟踪读**。标签栏在 key（path）不变时复用 DOM、不重跑 children，
+    /// 脏标（`<Show>` / `aria-label`）必须依赖 `tabs`/`active`/编辑器信号的变化重新求值，
+    /// 否则复用后会残留旧脏标。异步只读调用点没有响应式 owner，跟踪读不影响其行为。
     pub fn tab_display_dirty(
         &self,
         index: usize,
         ide_text: RwSignal<String>,
         ide_baseline: RwSignal<String>,
     ) -> bool {
-        if self.active.get_untracked() == Some(index) {
+        if self.active.get() == Some(index) {
             return self.active_editor_is_dirty(ide_text, ide_baseline);
         }
         self.tabs
-            .get_untracked()
-            .get(index)
-            .is_some_and(|t| t.text != t.baseline)
+            .with(|list| list.get(index).is_some_and(|t| t.text != t.baseline))
     }
 }
 
