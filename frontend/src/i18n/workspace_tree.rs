@@ -65,6 +65,13 @@ pub fn workspace_tree_ctx_new_dir(l: Locale) -> &'static str {
     }
 }
 
+pub fn workspace_tree_ctx_open_in_editor(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "在编辑器查看",
+        Locale::En => "Open in editor",
+    }
+}
+
 pub fn workspace_tree_ctx_save_to_device(l: Locale) -> &'static str {
     match l {
         Locale::ZhHans => "保存到本机…",

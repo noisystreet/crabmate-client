@@ -150,6 +150,9 @@ pub struct SideColumnViewSignals {
     pub insert_workspace_file_ref: StoredValue<Arc<dyn Fn(String) + Send + Sync>>,
     pub thinking_trace_log: RwSignal<Vec<ThinkingTraceInfo>>,
     pub is_narrow_viewport: RwSignal<bool>,
+    /// 「在编辑器查看」桥接（工作区右键 → IDE 布局，复用工具卡同款 nonce / path）。
+    pub ide_open_file_nonce: RwSignal<u64>,
+    pub ide_open_file_path: RwSignal<Option<String>>,
     pub chat: crate::chat_session_state::ChatSessionSignals,
     /// 右列状态栈入参（原底栏；随右列展开挂载）。
     pub status_bar: StatusBarFooterSignals,
@@ -209,6 +212,8 @@ impl AppShellCtx {
             insert_workspace_file_ref: self.insert_workspace_file_ref,
             thinking_trace_log: self.signals.approval.thinking_trace_log,
             is_narrow_viewport: self.signals.shell_ui.is_narrow_viewport,
+            ide_open_file_nonce: self.signals.shell_ui.ide_open_file_nonce,
+            ide_open_file_path: self.signals.shell_ui.ide_open_file_path,
             chat: self.signals.chat,
             status_bar: self.status_bar_footer_signals(),
         }
