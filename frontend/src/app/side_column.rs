@@ -13,7 +13,7 @@ use super::side_column_workspace_scroll::WorkspaceSideCardScrollInner;
 use super::status_bar::side_status_stack_view;
 use super::workspace_panel::make_refresh_workspace_after_mutation;
 use super::workspace_panel_state::WorkspacePanelSignals;
-use crate::workspace_context_menu::WorkspaceContextMenuActions;
+use crate::workspace_context_menu::{WorkspaceContextMenuActions, WorkspaceOpenInEditorSignals};
 
 #[component]
 fn SideColumnTasksLoadedPane(
@@ -208,6 +208,7 @@ fn SideColumnWorkspaceCard(
     changelist_fetch_nonce: RwSignal<u64>,
     insert_workspace_file_ref: StoredValue<Arc<dyn Fn(String) + Send + Sync>>,
     is_narrow_viewport: RwSignal<bool>,
+    open_in_editor: WorkspaceOpenInEditorSignals,
     chat: crate::chat_session_state::ChatSessionSignals,
 ) -> impl IntoView {
     let insert_sv = insert_workspace_file_ref;
@@ -223,6 +224,8 @@ fn SideColumnWorkspaceCard(
         ide_tabs: None,
         ide_confirm: None,
         conversation_id: crate::workspace_context_menu::conversation_id_from_chat(chat),
+        // desktop 对话布局：右键「在编辑器查看」经桥接切到 IDE 布局并打开文件（窄屏 / 移动远端隐藏）。
+        open_in_editor: Some(open_in_editor),
     });
     view! {
         <div class="side-pane" style:flex="1" style:min-width="0">
@@ -308,11 +311,19 @@ pub fn side_column_view(signals: SideColumnViewSignals) -> impl IntoView {
         insert_workspace_file_ref,
         thinking_trace_log,
         is_narrow_viewport,
+        ide_open_file_nonce,
+        ide_open_file_path,
         chat,
     } = signals;
     let tasks_data = status_tasks.tasks_data;
     let tasks_err = status_tasks.tasks_err;
     let tasks_loading = status_tasks.tasks_loading;
+    // 「在编辑器查看」桥接：nonce / path 为空壳层信号，`narrow` 复用视口判定（移动远端在 `available` 内排除）。
+    let open_in_editor = WorkspaceOpenInEditorSignals {
+        nonce: ide_open_file_nonce,
+        path: ide_open_file_path,
+        narrow: is_narrow_viewport,
+    };
     // 状态栈折叠态：在 `Show` 外一次创建；`Show` 的 children 会重复求值，不能就地 new。
     let status_stack_collapsed = RwSignal::new(false);
     let resize_toolbar = SideColumnResizeToolbarSignals {
@@ -357,6 +368,7 @@ pub fn side_column_view(signals: SideColumnViewSignals) -> impl IntoView {
                         changelist_fetch_nonce=changelist_fetch_nonce
                         insert_workspace_file_ref=insert_workspace_file_ref
                         is_narrow_viewport=is_narrow_viewport
+                        open_in_editor=open_in_editor
                         chat=chat
                     />
                 </Show>

@@ -198,6 +198,8 @@ pub fn IdeLayoutView(shell: IdeLayoutShellSignals) -> impl IntoView {
         ide_tabs: Some((tabs, tab_editor)),
         ide_confirm: Some(confirm),
         conversation_id: crate::workspace_context_menu::conversation_id_from_chat(chat),
+        // IDE 布局内文件行单击即打开，无需右键入口（该入口只在对话布局提供）。
+        open_in_editor: None,
     });
 
     let save_ctx = IdeSaveContext {

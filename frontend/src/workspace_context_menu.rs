@@ -50,6 +50,23 @@ pub struct WorkspaceTreeRefreshHint {
     pub deleted_rel: Option<String>,
 }
 
+/// 「在编辑器查看」跨布局桥接：递增 `nonce` 通知 IDE 布局打开 `path`（消费后清空，防重放）。
+#[derive(Clone, Copy)]
+pub struct WorkspaceOpenInEditorSignals {
+    pub nonce: RwSignal<u64>,
+    pub path: RwSignal<Option<String>>,
+    /// 窄屏视口判定（`ShellUISignals::is_narrow_viewport`）；移动远端在 [`Self::available`] 中另行排除。
+    pub narrow: RwSignal<bool>,
+}
+
+impl WorkspaceOpenInEditorSignals {
+    /// 该入口当前是否可用：IDE 布局可达（非窄屏、非 Android 远程薄客户端），与工具卡
+    /// 「打开此文件」的 `open_file_enabled` 同口径（目标须为文件由调用处另行判定）。
+    fn available(self) -> bool {
+        !self.narrow.get() && !crate::mobile_remote::mobile_remote_client()
+    }
+}
+
 #[derive(Clone)]
 pub struct WorkspaceContextMenuActions {
     pub refresh_after_mutation: std::sync::Arc<dyn Fn(WorkspaceTreeRefreshHint) + Send + Sync>,
@@ -57,6 +74,8 @@ pub struct WorkspaceContextMenuActions {
     pub ide_confirm: Option<IdeConfirmSignals>,
     /// 当前会话绑定的服务端 `conversation_id`（可选；供 `POST /workspace/file/move` 写入变更集）。
     pub conversation_id: std::sync::Arc<dyn Fn() -> Option<String> + Send + Sync>,
+    /// 「在编辑器查看」桥接（仅 desktop 对话布局提供；窄屏 / 移动远端由可用性判定隐藏）。
+    pub open_in_editor: Option<WorkspaceOpenInEditorSignals>,
 }
 
 impl WorkspaceContextMenuActions {
@@ -148,6 +167,34 @@ fn workspace_ctx_target_is_file(menu: RwSignal<Option<WorkspaceContextAnchor>>) 
 fn workspace_ctx_target_is_dir_or_root(menu: RwSignal<Option<WorkspaceContextAnchor>>) -> bool {
     menu.get()
         .is_some_and(|a| a.target_is_dir || a.target_rel.is_none())
+}
+
+/// 「在编辑器查看」仅对文件目标、且壳层已提供桥接（宽屏 desktop）时展示。
+fn workspace_ctx_can_open_in_editor(
+    menu: RwSignal<Option<WorkspaceContextAnchor>>,
+    open_in_editor: Option<WorkspaceOpenInEditorSignals>,
+) -> bool {
+    workspace_ctx_target_is_file(menu)
+        && open_in_editor.is_some_and(WorkspaceOpenInEditorSignals::available)
+}
+
+fn open_in_editor_from_open_menu(
+    menu: RwSignal<Option<WorkspaceContextAnchor>>,
+    open_in_editor: WorkspaceOpenInEditorSignals,
+) {
+    let Some(anchor) = menu.get() else {
+        return;
+    };
+    if anchor.target_is_dir {
+        return;
+    }
+    let Some(rel) = anchor.target_rel.clone() else {
+        return;
+    };
+    menu.set(None);
+    // 先写路径再递增 nonce：消费端以 nonce 变化触发，读取时路径须已就位。
+    open_in_editor.path.set(Some(rel));
+    open_in_editor.nonce.update(|n| *n = n.wrapping_add(1));
 }
 
 fn start_create_from_open_menu(
@@ -278,6 +325,30 @@ struct WorkspaceContextMenuBodyInput {
 }
 
 #[component]
+fn WorkspaceOpenInEditorItem(
+    workspace_context_menu: RwSignal<Option<WorkspaceContextAnchor>>,
+    locale: RwSignal<Locale>,
+    open_in_editor: Option<WorkspaceOpenInEditorSignals>,
+) -> impl IntoView {
+    view! {
+        <Show when=move || workspace_ctx_can_open_in_editor(workspace_context_menu, open_in_editor)>
+            <button
+                type="button"
+                class="session-ctx-item"
+                role="menuitem"
+                on:click=move |_| {
+                    if let Some(sig) = open_in_editor {
+                        open_in_editor_from_open_menu(workspace_context_menu, sig);
+                    }
+                }
+            >
+                {move || crate::i18n::workspace_tree_ctx_open_in_editor(locale.get())}
+            </button>
+        </Show>
+    }
+}
+
+#[component]
 fn WorkspaceContextMenuBody(input: WorkspaceContextMenuBodyInput) -> impl IntoView {
     let WorkspaceContextMenuBodyInput {
         workspace_context_menu,
@@ -289,7 +360,13 @@ fn WorkspaceContextMenuBody(input: WorkspaceContextMenuBodyInput) -> impl IntoVi
         workspace_err,
         actions,
     } = input;
+    let open_in_editor = actions.get_value().open_in_editor;
     view! {
+        <WorkspaceOpenInEditorItem
+            workspace_context_menu=workspace_context_menu
+            locale=locale
+            open_in_editor=open_in_editor
+        />
         <button
             type="button"
             class="session-ctx-item"
