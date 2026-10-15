@@ -418,12 +418,18 @@ pub fn export_session_json_for_id(
     id: &str,
     loc: crate::i18n::Locale,
     apply_assistant_display_filters: bool,
+    include_turn_context_inject: bool,
 ) {
     let session = sessions.with(|list| list.iter().find(|s| s.id == id).cloned());
     let Some(s) = session else {
         return;
     };
-    let file = session_to_export_file(&s, loc, apply_assistant_display_filters);
+    let file = session_to_export_file(
+        &s,
+        loc,
+        apply_assistant_display_filters,
+        include_turn_context_inject,
+    );
     let Ok(json) = crate::session_export::display_session_to_json_pretty(&file) else {
         return;
     };
@@ -486,12 +492,18 @@ pub fn export_session_markdown_for_id(
     id: &str,
     loc: crate::i18n::Locale,
     apply_assistant_display_filters: bool,
+    include_turn_context_inject: bool,
 ) {
     let session = sessions.with(|list| list.iter().find(|s| s.id == id).cloned());
     let Some(s) = session else {
         return;
     };
-    let md = session_to_markdown(&s, loc, apply_assistant_display_filters);
+    let md = session_to_markdown(
+        &s,
+        loc,
+        apply_assistant_display_filters,
+        include_turn_context_inject,
+    );
     let stem = export_filename_stem("chat_export");
     let name = format!("{stem}.md");
     if let Err(e) = trigger_download(&name, "text/plain;charset=utf-8", &md, loc) {

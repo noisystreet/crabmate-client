@@ -15,6 +15,7 @@ use wasm_bindgen_futures::{JsFuture, spawn_local};
 use crate::i18n::Locale;
 use crate::message_format::{message_text_for_display_ex, stored_tool_message_detail_text};
 use crate::storage::{ChatSession, StoredMessage};
+use crate::timeline_scan::is_turn_context_inject_timeline_message;
 use crate::visible_messages::visible_message_indices_for_export;
 
 pub use crabmate::cm_chat_export::display_session_to_json_pretty;
@@ -203,11 +204,13 @@ pub fn session_to_export_file(
     session: &ChatSession,
     loc: Locale,
     apply_assistant_display_filters: bool,
+    include_turn_context_inject: bool,
 ) -> DisplayChatSessionFile {
     DisplayChatSessionFile::new(stored_messages_to_export(
         &session.messages,
         loc,
         apply_assistant_display_filters,
+        include_turn_context_inject,
     ))
 }
 
@@ -215,11 +218,27 @@ fn stored_messages_to_export(
     messages: &[StoredMessage],
     loc: Locale,
     apply_assistant_display_filters: bool,
+    include_turn_context_inject: bool,
 ) -> Vec<DisplayExportMessage> {
-    let indices = visible_message_indices_for_export(messages);
+    let indices = visible_message_indices_for_export(messages, include_turn_context_inject);
     let mut out = Vec::new();
     for &idx in &indices {
         let m = &messages[idx];
+        // 本轮 `context_inject` / `context_trim` 旁注：水合行可能为 `system`，
+        // 而导出的 Markdown / JSON 都会跳过 `system`，故统一按 `assistant` 输出，
+        // 与实时落盘的助手 timeline 气泡（见 `timeline_dispatch`）及主列展示一致。
+        if include_turn_context_inject && is_turn_context_inject_timeline_message(m) {
+            out.push(DisplayExportMessage {
+                role: "assistant".to_string(),
+                content: Some(message_text_for_export(
+                    m,
+                    loc,
+                    apply_assistant_display_filters,
+                )),
+                name: None,
+            });
+            continue;
+        }
         if m.role == "system" && m.is_tool {
             out.push(DisplayExportMessage {
                 role: "tool".to_string(),
@@ -289,9 +308,14 @@ pub fn session_to_markdown(
     session: &ChatSession,
     loc: Locale,
     apply_assistant_display_filters: bool,
+    include_turn_context_inject: bool,
 ) -> String {
-    let messages =
-        stored_messages_to_export(&session.messages, loc, apply_assistant_display_filters);
+    let messages = stored_messages_to_export(
+        &session.messages,
+        loc,
+        apply_assistant_display_filters,
+        include_turn_context_inject,
+    );
     markdown_from_export_messages(
         crabmate::cm_chat_export::export_md_title_full(export_md_locale(loc)),
         &messages,
@@ -307,6 +331,7 @@ pub fn stored_messages_by_ids_to_markdown(
     selected_ids: &[String],
     loc: Locale,
     apply_assistant_display_filters: bool,
+    include_turn_context_inject: bool,
 ) -> String {
     use std::collections::HashSet;
 
@@ -316,7 +341,12 @@ pub fn stored_messages_by_ids_to_markdown(
         .filter(|m| set.contains(m.id.as_str()))
         .cloned()
         .collect();
-    let messages = stored_messages_to_export(&subset, loc, apply_assistant_display_filters);
+    let messages = stored_messages_to_export(
+        &subset,
+        loc,
+        apply_assistant_display_filters,
+        include_turn_context_inject,
+    );
     markdown_from_export_messages(
         crabmate::cm_chat_export::export_md_title_selection(export_md_locale(loc)),
         &messages,
@@ -613,6 +643,7 @@ mod tests {
             &["c".into(), "a".into()],
             Locale::ZhHans,
             true,
+            false,
         );
         assert!(md.contains("first"));
         assert!(!md.contains("second"));
@@ -648,7 +679,7 @@ mod tests {
             history_window_start: None,
             history_has_older: None,
         };
-        let file = session_to_export_file(&session, Locale::ZhHans, true);
+        let file = session_to_export_file(&session, Locale::ZhHans, true, false);
         assert_eq!(file.schema, CHAT_EXPORT_SCHEMA_ID);
         assert_eq!(file.schema_version, CHAT_EXPORT_SCHEMA_VERSION);
         assert_eq!(file.projection, CHAT_EXPORT_PROJECTION_DISPLAY);
@@ -693,7 +724,7 @@ mod tests {
             history_window_start: None,
             history_has_older: None,
         };
-        let md = session_to_markdown(&session, Locale::ZhHans, true);
+        let md = session_to_markdown(&session, Locale::ZhHans, true, false);
         assert_eq!(md.matches("canonical answer").count(), 1);
     }
 
@@ -718,7 +749,7 @@ mod tests {
             history_window_start: None,
             history_has_older: None,
         };
-        let md = session_to_markdown(&session, Locale::ZhHans, true);
+        let md = session_to_markdown(&session, Locale::ZhHans, true, false);
         assert!(md.contains("总计遍历：1"), "md={md}");
         assert!(
             md.contains("file: a.txt"),
@@ -750,7 +781,50 @@ mod tests {
             history_window_start: None,
             history_has_older: None,
         };
-        let md = session_to_markdown(&session, Locale::ZhHans, true);
+        let md = session_to_markdown(&session, Locale::ZhHans, true, false);
         assert_eq!(md.matches("## 助手").count(), 2, "md={md}");
+    }
+
+    #[test]
+    fn export_includes_turn_context_inject_when_pref_on() {
+        // 水合后的旁注行为 `system`：导出 Markdown / JSON 均跳过 `system`，
+        // 故开启开关时须按 `assistant` 输出才能出现在导出结果中。
+        let note = msg(
+            "n",
+            "system",
+            r#"{"kind":"context_inject","title":"本轮注入"}"#,
+            false,
+        );
+        let session = ChatSession {
+            id: "s1".to_string(),
+            layout_schema_version: crate::storage::CURRENT_LAYOUT_SCHEMA_VERSION,
+            title: "t".to_string(),
+            draft: String::new(),
+            messages: vec![
+                msg("u", "user", "hi", false),
+                note,
+                msg("a", "assistant", "答", false),
+            ],
+            updated_at: 0,
+            pinned: false,
+            starred: false,
+            server_conversation_id: None,
+            server_revision: None,
+            workspace_root: None,
+            history_total: None,
+            history_window_start: None,
+            history_has_older: None,
+        };
+
+        let md_off = session_to_markdown(&session, Locale::ZhHans, true, false);
+        assert!(!md_off.contains("本轮注入"), "md_off={md_off}");
+
+        let md_on = session_to_markdown(&session, Locale::ZhHans, true, true);
+        assert!(md_on.contains("本轮注入"), "md_on={md_on}");
+        assert_eq!(md_on.matches("## 助手").count(), 2, "md_on={md_on}");
+
+        let file_on = session_to_export_file(&session, Locale::ZhHans, true, true);
+        assert_eq!(file_on.messages.len(), 3);
+        assert_eq!(file_on.messages[1].role, "assistant");
     }
 }
