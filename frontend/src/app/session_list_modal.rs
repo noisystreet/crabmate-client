@@ -17,6 +17,7 @@ fn SessionListModalPanel(session_modal: RwSignal<bool>) -> impl IntoView {
     let draft = shell.composer.draft;
     let locale = shell.locale;
     let apply_assistant_display_filters = shell.apply_assistant_display_filters;
+    let show_turn_context_inject = shell.show_turn_context_inject;
 
     view! {
         <FocusableModalPanel
@@ -62,6 +63,7 @@ fn SessionListModalPanel(session_modal: RwSignal<bool>) -> impl IntoView {
                                     draft,
                                     session_modal,
                                     apply_assistant_display_filters,
+                                    show_turn_context_inject,
                                 } />
                             }
                         })

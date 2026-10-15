@@ -19,6 +19,7 @@ pub struct ChatShellLeptosContext {
     pub composer: ChatComposerSignals,
     pub locale: RwSignal<crate::i18n::Locale>,
     pub apply_assistant_display_filters: RwSignal<bool>,
+    pub show_turn_context_inject: RwSignal<bool>,
 }
 
 impl ChatShellLeptosContext {
@@ -29,6 +30,7 @@ impl ChatShellLeptosContext {
             composer: app.chat_composer,
             locale: app.shell_ui.locale,
             apply_assistant_display_filters: app.shell_ui.apply_assistant_display_filters,
+            show_turn_context_inject: app.shell_ui.show_turn_context_inject,
         }
     }
 }

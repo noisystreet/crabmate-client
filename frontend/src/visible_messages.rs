@@ -5,6 +5,8 @@
 //!
 //! - 主列 / 导出均跳过 [`is_ephemeral_timeline_assistant_for_chat_ui`] 与空助手壳；
 //! - 导出另跳过 [`is_ephemeral_timeline_assistant_for_export`] 的规划轮 JSON / 参数残留；
+//! - 本轮 `context_inject` / `context_trim` 旁注：主列与导出均仅在开关开启时保留
+//!   （见 [`visible_message_indices_for_export`] 的 `include_turn_context_inject`）；
 //! - TUI 对空壳另允许 stream overlay 有正文时挂载。
 
 use crate::storage::StoredMessage;
@@ -14,8 +16,15 @@ use crate::timeline_scan::{
 };
 
 /// 导出路径是否应隐藏该条。
-fn is_message_hidden_from_export(m: &StoredMessage, messages: &[StoredMessage]) -> bool {
-    if is_turn_context_inject_timeline_message(m) {
+///
+/// `include_turn_context_inject` 为 `false`（默认）时隐藏本轮 `context_inject` / `context_trim`
+/// 旁注；为 `true`（跟随「显示每轮上下文注入与压缩信息」开关）时保留，与主列一致。
+fn is_message_hidden_from_export(
+    m: &StoredMessage,
+    messages: &[StoredMessage],
+    include_turn_context_inject: bool,
+) -> bool {
+    if !include_turn_context_inject && is_turn_context_inject_timeline_message(m) {
         return true;
     }
     if is_ephemeral_timeline_assistant_for_export(m, messages) {
@@ -82,13 +91,19 @@ pub(crate) fn tui_should_render_message(
 }
 
 /// 返回 `messages` 中应对**导出**展示的原始下标（顺序不变）。
+///
+/// `include_turn_context_inject` 跟随界面开关：`true` 时导出包含本轮
+/// `context_inject` / `context_trim` 旁注。
 #[must_use]
-pub fn visible_message_indices_for_export(messages: &[StoredMessage]) -> Vec<usize> {
+pub fn visible_message_indices_for_export(
+    messages: &[StoredMessage],
+    include_turn_context_inject: bool,
+) -> Vec<usize> {
     messages
         .iter()
         .enumerate()
         .filter_map(|(idx, m)| {
-            if is_message_hidden_from_export(m, messages) {
+            if is_message_hidden_from_export(m, messages, include_turn_context_inject) {
                 None
             } else {
                 Some(idx)
@@ -136,7 +151,7 @@ mod tests {
             msg("a1", "assistant", listing, false),
             msg("a2", "assistant", compact, false),
         ];
-        let export = visible_message_indices_for_export(&messages);
+        let export = visible_message_indices_for_export(&messages, false);
         assert_eq!(export.len(), 3);
         assert_eq!(tui_visible_ids(&messages), ["u", "a1", "a2"]);
     }
@@ -158,7 +173,10 @@ mod tests {
                 created_at: 0,
             },
         ];
-        assert_eq!(visible_message_indices_for_export(&messages).len(), 1);
+        assert_eq!(
+            visible_message_indices_for_export(&messages, false).len(),
+            1
+        );
         assert_eq!(tui_visible_ids(&messages), ["u"]);
     }
 
@@ -211,7 +229,10 @@ mod tests {
                 created_at: 0,
             },
         ];
-        assert_eq!(visible_message_indices_for_export(&messages).len(), 2);
+        assert_eq!(
+            visible_message_indices_for_export(&messages, false).len(),
+            2
+        );
         assert_eq!(tui_visible_ids(&messages), ["u", "a1"]);
     }
 
@@ -234,7 +255,7 @@ mod tests {
             snap,
         ];
         assert_eq!(
-            visible_message_indices_for_export(&messages).len(),
+            visible_message_indices_for_export(&messages, false).len(),
             2,
             "snap must hide from export"
         );
@@ -263,7 +284,10 @@ mod tests {
             },
             msg("a1", "assistant", "终答", false),
         ];
-        assert_eq!(visible_message_indices_for_export(&messages).len(), 2);
+        assert_eq!(
+            visible_message_indices_for_export(&messages, false).len(),
+            2
+        );
         assert_eq!(tui_visible_ids(&messages), ["u", "a1"]);
     }
 
@@ -274,7 +298,10 @@ mod tests {
             msg("r1", "assistant", "编排路由：direct", false),
             msg("a1", "assistant", "终答", false),
         ];
-        assert_eq!(visible_message_indices_for_export(&messages).len(), 2);
+        assert_eq!(
+            visible_message_indices_for_export(&messages, false).len(),
+            2
+        );
         assert_eq!(tui_visible_ids(&messages), ["u", "a1"]);
     }
 
@@ -287,7 +314,7 @@ mod tests {
             msg("a1", "assistant", "终答", false),
         ];
         assert_eq!(
-            visible_message_indices_for_export(&messages).len(),
+            visible_message_indices_for_export(&messages, false).len(),
             2,
             "export drops staged planner JSON"
         );
@@ -316,9 +343,14 @@ mod tests {
             &inject, &messages, "s", None, true
         ));
         assert_eq!(
-            visible_message_indices_for_export(&messages).len(),
+            visible_message_indices_for_export(&messages, false).len(),
             2,
-            "export always omits inject summaries"
+            "export omits inject summaries when the pref is off"
+        );
+        assert_eq!(
+            visible_message_indices_for_export(&messages, true).len(),
+            3,
+            "export includes inject summaries when the pref is on"
         );
     }
 }

@@ -25,6 +25,7 @@ pub struct SessionModalRowBundle {
     /// 「管理会话」弹窗开关。
     pub session_modal: RwSignal<bool>,
     pub apply_assistant_display_filters: RwSignal<bool>,
+    pub show_turn_context_inject: RwSignal<bool>,
 }
 
 fn session_row_outer_class(active: bool) -> &'static str {
@@ -192,6 +193,7 @@ fn SessionModalRowActions(
         chat,
         draft,
         apply_assistant_display_filters,
+        show_turn_context_inject,
         ..
     } = bundle;
     let id_rename = id.clone();
@@ -265,6 +267,7 @@ fn SessionModalRowActions(
                             &id,
                             locale.get_untracked(),
                             apply_assistant_display_filters.get_untracked(),
+                            show_turn_context_inject.get_untracked(),
                         )
                     }
                 }
@@ -284,6 +287,7 @@ fn SessionModalRowActions(
                             &id,
                             locale.get_untracked(),
                             apply_assistant_display_filters.get_untracked(),
+                            show_turn_context_inject.get_untracked(),
                         )
                     }
                 }

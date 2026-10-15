@@ -19,6 +19,7 @@ pub(super) fn SessionContextMenuLayer(
     let draft = shell.composer.draft;
     let locale = shell.locale;
     let apply_assistant_display_filters = shell.apply_assistant_display_filters;
+    let show_turn_context_inject = shell.show_turn_context_inject;
     let menu_style = Memo::new(move |_| {
         session_context_menu
             .get()
@@ -141,6 +142,7 @@ pub(super) fn SessionContextMenuLayer(
                                 &id,
                                 locale.get_untracked(),
                                 apply_assistant_display_filters.get_untracked(),
+                                show_turn_context_inject.get_untracked(),
                             );
                         }
                     >
@@ -161,6 +163,7 @@ pub(super) fn SessionContextMenuLayer(
                                 &id,
                                 locale.get_untracked(),
                                 apply_assistant_display_filters.get_untracked(),
+                                show_turn_context_inject.get_untracked(),
                             );
                         }
                     >

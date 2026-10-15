@@ -40,7 +40,7 @@ Proposed
 
 卡片形态：助手时间线或回合元信息条上一张 **只读压缩卡**（例如「已从文件注入：`a.md` · `b.md`」），展开最多给标题/截断摘要，默认不渲染整篇 Markdown。不得看起来像用户说的话。
 
-**已落地（软字段，非本仓发明契约）**：钉 pin 的 Server `timeline_log` 可带 `kind=context_inject` / `context_trim`（`detail` 形状见 Server `SSE协议.md`）。Client **默认不**把这些旁注画进主列；设置「外观 → 显示每轮注入与窗口裁剪信息」打开后才显示。导出始终省略。这不是阶段 B 的 living_docs 文件路径卡。
+**已落地（软字段，非本仓发明契约）**：钉 pin 的 Server `timeline_log` 可带 `kind=context_inject` / `context_trim`（`detail` 形状见 Server `SSE协议.md`）。Client **默认不**把这些旁注画进主列；设置「外观 → 显示每轮注入与窗口裁剪信息」打开后才显示。会话导出（Markdown / JSON）同样**跟随该开关**：关闭时省略，开启时按助手段落导出（水合行可能为 `system`，导出统一按 `assistant` 输出以避免被 `system` 过滤跳过）。这不是阶段 B 的 living_docs 文件路径卡。
 
 ### 契约与依赖方向
 

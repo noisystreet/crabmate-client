@@ -254,18 +254,19 @@ fn handle_export(args: &[&str], shell: &ComposerStreamShell, ctx: WebSlashContro
     let kind = args.first().copied().unwrap_or("json").to_ascii_lowercase();
     let id = ctx.chat.active_id.get_untracked();
     let filters = ctx.apply_assistant_display_filters.get_untracked();
+    let include_inject = shell.show_turn_context_inject.get_untracked();
     match kind.as_str() {
         "json" | "" => {
-            export_session_json_for_id(ctx.chat.sessions, &id, loc, filters);
+            export_session_json_for_id(ctx.chat.sessions, &id, loc, filters, include_inject);
             set_ok(ctx.chat, shell, "已触发 JSON 导出下载");
         }
         "markdown" | "md" => {
-            export_session_markdown_for_id(ctx.chat.sessions, &id, loc, filters);
+            export_session_markdown_for_id(ctx.chat.sessions, &id, loc, filters, include_inject);
             set_ok(ctx.chat, shell, "已触发 Markdown 导出下载");
         }
         "both" => {
-            export_session_json_for_id(ctx.chat.sessions, &id, loc, filters);
-            export_session_markdown_for_id(ctx.chat.sessions, &id, loc, filters);
+            export_session_json_for_id(ctx.chat.sessions, &id, loc, filters, include_inject);
+            export_session_markdown_for_id(ctx.chat.sessions, &id, loc, filters, include_inject);
             set_ok(ctx.chat, shell, "已触发 JSON + Markdown 导出下载");
         }
         _ => set_ok(ctx.chat, shell, "用法: /export [json|markdown|both]"),
