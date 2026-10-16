@@ -393,7 +393,11 @@ fn restore_reasoning_after_hydration(chat: &ChatSessionSignals, aid: &str, nonce
         .update(|map| map.retain(|k, _| !preserved.contains_key(k)));
 }
 
-fn apply_saved_revision_if_same_conversation(chat: &ChatSessionSignals, cid: &str, revision: u64) {
+pub(super) fn apply_saved_revision_if_same_conversation(
+    chat: &ChatSessionSignals,
+    cid: &str,
+    revision: u64,
+) {
     chat.session_sync.update(|st| {
         if st.conversation_id.as_deref().map(str::trim) == Some(cid) {
             st.apply_saved_revision(revision);
