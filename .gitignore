@@ -62,5 +62,10 @@ mobile-tauri/src-tauri/gen/android/app/key.properties
 ########################
 agent_space/
 
+########################
+# e2e 临时工作区（异常中断可能残留）
+########################
+.e2e_tmp_*/
+
 # local tauri/app data
 **/.crabmate/
