@@ -340,8 +340,8 @@
 /* —— 思维链折叠块（reasoning_text / <think> 标签拆出） —— */
 .chat-tui-think {
   box-sizing: border-box;
-  width: fit-content;
-  max-width: 100%;
+  /* 固定占满可用宽度，不再按思考正文长度收缩 */
+  width: 100%;
   margin-bottom: var(--space-2, 0.5rem);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md, 8px);
