@@ -209,6 +209,7 @@ REAL_LLM_E2E=1 npx playwright test specs/real-llm-three-turn-scroll.spec.ts
   - **无 START 的 `TOOL_CALL_RESULT`** —— `drain(clear=true)` 掏空 overlay，而 canonical 无该工具步；
   - **`turn_segment_start{beforeToolCallId}` 先于 `TOOL_CALL_START`**（真实 SSE 的实际形态，两者相隔约 475ms）—— `reset_loading_tail_streaming_text` 已清 overlay，pending 旁白要等 `ToolCall` 才被吸收。
 - **真实 LLM 工具回合闪没**：`specs/real-llm-tool-bubble-vanish.spec.ts` 用导出同款提示「分析一下当前目录下的源码」+ 迷你 `cpp-demo` 工作区；流中采样正文助手不得归零/闪回。需 `API_KEY` 或本机钥匙串 `client_llm`。
+- **工具后无终答不得补空回复诊断**：`specs/mock-tool-only-turn-no-empty-diagnostic.spec.ts` 按「先流正文旁白 → `assistant_answer_phase` 后声明 `parsing_tool_calls` → 工具卡 → 直接 `RUN_FINISHED`」时序（`demote_answer_before_tools` 令 `answer_phase=false`、`delta_chars=0`，尾泡被 dedupe 移除后走 mid 缺失分支）；断言工具卡与旁白均可见、且不得出现 `(无回复：未进入正文阶段)` / `stream_ended=完成` 诊断（Server `Completed` 蕴含本轮必有可见输出）。
 
 ### 监控分层（旁白 / 导出）
 
@@ -230,10 +231,13 @@ GitHub Actions：本仓 `.github/workflows/e2e-playwright.yml`（PR → `main`�
 - `specs/mock-empty-assistant-shell.spec.ts`
 - `specs/mock-real-tool-bubble-vanish.spec.ts`
 - `specs/mock-tool-call-scenarios.spec.ts`
+- `specs/mock-tool-only-turn-no-empty-diagnostic.spec.ts`
 - `specs/mock-approval-scenarios.spec.ts`
 - `specs/mock-multi-turn.spec.ts`
 - `specs/mock-storage-consistency.spec.ts`
 - `specs/mock-v2-multi-turn-boundaries.spec.ts`
+- `specs/mock-mobile-shell.spec.ts`
+- `specs/mock-hydrate-parse-failed.spec.ts`
 
 本地全量 mock：`make frontend` 后 `./scripts/e2e-playwright.sh`（自动起纯 API serve + `crabmate-web`；或手动起两者后 `cd e2e && CRABMATE_API_BASE=http://127.0.0.1:8080 no_proxy=127.0.0.1,localhost npx playwright test`）。
 

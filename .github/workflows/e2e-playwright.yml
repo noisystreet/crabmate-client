@@ -122,6 +122,7 @@ jobs:
             specs/mock-empty-assistant-shell.spec.ts \
             specs/mock-real-tool-bubble-vanish.spec.ts \
             specs/mock-tool-call-scenarios.spec.ts \
+            specs/mock-tool-only-turn-no-empty-diagnostic.spec.ts \
             specs/mock-approval-scenarios.spec.ts \
             specs/mock-multi-turn.spec.ts \
             specs/mock-storage-consistency.spec.ts \
