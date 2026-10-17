@@ -8,7 +8,8 @@ use crate::sse_dispatch::ToolJobState;
 use crate::storage::{StoredMessage, StoredMessageState};
 use crate::stream_text_overlay::StreamTextOverlay;
 
-use super::tui_body_chunks::{message_body_chunks, tool_live_overlay};
+use super::tui_body_chunks::{message_body_chunks, message_body_chunks_cached, tool_live_overlay};
+use super::tui_body_parse_cache::TuiBodyParseCache;
 use super::tui_line_markdown::{TuiBodyChunks, TuiBodyPatch, plan_tui_body_patch};
 use super::tui_thinking_block::THINK_SECTION_CLASS;
 use super::tui_tool_process::tool_row_live_fields;
@@ -39,6 +40,8 @@ pub(crate) struct TuiMountState {
     pub committed_key: u64,
     pub live_id: Option<String>,
     pub live_body: Option<TuiBodyChunks>,
+    /// live 终答的增量解析缓存（已冻结块不重跑 Markdown）；随 session / live id 失效。
+    pub live_parse: Option<TuiBodyParseCache>,
     /// live 工具行是否已挂载 details（用于决定 ToolRow vs ReplaceAll）。
     pub live_tool_has_details: Option<bool>,
 }
@@ -306,12 +309,13 @@ fn full_rebuild_plan(messages: &[StoredMessage], ctx: &TuiRenderCtx<'_>) -> TuiS
     let live_id = live_message_id(messages, ctx.overlay);
     let committed_key = committed_fingerprint(&turns, live_id.as_deref());
     let mounted_ids: Vec<String> = turns.iter().map(|(_, m)| m.id.clone()).collect();
+    let mut live_parse = None;
     let live_body = live_id.as_ref().and_then(|id| {
         // 仅当 live 已可挂载时缓存 body（空壳未挂载则无 live_body）
-        turns
-            .iter()
-            .find(|(_, m)| m.id == *id)
-            .map(|(_, m)| message_body_chunks(m, ctx))
+        let message = turns.iter().find(|(_, m)| m.id == *id).map(|(_, m)| *m)?;
+        let cache =
+            live_parse.get_or_insert_with(|| TuiBodyParseCache::new(id, ctx.markdown_render));
+        Some(message_body_chunks_cached(message, ctx, Some(cache)))
     });
     let live_tool_has_details =
         live_tool_has_details_flag(messages, live_id.as_deref(), ctx.locale, ctx.tool_chunks);
@@ -322,6 +326,7 @@ fn full_rebuild_plan(messages: &[StoredMessage], ctx: &TuiRenderCtx<'_>) -> TuiS
             committed_key,
             live_id,
             live_body,
+            live_parse,
             live_tool_has_details,
         },
         full_html: Some(build_tui_transcript_html(messages, ctx)),
@@ -425,7 +430,7 @@ fn plan_live_tool_patch(
     prev: &TuiMountState,
     message: &StoredMessage,
     id: &str,
-    next_chunks: TuiBodyChunks,
+    next_chunks: &TuiBodyChunks,
     ctx: &TuiRenderCtx<'_>,
 ) -> LiveBodyPlan {
     let live = tool_live_overlay(message, ctx.tool_chunks);
@@ -449,7 +454,7 @@ fn plan_live_tool_patch(
         id,
         md,
         TuiBodyPatch::ReplaceAll {
-            chunks: next_chunks,
+            chunks: next_chunks.clone(),
         },
     )
 }
@@ -457,14 +462,14 @@ fn plan_live_tool_patch(
 fn plan_live_text_patch(
     prev: &TuiMountState,
     id: &str,
-    next_chunks: TuiBodyChunks,
+    next_chunks: &TuiBodyChunks,
 ) -> LiveBodyPlan {
     let prev_chunks = prev
         .live_body
         .as_ref()
         .filter(|_| prev.live_id.as_deref() == Some(id));
     let md = next_chunks.markdown_render;
-    let patch = plan_tui_body_patch(prev_chunks, &next_chunks);
+    let patch = plan_tui_body_patch(prev_chunks, next_chunks);
     live_body_plan(id, md, patch)
 }
 
@@ -491,7 +496,7 @@ fn plan_live_patch(
     messages: &[StoredMessage],
     live_id: Option<&str>,
     promote_id: Option<&str>,
-    live_chunks: Option<TuiBodyChunks>,
+    live_chunks: Option<&TuiBodyChunks>,
     ctx: &TuiRenderCtx<'_>,
 ) -> Option<LiveBodyPlan> {
     if let Some(id) = live_id {
@@ -551,6 +556,7 @@ fn next_mount_state(
     live_id: Option<String>,
     committed_key: u64,
     live_chunks: Option<TuiBodyChunks>,
+    live_parse: Option<TuiBodyParseCache>,
     ctx: &TuiRenderCtx<'_>,
 ) -> TuiMountState {
     // live chunks 由调用方算好传入（与 plan_live_patch 共用一次解析）；
@@ -575,13 +581,39 @@ fn next_mount_state(
         committed_key,
         live_id,
         live_body,
+        live_parse,
         live_tool_has_details,
     }
 }
 
+/// 解析 live 正文并维护增量缓存：同一 live 消息原位复用（只吸收新增行），换消息时原位替换。
+fn live_chunks_with_cache(
+    prev: &mut TuiMountState,
+    messages: &[StoredMessage],
+    live_id: Option<&str>,
+    ctx: &TuiRenderCtx<'_>,
+) -> Option<TuiBodyChunks> {
+    let id = live_id?;
+    let message = messages.iter().find(|m| m.id == id)?;
+    let cache = if prev.live_id.as_deref() == Some(id) {
+        prev.live_parse
+            .get_or_insert_with(|| TuiBodyParseCache::new(id, ctx.markdown_render))
+    } else {
+        prev.live_parse
+            .insert(TuiBodyParseCache::new(id, ctx.markdown_render))
+    };
+    Some(message_body_chunks_cached(message, ctx, Some(cache)))
+}
+
+fn take_live_parse(prev: &mut TuiMountState, live_id: Option<&str>) -> Option<TuiBodyParseCache> {
+    prev.live_parse
+        .take()
+        .filter(|cache| live_id == Some(cache.message_id()))
+}
+
 /// [`plan_tui_sync`] 入参袋（避免形参超 frontend clippy 上限）。
 pub(crate) struct PlanTuiSyncArgs<'a> {
-    pub prev: Option<&'a TuiMountState>,
+    pub prev: Option<TuiMountState>,
     pub messages: &'a [StoredMessage],
     pub session_id: &'a str,
     pub overlay: Option<&'a StreamTextOverlay>,
@@ -631,10 +663,10 @@ pub(crate) fn plan_tui_sync(args: PlanTuiSyncArgs<'_>) -> TuiSyncPlan {
         open_file_enabled,
         think_open,
     };
-    let Some(prev) = prev else {
+    let Some(mut prev) = prev else {
         return full_rebuild_plan(messages, &ctx);
     };
-    if must_full_rebuild(prev, &turns, session_id) {
+    if must_full_rebuild(&prev, &turns, session_id) {
         return full_rebuild_plan(messages, &ctx);
     }
 
@@ -642,33 +674,36 @@ pub(crate) fn plan_tui_sync(args: PlanTuiSyncArgs<'_>) -> TuiSyncPlan {
     let committed_key = committed_fingerprint(&turns, live_id.as_deref());
     // live body chunks 只解析一次：plan_live_patch 与 next_mount_state 共用，
     // 流式每 token 省去一次对同一 live 消息的重复 markdown/块解析。
-    let live_chunks = live_id.as_deref().and_then(|id| {
-        messages
-            .iter()
-            .find(|m| m.id == id)
-            .map(|m| message_body_chunks(m, &ctx))
-    });
-    let append_sections = append_new_turn_sections(prev, &turns, live_id.as_deref(), &ctx);
-    let promote_id = promote_id_from(prev, live_id.as_deref());
+    // 缓存按值持有（调用方已拥有上一帧状态），同一 live 消息原位复用，只吸收新增行；
+    // 换消息时原位替换，避免每帧克隆整份缓存（source + 已冻结块 HTML）。
+    let live_chunks = live_chunks_with_cache(&mut prev, messages, live_id.as_deref(), &ctx);
+    let append_sections = append_new_turn_sections(&prev, &turns, live_id.as_deref(), &ctx);
+    let promote_id = promote_id_from(&prev, live_id.as_deref());
     let live = plan_live_patch(
-        prev,
+        &prev,
         messages,
         live_id.as_deref(),
         promote_id.as_deref(),
-        live_chunks.clone(),
+        live_chunks.as_ref(),
         &ctx,
     );
+    // 结构判定在移出缓存前完成：移出后不能再整体借用 prev。
+    let structural_noop = append_sections.is_empty() && promote_id.is_none();
+    let same_ids = same_turn_ids(&prev, &turns);
+    let live_unchanged =
+        structural_noop && prev.committed_key == committed_key && prev.live_id == live_id;
+    let live_parse = take_live_parse(&mut prev, live_id.as_deref());
     let next = next_mount_state(
         &turns,
         messages,
         live_id.clone(),
         committed_key,
         live_chunks,
+        live_parse,
         &ctx,
     );
 
-    let structural_noop = append_sections.is_empty() && promote_id.is_none();
-    if structural_noop && prev.committed_key == committed_key && prev.live_id == live_id {
+    if live_unchanged {
         return TuiSyncPlan {
             next,
             full_html: None,
@@ -680,7 +715,7 @@ pub(crate) fn plan_tui_sync(args: PlanTuiSyncArgs<'_>) -> TuiSyncPlan {
         };
     }
 
-    if same_turn_ids(prev, &turns) && append_sections.is_empty() {
+    if same_ids && append_sections.is_empty() {
         let refresh_bodies =
             plan_refresh_bodies(messages, live_id.as_deref(), promote_id.as_deref(), &ctx);
         let mut refresh_actions = plan_refresh_actions(messages, live_id.as_deref(), locale);

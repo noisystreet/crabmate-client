@@ -31,7 +31,7 @@ fn sync_with_think(
     let empty_jobs = HashMap::new();
     let empty_paths = HashMap::new();
     plan_tui_sync(PlanTuiSyncArgs {
-        prev,
+        prev: prev.cloned(),
         messages,
         session_id,
         overlay,
@@ -96,6 +96,73 @@ fn streaming_tokens_incremental_open_plain() {
         } => {
             assert!(append_closed.is_empty());
             assert_eq!(open_plain.as_deref(), Some("**ab"));
+        }
+        other => panic!("expected Incremental, got {other:?}"),
+    }
+}
+
+#[test]
+fn streaming_reuses_incremental_parse_cache_across_frames() {
+    let user = message("u1", "user", "hi");
+    let mut assistant = message("a1", "assistant", "");
+    assistant.state = Some(StoredMessageState::Loading);
+    let messages = vec![user, assistant];
+    let empty = HashMap::new();
+    let overlay = |answer: &str| StreamTextOverlay {
+        session_id: "s1".to_string(),
+        message_id: "a1".to_string(),
+        answer: answer.to_string(),
+        reasoning: String::new(),
+    };
+
+    let plan1 = sync(None, &messages, "s1", Some(&overlay("a\n\nb")), &empty);
+    assert_eq!(
+        plan1
+            .next
+            .live_parse
+            .as_ref()
+            .map(TuiBodyParseCache::message_id),
+        Some("a1")
+    );
+
+    let plan2 = sync(
+        Some(&plan1.next),
+        &messages,
+        "s1",
+        Some(&overlay("a\n\nb\n\nc")),
+        &empty,
+    );
+    assert_eq!(
+        plan2
+            .next
+            .live_parse
+            .as_ref()
+            .map(TuiBodyParseCache::message_id),
+        Some("a1"),
+        "缓存须随 live 消息跨帧续用"
+    );
+
+    let plan3 = sync(
+        Some(&plan2.next),
+        &messages,
+        "s1",
+        Some(&overlay("a\n\nb\n\nc\n\nd")),
+        &empty,
+    );
+    assert_eq!(
+        plan3
+            .next
+            .live_parse
+            .as_ref()
+            .map(TuiBodyParseCache::message_id),
+        Some("a1")
+    );
+    let live = plan3.live.expect("live patch");
+    match live.patch {
+        TuiBodyPatch::Incremental { append_closed, .. } => {
+            // 只追加末块 "c" 及其后的空行，已冻结的 a/b 不重发。
+            assert_eq!(append_closed.len(), 2);
+            assert!(append_closed[0].contains('c'));
         }
         other => panic!("expected Incremental, got {other:?}"),
     }

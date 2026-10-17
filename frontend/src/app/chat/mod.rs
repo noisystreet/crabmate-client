@@ -36,6 +36,7 @@ mod stream_visibility_resume;
 mod tui_actions_bar;
 mod tui_body_chunks;
 mod tui_body_dom;
+mod tui_body_parse_cache;
 mod tui_line_markdown;
 mod tui_stream_dom_sync;
 mod tui_stream_view;
