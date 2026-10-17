@@ -210,6 +210,9 @@ REAL_LLM_E2E=1 npx playwright test specs/real-llm-three-turn-scroll.spec.ts
   - **`turn_segment_start{beforeToolCallId}` 先于 `TOOL_CALL_START`**（真实 SSE 的实际形态，两者相隔约 475ms）—— `reset_loading_tail_streaming_text` 已清 overlay，pending 旁白要等 `ToolCall` 才被吸收。
 - **真实 LLM 工具回合闪没**：`specs/real-llm-tool-bubble-vanish.spec.ts` 用导出同款提示「分析一下当前目录下的源码」+ 迷你 `cpp-demo` 工作区；流中采样正文助手不得归零/闪回。需 `API_KEY` 或本机钥匙串 `client_llm`。
 - **工具后无终答不得补空回复诊断**：`specs/mock-tool-only-turn-no-empty-diagnostic.spec.ts` 按「先流正文旁白 → `assistant_answer_phase` 后声明 `parsing_tool_calls` → 工具卡 → 直接 `RUN_FINISHED`」时序（`demote_answer_before_tools` 令 `answer_phase=false`、`delta_chars=0`，尾泡被 dedupe 移除后走 mid 缺失分支）；断言工具卡与旁白均可见、且不得出现 `(无回复：未进入正文阶段)` / `stream_ended=完成` 诊断（Server `Completed` 蕴含本轮必有可见输出）。
+- **中断后继续不得零回复**（真实 LLM，本地运行）：
+  - `specs/real-llm-stop-then-continue.spec.ts`：长文本流式中点「停止」，再发「继续」，断言新回合有非空正文。
+  - `specs/real-llm-stop-during-long-tool.spec.ts`：让模型同步执行 `sleep 120`，在工具卡 ⏳ 运行态点「停止」，再发「继续」。`run_command` 需先绑定工作区（用例自建临时目录并 `POST /workspace`），工具 id 取 `.chat-tui-tool-name` 的 `title` 属性。
 
 ### 监控分层（旁白 / 导出）
 
