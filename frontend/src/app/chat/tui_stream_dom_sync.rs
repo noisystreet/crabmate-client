@@ -31,7 +31,8 @@ use std::collections::{HashMap, HashSet};
 struct PlanActiveSessionArgs<'a> {
     sessions: &'a [ChatSession],
     active_id: &'a str,
-    prev: Option<&'a TuiMountState>,
+    /// 上一帧挂载状态（按值传入：调用方已从信号克隆，缓存可直接移出，避免再克隆一份）。
+    prev: Option<TuiMountState>,
     overlay: Option<&'a StreamTextOverlay>,
     locale: Locale,
     apply_filters: bool,
@@ -453,7 +454,7 @@ fn sync_chat_tui_stream_dom(
                         let plan = plan_for_active_session(PlanActiveSessionArgs {
                             sessions,
                             active_id: &active_id,
-                            prev: prev.as_ref(),
+                            prev,
                             overlay,
                             locale: display.locale,
                             apply_filters: display.apply_filters,

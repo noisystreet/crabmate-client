@@ -10,6 +10,7 @@ use crate::stream_text_overlay::{
     StreamTextOverlay, message_text_for_display_including_stream_overlay,
 };
 
+use super::tui_body_parse_cache::{TuiBodyParseCache, parse_tui_body_chunks_incremental};
 use super::tui_line_markdown::{
     TuiBodyChunks, open_active_block_class, parse_tui_body_chunks_with, render_open_active_html,
 };
@@ -190,6 +191,15 @@ pub(crate) fn message_body_chunks(
     message: &StoredMessage,
     ctx: &TuiRenderCtx<'_>,
 ) -> TuiBodyChunks {
+    message_body_chunks_cached(message, ctx, None)
+}
+
+/// [`message_body_chunks`] 的缓存版：助手终答可传增量解析缓存（`None` 等价全量）。
+pub(crate) fn message_body_chunks_cached(
+    message: &StoredMessage,
+    ctx: &TuiRenderCtx<'_>,
+    cache: Option<&mut TuiBodyParseCache>,
+) -> TuiBodyChunks {
     if message.is_tool {
         let live = tool_live_overlay(message, ctx.tool_chunks);
         let job = message
@@ -250,11 +260,21 @@ pub(crate) fn message_body_chunks(
         ctx.locale,
         ctx.apply_filters,
     );
-    let mut chunks = parse_tui_body_chunks_with(
-        &answer,
-        message_finalize_open_block(message),
-        ctx.markdown_render,
-    );
+    let mut chunks = match cache {
+        Some(cache) => {
+            if cache.message_id() != message.id.as_str()
+                || cache.markdown_render() != ctx.markdown_render
+            {
+                *cache = TuiBodyParseCache::new(&message.id, ctx.markdown_render);
+            }
+            parse_tui_body_chunks_incremental(cache, &answer, message_finalize_open_block(message))
+        }
+        None => parse_tui_body_chunks_with(
+            &answer,
+            message_finalize_open_block(message),
+            ctx.markdown_render,
+        ),
+    };
     if !thinking.trim().is_empty() {
         // 默认折叠：流式生成时也不自动展开，避免渲染过程视觉跳动；用户点击 summary 展开。
         let open = ctx.think_open.contains(&message.id);

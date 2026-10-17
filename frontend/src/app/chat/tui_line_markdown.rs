@@ -125,7 +125,7 @@ fn open_fence_plain_text(ch: u8, run: usize, lang: &str, body: &str, open_tail: 
     plain
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum BlockKind {
     Paragraph,
     Table,
@@ -320,6 +320,7 @@ pub enum TuiBodyPatch {
     },
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum FenceMode {
     Off,
     Open {
@@ -342,8 +343,9 @@ fn is_atx_heading_or_thematic_line(line: &str) -> bool {
     is_atx_heading_line(line) || is_thematic_break_line(line)
 }
 
-struct BlockAbsorbState {
-    closed: Vec<String>,
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct BlockAbsorbState {
+    pub(super) closed: Vec<String>,
     pending: String,
     pending_kind: Option<BlockKind>,
     fence: FenceMode,
@@ -351,7 +353,7 @@ struct BlockAbsorbState {
 }
 
 impl BlockAbsorbState {
-    fn new(markdown_render: bool) -> Self {
+    pub(super) fn new(markdown_render: bool) -> Self {
         Self {
             closed: Vec::new(),
             pending: String::new(),
@@ -386,7 +388,7 @@ impl BlockAbsorbState {
     }
 
     /// 消息结束：把 pending / 未闭合围栏全部冻进 closed。
-    fn seal_for_finalize(&mut self) {
+    pub(super) fn seal_for_finalize(&mut self) {
         self.flush_pending();
         self.close_open_fence();
     }
@@ -431,7 +433,7 @@ impl BlockAbsorbState {
         true
     }
 
-    fn absorb_complete_line(&mut self, line: &str) {
+    pub(super) fn absorb_complete_line(&mut self, line: &str) {
         if self.try_absorb_fence(line) {
             return;
         }
@@ -458,6 +460,32 @@ impl BlockAbsorbState {
                 self.flush_pending();
                 push_pending_line(&mut self.pending, line);
                 self.pending_kind = Some(kind);
+            }
+        }
+    }
+}
+
+pub(super) fn open_plain_for_state(
+    state: &BlockAbsorbState,
+    open_line: Option<&str>,
+) -> Option<String> {
+    match open_line {
+        Some(open) => {
+            if let Some(plain) = state.open_fence_plain(open) {
+                Some(plain)
+            } else {
+                let mut open_buf = state.pending.clone();
+                push_pending_line(&mut open_buf, open);
+                Some(open_buf)
+            }
+        }
+        None => {
+            if let Some(plain) = state.open_fence_plain("") {
+                Some(plain)
+            } else if !state.pending.is_empty() {
+                Some(state.pending.clone())
+            } else {
+                None
             }
         }
     }
@@ -499,26 +527,8 @@ pub fn parse_tui_body_chunks_with(
             state.seal_for_finalize();
             None
         }
-        Some(open) => {
-            if let Some(plain) = state.open_fence_plain(open) {
-                Some(plain)
-            } else {
-                let mut open_buf = std::mem::take(&mut state.pending);
-                let _ = state.pending_kind.take();
-                push_pending_line(&mut open_buf, open);
-                Some(open_buf)
-            }
-        }
-        None => {
-            if let Some(plain) = state.open_fence_plain("") {
-                Some(plain)
-            } else if !state.pending.is_empty() {
-                // 完整行已到、尚无空行收束：留在 open，避免提前冻结导致后续同段续写时 ReplaceAll。
-                Some(std::mem::take(&mut state.pending))
-            } else {
-                None
-            }
-        }
+        // 完整行已到、尚无空行收束：留在 open，避免提前冻结导致后续同段续写时 ReplaceAll。
+        other => open_plain_for_state(&state, other),
     };
 
     TuiBodyChunks {
