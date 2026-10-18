@@ -787,3 +787,31 @@ fn rendered_chat_area_keeps_all_characters() {
     let shown = flat.matches('中').count();
     assert_eq!(shown, CHARS, "行尾字符被裁掉了（屏幕只剩 {shown} 个）");
 }
+
+/// 段落间距必须活到 render 层：`BodyRow` 里要真有一个空行。
+///
+/// `md_tests` 的断言只证明 `wrap_styled_chars` 会产出空 row。若渲染层某天
+/// 过滤掉空 `Line`（比如按 `spans.is_empty()` 跳过），界面上的空行仍会静默
+/// 消失——这正是「终答没有空行」那个 bug 的成因，故在 BodyRow 这一层再钉一次。
+#[test]
+fn assistant_paragraph_gap_survives_to_body_rows() {
+    let mut st = UiState::new();
+    st.push_line(LineKind::Assistant, "甲\n\n乙");
+    let rows = body_rows(&st, 60);
+    assert_eq!(rows.len(), 3, "甲 / 空行 / 乙 三行");
+    assert_eq!(rows[1].line.to_string(), "", "中间那行必须是空行");
+    assert!(
+        rows[2].line.to_string().contains('乙'),
+        "末行应是第二段，got {:?}",
+        rows[2].line.to_string()
+    );
+}
+
+/// 连续空行折叠到 render 层仍然只有一个空行（不放大成多行空白）。
+#[test]
+fn body_rows_collapse_consecutive_blanks_to_one() {
+    let mut st = UiState::new();
+    st.push_line(LineKind::Assistant, "甲\n\n\n\n乙");
+    let rows = body_rows(&st, 60);
+    assert_eq!(rows.len(), 3, "多余空行不该变成多行空白");
+}
