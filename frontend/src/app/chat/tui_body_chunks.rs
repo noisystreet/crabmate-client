@@ -2,6 +2,7 @@
 //! （工具行 / 用户文本含文件引用 chip / skill slash / 思维链折叠 + 终答）。
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use crate::i18n::Locale;
 use crate::markdown::plaintext_to_safe_html;
@@ -98,9 +99,9 @@ fn skill_slash_body_chunks(
     if task.is_empty() {
         return TuiBodyChunks {
             think: None,
-            closed: vec![format!(
+            closed: vec![Arc::new(format!(
                 "<div class=\"chat-tui-line chat-tui-line--block\">{chip}</div>"
-            )],
+            ))],
             open_plain: None,
             markdown_render,
         };
@@ -108,22 +109,22 @@ fn skill_slash_body_chunks(
     let mut task_chunks = user_text_body_chunks(task, finalize_open_block, markdown_render);
     let chip_prefix = format!("{chip} ");
     if let Some(first) = task_chunks.closed.first_mut() {
-        prepend_inline_html_to_first_tui_line(first, &chip_prefix);
+        prepend_inline_html_to_first_tui_line(Arc::make_mut(first), &chip_prefix);
         return task_chunks;
     }
     if let Some(plain) = task_chunks.open_plain.take() {
         let class = open_active_block_class(&plain, markdown_render);
         let body = render_open_active_html(&plain, markdown_render);
-        task_chunks
-            .closed
-            .push(format!("<div class=\"{class}\">{chip_prefix}{body}</div>"));
+        task_chunks.closed.push(Arc::new(format!(
+            "<div class=\"{class}\">{chip_prefix}{body}</div>"
+        )));
         return task_chunks;
     }
     TuiBodyChunks {
         think: None,
-        closed: vec![format!(
+        closed: vec![Arc::new(format!(
             "<div class=\"chat-tui-line chat-tui-line--block\">{chip}</div>"
-        )],
+        ))],
         open_plain: None,
         markdown_render,
     }
@@ -173,7 +174,7 @@ fn user_text_body_chunks(
         }
     };
     for c in &mut chunks.closed {
-        replace_marks(c);
+        replace_marks(Arc::make_mut(c));
     }
     // open_plain 是源文本不能嵌 HTML：有引用时折成闭合行并替换占位符。
     if let Some(plain) = chunks.open_plain.take() {
@@ -182,7 +183,7 @@ fn user_text_body_chunks(
         replace_marks(&mut body);
         chunks
             .closed
-            .push(format!("<div class=\"{class}\">{body}</div>"));
+            .push(Arc::new(format!("<div class=\"{class}\">{body}</div>")));
     }
     chunks
 }
@@ -209,9 +210,9 @@ pub(crate) fn message_body_chunks_cached(
         let open_path = ctx.tool_open_file_path(message);
         return TuiBodyChunks {
             think: None,
-            closed: vec![tool_process_body_html(
+            closed: vec![Arc::new(tool_process_body_html(
                 message, ctx.locale, live, job, open_path,
-            )],
+            ))],
             open_plain: None,
             // 工具 HTML 不走 MD，仍记录全局开关以免与 Incremental 前缀比较漂移。
             markdown_render: ctx.markdown_render,

@@ -1,5 +1,7 @@
 //! 用户气泡中的聊天附图（`/uploads/...`，与 composer 待发预览同源）。
 
+use std::sync::Arc;
+
 use crate::app::chat::tui_line_markdown::TuiBodyChunks;
 use crate::chat_upload_src::{chat_upload_filename, safe_chat_upload_path};
 use crate::i18n::{self, Locale};
@@ -40,7 +42,7 @@ pub(crate) fn append_user_upload_images(
 ) {
     let html = user_upload_images_html(urls, locale);
     if !html.is_empty() {
-        chunks.closed.push(html);
+        chunks.closed.push(Arc::new(html));
     }
 }
 
