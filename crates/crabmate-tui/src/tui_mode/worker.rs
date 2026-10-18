@@ -6,7 +6,7 @@
 use std::sync::mpsc::{self, Sender};
 use std::thread;
 
-use crossterm::event::{self, Event, KeyEvent};
+use crossterm::event::{self, Event, KeyEvent, MouseButton, MouseEvent, MouseEventKind};
 
 use crabmate_client_api::paths;
 
@@ -25,6 +25,8 @@ use super::settings::{LlmSave, PersistedSettings, PrefsSave, merge_llm_save, mer
 /// UI 事件（键盘线程与回合/拉取线程共同的生产者）。
 pub(super) enum UiEvent {
     Key(KeyEvent),
+    /// 鼠标事件（目前只用于右栏工作区目录树的点击/滚轮，见 `mouse.rs`）。
+    Mouse(MouseEvent),
     Text(String),
     Thinking(String),
     System(String),
@@ -162,7 +164,7 @@ impl StreamSink for UiSink {
     }
 }
 
-/// 键盘读取线程：阻塞在 `event::read()`，按键转为 `UiEvent::Key`。
+/// 键盘/鼠标读取线程：阻塞在 `event::read()`，按键与鼠标事件转为 `UiEvent`。
 pub(super) fn spawn_key_reader(tx: Sender<UiEvent>) {
     thread::spawn(move || {
         loop {
@@ -172,11 +174,32 @@ pub(super) fn spawn_key_reader(tx: Sender<UiEvent>) {
                         break;
                     }
                 }
+                // 只转发会被处理的那几类：捕获鼠标后终端会持续上报指针移动/拖动，
+                // 这类事件每条进 channel 都会让主循环把节流降到 2ms 白刷整帧。
+                Ok(Event::Mouse(m)) if is_actionable_mouse(m.kind) => {
+                    if tx.send(UiEvent::Mouse(m)).is_err() {
+                        break;
+                    }
+                }
+                Ok(Event::Mouse(_)) => {}
                 Ok(_) => {}
                 Err(_) => break,
             }
         }
     });
+}
+
+/// 鼠标事件里真正会被 `on_mouse` 处理的那几类；其余在读取线程就丢弃。
+///
+/// 捕获鼠标后终端会持续上报指针移动（`Moved`）与拖动（`Drag`），而 `run_loop`
+/// 每收到一条消息就把节流从 50ms 降到 2ms 并整帧重绘——这类事件一条也不该进去。
+pub(super) fn is_actionable_mouse(kind: MouseEventKind) -> bool {
+    matches!(
+        kind,
+        MouseEventKind::Down(MouseButton::Left)
+            | MouseEventKind::ScrollUp
+            | MouseEventKind::ScrollDown
+    )
 }
 
 /// 持久 worker：单 current-thread runtime 串行执行回合与刷新任务，
@@ -374,4 +397,38 @@ fn job_save_prefs(
         Ok(save)
     });
     let _ = tx.send(UiEvent::SavedPrefs(result));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_actionable_mouse;
+    use crossterm::event::{MouseButton, MouseEventKind};
+
+    #[test]
+    fn pointer_motion_and_drags_are_dropped() {
+        // 指针划过 / 按住拖动：一条都不进 channel（否则主循环按 2ms 整帧重绘）。
+        assert!(!is_actionable_mouse(MouseEventKind::Moved));
+        assert!(!is_actionable_mouse(MouseEventKind::Drag(
+            MouseButton::Left
+        )));
+        assert!(!is_actionable_mouse(MouseEventKind::Up(MouseButton::Left)));
+    }
+
+    #[test]
+    fn clicks_and_wheel_are_kept() {
+        assert!(is_actionable_mouse(MouseEventKind::Down(MouseButton::Left)));
+        assert!(is_actionable_mouse(MouseEventKind::ScrollUp));
+        assert!(is_actionable_mouse(MouseEventKind::ScrollDown));
+    }
+
+    #[test]
+    fn non_left_clicks_are_dropped() {
+        // 右键 / 中键没有绑定动作，`on_mouse` 也是忽略。
+        assert!(!is_actionable_mouse(MouseEventKind::Down(
+            MouseButton::Right
+        )));
+        assert!(!is_actionable_mouse(MouseEventKind::Down(
+            MouseButton::Middle
+        )));
+    }
 }

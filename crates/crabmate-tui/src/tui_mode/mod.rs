@@ -11,7 +11,9 @@
 mod approve;
 mod body_memo;
 mod controls;
+mod layout;
 mod md;
+mod mouse;
 mod palette;
 mod render;
 mod serve_defaults;
@@ -33,8 +35,9 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use crossterm::cursor::SetCursorStyle;
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{DisableMouseCapture, EnableMouseCapture, KeyCode, KeyEvent, KeyModifiers};
 use crossterm::execute;
+use crossterm::style::Print;
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
@@ -81,6 +84,8 @@ struct TuiApp<'a> {
     panel: Option<SettingsPanel>,
     /// serve user-data 设置快照（启动拉取 / 保存成功后更新；随轮与状态行合成用）。
     persisted: Option<PersistedSettings>,
+    /// 上一帧的终端尺寸：鼠标命中检测要按同一套分区重算矩形。
+    last_size: (u16, u16),
 }
 
 impl TuiApp<'_> {
@@ -577,6 +582,8 @@ impl TuiApp<'_> {
     fn on_msg(&mut self, msg: UiEvent) {
         match msg {
             UiEvent::Key(key) => self.on_key(key),
+            // 鼠标：右栏工作区目录树的点击/滚轮（审批凥层/设置面板打开时内部直接忽略）。
+            UiEvent::Mouse(m) => self.on_mouse(m),
             UiEvent::Text(delta) => self.st.stream_delta(LineKind::Assistant, &delta),
             UiEvent::Thinking(delta) => self.st.stream_delta(LineKind::Thinking, &delta),
             UiEvent::System(line) => self.st.push_line(LineKind::System, line.trim()),
@@ -762,6 +769,7 @@ impl TuiApp<'_> {
             }
             // 每帧读取终端尺寸：窄屏隐藏左栏；若焦点滞留已隐藏的左栏则收回输入框。
             let size = terminal.backend().size().context("terminal size")?;
+            self.last_size = (size.width, size.height);
             self.st.sidebar_visible = size.width >= SIDEBAR_MIN_WIDTH;
             // PgUp/PgDn 页步 ≈ 聊天可视区行数（状态行 + composer 占几行）。
             self.st.page_rows = (size.height as usize).saturating_sub(4).max(1);
@@ -793,11 +801,29 @@ impl TuiApp<'_> {
     }
 }
 
-/// raw mode + 备用屏幕的 RAII 复原。
-struct ScreenGuard;
+/// 鼠标捕获开关：默认开启；`CM_TUI_MOUSE=off|0|false|none` 关闭，回到纯键盘（保留终端原生拖选复制）。
+fn mouse_capture_enabled() -> bool {
+    !matches!(
+        std::env::var("CM_TUI_MOUSE")
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase()
+            .as_str(),
+        "off" | "0" | "false" | "none"
+    )
+}
+
+/// raw mode + 备用屏幕 + 鼠标捕获的 RAII 复原。
+struct ScreenGuard {
+    /// 是否启用过鼠标捕获（未启用时不补发 Disable，避免向终端写多余序列）。
+    mouse: bool,
+}
 
 impl Drop for ScreenGuard {
     fn drop(&mut self) {
+        if self.mouse {
+            let _ = execute!(io::stdout(), DisableMouseCapture);
+        }
         let _ = execute!(io::stdout(), LeaveAlternateScreen);
         let _ = disable_raw_mode();
     }
@@ -813,9 +839,20 @@ pub async fn run_tui(
     enable_raw_mode().context("enable raw mode")?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen).context("enter alternate screen")?;
+    // 鼠标捕获用于右栏工作区树的点击/滚轮。它会接管终端原生拖选复制
+    // （多数终端 Shift+拖选仍可用）；`CM_TUI_MOUSE=off` 关闭。
+    let mouse = mouse_capture_enabled();
+    if mouse {
+        execute!(stdout, EnableMouseCapture).context("enable mouse capture")?;
+        // crossterm 的 `EnableMouseCapture` 顺带打开 any-event tracking（`?1003h`）：
+        // 指针只要划过终端就持续上报 `Moved`。这里把它关掉，只留按键/滚轮需要的
+        // 1000/1002/1006，免得「鼠标一动就整屏重绘」。`DisableMouseCapture` 会一并
+        // 复位这几项，所以退出路径不需要为此多写一句。
+        execute!(stdout, Print("\x1b[?1003l")).context("disable mouse motion tracking")?;
+    }
     // 输入行只显示文本，用闪烁竖条光标提示输入位置。
     execute!(stdout, SetCursorStyle::BlinkingBar).context("set cursor style")?;
-    let _guard = ScreenGuard;
+    let _guard = ScreenGuard { mouse };
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout)).context("init terminal")?;
     // 必须在启动键盘读取线程前清屏：`clear()` 会查询光标位置（DSR），
     // 需要 crossterm 的全局事件锁；而键盘线程已阻塞在 `event::read()` 持锁，
@@ -842,6 +879,7 @@ pub async fn run_tui(
         body_key: None,
         panel: None,
         persisted: None,
+        last_size: (0, 0),
     };
     // 启动即拉一次会话 / 工作区根 / serve 默认状态 / user-data 设置快照（失败以系统行提示）。
     app.refresh_sessions();

@@ -130,6 +130,8 @@ sudo dpkg -i crates/crabmate-tui/target/debian/crabmate-tui_*.deb
 
 键位、布局与设置面板见 [docs/design/remote_cli_tui.md](./docs/design/remote_cli_tui.md)。
 
+右侧工作区目录树也支持鼠标：点击目录行展开/收起，点击文件行只选中（插入路径仍用 Enter），树聚焦后在其上滚动滚轮可移动光标（在聊天区滚动滚轮则滚动对话），点击树外任意处把焦点收回输入框。鼠标捕获默认开启；设 `CM_TUI_MOUSE=off` 可关闭，改回纯键盘并保留终端原生拖选复制。
+
 ## 个人云（远程纯 API）
 
 公网只暴露 `api.…` → Caddy → 本机 `serve`（不要 `--with-web`）；壳用包内 UI 连接 `https://api.…/` + Bearer。步骤与勾选见 [`docs/design/personal_cloud_runbook.md`](docs/design/personal_cloud_runbook.md)。VPS/systemd/Caddy 见 Server [`个人VPS部署指南.md`](https://github.com/noisystreet/CrabMate/blob/main/docs/个人VPS部署指南.md)。

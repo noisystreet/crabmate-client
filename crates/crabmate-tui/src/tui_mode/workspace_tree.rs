@@ -401,6 +401,18 @@ impl UiState {
         }
     }
 
+    /// 鼠标点击落光标：占位行不可选中（与 ↑↓ 跳过的语义一致）；返回是否命中可选行。
+    pub fn ws_set_cursor(&mut self, idx: usize) -> bool {
+        match self.ws_rows.get(idx) {
+            Some(r) if !r.placeholder => {
+                self.ws_pending_cursor = None;
+                self.ws_cursor = idx;
+                true
+            }
+            _ => false,
+        }
+    }
+
     /// 子目录列表成功到达：写入缓存（折叠中的也缓存，便于再次展开）。
     /// 目录行之下的行会被占位→真实子行的替换顶开/收拢，光标按净位移保持指向原条目。
     pub fn ws_dir_ok(&mut self, rel: &str, data: WorkspaceDirData) {
@@ -522,6 +534,18 @@ impl UiState {
         } else if self.ws_cursor + 1 < n {
             self.ws_cursor += 1;
         }
+    }
+
+    /// 鼠标点击候选：直接落到该行（越界不动）；返回是否命中。
+    pub fn ws_pick_set(&mut self, idx: usize) -> bool {
+        let Some(st) = self.ws_pick.as_ref() else {
+            return false;
+        };
+        if idx >= st.projects.len() {
+            return false;
+        }
+        self.ws_cursor = idx;
+        true
     }
 
     /// 光标所在项目发起切换；返回其名字（忙/空列表不动作）。

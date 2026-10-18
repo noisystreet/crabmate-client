@@ -8,12 +8,13 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
+use super::layout::panes;
 use super::md;
 use super::palette::Palette;
 use super::settings_panel::PanelContent;
 use super::state::{Focus, LineKind, LogLine, UiState};
 use super::status::{SPINNER_FRAMES, status_text};
-use super::ws_sidebar::{sessions_content, sidebar_view, workspace_content};
+use super::ws_sidebar::{pane_list_area, sessions_content, sidebar_view, workspace_content};
 
 /// 低于此宽度隐藏左右栏（等价 repl 布局）。
 pub const SIDEBAR_MIN_WIDTH: u16 = 120;
@@ -456,51 +457,37 @@ pub fn draw(
     panel: Option<&PanelContent>,
 ) {
     let area = frame.area();
-    let chunks = Layout::vertical([
-        Constraint::Length(1),
-        Constraint::Min(1),
-        Constraint::Length(1),
-    ])
-    .split(area);
-    let top_area = chunks[0];
-    let body_area = chunks[1];
-    let status_area = chunks[2];
+    // 顶栏 / 主体三列 / 状态栏的矩形与鼠标命中检测共用 `layout::panes`。
+    let p = panes(area, st.sidebar_visible);
 
     let spin = progress_mark_frame(st, info);
     let pal = &st.palette;
-    paint_bg(frame, top_area, pal.chrome_bg);
+    paint_bg(frame, p.top, pal.chrome_bg);
     // 顶栏工作区名称居中（对齐 Desktop 标题栏观感）。
-    let top = Paragraph::new(top_text(st, top_area.width as usize))
+    let top = Paragraph::new(top_text(st, p.top.width as usize))
         .alignment(Alignment::Center)
         .style(Style::new().fg(pal.fg).add_modifier(Modifier::BOLD));
-    frame.render_widget(top, top_area);
+    frame.render_widget(top, p.top);
 
-    if st.sidebar_visible {
-        let cols = Layout::horizontal([
-            Constraint::Length(SIDEBAR_WIDTH),
-            Constraint::Min(0),
-            Constraint::Length(SIDEBAR_WIDTH),
-        ])
-        .split(body_area);
-        let (rows, cursor, hint) = sessions_content(st, cols[0].width.saturating_sub(2) as usize);
-        paint_bg(frame, cols[0], pal.chrome_bg);
-        render_pane(frame, cols[0], rows, cursor, hint, pal);
-        let (rows, cursor, hint) = workspace_content(st, cols[2].width.saturating_sub(2) as usize);
-        paint_bg(frame, cols[2], pal.chrome_bg);
-        render_pane(frame, cols[2], rows, cursor, hint, pal);
-        render_chat_column(frame, st, cols[1], prepared, panel.is_none(), spin);
-    } else {
-        render_chat_column(frame, st, body_area, prepared, panel.is_none(), spin);
+    // 宽屏三列；窄屏 `left`/`right` 为 None，聊天列即整个主体。
+    if let (Some(left), Some(right)) = (p.left, p.right) {
+        let (rows, cursor, hint) = sessions_content(st, left.width.saturating_sub(2) as usize);
+        paint_bg(frame, left, pal.chrome_bg);
+        render_pane(frame, left, rows, cursor, hint, pal);
+        let (rows, cursor, hint) = workspace_content(st, right.width.saturating_sub(2) as usize);
+        paint_bg(frame, right, pal.chrome_bg);
+        render_pane(frame, right, rows, cursor, hint, pal);
     }
+    render_chat_column(frame, st, p.chat, prepared, panel.is_none(), spin);
 
-    paint_bg(frame, status_area, pal.chrome_bg);
+    paint_bg(frame, p.status, pal.chrome_bg);
     let status = Paragraph::new(status_text(
         info,
         st.conversation_id.as_deref(),
-        status_area.width as usize,
+        p.status.width as usize,
     ))
     .style(Style::new().fg(pal.fg).add_modifier(Modifier::BOLD));
-    frame.render_widget(status, status_area);
+    frame.render_widget(status, p.status);
 
     // 设置面板浮层：整屏覆盖（含顶栏/状态栏），最后绘制压住全部内容。
     if let Some(content) = panel {
@@ -571,16 +558,18 @@ fn render_pane(
     if area.width <= 1 || area.height == 0 {
         return;
     }
-    let inner = Rect::new(area.x + 1, area.y, area.width - 1, area.height);
-    let cols = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(inner);
-    let shown = sidebar_view(&rows, cols[0].height as usize, cursor);
+    // 内容区与提示行矩形同样跑鼠标命中检测用的那份计算。
+    let list_area = pane_list_area(area);
+    let shown = sidebar_view(&rows, list_area.height as usize, cursor);
     let list = Paragraph::new(shown).style(Style::new().fg(pal.fg));
-    frame.render_widget(list, cols[0]);
-    if cols[1].height > 0
+    frame.render_widget(list, list_area);
+    // 提示行占列内最后一行（高度不足 2 行时没有提示位）。
+    if area.height >= 2
         && let Some(text) = hint
     {
+        let hint_area = Rect::new(area.x + 1, area.y + area.height - 1, area.width - 1, 1);
         let hint_p = Paragraph::new(Span::styled(text, Style::new().fg(pal.muted)));
-        frame.render_widget(hint_p, cols[1]);
+        frame.render_widget(hint_p, hint_area);
     }
 }
 
