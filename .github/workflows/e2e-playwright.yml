@@ -37,8 +37,8 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: noisystreet/CrabMate
-          # 与契约钉点一致：crates.io crabmate 0.6.0（git tag v0.6.0）
-          ref: v0.6.0
+          # 与契约钉点一致：crates.io crabmate 0.7.0（git tag v0.7.0）
+          ref: v0.7.0
           path: crabmate-server
 
       - name: Install system deps (OpenSSL / libssh2)
