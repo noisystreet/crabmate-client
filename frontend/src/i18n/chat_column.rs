@@ -248,6 +248,190 @@ pub fn msg_skill_inject_card_forced(l: Locale) -> &'static str {
     }
 }
 
+/// 聊天主列上下文压缩 / 裁剪卡：服务端未给 `title` 时的兜底名称。
+pub fn msg_context_trim_card_label(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "上下文压缩",
+        Locale::En => "Context compacted",
+    }
+}
+
+/// 聊天主列上下文压缩 / 裁剪卡：状态符的无障碍标签（中性语义，避免复用工具卡的「完成」）。
+pub fn msg_context_trim_status_label(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "上下文压缩",
+        Locale::En => "Context compaction",
+    }
+}
+
+/// 聊天主列上下文压缩 / 裁剪卡：单行摘要（已用 / 可用上下文 + 占用百分比）。
+pub fn msg_context_trim_used_available(
+    l: Locale,
+    used: &str,
+    available: &str,
+    used_pct: u32,
+) -> String {
+    match l {
+        Locale::ZhHans => format!("已用 {used} tokens ({used_pct}%) · 可用 {available} tokens"),
+        Locale::En => format!("Used {used} tokens ({used_pct}%) · available {available} tokens"),
+    }
+}
+
+/// 聊天主列上下文压缩 / 裁剪卡：单行摘要（仅有已用量时）。
+pub fn msg_context_trim_used_tokens(l: Locale, used: &str) -> String {
+    match l {
+        Locale::ZhHans => format!("已用 {used} tokens"),
+        Locale::En => format!("Used {used} tokens"),
+    }
+}
+
+/// 聊天主列上下文压缩 / 裁剪卡：单行摘要（消息条数 before → after）。
+pub fn msg_context_trim_message_range(l: Locale, before: u32, after: u32) -> String {
+    match l {
+        Locale::ZhHans => format!("{before} → {after} 条消息"),
+        Locale::En => format!("{before} → {after} messages"),
+    }
+}
+
+/// 聊天主列上下文压缩 / 裁剪卡：折叠详情 summary 的 tooltip（展开后仍成立）。
+pub fn msg_context_trim_detail_title(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "上下文压缩详情",
+        Locale::En => "Context compaction details",
+    }
+}
+
+/// 上下文压缩 / 裁剪卡展开层的结构化字段。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ContextTrimFact {
+    /// 压缩前后 token 数。
+    Tokens,
+    /// 上下文窗口与预留输出。
+    Window,
+    /// 消息条数 before → after。
+    Messages,
+    /// 移除的轮次 / 消息数。
+    Removed,
+    /// 消息 / 工具 schema / 附件的 token 构成。
+    Breakdown,
+    /// 压缩方式与触发条件。
+    Method,
+    /// token 计数来源（服务端标识）。
+    CountingSource,
+    /// 压缩原因（服务端标识）。
+    Reason,
+}
+
+/// 聊天主列上下文压缩 / 裁剪卡：结构化字段标签。
+pub fn msg_context_trim_fact_label(l: Locale, fact: ContextTrimFact) -> &'static str {
+    match (l, fact) {
+        (Locale::ZhHans, ContextTrimFact::Tokens) => "Tokens",
+        (Locale::En, ContextTrimFact::Tokens) => "Tokens",
+        (Locale::ZhHans, ContextTrimFact::Window) => "上下文窗口",
+        (Locale::En, ContextTrimFact::Window) => "Context window",
+        (Locale::ZhHans, ContextTrimFact::Messages) => "消息",
+        (Locale::En, ContextTrimFact::Messages) => "Messages",
+        (Locale::ZhHans, ContextTrimFact::Removed) => "移除",
+        (Locale::En, ContextTrimFact::Removed) => "Removed",
+        (Locale::ZhHans, ContextTrimFact::Breakdown) => "构成",
+        (Locale::En, ContextTrimFact::Breakdown) => "Breakdown",
+        (Locale::ZhHans, ContextTrimFact::Method) => "方式",
+        (Locale::En, ContextTrimFact::Method) => "Method",
+        (Locale::ZhHans, ContextTrimFact::CountingSource) => "计数来源",
+        (Locale::En, ContextTrimFact::CountingSource) => "Counting source",
+        (Locale::ZhHans, ContextTrimFact::Reason) => "原因",
+        (Locale::En, ContextTrimFact::Reason) => "Reason",
+    }
+}
+
+/// 聊天主列上下文压缩 / 裁剪卡：上下文窗口（含预留输出）。
+pub fn msg_context_trim_window(l: Locale, cap: &str, reserved: Option<&str>) -> String {
+    match (l, reserved) {
+        (Locale::ZhHans, Some(reserved)) => format!("{cap} tokens（预留输出 {reserved}）"),
+        (Locale::En, Some(reserved)) => format!("{cap} tokens (reserved output {reserved})"),
+        (Locale::ZhHans, None) => format!("{cap} tokens"),
+        (Locale::En, None) => format!("{cap} tokens"),
+    }
+}
+
+/// 聊天主列上下文压缩 / 裁剪卡：移除的轮次 / 消息数。
+pub fn msg_context_trim_removed(l: Locale, groups: u32, messages: u32) -> String {
+    match (l, groups > 0, messages > 0) {
+        (Locale::ZhHans, true, true) => format!("{groups} 轮 · {messages} 条消息"),
+        (Locale::En, true, true) => format!("{groups} turn groups · {messages} messages"),
+        (Locale::ZhHans, true, false) => format!("{groups} 轮"),
+        (Locale::En, true, false) => format!("{groups} turn groups"),
+        (Locale::ZhHans, false, true) => format!("{messages} 条消息"),
+        (Locale::En, false, true) => format!("{messages} messages"),
+        (Locale::ZhHans, false, false) => String::new(),
+        (Locale::En, false, false) => String::new(),
+    }
+}
+
+/// 聊天主列上下文压缩 / 裁剪卡：token 构成（消息 / 工具 schema / 附件）。
+pub fn msg_context_trim_breakdown(
+    l: Locale,
+    messages: Option<&str>,
+    schema: Option<&str>,
+    attachments: Option<&str>,
+) -> String {
+    let (messages_label, schema_label, attachments_label) = match l {
+        Locale::ZhHans => ("消息", "工具定义", "附件"),
+        Locale::En => ("messages", "tool schema", "attachments"),
+    };
+    [
+        messages.map(|v| format!("{messages_label} {v}")),
+        schema.map(|v| format!("{schema_label} {v}")),
+        attachments.map(|v| format!("{attachments_label} {v}")),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>()
+    .join(" · ")
+}
+
+/// 聊天主列上下文压缩 / 裁剪卡：摘要方式（`tail_kept` 为保留的末尾条数）。
+pub fn msg_context_trim_method_summary(l: Locale, tail_kept: Option<u32>) -> String {
+    match (l, tail_kept) {
+        (Locale::ZhHans, Some(n)) => format!("摘要（保留末尾 {n} 条）"),
+        (Locale::En, Some(n)) => format!("summary (kept last {n})"),
+        (Locale::ZhHans, None) => "摘要".to_string(),
+        (Locale::En, None) => "summary".to_string(),
+    }
+}
+
+/// 聊天主列上下文压缩 / 裁剪卡：按阈值裁剪历史。
+pub fn msg_context_trim_method_trim(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "裁剪历史",
+        Locale::En => "history trimmed",
+    }
+}
+
+/// 聊天主列上下文压缩 / 裁剪卡：工具输出压缩次数。
+pub fn msg_context_trim_method_compress(l: Locale, hits: u32) -> String {
+    match l {
+        Locale::ZhHans => format!("压缩工具输出 ×{hits}"),
+        Locale::En => format!("tool output compressed ×{hits}"),
+    }
+}
+
+/// 聊天主列上下文压缩 / 裁剪卡：token 预算触发。
+pub fn msg_context_trim_method_token_trigger(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "token 预算触发",
+        Locale::En => "token budget triggered",
+    }
+}
+
+/// 聊天主列上下文压缩 / 裁剪卡：原始 JSON 折叠区标题。
+pub fn msg_context_trim_raw_json_label(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "原始 JSON",
+        Locale::En => "Raw JSON",
+    }
+}
+
 pub fn composer_slash_builtin_skills_list(l: Locale) -> &'static str {
     match l {
         Locale::ZhHans => "列出可 `/id` 调用的技能明细",

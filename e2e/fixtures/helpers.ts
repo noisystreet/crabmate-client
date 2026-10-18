@@ -25,11 +25,13 @@ export function apiUrl(path: string): string {
 /** 设置 prefs、session，再导航一次等待输入框就绪（避免 SPA 防抖 PUT 盖住 seed）。
  *
  * `opts.sidePanelView` 覆盖 `side_panel_view`（默认 `"hidden"`，即右列收起；
- * 需要状态栈可见的用例传 `"workspace"`）。*/
+ * 需要状态栈可见的用例传 `"workspace"`）。
+ * `opts.showTurnContextInject` 打开聊天主列的 `context_inject` / `context_trim` 旁注
+ * （默认关，与产品默认一致）。*/
 export async function seedSession(
   page: Page,
   sid: string,
-  opts: { sidePanelView?: string } = {},
+  opts: { sidePanelView?: string; showTurnContextInject?: boolean } = {},
 ) {
   await applyWebApiBearerHeaders(page);
 
@@ -48,6 +50,7 @@ export async function seedSession(
     side_width: 280,
     editor_layout_mode: false,
     status_bar_visible: true,
+    show_turn_context_inject: opts.showTurnContextInject ?? false,
   };
   const sessionsBody = {
     sessions: [

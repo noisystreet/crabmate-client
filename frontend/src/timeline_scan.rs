@@ -80,12 +80,174 @@ fn json_looks_like_context_inject_detail(text: &str) -> bool {
         || (obj.contains_key("count_hit") && obj.contains_key("n_before"))
 }
 
+/// 本轮上下文压缩 / 裁剪信息（Server `context_trim` 的 `detail`）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContextTrimInfo {
+    /// 服务端事件标题（如「已裁剪历史」/「已压缩工具输出」）；纯 detail 形态下为空。
+    pub title: String,
+    /// 压缩前 token 数（`detail.before_tokens`）。
+    pub before_tokens: Option<u32>,
+    /// 压缩后服务端 `used_input_tokens`（`detail.after_tokens`）。
+    pub after_tokens: Option<u32>,
+    /// 模型上下文窗口（`detail.max_input_tokens`）。
+    pub max_input_tokens: Option<u32>,
+    /// 为输出预留的 token 数（`detail.reserved_output_tokens`）。
+    pub reserved_output_tokens: Option<u32>,
+    /// 消息正文占用（`detail.message_tokens`）。
+    pub message_tokens: Option<u32>,
+    /// 工具 schema 占用（`detail.tool_schema_tokens`）。
+    pub tool_schema_tokens: Option<u32>,
+    /// 附件占用（`detail.attachment_tokens`）。
+    pub attachment_tokens: Option<u32>,
+    /// 裁剪前消息条数（`detail.n_before`）。
+    pub n_before: Option<u32>,
+    /// 裁剪后消息条数（`detail.n_after`）。
+    pub n_after: Option<u32>,
+    /// 按条数阈值命中的裁剪（`detail.count_hit`）。
+    pub count_hit: bool,
+    /// 按字符阈值命中的裁剪（`detail.char_hit`）。
+    pub char_hit: bool,
+    /// 工具输出压缩次数（`detail.compress_hits`）。
+    pub compress_hits: u32,
+    /// 是否由 LLM 摘要替换前缀（`detail.summarized`）。
+    pub summarized: bool,
+    /// 摘要后保留的末尾消息数（`detail.tail_kept`）。
+    pub tail_kept: Option<u32>,
+    /// 是否由 token 预算触发（`detail.token_triggered`）。
+    pub token_triggered: bool,
+    /// 移除的完整轮次（`detail.removed_turn_groups`）。
+    pub removed_turn_groups: u32,
+    /// 移除的消息条数（`detail.removed_messages`）。
+    pub removed_messages: u32,
+    /// token 计数来源（`detail.counting_source`）。
+    pub counting_source: Option<String>,
+    /// 压缩原因标识（`detail.compaction_reason`）。
+    pub compaction_reason: Option<String>,
+    /// 归一化（pretty）后的 detail JSON，供原始 JSON 折叠区展示。
+    pub detail: String,
+}
+
+/// detail 形状是否为 `context_trim`（`skills` / `kinds` 存在时优先按 `context_inject` 处理）。
+fn detail_looks_like_context_trim(v: &serde_json::Value) -> bool {
+    let Some(obj) = v.as_object() else {
+        return false;
+    };
+    if obj.contains_key("skills") || obj.contains_key("kinds") {
+        return false;
+    }
+    obj.contains_key("after_tokens") || obj.contains_key("n_after") || obj.contains_key("n_before")
+}
+
+/// 旁注只可能是 JSON 对象，或「标题行 + JSON 对象」；先做廉价前缀判断，
+/// 避免对普通正文（Markdown / 纯文本）反复尝试整串解析。
+fn looks_like_context_event(text: &str) -> bool {
+    text.starts_with('{')
+        || text
+            .split_once('\n')
+            .is_some_and(|(_, rest)| rest.trim_start().starts_with('{'))
+}
+
+/// 一次解析拆出 `(kind 是否为 context_trim, title, detail)`：水合 `{kind,title,detail}`
+/// （`detail` 为字符串）、流式 `title\n<detail>`、纯 detail JSON 三种形态。
+fn context_event_parts(text: &str) -> Option<(bool, String, serde_json::Value)> {
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(text) {
+        let kind_is_trim = v.get("kind").and_then(|k| k.as_str()) == Some("context_trim");
+        let title = v
+            .get("title")
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        return Some((kind_is_trim, title, nested_timeline_detail(&v)?));
+    }
+    let (title, rest) = text.split_once('\n')?;
+    let v: serde_json::Value = serde_json::from_str(rest.trim()).ok()?;
+    Some((false, title.trim().to_string(), nested_timeline_detail(&v)?))
+}
+
+/// 外层 `detail` 为 JSON 字符串时再解析一层；已是对象时直接取该对象。
+fn nested_timeline_detail(v: &serde_json::Value) -> Option<serde_json::Value> {
+    match v.get("detail") {
+        Some(serde_json::Value::String(raw)) => serde_json::from_str(raw.trim()).ok(),
+        Some(other @ serde_json::Value::Object(_)) => Some(other.clone()),
+        Some(_) => None,
+        None => v.is_object().then(|| v.clone()),
+    }
+}
+
+fn json_u32(v: &serde_json::Value, key: &str) -> Option<u32> {
+    u32::try_from(v.get(key)?.as_u64()?).ok()
+}
+
+fn json_bool(v: &serde_json::Value, key: &str) -> Option<bool> {
+    v.get(key)?.as_bool()
+}
+
+fn json_string(v: &serde_json::Value, key: &str) -> Option<String> {
+    v.get(key)?
+        .as_str()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+}
+
+/// 从任意消息正文提取上下文压缩 / 裁剪信息；非 trim 旁注 → `None`。
+///
+/// 水合形态以 `kind=context_trim` 为准；流式 / 纯 detail 形态按
+/// [`detail_looks_like_context_trim`] 判定（Server `trim_event` 至少含 `after_tokens` /
+/// `n_before` / `n_after` 之一，E2E 也存在仅 `after_tokens` 的形态）。
+/// 卡片渲染与默认隐藏开关共用此判定。
+#[must_use]
+pub fn context_trim_from_timeline_text(text: &str) -> Option<ContextTrimInfo> {
+    let t = text.trim();
+    if t.is_empty() || !looks_like_context_event(t) {
+        return None;
+    }
+    let (kind_is_trim, title, detail) = context_event_parts(t)?;
+    if !kind_is_trim && !detail_looks_like_context_trim(&detail) {
+        return None;
+    }
+    let detail_text = serde_json::to_string_pretty(&detail).unwrap_or_else(|_| detail.to_string());
+    Some(ContextTrimInfo {
+        title,
+        before_tokens: json_u32(&detail, "before_tokens"),
+        after_tokens: json_u32(&detail, "after_tokens"),
+        max_input_tokens: json_u32(&detail, "max_input_tokens"),
+        reserved_output_tokens: json_u32(&detail, "reserved_output_tokens"),
+        message_tokens: json_u32(&detail, "message_tokens"),
+        tool_schema_tokens: json_u32(&detail, "tool_schema_tokens"),
+        attachment_tokens: json_u32(&detail, "attachment_tokens"),
+        n_before: json_u32(&detail, "n_before"),
+        n_after: json_u32(&detail, "n_after"),
+        count_hit: json_bool(&detail, "count_hit").unwrap_or(false),
+        char_hit: json_bool(&detail, "char_hit").unwrap_or(false),
+        compress_hits: json_u32(&detail, "compress_hits").unwrap_or(0),
+        summarized: json_bool(&detail, "summarized").unwrap_or(false),
+        tail_kept: json_u32(&detail, "tail_kept"),
+        token_triggered: json_bool(&detail, "token_triggered").unwrap_or(false),
+        removed_turn_groups: json_u32(&detail, "removed_turn_groups").unwrap_or(0),
+        removed_messages: json_u32(&detail, "removed_messages").unwrap_or(0),
+        counting_source: json_string(&detail, "counting_source"),
+        compaction_reason: json_string(&detail, "compaction_reason"),
+        detail: detail_text,
+    })
+}
+
+/// 上下文压缩 / 裁剪旁注（system 水合行或 assistant 本地 snapshot）。
+#[must_use]
+pub fn is_context_trim_timeline_message(m: &StoredMessage) -> bool {
+    !m.is_tool && context_trim_from_timeline_text(&m.text).is_some()
+}
+
 /// 水合 `crabmate_timeline` 正文或流式旁注拼接（title + `\n` + detail JSON）。
 #[must_use]
 pub fn is_turn_context_inject_timeline_text(text: &str) -> bool {
     let t = text.trim();
-    if t.is_empty() {
+    if t.is_empty() || !looks_like_context_event(t) {
         return false;
+    }
+    if context_trim_from_timeline_text(t).is_some() {
+        return true;
     }
     if json_object_kind_is_inject(t) {
         return true;
@@ -231,6 +393,35 @@ fn server_has_equivalent_skill_inject(server_msgs: &[StoredMessage], local_text:
         })
         .filter_map(|s| skill_inject_from_timeline_text(&s.text))
         .any(|info| info.skills == local.skills && info.forced == local.forced)
+}
+
+/// 两条 trim 事件是否指向同一轮：`title` 相同，且至少有一个可比的稳定键相等。
+///
+/// `SSE` 首次事件与落盘最终事件的计数会继续累加，因此 `n_before` 或 `after_tokens`
+/// 任一对齐即视为同一事件；两侧没有共同键时保守地视为不同，避免误删另一轮卡片。
+fn context_trim_rows_match(local: &ContextTrimInfo, server: &ContextTrimInfo) -> bool {
+    if server.title != local.title {
+        return false;
+    }
+    let same = |a: Option<u32>, b: Option<u32>| matches!((a, b), (Some(x), Some(y)) if x == y);
+    same(local.n_before, server.n_before) || same(local.after_tokens, server.after_tokens)
+}
+
+/// 服务端已持久化等价压缩 / 裁剪旁注（水合后丢弃流式本地快照，避免双卡）。
+fn server_has_equivalent_context_trim(server_msgs: &[StoredMessage], local_text: &str) -> bool {
+    let Some(local) = context_trim_from_timeline_text(local_text) else {
+        return false;
+    };
+    server_msgs
+        .iter()
+        .filter(|s| !s.is_tool)
+        .filter(|s| {
+            !s.state
+                .as_ref()
+                .is_some_and(|st| st.is_local_timeline_snapshot_row())
+        })
+        .filter_map(|s| context_trim_from_timeline_text(&s.text))
+        .any(|info| context_trim_rows_match(&local, &info))
 }
 
 /// 已落盘的编排路由旁注：导出与聊天列均跳过。
@@ -468,6 +659,11 @@ pub fn should_preserve_local_timeline_on_hydrate(
             {
                 return false;
             }
+            if is_context_trim_timeline_message(m)
+                && server_has_equivalent_context_trim(server_msgs, &m.text)
+            {
+                return false;
+            }
             !server_assistant_has_trimmed_text(server_msgs, &m.text)
                 && !is_timeline_snapshot_duplicate_of_canonical_assistant(m, server_msgs)
         }
@@ -528,392 +724,4 @@ pub fn is_ephemeral_timeline_assistant_for_export(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::storage::{StoredMessage, StoredMessageState};
-
-    #[test]
-    fn context_inject_kind_and_json_body_detected() {
-        assert!(is_turn_context_inject_kind("context_inject"));
-        assert!(is_turn_context_inject_kind(" context_trim "));
-        assert!(!is_turn_context_inject_kind("final_response"));
-        assert!(is_turn_context_inject_timeline_text(
-            r#"{"kind":"context_inject","title":"inject"}"#
-        ));
-        assert!(is_turn_context_inject_timeline_text(
-            "本轮注入\n{\"skills\":[\"rust-style\"],\"forced\":false}"
-        ));
-        assert!(is_turn_context_inject_timeline_text(
-            r#"{"count_hit":true,"n_before":40,"n_after":12}"#
-        ));
-        assert!(!is_turn_context_inject_timeline_text("hello"));
-    }
-
-    #[test]
-    fn legacy_local_snapshot_dropped_when_server_has_same_assistant_text() {
-        let snap = StoredMessage {
-            id: "legacy-fr".into(),
-            role: "assistant".into(),
-            text: "same answer".into(),
-            reasoning_text: String::new(),
-            image_urls: vec![],
-            state: Some(timeline_state_local_snapshot()),
-            is_tool: false,
-            tool_call_id: None,
-            tool_name: None,
-            created_at: 0,
-        };
-        let server = vec![StoredMessage {
-            id: "srv".into(),
-            role: "assistant".into(),
-            text: "same answer".into(),
-            reasoning_text: String::new(),
-            image_urls: vec![],
-            state: None,
-            is_tool: false,
-            tool_call_id: None,
-            tool_name: None,
-            created_at: 1,
-        }];
-        assert!(!should_preserve_local_timeline_on_hydrate(&snap, &server));
-        assert!(is_ephemeral_timeline_assistant_for_export(
-            &snap,
-            &[snap.clone(), server[0].clone()]
-        ));
-    }
-
-    #[test]
-    fn parses_context_trim_after_tokens() {
-        // 正常 `after_tokens`。
-        assert_eq!(
-            context_trim_after_used_tokens(Some(r#"{"count_hit":true,"after_tokens":1234}"#)),
-            Some(1234)
-        );
-        // 无 `after_tokens` / `null` / 缺 detail → 不重置。
-        assert_eq!(
-            context_trim_after_used_tokens(Some(r#"{"n_before":3}"#)),
-            None
-        );
-        assert_eq!(
-            context_trim_after_used_tokens(Some(r#"{"after_tokens":null}"#)),
-            None
-        );
-        assert_eq!(context_trim_after_used_tokens(None), None);
-        // 空串 / 非 JSON → 不重置。
-        assert_eq!(context_trim_after_used_tokens(Some("  ")), None);
-        assert_eq!(context_trim_after_used_tokens(Some("not json")), None);
-    }
-
-    #[test]
-    fn context_trim_watermark_reset_requires_all_conditions() {
-        // 三条件齐备 → 返回归属与回落值（0 亦为合法回落）。
-        assert_eq!(
-            context_trim_watermark_reset(true, Some(18000), Some("cid-1")),
-            Some(("cid-1", 18000))
-        );
-        assert_eq!(
-            context_trim_watermark_reset(true, Some(0), Some("cid-1")),
-            Some(("cid-1", 0))
-        );
-        // 后台流（本轮不被查看）→ 不重置，避免污染活跃会话。
-        assert_eq!(
-            context_trim_watermark_reset(false, Some(18000), Some("cid-1")),
-            None
-        );
-        // 解析不出 after_tokens → 不重置。
-        assert_eq!(
-            context_trim_watermark_reset(true, None, Some("cid-1")),
-            None
-        );
-        // 无服务端 conversation_id → 不重置。
-        assert_eq!(context_trim_watermark_reset(true, Some(18000), None), None);
-    }
-
-    #[test]
-    fn parses_final_response_snapshot_without_msg_field() {
-        let state =
-            StoredMessageState::from_wire(r#"{"k":"cm_tl","t":"final_response_snapshot"}"#.into());
-        assert_eq!(
-            timeline_ui_snapshot_type(&state).as_deref(),
-            Some("final_response_snapshot")
-        );
-    }
-
-    #[test]
-    fn final_response_snapshot_dropped_when_server_has_same_text() {
-        let snap = StoredMessage {
-            id: "fr1".into(),
-            role: "assistant".into(),
-            text: "hello world".into(),
-            reasoning_text: String::new(),
-            image_urls: vec![],
-            state: Some(timeline_state_final_response_snapshot()),
-            is_tool: false,
-            tool_call_id: None,
-            tool_name: None,
-            created_at: 0,
-        };
-        let server = vec![StoredMessage {
-            id: "srv".into(),
-            role: "assistant".into(),
-            text: "hello world".into(),
-            reasoning_text: String::new(),
-            image_urls: vec![],
-            state: None,
-            is_tool: false,
-            tool_call_id: None,
-            tool_name: None,
-            created_at: 1,
-        }];
-        assert!(is_ephemeral_timeline_assistant_for_export(&snap, &server));
-        assert!(!should_preserve_local_timeline_on_hydrate(&snap, &server));
-    }
-
-    #[test]
-    fn planner_tool_call_rejected_timeline_dropped_for_export() {
-        let m = StoredMessage {
-            id: "reject".into(),
-            role: "assistant".into(),
-            text: "规划轮工具调用已拒绝\ncode=PLANNER_TOOL_CALL_REJECTED".to_string(),
-            reasoning_text: String::new(),
-            image_urls: vec![],
-            state: Some(timeline_state_local_snapshot()),
-            is_tool: false,
-            tool_call_id: None,
-            tool_name: None,
-            created_at: 0,
-        };
-        assert!(is_ephemeral_timeline_assistant_for_export(&m, &[]));
-    }
-
-    #[test]
-    fn commentary_before_tools_dropped_for_export() {
-        let m = StoredMessage {
-            id: "c1".into(),
-            role: "assistant".into(),
-            text: String::new(),
-            reasoning_text: "先写总结\n".into(),
-            image_urls: vec![],
-            state: Some(crate::storage::StoredMessageState::CommentaryBeforeTools),
-            is_tool: false,
-            tool_call_id: None,
-            tool_name: None,
-            created_at: 0,
-        };
-        assert!(is_commentary_before_tools_assistant(&m));
-        assert!(is_ephemeral_timeline_assistant_for_export(&m, &[]));
-    }
-
-    #[test]
-    fn staged_planner_round_dropped_for_export() {
-        let m = StoredMessage {
-            id: "plan".into(),
-            role: "assistant".into(),
-            text: r#"1. `rerun-demo`: 重新运行 demo
-
-```json
-{"type":"agent_reply_plan","version":1,"steps":[{"id":"rerun-demo","description":"重新运行 demo"}],"no_task":false}
-```"#
-                .into(),
-            reasoning_text: String::new(),
-            image_urls: vec![],
-            state: None,
-            is_tool: false,
-            tool_call_id: None,
-            tool_name: None,
-            created_at: 0,
-        };
-        assert!(is_ephemeral_timeline_assistant_for_export(&m, &[]));
-    }
-
-    #[test]
-    fn tool_argument_array_residue_dropped_for_export() {
-        let m = StoredMessage {
-            id: "args".into(),
-            role: "assistant".into(),
-            text: r#"["-c","tar xzf hpcg-HPCG-release-3-1-0.tar.gz"]"#.into(),
-            reasoning_text: String::new(),
-            image_urls: vec![],
-            state: None,
-            is_tool: false,
-            tool_call_id: None,
-            tool_name: None,
-            created_at: 0,
-        };
-        assert!(is_ephemeral_timeline_assistant_for_export(&m, &[]));
-    }
-
-    #[test]
-    fn bare_shell_command_residue_dropped_for_export() {
-        let m = StoredMessage {
-            id: "cmd".into(),
-            role: "assistant".into(),
-            text: "tar -xzf hpcg-HPCG-release-3-1-0.tar.gz".into(),
-            reasoning_text: String::new(),
-            image_urls: vec![],
-            state: None,
-            is_tool: false,
-            tool_call_id: None,
-            tool_name: None,
-            created_at: 0,
-        };
-        assert!(is_ephemeral_timeline_assistant_for_export(&m, &[]));
-    }
-
-    #[test]
-    fn bare_archive_path_argument_residue_dropped_for_export() {
-        let m = StoredMessage {
-            id: "path-arg".into(),
-            role: "assistant".into(),
-            text: "hpcg-HPCG-release-3-1-0.tar.gz".into(),
-            reasoning_text: String::new(),
-            image_urls: vec![],
-            state: None,
-            is_tool: false,
-            tool_call_id: None,
-            tool_name: None,
-            created_at: 0,
-        };
-        assert!(is_ephemeral_timeline_assistant_for_export(&m, &[]));
-    }
-
-    #[test]
-    fn truncated_install_path_residue_dropped_for_export() {
-        let m = StoredMessage {
-            id: "install-trunc".into(),
-            role: "assistant".into(),
-            text: "hpcg-HPCG-release-3-1-0/INSTALLe".into(),
-            reasoning_text: String::new(),
-            image_urls: vec![],
-            state: None,
-            is_tool: false,
-            tool_call_id: None,
-            tool_name: None,
-            created_at: 0,
-        };
-        assert!(is_ephemeral_timeline_assistant_for_export(&m, &[]));
-    }
-
-    #[test]
-    fn makefile_path_residue_not_dropped_for_export() {
-        let m = StoredMessage {
-            id: "makefile-path".into(),
-            role: "assistant".into(),
-            text: "hpcg-HPCG-release-3-1-0/Makefile".into(),
-            reasoning_text: String::new(),
-            image_urls: vec![],
-            state: None,
-            is_tool: false,
-            tool_call_id: None,
-            tool_name: None,
-            created_at: 0,
-        };
-        assert!(!is_ephemeral_timeline_assistant_for_export(&m, &[]));
-    }
-
-    #[test]
-    fn explanatory_shell_command_answer_is_kept_for_export() {
-        let m = StoredMessage {
-            id: "cmd-explain".into(),
-            role: "assistant".into(),
-            text: "可以执行：\n\n```bash\ntar -xzf archive.tar.gz\n```".into(),
-            reasoning_text: String::new(),
-            image_urls: vec![],
-            state: None,
-            is_tool: false,
-            tool_call_id: None,
-            tool_name: None,
-            created_at: 0,
-        };
-        assert!(!is_ephemeral_timeline_assistant_for_export(&m, &[]));
-    }
-
-    #[test]
-    fn context_inject_skills_parses_three_shapes_and_dedupes() {
-        // 流式：`title\n<detail>`，id 与 `.md` 路径归一为同一展示名。
-        let streamed = "本轮注入\n{\"kinds\":[\"skill\"],\"skills\":[\"rust-style\",\".crabmate/skills/rust-style.md\"],\"forced\":true}";
-        let info = context_inject_skills(streamed).expect("streamed");
-        assert_eq!(info.skills, vec!["rust-style".to_string()]);
-        assert!(info.forced);
-
-        // 水合：外层 `{kind,title,detail}`，`detail` 是 JSON 字符串。
-        let hydrated = r#"{"kind":"context_inject","title":"本轮注入","detail":"{\"skills\":[\"rust-style\"],\"forced\":false}"}"#;
-        let info = context_inject_skills(hydrated).expect("hydrated");
-        assert_eq!(info.skills, vec!["rust-style".to_string()]);
-        assert!(!info.forced);
-
-        // 纯 detail JSON。
-        let pure = r#"{"skills":["a","b"],"forced":false}"#;
-        assert_eq!(
-            context_inject_skills(pure).expect("pure").skills,
-            vec!["a".to_string(), "b".to_string()]
-        );
-
-        // 无 skill / 非法输入 → None（不得画空卡）。
-        assert!(context_inject_skills("hello").is_none());
-        assert!(context_inject_skills(r#"{"skills":[],"forced":true}"#).is_none());
-        assert!(context_inject_skills(r#"{"count_hit":true,"n_before":40}"#).is_none());
-        // `.md` 后缀大小写不敏感。
-        assert_eq!(
-            context_inject_skills(r#"{"skills":["foo.MD"],"forced":false}"#)
-                .expect("uppercase suffix")
-                .skills,
-            vec!["foo".to_string()]
-        );
-    }
-
-    #[test]
-    fn plain_message_with_skills_json_is_not_skill_inject() {
-        // 普通消息正文恰为 `{"skills":[...]}`：detail 解析能取到，但注入门控必须拒绝，
-        // 否则会被画成 skill 卡并丢掉角色标签 / 原文。
-        let raw = r#"{"skills":["rust-style"]}"#;
-        assert!(context_inject_skills(raw).is_some());
-        assert!(skill_inject_from_timeline_text(raw).is_none());
-        let m = StoredMessage {
-            id: "u1".into(),
-            role: "user".into(),
-            text: raw.into(),
-            reasoning_text: String::new(),
-            image_urls: vec![],
-            state: None,
-            is_tool: false,
-            tool_call_id: None,
-            tool_name: None,
-            created_at: 0,
-        };
-        assert!(!is_skill_inject_timeline_message(&m));
-    }
-
-    #[test]
-    fn local_skill_inject_snapshot_dropped_when_server_has_equivalent() {
-        let snap = StoredMessage {
-            id: "local-skill".into(),
-            role: "assistant".into(),
-            text: "本轮注入\n{\"skills\":[\"rust-style\"],\"forced\":false}".into(),
-            reasoning_text: String::new(),
-            image_urls: vec![],
-            state: Some(timeline_state_local_snapshot()),
-            is_tool: false,
-            tool_call_id: None,
-            tool_name: None,
-            created_at: 0,
-        };
-        let server = vec![StoredMessage {
-            id: "srv-skill".into(),
-            role: "system".into(),
-            text: r#"{"kind":"context_inject","title":"本轮注入","detail":"{\"skills\":[\"rust-style\"],\"forced\":false}"}"#.into(),
-            reasoning_text: String::new(),
-            image_urls: vec![],
-            state: None,
-            is_tool: false,
-            tool_call_id: None,
-            tool_name: None,
-            created_at: 1,
-        }];
-        assert!(is_skill_inject_timeline_message(&snap));
-        assert!(is_skill_inject_timeline_message(&server[0]));
-        assert!(!should_preserve_local_timeline_on_hydrate(&snap, &server));
-        // 服务端没有等价 skill 注入时保留本地快照。
-        assert!(should_preserve_local_timeline_on_hydrate(&snap, &[]));
-    }
-}
+mod tests;
