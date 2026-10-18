@@ -7,6 +7,7 @@ use ratatui::style::Color;
 use crabmate_client_api::secrets::{KEYRING_SERVICE, SecretSlot};
 
 use super::super::TuiApp;
+use super::super::palette::Palette;
 use super::super::settings::{LlmSave, PersistedSettings, PrefsSave};
 use super::super::state::LineKind;
 use super::super::worker::WorkerJob;
@@ -43,7 +44,12 @@ impl TuiApp<'_> {
     /// （启动静默拉取失败不打扰；面板打开会重试加载）。
     pub(crate) fn on_user_data(&mut self, result: Result<PersistedSettings, String>) {
         match result {
-            Ok(persisted) => self.persisted = Some(persisted),
+            Ok(persisted) => {
+                // 主题只读自 Desktop user-data：启动一次，之后不变（切换需重启生效）。
+                self.st
+                    .set_palette(Palette::resolve(persisted.theme.as_deref()));
+                self.persisted = Some(persisted);
+            }
             Err(e) => {
                 if self.panel.is_some() {
                     self.st.push_line(

@@ -8,6 +8,7 @@ use std::sync::mpsc::Sender;
 
 use crate::serve::{ApprovalDecision, CommandApprovalData, SessionListRow, WorkspaceDirEntry};
 
+use super::palette::Palette;
 use super::serve_defaults::ServeDefaults;
 use super::tool_summary::tool_end_text;
 use super::workspace_tree::{WsPickState, WsRow};
@@ -65,6 +66,9 @@ pub struct LogLine {
     pub text: String,
     /// thinking 折叠态（默认折叠；Ctrl+E 切换全局展开）。
     pub collapsed: bool,
+    /// 工具行结果（`Some(true)` 成功 / `Some(false)` 失败 / `None` 进行中）；
+    /// 仅供渲染分色，不参与文本（文本仍是 `tool_end_text` 的完整串）。
+    pub tool_ok: Option<bool>,
 }
 
 impl LogLine {
@@ -75,6 +79,7 @@ impl LogLine {
             kind,
             text: text.to_string(),
             collapsed,
+            tool_ok: None,
         }
     }
 
@@ -87,6 +92,8 @@ impl LogLine {
 #[derive(Debug, Default)]
 pub struct UiState {
     pub lines: Vec<LogLine>,
+    /// 终端配色板（随 `UserPrefsDto.theme`；启动时解析一次，不随帧变）。
+    pub palette: Palette,
     /// 输入缓冲（Vec<char> 便于光标插入；含 `\n` 即多行编辑）。
     input: Vec<char>,
     /// 输入光标位置（字符下标）。
@@ -154,6 +161,8 @@ impl UiState {
     pub fn new() -> Self {
         Self {
             page_rows: 12,
+            // 主题在拿到 user-data 前先按终端能力落默认深色。
+            palette: Palette::resolve(None),
             ..Self::default()
         }
     }
@@ -184,6 +193,14 @@ impl UiState {
     /// 内容/折叠变化代数 +1（body memo 失效用）。
     fn bump(&mut self) {
         self.content_rev = self.content_rev.wrapping_add(1);
+    }
+
+    /// 应用配色板（启动拉到 user-data 后一次；变化时让 body memo 失效重算样式）。
+    pub fn set_palette(&mut self, palette: Palette) {
+        if self.palette != palette {
+            self.palette = palette;
+            self.bump();
+        }
     }
 
     // ── 输入缓冲（单行/多行统一） ─────────────────────────────
@@ -430,8 +447,14 @@ impl UiState {
         match idx {
             Some(i) if self.lines.get(i).is_some_and(|l| l.kind == LineKind::Tool) => {
                 self.lines[i].text = text;
+                self.lines[i].tool_ok = ok;
             }
-            _ => self.push_line(LineKind::Tool, &text),
+            _ => {
+                self.push_line(LineKind::Tool, &text);
+                if let Some(last) = self.lines.last_mut() {
+                    last.tool_ok = ok;
+                }
+            }
         }
         self.refresh_search_meta();
         self.bump();

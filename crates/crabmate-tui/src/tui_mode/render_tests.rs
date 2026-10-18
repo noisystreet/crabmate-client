@@ -39,28 +39,31 @@ fn thinking_expanded_wraps_multirow() {
 #[test]
 fn search_marks_and_anchors_rows() {
     let mut st = UiState::new();
+    // 固定调色板：参数化断言不能随终端环境（NO_COLOR 等）漂移。
+    st.set_palette(super::Palette::default());
     st.push_line(LineKind::Assistant, "hello world");
     st.push_line(LineKind::User, "bye");
     st.start_search("hello");
     let rows = body_rows(&st, 60);
+    let pal = st.palette;
     // 只取内容行：块间分隔空行的 spans 为空，`all(...)` 恒真会悄悄架空断言。
     let filled: Vec<&BodyRow> = rows.iter().filter(|r| r.log_index.is_some()).collect();
     assert_eq!(filled.len(), 2, "两条日志行应各产出一条内容行");
-    // 锚定行第一物理行以黄底反色突出
+    // 锚定行第一物理行以 accent 底反色突出
     assert!(
         filled[0]
             .line
             .spans
             .iter()
-            .any(|s| s.style.bg == Some(Color::Yellow))
+            .any(|s| s.style.bg == Some(pal.hit))
     );
-    // 非命中行（User 行）不带黄色前景
+    // 非命中行（User 行）不带 accent 前景
     assert!(
         filled[1]
             .line
             .spans
             .iter()
-            .all(|s| s.style.fg != Some(Color::Yellow))
+            .all(|s| s.style.fg != Some(pal.hit))
     );
 }
 
@@ -333,4 +336,87 @@ fn adjacent_message_bubbles_get_blank_separator() {
         .windows(2)
         .any(|w| w[0].line.to_string().contains('q') && w[1].line.to_string().is_empty());
     assert!(separated, "用户块与助手块之间应有一个空行");
+}
+
+#[test]
+fn tool_row_colors_by_result() {
+    let mut st = UiState::new();
+    // 固定调色板：参数化断言不能随终端环境（NO_COLOR 等）漂移。
+    st.set_palette(super::Palette::default());
+    st.tool_start("c1", "read_file");
+    st.tool_end("c1", "read_file", Some(true), None);
+    st.tool_start("c2", "grep");
+    st.tool_end("c2", "grep", Some(false), None);
+    let pal = st.palette;
+    let rows = body_rows(&st, 80);
+    let filled: Vec<&BodyRow> = rows.iter().filter(|r| r.log_index.is_some()).collect();
+    assert_eq!(filled.len(), 2, "两行工具日志各产出一条内容行");
+    assert!(
+        filled[0]
+            .line
+            .spans
+            .iter()
+            .any(|s| s.style.fg == Some(pal.ok)),
+        "成功行用 ok 色"
+    );
+    assert!(
+        filled[1]
+            .line
+            .spans
+            .iter()
+            .any(|s| s.style.fg == Some(pal.err) && s.style.add_modifier.contains(Modifier::BOLD)),
+        "失败行用 err 色 + BOLD（无色模式下也靠 BOLD 区分）"
+    );
+}
+
+#[test]
+fn collapsed_thinking_gets_fold_marker() {
+    let mut st = UiState::new();
+    st.stream_delta(LineKind::Thinking, "想了很久");
+    let rows = body_rows(&st, 80);
+    let text = rows[0].line.to_string();
+    assert!(text.contains('▸'), "折叠态应有 ▸ 标记: {text:?}");
+}
+
+#[test]
+fn prefix_is_dim_and_content_is_not() {
+    let mut st = UiState::new();
+    // 固定调色板：参数化断言不能随终端环境（NO_COLOR 等）漂移。
+    st.set_palette(super::Palette::default());
+    st.push_line(LineKind::User, "hi");
+    let rows = body_rows(&st, 40);
+    let spans = &rows[0].line.spans;
+    assert!(
+        spans[0].style.add_modifier.contains(Modifier::DIM),
+        "前缀应降噪为 DIM"
+    );
+    assert!(
+        !spans[1].style.add_modifier.contains(Modifier::DIM),
+        "正文不应被 DIM"
+    );
+}
+
+#[test]
+fn composer_border_geometry() {
+    // 边框左右各占 1 列。
+    let normal = Rect::new(0, 0, 80, 5);
+    assert!(use_composer_border(normal));
+    assert_eq!(composer_content_width(normal), 78);
+    // 20 列窄终端仍有可用内宽（不能算出 0，否则光标窗口会退化）。
+    assert_eq!(composer_content_width(Rect::new(0, 0, 20, 4)), 18);
+    // 放不下边框时退化：宽度走旧的左内缩 1 列。
+    let tiny_w = Rect::new(0, 0, 3, 5);
+    assert!(!use_composer_border(tiny_w), "3 列放不下边框");
+    assert_eq!(composer_content_width(tiny_w), 2);
+    let tiny_h = Rect::new(0, 0, 80, 2);
+    assert!(!use_composer_border(tiny_h), "2 行放不下上下边框");
+    assert_eq!(composer_content_width(tiny_h), 79);
+}
+
+#[test]
+fn composer_outer_rows_adds_borders() {
+    let st = UiState::new();
+    // 单行输入：1 内容行 + 上下边框。
+    assert_eq!(composer_rows(&st), 1);
+    assert_eq!(composer_outer_rows(&st), 3);
 }
