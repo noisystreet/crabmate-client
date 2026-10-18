@@ -43,17 +43,20 @@ fn search_marks_and_anchors_rows() {
     st.push_line(LineKind::User, "bye");
     st.start_search("hello");
     let rows = body_rows(&st, 60);
+    // 只取内容行：块间分隔空行的 spans 为空，`all(...)` 恒真会悄悄架空断言。
+    let filled: Vec<&BodyRow> = rows.iter().filter(|r| r.log_index.is_some()).collect();
+    assert_eq!(filled.len(), 2, "两条日志行应各产出一条内容行");
     // 锚定行第一物理行以黄底反色突出
     assert!(
-        rows[0]
+        filled[0]
             .line
             .spans
             .iter()
             .any(|s| s.style.bg == Some(Color::Yellow))
     );
-    // 非命中行不带黄色前景
+    // 非命中行（User 行）不带黄色前景
     assert!(
-        rows[1]
+        filled[1]
             .line
             .spans
             .iter()
@@ -72,14 +75,46 @@ fn chat_body_width_matches_layout() {
 }
 
 #[test]
-fn thinking_and_answer_do_not_add_blank_between() {
+fn thinking_and_answer_get_blank_separator() {
     let mut st = UiState::new();
     st.push_line(LineKind::User, "q");
     st.stream_delta(LineKind::Thinking, "想");
     st.stream_delta(LineKind::Assistant, "答");
     let rows = body_rows(&st, 80);
-    let all_filled = rows.iter().all(|r| !r.line.to_string().is_empty());
-    assert!(all_filled, "思考行与正文同回合不应插入空行");
+    let blanks = rows
+        .iter()
+        .filter(|r| r.line.to_string().is_empty())
+        .count();
+    assert_eq!(blanks, 2, "用户 / 思考 / 正文三块之间各一个空行");
+}
+
+#[test]
+fn tool_block_separated_from_text_but_compact_inside() {
+    let mut st = UiState::new();
+    st.stream_delta(LineKind::Assistant, "先看看");
+    st.tool_start("c1", "read_file");
+    st.tool_end("c1", "read_file", Some(true), Some("read file: a.rs"));
+    st.tool_start("c2", "grep");
+    st.stream_delta(LineKind::Assistant, "结论");
+    let rows = body_rows(&st, 80);
+    let text: Vec<String> = rows.iter().map(|r| r.line.to_string()).collect();
+    assert_eq!(text.len(), 6, "4 条内容行 + 2 个块间空行: {text:?}");
+    assert!(text[1].is_empty(), "正文与工具块之间应空行: {text:?}");
+    assert!(text[2].contains("read file: a.rs"), "工具结束行: {text:?}");
+    assert!(text[3].contains("grep"), "连续工具行之间不插空行: {text:?}");
+    assert!(text[4].is_empty(), "工具块与正文块之间应空行: {text:?}");
+}
+
+#[test]
+fn separators_carry_no_log_index() {
+    let mut st = UiState::new();
+    st.push_line(LineKind::User, "q");
+    st.stream_delta(LineKind::Thinking, "想");
+    st.stream_delta(LineKind::Assistant, "答");
+    let seq: Vec<Option<usize>> = body_rows(&st, 80).iter().map(|r| r.log_index).collect();
+    // 内容行按逻辑行号递增；块间分隔行为 None，/find 锚点（按 Some(target) 查找）
+    // 因而不会停在空行上。
+    assert_eq!(seq, vec![Some(0), None, Some(1), None, Some(2)]);
 }
 
 #[test]
