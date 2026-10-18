@@ -322,13 +322,17 @@ pub fn session_is_disposable_blank(s: &ChatSession) -> bool {
 /// （Web `prefer_or_create_empty_session`）。
 ///
 /// 复用时会用 `workspace_root` 覆盖该行的绑定（`None` 表示保持原样）。
+///
+/// `new_id` / `now_ms` 收**闭包而非值**：复用分支根本不生成新 id，提前求值等于白跑。
+/// Web 侧那两个来源是 `js_sys::Date::now()` / `Math::random()`，在 host target 的单测里
+/// 一调用就 panic（wasm-bindgen 导入函数只能在 wasm 上调），所以惰性是硬要求。
 #[must_use]
 pub fn prefer_or_create_empty_session(
     mut list: Vec<ChatSession>,
     workspace_root: Option<String>,
     title: String,
-    local_id: String,
-    now_ms: i64,
+    new_id: impl FnOnce() -> String,
+    now_ms: impl FnOnce() -> i64,
 ) -> (Vec<ChatSession>, String) {
     if let Some(pos) = list.iter().position(session_is_blank_chat) {
         let id = list[pos].id.clone();
@@ -337,7 +341,7 @@ pub fn prefer_or_create_empty_session(
         }
         return (list, id);
     }
-    let row = new_empty_session(local_id, title, now_ms, workspace_root);
+    let row = new_empty_session(new_id(), title, now_ms(), workspace_root);
     let id = row.id.clone();
     list.insert(0, row);
     (list, id)
@@ -544,20 +548,43 @@ mod tests {
             list,
             Some("/w".to_string()),
             "t".into(),
-            "s_new".into(),
-            5,
+            || "s_new".to_string(),
+            || 5,
         );
         assert_eq!(id, "s1", "复用列表里的空白行，不新建");
         assert_eq!(list.len(), 2);
         assert_eq!(list[0].workspace_root.as_deref(), Some("/w"));
     }
 
+    /// 复用分支必须惰性：既不该生成新 id，也不该读时钟。
+    ///
+    /// Web 侧那两个来源是 `js_sys` 调用，提前求值会让 host target 的
+    /// `cargo test --lib` 在 wasm-bindgen 导入函数上 panic。
+    #[test]
+    fn prefer_reuses_blank_without_touching_id_or_clock() {
+        let (list, id) = prefer_or_create_empty_session(
+            vec![session("s1")],
+            None,
+            "t".into(),
+            || -> String { panic!("复用分支不该生成新 id") },
+            || -> i64 { panic!("复用分支不该读时钟") },
+        );
+        assert_eq!(id, "s1");
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].workspace_root, None, "None 不该写绑定");
+    }
+
     #[test]
     fn prefer_keeps_existing_root_when_none_given() {
         let mut blank = session("s1");
         blank.workspace_root = Some("/keep".to_string());
-        let (list, id) =
-            prefer_or_create_empty_session(vec![blank], None, "t".into(), "s_new".into(), 5);
+        let (list, id) = prefer_or_create_empty_session(
+            vec![blank],
+            None,
+            "t".into(),
+            || "s_new".to_string(),
+            || 5,
+        );
         assert_eq!(id, "s1");
         assert_eq!(
             list[0].workspace_root.as_deref(),
@@ -570,8 +597,13 @@ mod tests {
     fn prefer_inserts_when_nothing_is_blank() {
         let mut used = session("s1");
         used.messages.push(msg("m1"));
-        let (list, id) =
-            prefer_or_create_empty_session(vec![used], None, "t".into(), "s_new".into(), 5);
+        let (list, id) = prefer_or_create_empty_session(
+            vec![used],
+            None,
+            "t".into(),
+            || "s_new".to_string(),
+            || 5,
+        );
         assert_eq!(id, "s_new");
         assert_eq!(list.len(), 2);
         assert_eq!(list[0].id, "s_new", "新行插到最前");
