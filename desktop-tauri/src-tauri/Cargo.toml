@@ -1,6 +1,6 @@
 [package]
 name = "crabmate-desktop"
-version = "0.5.2"
+version = "0.7.0"
 description = "CrabMate desktop shell powered by Tauri"
 authors = ["crabmate contributors"]
 edition = "2024"

@@ -1,6 +1,6 @@
 [package]
 name = "crabmate-tui"
-version = "0.5.2"
+version = "0.7.0"
 edition = "2024"
 license = "Apache-2.0"
 description = "CrabMate remote terminal client (HTTP/SSE to crabmate serve)"
@@ -17,7 +17,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow = "1"
 clap = { version = "4", features = ["derive", "env"] }
-crabmate = { version = "0.6.0", default-features = false, features = ["protocol"] }
+crabmate = { version = "0.7.0", default-features = false, features = ["protocol"] }
 crabmate-client-api = { path = "../crabmate-client-api" }
 crossterm = "0.29"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }

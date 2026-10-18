@@ -281,9 +281,9 @@ dependencies = [
 
 [[package]]
 name = "crabmate"
-version = "0.6.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ba6d2896b8fa507df9b3b7767a4164914406ebacab3de5b937c376c5bd5075a3"
+checksum = "4b93fc2104a238e88ab0d7df1d769457e34be21d46a82e9a24a5e9826a714698"
 dependencies = [
  "getrandom",
  "log",
@@ -295,7 +295,7 @@ dependencies = [
 
 [[package]]
 name = "crabmate-client-api"
-version = "0.5.2"
+version = "0.7.0"
 dependencies = [
  "crabmate",
  "serde",
@@ -304,14 +304,14 @@ dependencies = [
 
 [[package]]
 name = "crabmate-tool-card"
-version = "0.5.2"
+version = "0.7.0"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "crabmate-web"
-version = "0.5.2"
+version = "0.7.0"
 dependencies = [
  "ammonia",
  "console_error_panic_hook",

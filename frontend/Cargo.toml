@@ -1,17 +1,17 @@
 [package]
 name = "crabmate-web"
-version = "0.5.2"
+version = "0.7.0"
 edition = "2024"
 license = "Apache-2.0"
 description = "CrabMate Web UI (Leptos CSR + WASM)"
-# 契约钉版本：crates.io crabmate 0.6.0 + protocol（见 docs/design/contract_pin.md）
+# 契约钉版本：crates.io crabmate 0.7.0 + protocol（见 docs/design/contract_pin.md）
 
 [lib]
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 # Server 线契约（禁止 path 回本地 crabmate_agent；勿开 server feature）
-crabmate = { version = "0.6.0", default-features = false, features = ["protocol"] }
+crabmate = { version = "0.7.0", default-features = false, features = ["protocol"] }
 # 本仓 path（展示 crate / 共享逻辑；勿 path 回 Server）
 crabmate-tool-card = { path = "../crates/crabmate-tool-card" }
 crabmate-client-api = { path = "../crates/crabmate-client-api" }
