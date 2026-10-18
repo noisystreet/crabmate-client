@@ -15,7 +15,9 @@ use super::scroll_follow::follow_after_content_paint;
 use super::scroll_shell::ChatScrollShellSignals;
 use super::tui_body_dom::{apply_incremental_tail, find_answer_body, reconcile_answer_hidden};
 use super::tui_line_markdown::TuiBodyPatch;
-use super::tui_transcript_sync::{PlanTuiSyncArgs, TuiMountState, TuiSyncPlan, plan_tui_sync};
+use super::tui_transcript_sync::{
+    LiveBodyPlan, PlanTuiSyncArgs, TuiMountState, TuiSyncPlan, TurnActionsPlan, plan_tui_sync,
+};
 use super::user_message_edit::{UserMessageEdit, mount_user_message_editor};
 use super::workspace_image_hydrate::{
     revoke_workspace_image_blobs, schedule_workspace_image_hydrate,
@@ -308,27 +310,29 @@ fn apply_tui_promote_and_appends(transcript: &web_sys::HtmlElement, plan: &TuiSy
 
 fn apply_tui_body_and_action_patches(
     transcript: &web_sys::HtmlElement,
-    plan: &TuiSyncPlan,
+    live: Option<LiveBodyPlan>,
+    refresh_bodies: Vec<LiveBodyPlan>,
+    refresh_actions: Vec<TurnActionsPlan>,
 ) -> bool {
-    if let Some(live) = &plan.live {
+    if let Some(live) = live {
         let Some(wrap) = find_turn_wrap(transcript, &live.message_id) else {
             return false;
         };
-        if !apply_body_patch(&wrap, live.patch.clone(), live.markdown_render) {
+        if !apply_body_patch(&wrap, live.patch, live.markdown_render) {
             return false;
         }
     }
 
-    for refresh in &plan.refresh_bodies {
+    for refresh in refresh_bodies {
         let Some(wrap) = find_turn_wrap(transcript, &refresh.message_id) else {
             return false;
         };
-        if !apply_body_patch(&wrap, refresh.patch.clone(), refresh.markdown_render) {
+        if !apply_body_patch(&wrap, refresh.patch, refresh.markdown_render) {
             return false;
         }
     }
 
-    for actions in &plan.refresh_actions {
+    for actions in refresh_actions {
         if !apply_actions_html(transcript, &actions.message_id, &actions.html) {
             return false;
         }
@@ -367,20 +371,27 @@ fn plan_touches_images(plan: &TuiSyncPlan) -> bool {
     }
 }
 
-fn apply_tui_sync_plan(transcript: &web_sys::HtmlElement, plan: &TuiSyncPlan) -> bool {
-    if let Some(html) = &plan.full_html {
+/// 应用计划：patch 按所有权移出（`take` / `mem::take`），避免每帧把思维链正文、
+/// 闭合块列表等整份克隆一遍。
+fn apply_tui_sync_plan(transcript: &web_sys::HtmlElement, plan: &mut TuiSyncPlan) -> bool {
+    if let Some(html) = plan.full_html.take() {
         revoke_workspace_image_blobs(transcript);
-        transcript.set_inner_html(html);
+        transcript.set_inner_html(&html);
         schedule_workspace_image_hydrate(transcript);
         return true;
     }
     if !apply_tui_promote_and_appends(transcript, plan) {
         return false;
     }
-    if !apply_tui_body_and_action_patches(transcript, plan) {
+    // 图片判定要在移出 patch 之前完成。
+    let touches_images = plan_touches_images(plan);
+    let live = plan.live.take();
+    let refresh_bodies = std::mem::take(&mut plan.refresh_bodies);
+    let refresh_actions = std::mem::take(&mut plan.refresh_actions);
+    if !apply_tui_body_and_action_patches(transcript, live, refresh_bodies, refresh_actions) {
         return false;
     }
-    if plan_touches_images(plan) {
+    if touches_images {
         schedule_workspace_image_hydrate(transcript);
     }
     true
@@ -398,17 +409,17 @@ fn find_restore_scope_from_plan(plan: &TuiSyncPlan) -> FindRestoreScope {
 
 fn apply_or_rebuild_tui_mount(
     el: &web_sys::HtmlElement,
-    plan: TuiSyncPlan,
+    mut plan: TuiSyncPlan,
     mount_state: RwSignal<Option<TuiMountState>>,
     rebuild: impl FnOnce() -> TuiSyncPlan,
 ) -> FindRestoreScope {
     let scope = find_restore_scope_from_plan(&plan);
-    if apply_tui_sync_plan(el, &plan) {
+    if apply_tui_sync_plan(el, &mut plan) {
         mount_state.set(Some(plan.next));
         return scope;
     }
-    let forced = rebuild();
-    if apply_tui_sync_plan(el, &forced) {
+    let mut forced = rebuild();
+    if apply_tui_sync_plan(el, &mut forced) {
         mount_state.set(Some(forced.next));
         return FindRestoreScope::Full;
     }
@@ -691,6 +702,7 @@ mod tests {
     use super::super::tui_line_markdown::TuiBodyChunks;
     use super::super::tui_transcript_sync::LiveBodyPlan;
     use super::*;
+    use std::sync::Arc;
 
     fn bare_plan() -> TuiSyncPlan {
         TuiSyncPlan {
@@ -775,12 +787,12 @@ mod tests {
             },
             with_live(replace_all_patch()),
             with_live(TuiBodyPatch::Incremental {
-                append_closed: vec!["<pre><code>x</code></pre>".to_string()],
+                append_closed: vec![Arc::new("<pre><code>x</code></pre>".to_string())],
                 open_plain: Some("y".to_string()),
             }),
             with_live(TuiBodyPatch::ThinkBody {
                 body_html: "<p>t</p>".to_string(),
-                append_closed: vec!["<pre><code>t</code></pre>".to_string()],
+                append_closed: vec![Arc::new("<pre><code>t</code></pre>".to_string())],
                 open_plain: None,
             }),
             // 回归用例：纯思维链流式阶段（append_closed 为空）但 body_html 含图，

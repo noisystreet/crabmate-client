@@ -2,6 +2,8 @@
 //!
 //! 从 `tui_stream_view` 拆出，控制该文件行数与函数形参数目（fn-param / fn-nloc ratchet）。
 
+use std::sync::Arc;
+
 use wasm_bindgen::JsCast;
 
 use super::tui_line_markdown::{
@@ -62,14 +64,17 @@ pub(super) fn apply_open_active_block(
 /// Incremental / ThinkBody 共用的「追加闭合块 + 更新活跃块」尾部应用。
 pub(super) fn apply_incremental_tail(
     body: &web_sys::HtmlElement,
-    append_closed: &[String],
+    append_closed: &[Arc<String>],
     open_plain: Option<&str>,
     markdown_render: bool,
 ) -> bool {
     if !append_closed.is_empty() {
         remove_open_block(body);
         for chunk in append_closed {
-            if body.insert_adjacent_html("beforeend", chunk).is_err() {
+            if body
+                .insert_adjacent_html("beforeend", chunk.as_str())
+                .is_err()
+            {
                 return false;
             }
         }

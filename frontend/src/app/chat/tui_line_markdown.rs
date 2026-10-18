@@ -2,6 +2,8 @@
 //! 活跃末块做**流式安全**行内增强（成对 `**` / `*` / `` ` `` / `~~` / `[text](url)` 才着色；半截标记保持字面量）；
 //! 未闭合围栏仍纯文本。段落/表格/列表/引用在空行或块类型切换时才冻结，避免终态全文重渲抖动。
 
+use std::sync::Arc;
+
 use crate::markdown::{plaintext_to_safe_html, stream_inline_safe_html, to_safe_html};
 
 /// 活跃块是否为未闭合围栏缓冲（须 `textContent`，禁止行内 HTML）。
@@ -241,7 +243,9 @@ impl ThinkBlock {
 pub struct TuiBodyChunks {
     /// 思维链折叠块（`<details>`）；无思考时为 `None`。
     pub think: Option<ThinkBlock>,
-    pub closed: Vec<String>,
+    /// 已冻结块 HTML。`Arc` 让每帧的新 `TuiBodyChunks` 与上一帧 / 增量缓存共享同一份块字符串，
+    /// 只复制指针，不复制整段 HTML（挂载状态进 Leptos 信号，必须 `Send + Sync`，故不用 `Rc`）。
+    pub closed: Vec<Arc<String>>,
     /// 活跃块源文本；围栏缓冲以 \`\`\` / `~~~`（可带最多 3 空格缩进）开头。DOM 用 [`render_open_active_html`] 写入。
     pub open_plain: Option<String>,
     /// 与解析时 `markdown_render` 一致；活跃块与 Incremental 渲染均读此标志（patch 不再另带一份）。
@@ -299,7 +303,7 @@ pub enum TuiBodyPatch {
         chunks: TuiBodyChunks,
     },
     Incremental {
-        append_closed: Vec<String>,
+        append_closed: Vec<Arc<String>>,
         /// 活跃块源文本（非 HTML）；`None` 表示移除活跃块节点。
         open_plain: Option<String>,
     },
@@ -307,7 +311,7 @@ pub enum TuiBodyPatch {
     /// 若同帧还有新闭合块/活跃块则一并应用（思维链冻结与终答开头的过渡帧）。
     ThinkBody {
         body_html: String,
-        append_closed: Vec<String>,
+        append_closed: Vec<Arc<String>>,
         open_plain: Option<String>,
     },
     /// 工具折叠行：只改文案，不重写 HTML（高度与结构保持不变）。
@@ -345,7 +349,7 @@ fn is_atx_heading_or_thematic_line(line: &str) -> bool {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct BlockAbsorbState {
-    pub(super) closed: Vec<String>,
+    pub(super) closed: Vec<Arc<String>>,
     pending: String,
     pending_kind: Option<BlockKind>,
     fence: FenceMode,
@@ -368,8 +372,10 @@ impl BlockAbsorbState {
             self.pending_kind = None;
             return;
         }
-        self.closed
-            .push(closed_md_html(&self.pending, self.markdown_render));
+        self.closed.push(Arc::new(closed_md_html(
+            &self.pending,
+            self.markdown_render,
+        )));
         self.pending.clear();
         self.pending_kind = None;
     }
@@ -382,8 +388,13 @@ impl BlockAbsorbState {
             body,
         } = std::mem::replace(&mut self.fence, FenceMode::Off)
         {
-            self.closed
-                .push(fence_html(ch, run, &lang, &body, self.markdown_render));
+            self.closed.push(Arc::new(fence_html(
+                ch,
+                run,
+                &lang,
+                &body,
+                self.markdown_render,
+            )));
         }
     }
 
@@ -439,12 +450,13 @@ impl BlockAbsorbState {
         }
         if line.trim().is_empty() {
             self.flush_pending();
-            self.closed.push(blank_line_html());
+            self.closed.push(Arc::new(blank_line_html()));
             return;
         }
         if is_atx_heading_or_thematic_line(line) {
             self.flush_pending();
-            self.closed.push(closed_md_html(line, self.markdown_render));
+            self.closed
+                .push(Arc::new(closed_md_html(line, self.markdown_render)));
             return;
         }
         let kind = classify_block_line(line);
