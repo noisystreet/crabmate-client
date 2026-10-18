@@ -25,6 +25,7 @@ mod settings_panel;
 mod spinner;
 mod state;
 mod status;
+mod text;
 mod tool_summary;
 mod worker;
 mod workspace_keys;

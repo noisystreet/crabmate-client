@@ -13,7 +13,7 @@ use super::md;
 use super::palette::Palette;
 use super::settings_panel::PanelContent;
 use super::state::{Focus, LineKind, LogLine, UiState};
-use super::status::{SPINNER_FRAMES, status_text};
+use super::status::{SPINNER_FRAMES, status_line};
 use super::ws_sidebar::{pane_list_area, sessions_content, sidebar_view, workspace_content};
 
 /// 低于此宽度隐藏左右栏（等价 repl 布局）。
@@ -163,14 +163,14 @@ fn fold_thinking(text: &str, content_width: usize) -> String {
     // 按显示列算预算，不用字节数：`▸` 是 3 字节但只有 2 列。
     let mark_w = UnicodeWidthStr::width(MARK);
     // 放不下「标记 + 至少 1 列正文 + 省略号」时只留标记，避免渲染出超宽行。
-    // 阈值必须是 mark_w + 2：`truncate_display` 会自行补一个 `…`，可能比预算
-    // 宽 1 列，若在这里放行，正文预算会被抬高到 1 列从而溢出 1 列。
-    let body_budget = content_width.saturating_sub(mark_w + 2);
+    // `truncate_display` 现在保证结果 ≤ 预算（`…` 已算在预算内），故这里只需给结尾那个
+    // `…` 留 1 列：MARK + shown + `…` ≤ mark_w + (content_width - mark_w - 1) + 1。
+    // （旧实现要留 2 列，因为截断结果可能比预算宽 1 列；修掉后正文多出 1 列可用。）
+    let body_budget = content_width.saturating_sub(mark_w + 1);
     if body_budget == 0 {
         return MARK.trim_end().to_string();
     }
     let head = text.lines().next().unwrap_or("").trim();
-    // 上面已预留省略号那一列，故 MARK + shown + `…` 恒 ≤ content_width。
     let shown = truncate_display(head, body_budget);
     format!("{MARK}{shown}…")
 }
@@ -358,24 +358,9 @@ fn display_lines(st: &UiState, width: usize) -> Vec<Line<'static>> {
     body_rows(st, width).into_iter().map(|r| r.line).collect()
 }
 
-/// 按显示宽度截断（用于状态行），尾部补 `…`。
-pub(super) fn truncate_display(text: &str, width: usize) -> String {
-    if width == 0 {
-        return String::new();
-    }
-    let mut out = String::new();
-    let mut w = 0usize;
-    for ch in text.chars() {
-        let cw = ch.width().unwrap_or(0);
-        if w + cw > width {
-            out.push('…');
-            break;
-        }
-        out.push(ch);
-        w += cw;
-    }
-    out
-}
+// 截断规则已下沉到 [`super::text`]：`render.rs` 贴着 920 行门禁，且状态栏 / 左右侧栏 /
+// 设置面板共用同一条「显示宽 ≤ width」的不变式。这里保留再导出，历史调用方不必搬家。
+pub(super) use super::text::truncate_display;
 
 /// 工作区展示名：路径 basename（根目录/空串回退原路径文本）。
 pub(super) fn workspace_basename(path: &str) -> String {
@@ -428,15 +413,38 @@ pub(super) fn sidebar_rows(st: &UiState, width: usize) -> Vec<Line<'static>> {
         } else {
             row.title.trim()
         };
-        let text = truncate_display(&format!("{mark} {title}"), width);
-        let style = match (st.focus, st.selected == i) {
-            (Focus::Sidebar, true) => Style::new().add_modifier(Modifier::REVERSED),
-            (Focus::Input, true) => Style::new().add_modifier(Modifier::BOLD),
-            _ => Style::new(),
-        };
-        rows.push(Line::from(Span::styled(text, style)));
+        let selected = st.selected == i;
+        // 竖条占 1 列：选中行的文本预算要减 1，否则末列会被 `Paragraph` 直接裁掉。
+        let budget = width.saturating_sub(usize::from(selected));
+        let text = truncate_display(&format!("{mark} {title}"), budget);
+        rows.push(selected_row(st, text, selected));
     }
     rows
+}
+
+/// 选中行：左缘 `▎` 竖条（聚焦本栏时 `accent`，否则 `muted`）+ 选中底色。
+///
+/// 未选中行保持裸文本（不设前景色，跟随终端默认），避免整列被 palette 接管。
+/// 底色在无色模式下降级为反色（见 [`Palette::selection`]）。
+fn selected_row(st: &UiState, text: String, selected: bool) -> Line<'static> {
+    if !selected {
+        return Line::from(Span::styled(text, Style::new()));
+    }
+    let focused = st.focus == Focus::Sidebar;
+    let bar_fg = if focused {
+        st.palette.accent
+    } else {
+        st.palette.muted
+    };
+    // 焦点不在本栏时底色本来就更淡，再补 BOLD 让「当前是哪个会话」仍能一眼扫到。
+    let mut body = st.palette.selection(st.palette.fg);
+    if !focused {
+        body = body.add_modifier(Modifier::BOLD);
+    }
+    Line::from(vec![
+        Span::styled("▎", Style::new().fg(bar_fg)),
+        Span::styled(text, body),
+    ])
 }
 
 /// 给一块区域整体铺背景色（先于文字绘制，杜绝段落内容不足时的底色缺口）。
@@ -473,23 +481,29 @@ pub fn draw(
 
     // 宽屏三列；窄屏 `left`/`right` 为 None，聊天列即整个主体。
     if let (Some(left), Some(right)) = (p.left, p.right) {
-        let (rows, cursor, hint) = sessions_content(st, left.width.saturating_sub(2) as usize);
+        // 列内左右各留 1 列：内容宽度（`- 2`）在「构建行」与「标题溢出计数截断」两处
+        // 必须是同一口径，否则 `↑n`/`↓n` 会把标题挤出列外。
+        let left_w = left.width.saturating_sub(2) as usize;
+        let (rows, cursor, hint) = sessions_content(st, left_w);
         paint_bg(frame, left, pal.chrome_bg);
-        render_pane(frame, left, rows, cursor, hint, pal);
-        let (rows, cursor, hint) = workspace_content(st, right.width.saturating_sub(2) as usize);
+        render_pane(frame, left, rows, cursor, hint, pal, left_w);
+        let right_w = right.width.saturating_sub(2) as usize;
+        let (rows, cursor, hint) = workspace_content(st, right_w);
         paint_bg(frame, right, pal.chrome_bg);
-        render_pane(frame, right, rows, cursor, hint, pal);
+        render_pane(frame, right, rows, cursor, hint, pal, right_w);
     }
     render_chat_column(frame, st, p.chat, prepared, panel.is_none(), spin);
 
     paint_bg(frame, p.status, pal.chrome_bg);
-    let status = Paragraph::new(status_text(
+    // 分段样式已在 `status_line` 里定好（label 淡色 / 值正文色 / 分隔极暗），此处不能再套
+    // 整行 `fg + BOLD`：base style 的修饰位会盖到 label 上，淡化标签就白做了。
+    let status = status_line(
         info,
         st.conversation_id.as_deref(),
         p.status.width as usize,
-    ))
-    .style(Style::new().fg(pal.fg).add_modifier(Modifier::BOLD));
-    frame.render_widget(status, p.status);
+        pal,
+    );
+    frame.render_widget(Paragraph::new(status), p.status);
 
     // 设置面板浮层：整屏覆盖（含顶栏/状态栏），最后绘制压住全部内容。
     if let Some(content) = panel {
@@ -549,6 +563,7 @@ const COMPOSER_PLACEHOLDER: &str = "输入消息 · Alt+Enter 换行 · /help �
 
 /// 通用固定列渲染：内容窗口裁剪（含提示行）。内容行/光标/提示由 [`super::ws_sidebar`] 提供。
 /// 列内左右各留 1 列空隙（对齐聊天区观感），行宽按 `width - 2` 截断。
+/// `width` 与构建行时用的是同一个值（`列宽 - 2`），标题溢出计数也按它截断。
 fn render_pane(
     frame: &mut Frame,
     area: Rect,
@@ -556,13 +571,14 @@ fn render_pane(
     cursor: usize,
     hint: Option<&'static str>,
     pal: &Palette,
+    width: usize,
 ) {
     if area.width <= 1 || area.height == 0 {
         return;
     }
     // 内容区与提示行矩形同样跑鼠标命中检测用的那份计算。
     let list_area = pane_list_area(area);
-    let shown = sidebar_view(&rows, list_area.height as usize, cursor);
+    let shown = sidebar_view(&rows, list_area.height as usize, cursor, width, pal);
     let list = Paragraph::new(shown).style(Style::new().fg(pal.fg));
     frame.render_widget(list, list_area);
     // 提示行占列内最后一行（高度不足 2 行时没有提示位）。
