@@ -126,6 +126,13 @@ fn prefix_for(log: &LogLine) -> &'static str {
         _ => kind_prefix(log.kind),
     }
 }
+/// 逻辑行前缀占用的**显示列数**（折行预算必须按列算，不能按字符数）：
+/// `[助手] ` 只有 5 个字符却占 7 列，按字符数留白会让每行首物理行超出正文区
+/// 1–2 列，末字被区域右缘裁掉——观感就是「行尾被切、没有折回来」。
+fn prefix_width(prefix: &str) -> usize {
+    UnicodeWidthStr::width(prefix)
+}
+
 /// 前缀样式：一律 muted + DIM，把亮度让给正文；系统告警要抢眼，保持 err + BOLD。
 fn prefix_style(kind: LineKind, pal: &Palette) -> Style {
     if kind == LineKind::System {
@@ -239,7 +246,8 @@ pub(crate) fn build_body_rows(st: &UiState, width: usize) -> Vec<BodyRow> {
     let mut prev: Option<(LineKind, usize)> = None;
     for (idx, log) in st.lines.iter().enumerate() {
         let prefix = prefix_for(log);
-        let content_width = width.saturating_sub(prefix.chars().count());
+        let prefix_w = prefix_width(prefix);
+        let content_width = width.saturating_sub(prefix_w);
         let matched = needle.is_some_and(|n| log.text.to_lowercase().contains(n));
         if let Some((_, prev_indent)) = prev.filter(|(k, _)| *k != log.kind) {
             out.push(BodyRow::separator(width, prev_indent, pal));
@@ -267,7 +275,7 @@ pub(crate) fn build_body_rows(st: &UiState, width: usize) -> Vec<BodyRow> {
         } else {
             out.extend(plain_body_rows(&cx));
         }
-        prev = Some((log.kind, prefix.chars().count()));
+        prev = Some((log.kind, prefix_w));
     }
     out
 }

@@ -667,3 +667,68 @@ fn composer_outer_rows_adds_borders() {
     assert_eq!(composer_rows(&st), 1);
     assert_eq!(composer_outer_rows(&st), 3);
 }
+
+#[test]
+fn body_rows_never_exceed_width() {
+    let mut st = UiState::new();
+    st.set_palette(super::Palette::default());
+    for kind in [
+        LineKind::User,
+        LineKind::Assistant,
+        LineKind::Thinking,
+        LineKind::Tool,
+        LineKind::System,
+    ] {
+        st.push_line(kind, &"中文内容abc ".repeat(30));
+    }
+    for width in [24usize, 40, 80, 120] {
+        for r in body_rows(&st, width) {
+            let text = r.line.to_string();
+            let w = UnicodeWidthStr::width(text.as_str());
+            assert!(w <= width, "width={width} 实际行宽={w} 超宽: {text:?}");
+        }
+    }
+}
+
+/// 端到端回归：预折行用的宽度必须与真实渲染区宽度一致，否则行尾字符会被
+/// ratatui 按区域右缘直接丢掉——观感就是「超出宽度、没有折回来」。
+/// 正文取 38 个汉字（76 列）：按正确宽度正好铺满首物理行并折 2 字到次行，
+/// 而按「前缀字符数」多算 2 列时，首行会摆到 81 列、末字被裁掉且不再出现。
+#[test]
+fn rendered_chat_area_keeps_all_characters() {
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+
+    const CHARS: usize = 38;
+    let text = "中".repeat(CHARS);
+    let mut st = UiState::new();
+    st.set_palette(super::Palette::default());
+    st.sidebar_visible = false;
+    st.push_line(LineKind::Assistant, &text);
+    let rows = build_body_rows(&st, chat_body_width(false, 80));
+    let info = StatusInfo {
+        api_base: "http://x".into(),
+        model: None,
+        role: None,
+        mode: None,
+        running: false,
+        cancel_sent: false,
+        spinner: 0,
+        view_offset: 0,
+        search_term: None,
+        search_total: 0,
+    };
+    let mut terminal = Terminal::new(TestBackend::new(80, 12)).expect("terminal");
+    terminal
+        .draw(|f| draw(f, &st, &info, &rows, None))
+        .expect("draw");
+    let buffer = terminal.backend().buffer();
+    let mut flat = String::new();
+    for y in 0..12u16 {
+        for x in 0..80u16 {
+            flat.push_str(buffer[(x, y)].symbol());
+        }
+    }
+    let shown = flat.matches('中').count();
+    assert_eq!(shown, CHARS, "行尾字符被裁掉了（屏幕只剩 {shown} 个）");
+}
