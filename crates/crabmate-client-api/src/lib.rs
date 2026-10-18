@@ -16,6 +16,7 @@ pub mod messages;
 pub mod paths;
 pub mod prompt_tokens;
 pub mod secrets;
+pub mod session_model;
 pub mod sessions;
 pub mod slash;
 pub mod sse_dispatch;
@@ -48,6 +49,13 @@ pub use prompt_tokens::{
     TiktokenPromptTokensSnapshot, parse_tiktoken_prompt_tokens_value, tiktoken_from_ag_ui_object,
 };
 pub use secrets::{KEYRING_SERVICE, SecretSlot, WEB_API_BEARER_KEYRING_ACCOUNT};
+pub use session_model::{
+    CURRENT_LAYOUT_SCHEMA_VERSION, ChatSession, DEFAULT_CHAT_SESSION_TITLE,
+    LEGACY_LAYOUT_SCHEMA_VERSION, StoredMessage, StoredMessageState, TIMELINE_UI_STATE_KEY,
+    V2_COMMENTARY_ROW_ID_PREFIX, V2_FINAL_ANSWER_ROW_ID, V2_THINK_ROW_ID_PREFIX, new_empty_session,
+    new_session_id, prefer_or_create_empty_session, reclaim_disposable_blank_session,
+    session_is_blank_chat, session_is_disposable_blank, session_is_unbound_empty_chat,
+};
 pub use sessions::{
     SessionListRow, conversation_id_for_resume, session_row_conversation_id_for_resume,
 };

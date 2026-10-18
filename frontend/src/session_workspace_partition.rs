@@ -14,8 +14,8 @@ use crate::api::WorkspaceData;
 use crate::chat_session_state::ChatSessionSignals;
 use crate::i18n::Locale;
 use crate::storage::{
-    CURRENT_LAYOUT_SCHEMA_VERSION, ChatSession, clear_stale_stream_loading_states,
-    ensure_at_least_one, make_session_id, normalize_workspace_partition_path,
+    ChatSession, clear_stale_stream_loading_states, ensure_at_least_one, make_session_id,
+    normalize_workspace_partition_path,
 };
 use crate::user_data_bootstrap::load_web_sessions;
 
@@ -159,50 +159,23 @@ pub(crate) fn aid_pick_for_loaded_bucket(
     aid_from_server.filter(|id| list.iter().any(|s| s.id == *id))
 }
 
-#[must_use]
-pub(crate) fn session_is_blank_chat(s: &ChatSession) -> bool {
-    s.messages.is_empty()
-        && s.server_conversation_id
-            .as_deref()
-            .map(str::trim)
-            .filter(|t| !t.is_empty())
-            .is_none()
-}
-
-/// 无正文、无草稿、无工作区绑定：冷启动可复用，且不必改写已有行。
-#[must_use]
-pub(crate) fn session_is_unbound_empty_chat(s: &ChatSession) -> bool {
-    session_is_blank_chat(s)
-        && s.draft.trim().is_empty()
-        && s.workspace_root
-            .as_deref()
-            .map(str::trim)
-            .unwrap_or("")
-            .is_empty()
-}
+// 判定已下沉到共享层（`crabmate-client-api::session_model`）：
+// Desktop 与 TUI 共用同一份「空白会话 / 未绑定空会话」语义。
+pub(crate) use crabmate_client_api::session_model::{
+    session_is_blank_chat, session_is_unbound_empty_chat,
+};
 
 fn insert_empty_session(
     mut list: Vec<ChatSession>,
     workspace_root: Option<String>,
     default_title: String,
 ) -> (Vec<ChatSession>, String) {
-    let now = js_sys::Date::now() as i64;
-    let s = ChatSession {
-        id: make_session_id(),
-        layout_schema_version: CURRENT_LAYOUT_SCHEMA_VERSION,
-        title: default_title,
-        draft: String::new(),
-        messages: Vec::new(),
-        updated_at: now,
-        pinned: false,
-        starred: false,
-        server_conversation_id: None,
-        server_revision: None,
+    let s = crabmate_client_api::new_empty_session(
+        make_session_id(),
+        default_title,
+        js_sys::Date::now() as i64,
         workspace_root,
-        history_total: None,
-        history_window_start: None,
-        history_has_older: None,
-    };
+    );
     let id = s.id.clone();
     list.insert(0, s);
     (list, id)
@@ -233,25 +206,22 @@ pub(crate) fn prepare_cold_start_session_list(
 }
 
 /// 优先复用已有空白会话，否则在列表前插入一条空会话并设为活动。
+///
+/// 判定与构造已下沉到 `crabmate-client-api`（TUI 的 `/conv new` 走同一份实现），
+/// 这里只负责注入 Web 的 id / 时间源。
 #[must_use]
 pub(crate) fn prefer_or_create_empty_session(
-    mut list: Vec<ChatSession>,
+    list: Vec<ChatSession>,
     workspace_root: Option<String>,
     default_title: String,
 ) -> (Vec<ChatSession>, String) {
-    if let Some(id) = list
-        .iter()
-        .find(|s| session_is_blank_chat(s))
-        .map(|s| s.id.clone())
-    {
-        if let Some(s) = list.iter_mut().find(|s| s.id == id) {
-            if workspace_root.is_some() {
-                s.workspace_root = workspace_root;
-            }
-        }
-        return (list, id);
-    }
-    insert_empty_session(list, workspace_root, default_title)
+    crabmate_client_api::session_model::prefer_or_create_empty_session(
+        list,
+        workspace_root,
+        default_title,
+        make_session_id(),
+        js_sys::Date::now() as i64,
+    )
 }
 
 fn align_workspace_roots_to_server_path(list2: &mut [ChatSession], server_path: &str) {
@@ -629,7 +599,7 @@ pub fn wire_workspace_session_storage_partition(args: WireWorkspaceSessionPartit
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::StoredMessage;
+    use crate::storage::{CURRENT_LAYOUT_SCHEMA_VERSION, StoredMessage};
 
     fn sess(
         id: &str,

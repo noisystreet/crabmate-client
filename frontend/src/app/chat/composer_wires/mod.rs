@@ -22,11 +22,10 @@ use super::handles::{
 use super::stream_follow_up_gates::{ComposerSendDecision, decide_composer_send};
 use super::stream_user_abort::apply_user_abort_of_inflight_stream;
 use crate::chat_session_state::ChatSessionSignals;
-use crate::session_ops::{
-    flush_active_composer_draft, flush_composer_draft_to_session, reclaim_disposable_blank_session,
-};
+use crate::session_ops::{flush_active_composer_draft, flush_composer_draft_to_session};
 use crate::session_sync::SessionSyncState;
 use crate::storage::{ChatSession, DEFAULT_CHAT_SESSION_TITLE, make_session_id};
+use crabmate_client_api::reclaim_disposable_blank_session;
 
 /// 发送路径所需的会话草稿上下文（Copy；供斜杠命令拦截判定与闭包捕获共用）。
 #[derive(Clone, Copy)]
