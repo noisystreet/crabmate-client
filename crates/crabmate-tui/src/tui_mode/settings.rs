@@ -139,6 +139,8 @@ pub struct PersistedSettings {
     /// 只读工具 TTL 缓存禁用标记（镜像 prefs `disable_readonly_tool_ttl_cache`：
     /// `Some(true)` = 禁用 / 随轮发 ttl=0；`None`/`Some(false)` = 跟随 server）。
     pub tool_cache_disabled: Option<bool>,
+    /// Desktop 主题名（只读：TUI 不写回；切换需重启生效）。
+    pub theme: Option<String>,
 }
 
 impl PersistedSettings {
@@ -159,6 +161,8 @@ impl PersistedSettings {
             session_mode: normalize(&prefs.session_mode)
                 .filter(|m| is_valid_session_mode(m.as_str())),
             tool_cache_disabled: prefs.disable_readonly_tool_ttl_cache,
+            // 只读：TUI 不自建主题，只跟随 Desktop 的 `theme`。
+            theme: normalize(&prefs.theme),
         }
     }
 

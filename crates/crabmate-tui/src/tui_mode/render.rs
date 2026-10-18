@@ -9,6 +9,7 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use super::md;
+use super::palette::Palette;
 use super::settings_panel::PanelContent;
 use super::state::{Focus, LineKind, UiState};
 use super::ws_sidebar::{sessions_content, sidebar_view, workspace_content};
@@ -35,15 +36,8 @@ const MAX_COMPOSER_ROWS: usize = 4;
 const OVERLAY_MAX_WIDTH: u16 = 78;
 const OVERLAY_HEIGHT: u16 = 8;
 
-/// 区域色块（对齐 Desktop 面板观感：主体聊天深底 + 亮灰会话侧栏 +
-/// 略亮输入条 + 底部蓝色状态栏）。
-const STATUS_BG: Color = Color::Blue;
-const STATUS_FG: Color = Color::White;
-const SIDEBAR_BG: Color = Color::Indexed(240);
-const CHAT_BG: Color = Color::Indexed(235);
-const COMPOSER_BG: Color = Color::Indexed(237);
-/// 顶栏背景（工作区名称；对齐 Desktop 顶部标题栏观感）。
-const TOPBAR_BG: Color = Color::Indexed(238);
+// 配色见 [`Palette`]：顶栏 / 状态栏 / 侧栏 / composer 用 `chrome_bg`，聊天区用 `bg`，
+// 正文 / 次要 / 强调分别为 `fg` / `muted` / `accent`（随 Desktop 主题）。
 
 /// 状态行展示信息（mod 层组装好的显示值，含 override 标记）。
 #[derive(Clone)]
@@ -90,54 +84,80 @@ impl BodyRow {
     }
 }
 
-fn kind_style(kind: LineKind) -> (String, Style) {
-    // 亮系前景（聊天区为深底色，保证可读）。
+/// 消息前缀（宽 4–5 列；宽度参与折行计算，故与样式分开）。
+fn kind_prefix(kind: LineKind) -> &'static str {
     match kind {
-        LineKind::User => (
-            "[你] ".to_string(),
-            Style::new()
-                .fg(Color::LightCyan)
-                .add_modifier(Modifier::BOLD),
-        ),
-        LineKind::Assistant => ("[助手] ".to_string(), Style::new().fg(Color::LightGreen)),
-        LineKind::Thinking => ("[思考] ".to_string(), Style::new().fg(Color::Gray)),
-        LineKind::Tool => ("[工具] ".to_string(), Style::new().fg(Color::LightMagenta)),
-        LineKind::System => ("[!] ".to_string(), Style::new().fg(Color::LightYellow)),
+        LineKind::User => "[你] ",
+        LineKind::Assistant => "[助手] ",
+        LineKind::Thinking => "[思考] ",
+        LineKind::Tool => "[工具] ",
+        LineKind::System => "[!] ",
     }
 }
 
-/// thinking 折叠行的单行预览：首行截断 + `…`（占位不超 content_width）。
+/// 前缀样式：一律 muted + DIM，把亮度让给正文；系统告警要抢眼，保持 err + BOLD。
+fn prefix_style(kind: LineKind, pal: &Palette) -> Style {
+    if kind == LineKind::System {
+        return Style::new().fg(pal.err).add_modifier(Modifier::BOLD);
+    }
+    Style::new().fg(pal.muted).add_modifier(Modifier::DIM)
+}
+
+/// 内容基色（工具行按结果另算，见 [`tool_content_style`]）。
+fn kind_style(kind: LineKind, pal: &Palette) -> Style {
+    match kind {
+        LineKind::User => Style::new().fg(pal.accent).add_modifier(Modifier::BOLD),
+        LineKind::Assistant => Style::new().fg(pal.fg),
+        LineKind::Thinking => Style::new().fg(pal.muted),
+        LineKind::Tool => Style::new().fg(pal.muted),
+        LineKind::System => Style::new().fg(pal.err),
+    }
+}
+
+/// thinking 折叠行的单行预览：`▸` 标记 + 首行截断 + `…`（占位不超 content_width）。
 fn fold_thinking(text: &str, content_width: usize) -> String {
-    if content_width == 0 {
-        return String::new();
+    const MARK: &str = "▸ ";
+    if content_width <= MARK.len() {
+        return MARK.trim_end().to_string();
     }
     let head = text.lines().next().unwrap_or("").trim();
-    if head.is_empty() {
-        return "…".to_string();
-    }
-    let budget = content_width.saturating_sub(2).max(1);
-    let mut s = truncate_display(head, budget);
-    s.push('…');
-    s
+    let budget = content_width.saturating_sub(MARK.len() + 1).max(1);
+    let shown = truncate_display(head, budget);
+    format!("{MARK}{shown}…")
+}
+
+/// 单条逻辑行的渲染上下文（前缀/基色/宽度/搜索态/配色），把 10 来个参数收成一个
+/// 结构体：`plain` / `assistant` 两条渲染路径共用，也避免超长参数表。
+struct RowCtx<'a> {
+    idx: usize,
+    kind: LineKind,
+    tool_ok: Option<bool>,
+    text: &'a str,
+    prefix: &'static str,
+    prefix_style: Style,
+    style: Style,
+    content_width: usize,
+    matched: bool,
+    anchor_log: bool,
+    pal: &'a Palette,
 }
 
 /// 把 transcript 转成可渲染的物理行（含搜索高亮标记）；逻辑行首带前缀，
 /// 仅作用于其第一物理行。thinking 折叠时只出一行预览。
-/// 供事件循环做帧间 memo（内容/宽度/搜索未变时复用），渲染层拿结果直接裁剪。
+/// 供事件循环做帧间 memo（内容/宽度/搜索/主题未变时复用），渲染层拿结果直接裁剪。
 pub(crate) fn build_body_rows(st: &UiState, width: usize) -> Vec<BodyRow> {
     let needle = st.search_term();
     let target = st.search_cursor;
+    let pal = &st.palette;
     let mut out: Vec<BodyRow> = Vec::new();
     // 块间空行：相邻两条日志行 kind 不同即为块边界（用户 / 思考 / 正文 / 工具 /
     // 系统各自成块），对齐 Desktop `.chat-tui-transcript` 的块间距观感；同类相邻
     // （如连续工具行）保持紧凑，对应 desktop 的 tool-process 块内多行。
     let mut prev_kind: Option<LineKind> = None;
     for (idx, log) in st.lines.iter().enumerate() {
-        let (prefix, style) = kind_style(log.kind);
-        let prefix_w = prefix.chars().count();
-        let content_width = width.saturating_sub(prefix_w);
+        let prefix = kind_prefix(log.kind);
+        let content_width = width.saturating_sub(prefix.chars().count());
         let matched = needle.is_some_and(|n| log.text.to_lowercase().contains(n));
-        let anchor_log = matched && target == Some(idx);
         if prev_kind.is_some_and(|k| k != log.kind) {
             out.push(BodyRow::separator());
         }
@@ -146,96 +166,88 @@ pub(crate) fn build_body_rows(st: &UiState, width: usize) -> Vec<BodyRow> {
         } else {
             log.text.clone()
         };
+        let cx = RowCtx {
+            idx,
+            kind: log.kind,
+            tool_ok: log.tool_ok,
+            text: &text,
+            prefix,
+            prefix_style: prefix_style(log.kind, pal),
+            style: kind_style(log.kind, pal),
+            content_width,
+            matched,
+            anchor_log: matched && target == Some(idx),
+            pal,
+        };
         if log.kind == LineKind::Assistant {
-            out.extend(assistant_body_rows(
-                idx,
-                &text,
-                &prefix,
-                style,
-                content_width,
-                matched,
-                anchor_log,
-            ));
+            out.extend(assistant_body_rows(&cx));
         } else {
-            out.extend(plain_body_rows(
-                idx,
-                &text,
-                &prefix,
-                style,
-                content_width,
-                matched,
-                anchor_log,
-            ));
+            out.extend(plain_body_rows(&cx));
         }
         prev_kind = Some(log.kind);
     }
     out
 }
 
+/// 工具行内容色：成功走 `ok`、失败 `err` + BOLD（无色模式下 BOLD 仍可辨），
+/// 其余（进行中 / 非工具行）沿用基色。
+fn tool_content_style(cx: &RowCtx<'_>, base: Style) -> Style {
+    match (cx.kind, cx.tool_ok) {
+        (LineKind::Tool, Some(true)) => Style::new().fg(cx.pal.ok),
+        (LineKind::Tool, Some(false)) => Style::new().fg(cx.pal.err).add_modifier(Modifier::BOLD),
+        _ => base,
+    }
+}
+
 /// 非 Assistant 逻辑行 → 物理 BodyRow（thinking 折叠/用户/工具/系统行，纯文本）。
-fn plain_body_rows(
-    idx: usize,
-    text: &str,
-    prefix: &str,
-    style: Style,
-    content_width: usize,
-    matched: bool,
-    anchor_log: bool,
-) -> Vec<BodyRow> {
+fn plain_body_rows(cx: &RowCtx<'_>) -> Vec<BodyRow> {
+    let base = tool_content_style(cx, cx.style);
     let mut rows = Vec::new();
     let mut first = true;
-    for phys in md::wrap_physical(text, content_width) {
+    for phys in md::wrap_physical(cx.text, cx.content_width) {
         let mut spans: Vec<Span<'static>> = Vec::new();
-        let mut row_style = style;
-        if anchor_log && first {
-            // 锚定命中行反色突出；其余命中行仅改前景。
-            row_style = Style::new()
-                .fg(Color::Black)
-                .bg(Color::Yellow)
-                .add_modifier(Modifier::BOLD);
-        } else if matched {
-            row_style = Style::new().fg(Color::Yellow);
-        }
+        let anchor = cx.anchor_log && first;
+        let row_style = md::highlight_override(base, cx.matched, anchor, cx.pal);
         if first {
-            spans.push(Span::styled(prefix.to_string(), row_style));
+            spans.push(Span::styled(
+                cx.prefix.to_string(),
+                md::highlight_override(cx.prefix_style, cx.matched, anchor, cx.pal),
+            ));
         }
         spans.push(Span::styled(phys, row_style));
-        rows.push(BodyRow::content(idx, Line::from(spans)));
+        rows.push(BodyRow::content(cx.idx, Line::from(spans)));
         first = false;
     }
     rows
 }
 
 /// Assistant 逻辑行 → 全部物理 BodyRow（行内 markdown 样式 + 宽度折行 + 搜索高亮）。
-fn assistant_body_rows(
-    idx: usize,
-    text: &str,
-    prefix: &str,
-    style: Style,
-    content_width: usize,
-    matched: bool,
-    anchor_log: bool,
-) -> Vec<BodyRow> {
-    let styled = md::assistant_styled_text(text);
+fn assistant_body_rows(cx: &RowCtx<'_>) -> Vec<BodyRow> {
+    let styled = md::assistant_styled_text(cx.text, cx.pal);
     let mut rows = Vec::new();
-    for (row_no, row) in md::wrap_styled_chars(&styled, content_width)
+    for (row_no, row) in md::wrap_styled_chars(&styled, cx.content_width)
         .into_iter()
         .enumerate()
     {
         let is_first = row_no == 0;
         let mut spans: Vec<Span<'static>> = Vec::new();
         if is_first {
-            let pstyle =
-                md::highlight_override(md::md_row_style(Style::new(), style), matched, anchor_log);
-            spans.push(Span::styled(prefix.to_string(), pstyle));
+            let pstyle = md::highlight_override(
+                md::md_row_style(Style::new(), cx.prefix_style),
+                cx.matched,
+                cx.anchor_log,
+                cx.pal,
+            );
+            spans.push(Span::styled(cx.prefix.to_string(), pstyle));
         }
         spans.extend(md::styled_row_spans(
             &row,
-            style,
-            matched,
-            anchor_log && is_first,
+            cx.style,
+            cx.matched,
+            cx.anchor_log && is_first,
+            cx.pal,
         ));
-        rows.push(BodyRow::content(idx, Line::from(spans)));
+        rows.push(BodyRow::content(cx.idx, Line::from(spans)));
     }
     rows
 }
@@ -360,12 +372,12 @@ pub(super) fn sidebar_rows(st: &UiState, width: usize) -> Vec<Line<'static>> {
     let title = format!("会话 [{}]", st.sessions.len());
     rows.push(Line::from(Span::styled(
         truncate_display(&title, width),
-        Style::new().fg(Color::White).add_modifier(Modifier::BOLD),
+        Style::new().fg(st.palette.fg).add_modifier(Modifier::BOLD),
     )));
     if st.sessions.is_empty() {
         rows.push(Line::from(Span::styled(
             truncate_display("（空）发一条消息后出现", width),
-            Style::new().fg(Color::Gray),
+            Style::new().fg(st.palette.muted),
         )));
         return rows;
     }
@@ -423,11 +435,12 @@ pub fn draw(
     let body_area = chunks[1];
     let status_area = chunks[2];
 
-    paint_bg(frame, top_area, TOPBAR_BG);
+    let pal = &st.palette;
+    paint_bg(frame, top_area, pal.chrome_bg);
     // 顶栏工作区名称居中（对齐 Desktop 标题栏观感）。
     let top = Paragraph::new(top_text(st, top_area.width as usize))
         .alignment(Alignment::Center)
-        .style(Style::new().fg(Color::White).add_modifier(Modifier::BOLD));
+        .style(Style::new().fg(pal.fg).add_modifier(Modifier::BOLD));
     frame.render_widget(top, top_area);
 
     if st.sidebar_visible {
@@ -438,28 +451,28 @@ pub fn draw(
         ])
         .split(body_area);
         let (rows, cursor, hint) = sessions_content(st, cols[0].width.saturating_sub(2) as usize);
-        paint_bg(frame, cols[0], SIDEBAR_BG);
-        render_pane(frame, cols[0], rows, cursor, hint);
+        paint_bg(frame, cols[0], pal.chrome_bg);
+        render_pane(frame, cols[0], rows, cursor, hint, pal);
         let (rows, cursor, hint) = workspace_content(st, cols[2].width.saturating_sub(2) as usize);
-        paint_bg(frame, cols[2], SIDEBAR_BG);
-        render_pane(frame, cols[2], rows, cursor, hint);
+        paint_bg(frame, cols[2], pal.chrome_bg);
+        render_pane(frame, cols[2], rows, cursor, hint, pal);
         render_chat_column(frame, st, cols[1], prepared, panel.is_none());
     } else {
         render_chat_column(frame, st, body_area, prepared, panel.is_none());
     }
 
-    paint_bg(frame, status_area, STATUS_BG);
+    paint_bg(frame, status_area, pal.chrome_bg);
     let status = Paragraph::new(status_text(
         info,
         st.conversation_id.as_deref(),
         status_area.width as usize,
     ))
-    .style(Style::new().fg(STATUS_FG).add_modifier(Modifier::BOLD));
+    .style(Style::new().fg(pal.fg).add_modifier(Modifier::BOLD));
     frame.render_widget(status, status_area);
 
     // 设置面板浮层：整屏覆盖（含顶栏/状态栏），最后绘制压住全部内容。
     if let Some(content) = panel {
-        render_settings_overlay(frame, area, content);
+        render_settings_overlay(frame, area, content, pal);
     }
 }
 
@@ -471,7 +484,10 @@ fn render_chat_column(
     prepared: &[BodyRow],
     cursor_allowed: bool,
 ) {
-    let rows = composer_rows(st).min(area.height);
+    // composer 含上下边框；至少给聊天区留 1 行，极小终端下不把 transcript 挤没。
+    let rows = composer_outer_rows(st)
+        .min(area.height.saturating_sub(1))
+        .max(1);
     let parts = Layout::vertical([Constraint::Min(1), Constraint::Length(rows)]).split(area);
     let body_area = parts[0];
     render_body(frame, st, body_area, prepared);
@@ -481,10 +497,33 @@ fn render_chat_column(
     render_input(frame, st, parts[1], cursor_allowed);
 }
 
-/// composer 高度：随输入行数增长，最多 `MAX_COMPOSER_ROWS`（单行恒为 1）。
+/// composer 内容行数：随输入行数增长，最多 `MAX_COMPOSER_ROWS`（单行恒为 1）。
 fn composer_rows(st: &UiState) -> u16 {
     st.input_line_count().clamp(1, MAX_COMPOSER_ROWS) as u16
 }
+
+/// composer 占用总行数：内容行 + 上下边框。
+fn composer_outer_rows(st: &UiState) -> u16 {
+    composer_rows(st).saturating_add(2)
+}
+
+/// 终端太窄/太矮时放不下边框，退回无边框（否则内宽可能为 0）。
+fn use_composer_border(area: Rect) -> bool {
+    area.width >= 4 && area.height >= 3
+}
+
+/// composer 内容宽度：有边框时左右各占 1 列；无边框时沿用旧的左内缩 1 列。
+fn composer_content_width(area: Rect) -> usize {
+    let w = if use_composer_border(area) {
+        area.width.saturating_sub(2)
+    } else {
+        area.width.saturating_sub(1)
+    };
+    w as usize
+}
+
+/// 空 composer 的占位提示（仅显示，不写输入缓冲）。
+const COMPOSER_PLACEHOLDER: &str = "输入消息 · Alt+Enter 换行 · /help 查看命令";
 
 /// 通用固定列渲染：内容窗口裁剪（含提示行）。内容行/光标/提示由 [`super::ws_sidebar`] 提供。
 /// 列内左右各留 1 列空隙（对齐聊天区观感），行宽按 `width - 2` 截断。
@@ -494,6 +533,7 @@ fn render_pane(
     rows: Vec<Line<'static>>,
     cursor: usize,
     hint: Option<&'static str>,
+    pal: &Palette,
 ) {
     if area.width <= 1 || area.height == 0 {
         return;
@@ -501,12 +541,12 @@ fn render_pane(
     let inner = Rect::new(area.x + 1, area.y, area.width - 1, area.height);
     let cols = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(inner);
     let shown = sidebar_view(&rows, cols[0].height as usize, cursor);
-    let list = Paragraph::new(shown).style(Style::new().fg(Color::White));
+    let list = Paragraph::new(shown).style(Style::new().fg(pal.fg));
     frame.render_widget(list, cols[0]);
     if cols[1].height > 0
         && let Some(text) = hint
     {
-        let hint_p = Paragraph::new(Span::styled(text, Style::new().fg(Color::Gray)));
+        let hint_p = Paragraph::new(Span::styled(text, Style::new().fg(pal.muted)));
         frame.render_widget(hint_p, cols[1]);
     }
 }
@@ -515,7 +555,7 @@ fn render_pane(
 const BODY_EMPTY_HINT: &str = "输入消息开始对话 · Alt+Enter 换行 · Ctrl+E 思考 · Ctrl+W 工作区树 · PgUp/PgDn 滚动 · /find 搜索 · Ctrl+C 退出 · /help";
 
 fn render_body(frame: &mut Frame, st: &UiState, area: Rect, prepared: &[BodyRow]) {
-    paint_bg(frame, area, CHAT_BG);
+    paint_bg(frame, area, st.palette.bg);
     if area.width <= 1 || area.height == 0 {
         return;
     }
@@ -527,7 +567,10 @@ fn render_body(frame: &mut Frame, st: &UiState, area: Rect, prepared: &[BodyRow]
         area.height,
     );
     if st.lines.is_empty() {
-        let hint = Paragraph::new(Span::styled(BODY_EMPTY_HINT, Style::new().fg(Color::White)));
+        let hint = Paragraph::new(Span::styled(
+            BODY_EMPTY_HINT,
+            Style::new().fg(st.palette.muted),
+        ));
         frame.render_widget(hint, text_area);
         return;
     }
@@ -573,18 +616,20 @@ fn render_approval_overlay(frame: &mut Frame, st: &UiState, area: Rect) {
         .saturating_add(area.height.saturating_sub(OVERLAY_HEIGHT));
     let rect = Rect::new(x, y, width, OVERLAY_HEIGHT);
     // 先清空矩形内字形，再整体铺底色：浮层必须是独立色块，
-    // 不能与底下聊天区残留文本/上一帧内容视觉重叠。
+    // 不能与底下聊天区残留文本/上一帧内容视觉重叠。底色跟主题走——
+    // 固定深底在浅色主题下会让正文色（深字）不可读。
+    let pal = &st.palette;
     frame.render_widget(Clear, rect);
-    paint_bg(frame, rect, Color::Indexed(236));
+    paint_bg(frame, rect, pal.chrome_bg);
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::new().fg(Color::Yellow))
-        .title(Span::styled(" 命令审批 ", Style::new().fg(Color::Yellow)));
+        .border_style(Style::new().fg(pal.accent))
+        .title(Span::styled(" 命令审批 ", Style::new().fg(pal.accent)));
     let inner = block.inner(rect);
     let preview = truncate_display(&ap.preview(), inner.width.saturating_sub(2) as usize);
     let mut lines: Vec<Line<'static>> = vec![Line::from(Span::styled(
         preview,
-        Style::new().fg(Color::White).add_modifier(Modifier::BOLD),
+        Style::new().fg(pal.fg).add_modifier(Modifier::BOLD),
     ))];
     if let Some(key) = ap
         .allowlist_key
@@ -594,37 +639,36 @@ fn render_approval_overlay(frame: &mut Frame, st: &UiState, area: Rect) {
     {
         lines.push(Line::from(Span::styled(
             format!("allowlist: {key}"),
-            Style::new().fg(Color::Gray),
+            Style::new().fg(pal.muted),
         )));
     }
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
         "回合已暂停，等待你的决策",
-        Style::new().fg(Color::Gray),
+        Style::new().fg(pal.muted),
     )));
     lines.push(Line::from(Span::styled(
         "[Enter] 仅此一次  [a] 始终允许  [Esc/n] 拒绝  [Ctrl+C] 拒绝",
-        Style::new().fg(Color::LightYellow),
+        Style::new().fg(pal.accent),
     )));
     lines.push(Line::from(Span::styled(
         "Ctrl+C 只拒绝本命令；回合继续，取消需再按一次 Ctrl+C",
-        Style::new().fg(Color::Gray),
+        Style::new().fg(pal.muted),
     )));
     frame.render_widget(Paragraph::new(lines).block(block), rect);
 }
 
 /// 设置面板浮层：整屏 Clear + 独立色块 + 边框块（模板同审批浮层），
 /// 内容行由 [`super::settings_panel`] 构建（已按内宽截断），编辑时给出硬件光标位。
-fn render_settings_overlay(frame: &mut Frame, area: Rect, content: &PanelContent) {
-    let bg = Color::Indexed(234);
+fn render_settings_overlay(frame: &mut Frame, area: Rect, content: &PanelContent, pal: &Palette) {
     frame.render_widget(Clear, area);
-    paint_bg(frame, area, bg);
+    paint_bg(frame, area, pal.chrome_bg);
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::new().fg(Color::Yellow))
+        .border_style(Style::new().fg(pal.accent))
         .title(Span::styled(
             " 设置（模型 / 会话） ",
-            Style::new().fg(Color::Yellow),
+            Style::new().fg(pal.accent),
         ));
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -710,42 +754,85 @@ pub(super) fn cell_window(text: &str, start: usize, cells: usize) -> String {
     out
 }
 
+/// 画 composer 边框（或无边框退化）并返回可用内区；内区为空时返回 `None`。
+fn composer_inner(frame: &mut Frame, area: Rect, focused: bool, pal: &Palette) -> Option<Rect> {
+    let inner = if use_composer_border(area) {
+        let border = if focused { pal.accent } else { pal.muted };
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::new().fg(border));
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+        inner
+    } else {
+        // 极窄/极矮终端放不下边框：退回旧的「左内缩 1 列」画法。
+        Rect::new(
+            area.x.saturating_add(1),
+            area.y,
+            area.width.saturating_sub(1),
+            area.height,
+        )
+    };
+    (!inner.is_empty()).then_some(inner)
+}
+
+/// 空 composer 的占位提示（只画不写缓冲：输入第一个字符就消失）。
+fn render_composer_placeholder(frame: &mut Frame, inner: Rect, pal: &Palette) {
+    let hint = Paragraph::new(Span::styled(
+        COMPOSER_PLACEHOLDER,
+        Style::new().fg(pal.muted).add_modifier(Modifier::DIM),
+    ));
+    frame.render_widget(hint, Rect::new(inner.x, inner.y, inner.width, 1));
+}
+
+/// 逐行画 composer 内容（已按宽度窗口裁剪）。
+fn render_composer_rows(frame: &mut Frame, inner: Rect, rows: &[String], pal: &Palette) {
+    for (i, text) in rows.iter().enumerate() {
+        if i >= inner.height as usize {
+            break;
+        }
+        let row_area = Rect::new(inner.x, inner.y.saturating_add(i as u16), inner.width, 1);
+        let paragraph =
+            Paragraph::new(Line::from(Span::raw(text.as_str()))).style(Style::new().fg(pal.fg));
+        frame.render_widget(paragraph, row_area);
+    }
+}
+
+/// composer 硬件光标位置（clamp 在内区内，避免落到边框或浮层上）。
+fn composer_cursor_pos(inner: Rect, shown_cursor: usize, disp_row: usize) -> (u16, u16) {
+    let col = inner
+        .x
+        .saturating_add(shown_cursor as u16)
+        .min(inner.x.saturating_add(inner.width.saturating_sub(1)));
+    let row = inner
+        .y
+        .saturating_add(disp_row as u16)
+        .min(inner.y.saturating_add(inner.height.saturating_sub(1)));
+    (col, row)
+}
+
 fn render_input(frame: &mut Frame, st: &UiState, area: Rect, cursor_allowed: bool) {
     if area.width <= 1 || area.height == 0 {
         return;
     }
-    paint_bg(frame, area, COMPOSER_BG);
-    let visible_w = area.width.saturating_sub(1) as usize;
-    let rows = (composer_rows(st) as usize).min(area.height as usize);
-    let (shown, disp_row, shown_cursor, _hstart) = composer_window(st, visible_w, rows);
-    for (i, text) in shown.iter().enumerate() {
-        if i >= area.height as usize {
-            break;
-        }
-        let row_area = Rect::new(
-            area.x.saturating_add(1),
-            area.y.saturating_add(i as u16),
-            area.width.saturating_sub(1),
-            1,
-        );
-        let paragraph = Paragraph::new(Line::from(Span::raw(text.as_str())))
-            .style(Style::new().fg(Color::White));
-        frame.render_widget(paragraph, row_area);
-    }
-    // 全屏浮层（设置面板）打开时不需要 composer 硬件光标，避免光标漏到浮层外。
-    if st.focus != Focus::Input || !cursor_allowed {
+    let pal = &st.palette;
+    paint_bg(frame, area, pal.chrome_bg);
+    // 焦点在输入框且没被浮层占键盘时边框用 accent；聚焦在侧栏/工作区或浮层打开时 muted。
+    let focused = cursor_allowed && st.focus == Focus::Input;
+    let Some(inner) = composer_inner(frame, area, focused, pal) else {
         return;
+    };
+    if st.current_input().trim().is_empty() {
+        render_composer_placeholder(frame, inner, pal);
     }
-    let col = area
-        .x
-        .saturating_add(1)
-        .saturating_add(shown_cursor as u16)
-        .min(area.x.saturating_add(area.width.saturating_sub(1)));
-    let row = area
-        .y
-        .saturating_add(disp_row as u16)
-        .min(area.y.saturating_add(area.height.saturating_sub(1)));
-    frame.set_cursor_position((col, row));
+    let rows = (composer_rows(st) as usize).min(inner.height as usize);
+    let (shown, disp_row, shown_cursor, _hstart) =
+        composer_window(st, composer_content_width(area), rows);
+    render_composer_rows(frame, inner, &shown, pal);
+    // 全屏浮层（设置面板）打开时不需要 composer 硬件光标，避免光标漏到浮层外。
+    if focused {
+        frame.set_cursor_position(composer_cursor_pos(inner, shown_cursor, disp_row));
+    }
 }
 
 #[cfg(test)]

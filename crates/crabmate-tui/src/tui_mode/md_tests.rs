@@ -5,9 +5,14 @@
 
 use super::*;
 
+/// 测试用默认调色板（深色主题）。
+fn pal() -> super::Palette {
+    super::Palette::default()
+}
+
 #[test]
 fn bold_code_and_link_get_expected_styles() {
-    let chars = inline_styled_chars("a **b** `c` [d](https://e)");
+    let chars = inline_styled_chars("a **b** `c` [d](https://e)", &pal());
     assert!(
         chars
             .iter()
@@ -16,7 +21,7 @@ fn bold_code_and_link_get_expected_styles() {
     assert!(
         chars
             .iter()
-            .any(|(s, ch)| s.fg == Some(Color::Cyan) && *ch == 'c')
+            .any(|(s, ch)| s.bg == Some(pal().code_bg) && *ch == 'c')
     );
     assert!(
         chars
@@ -28,44 +33,50 @@ fn bold_code_and_link_get_expected_styles() {
 
 #[test]
 fn unterminated_marker_has_no_bold() {
-    let chars = inline_styled_chars("尾 **未闭合");
+    let chars = inline_styled_chars("尾 **未闭合", &pal());
     assert!(
         chars
             .iter()
             .all(|(s, _)| !s.add_modifier.contains(Modifier::BOLD))
     );
     let rows = wrap_styled_chars(&chars, 200);
-    let spans = styled_row_spans(&rows[0], Style::new(), false, false);
+    let spans = styled_row_spans(&rows[0], Style::new(), false, false, &pal());
     let joined: String = spans.iter().map(|s| s.content.as_ref()).collect();
     assert!(joined.contains("**未闭合"));
 }
 
 #[test]
-fn matched_highlight_keeps_bold_but_turns_yellow() {
-    let chars = inline_styled_chars("a **b** c");
+fn matched_highlight_keeps_bold_but_turns_accent() {
+    let chars = inline_styled_chars("a **b** c", &pal());
     let rows = wrap_styled_chars(&chars, 200);
-    let spans = styled_row_spans(&rows[0], Style::new().fg(Color::LightGreen), true, false);
-    assert!(spans.iter().any(|s| s.style.fg == Some(Color::Yellow)
+    let spans = styled_row_spans(
+        &rows[0],
+        Style::new().fg(Color::LightGreen),
+        true,
+        false,
+        &pal(),
+    );
+    assert!(spans.iter().any(|s| s.style.fg == Some(pal().hit)
         && s.style.add_modifier.contains(Modifier::BOLD)
         && s.to_string().contains('b')));
 }
 
 #[test]
 fn anchor_row_overrides_whole_row() {
-    let chars = inline_styled_chars("**b**");
+    let chars = inline_styled_chars("**b**", &pal());
     let rows = wrap_styled_chars(&chars, 200);
-    let spans = styled_row_spans(&rows[0], Style::new(), false, true);
+    let spans = styled_row_spans(&rows[0], Style::new(), false, true, &pal());
     assert!(
         spans
             .iter()
-            .all(|s| s.style.bg == Some(Color::Yellow) && s.style.fg == Some(Color::Black))
+            .all(|s| s.style.bg == Some(pal().hit) && s.style.fg == Some(pal().bg))
     );
 }
 
 #[test]
 fn code_fence_content_is_plain_and_literal() {
     let text = "前 **A**\n```\nls *.rs **x** `t`\n```\n后 **B**";
-    let chars = assistant_styled_text(text);
+    let chars = assistant_styled_text(text, &pal());
     let styled = |c: char| {
         chars
             .iter()
@@ -87,7 +98,7 @@ fn code_fence_content_is_plain_and_literal() {
 fn glued_mid_line_fence_splits_and_code_stays_plain() {
     // `依赖：```rust` 粘连围栏：normalize 拆成独立围栏行后，in_fence 状态机正确接管
     let text = "依赖：```rust\nx **y** `t`\n```";
-    let chars = assistant_styled_text(text);
+    let chars = assistant_styled_text(text, &pal());
     let joined: String = chars.iter().map(|(_, ch)| *ch).collect();
     assert_eq!(joined, "依赖：\n```rust\nx **y** `t`\n```");
     let styled = |c: char| {

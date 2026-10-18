@@ -11,6 +11,7 @@
 mod approve;
 mod controls;
 mod md;
+mod palette;
 mod render;
 mod serve_defaults;
 mod settings;

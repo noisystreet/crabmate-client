@@ -10,19 +10,33 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Span;
 use unicode_width::UnicodeWidthChar;
 
+use super::palette::Palette;
 use crabmate_client_api::{InlineSpan, normalize_markdown_for_render, parse_inline_markdown};
 
 /// 行内 markdown 片段 → 渲染样式（前景仅在需要区分时给出，其余随基色）。
-pub(crate) fn md_span_style(span: &InlineSpan) -> Style {
+/// 行内代码 / 链接跟主题走（`muted`→`accent`→`code_bg`），无色模式退到修饰位。
+pub(crate) fn md_span_style(span: &InlineSpan, pal: &Palette) -> Style {
     match span {
         InlineSpan::Text(_) => Style::new(),
         InlineSpan::Bold(_) => Style::new().add_modifier(Modifier::BOLD),
         InlineSpan::Italic(_) => Style::new().add_modifier(Modifier::ITALIC),
-        InlineSpan::InlineCode(_) => Style::new().fg(Color::Cyan),
+        InlineSpan::InlineCode(_) => {
+            if pal.is_mono() {
+                Style::new().add_modifier(Modifier::REVERSED)
+            } else {
+                Style::new().fg(pal.fg).bg(pal.code_bg)
+            }
+        }
         InlineSpan::Strike(_) => Style::new().add_modifier(Modifier::CROSSED_OUT),
-        InlineSpan::Link { .. } => Style::new()
-            .fg(Color::Blue)
-            .add_modifier(Modifier::UNDERLINED),
+        InlineSpan::Link { .. } => {
+            if pal.is_mono() {
+                Style::new().add_modifier(Modifier::UNDERLINED)
+            } else {
+                Style::new()
+                    .fg(pal.accent)
+                    .add_modifier(Modifier::UNDERLINED)
+            }
+        }
     }
 }
 
@@ -73,10 +87,10 @@ pub(crate) fn wrap_physical(text: &str, width: usize) -> Vec<String> {
 }
 
 /// 单段（不含换行）行内文本 → 带 markdown 样式的字符流。
-pub(crate) fn inline_styled_chars(part: &str) -> Vec<(Style, char)> {
+pub(crate) fn inline_styled_chars(part: &str, pal: &Palette) -> Vec<(Style, char)> {
     let mut out = Vec::new();
     for span in parse_inline_markdown(part) {
-        let st = md_span_style(&span);
+        let st = md_span_style(&span, pal);
         out.extend(span_text(&span).chars().map(|c| (st, c)));
     }
     out
@@ -180,7 +194,7 @@ fn list_or_quote_match(rest: &[u8]) -> Option<(usize, usize)> {
 /// 单行：行首标记（标题/列表/引用）轻渲染 + 其余部分行内 md。
 /// 标记弱化为灰色；标题正文整体加粗（行内样式叠加）。宽容识别只影响样式判定，
 /// 不增删字符（分隔空格/tab 原样保留；tab 仅会在折行时被丢弃）。
-fn styled_part_chars(part: &str) -> Vec<(Style, char)> {
+fn styled_part_chars(part: &str, pal: &Palette) -> Vec<(Style, char)> {
     let indent = leading_indent(part);
     let rest = &part.as_bytes()[indent..];
     let (marker_len, content_at, heading) = if let Some((h, ca)) = heading_match(rest) {
@@ -188,7 +202,7 @@ fn styled_part_chars(part: &str) -> Vec<(Style, char)> {
     } else if let Some((m, ca)) = list_or_quote_match(rest) {
         (m, ca, false)
     } else {
-        return inline_styled_chars(part);
+        return inline_styled_chars(part, pal);
     };
     let mut out: Vec<(Style, char)> = Vec::new();
     out.extend(part[..indent].chars().map(|c| (Style::new(), c)));
@@ -200,7 +214,7 @@ fn styled_part_chars(part: &str) -> Vec<(Style, char)> {
             rest.get(marker_len).copied().unwrap_or(b' ') as char,
         ));
     }
-    let body = inline_styled_chars(&part[indent + content_at..]);
+    let body = inline_styled_chars(&part[indent + content_at..], pal);
     if heading {
         out.extend(
             body.into_iter()
@@ -216,7 +230,7 @@ fn styled_part_chars(part: &str) -> Vec<(Style, char)> {
 /// 先过共享 [`crabmate_client_api::normalize_markdown_for_render`]（与 desktop/web
 /// 同一入口），再逐行渲染；处于 `` ``` `` / `~~~` 围栏内的行整行按纯文本，
 /// 避免代码内容里的 `**`/反引号/`[t](u)` 等被误当成行内样式而吞字符。
-pub(crate) fn assistant_styled_text(text: &str) -> Vec<(Style, char)> {
+pub(crate) fn assistant_styled_text(text: &str, pal: &Palette) -> Vec<(Style, char)> {
     let text = normalize_markdown_for_render(text);
     let mut out = Vec::new();
     let mut first = true;
@@ -232,7 +246,7 @@ pub(crate) fn assistant_styled_text(text: &str) -> Vec<(Style, char)> {
         if toggles || in_fence {
             out.extend(part.chars().map(|c| (Style::new(), c)));
         } else {
-            out.extend(styled_part_chars(part));
+            out.extend(styled_part_chars(part, pal));
         }
         first = false;
     }
@@ -282,16 +296,25 @@ pub(crate) fn md_row_style(md: Style, base: Style) -> Style {
     s.add_modifier(md.add_modifier | base.add_modifier)
 }
 
-/// 搜索高亮叠加：锚定行整体反色；其余命中行改黄色前景（保留修饰位）。
-pub(crate) fn highlight_override(s: Style, matched: bool, anchor: bool) -> Style {
+/// 搜索高亮叠加：锚定行整体反色（跟主题，无色模式退 `REVERSED`）；
+/// 其余命中行改 `hit` 前景（保留修饰位）。
+pub(crate) fn highlight_override(s: Style, matched: bool, anchor: bool, pal: &Palette) -> Style {
     if anchor {
-        return Style::new()
-            .fg(Color::Black)
-            .bg(Color::Yellow)
-            .add_modifier(Modifier::BOLD);
+        return if pal.is_mono() {
+            Style::new().add_modifier(Modifier::REVERSED | Modifier::BOLD)
+        } else {
+            Style::new()
+                .fg(pal.bg)
+                .bg(pal.hit)
+                .add_modifier(Modifier::BOLD)
+        };
     }
     if matched {
-        return Style::new().fg(Color::Yellow).add_modifier(s.add_modifier);
+        return if pal.is_mono() {
+            s.add_modifier(Modifier::BOLD)
+        } else {
+            Style::new().fg(pal.hit).add_modifier(s.add_modifier)
+        };
     }
     s
 }
@@ -306,11 +329,12 @@ pub(crate) fn styled_row_spans(
     base: Style,
     matched: bool,
     anchor: bool,
+    pal: &Palette,
 ) -> Vec<Span<'static>> {
     let mut spans: Vec<Span<'static>> = Vec::new();
     let mut cur: Option<(String, Style)> = None;
     for &(md, ch) in row {
-        let style = highlight_override(md_row_style(md, base), matched, anchor);
+        let style = highlight_override(md_row_style(md, base), matched, anchor, pal);
         match &mut cur {
             Some((t, s)) if same_style(s, &style) => t.push(ch),
             _ => {
