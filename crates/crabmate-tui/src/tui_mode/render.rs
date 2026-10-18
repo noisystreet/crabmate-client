@@ -21,14 +21,14 @@ pub const SIDEBAR_MIN_WIDTH: u16 = 120;
 pub(crate) const SIDEBAR_WIDTH: u16 = 26;
 
 /// 计算 build_body_rows 使用的聊天区宽度（与 draw 里传给 render_body 的区域一致：
-/// 宽屏时左右各占一列）。
+/// 聊天列内左右各留 1 列空隙，与侧栏 / composer 边框的对称留白对齐）。
 pub(crate) fn chat_body_width(sidebar_visible: bool, terminal_width: u16) -> usize {
     let col = if sidebar_visible {
         terminal_width.saturating_sub(SIDEBAR_WIDTH * 2)
     } else {
         terminal_width
     };
-    (col as usize).saturating_sub(1)
+    (col as usize).saturating_sub(2)
 }
 pub(super) const SIDEBAR_HINT: &str = "↑↓选 Enter用 n新建 r刷新";
 /// composer 最多展开行数（多行输入）。
@@ -595,14 +595,16 @@ fn render_body(
     spin: Option<usize>,
 ) {
     paint_bg(frame, area, st.palette.bg);
-    if area.width <= 1 || area.height == 0 {
+    // 正文区左右各让 1 列，故宽度 ≤ 2 时已无内容可画（与下面的 −2 预算同步）。
+    if area.width <= 2 || area.height == 0 {
         return;
     }
-    // 与区域左缘留 1 列间距（右缘贴边；折行/memo 宽度不变）。
+    // 左右各留 1 列间距（与左侧对称；宽度须与 `chat_body_width` 完全一致，
+    // 否则折行预算大于绘制区，行尾字符会被区域右缘裁掉）。
     let text_area = Rect::new(
         area.x.saturating_add(1),
         area.y,
-        area.width.saturating_sub(1),
+        area.width.saturating_sub(2),
         area.height,
     );
     if st.lines.is_empty() {
