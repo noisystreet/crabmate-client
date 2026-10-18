@@ -7,12 +7,14 @@
 //! - 导出另跳过 [`is_ephemeral_timeline_assistant_for_export`] 的规划轮 JSON / 参数残留；
 //! - 本轮 `context_inject` / `context_trim` 旁注：主列与导出均仅在开关开启时保留
 //!   （见 [`visible_message_indices_for_export`] 的 `include_turn_context_inject`）；
+//!   例外：含 `skills` 的 `context_inject` 在主列默认可见（画独立 skill 卡，让用户确认
+//!   skill 确实被调用），导出仍跟随开关；
 //! - TUI 对空壳另允许 stream overlay 有正文时挂载。
 
 use crate::storage::StoredMessage;
 use crate::timeline_scan::{
     is_ephemeral_timeline_assistant_for_chat_ui, is_ephemeral_timeline_assistant_for_export,
-    is_turn_context_inject_timeline_message,
+    is_skill_inject_timeline_message, is_turn_context_inject_timeline_message,
 };
 
 /// 导出路径是否应隐藏该条。
@@ -43,7 +45,10 @@ pub(crate) fn is_empty_assistant_body(m: &StoredMessage) -> bool {
 }
 
 fn tui_hides_inject_unless_pref(m: &StoredMessage, show_turn_context_inject: bool) -> bool {
-    !show_turn_context_inject && is_turn_context_inject_timeline_message(m)
+    if show_turn_context_inject {
+        return false;
+    }
+    is_turn_context_inject_timeline_message(m) && !is_skill_inject_timeline_message(m)
 }
 
 fn tui_empty_shell_has_overlay_text(
@@ -351,6 +356,31 @@ mod tests {
             visible_message_indices_for_export(&messages, true).len(),
             3,
             "export includes inject summaries when the pref is on"
+        );
+    }
+
+    #[test]
+    fn tui_shows_skill_inject_even_when_pref_off() {
+        let inject = msg(
+            "skill",
+            "system",
+            r#"{"kind":"context_inject","title":"本轮注入","detail":"{\"skills\":[\"rust-style\"],\"forced\":true}"}"#,
+            false,
+        );
+        let messages = vec![
+            msg("u", "user", "q", false),
+            inject.clone(),
+            msg("a1", "assistant", "终答", false),
+        ];
+        assert_eq!(
+            tui_visible_ids(&messages),
+            ["u", "skill", "a1"],
+            "skill invocation card stays visible so the user can confirm it ran"
+        );
+        assert_eq!(
+            visible_message_indices_for_export(&messages, false).len(),
+            2,
+            "export still follows the pref to avoid dumping raw inject JSON"
         );
     }
 }

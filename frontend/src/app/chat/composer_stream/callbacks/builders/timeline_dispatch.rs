@@ -104,7 +104,13 @@ fn timeline_log_dispatch_context_inject(
     stream_ctx: &ChatStreamCallbackCtx,
     info: &TimelineLogInfo,
 ) {
-    if stream_ctx.shell.show_turn_context_inject.get_untracked() {
+    // 含 skills 的注入无条件落气泡，让用户明确看到 skill 确实被调用；
+    // 其余注入信息仍只在开关开启时显示。
+    let has_skills = info
+        .detail
+        .as_deref()
+        .is_some_and(|d| crate::timeline_scan::context_inject_skills(d).is_some());
+    if has_skills || stream_ctx.shell.show_turn_context_inject.get_untracked() {
         timeline_log_dispatch_default_body(stream_ctx, info);
     }
 }

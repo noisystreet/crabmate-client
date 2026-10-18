@@ -108,6 +108,131 @@ pub fn is_turn_context_inject_timeline_message(m: &StoredMessage) -> bool {
     is_turn_context_inject_timeline_text(&m.text)
 }
 
+/// 本轮 skill 调用信息（Server 0.6.0 `context_inject` 的 `detail.skills` / `detail.forced`）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SkillInjectInfo {
+    /// 归一化后的展示名（取路径 basename、去 `.md` 后缀，保序去重）。
+    pub skills: Vec<String>,
+    /// 用户显式 `/<skill-id>` 选用（Server 强制注入）。
+    pub forced: bool,
+}
+
+/// 去 `.md` 后缀（ASCII 大小写不敏感）。
+fn strip_md_suffix(s: &str) -> &str {
+    let Some(i) = s.len().checked_sub(3) else {
+        return s;
+    };
+    if s.is_char_boundary(i) && s[i..].eq_ignore_ascii_case(".md") {
+        &s[..i]
+    } else {
+        s
+    }
+}
+
+/// skill 展示名：`rust-style` 与 `.crabmate/skills/rust-style.md` 归一为同一 id。
+fn skill_display_name(raw: &str) -> Option<String> {
+    let t = raw.trim();
+    if t.is_empty() {
+        return None;
+    }
+    let base = t.rsplit(['/', '\\']).next().unwrap_or(t).trim();
+    let base = strip_md_suffix(base).trim();
+    if base.is_empty() {
+        None
+    } else {
+        Some(base.to_string())
+    }
+}
+
+fn skill_inject_from_detail_value(v: &serde_json::Value) -> Option<SkillInjectInfo> {
+    let arr = v.get("skills")?.as_array()?;
+    let mut skills: Vec<String> = Vec::new();
+    for raw in arr.iter().filter_map(|s| s.as_str()) {
+        let Some(name) = skill_display_name(raw) else {
+            continue;
+        };
+        if !skills.contains(&name) {
+            skills.push(name);
+        }
+    }
+    if skills.is_empty() {
+        return None;
+    }
+    Some(SkillInjectInfo {
+        skills,
+        forced: v
+            .get("forced")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
+    })
+}
+
+/// 水合外层 JSON 的 `detail` 是字符串；流式正文是 `title\n<detail>`；也接受纯 detail JSON。
+fn context_inject_detail_value(text: &str) -> Option<serde_json::Value> {
+    let t = text.trim();
+    if t.is_empty() {
+        return None;
+    }
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(t) {
+        if let Some(detail) = v.get("detail").and_then(|d| d.as_str()) {
+            return serde_json::from_str(detail.trim()).ok();
+        }
+        return v.is_object().then_some(v);
+    }
+    let (_, rest) = t.split_once('\n')?;
+    let v: serde_json::Value = serde_json::from_str(rest.trim()).ok()?;
+    if let Some(detail) = v.get("detail").and_then(|d| d.as_str()) {
+        return serde_json::from_str(detail.trim()).ok();
+    }
+    v.is_object().then_some(v)
+}
+
+/// 从已确认是 `context_inject` 的 detail 中提取 skill 调用信息；无 skill 或非法输入 → `None`。
+///
+/// 三种落盘形态均支持：水合 `{kind,title,detail}`（`detail` 为 JSON 字符串）、流式
+/// `title\n<detail>`、纯 detail JSON。展示层据此画独立 skill 卡（不得伪造成 `tool_call`）。
+///
+/// 对任意消息正文请改用 [`skill_inject_from_timeline_text`]：本函数不做注入门控。
+#[must_use]
+pub fn context_inject_skills(text: &str) -> Option<SkillInjectInfo> {
+    skill_inject_from_detail_value(&context_inject_detail_value(text)?)
+}
+
+/// 从任意消息正文提取 skill 调用，先过 `context_inject` 门控。
+///
+/// 门控避免把正文恰为 `{"skills":[...]}` 的普通消息误判为注入旁注：合法注入行必须带
+/// `kind=context_inject`，或 detail 同时含 `skills` + `forced`（Server 0.6.0 恒定输出）。
+#[must_use]
+pub fn skill_inject_from_timeline_text(text: &str) -> Option<SkillInjectInfo> {
+    if !is_turn_context_inject_timeline_text(text) {
+        return None;
+    }
+    context_inject_skills(text)
+}
+
+/// 含 skill 调用的上下文注入旁注（主列默认可见）。
+#[must_use]
+pub fn is_skill_inject_timeline_message(m: &StoredMessage) -> bool {
+    !m.is_tool && skill_inject_from_timeline_text(&m.text).is_some()
+}
+
+/// 服务端已持久化等价 skill 注入（水合后丢弃流式本地快照，避免双卡）。
+fn server_has_equivalent_skill_inject(server_msgs: &[StoredMessage], local_text: &str) -> bool {
+    let Some(local) = skill_inject_from_timeline_text(local_text) else {
+        return false;
+    };
+    server_msgs
+        .iter()
+        .filter(|s| !s.is_tool)
+        .filter(|s| {
+            !s.state
+                .as_ref()
+                .is_some_and(|st| st.is_local_timeline_snapshot_row())
+        })
+        .filter_map(|s| skill_inject_from_timeline_text(&s.text))
+        .any(|info| info.skills == local.skills && info.forced == local.forced)
+}
+
 /// 已落盘的编排路由旁注：导出与聊天列均跳过。
 pub fn is_orchestration_route_timeline_message(m: &StoredMessage) -> bool {
     !m.is_tool && is_orchestration_route_timeline_text(&m.text)
@@ -338,6 +463,11 @@ pub fn should_preserve_local_timeline_on_hydrate(
     match timeline_ui_snapshot_type(state).as_deref() {
         Some("final_response_snapshot") => !server_assistant_has_trimmed_text(server_msgs, &m.text),
         Some("local_snapshot") | None => {
+            if is_skill_inject_timeline_message(m)
+                && server_has_equivalent_skill_inject(server_msgs, &m.text)
+            {
+                return false;
+            }
             !server_assistant_has_trimmed_text(server_msgs, &m.text)
                 && !is_timeline_snapshot_duplicate_of_canonical_assistant(m, server_msgs)
         }
@@ -696,5 +826,94 @@ mod tests {
             created_at: 0,
         };
         assert!(!is_ephemeral_timeline_assistant_for_export(&m, &[]));
+    }
+
+    #[test]
+    fn context_inject_skills_parses_three_shapes_and_dedupes() {
+        // 流式：`title\n<detail>`，id 与 `.md` 路径归一为同一展示名。
+        let streamed = "本轮注入\n{\"kinds\":[\"skill\"],\"skills\":[\"rust-style\",\".crabmate/skills/rust-style.md\"],\"forced\":true}";
+        let info = context_inject_skills(streamed).expect("streamed");
+        assert_eq!(info.skills, vec!["rust-style".to_string()]);
+        assert!(info.forced);
+
+        // 水合：外层 `{kind,title,detail}`，`detail` 是 JSON 字符串。
+        let hydrated = r#"{"kind":"context_inject","title":"本轮注入","detail":"{\"skills\":[\"rust-style\"],\"forced\":false}"}"#;
+        let info = context_inject_skills(hydrated).expect("hydrated");
+        assert_eq!(info.skills, vec!["rust-style".to_string()]);
+        assert!(!info.forced);
+
+        // 纯 detail JSON。
+        let pure = r#"{"skills":["a","b"],"forced":false}"#;
+        assert_eq!(
+            context_inject_skills(pure).expect("pure").skills,
+            vec!["a".to_string(), "b".to_string()]
+        );
+
+        // 无 skill / 非法输入 → None（不得画空卡）。
+        assert!(context_inject_skills("hello").is_none());
+        assert!(context_inject_skills(r#"{"skills":[],"forced":true}"#).is_none());
+        assert!(context_inject_skills(r#"{"count_hit":true,"n_before":40}"#).is_none());
+        // `.md` 后缀大小写不敏感。
+        assert_eq!(
+            context_inject_skills(r#"{"skills":["foo.MD"],"forced":false}"#)
+                .expect("uppercase suffix")
+                .skills,
+            vec!["foo".to_string()]
+        );
+    }
+
+    #[test]
+    fn plain_message_with_skills_json_is_not_skill_inject() {
+        // 普通消息正文恰为 `{"skills":[...]}`：detail 解析能取到，但注入门控必须拒绝，
+        // 否则会被画成 skill 卡并丢掉角色标签 / 原文。
+        let raw = r#"{"skills":["rust-style"]}"#;
+        assert!(context_inject_skills(raw).is_some());
+        assert!(skill_inject_from_timeline_text(raw).is_none());
+        let m = StoredMessage {
+            id: "u1".into(),
+            role: "user".into(),
+            text: raw.into(),
+            reasoning_text: String::new(),
+            image_urls: vec![],
+            state: None,
+            is_tool: false,
+            tool_call_id: None,
+            tool_name: None,
+            created_at: 0,
+        };
+        assert!(!is_skill_inject_timeline_message(&m));
+    }
+
+    #[test]
+    fn local_skill_inject_snapshot_dropped_when_server_has_equivalent() {
+        let snap = StoredMessage {
+            id: "local-skill".into(),
+            role: "assistant".into(),
+            text: "本轮注入\n{\"skills\":[\"rust-style\"],\"forced\":false}".into(),
+            reasoning_text: String::new(),
+            image_urls: vec![],
+            state: Some(timeline_state_local_snapshot()),
+            is_tool: false,
+            tool_call_id: None,
+            tool_name: None,
+            created_at: 0,
+        };
+        let server = vec![StoredMessage {
+            id: "srv-skill".into(),
+            role: "system".into(),
+            text: r#"{"kind":"context_inject","title":"本轮注入","detail":"{\"skills\":[\"rust-style\"],\"forced\":false}"}"#.into(),
+            reasoning_text: String::new(),
+            image_urls: vec![],
+            state: None,
+            is_tool: false,
+            tool_call_id: None,
+            tool_name: None,
+            created_at: 1,
+        }];
+        assert!(is_skill_inject_timeline_message(&snap));
+        assert!(is_skill_inject_timeline_message(&server[0]));
+        assert!(!should_preserve_local_timeline_on_hydrate(&snap, &server));
+        // 服务端没有等价 skill 注入时保留本地快照。
+        assert!(should_preserve_local_timeline_on_hydrate(&snap, &[]));
     }
 }

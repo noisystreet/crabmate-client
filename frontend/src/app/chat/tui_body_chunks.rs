@@ -188,6 +188,32 @@ fn user_text_body_chunks(
     chunks
 }
 
+/// skill 调用卡：语义独立于工具卡，明确告知本轮确实调用了 skill（不得伪装成 `tool_call`）。
+fn skill_inject_card_html(info: &crate::timeline_scan::SkillInjectInfo, locale: Locale) -> String {
+    let label = plaintext_to_safe_html(crate::i18n::msg_skill_inject_card_label(locale));
+    let forced = if info.forced {
+        format!(
+            "<span class=\"chat-tui-skill-inject-forced\">{}</span>",
+            plaintext_to_safe_html(crate::i18n::msg_skill_inject_card_forced(locale))
+        )
+    } else {
+        String::new()
+    };
+    let mut chips = String::new();
+    for id in &info.skills {
+        let esc = plaintext_to_safe_html(id);
+        chips.push_str(&format!(
+            "<span class=\"chat-tui-skill-inject-chip\" title=\"{esc}\">{esc}</span>"
+        ));
+    }
+    format!(
+        "<div class=\"chat-tui-skill-inject\" data-testid=\"chat-tui-skill-inject\">\
+         <span class=\"chat-tui-skill-inject-mark\" aria-hidden=\"true\">✦</span>\
+         <span class=\"chat-tui-skill-inject-label\">{label}</span>\
+         {forced}{chips}</div>"
+    )
+}
+
 pub(crate) fn message_body_chunks(
     message: &StoredMessage,
     ctx: &TuiRenderCtx<'_>,
@@ -215,6 +241,14 @@ pub(crate) fn message_body_chunks_cached(
             ))],
             open_plain: None,
             // 工具 HTML 不走 MD，仍记录全局开关以免与 Incremental 前缀比较漂移。
+            markdown_render: ctx.markdown_render,
+        };
+    }
+    if let Some(info) = crate::timeline_scan::skill_inject_from_timeline_text(&message.text) {
+        return TuiBodyChunks {
+            think: None,
+            closed: vec![Arc::new(skill_inject_card_html(&info, ctx.locale))],
+            open_plain: None,
             markdown_render: ctx.markdown_render,
         };
     }

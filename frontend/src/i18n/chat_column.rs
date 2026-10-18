@@ -232,6 +232,22 @@ pub fn msg_skill_invoke_suffix(l: Locale) -> &'static str {
     }
 }
 
+/// 聊天主列 skill 调用卡：标题（明确告知本轮确实调用了 skill）。
+pub fn msg_skill_inject_card_label(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "已调用 skill",
+        Locale::En => "Skill invoked",
+    }
+}
+
+/// 聊天主列 skill 调用卡：用户显式 `/<skill-id>` 选用标记。
+pub fn msg_skill_inject_card_forced(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "显式",
+        Locale::En => "explicit",
+    }
+}
+
 pub fn composer_slash_builtin_skills_list(l: Locale) -> &'static str {
     match l {
         Locale::ZhHans => "列出可 `/id` 调用的技能明细",

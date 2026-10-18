@@ -77,7 +77,7 @@ pub(crate) struct TurnActionsPlan {
 
 /// 工具名写在过程行内；不重复角色标签（对齐气泡）。
 fn tui_role_label(message: &StoredMessage, locale: Locale) -> String {
-    if message.is_tool {
+    if message.is_tool || crate::timeline_scan::is_skill_inject_timeline_message(message) {
         return String::new();
     }
     crate::session_ops::message_role_label(message, locale).to_string()
@@ -86,6 +86,9 @@ fn tui_role_label(message: &StoredMessage, locale: Locale) -> String {
 fn tui_turn_role_class(message: &StoredMessage) -> &'static str {
     if message.is_tool {
         return "chat-tui-turn--tool";
+    }
+    if crate::timeline_scan::is_skill_inject_timeline_message(message) {
+        return "chat-tui-turn--skill";
     }
     match message.role.as_str() {
         "user" => "chat-tui-turn--user",

@@ -8,16 +8,16 @@ Proposed
 
 用户希望在对话里看见 **skill / 上下文注入** 用了什么，而不是只有工具卡。本仓路径 A 薄壳不变：执行与组装权威在已运行的 `crabmate serve`；本仓不得发明线协议字段并当作契约。
 
-**代码事实（Client + 已钉 `crabmate` 0.4.0）**：
+**代码事实（Client + 已钉 `crabmate` 0.6.0）**：
 
-- Skill **不是** `tool_call`。L2 把 skills 目录编成索引写入 `system`；L5 按本轮用户消息 Top-K（或 `/<skill-id>` 强制）把 skill **正文**叠进 `system`。聊天 SSE（[Server `SSE协议.md`](https://github.com/noisystreet/CrabMate/blob/main/docs/SSE协议.md)）无 `skill_*` 事件。
+- Skill **不是** `tool_call`。L2 把 skills 目录编成索引写入 `system`；L5 按本轮用户消息 Top-K（或 `/<skill-id>` 强制）把 skill **正文**叠进 `system`。聊天 SSE（[Server `SSE协议.md`](https://github.com/noisystreet/CrabMate/blob/main/docs/SSE协议.md)）无 `skill_*` 事件；但已钉 `crabmate` 0.6.0 的 `timeline_log` 在 `kind=context_inject` 时下发结构化 `detail`：`{"kinds":[…],"skills":[…],"forced":bool}`，`skills` 可能同时包含 id 与 `.crabmate/skills/<id>.md` 路径。Client 只吃该结构化字段，不解析 `system` 正文。
 - 用户显式 `/<id> [任务]`：存盘仍是斜杠原文；展示侧已有用户气泡内联 chip（[`skill_slash_display.rs`](../../frontend/src/message_format/skill_slash_display.rs)、[`tui_transcript_sync.rs`](../../frontend/src/app/chat/tui_transcript_sync.rs) `skill_slash_body_chunks`）。Composer `/` 浮层来自 `GET /skills`（含 `id` / `description` / `path`）。
 - 首轮工作区上下文（活文档、备忘文件、项目画像、依赖摘要）合成 **一条** `role=user`，`name=crabmate_first_turn_workspace_context`（Server `cm_types`）。其中 **从文件读** 的是：
   - `.crabmate/living_docs/` 下 `SUMMARY.md` / `map.md` / `pitfalls.md` / `build.md`（可改相对目录）
   - `agent_memory_file` 指向的备忘文件
   - 项目画像与依赖摘要是 **扫描生成**（工作区 walk / `cargo metadata` / `package.json`），不是「把某个用户文档整篇注入」
 - `GET /conversation/messages` 经 `filter_messages_for_web_client_snapshot` **不向 Web 下发** 上述 `user.name` 注入条（与长期记忆、变更集、规划纠偏同类）。本仓水合若见到 `crabmate_first_turn_workspace_context` 会 **跳过**（[`conversation_hydrate.rs`](../../frontend/src/conversation_hydrate.rs)）。
-- 另一套隐藏规则是正文前缀启发式：[`cm_display_rules::user_message_should_hide_for_chat_display`](https://docs.rs/crabmate/0.4.0/crabmate/cm_display_rules/)（规划拒绝、步级反馈、plan rewrite、LTM 前缀、编排纠偏）。**不含** L6 文件块（L6 靠 `name` 过滤，根本到不了 UI）。
+- 另一套隐藏规则是正文前缀启发式：[`cm_display_rules::user_message_should_hide_for_chat_display`](https://docs.rs/crabmate/0.6.0/crabmate/cm_display_rules/)（规划拒绝、步级反馈、plan rewrite、LTM 前缀、编排纠偏）。**不含** L6 文件块（L6 靠 `name` 过滤，根本到不了 UI）。
 - 变更集已有侧栏 Markdown 弹窗（`GET /workspace/changelog`），不是消息卡。调试台 `thinking_trace.context_snapshot` 是工具前后摘要，不是 L5/L6 文件清单。
 
 **要回答的问题**：聊天区要不要、以及如何展示「从文件注入」的上下文，而不把注入全文伪装成用户发言、不在本仓发明 SSE 形状。
@@ -34,13 +34,20 @@ Proposed
 |------|------------------------------|
 | 本轮 / 本会话首轮读过的 living_docs 相对路径 | 规划拒绝、编排纠偏、plan rewrite 注入 user |
 | agent 备忘文件相对路径 | 长期记忆 **召回** 条（不是工作区备忘文件） |
-| 用户 `/<skill-id>`：chip 可附 `GET /skills` 的 `path` | Top-K skill **自动**叠进 `system`（无事件则不上卡） |
+| 本轮实际调用的 skill（`/<skill-id>` 与 Top-K 自动选择），由 `context_inject.detail.skills` 驱动 | Server 未下发 `skills` 时的任何猜测（不解析 `system` 正文） |
 | （可选，须标「扫描」）项目画像 / 依赖摘要 | 把 L6 **全文**当用户/助手气泡 |
 | | 用工具卡冒充 skill（无 `invoke_skill` 工具） |
 
 卡片形态：助手时间线或回合元信息条上一张 **只读压缩卡**（例如「已从文件注入：`a.md` · `b.md`」），展开最多给标题/截断摘要，默认不渲染整篇 Markdown。不得看起来像用户说的话。
 
 **已落地（软字段，非本仓发明契约）**：钉 pin 的 Server `timeline_log` 可带 `kind=context_inject` / `context_trim`（`detail` 形状见 Server `SSE协议.md`）。Client **默认不**把这些旁注画进主列；设置「外观 → 显示每轮注入与窗口裁剪信息」打开后才显示。会话导出（Markdown / JSON）同样**跟随该开关**：关闭时省略，开启时按助手段落导出（水合行可能为 `system`，导出统一按 `assistant` 输出以避免被 `system` 过滤跳过）。这不是阶段 B 的 living_docs 文件路径卡。
+
+**例外（skill 调用卡，本 ADR 阶段 C 的落地形态）**：`context_inject.detail` 含非空 `skills` 时，Client 渲染一张**独立**的 skill 调用卡（label「已调用 skill」/「Skill invoked」，`forced=true` 时附「显式 / explicit」标记，skills 归一化为 basename 去 `.md` 后保序去重）。该卡：
+
+- **默认在主列可见**，不受上述「显示每轮注入」开关影响——用户必须能明确确认 skill 确实被调用；导出仍随该开关（避免导出原始 JSON 旁注）。
+- **语义独立于工具卡**：不复用 `ToolCardInput` / `tool_process_body_html`，不显示「助手 / 系统」角色标签，回合 class 为 `chat-tui-turn--skill`；因为 skill 不是 `tool_call`，不得伪装成工具调用。
+- **流式与水合同形**：流式 `title + "\n" + detail` 的 assistant 快照与服务端 `system` marker（`{kind,title,detail}`，`detail` 为 JSON 字符串）共用 `timeline_scan::context_inject_skills` 解析；水合时若服务端已有等价 skill 注入行则丢弃本地快照，避免双卡。
+- **无结构化 `skills` 不画卡**：仅 `kinds`（如 `count_hit`）仍走上面的开关旁注路径。
 
 ### 契约与依赖方向
 
@@ -71,6 +78,8 @@ Client：按列表画卡；无列表则不画。水合测试从「skip 该 name�
 **阶段 C — 自动 Top-K skill（可选）**
 
 仅当 Server 下发本轮选中的 skill id/path。不得从 `system` 正文正则抠。
+
+**状态：已落地（Server 0.6.0）**——`context_inject.detail.skills` / `forced` 即上述结构化字段；Client 在 `timeline_scan::context_inject_skills` 统一解析，并渲染独立 skill 调用卡（见 Decision「例外」）。
 
 ### 明确不做
 
