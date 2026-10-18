@@ -71,12 +71,67 @@ fn search_marks_and_anchors_rows() {
 
 #[test]
 fn chat_body_width_matches_layout() {
-    assert_eq!(chat_body_width(false, 100), 99);
-    // 宽屏：左右各一列（会话 + 工作区），再留 1 列正文间距。
+    // 聊天列内左右各留 1 列空隙（与侧栏 / composer 的对称留白一致），
+    // 故正文预算恒为「列宽 − 2」，不能只减左侧那 1 列。
+    assert_eq!(chat_body_width(false, 100), 98);
     assert_eq!(
         chat_body_width(true, 100),
-        100 - SIDEBAR_WIDTH as usize * 2 - 1
+        100 - SIDEBAR_WIDTH as usize * 2 - 2
     );
+}
+
+/// 正文绘制区必须与 `chat_body_width` 同步收窄：两处都按「列宽 − 1」算会贴到列右缘，
+/// 而只改一侧（预算比绘制区宽 1 列）则末列字符被区域右缘直接丢掉——后者由
+/// `rendered_chat_area_keeps_all_characters` 按字符计数兜住，本用例补的是前者的观感缺口。
+#[test]
+fn rendered_chat_area_keeps_right_gutter() {
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+
+    const TERMINAL_W: u16 = 80;
+    const TERMINAL_H: u16 = 12;
+    let mut st = UiState::new();
+    st.set_palette(super::Palette::default());
+    st.sidebar_visible = false;
+    st.push_line(LineKind::Assistant, &"中".repeat(38));
+    st.push_line(LineKind::Tool, &"工具输出abcd ".repeat(12));
+    st.push_line(LineKind::User, &"中文内容abc ".repeat(20));
+    let rows = build_body_rows(&st, chat_body_width(false, TERMINAL_W));
+    let info = StatusInfo {
+        api_base: "http://x".into(),
+        model: None,
+        role: None,
+        mode: None,
+        running: false,
+        cancel_sent: false,
+        spinner: 0,
+        view_offset: 0,
+        search_term: None,
+        search_total: 0,
+    };
+    let mut terminal = Terminal::new(TestBackend::new(TERMINAL_W, TERMINAL_H)).expect("terminal");
+    terminal
+        .draw(|f| draw(f, &st, &info, &rows, None))
+        .expect("draw");
+    let buffer = terminal.backend().buffer();
+    // 无侧栏时聊天列即整屏：正文区为 [1, 79)，故 x=0 与 x=79 两列必须是留白。
+    // transcript 的行范围按布局推导（顶栏 / composer / 状态栏各占几行），不写死行号：
+    // composer 多于一行输入时正文会被挤短，写死的 y 会落到 composer 边框行上。
+    let body_h = TERMINAL_H - 2; // 顶栏 + 状态栏
+    let composer_h = composer_outer_rows(&st)
+        .min(body_h.saturating_sub(1))
+        .max(1);
+    let transcript_h = body_h - composer_h;
+    assert!(transcript_h >= 1, "终端太矮，本用例前提不成立");
+    let last_x = TERMINAL_W - 1;
+    for y in 1..1 + transcript_h {
+        assert_eq!(buffer[(0, y)].symbol(), " ", "左侧留白被占用 (y={y})");
+        assert_eq!(
+            buffer[(last_x, y)].symbol(),
+            " ",
+            "右侧留白被占用：正文写到聊天列最右一列 (y={y})"
+        );
+    }
 }
 
 /// 分隔行判定：非空且只由 `─` 组成（允许左侧缩进空格）。
