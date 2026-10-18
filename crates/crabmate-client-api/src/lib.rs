@@ -8,6 +8,7 @@ pub mod ag_ui_parser;
 pub mod approval;
 pub mod auth;
 pub mod chat_body;
+pub mod conversation_messages;
 pub mod handoff;
 pub mod health;
 pub mod markdown_inline;
@@ -36,6 +37,10 @@ pub use chat_body::{
     ChatStreamCoreFields, build_chat_stream_core_body, insert_trimmed_str,
     llm_context_tokens_for_chat_body, merge_chat_stream_core_fields,
     readonly_tool_ttl_cache_secs_for_chat_body, temperature_for_chat_body,
+};
+pub use conversation_messages::{
+    CONVERSATION_MESSAGES_PAGE_LIMIT, ConversationMessage, ConversationMessagesResponse,
+    FIRST_TURN_WORKSPACE_CONTEXT_NAME, ReplayRow,
 };
 pub use handoff::{
     API_BASE_HASH_KEY, BEARER_HASH_KEY, handoff_hash_fragment, is_handoff_hash_key,

@@ -127,10 +127,11 @@ pub(super) fn plan_new_blank_outcome(
     }
 }
 
-/// `/conv new` 相关的 UI 侧状态。
+/// `/conv new` 与历史回放相关的 UI 侧状态。
 ///
-/// 五个字段都只在「新建 → 起名 → 绑定 → 切走回收」这条线上用，集中成一个结构体，
-/// 好让 `mod.rs` 只留一个字段（该文件有 920 行门禁）。
+/// 前五个字段只在「新建 → 起名 → 绑定 → 切走回收」这条线上用，集中成一个结构体，
+/// 好让 `mod.rs` 只留一个字段（该文件有 920 行门禁）；`history_auto_replayed` 是
+/// 启动时的一次性标记，放这里同样是为了不给 `mod.rs` 加字段。
 #[derive(Debug, Default)]
 pub(super) struct UiIndexState {
     /// `/conv new` 在服务端索引里新建（或复用）、尚未绑定 `conversation_id` 的本地会话行 id。
@@ -143,6 +144,8 @@ pub(super) struct UiIndexState {
     pub(super) pending_bind_conversation: Option<String>,
     /// `NewBlank` 在途期间发出的首条消息算出的标题：等行 id 到手再写。
     pub(super) pending_session_title: Option<String>,
+    /// 启动时的「回放上次会话」是否已尝试过（只做一次，避免每次刷新左栏都冲掉 transcript）。
+    pub(super) history_auto_replayed: bool,
 }
 
 impl TuiApp<'_> {
@@ -191,9 +194,10 @@ impl TuiApp<'_> {
             .push_line(LineKind::System, "已开始新会话（正在写入会话列表…）");
     }
 
-    /// 新建 / 切换共用的「空对话」复位：清 `conversation_id`、清 transcript、聚焦输入框。
+    /// 新建 / 切换共用的「空对话」复位：清 `conversation_id`、清在途回放、清 transcript、聚焦输入框。
     fn reset_for_new_chat(&mut self) {
         self.st.conversation_id = None;
+        self.st.history_pending = None;
         self.st.reset_transcript();
         self.st.focus = Focus::Input;
     }

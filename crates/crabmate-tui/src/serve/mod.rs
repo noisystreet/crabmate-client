@@ -7,6 +7,7 @@ mod chat_classify;
 mod chat_stream;
 mod client;
 mod config;
+mod conversation;
 mod error;
 mod json_api;
 mod sessions;
@@ -23,6 +24,7 @@ pub use chat_stream::{
 };
 pub use client::ServeClient;
 pub use config::ConnectionConfig;
+pub use conversation::{ConversationMessagesResponse, fetch_conversation_messages};
 pub use error::TermError;
 pub use sessions::{
     DEFAULT_SESSION_TITLE, SessionIndexApplied, SessionIndexOp, SessionListRow, WebSessionsList,

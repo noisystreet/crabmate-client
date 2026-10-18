@@ -11,6 +11,7 @@
 mod approve;
 mod body_memo;
 mod controls;
+mod history;
 mod layout;
 mod md;
 mod mouse;
@@ -192,14 +193,9 @@ impl TuiApp<'_> {
         }
         // 切走前回收「/conv new 建的空行」并把服务端 active 指过去（对齐 Web reclaim）。
         self.leave_current_for_switch(&resume);
-        self.st.conversation_id = Some(resume);
-        self.st.reset_transcript();
         self.st.focus = Focus::Input;
-        let label = title.unwrap_or("(by id)");
-        self.st.push_line(
-            LineKind::System,
-            &format!("已切换到会话「{label}」（新对话从空开始）"),
-        );
+        // 切换 = 换一份 transcript（同 Desktop）：清空后回放该会话的历史。
+        history::replay_into(self, resume, title);
     }
 
     fn refresh_sessions(&mut self) {
@@ -615,12 +611,18 @@ impl TuiApp<'_> {
                     self.st.replace_sessions(list.sessions);
                     // 待定位的新建行只能在刷新回来的列表里按 id 找（见 `session_index`）。
                     self.apply_pending_select();
+                    // 启动后第一次拿到列表：回放上次在用的会话（只做一次）。
+                    history::auto_replay_if_active(self);
                 }
                 Err(e) => {
                     self.st
                         .push_line(LineKind::System, &format!("拉取会话列表失败：{e}"));
                 }
             },
+            UiEvent::ConversationHistory {
+                conversation_id,
+                result,
+            } => history::on_result(self, &conversation_id, result),
             UiEvent::SessionIndex { result, op } => self.on_session_index(result, op),
             UiEvent::Status(result) => match result {
                 Ok(defaults) => self.st.serve_defaults = Some(defaults),
@@ -710,6 +712,9 @@ impl TuiApp<'_> {
             readonly_tool_ttl_cache_secs,
             stream_resume: None,
         };
+        // 在途的历史回包从此没有落点（见 `history::should_apply_reply`）：清掉它，
+        // 免得晚到的历史把刚发出的这一轮冲掉。
+        self.st.history_pending = None;
         // 新回合：清上轮工具行映射并回到最新视图（搜索词保留、锚点释放）。
         self.st.reset_run_tools();
         self.st.view_offset = 0;

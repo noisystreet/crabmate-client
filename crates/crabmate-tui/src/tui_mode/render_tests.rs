@@ -815,3 +815,14 @@ fn body_rows_collapse_consecutive_blanks_to_one() {
     let rows = body_rows(&st, 60);
     assert_eq!(rows.len(), 3, "多余空行不该变成多行空白");
 }
+
+/// 回放的历史工具行不该再画「进行中」的进度位：历史里没有「正在跑」这回事，
+/// 否则打开旧会话会看到一排转圈的工具行。
+#[test]
+fn replayed_tool_row_has_no_progress_slot() {
+    let mut st = UiState::new();
+    st.push_line(LineKind::Tool, "live");
+    st.push_replayed_line(LineKind::Tool, "history", None);
+    assert_eq!(prefix_for(&st.lines[0]), TOOL_PREFIX_PROGRESS);
+    assert_eq!(prefix_for(&st.lines[1]), kind_prefix(LineKind::Tool));
+}

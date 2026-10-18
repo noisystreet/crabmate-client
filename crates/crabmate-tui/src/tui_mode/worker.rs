@@ -11,12 +11,12 @@ use crossterm::event::{self, Event, KeyEvent, MouseButton, MouseEvent, MouseEven
 use crabmate_client_api::paths;
 
 use crate::serve::{
-    ApprovalGate, AutoAllowOnce, ChatStreamOptions, ChatStreamOutcome, ServeClient,
-    SessionIndexApplied, SessionIndexOp, StreamCancel, StreamSink, TermError, WebSessionsList,
-    WorkspaceDirData, WorkspaceProjectsData, apply_web_session_op, fetch_llm_overrides,
-    fetch_user_data_prefs, fetch_web_sessions, fetch_workspace, fetch_workspace_dir,
-    fetch_workspace_projects, put_llm_overrides, put_user_data_prefs, run_chat_stream_sink,
-    switch_workspace_project,
+    ApprovalGate, AutoAllowOnce, ChatStreamOptions, ChatStreamOutcome,
+    ConversationMessagesResponse, ServeClient, SessionIndexApplied, SessionIndexOp, StreamCancel,
+    StreamSink, TermError, WebSessionsList, WorkspaceDirData, WorkspaceProjectsData,
+    apply_web_session_op, fetch_conversation_messages, fetch_llm_overrides, fetch_user_data_prefs,
+    fetch_web_sessions, fetch_workspace, fetch_workspace_dir, fetch_workspace_projects,
+    put_llm_overrides, put_user_data_prefs, run_chat_stream_sink, switch_workspace_project,
 };
 
 use super::approve::{ApprovalPrompt, OverlayApprovalGate};
@@ -49,6 +49,12 @@ pub(super) enum UiEvent {
         error: Option<String>,
     },
     Sessions(Result<WebSessionsList, String>),
+    /// 已持久化会话的历史分页（`GET /conversation/messages`）：只读回放。
+    /// 失败只提示，不阻断输入（当前会话仍可继续聊）。
+    ConversationHistory {
+        conversation_id: String,
+        result: Result<ConversationMessagesResponse, String>,
+    },
     /// 会话索引写入（`/conv new` 新建或复用空行 / 首轮后绑定 `conversation_id` / 切走回收）结果。
     SessionIndex {
         result: Result<SessionIndexApplied, String>,
@@ -91,6 +97,11 @@ pub(super) struct TurnRequest {
 pub(super) enum WorkerJob {
     Turn(Box<TurnRequest>),
     RefreshSessions,
+    /// 拉一页已持久化会话历史（只读回放）；`before_index = None` 取最新页。
+    ConversationHistory {
+        conversation_id: String,
+        before_index: Option<u32>,
+    },
     /// 写会话索引（`GET` → 改 → 全量 `PUT`）：新建空白行 / 绑定 `conversation_id`。
     SessionIndex(SessionIndexOp),
     /// 拉取根目录列表；`keep` 为 true 时保留展开态与光标（用户手动刷新）。
@@ -224,6 +235,10 @@ pub(super) fn spawn_worker(client: ServeClient, tx: Sender<UiEvent>) -> Sender<W
             match job {
                 WorkerJob::Turn(job) => run_turn_job(&rt, &client, *job, &tx),
                 WorkerJob::RefreshSessions => job_refresh_sessions(&rt, &client, &tx),
+                WorkerJob::ConversationHistory {
+                    conversation_id,
+                    before_index,
+                } => job_conversation_history(&rt, &client, &conversation_id, before_index, &tx),
                 WorkerJob::SessionIndex(op) => job_session_index(&rt, &client, op, &tx),
                 WorkerJob::RefreshWorkspace { keep } => {
                     job_refresh_workspace_root(&rt, &client, &tx, keep);
@@ -303,6 +318,27 @@ fn job_refresh_sessions(rt: &tokio::runtime::Runtime, client: &ServeClient, tx: 
         (!p.is_empty()).then(|| p.to_string())
     });
     let _ = tx.send(UiEvent::WorkspacePath(path));
+}
+
+/// 拉一页会话历史（只读回放）。失败如实回传，提示文案由 UI 决定。
+fn job_conversation_history(
+    rt: &tokio::runtime::Runtime,
+    client: &ServeClient,
+    conversation_id: &str,
+    before_index: Option<u32>,
+    tx: &Sender<UiEvent>,
+) {
+    let result = rt
+        .block_on(fetch_conversation_messages(
+            client,
+            conversation_id,
+            before_index,
+        ))
+        .map_err(|e| e.to_string());
+    let _ = tx.send(UiEvent::ConversationHistory {
+        conversation_id: conversation_id.to_string(),
+        result,
+    });
 }
 
 /// 工作区根目录列表（顶栏路径 + 目录树数据）。

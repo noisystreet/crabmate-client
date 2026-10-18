@@ -69,6 +69,11 @@ pub struct LogLine {
     /// 工具行结果（`Some(true)` 成功 / `Some(false)` 失败 / `None` 进行中）；
     /// 仅供渲染分色，不参与文本（文本仍是 `tool_end_text` 的完整串）。
     pub tool_ok: Option<bool>,
+    /// 回放的历史行（来自 `GET /conversation/messages`，不属于本次运行的流）。
+    ///
+    /// 单独标记而不是复用 `tool_ok: None`：`None` 在实时路径里表示「工具正在进行中」，
+    /// 渲染层据此显示 `⠿` 进度占位；历史行若共用同一取值会被误画成「还在跑」。
+    pub replayed: bool,
 }
 
 impl LogLine {
@@ -80,12 +85,26 @@ impl LogLine {
             text: text.to_string(),
             collapsed,
             tool_ok: None,
+            replayed: false,
         }
     }
 
     fn append(&mut self, delta: &str) {
         self.text.push_str(delta);
     }
+}
+
+/// 在途的历史回放请求（`GET /conversation/messages`）。
+///
+/// 携带请求前的绑定与标题：回包要用它们判断「这次回包还算不算数」（用户可能已经
+/// 切走或已经开聊），并在失败时把绑定回滚——否则会拿一个可能已被服务端删掉的 id 继续聊。
+#[derive(Debug, Clone)]
+pub struct HistoryRequest {
+    pub conversation_id: String,
+    /// 请求前的绑定（`None` = 新会话）。
+    pub prev_conversation_id: Option<String>,
+    /// 会话标题（提示文案用；没有就是 `(by id)`）。
+    pub title: String,
 }
 
 /// 全屏 UI 状态；仅由事件循环触碰（单线程）。
@@ -99,6 +118,10 @@ pub struct UiState {
     /// 输入光标位置（字符下标）。
     cursor: usize,
     pub conversation_id: Option<String>,
+    /// 在途的历史回放请求（`None` = 没有正在等的回放）。
+    ///
+    /// 用户一发送消息或新建会话就清空：那时的回包已经没有落点，清屏会丢真实内容。
+    pub history_pending: Option<HistoryRequest>,
     /// 是否有回合在跑（SSE 任务未结束）。
     pub running: bool,
     /// 当前回合是否已发过取消（第二次 Ctrl+C = 强退）。
@@ -173,6 +196,23 @@ impl UiState {
         // thinking 默认折叠；但"全局展开"开启时新建的 thinking 行也应保持展开。
         let collapsed = kind == LineKind::Thinking && !self.thinking_visible;
         self.lines.push(LogLine::new(kind, text, collapsed));
+        self.refresh_search_meta();
+        self.bump();
+    }
+
+    /// 回放一行历史（`GET /conversation/messages`）。
+    ///
+    /// `tool_ok` 由调用方给：服务端的工具结果消息没有成败信号，故传 `None`，
+    /// 由 `replayed` 让渲染层不画「进行中」占位。
+    pub fn push_replayed_line(&mut self, kind: LineKind, text: &str, tool_ok: Option<bool>) {
+        let collapsed = kind == LineKind::Thinking && !self.thinking_visible;
+        self.lines.push(LogLine {
+            kind,
+            text: text.to_string(),
+            collapsed,
+            tool_ok,
+            replayed: true,
+        });
         self.refresh_search_meta();
         self.bump();
     }

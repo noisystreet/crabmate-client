@@ -1,0 +1,335 @@
+//! `GET /conversation/messages` 响应解析与「回放行」归一（纯逻辑，无 IO）。
+//!
+//! Web / Desktop 的水合层（`frontend/src/conversation_hydrate*.rs`）把同一份响应转成
+//! 它自己的 `StoredMessage` 与时间线卡片；TUI 只需要**与 UI 无关**的中性形态：一段文本
+//! 属于「用户 / 思考 / 助手 / 工具」中的哪一类。两边共享的就是这份「哪条消息出哪一行」
+//! 的判定，避免第三次出现「两份规则漂移」。
+//!
+//! 隐藏规则里有一半在服务端：`filter_messages_for_web_client_snapshot` 已经滤掉长期记忆、
+//! 变更集、规划纠偏、`role=tool` 的 `name` 注入条（见 ADR-0003）。剩下 **首轮工作区上下文**
+//! 那条 `user` 消息仍在响应里（靠 `name` 区分），客户端必须自己跳过——此处与 frontend 同名
+//! 常量保持一致，否则回放会凭空多一句用户发言。
+
+use serde::Deserialize;
+use serde_json::Value;
+
+/// 首轮工作区上下文注入条的 `user.name`（Server `types.rs` 与 frontend 同名常量）。
+pub const FIRST_TURN_WORKSPACE_CONTEXT_NAME: &str = "crabmate_first_turn_workspace_context";
+
+/// 回放默认页大小（与后端默认 80 对齐；上限由服务端
+/// `MAX_CONVERSATION_MESSAGES_PAGE_LIMIT` 约束）。
+pub const CONVERSATION_MESSAGES_PAGE_LIMIT: u32 = 80;
+
+/// `GET /conversation/messages` 响应。
+///
+/// 只声明回放要用的字段；`layout` / `context_artifacts` / `tiktoken_prompt_tokens` 等
+/// Web 专用字段刻意不解析（未知字段被 `serde` 忽略，前向兼容）。
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct ConversationMessagesResponse {
+    #[serde(default)]
+    pub conversation_id: String,
+    /// 服务端权威修订号（回放不合并本地副本，仅用于显示/诊断）。
+    #[serde(default)]
+    pub revision: u64,
+    #[serde(default)]
+    pub messages: Vec<ConversationMessage>,
+    /// 过滤后可见消息总数。
+    #[serde(default)]
+    pub total_count: u32,
+    /// 本页第一条在过滤后数组中的下标（往旧翻页时回传 `before_index`）。
+    #[serde(default)]
+    pub window_start_index: u32,
+    /// 本页之前是否还有更早的消息。
+    #[serde(default)]
+    pub has_older: bool,
+}
+
+/// 一条 OpenAI 兼容消息（只取展示所需字段）。
+#[derive(Debug, Clone, Deserialize)]
+pub struct ConversationMessage {
+    pub role: String,
+    #[serde(default)]
+    pub content: Option<Value>,
+    #[serde(default, alias = "reasoning")]
+    pub reasoning_content: Option<String>,
+    /// 服务端给的展示文本（正文）。
+    #[serde(default)]
+    pub display_content: Option<String>,
+    /// 服务端给的展示文本（思考）。
+    #[serde(default)]
+    pub display_reasoning_content: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub tool_calls: Option<Value>,
+    #[serde(default)]
+    pub tool_call_id: Option<String>,
+}
+
+/// 回放出来的一行（不含任何 UI 类型，调用方自行映射成自己的行模型）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReplayRow {
+    User(String),
+    Thinking(String),
+    Assistant(String),
+    Tool { name: String, body: String },
+}
+
+impl ConversationMessagesResponse {
+    /// 响应 → 有序回放行。
+    ///
+    /// 规则（与 Desktop 的可视结果对齐，但**不做**时间线卡片/折叠分组）：
+    /// - `user`：跳过首轮工作区上下文注入条，其余照出；
+    /// - `system`：跳过（`crabmate_ui_sep` / `crabmate_timeline` 是 Web 专用卡片）；
+    /// - `assistant`：先思考后正文，两者皆空（只带 `tool_calls`）时不产行——工具结果
+    ///   行会紧跟其后单独出现，再造一张「调用卡」在终端里只是噪声；
+    /// - `tool`：`[工具] name` + 结果正文；
+    /// - 未知 `role`：跳过（宁可少显示，也不把不认识的东西当正文印出来）。
+    #[must_use]
+    pub fn replay_rows(&self) -> Vec<ReplayRow> {
+        let mut out = Vec::new();
+        for msg in &self.messages {
+            match msg.role.trim() {
+                "user" => {
+                    if msg.name.as_deref().map(str::trim) == Some(FIRST_TURN_WORKSPACE_CONTEXT_NAME)
+                    {
+                        continue;
+                    }
+                    let text = msg.display_text();
+                    if !text.is_empty() {
+                        out.push(ReplayRow::User(text));
+                    }
+                }
+                "assistant" => {
+                    let reasoning = msg.display_reasoning();
+                    if !reasoning.is_empty() {
+                        out.push(ReplayRow::Thinking(reasoning));
+                    }
+                    let text = msg.display_text();
+                    if !text.is_empty() {
+                        out.push(ReplayRow::Assistant(text));
+                    }
+                }
+                "tool" => out.push(ReplayRow::Tool {
+                    name: msg.tool_label(),
+                    body: msg.display_text(),
+                }),
+                _ => {}
+            }
+        }
+        out
+    }
+}
+
+impl ConversationMessage {
+    /// 正文展示文本：`display_content` 优先，其次从 `content` 归一。
+    #[must_use]
+    fn display_text(&self) -> String {
+        self.display_content
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| content_text(&self.content))
+    }
+
+    /// 思考展示文本：`display_reasoning_content` 优先，其次原始 `reasoning_content`。
+    #[must_use]
+    fn display_reasoning(&self) -> String {
+        self.display_reasoning_content
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .or_else(|| {
+                self.reasoning_content
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+            })
+            .map(str::to_string)
+            .unwrap_or_default()
+    }
+
+    /// 工具名：`name` → `tool_call_id` → 字面 `tool`。
+    #[must_use]
+    fn tool_label(&self) -> String {
+        self.name
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .or_else(|| {
+                self.tool_call_id
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+            })
+            .unwrap_or("tool")
+            .to_string()
+    }
+}
+
+/// `content` 归一：字符串原样；parts 数组取 `type=text` 拼接，图片附 `[图片]` 占位。
+///
+/// 终端画不出图片，但静默丢掉会让「用户发了图」这条消息看起来莫名其妙，
+/// 故保留一个可见占位。
+fn content_text(content: &Option<Value>) -> String {
+    match content {
+        Some(Value::String(s)) => s.trim().to_string(),
+        Some(Value::Array(parts)) => {
+            let mut text = String::new();
+            let mut images = 0usize;
+            for part in parts {
+                let Some(obj) = part.as_object() else {
+                    continue;
+                };
+                match obj.get("type").and_then(Value::as_str).unwrap_or("") {
+                    "text" => {
+                        if let Some(t) = obj.get("text").and_then(Value::as_str) {
+                            if !text.is_empty() {
+                                text.push('\n');
+                            }
+                            text.push_str(t);
+                        }
+                    }
+                    "image_url" => images += 1,
+                    _ => {}
+                }
+            }
+            for _ in 0..images {
+                if !text.is_empty() {
+                    text.push('\n');
+                }
+                text.push_str("[图片]");
+            }
+            text.trim().to_string()
+        }
+        _ => String::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn parse(v: Value) -> ConversationMessagesResponse {
+        serde_json::from_value(v).expect("response parses")
+    }
+
+    #[test]
+    fn replays_roles_in_order() {
+        let resp = parse(json!({
+            "conversation_id": "c1",
+            "revision": 7,
+            "total_count": 4,
+            "has_older": true,
+            "window_start_index": 0,
+            "messages": [
+                {"role": "user", "content": "看下这个文件"},
+                {"role": "assistant", "content": "", "reasoning_content": "先读文件",
+                 "display_content": "读完了"},
+                {"role": "tool", "name": "read_file", "content": "1|fn main() {}"},
+                {"role": "assistant", "content": "结论：没问题"}
+            ]
+        }));
+        assert_eq!(resp.revision, 7);
+        assert_eq!(resp.total_count, 4);
+        assert!(resp.has_older);
+        assert_eq!(
+            resp.replay_rows(),
+            vec![
+                ReplayRow::User("看下这个文件".into()),
+                ReplayRow::Thinking("先读文件".into()),
+                ReplayRow::Assistant("读完了".into()),
+                ReplayRow::Tool {
+                    name: "read_file".into(),
+                    body: "1|fn main() {}".into(),
+                },
+                ReplayRow::Assistant("结论：没问题".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn skips_workspace_context_injection() {
+        let resp = parse(json!({
+            "messages": [
+                {"role": "user", "name": FIRST_TURN_WORKSPACE_CONTEXT_NAME,
+                 "content": "<workspace dump>"},
+                {"role": "user", "content": "真正的问题"}
+            ]
+        }));
+        assert_eq!(
+            resp.replay_rows(),
+            vec![ReplayRow::User("真正的问题".into())],
+            "注入了工作区上下文的 user 消息不该显示成用户发言"
+        );
+    }
+
+    #[test]
+    fn skips_system_cards_and_unknown_roles() {
+        let resp = parse(json!({
+            "messages": [
+                {"role": "system", "name": "crabmate_ui_sep", "content": "---"},
+                {"role": "system", "name": "crabmate_timeline", "content": "{}"},
+                {"role": "developer", "content": "谁？"}
+            ]
+        }));
+        assert!(resp.replay_rows().is_empty());
+    }
+
+    #[test]
+    fn assistant_with_only_tool_calls_yields_no_row() {
+        let resp = parse(json!({
+            "messages": [{
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{"id": "t1", "function": {"name": "read_file"}}]
+            }]
+        }));
+        assert!(
+            resp.replay_rows().is_empty(),
+            "只有 tool_calls 的助手消息不该在终端再造一张调用卡"
+        );
+    }
+
+    #[test]
+    fn content_parts_join_text_and_mark_images() {
+        let resp = parse(json!({
+            "messages": [{
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "第一段"},
+                    {"type": "image_url", "image_url": {"url": "data:..."}},
+                    {"type": "text", "text": "第二段"}
+                ]
+            }]
+        }));
+        assert_eq!(
+            resp.replay_rows(),
+            vec![ReplayRow::User("第一段\n第二段\n[图片]".into())]
+        );
+    }
+
+    #[test]
+    fn display_content_wins_over_raw_content() {
+        let resp = parse(json!({
+            "messages": [{
+                "role": "assistant",
+                "content": "原始很长很长",
+                "display_content": "展示文本"
+            }]
+        }));
+        assert_eq!(
+            resp.replay_rows(),
+            vec![ReplayRow::Assistant("展示文本".into())]
+        );
+    }
+
+    #[test]
+    fn empty_response_replays_nothing() {
+        let resp = parse(json!({}));
+        assert!(resp.replay_rows().is_empty());
+        assert_eq!(resp.revision, 0);
+    }
+}
