@@ -11,6 +11,7 @@
 mod approve;
 mod body_memo;
 mod controls;
+mod exit_flush;
 mod history;
 mod layout;
 mod md;
@@ -870,7 +871,7 @@ pub async fn run_tui(
     }
     // 输入行只显示文本，用闪烁竖条光标提示输入位置。
     execute!(stdout, SetCursorStyle::BlinkingBar).context("set cursor style")?;
-    let _guard = ScreenGuard { mouse };
+    let guard = ScreenGuard { mouse };
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout)).context("init terminal")?;
     // 必须在启动键盘读取线程前清屏：`clear()` 会查询光标位置（DSR），
     // 需要 crossterm 的全局事件锁；而键盘线程已阻塞在 `event::read()` 持锁，
@@ -906,5 +907,13 @@ pub async fn run_tui(
     app.refresh_workspace(false);
     app.refresh_status();
     app.load_user_settings();
-    app.run_loop(&mut terminal)
+    let res = app.run_loop(&mut terminal);
+    // 退出落盘（有界 best-effort）：`st.running` 仍为真 = 回合中被强退，不再等它落定。
+    let force = app.st.running;
+    let warn = app.flush_before_exit(force).await;
+    drop(guard);
+    if let Some(warn) = warn {
+        eprintln!("{warn}");
+    }
+    res
 }

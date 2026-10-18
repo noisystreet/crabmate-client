@@ -286,6 +286,7 @@ impl TuiApp<'_> {
                     SessionIndexOp::BindServer { .. } => "会话未绑定到列表行",
                     SessionIndexOp::RemoveBlank { .. } => "空白会话未能回收",
                     SessionIndexOp::SetTitle { .. } => "会话标题未写入会话列表",
+                    SessionIndexOp::FlushExit { .. } => "退出前的会话落盘未完成",
                 };
                 // 绑定失败最常见的原因是那条空行已被别的端删掉：丢弃待绑定记录，
                 // 否则后续每轮都会重试同一个失败绑定，`/conv new` 还会一直走复用分支。
@@ -359,6 +360,8 @@ impl TuiApp<'_> {
             SessionIndexOp::RemoveBlank { .. } => {}
             // 起名同理：左栏刷新后自然显示新标题，不必额外打一行。
             SessionIndexOp::SetTitle { .. } => {}
+            // 退出落盘发生在退出路径上，屏幕上已经没有可看的地方，静默即可。
+            SessionIndexOp::FlushExit { .. } => {}
         }
         self.refresh_sessions();
     }
@@ -381,8 +384,8 @@ impl TuiApp<'_> {
         let _ = self.job_tx.send(WorkerJob::SessionIndex(op));
     }
 
-    /// 某个 `conversation_id` 在会话索引里的本地行 id。
-    fn row_id_for_conversation(&self, conversation_id: &str) -> Option<String> {
+    /// 某个 `conversation_id` 在会话索引里的本地行 id（切走回收与退出落盘都要查它）。
+    pub(super) fn row_id_for_conversation(&self, conversation_id: &str) -> Option<String> {
         self.st
             .sessions
             .iter()
