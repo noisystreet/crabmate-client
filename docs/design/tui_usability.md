@@ -22,7 +22,7 @@
 | G2 | 回合进行中 Enter 仅提示「回合进行中：Ctrl+C 可取消，完成后再发送」并保留输入（`mod.rs:277-281`） | 忙时排队下一句 + 排队 chip + 结束后自动发出（`composer_follow_up.rs`） | 用户意图被打断，长回合场景需干等或反复重试 |
 | G3 | composer 为全局单缓冲：切会话/新建只 `reset_transcript`（清行/搜索）并聚焦输入框，**不保存/不恢复各会话草稿**（`state.rs:380-389`、`mod.rs:176-204`） | 每次切会话 flush 当前草稿、回来恢复（`composer.rs`、`session_ops.rs::flush_active_composer_draft`） | 遗留草稿会“串”到下一个会话；切走再回来内容丢失 |
 | G4 | 无任何复制路径：未启用鼠标捕获、无剪贴板调用（`tui_mode` 全目录无 Mouse/Clipboard/OSC52） | 消息 copy + 代码块「复制」按钮（`md_code_copy.rs`、`tui_actions_bar.rs`） | 终端里想取走一段代码/回复只能手工选中或重打 |
-| G5 | 会话列表无 CRUD/过滤/导出：左栏仅 use/new/refresh（`mod.rs:454-466`）；repl `/conv list` 只读（`slash.rs:199-245`） | 排序 + 标题过滤 + 全文搜索 + 重命名/删除/导出（`session_rail.rs`、`session_list_modal.rs`） | 会话一多靠翻，无清理手段 |
+| G5 | 会话列表无 CRUD/过滤/导出：左栏仅 use/new/refresh（`mod.rs`）；repl `/conv list` 只读（`slash.rs:199-245`）。`/conv new` 已改为**写**服务端会话索引（`serve/sessions.rs`：`GET` → 复用或插入空白行 → 全量 `PUT`，首轮结束回填 `server_conversation_id`，切走回收空白行，首条消息按 Web 规则起名，语义对齐 Web 的 `prefer_or_create_empty_session` / `reclaim_disposable_blank_session` / `title_from_user_prompt`），左栏与 Web/Desktop 同步可见；仍无重命名/删除 UI | 排序 + 标题过滤 + 全文搜索 + 重命名/删除/导出（`session_rail.rs`、`session_list_modal.rs`） | 会话一多靠翻，无清理手段 |
 | G6 | 切换会话后 transcript 从空开始，**无历史回放**（矩阵 L53；`state.rs`「v1 无历史回放」） | 会话水合 + 顶部「加载更早」prepend（`session_hydrate.rs`、`tui_stream_view.rs`） | 续聊时看不到前文，须先切到别的壳回顾 |
 | G7 | 无 retry / regen / branch / 编辑用户消息 | 消息回合菜单（`message_row_actions.rs`、`user_message_edit.rs`） | 模型答错只能整轮重发或手动复制改写 |
 | G8 | 审批浮层命令预览截断（宽 78/高 8，`render.rs:550-562`） | 底部审批条可展开完整命令 + 失败保留重试（`approval_modal.rs`） | 长命令看不到全貌，易误判 |
