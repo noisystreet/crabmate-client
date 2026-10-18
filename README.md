@@ -130,6 +130,8 @@ No Rust toolchain? The same binary-only `.deb` is also attached to each `v*` Git
 
 Keybindings, layout, and the settings panel: [docs/design/remote_cli_tui.md](./docs/design/remote_cli_tui.md).
 
+The right-hand workspace tree is also mouse-driven: click a directory row to expand or collapse it, click a file row to select it (Enter still inserts its path), scroll the wheel over it to move the cursor once the tree has focus (over the transcript the wheel scrolls the chat), and click outside the tree to put focus back in the composer. Mouse capture is on by default; set `CM_TUI_MOUSE=off` to keep the terminal's native drag-select copy instead.
+
 ## Personal cloud (remote API-only)
 
 Expose only `api.…` → Caddy → loopback `serve` (no `--with-web`); the shell uses packaged UI against `https://api.…/` + Bearer. Steps: [`docs/design/personal_cloud_runbook.md`](docs/design/personal_cloud_runbook.md). VPS/systemd/Caddy: Server [`个人VPS部署指南.md`](https://github.com/noisystreet/CrabMate/blob/main/docs/个人VPS部署指南.md).

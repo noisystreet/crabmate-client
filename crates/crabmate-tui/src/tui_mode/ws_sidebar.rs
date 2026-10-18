@@ -4,6 +4,7 @@
 //! 拆出本模块以控制 `render.rs` 单文件行数（fn-nloc 门禁 ≤ 920）；数据侧见
 //! [`super::workspace_tree`]。
 
+use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
@@ -175,17 +176,41 @@ pub(super) fn sidebar_view<'a>(rows: &[Line<'a>], height: usize, selected: usize
     }
     let mut out = Vec::with_capacity(height);
     out.push(rows[0].clone());
+    let (start, end) = sidebar_window(rows.len(), height, selected);
+    out.extend(rows[start + 1..end + 1].iter().cloned());
+    out
+}
+
+/// 条目区（不含固定的标题行）的可见窗口 `[start, end)`。
+///
+/// 渲染裁剪与鼠标命中检测必须共用这一份：各算一遍就会在「列表够长且光标接近底部」时
+/// 悄悄错开一行，而症状是点到的行和反色高亮不同行，极难察觉。
+pub(super) fn sidebar_window(rows_len: usize, height: usize, selected: usize) -> (usize, usize) {
+    let items_len = rows_len.saturating_sub(1);
+    if height == 0 || items_len == 0 {
+        return (0, 0);
+    }
+    if rows_len <= height {
+        return (0, items_len);
+    }
     let item_max = height - 1;
-    let items_len = rows.len() - 1;
-    let sel = selected.min(items_len.saturating_sub(1));
+    let sel = selected.min(items_len - 1);
     let start = if sel < item_max {
         0
     } else {
         sel + 1 - item_max
     };
-    let end = (start + item_max).min(items_len);
-    out.extend(rows[start + 1..end + 1].iter().cloned());
-    out
+    (start, (start + item_max).min(items_len))
+}
+
+/// 侧栏列的内容区：去掉列内左留白 1 列与底部 1 行（按键提示）。
+/// 渲染与鼠标命中检测共用。
+pub(super) fn pane_list_area(area: Rect) -> Rect {
+    if area.width <= 1 || area.height == 0 {
+        return Rect::new(area.x, area.y, 0, 0);
+    }
+    let inner = Rect::new(area.x + 1, area.y, area.width - 1, area.height);
+    Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(inner)[0]
 }
 
 /// 项目池「选择/切换工作区」内容行：首行标题，其后为候选项目（加载中/未启用/错误占位）。
