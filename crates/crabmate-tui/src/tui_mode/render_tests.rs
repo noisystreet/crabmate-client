@@ -1,4 +1,6 @@
 use super::*;
+// 状态行函数已拆到兄弟模块（`render.rs` 行数门禁）；这里显式导入保持用例不变。
+use super::super::status::{SPINNER_FRAMES, status_text};
 use crate::serve::SessionListRow;
 
 #[test]
@@ -77,18 +79,220 @@ fn chat_body_width_matches_layout() {
     );
 }
 
+/// 分隔行判定：非空且只由 `─` 组成（允许左侧缩进空格）。
+fn is_rule(s: &str) -> bool {
+    let t = s.trim();
+    !t.is_empty() && t.chars().all(|c| c == '─')
+}
+
 #[test]
-fn thinking_and_answer_get_blank_separator() {
+fn thinking_and_answer_get_rule_separator() {
     let mut st = UiState::new();
     st.push_line(LineKind::User, "q");
     st.stream_delta(LineKind::Thinking, "想");
     st.stream_delta(LineKind::Assistant, "答");
     let rows = body_rows(&st, 80);
-    let blanks = rows
+    let rules: Vec<String> = rows
         .iter()
-        .filter(|r| r.line.to_string().is_empty())
-        .count();
-    assert_eq!(blanks, 2, "用户 / 思考 / 正文三块之间各一个空行");
+        .filter(|r| r.log_index.is_none())
+        .map(|r| r.line.to_string())
+        .collect();
+    assert_eq!(rules.len(), 2, "用户 / 思考 / 正文三块之间各一条分隔线");
+    assert!(
+        rules.iter().all(|s| is_rule(s)),
+        "块间分隔应为满宽细线而非空行: {rules:?}"
+    );
+}
+
+#[test]
+fn separator_rule_spans_full_width_in_border_color() {
+    let mut st = UiState::new();
+    st.set_palette(super::Palette::default());
+    st.push_line(LineKind::User, "q");
+    st.stream_delta(LineKind::Assistant, "a");
+    let rows = body_rows(&st, 40);
+    let sep = rows
+        .iter()
+        .find(|r| r.log_index.is_none())
+        .expect("应有块间分隔行");
+    let text = sep.line.to_string();
+    assert_eq!(text.chars().count(), 40, "分隔线应铺满正文宽度: {text:?}");
+    assert_eq!(
+        sep.line.spans[0].style.fg,
+        Some(super::Palette::default().border),
+        "分隔线应取 palette.border"
+    );
+}
+
+#[test]
+fn spinner_marks_share_static_mark_width() {
+    // 折叠行预算按「标记的显示列」算；若将来换成不同宽度的字符，
+    // 折叠行宽度会随帧抖动。这条锁住契约。
+    let base = UnicodeWidthStr::width("▸ ");
+    for mark in SPINNER_FRAMES {
+        assert_eq!(
+            UnicodeWidthStr::width(format!("{mark} ").as_str()),
+            base,
+            "{mark} 必须与 ▸ 同宽"
+        );
+    }
+    // 进行中工具行的进度位占位也必须是这个宽度：换帧才不挤动折行点。
+    assert_eq!(
+        UnicodeWidthStr::width(TOOL_PROGRESS_MARK),
+        base,
+        "进度位占位必须与折叠标记同宽"
+    );
+}
+
+#[test]
+fn folded_thinking_never_exceeds_content_width() {
+    // CJK 与 ASCII 都要覆盖：`truncate_display` 截断时可能比预算宽 1 列，
+    // 只有在首字符占 1 列（ASCII）时才会暴露「预算被抬高」的边界。
+    for text in ["内容很长很长的思考文字", "abcdefghijklmnop"] {
+        for cw in 0..40usize {
+            let out = fold_thinking(text, cw);
+            let w = UnicodeWidthStr::width(out.as_str());
+            assert!(w <= cw.max(1), "text={text:?} cw={cw} 超宽 {w}: {out:?}");
+        }
+    }
+}
+
+#[test]
+fn with_progress_mark_replaces_mark_and_keeps_width() {
+    let mut st = UiState::new();
+    st.push_line(LineKind::Thinking, "想");
+    let rows = body_rows(&st, 40);
+    let plain = rows[0].line.to_string();
+    let spinning = with_progress_mark(rows[0].line.clone(), 5).to_string();
+    assert!(plain.contains("▸ "), "静态标记: {plain:?}");
+    assert!(spinning.contains("⠴ "), "第 5 帧: {spinning:?}");
+    assert!(!spinning.contains('▸'), "静态标记应被替换: {spinning:?}");
+    assert_eq!(
+        UnicodeWidthStr::width(plain.as_str()),
+        UnicodeWidthStr::width(spinning.as_str()),
+        "替换不得改变行宽"
+    );
+}
+
+/// 渲染期替换只认内容 span 的 `▸ ` 前缀，正文里出现的 `▸` 不能被误伤。
+#[test]
+fn with_progress_mark_leaves_other_content_untouched() {
+    let line = Line::from(vec![Span::raw("[思考] "), Span::raw("正文里有 ▸ 符号")]);
+    assert_eq!(
+        with_progress_mark(line, 3).to_string(),
+        "[思考] 正文里有 ▸ 符号"
+    );
+}
+
+/// 极窄宽度下 `fold_thinking` 只留 `▸`（无空格）：此时不替换，避免超宽。
+#[test]
+fn with_progress_mark_degrades_when_mark_is_single_char() {
+    let line = Line::from(vec![Span::raw("[思考] "), Span::raw("▸")]);
+    let expected = line.to_string();
+    assert_eq!(
+        with_progress_mark(line, 4).to_string(),
+        expected,
+        "只留标记时不应替换"
+    );
+}
+
+/// 进行中的工具行：前缀带静态进度位，渲染期换成 spinner 帧后宽度不变。
+#[test]
+fn in_flight_tool_row_gets_progress_slot() {
+    let mut st = UiState::new();
+    st.push_line(LineKind::Tool, "exec — 运行中");
+    let rows = body_rows(&st, 60);
+    let plain = rows[0].line.to_string();
+    assert!(
+        plain.starts_with("[工具] ⠿ "),
+        "进行中应有进度位: {plain:?}"
+    );
+
+    let spinning = with_progress_mark(rows[0].line.clone(), 2).to_string();
+    assert!(spinning.starts_with("[工具] ⠹ "), "第 2 帧: {spinning:?}");
+    assert!(!spinning.contains('⠿'), "占位应被帧替换: {spinning:?}");
+    assert_eq!(
+        UnicodeWidthStr::width(plain.as_str()),
+        UnicodeWidthStr::width(spinning.as_str()),
+        "换帧不得改变行宽"
+    );
+}
+
+/// 结束的工具行不加进度位（文本自带 `✓/✗`），避免双重标记。
+#[test]
+fn finished_tool_row_has_no_progress_slot() {
+    let mut st = UiState::new();
+    st.push_line(LineKind::Tool, "exec ✓ — exit 0");
+    st.lines.last_mut().expect("刚 push 的行").tool_ok = Some(true);
+    let plain = body_rows(&st, 60)[0].line.to_string();
+    assert!(plain.starts_with("[工具] "), "结束行无进度位: {plain:?}");
+    assert!(!plain.contains('⠿'), "结束行不应有占位: {plain:?}");
+}
+
+#[test]
+fn progress_mark_frame_requires_live_folded_thinking() {
+    fn info(running: bool, cancel_sent: bool) -> StatusInfo {
+        StatusInfo {
+            api_base: "http://x".into(),
+            model: None,
+            role: None,
+            mode: None,
+            running,
+            cancel_sent,
+            spinner: 7,
+            view_offset: 0,
+            search_term: None,
+            search_total: 0,
+        }
+    }
+    let mut st = UiState::new();
+    st.push_line(LineKind::Thinking, "想");
+    assert_eq!(
+        progress_mark_frame(&st, &info(true, false)),
+        Some(7),
+        "生成中 + 折叠 + 末行"
+    );
+    assert_eq!(
+        progress_mark_frame(&st, &info(true, true)),
+        None,
+        "取消中不转"
+    );
+    assert_eq!(
+        progress_mark_frame(&st, &info(false, false)),
+        None,
+        "非生成中不转"
+    );
+
+    st.set_thinking_visible(true);
+    assert_eq!(
+        progress_mark_frame(&st, &info(true, false)),
+        None,
+        "展开态不转"
+    );
+
+    let mut ended = UiState::new();
+    ended.push_line(LineKind::Thinking, "想");
+    ended.push_line(LineKind::Assistant, "答");
+    assert_eq!(
+        progress_mark_frame(&ended, &info(true, false)),
+        None,
+        "末行非 thinking 后停转"
+    );
+
+    // 进行中的工具行同样驱动进度动画；一旦拿到 tool_ok 就停。
+    let mut tool = UiState::new();
+    tool.push_line(LineKind::Tool, "exec — 运行中");
+    assert_eq!(
+        progress_mark_frame(&tool, &info(true, false)),
+        Some(7),
+        "进行中工具行 + 末行"
+    );
+    tool.lines.last_mut().expect("刚 push 的行").tool_ok = Some(true);
+    assert_eq!(
+        progress_mark_frame(&tool, &info(true, false)),
+        None,
+        "工具结束即停转"
+    );
 }
 
 #[test]
@@ -101,11 +305,14 @@ fn tool_block_separated_from_text_but_compact_inside() {
     st.stream_delta(LineKind::Assistant, "结论");
     let rows = body_rows(&st, 80);
     let text: Vec<String> = rows.iter().map(|r| r.line.to_string()).collect();
-    assert_eq!(text.len(), 6, "4 条内容行 + 2 个块间空行: {text:?}");
-    assert!(text[1].is_empty(), "正文与工具块之间应空行: {text:?}");
+    assert_eq!(text.len(), 6, "4 条内容行 + 2 条分隔线: {text:?}");
+    assert!(is_rule(&text[1]), "正文与工具块之间应有分隔线: {text:?}");
     assert!(text[2].contains("read file: a.rs"), "工具结束行: {text:?}");
-    assert!(text[3].contains("grep"), "连续工具行之间不插空行: {text:?}");
-    assert!(text[4].is_empty(), "工具块与正文块之间应空行: {text:?}");
+    assert!(
+        text[3].contains("grep"),
+        "连续工具行之间不插分隔线: {text:?}"
+    );
+    assert!(is_rule(&text[4]), "工具块与正文块之间应有分隔线: {text:?}");
 }
 
 #[test]
@@ -148,6 +355,7 @@ fn status_line_lists_overrides() {
         mode: Some("plan".into()),
         running: false,
         cancel_sent: false,
+        spinner: 0,
         view_offset: 0,
         search_term: None,
         search_total: 0,
@@ -170,6 +378,7 @@ fn status_running_indicator_right_aligned() {
         mode: None,
         running: false,
         cancel_sent: false,
+        spinner: 0,
         view_offset: 0,
         search_term: None,
         search_total: 0,
@@ -186,7 +395,7 @@ fn status_running_indicator_right_aligned() {
         ..base.clone()
     };
     assert!(
-        status_text(&generating, None, 40).ends_with("● 生成中"),
+        status_text(&generating, None, 40).ends_with("⠋ 生成中"),
         "生成中指示贴右缘"
     );
     let cancelling = StatusInfo {
@@ -194,7 +403,42 @@ fn status_running_indicator_right_aligned() {
         cancel_sent: true,
         ..base.clone()
     };
-    assert!(status_text(&cancelling, None, 40).ends_with("… 取消中"));
+    assert!(status_text(&cancelling, None, 40).ends_with("✳ 取消中"));
+}
+
+#[test]
+fn spinner_advances_per_frame_and_wraps() {
+    let base = StatusInfo {
+        api_base: "http://x".into(),
+        model: None,
+        role: None,
+        mode: None,
+        running: true,
+        cancel_sent: false,
+        spinner: 0,
+        view_offset: 0,
+        search_term: None,
+        search_total: 0,
+    };
+    assert!(status_text(&base, None, 40).ends_with("⠋ 生成中"));
+    let f1 = StatusInfo {
+        spinner: 1,
+        ..base.clone()
+    };
+    assert!(status_text(&f1, None, 40).ends_with("⠙ 生成中"), "第二帧");
+    // 10 帧一圈：帧号 10 回到首帧，任意 usize 都不会越界。
+    let wrap = StatusInfo {
+        spinner: 10,
+        ..base.clone()
+    };
+    assert!(status_text(&wrap, None, 40).ends_with("⠋ 生成中"), "回绕");
+    // 取消中不显 spinner（静态 ✳），帧号变化也不影响。
+    let cancelling = StatusInfo {
+        cancel_sent: true,
+        spinner: 7,
+        ..base
+    };
+    assert!(status_text(&cancelling, None, 40).ends_with("✳ 取消中"));
 }
 
 #[test]
@@ -206,12 +450,13 @@ fn status_indicator_kept_on_narrow_bar() {
         mode: None,
         running: true,
         cancel_sent: false,
+        spinner: 0,
         view_offset: 0,
         search_term: None,
         search_total: 0,
     };
     let s = status_text(&base, None, 16);
-    assert!(s.ends_with("● 生成中"), "窄条也保留右缘指示");
+    assert!(s.ends_with("⠋ 生成中"), "窄条也保留右缘指示");
     assert!(
         UnicodeWidthStr::width(s.as_str()) <= 16 + 16,
         "不爆炸性超出"
@@ -227,6 +472,7 @@ fn status_uses_serve_defaults_when_no_override() {
         mode: None,
         running: false,
         cancel_sent: false,
+        spinner: 0,
         view_offset: 0,
         search_term: None,
         search_total: 0,
@@ -245,6 +491,7 @@ fn status_shows_search_and_view_back() {
         mode: None,
         running: false,
         cancel_sent: false,
+        spinner: 0,
         view_offset: 12,
         search_term: Some("grep".into()),
         search_total: 2,
@@ -327,15 +574,15 @@ fn composer_window_multiline_follows_cursor_line() {
 }
 
 #[test]
-fn adjacent_message_bubbles_get_blank_separator() {
+fn adjacent_message_bubbles_get_rule_separator() {
     let mut st = UiState::new();
     st.push_line(LineKind::User, "q");
     st.stream_delta(LineKind::Assistant, "a");
     let rows = body_rows(&st, 80);
     let separated = rows
         .windows(2)
-        .any(|w| w[0].line.to_string().contains('q') && w[1].line.to_string().is_empty());
-    assert!(separated, "用户块与助手块之间应有一个空行");
+        .any(|w| w[0].line.to_string().contains('q') && is_rule(&w[1].line.to_string()));
+    assert!(separated, "用户块与助手块之间应有一条分隔线");
 }
 
 #[test]

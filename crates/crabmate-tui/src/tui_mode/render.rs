@@ -11,7 +11,8 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 use super::md;
 use super::palette::Palette;
 use super::settings_panel::PanelContent;
-use super::state::{Focus, LineKind, UiState};
+use super::state::{Focus, LineKind, LogLine, UiState};
+use super::status::{SPINNER_FRAMES, status_text};
 use super::ws_sidebar::{sessions_content, sidebar_view, workspace_content};
 
 /// 低于此宽度隐藏左右栏（等价 repl 布局）。
@@ -49,6 +50,8 @@ pub struct StatusInfo {
     pub mode: Option<String>,
     pub running: bool,
     pub cancel_sent: bool,
+    /// 生成中 spinner 帧号（事件循环按时间推进；空闲 / 取消中不显示）。
+    pub spinner: usize,
     /// transcript 回看行数（>0 时显示 ↑N）。
     pub view_offset: usize,
     /// 活跃搜索词（/find）。
@@ -75,16 +78,29 @@ impl BodyRow {
         }
     }
 
-    /// 块间分隔行：空行，不归属任何逻辑行（搜索锚点据此跳过）。
-    fn separator() -> Self {
+    /// 块间分隔行：极暗的满宽细线，不归属任何逻辑行（搜索锚点据此跳过）。
+    /// `indent` 取上一条逻辑行的前缀宽度，让线与上方块内容左对齐；
+    /// `width` 小于 `indent` 或极窄时 `rule` 退化为 0，此时等同空行，不会 panic。
+    fn separator(width: usize, indent: usize, pal: &Palette) -> Self {
+        let indent = indent.min(width);
+        let rule = width.saturating_sub(indent);
+        let mut text = String::with_capacity(width);
+        text.push_str(&" ".repeat(indent));
+        text.push_str(&"─".repeat(rule));
+        // 无色模式没有可靠的“极暗”色，退回 DIM；`─` 本身已能表达分隔。
+        let style = if pal.mono {
+            Style::new().add_modifier(Modifier::DIM)
+        } else {
+            Style::new().fg(pal.border)
+        };
         Self {
             log_index: None,
-            line: Line::from(""),
+            line: Line::from(Span::styled(text, style)),
         }
     }
 }
 
-/// 消息前缀（宽 4–5 列；宽度参与折行计算，故与样式分开）。
+/// 消息前缀（宽 4–7 列；宽度参与折行计算，故与样式分开）。
 fn kind_prefix(kind: LineKind) -> &'static str {
     match kind {
         LineKind::User => "[你] ",
@@ -95,6 +111,21 @@ fn kind_prefix(kind: LineKind) -> &'static str {
     }
 }
 
+/// 进行中工具行的进度位占位（`⠿` 与 spinner 帧同为 1 列宽，换帧不改折行点）。
+const TOOL_PROGRESS_MARK: &str = "⠿ ";
+
+/// 进行中工具行的完整前缀：`[工具] ` + 进度位（即 [`TOOL_PROGRESS_MARK`]）。
+/// 结束行不加进度位——它的文本自带 `✓ / ✗`，不重复。
+const TOOL_PREFIX_PROGRESS: &str = "[工具] ⠿ ";
+
+/// 逻辑行前缀：进行中的工具行多一个进度位。
+/// 进度位是**静态**占位，动画由渲染层换字符，因此不进入 body memo。
+fn prefix_for(log: &LogLine) -> &'static str {
+    match (log.kind, log.tool_ok) {
+        (LineKind::Tool, None) => TOOL_PREFIX_PROGRESS,
+        _ => kind_prefix(log.kind),
+    }
+}
 /// 前缀样式：一律 muted + DIM，把亮度让给正文；系统告警要抢眼，保持 err + BOLD。
 fn prefix_style(kind: LineKind, pal: &Palette) -> Style {
     if kind == LineKind::System {
@@ -115,17 +146,65 @@ fn kind_style(kind: LineKind, pal: &Palette) -> Style {
 }
 
 /// thinking 折叠行的单行预览：`▸` 标记 + 首行截断 + `…`（占位不超 content_width）。
+///
+/// 只产出**静态** `▸`：生成中的动画由渲染层 [`with_progress_mark`] 替换标记，
+/// 这样 body memo 不会因为换帧而失效（否则停顿期每 120ms 就要全量重建一次）。
 fn fold_thinking(text: &str, content_width: usize) -> String {
     const MARK: &str = "▸ ";
-    if content_width <= MARK.len() {
+    // 按显示列算预算，不用字节数：`▸` 是 3 字节但只有 2 列。
+    let mark_w = UnicodeWidthStr::width(MARK);
+    // 放不下「标记 + 至少 1 列正文 + 省略号」时只留标记，避免渲染出超宽行。
+    // 阈值必须是 mark_w + 2：`truncate_display` 会自行补一个 `…`，可能比预算
+    // 宽 1 列，若在这里放行，正文预算会被抬高到 1 列从而溢出 1 列。
+    let body_budget = content_width.saturating_sub(mark_w + 2);
+    if body_budget == 0 {
         return MARK.trim_end().to_string();
     }
     let head = text.lines().next().unwrap_or("").trim();
-    let budget = content_width.saturating_sub(MARK.len() + 1).max(1);
-    let shown = truncate_display(head, budget);
+    // 上面已预留省略号那一列，故 MARK + shown + `…` 恒 ≤ content_width。
+    let shown = truncate_display(head, body_budget);
     format!("{MARK}{shown}…")
 }
 
+/// 末行「活跃进度」的 spinner 帧：仅在「生成中 + 未取消 + 末行是折叠 Thinking
+/// 或进行中的工具行」时给出。展开态（Ctrl+E）正文本身在变，不叠加动画。
+fn progress_mark_frame(st: &UiState, info: &StatusInfo) -> Option<usize> {
+    let live = st.lines.last().is_some_and(|l| match l.kind {
+        LineKind::Thinking => l.collapsed,
+        LineKind::Tool => l.tool_ok.is_none(),
+        _ => false,
+    });
+    (info.running && !info.cancel_sent && live).then_some(info.spinner)
+}
+
+/// 把末行的静态进度标记换成 spinner 帧字符（保留原 span 样式）。
+///
+/// 两种落点：
+/// - 折叠思考行：标记在**内容** span 开头（`▸ `），故只动 `spans[1]`，避免误改
+///   正文里恰好出现的 `▸`；极窄宽度下 [`fold_thinking`] 只输出单个 `▸`（无空格），
+///   此时 `strip_prefix` 不命中，自然保留标记而不是渲染出超宽行。
+/// - 进行中工具行：进度位在**消息前缀**末尾（`[工具] ⠿ `），故只处理有成对
+///   `(前缀, 内容)` span 的第一物理行，不会碰到正文。
+///
+/// 两种标记都是「1 列字形 + 空格」，与 spinner 帧等宽，换帧不改变行宽。
+fn with_progress_mark(line: Line<'static>, frame: usize) -> Line<'static> {
+    const THINK_MARK: &str = "▸ ";
+    let glyph = SPINNER_FRAMES[frame % SPINNER_FRAMES.len()];
+    let mut spans: Vec<Span<'static>> = line.spans;
+    if let Some(span) = spans.get_mut(1)
+        && let Some(rest) = span.content.as_ref().strip_prefix(THINK_MARK)
+    {
+        *span = Span::styled(format!("{glyph} {rest}"), span.style);
+        return Line::from(spans);
+    }
+    if spans.len() >= 2
+        && let Some(span) = spans.first_mut()
+        && let Some(head) = span.content.as_ref().strip_suffix(TOOL_PROGRESS_MARK)
+    {
+        *span = Span::styled(format!("{head}{glyph} "), span.style);
+    }
+    Line::from(spans)
+}
 /// 单条逻辑行的渲染上下文（前缀/基色/宽度/搜索态/配色），把 10 来个参数收成一个
 /// 结构体：`plain` / `assistant` 两条渲染路径共用，也避免超长参数表。
 struct RowCtx<'a> {
@@ -144,22 +223,26 @@ struct RowCtx<'a> {
 
 /// 把 transcript 转成可渲染的物理行（含搜索高亮标记）；逻辑行首带前缀，
 /// 仅作用于其第一物理行。thinking 折叠时只出一行预览。
-/// 供事件循环做帧间 memo（内容/宽度/搜索/主题未变时复用），渲染层拿结果直接裁剪。
+/// 供事件循环做帧间 memo（内容/宽度/搜索/主题未变时复用），
+/// 渲染层拿结果直接裁剪；生成中的 spinner 标记由渲染层替换，不进 memo。
 pub(crate) fn build_body_rows(st: &UiState, width: usize) -> Vec<BodyRow> {
     let needle = st.search_term();
     let target = st.search_cursor;
     let pal = &st.palette;
     let mut out: Vec<BodyRow> = Vec::new();
-    // 块间空行：相邻两条日志行 kind 不同即为块边界（用户 / 思考 / 正文 / 工具 /
-    // 系统各自成块），对齐 Desktop `.chat-tui-transcript` 的块间距观感；同类相邻
+    // 块间分隔：相邻两条日志行 kind 不同即为块边界（用户 / 思考 / 正文 / 工具 /
+    // 系统各自成块），画一条极暗满宽细线代替空行——间距不变，但块边界更清晰
+    // （对齐 Desktop `.chat-tui-transcript` 的块间距观感）；同类相邻
     // （如连续工具行）保持紧凑，对应 desktop 的 tool-process 块内多行。
-    let mut prev_kind: Option<LineKind> = None;
+    // 上一条逻辑行的 (类别, 前缀宽度)：分隔线缩进取上一条逻辑行的前缀宽度，
+    // 因此要存宽度而不只是类别——进行中的工具行前缀比结束行宽 2 列。
+    let mut prev: Option<(LineKind, usize)> = None;
     for (idx, log) in st.lines.iter().enumerate() {
-        let prefix = kind_prefix(log.kind);
+        let prefix = prefix_for(log);
         let content_width = width.saturating_sub(prefix.chars().count());
         let matched = needle.is_some_and(|n| log.text.to_lowercase().contains(n));
-        if prev_kind.is_some_and(|k| k != log.kind) {
-            out.push(BodyRow::separator());
+        if let Some((_, prev_indent)) = prev.filter(|(k, _)| *k != log.kind) {
+            out.push(BodyRow::separator(width, prev_indent, pal));
         }
         let text = if log.kind == LineKind::Thinking && log.collapsed {
             fold_thinking(&log.text, content_width)
@@ -184,7 +267,7 @@ pub(crate) fn build_body_rows(st: &UiState, width: usize) -> Vec<BodyRow> {
         } else {
             out.extend(plain_body_rows(&cx));
         }
-        prev_kind = Some(log.kind);
+        prev = Some((log.kind, prefix.chars().count()));
     }
     out
 }
@@ -306,66 +389,6 @@ fn top_text(st: &UiState, width: usize) -> String {
     truncate_display(&name, width)
 }
 
-/// 状态行左侧内容：serve / model / role / mode / conv 与搜索、回看标记
-/// （不含运行态——运行态在整行右缘右对齐，仿 Desktop 状态栏）。
-fn status_left_text(info: &StatusInfo, conv: Option<&str>) -> String {
-    let mut parts: Vec<String> = Vec::new();
-    parts.push(format!("serve {}", info.api_base));
-    if let Some(m) = info.model.as_deref() {
-        parts.push(format!("model {m}"));
-    }
-    if let Some(r) = info.role.as_deref() {
-        parts.push(format!("role {r}"));
-    }
-    if let Some(mode) = info.mode.as_deref() {
-        parts.push(format!("mode {mode}"));
-    }
-    parts.push(match conv {
-        Some(c) => format!("conv {c}"),
-        None => "conv (new)".to_string(),
-    });
-    if let Some(term) = info.search_term.as_deref() {
-        if info.search_total == 0 {
-            parts.push(format!("find 「{term}」 无匹配"));
-        } else {
-            parts.push(format!("find 「{term}」 {}处", info.search_total));
-        }
-    }
-    if info.view_offset > 0 {
-        parts.push(format!("↑{}", info.view_offset));
-    }
-    parts.join(" | ")
-}
-
-/// 状态行右侧运行态指示（空闲 / 生成中 / 取消中）。
-fn status_running_text(info: &StatusInfo) -> &'static str {
-    match (info.running, info.cancel_sent) {
-        (true, true) => "… 取消中",
-        (true, false) => "● 生成中",
-        (false, _) => "○ 空闲",
-    }
-}
-
-/// 把 `right` 显示列宽感知地对齐到整行右缘（`left` 先截断，避免挤压右缘指示）。
-fn pad_right(left: &str, right: &str, width: usize) -> String {
-    if width == 0 {
-        return String::new();
-    }
-    let right_w = UnicodeWidthStr::width(right);
-    let cut = truncate_display(left, width.saturating_sub(right_w));
-    let pad = width.saturating_sub(UnicodeWidthStr::width(cut.as_str()) + right_w);
-    format!("{cut}{}{right}", " ".repeat(pad))
-}
-
-/// 状态行内容（单行）：左侧上下文 + 右对齐的空闲/生成中指示（仿 Desktop）。
-fn status_text(info: &StatusInfo, conv: Option<&str>, width: usize) -> String {
-    pad_right(
-        &status_left_text(info, conv),
-        status_running_text(info),
-        width,
-    )
-}
-
 /// 左栏内容行：首行标题，其后每会话一行（`>` 当前，`*` serve 活跃，选中高亮）。
 pub(super) fn sidebar_rows(st: &UiState, width: usize) -> Vec<Line<'static>> {
     let mut rows: Vec<Line<'static>> = Vec::new();
@@ -435,6 +458,7 @@ pub fn draw(
     let body_area = chunks[1];
     let status_area = chunks[2];
 
+    let spin = progress_mark_frame(st, info);
     let pal = &st.palette;
     paint_bg(frame, top_area, pal.chrome_bg);
     // 顶栏工作区名称居中（对齐 Desktop 标题栏观感）。
@@ -456,9 +480,9 @@ pub fn draw(
         let (rows, cursor, hint) = workspace_content(st, cols[2].width.saturating_sub(2) as usize);
         paint_bg(frame, cols[2], pal.chrome_bg);
         render_pane(frame, cols[2], rows, cursor, hint, pal);
-        render_chat_column(frame, st, cols[1], prepared, panel.is_none());
+        render_chat_column(frame, st, cols[1], prepared, panel.is_none(), spin);
     } else {
-        render_chat_column(frame, st, body_area, prepared, panel.is_none());
+        render_chat_column(frame, st, body_area, prepared, panel.is_none(), spin);
     }
 
     paint_bg(frame, status_area, pal.chrome_bg);
@@ -483,6 +507,7 @@ fn render_chat_column(
     area: Rect,
     prepared: &[BodyRow],
     cursor_allowed: bool,
+    spin: Option<usize>,
 ) {
     // composer 含上下边框；至少给聊天区留 1 行，极小终端下不把 transcript 挤没。
     let rows = composer_outer_rows(st)
@@ -490,7 +515,7 @@ fn render_chat_column(
         .max(1);
     let parts = Layout::vertical([Constraint::Min(1), Constraint::Length(rows)]).split(area);
     let body_area = parts[0];
-    render_body(frame, st, body_area, prepared);
+    render_body(frame, st, body_area, prepared, spin);
     if st.approval.is_some() {
         render_approval_overlay(frame, st, body_area);
     }
@@ -554,7 +579,13 @@ fn render_pane(
 /// 空 transcript 时的快捷键引导。
 const BODY_EMPTY_HINT: &str = "输入消息开始对话 · Alt+Enter 换行 · Ctrl+E 思考 · Ctrl+W 工作区树 · PgUp/PgDn 滚动 · /find 搜索 · Ctrl+C 退出 · /help";
 
-fn render_body(frame: &mut Frame, st: &UiState, area: Rect, prepared: &[BodyRow]) {
+fn render_body(
+    frame: &mut Frame,
+    st: &UiState,
+    area: Rect,
+    prepared: &[BodyRow],
+    spin: Option<usize>,
+) {
     paint_bg(frame, area, st.palette.bg);
     if area.width <= 1 || area.height == 0 {
         return;
@@ -594,9 +625,18 @@ fn render_body(frame: &mut Frame, st: &UiState, area: Rect, prepared: &[BodyRow]
     let back = back.min(max_back);
     let end = rows_total.saturating_sub(back);
     let start = end.saturating_sub(viewport);
+    // 折叠思考行的 spinner 在此替换标记：body memo 不含帧号，故不会触发重建。
+    // 只命中最后一条逻辑行（`prepared` 里可能有多条历史折叠行）。
+    let spin_target = spin.map(|_| st.lines.len().saturating_sub(1));
     let shown = rows[start..end.min(rows_total)]
         .iter()
-        .map(|r| r.line.clone())
+        .map(|r| {
+            let line = r.line.clone();
+            match (spin, spin_target) {
+                (Some(f), Some(idx)) if r.log_index == Some(idx) => with_progress_mark(line, f),
+                _ => line,
+            }
+        })
         .collect::<Vec<_>>();
     frame.render_widget(Paragraph::new(shown), text_area);
 }

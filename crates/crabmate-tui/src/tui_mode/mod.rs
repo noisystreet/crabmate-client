@@ -9,6 +9,7 @@
 //! `ctrl_c` 信号路径。
 
 mod approve;
+mod body_memo;
 mod controls;
 mod md;
 mod palette;
@@ -16,7 +17,9 @@ mod render;
 mod serve_defaults;
 mod settings;
 mod settings_panel;
+mod spinner;
 mod state;
+mod status;
 mod tool_summary;
 mod worker;
 mod workspace_tree;
@@ -44,7 +47,7 @@ use crate::serve::{
 
 use self::approve::{decision_for_key, decision_summary};
 use self::controls::{Control, clear_word, parse_control, set_mode_field, set_override_field};
-use self::render::{BodyRow, SIDEBAR_MIN_WIDTH, StatusInfo, build_body_rows, chat_body_width};
+use self::render::{BodyRow, SIDEBAR_MIN_WIDTH, StatusInfo, build_body_rows};
 use self::settings::{
     PersistedSettings, build_turn_client_llm, merge_turn, normalize, turn_temperature,
     turn_tool_cache_secs,
@@ -54,25 +57,6 @@ use self::worker::{TurnRequest, UiEvent, WorkerJob, spawn_key_reader, spawn_work
 use super::SessionPrefs;
 use state::{Focus, LineKind, UiState};
 
-/// body 物理行 memo 的失效键：内容代数（`content_rev`）+ 宽度 + 搜索词/锚点。
-/// `view_offset`/焦点/审批等"draw 期"因素不在此列（窗口裁剪每帧实时做）。
-#[derive(PartialEq, Debug)]
-struct BodyMemoKey {
-    width: usize,
-    rev: u64,
-    needle: Option<String>,
-    cursor: Option<usize>,
-}
-
-fn body_memo_key(st: &UiState, terminal_width: u16) -> BodyMemoKey {
-    BodyMemoKey {
-        width: chat_body_width(st.sidebar_visible, terminal_width),
-        rev: st.content_rev,
-        needle: st.search_term().map(str::to_string),
-        cursor: st.search_cursor,
-    }
-}
-
 /// 全屏会话的共享 UI 状态与依赖。
 struct TuiApp<'a> {
     client: &'a ServeClient,
@@ -81,6 +65,8 @@ struct TuiApp<'a> {
     /// `--no-keyring`：设置面板里 API 密钥行禁写（也不参与 key_set 判定）。
     no_keyring: bool,
     st: UiState,
+    /// 生成中 spinner 帧（按墙钟推进；见 `spinner` 模块）。
+    spinner: spinner::Spinner,
     rx: Receiver<UiEvent>,
     job_tx: Sender<WorkerJob>,
     cancel: Option<StreamCancel>,
@@ -89,7 +75,7 @@ struct TuiApp<'a> {
     quit_pending: bool,
     /// 帧间 memo：内容/宽度/搜索未变时复用，避免每帧全量 tokenize+wrap。
     prepared: Vec<BodyRow>,
-    body_key: Option<BodyMemoKey>,
+    body_key: Option<body_memo::BodyMemoKey>,
     /// 设置面板（`/settings` / F2 打开；`None` = 关闭）。
     panel: Option<SettingsPanel>,
     /// serve user-data 设置快照（启动拉取 / 保存成功后更新；随轮与状态行合成用）。
@@ -99,7 +85,7 @@ struct TuiApp<'a> {
 impl TuiApp<'_> {
     /// 计算当前帧的 body 行：memo 命中直接复用；否则重建。
     fn prepare_body(&mut self, terminal_width: u16) {
-        let key = body_memo_key(&self.st, terminal_width);
+        let key = body_memo::key(&self.st, terminal_width);
         if self.body_key.as_ref() != Some(&key) {
             self.prepared = build_body_rows(&self.st, key.width);
             self.body_key = Some(key);
@@ -781,6 +767,7 @@ impl TuiApp<'_> {
             ),
             running: self.st.running,
             cancel_sent: self.st.cancel_sent,
+            spinner: self.spinner.frame(),
             view_offset: self.st.view_offset,
             search_term: self.st.search_term().map(str::to_string),
             search_total: self.st.search_total,
@@ -811,6 +798,8 @@ impl TuiApp<'_> {
                     return Ok(());
                 }
             }
+            self.spinner
+                .advance(self.st.running && !self.st.cancel_sent);
             let info = self.status_info();
             // 内容/宽度/搜索未变时复用已构建的 body 物理行，避免每帧全量 tokenize+wrap。
             self.prepare_body(size.width);
@@ -863,6 +852,7 @@ pub async fn run_tui(
         yes,
         no_keyring,
         st: UiState::new(),
+        spinner: spinner::Spinner::new(),
         rx,
         job_tx,
         cancel: None,
@@ -880,33 +870,4 @@ pub async fn run_tui(
     app.refresh_status();
     app.load_user_settings();
     app.run_loop(&mut terminal)
-}
-
-#[cfg(test)]
-mod memo_tests {
-    use super::*;
-    use state::LineKind;
-
-    #[test]
-    fn memo_key_changes_on_render_inputs() {
-        let mut s = UiState::new();
-        let k0 = body_memo_key(&s, 120);
-        s.push_line(LineKind::User, "a");
-        assert_ne!(body_memo_key(&s, 120), k0, "新增行应失效");
-        let k1 = body_memo_key(&s, 120);
-        s.stream_delta(LineKind::Assistant, "b");
-        assert_ne!(body_memo_key(&s, 120), k1, "流式追加应失效");
-        let k2 = body_memo_key(&s, 120);
-        s.start_search("b");
-        assert_ne!(body_memo_key(&s, 120), k2, "搜索词/锚点应失效");
-        let k3 = body_memo_key(&s, 120);
-        s.toggle_thinking();
-        assert_ne!(body_memo_key(&s, 120), k3, "折叠切换应失效");
-        // draw 期因素（滚动）不应失效
-        let k4 = body_memo_key(&s, 120);
-        s.view_offset = 5;
-        assert_eq!(body_memo_key(&s, 120), k4, "滚动不应失效");
-        // 宽度变化应失效
-        assert_ne!(body_memo_key(&s, 120), body_memo_key(&s, 121), "宽度应失效");
-    }
 }
