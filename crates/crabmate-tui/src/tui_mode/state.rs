@@ -264,6 +264,12 @@ impl UiState {
         s
     }
 
+    /// 输入框当前全文（不动光标、不清空）：退出前把草稿写回会话行用。
+    #[must_use]
+    pub fn input_snapshot(&self) -> String {
+        self.input.iter().collect()
+    }
+
     pub fn insert_char(&mut self, c: char) {
         if self.cursor >= self.input.len() {
             self.input.push(c);
