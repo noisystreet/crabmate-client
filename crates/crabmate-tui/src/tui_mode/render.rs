@@ -63,10 +63,31 @@ pub struct StatusInfo {
     pub search_total: usize,
 }
 
-/// 一条可渲染的 transcript 物理行（附所属逻辑行下标，供搜索锚点定位）。
+/// 一条可渲染的 transcript 物理行。
 pub struct BodyRow {
-    pub log_index: usize,
+    /// 所属逻辑行下标（供搜索锚点定位）；块间分隔行不属于任何逻辑行，为 `None`。
+    /// 用 `Option` 而非哨兵下标，是为了让"分隔行不该被锚点命中"成为类型级事实——
+    /// 锚点查找按 `Some(target)` 匹配，无需依赖“首匹配/末匹配”之类的取行顺序。
+    pub log_index: Option<usize>,
     pub line: Line<'static>,
+}
+
+impl BodyRow {
+    /// 内容行：逻辑行 `idx` 的一个物理行。
+    fn content(idx: usize, line: Line<'static>) -> Self {
+        Self {
+            log_index: Some(idx),
+            line,
+        }
+    }
+
+    /// 块间分隔行：空行，不归属任何逻辑行（搜索锚点据此跳过）。
+    fn separator() -> Self {
+        Self {
+            log_index: None,
+            line: Line::from(""),
+        }
+    }
 }
 
 fn kind_style(kind: LineKind) -> (String, Style) {
@@ -107,21 +128,18 @@ pub(crate) fn build_body_rows(st: &UiState, width: usize) -> Vec<BodyRow> {
     let needle = st.search_term();
     let target = st.search_cursor;
     let mut out: Vec<BodyRow> = Vec::new();
-    // 相邻的两个消息气泡（用户/助手块）之间插入一个空行；中间夹 thinking/工具/
-    // 系统行时属于同回合，不打断（只比较相邻日志行，避免在思考/工具与正文间空行）。
-    let mut prev_bubble = false;
+    // 块间空行：相邻两条日志行 kind 不同即为块边界（用户 / 思考 / 正文 / 工具 /
+    // 系统各自成块），对齐 Desktop `.chat-tui-transcript` 的块间距观感；同类相邻
+    // （如连续工具行）保持紧凑，对应 desktop 的 tool-process 块内多行。
+    let mut prev_kind: Option<LineKind> = None;
     for (idx, log) in st.lines.iter().enumerate() {
         let (prefix, style) = kind_style(log.kind);
         let prefix_w = prefix.chars().count();
         let content_width = width.saturating_sub(prefix_w);
         let matched = needle.is_some_and(|n| log.text.to_lowercase().contains(n));
         let anchor_log = matched && target == Some(idx);
-        let is_bubble = matches!(log.kind, LineKind::User | LineKind::Assistant);
-        if is_bubble && prev_bubble {
-            out.push(BodyRow {
-                log_index: idx,
-                line: Line::from(""),
-            });
+        if prev_kind.is_some_and(|k| k != log.kind) {
+            out.push(BodyRow::separator());
         }
         let text = if log.kind == LineKind::Thinking && log.collapsed {
             fold_thinking(&log.text, content_width)
@@ -149,7 +167,7 @@ pub(crate) fn build_body_rows(st: &UiState, width: usize) -> Vec<BodyRow> {
                 anchor_log,
             ));
         }
-        prev_bubble = is_bubble;
+        prev_kind = Some(log.kind);
     }
     out
 }
@@ -182,10 +200,7 @@ fn plain_body_rows(
             spans.push(Span::styled(prefix.to_string(), row_style));
         }
         spans.push(Span::styled(phys, row_style));
-        rows.push(BodyRow {
-            log_index: idx,
-            line: Line::from(spans),
-        });
+        rows.push(BodyRow::content(idx, Line::from(spans)));
         first = false;
     }
     rows
@@ -220,10 +235,7 @@ fn assistant_body_rows(
             matched,
             anchor_log && is_first,
         ));
-        rows.push(BodyRow {
-            log_index: idx,
-            line: Line::from(spans),
-        });
+        rows.push(BodyRow::content(idx, Line::from(spans)));
     }
     rows
 }
@@ -525,7 +537,7 @@ fn render_body(frame: &mut Frame, st: &UiState, area: Rect, prepared: &[BodyRow]
     let max_back = rows_total.saturating_sub(viewport);
     let back = if let Some(target) = st.search_cursor {
         // 搜索锚定：目标逻辑行置于视口上 1/3 处。
-        match rows.iter().position(|r| r.log_index == target) {
+        match rows.iter().position(|r| r.log_index == Some(target)) {
             Some(pos) => {
                 let want_start = pos.saturating_sub(viewport / 3);
                 let end = (want_start + viewport).min(rows_total);
