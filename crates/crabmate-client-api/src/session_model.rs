@@ -343,6 +343,44 @@ pub fn prefer_or_create_empty_session(
     (list, id)
 }
 
+/// 是否仍是「还没起名」的默认标题。
+///
+/// 任一语言的默认值都算（`新会话` / `New chat`，后者大小写不敏感）。
+/// **空串与全空白不算**：`ChatSession.title` 缺省就是空串，若把空串当默认值，
+/// 别的端从没起过名的会话会被这里改写。
+#[must_use]
+pub fn is_default_session_title(title: &str) -> bool {
+    let t = title.trim();
+    t == "新会话" || t.eq_ignore_ascii_case("new chat")
+}
+
+/// 首条用户消息 → 侧栏标题：压平换行、折叠连续空白，超过 48 字符取前 47 加 `…`。
+///
+/// 全空白退回 `default_title`——那是本端本地化决策（Web 传 [`DEFAULT_CHAT_SESSION_TITLE`]，
+/// TUI 传自己的中文默认标题），所以由调用方给，而不是写死在这里。
+#[must_use]
+pub fn title_from_user_prompt(text: &str, default_title: &str) -> String {
+    let t = text.trim();
+    if t.is_empty() {
+        return default_title.to_string();
+    }
+    let single_line: String = t
+        .chars()
+        .map(|c| if matches!(c, '\n' | '\r') { ' ' } else { c })
+        .collect();
+    let collapsed = single_line.split_whitespace().collect::<Vec<_>>().join(" ");
+    const MAX_CHARS: usize = 48;
+    let n = collapsed.chars().count();
+    if n <= MAX_CHARS {
+        return collapsed;
+    }
+    let kept: String = collapsed
+        .chars()
+        .take(MAX_CHARS.saturating_sub(1))
+        .collect();
+    format!("{kept}…")
+}
+
 /// 从会话列表回收 `leaving_id` 指向的空白会话
 /// （Web `reclaim_disposable_blank_session`）。
 ///
@@ -621,5 +659,54 @@ mod tests {
         assert!(s.has_v2_layout_projection(), "稳定 key 优先于版本字段");
         s.normalize_layout_schema_version();
         assert_eq!(s.layout_schema_version, CURRENT_LAYOUT_SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn default_title_matches_any_locale_but_never_empty() {
+        for s in ["新会话", "New chat", "new chat", "NEW CHAT", "  新会话  "] {
+            assert!(is_default_session_title(s), "{s:?} 应算默认标题");
+        }
+        // 空串 / 全空白 / 别的名字都不算——空串是 `title` 的 serde 缺省值。
+        for s in ["", "   ", "我的会话", "New chats", "新会话 2"] {
+            assert!(!is_default_session_title(s), "{s:?} 不该算默认标题");
+        }
+    }
+
+    #[test]
+    fn title_from_prompt_flattens_and_collapses() {
+        assert_eq!(
+            title_from_user_prompt("  hello\nworld  ", DEFAULT_CHAT_SESSION_TITLE),
+            "hello world"
+        );
+        assert_eq!(
+            title_from_user_prompt("a\t\tb", DEFAULT_CHAT_SESSION_TITLE),
+            "a b"
+        );
+        // 全空白退回调用方给的默认标题（Web 与 TUI 传的不同）。
+        assert_eq!(
+            title_from_user_prompt("  \n\t ", DEFAULT_CHAT_SESSION_TITLE),
+            DEFAULT_CHAT_SESSION_TITLE
+        );
+        assert_eq!(
+            title_from_user_prompt("   ", "新会话"),
+            "新会话",
+            "默认标题由调用方决定"
+        );
+    }
+
+    #[test]
+    fn title_from_prompt_truncates_at_48_chars() {
+        let body = "字".repeat(60);
+        let out = title_from_user_prompt(&body, DEFAULT_CHAT_SESSION_TITLE);
+        assert_eq!(out.chars().count(), 48, "47 个字符 + 省略号");
+        assert!(out.ends_with('…'));
+        assert_eq!(out.chars().take(47).collect::<String>(), "字".repeat(47));
+
+        // 恰好 48 个字符不截断。
+        let exact = "字".repeat(48);
+        assert_eq!(
+            title_from_user_prompt(&exact, DEFAULT_CHAT_SESSION_TITLE),
+            exact
+        );
     }
 }

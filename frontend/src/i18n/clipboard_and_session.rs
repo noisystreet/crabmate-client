@@ -34,14 +34,11 @@ pub fn default_session_title(l: Locale) -> &'static str {
     }
 }
 
-/// 是否与当前语言下的默认会话标题等价（含历史中文默认值）。
-pub fn is_default_session_title(s: &str) -> bool {
-    let t = s.trim();
-    t == default_session_title(Locale::ZhHans)
-        || t == default_session_title(Locale::En)
-        || t == "新会话"
-        || t.eq_ignore_ascii_case("new chat")
-}
+/// 是否与「任一语言的默认会话标题」等价（含历史中文默认值）。
+///
+/// 判定已下沉到 `crabmate-client-api`（TUI 的起名守卫用同一份）；空串**不算**默认标题。
+/// 这里 re-export 是为了保住 `i18n::is_default_session_title` 的既有调用点。
+pub use crabmate_client_api::session_model::is_default_session_title;
 
 /// 侧栏/列表展示用：默认标题随界面语言切换，其它标题保持原样。
 pub fn session_title_for_display(stored: &str, loc: Locale) -> String {
