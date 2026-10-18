@@ -226,44 +226,74 @@ fn styled_part_chars(part: &str, pal: &Palette) -> Vec<(Style, char)> {
     out
 }
 
+/// 是否丢弃这一行：围栏外的连续空行只留一个，首部空行也不产生间距
+/// （desktop 走 pulldown-cmark，多个空行只算一个段落分隔）。
+///
+/// 围栏切换行不必特判：以 ``` / ~~~ 开头的行不可能是空行。
+fn skip_blank_gap(blank: bool, in_fence: bool, prev_blank: bool) -> bool {
+    blank && !in_fence && prev_blank
+}
+
 /// 整段助手文本 → 带样式的字符流（段间补 `\n` 作强制断行，标记不跨段解析）。
 /// 先过共享 [`crabmate_client_api::normalize_markdown_for_render`]（与 desktop/web
 /// 同一入口），再逐行渲染；处于 `` ``` `` / `~~~` 围栏内的行整行按纯文本，
 /// 避免代码内容里的 `**`/反引号/`[t](u)` 等被误当成行内样式而吞字符。
+///
+/// 空行语义对齐 desktop（CommonMark）：围栏外的连续空行折叠成**一个**，
+/// 首部与尾部空行不产生间距；围栏内的空行原样保留（desktop 的 `<pre>` 同样保留），
+/// 含流式中途停在未闭合围栏里时的结尾空行。
+/// 段落间距由此在折行层落成一行空白，与 `.msg-md-prose p { margin }` 对应。
 pub(crate) fn assistant_styled_text(text: &str, pal: &Palette) -> Vec<(Style, char)> {
     let text = normalize_markdown_for_render(text);
     let mut out = Vec::new();
     let mut first = true;
     let mut in_fence = false;
+    // 开头视为「上一行为空」，让首部空行不产生间距。
+    let mut prev_blank = true;
     for part in text.split('\n') {
-        if !first {
-            out.push((Style::new(), '\n'));
-        }
         let toggles = is_fence_switch(part);
         if toggles {
             in_fence = !in_fence;
+        }
+        let blank = part.trim().is_empty();
+        if skip_blank_gap(blank, in_fence, prev_blank) {
+            continue;
+        }
+        if !first {
+            out.push((Style::new(), '\n'));
         }
         if toggles || in_fence {
             out.extend(part.chars().map(|c| (Style::new(), c)));
         } else {
             out.extend(styled_part_chars(part, pal));
         }
+        prev_blank = blank;
         first = false;
+    }
+    // 尾部空行不产生间距（同 CommonMark：文档结尾的空行不算段落）。
+    // 围栏未闭合时不动：流式输出随时可能续写，围栏内的空行属于代码内容，
+    // 提前裁掉会让它在块闭合时「消失又出现」。
+    if !in_fence {
+        while let Some(&(_, '\n')) = out.last() {
+            out.pop();
+        }
     }
     out
 }
 
-/// 按显示宽度把带样式字符流折成物理行（控制字符丢弃；规则同普通行 wrap）。
+/// 按显示宽度把带样式字符流折成物理行（控制字符丢弃）。
+///
+/// `\n` 一律落行——包括当前行为空时：空行要保留成一行空白，段落间距才存在
+/// （对齐 desktop 的 `.msg-md-prose p { margin }`）。普通纯文本走
+/// [`wrap_physical`]，仍折叠空行。
 pub(crate) fn wrap_styled_chars(styled: &[(Style, char)], width: usize) -> Vec<Vec<(Style, char)>> {
     let mut rows: Vec<Vec<(Style, char)>> = Vec::new();
     let mut row: Vec<(Style, char)> = Vec::new();
     let mut row_width = 0usize;
     for &(st, ch) in styled {
         if ch == '\n' {
-            if !row.is_empty() {
-                rows.push(std::mem::take(&mut row));
-                row_width = 0;
-            }
+            rows.push(std::mem::take(&mut row));
+            row_width = 0;
             continue;
         }
         if ch.is_control() {

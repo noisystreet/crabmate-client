@@ -132,3 +132,50 @@ fn wrap_drops_control_chars() {
     assert_eq!(rows, vec!["a[31mb"]);
     assert!(!rows[0].contains('\u{1b}'));
 }
+
+/// 物理行 → 纯文本（断言空行 / 段落间距用）。
+fn row_text(row: &[(Style, char)]) -> String {
+    row.iter().map(|(_, ch)| *ch).collect()
+}
+
+/// 段落间距：围栏外的空行落成一行空白（对齐 desktop 的 `.msg-md-prose p` 间距）。
+#[test]
+fn paragraph_gap_becomes_blank_row() {
+    let rows = wrap_styled_chars(&assistant_styled_text("甲\n\n乙", &pal()), 200);
+    let text: Vec<String> = rows.iter().map(|r| row_text(r)).collect();
+    assert_eq!(text, vec!["甲", "", "乙"], "段落之间应有一个空行");
+}
+
+/// 多个连续空行折叠为一个：CommonMark 里它们只算一个段落分隔，
+/// desktop 的 `<p>` 之间也只有一个 margin。
+#[test]
+fn consecutive_blank_lines_collapse_to_one_gap() {
+    let rows = wrap_styled_chars(&assistant_styled_text("甲\n\n\n\n乙", &pal()), 200);
+    let text: Vec<String> = rows.iter().map(|r| row_text(r)).collect();
+    assert_eq!(text, vec!["甲", "", "乙"]);
+}
+
+/// 首尾空行不产生间距（同 CommonMark：文档首尾空行不算段落）。
+#[test]
+fn leading_and_trailing_blank_lines_add_no_gap() {
+    let rows = wrap_styled_chars(&assistant_styled_text("\n\n甲\n\n", &pal()), 200);
+    let text: Vec<String> = rows.iter().map(|r| row_text(r)).collect();
+    assert_eq!(text, vec!["甲"]);
+}
+
+/// 围栏代码块内的空行原样保留（desktop 的 `<pre>` 同样保留）。
+#[test]
+fn blank_line_inside_fence_is_preserved() {
+    let rows = wrap_styled_chars(&assistant_styled_text("```\na\n\nb\n```", &pal()), 200);
+    let text: Vec<String> = rows.iter().map(|r| row_text(r)).collect();
+    assert_eq!(text, vec!["```", "a", "", "b", "```"]);
+}
+
+/// 未闭合围栏（流式输出中途）的结尾空行也要保留：它属于代码内容，
+/// 围栏闭合后仍在，提前裁掉会让空行「先消失、再出现」。
+#[test]
+fn trailing_blank_inside_unclosed_fence_is_kept() {
+    let rows = wrap_styled_chars(&assistant_styled_text("```\na\n\n", &pal()), 200);
+    let text: Vec<String> = rows.iter().map(|r| row_text(r)).collect();
+    assert_eq!(text, vec!["```", "a", ""]);
+}
