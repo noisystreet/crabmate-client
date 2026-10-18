@@ -267,6 +267,41 @@ fn tool_turn_uses_tool_modifier_without_generic_role_word() {
 }
 
 #[test]
+fn skill_inject_turn_renders_dedicated_card_without_role_label() {
+    let inject = message(
+        "sk1",
+        "system",
+        r#"{"kind":"context_inject","title":"本轮注入","detail":"{\"skills\":[\"rust-style\"],\"forced\":true}"}"#,
+    );
+    let output = build_html(&[inject], None, &HashSet::new());
+    assert!(output.contains("chat-tui-turn--skill"), "got {output}");
+    assert!(
+        output.contains("data-testid=\"chat-tui-skill-inject\""),
+        "got {output}"
+    );
+    assert!(output.contains("已调用 skill"), "got {output}");
+    assert!(output.contains("rust-style"), "got {output}");
+    assert!(
+        output.contains("chat-tui-skill-inject-forced"),
+        "got {output}"
+    );
+    assert!(!output.contains("chat-tui-role-label"), "got {output}");
+    assert!(!output.contains("chat-tui-tool-process"), "got {output}");
+}
+
+#[test]
+fn plain_skills_json_message_keeps_role_label_and_no_skill_card() {
+    // 普通消息正文恰为 skills JSON：不得画 skill 卡，原文与角色标签都要保留。
+    let m = message("u1", "user", r#"{"skills":["rust-style"]}"#);
+    let output = build_html(&[m], None, &HashSet::new());
+    assert!(!output.contains("chat-tui-skill-inject"), "got {output}");
+    assert!(!output.contains("chat-tui-turn--skill"), "got {output}");
+    assert!(output.contains("chat-tui-turn--user"), "got {output}");
+    assert!(output.contains("chat-tui-role-label"), "got {output}");
+    assert!(output.contains("skills"), "got {output}");
+}
+
+#[test]
 fn promote_finished_assistant_uses_incremental_not_replace_all() {
     let user = message("u1", "user", "hi");
     let mut assistant = message("a1", "assistant", "");

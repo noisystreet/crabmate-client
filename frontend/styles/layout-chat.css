@@ -472,6 +472,64 @@
   border-radius: var(--radius-md);
 }
 
+/* —— skill 调用卡：语义独立于工具卡，明确告知 skill 确实被调用 —— */
+.chat-tui-turn--skill {
+  align-self: stretch;
+  width: auto;
+  max-width: none;
+  background: color-mix(in srgb, var(--accent) 7%, var(--bg-elevated));
+  border: 1px solid color-mix(in srgb, var(--accent) 26%, var(--border-subtle));
+  border-left: 3px solid color-mix(in srgb, var(--accent) 70%, var(--border));
+  box-shadow: none;
+  border-radius: var(--radius-md);
+}
+
+.chat-tui-skill-inject {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1, 4px) var(--space-2, 8px);
+  min-width: 0;
+  font-size: var(--text-md);
+  line-height: 1.45;
+}
+
+.chat-tui-skill-inject-mark {
+  flex: 0 0 auto;
+  color: var(--accent);
+  font-size: var(--text-sm);
+  line-height: 1;
+}
+
+.chat-tui-skill-inject-label {
+  flex: 0 0 auto;
+  font-weight: var(--font-weight-label, 600);
+  color: color-mix(in srgb, var(--accent) 82%, var(--text));
+}
+
+.chat-tui-skill-inject-forced {
+  flex: 0 0 auto;
+  padding: 0 0.4em;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: color-mix(in srgb, var(--accent) 90%, var(--text));
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--border));
+}
+
+.chat-tui-skill-inject-chip {
+  flex: 0 0 auto;
+  padding: 0.05em 0.5em;
+  border-radius: var(--radius-pill);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
+}
+
 /* —— 工具回合：扁平 mono —— */
 .chat-tui-turn--tool {
   align-self: stretch;
