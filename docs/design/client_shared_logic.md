@@ -51,6 +51,8 @@ frontend & tui (serve/) ──┴── crabmate（protocol feature；crates.io 
 
 **2026-09**：Markdown 渲染前的文本规范化（原 `frontend/src/markdown.rs::normalize_markdown_for_render` 及全部 CJK/围栏/标题/列表补丁）下沉为 `crabmate-client-api::markdown_normalize`（纯逻辑、零新依赖），`frontend` 改为消费共享实现（行为不变）；TUI `tui_mode/md.rs::assistant_styled_text` 已接入同一入口（先 normalize 再逐行轻渲染，渲染文本与 normalize 输出逐字一致）。
 
+  **2026-10**：会话 / 消息的**本地**数据模型下沉为 `crabmate-client-api::session_model`（原 `frontend/src/storage.rs` 的 `ChatSession` / `StoredMessage` / `StoredMessageState`、7 个常量，以及 `session_workspace_partition.rs` / `session_ops.rs` 里的会话判定）。它不是契约类型——服务端把这个数组当 JSON 透传存储——所以不受 `contract_pin.md` 约束。时间与熵源改为注入（`new_session_id(now_ms, entropy)` / `new_empty_session(..., now_ms, ...)`），共享层保持纯函数；`frontend` 侧 `make_session_id` / `ensure_at_least_one` / `insert_empty_session` / `prefer_or_create_empty_session` 只注入 `js_sys` 的时钟与随机数。`frontend/src/storage.rs` 改为 `pub use` 共享类型，`crate::storage::X` 的既有引用（59 个文件）零改动；`session_is_blank_chat` / `session_is_unbound_empty_chat` / `is_disposable_blank_session` / `reclaim_disposable_blank_session` 改为调用同一份实现。**动机**：TUI 的 `/conv new` 与 Desktop 各写过一份「空白会话 / 可丢弃空白行 / 复用或新建」判定，已经漂移过（TUI 曾把缺失标题当作默认标题，而 Web 的 `is_default_session_title("")` 返回 `false`）。TUI 侧改用类型（替代当前对 `serde_json::Value` 的取值）是下一步，本阶段只保证共享实现就位且 Desktop 已在用。
+
 ---
 
 ## 3. 拟建布局

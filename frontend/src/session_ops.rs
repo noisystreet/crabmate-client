@@ -355,34 +355,6 @@ pub fn flush_active_composer_draft(
     flush_composer_draft_to_session(sessions, &prev, &draft.get_untracked());
 }
 
-/// 判断「上一个活动会话」是否为可自动清理的空白新会话：0 条消息、无服务端
-/// `conversation_id`（未真正发起过对话）、无草稿、非置顶/收藏。
-///
-/// 仅用于「离开该会话」的切换 / 新建会话路径，勿据此批量清理列表中其它空会话。
-#[must_use]
-fn is_disposable_blank_session(s: &ChatSession) -> bool {
-    crate::session_workspace_partition::session_is_blank_chat(s)
-        && s.draft.trim().is_empty()
-        && !s.pinned
-        && !s.starred
-}
-
-/// 从会话列表回收 `leaving_id` 指向的空白会话（判定见 `is_disposable_blank_session`）。
-///
-/// 供「切换离开」「新建会话」两条路径复用；`leaving_id` 为空或非空白会话时不动作。
-pub(crate) fn reclaim_disposable_blank_session(sessions: &mut Vec<ChatSession>, leaving_id: &str) {
-    if leaving_id.is_empty() {
-        return;
-    }
-    let disposable = sessions
-        .iter()
-        .find(|s| s.id == leaving_id)
-        .is_some_and(is_disposable_blank_session);
-    if disposable {
-        sessions.retain(|s| s.id != leaving_id);
-    }
-}
-
 /// 切换当前活跃会话：**先**将合成器草稿写入当前会话，再激活 `next_session_id` 并从会话条目载入草稿。
 ///
 /// 若离开的是一个空白新会话（见 `is_disposable_blank_session`），顺带把它从列表中删除，
@@ -399,7 +371,7 @@ pub fn switch_active_session_after_composer_flush(
     let prev_id = chat.active_id.get_untracked();
     if prev_id != next_session_id {
         chat.sessions
-            .update(|list| reclaim_disposable_blank_session(list, &prev_id));
+            .update(|list| crabmate_client_api::reclaim_disposable_blank_session(list, &prev_id));
     }
     chat.active_id.set(next_session_id.to_string());
     draft.set(chat.sessions.with(|list| {
@@ -765,10 +737,11 @@ pub fn clamp_session_ctx_menu_pos(cx: i32, cy: i32) -> (f64, f64) {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        is_disposable_blank_session, reclaim_disposable_blank_session, title_from_user_prompt,
-    };
+    use super::title_from_user_prompt;
     use crate::storage::{ChatSession, DEFAULT_CHAT_SESSION_TITLE, StoredMessage};
+    // 判定与回收规则已下沉到共享层：测试直接断言 TUI 也在用的那份实现。
+    use crabmate_client_api::reclaim_disposable_blank_session;
+    use crabmate_client_api::session_is_disposable_blank as is_disposable_blank_session;
 
     fn blank_session() -> ChatSession {
         ChatSession {
