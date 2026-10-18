@@ -25,6 +25,26 @@ fn workspace_set_line(path: &str) -> String {
     }
 }
 
+/// `/workspace <路径>` 请求结果的处理决定。
+///
+/// 抽成纯函数是为了能测——尤其 `Failed` 这条：只有服务端**确认**成功才允许重置目录树。
+/// 请求失败时真相有两种（serve 拒绝了 / serve 改了但响应丢了，客户端无从判断），
+/// 此时顺手也重置一次树，界面就会显示一个既不是旧根、也没被确认的新根。
+#[derive(Debug, PartialEq, Eq)]
+enum WsSetOutcome {
+    /// 服务端确认切换：附带回显文案。
+    Switched(String),
+    /// 请求失败：附带回显文案，**不**重置目录树。
+    Failed(String),
+}
+
+fn workspace_set_outcome(result: Result<String, String>) -> WsSetOutcome {
+    match result {
+        Ok(path) => WsSetOutcome::Switched(workspace_set_line(&path)),
+        Err(e) => WsSetOutcome::Failed(format!("切换工作区失败：{e}")),
+    }
+}
+
 /// 查询结果的系统行：未设置根时 serve 回空路径（不能只打一个冒号）。
 fn workspace_query_line(result: &Result<String, String>) -> String {
     match result {
@@ -83,15 +103,14 @@ impl TuiApp<'_> {
 
     /// `POST /workspace` 结果：成功后与项目池切换走同一收尾。
     pub(super) fn on_workspace_set(&mut self, result: Result<String, String>) {
-        match result {
-            Ok(path) => {
-                let line = workspace_set_line(&path);
+        match workspace_set_outcome(result) {
+            // 只有服务端确认成功才重置树：失败时真实根未知（可能已生效也可能没），
+            // 此时重置会让界面显示一个既非旧根、也未经确认的树。
+            WsSetOutcome::Switched(line) => {
                 self.st.push_line(LineKind::System, &line);
                 self.reset_workspace_after_switch();
             }
-            Err(e) => self
-                .st
-                .push_line(LineKind::System, &format!("切换工作区失败：{e}")),
+            WsSetOutcome::Failed(line) => self.st.push_line(LineKind::System, &line),
         }
     }
 
@@ -131,7 +150,10 @@ impl TuiApp<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_default_word, workspace_query_line, workspace_set_line};
+    use super::{
+        WsSetOutcome, is_default_word, workspace_query_line, workspace_set_line,
+        workspace_set_outcome,
+    };
 
     #[test]
     fn default_words_restore_serve_default() {
@@ -158,5 +180,47 @@ mod tests {
         assert!(workspace_query_line(&Ok(String::new())).contains("未设置"));
         assert!(workspace_query_line(&Ok("/data/proj".into())).contains("/data/proj"));
         assert!(workspace_query_line(&Err("busy".into())).contains("busy"));
+    }
+
+    /// 服务端拒绝时，回显必须读作「失败」，不能半个字像成功。
+    #[test]
+    fn failed_set_never_reads_as_success() {
+        let out = workspace_set_outcome(Err(
+            "工作区路径无效或不存在: No such file or directory (os error 2)".into(),
+        ));
+        match out {
+            WsSetOutcome::Failed(line) => {
+                assert!(line.contains("切换工作区失败"), "应明说失败：{line}");
+                assert!(
+                    line.contains("工作区路径无效或不存在"),
+                    "应透传 serve 原文：{line}"
+                );
+                assert!(!line.contains("已切换"), "失败行不能含成功措辞：{line}");
+            }
+            WsSetOutcome::Switched(l) => panic!("Err 走了成功分支：{l}"),
+        }
+    }
+
+    /// 只有 `Switched` 才允许重置树：失败分支必须可区分，不能与成功混为一谈。
+    #[test]
+    fn only_confirmed_set_switches() {
+        assert_eq!(
+            workspace_set_outcome(Ok("/data/proj".into())),
+            WsSetOutcome::Switched("已切换到工作区：/data/proj".into())
+        );
+        // serve 用空串表示恢复默认根：回显不能是空路径。
+        assert_eq!(
+            workspace_set_outcome(Ok(String::new())),
+            WsSetOutcome::Switched("已切换工作区：serve 默认根".into())
+        );
+        assert!(matches!(
+            workspace_set_outcome(Err("boom".into())),
+            WsSetOutcome::Failed(_)
+        ));
+        // 失败行与成功行必须互斥（防止有人后来把两分支合并）。
+        assert_ne!(
+            workspace_set_outcome(Err("x".into())),
+            workspace_set_outcome(Ok("x".into()))
+        );
     }
 }
