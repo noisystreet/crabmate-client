@@ -219,8 +219,10 @@ pub(crate) fn prefer_or_create_empty_session(
         list,
         workspace_root,
         default_title,
-        make_session_id(),
-        js_sys::Date::now() as i64,
+        // 传函数而非值：命中复用分支时不该碰 js_sys。
+        // 否则 host target（`cargo test --lib`）会在 wasm-bindgen 导入函数上 panic。
+        make_session_id,
+        || js_sys::Date::now() as i64,
     )
 }
 
