@@ -9,6 +9,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
+use super::palette::Palette;
 use super::render::{SIDEBAR_HINT, sidebar_rows, truncate_display, workspace_basename};
 use super::state::{Focus, UiState};
 use super::workspace_tree::WsRow;
@@ -111,74 +112,173 @@ fn ws_row_text(row: &WsRow, width: usize) -> String {
     )
 }
 
-/// 追加一条左栏行（可选反色高亮）。
-fn push_sidebar_line(rows: &mut Vec<Line<'static>>, text: String, fg: Color, highlight: bool) {
-    let base = Style::new().fg(fg);
-    let style = if highlight {
-        base.add_modifier(Modifier::REVERSED)
-    } else {
-        base
-    };
-    rows.push(Line::from(Span::styled(text, style)));
+/// 追加一条侧栏行；`highlight` 时左缘加 `▎` 竖条 + 选中底色。
+///
+/// 竖条占 1 列，故高亮行按 `width - 1` 再截断一次：调用方按 `width` 截断过，直接拼上去
+/// 会让末列被 `Paragraph` 裁掉（与 `fae763b` 的「预算必须恒等于绘制区宽度」同一类问题）。
+fn push_sidebar_line(
+    rows: &mut Vec<Line<'static>>,
+    text: String,
+    fg: Color,
+    highlight: bool,
+    pal: &Palette,
+    width: usize,
+) {
+    if !highlight {
+        rows.push(Line::from(Span::styled(text, Style::new().fg(fg))));
+        return;
+    }
+    let body = truncate_display(&text, width.saturating_sub(1));
+    rows.push(Line::from(vec![
+        Span::styled("▎", Style::new().fg(pal.accent)),
+        Span::styled(body, pal.selection(fg)),
+    ]));
 }
 
 /// 工作区侧栏内容行：首行标题，其后为扁平树（加载中/错误/空目录占位）。
 fn workspace_sidebar_rows(st: &UiState, width: usize) -> Vec<Line<'static>> {
     let mut rows: Vec<Line<'static>> = Vec::new();
+    let pal = &st.palette;
     rows.push(workspace_title(st, width));
     let highlight_first = st.focus == Focus::Workspace && st.ws_cursor == 0;
     if !st.ws_ready {
         let (text, fg) = match st.ws_root_err.as_deref() {
             Some(e) => (
                 truncate_display(&format!("（读取失败：{e}）"), width),
-                Color::LightRed,
+                pal.err,
             ),
-            None => (truncate_display("（加载中…）", width), Color::Gray),
+            None => (truncate_display("（加载中…）", width), pal.muted),
         };
-        push_sidebar_line(&mut rows, text, fg, highlight_first);
+        push_sidebar_line(&mut rows, text, fg, highlight_first, pal, width);
         return rows;
     }
     if st.ws_rows.is_empty() {
         push_sidebar_line(
             &mut rows,
             truncate_display("（空目录）", width),
-            Color::Gray,
+            pal.muted,
             highlight_first,
+            pal,
+            width,
         );
         return rows;
     }
     let highlight = st.focus == Focus::Workspace;
     for (i, row) in st.ws_rows.iter().enumerate() {
+        // 目录 / 文件 / 占位三档颜色都取 palette：写死的 `LightCyan` / `White` 在浅色主题下
+        // 会变成「浅底白字」，等于看不见。
         let fg = if row.placeholder {
-            Color::Gray
+            pal.muted
         } else if row.is_dir {
-            Color::LightCyan
+            pal.accent
         } else {
-            Color::White
+            pal.fg
         };
         push_sidebar_line(
             &mut rows,
             ws_row_text(row, width),
             fg,
             highlight && i == st.ws_cursor,
+            pal,
+            width,
         );
     }
     rows
 }
 
 /// 对左栏内容做窗口裁剪：标题固定，条目区尽量让选中行可见。
-pub(super) fn sidebar_view<'a>(rows: &[Line<'a>], height: usize, selected: usize) -> Vec<Line<'a>> {
+///
+/// 溢出时在标题行尾补 `↑n` / `↓n`（被藏起来的条数）。放标题行而不是上下沿：条目区一行都
+/// 不能浪费，标题行本来就在，且计数与裁剪共用 [`sidebar_window`] 的同一份窗口。
+pub(super) fn sidebar_view<'a>(
+    rows: &[Line<'a>],
+    height: usize,
+    selected: usize,
+    width: usize,
+    pal: &Palette,
+) -> Vec<Line<'a>> {
     if height == 0 {
         return Vec::new();
     }
     if rows.len() <= height {
         return rows.to_vec();
     }
-    let mut out = Vec::with_capacity(height);
-    out.push(rows[0].clone());
     let (start, end) = sidebar_window(rows.len(), height, selected);
+    let mut out = Vec::with_capacity(height);
+    // `end` 是条目区右开区间，标题行占 `rows[0]`，故条目总数为 `rows.len() - 1`。
+    out.push(title_with_overflow(
+        &rows[0],
+        start,
+        (rows.len() - 1).saturating_sub(end),
+        width,
+        pal,
+    ));
     out.extend(rows[start + 1..end + 1].iter().cloned());
     out
+}
+
+/// 标题行 + 溢出计数（上下都没有隐藏时原样返回，仅多一次 clone）。
+///
+/// 逐 span 搬运而不是 `to_string()` 后重涂：标题可能是多 span 的（工作区名 `fg+BOLD`
+/// + 右侧 `光标/总数` 的 `muted`），压平会让计数器在「树一长」时突然变色。
+///
+/// 预算分配顺序是「非空白内容优先」：先算出名称与计数器要占多少，剩下的才给右对齐填充。
+/// 否则填充会刚好吃掉整份预算（`↓4` 只有 3 列，留白却有一大截），计数器反而被挤没。
+fn title_with_overflow<'a>(
+    title: &Line<'a>,
+    above: usize,
+    below: usize,
+    width: usize,
+    pal: &Palette,
+) -> Line<'a> {
+    if above == 0 && below == 0 {
+        return title.clone();
+    }
+    let mut hint = String::new();
+    if above > 0 {
+        hint.push_str(&format!("↑{above}"));
+    }
+    if below > 0 {
+        hint.push_str(&format!("↓{below}"));
+    }
+    // 标题原本按 `width` 截断过：这里要给它让出 `空格 + 计数` 的位置。
+    let hint_w = UnicodeWidthStr::width(hint.as_str()) + 1;
+    let mut room = width.saturating_sub(hint_w);
+    // 非空白 span（名称、计数器）先占位，填充只能吃剩下的。
+    let content_need: usize = title
+        .spans
+        .iter()
+        .filter(|s| !s.content.trim().is_empty())
+        .map(|s| UnicodeWidthStr::width(s.content.as_ref()))
+        .sum();
+    let mut pad_room = room.saturating_sub(content_need);
+    let mut spans: Vec<Span<'a>> = Vec::new();
+    for span in &title.spans {
+        if room == 0 {
+            break;
+        }
+        let text = span.content.as_ref();
+        let span_w = UnicodeWidthStr::width(text);
+        if text.trim().is_empty() {
+            let keep = span_w.min(pad_room);
+            pad_room -= keep;
+            room -= keep;
+            if keep > 0 {
+                spans.push(Span::styled(" ".repeat(keep), span.style));
+            }
+            continue;
+        }
+        if span_w <= room {
+            room -= span_w;
+            spans.push(span.clone());
+            continue;
+        }
+        // 极端窄：内容也放不下，截断后收工（保留它自己的样式）。
+        spans.push(Span::styled(truncate_display(text, room), span.style));
+        room = 0;
+    }
+    spans.push(Span::styled(format!(" {hint}"), Style::new().fg(pal.muted)));
+    Line::from(spans)
 }
 
 /// 条目区（不含固定的标题行）的可见窗口 `[start, end)`。
@@ -216,9 +316,10 @@ pub(super) fn pane_list_area(area: Rect) -> Rect {
 /// 项目池「选择/切换工作区」内容行：首行标题，其后为候选项目（加载中/未启用/错误占位）。
 fn workspace_pick_rows(st: &UiState, width: usize) -> Vec<Line<'static>> {
     let mut rows: Vec<Line<'static>> = Vec::new();
+    let pal = &st.palette;
     rows.push(Line::from(Span::styled(
         truncate_display("项目池（选择/切换工作区）", width),
-        Style::new().fg(Color::White).add_modifier(Modifier::BOLD),
+        Style::new().fg(pal.fg).add_modifier(Modifier::BOLD),
     )));
     let Some(pick) = st.ws_pick.as_ref() else {
         return rows;
@@ -228,37 +329,47 @@ fn workspace_pick_rows(st: &UiState, width: usize) -> Vec<Line<'static>> {
         push_sidebar_line(
             &mut rows,
             truncate_display("（加载中…）", width),
-            Color::Gray,
+            pal.muted,
             highlight_first,
+            pal,
+            width,
         );
     } else if let Some(e) = pick.error.as_deref() {
         push_sidebar_line(
             &mut rows,
             truncate_display(&format!("（失败：{e}）"), width),
-            Color::LightRed,
+            pal.err,
             highlight_first,
+            pal,
+            width,
         );
     } else if !pick.enabled {
         push_sidebar_line(
             &mut rows,
             truncate_display("（项目池未启用：服务端配置后可用）", width),
-            Color::Gray,
+            pal.muted,
             highlight_first,
+            pal,
+            width,
         );
     } else if pick.projects.is_empty() {
         push_sidebar_line(
             &mut rows,
             truncate_display("（无可用项目）", width),
-            Color::Gray,
+            pal.muted,
             highlight_first,
+            pal,
+            width,
         );
     } else {
         for (i, name) in pick.projects.iter().enumerate() {
             push_sidebar_line(
                 &mut rows,
                 truncate_display(name, width),
-                Color::White,
+                pal.fg,
                 st.focus == Focus::Workspace && i == st.ws_cursor,
+                pal,
+                width,
             );
         }
     }
@@ -322,6 +433,9 @@ mod tests {
 
     fn ready_ws_state() -> UiState {
         let mut st = UiState::new();
+        // 显式落深色配色：`UiState::new()` 走 `Palette::resolve`（会读 `NO_COLOR` 等环境），
+        // 测试不能依赖运行环境是不是无色终端。
+        st.set_palette(Palette::default());
         st.workspace_path = Some("/data/proj".to_string());
         st.ws_ready = true;
         st.ws_cursor = 2;
@@ -353,20 +467,14 @@ mod tests {
         assert!(rows[1].to_string().contains("▸ src"), "折叠目录带 ▸");
         assert!(rows[2].to_string().contains("lib.rs"), "缩进子行");
         assert!(!rows[2].to_string().contains("▸"));
-        // 光标行（README.md，cursor=2 → 行 3）反色高亮
-        assert!(
-            rows[3].spans[0]
-                .style
-                .add_modifier
-                .contains(Modifier::REVERSED),
-            "工作区聚焦时光标行应反色"
+        // 光标行（README.md，cursor=2 → 行 3）：左缘竖条 + 选中底色（不再是反色）
+        assert_eq!(rows[3].spans[0].content, "▎", "选中行左缘竖条");
+        assert_eq!(
+            rows[3].spans[1].style.bg,
+            Some(st.palette.selection_bg),
+            "选中行应为 selection_bg 底色"
         );
-        assert!(
-            !rows[1].spans[0]
-                .style
-                .add_modifier
-                .contains(Modifier::REVERSED)
-        );
+        assert_eq!(rows[1].spans.len(), 1, "未选中行不带竖条");
     }
 
     #[test]
@@ -389,12 +497,21 @@ mod tests {
     fn workspace_row_highlight_requires_workspace_focus() {
         let st = ready_ws_state(); // focus 默认 Input
         let rows = workspace_sidebar_rows(&st, 60);
+        assert_eq!(rows[3].spans.len(), 1, "非 Workspace 焦点不加竖条");
+    }
+
+    #[test]
+    fn mono_palette_falls_back_to_reverse() {
+        let mut st = ready_ws_state();
+        st.set_palette(Palette::mono());
+        st.focus = Focus::Workspace;
+        let rows = workspace_sidebar_rows(&st, 60);
         assert!(
-            !rows[3].spans[0]
+            rows[3].spans[1]
                 .style
                 .add_modifier
                 .contains(Modifier::REVERSED),
-            "非 Workspace 焦点不反色"
+            "无色模式下选中态必须退回反色（selection_bg 已被抹成 Reset）"
         );
     }
 
@@ -409,8 +526,8 @@ mod tests {
         let rows = workspace_sidebar_rows(&st, 60);
         assert_eq!(
             rows[2].spans[0].style.fg,
-            Some(Color::Gray),
-            "在途占位行应为灰色"
+            Some(st.palette.muted),
+            "在途占位行应为淡色"
         );
     }
 
@@ -435,20 +552,72 @@ mod tests {
 
     #[test]
     fn sidebar_view_keeps_selected_visible() {
+        let pal = Palette::default();
         let mut rows: Vec<Line<'static>> = vec![Line::from("header")];
         rows.extend((0..10).map(|i| Line::from(format!("item{i}"))));
-        let v = sidebar_view(&rows, 4, 7);
+        let v = sidebar_view(&rows, 4, 7, 20, &pal);
         assert_eq!(v.len(), 4);
         assert!(v.last().unwrap().to_string().contains("item7"));
         assert!(v.first().unwrap().to_string().contains("header"));
     }
 
     #[test]
+    fn sidebar_view_reports_hidden_rows_in_title() {
+        let pal = Palette::default();
+        let mut rows: Vec<Line<'static>> = vec![Line::from("header")];
+        rows.extend((0..10).map(|i| Line::from(format!("item{i}"))));
+        // 高 4 行 = 标题 + 3 条；选中第 7 条 → 上方藏 5 条、下方藏 2 条。
+        let v = sidebar_view(&rows, 4, 7, 20, &pal);
+        let title = v[0].to_string();
+        assert!(title.contains("↑5"), "上方隐藏计数：{title}");
+        assert!(title.contains("↓2"), "下方隐藏计数：{title}");
+        assert_eq!(v.len(), 4);
+    }
+
+    #[test]
     fn sidebar_view_fits_without_window() {
+        let pal = Palette::default();
         let mut rows: Vec<Line<'static>> = vec![Line::from("header")];
         rows.extend((0..3).map(|i| Line::from(format!("item{i}"))));
-        let v = sidebar_view(&rows, 5, 1);
+        let v = sidebar_view(&rows, 5, 1, 20, &pal);
         assert_eq!(v.len(), 4);
+        assert!(!v[0].to_string().contains('↑'), "没有隐藏行时不该出现计数");
+    }
+
+    /// 带溢出计数时标题仍要保住多 span 样式（工作区名 BOLD / 计数器 muted）。
+    #[test]
+    fn overflow_hint_keeps_counter_style_and_drops_padding() {
+        let pal = Palette::default();
+        // 模拟 `workspace_title`：[名称(BOLD)] [右对齐填充] [计数器(Gray)]
+        let mut rows = vec![Line::from(vec![
+            Span::styled(
+                "proj".to_string(),
+                Style::new().fg(Color::White).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(" ".repeat(13), Style::new()),
+            Span::styled("2/3".to_string(), Style::new().fg(Color::Gray)),
+        ])];
+        rows.extend((0..5).map(|i| Line::from(format!("item{i}"))));
+        // 高 2 行 = 标题 + 1 条；选中第 0 条 → 下方藏 4 条。
+        let v = sidebar_view(&rows, 2, 0, 20, &pal);
+        let head = &v[0];
+        let text = head.to_string();
+        assert!(text.contains("2/3"), "计数器该留下：{text}");
+        assert!(text.contains("↓4"), "应带溢出计数：{text}");
+        assert!(
+            UnicodeWidthStr::width(text.as_str()) <= 20,
+            "标题不得超宽：{text}"
+        );
+        let counter = head
+            .spans
+            .iter()
+            .find(|s| s.content.contains("2/3"))
+            .expect("计数器 span");
+        assert_eq!(
+            counter.style.fg,
+            Some(Color::Gray),
+            "计数器样式不能被压平成标题样式"
+        );
     }
 
     #[test]
@@ -491,19 +660,12 @@ mod tests {
         });
         let rows = workspace_pick_rows(&st, 60);
         assert_eq!(rows.len(), 3);
-        assert!(
-            !rows[1].spans[0]
-                .style
-                .add_modifier
-                .contains(Modifier::REVERSED),
-            "非光标行不反色"
-        );
-        assert!(
-            rows[2].spans[0]
-                .style
-                .add_modifier
-                .contains(Modifier::REVERSED),
-            "光标行反色"
+        assert_eq!(rows[1].spans.len(), 1, "非光标行不带竖条");
+        assert_eq!(rows[2].spans[0].content, "▎", "光标行带竖条");
+        assert_eq!(
+            rows[2].spans[1].style.bg,
+            Some(st.palette.selection_bg),
+            "光标行应为 selection_bg 底色"
         );
     }
 

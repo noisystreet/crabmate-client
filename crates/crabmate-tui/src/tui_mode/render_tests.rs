@@ -4,10 +4,13 @@ use super::super::status::{SPINNER_FRAMES, status_text};
 use crate::serve::SessionListRow;
 
 #[test]
-fn truncate_appends_ellipsis() {
-    assert_eq!(truncate_display("abcdef", 4), "abcd…");
+fn truncate_reserves_the_ellipsis_column() {
+    // 截断结果必须 ≤ 预算：旧实现「放不下就无条件补 …」会多出第 `width+1` 列，
+    // 让调用方按 width 算的预算（状态栏分段、侧栏选中行竖条）悄悄失准。
+    assert_eq!(truncate_display("abcdef", 4), "abc…");
     assert_eq!(truncate_display("你好", 3), "你…");
     assert_eq!(truncate_display("", 4), "");
+    assert_eq!(truncate_display("abc", 3), "abc", "装得下时不该改写");
 }
 
 #[test]
@@ -201,8 +204,8 @@ fn spinner_marks_share_static_mark_width() {
 
 #[test]
 fn folded_thinking_never_exceeds_content_width() {
-    // CJK 与 ASCII 都要覆盖：`truncate_display` 截断时可能比预算宽 1 列，
-    // 只有在首字符占 1 列（ASCII）时才会暴露「预算被抬高」的边界。
+    // CJK 与 ASCII 都要覆盖：折叠行是「标记 + 正文 + …」拼出来的，
+    // 正文那段由 `truncate_display` 截到预算内，超宽只可能来自拼接本身。
     for text in ["内容很长很长的思考文字", "abcdefghijklmnop"] {
         for cw in 0..40usize {
             let out = fold_thinking(text, cw);
@@ -416,7 +419,8 @@ fn status_line_lists_overrides() {
         search_total: 0,
     };
     let s = status_text(&info, Some("c1"), 200);
-    assert!(s.contains("serve http://127.0.0.1:8080"));
+    // 宽终端预算够：`serve` 显示完整 base（TUI 里没有第二个入口能看全量 URL）。
+    assert!(s.contains("serve http://127.0.0.1:8080"), "{s}");
     assert!(s.contains("model gpt-x*"));
     assert!(s.contains("role coder"));
     assert!(s.contains("mode plan"));
@@ -590,6 +594,33 @@ fn sidebar_rows_untitled_and_truncate() {
     st.replace_sessions(vec![row("a", "这是一个很长的会话标题标题", None)]);
     let rows = sidebar_rows(&st, 10);
     assert!(rows[1].to_string().contains("(untitled)") || rows[1].to_string().contains("…"));
+}
+
+/// 左会话栏选中态：竖条 + 选中底色；竖条颜色随焦点变，非聚焦时补 BOLD。
+#[test]
+fn sidebar_selected_row_gets_bar_and_selection_bg() {
+    let mut st = UiState::new();
+    st.set_palette(Palette::default());
+    st.replace_sessions(vec![row("a", "Alpha", Some("c1")), row("b", "Beta", None)]);
+    st.selected = 1;
+    let width = 20;
+    let rows = sidebar_rows(&st, width);
+    // 焦点在输入框：竖条退到 muted，但仍在；底色照旧。
+    assert_eq!(rows[2].spans[0].content, "▎", "选中行左缘应有竖条");
+    assert_eq!(rows[2].spans[0].style.fg, Some(st.palette.muted));
+    assert_eq!(rows[2].spans[1].style.bg, Some(st.palette.selection_bg));
+    assert!(
+        rows[2].spans[1].style.add_modifier.contains(Modifier::BOLD),
+        "非聚焦选中行补 BOLD，避免底色变淡后看不出当前会话"
+    );
+    assert_eq!(rows[1].spans.len(), 1, "未选中行不带竖条");
+    // 焦点移到左栏：竖条改 accent。
+    st.focus = Focus::Sidebar;
+    let rows = sidebar_rows(&st, width);
+    assert_eq!(rows[2].spans[0].style.fg, Some(st.palette.accent));
+    // 竖条占 1 列，故竖条 + 文本不得超过列宽预算。
+    let used = 1 + UnicodeWidthStr::width(rows[2].spans[1].content.as_ref());
+    assert!(used <= width, "选中行超宽：{used} > {width}");
 }
 
 #[test]

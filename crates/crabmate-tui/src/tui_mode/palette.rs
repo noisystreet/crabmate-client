@@ -8,7 +8,7 @@
 //! 终端能力差异由 [`Palette::resolve`] 兜底：无真彩时把 `Rgb` 降到最接近的 16 色，
 //! `NO_COLOR` / `TERM=dumb` 时退到无色模式（靠修饰位区分，不靠颜色）。
 
-use ratatui::style::Color;
+use ratatui::style::{Color, Modifier, Style};
 
 /// 语义化配色板。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,6 +26,10 @@ pub(crate) struct Palette {
     pub bg: Color,
     /// 顶栏 / 状态栏 / 侧栏 / composer 底色（比 `bg` 再压一档，形成条带）。
     pub chrome_bg: Color,
+    /// 列表选中行底色（桌面 `--surface-hover` 一档）。
+    ///
+    /// 无色模式下会被抹成 `Reset`，选中态改由 [`Palette::selection`] 退回反色表达。
+    pub selection_bg: Color,
     /// 边框（`--border`）。
     pub border: Color,
     /// 行内代码底色。
@@ -50,6 +54,7 @@ const DEFAULT_DARK: Palette = Palette {
     hit: rgb(0xe6, 0xc4, 0x5c),
     bg: rgb(0x16, 0x17, 0x27),
     chrome_bg: rgb(0x10, 0x11, 0x1f),
+    selection_bg: rgb(0x23, 0x25, 0x41),
     border: rgb(0x2a, 0x2b, 0x40),
     code_bg: rgb(0x1f, 0x20, 0x33),
     ok: rgb(0x6c, 0xc4, 0x9a),
@@ -65,6 +70,7 @@ const HIGH_CONTRAST_DARK: Palette = Palette {
     hit: rgb(0xff, 0xe0, 0x66),
     bg: rgb(0x24, 0x24, 0x24),
     chrome_bg: rgb(0x1a, 0x1a, 0x1a),
+    selection_bg: rgb(0x3a, 0x3a, 0x3a),
     border: rgb(0xe8, 0xe8, 0xe8),
     code_bg: rgb(0x2c, 0x2c, 0x2c),
     ok: rgb(0x66, 0xff, 0x99),
@@ -80,6 +86,7 @@ const MATERIAL_DARK: Palette = Palette {
     hit: rgb(0xe6, 0xc4, 0x5c),
     bg: rgb(0x1b, 0x1b, 0x1f),
     chrome_bg: rgb(0x14, 0x14, 0x17),
+    selection_bg: rgb(0x2b, 0x2b, 0x31),
     border: rgb(0x32, 0x32, 0x36),
     code_bg: rgb(0x24, 0x24, 0x28),
     ok: rgb(0x6c, 0xc4, 0x9a),
@@ -95,6 +102,7 @@ const SHADCN_DARK: Palette = Palette {
     hit: rgb(0xf5, 0xd0, 0x5a),
     bg: rgb(0x18, 0x18, 0x1b),
     chrome_bg: rgb(0x10, 0x10, 0x12),
+    selection_bg: rgb(0x26, 0x26, 0x31),
     border: rgb(0x27, 0x27, 0x2a),
     code_bg: rgb(0x27, 0x27, 0x2a),
     ok: rgb(0x6c, 0xc4, 0x9a),
@@ -110,6 +118,7 @@ const CRABMATE_LIGHT: Palette = Palette {
     hit: rgb(0x8a, 0x6d, 0x00),
     bg: rgb(0xf0, 0xec, 0xe2),
     chrome_bg: rgb(0xf7, 0xf4, 0xec),
+    selection_bg: rgb(0xe3, 0xde, 0xd0),
     border: rgb(0xe2, 0xdd, 0xd1),
     code_bg: rgb(0xe8, 0xe2, 0xd6),
     ok: rgb(0x2f, 0x7d, 0x4f),
@@ -125,6 +134,7 @@ const SHADCN_LIGHT: Palette = Palette {
     hit: rgb(0x8a, 0x6d, 0x00),
     bg: rgb(0xf4, 0xf4, 0xf5),
     chrome_bg: rgb(0xec, 0xec, 0xed),
+    selection_bg: rgb(0xdc, 0xdc, 0xe1),
     border: rgb(0xe4, 0xe4, 0xe7),
     code_bg: rgb(0xe8, 0xe8, 0xea),
     ok: rgb(0x2f, 0x7d, 0x4f),
@@ -140,6 +150,7 @@ const MONO: Palette = Palette {
     hit: Color::Reset,
     bg: Color::Reset,
     chrome_bg: Color::Reset,
+    selection_bg: Color::Reset,
     border: Color::Reset,
     code_bg: Color::Reset,
     ok: Color::Reset,
@@ -190,10 +201,24 @@ impl Palette {
         p.bg = nearest_ansi(p.bg);
         p.chrome_bg = nearest_ansi(p.chrome_bg);
         p.border = nearest_ansi(p.border);
+        p.selection_bg = nearest_ansi(p.selection_bg);
         p.code_bg = nearest_ansi(p.code_bg);
         p.ok = nearest_ansi(p.ok);
         p.err = nearest_ansi(p.err);
         p
+    }
+
+    /// 列表选中行样式：有彩走底色，无色模式退回反色。
+    ///
+    /// `mono` 下 `selection_bg` 已被抹成 `Reset`，只靠底色选中态会彻底消失，
+    /// 故这里必须降级到 `REVERSED`（这是无色模式的兜底分支，不是主路径）。
+    #[must_use]
+    pub(crate) fn selection(&self, fg: Color) -> Style {
+        if self.mono {
+            Style::new().add_modifier(Modifier::REVERSED)
+        } else {
+            Style::new().fg(fg).bg(self.selection_bg)
+        }
     }
 
     /// 按主题 + 终端能力解析出最终配色板（启动时一次）。
