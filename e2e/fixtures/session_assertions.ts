@@ -221,11 +221,21 @@ export async function assertNeedlesExactlyOnceAfterReload(args: {
   sid: string;
   needles: readonly string[];
 }): Promise<void> {
-  await args.page.reload({ waitUntil: "networkidle", timeout: 20_000 });
+  // `networkidle` 会被后台水合 / 轮询请求拖成偶发超时；UI 就绪由 composer 选择器保证。
+  await args.page.reload({ waitUntil: "domcontentloaded", timeout: 20_000 });
   await args.page.waitForSelector('[data-testid="chat-composer-input"]', {
     timeout: 15_000,
   });
   await openSessionInRail(args.page, args.sid);
+
+  // 会话切换后的 transcript 重建是异步的：点击后立刻采样会抢在重渲染之前拿到 0 命中
+  // （与 `mock-storage-consistency` 同一竞态）。先等每段旁白都已挂载，再判「恰好 1」；
+  // 双写（≥2）不会被这段等待掩盖，仍会在后续严格断言中失败。
+  const transcript = args.page.getByTestId("chat-tui-transcript");
+  for (const needle of args.needles) {
+    await expect(transcript).toContainText(needle, { timeout: 15_000 });
+  }
+
   await assertNeedlesExactlyOncePreHydrate({
     ...args,
     label: "post-reload",
