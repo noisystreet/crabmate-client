@@ -827,6 +827,174 @@
   border-radius: var(--radius-md);
 }
 
+/* —— 上下文压缩 / 裁剪卡：与工具回合同构（扁平透明底 + 单行折叠 + 详情） —— */
+.chat-tui-turn--trim {
+  align-self: stretch;
+  width: auto;
+  max-width: none;
+  border-radius: calc(var(--radius-md) / 2);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--text-md);
+  line-height: 1.45;
+  color: color-mix(in srgb, var(--text) 88%, var(--muted));
+  padding: 2px var(--space-inset-msg, 0.85rem);
+  box-sizing: border-box;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+
+.chat-tui-trim-card {
+  min-width: 0;
+}
+
+.chat-tui-trim-row {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0.35rem 0.55rem;
+  box-sizing: border-box;
+  overflow: hidden;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--text-md);
+  line-height: 1.45;
+}
+
+.chat-tui-trim-status {
+  flex: 0 0 1.4em;
+  box-sizing: border-box;
+  width: 1.4em;
+  min-width: 1.4em;
+  max-width: 1.4em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  line-height: 1;
+  font-size: var(--text-sm);
+  color: var(--muted);
+}
+
+.chat-tui-trim-mark {
+  flex: 0 0 auto;
+  opacity: 0.72;
+  font-size: var(--text-sm);
+  line-height: 1;
+}
+
+.chat-tui-trim-name {
+  flex: 0 0 auto;
+  font-weight: var(--font-weight-label, 600);
+  color: color-mix(in srgb, var(--text) 82%, var(--muted));
+}
+
+.chat-tui-trim-one-line {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: color-mix(in srgb, var(--text) 90%, var(--muted));
+}
+
+.chat-tui-trim-expand {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: var(--text-xs);
+  transition: transform 0.12s ease;
+}
+
+.chat-tui-trim-details {
+  /* 独立格式化上下文：summary 的负外边距只在本卡内部折算高度，不外溢影响相邻回合 */
+  display: flow-root;
+  margin: 0;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--text-md);
+}
+
+.chat-tui-trim-details > summary.chat-tui-trim-row {
+  /* 视觉仍是单行 1.75rem：用负外边距把命中区扩到 2.5rem（约 40px），兼顾 Android 触控 */
+  height: 2.5rem;
+  min-height: 2.5rem;
+  max-height: 2.5rem;
+  margin-block: -0.375rem;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.chat-tui-trim-details > summary.chat-tui-trim-row:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.chat-tui-trim-details > summary.chat-tui-trim-row::-webkit-details-marker {
+  display: none;
+}
+
+.chat-tui-trim-details[open] > summary .chat-tui-trim-expand {
+  transform: rotate(90deg);
+}
+
+.chat-tui-trim-detail-body {
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  max-height: 16rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: color-mix(in srgb, var(--surface) 88%, var(--bg));
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  border-radius: var(--radius-md);
+}
+
+/* 展开层：结构化字段（label / value 两列）+ 二级折叠的原始 JSON */
+.chat-tui-trim-facts {
+  display: grid;
+  gap: 4px 12px;
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  background: color-mix(in srgb, var(--surface) 88%, var(--bg));
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  border-radius: var(--radius-md);
+}
+
+.chat-tui-trim-fact {
+  display: grid;
+  grid-template-columns: minmax(0, 7rem) minmax(0, 1fr);
+  gap: 0.5rem;
+  align-items: baseline;
+  min-width: 0;
+}
+
+.chat-tui-trim-fact-label {
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+
+.chat-tui-trim-fact-value {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: color-mix(in srgb, var(--text) 90%, var(--muted));
+}
+
+.chat-tui-trim-raw {
+  margin-top: 6px;
+}
+
+.chat-tui-trim-raw-summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  user-select: none;
+}
+
+.chat-tui-trim-raw-summary:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+}
+
 /* 后台任务实时输出（/output 增量；常驻气泡下方，终端滚动区） */
 .chat-tui-tool-job-output {
   margin-top: 6px;

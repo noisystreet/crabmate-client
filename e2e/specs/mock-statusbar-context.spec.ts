@@ -397,4 +397,55 @@ test.describe("Mock：状态栏上下文用量百分比", () => {
     expect(trimmed.used).toBe(after.used);
     expect(trimmed.used).toBeLessThan(peak.used);
   });
+
+  test("context_trim 卡：detail 仅含 after_tokens 时折叠摘要与展开详情", async ({
+    page,
+  }) => {
+    // 服务端事件 detail 只有 `after_tokens`（无 n_before / n_after），
+    // 折叠层应退化为「已用 tokens」，展开层展示原始 JSON。
+    const turn: TurnTokens = {
+      used: 20_000,
+      maxInput: 200_000,
+      message: 18_000,
+      answer: "已压缩历史",
+      trimAfterTokens: 18_000,
+    };
+    await installSequencedMockSse(page, [turn], "e2e-mock-ctx-trim-card");
+    await seedSession(page, "s_e2e_mock_ctx_trim_card", {
+      sidePanelView: "workspace",
+      showTurnContextInject: true,
+    });
+    await runTurn(page, "请压缩上下文", turn.answer);
+
+    const card = page.locator('[data-testid="chat-tui-trim-card"]');
+    await expect(card).toBeVisible({ timeout: 10_000 });
+    await expect(card).toContainText("已裁剪历史");
+    await expect(card.locator(".chat-tui-trim-one-line")).toHaveText(
+      "已用 18.0k tokens",
+    );
+    // 压缩不是「任务完成」：状态符用中性语义的自定义标签。
+    // `role="img"` 让 `aria-label` 对裸 span 生效（generic role 不允许命名）。
+    await expect(card.locator(".chat-tui-trim-status")).toHaveAttribute(
+      "role",
+      "img",
+    );
+    await expect(card.locator(".chat-tui-trim-status")).toHaveAttribute(
+      "aria-label",
+      "上下文压缩",
+    );
+
+    const details = card.locator("details.chat-tui-trim-details");
+    await expect(details).not.toHaveAttribute("open", "");
+    await expect(card.locator(".chat-tui-trim-raw")).toBeHidden();
+
+    await card.locator("summary.chat-tui-trim-row").click();
+    await expect(details).toHaveAttribute("open", "");
+    const raw = card.locator(".chat-tui-trim-raw");
+    await expect(raw).toBeVisible();
+    await raw.locator("summary").click();
+    await expect(card.locator(".chat-tui-trim-detail-body")).toBeVisible();
+    await expect(card.locator(".chat-tui-trim-detail-body")).toContainText(
+      "after_tokens",
+    );
+  });
 });

@@ -27,6 +27,10 @@ Accepted
 3. **压缩 / 裁剪后回落**：收到 `kind=context_trim`、能解析出 `detail.after_tokens`、本轮流正被查看（`is_bound_session_active()`）、且存在服务端 cid 时，调 `ContextUsedWatermark::reset(key, after_tokens)` **无条件置位（允许回落）**——一次覆盖裁剪历史 / 工具输出压缩 / 摘要三类场景。
 4. **判定抽为纯函数**：`context_trim_watermark_reset(bound_active, after, cid)`（`frontend/src/timeline_scan.rs`），与 `context_trim_after_used_tokens` 同处，便于单测；接线处只做取值与 `update`。
 
+### 聊天主列的 trim 卡片形态
+
+同一 `kind=context_trim` 事件还会在聊天主列渲染一张旁注卡（受 `show_turn_context_inject` 开关控制，默认隐藏，与 `context_inject` 共用展示路径）：折叠行显示已用 / 可用上下文（缺窗口字段时退化为已用 tokens），展开层为结构化字段 + 原始 JSON 二级折叠。本 ADR 只约束状态栏的水位语义，卡片形态见实现与 `CHANGELOG.md`。
+
 ### 已知时序特性（刻意保留，勿当 bug「修掉」）
 
 `context_trim` 中途到达即把水位 reset 到 `after_tokens`，但显示分子 `axis.used` 仍是**上一回合末**的快照；`context_axis_apply_watermark` 做 `axis.used.max(watermark.used())`，故**中途显示维持旧峰值，回落要到本轮末 `RUN_FINISHED` 快照刷入后才可见**。
