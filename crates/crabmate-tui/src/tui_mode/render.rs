@@ -122,8 +122,9 @@ const TOOL_PREFIX_PROGRESS: &str = "[工具] ⠿ ";
 /// 逻辑行前缀：进行中的工具行多一个进度位。
 /// 进度位是**静态**占位，动画由渲染层换字符，因此不进入 body memo。
 fn prefix_for(log: &LogLine) -> &'static str {
-    match (log.kind, log.tool_ok) {
-        (LineKind::Tool, None) => TOOL_PREFIX_PROGRESS,
+    // 回放的历史工具行没有「进行中」这个概念，不带进度位占位。
+    match (log.kind, log.tool_ok, log.replayed) {
+        (LineKind::Tool, None, false) => TOOL_PREFIX_PROGRESS,
         _ => kind_prefix(log.kind),
     }
 }
@@ -179,7 +180,8 @@ fn fold_thinking(text: &str, content_width: usize) -> String {
 fn progress_mark_frame(st: &UiState, info: &StatusInfo) -> Option<usize> {
     let live = st.lines.last().is_some_and(|l| match l.kind {
         LineKind::Thinking => l.collapsed,
-        LineKind::Tool => l.tool_ok.is_none(),
+        // 回放的历史行不是「进行中」，别给它加 spinner。
+        LineKind::Tool => l.tool_ok.is_none() && !l.replayed,
         _ => false,
     });
     (info.running && !info.cancel_sent && live).then_some(info.spinner)

@@ -37,6 +37,30 @@ pub fn chat_stream_cancel(job_id: &str) -> String {
     format!("/chat/stream/{job_id}/cancel")
 }
 
+/// 已持久化会话的消息分页（`GET`；tui / frontend）。
+///
+/// `limit` / `before_index` 为 `None` 时走服务端默认页；`before_index` 是「本页第一条在
+/// 过滤后数组中的下标」，往旧翻页时回传。只有给了 `limit` 才带 `before_index`——与服务端
+/// 「不给 limit 就按默认页返回」的语义一致。`conversation_id` 按查询参数做百分号编码。
+#[must_use]
+pub fn conversation_messages(
+    conversation_id: &str,
+    limit: Option<u32>,
+    before_index: Option<u32>,
+) -> String {
+    let mut out = format!(
+        "/conversation/messages?conversation_id={}",
+        crate::handoff::percent_encode_unreserved(conversation_id)
+    );
+    if let Some(limit) = limit.filter(|&n| n > 0) {
+        out.push_str(&format!("&limit={limit}"));
+        if let Some(before) = before_index {
+            out.push_str(&format!("&before_index={before}"));
+        }
+    }
+    out
+}
+
 /// 删除服务端已持久化会话（`DELETE`；tui / frontend）。
 ///
 /// 服务端幂等（不存在 / 已过期也返回 204），非法 id 返回 400
@@ -52,7 +76,10 @@ pub fn conversation_delete(conversation_id: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{CHAT_STREAM, HEALTH, WORKSPACE, chat_stream_cancel, conversation_delete};
+    use super::{
+        CHAT_STREAM, HEALTH, WORKSPACE, chat_stream_cancel, conversation_delete,
+        conversation_messages,
+    };
 
     #[test]
     fn constants_are_stable() {
@@ -70,5 +97,34 @@ mod tests {
     fn conversation_delete_path_encodes_id() {
         assert_eq!(conversation_delete("c1"), "/conversation/c1");
         assert_eq!(conversation_delete("ws:a/b"), "/conversation/ws%3Aa%2Fb");
+    }
+
+    #[test]
+    fn conversation_messages_path_carries_paging() {
+        assert_eq!(
+            conversation_messages("c1", None, None),
+            "/conversation/messages?conversation_id=c1"
+        );
+        assert_eq!(
+            conversation_messages("c1", Some(80), None),
+            "/conversation/messages?conversation_id=c1&limit=80"
+        );
+        assert_eq!(
+            conversation_messages("c1", Some(80), Some(40)),
+            "/conversation/messages?conversation_id=c1&limit=80&before_index=40"
+        );
+    }
+
+    #[test]
+    fn conversation_messages_path_encodes_id_and_drops_zero_limit() {
+        assert_eq!(
+            conversation_messages("ws:a/b", None, None),
+            "/conversation/messages?conversation_id=ws%3Aa%2Fb"
+        );
+        // limit=0 视为「不指定」，否则服务端会拒或返回空页。
+        assert_eq!(
+            conversation_messages("c1", Some(0), Some(40)),
+            "/conversation/messages?conversation_id=c1"
+        );
     }
 }
