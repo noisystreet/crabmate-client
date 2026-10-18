@@ -257,29 +257,10 @@ pub fn approval_session_id() -> String {
 }
 
 /// 首条用户消息生成侧栏/「管理会话」列表标题：压平换行、折叠空白，截断过长前缀。
+///
+/// 规整算法已下沉到 `crabmate-client-api`（TUI 起名用同一份）；这里只绑定 Web 的默认标题。
 pub fn title_from_user_prompt(text: &str) -> String {
-    let t = text.trim();
-    if t.is_empty() {
-        return DEFAULT_CHAT_SESSION_TITLE.to_string();
-    }
-    let single_line: String = t
-        .chars()
-        .map(|c| if matches!(c, '\n' | '\r') { ' ' } else { c })
-        .collect();
-    let collapsed = single_line.split_whitespace().collect::<Vec<_>>().join(" ");
-    const MAX_CHARS: usize = 48;
-    let n = collapsed.chars().count();
-    if n <= MAX_CHARS {
-        collapsed
-    } else {
-        format!(
-            "{}…",
-            collapsed
-                .chars()
-                .take(MAX_CHARS.saturating_sub(1))
-                .collect::<String>()
-        )
-    }
+    crabmate_client_api::session_model::title_from_user_prompt(text, DEFAULT_CHAT_SESSION_TITLE)
 }
 
 /// 修改当前活跃会话并刷新 [`ChatSession::updated_at`]（视为对话/结构层面的活动时间）。

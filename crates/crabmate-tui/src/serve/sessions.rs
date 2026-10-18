@@ -10,8 +10,15 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 pub use crabmate_client_api::SessionListRow;
+/// 标题是否仍是「还没起名」的默认值。判定已下沉到共享层（Web `i18n::is_default_session_title`
+/// 用同一份）；空串**不算**默认标题。这里 re-export 保住 `serve::is_default_session_title`。
+pub use crabmate_client_api::session_model::is_default_session_title;
 
 use crabmate_client_api::paths;
+use crabmate_client_api::session_model::{
+    ChatSession, session_is_blank_chat, session_is_disposable_blank,
+    title_from_user_prompt as shared_title_from_user_prompt,
+};
 use crabmate_client_api::session_row_conversation_id_for_resume;
 
 use crate::serve::client::ServeClient;
@@ -122,11 +129,13 @@ impl IndexStamp {
     }
 }
 
-/// 新会话行 id：`s_<毫秒>_<纳秒>`（Web 端 `s_<毫秒>_<随机数>` 同族；本地索引只要求唯一）。
+/// 新会话行 id：`s_<毫秒>_<纳秒>`（Web 端 `s_<毫秒>_<随机数>` 同族）。
+///
+/// 格式由共享层 `new_session_id` 统一，熵源在这里注入（亚秒纳秒，同一毫秒内不撞）。
 #[must_use]
 pub fn new_local_session_id(now: SystemTime) -> String {
     let d = now.duration_since(UNIX_EPOCH).unwrap_or_default();
-    format!("s_{}_{}", d.as_millis(), d.subsec_nanos())
+    crabmate_client_api::new_session_id(d.as_millis() as i64, d.subsec_nanos())
 }
 
 /// 把变更应用到（服务端原样返回的）索引数组上。
@@ -290,32 +299,13 @@ fn bind_row(row: &mut Value, conversation_id: &str, now_ms: i64) {
 /// 所以建行就写这个值——Web 端展示时会按它自己的界面语言再折算。
 pub const DEFAULT_SESSION_TITLE: &str = "新会话";
 
-/// 标题是否仍是「还没起名」的默认值（对齐 Web `i18n::is_default_session_title`）。
-#[must_use]
-pub fn is_default_session_title(title: &str) -> bool {
-    let t = title.trim();
-    t == DEFAULT_SESSION_TITLE || t.eq_ignore_ascii_case("new chat")
-}
-
 /// 首条用户消息 → 侧栏标题（对齐 Web `session_ops::title_from_user_prompt`）：
 /// 压平换行、折叠连续空白，超过 48 字符取前 47 加 `…`；全空白退回默认标题。
+///
+/// 规整算法已下沉到 `crabmate-client-api`（Web 用同一份），这里只绑定 TUI 的中文默认标题。
 #[must_use]
 pub fn title_from_user_prompt(text: &str) -> String {
-    let t = text.trim();
-    if t.is_empty() {
-        return DEFAULT_SESSION_TITLE.to_string();
-    }
-    let single_line: String = t
-        .chars()
-        .map(|c| if matches!(c, '\n' | '\r') { ' ' } else { c })
-        .collect();
-    let collapsed = single_line.split_whitespace().collect::<Vec<_>>().join(" ");
-    const MAX_CHARS: usize = 48;
-    if collapsed.chars().count() <= MAX_CHARS {
-        return collapsed;
-    }
-    let kept: String = collapsed.chars().take(MAX_CHARS - 1).collect();
-    format!("{kept}…")
+    shared_title_from_user_prompt(text, DEFAULT_SESSION_TITLE)
 }
 
 /// 改默认标题：只有当前标题**明确等于中 / 英默认标题**时才写
@@ -334,17 +324,28 @@ fn set_default_title(row: &mut Value, title: &str, now_ms: i64) {
     obj.insert("updated_at".into(), Value::from(now_ms));
 }
 
-/// 空白会话行（对齐 Web `session_is_blank_chat`）：无正文且未绑定 `conversation_id`。
-fn row_is_blank_chat(row: &Value) -> bool {
-    row_messages_empty(row) && row_trimmed(row, "server_conversation_id").is_none()
+/// 把索引行解析成 Web 的 `ChatSession`；解析失败返回 `None`。
+///
+/// 服务端存的就是 Web 侧完整 `ChatSession`，所以判定只做**读**——写回仍走原始 JSON
+/// （`bind_row` / `set_default_title` 只动目标字段，不按类型重建整行，免得抹掉别的端数据）。
+///
+/// 解析失败（字段类型不对、`messages` 不是数组……）由调用方按「不是空白行」处理：宁可少认
+/// 一条空行去复用 / 回收，也不误动别的端写过的会话。
+///
+/// 成本：反序列化会把 `messages` 一并解析。这些都是 `/conv new` / 切走回收这类手动操作，
+/// 而且同一时刻只对「第一条命中」或「目标那一条」求值，跟一次 `GET` + 全量 `PUT` 比可忽略。
+fn row_as_session(row: &Value) -> Option<ChatSession> {
+    ChatSession::deserialize(row).ok()
 }
 
-/// 可丢弃的空白行（对齐 Web `is_disposable_blank_session`）：空白 + 无草稿 + 未置顶 / 收藏。
+/// 空白会话行（共享层 `session_is_blank_chat`）：无正文且未绑定 `conversation_id`。
+fn row_is_blank_chat(row: &Value) -> bool {
+    row_as_session(row).is_some_and(|s| session_is_blank_chat(&s))
+}
+
+/// 可丢弃的空白行（共享层 `session_is_disposable_blank`）：空白 + 无草稿 + 未置顶 / 收藏。
 fn row_is_disposable_blank(row: &Value) -> bool {
-    row_is_blank_chat(row)
-        && row_trimmed(row, "draft").is_none()
-        && !row_flag(row, "pinned")
-        && !row_flag(row, "starred")
+    row_as_session(row).is_some_and(|s| session_is_disposable_blank(&s))
 }
 
 /// 回收一条空白行（对齐 Web `reclaim_disposable_blank_session`）。
@@ -401,26 +402,12 @@ fn applied_without_removal(
     }
 }
 
-/// 行内 `messages` 是否为空：缺字段按空（与 Web 侧 serde default 同义），
-/// 形状不认识时按「有正文」——宁可少认一条空行，也不误动别的端写过的会话。
-fn row_messages_empty(row: &Value) -> bool {
-    match row.get("messages") {
-        None => true,
-        Some(Value::Array(list)) => list.is_empty(),
-        Some(_) => false,
-    }
-}
-
 /// 取字符串字段并 trim；缺失 / 非字符串 / 全空白都算 `None`。
 fn row_trimmed<'a>(row: &'a Value, key: &str) -> Option<&'a str> {
     row.get(key)
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|t| !t.is_empty())
-}
-
-fn row_flag(row: &Value, key: &str) -> bool {
-    row.get(key).and_then(Value::as_bool).unwrap_or(false)
 }
 
 #[cfg(test)]
@@ -865,5 +852,47 @@ mod tests {
         .expect("apply");
         assert_eq!(applied.sessions.as_array().map(Vec::len), Some(1));
         assert_eq!(applied.active_session_id.as_deref(), Some("s_blank"));
+    }
+
+    #[test]
+    fn malformed_row_is_never_treated_as_blank() {
+        // 判定改为按 `ChatSession` 反序列化后，字段类型不对会解析失败。
+        // 失败必须一律当作「不是空白行」——宁可少认一条空行去复用 / 回收，
+        // 也不能把别的端写过的行当成空壳删掉。
+        let bad_messages = json!({"id": "s1", "messages": {"0": "x"}});
+        assert!(!row_is_blank_chat(&bad_messages));
+        assert!(!row_is_disposable_blank(&bad_messages));
+
+        let bad_cid = json!({"id": "s2", "messages": [], "server_conversation_id": 42});
+        assert!(!row_is_blank_chat(&bad_cid));
+
+        let bad_flags = json!({"id": "s3", "messages": [], "pinned": "yes"});
+        assert!(!row_is_disposable_blank(&bad_flags));
+
+        // 对照：同样内容、类型正确时确实是空白行。
+        let well_formed = json!({"id": "s4", "messages": [], "server_conversation_id": null});
+        assert!(row_is_blank_chat(&well_formed));
+        assert!(row_is_disposable_blank(&well_formed));
+    }
+
+    #[test]
+    fn malformed_row_is_not_dropped_by_remove_blank() {
+        // 端到端：形状不对的行即使 id 命中，也不能被 RemoveBlank 删掉。
+        let raw = json!([{"id": "s1", "messages": {"0": "x"}}]);
+        let applied = apply_index_op(
+            &raw,
+            Some("s1"),
+            &SessionIndexOp::RemoveBlank {
+                local_id: "s1".into(),
+                next_active: None,
+            },
+            &stamp("x"),
+        )
+        .expect("apply");
+        assert_eq!(
+            applied.sessions.as_array().map(Vec::len),
+            Some(1),
+            "解析失败的行不可回收"
+        );
     }
 }
