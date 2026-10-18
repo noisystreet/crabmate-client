@@ -28,6 +28,7 @@ mod status;
 mod text;
 mod tool_summary;
 mod worker;
+mod workspace_cmd;
 mod workspace_keys;
 mod workspace_tree;
 mod ws_sidebar;
@@ -263,20 +264,6 @@ impl TuiApp<'_> {
         }
     }
 
-    fn fetch_ws_projects(&mut self) {
-        if self.job_tx.send(WorkerJob::WsProjects).is_err() {
-            self.st
-                .push_line(LineKind::System, "拉取项目池失败：worker 已退出");
-        }
-    }
-
-    fn switch_ws_project(&mut self, name: String) {
-        if self.job_tx.send(WorkerJob::WsSwitchProject(name)).is_err() {
-            self.st
-                .push_line(LineKind::System, "切换项目失败：worker 已退出");
-        }
-    }
-
     /// 聚焦右栏工作区目录树（Ctrl+W / 会话栏 w）；根列表未就绪时先拉一次。
     fn focus_workspace(&mut self) {
         if !self.st.ws_ready && !self.st.ws_root_pending {
@@ -345,6 +332,7 @@ impl TuiApp<'_> {
             }
             Control::Help => self.show_help(),
             Control::Find(arg) => self.do_find(arg),
+            Control::Workspace(arg) => self.workspace_command(arg),
             Control::Model(arg) => {
                 let echo = set_override_field(&mut self.overrides.model, arg, "model");
                 self.st.push_line(LineKind::System, &echo);
@@ -384,8 +372,9 @@ impl TuiApp<'_> {
     /// `/help`：向 transcript 打印本地命令与快捷键说明。
     fn show_help(&mut self) {
         for line in [
-            "本地命令：/quit /help /status /settings /mode /role /model /find /conv",
+            "本地命令：/quit /help /status /settings /mode /role /model /find /workspace /conv",
             "/mode ask|plan|act · /role <id> · /model <name>（off 清除，随对话生效）",
+            "/workspace <路径>（/cd 别名）切换 serve 工作区根；空参只看当前根；/workspace off 恢复 serve 默认根",
             "/settings（或 F2）：设置面板（模型名/API Base/温度/思考模式/API 密钥/Agent role/会话模式；S 保存）",
             "/find <词> 搜索并高亮 · /find（空参）跳下一处 · /find off 清除",
             "/conv list 刷新 · /conv use <id> 切换 · /conv new 新会话",
@@ -648,23 +637,11 @@ impl TuiApp<'_> {
             },
             UiEvent::WsProjects(result) => self.st.ws_pick_projects(result),
             UiEvent::WsProjectSwitch(result) => self.on_ws_project_switch(result),
+            UiEvent::WorkspaceQuery(result) => self.on_workspace_query(result),
+            UiEvent::WorkspaceSet(result) => self.on_workspace_set(result),
             UiEvent::UserData(result) => self.on_user_data(result),
             UiEvent::SavedLlm(result) => self.on_settings_saved_llm(result),
             UiEvent::SavedPrefs(result) => self.on_settings_saved_prefs(result),
-        }
-    }
-
-    /// 项目池切换结果：成功打印路径、关闭选择视图并刷新根列表；失败留在视图提示。
-    fn on_ws_project_switch(&mut self, result: Result<String, String>) {
-        if let Ok(path) = &result {
-            self.st
-                .push_line(LineKind::System, &format!("已切换到工作区：{path}"));
-        }
-        self.st.ws_pick_switch_result(result);
-        if self.st.ws_pick.is_none() {
-            // 切到新工作区：重置树与展开态（不能保留上一个项目的目录结构）。
-            self.st.ws_begin_root_fetch();
-            self.refresh_workspace(false);
         }
     }
 

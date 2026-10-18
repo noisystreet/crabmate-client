@@ -16,7 +16,8 @@ use crate::serve::{
     StreamSink, TermError, WebSessionsList, WorkspaceDirData, WorkspaceProjectsData,
     apply_web_session_op, fetch_conversation_messages, fetch_llm_overrides, fetch_user_data_prefs,
     fetch_web_sessions, fetch_workspace, fetch_workspace_dir, fetch_workspace_projects,
-    put_llm_overrides, put_user_data_prefs, run_chat_stream_sink, switch_workspace_project,
+    put_llm_overrides, put_user_data_prefs, run_chat_stream_sink, set_workspace,
+    switch_workspace_project,
 };
 
 use super::approve::{ApprovalPrompt, OverlayApprovalGate};
@@ -78,6 +79,10 @@ pub(super) enum UiEvent {
     WsProjects(Result<WorkspaceProjectsData, String>),
     /// 项目切换（`POST /workspace/projects`）结果：成功为 serve 端工作区路径。
     WsProjectSwitch(Result<String, String>),
+    /// `/workspace`（空参）查询结果：serve 当前工作区根。
+    WorkspaceQuery(Result<String, String>),
+    /// `/workspace <路径>` 设置结果：成功为生效路径（空串＝serve 默认根）。
+    WorkspaceSet(Result<String, String>),
     /// 启动时 user-data 设置快照（prefs + llm-overrides）拉取结果（合成持久层）。
     UserData(Result<PersistedSettings, String>),
     /// `llm-overrides` 保存结果：`Ok` 回传已应用动作（面板据此清 staged）。
@@ -115,6 +120,10 @@ pub(super) enum WorkerJob {
     WsProjects,
     /// 切换项目池内项目（`POST /workspace/projects`）。
     WsSwitchProject(String),
+    /// 查询当前工作区根（`GET /workspace`）：`/workspace` 空参。
+    WorkspaceQuery,
+    /// 按路径设置工作区根（`POST /workspace`，空串＝恢复 serve 默认）：`/workspace <路径>`。
+    WorkspaceSet(String),
     /// 拉取 user-data 设置快照（prefs + llm-overrides）→ 持久层。
     LoadUserSettings,
     /// 保存 llm-overrides：先 GET 再改 `client_llm.{model,api_base}` 再全量 PUT。
@@ -247,6 +256,8 @@ pub(super) fn spawn_worker(client: ServeClient, tx: Sender<UiEvent>) -> Sender<W
                 WorkerJob::RefreshStatus => job_refresh_status(&rt, &client, &tx),
                 WorkerJob::WsProjects => job_ws_projects(&rt, &client, &tx),
                 WorkerJob::WsSwitchProject(name) => job_ws_switch_project(&rt, &client, &name, &tx),
+                WorkerJob::WorkspaceQuery => job_workspace_query(&rt, &client, &tx),
+                WorkerJob::WorkspaceSet(path) => job_workspace_set(&rt, &client, &path, &tx),
                 WorkerJob::LoadUserSettings => job_load_user_settings(&rt, &client, &tx),
                 WorkerJob::SaveLlm(save) => job_save_llm(&rt, &client, save, &tx),
                 WorkerJob::SavePrefs(save) => job_save_prefs(&rt, &client, save, &tx),
@@ -395,6 +406,38 @@ fn job_ws_switch_project(
         .block_on(switch_workspace_project(client, name))
         .map_err(|e| e.to_string());
     let _ = tx.send(UiEvent::WsProjectSwitch(result));
+}
+
+/// `/workspace`（空参）：读 serve 当前工作区根（`GET /workspace`）。
+///
+/// `fetch_workspace` 不像 `fetch_workspace_dir` 那样检查体内 `error`（2xx 也可能带
+/// 语义错误），这里补上：否则用户会看到「当前工作区：」空一行而不是失败原因。
+fn job_workspace_query(rt: &tokio::runtime::Runtime, client: &ServeClient, tx: &Sender<UiEvent>) {
+    let result = match rt.block_on(fetch_workspace(client)) {
+        Ok(w) => match w.error.as_deref().map(str::trim) {
+            Some(e) if !e.is_empty() => Err(e.to_string()),
+            _ => Ok(w.path),
+        },
+        Err(e) => Err(e.to_string()),
+    };
+    let _ = tx.send(UiEvent::WorkspaceQuery(result));
+}
+
+/// `/workspace <路径>`：按路径设置 serve 工作区根（`POST /workspace`）。
+///
+/// 与项目池那条（`POST /workspace/projects`）是同一个后端状态的两种入口：项目池只能选
+/// 池内已有项目，这里把路径原样发出去（客户端不做白名单，能否落地由 serve 决定；
+/// 空串＝恢复 serve 默认）。
+fn job_workspace_set(
+    rt: &tokio::runtime::Runtime,
+    client: &ServeClient,
+    path: &str,
+    tx: &Sender<UiEvent>,
+) {
+    let result = rt
+        .block_on(set_workspace(client, path))
+        .map_err(|e| e.to_string());
+    let _ = tx.send(UiEvent::WorkspaceSet(result));
 }
 
 /// 启动时拉取 user-data 设置快照（`GET /user-data/prefs` + `GET /user-data/llm-overrides`）

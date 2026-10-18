@@ -16,6 +16,8 @@ pub enum Control {
     /// `/settings`：打开设置面板（等同 F2）。
     Settings,
     Find(Option<String>),
+    /// `/workspace [路径]`（`/cd` 别名）：空参查当前根，带参按路径切换。
+    Workspace(Option<String>),
     ConvNew,
     ConvRefresh,
     ConvUse(String),
@@ -82,6 +84,7 @@ pub fn parse_control(text: &str) -> Option<Control> {
         slash::ROLE => Some(Control::Role(arg_opt)),
         slash::STATUS => Some(Control::Status),
         "settings" => Some(Control::Settings),
+        slash::WORKSPACE | slash::CD => Some(Control::Workspace(arg_opt)),
         "find" | "search" | "grep" => Some(Control::Find(arg_opt)),
         slash::CONV => Some(match arg_opt {
             None => Control::ConvRefresh,
@@ -160,6 +163,28 @@ mod tests {
         assert!(matches!(
             parse_control("/grep off"),
             Some(Control::Find(Some(v))) if v == "off"
+        ));
+    }
+
+    #[test]
+    fn parse_control_workspace_and_cd_alias() {
+        assert!(matches!(
+            parse_control("/workspace"),
+            Some(Control::Workspace(None))
+        ));
+        assert!(matches!(
+            parse_control("/workspace /data/proj"),
+            Some(Control::Workspace(Some(v))) if v == "/data/proj"
+        ));
+        // 路径带空格：整体作为参数（`split_whitespace` 只切命令头）。
+        assert!(matches!(
+            parse_control("/cd /data/my proj"),
+            Some(Control::Workspace(Some(v))) if v == "/data/my proj"
+        ));
+        // 大小写与首尾空白同样接受。
+        assert!(matches!(
+            parse_control("  /WorkSpace   /tmp/x  "),
+            Some(Control::Workspace(Some(v))) if v == "/tmp/x"
         ));
     }
 
