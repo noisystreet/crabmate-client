@@ -356,8 +356,9 @@ pub fn is_default_session_title(title: &str) -> bool {
 
 /// 首条用户消息 → 侧栏标题：压平换行、折叠连续空白，超过 48 字符取前 47 加 `…`。
 ///
-/// 全空白退回 `default_title`——那是本端本地化决策（Web 传 [`DEFAULT_CHAT_SESSION_TITLE`]，
-/// TUI 传自己的中文默认标题），所以由调用方给，而不是写死在这里。
+/// 全空白退回 `default_title`——那是调用方的**存储用**默认值（Web 传
+/// [`DEFAULT_CHAT_SESSION_TITLE`]，TUI 传自己的中文默认标题），所以由调用方给，
+/// 而不是写死在这里。注意它不是界面语言下的展示标题（那是 `i18n::default_session_title`）。
 #[must_use]
 pub fn title_from_user_prompt(text: &str, default_title: &str) -> String {
     let t = text.trim();

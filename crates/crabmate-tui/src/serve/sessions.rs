@@ -330,22 +330,35 @@ fn set_default_title(row: &mut Value, title: &str, now_ms: i64) {
 /// （`bind_row` / `set_default_title` 只动目标字段，不按类型重建整行，免得抹掉别的端数据）。
 ///
 /// 解析失败（字段类型不对、`messages` 不是数组……）由调用方按「不是空白行」处理：宁可少认
-/// 一条空行去复用 / 回收，也不误动别的端写过的会话。
-///
-/// 成本：反序列化会把 `messages` 一并解析。这些都是 `/conv new` / 切走回收这类手动操作，
-/// 而且同一时刻只对「第一条命中」或「目标那一条」求值，跟一次 `GET` + 全量 `PUT` 比可忽略。
+/// 一条空行去复用 / 回收，也不误动别的端写过的会话。代价是**任何一条消息**的字段类型不符，
+/// 该行就再也不被认作空白行——`/conv new` 会改为新建一行（不会误删，但可能堆积空会话）。
 fn row_as_session(row: &Value) -> Option<ChatSession> {
     ChatSession::deserialize(row).ok()
 }
 
+/// `messages` 是否「可能为空」：只做长度快筛，**不解析**元素。
+///
+/// 仅用于跳过明显的非空行，真正的判定仍走共享层（这里不重复任何会话规则）。
+/// 非数组时返回 `false`——那种行本来也解析不出 `ChatSession`，结论一致。
+///
+/// 没有这一层，`apply_index_op` 的 `NewBlank` 会逐行完整反序列化（含全部 `messages`）只为
+/// 求一个 `messages.is_empty()`；而列表里绝大多数行都有正文，那等于全表解析。
+fn messages_look_empty(row: &Value) -> bool {
+    match row.get("messages") {
+        None => true,
+        Some(Value::Array(list)) => list.is_empty(),
+        Some(_) => false,
+    }
+}
+
 /// 空白会话行（共享层 `session_is_blank_chat`）：无正文且未绑定 `conversation_id`。
 fn row_is_blank_chat(row: &Value) -> bool {
-    row_as_session(row).is_some_and(|s| session_is_blank_chat(&s))
+    messages_look_empty(row) && row_as_session(row).is_some_and(|s| session_is_blank_chat(&s))
 }
 
 /// 可丢弃的空白行（共享层 `session_is_disposable_blank`）：空白 + 无草稿 + 未置顶 / 收藏。
 fn row_is_disposable_blank(row: &Value) -> bool {
-    row_as_session(row).is_some_and(|s| session_is_disposable_blank(&s))
+    messages_look_empty(row) && row_as_session(row).is_some_and(|s| session_is_disposable_blank(&s))
 }
 
 /// 回收一条空白行（对齐 Web `reclaim_disposable_blank_session`）。
@@ -868,6 +881,11 @@ mod tests {
 
         let bad_flags = json!({"id": "s3", "messages": [], "pinned": "yes"});
         assert!(!row_is_disposable_blank(&bad_flags));
+
+        // 非空消息行：长度快筛直接短路，不看消息体是否畸形——都不算空行。
+        let with_messages = json!({"id": "s5", "messages": [{"id": "m1", "role": "user"}]});
+        assert!(!row_is_blank_chat(&with_messages));
+        assert!(!row_is_disposable_blank(&with_messages));
 
         // 对照：同样内容、类型正确时确实是空白行。
         let well_formed = json!({"id": "s4", "messages": [], "server_conversation_id": null});
