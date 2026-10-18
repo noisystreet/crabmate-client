@@ -39,6 +39,17 @@ pub struct WsRow {
     pub expanded: bool,
     /// 目录子列表在途的占位行（灰色「…」）。
     pub loading: bool,
+    /// 非真实条目（「…」加载占位 /「（空）」占位）：不可选中、不参与计数。
+    pub placeholder: bool,
+}
+
+/// Enter 在树行上的动作：目录切换展开态，文件交给事件循环插入输入框。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WsActivate {
+    /// 目录：已切换展开态；`fetch` 为 true 时需要拉取子列表。
+    Dir { rel: String, fetch: bool },
+    /// 文件：相对工作区根的 POSIX 路径。
+    File(String),
 }
 
 /// 父相对路径 + 子名 → 子相对路径（根下子项返回 `name`）。
@@ -62,6 +73,14 @@ pub fn ws_parent_rel(rel: &str) -> String {
 /// 展开中但子列表尚未到达的目录占位行路径（不会与真实条目重名）。
 fn ws_loading_rel(rel: &str) -> String {
     format!("{rel}/\u{22ef}_loading")
+}
+
+/// 展开后无子项时插入的占位行文案（否则「…」一消失就像没响应）。
+const EMPTY_DIR_TEXT: &str = "（空）";
+
+/// 空目录占位行路径（不会与真实条目重名）。
+fn ws_empty_rel(rel: &str) -> String {
+    format!("{rel}/\u{22ef}_empty")
 }
 
 /// 把已加载目录缓存 + 展开集扁平化为可见行（深度优先；目录紧跟其后代）。
@@ -90,18 +109,35 @@ fn build_ws_rows(
                 is_dir: entry.is_dir,
                 expanded: open,
                 loading: false,
+                placeholder: false,
             });
-            if open && cache.contains_key(&rel) {
-                push_children(out, cache, expanded, &rel, indent + 1);
-            } else if open {
-                out.push(WsRow {
+            if !open {
+                continue;
+            }
+            match cache.get(&rel) {
+                Some(children) => {
+                    push_children(out, cache, expanded, &rel, indent + 1);
+                    if children.is_empty() {
+                        out.push(WsRow {
+                            indent: indent + 1,
+                            rel: ws_empty_rel(&rel),
+                            name: EMPTY_DIR_TEXT.to_string(),
+                            is_dir: false,
+                            expanded: false,
+                            loading: false,
+                            placeholder: true,
+                        });
+                    }
+                }
+                None => out.push(WsRow {
                     indent: indent + 1,
                     rel: ws_loading_rel(&rel),
                     name: "\u{22ef}".to_string(),
                     is_dir: false,
                     expanded: false,
                     loading: true,
-                });
+                    placeholder: true,
+                }),
             }
         }
     }
@@ -119,17 +155,41 @@ impl UiState {
         self.ws_rows = build_ws_rows(&self.ws_dir_cache, &self.ws_expanded);
     }
 
-    /// 光标收敛到当前可见行界内。
+    /// 光标收敛：先夹到界内，再避开设不可选中的占位行（「…」/「（空）」）。
     fn ws_clamp_cursor(&mut self) {
-        let last = self.ws_rows.len().saturating_sub(1);
-        if self.ws_cursor > last {
-            self.ws_cursor = last;
+        if self.ws_rows.is_empty() {
+            self.ws_cursor = 0;
+            return;
+        }
+        self.ws_cursor = self.ws_cursor.min(self.ws_rows.len() - 1);
+        if !self.ws_rows[self.ws_cursor].placeholder {
+            return;
+        }
+        // 优先向后（视觉下方）找真实条目，找不到再向前找。
+        if let Some(i) =
+            (self.ws_cursor..self.ws_rows.len()).find(|&i| !self.ws_rows[i].placeholder)
+        {
+            self.ws_cursor = i;
+        } else if let Some(i) = (0..self.ws_cursor)
+            .rev()
+            .find(|&i| !self.ws_rows[i].placeholder)
+        {
+            self.ws_cursor = i;
         }
     }
 
     /// 记录根目录列表已入队（进入工作区视图前的去重标记）。
     pub fn ws_begin_root_fetch(&mut self) {
         self.ws_root_pending = true;
+    }
+
+    /// 手动刷新前占位：已有根请求在途时返回 false（避免连按 `r` 排队多个根请求）。
+    pub fn ws_begin_refresh(&mut self) -> bool {
+        if self.ws_root_pending {
+            return false;
+        }
+        self.ws_root_pending = true;
+        true
     }
 
     /// 根目录列表成功到达：整体替换树并刷新顶栏路径。
@@ -144,7 +204,68 @@ impl UiState {
         self.ws_dir_cache.clear();
         self.ws_dir_cache.insert(String::new(), data.entries);
         self.ws_cursor = 0;
+        self.ws_pending_cursor = None;
         self.ws_refresh_rows();
+    }
+
+    /// 手动刷新根目录：保留展开集与光标位置；返回需要重新拉取的已展开目录。
+    ///
+    /// 子目录缓存全部作废（刷新就是要拿新数据），但展开态保留：调用方按返回列表
+    /// 重新入队，在途期间这些目录下显示「…」占位。若根路径已变化（外部切走工作区），
+    /// 保留旧展开态没有意义，退回重置语义。
+    pub fn ws_root_replace_keep(&mut self, data: WorkspaceDirData) -> Vec<String> {
+        let p = data.path.trim();
+        if self
+            .workspace_path
+            .as_deref()
+            .is_some_and(|old| old.trim() != p)
+        {
+            self.ws_root_replace(data);
+            return Vec::new();
+        }
+        let cursor_rel = self
+            .ws_rows
+            .get(self.ws_cursor)
+            .filter(|r| !r.placeholder)
+            .map(|r| r.rel.clone());
+        let old_cursor = self.ws_cursor;
+        self.workspace_path = (!p.is_empty()).then(|| p.to_string());
+        self.ws_ready = true;
+        self.ws_root_pending = false;
+        self.ws_root_err = None;
+        self.ws_dir_cache.clear();
+        self.ws_dir_cache.insert(String::new(), data.entries);
+        let mut refetch: Vec<String> = self.ws_expanded.iter().cloned().collect();
+        refetch.sort();
+        self.ws_loading = refetch.iter().cloned().collect();
+        self.ws_refresh_rows();
+        // 光标优先按 rel 还原；该行暂不可见（在展开目录内）时落到最近存活祖先，
+        // 同时记下目标 rel，等子列表重载后再归位。
+        self.ws_cursor = cursor_rel
+            .as_deref()
+            .and_then(|rel| self.ws_row_index_near(rel))
+            .unwrap_or_else(|| old_cursor.min(self.ws_rows.len().saturating_sub(1)));
+        self.ws_clamp_cursor();
+        self.ws_pending_cursor = cursor_rel.filter(|rel| {
+            self.ws_rows
+                .get(self.ws_cursor)
+                .is_none_or(|r| r.rel != *rel)
+        });
+        refetch
+    }
+
+    /// `rel` 自身或其最近存活祖先的行下标（刷新后光标落点）。
+    fn ws_row_index_near(&self, rel: &str) -> Option<usize> {
+        let mut cur = rel.to_string();
+        loop {
+            if let Some(i) = self.ws_rows.iter().position(|r| r.rel == cur) {
+                return Some(i);
+            }
+            if cur.is_empty() {
+                return None;
+            }
+            cur = ws_parent_rel(&cur);
+        }
     }
 
     /// 根目录列表失败：保留旧数据，记录占位错误；返回是否需要提示（由事件循环发系统行）。
@@ -157,26 +278,62 @@ impl UiState {
         fresh
     }
 
+    /// 打开目录：写入展开集、按需标记加载中并刷新可见行；返回是否需要拉取子列表。
+    fn ws_open_dir(&mut self, rel: &str) -> bool {
+        self.ws_expanded.insert(rel.to_string());
+        let fetch = !self.ws_dir_cache.contains_key(rel) && !self.ws_loading.contains(rel);
+        if fetch {
+            self.ws_loading.insert(rel.to_string());
+        }
+        self.ws_refresh_rows();
+        fetch
+    }
+
     /// 展开/折叠光标所在目录；需要拉子列表时返回其相对路径（事件循环据此入队）。
     pub fn ws_toggle_dir(&mut self) -> Option<String> {
         let row = self.ws_rows.get(self.ws_cursor).filter(|r| r.is_dir)?;
         let rel = row.rel.clone();
+        self.ws_pending_cursor = None;
         if self.ws_expanded.contains(&rel) {
             self.ws_expanded.remove(&rel);
             self.ws_refresh_rows();
             return None;
         }
-        self.ws_expanded.insert(rel.clone());
-        let fetch = !self.ws_dir_cache.contains_key(&rel) && !self.ws_loading.contains(&rel);
-        if fetch {
-            self.ws_loading.insert(rel.clone());
+        self.ws_open_dir(&rel).then_some(rel)
+    }
+
+    /// 向右：只展开目录（已展开则不动，避免 `→` 反而收起）。
+    pub fn ws_expand_dir(&mut self) -> Option<String> {
+        let row = self
+            .ws_rows
+            .get(self.ws_cursor)
+            .filter(|r| r.is_dir && !r.placeholder)?;
+        let rel = row.rel.clone();
+        self.ws_pending_cursor = None;
+        if self.ws_expanded.contains(&rel) {
+            return None;
         }
-        self.ws_refresh_rows();
-        fetch.then_some(rel)
+        self.ws_open_dir(&rel).then_some(rel)
+    }
+
+    /// Enter：目录切换展开态；文件返回相对路径（由事件循环插入输入框）。
+    pub fn ws_activate(&mut self) -> Option<WsActivate> {
+        let row = self.ws_rows.get(self.ws_cursor)?;
+        if row.placeholder {
+            return None;
+        }
+        let rel = row.rel.clone();
+        self.ws_pending_cursor = None;
+        if !row.is_dir {
+            return Some(WsActivate::File(rel));
+        }
+        let fetch = self.ws_toggle_dir().is_some();
+        Some(WsActivate::Dir { rel, fetch })
     }
 
     /// 向左：折叠展开中的目录；否则跳到父目录行（根行不动作）。
     pub fn ws_left(&mut self) {
+        self.ws_pending_cursor = None;
         let Some(row) = self.ws_rows.get(self.ws_cursor) else {
             return;
         };
@@ -194,15 +351,53 @@ impl UiState {
         }
     }
 
-    /// 上/下移动树光标（空树不动作）。
+    /// 上/下移动树光标（跳过不可选中的占位行；到边不动作）。
     pub fn ws_move(&mut self, up: bool) {
+        self.ws_pending_cursor = None;
         if self.ws_rows.is_empty() {
             return;
         }
-        if up {
-            self.ws_cursor = self.ws_cursor.saturating_sub(1);
-        } else if self.ws_cursor + 1 < self.ws_rows.len() {
-            self.ws_cursor += 1;
+        let mut i = self.ws_cursor.min(self.ws_rows.len() - 1);
+        loop {
+            if up {
+                if i == 0 {
+                    return;
+                }
+                i -= 1;
+            } else {
+                if i + 1 >= self.ws_rows.len() {
+                    return;
+                }
+                i += 1;
+            }
+            if !self.ws_rows[i].placeholder {
+                self.ws_cursor = i;
+                return;
+            }
+        }
+    }
+
+    /// Home/End：跳到首个/末个可选行。
+    pub fn ws_move_to_edge(&mut self, end: bool) {
+        self.ws_pending_cursor = None;
+        let idx = if end {
+            self.ws_rows.iter().rposition(|r| !r.placeholder)
+        } else {
+            self.ws_rows.iter().position(|r| !r.placeholder)
+        };
+        if let Some(i) = idx {
+            self.ws_cursor = i;
+        }
+    }
+
+    /// PgUp/PgDn：按页步逐行移动（自动跳过占位行，到边即停）。
+    pub fn ws_page(&mut self, down: bool, page: usize) {
+        for _ in 0..page.max(1) {
+            let before = self.ws_cursor;
+            self.ws_move(!down);
+            if self.ws_cursor == before {
+                break;
+            }
         }
     }
 
@@ -222,6 +417,22 @@ impl UiState {
             }
         }
         self.ws_clamp_cursor();
+        self.ws_restore_pending_cursor();
+    }
+
+    /// 刷新时记下的目标行已重新可见 → 光标归位（用户此间手动移动过则已清空，不再抢光标）。
+    fn ws_restore_pending_cursor(&mut self) {
+        let Some(rel) = self.ws_pending_cursor.clone() else {
+            return;
+        };
+        if let Some(i) = self
+            .ws_rows
+            .iter()
+            .position(|r| r.rel == rel && !r.placeholder)
+        {
+            self.ws_cursor = i;
+            self.ws_pending_cursor = None;
+        }
     }
 
     /// 子目录列表失败：目录仍在展开中则收起并让光标回到该目录行；返回是否收起。
@@ -341,266 +552,5 @@ impl UiState {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn ent(name: &str, is_dir: bool) -> WorkspaceDirEntry {
-        WorkspaceDirEntry {
-            name: name.to_string(),
-            is_dir,
-        }
-    }
-
-    fn data(path: &str, entries: Vec<WorkspaceDirEntry>) -> WorkspaceDirData {
-        WorkspaceDirData {
-            path: path.to_string(),
-            entries,
-            error: None,
-        }
-    }
-
-    #[test]
-    fn ws_rel_helpers() {
-        assert_eq!(ws_child_rel("", "src"), "src");
-        assert_eq!(ws_child_rel("src", "main.rs"), "src/main.rs");
-        assert_eq!(ws_parent_rel("src/lib/mod.rs"), "src/lib");
-        assert_eq!(ws_parent_rel("main.rs"), "");
-    }
-
-    #[test]
-    fn ws_root_replace_flattens_root_rows() {
-        let mut s = UiState::new();
-        s.ws_root_replace(data(
-            "/data/p",
-            vec![
-                ent("src", true),
-                ent("README.md", false),
-                ent("target", true),
-            ],
-        ));
-        assert!(s.ws_ready);
-        assert_eq!(s.workspace_path.as_deref(), Some("/data/p"));
-        assert_eq!(s.ws_rows.len(), 3);
-        assert_eq!(s.ws_rows[0].rel, "src");
-        assert_eq!(s.ws_rows[0].indent, 0);
-        assert!(s.ws_rows[0].is_dir && !s.ws_rows[0].expanded);
-        assert_eq!(s.ws_rows[1].name, "README.md");
-        // 空树时光标收敛到 0
-        s.ws_cursor = 9;
-        s.ws_root_replace(data("/empty", Vec::new()));
-        assert!(s.ws_rows.is_empty());
-        assert_eq!(s.ws_cursor, 0);
-    }
-
-    #[test]
-    fn ws_expand_fetches_and_inserts_children() {
-        let mut s = UiState::new();
-        s.ws_root_replace(data("/p", vec![ent("src", true)]));
-        assert_eq!(s.ws_toggle_dir(), Some("src".to_string()), "应请求子列表");
-        assert!(s.ws_loading.contains("src"));
-        // 列表在途时再 toggle 不会重复请求（先折叠再展开）
-        assert_eq!(s.ws_toggle_dir(), None, "折叠不请求");
-        assert_eq!(s.ws_toggle_dir(), None, "加载中不重复请求");
-        s.ws_dir_ok(
-            "src",
-            data("/p/src", vec![ent("lib", true), ent("main.rs", false)]),
-        );
-        assert_eq!(s.ws_rows.len(), 3, "src 展开后其后代可见");
-        assert_eq!(s.ws_rows[1].rel, "src/lib");
-        assert_eq!(s.ws_rows[1].indent, 1);
-        assert_eq!(s.ws_rows[2].name, "main.rs");
-        // 折叠 src → 后代行消失，光标留在 src
-        s.ws_cursor = 0;
-        assert_eq!(s.ws_toggle_dir(), None);
-        assert_eq!(s.ws_rows.len(), 1);
-        assert!(!s.ws_expanded.contains("src"));
-    }
-
-    #[test]
-    fn ws_dir_ok_caches_when_collapsed_early() {
-        let mut s = UiState::new();
-        s.ws_root_replace(data("/p", vec![ent("docs", true)]));
-        assert_eq!(s.ws_toggle_dir(), Some("docs".to_string()));
-        // 结果到达前用户已折叠：缓存仍写入，再次展开无需请求
-        assert_eq!(s.ws_toggle_dir(), None);
-        s.ws_dir_ok("docs", data("/p/docs", vec![ent("a.md", false)]));
-        assert_eq!(s.ws_rows.len(), 1);
-        assert_eq!(s.ws_toggle_dir(), None, "已有缓存不再请求");
-        assert_eq!(s.ws_rows.len(), 2);
-    }
-
-    #[test]
-    fn ws_dir_failed_collapses_and_reports() {
-        let mut s = UiState::new();
-        s.ws_root_replace(data("/p", vec![ent("x", true)]));
-        assert_eq!(s.ws_toggle_dir(), Some("x".to_string()));
-        assert!(s.ws_dir_failed("x"), "展开中的目录失败应收起并上报");
-        assert!(!s.ws_expanded.contains("x"));
-        assert!(!s.ws_loading.contains("x"));
-        assert_eq!(s.ws_rows.len(), 1);
-        // 已折叠目录收到迟到的失败结果不应提示
-        assert_eq!(s.ws_toggle_dir(), Some("x".to_string()));
-        assert_eq!(s.ws_toggle_dir(), None, "先折叠");
-        assert!(!s.ws_dir_failed("x"));
-    }
-
-    #[test]
-    fn ws_cursor_moves_and_left_goes_parent() {
-        let mut s = UiState::new();
-        s.ws_root_replace(data("/p", vec![ent("a", true), ent("b", true)]));
-        s.ws_toggle_dir();
-        s.ws_dir_ok("a", data("/p/a", vec![ent("a1.txt", false)]));
-        // rows: a(0) a1.txt(1) b(2)
-        s.ws_cursor = 1;
-        s.ws_left();
-        assert_eq!(s.ws_cursor, 0, "文件行向左跳到父目录");
-        s.ws_toggle_dir(); // 折叠 a
-        s.ws_move(false); // 到 b
-        assert_eq!(s.ws_rows[s.ws_cursor].rel, "b");
-        s.ws_left(); // b 未展开 → 父是根，不动作
-        assert_eq!(s.ws_rows[s.ws_cursor].rel, "b");
-        s.ws_move(true);
-        s.ws_move(true); // 顶部不动
-        assert_eq!(s.ws_cursor, 0);
-    }
-
-    #[test]
-    fn ws_root_failed_keeps_old_tree() {
-        let mut s = UiState::new();
-        s.ws_root_replace(data("/p", vec![ent("keep", true)]));
-        assert!(!s.ws_root_failed("busy"), "已有数据时失败不提示、保留旧树");
-        assert!(s.ws_ready);
-        assert_eq!(s.ws_rows.len(), 1);
-        // 首次加载失败：占位错误 + 后续可重试
-        let mut t = UiState::new();
-        assert!(t.ws_root_failed("down"));
-        assert_eq!(t.ws_root_err.as_deref(), Some("down"));
-        t.ws_begin_root_fetch();
-        t.ws_root_replace(data("/p", vec![]));
-        assert_eq!(t.ws_root_err, None);
-    }
-
-    #[test]
-    fn ws_expand_shows_loading_placeholder_until_loaded() {
-        let mut s = UiState::new();
-        s.ws_root_replace(data("/p", vec![ent("a", true)]));
-        assert_eq!(s.ws_toggle_dir(), Some("a".to_string()));
-        assert_eq!(s.ws_rows.len(), 2, "在途时目录下方应有占位行");
-        assert!(s.ws_rows[1].loading);
-        assert_eq!(s.ws_rows[1].name, "\u{22ef}");
-        // 空目录到达：占位消失、仍保持展开（无子行即空目录）
-        s.ws_dir_ok("a", data("/p/a", Vec::new()));
-        assert_eq!(s.ws_rows.len(), 1);
-        assert!(!s.ws_rows[0].loading);
-    }
-
-    #[test]
-    fn ws_dir_ok_shifts_cursor_past_inserted_children() {
-        let mut s = UiState::new();
-        s.ws_root_replace(data("/p", vec![ent("a", true), ent("b", false)]));
-        assert_eq!(s.ws_toggle_dir(), Some("a".to_string()));
-        // rows: a(0) …(1) b(2) → 光标移到 b
-        s.ws_move(false);
-        s.ws_move(false);
-        assert_eq!(s.ws_rows[s.ws_cursor].rel, "b");
-        // 两个子行顶开占位：b 应后移到索引 3，光标保持指向 b
-        s.ws_dir_ok("a", data("/p/a", vec![ent("a1", false), ent("a2", false)]));
-        assert_eq!(s.ws_rows[s.ws_cursor].rel, "b");
-        assert_eq!(s.ws_rows.len(), 4);
-    }
-
-    #[test]
-    fn ws_dir_failed_keeps_cursor_on_following_row() {
-        let mut s = UiState::new();
-        s.ws_root_replace(data("/p", vec![ent("a", true), ent("b", false)]));
-        assert_eq!(s.ws_toggle_dir(), Some("a".to_string()));
-        s.ws_move(false);
-        s.ws_move(false); // 光标在占位下的 b
-        assert!(s.ws_dir_failed("a"));
-        assert_eq!(s.ws_rows.len(), 2);
-        assert_eq!(
-            s.ws_rows[s.ws_cursor].rel, "b",
-            "收起顶开下行时保持指向原行"
-        );
-    }
-
-    #[test]
-    fn ws_dir_failed_anchors_cursor_on_dir_row_when_inside() {
-        let mut s = UiState::new();
-        s.ws_root_replace(data("/p", vec![ent("a", true)]));
-        assert_eq!(s.ws_toggle_dir(), Some("a".to_string()));
-        s.ws_move(false); // 光标落在占位行
-        assert!(s.ws_dir_failed("a"));
-        assert_eq!(s.ws_rows.len(), 1);
-        assert_eq!(s.ws_rows[s.ws_cursor].rel, "a", "占位行消失后回到目录行");
-    }
-
-    fn pool(enabled: bool, projects: Vec<&str>) -> WorkspaceProjectsData {
-        WorkspaceProjectsData {
-            enabled,
-            pool_path: None,
-            projects: projects.into_iter().map(str::to_string).collect(),
-        }
-    }
-
-    #[test]
-    fn ws_pick_open_close_and_projects() {
-        let mut s = UiState::new();
-        assert!(s.ws_open_pick(), "首次进入应拉项目池");
-        assert!(s.ws_pick.as_ref().unwrap().loading);
-        assert!(!s.ws_open_pick(), "已在选择中不重复进入");
-        s.ws_pick_projects(Ok(pool(true, vec!["proj-a", "proj-b"])));
-        let st = s.ws_pick.as_ref().unwrap();
-        assert!(!st.loading);
-        assert_eq!(
-            st.projects,
-            vec!["proj-a".to_string(), "proj-b".to_string()]
-        );
-        assert!(st.enabled);
-        s.ws_close_pick();
-        assert!(s.ws_pick.is_none());
-    }
-
-    #[test]
-    fn ws_pick_error_and_refresh_gating() {
-        let mut s = UiState::new();
-        s.ws_open_pick();
-        s.ws_pick_projects(Err("boom".to_string()));
-        assert_eq!(s.ws_pick.as_ref().unwrap().error.as_deref(), Some("boom"));
-        assert!(s.ws_pick_refresh());
-        assert!(!s.ws_pick_refresh(), "加载中不重复拉取");
-        s.ws_pick_projects(Ok(pool(true, Vec::new())));
-        assert_eq!(s.ws_pick.as_ref().unwrap().error, None);
-    }
-
-    #[test]
-    fn ws_pick_switch_success_closes_failure_keeps() {
-        let mut s = UiState::new();
-        s.ws_open_pick();
-        s.ws_pick_projects(Ok(pool(true, vec!["proj-a", "proj-b"])));
-        s.ws_pick_move(false);
-        assert_eq!(s.ws_cursor, 1);
-        assert_eq!(s.ws_pick_begin_switch(), Some("proj-b".to_string()));
-        assert!(s.ws_pick_begin_switch().is_none(), "切换在途不重复");
-        s.ws_pick_switch_result(Ok("/pool/proj-b".to_string()));
-        assert!(s.ws_pick.is_none(), "成功关闭选择视图");
-
-        s.ws_open_pick();
-        s.ws_pick_projects(Ok(pool(true, vec!["proj-x"])));
-        assert_eq!(s.ws_pick_begin_switch(), Some("proj-x".to_string()));
-        s.ws_pick_switch_result(Err("denied".to_string()));
-        assert!(s.ws_pick.is_some(), "失败留在选择视图");
-        assert_eq!(s.ws_pick.as_ref().unwrap().error.as_deref(), Some("denied"));
-        assert!(!s.ws_pick.as_ref().unwrap().busy);
-    }
-
-    #[test]
-    fn ws_pick_move_clamps_to_project_list() {
-        let mut s = UiState::new();
-        s.ws_open_pick();
-        s.ws_pick_move(false); // 空列表不越界
-        s.ws_pick_projects(Ok(pool(true, vec!["only"])));
-        s.ws_pick_move(false);
-        assert_eq!(s.ws_cursor, 0, "单项目不越界");
-    }
-}
+#[path = "workspace_tree_tests.rs"]
+mod tests;

@@ -50,7 +50,11 @@ pub(super) enum UiEvent {
     /// 工作区根路径（`GET /workspace`，随会话刷新顺带拉取；只更新顶栏，不动目录树）。
     WorkspacePath(Option<String>),
     /// 工作区根目录列表（`GET /workspace`）：路径给顶栏，entries 给目录树。
-    Workspace(Result<WorkspaceDirData, String>),
+    /// `keep` 区分用户手动刷新（保留展开态）与首次/切换工作区（重置）。
+    Workspace {
+        result: Result<WorkspaceDirData, String>,
+        keep: bool,
+    },
     /// 已展开子目录的列表（`GET /workspace?path=`）结果。
     WorkspaceDir {
         rel: String,
@@ -79,7 +83,10 @@ pub(super) struct TurnRequest {
 pub(super) enum WorkerJob {
     Turn(Box<TurnRequest>),
     RefreshSessions,
-    RefreshWorkspace,
+    /// 拉取根目录列表；`keep` 为 true 时保留展开态与光标（用户手动刷新）。
+    RefreshWorkspace {
+        keep: bool,
+    },
     /// 展开目录 → 拉取该目录子列表。
     WorkspaceDir(String),
     RefreshStatus,
@@ -186,7 +193,9 @@ pub(super) fn spawn_worker(client: ServeClient, tx: Sender<UiEvent>) -> Sender<W
             match job {
                 WorkerJob::Turn(job) => run_turn_job(&rt, &client, *job, &tx),
                 WorkerJob::RefreshSessions => job_refresh_sessions(&rt, &client, &tx),
-                WorkerJob::RefreshWorkspace => job_refresh_workspace_root(&rt, &client, &tx),
+                WorkerJob::RefreshWorkspace { keep } => {
+                    job_refresh_workspace_root(&rt, &client, &tx, keep);
+                }
                 WorkerJob::WorkspaceDir(rel) => job_workspace_dir(&rt, &client, &rel, &tx),
                 WorkerJob::RefreshStatus => job_refresh_status(&rt, &client, &tx),
                 WorkerJob::WsProjects => job_ws_projects(&rt, &client, &tx),
@@ -256,11 +265,12 @@ fn job_refresh_workspace_root(
     rt: &tokio::runtime::Runtime,
     client: &ServeClient,
     tx: &Sender<UiEvent>,
+    keep: bool,
 ) {
     let result = rt
         .block_on(fetch_workspace_dir(client, None))
         .map_err(|e| e.to_string());
-    let _ = tx.send(UiEvent::Workspace(result));
+    let _ = tx.send(UiEvent::Workspace { result, keep });
 }
 
 /// 展开目录的子列表。

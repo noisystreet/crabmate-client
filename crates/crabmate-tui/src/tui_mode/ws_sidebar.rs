@@ -6,33 +6,92 @@
 
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use super::render::{SIDEBAR_HINT, sidebar_rows, truncate_display, workspace_basename};
 use super::state::{Focus, UiState};
 use super::workspace_tree::WsRow;
 
-/// 工作区树聚焦时的按键提示（占位性质，超宽即裁）。
-const WORKSPACE_HINT: &str = "↑↓选 Enter/→展开 ◀收起 p项目池 r刷新 w会话";
+/// 工作区树（目录行）聚焦时的按键提示。宽度必须 ≤ 侧栏内宽
+/// （`SIDEBAR_WIDTH` - 1 = 25 列），否则 `render_pane` 会直接裁掉尾部按键；中文按 2 列计。
+const WORKSPACE_HINT: &str = "Enter展开 ←收 r刷 p池 w栏";
+/// 文件行的提示：Enter 把相对路径插入输入框。
+const WORKSPACE_FILE_HINT: &str = "Enter插路径 ←父 r刷 w栏";
 /// 工作区未设置（顶栏路径为空）时的按键提示。
-const WORKSPACE_UNSET_HINT: &str = "未设置：p 从项目池选择 · r刷新";
+const WORKSPACE_UNSET_HINT: &str = "未设置：p 选项目池 · r刷";
 /// 项目池「选择/切换工作区」子视图的按键提示。
-const WORKSPACE_PICK_HINT: &str = "↑↓选 Enter切换 r刷新 Esc返回";
+const WORKSPACE_PICK_HINT: &str = "↑↓ Enter切换 r刷 Esc返回";
 
-/// 工作区侧栏标题：仅 `basename`（对齐 Desktop，不带“工作区: ”前缀；未获取时占位）。
-fn workspace_title(st: &UiState, width: usize) -> String {
+/// 工作区侧栏标题：`basename` 左对齐，`光标/总数` 右对齐（未就绪/空树时不显示计数）。
+fn workspace_title(st: &UiState, width: usize) -> Line<'static> {
     let name = st
         .workspace_path
         .as_deref()
         .filter(|s| !s.trim().is_empty())
         .map(workspace_basename)
-        .filter(|n| !n.is_empty());
-    match name {
-        Some(n) => truncate_display(&n, width),
-        None => truncate_display("（未获取）", width),
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| "（未获取）".to_string());
+    let total = st.ws_rows.iter().filter(|r| !r.placeholder).count();
+    let counter = if st.ws_ready && total > 0 {
+        let pos = st
+            .ws_rows
+            .iter()
+            .take(st.ws_cursor.saturating_add(1))
+            .filter(|r| !r.placeholder)
+            .count();
+        format!("{pos}/{total}")
+    } else {
+        String::new()
+    };
+    let counter_w = UnicodeWidthStr::width(counter.as_str());
+    let name_w = if counter.is_empty() {
+        width
+    } else {
+        width.saturating_sub(counter_w + 1)
+    };
+    let left = truncate_display(&name, name_w);
+    let mut spans = vec![Span::styled(
+        left.clone(),
+        Style::new().fg(Color::White).add_modifier(Modifier::BOLD),
+    )];
+    if !counter.is_empty() {
+        let pad = width
+            .saturating_sub(UnicodeWidthStr::width(left.as_str()))
+            .saturating_sub(counter_w);
+        spans.push(Span::styled(" ".repeat(pad), Style::new()));
+        spans.push(Span::styled(counter, Style::new().fg(Color::Gray)));
     }
+    Line::from(spans)
 }
 
-/// 单棵树行文本：缩进 + 目录 `▾/▸`（文件占位空格对齐）+ 名称。
+/// 名称按显示宽度做尾部截断：保留开头 `…` 与末尾字符，深层目录仍能看清文件名。
+fn truncate_name_tail(name: &str, width: usize) -> String {
+    if width == 0 {
+        return String::new();
+    }
+    if UnicodeWidthStr::width(name) <= width {
+        return name.to_string();
+    }
+    if width == 1 {
+        return "…".to_string();
+    }
+    let budget = width - 1;
+    let mut tail: Vec<char> = Vec::new();
+    let mut used = 0usize;
+    for ch in name.chars().rev() {
+        let cw = ch.width().unwrap_or(0);
+        if used + cw > budget {
+            break;
+        }
+        tail.push(ch);
+        used += cw;
+    }
+    let mut out = String::from("…");
+    out.extend(tail.into_iter().rev());
+    out
+}
+
+/// 单棵树行文本：缩进 + 目录 `▾/▸`（文件占位空格对齐）+ 名称（超宽保留尾部）。
 fn ws_row_text(row: &WsRow, width: usize) -> String {
     let pad = "  ".repeat(usize::from(row.indent));
     let glyph = if row.is_dir {
@@ -40,7 +99,15 @@ fn ws_row_text(row: &WsRow, width: usize) -> String {
     } else {
         "  "
     };
-    truncate_display(&format!("{pad}{glyph}{}", row.name), width)
+    let prefix = format!("{pad}{glyph}");
+    let prefix_w = UnicodeWidthStr::width(prefix.as_str());
+    if prefix_w >= width {
+        return truncate_display(&prefix, width);
+    }
+    format!(
+        "{prefix}{}",
+        truncate_name_tail(&row.name, width - prefix_w)
+    )
 }
 
 /// 追加一条左栏行（可选反色高亮）。
@@ -57,11 +124,7 @@ fn push_sidebar_line(rows: &mut Vec<Line<'static>>, text: String, fg: Color, hig
 /// 工作区侧栏内容行：首行标题，其后为扁平树（加载中/错误/空目录占位）。
 fn workspace_sidebar_rows(st: &UiState, width: usize) -> Vec<Line<'static>> {
     let mut rows: Vec<Line<'static>> = Vec::new();
-    let title_style = Style::new().fg(Color::White).add_modifier(Modifier::BOLD);
-    rows.push(Line::from(Span::styled(
-        workspace_title(st, width),
-        title_style,
-    )));
+    rows.push(workspace_title(st, width));
     let highlight_first = st.focus == Focus::Workspace && st.ws_cursor == 0;
     if !st.ws_ready {
         let (text, fg) = match st.ws_root_err.as_deref() {
@@ -85,7 +148,7 @@ fn workspace_sidebar_rows(st: &UiState, width: usize) -> Vec<Line<'static>> {
     }
     let highlight = st.focus == Focus::Workspace;
     for (i, row) in st.ws_rows.iter().enumerate() {
-        let fg = if row.loading {
+        let fg = if row.placeholder {
             Color::Gray
         } else if row.is_dir {
             Color::LightCyan
@@ -199,21 +262,25 @@ pub(super) fn workspace_content(
             (st.focus == Focus::Workspace).then_some(WORKSPACE_PICK_HINT),
         )
     } else {
-        let hint = if st.focus == Focus::Workspace {
-            Some(if st.workspace_path.is_none() {
-                WORKSPACE_UNSET_HINT
-            } else {
-                WORKSPACE_HINT
-            })
-        } else {
-            None
-        };
+        let hint = (st.focus == Focus::Workspace).then(|| workspace_hint(st));
         (workspace_sidebar_rows(st, width), st.ws_cursor, hint)
+    }
+}
+
+/// 按光标所在行选择提示文案（文件行强调 Enter 插入路径）。
+fn workspace_hint(st: &UiState) -> &'static str {
+    if st.workspace_path.is_none() {
+        return WORKSPACE_UNSET_HINT;
+    }
+    match st.ws_rows.get(st.ws_cursor) {
+        Some(row) if !row.placeholder && !row.is_dir => WORKSPACE_FILE_HINT,
+        _ => WORKSPACE_HINT,
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::super::render::SIDEBAR_WIDTH;
     use super::*;
 
     fn ws_row(indent: u8, rel: &str, name: &str, is_dir: bool, expanded: bool) -> WsRow {
@@ -224,6 +291,7 @@ mod tests {
             is_dir,
             expanded,
             loading: false,
+            placeholder: false,
         }
     }
 
@@ -311,6 +379,7 @@ mod tests {
         st.focus = Focus::Workspace;
         st.ws_cursor = 0; // 占位行不被反色，便于检查灰色前景
         st.ws_rows[1].loading = true;
+        st.ws_rows[1].placeholder = true;
         st.ws_rows[1].name = "\u{22ef}".to_string();
         let rows = workspace_sidebar_rows(&st, 60);
         assert_eq!(
@@ -423,11 +492,57 @@ mod tests {
         st.ws_ready = true;
         let (_, _, hint) = workspace_content(&st, 60);
         let hint = hint.unwrap();
-        assert!(hint.contains("Enter/→展开"), "正常树给树提示");
-        assert!(hint.contains('p'), "已设置工作区也可提示 p 切换项目");
+        assert!(hint.contains("Enter展开"), "正常树给树提示");
+        assert!(hint.contains('p'), "提示 p 切项目");
+        assert!(hint.contains('w'), "提示 w 回会话栏");
         st.ws_pick = Some(super::super::workspace_tree::WsPickState::default());
         let (rows, _, hint) = workspace_content(&st, 60);
         assert!(rows[0].to_string().contains("项目池"));
         assert!(hint.unwrap().contains("Enter切换"));
+    }
+
+    #[test]
+    fn hints_fit_sidebar_width() {
+        // 提示占满侧栏内宽（`SIDEBAR_WIDTH` - 1），超出会被 `render_pane` 直接裁掉尾按键。
+        for hint in [
+            WORKSPACE_HINT,
+            WORKSPACE_FILE_HINT,
+            WORKSPACE_UNSET_HINT,
+            WORKSPACE_PICK_HINT,
+        ] {
+            assert!(
+                UnicodeWidthStr::width(hint) < SIDEBAR_WIDTH as usize,
+                "提示超宽会被裁切：{hint}"
+            );
+        }
+    }
+
+    #[test]
+    fn workspace_title_right_aligns_counter() {
+        let mut st = ready_ws_state();
+        st.focus = Focus::Workspace;
+        st.ws_cursor = 1;
+        let title = workspace_title(&st, 24).to_string();
+        assert!(title.starts_with("proj"), "左对齐 basename：{title}");
+        assert!(title.ends_with("2/3"), "右对齐光标/总数：{title}");
+        assert_eq!(UnicodeWidthStr::width(title.as_str()), 24, "补足内宽");
+    }
+
+    #[test]
+    fn deep_row_keeps_filename_tail() {
+        let row = ws_row(2, "a/b/c/module_name.rs", "module_name.rs", false, false);
+        let text = ws_row_text(&row, 14);
+        assert!(UnicodeWidthStr::width(text.as_str()) <= 14);
+        assert!(text.ends_with("name.rs"), "保留尾部文件名：{text}");
+        assert!(text.contains('…'), "中段省略：{text}");
+    }
+
+    #[test]
+    fn file_row_hint_mentions_insert() {
+        let mut st = ready_ws_state();
+        st.focus = Focus::Workspace;
+        st.ws_cursor = 2; // README.md
+        let (_, _, hint) = workspace_content(&st, 60);
+        assert!(hint.unwrap().contains("插路径"));
     }
 }

@@ -19,6 +19,7 @@ mod settings_panel;
 mod state;
 mod tool_summary;
 mod worker;
+mod workspace_keys;
 mod workspace_tree;
 mod ws_sidebar;
 
@@ -39,7 +40,7 @@ use ratatui::backend::{Backend, CrosstermBackend};
 
 use crate::serve::{
     ApprovalDecision, ChatStreamOptions, ChatStreamOutcome, ServeClient, StreamCancel,
-    new_approval_session_id,
+    WorkspaceDirData, new_approval_session_id,
 };
 
 use self::approve::{decision_for_key, decision_summary};
@@ -212,17 +213,59 @@ impl TuiApp<'_> {
         }
     }
 
-    fn refresh_workspace(&mut self) {
-        if self.job_tx.send(WorkerJob::RefreshWorkspace).is_err() {
+    /// 拉取根目录列表；`keep` 为 true 时保留已展开目录与光标（用户手动 `r` 刷新）。
+    fn refresh_workspace(&mut self, keep: bool) {
+        if self
+            .job_tx
+            .send(WorkerJob::RefreshWorkspace { keep })
+            .is_err()
+        {
+            // worker 已退出：回滚在途标记，否则后续 `r` 会被去重逻辑永久吞掉。
+            self.st.ws_root_pending = false;
             self.st
                 .push_line(LineKind::System, "刷新工作区失败：worker 已退出");
         }
     }
 
-    fn fetch_ws_dir(&mut self, rel: String) {
-        if self.job_tx.send(WorkerJob::WorkspaceDir(rel)).is_err() {
+    /// 拉取子目录列表；发送失败时清掉该目录的在途标记并收起，返回是否已入队。
+    fn fetch_ws_dir(&mut self, rel: String) -> bool {
+        if self
+            .job_tx
+            .send(WorkerJob::WorkspaceDir(rel.clone()))
+            .is_err()
+        {
             self.st
                 .push_line(LineKind::System, "拉取目录失败：worker 已退出");
+            self.st.ws_dir_failed(&rel);
+            return false;
+        }
+        true
+    }
+
+    /// 根目录列表结果：`keep` 时保留展开态并重拉子目录，否则整体重置。
+    fn on_workspace_root(&mut self, result: Result<WorkspaceDirData, String>, keep: bool) {
+        match result {
+            Ok(data) => {
+                let refetch = if keep {
+                    self.st.ws_root_replace_keep(data)
+                } else {
+                    self.st.ws_root_replace(data);
+                    Vec::new()
+                };
+                // 保留展开态时子缓存已作废，逐个重拉（worker 串行，父目录先到）。
+                for rel in refetch {
+                    self.fetch_ws_dir(rel);
+                }
+            }
+            Err(e) => {
+                // 手动刷新失败时树还在，`ws_root_failed` 不会置侧栏错误；必须显式提示，
+                // 否则用户只看到「正在刷新…」后毫无反馈。
+                let fresh = self.st.ws_root_failed(&e);
+                if (fresh && self.st.focus == Focus::Workspace) || keep {
+                    self.st
+                        .push_line(LineKind::System, &format!("拉取工作区失败：{e}"));
+                }
+            }
         }
     }
 
@@ -244,7 +287,7 @@ impl TuiApp<'_> {
     fn focus_workspace(&mut self) {
         if !self.st.ws_ready && !self.st.ws_root_pending {
             self.st.ws_begin_root_fetch();
-            self.refresh_workspace();
+            self.refresh_workspace(false);
         }
         self.st.focus = Focus::Workspace;
     }
@@ -467,63 +510,6 @@ impl TuiApp<'_> {
         }
     }
 
-    /// 工作区目录树视图按键：浏览目录层级（Enter/→ 展开，← 收起或回父目录）。
-    fn on_workspace_key(&mut self, key: KeyEvent) {
-        if self.st.ws_pick.is_some() {
-            self.on_workspace_pick_key(key);
-            return;
-        }
-        match key.code {
-            KeyCode::Tab | KeyCode::BackTab | KeyCode::Esc => self.st.focus = Focus::Input,
-            KeyCode::Up => self.st.ws_move(true),
-            KeyCode::Down => self.st.ws_move(false),
-            KeyCode::Enter | KeyCode::Right => {
-                if let Some(rel) = self.st.ws_toggle_dir() {
-                    self.fetch_ws_dir(rel);
-                }
-            }
-            KeyCode::Left => self.st.ws_left(),
-            KeyCode::Char('r') => {
-                self.st.push_line(LineKind::System, "正在刷新工作区目录…");
-                self.refresh_workspace();
-            }
-            // w：回到左栏会话列表（w 两侧对称切换）。
-            KeyCode::Char('w') => self.st.focus = Focus::Sidebar,
-            // p：项目池「选择/切换工作区」（未设置=首次选择；已设置=切到另一项目）。
-            KeyCode::Char('p') if self.st.ws_open_pick() => {
-                self.fetch_ws_projects();
-            }
-            _ => {}
-        }
-    }
-
-    /// 项目池「选择/切换工作区」子视图按键。
-    fn on_workspace_pick_key(&mut self, key: KeyEvent) {
-        match key.code {
-            KeyCode::Esc | KeyCode::Tab | KeyCode::BackTab => self.st.ws_close_pick(),
-            KeyCode::Up => self.st.ws_pick_move(true),
-            KeyCode::Down => self.st.ws_pick_move(false),
-            KeyCode::Char('r') => {
-                if self.st.ws_pick_refresh() {
-                    self.fetch_ws_projects();
-                }
-            }
-            KeyCode::Enter | KeyCode::Right => {
-                if let Some(name) = self.st.ws_pick_begin_switch() {
-                    self.st
-                        .push_line(LineKind::System, &format!("正在切换到项目「{name}」…"));
-                    self.switch_ws_project(name);
-                }
-            }
-            // w：关闭选择并回到左栏会话。
-            KeyCode::Char('w') => {
-                self.st.ws_close_pick();
-                self.st.focus = Focus::Sidebar;
-            }
-            _ => {}
-        }
-    }
-
     fn on_input_key(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Enter if is_alt_enter(&key) => self.st.insert_newline(),
@@ -640,15 +626,7 @@ impl TuiApp<'_> {
                 }
             },
             UiEvent::WorkspacePath(path) => self.st.workspace_path = path,
-            UiEvent::Workspace(result) => match result {
-                Ok(data) => self.st.ws_root_replace(data),
-                Err(e) => {
-                    if self.st.ws_root_failed(&e) && self.st.focus == Focus::Workspace {
-                        self.st
-                            .push_line(LineKind::System, &format!("拉取工作区失败：{e}"));
-                    }
-                }
-            },
+            UiEvent::Workspace { result, keep } => self.on_workspace_root(result, keep),
             UiEvent::WorkspaceDir { rel, result } => match result {
                 Ok(data) => self.st.ws_dir_ok(&rel, data),
                 Err(e) => {
@@ -676,7 +654,9 @@ impl TuiApp<'_> {
         }
         self.st.ws_pick_switch_result(result);
         if self.st.ws_pick.is_none() {
-            self.refresh_workspace();
+            // 切到新工作区：重置树与展开态（不能保留上一个项目的目录结构）。
+            self.st.ws_begin_root_fetch();
+            self.refresh_workspace(false);
         }
     }
 
@@ -876,7 +856,7 @@ pub async fn run_tui(
     // 启动即拉一次会话 / 工作区根 / serve 默认状态 / user-data 设置快照（失败以系统行提示）。
     app.refresh_sessions();
     app.st.ws_begin_root_fetch();
-    app.refresh_workspace();
+    app.refresh_workspace(false);
     app.refresh_status();
     app.load_user_settings();
     app.run_loop(&mut terminal)
