@@ -1,7 +1,13 @@
-//! `GET /user-data/workspaces/current/sessions`：与 WASM 同源的 Web 会话列表。
+//! `GET /user-data/workspaces/current/sessions`：与 WASM 同源的 Web 会话列表，
+//! 以及把 TUI 新建/绑定的会话写回同一份索引（`GET` → 改 → 全量 `PUT`）。
+//!
+//! 服务端对这一数组做**透传存储**（行是 Web 的全量 `ChatSession`，含 `messages` 等
+//! 瘦行未列出的字段），因此写入必须保留未改动行的原样 JSON，不能按瘦行重建。
+
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Deserialize;
-use serde_json::Value;
+use serde_json::{Value, json};
 
 pub use crabmate_client_api::SessionListRow;
 
@@ -15,6 +21,9 @@ use crate::serve::error::TermError;
 pub struct WebSessionsList {
     pub sessions: Vec<SessionListRow>,
     pub active_session_id: Option<String>,
+    /// 服务端原样的 `sessions` 数组（缺失 / 非数组时为 `Value::Null`）。
+    /// 写入路径必须基于它做局部修改，否则会把 Web 端的 `messages` 等字段清空。
+    pub raw_sessions: Value,
 }
 
 #[derive(Debug, Deserialize)]
@@ -31,6 +40,7 @@ pub async fn fetch_web_sessions(client: &ServeClient) -> Result<WebSessionsList,
     Ok(WebSessionsList {
         sessions: SessionListRow::parse_rows(&dto.sessions),
         active_session_id: dto.active_session_id,
+        raw_sessions: dto.sessions,
     })
 }
 
@@ -40,10 +50,390 @@ pub fn conversation_id_for_resume(row: &SessionListRow) -> Option<&str> {
     session_row_conversation_id_for_resume(row)
 }
 
+// ── 写入：会话索引的本地变更（TUI 新建 / 首轮绑定）────────────────────────
+
+/// 会话索引的一次变更；执行方式是 `GET` 最新索引 → 应用 → 全量 `PUT`。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SessionIndexOp {
+    /// 新建一条空白会话并设为 active；列表里已有空白会话时**复用**它
+    /// （对齐 Web `prefer_or_create_empty_session`）。
+    NewBlank {
+        /// 侧栏标题：Web 的默认标题（`i18n::default_session_title`）。
+        /// 首轮发送后会按 Web 规则换成消息摘要（见 [`SessionIndexOp::SetTitle`]）。
+        title: String,
+    },
+    /// 把服务端 `conversation_id` 写回指定本地会话行（新建的会话首轮结束后调用）。
+    BindServer {
+        /// 本地会话行 id（`sessions[].id`）。
+        local_id: String,
+        conversation_id: String,
+    },
+    /// 切走时回收空白会话行（对齐 Web `reclaim_disposable_blank_session`）。
+    RemoveBlank {
+        /// 本地会话行 id（`sessions[].id`）。
+        local_id: String,
+        /// 切过去的那一行的 id：被回收的行若正是 active，active 要改指向它；
+        /// 为 `None` 时不回收 active 行，否则服务端 active 会指向已删除的行。
+        next_active: Option<String>,
+    },
+    /// 把默认标题换成首条用户消息摘要（对齐 Web：仅当标题仍是默认值时才改）。
+    SetTitle {
+        /// 本地会话行 id（`sessions[].id`）。
+        local_id: String,
+        /// 新标题（已由 [`title_from_user_prompt`] 规整）。
+        title: String,
+    },
+}
+
+/// 应用变更所需的外部输入（时间戳与新行 id 由调用方注入，便于单测固定）。
+#[derive(Debug, Clone)]
+pub struct IndexStamp {
+    pub now_ms: i64,
+    pub new_local_id: String,
+}
+
+/// 变更结果：回传要 `PUT` 的全量数组、新的 active id，以及本次命中的本地行 id。
+#[derive(Debug, Clone)]
+pub struct AppliedIndex {
+    pub sessions: Value,
+    pub active_session_id: Option<String>,
+    pub local_id: String,
+    /// `NewBlank` 是复用了已有空白行（`true`）还是新插入一行（`false`）。
+    pub reused_blank: bool,
+}
+
+/// 写入成功后回传 UI 的最小信息（不带整份索引）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionIndexApplied {
+    /// 本次命中的本地会话行 id。
+    pub local_id: String,
+    /// `NewBlank` 是否复用了已有空白行。
+    pub reused_blank: bool,
+}
+
+impl IndexStamp {
+    /// 当前时刻 + 一个新行 id。
+    #[must_use]
+    pub fn now() -> Self {
+        Self {
+            now_ms: now_ms(),
+            new_local_id: new_local_session_id(SystemTime::now()),
+        }
+    }
+}
+
+/// 新会话行 id：`s_<毫秒>_<纳秒>`（Web 端 `s_<毫秒>_<随机数>` 同族；本地索引只要求唯一）。
+#[must_use]
+pub fn new_local_session_id(now: SystemTime) -> String {
+    let d = now.duration_since(UNIX_EPOCH).unwrap_or_default();
+    format!("s_{}_{}", d.as_millis(), d.subsec_nanos())
+}
+
+/// 把变更应用到（服务端原样返回的）索引数组上。
+///
+/// 除命中的行外，其余行逐字段原样保留——服务端透传存储，重建会丢 Web 端会话正文。
+pub fn apply_index_op(
+    raw: &Value,
+    active: Option<&str>,
+    op: &SessionIndexOp,
+    stamp: &IndexStamp,
+) -> Result<AppliedIndex, TermError> {
+    let mut rows: Vec<Value> = raw.as_array().cloned().unwrap_or_default();
+    match op {
+        SessionIndexOp::NewBlank { title } => {
+            // 已有空白会话就复用：与 Web 一致，别在侧栏堆「0 消息」的空会话。
+            let reuse = rows
+                .iter()
+                .find(|r| row_is_blank_chat(r))
+                .and_then(|r| row_id(r))
+                .map(str::to_string);
+            if let Some(id) = reuse {
+                return Ok(AppliedIndex {
+                    sessions: Value::Array(rows),
+                    active_session_id: Some(id.clone()),
+                    local_id: id,
+                    reused_blank: true,
+                });
+            }
+            rows.insert(0, blank_row(&stamp.new_local_id, title, stamp.now_ms));
+            Ok(AppliedIndex {
+                sessions: Value::Array(rows),
+                active_session_id: Some(stamp.new_local_id.clone()),
+                local_id: stamp.new_local_id.clone(),
+                reused_blank: false,
+            })
+        }
+        SessionIndexOp::BindServer {
+            local_id,
+            conversation_id,
+        } => {
+            let row = rows
+                .iter_mut()
+                .find(|r| row_id(r) == Some(local_id.as_str()))
+                .ok_or_else(|| {
+                    TermError::Message(format!("会话行已不存在：{local_id}（可能被其他端删除）"))
+                })?;
+            bind_row(row, conversation_id, stamp.now_ms);
+            Ok(AppliedIndex {
+                sessions: Value::Array(rows),
+                active_session_id: active.map(str::to_string),
+                local_id: local_id.clone(),
+                reused_blank: false,
+            })
+        }
+        SessionIndexOp::RemoveBlank {
+            local_id,
+            next_active,
+        } => Ok(remove_blank_row(
+            &mut rows,
+            active,
+            local_id,
+            next_active.as_deref(),
+        )),
+        SessionIndexOp::SetTitle { local_id, title } => {
+            if let Some(row) = rows
+                .iter_mut()
+                .find(|r| row_id(r) == Some(local_id.as_str()))
+            {
+                set_default_title(row, title, stamp.now_ms);
+            }
+            Ok(AppliedIndex {
+                sessions: Value::Array(rows),
+                active_session_id: active.map(str::to_string),
+                local_id: local_id.clone(),
+                reused_blank: false,
+            })
+        }
+    }
+}
+
+/// `PUT` 体：`active_session_id` 为 `None` 时不写（与 Web 端 `skip_serializing_if` 同义）。
+///
+/// 注意这是**整体替换**，只带这两个顶层字段：服务端若在同一对象上另有字段（版本号之类），
+/// 这次 `PUT` 会把它们抹掉。目前 `WebSessionsDto` 只认这两个，所以暂时安全——服务端在该
+/// 对象上加字段时必须同步这里。
+#[must_use]
+pub fn put_sessions_body(applied: &AppliedIndex) -> Value {
+    let mut body = serde_json::Map::new();
+    body.insert("sessions".into(), applied.sessions.clone());
+    if let Some(active) = applied.active_session_id.as_deref() {
+        body.insert(
+            "active_session_id".into(),
+            Value::String(active.to_string()),
+        );
+    }
+    Value::Object(body)
+}
+
+/// `GET` 最新索引 → 应用变更 → 全量 `PUT`；成功返回命中的本地行 id。
+pub async fn apply_web_session_op(
+    client: &ServeClient,
+    op: &SessionIndexOp,
+) -> Result<SessionIndexApplied, TermError> {
+    let list = fetch_web_sessions(client).await?;
+    let applied = apply_index_op(
+        &list.raw_sessions,
+        list.active_session_id.as_deref(),
+        op,
+        &IndexStamp::now(),
+    )?;
+    client
+        .put_json_no_content(
+            paths::USER_DATA_WORKSPACE_SESSIONS,
+            &put_sessions_body(&applied),
+        )
+        .await?;
+    Ok(SessionIndexApplied {
+        local_id: applied.local_id,
+        reused_blank: applied.reused_blank,
+    })
+}
+
+fn now_ms() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+fn row_id(row: &Value) -> Option<&str> {
+    row.get("id")?.as_str()
+}
+
+/// 空白会话行：只写 Web `ChatSession` 的必需 / 常用字段（其余由 Web 侧 serde 缺省补齐）。
+/// 不写 `workspace_root`：工作区分桶由 Web 侧规范化路径决定，TUI 不自造绑定。
+fn blank_row(id: &str, title: &str, now_ms: i64) -> Value {
+    json!({
+        "id": id,
+        "title": title,
+        "draft": "",
+        "messages": [],
+        "updated_at": now_ms,
+        "pinned": false,
+        "starred": false,
+    })
+}
+
+/// 绑定服务端会话：只动 `server_conversation_id` 与 `updated_at`，其余字段原样保留。
+fn bind_row(row: &mut Value, conversation_id: &str, now_ms: i64) {
+    let Some(obj) = row.as_object_mut() else {
+        return;
+    };
+    obj.insert(
+        "server_conversation_id".into(),
+        Value::String(conversation_id.to_string()),
+    );
+    obj.insert("updated_at".into(), Value::from(now_ms));
+}
+
+/// Web 侧「默认会话标题」（`i18n::default_session_title(ZhHans)`）：TUI 界面文案固定中文，
+/// 所以建行就写这个值——Web 端展示时会按它自己的界面语言再折算。
+pub const DEFAULT_SESSION_TITLE: &str = "新会话";
+
+/// 标题是否仍是「还没起名」的默认值（对齐 Web `i18n::is_default_session_title`）。
+#[must_use]
+pub fn is_default_session_title(title: &str) -> bool {
+    let t = title.trim();
+    t == DEFAULT_SESSION_TITLE || t.eq_ignore_ascii_case("new chat")
+}
+
+/// 首条用户消息 → 侧栏标题（对齐 Web `session_ops::title_from_user_prompt`）：
+/// 压平换行、折叠连续空白，超过 48 字符取前 47 加 `…`；全空白退回默认标题。
+#[must_use]
+pub fn title_from_user_prompt(text: &str) -> String {
+    let t = text.trim();
+    if t.is_empty() {
+        return DEFAULT_SESSION_TITLE.to_string();
+    }
+    let single_line: String = t
+        .chars()
+        .map(|c| if matches!(c, '\n' | '\r') { ' ' } else { c })
+        .collect();
+    let collapsed = single_line.split_whitespace().collect::<Vec<_>>().join(" ");
+    const MAX_CHARS: usize = 48;
+    if collapsed.chars().count() <= MAX_CHARS {
+        return collapsed;
+    }
+    let kept: String = collapsed.chars().take(MAX_CHARS - 1).collect();
+    format!("{kept}…")
+}
+
+/// 改默认标题：只有当前标题**明确等于中 / 英默认标题**时才写
+/// （对齐 Web `is_default_session_title` 的守卫），别端起过名或用户改过的标题一律保留。
+///
+/// 标题缺失 / 空串按 Web 语义**不算**默认标题（Web `ChatSession.title` 缺省为空串，
+/// `is_default_session_title("")` 是 `false`），所以这两种情况下不动它。
+fn set_default_title(row: &mut Value, title: &str, now_ms: i64) {
+    if !row_trimmed(row, "title").is_some_and(is_default_session_title) {
+        return;
+    }
+    let Some(obj) = row.as_object_mut() else {
+        return;
+    };
+    obj.insert("title".into(), Value::String(title.to_string()));
+    obj.insert("updated_at".into(), Value::from(now_ms));
+}
+
+/// 空白会话行（对齐 Web `session_is_blank_chat`）：无正文且未绑定 `conversation_id`。
+fn row_is_blank_chat(row: &Value) -> bool {
+    row_messages_empty(row) && row_trimmed(row, "server_conversation_id").is_none()
+}
+
+/// 可丢弃的空白行（对齐 Web `is_disposable_blank_session`）：空白 + 无草稿 + 未置顶 / 收藏。
+fn row_is_disposable_blank(row: &Value) -> bool {
+    row_is_blank_chat(row)
+        && row_trimmed(row, "draft").is_none()
+        && !row_flag(row, "pinned")
+        && !row_flag(row, "starred")
+}
+
+/// 回收一条空白行（对齐 Web `reclaim_disposable_blank_session`）。
+///
+/// 只有「确实可丢弃」的行才删：别的端写过的正文 / 草稿 / 收藏一律不动。
+/// 被删行正是 `active` 时必须同时把 active 指到 `next_active`，否则服务端 active 会指向
+/// 一条已不存在的行；`next_active` 缺失时宁可不删。
+///
+/// `next_active` 是调用方按**本地快照**反查出来的 id，而这里操作的是刚 `GET` 回来的
+/// 最新数组——两者可能已被别的端改动，所以落点必须按这里的数据再校验一次。
+fn remove_blank_row(
+    rows: &mut Vec<Value>,
+    active: Option<&str>,
+    local_id: &str,
+    next_active: Option<&str>,
+) -> AppliedIndex {
+    let Some(idx) = rows.iter().position(|r| row_id(r) == Some(local_id)) else {
+        // 已被其他端删掉：回收是幂等动作，不算失败。
+        return applied_without_removal(rows, active, local_id);
+    };
+    if !row_is_disposable_blank(&rows[idx]) {
+        return applied_without_removal(rows, active, local_id);
+    }
+    if active == Some(local_id) {
+        // 落点必须真的在数组里，且不能是被删的这一行本身。
+        let next =
+            next_active.filter(|id| *id != local_id && rows.iter().any(|r| row_id(r) == Some(*id)));
+        let Some(next) = next else {
+            return applied_without_removal(rows, active, local_id);
+        };
+        rows.remove(idx);
+        return AppliedIndex {
+            sessions: Value::Array(std::mem::take(rows)),
+            active_session_id: Some(next.to_string()),
+            local_id: local_id.to_string(),
+            reused_blank: false,
+        };
+    }
+    rows.remove(idx);
+    applied_without_removal(rows, active, local_id)
+}
+
+/// 未改动任何行时的返回（行数不变，active 照旧）。
+fn applied_without_removal(
+    rows: &mut Vec<Value>,
+    active: Option<&str>,
+    local_id: &str,
+) -> AppliedIndex {
+    AppliedIndex {
+        sessions: Value::Array(std::mem::take(rows)),
+        active_session_id: active.map(str::to_string),
+        local_id: local_id.to_string(),
+        reused_blank: false,
+    }
+}
+
+/// 行内 `messages` 是否为空：缺字段按空（与 Web 侧 serde default 同义），
+/// 形状不认识时按「有正文」——宁可少认一条空行，也不误动别的端写过的会话。
+fn row_messages_empty(row: &Value) -> bool {
+    match row.get("messages") {
+        None => true,
+        Some(Value::Array(list)) => list.is_empty(),
+        Some(_) => false,
+    }
+}
+
+/// 取字符串字段并 trim；缺失 / 非字符串 / 全空白都算 `None`。
+fn row_trimmed<'a>(row: &'a Value, key: &str) -> Option<&'a str> {
+    row.get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+}
+
+fn row_flag(row: &Value, key: &str) -> bool {
+    row.get(key).and_then(Value::as_bool).unwrap_or(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    fn stamp(local_id: &str) -> IndexStamp {
+        IndexStamp {
+            now_ms: 1_700_000_000_000,
+            new_local_id: local_id.to_string(),
+        }
+    }
 
     #[test]
     fn parses_rows() {
@@ -55,5 +445,425 @@ mod tests {
         assert_eq!(rows.len(), 2);
         assert_eq!(conversation_id_for_resume(&rows[0]), Some("c1"));
         assert_eq!(conversation_id_for_resume(&rows[1]), None);
+    }
+
+    #[test]
+    fn new_blank_row_is_first_and_active() {
+        // 旧行有正文（不是空白会话），所以这里必须真的插一行。
+        let raw = json!([{"id":"s1","title":"old","messages":[{"role":"user","content":"hi"}]}]);
+        let applied = apply_index_op(
+            &raw,
+            Some("s1"),
+            &SessionIndexOp::NewBlank {
+                title: "新会话".into(),
+            },
+            &stamp("s_new"),
+        )
+        .expect("apply");
+        let rows = applied.sessions.as_array().expect("array");
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0]["id"], json!("s_new"));
+        assert_eq!(rows[0]["title"], json!("新会话"));
+        assert_eq!(rows[0]["messages"], json!([]));
+        assert_eq!(rows[0]["draft"], json!(""));
+        assert_eq!(rows[0]["server_conversation_id"], Value::Null, "新行未绑定");
+        assert_eq!(rows[1]["id"], json!("s1"), "旧行仍在原位");
+        assert_eq!(applied.active_session_id.as_deref(), Some("s_new"));
+        assert_eq!(applied.local_id, "s_new");
+    }
+
+    #[test]
+    fn new_blank_keeps_other_rows_byte_identical() {
+        // 服务端透传存储：别人的 messages / layout 字段一个都不能动。
+        let other = json!({
+            "id":"s1",
+            "title":"keep",
+            "messages":[{"role":"user","content":"hi"}],
+            "layout_schema_version":2,
+            "history_total":42,
+            "workspace_root":"/w",
+            "unknown_future_field":{"a":[1,2]}
+        });
+        let raw = json!([other.clone(), {"id":"s2","messages":[{"role":"user","content":"yo"}]}]);
+        let applied = apply_index_op(
+            &raw,
+            None,
+            &SessionIndexOp::NewBlank { title: "n".into() },
+            &stamp("s_new"),
+        )
+        .expect("apply");
+        let rows = applied.sessions.as_array().expect("array");
+        assert_eq!(rows[1], other, "整行原样保留");
+        assert_eq!(
+            rows[2],
+            json!({"id":"s2","messages":[{"role":"user","content":"yo"}]})
+        );
+        assert!(!applied.reused_blank, "两行都有正文：必须新插一行");
+    }
+
+    #[test]
+    fn bind_sets_conversation_id_only_on_target_row() {
+        let raw = json!([
+            {"id":"s_new","title":"新会话","messages":[]},
+            {"id":"s1","title":"keep","messages":[{"role":"user","content":"hi"}]}
+        ]);
+        let applied = apply_index_op(
+            &raw,
+            Some("s1"),
+            &SessionIndexOp::BindServer {
+                local_id: "s_new".into(),
+                conversation_id: "c9".into(),
+            },
+            &stamp("ignored"),
+        )
+        .expect("apply");
+        let rows = applied.sessions.as_array().expect("array");
+        assert_eq!(rows[0]["server_conversation_id"], json!("c9"));
+        assert_eq!(rows[0]["updated_at"], json!(1_700_000_000_000i64));
+        assert_eq!(rows[0]["messages"], json!([]), "绑定不改正文");
+        assert_eq!(
+            rows[1],
+            json!({"id":"s1","title":"keep","messages":[{"role":"user","content":"hi"}]}),
+            "其他行原样"
+        );
+        assert_eq!(
+            applied.active_session_id.as_deref(),
+            Some("s1"),
+            "绑定不动 active"
+        );
+        assert_eq!(applied.local_id, "s_new");
+    }
+
+    #[test]
+    fn bind_missing_row_is_an_error() {
+        let err = apply_index_op(
+            &json!([{"id":"s1"}]),
+            None,
+            &SessionIndexOp::BindServer {
+                local_id: "gone".into(),
+                conversation_id: "c9".into(),
+            },
+            &stamp("x"),
+        )
+        .expect_err("missing row must fail");
+        assert!(err.to_string().contains("gone"), "错误文案带上行 id");
+    }
+
+    #[test]
+    fn non_array_raw_is_treated_as_empty() {
+        let applied = apply_index_op(
+            &Value::Null,
+            None,
+            &SessionIndexOp::NewBlank { title: "n".into() },
+            &stamp("s_new"),
+        )
+        .expect("apply");
+        assert_eq!(applied.sessions.as_array().map(Vec::len), Some(1));
+    }
+
+    #[test]
+    fn put_body_omits_absent_active_id() {
+        let applied = AppliedIndex {
+            sessions: json!([]),
+            active_session_id: None,
+            local_id: "s".into(),
+            reused_blank: false,
+        };
+        let body = put_sessions_body(&applied);
+        assert!(body.get("active_session_id").is_none(), "None 不写");
+        assert_eq!(body["sessions"], json!([]));
+
+        let applied = AppliedIndex {
+            sessions: json!([]),
+            active_session_id: Some("s1".into()),
+            local_id: "s1".into(),
+            reused_blank: false,
+        };
+        assert_eq!(
+            put_sessions_body(&applied)["active_session_id"],
+            json!("s1")
+        );
+    }
+
+    #[test]
+    fn local_session_id_shape() {
+        let id = new_local_session_id(UNIX_EPOCH + std::time::Duration::new(1_700_000_000, 123));
+        assert_eq!(id, "s_1700000000000_123");
+    }
+
+    #[test]
+    fn new_blank_reuses_existing_blank_row() {
+        // 对齐 Web `prefer_or_create_empty_session`：已有空白会话就复用，不再插行。
+        let raw = json!([
+            {"id":"s1","title":"keep","messages":[{"role":"user","content":"hi"}]},
+            {"id":"s_blank","title":"新会话","messages":[],"draft":""}
+        ]);
+        let applied = apply_index_op(
+            &raw,
+            Some("s1"),
+            &SessionIndexOp::NewBlank {
+                title: "新会话".into(),
+            },
+            &stamp("s_new"),
+        )
+        .expect("apply");
+        let rows = applied.sessions.as_array().expect("array");
+        assert_eq!(rows.len(), 2, "不该插出第三行");
+        assert_eq!(applied.local_id, "s_blank");
+        assert_eq!(applied.active_session_id.as_deref(), Some("s_blank"));
+        assert!(applied.reused_blank);
+    }
+
+    #[test]
+    fn bound_but_empty_row_is_not_reused() {
+        // messages 空但已有 server_conversation_id：Web 侧不算空白会话，不能复用。
+        let raw = json!([{"id":"s1","messages":[],"server_conversation_id":"c1"}]);
+        let applied = apply_index_op(
+            &raw,
+            None,
+            &SessionIndexOp::NewBlank { title: "n".into() },
+            &stamp("s_new"),
+        )
+        .expect("apply");
+        assert_eq!(applied.local_id, "s_new");
+        assert!(!applied.reused_blank);
+        assert_eq!(applied.sessions.as_array().map(Vec::len), Some(2));
+    }
+
+    #[test]
+    fn remove_blank_drops_disposable_row() {
+        let raw = json!([
+            {"id":"s_blank","title":"新会话","messages":[],"draft":"","pinned":false,"starred":false},
+            {"id":"s1","title":"keep","messages":[{"role":"user","content":"hi"}]}
+        ]);
+        let applied = apply_index_op(
+            &raw,
+            Some("s_blank"),
+            &SessionIndexOp::RemoveBlank {
+                local_id: "s_blank".into(),
+                next_active: Some("s1".into()),
+            },
+            &stamp("x"),
+        )
+        .expect("apply");
+        let rows = applied.sessions.as_array().expect("array");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["id"], json!("s1"));
+        assert_eq!(
+            applied.active_session_id.as_deref(),
+            Some("s1"),
+            "active 要跟着落到目标行"
+        );
+    }
+
+    #[test]
+    fn remove_blank_keeps_row_with_content_or_draft() {
+        // 有正文 / 有草稿 / 置顶 / 收藏：一律不动（别的端可能正在用）。
+        for row in [
+            json!({"id":"s1","messages":[{"role":"user","content":"hi"}]}),
+            json!({"id":"s1","messages":[],"draft":"写了一半"}),
+            json!({"id":"s1","messages":[],"pinned":true}),
+            json!({"id":"s1","messages":[],"starred":true}),
+        ] {
+            let applied = apply_index_op(
+                &json!([row]),
+                None,
+                &SessionIndexOp::RemoveBlank {
+                    local_id: "s1".into(),
+                    next_active: None,
+                },
+                &stamp("x"),
+            )
+            .expect("apply");
+            assert_eq!(
+                applied.sessions.as_array().map(Vec::len),
+                Some(1),
+                "不该删：{row}"
+            );
+        }
+    }
+
+    #[test]
+    fn remove_blank_refuses_active_row_without_next() {
+        // 被删行正是 active 且没有落点：宁可不删，不能让服务端 active 指向已删除的行。
+        let raw = json!([{"id":"s_blank","messages":[]}]);
+        let applied = apply_index_op(
+            &raw,
+            Some("s_blank"),
+            &SessionIndexOp::RemoveBlank {
+                local_id: "s_blank".into(),
+                next_active: None,
+            },
+            &stamp("x"),
+        )
+        .expect("apply");
+        assert_eq!(applied.sessions.as_array().map(Vec::len), Some(1));
+        assert_eq!(applied.active_session_id.as_deref(), Some("s_blank"));
+    }
+
+    #[test]
+    fn remove_missing_row_is_idempotent() {
+        let raw = json!([{"id":"s1","messages":[{"role":"user","content":"hi"}]}]);
+        let applied = apply_index_op(
+            &raw,
+            Some("s1"),
+            &SessionIndexOp::RemoveBlank {
+                local_id: "gone".into(),
+                next_active: None,
+            },
+            &stamp("x"),
+        )
+        .expect("已被别端删掉时不该报错");
+        assert_eq!(applied.sessions.as_array().map(Vec::len), Some(1));
+        assert_eq!(applied.active_session_id.as_deref(), Some("s1"));
+    }
+
+    #[test]
+    fn title_from_prompt_matches_web_rules() {
+        // 与 Web `title_from_user_prompt` 同值：压平换行、折叠连续空白。
+        assert_eq!(title_from_user_prompt("  hello\nworld  "), "hello world");
+        assert_eq!(title_from_user_prompt("a\t\tb"), "a b");
+        // 全空白 → 默认标题（Web 侧同）。
+        assert_eq!(title_from_user_prompt("  \n\t "), DEFAULT_SESSION_TITLE);
+    }
+
+    #[test]
+    fn title_from_prompt_truncates_at_48_chars() {
+        let body = "a".repeat(60);
+        let out = title_from_user_prompt(&body);
+        assert!(out.ends_with('…'), "got {out:?}");
+        assert_eq!(out.chars().count(), 48, "48 含省略号，与 Web 一致");
+    }
+
+    #[test]
+    fn default_title_detection_matches_web() {
+        // Web `i18n::is_default_session_title`：中 / 英默认标题（大小写不敏感）都算没起名。
+        for s in ["新会话", " New Chat ", "new chat", "NEW CHAT"] {
+            assert!(is_default_session_title(s), "{s} 应算默认标题");
+        }
+        for s in ["随便聊聊", "新会话2", ""] {
+            assert!(!is_default_session_title(s), "{s:?} 不应算默认标题");
+        }
+    }
+
+    #[test]
+    fn set_title_renames_only_default_row() {
+        let raw = json!([
+            {"id":"s_new","title":"新会话","messages":[]},
+            {"id":"s1","title":"已经起过的名字","messages":[{"role":"user","content":"hi"}]}
+        ]);
+        let applied = apply_index_op(
+            &raw,
+            None,
+            &SessionIndexOp::SetTitle {
+                local_id: "s_new".into(),
+                title: "帮我看下这个报错".into(),
+            },
+            &stamp("x"),
+        )
+        .expect("apply");
+        let rows = applied.sessions.as_array().expect("array");
+        assert_eq!(rows[0]["title"], json!("帮我看下这个报错"));
+        assert_eq!(rows[0]["updated_at"], json!(1_700_000_000_000i64));
+        assert_eq!(rows[0]["messages"], json!([]), "起名不改正文");
+        assert_eq!(rows[1], raw[1], "别的行原样");
+    }
+
+    #[test]
+    fn set_title_keeps_non_default_title() {
+        // 别端已经起过名（或用户自己改过）：不能覆盖。
+        let raw = json!([{"id":"s1","title":"别端起的名字","messages":[]}]);
+        let applied = apply_index_op(
+            &raw,
+            None,
+            &SessionIndexOp::SetTitle {
+                local_id: "s1".into(),
+                title: "TUI 想改的名字".into(),
+            },
+            &stamp("x"),
+        )
+        .expect("apply");
+        assert_eq!(applied.sessions[0]["title"], json!("别端起的名字"));
+    }
+
+    #[test]
+    fn set_title_missing_row_is_not_an_error() {
+        // 行被别端删掉：起名失败不该让回合无法开始。
+        let applied = apply_index_op(
+            &json!([{"id":"s1","title":"新会话","messages":[]}]),
+            None,
+            &SessionIndexOp::SetTitle {
+                local_id: "gone".into(),
+                title: "t".into(),
+            },
+            &stamp("x"),
+        )
+        .expect("行不存在时不报错");
+        assert_eq!(applied.sessions.as_array().map(Vec::len), Some(1));
+    }
+
+    #[test]
+    fn set_title_keeps_empty_title() {
+        // 空串 / 缺字段按 Web 语义不算默认标题（`is_default_session_title("")` 是 false），
+        // 不能因为读不出标题就覆盖。
+        for row in [
+            json!({"id":"s1","title":"","messages":[]}),
+            json!({"id":"s1","messages":[]}),
+        ] {
+            let applied = apply_index_op(
+                &json!([row.clone()]),
+                None,
+                &SessionIndexOp::SetTitle {
+                    local_id: "s1".into(),
+                    title: "t".into(),
+                },
+                &stamp("x"),
+            )
+            .expect("apply");
+            assert_eq!(applied.sessions[0]["title"], row["title"], "不该改：{row}");
+        }
+    }
+
+    #[test]
+    fn remove_blank_refuses_unknown_next_active() {
+        // 落点是调用方按本地快照反查的，可能已被别端删掉：这里必须按最新数组再校验。
+        let raw = json!([
+            {"id":"s_blank","messages":[]},
+            {"id":"s1","messages":[{"role":"user","content":"hi"}]}
+        ]);
+        let applied = apply_index_op(
+            &raw,
+            Some("s_blank"),
+            &SessionIndexOp::RemoveBlank {
+                local_id: "s_blank".into(),
+                next_active: Some("gone".into()),
+            },
+            &stamp("x"),
+        )
+        .expect("apply");
+        assert_eq!(
+            applied.sessions.as_array().map(Vec::len),
+            Some(2),
+            "落点不在数组里：宁可不删"
+        );
+        assert_eq!(applied.active_session_id.as_deref(), Some("s_blank"));
+    }
+
+    #[test]
+    fn remove_blank_refuses_self_next_active() {
+        // 落点等于被删行本身：删完 active 就悬空了，同样不删。
+        let raw = json!([{"id":"s_blank","messages":[]}]);
+        let applied = apply_index_op(
+            &raw,
+            Some("s_blank"),
+            &SessionIndexOp::RemoveBlank {
+                local_id: "s_blank".into(),
+                next_active: Some("s_blank".into()),
+            },
+            &stamp("x"),
+        )
+        .expect("apply");
+        assert_eq!(applied.sessions.as_array().map(Vec::len), Some(1));
+        assert_eq!(applied.active_session_id.as_deref(), Some("s_blank"));
     }
 }

@@ -25,7 +25,9 @@ pub use client::ServeClient;
 pub use config::ConnectionConfig;
 pub use error::TermError;
 pub use sessions::{
-    SessionListRow, WebSessionsList, conversation_id_for_resume, fetch_web_sessions,
+    DEFAULT_SESSION_TITLE, SessionIndexApplied, SessionIndexOp, SessionListRow, WebSessionsList,
+    apply_web_session_op, conversation_id_for_resume, fetch_web_sessions, is_default_session_title,
+    title_from_user_prompt,
 };
 pub use user_data::{
     LlmOverridesDto, UserPrefsDto, fetch_llm_overrides, fetch_user_data_prefs, put_llm_overrides,

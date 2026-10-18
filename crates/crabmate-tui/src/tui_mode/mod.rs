@@ -17,6 +17,7 @@ mod mouse;
 mod palette;
 mod render;
 mod serve_defaults;
+mod session_index;
 mod settings;
 mod settings_panel;
 mod spinner;
@@ -86,6 +87,8 @@ struct TuiApp<'a> {
     persisted: Option<PersistedSettings>,
     /// 上一帧的终端尺寸：鼠标命中检测要按同一套分区重算矩形。
     last_size: (u16, u16),
+    /// `/conv new` 的会话索引状态（新建 / 在途 / 待起名 / 待绑定，见 `session_index`）。
+    index: session_index::UiIndexState,
 }
 
 impl TuiApp<'_> {
@@ -149,10 +152,23 @@ impl TuiApp<'_> {
     }
 
     fn use_selected(&mut self) {
+        // 选中的正是 `/conv new` 刚建、还没发过消息的空行：它已经是当前会话，
+        // 「使用」它等于原地打转（`switch_to_conv` 还会把这条空行回收掉）。
+        if session_index::selection_is_pending_blank(
+            self.index.local_new_session.as_deref(),
+            &self.st.sessions,
+            self.st.selected,
+        ) {
+            self.st.push_line(
+                LineKind::System,
+                "这就是当前新会话（还没有 server conversation_id）：直接输入即可",
+            );
+            return;
+        }
         let Some(resume) = self.st.selected_resume() else {
             self.st.push_line(
                 LineKind::System,
-                "该会话尚无 server conversation_id（先在 Web 端聊一轮绑定）",
+                "该会话还没有 server conversation_id：先发一条消息（首轮结束会自动绑定）",
             );
             return;
         };
@@ -174,6 +190,8 @@ impl TuiApp<'_> {
                 .push_line(LineKind::System, "回合进行中：结束后再切换会话");
             return;
         }
+        // 切走前回收「/conv new 建的空行」并把服务端 active 指过去（对齐 Web reclaim）。
+        self.leave_current_for_switch(&resume);
         self.st.conversation_id = Some(resume);
         self.st.reset_transcript();
         self.st.focus = Focus::Input;
@@ -182,19 +200,6 @@ impl TuiApp<'_> {
             LineKind::System,
             &format!("已切换到会话「{label}」（新对话从空开始）"),
         );
-    }
-
-    fn new_session(&mut self) {
-        if self.st.running {
-            self.st
-                .push_line(LineKind::System, "回合进行中：结束后再新建会话");
-            return;
-        }
-        self.st.conversation_id = None;
-        self.st.reset_transcript();
-        self.st.focus = Focus::Input;
-        self.st
-            .push_line(LineKind::System, "已开始新会话（conversation_id 已清空）");
     }
 
     fn refresh_sessions(&mut self) {
@@ -566,7 +571,10 @@ impl TuiApp<'_> {
             panel.unlock_after_turn();
         }
         if let Some(cid) = outcome.conversation_id {
-            self.st.conversation_id = Some(cid);
+            self.st.conversation_id = Some(cid.clone());
+            // `/conv new` 建的本地行还没有服务端 id：首轮结束就补上（左栏 `>` 与
+            // `/conv use`、Web 端续聊都靠它）。
+            self.bind_new_session(&cid);
         }
         if let Some(msg) = error {
             self.st
@@ -605,12 +613,15 @@ impl TuiApp<'_> {
                 Ok(list) => {
                     self.st.active_session_id = list.active_session_id;
                     self.st.replace_sessions(list.sessions);
+                    // 待定位的新建行只能在刷新回来的列表里按 id 找（见 `session_index`）。
+                    self.apply_pending_select();
                 }
                 Err(e) => {
                     self.st
                         .push_line(LineKind::System, &format!("拉取会话列表失败：{e}"));
                 }
             },
+            UiEvent::SessionIndex { result, op } => self.on_session_index(result, op),
             UiEvent::Status(result) => match result {
                 Ok(defaults) => self.st.serve_defaults = Some(defaults),
                 Err(e) => {
@@ -654,6 +665,8 @@ impl TuiApp<'_> {
     }
 
     fn start_turn(&mut self, message: &str) {
+        // `/conv new` 建的空行还没有名字：首条消息就是它的标题（与 Web 同规则）。
+        self.retitle_new_session_for_first_turn(message);
         // override ＞ user-data 合成随轮字段；空白不发送（回落 serve 默认）。
         let stored = self.persisted.as_ref();
         let model = merge_turn(
@@ -880,6 +893,7 @@ pub async fn run_tui(
         panel: None,
         persisted: None,
         last_size: (0, 0),
+        index: session_index::UiIndexState::default(),
     };
     // 启动即拉一次会话 / 工作区根 / serve 默认状态 / user-data 设置快照（失败以系统行提示）。
     app.refresh_sessions();
