@@ -5,7 +5,7 @@ use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use ratatui::widgets::{Block, Borders, Paragraph};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use super::layout::panes;
@@ -15,6 +15,12 @@ use super::settings_panel::PanelContent;
 use super::state::{Focus, LineKind, LogLine, UiState};
 use super::status::{SPINNER_FRAMES, status_line};
 use super::ws_sidebar::{pane_list_area, sessions_content, sidebar_view, workspace_content};
+
+// 浮层（审批 / 设置面板）拆到 `overlay.rs`：它们自成一套模板，也把本文件的行数
+// 从 920 门禁线附近拉开，给后续 B4 / B5 的改动留余量。
+#[path = "overlay.rs"]
+mod overlay;
+use overlay::{render_approval_overlay, render_settings_overlay};
 
 /// 低于此宽度隐藏左右栏（等价 repl 布局）。
 pub const SIDEBAR_MIN_WIDTH: u16 = 120;
@@ -40,10 +46,6 @@ pub(super) const SIDEBAR_HINT: &str = "↑↓ Enter用 Del删 n新 r刷";
 pub(super) const SIDEBAR_DELETE_HINT: &str = "[y] 删除 [Esc] 取消";
 /// composer 最多展开行数（多行输入）。
 const MAX_COMPOSER_ROWS: usize = 4;
-/// 审批浮层宽高上限。
-const OVERLAY_MAX_WIDTH: u16 = 78;
-const OVERLAY_HEIGHT: u16 = 8;
-
 // 配色见 [`Palette`]：顶栏 / 状态栏 / 侧栏 / composer 用 `chrome_bg`，聊天区用 `bg`，
 // 正文 / 次要 / 强调分别为 `fg` / `muted` / `accent`（随 Desktop 主题）。
 
@@ -662,96 +664,6 @@ fn render_body(
         })
         .collect::<Vec<_>>();
     frame.render_widget(Paragraph::new(shown), text_area);
-}
-
-/// 审批浮层：命令预览 + 按键提示，置于聊天主体底部（composer 之上）。
-fn render_approval_overlay(frame: &mut Frame, st: &UiState, area: Rect) {
-    let Some(ap) = &st.approval else {
-        return;
-    };
-    let width = area.width.saturating_sub(4).min(OVERLAY_MAX_WIDTH);
-    if width == 0 || area.height < OVERLAY_HEIGHT {
-        return;
-    }
-    let x = area.x.saturating_add(area.width.saturating_sub(width) / 2);
-    let y = area
-        .y
-        .saturating_add(area.height.saturating_sub(OVERLAY_HEIGHT));
-    let rect = Rect::new(x, y, width, OVERLAY_HEIGHT);
-    // 先清空矩形内字形，再整体铺底色：浮层必须是独立色块，
-    // 不能与底下聊天区残留文本/上一帧内容视觉重叠。底色跟主题走——
-    // 固定深底在浅色主题下会让正文色（深字）不可读。
-    let pal = &st.palette;
-    frame.render_widget(Clear, rect);
-    paint_bg(frame, rect, pal.chrome_bg);
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::new().fg(pal.accent))
-        .title(Span::styled(" 命令审批 ", Style::new().fg(pal.accent)));
-    let inner = block.inner(rect);
-    let preview = truncate_display(&ap.preview(), inner.width.saturating_sub(2) as usize);
-    let mut lines: Vec<Line<'static>> = vec![Line::from(Span::styled(
-        preview,
-        Style::new().fg(pal.fg).add_modifier(Modifier::BOLD),
-    ))];
-    if let Some(key) = ap
-        .allowlist_key
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    {
-        lines.push(Line::from(Span::styled(
-            format!("allowlist: {key}"),
-            Style::new().fg(pal.muted),
-        )));
-    }
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        "回合已暂停，等待你的决策",
-        Style::new().fg(pal.muted),
-    )));
-    lines.push(Line::from(Span::styled(
-        "[Enter] 仅此一次  [a] 始终允许  [Esc/n] 拒绝  [Ctrl+C] 拒绝",
-        Style::new().fg(pal.accent),
-    )));
-    lines.push(Line::from(Span::styled(
-        "Ctrl+C 只拒绝本命令；回合继续，取消需再按一次 Ctrl+C",
-        Style::new().fg(pal.muted),
-    )));
-    frame.render_widget(Paragraph::new(lines).block(block), rect);
-}
-
-/// 设置面板浮层：整屏 Clear + 独立色块 + 边框块（模板同审批浮层），
-/// 内容行由 [`super::settings_panel`] 构建（已按内宽截断），编辑时给出硬件光标位。
-fn render_settings_overlay(frame: &mut Frame, area: Rect, content: &PanelContent, pal: &Palette) {
-    frame.render_widget(Clear, area);
-    paint_bg(frame, area, pal.chrome_bg);
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::new().fg(pal.accent))
-        .title(Span::styled(
-            " 设置（模型 / 会话） ",
-            Style::new().fg(pal.accent),
-        ));
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
-    if inner.width == 0 || inner.height == 0 {
-        return;
-    }
-    let shown: Vec<Line<'static>> = content
-        .lines
-        .iter()
-        .take(inner.height as usize)
-        .cloned()
-        .collect();
-    frame.render_widget(Paragraph::new(shown), inner);
-    // 文本编辑光标：内容行下标 + cell 列（仅在浮层内可见区域落位）。
-    if let Some((row, col)) = content.cursor
-        && (row as u16) < inner.height
-        && (col as u16) < inner.width
-    {
-        frame.set_cursor_position((inner.x + col as u16, inner.y + row as u16));
-    }
 }
 
 /// composer 可视窗口：返回（可视各行、光标所在显示行、光标显示列、水平滚动起点）。
