@@ -44,18 +44,61 @@ fn heading_levels_are_indented() {
 }
 
 #[test]
-fn list_and_quote_markers_are_gray_content_plain() {
+fn list_and_quote_markers_render() {
+    // 无序列表：`-` 换圆点，正文不加粗
     let ul = assistant_styled_text("- 项目", &pal(), 0);
-    assert!(has_gray(&ul, '-'));
+    let ul_text: String = ul.iter().map(|(_, ch)| *ch).collect();
+    assert_eq!(ul_text, "• 项目");
+    assert_eq!(ul[0].0.fg, Some(pal().muted), "圆点用 muted");
     assert!(!has_bold(&ul, '项'));
+    // 有序列表：编号保留（数字携带顺序信息）
     let ol = assistant_styled_text("1. 有序", &pal(), 0);
     assert!(has_gray(&ol, '1'));
     assert!(has_gray(&ol, '.'));
+    // 引用：`>` 保留（多行引用靠它连成范围）
     let quote = assistant_styled_text("> 引用", &pal(), 0);
     assert!(has_gray(&quote, '>'));
-    // 完整文本原样保留（标记字符仍在、未被样式吞掉）
     let joined: String = quote.iter().map(|(_, ch)| *ch).collect();
     assert_eq!(joined, "> 引用");
+}
+
+/// 嵌套层级靠符号区分：一级 `•`、缩进 2 及以上 `◦`。
+#[test]
+fn nested_list_bullets_change_with_indent() {
+    let render = |t: &str| -> String {
+        assistant_styled_text(t, &pal(), 0)
+            .iter()
+            .map(|(_, c)| *c)
+            .collect()
+    };
+    assert_eq!(render("- a"), "• a");
+    assert_eq!(render("  - b"), "  ◦ b");
+    assert_eq!(render("   - c"), "   ◦ c");
+}
+
+/// 4 空格缩进是 CommonMark 的缩进代码块，不该被当成列表项（保持原样）。
+#[test]
+fn four_space_indent_is_not_a_list() {
+    let text: String = assistant_styled_text("    - d", &pal(), 0)
+        .iter()
+        .map(|(_, c)| *c)
+        .collect();
+    assert_eq!(text, "    - d");
+}
+
+/// 任务列表与无序列表的标记都占 2 列，混排时正文起始列一致。
+#[test]
+fn task_and_bullet_markers_share_indent() {
+    let bullet: String = assistant_styled_text("- 项", &pal(), 0)
+        .iter()
+        .map(|(_, c)| *c)
+        .collect();
+    let task: String = assistant_styled_text("- [ ] 项", &pal(), 0)
+        .iter()
+        .map(|(_, c)| *c)
+        .collect();
+    assert_eq!(bullet, "• 项");
+    assert_eq!(task, "☐ 项");
 }
 
 #[test]
@@ -84,16 +127,18 @@ fn glued_markers_match_desktop_normalize_semantics() {
     assert!(!h_text.contains('#'), "标题标记不该上屏：{h_text:?}");
     assert!(h_text.contains("规范"));
     assert!(has_bold(&h, '规'));
+    // 粘连列表仍识别，但标记已换成圆点，不再与 normalize 输出逐字一致
     let ul = assistant_styled_text("-规范", &pal(), 0);
-    assert!(has_gray(&ul, '-'));
+    let ul_text: String = ul.iter().map(|(_, ch)| *ch).collect();
+    assert_eq!(ul_text, "• 规范");
     let ol = assistant_styled_text("1.下一步", &pal(), 0);
     assert!(has_gray(&ol, '1'));
     assert!(has_gray(&ol, '.'));
     let q = assistant_styled_text(">正文", &pal(), 0);
     assert!(has_gray(&q, '>'));
     // 渲染文本与共享 normalize 输出逐字一致（补的空格原样呈现、不吞字符）
-    // 标题已被替换成竖条/缩进，不再逐字一致；其余标记仍原样保留。
-    for input in ["-规范", "1.下一步", ">正文"] {
+    // 标题与无序列表的标记已被替换，不再逐字一致；有序列表与引用仍原样保留。
+    for input in ["1.下一步", ">正文"] {
         let chars = assistant_styled_text(input, &pal(), 0);
         let joined: String = chars.iter().map(|(_, ch)| *ch).collect();
         let expected = normalize_markdown_for_render(input);
