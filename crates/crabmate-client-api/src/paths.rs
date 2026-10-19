@@ -30,6 +30,11 @@ pub const USER_DATA_PREFS: &str = "/user-data/prefs";
 pub const USER_DATA_LLM_OVERRIDES: &str = "/user-data/llm-overrides";
 /// 会话存储配置（frontend）。
 pub const CONFIG_SESSION_CONVERSATION_STORE: &str = "/config/session/conversation-store";
+/// 可调用的 skill 目录（tui / frontend）。
+///
+/// 响应形如 `{enabled, skills_dir, skills_user_dir, skills_system_dir, skills[], error?}`；
+/// 客户端只用 `enabled` 与 `skills[].{id,description,path}` 来喂 `/` 补全菜单。
+pub const SKILLS: &str = "/skills";
 
 /// 取消指定 job 的 chat 流（tui / frontend）。
 #[must_use]
@@ -77,7 +82,7 @@ pub fn conversation_delete(conversation_id: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        CHAT_STREAM, HEALTH, WORKSPACE, chat_stream_cancel, conversation_delete,
+        CHAT_STREAM, HEALTH, SKILLS, WORKSPACE, chat_stream_cancel, conversation_delete,
         conversation_messages,
     };
 
@@ -86,6 +91,7 @@ mod tests {
         assert_eq!(HEALTH, "/health");
         assert_eq!(CHAT_STREAM, "/chat/stream");
         assert_eq!(WORKSPACE, "/workspace");
+        assert_eq!(SKILLS, "/skills");
     }
 
     #[test]
