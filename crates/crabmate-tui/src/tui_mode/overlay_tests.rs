@@ -5,7 +5,8 @@
 //! 那边管全屏条带与聊天区，这边管浮层。
 
 use super::super::*; // render：draw / UiState / Palette / StatusInfo / build_body_rows / chat_body_width
-use super::*; // overlay：settings_panel_rect / settings_panel_content_width
+use super::*; // overlay：settings_panel_rect / settings_panel_content_width / choice_line
+use crate::tui_mode::approve::ApprovalChoice;
 use crate::tui_mode::state::ApprovalOverlay;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
@@ -214,4 +215,62 @@ fn approval_overlay_fills_its_whole_rect_with_the_card_background() {
     // 浮层底色必须与聊天区可区分，否则「填充」等于没填充。
     assert_ne!(pal.overlay_bg, pal.bg, "卡片色不能与聊天区底色相同");
     assert_ne!(pal.overlay_bg, pal.chrome_bg, "卡片色不应复用条带色");
+}
+
+/// 三个选项排一行，选中项是 `err` 色块、未选中项没有底色（span 级精确断言）。
+#[test]
+fn choice_line_paints_only_the_selected_option_as_a_block() {
+    let pal = Palette::default();
+    let line = choice_line(ApprovalChoice::Once, &pal);
+    // spans: [「 仅此一次 」, 间隙, 「 始终允许 」, 间隙, 「 拒绝 」]
+    assert_eq!(line.spans.len(), 5, "三个选项 + 两个间隙");
+    assert_eq!(line.spans[0].style.bg, Some(pal.err), "选中项应铺 err 底色");
+    assert_eq!(line.spans[2].style.bg, None, "未选中项不该有底色");
+    assert_eq!(line.spans[4].style.bg, None, "未选中项不该有底色");
+    // 标签文字与顺序必须和方向键的遍历顺序一致。
+    assert_eq!(line.spans[0].content.trim(), "仅此一次");
+    assert_eq!(line.spans[2].content.trim(), "始终允许");
+    assert_eq!(line.spans[4].content.trim(), "拒绝");
+}
+
+/// 选中的色块要真的落到缓冲区上（span 正确 ≠ 像素正确，这里补齐另一半）。
+#[test]
+fn the_selected_choice_reaches_the_buffer_as_a_filled_block() {
+    let mut st = UiState::new();
+    st.set_palette(Palette::default());
+    st.sidebar_visible = false;
+    let (tx, _rx) = std::sync::mpsc::channel();
+    st.approval = Some(ApprovalOverlay {
+        command: "rm".into(),
+        args: "-rf build".into(),
+        allowlist_key: None,
+        answer: tx,
+    });
+    // 选中「拒绝」（最后一格），色块应画在这一项上。
+    st.approval_choice = ApprovalChoice::Deny;
+    let pal = st.palette;
+    let buf = render_frame(&st, None);
+
+    let y = row_with(&buf, "始终允许"); // 选项行
+    let err_cells = (0..W).filter(|&x| buf[(x, y)].bg == pal.err).count();
+    // 「 拒绝 」视觉上 6 列宽，但两个汉字各有 1 列续格（缓冲区里恒为 `Reset`），
+    // 真正带底色的只有 4 格：左空格 + 两个汉字的首列 + 右空格。
+    assert!(
+        err_cells >= 4,
+        "选中项应画成连续色块，实际只有 {err_cells} 格 err 底色"
+    );
+
+    // 换成选「仅此一次」后，色块位置随之改变（说明它跟着光标走，不是写死的）。
+    st.approval_choice = ApprovalChoice::Once;
+    let buf = render_frame(&st, None);
+    let y2 = row_with(&buf, "始终允许");
+    let first_err_x = (0..W).find(|&x| buf[(x, y2)].bg == pal.err);
+    let last_err_x = (0..W).rev().find(|&x| buf[(x, y2)].bg == pal.err);
+    if let (Some(first), Some(last)) = (first_err_x, last_err_x) {
+        // 色块靠左（「仅此一次」在第一格），且比「拒绝」那一块更宽。
+        assert!(first < W / 2, "「仅此一次」的色块应在左侧");
+        assert!(last - first >= 5, "色块宽度应覆盖标签 + 两侧空格");
+    } else {
+        panic!("选中「仅此一次」后没有 err 底色块");
+    }
 }

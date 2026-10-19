@@ -13,10 +13,13 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 // 本文件是 `render` 的子模块，`super::` 即 `render`：直接取它已引入的类型与私有
 // 工具函数（`paint_bg` 铺底、`truncate_display` 截断），不必再走 `super::super::…`。
 use super::{Palette, PanelContent, UiState, paint_bg, truncate_display};
+// 选项枚举在 `approve`（与按键→决策的逻辑同处）。
+use super::super::approve::ApprovalChoice;
 
 /// 审批浮层宽高上限。
 const OVERLAY_MAX_WIDTH: u16 = 78;
-const OVERLAY_HEIGHT: u16 = 8;
+/// 边框 2 行 + preview + （可选）allowlist + 空行 + 状态 + 选项行 + 两行提示。
+const OVERLAY_HEIGHT: u16 = 9;
 
 /// 在 `area` 内居中放一个 `width × height` 的矩形；装不下时贴左上，绝不越界。
 fn centered(area: Rect, width: u16, height: u16) -> Rect {
@@ -107,8 +110,12 @@ pub(super) fn render_approval_overlay(frame: &mut Frame, st: &UiState, area: Rec
         "回合已暂停，等待你的决策",
         Style::new().fg(pal.muted),
     )));
+    // 三个选项：`←` / `→` 移动，选中项画成色块（`err` 底 + 聊天区前景），
+    // 未选中只是 muted 文字。用色块而不是 `[ ]` 括起来，是因为在深色终端里
+    // 反色块比括号更容易一眼扫到当前会提交哪一项。
+    lines.push(choice_line(st.approval_choice, pal));
     lines.push(Line::from(Span::styled(
-        "[Enter] 仅此一次  [a] 始终允许  [Esc/n] 拒绝  [Ctrl+C] 拒绝",
+        "[←/→] 选择   [Enter] 确认   [Esc] 拒绝   [Ctrl+C] 拒绝",
         Style::new().fg(pal.accent),
     )));
     lines.push(Line::from(Span::styled(
@@ -116,6 +123,26 @@ pub(super) fn render_approval_overlay(frame: &mut Frame, st: &UiState, area: Rec
         Style::new().fg(pal.muted),
     )));
     frame.render_widget(Paragraph::new(lines).block(block), rect);
+}
+
+/// 三个动作选项排成一行；选中项加 `err` 底色块。
+fn choice_line(selected: ApprovalChoice, pal: &Palette) -> Line<'static> {
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    for (i, choice) in ApprovalChoice::ALL.iter().enumerate() {
+        if i > 0 {
+            spans.push(Span::raw("   "));
+        }
+        let style = if *choice == selected {
+            Style::new()
+                .fg(pal.bg)
+                .bg(pal.err)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::new().fg(pal.muted)
+        };
+        spans.push(Span::styled(format!(" {} ", choice.label()), style));
+    }
+    Line::from(spans)
 }
 
 /// 设置面板浮层：居中弹层（`Clear` + 独立色块 + 边框块，模板同审批浮层），
