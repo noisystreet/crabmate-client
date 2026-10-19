@@ -82,7 +82,7 @@ struct TuiApp<'a> {
     job_tx: Sender<WorkerJob>,
     cancel: Option<StreamCancel>,
     exit: bool,
-    /// `/quit` 请求在回合结束后退出（回合进行中先取消并等待）。
+    /// `/quit`（`/exit`、`/q` 同义）请求在回合结束后退出（回合进行中先取消并等待）。
     quit_pending: bool,
     /// 帧间 memo：内容/宽度/搜索未变时复用，避免每帧全量 tokenize+wrap。
     prepared: Vec<BodyRow>,
@@ -374,7 +374,7 @@ impl TuiApp<'_> {
     /// `/help`：向 transcript 打印本地命令与快捷键说明。
     fn show_help(&mut self) {
         for line in [
-            "本地命令：/quit /help /status /settings /mode /role /model /find /workspace /conv",
+            "本地命令：/quit（/exit、/q 同义） /help /status /settings /mode /role /model /find /workspace /conv",
             "/mode ask|plan|act · /role <id> · /model <name>（off 清除，随对话生效）",
             "/workspace <路径>（/cd 别名）切换 serve 工作区根；空参只看当前根；/workspace off 恢复 serve 默认根",
             "/settings（或 F2）：设置面板（模型名/API Base/温度/思考模式/API 密钥/Agent role/会话模式；S 保存）",

@@ -66,7 +66,8 @@ pub fn set_mode_field(slot: &mut Option<String>, arg: Option<String>) -> String 
 }
 
 /// 解析控制斜杠：`/model [x]` `/mode [ask|plan|act]` `/role [id]` `/status`
-/// `/find [词]` `/help` `/conv`(刷新) `/conv new` `/quit`。返回 `None` 表示按普通消息处理。
+/// `/find [词]` `/help` `/conv`(刷新) `/conv new` `/quit`（`/exit`、`/q` 同义）。
+/// 返回 `None` 表示按普通消息处理。
 pub fn parse_control(text: &str) -> Option<Control> {
     let t = text.trim();
     let rest = t.strip_prefix('/')?.trim();
@@ -110,6 +111,10 @@ mod tests {
     fn parse_control_known_slashes() {
         assert!(matches!(parse_control("/quit"), Some(Control::Quit)));
         assert!(matches!(parse_control("/EXIT"), Some(Control::Quit)));
+        // `/exit`、`/q` 与 `/quit` 同义；带尾随空白同样接受。
+        assert!(matches!(parse_control("/exit"), Some(Control::Quit)));
+        assert!(matches!(parse_control(" /Exit  "), Some(Control::Quit)));
+        assert!(matches!(parse_control("/q"), Some(Control::Quit)));
         assert!(matches!(parse_control("/status"), Some(Control::Status)));
         assert!(matches!(
             parse_control("/settings"),

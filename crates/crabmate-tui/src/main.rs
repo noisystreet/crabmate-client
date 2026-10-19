@@ -417,7 +417,7 @@ fn ensure_tty() -> Result<()> {
 
 fn print_repl_banner(client: &ServeClient, conversation_id: Option<&str>) {
     eprintln!(
-        "crabmate-tui repl → {}  (/help · Ctrl+C / Ctrl+D / /quit)",
+        "crabmate-tui repl → {}  (/help · Ctrl+C / Ctrl+D / /quit|/exit)",
         client.config().api_base
     );
     if let Some(cid) = conversation_id {

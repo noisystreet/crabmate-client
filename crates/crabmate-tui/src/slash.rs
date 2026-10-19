@@ -124,7 +124,7 @@ fn print_help() {
   /conv new             clear conversation_id (next turn starts fresh)\n\
   /conv use <id>        set conversation_id for continuation\n\
   /conv delete [<id>]   delete a server-persisted conversation (idempotent 204)\n\
-  /quit                 exit repl\n\
+  /quit /exit /q        exit repl\n\
 model-side slash (sent to serve; serve short-circuits, nothing is persisted):\n\
   /btw <question>       off-the-record side question (no tools, not added to history)"
     );
@@ -293,6 +293,11 @@ mod tests {
     fn detects_control_slashes() {
         assert!(is_control_slash("/help"));
         assert!(is_control_slash("/HELP"));
+        // 退出：`/quit` 与别名 `/exit`、`/q`（大小写不敏感）都要拦截，别发给模型。
+        assert!(is_control_slash("/quit"));
+        assert!(is_control_slash("/exit"));
+        assert!(is_control_slash("/EXIT"));
+        assert!(is_control_slash("/q"));
         assert!(is_control_slash("/Workspace /tmp"));
         assert!(is_control_slash("/conv list"));
         assert!(is_control_slash("/conv delete c1"));
