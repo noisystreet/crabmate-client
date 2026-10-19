@@ -297,7 +297,8 @@ fn bullet_char(indent: usize) -> char {
 /// 三类标记的处理**故意不同**：
 /// - 无序列表 `-` / `*` / `+`：换成圆点 —— 短横线在终端里和分隔线、负号容易混
 /// - 有序列表 `1.`：保留编号。数字本身携带顺序信息，换成圆点就丢了
-/// - 引用 `>`：保留原字符。多行引用靠 `>` 连成一片，去掉反而看不出范围
+/// - 引用 `>`：换成竖条 `▎`。连续几行的竖条自然连成一条线，范围一眼可见；
+///   嵌套（`> > x`）就叠几条
 fn push_marker(
     out: &mut Vec<(Style, char)>,
     marker_len: usize,
@@ -316,6 +317,10 @@ fn push_marker(
             out.push((bullet_st, bullet_char(indent)));
             out.push((Style::new(), ' '));
         }
+        Some(b'>') => {
+            push_quote(out, rest, pal);
+            return;
+        }
         _ => {
             let marker: String = rest[..marker_len].to_string();
             out.extend(marker.chars().map(|c| (Style::new().fg(Color::Gray), c)));
@@ -326,6 +331,27 @@ fn push_marker(
         }
     }
     out.extend(inline_styled_chars(&rest[content_at..], pal));
+}
+
+/// 引用：每个 `>` 换成一个竖条，嵌套就叠几条。
+///
+/// `>` 本身留在屏幕上时，读者要自己数「这几行前面有几个尖括号」才能看出引用范围；
+/// 换成竖条后，连续几行自然连成一条竖线，范围一眼可见。
+fn push_quote(out: &mut Vec<(Style, char)>, rest: &str, pal: &Palette) {
+    let bar = if pal.is_mono() {
+        Style::new()
+    } else {
+        Style::new().fg(pal.accent)
+    };
+    let mut body = rest;
+    while let Some((_, content_at)) = quote_match(body.as_bytes()) {
+        // 竖条后固定补一个空格：`>正文`（无空格）与 `> 正文` 输出一致，
+        // 也和 `• ` / `☐ ` 一样占 2 列。
+        out.push((bar, '▎'));
+        out.push((Style::new(), ' '));
+        body = &body[content_at..];
+    }
+    out.extend(inline_styled_chars(body, pal));
 }
 
 /// 单行：行首标记（分隔线/标题/任务列表/列表/引用）渲染 + 其余部分行内 md。
