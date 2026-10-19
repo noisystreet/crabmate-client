@@ -87,13 +87,11 @@ pub(crate) fn wrap_physical(text: &str, width: usize) -> Vec<String> {
 }
 
 /// 单段（不含换行）行内文本 → 带 markdown 样式的字符流。
+///
+/// 图片（`![alt](url)`）先由 [`inline_image`] 切出去降级成 `[图] alt`：
+/// 终端显示不了位图，而共享 parser 不认 `![`（会把 `!` 单独留成文本）。
 pub(crate) fn inline_styled_chars(part: &str, pal: &Palette) -> Vec<(Style, char)> {
-    let mut out = Vec::new();
-    for span in parse_inline_markdown(part) {
-        let st = md_span_style(&span, pal);
-        out.extend(span_text(&span).chars().map(|c| (st, c)));
-    }
-    out
+    inline_image::inline_styled_chars(part, pal)
 }
 
 /// 该行是否为代码围栏开关行（`` ``` `` / `~~~`，容忍行首缩进）。
@@ -702,6 +700,10 @@ pub(crate) fn styled_row_spans(
 // 表格渲染拆到独立文件：`md.rs` 贴着 920 行门禁，且表格要跨行收集（见文件头注释）。
 #[path = "md_table.rs"]
 mod table;
+
+// 行内图片降级（`![alt](url)` → `[图] alt`）单独成文件：见 md_image.rs 头注释。
+#[path = "md_image.rs"]
+mod inline_image;
 
 // 测试拆到独立文件：避免 lizard 函数体合并跨度超 fn-nloc 门禁（同 render / settings_panel 惯例）。
 #[cfg(test)]

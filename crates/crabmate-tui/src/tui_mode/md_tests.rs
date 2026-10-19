@@ -376,3 +376,84 @@ fn table_cell_supports_inline_markdown() {
     let o = chars.iter().find(|(_, ch)| *ch == 'o').expect("应有省略");
     let _ = o;
 }
+
+// ---------- 行内图片（降级成 `[图] alt`） ----------
+
+fn render_inline(text: &str) -> String {
+    assistant_styled_text(text, &pal(), 0)
+        .iter()
+        .map(|(_, c)| *c)
+        .collect()
+}
+
+/// 基本形态：`![alt](url)` → `[图] alt`，URL 不上屏，感叹号不残留。
+#[test]
+fn image_degrades_to_alt_text() {
+    assert_eq!(render_inline("![架构图](https://x/a.png)"), "[图] 架构图");
+    // 没有 alt 就只留标记
+    assert_eq!(render_inline("![](https://x/a.png)"), "[图]");
+    // 夹在正文里
+    assert_eq!(render_inline("见图 ![x](u) 结束"), "见图 [图] x 结束");
+}
+
+/// `[图]` 用 accent —— 让人一眼看出「这里原本是张图」，而不是一段普通文字。
+#[test]
+fn image_tag_is_accented() {
+    let chars = assistant_styled_text("![a](u)", &pal(), 0);
+    let open = chars.iter().find(|(_, c)| *c == '[').expect("应有 [图]");
+    assert_eq!(open.0.fg, Some(pal().accent), "[图] 用 accent");
+    // alt 本身不是 accent（它是正文）
+    let alt = chars.iter().find(|(_, c)| *c == 'a').expect("应有 alt");
+    assert_ne!(alt.0.fg, Some(pal().accent));
+}
+
+/// alt 里的行内 markdown 仍然生效。
+#[test]
+fn image_alt_keeps_inline_markdown() {
+    let chars = assistant_styled_text("![**粗**](u)", &pal(), 0);
+    let text: String = chars.iter().map(|(_, c)| *c).collect();
+    assert_eq!(text, "[图] 粗", "`**` 标记不该上屏");
+    let c = chars.iter().find(|(_, ch)| *ch == '粗').expect("应有 alt");
+    assert!(c.0.add_modifier.contains(Modifier::BOLD));
+}
+
+/// 语法不完整（缺 `)` 或缺 `](`）时不算图片，原样保留 —— 不吞掉残句。
+#[test]
+fn incomplete_image_syntax_is_left_alone() {
+    assert_eq!(render_inline("![x](u"), "![x](u");
+    assert_eq!(render_inline("![x] 没有 url"), "![x] 没有 url");
+    assert_eq!(render_inline("a ! b"), "a ! b");
+}
+
+/// 普通链接不受影响，仍是 accent + 下划线。
+#[test]
+fn plain_link_still_works() {
+    let chars = assistant_styled_text("[文档](https://x)", &pal(), 0);
+    let text: String = chars.iter().map(|(_, c)| *c).collect();
+    assert_eq!(text, "文档");
+    let d = chars
+        .iter()
+        .find(|(_, c)| *c == '文')
+        .expect("应有链接文字");
+    assert_eq!(d.0.fg, Some(pal().accent));
+    assert!(d.0.add_modifier.contains(Modifier::UNDERLINED));
+}
+
+/// 围栏里的 `![x](u)` 是代码内容，保持字面。
+#[test]
+fn image_inside_fence_stays_literal() {
+    let chars = assistant_styled_text("```\n![x](u)\n```", &pal(), 10);
+    let text: String = chars.iter().map(|(_, c)| *c).collect();
+    assert!(text.contains("![x](u)"), "围栏内应保持字面：{text:?}");
+}
+
+/// 表格单元格里的图片同样降级（单元格走的是同一个行内渲染入口）。
+#[test]
+fn image_inside_table_cell_degrades() {
+    let rows = wrap_styled_chars(
+        &assistant_styled_text("| 图 |\n| --- |\n| ![a](u) |", &pal(), 0),
+        200,
+    );
+    let text: String = rows[2].iter().map(|(_, c)| *c).collect();
+    assert_eq!(text, "[图] a");
+}
