@@ -23,6 +23,7 @@ use crate::serve::{
 use super::approve::{ApprovalPrompt, OverlayApprovalGate};
 use super::serve_defaults::ServeDefaults;
 use super::settings::{LlmSave, PersistedSettings, PrefsSave, merge_llm_save, merge_prefs_save};
+use super::slash_menu::SkillsPayload;
 
 /// UI 事件（键盘线程与回合/拉取线程共同的生产者）。
 pub(super) enum UiEvent {
@@ -89,6 +90,8 @@ pub(super) enum UiEvent {
     SavedLlm(Result<LlmSave, String>),
     /// `prefs` 保存结果：`Ok` 回传已应用动作（面板据此清 staged）。
     SavedPrefs(Result<PrefsSave, String>),
+    /// skill 目录（`GET /skills`，供 `/` 补全菜单的 skill 候选）。
+    Skills(Result<SkillsPayload, String>),
 }
 
 /// 回合后台任务：由持久 worker 线程串行消费。
@@ -131,6 +134,8 @@ pub(super) enum WorkerJob {
     SaveLlm(LlmSave),
     /// 保存 prefs：先 GET 再改 `cm_role/session_mode` 再全量 PUT。
     SavePrefs(PrefsSave),
+    /// 拉 skill 目录（`GET /skills`）：只给 `/` 补全菜单用。
+    Skills,
 }
 
 /// 全屏模式 sink：把流事件发往 UI 事件通道。
@@ -262,6 +267,7 @@ pub(super) fn spawn_worker(client: ServeClient, tx: Sender<UiEvent>) -> Sender<W
                 WorkerJob::LoadUserSettings => job_load_user_settings(&rt, &client, &tx),
                 WorkerJob::SaveLlm(save) => job_save_llm(&rt, &client, save, &tx),
                 WorkerJob::SavePrefs(save) => job_save_prefs(&rt, &client, save, &tx),
+                WorkerJob::Skills => job_skills(&rt, &client, &tx),
             }
         }
     });
@@ -386,6 +392,17 @@ fn job_workspace_dir(
 fn job_refresh_status(rt: &tokio::runtime::Runtime, client: &ServeClient, tx: &Sender<UiEvent>) {
     let result = rt.block_on(fetch_serve_defaults(client));
     let _ = tx.send(UiEvent::Status(result));
+}
+
+/// skill 目录（`GET /skills`）：只给 `/` 补全菜单的 skill 候选，失败如实回传。
+fn job_skills(rt: &tokio::runtime::Runtime, client: &ServeClient, tx: &Sender<UiEvent>) {
+    let result = rt.block_on(async {
+        client
+            .get_json::<SkillsPayload>(paths::SKILLS)
+            .await
+            .map_err(|e| e.to_string())
+    });
+    let _ = tx.send(UiEvent::Skills(result));
 }
 
 /// 项目池列表（`GET /workspace/projects`）。

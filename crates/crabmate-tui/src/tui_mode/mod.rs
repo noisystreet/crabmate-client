@@ -23,6 +23,7 @@ mod session_index;
 mod settings;
 mod settings_panel;
 mod sidebar_keys;
+mod slash_menu;
 mod spinner;
 mod state;
 mod status;
@@ -375,6 +376,7 @@ impl TuiApp<'_> {
     fn show_help(&mut self) {
         for line in [
             "本地命令：/quit（/exit、/q 同义） /help /status /settings /mode /role /model /find /workspace /conv",
+            "输入 / 弹出补全菜单（内建命令 + skill；↑↓ 选择 · Tab/Enter 补全 · Esc 关闭）",
             "/mode ask|plan|act · /role <id> · /model <name>（off 清除，随对话生效）",
             "/workspace <路径>（/cd 别名）切换 serve 工作区根；空参只看当前根；/workspace off 恢复 serve 默认根",
             "/settings（或 F2）：设置面板（模型名/API Base/温度/思考模式/API 密钥/Agent role/会话模式；S 保存）",
@@ -452,7 +454,17 @@ impl TuiApp<'_> {
             self.on_sidebar_key(key);
             return;
         }
+        // composer 的 `/` 补全菜单打开时先吃方向键 / Tab / Enter / Esc（对齐 Desktop 浮层）。
+        if self.on_slash_menu_key(&key) {
+            return;
+        }
         self.on_input_key(key);
+    }
+
+    /// `/` 补全菜单接管按键；返回 `true` 表示已消费。只在前缀态里成立，所以
+    /// `/zzz`（无候选）之类不会把方向键从 transcript 滚动里抢走。
+    fn on_slash_menu_key(&mut self, key: &KeyEvent) -> bool {
+        self.st.slash_menu_open() && self.slash_menu_key(key)
     }
 
     /// F2 开关设置面板：关闭时若脏字段则先弹确认（Esc 同语义）。
@@ -517,6 +529,9 @@ impl TuiApp<'_> {
             KeyCode::Down => self.st.scroll_lines(false, 3),
             _ => {}
         }
+        // 草稿变了：收敛 `/` 菜单的选中项与「Esc 关闭」状态，并确保 skill 候选已拉过。
+        self.st.slash_after_input();
+        self.maybe_fetch_skills();
     }
 
     fn on_turn_done(&mut self, outcome: ChatStreamOutcome, error: Option<String>) {
@@ -550,6 +565,7 @@ impl TuiApp<'_> {
             // 鼠标：右栏工作区目录树的点击/滚轮（审批凥层/设置面板打开时内部直接忽略）。
             UiEvent::Mouse(m) => self.on_mouse(m),
             UiEvent::Text(delta) => self.st.stream_delta(LineKind::Assistant, &delta),
+            UiEvent::Skills(result) => self.st.set_skills(result),
             UiEvent::Thinking(delta) => self.st.stream_delta(LineKind::Thinking, &delta),
             UiEvent::System(line) => self.st.push_line(LineKind::System, line.trim()),
             UiEvent::ToolStart { tool_call_id, name } => self.st.tool_start(&tool_call_id, &name),

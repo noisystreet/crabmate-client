@@ -143,6 +143,8 @@ impl TuiApp<'_> {
         self.index.pending_bind_conversation = None;
         self.index.pending_session_title = None;
         self.index.new_session_pending = false;
+        // skill 目录是按工作区（`.crabmate/skills`）解析的：换根后旧候选不该继续出现在菜单里。
+        self.st.clear_skills();
         self.st.ws_begin_root_fetch();
         self.refresh_workspace(false);
         self.refresh_sessions();
