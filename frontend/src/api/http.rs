@@ -434,7 +434,7 @@ pub struct SkillsListData {
 }
 
 pub async fn fetch_skills(loc: Locale) -> Result<SkillsListData, String> {
-    fetch_json("GET", "/skills", None, loc).await
+    fetch_json("GET", paths::SKILLS, None, loc).await
 }
 
 pub async fn fetch_tasks(loc: Locale) -> Result<TasksData, String> {
