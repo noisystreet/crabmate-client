@@ -1,8 +1,8 @@
 version: 2
 updates:
   # --- Rust（一条多目录条目；本仓无顶层 workspace，包各自独立 Cargo.lock）---
-  # 仅 tokio 用 group-by: dependency-name 做「跨目录同名依赖合并」——同一次 tokio
-  # 升级只出一条 PR（覆盖所有含 tokio 的包），其余依赖仍按目录各自出 PR。
+  # tokio / serde_json 用 group-by: dependency-name 做「跨目录同名依赖合并」——
+  # 同一次升级只出一条 PR（覆盖所有含该依赖的包），其余依赖仍按目录各自出 PR。
   # tauri 生态保持「一族一起升」的既有分组。
   - package-ecosystem: cargo
     directories:
@@ -25,6 +25,11 @@ updates:
       tokio:
         patterns:
           - "tokio"
+        group-by: dependency-name
+      # serde_json 跨全部目录收敛为一条 PR（曾一次开出 8 条同名 patch PR）。
+      serde-json:
+        patterns:
+          - "serde_json"
         group-by: dependency-name
       # Tauri 生态须版本对齐（tauri / tauri-build / tauri-plugin-* / victauri*），
       # 一条 PR 升一组，避免单包 PR 互相拆散与 lockstep 手工对齐。
