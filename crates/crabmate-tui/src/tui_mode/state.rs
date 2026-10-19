@@ -11,8 +11,18 @@ use crate::serve::{ApprovalDecision, CommandApprovalData, SessionListRow, Worksp
 use super::approve::ApprovalChoice;
 use super::palette::Palette;
 use super::serve_defaults::ServeDefaults;
+use super::slash_menu::{SkillsCache, SkillsPayload, SlashItem, filtered_items, slash_prefix};
 use super::tool_summary::tool_end_text;
 use super::workspace_tree::{WsPickState, WsRow};
+
+/// `/` 补全菜单的会话内状态。
+#[derive(Debug, Default)]
+pub struct SlashMenuState {
+    /// 选中项下标（超界时由输入变化后的收敛逻辑拉回）。
+    pub cursor: usize,
+    /// 本次 `/` 前缀态里被 Esc 关掉（草稿离开前缀态后自动解除）。
+    pub dismissed: bool,
+}
 
 /// transcript 行类别（决定前缀与配色）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -186,6 +196,12 @@ pub struct UiState {
     /// transcript 内容代数（任何影响渲染的行内容/折叠/清空变化都会递增）。
     /// 供 body 行帧间 memo 作失效键（O(1)，对原位同长编辑也免疫）。
     pub content_rev: u64,
+    /// `/` 补全菜单（输入期候选提示，不影响提交语义）。
+    pub slash: SlashMenuState,
+    /// serve 的 skill 目录缓存（`GET /skills`；`None` = 还没拉过）。
+    pub skills: Option<SkillsCache>,
+    /// skill 目录拉取在途（防重复请求）。
+    pub skills_loading: bool,
 }
 
 impl UiState {
@@ -311,6 +327,97 @@ impl UiState {
         if at_end || glued_right {
             self.insert_char(' ');
         }
+    }
+
+    /// 整串替换输入缓冲（`/` 菜单接受候选时用；光标落到末尾）。
+    pub fn set_input(&mut self, text: &str) {
+        self.input = text.chars().collect();
+        self.cursor = self.input.len();
+    }
+
+    // ── `/` 补全菜单（输入期候选提示，与提交时的控制斜杠解析无关） ──────
+
+    /// 草稿处于候选态、且没被 Esc 关掉。
+    #[must_use]
+    pub fn slash_menu_open(&self) -> bool {
+        !self.slash.dismissed && slash_prefix(&self.current_input()).is_some()
+    }
+
+    /// 当前候选；菜单关闭 / 非前缀态时为空。
+    #[must_use]
+    pub fn slash_items(&self) -> Vec<SlashItem> {
+        if self.slash.dismissed {
+            return Vec::new();
+        }
+        let draft = self.current_input();
+        let Some(prefix) = slash_prefix(&draft) else {
+            return Vec::new();
+        };
+        filtered_items(prefix, self.skills.as_ref())
+    }
+
+    pub fn slash_dismiss(&mut self) {
+        self.slash.dismissed = true;
+    }
+
+    /// 环形步进选择（`len == 0` 时不动）。
+    pub fn slash_step(&mut self, len: usize, delta: i32) {
+        if len == 0 {
+            return;
+        }
+        self.slash.cursor = ((self.slash.cursor as i32 + delta).rem_euclid(len as i32)) as usize;
+    }
+
+    /// 接受光标项：整串替换草稿并收起菜单；无候选时返回 `false`（放行原本的按键语义）。
+    pub fn slash_accept(&mut self) -> bool {
+        let items = self.slash_items();
+        let Some(item) = items.get(self.slash.cursor) else {
+            return false;
+        };
+        let insert = item.insert.clone();
+        self.set_input(&insert);
+        // 接受后立刻收起：`/help` 这类无参命令接受后草稿仍是前缀态，否则马上又弹回来。
+        self.slash.dismissed = true;
+        self.slash.cursor = 0;
+        true
+    }
+
+    /// 输入变化后统一收敛：离开前缀态就解除 Esc 关闭；光标钳到合法范围。
+    pub fn slash_after_input(&mut self) {
+        if slash_prefix(&self.current_input()).is_none() {
+            self.slash.dismissed = false;
+            self.slash.cursor = 0;
+        }
+        let n = if self.slash.dismissed {
+            0
+        } else {
+            self.slash_items().len()
+        };
+        if n == 0 {
+            self.slash.cursor = 0;
+        } else if self.slash.cursor >= n {
+            self.slash.cursor = n - 1;
+        }
+    }
+
+    /// skill 目录拉取结果落地。失败也缓存：每次打开菜单都重试同一个错只会刷屏。
+    pub fn set_skills(&mut self, result: Result<SkillsPayload, String>) {
+        self.skills_loading = false;
+        self.skills = Some(match result {
+            Ok(p) => SkillsCache::from_payload(p),
+            Err(e) => SkillsCache {
+                enabled: false,
+                skills: Vec::new(),
+                err: Some(e),
+            },
+        });
+    }
+
+    /// 切换工作区后 skill 目录可能整套换掉：清缓存并复位菜单态。
+    pub fn clear_skills(&mut self) {
+        self.skills = None;
+        self.skills_loading = false;
+        self.slash = SlashMenuState::default();
     }
 
     pub fn backspace(&mut self) {

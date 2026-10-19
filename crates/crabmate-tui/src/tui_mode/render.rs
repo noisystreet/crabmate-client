@@ -543,6 +543,10 @@ fn render_chat_column(
     if st.approval.is_some() {
         render_approval_overlay(frame, st, body_area);
     }
+    // `/` 补全菜单贴在 composer 正上方；审批浮层（回合被阻塞）优先，此时不画。
+    if st.approval.is_none() {
+        super::slash_menu::render_slash_menu(frame, st, body_area);
+    }
     render_input(frame, st, parts[1], cursor_allowed);
 }
 
