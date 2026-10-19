@@ -22,6 +22,7 @@ mod serve_defaults;
 mod session_index;
 mod settings;
 mod settings_panel;
+mod sidebar_keys;
 mod spinner;
 mod state;
 mod status;
@@ -380,6 +381,7 @@ impl TuiApp<'_> {
             "/conv list 刷新 · /conv use <id> 切换 · /conv new 新会话",
             "按键：Alt+Enter 换行 · Ctrl+E 思考展开/折叠 · Ctrl+W 工作区目录树 · PgUp/PgDn 翻页 · Ctrl+End 回底部",
             "设置面板：↑↓ 移动 · Enter 编辑 · Tab 切分区 · S 保存 · Esc/F2 关闭（有改动 Esc 先确认）",
+            "会话栏：↑↓选 Enter用 n新建 r刷新 Del删除（再按 y/Enter 确认，Esc/n 或其它键取消）Shift+Del 直接删",
             "工作区树：↑↓选 Enter/→展开 ◀收起/回父 r刷新 w回会话列表 Tab/Esc 回输入",
             "工作区切换：按 p 从项目池选择/切换（未设置=选择，已设置=切到另一项目；↑↓选 Enter切换 r刷新 Esc 返回）",
             "审批浮层：Enter=一次 · a=始终 · Esc/n=拒绝 · Ctrl+C 先拒绝、回合随后继续需再按取消",
@@ -454,6 +456,8 @@ impl TuiApp<'_> {
     /// F2 开关设置面板：关闭时若脏字段则先弹确认（Esc 同语义）。
     fn toggle_settings(&mut self) {
         if self.panel.is_none() {
+            // 面板接管键盘：会话栏那次「待确认删除」留到回来再按 y 就是误删，先作废。
+            self.st.confirm_delete = None;
             self.open_settings();
         } else {
             self.on_settings_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
@@ -479,20 +483,6 @@ impl TuiApp<'_> {
         }
     }
 
-    fn on_sidebar_key(&mut self, key: KeyEvent) {
-        match key.code {
-            KeyCode::Tab | KeyCode::BackTab | KeyCode::Esc => self.st.focus = Focus::Input,
-            KeyCode::Up => self.st.move_selection(true),
-            KeyCode::Down => self.st.move_selection(false),
-            KeyCode::Enter => self.use_selected(),
-            KeyCode::Char('n') => self.new_session(),
-            KeyCode::Char('r') => self.refresh_sessions(),
-            // w：聚焦右栏工作区目录树（与工作区视图内的 w 互逆）。
-            KeyCode::Char('w') => self.focus_workspace(),
-            _ => {}
-        }
-    }
-
     fn on_input_key(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Enter if is_alt_enter(&key) => self.st.insert_newline(),
@@ -502,32 +492,10 @@ impl TuiApp<'_> {
             KeyCode::Char('w') if is_ctrl_w(&key) && self.st.sidebar_visible => {
                 self.focus_workspace();
             }
-            KeyCode::Char('e') if is_ctrl_e(&key) => {
-                self.st.toggle_thinking();
-                let state = if self.st.thinking_visible() {
-                    "展开"
-                } else {
-                    "折叠"
-                };
-                self.st.push_line(
-                    LineKind::System,
-                    &format!("思考内容已{state}（Ctrl+E 切换）"),
-                );
-            }
+            KeyCode::Char('e') if is_ctrl_e(&key) => self.st.toggle_thinking_with_notice(),
             KeyCode::Char('c') | KeyCode::Char('d') | KeyCode::Char('z')
                 if key.modifiers.contains(KeyModifiers::CONTROL) => {}
-            KeyCode::Tab => {
-                let wide_enough = self.st.sidebar_visible;
-                if wide_enough && !self.st.sessions.is_empty() {
-                    self.st.selected = self
-                        .st
-                        .sessions
-                        .iter()
-                        .position(|r| self.st.row_in_use(r))
-                        .unwrap_or(0);
-                    self.st.focus = Focus::Sidebar;
-                }
-            }
+            KeyCode::Tab => self.focus_sidebar_on_current(),
             KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.st.insert_char(ch);
             }
@@ -593,6 +561,8 @@ impl TuiApp<'_> {
                 // 审批浮层优先级高于设置面板：面板（只读）开着时先关掉再弹审批，
                 // 避免按键被面板截走导致审批悬挂。
                 self.panel = None;
+                // 审批期间只认决策键，会话栏的待确认删除留到审批结束就是误删。
+                self.st.confirm_delete = None;
                 self.st.begin_approval(&prompt.req, prompt.answer);
             }
             UiEvent::TurnDone { outcome, error } => self.on_turn_done(outcome, error),

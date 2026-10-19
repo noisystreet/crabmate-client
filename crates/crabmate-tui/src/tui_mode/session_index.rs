@@ -287,6 +287,7 @@ impl TuiApp<'_> {
                     SessionIndexOp::RemoveBlank { .. } => "空白会话未能回收",
                     SessionIndexOp::SetTitle { .. } => "会话标题未写入会话列表",
                     SessionIndexOp::FlushExit { .. } => "退出前的会话落盘未完成",
+                    SessionIndexOp::Delete { .. } => "删除会话未写入会话列表",
                 };
                 // 绑定失败最常见的原因是那条空行已被别的端删掉：丢弃待绑定记录，
                 // 否则后续每轮都会重试同一个失败绑定，`/conv new` 还会一直走复用分支。
@@ -362,6 +363,8 @@ impl TuiApp<'_> {
             SessionIndexOp::SetTitle { .. } => {}
             // 退出落盘发生在退出路径上，屏幕上已经没有可看的地方，静默即可。
             SessionIndexOp::FlushExit { .. } => {}
+            // 删除：左栏刷新后那行自然消失，不必额外打一行（发起时已提示「正在删除…」）。
+            SessionIndexOp::Delete { .. } => {}
         }
         self.refresh_sessions();
     }

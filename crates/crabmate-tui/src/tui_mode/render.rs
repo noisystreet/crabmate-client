@@ -31,7 +31,13 @@ pub(crate) fn chat_body_width(sidebar_visible: bool, terminal_width: u16) -> usi
     };
     (col as usize).saturating_sub(2)
 }
-pub(super) const SIDEBAR_HINT: &str = "↑↓选 Enter用 n新建 r刷新";
+/// 左栏会话栏聚焦时的按键提示。宽度必须 ≤ 侧栏内宽（`SIDEBAR_WIDTH` - 1 = 25 列），
+/// 否则 `render_pane` 会直接裁掉尾部的键；中文按 2 列计。
+pub(super) const SIDEBAR_HINT: &str = "↑↓ Enter用 Del删 n新 r刷";
+/// 删除确认态的提示（`Delete` 已按一次）：y / Enter 删，Esc / n 取消。
+///
+/// 与 Desktop 的确认框同语义，但借用侧栏底部提示行，不抢焦点、不开浮层。
+pub(super) const SIDEBAR_DELETE_HINT: &str = "[y] 删除 [Esc] 取消";
 /// composer 最多展开行数（多行输入）。
 const MAX_COMPOSER_ROWS: usize = 4;
 /// 审批浮层宽高上限。

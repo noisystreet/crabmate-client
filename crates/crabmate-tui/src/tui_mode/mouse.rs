@@ -44,6 +44,8 @@ impl TuiApp<'_> {
             MouseEventKind::Down(MouseButton::Left) => {
                 if matches!(self.st.focus, Focus::Sidebar | Focus::Workspace) {
                     self.st.focus = Focus::Input;
+                    // 焦点离开会话栏：作废待确认删除，免得回来按 y 误删。
+                    self.st.confirm_delete = None;
                 }
             }
             _ => {}
