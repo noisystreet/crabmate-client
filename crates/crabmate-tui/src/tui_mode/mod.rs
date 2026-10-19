@@ -422,8 +422,9 @@ impl TuiApp<'_> {
 
     fn on_key(&mut self, key: KeyEvent) {
         // 审批浮层优先：只认决策键，忽略其它输入（防多重审批叠栈）。
+        // ←/→ 只移动选中项（`decision_for_key` 返回 None），Enter 才按选中项提交。
         if self.st.approval.is_some() {
-            if let Some(decision) = decision_for_key(&key) {
+            if let Some(decision) = decision_for_key(&key, &mut self.st.approval_choice) {
                 let via_ctrl_abort = is_ctrl_abort(&key);
                 self.answer_approval(decision, via_ctrl_abort);
             }

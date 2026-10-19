@@ -8,6 +8,7 @@ use std::sync::mpsc::Sender;
 
 use crate::serve::{ApprovalDecision, CommandApprovalData, SessionListRow, WorkspaceDirEntry};
 
+use super::approve::ApprovalChoice;
 use super::palette::Palette;
 use super::serve_defaults::ServeDefaults;
 use super::tool_summary::tool_end_text;
@@ -170,6 +171,8 @@ pub struct UiState {
     pub ws_pick: Option<WsPickState>,
     /// 审批浮层（回合暂停等待决策）。
     pub approval: Option<ApprovalOverlay>,
+    /// 审批浮层里方向键选中的那一项（浮层关闭后保留，下次打开时复位）。
+    pub approval_choice: ApprovalChoice,
     /// 工具调用 id → transcript 行号（结果到达时原位更新摘要行）。
     tool_pending: HashMap<String, usize>,
     /// 全局 thinking 展开开关（默认折叠）。
@@ -486,6 +489,9 @@ impl UiState {
             allowlist_key: req.allowlist_key.clone(),
             answer,
         });
+        // 每次新请求都把光标复位到默认项：上一条审批停在哪一项，不该影响下一次的
+        // 默认回答（否则「上次点了始终允许」会让下一条审批一回车就自动放行）。
+        self.approval_choice = ApprovalChoice::default();
     }
 
     // ── 工具行摘要 ───────────────────────────────────────────
