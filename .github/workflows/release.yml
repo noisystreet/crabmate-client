@@ -270,7 +270,8 @@ jobs:
           tag = sys.argv[1]
           version = tag[1:] if tag.startswith("v") else tag
           text = open("CHANGELOG.md", encoding="utf-8").read()
-          pattern = re.compile(r"^## \[\s*" + re.escape(version) + r"\s*\]", re.MULTILINE)
+          # 整行吃掉标题（含 " - <date>"）：只匹配到 "]" 会把日期残行留在 notes 首行。
+          pattern = re.compile(r"^## \[\s*" + re.escape(version) + r"\s*\][^\n]*\n", re.MULTILINE)
           m = pattern.search(text)
           if m:
               rest = text[m.end():]
