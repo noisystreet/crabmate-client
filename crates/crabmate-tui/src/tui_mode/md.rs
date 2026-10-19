@@ -337,6 +337,34 @@ fn push_row(out: &mut Vec<(Style, char)>, first: &mut bool, row: Vec<(Style, cha
     *first = false;
 }
 
+/// 去掉末尾的换行（CommonMark：文档结尾的空行不算段落）。
+fn trim_tail(out: &mut Vec<(Style, char)>) {
+    while let Some(&(_, '\n')) = out.last() {
+        out.pop();
+    }
+}
+
+/// 若 `rows[i]` 起是表格，渲染并追加；返回消费掉的行数。
+fn emit_table(
+    rows: &[&str],
+    i: usize,
+    pal: &Palette,
+    width: usize,
+    in_fence: bool,
+    out: &mut Vec<(Style, char)>,
+    first: &mut bool,
+) -> Option<usize> {
+    // 围栏内的 `|` 是代码内容，不是表格。
+    if in_fence {
+        return None;
+    }
+    let (lines, consumed) = table::table_rows(rows, i, pal, width)?;
+    for line in lines {
+        push_row(out, first, line);
+    }
+    Some(consumed)
+}
+
 /// 整段助手文本 → 带样式的字符流（段间补 `\n` 作强制断行，标记不跨段解析）。
 /// 先过共享 [`crabmate_client_api::normalize_markdown_for_render`]（与 desktop/web
 /// 同一入口），再逐行渲染；处于 `` ``` `` / `~~~` 围栏内的行整行按纯文本，
@@ -360,7 +388,10 @@ pub(crate) fn assistant_styled_text(
     let mut in_fence = false;
     // 开头视为「上一行为空」，让首部空行不产生间距。
     let mut prev_blank = true;
-    for part in text.split('\n') {
+    let rows: Vec<&str> = text.split('\n').collect();
+    let mut i = 0usize;
+    while i < rows.len() {
+        let part = rows[i];
         if is_fence_switch(part) {
             let opening = !in_fence;
             in_fence = !in_fence;
@@ -374,10 +405,19 @@ pub(crate) fn assistant_styled_text(
                 }
             }
             prev_blank = false;
+            i += 1;
+            continue;
+        }
+        if let Some(consumed) =
+            emit_table(&rows, i, pal, code_width, in_fence, &mut out, &mut first)
+        {
+            prev_blank = false;
+            i += consumed;
             continue;
         }
         let blank = part.trim().is_empty();
         if skip_blank_gap(blank, in_fence, prev_blank) {
+            i += 1;
             continue;
         }
         let row = if in_fence {
@@ -387,14 +427,12 @@ pub(crate) fn assistant_styled_text(
         };
         push_row(&mut out, &mut first, row);
         prev_blank = blank;
+        i += 1;
     }
-    // 尾部空行不产生间距（同 CommonMark：文档结尾的空行不算段落）。
     // 围栏未闭合时不动：流式输出随时可能续写，围栏内的空行属于代码内容，
     // 提前裁掉会让它在块闭合时「消失又出现」。
     if !in_fence {
-        while let Some(&(_, '\n')) = out.last() {
-            out.pop();
-        }
+        trim_tail(&mut out);
     }
     out
 }
@@ -505,6 +543,10 @@ pub(crate) fn styled_row_spans(
     }
     spans
 }
+
+// 表格渲染拆到独立文件：`md.rs` 贴着 920 行门禁，且表格要跨行收集（见文件头注释）。
+#[path = "md_table.rs"]
+mod table;
 
 // 测试拆到独立文件：避免 lizard 函数体合并跨度超 fn-nloc 门禁（同 render / settings_panel 惯例）。
 #[cfg(test)]

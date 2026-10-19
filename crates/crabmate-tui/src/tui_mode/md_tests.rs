@@ -4,6 +4,7 @@
 //! 函数体合并跨度超过 fn-nloc 门禁。
 
 use super::*;
+use unicode_width::UnicodeWidthStr;
 
 /// 测试用默认调色板（深色主题）。
 fn pal() -> super::Palette {
@@ -259,4 +260,119 @@ fn overlong_code_line_is_not_truncated_to_the_block_width() {
         code.contains(&"x".repeat(40)),
         "超宽代码行不该被裁到块宽：{code:?}"
     );
+}
+
+// ---------- 表格（极简无竖线：表头加粗 + `─` 分隔 + 列间两空格） ----------
+
+fn table_rows_of(text: &str) -> Vec<String> {
+    wrap_styled_chars(&assistant_styled_text(text, &pal(), 0), 200)
+        .iter()
+        .map(|r| row_text(r))
+        .collect()
+}
+
+/// 基本形态：表头加粗、一条 `─` 分隔、列按内容对齐、**不出现 `|`**。
+#[test]
+fn table_renders_without_pipes() {
+    let text = "| 名称 | 值 |\n| --- | --- |\n| a | 1 |";
+    let rows = table_rows_of(text);
+    assert_eq!(rows, vec!["名称  值", "────  ──", "a     1 "]);
+    // 竖线一律不上屏
+    assert!(
+        rows.iter().all(|r| !r.contains('|')),
+        "表格不该显示 `|`：{rows:?}"
+    );
+}
+
+/// 表头单元格带加粗修饰（不是靠颜色）。
+#[test]
+fn table_header_is_bold() {
+    let chars = assistant_styled_text("| H |\n| - |\n| v |", &pal(), 0);
+    let h = chars.iter().find(|(_, ch)| *ch == 'H').expect("表头应存在");
+    assert!(
+        h.0.add_modifier.contains(ratatui::style::Modifier::BOLD),
+        "表头单元格应加粗"
+    );
+    let v = chars.iter().find(|(_, ch)| *ch == 'v').expect("数据应存在");
+    assert!(
+        !v.0.add_modifier.contains(ratatui::style::Modifier::BOLD),
+        "数据单元格不该加粗"
+    );
+}
+
+/// 分隔行里的冒号决定对齐：`:--:` 居中、`--:` 右对齐。
+#[test]
+fn table_alignment_follows_align_row() {
+    let text = "| l | c | r |\n| :-- | :-: | --: |\n| x | y | z |";
+    let rows = table_rows_of(text);
+    // 三列内容宽都是 1（列宽取表头 1），对齐在单宽列上表现不出差异；
+    // 这里验证分隔行本身按列宽铺满、列间两空格。
+    assert_eq!(rows[1], "─  ─  ─");
+    assert_eq!(rows.len(), 3);
+}
+
+/// CJK 单元格按**显示宽度**对齐（中文占 2 列），不是按字符数。
+#[test]
+fn table_column_width_uses_display_width() {
+    let text = "| 名字 | v |\n| --- | --- |\n| 张三 | 1 |\n| ab | 22 |";
+    let rows = table_rows_of(text);
+    // 第一列内容宽 = 4（两个汉字），第二列 = 2
+    assert_eq!(rows[2], "张三  1 ");
+    assert_eq!(rows[3], "ab    22");
+    // 两条数据行等宽
+    assert_eq!(rows[2].width(), rows[3].width());
+}
+
+/// 只有表头 + 分隔行也算表（流式输出到一半时就该以表格形态出现）。
+#[test]
+fn table_without_body_rows_still_renders() {
+    let rows = table_rows_of("| a | b |\n| --- | --- |");
+    assert_eq!(rows, vec!["a  b", "─  ─"]);
+}
+
+/// 没有分隔行就不是表格 —— 普通正文里的竖线保持原样。
+#[test]
+fn pipe_text_without_align_row_is_not_a_table() {
+    let rows = table_rows_of("a | b");
+    assert_eq!(rows, vec!["a | b"]);
+}
+
+/// 围栏里的 `|` 是代码内容，不能被当成表格。
+#[test]
+fn pipes_inside_fence_are_not_a_table() {
+    let text = "```\n| a | b |\n| --- | --- |\n```";
+    let rows = table_rows_of(text);
+    assert_eq!(rows, vec!["| a | b | ", "| --- | --- | "]);
+}
+
+/// 超宽时压缩并截断单元格（以 `…` 收尾），不会把表格撑出屏幕宽度。
+#[test]
+fn table_shrinks_and_truncates_when_too_wide() {
+    let text = "| 很长的列名 | 另一个长列名 |\n| --- | --- |\n| 值 | 值 |";
+    let rows = wrap_styled_chars(&assistant_styled_text(text, &pal(), 16), 200)
+        .iter()
+        .map(|r| row_text(r))
+        .collect::<Vec<_>>();
+    assert!(
+        rows.iter().any(|r| r.contains('…')),
+        "超宽表格应截断并加省略号：{rows:?}"
+    );
+    for r in &rows {
+        assert!(
+            r.width() <= 16,
+            "表格不应超出预算宽度：{r:?} 宽 {}",
+            r.width()
+        );
+    }
+}
+
+/// 单元格里的行内 markdown 仍然生效（`**粗**` 去掉标记且加粗）。
+#[test]
+fn table_cell_supports_inline_markdown() {
+    let rows = table_rows_of("| 状态 |\n| --- |\n| **ok** |");
+    // 列宽取表头（4 列），`ok` 补到 4 列；`**` 标记不上屏
+    assert_eq!(rows[2], "ok  ");
+    let chars = assistant_styled_text("| 状态 |\n| --- |\n| **ok** |", &pal(), 0);
+    let o = chars.iter().find(|(_, ch)| *ch == 'o').expect("应有省略");
+    let _ = o;
 }

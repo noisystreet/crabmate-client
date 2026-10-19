@@ -298,3 +298,32 @@ fn code_block_renders_label_and_background_without_fence_marks() {
         text_row(&buf, code_y)
     );
 }
+
+/// 表格在缓冲区层面：整屏不得出现 `|`，且有一行 `─` 分隔线。
+///
+/// 字符流测试只证明 span 里有正确内容，证明不了「竖线真的没被画上去」。
+#[test]
+fn table_renders_without_pipes_on_screen() {
+    let pal = Palette::default();
+    let mut st = UiState::new();
+    st.set_palette(pal);
+    st.sidebar_visible = false;
+    st.push_line(
+        LineKind::Assistant,
+        "| 模型 | 上下文 |\n| --- | --- |\n| gpt-4o | 128k |",
+    );
+    let buf = render_screen(&st);
+    let mut saw_rule = false;
+    for y in 0..H {
+        let t = text_row(&buf, y);
+        assert!(!t.contains('|'), "第 {y} 行仍有竖线：{t:?}");
+        if t.contains('─') {
+            saw_rule = true;
+        }
+    }
+    assert!(
+        saw_rule,
+        "应有一行 `─` 分隔线；整屏：{:?}",
+        (0..6).map(|y| text_row(&buf, y)).collect::<Vec<_>>()
+    );
+}
