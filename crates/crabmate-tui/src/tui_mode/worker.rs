@@ -107,7 +107,8 @@ pub(super) enum WorkerJob {
         conversation_id: String,
         before_index: Option<u32>,
     },
-    /// 写会话索引（`GET` → 改 → 全量 `PUT`）：新建空白行 / 绑定 `conversation_id`。
+    /// 写会话索引（`GET` → 改 → 全量 `PUT`）：新建空白行 / 绑定 `conversation_id` /
+    /// 删除行（删除时会连服务端对话一起清，见 `apply_web_session_op`）。
     SessionIndex(SessionIndexOp),
     /// 拉取根目录列表；`keep` 为 true 时保留展开态与光标（用户手动刷新）。
     RefreshWorkspace {

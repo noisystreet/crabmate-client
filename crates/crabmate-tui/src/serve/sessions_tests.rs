@@ -296,6 +296,113 @@ fn remove_missing_row_is_idempotent() {
 }
 
 #[test]
+fn delete_removes_row_with_content_but_keeps_active() {
+    // 明确删除有权删有正文的会话（不是回收，不做空白校验）。
+    let raw = json!([
+        {"id":"s1","messages":[{"role":"user","content":"hi"}]},
+        {"id":"s2","messages":[],"draft":""}
+    ]);
+    let applied = apply_index_op(
+        &raw,
+        Some("s1"),
+        &SessionIndexOp::Delete {
+            local_id: "s2".into(),
+            next_active: Some("s1".into()),
+            server_conversation_id: None,
+        },
+        &stamp("x"),
+    )
+    .expect("apply");
+    let rows = applied.sessions.as_array().expect("array");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["id"], json!("s1"));
+    assert_eq!(
+        applied.active_session_id.as_deref(),
+        Some("s1"),
+        "删非 active 行时 active 不变"
+    );
+}
+
+#[test]
+fn delete_active_row_moves_active_to_next() {
+    // `server_conversation_id` 只用于写完后删服务端对话，不参与索引计算。
+    let raw = json!([{"id":"s1","messages":[]}, {"id":"s2","messages":[]}]);
+    let applied = apply_index_op(
+        &raw,
+        Some("s1"),
+        &SessionIndexOp::Delete {
+            local_id: "s1".into(),
+            next_active: Some("s2".into()),
+            server_conversation_id: Some("c9".into()),
+        },
+        &stamp("x"),
+    )
+    .expect("apply");
+    assert_eq!(applied.sessions.as_array().map(Vec::len), Some(1));
+    assert_eq!(applied.active_session_id.as_deref(), Some("s2"));
+}
+
+#[test]
+fn delete_active_row_falls_back_when_next_missing() {
+    // 本地快照给的落点已被别端删掉：退化为剩余首行，active 不能指向已删行。
+    let raw = json!([{"id":"s1","messages":[]}, {"id":"s2","messages":[]}]);
+    let applied = apply_index_op(
+        &raw,
+        Some("s1"),
+        &SessionIndexOp::Delete {
+            local_id: "s1".into(),
+            next_active: Some("gone".into()),
+            server_conversation_id: None,
+        },
+        &stamp("x"),
+    )
+    .expect("apply");
+    assert_eq!(applied.active_session_id.as_deref(), Some("s2"));
+}
+
+#[test]
+fn delete_last_row_leaves_one_default_blank() {
+    // 对齐 Web `ensure_at_least_one`：删空了就补一条空白会话，active 指向它。
+    let raw = json!([{"id":"s1","messages":[{"role":"user","content":"hi"}]}]);
+    let applied = apply_index_op(
+        &raw,
+        Some("s1"),
+        &SessionIndexOp::Delete {
+            local_id: "s1".into(),
+            next_active: None,
+            server_conversation_id: Some("c1".into()),
+        },
+        &stamp("s_new"),
+    )
+    .expect("apply");
+    let rows = applied.sessions.as_array().expect("array");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["id"], json!("s_new"));
+    assert_eq!(rows[0]["title"], json!("新会话"));
+    assert_eq!(rows[0]["messages"], json!([]));
+    assert_eq!(applied.active_session_id.as_deref(), Some("s_new"));
+}
+
+#[test]
+fn delete_missing_row_is_idempotent() {
+    let raw = json!([{"id":"s1","messages":[]}]);
+    let applied = apply_index_op(
+        &raw,
+        Some("s1"),
+        &SessionIndexOp::Delete {
+            local_id: "gone".into(),
+            next_active: Some("s1".into()),
+            server_conversation_id: None,
+        },
+        &stamp("s_new"),
+    )
+    .expect("已被别端删掉时不该报错，也不该补行");
+    assert_eq!(applied.sessions.as_array().map(Vec::len), Some(1));
+    assert_eq!(applied.sessions.as_array().unwrap()[0]["id"], json!("s1"));
+    assert_eq!(applied.active_session_id.as_deref(), Some("s1"));
+}
+
+#[test]
 fn title_from_prompt_matches_web_rules() {
     // 与 Web `title_from_user_prompt` 同值：压平换行、折叠连续空白。
     assert_eq!(title_from_user_prompt("  hello\nworld  "), "hello world");

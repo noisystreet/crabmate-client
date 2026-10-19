@@ -104,6 +104,24 @@ pub enum SessionIndexOp {
         /// 待写回的草稿全文（`None` = 没草稿；空白草稿由调用方判掉）。
         draft: Option<String>,
     },
+    /// 删除一条会话行（左栏 `Delete` / `Shift+Delete`，对齐 Desktop 的两级语义）。
+    ///
+    /// 与 [`SessionIndexOp::RemoveBlank`] 的区别是**语义**：`RemoveBlank` 是切走时的
+    /// 顺手回收，只碰「可丢弃的空白行」；这里是用户明确选中要删的会话，正文一起删，
+    /// 所以不做空白校验。
+    Delete {
+        /// 本地会话行 id（`sessions[].id`）。
+        local_id: String,
+        /// 被删行正是 active 时的落点；不可用（缺失 / 已不存在）时退化为剩余首行。
+        /// 删完为空则由本模块补一条默认空白行（对齐 Web `ensure_at_least_one`）。
+        next_active: Option<String>,
+        /// 该行已绑定的服务端对话；索引 `PUT` **成功后**再 best-effort 删它
+        /// （`DELETE /conversation/{id}`，幂等 204）。
+        ///
+        /// 顺序不能反：先删对话、再写索引，一旦索引写失败就留下一条点开即空的
+        /// 空壳会话，左栏看着还在、内容已经没了。
+        server_conversation_id: Option<String>,
+    },
 }
 
 /// 应用变更所需的外部输入（时间戳与新行 id 由调用方注入，便于单测固定）。
@@ -253,6 +271,18 @@ pub fn apply_index_op(
                 reused_blank: false,
             })
         }
+        SessionIndexOp::Delete {
+            local_id,
+            next_active,
+            // 服务端对话的删除属于写入层（见 `apply_web_session_op`），索引变更用不到它。
+            ..
+        } => Ok(delete_row(
+            &mut rows,
+            active,
+            local_id,
+            next_active.as_deref(),
+            stamp,
+        )),
     }
 }
 
@@ -275,6 +305,11 @@ pub fn put_sessions_body(applied: &AppliedIndex) -> Value {
 }
 
 /// `GET` 最新索引 → 应用变更 → 全量 `PUT`；成功返回命中的本地行 id。
+///
+/// `Delete` 还多一步：索引写成功后 best-effort 删掉该行的服务端对话。放在同一个
+/// 函数里是为了保证顺序——先写索引再删对话，反过来一旦 `PUT` 失败就会留下一条
+/// 点开即空的空壳会话。删除是幂等 `204`，失败也静默：索引已经改完，没有回滚余地，
+/// 更不该因为服务端问题让用户以为删除没发生。
 pub async fn apply_web_session_op(
     client: &ServeClient,
     op: &SessionIndexOp,
@@ -292,6 +327,15 @@ pub async fn apply_web_session_op(
             &put_sessions_body(&applied),
         )
         .await?;
+    if let SessionIndexOp::Delete {
+        server_conversation_id: Some(cid),
+        ..
+    } = op
+    {
+        let _ = client
+            .delete_no_content(&paths::conversation_delete(cid))
+            .await;
+    }
     Ok(SessionIndexApplied {
         local_id: applied.local_id,
         reused_blank: applied.reused_blank,
@@ -448,6 +492,63 @@ fn remove_blank_row(
     }
     rows.remove(idx);
     applied_without_removal(rows, active, local_id)
+}
+
+/// 删除一条会话行（左栏 `Delete` 确认后 / `Shift+Delete` 免确认）。
+///
+/// 与 [`remove_blank_row`] 的差别是「用户明确要删」而非「顺手回收」：不校验空白，
+/// 正文随行一起删（Web / Desktop 的右键删除同义）。两条附加规则：
+///
+/// 1. 被删行正是 `active` 时 `active_session_id` 必须落到一条**仍存在**的行上，
+///    否则服务端 active 指向已删除的会话；`next_active` 是调用方按本地快照反查的，
+///    这里要按刚 `GET` 回来的数组再校验一次，不可用则退化为剩余首行。
+/// 2. 删完为空时补一条默认空白会话（对齐 Web `ensure_at_least_one`）：索引里至少留
+///    一行，active 才有落点，左栏也不会塌成「（空）发一条消息后出现」。
+fn delete_row(
+    rows: &mut Vec<Value>,
+    active: Option<&str>,
+    local_id: &str,
+    next_active: Option<&str>,
+    stamp: &IndexStamp,
+) -> AppliedIndex {
+    let Some(idx) = rows.iter().position(|r| row_id(r) == Some(local_id)) else {
+        // 已被其他端删掉：删除是幂等动作，不算失败。
+        return applied_without_removal(rows, active, local_id);
+    };
+    let was_active = active == Some(local_id);
+    rows.remove(idx);
+    if rows.is_empty() {
+        rows.push(blank_row(
+            &stamp.new_local_id,
+            DEFAULT_SESSION_TITLE,
+            stamp.now_ms,
+        ));
+        return AppliedIndex {
+            sessions: Value::Array(std::mem::take(rows)),
+            active_session_id: Some(stamp.new_local_id.clone()),
+            local_id: local_id.to_string(),
+            reused_blank: false,
+        };
+    }
+    if !was_active {
+        // 只少了这一行，active 指向别的行、仍是有效 id，照原样写回。
+        return AppliedIndex {
+            sessions: Value::Array(std::mem::take(rows)),
+            active_session_id: active.map(str::to_string),
+            local_id: local_id.to_string(),
+            reused_blank: false,
+        };
+    }
+    let next = next_active
+        .filter(|id| *id != local_id && rows.iter().any(|r| row_id(r) == Some(*id)))
+        .map(str::to_string)
+        .or_else(|| rows.iter().find_map(|r| row_id(r).map(str::to_string)));
+    AppliedIndex {
+        sessions: Value::Array(std::mem::take(rows)),
+        active_session_id: next,
+        local_id: local_id.to_string(),
+        reused_blank: false,
+    }
 }
 
 /// 未改动任何行时的返回（行数不变，active 照旧）。

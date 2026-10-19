@@ -136,6 +136,10 @@ pub struct UiState {
     pub sessions: Vec<SessionListRow>,
     /// 左栏选中项下标。
     pub selected: usize,
+    /// 待确认删除的会话行 id（`Delete` 第一次按下；`Shift+Delete` / 确认后清空）。
+    ///
+    /// 放 `UiState` 而不是 `TuiApp`：侧栏底部的提示行要按它切换成确认文案。
+    pub confirm_delete: Option<String>,
     /// serve 默认偏好（`/status` 拉取）。
     pub serve_defaults: Option<ServeDefaults>,
     /// serve 侧当前活跃会话（左栏 `*` 标记）。
@@ -554,6 +558,23 @@ impl UiState {
     /// Ctrl+E：切换 thinking 展开/折叠。
     pub fn toggle_thinking(&mut self) {
         self.set_thinking_visible(!self.thinking_visible);
+    }
+
+    /// Ctrl+E 的完整动作：切换后再回报一行提示。
+    ///
+    /// 与 `toggle_thinking` 分开纯为复杂度：`on_input_key` 的 match 已贴着
+    /// lizard 的 CCN 门禁（≤ 10），内联的 if/else + 提示格式化把它顶到了 11。
+    pub fn toggle_thinking_with_notice(&mut self) {
+        self.toggle_thinking();
+        let state = if self.thinking_visible() {
+            "展开"
+        } else {
+            "折叠"
+        };
+        self.push_line(
+            LineKind::System,
+            &format!("思考内容已{state}（Ctrl+E 切换）"),
+        );
     }
 
     // ── 搜索（/find） ────────────────────────────────────────

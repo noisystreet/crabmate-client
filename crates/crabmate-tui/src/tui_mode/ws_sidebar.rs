@@ -10,7 +10,9 @@ use ratatui::text::{Line, Span};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use super::palette::Palette;
-use super::render::{SIDEBAR_HINT, sidebar_rows, truncate_display, workspace_basename};
+use super::render::{
+    SIDEBAR_DELETE_HINT, SIDEBAR_HINT, sidebar_rows, truncate_display, workspace_basename,
+};
 use super::state::{Focus, UiState};
 use super::workspace_tree::WsRow;
 
@@ -377,11 +379,20 @@ fn workspace_pick_rows(st: &UiState, width: usize) -> Vec<Line<'static>> {
 }
 
 /// 左栏会话可视内容：返回（行、光标、聚焦时提示文案）。
+///
+/// 删除确认态（`Delete` 已按一次、还没确认）时提示行换成确认文案：不弹浮层，
+/// 但必须让人一眼看出「现在按 y 会真的删掉」。
 pub(super) fn sessions_content(
     st: &UiState,
     width: usize,
 ) -> (Vec<Line<'static>>, usize, Option<&'static str>) {
-    let hint = (st.focus == Focus::Sidebar).then_some(SIDEBAR_HINT);
+    let hint = (st.focus == Focus::Sidebar).then(|| {
+        if st.confirm_delete.is_some() {
+            SIDEBAR_DELETE_HINT
+        } else {
+            SIDEBAR_HINT
+        }
+    });
     (sidebar_rows(st, width), st.selected, hint)
 }
 
@@ -550,6 +561,21 @@ mod tests {
         assert!(hint.is_some());
     }
 
+    /// 删除确认态：提示行必须换成确认文案，不能让「下一键就删」悄悄发生。
+    #[test]
+    fn sessions_hint_switches_to_confirm_copy_while_deleting() {
+        let mut st = ready_ws_state();
+        st.focus = Focus::Sidebar;
+        let (_, _, hint) = sessions_content(&st, 60);
+        assert_eq!(hint, Some(SIDEBAR_HINT), "平时是按键提示");
+        assert!(hint.unwrap().contains("Del"), "平时要提示删除键");
+
+        st.confirm_delete = Some("s1".to_string());
+        let (_, _, hint) = sessions_content(&st, 60);
+        assert_eq!(hint, Some(SIDEBAR_DELETE_HINT), "确认态换确认文案");
+        assert!(!hint.unwrap().contains("Del删"), "确认态不再重复按键说明");
+    }
+
     #[test]
     fn sidebar_view_keeps_selected_visible() {
         let pal = Palette::default();
@@ -696,6 +722,8 @@ mod tests {
             WORKSPACE_FILE_HINT,
             WORKSPACE_UNSET_HINT,
             WORKSPACE_PICK_HINT,
+            SIDEBAR_HINT,
+            SIDEBAR_DELETE_HINT,
         ] {
             assert!(
                 UnicodeWidthStr::width(hint) < SIDEBAR_WIDTH as usize,

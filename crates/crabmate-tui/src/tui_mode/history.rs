@@ -77,16 +77,51 @@ pub(super) fn on_result(
     };
     match result {
         Ok(resp) => apply_page(app, &pending, &resp),
-        Err(e) => {
-            app.st.conversation_id = pending.prev_conversation_id.clone();
-            app.st.push_line(
-                LineKind::System,
-                &format!(
-                    "载入会话「{}」的历史失败：{e}（已保持原会话，可直接输入）",
-                    pending.title
-                ),
-            );
-        }
+        Err(e) => match fail_fallback(pending.prev_conversation_id.as_deref()) {
+            ReplayFailFallback::RestorePrevious => {
+                app.st.conversation_id = pending.prev_conversation_id.clone();
+                app.st.push_line(
+                    LineKind::System,
+                    &format!(
+                        "载入会话「{}」的历史失败：{e}（已保持原会话，可直接输入）",
+                        pending.title
+                    ),
+                );
+            }
+            ReplayFailFallback::StartNewSession => {
+                // 没有原会话可回（典型：刚删掉当前会话，删除路径先把绑定清空了）。
+                // 就此空着的话，下一条消息会去开一个连索引都不知道的 `conversation_id`
+                // —— 左栏、Web、Desktop 都看不见它。所以直接开一条新会话顶上。
+                app.st.conversation_id = None;
+                app.st.push_line(
+                    LineKind::System,
+                    &format!(
+                        "载入会话「{}」的历史失败：{e}（无原会话可回，正在开新会话）",
+                        pending.title
+                    ),
+                );
+                app.new_session();
+            }
+        },
+    }
+}
+
+/// 回放失败后往哪儿落。
+///
+/// 决定了「失败提示怎么说」和「要不要顺势开一条新会话」，抽成纯函数便于单测：
+/// [`on_result`] 本身绑着 worker 通道，测不了。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReplayFailFallback {
+    /// 回到 `prev_conversation_id`：屏幕上原来那段对话还在，位置不动。
+    RestorePrevious,
+    /// 没有原会话可回：必须开一条新会话，否则下一条消息没有索引行可绑。
+    StartNewSession,
+}
+
+fn fail_fallback(prev: Option<&str>) -> ReplayFailFallback {
+    match prev {
+        Some(_) => ReplayFailFallback::RestorePrevious,
+        None => ReplayFailFallback::StartNewSession,
     }
 }
 
@@ -275,6 +310,17 @@ mod tests {
                 ),
             ]
         );
+    }
+
+    /// 回放失败后的落点：有原会话就回滚，没有就必须开一条新会话（否则下一条消息
+    /// 会开一个连索引都不知道的 `conversation_id`，左栏与其它端都看不见它）。
+    #[test]
+    fn fail_fallback_keeps_previous_or_starts_a_new_session() {
+        assert_eq!(
+            fail_fallback(Some("c1")),
+            ReplayFailFallback::RestorePrevious
+        );
+        assert_eq!(fail_fallback(None), ReplayFailFallback::StartNewSession);
     }
 
     /// 四种丢弃条件各自都要挡住；只有全绿才落地。
