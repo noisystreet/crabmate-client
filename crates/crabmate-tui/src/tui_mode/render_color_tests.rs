@@ -244,3 +244,57 @@ fn mono_mode_paints_no_color_at_all() {
         }
     }
 }
+
+/// 代码块：围栏记号不上屏、语言标签替代它、代码行整片 `code_bg`。
+///
+/// 这三条必须在缓冲区层面验证 —— `md_tests` 只能证明字符流里有正确的
+/// `(Style, char)`，证明不了它最后有没有被画成像素（行内代码底色曾经就是这样丢的）。
+#[test]
+fn code_block_renders_label_and_background_without_fence_marks() {
+    let pal = Palette::default();
+    let mut st = UiState::new();
+    st.set_palette(pal);
+    st.sidebar_visible = false;
+    st.push_line(LineKind::Assistant, "```rust\nlet x = 1;\n```");
+    let buf = render_screen(&st);
+
+    // 语言标签行存在、代码行存在
+    let label_y = row_with(&buf, "rust");
+    let code_y = row_with(&buf, "let x = 1;");
+    assert_ne!(label_y, code_y, "标签与代码不该在同一行");
+
+    // 围栏记号本身不能在屏上任何位置出现
+    for y in 0..H {
+        assert!(
+            !text_row(&buf, y).contains("```"),
+            "第 {y} 行仍显示代码围栏记号：{:?}",
+            text_row(&buf, y)
+        );
+    }
+
+    // 代码行整片 code_bg：铺成等宽矩形，应接近整行宽度（≥ 60 格），
+    // 而不是「内容有多宽铺多宽」。
+    let bg_cells = (0..W)
+        .filter(|&x| buf[(x, code_y)].bg == pal.code_bg)
+        .count();
+    assert!(
+        bg_cells >= 50,
+        "代码行应铺开成矩形（≥50 格，内容仅 13 格），实际只有 {bg_cells} 格；该行：{:?}",
+        text_row(&buf, code_y)
+    );
+    // 标签行同样参与矩形（右上角不能缺），只是最左几列是更深的 gutter 色带。
+    let label_code_cells = (0..W)
+        .filter(|&x| buf[(x, label_y)].bg == pal.code_bg)
+        .count();
+    assert!(
+        label_code_cells >= 50,
+        "标签行也应铺到同一宽度，实际 {label_code_cells} 格；该行：{:?}",
+        text_row(&buf, label_y)
+    );
+    // 整行同一底色：左端不能有更深的 gutter 色带（那条接缝看起来就是边框线）
+    assert!(
+        (0..W).all(|x| buf[(x, code_y)].bg != pal.chrome_bg),
+        "代码行左端不该再有 gutter 色带：{:?}",
+        text_row(&buf, code_y)
+    );
+}
