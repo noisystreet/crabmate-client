@@ -250,16 +250,19 @@ fn code_block_lines_share_one_width() {
     assert!(texts[1].contains("fn main() {}"), "got {:?}", texts[1]);
 }
 
-/// 超过目标宽度的行不裁也不补：交给折行，块在那种情况下自然变宽。
+/// 超过目标宽度的行不截断：内容换成多行，且**每行都补齐到块宽**
+/// （否则最后一段右侧短一截，`code_bg` 矩形的右边界会缺角）。
 #[test]
-fn overlong_code_line_is_not_truncated_to_the_block_width() {
-    let text = "```\nxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n```";
+fn overlong_code_line_wraps_into_full_width_rows() {
+    let text = "```\nxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n```"; // 35 个 x
     let rows = wrap_styled_chars(&assistant_styled_text(text, &pal(), 20), 200);
-    let code = row_text(&rows[0]); // 无语言：没有标签行，第一行就是代码
-    assert!(
-        code.contains(&"x".repeat(40)),
-        "超宽代码行不该被裁到块宽：{code:?}"
-    );
+    let texts: Vec<String> = rows.iter().map(|r| row_text(r)).collect();
+    let total: usize = texts.iter().map(|t| t.matches('x').count()).sum();
+    assert_eq!(total, 35, "内容不该被裁：{texts:?}");
+    assert!(texts.len() >= 2, "35 列应折成 2 行以上：{texts:?}");
+    for t in &texts {
+        assert_eq!(t.width(), 20, "每行都该补齐到块宽：{t:?}");
+    }
 }
 
 // ---------- 表格（极简无竖线：表头加粗 + `─` 分隔 + 列间两空格） ----------
@@ -456,4 +459,79 @@ fn image_inside_table_cell_degrades() {
     );
     let text: String = rows[2].iter().map(|(_, c)| *c).collect();
     assert_eq!(text, "[图] a");
+}
+
+// ---------- 折行：续行的悬挂缩进 / 竖条延续 ----------
+
+fn wrapped_rows(text: &str, width: usize) -> Vec<String> {
+    wrap_styled_chars(&assistant_styled_text(text, &pal(), width), width)
+        .iter()
+        .map(|r| row_text(r))
+        .collect()
+}
+
+/// 引用折行后，**每一行**都以竖条开头 —— 一整个引用块在屏幕上是连续的竖线。
+#[test]
+fn wrapped_quote_keeps_bar_on_every_row() {
+    let rows = wrapped_rows("> 这是一段很长很长很长很长很长的引用内容", 20);
+    assert!(rows.len() >= 2, "应折成多行：{rows:?}");
+    for r in &rows {
+        assert!(r.starts_with("▎ "), "续行也该带竖条：{r:?}");
+        assert!(r.width() <= 20, "不该超宽：{r:?}");
+    }
+}
+
+/// 嵌套引用的续行带上**同样数量的**竖条。
+#[test]
+fn wrapped_nested_quote_keeps_all_bars() {
+    let rows = wrapped_rows("> > 一二三四五六七八九十一二三四五六七八九十", 20);
+    assert!(rows.len() >= 2, "应折成多行：{rows:?}");
+    for r in &rows {
+        assert!(r.starts_with("▎ ▎ "), "续行应保留两级竖条：{r:?}");
+    }
+}
+
+/// 无序列表折行后，续行缩进到**正文起始列**（悬挂缩进），而不是顶到第 0 列。
+#[test]
+fn wrapped_list_item_hangs_under_content() {
+    let rows = wrapped_rows("- 一二三四五六七八九十一二三四五六七八九十", 20);
+    assert!(rows.len() >= 2, "应折成多行：{rows:?}");
+    assert!(rows[0].starts_with("• "), "首行是圆点：{rows:?}");
+    for r in &rows[1..] {
+        assert!(r.starts_with("  "), "续行应悬挂缩进 2 列：{r:?}");
+        assert!(!r.starts_with("•"), "续行不该重复圆点：{r:?}");
+    }
+}
+
+/// 任务列表同理。
+#[test]
+fn wrapped_task_item_hangs_under_content() {
+    let rows = wrapped_rows("- [x] 一二三四五六七八九十一二三四五六七八九十", 20);
+    assert!(rows.len() >= 2, "应折成多行：{rows:?}");
+    assert!(rows[0].starts_with("☑ "), "首行是勾选框：{rows:?}");
+    for r in &rows[1..] {
+        assert!(r.starts_with("  "), "续行应悬挂缩进：{r:?}");
+    }
+}
+
+/// 标题折行后续行与标题正文对齐（H1 的 `▌ ` 占 2 列）。
+#[test]
+fn wrapped_heading_aligns_with_its_own_body() {
+    let rows = wrapped_rows("# 一二三四五六七八九十一二三四五六七八九十", 20);
+    assert!(rows.len() >= 2, "应折成多行：{rows:?}");
+    assert!(rows[0].starts_with("▌ "), "H1 首行有竖条：{rows:?}");
+    for r in &rows[1..] {
+        assert!(r.starts_with("  "), "续行应缩进 2 列：{r:?}");
+    }
+}
+
+/// 有序列表折行后续行对齐到编号之后（`1. ` 占 3 列）。
+#[test]
+fn wrapped_ordered_item_hangs_after_number() {
+    let rows = wrapped_rows("1. 一二三四五六七八九十一二三四五六七八九十", 20);
+    assert!(rows.len() >= 2, "应折成多行：{rows:?}");
+    for r in &rows[1..] {
+        assert!(r.starts_with("   "), "续行应缩进 3 列：{r:?}");
+        assert!(!r.starts_with("1."), "续行不该重复编号：{r:?}");
+    }
 }

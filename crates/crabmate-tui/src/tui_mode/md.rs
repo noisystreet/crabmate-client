@@ -232,6 +232,47 @@ fn heading_indent(level: usize) -> usize {
     }
 }
 
+/// 行内字符流的显示宽度。
+fn display_width(chars: &[(Style, char)]) -> usize {
+    chars.iter().map(|(_, c)| c.width().unwrap_or(0)).sum()
+}
+
+/// 悬挂前缀：`n` 个空格。
+fn hang_pad(n: usize) -> Vec<(Style, char)> {
+    (0..n).map(|_| (Style::new(), ' ')).collect()
+}
+
+/// 内容按 `width` 折行：续行先插入 `cont`，再继续放内容。
+///
+/// `used` 是当前行**已经**占掉的列数（缩进 + 前缀）。`width == 0` 表示不折行
+/// （纯文本场景，调用方只关心内容）。
+///
+/// 为什么不交给 `wrap_styled_chars`：那一层只看到字符流，拿不到「这是哪个块的
+/// 续行」—— 悬挂缩进只能在**生成字符流时**就插好，否则续行会顶到第 0 列。
+fn wrap_body(
+    body: Vec<(Style, char)>,
+    mut used: usize,
+    cont: Vec<(Style, char)>,
+    width: usize,
+) -> Vec<(Style, char)> {
+    if width == 0 {
+        return body;
+    }
+    let cont_w = display_width(&cont);
+    let mut out: Vec<(Style, char)> = Vec::new();
+    for (s, ch) in body {
+        let cw = ch.width().unwrap_or(0);
+        if used + cw > width && used > cont_w {
+            out.push((Style::new(), '\n'));
+            out.extend(cont.iter().copied());
+            used = cont_w;
+        }
+        out.push((s, ch));
+        used += cw;
+    }
+    out
+}
+
 /// 分隔线：一条 `─` 铺到可用宽度。
 fn rule_chars(width: usize, pal: &Palette) -> Vec<(Style, char)> {
     let st = if pal.is_mono() {
@@ -242,36 +283,55 @@ fn rule_chars(width: usize, pal: &Palette) -> Vec<(Style, char)> {
     (0..width.max(RULE_MIN)).map(|_| (st, '─')).collect()
 }
 
+/// 标题首行前缀：H1 是 `▌ `，其余是缩进空格。
+fn heading_prefix(level: usize, pal: &Palette) -> Vec<(Style, char)> {
+    if level != 1 {
+        return hang_pad(heading_indent(level));
+    }
+    let bar = if pal.is_mono() {
+        Style::new()
+    } else {
+        Style::new().fg(pal.accent)
+    };
+    vec![(bar, '▌'), (Style::new(), ' ')]
+}
+
 /// 标题：**标记不上屏**，改用层级缩进 + 强调；H1 额外加 `▌` 竖条。
 ///
 /// 早前把 `###` 灰化留在行内，问题有二：白占 2～6 列；且 H1–H6 除字数外看起来
 /// 完全一样，长文档里读不出骨架。
-fn push_heading(out: &mut Vec<(Style, char)>, level: usize, body: &str, pal: &Palette) {
+fn push_heading(
+    out: &mut Vec<(Style, char)>,
+    level: usize,
+    body: &str,
+    pal: &Palette,
+    indent: usize,
+    width: usize,
+) {
     let mut base = Style::new().add_modifier(Modifier::BOLD);
     if !pal.is_mono() && level <= 2 {
         base = base.fg(pal.accent);
     }
-    if level == 1 {
-        let bar = if pal.is_mono() {
-            Style::new()
-        } else {
-            Style::new().fg(pal.accent)
-        };
-        out.push((bar, '▌'));
-        out.push((Style::new(), ' '));
-    } else {
-        out.extend((0..heading_indent(level)).map(|_| (Style::new(), ' ')));
-    }
+    let prefix = heading_prefix(level, pal);
+    let used = indent + display_width(&prefix);
+    out.extend(prefix);
     // 行内样式（粗体/代码底纹）叠加在标题样式之上，不是被覆盖。
-    out.extend(
-        inline_styled_chars(body, pal)
-            .into_iter()
-            .map(|(s, c)| (s.patch(base), c)),
-    );
+    let chars: Vec<(Style, char)> = inline_styled_chars(body, pal)
+        .into_iter()
+        .map(|(s, c)| (s.patch(base), c))
+        .collect();
+    out.extend(wrap_body(chars, used, hang_pad(used), width));
 }
 
 /// 任务列表：`☑` / `☐` 取代 `[x]` / `[ ]` —— 省一列，且方框本身就是列表语义。
-fn push_task(out: &mut Vec<(Style, char)>, checked: bool, body: &str, pal: &Palette) {
+fn push_task(
+    out: &mut Vec<(Style, char)>,
+    checked: bool,
+    body: &str,
+    pal: &Palette,
+    indent: usize,
+    width: usize,
+) {
     let st = match (pal.is_mono(), checked) {
         (true, _) => Style::new(),
         (false, true) => Style::new().fg(pal.accent),
@@ -279,7 +339,13 @@ fn push_task(out: &mut Vec<(Style, char)>, checked: bool, body: &str, pal: &Pale
     };
     out.push((st, if checked { '☑' } else { '☐' }));
     out.push((Style::new(), ' '));
-    out.extend(inline_styled_chars(body, pal));
+    let used = indent + 2;
+    out.extend(wrap_body(
+        inline_styled_chars(body, pal),
+        used,
+        hang_pad(used),
+        width,
+    ));
 }
 
 /// 无序列表符号：一级 `•`、二级 `◦`，让嵌套层级一眼可辨。
@@ -304,6 +370,7 @@ fn push_marker(
     rest: &str,
     indent: usize,
     pal: &Palette,
+    width: usize,
 ) {
     let bullet_st = if pal.is_mono() {
         Style::new()
@@ -314,42 +381,63 @@ fn push_marker(
         Some(b'-') | Some(b'*') | Some(b'+') => {
             out.push((bullet_st, bullet_char(indent)));
             out.push((Style::new(), ' '));
+            let used = indent + 2;
+            out.extend(wrap_body(
+                inline_styled_chars(&rest[content_at..], pal),
+                used,
+                hang_pad(used),
+                width,
+            ));
         }
-        Some(b'>') => {
-            push_quote(out, rest, pal);
-            return;
-        }
+        Some(b'>') => push_quote(out, rest, indent, pal, width),
         _ => {
             let marker: String = rest[..marker_len].to_string();
-            out.extend(marker.chars().map(|c| (Style::new().fg(Color::Gray), c)));
+            let marker_st = Style::new().fg(Color::Gray);
+            out.extend(marker.chars().map(|c| (marker_st, c)));
+            let mut used = indent + marker_len;
             if content_at > marker_len {
-                let sep = rest[marker_len..].chars().next().unwrap_or(' ');
-                out.push((Style::new(), sep));
+                out.push((Style::new(), ' '));
+                used += 1;
             }
+            out.extend(wrap_body(
+                inline_styled_chars(&rest[content_at..], pal),
+                used,
+                hang_pad(used),
+                width,
+            ));
         }
     }
-    out.extend(inline_styled_chars(&rest[content_at..], pal));
 }
 
-/// 引用：每个 `>` 换成一个竖条，嵌套就叠几条。
-///
-/// `>` 本身留在屏幕上时，读者要自己数「这几行前面有几个尖括号」才能看出引用范围；
-/// 换成竖条后，连续几行自然连成一条竖线，范围一眼可见。
-fn push_quote(out: &mut Vec<(Style, char)>, rest: &str, pal: &Palette) {
+/// 引用：每个 `>` 换成一个竖条，嵌套就叠几条；**折行后的续行同样带竖条**，
+/// 这样一整个引用块在屏幕上始终是一条连续的竖线。
+fn push_quote(
+    out: &mut Vec<(Style, char)>,
+    rest: &str,
+    indent: usize,
+    pal: &Palette,
+    width: usize,
+) {
     let bar = if pal.is_mono() {
         Style::new()
     } else {
         Style::new().fg(pal.accent)
     };
     let mut body = rest;
+    let mut bars = 0usize;
     while let Some((_, content_at)) = quote_match(body.as_bytes()) {
         // 竖条后固定补一个空格：`>正文`（无空格）与 `> 正文` 输出一致，
         // 也和 `• ` / `☐ ` 一样占 2 列。
         out.push((bar, '▎'));
         out.push((Style::new(), ' '));
+        bars += 1;
         body = &body[content_at..];
     }
-    out.extend(inline_styled_chars(body, pal));
+    let cont: Vec<(Style, char)> = (0..bars)
+        .flat_map(|_| [(bar, '▎'), (Style::new(), ' ')])
+        .collect();
+    let used = indent + bars * 2;
+    out.extend(wrap_body(inline_styled_chars(body, pal), used, cont, width));
 }
 
 /// 单行：行首标记（分隔线/标题/任务列表/列表/引用）渲染 + 其余部分行内 md。
@@ -365,15 +453,15 @@ fn styled_part_chars(part: &str, pal: &Palette, width: usize) -> Vec<(Style, cha
         return out;
     }
     if let Some((level, ca)) = heading_match(rest.as_bytes()) {
-        push_heading(&mut out, level, &rest[ca..], pal);
+        push_heading(&mut out, level, &rest[ca..], pal, indent, width);
         return out;
     }
     if let Some((checked, ca)) = task_match(rest.as_bytes()) {
-        push_task(&mut out, checked, &rest[ca..], pal);
+        push_task(&mut out, checked, &rest[ca..], pal, indent, width);
         return out;
     }
     if let Some((m, ca)) = list_or_quote_match(rest.as_bytes()) {
-        push_marker(&mut out, m, ca, rest, indent, pal);
+        push_marker(&mut out, m, ca, rest, indent, pal, width);
         return out;
     }
     inline_styled_chars(part, pal)
@@ -456,28 +544,48 @@ fn fence_open_chars(part: &str, pal: &Palette, width: usize) -> Vec<(Style, char
 /// 不展开的话代码里按 tab 缩进的行会全部左对齐，缩进层级直接消失。
 fn code_line_chars(part: &str, pal: &Palette, width: usize) -> Vec<(Style, char)> {
     let code = code_block_style(pal);
-    let mut out: Vec<(Style, char)> = Vec::new();
-    let mut used = 0usize;
+    let mut cells: Vec<(Style, char)> = Vec::new();
     let mut col = 0usize;
     for ch in part.chars() {
         if ch == '\t' {
             let pad = FENCE_TAB_WIDTH - (col % FENCE_TAB_WIDTH);
-            out.extend((0..pad).map(|_| (code, ' ')));
+            cells.extend((0..pad).map(|_| (code, ' ')));
             col += pad;
-            used += pad;
             continue;
         }
         if ch.is_control() {
             continue;
         }
-        out.push((code, ch));
-        let w = ch.width().unwrap_or(0);
-        col += w;
-        used += w;
+        cells.push((code, ch));
+        col += ch.width().unwrap_or(0);
     }
-    // 至少留一格右侧间距，让代码不贴着色块右边缘。
-    let target = width.max(used + 1);
-    pad_to(&mut out, used, target, code);
+    if width == 0 {
+        // 纯文本场景（不铺满）：单行 + 末尾一格间距。
+        let used = col;
+        pad_to(&mut cells, used, used + 1, code);
+        return cells;
+    }
+    split_padded(cells, width, code)
+}
+
+/// 按 `width` 把代码内容切成多行，**每行都补齐到 `width`**。
+///
+/// 不补的话超宽行折出来的最后一段会短一截，`code_bg` 矩形的右边界就缺一块 ——
+/// 一屏里只要有一行超宽，整块的右边看起来就被啃掉一角。
+fn split_padded(cells: Vec<(Style, char)>, width: usize, st: Style) -> Vec<(Style, char)> {
+    let mut out: Vec<(Style, char)> = Vec::new();
+    let mut row = 0usize;
+    for (s, ch) in cells {
+        let cw = ch.width().unwrap_or(0);
+        if row > 0 && row + cw > width {
+            pad_to(&mut out, row, width, st);
+            out.push((Style::new(), '\n'));
+            row = 0;
+        }
+        out.push((s, ch));
+        row += cw;
+    }
+    pad_to(&mut out, row, width, st);
     out
 }
 
