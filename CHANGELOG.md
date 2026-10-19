@@ -9,6 +9,12 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ## [Unreleased]
 
+### Fixed
+
+- **TUI: switching the workspace now refreshes the sidebar session list instead of leaving the previous workspace's sessions in place.** The session index is stored per workspace (`GET /user-data/workspaces/current/sessions`), but the shared post-switch tail (`reset_workspace_after_switch`, reached by `/workspace <path>`, the project-pool picker and mouse clicks) only reset the directory tree and re-fetched the root listing. The top bar and the right-hand tree moved to the new project while the left column kept the old bucket's snapshot until the next turn finished (the routine post-turn sessions refresh), so the panes disagreed about which workspace was open for as long as the user stayed idle after switching. The tail now also re-fetches the session list and drops the old bucket's session-index bookkeeping (`/conv new` row id, pending bind / title, pending selection), which would otherwise survive into the new bucket and make the first post-switch turn fail its `BindServer` with "会话行已不存在" — that row id only exists in the previous bucket — leaving the new session unlisted. The current `conversation_id` is still left untouched, matching the existing serve contract that a workspace switch does not interrupt the ongoing conversation — only the list is re-read, so an in-flight turn is unaffected and no index write is issued. No protocol change.
+
+- **TUI: the project-pool picker now refuses a workspace switch while a turn is running, the same guard `/workspace <path>` already had.** The picker reaches the same serve root change through a different key (`Ctrl+W` → `p` / a mouse click), so tools already in flight could run against a root that changed under them — the exact hazard the command form was guarded against. The picker marks its view busy before dispatching; the refusal now goes through the switch-result callback, so the view unlocks and shows the reason in place instead of leaving Enter permanently blocked by a stuck busy flag. No protocol change.
+
 ## [0.7.0] - 2026-10-18
 
 ### Added
