@@ -284,19 +284,46 @@ fn push_task(out: &mut Vec<(Style, char)>, checked: bool, body: &str, pal: &Pale
     out.extend(inline_styled_chars(body, pal));
 }
 
-/// 列表/引用标记：保留原字符、弱化成灰色，其余部分走行内 md。
+/// 无序列表符号：一级 `•`、二级 `◦`，让嵌套层级一眼可辨。
+///
+/// 只分两级是**故意的**：`leading_indent` 最多认 3 个空格 —— CommonMark 里
+/// 4 空格缩进是代码块，不该被当成列表项，那种行原样呈现。
+fn bullet_char(indent: usize) -> char {
+    if indent >= 2 { '◦' } else { '•' }
+}
+
+/// 行首标记渲染。
+///
+/// 三类标记的处理**故意不同**：
+/// - 无序列表 `-` / `*` / `+`：换成圆点 —— 短横线在终端里和分隔线、负号容易混
+/// - 有序列表 `1.`：保留编号。数字本身携带顺序信息，换成圆点就丢了
+/// - 引用 `>`：保留原字符。多行引用靠 `>` 连成一片，去掉反而看不出范围
 fn push_marker(
     out: &mut Vec<(Style, char)>,
     marker_len: usize,
     content_at: usize,
     rest: &str,
+    indent: usize,
     pal: &Palette,
 ) {
-    let marker: String = rest[..marker_len].to_string();
-    out.extend(marker.chars().map(|c| (Style::new().fg(Color::Gray), c)));
-    if content_at > marker_len {
-        let sep = rest[marker_len..].chars().next().unwrap_or(' ');
-        out.push((Style::new(), sep));
+    let bullet_st = if pal.is_mono() {
+        Style::new()
+    } else {
+        Style::new().fg(pal.muted)
+    };
+    match rest.as_bytes().first().copied() {
+        Some(b'-') | Some(b'*') | Some(b'+') => {
+            out.push((bullet_st, bullet_char(indent)));
+            out.push((Style::new(), ' '));
+        }
+        _ => {
+            let marker: String = rest[..marker_len].to_string();
+            out.extend(marker.chars().map(|c| (Style::new().fg(Color::Gray), c)));
+            if content_at > marker_len {
+                let sep = rest[marker_len..].chars().next().unwrap_or(' ');
+                out.push((Style::new(), sep));
+            }
+        }
     }
     out.extend(inline_styled_chars(&rest[content_at..], pal));
 }
@@ -322,7 +349,7 @@ fn styled_part_chars(part: &str, pal: &Palette, width: usize) -> Vec<(Style, cha
         return out;
     }
     if let Some((m, ca)) = list_or_quote_match(rest.as_bytes()) {
-        push_marker(&mut out, m, ca, rest, pal);
+        push_marker(&mut out, m, ca, rest, indent, pal);
         return out;
     }
     inline_styled_chars(part, pal)
