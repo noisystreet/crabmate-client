@@ -234,6 +234,109 @@ fn skip_blank_gap(blank: bool, in_fence: bool, prev_blank: bool) -> bool {
     blank && !in_fence && prev_blank
 }
 
+/// 代码块内 tab 的展开宽度（与多数编辑器默认一致）。
+const FENCE_TAB_WIDTH: usize = 4;
+
+/// 开围栏行的语言标签：`` ```rust `` / `~~~rust` / `` ``` rust `` 都取 `rust`。
+fn fence_lang(part: &str) -> &str {
+    part.trim()
+        .trim_start_matches('`')
+        .trim_start_matches('~')
+        .trim()
+}
+
+/// 代码块的整行样式：深色主题铺 `code_bg`，无色模式不铺底。
+///
+/// 无色模式下**不用** `REVERSED`：行内代码那样做是因为它嵌在正文里、不反色就看不出来；
+/// 整块代码若整片反白，屏幕会像选中的一大段，反而更乱。
+fn code_block_style(pal: &Palette) -> Style {
+    if pal.is_mono() {
+        Style::new()
+    } else {
+        Style::new().fg(pal.fg).bg(pal.code_bg)
+    }
+}
+
+/// 把当前行补空格到 `width`（形成等宽矩形）；已超宽则不动，交给折行处理。
+fn pad_to(out: &mut Vec<(Style, char)>, used: usize, width: usize, st: Style) {
+    for _ in used..width {
+        out.push((st, ' '));
+    }
+}
+
+/// 开围栏 → 语言标签行（`accent`），整行铺 `code_bg` 并补到目标宽度。
+///
+/// 标签行也铺底（而不只是画个 `rust`），否则代码块顶端会缺一角，矩形不闭合。
+/// **无语言时返回空**：不画标签行，` ``` ` 后直接就是代码，块上边界是第一行代码。
+fn fence_open_chars(part: &str, pal: &Palette, width: usize) -> Vec<(Style, char)> {
+    let lang = fence_lang(part);
+    // 无语言：返回空（**不要**补满一行空格 —— 那在屏幕上就是一行空色块，
+    // 读起来像代码块上方多了一个空行）。
+    if lang.is_empty() {
+        return Vec::new();
+    }
+    let code = code_block_style(pal);
+    let mut out: Vec<(Style, char)> = Vec::new();
+    let mut used = 0usize;
+    let base = Style::new().fg(pal.accent);
+    // 语言名坐在代码底上（无色模式下无底）。
+    let st = if pal.is_mono() {
+        base
+    } else {
+        base.bg(pal.code_bg)
+    };
+    for ch in lang.chars() {
+        out.push((st, ch));
+        used += ch.width().unwrap_or(0);
+    }
+    pad_to(&mut out, used, width, code);
+    out
+}
+
+/// 代码行 → 内容，整行铺 `code_bg` 并补到 `width`（等宽矩形）。
+///
+/// 代码从最左列开始：留内边距会让代码与色块左边界之间多出一段看似「没对齐」的空隙。
+/// 不画行号：行号在窄终端里会挤占代码宽度，而且流式输出时「行号 + 内容」两套
+/// 编号列容易被读成排版噪声。块的边界靠底色矩形表达即可。
+///
+/// tab 按 [`FENCE_TAB_WIDTH`] 展开：`wrap_styled_chars` 把控制字符整个丢掉，
+/// 不展开的话代码里按 tab 缩进的行会全部左对齐，缩进层级直接消失。
+fn code_line_chars(part: &str, pal: &Palette, width: usize) -> Vec<(Style, char)> {
+    let code = code_block_style(pal);
+    let mut out: Vec<(Style, char)> = Vec::new();
+    let mut used = 0usize;
+    let mut col = 0usize;
+    for ch in part.chars() {
+        if ch == '\t' {
+            let pad = FENCE_TAB_WIDTH - (col % FENCE_TAB_WIDTH);
+            out.extend((0..pad).map(|_| (code, ' ')));
+            col += pad;
+            used += pad;
+            continue;
+        }
+        if ch.is_control() {
+            continue;
+        }
+        out.push((code, ch));
+        let w = ch.width().unwrap_or(0);
+        col += w;
+        used += w;
+    }
+    // 至少留一格右侧间距，让代码不贴着色块右边缘。
+    let target = width.max(used + 1);
+    pad_to(&mut out, used, target, code);
+    out
+}
+
+/// 追加一行（首行前不补换行）；空段落也要过这里，否则段落间距会消失。
+fn push_row(out: &mut Vec<(Style, char)>, first: &mut bool, row: Vec<(Style, char)>) {
+    if !*first {
+        out.push((Style::new(), '\n'));
+    }
+    out.extend(row);
+    *first = false;
+}
+
 /// 整段助手文本 → 带样式的字符流（段间补 `\n` 作强制断行，标记不跨段解析）。
 /// 先过共享 [`crabmate_client_api::normalize_markdown_for_render`]（与 desktop/web
 /// 同一入口），再逐行渲染；处于 `` ``` `` / `~~~` 围栏内的行整行按纯文本，
@@ -243,7 +346,14 @@ fn skip_blank_gap(blank: bool, in_fence: bool, prev_blank: bool) -> bool {
 /// 首部与尾部空行不产生间距；围栏内的空行原样保留（desktop 的 `<pre>` 同样保留），
 /// 含流式中途停在未闭合围栏里时的结尾空行。
 /// 段落间距由此在折行层落成一行空白，与 `.msg-md-prose p { margin }` 对应。
-pub(crate) fn assistant_styled_text(text: &str, pal: &Palette) -> Vec<(Style, char)> {
+///
+/// `code_width` 是代码块要铺满的目标显示宽度（让整个块是个等宽矩形）；
+/// 传 `0` 表示不铺满（纯文本场景与大多数用例只关心内容，不关心块宽）。
+pub(crate) fn assistant_styled_text(
+    text: &str,
+    pal: &Palette,
+    code_width: usize,
+) -> Vec<(Style, char)> {
     let text = normalize_markdown_for_render(text);
     let mut out = Vec::new();
     let mut first = true;
@@ -251,24 +361,32 @@ pub(crate) fn assistant_styled_text(text: &str, pal: &Palette) -> Vec<(Style, ch
     // 开头视为「上一行为空」，让首部空行不产生间距。
     let mut prev_blank = true;
     for part in text.split('\n') {
-        let toggles = is_fence_switch(part);
-        if toggles {
+        if is_fence_switch(part) {
+            let opening = !in_fence;
             in_fence = !in_fence;
+            // 围栏标记行本身**不上屏**：开围栏折成一行语言标签，闭合行直接丢掉 ——
+            // ` ``` ` 只是解析记号。无语言时不画标签行（空色块会读作「多一个空行」）。
+            // 流式下不抖动：未闭合时标签行已经画出，闭合后只是不再新增行。
+            if opening {
+                let label = fence_open_chars(part, pal, code_width);
+                if !label.is_empty() {
+                    push_row(&mut out, &mut first, label);
+                }
+            }
+            prev_blank = false;
+            continue;
         }
         let blank = part.trim().is_empty();
         if skip_blank_gap(blank, in_fence, prev_blank) {
             continue;
         }
-        if !first {
-            out.push((Style::new(), '\n'));
-        }
-        if toggles || in_fence {
-            out.extend(part.chars().map(|c| (Style::new(), c)));
+        let row = if in_fence {
+            code_line_chars(part, pal, code_width)
         } else {
-            out.extend(styled_part_chars(part, pal));
-        }
+            styled_part_chars(part, pal)
+        };
+        push_row(&mut out, &mut first, row);
         prev_blank = blank;
-        first = false;
     }
     // 尾部空行不产生间距（同 CommonMark：文档结尾的空行不算段落）。
     // 围栏未闭合时不动：流式输出随时可能续写，围栏内的空行属于代码内容，

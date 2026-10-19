@@ -328,7 +328,9 @@ fn plain_body_rows(cx: &RowCtx<'_>) -> Vec<BodyRow> {
 
 /// Assistant 逻辑行 → 全部物理 BodyRow（行内 markdown 样式 + 宽度折行 + 搜索高亮）。
 fn assistant_body_rows(cx: &RowCtx<'_>) -> Vec<BodyRow> {
-    let styled = md::assistant_styled_text(cx.text, cx.pal);
+    // 代码块要铺成等宽矩形，得知道可用宽度；首行的 `prefix` 会占几列，先扣掉。
+    let code_width = cx.content_width.saturating_sub(prefix_width(cx.prefix));
+    let styled = md::assistant_styled_text(cx.text, cx.pal, code_width);
     let mut rows = Vec::new();
     for (row_no, row) in md::wrap_styled_chars(&styled, cx.content_width)
         .into_iter()
