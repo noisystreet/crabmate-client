@@ -30,6 +30,12 @@ pub(crate) struct Palette {
     ///
     /// 无色模式下会被抹成 `Reset`，选中态改由 [`Palette::selection`] 退回反色表达。
     pub selection_bg: Color,
+    /// 浮层（审批 / 设置面板）的卡片底色。
+    ///
+    /// 独立于 `chrome_bg`：条带色比聊天区更暗，用它当浮层底会让卡片看起来是**凹进去**的
+    /// （背景被挖空），而不是浮在内容之上。这一档取「比 `bg` 亮一步」，深色主题下是抬升的
+    /// surface、浅色主题下是更白的卡片。
+    pub overlay_bg: Color,
     /// 边框（`--border`）。
     pub border: Color,
     /// 行内代码底色。
@@ -55,6 +61,9 @@ const DEFAULT_DARK: Palette = Palette {
     bg: rgb(0x16, 0x17, 0x27),
     chrome_bg: rgb(0x10, 0x11, 0x1f),
     selection_bg: rgb(0x23, 0x25, 0x41),
+    // 直接取桌面 `--surface-hover`（#1f2033）：比 `bg`(=--surface) 亮一档，
+    // 又比 `selection_bg` 暗，卡片既能浮起来又不抢选中行的注意力。
+    overlay_bg: rgb(0x1f, 0x20, 0x33),
     border: rgb(0x2a, 0x2b, 0x40),
     code_bg: rgb(0x1f, 0x20, 0x33),
     ok: rgb(0x6c, 0xc4, 0x9a),
@@ -71,6 +80,7 @@ const HIGH_CONTRAST_DARK: Palette = Palette {
     bg: rgb(0x24, 0x24, 0x24),
     chrome_bg: rgb(0x1a, 0x1a, 0x1a),
     selection_bg: rgb(0x3a, 0x3a, 0x3a),
+    overlay_bg: rgb(0x2f, 0x2f, 0x2f),
     border: rgb(0xe8, 0xe8, 0xe8),
     code_bg: rgb(0x2c, 0x2c, 0x2c),
     ok: rgb(0x66, 0xff, 0x99),
@@ -87,6 +97,7 @@ const MATERIAL_DARK: Palette = Palette {
     bg: rgb(0x1b, 0x1b, 0x1f),
     chrome_bg: rgb(0x14, 0x14, 0x17),
     selection_bg: rgb(0x2b, 0x2b, 0x31),
+    overlay_bg: rgb(0x25, 0x25, 0x2b),
     border: rgb(0x32, 0x32, 0x36),
     code_bg: rgb(0x24, 0x24, 0x28),
     ok: rgb(0x6c, 0xc4, 0x9a),
@@ -103,6 +114,7 @@ const SHADCN_DARK: Palette = Palette {
     bg: rgb(0x18, 0x18, 0x1b),
     chrome_bg: rgb(0x10, 0x10, 0x12),
     selection_bg: rgb(0x26, 0x26, 0x31),
+    overlay_bg: rgb(0x22, 0x22, 0x28),
     border: rgb(0x27, 0x27, 0x2a),
     code_bg: rgb(0x27, 0x27, 0x2a),
     ok: rgb(0x6c, 0xc4, 0x9a),
@@ -119,6 +131,7 @@ const CRABMATE_LIGHT: Palette = Palette {
     bg: rgb(0xf0, 0xec, 0xe2),
     chrome_bg: rgb(0xf7, 0xf4, 0xec),
     selection_bg: rgb(0xe3, 0xde, 0xd0),
+    overlay_bg: rgb(0xfd, 0xfb, 0xf7),
     border: rgb(0xe2, 0xdd, 0xd1),
     code_bg: rgb(0xe8, 0xe2, 0xd6),
     ok: rgb(0x2f, 0x7d, 0x4f),
@@ -135,6 +148,7 @@ const SHADCN_LIGHT: Palette = Palette {
     bg: rgb(0xf4, 0xf4, 0xf5),
     chrome_bg: rgb(0xec, 0xec, 0xed),
     selection_bg: rgb(0xdc, 0xdc, 0xe1),
+    overlay_bg: rgb(0xff, 0xff, 0xff),
     border: rgb(0xe4, 0xe4, 0xe7),
     code_bg: rgb(0xe8, 0xe8, 0xea),
     ok: rgb(0x2f, 0x7d, 0x4f),
@@ -151,6 +165,7 @@ const MONO: Palette = Palette {
     bg: Color::Reset,
     chrome_bg: Color::Reset,
     selection_bg: Color::Reset,
+    overlay_bg: Color::Reset,
     border: Color::Reset,
     code_bg: Color::Reset,
     ok: Color::Reset,
@@ -202,6 +217,7 @@ impl Palette {
         p.chrome_bg = nearest_ansi(p.chrome_bg);
         p.border = nearest_ansi(p.border);
         p.selection_bg = nearest_ansi(p.selection_bg);
+        p.overlay_bg = nearest_ansi(p.overlay_bg);
         p.code_bg = nearest_ansi(p.code_bg);
         p.ok = nearest_ansi(p.ok);
         p.err = nearest_ansi(p.err);
