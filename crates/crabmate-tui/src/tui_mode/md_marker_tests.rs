@@ -55,11 +55,12 @@ fn list_and_quote_markers_render() {
     let ol = assistant_styled_text("1. 有序", &pal(), 0);
     assert!(has_gray(&ol, '1'));
     assert!(has_gray(&ol, '.'));
-    // 引用：`>` 保留（多行引用靠它连成范围）
+    // 引用：`>` 换成竖条，连续几行自然连成一条线
     let quote = assistant_styled_text("> 引用", &pal(), 0);
-    assert!(has_gray(&quote, '>'));
+    assert!(!quote.iter().any(|(_, ch)| *ch == '>'), "`>` 不该上屏");
     let joined: String = quote.iter().map(|(_, ch)| *ch).collect();
-    assert_eq!(joined, "> 引用");
+    assert_eq!(joined, "▎ 引用");
+    assert_eq!(quote[0].0.fg, Some(pal().accent), "竖条用 accent");
 }
 
 /// 嵌套层级靠符号区分：一级 `•`、缩进 2 及以上 `◦`。
@@ -84,6 +85,19 @@ fn four_space_indent_is_not_a_list() {
         .map(|(_, c)| *c)
         .collect();
     assert_eq!(text, "    - d");
+}
+
+/// 嵌套引用叠竖条；粘连写法 `>正文` 也补一个空格，与 `> 正文` 对齐。
+#[test]
+fn nested_quote_stacks_bars() {
+    let render = |t: &str| -> String {
+        assistant_styled_text(t, &pal(), 0)
+            .iter()
+            .map(|(_, c)| *c)
+            .collect()
+    };
+    assert_eq!(render("> > 二级"), "▎ ▎ 二级");
+    assert_eq!(render(">正文"), "▎ 正文");
 }
 
 /// 任务列表与无序列表的标记都占 2 列，混排时正文起始列一致。
@@ -135,15 +149,15 @@ fn glued_markers_match_desktop_normalize_semantics() {
     assert!(has_gray(&ol, '1'));
     assert!(has_gray(&ol, '.'));
     let q = assistant_styled_text(">正文", &pal(), 0);
-    assert!(has_gray(&q, '>'));
+    let q_text: String = q.iter().map(|(_, ch)| *ch).collect();
+    assert_eq!(q_text, "▎ 正文", "粘连引用也换成竖条");
     // 渲染文本与共享 normalize 输出逐字一致（补的空格原样呈现、不吞字符）
-    // 标题与无序列表的标记已被替换，不再逐字一致；有序列表与引用仍原样保留。
-    for input in ["1.下一步", ">正文"] {
-        let chars = assistant_styled_text(input, &pal(), 0);
-        let joined: String = chars.iter().map(|(_, ch)| *ch).collect();
-        let expected = normalize_markdown_for_render(input);
-        assert_eq!(joined, expected, "应与共享 normalize 输出一致: {input}");
-    }
+    // 标题、无序列表、引用的标记都已被替换，不再逐字一致；有序列表仍原样保留。
+    let input = "1.下一步";
+    let chars = assistant_styled_text(input, &pal(), 0);
+    let joined: String = chars.iter().map(|(_, ch)| *ch).collect();
+    let expected = normalize_markdown_for_render(input);
+    assert_eq!(joined, expected, "应与共享 normalize 输出一致: {input}");
 }
 
 #[test]
