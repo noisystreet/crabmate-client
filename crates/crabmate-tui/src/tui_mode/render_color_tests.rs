@@ -327,3 +327,33 @@ fn table_renders_without_pipes_on_screen() {
         (0..6).map(|y| text_row(&buf, y)).collect::<Vec<_>>()
     );
 }
+
+/// 结构性标记在缓冲区层面：`#`、`[ ]`、`[x]` 不上屏，`▌` / `─` / `☑` 上屏。
+#[test]
+fn structural_markers_do_not_reach_the_screen() {
+    let pal = Palette::default();
+    let mut st = UiState::new();
+    st.set_palette(pal);
+    st.sidebar_visible = false;
+    st.push_line(
+        LineKind::Assistant,
+        "# 一级\n\n---\n\n- [x] 完成\n- [ ] 待办",
+    );
+    let buf = render_screen(&st);
+    let rows: Vec<String> = (0..H).map(|y| text_row(&buf, y)).collect();
+    let joined = rows.join("\n");
+    assert!(!joined.contains('#'), "标题标记不该上屏：{joined}");
+    assert!(
+        !joined.contains("[x]") && !joined.contains("[ ]"),
+        "任务标记不该上屏：{joined}"
+    );
+    assert!(joined.contains('▌'), "H1 应有竖条：{joined}");
+    assert!(
+        joined.contains('☑') && joined.contains('☐'),
+        "应有勾选框：{joined}"
+    );
+    assert!(
+        rows.iter().any(|r| r.matches('─').count() > 20),
+        "应有横向分隔线：{joined}"
+    );
+}

@@ -21,11 +21,26 @@ fn has_bold(chars: &[(Style, char)], c: char) -> bool {
 }
 
 #[test]
-fn heading_is_bold_and_marker_gray() {
+fn heading_hides_marker_and_adds_bar() {
     let chars = assistant_styled_text("# 标题", &pal(), 0);
-    assert!(has_gray(&chars, '#'));
+    assert!(!chars.iter().any(|(_, ch)| *ch == '#'), "标题标记不该上屏");
+    assert!(chars.iter().any(|(_, ch)| *ch == '▌'), "H1 应加左侧竖条");
     assert!(has_bold(&chars, '标'));
     assert!(has_bold(&chars, '题'));
+}
+
+/// 层级靠缩进区分：H2 +2、H3 +4、H4+ 一律 +6。
+#[test]
+fn heading_levels_are_indented() {
+    let render = |t: &str| -> String {
+        assistant_styled_text(t, &pal(), 0)
+            .iter()
+            .map(|(_, c)| *c)
+            .collect()
+    };
+    assert_eq!(render("## 二级"), "  二级");
+    assert_eq!(render("### 三级"), "    三级");
+    assert_eq!(render("###### 六级"), "      六级");
 }
 
 #[test]
@@ -50,7 +65,7 @@ fn heading_keeps_inline_code_and_no_marker_loss() {
         *ch == 'x' && s.bg == Some(pal().code_bg) && s.add_modifier.contains(Modifier::BOLD)
     }));
     let joined: String = chars.iter().map(|(_, ch)| *ch).collect();
-    assert_eq!(joined, "# 看 x 用");
+    assert_eq!(joined, "▌ 看 x 用");
 }
 
 #[test]
@@ -65,7 +80,9 @@ fn spaced_asterisks_mid_line_not_treated_as_list() {
 fn glued_markers_match_desktop_normalize_semantics() {
     // 与 desktop 共用同一 normalize 入口：`###规范`/`-规范`/`1.下一步` 补空格，`>正文` 原样
     let h = assistant_styled_text("###规范", &pal(), 0);
-    assert!(has_gray(&h, '#'));
+    let h_text: String = h.iter().map(|(_, ch)| *ch).collect();
+    assert!(!h_text.contains('#'), "标题标记不该上屏：{h_text:?}");
+    assert!(h_text.contains("规范"));
     assert!(has_bold(&h, '规'));
     let ul = assistant_styled_text("-规范", &pal(), 0);
     assert!(has_gray(&ul, '-'));
@@ -75,7 +92,8 @@ fn glued_markers_match_desktop_normalize_semantics() {
     let q = assistant_styled_text(">正文", &pal(), 0);
     assert!(has_gray(&q, '>'));
     // 渲染文本与共享 normalize 输出逐字一致（补的空格原样呈现、不吞字符）
-    for input in ["###规范", "-规范", "1.下一步", ">正文"] {
+    // 标题已被替换成竖条/缩进，不再逐字一致；其余标记仍原样保留。
+    for input in ["-规范", "1.下一步", ">正文"] {
         let chars = assistant_styled_text(input, &pal(), 0);
         let joined: String = chars.iter().map(|(_, ch)| *ch).collect();
         let expected = normalize_markdown_for_render(input);
@@ -100,6 +118,47 @@ fn ascii_flags_and_asterisk_emphasis_stay_untouched() {
 #[test]
 fn heading_tab_separator_accepted() {
     let chars = assistant_styled_text("#\t标题", &pal(), 0);
-    assert!(has_gray(&chars, '#'));
+    assert!(!chars.iter().any(|(_, ch)| *ch == '#'), "标记不该上屏");
+    assert!(chars.iter().any(|(_, ch)| *ch == '▌'));
     assert!(has_bold(&chars, '标'));
+}
+
+/// 分隔线：`---` 变成一条铺满宽度的 `─`，短横线本身不上屏。
+#[test]
+fn rule_renders_as_full_width_line() {
+    let chars = assistant_styled_text("---", &pal(), 20);
+    let text: String = chars.iter().map(|(_, c)| *c).collect();
+    assert_eq!(text, "─".repeat(20));
+    assert!(!chars.iter().any(|(_, c)| *c == '-'));
+    assert_eq!(chars[0].0.fg, Some(pal().muted), "分隔线用 muted");
+}
+
+/// 分隔线在宽度未知（纯文本场景）时退化成最短可见长度，不是零长。
+#[test]
+fn rule_has_minimum_length_without_width() {
+    let chars = assistant_styled_text("***", &pal(), 0);
+    assert_eq!(chars.iter().filter(|(_, c)| *c == '─').count(), RULE_MIN);
+}
+
+/// 任务列表：`[ ]` / `[x]` 换成方框，勾选态用 accent。
+#[test]
+fn task_list_uses_checkboxes() {
+    let todo: String = assistant_styled_text("- [ ] 待办", &pal(), 0)
+        .iter()
+        .map(|(_, c)| *c)
+        .collect();
+    assert_eq!(todo, "☐ 待办");
+    let done = assistant_styled_text("- [x] 完成", &pal(), 0);
+    let done_text: String = done.iter().map(|(_, c)| *c).collect();
+    assert_eq!(done_text, "☑ 完成");
+    assert_eq!(done[0].0.fg, Some(pal().accent), "勾选项用 accent");
+}
+
+/// 围栏里的 `---` 与 `- [ ]` 是代码内容，不能被当成结构标记。
+#[test]
+fn rule_and_task_inside_fence_stay_literal() {
+    let chars = assistant_styled_text("```\n---\n- [ ] x\n```", &pal(), 10);
+    let text: String = chars.iter().map(|(_, c)| *c).collect();
+    assert!(text.contains("---"), "围栏内的 --- 应保持字面：{text:?}");
+    assert!(text.contains("[ ]"), "围栏内的任务标记应保持字面：{text:?}");
 }
