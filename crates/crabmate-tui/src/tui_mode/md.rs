@@ -191,39 +191,141 @@ fn list_or_quote_match(rest: &[u8]) -> Option<(usize, usize)> {
         .or_else(|| ordered_match(rest))
 }
 
-/// 单行：行首标记（标题/列表/引用）轻渲染 + 其余部分行内 md。
-/// 标记弱化为灰色；标题正文整体加粗（行内样式叠加）。宽容识别只影响样式判定，
-/// 不增删字符（分隔空格/tab 原样保留；tab 仅会在折行时被丢弃）。
-fn styled_part_chars(part: &str, pal: &Palette) -> Vec<(Style, char)> {
-    let indent = leading_indent(part);
-    let rest = &part.as_bytes()[indent..];
-    let (marker_len, content_at, heading) = if let Some((h, ca)) = heading_match(rest) {
-        (h, ca, true)
-    } else if let Some((m, ca)) = list_or_quote_match(rest) {
-        (m, ca, false)
-    } else {
-        return inline_styled_chars(part, pal);
+/// 分隔线的最短可见长度（`width == 0` 的纯文本场景退化成这个）。
+const RULE_MIN: usize = 3;
+
+/// 水平分隔线：整行只有 `-` / `*` / `_`（≥3 个），允许中间夹空格。
+fn is_rule(rest: &[u8]) -> bool {
+    let mut marks = 0usize;
+    for &b in rest {
+        match b {
+            b'-' | b'*' | b'_' => marks += 1,
+            b' ' | b'\t' => {}
+            _ => return false,
+        }
+    }
+    marks >= 3
+}
+
+/// 任务列表：`- [ ] 文本` / `- [x] 文本` → 返回（是否勾选, 正文起点）。
+fn task_match(rest: &[u8]) -> Option<(bool, usize)> {
+    let (_, ca) = unordered_match(rest)?;
+    let checked = match rest.get(ca..)? {
+        [b'[', b' ', b']', ..] => false,
+        [b'[', b'x' | b'X', b']', ..] => true,
+        _ => return None,
     };
-    let mut out: Vec<(Style, char)> = Vec::new();
-    out.extend(part[..indent].chars().map(|c| (Style::new(), c)));
-    let marker: String = part[indent..indent + marker_len].to_string();
+    let after = ca + 3;
+    let start = if rest.get(after) == Some(&b' ') {
+        after + 1
+    } else {
+        after
+    };
+    Some((checked, start))
+}
+
+/// 标题层级缩进（列）：H1 用 `▌` 竖条代替缩进，H4 及更深不再加宽。
+fn heading_indent(level: usize) -> usize {
+    match level {
+        0 | 1 => 0,
+        2 => 2,
+        3 => 4,
+        _ => 6,
+    }
+}
+
+/// 分隔线：一条 `─` 铺到可用宽度。
+fn rule_chars(width: usize, pal: &Palette) -> Vec<(Style, char)> {
+    let st = if pal.is_mono() {
+        Style::new()
+    } else {
+        Style::new().fg(pal.muted)
+    };
+    (0..width.max(RULE_MIN)).map(|_| (st, '─')).collect()
+}
+
+/// 标题：**标记不上屏**，改用层级缩进 + 强调；H1 额外加 `▌` 竖条。
+///
+/// 早前把 `###` 灰化留在行内，问题有二：白占 2～6 列；且 H1–H6 除字数外看起来
+/// 完全一样，长文档里读不出骨架。
+fn push_heading(out: &mut Vec<(Style, char)>, level: usize, body: &str, pal: &Palette) {
+    let mut base = Style::new().add_modifier(Modifier::BOLD);
+    if !pal.is_mono() && level <= 2 {
+        base = base.fg(pal.accent);
+    }
+    if level == 1 {
+        let bar = if pal.is_mono() {
+            Style::new()
+        } else {
+            Style::new().fg(pal.accent)
+        };
+        out.push((bar, '▌'));
+        out.push((Style::new(), ' '));
+    } else {
+        out.extend((0..heading_indent(level)).map(|_| (Style::new(), ' ')));
+    }
+    // 行内样式（粗体/代码底纹）叠加在标题样式之上，不是被覆盖。
+    out.extend(
+        inline_styled_chars(body, pal)
+            .into_iter()
+            .map(|(s, c)| (s.patch(base), c)),
+    );
+}
+
+/// 任务列表：`☑` / `☐` 取代 `[x]` / `[ ]` —— 省一列，且方框本身就是列表语义。
+fn push_task(out: &mut Vec<(Style, char)>, checked: bool, body: &str, pal: &Palette) {
+    let st = match (pal.is_mono(), checked) {
+        (true, _) => Style::new(),
+        (false, true) => Style::new().fg(pal.accent),
+        (false, false) => Style::new().fg(pal.muted),
+    };
+    out.push((st, if checked { '☑' } else { '☐' }));
+    out.push((Style::new(), ' '));
+    out.extend(inline_styled_chars(body, pal));
+}
+
+/// 列表/引用标记：保留原字符、弱化成灰色，其余部分走行内 md。
+fn push_marker(
+    out: &mut Vec<(Style, char)>,
+    marker_len: usize,
+    content_at: usize,
+    rest: &str,
+    pal: &Palette,
+) {
+    let marker: String = rest[..marker_len].to_string();
     out.extend(marker.chars().map(|c| (Style::new().fg(Color::Gray), c)));
     if content_at > marker_len {
-        out.push((
-            Style::new(),
-            rest.get(marker_len).copied().unwrap_or(b' ') as char,
-        ));
+        let sep = rest[marker_len..].chars().next().unwrap_or(' ');
+        out.push((Style::new(), sep));
     }
-    let body = inline_styled_chars(&part[indent + content_at..], pal);
-    if heading {
-        out.extend(
-            body.into_iter()
-                .map(|(s, c)| (s.add_modifier(Modifier::BOLD), c)),
-        );
-    } else {
-        out.extend(body);
+    out.extend(inline_styled_chars(&rest[content_at..], pal));
+}
+
+/// 单行：行首标记（分隔线/标题/任务列表/列表/引用）渲染 + 其余部分行内 md。
+///
+/// 宽容识别只影响样式判定，不增删正文；只有**结构性标记**（分隔线、标题 `#`、
+/// 任务列表的 `[ ]`）不上屏 —— 它们由更明确的视觉形式替代。
+fn styled_part_chars(part: &str, pal: &Palette, width: usize) -> Vec<(Style, char)> {
+    let indent = leading_indent(part);
+    let rest = &part[indent..];
+    let mut out: Vec<(Style, char)> = part[..indent].chars().map(|c| (Style::new(), c)).collect();
+    if is_rule(rest.as_bytes()) {
+        out.extend(rule_chars(width, pal));
+        return out;
     }
-    out
+    if let Some((level, ca)) = heading_match(rest.as_bytes()) {
+        push_heading(&mut out, level, &rest[ca..], pal);
+        return out;
+    }
+    if let Some((checked, ca)) = task_match(rest.as_bytes()) {
+        push_task(&mut out, checked, &rest[ca..], pal);
+        return out;
+    }
+    if let Some((m, ca)) = list_or_quote_match(rest.as_bytes()) {
+        push_marker(&mut out, m, ca, rest, pal);
+        return out;
+    }
+    inline_styled_chars(part, pal)
 }
 
 /// 是否丢弃这一行：围栏外的连续空行只留一个，首部空行也不产生间距
@@ -423,7 +525,7 @@ pub(crate) fn assistant_styled_text(
         let row = if in_fence {
             code_line_chars(part, pal, code_width)
         } else {
-            styled_part_chars(part, pal)
+            styled_part_chars(part, pal, code_width)
         };
         push_row(&mut out, &mut first, row);
         prev_blank = blank;
