@@ -316,12 +316,19 @@ pub(crate) fn wrap_styled_chars(styled: &[(Style, char)], width: usize) -> Vec<V
     rows
 }
 
-/// 行基色叠加 markdown 片段样式（md 未给前景时随基色）。
+/// 叠加行内样式到行基色上（md 未给前景/底色时随基色）。
+///
+/// **三个槽位都要搬**：`fg`、`bg`、modifier。曾经只搬 `fg` 与 modifier，于是
+/// `InlineCode` 的 `bg(code_bg)` 在合并时被静默丢掉 —— 行内代码在屏幕上从来没有底色，
+/// 而 `md_span_style` 的单测一直是绿的（它只验证「算出来了」，不验证「画上去了」）。
+/// 现在由 `render_color_tests::inline_code_gets_code_background` 在缓冲区层面守住。
 pub(crate) fn md_row_style(md: Style, base: Style) -> Style {
-    let fg = md.fg.or(base.fg);
     let mut s = Style::new();
-    if let Some(c) = fg {
+    if let Some(c) = md.fg.or(base.fg) {
         s = s.fg(c);
+    }
+    if let Some(c) = md.bg.or(base.bg) {
+        s = s.bg(c);
     }
     s.add_modifier(md.add_modifier | base.add_modifier)
 }

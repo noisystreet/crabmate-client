@@ -901,3 +901,9 @@ fn render_input(frame: &mut Frame, st: &UiState, area: Rect, cursor_allowed: boo
 #[cfg(test)]
 #[path = "render_tests.rs"]
 mod tests;
+
+// 颜色级断言单独成文件：`render_tests.rs` 已 859 行，且按关注点分开
+// （结构与宽度的说不该和 buffer 颜色的混在一处）。
+#[cfg(test)]
+#[path = "render_color_tests.rs"]
+mod color_tests;
