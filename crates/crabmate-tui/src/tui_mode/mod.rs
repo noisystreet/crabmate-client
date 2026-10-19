@@ -49,6 +49,7 @@ use crossterm::terminal::{
 };
 use ratatui::Terminal;
 use ratatui::backend::{Backend, CrosstermBackend};
+use ratatui::layout::Rect;
 
 use crate::serve::{
     ApprovalDecision, ChatStreamOptions, ChatStreamOutcome, ServeClient, StreamCancel,
@@ -758,7 +759,10 @@ impl TuiApp<'_> {
             let info = self.status_info();
             // 内容/宽度/搜索未变时复用已构建的 body 物理行，避免每帧全量 tokenize+wrap。
             self.prepare_body(size.width);
-            let panel = self.settings_content((size.width as usize).saturating_sub(2));
+            // 设置面板改成居中弹层后，内容必须按**弹层内宽**排版：用与绘制同源的
+            // `settings_panel_content_width`，否则会出现「画 76 列、按 78 列生成」的错位。
+            let screen = Rect::new(0, 0, size.width, size.height);
+            let panel = self.settings_content(render::settings_panel_content_width(screen));
             terminal
                 .draw(|f| render::draw(f, &self.st, &info, &self.prepared, panel.as_ref()))
                 .context("tui draw failed")?;

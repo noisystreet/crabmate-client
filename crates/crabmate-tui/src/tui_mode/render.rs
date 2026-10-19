@@ -21,6 +21,9 @@ use super::ws_sidebar::{pane_list_area, sessions_content, sidebar_view, workspac
 #[path = "overlay.rs"]
 mod overlay;
 use overlay::{render_approval_overlay, render_settings_overlay};
+// 面板内容必须按弹层内宽生成（否则居中后错位），所以把同一个矩形计算暴露给
+// `mod.rs` 的 `settings_content(...)` 调用点。
+pub(crate) use overlay::settings_panel_content_width;
 
 /// 低于此宽度隐藏左右栏（等价 repl 布局）。
 pub const SIDEBAR_MIN_WIDTH: u16 = 120;
