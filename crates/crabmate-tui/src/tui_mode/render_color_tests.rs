@@ -357,3 +357,37 @@ fn structural_markers_do_not_reach_the_screen() {
         "应有横向分隔线：{joined}"
     );
 }
+
+/// 顶栏不该再出现模式徽标或键位提示：模式由状态栏的 `mode` 段显示。
+/// buffer 级断言（而不只是 span 级）——「算对了却没上屏」是这层曾经漏过的坑。
+#[test]
+fn top_bar_has_no_mode_badge_or_hints() {
+    let mut st = UiState::new();
+    st.set_palette(Palette::from_theme(Some("shadcn-dark")));
+    st.sidebar_visible = false;
+    st.workspace_path = Some("/data/proj".into());
+    let rows = build_body_rows(&st, chat_body_width(false, W));
+    let mut info = status_info();
+    info.mode = Some("act".into());
+    let mut terminal = Terminal::new(TestBackend::new(W, H)).expect("terminal");
+    terminal
+        .draw(|f| draw(f, &st, &info, &rows, None))
+        .expect("draw");
+    let buf = terminal.backend().buffer().clone();
+    let pal = st.palette;
+
+    let text = text_row(&buf, 0);
+    assert!(text.contains("CrabMate"), "左段品牌应上屏：{text:?}");
+    assert!(text.contains("proj"), "中段工作区名应上屏：{text:?}");
+    let badge_cells = (0..W).filter(|&x| buf[(x, 0)].bg == pal.accent).count();
+    assert_eq!(badge_cells, 0, "顶栏不该有 accent 色块：{text:?}");
+    assert!(
+        !text.contains("ACT") && !text.contains("Ctrl+E") && !text.contains("F2"),
+        "顶栏不该出现模式徽标或键位提示：{text:?}"
+    );
+    assert_eq!(
+        row_bg_count(&buf, 0, pal.bg),
+        0,
+        "顶栏仍是条带色，不该用聊天区底色"
+    );
+}
