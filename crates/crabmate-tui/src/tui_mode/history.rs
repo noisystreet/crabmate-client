@@ -294,7 +294,7 @@ mod tests {
     fn tool_history_row_uses_done_mark_and_truncates_head() {
         let long = format!("{}\ntail", "x".repeat(TOOL_HEAD_WIDTH * 2));
         let (text, ok) = tool_history_row("read_file", &long);
-        assert!(text.starts_with("read_file (done) — "), "got {text}");
+        assert!(text.starts_with("(done) read_file — "), "got {text}");
         assert!(text.chars().count() < TOOL_HEAD_WIDTH + 32, "got {text}");
         assert_eq!(ok, None, "纯文本结果没有成败信号");
     }
@@ -307,7 +307,7 @@ mod tests {
         let body = r#"{"crabmate_tool":{"v":1,"name":"read_file","summary":"读：a.rs","ok":true,"output":"content\nmore"}}"#;
         assert_eq!(
             tool_history_row("read_file", body),
-            ("read_file ✓ — 读：a.rs".to_string(), Some(true))
+            ("✓ read_file — 读：a.rs".to_string(), Some(true))
         );
     }
 
@@ -317,7 +317,7 @@ mod tests {
         let body = r#"{"crabmate_tool":{"v":1,"name":"exec","output":"exit 0\n…"}}"#;
         assert_eq!(
             tool_history_row("exec", body),
-            ("exec (done) — exit 0".to_string(), None)
+            ("(done) exec — exit 0".to_string(), None)
         );
     }
 
@@ -325,7 +325,7 @@ mod tests {
     fn tool_history_row_without_body_keeps_name_only() {
         assert_eq!(
             tool_history_row("bash", "   "),
-            ("bash (done)".to_string(), None)
+            ("(done) bash".to_string(), None)
         );
     }
 
@@ -357,7 +357,7 @@ mod tests {
                 (LineKind::Assistant, "回答".to_string(), None),
                 (
                     LineKind::Tool,
-                    "read_file (done) — 1|fn main() {}".to_string(),
+                    "(done) read_file — 1|fn main() {}".to_string(),
                     None,
                 ),
             ]
@@ -379,7 +379,7 @@ mod tests {
             rows_to_lines(&resp),
             vec![(
                 LineKind::Tool,
-                "read_file ✗ — 读：a.rs".to_string(),
+                "✗ read_file — 读：a.rs".to_string(),
                 Some(false)
             )]
         );
