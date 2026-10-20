@@ -36,9 +36,13 @@ pub(crate) enum LineAction {
     System(String),
     Approve(CommandApprovalData),
     /// `TOOL_CALL_START`：工具开始（显示工具行开始态）。
+    ///
+    /// `note` 是事件自带的「要执行什么」（`summary` 或 `arguments` / `argsPreview`）：
+    /// 有它才能在执行中就看到实际命令，而不是等 `TOOL_CALL_RESULT` 回来才补。
     ToolStart {
         tool_call_id: String,
         name: String,
+        note: Option<String>,
     },
     /// `TOOL_CALL_RESULT`（非 partial 收尾）：工具结束 + 结果摘要。
     ToolResult {
@@ -72,12 +76,20 @@ fn parse_with_collector(line: &str, acc: &RefCell<Collected>) -> SseDispatch {
     let mut on_delta = |s: String| acc.borrow_mut().text(s);
     let mut on_reasoning_delta = |s: String| acc.borrow_mut().reasoning(s);
     let mut on_tool_call = |name: String,
-                            _summary: String,
-                            _args_preview: Option<String>,
+                            summary: String,
+                            args_preview: Option<String>,
                             _args_full: Option<String>,
                             _goal_id: Option<String>,
                             tool_call_id: Option<String>| {
-        acc.borrow_mut().tool_start(tool_call_id, name);
+        // 事件里已经有「要执行什么」：`summary` 优先，其次参数预览（`run_command`
+        // 的 `git status` 就靠它）。以前两者都被丢掉，工具行只能显示工具名，
+        // 命令必须等结果回来才看得见。
+        let note = std::iter::once(summary)
+            .chain(args_preview)
+            .map(|s| s.trim().to_string())
+            .find(|s| !s.is_empty() && !looks_like_json(s))
+            .map(|s| trim_tail(&s));
+        acc.borrow_mut().tool_start(tool_call_id, name, note);
     };
     let mut on_tool_result = |info: ToolResultInfo| acc.borrow_mut().tool_result(info);
     let mut on_approval = |req: CommandApprovalData| acc.borrow_mut().approve(req);
@@ -110,7 +122,7 @@ struct Collected {
     /// 畸形 `command_approval` 提示行。
     system: Option<String>,
     approval: Option<CommandApprovalData>,
-    tool_start: Option<(Option<String>, String)>,
+    tool_start: Option<(Option<String>, String, Option<String>)>,
     tool_result: Option<ToolResultInfo>,
     run_error: Option<String>,
 }
@@ -132,8 +144,8 @@ impl Collected {
         self.approval.get_or_insert(req);
     }
 
-    fn tool_start(&mut self, tool_call_id: Option<String>, name: String) {
-        self.tool_start.get_or_insert((tool_call_id, name));
+    fn tool_start(&mut self, tool_call_id: Option<String>, name: String, note: Option<String>) {
+        self.tool_start.get_or_insert((tool_call_id, name, note));
     }
 
     fn tool_result(&mut self, info: ToolResultInfo) {
@@ -155,10 +167,11 @@ fn resolve(collected: Collected) -> Result<LineAction, TermError> {
         LineAction::Approve(req)
     } else if let Some(hint) = collected.system {
         LineAction::System(hint)
-    } else if let Some((tool_call_id, name)) = collected.tool_start {
+    } else if let Some((tool_call_id, name, note)) = collected.tool_start {
         LineAction::ToolStart {
             tool_call_id: tool_call_id.unwrap_or_default(),
             name,
+            note,
         }
     } else if let Some(info) = collected.tool_result {
         tool_result_action(info)
@@ -205,6 +218,15 @@ fn is_ag_ui_event(line: &str) -> bool {
 /// 截断到 ≤[`NOTE_MAX_CHARS`] 字符（字符级，不切代理对）。
 fn trim_tail(s: &str) -> String {
     s.chars().take(NOTE_MAX_CHARS).collect()
+}
+
+/// 该串是否为原始 JSON（对象 / 数组）。
+///
+/// 共享解析器把 `arguments`（完整参数 **JSON**）优先于 `argsPreview`（`path=/etc/hosts`
+/// 这类可读预览）交给回调，两者共用一个位置，客户端分不出来。JSON 原样上屏就是
+/// `{"path":"a.rs"}`——比不显示更糟，所以判掉。
+fn looks_like_json(s: &str) -> bool {
+    s.starts_with('{') || s.starts_with('[')
 }
 
 #[cfg(test)]
@@ -270,9 +292,61 @@ mod tests {
     fn tool_call_start_parses_name_and_id() {
         let data = r#"{"type":"TOOL_CALL_START","toolCallId":"tc-1","name":"exec","parentMessageId":"m1"}"#;
         match classify_line(data).unwrap() {
-            LineAction::ToolStart { tool_call_id, name } => {
+            LineAction::ToolStart {
+                tool_call_id,
+                name,
+                note,
+            } => {
                 assert_eq!(tool_call_id, "tc-1");
                 assert_eq!(name, "exec");
+                assert!(note.is_none(), "无 summary / argsPreview 时不凭空造说明");
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    /// `TOOL_CALL_START` 里的 `argsPreview` 要在**开始**就带到 UI：否则工具行只显示
+    /// 工具名，实际命令得等 `TOOL_CALL_RESULT` 回来才看得见。
+    #[test]
+    fn tool_call_start_carries_args_preview() {
+        let data = r#"{"type":"TOOL_CALL_START","toolCallId":"tc-2","name":"run_command","argsPreview":"git status"}"#;
+        match classify_line(data).unwrap() {
+            LineAction::ToolStart {
+                tool_call_id,
+                name,
+                note,
+            } => {
+                assert_eq!(tool_call_id, "tc-2");
+                assert_eq!(name, "run_command");
+                assert_eq!(note.as_deref(), Some("git status"));
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    /// 参数位可能是完整参数 **JSON**（共享解析器让 `arguments` 优先于 `argsPreview`），
+    /// 原样上屏会把 `{"path":"a.rs"}` 印成标题：宁可不显示，也不要这种噪音。
+    #[test]
+    fn tool_call_start_ignores_json_arguments() {
+        let data = r#"{"type":"TOOL_CALL_START","toolCallId":"tc-3","name":"create_file","arguments":"{\"path\":\"a.rs\"}"}"#;
+        match classify_line(data).unwrap() {
+            LineAction::ToolStart { note, .. } => assert!(note.is_none()),
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    /// 超长 summary 要截到 [`NOTE_MAX_CHARS`]：工具行只有一行，几百字的摘要会把
+    /// 整个 transcript 挤变形。
+    #[test]
+    fn long_summary_is_truncated() {
+        let long = "x".repeat(NOTE_MAX_CHARS + 50);
+        let data = format!(
+            r#"{{"type":"TOOL_CALL_START","toolCallId":"tc-4","name":"run_command","summary":"{long}"}}"#
+        );
+        match classify_line(&data).unwrap() {
+            LineAction::ToolStart { note, .. } => {
+                let note = note.expect("超长 summary 应保留截断后的内容");
+                assert_eq!(note.chars().count(), NOTE_MAX_CHARS);
             }
             other => panic!("unexpected {other:?}"),
         }

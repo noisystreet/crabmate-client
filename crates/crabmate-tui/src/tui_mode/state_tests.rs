@@ -218,7 +218,7 @@ fn reset_transcript_clears_lines() {
     let mut s = UiState::new();
     s.push_line(LineKind::User, "hi");
     s.view_offset = 3;
-    s.tool_start("tc-1", "exec");
+    s.tool_start("tc-1", "exec", None);
     s.start_search("hi");
     s.reset_transcript();
     assert!(s.lines.is_empty());
@@ -262,10 +262,22 @@ fn new_thinking_rows_follow_global_expand_state() {
     assert!(s.lines.last().unwrap().collapsed);
 }
 
+/// 开始态就该看到「要执行什么」，不必等结果回来才补。
+///
+/// `run_command` 连名字一起省掉：note 就是那条命令，前缀工具名只是噪音。
+#[test]
+fn tool_start_shows_note_immediately() {
+    let mut s = UiState::new();
+    s.tool_start("tc-2", "run_command", Some("git status"));
+    assert_eq!(s.lines.last().unwrap().text, "git status");
+    s.tool_end("tc-2", "run_command", Some(true), Some("git status"));
+    assert_eq!(s.lines.last().unwrap().text, "✓ git status");
+}
+
 #[test]
 fn tool_row_start_then_end_updates_in_place() {
     let mut s = UiState::new();
-    s.tool_start("tc-9", "exec");
+    s.tool_start("tc-9", "exec", None);
     assert_eq!(s.lines.last().unwrap().kind, LineKind::Tool);
     assert_eq!(s.lines.last().unwrap().text, "exec");
     s.tool_end("tc-9", "exec", Some(true), Some("exit 0"));

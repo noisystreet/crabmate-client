@@ -83,6 +83,41 @@ pub(super) fn flatten_note(name: &str, note: &str) -> Option<String> {
     (!kept.is_empty()).then(|| kept.join(" · "))
 }
 
+/// 名字只是壳、note 本身已经说明「在做什么」的工具。
+///
+/// `run_command` 的 note 就是那条命令，再前缀一遍等于说「跑命令：git add -A」——
+/// 工具名不带来任何额外信息。`read_file` / `write_file` 则不同：note 里只有一个
+/// 路径，读还是写得靠名字区分，省掉就看不出来了。
+const NAME_IMPLIED_BY_NOTE: [&str; 1] = ["run_command"];
+
+/// 该工具名对读者是否多余（note 已完整表达语义）。
+fn name_implied_by_note(name: &str) -> bool {
+    let name_n = normalized(name);
+    NAME_IMPLIED_BY_NOTE.iter().any(|t| normalized(t) == name_n)
+}
+
+/// 去掉控制字符（含 `\x1b`）。
+///
+/// note 来自命令文本 / 路径，可能夹带 ANSI 转义；原样进缓冲区会被终端当成控制序列
+/// 执行（清屏、移动光标、伪造输出）。`ratatui` 不会替调用方拦这一层，只能在这里滤。
+fn strip_control_chars(s: &str) -> String {
+    s.chars().filter(|c| !c.is_control()).collect()
+}
+
+/// 工具行正文（不含标记）：`name — note`；note 与 name 重复时只留 note。
+///
+/// **开始态与结束态共用**：工具一开始跑就该看到「要执行什么」
+/// （`run_command — git status`），不必等结果回来再补。
+#[must_use]
+pub(super) fn tool_row_text(name: &str, note: Option<&str>) -> String {
+    let body = match note.and_then(|n| flatten_note(name, n)) {
+        Some(note) if note_repeats_name(name, &note) || name_implied_by_note(name) => note,
+        Some(note) => format!("{name} — {note}"),
+        None => name.to_string(),
+    };
+    strip_control_chars(&body)
+}
+
 /// 工具结束行文案：`mark name — note`。
 ///
 /// 标记一律**前置**：工具行常常连着出现，成败列对齐在同一列上才好扫——一眼看出
@@ -91,12 +126,7 @@ pub(super) fn flatten_note(name: &str, note: &str) -> Option<String> {
 /// note 与 name 重复时省略 name（`✓ read file: hello.cpp`）。
 #[must_use]
 pub(super) fn tool_end_text(name: &str, ok: Option<bool>, note: Option<&str>) -> String {
-    let m = mark(ok);
-    match note.and_then(|n| flatten_note(name, n)) {
-        Some(note) if note_repeats_name(name, &note) => format!("{m} {note}"),
-        Some(note) => format!("{m} {name} — {note}"),
-        None => format!("{m} {name}"),
-    }
+    format!("{} {}", mark(ok), tool_row_text(name, note))
 }
 
 #[cfg(test)]
@@ -148,6 +178,34 @@ mod tests {
             ),
             "✓ search_replace: 2 处替换"
         );
+    }
+
+    /// `run_command` 的 note 就是命令本身，工具名不带来信息：只留命令。
+    /// 其它工具（note 只是一条路径）仍保留名字——读还是写得靠它区分。
+    ///
+    /// 注：serve 的 `summary_run_command` 返回的就是裸命令（`git add -A`），
+    /// 不带 `命令：` 前缀；`命令：…` 只出现在工具**输出正文**的多行格式里。
+    #[test]
+    fn command_tool_drops_its_own_name() {
+        assert_eq!(
+            tool_row_text("run_command", Some("git add -A")),
+            "git add -A"
+        );
+        assert_eq!(
+            tool_end_text("run_command", Some(true), Some("git add -A")),
+            "✓ git add -A"
+        );
+        assert_eq!(tool_row_text("read_file", Some("a.rs")), "read_file — a.rs");
+    }
+
+    /// note 可能夹带 ANSI 转义（命令文本原样透传）：必须滤掉，否则终端会当控制序列执行。
+    #[test]
+    fn note_control_chars_are_stripped() {
+        assert_eq!(
+            tool_row_text("run_command", Some("git status\u{1b}[2J\u{7}")),
+            "git status[2J"
+        );
+        assert_eq!(tool_row_text("run_command", Some("a\tb")), "ab");
     }
 
     /// serve 的 summary 可能用连字符写工具名（`search-replace (preview): …`），

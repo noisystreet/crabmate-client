@@ -139,7 +139,14 @@ pub trait StreamSink {
     }
     /// 工具开始（AG-UI `TOOL_CALL_START`，serve v2 协议）。文本模式默认忽略；
     /// 全屏 TUI 用它渲染"工具行摘要"的开始态。
-    fn on_tool_start(&mut self, _tool_call_id: &str, _name: &str) -> Result<(), TermError> {
+    ///
+    /// `note` = 事件自带的 `summary` / `argsPreview`（「要执行什么」）。
+    fn on_tool_start(
+        &mut self,
+        _tool_call_id: &str,
+        _name: &str,
+        _note: Option<&str>,
+    ) -> Result<(), TermError> {
         Ok(())
     }
     /// 工具结果（`TOOL_CALL_RESULT`；非 partial 收尾帧）。`ok=None` = 无结果标记；
@@ -572,7 +579,11 @@ async fn dispatch_line_action(
         LineAction::Approve(req) => {
             resolve_approval(client, approval_session_id, req, approval).await?;
         }
-        LineAction::ToolStart { tool_call_id, name } => sink.on_tool_start(&tool_call_id, &name)?,
+        LineAction::ToolStart {
+            tool_call_id,
+            name,
+            note,
+        } => sink.on_tool_start(&tool_call_id, &name, note.as_deref())?,
         LineAction::ToolResult {
             tool_call_id,
             name,
