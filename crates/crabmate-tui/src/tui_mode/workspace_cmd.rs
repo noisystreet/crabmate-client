@@ -223,6 +223,8 @@ mod tests {
             persisted: None,
             last_size: (0, 0),
             index: Default::default(),
+            resume: None,
+            sent_turn: None,
         }
     }
 

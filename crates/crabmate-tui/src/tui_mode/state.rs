@@ -255,6 +255,12 @@ impl UiState {
         self.bump();
     }
 
+    /// 最后一行是什么类型（`/resume` 判断续流正文该接上原块还是另起一块）。
+    #[must_use]
+    pub fn last_kind(&self) -> Option<LineKind> {
+        self.lines.last().map(|l| l.kind)
+    }
+
     /// 内容/折叠变化代数 +1（body memo 失效用）。
     fn bump(&mut self) {
         self.content_rev = self.content_rev.wrapping_add(1);

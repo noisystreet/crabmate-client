@@ -199,6 +199,8 @@ impl TuiApp<'_> {
         self.st.conversation_id = None;
         self.st.history_pending = None;
         self.st.reset_transcript();
+        // 新会话是一份空 transcript：上一轮的断点无处可续（`/resume` 会拒绝）。
+        self.drop_resume_point();
         self.st.focus = Focus::Input;
     }
 

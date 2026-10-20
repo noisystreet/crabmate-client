@@ -24,6 +24,8 @@ pub const STATUS: &str = "status";
 pub const MODE: &str = "mode";
 /// `/role`（repl / tui-mode）。
 pub const ROLE: &str = "role";
+/// `/resume`（repl / tui-mode）：续传上一轮被中断、serve 侧 job 可能仍在跑的回合。
+pub const RESUME: &str = "resume";
 /// `/quit`（repl / tui-mode）。
 pub const QUIT: &str = "quit";
 /// `/quit` 别名（repl / tui-mode）。
@@ -34,7 +36,8 @@ pub const QUIT_Q: &str = "q";
 #[cfg(test)]
 mod tests {
     use super::{
-        CD, CONV, HELP, HELP_Q, MODE, MODEL, QUIT, QUIT_EXIT, QUIT_Q, ROLE, STATUS, WORKSPACE,
+        CD, CONV, HELP, HELP_Q, MODE, MODEL, QUIT, QUIT_EXIT, QUIT_Q, RESUME, ROLE, STATUS,
+        WORKSPACE,
     };
 
     #[test]
@@ -48,6 +51,7 @@ mod tests {
         assert_eq!(STATUS, "status");
         assert_eq!(MODE, "mode");
         assert_eq!(ROLE, "role");
+        assert_eq!(RESUME, "resume");
         assert_eq!(QUIT, "quit");
         assert_eq!(QUIT_EXIT, "exit");
         assert_eq!(QUIT_Q, "q");

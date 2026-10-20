@@ -13,7 +13,7 @@ use crabmate_client_api::paths;
 use crate::serve::{
     ApprovalGate, AutoAllowOnce, ChatStreamOptions, ChatStreamOutcome,
     ConversationMessagesResponse, ServeClient, SessionIndexApplied, SessionIndexOp, StreamCancel,
-    StreamSink, TermError, WebSessionsList, WorkspaceDirData, WorkspaceProjectsData,
+    StreamResume, StreamSink, TermError, WebSessionsList, WorkspaceDirData, WorkspaceProjectsData,
     apply_web_session_op, fetch_conversation_messages, fetch_llm_overrides, fetch_user_data_prefs,
     fetch_web_sessions, fetch_workspace, fetch_workspace_dir, fetch_workspace_projects,
     put_llm_overrides, put_user_data_prefs, run_chat_stream_sink, set_workspace,
@@ -49,6 +49,9 @@ pub(super) enum UiEvent {
     TurnDone {
         outcome: ChatStreamOutcome,
         error: Option<String>,
+        /// 传输中断且已拿到 job 句柄时的续流点（`TermError::InterruptedStream`）；
+        /// 由 worker 在错误变成字符串之前取出，供 `/resume` 使用。
+        interrupted: Option<StreamResume>,
     },
     Sessions(Result<WebSessionsList, String>),
     /// 已持久化会话的历史分页（`GET /conversation/messages`）：只读回放。
@@ -296,12 +299,44 @@ fn run_turn_job(
         )
         .await
     });
-    let (outcome, error) = match result {
-        Ok(o) => (o, None),
-        Err(TermError::Interrupted) => (ChatStreamOutcome::default(), None),
-        Err(e) => (ChatStreamOutcome::default(), Some(e.to_string())),
-    };
-    let _ = tx.send(UiEvent::TurnDone { outcome, error });
+    let (outcome, error, interrupted) = split_turn_result(result);
+    let _ = tx.send(UiEvent::TurnDone {
+        outcome,
+        error,
+        interrupted,
+    });
+}
+
+/// 回合结果 → (摘要, 错误文案, 续流点)。
+///
+/// `TermError::InterruptedStream` 在变成字符串之前被拆出来：UI 侧 `/resume`
+/// 需要 `job_id` / `after_seq` 两个数字，字符串里只留给人看。用户强退
+/// （`TermError::Interrupted`）沿用原语义——不报错，也不留续流点。
+fn split_turn_result(
+    result: Result<ChatStreamOutcome, TermError>,
+) -> (ChatStreamOutcome, Option<String>, Option<StreamResume>) {
+    match result {
+        Ok(o) => (o, None, None),
+        Err(TermError::Interrupted) => (ChatStreamOutcome::default(), None, None),
+        Err(e) => {
+            // 先借用取续流点，再让错误自己渲染文案：格式串只留在 `TermError` 的
+            // Display 里，不会在 worker 这边多一份需要同步修改的副本。
+            let interrupted = match &e {
+                TermError::InterruptedStream {
+                    job_id, after_seq, ..
+                } => Some(StreamResume {
+                    job_id: *job_id,
+                    after_seq: *after_seq,
+                }),
+                _ => None,
+            };
+            (
+                ChatStreamOutcome::default(),
+                Some(e.to_string()),
+                interrupted,
+            )
+        }
+    }
 }
 
 async fn fetch_serve_defaults(client: &ServeClient) -> Result<ServeDefaults, String> {
