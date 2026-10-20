@@ -140,20 +140,44 @@ impl ConversationMessage {
     }
 
     /// 思考展示文本：`display_reasoning_content` 优先，其次原始 `reasoning_content`。
+    ///
+    /// 关键在**不要重复、也不要丢**。服务端可能把思考合并进 `display_content`（前端
+    /// `conversation_hydrate` 的注释就是这么写的，并且「勿再叠加 raw `reasoning_content`」），
+    /// 也可能只是提供正文的展示版、思考仍单独给：
+    ///
+    /// 1. 有 `display_reasoning_content` → 用它，绝不叠加 raw（两者是同一段思考的两个版本）；
+    /// 2. 否则 raw 已出现在 `display_content` 里 → 判定已合并，不再单出一行（否则同一段思考
+    ///    出现两次，且合并处的粘连会打乱正文的 markdown 结构）；
+    /// 3. 否则 raw 单独成行 —— 宁可重复一次可折叠，也不能把思考整段丢掉。
     #[must_use]
     fn display_reasoning(&self) -> String {
-        self.display_reasoning_content
+        if let Some(display) = self
+            .display_reasoning_content
             .as_deref()
             .map(str::trim)
             .filter(|s| !s.is_empty())
-            .or_else(|| {
-                self.reasoning_content
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|s| !s.is_empty())
-            })
-            .map(str::to_string)
-            .unwrap_or_default()
+        {
+            return display.to_string();
+        }
+        let Some(raw) = self
+            .reasoning_content
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        else {
+            return String::new();
+        };
+        if self.display_content_mentions(raw) {
+            return String::new();
+        }
+        raw.to_string()
+    }
+
+    /// `display_content` 是否已把这段思考原文并进正文（服务端的展示层合并）。
+    fn display_content_mentions(&self, reasoning: &str) -> bool {
+        self.display_content
+            .as_deref()
+            .is_some_and(|body| body.contains(reasoning))
     }
 
     /// 工具名：`name` → 调用侧 `tool_calls` 的 id 查表 → 字面 `tool`。
@@ -417,5 +441,64 @@ mod tests {
         let resp = parse(json!({}));
         assert!(resp.replay_rows().is_empty());
         assert_eq!(resp.revision, 0);
+    }
+
+    /// 助手有 `display_content` 时**不再叠加** raw `reasoning_content`：服务端已把思考合并进
+    /// 正文（与 Web Hydrate 同一规则）。旧行为会多出一行 Thinking，让同一段思考出现两次，
+    /// 且合并处的粘连会打乱正文的 markdown 结构。
+    #[test]
+    fn assistant_with_display_content_does_not_double_reasoning() {
+        let resp = parse(json!({
+            "messages": [{
+                "role": "assistant",
+                "content": "正文",
+                "display_content": "思考\n\n正文",
+                "reasoning_content": "思考"
+            }]
+        }));
+        assert_eq!(
+            resp.replay_rows(),
+            vec![ReplayRow::Assistant("思考\n\n正文".into())],
+            "此时正文已含思考，不应再产 Thinking 行"
+        );
+    }
+
+    /// 服务端**同时**给了 `display_reasoning_content` 时，思考行用它（不是 raw）。
+    #[test]
+    fn assistant_with_display_content_uses_display_reasoning() {
+        let resp = parse(json!({
+            "messages": [{
+                "role": "assistant",
+                "display_content": "正文",
+                "display_reasoning_content": "展示版思考",
+                "reasoning_content": "原始思考"
+            }]
+        }));
+        assert_eq!(
+            resp.replay_rows(),
+            vec![
+                ReplayRow::Thinking("展示版思考".into()),
+                ReplayRow::Assistant("正文".into())
+            ]
+        );
+    }
+
+    /// 没有 `display_content` 时保持旧行为：raw `reasoning_content` 单独出思考行。
+    #[test]
+    fn assistant_without_display_content_still_replays_raw_reasoning() {
+        let resp = parse(json!({
+            "messages": [{
+                "role": "assistant",
+                "content": "正文",
+                "reasoning_content": "原始思考"
+            }]
+        }));
+        assert_eq!(
+            resp.replay_rows(),
+            vec![
+                ReplayRow::Thinking("原始思考".into()),
+                ReplayRow::Assistant("正文".into())
+            ]
+        );
     }
 }

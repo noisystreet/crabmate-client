@@ -98,6 +98,8 @@ fn last_paragraph_has_open_bold(out: &[String]) -> bool {
 /// 1. **行内围栏**：正文后紧贴 `` ```lang `` / `~~~lang`（如 `依赖：```rust`），拆成上一行 + 独立围栏行。
 /// 2. **信息串与注释粘连**：行首合法围栏后写成 `` ```rust// comment ``，拆成 `` ```rust `` 与 `// comment` 两行。
 /// 3. **行尾悬空围栏**：行首不是合法围栏行，但行尾仅剩一段 `` ``` `` / `~~~` 且无其它正文，去掉尾部 fence，避免误开空代码块。
+///    **只在围栏外**生效：围栏内同一形状是**闭合**符号（模型常把它写在最后一行代码末尾，`}```），
+///    那里改成拆成独立行 —— 删掉会让围栏永不闭合，余下正文全部被当成代码块。
 /// 4. **ATX 标题缺空格**：如 `###规范与安全`（`#` 与标题字之间无空格），在至多 6 个 `#` 后补一个空格，满足 CommonMark 标题语法。
 /// 5. **列表标记缺空格**：如 `-规范` / `1.下一步`（标记与**非 ASCII** 正文之间无空格）；不改 `-rf` / `1.0` / `*em*`。
 /// 6. **GFM 表头与分隔行粘连**：如 `| a | b ||---|---|`（模型常漏换行），拆成表头行 + 独立对齐行。
@@ -109,10 +111,77 @@ pub fn normalize_markdown_for_render(md: &str) -> String {
         return String::new();
     }
     let md = normalize_glued_markdown_blocks(md);
-    md.split('\n')
-        .map(normalize_one_input_line)
-        .collect::<Vec<_>>()
-        .join("\n")
+    let mut in_fence = false;
+    let mut out: Vec<String> = Vec::new();
+    for line in md.split('\n') {
+        if in_fence {
+            in_fence = normalize_inside_fence(line, &mut out);
+            continue;
+        }
+        // 单行规则可能把一行拆成多行（行内围栏、表头+对齐行），围栏状态要按**展开后**
+        // 的每一行更新；否则 `依赖：```rust` 拆出来的开符不会让后文进入围栏语义。
+        for piece in normalize_one_input_line(line).split('\n') {
+            if fence_switch_line(piece) {
+                in_fence = !in_fence;
+            }
+            out.push(piece.to_string());
+        }
+    }
+    out.join("\n")
+}
+
+/// 围栏内的一行：只做「把粘在代码行末尾的围栏拆出来」，其余原样。
+///
+/// 这里必须与渲染器（TUI `md::is_fence_switch`、Web `pulldown-cmark`）的判定一致：
+/// 渲染器只认**行首**围栏，所以模型把闭合符号写在最后一行代码末尾（`}``` `）时，
+/// 围栏永远不会关上，余下正文全部被当成代码（TUI 涂 code 背景，Web 收进 `<pre>`）。
+/// 拆成独立行既保住了闭合，也不丢代码内容。
+///
+/// 返回该行之后是否仍在围栏内。
+fn normalize_inside_fence(line: &str, out: &mut Vec<String>) -> bool {
+    if fence_switch_line(line) {
+        out.push(line.to_string());
+        return false;
+    }
+    let trimmed_end = line.trim_end_matches([' ', '\t']);
+    if let Some((body, fence)) = split_trailing_fence_run(trimmed_end) {
+        out.push(body.to_string());
+        out.push(fence.to_string());
+        return false;
+    }
+    out.push(line.to_string());
+    true
+}
+
+/// 是否为围栏开关行（`` ``` `` / `~~~`），容忍行首缩进。
+///
+/// 与 TUI `tui_mode::md::is_fence_switch` 同一语义（任意缩进都算）：两边判定一旦错位，
+/// 就会出现「normalize 以为在围栏内而渲染器以为在外面」这类一边删一边不删的矛盾。
+fn fence_switch_line(line: &str) -> bool {
+    let s = line.trim_start();
+    s.starts_with("```") || s.starts_with("~~~")
+}
+
+/// 终态兜底：围栏数为奇数时，把**最后一个**未配对的开关行降级成普通文本。
+///
+/// 只给**已经结束**的文本用（历史回放）：流式中途停在未闭合围栏是正常状态，那时不能动，
+/// 否则代码块会在闭合瞬间跳变。而回放是终态——一条消息里多出一个孤儿开符，
+/// 余下正文就被涂成代码块；降级（去掉那一行的标记本身，不删正文）比继续错下去好。
+#[must_use]
+pub fn balance_unclosed_fence(md: &str) -> String {
+    let mut orphan: Option<usize> = None;
+    for (i, line) in md.split('\n').enumerate() {
+        if fence_switch_line(line) {
+            orphan = if orphan.is_some() { None } else { Some(i) };
+        }
+    }
+    let Some(orphan) = orphan else {
+        return md.to_string();
+    };
+    let mut lines: Vec<&str> = md.split('\n').collect();
+    // 开关行整行只有标记（可能带 info 串），清空即降级成普通空行，正文一个字不丢。
+    lines[orphan] = "";
+    lines.join("\n")
 }
 
 /// 去掉 `\r`，对单行应用围栏规范化（可能输出多行，以 `\n` 连接），再对**每一输出行**补 ATX 标题空格。
@@ -498,7 +567,7 @@ fn split_trailing_fence_run(s: &str) -> Option<(&str, &str)> {
 
 #[cfg(test)]
 mod tests {
-    use super::normalize_markdown_for_render;
+    use super::{balance_unclosed_fence, normalize_markdown_for_render};
 
     #[test]
     fn normalize_sticky_lang_slash_slash() {
@@ -528,6 +597,49 @@ mod tests {
     fn normalize_preserves_valid_tilde_fence_line() {
         let line = "~~~\nlet x = 1;\n~~~";
         assert_eq!(normalize_markdown_for_render(line), line);
+    }
+
+    /// 回归：闭合围栏粘在最后一行代码末尾（模型常见写法 `}``` `）。
+    ///
+    /// 旧行为把它当「行尾悬空围栏」删掉 —— 围栏永不闭合，余下正文在 TUI 被涂成代码背景
+    /// （`code_line_chars`）、在 Web 被收进 `<pre>`。
+    #[test]
+    fn normalize_keeps_closing_fence_glued_to_code_line() {
+        let raw = "```rust\nfn main() {}```\n后面的普通文字\n";
+        assert_eq!(
+            normalize_markdown_for_render(raw),
+            "```rust\nfn main() {}\n```\n后面的普通文字\n",
+            "闭合围栏应拆成独立行保留，而不是删掉"
+        );
+    }
+
+    /// 围栏内的行**不做**行内改写：代码里的 `###x` / `-规范` 是内容，补空格就改了代码。
+    #[test]
+    fn normalize_leaves_fence_body_untouched() {
+        let raw = "```\n###NotAHeading\n-NotAList\n```";
+        assert_eq!(normalize_markdown_for_render(raw), raw);
+    }
+
+    /// 终态兜底：多出的孤儿开符降级成普通行，后面的正文回到正文样式。
+    #[test]
+    fn balance_demotes_a_trailing_unclosed_opener() {
+        let raw = "前言\n```rust\n残留的正文\n";
+        let n = balance_unclosed_fence(raw);
+        assert!(!n.contains("```"), "孤儿开符应被降级：{n:?}");
+        assert!(n.contains("残留的正文"), "正文一个字都不能丢：{n:?}");
+        assert!(n.contains("前言"), "{n:?}");
+    }
+
+    /// 围栏配平时兜底不改动，内层的闭合也照样保留。
+    #[test]
+    fn balance_leaves_balanced_text_untouched() {
+        let raw = "```rust\nlet x = 1;\n```\n正文\n";
+        assert_eq!(balance_unclosed_fence(raw), raw);
+        // 奇数个开关里，被降级的是**最后一个**（前面成对的代码块保持完整）。
+        let odd = "```rust\nlet x = 1;\n```\n```py\nprint(1)\n";
+        let n = balance_unclosed_fence(odd);
+        assert_eq!(n.matches("```").count(), 2, "{n:?}");
+        assert!(n.contains("let x = 1;"), "{n:?}");
     }
 
     #[test]

@@ -10,6 +10,7 @@
 //! 回包是异步的，所以「这次回包还该不该落到屏幕上」必须显式判断（[`should_apply_reply`]）：
 //! 等它的这段时间里用户可能已经切走、新建会话或直接开聊。
 
+use crabmate_client_api::markdown_normalize::balance_unclosed_fence;
 use crabmate_client_api::{ConversationMessagesResponse, ReplayRow};
 use crabmate_tool_card::parse_tool_envelope;
 use unicode_width::UnicodeWidthChar;
@@ -216,13 +217,18 @@ pub(super) fn auto_replay_if_active(app: &mut TuiApp<'_>) {
 
 /// 响应 → (行类型, 文本, 工具成败)。抽成纯函数便于单测：`apply_page` 剩下的只是作用到 `UiState`。
 /// 第三项只对工具行有值，其余恒 `None`。
+///
+/// 助手正文先过 [`balance_unclosed_fence`]：回放是**终态**，一条消息里多出的孤儿开符
+/// （模型写到一半的 ``` / 服务端展示合并留下的残片）会让 TUI 把余下正文全部涂成代码块
+/// （`md::assistant_styled_text` 的 `in_fence` 进去就不出来）。流式期间不能这么做 ——
+/// 那时停在未闭合围栏是正常状态，提前「修正」会让代码块在闭合瞬间跳变。
 fn rows_to_lines(resp: &ConversationMessagesResponse) -> Vec<(LineKind, String, Option<bool>)> {
     resp.replay_rows()
         .into_iter()
         .map(|row| match row {
             ReplayRow::User(t) => (LineKind::User, t, None),
             ReplayRow::Thinking(t) => (LineKind::Thinking, t, None),
-            ReplayRow::Assistant(t) => (LineKind::Assistant, t, None),
+            ReplayRow::Assistant(t) => (LineKind::Assistant, balance_unclosed_fence(&t), None),
             ReplayRow::Tool { name, body } => {
                 let (text, ok) = tool_history_row(&name, &body);
                 (LineKind::Tool, text, ok)
@@ -363,6 +369,26 @@ mod tests {
                     None,
                 ),
             ]
+        );
+    }
+
+    /// 回放的助手正文先做围栏配平：孤儿开符会让余下正文整段变代码块背景。
+    #[test]
+    fn replayed_assistant_text_drops_orphan_fence() {
+        let resp = response(serde_json::json!({
+            "messages": [{
+                "role": "assistant",
+                "content": "结论\n```rust\n这段正文被孤儿围栏挡住了\n"
+            }]
+        }));
+        let rows = rows_to_lines(&resp);
+        let (kind, text, _) = rows.first().expect("应有一行");
+        assert_eq!(*kind, LineKind::Assistant);
+        assert!(!text.contains("```"), "孤儿开符应被降级：{text:?}");
+        assert!(text.contains("结论"), "{text:?}");
+        assert!(
+            text.contains("这段正文被孤儿围栏挡住了"),
+            "正文不能丢：{text:?}"
         );
     }
 
