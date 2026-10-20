@@ -11,6 +11,7 @@
 //! 等它的这段时间里用户可能已经切走、新建会话或直接开聊。
 
 use crabmate_client_api::{ConversationMessagesResponse, ReplayRow};
+use crabmate_tool_card::parse_tool_envelope;
 use unicode_width::UnicodeWidthChar;
 
 use super::state::{HistoryRequest, LineKind};
@@ -148,10 +149,11 @@ fn apply_page(app: &mut TuiApp<'_>, pending: &HistoryRequest, resp: &Conversatio
         );
         return;
     }
-    for (kind, text) in rows {
-        // 工具结果没有成败信号，统一按 `None`（渲染层的 `replayed` 标记保证
-        // 不会被画成「进行中」的进度占位）。
-        app.st.push_replayed_line(kind, &text, None);
+    for (kind, text, tool_ok) in rows {
+        // `tool_ok` 来自信封的 `ok`：它决定正文颜色（成功绿 / 失败红），不回传就只剩
+        // 文案里的 `✓/✗`，与现场的颜色对不上。纯文本结果没有信号，仍是 `None`。
+        // `replayed` 标记另由 `push_replayed_line` 负责，保证不会被画成「进行中」。
+        app.st.push_replayed_line(kind, &text, tool_ok);
     }
     app.st
         .push_line(LineKind::System, &summary_line(pending, resp));
@@ -211,27 +213,50 @@ pub(super) fn auto_replay_if_active(app: &mut TuiApp<'_>) {
     replay_into(app, resume, title.as_deref());
 }
 
-/// 响应 → (行类型, 文本)。抽成纯函数便于单测：`apply_page` 剩下的只是作用到 `UiState`。
-fn rows_to_lines(resp: &ConversationMessagesResponse) -> Vec<(LineKind, String)> {
+/// 响应 → (行类型, 文本, 工具成败)。抽成纯函数便于单测：`apply_page` 剩下的只是作用到 `UiState`。
+/// 第三项只对工具行有值，其余恒 `None`。
+fn rows_to_lines(resp: &ConversationMessagesResponse) -> Vec<(LineKind, String, Option<bool>)> {
     resp.replay_rows()
         .into_iter()
         .map(|row| match row {
-            ReplayRow::User(t) => (LineKind::User, t),
-            ReplayRow::Thinking(t) => (LineKind::Thinking, t),
-            ReplayRow::Assistant(t) => (LineKind::Assistant, t),
-            ReplayRow::Tool { name, body } => (LineKind::Tool, tool_history_text(&name, &body)),
+            ReplayRow::User(t) => (LineKind::User, t, None),
+            ReplayRow::Thinking(t) => (LineKind::Thinking, t, None),
+            ReplayRow::Assistant(t) => (LineKind::Assistant, t, None),
+            ReplayRow::Tool { name, body } => {
+                let (text, ok) = tool_history_row(&name, &body);
+                (LineKind::Tool, text, ok)
+            }
         })
         .collect()
 }
 
-/// 历史工具行文本：`name (done) — 首行摘要`。
+/// 历史工具行：`(文案, 成败)`。
 ///
-/// 服务端只存结果正文、没有 `✓/✗`，所以走 `tool_end_text` 的 `(done)` 形态，
-/// 而不是猜一个成败（猜错会让用户以为某次失败的调用成功了）。
-fn tool_history_text(name: &str, body: &str) -> String {
-    let head = head_excerpt(body.lines().next().unwrap_or(""));
-    let note = (!head.is_empty()).then_some(head.as_str());
-    tool_end_text(name, None, note)
+/// `role=tool` 落盘的正文有两种形态：纯文本结果，或 `{"crabmate_tool":{…}}` 信封。
+/// 后者必须解包——实时路径的 `note` 取的是 serve 的 `metadata.summary`，整段 JSON
+/// 直接印出来会让回放和现场差一整条街。信封里的 `ok` 同时决定文案的 `✓`/`✗`
+/// **和正文颜色**，所以要一起返回；纯文本结果没有信号 → `None`（不猜成败）。
+fn tool_history_row(name: &str, body: &str) -> (String, Option<bool>) {
+    if let Some(input) = parse_tool_envelope(body, Some(name)) {
+        let note = tool_note(input.summary.as_deref(), &input.output);
+        return (
+            tool_end_text(&input.name, input.ok, note.as_deref()),
+            input.ok,
+        );
+    }
+    let note = tool_note(None, body);
+    (tool_end_text(name, None, note.as_deref()), None)
+}
+
+/// 摘要：`summary` 优先，其次结果正文首行；都按显示宽截断。
+fn tool_note(summary: Option<&str>, body: &str) -> Option<String> {
+    summary
+        .map(head_excerpt)
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            let head = head_excerpt(body.lines().next().unwrap_or(""));
+            (!head.is_empty()).then_some(head)
+        })
 }
 
 /// 首行按**显示列宽**截断（宽字符按 2 列算）。
@@ -266,16 +291,42 @@ mod tests {
     }
 
     #[test]
-    fn tool_history_text_uses_done_mark_and_truncates_head() {
+    fn tool_history_row_uses_done_mark_and_truncates_head() {
         let long = format!("{}\ntail", "x".repeat(TOOL_HEAD_WIDTH * 2));
-        let text = tool_history_text("read_file", &long);
+        let (text, ok) = tool_history_row("read_file", &long);
         assert!(text.starts_with("read_file (done) — "), "got {text}");
         assert!(text.chars().count() < TOOL_HEAD_WIDTH + 32, "got {text}");
+        assert_eq!(ok, None, "纯文本结果没有成败信号");
+    }
+
+    /// 信封正文必须解包：整段 `{"crabmate_tool":…}` 印出来与实时差一整条街。
+    /// `summary` 与实时路径同源（serve `metadata.summary`），`ok` 要一并带出来
+    /// —— 它同时决定 `✓` 与正文颜色。
+    #[test]
+    fn envelope_body_is_unwrapped_like_the_live_path() {
+        let body = r#"{"crabmate_tool":{"v":1,"name":"read_file","summary":"读：a.rs","ok":true,"output":"content\nmore"}}"#;
+        assert_eq!(
+            tool_history_row("read_file", body),
+            ("read_file ✓ — 读：a.rs".to_string(), Some(true))
+        );
+    }
+
+    /// 信封没给 `summary` 时退回 output 首行；没给 `ok` 时仍是 `(done)`，不猜成败。
+    #[test]
+    fn envelope_without_summary_falls_back_to_output_head() {
+        let body = r#"{"crabmate_tool":{"v":1,"name":"exec","output":"exit 0\n…"}}"#;
+        assert_eq!(
+            tool_history_row("exec", body),
+            ("exec (done) — exit 0".to_string(), None)
+        );
     }
 
     #[test]
-    fn tool_history_text_without_body_keeps_name_only() {
-        assert_eq!(tool_history_text("bash", "   "), "bash (done)");
+    fn tool_history_row_without_body_keeps_name_only() {
+        assert_eq!(
+            tool_history_row("bash", "   "),
+            ("bash (done)".to_string(), None)
+        );
     }
 
     /// 按列宽而不是字符数：96 个汉字会折两行，必须在折行前截住。
@@ -301,14 +352,36 @@ mod tests {
         assert_eq!(
             rows_to_lines(&resp),
             vec![
-                (LineKind::User, "问题".to_string()),
-                (LineKind::Thinking, "先想想".to_string()),
-                (LineKind::Assistant, "回答".to_string()),
+                (LineKind::User, "问题".to_string(), None),
+                (LineKind::Thinking, "先想想".to_string(), None),
+                (LineKind::Assistant, "回答".to_string(), None),
                 (
                     LineKind::Tool,
-                    "read_file (done) — 1|fn main() {}".to_string()
+                    "read_file (done) — 1|fn main() {}".to_string(),
+                    None,
                 ),
             ]
+        );
+    }
+
+    /// 信封里的 `ok` 要一路传到渲染层的 `tool_ok`：它决定正文颜色。
+    /// 只改文案不改颜色，回放看起来仍与现场不同。
+    #[test]
+    fn envelope_ok_reaches_the_row_as_tool_ok() {
+        let resp = response(serde_json::json!({
+            "messages": [{
+                "role": "tool",
+                "name": "read_file",
+                "content": r#"{"crabmate_tool":{"v":1,"name":"read_file","summary":"读：a.rs","ok":false,"output":"denied"}}"#
+            }]
+        }));
+        assert_eq!(
+            rows_to_lines(&resp),
+            vec![(
+                LineKind::Tool,
+                "read_file ✗ — 读：a.rs".to_string(),
+                Some(false)
+            )]
         );
     }
 
