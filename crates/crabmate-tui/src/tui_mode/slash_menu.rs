@@ -121,6 +121,11 @@ pub fn builtin_items() -> Vec<SlashItem> {
             "查看 / 切换 serve 工作区根（/cd 别名）",
         ),
         item(slash::CONV, "/conv ", "会话列表 / 切换 / 新建"),
+        item(
+            slash::RESUME,
+            "/resume",
+            "续传被中断的回合（serve 侧 job 仍在跑时）",
+        ),
         item(slash::QUIT, "/quit", "退出（/exit、/q 同义）"),
     ]
 }

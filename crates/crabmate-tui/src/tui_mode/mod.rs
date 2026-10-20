@@ -18,6 +18,7 @@ mod md;
 mod mouse;
 mod palette;
 mod render;
+mod resume;
 mod serve_defaults;
 mod session_index;
 mod settings;
@@ -29,6 +30,7 @@ mod state;
 mod status;
 mod text;
 mod tool_summary;
+mod turn_send;
 mod worker;
 mod workspace_cmd;
 mod workspace_keys;
@@ -53,19 +55,15 @@ use ratatui::backend::{Backend, CrosstermBackend};
 use ratatui::layout::Rect;
 
 use crate::serve::{
-    ApprovalDecision, ChatStreamOptions, ChatStreamOutcome, ServeClient, StreamCancel,
-    WorkspaceDirData, new_approval_session_id,
+    ApprovalDecision, ChatStreamOutcome, ServeClient, StreamCancel, StreamResume, WorkspaceDirData,
 };
 
 use self::approve::{decision_for_key, decision_summary};
 use self::controls::{Control, clear_word, parse_control, set_mode_field, set_override_field};
 use self::render::{BodyRow, SIDEBAR_MIN_WIDTH, StatusInfo, build_body_rows};
-use self::settings::{
-    PersistedSettings, build_turn_client_llm, merge_turn, normalize, turn_temperature,
-    turn_tool_cache_secs,
-};
+use self::settings::{PersistedSettings, normalize};
 use self::settings_panel::{SettingsPanel, is_f2_key};
-use self::worker::{TurnRequest, UiEvent, WorkerJob, spawn_key_reader, spawn_worker};
+use self::worker::{UiEvent, WorkerJob, spawn_key_reader, spawn_worker};
 use super::SessionPrefs;
 use state::{Focus, LineKind, UiState};
 
@@ -96,6 +94,10 @@ struct TuiApp<'a> {
     last_size: (u16, u16),
     /// `/conv new` 的会话索引状态（新建 / 在途 / 待起名 / 待绑定，见 `session_index`）。
     index: session_index::UiIndexState,
+    /// 可 `/resume` 的断点（serve 侧 job 可能仍在跑；保留规则见 `resume` 模块）。
+    resume: Option<resume::ResumePoint>,
+    /// 在途回合的原始输入：回合结束后据此决定要不要留断点（`/resume` 需重发同一轮）。
+    sent_turn: Option<resume::TurnEcho>,
 }
 
 impl TuiApp<'_> {
@@ -199,6 +201,8 @@ impl TuiApp<'_> {
         }
         // 切走前回收「/conv new 建的空行」并把服务端 active 指过去（对齐 Web reclaim）。
         self.leave_current_for_switch(&resume);
+        // 断点属于上一个会话的 transcript：换会话后不可续，避免正文落到别人的记录里。
+        self.drop_resume_point();
         self.st.focus = Focus::Input;
         // 切换 = 换一份 transcript（同 Desktop）：清空后回放该会话的历史。
         history::replay_into(self, resume, title);
@@ -336,6 +340,7 @@ impl TuiApp<'_> {
             Control::Help => self.show_help(),
             Control::Find(arg) => self.do_find(arg),
             Control::Workspace(arg) => self.workspace_command(arg),
+            Control::Resume => self.resume_turn(),
             Control::Model(arg) => {
                 let echo = set_override_field(&mut self.overrides.model, arg, "model");
                 self.st.push_line(LineKind::System, &echo);
@@ -375,13 +380,14 @@ impl TuiApp<'_> {
     /// `/help`：向 transcript 打印本地命令与快捷键说明。
     fn show_help(&mut self) {
         for line in [
-            "本地命令：/quit（/exit、/q 同义） /help /status /settings /mode /role /model /find /workspace /conv",
+            "本地命令：/quit（/exit、/q 同义） /help /status /settings /mode /role /model /find /workspace /resume /conv",
             "输入 / 弹出补全菜单（内建命令 + skill；↑↓ 选择 · Tab/Enter 补全 · Esc 关闭）",
             "/mode ask|plan|act · /role <id> · /model <name>（off 清除，随对话生效）",
             "/workspace <路径>（/cd 别名）切换 serve 工作区根；空参只看当前根；/workspace off 恢复 serve 默认根",
             "/settings（或 F2）：设置面板（模型名/API Base/温度/思考模式/API 密钥/Agent role/会话模式；S 保存）",
             "/find <词> 搜索并高亮 · /find（空参）跳下一处 · /find off 清除",
             "/conv list 刷新 · /conv use <id> 切换 · /conv new 新会话",
+            "/resume 续传上一轮被中断的回合（serve 侧 job 仍在跑时；Ctrl+C 的 cancel 未送达也可续）",
             "按键：Alt+Enter 换行 · Ctrl+E 思考展开/折叠 · Ctrl+W 工作区目录树 · PgUp/PgDn 翻页 · Ctrl+End 回底部",
             "设置面板：↑↓ 移动 · Enter 编辑 · Tab 切分区 · S 保存 · Esc/F2 关闭（有改动 Esc 先确认）",
             "会话栏：↑↓选 Enter用 n新建 r刷新 Del删除（再按 y/Enter 确认，Esc/n 或其它键取消）Shift+Del 直接删",
@@ -534,10 +540,17 @@ impl TuiApp<'_> {
         self.maybe_fetch_skills();
     }
 
-    fn on_turn_done(&mut self, outcome: ChatStreamOutcome, error: Option<String>) {
+    fn on_turn_done(
+        &mut self,
+        outcome: ChatStreamOutcome,
+        error: Option<String>,
+        interrupted: Option<StreamResume>,
+    ) {
         self.st.running = false;
         self.st.cancel_sent = false;
         self.cancel = None;
+        // 断点：只有「serve 侧 job 可能仍在跑」才留（规则与 repl 同源，见 `resume`）。
+        self.record_turn_outcome(&outcome, interrupted);
         // 只读的设置面板随回合结束自动解锁（保留面板，不需重开）。
         if let Some(panel) = self.panel.as_mut() {
             panel.unlock_after_turn();
@@ -583,7 +596,11 @@ impl TuiApp<'_> {
                 self.st.confirm_delete = None;
                 self.st.begin_approval(&prompt.req, prompt.answer);
             }
-            UiEvent::TurnDone { outcome, error } => self.on_turn_done(outcome, error),
+            UiEvent::TurnDone {
+                outcome,
+                error,
+                interrupted,
+            } => self.on_turn_done(outcome, error, interrupted),
             UiEvent::Sessions(result) => match result {
                 Ok(list) => {
                     self.st.active_session_id = list.active_session_id;
@@ -636,70 +653,9 @@ impl TuiApp<'_> {
     fn start_turn(&mut self, message: &str) {
         // `/conv new` 建的空行还没有名字：首条消息就是它的标题（与 Web 同规则）。
         self.retitle_new_session_for_first_turn(message);
-        // override ＞ user-data 合成随轮字段；空白不发送（回落 serve 默认）。
-        let stored = self.persisted.as_ref();
-        let model = merge_turn(
-            &self.overrides.model,
-            stored.and_then(|p| p.model.as_deref()),
-        );
-        let api_base = merge_turn(
-            &self.overrides.api_base,
-            stored.and_then(|p| p.api_base.as_deref()),
-        );
-        let role = merge_turn(
-            &self.overrides.agent_role,
-            stored.and_then(|p| p.role.as_deref()),
-        );
-        let session_mode = merge_turn(
-            &self.overrides.session_mode,
-            stored.and_then(|p| p.session_mode.as_deref()),
-        );
-        // 随轮 client_llm：override（model/api_base/api_key）＞ user-data（thinking/context）；
-        // 装配纯逻辑见 `settings::build_turn_client_llm`（空白不发送，回落 serve 默认）。
-        let client_llm = build_turn_client_llm(
-            model.as_deref(),
-            api_base.as_deref(),
-            self.overrides.api_key.as_deref(),
-            stored.and_then(|p| p.thinking.as_deref()),
-            stored.and_then(|p| p.context_tokens.as_deref()),
-        );
-        // 温度（顶层 body.temperature，对齐 Desktop）：persisted 存原文，parse 有效才发送。
-        let temperature = turn_temperature(stored.and_then(|p| p.temperature.as_deref()));
-        // 只读工具缓存禁用（prefs disable=true）时顶层发 `readonly_tool_ttl_cache_secs: 0`。
-        let readonly_tool_ttl_cache_secs =
-            turn_tool_cache_secs(stored.and_then(|p| p.tool_cache_disabled));
-        let opts = ChatStreamOptions {
-            message: message.to_string(),
-            approval_session_id: new_approval_session_id(),
-            conversation_id: self.st.conversation_id.clone(),
-            client_llm,
-            agent_role: role,
-            session_mode,
-            temperature,
-            readonly_tool_ttl_cache_secs,
-            stream_resume: None,
-        };
-        // 在途的历史回包从此没有落点（见 `history::should_apply_reply`）：清掉它，
-        // 免得晚到的历史把刚发出的这一轮冲掉。
-        self.st.history_pending = None;
-        // 新回合：清上轮工具行映射并回到最新视图（搜索词保留、锚点释放）。
-        self.st.reset_run_tools();
-        self.st.view_offset = 0;
-        self.st.release_search_anchor();
+        let opts = self.build_turn_opts(message, None);
         self.st.push_line(LineKind::User, message);
-        self.st.running = true;
-        self.st.cancel_sent = false;
-        let cancel = StreamCancel::new();
-        self.cancel = Some(cancel.clone());
-        let job = TurnRequest {
-            opts,
-            cancel,
-            yes: self.yes,
-        };
-        if self.job_tx.send(WorkerJob::Turn(Box::new(job))).is_err() {
-            self.st.running = false;
-            self.st.push_line(LineKind::System, "回合 worker 已退出");
-        }
+        self.dispatch_turn(opts);
     }
 
     /// 状态行显示值：override（`*`）＞ user-data 已存值 ＞ serve 默认。
@@ -869,6 +825,8 @@ pub async fn run_tui(
         persisted: None,
         last_size: (0, 0),
         index: session_index::UiIndexState::default(),
+        resume: None,
+        sent_turn: None,
     };
     // 启动即拉一次会话 / 工作区根 / serve 默认状态 / user-data 设置快照（失败以系统行提示）。
     app.refresh_sessions();

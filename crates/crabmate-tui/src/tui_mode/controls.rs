@@ -18,6 +18,8 @@ pub enum Control {
     Find(Option<String>),
     /// `/workspace [路径]`（`/cd` 别名）：空参查当前根，带参按路径切换。
     Workspace(Option<String>),
+    /// `/resume`：续传上一轮被中断的回合（`stream_resume:{job_id,after_seq}`）。
+    Resume,
     ConvNew,
     ConvRefresh,
     ConvUse(String),
@@ -66,7 +68,8 @@ pub fn set_mode_field(slot: &mut Option<String>, arg: Option<String>) -> String 
 }
 
 /// 解析控制斜杠：`/model [x]` `/mode [ask|plan|act]` `/role [id]` `/status`
-/// `/find [词]` `/help` `/conv`(刷新) `/conv new` `/quit`（`/exit`、`/q` 同义）。
+/// `/find [词]` `/help` `/conv`(刷新) `/conv new` `/quit`（`/exit`、`/q` 同义）
+/// `/workspace [路径]`（`/cd` 别名）`/settings` `/resume`。
 /// 返回 `None` 表示按普通消息处理。
 pub fn parse_control(text: &str) -> Option<Control> {
     let t = text.trim();
@@ -86,6 +89,7 @@ pub fn parse_control(text: &str) -> Option<Control> {
         slash::STATUS => Some(Control::Status),
         "settings" => Some(Control::Settings),
         slash::WORKSPACE | slash::CD => Some(Control::Workspace(arg_opt)),
+        slash::RESUME => Some(Control::Resume),
         "find" | "search" | "grep" => Some(Control::Find(arg_opt)),
         slash::CONV => Some(match arg_opt {
             None => Control::ConvRefresh,
@@ -198,6 +202,18 @@ mod tests {
         assert!(parse_control("hello").is_none());
         assert!(parse_control("/my-skill").is_none());
         assert!(parse_control(" /model ").is_some());
+    }
+
+    #[test]
+    fn resume_is_a_local_control() {
+        assert!(matches!(parse_control("/resume"), Some(Control::Resume)));
+        assert!(matches!(parse_control("/RESUME"), Some(Control::Resume)));
+        assert!(matches!(
+            parse_control("  /Resume  "),
+            Some(Control::Resume)
+        ));
+        // 只有 `/` 开头才拦截：普通消息即使首词是 resume 也要发给模型。
+        assert!(parse_control("resume the turn").is_none());
     }
 
     #[test]

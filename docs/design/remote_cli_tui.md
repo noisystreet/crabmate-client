@@ -69,7 +69,7 @@ crates/
 | 能力 | Server 现状 | 远程 `crabmate-tui` |
 |------|-------------|----------------------|
 | 一轮对话 | `run_agent_turn` | `POST /chat/stream`（主路径）或 `/chat` |
-| 断线续传 | TUI SSE mirror | 传输层中断（`TermError::InterruptedStream`，已拿到 job 句柄）时**自动续流**：`chat` / `repl` 自动重发 `stream_resume:{job_id,after_seq}`，上限 2 次、退避 `0.5s × 第 n 次`（`src/turn.rs`）；用尽后仍可 repl `/resume` 手动续（job 取响应头 `x-stream-job-id`；cancel 已送达的回合不可续，cancel 未送达时 job 可能仍在跑、仍可续） |
+| 断线续传 | TUI SSE mirror | 传输层中断（`TermError::InterruptedStream`，已拿到 job 句柄）时**自动续流**：`chat` / `repl` 自动重发 `stream_resume:{job_id,after_seq}`，上限 2 次、退避 `0.5s × 第 n 次`（`src/turn.rs`）；用尽后仍可 repl `/resume` 手动续（job 取响应头 `x-stream-job-id`；cancel 已送达的回合不可续，cancel 未送达时 job 可能仍在跑、仍可续）。全屏 `tui` **不自动续流**（事件循环里没有重试循环），但同样可 `/resume` 手动续：断点在 `tui_mode/resume.rs` 里按同一规则保留（传输中断，或 Ctrl+C 且 cancel 未送达），续流时复用普通回合的 `ChatStreamOptions` 装配、只多一个 `stream_resume`，且不重发用户消息那一行；切会话 / `/conv new` 会作废断点（transcript 已换） |
 | 审批 | 进程内 dialoguer | SSE 控制面 + `POST /chat/approval` |
 | 回合取消 | 进程内中断 | Ctrl+C → `POST /chat/stream/{job_id}/cancel`（job 取响应头 `x-stream-job-id`；旧 serve 无路由时降级为本地中断） |
 | 斜杠 /skills | 同进程 | 经 stream 内置命令或后续 REST |
@@ -126,3 +126,12 @@ crates/
 
 - 文档：官方矩阵增加「Terminal remote client」；CLI/TUI 同进程改为「过渡」。
 - 日后：`crabmate tui|repl` help 指向 `crabmate-tui`；再定删除时间表。
+
+---
+
+## 9. 待办缺口（已知未做）
+
+全屏 `tui` 的 `/resume` 落地时复核出的两处遗留，均**不阻塞**当前用法，按影响排序：
+
+1. **传输中断会丢掉 `conversation_id`**（`crates/crabmate-tui/src/tui_mode/worker.rs`）。`run_chat_stream_sink` 里 `consume_sse_response(...).await?` 用 `?` 直接抛出，而 `TermError::InterruptedStream` 只带 `job_id` / `after_seq`，那时已填好的 `conversation_id` 随 `ChatStreamOutcome` 一起丢弃（错误分支统一返回 `ChatStreamOutcome::default()`）。后果：首轮传输中断后 `st.conversation_id` 不会绑定、`bind_new_session` 不执行，左栏那行继续没有 server id，要到下一条消息才绑上，Web / Desktop 侧也看不到这一轮。修法要给 `TermError::InterruptedStream` 增加 `conversation_id`（或让 sink 返回部分 outcome），会牵动 `src/turn.rs` 的自动续流与 repl，故单列一项。
+2. **全屏不自动续流**。`repl` / `chat` 在已拿到 job 句柄的传输中断上会静默重试 2 次（`0.5s × 第 n 次` 退避，见 §4 能力映射），全屏 `tui` 的事件循环没有重试结构，只能由用户敲 `/resume`。若要与行模式对齐，需在 worker 里补一层重试循环，并决定「正在重试」在状态栏如何呈现（现有 `✳ 取消中` 之外是否需要第四个状态）。
