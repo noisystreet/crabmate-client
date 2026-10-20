@@ -394,17 +394,6 @@ fn workspace_basename_derives_name() {
     assert_eq!(workspace_basename(""), "");
 }
 
-#[test]
-fn top_text_shows_name_without_prefix_or_path() {
-    let mut st = UiState::new();
-    st.workspace_path = Some("/data/proj".into());
-    let s = top_text(&st, 80);
-    assert_eq!(s, "proj");
-    assert!(!s.contains("工作区:"), "顶栏不带“工作区: ”前缀");
-    let st2 = UiState::new();
-    assert!(top_text(&st2, 80).contains("未获取"));
-}
-
 fn row(id: &str, title: &str, conv: Option<&str>) -> SessionListRow {
     SessionListRow {
         id: id.to_string(),

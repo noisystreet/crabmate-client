@@ -2,7 +2,7 @@
 //! 主区 transcript / 底栏输入 / 审批浮层。布局纯函数为主，便于单测。
 
 use ratatui::Frame;
-use ratatui::layout::{Alignment, Constraint, Layout, Rect};
+use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
@@ -24,6 +24,11 @@ use overlay::{render_approval_overlay, render_settings_overlay};
 // 面板内容必须按弹层内宽生成（否则居中后错位），所以把同一个矩形计算暴露给
 // `mod.rs` 的 `settings_content(...)` 调用点。
 pub(crate) use overlay::settings_panel_content_width;
+
+// 顶栏三段式（B5）拆到 `topbar.rs`：纯函数 + 自算列，别让本文件再贴 920 行门禁。
+#[path = "topbar.rs"]
+mod topbar;
+use topbar::top_line;
 
 /// 低于此宽度隐藏左右栏（等价 repl 布局）。
 pub const SIDEBAR_MIN_WIDTH: u16 = 120;
@@ -384,20 +389,6 @@ pub(super) fn workspace_basename(path: &str) -> String {
     }
 }
 
-/// 顶栏内容：仅工作区名（`basename`，对齐 Desktop 标题栏：不显示“工作区: ”前缀与
-/// 绝对路径；未获取时占位）。
-fn top_text(st: &UiState, width: usize) -> String {
-    let Some(path) = st
-        .workspace_path
-        .as_deref()
-        .filter(|s| !s.trim().is_empty())
-    else {
-        return truncate_display("（未获取）…", width);
-    };
-    let name = workspace_basename(path);
-    truncate_display(&name, width)
-}
-
 /// 左栏内容行：首行标题，其后每会话一行（`>` 当前，`*` serve 活跃，选中高亮）。
 pub(super) fn sidebar_rows(st: &UiState, width: usize) -> Vec<Line<'static>> {
     let mut rows: Vec<Line<'static>> = Vec::new();
@@ -486,11 +477,10 @@ pub fn draw(
     let spin = progress_mark_frame(st, info);
     let pal = &st.palette;
     paint_bg(frame, p.top, pal.chrome_bg);
-    // 顶栏工作区名称居中（对齐 Desktop 标题栏观感）。
-    let top = Paragraph::new(top_text(st, p.top.width as usize))
-        .alignment(Alignment::Center)
-        .style(Style::new().fg(pal.fg).add_modifier(Modifier::BOLD));
-    frame.render_widget(top, p.top);
+    // 顶栏：左品牌 + 居中工作区名。位置由 `top_line` 自算——
+    // 两段混排不能用整行居中，否则中段会随左段宽度漂。
+    // 模式不在这里（由状态栏 `mode` 段显示），也不放键位提示。
+    frame.render_widget(Paragraph::new(top_line(st, p.top.width as usize)), p.top);
 
     // 宽屏三列；窄屏 `left`/`right` 为 None，聊天列即整个主体。
     if let (Some(left), Some(right)) = (p.left, p.right) {
