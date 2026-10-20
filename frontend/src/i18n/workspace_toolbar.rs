@@ -227,6 +227,9 @@ pub fn ws_project_loading(l: Locale) -> &'static str {
 }
 
 /// 浏览器（非 Tauri）下手输绝对路径的输入框标签（原 `window.prompt` 文案）。
+///
+/// **不要**在这里提 `~`：Web 端不展开（路径属于 serve 主机），而 serve 是否展开尚未核对，
+/// 写上去就等于承诺一个本仓没法验证的服务端行为。要提示也得等 serve 侧确认之后再改。
 pub fn ws_path_prompt(l: Locale) -> &'static str {
     match l {
         Locale::ZhHans => "服务器上的工作区绝对路径",

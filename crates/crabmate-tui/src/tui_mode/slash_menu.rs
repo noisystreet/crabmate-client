@@ -118,7 +118,7 @@ pub fn builtin_items() -> Vec<SlashItem> {
         item(
             slash::WORKSPACE,
             "/workspace ",
-            "查看 / 切换 serve 工作区根（/cd 别名）",
+            "查看 / 切换 serve 工作区根（~/ 展开、off 恢复默认，/cd 别名）",
         ),
         item(slash::CONV, "/conv ", "会话列表 / 切换 / 新建"),
         item(

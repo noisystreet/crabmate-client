@@ -118,7 +118,7 @@ fn print_help() {
   /role <id>            set agent role for later turns (off to clear; list via /status)\n\
   settings panel        full-screen settings panel: run `crabmate-tui tui` then /settings or F2\n\
   /resume               resume the last interrupted run (network drop)\n\
-  /workspace [path]     show or set serve workspace root (/cd alias)\n\
+  /workspace [path]     show or set serve workspace root (off=serve default; ~/ expands via local HOME; /cd alias)\n\
   /conv                 show current conversation_id\n\
   /conv list            list Web sessions (user-data)\n\
   /conv new             clear conversation_id (next turn starts fresh)\n\
@@ -128,6 +128,19 @@ fn print_help() {
 model-side slash (sent to serve; serve short-circuits, nothing is persisted):\n\
   /btw <question>       off-the-record side question (no tools, not added to history)"
     );
+}
+
+/// `/workspace` 的参数 → `POST` 载荷。
+///
+/// 清除词（`off` / `none` / `clear` / `default`）给空串 —— serve 用**空路径**表示「恢复默认
+/// 根」，而空参已被「查询当前根」占用，所以 repl 一直缺这个能力；其余走 [`crate::workspace_path`]
+/// 的 `~` 展开，展不开就在这里拦下，不把字面量 `~` 发给 serve（那边只会报「路径无效」，
+/// 看不出真实原因）。抽成纯函数是为了两个分支都能直接测。
+fn workspace_set_payload(raw: &str) -> Result<String, String> {
+    if crate::workspace_path::is_default_word(raw) {
+        return Ok(String::new());
+    }
+    crate::workspace_path::resolve(raw)
 }
 
 async fn handle_workspace(
@@ -140,7 +153,11 @@ async fn handle_workspace(
         println!("workspace: {}", info.path);
         return Ok(());
     }
-    let path = args.join(" ");
+    let raw = args.join(" ");
+    let path = match workspace_set_payload(&raw) {
+        Ok(p) => p,
+        Err(e) => anyhow::bail!("{e}"),
+    };
     let set = set_workspace(client, &path).await?;
     if set.is_empty() {
         println!("workspace: (serve default)");
@@ -305,5 +322,23 @@ mod tests {
         assert!(!is_control_slash("/btw why"));
         assert!(!is_control_slash("/my-skill"));
         assert!(!is_control_slash("hello"));
+    }
+
+    /// repl 的 `/workspace` 载荷：清除词给空串（真去恢复默认根），普通路径原样透传。
+    ///
+    /// `~` 分支挂在 `CM_TUI_EXPAND_TILDE` 与 `$HOME` 上，属 `workspace_path` 自己的单测范围，
+    /// 这里只钉住「repl 不再把 `off` 当路径发出去」。
+    #[test]
+    fn workspace_payload_handles_clear_words_and_plain_paths() {
+        for w in ["off", "none", "clear", "default", "  off "] {
+            assert_eq!(
+                workspace_set_payload(w),
+                Ok(String::new()),
+                "{w} 应是默认根"
+            );
+        }
+        assert_eq!(workspace_set_payload("/data/proj"), Ok("/data/proj".into()));
+        // 近似词照旧当路径：`defaults` 不是清除词。
+        assert_eq!(workspace_set_payload("defaults"), Ok("defaults".into()));
     }
 }
