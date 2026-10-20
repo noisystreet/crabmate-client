@@ -14,33 +14,73 @@ fn mark(ok: Option<bool>) -> &'static str {
     }
 }
 
-/// 归一化：小写 + 下划线转空格，便于比较「read_file」与「read file: …」。
+/// 归一化：小写 + `_` / `-` 转空格，便于比较 `read_file` 与 `read file: …`。
+///
+/// 连字符必须一起转：serve 的 summary 会把工具名写成 `search-replace (preview): …`，
+/// 而工具名本身是 `search_replace`。只处理下划线时两者永远对不上，行里就会印成
+/// `search_replace — search-replace (preview): …`——名字看着写了两遍。
 fn normalized(s: &str) -> String {
-    s.trim().to_lowercase().replace('_', " ")
+    s.trim().to_lowercase().replace(['_', '-'], " ")
 }
 
 /// 工具名之后允许紧跟的分隔符。
 ///
+/// 语义是「紧跟 name 的**那一个字符**」，所以用字符集合而不是拼字符串比较。
 /// 够宽才不会印成 `search_replace — search_replace: …`（名字出现两次）：
 /// `search_replace: …`、`search_replace(a.rs)`、`search_replace（a.rs）`、
 /// `read file. …` 都算同一回事。但也不能放宽成「以名字开头就算」——
 /// `exec` 与 `execute` 不是一回事，必须由分隔符收尾。
-const NAME_SEPARATORS: [&str; 12] = [
-    " ", ":", "：", "(", "（", "[", "【", "-", "—", "/", ",", "，",
+const NAME_SEPARATORS: [char; 13] = [
+    ' ', ':', '：', '(', '（', '[', '【', '-', '—', '/', ',', '，', '.',
 ];
 
 /// note 是否以与工具名等价的短语开头（name + 任一分隔符，或就是 name 本身）。
+///
+/// 只比较前缀：工具行常连着出现，而 `note` 可能是很长的 summary——没必要为了
+/// 看前几个字符就把整段小写复制一遍。
 #[must_use]
 pub(super) fn note_repeats_name(name: &str, note: &str) -> bool {
     let name_n = normalized(name);
     if name_n.is_empty() {
         return false;
     }
-    let note_n = normalized(note);
-    note_n == name_n
-        || NAME_SEPARATORS
-            .iter()
-            .any(|sep| note_n.starts_with(&format!("{name_n}{sep}")))
+    // 多取一个字符就够：要么恰好等于名字，要么是名字 + 一个分隔符。
+    let head: String = note
+        .trim()
+        .chars()
+        .take(name_n.chars().count() + 1)
+        .collect();
+    match normalized(&head).strip_prefix(name_n.as_str()) {
+        Some("") => true,
+        Some(rest) => rest
+            .chars()
+            .next()
+            .is_some_and(|c| NAME_SEPARATORS.contains(&c)),
+        None => false,
+    }
+}
+
+/// 把多行 note 压成一行：丢掉空行、连续重复行，以及**只写了工具名**的行。
+///
+/// 服务端的 summary 常见形态是「工具名 \n 工具名: 详情」——首行没有信息量，留着
+/// 就会印成 `search_replace — search_replace: …`，看着像名字写了两遍；而按前缀判重
+/// 也判不出来，因为名字后面跟的是换行符而不是分隔符。
+#[must_use]
+pub(super) fn flatten_note(name: &str, note: &str) -> Option<String> {
+    let name_n = normalized(name);
+    let mut kept: Vec<&str> = Vec::new();
+    for line in note.lines() {
+        let t = line.trim();
+        if t.is_empty() || normalized(t) == name_n {
+            continue;
+        }
+        // 连续重复行去掉（`search_replace: 2 处` 出现两次只留一次）。
+        if kept.last() == Some(&t) {
+            continue;
+        }
+        kept.push(t);
+    }
+    (!kept.is_empty()).then(|| kept.join(" · "))
 }
 
 /// 工具结束行文案：`mark name — note`。
@@ -52,8 +92,8 @@ pub(super) fn note_repeats_name(name: &str, note: &str) -> bool {
 #[must_use]
 pub(super) fn tool_end_text(name: &str, ok: Option<bool>, note: Option<&str>) -> String {
     let m = mark(ok);
-    match note.map(str::trim).filter(|s| !s.is_empty()) {
-        Some(note) if note_repeats_name(name, note) => format!("{m} {note}"),
+    match note.and_then(|n| flatten_note(name, n)) {
+        Some(note) if note_repeats_name(name, &note) => format!("{m} {note}"),
         Some(note) => format!("{m} {name} — {note}"),
         None => format!("{m} {name}"),
     }
@@ -108,6 +148,63 @@ mod tests {
             ),
             "✓ search_replace: 2 处替换"
         );
+    }
+
+    /// serve 的 summary 可能用连字符写工具名（`search-replace (preview): …`），
+    /// 而工具名本身是下划线（`search_replace`）：两者要视为同一回事。
+    #[test]
+    fn hyphen_and_underscore_are_equivalent() {
+        assert_eq!(
+            tool_end_text(
+                "search_replace",
+                Some(true),
+                Some("search-replace (preview): 找到 1 处匹配")
+            ),
+            "✓ search-replace (preview): 找到 1 处匹配"
+        );
+        assert!(note_repeats_name("read_file", "read-file: a.rs"));
+        assert!(note_repeats_name("read-file", "read_file: a.rs"));
+    }
+
+    /// 多行 summary（首行只有工具名）压平后再判重：否则名字会印两遍。
+    #[test]
+    fn multi_line_note_drops_name_only_line() {
+        assert_eq!(
+            tool_end_text(
+                "search_replace",
+                Some(true),
+                Some("search_replace\nsearch_replace: 2 处替换")
+            ),
+            "✓ search_replace: 2 处替换"
+        );
+        // 首行是名字、次行是别的说明：只留说明。
+        assert_eq!(
+            tool_end_text("exec", Some(true), Some("exec\n2 files changed")),
+            "✓ exec — 2 files changed"
+        );
+        // 连续重复行只留一份，多段用 ` · ` 连接。
+        assert_eq!(
+            tool_end_text("exec", Some(true), Some("exec\nexit 0\nexit 0\n耗时 3ms")),
+            "✓ exec — exit 0 · 耗时 3ms"
+        );
+    }
+
+    /// note 恰好就是工具名（没有分隔符、没有说明）时同样省掉重复的名字。
+    #[test]
+    fn note_equal_to_name_drops_name_too() {
+        assert_eq!(
+            tool_end_text("read_file", Some(true), Some("read_file")),
+            "✓ read_file"
+        );
+    }
+
+    /// 只比较前缀：很长的 summary 也要判对（且不该为看前几个字符复制整段）。
+    #[test]
+    fn long_note_is_compared_by_prefix_only() {
+        let redundant = format!("search_replace: {}", "x".repeat(4096));
+        assert!(note_repeats_name("search_replace", &redundant));
+        let distinct = format!("{}: …", "y".repeat(4096));
+        assert!(!note_repeats_name("search_replace", &distinct));
     }
 
     #[test]
