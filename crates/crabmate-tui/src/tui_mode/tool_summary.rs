@@ -100,7 +100,7 @@ fn name_implied_by_note(name: &str) -> bool {
 ///
 /// note 来自命令文本 / 路径，可能夹带 ANSI 转义；原样进缓冲区会被终端当成控制序列
 /// 执行（清屏、移动光标、伪造输出）。`ratatui` 不会替调用方拦这一层，只能在这里滤。
-fn strip_control_chars(s: &str) -> String {
+pub(crate) fn strip_control_chars(s: &str) -> String {
     s.chars().filter(|c| !c.is_control()).collect()
 }
 

@@ -5,16 +5,9 @@
 //! `reset_workspace_after_switch`（旧项目的目录结构与光标必须丢弃）。
 
 use super::TuiApp;
-use super::controls::clear_word;
 use super::state::LineKind;
 use super::worker::WorkerJob;
-
-/// `/workspace` 的「恢复 serve 默认根」词：与 `/model` 等 override 的清除词一致，
-/// 另加直观的 `default`。serve 侧以**空路径**表示默认根，所以这里必须有个词能表达它——
-/// 空参已被「查询当前根」占用（`parse_control` 把空白参数归一成 `None`）。
-fn is_default_word(arg: &str) -> bool {
-    clear_word(arg) || arg.eq_ignore_ascii_case("default")
-}
+use crate::workspace_path::{self, is_default_word};
 
 /// 切换成功的系统行：serve 用空路径表示「恢复默认根」，那时没有路径可打。
 fn workspace_set_line(path: &str) -> String {
@@ -54,39 +47,90 @@ fn workspace_query_line(result: &Result<String, String>) -> String {
     }
 }
 
+/// `/workspace <路径>` 提交前的处理结果。
+#[derive(Debug, PartialEq, Eq)]
+enum WsSetInput {
+    /// 发出去的载荷（空串＝恢复 serve 默认根）与就地回显文案。
+    Submit { shown: String, payload: String },
+    /// 端内拦下：只打一行失败，**不发请求**。
+    Rejected(String),
+}
+
+/// 把 `/workspace` 的参数变成要 POST 的载荷。
+///
+/// `resolve` 由调用方注入（生产用 [`workspace_path::resolve`]），这样「展不开就拦下」这条
+/// 规则能脱离环境变量单测 —— 终端里的 `$HOME` 不该参与断言。
+fn ws_set_input(raw: &str, resolve: impl FnOnce(&str) -> Result<String, String>) -> WsSetInput {
+    if is_default_word(raw) {
+        return WsSetInput::Submit {
+            shown: "正在恢复工作区为 serve 默认根…".to_string(),
+            payload: String::new(),
+        };
+    }
+    match resolve(raw) {
+        // 空白载荷在 serve 语义里等于「空路径＝默认根」，与用户想要的切换相反，先拦。
+        // `parse_control` 已把空参归一成 `None`（走查询分支），所以这条只防手工构造的 `Some("  ")`。
+        Ok(p) if p.trim().is_empty() => WsSetInput::Rejected(
+            "切换工作区失败：路径为空（恢复 serve 默认根请用 /workspace off）".to_string(),
+        ),
+        Ok(p) => {
+            // 回显展开后的绝对路径：serve 记的就是它，用户也能立刻看出 `~` 落到了哪。
+            // 必须点明「本机」：远端部署时这个前缀是**客户端**猜的，不一定是 serve 的家目录。
+            let shown = if p == raw.trim() {
+                format!("正在切换到工作区：{p}")
+            } else {
+                format!("正在切换到工作区：{p}（按本机 HOME 展开 {}）", raw.trim())
+            };
+            WsSetInput::Submit { shown, payload: p }
+        }
+        Err(e) => WsSetInput::Rejected(format!("切换工作区失败：{e}")),
+    }
+}
+
 impl TuiApp<'_> {
     /// `/workspace`（别名 `/cd`）：空参查当前根，带参按路径切换。
     ///
     /// 与项目池的差别只在**入口怎么选**：项目池走 `…/projects`，只能挑 serve 池内已有
-    /// 项目；这里把路径原样 POST 给 `/workspace`，客户端不做任何白名单校验（本 crate 里
+    /// 项目；这里把路径 POST 给 `/workspace`，客户端不做任何白名单校验（本 crate 里
     /// 没有任何 allowed-roots 概念），所以池外路径**能不能**落地由 serve 侧策略决定——
     /// 拒绝会以 `ok:false` + `error` 回来，照原样打给用户。
+    ///
+    /// 端内只做两件能确定判断的事（见 [`crate::workspace_path`]）：把 `~` / `~/…` 展开成
+    /// 绝对路径；`~user` 或取不到家目录时就地拦下、**不发请求** —— 否则 serve 收到的
+    /// 只是一个字面量 `~`，它报的错与用户的真实问题无关。
     ///
     /// 回合进行中直接拒绝（同 `switch_to_conv`）：工具正跑着时换根，「这一轮用哪个根」
     /// 没有确定答案，交给 serve 去猜不如客户端先说清楚。
     pub(super) fn workspace_command(&mut self, arg: Option<String>) {
+        self.workspace_command_with(arg, workspace_path::resolve);
+    }
+
+    /// [`Self::workspace_command`] 的可测内核：`resolve` 由参数注入。
+    ///
+    /// 分开的理由只有一个：`ws_set_input` 的返回值能证明「算出来了什么」，但「被拦下时
+    /// 一个请求都没发」只有 `job_tx` 能证明，而生产路径用的是读环境变量的
+    /// [`workspace_path::resolve`]，测试无从注入。
+    fn workspace_command_with(
+        &mut self,
+        arg: Option<String>,
+        resolve: impl FnOnce(&str) -> Result<String, String>,
+    ) {
         if self.st.running {
             self.st
                 .push_line(LineKind::System, "回合进行中：结束后再切换工作区");
             return;
         }
-        match arg {
-            None => {
-                if self.job_tx.send(WorkerJob::WorkspaceQuery).is_err() {
-                    self.st
-                        .push_line(LineKind::System, "查询工作区失败：worker 已退出");
-                }
+        let Some(path) = arg else {
+            if self.job_tx.send(WorkerJob::WorkspaceQuery).is_err() {
+                self.st
+                    .push_line(LineKind::System, "查询工作区失败：worker 已退出");
             }
-            Some(path) => {
-                // 清除词（off / none / clear / default）→ 发空路径，恢复 serve 默认根。
-                let restore = is_default_word(&path);
-                let shown = if restore {
-                    "正在恢复工作区为 serve 默认根…".to_string()
-                } else {
-                    format!("正在切换到工作区：{path}")
-                };
+            return;
+        };
+        match ws_set_input(&path, resolve) {
+            WsSetInput::Rejected(line) => self.st.push_line(LineKind::System, &line),
+            WsSetInput::Submit { shown, payload } => {
                 self.st.push_line(LineKind::System, &shown);
-                let payload = if restore { String::new() } else { path };
                 if self.job_tx.send(WorkerJob::WorkspaceSet(payload)).is_err() {
                     self.st
                         .push_line(LineKind::System, "切换工作区失败：worker 已退出");
@@ -183,8 +227,8 @@ mod tests {
     use super::super::worker::{UiEvent, WorkerJob};
     use super::super::workspace_tree::WsPickState;
     use super::{
-        WsSetOutcome, is_default_word, workspace_query_line, workspace_set_line,
-        workspace_set_outcome,
+        WsSetInput, WsSetOutcome, is_default_word, workspace_query_line, workspace_set_line,
+        workspace_set_outcome, ws_set_input,
     };
     use crate::SessionPrefs;
     use crate::serve::{ConnectionConfig, ServeClient};
@@ -359,5 +403,109 @@ mod tests {
             "原因要在原地可见：{:?}",
             pick.error
         );
+    }
+
+    /// 清除词不参与展开：`/workspace off` 必须仍是「恢复默认根」，不能被当成路径。
+    #[test]
+    fn default_words_skip_tilde_expansion() {
+        for w in ["off", "none", "clear", "default"] {
+            match ws_set_input(w, |_| panic!("清除词不应调用展开：{w}")) {
+                WsSetInput::Submit { shown, payload } => {
+                    assert_eq!(payload, "");
+                    assert!(
+                        shown.contains("默认根"),
+                        "{w} 回显应说明恢复默认根：{shown}"
+                    );
+                }
+                WsSetInput::Rejected(l) => panic!("{w} 被拦下了：{l}"),
+            }
+        }
+    }
+
+    /// `~` 展开后的绝对路径才是载荷；回显要带出原输入，否则用户看不出落到了哪个目录。
+    #[test]
+    fn tilde_is_expanded_before_post() {
+        match ws_set_input("~/proj", |_| Ok("/home/t/proj".into())) {
+            WsSetInput::Submit { shown, payload } => {
+                assert_eq!(payload, "/home/t/proj");
+                assert!(shown.contains("/home/t/proj"), "应回显展开结果：{shown}");
+                assert!(
+                    shown.contains("按本机 HOME 展开 ~/proj"),
+                    "应点明是本机 HOME 展开的（远端部署时这不是 serve 的家目录）：{shown}"
+                );
+            }
+            WsSetInput::Rejected(l) => panic!("不该被拦下：{l}"),
+        }
+    }
+
+    #[test]
+    fn unchanged_path_is_echoed_without_expand_note() {
+        match ws_set_input("/data/proj", |_| Ok("/data/proj".into())) {
+            WsSetInput::Submit { shown, payload } => {
+                assert_eq!(payload, "/data/proj");
+                assert_eq!(shown, "正在切换到工作区：/data/proj");
+            }
+            WsSetInput::Rejected(l) => panic!("不该被拦下：{l}"),
+        }
+    }
+
+    /// 展不开（`~user` / 无家目录）时**不发请求**，且文案必须读作失败。
+    #[test]
+    fn unexpandable_tilde_is_rejected_without_request() {
+        match ws_set_input("~root", |_| Err("不支持 `~user` 形式…".into())) {
+            WsSetInput::Rejected(line) => {
+                assert!(line.contains("切换工作区失败"), "失败措辞：{line}");
+                assert!(line.contains("~user"), "应透传原因：{line}");
+                assert!(!line.contains("已切换"), "不能像成功：{line}");
+            }
+            WsSetInput::Submit { payload, .. } => panic!("拦下失败，仍会 POST `{payload}`"),
+        }
+    }
+
+    /// 空白载荷在 serve 语义里等于「空路径＝恢复默认根」，与用户想要的切换相反。
+    #[test]
+    fn blank_payload_is_rejected_not_treated_as_default_root() {
+        match ws_set_input("   ", |_| Ok("  ".into())) {
+            WsSetInput::Rejected(line) => assert!(line.contains("路径为空"), "{line}"),
+            WsSetInput::Submit { payload, .. } => panic!("空白载荷不该 POST：`{payload}`"),
+        }
+    }
+
+    /// 被拦下时**一个 worker 任务都不发**：这条只有 job 通道能证明，返回值看不出来。
+    #[test]
+    fn rejected_input_never_reaches_the_worker() {
+        let client =
+            ServeClient::new(ConnectionConfig::new("http://127.0.0.1:1", "")).expect("client");
+        let mut prefs = test_prefs();
+        let (job_tx, job_rx) = mpsc::channel();
+        let (_ui_tx, ui_rx) = mpsc::channel();
+        let mut app = test_app(&client, &mut prefs, ui_rx, job_tx);
+
+        app.workspace_command_with(Some("~root".into()), |_| Err("不支持 `~user` 形式".into()));
+
+        assert!(
+            job_rx.try_recv().is_err(),
+            "被拦下时不该发任何 worker 任务（含 WorkspaceSet）"
+        );
+        let last = app.st.lines.last().expect("应留一行失败回显");
+        assert!(last.text.contains("切换工作区失败"), "{:?}", last.text);
+    }
+
+    /// 放行时发出去的是**展开后**的绝对路径，不是用户输入原文。
+    #[test]
+    fn expanded_path_is_what_gets_posted() {
+        let client =
+            ServeClient::new(ConnectionConfig::new("http://127.0.0.1:1", "")).expect("client");
+        let mut prefs = test_prefs();
+        let (job_tx, job_rx) = mpsc::channel();
+        let (_ui_tx, ui_rx) = mpsc::channel();
+        let mut app = test_app(&client, &mut prefs, ui_rx, job_tx);
+
+        app.workspace_command_with(Some("~/proj".into()), |_| Ok("/home/t/proj".into()));
+
+        match job_rx.try_recv() {
+            Ok(WorkerJob::WorkspaceSet(payload)) => assert_eq!(payload, "/home/t/proj"),
+            _ => panic!("应发出 WorkspaceSet"),
+        }
     }
 }

@@ -10,7 +10,10 @@
 
 mod approve;
 mod body_memo;
-mod controls;
+// `controls` / `tool_summary` 提到 `pub(crate)`：`/workspace` 的清除词（`clear_word`）与
+// 控制字符剥离（`strip_control_chars`）在 crate 根的 `workspace_path` / repl 入口也要用，
+// 两份词表或两份剥离规则漂移比多一级可见性更贵。
+pub(crate) mod controls;
 mod exit_flush;
 mod history;
 mod layout;
@@ -29,7 +32,7 @@ mod spinner;
 mod state;
 mod status;
 mod text;
-mod tool_summary;
+pub(crate) mod tool_summary;
 mod turn_send;
 mod worker;
 mod workspace_cmd;

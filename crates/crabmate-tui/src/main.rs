@@ -5,6 +5,7 @@ mod serve;
 mod slash;
 mod tui_mode;
 mod turn;
+mod workspace_path;
 
 use std::io::{self, IsTerminal, Write};
 use std::process::ExitCode;
