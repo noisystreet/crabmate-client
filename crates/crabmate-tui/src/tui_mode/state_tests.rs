@@ -269,7 +269,7 @@ fn tool_row_start_then_end_updates_in_place() {
     assert_eq!(s.lines.last().unwrap().kind, LineKind::Tool);
     assert_eq!(s.lines.last().unwrap().text, "exec");
     s.tool_end("tc-9", "exec", Some(true), Some("exit 0"));
-    assert_eq!(s.lines.last().unwrap().text, "exec ✓ — exit 0");
+    assert_eq!(s.lines.last().unwrap().text, "✓ exec — exit 0");
     assert_eq!(s.lines.len(), 1);
 }
 
@@ -277,7 +277,7 @@ fn tool_row_start_then_end_updates_in_place() {
 fn tool_end_without_start_pushes_fallback_row() {
     let mut s = UiState::new();
     s.tool_end("tc-miss", "patch", Some(false), Some("rejected"));
-    assert_eq!(s.lines.last().unwrap().text, "patch ✗ — rejected");
+    assert_eq!(s.lines.last().unwrap().text, "✗ patch — rejected");
 }
 
 #[test]

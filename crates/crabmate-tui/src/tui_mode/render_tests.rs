@@ -281,7 +281,7 @@ fn in_flight_tool_row_gets_progress_slot() {
 #[test]
 fn finished_tool_row_has_no_progress_slot() {
     let mut st = UiState::new();
-    st.push_line(LineKind::Tool, "exec ✓ — exit 0");
+    st.push_line(LineKind::Tool, "✓ exec — exit 0");
     st.lines.last_mut().expect("刚 push 的行").tool_ok = Some(true);
     let plain = body_rows(&st, 60)[0].line.to_string();
     assert!(plain.starts_with("[工具] "), "结束行无进度位: {plain:?}");

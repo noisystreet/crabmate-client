@@ -29,14 +29,19 @@ pub(super) fn note_repeats_name(name: &str, note: &str) -> bool {
         || note_n.starts_with(&format!("{name_n}："))
 }
 
-/// 工具结束行文案：`name ✓ — note`；note 与 name 重复时省略 name（`✓ read file: hello.cpp`）。
+/// 工具结束行文案：`mark name — note`。
+///
+/// 标记一律**前置**：工具行常常连着出现，成败列对齐在同一列上才好扫——一眼看出
+/// 哪几次失败。曾经「有 note」时标记落在工具名右边、「note 重复名字」时又跑到左边，
+/// 同一屏里两种形态并存，反而看不出规律。
+/// note 与 name 重复时省略 name（`✓ read file: hello.cpp`）。
 #[must_use]
 pub(super) fn tool_end_text(name: &str, ok: Option<bool>, note: Option<&str>) -> String {
     let m = mark(ok);
     match note.map(str::trim).filter(|s| !s.is_empty()) {
         Some(note) if note_repeats_name(name, note) => format!("{m} {note}"),
-        Some(note) => format!("{name} {m} — {note}"),
-        None => format!("{name} {m}"),
+        Some(note) => format!("{m} {name} — {note}"),
+        None => format!("{m} {name}"),
     }
 }
 
@@ -64,17 +69,32 @@ mod tests {
     fn distinct_note_keeps_name() {
         assert_eq!(
             tool_end_text("exec", Some(true), Some("exit 0")),
-            "exec ✓ — exit 0"
+            "✓ exec — exit 0"
         );
         assert_eq!(
             tool_end_text("exec", Some(false), Some("rejected")),
-            "exec ✗ — rejected"
+            "✗ exec — rejected"
         );
     }
 
     #[test]
     fn no_note_just_mark() {
-        assert_eq!(tool_end_text("exec", Some(true), None), "exec ✓");
-        assert_eq!(tool_end_text("patch", None, None), "patch (done)");
+        assert_eq!(tool_end_text("exec", Some(true), None), "✓ exec");
+        assert_eq!(tool_end_text("patch", None, None), "(done) patch");
+    }
+
+    /// 标记恒在行首：连续工具行的成败列必须对齐。曾经「有 note」时标记在工具名
+    /// 右边、「note 重复名字」时又在左边，同一屏两种形态混排，看不出规律。
+    #[test]
+    fn mark_always_leads_the_line() {
+        for (ok, note) in [
+            (Some(true), None),
+            (Some(false), Some("rejected")),
+            (None, Some("read file: hello.cpp")),
+            (Some(true), Some("exit 0")),
+        ] {
+            let text = tool_end_text("exec", ok, note);
+            assert!(text.starts_with(mark(ok)), "标记应前置：{text:?}");
+        }
     }
 }
