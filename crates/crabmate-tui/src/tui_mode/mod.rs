@@ -581,7 +581,11 @@ impl TuiApp<'_> {
             UiEvent::Skills(result) => self.st.set_skills(result),
             UiEvent::Thinking(delta) => self.st.stream_delta(LineKind::Thinking, &delta),
             UiEvent::System(line) => self.st.push_line(LineKind::System, line.trim()),
-            UiEvent::ToolStart { tool_call_id, name } => self.st.tool_start(&tool_call_id, &name),
+            UiEvent::ToolStart {
+                tool_call_id,
+                name,
+                note,
+            } => self.st.tool_start(&tool_call_id, &name, note.as_deref()),
             UiEvent::ToolEnd {
                 tool_call_id,
                 name,

@@ -36,6 +36,8 @@ pub(super) enum UiEvent {
     ToolStart {
         tool_call_id: String,
         name: String,
+        /// 事件自带的「要执行什么」（`summary` / `argsPreview`）；没有则为空。
+        note: Option<String>,
     },
     ToolEnd {
         tool_call_id: String,
@@ -174,11 +176,17 @@ impl StreamSink for UiSink {
         Ok(())
     }
 
-    fn on_tool_start(&mut self, tool_call_id: &str, name: &str) -> Result<(), TermError> {
+    fn on_tool_start(
+        &mut self,
+        tool_call_id: &str,
+        name: &str,
+        note: Option<&str>,
+    ) -> Result<(), TermError> {
         self.tx
             .send(UiEvent::ToolStart {
                 tool_call_id: tool_call_id.to_string(),
                 name: name.to_string(),
+                note: note.map(str::to_string),
             })
             .map_err(|_| TermError::Message("ui channel closed".into()))
     }

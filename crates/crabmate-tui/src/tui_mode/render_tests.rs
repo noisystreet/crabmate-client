@@ -259,7 +259,7 @@ fn with_progress_mark_degrades_when_mark_is_single_char() {
 #[test]
 fn in_flight_tool_row_gets_progress_slot() {
     let mut st = UiState::new();
-    st.tool_start("tc-1", "exec");
+    st.tool_start("tc-1", "exec", None);
     let rows = body_rows(&st, 60);
     let plain = rows[0].line.to_string();
     assert!(
@@ -340,7 +340,7 @@ fn progress_mark_frame_requires_live_folded_thinking() {
 
     // 进行中的工具行同样驱动进度动画；一旦结束就停（成败未知也算结束）。
     let mut tool = UiState::new();
-    tool.tool_start("tc-1", "exec");
+    tool.tool_start("tc-1", "exec", None);
     assert_eq!(
         progress_mark_frame(&tool, &info(true, false)),
         Some(7),
@@ -390,9 +390,9 @@ fn finished_tool_row_without_verdict_is_not_running() {
 fn tool_block_separated_from_text_but_compact_inside() {
     let mut st = UiState::new();
     st.stream_delta(LineKind::Assistant, "先看看");
-    st.tool_start("c1", "read_file");
+    st.tool_start("c1", "read_file", None);
     st.tool_end("c1", "read_file", Some(true), Some("read file: a.rs"));
-    st.tool_start("c2", "grep");
+    st.tool_start("c2", "grep", None);
     st.stream_delta(LineKind::Assistant, "结论");
     let rows = body_rows(&st, 80);
     let text: Vec<String> = rows.iter().map(|r| r.line.to_string()).collect();
@@ -542,9 +542,9 @@ fn tool_row_colors_by_result() {
     let mut st = UiState::new();
     // 固定调色板：参数化断言不能随终端环境（NO_COLOR 等）漂移。
     st.set_palette(super::Palette::default());
-    st.tool_start("c1", "read_file");
+    st.tool_start("c1", "read_file", None);
     st.tool_end("c1", "read_file", Some(true), None);
-    st.tool_start("c2", "grep");
+    st.tool_start("c2", "grep", None);
     st.tool_end("c2", "grep", Some(false), None);
     let pal = st.palette;
     let rows = body_rows(&st, 80);
@@ -718,7 +718,7 @@ fn body_rows_collapse_consecutive_blanks_to_one() {
 #[test]
 fn replayed_tool_row_has_no_progress_slot() {
     let mut st = UiState::new();
-    st.tool_start("tc-1", "exec");
+    st.tool_start("tc-1", "exec", None);
     st.push_replayed_line(LineKind::Tool, "history", None);
     assert_eq!(prefix_for(&st.lines[0]), TOOL_PREFIX_PROGRESS);
     assert_eq!(prefix_for(&st.lines[1]), kind_prefix(LineKind::Tool));

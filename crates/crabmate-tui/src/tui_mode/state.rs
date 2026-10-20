@@ -12,7 +12,7 @@ use super::approve::ApprovalChoice;
 use super::palette::Palette;
 use super::serve_defaults::ServeDefaults;
 use super::slash_menu::{SkillsCache, SkillsPayload, SlashItem, filtered_items, slash_prefix};
-use super::tool_summary::tool_end_text;
+use super::tool_summary::{tool_end_text, tool_row_text};
 use super::workspace_tree::{WsPickState, WsRow};
 
 /// `/` 补全菜单的会话内状态。
@@ -632,12 +632,15 @@ impl UiState {
     // ── 工具行摘要 ───────────────────────────────────────────
 
     /// 工具开始：记一个「进行中」摘要行，RESULT 到达时原位补标记与状态。
-    pub fn tool_start(&mut self, tool_call_id: &str, name: &str) {
+    ///
+    /// `note` 是事件里已经给出的「要执行什么」（`TOOL_CALL_START` 的 summary /
+    /// argsPreview）——一开始就显示，别等结果回来才让用户看到跑的是什么命令。
+    pub fn tool_start(&mut self, tool_call_id: &str, name: &str, note: Option<&str>) {
         let display = if name.trim().is_empty() { "tool" } else { name };
         let idx = self.lines.len();
         self.lines.push(LogLine {
             kind: LineKind::Tool,
-            text: display.to_string(),
+            text: tool_row_text(display, note),
             collapsed: false,
             tool_state: ToolState::Running,
         });
