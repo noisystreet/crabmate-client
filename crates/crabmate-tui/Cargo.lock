@@ -648,6 +648,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "crabmate-tool-card"
+version = "0.7.0"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "crabmate-tui"
 version = "0.7.0"
 dependencies = [
@@ -655,6 +662,7 @@ dependencies = [
  "clap",
  "crabmate",
  "crabmate-client-api",
+ "crabmate-tool-card",
  "crossterm",
  "futures-util",
  "keyring",

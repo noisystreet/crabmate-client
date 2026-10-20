@@ -19,6 +19,8 @@ anyhow = "1"
 clap = { version = "4", features = ["derive", "env"] }
 crabmate = { version = "0.7.0", default-features = false, features = ["protocol"] }
 crabmate-client-api = { path = "../crabmate-client-api" }
+# `role=tool` 落盘正文是 `{"crabmate_tool":{…}}` 信封；解包规则与 Web 水合共用一份。
+crabmate-tool-card = { path = "../crabmate-tool-card" }
 crossterm = "0.29"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 keyring = "4.1.5"

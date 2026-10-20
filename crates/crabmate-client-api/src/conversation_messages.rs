@@ -10,6 +10,8 @@
 //! 那条 `user` 消息仍在响应里（靠 `name` 区分），客户端必须自己跳过——此处与 frontend 同名
 //! 常量保持一致，否则回放会凭空多一句用户发言。
 
+use std::collections::HashMap;
+
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -87,6 +89,10 @@ impl ConversationMessagesResponse {
     /// - 未知 `role`：跳过（宁可少显示，也不把不认识的东西当正文印出来）。
     #[must_use]
     pub fn replay_rows(&self) -> Vec<ReplayRow> {
+        // 工具**真实名字**只在 assistant 的 `tool_calls` 里保证有；`role=tool` 消息的
+        // `name` 是服务端可选字段（实践中常常只带 `tool_call_id`）。先把调用侧的
+        // id→name 收成一张表，否则回放会把 `call_xxx` 当工具名印出来。
+        let tool_names = tool_call_names(&self.messages);
         let mut out = Vec::new();
         for msg in &self.messages {
             match msg.role.trim() {
@@ -111,7 +117,7 @@ impl ConversationMessagesResponse {
                     }
                 }
                 "tool" => out.push(ReplayRow::Tool {
-                    name: msg.tool_label(),
+                    name: msg.tool_label(&tool_names),
                     body: msg.display_text(),
                 }),
                 _ => {}
@@ -150,22 +156,61 @@ impl ConversationMessage {
             .unwrap_or_default()
     }
 
-    /// 工具名：`name` → `tool_call_id` → 字面 `tool`。
+    /// 工具名：`name` → 调用侧 `tool_calls` 的 id 查表 → 字面 `tool`。
+    ///
+    /// 最后一档**不**回落到 `tool_call_id`：`call_abc123` 这种 id 对读的人没有
+    /// 信息量，印出来只会让工具行看起来像坏掉的数据（比缺名字更糟）。
     #[must_use]
-    fn tool_label(&self) -> String {
-        self.name
+    fn tool_label(&self, names: &HashMap<&str, &str>) -> String {
+        if let Some(name) = self
+            .name
             .as_deref()
             .map(str::trim)
             .filter(|s| !s.is_empty())
-            .or_else(|| {
-                self.tool_call_id
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|s| !s.is_empty())
-            })
-            .unwrap_or("tool")
-            .to_string()
+        {
+            return name.to_string();
+        }
+        self.tool_call_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .and_then(|id| names.get(id))
+            .map_or_else(|| "tool".to_string(), |name| (*name).to_string())
     }
+}
+
+/// 扫一遍 assistant 的 `tool_calls`，收集 `tool_call_id → function.name`。
+///
+/// 这是回放里唯一能拿到工具**真实名字**的地方。顶层 `name` 也接受：某些服务端
+/// 把函数名平铺在调用项上，而不是放在 `function` 里。
+fn tool_call_names(messages: &[ConversationMessage]) -> HashMap<&str, &str> {
+    let mut names = HashMap::new();
+    for msg in messages.iter().filter(|m| m.role.trim() == "assistant") {
+        let Some(calls) = msg.tool_calls.as_ref().and_then(Value::as_array) else {
+            continue;
+        };
+        for call in calls {
+            let Some(id) = call
+                .get("id")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            else {
+                continue;
+            };
+            let name = call
+                .get("function")
+                .and_then(|f| f.get("name"))
+                .or_else(|| call.get("name"))
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty());
+            if let Some(name) = name {
+                names.insert(id, name);
+            }
+        }
+    }
+    names
 }
 
 /// `content` 归一：字符串原样；parts 数组取 `type=text` 拼接，图片附 `[图片]` 占位。
@@ -247,6 +292,47 @@ mod tests {
                 },
                 ReplayRow::Assistant("结论：没问题".into()),
             ]
+        );
+    }
+
+    /// serve 常常只在 `role=tool` 里带 `tool_call_id`：名字必须从调用侧补回来，
+    /// 而不是把 id 当名字印给用户（这是回放工具行显示成 `call_xxx` 的成因）。
+    #[test]
+    fn tool_name_falls_back_to_the_call_site() {
+        let resp = parse(json!({
+            "messages": [
+                {"role": "assistant", "content": "", "tool_calls": [
+                    {"id": "call_abc123", "type": "function",
+                     "function": {"name": "read_file", "arguments": "{}"}}
+                ]},
+                {"role": "tool", "tool_call_id": "call_abc123", "content": "1|fn main() {}"}
+            ]
+        }));
+        assert_eq!(
+            resp.replay_rows(),
+            vec![ReplayRow::Tool {
+                name: "read_file".into(),
+                body: "1|fn main() {}".into(),
+            }],
+            "tool 消息缺 name 时应从 assistant 的 tool_calls 补"
+        );
+    }
+
+    /// 连调用侧都查不到：宁可显字面 `tool`，也不把 `call_xxx` 当名字。
+    #[test]
+    fn unknown_tool_id_does_not_leak_into_the_name() {
+        let resp = parse(json!({
+            "messages": [
+                {"role": "tool", "tool_call_id": "call_zzz", "content": "结果"}
+            ]
+        }));
+        assert_eq!(
+            resp.replay_rows(),
+            vec![ReplayRow::Tool {
+                name: "tool".into(),
+                body: "结果".into(),
+            }],
+            "tool_call_id 对读的人没有信息量，不该当工具名"
         );
     }
 
