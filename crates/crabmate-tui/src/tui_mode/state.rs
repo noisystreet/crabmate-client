@@ -70,6 +70,35 @@ impl ApprovalOverlay {
     }
 }
 
+/// 工具行的状态（仅 `LineKind::Tool` 有意义；其余行恒为 [`ToolState::Finished(None)`]）。
+///
+/// 曾经用 `tool_ok: Option<bool>` 兼表三态：`None` 同时是「进行中」与「已结束但服务端
+/// 没给成败」。渲染层只能靠文本里那句 `(done)` 去猜，而前缀与 spinner 仍按「进行中」
+/// 画，于是结束的调用看起来还在跑。拆成显式状态后，两者不再互相冒充。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToolState {
+    /// 调用中：前缀带进度位，末行还会叠 spinner 动画。
+    Running,
+    /// 已结束。`None` = 服务端没给成败（不猜，标记显示 `?`）。
+    Finished(Option<bool>),
+}
+
+impl ToolState {
+    /// 成败（仅 `Finished` 有值）。
+    #[must_use]
+    pub fn ok(self) -> Option<bool> {
+        match self {
+            Self::Running => None,
+            Self::Finished(ok) => ok,
+        }
+    }
+
+    #[must_use]
+    pub fn is_running(self) -> bool {
+        matches!(self, Self::Running)
+    }
+}
+
 /// 一条 transcript 记录。
 #[derive(Debug, Clone)]
 pub struct LogLine {
@@ -77,14 +106,8 @@ pub struct LogLine {
     pub text: String,
     /// thinking 折叠态（默认折叠；Ctrl+E 切换全局展开）。
     pub collapsed: bool,
-    /// 工具行结果（`Some(true)` 成功 / `Some(false)` 失败 / `None` 进行中）；
-    /// 仅供渲染分色，不参与文本（文本仍是 `tool_end_text` 的完整串）。
-    pub tool_ok: Option<bool>,
-    /// 回放的历史行（来自 `GET /conversation/messages`，不属于本次运行的流）。
-    ///
-    /// 单独标记而不是复用 `tool_ok: None`：`None` 在实时路径里表示「工具正在进行中」，
-    /// 渲染层据此显示 `⠿` 进度占位；历史行若共用同一取值会被误画成「还在跑」。
-    pub replayed: bool,
+    /// 工具行状态；仅供渲染分色与进度位，不参与文本（文本仍是 `tool_end_text` 的完整串）。
+    pub tool_state: ToolState,
 }
 
 impl LogLine {
@@ -95,8 +118,8 @@ impl LogLine {
             kind,
             text: text.to_string(),
             collapsed,
-            tool_ok: None,
-            replayed: false,
+            // 非工具行没有状态可言；工具行由 `tool_start` 改成 `Running`。
+            tool_state: ToolState::Finished(None),
         }
     }
 
@@ -225,16 +248,15 @@ impl UiState {
 
     /// 回放一行历史（`GET /conversation/messages`）。
     ///
-    /// `tool_ok` 由调用方给：服务端的工具结果消息没有成败信号，故传 `None`，
-    /// 由 `replayed` 让渲染层不画「进行中」占位。
+    /// 历史行一律是**已结束**的：回放只转写落盘的结果，不存在「还在跑」。
+    /// `tool_ok` 是信封里的成败；服务端没给就是 `None`（标记显示 `?`，不猜）。
     pub fn push_replayed_line(&mut self, kind: LineKind, text: &str, tool_ok: Option<bool>) {
         let collapsed = kind == LineKind::Thinking && !self.thinking_visible;
         self.lines.push(LogLine {
             kind,
             text: text.to_string(),
             collapsed,
-            tool_ok,
-            replayed: true,
+            tool_state: ToolState::Finished(tool_ok),
         });
         self.refresh_search_meta();
         self.bump();
@@ -609,17 +631,21 @@ impl UiState {
 
     // ── 工具行摘要 ───────────────────────────────────────────
 
-    /// 工具开始：记录一个摘要行，RESULT 到达时原位补结果标记。
+    /// 工具开始：记一个「进行中」摘要行，RESULT 到达时原位补标记与状态。
     pub fn tool_start(&mut self, tool_call_id: &str, name: &str) {
         let display = if name.trim().is_empty() { "tool" } else { name };
-        if tool_call_id.is_empty() {
-            self.push_line(LineKind::Tool, display);
-            return;
+        let idx = self.lines.len();
+        self.lines.push(LogLine {
+            kind: LineKind::Tool,
+            text: display.to_string(),
+            collapsed: false,
+            tool_state: ToolState::Running,
+        });
+        // 没有 id 就无法按 id 找回这一行；结果到达时会另起一行，本行就此停在
+        // `Running`——与「id 缺失等于放弃了原位更新」的既有语义一致。
+        if !tool_call_id.is_empty() {
+            self.tool_pending.insert(tool_call_id.to_string(), idx);
         }
-        self.lines
-            .push(LogLine::new(LineKind::Tool, display, false));
-        self.tool_pending
-            .insert(tool_call_id.to_string(), self.lines.len() - 1);
         self.refresh_search_meta();
         self.bump();
     }
@@ -639,12 +665,12 @@ impl UiState {
         match idx {
             Some(i) if self.lines.get(i).is_some_and(|l| l.kind == LineKind::Tool) => {
                 self.lines[i].text = text;
-                self.lines[i].tool_ok = ok;
+                self.lines[i].tool_state = ToolState::Finished(ok);
             }
             _ => {
                 self.push_line(LineKind::Tool, &text);
                 if let Some(last) = self.lines.last_mut() {
-                    last.tool_ok = ok;
+                    last.tool_state = ToolState::Finished(ok);
                 }
             }
         }

@@ -12,7 +12,7 @@ use super::layout::panes;
 use super::md;
 use super::palette::Palette;
 use super::settings_panel::PanelContent;
-use super::state::{Focus, LineKind, LogLine, UiState};
+use super::state::{Focus, LineKind, LogLine, ToolState, UiState};
 use super::status::{SPINNER_FRAMES, status_line};
 use super::ws_sidebar::{pane_list_area, sessions_content, sidebar_view, workspace_content};
 
@@ -133,9 +133,9 @@ const TOOL_PREFIX_PROGRESS: &str = "[工具] ⠿ ";
 /// 逻辑行前缀：进行中的工具行多一个进度位。
 /// 进度位是**静态**占位，动画由渲染层换字符，因此不进入 body memo。
 fn prefix_for(log: &LogLine) -> &'static str {
-    // 回放的历史工具行没有「进行中」这个概念，不带进度位占位。
-    match (log.kind, log.tool_ok, log.replayed) {
-        (LineKind::Tool, None, false) => TOOL_PREFIX_PROGRESS,
+    // 只有「调用中」才加进度位；结束行不论成败是否已知，文本自带标记。
+    match (log.kind, log.tool_state) {
+        (LineKind::Tool, ToolState::Running) => TOOL_PREFIX_PROGRESS,
         _ => kind_prefix(log.kind),
     }
 }
@@ -191,8 +191,8 @@ fn fold_thinking(text: &str, content_width: usize) -> String {
 fn progress_mark_frame(st: &UiState, info: &StatusInfo) -> Option<usize> {
     let live = st.lines.last().is_some_and(|l| match l.kind {
         LineKind::Thinking => l.collapsed,
-        // 回放的历史行不是「进行中」，别给它加 spinner。
-        LineKind::Tool => l.tool_ok.is_none() && !l.replayed,
+        // 结束的行（含成败未知）不再是「进行中」，不加 spinner。
+        LineKind::Tool => l.tool_state.is_running(),
         _ => false,
     });
     (info.running && !info.cancel_sent && live).then_some(info.spinner)
@@ -231,7 +231,7 @@ fn with_progress_mark(line: Line<'static>, frame: usize) -> Line<'static> {
 struct RowCtx<'a> {
     idx: usize,
     kind: LineKind,
-    tool_ok: Option<bool>,
+    tool_state: ToolState,
     text: &'a str,
     prefix: &'static str,
     prefix_style: Style,
@@ -274,7 +274,7 @@ pub(crate) fn build_body_rows(st: &UiState, width: usize) -> Vec<BodyRow> {
         let cx = RowCtx {
             idx,
             kind: log.kind,
-            tool_ok: log.tool_ok,
+            tool_state: log.tool_state,
             text: &text,
             prefix,
             prefix_style: prefix_style(log.kind, pal),
@@ -295,9 +295,9 @@ pub(crate) fn build_body_rows(st: &UiState, width: usize) -> Vec<BodyRow> {
 }
 
 /// 工具行内容色：成功走 `ok`、失败 `err` + BOLD（无色模式下 BOLD 仍可辨），
-/// 其余（进行中 / 非工具行）沿用基色。
+/// 其余（进行中 / 成败未知 / 非工具行）沿用基色。
 fn tool_content_style(cx: &RowCtx<'_>, base: Style) -> Style {
-    match (cx.kind, cx.tool_ok) {
+    match (cx.kind, cx.tool_state.ok()) {
         (LineKind::Tool, Some(true)) => Style::new().fg(cx.pal.ok),
         (LineKind::Tool, Some(false)) => Style::new().fg(cx.pal.err).add_modifier(Modifier::BOLD),
         _ => base,

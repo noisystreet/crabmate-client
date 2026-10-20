@@ -1,12 +1,16 @@
-//! 工具行摘要文案（纯逻辑）：结束行补 `✓/✗/(done)`；当说明文案本身以工具名开头
+//! 工具行摘要文案（纯逻辑）：结束行补 `✓/✗/?`；当说明文案本身以工具名开头
 //! （如 `read_file` + `read file: hello.cpp`）时省略工具名前缀，避免冗余重复。
 
-/// `✓` / `✗` / `(done)` 标记。
+/// `✓` / `✗` / `?` 标记。
+///
+/// `?` 表示「已结束，但服务端没给成败」——它与 `✓`/`✗` 同为 1 列，成败列因此
+/// 始终对齐。曾经用 `(done)`（6 列）当这一档，既比另两个宽出一截，又容易被读成
+/// 「完成」，而它实际说的是「结果不明」。
 fn mark(ok: Option<bool>) -> &'static str {
     match ok {
         Some(true) => "✓",
         Some(false) => "✗",
-        None => "(done)",
+        None => "?",
     }
 }
 
@@ -80,7 +84,15 @@ mod tests {
     #[test]
     fn no_note_just_mark() {
         assert_eq!(tool_end_text("exec", Some(true), None), "✓ exec");
-        assert_eq!(tool_end_text("patch", None, None), "(done) patch");
+        assert_eq!(tool_end_text("patch", None, None), "? patch");
+    }
+
+    /// 三档标记都占 1 列，成败列才能对齐（`(done)` 是 6 列，会把工具名推右 5 列）。
+    #[test]
+    fn every_mark_is_one_column() {
+        for ok in [Some(true), Some(false), None] {
+            assert_eq!(mark(ok).chars().count(), 1, "标记应占 1 列：{:?}", mark(ok));
+        }
     }
 
     /// 标记恒在行首：连续工具行的成败列必须对齐。曾经「有 note」时标记在工具名

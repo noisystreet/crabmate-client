@@ -259,7 +259,7 @@ fn with_progress_mark_degrades_when_mark_is_single_char() {
 #[test]
 fn in_flight_tool_row_gets_progress_slot() {
     let mut st = UiState::new();
-    st.push_line(LineKind::Tool, "exec — 运行中");
+    st.tool_start("tc-1", "exec");
     let rows = body_rows(&st, 60);
     let plain = rows[0].line.to_string();
     assert!(
@@ -282,7 +282,7 @@ fn in_flight_tool_row_gets_progress_slot() {
 fn finished_tool_row_has_no_progress_slot() {
     let mut st = UiState::new();
     st.push_line(LineKind::Tool, "✓ exec — exit 0");
-    st.lines.last_mut().expect("刚 push 的行").tool_ok = Some(true);
+    st.lines.last_mut().expect("刚 push 的行").tool_state = ToolState::Finished(Some(true));
     let plain = body_rows(&st, 60)[0].line.to_string();
     assert!(plain.starts_with("[工具] "), "结束行无进度位: {plain:?}");
     assert!(!plain.contains('⠿'), "结束行不应有占位: {plain:?}");
@@ -338,19 +338,51 @@ fn progress_mark_frame_requires_live_folded_thinking() {
         "末行非 thinking 后停转"
     );
 
-    // 进行中的工具行同样驱动进度动画；一旦拿到 tool_ok 就停。
+    // 进行中的工具行同样驱动进度动画；一旦结束就停（成败未知也算结束）。
     let mut tool = UiState::new();
-    tool.push_line(LineKind::Tool, "exec — 运行中");
+    tool.tool_start("tc-1", "exec");
     assert_eq!(
         progress_mark_frame(&tool, &info(true, false)),
         Some(7),
         "进行中工具行 + 末行"
     );
-    tool.lines.last_mut().expect("刚 push 的行").tool_ok = Some(true);
+    tool.tool_end("tc-1", "exec", Some(true), None);
     assert_eq!(
         progress_mark_frame(&tool, &info(true, false)),
         None,
         "工具结束即停转"
+    );
+}
+
+/// 修掉的 bug：结束但服务端没给成败的行（旧实现 `tool_ok = None`）被当成「进行中」，
+/// 前缀带 `⠿` 且末行一直转 spinner。现在终态是显式的，`Finished(None)` 不再冒充它。
+#[test]
+fn finished_tool_row_without_verdict_is_not_running() {
+    let mut st = UiState::new();
+    st.tool_end("tc-1", "exec", None, Some("exit 0"));
+    let plain = body_rows(&st, 60)[0].line.to_string();
+    assert!(
+        plain.starts_with("[工具] ? exec"),
+        "成败未知也要算结束: {plain:?}"
+    );
+    assert!(!plain.contains('⠿'), "结束行不应有进度位: {plain:?}");
+
+    let info = StatusInfo {
+        api_base: "http://x".into(),
+        model: None,
+        role: None,
+        mode: None,
+        running: true,
+        cancel_sent: false,
+        spinner: 7,
+        view_offset: 0,
+        search_term: None,
+        search_total: 0,
+    };
+    assert_eq!(
+        progress_mark_frame(&st, &info),
+        None,
+        "结束的行（成败未知）不该继续转 spinner"
     );
 }
 
@@ -697,7 +729,7 @@ fn body_rows_collapse_consecutive_blanks_to_one() {
 #[test]
 fn replayed_tool_row_has_no_progress_slot() {
     let mut st = UiState::new();
-    st.push_line(LineKind::Tool, "live");
+    st.tool_start("tc-1", "exec");
     st.push_replayed_line(LineKind::Tool, "history", None);
     assert_eq!(prefix_for(&st.lines[0]), TOOL_PREFIX_PROGRESS);
     assert_eq!(prefix_for(&st.lines[1]), kind_prefix(LineKind::Tool));
