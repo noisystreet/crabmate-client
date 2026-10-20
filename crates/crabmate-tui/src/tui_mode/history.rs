@@ -15,7 +15,7 @@ use crabmate_tool_card::parse_tool_envelope;
 use unicode_width::UnicodeWidthChar;
 
 use super::state::{HistoryRequest, LineKind};
-use super::tool_summary::tool_end_text;
+use super::tool_summary::{flatten_note, tool_end_text};
 use super::{TuiApp, WorkerJob};
 
 /// 历史工具行正文只留首行的前若干**显示列宽**。
@@ -239,25 +239,26 @@ fn rows_to_lines(resp: &ConversationMessagesResponse) -> Vec<(LineKind, String, 
 /// **和正文颜色**，所以要一起返回；纯文本结果没有信号 → `None`（不猜成败）。
 fn tool_history_row(name: &str, body: &str) -> (String, Option<bool>) {
     if let Some(input) = parse_tool_envelope(body, Some(name)) {
-        let note = tool_note(input.summary.as_deref(), &input.output);
+        let note = tool_note(&input.name, input.summary.as_deref(), &input.output);
         return (
             tool_end_text(&input.name, input.ok, note.as_deref()),
             input.ok,
         );
     }
-    let note = tool_note(None, body);
+    let note = tool_note(name, None, body);
     (tool_end_text(name, None, note.as_deref()), None)
 }
 
-/// 摘要：`summary` 优先，其次结果正文首行；都按显示宽截断。
-fn tool_note(summary: Option<&str>, body: &str) -> Option<String> {
-    summary
-        .map(head_excerpt)
-        .filter(|s| !s.is_empty())
-        .or_else(|| {
-            let head = head_excerpt(body.lines().next().unwrap_or(""));
-            (!head.is_empty()).then_some(head)
-        })
+/// 摘要：`summary` 优先，其次结果正文首行；先压成单行，再按显示宽截断。
+///
+/// 压平必须先做：`summary` 可能是「工具名 \n 工具名: 详情」，只取首行会留下一句纯
+/// 工具名（信息全丢），不压平则整段挤进一行、名字出现两次。
+fn tool_note(name: &str, summary: Option<&str>, body: &str) -> Option<String> {
+    let raw = summary
+        .filter(|s| !s.trim().is_empty())
+        .or_else(|| body.lines().next())?;
+    let flat = flatten_note(name, raw)?;
+    Some(head_excerpt(&flat))
 }
 
 /// 首行按**显示列宽**截断（宽字符按 2 列算）。
