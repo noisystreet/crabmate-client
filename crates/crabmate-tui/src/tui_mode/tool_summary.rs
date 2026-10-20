@@ -19,7 +19,17 @@ fn normalized(s: &str) -> String {
     s.trim().to_lowercase().replace('_', " ")
 }
 
-/// note 是否以与工具名等价的短语开头（name 前缀 + 空格 / 半角冒号 / 全角冒号）。
+/// 工具名之后允许紧跟的分隔符。
+///
+/// 够宽才不会印成 `search_replace — search_replace: …`（名字出现两次）：
+/// `search_replace: …`、`search_replace(a.rs)`、`search_replace（a.rs）`、
+/// `read file. …` 都算同一回事。但也不能放宽成「以名字开头就算」——
+/// `exec` 与 `execute` 不是一回事，必须由分隔符收尾。
+const NAME_SEPARATORS: [&str; 12] = [
+    " ", ":", "：", "(", "（", "[", "【", "-", "—", "/", ",", "，",
+];
+
+/// note 是否以与工具名等价的短语开头（name + 任一分隔符，或就是 name 本身）。
 #[must_use]
 pub(super) fn note_repeats_name(name: &str, note: &str) -> bool {
     let name_n = normalized(name);
@@ -28,9 +38,9 @@ pub(super) fn note_repeats_name(name: &str, note: &str) -> bool {
     }
     let note_n = normalized(note);
     note_n == name_n
-        || note_n.starts_with(&format!("{name_n} "))
-        || note_n.starts_with(&format!("{name_n}:"))
-        || note_n.starts_with(&format!("{name_n}："))
+        || NAME_SEPARATORS
+            .iter()
+            .any(|sep| note_n.starts_with(&format!("{name_n}{sep}")))
 }
 
 /// 工具结束行文案：`mark name — note`。
@@ -66,6 +76,37 @@ mod tests {
         assert_eq!(
             tool_end_text("read_file", Some(false), Some("read file: denied")),
             "✗ read file: denied"
+        );
+    }
+
+    /// 名字后面跟括号、斜杠、逗号等各式分隔符时也要判为重复：否则印成
+    /// `search_replace — search_replace: …`，工具名在一行里出现两次。
+    #[test]
+    fn name_prefix_recognises_common_separators() {
+        for note in [
+            "search_replace: 2 处替换",
+            "search_replace（a.rs）",
+            "search_replace(a.rs): 1",
+            "search_replace, 2 处",
+            "search_replace — 命中 3 行",
+            "search_replace/说明",
+        ] {
+            assert!(
+                note_repeats_name("search_replace", note),
+                "应判为重复：{note:?}"
+            );
+        }
+        // 不能只按前缀判断：`execute …` 不是 `exec` 的说明。
+        assert!(!note_repeats_name("exec", "execute something"));
+
+        // 端到端：工具名只出现一次。
+        assert_eq!(
+            tool_end_text(
+                "search_replace",
+                Some(true),
+                Some("search_replace: 2 处替换")
+            ),
+            "✓ search_replace: 2 处替换"
         );
     }
 
