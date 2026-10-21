@@ -33,6 +33,7 @@ mod slash_menu;
 mod spinner;
 mod state;
 mod status;
+mod status_stack;
 // `caps` 子命令要打印探测结果，`main` 侧需直接读（见 `term_image.rs` 头注释）。
 pub(crate) mod term_image;
 mod text;
@@ -453,9 +454,8 @@ impl TuiApp<'_> {
             self.on_ctrl_c();
             return;
         }
-        // F2：设置面板开关（打开时等同 Esc 的关闭语义，脏字段先确认）。
-        if is_f2_key(&key) {
-            self.toggle_settings();
+        // 顶层快捷键（F2 设置 / F3 状态栈）：打包成一个判定，给这条 if 链腾出 CCN。
+        if self.on_hotkey(&key) {
             return;
         }
         // 设置面板打开：按键全部交给面板（不再走 Workspace/Sidebar/输入分发）。
@@ -478,6 +478,25 @@ impl TuiApp<'_> {
         self.on_input_key(key);
     }
 
+    /// 顶层（面板无关）快捷键：`F2` 设置面板、`F3` 右栏状态栈折叠。返回是否已消费。
+    ///
+    /// 打包成一个方法是为了**不给上面那条 if 链再加分支** —— 它已贴着 lizard 的
+    /// CCN≤10 门禁（`toggle_thinking_with_notice` 就是同一原因提出去的）。
+    /// 把 `F2` 整块搬进来是净增 0 个分支，`F3` 才装得下。
+    fn on_hotkey(&mut self, key: &KeyEvent) -> bool {
+        if is_f2_key(key) {
+            // 打开时等同 Esc 的关闭语义，脏字段先确认。
+            self.toggle_settings();
+            return true;
+        }
+        // F3：右栏底部状态栈展开 / 折叠。窄屏没有状态栈，开关无效果（不报错）。
+        // 只切视图状态，不进 `BodyMemoKey` —— 它不改 transcript 内容。
+        if key.code == KeyCode::F(3) && key.modifiers.is_empty() {
+            self.st.toggle_status_stack();
+            return true;
+        }
+        false
+    }
     /// `/` 补全菜单接管按键；返回 `true` 表示已消费。只在前缀态里成立，所以
     /// `/zzz`（无候选）之类不会把方向键从 transcript 滚动里抢走。
     fn on_slash_menu_key(&mut self, key: &KeyEvent) -> bool {
@@ -671,6 +690,18 @@ impl TuiApp<'_> {
         let opts = self.build_turn_opts(message, None);
         self.st.push_line(LineKind::User, message);
         self.dispatch_turn(opts);
+    }
+
+    /// 右栏状态栈占用的行数：**渲染与鼠标命中必须用同一份**。
+    ///
+    /// `draw` 是自由函数、`on_mouse` 是方法，两处各算一遍的话，行数一漂就是
+    /// 「点击右栏点到了别的行」或「状态栈底部空一行」—— 都属于难归因的症状。
+    pub(super) fn status_stack_rows(&self) -> u16 {
+        status_stack::stack_rows(
+            &self.status_info(),
+            render::SIDEBAR_WIDTH.saturating_sub(2) as usize,
+            self.st.status_stack_collapsed,
+        )
     }
 
     /// 状态行显示值：override（`*`）＞ user-data 已存值 ＞ serve 默认。

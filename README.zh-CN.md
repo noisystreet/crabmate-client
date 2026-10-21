@@ -137,6 +137,8 @@ sudo dpkg -i crates/crabmate-tui/target/debian/crabmate-tui_*.deb
 
 键位、布局与设置面板见 [docs/design/remote_cli_tui.md](./docs/design/remote_cli_tui.md)。
 
+宽屏（≥120 列）**没有底部状态栏**：运行指示与 `serve` / `model` / `role` / `mode` 等分项移到**右栏底部逐行排列**（与 Desktop 右列底部纵栈同构），底栏那一行还给正文；`F3` 折叠成只剩运行指示一行。会话 id 不显示（Desktop 也没有，左栏的 `*` 已经标出当前会话）。窄终端（<120 列）两栏隐藏、栈无处安置，仍用底部单行状态栏。
+
 右侧工作区目录树也支持鼠标：点击目录行展开/收起，点击文件行只选中（插入路径仍用 Enter），树聚焦后在其上滚动滚轮可移动光标（在聊天区滚动滚轮则滚动对话），点击树外任意处把焦点收回输入框。鼠标捕获默认开启；设 `CM_TUI_MOUSE=off` 可关闭，改回纯键盘并保留终端原生拖选复制。
 
 ## 个人云（远程纯 API）

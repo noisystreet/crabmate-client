@@ -230,6 +230,8 @@ pub struct UiState {
     pub skills: Option<SkillsCache>,
     /// skill 目录拉取在途（防重复请求）。
     pub skills_loading: bool,
+    /// 右栏底部状态栈是否折叠（`F3`）：`false` = 展开；窄屏无状态栈，此开关无效果。
+    pub status_stack_collapsed: bool,
 }
 
 impl UiState {
@@ -728,6 +730,16 @@ impl UiState {
             LineKind::System,
             &format!("思考内容已{state}（Ctrl+E 切换）"),
         );
+    }
+
+    // ── 右栏状态栈折叠（F3） ────────────────────────────────
+
+    /// 切换右栏底部状态栈的展开 / 折叠。
+    ///
+    /// 窄屏没有状态栈（`layout::panes` 的 `right_status` 为 `None`），此时开关
+    /// **无效果但不报错** —— 不为它再加一处「窄屏改文案」的分支。
+    pub fn toggle_status_stack(&mut self) {
+        self.status_stack_collapsed = !self.status_stack_collapsed;
     }
 
     // ── 搜索（/find） ────────────────────────────────────────

@@ -137,6 +137,8 @@ No Rust toolchain? The same binary-only `.deb` is also attached to each `v*` Git
 
 Keybindings, layout, and the settings panel: [docs/design/remote_cli_tui.md](./docs/design/remote_cli_tui.md).
 
+Wide terminals (≥120 columns) have **no bottom status bar**: the run indicator and the `serve` / `model` / `role` / `mode` segments move into a **vertical stack at the bottom of the right column** (the same shape as Desktop's right-column stack), handing that row back to the transcript; `F3` collapses it to the run indicator alone. The conversation id is not shown (Desktop has no such chip either, and the left column's `*` already marks the active conversation). Narrow terminals (<120 columns) hide both columns and have nowhere to put the stack, so they keep the single-row bottom bar.
+
 The right-hand workspace tree is also mouse-driven: click a directory row to expand or collapse it, click a file row to select it (Enter still inserts its path), scroll the wheel over it to move the cursor once the tree has focus (over the transcript the wheel scrolls the chat), and click outside the tree to put focus back in the composer. Mouse capture is on by default; set `CM_TUI_MOUSE=off` to keep the terminal's native drag-select copy instead.
 
 ## Personal cloud (remote API-only)

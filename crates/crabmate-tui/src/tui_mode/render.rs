@@ -14,6 +14,7 @@ use super::palette::Palette;
 use super::settings_panel::PanelContent;
 use super::state::{Focus, LineKind, LogLine, ToolState, UiState};
 use super::status::{SPINNER_FRAMES, status_line};
+use super::status_stack;
 use super::ws_sidebar::{pane_list_area, sessions_content, sidebar_view, workspace_content};
 
 // 浮层（审批 / 设置面板）拆到 `overlay.rs`：它们自成一套模板，也把本文件的行数
@@ -489,8 +490,15 @@ pub fn draw(
     panel: Option<&PanelContent>,
 ) {
     let area = frame.area();
-    // 主体三列 / 状态栏的矩形与鼠标命中检测共用 `layout::panes`。
-    let p = panes(area, st.sidebar_visible);
+    // 右栏底部状态栈的行数（与 `status_stack::stack_lines` 同源，否则底部会空行 / 末段被裁）。
+    // 内宽与左右两栏一致：`SIDEBAR_WIDTH - 2`（列内左右各留 1 列）。
+    let stack_rows = status_stack::stack_rows(
+        info,
+        SIDEBAR_WIDTH.saturating_sub(2) as usize,
+        st.status_stack_collapsed,
+    );
+    // 主体三列 / 底栏 / 状态栈的矩形与鼠标命中检测共用 `layout::panes`。
+    let p = panes(area, st.sidebar_visible, stack_rows);
 
     let spin = progress_mark_frame(st, info);
     let pal = &st.palette;
@@ -508,18 +516,19 @@ pub fn draw(
         paint_bg(frame, right, pal.chrome_bg);
         render_pane(frame, right, rows, cursor, hint, pal, right_w);
     }
+    if let Some(rs) = p.right_status {
+        render_status_stack(frame, rs, st, info, pal);
+    }
     render_chat_column(frame, st, p.chat, prepared, panel.is_none(), spin);
 
-    paint_bg(frame, p.status, pal.chrome_bg);
-    // 分段样式已在 `status_line` 里定好（label 淡色 / 值正文色 / 分隔极暗），此处不能再套
-    // 整行 `fg + BOLD`：base style 的修饰位会盖到 label 上，淡化标签就白做了。
-    let status = status_line(
-        info,
-        st.conversation_id.as_deref(),
-        p.status.width as usize,
-        pal,
-    );
-    frame.render_widget(Paragraph::new(status), p.status);
+    // 底栏**只在窄屏存在**：宽屏的状态已进右栏底部，那一行还给正文。
+    if let Some(status_area) = p.status {
+        paint_bg(frame, status_area, pal.chrome_bg);
+        // 分段样式已在 `status_line` 里定好（label 淡色 / 值正文色 / 分隔极暗），此处不能再套
+        // 整行 `fg + BOLD`：base style 的修饰位会盖到 label 上，淡化标签就白做了。
+        let status = status_line(info, status_area.width as usize, pal);
+        frame.render_widget(Paragraph::new(status), status_area);
+    }
 
     // 设置面板浮层：整屏覆盖（含状态栏），最后绘制压住全部内容。
     if let Some(content) = panel {
@@ -529,6 +538,25 @@ pub fn draw(
         // 否则侧栏/状态栏会留成纯色块。模态浮层打开时不铺。
         paint_bg_cells(frame, st);
     }
+}
+
+/// 右栏底部状态栈：铺条带色后逐行画（每段一行，值已按列宽截断）。
+///
+/// 与 desktop 的 `.side-status-stack` 同位置、同形态（纵向、贴右栏底部）；
+/// 窄屏没有右栏时不会走到这里（`panes` 的 `right_status` 为 `None`）。
+fn render_status_stack(
+    frame: &mut Frame,
+    area: Rect,
+    st: &UiState,
+    info: &StatusInfo,
+    pal: &Palette,
+) {
+    paint_bg(frame, area, pal.chrome_bg);
+    let width = area.width.saturating_sub(2) as usize;
+    let lines = status_stack::stack_lines(info, width, pal, st.status_stack_collapsed);
+    // 列内左右各留 1 列，与左右两栏的内容对齐（`render_pane` 同一口径）。
+    let inner = Rect::new(area.x.saturating_add(1), area.y, width as u16, area.height);
+    frame.render_widget(Paragraph::new(lines), inner);
 }
 
 /// 聊天列：上为主区消息（滚动 transcript），底部为 composer 输入区。
