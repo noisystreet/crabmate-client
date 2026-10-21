@@ -31,24 +31,53 @@ use crate::turn::{TurnPrefs, run_turn};
 )]
 struct Cli {
     /// Absolute serve root URL (e.g. http://127.0.0.1:8080).
-    #[arg(long = "api-base", env = "CRABMATE_API_BASE", global = true)]
+    #[arg(
+        long = "api-base",
+        env = "CRABMATE_API_BASE",
+        global = true,
+        hide_env_values = true
+    )]
     api_base: Option<String>,
 
     /// Web API Bearer (`CM_WEB_API_BEARER_TOKEN` on serve). Not the model API_KEY.
-    #[arg(long = "bearer", env = "CM_WEB_API_BEARER_TOKEN", global = true)]
+    ///
+    /// `hide_env_values`：`--help` 默认会把 `env = "..."` 那个变量的**实际值**回显出来，
+    /// 而这里（和 `CM_API_KEY`）带的是真凭据——一次 `--help` 截屏或贴进 issue 就等于
+    /// 泄露可重放的 token。只隐藏值、保留变量名，用户仍能看出该设哪个环境变量。
+    #[arg(
+        long = "bearer",
+        env = "CM_WEB_API_BEARER_TOKEN",
+        global = true,
+        hide_env_values = true
+    )]
     bearer: Option<String>,
 
     /// 随每轮 chat 发送的 `client_llm.api_key`（同 WASM UI「设置 → API 密钥」；
     /// 供 serve 无服务端模型 `API_KEY` 时使用，如 bearer 模式个人云）。
-    #[arg(long = "llm-api-key", env = "CM_API_KEY", global = true)]
+    #[arg(
+        long = "llm-api-key",
+        env = "CM_API_KEY",
+        global = true,
+        hide_env_values = true
+    )]
     llm_api_key: Option<String>,
 
     /// 模型名覆盖 → `client_llm.model`。
-    #[arg(long = "llm-model", env = "CM_MODEL", global = true)]
+    #[arg(
+        long = "llm-model",
+        env = "CM_MODEL",
+        global = true,
+        hide_env_values = true
+    )]
     llm_model: Option<String>,
 
     /// 模型供应商 base URL 覆盖 → `client_llm.api_base`。
-    #[arg(long = "llm-api-base", env = "CM_API_BASE", global = true)]
+    #[arg(
+        long = "llm-api-base",
+        env = "CM_API_BASE",
+        global = true,
+        hide_env_values = true
+    )]
     llm_api_base: Option<String>,
 
     /// 不回退读取桌面壳已保存的钥匙串（默认：`--bearer` / `--llm-api-key` 缺省时回退）。
