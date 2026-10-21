@@ -119,16 +119,16 @@ fn rendered_chat_area_keeps_right_gutter() {
         .expect("draw");
     let buffer = terminal.backend().buffer();
     // 无侧栏时聊天列即整屏：正文区为 [1, 79)，故 x=0 与 x=79 两列必须是留白。
-    // transcript 的行范围按布局推导（顶栏 / composer / 状态栏各占几行），不写死行号：
+    // transcript 的行范围按布局推导（composer / 状态栏各占几行），不写死行号：
     // composer 多于一行输入时正文会被挤短，写死的 y 会落到 composer 边框行上。
-    let body_h = TERMINAL_H - 2; // 顶栏 + 状态栏
+    let body_h = TERMINAL_H - 1; // 状态栏
     let composer_h = composer_outer_rows(&st)
         .min(body_h.saturating_sub(1))
         .max(1);
     let transcript_h = body_h - composer_h;
     assert!(transcript_h >= 1, "终端太矮，本用例前提不成立");
     let last_x = TERMINAL_W - 1;
-    for y in 1..1 + transcript_h {
+    for y in 0..transcript_h {
         assert_eq!(buffer[(0, y)].symbol(), " ", "左侧留白被占用 (y={y})");
         assert_eq!(
             buffer[(last_x, y)].symbol(),

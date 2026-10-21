@@ -145,9 +145,9 @@ fn row_bg_count(buf: &Buffer, y: u16, want: Color) -> usize {
         .count()
 }
 
-/// 六种主题（默认 + 5 套 Desktop 主题）的条带 / 聊天区底色都必须按槽位取色。
+/// 五套 Desktop 主题的条带 / 聊天区底色都必须按槽位取色（透明默认主题另有专门用例）。
 ///
-/// 这是 A1 主题化最核心的不变式：顶栏、状态栏走 `chrome_bg`（"框"），
+/// 这是 A1 主题化最核心的不变式：状态栏走 `chrome_bg`（"框"），
 /// 正文区走 `bg`（"纸"）。两者一旦互相写反，深色主题下几乎看不出来，
 /// 浅色主题下会直接糊成一片 —— 正是没有颜色断言时最容易漏掉的回归。
 #[test]
@@ -168,31 +168,29 @@ fn every_theme_paints_bands_and_chat_area_from_palette_slots() {
         st.push_line(LineKind::User, "hi");
         let buf = render_screen(&st);
 
-        // 顶栏 / 状态栏 = chrome_bg（"框"），聊天区 = bg（"纸"）。两处都做反向断言：
+        // 状态栏 = chrome_bg（"框"），聊天区 = bg（"纸"）。两处都做反向断言：
         // 只要涂到了另一个槽位的颜色，就说明取色写反了，不管涂了多少格。
         let half = W as usize / 2;
-        for (y, what) in [(0, "顶栏"), (H - 1, "状态栏")] {
-            assert_eq!(
-                row_bg_count(&buf, y, pal.bg),
-                0,
-                "{what}不该用聊天区底色（theme={theme:?}）"
-            );
-            assert!(
-                row_bg_count(&buf, y, pal.chrome_bg) >= half,
-                "{what}应以 chrome_bg 为底（theme={theme:?}，实测 {} 格）",
-                row_bg_count(&buf, y, pal.chrome_bg)
-            );
-        }
-        // 顶栏下方第一行即聊天区（不含 composer）：底色必须是 bg，不是 chrome_bg。
         assert_eq!(
-            row_bg_count(&buf, 1, pal.chrome_bg),
+            row_bg_count(&buf, H - 1, pal.bg),
+            0,
+            "状态栏不该用聊天区底色（theme={theme:?}）"
+        );
+        assert!(
+            row_bg_count(&buf, H - 1, pal.chrome_bg) >= half,
+            "状态栏应以 chrome_bg 为底（theme={theme:?}，实测 {} 格）",
+            row_bg_count(&buf, H - 1, pal.chrome_bg)
+        );
+        // 第 0 行即聊天区（不含 composer）：底色必须是 bg，不是 chrome_bg。
+        assert_eq!(
+            row_bg_count(&buf, 0, pal.chrome_bg),
             0,
             "聊天区不该用条带底色（theme={theme:?}）"
         );
         assert!(
-            row_bg_count(&buf, 1, pal.bg) >= half,
+            row_bg_count(&buf, 0, pal.bg) >= half,
             "聊天区应以 bg 为底（theme={theme:?}，实测 {} 格）",
-            row_bg_count(&buf, 1, pal.bg)
+            row_bg_count(&buf, 0, pal.bg)
         );
     }
 }
@@ -420,40 +418,6 @@ fn structural_markers_do_not_reach_the_screen() {
     assert!(
         rows.iter().any(|r| r.matches('─').count() > 20),
         "应有横向分隔线：{joined}"
-    );
-}
-
-/// 顶栏不该再出现模式徽标或键位提示：模式由状态栏的 `mode` 段显示。
-/// buffer 级断言（而不只是 span 级）——「算对了却没上屏」是这层曾经漏过的坑。
-#[test]
-fn top_bar_has_no_mode_badge_or_hints() {
-    let mut st = UiState::new();
-    st.set_palette(Palette::from_theme(Some("shadcn-dark")));
-    st.sidebar_visible = false;
-    st.workspace_path = Some("/data/proj".into());
-    let rows = build_body_rows(&st, chat_body_width(false, W));
-    let mut info = status_info();
-    info.mode = Some("act".into());
-    let mut terminal = Terminal::new(TestBackend::new(W, H)).expect("terminal");
-    terminal
-        .draw(|f| draw(f, &st, &info, &rows, None))
-        .expect("draw");
-    let buf = terminal.backend().buffer().clone();
-    let pal = st.palette;
-
-    let text = text_row(&buf, 0);
-    assert!(text.contains("CrabMate"), "左段品牌应上屏：{text:?}");
-    assert!(text.contains("proj"), "中段工作区名应上屏：{text:?}");
-    let badge_cells = (0..W).filter(|&x| buf[(x, 0)].bg == pal.accent).count();
-    assert_eq!(badge_cells, 0, "顶栏不该有 accent 色块：{text:?}");
-    assert!(
-        !text.contains("ACT") && !text.contains("Ctrl+E") && !text.contains("F2"),
-        "顶栏不该出现模式徽标或键位提示：{text:?}"
-    );
-    assert_eq!(
-        row_bg_count(&buf, 0, pal.bg),
-        0,
-        "顶栏仍是条带色，不该用聊天区底色"
     );
 }
 

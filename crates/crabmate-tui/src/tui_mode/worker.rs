@@ -68,9 +68,9 @@ pub(super) enum UiEvent {
         op: SessionIndexOp,
     },
     Status(Result<ServeDefaults, String>),
-    /// 工作区根路径（`GET /workspace`，随会话刷新顺带拉取；只更新顶栏，不动目录树）。
+    /// 工作区根路径（`GET /workspace`，随会话刷新顺带拉取；只更新右栏标题，不动目录树）。
     WorkspacePath(Option<String>),
-    /// 工作区根目录列表（`GET /workspace`）：路径给顶栏，entries 给目录树。
+    /// 工作区根目录列表（`GET /workspace`）：路径给右栏标题，entries 给目录树。
     /// `keep` 区分用户手动刷新（保留展开态）与首次/切换工作区（重置）。
     Workspace {
         result: Result<WorkspaceDirData, String>,
@@ -368,7 +368,7 @@ fn job_session_index(
     let _ = tx.send(UiEvent::SessionIndex { result, op });
 }
 
-/// 会话列表 + 顶栏工作区路径刷新（静默；发送失败忽略，worker 随 UI 退出而停）。
+/// 会话列表 + 工作区路径刷新（静默；发送失败忽略，worker 随 UI 退出而停）。
 fn job_refresh_sessions(rt: &tokio::runtime::Runtime, client: &ServeClient, tx: &Sender<UiEvent>) {
     let result = rt
         .block_on(fetch_web_sessions(client))
@@ -402,7 +402,7 @@ fn job_conversation_history(
     });
 }
 
-/// 工作区根目录列表（顶栏路径 + 目录树数据）。
+/// 工作区根目录列表（工作区路径 + 目录树数据）。
 fn job_refresh_workspace_root(
     rt: &tokio::runtime::Runtime,
     client: &ServeClient,
