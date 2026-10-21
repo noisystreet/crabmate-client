@@ -24,20 +24,35 @@ pub(super) const SPINNER_FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼"
 /// 左区分段的保留优先级：数值越小越先保留。
 ///
 /// `find` 最高：它是搜索期间唯一还在变化的信息，丢掉等于没有反馈。
-/// `serve` 次之（排障首先要看连的哪台机器），之后才是模型 / 模式这类「一进界面就知道」的项。
+/// `view`（`↑N` 回看行数）紧随其后：它只在用户主动滚动时存在，而滚动的那一瞬间它是
+/// **唯一**能回答「我在哪 / 下面还有多少」的信息。`serve` 虽然重要，却是全程常驻项，
+/// 晚显示几列不损失判断依据；反过来，滚动时丢掉回看提示等于这次操作没有反馈。
+/// 之后才是模型 / 模式这类「一进界面就知道」的项。
 mod priority {
     pub(super) const FIND: u8 = 0;
-    pub(super) const SERVE: u8 = 1;
-    pub(super) const MODEL: u8 = 2;
-    pub(super) const MODE: u8 = 3;
-    pub(super) const ROLE: u8 = 4;
-    pub(super) const VIEW: u8 = 6;
+    pub(super) const VIEW: u8 = 1;
+    pub(super) const SERVE: u8 = 2;
+    pub(super) const MODEL: u8 = 3;
+    pub(super) const MODE: u8 = 4;
+    pub(super) const ROLE: u8 = 5;
 }
 
 /// 段间分隔符（极暗竖线，与 A6 的分隔线同色系）。
 const SEPARATOR: &str = " │ ";
 /// 分隔符显示宽。
 const SEPARATOR_W: usize = 3;
+
+/// 纵向状态栈的 label 列固定宽（`serve` / `model` 是最长的 5 列）。
+///
+/// 状态栈里所有行都按这一列宽排：第一列 label，第二列值。运行指示那一行不例外
+/// （第一列回看提示、第二列运行态），否则整块会变成「一列数据 + 一个页脚」。
+///
+/// 放这里而不是 `status_stack`：运行指示行的缩进也要用它，两处各写一份常量迟早
+/// 错开一列。新增更长的 label 时**必须**同步这里（`labels_fit_the_fixed_column` 会失败）。
+pub(super) const LABEL_W: usize = 5;
+
+/// label 列实际占的列数：定宽标签 + 1 列间隔。第二列（值 / 运行指示）从这里起。
+pub(super) const LABEL_COL_W: usize = LABEL_W + 1;
 
 /// 左区一个分段：`label` 走淡色、`value` 走正文色。
 pub(super) struct Segment {
@@ -94,11 +109,15 @@ fn serve_value(api_base: &str, segment_budget: usize) -> String {
     }
 }
 
-/// 左区所有候选分段（顺序即显示顺序，与优先级无关）。
+/// 环境段：`serve` / `model` / `role` / `mode` / `find`（顺序即显示顺序，与优先级无关）。
+///
+/// **不含回看提示**：纵向状态栈把它并进运行指示那一行（见
+/// [`running_row_with_view`]），既不占独立行、折叠态也照样可见；只有横版底栏
+/// 才需要它作为一个独立段 —— 见 [`left_segments`]。
 ///
 /// **不含会话 id**：desktop 的状态区也没有它，而整行放一个被截断的 id 没有信息量
 /// （要看当前会话，左栏有 `*` 标记）。
-pub(super) fn left_segments(info: &StatusInfo, budget: usize) -> Vec<Segment> {
+pub(super) fn environment_segments(info: &StatusInfo, budget: usize) -> Vec<Segment> {
     let mut out = vec![Segment {
         label: "serve",
         value: serve_value(&info.api_base, budget),
@@ -135,10 +154,29 @@ pub(super) fn left_segments(info: &StatusInfo, budget: usize) -> Vec<Segment> {
             priority: priority::FIND,
         });
     }
-    if info.view_offset > 0 {
+    out
+}
+
+/// 回看行数文案（`↑12`）；未滚动时为 `None`。
+///
+/// 状态栈（并进运行行）与横版底栏（当独立段）共用这一处格式：两处各拼一遍，
+/// 迟早出现「横条显示 `↑12`、栈里显示 `↑ 12 行`」这种同义不同形的漂移。
+pub(super) fn view_back_text(info: &StatusInfo) -> Option<String> {
+    // 数字右对齐到两列：`↑9`(3 列) 与 `↑10`(4 列) 宽度不同，会让左区预算在跨越
+    // 10 的倍数时忽多忽少 —— 临界宽度下 `serve` 就随滚轮闪进闪出。
+    (info.view_offset > 0).then(|| format!("↑{:>2}", info.view_offset))
+}
+
+/// 横版左区：环境段 + 回看提示段。
+///
+/// 回看段排在显示顺序的末尾：滚动时它每帧都在变，放行尾就不会把前面的
+/// `serve` 路径推来推去。
+pub(super) fn left_segments(info: &StatusInfo, budget: usize) -> Vec<Segment> {
+    let mut out = environment_segments(info, budget);
+    if let Some(value) = view_back_text(info) {
         out.push(Segment {
             label: "",
-            value: format!("↑{}", info.view_offset),
+            value,
             priority: priority::VIEW,
         });
     }
@@ -371,21 +409,41 @@ pub(super) fn running_spans(kind: &RunningKind, pal: &Palette) -> Vec<Span<'stat
     }
 }
 
-/// 纵向栈用：运行态一行**右对齐到 `width`**。
+/// 纵向栈的「运行指示」那一行：**按两列排**——第一列回看提示（可空），第二列运行态。
 ///
-/// 横版的右缘靠 [`push_running`] 的补白贴右；纵版没有「行尾」可言，只能自己补到列宽 ——
-/// 两边都是「运行指示永远贴右」，只是参照物从整行宽度换成了列宽。折叠态也走这里，
-/// 否则一折叠它就从右边缘跳到左边。
-pub(super) fn running_spans_right_aligned(
+/// 与上面各段同一套列（第一列 label、第二列值），整块因此是一张两列表格：
+///
+/// ```text
+/// serve 127.0.0.1:8080
+/// model gpt-x
+/// role  coder
+/// mode  plan
+/// ↑12   ○ 空闲
+/// ```
+///
+/// 之前这一行贴右缘，与上面的值列不成列，整块读起来像「一列数据 + 一个页脚」。
+///
+/// 回看提示并进这一行、而不是自己占一段一行的理由：
+/// 1. 折叠态只画这一行（见 `status_stack::stack_lines`），独立成段的话一折叠它就
+///    彻底消失——恰恰是滚动时最需要它的形态；
+/// 2. 展开态里它会挤掉一行环境段，而它只是个临时提示。
+///
+/// 运行态是**硬需求**（生成中 / 取消中必须随时可见），回看提示可丢弃：宽度连
+/// 「第二列」都放不下时退回贴左的纯运行态，不缩进。
+pub(super) fn running_row_with_view(
     kind: &RunningKind,
+    view_back: Option<&str>,
     width: usize,
     pal: &Palette,
 ) -> Vec<Span<'static>> {
-    let pad = width.saturating_sub(running_content_w(kind));
-    let mut spans: Vec<Span<'static>> = Vec::with_capacity(1 + RIGHT_W);
-    if pad > 0 {
-        spans.push(Span::styled(" ".repeat(pad), Style::new()));
+    if LABEL_COL_W + running_content_w(kind) > width {
+        return running_spans(kind, pal);
     }
+    // 回看提示自己也可能超出一列（`↑123456`）：截到列宽内，别把第二列推歪。
+    let mut first = view_back.map_or_else(String::new, |v| truncate_display(v, LABEL_W));
+    first.push_str(&" ".repeat(LABEL_COL_W.saturating_sub(UnicodeWidthStr::width(first.as_str()))));
+    // 淡色：它是「此刻在哪」的辅助提示，不该和右侧运行态抢注意力。
+    let mut spans: Vec<Span<'static>> = vec![Span::styled(first, Style::new().fg(pal.muted))];
     spans.extend(running_spans(kind, pal));
     spans
 }
@@ -452,439 +510,5 @@ pub(super) fn status_text(info: &StatusInfo, width: usize) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use ratatui::style::Color;
-
-    use super::*;
-
-    fn base_info(api_base: &str) -> StatusInfo {
-        StatusInfo {
-            api_base: api_base.into(),
-            model: None,
-            role: None,
-            mode: None,
-            running: false,
-            cancel_sent: false,
-            spinner: 0,
-            view_offset: 0,
-            search_term: None,
-            search_total: 0,
-        }
-    }
-
-    #[test]
-    fn host_port_strips_scheme_and_path() {
-        assert_eq!(host_port("http://127.0.0.1:8080"), "127.0.0.1:8080");
-        assert_eq!(
-            host_port("https://cloud.example.com/crabmate/base"),
-            "cloud.example.com"
-        );
-        assert_eq!(host_port("  http://x  "), "x");
-        // 没有 scheme 时原样保留首段，不做猜测。
-        assert_eq!(host_port("localhost:9000"), "localhost:9000");
-    }
-
-    #[test]
-    fn serve_shows_full_base_when_it_fits_and_shortens_only_when_narrow() {
-        let info = base_info("https://cloud.example.com/crabmate");
-        // 宽终端：完整 base（含路径前缀）可见—— TUI 里没有第二个入口能看全量 URL。
-        let wide = status_text(&info, 200);
-        assert!(
-            wide.contains("serve https://cloud.example.com/crabmate"),
-            "{wide}"
-        );
-        // 窄终端：退到 host:port，否则一整行只够 serve 一项。
-        let narrow = status_text(&info, 40);
-        assert!(narrow.contains("serve cloud.example.com"), "{narrow}");
-        assert!(!narrow.contains("/crabmate"), "{narrow}");
-    }
-
-    #[test]
-    fn narrow_bar_keeps_only_the_top_priority_segment() {
-        let mut info = base_info("http://127.0.0.1:8080");
-        info.model = Some("gpt-x".into());
-        info.mode = Some("plan".into());
-        info.search_term = Some("ab".into());
-        info.search_total = 2;
-        // 40 列：find(14) 之后连 `serve`(27) 都放不下 → **严格优先级**到此收手，
-        // 不允许 `model` 之类的次要项插队（否则会出现「model 在、serve 没了」）。
-        let text = status_text(&info, 40);
-        assert!(text.contains("find"), "搜索反馈必须常驻：{text}");
-        assert!(!text.contains("serve"), "serve 放不下就整体不收：{text}");
-        assert!(!text.contains("model"), "更低的 model 更不该插队：{text}");
-        assert!(!text.contains("conv"), "conv 应被丢弃：{text}");
-    }
-
-    /// 宽终端下每一段都在：本地 override 的 `*` 标记跟着值一起显示。
-    #[test]
-    fn wide_bar_lists_every_segment() {
-        let mut info = base_info("http://127.0.0.1:8080");
-        info.model = Some("gpt-x*".into());
-        info.role = Some("coder".into());
-        info.mode = Some("plan".into());
-        let text = status_text(&info, 200);
-        // 宽终端预算够：`serve` 显示完整 base（TUI 里没有第二个入口能看全量 URL）。
-        assert!(text.contains("serve http://127.0.0.1:8080"), "{text}");
-        assert!(text.contains("model gpt-x*"), "{text}");
-        assert!(text.contains("role coder"), "{text}");
-        assert!(text.contains("mode plan"), "{text}");
-        assert!(
-            !text.contains("conv"),
-            "会话 id 不上状态栏（desktop 也没有）：{text}"
-        );
-        assert!(text.contains("○ 空闲"), "{text}");
-    }
-
-    #[test]
-    fn serve_default_model_shows_up_without_a_mode() {
-        let mut info = base_info("http://x");
-        info.model = Some("deepseek".into());
-        let text = status_text(&info, 200);
-        assert!(text.contains("model deepseek"), "{text}");
-        // 未设置的值不该凭空出现（`model ` 里没有 `mode ` 子串）。
-        assert!(!text.contains("mode "), "{text}");
-    }
-
-    #[test]
-    fn search_and_view_back_segments_show_up() {
-        let mut info = base_info("http://x");
-        info.view_offset = 12;
-        info.search_term = Some("grep".into());
-        info.search_total = 2;
-        let text = status_text(&info, 200);
-        assert!(text.contains("find 「grep」"), "{text}");
-        assert!(text.contains("↑12"), "{text}");
-    }
-
-    #[test]
-    fn serve_outranks_model_when_both_compete() {
-        let mut info = base_info("http://127.0.0.1:8080");
-        info.model = Some("gpt-x".into());
-        info.search_term = Some("ab".into());
-        info.search_total = 2;
-        // 60 列：find(14) + serve(27) + 分隔(3) = 44 装得下，`model` 就轮不上了。
-        let text = status_text(&info, 60);
-        assert!(text.contains("find"), "{text}");
-        assert!(text.contains("serve"), "serve 优先于 model：{text}");
-        assert!(!text.contains("model"), "model 应被丢弃：{text}");
-    }
-
-    #[test]
-    fn dropped_segments_never_truncate_the_tail() {
-        let mut info = base_info("http://127.0.0.1:8080");
-        info.model = Some("gpt-x".into());
-        info.search_term = Some("needle".into());
-        info.search_total = 3;
-        // 20 列：只够 find 独占（它自己也超宽，按宽截断），`conv` / `model` 整段丢弃，
-        // 而不是被砍成半截留在行尾。
-        let text = status_text(&info, 20);
-        assert!(!text.contains("conv"), "丢弃是整段丢弃：{text}");
-        assert!(!text.contains("model"), "丢弃是整段丢弃：{text}");
-        assert!(text.starts_with("find"), "留下的应是最高优先级段：{text}");
-        assert_eq!(UnicodeWidthStr::width(text.as_str()), 20, "整行铺满");
-    }
-
-    #[test]
-    fn labels_use_muted_and_values_use_fg() {
-        let pal = Palette::default();
-        let mut info = base_info("http://127.0.0.1:8080");
-        // 至少两段才有分隔符可断言（`conv` 段移除后，单段不再插分隔符）。
-        info.model = Some("gpt-x".into());
-        let line = status_line(&info, 200, &pal);
-        let spans = &line.spans;
-        assert_eq!(spans[0].content, "serve");
-        assert_eq!(spans[0].style.fg, Some(pal.muted), "label 走淡色");
-        assert_eq!(spans[1].content, " ");
-        assert_eq!(spans[2].style.fg, Some(pal.fg), "值走正文色");
-        // 分隔符必须是极暗竖线，否则窄终端里像多了一列正文。
-        assert!(
-            spans.iter().any(|s| s.content == SEPARATOR),
-            "缺分隔符：{spans:?}"
-        );
-        assert_eq!(
-            spans
-                .iter()
-                .find(|s| s.content == SEPARATOR)
-                .map(|s| s.style.fg),
-            Some(Some(pal.border))
-        );
-    }
-
-    /// 生成中右缘的字形 span。
-    ///
-    /// 取尾部而不是固定下标：左区选了几段、右缘前置补了几个空格都不影响这里。
-    /// 只挑字形 span（不按固定步长跳），这样条里有没有格间空格都对。
-    fn bar_cells<'a>(line: &'a Line<'static>) -> Vec<&'a Span<'static>> {
-        let tail = &line.spans[line.spans.len() - BAR_W..];
-        tail.iter()
-            .filter(|s| s.content.as_ref() == BAR_CELL_DIM || s.content.as_ref() == BAR_CELL_LIT)
-            .collect()
-    }
-
-    /// 字形常量里唯一的那个字符（字形都是单字符）。
-    fn glyph_of(cell: &str) -> char {
-        cell.chars().next().expect("字形不能为空")
-    }
-
-    fn dim_ch() -> char {
-        glyph_of(BAR_CELL_DIM)
-    }
-
-    fn lit_ch() -> char {
-        glyph_of(BAR_CELL_LIT)
-    }
-
-    /// 行尾仪器条的 6 个字形（跳过分隔空格）。
-    ///
-    /// 断言形态时不能用字面串：`●` 的位置随帧号变，只有「字符合法 + 恰好一个实心」
-    /// 才是稳定不变式。
-    fn bar_glyphs(text: &str) -> Vec<char> {
-        text.chars()
-            .rev()
-            .take(BAR_W)
-            .filter(|c| *c != ' ')
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .collect()
-    }
-
-    /// 取行的前 `width` 列（按显示列切，不按字符切——`✳ 取消中` 是 8 列 5 字符）。
-    fn head_cols(text: &str, width: usize) -> String {
-        use unicode_width::UnicodeWidthChar;
-        let mut acc = 0usize;
-        let mut out = String::new();
-        for ch in text.chars() {
-            let w = ch.width().unwrap_or(0);
-            if acc + w > width {
-                break;
-            }
-            acc += w;
-            out.push(ch);
-        }
-        out
-    }
-
-    #[test]
-    fn running_indicator_right_aligned_across_states() {
-        let pal = Palette::default();
-        let mut info = base_info("http://x");
-        info.model = Some("gpt-x".into());
-        let mut head: Option<String> = None;
-        for (running, cancel, want) in [
-            (false, false, Some("○ 空闲")),
-            (true, false, None),
-            (true, true, Some("✳ 取消中")),
-        ] {
-            info.running = running;
-            info.cancel_sent = cancel;
-            let line = status_line(&info, 40, &pal);
-            let text = line.to_string();
-            match want {
-                Some(w) => assert!(text.ends_with(w), "{text} 应以 {w} 结尾"),
-                // 仪器条的实心格位置随帧号变，不能写死字面串。
-                None => {
-                    let glyphs = bar_glyphs(&text);
-                    assert!(
-                        glyphs.iter().all(|c| *c == dim_ch() || *c == lit_ch()),
-                        "应该只有仪器条字形：{text}"
-                    );
-                    assert_eq!(
-                        glyphs.iter().filter(|c| **c == lit_ch()).count(),
-                        BAR_BLOCK,
-                        "应恰好一颗方块点亮：{text}"
-                    );
-                }
-            }
-            assert_eq!(UnicodeWidthStr::width(text.as_str()), 40, "整行铺满");
-            // 三态的左区必须逐字相同：右缘统一到 `RIGHT_W` 列，切换时 `serve` / `model`
-            // 才不会整体平移。这是「统一宽度」要买的那一个性质。
-            let now = head_cols(&text, 40 - RIGHT_W);
-            match &head {
-                Some(first) => assert_eq!(&now, first, "左区随状态变了：{text}"),
-                None => head = Some(now),
-            }
-        }
-    }
-
-    #[test]
-    fn bar_cell_is_one_column() {
-        // 两个字形都必须 1 列：仪器条靠「6 格 × 1 列」参与预算，
-        // 任一被算成 2 列（或终端按全角渲染）右缘就会被推出屏幕。
-        for cell in [BAR_CELL_DIM, BAR_CELL_LIT] {
-            assert_eq!(UnicodeWidthStr::width(cell), 1, "{cell:?} 必须 1 列");
-        }
-        // 亮 / 灭必须等宽，否则扫描时行宽会跟着字形变。
-        assert_eq!(
-            UnicodeWidthStr::width(BAR_CELL_DIM),
-            UnicodeWidthStr::width(BAR_CELL_LIT)
-        );
-    }
-
-    #[test]
-    fn bar_block_walks_with_frame() {
-        let pal = Palette::default();
-        let mut info = base_info("http://x");
-        info.running = true;
-        // 覆盖两圈：每 `BAR_TICKS_PER_CELL` 拍，亮块右移一格。
-        let mut prev_start: Option<usize> = None;
-        for frame in 0..BAR_CELLS * BAR_TICKS_PER_CELL * 2 {
-            info.spinner = frame;
-            let start = (frame / BAR_TICKS_PER_CELL) % BAR_CELLS;
-            let want: Vec<usize> = (0..BAR_CELLS)
-                .filter(|i| (i + BAR_CELLS - start) % BAR_CELLS < BAR_BLOCK)
-                .collect();
-            let line = status_line_with(&info, 60, &pal, false);
-            let cells = bar_cells(&line);
-            let lit: Vec<usize> = (0..BAR_CELLS)
-                .filter(|i| cells[*i].style.fg == Some(pal.accent))
-                .collect();
-            assert_eq!(lit, want, "第 {frame} 拍亮块应从第 {start} 格起");
-            // 块长固定：单颗，不多不少。数量变化会被读成进度。
-            assert_eq!(lit.len(), BAR_BLOCK, "块长应恒为 {BAR_BLOCK}");
-            // 亮块必须是**单一连续段**（含环绕）：只有一个「灭→亮」的入口。
-            // 散点或两段就没有可追踪的边界，平移也就读不出来。
-            let rises = (0..BAR_CELLS)
-                .filter(|i| {
-                    let cur = want.contains(i);
-                    let prev = want.contains(&((i + BAR_CELLS - 1) % BAR_CELLS));
-                    cur && !prev
-                })
-                .count();
-            assert_eq!(rises, 1, "第 {frame} 拍亮块应是单一连续段：{want:?}");
-            // 熄灭格仍要可见，否则块的边界看不出来。
-            for i in (0..BAR_CELLS).filter(|i| !want.contains(i)) {
-                assert_eq!(cells[i].style.fg, Some(pal.muted), "第 {i} 格应熄灭");
-                assert_eq!(cells[i].content, BAR_CELL_DIM, "熄灭格应是熄灭字形");
-            }
-            // 起点每换一拍就前进一格（模 6）——「行进」就是这么来的。
-            // 同一相位持续 `BAR_TICKS_PER_CELL` 拍，只在真的换格时比。
-            if let Some(prev) = prev_start
-                && prev != start
-            {
-                assert_eq!(start, (prev + 1) % BAR_CELLS, "起点应逐拍前进一格");
-            }
-            prev_start = Some(start);
-        }
-    }
-
-    #[test]
-    fn bar_keeps_constant_width_across_frames() {
-        // 换格不改预算：右缘宽度只由「形态」决定，状态行才不会随帧左右抖。
-        let pal = Palette::default();
-        let mut info = base_info("http://x");
-        info.running = true;
-        let mut widths = std::collections::BTreeSet::new();
-        // 含极大帧号：`(spinner / 2) % BAR_CELLS` 必须对任意 usize 安全，且不改字形。
-        for frame in (0..BAR_CELLS + 3).chain([usize::MAX]) {
-            info.spinner = frame;
-            let text = status_line_with(&info, 60, &pal, false).to_string();
-            // 仪器条的实心格随帧号移动，只断言「字符合法」；位置由上面那个测试守。
-            let glyphs = bar_glyphs(&text);
-            assert!(
-                glyphs.iter().all(|c| *c == dim_ch() || *c == lit_ch()),
-                "帧 {frame}: {text}"
-            );
-            widths.insert(UnicodeWidthStr::width(text.as_str()));
-        }
-        assert_eq!(widths.len(), 1, "各帧行宽必须一致：{widths:?}");
-    }
-
-    #[test]
-    fn reduced_motion_lights_the_whole_bar() {
-        let pal = Palette::default();
-        let mut info = base_info("http://x");
-        info.running = true;
-        info.spinner = 8;
-        // 动效关掉后条不扫描，改成整条常亮：静止的「全亮条」与「○ 空闲」靠形状就能分辨，
-        // 也就不必再加「生成中」字样（右缘定宽是硬约束）。
-        let still = status_line_with(&info, 60, &pal, true);
-        let cells = bar_cells(&still);
-        assert!(
-            cells.iter().all(|s| s.style.fg == Some(pal.accent)),
-            "静态时应整条点亮：{cells:?}"
-        );
-        // 亮态必须是实心方块：形状与颜色一起变，底色消失时也分得出「运行中」和「空闲」。
-        assert!(
-            cells.iter().all(|s| s.content == BAR_CELL_LIT),
-            "静态时应整条是实心方块：{cells:?}"
-        );
-        // 同一份输入在开动效时变成「亮块从第 4 格起」——证明开关真的生效。
-        let moving = status_line_with(&info, 60, &pal, false);
-        let moving_cells = bar_cells(&moving);
-        assert_eq!(moving_cells[4].style.fg, Some(pal.accent));
-        assert_eq!(moving_cells[1].style.fg, Some(pal.muted));
-    }
-
-    #[test]
-    fn narrow_bar_keeps_only_the_bar() {
-        // 右缘固定 8 列，窄终端也照旧：`serve` 被截断，但状态指示不会被挤掉。
-        let pal = Palette::default();
-        let mut info = base_info("http://long");
-        info.model = Some("model-name".into());
-        info.running = true;
-        let text = status_line_with(&info, 16, &pal, false).to_string();
-        // 窄条右缘仍是完整的 8 列（6 格 + 前导补空），只是左区被截短。
-        let glyphs = bar_glyphs(&text);
-        assert!(
-            glyphs.iter().all(|c| *c == dim_ch() || *c == lit_ch()),
-            "窄条也保留仪器条：{text}"
-        );
-        assert_eq!(
-            glyphs.iter().filter(|c| **c == lit_ch()).count(),
-            BAR_BLOCK,
-            "窄条照样一颗完整方块：{text}"
-        );
-        assert!(!text.contains("生成中"), "生成中已不再带文案：{text}");
-        assert_eq!(UnicodeWidthStr::width(text.as_str()), 16, "仍恰好铺满");
-    }
-
-    #[test]
-    fn mono_bar_falls_back_to_reversed_cell() {
-        // `mono` 下所有槽都是 `Reset`，不换修饰位就完全看不出哪一格在动。
-        let pal = Palette::mono();
-        let mut info = base_info("http://x");
-        info.running = true;
-        // 4 拍 = 亮块首格前进到第 2 格（每 2 拍走一格）：2/3/4 亮，0/1/5 灭。
-        info.spinner = 4;
-        let line = status_line_with(&info, 60, &pal, false);
-        let cells = bar_cells(&line);
-        assert!(
-            cells[2].style.add_modifier.contains(Modifier::REVERSED),
-            "点亮格应走反色：{:?}",
-            cells[2]
-        );
-        assert!(
-            cells[1].style.add_modifier.contains(Modifier::DIM),
-            "熄灭格应走 DIM：{:?}",
-            cells[1]
-        );
-        assert!(
-            cells
-                .iter()
-                .all(|s| s.style.fg.is_none() || s.style.fg == Some(Color::Reset)),
-            "无色模式不该出现彩色 span"
-        );
-    }
-
-    #[test]
-    fn mono_palette_drops_every_color() {
-        // 无色模式：分段取舍与文本不变，但不再有任何一个 span 指定彩色
-        // （`Palette::mono()` 的所有槽都是 `Reset`）。
-        let info = base_info("http://127.0.0.1:8080");
-        let line = status_line(&info, 80, &Palette::mono());
-        let text = line.to_string();
-        assert!(text.contains("serve"), "{text}");
-        assert!(
-            !text.contains("conv"),
-            "会话 id 不上状态栏（desktop 也没有）：{text}"
-        );
-        assert!(
-            line.spans
-                .iter()
-                .all(|s| s.style.fg.is_none() || s.style.fg == Some(Color::Reset)),
-            "无色模式下不该有彩色 span：{:?}",
-            line.spans
-        );
-    }
-}
+#[path = "status_tests.rs"]
+mod tests;
