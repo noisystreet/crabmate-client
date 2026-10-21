@@ -9,6 +9,7 @@
 //! 2. **不写死坐标** —— 按特征（含某段文本的行、`┌` 所在格）定位，
 //!    这样 composer 行数、hint 占位等布局调整不会误伤本文件的断言。
 
+use super::super::background::BgCells;
 use super::*;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
@@ -42,6 +43,68 @@ fn render_screen(st: &UiState) -> Buffer {
         .draw(|f| draw(f, st, &info, &rows, None))
         .expect("draw");
     terminal.backend().buffer().clone()
+}
+
+/// 格子背景（无像素协议终端的降级档）：把主题底色格换成采样色。
+///
+/// 只断言「主题底色 → 采样色」这一条链路。`paint_bg_cells` 刻意只替换
+/// `pal.bg` / `pal.chrome_bg`，为的是不抹掉选中/高亮/错误色（那类格子的底色
+/// 另有来源）；这条保护当前没有单独的断言，改动该函数时要靠 review 守住。
+#[test]
+fn cell_background_replaces_themed_fills() {
+    let mut st = UiState::new();
+    let probe = (1u16, H - 1); // 状态栏：主题 chrome_bg 铺的格
+    let base = render_screen(&st);
+    assert_eq!(
+        base[probe].bg, st.palette.chrome_bg,
+        "基线：状态栏空白处应是 chrome_bg"
+    );
+
+    let tint = Color::Rgb(12, 34, 56);
+    st.bg_cells = Some(BgCells::solid(W, H, tint));
+    let painted = render_screen(&st);
+    assert_eq!(
+        painted[probe].bg, tint,
+        "格子背景应覆盖主题底色（否则图根本出不来）"
+    );
+    assert_eq!(
+        painted[probe].symbol(),
+        base[probe].symbol(),
+        "只动底色，不得改到字符"
+    );
+}
+
+/// 反向锁定：`paint_bg_cells` 只许改写「主题底色」格，气泡/边框/高亮的底色一个都不能动。
+///
+/// 上面那条只证明「主题底色被换掉」，这条证明「其它底色没被换」——后者才是「高亮不整片
+/// 消失」的实际内容（此前只在注释与 CHANGELOG 里声明，没有断言）。
+#[test]
+fn cell_background_keeps_every_non_theme_fill() {
+    let mut st = UiState::new();
+    st.set_palette(Palette::from_theme(Some("shadcn-dark")));
+    st.push_line(LineKind::User, "hi"); // 用户气泡自带 accent 底色
+    let base = render_screen(&st);
+    let pal = st.palette;
+    let tint = Color::Rgb(12, 34, 56);
+    st.bg_cells = Some(BgCells::solid(W, H, tint));
+    let painted = render_screen(&st);
+
+    let mut kept = 0usize;
+    for y in 0..H {
+        for x in 0..W {
+            let before = base[(x, y)].bg;
+            if before == pal.bg || before == pal.chrome_bg {
+                assert_eq!(painted[(x, y)].bg, tint, "主题底色格应铺上图色 ({x},{y})");
+            } else {
+                kept += 1;
+                assert_eq!(painted[(x, y)].bg, before, "非主题底色被背景改写 ({x},{y})");
+            }
+        }
+    }
+    assert!(
+        kept > 0,
+        "本用例需要一个非主题底色的格子（气泡/边框）才有意义"
+    );
 }
 
 fn text_row(buf: &Buffer, y: u16) -> String {

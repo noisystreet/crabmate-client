@@ -115,9 +115,14 @@ make tui
 ./crates/crabmate-tui/target/debug/crabmate-tui --api-base http://127.0.0.1:8080 --bearer "$CM_WEB_API_BEARER_TOKEN" chat "hello"
 ./crates/crabmate-tui/target/debug/crabmate-tui --api-base http://127.0.0.1:8080 repl   # interactive REPL
 ./crates/crabmate-tui/target/debug/crabmate-tui --api-base http://127.0.0.1:8080 tui    # full-screen TUI
+./crates/crabmate-tui/target/debug/crabmate-tui caps   # terminal pixel-graphics / colour depth probe (needs no server)
 ```
 
 A bearer-mode `serve` without a server-side model `API_KEY` returns `LLM_API_KEY_REQUIRED`; pass a client-owned key with `--llm-api-key` (or `CM_API_KEY` / `CM_MODEL` / `CM_API_BASE`). Missing `--bearer` / `--llm-api-key` falls back to the Desktop shell's saved secrets in the same OS keyring (read-only; `--no-keyring` disables it).
+
+`caps` prints what the terminal reports for colour depth and pixel graphics (`kitty` / `sixel` / `iterm2` / `halfblock` / `none`). It reads environment variables only — no escape-sequence query, no `serve` connection — and it **under-reports on purpose**: inside tmux / screen the pixel protocols are not selected unless you force one with `CM_TUI_IMAGE=kitty` (also `none` / `halfblock` / `sixel` / `iterm2`).
+
+Inside the full-screen `tui`, `/background <path>` paints a background **behind** the transcript, in one of two tiers. With the kitty graphics protocol (kitty, Ghostty, Konsole, Warp) it draws real pixels under the text — `z-index < 0` is the only way to sit below text — dimmed to 35%. Everywhere else, including sixel / iTerm2 terminals and the whole VTE family (xfce4-terminal, GNOME Terminal), it falls back to **per-cell background colours**: the image is downsampled to `columns × rows` and each cell's `bg` takes its share. That is a coarse mosaic (one cell = one pixel) but needs no protocol at all, so it works on any 256-colour terminal. Off by default; `/background` with no argument reports the current image and `off` clears it. Markdown images inside the transcript still degrade to `[图] alt` — only the background is real pixels for now.
 
 Release package (binary only, no menu icon or config files):
 

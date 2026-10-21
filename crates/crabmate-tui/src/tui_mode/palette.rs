@@ -10,6 +10,8 @@
 
 use ratatui::style::{Color, Modifier, Style};
 
+use super::term_image::{self, ColorDepth};
+
 /// 语义化配色板。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Palette {
@@ -245,45 +247,19 @@ impl Palette {
 
     /// [`Self::resolve`] 的可注入版本（单测不依赖真实环境变量）。
     ///
-    /// 判定顺序：`CM_TUI_COLOR` 显式覆盖 → `NO_COLOR`/`TERM=dumb` → 真彩检测 → 降级。
+    /// 判定顺序（全部在 [`term_image::color_depth`] 里完成）：`CM_TUI_COLOR` 显式覆盖 →
+    /// `NO_COLOR` / `TERM=dumb` → 真彩 → 256 → 16。两者读同一个函数，否则迟早会漂移成
+    /// 「配色用真彩、图像按 16 色」或「配色无色、背景彩色」这种自相矛盾的状态。
     #[must_use]
     pub(crate) fn resolve_with(theme: Option<&str>, env: &dyn Fn(&str) -> Option<String>) -> Self {
-        let lower = |k: &str| env(k).map(|v| v.trim().to_ascii_lowercase());
-        if let Some(forced) = color_mode_override(lower("CM_TUI_COLOR").as_deref(), theme) {
-            return forced;
-        }
-        if env("NO_COLOR").is_some_and(|v| !v.trim().is_empty()) || is_dumb_terminal(&lower) {
-            return Self::mono();
-        }
         let p = Self::from_theme(theme);
-        if is_truecolor(&lower) {
-            p
-        } else {
-            p.downgrade_basic()
+        match term_image::color_depth(env) {
+            ColorDepth::Mono => Self::mono(),
+            ColorDepth::TrueColor => p,
+            // 只有 16 色降级表；256 色可用的终端也不做索引色映射，直接退 16 色。
+            ColorDepth::Ansi16 | ColorDepth::Ansi256 => p.downgrade_basic(),
         }
     }
-}
-
-/// `CM_TUI_COLOR` 显式覆盖（`none`/`basic`/`truecolor`）；未设置或未知值返回 `None`。
-fn color_mode_override(mode: Option<&str>, theme: Option<&str>) -> Option<Palette> {
-    match mode? {
-        "none" | "mono" | "off" => Some(Palette::mono()),
-        "basic" | "16" => Some(Palette::from_theme(theme).downgrade_basic()),
-        "truecolor" | "24bit" | "256" => Some(Palette::from_theme(theme)),
-        _ => None,
-    }
-}
-
-fn is_dumb_terminal(lower: &dyn Fn(&str) -> Option<String>) -> bool {
-    lower("TERM").is_some_and(|t| t == "dumb")
-}
-
-fn is_truecolor(lower: &dyn Fn(&str) -> Option<String>) -> bool {
-    let colorterm =
-        lower("COLORTERM").is_some_and(|v| v.contains("truecolor") || v.contains("24bit"));
-    let term = lower("TERM")
-        .is_some_and(|t| t.contains("truecolor") || t.contains("-direct") || t.contains("direct-"));
-    colorterm || term
 }
 
 /// xterm 默认 16 色调色板（顺序与 ratatui `Color` 命名一致）。

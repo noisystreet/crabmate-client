@@ -28,6 +28,9 @@ pub fn is_control_slash(trimmed: &str) -> bool {
             | slash::QUIT
             | slash::QUIT_EXIT
             | slash::QUIT_Q
+            // `/background` 只对全屏 tui 有意义；repl 里也拦住，免得被当成普通消息发给模型。
+            | "background"
+            | "bg"
     )
 }
 
@@ -56,6 +59,13 @@ pub async fn handle_control_slash(
         }
         slash::CONV => {
             handle_conv(client, &args, conversation_id).await?;
+            Ok(true)
+        }
+        // 只对全屏 tui 有意义：给明确提示，别落进下面的 "unknown"。
+        "background" | "bg" => {
+            eprintln!(
+                "/background 只在全屏 tui 里可用：`crabmate-tui tui` 后执行 /background <图片路径>（off 关闭）"
+            );
             Ok(true)
         }
         other => {
@@ -117,6 +127,7 @@ fn print_help() {
   /mode ask|plan|act    set session mode for later turns (off to clear)\n\
   /role <id>            set agent role for later turns (off to clear; list via /status)\n\
   settings panel        full-screen settings panel: run `crabmate-tui tui` then /settings or F2\n\
+  /background <path>    full-screen background (tui only; kitty pixel tier, or per-cell colours elsewhere; off clears)\n\
   /resume               resume the last interrupted run (network drop)\n\
   /workspace [path]     show or set serve workspace root (off=serve default; ~/ expands via local HOME; /cd alias)\n\
   /conv                 show current conversation_id\n\

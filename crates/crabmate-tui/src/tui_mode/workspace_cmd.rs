@@ -269,6 +269,7 @@ mod tests {
             index: Default::default(),
             resume: None,
             sent_turn: None,
+            bg: None,
         }
     }
 

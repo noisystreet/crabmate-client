@@ -24,6 +24,8 @@ pub enum Control {
     ConvRefresh,
     ConvUse(String),
     ConvUnknown(String),
+    /// `/background [图片路径]`：全屏背景（kitty 走像素，其余用每格底色；空参查状态，`off` 关闭）。
+    Background(Option<String>),
 }
 
 pub fn clear_word(arg: &str) -> bool {
@@ -91,6 +93,7 @@ pub fn parse_control(text: &str) -> Option<Control> {
         slash::WORKSPACE | slash::CD => Some(Control::Workspace(arg_opt)),
         slash::RESUME => Some(Control::Resume),
         "find" | "search" | "grep" => Some(Control::Find(arg_opt)),
+        "background" | "bg" => Some(Control::Background(arg_opt)),
         slash::CONV => Some(match arg_opt {
             None => Control::ConvRefresh,
             Some(a) => match a.split_whitespace().next().unwrap_or("") {
@@ -195,6 +198,26 @@ mod tests {
             parse_control("  /WorkSpace   /tmp/x  "),
             Some(Control::Workspace(Some(v))) if v == "/tmp/x"
         ));
+    }
+
+    #[test]
+    fn parse_control_background() {
+        // 空参 = 查询状态；带参 = 路径（含空格要整体保留）。
+        assert!(matches!(
+            parse_control("/background"),
+            Some(Control::Background(None))
+        ));
+        assert!(matches!(
+            parse_control("/bg /tmp/my bg.png"),
+            Some(Control::Background(Some(v))) if v == "/tmp/my bg.png"
+        ));
+        // 清除词由上层 `clear_word` 判定，这里原样带出。
+        assert!(matches!(
+            parse_control("/BACKGROUND off"),
+            Some(Control::Background(Some(v))) if v == "off"
+        ));
+        // 普通消息不被拦。
+        assert!(parse_control("set the background please").is_none());
     }
 
     #[test]

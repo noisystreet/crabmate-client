@@ -206,6 +206,11 @@ pub struct UiState {
     pub approval: Option<ApprovalOverlay>,
     /// 审批浮层里方向键选中的那一项（浮层关闭后保留，下次打开时复位）。
     pub approval_choice: ApprovalChoice,
+    /// 格子背景采样表（`/background` 在无像素协议的终端上退到这一档；默认 `None`）。
+    ///
+    /// 放 `UiState` 而不是 `TuiApp`：只有渲染层读它，这样 `draw` 的签名不必多一个参数
+    /// （那会波及 `render_tests` 里几十处调用）。图像本身仍由 `background::Background` 持有。
+    pub bg_cells: Option<super::background::BgCells>,
     /// 工具调用 id → transcript 行号（结果到达时原位更新摘要行）。
     tool_pending: HashMap<String, usize>,
     /// 全局 thinking 展开开关（默认折叠）。
