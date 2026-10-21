@@ -6,9 +6,9 @@
 use super::*;
 use unicode_width::UnicodeWidthStr;
 
-/// 测试用默认调色板（深色主题）。
+/// 测试用固定深色调色板（不随默认主题与终端能力漂移）。
 fn pal() -> super::Palette {
-    super::Palette::default()
+    super::Palette::from_theme(Some("shadcn-dark"))
 }
 
 #[test]

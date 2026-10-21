@@ -124,6 +124,32 @@ const SHADCN_DARK: Palette = Palette {
     mono: false,
 };
 
+/// 已知主题名：`from_theme` 的 match 与 `CM_TUI_THEME` 的校验共用一份。
+///
+/// 加新预设时两处都要改——`every_listed_theme_name_maps_to_its_own_palette`
+/// 会在漏接 `from_theme` 时变红。
+const THEME_NAMES: [&str; 7] = [
+    "crabmate-light",
+    "shadcn-light",
+    "shadcn-dark",
+    "material-dark",
+    "high-contrast-dark",
+    "shadcn-transparent",
+    "default-dark",
+];
+
+/// `shadcn-dark` 的透明变体：**只**把两块底色还给终端（`Color::Reset`）。
+///
+/// 终端没有 alpha：`Reset` 的意思是「这一格不铺底色」，于是露出终端自己的背景
+/// （终端自身开了 opacity 才看得到壁纸）。分区感因此只剩 `border` 与气泡这类实色，
+/// 其余槽位一律沿用 `shadcn-dark`，且 `border` / `code_bg` / `selection_bg` /
+/// `overlay_bg` 必须保持实色，否则整屏会糊成一片。
+const SHADCN_TRANSPARENT: Palette = Palette {
+    bg: Color::Reset,
+    chrome_bg: Color::Reset,
+    ..SHADCN_DARK
+};
+
 /// `themes/crabmate-light.css`：聊天区底色用 `--surface-hover`（`#f0ece2`）压暗一档。
 const CRABMATE_LIGHT: Palette = Palette {
     fg: rgb(0x1c, 0x19, 0x13),
@@ -175,6 +201,11 @@ const MONO: Palette = Palette {
     mono: true,
 };
 
+/// 结构体兜底：**实底深色**，与 [`Palette::from_theme`] 的「未设置 → 透明」刻意不同。
+///
+/// 两者分工不同：`from_theme(None)` 表达产品默认（透明），而 `Default` 只给测试夹具与
+/// `..Default::default()` 一个「有底色、可读」的安全基线。若把 `Default` 也做成透明，
+/// 任何拿它当夹具的用例都会静默失去条带色（`render_tests` / `status` 里就有十几处）。
 impl Default for Palette {
     fn default() -> Self {
         DEFAULT_DARK
@@ -185,13 +216,21 @@ impl Palette {
     /// Desktop 主题名 → 配色板；未知 / 空 → 默认深色（不回落到不可读的随机取值）。
     #[must_use]
     pub(crate) fn from_theme(theme: Option<&str>) -> Self {
-        match theme.map(str::trim).unwrap_or_default() {
-            "crabmate-light" => CRABMATE_LIGHT,
-            "shadcn-light" => SHADCN_LIGHT,
-            "shadcn-dark" => SHADCN_DARK,
-            "material-dark" => MATERIAL_DARK,
-            "high-contrast-dark" => HIGH_CONTRAST_DARK,
-            _ => DEFAULT_DARK,
+        match theme.map(str::trim) {
+            // 未设置（含空串）：产品默认就是透明——启动到拉回 prefs 之间也走这里。
+            None | Some("") => SHADCN_TRANSPARENT,
+            Some("crabmate-light") => CRABMATE_LIGHT,
+            Some("shadcn-light") => SHADCN_LIGHT,
+            Some("shadcn-dark") => SHADCN_DARK,
+            Some("material-dark") => MATERIAL_DARK,
+            Some("high-contrast-dark") => HIGH_CONTRAST_DARK,
+            Some("shadcn-transparent") => SHADCN_TRANSPARENT,
+            // 旧的默认深色留一个显式名字：透明是新的默认，但得能切回来。
+            Some("default-dark") => DEFAULT_DARK,
+            // 认识不了的名字（前端将来新增主题 / user-data 被手改 / 拼错）→ 回退实底深色。
+            // 这里**不能**给透明：静默变透明的表现是「一片黑、没有条带」，几乎无法归因；
+            // 实底深色至少有可读的正文与分区。
+            Some(_) => DEFAULT_DARK,
         }
     }
 
@@ -247,12 +286,18 @@ impl Palette {
 
     /// [`Self::resolve`] 的可注入版本（单测不依赖真实环境变量）。
     ///
-    /// 判定顺序（全部在 [`term_image::color_depth`] 里完成）：`CM_TUI_COLOR` 显式覆盖 →
-    /// `NO_COLOR` / `TERM=dumb` → 真彩 → 256 → 16。两者读同一个函数，否则迟早会漂移成
-    /// 「配色用真彩、图像按 16 色」或「配色无色、背景彩色」这种自相矛盾的状态。
+    /// 判定顺序：`CM_TUI_THEME`（本地主题名覆盖）→ serve 的 prefs 主题；色深再看
+    /// [`term_image::color_depth`]（`CM_TUI_COLOR` 显式覆盖 → `NO_COLOR` / `TERM=dumb`
+    /// → 真彩 → 256 → 16）。配色与背景档位读同一个函数，否则迟早会漂移成「配色用真彩、
+    /// 图像按 16 色」或「配色无色、背景彩色」这种自相矛盾的状态。
     #[must_use]
     pub(crate) fn resolve_with(theme: Option<&str>, env: &dyn Fn(&str) -> Option<String>) -> Self {
-        let p = Self::from_theme(theme);
+        // `CM_TUI_THEME` 只认已知预设：拼错时**忽略覆盖**（继续用 serve 的 prefs），
+        // 而不是静默退成默认深色——后者会让人以为「透明主题没生效」却查不出原因。
+        let forced = env("CM_TUI_THEME")
+            .map(|v| v.trim().to_ascii_lowercase())
+            .filter(|v| THEME_NAMES.contains(&v.as_str()));
+        let p = Self::from_theme(forced.as_deref().or(theme));
         match term_image::color_depth(env) {
             ColorDepth::Mono => Self::mono(),
             ColorDepth::TrueColor => p,
@@ -326,9 +371,15 @@ mod tests {
             Palette::from_theme(Some("high-contrast-dark")),
             HIGH_CONTRAST_DARK
         );
-        // 未知 / 空 / None 一律回默认深色（不回落到不可读取值）。
+        // 旧的默认深色保留为显式可选项（透明成为默认后的回退入口）。
+        assert_eq!(Palette::from_theme(Some("default-dark")), DEFAULT_DARK);
+        // 未设置 / 空串 → 透明（产品默认）。
+        assert_eq!(Palette::from_theme(None), SHADCN_TRANSPARENT);
+        assert_eq!(Palette::from_theme(Some("")), SHADCN_TRANSPARENT);
+        // 不认识的名字 → 实底深色，而不是透明：静默变透明等于「一片黑、无处归因」。
         assert_eq!(Palette::from_theme(Some("nope")), DEFAULT_DARK);
-        assert_eq!(Palette::from_theme(None), Palette::default());
+        // `Default` 与 `from_theme(None)` 刻意解耦：结构体兜底要「有底色、可读」。
+        assert_eq!(Palette::default(), DEFAULT_DARK);
     }
 
     #[test]
@@ -418,5 +469,79 @@ mod tests {
         assert_eq!(m.accent, Color::Reset);
         // 无色模式下修饰位仍可用（调用方据此区分语义）。
         assert_eq!(m.downgrade_basic(), m);
+    }
+
+    #[test]
+    fn transparent_theme_only_resets_the_two_background_slots() {
+        let t = Palette::from_theme(Some("shadcn-transparent"));
+        assert_eq!(t.bg, Color::Reset, "聊天区底色交给终端");
+        assert_eq!(t.chrome_bg, Color::Reset, "条带底色也交给终端");
+        assert_eq!(t.fg, SHADCN_DARK.fg, "前景沿用 shadcn-dark");
+        assert_eq!(t.border, SHADCN_DARK.border);
+        assert_ne!(t.border, Color::Reset, "边框必须是实色，否则整屏没有分区");
+        assert_ne!(t.code_bg, Color::Reset, "代码块底色保持实色");
+        assert!(!t.mono, "透明不等于无色：语义仍靠颜色区分");
+    }
+
+    #[test]
+    fn transparent_slots_survive_the_16_colour_downgrade() {
+        let p = SHADCN_TRANSPARENT.downgrade_basic();
+        assert_eq!(p.bg, Color::Reset, "降级不该把「透出终端」变成某个索引色");
+        assert_eq!(p.chrome_bg, Color::Reset);
+        assert_ne!(p.border, Color::Reset);
+    }
+
+    #[test]
+    fn every_listed_theme_name_maps_to_its_own_palette() {
+        // 显式期望表：漏接 `from_theme` 的预设会落到 `Some(_)` 的深色兜底，等值断言立刻变红。
+        let expected = [
+            ("crabmate-light", CRABMATE_LIGHT),
+            ("shadcn-light", SHADCN_LIGHT),
+            ("shadcn-dark", SHADCN_DARK),
+            ("material-dark", MATERIAL_DARK),
+            ("high-contrast-dark", HIGH_CONTRAST_DARK),
+            ("shadcn-transparent", SHADCN_TRANSPARENT),
+            ("default-dark", DEFAULT_DARK),
+        ];
+        assert_eq!(
+            expected.len(),
+            THEME_NAMES.len(),
+            "THEME_NAMES 与期望表不同步"
+        );
+        for (name, want) in expected {
+            assert_eq!(Palette::from_theme(Some(name)), want, "{name} 映射错了");
+        }
+    }
+
+    #[test]
+    fn cm_tui_theme_overrides_the_serve_pref_but_only_for_known_names() {
+        let env = |theme: &'static str| {
+            move |k: &str| match k {
+                "CM_TUI_THEME" => Some(theme.to_string()),
+                "CM_TUI_COLOR" => Some("truecolor".to_string()),
+                _ => None,
+            }
+        };
+        // 覆盖生效：serve 给的是浅色，本地仍拿到透明深色。
+        let p = Palette::resolve_with(Some("shadcn-light"), &env("shadcn-transparent"));
+        assert_eq!(p, SHADCN_TRANSPARENT);
+
+        // 未列出的主题名不生效：仍用 serve 的 prefs，而不是静默退默认深色。
+        // 这里刻意不用「拼写接近的错名」——pre-commit 的 typos 钩子带自动修正
+        // （`--write-changes`），会把错名当笔误改对，用例就失去意义了。
+        let p = Palette::resolve_with(Some("crabmate-light"), &env("no-such-theme"));
+        assert_eq!(p, CRABMATE_LIGHT, "未知主题名应忽略覆盖");
+    }
+    #[test]
+    fn colourless_mode_outranks_a_theme_choice() {
+        // `CM_TUI_COLOR=none` 的判定在主题之后：连透明主题也要退成 mono。
+        // 这条守着判定顺序，避免将来把主题解析挪到色深之后。
+        let env = |k: &str| match k {
+            "CM_TUI_THEME" => Some("shadcn-transparent".to_string()),
+            "CM_TUI_COLOR" => Some("none".to_string()),
+            _ => None,
+        };
+        let p = Palette::resolve_with(Some("shadcn-dark"), &env);
+        assert!(p.is_mono(), "无色模式应压过主题选择");
     }
 }

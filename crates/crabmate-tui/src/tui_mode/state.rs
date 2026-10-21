@@ -237,7 +237,7 @@ impl UiState {
     pub fn new() -> Self {
         Self {
             page_rows: 12,
-            // 主题在拿到 user-data 前先按终端能力落默认深色。
+            // 拿到 user-data 前先落默认（透明）主题；prefs 到达后由 serve 的主题覆盖。
             palette: Palette::resolve(None),
             ..Self::default()
         }

@@ -53,6 +53,7 @@ fn render_screen(st: &UiState) -> Buffer {
 #[test]
 fn cell_background_replaces_themed_fills() {
     let mut st = UiState::new();
+    st.set_palette(Palette::from_theme(Some("shadcn-dark")));
     let probe = (1u16, H - 1); // 状态栏：主题 chrome_bg 铺的格
     let base = render_screen(&st);
     assert_eq!(
@@ -151,8 +152,9 @@ fn row_bg_count(buf: &Buffer, y: u16, want: Color) -> usize {
 /// 浅色主题下会直接糊成一片 —— 正是没有颜色断言时最容易漏掉的回归。
 #[test]
 fn every_theme_paints_bands_and_chat_area_from_palette_slots() {
+    // 只列有实底色的主题：透明预设的 bg 与 chrome_bg 同为 `Reset`，
+    // 「条带不该用聊天区底色」这种反向断言在它身上没有区分力（另有专门用例）。
     for theme in [
-        None,
         Some("crabmate-light"),
         Some("shadcn-light"),
         Some("shadcn-dark"),
@@ -201,7 +203,7 @@ fn every_theme_paints_bands_and_chat_area_from_palette_slots() {
 /// 而边框又只在有焦点时才被注意，改错了很难被发现。
 #[test]
 fn composer_border_follows_focus() {
-    let pal = Palette::default();
+    let pal = Palette::from_theme(Some("shadcn-dark"));
     let mut st = UiState::new();
     st.set_palette(pal);
     st.sidebar_visible = false;
@@ -237,7 +239,7 @@ fn composer_border_follows_focus() {
 /// 那只能证明「行模型里带着颜色」，证明不了它穿过 `Paragraph` 之后还留在缓冲区里。
 #[test]
 fn search_hit_reaches_the_buffer_and_vanishes_without_search() {
-    let pal = Palette::default();
+    let pal = Palette::from_theme(Some("shadcn-dark"));
     let mut st = UiState::new();
     st.set_palette(pal);
     st.sidebar_visible = false;
@@ -263,7 +265,7 @@ fn search_hit_reaches_the_buffer_and_vanishes_without_search() {
 /// 行内代码得有自己的底：否则 `code_bg` 这一档主题色等于白定义。
 #[test]
 fn inline_code_gets_code_background() {
-    let pal = Palette::default();
+    let pal = Palette::from_theme(Some("shadcn-dark"));
     let mut st = UiState::new();
     st.set_palette(pal);
     st.sidebar_visible = false;
@@ -314,7 +316,7 @@ fn mono_mode_paints_no_color_at_all() {
 /// `(Style, char)`，证明不了它最后有没有被画成像素（行内代码底色曾经就是这样丢的）。
 #[test]
 fn code_block_renders_label_and_background_without_fence_marks() {
-    let pal = Palette::default();
+    let pal = Palette::from_theme(Some("shadcn-dark"));
     let mut st = UiState::new();
     st.set_palette(pal);
     st.sidebar_visible = false;
@@ -367,7 +369,7 @@ fn code_block_renders_label_and_background_without_fence_marks() {
 /// 字符流测试只证明 span 里有正确内容，证明不了「竖线真的没被画上去」。
 #[test]
 fn table_renders_without_pipes_on_screen() {
-    let pal = Palette::default();
+    let pal = Palette::from_theme(Some("shadcn-dark"));
     let mut st = UiState::new();
     st.set_palette(pal);
     st.sidebar_visible = false;
@@ -394,7 +396,7 @@ fn table_renders_without_pipes_on_screen() {
 /// 结构性标记在缓冲区层面：`#`、`[ ]`、`[x]` 不上屏，`▌` / `─` / `☑` 上屏。
 #[test]
 fn structural_markers_do_not_reach_the_screen() {
-    let pal = Palette::default();
+    let pal = Palette::from_theme(Some("shadcn-dark"));
     let mut st = UiState::new();
     st.set_palette(pal);
     st.sidebar_visible = false;
@@ -453,4 +455,39 @@ fn top_bar_has_no_mode_badge_or_hints() {
         0,
         "顶栏仍是条带色，不该用聊天区底色"
     );
+}
+
+/// 透明主题：两块底色都交给终端，分区只剩 `border` / 气泡这类实色格。
+#[test]
+fn transparent_theme_leaves_both_background_slots_to_the_terminal() {
+    let mut st = UiState::new();
+    st.set_palette(Palette::from_theme(Some("shadcn-transparent")));
+    st.sidebar_visible = false;
+    st.push_line(LineKind::User, "hi");
+    st.push_line(LineKind::Assistant, "行内 `code` 也要留底");
+    let buf = render_screen(&st);
+    let half = W as usize / 2;
+
+    assert!(
+        row_bg_count(&buf, H - 1, Color::Reset) >= half,
+        "状态栏应透出终端底色"
+    );
+    assert!(
+        row_bg_count(&buf, 0, Color::Reset) >= half,
+        "聊天区应透出终端底色"
+    );
+    // (ii) 档的代价：整屏没有一个实色底块（边框是**前景色**字符，不是底色），
+    // 分区感只剩字符本身与空白，所以前景必须仍是实色，否则等同于无色模式。
+    let inked = (0..H)
+        .flat_map(|y| (0..W).map(move |x| (x, y)))
+        .filter(|&(x, y)| buf[(x, y)].fg != Color::Reset)
+        .count();
+    assert!(inked > 0, "透明只该让出底色，前景（边框/正文）必须仍是实色");
+    // 透明只让出 `bg` / `chrome_bg`：行内代码这类槽位必须仍有实底，
+    // 否则「透明主题」会把可读性兜底一起抹掉。
+    let code_cells = (0..H)
+        .flat_map(|y| (0..W).map(move |x| (x, y)))
+        .filter(|&(x, y)| buf[(x, y)].bg == st.palette.code_bg)
+        .count();
+    assert!(code_cells > 0, "行内代码的 code_bg 不该被透明主题抹掉");
 }

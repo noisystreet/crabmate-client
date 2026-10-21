@@ -446,7 +446,7 @@ mod tests {
         let mut st = UiState::new();
         // 显式落深色配色：`UiState::new()` 走 `Palette::resolve`（会读 `NO_COLOR` 等环境），
         // 测试不能依赖运行环境是不是无色终端。
-        st.set_palette(Palette::default());
+        st.set_palette(Palette::from_theme(Some("shadcn-dark")));
         st.workspace_path = Some("/data/proj".to_string());
         st.ws_ready = true;
         st.ws_cursor = 2;
@@ -578,7 +578,7 @@ mod tests {
 
     #[test]
     fn sidebar_view_keeps_selected_visible() {
-        let pal = Palette::default();
+        let pal = Palette::from_theme(Some("shadcn-dark"));
         let mut rows: Vec<Line<'static>> = vec![Line::from("header")];
         rows.extend((0..10).map(|i| Line::from(format!("item{i}"))));
         let v = sidebar_view(&rows, 4, 7, 20, &pal);
@@ -589,7 +589,7 @@ mod tests {
 
     #[test]
     fn sidebar_view_reports_hidden_rows_in_title() {
-        let pal = Palette::default();
+        let pal = Palette::from_theme(Some("shadcn-dark"));
         let mut rows: Vec<Line<'static>> = vec![Line::from("header")];
         rows.extend((0..10).map(|i| Line::from(format!("item{i}"))));
         // 高 4 行 = 标题 + 3 条；选中第 7 条 → 上方藏 5 条、下方藏 2 条。
@@ -602,7 +602,7 @@ mod tests {
 
     #[test]
     fn sidebar_view_fits_without_window() {
-        let pal = Palette::default();
+        let pal = Palette::from_theme(Some("shadcn-dark"));
         let mut rows: Vec<Line<'static>> = vec![Line::from("header")];
         rows.extend((0..3).map(|i| Line::from(format!("item{i}"))));
         let v = sidebar_view(&rows, 5, 1, 20, &pal);
@@ -613,7 +613,7 @@ mod tests {
     /// 带溢出计数时标题仍要保住多 span 样式（工作区名 BOLD / 计数器 muted）。
     #[test]
     fn overflow_hint_keeps_counter_style_and_drops_padding() {
-        let pal = Palette::default();
+        let pal = Palette::from_theme(Some("shadcn-dark"));
         // 模拟 `workspace_title`：[名称(BOLD)] [右对齐填充] [计数器(Gray)]
         let mut rows = vec![Line::from(vec![
             Span::styled(
