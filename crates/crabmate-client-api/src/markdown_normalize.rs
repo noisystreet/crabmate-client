@@ -107,8 +107,32 @@ fn last_paragraph_has_open_bold(out: &[String]) -> bool {
 ///
 /// 无法覆盖所有非法 Markdown；不改写嵌套列表缩进（避免误伤代码/散文）。极端正文若以围栏标记结尾仍可能被改写（极少见）。
 pub fn normalize_markdown_for_render(md: &str) -> String {
+    normalize_markdown_for_render_checked(md).0
+}
+
+/// 文本结尾的围栏状态。
+///
+/// **只做诊断、不决定处置**：同一份文本在流式与回放里的正确处置相反 ——
+/// 流式中途停在未闭合围栏是正常态（提前「修正」会让代码块在闭合瞬间跳变），
+/// 回放是终态（多出的孤儿开符会把余下正文全涂成代码块）。判断权留给调用方，
+/// 这里只回答「结尾是否还有未闭合围栏」。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FenceState {
+    /// 开关行成对。
+    Balanced,
+    /// 结尾仍在围栏内（最后一个开符没等到闭合）。
+    Open,
+}
+
+/// 规范化 + 围栏状态（[`normalize_markdown_for_render`] 的带诊断版本）。
+///
+/// 两者是**同一趟**产物：行集合由同一个状态机展开（含行内围栏拆行、围栏内拆闭合符），
+/// 所以调用方不必自己再数一遍开关行 —— 数出与渲染器不同的行集合，正是
+/// 「行内粘连开符 + 正常代码块」被误判成孤儿、真正的闭合符被清掉的根因。
+#[must_use]
+pub fn normalize_markdown_for_render_checked(md: &str) -> (String, FenceState) {
     if md.is_empty() {
-        return String::new();
+        return (String::new(), FenceState::Balanced);
     }
     let md = normalize_glued_markdown_blocks(md);
     let mut in_fence = false;
@@ -127,7 +151,12 @@ pub fn normalize_markdown_for_render(md: &str) -> String {
             out.push(piece.to_string());
         }
     }
-    out.join("\n")
+    let state = if in_fence {
+        FenceState::Open
+    } else {
+        FenceState::Balanced
+    };
+    (out.join("\n"), state)
 }
 
 /// 围栏内的一行：只做「把粘在代码行末尾的围栏拆出来」，其余原样。
@@ -162,26 +191,45 @@ fn fence_switch_line(line: &str) -> bool {
     s.starts_with("```") || s.starts_with("~~~")
 }
 
-/// 终态兜底：围栏数为奇数时，把**最后一个**未配对的开关行降级成普通文本。
+/// 把最后一个未配对的开符行降级成空行（正文一个字不丢）。
+///
+/// **输入必须是已规范的文本**（[`normalize_markdown_for_render_checked`] 的输出）：
+/// 只有在「渲染器实际会看到的行集合」上做贪心配对，`open` 才真的指向一个开符。
+/// 在**原始**文本上数会漏掉行内粘连的开符（`依赖：```rust`），于是把后面的正常
+/// 代码块算成奇数、把最后一个**闭合符**当成孤儿清掉 —— 那会制造出未闭合围栏，
+/// 正是本函数要防范的反面。
+fn demote_last_opener(md: &str) -> String {
+    let mut lines: Vec<&str> = md.split('\n').collect();
+    let mut open: Option<usize> = None;
+    for (i, line) in lines.iter().enumerate() {
+        if fence_switch_line(line) {
+            open = if open.is_some() { None } else { Some(i) };
+        }
+    }
+    let Some(i) = open else {
+        return md.to_string();
+    };
+    // 开关行整行只有标记（可能带 info 串），清空即降级成普通空行，正文一个字不丢。
+    lines[i] = "";
+    lines.join("\n")
+}
+
+/// 终态兜底：规范化后若仍有未闭合围栏，把**最后一个**未配对的开符行降级成空行。
 ///
 /// 只给**已经结束**的文本用（历史回放）：流式中途停在未闭合围栏是正常状态，那时不能动，
 /// 否则代码块会在闭合瞬间跳变。而回放是终态——一条消息里多出一个孤儿开符，
 /// 余下正文就被涂成代码块；降级（去掉那一行的标记本身，不删正文）比继续错下去好。
+///
+/// **顺序是「先规范化、再配对」**：早先的实现直接在原始文本上数开关行，而行内围栏
+/// （`依赖：```rust`）要等规范化才拆成独立行 —— 于是「两个正常代码块 + 一处粘连开符」
+/// 被数成奇数，真正的闭合行被清空，TUI 回放就把历史消息渲染成了代码块。
 #[must_use]
 pub fn balance_unclosed_fence(md: &str) -> String {
-    let mut orphan: Option<usize> = None;
-    for (i, line) in md.split('\n').enumerate() {
-        if fence_switch_line(line) {
-            orphan = if orphan.is_some() { None } else { Some(i) };
-        }
+    let (text, state) = normalize_markdown_for_render_checked(md);
+    match state {
+        FenceState::Balanced => text,
+        FenceState::Open => demote_last_opener(&text),
     }
-    let Some(orphan) = orphan else {
-        return md.to_string();
-    };
-    let mut lines: Vec<&str> = md.split('\n').collect();
-    // 开关行整行只有标记（可能带 info 串），清空即降级成普通空行，正文一个字不丢。
-    lines[orphan] = "";
-    lines.join("\n")
 }
 
 /// 去掉 `\r`，对单行应用围栏规范化（可能输出多行，以 `\n` 连接），再对**每一输出行**补 ATX 标题空格。
@@ -567,7 +615,62 @@ fn split_trailing_fence_run(s: &str) -> Option<(&str, &str)> {
 
 #[cfg(test)]
 mod tests {
-    use super::{balance_unclosed_fence, normalize_markdown_for_render};
+    use super::{
+        FenceState, balance_unclosed_fence, normalize_markdown_for_render,
+        normalize_markdown_for_render_checked,
+    };
+
+    /// 回归：行内粘连开符（`依赖：```rust`）+ 一个正常代码块，规范化后围栏必须成对。
+    ///
+    /// 这条针对的是「行集合由规范化确定」这件事：若改回在原始文本上数开关行，
+    /// 粘连开符不算开关，后面那个正常代码块就被算成奇数。
+    #[test]
+    fn checked_reports_balanced_when_an_opener_is_glued_to_prose() {
+        let raw = "```rust\na();\n```\n\n依赖：```rust\nb();\n```\n\n后面的正文\n";
+        let (norm, state) = normalize_markdown_for_render_checked(raw);
+        assert_eq!(state, FenceState::Balanced, "{norm:?}");
+    }
+
+    /// 真孤儿开符要被诊断出来，且正文一个字都不能丢（诊断不负责处置）。
+    #[test]
+    fn checked_reports_open_for_an_orphan_opener() {
+        let raw = "前言\n```rust\n残留的正文\n";
+        let (norm, state) = normalize_markdown_for_render_checked(raw);
+        assert_eq!(state, FenceState::Open, "{norm:?}");
+        assert!(norm.contains("残留的正文"), "{norm:?}");
+    }
+
+    /// 组合回归：`balance_unclosed_fence` 先规范化再配对，
+    /// 因此「两个正常代码块 + 行内粘连开符」必须保持闭合。
+    ///
+    /// 旧实现在这里会把**最后一个闭合符**当成孤儿清掉，制造出未闭合围栏 ——
+    /// 症状就是 TUI 回放把历史消息的后半段渲染成代码块、并按原始格式显示。
+    #[test]
+    fn balance_keeps_two_blocks_closed_when_an_opener_is_glued_to_prose() {
+        let raw = "```rust\na();\n```\n\n依赖：```rust\nb();\n```\n\n后面的正文\n";
+        let balanced = balance_unclosed_fence(raw);
+        let (norm, state) = normalize_markdown_for_render_checked(&balanced);
+        assert_eq!(
+            state,
+            FenceState::Balanced,
+            "balanced={balanced:?} norm={norm:?}"
+        );
+    }
+
+    /// 规范化必须幂等：回放侧已经规范化过一遍，渲染侧（`md::assistant_styled_text`）
+    /// 还会再过一次；两次结果不一致就会出现「回放与现场不同」。
+    #[test]
+    fn normalize_is_idempotent() {
+        for raw in [
+            "```rust\na();\n```\n\n依赖：```rust\nb();\n```\n",
+            "fn main() {}```\n后面的文字\n",
+            "###规范\n-项\n",
+            "| a | b |\n|---|---|\n| 1 | 2 |\n",
+        ] {
+            let once = normalize_markdown_for_render(raw);
+            assert_eq!(normalize_markdown_for_render(&once), once, "raw={raw:?}");
+        }
+    }
 
     #[test]
     fn normalize_sticky_lang_slash_slash() {
