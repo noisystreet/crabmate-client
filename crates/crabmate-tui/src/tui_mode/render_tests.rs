@@ -723,3 +723,66 @@ fn replayed_tool_row_has_no_progress_slot() {
     assert_eq!(prefix_for(&st.lines[0]), TOOL_PREFIX_PROGRESS);
     assert_eq!(prefix_for(&st.lines[1]), kind_prefix(LineKind::Tool));
 }
+
+/// 把「环境变量取到什么值」直接喂给解析函数，避免单测碰真实 env。
+fn composer_hint_from(v: Option<&str>) -> bool {
+    composer_hint_enabled_with(&|_| v.map(str::to_string))
+}
+
+/// 占位提示默认关：只有显式开启的取值才画。
+#[test]
+fn composer_hint_is_off_unless_explicitly_enabled() {
+    assert!(!composer_hint_from(None), "未设变量应保持关闭");
+    for v in ["0", "off", "false", "no", "disable", "", "随便"] {
+        assert!(!composer_hint_from(Some(v)), "{v:?} 不应开启");
+    }
+    for v in ["1", "on", " TRUE ", "yes", "ENABLE"] {
+        assert!(composer_hint_from(Some(v)), "{v:?} 应开启");
+    }
+}
+
+/// 空 composer 默认不画占位提示。
+///
+/// 只覆盖「默认」这一半：开启分支要读真实环境变量，而 `std::env::set_var` 在
+/// edition 2024 是 unsafe、还会污染同进程其它用例，不值得为它开这个口子。
+#[test]
+fn empty_composer_has_no_placeholder_by_default() {
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+
+    if composer_hint_enabled() {
+        return; // 本机设了 CM_TUI_COMPOSER_HINT，本用例前提不成立。
+    }
+    let mut st = UiState::new();
+    st.set_palette(Palette::default());
+    st.sidebar_visible = false;
+    let rows = build_body_rows(&st, chat_body_width(false, 80));
+    let info = StatusInfo {
+        api_base: "http://x".into(),
+        model: None,
+        role: None,
+        mode: None,
+        running: false,
+        cancel_sent: false,
+        spinner: 0,
+        view_offset: 0,
+        search_term: None,
+        search_total: 0,
+    };
+    let mut terminal = Terminal::new(TestBackend::new(80, 12)).expect("terminal");
+    terminal
+        .draw(|f| draw(f, &st, &info, &rows, None))
+        .expect("draw");
+    let screen: String = terminal
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .map(|c| c.symbol())
+        .collect();
+    // 空会话正文的 BODY_EMPTY_HINT 也以「输入消息」开头，故匹配带分隔符的完整前缀。
+    assert!(
+        !screen.contains("输入消息 ·"),
+        "默认不应画 composer 占位提示"
+    );
+}
