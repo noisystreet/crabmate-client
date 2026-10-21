@@ -26,7 +26,7 @@ pub(crate) struct Palette {
     pub hit: Color,
     /// 聊天区底色。
     pub bg: Color,
-    /// 顶栏 / 状态栏 / 侧栏 / composer 底色（比 `bg` 再压一档，形成条带）。
+    /// 状态栏 / 侧栏 / composer 底色（比 `bg` 再压一档，形成条带）。
     pub chrome_bg: Color,
     /// 列表选中行底色（桌面 `--surface-hover` 一档）。
     ///

@@ -25,11 +25,6 @@ use overlay::{render_approval_overlay, render_settings_overlay};
 // `mod.rs` 的 `settings_content(...)` 调用点。
 pub(crate) use overlay::settings_panel_content_width;
 
-// 顶栏三段式（B5）拆到 `topbar.rs`：纯函数 + 自算列，别让本文件再贴 920 行门禁。
-#[path = "topbar.rs"]
-mod topbar;
-use topbar::top_line;
-
 /// 低于此宽度隐藏左右栏（等价 repl 布局）。
 pub const SIDEBAR_MIN_WIDTH: u16 = 120;
 /// 左会话列 / 右工作区列宽度。
@@ -54,7 +49,7 @@ pub(super) const SIDEBAR_HINT: &str = "↑↓ Enter用 Del删 n新 r刷";
 pub(super) const SIDEBAR_DELETE_HINT: &str = "[y] 删除 [Esc] 取消";
 /// composer 最多展开行数（多行输入）。
 const MAX_COMPOSER_ROWS: usize = 4;
-// 配色见 [`Palette`]：顶栏 / 状态栏 / 侧栏 / composer 用 `chrome_bg`，聊天区用 `bg`，
+// 配色见 [`Palette`]：状态栏 / 侧栏 / composer 用 `chrome_bg`，聊天区用 `bg`，
 // 正文 / 次要 / 强调分别为 `fg` / `muted` / `accent`（随 Desktop 主题）。
 
 /// 状态行展示信息（mod 层组装好的显示值，含 override 标记）。
@@ -482,8 +477,8 @@ fn paint_bg_cells(frame: &mut Frame, st: &UiState) {
     }
 }
 
-/// 渲染一帧。对齐 Desktop：整屏 = 顶栏(工作区) + 主体 + 底部状态栏；宽屏主体为
-/// 左会话列 | 聊天列 | 右工作区目录树（右栏默认显示），composer 只位于聊天列底部。
+/// 渲染一帧。整屏 = 主体 + 底部状态栏；宽屏主体为左会话列 | 聊天列 | 右工作区目录树
+/// （右栏默认显示），composer 只位于聊天列底部。
 /// `prepared` 为事件循环按（宽度/内容指纹/搜索）memo 好的 transcript 物理行；
 /// `panel` 为设置面板内容（`Some` 时最后绘制全屏浮层并隐藏 composer 光标）。
 pub fn draw(
@@ -494,16 +489,11 @@ pub fn draw(
     panel: Option<&PanelContent>,
 ) {
     let area = frame.area();
-    // 顶栏 / 主体三列 / 状态栏的矩形与鼠标命中检测共用 `layout::panes`。
+    // 主体三列 / 状态栏的矩形与鼠标命中检测共用 `layout::panes`。
     let p = panes(area, st.sidebar_visible);
 
     let spin = progress_mark_frame(st, info);
     let pal = &st.palette;
-    paint_bg(frame, p.top, pal.chrome_bg);
-    // 顶栏：左品牌 + 居中工作区名。位置由 `top_line` 自算——
-    // 两段混排不能用整行居中，否则中段会随左段宽度漂。
-    // 模式不在这里（由状态栏 `mode` 段显示），也不放键位提示。
-    frame.render_widget(Paragraph::new(top_line(st, p.top.width as usize)), p.top);
 
     // 宽屏三列；窄屏 `left`/`right` 为 None，聊天列即整个主体。
     if let (Some(left), Some(right)) = (p.left, p.right) {
@@ -531,12 +521,12 @@ pub fn draw(
     );
     frame.render_widget(Paragraph::new(status), p.status);
 
-    // 设置面板浮层：整屏覆盖（含顶栏/状态栏），最后绘制压住全部内容。
+    // 设置面板浮层：整屏覆盖（含状态栏），最后绘制压住全部内容。
     if let Some(content) = panel {
         render_settings_overlay(frame, area, content, pal);
     } else {
         // 格子背景必须最后铺：它是「每格底色」，要盖掉前面各处 `paint_bg` 铺的主题底色，
-        // 否则顶栏/侧栏/状态栏会留成纯色块。模态浮层打开时不铺。
+        // 否则侧栏/状态栏会留成纯色块。模态浮层打开时不铺。
         paint_bg_cells(frame, st);
     }
 }

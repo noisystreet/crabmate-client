@@ -154,10 +154,10 @@ fn approval_overlay_is_centered_and_uses_the_error_border() {
     let buf = render_frame(&st, None);
 
     let title_y = row_with(&buf, "命令审批");
-    // 聊天主体 = 整屏 − 顶栏(1) − 状态栏(1) − composer(内容行 + 上下边框)；
+    // 聊天主体 = 整屏 − 状态栏(1) − composer(内容行 + 上下边框)；
     // 浮层在主体内垂直居中。
-    let body_h = H.saturating_sub(2).saturating_sub(composer_outer_rows(&st));
-    let body = Rect::new(0, 1, W, body_h);
+    let body_h = H.saturating_sub(1).saturating_sub(composer_outer_rows(&st));
+    let body = Rect::new(0, 0, W, body_h);
     let want_y = body.y + (body.height - OVERLAY_HEIGHT) / 2;
     assert_eq!(title_y, want_y, "审批浮层应垂直居中，而不是贴底");
     assert_ne!(
@@ -188,8 +188,8 @@ fn approval_overlay_fills_its_whole_rect_with_the_card_background() {
     let pal = st.palette;
     let buf = render_frame(&st, None);
 
-    let body_h = H.saturating_sub(2).saturating_sub(composer_outer_rows(&st));
-    let body = Rect::new(0, 1, W, body_h);
+    let body_h = H.saturating_sub(1).saturating_sub(composer_outer_rows(&st));
+    let body = Rect::new(0, 0, W, body_h);
     let rect = centered(
         body,
         body.width.saturating_sub(4).min(OVERLAY_MAX_WIDTH),

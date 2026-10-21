@@ -21,7 +21,7 @@ use super::workspace_tree::WsRow;
 const WORKSPACE_HINT: &str = "Enter展开 ←收 r刷 p池 w栏";
 /// 文件行的提示：Enter 把相对路径插入输入框。
 const WORKSPACE_FILE_HINT: &str = "Enter插路径 ←父 r刷 w栏";
-/// 工作区未设置（顶栏路径为空）时的按键提示。
+/// 工作区未设置（根路径为空）时的按键提示。
 const WORKSPACE_UNSET_HINT: &str = "未设置：p 选项目池 · r刷";
 /// 项目池「选择/切换工作区」子视图的按键提示。
 const WORKSPACE_PICK_HINT: &str = "↑↓ Enter切换 r刷 Esc返回";

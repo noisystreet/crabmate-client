@@ -7,9 +7,8 @@ use ratatui::layout::{Constraint, Layout, Rect};
 
 use super::render::SIDEBAR_WIDTH;
 
-/// 顶栏 / 主体 / 状态栏；宽屏时主体再分「左会话 | 聊天 | 右工作区」三列。
+/// 主体 / 状态栏；宽屏时主体再分「左会话 | 聊天 | 右工作区」三列。
 pub(super) struct Panes {
-    pub top: Rect,
     pub status: Rect,
     /// 左栏会话列（窄屏隐藏时为 `None`）。
     pub left: Option<Rect>,
@@ -21,26 +20,20 @@ pub(super) struct Panes {
 
 /// 按终端区域与侧栏可见性切分。
 pub(super) fn panes(area: Rect, sidebar_visible: bool) -> Panes {
-    let rows = Layout::vertical([
-        Constraint::Length(1),
-        Constraint::Min(1),
-        Constraint::Length(1),
-    ])
-    .split(area);
+    let rows = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(area);
     let (left, chat, right) = if sidebar_visible {
         let cols = Layout::horizontal([
             Constraint::Length(SIDEBAR_WIDTH),
             Constraint::Min(0),
             Constraint::Length(SIDEBAR_WIDTH),
         ])
-        .split(rows[1]);
+        .split(rows[0]);
         (Some(cols[0]), cols[1], Some(cols[2]))
     } else {
-        (None, rows[1], None)
+        (None, rows[0], None)
     };
     Panes {
-        top: rows[0],
-        status: rows[2],
+        status: rows[1],
         left,
         chat,
         right,
@@ -80,7 +73,7 @@ mod tests {
         // 中列起止连续，三列拼满主体且不重叠。
         assert_eq!(p.chat.x, left.width);
         assert_eq!(p.chat.x + p.chat.width, right.x);
-        assert_eq!(p.top.height, 1);
+        assert_eq!(p.chat.y, 0, "主体从第 0 行起（没有顶栏占行）");
         assert_eq!(p.status.y, 39);
     }
 
@@ -99,8 +92,8 @@ mod tests {
         for r in cols {
             assert_eq!(r.y, cols[0].y);
             assert_eq!(r.height, cols[0].height);
-            // 三列都夹在顶栏与状态栏之间。
-            assert!(r.y > p.top.y);
+            // 三列从第 0 行起，到状态栏上沿为止。
+            assert_eq!(r.y, 0);
             assert!(r.y + r.height <= p.status.y);
         }
     }

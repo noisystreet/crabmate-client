@@ -180,7 +180,7 @@ pub struct UiState {
     pub active_session_id: Option<String>,
     /// 当前是否宽到显示左栏（由渲染层每帧刷新）。
     pub sidebar_visible: bool,
-    /// 当前工作区路径（`GET /workspace`；顶栏显示，未获取为 None）。
+    /// 当前工作区路径（`GET /workspace`；右栏标题显示，未获取为 None）。
     pub workspace_path: Option<String>,
     /// 工作区目录树：根列表是否已成功加载（false 时渲染占位）。
     pub ws_ready: bool,

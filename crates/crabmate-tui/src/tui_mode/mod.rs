@@ -1,6 +1,6 @@
 //! `crabmate-tui tui`：全屏模式（M3–M4）。
 //!
-//! 布局（仿 Desktop）：顶栏(工作区) + 左栏会话 + 主区流式 transcript +
+//! 布局（仿 Desktop）：左栏会话 + 主区流式 transcript +
 //! **右栏工作区目录树（宽屏默认显示；Ctrl+W 聚焦右栏浏览）** + 底栏（多行）输入 +
 //! 审批浮层 + 底部状态栏。回合/拉取在持久 worker 线程的 current-thread tokio runtime 中
 //! 串行执行（`run_chat_stream_sink` / `fetch_web_sessions` / `fetch_workspace_dir` /

@@ -192,7 +192,7 @@ impl UiState {
         true
     }
 
-    /// 根目录列表成功到达：整体替换树并刷新顶栏路径。
+    /// 根目录列表成功到达：整体替换树并刷新右栏标题的工作区名。
     pub fn ws_root_replace(&mut self, data: WorkspaceDirData) {
         let p = data.path.trim();
         self.workspace_path = (!p.is_empty()).then(|| p.to_string());

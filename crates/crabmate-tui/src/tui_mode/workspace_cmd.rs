@@ -139,7 +139,7 @@ impl TuiApp<'_> {
         }
     }
 
-    /// `GET /workspace` 结果：只报当前根（顶栏与目录树由随后的根列表刷新负责）。
+    /// `GET /workspace` 结果：只报当前根（右栏标题与目录树由随后的根列表刷新负责）。
     pub(super) fn on_workspace_query(&mut self, result: Result<String, String>) {
         let line = workspace_query_line(&result);
         self.st.push_line(LineKind::System, &line);
@@ -171,10 +171,10 @@ impl TuiApp<'_> {
     }
 
     /// 切到新工作区后：重置树与展开态（不能保留上一个项目的目录结构）并重拉根列表；
-    /// 顶栏的 `workspace_path` 随根列表回来时更新（见 `ws_root_replace`）。
+    /// 右栏标题的工作区名（`workspace_path`）随根列表回来时更新（见 `ws_root_replace`）。
     ///
     /// 左栏会话列表同样是**按工作区分桶**的（`…/workspaces/current/sessions`），也要重拉：
-    /// 否则顶栏与目录树已换到新项目，左栏还列着上一个项目的会话，而且要等到下一轮结束
+    /// 否则右栏标题与目录树已换到新项目，左栏还列着上一个项目的会话，而且要等到下一轮结束
     /// （`on_turn_done` 的例行刷新）才会更新。当前 `conversation_id` 保持不动（serve 契约：
     /// 切换工作区不打断正在进行的对话），只是列表换成新桶。
     ///
