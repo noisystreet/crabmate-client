@@ -585,6 +585,29 @@ fn composer_content_width(area: Rect) -> usize {
 /// 空 composer 的占位提示（仅显示，不写输入缓冲）。
 const COMPOSER_PLACEHOLDER: &str = "输入消息 · Alt+Enter 换行 · /help 查看命令";
 
+/// 打开 composer 占位提示的开关：`1` / `on` / `true` / `yes` / `enable`。
+///
+/// 默认**不显示**：空会话时 [`BODY_EMPTY_HINT`] 已经把同一批快捷键说过一遍，
+/// 输入框里再挂一条等于同一句话在屏幕上出现两次；那行灰字还长期占着首行，
+/// 容易和真正输入的内容混淆。
+const COMPOSER_HINT_ENV: &str = "CM_TUI_COMPOSER_HINT";
+
+/// 是否画 composer 占位提示：默认关，[`COMPOSER_HINT_ENV`] 显式开启时才画。
+fn composer_hint_enabled() -> bool {
+    composer_hint_enabled_with(&|k| std::env::var(k).ok())
+}
+
+/// [`composer_hint_enabled`] 的可注入版本（单测不依赖真实环境变量）。
+fn composer_hint_enabled_with(env: &dyn Fn(&str) -> Option<String>) -> bool {
+    match env(COMPOSER_HINT_ENV) {
+        Some(v) => matches!(
+            v.trim().to_ascii_lowercase().as_str(),
+            "1" | "on" | "true" | "yes" | "enable"
+        ),
+        None => false,
+    }
+}
+
 /// 通用固定列渲染：内容窗口裁剪（含提示行）。内容行/光标/提示由 [`super::ws_sidebar`] 提供。
 /// 列内左右各留 1 列空隙（对齐聊天区观感），行宽按 `width - 2` 截断。
 /// `width` 与构建行时用的是同一个值（`列宽 - 2`），标题溢出计数也按它截断。
@@ -813,7 +836,7 @@ fn render_input(frame: &mut Frame, st: &UiState, area: Rect, cursor_allowed: boo
     let Some(inner) = composer_inner(frame, area, focused, pal) else {
         return;
     };
-    if st.current_input().trim().is_empty() {
+    if composer_hint_enabled() && st.current_input().trim().is_empty() {
         render_composer_placeholder(frame, inner, pal);
     }
     let rows = (composer_rows(st) as usize).min(inner.height as usize);
