@@ -115,7 +115,7 @@ fn settings_panel_content_width_matches_the_drawn_inner_width() {
 #[test]
 fn settings_panel_leaves_the_conversation_visible_around_it() {
     let mut st = UiState::new();
-    st.set_palette(Palette::default());
+    st.set_palette(Palette::from_theme(Some("shadcn-dark")));
     st.sidebar_visible = false;
     st.push_line(LineKind::User, "hi");
     let pal = st.palette;
@@ -141,7 +141,7 @@ fn settings_panel_leaves_the_conversation_visible_around_it() {
 #[test]
 fn approval_overlay_is_centered_and_uses_the_error_border() {
     let mut st = UiState::new();
-    st.set_palette(Palette::default());
+    st.set_palette(Palette::from_theme(Some("shadcn-dark")));
     st.sidebar_visible = false;
     let (tx, _rx) = std::sync::mpsc::channel();
     st.approval = Some(ApprovalOverlay {
@@ -176,7 +176,7 @@ fn approval_overlay_is_centered_and_uses_the_error_border() {
 #[test]
 fn approval_overlay_fills_its_whole_rect_with_the_card_background() {
     let mut st = UiState::new();
-    st.set_palette(Palette::default());
+    st.set_palette(Palette::from_theme(Some("shadcn-dark")));
     st.sidebar_visible = false;
     let (tx, _rx) = std::sync::mpsc::channel();
     st.approval = Some(ApprovalOverlay {
@@ -220,7 +220,7 @@ fn approval_overlay_fills_its_whole_rect_with_the_card_background() {
 /// 三个选项排一行，选中项是 `err` 色块、未选中项没有底色（span 级精确断言）。
 #[test]
 fn choice_line_paints_only_the_selected_option_as_a_block() {
-    let pal = Palette::default();
+    let pal = Palette::from_theme(Some("shadcn-dark"));
     let line = choice_line(ApprovalChoice::Once, &pal);
     // spans: [「 仅此一次 」, 间隙, 「 始终允许 」, 间隙, 「 拒绝 」]
     assert_eq!(line.spans.len(), 5, "三个选项 + 两个间隙");
@@ -237,7 +237,7 @@ fn choice_line_paints_only_the_selected_option_as_a_block() {
 #[test]
 fn the_selected_choice_reaches_the_buffer_as_a_filled_block() {
     let mut st = UiState::new();
-    st.set_palette(Palette::default());
+    st.set_palette(Palette::from_theme(Some("shadcn-dark")));
     st.sidebar_visible = false;
     let (tx, _rx) = std::sync::mpsc::channel();
     st.approval = Some(ApprovalOverlay {

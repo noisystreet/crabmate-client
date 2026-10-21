@@ -102,7 +102,7 @@ mod tests {
     fn state(path: Option<&str>) -> UiState {
         let mut st = UiState::new();
         // 固定调色板：断言不能随终端环境（`NO_COLOR` / `COLORTERM`）漂移。
-        st.set_palette(Palette::default());
+        st.set_palette(Palette::from_theme(Some("shadcn-dark")));
         st.workspace_path = path.map(str::to_string);
         st
     }

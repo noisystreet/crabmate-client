@@ -124,6 +124,8 @@ bearer 鉴权但服务端未设模型 `API_KEY` 的 serve 会返回 `LLM_API_KEY
 
 全屏 `tui` 里用 `/background <图片路径>` 在记录**背后**铺一层背景，分两档。有 kitty 图形协议时（kitty / Ghostty / Konsole / Warp）在文字下方画真像素——`z-index < 0` 是「位于文字下方」的唯一途径——压暗到 35%。其余终端（sixel / iTerm2，以及整个 VTE 家族：xfce4-terminal、GNOME Terminal）退到**每格背景色**：图被缩到「列 × 行」，每格的 `bg` 取自己那一份。这是粗马赛克（一格 = 一个像素），但完全不依赖终端协议，任何 256 色终端都能用。默认关闭；空参显示当前图，`off` 关闭。记录里的 Markdown 图片仍降级为 `[图] alt`——目前只有背景是真的像素。
 
+默认主题是**透明**的（`shadcn-transparent`）：沿用 `shadcn-dark` 的配色，但把两块底色（`bg` 与 `chrome_bg`）都设成 `Color::Reset`，于是正文区与各条带都画在终端自己铺的底色上——这是终端原生的观感，终端自身开了透明度时通常就能看到壁纸。终端单元格没有 alpha，所以只有「全透」与「不透」两态，没有半透明遮罩；终端没开透明时就只是终端默认底色，排版靠字符与边框分区而不是色带。serve 的 prefs 里设了主题时仍以它为准；本地可用 `CM_TUI_THEME` 覆盖（`crabmate-light` / `shadcn-light` / `shadcn-dark` / `material-dark` / `high-contrast-dark` / `shadcn-transparent` / `default-dark`，未知名忽略），`CM_TUI_THEME=default-dark` 可恢复原来的实底深色。
+
 发版包（仅二进制，无菜单图标、无配置文件）：
 
 ```bash
