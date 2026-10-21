@@ -1,11 +1,11 @@
 //! 浮层布局与配色的 buffer 级断言（B4）。
 //!
-//! 这里只测「浮层画在哪、用什么颜色」：位置/尺寸走纯函数（`settings_panel_rect`），
-//! 居中与边框色走 `TestBackend` 的一帧。与 `render_color_tests.rs` 分工一致 ——
+//! 这里只测「浮层画在哪、用什么颜色」：位置/尺寸走纯函数（`settings_panel_layout`），
+//! 分区与底色走 `TestBackend` 的一帧。与 `render_color_tests.rs` 分工一致 ——
 //! 那边管全屏条带与聊天区，这边管浮层。
 
 use super::super::*; // render：draw / UiState / Palette / StatusInfo / build_body_rows / chat_body_width
-use super::*; // overlay：settings_panel_rect / settings_panel_content_width / choice_line
+use super::*; // overlay：settings_panel_layout / settings_panel_content_width / choice_line
 use crate::tui_mode::approve::ApprovalChoice;
 use crate::tui_mode::state::ApprovalOverlay;
 use ratatui::Terminal;
@@ -71,70 +71,118 @@ fn row_with(buf: &Buffer, needle: &str) -> u16 {
         .unwrap_or_else(|| panic!("屏幕上看不到 {needle:?}"))
 }
 
-/// 设置面板弹层：居中、宽度有上限、高度随内容，极小终端退回整屏。
+/// 设置页四区布局：全屏铺满（不居中、不留边距），顶栏 + 左导航 + 内容 + 贴底底栏。
 #[test]
-fn settings_panel_dialog_is_centered_and_bounded() {
+fn settings_page_is_full_screen_with_four_regions() {
     let screen = Rect::new(0, 0, 80, 24);
-    let r = settings_panel_rect(screen, 10);
-    assert_eq!(r.width, 76, "左右各留 2 列");
-    assert_eq!(r.height, 12, "内容 10 行 + 上下边框");
-    assert_eq!((r.x, r.y), (2, 6), "水平、垂直都居中");
+    let l = settings_panel_layout(screen);
 
-    // 宽终端受 78 列上限约束，但仍在行内居中。
-    let wide = settings_panel_rect(Rect::new(0, 0, 200, 40), 10);
-    assert_eq!(wide.width, 78);
-    assert_eq!(wide.x, (200 - 78) / 2);
+    // 顶栏贴顶，只占标题一行（区域靠底色块区分，不画分隔线）。
+    assert_eq!((l.header.x, l.header.y, l.header.width), (0, 0, 80));
+    assert_eq!(l.header.height, 1, "顶栏只有标题行");
 
-    // 内容比可用高度多时按可用区裁剪（上下各留 1 行），不能顶到边。
-    let tall = settings_panel_rect(Rect::new(0, 0, 80, 24), 100);
-    assert_eq!(tall.height, 22);
-    assert_eq!(tall.y, 1);
+    // 底栏贴底，末行正好结束于屏幕底部。
+    assert_eq!(l.footer.y + l.footer.height, 24, "底栏必须贴底");
+    assert_eq!(l.footer.width, 80);
 
-    // 极小终端：退回整屏（与拆出前一致），且绝不越界。
-    let tiny = Rect::new(0, 0, 7, 20);
-    assert_eq!(settings_panel_rect(tiny, 4), tiny);
-    let short = Rect::new(0, 0, 80, 3);
-    assert_eq!(settings_panel_rect(short, 4), short);
+    // 左导航 + 内容区在中间横向铺满，且互不重叠。
+    assert!(l.nav.width > 0, "80 列足够画导航轨");
+    assert_eq!(l.nav.x, 0);
+    assert_eq!(l.content.x, l.nav.width, "内容区紧贴导航轨右侧");
+    assert_eq!(l.nav.width + l.content.width, 80, "两栏合起来铺满整宽");
+    assert_eq!(l.nav.height, l.content.height);
+    assert_eq!(l.nav.y + l.nav.height, l.footer.y, "主体不与底栏重叠");
 }
 
-/// 内容宽度必须与绘制内宽同源 —— 否则居中之后值列会错位、行尾被裁。
+/// 宽终端同样铺满（不再有 78 列上限）；窄终端放弃导航轨，极小终端只留内容。
+#[test]
+fn settings_page_adapts_to_terminal_width() {
+    let wide = settings_panel_layout(Rect::new(0, 0, 200, 40));
+    assert_eq!(wide.nav.width + wide.content.width, 200, "宽终端也铺满");
+    assert!(wide.nav.width <= 200 / 3, "导航轨不超过 1/3 宽");
+
+    let narrow = settings_panel_layout(Rect::new(0, 0, 30, 24));
+    assert_eq!(narrow.nav.width, 0, "窄终端不画导航轨");
+    assert_eq!(narrow.content.width, 30, "内容区独占整宽");
+
+    // 极小终端：整屏给内容，不画顶栏/底栏。
+    let tiny = Rect::new(0, 0, 16, 6);
+    let l = settings_panel_layout(tiny);
+    assert_eq!(l.header.height, 0);
+    assert_eq!(l.footer.height, 0);
+    assert_eq!(l.content, tiny);
+}
+
+/// 内容宽度必须与绘制内宽同源 —— 否则值列会错位、行尾被裁。
 #[test]
 fn settings_panel_content_width_matches_the_drawn_inner_width() {
-    for w in [20u16, 40, 80, 120, 200] {
+    // 直接对照绘制侧用的同一个矩形函数 —— 这才是「同源」的真正含义；
+    // 在测试里把内缩公式再抄一遍，反而会把公式漂移一起锁进期望值。
+    for w in [3u16, 20, 30, 44, 80, 120, 200] {
         let screen = Rect::new(0, 0, w, 24);
-        let rect = settings_panel_rect(screen, 8);
+        let layout = settings_panel_layout(screen);
         assert_eq!(
-            settings_panel_content_width(screen) as u16 + 2,
-            rect.width,
-            "内容宽度 + 左右边框 应等于弹层宽度（w={w}）"
+            settings_panel_content_width(screen) as u16,
+            content_inner_rect(layout.content).width,
+            "内容宽度必须等于绘制侧内容区宽度（w={w}）"
         );
     }
 }
 
-/// 打开设置面板后，弹层四周仍能看到底下的对话（不再是整屏覆盖）。
+/// 设置是「页面」而非浮层：整屏铺页面底色，底下的对话不再可见（对齐 desktop）。
 #[test]
-fn settings_panel_leaves_the_conversation_visible_around_it() {
+fn settings_page_covers_the_conversation() {
     let mut st = UiState::new();
     st.set_palette(Palette::from_theme(Some("shadcn-dark")));
     st.sidebar_visible = false;
-    st.push_line(LineKind::User, "hi");
+    // 用独特标记串而不是 "hi"：子串否定断言容易被别的文案里出现的两个字母误伤。
+    st.push_line(LineKind::User, "UNIQUE-CONV-MARKER");
     let pal = st.palette;
     let content = PanelContent {
         lines: vec![Line::from("模型: demo")],
-        cursor: None,
+        ..Default::default()
     };
     let buf = render_frame(&st, Some(&content));
-    let rect = settings_panel_rect(Rect::new(0, 0, W, H), content.lines.len());
 
-    // 弹层内部铺浮层卡片色。
-    assert_eq!(
-        buf[(rect.x + 1, rect.y + 1)].bg,
-        pal.overlay_bg,
-        "弹层内应铺 overlay_bg"
+    assert!(
+        (0..H).all(|y| !row_text(&buf, y).contains("UNIQUE-CONV-MARKER")),
+        "设置页应盖住底下对话（对齐 desktop 全屏页）"
     );
-    // 弹层左边距（x=0，在 rect 之外）保留聊天区底色 —— 证明不是整屏覆盖。
-    assert_eq!(buf[(0, rect.y + 1)].bg, pal.bg, "弹层外侧应仍是聊天区底色");
-    assert!(rect.x >= 2, "居中后左右应留出边距");
+
+    let l = settings_panel_layout(Rect::new(0, 0, W, H));
+    // 顶栏 / 底栏是「条」，用卡片色与页面底色区分（不画分隔线）。
+    assert_eq!(buf[(1, l.header.y)].bg, pal.overlay_bg, "顶栏条");
+    assert_eq!(buf[(1, l.footer.y)].bg, pal.overlay_bg, "底栏条");
+    let body_y = l.header.y + l.header.height;
+    assert_eq!(buf[(W / 2, body_y)].bg, pal.bg, "主体应为页面底色");
+}
+
+/// 无色模式下 `bg` / `accent` 全是 `Reset`，选中项必须退回 `REVERSED`：
+/// 否则导航轨里「当前在哪个分区」完全看不出来（见 `palette.rs` 的 mono 约定）。
+#[test]
+fn settings_nav_keeps_the_active_section_visible_in_colourless_mode() {
+    let mut st = UiState::new();
+    st.set_palette(Palette::mono());
+    st.sidebar_visible = false;
+    assert!(st.palette.mono, "前提：mono 调色板");
+    let content = PanelContent {
+        title: "模型".into(),
+        nav: vec![("模型".into(), true), ("会话".into(), false)],
+        ..Default::default()
+    };
+    let buf = render_frame(&st, Some(&content));
+    let l = settings_panel_layout(Rect::new(0, 0, W, H));
+
+    let active = &buf[(1, l.nav.y)];
+    let idle = &buf[(1, l.nav.y + 1)];
+    assert!(
+        active.modifier.contains(Modifier::REVERSED),
+        "无色模式下选中项应退回反色"
+    );
+    assert!(
+        !idle.modifier.contains(Modifier::REVERSED),
+        "未选中项不应反色"
+    );
 }
 
 /// 审批浮层：纵向居中（不再贴底），边框用 `err` 表达「回合被阻塞」。

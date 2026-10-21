@@ -6,10 +6,10 @@
 use super::*;
 
 impl SettingsPanel {
-    /// 构建一帧面板内容：分区导航 + 标记说明 + 字段行 + 底栏。
+    /// 构建一帧面板内容：说明行 + 字段行 + 顶栏/导航/底栏元数据。
     pub fn content(&self, ctx: &PanelCtx<'_>, width: usize) -> PanelContent {
         let mut lines: Vec<Line<'static>> = Vec::new();
-        lines.push(nav_line(self, width));
+        // 分区说明行：对应 desktop 内容区标题下的 `settings-content-desc`。
         lines.push(Line::from(Span::styled(
             truncate_display(
                 "标记：* = override · ~ = 未保存 · 留空保存 = 跟随 server",
@@ -26,10 +26,15 @@ impl SettingsPanel {
             }
             lines.push(line);
         }
-        // 字段行与底栏之间留一空行。
-        lines.push(Line::from(""));
-        lines.extend(footer_lines(self, width));
-        PanelContent { lines, cursor }
+        PanelContent {
+            lines,
+            cursor,
+            title: self.section.label().to_string(),
+            badge: settings_badge(self),
+            nav: nav_items(self),
+            // 底栏单独返回：绘制侧把它贴到页面底部，而不是跟字段行一起往上堆。
+            footer: footer_lines(self, width),
+        }
     }
 
     /// 单字段行：标签 + 值（编辑中的文本字段显示缓冲并给出光标列）。
@@ -163,23 +168,31 @@ fn api_base_display(v: &str) -> String {
     v.to_string()
 }
 
-/// 分区导航（选中项高亮反色）。
-fn nav_line(panel: &SettingsPanel, width: usize) -> Line<'static> {
-    let mut parts = vec![Span::styled("分区：", Style::new().fg(Color::DarkGray))];
-    for section in Section::ALL {
-        let selected = section == panel.section;
-        let mark = if selected { "▸ " } else { "  " };
-        let text = format!("{mark}{}   ", section.label());
-        let style = if selected {
-            Style::new()
-                .fg(Color::White)
-                .add_modifier(Modifier::BOLD | Modifier::REVERSED)
-        } else {
-            Style::new().fg(Color::DarkGray)
-        };
-        parts.push(Span::styled(truncate_display(&text, width), style));
+/// 左侧导航项：按 [`Section::ALL`] 顺序给出「分区名 + 是否选中」。
+///
+/// 选中态的视觉（反色底块）由绘制侧负责，这里只产出数据，便于状态层直接断言。
+fn nav_items(panel: &SettingsPanel) -> Vec<(String, bool)> {
+    Section::ALL
+        .iter()
+        .map(|s| (s.label().to_string(), *s == panel.section))
+        .collect()
+}
+
+/// 顶栏状态徽标：关闭确认 ＞ 保存中 ＞ 未保存 ＞ 只读；都没有则 `None`。
+fn settings_badge(panel: &SettingsPanel) -> Option<String> {
+    if panel.confirm_close {
+        return Some("确认放弃？".to_string());
     }
-    Line::from(parts)
+    if panel.is_saving() {
+        return Some("保存中…".to_string());
+    }
+    if panel.is_dirty() {
+        return Some("未保存".to_string());
+    }
+    if panel.read_only {
+        return Some("只读".to_string());
+    }
+    None
 }
 
 /// 面板底栏两行：动态提示 + 按键说明（每行文案各自独立成函数，控制 CCN ≤ 10）。

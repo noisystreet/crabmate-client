@@ -28,9 +28,8 @@ fn ctx<'a>(o: &'a SessionPrefs, persisted: Option<&'a PersistedSettings>) -> Pan
     }
 }
 
-fn lines_text(content: &PanelContent) -> Vec<String> {
-    content
-        .lines
+fn line_texts(lines: &[ratatui::text::Line<'static>]) -> Vec<String> {
+    lines
         .iter()
         .map(|l| {
             l.spans
@@ -39,6 +38,15 @@ fn lines_text(content: &PanelContent) -> Vec<String> {
                 .collect::<String>()
         })
         .collect()
+}
+
+fn lines_text(content: &PanelContent) -> Vec<String> {
+    line_texts(&content.lines)
+}
+
+/// 底栏文本：底栏已从 `lines` 拆到 `footer`（贴页面底部渲染），断言要跟着换源。
+fn footer_text(content: &PanelContent) -> Vec<String> {
+    line_texts(&content.footer)
 }
 
 #[test]
@@ -313,9 +321,60 @@ fn panel_footer_lines_contain_key_hints() {
     let c = ctx(&o, None);
     let p = SettingsPanel::new(false);
     let content = p.content(&c, 90);
-    let text = lines_text(&content);
+    let text = footer_text(&content);
     assert!(text.iter().any(|l| l.contains("[S] 保存")));
     assert!(text.iter().any(|l| l.contains("[Tab] 分区")));
+}
+
+/// 顶栏 / 左导航元数据：分区名进 `title`，两个分区都出现在 `nav` 且只有一个选中。
+#[test]
+fn panel_exposes_title_and_nav_items() {
+    let o = overrides(None, None, None, None);
+    let c = ctx(&o, None);
+    let mut p = SettingsPanel::new(false);
+    let content = p.content(&c, 90);
+    assert_eq!(content.title, "模型", "默认分区是模型");
+    assert_eq!(content.nav.len(), Section::ALL.len());
+    assert_eq!(
+        content.nav.iter().filter(|(_, active)| *active).count(),
+        1,
+        "同一时刻只有一个分区被选中"
+    );
+    assert!(
+        content
+            .nav
+            .iter()
+            .any(|(label, active)| label == "模型" && *active)
+    );
+
+    // Tab 切到会话：标题与选中项一起跟着走。
+    p.handle_key(&key(KeyCode::Tab), &c);
+    let content = p.content(&c, 90);
+    assert_eq!(content.title, "会话");
+    assert!(
+        content
+            .nav
+            .iter()
+            .any(|(label, active)| label == "会话" && *active)
+    );
+}
+
+/// 顶栏徽标反映面板状态：干净时无徽标，有 staged 改动时显示「未保存」。
+#[test]
+fn panel_badge_tracks_dirty_state() {
+    let o = overrides(None, None, None, None);
+    let c = ctx(&o, None);
+    let mut p = SettingsPanel::new(false);
+    assert!(p.content(&c, 90).badge.is_none(), "无改动不挂徽标");
+
+    p.handle_key(&key(KeyCode::Enter), &c);
+    // 用不可能与任何真实模型名相同的值，避免「默认生效值恰好等于它 → 不产生 staged」的偶发失败。
+    for ch in "zz-badge-probe".chars() {
+        p.handle_key(&key(KeyCode::Char(ch)), &c);
+    }
+    p.handle_key(&key(KeyCode::Enter), &c);
+    assert!(p.is_dirty(), "写入应与现值不同，从而产生 staged 改动");
+    assert_eq!(p.content(&c, 90).badge.as_deref(), Some("未保存"));
 }
 
 #[test]
