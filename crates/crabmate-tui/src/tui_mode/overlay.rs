@@ -9,6 +9,7 @@ use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use unicode_width::UnicodeWidthStr;
 
 // 本文件是 `render` 的子模块，`super::` 即 `render`：直接取它已引入的类型与私有
 // 工具函数（`paint_bg` 铺底、`truncate_display` 截断），不必再走 `super::super::…`。
@@ -32,32 +33,98 @@ fn centered(area: Rect, width: u16, height: u16) -> Rect {
     Rect::new(x, y, width, height)
 }
 
-/// 设置面板弹层矩形（含边框）：居中、宽度有上限、高度随内容自适应。
+/// 设置页左侧导航轨宽度。
 ///
-/// 为什么不是整屏：整屏覆盖把底下的对话完全盖住，看起来像「切换了页面」而不是
-/// 「打开了一个浮层」；居中留边距后，底下的会话仍在视野里，与桌面端的模态观感一致。
+/// 对齐 desktop `.settings-nav { grid-template-columns: 220px }` 的终端比例版：
+/// TUI 只有「模型 / 会话」两个分区，14 列足够放下选中标记与中文标签。
+const SETTINGS_NAV_WIDTH: u16 = 14;
+/// 设置页顶栏高度：只占标题这一行，区域靠底色块与主体区分（不画分隔线）。
+const SETTINGS_HEADER_ROWS: u16 = 1;
+/// 设置页底栏高度：状态提示 + 按键说明，同样靠底色块区分。
 ///
-/// **极小终端退化为整屏**（与拆出前的行为一致）：可用区放不下「边框 + 一行内容」时，
-/// 居中只会挤掉本就不多的行，整屏反而最稳。
-///
-/// 宽度与 [`settings_panel_content_width`] 必须同源 —— 内容行是按宽度排版的
-/// （值列对齐、超长截断都在 `SettingsPanel::content(ctx, width)` 里做），
-/// 两边各算一套就会出现「弹层 76 列、内容按 78 列生成」这种错位。
-pub(super) fn settings_panel_rect(area: Rect, content_lines: usize) -> Rect {
-    if area.width < 8 || area.height < 4 {
-        return area;
-    }
-    let width = area.width.saturating_sub(4).clamp(4, OVERLAY_MAX_WIDTH);
-    let want = (content_lines as u16).saturating_add(2); // 上下边框
-    let height = want.min(area.height.saturating_sub(2)).max(3);
-    centered(area, width, height)
+/// 与 `settings_panel_draw::footer_lines()` 恒返回 2 行是隐式契约：那边加行要同步调这里，
+/// 否则多出来的行会被 `take` 静默截断。
+const SETTINGS_FOOTER_ROWS: u16 = 2;
+/// 内容区左右内缩（desktop `.settings-content { padding: 0 14px }` 的终端缩略版）。
+const SETTINGS_CONTENT_PAD: u16 = 2;
+/// 低于此宽度不画左导航轨：两栏挤在一起还不如单列铺满。
+const SETTINGS_NAV_MIN_WIDTH: u16 = 44;
+
+/// 设置页四区矩形（顶栏 / 左导航 / 内容区 / 底栏），对齐 desktop 设置页骨架。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct SettingsPanelLayout {
+    /// 顶栏：标题 + 状态徽标，整行卡片色（不画分隔线）。
+    pub header: Rect,
+    /// 左导航轨；`width == 0` 表示终端太窄，不画导航（改用 Tab 切分区）。
+    pub nav: Rect,
+    /// 右侧内容区（字段行按它的内宽排版）。
+    pub content: Rect,
+    /// 贴底底栏：状态提示 + 按键说明，整行卡片色。
+    pub footer: Rect,
 }
 
-/// 面板内容可用宽度：与 [`settings_panel_rect`] 同源（扣掉左右边框）。
+/// 计算设置页四区矩形。
 ///
-/// 绘制侧用 `Block::inner`，这里用同样的减法，保证「按多宽生成」= 「画多宽」。
+/// 目标是与 desktop 的设置**页面**同构（顶栏 / 左导航 + 内容 / 贴底底栏），
+/// 而不是居中浮层：分区已多到需要导航轨，浮层里既塞不下也看不全。
+///
+/// **极小终端**（`width < 20` 或 `height < 8`）退化为「整屏内容区、无顶栏底栏」：
+/// 那种尺寸下顶栏 / 底栏这两条常驻区域都在抢本就不够用的行。
+///
+/// 内容区宽度与 [`settings_panel_content_width`] 必须同源 —— 字段行是按宽度排版的
+/// （值列对齐、超长截断都在 `SettingsPanel::content(ctx, width)` 里做），
+/// 两边各算一套就会出现「画 60 列、按 64 列生成」这种错位。
+pub(super) fn settings_panel_layout(area: Rect) -> SettingsPanelLayout {
+    if area.width < 20 || area.height < 8 {
+        return SettingsPanelLayout {
+            header: Rect::new(area.x, area.y, area.width, 0),
+            nav: Rect::new(area.x, area.y, 0, 0),
+            content: area,
+            footer: Rect::new(area.x, area.y, area.width, 0),
+        };
+    }
+    let header = Rect::new(area.x, area.y, area.width, SETTINGS_HEADER_ROWS);
+    let footer_y = area.y + area.height - SETTINGS_FOOTER_ROWS;
+    let footer = Rect::new(area.x, footer_y, area.width, SETTINGS_FOOTER_ROWS);
+    let body_y = header.y + header.height;
+    let body_h = footer_y.saturating_sub(body_y);
+    // 导航轨最多占 1/3 宽，避免窄屏上把字段挤成一条缝。
+    let nav_w = if area.width >= SETTINGS_NAV_MIN_WIDTH {
+        SETTINGS_NAV_WIDTH.min(area.width / 3)
+    } else {
+        0
+    };
+    SettingsPanelLayout {
+        header,
+        nav: Rect::new(area.x, body_y, nav_w, body_h),
+        content: Rect::new(
+            area.x.saturating_add(nav_w),
+            body_y,
+            area.width.saturating_sub(nav_w),
+            body_h,
+        ),
+        footer,
+    }
+}
+
+/// 内容区扣掉左右内缩后的可绘矩形。
+///
+/// 绘制（[`render_settings_body`]）与宽度计算（[`settings_panel_content_width`]）共用这一份，
+/// 从根上避免「画 60 列、按 64 列生成」这类错位 —— 包括极窄终端下内缩需要减半的情况。
+fn content_inner_rect(rect: Rect) -> Rect {
+    // 内缩取一半宽（窄终端下两边各 1 列），避免把内容挤没。
+    let pad = SETTINGS_CONTENT_PAD.min(rect.width / 2);
+    Rect::new(
+        rect.x.saturating_add(pad),
+        rect.y,
+        rect.width.saturating_sub(pad.saturating_mul(2)),
+        rect.height,
+    )
+}
+
+/// 面板内容可用宽度：与 [`settings_panel_layout`] 同源（扣掉内容区左右内缩）。
 pub(crate) fn settings_panel_content_width(area: Rect) -> usize {
-    settings_panel_rect(area, 0).width.saturating_sub(2) as usize
+    content_inner_rect(settings_panel_layout(area).content).width as usize
 }
 
 /// 审批浮层：命令预览 + 按键提示，居中浮在聊天主体上。
@@ -145,29 +212,112 @@ fn choice_line(selected: ApprovalChoice, pal: &Palette) -> Line<'static> {
     Line::from(spans)
 }
 
-/// 设置面板浮层：居中弹层（`Clear` + 独立色块 + 边框块，模板同审批浮层），
-/// 内容行由 [`super::settings_panel`] 构建（按 [`settings_panel_content_width`] 截断），
-/// 编辑时给出硬件光标位。极小终端下 [`settings_panel_rect`] 会退化为整屏。
+/// 设置页（全屏）：顶栏 + 左侧分区导航 + 内容区 + 贴底底栏。
+///
+/// 骨架对齐 desktop 的 `.settings-page`（顶栏 / `settings-layout` 两栏 / 贴底操作区），
+/// 不再是居中浮层。字段行由 [`super::settings_panel`] 按
+/// [`settings_panel_content_width`] 排版，编辑时给出硬件光标位。
 pub(super) fn render_settings_overlay(
     frame: &mut Frame,
     area: Rect,
     content: &PanelContent,
     pal: &Palette,
 ) {
-    let rect = settings_panel_rect(area, content.lines.len());
+    let layout = settings_panel_layout(area);
+    // 整屏清底：设置是「页面」而非浮层，底下不留对话残影。
+    frame.render_widget(Clear, area);
+    paint_bg(frame, area, pal.bg);
+
+    render_settings_header(frame, layout.header, content, pal);
+    if layout.nav.width > 0 {
+        render_settings_nav(frame, layout.nav, content, pal);
+    }
+    let inner = render_settings_body(frame, layout.content, content);
+    render_settings_footer(frame, layout.footer, content, pal);
+
+    // 文本编辑光标：内容行下标 + cell 列（仅在内容可见区内落位）。
+    if let Some((row, col)) = content.cursor
+        && inner.width > 0
+        && (row as u16) < inner.height
+        && (col as u16) < inner.width
+    {
+        frame.set_cursor_position((inner.x + col as u16, inner.y + row as u16));
+    }
+}
+
+/// 顶栏：`设置 · <分区>` + 状态徽标（未保存 / 保存中 / 只读）。
+fn render_settings_header(frame: &mut Frame, rect: Rect, content: &PanelContent, pal: &Palette) {
+    if rect.height == 0 || rect.width == 0 {
+        return;
+    }
+    // 高度由 `SETTINGS_HEADER_ROWS` 决定，这里直接用 rect 而不是写死 1 行：
+    // 常量若调大，新增的行也一并清底上色，不会留下一条页面底色的缝。
     frame.render_widget(Clear, rect);
     paint_bg(frame, rect, pal.overlay_bg);
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::new().fg(pal.accent))
-        .title(Span::styled(
-            " 设置（模型 / 会话） ",
-            Style::new().fg(pal.accent),
+    let mut spans = vec![
+        Span::styled(
+            " 设置",
+            Style::new().fg(pal.accent).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(" · ", Style::new().fg(pal.muted)),
+        Span::styled(
+            content.title.clone(),
+            Style::new().fg(pal.fg).add_modifier(Modifier::BOLD),
+        ),
+    ];
+    if let Some(badge) = &content.badge {
+        // 徽标走 `err` 色：未保存 / 只读都是「需要你先处理」的状态，与正常标题区分。
+        spans.push(Span::styled("  ", Style::new()));
+        spans.push(Span::styled(
+            format!("[{badge}]"),
+            Style::new().fg(pal.err).add_modifier(Modifier::BOLD),
         ));
-    let inner = block.inner(rect);
-    frame.render_widget(block, rect);
-    if inner.width == 0 || inner.height == 0 {
+    }
+    frame.render_widget(Paragraph::new(Line::from(spans)), rect);
+}
+
+/// 左侧分区导航轨：竖排、选中项反色底块。
+fn render_settings_nav(frame: &mut Frame, rect: Rect, content: &PanelContent, pal: &Palette) {
+    // 整块铺卡片色，与内容区的页面底色天然分开 —— 不画竖分隔线。
+    paint_bg(frame, rect, pal.overlay_bg);
+    if rect.width == 0 || rect.height == 0 {
         return;
+    }
+    let lines: Vec<Line<'static>> = content
+        .nav
+        .iter()
+        .take(rect.height as usize)
+        .map(|(label, active)| {
+            let style = if *active {
+                // 无色模式（`pal.mono`）下 `bg` / `accent` 全是 `Reset`，色块会整个消失，
+                // 此时退回反色 + 加粗 —— palette.rs 的约定就是「无区分只能靠 DIM/BOLD/REVERSED」。
+                if pal.mono {
+                    Style::new().add_modifier(Modifier::BOLD | Modifier::REVERSED)
+                } else {
+                    Style::new()
+                        .fg(pal.bg)
+                        .bg(pal.accent)
+                        .add_modifier(Modifier::BOLD)
+                }
+            } else {
+                Style::new().fg(pal.muted)
+            };
+            let text = if *active {
+                format!(" {label} ")
+            } else {
+                format!(" {label}")
+            };
+            Line::from(Span::styled(fill_cells(&text, rect.width as usize), style))
+        })
+        .collect();
+    frame.render_widget(Paragraph::new(lines), rect);
+}
+
+/// 内容区：字段行铺在顶栏与底栏之间，左右留内缩；返回可绘区（供光标定位）。
+fn render_settings_body(frame: &mut Frame, rect: Rect, content: &PanelContent) -> Rect {
+    let inner = content_inner_rect(rect);
+    if inner.width == 0 || inner.height == 0 {
+        return inner;
     }
     let shown: Vec<Line<'static>> = content
         .lines
@@ -176,13 +326,39 @@ pub(super) fn render_settings_overlay(
         .cloned()
         .collect();
     frame.render_widget(Paragraph::new(shown), inner);
-    // 文本编辑光标：内容行下标 + cell 列（仅在浮层内可见区域落位）。
-    if let Some((row, col)) = content.cursor
-        && (row as u16) < inner.height
-        && (col as u16) < inner.width
-    {
-        frame.set_cursor_position((inner.x + col as u16, inner.y + row as u16));
+    inner
+}
+
+/// 底栏：状态提示 + 按键说明，贴底固定（对齐 desktop 页面底部操作区）。
+fn render_settings_footer(frame: &mut Frame, rect: Rect, content: &PanelContent, pal: &Palette) {
+    if rect.height == 0 || rect.width == 0 {
+        return;
     }
+    // 同顶栏：整块卡片色本身就是一条「底栏」，不再画上方分隔线。
+    paint_bg(frame, rect, pal.overlay_bg);
+    let lines: Vec<Line<'static>> = content
+        .footer
+        .iter()
+        .take(rect.height as usize)
+        .cloned()
+        .collect();
+    frame.render_widget(Paragraph::new(lines), rect);
+}
+
+/// 把文本**填满**指定 cell 宽（CJK 按 2 列算）：不足补空格、超出截断。
+///
+/// 用于反色 / 反色块导航项铺满整行。注意与 `settings_panel::pad_cells` 语义不同 ——
+/// 那个是「补齐到至少 `cells`、超出原样返回」（字段标签列对齐用），这里必须截断，
+/// 否则超长标签会画出导航轨边界。两者刻意不复用同一个名字。
+fn fill_cells(text: &str, width: usize) -> String {
+    let used = UnicodeWidthStr::width(text);
+    if used >= width {
+        return truncate_display(text, width);
+    }
+    let mut out = String::with_capacity(text.len() + width - used);
+    out.push_str(text);
+    out.push_str(&" ".repeat(width - used));
+    out
 }
 
 // 测试与实现分开文件（同 render / md / settings_panel 惯例），避免本文件顶到行数门禁。

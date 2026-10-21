@@ -843,11 +843,27 @@ impl PanelCtx<'_> {
     }
 }
 
-/// 面板一帧内容（render 只负责把它画到浮层里）。
+/// 面板一帧内容（render 只负责把它画到全屏设置页里）。
+///
+/// 字段按 desktop 设置页的四区骨架拆分：顶栏（[`Self::title`] / [`Self::badge`]）、
+/// 左侧导航（[`Self::nav`]）、主内容（[`Self::lines`] / [`Self::cursor`]）、
+/// 贴底底栏（[`Self::footer`]）。
+#[derive(Default)]
 pub struct PanelContent {
     pub lines: Vec<Line<'static>>,
     /// 文本编辑光标：内容行下标 + cell 列（None = 不设硬件光标）。
     pub cursor: Option<(usize, usize)>,
+    /// 顶栏标题（当前分区名）。
+    pub title: String,
+    /// 顶栏状态徽标（未保存 / 保存中 / 只读）；`None` = 不显示。
+    pub badge: Option<String>,
+    /// 左侧导航项：`(分区名, 是否选中)`，按 [`Section::ALL`] 顺序排列。
+    pub nav: Vec<(String, bool)>,
+    /// 贴底底栏（状态提示 + 按键说明）。
+    ///
+    /// 必须与 `lines` 分开：字段行只有六七行，混在一起会让底栏飘在屏幕中间，
+    /// 而 desktop 底栏是贴着页面底部固定的。
+    pub footer: Vec<Line<'static>>,
 }
 
 /// 把字符串按 cell 补齐到至少 `cells`（超出则原样返回）。
