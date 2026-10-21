@@ -16,6 +16,8 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = "1"
+# 背景图走 kitty 协议要以 base64 传输；用锁文件里已有的 0.22，不再多拉一份。
+base64 = "0.22"
 clap = { version = "4", features = ["derive", "env"] }
 crabmate = { version = "0.7.0", default-features = false, features = ["protocol"] }
 crabmate-client-api = { path = "../crabmate-client-api" }
@@ -23,6 +25,8 @@ crabmate-client-api = { path = "../crabmate-client-api" }
 crabmate-tool-card = { path = "../crabmate-tool-card" }
 crossterm = "0.29"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
+# `/background` 的解码 / 缩放 / 压暗 / 重编码；只开带得上的格式，不把全部编解码器编进来。
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
 keyring = "4.1.5"
 ratatui = "0.30"
 reedline = { version = "0.52", default-features = false }

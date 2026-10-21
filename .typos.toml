@@ -3,6 +3,10 @@ typ = "typ"
 clen = "clen"
 hel = "hel"
 ratatui = "ratatui"
+iterm = "iterm"
+iterm2 = "iterm2"
+Iterm = "Iterm"
+Iterm2 = "Iterm2"
 
 [files]
 extend-exclude = [

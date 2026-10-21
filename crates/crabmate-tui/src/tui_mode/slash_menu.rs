@@ -116,6 +116,11 @@ pub fn builtin_items() -> Vec<SlashItem> {
         item(slash::ROLE, "/role ", "Agent role override（off 清除）"),
         item("find", "/find ", "搜索并高亮记录（off 清除）"),
         item(
+            "background",
+            "/background ",
+            "全屏背景（kitty 走像素，其余用每格底色；off 关闭，图会压暗）",
+        ),
+        item(
             slash::WORKSPACE,
             "/workspace ",
             "查看 / 切换 serve 工作区根（~/ 展开、off 恢复默认，/cd 别名）",

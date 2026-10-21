@@ -115,9 +115,14 @@ make tui
 ./crates/crabmate-tui/target/debug/crabmate-tui --api-base http://127.0.0.1:8080 --bearer "$CM_WEB_API_BEARER_TOKEN" chat "你好"
 ./crates/crabmate-tui/target/debug/crabmate-tui --api-base http://127.0.0.1:8080 repl   # 交互 REPL
 ./crates/crabmate-tui/target/debug/crabmate-tui --api-base http://127.0.0.1:8080 tui    # 全屏 TUI
+./crates/crabmate-tui/target/debug/crabmate-tui caps   # 终端像素图 / 颜色深度探测（不需要 serve）
 ```
 
 bearer 鉴权但服务端未设模型 `API_KEY` 的 serve 会返回 `LLM_API_KEY_REQUIRED`；可用 `--llm-api-key` 自带模型密钥（或 `CM_API_KEY` / `CM_MODEL` / `CM_API_BASE`）。`--bearer` / `--llm-api-key` 缺省时会 **read-only 回退读取桌面壳已保存在同一系统钥匙串里的密钥**（`--no-keyring` 可关闭回退）。
+
+`caps` 打印终端自报的颜色深度与像素图能力（`kitty` / `sixel` / `iterm2` / `halfblock` / `none`）。它只读环境变量——不做转义序列查询、不连 `serve`——并且**故意宁可漏报**：在 tmux / screen 里默认不选像素协议，除非用 `CM_TUI_IMAGE=kitty` 强制（也接受 `none` / `halfblock` / `sixel` / `iterm2`）。
+
+全屏 `tui` 里用 `/background <图片路径>` 在记录**背后**铺一层背景，分两档。有 kitty 图形协议时（kitty / Ghostty / Konsole / Warp）在文字下方画真像素——`z-index < 0` 是「位于文字下方」的唯一途径——压暗到 35%。其余终端（sixel / iTerm2，以及整个 VTE 家族：xfce4-terminal、GNOME Terminal）退到**每格背景色**：图被缩到「列 × 行」，每格的 `bg` 取自己那一份。这是粗马赛克（一格 = 一个像素），但完全不依赖终端协议，任何 256 色终端都能用。默认关闭；空参显示当前图，`off` 关闭。记录里的 Markdown 图片仍降级为 `[图] alt`——目前只有背景是真的像素。
 
 发版包（仅二进制，无菜单图标、无配置文件）：
 

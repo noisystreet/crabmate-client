@@ -459,6 +459,29 @@ fn paint_bg(frame: &mut Frame, rect: Rect, color: Color) {
     frame.buffer_mut().set_style(rect, Style::new().bg(color));
 }
 
+/// 格子背景：把仍是「主题底色」的单元格换成采样色，前景文字与显式底色都不动。
+///
+/// 只替换 `pal.bg` / `pal.chrome_bg`：选中行、错误色、搜索高亮等都有各自的底色，
+/// 被图色覆盖的话高亮就整片消失。先判断再改，等于「只给没有个性的格子铺图」。
+fn paint_bg_cells(frame: &mut Frame, st: &UiState) {
+    let Some(cells) = st.bg_cells.as_ref() else {
+        return;
+    };
+    let area = frame.area();
+    let flat = [st.palette.bg, st.palette.chrome_bg];
+    let buf = frame.buffer_mut();
+    for y in area.top()..area.bottom() {
+        for x in area.left()..area.right() {
+            if !flat.contains(&buf[(x, y)].bg) {
+                continue;
+            }
+            if let Some(c) = cells.get(x - area.left(), y - area.top(), area.width, area.height) {
+                buf[(x, y)].bg = c;
+            }
+        }
+    }
+}
+
 /// 渲染一帧。对齐 Desktop：整屏 = 顶栏(工作区) + 主体 + 底部状态栏；宽屏主体为
 /// 左会话列 | 聊天列 | 右工作区目录树（右栏默认显示），composer 只位于聊天列底部。
 /// `prepared` 为事件循环按（宽度/内容指纹/搜索）memo 好的 transcript 物理行；
@@ -511,6 +534,10 @@ pub fn draw(
     // 设置面板浮层：整屏覆盖（含顶栏/状态栏），最后绘制压住全部内容。
     if let Some(content) = panel {
         render_settings_overlay(frame, area, content, pal);
+    } else {
+        // 格子背景必须最后铺：它是「每格底色」，要盖掉前面各处 `paint_bg` 铺的主题底色，
+        // 否则顶栏/侧栏/状态栏会留成纯色块。模态浮层打开时不铺。
+        paint_bg_cells(frame, st);
     }
 }
 

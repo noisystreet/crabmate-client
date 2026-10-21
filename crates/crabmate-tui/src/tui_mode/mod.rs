@@ -9,6 +9,8 @@
 //! `ctrl_c` 信号路径。
 
 mod approve;
+mod background;
+mod background_cmd;
 mod body_memo;
 // `controls` / `tool_summary` 提到 `pub(crate)`：`/workspace` 的清除词（`clear_word`）与
 // 控制字符剥离（`strip_control_chars`）在 crate 根的 `workspace_path` / repl 入口也要用，
@@ -31,6 +33,8 @@ mod slash_menu;
 mod spinner;
 mod state;
 mod status;
+// `caps` 子命令要打印探测结果，`main` 侧需直接读（见 `term_image.rs` 头注释）。
+pub(crate) mod term_image;
 mod text;
 pub(crate) mod tool_summary;
 mod turn_send;
@@ -101,6 +105,8 @@ struct TuiApp<'a> {
     resume: Option<resume::ResumePoint>,
     /// 在途回合的原始输入：回合结束后据此决定要不要留断点（`/resume` 需重发同一轮）。
     sent_turn: Option<resume::TurnEcho>,
+    /// `/background` 设置的 kitty 像素背景；`None` = 不画（默认关闭）。
+    bg: Option<background::Background>,
 }
 
 impl TuiApp<'_> {
@@ -342,6 +348,7 @@ impl TuiApp<'_> {
             }
             Control::Help => self.show_help(),
             Control::Find(arg) => self.do_find(arg),
+            Control::Background(arg) => self.set_background(arg),
             Control::Workspace(arg) => self.workspace_command(arg),
             Control::Resume => self.resume_turn(),
             Control::Model(arg) => {
@@ -383,12 +390,13 @@ impl TuiApp<'_> {
     /// `/help`：向 transcript 打印本地命令与快捷键说明。
     fn show_help(&mut self) {
         for line in [
-            "本地命令：/quit（/exit、/q 同义） /help /status /settings /mode /role /model /find /workspace /resume /conv",
+            "本地命令：/quit（/exit、/q 同义） /help /status /settings /mode /role /model /find /background /workspace /resume /conv",
             "输入 / 弹出补全菜单（内建命令 + skill；↑↓ 选择 · Tab/Enter 补全 · Esc 关闭）",
             "/mode ask|plan|act · /role <id> · /model <name>（off 清除，随对话生效）",
             "/workspace <路径>（/cd 别名）切换 serve 工作区根；空参只看当前根；/workspace off 恢复 serve 默认根",
             "/settings（或 F2）：设置面板（模型名/API Base/温度/思考模式/API 密钥/Agent role/会话模式；S 保存）",
             "/find <词> 搜索并高亮 · /find（空参）跳下一处 · /find off 清除",
+            "/background <图片路径>：全屏背景（kitty 走真像素，其余终端用每格底色；图会压暗保正文可读；off 关闭）",
             "/conv list 刷新 · /conv use <id> 切换 · /conv new 新会话",
             "/resume 续传上一轮被中断的回合（serve 侧 job 仍在跑时；Ctrl+C 的 cancel 未送达也可续）",
             "按键：Alt+Enter 换行 · Ctrl+E 思考展开/折叠 · Ctrl+W 工作区目录树 · PgUp/PgDn 翻页 · Ctrl+End 回底部",
@@ -746,6 +754,9 @@ impl TuiApp<'_> {
             terminal
                 .draw(|f| render::draw(f, &self.st, &info, &self.prepared, panel.as_ref()))
                 .context("tui draw failed")?;
+            // 背景要在 draw 之后重放：kitty 让图像跟着文本一起滚动（规范明确），
+            // 而 ratatui 的差分绘制只认字符网格，不会替我们维持图像层。
+            self.paint_background(screen);
             let _ = io::stdout().flush();
             thread::sleep(Duration::from_millis(if any { 2 } else { 50 }));
         }
@@ -834,6 +845,7 @@ pub async fn run_tui(
         index: session_index::UiIndexState::default(),
         resume: None,
         sent_turn: None,
+        bg: None,
     };
     // 启动即拉一次会话 / 工作区根 / serve 默认状态 / user-data 设置快照（失败以系统行提示）。
     app.refresh_sessions();
@@ -842,6 +854,8 @@ pub async fn run_tui(
     app.refresh_status();
     app.load_user_settings();
     let res = app.run_loop(&mut terminal);
+    // 显式删背景图：退出备用屏幕时终端本会清空，但别把图像配额留到下一次运行。
+    app.clear_background();
     // 退出落盘（有界 best-effort）：`st.running` 仍为真 = 回合中被强退，不再等它落定。
     let force = app.st.running;
     let warn = app.flush_before_exit(force).await;
