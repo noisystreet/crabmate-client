@@ -1,6 +1,6 @@
 # 远程 CLI / TUI（路径 B）
 
-> **状态**：方案（已拍板走 **远程客户端**；**P3 已落地** `repl` 斜杠 `/help` `/workspace` `/conv`；**P4 已落地（M1–M4）**：全屏 `tui` 流式 transcript + 状态行 + 单行/多行输入 + Ctrl+C 取消 + 左栏会话与 `/status` 联动 + 审批浮层 + thinking 折叠 + 工具行摘要 + `/find` 搜索 + 翻页滚动 + 助手正文行内 Markdown 轻渲染 + `/background` 全屏背景（kitty 像素 / 每格底色两档，`crabmate-tui caps` 打印终端探针） + 工作区目录树浏览（右栏仿 Desktop 默认显示；Ctrl+W 聚焦，含未设置时按 p 从项目池选择）；设置面板 W1+W2 已落地；**P5 已落地**：README 双语安装/用法同步，`make tui-release` 产出仅二进制的 `crabmate-tui_*.deb`（无图标、无配置；v* tag 的 GitHub Release 亦附带））  
+> **状态**：方案（已拍板走 **远程客户端**；**P3 已落地** `repl` 斜杠 `/help` `/workspace` `/conv`；**P4 已落地（M1–M4）**：全屏 `tui` 流式 transcript + 状态（宽屏为右栏底部纵栈、`F3` 折叠；窄屏为底部单行） + 单行/多行输入 + Ctrl+C 取消 + 左栏会话与 `/status` 联动 + 审批浮层 + thinking 折叠 + 工具行摘要 + `/find` 搜索 + 翻页滚动 + 助手正文行内 Markdown 轻渲染 + `/background` 全屏背景（kitty 像素 / 每格底色两档，`crabmate-tui caps` 打印终端探针） + 工作区目录树浏览（右栏仿 Desktop 默认显示；Ctrl+W 聚焦，含未设置时按 p 从项目池选择）；设置面板 W1+W2 已落地；**P5 已落地**：README 双语安装/用法同步，`make tui-release` 产出仅二进制的 `crabmate-tui_*.deb`（无图标、无配置；v* tag 的 GitHub Release 亦附带））  
 > **范围**：`crabmate-client` 新增终端面；`crabmate serve` 仍为执行权威  
 > **关联**：Server [`client_shell_split.md`](https://github.com/noisystreet/CrabMate/blob/main/docs/design/client_shell_split.md)、[`命令行与路由.md`](https://github.com/noisystreet/CrabMate/blob/main/docs/命令行与路由.md)、本仓 [`contract_pin.md`](./contract_pin.md) / [`personal_cloud_runbook.md`](./personal_cloud_runbook.md)
 

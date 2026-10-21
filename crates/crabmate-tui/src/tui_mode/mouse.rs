@@ -24,7 +24,11 @@ impl TuiApp<'_> {
             return;
         }
         let (width, height) = self.last_size;
-        let p = panes(Rect::new(0, 0, width, height), self.st.sidebar_visible);
+        let p = panes(
+            Rect::new(0, 0, width, height),
+            self.st.sidebar_visible,
+            self.status_stack_rows(),
+        );
         let (column, row) = (ev.column, ev.row);
         // 窄屏侧栏隐藏时右栏矩形不存在，鼠标完全不动状态。
         let on_right = p.right.is_some_and(|r| contains(r, column, row));
@@ -73,7 +77,11 @@ impl TuiApp<'_> {
     /// 而插入路径仍由 Enter 完成（底部提示行已写明）。
     fn click_workspace(&mut self, column: u16, row: u16) {
         let (width, height) = self.last_size;
-        let p = panes(Rect::new(0, 0, width, height), self.st.sidebar_visible);
+        let p = panes(
+            Rect::new(0, 0, width, height),
+            self.st.sidebar_visible,
+            self.status_stack_rows(),
+        );
         let Some(right) = p.right else {
             return;
         };

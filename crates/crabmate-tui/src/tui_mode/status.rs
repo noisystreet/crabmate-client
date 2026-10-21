@@ -31,7 +31,6 @@ mod priority {
     pub(super) const MODEL: u8 = 2;
     pub(super) const MODE: u8 = 3;
     pub(super) const ROLE: u8 = 4;
-    pub(super) const CONV: u8 = 5;
     pub(super) const VIEW: u8 = 6;
 }
 
@@ -41,10 +40,10 @@ const SEPARATOR: &str = " │ ";
 const SEPARATOR_W: usize = 3;
 
 /// 左区一个分段：`label` 走淡色、`value` 走正文色。
-struct Segment {
-    label: &'static str,
-    value: String,
-    priority: u8,
+pub(super) struct Segment {
+    pub(super) label: &'static str,
+    pub(super) value: String,
+    pub(super) priority: u8,
 }
 
 impl Segment {
@@ -96,7 +95,10 @@ fn serve_value(api_base: &str, segment_budget: usize) -> String {
 }
 
 /// 左区所有候选分段（顺序即显示顺序，与优先级无关）。
-fn left_segments(info: &StatusInfo, conv: Option<&str>, budget: usize) -> Vec<Segment> {
+///
+/// **不含会话 id**：desktop 的状态区也没有它，而整行放一个被截断的 id 没有信息量
+/// （要看当前会话，左栏有 `*` 标记）。
+pub(super) fn left_segments(info: &StatusInfo, budget: usize) -> Vec<Segment> {
     let mut out = vec![Segment {
         label: "serve",
         value: serve_value(&info.api_base, budget),
@@ -123,11 +125,6 @@ fn left_segments(info: &StatusInfo, conv: Option<&str>, budget: usize) -> Vec<Se
             priority: priority::MODE,
         });
     }
-    out.push(Segment {
-        label: "conv",
-        value: conv.unwrap_or("(new)").to_string(),
-        priority: priority::CONV,
-    });
     if let Some(term) = info.search_term.as_deref() {
         out.push(Segment {
             label: "find",
@@ -212,7 +209,7 @@ fn push_segment(
 }
 
 /// 状态行右缘的运行态。
-enum RunningKind {
+pub(super) enum RunningKind {
     Idle,
     /// 生成中。`phase` 是方形亮块所在的格：方块随拍右移，六格一圈。
     /// `None` 表示整条常亮——动效关闭（`CM_TUI_REDUCED_MOTION`）时用
@@ -304,7 +301,7 @@ fn running_content_w(kind: &RunningKind) -> usize {
 
 /// 当前运行态。`reduced_motion` 时整条常亮、不扫描——动效可关是硬约束（录屏 / 远程终端 /
 /// 屏幕阅读器场景），但右缘仍要能一眼看出在生成，所以不能干脆不画。
-fn running_kind(info: &StatusInfo, reduced_motion: bool) -> RunningKind {
+pub(super) fn running_kind(info: &StatusInfo, reduced_motion: bool) -> RunningKind {
     match (info.running, info.cancel_sent) {
         (true, false) => RunningKind::Generating {
             // 六个相位：亮块每拍右移一格，走满一圈回绕。
@@ -345,12 +342,20 @@ fn push_running(spans: &mut Vec<Span<'static>>, kind: &RunningKind, pal: &Palett
     if pad > 0 {
         spans.push(Span::styled(" ".repeat(pad), Style::new()));
     }
+    spans.extend(running_spans(kind, pal));
+}
+
+/// 运行态自身的 span（**不含**右对齐补白）。
+///
+/// 横版状态行右对齐到 [`RIGHT_W`]、纵向状态栈左对齐 —— 两者共用这一份字形与配色，
+/// 免得仪器条在两处各写一遍（改一处忘一处就会出现「横条在动、栈里不动」）。
+pub(super) fn running_spans(kind: &RunningKind, pal: &Palette) -> Vec<Span<'static>> {
     let bold = |fg: Color| Style::new().fg(fg).add_modifier(Modifier::BOLD);
     match kind {
-        RunningKind::Idle => spans.push(Span::styled(IDLE_TEXT, bold(pal.muted))),
-        RunningKind::Cancelling => spans.push(Span::styled(CANCELLING_TEXT, bold(pal.accent))),
-        RunningKind::Generating { phase } => {
-            for i in 0..BAR_CELLS {
+        RunningKind::Idle => vec![Span::styled(IDLE_TEXT, bold(pal.muted))],
+        RunningKind::Cancelling => vec![Span::styled(CANCELLING_TEXT, bold(pal.accent))],
+        RunningKind::Generating { phase } => (0..BAR_CELLS)
+            .map(|i| {
                 // 方形亮块沿条右移：条内只有这一个亮特征，方向不会被误读。
                 // 「隔一亮一」不行——那种图案只有两个相位，平移一格就等于整体反转，
                 // 眼睛只会看到闪烁（周期 2 < 位移可分辨的尺度）。
@@ -360,17 +365,36 @@ fn push_running(spans: &mut Vec<Span<'static>>, kind: &RunningKind, pal: &Palett
                 } else {
                     (BAR_CELL_DIM, bar_dim_style(pal))
                 };
-                spans.push(Span::styled(cell, style));
-            }
-        }
+                Span::styled(cell, style)
+            })
+            .collect(),
     }
+}
+
+/// 纵向栈用：运行态一行**右对齐到 `width`**。
+///
+/// 横版的右缘靠 [`push_running`] 的补白贴右；纵版没有「行尾」可言，只能自己补到列宽 ——
+/// 两边都是「运行指示永远贴右」，只是参照物从整行宽度换成了列宽。折叠态也走这里，
+/// 否则一折叠它就从右边缘跳到左边。
+pub(super) fn running_spans_right_aligned(
+    kind: &RunningKind,
+    width: usize,
+    pal: &Palette,
+) -> Vec<Span<'static>> {
+    let pad = width.saturating_sub(running_content_w(kind));
+    let mut spans: Vec<Span<'static>> = Vec::with_capacity(1 + RIGHT_W);
+    if pad > 0 {
+        spans.push(Span::styled(" ".repeat(pad), Style::new()));
+    }
+    spans.extend(running_spans(kind, pal));
+    spans
 }
 
 /// `CM_TUI_REDUCED_MOTION=1`：动效退回静态。与 `NO_COLOR` 同理——录屏、远程终端、
 /// 屏幕阅读器场景下这类效果是干扰。
 ///
 /// 进程内只读一次环境变量：本函数在渲染热路径上（每帧 2–50ms 一次），不该每帧分配字符串。
-fn reduced_motion() -> bool {
+pub(super) fn reduced_motion() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| {
         std::env::var("CM_TUI_REDUCED_MOTION").is_ok_and(|v| {
@@ -384,20 +408,14 @@ fn reduced_motion() -> bool {
 ///
 /// 调用方**不要**再给 `Paragraph` 套整行 `fg + BOLD`：base style 的修饰位会盖到 label 上，
 /// 淡化后的标签就白做了。
-pub(super) fn status_line(
-    info: &StatusInfo,
-    conv: Option<&str>,
-    width: usize,
-    pal: &Palette,
-) -> Line<'static> {
-    status_line_with(info, conv, width, pal, reduced_motion())
+pub(super) fn status_line(info: &StatusInfo, width: usize, pal: &Palette) -> Line<'static> {
+    status_line_with(info, width, pal, reduced_motion())
 }
 
 /// [`status_line`] 的可注入版本：单测要能强制 reduced motion，不依赖真实环境变量
 /// （与 `Palette::resolve_with` 同一手法）。
 fn status_line_with(
     info: &StatusInfo,
-    conv: Option<&str>,
     width: usize,
     pal: &Palette,
     reduced_motion: bool,
@@ -406,7 +424,7 @@ fn status_line_with(
     // 右缘恒占 `RIGHT_W` 列：预算不随状态变，切换时左区不跳。
     let right_w = RIGHT_W;
     let budget = width.saturating_sub(right_w);
-    let segs = left_segments(info, conv, budget);
+    let segs = left_segments(info, budget);
     let chosen = fit_segments(&segs, budget);
     let mut spans: Vec<Span<'static>> = Vec::new();
     let mut used = 0usize;
@@ -429,8 +447,8 @@ fn status_line_with(
 ///
 /// `#[cfg(test)]` 是刻意的：留着它当生产 API 就会有人拿它拼字符串，样式又退回单色。
 #[cfg(test)]
-pub(super) fn status_text(info: &StatusInfo, conv: Option<&str>, width: usize) -> String {
-    status_line(info, conv, width, &Palette::default()).to_string()
+pub(super) fn status_text(info: &StatusInfo, width: usize) -> String {
+    status_line(info, width, &Palette::default()).to_string()
 }
 
 #[cfg(test)]
@@ -470,13 +488,13 @@ mod tests {
     fn serve_shows_full_base_when_it_fits_and_shortens_only_when_narrow() {
         let info = base_info("https://cloud.example.com/crabmate");
         // 宽终端：完整 base（含路径前缀）可见—— TUI 里没有第二个入口能看全量 URL。
-        let wide = status_text(&info, None, 200);
+        let wide = status_text(&info, 200);
         assert!(
             wide.contains("serve https://cloud.example.com/crabmate"),
             "{wide}"
         );
         // 窄终端：退到 host:port，否则一整行只够 serve 一项。
-        let narrow = status_text(&info, None, 40);
+        let narrow = status_text(&info, 40);
         assert!(narrow.contains("serve cloud.example.com"), "{narrow}");
         assert!(!narrow.contains("/crabmate"), "{narrow}");
     }
@@ -490,7 +508,7 @@ mod tests {
         info.search_total = 2;
         // 40 列：find(14) 之后连 `serve`(27) 都放不下 → **严格优先级**到此收手，
         // 不允许 `model` 之类的次要项插队（否则会出现「model 在、serve 没了」）。
-        let text = status_text(&info, Some("conv-id-1234"), 40);
+        let text = status_text(&info, 40);
         assert!(text.contains("find"), "搜索反馈必须常驻：{text}");
         assert!(!text.contains("serve"), "serve 放不下就整体不收：{text}");
         assert!(!text.contains("model"), "更低的 model 更不该插队：{text}");
@@ -504,13 +522,16 @@ mod tests {
         info.model = Some("gpt-x*".into());
         info.role = Some("coder".into());
         info.mode = Some("plan".into());
-        let text = status_text(&info, Some("c1"), 200);
+        let text = status_text(&info, 200);
         // 宽终端预算够：`serve` 显示完整 base（TUI 里没有第二个入口能看全量 URL）。
         assert!(text.contains("serve http://127.0.0.1:8080"), "{text}");
         assert!(text.contains("model gpt-x*"), "{text}");
         assert!(text.contains("role coder"), "{text}");
         assert!(text.contains("mode plan"), "{text}");
-        assert!(text.contains("conv c1"), "{text}");
+        assert!(
+            !text.contains("conv"),
+            "会话 id 不上状态栏（desktop 也没有）：{text}"
+        );
         assert!(text.contains("○ 空闲"), "{text}");
     }
 
@@ -518,7 +539,7 @@ mod tests {
     fn serve_default_model_shows_up_without_a_mode() {
         let mut info = base_info("http://x");
         info.model = Some("deepseek".into());
-        let text = status_text(&info, None, 200);
+        let text = status_text(&info, 200);
         assert!(text.contains("model deepseek"), "{text}");
         // 未设置的值不该凭空出现（`model ` 里没有 `mode ` 子串）。
         assert!(!text.contains("mode "), "{text}");
@@ -530,7 +551,7 @@ mod tests {
         info.view_offset = 12;
         info.search_term = Some("grep".into());
         info.search_total = 2;
-        let text = status_text(&info, None, 200);
+        let text = status_text(&info, 200);
         assert!(text.contains("find 「grep」"), "{text}");
         assert!(text.contains("↑12"), "{text}");
     }
@@ -542,7 +563,7 @@ mod tests {
         info.search_term = Some("ab".into());
         info.search_total = 2;
         // 60 列：find(14) + serve(27) + 分隔(3) = 44 装得下，`model` 就轮不上了。
-        let text = status_text(&info, None, 60);
+        let text = status_text(&info, 60);
         assert!(text.contains("find"), "{text}");
         assert!(text.contains("serve"), "serve 优先于 model：{text}");
         assert!(!text.contains("model"), "model 应被丢弃：{text}");
@@ -556,7 +577,7 @@ mod tests {
         info.search_total = 3;
         // 20 列：只够 find 独占（它自己也超宽，按宽截断），`conv` / `model` 整段丢弃，
         // 而不是被砍成半截留在行尾。
-        let text = status_text(&info, Some("c1"), 20);
+        let text = status_text(&info, 20);
         assert!(!text.contains("conv"), "丢弃是整段丢弃：{text}");
         assert!(!text.contains("model"), "丢弃是整段丢弃：{text}");
         assert!(text.starts_with("find"), "留下的应是最高优先级段：{text}");
@@ -566,8 +587,10 @@ mod tests {
     #[test]
     fn labels_use_muted_and_values_use_fg() {
         let pal = Palette::default();
-        let info = base_info("http://127.0.0.1:8080");
-        let line = status_line(&info, Some("c1"), 200, &pal);
+        let mut info = base_info("http://127.0.0.1:8080");
+        // 至少两段才有分隔符可断言（`conv` 段移除后，单段不再插分隔符）。
+        info.model = Some("gpt-x".into());
+        let line = status_line(&info, 200, &pal);
         let spans = &line.spans;
         assert_eq!(spans[0].content, "serve");
         assert_eq!(spans[0].style.fg, Some(pal.muted), "label 走淡色");
@@ -655,7 +678,7 @@ mod tests {
         ] {
             info.running = running;
             info.cancel_sent = cancel;
-            let line = status_line(&info, None, 40, &pal);
+            let line = status_line(&info, 40, &pal);
             let text = line.to_string();
             match want {
                 Some(w) => assert!(text.ends_with(w), "{text} 应以 {w} 结尾"),
@@ -711,7 +734,7 @@ mod tests {
             let want: Vec<usize> = (0..BAR_CELLS)
                 .filter(|i| (i + BAR_CELLS - start) % BAR_CELLS < BAR_BLOCK)
                 .collect();
-            let line = status_line_with(&info, None, 60, &pal, false);
+            let line = status_line_with(&info, 60, &pal, false);
             let cells = bar_cells(&line);
             let lit: Vec<usize> = (0..BAR_CELLS)
                 .filter(|i| cells[*i].style.fg == Some(pal.accent))
@@ -755,7 +778,7 @@ mod tests {
         // 含极大帧号：`(spinner / 2) % BAR_CELLS` 必须对任意 usize 安全，且不改字形。
         for frame in (0..BAR_CELLS + 3).chain([usize::MAX]) {
             info.spinner = frame;
-            let text = status_line_with(&info, None, 60, &pal, false).to_string();
+            let text = status_line_with(&info, 60, &pal, false).to_string();
             // 仪器条的实心格随帧号移动，只断言「字符合法」；位置由上面那个测试守。
             let glyphs = bar_glyphs(&text);
             assert!(
@@ -775,7 +798,7 @@ mod tests {
         info.spinner = 8;
         // 动效关掉后条不扫描，改成整条常亮：静止的「全亮条」与「○ 空闲」靠形状就能分辨，
         // 也就不必再加「生成中」字样（右缘定宽是硬约束）。
-        let still = status_line_with(&info, None, 60, &pal, true);
+        let still = status_line_with(&info, 60, &pal, true);
         let cells = bar_cells(&still);
         assert!(
             cells.iter().all(|s| s.style.fg == Some(pal.accent)),
@@ -787,7 +810,7 @@ mod tests {
             "静态时应整条是实心方块：{cells:?}"
         );
         // 同一份输入在开动效时变成「亮块从第 4 格起」——证明开关真的生效。
-        let moving = status_line_with(&info, None, 60, &pal, false);
+        let moving = status_line_with(&info, 60, &pal, false);
         let moving_cells = bar_cells(&moving);
         assert_eq!(moving_cells[4].style.fg, Some(pal.accent));
         assert_eq!(moving_cells[1].style.fg, Some(pal.muted));
@@ -800,7 +823,7 @@ mod tests {
         let mut info = base_info("http://long");
         info.model = Some("model-name".into());
         info.running = true;
-        let text = status_line_with(&info, None, 16, &pal, false).to_string();
+        let text = status_line_with(&info, 16, &pal, false).to_string();
         // 窄条右缘仍是完整的 8 列（6 格 + 前导补空），只是左区被截短。
         let glyphs = bar_glyphs(&text);
         assert!(
@@ -824,7 +847,7 @@ mod tests {
         info.running = true;
         // 4 拍 = 亮块首格前进到第 2 格（每 2 拍走一格）：2/3/4 亮，0/1/5 灭。
         info.spinner = 4;
-        let line = status_line_with(&info, None, 60, &pal, false);
+        let line = status_line_with(&info, 60, &pal, false);
         let cells = bar_cells(&line);
         assert!(
             cells[2].style.add_modifier.contains(Modifier::REVERSED),
@@ -849,10 +872,13 @@ mod tests {
         // 无色模式：分段取舍与文本不变，但不再有任何一个 span 指定彩色
         // （`Palette::mono()` 的所有槽都是 `Reset`）。
         let info = base_info("http://127.0.0.1:8080");
-        let line = status_line(&info, Some("c1"), 80, &Palette::mono());
+        let line = status_line(&info, 80, &Palette::mono());
         let text = line.to_string();
         assert!(text.contains("serve"), "{text}");
-        assert!(text.contains("conv c1"), "{text}");
+        assert!(
+            !text.contains("conv"),
+            "会话 id 不上状态栏（desktop 也没有）：{text}"
+        );
         assert!(
             line.spans
                 .iter()

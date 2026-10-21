@@ -7,36 +7,56 @@ use ratatui::layout::{Constraint, Layout, Rect};
 
 use super::render::SIDEBAR_WIDTH;
 
-/// 主体 / 状态栏；宽屏时主体再分「左会话 | 聊天 | 右工作区」三列。
+/// 主体 / 底栏；宽屏时主体再分「左会话 | 聊天 | 右工作区」，右栏底部再切出状态栈。
+///
+/// **宽屏没有底栏**（`status == None`）：状态改到右栏底部纵向排列，那一行还给正文 ——
+/// 与 desktop 的 `.side-status-stack`（`flex-direction: column`，原底栏迁入右栏底部）
+/// 同构。窄屏两栏都隐藏、没有地方安置状态栈，底栏**保留**：状态里的「生成中 / 取消中 /
+/// 审批阻塞」必须始终可见，不能为了对称把它一起删掉。
 pub(super) struct Panes {
-    pub status: Rect,
+    /// 底栏；**仅窄屏**为 `Some`。
+    pub status: Option<Rect>,
     /// 左栏会话列（窄屏隐藏时为 `None`）。
     pub left: Option<Rect>,
     /// 中列：transcript + composer。
     pub chat: Rect,
-    /// 右栏工作区目录树（窄屏隐藏时为 `None`）。
+    /// 右栏目录树（**不含**底部状态栈）。
     pub right: Option<Rect>,
+    /// 右栏底部的状态栈；无右栏时为 `None`（含 `stack_rows == 0`）。
+    pub right_status: Option<Rect>,
 }
 
-/// 按终端区域与侧栏可见性切分。
-pub(super) fn panes(area: Rect, sidebar_visible: bool) -> Panes {
-    let rows = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(area);
-    let (left, chat, right) = if sidebar_visible {
-        let cols = Layout::horizontal([
-            Constraint::Length(SIDEBAR_WIDTH),
-            Constraint::Min(0),
-            Constraint::Length(SIDEBAR_WIDTH),
-        ])
-        .split(rows[0]);
-        (Some(cols[0]), cols[1], Some(cols[2]))
-    } else {
-        (None, rows[0], None)
-    };
+/// 按终端区域、侧栏可见性与状态栈高度切分。
+///
+/// `stack_rows` 由调用方算（见 `status_stack::stack_rows`），这里只负责把它压到
+/// 「树至少留 1 行」的范围内 —— 这条不变量放这里而不是让两边各算，是因为漂移的
+/// 表现是「树被挤没」，很难归因。
+pub(super) fn panes(area: Rect, sidebar_visible: bool, stack_rows: u16) -> Panes {
+    if !sidebar_visible {
+        let rows = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(area);
+        return Panes {
+            status: Some(rows[1]),
+            left: None,
+            chat: rows[0],
+            right: None,
+            right_status: None,
+        };
+    }
+    let cols = Layout::horizontal([
+        Constraint::Length(SIDEBAR_WIDTH),
+        Constraint::Min(0),
+        Constraint::Length(SIDEBAR_WIDTH),
+    ])
+    .split(area);
+    let stack = stack_rows.min(cols[2].height.saturating_sub(1));
+    let right_rows =
+        Layout::vertical([Constraint::Min(1), Constraint::Length(stack)]).split(cols[2]);
     Panes {
-        status: rows[1],
-        left,
-        chat,
-        right,
+        status: None,
+        left: Some(cols[0]),
+        chat: cols[1],
+        right: Some(right_rows[0]),
+        right_status: (stack > 0).then_some(right_rows[1]),
     }
 }
 
@@ -57,12 +77,13 @@ pub(super) fn contains(area: Rect, column: u16, row: u16) -> bool {
 mod tests {
     use super::*;
 
+    /// 宽屏：200 列 × 40 行，状态栈 5 行。
     fn wide() -> Panes {
-        panes(Rect::new(0, 0, 200, 40), true)
+        panes(Rect::new(0, 0, 200, 40), true, 5)
     }
 
     #[test]
-    fn wide_layout_has_three_columns() {
+    fn wide_layout_has_no_bottom_bar() {
         let p = wide();
         let left = p.left.expect("宽屏有左栏");
         let right = p.right.expect("宽屏有右栏");
@@ -74,28 +95,43 @@ mod tests {
         assert_eq!(p.chat.x, left.width);
         assert_eq!(p.chat.x + p.chat.width, right.x);
         assert_eq!(p.chat.y, 0, "主体从第 0 行起（没有顶栏占行）");
-        assert_eq!(p.status.y, 39);
+        // **宽屏不再有底栏**：状态进右栏底部，那一行还给正文。
+        assert!(p.status.is_none(), "宽屏不该再有底栏");
+        assert_eq!(p.chat.height, 40, "底栏消失后正文占满整个高度");
+        let stack = p.right_status.expect("宽屏有状态栈");
+        assert_eq!(stack.height, 5);
+        assert_eq!(stack.y + stack.height, 40, "状态栈贴底");
+        assert_eq!(stack.x, right.x, "与右栏同列");
+        assert_eq!(stack.width, SIDEBAR_WIDTH);
+        assert_eq!(right.y + right.height, stack.y, "树与状态栈上下相接");
     }
 
     #[test]
-    fn narrow_layout_hides_sidebars() {
-        let p = panes(Rect::new(0, 0, 80, 24), false);
+    fn narrow_layout_keeps_the_bottom_bar() {
+        let p = panes(Rect::new(0, 0, 80, 24), false, 5);
         assert!(p.left.is_none());
         assert!(p.right.is_none());
+        assert!(p.right_status.is_none(), "没有右栏就没有状态栈");
         assert_eq!(p.chat.width, 80);
+        // 窄屏没有地方安置状态栈，底栏保留（否则「生成中 / 审批阻塞」无处显示）。
+        let status = p.status.expect("窄屏保留底栏");
+        assert_eq!(status.y, 23);
+        assert_eq!(p.chat.height, 23);
     }
 
     #[test]
-    fn columns_share_the_same_rows() {
-        let p = wide();
-        let cols = [p.left.unwrap(), p.chat, p.right.unwrap()];
-        for r in cols {
-            assert_eq!(r.y, cols[0].y);
-            assert_eq!(r.height, cols[0].height);
-            // 三列从第 0 行起，到状态栏上沿为止。
-            assert_eq!(r.y, 0);
-            assert!(r.y + r.height <= p.status.y);
-        }
+    fn stack_rows_are_clamped_so_the_tree_keeps_a_row() {
+        // 要求 40 行状态栈、终端只有 6 行 → 树至少留 1 行。
+        let p = panes(Rect::new(0, 0, 200, 6), true, 40);
+        assert_eq!(p.right.expect("宽屏有右栏").height, 1, "树至少留一行");
+        assert_eq!(p.right_status.expect("仍有状态栈").height, 5);
+    }
+
+    #[test]
+    fn zero_stack_rows_leaves_the_tree_full_height() {
+        let p = panes(Rect::new(0, 0, 200, 40), true, 0);
+        assert!(p.right_status.is_none());
+        assert_eq!(p.right.expect("宽屏有右栏").height, 40);
     }
 
     #[test]
