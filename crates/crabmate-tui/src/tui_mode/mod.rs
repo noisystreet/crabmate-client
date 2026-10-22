@@ -11,7 +11,7 @@
 mod approve;
 mod background;
 mod background_cmd;
-mod body_memo;
+mod body_cache;
 // `controls` / `tool_summary` 提到 `pub(crate)`：清除词与控制字符剥离在 crate 根也要用。
 pub(crate) mod controls;
 mod drafts;
@@ -70,7 +70,7 @@ use crate::serve::{
 
 use self::approve::{decision_for_key, decision_summary};
 use self::controls::{Control, clear_word, parse_control, set_mode_field, set_override_field};
-use self::render::{BodyRow, SIDEBAR_MIN_WIDTH, StatusInfo, build_body_rows};
+use self::render::{SIDEBAR_MIN_WIDTH, StatusInfo};
 use self::settings::{PersistedSettings, normalize};
 use self::settings_panel::{SettingsPanel, is_f2_key};
 use self::worker::{UiEvent, WorkerJob, spawn_key_reader, spawn_worker};
@@ -97,9 +97,8 @@ struct TuiApp<'a> {
     exit: bool,
     /// `/quit`（`/exit`、`/q` 同义）请求在回合结束后退出（回合进行中先取消并等待）。
     quit_pending: bool,
-    /// 帧间 memo：内容/宽度/搜索未变时复用，避免每帧全量 tokenize+wrap。
-    prepared: Vec<BodyRow>,
-    body_key: Option<body_memo::BodyMemoKey>,
+    /// transcript 物理行的行级缓存（只重建变化的行，见 `body_cache`）。
+    body: body_cache::BodyCache,
     /// 设置面板（`/settings` / F2 打开；`None` = 关闭）。
     panel: Option<SettingsPanel>,
     /// serve user-data 设置快照（启动拉取 / 保存成功后更新；随轮与状态行合成用）。
@@ -117,13 +116,10 @@ struct TuiApp<'a> {
 }
 
 impl TuiApp<'_> {
-    /// 计算当前帧的 body 行：memo 命中直接复用；否则重建。
+    /// 先把 body 缓存推到最新：流式期只重建被改动的那一行，其余行复用。
     fn prepare_body(&mut self, terminal_width: u16) {
-        let key = body_memo::key(&self.st, terminal_width);
-        if self.body_key.as_ref() != Some(&key) {
-            self.prepared = build_body_rows(&self.st, key.width);
-            self.body_key = Some(key);
-        }
+        let width = render::chat_body_width(self.st.sidebar_visible, terminal_width);
+        self.body.ensure(&self.st, width);
     }
 }
 
@@ -802,7 +798,7 @@ impl TuiApp<'_> {
             let screen = Rect::new(0, 0, size.width, size.height);
             let panel = self.settings_content(render::settings_panel_content_width(screen));
             terminal
-                .draw(|f| render::draw(f, &self.st, &info, &self.prepared, panel.as_ref()))
+                .draw(|f| render::draw(f, &self.st, &info, self.body.as_slice(), panel.as_ref()))
                 .context("tui draw failed")?;
             // 背景要在 draw 之后重放：kitty 让图像跟着文本一起滚动（规范明确），
             // 而 ratatui 的差分绘制只认字符网格，不会替我们维持图像层。
@@ -889,8 +885,7 @@ pub async fn run_tui(
         cancel: None,
         exit: false,
         quit_pending: false,
-        prepared: Vec::new(),
-        body_key: None,
+        body: body_cache::BodyCache::default(),
         panel: None,
         persisted: None,
         last_size: (0, 0),

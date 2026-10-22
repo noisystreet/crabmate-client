@@ -74,6 +74,7 @@ pub struct StatusInfo {
 }
 
 /// 一条可渲染的 transcript 物理行。
+#[derive(Clone)]
 pub struct BodyRow {
     /// 所属逻辑行下标（供搜索锚点定位）；块间分隔行不属于任何逻辑行，为 `None`。
     /// 用 `Option` 而非哨兵下标，是为了让"分隔行不该被锚点命中"成为类型级事实——
@@ -94,7 +95,7 @@ impl BodyRow {
     /// 块间分隔行：极暗的满宽细线，不归属任何逻辑行（搜索锚点据此跳过）。
     /// `indent` 取上一条逻辑行的前缀宽度，让线与上方块内容左对齐；
     /// `width` 小于 `indent` 或极窄时 `rule` 退化为 0，此时等同空行，不会 panic。
-    fn separator(width: usize, indent: usize, pal: &Palette) -> Self {
+    pub(crate) fn separator(width: usize, indent: usize, pal: &Palette) -> Self {
         let indent = indent.min(width);
         let rule = width.saturating_sub(indent);
         let mut text = String::with_capacity(width);
@@ -133,7 +134,7 @@ const TOOL_PREFIX_PROGRESS: &str = "[工具] ⠿ ";
 
 /// 逻辑行前缀：进行中的工具行多一个进度位。
 /// 进度位是**静态**占位，动画由渲染层换字符，因此不进入 body memo。
-fn prefix_for(log: &LogLine) -> &'static str {
+pub(crate) fn prefix_for(log: &LogLine) -> &'static str {
     // 只有「调用中」才加进度位；结束行不论成败是否已知，文本自带标记。
     match (log.kind, log.tool_state) {
         (LineKind::Tool, ToolState::Running) => TOOL_PREFIX_PROGRESS,
@@ -143,7 +144,7 @@ fn prefix_for(log: &LogLine) -> &'static str {
 /// 逻辑行前缀占用的**显示列数**（折行预算必须按列算，不能按字符数）：
 /// `[助手] ` 只有 5 个字符却占 7 列，按字符数留白会让每行首物理行超出正文区
 /// 1–2 列，末字被区域右缘裁掉——观感就是「行尾被切、没有折回来」。
-fn prefix_width(prefix: &str) -> usize {
+pub(crate) fn prefix_width(prefix: &str) -> usize {
     UnicodeWidthStr::width(prefix)
 }
 
@@ -245,8 +246,10 @@ struct RowCtx<'a> {
 
 /// 把 transcript 转成可渲染的物理行（含搜索高亮标记）；逻辑行首带前缀，
 /// 仅作用于其第一物理行。thinking 折叠时只出一行预览。
-/// 供事件循环做帧间 memo（内容/宽度/搜索/主题未变时复用），
-/// 渲染层拿结果直接裁剪；生成中的 spinner 标记由渲染层替换，不进 memo。
+///
+/// 全量重建（**仅测试**的参照实现）：生产路径走 `body_cache` 的行级缓存，
+/// 这里保留是为了给缓存写「结果必须与全量重建一致」的等价性断言。
+#[cfg(test)]
 pub(crate) fn build_body_rows(st: &UiState, width: usize) -> Vec<BodyRow> {
     let needle = st.search_term();
     let target = st.search_cursor;
@@ -260,39 +263,65 @@ pub(crate) fn build_body_rows(st: &UiState, width: usize) -> Vec<BodyRow> {
     // 因此要存宽度而不只是类别——进行中的工具行前缀比结束行宽 2 列。
     let mut prev: Option<(LineKind, usize)> = None;
     for (idx, log) in st.lines.iter().enumerate() {
-        let prefix = prefix_for(log);
-        let prefix_w = prefix_width(prefix);
-        let content_width = width.saturating_sub(prefix_w);
+        let prefix_w = prefix_width(prefix_for(log));
         let matched = needle.is_some_and(|n| log.text.to_lowercase().contains(n));
         if let Some((_, prev_indent)) = prev.filter(|(k, _)| *k != log.kind) {
             out.push(BodyRow::separator(width, prev_indent, pal));
         }
-        let text = if log.kind == LineKind::Thinking && log.collapsed {
-            fold_thinking(&log.text, content_width)
-        } else {
-            log.text.clone()
-        };
-        let cx = RowCtx {
+        out.extend(line_rows(
+            log,
             idx,
-            kind: log.kind,
-            tool_state: log.tool_state,
-            text: &text,
-            prefix,
-            prefix_style: prefix_style(log.kind, pal),
-            style: kind_style(log.kind, pal),
-            content_width,
+            width,
             matched,
-            anchor_log: matched && target == Some(idx),
+            target == Some(idx),
             pal,
-        };
-        if log.kind == LineKind::Assistant {
-            out.extend(assistant_body_rows(&cx));
-        } else {
-            out.extend(plain_body_rows(&cx));
-        }
+        ));
         prev = Some((log.kind, prefix_w));
     }
     out
+}
+
+/// 单条逻辑行 → 物理行（**不含**块间分隔线）。
+///
+/// 这是 `build_body_rows` 的循环体，单独拆出来是给 [`super::body_cache`] 按行复用：
+/// 流式期只有最后一行会变，不必每帧把整个 transcript 的 markdown 解析与折行重做一遍。
+///
+/// `matched` / `anchor` 由调用方给出而不是内部现算：缓存层已维护好命中集合
+/// （见 `state_search`），再按行 `to_lowercase()` 一遍等于把省下的开销又赔回去。
+pub(crate) fn line_rows(
+    log: &LogLine,
+    idx: usize,
+    width: usize,
+    matched: bool,
+    anchor: bool,
+    pal: &Palette,
+) -> Vec<BodyRow> {
+    let prefix = prefix_for(log);
+    let prefix_w = prefix_width(prefix);
+    let content_width = width.saturating_sub(prefix_w);
+    let text = if log.kind == LineKind::Thinking && log.collapsed {
+        fold_thinking(&log.text, content_width)
+    } else {
+        log.text.clone()
+    };
+    let cx = RowCtx {
+        idx,
+        kind: log.kind,
+        tool_state: log.tool_state,
+        text: &text,
+        prefix,
+        prefix_style: prefix_style(log.kind, pal),
+        style: kind_style(log.kind, pal),
+        content_width,
+        matched,
+        anchor_log: matched && anchor,
+        pal,
+    };
+    if log.kind == LineKind::Assistant {
+        assistant_body_rows(&cx)
+    } else {
+        plain_body_rows(&cx)
+    }
 }
 
 /// 工具行内容色：成功走 `ok`、失败 `err` + BOLD（无色模式下 BOLD 仍可辨），
