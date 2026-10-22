@@ -291,6 +291,9 @@ fn head_excerpt(line: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::mpsc;
+
+    use super::super::test_support::{test_app, test_client, test_prefs};
     use super::*;
 
     fn pending(title: &str) -> HistoryRequest {
@@ -303,6 +306,86 @@ mod tests {
 
     fn response(v: serde_json::Value) -> ConversationMessagesResponse {
         serde_json::from_value(v).expect("response parses")
+    }
+
+    /// 回放失败回滚时，草稿必须跟着会话一起退回：屏幕回到 A，输入框也得是 A 的。
+    ///
+    /// 不修的话，用户对着 A 的 transcript 按回车，发出去的是 B 留下的那段草稿
+    /// —— 正是「草稿串会话」这个要消灭的问题，只是入口换到了失败回滚这条路径。
+    #[test]
+    fn failed_replay_rolls_the_draft_back_with_the_session() {
+        let client = test_client();
+        let mut prefs = test_prefs();
+        let (job_tx, _job_rx) = mpsc::channel();
+        let (ui_tx, ui_rx) = mpsc::channel();
+        let mut app = test_app(&client, &mut prefs, ui_rx, ui_tx, job_tx);
+
+        // 状态：当前在 B，输入框里是 B 的草稿；A 那边也留着半句。
+        app.st.conversation_id = Some("B".to_string());
+        app.drafts.save(Some("A"), "A 的半句");
+        app.drafts.save(Some("B"), "B 的草稿");
+        app.st.set_input("B 的草稿");
+        app.st.history_pending = Some(HistoryRequest {
+            conversation_id: "B".to_string(),
+            prev_conversation_id: Some("A".to_string()),
+            title: "A".to_string(),
+        });
+
+        on_result(&mut app, "B", Err("boom".to_string()));
+
+        assert_eq!(
+            app.st.conversation_id.as_deref(),
+            Some("A"),
+            "绑定应回滚到原会话"
+        );
+        assert_eq!(
+            app.st.input_snapshot(),
+            "A 的半句",
+            "输入框必须跟着回滚，否则这段草稿会发到别的会话里"
+        );
+        assert_eq!(
+            app.drafts.load(Some("B")),
+            Some("B 的草稿"),
+            "B 的草稿仍留在它自己名下，没有被写坏"
+        );
+    }
+
+    /// 没有原会话可回（典型：原会话刚被删）：要开一条新会话，但输入框里那条
+    /// **目标会话**的草稿不能变成新会话的开场白。
+    #[test]
+    fn failed_replay_without_a_fallback_keeps_the_draft_off_the_new_session() {
+        let client = test_client();
+        let mut prefs = test_prefs();
+        let (job_tx, _job_rx) = mpsc::channel();
+        let (ui_tx, ui_rx) = mpsc::channel();
+        let mut app = test_app(&client, &mut prefs, ui_rx, ui_tx, job_tx);
+
+        app.st.conversation_id = Some("B".to_string());
+        app.drafts.save(Some("B"), "B 的草稿");
+        app.st.set_input("B 的草稿");
+        app.st.history_pending = Some(HistoryRequest {
+            conversation_id: "B".to_string(),
+            prev_conversation_id: None,
+            title: "B".to_string(),
+        });
+
+        on_result(&mut app, "B", Err("gone".to_string()));
+
+        assert_eq!(app.st.conversation_id, None, "应改为新会话");
+        assert!(
+            app.st.input_snapshot().trim().is_empty(),
+            "目标会话的草稿不该被带进新会话：{:?}",
+            app.st.input_snapshot()
+        );
+        assert_eq!(
+            app.drafts.load(Some("B")),
+            Some("B 的草稿"),
+            "草稿仍留在原会话名下"
+        );
+        assert!(
+            app.drafts.load(None).is_none(),
+            "「未绑定」槽不该收下这条草稿"
+        );
     }
 
     #[test]

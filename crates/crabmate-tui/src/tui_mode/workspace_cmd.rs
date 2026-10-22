@@ -221,63 +221,13 @@ impl TuiApp<'_> {
 mod tests {
     use std::sync::mpsc;
 
-    use super::super::TuiApp;
-    use super::super::spinner::Spinner;
-    use super::super::state::UiState;
+    use super::super::test_support::{test_app, test_client, test_prefs};
     use super::super::worker::{UiEvent, WorkerJob};
     use super::super::workspace_tree::WsPickState;
     use super::{
         WsSetInput, WsSetOutcome, is_default_word, workspace_query_line, workspace_set_line,
         workspace_set_outcome, ws_set_input,
     };
-    use crate::SessionPrefs;
-    use crate::serve::{ConnectionConfig, ServeClient};
-
-    fn test_prefs() -> SessionPrefs {
-        SessionPrefs {
-            api_key: None,
-            model: None,
-            api_base: None,
-            agent_role: None,
-            session_mode: None,
-        }
-    }
-
-    fn test_app<'a>(
-        client: &'a ServeClient,
-        prefs: &'a mut SessionPrefs,
-        rx: mpsc::Receiver<UiEvent>,
-        tx: mpsc::Sender<UiEvent>,
-        job_tx: mpsc::Sender<WorkerJob>,
-    ) -> TuiApp<'a> {
-        // `tx` 必须与 `rx` 是同一对：单测没有 tokio runtime，`fetch_ws_dir` 会退回队列，这条
-        // tx 眼下用不到；但若将来某个测试跑在 `#[tokio::test]` 下，读请求就真的会 `spawn`，
-        // 那时发到一个没人读的通道里会让断言假通过。
-        TuiApp {
-            client,
-            overrides: prefs,
-            yes: true,
-            no_keyring: true,
-            st: UiState::new(),
-            drafts: Default::default(),
-            spinner: Spinner::new(),
-            rx,
-            tx,
-            job_tx,
-            cancel: None,
-            exit: false,
-            quit_pending: false,
-            prepared: Vec::new(),
-            body_key: None,
-            panel: None,
-            persisted: None,
-            last_size: (0, 0),
-            index: Default::default(),
-            resume: None,
-            sent_turn: None,
-            bg: None,
-        }
-    }
 
     #[test]
     fn default_words_restore_serve_default() {
@@ -351,8 +301,7 @@ mod tests {
     /// 切换工作区后必须立刻重拉左栏，并丢掉只属于旧桶的索引记账。
     #[test]
     fn workspace_switch_refetches_sessions_and_drops_old_bucket_index() {
-        let client =
-            ServeClient::new(ConnectionConfig::new("http://127.0.0.1:1", "")).expect("client");
+        let client = test_client();
         let mut prefs = test_prefs();
         let (job_tx, job_rx) = mpsc::channel();
         let (ui_tx, ui_rx) = mpsc::channel();
@@ -384,8 +333,7 @@ mod tests {
     /// 项目池切换与 `/workspace <路径>` 共用同一条回合守卫，且拒绝后要解锁视图。
     #[test]
     fn project_switch_is_refused_while_a_turn_is_running() {
-        let client =
-            ServeClient::new(ConnectionConfig::new("http://127.0.0.1:1", "")).expect("client");
+        let client = test_client();
         let mut prefs = test_prefs();
         let (job_tx, job_rx) = mpsc::channel();
         let (ui_tx, ui_rx) = mpsc::channel();
@@ -481,8 +429,7 @@ mod tests {
     /// 代数不符的回包必须被丢弃，否则旧工作区的目录内容会被写进新工作区的缓存。
     #[test]
     fn stale_workspace_dir_reply_is_dropped() {
-        let client =
-            ServeClient::new(ConnectionConfig::new("http://127.0.0.1:1", "")).expect("client");
+        let client = test_client();
         let mut prefs = test_prefs();
         let (job_tx, _job_rx) = mpsc::channel();
         let (ui_tx, ui_rx) = mpsc::channel();
@@ -532,8 +479,7 @@ mod tests {
     /// 被拦下时**一个 worker 任务都不发**：这条只有 job 通道能证明，返回值看不出来。
     #[test]
     fn rejected_input_never_reaches_the_worker() {
-        let client =
-            ServeClient::new(ConnectionConfig::new("http://127.0.0.1:1", "")).expect("client");
+        let client = test_client();
         let mut prefs = test_prefs();
         let (job_tx, job_rx) = mpsc::channel();
         let (ui_tx, ui_rx) = mpsc::channel();
@@ -552,8 +498,7 @@ mod tests {
     /// 放行时发出去的是**展开后**的绝对路径，不是用户输入原文。
     #[test]
     fn expanded_path_is_what_gets_posted() {
-        let client =
-            ServeClient::new(ConnectionConfig::new("http://127.0.0.1:1", "")).expect("client");
+        let client = test_client();
         let mut prefs = test_prefs();
         let (job_tx, job_rx) = mpsc::channel();
         let (ui_tx, ui_rx) = mpsc::channel();
