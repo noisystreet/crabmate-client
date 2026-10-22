@@ -81,6 +81,9 @@ pub(super) fn on_result(
         Ok(resp) => apply_page(app, &pending, &resp),
         Err(e) => match fail_fallback(pending.prev_conversation_id.as_deref()) {
             ReplayFailFallback::RestorePrevious => {
+                // 先换回**原会话**的草稿，再把绑定回滚：`swap_draft_in` 用 `st.conversation_id`
+                // 作存回的键，顺序反过来会把目标会话的草稿写进原会话的槽。
+                app.swap_draft_in(pending.prev_conversation_id.as_deref());
                 app.st.conversation_id = pending.prev_conversation_id.clone();
                 app.st.push_line(
                     LineKind::System,
@@ -94,6 +97,10 @@ pub(super) fn on_result(
                 // 没有原会话可回（典型：刚删掉当前会话，删除路径先把绑定清空了）。
                 // 就此空着的话，下一条消息会去开一个连索引都不知道的 `conversation_id`
                 // —— 左栏、Web、Desktop 都看不见它。所以直接开一条新会话顶上。
+                //
+                // 输入框里此刻是**目标会话**的草稿（切走时换进来的），不能让它变成新会话的
+                // 开场白：先按目标 id 存回、切到「未绑定」槽，再清绑定。
+                app.swap_draft_in(None);
                 app.st.conversation_id = None;
                 app.st.push_line(
                     LineKind::System,

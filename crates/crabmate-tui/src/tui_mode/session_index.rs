@@ -196,6 +196,8 @@ impl TuiApp<'_> {
 
     /// 新建 / 切换共用的「空对话」复位：清 `conversation_id`、清在途回放、清 transcript、聚焦输入框。
     fn reset_for_new_chat(&mut self) {
+        // 旧会话的草稿先存回（`conversation_id` 马上要被清掉），再取「未绑定」那一份（通常是空）。
+        self.swap_draft_in(None);
         self.st.conversation_id = None;
         self.st.history_pending = None;
         self.st.reset_transcript();

@@ -16,6 +16,7 @@ mod body_memo;
 // 控制字符剥离（`strip_control_chars`）在 crate 根的 `workspace_path` / repl 入口也要用，
 // 两份词表或两份剥离规则漂移比多一级可见性更贵。
 pub(crate) mod controls;
+mod drafts;
 mod exit_flush;
 mod history;
 mod layout;
@@ -84,6 +85,8 @@ struct TuiApp<'a> {
     /// `--no-keyring`：设置面板里 API 密钥行禁写（也不参与 key_set 判定）。
     no_keyring: bool,
     st: UiState,
+    /// 会话级输入草稿：切会话 / 新建时换入换出（见 `drafts`）。
+    drafts: drafts::Drafts,
     /// 生成中 spinner 帧（按墙钟推进；见 `spinner` 模块）。
     spinner: spinner::Spinner,
     rx: Receiver<UiEvent>,
@@ -217,6 +220,8 @@ impl TuiApp<'_> {
         // 断点属于上一个会话的 transcript：换会话后不可续，避免正文落到别人的记录里。
         self.drop_resume_point();
         self.st.focus = Focus::Input;
+        // 草稿按会话换入换出：当前内容存回旧会话，再取目标会话那一份（见 `drafts`）。
+        self.swap_draft_in(Some(&resume));
         // 切换 = 换一份 transcript（同 Desktop）：清空后回放该会话的历史。
         history::replay_into(self, resume, title);
     }
@@ -306,8 +311,8 @@ impl TuiApp<'_> {
             return;
         }
         if self.st.running {
-            self.st
-                .push_line(LineKind::System, "回合进行中：Ctrl+C 可取消，完成后再发送");
+            // 忙时不再丢弃：文本进排队槽，回合正常结束后自动发出（Esc 清队）。
+            self.queue_submit(&trimmed);
             return;
         }
         self.st.take_input();
@@ -388,7 +393,7 @@ impl TuiApp<'_> {
             "/background <图片路径>：全屏背景（kitty 走真像素，其余终端用每格底色；图会压暗保正文可读；off 关闭）",
             "/conv list 刷新 · /conv use <id> 切换 · /conv new 新会话",
             "/resume 续传上一轮被中断的回合（serve 侧 job 仍在跑时；Ctrl+C 的 cancel 未送达也可续）",
-            "按键：Alt+Enter 换行 · Ctrl+E 思考展开/折叠 · Ctrl+W 工作区目录树 · PgUp/PgDn 翻页 · Ctrl+End 回底部",
+            "按键：Alt+Enter 换行 · Ctrl+E 思考展开/折叠 · Ctrl+W 工作区目录树 · PgUp/PgDn 翻页 · Ctrl+End 回底部 · 回合中 Enter 排队发送（输入框内 Esc 清队）",
             "设置面板：↑↓ 移动 · Enter 编辑 · Tab 切分区 · S 保存 · Esc/F2 关闭（有改动 Esc 先确认）",
             "会话栏：↑↓选 Enter用 n新建 r刷新 Del删除（再按 y/Enter 确认，Esc/n 或其它键取消）Shift+Del 直接删",
             "工作区树：↑↓选 Enter/→展开 ◀收起/回父 r刷新 w回会话列表 Tab/Esc 回输入",
@@ -533,6 +538,10 @@ impl TuiApp<'_> {
             KeyCode::Char('e') if is_ctrl_e(&key) => self.st.toggle_thinking_with_notice(),
             KeyCode::Char('c') | KeyCode::Char('d') | KeyCode::Char('z')
                 if key.modifiers.contains(KeyModifiers::CONTROL) => {}
+            // Esc：清掉排队消息（审批浮层 / `/` 菜单 / 设置面板的 Esc 在前面的层就消费了）。
+            KeyCode::Esc => {
+                self.clear_queued_on_esc();
+            }
             KeyCode::Tab => self.focus_sidebar_on_current(),
             KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.st.insert_char(ch);
@@ -564,6 +573,9 @@ impl TuiApp<'_> {
         error: Option<String>,
         interrupted: Option<StreamResume>,
     ) {
+        // 排队处置取决于这一轮怎么结束：先记标志（下面会复位 / move 走 error）；中断也算非正常。
+        let cancelled = self.st.cancel_sent;
+        let failed = error.is_some() || interrupted.is_some();
         self.st.running = false;
         self.st.cancel_sent = false;
         self.cancel = None;
@@ -587,7 +599,10 @@ impl TuiApp<'_> {
         self.refresh_sessions();
         if self.quit_pending {
             self.exit = true;
+            return;
         }
+        // 忙时排队的下一句：正常结束才自动发出（取消 / 出错退回输入框，见 `drafts`）。
+        self.flush_queued_after_turn(failed, cancelled);
     }
 
     fn on_msg(&mut self, msg: UiEvent) {
@@ -866,6 +881,7 @@ pub async fn run_tui(
         yes,
         no_keyring,
         st: UiState::new(),
+        drafts: drafts::Drafts::default(),
         spinner: spinner::Spinner::new(),
         rx,
         tx: tx.clone(),

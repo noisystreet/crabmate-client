@@ -1,6 +1,6 @@
 # TUI 易用性规划（对齐 Desktop 聊天体验）
 
-> **状态**：方案（Proposed，未进入实现）。逐波按本文落地；每波独立 PR，落地后必须同 PR 更新 [`client_capability_matrix.md`](./client_capability_matrix.md) 对应格（§4）。
+> **状态**：Wave 1 部分已落地（各条见「已落地」标注：`/resume`、忙时排队、会话草稿、`/` 补全菜单等已在主干）；Wave 2/3 仍为方案。逐波按本文落地；每波独立 PR，落地后必须同 PR 更新 [`client_capability_matrix.md`](./client_capability_matrix.md) 对应格（§4）。
 > **范围**：`crabmate-tui`（全屏 `tui` 为主，`repl` 相应联动）；候选与取舍参照 Desktop / Web（`frontend/`）聊天体验，**语义对齐，不追求 UI 复刻**。
 > **关联**：[`remote_cli_tui.md`](./remote_cli_tui.md)（TUI 母方案，P1–P5）、[`client_capability_matrix.md`](./client_capability_matrix.md)（TUI 行 L53–L81）、[`tui_settings_panel.md`](./tui_settings_panel.md)（设置面板，W3 遗留）、[`chat_ui_todo.md`](./chat_ui_todo.md)（Desktop 聊天 UI 已勾项 = “已做过”的参照，不要当缺口重做）、[`contract_pin.md`](./contract_pin.md)（契约钉点）、Server `docs/`（SSE / user-data / 会话权威）
 
@@ -19,8 +19,8 @@
 | # | 缺口（TUI 现状） | Desktop 参照 | 影响 |
 |---|---|---|---|
 | G1 | 全屏 `tui` 无 `/resume`：`start_turn` 中 `stream_resume` 写死 `None`，控制斜杠表也无 `/resume`（`tui_mode/mod.rs`、`tui_mode/controls.rs`） | in-app stream resume（矩阵 L62，TUI=yes 目前仅 repl 路径） | 远程断线/取消未送达时全屏只能重开一轮，丢上下文 |
-| G2 | 回合进行中 Enter 仅提示「回合进行中：Ctrl+C 可取消，完成后再发送」并保留输入（`mod.rs:277-281`） | 忙时排队下一句 + 排队 chip + 结束后自动发出（`composer_follow_up.rs`） | 用户意图被打断，长回合场景需干等或反复重试 |
-| G3 | composer 为全局单缓冲：切会话/新建只 `reset_transcript`（清行/搜索）并聚焦输入框，**不保存/不恢复各会话草稿**（`state.rs:380-389`、`mod.rs:176-204`） | 每次切会话 flush 当前草稿、回来恢复（`composer.rs`、`session_ops.rs::flush_active_composer_draft`） | 遗留草稿会“串”到下一个会话；切走再回来内容丢失 |
+| G2 | ~~回合进行中 Enter 仅提示并保留输入~~ → **已落地**：忙时 Enter 进排队槽，回合**正常**结束后自动发出；Esc 清队；取消 / 出错则退回输入框（`tui_mode/drafts.rs`） | 忙时排队下一句 + 排队 chip + 结束后自动发出（`composer_follow_up.rs`） | 用户意图被打断，长回合场景需干等或反复重试 |
+| G3 | ~~composer 为全局单缓冲，不保存/不恢复各会话草稿~~ → **已落地**：按 `conversation_id` 换入换出，`/conv new` 起空白（`tui_mode/drafts.rs`） | 每次切会话 flush 当前草稿、回来恢复（`composer.rs`、`session_ops.rs::flush_active_composer_draft`） | 遗留草稿会“串”到下一个会话；切走再回来内容丢失 |
 | G4 | 无任何复制路径：未启用鼠标捕获、无剪贴板调用（`tui_mode` 全目录无 Mouse/Clipboard/OSC52） | 消息 copy + 代码块「复制」按钮（`md_code_copy.rs`、`tui_actions_bar.rs`） | 终端里想取走一段代码/回复只能手工选中或重打 |
 | G5 | 会话列表无 CRUD/过滤/导出：左栏仅 use/new/refresh（`mod.rs`）；repl `/conv list` 只读（`slash.rs:199-245`）。`/conv new` 已改为**写**服务端会话索引（`serve/sessions.rs`：`GET` → 复用或插入空白行 → 全量 `PUT`，首轮结束回填 `server_conversation_id`，切走回收空白行，首条消息按 Web 规则起名，语义对齐 Web 的 `prefer_or_create_empty_session` / `reclaim_disposable_blank_session` / `title_from_user_prompt`），左栏与 Web/Desktop 同步可见；仍无重命名/删除 UI | 排序 + 标题过滤 + 全文搜索 + 重命名/删除/导出（`session_rail.rs`、`session_list_modal.rs`） | 会话一多靠翻，无清理手段 |
 | G6 | 切换会话后 transcript 从空开始，**无历史回放**（矩阵 L53；`state.rs`「v1 无历史回放」） | 会话水合 + 顶部「加载更早」prepend（`session_hydrate.rs`、`tui_stream_view.rs`） | 续聊时看不到前文，须先切到别的壳回顾 |
@@ -63,14 +63,18 @@
 - **落点**：`tui_mode/controls.rs`、`tui_mode/mod.rs`（`start_turn`）、`tui_mode/state.rs`、`tui_mode/worker.rs`。
 - **风险**：与 Ctrl+C「第一次取消回合」现有语义的边界（repl 已定义，沿用即可）。
 
-#### W1.2 忙时排队发送（G2）
+#### W1.2 忙时排队发送（G2）— 已落地（`tui_mode/drafts.rs`）
+
+> **实现**：队列只留最后一条（连按 Enter = 改主意），Esc 清队（仅在输入框焦点下；侧栏 / 工作区树里 Esc 先用于返回输入框）。Ctrl+C 仍是「取消回合」，语义不变。取消 / 出错的回合**不**自动发出，而是把文本退回输入框（`queued_outcome`）—— 用户在那时按 Ctrl+C 的意图通常是「停下来」，替他再发一句意外消息比多问一次更糟。回合进行中输入框照常可编辑，只有按 Enter 才入队。排队状态目前以 transcript 的一行系统提示呈现（`已排队：回合结束后自动发送（Esc 清队）`），常驻 chip / 状态行指示尚未做。
 
 - **参照**：Desktop `ComposerStreamFollowUp::QueuedUserMessage` + 排队 chip（`composer_follow_up.rs`、`column.rs`）。
 - **方案**：回合进行中按 Enter → 文本进入「排队」槽并显示状态行指示（如 `○ 排队中：将自动发送`），回合结束自动 `start_turn` 发出；队列非空时再按 Enter 覆盖或 Esc/Ctrl+C 清队。切换会话/新建时若队列存在先落为草稿（联动 W1.3）再清。
 - **落点**：`state.rs`（新增 `queued_text`）、`mod.rs`（`on_submit`/回合结束回调）、`render.rs`（composer 上方一行指示）。
 - **风险**：与「回合在跑拒绝切会话」（`mod.rs:176-204`）的一致性——队列随会话切换落地草稿即可。
 
-#### W1.3 会话级草稿保留/恢复（G3）
+#### W1.3 会话级草稿保留/恢复（G3）— 已落地（`tui_mode/drafts.rs`）
+
+> **实现**：草稿按 `conversation_id` 存在内存表里，切会话 / `/conv new` 时换入换出；全空白视为无草稿。退出时仍由 `exit_flush` 把当前会话那一份写回服务端索引（本条只补「切换不丢」这一段）。**局限**：草稿不跨进程——切走的会话只在内存里有，退出后不保留。
 
 - **参照**：Desktop `flush_active_composer_draft` / 切会话恢复。
 - **方案**：composer 文本按当前 `conversation_id` 缓存：切会话时保存旧缓冲并载入目标会话草稿，`/conv new` 新建时清空草稿，发送成功后清空该会话草稿。杜绝草稿“串会话”（现状见 §1.2 G3）。
@@ -151,8 +155,8 @@
 - **单测**：Wave 1 以 `state.rs` / `controls.rs` 纯逻辑为主（断点记录、队列状态机、草稿表换入换出、过滤词匹配、OSC52 序列转义），沿用 `render_tests.rs` / `settings_*_tests.rs` 的写法。
 - **手测**（需真实 TTY + 本地 `crabmate serve`）：
   - W1.1：`tui` 中 `Ctrl+C` 未送达取消（或断网）→ `/resume` 续上；已确认取消则不可续。
-  - W1.2：长回合中输入第二句 → 显示排队 → 回合结束自动发出；Esc 清队。
-  - W1.3：会话 A 输入半句 → 切 B 再切回 A → 半句仍在；`/conv new` 后为空。
+  - W1.2：长回合中输入第二句 → 出现「已排队」系统行 → 回合**正常**结束才自动发出；取消 / 出错应退回输入框；输入框焦点下 Esc 清队（在侧栏 / 工作区树里要先 Esc 回输入框）。
+  - W1.3：会话 A 输入半句 → 切 B 再切回 A → 半句仍在；`/conv new` 后为空。**已知局限**：草稿只在内存，退出进程即丢（`exit_flush` 只写当前会话那一份），切走的那几个会话的草稿不跨进程保留。
   - W1.4：kitty/wezterm 下复制助手消息/代码块 → 粘贴到编辑器；不支持终端给出提示。
   - W1.5：左栏输入字母过滤 → 选中使用；清空恢复全量。
 - **无浏览器 E2E**：TUI 不属 Playwright 范围（`remote_cli_tui.md`）。

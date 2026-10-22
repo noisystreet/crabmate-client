@@ -259,6 +259,7 @@ mod tests {
             yes: true,
             no_keyring: true,
             st: UiState::new(),
+            drafts: Default::default(),
             spinner: Spinner::new(),
             rx,
             tx,
