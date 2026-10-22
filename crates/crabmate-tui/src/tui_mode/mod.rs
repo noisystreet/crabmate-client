@@ -12,9 +12,7 @@ mod approve;
 mod background;
 mod background_cmd;
 mod body_memo;
-// `controls` / `tool_summary` 提到 `pub(crate)`：`/workspace` 的清除词（`clear_word`）与
-// 控制字符剥离（`strip_control_chars`）在 crate 根的 `workspace_path` / repl 入口也要用，
-// 两份词表或两份剥离规则漂移比多一级可见性更贵。
+// `controls` / `tool_summary` 提到 `pub(crate)`：清除词与控制字符剥离在 crate 根也要用。
 pub(crate) mod controls;
 mod drafts;
 mod exit_flush;
@@ -38,6 +36,8 @@ mod status;
 mod status_stack;
 // `caps` 子命令要打印探测结果，`main` 侧需直接读（见 `term_image.rs` 头注释）。
 pub(crate) mod term_image;
+#[cfg(test)]
+mod test_support;
 mod text;
 pub(crate) mod tool_summary;
 mod turn_send;
