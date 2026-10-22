@@ -21,7 +21,7 @@ impl UiState {
     fn log_matches(&self, idx: usize, needle: &str) -> bool {
         self.lines
             .get(idx)
-            .is_some_and(|l| l.text.to_lowercase().contains(needle))
+            .is_some_and(|l| l.text().to_lowercase().contains(needle))
     }
 
     /// 命中数变化后同步计数；归零时释放锚点（否则状态行会显示 `1/0`）。
@@ -185,7 +185,7 @@ mod tests {
         let hit = s
             .lines
             .first()
-            .is_some_and(|l| l.text.to_lowercase().contains("read_file"));
+            .is_some_and(|l| l.text().to_lowercase().contains("read_file"));
         assert_eq!(s.search_total, usize::from(hit), "命中集合必须与正文一致");
         assert_eq!(s.search_hits.len(), usize::from(hit));
     }
