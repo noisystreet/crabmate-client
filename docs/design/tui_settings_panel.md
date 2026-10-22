@@ -59,7 +59,7 @@ Desktop 设置共 8 个分区（`settings_page`）。逐区对齐结论：
 | Desktop 分区 | TUI 对齐结论 | 依据 / 理由 |
 |---|---|---|
 | **Connection**（Web Bearer + serve API 基址） | **reduced**：面板内**只读展示**，编辑仍走 CLI/env/钥匙串回退 | 两者在启动期定死（`ServeClient` 由 `ConnectionConfig` 建一次），会话中改需重建 client+worker，不划算；语义与来源提示写进面板 |
-| **Appearance**（locale/theme/bg_decor/show_turn_context_inject） | **no** | CSS/DOM/`matchMedia` 渲染，终端无对应；`show_turn_context_inject` 矩阵 TUI 格已是 `no`（L63） |
+| **Appearance**（locale/theme/bg_decor/show_turn_context_inject） | **reduced：只有 `theme`**（W4 已落地） | TUI 一直在按 `prefs.theme` 上色（`palette.rs::from_theme`），W4 起面板新增「外观」分区，可切换并写回同一键；`locale` / `bg_decor` / `show_turn_context_inject` 仍 **no**——CSS/DOM/`matchMedia` 渲染，终端无对应（矩阵 TUI 格已是 `no`） |
 | **Llm（模型配置）** | **reduced→主模型扁平字段**：对齐 `client_llm.{api_base,model,temperature,llm_context_tokens,llm_thinking_mode}` + 密钥 | Desktop 的“注册表 + 主/执行器套用”面向多预设管理；TUI 只管理当前主模型这一份（§4.2 / §4.3） |
 | **Tools**（readonly tool TTL 缓存开关） | **reduced**：对齐同名字段（§4.2） | 开关 = serve prefs 布尔 + 随轮发送 `readonly_tool_ttl_cache_secs`，语义一致即可用 |
 | **Session**（SQLite 会话存储 + 字体） | **reduced**：SQLite 开关可读/切（serve 两布尔 + POST）；字体 **no** | SQLite 开关本来就是 serve 级（`/status` 驱动），字体属 CSS 渲染 |
@@ -82,6 +82,12 @@ Desktop 设置共 8 个分区（`settings_page`）。逐区对齐结论：
 | 上下文 tokens | `client_llm.llm_context_tokens` | 数值文本 | 空 = 跟随 server | 正整数 ≤ 10_000_000（`settings_commit.rs` 同区间） |
 | 思考模式 | `client_llm.llm_thinking_mode` | 枚举 | `server` | `server / on / off` |
 | API 密钥 | 钥匙串 `SecretSlot::ClientLlm`（不是 serve 字段） | password 编辑 + 清除 | 未设 = 跟随 server 服务端 `API_KEY` | 仅本机，不回显明文；有「已设」标记 |
+
+**外观（写 `/user-data/prefs` 的 `theme`，合并保真）**
+
+| 字段 | Desktop 对照键 | 控件 | 空值 / 默认 | 说明 |
+|---|---|---|---|---|
+| 主题 | `prefs.theme` | Enter 展开候选列表，↑/↓ 选择（默认（透明）/ shadcn-transparent / default-dark / crabmate-dark / shadcn-dark / material-dark / high-contrast-dark / crabmate-light / shadcn-light） | 空 = 清除键 = TUI 产品默认透明；保存后立即重解析配色 | 选项全部来自 `palette.rs` 的 `THEME_OPTIONS`（与 `THEME_NAMES` 同源，有 `theme_options_and_theme_names_stay_in_lockstep` 守着），因此选中即有可见变化。候选多于 7 项时开窗滚动（窗口跟着选中项走，首尾用 `⋯ 还有 N 项` 示意），避免小终端里被内容区高度裁掉。**不含 `system`**：终端拿不到 Desktop 的 `matchMedia` / Tauri 明暗提示，选它只会退成实底深色，与浅色系统下的 Desktop 表现相反；读到 Desktop 写的 `system` 时按原值展示、编辑起点回落「默认」，不主动改写该键 |
 
 **会话（写 `/user-data/prefs`，合并保真）**
 
@@ -108,7 +114,7 @@ Desktop 设置共 8 个分区（`settings_page`）。逐区对齐结论：
 ### 4.3 明确不做的字段（避免误配）
 
 - `saved_models[]` 注册表增删改、`executor_llm.*`、`execution_mode`：TUI 写 `llm-overrides` 时**原样合并保留**，不展示、不编辑。
-- 每台 MCP 服务器的 command/args/env/cwd/url/Bearer、GitHub 全部字段、字体/主题/背景、IDE 全字段、`show_turn_context_inject`。
+- 每台 MCP 服务器的 command/args/env/cwd/url/Bearer、GitHub 全部字段、字体/背景装饰、`locale`、IDE 全字段、`show_turn_context_inject`。
 - 会话「切换会话存储 SQLite」归 §7 后置（需确认 POST 端点契约）而非 W1/W2。
 
 ---
@@ -195,6 +201,7 @@ Desktop 设置共 8 个分区（`settings_page`）。逐区对齐结论：
 | **W1 面板骨架 + 模型/会话扁平字段** | `/settings` + F2 浮层；分区导航；三层显示；字段编辑：模型名、网关/api_base（预设表随 §6.4 对齐）、role、mode；`S` 保存（`llm-overrides` / `prefs` 合并 PUT）；`Esc`/脏确认；回合中只读；F2 加入 `/help` 与「快捷键」分区；斜杠 `/model /mode /role` 保留 | 连本地 serve 冒烟：面板改 model/role/mode → 保存 → `/status` 与 Desktop 设置页可见 → 下一轮请求体带 `client_llm.model`；重启 TUI 后值仍在（user-data 层） |
 | **W2 完整 LLM 字段 + 密钥 + 工具开关** | 温度/思考模式字段与 API 密钥写钥匙串槽 **已随面板一并落地**（校验区间对齐；密钥重启后从同一槽位回读；矩阵 auth Notes 已同步）；上下文 tokens、只读工具缓存开关、网关预设下拉（与 `client_llm_presets.rs` 同名表，双端同步注释已加；跨仓同步纪律见 §8）**已随收尾落地** | 校验区间对齐；密钥保存后重启可回读；上下文 tokens >0 随轮 `client_llm.llm_context_tokens`；关缓存开关后请求体出现 `readonly_tool_ttl_cache_secs: 0` |
 | **W3 后置项（契约核对后）** | MCP 全局开关 + `tool_timeout_secs`（`/user-data/mcp-servers` 系端点）；Session SQLite 会话存储开关（`/status` 布尔 + POST） | 开关读/写与 Desktop 设置页同源一致；不实现服务器行管理 |
+| **W4 外观分区（主题）** | 面板新增「外观」分区（导航首位，与 Desktop 同序）：`prefs.theme` 的 ←/→ 切换 + 合并写回；保存成功即用新值重解析配色；`palette.rs` 增 `THEME_OPTIONS`，并把 `crabmate-dark` 补进 `THEME_NAMES`（此前 `CM_TUI_THEME` 不认它） | 单测：选项→slug 映射、未知 slug（`system`）读透不改写、Esc 不落 staged、保存只进 prefs 组；冒烟：F2 → Tab 到「外观」→ 选 `crabmate-light` → `S` → 配色立刻变化、`/user-data/prefs` 的 `theme` 同步、Desktop 设置页看到同值 |
 
 各 Wave 内**一项用户可见行为一个 PR**（引用 `coding_agent_client.md` 约束第 5 条的小步纪律）。
 

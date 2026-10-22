@@ -128,14 +128,36 @@ const SHADCN_DARK: Palette = Palette {
 ///
 /// 加新预设时两处都要改——`every_listed_theme_name_maps_to_its_own_palette`
 /// 会在漏接 `from_theme` 时变红。
-const THEME_NAMES: [&str; 7] = [
+///
+/// `crabmate-dark` 对应 `tokens.css` 的 `:root` 深色基线，配色与 [`DEFAULT_DARK`]
+/// 相同但名字独立：列入后 `CM_TUI_THEME=crabmate-dark` 不再被当作未知名忽略。
+const THEME_NAMES: [&str; 8] = [
     "crabmate-light",
+    "crabmate-dark",
     "shadcn-light",
     "shadcn-dark",
     "material-dark",
     "high-contrast-dark",
     "shadcn-transparent",
     "default-dark",
+];
+
+/// 设置面板「主题」字段的 ←→ 循环选项（首项 `None` = 清空 prefs 键 = 产品默认透明）。
+///
+/// 选项全部取自 [`THEME_NAMES`]，因此面板里看到的每一项都能被 [`Palette::from_theme`]
+/// 精确映射（选了就有变化，不会静默落到深色兜底）。`system` 不在其中：终端拿不到
+/// 桌面端的 `matchMedia` / Tauri 明暗提示，选它只会退成实底深色，与 Desktop 浅色
+/// 系统下的表现相反。
+pub(crate) const THEME_OPTIONS: [Option<&str>; 9] = [
+    None,
+    Some("shadcn-transparent"),
+    Some("default-dark"),
+    Some("crabmate-dark"),
+    Some("shadcn-dark"),
+    Some("material-dark"),
+    Some("high-contrast-dark"),
+    Some("crabmate-light"),
+    Some("shadcn-light"),
 ];
 
 /// `shadcn-dark` 的透明变体：**只**把两块底色还给终端（`Color::Reset`）。
@@ -496,6 +518,9 @@ mod tests {
         // 显式期望表：漏接 `from_theme` 的预设会落到 `Some(_)` 的深色兜底，等值断言立刻变红。
         let expected = [
             ("crabmate-light", CRABMATE_LIGHT),
+            // 与 `tokens.css` 的 `:root` 深色基线同值；名字独立列入以便
+            // `CM_TUI_THEME` 能显式选它。
+            ("crabmate-dark", DEFAULT_DARK),
             ("shadcn-light", SHADCN_LIGHT),
             ("shadcn-dark", SHADCN_DARK),
             ("material-dark", MATERIAL_DARK),
@@ -510,6 +535,34 @@ mod tests {
         );
         for (name, want) in expected {
             assert_eq!(Palette::from_theme(Some(name)), want, "{name} 映射错了");
+        }
+    }
+
+    /// 面板可选列表必须与 `THEME_NAMES` 一一对应。
+    ///
+    /// 两张表是手写的：只加名字忘了加选项，那个主题在面板里就选不到（`from_theme`
+    /// 能映射、用户点不着）；只加选项忘了加名字，则选中后会被当成未知名静默回落到
+    /// `default-dark`。上面那个测试只校验 `from_theme` 的映射，两种漏接都拦不住。
+    #[test]
+    fn theme_options_and_theme_names_stay_in_lockstep() {
+        let options: Vec<&str> = THEME_OPTIONS.iter().flatten().copied().collect();
+        assert_eq!(
+            options.len() + 1,
+            THEME_OPTIONS.len(),
+            "除首项「默认」外，每个选项都该是一个具名主题"
+        );
+        assert_eq!(THEME_OPTIONS[0], None, "首项是清除 prefs 键的「默认」");
+        for name in THEME_NAMES {
+            assert!(
+                options.contains(&name),
+                "主题名 {name} 没有对应的面板选项，面板里选不到它"
+            );
+        }
+        for name in &options {
+            assert!(
+                THEME_NAMES.contains(name),
+                "面板选项 {name} 不在 THEME_NAMES 里，选中后会静默回落深色"
+            );
         }
     }
 

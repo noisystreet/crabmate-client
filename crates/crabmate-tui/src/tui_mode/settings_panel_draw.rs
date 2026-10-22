@@ -5,6 +5,9 @@
 
 use super::*;
 
+/// 主题「未设置」在面板里的显示名（下拉项、字段值、底栏共用一份措辞）。
+const THEME_NONE_LABEL: &str = "默认（透明）";
+
 impl SettingsPanel {
     /// 构建一帧面板内容：说明行 + 字段行 + 顶栏/导航/底栏元数据。
     pub fn content(&self, ctx: &PanelCtx<'_>, width: usize) -> PanelContent {
@@ -25,6 +28,11 @@ impl SettingsPanel {
                 cursor = Some((lines.len(), col));
             }
             lines.push(line);
+            // 主题 9 个候选、也全是展示用选项：编辑中就在行下方把列表摊开，
+            // 比在底栏读一行「当前循环到哪」再连按 ←→ 直观。
+            if *field == FieldId::Theme {
+                lines.extend(self.theme_dropdown(width));
+            }
         }
         PanelContent {
             lines,
@@ -75,14 +83,45 @@ impl SettingsPanel {
         (Line::from(vec![label_span, value_span]), None)
     }
 
+    /// 主题下拉列表：仅在主题行处于编辑态时非空。
+    ///
+    /// 对齐到标签列之后，当前项反色 + `▸`，其余灰字；`None` 显示 [`THEME_NONE_LABEL`]，
+    /// 与 `theme_cell` 用同一份措辞，免得同一样东西两种叫法。
+    ///
+    /// 候选多于 [`THEME_DROPDOWN_MAX_ROWS`] 时开窗滚动，窗口跟着 `pick` 走：绘制侧
+    /// `render_settings_body` 是 `take(inner.height)` 硬裁，全铺的话小终端里被裁掉的
+    /// 正是尾部，选中项可能整个消失 —— 而那条路径没有任何滚动机制能救它。
+    fn theme_dropdown(&self, width: usize) -> Vec<Line<'static>> {
+        let Some(Editing::Theme { pick }) = &self.editing else {
+            return Vec::new();
+        };
+        let total = THEME_OPTIONS.len();
+        let (start, end) = dropdown_window(*pick, total, THEME_DROPDOWN_MAX_ROWS);
+        let indent = " ".repeat(LABEL_PAD + 2);
+        let mut out = Vec::with_capacity(end - start + 2);
+        if start > 0 {
+            out.push(dropdown_ellipsis(&indent, start, width));
+        }
+        for i in start..end {
+            out.push(theme_option_line(&indent, i, i == *pick, width));
+        }
+        if end < total {
+            out.push(dropdown_ellipsis(&indent, total - end, width));
+        }
+        out
+    }
+
     /// 字段值列文本与颜色：staged（~）＞ override（*）＞ user-data ＞ serve 默认 ＞ 跟随 server。
-    /// API 密钥不走三层合成（staged / 已设态两态）；工具缓存有独立两态行文案。
+    /// API 密钥不走三层合成（staged / 已设态两态）；工具缓存、主题各有独立行文案。
     fn value_cell(&self, ctx: &PanelCtx<'_>, field: FieldId) -> (String, Color) {
         if field == FieldId::ApiKey {
             return self.secret_cell();
         }
         if field == FieldId::ToolCache {
             return self.tool_cache_cell(ctx);
+        }
+        if field == FieldId::Theme {
+            return self.theme_cell(ctx);
         }
         match self.staged(field) {
             FieldAction::Write(Some(v)) => {
@@ -131,6 +170,21 @@ impl SettingsPanel {
                     value: Some(_),
                 } => ("关（禁用缓存）".to_string(), Color::White),
                 _ => ("开（跟随 server）".to_string(), Color::DarkGray),
+            },
+        }
+    }
+
+    /// 主题行值：staged（~）＞ user-data 已存 slug ＞ 默认（透明）。
+    ///
+    /// 空值不叫「跟随 server」：`prefs.theme` 缺失时 TUI 回落到自己的产品默认
+    /// （透明底色），与 serve 配置无关，写成「跟随 server」会误导。
+    fn theme_cell(&self, ctx: &PanelCtx<'_>) -> (String, Color) {
+        match self.staged(FieldId::Theme) {
+            FieldAction::Write(Some(v)) => (format!("{v}~"), Color::LightYellow),
+            FieldAction::Write(None) => (format!("{THEME_NONE_LABEL}~"), Color::LightYellow),
+            FieldAction::Skip => match ctx.effective(FieldId::Theme).value {
+                Some(v) => (v, Color::White),
+                None => (THEME_NONE_LABEL.to_string(), Color::DarkGray),
             },
         }
     }
@@ -219,6 +273,8 @@ fn footer_hint(panel: &SettingsPanel) -> String {
         return String::new();
     }
     match &panel.editing {
+        // 主题是下拉列表：上下逐项走，不是左右循环。
+        Some(Editing::Theme { .. }) => "[↑/↓] 选择  [Enter] 确定  [Esc] 取消".to_string(),
         Some(Editing::Mode { .. })
         | Some(Editing::Think { .. })
         | Some(Editing::Tool { .. })
@@ -235,6 +291,7 @@ fn footer_msg(panel: &SettingsPanel) -> (String, Color) {
         Some(Editing::Mode { pick }) => mode_cycle_text(*pick),
         Some(Editing::Think { pick }) => think_cycle_text(*pick),
         Some(Editing::Tool { pick }) => tool_cycle_text(*pick),
+        Some(Editing::Theme { pick }) => theme_cycle_text(*pick),
         Some(Editing::Gateway { pick, .. }) => gateway_cycle_text(*pick),
         Some(Editing::Text { field, .. }) => match &panel.note {
             Some((note, color)) => (note.clone(), *color),
@@ -291,6 +348,18 @@ fn tool_cycle_text(pick: usize) -> (String, Color) {
     (text, Color::Gray)
 }
 
+/// 主题编辑态的底栏提示：只报当前选中项。
+///
+/// 候选列表已经在字段行下方摊开（`theme_dropdown`），这里再拼整串只会让高亮项被
+/// `truncate_display` 截掉 —— 底栏的职责是「说清现在选到哪」，不是复述列表。
+fn theme_cycle_text(pick: usize) -> (String, Color) {
+    let label = THEME_OPTIONS
+        .get(pick)
+        .and_then(|opt| *opt)
+        .unwrap_or(THEME_NONE_LABEL);
+    (format!("主题：{label}"), Color::Gray)
+}
+
 /// 网关预设 ←→ 循环的可视化预览（URL 一并显示，避免只看 id 不知落点）。
 fn gateway_cycle_text(pick: usize) -> (String, Color) {
     let mut text = String::from("网关：");
@@ -330,4 +399,51 @@ fn browse_msg(panel: &SettingsPanel) -> (String, Color) {
         return ("未保存改动：S 保存".to_string(), Color::LightYellow);
     }
     ("留空保存 = 清除（跟随 server）".to_string(), Color::Gray)
+}
+
+/// 主题下拉一次最多显示几行候选。
+///
+/// 9 项全铺时整块内容要 11 行（说明 + 字段 + 9），而 `render_settings_body` 是
+/// `take(inner.height)` 硬裁 —— 小窗口（tmux 分屏、矮终端）里被裁掉的恰好是尾部，
+/// 选中项可以整个消失，且没有任何滚动机制能救它。封顶后候选行数固定，再配合
+/// [`dropdown_window`] 保证 `pick` 永远落在可见区间内；展开后总行数上界为
+/// `THEME_DROPDOWN_MAX_ROWS + 2`（首尾各一行省略提示）。
+const THEME_DROPDOWN_MAX_ROWS: usize = 7;
+
+/// 以 `pick` 为中心的可见区间 `[start, end)`，长度不超过 `max`。
+///
+/// 贴边时向内收而不是强行居中，这样**候选区间**长度恒为 `max`（总数不足时取总数），
+/// 只有首尾省略行会随位置多出一行 —— 展开后总行数的上界仍是 `max + 2`。
+fn dropdown_window(pick: usize, total: usize, max: usize) -> (usize, usize) {
+    if total <= max {
+        return (0, total);
+    }
+    let start = pick.saturating_sub(max / 2).min(total - max);
+    (start, start + max)
+}
+
+/// 窗口外那一侧的省略行（`rest` = 还有几项没显示）。
+fn dropdown_ellipsis(indent: &str, rest: usize, width: usize) -> Line<'static> {
+    let text = format!("{indent}  ⋯ 还有 {rest} 项");
+    Line::from(Span::styled(
+        truncate_display(&text, width),
+        Style::new().fg(Color::DarkGray),
+    ))
+}
+
+/// 下拉里的一项：`▸` + 名称，选中项反色。
+///
+/// 截断只作用于名称：整行（含缩进）一起截的话，窄终端下缩进会先吃掉宽度，
+/// 主题名只剩半截甚至空串。
+fn theme_option_line(indent: &str, i: usize, here: bool, width: usize) -> Line<'static> {
+    let label = THEME_OPTIONS[i].unwrap_or(THEME_NONE_LABEL);
+    let avail = width.saturating_sub(indent.len() + 2);
+    let marker = if here { "▸ " } else { "  " };
+    let text = format!("{indent}{marker}{}", truncate_display(label, avail));
+    let style = if here {
+        Style::new().add_modifier(Modifier::REVERSED)
+    } else {
+        Style::new().fg(Color::DarkGray)
+    };
+    Line::from(Span::styled(text, style))
 }
