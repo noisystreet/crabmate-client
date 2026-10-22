@@ -15,6 +15,10 @@ use super::slash_menu::{SkillsCache, SkillsPayload, SlashItem, filtered_items, s
 use super::tool_summary::{tool_end_text, tool_row_text};
 use super::workspace_tree::{WsPickState, WsRow};
 
+// 搜索的命中集合与跳转：拆出去是为了增量维护（旧实现每个流式增量全量重扫，见文件头）。
+#[path = "state_search.rs"]
+mod search;
+
 /// `/` 补全菜单的会话内状态。
 #[derive(Debug, Default)]
 pub struct SlashMenuState {
@@ -108,6 +112,11 @@ pub struct LogLine {
     pub collapsed: bool,
     /// 工具行状态；仅供渲染分色与进度位，不参与文本（文本仍是 `tool_end_text` 的完整串）。
     pub tool_state: ToolState,
+    /// 内容代数：文本被追加/替换或工具状态变化时 +1。
+    ///
+    /// 供 body 行级缓存做指纹（O(1)）。不用「文本长度」或逐行哈希：前者漏等长替换，
+    /// 后者每帧都要重算一遍全文，正好把要省的开销又赔回去。
+    pub rev: u64,
 }
 
 impl LogLine {
@@ -120,11 +129,13 @@ impl LogLine {
             collapsed,
             // 非工具行没有状态可言；工具行由 `tool_start` 改成 `Running`。
             tool_state: ToolState::Finished(None),
+            rev: 0,
         }
     }
 
     fn append(&mut self, delta: &str) {
         self.text.push_str(delta);
+        self.rev = self.rev.wrapping_add(1);
     }
 }
 
@@ -237,6 +248,10 @@ pub struct UiState {
     pub search_cursor: Option<usize>,
     /// 当前搜索命中的逻辑行数（状态行提示用）。
     pub search_total: usize,
+    /// 当前搜索命中的逻辑行下标（升序、无重复；`search_total` 恒等于其长度）。
+    ///
+    /// 独立于 `lines` 的扫描结果存在，是为了流式期只重判被改动的那一行。
+    pub(super) search_hits: Vec<usize>,
     /// transcript 内容代数（任何影响渲染的行内容/折叠/清空变化都会递增）。
     /// 供 body 行帧间 memo 作失效键（O(1)，对原位同长编辑也免疫）。
     pub content_rev: u64,
@@ -265,7 +280,7 @@ impl UiState {
         // thinking 默认折叠；但"全局展开"开启时新建的 thinking 行也应保持展开。
         let collapsed = kind == LineKind::Thinking && !self.thinking_visible;
         self.lines.push(LogLine::new(kind, text, collapsed));
-        self.refresh_search_meta();
+        self.search_on_line_added();
         self.bump();
     }
 
@@ -280,8 +295,9 @@ impl UiState {
             text: text.to_string(),
             collapsed,
             tool_state: ToolState::Finished(tool_ok),
+            rev: 0,
         });
-        self.refresh_search_meta();
+        self.search_on_line_added();
         self.bump();
     }
 
@@ -296,7 +312,8 @@ impl UiState {
         } else {
             self.push_line(kind, delta);
         }
-        self.refresh_search_meta();
+        // 流式续接只改了最后一行：只重判它，不重扫全表。
+        self.search_on_last_line_changed();
         self.bump();
     }
 
@@ -657,6 +674,7 @@ impl UiState {
         self.search = None;
         self.search_cursor = None;
         self.search_total = 0;
+        self.search_hits.clear();
         self.bump();
     }
 
@@ -689,13 +707,14 @@ impl UiState {
             text: tool_row_text(display, note),
             collapsed: false,
             tool_state: ToolState::Running,
+            rev: 0,
         });
         // 没有 id 就无法按 id 找回这一行；结果到达时会另起一行，本行就此停在
         // `Running`——与「id 缺失等于放弃了原位更新」的既有语义一致。
         if !tool_call_id.is_empty() {
             self.tool_pending.insert(tool_call_id.to_string(), idx);
         }
-        self.refresh_search_meta();
+        self.search_on_line_added();
         self.bump();
     }
 
@@ -713,17 +732,21 @@ impl UiState {
         let idx = self.tool_pending.remove(tool_call_id);
         match idx {
             Some(i) if self.lines.get(i).is_some_and(|l| l.kind == LineKind::Tool) => {
-                self.lines[i].text = text;
-                self.lines[i].tool_state = ToolState::Finished(ok);
+                let line = &mut self.lines[i];
+                line.text = text;
+                line.tool_state = ToolState::Finished(ok);
+                line.rev = line.rev.wrapping_add(1);
+                // 原位替换了文本：命中集合要跟着改（可能是中间行，不是末尾）。
+                self.search_on_line_changed(i);
             }
             _ => {
                 self.push_line(LineKind::Tool, &text);
                 if let Some(last) = self.lines.last_mut() {
                     last.tool_state = ToolState::Finished(ok);
+                    last.rev = last.rev.wrapping_add(1);
                 }
             }
         }
-        self.refresh_search_meta();
         self.bump();
     }
 
@@ -781,93 +804,8 @@ impl UiState {
         self.status_stack_collapsed = !self.status_stack_collapsed;
     }
 
-    // ── 搜索（/find） ────────────────────────────────────────
-
-    fn needle(&self) -> Option<&str> {
-        self.search.as_deref()
-    }
-
-    fn log_matches(&self, idx: usize, needle: &str) -> bool {
-        self.lines
-            .get(idx)
-            .is_some_and(|l| l.text.to_lowercase().contains(needle))
-    }
-
-    /// 命中搜索的逻辑行下标（升序）。
-    fn matches(&self) -> Vec<usize> {
-        let Some(needle) = self.needle() else {
-            return Vec::new();
-        };
-        (0..self.lines.len())
-            .filter(|&i| self.log_matches(i, needle))
-            .collect()
-    }
-
-    /// 内容变化后同步命中计数（仅搜索激活时扫描，开销与 transcript 长度线性）。
-    fn refresh_search_meta(&mut self) {
-        if self.search.is_none() {
-            self.search_total = 0;
-            return;
-        }
-        self.search_total = self.matches().len();
-        if self.search_total == 0 {
-            self.search_cursor = None;
-        }
-    }
-
-    /// 设置新搜索词并从首条命中跳转；返回命中数。
-    pub fn start_search(&mut self, term: &str) -> usize {
-        self.search = Some(term.trim().to_lowercase());
-        self.search_cursor = None;
-        self.search_total = 0;
-        let hits = self.matches();
-        self.search_total = hits.len();
-        if let Some(&first) = hits.first() {
-            self.search_cursor = Some(first);
-        }
-        hits.len()
-    }
-
-    /// 跳到下一个命中（循环）；无命中返回 `None`。
-    pub fn next_search_hit(&mut self) -> Option<usize> {
-        let hits = self.matches();
-        self.search_total = hits.len();
-        if hits.is_empty() {
-            return None;
-        }
-        let after = self.search_cursor.unwrap_or(0);
-        let next = hits
-            .iter()
-            .copied()
-            .find(|&i| i > after)
-            .or_else(|| hits.first().copied());
-        if let Some(n) = next {
-            self.search_cursor = Some(n);
-        }
-        next
-    }
-
-    /// 手动滚动后释放锚点（保留搜索词与高亮）。
-    pub fn release_search_anchor(&mut self) {
-        self.search_cursor = None;
-    }
-
-    /// 清除搜索（去掉高亮与锚点）。
-    pub fn clear_search(&mut self) {
-        self.search = None;
-        self.search_cursor = None;
-        self.search_total = 0;
-    }
-
-    #[must_use]
-    pub fn search_active(&self) -> bool {
-        self.search.is_some()
-    }
-
-    #[must_use]
-    pub fn search_term(&self) -> Option<&str> {
-        self.search.as_deref()
-    }
+    // 搜索（`/find`）的状态与跳转见 `state_search.rs`：命中集合增量维护，
+    // 不再在 `stream_delta` 里全量重扫。
 
     pub fn scroll_page(&mut self, up: bool) {
         let step = self.page_rows.max(1);
