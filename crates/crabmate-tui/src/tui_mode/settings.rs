@@ -94,7 +94,8 @@ impl LlmSave {
     }
 }
 
-/// `/user-data/prefs` 的 `cm_role / session_mode / disable_readonly_tool_ttl_cache` 保存动作。
+/// `/user-data/prefs` 的 `cm_role / session_mode / disable_readonly_tool_ttl_cache /
+/// theme` 保存动作。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PrefsSave {
     pub role: FieldAction,
@@ -102,13 +103,19 @@ pub struct PrefsSave {
     /// 只读工具缓存：`Write(Some("off"))` = 禁用（disable=true，随轮发 ttl=0）；
     /// `Write(None)` / 空 = 清除键（跟随 server）。见 [`TOOL_CACHE_DISABLED`]。
     pub tool_cache: FieldAction,
+    /// 主题（prefs `theme`；`Write(None)` / 空 = 清除键 = TUI 产品默认透明）。
+    /// 与 Desktop 同一 slug 表，保存后两端设置页看到同一个值。
+    pub theme: FieldAction,
 }
 
 impl PrefsSave {
     /// 各组字段是否有任一待保存动作。
     #[must_use]
     pub fn any(&self) -> bool {
-        self.role.is_write() || self.session_mode.is_write() || self.tool_cache.is_write()
+        self.role.is_write()
+            || self.session_mode.is_write()
+            || self.tool_cache.is_write()
+            || self.theme.is_write()
     }
 
     /// 清空全部动作（保存成功落地后调用）。
@@ -116,6 +123,7 @@ impl PrefsSave {
         self.role = FieldAction::Skip;
         self.session_mode = FieldAction::Skip;
         self.tool_cache = FieldAction::Skip;
+        self.theme = FieldAction::Skip;
     }
 }
 
@@ -123,7 +131,7 @@ impl PrefsSave {
 ///
 /// 连同一 serve 时与 Desktop/Web 共享：`client_llm.{model,api_base,temperature,
 /// llm_thinking_mode,llm_context_tokens}` + prefs 的 `cm_role/session_mode/
-/// disable_readonly_tool_ttl_cache`。空白值一律归一为 `None`（= 未设置 / 跟随 server）。
+/// disable_readonly_tool_ttl_cache/theme`。空白值一律归一为 `None`（= 未设置 / 跟随 server）。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PersistedSettings {
     pub model: Option<String>,
@@ -139,7 +147,8 @@ pub struct PersistedSettings {
     /// 只读工具 TTL 缓存禁用标记（镜像 prefs `disable_readonly_tool_ttl_cache`：
     /// `Some(true)` = 禁用 / 随轮发 ttl=0；`None`/`Some(false)` = 跟随 server）。
     pub tool_cache_disabled: Option<bool>,
-    /// Desktop 主题名（只读：TUI 不写回；切换需重启生效）。
+    /// 主题名（prefs `theme`；与 Desktop 同一 slug 表）。面板可改，保存后立即
+    /// 重新解析配色；空 = 清除键 = TUI 产品默认（透明）。
     pub theme: Option<String>,
 }
 
@@ -161,7 +170,8 @@ impl PersistedSettings {
             session_mode: normalize(&prefs.session_mode)
                 .filter(|m| is_valid_session_mode(m.as_str())),
             tool_cache_disabled: prefs.disable_readonly_tool_ttl_cache,
-            // 只读：TUI 不自建主题，只跟随 Desktop 的 `theme`。
+            // 原样保留任意 slug（含 Desktop 侧新增 / `system`），面板不认识的
+            // 值在编辑态回落到「默认」选项，不会在读取时丢弃用户已有设置。
             theme: normalize(&prefs.theme),
         }
     }
@@ -180,6 +190,7 @@ impl PersistedSettings {
         apply_slot(&mut self.role, &save.role);
         apply_slot(&mut self.session_mode, &save.session_mode);
         apply_tool_cache_action(&mut self.tool_cache_disabled, &save.tool_cache);
+        apply_slot(&mut self.theme, &save.theme);
     }
 }
 
@@ -406,13 +417,14 @@ pub fn merge_llm_save(mut base: LlmOverridesDto, save: &LlmSave) -> LlmOverrides
     base
 }
 
-/// 合并写回 `/user-data/prefs`：只改 `cm_role / session_mode / disable_readonly_tool_ttl_cache`，
-/// `locale / theme / 布局 / IDE` 等字段原样保留（合并保真）。
+/// 合并写回 `/user-data/prefs`：只改 `cm_role / session_mode / disable_readonly_tool_ttl_cache /
+/// theme`，`locale / 布局 / IDE` 等字段原样保留（合并保真）。
 #[must_use]
 pub fn merge_prefs_save(mut base: UserPrefsDto, save: &PrefsSave) -> UserPrefsDto {
     apply_slot(&mut base.cm_role, &save.role);
     apply_slot(&mut base.session_mode, &save.session_mode);
     apply_tool_cache_action(&mut base.disable_readonly_tool_ttl_cache, &save.tool_cache);
+    apply_slot(&mut base.theme, &save.theme);
     base
 }
 

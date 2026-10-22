@@ -8,99 +8,15 @@ use ratatui::text::{Line, Span};
 use unicode_width::UnicodeWidthStr;
 
 use super::SessionPrefs;
+use super::palette::THEME_OPTIONS;
 use super::render::{cell_window, horizontal_window, truncate_display};
 use super::serve_defaults::ServeDefaults;
 use super::settings::{
-    EffectiveView, FieldAction, Layer, LlmSave, PersistedSettings, PrefsSave, SESSION_MODES,
-    THINKING_MODES, TOOL_CACHE_DISABLED, effective_value, is_valid_context_tokens,
-    is_valid_temperature, normalize_str, validate_api_base,
+    EffectiveView, FieldAction, Layer, LlmSave, PersistedSettings, PrefsSave, TOOL_CACHE_DISABLED,
+    effective_value, is_valid_context_tokens, is_valid_temperature, normalize_str,
+    validate_api_base,
 };
 
-/// 会话模式编辑选项长度 =「跟随 server」+ [`SESSION_MODES`]。
-const MODE_OPTIONS_LEN: usize = SESSION_MODES.len() + 1;
-
-/// 思考模式编辑选项长度 =「跟随 server」+ [`THINKING_MODES`]。
-const THINK_OPTIONS_LEN: usize = THINKING_MODES.len() + 1;
-
-/// 会话模式编辑选项（`None` = 跟随 server，即清除存储键）；取值以 [`SESSION_MODES`] 为单一来源。
-fn mode_options() -> [Option<&'static str>; MODE_OPTIONS_LEN] {
-    let mut out = [None; MODE_OPTIONS_LEN];
-    for (i, m) in SESSION_MODES.iter().copied().enumerate() {
-        out[i + 1] = Some(m);
-    }
-    out
-}
-
-/// 思考模式编辑选项（`None` = 跟随 server，即清除存储键）；取值以 [`THINKING_MODES`] 为单一来源。
-fn think_options() -> [Option<&'static str>; THINK_OPTIONS_LEN] {
-    let mut out = [None; THINK_OPTIONS_LEN];
-    for (i, m) in THINKING_MODES.iter().copied().enumerate() {
-        out[i + 1] = Some(m);
-    }
-    out
-}
-
-/// 只读工具缓存编辑选项长度 = 开（跟随 server） + 关（禁用）。
-const TOOL_OPTIONS_LEN: usize = 2;
-
-/// 只读工具缓存编辑选项（`None` = 开/跟随 server，即清除 prefs 键；`Some("off")` = 关/禁用）。
-fn tool_options() -> [Option<&'static str>; TOOL_OPTIONS_LEN] {
-    [None, Some(TOOL_CACHE_DISABLED)]
-}
-
-/// 网关预设（与 `frontend/src/client_llm_presets.rs` 的 `CLIENT_LLM_API_BASE_PRESETS`
-/// **同源拷贝**；改 URL / 增删条目需两仓同步，避免漂移）。
-/// TUI 只回写 `api_base`，不按预设自动填建议模型名（模型名仍保持「空 = 跟随 server」）。
-#[derive(Clone, Copy)]
-struct ApiPreset {
-    id: &'static str,
-    url: &'static str,
-}
-
-const API_BASE_PRESETS: &[ApiPreset] = &[
-    ApiPreset {
-        id: "server",
-        url: "",
-    },
-    ApiPreset {
-        id: "ollama",
-        url: "http://127.0.0.1:11434/v1",
-    },
-    ApiPreset {
-        id: "deepseek",
-        url: "https://api.deepseek.com/v1",
-    },
-    ApiPreset {
-        id: "minimax",
-        url: "https://api.minimaxi.com/v1",
-    },
-    ApiPreset {
-        id: "zhipu",
-        url: "https://open.bigmodel.cn/api/paas/v4",
-    },
-    ApiPreset {
-        id: "moonshot",
-        url: "https://api.moonshot.cn/v1",
-    },
-    ApiPreset {
-        id: "custom",
-        url: "",
-    },
-];
-
-const GATEWAY_SERVER_ID: &str = "server";
-const GATEWAY_CUSTOM_ID: &str = "custom";
-
-/// 网关预设选项下标 → 值（对应 [`API_BASE_PRESETS`]；`server` 是首位，`custom` 是末位）。
-fn gateway_pick_of(value: Option<&str>) -> usize {
-    match value.map(str::trim).filter(|s| !s.is_empty()) {
-        None => 0,
-        Some(v) => API_BASE_PRESETS
-            .iter()
-            .position(|p| p.id != GATEWAY_SERVER_ID && p.id != GATEWAY_CUSTOM_ID && p.url == v)
-            .unwrap_or(API_BASE_PRESETS.len() - 1),
-    }
-}
 /// 字段行标签列宽（cell；含标签与值之间间隔）。
 const LABEL_PAD: usize = 13;
 
@@ -109,18 +25,23 @@ pub(super) fn is_f2_key(key: &KeyEvent) -> bool {
     key.code == KeyCode::F(2) && !key.modifiers.contains(KeyModifiers::CONTROL)
 }
 
-/// 面板分区：模型 / 会话（扁平字段，写 serve user-data）。
+/// 面板分区：外观 / 模型 / 会话（扁平字段，写 serve user-data）。
+///
+/// 顺序与 Desktop 设置页导航一致（外观在模型之前），`ALL` 的下标必须与枚举判别式
+/// 对齐——[`SettingsPanel::cycle_section`] 用 `section as usize` 索引。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Section {
+    Appearance,
     Llm,
     Session,
 }
 
 impl Section {
-    const ALL: [Section; 2] = [Section::Llm, Section::Session];
+    const ALL: [Section; 3] = [Section::Appearance, Section::Llm, Section::Session];
 
     const fn label(self) -> &'static str {
         match self {
+            Section::Appearance => "外观",
             Section::Llm => "模型",
             Section::Session => "会话",
         }
@@ -128,6 +49,7 @@ impl Section {
 
     const fn fields(self) -> &'static [FieldId] {
         match self {
+            Section::Appearance => &[FieldId::Theme],
             Section::Llm => &[
                 FieldId::Model,
                 FieldId::ApiBase,
@@ -141,11 +63,13 @@ impl Section {
     }
 }
 
-/// 面板管理的字段：模型分区 6 个 + 会话分区 3 个。`Temperature/ThinkingMode/
+/// 面板管理的字段：外观 1 个 + 模型 6 个 + 会话 3 个。`Temperature/ThinkingMode/
 /// ContextTokens` 写 user-data `client_llm.*`；`ApiKey` 只写本机钥匙串（见 TuiApp
-/// 接线）；`ToolCache` 写 prefs `disable_readonly_tool_ttl_cache`。
+/// 接线）；`ToolCache` 写 prefs `disable_readonly_tool_ttl_cache`；`Theme` 写 prefs
+/// `theme`（与 Desktop 同一 slug 表，保存后立即重新解析配色）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FieldId {
+    Theme,
     Model,
     ApiBase,
     Temperature,
@@ -159,6 +83,7 @@ pub enum FieldId {
 
 const fn field_label(field: FieldId) -> &'static str {
     match field {
+        FieldId::Theme => "主题",
         FieldId::Model => "模型名",
         FieldId::ApiBase => "API Base",
         FieldId::Temperature => "温度",
@@ -195,6 +120,10 @@ enum Editing {
     Tool {
         pick: usize,
     },
+    /// 主题循环：`pick` 对应 [`THEME_OPTIONS`]（下标 0 = 默认 / 清除 prefs 键）。
+    Theme {
+        pick: usize,
+    },
     /// 网关预设循环：`pick` 对应 [`API_BASE_PRESETS`]；`prefill` 在选「自定义 URL」时
     /// 作为文本编辑初值（当前生效值，避免重输长 URL）。
     Gateway {
@@ -210,11 +139,15 @@ enum EditAction {
     CommitMode,
     CommitThink,
     CommitTool,
+    CommitTheme,
     CommitGateway,
     Insert(char),
     Backspace,
     MoveLeft,
     MoveRight,
+    /// 下拉列表里向上/向下移动（主题用；到两端停住，不环绕）。
+    PickUp,
+    PickDown,
 }
 
 /// 面板按键处理结果（状态已内部更新；副作用交给调用方）。
@@ -325,6 +258,7 @@ impl SettingsPanel {
             FieldId::Role => &self.prefs.role,
             FieldId::SessionMode => &self.prefs.session_mode,
             FieldId::ToolCache => &self.prefs.tool_cache,
+            FieldId::Theme => &self.prefs.theme,
         }
     }
 
@@ -339,6 +273,7 @@ impl SettingsPanel {
             FieldId::Role => self.prefs.role = action,
             FieldId::SessionMode => self.prefs.session_mode = action,
             FieldId::ToolCache => self.prefs.tool_cache = action,
+            FieldId::Theme => self.prefs.theme = action,
         }
     }
 
@@ -453,8 +388,8 @@ impl SettingsPanel {
         self.row = 0;
     }
 
-    /// Enter：进入当前字段的编辑（文本缓冲预填生效值；会话模式/思考模式/工具缓存/网关
-    /// 预设进枚举循环；API 密钥从空开始；自定义网关在预设循环里 Enter 落到文本编辑）。
+    /// Enter：进入当前字段的编辑（文本缓冲预填生效值；主题/会话模式/思考模式/工具缓存/
+    /// 网关预设进枚举循环；API 密钥从空开始；自定义网关在预设循环里 Enter 落到文本编辑）。
     fn begin_edit(&mut self, ctx: &PanelCtx<'_>) {
         if self.read_only {
             self.set_note(
@@ -498,6 +433,20 @@ impl SettingsPanel {
                 },
             };
             self.editing = Some(Editing::Tool { pick });
+            return;
+        }
+        if field == FieldId::Theme {
+            // 当前生效值不在选项表里（Desktop 侧新增 slug / `system`）时回落到
+            // 下标 0 =「默认」：读取不改写，只有用户按 Enter 提交才会落盘。
+            let pick = match self.staged(field) {
+                FieldAction::Write(Some(v)) => theme_index_of(Some(v)),
+                FieldAction::Write(None) => 0,
+                FieldAction::Skip => match ctx.effective(field).value {
+                    Some(v) => theme_index_of(Some(&v)),
+                    None => 0,
+                },
+            };
+            self.editing = Some(Editing::Theme { pick });
             return;
         }
         // API Base：网关预设循环（server / ollama / … / 自定义 URL）。自定义在预设里 Enter
@@ -568,6 +517,17 @@ impl SettingsPanel {
                 KeyCode::Right => Some(EditAction::MoveRight),
                 _ => None,
             },
+            Some(Editing::Theme { .. }) => match key.code {
+                KeyCode::Esc => Some(EditAction::Cancel),
+                KeyCode::Enter => Some(EditAction::CommitTheme),
+                // 主题是「下拉」而不是「循环」：候选有 9 个，↑↓ 逐项走过一遍比记住顺序
+                // 连按 ←→ 更符合直觉。←→ 保留，习惯循环的人不必改手。
+                KeyCode::Up => Some(EditAction::PickUp),
+                KeyCode::Down => Some(EditAction::PickDown),
+                KeyCode::Left => Some(EditAction::MoveLeft),
+                KeyCode::Right => Some(EditAction::MoveRight),
+                _ => None,
+            },
             Some(Editing::Gateway { .. }) => match key.code {
                 KeyCode::Esc => Some(EditAction::Cancel),
                 KeyCode::Enter => Some(EditAction::CommitGateway),
@@ -586,11 +546,14 @@ impl SettingsPanel {
             EditAction::CommitMode => self.commit_mode(),
             EditAction::CommitThink => self.commit_think(),
             EditAction::CommitTool => self.commit_tool(),
+            EditAction::CommitTheme => self.commit_theme(),
             EditAction::CommitGateway => self.commit_gateway(),
             EditAction::Insert(c) => self.edit_insert(c),
             EditAction::Backspace => self.edit_backspace(),
             EditAction::MoveLeft => self.edit_move(true),
             EditAction::MoveRight => self.edit_move(false),
+            EditAction::PickUp => self.pick_step(true),
+            EditAction::PickDown => self.pick_step(false),
         }
     }
 
@@ -661,6 +624,15 @@ impl SettingsPanel {
         self.set_staged(FieldId::ToolCache, FieldAction::Write(value));
     }
 
+    /// 主题确认：写入当前选项（下标 0 = `None` = 清除 prefs 键、回到产品默认透明）。
+    fn commit_theme(&mut self) {
+        let Some(Editing::Theme { pick }) = self.editing.take() else {
+            return;
+        };
+        let value = THEME_OPTIONS[pick].map(str::to_string);
+        self.set_staged(FieldId::Theme, FieldAction::Write(value));
+    }
+
     /// 网关预设确认：`server` = 清除（跟随 server）；具名预设写其 URL；`custom`
     /// 转文本编辑（缓冲预填当前生效值，Enter 后再走 URL 校验）。
     fn commit_gateway(&mut self) {
@@ -707,7 +679,7 @@ impl SettingsPanel {
         }
     }
 
-    /// 编辑态 ←/→：文本字段移动光标；模式/思考/工具/网关枚举循环切选项（↑↓ 不动）。
+    /// 编辑态 ←/→：文本字段移动光标；模式/思考/工具/主题/网关枚举移动选项（↑↓ 不动）。
     fn edit_move(&mut self, left: bool) {
         match &mut self.editing {
             Some(Editing::Text { buf, cursor, .. }) => {
@@ -720,6 +692,17 @@ impl SettingsPanel {
             Some(other) => move_cycle_pick(other, left),
             None => {}
         }
+    }
+
+    /// 主题下拉光标：↑↓ 与 ←→ 走同一个 clamp 移动（[`move_pick`]）。
+    ///
+    /// 不复用 `move_cycle_pick` 那层分派，是因为下拉只认 `Theme`；但移动规则必须
+    /// 与它一致，否则同一个 `pick` 会因按键不同而语义分叉。
+    fn pick_step(&mut self, up: bool) {
+        let Some(Editing::Theme { pick }) = &mut self.editing else {
+            return;
+        };
+        move_pick(pick, up, THEME_OPTIONS.len());
     }
 
     /// S 保存：staged 全空时提示；否则标记在途并返回保存请求（含两组暂存动作 + 密钥）。
@@ -745,41 +728,18 @@ impl SettingsPanel {
     }
 }
 
-/// ←/→ 移动循环类编辑的光标（Mode / Think / Tool / Gateway）。
+/// ←/→ 移动循环类编辑的光标（Mode / Think / Tool / Theme / Gateway）。
+///
+/// 分派留在父模块：参数是私有的 [`Editing`]，选项表与下标算术在 [`schema`]。
 fn move_cycle_pick(editing: &mut Editing, left: bool) {
     match editing {
         Editing::Mode { pick } => move_pick(pick, left, mode_options().len()),
         Editing::Think { pick } => move_pick(pick, left, think_options().len()),
         Editing::Tool { pick } => move_pick(pick, left, tool_options().len()),
+        Editing::Theme { pick } => move_pick(pick, left, THEME_OPTIONS.len()),
         Editing::Gateway { pick, .. } => move_pick(pick, left, API_BASE_PRESETS.len()),
         Editing::Text { .. } => {}
     }
-}
-
-/// 把 `pick` 在 `0..len` 里按方向移动一格（clamp，不循环回卷）。
-fn move_pick(pick: &mut usize, left: bool, len: usize) {
-    if left {
-        *pick = pick.saturating_sub(1);
-    } else if *pick + 1 < len {
-        *pick += 1;
-    }
-}
-
-/// 会话模式选项下标 → 值（按 [`SESSION_MODES`] 顺序；其余（含 None）回 0 = 跟随 server）。
-fn mode_index_of(v: Option<&str>) -> usize {
-    v.and_then(|m| SESSION_MODES.iter().position(|x| *x == m))
-        .map_or(0, |i| i + 1)
-}
-
-/// 思考模式选项下标 → 值（按 [`THINKING_MODES`] 顺序；其余（含 None）回 0 = server/跟随）。
-fn think_index_of(v: Option<&str>) -> usize {
-    v.and_then(|m| THINKING_MODES.iter().position(|x| *x == m))
-        .map_or(0, |i| i + 1)
-}
-
-/// 只读工具缓存选项下标 → 值（`off` → 1 = 禁用；其它（含 None）回 0 = 开/跟随 server）。
-fn tool_index_of(v: Option<&str>) -> usize {
-    usize::from(v == Some(TOOL_CACHE_DISABLED))
 }
 
 /// 面板显示所需的三层上下文（override / 持久层 / serve 默认）。
@@ -791,7 +751,7 @@ pub struct PanelCtx<'a> {
 
 impl PanelCtx<'_> {
     /// 字段的三层来源（override、user-data、serve 默认；空白由合成时归一），供合成/预填共用。
-    /// 温度/上下文/思考/工具缓存无本地 override（TUI 无斜杠）与 serve 默认；API 密钥不参与
+    /// 温度/上下文/思考/工具缓存/主题无本地 override（TUI 无斜杠）与 serve 默认；API 密钥不参与
     /// 三层（走钥匙串）。
     fn sources(&self, field: FieldId) -> (Option<&str>, Option<&str>, Option<&str>) {
         let p = self.persisted;
@@ -803,6 +763,7 @@ impl PanelCtx<'_> {
             | FieldId::ContextTokens
             | FieldId::ThinkingMode
             | FieldId::ToolCache
+            | FieldId::Theme
             | FieldId::ApiKey => None,
             FieldId::Role => self.overrides.agent_role.as_deref(),
             FieldId::SessionMode => self.overrides.session_mode.as_deref(),
@@ -820,15 +781,17 @@ impl PanelCtx<'_> {
             FieldId::ToolCache => p
                 .and_then(|p| p.tool_cache_disabled)
                 .and_then(|d| d.then_some(TOOL_CACHE_DISABLED)),
+            FieldId::Theme => p.and_then(|p| p.theme.as_deref()),
         };
         let remote = match field {
             FieldId::Model => d.and_then(|d| d.model.as_deref()),
-            // API Base / 温度 / 上下文 / 思考 / 工具缓存没有 /status 默认来源：三层只到 user-data。
+            // API Base / 温度 / 上下文 / 思考 / 工具缓存 / 主题没有 /status 默认来源：三层只到 user-data。
             FieldId::ApiBase
             | FieldId::Temperature
             | FieldId::ContextTokens
             | FieldId::ThinkingMode
             | FieldId::ToolCache
+            | FieldId::Theme
             | FieldId::ApiKey => None,
             FieldId::Role => d.and_then(|d| d.role.as_deref()),
             FieldId::SessionMode => d.and_then(|d| d.mode.as_deref()),
@@ -873,6 +836,12 @@ fn pad_cells(s: &str, cells: usize) -> String {
     format!("{s}{}", " ".repeat(pad))
 }
 
+// 选项表 / 枚举下标换算的纯函数层（单独成文件压行数门禁）。重导出让 `draw` /
+// `app` / 各测试子模块的 `use super::*` 依旧能拿到 `mode_options` 这些名字。
+#[path = "settings_panel_schema.rs"]
+mod schema;
+pub(crate) use self::schema::*;
+
 // 内容构建与行渲染（content / field_line / 值列 / 导航 / 底栏文案）独立成文件：压行数门禁。
 #[path = "settings_panel_draw.rs"]
 mod draw;
@@ -894,3 +863,8 @@ mod tests_w2;
 #[cfg(test)]
 #[path = "settings_panel_w3_tests.rs"]
 mod tests_w3;
+
+// 外观分区（主题）单测独立成文件（同上）。
+#[cfg(test)]
+#[path = "settings_panel_appearance_tests.rs"]
+mod tests_appearance;

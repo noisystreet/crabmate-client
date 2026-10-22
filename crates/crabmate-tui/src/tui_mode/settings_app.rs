@@ -245,6 +245,12 @@ impl TuiApp<'_> {
                 if save.session_mode.is_write() {
                     self.overrides.session_mode = None;
                 }
+                // 主题：持久层已更新，立即按新值重解析配色（`CM_TUI_THEME` 覆盖仍优先，
+                // 由 `Palette::resolve` 内部判定）。先取 clone 再改 `st`，避开借用冲突。
+                if save.theme.is_write() {
+                    let theme = self.persisted.as_ref().and_then(|p| p.theme.clone());
+                    self.st.set_palette(Palette::resolve(theme.as_deref()));
+                }
                 let names = prefs_saved_names(&save);
                 self.st.push_line(
                     LineKind::System,
@@ -302,6 +308,9 @@ fn prefs_saved_names(save: &PrefsSave) -> Vec<&'static str> {
     }
     if save.tool_cache.is_write() {
         v.push(field_label(FieldId::ToolCache));
+    }
+    if save.theme.is_write() {
+        v.push(field_label(FieldId::Theme));
     }
     v
 }

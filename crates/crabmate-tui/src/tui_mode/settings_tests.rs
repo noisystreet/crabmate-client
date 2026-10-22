@@ -268,6 +268,7 @@ fn merge_prefs_save_preserves_unrelated_keys() {
         role: FieldAction::Write(Some("architect".into())),
         session_mode: FieldAction::Write(None),
         tool_cache: FieldAction::Skip,
+        theme: FieldAction::Skip,
     };
     let out = merge_prefs_save(base, &save);
     assert_eq!(out.cm_role.as_deref(), Some("architect"));
@@ -361,9 +362,11 @@ fn persisted_apply_saved_updates_only_written_keys() {
         role: FieldAction::Skip,
         session_mode: FieldAction::Write(Some("plan".into())),
         tool_cache: FieldAction::Skip,
+        theme: FieldAction::Write(Some("shadcn-dark".into())),
     });
     assert_eq!(p.role.as_deref(), Some("coder"), "Skip 键不动");
     assert_eq!(p.session_mode.as_deref(), Some("plan"));
+    assert_eq!(p.theme.as_deref(), Some("shadcn-dark"), "主题随保存落地");
 }
 
 #[test]
