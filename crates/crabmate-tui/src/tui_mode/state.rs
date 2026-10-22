@@ -160,6 +160,11 @@ pub struct UiState {
     pub running: bool,
     /// 当前回合是否已发过取消（第二次 Ctrl+C = 强退）。
     pub cancel_sent: bool,
+    /// 回合进行中按 Enter 排队的下一句（回合**正常**结束后自动发出；Esc 清队）。
+    ///
+    /// 只保留最后一条：与 Desktop 的排队 chip 同语义，连按 Enter 视为「改主意」。
+    /// 取消 / 出错的回合不自动发出，见 `drafts::queued_outcome`。
+    pub queued: Option<String>,
     /// 从底部回看的物理行数（0 = 跟随最新）。
     pub view_offset: usize,
     /// PgUp/PgDn 页步（由事件循环按终端高度刷新）。
@@ -331,6 +336,29 @@ impl UiState {
         let s: String = self.input.drain(..).collect();
         self.cursor = 0;
         s
+    }
+
+    // ── 忙时排队（回合结束后自动发送） ─────────────────────────
+
+    /// 排入「回合结束后自动发送」的下一句（覆盖前一条）。
+    pub fn queue_message(&mut self, text: &str) {
+        self.queued = Some(text.to_string());
+    }
+
+    /// 是否有排队消息（回合结束时据此决定要不要动输入框）。
+    #[must_use]
+    pub fn has_queued(&self) -> bool {
+        self.queued.is_some()
+    }
+
+    /// 取走排队消息（回合结束时调用）。
+    pub fn take_queued(&mut self) -> Option<String> {
+        self.queued.take()
+    }
+
+    /// 清掉排队消息（Esc）；返回是否确有内容被清掉。
+    pub fn clear_queued(&mut self) -> bool {
+        self.queued.take().is_some()
     }
 
     /// 输入框当前全文（不动光标、不清空）：退出前把草稿写回会话行用。
