@@ -492,7 +492,7 @@ mod tests {
             "被拦下时不该发任何 worker 任务（含 WorkspaceSet）"
         );
         let last = app.st.lines.last().expect("应留一行失败回显");
-        assert!(last.text.contains("切换工作区失败"), "{:?}", last.text);
+        assert!(last.text().contains("切换工作区失败"), "{:?}", last.text());
     }
 
     /// 放行时发出去的是**展开后**的绝对路径，不是用户输入原文。

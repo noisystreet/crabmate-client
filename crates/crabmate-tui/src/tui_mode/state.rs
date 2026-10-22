@@ -4,6 +4,7 @@
 //! 工作区目录树的状态逻辑在 [`super::workspace_tree`]（拆分以控制单文件行数）。
 
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::Sender;
 
 use crate::serve::{ApprovalDecision, CommandApprovalData, SessionListRow, WorkspaceDirEntry};
@@ -103,20 +104,33 @@ impl ToolState {
     }
 }
 
+/// 行版本号的来源：全局单调递增。
+///
+/// 用全局计数器、而不是「每行自己 +1」：后者下，两条内容不同但都刚构造出来的行
+/// 版本都是 0，行级缓存分不开 —— 把整批行换成另一批等长的行时就会漏判。
+/// 全局计数保证「任何一次构造 / 修改」都拿到互不相同的值。
+static NEXT_LINE_REV: AtomicU64 = AtomicU64::new(1);
+
+fn next_rev() -> u64 {
+    NEXT_LINE_REV.fetch_add(1, Ordering::Relaxed)
+}
+
 /// 一条 transcript 记录。
+///
+/// 字段私有、改内容只走下面几个方法：body 行级缓存只凭 [`LogLine::rev`] 判断
+/// 「这一行变没变」，谁绕过方法直接改文本，缓存就会一直显示旧内容。
+/// 收成私有等于让编译器替人记着这条规矩。
 #[derive(Debug, Clone)]
 pub struct LogLine {
-    pub kind: LineKind,
-    pub text: String,
+    kind: LineKind,
+    text: String,
     /// thinking 折叠态（默认折叠；Ctrl+E 切换全局展开）。
-    pub collapsed: bool,
+    collapsed: bool,
     /// 工具行状态；仅供渲染分色与进度位，不参与文本（文本仍是 `tool_end_text` 的完整串）。
-    pub tool_state: ToolState,
-    /// 内容代数：文本被追加/替换或工具状态变化时 +1。
-    ///
-    /// 供 body 行级缓存做指纹（O(1)）。不用「文本长度」或逐行哈希：前者漏等长替换，
-    /// 后者每帧都要重算一遍全文，正好把要省的开销又赔回去。
-    pub rev: u64,
+    tool_state: ToolState,
+    /// 行版本：内容 / 折叠 / 工具状态每变一次就换一个新值，供 body 行级缓存做指纹（O(1)）。
+    /// 不用「文本长度」或逐行哈希：前者漏等长替换，后者每帧都要重算一遍全文。
+    rev: u64,
 }
 
 impl LogLine {
@@ -127,15 +141,78 @@ impl LogLine {
             kind,
             text: text.to_string(),
             collapsed,
-            // 非工具行没有状态可言；工具行由 `tool_start` 改成 `Running`。
+            // 非工具行没有状态可言；工具行由 `tool_start` 换成 `Running`。
             tool_state: ToolState::Finished(None),
-            rev: 0,
+            rev: next_rev(),
         }
+    }
+
+    /// 同上，但给定初始工具状态（回放的历史行 / 刚起的工具行）。
+    fn with_tool_state(kind: LineKind, text: &str, collapsed: bool, tool_state: ToolState) -> Self {
+        Self {
+            tool_state,
+            ..Self::new(kind, text, collapsed)
+        }
+    }
+
+    /// 从落盘数据还原一行（历史回放）：文本与成败一次落定。
+    pub(crate) fn replayed(
+        kind: LineKind,
+        text: &str,
+        collapsed: bool,
+        tool_ok: Option<bool>,
+    ) -> Self {
+        Self::with_tool_state(kind, text, collapsed, ToolState::Finished(tool_ok))
+    }
+
+    #[must_use]
+    pub(crate) fn kind(&self) -> LineKind {
+        self.kind
+    }
+
+    #[must_use]
+    pub(crate) fn text(&self) -> &str {
+        &self.text
+    }
+
+    #[must_use]
+    pub(crate) fn is_collapsed(&self) -> bool {
+        self.collapsed
+    }
+
+    #[must_use]
+    pub(crate) fn tool_state(&self) -> ToolState {
+        self.tool_state
+    }
+
+    /// 行版本 —— body 行级缓存的指纹。
+    #[must_use]
+    pub(crate) fn rev(&self) -> u64 {
+        self.rev
+    }
+
+    fn touch(&mut self) {
+        self.rev = next_rev();
     }
 
     fn append(&mut self, delta: &str) {
         self.text.push_str(delta);
-        self.rev = self.rev.wrapping_add(1);
+        self.touch();
+    }
+
+    /// 工具结果回填：文本与状态一起换。
+    fn finish(&mut self, text: String, ok: Option<bool>) {
+        self.text = text;
+        self.tool_state = ToolState::Finished(ok);
+        self.touch();
+    }
+
+    /// 折叠态变化（没变就不动版本，免得白白让缓存重建）。
+    fn set_collapsed(&mut self, collapsed: bool) {
+        if self.collapsed != collapsed {
+            self.collapsed = collapsed;
+            self.touch();
+        }
     }
 }
 
@@ -286,13 +363,8 @@ impl UiState {
     /// `tool_ok` 是信封里的成败；服务端没给就是 `None`（标记显示 `?`，不猜）。
     pub fn push_replayed_line(&mut self, kind: LineKind, text: &str, tool_ok: Option<bool>) {
         let collapsed = kind == LineKind::Thinking && !self.thinking_visible;
-        self.lines.push(LogLine {
-            kind,
-            text: text.to_string(),
-            collapsed,
-            tool_state: ToolState::Finished(tool_ok),
-            rev: 0,
-        });
+        self.lines
+            .push(LogLine::replayed(kind, text, collapsed, tool_ok));
         self.search_on_line_added();
     }
 
@@ -302,7 +374,7 @@ impl UiState {
             return;
         }
         let mergeable = matches!(kind, LineKind::Assistant | LineKind::Thinking);
-        if mergeable && self.lines.last().is_some_and(|l| l.kind == kind) {
+        if mergeable && self.lines.last().is_some_and(|l| l.kind() == kind) {
             self.lines.last_mut().expect("checked last").append(delta);
         } else {
             self.push_line(kind, delta);
@@ -314,7 +386,7 @@ impl UiState {
     /// 最后一行是什么类型（`/resume` 判断续流正文该接上原块还是另起一块）。
     #[must_use]
     pub fn last_kind(&self) -> Option<LineKind> {
-        self.lines.last().map(|l| l.kind)
+        self.lines.last().map(|l| l.kind())
     }
 
     /// 应用配色板（启动拉到 user-data 后一次、设置面板改主题时；主题是渲染输入，
@@ -688,13 +760,12 @@ impl UiState {
     pub fn tool_start(&mut self, tool_call_id: &str, name: &str, note: Option<&str>) {
         let display = if name.trim().is_empty() { "tool" } else { name };
         let idx = self.lines.len();
-        self.lines.push(LogLine {
-            kind: LineKind::Tool,
-            text: tool_row_text(display, note),
-            collapsed: false,
-            tool_state: ToolState::Running,
-            rev: 0,
-        });
+        self.lines.push(LogLine::with_tool_state(
+            LineKind::Tool,
+            &tool_row_text(display, note),
+            false,
+            ToolState::Running,
+        ));
         // 没有 id 就无法按 id 找回这一行；结果到达时会另起一行，本行就此停在
         // `Running`——与「id 缺失等于放弃了原位更新」的既有语义一致。
         if !tool_call_id.is_empty() {
@@ -716,20 +787,26 @@ impl UiState {
         let text = tool_end_text(display, ok, note);
         let idx = self.tool_pending.remove(tool_call_id);
         match idx {
-            Some(i) if self.lines.get(i).is_some_and(|l| l.kind == LineKind::Tool) => {
+            Some(i)
+                if self
+                    .lines
+                    .get(i)
+                    .is_some_and(|l| l.kind() == LineKind::Tool) =>
+            {
                 let line = &mut self.lines[i];
-                line.text = text;
-                line.tool_state = ToolState::Finished(ok);
-                line.rev = line.rev.wrapping_add(1);
+                line.finish(text, ok);
                 // 原位替换了文本：命中集合要跟着改（可能是中间行，不是末尾）。
                 self.search_on_line_changed(i);
             }
             _ => {
-                self.push_line(LineKind::Tool, &text);
-                if let Some(last) = self.lines.last_mut() {
-                    last.tool_state = ToolState::Finished(ok);
-                    last.rev = last.rev.wrapping_add(1);
-                }
+                // 没有对应的 start 行（续流中段）：直接补一行「已结束」。
+                self.lines.push(LogLine::with_tool_state(
+                    LineKind::Tool,
+                    &text,
+                    false,
+                    ToolState::Finished(ok),
+                ));
+                self.search_on_line_added();
             }
         }
     }
@@ -745,8 +822,8 @@ impl UiState {
     pub fn set_thinking_visible(&mut self, visible: bool) {
         self.thinking_visible = visible;
         for line in &mut self.lines {
-            if line.kind == LineKind::Thinking {
-                line.collapsed = !visible;
+            if line.kind() == LineKind::Thinking {
+                line.set_collapsed(!visible);
             }
         }
     }

@@ -8,7 +8,7 @@ fn stream_delta_merges_same_kind() {
     s.stream_delta(LineKind::Assistant, "你");
     s.stream_delta(LineKind::Assistant, "好");
     assert_eq!(s.lines.len(), 1);
-    assert_eq!(s.lines[0].text, "你好");
+    assert_eq!(s.lines[0].text(), "你好");
 }
 
 #[test]
@@ -17,8 +17,8 @@ fn stream_delta_breaks_on_kind_change() {
     s.stream_delta(LineKind::Thinking, "think");
     s.stream_delta(LineKind::Assistant, "hi");
     assert_eq!(s.lines.len(), 2);
-    assert_eq!(s.lines[0].kind, LineKind::Thinking);
-    assert_eq!(s.lines[1].kind, LineKind::Assistant);
+    assert_eq!(s.lines[0].kind(), LineKind::Thinking);
+    assert_eq!(s.lines[1].kind(), LineKind::Assistant);
 }
 
 #[test]
@@ -230,13 +230,13 @@ fn reset_transcript_clears_lines() {
 fn thinking_collapsed_by_default_and_toggles() {
     let mut s = UiState::new();
     s.push_line(LineKind::Thinking, "deep thought");
-    assert!(s.lines[0].collapsed);
+    assert!(s.lines[0].is_collapsed());
     assert!(!s.thinking_visible());
     s.toggle_thinking();
     assert!(s.thinking_visible());
-    assert!(!s.lines[0].collapsed);
+    assert!(!s.lines[0].is_collapsed());
     s.toggle_thinking();
-    assert!(s.lines[0].collapsed);
+    assert!(s.lines[0].is_collapsed());
 }
 
 #[test]
@@ -247,19 +247,19 @@ fn new_thinking_rows_follow_global_expand_state() {
     s.toggle_thinking();
     // User 行之后新开的 thinking 块应保持展开
     s.stream_delta(LineKind::Thinking, "思考a");
-    assert!(!s.lines.last().unwrap().collapsed);
+    assert!(!s.lines.last().unwrap().is_collapsed());
     // 同块续接仍展开
     s.stream_delta(LineKind::Thinking, "思考b");
-    assert!(!s.lines.last().unwrap().collapsed);
+    assert!(!s.lines.last().unwrap().is_collapsed());
     // 跨 Tool 行后再次出现的 thinking 块也应展开
     s.push_line(LineKind::Tool, "exec");
     s.stream_delta(LineKind::Thinking, "思考c");
-    assert!(!s.lines.last().unwrap().collapsed);
+    assert!(!s.lines.last().unwrap().is_collapsed());
     // 折叠后新建的 thinking 块恢复默认折叠
     s.toggle_thinking();
     s.push_line(LineKind::System, "x");
     s.stream_delta(LineKind::Thinking, "思考d");
-    assert!(s.lines.last().unwrap().collapsed);
+    assert!(s.lines.last().unwrap().is_collapsed());
 }
 
 /// 开始态就该看到「要执行什么」，不必等结果回来才补。
@@ -269,19 +269,19 @@ fn new_thinking_rows_follow_global_expand_state() {
 fn tool_start_shows_note_immediately() {
     let mut s = UiState::new();
     s.tool_start("tc-2", "run_command", Some("git status"));
-    assert_eq!(s.lines.last().unwrap().text, "git status");
+    assert_eq!(s.lines.last().unwrap().text(), "git status");
     s.tool_end("tc-2", "run_command", Some(true), Some("git status"));
-    assert_eq!(s.lines.last().unwrap().text, "✓ git status");
+    assert_eq!(s.lines.last().unwrap().text(), "✓ git status");
 }
 
 #[test]
 fn tool_row_start_then_end_updates_in_place() {
     let mut s = UiState::new();
     s.tool_start("tc-9", "exec", None);
-    assert_eq!(s.lines.last().unwrap().kind, LineKind::Tool);
-    assert_eq!(s.lines.last().unwrap().text, "exec");
+    assert_eq!(s.lines.last().unwrap().kind(), LineKind::Tool);
+    assert_eq!(s.lines.last().unwrap().text(), "exec");
     s.tool_end("tc-9", "exec", Some(true), Some("exit 0"));
-    assert_eq!(s.lines.last().unwrap().text, "✓ exec — exit 0");
+    assert_eq!(s.lines.last().unwrap().text(), "✓ exec — exit 0");
     assert_eq!(s.lines.len(), 1);
 }
 
@@ -289,7 +289,7 @@ fn tool_row_start_then_end_updates_in_place() {
 fn tool_end_without_start_pushes_fallback_row() {
     let mut s = UiState::new();
     s.tool_end("tc-miss", "patch", Some(false), Some("rejected"));
-    assert_eq!(s.lines.last().unwrap().text, "✗ patch — rejected");
+    assert_eq!(s.lines.last().unwrap().text(), "✗ patch — rejected");
 }
 
 #[test]

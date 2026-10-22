@@ -281,8 +281,10 @@ fn in_flight_tool_row_gets_progress_slot() {
 #[test]
 fn finished_tool_row_has_no_progress_slot() {
     let mut st = UiState::new();
-    st.push_line(LineKind::Tool, "✓ exec — exit 0");
-    st.lines.last_mut().expect("刚 push 的行").tool_state = ToolState::Finished(Some(true));
+    // 走与 `tool_end` 同一条路（原位回填），而不是直接改字段：
+    // `LogLine` 的字段是私有的，正是为了不让「改了内容却忘了换行版本」悄悄发生。
+    st.tool_start("call-1", "exec", None);
+    st.tool_end("call-1", "exec", Some(true), None);
     let plain = body_rows(&st, 60)[0].line.to_string();
     assert!(plain.starts_with("[工具] "), "结束行无进度位: {plain:?}");
     assert!(!plain.contains('⠿'), "结束行不应有占位: {plain:?}");

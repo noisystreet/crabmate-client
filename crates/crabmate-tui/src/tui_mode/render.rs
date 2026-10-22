@@ -136,9 +136,9 @@ const TOOL_PREFIX_PROGRESS: &str = "[工具] ⠿ ";
 /// 进度位是**静态**占位，动画由渲染层换字符，因此不进入 body memo。
 pub(crate) fn prefix_for(log: &LogLine) -> &'static str {
     // 只有「调用中」才加进度位；结束行不论成败是否已知，文本自带标记。
-    match (log.kind, log.tool_state) {
+    match (log.kind(), log.tool_state()) {
         (LineKind::Tool, ToolState::Running) => TOOL_PREFIX_PROGRESS,
-        _ => kind_prefix(log.kind),
+        _ => kind_prefix(log.kind()),
     }
 }
 /// 逻辑行前缀占用的**显示列数**（折行预算必须按列算，不能按字符数）：
@@ -191,10 +191,10 @@ fn fold_thinking(text: &str, content_width: usize) -> String {
 /// 末行「活跃进度」的 spinner 帧：仅在「生成中 + 未取消 + 末行是折叠 Thinking
 /// 或进行中的工具行」时给出。展开态（Ctrl+E）正文本身在变，不叠加动画。
 fn progress_mark_frame(st: &UiState, info: &StatusInfo) -> Option<usize> {
-    let live = st.lines.last().is_some_and(|l| match l.kind {
-        LineKind::Thinking => l.collapsed,
+    let live = st.lines.last().is_some_and(|l| match l.kind() {
+        LineKind::Thinking => l.is_collapsed(),
         // 结束的行（含成败未知）不再是「进行中」，不加 spinner。
-        LineKind::Tool => l.tool_state.is_running(),
+        LineKind::Tool => l.tool_state().is_running(),
         _ => false,
     });
     (info.running && !info.cancel_sent && live).then_some(info.spinner)
@@ -264,8 +264,8 @@ pub(crate) fn build_body_rows(st: &UiState, width: usize) -> Vec<BodyRow> {
     let mut prev: Option<(LineKind, usize)> = None;
     for (idx, log) in st.lines.iter().enumerate() {
         let prefix_w = prefix_width(prefix_for(log));
-        let matched = needle.is_some_and(|n| log.text.to_lowercase().contains(n));
-        if let Some((_, prev_indent)) = prev.filter(|(k, _)| *k != log.kind) {
+        let matched = needle.is_some_and(|n| log.text().to_lowercase().contains(n));
+        if let Some((_, prev_indent)) = prev.filter(|(k, _)| *k != log.kind()) {
             out.push(BodyRow::separator(width, prev_indent, pal));
         }
         out.extend(line_rows(
@@ -276,7 +276,7 @@ pub(crate) fn build_body_rows(st: &UiState, width: usize) -> Vec<BodyRow> {
             target == Some(idx),
             pal,
         ));
-        prev = Some((log.kind, prefix_w));
+        prev = Some((log.kind(), prefix_w));
     }
     out
 }
@@ -299,25 +299,25 @@ pub(crate) fn line_rows(
     let prefix = prefix_for(log);
     let prefix_w = prefix_width(prefix);
     let content_width = width.saturating_sub(prefix_w);
-    let text = if log.kind == LineKind::Thinking && log.collapsed {
-        fold_thinking(&log.text, content_width)
+    let text = if log.kind() == LineKind::Thinking && log.is_collapsed() {
+        fold_thinking(log.text(), content_width)
     } else {
-        log.text.clone()
+        log.text().to_string()
     };
     let cx = RowCtx {
         idx,
-        kind: log.kind,
-        tool_state: log.tool_state,
+        kind: log.kind(),
+        tool_state: log.tool_state(),
         text: &text,
         prefix,
-        prefix_style: prefix_style(log.kind, pal),
-        style: kind_style(log.kind, pal),
+        prefix_style: prefix_style(log.kind(), pal),
+        style: kind_style(log.kind(), pal),
         content_width,
         matched,
         anchor_log: matched && anchor,
         pal,
     };
-    if log.kind == LineKind::Assistant {
+    if log.kind() == LineKind::Assistant {
         assistant_body_rows(&cx)
     } else {
         plain_body_rows(&cx)

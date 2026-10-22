@@ -33,9 +33,9 @@ struct CachedLine {
 
 impl CachedLine {
     fn still_valid(&self, log: &LogLine, matched: bool, anchor: bool) -> bool {
-        self.kind == log.kind
-            && self.rev == log.rev
-            && self.collapsed == log.collapsed
+        self.kind == log.kind()
+            && self.rev == log.rev()
+            && self.collapsed == log.is_collapsed()
             && self.matched == matched
             && self.anchor == anchor
     }
@@ -117,27 +117,27 @@ impl BodyCache {
         let mut prev = from
             .checked_sub(1)
             .and_then(|i| st.lines.get(i))
-            .map(|l| (l.kind, prefix_width(prefix_for(l))));
+            .map(|l| (l.kind(), prefix_width(prefix_for(l))));
         for i in from..st.lines.len() {
             let log = &st.lines[i];
             let matched = st.search_hits.binary_search(&i).is_ok();
             let is_anchor = anchor == Some(i);
             let start = self.flat.len();
-            if let Some((_, prev_indent)) = prev.filter(|(k, _)| *k != log.kind) {
+            if let Some((_, prev_indent)) = prev.filter(|(k, _)| *k != log.kind()) {
                 self.flat.push(BodyRow::separator(width, prev_indent, pal));
             }
             let rows = line_rows(log, i, width, matched, is_anchor, pal);
             self.flat.extend(rows);
             let prefix_w = prefix_width(prefix_for(log));
             self.lines.push(CachedLine {
-                kind: log.kind,
-                rev: log.rev,
-                collapsed: log.collapsed,
+                kind: log.kind(),
+                rev: log.rev(),
+                collapsed: log.is_collapsed(),
                 matched,
                 anchor: is_anchor,
             });
             self.starts.push(start);
-            prev = Some((log.kind, prefix_w));
+            prev = Some((log.kind(), prefix_w));
         }
     }
 }
@@ -163,6 +163,21 @@ mod tests {
             .map(|r| (r.log_index, format!("{:?}", r.line)))
             .collect();
         assert_eq!(got, want, "缓存与全量重建不一致（width={width}）");
+    }
+
+    /// 把整批行换成另一批等长的行（不经过 `reset_transcript`）：行版本是全局唯一的，
+    /// 所以「长度相同、kind 相同、只有文本不同」的替换也必须被逐行发现。
+    #[test]
+    fn wholesale_replacement_without_reset_is_detected() {
+        let mut st = UiState::new();
+        st.push_line(LineKind::User, "旧的一行");
+        st.push_line(LineKind::Assistant, "旧的二行");
+        let mut cache = BodyCache::default();
+        assert_same_as_full_rebuild(&st, &mut cache, 80);
+
+        st.lines[0] = LogLine::replayed(LineKind::User, "新的一行", false, None);
+        st.lines[1] = LogLine::replayed(LineKind::Assistant, "新的二行", false, None);
+        assert_same_as_full_rebuild(&st, &mut cache, 80);
     }
 
     /// 主题切换必须整表重建：颜色是渲染输入，漏掉它聊天区会停在旧配色。
