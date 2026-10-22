@@ -73,13 +73,11 @@ impl UiState {
             None => return,
         };
         let pos = self.search_hits.binary_search(&idx);
-        match (pos.is_ok(), hit) {
-            (false, true) => {
-                let at = pos.unwrap_or_else(|e| e);
-                self.search_hits.insert(at, idx);
-            }
-            (true, false) => {
-                self.search_hits.remove(pos.unwrap_or(0));
+        match (pos, hit) {
+            // 由不命中变命中：按序插回（保持升序，后续 binary_search 才成立）。
+            (Err(at), true) => self.search_hits.insert(at, idx),
+            (Ok(at), false) => {
+                self.search_hits.remove(at);
             }
             _ => {}
         }
@@ -108,14 +106,14 @@ impl UiState {
 
     /// 跳到下一个命中（循环）；无命中返回 `None`。
     pub fn next_search_hit(&mut self) -> Option<usize> {
-        let hits = std::mem::take(&mut self.search_hits);
+        // 命中集合已有序：直接在其中找下一个，不必重扫正文。
         let after = self.search_cursor.unwrap_or(0);
-        let next = hits
+        let next = self
+            .search_hits
             .iter()
             .copied()
             .find(|&i| i > after)
-            .or_else(|| hits.first().copied());
-        self.search_hits = hits;
+            .or_else(|| self.search_hits.first().copied());
         if let Some(n) = next {
             self.search_cursor = Some(n);
         }
