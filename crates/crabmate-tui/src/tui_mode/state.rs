@@ -252,9 +252,6 @@ pub struct UiState {
     ///
     /// 独立于 `lines` 的扫描结果存在，是为了流式期只重判被改动的那一行。
     pub(super) search_hits: Vec<usize>,
-    /// transcript 内容代数（任何影响渲染的行内容/折叠/清空变化都会递增）。
-    /// 供 body 行帧间 memo 作失效键（O(1)，对原位同长编辑也免疫）。
-    pub content_rev: u64,
     /// `/` 补全菜单（输入期候选提示，不影响提交语义）。
     pub slash: SlashMenuState,
     /// serve 的 skill 目录缓存（`GET /skills`；`None` = 还没拉过）。
@@ -281,7 +278,6 @@ impl UiState {
         let collapsed = kind == LineKind::Thinking && !self.thinking_visible;
         self.lines.push(LogLine::new(kind, text, collapsed));
         self.search_on_line_added();
-        self.bump();
     }
 
     /// 回放一行历史（`GET /conversation/messages`）。
@@ -298,7 +294,6 @@ impl UiState {
             rev: 0,
         });
         self.search_on_line_added();
-        self.bump();
     }
 
     /// 流式增量：若最后一条同类（Assistant/Thinking）则续接，否则开新行。
@@ -314,7 +309,6 @@ impl UiState {
         }
         // 流式续接只改了最后一行：只重判它，不重扫全表。
         self.search_on_last_line_changed();
-        self.bump();
     }
 
     /// 最后一行是什么类型（`/resume` 判断续流正文该接上原块还是另起一块）。
@@ -323,17 +317,10 @@ impl UiState {
         self.lines.last().map(|l| l.kind)
     }
 
-    /// 内容/折叠变化代数 +1（body memo 失效用）。
-    fn bump(&mut self) {
-        self.content_rev = self.content_rev.wrapping_add(1);
-    }
-
-    /// 应用配色板（启动拉到 user-data 后一次；变化时让 body memo 失效重算样式）。
+    /// 应用配色板（启动拉到 user-data 后一次、设置面板改主题时；主题是渲染输入，
+    /// body 缓存自己按它失效，这里只需落到状态上）。
     pub fn set_palette(&mut self, palette: Palette) {
-        if self.palette != palette {
-            self.palette = palette;
-            self.bump();
-        }
+        self.palette = palette;
     }
 
     // ── 输入缓冲（单行/多行统一） ─────────────────────────────
@@ -675,7 +662,6 @@ impl UiState {
         self.search_cursor = None;
         self.search_total = 0;
         self.search_hits.clear();
-        self.bump();
     }
 
     // ── 审批浮层 ─────────────────────────────────────────────
@@ -715,7 +701,6 @@ impl UiState {
             self.tool_pending.insert(tool_call_id.to_string(), idx);
         }
         self.search_on_line_added();
-        self.bump();
     }
 
     /// 工具结果：更新对应摘要行（note 与工具名重复时省略前缀，如 `✓ read file: hello.cpp`）；
@@ -747,7 +732,6 @@ impl UiState {
                 }
             }
         }
-        self.bump();
     }
 
     /// 回合开始时清理上轮工具行映射。
@@ -765,7 +749,6 @@ impl UiState {
                 line.collapsed = !visible;
             }
         }
-        self.bump();
     }
 
     pub fn thinking_visible(&self) -> bool {

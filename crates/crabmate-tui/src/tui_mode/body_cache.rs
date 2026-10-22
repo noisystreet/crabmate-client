@@ -17,6 +17,7 @@
 //! 会让后面所有行的起点平移。流式主路径改的总是最后一行（尾部重建 = 一行），
 //! 而工具结果回填、搜索跳转这类事件频率低，重建尾部可以接受。
 
+use super::palette::Palette;
 use super::render::{BodyRow, line_rows, prefix_for, prefix_width};
 use super::state::{LineKind, LogLine, UiState};
 
@@ -47,6 +48,9 @@ pub(super) struct BodyCache {
     width: usize,
     /// 建立缓存时的搜索词（变则整表失效：高亮位置全变）。
     needle: Option<String>,
+    /// 建立缓存时的配色板。主题也是渲染输入（前缀/正文/高亮色都取自此），
+    /// 变了必须整表重建 —— 否则设置面板里换主题后聊天区会停在旧配色。
+    palette: Palette,
     lines: Vec<CachedLine>,
     /// 组装好的扁平物理行（含块间分隔行）。
     flat: Vec<BodyRow>,
@@ -64,11 +68,13 @@ impl BodyCache {
         let structural = !self.init
             || self.width != width
             || self.needle.as_deref() != needle
+            || self.palette != st.palette
             || self.lines.len() > st.lines.len();
         if structural {
             self.init = true;
             self.width = width;
             self.needle = needle.map(str::to_owned);
+            self.palette = st.palette;
             self.lines.clear();
             self.starts.clear();
             self.flat.clear();
@@ -142,18 +148,36 @@ mod tests {
     use crate::tui_mode::render::build_body_rows;
 
     /// 缓存结果必须与「无缓存的全量重建」逐行一致 —— 这是这个模块唯一重要的事。
+    ///
+    /// 比较用 `Debug` 而不是 `to_string()`：后者只比文本，样式（配色、搜索高亮、
+    /// 工具行成败色）全被忽略 —— 主题失效这类 bug 就会从测试里漏过去。
     fn assert_same_as_full_rebuild(st: &UiState, cache: &mut BodyCache, width: usize) {
         cache.ensure(st, width);
         let got: Vec<(Option<usize>, String)> = cache
             .as_slice()
             .iter()
-            .map(|r| (r.log_index, r.line.to_string()))
+            .map(|r| (r.log_index, format!("{:?}", r.line)))
             .collect();
         let want: Vec<(Option<usize>, String)> = build_body_rows(st, width)
             .iter()
-            .map(|r| (r.log_index, r.line.to_string()))
+            .map(|r| (r.log_index, format!("{:?}", r.line)))
             .collect();
         assert_eq!(got, want, "缓存与全量重建不一致（width={width}）");
+    }
+
+    /// 主题切换必须整表重建：颜色是渲染输入，漏掉它聊天区会停在旧配色。
+    #[test]
+    fn palette_change_rebuilds_styles() {
+        let mut st = UiState::new();
+        st.push_line(LineKind::User, "已渲染的内容");
+        st.start_search("内容");
+        let mut cache = BodyCache::default();
+        assert_same_as_full_rebuild(&st, &mut cache, 80);
+
+        st.set_palette(Palette::from_theme(Some("shadcn-dark")));
+        assert_same_as_full_rebuild(&st, &mut cache, 80);
+        st.set_palette(Palette::mono());
+        assert_same_as_full_rebuild(&st, &mut cache, 80);
     }
 
     #[test]
