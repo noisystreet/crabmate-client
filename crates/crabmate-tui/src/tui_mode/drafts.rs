@@ -140,7 +140,12 @@ impl TuiApp<'_> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::mpsc;
+
+    use super::super::test_support::{test_app, test_client, test_prefs};
+    use super::super::worker::WorkerJob;
     use super::*;
+    use crate::serve::ChatStreamOutcome;
 
     /// 切走再切回：草稿跟着会话走，不会串到别人的输入框。
     #[test]
@@ -199,6 +204,105 @@ mod tests {
             queued_outcome(true, false, true),
             QueuedOutcome::ReturnToComposer,
             "Ctrl+C 取消后不该自动发送"
+        );
+    }
+
+    /// 忙时提交不再丢弃：文本进队列、输入框清空，且**不**立刻发出新回合。
+    #[test]
+    fn busy_submit_is_queued_instead_of_dropped() {
+        let client = test_client();
+        let mut prefs = test_prefs();
+        let (job_tx, job_rx) = mpsc::channel();
+        let (ui_tx, ui_rx) = mpsc::channel();
+        let mut app = test_app(&client, &mut prefs, ui_rx, ui_tx, job_tx);
+
+        app.st.running = true;
+        app.st.set_input("下一句");
+        app.on_submit();
+
+        assert_eq!(app.st.queued.as_deref(), Some("下一句"), "忙时提交应进队列");
+        assert!(
+            app.st.input_snapshot().is_empty(),
+            "内容已进队列，输入框应清空（否则下次回车会重复发送）"
+        );
+        assert!(
+            job_rx.try_iter().all(|j| !matches!(j, WorkerJob::Turn(_))),
+            "回合还在跑，不该再发一轮"
+        );
+    }
+
+    /// 回合正常结束 → 排队消息自动开成下一轮，并真的交给 worker。
+    #[test]
+    fn queued_message_is_sent_once_the_turn_finishes_cleanly() {
+        let client = test_client();
+        let mut prefs = test_prefs();
+        let (job_tx, job_rx) = mpsc::channel();
+        let (ui_tx, ui_rx) = mpsc::channel();
+        let mut app = test_app(&client, &mut prefs, ui_rx, ui_tx, job_tx);
+
+        app.st.running = true;
+        app.st.set_input("下一句");
+        app.on_submit();
+
+        app.on_turn_done(ChatStreamOutcome::default(), None, None);
+
+        assert!(app.st.queued.is_none(), "发出去之后队列应清空");
+        assert!(app.st.running, "排队消息应开出一轮新回合");
+        assert!(
+            job_rx.try_iter().any(|j| matches!(j, WorkerJob::Turn(_))),
+            "新回合必须真的交给 worker，否则界面显示在跑、实际没发"
+        );
+    }
+
+    /// 回合被 Ctrl+C 取消 → 排队消息退回输入框，不替用户发出去。
+    #[test]
+    fn queued_message_returns_to_the_composer_when_cancelled() {
+        let client = test_client();
+        let mut prefs = test_prefs();
+        let (job_tx, job_rx) = mpsc::channel();
+        let (ui_tx, ui_rx) = mpsc::channel();
+        let mut app = test_app(&client, &mut prefs, ui_rx, ui_tx, job_tx);
+
+        app.st.running = true;
+        app.st.set_input("下一句");
+        app.on_submit();
+        app.st.cancel_sent = true;
+
+        app.on_turn_done(ChatStreamOutcome::default(), None, None);
+
+        assert!(app.st.queued.is_none());
+        assert_eq!(
+            app.st.input_snapshot(),
+            "下一句",
+            "取消的回合不该替用户把排队消息发出去"
+        );
+        assert!(!app.st.running);
+        assert!(
+            job_rx.try_iter().all(|j| !matches!(j, WorkerJob::Turn(_))),
+            "取消后不该自动开新回合"
+        );
+    }
+
+    /// 回合出错 → 同样退回输入框（`error = Some` 即非正常结束）。
+    #[test]
+    fn queued_message_returns_to_the_composer_when_the_turn_failed() {
+        let client = test_client();
+        let mut prefs = test_prefs();
+        let (job_tx, job_rx) = mpsc::channel();
+        let (ui_tx, ui_rx) = mpsc::channel();
+        let mut app = test_app(&client, &mut prefs, ui_rx, ui_tx, job_tx);
+
+        app.st.running = true;
+        app.st.set_input("下一句");
+        app.on_submit();
+
+        app.on_turn_done(ChatStreamOutcome::default(), Some("boom".into()), None);
+
+        assert_eq!(app.st.input_snapshot(), "下一句", "出错的回合不该自动发送");
+        assert!(!app.st.running);
+        assert!(
+            job_rx.try_iter().all(|j| !matches!(j, WorkerJob::Turn(_))),
+            "出错后不该自动开新回合"
         );
     }
 }
