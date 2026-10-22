@@ -202,6 +202,9 @@ impl UiState {
         self.ws_expanded.clear();
         self.ws_loading.clear();
         self.ws_dir_cache.clear();
+        // 换了工作区：在途的旧读请求回来后必须被丢弃（见 `ws_generation`）。
+        self.ws_generation = self.ws_generation.wrapping_add(1);
+        self.ws_dir_stale.clear();
         self.ws_dir_cache.insert(String::new(), data.entries);
         self.ws_cursor = 0;
         self.ws_pending_cursor = None;
@@ -210,9 +213,13 @@ impl UiState {
 
     /// 手动刷新根目录：保留展开集与光标位置；返回需要重新拉取的已展开目录。
     ///
-    /// 子目录缓存全部作废（刷新就是要拿新数据），但展开态保留：调用方按返回列表
-    /// 重新入队，在途期间这些目录下显示「…」占位。若根路径已变化（外部切走工作区），
-    /// 保留旧展开态没有意义，退回重置语义。
+    /// **子目录缓存不清**：刷新让旧值过期，但不该让树变空。曾经的实现在这里
+    /// `ws_dir_cache.clear()`，于是每个已展开目录在重拉返回前都退回 `…` 占位 —— 一旦
+    /// 这次刷新排在某个慢请求后面（甚至失败），用户看到的就是整棵树突然空掉。现在旧
+    /// 子列表继续参与渲染，调用方按返回列表后台重拉，`ws_dir_ok` 到达时按 `rel` 覆盖。
+    ///
+    /// 展开态与光标照旧保留。若根路径已变化（外部切走工作区），旧展开态与旧缓存都没有
+    /// 意义，退回重置语义。
     pub fn ws_root_replace_keep(&mut self, data: WorkspaceDirData) -> Vec<String> {
         let p = data.path.trim();
         if self
@@ -233,8 +240,16 @@ impl UiState {
         self.ws_ready = true;
         self.ws_root_pending = false;
         self.ws_root_err = None;
-        self.ws_dir_cache.clear();
+        // 根列表换成新的；子目录旧值留着继续渲染，等重拉结果按 rel 覆盖。
         self.ws_dir_cache.insert(String::new(), data.entries);
+        // 子列表全部视为过期：已展开的由下面的 refetch 立刻重拉，折叠的下次展开时补拉
+        // —— 否则 `r` 刷新永远刷不到当时没展开的那些。
+        self.ws_dir_stale = self
+            .ws_dir_cache
+            .keys()
+            .filter(|k| !k.is_empty())
+            .cloned()
+            .collect();
         let mut refetch: Vec<String> = self.ws_expanded.iter().cloned().collect();
         refetch.sort();
         self.ws_loading = refetch.iter().cloned().collect();
@@ -281,8 +296,10 @@ impl UiState {
     /// 打开目录：写入展开集、按需标记加载中并刷新可见行；返回是否需要拉取子列表。
     fn ws_open_dir(&mut self, rel: &str) -> bool {
         self.ws_expanded.insert(rel.to_string());
-        let fetch = !self.ws_dir_cache.contains_key(rel) && !self.ws_loading.contains(rel);
-        if fetch {
+        let cached = self.ws_dir_cache.contains_key(rel);
+        // 过期缓存也要重拉一次，但**不设 loading**：旧值继续渲染，不退回 `…`。
+        let fetch = (!cached || self.ws_dir_stale.contains(rel)) && !self.ws_loading.contains(rel);
+        if fetch && !cached {
             self.ws_loading.insert(rel.to_string());
         }
         self.ws_refresh_rows();
@@ -417,6 +434,7 @@ impl UiState {
     /// 目录行之下的行会被占位→真实子行的替换顶开/收拢，光标按净位移保持指向原条目。
     pub fn ws_dir_ok(&mut self, rel: &str, data: WorkspaceDirData) {
         self.ws_loading.remove(rel);
+        self.ws_dir_stale.remove(rel);
         let dir_idx = self.ws_rows.iter().position(|r| r.rel == rel);
         let before_len = self.ws_rows.len();
         self.ws_dir_cache.insert(rel.to_string(), data.entries);

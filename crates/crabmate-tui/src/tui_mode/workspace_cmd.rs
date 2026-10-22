@@ -247,8 +247,12 @@ mod tests {
         client: &'a ServeClient,
         prefs: &'a mut SessionPrefs,
         rx: mpsc::Receiver<UiEvent>,
+        tx: mpsc::Sender<UiEvent>,
         job_tx: mpsc::Sender<WorkerJob>,
     ) -> TuiApp<'a> {
+        // `tx` 必须与 `rx` 是同一对：单测没有 tokio runtime，`fetch_ws_dir` 会退回队列，这条
+        // tx 眼下用不到；但若将来某个测试跑在 `#[tokio::test]` 下，读请求就真的会 `spawn`，
+        // 那时发到一个没人读的通道里会让断言假通过。
         TuiApp {
             client,
             overrides: prefs,
@@ -257,6 +261,7 @@ mod tests {
             st: UiState::new(),
             spinner: Spinner::new(),
             rx,
+            tx,
             job_tx,
             cancel: None,
             exit: false,
@@ -349,8 +354,8 @@ mod tests {
             ServeClient::new(ConnectionConfig::new("http://127.0.0.1:1", "")).expect("client");
         let mut prefs = test_prefs();
         let (job_tx, job_rx) = mpsc::channel();
-        let (_ui_tx, ui_rx) = mpsc::channel();
-        let mut app = test_app(&client, &mut prefs, ui_rx, job_tx);
+        let (ui_tx, ui_rx) = mpsc::channel();
+        let mut app = test_app(&client, &mut prefs, ui_rx, ui_tx, job_tx);
         app.index.local_new_session = Some("old-row".into());
         app.index.pending_select_session = Some("old-row".into());
         app.index.pending_bind_conversation = Some("old-cid".into());
@@ -382,8 +387,8 @@ mod tests {
             ServeClient::new(ConnectionConfig::new("http://127.0.0.1:1", "")).expect("client");
         let mut prefs = test_prefs();
         let (job_tx, job_rx) = mpsc::channel();
-        let (_ui_tx, ui_rx) = mpsc::channel();
-        let mut app = test_app(&client, &mut prefs, ui_rx, job_tx);
+        let (ui_tx, ui_rx) = mpsc::channel();
+        let mut app = test_app(&client, &mut prefs, ui_rx, ui_tx, job_tx);
         app.st.running = true;
         app.st.ws_pick = Some(WsPickState {
             enabled: true,
@@ -472,6 +477,57 @@ mod tests {
         }
     }
 
+    /// 代数不符的回包必须被丢弃，否则旧工作区的目录内容会被写进新工作区的缓存。
+    #[test]
+    fn stale_workspace_dir_reply_is_dropped() {
+        let client =
+            ServeClient::new(ConnectionConfig::new("http://127.0.0.1:1", "")).expect("client");
+        let mut prefs = test_prefs();
+        let (job_tx, _job_rx) = mpsc::channel();
+        let (ui_tx, ui_rx) = mpsc::channel();
+        let mut app = test_app(&client, &mut prefs, ui_rx, ui_tx, job_tx);
+        use crate::serve::{WorkspaceDirData, WorkspaceDirEntry};
+        let dir = |path: &str, name: &str| WorkspaceDirData {
+            path: path.to_string(),
+            entries: vec![WorkspaceDirEntry {
+                name: name.to_string(),
+                is_dir: false,
+            }],
+            error: None,
+        };
+        app.st.ws_root_replace(WorkspaceDirData {
+            path: "/b".to_string(),
+            entries: vec![WorkspaceDirEntry {
+                name: "src".to_string(),
+                is_dir: true,
+            }],
+            error: None,
+        });
+        let current = app.st.ws_generation;
+
+        // 旧工作区的回包（代数小一号）：必须被丢弃。
+        app.on_msg(UiEvent::WorkspaceDir {
+            rel: "src".to_string(),
+            generation: current.wrapping_sub(1),
+            result: Ok(dir("/a/src", "stale.rs")),
+        });
+        assert!(
+            !app.st.ws_dir_cache.contains_key("src"),
+            "旧代数的回包应被丢弃"
+        );
+
+        // 当前代数的回包：正常写入。
+        app.on_msg(UiEvent::WorkspaceDir {
+            rel: "src".to_string(),
+            generation: current,
+            result: Ok(dir("/b/src", "fresh.rs")),
+        });
+        assert!(
+            app.st.ws_dir_cache.contains_key("src"),
+            "同代数的回包应生效"
+        );
+    }
+
     /// 被拦下时**一个 worker 任务都不发**：这条只有 job 通道能证明，返回值看不出来。
     #[test]
     fn rejected_input_never_reaches_the_worker() {
@@ -479,8 +535,8 @@ mod tests {
             ServeClient::new(ConnectionConfig::new("http://127.0.0.1:1", "")).expect("client");
         let mut prefs = test_prefs();
         let (job_tx, job_rx) = mpsc::channel();
-        let (_ui_tx, ui_rx) = mpsc::channel();
-        let mut app = test_app(&client, &mut prefs, ui_rx, job_tx);
+        let (ui_tx, ui_rx) = mpsc::channel();
+        let mut app = test_app(&client, &mut prefs, ui_rx, ui_tx, job_tx);
 
         app.workspace_command_with(Some("~root".into()), |_| Err("不支持 `~user` 形式".into()));
 
@@ -499,8 +555,8 @@ mod tests {
             ServeClient::new(ConnectionConfig::new("http://127.0.0.1:1", "")).expect("client");
         let mut prefs = test_prefs();
         let (job_tx, job_rx) = mpsc::channel();
-        let (_ui_tx, ui_rx) = mpsc::channel();
-        let mut app = test_app(&client, &mut prefs, ui_rx, job_tx);
+        let (ui_tx, ui_rx) = mpsc::channel();
+        let mut app = test_app(&client, &mut prefs, ui_rx, ui_tx, job_tx);
 
         app.workspace_command_with(Some("~/proj".into()), |_| Ok("/home/t/proj".into()));
 

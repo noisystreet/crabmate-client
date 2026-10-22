@@ -2,7 +2,8 @@
 //! 并阻塞在应答通道上等决策；事件循环保持运行收按键。Esc/n=拒绝、Enter/y/o=一次、
 //! a=始终（与 repl 的 Tty 提示语义一致）。
 
-use std::sync::mpsc::{self, Sender};
+use std::sync::mpsc::{self, RecvTimeoutError, Sender};
+use std::time::Duration;
 
 use crate::serve::{ApprovalDecision, ApprovalGate, CommandApprovalData, TermError};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -15,12 +16,21 @@ pub struct ApprovalPrompt {
     pub answer: Sender<ApprovalDecision>,
 }
 
+/// 等用户按键的上限。
+///
+/// 人会走开，所以给得宽；但**必须有上限**。`recv()` 无限等会把整个 worker 线程停在这里，
+/// 之后每一条消息都排在它后面 —— 界面照常能打字，却再也不会有回应，而且没有任何提示，
+/// 看上去就是卡死。超时按「拒绝」收尾（保守方向：不放行未确认的命令），并留一条系统行。
+pub const APPROVAL_WAIT: Duration = Duration::from_secs(600);
+
 /// 全屏浮层审批 gate（运行在 SSE 回合任务内）。
 ///
 /// `decide` 把请求发给 UI 事件循环，然后阻塞等决策；UI 通道关闭（退出/崩溃）时
 /// 回 `Deny` 兜底，避免 serve 侧审批会话悬挂（与文本模式读行失败路径一致）。
 pub struct OverlayApprovalGate {
     pub tx: Sender<UiEvent>,
+    /// 等决策的上限；生产用 [`APPROVAL_WAIT`]，单测可传毫秒级以便覆盖超时路径。
+    pub wait: Duration,
 }
 
 impl ApprovalGate for OverlayApprovalGate {
@@ -34,7 +44,22 @@ impl ApprovalGate for OverlayApprovalGate {
                 },
             })
             .map_err(|_| TermError::Message("ui channel closed".into()))?;
-        Ok(answer_rx.recv().unwrap_or(ApprovalDecision::Deny))
+        match answer_rx.recv_timeout(self.wait) {
+            Ok(decision) => Ok(decision),
+            Err(RecvTimeoutError::Timeout) => {
+                // 通知 UI 撤掉浮层：它手里那条 `answer` 此刻已断开，再按键只会静默失败，
+                // 而屏幕上还显示着「等你确认」，与真实状态相反。
+                let _ = self.tx.send(UiEvent::ApprovalExpired {
+                    notice: format!(
+                        "审批等待超过 {} 分钟，已按「拒绝」处理",
+                        self.wait.as_secs().div_ceil(60).max(1)
+                    ),
+                });
+                Ok(ApprovalDecision::Deny)
+            }
+            // UI 侧丢弃了回传通道（退出/崩溃）：与超时同向兜底。
+            Err(RecvTimeoutError::Disconnected) => Ok(ApprovalDecision::Deny),
+        }
     }
 }
 
@@ -260,7 +285,10 @@ mod tests {
     #[test]
     fn overlay_gate_round_trips_via_channel() {
         let (tx, rx) = mpsc::channel::<UiEvent>();
-        let mut gate = OverlayApprovalGate { tx };
+        let mut gate = OverlayApprovalGate {
+            tx,
+            wait: APPROVAL_WAIT,
+        };
         let worker = std::thread::spawn(move || gate.decide(&req("rm")));
         // UI 侧收到请求
         let UiEvent::Approval { prompt } = rx.recv().expect("prompt") else {
@@ -277,13 +305,39 @@ mod tests {
     #[test]
     fn overlay_gate_denies_when_ui_drops() {
         let (tx, rx) = mpsc::channel::<UiEvent>();
-        let mut gate = OverlayApprovalGate { tx };
+        let mut gate = OverlayApprovalGate {
+            tx,
+            wait: APPROVAL_WAIT,
+        };
         let worker = std::thread::spawn(move || gate.decide(&req("rm")));
         let UiEvent::Approval { prompt } = rx.recv().expect("prompt") else {
             panic!("expected approval prompt");
         };
         drop(prompt.answer); // UI 退出未答复
         assert_eq!(worker.join().unwrap().unwrap(), ApprovalDecision::Deny);
+    }
+
+    /// 用户始终不回答（浮层没被处理 / 人走开）：必须有一个上限把 worker 放回来，
+    /// 否则整条 worker 线程永久停在这里，后续消息全部排队，且屏幕上没有任何提示。
+    #[test]
+    fn overlay_gate_times_out_as_deny() {
+        let (tx, rx) = mpsc::channel::<UiEvent>();
+        let mut gate = OverlayApprovalGate {
+            tx,
+            wait: Duration::from_millis(30),
+        };
+        let worker = std::thread::spawn(move || gate.decide(&req("rm")));
+        let UiEvent::Approval { prompt } = rx.recv().expect("prompt") else {
+            panic!("expected approval prompt");
+        };
+        // 通道保持打开但不答复 —— 正是「UI 收到了却没人处理」那种状态。
+        let decision = worker.join().unwrap().unwrap();
+        assert_eq!(decision, ApprovalDecision::Deny, "超时按拒绝收尾");
+        drop(prompt);
+        let UiEvent::ApprovalExpired { notice } = rx.recv().expect("timeout notice") else {
+            panic!("expected an ApprovalExpired after timeout");
+        };
+        assert!(notice.contains("拒绝"), "提示应说明按拒绝处理: {notice}");
     }
 
     #[test]
