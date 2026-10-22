@@ -20,7 +20,7 @@ use crate::serve::{
     switch_workspace_project,
 };
 
-use super::approve::{ApprovalPrompt, OverlayApprovalGate};
+use super::approve::{APPROVAL_WAIT, ApprovalPrompt, OverlayApprovalGate};
 use super::serve_defaults::ServeDefaults;
 use super::settings::{LlmSave, PersistedSettings, PrefsSave, merge_llm_save, merge_prefs_save};
 use super::slash_menu::SkillsPayload;
@@ -79,7 +79,17 @@ pub(super) enum UiEvent {
     /// 已展开子目录的列表（`GET /workspace?path=`）结果。
     WorkspaceDir {
         rel: String,
+        /// 发起时的 [`UiState::ws_generation`]：回包时代数已变 = 中途切过工作区，
+        /// 这条结果属于旧工作区，必须丢弃（否则会把 A 的目录内容写进 B 的缓存）。
+        generation: u64,
         result: Result<WorkspaceDirData, String>,
+    },
+    /// 审批等待超时（[`APPROVAL_WAIT`]）。
+    ///
+    /// UI 必须据此撤掉浮层：否则它继续画着一个早已按「拒绝」处理掉的请求，
+    /// 用户按 Enter 时那条 `answer` 早已断开，静默失败、屏幕上什么都不说。
+    ApprovalExpired {
+        notice: String,
     },
     /// 项目池列表（`GET /workspace/projects`）。
     WsProjects(Result<WorkspaceProjectsData, String>),
@@ -123,7 +133,10 @@ pub(super) enum WorkerJob {
         keep: bool,
     },
     /// 展开目录 → 拉取该目录子列表。
-    WorkspaceDir(String),
+    WorkspaceDir {
+        rel: String,
+        generation: u64,
+    },
     RefreshStatus,
     /// 项目池列表（`GET /workspace/projects`）。
     WsProjects,
@@ -269,7 +282,9 @@ pub(super) fn spawn_worker(client: ServeClient, tx: Sender<UiEvent>) -> Sender<W
                 WorkerJob::RefreshWorkspace { keep } => {
                     job_refresh_workspace_root(&rt, &client, &tx, keep);
                 }
-                WorkerJob::WorkspaceDir(rel) => job_workspace_dir(&rt, &client, &rel, &tx),
+                WorkerJob::WorkspaceDir { rel, generation } => {
+                    job_workspace_dir(&rt, &client, &rel, generation, &tx);
+                }
                 WorkerJob::RefreshStatus => job_refresh_status(&rt, &client, &tx),
                 WorkerJob::WsProjects => job_ws_projects(&rt, &client, &tx),
                 WorkerJob::WsSwitchProject(name) => job_ws_switch_project(&rt, &client, &name, &tx),
@@ -296,7 +311,10 @@ fn run_turn_job(
         let mut gate: Box<dyn ApprovalGate> = if job.yes {
             Box::new(AutoAllowOnce)
         } else {
-            Box::new(OverlayApprovalGate { tx: tx.clone() })
+            Box::new(OverlayApprovalGate {
+                tx: tx.clone(),
+                wait: APPROVAL_WAIT,
+            })
         };
         run_chat_stream_sink(
             client,
@@ -420,6 +438,7 @@ fn job_workspace_dir(
     rt: &tokio::runtime::Runtime,
     client: &ServeClient,
     rel: &str,
+    generation: u64,
     tx: &Sender<UiEvent>,
 ) {
     let result = rt
@@ -427,6 +446,7 @@ fn job_workspace_dir(
         .map_err(|e| e.to_string());
     let _ = tx.send(UiEvent::WorkspaceDir {
         rel: rel.to_string(),
+        generation,
         result,
     });
 }

@@ -22,6 +22,7 @@ mod layout;
 mod md;
 mod mouse;
 mod palette;
+mod read_jobs;
 mod render;
 mod resume;
 mod serve_defaults;
@@ -86,6 +87,8 @@ struct TuiApp<'a> {
     /// 生成中 spinner 帧（按墙钟推进；见 `spinner` 模块）。
     spinner: spinner::Spinner,
     rx: Receiver<UiEvent>,
+    /// UI 事件发送端：读请求 `spawn` 出去后自己回包，不经 worker 队列。
+    tx: Sender<UiEvent>,
     job_tx: Sender<WorkerJob>,
     cancel: Option<StreamCancel>,
     exit: bool,
@@ -237,21 +240,6 @@ impl TuiApp<'_> {
             self.st
                 .push_line(LineKind::System, "刷新工作区失败：worker 已退出");
         }
-    }
-
-    /// 拉取子目录列表；发送失败时清掉该目录的在途标记并收起，返回是否已入队。
-    fn fetch_ws_dir(&mut self, rel: String) -> bool {
-        if self
-            .job_tx
-            .send(WorkerJob::WorkspaceDir(rel.clone()))
-            .is_err()
-        {
-            self.st
-                .push_line(LineKind::System, "拉取目录失败：worker 已退出");
-            self.st.ws_dir_failed(&rel);
-            return false;
-        }
-        true
     }
 
     /// 根目录列表结果：`keep` 时保留展开态并重拉子目录，否则整体重置。
@@ -630,6 +618,12 @@ impl TuiApp<'_> {
                 self.st.confirm_delete = None;
                 self.st.begin_approval(&prompt.req, prompt.answer);
             }
+            UiEvent::ApprovalExpired { notice } => {
+                // 浮层还挂着就撤掉：它手里那条 `answer` 已断开，留着只会误导 ——
+                // 用户按 Enter 会静默失败，而屏幕上仍显示「等你确认」。
+                self.st.approval = None;
+                self.st.push_line(LineKind::System, &notice);
+            }
             UiEvent::TurnDone {
                 outcome,
                 error,
@@ -663,17 +657,27 @@ impl TuiApp<'_> {
             },
             UiEvent::WorkspacePath(path) => self.st.workspace_path = path,
             UiEvent::Workspace { result, keep } => self.on_workspace_root(result, keep),
-            UiEvent::WorkspaceDir { rel, result } => match result {
-                Ok(data) => self.st.ws_dir_ok(&rel, data),
-                Err(e) => {
-                    if self.st.ws_dir_failed(&rel) {
-                        self.st.push_line(
-                            LineKind::System,
-                            &format!("展开 {rel} 失败：{e}（← 可重试）"),
-                        );
+            UiEvent::WorkspaceDir {
+                rel,
+                generation,
+                result,
+            } => {
+                // 代数不符 = 中途切过工作区：这条结果属于旧工作区，丢弃。否则会把 A 的
+                // 目录内容写进 B 的缓存，用户随后在 B 展开同名目录会看到 A 的内容。
+                if generation == self.st.ws_generation {
+                    match result {
+                        Ok(data) => self.st.ws_dir_ok(&rel, data),
+                        Err(e) => {
+                            if self.st.ws_dir_failed(&rel) {
+                                self.st.push_line(
+                                    LineKind::System,
+                                    &format!("展开 {rel} 失败：{e}（← 可重试）"),
+                                );
+                            }
+                        }
                     }
                 }
-            },
+            }
             UiEvent::WsProjects(result) => self.st.ws_pick_projects(result),
             UiEvent::WsProjectSwitch(result) => self.on_ws_project_switch(result),
             UiEvent::WorkspaceQuery(result) => self.on_workspace_query(result),
@@ -864,6 +868,7 @@ pub async fn run_tui(
         st: UiState::new(),
         spinner: spinner::Spinner::new(),
         rx,
+        tx: tx.clone(),
         job_tx,
         cancel: None,
         exit: false,

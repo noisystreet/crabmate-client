@@ -367,13 +367,39 @@ fn ws_refresh_keep_restores_expansion_and_cursor() {
     let refetch = s.ws_root_replace_keep(data("/p", vec![ent("a", true), ent("b.txt", false)]));
     assert_eq!(refetch, vec!["a".to_string()], "已展开目录需重拉");
     assert!(s.ws_expanded.contains("a"), "刷新保留展开态");
-    assert!(s.ws_rows[1].placeholder, "重拉前显示占位");
+    assert_eq!(
+        s.ws_rows[1].name, "a1.txt",
+        "重拉前保留旧子列表，不退回占位"
+    );
+    assert!(!s.ws_rows[1].placeholder);
     assert_eq!(s.ws_rows[s.ws_cursor].rel, "b.txt", "光标按 rel 还原");
     assert!(s.ws_loading.contains("a"));
 }
 
 #[test]
-fn ws_refresh_keep_falls_back_to_nearest_ancestor() {
+fn ws_refresh_keep_falls_back_to_nearest_ancestor_when_row_is_gone() {
+    let mut s = UiState::new();
+    s.ws_root_replace(data("/p", vec![ent("a", true)]));
+    s.ws_toggle_dir();
+    s.ws_dir_ok("a", data("/p/a", vec![ent("b", true)]));
+    s.ws_cursor = 1; // a/b
+    // 刷新不清缓存，所以正常情况下 a/b 一直可见、光标原地不动（见上一个测试）。
+    // 这条用例构造的是缓存里那条子行真的没了（例如目录在别处被删）：
+    // 撤掉子列表后刷新，a/b 不在树上，才需要落回最近存活祖先并记住目标 rel。
+    s.ws_dir_cache.remove("a");
+    let refetch = s.ws_root_replace_keep(data("/p", vec![ent("a", true)]));
+    assert_eq!(refetch, vec!["a".to_string()]);
+    assert_eq!(s.ws_rows[s.ws_cursor].rel, "a", "子行不可见时落回祖先");
+    assert_eq!(s.ws_pending_cursor.as_deref(), Some("a/b"));
+    // 子列表重载到位后光标回到原行
+    s.ws_dir_ok("a", data("/p/a", vec![ent("b", true)]));
+    assert_eq!(s.ws_rows[s.ws_cursor].rel, "a/b", "重载后光标归位");
+    assert!(s.ws_pending_cursor.is_none());
+}
+
+/// 刷新时子行仍可见 —— 光标不该为了「重拉」而先跳走再跳回。
+#[test]
+fn ws_refresh_keep_keeps_cursor_on_the_same_row() {
     let mut s = UiState::new();
     s.ws_root_replace(data("/p", vec![ent("a", true)]));
     s.ws_toggle_dir();
@@ -381,12 +407,8 @@ fn ws_refresh_keep_falls_back_to_nearest_ancestor() {
     s.ws_cursor = 1; // a/b
     let refetch = s.ws_root_replace_keep(data("/p", vec![ent("a", true)]));
     assert_eq!(refetch, vec!["a".to_string()]);
-    assert_eq!(s.ws_rows[s.ws_cursor].rel, "a", "子行暂不可见时落回祖先");
-    assert_eq!(s.ws_pending_cursor.as_deref(), Some("a/b"));
-    // 子列表重载到位后光标回到原行
-    s.ws_dir_ok("a", data("/p/a", vec![ent("b", true)]));
-    assert_eq!(s.ws_rows[s.ws_cursor].rel, "a/b", "重载后光标归位");
-    assert!(s.ws_pending_cursor.is_none());
+    assert_eq!(s.ws_rows[s.ws_cursor].rel, "a/b", "旧子行还在，光标不动");
+    assert!(s.ws_pending_cursor.is_none(), "无需等重载归位");
 }
 
 #[test]
@@ -403,4 +425,87 @@ fn ws_refresh_keep_resets_when_root_changed() {
     assert_eq!(s.ws_rows.len(), 1);
     assert_eq!(s.ws_rows[s.ws_cursor].rel, "b");
     assert!(s.ws_pending_cursor.is_none());
+}
+
+/// 刷新根目录时，已展开目录的旧子列表必须留在树上 —— 不能退回 `…` 占位。
+/// 这道测试挡的是「刷新排在慢请求后面 → 整棵树突然空掉」那条路径。
+#[test]
+fn root_refresh_keeps_children_until_reload() {
+    let mut s = UiState::new();
+    s.ws_root_replace(data("/p", vec![ent("src", true)]));
+    s.ws_toggle_dir();
+    s.ws_dir_ok("src", data("/p/src", vec![ent("main.rs", false)]));
+    assert_eq!(s.ws_rows.len(), 2, "src 展开后有子行");
+
+    // 刷新根：src 进入重拉，但旧子列表仍在
+    let refetch = s.ws_root_replace_keep(data("/p", vec![ent("src", true)]));
+    assert_eq!(refetch, vec!["src".to_string()]);
+    assert!(s.ws_loading.contains("src"), "标记为在途，防重复请求");
+    assert_eq!(s.ws_rows.len(), 2, "刷新在途时旧子列表仍渲染");
+    assert!(
+        s.ws_rows.iter().all(|r| !r.placeholder),
+        "不该出现 `…` / `（空）` 占位行"
+    );
+    assert_eq!(s.ws_rows[1].name, "main.rs");
+
+    // 重拉到达：按 rel 覆盖旧值
+    s.ws_dir_ok("src", data("/p/src", vec![ent("lib.rs", false)]));
+    assert_eq!(s.ws_rows[1].name, "lib.rs");
+    assert!(!s.ws_loading.contains("src"));
+}
+
+/// 根路径变了（外部切走工作区）：旧缓存没有意义，必须清掉重来。
+#[test]
+fn root_refresh_to_a_new_path_drops_old_cache() {
+    let mut s = UiState::new();
+    s.ws_root_replace(data("/p", vec![ent("src", true)]));
+    s.ws_toggle_dir();
+    s.ws_dir_ok("src", data("/p/src", vec![ent("main.rs", false)]));
+
+    let refetch = s.ws_root_replace_keep(data("/other", vec![ent("docs", true)]));
+    assert!(refetch.is_empty());
+    assert!(s.ws_expanded.is_empty());
+    assert!(!s.ws_dir_cache.contains_key("src"));
+    assert_eq!(s.ws_rows.len(), 1);
+    assert_eq!(s.ws_rows[0].name, "docs");
+}
+
+/// 重置树（首次/切换工作区）必须换代数：并发读请求回来后据此丢弃旧工作区的结果。
+#[test]
+fn root_replace_bumps_generation_but_refresh_does_not() {
+    let mut s = UiState::new();
+    let g0 = s.ws_generation;
+    s.ws_root_replace(data("/a", vec![ent("x", true)]));
+    let g1 = s.ws_generation;
+    assert_ne!(g0, g1, "重置树必须换代数");
+    // 同一工作区的手动刷新不算换工作区：在途的子目录重拉仍然有效。
+    s.ws_root_replace_keep(data("/a", vec![ent("x", true)]));
+    assert_eq!(s.ws_generation, g1, "刷新不该递增代数");
+}
+
+/// 刷新要把**折叠**目录也标成过期：否则 `r` 永远刷不到当时没展开的那些，
+/// 用户折叠后重开会看到刷新前的旧内容，且没有任何机制纠正。
+#[test]
+fn root_refresh_marks_collapsed_dirs_stale() {
+    let mut s = UiState::new();
+    s.ws_root_replace(data("/p", vec![ent("a", true), ent("b", true)]));
+    assert_eq!(s.ws_toggle_dir(), Some("a".to_string()), "首次展开要拉");
+    s.ws_dir_ok("a", data("/p/a", vec![ent("a1", false)]));
+    s.ws_toggle_dir(); // 折叠 a
+    assert!(!s.ws_expanded.contains("a"));
+    assert!(!s.ws_dir_stale.contains("a"));
+
+    s.ws_root_replace_keep(data("/p", vec![ent("a", true), ent("b", true)]));
+    assert!(s.ws_dir_stale.contains("a"), "刷新后旧缓存标记为过期");
+
+    // 再展开：过期缓存要补拉，但**不**退回占位 —— 旧值继续显示。
+    assert_eq!(s.ws_toggle_dir(), Some("a".to_string()), "过期缓存也要重拉");
+    assert!(!s.ws_loading.contains("a"), "有缓存就不该显示 `…`");
+    assert_eq!(s.ws_rows.len(), 3, "旧子行仍在树上");
+
+    // 补拉到位后过期标记清除，之后的展开不再重复请求。
+    s.ws_dir_ok("a", data("/p/a", vec![ent("a2", false)]));
+    assert!(!s.ws_dir_stale.contains("a"));
+    s.ws_toggle_dir(); // 折叠
+    assert_eq!(s.ws_toggle_dir(), None, "已经新鲜了，不再重拉");
 }

@@ -190,6 +190,17 @@ pub struct UiState {
     pub ws_root_err: Option<String>,
     /// 目录相对路径 → 已加载子条目缓存（`""` = 根）。
     pub ws_dir_cache: HashMap<String, Vec<WorkspaceDirEntry>>,
+    /// 工作区代数：每次**重置**树（首次/切换工作区）自增。
+    ///
+    /// 读请求现在是并发发出的，回包顺序不再与发起顺序一致。带上发起时的代数，
+    /// 回包时代数不符就说明中途切走了 —— 那条结果属于旧工作区，必须丢弃，
+    /// 否则会把 A 的目录内容写进 B 的缓存。
+    pub ws_generation: u64,
+    /// 缓存已过期、展开时该后台重拉的路径。
+    ///
+    /// 刷新不再清空缓存（否则整棵树会短暂塌成 `…`），改为标记过期：旧值继续显示，
+    /// 折叠目录下次展开时补拉一次，这样刷新也能覆盖到当时没展开的那些。
+    pub ws_dir_stale: HashSet<String>,
     /// 已展开的目录相对路径。
     pub ws_expanded: HashSet<String>,
     /// 子目录列表在途的路径（防重复请求）。
