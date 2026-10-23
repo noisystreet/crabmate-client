@@ -1,0 +1,26 @@
+# crabmate-client 全仓 Rust 格式化基线。
+#
+# 生效范围：scripts/rust-pkg-dirs.txt 列出的全部包（desktop/mobile 壳、crates/*、web-host、frontend）。
+# rustfmt 从「被格式化的源文件所在目录」逐级向上查找 rustfmt.toml，仓库根的一份即可覆盖这些包；
+# 若某个包目录内再放一份 rustfmt.toml，会截断继承、只对该包生效。
+#
+# 门禁无需改动：scripts/check.sh、.pre-commit-config.yaml 的 cargo-fmt hook、CI 三处都是
+# `cargo fmt --all -- --check`，会自动读取本文件。
+#
+# 只写 stable rustfmt 支持的选项。nightly-only 选项（imports_granularity、group_imports、
+# wrap_comments、format_code_in_doc_comments 等）在 stable 下会打印
+# "Warning: can't set ..., unstable features are only available in nightly channel" 并被忽略，
+# 等于没配，所以不要写；确实需要就得改用 `cargo +nightly fmt` 并同步 pre-commit 与 CI。
+#
+# edition 不在此声明：cargo fmt 从各包 Cargo.toml 读取（当前全部为 2024）。
+#
+# 下面各项取值均与 rustfmt 默认一致，属于「把默认基线显式化」，改动前后应为 0 diff。
+# 若要调整风格，改本文件后需单独跑一次全仓 `make fmt`，并把纯格式改动做成独立 commit。
+
+max_width = 100                    # 每行最大宽度（默认）
+hard_tabs = false                  # 缩进用空格（默认）
+tab_spaces = 4                     # 缩进宽度（默认）
+newline_style = "Unix"             # 统一 LF，避免 CRLF 混入（默认）
+use_small_heuristics = "Default"   # 布局启发式保持默认，不做激进单行收拢
+reorder_imports = true             # use 条目在分组内按字典序（默认）
+reorder_modules = true             # mod 声明按字典序（默认）
