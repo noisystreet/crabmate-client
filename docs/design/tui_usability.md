@@ -1,6 +1,6 @@
 # TUI 易用性规划（对齐 Desktop 聊天体验）
 
-> **状态**：Wave 1 部分已落地（各条见「已落地」标注：`/resume`、忙时排队、会话草稿、`/` 补全菜单等已在主干）；Wave 2/3 仍为方案。逐波按本文落地；每波独立 PR，落地后必须同 PR 更新 [`client_capability_matrix.md`](./client_capability_matrix.md) 对应格（§4）。
+> **状态**：Wave 1 已落地 W1.1 全屏 `/resume`、W1.2 忙时排队、W1.3 会话级草稿、W1.4 复制（OSC52 / 外部工具）；**W1.5 会话列输入过滤仍未落地**（`session_filter` 等在 `tui_mode` 无对应字段）。W2.1 历史回放已落地**最新页**（`GET /conversation/messages`，更早的分页未做），W2.2 只剩左栏 `d` 与行内重命名（改名仍缺 serve 端点）。Wave 3 仍为方案。逐波按本文落地；每波独立 PR，落地后必须同 PR 更新 [`client_capability_matrix.md`](./client_capability_matrix.md) 对应格（§4）。
 > **范围**：`crabmate-tui`（全屏 `tui` 为主，`repl` 相应联动）；候选与取舍参照 Desktop / Web（`frontend/`）聊天体验，**语义对齐，不追求 UI 复刻**。
 > **关联**：[`remote_cli_tui.md`](./remote_cli_tui.md)（TUI 母方案，P1–P5）、[`client_capability_matrix.md`](./client_capability_matrix.md)（TUI 行 L53–L81）、[`tui_settings_panel.md`](./tui_settings_panel.md)（设置面板，W3 遗留）、[`chat_ui_todo.md`](./chat_ui_todo.md)（Desktop 聊天 UI 已勾项 = “已做过”的参照，不要当缺口重做）、[`contract_pin.md`](./contract_pin.md)（契约钉点）、Server `docs/`（SSE / user-data / 会话权威）
 
@@ -81,7 +81,9 @@
 - **落点**：`state.rs`（`HashMap<conversation_id, String>` 草稿表）、`mod.rs`（`switch_to_conv`/`new_session`/发送成功回调）。
 - **风险**：草稿仅本进程内存（repl 的 `/model` 等偏好同样进程级），不落盘——文档注明即可。
 
-#### W1.4 复制（OSC52 + 外部剪贴板回退）（G4）
+#### W1.4 复制（OSC52 + 外部剪贴板回退）（G4）— 已落地（`tui_mode/clipboard.rs`）
+
+> **实现**：`/copy [assistant|user]`（别名 `/yank`）与 **Ctrl+Y** —— 后者在顶层热键表里，输入框 / 会话栏 / 工作区树三种焦点下都可用。复制目标是**最近一条非空消息**的**原始 Markdown 正文**（不是渲染后的文本）。投递按环境自动选路：SSH 会话（`SSH_CONNECTION` / `SSH_TTY` / `SSH_CLIENT`）走 **OSC52**（内容由本地终端执行；客户端跑在远端时只有这条路能把正文送回用户手边）；本地会话优先 `wl-copy` → `xclip` → `xsel`（能拿到退出码），都没有时回落 OSC52；tmux / screen 下自动加 passthrough 包裹（`ESC Ptmux;` + 内层 ESC 双写）。`CM_TUI_CLIPBOARD=off|osc52|tool` 可强制路径，认不出的值按未设置处理。结果写一行系统提示（`已复制助手回复（N 行 → OSC52）` / `没有可复制的助手回复` / `复制失败：…`）。**与原方案的偏差**：按键从 `c` 改为 **Ctrl+Y**（输入框焦点下 `c` 就是打字，不能占用）；目标只做「整条消息」，**未做**「代码围栏块聚焦复制」（围栏边界尚未抽到 `md.rs`），也**不复制** thinking 行。
 
 - **参照**：Desktop 消息 copy / 代码块复制按钮。
 - **方案**：新增按键：当前「锚定/最近」对象复制——定义：`c` 复制**当前光标所在/最近一条助手消息**正文（纯文本，含已折叠 thinking 之外的部分）、代码围栏块聚焦时复制整块；复制协议优先 **OSC52**（kitty/wezterm/screen/tmux `set-clipboard` 支持），不支持且环境有 `wl-copy`/`xsel`/`xclip` 时回退调用，否则系统行提示「终端不支持剪贴板」。Esc 不干扰。

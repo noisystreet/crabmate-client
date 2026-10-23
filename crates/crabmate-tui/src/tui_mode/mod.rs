@@ -12,11 +12,14 @@ mod approve;
 mod background;
 mod background_cmd;
 mod body_cache;
+mod clipboard;
 // `controls` / `tool_summary` 提到 `pub(crate)`：清除词与控制字符剥离在 crate 根也要用。
 pub(crate) mod controls;
 mod drafts;
 mod exit_flush;
+mod help;
 mod history;
+mod hotkeys;
 mod layout;
 mod md;
 mod mouse;
@@ -72,7 +75,7 @@ use self::approve::{decision_for_key, decision_summary};
 use self::controls::{Control, clear_word, parse_control, set_mode_field, set_override_field};
 use self::render::{SIDEBAR_MIN_WIDTH, StatusInfo};
 use self::settings::{PersistedSettings, normalize};
-use self::settings_panel::{SettingsPanel, is_f2_key};
+use self::settings_panel::SettingsPanel;
 use self::worker::{UiEvent, WorkerJob, spawn_key_reader, spawn_worker};
 use super::SessionPrefs;
 use state::{Focus, LineKind, UiState};
@@ -339,6 +342,7 @@ impl TuiApp<'_> {
             Control::Help => self.show_help(),
             Control::Find(arg) => self.do_find(arg),
             Control::Background(arg) => self.set_background(arg),
+            Control::Copy(arg) => self.copy_last(arg),
             Control::Workspace(arg) => self.workspace_command(arg),
             Control::Resume => self.resume_turn(),
             Control::Model(arg) => {
@@ -377,25 +381,9 @@ impl TuiApp<'_> {
         }
     }
 
-    /// `/help`：向 transcript 打印本地命令与快捷键说明。
+    /// `/help`：向 transcript 打印本地命令与快捷键说明（文案表见 [`help`]）。
     fn show_help(&mut self) {
-        for line in [
-            "本地命令：/quit（/exit、/q 同义） /help /status /settings /mode /role /model /find /background /workspace /resume /conv",
-            "输入 / 弹出补全菜单（内建命令 + skill；↑↓ 选择 · Tab/Enter 补全 · Esc 关闭）",
-            "/mode ask|plan|act · /role <id> · /model <name>（off 清除，随对话生效）",
-            "/workspace <路径>（/cd 别名）切换 serve 工作区根；空参只看当前根；/workspace off 恢复 serve 默认根",
-            "/settings（或 F2）：设置面板（模型名/API Base/温度/思考模式/API 密钥/Agent role/会话模式；S 保存）",
-            "/find <词> 搜索并高亮 · /find（空参）跳下一处 · /find off 清除",
-            "/background <图片路径>：全屏背景（kitty 走真像素，其余终端用每格底色；图会压暗保正文可读；off 关闭）",
-            "/conv list 刷新 · /conv use <id> 切换 · /conv new 新会话",
-            "/resume 续传上一轮被中断的回合（serve 侧 job 仍在跑时；Ctrl+C 的 cancel 未送达也可续）",
-            "按键：Alt+Enter 换行 · Ctrl+E 思考展开/折叠 · Ctrl+W 工作区目录树 · PgUp/PgDn 翻页 · Ctrl+End 回底部 · 回合中 Enter 排队发送（输入框内 Esc 清队）",
-            "设置面板：↑↓ 移动 · Enter 编辑 · Tab 切分区 · S 保存 · Esc/F2 关闭（有改动 Esc 先确认）",
-            "会话栏：↑↓选 Enter用 n新建 r刷新 Del删除（再按 y/Enter 确认，Esc/n 或其它键取消）Shift+Del 直接删",
-            "工作区树：↑↓选 Enter/→展开 ◀收起/回父 r刷新 w回会话列表 Tab/Esc 回输入",
-            "工作区切换：按 p 从项目池选择/切换（未设置=选择，已设置=切到另一项目；↑↓选 Enter切换 r刷新 Esc 返回）",
-            "审批浮层：Enter=一次 · a=始终 · Esc/n=拒绝 · Ctrl+C 先拒绝、回合随后继续需再按取消",
-        ] {
+        for line in help::LINES {
             self.st.push_line(LineKind::System, line);
         }
     }
@@ -427,6 +415,12 @@ impl TuiApp<'_> {
                 }
             }
         }
+    }
+
+    /// `/copy` 与 Ctrl+Y：复制最近一条消息，结果写成一行系统提示（流程见 [`clipboard::run`]）。
+    fn copy_last(&mut self, arg: Option<String>) {
+        let notice = clipboard::run(&self.st.lines, arg.as_deref());
+        self.st.push_line(LineKind::System, &notice);
     }
 
     fn on_key(&mut self, key: KeyEvent) {
@@ -467,24 +461,18 @@ impl TuiApp<'_> {
         self.on_input_key(key);
     }
 
-    /// 顶层（面板无关）快捷键：`F2` 设置面板、`F3` 右栏状态栈折叠。返回是否已消费。
+    /// 顶层（与焦点无关）快捷键的分派：F2 设置面板 / F3 状态栈 / Ctrl+Y 复制。
     ///
-    /// 打包成一个方法是为了**不给上面那条 if 链再加分支** —— 它已贴着 lizard 的
-    /// CCN≤10 门禁（`toggle_thinking_with_notice` 就是同一原因提出去的）。
-    /// 把 `F2` 整块搬进来是净增 0 个分支，`F3` 才装得下。
+    /// 判定表在 [`hotkeys`]：这里只按结果分派，不再往上面那条 if 链（和本方法的
+    /// 历史实现）里加分支 —— 两者都贴着 CCN≤10 门禁。
     fn on_hotkey(&mut self, key: &KeyEvent) -> bool {
-        if is_f2_key(key) {
-            // 打开时等同 Esc 的关闭语义，脏字段先确认。
-            self.toggle_settings();
-            return true;
+        match hotkeys::of(key) {
+            Some(hotkeys::TopHotkey::Settings) => self.toggle_settings(),
+            Some(hotkeys::TopHotkey::StatusStack) => self.st.toggle_status_stack(),
+            Some(hotkeys::TopHotkey::Copy) => self.copy_last(None),
+            None => return false,
         }
-        // F3：右栏底部状态栈展开 / 折叠。窄屏没有状态栈，开关无效果（不报错）。
-        // 只切视图状态，不进 `BodyMemoKey` —— 它不改 transcript 内容。
-        if key.code == KeyCode::F(3) && key.modifiers.is_empty() {
-            self.st.toggle_status_stack();
-            return true;
-        }
-        false
+        true
     }
     /// `/` 补全菜单接管按键；返回 `true` 表示已消费。只在前缀态里成立，所以
     /// `/zzz`（无候选）之类不会把方向键从 transcript 滚动里抢走。
