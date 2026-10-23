@@ -19,6 +19,28 @@ use super::state::{LineKind, LogLine};
 /// 外部剪贴板工具，按优先级排列（Wayland 优先于 X11）。
 pub(crate) const TOOLS: [&str; 3] = ["wl-copy", "xclip", "xsel"];
 
+/// OSC52 的 base64 体积上限（64 KiB，约 48 KiB 原文）。
+///
+/// OSC52 没有分块续传（不像 kitty 图形协议每块 4096 字节），也没有任何回执能判断
+/// 终端是否收全了：超长内容会被静默截断甚至整条丢弃。所以超过这个量不阻断复制，
+/// 但必须在结果行里说清「可能不完整」，不能谎报成功。
+const OSC52_SAFE_B64: usize = 64 * 1024;
+
+/// base64 编码后的字节数（`ceil(n / 3) * 4`）。
+pub(crate) fn base64_len(bytes: usize) -> usize {
+    bytes.div_ceil(3) * 4
+}
+
+/// 终端复用器：OSC52 的转发规则各不相同。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Multiplexer {
+    None,
+    /// tmux：需要 `ESC Ptmux;` passthrough 包裹，且服务端默认 `allow-passthrough off`。
+    Tmux,
+    /// screen：**不转发** OSC52，也不认 tmux 的 `Ptmux;` 前缀，这条路不可用。
+    Screen,
+}
+
 /// 复制投递路径（也用于成功提示，让用户知道内容去了哪）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CopyRoute {
@@ -32,7 +54,8 @@ impl CopyRoute {
     #[must_use]
     pub(crate) fn label(self) -> &'static str {
         match self {
-            Self::Osc52 => "OSC52",
+            // 对终端用户来说 “OSC52” 没有意义；说清楚内容由谁承接。
+            Self::Osc52 => "终端剪贴板",
             Self::Tool(name) => name,
         }
     }
@@ -53,22 +76,34 @@ pub(crate) fn last_message_text(lines: &[LogLine], kind: LineKind) -> Option<Str
 /// 选投递路径。
 ///
 /// `override_` 是 `CM_TUI_CLIPBOARD`（`off` / `osc52` / `tool`），认不出的值按未设置处理：
-/// 环境变量写错不该让复制直接不可用。
+/// 环境变量写错不该让复制直接不可用。`allow_osc52` 由调用方按复用器给出——screen
+/// 既不转发 OSC52 也不认 tmux 的 `Ptmux;` 前缀，那条路在它下面必然无效。
 pub(crate) fn choose_route(
     override_: Option<&str>,
     is_ssh: bool,
     tool: Option<&'static str>,
+    allow_osc52: bool,
 ) -> Result<CopyRoute, String> {
-    match override_.map(|v| v.trim().to_ascii_lowercase()).as_deref() {
-        Some("off" | "none" | "0") => Err("CM_TUI_CLIPBOARD 已关闭复制".to_string()),
-        Some("osc52") => Ok(CopyRoute::Osc52),
-        Some("tool" | "external") => tool
-            .map(CopyRoute::Tool)
-            .ok_or_else(|| "CM_TUI_CLIPBOARD=tool 但未找到 wl-copy / xclip / xsel".to_string()),
+    let forced = override_.map(|v| v.trim().to_ascii_lowercase());
+    let route = match forced.as_deref() {
+        Some("off" | "none" | "0") => return Err("CM_TUI_CLIPBOARD 已关闭复制".to_string()),
+        Some("osc52") => CopyRoute::Osc52,
+        Some("tool" | "external") => {
+            return tool.map(CopyRoute::Tool).ok_or_else(|| {
+                "CM_TUI_CLIPBOARD=tool 但未找到 wl-copy / xclip / xsel".to_string()
+            });
+        }
         // 未设置 / 无法识别：SSH 下外部工具写的是远端剪贴板，只能走 OSC52。
-        _ if is_ssh => Ok(CopyRoute::Osc52),
-        _ => Ok(tool.map_or(CopyRoute::Osc52, CopyRoute::Tool)),
+        _ if is_ssh => CopyRoute::Osc52,
+        _ => tool.map_or(CopyRoute::Osc52, CopyRoute::Tool),
+    };
+    if route == CopyRoute::Osc52 && !allow_osc52 {
+        return Err(
+            "screen 不转发 OSC52：请安装 wl-copy / xclip / xsel，或在 tmux / 裸终端里复制"
+                .to_string(),
+        );
     }
+    Ok(route)
 }
 
 /// OSC52 序列：`ESC ] 52 ; c ; <base64> ST`（`c` = clipboard 选择区）。
@@ -98,12 +133,49 @@ pub(crate) fn tool_args(name: &str) -> &'static [&'static str] {
 /// 按环境选路并真正投递；返回实际用的路径（成功提示要显示它）。
 pub(crate) fn deliver(text: &str) -> Result<CopyRoute, String> {
     let override_ = std::env::var("CM_TUI_CLIPBOARD").ok();
-    let route = choose_route(override_.as_deref(), in_ssh_session(), find_tool())?;
+    let is_ssh = in_ssh_session();
+    let mux = multiplexer();
+    // SSH 下外部工具写的是远端剪贴板，screen 下 OSC52 又不可用：这两种情况只剩一条路，
+    // 不必再扫一遍 PATH 做无谓的 stat。
+    let tool = if is_ssh || mux == Multiplexer::Screen {
+        None
+    } else {
+        find_tool()
+    };
+    let route = choose_route(
+        override_.as_deref(),
+        is_ssh,
+        tool,
+        mux != Multiplexer::Screen,
+    )?;
     match route {
-        CopyRoute::Osc52 => write_osc52(text, in_multiplexer())?,
-        CopyRoute::Tool(name) => send_to_tool(name, text)?,
+        CopyRoute::Osc52 => write_osc52(text, mux)?,
+        // 工具在、却用不了（没有 DISPLAY / 没有 wl 服务）时终端剪贴板可能仍然可用，
+        // 回落一次，比把一个退出码直接甩给用户好。
+        CopyRoute::Tool(name) => match send_to_tool(name, text) {
+            Ok(()) => {}
+            Err(err) => match write_osc52(text, mux) {
+                Ok(()) => return Ok(CopyRoute::Osc52),
+                Err(osc) => return Err(format!("{err}；终端剪贴板也失败：{osc}")),
+            },
+        },
     }
     Ok(route)
+}
+
+/// OSC52 体积超限时要追加的提示；不适用时返回 `None`。
+pub(crate) fn oversized_note(route: CopyRoute, text_len: usize) -> Option<String> {
+    if route != CopyRoute::Osc52 {
+        return None;
+    }
+    let encoded = base64_len(text_len);
+    (encoded > OSC52_SAFE_B64).then(|| {
+        format!(
+            "；内容约 {} KiB 超过 OSC52 常见上限（{} KiB），粘贴不完整时请改用本地剪贴板工具",
+            encoded / 1024,
+            OSC52_SAFE_B64 / 1024
+        )
+    })
 }
 
 /// `/copy` 的完整流程，返回给用户看的一行结果（成功与失败都是文案）。
@@ -125,10 +197,15 @@ pub(crate) fn run(lines: &[LogLine], arg: Option<&str>) -> String {
         return format!("没有可复制的{label}");
     };
     let rows = text.lines().count();
-    match deliver(&text) {
-        Ok(route) => format!("已复制{label}（{rows} 行 → {}）", route.label()),
-        Err(err) => format!("复制失败：{err}"),
+    let route = match deliver(&text) {
+        Ok(route) => route,
+        Err(err) => return format!("复制失败：{err}"),
+    };
+    let mut notice = format!("已复制{label}（{rows} 行，经 {}）", route.label());
+    if let Some(note) = oversized_note(route, text.len()) {
+        notice.push_str(&note);
     }
+    notice
 }
 
 fn env_present(keys: &[&str]) -> bool {
@@ -140,8 +217,14 @@ fn in_ssh_session() -> bool {
     env_present(&["SSH_CONNECTION", "SSH_TTY", "SSH_CLIENT"])
 }
 
-fn in_multiplexer() -> bool {
-    env_present(&["TMUX", "STY"])
+fn multiplexer() -> Multiplexer {
+    if env_present(&["TMUX"]) {
+        Multiplexer::Tmux
+    } else if env_present(&["STY"]) {
+        Multiplexer::Screen
+    } else {
+        Multiplexer::None
+    }
 }
 
 fn find_tool() -> Option<&'static str> {
@@ -152,18 +235,22 @@ fn find_tool() -> Option<&'static str> {
 }
 
 /// 写 OSC52：序列不移动光标，因此可以直接写 stdout，下一帧 ratatui 重绘不受影响。
-fn write_osc52(text: &str, multiplexer: bool) -> Result<(), String> {
+fn write_osc52(text: &str, mux: Multiplexer) -> Result<(), String> {
+    let mut stdout = std::io::stdout();
+    write_osc52_to(&mut stdout, text, mux).map_err(|e| format!("写终端失败：{e}"))
+}
+
+/// 把 OSC52 序列写进任意 writer。单独拆出来是为了让单元测试能断言完整字节流
+/// ——「要不要包 passthrough」是最容易写错的一段，而它此前没有测试覆盖。
+fn write_osc52_to(w: &mut impl Write, text: &str, mux: Multiplexer) -> std::io::Result<()> {
     let sequence = osc52_sequence(text);
-    let payload = if multiplexer {
+    let payload = if mux == Multiplexer::Tmux {
         wrap_mux(&sequence)
     } else {
         sequence
     };
-    let mut stdout = std::io::stdout();
-    stdout
-        .write_all(payload.as_bytes())
-        .and_then(|()| stdout.flush())
-        .map_err(|e| format!("写终端失败：{e}"))
+    w.write_all(payload.as_bytes())?;
+    w.flush()
 }
 
 fn send_to_tool(name: &str, text: &str) -> Result<(), String> {
@@ -265,28 +352,28 @@ mod tests {
 
     #[test]
     fn route_off_is_an_error() {
-        assert!(choose_route(Some("off"), false, Some("wl-copy")).is_err());
-        assert!(choose_route(Some("none"), true, None).is_err());
+        assert!(choose_route(Some("off"), false, Some("wl-copy"), true).is_err());
+        assert!(choose_route(Some("none"), true, None, true).is_err());
     }
 
     #[test]
     fn route_explicit_values_win() {
         assert_eq!(
-            choose_route(Some("osc52"), false, Some("wl-copy")),
+            choose_route(Some("osc52"), false, Some("wl-copy"), true),
             Ok(CopyRoute::Osc52)
         );
         assert_eq!(
-            choose_route(Some("tool"), false, Some("xclip")),
+            choose_route(Some("tool"), false, Some("xclip"), true),
             Ok(CopyRoute::Tool("xclip"))
         );
-        assert!(choose_route(Some("tool"), false, None).is_err());
+        assert!(choose_route(Some("tool"), false, None, true).is_err());
     }
 
     #[test]
     fn ssh_prefers_osc52_over_local_tools() {
         // 远端没有可用剪贴板：外部工具即使存在也不该被选。
         assert_eq!(
-            choose_route(None, true, Some("wl-copy")),
+            choose_route(None, true, Some("wl-copy"), true),
             Ok(CopyRoute::Osc52)
         );
     }
@@ -294,18 +381,32 @@ mod tests {
     #[test]
     fn local_session_prefers_external_tool_but_falls_back_to_osc52() {
         assert_eq!(
-            choose_route(None, false, Some("wl-copy")),
+            choose_route(None, false, Some("wl-copy"), true),
             Ok(CopyRoute::Tool("wl-copy"))
         );
-        assert_eq!(choose_route(None, false, None), Ok(CopyRoute::Osc52));
+        assert_eq!(choose_route(None, false, None, true), Ok(CopyRoute::Osc52));
     }
 
     #[test]
     fn unknown_override_falls_back_to_auto() {
         assert_eq!(
-            choose_route(Some("whatever"), false, Some("xsel")),
+            choose_route(Some("whatever"), false, Some("xsel"), true),
             Ok(CopyRoute::Tool("xsel"))
         );
+    }
+
+    #[test]
+    fn screen_refuses_osc52_and_keeps_the_tool_route() {
+        // screen 既不转发 OSC52，也不认 tmux 的 `Ptmux;` 前缀：这条路必须报错，
+        // 而不是发一串注定被丢弃的字节再报「已复制」。
+        let err = choose_route(None, false, None, false).expect_err("screen 下 OSC52 不可用");
+        assert!(err.contains("screen"), "{err}");
+        assert_eq!(
+            choose_route(None, false, Some("wl-copy"), false),
+            Ok(CopyRoute::Tool("wl-copy"))
+        );
+        // SSH + screen 也没有第二条路：外部工具写的是远端剪贴板。
+        assert!(choose_route(None, true, None, false).is_err());
     }
 
     #[test]
@@ -313,5 +414,53 @@ mod tests {
         assert!(tool_args("wl-copy").is_empty());
         assert_eq!(tool_args("xclip"), &["-selection", "clipboard"]);
         assert_eq!(tool_args("xsel"), &["--clipboard", "--input"]);
+    }
+
+    #[test]
+    fn osc52_writer_emits_the_bare_sequence_outside_tmux() {
+        let mut out = Vec::new();
+        write_osc52_to(&mut out, "hi", Multiplexer::None).expect("write");
+        let written = String::from_utf8(out).expect("utf8");
+        assert_eq!(written, osc52_sequence("hi"));
+        assert!(!written.contains("Ptmux;"));
+    }
+
+    #[test]
+    fn osc52_writer_wraps_for_tmux_but_never_uses_tmux_syntax_for_screen() {
+        let mut tmux = Vec::new();
+        write_osc52_to(&mut tmux, "hi", Multiplexer::Tmux).expect("write");
+        let tmux = String::from_utf8(tmux).expect("utf8");
+        assert_eq!(tmux, wrap_mux(&osc52_sequence("hi")));
+        assert!(tmux.starts_with("\x1bPtmux;"));
+
+        // screen 正常走不到这里（`choose_route` 已拒绝），但万一走到，也不能喂它
+        // 不认识的 `Ptmux;` 语法。
+        let mut screen = Vec::new();
+        write_osc52_to(&mut screen, "hi", Multiplexer::Screen).expect("write");
+        let screen = String::from_utf8(screen).expect("utf8");
+        assert_eq!(screen, osc52_sequence("hi"));
+    }
+
+    #[test]
+    fn oversized_note_only_fires_for_long_osc52_payloads() {
+        // 1000 字节 → base64 1336 B，远低于阈值。
+        assert_eq!(oversized_note(CopyRoute::Osc52, 1_000), None);
+        // 50 KiB → base64 ≈ 67 KiB，越过 64 KiB 上限。
+        let note = oversized_note(CopyRoute::Osc52, 50 * 1024).expect("should warn");
+        assert!(note.contains("OSC52"), "{note}");
+        // 走外部工具时不存在这个上限。
+        assert_eq!(
+            oversized_note(CopyRoute::Tool("wl-copy"), 10 * 1024 * 1024),
+            None
+        );
+    }
+
+    #[test]
+    fn base64_len_matches_the_encoder() {
+        for n in [0usize, 1, 2, 3, 4, 100, 4_096] {
+            let text = "x".repeat(n);
+            let encoded = base64::engine::general_purpose::STANDARD.encode(text.as_bytes());
+            assert_eq!(base64_len(n), encoded.len(), "len {n}");
+        }
     }
 }

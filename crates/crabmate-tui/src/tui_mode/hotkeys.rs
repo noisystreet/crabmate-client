@@ -33,3 +33,44 @@ pub(super) fn of(key: &KeyEvent) -> Option<TopHotkey> {
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn key(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
+        KeyEvent::new(code, modifiers)
+    }
+
+    #[test]
+    fn ctrl_y_is_copy() {
+        assert_eq!(
+            of(&key(KeyCode::Char('y'), KeyModifiers::CONTROL)),
+            Some(TopHotkey::Copy)
+        );
+    }
+
+    #[test]
+    fn plain_y_stays_with_the_sidebar() {
+        // 裸 `y` 在会话栏是「确认删除」，不能被顶层热键表抢走。
+        assert_eq!(of(&key(KeyCode::Char('y'), KeyModifiers::NONE)), None);
+    }
+
+    #[test]
+    fn f3_toggles_the_stack_and_ctrl_f3_is_left_alone() {
+        assert_eq!(
+            of(&key(KeyCode::F(3), KeyModifiers::NONE)),
+            Some(TopHotkey::StatusStack)
+        );
+        // 带修饰键的 F3 是别的终端语义，不抢。
+        assert_eq!(of(&key(KeyCode::F(3), KeyModifiers::CONTROL)), None);
+    }
+
+    #[test]
+    fn f2_opens_the_settings_panel() {
+        assert_eq!(
+            of(&key(KeyCode::F(2), KeyModifiers::NONE)),
+            Some(TopHotkey::Settings)
+        );
+    }
+}
