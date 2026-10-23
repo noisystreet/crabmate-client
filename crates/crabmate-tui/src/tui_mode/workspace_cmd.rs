@@ -3,6 +3,9 @@
 //! 从 `mod.rs` 拆出：`mod.rs` 顶着 920 行门禁，而且这几段逻辑本来就该放一处看——
 //! 三条入口的差别只在「怎么发请求」，成功后都要走同一个
 //! `reset_workspace_after_switch`（旧项目的目录结构与光标必须丢弃）。
+//!
+//! 时序约定：两条会真正切根的入口（`/workspace`、项目池）都在**发切换请求之前**先做空白行
+//! 回收 —— 会话索引端点只认 `workspaces/current`，切完再回收，请求就落到新桶上了。
 
 use super::TuiApp;
 use super::state::LineKind;
@@ -131,6 +134,9 @@ impl TuiApp<'_> {
             WsSetInput::Rejected(line) => self.st.push_line(LineKind::System, &line),
             WsSetInput::Submit { shown, payload } => {
                 self.st.push_line(LineKind::System, &shown);
+                // 先回收再切：索引端点只认 `workspaces/current`，切完再发就打到新桶了。
+                // worker 串行处理 job，先入队即先执行。
+                self.reclaim_blank_on_workspace_switch();
                 if self.job_tx.send(WorkerJob::WorkspaceSet(payload)).is_err() {
                     self.st
                         .push_line(LineKind::System, "切换工作区失败：worker 已退出");
@@ -182,10 +188,18 @@ impl TuiApp<'_> {
     /// 那些行 id 只存在于上一个桶，留着会让新桶首轮结束时的 `BindServer` 落到
     /// 「会话行已不存在」并让新会话登记不上。
     fn reset_workspace_after_switch(&mut self) {
+        // 空白行的回收**不在这里**：会话索引端点只认 `workspaces/current`，等服务端确认
+        // 切换之后再发 `RemoveBlank`，请求就落到新桶上（行 id 在旧桶，删不掉）。回收因此
+        // 由两条切换入口在**发切换请求之前**发起，见 `reclaim_blank_on_workspace_switch`。
+        // 这里只剩记账清理。
         self.index.local_new_session = None;
         self.index.pending_select_session = None;
         self.index.pending_bind_conversation = None;
         self.index.pending_session_title = None;
+        // 新建写入还在途（行 id 未知）：回包属于旧桶，不能在新桶里记账。
+        if self.index.new_session_pending {
+            self.index.pending_new_blank_left_bucket = true;
+        }
         self.index.new_session_pending = false;
         // skill 目录是按工作区（`.crabmate/skills`）解析的：换根后旧候选不该继续出现在菜单里。
         self.st.clear_skills();
@@ -210,6 +224,8 @@ impl TuiApp<'_> {
                 .ws_pick_switch_result(Err("回合进行中：结束后再切换工作区".to_string()));
             return;
         }
+        // 同 `/workspace`：回收要在切根之前发，否则落到新桶上删不掉。
+        self.reclaim_blank_on_workspace_switch();
         if self.job_tx.send(WorkerJob::WsSwitchProject(name)).is_err() {
             self.st
                 .push_line(LineKind::System, "切换项目失败：worker 已退出");
@@ -228,6 +244,21 @@ mod tests {
         WsSetInput, WsSetOutcome, is_default_word, workspace_query_line, workspace_set_line,
         workspace_set_outcome, ws_set_input,
     };
+    use crate::serve::{SessionIndexApplied, SessionIndexOp, SessionListRow};
+
+    /// 左栏会话行：只有 id 有意义，其余按空会话缺省。
+    fn row(id: &str) -> SessionListRow {
+        SessionListRow {
+            id: id.to_string(),
+            title: String::new(),
+            updated_at: 0,
+            pinned: false,
+            starred: false,
+            server_conversation_id: None,
+            server_revision: None,
+            workspace_root: None,
+        }
+    }
 
     #[test]
     fn default_words_restore_serve_default() {
@@ -328,6 +359,135 @@ mod tests {
         ));
         assert!(matches!(job_rx.try_recv(), Ok(WorkerJob::RefreshSessions)));
         assert!(job_rx.try_recv().is_err(), "不应再排队其它任务");
+    }
+
+    /// 换工作区要 best-effort 回收 `/conv new` 那条还没人认领的空行，且**排在切换请求
+    /// 之前**：会话索引端点只认 `workspaces/current`，等 serve 确认切换后再发 `RemoveBlank`
+    /// 就打到新桶上了（行 id 在旧桶，`remove_blank_row` 静默跳过，一行不删）。
+    #[test]
+    fn workspace_switch_reclaims_unclaimed_blank_row_before_switching() {
+        let client = test_client();
+        let mut prefs = test_prefs();
+        let (job_tx, job_rx) = mpsc::channel();
+        let (ui_tx, ui_rx) = mpsc::channel();
+        let mut app = test_app(&client, &mut prefs, ui_rx, ui_tx, job_tx);
+        app.index.local_new_session = Some("s_blank".into());
+        app.st.sessions = vec![row("s_blank"), row("s_other")];
+
+        // 走真实入口（提交切换请求）而不是直接调收尾：回收的时机就在这一步。
+        app.workspace_command_with(Some("/data/next".into()), |p| Ok(p.to_string()));
+
+        assert!(app.index.local_new_session.is_none(), "记账仍要丢弃");
+        match job_rx.try_recv() {
+            Ok(WorkerJob::SessionIndex(SessionIndexOp::RemoveBlank {
+                local_id,
+                next_active,
+            })) => {
+                assert_eq!(local_id, "s_blank");
+                assert_eq!(
+                    next_active.as_deref(),
+                    Some("s_other"),
+                    "被回收的行就是服务端 active，必须带上落点"
+                );
+            }
+            _ => panic!("第一条 worker 任务应是空白行回收"),
+        }
+        assert!(
+            matches!(job_rx.try_recv(), Ok(WorkerJob::WorkspaceSet(_))),
+            "回收必须先于切换请求入队（worker 串行，先入队即先执行）"
+        );
+    }
+
+    /// 已绑定对话的行不是空行：换工作区时不得回收（删掉就等于丢正文）。
+    #[test]
+    fn workspace_switch_keeps_a_claimed_session_row() {
+        let client = test_client();
+        let mut prefs = test_prefs();
+        let (job_tx, job_rx) = mpsc::channel();
+        let (ui_tx, ui_rx) = mpsc::channel();
+        let mut app = test_app(&client, &mut prefs, ui_rx, ui_tx, job_tx);
+        app.st.conversation_id = Some("c1".into());
+        app.index.local_new_session = Some("s_bound".into());
+        app.st.sessions = vec![row("s_bound"), row("s_other")];
+
+        app.workspace_command_with(Some("/data/next".into()), |p| Ok(p.to_string()));
+
+        // 第一条就是切换请求本身：没有任何回收任务排在它前面。
+        assert!(
+            matches!(job_rx.try_recv(), Ok(WorkerJob::WorkspaceSet(_))),
+            "已认领的行不该被回收"
+        );
+    }
+
+    /// 收尾函数**不再**发回收请求：回收已前移到两个切换入口。
+    ///
+    /// 留这条是为了防止有人把 `reclaim_blank_on_workspace_switch` 加回收尾里 —— 那时
+    /// serve 的 current 已是新桶，请求打在错的桶上；而只断言「发过 RemoveBlank」的用例
+    /// 照样会通过（那正是先漏掉的那个 bug）。
+    #[test]
+    fn reset_after_switch_does_not_reclaim() {
+        let client = test_client();
+        let mut prefs = test_prefs();
+        let (job_tx, job_rx) = mpsc::channel();
+        let (ui_tx, ui_rx) = mpsc::channel();
+        let mut app = test_app(&client, &mut prefs, ui_rx, ui_tx, job_tx);
+        app.index.local_new_session = Some("s_blank".into());
+        app.st.sessions = vec![row("s_blank"), row("s_other")];
+
+        app.reset_workspace_after_switch();
+
+        assert!(app.index.local_new_session.is_none(), "记账仍要丢弃");
+        assert!(
+            matches!(
+                job_rx.try_recv(),
+                Ok(WorkerJob::RefreshWorkspace { keep: false })
+            ),
+            "收尾只刷新，不发回收"
+        );
+        assert!(matches!(job_rx.try_recv(), Ok(WorkerJob::RefreshSessions)));
+        assert!(job_rx.try_recv().is_err(), "不应再排队其它任务");
+    }
+
+    /// `/conv new` 的写入还在途时切了工作区：回包属于旧桶，不能在新桶里把行 id 记回来
+    /// （记回来会让新桶首轮结束的 `BindServer` 落到「会话行已不存在」）。
+    #[test]
+    fn in_flight_new_blank_from_old_bucket_is_not_recorded() {
+        let client = test_client();
+        let mut prefs = test_prefs();
+        let (job_tx, _job_rx) = mpsc::channel();
+        let (ui_tx, ui_rx) = mpsc::channel();
+        let mut app = test_app(&client, &mut prefs, ui_rx, ui_tx, job_tx);
+        app.index.new_session_pending = true;
+
+        app.reset_workspace_after_switch();
+        assert!(
+            app.index.pending_new_blank_left_bucket,
+            "在途新建属于旧桶，要打上标记"
+        );
+
+        // 回包到达：行 id 属于切换前的工作区。
+        app.on_session_index(
+            Ok(SessionIndexApplied {
+                local_id: "s_old".into(),
+                reused_blank: false,
+            }),
+            SessionIndexOp::NewBlank {
+                title: "新会话".into(),
+            },
+        );
+
+        assert!(
+            app.index.local_new_session.is_none(),
+            "不能把旧桶的行 id 记回来"
+        );
+        assert!(
+            app.index.pending_select_session.is_none(),
+            "也不能在新桶的列表里等这行"
+        );
+        assert!(
+            !app.index.pending_new_blank_left_bucket,
+            "标记用一次即清，否则下次真正的新建也会被丢弃"
+        );
     }
 
     /// 项目池切换与 `/workspace <路径>` 共用同一条回合守卫，且拒绝后要解锁视图。

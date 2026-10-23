@@ -127,6 +127,53 @@ pub(super) fn plan_new_blank_outcome(
     }
 }
 
+/// 切工作区时该不该回收当前那条「`/conv new` 建、还没人认领」的空行（纯判定）。
+///
+/// 返回 `(要删的行 id, active 的新落点)`。两个条件缺一不可：
+/// - **没被认领**：已经有 `conversation_id`（或有一轮在等行 id 绑定）就说明这行代表一个
+///   真会话，删掉等于丢正文；
+/// - **桶里还有别的行**：`serve::sessions::remove_blank_row` 拒绝删除 active 行，
+///   `next_active` 缺失时它的结论是「宁可不删」——只剩这一行时删了会让桶变空，
+///   服务端 `active_session_id` 也就没了落点。
+///
+/// `sessions` 是**本地快照**（切根之前抓的旧桶列表），不是服务端真相：它可能还没刷新成功、
+/// 为空，也可能含一行已被别的端删掉的落点候选。两种情形都返回 `None`（放弃回收）——
+/// 少一条回收的代价是残留一条空行，猜错落点则是把服务端 active 指到不存在的行，后者更糟。
+pub(super) fn plan_workspace_switch_reclaim(
+    local_new_session: Option<&str>,
+    has_conversation: bool,
+    pending_bind: Option<&str>,
+    sessions: &[SessionListRow],
+) -> Option<(String, String)> {
+    let local_id = local_new_session?;
+    if has_conversation || pending_bind.is_some() {
+        return None;
+    }
+    let next_active = sessions
+        .iter()
+        .find(|r| r.id.as_str() != local_id)?
+        .id
+        .clone();
+    Some((local_id.to_string(), next_active))
+}
+
+/// 索引写入失败时要报给用户的那行提示；`None` 表示**静默**。
+///
+/// 只有 `RemoveBlank` 静默，理由见 [`TuiApp::reclaim_blank_on_workspace_switch`]：回收是
+/// 顺手动作，失败只留下一条可丢弃的空行，而它最常见的成因——行已被别的端删掉——本来就
+/// 无需用户知晓；切工作区路径上这条提示更与当前操作无关（用户刚切了工作区，却收到一句
+/// 讲回收失败的话）。残留行由 `NewBlank` 的复用规则兜底。
+fn index_failure_notice(op: &SessionIndexOp) -> Option<&'static str> {
+    match op {
+        SessionIndexOp::NewBlank { .. } => Some("新建会话未写入会话列表"),
+        SessionIndexOp::BindServer { .. } => Some("会话未绑定到列表行"),
+        SessionIndexOp::RemoveBlank { .. } => None,
+        SessionIndexOp::SetTitle { .. } => Some("会话标题未写入会话列表"),
+        SessionIndexOp::FlushExit { .. } => Some("退出前的会话落盘未完成"),
+        SessionIndexOp::Delete { .. } => Some("删除会话未写入会话列表"),
+    }
+}
+
 /// `/conv new` 与历史回放相关的 UI 侧状态。
 ///
 /// 前五个字段只在「新建 → 起名 → 绑定 → 切走回收」这条线上用，集中成一个结构体，
@@ -146,6 +193,12 @@ pub(super) struct UiIndexState {
     pub(super) pending_session_title: Option<String>,
     /// 启动时的「回放上次会话」是否已尝试过（只做一次，避免每次刷新左栏都冲掉 transcript）。
     pub(super) history_auto_replayed: bool,
+    /// `NewBlank` 写出去了、回包才到达，而用户中途切了工作区。
+    ///
+    /// 这条回包属于**旧桶**：行 id 只存在于上一个工作区的会话列表里。记账会让新桶
+    /// 首轮结束时的 `BindServer` 落到「会话行已不存在」；而回收也打不到旧桶
+    /// （接口只认 `workspaces/current`，此刻已指向新桶）。所以回包到达时只丢弃。
+    pub(super) pending_new_blank_left_bucket: bool,
 }
 
 impl TuiApp<'_> {
@@ -279,19 +332,21 @@ impl TuiApp<'_> {
         op: SessionIndexOp,
     ) {
         // 在途标记只属于 `NewBlank`；成败都要清，否则 `/conv new` 会被永久挡住。
-        if matches!(op, SessionIndexOp::NewBlank { .. }) {
+        let left_bucket = if matches!(op, SessionIndexOp::NewBlank { .. }) {
             self.index.new_session_pending = false;
-        }
+            std::mem::take(&mut self.index.pending_new_blank_left_bucket)
+        } else {
+            false
+        };
         let applied = match result {
             Ok(applied) => applied,
             Err(e) => {
-                let what = match op {
-                    SessionIndexOp::NewBlank { .. } => "新建会话未写入会话列表",
-                    SessionIndexOp::BindServer { .. } => "会话未绑定到列表行",
-                    SessionIndexOp::RemoveBlank { .. } => "空白会话未能回收",
-                    SessionIndexOp::SetTitle { .. } => "会话标题未写入会话列表",
-                    SessionIndexOp::FlushExit { .. } => "退出前的会话落盘未完成",
-                    SessionIndexOp::Delete { .. } => "删除会话未写入会话列表",
+                // 回收是顺手动作：失败只留下一条可丢弃的空行，而它最常见的成因（行已被别的
+                // 端删掉）本来就无需用户知晓；切工作区路径上这条提示更与当前操作无关——
+                // 用户刚切了工作区，却收到一句讲回收失败的话。静默失败，残留行由 `NewBlank`
+                // 的复用规则兜底。文案映射见 `index_failure_notice`。
+                let Some(what) = index_failure_notice(&op) else {
+                    return;
                 };
                 // 绑定失败最常见的原因是那条空行已被别的端删掉：丢弃待绑定记录，
                 // 否则后续每轮都会重试同一个失败绑定，`/conv new` 还会一直走复用分支。
@@ -302,6 +357,17 @@ impl TuiApp<'_> {
                 return;
             }
         };
+        if left_bucket {
+            // 这条新会话写在**切换前**的工作区里：行 id 只存在于那个桶。记账会让新桶
+            // 首轮结束时的 `BindServer` 落到「会话行已不存在」（见字段注释），回收又
+            // 打不到旧桶（接口只认 `workspaces/current`），所以只丢本地记账。
+            self.st.push_line(
+                LineKind::System,
+                "上一条新会话属于切换前的工作区：本地记账已丢弃（那行仍留在原工作区的会话列表里，下次新建会复用它）",
+            );
+            self.refresh_sessions();
+            return;
+        }
         match op {
             SessionIndexOp::NewBlank { .. } => {
                 let plan = plan_new_blank_outcome(
@@ -391,6 +457,39 @@ impl TuiApp<'_> {
         let _ = self.job_tx.send(WorkerJob::SessionIndex(op));
     }
 
+    /// 切换工作区前的清理：best-effort 回收「`/conv new` 建、还没人认领」的空行。
+    ///
+    /// **必须在发切换请求之前调用。** 会话索引端点只认 `workspaces/current`
+    /// （`paths::USER_DATA_WORKSPACE_SESSIONS`）：服务端确认切换之后 current 已是新桶，那时
+    /// 再发 `RemoveBlank`，行 id 在旧桶里查不到，`remove_blank_row` 会静默跳过——一行不删，
+    /// 还白白多一次「GET 新桶 → 原样 PUT 回去」，把与 Web / Desktop 并发写的覆盖窗口扩大到
+    /// 每次切工作区。两个切换入口（`/workspace`、项目池）因此都把它排在 `WorkspaceSet` /
+    /// `WsSwitchProject` 之前入队；worker 串行，先入队即先执行。
+    ///
+    /// 只把 `local_new_session` 置 `None`（更早的做法）等于放弃这行：没人认领也就没人删，
+    /// 它会一直留在旧工作区的会话列表里 —— 切回去能看到一条「0 消息」的空会话，而且
+    /// 谁也不会再去动它。删不掉的情形见 [`plan_workspace_switch_reclaim`]；那时仍靠
+    /// `NewBlank` 的复用逻辑兜底（下次在同一个桶里新建会先复用这条空行，不会每切一次
+    /// 就多一条）。
+    pub(super) fn reclaim_blank_on_workspace_switch(&mut self) {
+        let plan = plan_workspace_switch_reclaim(
+            self.index.local_new_session.as_deref(),
+            self.st.conversation_id.is_some(),
+            self.index.pending_bind_conversation.as_deref(),
+            &self.st.sessions,
+        );
+        // 记账先丢：回收是尽力而为，成不成都不能让旧桶的行 id 活过这次切换。
+        self.index.local_new_session = None;
+        let Some((local_id, next_active)) = plan else {
+            return;
+        };
+        let op = SessionIndexOp::RemoveBlank {
+            local_id,
+            next_active: Some(next_active),
+        };
+        let _ = self.job_tx.send(WorkerJob::SessionIndex(op));
+    }
+
     /// 某个 `conversation_id` 在会话索引里的本地行 id（切走回收与退出落盘都要查它）。
     pub(super) fn row_id_for_conversation(&self, conversation_id: &str) -> Option<String> {
         self.st
@@ -436,6 +535,48 @@ mod tests {
             server_revision: None,
             workspace_root: None,
         }
+    }
+
+    /// 切工作区时：`/conv new` 建的行还没被认领，就该回收，落点取桶里的另一行
+    /// —— 那行是服务端 active，`next_active` 缺了写入层会拒绝删除。
+    #[test]
+    fn unclaimed_blank_is_reclaimed_on_workspace_switch() {
+        assert_eq!(
+            plan_workspace_switch_reclaim(
+                Some("s_blank"),
+                false,
+                None,
+                &[row("s_blank"), row("s1")]
+            ),
+            Some(("s_blank".to_string(), "s1".to_string()))
+        );
+    }
+
+    /// 三种不该回收的情形：已绑定对话（删了丢正文）、有轮次在等绑定、
+    /// 桶里只剩这一行（删了桶就空了，服务端 active 没有落点）。
+    #[test]
+    fn claimed_blank_or_last_row_is_not_reclaimed() {
+        let two = [row("s_blank"), row("s1")];
+        assert_eq!(
+            plan_workspace_switch_reclaim(Some("s_blank"), true, None, &two),
+            None,
+            "已绑定 conversation_id 的行不是空行"
+        );
+        assert_eq!(
+            plan_workspace_switch_reclaim(Some("s_blank"), false, Some("c1"), &two),
+            None,
+            "有轮次在等行 id 绑定：此刻清掉会让那一轮的正文无处落"
+        );
+        assert_eq!(
+            plan_workspace_switch_reclaim(Some("s_blank"), false, None, &[row("s_blank")]),
+            None,
+            "只剩这一行时不删，免得桶变空"
+        );
+        assert_eq!(
+            plan_workspace_switch_reclaim(None, false, None, &[row("s1")]),
+            None,
+            "没用过 /conv new：没有可回收的行"
+        );
     }
 
     #[test]
