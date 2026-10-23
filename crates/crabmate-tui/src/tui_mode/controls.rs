@@ -26,6 +26,10 @@ pub enum Control {
     ConvUnknown(String),
     /// `/background [图片路径]`：全屏背景（kitty 走像素，其余用每格底色；空参查状态，`off` 关闭）。
     Background(Option<String>),
+    /// `/copy [assistant|user]`（`/yank` 同义）：复制最近一条该类型消息到剪贴板。
+    ///
+    /// 走终端剪贴板（OSC52）或 `wl-copy` / `xclip` / `xsel`，见 [`super::clipboard`]。
+    Copy(Option<String>),
 }
 
 pub fn clear_word(arg: &str) -> bool {
@@ -94,6 +98,7 @@ pub fn parse_control(text: &str) -> Option<Control> {
         slash::RESUME => Some(Control::Resume),
         "find" | "search" | "grep" => Some(Control::Find(arg_opt)),
         "background" | "bg" => Some(Control::Background(arg_opt)),
+        "copy" | "yank" => Some(Control::Copy(arg_opt)),
         slash::CONV => Some(match arg_opt {
             None => Control::ConvRefresh,
             Some(a) => match a.split_whitespace().next().unwrap_or("") {
@@ -144,6 +149,17 @@ mod tests {
         assert!(matches!(
             parse_control("/role coder"),
             Some(Control::Role(Some(v))) if v == "coder"
+        ));
+    }
+
+    #[test]
+    fn parse_control_copy_targets() {
+        // 空参默认助手回复；`yank` 是别名。
+        assert!(matches!(parse_control("/copy"), Some(Control::Copy(None))));
+        assert!(matches!(parse_control("/yank"), Some(Control::Copy(None))));
+        assert!(matches!(
+            parse_control("/copy user"),
+            Some(Control::Copy(Some(v))) if v == "user"
         ));
     }
 
