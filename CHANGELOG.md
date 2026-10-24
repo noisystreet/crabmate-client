@@ -386,6 +386,7 @@ Alpha preview of the 0.5 line: the client is aligned with the Server contract pi
 
 - Chat markdown: remote images get `referrerpolicy=no-referrer`; `javascript:` / `data:` href/src stay stripped; anchors that lose `href` unwrap to text; links use ammonia `target=_blank` instead of a post-pass string replace
 - Desktop / Android / connect lockfiles: bump transitive `plist` 1.8.0 → 1.10.0 so `quick-xml` is 0.41.0 (RUSTSEC-2026-0194 / RUSTSEC-2026-0195)
+- Desktop / Android / connect / TUI lockfiles: bump transitive `ctutils` 0.4.2 → 0.4.4 (RUSTSEC-2026-0385 — non-constant-time mask generation and `u128` comparisons). It arrives through the keyring chain (`keyring` 4.2.0 → `secret-service` 5.2.0 → `digest` 0.11.3), so no direct dependency changes; `cargo update -p ctutils --precise 0.4.4` per workspace, and `cargo audit` / `cargo deny check licenses bans sources` are clean again
 
 ## [0.1.0] - 2026-08-08
 
