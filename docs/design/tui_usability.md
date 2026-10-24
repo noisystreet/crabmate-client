@@ -14,7 +14,7 @@
 
 ### 1.2 TUI 现状与缺口对照
 
-`crabmate-tui` 已具备：全屏 transcript + 状态栏、左栏会话 use/new/refresh、右栏工作区目录树 + 项目池、审批浮层、thinking 折叠、工具行摘要、会话内 `/find`、多行输入、设置面板（模型/会话两分区，W1+W2 落地）、repl `/resume` 断线续传。与 Desktop 对照，下列**用户高频操作缺口**是本规划的对象：
+`crabmate-tui` 已具备：全屏 transcript + 状态栏、左栏会话 use/new/refresh（**并有鼠标：单击会话行即选中并切换**，滚轮刻意不碰列表）、右栏工作区目录树 + 项目池、审批浮层、thinking 折叠、工具行摘要、会话内 `/find`、多行输入、设置面板（模型/会话两分区，W1+W2 落地）、repl `/resume` 断线续传。与 Desktop 对照，下列**用户高频操作缺口**是本规划的对象：
 
 | # | 缺口（TUI 现状） | Desktop 参照 | 影响 |
 |---|---|---|---|
