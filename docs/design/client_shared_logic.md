@@ -88,6 +88,7 @@ frontend/                # wasm fetch 适配器 + UI；S1–S4 已用 client-api
 | `ag_ui_parser`（S6c） | AG-UI 单行 JSON → 控制面分发（`parse_ag_ui_line`；仅 `serde_json` + `cm_sse_protocol`） |
 | `tool_display`（S8） | 工具调用 → 单行展示推导（非占位 summary 优先、语义槽、截断残片打捞）；实时 SSE / TUI 回放 / Web 水合三路径共用 |
 | `workspace_rel`（S9） | 工作区相对路径片段运算（`child_rel` / `parent_rel`；两端原本逐字等价） |
+| `client_llm_presets`（S10） | LLM 网关预设表（7 条 `id`+`url`）+ URL→id / 下标 / 显示名投影；`server` 必在首项、`custom` 必在末项为不变量 |
 
 ---
 
@@ -259,6 +260,28 @@ TUI 侧判据：`serve/chat_stream.rs:5-8` 已 `use crabmate::cm_sse_protocol::�
 | TUI `build_ws_rows` / `ws_root_replace_keep` / `ws_row_index_near` | 仅 TUI：缓存扁平化成可见行、光标位移 |
 | `crates/crabmate-tui/src/workspace_path.rs`（`~` 展开、`~user` 拒绝） | 仅 TUI：终端进程的 `HOME` 语义（见 `remote_cli_tui.md`） |
 
+### 4.14 LLM 网关预设表（S10 已落地）
+
+| 端 | 路径 |
+|----|------|
+| frontend | `frontend/src/client_llm_presets.rs` → `api_base_select_value_for_draft`（现为 `pub use` 转发） |
+| tui | `crates/crabmate-tui/src/tui_mode/settings_panel_schema.rs` → `API_BASE_PRESETS` / `GATEWAY_SERVER_ID` / `GATEWAY_CUSTOM_ID` / `gateway_pick_of`（现为 `pub use` 转发）；`settings_panel_draw.rs::api_base_display` 改调共享 `display_id_for_url` |
+
+共享：`crabmate_client_api::client_llm_presets`——`PRESETS`（7 条 `id`+`url`）+ 三个投影：
+`select_id_for_url`（Web `<select>` 值语义）/ `index_for_url`（TUI `pick` 下标语义）/
+`display_id_for_url`（显示名，不含占位项）。两条不变量由共享层单测钉住：`server` 必在首项、
+`custom` 必在末项——`index_for_url` 用「空→首项、未知→末项」代理这两个 id。
+
+**为什么上收**：两份表逐字相同，且 TUI 侧注释原文写着「与 `frontend/src/client_llm_presets.rs`
+的 `CLIENT_LLM_API_BASE_PRESETS` **同源拷贝**；改 URL / 增删条目需两仓同步」——用注释管理漂移。
+TUI 内部还有第三处内联匹配（`settings_panel_draw.rs::api_base_display`），一并收敛。
+
+**顺带清理（Web 侧）**：本地 `ClientLlmApiBasePreset` 的 `suggested_model`（「选此项时填建议模型名」）
+在 `frontend` 内**零消费点**——功能从未接线，下沉时一并删除，不保留空壳字段。
+
+**留端**：TUI 的循环选择状态机与渲染仍在 `settings_panel*.rs`（只借 `index_for_url` 取下标）；
+Web 的 `api_base_preset_select` 字符串链路（写入已保存模型预设的标签）不动。
+
 ---
 
 ## 5. 明确不共享
@@ -298,8 +321,9 @@ TUI 侧判据：`serve/chat_stream.rs:5-8` 已 `use crabmate::cm_sse_protocol::�
 | **S7b**（待拍板） | `llm_thinking_mode` 分叉定权威口径（frontend 两态恒注入 vs TUI 仅字面 `on`/`off`） | 需先确认 Server / Desktop 权威语义，再统一两端取值与单测 |
 | **S7c**（可选） | C3：错误携带结构化 HTTP status，消除 `http_error_status_code` 括号反解（见 §4.10） | 改动面中，收益低中 |
 | **S9** ✅ | `workspace_rel`：`child_rel` / `parent_rel` 下沉；frontend `workspace_tree` 与 tui `tui_mode/workspace_tree` 改 `pub use` 转发（调用点零改动） | client-api 150 单测（含 5 个新增）；tui `workspace_tree` 既有断言通过；`wasm32` clippy；`check-boundaries.sh` ok |
+| **S10** ✅ | `client_llm_presets`：`PRESETS` + `select_id_for_url` / `index_for_url` / `display_id_for_url` 下沉；frontend `api_base_select_value_for_draft` 与 tui `API_BASE_PRESETS` / `gateway_pick_of` / `api_base_display` 改共享 | 两端表合一（删 TUI 第三处内联匹配与 Web 无消费的 `suggested_model`）；client-api 156 单测（含 11 个新增）；tui 623 全绿；`wasm32` clippy；`check-boundaries.sh` ok |
 
-**建议开工顺序**：S0 → S1–S4 → S5a / S5 health → S5 slash / paths / messages（均已完成）→ **S6a → S6b → S6c → S6d**（均已完成；S6e 视 S6a–d 收益再定）→ **S7a**（已完成）→ S7b（需先拍板）。
+**建议开工顺序**：S0 → S1–S4 → S5a / S5 health → S5 slash / paths / messages（均已完成）→ **S6a → S6b → S6c → S6d**（均已完成；S6e 视 S6a–d 收益再定）→ **S7a**（已完成）→ **S8 / S9 / S10**（均已完成）→ S7b（需先拍板）。
 
 每步独立小 PR，均**不新增 crate**、不动 `scripts/rust-pkg-dirs.txt`；每步以 `make check`（含 frontend `wasm32` clippy）+ `make test` 收口。
 

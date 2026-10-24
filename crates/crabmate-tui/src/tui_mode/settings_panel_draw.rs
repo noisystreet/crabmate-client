@@ -214,12 +214,8 @@ fn value_text(field: FieldId, v: &str) -> String {
 
 /// API Base 显示名：与任一具名预设 URL 完全一致 → 预设 id；否则原样 URL。
 fn api_base_display(v: &str) -> String {
-    for p in API_BASE_PRESETS {
-        if p.id != GATEWAY_SERVER_ID && p.id != GATEWAY_CUSTOM_ID && p.url == v {
-            return p.id.to_string();
-        }
-    }
-    v.to_string()
+    crabmate_client_api::client_llm_presets::display_id_for_url(v)
+        .map_or_else(|| v.to_string(), str::to_string)
 }
 
 /// 左侧导航项：按 [`Section::ALL`] 顺序给出「分区名 + 是否选中」。

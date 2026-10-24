@@ -41,59 +41,15 @@ pub(crate) fn tool_options() -> [Option<&'static str>; TOOL_OPTIONS_LEN] {
     [None, Some(TOOL_CACHE_DISABLED)]
 }
 
-/// 网关预设（与 `frontend/src/client_llm_presets.rs` 的 `CLIENT_LLM_API_BASE_PRESETS`
-/// **同源拷贝**；改 URL / 增删条目需两仓同步，避免漂移）。
+/// 网关预设表与「URL → 下标」投影与 Web 共用
+/// （`crabmate_client_api::client_llm_presets`）。
 /// TUI 只回写 `api_base`，不按预设自动填建议模型名（模型名仍保持「空 = 跟随 server」）。
-#[derive(Clone, Copy)]
-pub(crate) struct ApiPreset {
-    pub(crate) id: &'static str,
-    pub(crate) url: &'static str,
-}
-
-pub(crate) const API_BASE_PRESETS: &[ApiPreset] = &[
-    ApiPreset {
-        id: "server",
-        url: "",
-    },
-    ApiPreset {
-        id: "ollama",
-        url: "http://127.0.0.1:11434/v1",
-    },
-    ApiPreset {
-        id: "deepseek",
-        url: "https://api.deepseek.com/v1",
-    },
-    ApiPreset {
-        id: "minimax",
-        url: "https://api.minimaxi.com/v1",
-    },
-    ApiPreset {
-        id: "zhipu",
-        url: "https://open.bigmodel.cn/api/paas/v4",
-    },
-    ApiPreset {
-        id: "moonshot",
-        url: "https://api.moonshot.cn/v1",
-    },
-    ApiPreset {
-        id: "custom",
-        url: "",
-    },
-];
-
-pub(crate) const GATEWAY_SERVER_ID: &str = "server";
-pub(crate) const GATEWAY_CUSTOM_ID: &str = "custom";
-
-/// 网关预设选项下标 → 值（对应 [`API_BASE_PRESETS`]；`server` 是首位，`custom` 是末位）。
-pub(crate) fn gateway_pick_of(value: Option<&str>) -> usize {
-    match value.map(str::trim).filter(|s| !s.is_empty()) {
-        None => 0,
-        Some(v) => API_BASE_PRESETS
-            .iter()
-            .position(|p| p.id != GATEWAY_SERVER_ID && p.id != GATEWAY_CUSTOM_ID && p.url == v)
-            .unwrap_or(API_BASE_PRESETS.len() - 1),
-    }
-}
+/// `index_for_url` 承担「空→首位（server）、未知→末位（custom）」语义，
+/// 该不变量由共享层单测钉住。
+pub(crate) use crabmate_client_api::client_llm_presets::{
+    CUSTOM_ID as GATEWAY_CUSTOM_ID, PRESETS as API_BASE_PRESETS, SERVER_ID as GATEWAY_SERVER_ID,
+    index_for_url as gateway_pick_of,
+};
 
 /// ←/→ 移动循环类编辑的游标推进。`Editing` 是父模块的私有状态机类型，故该函数
 /// 的"选择哪个选项表"分派留在父模块（`SettingsPanel::edit_move`），这里只做下标算术。
