@@ -191,6 +191,8 @@ fn parse_and_dispatch_sse_frame(
         workspace_tool: SseWorkspaceToolHooks {
             on_workspace_changed: Some(&mut on_ws),
             on_tool_call: Some(&mut on_tool_call),
+            // Web 工具卡在 START 帧已拿到完整 `arguments` 并渲染，参数帧暂无额外可做的事。
+            on_tool_call_args: None,
             on_tool_status_change: Some(&mut on_tool_status),
             on_parsing_tool_calls_change: Some(&mut on_parse),
             on_tool_output_chunk: Some(&mut on_tool_chunk),

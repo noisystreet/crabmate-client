@@ -312,3 +312,42 @@ TUI 侧判据：`serve/chat_stream.rs:5-8` 已 `use crabmate::cm_sse_protocol::�
 - Server D2 硬删同进程 `chat|repl|tui`（见 Server `client_shell_split.md` §2.5）。
 - `crabmate-tui` 钥匙串 / GitHub 头 / `stream_resume`（终端功能，见 `remote_cli_tui.md`）。
 - P4 全屏 ratatui / P5 发版说明。
+
+---
+
+## 10. 工具展示行推导（`tool_display`，S8）
+
+> 落地于 `crates/crabmate-client-api/src/tool_display.rs`。覆盖三条路径：实时 SSE（TUI / Web）、
+> TUI 历史回放（`tui_mode/history.rs`）、Web 会话水合（`conversation_hydrate_timeline.rs`）。
+
+**为什么上收**：Server 的 `TOOL_CALL_START.summary` 在摘要推导失败时会直接下发占位串 `tool: <name>`
+（Server `tool_call_summary_from_args`）。此前两端各自兜底——Web 的 `run_command_card.rs` 认出占位后解析
+参数 JSON，TUI 只把「像 JSON 的串」丢掉（`run_command` 参数恒为 JSON，于是命令一并丢失）。两份手写规则
+必然漂移，故收敛为一份纯函数：
+
+```rust
+pub struct ToolDisplayInput<'a> { pub name: &'a str, pub summary: Option<&'a str>, pub args: Option<&'a str> }
+pub fn is_placeholder_summary(name: &str, summary: &str) -> bool;
+pub fn tool_display_line(input: &ToolDisplayInput<'_>) -> Option<String>;
+```
+
+**推导顺序**（对所有工具同一套，无按工具名特判）：
+
+1. `summary` 非空且非占位 → 用它；
+2. `args` 是 JSON 对象 → 语义槽：`shell`（`command`/`cmd`/`script` + `args`）、`path`/`paths`、
+   `pattern`/`query`/`regex`/`symbol`、`url`/`endpoint`、`id`/`name`/`session_id`/`action`；
+   值接受 string / array / number / bool（Server 侧 `command: String` 遇数组即弃）；
+3. `args` 是**被截断**的 JSON 残片 → 仅按引号扫描捞 `command`，绝不把半截 JSON 打进正文；
+4. 非 JSON 文本（旧式预览，如 `path=/etc/hosts`）→ 单行原样；
+5. 都不行 → `None`，由各端用自己的 i18n 兜底（`tool: <name>` / `工具: <name>`）。
+
+`Query` 槽排在 `Path` 之前：`search_in_files` 同时带 `pattern` 与 `root`，后者是 `root=.`，几乎无信息量。
+
+**边界**：仍属「纯解析 / 纯推导」——不碰 IO、Tauri、`web-sys`、`reqwest`、`tokio`；i18n 文案与
+工具卡 DOM 留端。`TOOL_CALL_ARGS` 的钩子（`SseWorkspaceToolHooks::on_tool_call_args`）与
+`StreamSink::on_tool_args` 已接通，但当前 Server 的 START 与 ARGS 同源（`arguments` 优先，否则
+240 字符 `argsPreview`），消费第二帧暂无新增信息——接线是为 Server 将来分片下发参数留口。
+
+**行为变化（有意）**：`run_command` 的展示文本由「args 优先」改为「非占位 summary 优先」。以前 Web
+在 `summary` 与 args 都给得出内容时取 args，TUI 取 `summary`；统一后两端一致取 `summary`——
+它由 Server 的摘要推导产生，通常比原始参数更贴近「做了什么」。

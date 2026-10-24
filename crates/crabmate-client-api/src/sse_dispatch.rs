@@ -32,6 +32,12 @@ pub struct SseWorkspaceToolHooks<'a> {
             Option<String>,
         ),
     >,
+    /// `TOOL_CALL_ARGS`：全量参数帧（`tool_call_id`, `args`）。
+    ///
+    /// 与 `TOOL_CALL_START` 分开到达，供消费方在参数补全后刷新工具行/卡片文本；
+    /// 当前 Server 两帧同源（`arguments` 优先、否则 `argsPreview`），接线是为
+    /// Server 将来分片下发参数时留口。`None` 时该帧静默跳过。
+    pub on_tool_call_args: Option<&'a mut dyn FnMut(String, String)>,
     pub on_tool_status_change: Option<&'a mut dyn FnMut(bool)>,
     pub on_parsing_tool_calls_change: Option<&'a mut dyn FnMut(bool)>,
     /// `tool_output_chunk`：工具执行中的输出片段（如 PTY）；最终以 `tool_result` 收束。

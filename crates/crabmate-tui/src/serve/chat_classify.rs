@@ -12,6 +12,7 @@ use crabmate_client_api::sse_dispatch::{
     CommandApprovalData, SseClarifyTraceHooks, SseControlSink, SseDispatch, SseNoticeTimelineHooks,
     SseTurnPhaseHooks, SseWorkspaceToolHooks, ToolResultInfo,
 };
+use crabmate_client_api::tool_display::{ToolDisplayInput, tool_display_line};
 use serde_json::Value;
 
 use crate::serve::error::TermError;
@@ -43,6 +44,11 @@ pub(crate) enum LineAction {
         tool_call_id: String,
         name: String,
         note: Option<String>,
+    },
+    /// `TOOL_CALL_ARGS`：参数全量帧（启动帧的 `summary`/`argsPreview` 之外的补充）。
+    ToolArgs {
+        tool_call_id: String,
+        args: String,
     },
     /// `TOOL_CALL_RESULT`（非 partial 收尾）：工具结束 + 结果摘要。
     ToolResult {
@@ -81,16 +87,19 @@ fn parse_with_collector(line: &str, acc: &RefCell<Collected>) -> SseDispatch {
                             _args_full: Option<String>,
                             _goal_id: Option<String>,
                             tool_call_id: Option<String>| {
-        // 事件里已经有「要执行什么」：`summary` 优先，其次参数预览（`run_command`
-        // 的 `git status` 就靠它）。以前两者都被丢掉，工具行只能显示工具名，
-        // 命令必须等结果回来才看得见。
-        let note = std::iter::once(summary)
-            .chain(args_preview)
-            .map(|s| s.trim().to_string())
-            .find(|s| !s.is_empty() && !looks_like_json(s))
-            .map(|s| trim_tail(&s));
+        // 事件里已经有「要执行什么」：推导规则统一在 `crabmate_client_api::tool_display`
+        // （TUI 与 Web 共用一份）。它会认出 Server 的 `tool: <name>` 占位串，改从参数
+        // JSON 里取 `command`/`path`/`pattern`，避免工具行只剩工具名。
+        let note = tool_display_line(&ToolDisplayInput {
+            name: &name,
+            summary: Some(summary.as_str()),
+            args: args_preview.as_deref(),
+        })
+        .map(|s| trim_tail(&s));
         acc.borrow_mut().tool_start(tool_call_id, name, note);
     };
+    let mut on_tool_args =
+        |tool_call_id: String, args: String| acc.borrow_mut().tool_args(tool_call_id, args);
     let mut on_tool_result = |info: ToolResultInfo| acc.borrow_mut().tool_result(info);
     let mut on_approval = |req: CommandApprovalData| acc.borrow_mut().approve(req);
     let mut on_approval_invalid = || acc.borrow_mut().system(MALFORMED_APPROVAL_HINT);
@@ -100,6 +109,7 @@ fn parse_with_collector(line: &str, acc: &RefCell<Collected>) -> SseDispatch {
         on_reasoning_delta: Some(&mut on_reasoning_delta),
         workspace_tool: SseWorkspaceToolHooks {
             on_tool_call: Some(&mut on_tool_call),
+            on_tool_call_args: Some(&mut on_tool_args),
             on_tool_result: Some(&mut on_tool_result),
             on_command_approval_request: Some(&mut on_approval),
             on_command_approval_invalid: Some(&mut on_approval_invalid),
@@ -123,6 +133,8 @@ struct Collected {
     system: Option<String>,
     approval: Option<CommandApprovalData>,
     tool_start: Option<(Option<String>, String, Option<String>)>,
+    /// `TOOL_CALL_ARGS`：(tool_call_id, args)。
+    tool_args: Option<(String, String)>,
     tool_result: Option<ToolResultInfo>,
     run_error: Option<String>,
 }
@@ -146,6 +158,10 @@ impl Collected {
 
     fn tool_start(&mut self, tool_call_id: Option<String>, name: String, note: Option<String>) {
         self.tool_start.get_or_insert((tool_call_id, name, note));
+    }
+
+    fn tool_args(&mut self, tool_call_id: String, args: String) {
+        self.tool_args.get_or_insert((tool_call_id, args));
     }
 
     fn tool_result(&mut self, info: ToolResultInfo) {
@@ -173,6 +189,8 @@ fn resolve(collected: Collected) -> Result<LineAction, TermError> {
             name,
             note,
         }
+    } else if let Some((tool_call_id, args)) = collected.tool_args {
+        LineAction::ToolArgs { tool_call_id, args }
     } else if let Some(info) = collected.tool_result {
         tool_result_action(info)
     } else if let Some(s) = collected.err {
@@ -218,15 +236,6 @@ fn is_ag_ui_event(line: &str) -> bool {
 /// 截断到 ≤[`NOTE_MAX_CHARS`] 字符（字符级，不切代理对）。
 fn trim_tail(s: &str) -> String {
     s.chars().take(NOTE_MAX_CHARS).collect()
-}
-
-/// 该串是否为原始 JSON（对象 / 数组）。
-///
-/// 共享解析器把 `arguments`（完整参数 **JSON**）优先于 `argsPreview`（`path=/etc/hosts`
-/// 这类可读预览）交给回调，两者共用一个位置，客户端分不出来。JSON 原样上屏就是
-/// `{"path":"a.rs"}`——比不显示更糟，所以判掉。
-fn looks_like_json(s: &str) -> bool {
-    s.starts_with('{') || s.starts_with('[')
 }
 
 #[cfg(test)]
@@ -324,13 +333,26 @@ mod tests {
         }
     }
 
-    /// 参数位可能是完整参数 **JSON**（共享解析器让 `arguments` 优先于 `argsPreview`），
-    /// 原样上屏会把 `{"path":"a.rs"}` 印成标题：宁可不显示，也不要这种噪音。
+    /// 参数位可能是完整参数 **JSON**（共享解析器让 `arguments` 优先于 `argsPreview`）。
+    /// 不能原样上屏（`{"path":"a.rs"}` 会把标题印成 JSON 噪音），但也不该整段丢弃——
+    /// 共享层按语义槽压成 `path=a.rs` 这样的一行。
     #[test]
-    fn tool_call_start_ignores_json_arguments() {
+    fn tool_call_start_renders_json_arguments_compactly() {
         let data = r#"{"type":"TOOL_CALL_START","toolCallId":"tc-3","name":"create_file","arguments":"{\"path\":\"a.rs\"}"}"#;
         match classify_line(data).unwrap() {
-            LineAction::ToolStart { note, .. } => assert!(note.is_none()),
+            LineAction::ToolStart { note, .. } => assert_eq!(note.as_deref(), Some("path=a.rs")),
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    /// 本 bug 的端到端回归：Server 下发占位 `summary` 时，参数里的真实命令必须救回来。
+    #[test]
+    fn placeholder_summary_falls_back_to_args_command() {
+        let data = r#"{"type":"TOOL_CALL_START","toolCallId":"tc-5","name":"run_command","summary":"tool: run_command","arguments":"{\"command\":\"git\",\"args\":[\"status\",\"-sb\"]}"}"#;
+        match classify_line(data).unwrap() {
+            LineAction::ToolStart { note, .. } => {
+                assert_eq!(note.as_deref(), Some("git status -sb"))
+            }
             other => panic!("unexpected {other:?}"),
         }
     }
@@ -353,11 +375,19 @@ mod tests {
     }
 
     #[test]
-    fn tool_args_and_end_are_skipped() {
-        assert!(matches!(
-            classify_line(r#"{"type":"TOOL_CALL_ARGS","toolCallId":"tc-1","args":"{}"}"#).unwrap(),
-            LineAction::Skip
-        ));
+    fn tool_args_frame_carries_full_arguments() {
+        let data = r#"{"type":"TOOL_CALL_ARGS","toolCallId":"tc-1","args":"{\"path\":\"a.rs\"}"}"#;
+        match classify_line(data).unwrap() {
+            LineAction::ToolArgs { tool_call_id, args } => {
+                assert_eq!(tool_call_id, "tc-1");
+                assert_eq!(args, r#"{"path":"a.rs"}"#);
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    #[test]
+    fn tool_call_end_is_skipped() {
         assert!(matches!(
             classify_line(r#"{"type":"TOOL_CALL_END","toolCallId":"tc-1"}"#).unwrap(),
             LineAction::Skip

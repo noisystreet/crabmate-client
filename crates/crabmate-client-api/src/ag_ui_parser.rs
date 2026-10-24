@@ -161,8 +161,14 @@ fn dispatch_tool_call_start(val: &serde_json::Value, sink: &mut SseControlSink<'
     }
 }
 
-fn dispatch_tool_call_args(_val: &serde_json::Value, _sink: &mut SseControlSink<'_>) {
-    // TOOL_CALL_ARGS: 当前前端无专用回调，可后续扩展
+/// 全量参数帧：与 `TOOL_CALL_START` 分开到达，供消费方补全/刷新工具行文本。
+fn dispatch_tool_call_args(v: &serde_json::Value, sink: &mut SseControlSink<'_>) {
+    let s = |k: &str| v.get(k).and_then(|x| x.as_str()).unwrap_or("").to_string();
+    let (id, args) = (s("toolCallId"), s("args"));
+    let hook = sink.workspace_tool.on_tool_call_args.as_mut();
+    if let Some(h) = hook.filter(|_| !args.trim().is_empty()) {
+        h(id, args);
+    }
 }
 
 fn dispatch_tool_call_end(_val: &serde_json::Value, _sink: &mut SseControlSink<'_>) {

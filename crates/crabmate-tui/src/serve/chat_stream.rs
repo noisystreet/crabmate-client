@@ -149,6 +149,11 @@ pub trait StreamSink {
     ) -> Result<(), TermError> {
         Ok(())
     }
+    /// `TOOL_CALL_ARGS`：参数全量帧。与 `on_tool_start` 分开到达，供实现方在参数补全后
+    /// 刷新工具行文本；默认忽略（文本模式无症状）。
+    fn on_tool_args(&mut self, _tool_call_id: &str, _args: &str) -> Result<(), TermError> {
+        Ok(())
+    }
     /// 工具结果（`TOOL_CALL_RESULT`；非 partial 收尾帧）。`ok=None` = 无结果标记；
     /// `note` 为 serve 摘要（`metadata.summary`），缺省回退输出内容截断。
     fn on_tool_end(
@@ -584,6 +589,7 @@ async fn dispatch_line_action(
             name,
             note,
         } => sink.on_tool_start(&tool_call_id, &name, note.as_deref())?,
+        LineAction::ToolArgs { tool_call_id, args } => sink.on_tool_args(&tool_call_id, &args)?,
         LineAction::ToolResult {
             tool_call_id,
             name,
