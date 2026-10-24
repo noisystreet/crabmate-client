@@ -86,6 +86,8 @@ frontend/                # wasm fetch 适配器 + UI；S1–S4 已用 client-api
 | `prompt_tokens`（S6a） | tiktoken 快照 DTO + camelCase/snake_case 双键解析（无 IO） |
 | `sse_dispatch`（S6b） | AG-UI 控制面 DTO + `SseControlSink` 钩子组签名 + `SseDispatch` 三态（钩子实现留端） |
 | `ag_ui_parser`（S6c） | AG-UI 单行 JSON → 控制面分发（`parse_ag_ui_line`；仅 `serde_json` + `cm_sse_protocol`） |
+| `tool_display`（S8） | 工具调用 → 单行展示推导（非占位 summary 优先、语义槽、截断残片打捞）；实时 SSE / TUI 回放 / Web 水合三路径共用 |
+| `workspace_rel`（S9） | 工作区相对路径片段运算（`child_rel` / `parent_rel`；两端原本逐字等价） |
 
 ---
 
@@ -238,6 +240,25 @@ TUI 侧判据：`serve/chat_stream.rs:5-8` 已 `use crabmate::cm_sse_protocol::�
 | `stream_resume` / 图像 | 本端存储与终端能力 |
 | 校验类（`is_valid_temperature`、`validate_temperature_override`、`validate_llm_context_tokens_override`） | 是**保存期校验**（空视为合法 + 出文案），非出站取值规则，混用易漂移 |
 
+### 4.13 工作区相对路径片段运算（S9 已落地）
+
+| 端 | 路径 |
+|----|------|
+| frontend | `frontend/src/workspace_tree.rs` → `workspace_child_rel` / `workspace_parent_rel`（现为 `pub use` 转发） |
+| tui | `crates/crabmate-tui/src/tui_mode/workspace_tree.rs` → `ws_child_rel` / `ws_parent_rel`（现为 `pub use` 转发） |
+
+共享：`crabmate_client_api::workspace_rel::{child_rel, parent_rel}`——两端原本**逐字等价**的两条纯函数
+（父+子名拼装、父目录推导；POSIX 风格与 serve 的 `path` 查询一致）。下沉后两端调用点零改动，
+删除的是第二份「看起来一样、迟早不一样」的实现。
+
+**留端**（各端 UI 结构，不是同一份规则）：
+
+| 留端项 | 原因 |
+|--------|------|
+| `workspace_expand_ancestor_dirs` / `workspace_prune_subtree_state` | 仅 Web：`HashSet` 展开集 + 目录缓存维护 |
+| TUI `build_ws_rows` / `ws_root_replace_keep` / `ws_row_index_near` | 仅 TUI：缓存扁平化成可见行、光标位移 |
+| `crates/crabmate-tui/src/workspace_path.rs`（`~` 展开、`~user` 拒绝） | 仅 TUI：终端进程的 `HOME` 语义（见 `remote_cli_tui.md`） |
+
 ---
 
 ## 5. 明确不共享
@@ -276,6 +297,7 @@ TUI 侧判据：`serve/chat_stream.rs:5-8` 已 `use crabmate::cm_sse_protocol::�
 | **S7a** ✅ | `chat_body` 可选块取值规则下沉：`insert_trimmed_str` / `temperature_for_chat_body` / `readonly_tool_ttl_cache_secs_for_chat_body` / `llm_context_tokens_for_chat_body`；frontend 与 tui 改委托并删本地重复实现（TUI 私有 `insert_trimmed` 删除） | 两端语义统一为 trim-on-write（frontend 原写原值 → 写 trim 值，持久化边界已 trim 故出站不变）；两端既有相关单测全通过（frontend 679 / tui 217 / 契约 86）；`wasm32` clippy；`lizard` CCN ≤10；`check-boundaries.sh` ok |
 | **S7b**（待拍板） | `llm_thinking_mode` 分叉定权威口径（frontend 两态恒注入 vs TUI 仅字面 `on`/`off`） | 需先确认 Server / Desktop 权威语义，再统一两端取值与单测 |
 | **S7c**（可选） | C3：错误携带结构化 HTTP status，消除 `http_error_status_code` 括号反解（见 §4.10） | 改动面中，收益低中 |
+| **S9** ✅ | `workspace_rel`：`child_rel` / `parent_rel` 下沉；frontend `workspace_tree` 与 tui `tui_mode/workspace_tree` 改 `pub use` 转发（调用点零改动） | client-api 150 单测（含 5 个新增）；tui `workspace_tree` 既有断言通过；`wasm32` clippy；`check-boundaries.sh` ok |
 
 **建议开工顺序**：S0 → S1–S4 → S5a / S5 health → S5 slash / paths / messages（均已完成）→ **S6a → S6b → S6c → S6d**（均已完成；S6e 视 S6a–d 收益再定）→ **S7a**（已完成）→ S7b（需先拍板）。
 
