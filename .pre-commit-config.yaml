@@ -251,7 +251,7 @@ repos:
       - id: conventional-pre-commit
         stages: [commit-msg]
         args:
-          # 与 .cursor/rules/conventional-commits.mdc 中的 type 对齐
+          # 与 AGENTS.md「Commit subjects」的 type 清单对齐
           - build
           - chore
           - ci
