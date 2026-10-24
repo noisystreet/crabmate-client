@@ -25,6 +25,12 @@ use crate::workspace_fs_ops::{
 };
 use crate::workspace_shell::{workspace_list_row_class, workspace_list_row_icon};
 
+// 路径片段运算两端共用（`crabmate-client-api::workspace_rel`）；本模块只保留
+// Web 侧树状态（展开集、缓存、可见行扁平化）。
+pub use crabmate_client_api::workspace_rel::{
+    child_rel as workspace_child_rel, parent_rel as workspace_parent_rel,
+};
+
 struct InlineCommitInput {
     name: String,
     parent_rel: String,
@@ -82,22 +88,6 @@ pub(crate) fn workspace_file_row_drag_start(ev: &web_sys::DragEvent, rel: &str) 
     dt.set_effect_allowed("copy");
     let _ = dt.set_data(CRABMATE_WS_REL_MIME, &rel);
     let _ = dt.set_data("text/plain", &format!("@{rel}"));
-}
-
-/// 相对工作区根的路径片段拼接（POSIX 风格，与后端 `path` 查询一致）。
-pub fn workspace_child_rel(parent: &str, name: &str) -> String {
-    if parent.is_empty() {
-        name.to_string()
-    } else {
-        format!("{}/{}", parent, name)
-    }
-}
-
-/// 条目相对路径的父目录（根下文件/夹返回 `""`）。
-pub fn workspace_parent_rel(rel: &str) -> String {
-    rel.rfind('/')
-        .map(|i| rel[..i].to_string())
-        .unwrap_or_default()
 }
 
 /// 将 `parent_rel` 的各级祖先（含自身）加入 `expanded`。

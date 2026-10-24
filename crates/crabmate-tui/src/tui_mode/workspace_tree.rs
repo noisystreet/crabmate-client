@@ -9,6 +9,12 @@ use crate::serve::{WorkspaceDirData, WorkspaceDirEntry, WorkspaceProjectsData};
 
 use super::state::UiState;
 
+// 路径片段运算与 Web 共用（`crabmate-client-api::workspace_rel`）；
+// 本模块只保留终端侧树状态（缓存扁平化、光标、展开/折叠）。
+pub use crabmate_client_api::workspace_rel::{
+    child_rel as ws_child_rel, parent_rel as ws_parent_rel,
+};
+
 /// 项目池「选择/切换工作区」子视图状态（未设置=首次选择，已设置=切到另一项目；
 /// 关闭后为 `None`）。
 #[derive(Debug, Clone, Default)]
@@ -50,24 +56,6 @@ pub enum WsActivate {
     Dir { rel: String, fetch: bool },
     /// 文件：相对工作区根的 POSIX 路径。
     File(String),
-}
-
-/// 父相对路径 + 子名 → 子相对路径（根下子项返回 `name`）。
-#[must_use]
-pub fn ws_child_rel(parent: &str, name: &str) -> String {
-    if parent.is_empty() {
-        name.to_string()
-    } else {
-        format!("{parent}/{name}")
-    }
-}
-
-/// 相对路径的父目录（根下文件/夹返回 `""`）。
-#[must_use]
-pub fn ws_parent_rel(rel: &str) -> String {
-    rel.rfind('/')
-        .map(|i| rel[..i].to_string())
-        .unwrap_or_default()
 }
 
 /// 展开中但子列表尚未到达的目录占位行路径（不会与真实条目重名）。

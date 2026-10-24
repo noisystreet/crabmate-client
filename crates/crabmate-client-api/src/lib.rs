@@ -24,6 +24,7 @@ pub mod sse_dispatch;
 pub mod tool_display;
 pub mod url;
 pub mod workspace;
+pub mod workspace_rel;
 
 pub use ag_ui_parser::{format_user_error_with_meta, parse_ag_ui_line};
 pub use approval::{
