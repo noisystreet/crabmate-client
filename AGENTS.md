@@ -20,10 +20,12 @@
 ├── web-host/                # binary crabmate-web (loopback static UI host)
 ├── frontend/                # Business UI; contract crates.io crabmate 0.7.0 + protocol
 ├── e2e/                     # Playwright (browser UI)
-├── scripts/                 # sync-connect, victauri-e2e, e2e-playwright, check.sh, check-boundaries.sh, check-css-breakpoints.sh, check-css-contract.sh, check-css-tokens.sh, check-token-mirrors.sh, set-version.sh; rust-pkg-dirs.txt = package list single source
+├── fixtures/                # golden JSONL fixtures (sse_ag_ui / turn_project_web)
+├── .github/                 # workflows/ (ci, code-complexity, dependency-security, e2e-playwright, release, victauri-e2e-nightly) + dependabot / PR template
+├── scripts/                 # one script per gate (check-*.sh, lizard / fn-param / fn-nloc ratchets, ktlint-android) + release / pack helpers, victauri-e2e, e2e-playwright, set-version; rust-pkg-dirs.txt = package list single source
 ├── docs/
 │   ├── TESTING.md
-│   └── design/
+│   ├── design/
 │       ├── tauri_gui_mvp_design.md
 │       ├── contract_pin.md
 │       ├── personal_cloud_runbook.md
@@ -32,11 +34,11 @@
 │       ├── client_shared_logic.md  # extract shared pure logic across WASM / connect / tui
 │       ├── coding_agent_client.md  # coding-agent review/revert plan (Waves 1–3)
 │       └── shell_smoke_runbook.md
+│   └── adr/                  # ADRs 0001–0005 (see Documentation Rules table)
 ├── CHANGELOG.md             # Release notes (English)
 ├── README.md                # English (default)
 ├── README.zh-CN.md          # Simplified Chinese
-├── AGENTS.md                # Agent / contributor constraints (English only)
-└── .cursor/rules/
+└── AGENTS.md                # Agent / contributor constraints (English only)
 ```
 
 ## Hard Constraints
@@ -49,6 +51,7 @@
 - `crabmate-client-api` is in-repo path only (`crates/crabmate-client-api`); no Tauri / `web-sys` / `reqwest` / `tokio`
 - `crabmate-tool-card` is in-repo path only (`crates/crabmate-tool-card`); do not git-pin Server `crabmate-tool-card`
 - Boundary rules above are **mechanically enforced** by `scripts/check-boundaries.sh` (pre-commit hook + `scripts/check.sh`): client-api dependency purity, `crabmate-connect` default features stay Tauri-free, exact contract-pin shape across all manifests, and version consistency across all Rust packages
+- Complexity **gates**: `lizard` CCN>10 fails globally (zero rule, no per-module caps); function params ≤ 9 (`fn-param-ratchet`); function nloc ≤ 200 and Rust file ≤ 920 lines (`fn-nloc-ratchet`) — enforced by pre-commit + `scripts/check.sh`
 - Package versions move in **lockstep** across all Rust packages; bump via `bash scripts/set-version.sh <semver>` (never hand-edit one Cargo.toml version)
 - Package list **single source**: `scripts/rust-pkg-dirs.txt` — consumed by the `Makefile` `fmt` / `clippy` / `clean` loops, `scripts/check.sh`, and `scripts/check-boundaries.sh`; adding a package only touches this file (plus Makefile `test-*` grouping / CI cache if needed)
 - Responsive breakpoint **single source**: `MOBILE_LAYOUT_BREAKPOINT_PX` in `frontend/src/app_prefs.rs`; `@media` cannot use `var()`, so CSS repeats the value under constraint — narrow `max-width: N` pairs with complementary `min-width: N + 1` (never cross-written) and other breakpoints are registered in `scripts/check-css-breakpoints.sh`; enforced by that hook + `scripts/check.sh`
@@ -69,7 +72,7 @@
 ```bash
 make help
 make frontend                # trunk → frontend/dist
-make check                   # or pre-commit run --all-files (includes frontend wasm32 clippy + ktlint)
+make check                   # scripts/check.sh — aligned with the local hooks but WITHOUT typos / e2e format+lint / commit-msg (pre-commit is a superset)
 make dependency-security     # cargo audit + cargo deny (all workspaces; not in pre-commit)
 make ktlint-android          # hand-maintained Android Kotlin only (`edu/crabmate`)
 make test
@@ -87,12 +90,15 @@ bash scripts/check-token-mirrors.sh      # Android res + boot pages must mirror 
 bash scripts/check-icons.sh              # no literal <svg> outside icon.rs; svg rule sizes must be var(--icon-*)
 bash scripts/check-modal-shell.sh        # role / aria-modal only emitted by app/focusable_menu.rs
 bash scripts/check-xml-comments.sh       # no `--` inside XML comment bodies (XML 1.0 §2.5; aapt2 fails resource merging)
+bash scripts/ensure-tauri-dist-stubs.sh  # desktop/mobile dist stubs for tauri codegen
 bash scripts/set-version.sh 0.5.1        # bump all Rust package versions (+ Cargo.locks) in one step
 bash scripts/lizard-rust.sh              # any function with CCN>10 fails (global zero rule; no per-module caps)
+bash scripts/fn-param-ratchet.sh         # function param cap: lizard max params <= 9
+bash scripts/fn-nloc-ratchet.sh          # function nloc <= 200 and Rust file <= 920 lines
 bash scripts/dependency-security.sh      # cargo audit + cargo deny; not in pre-commit / check.sh
 bash scripts/ktlint-android.sh           # needs java; `--format` to fix
-./scripts/victauri-e2e.sh all   # needs a usable crabmate serve binary; not in default CI
-./scripts/e2e-playwright.sh     # Playwright; needs frontend/dist + serve
+make victauri-e2e                # or ./scripts/victauri-e2e.sh all; needs a usable crabmate serve binary; not in default CI
+make e2e-playwright              # or ./scripts/e2e-playwright.sh; needs frontend/dist + serve; pre-commit only runs its format/lint
 ```
 
 ## Documentation Rules
@@ -130,14 +136,34 @@ When updating docs:
 | Dependency audit (`cargo audit` / `cargo deny`) | `deny.toml`; CI `.github/workflows/dependency-security.yml`; not in pre-commit |
 | User/maintainer release notes | `CHANGELOG.md` (English; Keep a Changelog; move Unreleased into a version section on release) |
 | Contract pin tag / rev | `docs/design/contract_pin.md`; policy authority is Server |
-| SSE / CORS / Bearer / API base / contract semver | **Server** `docs/`; this repo only links |
+| SSE / CORS / Bearer / API base / `CM_WEB_*` / error codes + `request_id` / contract semver | **Server** `docs/`; this repo only links |
+| `client-contract-v*` release policy | **Server** `docs/design/client_contract_versioning.md` (linked below); this repo only pins the shape in `docs/design/contract_pin.md` |
 | Path A progress checkboxes | Server `docs/design/client_shell_split_todo.md` |
 
 ## Coding Rules
 
 - Follow existing shell code style
-- Commit subjects: Conventional Commits + bilingual Chinese/English subject (see `.cursor/rules/conventional-commits.mdc`)
-- **Forbidden**: `git commit --no-verify`
+
+### Before committing
+
+- Run the gate first, then commit: `pre-commit run --all-files`; if `pre-commit` is not installed, fall back to `bash scripts/check.sh`
+- Re-run until green — **forbidden**: `git commit --no-verify`
+- `pre-commit run --all-files` skips the `commit-msg` stage, so a green manual run does not validate the commit subject — the type is only checked when you actually `git commit`
+- Hook prerequisites: the three complexity hooks (`lizard-rust` / `fn-param-ratchet` / `fn-nloc-ratchet`) need `pip install lizard`; `ktlint-android` needs a local JDK 17+ (the first run downloads the pinned ktlint CLI); `taplo` hooks self-skip when taplo is absent
+- Covered by pre-commit: every `check-*.sh` gate, `cargo fmt` + per-package clippy (incl. frontend wasm32), the three complexity ratchets, ktlint, typos, and the e2e format/lint (`e2e-format` / `e2e-lint`)
+- Not covered by pre-commit (run separately or in CI): `cargo test`, Victauri E2E, the Playwright run itself (`./scripts/e2e-playwright.sh`; only its format/lint is gated), `make dependency-security`
+
+### Commit subjects
+
+- Format: `<type>(<optional scope>): <中文简述> / <English brief>`
+- Types are enforced by the `commit-msg` hook; keep its `conventional-pre-commit` `args` in `.pre-commit-config.yaml` in sync with this list: `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `ci`, `build`, `style`, `perf`, `revert`
+- Scope follows the shell / area touched, e.g. `desktop`, `mobile`, `connect`, `docs`
+- The bilingual half is human-enforced; examples:
+
+  ```text
+  docs(desktop): 对齐路径 A 薄壳说明 / align thin-shell docs with path A
+  chore: 增加 pre-commit 与 check 脚本 / add pre-commit and check script
+  ```
 
 ## Server doc index (read-only links)
 

@@ -18,9 +18,7 @@ Thumbs.db
 .history/
 .env
 .env.*
-.cursor/*
-!.cursor/rules/
-!.cursor/rules/**
+.cursor/
 
 ########################
 # Python
