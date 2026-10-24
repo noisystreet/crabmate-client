@@ -22,7 +22,7 @@ crabmate-connect = { path = "../../crates/crabmate-connect", features = ["tauri"
 # 0.7.1 仅新增主机名尾部 `.` 的跨平台兼容处理（非安全修复），降级无安全影响。
 [target.'cfg(target_os = "android")'.dependencies]
 jni = "0.22"
-rustls-platform-verifier = "=0.7.0"
+rustls-platform-verifier = "=0.7.1"
 
 [lib]
 name = "crabmate_mobile_lib"
