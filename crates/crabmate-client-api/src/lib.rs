@@ -8,6 +8,7 @@ pub mod ag_ui_parser;
 pub mod approval;
 pub mod auth;
 pub mod chat_body;
+pub mod client_llm_presets;
 pub mod conversation_messages;
 pub mod handoff;
 pub mod health;

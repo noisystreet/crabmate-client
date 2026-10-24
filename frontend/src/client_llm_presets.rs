@@ -1,75 +1,13 @@
-//! Web「设置」中 `client_llm.api_base` 网关预设。
+//! Web「设置」中 `client_llm.api_base` 的预设反查。
 //!
-//! 与 Server [`cm_types::llm_gateway_presets`](https://github.com/noisystreet/CrabMate/blob/main/src/cm_types/llm_gateway_presets.rs)
-//! 同源拷贝（展示 crate 下沉 W1）；改 URL / 建议模型时请两仓同步。
-//! TUI 设置面板 `crates/crabmate-tui/src/tui_mode/settings_panel.rs` 亦有**同源拷贝**
-//! （只回写 `api_base`，不自动填建议模型）；增删条目 / 改 URL 时本文件与 TUI 表需同步。
+//! 预设表本体在 `crabmate_client_api::client_llm_presets`——与 TUI 设置面板共用
+//! 的单一来源（此前两端各持一份逐字相同的 `id`+`url` 表，靠注释约定「两仓同步」）。
+//! 本模块只保留 Web 侧的对外名字，调用点无需改动。
+//!
+//! 原本地拷贝里的 `suggested_model`（「选此项时填建议模型名」）在 `frontend` 内
+//! 没有任何消费点，随这次下沉一并移除，未接线的功能不再以字段形式留存。
 
-/// 单条预设：`id` 用于 UI；`url` 写入 `api_base`（空串表示「沿用服务端 / 自定义」占位）。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ClientLlmApiBasePreset {
-    pub id: &'static str,
-    pub url: &'static str,
-    /// 选此项时，若模型名为空则填入建议值（不覆盖用户已填的 model）。
-    pub suggested_model: Option<&'static str>,
-}
-
-/// 常用 OpenAI 兼容网关（与 Server 预设表、README 供应商示例一致）。
-pub const CLIENT_LLM_API_BASE_PRESETS: &[ClientLlmApiBasePreset] = &[
-    ClientLlmApiBasePreset {
-        id: "server",
-        url: "",
-        suggested_model: None,
-    },
-    ClientLlmApiBasePreset {
-        id: "ollama",
-        url: "http://127.0.0.1:11434/v1",
-        suggested_model: None,
-    },
-    ClientLlmApiBasePreset {
-        id: "deepseek",
-        url: "https://api.deepseek.com/v1",
-        suggested_model: Some("deepseek-v4-flash"),
-    },
-    ClientLlmApiBasePreset {
-        id: "minimax",
-        url: "https://api.minimaxi.com/v1",
-        suggested_model: None,
-    },
-    ClientLlmApiBasePreset {
-        id: "zhipu",
-        url: "https://open.bigmodel.cn/api/paas/v4",
-        suggested_model: Some("glm-5"),
-    },
-    ClientLlmApiBasePreset {
-        id: "moonshot",
-        url: "https://api.moonshot.cn/v1",
-        suggested_model: Some("kimi-k2.5"),
-    },
-    ClientLlmApiBasePreset {
-        id: "custom",
-        url: "",
-        suggested_model: None,
-    },
-];
-
-/// 当前草稿对应的预设 id：空 → `server`；与任一非 server/custom 预设 `url` 完全一致 → 该 id；否则 `custom`。
-#[must_use]
-pub fn api_base_select_value_for_draft(draft: &str) -> &'static str {
-    let t = draft.trim();
-    if t.is_empty() {
-        return "server";
-    }
-    for p in CLIENT_LLM_API_BASE_PRESETS {
-        if p.id == "server" || p.id == "custom" {
-            continue;
-        }
-        if p.url == t {
-            return p.id;
-        }
-    }
-    "custom"
-}
+pub use crabmate_client_api::client_llm_presets::select_id_for_url as api_base_select_value_for_draft;
 
 #[cfg(test)]
 mod tests {
