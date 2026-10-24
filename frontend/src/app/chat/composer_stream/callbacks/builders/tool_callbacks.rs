@@ -16,6 +16,7 @@ use crate::session_ops::{make_message_id, message_created_ms};
 use crate::sse_dispatch::{ToolJobState, ToolOutputChunkInfo, ToolResultInfo};
 use crate::storage::{StoredMessage, StoredMessageState};
 use crate::timeline_scan::timeline_state_tool;
+use crabmate_client_api::tool_display::{ToolDisplayInput, tool_display_line};
 
 use super::super::super::context::ChatStreamCallbackCtx;
 use super::super::super::per_stream_accum::PerStreamAccum;
@@ -334,6 +335,15 @@ fn capture_write_tool_file_path(
     });
 }
 
+/// 共享推导的薄封装：`full`（完整参数）与 `preview`（截断预览）分别试一次。
+fn tool_display_line_for(name: &str, summary: &str, args: Option<&str>) -> Option<String> {
+    tool_display_line(&ToolDisplayInput {
+        name,
+        summary: Some(summary),
+        args,
+    })
+}
+
 pub(in super::super) fn chat_stream_on_tool_call_builder(
     stream_ctx: Rc<ChatStreamCallbackCtx>,
     accum: Rc<PerStreamAccum>,
@@ -356,27 +366,25 @@ pub(in super::super) fn chat_stream_on_tool_call_builder(
             );
             let _ = goal_id;
             let loc = stream_ctx.locale.get_untracked();
-            let core = if name.trim() == "run_command" {
-                let inv = run_command_card_invocation_line(
-                    summary.as_str(),
-                    preview.as_deref(),
-                    full.as_deref(),
-                );
-                if inv.is_empty() {
-                    format!("{}{}", i18n::tool_card_prefix(loc), name.trim())
+            // 展示文本推导统一走 `crabmate-client-api` 的共享纯逻辑（TUI 同一份）：它会认出
+            // Server 的 `tool: <name>` 占位串，改从参数 JSON 取 `command`/`path`/`pattern`。
+            let derived = tool_display_line_for(&name, &summary, full.as_deref())
+                .or_else(|| tool_display_line_for(&name, &summary, preview.as_deref()));
+            let core = derived.clone().unwrap_or_else(|| {
+                if name.trim().is_empty() {
+                    i18n::tool_card_fallback(loc).to_string()
                 } else {
-                    inv
+                    format!("{}{}", i18n::tool_card_prefix(loc), name.trim())
                 }
-            } else if !summary.trim().is_empty() {
-                summary.trim().to_string()
-            } else if !name.trim().is_empty() {
-                format!("{}{}", i18n::tool_card_prefix(loc), name.trim())
-            } else {
-                i18n::tool_card_fallback(loc).to_string()
-            };
+            });
             let text = to_single_line(&core, 180);
-            let detail = if name.trim() == "run_command" && !core.is_empty() {
-                format!("tool: {name}\nstatus: running\n$ {core}")
+            // `$ …` 只在真有命令行时加：core 落到 i18n 兜底（`工具：run_command`）时，
+            // 再加提示符就成了 `$ 工具：run_command` 这种错位。
+            let detail = if name.trim() == "run_command" {
+                match derived {
+                    Some(cmd) => format!("tool: {name}\nstatus: running\n$ {cmd}"),
+                    None => format!("tool: {name}\nstatus: running"),
+                }
             } else if !name.trim().is_empty() {
                 format!("tool: {name}\nstatus: running")
             } else {

@@ -1,7 +1,13 @@
 //! `crabmate_timeline` 系统消息解析（从 `conversation_hydrate` 拆出以降低圈复杂度）。
 
+use crabmate_client_api::tool_display::{ToolDisplayInput, tool_display_line};
 use serde_json::Value;
 
+/// 工具调用 → 一行（水合路径）。
+///
+/// 以前这里只取 `function.name`，于是重新打开会话时工具卡永远是 `工具：run_command`，
+/// 命令本身不在卡片里。现在与实时路径共用 `crabmate_client_api::tool_display`：
+/// 从 `function.arguments` 推导（`git status -sb` / `path=a.rs`），推不出再退回函数名。
 fn tool_calls_summary(tool_calls: &Value) -> String {
     let Some(arr) = tool_calls.as_array() else {
         return String::new();
@@ -11,18 +17,31 @@ fn tool_calls_summary(tool_calls: &Value) -> String {
         let Some(obj) = tc.as_object() else {
             continue;
         };
-        let name = obj
-            .get("function")
-            .and_then(|f| f.get("name"))
-            .and_then(|n| n.as_str())
-            .unwrap_or("?");
-        lines.push(name.to_string());
+        lines.push(tool_call_display_line(obj));
     }
     if lines.is_empty() {
         String::new()
     } else {
         lines.join(", ")
     }
+}
+
+fn tool_call_display_line(obj: &serde_json::Map<String, Value>) -> String {
+    let func = obj.get("function");
+    let name = func
+        .and_then(|f| f.get("name"))
+        .and_then(|n| n.as_str())
+        .unwrap_or("?");
+    let args = func.and_then(|f| f.get("arguments")).map(|a| match a {
+        Value::String(s) => s.clone(),
+        other => other.to_string(),
+    });
+    tool_display_line(&ToolDisplayInput {
+        name,
+        summary: None,
+        args: args.as_deref(),
+    })
+    .unwrap_or_else(|| name.to_string())
 }
 
 fn first_tool_call_function_name(tool_calls: &Value) -> Option<String> {

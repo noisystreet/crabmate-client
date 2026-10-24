@@ -11,6 +11,7 @@
 //! 等它的这段时间里用户可能已经切走、新建会话或直接开聊。
 
 use crabmate_client_api::markdown_normalize::balance_unclosed_fence;
+use crabmate_client_api::tool_display::is_placeholder_summary;
 use crabmate_client_api::{ConversationMessagesResponse, ReplayRow};
 use crabmate_tool_card::parse_tool_envelope;
 use unicode_width::UnicodeWidthChar;
@@ -267,8 +268,10 @@ fn tool_history_row(name: &str, body: &str) -> (String, Option<bool>) {
 /// 压平必须先做：`summary` 可能是「工具名 \n 工具名: 详情」，只取首行会留下一句纯
 /// 工具名（信息全丢），不压平则整段挤进一行、名字出现两次。
 fn tool_note(name: &str, summary: Option<&str>, body: &str) -> Option<String> {
+    // 占位摘要（Server 摘要推导失败时的 `tool: <name>`）没有信息量，还会把工具行
+    // 退回「只有工具名」：丢掉它，宁可回退到结果正文首行。
     let raw = summary
-        .filter(|s| !s.trim().is_empty())
+        .filter(|s| !s.trim().is_empty() && !is_placeholder_summary(name, s))
         .or_else(|| body.lines().next())?;
     let flat = flatten_note(name, raw)?;
     Some(head_excerpt(&flat))
@@ -295,6 +298,24 @@ mod tests {
 
     use super::super::test_support::{test_app, test_client, test_prefs};
     use super::*;
+
+    /// 回放时 Server 的占位摘要（`tool: run_command`）必须被丢掉并回退到输出首行：
+    /// 否则重开会话的工具行又变回「只有工具名」，正是实时路径刚修掉的那个现象。
+    #[test]
+    fn replay_drops_placeholder_summary_in_favour_of_output() {
+        let note = tool_note(
+            "run_command",
+            Some("tool: run_command"),
+            "git status (exit=0):\n位于分支 main",
+        );
+        assert_eq!(note.as_deref(), Some("git status (exit=0):"));
+    }
+
+    #[test]
+    fn replay_prefers_real_summary_over_output() {
+        let note = tool_note("run_command", Some("make -C build"), "ignored");
+        assert_eq!(note.as_deref(), Some("make -C build"));
+    }
 
     fn pending(title: &str) -> HistoryRequest {
         HistoryRequest {

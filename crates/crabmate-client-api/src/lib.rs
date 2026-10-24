@@ -21,6 +21,7 @@ pub mod session_model;
 pub mod sessions;
 pub mod slash;
 pub mod sse_dispatch;
+pub mod tool_display;
 pub mod url;
 pub mod workspace;
 
@@ -65,6 +66,7 @@ pub use session_model::{
 pub use sessions::{
     SessionListRow, conversation_id_for_resume, session_row_conversation_id_for_resume,
 };
+pub use tool_display::{ToolDisplayInput, is_placeholder_summary, tool_display_line};
 pub use url::normalize_api_base;
 pub use workspace::{
     WorkspaceDirData, WorkspaceDirEntry, WorkspaceInfo, WorkspaceProjectsData,
