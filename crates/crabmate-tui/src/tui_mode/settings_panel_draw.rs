@@ -280,8 +280,8 @@ fn footer_hint(panel: &SettingsPanel) -> String {
         | Some(Editing::Tool { .. })
         | Some(Editing::Gateway { .. }) => "[←/→] 循环  [Enter] 确定  [Esc] 取消".to_string(),
         Some(Editing::Text { .. }) => "[Enter] 确定  [Esc] 取消编辑".to_string(),
-        None if panel.read_only => "[↑↓] 浏览  [Tab] 分区  [Esc/F2] 关闭".to_string(),
-        None => "[↑↓] 移动  [Enter] 编辑  [Tab] 分区  [S] 保存  [Esc/F2] 关闭".to_string(),
+        None if panel.read_only => "[↑↓] 浏览  [Tab] 分区  [Esc] 关闭".to_string(),
+        None => "[↑↓] 移动  [Enter] 编辑  [Tab] 分区  [F2] 保存  [Esc] 关闭".to_string(),
     }
 }
 

@@ -50,7 +50,7 @@ fn footer_text(content: &PanelContent) -> Vec<String> {
 }
 
 #[test]
-fn clean_panel_esc_and_f2_close_immediately() {
+fn clean_panel_esc_closes_immediately() {
     let o = overrides(None, None, None, None);
     let c = ctx(&o, None);
     let mut p = SettingsPanel::new(false);
@@ -58,21 +58,31 @@ fn clean_panel_esc_and_f2_close_immediately() {
         p.handle_key(&key(KeyCode::Esc), &c),
         PanelEffect::Close
     ));
-    let mut p = SettingsPanel::new(false);
-    assert!(matches!(
-        p.handle_key(&key(KeyCode::F(2)), &c),
-        PanelEffect::Close
-    ));
 }
 
 #[test]
-fn f2_detector() {
-    let k = KeyEvent::new(KeyCode::F(2), KeyModifiers::NONE);
-    assert!(is_f2_key(&k));
-    let k1 = KeyEvent::new(KeyCode::F(1), KeyModifiers::NONE);
-    assert!(!is_f2_key(&k1));
-    let kc = KeyEvent::new(KeyCode::F(2), KeyModifiers::CONTROL);
-    assert!(!is_f2_key(&kc));
+fn f2_saves_instead_of_closing() {
+    let o = overrides(None, None, None, None);
+    let c = ctx(&o, None);
+    let mut p = SettingsPanel::new(false);
+    // F2 专用于保存：干净面板按下只得到「无改动可保存」，不再关闭面板。
+    assert!(matches!(
+        p.handle_key(&key(KeyCode::F(2)), &c),
+        PanelEffect::None
+    ));
+    assert_eq!(
+        p.note.as_ref().map(|(t, _)| t.as_str()),
+        Some("无改动可保存")
+    );
+}
+
+#[test]
+fn settings_open_key_detector() {
+    assert!(is_settings_open_key(&key(KeyCode::F(6))));
+    // F2 已改作面板内保存；`Ctrl+,` 在 VTE 系终端与裸逗号同码，也不再绑定（见 `hotkeys`）。
+    let comma = KeyEvent::new(KeyCode::Char(','), KeyModifiers::CONTROL);
+    assert!(!is_settings_open_key(&comma) && !is_settings_open_key(&key(KeyCode::F(2))));
+    assert!(is_save_key(&key(KeyCode::F(2))) && is_save_key(&key(KeyCode::Char('s'))));
 }
 
 #[test]
@@ -322,8 +332,11 @@ fn panel_footer_lines_contain_key_hints() {
     let p = SettingsPanel::new(false);
     let content = p.content(&c, 90);
     let text = footer_text(&content);
-    assert!(text.iter().any(|l| l.contains("[S] 保存")));
+    assert!(text.iter().any(|l| l.contains("[F2] 保存")));
     assert!(text.iter().any(|l| l.contains("[Tab] 分区")));
+    // 关闭键只剩 Esc：F2 已改为保存，底栏不能再提示「[Esc/F2] 关闭」。
+    assert!(text.iter().any(|l| l.contains("[Esc] 关闭")));
+    assert!(!text.iter().any(|l| l.contains("Esc/F2")));
 }
 
 /// 顶栏 / 左导航元数据：分区名进 `title`，两个分区都出现在 `nav` 且只有一个选中。

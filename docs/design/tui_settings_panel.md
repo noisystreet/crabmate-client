@@ -1,6 +1,6 @@
 # TUI 设置面板（对齐 Desktop 设置）
 
-> **状态**：**W1 / W2 / W4 已落地**（`/settings` + F2，三个分区共十个字段——外观 `theme`；模型 `model` / `api_base` / `temperature` / `llm_context_tokens` / `llm_thinking_mode` / API 密钥；会话 `role` / `session_mode` / 只读工具缓存开关）；**W3 后置项未落地**（MCP `global_enabled` / `tool_timeout_secs`、Session SQLite 开关）。§4.1 里「连接（只读信息）」「快捷键」「本地行为」三个分区**仍只是方案、面板里没有**。落地按 §7「分期」逐波提交（§8 是落地纪律）。
+> **状态**：**W1 / W2 / W4 已落地**（`/settings` + F6，三个分区共十个字段——外观 `theme`；模型 `model` / `api_base` / `temperature` / `llm_context_tokens` / `llm_thinking_mode` / API 密钥；会话 `role` / `session_mode` / 只读工具缓存开关）；**W3 后置项未落地**（MCP `global_enabled` / `tool_timeout_secs`、Session SQLite 开关）。§4.1 里「连接（只读信息）」「快捷键」「本地行为」三个分区**仍只是方案、面板里没有**。落地按 §7「分期」逐波提交（§8 是落地纪律）。
 > **范围**：`crabmate-tui`（`tui` 全屏为主，`repl` 仅入口引导）；设置**选项字段与语义尽量对齐 Desktop**（`frontend/` Settings），不追求 UI 像素一致。
 > **关联**：[`remote_cli_tui.md`](./remote_cli_tui.md)（TUI 母方案）、[`client_capability_matrix.md`](./client_capability_matrix.md)（能力单元格，改动须同 PR 更新）、[`contract_pin.md`](./contract_pin.md)（契约钉点）、Server `docs/`（SSE / user-data / 配置权威）
 
@@ -26,7 +26,7 @@ Desktop（`frontend/` Settings）的设置不是这样：**字段实体与持久
 
 ### 目标
 
-1. 全屏 `tui` 新增 `/settings`（+ F2）设置面板：分区浏览 + 字段编辑 + 显式保存/放弃，取代「斜杠改 override」作为会话偏好主入口（斜杠保留兼容）。
+1. 全屏 `tui` 新增 `/settings`（+ F6）设置面板：分区浏览 + 字段编辑 + 显式保存/放弃，取代「斜杠改 override」作为会话偏好主入口（斜杠保留兼容）。
 2. 设置项清单与 Desktop Settings 对齐（§4 逐字段表），持久化尽量落到与 Desktop 相同的 serve user-data 与钥匙串槽位，而不是发明一套 TUI 私有格式。
 3. 面板里能看到三层有效值，避免“看不见生效值”的困惑：本进程 override（`*`）＞ serve user-data 已存值 ＞ `/status?view=shell` server 默认（空 = 跟随 server）。
 
@@ -123,7 +123,11 @@ Desktop 设置共 8 个分区（`settings_page`）。逐区对齐结论见下表
 
 ### 5.1 入口
 
-- `tui` 全屏：输入 `/settings`（加入 `controls.rs` `Control` 枚举解析）；同时绑全局键 **F2**（不占用已用 Ctrl+* 组合）。Esc 逐层关闭（编辑态→面板→输入态）。
+- `tui` 全屏：输入 `/settings`（加入 `controls.rs` `Control` 枚举解析）；同时绑全局键 **F6**。Esc 逐层关闭（编辑态→面板→输入态）。
+
+  **键位分工（2026-04 调整）**：`F6` 开关面板、`F2` 在面板内**保存**（与 `s` 并列）。`F2` 不再是开关别名——它原先既开又关，导致「刚改完字段想按 F2 保存」按到的却是关闭；拆开后与既有的 `F3`（状态栈）连成一组功能键，保存也有一个不受输入缓冲影响的功能键。
+
+  **为什么不用 VS Code 的 `Ctrl+,`**：终端只有开键盘增强协议（CSI u / kitty）才分辨得出「Ctrl+逗号」与裸 `,`，而 VTE 系终端（gnome-terminal / xfce4-terminal / tilix）把两者发成同一个 `0x2C`——上游 `GNOME/vte#2601` 至今仍是 open（里程碑挂在 vte 0.86）。在那些终端里绑 `Ctrl+,` 的结果是：面板打不开，且光标在输入框时还会插入一个逗号。`F2`–`F9` 由 VTE 按 terminfo 原样透传（`F1`/`F10`/`F11` 常被终端或桌面占用），因此选 `F6`；`/settings` 仍是无条件可用的入口。
 - `repl`：不加面板；`/model /mode /role` 已覆盖。仅 `/help` 文案里提示“设置面板见 `crabmate-tui tui` /settings”。
 
 ### 5.2 面板形态（已落地：全屏页面，**不是**浮层）
@@ -141,14 +145,14 @@ Desktop 设置共 8 个分区（`settings_page`）。逐区对齐结论见下表
 │        │  思考模式          server
 │        │  API 密钥          已设置
 └────────┘
-[↑↓] 移动  [Enter] 编辑  [Tab] 分区  [S] 保存  [Esc/F2] 关闭
+[↑↓] 移动  [Enter] 编辑  [Tab] 分区  [F2] 保存  [Esc] 关闭
 ```
 
 （示意，不是逐格复刻；配色走 `Palette`，`NO_COLOR` 下靠反色/加粗区分。）
 
 - 左列分区导航（仿 Desktop NavRail，顺序同 Desktop：外观 → 模型 → 会话），右列当前分区字段行；每行展示合成生效值与 override 来源（`*` = override · `~` = 未保存 · 留空保存 = 跟随 server）。
 - 行级 Enter → 该字段编辑行（复用现有输入缓冲编辑原语：文本直输、数值过滤、枚举 ←→ 循环、开关回车翻转；主题行 Enter 展开候选列表、↑/↓ 选）。编辑时给出硬件光标位。
-- 底栏随状态切文案（`settings_panel_draw.rs`）：常态 `[↑↓] 移动  [Enter] 编辑  [Tab] 分区  [S] 保存  [Esc/F2] 关闭`；有脏字段 `[y] 放弃并关闭  [Esc] 返回`（对齐 Desktop close-guard，避免“改了以为存了”）；回合进行中只读 `[↑↓] 浏览  [Tab] 分区  [Esc/F2] 关闭`。`S` 按字段归属分写：`client_llm.*` / prefs → 合并 PUT，API 密钥 → 本机钥匙串。
+- 底栏随状态切文案（`settings_panel_draw.rs`）：常态 `[↑↓] 移动  [Enter] 编辑  [Tab] 分区  [F2] 保存  [Esc] 关闭`；有脏字段 `[y] 放弃并关闭  [Esc] 返回`（对齐 Desktop close-guard，避免“改了以为存了”）；回合进行中只读 `[↑↓] 浏览  [Tab] 分区  [Esc] 关闭`。`F2`（或 `S`）按字段归属分写：`client_llm.*` / prefs → 合并 PUT，API 密钥 → 本机钥匙串。
 - 回合进行中打开：只读展示，保存禁用并提示（与审批浮层优先级一致的防叠原则）。
 
 ### 5.3 三层显示规则
@@ -199,10 +203,10 @@ Desktop 设置共 8 个分区（`settings_page`）。逐区对齐结论见下表
 
 | Wave | 交付 | 验收 |
 |---|---|---|
-| **W1 面板骨架 + 模型/会话扁平字段**（**已落地**） | `/settings` + F2 页面；分区导航；三层显示；字段编辑：模型名、网关/api_base（预设表随 §6.4 对齐）、role、mode；`S` 保存（`llm-overrides` / `prefs` 合并 PUT）；`Esc`/脏确认；回合中只读；F2 已加入 `/help`（草案的「快捷键」面板分区**未落地**，信息仍只在 `/help` 输出里）；斜杠 `/model /mode /role` 保留 | 连本地 serve 冒烟：面板改 model/role/mode → 保存 → `/status` 与 Desktop 设置页可见 → 下一轮请求体带 `client_llm.model`；重启 TUI 后值仍在（user-data 层） |
+| **W1 面板骨架 + 模型/会话扁平字段**（**已落地**） | `/settings` + F6 页面；分区导航；三层显示；字段编辑：模型名、网关/api_base（预设表随 §6.4 对齐）、role、mode；`F2`（或 `S`）保存（`llm-overrides` / `prefs` 合并 PUT）；`Esc`/脏确认；回合中只读；`F6` 开关与 `F2` 保存已加入 `/help`（草案的「快捷键」面板分区**未落地**，信息仍只在 `/help` 输出里）；斜杠 `/model /mode /role` 保留 | 连本地 serve 冒烟：面板改 model/role/mode → 保存 → `/status` 与 Desktop 设置页可见 → 下一轮请求体带 `client_llm.model`；重启 TUI 后值仍在（user-data 层） |
 | **W2 完整 LLM 字段 + 密钥 + 工具开关**（**已落地**） | 温度/思考模式字段与 API 密钥写钥匙串槽 **已随面板一并落地**（校验区间对齐；密钥重启后从同一槽位回读；矩阵 auth Notes 已同步）；上下文 tokens、只读工具缓存开关、网关预设下拉（与 `client_llm_presets.rs` 同名表，双端同步注释已加；跨仓同步纪律见 §8）**已随收尾落地** | 校验区间对齐；密钥保存后重启可回读；上下文 tokens >0 随轮 `client_llm.llm_context_tokens`；关缓存开关后请求体出现 `readonly_tool_ttl_cache_secs: 0` |
 | **W3 后置项（契约核对后 — 未落地）** | MCP 全局开关 + `tool_timeout_secs`（`/user-data/mcp-servers` 系端点）；Session SQLite 会话存储开关（`/status` 布尔 + POST）。**两项在 `tui_mode` 里都还没有对应代码** | 开关读/写与 Desktop 设置页同源一致；不实现服务器行管理 |
-| **W4 外观分区（主题）**（**已落地**） | 面板新增「外观」分区（导航首位，与 Desktop 同序）：`prefs.theme` 的 ←/→ 切换 + 合并写回；保存成功即用新值重解析配色；`palette.rs` 增 `THEME_OPTIONS`，并把 `crabmate-dark` 补进 `THEME_NAMES`（此前 `CM_TUI_THEME` 不认它） | 单测：选项→slug 映射、未知 slug（`system`）读透不改写、Esc 不落 staged、保存只进 prefs 组；冒烟：F2 → Tab 到「外观」→ 选 `crabmate-light` → `S` → 配色立刻变化、`/user-data/prefs` 的 `theme` 同步、Desktop 设置页看到同值 |
+| **W4 外观分区（主题）**（**已落地**） | 面板新增「外观」分区（导航首位，与 Desktop 同序）：`prefs.theme` 的 ←/→ 切换 + 合并写回；保存成功即用新值重解析配色；`palette.rs` 增 `THEME_OPTIONS`，并把 `crabmate-dark` 补进 `THEME_NAMES`（此前 `CM_TUI_THEME` 不认它） | 单测：选项→slug 映射、未知 slug（`system`）读透不改写、Esc 不落 staged、保存只进 prefs 组；冒烟：F6 → Tab 到「外观」→ 选 `crabmate-light` → `F2` → 配色立刻变化、`/user-data/prefs` 的 `theme` 同步、Desktop 设置页看到同值 |
 
 各 Wave 内**一项用户可见行为一个 PR**（引用 `coding_agent_client.md` 约束第 5 条的小步纪律）。
 
@@ -237,4 +241,4 @@ Desktop 设置共 8 个分区（`settings_page`）。逐区对齐结论见下表
 ## 10. 验证
 
 - 单测：字段校验（温度区间/上下文上限/思考枚举，对齐 Desktop）、合并 PUT 构造（不丢 `saved_models`/非管理 prefs 键）、三层显示合成、`/settings` 解析与脏确认逻辑。沿用现有 CCN/行数门禁（大逻辑拆 `settings_panel.rs`，避免 `mod.rs` 超限）。
-- 冒烟（`docs/design/shell_smoke_runbook.md` 同风格）：连本地 serve → F2 开面板 → 改模型保存 → `/status` 变化 + 请求体含 `client_llm`；改 role/mode 同验；重启 TUI 仍在；Desktop 设置页可见同值；密钥保存后 `--no-keyring` 不读。
+- 冒烟（`docs/design/shell_smoke_runbook.md` 同风格）：连本地 serve → F6 开面板 → 改模型 → F2 保存 → `/status` 变化 + 请求体含 `client_llm`；改 role/mode 同验；重启 TUI 仍在；Desktop 设置页可见同值；密钥保存后 `--no-keyring` 不读。
