@@ -1,6 +1,6 @@
 # TUI 设置面板（对齐 Desktop 设置）
 
-> **状态**：方案（Proposed，未进入实现）。本文只规划，落地按 §8「分期」逐波提交。
+> **状态**：**W1 / W2 / W4 已落地**（`/settings` + F2，三个分区共十个字段——外观 `theme`；模型 `model` / `api_base` / `temperature` / `llm_context_tokens` / `llm_thinking_mode` / API 密钥；会话 `role` / `session_mode` / 只读工具缓存开关）；**W3 后置项未落地**（MCP `global_enabled` / `tool_timeout_secs`、Session SQLite 开关）。§4.1 里「连接（只读信息）」「快捷键」「本地行为」三个分区**仍只是方案、面板里没有**。落地按 §7「分期」逐波提交（§8 是落地纪律）。
 > **范围**：`crabmate-tui`（`tui` 全屏为主，`repl` 仅入口引导）；设置**选项字段与语义尽量对齐 Desktop**（`frontend/` Settings），不追求 UI 像素一致。
 > **关联**：[`remote_cli_tui.md`](./remote_cli_tui.md)（TUI 母方案）、[`client_capability_matrix.md`](./client_capability_matrix.md)（能力单元格，改动须同 PR 更新）、[`contract_pin.md`](./contract_pin.md)（契约钉点）、Server `docs/`（SSE / user-data / 配置权威）
 
@@ -54,23 +54,23 @@ Desktop（`frontend/` Settings）的设置不是这样：**字段实体与持久
 
 ### 4.1 分区级结论
 
-Desktop 设置共 8 个分区（`settings_page`）。逐区对齐结论：
+Desktop 设置共 8 个分区（`settings_page`）。逐区对齐结论见下表 —— **注意「TUI 对齐结论」列混合了「已落地」与「仅方案」两种状态**，当前面板真正实现了的只有**外观 / 模型 / 会话**三个分区（`settings_panel.rs::Section`），其余结论仍是待做/不做项：
 
 | Desktop 分区 | TUI 对齐结论 | 依据 / 理由 |
 |---|---|---|
-| **Connection**（Web Bearer + serve API 基址） | **reduced**：面板内**只读展示**，编辑仍走 CLI/env/钥匙串回退 | 两者在启动期定死（`ServeClient` 由 `ConnectionConfig` 建一次），会话中改需重建 client+worker，不划算；语义与来源提示写进面板 |
+| **Connection**（Web Bearer + serve API 基址） | **no（尚未落地）**：面板没有连接分区；连接信息仍只能从 CLI/env/钥匙串得知，编辑走 CLI/env/钥匙串回退 | 两者在启动期定死（`ServeClient` 由 `ConnectionConfig` 建一次），会话中改需重建 client+worker，不划算；草案里的「面板内只读展示」未实现 |
 | **Appearance**（locale/theme/bg_decor/show_turn_context_inject） | **reduced：只有 `theme`**（W4 已落地） | TUI 一直在按 `prefs.theme` 上色（`palette.rs::from_theme`），W4 起面板新增「外观」分区，可切换并写回同一键；`locale` / `bg_decor` / `show_turn_context_inject` 仍 **no**——CSS/DOM/`matchMedia` 渲染，终端无对应（矩阵 TUI 格已是 `no`） |
 | **Llm（模型配置）** | **reduced→主模型扁平字段**：对齐 `client_llm.{api_base,model,temperature,llm_context_tokens,llm_thinking_mode}` + 密钥 | Desktop 的“注册表 + 主/执行器套用”面向多预设管理；TUI 只管理当前主模型这一份（§4.2 / §4.3） |
-| **Tools**（readonly tool TTL 缓存开关） | **reduced**：对齐同名字段（§4.2） | 开关 = serve prefs 布尔 + 随轮发送 `readonly_tool_ttl_cache_secs`，语义一致即可用 |
-| **Session**（SQLite 会话存储 + 字体） | **reduced**：SQLite 开关可读/切（serve 两布尔 + POST）；字体 **no** | SQLite 开关本来就是 serve 级（`/status` 驱动），字体属 CSS 渲染 |
-| **Shortcuts**（只读快捷键说明） | **yes**：设置面板内一个「快捷键」信息分区 | 复用现有 `/help` 文案，集中展示（含本面板自身按键） |
+| **Tools**（readonly tool TTL 缓存开关） | **reduced（已落地）**：对齐同名字段（§4.2），但**没有独立 Tools 分区**——开关落在面板「会话」分区第三行 | 开关 = serve prefs 布尔 + 随轮发送 `readonly_tool_ttl_cache_secs`，语义一致即可用 |
+| **Session**（SQLite 会话存储 + 字体） | **reduced（部分落地）**：面板「会话」分区已含 `role` / `session_mode` / 只读工具缓存；**SQLite 开关未落地（归 W3）**；字体 **no** | SQLite 开关本来就是 serve 级（`/status` 驱动），字体属 CSS 渲染 |
+| **Shortcuts**（只读快捷键说明） | **no（尚未落地）**：面板没有「快捷键」分区；快捷键说明仍只在 `/help` 输出里 | 复用现有 `/help` 文案的思路可行，但需新增一个只读分区才会出现在面板内 |
 | **Github** | **no** | 矩阵 L48 TUI=no（Device Flow 需外开浏览器/原生钥匙串/Cookie，终端都没有） |
-| **Mcp** | **reduced（后置）**：全局开关 `global_enabled` + `tool_timeout_secs` 读/改；服务器行管理 **no** | MCP 实体在 serve user-data、stdio 在 serve 机拉起；Web UI 本身也只回 `has_*` 摘要、逐字段编辑走 JSON 导入（`user_data.rs` DTO），终端面板做行编辑收益低 |
+| **Mcp** | **未落地（W3 后置）**：草案的全局开关 `global_enabled` + `tool_timeout_secs` 读/改都还没进面板（`tui_mode` 内无对应代码）；服务器行管理 **no** | MCP 实体在 serve user-data、stdio 在 serve 机拉起；Web UI 本身也只回 `has_*` 摘要、逐字段编辑走 JSON 导入（`user_data.rs` DTO），终端面板做行编辑收益低 |
 | IDE 编辑器设置页（独立入口） | **no** | 内嵌 CodeMirror 才有；远程终端无 WebView |
 
 ### 4.2 TUI 设置面板的字段清单（对齐列）
 
-按「模型 / 会话 / 工具 / 连接（信息）」分组。校验区间、空值语义、键名对照 Desktop 同名字段（引用前端证据见后）。
+按面板**实际分区**「外观 / 模型 / 会话」分组（`settings_panel.rs::Section`，共十字段）。校验区间、空值语义、键名对照 Desktop 同名字段（引用前端证据见后）。文末「连接（只读信息）」与「本地」两小节是**未落地**的草案，保留作后续参考。
 
 **模型（写 `/user-data/llm-overrides` 的 `client_llm.*`，合并保真）**
 
@@ -104,12 +104,12 @@ Desktop 设置共 8 个分区（`settings_page`）。逐区对齐结论：
 | serve API 基址 | 当前生效 `api_base`（来源标注：flag/env/默认） |
 | Web Bearer | 已提供 / 来自钥匙串回退 / 未提供（`--no-keyring` 时提示）——**只读**，注明「Web Bearer ≠ 模型 API_KEY」 |
 
-**本地（非 Desktop 对齐项，TUI 自有，进面板「本地行为」小分区）**
+**本地（非 Desktop 对齐项，TUI 自有 — 未落地：面板没有「本地行为」分区）**
 
 | 项 | 说明 |
 |---|---|
-| 自动审批（`--yes`） | 会话内切换等价物；仅影响放行决策，执行仍在 serve |
-| thinking 默认折叠 | 读当前全局态，可一键切默认（进程级） |
+| 自动审批（`--yes`） | 草案：会话内切换等价物，仅影响放行决策、执行仍在 serve。**当前只能在启动时用 `--yes`** |
+| thinking 默认折叠 | 草案：读当前全局态并一键切默认（进程级）。**当前只有 `Ctrl+E` 折叠 thinking** |
 
 ### 4.3 明确不做的字段（避免误配）
 
@@ -119,37 +119,36 @@ Desktop 设置共 8 个分区（`settings_page`）。逐区对齐结论：
 
 ---
 
-## 5. 交互与入口设计（草案）
+## 5. 交互与入口设计（已落地；入口与按键以 §5.2 为准）
 
 ### 5.1 入口
 
 - `tui` 全屏：输入 `/settings`（加入 `controls.rs` `Control` 枚举解析）；同时绑全局键 **F2**（不占用已用 Ctrl+* 组合）。Esc 逐层关闭（编辑态→面板→输入态）。
 - `repl`：不加面板；`/model /mode /role` 已覆盖。仅 `/help` 文案里提示“设置面板见 `crabmate-tui tui` /settings”。
 
-### 5.2 面板形态
+### 5.2 面板形态（已落地：全屏页面，**不是**浮层）
 
-复用现有「审批浮层」同款绘制管线（`Clear` + 独立色块 + 边框块，`render.rs`），做成**居中或右侧覆盖的大浮层**（宽取 `min(终端宽-4, 96)`、高取 `终端高-4` 上限；终端过窄时降级为全宽行列表）：
+实现形态与最初草案不同：草案设想「复用审批浮层管线做居中/右侧覆盖的大浮层」，落地时改为**全屏页面**（`overlay.rs::render_settings_overlay`）——整屏清底后重绘，骨架对齐 Desktop 的 `.settings-page`：**顶栏**（`设置 · <分区>` + `[未保存]` / `[保存中…]` / `[只读]` / `[确认放弃？]` 徽标）× **左侧分区导航轨** × **内容区** × **贴底底栏**。原因：字段行要按宽度对齐值列并截尾（`SettingsPanel::content(ctx, width)`），浮层宽度随终端变化会让整页字段错位；页面形态下 `settings_panel_content_width` 是「绘制内宽」与「内容排版宽」的唯一来源（有单测守住两者相等）。
 
-```
-┌─ 设置（对齐 Desktop）───────────────────────────────┐
-│ 分区         字段 / 当前生效值              override │
-│ ┌────────┐  模型                                  │
-│ │连接     │  [模型名]      deepseek-chat*        │
-│ │模型(高亮)│  网关          server / …(预设)        │
-│ │会话     │  温度 / 上下文 / 思考 / API密钥(已设)    │
-│ │工具     │  会话                                │
-│ │本地行为 │  role / mode                          │
-│ │快捷键   │  工具                                │
-│ └────────┘  本地行为                              │
-│  当前生效标记： * 本进程override · 无标记=serve已存  │
-│ [↑↓] 选择 [Enter] 编辑 [Tab] 切换分区              │
-│ [S] 保存全部 [Esc] 放弃（有改动先确认） [F2] 关闭    │
-└───────────────────────────────────────────────────┘
+```text
+设置 · 模型                                     [未保存]
+标记：* = override · ~ = 未保存 · 留空保存 = 跟随 server
+┌────────┐
+│ 外观   │  模型名            deepseek-chat*
+│ 模型 ▍ │  API Base          server
+│ 会话   │  温度              0.7
+│        │  上下文 tokens     (跟随 server)
+│        │  思考模式          server
+│        │  API 密钥          已设置
+└────────┘
+[↑↓] 移动  [Enter] 编辑  [Tab] 分区  [S] 保存  [Esc/F2] 关闭
 ```
 
-- 左列分区导航（仿 Desktop NavRail），右列当前分区字段行；每行展示合成生效值与 override 来源。
-- 行级 Enter → 该字段编辑行（复用现有输入缓冲编辑原语：文本直输、数值过滤、枚举 ←→ 循环、开关回车翻转）。
-- 底部操作条固定：`S` 保存全部（按字段归属分写 PUT / 钥匙串）、`Esc` 放弃。**有脏字段时 Esc 先弹确认**（对齐 Desktop 的 close-guard 语义，避免“改了以为存了”）。
+（示意，不是逐格复刻；配色走 `Palette`，`NO_COLOR` 下靠反色/加粗区分。）
+
+- 左列分区导航（仿 Desktop NavRail，顺序同 Desktop：外观 → 模型 → 会话），右列当前分区字段行；每行展示合成生效值与 override 来源（`*` = override · `~` = 未保存 · 留空保存 = 跟随 server）。
+- 行级 Enter → 该字段编辑行（复用现有输入缓冲编辑原语：文本直输、数值过滤、枚举 ←→ 循环、开关回车翻转；主题行 Enter 展开候选列表、↑/↓ 选）。编辑时给出硬件光标位。
+- 底栏随状态切文案（`settings_panel_draw.rs`）：常态 `[↑↓] 移动  [Enter] 编辑  [Tab] 分区  [S] 保存  [Esc/F2] 关闭`；有脏字段 `[y] 放弃并关闭  [Esc] 返回`（对齐 Desktop close-guard，避免“改了以为存了”）；回合进行中只读 `[↑↓] 浏览  [Tab] 分区  [Esc/F2] 关闭`。`S` 按字段归属分写：`client_llm.*` / prefs → 合并 PUT，API 密钥 → 本机钥匙串。
 - 回合进行中打开：只读展示，保存禁用并提示（与审批浮层优先级一致的防叠原则）。
 
 ### 5.3 三层显示规则
@@ -160,7 +159,7 @@ Desktop 设置共 8 个分区（`settings_page`）。逐区对齐结论：
 | 无 override，serve user-data 有值 | user-data 值 |
 | 都无 | `(跟随 server)`——附 `/status?view=shell` 取到的默认值（可读） |
 
-保存后：override 清空（值已落到 user-data 层），行回到「user-data 值」显示；仅**本地行为**类字段留在进程内。
+保存后：override 清空（值已落到 user-data 层），行回到「user-data 值」显示；仅**本地行为**类字段留在进程内（当前面板没有这类字段——本地行为分区未落地）。
 
 ---
 
@@ -190,18 +189,20 @@ Desktop 设置共 8 个分区（`settings_page`）。逐区对齐结论：
 
 ### 6.4 随轮发送
 
-保存到 user-data 后，新一轮回合仍按 Desktop 同规则随 body 发送（空值不发送）：`client_llm.{api_key?,api_base,model,llm_context_tokens?,llm_thinking_mode?}`、顶层 `temperature?`、`readonly_tool_ttl_cache_secs?`。**已实现**：顶层 `temperature`（f64，仅 0.0..=2.0）、`client_llm.llm_thinking_mode`（仅 on/off）与 `client_llm.llm_context_tokens`（仅 >0 的 JSON 数值）、顶层 `readonly_tool_ttl_cache_secs`（缓存开关关时 = 0）均已随 W2 落地；字段名与校验区间以契约 `crabmate 0.5.2` 与前端 `http_request.rs` L77-86 / `client_llm_storage.rs`（`client_llm_json_for_chat_body`、`readonly_tool_ttl_cache_secs_for_chat_body`）为准。
+保存到 user-data 后，新一轮回合仍按 Desktop 同规则随 body 发送（空值不发送）：`client_llm.{api_key?,api_base,model,llm_context_tokens?,llm_thinking_mode?}`、顶层 `temperature?`、`readonly_tool_ttl_cache_secs?`。**已实现**：顶层 `temperature`（f64，仅 0.0..=2.0）、`client_llm.llm_thinking_mode`（仅 on/off）与 `client_llm.llm_context_tokens`（仅 >0 的 JSON 数值）、顶层 `readonly_tool_ttl_cache_secs`（缓存开关关时 = 0）均已随 W2 落地；字段名与校验区间以**契约 crate**（当前 `crabmate` 0.7.0，钉点见 [`contract_pin.md`](./contract_pin.md)；此处不写死版本号，随钉点演进）与前端 `http_request.rs` L77-86 / `client_llm_storage.rs`（`client_llm_json_for_chat_body`、`readonly_tool_ttl_cache_secs_for_chat_body`）为准。
 
 ---
 
 ## 7. 分期（逐波小步 PR）
 
+状态以行内标注为准：**W1 / W2 / W4 已落地，W3 未落地**（核对方式：`grep -rn "global_enabled\|tool_timeout" crates/crabmate-tui/src` 目前为空）。
+
 | Wave | 交付 | 验收 |
 |---|---|---|
-| **W1 面板骨架 + 模型/会话扁平字段** | `/settings` + F2 浮层；分区导航；三层显示；字段编辑：模型名、网关/api_base（预设表随 §6.4 对齐）、role、mode；`S` 保存（`llm-overrides` / `prefs` 合并 PUT）；`Esc`/脏确认；回合中只读；F2 加入 `/help` 与「快捷键」分区；斜杠 `/model /mode /role` 保留 | 连本地 serve 冒烟：面板改 model/role/mode → 保存 → `/status` 与 Desktop 设置页可见 → 下一轮请求体带 `client_llm.model`；重启 TUI 后值仍在（user-data 层） |
-| **W2 完整 LLM 字段 + 密钥 + 工具开关** | 温度/思考模式字段与 API 密钥写钥匙串槽 **已随面板一并落地**（校验区间对齐；密钥重启后从同一槽位回读；矩阵 auth Notes 已同步）；上下文 tokens、只读工具缓存开关、网关预设下拉（与 `client_llm_presets.rs` 同名表，双端同步注释已加；跨仓同步纪律见 §8）**已随收尾落地** | 校验区间对齐；密钥保存后重启可回读；上下文 tokens >0 随轮 `client_llm.llm_context_tokens`；关缓存开关后请求体出现 `readonly_tool_ttl_cache_secs: 0` |
-| **W3 后置项（契约核对后）** | MCP 全局开关 + `tool_timeout_secs`（`/user-data/mcp-servers` 系端点）；Session SQLite 会话存储开关（`/status` 布尔 + POST） | 开关读/写与 Desktop 设置页同源一致；不实现服务器行管理 |
-| **W4 外观分区（主题）** | 面板新增「外观」分区（导航首位，与 Desktop 同序）：`prefs.theme` 的 ←/→ 切换 + 合并写回；保存成功即用新值重解析配色；`palette.rs` 增 `THEME_OPTIONS`，并把 `crabmate-dark` 补进 `THEME_NAMES`（此前 `CM_TUI_THEME` 不认它） | 单测：选项→slug 映射、未知 slug（`system`）读透不改写、Esc 不落 staged、保存只进 prefs 组；冒烟：F2 → Tab 到「外观」→ 选 `crabmate-light` → `S` → 配色立刻变化、`/user-data/prefs` 的 `theme` 同步、Desktop 设置页看到同值 |
+| **W1 面板骨架 + 模型/会话扁平字段**（**已落地**） | `/settings` + F2 页面；分区导航；三层显示；字段编辑：模型名、网关/api_base（预设表随 §6.4 对齐）、role、mode；`S` 保存（`llm-overrides` / `prefs` 合并 PUT）；`Esc`/脏确认；回合中只读；F2 已加入 `/help`（草案的「快捷键」面板分区**未落地**，信息仍只在 `/help` 输出里）；斜杠 `/model /mode /role` 保留 | 连本地 serve 冒烟：面板改 model/role/mode → 保存 → `/status` 与 Desktop 设置页可见 → 下一轮请求体带 `client_llm.model`；重启 TUI 后值仍在（user-data 层） |
+| **W2 完整 LLM 字段 + 密钥 + 工具开关**（**已落地**） | 温度/思考模式字段与 API 密钥写钥匙串槽 **已随面板一并落地**（校验区间对齐；密钥重启后从同一槽位回读；矩阵 auth Notes 已同步）；上下文 tokens、只读工具缓存开关、网关预设下拉（与 `client_llm_presets.rs` 同名表，双端同步注释已加；跨仓同步纪律见 §8）**已随收尾落地** | 校验区间对齐；密钥保存后重启可回读；上下文 tokens >0 随轮 `client_llm.llm_context_tokens`；关缓存开关后请求体出现 `readonly_tool_ttl_cache_secs: 0` |
+| **W3 后置项（契约核对后 — 未落地）** | MCP 全局开关 + `tool_timeout_secs`（`/user-data/mcp-servers` 系端点）；Session SQLite 会话存储开关（`/status` 布尔 + POST）。**两项在 `tui_mode` 里都还没有对应代码** | 开关读/写与 Desktop 设置页同源一致；不实现服务器行管理 |
+| **W4 外观分区（主题）**（**已落地**） | 面板新增「外观」分区（导航首位，与 Desktop 同序）：`prefs.theme` 的 ←/→ 切换 + 合并写回；保存成功即用新值重解析配色；`palette.rs` 增 `THEME_OPTIONS`，并把 `crabmate-dark` 补进 `THEME_NAMES`（此前 `CM_TUI_THEME` 不认它） | 单测：选项→slug 映射、未知 slug（`system`）读透不改写、Esc 不落 staged、保存只进 prefs 组；冒烟：F2 → Tab 到「外观」→ 选 `crabmate-light` → `S` → 配色立刻变化、`/user-data/prefs` 的 `theme` 同步、Desktop 设置页看到同值 |
 
 各 Wave 内**一项用户可见行为一个 PR**（引用 `coding_agent_client.md` 约束第 5 条的小步纪律）。
 
