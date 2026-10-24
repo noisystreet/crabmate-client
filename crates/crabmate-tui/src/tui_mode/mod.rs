@@ -437,7 +437,7 @@ impl TuiApp<'_> {
             self.on_ctrl_c();
             return;
         }
-        // 顶层快捷键（F2 设置 / F3 状态栈）：打包成一个判定，给这条 if 链腾出 CCN。
+        // 顶层快捷键（F6 设置 / F3 状态栈）：打包成一个判定，给这条 if 链腾出 CCN。
         if self.on_hotkey(&key) {
             return;
         }
@@ -461,7 +461,7 @@ impl TuiApp<'_> {
         self.on_input_key(key);
     }
 
-    /// 顶层（与焦点无关）快捷键的分派：F2 设置面板 / F3 状态栈 / Ctrl+Y 复制。
+    /// 顶层（与焦点无关）快捷键的分派：F6 设置面板 / F3 状态栈 / Ctrl+Y 复制。
     ///
     /// 判定表在 [`hotkeys`]：这里只按结果分派，不再往上面那条 if 链（和本方法的
     /// 历史实现）里加分支 —— 两者都贴着 CCN≤10 门禁。
@@ -480,7 +480,7 @@ impl TuiApp<'_> {
         self.st.slash_menu_open() && self.slash_menu_key(key)
     }
 
-    /// F2 开关设置面板：关闭时若脏字段则先弹确认（Esc 同语义）。
+    /// F6 开关设置面板：关闭时若脏字段则先弹确认（Esc 同语义）。
     fn toggle_settings(&mut self) {
         if self.panel.is_none() {
             // 面板接管键盘：会话栏那次「待确认删除」留到回来再按 y 就是误删，先作废。

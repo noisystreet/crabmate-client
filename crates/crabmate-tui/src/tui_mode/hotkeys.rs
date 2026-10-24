@@ -6,12 +6,13 @@
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use super::settings_panel::is_f2_key;
+use super::settings_panel::is_settings_open_key;
 
 /// 与焦点无关的热键（输入框 / 会话栏 / 工作区树下都可用）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum TopHotkey {
-    /// F2：设置面板开关（打开时等同 Esc 的关闭语义，脏字段先确认）。
+    /// F6：设置面板开关（打开时等同 Esc 的关闭语义，脏字段先确认）。
+    /// 面板内保存用 F2，两者分工不同：F2 不再是开关别名。
     Settings,
     /// F3：右栏底部状态栈展开 / 折叠（窄屏没有状态栈，切换无效果也不报错）。
     StatusStack,
@@ -24,7 +25,7 @@ pub(super) enum TopHotkey {
 /// 用 `(code, modifiers)` 精确匹配而不是 `if` 链：match 的臂不计入圈复杂度，
 /// 所以这里能同时容纳多个热键，而调用方的 if 链保持原样。
 pub(super) fn of(key: &KeyEvent) -> Option<TopHotkey> {
-    if is_f2_key(key) {
+    if is_settings_open_key(key) {
         return Some(TopHotkey::Settings);
     }
     match (key.code, key.modifiers) {
@@ -67,10 +68,18 @@ mod tests {
     }
 
     #[test]
-    fn f2_opens_the_settings_panel() {
+    fn f6_opens_the_settings_panel() {
         assert_eq!(
-            of(&key(KeyCode::F(2), KeyModifiers::NONE)),
+            of(&key(KeyCode::F(6), KeyModifiers::NONE)),
             Some(TopHotkey::Settings)
         );
+    }
+
+    #[test]
+    fn f2_and_punctuation_stay_out_of_the_settings_hotkey() {
+        // F2 归面板内的「保存」；`Ctrl+,` 在 VTE 系终端与裸逗号同码，索性不绑。
+        assert_eq!(of(&key(KeyCode::F(2), KeyModifiers::NONE)), None);
+        assert_eq!(of(&key(KeyCode::Char(','), KeyModifiers::CONTROL)), None);
+        assert_eq!(of(&key(KeyCode::Char(','), KeyModifiers::NONE)), None);
     }
 }

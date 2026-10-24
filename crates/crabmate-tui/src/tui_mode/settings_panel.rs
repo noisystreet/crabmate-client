@@ -20,9 +20,26 @@ use super::settings::{
 /// 字段行标签列宽（cell；含标签与值之间间隔）。
 const LABEL_PAD: usize = 13;
 
-/// F2：设置面板开关（与 Esc 同语义地关闭；空闲时由 mod 层打开）。
-pub(super) fn is_f2_key(key: &KeyEvent) -> bool {
-    key.code == KeyCode::F(2) && !key.modifiers.contains(KeyModifiers::CONTROL)
+/// F6：设置面板开关（与 Esc 同语义地关闭；空闲时由 mod 层打开）。
+///
+/// 选 F6 而不是 `Ctrl+,`（VS Code / Desktop 的设置键）：终端只有开键盘增强协议
+/// （CSI u / kitty）才分辨得出「Ctrl+逗号」与裸 `,`，而 VTE 系终端（gnome-terminal
+/// / xfce4-terminal / tilix，GNOME/vte#2601 仍未实现）会把两者发成同一个 `0x2C`，
+/// 那样按键既打不开面板、又会往输入框里插一个逗号。F2–F9 由 VTE 按 terminfo
+/// 原样透传，与本 TUI 已有的 F2（保存）/ F3（状态栈）同属一组功能键。
+pub(super) fn is_settings_open_key(key: &KeyEvent) -> bool {
+    matches!(key.code, KeyCode::F(6)) && !key.modifiers.contains(KeyModifiers::CONTROL)
+}
+
+/// F2（或 `S`）：面板内保存。
+///
+/// F2 不再兼作开关别名，专用于保存：与 `S` 并列，是为了让浏览态既有功能键
+/// （不受输入缓冲影响）也有单字母快键。
+pub(super) fn is_save_key(key: &KeyEvent) -> bool {
+    matches!(
+        key.code,
+        KeyCode::F(2) | KeyCode::Char('s') | KeyCode::Char('S')
+    ) && !key.modifiers.contains(KeyModifiers::CONTROL)
 }
 
 /// 面板分区：外观 / 模型 / 会话（扁平字段，写 serve user-data）。
@@ -311,7 +328,7 @@ impl SettingsPanel {
         }
     }
 
-    /// 浏览态按键：↑↓ 移动行、Tab 切分区、Enter 编辑、S 保存、Esc/F2 关闭（脏先确认）。
+    /// 浏览态按键：↑↓ 移动行、Tab 切分区、Enter 编辑、F2/S 保存、Esc 关闭（脏先确认）。
     pub(super) fn handle_key(&mut self, key: &KeyEvent, ctx: &PanelCtx<'_>) -> PanelEffect {
         if self.editing.is_some() {
             self.edit_key(key);
@@ -323,7 +340,7 @@ impl SettingsPanel {
                     self.confirm_close = false;
                     return PanelEffect::Close;
                 }
-                KeyCode::Esc | KeyCode::F(2) | KeyCode::Char('n') | KeyCode::Char('N') => {
+                KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => {
                     self.confirm_close = false;
                 }
                 _ => {}
@@ -352,14 +369,14 @@ impl SettingsPanel {
                 self.cycle_section(false);
             }
             KeyCode::Enter => self.begin_edit(ctx),
-            KeyCode::Char('s') | KeyCode::Char('S') => return self.request_save(),
-            KeyCode::Esc | KeyCode::F(2) => {
+            KeyCode::Esc => {
                 if self.is_dirty() {
                     self.confirm_close = true;
                 } else {
                     return PanelEffect::Close;
                 }
             }
+            _ if is_save_key(key) => return self.request_save(),
             _ => {}
         }
         PanelEffect::None
