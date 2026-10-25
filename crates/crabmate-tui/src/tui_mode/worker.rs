@@ -28,6 +28,11 @@ use super::slash_menu::SkillsPayload;
 /// UI 事件（键盘线程与回合/拉取线程共同的生产者）。
 pub(super) enum UiEvent {
     Key(KeyEvent),
+    /// 括号粘贴（bracketed paste）：终端把一次粘贴包成一个事件，**含其中的换行**。
+    ///
+    /// 与 [`UiEvent::Key`] 分开是因为换行在这条路径上不该被当成提交
+    /// （`on_input_key` 里 `KeyCode::Enter => on_submit`）：多行文本要整段进输入框。
+    Paste(String),
     /// 鼠标事件（目前只用于右栏工作区目录树的点击/滚轮，见 `mouse.rs`）。
     Mouse(MouseEvent),
     /// 终端尺寸变化：**只作唤醒源，刻意不携带尺寸**。
@@ -233,6 +238,12 @@ pub(super) fn spawn_key_reader(tx: Sender<UiEvent>) {
             match event::read() {
                 Ok(Event::Key(key)) => {
                     if tx.send(UiEvent::Key(key)).is_err() {
+                        break;
+                    }
+                }
+                // 括号粘贴：整段粘贴是一个事件（换行也在里面），交给输入框一次性插入。
+                Ok(Event::Paste(text)) => {
+                    if tx.send(UiEvent::Paste(text)).is_err() {
                         break;
                     }
                 }
