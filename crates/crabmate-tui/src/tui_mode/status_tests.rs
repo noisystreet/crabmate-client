@@ -19,6 +19,7 @@ fn base_info(api_base: &str) -> StatusInfo {
         view_offset: 0,
         search_term: None,
         search_total: 0,
+        context: "—".to_string(),
     }
 }
 
@@ -465,4 +466,41 @@ fn mono_palette_drops_every_color() {
         "无色模式下不该有彩色 span：{:?}",
         line.spans
     );
+}
+
+#[test]
+fn context_segment_renders_after_mode() {
+    let mut info = base_info("http://127.0.0.1:8080");
+    info.context = "116.9k / 1000k (11.7%)".to_string();
+    let text = status_text(&info, 200);
+    assert!(
+        text.contains("ctx 116.9k / 1000k (11.7%)"),
+        "上下文段缺失：{text}"
+    );
+}
+
+#[test]
+fn context_segment_dropped_before_serve_when_budget_is_tight() {
+    // 窄预算时按优先级裁剪：serve 必留，ctx 只在该留的段都装得下时才在。
+    let mut info = base_info("https://example.com");
+    info.context = "116.9k / 1000k (11.7%)".to_string();
+    let narrow = status_text(&info, 28);
+    assert!(!narrow.contains("ctx"), "窄预算不该保留 ctx：{narrow}");
+    assert!(narrow.contains("example.com"), "serve 段应保留：{narrow}");
+}
+
+/// 横向状态行在任意终端宽度下都不得超宽：超了 ratatui 会折行/截断，
+/// 表现就是「用量百分比溢出」把右缘运行态挤乱。
+#[test]
+fn status_line_never_exceeds_its_width() {
+    let mut info = base_info("http://127.0.0.1:8080");
+    info.model = Some("gpt-4o".into());
+    info.mode = Some("agent".into());
+    // 最宽的合法值（三位整数 + 两位小数 + 95% 区间）。
+    info.context = "999.9k / 1000k (99.9%)".into();
+    for w in [30usize, 40, 60, 80, 100, 140, 200] {
+        let text = status_text(&info, w);
+        let lw = UnicodeWidthStr::width(text.as_str());
+        assert!(lw <= w, "宽度 {w} 下溢出到 {lw}：{text:?}");
+    }
 }

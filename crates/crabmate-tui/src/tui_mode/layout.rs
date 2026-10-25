@@ -5,7 +5,7 @@
 
 use ratatui::layout::{Constraint, Layout, Rect};
 
-use super::render::SIDEBAR_WIDTH;
+use super::render::{SIDEBAR_WIDTH, WORKSPACE_PANE_WIDTH};
 
 /// 主体 / 底栏；宽屏时主体再分「左会话 | 聊天 | 右工作区」，右栏底部再切出状态栈。
 ///
@@ -45,7 +45,7 @@ pub(super) fn panes(area: Rect, sidebar_visible: bool, stack_rows: u16) -> Panes
     let cols = Layout::horizontal([
         Constraint::Length(SIDEBAR_WIDTH),
         Constraint::Min(0),
-        Constraint::Length(SIDEBAR_WIDTH),
+        Constraint::Length(WORKSPACE_PANE_WIDTH),
     ])
     .split(area);
     let stack = stack_rows.min(cols[2].height.saturating_sub(1));
@@ -89,8 +89,8 @@ mod tests {
         let right = p.right.expect("宽屏有右栏");
         assert_eq!(left.x, 0);
         assert_eq!(left.width, SIDEBAR_WIDTH);
-        assert_eq!(right.x, 200 - SIDEBAR_WIDTH);
-        assert_eq!(right.width, SIDEBAR_WIDTH);
+        assert_eq!(right.x, 200 - WORKSPACE_PANE_WIDTH);
+        assert_eq!(right.width, WORKSPACE_PANE_WIDTH);
         // 中列起止连续，三列拼满主体且不重叠。
         assert_eq!(p.chat.x, left.width);
         assert_eq!(p.chat.x + p.chat.width, right.x);
@@ -102,7 +102,7 @@ mod tests {
         assert_eq!(stack.height, 5);
         assert_eq!(stack.y + stack.height, 40, "状态栈贴底");
         assert_eq!(stack.x, right.x, "与右栏同列");
-        assert_eq!(stack.width, SIDEBAR_WIDTH);
+        assert_eq!(stack.width, WORKSPACE_PANE_WIDTH);
         assert_eq!(right.y + right.height, stack.y, "树与状态栈上下相接");
     }
 

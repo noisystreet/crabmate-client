@@ -29,12 +29,15 @@ pub(super) const SPINNER_FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼"
 /// 晚显示几列不损失判断依据；反过来，滚动时丢掉回看提示等于这次操作没有反馈。
 /// 之后才是模型 / 模式这类「一进界面就知道」的项。
 mod priority {
+    // 数值越小越先保留（横版按列预算裁剪、纵版按行预算裁剪共用）。
     pub(super) const FIND: u8 = 0;
     pub(super) const VIEW: u8 = 1;
     pub(super) const SERVE: u8 = 2;
     pub(super) const MODEL: u8 = 3;
-    pub(super) const MODE: u8 = 4;
-    pub(super) const ROLE: u8 = 5;
+    // 上下文用量比 mode / role 更常被盯：窄屏时先丢后两者。
+    pub(super) const CONTEXT: u8 = 4;
+    pub(super) const MODE: u8 = 5;
+    pub(super) const ROLE: u8 = 6;
 }
 
 /// 段间分隔符（极暗竖线，与 A6 的分隔线同色系）。
@@ -144,6 +147,13 @@ pub(super) fn environment_segments(info: &StatusInfo, budget: usize) -> Vec<Segm
             priority: priority::MODE,
         });
     }
+    // 显示顺序排在 `mode` 之后，但优先级高于 `mode` / `role`（见 `priority`）。
+    // 无条件 push：没有实测时值是占位 `—`，段消失会让人误判「功能没生效」。
+    out.push(Segment {
+        label: "ctx",
+        value: info.context.clone(),
+        priority: priority::CONTEXT,
+    });
     if let Some(term) = info.search_term.as_deref() {
         out.push(Segment {
             label: "find",

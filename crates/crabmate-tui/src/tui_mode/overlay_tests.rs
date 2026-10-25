@@ -28,6 +28,7 @@ fn status_info() -> StatusInfo {
         view_offset: 0,
         search_term: None,
         search_total: 0,
+        context: "—".to_string(),
     }
 }
 

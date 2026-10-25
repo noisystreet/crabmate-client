@@ -16,8 +16,9 @@ use reqwest::header::{ACCEPT, CONTENT_TYPE, HeaderValue};
 use serde_json::Value;
 use tokio::sync::watch;
 
-use crate::serve::approval::{ApprovalDecision, ApprovalGate, CommandApprovalData};
-use crate::serve::chat_classify::{LineAction, classify_line};
+use crate::serve::approval::ApprovalGate;
+use crate::serve::chat_classify::classify_line;
+use crate::serve::chat_dispatch::dispatch_line_action;
 use crate::serve::client::ServeClient;
 use crate::serve::error::TermError;
 
@@ -135,6 +136,14 @@ pub trait StreamSink {
     fn on_reasoning(&mut self, delta: &str) -> Result<(), TermError>;
     /// 系统行（如 Ctrl+C 停止提示）；文本模式写 stderr，全屏显示为 transcript 系统行。
     fn on_system(&mut self, _line: &str) -> Result<(), TermError> {
+        Ok(())
+    }
+    /// 上下文用量快照（`tiktokenPromptTokens`（`RUN_FINISHED` / `conversation_saved`））：全屏 TUI 用它更新状态行
+    /// 的上下文段与会话内水位；文本模式（`chat` / `repl`）没有状态行，默认忽略。
+    fn on_prompt_tokens(
+        &mut self,
+        _snap: &crabmate_client_api::prompt_tokens::TiktokenPromptTokensSnapshot,
+    ) -> Result<(), TermError> {
         Ok(())
     }
     /// 工具开始（AG-UI `TOOL_CALL_START`，serve v2 协议）。文本模式默认忽略；
@@ -567,61 +576,6 @@ async fn handle_sse_data(
     Ok(())
 }
 
-/// 单行动作的副作用分派：审批需异步回传，其余直接推进 sink。
-async fn dispatch_line_action(
-    client: &ServeClient,
-    approval_session_id: &str,
-    action: LineAction,
-    sink: &mut dyn StreamSink,
-    approval: &mut dyn ApprovalGate,
-) -> Result<(), TermError> {
-    match action {
-        LineAction::Skip => {}
-        LineAction::WriteOut(s) => sink.on_text(&s)?,
-        LineAction::WriteErr(s) => sink.on_reasoning(&s)?,
-        LineAction::System(s) => sink.on_system(&s)?,
-        LineAction::Plain(s) => sink.on_text(&s)?,
-        LineAction::Approve(req) => {
-            resolve_approval(client, approval_session_id, req, approval).await?;
-        }
-        LineAction::ToolStart {
-            tool_call_id,
-            name,
-            note,
-        } => sink.on_tool_start(&tool_call_id, &name, note.as_deref())?,
-        LineAction::ToolArgs { tool_call_id, args } => sink.on_tool_args(&tool_call_id, &args)?,
-        LineAction::ToolResult {
-            tool_call_id,
-            name,
-            ok,
-            note,
-        } => sink.on_tool_end(&tool_call_id, &name, ok, note.as_deref())?,
-    }
-    Ok(())
-}
-
-async fn resolve_approval(
-    client: &ServeClient,
-    approval_session_id: &str,
-    req: CommandApprovalData,
-    approval: &mut dyn ApprovalGate,
-) -> Result<(), TermError> {
-    match approval.decide(&req) {
-        Ok(decision) => {
-            client
-                .submit_chat_approval(approval_session_id, decision)
-                .await
-        }
-        Err(e) => {
-            // 读决策失败 / 中断时尽量 deny，避免 serve 侧审批会话悬挂。
-            let _ = client
-                .submit_chat_approval(approval_session_id, ApprovalDecision::Deny)
-                .await;
-            Err(e)
-        }
-    }
-}
-
 fn write_out(out: &mut dyn Write, s: &str) -> Result<(), TermError> {
     if s.is_empty() {
         return Ok(());
@@ -635,7 +589,7 @@ fn write_out(out: &mut dyn Write, s: &str) -> Result<(), TermError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::serve::approval::{ApprovalDecision, AutoAllowOnce};
+    use crate::serve::approval::{ApprovalDecision, AutoAllowOnce, CommandApprovalData};
 
     struct CaptureGate {
         seen: Vec<CommandApprovalData>,

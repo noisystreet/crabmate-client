@@ -9,6 +9,7 @@ use std::thread;
 use crossterm::event::{self, Event, KeyEvent, MouseButton, MouseEvent, MouseEventKind};
 
 use crabmate_client_api::paths;
+use crabmate_client_api::prompt_tokens::TiktokenPromptTokensSnapshot;
 
 use crate::serve::{
     ApprovalGate, AutoAllowOnce, ChatStreamOptions, ChatStreamOutcome,
@@ -65,6 +66,11 @@ pub(super) enum UiEvent {
         interrupted: Option<StreamResume>,
     },
     Sessions(Result<WebSessionsList, String>),
+    /// 上下文用量快照（`tiktokenPromptTokens`（`RUN_FINISHED` / `conversation_saved`））：更新状态行上下文段与会话内水位。
+    ///
+    /// `Box` 是因为它比其它变体大一个量级（7 个 `Option` + 2 个 `String`），没必要让每个
+    /// `UiEvent` 都撑到那个尺寸。
+    PromptTokens(Box<TiktokenPromptTokensSnapshot>),
     /// 已持久化会话的历史分页（`GET /conversation/messages`）：只读回放。
     /// 失败只提示，不阻断输入（当前会话仍可继续聊）。
     ConversationHistory {
@@ -196,6 +202,12 @@ impl StreamSink for UiSink {
                 .map_err(|_| TermError::Message("ui channel closed".into()))?;
         }
         Ok(())
+    }
+
+    fn on_prompt_tokens(&mut self, snap: &TiktokenPromptTokensSnapshot) -> Result<(), TermError> {
+        self.tx
+            .send(UiEvent::PromptTokens(Box::new(snap.clone())))
+            .map_err(|_| TermError::Message("ui channel closed".into()))
     }
 
     fn on_tool_start(
@@ -428,17 +440,26 @@ fn job_conversation_history(
     before_index: Option<u32>,
     tx: &Sender<UiEvent>,
 ) {
-    let result = rt
-        .block_on(fetch_conversation_messages(
-            client,
-            conversation_id,
-            before_index,
-        ))
-        .map_err(|e| e.to_string());
+    let fetched = rt.block_on(fetch_conversation_messages(
+        client,
+        conversation_id,
+        before_index,
+    ));
+    // 水合响应自带当前上下文快照：新会话 / 切换会话即可显示初始用量（与 Desktop 同口径），
+    // 不必等回合末的 `RUN_FINISHED`。
+    let snapshot = fetched
+        .as_ref()
+        .ok()
+        .and_then(|r| r.tiktoken_prompt_tokens.clone());
+    let result = fetched.map_err(|e| e.to_string());
     let _ = tx.send(UiEvent::ConversationHistory {
         conversation_id: conversation_id.to_string(),
         result,
     });
+    // 先送 History（UI 侧据此绑定 `conversation_id`），再送快照，水位才落在正确的会话上。
+    if let Some(snap) = snapshot {
+        let _ = tx.send(UiEvent::PromptTokens(Box::new(snap)));
+    }
 }
 
 /// 工作区根目录列表（工作区路径 + 目录树数据）。
