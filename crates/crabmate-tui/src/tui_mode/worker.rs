@@ -30,6 +30,10 @@ pub(super) enum UiEvent {
     Key(KeyEvent),
     /// 鼠标事件（目前只用于右栏工作区目录树的点击/滚轮，见 `mouse.rs`）。
     Mouse(MouseEvent),
+    /// 终端尺寸变化：**只作唤醒源，刻意不携带尺寸**。
+    /// 真值永远在 draw 前 ioctl 现查（见 `event_loop` 的 `sync_terminal_size`）——
+    /// 事件里放一份 w/h 只会诱发「缓存下来省一次 ioctl」这类漏 resize bug。
+    Resize,
     Text(String),
     Thinking(String),
     System(String),
@@ -236,6 +240,12 @@ pub(super) fn spawn_key_reader(tx: Sender<UiEvent>) {
                 // 这类事件每条进 channel 都会让主循环把节流降到 2ms 白刷整帧。
                 Ok(Event::Mouse(m)) if is_actionable_mouse(m.kind) => {
                     if tx.send(UiEvent::Mouse(m)).is_err() {
+                        break;
+                    }
+                }
+                // 尺寸变化只作唤醒源：真值在 `draw_frame` 前现查（`sync_terminal_size`）。
+                Ok(Event::Resize(..)) => {
+                    if tx.send(UiEvent::Resize).is_err() {
                         break;
                     }
                 }

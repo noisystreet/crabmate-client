@@ -42,6 +42,14 @@ impl Spinner {
     pub(super) fn frame(&self) -> usize {
         self.frame
     }
+
+    /// 距下一次换帧还剩多久（已过期返回 0）。
+    ///
+    /// 事件循环据此算唤醒 deadline：生成中不能像静态那样长等到兜底超时，
+    /// 否则 spinner 会「120ms 一帧」退化成「1s 一帧」。
+    pub(super) fn remaining(&self) -> Duration {
+        SPINNER_INTERVAL.saturating_sub(self.at.elapsed())
+    }
 }
 
 #[cfg(test)]

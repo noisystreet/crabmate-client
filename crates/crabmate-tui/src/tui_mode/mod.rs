@@ -16,6 +16,7 @@ mod clipboard;
 // `controls` / `tool_summary` 提到 `pub(crate)`：清除词与控制字符剥离在 crate 根也要用。
 pub(crate) mod controls;
 mod drafts;
+mod event_loop;
 mod exit_flush;
 mod help;
 mod history;
@@ -50,10 +51,8 @@ mod workspace_keys;
 mod workspace_tree;
 mod ws_sidebar;
 
-use std::io::{self, Write};
+use std::io;
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::thread;
-use std::time::Duration;
 
 use anyhow::{Context, Result};
 use crossterm::cursor::SetCursorStyle;
@@ -64,8 +63,7 @@ use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
 use ratatui::Terminal;
-use ratatui::backend::{Backend, CrosstermBackend};
-use ratatui::layout::Rect;
+use ratatui::backend::CrosstermBackend;
 
 use crate::serve::{
     ApprovalDecision, ChatStreamOutcome, ServeClient, StreamCancel, StreamResume, WorkspaceDirData,
@@ -73,7 +71,7 @@ use crate::serve::{
 
 use self::approve::{decision_for_key, decision_summary};
 use self::controls::{Control, clear_word, parse_control, set_mode_field, set_override_field};
-use self::render::{SIDEBAR_MIN_WIDTH, StatusInfo};
+use self::render::StatusInfo;
 use self::settings::{PersistedSettings, normalize};
 use self::settings_panel::SettingsPanel;
 use self::worker::{UiEvent, WorkerJob, spawn_key_reader, spawn_worker};
@@ -594,6 +592,9 @@ impl TuiApp<'_> {
             UiEvent::Key(key) => self.on_key(key),
             // 鼠标：右栏工作区目录树的点击/滚轮（审批凥层/设置面板打开时内部直接忽略）。
             UiEvent::Mouse(m) => self.on_mouse(m),
+            // 尺寸变化只为唤醒：真值在 `draw_frame` 前现查（`sync_terminal_size`）。
+            // 变体刻意不携带尺寸，所以这里没有任何可缓存的 w/h。
+            UiEvent::Resize => {}
             UiEvent::Text(delta) => self.st.stream_delta(LineKind::Assistant, &delta),
             UiEvent::Skills(result) => self.st.set_skills(result),
             UiEvent::Thinking(delta) => self.st.stream_delta(LineKind::Thinking, &delta),
@@ -750,63 +751,6 @@ impl TuiApp<'_> {
             search_total: self.st.search_total,
         }
     }
-
-    /// 事件循环：drain 通道 → 渲染 → 节流 sleep。
-    fn run_loop(&mut self, terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
-        loop {
-            if self.exit {
-                return Ok(());
-            }
-            // 每帧读取终端尺寸：窄屏隐藏左栏；若焦点滞留已隐藏的左栏则收回输入框。
-            let size = terminal.backend().size().context("terminal size")?;
-            self.last_size = (size.width, size.height);
-            self.st.sidebar_visible = size.width >= SIDEBAR_MIN_WIDTH;
-            // PgUp/PgDn 页步 ≈ 聊天可视区行数（状态行 + composer 占几行）。
-            self.st.page_rows = (size.height as usize).saturating_sub(4).max(1);
-            if !self.st.sidebar_visible
-                && matches!(self.st.focus, Focus::Sidebar | Focus::Workspace)
-            {
-                self.st.focus = Focus::Input;
-            }
-            let mut any = false;
-            while let Ok(msg) = self.rx.try_recv() {
-                any = true;
-                self.on_msg(msg);
-                if self.exit {
-                    return Ok(());
-                }
-            }
-            self.spinner
-                .advance(self.st.running && !self.st.cancel_sent);
-            let info = self.status_info();
-            // 内容/宽度/搜索未变时复用已构建的 body 物理行，避免每帧全量 tokenize+wrap。
-            self.prepare_body(size.width);
-            // 设置面板改成居中弹层后，内容必须按**弹层内宽**排版：用与绘制同源的
-            // `settings_panel_content_width`，否则会出现「画 76 列、按 78 列生成」的错位。
-            let screen = Rect::new(0, 0, size.width, size.height);
-            let panel = self.settings_content(render::settings_panel_content_width(screen));
-            terminal
-                .draw(|f| render::draw(f, &self.st, &info, self.body.as_slice(), panel.as_ref()))
-                .context("tui draw failed")?;
-            // 背景要在 draw 之后重放：kitty 让图像跟着文本一起滚动（规范明确），
-            // 而 ratatui 的差分绘制只认字符网格，不会替我们维持图像层。
-            self.paint_background(screen);
-            let _ = io::stdout().flush();
-            thread::sleep(Duration::from_millis(if any { 2 } else { 50 }));
-        }
-    }
-}
-
-/// 鼠标捕获开关：默认开启；`CM_TUI_MOUSE=off|0|false|none` 关闭，回到纯键盘（保留终端原生拖选复制）。
-fn mouse_capture_enabled() -> bool {
-    !matches!(
-        std::env::var("CM_TUI_MOUSE")
-            .unwrap_or_default()
-            .trim()
-            .to_ascii_lowercase()
-            .as_str(),
-        "off" | "0" | "false" | "none"
-    )
 }
 
 /// raw mode + 备用屏幕 + 鼠标捕获的 RAII 复原。
@@ -837,7 +781,7 @@ pub async fn run_tui(
     execute!(stdout, EnterAlternateScreen).context("enter alternate screen")?;
     // 鼠标捕获用于右栏工作区树的点击/滚轮。它会接管终端原生拖选复制
     // （多数终端 Shift+拖选仍可用）；`CM_TUI_MOUSE=off` 关闭。
-    let mouse = mouse_capture_enabled();
+    let mouse = event_loop::mouse_capture_enabled();
     if mouse {
         execute!(stdout, EnableMouseCapture).context("enable mouse capture")?;
         // crossterm 的 `EnableMouseCapture` 顺带打开 any-event tracking（`?1003h`）：
