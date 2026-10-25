@@ -71,11 +71,16 @@ pub(super) enum UiEvent {
     /// `Box` 是因为它比其它变体大一个量级（7 个 `Option` + 2 个 `String`），没必要让每个
     /// `UiEvent` 都撑到那个尺寸。
     PromptTokens(Box<TiktokenPromptTokensSnapshot>),
+    /// 上下文用量**回落**（`timeline_log` 的 `kind=context_trim`）：压缩 / 裁剪后的用量。
+    ContextTrim(u32),
     /// 已持久化会话的历史分页（`GET /conversation/messages`）：只读回放。
     /// 失败只提示，不阻断输入（当前会话仍可继续聊）。
     ConversationHistory {
         conversation_id: String,
         result: Result<ConversationMessagesResponse, String>,
+        /// 水合响应自带的用量快照：随回包一起走 `should_apply_reply` 门控
+        /// （回包被丢弃时快照也不该生效，与 Web 端同口径）。
+        snapshot: Option<TiktokenPromptTokensSnapshot>,
     },
     /// 会话索引写入（`/conv new` 新建或复用空行 / 首轮后绑定 `conversation_id` / 切走回收）结果。
     SessionIndex {
@@ -201,6 +206,13 @@ impl StreamSink for UiSink {
                 .send(UiEvent::System(line.to_string()))
                 .map_err(|_| TermError::Message("ui channel closed".into()))?;
         }
+        Ok(())
+    }
+
+    fn on_context_trim(&mut self, after: u32) -> Result<(), TermError> {
+        self.tx
+            .send(UiEvent::ContextTrim(after))
+            .map_err(|_| TermError::Message("ui channel closed".into()))?;
         Ok(())
     }
 
@@ -455,11 +467,8 @@ fn job_conversation_history(
     let _ = tx.send(UiEvent::ConversationHistory {
         conversation_id: conversation_id.to_string(),
         result,
+        snapshot,
     });
-    // 先送 History（UI 侧据此绑定 `conversation_id`），再送快照，水位才落在正确的会话上。
-    if let Some(snap) = snapshot {
-        let _ = tx.send(UiEvent::PromptTokens(Box::new(snap)));
-    }
 }
 
 /// 工作区根目录列表（工作区路径 + 目录树数据）。

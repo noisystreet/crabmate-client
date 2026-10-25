@@ -253,6 +253,8 @@ impl TuiApp<'_> {
         self.swap_draft_in(None);
         self.st.conversation_id = None;
         self.st.history_pending = None;
+        // 新会话还没有任何实测：留着上一个会话的用量会让人以为新会话已经在吃上下文。
+        self.st.clear_usage();
         self.st.reset_transcript();
         // 新会话是一份空 transcript：上一轮的断点无处可续（`/resume` 会拒绝）。
         self.drop_resume_point();

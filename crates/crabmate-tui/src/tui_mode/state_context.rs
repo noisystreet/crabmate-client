@@ -37,6 +37,25 @@ impl UiState {
         self.context.snapshot = Some(snap);
     }
 
+    /// `context_trim`（历史压缩 / 工具输出压缩 / 摘要）后把会话内水位**回落**到服务端给的
+    /// `after_tokens`。没有 cid 时不动：水位按会话归属，无主的水位没有意义。
+    ///
+    /// 这是 ADR 0005 里「会话内单调、压缩 / 裁剪后回落」的后半句 —— 少了它，水位只增不减，
+    /// 压缩过的会话会一直显示压缩前的峰值。
+    pub fn reset_used(&mut self, after: u32) {
+        if let Some(cid) = self.conversation_id.clone() {
+            self.context.watermark.reset(&cid, after);
+        }
+    }
+
+    /// 换会话 / 新建会话：清掉用量快照与水位。
+    ///
+    /// 不清的话 `/conv new` 之后状态栏还在显示上一个会话的数字 —— `context_text` 只看
+    /// `snapshot`、不看 cid，那个数字是别人会话的。
+    pub fn clear_usage(&mut self) {
+        self.context = ContextUsage::default();
+    }
+
     /// 状态行 `ctx` 段的文本：有实测时 `12.0k / 1000k (1.2%)`，没有时占位 `—`（`— / 1000k`）。
     ///
     /// **总是返回文本**（而不是「无数据就没有段」）：段整个消失时，用户无法区分
