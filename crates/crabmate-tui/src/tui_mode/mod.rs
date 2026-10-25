@@ -25,6 +25,7 @@ mod layout;
 mod md;
 mod mouse;
 mod palette;
+mod paste;
 mod read_jobs;
 mod render;
 mod resume;
@@ -56,7 +57,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 
 use anyhow::{Context, Result};
 use crossterm::cursor::SetCursorStyle;
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{DisableBracketedPaste, KeyCode, KeyEvent, KeyModifiers};
 use crossterm::execute;
 use crossterm::style::Print;
 use crossterm::terminal::{
@@ -590,6 +591,8 @@ impl TuiApp<'_> {
     fn on_msg(&mut self, msg: UiEvent) {
         match msg {
             UiEvent::Key(key) => self.on_key(key),
+            // 粘贴整段进输入框（不改焦点、不提交）：见 `paste` 模块头注释。
+            UiEvent::Paste(text) => self.on_paste(text),
             // 鼠标：右栏工作区目录树的点击/滚轮（审批凥层/设置面板打开时内部直接忽略）。
             UiEvent::Mouse(m) => self.on_mouse(m),
             // 尺寸变化只为唤醒：真值在 `draw_frame` 前现查（`sync_terminal_size`）。
@@ -767,16 +770,21 @@ const MOUSE_ON: &str = "\x1b[?1000h\x1b[?1002h\x1b[?1006h";
 /// 与 [`MOUSE_ON`] 对称的关闭序列（`ScreenGuard` 的复原路径）。
 const MOUSE_OFF: &str = "\x1b[?1000l\x1b[?1002l\x1b[?1006l";
 
-/// raw mode + 备用屏幕 + 鼠标捕获的 RAII 复原。
+/// raw mode + 备用屏幕 + 鼠标/括号粘贴捕获的 RAII 复原。
 struct ScreenGuard {
     /// 是否启用过鼠标捕获（未启用时不补发 [`MOUSE_OFF`]，避免向终端写多余序列）。
     mouse: bool,
+    /// 是否启用过括号粘贴（同 `mouse`：没开过就别补发关闭序列）。
+    paste: bool,
 }
 
 impl Drop for ScreenGuard {
     fn drop(&mut self) {
         if self.mouse {
             let _ = execute!(io::stdout(), Print(MOUSE_OFF));
+        }
+        if self.paste {
+            let _ = execute!(io::stdout(), DisableBracketedPaste);
         }
         let _ = execute!(io::stdout(), LeaveAlternateScreen);
         let _ = disable_raw_mode();
@@ -795,13 +803,13 @@ pub async fn run_tui(
     execute!(stdout, EnterAlternateScreen).context("enter alternate screen")?;
     // 鼠标捕获用于右栏工作区树的点击/滚轮。它会接管终端原生拖选复制
     // （多数终端 Shift+拖选仍可用）；`CM_TUI_MOUSE=off` 关闭。
+    // 括号粘贴决定「粘贴是一个事件还是一串按键」（见 `event_loop`）；`CM_TUI_PASTE=off` 关闭。
     let mouse = event_loop::mouse_capture_enabled();
-    if mouse {
-        execute!(stdout, Print(MOUSE_ON)).context("enable mouse capture")?;
-    }
+    let paste = event_loop::paste_capture_enabled();
+    event_loop::enable_captures(&mut stdout, mouse, paste)?;
     // 输入行只显示文本，用闪烁竖条光标提示输入位置。
     execute!(stdout, SetCursorStyle::BlinkingBar).context("set cursor style")?;
-    let guard = ScreenGuard { mouse };
+    let guard = ScreenGuard { mouse, paste };
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout)).context("init terminal")?;
     // 必须在启动键盘读取线程前清屏：`clear()` 会查询光标位置（DSR），
     // 需要 crossterm 的全局事件锁；而键盘线程已阻塞在 `event::read()` 持锁，
