@@ -56,7 +56,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 
 use anyhow::{Context, Result};
 use crossterm::cursor::SetCursorStyle;
-use crossterm::event::{DisableMouseCapture, EnableMouseCapture, KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use crossterm::execute;
 use crossterm::style::Print;
 use crossterm::terminal::{
@@ -753,16 +753,30 @@ impl TuiApp<'_> {
     }
 }
 
+/// 鼠标上报：只要按下/释放（1000）、按住时的拖动（1002）与 SGR 编码（1006）。
+///
+/// 1002 目前没有消费者 —— `worker::is_actionable_mouse` 在读取线程就丢弃 `Drag`，
+/// 保留它只是与 crossterm 的捕获集合保持一致（少开的是 any-event 1003，不是这一个）。
+///
+/// 刻意不用 crossterm 的 `EnableMouseCapture`：它会连带打开 any-event（1003），
+/// 而「再把 1003 关掉」并不保证只关这一项 —— kitty 把 mouse tracking 存成**单值**，
+/// `?1003l` 会把刚开的 1000/1002 一起清掉，整个鼠标就此静默（实测：kitty 里左栏、
+/// 右栏与滚轮全部无响应，同一序列在 VTE 正常）。自己发最小集合后语义在所有终端一致；
+/// 又因为从不开 any-event，本来就不会收到 `Moved`，退出时也只需对称关闭。
+const MOUSE_ON: &str = "\x1b[?1000h\x1b[?1002h\x1b[?1006h";
+/// 与 [`MOUSE_ON`] 对称的关闭序列（`ScreenGuard` 的复原路径）。
+const MOUSE_OFF: &str = "\x1b[?1000l\x1b[?1002l\x1b[?1006l";
+
 /// raw mode + 备用屏幕 + 鼠标捕获的 RAII 复原。
 struct ScreenGuard {
-    /// 是否启用过鼠标捕获（未启用时不补发 Disable，避免向终端写多余序列）。
+    /// 是否启用过鼠标捕获（未启用时不补发 [`MOUSE_OFF`]，避免向终端写多余序列）。
     mouse: bool,
 }
 
 impl Drop for ScreenGuard {
     fn drop(&mut self) {
         if self.mouse {
-            let _ = execute!(io::stdout(), DisableMouseCapture);
+            let _ = execute!(io::stdout(), Print(MOUSE_OFF));
         }
         let _ = execute!(io::stdout(), LeaveAlternateScreen);
         let _ = disable_raw_mode();
@@ -783,12 +797,7 @@ pub async fn run_tui(
     // （多数终端 Shift+拖选仍可用）；`CM_TUI_MOUSE=off` 关闭。
     let mouse = event_loop::mouse_capture_enabled();
     if mouse {
-        execute!(stdout, EnableMouseCapture).context("enable mouse capture")?;
-        // crossterm 的 `EnableMouseCapture` 顺带打开 any-event tracking（`?1003h`）：
-        // 指针只要划过终端就持续上报 `Moved`。这里把它关掉，只留按键/滚轮需要的
-        // 1000/1002/1006，免得「鼠标一动就整屏重绘」。`DisableMouseCapture` 会一并
-        // 复位这几项，所以退出路径不需要为此多写一句。
-        execute!(stdout, Print("\x1b[?1003l")).context("disable mouse motion tracking")?;
+        execute!(stdout, Print(MOUSE_ON)).context("enable mouse capture")?;
     }
     // 输入行只显示文本，用闪烁竖条光标提示输入位置。
     execute!(stdout, SetCursorStyle::BlinkingBar).context("set cursor style")?;
