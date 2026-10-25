@@ -17,7 +17,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow = "1"
 # 背景图走 kitty 协议要以 base64 传输；用锁文件里已有的 0.22，不再多拉一份。
-base64 = "0.22"
+base64 = "0.23"
 clap = { version = "4", features = ["derive", "env"] }
 crabmate = { version = "0.7.0", default-features = false, features = ["protocol"] }
 crabmate-client-api = { path = "../crabmate-client-api" }
