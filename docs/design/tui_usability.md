@@ -27,8 +27,11 @@
 | G7 | 无 retry / regen / branch / 编辑用户消息（`controls.rs` 无对应命令，`tui_mode` 里无 `regen`/`branch`） | 消息回合菜单（`message_row_actions.rs`、`user_message_edit.rs`） | 模型答错只能整轮重发或手动复制改写 |
 | G8 | ~~审批浮层把命令截成一行且无法展开~~ → **已落地**：`Ctrl+E` 在 78×9 收起档与铺满主体区的展开档之间切换，展开档按显示宽折行（`text::wrap_display`）并支持 ↑/↓、PgUp/PgDn、Home/End 滚动，提示行显示「第 x-y / N 行」（`overlay.rs`） | 底部审批条可展开完整命令 + 失败保留重试（`approval_modal.rs`） | 长命令看不到全貌，易误判 |
 | G9 | 澄清问卷（`clarification_questionnaire`）在 TUI 无交互 UI：`serve/chat_classify.rs` 只有 `clarify_trace` 钩子，没有表单 | 问卷表单（Web `frontend`） | 模型需要澄清时 TUI 这侧拿不到结构化提问 |
+| G10 | 窄终端（< 120 列）下**当前工作区不可见**：左右栏按 `sidebar_visible` 隐藏（`layout.rs::panes`），而工作区名只画在右栏（`ws_sidebar.rs::workspace_title`），顶栏已删除（`tui_visual_polish.md` §11.1）；状态行（`status.rs`）与右栏状态栈都不带 workspace 字段 | 顶栏工作区名 + 面包屑 | 窄屏 / 分屏时不知道命令跑在哪个项目，得先 `/workspace` 查一次 |
 
 另有与 Desktop 同步暂缓/不做项，见 §2 非目标（勿误当缺口）。
+
+> **2026-10-25 代码核对**：G1–G10 已逐条对着代码验过（`resume.rs` / `drafts.rs` / `clipboard.rs` / `sidebar_keys.rs` / `history.rs` / `overlay.rs` / `ws_sidebar.rs` / `status.rs`），表内状态即当时事实。G10 为本次核对新发现的缺口（顶栏删除后的遗留债）；G5 的「导出」与 G7 的 retry/regen/branch 仍依赖 serve 端点，不属可独立落地项。
 
 ---
 
@@ -159,6 +162,7 @@
 | W2.4 | L61 Notes | 补导出能力 |
 | W3.1 | L60「Control slashes」TUI 列 | 已同步（TUI 有 `/` 补全菜单，含 skills 候选） |
 | W3.2 | L55「`POST /chat/stream` + command approval」TUI Notes | 补 `Ctrl+E` 展开看完整命令（折行 + 滚动）、收起档单行截断 |
+| W3.3 | L53「Full-screen TUI」Notes | 补「< 120 列时左右栏隐藏，当前工作区无指示」（G10，待落地） |
 
 > 矩阵维护规则：改了用户可见能力就必须在同 PR 更新对应格（§顶注），不允许“下个 PR 再补”。
 
