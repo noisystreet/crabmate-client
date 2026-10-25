@@ -290,7 +290,7 @@ Web 的 `api_base_preset_select` 字符串链路（写入已保存模型预设�
 | 端 | 路径 |
 |----|------|
 | frontend | `app/status_context.rs`（轴线与文本，已改为消费共享实现并 re-export）、`chat_session_state.rs`（`ContextUsedWatermark` 改 re-export）、`app/context_usage_page.rs` |
-| tui | `tui_mode/state_context.rs`（`set_prompt_tokens` / `context_text`，状态行 `ctx` 段）、`serve/chat_classify.rs`（从 `RUN_FINISHED` / `conversation_saved` 帧摘 `tiktokenPromptTokens` → `LineAction::PromptTokens`） |
+| tui | `tui_mode/state_context.rs`（`set_prompt_tokens` / `context_text`，状态行 `ctx` 段）、`serve/chat_classify.rs`（从 `RUN_FINISHED` / `conversation_saved` 帧摘 `tiktokenPromptTokens` → `LineAction::PromptTokens`；并从 `timeline_log` 的 `kind=context_trim` 取 `after_tokens` → `LineAction::ContextTrim` 回落水位） |
 
 共享实现（`crabmate_client_api::context_axis`）：
 
@@ -311,7 +311,7 @@ Web 的 `api_base_preset_select` 字符串链路（写入已保存模型预设�
 | 分子的 tiktoken 快照匹配 | frontend 要按 `conversation_id` 比对活动会话（`status_bar_context_snapshot_for_active_session`） |
 | `status_context_meter_fill_class` | CSS 类名，属 presentation |
 
-**TUI 侧消费点**（随 S11 一并落地）：用量实测有两个来源：`GET /conversation/messages` 水合响应（snake_case `tiktoken_prompt_tokens`，新会话即有初始占用，Web/TUI 同口径）与 `RUN_FINISHED` / `CUSTOM conversation_saved` 流事件（camelCase `tiktokenPromptTokens`，不是顶层 `stream_ended` 子对象），`serve/chat_classify.rs` 把它摘成 `LineAction::PromptTokens`（子串守卫，只有终止帧才多解一次 JSON），经 `StreamSink::on_prompt_tokens` → `UiEvent::PromptTokens` 进 `UiState::set_prompt_tokens`，再由 `context_text` 拼出状态行 `ctx` 段。水位按服务端 `conversation_id` 归属：cid 还没绑上时只存快照、不记水位（宁缺不猜，否则切会话后旧峰值会挂到新会话上）。web / tui 因此共用同一份 fill 口径与阈值。
+**TUI 侧消费点**（随 S11 一并落地）：用量实测有两个来源：`GET /conversation/messages` 水合响应（snake_case `tiktoken_prompt_tokens`，新会话即有初始占用，Web/TUI 同口径）与 `RUN_FINISHED` / `CUSTOM conversation_saved` 流事件（camelCase `tiktokenPromptTokens`，不是顶层 `stream_ended` 子对象），`serve/chat_classify.rs` 把它摘成 `LineAction::PromptTokens`（子串守卫，只有终止帧才多解一次 JSON），经 `StreamSink::on_prompt_tokens` → `UiEvent::PromptTokens` 进 `UiState::set_prompt_tokens`，再由 `context_text` 拼出状态行 `ctx` 段。水位按服务端 `conversation_id` 归属：cid 还没绑上时只存快照、不记水位（宁缺不猜，否则切会话后旧峰值会挂到新会话上）。web / tui 因此共用同一份 fill 口径与阈值。**回落同样下沉**：`context_trim_after_used_tokens`（解析 `timeline_log` 的**字符串化** `detail`，取 `after_tokens`）与 `context_trim_watermark_reset`（`bound_active` / `after` / `cid` 三条件）也在 `context_axis`；TUI 的 `UiState::reset_used` 与 Web 的 `timeline_dispatch` 调的是同一套规则 —— 压缩 / 裁剪后水位回落，不再只增不减。另：`/conv new` 与切换会话会 `UiState::clear_usage`，避免新会话继续显示上一个会话的数字（`context_text` 只看 `snapshot`、不看 cid）。
 
 ## 5. 明确不共享
 

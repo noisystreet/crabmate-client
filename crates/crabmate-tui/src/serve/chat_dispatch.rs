@@ -31,6 +31,7 @@ fn dispatch_sink_action(action: LineAction, sink: &mut dyn StreamSink) -> Result
     match action {
         LineAction::Skip => {}
         LineAction::PromptTokens(snap) => sink.on_prompt_tokens(&snap)?,
+        LineAction::ContextTrim { after } => sink.on_context_trim(after)?,
         LineAction::WriteOut(s) | LineAction::Plain(s) => sink.on_text(&s)?,
         LineAction::WriteErr(s) => sink.on_reasoning(&s)?,
         LineAction::System(s) => sink.on_system(&s)?,

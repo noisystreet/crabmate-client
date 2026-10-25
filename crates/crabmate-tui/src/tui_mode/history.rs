@@ -11,6 +11,7 @@
 //! 等它的这段时间里用户可能已经切走、新建会话或直接开聊。
 
 use crabmate_client_api::markdown_normalize::balance_unclosed_fence;
+use crabmate_client_api::prompt_tokens::TiktokenPromptTokensSnapshot;
 use crabmate_client_api::tool_display::is_placeholder_summary;
 use crabmate_client_api::{ConversationMessagesResponse, ReplayRow};
 use crabmate_tool_card::parse_tool_envelope;
@@ -36,6 +37,8 @@ pub(super) fn replay_into(app: &mut TuiApp<'_>, conversation_id: String, title: 
         title: label.clone(),
     });
     app.st.conversation_id = Some(conversation_id.clone());
+    // 旧会话的用量不能留在状态栏上等新快照覆盖（切换失败时它还会一直在）。
+    app.st.clear_usage();
     // 先不清屏：拿到内容后才在 `apply_page` 里替换。请求失败时原来的对话还在。
     app.st
         .push_line(LineKind::System, &format!("正在载入会话「{label}」的历史…"));
@@ -58,6 +61,7 @@ pub(super) fn on_result(
     app: &mut TuiApp<'_>,
     conversation_id: &str,
     result: Result<ConversationMessagesResponse, String>,
+    snapshot: Option<TiktokenPromptTokensSnapshot>,
 ) {
     let Some(pending) = app.st.history_pending.as_ref() else {
         return;
@@ -78,6 +82,11 @@ pub(super) fn on_result(
     let Some(pending) = app.st.history_pending.take() else {
         return;
     };
+    // 用量快照只在这一支应用：回包被判为「不该生效」时（切会话失败 / 回合在途）跳过，
+    // 与 Web 端一致 —— 否则会把上一次会话的水位记到当前会话上。
+    if let Some(snap) = snapshot {
+        app.st.set_prompt_tokens(snap);
+    }
     match result {
         Ok(resp) => apply_page(app, &pending, &resp),
         Err(e) => match fail_fallback(pending.prev_conversation_id.as_deref()) {
@@ -352,7 +361,7 @@ mod tests {
             title: "A".to_string(),
         });
 
-        on_result(&mut app, "B", Err("boom".to_string()));
+        on_result(&mut app, "B", Err("boom".to_string()), None);
 
         assert_eq!(
             app.st.conversation_id.as_deref(),
@@ -390,7 +399,7 @@ mod tests {
             title: "B".to_string(),
         });
 
-        on_result(&mut app, "B", Err("gone".to_string()));
+        on_result(&mut app, "B", Err("gone".to_string()), None);
 
         assert_eq!(app.st.conversation_id, None, "应改为新会话");
         assert!(

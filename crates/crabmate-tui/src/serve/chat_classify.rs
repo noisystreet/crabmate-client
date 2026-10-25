@@ -12,12 +12,13 @@ use std::path::PathBuf;
 use std::sync::OnceLock;
 
 use crabmate_client_api::ag_ui_parser::parse_ag_ui_line;
+use crabmate_client_api::context_axis::context_trim_after_used_tokens;
 use crabmate_client_api::prompt_tokens::{
     TiktokenPromptTokensSnapshot, tiktoken_from_ag_ui_object,
 };
 use crabmate_client_api::sse_dispatch::{
     CommandApprovalData, SseClarifyTraceHooks, SseControlSink, SseDispatch, SseNoticeTimelineHooks,
-    SseTurnPhaseHooks, SseWorkspaceToolHooks, ToolResultInfo,
+    SseTurnPhaseHooks, SseWorkspaceToolHooks, TimelineLogInfo, ToolResultInfo,
 };
 use crabmate_client_api::tool_display::{ToolDisplayInput, tool_display_line};
 use serde_json::Value;
@@ -67,6 +68,11 @@ pub(crate) enum LineAction {
     /// 带 `tiktokenPromptTokens` 的帧（`RUN_FINISHED` / `CUSTOM conversation_saved`）的用量快照：
     /// 这是唯一携带 `used_input_tokens` 的来源（状态行上下文段与会话内水位靠它）。
     PromptTokens(TiktokenPromptTokensSnapshot),
+    /// `CUSTOM timeline_log` 里 `kind=context_trim`：服务端压缩 / 裁剪了窗口，
+    /// 会话内水位要**回落**到 `after_tokens`（否则只增不减，数字虚高）。
+    ContextTrim {
+        after: u32,
+    },
     Plain(String),
 }
 
@@ -164,6 +170,17 @@ fn parse_with_collector(line: &str, acc: &RefCell<Collected>) -> SseDispatch {
     let mut on_tool_result = |info: ToolResultInfo| acc.borrow_mut().tool_result(info);
     let mut on_approval = |req: CommandApprovalData| acc.borrow_mut().approve(req);
     let mut on_approval_invalid = || acc.borrow_mut().system(MALFORMED_APPROVAL_HINT);
+    // `timeline_log` 的 `context_trim`：压缩 / 裁剪后水位回落（ADR 0005）。
+    // `detail` 是字符串化 JSON，解析规则在共享层（与 Web 端同一份口径）。
+    let mut on_timeline_log = |info: TimelineLogInfo| {
+        if info.kind != "context_trim" {
+            return;
+        }
+        let Some(after) = context_trim_after_used_tokens(info.detail.as_deref()) else {
+            return;
+        };
+        acc.borrow_mut().trim(after);
+    };
     let mut sink = SseControlSink {
         on_error: &mut on_error,
         on_delta: Some(&mut on_delta),
@@ -178,7 +195,10 @@ fn parse_with_collector(line: &str, acc: &RefCell<Collected>) -> SseDispatch {
         },
         turn_phase: SseTurnPhaseHooks::default(),
         clarify_trace: SseClarifyTraceHooks::default(),
-        notice_timeline: SseNoticeTimelineHooks::default(),
+        notice_timeline: SseNoticeTimelineHooks {
+            on_timeline_log: Some(&mut on_timeline_log),
+            ..SseNoticeTimelineHooks::default()
+        },
     };
     parse_ag_ui_line(line, &mut sink)
 }
@@ -198,6 +218,8 @@ struct Collected {
     tool_args: Option<(String, String)>,
     tool_result: Option<ToolResultInfo>,
     run_error: Option<String>,
+    /// `context_trim` 的裁剪后用量（`detail.after_tokens`）。
+    context_trim: Option<u32>,
 }
 
 impl Collected {
@@ -232,6 +254,10 @@ impl Collected {
     fn run_error(&mut self, msg: String) {
         self.run_error.get_or_insert(msg);
     }
+
+    fn trim(&mut self, after: u32) {
+        self.context_trim.get_or_insert(after);
+    }
 }
 
 /// 槽位 → 终端动作（单行数据块至多命中一类；多命中时按下方顺序取优先级）。
@@ -239,6 +265,9 @@ fn resolve(collected: Collected) -> Result<LineAction, TermError> {
     if let Some(msg) = collected.run_error {
         // 回合终止：交由上层收口（与 `chat_stream` 的 `?` 传播一致）。
         return Err(TermError::RunError(msg));
+    }
+    if let Some(after) = collected.context_trim {
+        return Ok(LineAction::ContextTrim { after });
     }
     Ok(if let Some(req) = collected.approval {
         LineAction::Approve(req)
@@ -596,3 +625,7 @@ mod tests {
         ));
     }
 }
+
+#[cfg(test)]
+#[path = "chat_classify_tests.rs"]
+mod timeline_tests;

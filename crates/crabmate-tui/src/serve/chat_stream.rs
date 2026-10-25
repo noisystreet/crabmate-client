@@ -146,6 +146,11 @@ pub trait StreamSink {
     ) -> Result<(), TermError> {
         Ok(())
     }
+    /// 上下文用量**回落**（`timeline_log` 的 `kind=context_trim`，携带裁剪后的 `used_input_tokens`）：
+    /// 全屏 TUI 用它把会话内水位从旧的峰值降下来；文本模式无状态行，默认忽略。
+    fn on_context_trim(&mut self, _after: u32) -> Result<(), TermError> {
+        Ok(())
+    }
     /// 工具开始（AG-UI `TOOL_CALL_START`，serve v2 协议）。文本模式默认忽略；
     /// 全屏 TUI 用它渲染"工具行摘要"的开始态。
     ///

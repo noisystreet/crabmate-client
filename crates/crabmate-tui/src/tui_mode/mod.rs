@@ -601,6 +601,8 @@ impl TuiApp<'_> {
             UiEvent::Thinking(delta) => self.st.stream_delta(LineKind::Thinking, &delta),
             UiEvent::System(line) => self.st.push_line(LineKind::System, line.trim()),
             UiEvent::PromptTokens(snap) => self.st.set_prompt_tokens(*snap),
+            // 压缩 / 裁剪后水位回落（ADR 0005）：只增不减会让数字虚高。
+            UiEvent::ContextTrim(after) => self.st.reset_used(after),
             UiEvent::ToolStart {
                 tool_call_id,
                 name,
@@ -648,7 +650,8 @@ impl TuiApp<'_> {
             UiEvent::ConversationHistory {
                 conversation_id,
                 result,
-            } => history::on_result(self, &conversation_id, result),
+                snapshot,
+            } => history::on_result(self, &conversation_id, result, snapshot),
             UiEvent::SessionIndex { result, op } => self.on_session_index(result, op),
             UiEvent::Status(result) => match result {
                 Ok(defaults) => self.st.serve_defaults = Some(defaults),
