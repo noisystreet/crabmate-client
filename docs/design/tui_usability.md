@@ -1,6 +1,6 @@
 # TUI 易用性规划（对齐 Desktop 聊天体验）
 
-> **状态**：Wave 1 已落地 W1.1 全屏 `/resume`、W1.2 忙时排队、W1.3 会话级草稿、W1.4 复制（OSC52 / 外部工具）；**W1.5 会话列输入过滤仍未落地**（`session_filter` 等在 `tui_mode` 无对应字段）。W2.1 历史回放已落地**最新页**（`GET /conversation/messages`，更早的分页未做），W2.2 只剩左栏 `d` 与行内重命名（改名仍缺 serve 端点）。Wave 3 仍为方案。逐波按本文落地；每波独立 PR，落地后必须同 PR 更新 [`client_capability_matrix.md`](./client_capability_matrix.md) 对应格（§4）。
+> **状态**：Wave 1 已落地 W1.1 全屏 `/resume`、W1.2 忙时排队、W1.3 会话级草稿、W1.4 复制（OSC52 / 外部工具）、W1.6 多行粘贴（bracketed paste，`CM_TUI_PASTE=off` 可关）；**W1.5 会话列输入过滤仍未落地**（`session_filter` 等在 `tui_mode` 无对应字段）。W2.1 历史回放已落地**最新页**（`GET /conversation/messages`，更早的分页未做），W2.2 只剩左栏 `d` 与行内重命名（改名仍缺 serve 端点）。Wave 3 仍为方案。逐波按本文落地；每波独立 PR，落地后必须同 PR 更新 [`client_capability_matrix.md`](./client_capability_matrix.md) 对应格（§4）。
 > **范围**：`crabmate-tui`（全屏 `tui` 为主，`repl` 相应联动）；候选与取舍参照 Desktop / Web（`frontend/`）聊天体验，**语义对齐，不追求 UI 复刻**。
 > **关联**：[`remote_cli_tui.md`](./remote_cli_tui.md)（TUI 母方案，P1–P5）、[`client_capability_matrix.md`](./client_capability_matrix.md)（TUI 行 L53–L81）、[`tui_settings_panel.md`](./tui_settings_panel.md)（设置面板，W3 遗留）、[`chat_ui_todo.md`](./chat_ui_todo.md)（Desktop 聊天 UI 已勾项 = “已做过”的参照，不要当缺口重做）、[`contract_pin.md`](./contract_pin.md)（契约钉点）、Server `docs/`（SSE / user-data / 会话权威）
 
@@ -14,7 +14,7 @@
 
 ### 1.2 TUI 现状与缺口对照
 
-`crabmate-tui` 已具备：全屏 transcript + 状态栏、左栏会话 use/new/refresh（**并有鼠标：单击会话行即选中并切换**，滚轮刻意不碰列表）、右栏工作区目录树 + 项目池、审批浮层、thinking 折叠、工具行摘要、会话内 `/find`、多行输入、设置面板（模型/会话两分区，W1+W2 落地）、repl `/resume` 断线续传。与 Desktop 对照，下列**用户高频操作缺口**是本规划的对象：
+`crabmate-tui` 已具备：全屏 transcript + 状态栏、左栏会话 use/new/refresh（**并有鼠标：单击会话行即选中并切换**，滚轮刻意不碰列表）、右栏工作区目录树 + 项目池、审批浮层、thinking 折叠、工具行摘要、会话内 `/find`、多行输入（Alt+Enter 换行；粘贴一段多行文本时整段落进输入框，不会被当成多次回车提交）、设置面板（模型/会话两分区，W1+W2 落地）、repl `/resume` 断线续传。与 Desktop 对照，下列**用户高频操作缺口**是本规划的对象：
 
 | # | 缺口（TUI 现状） | Desktop 参照 | 影响 |
 |---|---|---|---|
@@ -97,6 +97,14 @@
 - **落点**：`state.rs`（`session_filter`）、`mod.rs`（左栏按键）、`render.rs`（左栏过滤态行渲染）。
 - **风险**：小。窄屏左栏不可见时过滤不生效（保持现状）。
 
+#### W1.6 多行粘贴（bracketed paste）— 已落地（`tui_mode/paste.rs`、`tui_mode/state_paste.rs`）
+
+> **实现**：启动时下发 `EnableBracketedPaste`（`ScreenGuard` 退出时对称关闭；`CM_TUI_PASTE=off` 可关），键盘线程把 `Event::Paste` 转成 `UiEvent::Paste`，`on_paste` 一次性写进输入框（**不提交**）。归一化在 `UiState::insert_paste`：`\r\n` / 裸 `\r` 统一成 `\n`（多行判定只认 `\n`）、`\t` 展开四空格、其余 C0 控制符丢弃（裸 `\x1b` 会被渲染层当成未闭合转义序列）、单次上限 32K 字符（超出截断并在 transcript 提示）。落地前的问题：终端把粘贴当逐字符按键，换行变成 `KeyCode::Enter` 被当成提交，多行内容只发出第一行、剩下的落进新草稿；夹带的 `Tab` 还会被当成焦点切换。**未做**：图片/文件粘贴、多行粘贴后自动折叠成「已粘贴 N 行」占位。
+
+- **参照**：Desktop composer 的粘贴（浏览器原生 `paste` 事件，整段进 textarea）。
+- **落点**：`tui_mode/mod.rs`（开关 + `ScreenGuard`）、`tui_mode/event_loop.rs`（`paste_capture_enabled` / `enable_captures`）、`tui_mode/worker.rs`（事件转发）、`tui_mode/paste.rs`、`tui_mode/state_paste.rs`。
+- **风险**：小。关掉括号粘贴即回到改造前行为（逐字符按键）。
+
 ### Wave 2 · 需确认 serve 会话/消息契约
 
 > 前置：核对 serve 是否提供「会话消息分页读取」「会话删除/改名」端点（TUI `/conv list` 已证明会话列表存在；Desktop 水合数据源在 serve 侧）。未 pin 前不落地，禁止用猜测端点写代码。
@@ -143,6 +151,7 @@
 |---|---|---|
 | W1.1 | L62「In-app stream resume after background」TUI 列/Notes | TUI 全屏补 `/resume`，Notes 补充（原仅 repl） |
 | W1.2/W1.3/W1.4/W1.5 | L53「Full-screen TUI」Notes / L60「Control slashes」 | Notes 追加排队/草稿/复制/过滤描述 |
+| W1.6 | L53「Full-screen TUI」Notes | 多行输入一栏补「整段粘贴经括号粘贴一次落地，`CM_TUI_PASTE=off` 可关」 |
 | W2.1 | L53 Notes「switching sessions starts a fresh transcript」 | 改为「切换可翻历史」 |
 | W2.2 | L61「Web session list + resume…」TUI 列/Notes | 补 CRUD 能力描述 |
 | W2.3 | L59「Ask/Plan/Act…」附近或新增行 | 视方案形态在 chat/tools 段新增或并入 Notes |
@@ -161,6 +170,7 @@
   - W1.3：会话 A 输入半句 → 切 B 再切回 A → 半句仍在；`/conv new` 后为空。**已知局限**：草稿只在内存，退出进程即丢（`exit_flush` 只写当前会话那一份），切走的那几个会话的草稿不跨进程保留。
   - W1.4：kitty/wezterm 下复制助手消息/代码块 → 粘贴到编辑器；不支持终端给出提示。
   - W1.5：左栏输入字母过滤 → 选中使用；清空恢复全量。
+  - W1.6：从编辑器复制一段多行文本粘进 composer → 整段落进输入框（含换行，光标在末尾）、**不会**被当成交付；粘贴内容夹 `Tab` 不切换焦点；单次超 32K 字符时 transcript 提示截断。`CM_TUI_PASTE=off` 时回到逐字符按键的旧行为。
 - **无浏览器 E2E**：TUI 不属 Playwright 范围（`remote_cli_tui.md`）。
 
 ---

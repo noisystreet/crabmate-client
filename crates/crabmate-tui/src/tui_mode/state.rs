@@ -20,6 +20,10 @@ use super::workspace_tree::{WsPickState, WsRow};
 #[path = "state_search.rs"]
 mod search;
 
+// 粘贴落地（`insert_paste`）：子模块才能直接写私有字段 `input` / `cursor`，顺带压住本文件行数。
+#[path = "state_paste.rs"]
+mod paste;
+
 /// `/` 补全菜单的会话内状态。
 #[derive(Debug, Default)]
 pub struct SlashMenuState {

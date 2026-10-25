@@ -19,14 +19,17 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
+use crossterm::event::EnableBracketedPaste;
+use crossterm::execute;
+use crossterm::style::Print;
 use ratatui::Terminal;
 // `Backend` 只为 `size()` 这个 trait 方法进 scope（`CrosstermBackend` 自身没有它）。
 use ratatui::backend::{Backend, CrosstermBackend};
 use ratatui::layout::Rect;
 
-use super::TuiApp;
 use super::render::{self, SIDEBAR_MIN_WIDTH};
 use super::state::Focus;
+use super::{MOUSE_ON, TuiApp};
 
 /// 事件循环模式（`CM_TUI_LOOP`）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -104,14 +107,41 @@ fn read_terminal_size(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> 
 /// 鼠标捕获开关：默认开启；`CM_TUI_MOUSE=off|0|false|none` 关闭，
 /// 回到纯键盘（保留终端原生拖选复制）。
 pub(super) fn mouse_capture_enabled() -> bool {
-    !matches!(
-        std::env::var("CM_TUI_MOUSE")
+    !env_flag_off("CM_TUI_MOUSE")
+}
+
+/// 括号粘贴（bracketed paste）开关：默认开启；`CM_TUI_PASTE=off|0|false|none` 关闭。
+///
+/// 关掉后终端不再把粘贴包装成 `Event::Paste`，而是当逐字符按键送进来：换行会变成
+/// 提交、`Tab` 会变成焦点切换。只在粘贴会触发终端兼容问题时才该关。
+pub(super) fn paste_capture_enabled() -> bool {
+    !env_flag_off("CM_TUI_PASTE")
+}
+
+/// 环境变量是否是「显式关闭」的那几种写法。
+fn env_flag_off(name: &str) -> bool {
+    matches!(
+        std::env::var(name)
             .unwrap_or_default()
             .trim()
             .to_ascii_lowercase()
             .as_str(),
         "off" | "0" | "false" | "none"
     )
+}
+
+/// 按开关向终端下发「捕获」类序列：鼠标点击/滚轮与括号粘贴。
+///
+/// 两条序列各自可关，语义不同：关鼠标是为了拿回终端原生拖选复制，
+/// 关括号粘贴是为了绕开打包粘贴的终端兼容问题（见 [`paste_capture_enabled`]）。
+pub(super) fn enable_captures(stdout: &mut io::Stdout, mouse: bool, paste: bool) -> Result<()> {
+    if mouse {
+        execute!(stdout, Print(MOUSE_ON)).context("enable mouse capture")?;
+    }
+    if paste {
+        execute!(stdout, EnableBracketedPaste).context("enable bracketed paste")?;
+    }
+    Ok(())
 }
 
 impl TuiApp<'_> {
