@@ -17,9 +17,13 @@
 //! 会让后面所有行的起点平移。流式主路径改的总是最后一行（尾部重建 = 一行），
 //! 而工具结果回填、搜索跳转这类事件频率低，重建尾部可以接受。
 
+use ratatui::style::{Modifier, Style};
+use ratatui::text::{Line, Span};
+
 use super::palette::Palette;
 use super::render::{BodyRow, line_rows, prefix_for, prefix_width};
-use super::state::{LineKind, LogLine, UiState};
+use super::state::{HistoryPage, LineKind, LogLine, UiState};
+use super::text::truncate_display;
 
 /// 单条逻辑行的缓存项。
 struct CachedLine {
@@ -51,6 +55,9 @@ pub(super) struct BodyCache {
     /// 建立缓存时的配色板。主题也是渲染输入（前缀/正文/高亮色都取自此），
     /// 变了必须整表重建 —— 否则设置面板里换主题后聊天区会停在旧配色。
     palette: Palette,
+    /// 顶部分页提示（`history_page` 的投影）：它变了要整表重建，
+    /// 否则「还有更早」出现 / 消失时聊天区不会有任何变化。
+    banner: Option<&'static str>,
     lines: Vec<CachedLine>,
     /// 组装好的扁平物理行（含块间分隔行）。
     flat: Vec<BodyRow>,
@@ -65,14 +72,12 @@ impl BodyCache {
     /// 保证缓存与 `st` 一致，然后供渲染层取用。
     pub(super) fn ensure(&mut self, st: &UiState, width: usize) {
         let needle = st.search_term();
-        let structural = !self.init
-            || self.width != width
-            || self.needle.as_deref() != needle
-            || self.palette != st.palette
-            || self.lines.len() > st.lines.len();
+        let banner = history_banner(st.history_page);
+        let structural = self.needs_full_rebuild(width, needle, st.palette, st.lines.len(), banner);
         if structural {
             self.init = true;
             self.width = width;
+            self.banner = banner;
             self.needle = needle.map(str::to_owned);
             self.palette = st.palette;
             self.lines.clear();
@@ -97,6 +102,25 @@ impl BodyCache {
         self.rebuild_from(st, dirty, width, anchor);
     }
 
+    /// 是否必须整表重建（宽度 / 搜索词 / 配色 / 行数收缩 / 分页提示变化）。
+    ///
+    /// 抽成独立函数：`ensure` 的圈复杂度贴着门禁（≤10），再往它的 `||` 链上加一项就会破线。
+    fn needs_full_rebuild(
+        &self,
+        width: usize,
+        needle: Option<&str>,
+        palette: Palette,
+        line_count: usize,
+        banner: Option<&'static str>,
+    ) -> bool {
+        !self.init
+            || self.width != width
+            || self.banner != banner
+            || self.needle.as_deref() != needle
+            || palette != self.palette
+            || self.lines.len() > line_count
+    }
+
     /// 组装后的扁平行；须在 [`Self::ensure`] 之后调用。
     pub(super) fn as_slice(&self) -> &[BodyRow] {
         &self.flat
@@ -107,6 +131,13 @@ impl BodyCache {
         self.flat.truncate(cut);
         self.starts.truncate(from);
         self.lines.truncate(from);
+        // 顶部分页提示排在最前：它不属于任何逻辑行（`log_index: None`），
+        // 于是搜索锚点、spinner 目标这些「按逻辑行定位」的逻辑会自然跳过它。
+        if from == 0
+            && let Some(row) = history_banner_row(st, width)
+        {
+            self.flat.push(row);
+        }
         #[cfg(test)]
         {
             self.rebuilt += st.lines.len() - from;
@@ -140,6 +171,35 @@ impl BodyCache {
             prev = Some((log.kind(), prefix_w));
         }
     }
+}
+
+/// 顶部分页提示文案（`history_page` 的投影；`None` = 不显示）。
+///
+/// 放在 body 的**第一条物理行**而不是 sticky 在视口顶：Desktop 的「加载更早」也在
+/// 对话顶部，滚到顶才看得见，语义一致。
+fn history_banner(page: Option<HistoryPage>) -> Option<&'static str> {
+    let page = page?;
+    if page.loading {
+        return Some("↑ 正在加载更早的消息…");
+    }
+    page.has_older.then_some("↑ 还有更早的消息：/older 加载")
+}
+
+/// 提示行本体：左对齐、`muted` 色、按显示宽截断（与其它物理行同宽预算）。
+///
+/// `pub(super)` 给 `render::build_body_rows` 复用 —— 缓存与「无缓存全量重建」必须
+/// 产出逐行一致的结果，否则 `assert_same_as_full_rebuild` 会红。
+pub(super) fn history_banner_row(st: &UiState, width: usize) -> Option<BodyRow> {
+    let text = history_banner(st.history_page)?;
+    Some(BodyRow {
+        log_index: None,
+        line: Line::from(Span::styled(
+            truncate_display(text, width),
+            Style::new()
+                .fg(st.palette.muted)
+                .add_modifier(Modifier::DIM),
+        )),
+    })
 }
 
 #[cfg(test)]
@@ -178,6 +238,40 @@ mod tests {
         st.lines[0] = LogLine::replayed(LineKind::User, "新的一行", false, None);
         st.lines[1] = LogLine::replayed(LineKind::Assistant, "新的二行", false, None);
         assert_same_as_full_rebuild(&st, &mut cache, 80);
+    }
+
+    /// 顶部分页提示（`/older`）也走「缓存 vs 全量重建」同一条路：两路必须产出同一行，
+    /// 且 `loading` 态切换时要整表重建（否则提示不会变成「正在加载」）。
+    #[test]
+    fn history_banner_row_matches_full_rebuild() {
+        let mut st = UiState::new();
+        st.push_line(LineKind::User, "已加载的最新页");
+        st.set_history_page(40, true);
+        let mut cache = BodyCache::default();
+
+        assert_same_as_full_rebuild(&st, &mut cache, 80);
+        assert!(
+            first_row_text(&cache).contains("更早"),
+            "首行应是分页提示：{}",
+            first_row_text(&cache)
+        );
+
+        st.set_older_loading(true);
+        assert_same_as_full_rebuild(&st, &mut cache, 80);
+        assert!(
+            first_row_text(&cache).contains("正在加载"),
+            "loading 态要换文案：{}",
+            first_row_text(&cache)
+        );
+    }
+
+    fn first_row_text(cache: &BodyCache) -> String {
+        cache.as_slice()[0]
+            .line
+            .spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect()
     }
 
     /// 主题切换必须整表重建：颜色是渲染输入，漏掉它聊天区会停在旧配色。

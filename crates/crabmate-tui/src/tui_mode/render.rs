@@ -254,12 +254,12 @@ pub(crate) fn build_body_rows(st: &UiState, width: usize) -> Vec<BodyRow> {
     let target = st.search_cursor;
     let pal = &st.palette;
     let mut out: Vec<BodyRow> = Vec::new();
-    // 块间分隔：相邻两条日志行 kind 不同即为块边界（用户 / 思考 / 正文 / 工具 /
-    // 系统各自成块），画一条极暗满宽细线代替空行——间距不变，但块边界更清晰
-    // （对齐 Desktop `.chat-tui-transcript` 的块间距观感）；同类相邻
-    // （如连续工具行）保持紧凑，对应 desktop 的 tool-process 块内多行。
-    // 上一条逻辑行的 (类别, 前缀宽度)：分隔线缩进取上一条逻辑行的前缀宽度，
-    // 因此要存宽度而不只是类别——进行中的工具行前缀比结束行宽 2 列。
+    // 顶部分页提示（`/older`）：与 `body_cache` 同源，保证「缓存 vs 全量重建」逐行一致。
+    if let Some(row) = super::body_cache::history_banner_row(st, width) {
+        out.push(row);
+    }
+    // 块间分隔：kind 变化即为块边界，画极暗满宽细线（对齐 Desktop 块间距观感），
+    // 同类相邻（连续工具行）保持紧凑；`prev` 存 (类别, 前缀宽度) 供分隔线缩进。
     let mut prev: Option<(LineKind, usize)> = None;
     for (idx, log) in st.lines.iter().enumerate() {
         let prefix_w = prefix_width(prefix_for(log));

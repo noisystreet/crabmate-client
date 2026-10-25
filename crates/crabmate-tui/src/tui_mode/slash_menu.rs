@@ -131,6 +131,11 @@ pub fn builtin_items() -> Vec<SlashItem> {
             "/resume",
             "续传被中断的回合（serve 侧 job 仍在跑时）",
         ),
+        item(
+            "older",
+            "/older",
+            "加载更早的消息（分页向前，等同 /history）",
+        ),
         item(slash::QUIT, "/quit", "退出（/exit、/q 同义）"),
     ]
 }

@@ -17,7 +17,7 @@ use crabmate_client_api::{ConversationMessagesResponse, ReplayRow};
 use crabmate_tool_card::parse_tool_envelope;
 use unicode_width::UnicodeWidthChar;
 
-use super::state::{HistoryRequest, LineKind};
+use super::state::{HistoryPage, HistoryRequest, LineKind};
 use super::tool_summary::{flatten_note, tool_end_text};
 use super::{TuiApp, WorkerJob};
 
@@ -60,9 +60,16 @@ pub(super) fn replay_into(app: &mut TuiApp<'_>, conversation_id: String, title: 
 pub(super) fn on_result(
     app: &mut TuiApp<'_>,
     conversation_id: &str,
+    before_index: Option<u32>,
     result: Result<ConversationMessagesResponse, String>,
     snapshot: Option<TiktokenPromptTokensSnapshot>,
 ) {
+    // 前插页与「切换会话回放」是两条独立的落地路径：前者不清屏、不动绑定，
+    // 只认自己那个在途标记（`history_page.loading`）。
+    if before_index.is_some() {
+        on_older_result(app, conversation_id, result);
+        return;
+    }
     let Some(pending) = app.st.history_pending.as_ref() else {
         return;
     };
@@ -125,6 +132,123 @@ pub(super) fn on_result(
     }
 }
 
+/// `/older` 的门控结果（纯函数便于单测：`load_older` 本身绑着 worker 通道）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum OlderGate {
+    Enqueue {
+        conversation_id: String,
+        before_index: u32,
+    },
+    Refuse(&'static str),
+}
+
+/// 能不能往前翻一页；不能时给出**为什么**，而不是静默无事发生。
+fn older_gate(
+    running: bool,
+    replay_pending: bool,
+    conversation_id: Option<&str>,
+    page: Option<&HistoryPage>,
+) -> OlderGate {
+    if running {
+        return OlderGate::Refuse("回合进行中：等这一轮结束（或 Ctrl+C 取消）后再翻历史");
+    }
+    // 切换会话的回放还在途：`replay_into` 已经改绑 `conversation_id`，但 `history_page`
+    // 仍是**上一个会话**的游标。放行就等于拿旧游标去请求新会话，回包还能通过下面
+    // `on_older_result` 的 `same_session` 门控 —— 前插进来的那页属于别的会话。
+    if replay_pending {
+        return OlderGate::Refuse("正在载入会话历史，稍后再翻更早的消息");
+    }
+    let Some(cid) = conversation_id.map(str::trim).filter(|c| !c.is_empty()) else {
+        return OlderGate::Refuse(
+            "当前没有可翻的会话历史（先聊一句让它落盘，或用 /conv use 打开一个会话）",
+        );
+    };
+    let Some(page) = page else {
+        return OlderGate::Refuse("当前没有分页游标（先 /conv use 打开已落盘的会话）");
+    };
+    if page.loading {
+        return OlderGate::Refuse("正在加载更早的消息…");
+    }
+    if !page.has_older {
+        return OlderGate::Refuse("已经是第一条消息了（没有更早的历史）");
+    }
+    OlderGate::Enqueue {
+        conversation_id: cid.to_string(),
+        before_index: page.window_start,
+    }
+}
+
+/// `/older`：把游标之前的一页历史拉回来并前插到 transcript 头部。
+pub(super) fn load_older(app: &mut TuiApp<'_>) {
+    let page = app.st.history_page;
+    match older_gate(
+        app.st.running,
+        app.st.history_pending.is_some(),
+        app.st.conversation_id.as_deref(),
+        page.as_ref(),
+    ) {
+        OlderGate::Enqueue {
+            conversation_id,
+            before_index,
+        } => {
+            app.st.set_older_loading(true);
+            let sent = app
+                .job_tx
+                .send(WorkerJob::ConversationHistory {
+                    conversation_id,
+                    before_index: Some(before_index),
+                })
+                .is_ok();
+            if !sent {
+                app.st.set_older_loading(false);
+                app.st
+                    .push_line(LineKind::System, "加载更早的消息失败：worker 已退出");
+            }
+        }
+        OlderGate::Refuse(msg) => app.st.push_line(LineKind::System, msg),
+    }
+}
+
+/// 前插页回包：只在「仍停在同一会话、没有回合在跑、确实有一次翻页在途」时落地。
+///
+/// 其余情形（切走了 / 已开聊 / `/conv new`）把回包丢掉 —— 与 [`should_apply_reply`]
+/// 对切换回放的门控同源，只是这里认的是另一份在途标记。
+fn on_older_result(
+    app: &mut TuiApp<'_>,
+    conversation_id: &str,
+    result: Result<ConversationMessagesResponse, String>,
+) {
+    let waiting = app.st.history_page.is_some_and(|page| page.loading);
+    let same_session = app.st.conversation_id.as_deref() == Some(conversation_id);
+    if !waiting || !same_session || app.st.running {
+        app.st.set_older_loading(false);
+        return;
+    }
+    match result {
+        Ok(resp) => {
+            let rows = rows_to_lines(&resp);
+            let n = rows.len();
+            app.st.prepend_replayed(rows);
+            // 空页还带 `has_older: true` 是服务端异常态：收敛成「没有更早」，否则
+            // `/older` 会反复请求同一页、每次前插 0 行。
+            app.st
+                .set_history_page(resp.window_start_index, resp.has_older && n > 0);
+            let tail = if app.st.has_older_pages() {
+                "（仍有更早：继续 /older）"
+            } else {
+                "（已到最早一条）"
+            };
+            app.st
+                .push_line(LineKind::System, &format!("已加载更早的 {n} 条消息{tail}"));
+        }
+        Err(e) => {
+            app.st.set_older_loading(false);
+            app.st
+                .push_line(LineKind::System, &format!("加载更早的消息失败：{e}"));
+        }
+    }
+}
+
 /// 回放失败后往哪儿落。
 ///
 /// 决定了「失败提示怎么说」和「要不要顺势开一条新会话」，抽成纯函数便于单测：
@@ -159,6 +283,9 @@ fn should_apply_reply(running: bool, pending_matches: bool, current_matches: boo
 fn apply_page(app: &mut TuiApp<'_>, pending: &HistoryRequest, resp: &ConversationMessagesResponse) {
     let rows = rows_to_lines(resp);
     app.st.reset_transcript();
+    // 游标必须在 `reset_transcript` 之后写：它会连 `history_page` 一起清掉。
+    app.st
+        .set_history_page(resp.window_start_index, resp.has_older);
     if rows.is_empty() {
         // 空会话（刚建、还没发过消息）：说清可以直接输入，别报「载入了 0 行」。
         app.st.push_line(
@@ -189,7 +316,7 @@ fn summary_line(pending: &HistoryRequest, resp: &ConversationMessagesResponse) -
         facts.push(format!("revision {}", resp.revision));
     }
     if resp.has_older {
-        facts.push("更早的消息暂不回放".to_string());
+        facts.push("更早的消息用 /older 加载".to_string());
     }
     format!(
         "已续接会话「{}」（{}；要开新会话用 `/conv new`）",
@@ -361,7 +488,7 @@ mod tests {
             title: "A".to_string(),
         });
 
-        on_result(&mut app, "B", Err("boom".to_string()), None);
+        on_result(&mut app, "B", None, Err("boom".to_string()), None);
 
         assert_eq!(
             app.st.conversation_id.as_deref(),
@@ -399,7 +526,7 @@ mod tests {
             title: "B".to_string(),
         });
 
-        on_result(&mut app, "B", Err("gone".to_string()), None);
+        on_result(&mut app, "B", None, Err("gone".to_string()), None);
 
         assert_eq!(app.st.conversation_id, None, "应改为新会话");
         assert!(
@@ -544,6 +671,158 @@ mod tests {
         assert_eq!(fail_fallback(None), ReplayFailFallback::StartNewSession);
     }
 
+    /// `/older` 的门控：五类拒绝理由各一例 + 唯一的放行分支带上游标。
+    #[test]
+    fn older_gate_refuses_each_reason_and_enqueues_on_the_happy_path() {
+        let page = HistoryPage {
+            window_start: 40,
+            has_older: true,
+            loading: false,
+        };
+        // ① 回合在跑
+        assert!(matches!(
+            older_gate(true, false, Some("c1"), Some(&page)),
+            OlderGate::Refuse(_)
+        ));
+        // ② 切换会话的回放还在途：游标还是上一个会话的
+        assert!(matches!(
+            older_gate(false, true, Some("c1"), Some(&page)),
+            OlderGate::Refuse(_)
+        ));
+        // ③ 没有会话绑定 / 只有空白
+        assert!(matches!(
+            older_gate(false, false, None, Some(&page)),
+            OlderGate::Refuse(_)
+        ));
+        assert!(matches!(
+            older_gate(false, false, Some("   "), Some(&page)),
+            OlderGate::Refuse(_)
+        ));
+        // ④ 没有游标（未回放过）
+        assert!(matches!(
+            older_gate(false, false, Some("c1"), None),
+            OlderGate::Refuse(_)
+        ));
+        // ⑤ 已有一次在途 / 已到最早一条
+        let loading = HistoryPage {
+            loading: true,
+            ..page
+        };
+        assert!(matches!(
+            older_gate(false, false, Some("c1"), Some(&loading)),
+            OlderGate::Refuse(_)
+        ));
+        let exhausted = HistoryPage {
+            has_older: false,
+            ..page
+        };
+        assert!(matches!(
+            older_gate(false, false, Some("c1"), Some(&exhausted)),
+            OlderGate::Refuse(_)
+        ));
+        // 放行：`before_index` 取游标，会话 id 去掉首尾空白。
+        assert_eq!(
+            older_gate(false, false, Some(" c1 "), Some(&page)),
+            OlderGate::Enqueue {
+                conversation_id: "c1".to_string(),
+                before_index: 40,
+            }
+        );
+    }
+
+    /// 回放在途时 `/older` 必须被拒：此刻 `conversation_id` 已改绑新会话，而 `history_page`
+    /// 仍是上一个会话的游标，放行就会把别的会话的一页前插进来。这里走完整的 `load_older`，
+    /// 同时断言**真的没有发出请求**，而不只是拒绝文案。
+    #[test]
+    fn load_older_is_refused_while_a_session_replay_is_in_flight() {
+        let client = test_client();
+        let mut prefs = test_prefs();
+        let (job_tx, job_rx) = mpsc::channel();
+        let (ui_tx, ui_rx) = mpsc::channel();
+        let mut app = test_app(&client, &mut prefs, ui_rx, ui_tx, job_tx);
+
+        // 模拟 `/conv use B`：已改绑，回包还没落地。
+        app.st.conversation_id = Some("B".to_string());
+        app.st.history_pending = Some(HistoryRequest {
+            conversation_id: "B".to_string(),
+            prev_conversation_id: Some("A".to_string()),
+            title: "B".to_string(),
+        });
+        app.st.set_history_page(40, true);
+
+        load_older(&mut app);
+
+        assert!(job_rx.try_recv().is_err(), "回放在途时不该发出翻页请求");
+        assert!(
+            !app.st.history_page.expect("page").loading,
+            "在途标记不该被置起"
+        );
+        let last = app.st.lines.last().expect("应有一行拒绝提示");
+        assert!(
+            last.text().contains("正在载入会话历史"),
+            "got {}",
+            last.text()
+        );
+    }
+
+    /// 前插页回包不得清屏：屏幕上已有的最新页原地保留，只在头部多出更早的行。
+    #[test]
+    fn older_result_prepends_without_resetting_the_transcript() {
+        let client = test_client();
+        let mut prefs = test_prefs();
+        let (job_tx, _job_rx) = mpsc::channel();
+        let (ui_tx, ui_rx) = mpsc::channel();
+        let mut app = test_app(&client, &mut prefs, ui_rx, ui_tx, job_tx);
+
+        app.st.conversation_id = Some("c1".to_string());
+        app.st.push_line(LineKind::User, "最新的问题");
+        app.st.set_history_page(2, true);
+        app.st.set_older_loading(true);
+
+        let resp = response(serde_json::json!({
+            "total_count": 3,
+            "window_start_index": 0,
+            "has_older": false,
+            "messages": [{"role": "user", "content": "更早的问题"}]
+        }));
+        on_older_result(&mut app, "c1", Ok(resp));
+
+        let texts: Vec<&str> = app.st.lines.iter().map(|l| l.text()).collect();
+        let older = texts.iter().position(|t| t.contains("更早的问题"));
+        let newest = texts.iter().position(|t| t.contains("最新的问题"));
+        assert!(older.is_some() && newest.is_some(), "{texts:?}");
+        assert!(older < newest, "更早的行必须排在前面：{texts:?}");
+        assert!(!app.st.has_older_pages(), "window_start=0 应视为到底");
+    }
+
+    /// 切走之后到达的前插回包必须丢掉（否则旧会话的历史会插进新会话）。
+    #[test]
+    fn older_result_is_dropped_after_switching_sessions() {
+        let client = test_client();
+        let mut prefs = test_prefs();
+        let (job_tx, _job_rx) = mpsc::channel();
+        let (ui_tx, ui_rx) = mpsc::channel();
+        let mut app = test_app(&client, &mut prefs, ui_rx, ui_tx, job_tx);
+
+        app.st.conversation_id = Some("c2".to_string());
+        app.st.push_line(LineKind::User, "另一个会话");
+        app.st.set_history_page(2, true);
+        app.st.set_older_loading(true);
+
+        let resp = response(serde_json::json!({
+            "messages": [{"role": "user", "content": "旧会话的历史"}]
+        }));
+        on_older_result(&mut app, "c1", Ok(resp));
+
+        let texts: Vec<&str> = app.st.lines.iter().map(|l| l.text()).collect();
+        assert!(
+            !texts.iter().any(|t| t.contains("旧会话的历史")),
+            "{texts:?}"
+        );
+        let page = app.st.history_page.expect("page 仍在");
+        assert!(!page.loading, "在途标记要复位，否则 /older 再也发不出去");
+    }
+
     /// 四种丢弃条件各自都要挡住；只有全绿才落地。
     #[test]
     fn reply_guard_drops_on_any_stale_signal() {
@@ -584,6 +863,6 @@ mod tests {
         }));
         let line = summary_line(&pending("x"), &resp);
         assert!(line.contains("revision 9"), "got {line}");
-        assert!(line.contains("更早的消息暂不回放"), "got {line}");
+        assert!(line.contains("/older"), "got {line}");
     }
 }

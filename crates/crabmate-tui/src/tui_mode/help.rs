@@ -5,7 +5,7 @@
 
 /// `/help` 输出的每一行。
 pub(super) const LINES: &[&str] = &[
-    "本地命令：/quit（/exit、/q 同义） /help /status /settings /mode /role /model /find /background /workspace /resume /conv /copy",
+    "本地命令：/quit（/exit、/q 同义） /help /status /settings /mode /role /model /find /background /workspace /resume /older /conv /copy",
     "输入 / 弹出补全菜单（内建命令 + skill；↑↓ 选择 · Tab/Enter 补全 · Esc 关闭）",
     "/copy [assistant|user]（Ctrl+Y 同义）：复制最近一条消息到剪贴板（默认助手回复）",
     "/mode ask|plan|act · /role <id> · /model <name>（off 清除，随对话生效）",
@@ -15,6 +15,7 @@ pub(super) const LINES: &[&str] = &[
     "/background <图片路径>：全屏背景（kitty 走真像素，其余终端用每格底色；图会压暗保正文可读；off 关闭）",
     "/conv list 刷新 · /conv use <id> 切换 · /conv new 新会话",
     "/resume 续传上一轮被中断的回合（serve 侧 job 仍在跑时；Ctrl+C 的 cancel 未送达也可续）",
+    "/older（/history 同义）把更早一页历史前插到当前对话（切换会话只载入最新一页时用；跨页命中仍可 /find）",
     "按键：Alt+Enter 换行 · Ctrl+E 思考展开/折叠 · Ctrl+Y 复制最近回复 · Ctrl+W 工作区目录树 · PgUp/PgDn 翻页 · Ctrl+End 回底部 · 回合中 Enter 排队发送（输入框内 Esc 清队）",
     "设置面板：↑↓ 移动 · Enter 编辑 · Tab 切分区 · F2 保存 · Esc 关闭（有改动 Esc 先确认）",
     "会话栏：↑↓选 Enter用 n新建 r刷新 Del删除（再按 y/Enter 确认，Esc/n 或其它键取消）Shift+Del 直接删",
