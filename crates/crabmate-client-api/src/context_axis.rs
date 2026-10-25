@@ -13,6 +13,8 @@
 //! 固定开销（系统提示、工具 schema、技能正文等）。DTO 没有 `vendor_overhead_tokens`，故只能反推。
 //! 用量条把 `F` 与「会话连续增长的内容」分色，但两者之和刻意与文本 `used / raw_cap` 同归一化。
 
+use std::collections::BTreeMap;
+
 use crate::prompt_tokens::TiktokenPromptTokensSnapshot;
 
 /// 用量条进入告警档的百分比阈值（两端同一口径）。
@@ -225,6 +227,35 @@ pub fn context_placeholder_text(raw_cap: u32) -> String {
     }
 }
 
+/// 新会话（尚无服务端 `conversation_id`）状态栏用的 system-only prompt token 粗估。
+///
+/// 服务端在 `GET /status?view=shell` 的 `tiktoken_new_session_baseline_by_agent_role`
+/// 按 agent role 预存了这份估算。查表顺序两端必须一致：**显式选中角色 → 服务端默认角色
+/// → `""` 档**。空 map 返回 `None`（宁可不显示，也不要编一个数字）。
+///
+/// 抽到这里的理由与轴线同：这段顺序原先在 `frontend/src/app_prefs.rs` 与
+/// `crates/crabmate-tui/src/tui_mode/serve_defaults.rs` 各写一份，靠「照着抄」保持一致。
+///
+/// 调用方负责判定「是否真的没有 cid」——有 cid 的会话应当等实测，不拿基线冒充。
+#[must_use]
+pub fn new_session_baseline_prompt_tokens(
+    baseline_by_role: &BTreeMap<String, u32>,
+    selected_role: Option<&str>,
+    default_role: Option<&str>,
+) -> Option<u32> {
+    if baseline_by_role.is_empty() {
+        return None;
+    }
+    let pick = |r: Option<&str>| {
+        r.map(str::trim)
+            .filter(|s| !s.is_empty())
+            .and_then(|r| baseline_by_role.get(r).copied())
+    };
+    pick(selected_role)
+        .or_else(|| pick(default_role))
+        .or_else(|| baseline_by_role.get("").copied())
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -232,7 +263,9 @@ mod tests {
         context_axis_from_snapshot, context_axis_split, context_axis_used_pct, context_axis_whole,
         context_placeholder_text, context_trim_after_used_tokens, context_trim_watermark_reset,
         context_value_text, format_compact_cap_tokens, format_compact_tokens,
+        new_session_baseline_prompt_tokens,
     };
+    use std::collections::BTreeMap;
 
     fn snap(
         used: Option<u32>,
@@ -418,5 +451,59 @@ mod tests {
         // 拿不到 after / cid 都不动
         assert_eq!(context_trim_watermark_reset(true, None, Some("c1")), None);
         assert_eq!(context_trim_watermark_reset(true, after, None), None);
+    }
+
+    fn baseline_map() -> BTreeMap<String, u32> {
+        let mut m = BTreeMap::new();
+        m.insert(String::new(), 9_000);
+        m.insert("coder".to_string(), 12_000);
+        m.insert("writer".to_string(), 5_000);
+        m
+    }
+
+    #[test]
+    fn baseline_prefers_selected_then_default_then_blank_key() {
+        let m = baseline_map();
+        // 显式选中优先
+        assert_eq!(
+            new_session_baseline_prompt_tokens(&m, Some("writer"), Some("coder")),
+            Some(5_000)
+        );
+        // 选中角色不在表里 → 默认角色
+        assert_eq!(
+            new_session_baseline_prompt_tokens(&m, Some("nope"), Some("coder")),
+            Some(12_000)
+        );
+        // 没有选中角色 → 默认角色
+        assert_eq!(
+            new_session_baseline_prompt_tokens(&m, None, Some("coder")),
+            Some(12_000)
+        );
+        // 默认角色也不在表里 → `""` 档
+        assert_eq!(
+            new_session_baseline_prompt_tokens(&m, None, Some("gone")),
+            Some(9_000)
+        );
+    }
+
+    #[test]
+    fn baseline_is_none_for_empty_map_or_no_match() {
+        // 服务端没给基线
+        assert_eq!(
+            new_session_baseline_prompt_tokens(&BTreeMap::new(), Some("coder"), Some("coder")),
+            None
+        );
+        // 有 map 但没有 `""` 档、角色也都不匹配
+        let mut m = BTreeMap::new();
+        m.insert("coder".to_string(), 12_000);
+        assert_eq!(
+            new_session_baseline_prompt_tokens(&m, Some("x"), Some("y")),
+            None
+        );
+        // 空白角色串视为未指定
+        assert_eq!(
+            new_session_baseline_prompt_tokens(&m, Some("  "), Some("coder")),
+            Some(12_000)
+        );
     }
 }

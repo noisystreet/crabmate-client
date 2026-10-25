@@ -73,6 +73,14 @@ pub(super) enum UiEvent {
     PromptTokens(Box<TiktokenPromptTokensSnapshot>),
     /// 上下文用量**回落**（`timeline_log` 的 `kind=context_trim`）：压缩 / 裁剪后的用量。
     ContextTrim(u32),
+    /// 回合末补的用量快照（`GET /conversation/messages` 的 `tiktoken_prompt_tokens`）。
+    ///
+    /// 与 [`UiEvent::PromptTokens`] 同口径，但**带 `conversation_id`**：这条回包是异步的，
+    /// 到达时用户可能已经切走 —— 那个数字属于上一个会话，不能落到当前会话的水位上。
+    UsageHydrated {
+        conversation_id: String,
+        snapshot: Option<TiktokenPromptTokensSnapshot>,
+    },
     /// 已持久化会话的历史分页（`GET /conversation/messages`）：只读回放。
     /// 失败只提示，不阻断输入（当前会话仍可继续聊）。
     ConversationHistory {
@@ -144,6 +152,14 @@ pub(super) enum WorkerJob {
     ConversationHistory {
         conversation_id: String,
         before_index: Option<u32>,
+    },
+    /// 回合末补一次用量快照：只取 `GET /conversation/messages` 的 `tiktoken_prompt_tokens`，
+    /// 消息正文丢弃（回放另有 [`WorkerJob::ConversationHistory`]）。
+    ///
+    /// 流帧 `tiktokenPromptTokens` 不一定每轮都来；缺了这一轮，状态行会从新会话基线的
+    /// `~12k` 掉回占位 `—`。Desktop 用同一招兜底（流收尾后 `bump_session_hydrate_nonce`）。
+    RefreshUsage {
+        conversation_id: String,
     },
     /// 写会话索引（`GET` → 改 → 全量 `PUT`）：新建空白行 / 绑定 `conversation_id` /
     /// 删除行（删除时会连服务端对话一起清，见 `apply_web_session_op`）。
@@ -323,6 +339,9 @@ pub(super) fn spawn_worker(client: ServeClient, tx: Sender<UiEvent>) -> Sender<W
                     conversation_id,
                     before_index,
                 } => job_conversation_history(&rt, &client, &conversation_id, before_index, &tx),
+                WorkerJob::RefreshUsage { conversation_id } => {
+                    job_refresh_usage(&rt, &client, &conversation_id, &tx);
+                }
                 WorkerJob::SessionIndex(op) => job_session_index(&rt, &client, op, &tx),
                 WorkerJob::RefreshWorkspace { keep } => {
                     job_refresh_workspace_root(&rt, &client, &tx, keep);
@@ -467,6 +486,26 @@ fn job_conversation_history(
     let _ = tx.send(UiEvent::ConversationHistory {
         conversation_id: conversation_id.to_string(),
         result,
+        snapshot,
+    });
+}
+
+/// 回合末补用量快照：只留 `tiktoken_prompt_tokens`，消息正文丢弃。
+///
+/// 失败静默：状态行的用量段不是关键路径，拉不到就维持现状（占位 `—`），
+/// 不必往 transcript 里写一条与用户操作无关的报错。
+fn job_refresh_usage(
+    rt: &tokio::runtime::Runtime,
+    client: &ServeClient,
+    conversation_id: &str,
+    tx: &Sender<UiEvent>,
+) {
+    let snapshot = rt
+        .block_on(fetch_conversation_messages(client, conversation_id, None))
+        .ok()
+        .and_then(|r| r.tiktoken_prompt_tokens);
+    let _ = tx.send(UiEvent::UsageHydrated {
+        conversation_id: conversation_id.to_string(),
         snapshot,
     });
 }

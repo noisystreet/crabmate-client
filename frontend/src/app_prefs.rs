@@ -2,6 +2,8 @@
 
 use std::sync::atomic::{AtomicI8, Ordering};
 
+use crabmate_client_api::context_axis::new_session_baseline_prompt_tokens;
+
 use crate::api::StatusData;
 
 /// 偏好里可选的主题（含 **`system`**＝跟随 OS 明暗；解析到 CSS 见 [`resolve_data_theme_slug`]）。
@@ -191,26 +193,11 @@ pub fn status_bar_new_session_baseline_prompt_tokens(
     selected_agent_role: Option<&str>,
 ) -> Option<u32> {
     let sd = server?;
-    let map = &sd.tiktoken_new_session_baseline_by_agent_role;
-    if map.is_empty() {
-        return None;
-    }
-    if let Some(role) = selected_agent_role.map(str::trim).filter(|s| !s.is_empty()) {
-        if let Some(&n) = map.get(role) {
-            return Some(n);
-        }
-    }
-    if let Some(role) = sd
-        .default_agent_role_id
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    {
-        if let Some(&n) = map.get(role) {
-            return Some(n);
-        }
-    }
-    map.get("").copied()
+    new_session_baseline_prompt_tokens(
+        &sd.tiktoken_new_session_baseline_by_agent_role,
+        selected_agent_role,
+        sd.default_agent_role_id.as_deref(),
+    )
 }
 
 /// 尚无服务端水合 tiktoken 时底栏「上下文」用量：有 `server_conversation_id` 则等待水合（`None`），否则回落 `GET /status` 基线。
