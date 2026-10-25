@@ -13,6 +13,8 @@
 use std::collections::HashMap;
 
 use serde::Deserialize;
+
+use crate::prompt_tokens::TiktokenPromptTokensSnapshot;
 use serde_json::Value;
 
 /// 首轮工作区上下文注入条的 `user.name`（Server `types.rs` 与 frontend 同名常量）。
@@ -44,6 +46,12 @@ pub struct ConversationMessagesResponse {
     /// 本页之前是否还有更早的消息。
     #[serde(default)]
     pub has_older: bool,
+    /// 会话当前的上下文用量快照（服务端随本响应附带，snake_case 键）。
+    ///
+    /// 新会话建立后这里就有值（system prompt + 工具 schema 的初始占用），所以水合即可显示
+    /// 初始用量，不必等回合末的 `RUN_FINISHED` —— Web 端就是这么显示的。
+    #[serde(default)]
+    pub tiktoken_prompt_tokens: Option<TiktokenPromptTokensSnapshot>,
 }
 
 /// 一条 OpenAI 兼容消息（只取展示所需字段）。
@@ -500,5 +508,31 @@ mod tests {
                 ReplayRow::Assistant("正文".into())
             ]
         );
+    }
+
+    /// 水合响应里的上下文快照：Web 端靠它在新会话就显示初始用量，TUI 走同一条路。
+    #[test]
+    fn hydrate_response_carries_tiktoken_snapshot() {
+        let resp = parse(json!({
+            "conversation_id": "conv-1",
+            "revision": 43,
+            "messages": [],
+            "tiktoken_prompt_tokens": {
+                "prompt_tokens": 1200,
+                "tiktoken_model": "gpt-4o",
+                "used_input_tokens": 1500,
+                "max_input_tokens": 9000
+            }
+        }));
+        let snap = resp.tiktoken_prompt_tokens.expect("应解析出快照");
+        assert_eq!(snap.prompt_tokens, 1200);
+        assert_eq!(snap.used_input_tokens, Some(1500));
+    }
+
+    /// 老服务端/不带该字段时不能报错，只是没有快照。
+    #[test]
+    fn hydrate_response_without_snapshot_is_fine() {
+        let resp = parse(json!({"conversation_id": "conv-1", "revision": 1}));
+        assert!(resp.tiktoken_prompt_tokens.is_none());
     }
 }

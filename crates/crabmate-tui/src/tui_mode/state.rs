@@ -24,6 +24,10 @@ mod search;
 #[path = "state_paste.rs"]
 mod paste;
 
+// 上下文用量（`tiktokenPromptTokens` 快照 → 状态行 `ctx` 段）：同上，拆出去压 `state.rs` 行数。
+#[path = "state_context.rs"]
+mod context;
+
 /// `/` 补全菜单的会话内状态。
 #[derive(Debug, Default)]
 pub struct SlashMenuState {
@@ -277,6 +281,8 @@ pub struct UiState {
     pub confirm_delete: Option<String>,
     /// serve 默认偏好（`/status` 拉取）。
     pub serve_defaults: Option<ServeDefaults>,
+    /// 上下文用量（ADE 0005 同口径）：会话内水位 + 最近一次 `tiktokenPromptTokens` 快照。
+    pub context: context::ContextUsage,
     /// serve 侧当前活跃会话（左栏 `*` 标记）。
     pub active_session_id: Option<String>,
     /// 当前是否宽到显示左栏（由渲染层每帧刷新）。

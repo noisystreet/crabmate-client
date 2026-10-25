@@ -10,6 +10,10 @@ use serde_json::Value;
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct TiktokenPromptTokensSnapshot {
     pub prompt_tokens: u32,
+    /// 计数所用 tiktoken 模型名。**缺省容忍**：某些计数来源（如 `provider_usage`）不填模型名，
+    /// 而 `#[derive(Deserialize)]` 里一个必填字段缺失就会把整条快照丢成 `None` —— 结果是
+    /// 状态栏 / 芯片在真实环境里静默消失，而 fixtures 里（带模型名）看上去一切正常。
+    #[serde(default)]
     pub tiktoken_model: String,
     #[serde(default)]
     pub used_input_tokens: Option<u32>,

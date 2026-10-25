@@ -25,6 +25,7 @@ mod layout;
 mod md;
 mod mouse;
 mod palette;
+mod pane_width;
 mod paste;
 mod read_jobs;
 mod render;
@@ -599,6 +600,7 @@ impl TuiApp<'_> {
             UiEvent::Skills(result) => self.st.set_skills(result),
             UiEvent::Thinking(delta) => self.st.stream_delta(LineKind::Thinking, &delta),
             UiEvent::System(line) => self.st.push_line(LineKind::System, line.trim()),
+            UiEvent::PromptTokens(snap) => self.st.set_prompt_tokens(*snap),
             UiEvent::ToolStart {
                 tool_call_id,
                 name,
@@ -703,7 +705,7 @@ impl TuiApp<'_> {
     pub(super) fn status_stack_rows(&self) -> u16 {
         status_stack::stack_rows(
             &self.status_info(),
-            render::SIDEBAR_WIDTH.saturating_sub(2) as usize,
+            render::WORKSPACE_PANE_WIDTH.saturating_sub(2) as usize,
             self.st.status_stack_collapsed,
         )
     }
@@ -728,6 +730,10 @@ impl TuiApp<'_> {
             };
         StatusInfo {
             api_base: self.client.config().api_base.clone(),
+            // 上下文用量：段恒显示，没有实测时是占位 `—`（见 `UiState::context_text`）。
+            context: self
+                .st
+                .context_text(stored.and_then(|p| p.context_tokens.as_deref())),
             model: show(
                 &overrides.model,
                 stored.and_then(|p| p.model.as_deref()),

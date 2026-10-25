@@ -1,7 +1,7 @@
 //! 右栏底部的纵向状态栈（对齐 desktop 的 `.side-status-stack`）。
 //!
 //! desktop 早已把底栏迁进右栏底部、改成 `flex-direction: column` + 可折叠；TUI 这一轮
-//! 才跟上。**动机不只是「像 desktop」**：右栏只有 [`super::render::SIDEBAR_WIDTH`] 列，
+//! 才跟上。**动机不只是「像 desktop」**：右栏只有 [`super::render::WORKSPACE_PANE_WIDTH`] 列，
 //! 横排在这么窄的地方必然一路截断（`serve http://… │ model … │ role …` 三项就放不下），
 //! 纵向每段一行反而能把值显示全。
 //!
@@ -48,7 +48,7 @@ pub(super) fn stack_rows(info: &StatusInfo, width: usize, collapsed: bool) -> u1
 /// 横版是「装不进列预算就整段丢弃」，纵版同理，只是预算是行数；两者共用
 /// `Segment::priority`，避免出现「横条里 serve 优先、栈里 img 优先」这种自相矛盾。
 ///
-/// **裁剪分支目前走不到**：[`environment_segments`] 最多 5 段，而阈值是
+/// **裁剪分支目前走不到**：[`environment_segments`] 最多 6 段（含 `ctx`），而阈值是
 /// `MAX_STACK_ROWS - 1 = 7`，于是 `keep == segs.len()` 恒成立、提前返回。留着它是给
 /// 「以后加段」预留 —— 真加到第 8 段时，`stack_never_exceeds_the_row_budget` 会先失败。
 fn visible_segments(info: &StatusInfo, width: usize) -> Vec<Segment> {
@@ -144,6 +144,7 @@ mod tests {
             view_offset: 0,
             search_term: None,
             search_total: 0,
+            context: "—".to_string(),
         }
     }
 
@@ -183,21 +184,27 @@ mod tests {
     fn expanded_lists_every_segment_one_per_line() {
         let i = info();
         let t = texts(&stack_lines_with(&i, 24, &pal(), false, true));
-        assert_eq!(t.len(), 1 + 4, "serve/model/role/mode + 运行指示：{t:?}");
+        assert_eq!(
+            t.len(),
+            1 + 5,
+            "serve/model/role/mode/ctx + 运行指示：{t:?}"
+        );
         assert!(t[0].starts_with("serve"), "{t:?}");
         assert!(t[1].starts_with("model"), "{t:?}");
         assert!(t[2].starts_with("role"), "{t:?}");
         assert!(t[3].starts_with("mode"), "{t:?}");
+        // `ctx` 段恒在（无实测时值是占位 `—`）：段消失会让人误判「功能没生效」。
+        assert!(t[4].starts_with("ctx"), "{t:?}");
         // 运行指示贴**最底**（desktop 的 chips → run indicator 顺序）；切回合时
         // 只有这一行变，上面的段不跟着挪。
-        assert!(t[4].contains("空闲"), "运行指示应在最下一行：{t:?}");
+        assert!(t[5].contains("空闲"), "运行指示应在最下一行：{t:?}");
         // 与各段的值同列：第一列（label 列）留空，运行态从第二列起。
         assert!(
-            t[4].starts_with(&" ".repeat(LABEL_COL_W)),
+            t[5].starts_with(&" ".repeat(LABEL_COL_W)),
             "运行指示应缩进到第二列：{t:?}"
         );
         assert_eq!(
-            UnicodeWidthStr::width(t[4].as_str()),
+            UnicodeWidthStr::width(t[5].as_str()),
             LABEL_COL_W + UnicodeWidthStr::width("○ 空闲"),
             "第二列起排，不该再补到列宽：{t:?}"
         );
@@ -368,5 +375,43 @@ mod tests {
         assert!(rows <= MAX_STACK_ROWS, "{rows}");
         let lines = stack_lines_with(&i, 24, &pal(), false, true);
         assert_eq!(rows as usize, lines.len(), "行数必须与渲染同源");
+    }
+
+    #[test]
+    fn stack_shows_ctx_line_when_snapshot_present() {
+        let mut i = info();
+        i.context = "116.9k / 1000k (11.7%)".into();
+        let t = texts(&stack_lines_with(&i, 40, &pal(), false, true));
+        let ctx = t
+            .iter()
+            .find(|s| s.starts_with("ctx"))
+            .unwrap_or_else(|| panic!("纵向状态栈里应有 ctx 行，实际：{t:?}"));
+        assert!(ctx.contains("116.9k / 1000k (11.7%)"), "{ctx}");
+    }
+
+    #[test]
+    fn stack_keeps_ctx_line_as_placeholder_without_snapshot() {
+        // 段恒在：值占位 `—`，而不是整行消失（消失会让人以为功能没生效）。
+        let i = info();
+        let t = texts(&stack_lines_with(&i, 40, &pal(), false, true));
+        let ctx = t
+            .iter()
+            .find(|s| s.starts_with("ctx"))
+            .unwrap_or_else(|| panic!("纵向状态栈里应有 ctx 行，实际：{t:?}"));
+        assert!(ctx.contains('—'), "{ctx}");
+    }
+
+    /// 纵向栈每行都必须 ≤ 栏内宽：超了 ratatui 会折行，把「运行指示」那行挤走，
+    /// 这正是「状态栏用量溢出」的表现。
+    #[test]
+    fn every_stack_line_fits_the_pane_width() {
+        let mut i = info();
+        // 最宽的真实值：两位数百分比 + 四位数 k。
+        i.context = "999.9k / 1000k (99.9%)".into();
+        let w = crate::tui_mode::render::WORKSPACE_PANE_WIDTH.saturating_sub(2) as usize;
+        for line in stack_lines_with(&i, w, &pal(), false, true) {
+            let lw = UnicodeWidthStr::width(line.to_string().as_str());
+            assert!(lw <= w, "行宽 {lw} 超过栏内宽 {w}：{:?}", line.to_string());
+        }
     }
 }

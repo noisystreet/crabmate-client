@@ -1,0 +1,153 @@
+//! 上下文用量：`tiktokenPromptTokens` 快照 → 状态行 `ctx` 段文本（ADE 0005 同口径）。
+//!
+//! 拆成子模块（同 `state_search` / `state_paste`）：`state.rs` 贴着 920 行门禁，而这段是
+//! 自成一体的装配 —— 口径本身在 `crabmate_client_api::context_axis`，这里只负责把
+//! 「本机设置上限 / 快照 / 会话水位」三者拼成一条轴线。
+
+use crabmate_client_api::chat_body::llm_context_tokens_for_chat_body;
+use crabmate_client_api::context_axis::ContextUsedWatermark;
+use crabmate_client_api::context_axis::{
+    context_axis_apply_watermark, context_axis_from_snapshot, context_placeholder_text,
+    context_value_text,
+};
+use crabmate_client_api::prompt_tokens::TiktokenPromptTokensSnapshot;
+
+use super::UiState;
+
+/// 上下文用量的两件状态：会话内水位 + 最近一次 `tiktokenPromptTokens` 快照。
+///
+/// 合成一个字段是为了 `state.rs` 的行数门禁 —— 那里每个字段都要配注释。
+#[derive(Clone, Debug, Default)]
+pub struct ContextUsage {
+    /// 服务端 `used_input_tokens` 的滚动水位，按 `conversation_id` 归属。
+    pub watermark: ContextUsedWatermark,
+    /// 最近一次 `tiktokenPromptTokens` 的快照：固定开销拆分与上限兜底都用它。
+    pub snapshot: Option<TiktokenPromptTokensSnapshot>,
+}
+
+impl UiState {
+    /// 记录一次用量快照（`tiktokenPromptTokens`）。
+    ///
+    /// 水位按服务端 `conversation_id` 归属；cid 还没绑上（首轮终止帧可能早于 `TurnDone`
+    /// 回填）时**只存快照、不记水位** —— 宁缺不猜：猜错会把旧会话的峰值挂到新会话上。
+    pub fn set_prompt_tokens(&mut self, snap: TiktokenPromptTokensSnapshot) {
+        if let (Some(used), Some(cid)) = (used_tokens(&snap), self.conversation_id.as_deref()) {
+            self.context.watermark.observe(cid, used);
+        }
+        self.context.snapshot = Some(snap);
+    }
+
+    /// 状态行 `ctx` 段的文本：有实测时 `12.0k / 1000k (1.2%)`，没有时占位 `—`（`— / 1000k`）。
+    ///
+    /// **总是返回文本**（而不是「无数据就没有段」）：段整个消失时，用户无法区分
+    /// 「这个功能没生效」和「这一轮还没产生实测」，排查时只剩猜。
+    ///
+    /// `cap_from_settings` 是本机设置里的上下文窗口（`context_tokens` 原文），**优先于**快照的
+    /// `max_input_tokens`：后者是「窗口 − 输出预留 − 安全余量」，拿它当分母会让数字在首轮
+    /// 前后于 1000k / 993k 之间跳变。
+    pub fn context_text(&self, cap_from_settings: Option<&str>) -> String {
+        let Some(snap) = self.context.snapshot.as_ref() else {
+            return context_placeholder_text(settings_cap(cap_from_settings));
+        };
+        let Some(used) = used_tokens(snap) else {
+            return context_placeholder_text(cap_tokens(cap_from_settings, snap));
+        };
+        let cap = cap_tokens(cap_from_settings, snap);
+        let axis = context_axis_from_snapshot(snap, cap, used);
+        let axis = context_axis_apply_watermark(
+            axis,
+            self.conversation_id.as_deref(),
+            &self.context.watermark,
+        );
+        context_value_text(axis)
+    }
+}
+
+/// 分子：服务端实测优先，缺 `used_input_tokens` 时退到 `prompt_tokens`（与 Web 同一顺序）。
+fn used_tokens(snap: &TiktokenPromptTokensSnapshot) -> Option<u32> {
+    Some(snap.used_input_tokens.unwrap_or(snap.prompt_tokens))
+}
+
+/// 本机设置里的窗口（`context_tokens` 原文）；空 / 非数字 / 0 一律视为未设置。
+fn settings_cap(cap_from_settings: Option<&str>) -> u32 {
+    llm_context_tokens_for_chat_body(cap_from_settings)
+        .map(|n| u32::try_from(n).unwrap_or(u32::MAX))
+        .unwrap_or(0)
+}
+
+/// 分母：本机设置上限优先 → 快照 `max_input_tokens` → `0`（表示未知，文本省略百分比）。
+fn cap_tokens(cap_from_settings: Option<&str>, snap: &TiktokenPromptTokensSnapshot) -> u32 {
+    match settings_cap(cap_from_settings) {
+        0 => snap.max_input_tokens.unwrap_or(0),
+        n => n,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{UiState, cap_tokens, used_tokens};
+    use crabmate_client_api::prompt_tokens::TiktokenPromptTokensSnapshot;
+
+    fn snap(
+        used: Option<u32>,
+        prompt: u32,
+        max_input: Option<u32>,
+    ) -> TiktokenPromptTokensSnapshot {
+        TiktokenPromptTokensSnapshot {
+            prompt_tokens: prompt,
+            tiktoken_model: "gpt-4o".to_string(),
+            used_input_tokens: used,
+            max_input_tokens: max_input,
+            reserved_output_tokens: None,
+            message_tokens: None,
+            tool_schema_tokens: None,
+            attachment_tokens: None,
+            counting_source: None,
+            provider_input_tokens: None,
+        }
+    }
+
+    #[test]
+    fn settings_cap_wins_over_snapshot_max_input() {
+        // 本机设置 100 万优先，不被快照的 993k 顶掉（否则数字会在首轮前后跳变）。
+        let s = snap(Some(1_000), 1_000, Some(993_000));
+        assert_eq!(cap_tokens(Some("1000000"), &s), 1_000_000);
+    }
+
+    #[test]
+    fn cap_falls_back_to_snapshot_then_zero() {
+        let with_max = snap(Some(1_000), 1_000, Some(993_000));
+        assert_eq!(cap_tokens(None, &with_max), 993_000);
+        // 空串 / 非数字 / 0 都视为「未设置」，继续回退。
+        assert_eq!(cap_tokens(Some("  "), &with_max), 993_000);
+        assert_eq!(cap_tokens(Some("abc"), &with_max), 993_000);
+        assert_eq!(cap_tokens(Some("0"), &with_max), 993_000);
+        let no_max = snap(Some(1_000), 1_000, None);
+        assert_eq!(cap_tokens(None, &no_max), 0);
+    }
+
+    #[test]
+    fn used_prefers_server_count_and_falls_back_to_prompt_tokens() {
+        assert_eq!(used_tokens(&snap(Some(500), 400, None)), Some(500));
+        assert_eq!(used_tokens(&snap(None, 400, None)), Some(400));
+    }
+
+    #[test]
+    fn snapshot_becomes_status_text_end_to_end() {
+        let mut st = UiState::new();
+        st.conversation_id = Some("conv-1".to_string());
+        st.set_prompt_tokens(snap(Some(116_900), 116_900, Some(993_000)));
+        assert_eq!(st.context_text(Some("1000000")), "116.9k / 1000k (11.7%)");
+        // 水位：下一轮实测回落时仍显示本会话峰值（`observe` 只取滚动最大）。
+        st.set_prompt_tokens(snap(Some(100_000), 100_000, Some(993_000)));
+        assert_eq!(st.context_text(Some("1000000")), "116.9k / 1000k (11.7%)");
+    }
+
+    #[test]
+    fn no_snapshot_renders_placeholder_not_nothing() {
+        // 段消失会让用户以为功能没生效；没有实测时给占位（有已知上限就带上分母）。
+        let st = UiState::new();
+        assert_eq!(st.context_text(Some("1000000")), "— / 1000k");
+        assert_eq!(st.context_text(None), "—");
+    }
+}

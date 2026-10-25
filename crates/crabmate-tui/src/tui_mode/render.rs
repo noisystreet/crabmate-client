@@ -28,14 +28,13 @@ pub(crate) use overlay::settings_panel_content_width;
 
 /// 低于此宽度隐藏左右栏（等价 repl 布局）。
 pub const SIDEBAR_MIN_WIDTH: u16 = 120;
-/// 左会话列 / 右工作区列宽度。
-pub(crate) const SIDEBAR_WIDTH: u16 = 26;
+pub(crate) use super::pane_width::{SIDEBAR_WIDTH, WORKSPACE_PANE_WIDTH};
 
 /// 计算 build_body_rows 使用的聊天区宽度（与 draw 里传给 render_body 的区域一致：
 /// 聊天列内左右各留 1 列空隙，与侧栏 / composer 边框的对称留白对齐）。
 pub(crate) fn chat_body_width(sidebar_visible: bool, terminal_width: u16) -> usize {
     let col = if sidebar_visible {
-        terminal_width.saturating_sub(SIDEBAR_WIDTH * 2)
+        terminal_width.saturating_sub(SIDEBAR_WIDTH + WORKSPACE_PANE_WIDTH)
     } else {
         terminal_width
     };
@@ -50,8 +49,7 @@ pub(super) const SIDEBAR_HINT: &str = "↑↓ Enter用 Del删 n新 r刷";
 pub(super) const SIDEBAR_DELETE_HINT: &str = "[y] 删除 [Esc] 取消";
 /// composer 最多展开行数（多行输入）。
 const MAX_COMPOSER_ROWS: usize = 4;
-// 配色见 [`Palette`]：状态栏 / 侧栏 / composer 用 `chrome_bg`，聊天区用 `bg`，
-// 正文 / 次要 / 强调分别为 `fg` / `muted` / `accent`（随 Desktop 主题）。
+// 配色见 [`Palette`]：状态栏 / 侧栏 / composer 用 `chrome_bg`，聊天区用 `bg`；正文 / 次要 / 强调 = `fg` / `muted` / `accent`（随 Desktop 主题）。
 
 /// 状态行展示信息（mod 层组装好的显示值，含 override 标记）。
 #[derive(Clone)]
@@ -71,6 +69,7 @@ pub struct StatusInfo {
     pub search_term: Option<String>,
     /// 搜索命中逻辑行数。
     pub search_total: usize,
+    pub context: String,
 }
 
 /// 一条可渲染的 transcript 物理行。
@@ -523,10 +522,10 @@ pub fn draw(
 ) {
     let area = frame.area();
     // 右栏底部状态栈的行数（与 `status_stack::stack_lines` 同源，否则底部会空行 / 末段被裁）。
-    // 内宽与左右两栏一致：`SIDEBAR_WIDTH - 2`（列内左右各留 1 列）。
+    // 状态栈在右栏：内宽取右栏（`WORKSPACE_PANE_WIDTH - 2`，列内左右各留 1 列）。
     let stack_rows = status_stack::stack_rows(
         info,
-        SIDEBAR_WIDTH.saturating_sub(2) as usize,
+        WORKSPACE_PANE_WIDTH.saturating_sub(2) as usize,
         st.status_stack_collapsed,
     );
     // 主体三列 / 底栏 / 状态栈的矩形与鼠标命中检测共用 `layout::panes`。

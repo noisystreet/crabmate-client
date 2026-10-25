@@ -4,6 +4,7 @@
 
 mod approval;
 mod chat_classify;
+mod chat_dispatch;
 mod chat_stream;
 mod client;
 mod config;

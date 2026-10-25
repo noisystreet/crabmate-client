@@ -28,6 +28,7 @@
 | G8 | ~~审批浮层把命令截成一行且无法展开~~ → **已落地**：`Ctrl+E` 在 78×9 收起档与铺满主体区的展开档之间切换，展开档按显示宽折行（`text::wrap_display`）并支持 ↑/↓、PgUp/PgDn、Home/End 滚动，提示行显示「第 x-y / N 行」（`overlay.rs`） | 底部审批条可展开完整命令 + 失败保留重试（`approval_modal.rs`） | 长命令看不到全貌，易误判 |
 | G9 | 澄清问卷（`clarification_questionnaire`）在 TUI 无交互 UI：`serve/chat_classify.rs` 只有 `clarify_trace` 钩子，没有表单 | 问卷表单（Web `frontend`） | 模型需要澄清时 TUI 这侧拿不到结构化提问 |
 | G10 | 窄终端（< 120 列）下**当前工作区不可见**：左右栏按 `sidebar_visible` 隐藏（`layout.rs::panes`），而工作区名只画在右栏（`ws_sidebar.rs::workspace_title`），顶栏已删除（`tui_visual_polish.md` §11.1）；状态行（`status.rs`）与右栏状态栈都不带 workspace 字段 | 顶栏工作区名 + 面包屑 | 窄屏 / 分屏时不知道命令跑在哪个项目，得先 `/workspace` 查一次 |
+| G11 | 上下文用量水位**压缩后不回落**：TUI 不解析 `timeline_log` `kind=context_trim`（`serve/chat_classify.rs` 只有正文 / 工具 / 审批钩子，`notice_timeline` 未接），而 `ContextUsedWatermark` 的 `observe` 只取滚动最大；Web 侧由 `reset` 借 `after_tokens` 把水位置回压缩后的值 | 把 `context_trim` 的 `after_tokens` 接到 `ContextUsedWatermark::reset` | 真发生压缩 / 裁剪后，状态行 `ctx` 仍停在旧峰值，直到切会话或重发流换 cid；用户会以为「压缩没生效」 |
 
 另有与 Desktop 同步暂缓/不做项，见 §2 非目标（勿误当缺口）。
 
@@ -163,6 +164,8 @@
 | W3.1 | L60「Control slashes」TUI 列 | 已同步（TUI 有 `/` 补全菜单，含 skills 候选） |
 | W3.2 | L55「`POST /chat/stream` + command approval」TUI Notes | 补 `Ctrl+E` 展开看完整命令（折行 + 滚动）、收起档单行截断 |
 | W3.3 | L53「Full-screen TUI」Notes | 补「< 120 列时左右栏隐藏，当前工作区无指示」（G10，待落地） |
+| W3.4 | L54「Full-screen TUI」Notes | 补状态栏 `ctx` 上下文用量段（`tiktokenPromptTokens`（`RUN_FINISHED` / `conversation_saved`） + 会话内水位；口径来自 S11 `client-api::context_axis`；段恒在，无实测时占位 `—`）——已同步 |
+| W3.5 | 同格 Notes | 待补：TUI 不消费 `timeline_log` `kind=context_trim`，故压缩 / 裁剪后水位**不会回落**（只增不减，直到切会话或换 cid）。Web 侧由 `ContextUsedWatermark::reset` 处理，见 G11 |
 
 > 矩阵维护规则：改了用户可见能力就必须在同 PR 更新对应格（§顶注），不允许“下个 PR 再补”。
 

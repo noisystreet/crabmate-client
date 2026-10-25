@@ -6,8 +6,15 @@
 //! 独立成模块以免 `chat_stream.rs` 单文件超行数门禁（≤920 行 / CCN ≤10）。
 
 use std::cell::RefCell;
+use std::fs::OpenOptions;
+use std::io::Write;
+use std::path::PathBuf;
+use std::sync::OnceLock;
 
 use crabmate_client_api::ag_ui_parser::parse_ag_ui_line;
+use crabmate_client_api::prompt_tokens::{
+    TiktokenPromptTokensSnapshot, tiktoken_from_ag_ui_object,
+};
 use crabmate_client_api::sse_dispatch::{
     CommandApprovalData, SseClarifyTraceHooks, SseControlSink, SseDispatch, SseNoticeTimelineHooks,
     SseTurnPhaseHooks, SseWorkspaceToolHooks, ToolResultInfo,
@@ -57,11 +64,65 @@ pub(crate) enum LineAction {
         ok: Option<bool>,
         note: Option<String>,
     },
+    /// 带 `tiktokenPromptTokens` 的帧（`RUN_FINISHED` / `CUSTOM conversation_saved`）的用量快照：
+    /// 这是唯一携带 `used_input_tokens` 的来源（状态行上下文段与会话内水位靠它）。
+    PromptTokens(TiktokenPromptTokensSnapshot),
     Plain(String),
 }
 
+/// 排查开关：`CM_TUI_SSE_DUMP=<file>` 时把「可能与用量有关」的原始帧追加写入该文件。
+///
+/// 只在排查「状态栏没有 ctx」时打开。未设置时每行只多一次 `OnceLock` 读（无系统调用、
+/// 不碰文件），高频 token 流下开销可忽略；设置后也只写含关键字的那几帧，不会把整条流转存。
+fn dump_frame(line: &str) {
+    static PATH: OnceLock<Option<PathBuf>> = OnceLock::new();
+    let Some(path) = PATH.get_or_init(|| std::env::var_os("CM_TUI_SSE_DUMP").map(PathBuf::from))
+    else {
+        return;
+    };
+    if !dump_worthy(line) {
+        return;
+    }
+    if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(path) {
+        let _ = writeln!(f, "{line}");
+    }
+}
+
+/// 值得落盘的关键字：用量快照本身、终止帧、会话保存帧。
+fn dump_worthy(line: &str) -> bool {
+    // 只看 `tiktoken`/`RUN_FINISHED` 不够：当真快照没来时，需要知道 serve 到底发了哪些控制帧
+    // （`RUN_FINISHED` 有没有 `tiktokenPromptTokens`、有没有 `conversation_saved`）。
+    // 正文 / 思维链 / 工具参数增量才是高频路径，排除它们之后每回合只剩几行。
+    let control = line.contains("tiktoken")
+        || line.contains("RUN_FINISHED")
+        || line.contains("conversation_saved")
+        || line.contains("\"type\":\"");
+    control
+        && !line.contains("TEXT_MESSAGE_CONTENT")
+        && !line.contains("REASONING_MESSAGE_CONTENT")
+        && !line.contains("TOOL_CALL_ARGS")
+}
+
+/// 帧里的 tiktoken 用量。serve 把它挂在**事件根**（`RUN_FINISHED`，外层键是 camelCase
+/// `tiktokenPromptTokens`），`CUSTOM conversation_saved` 则挂在 `data` 下 —— 两处都取，
+/// camel/snake 命名差异交给 `tiktoken_from_ag_ui_object`。
+///
+/// 先做字段名守卫：这条路径每条 SSE 行都要走一遍，而正文增量里不可能出现这个键，
+/// 所以高频 token 流不会被这条多解一次 JSON。
+fn prompt_tokens_from_line(line: &str) -> Option<TiktokenPromptTokensSnapshot> {
+    if !line.contains("tiktokenPromptTokens") && !line.contains("tiktoken_prompt_tokens") {
+        return None;
+    }
+    let v: Value = serde_json::from_str(line).ok()?;
+    tiktoken_from_ag_ui_object(&v).or_else(|| v.get("data").and_then(tiktoken_from_ag_ui_object))
+}
 /// 单行 AG-UI SSE → 终端动作。
 pub(crate) fn classify_line(line: &str) -> Result<LineAction, TermError> {
+    dump_frame(line);
+    // 带用量快照的帧先摘出来：其余分支对它无动作，而这是唯一的 token 实测来源。
+    if let Some(snap) = prompt_tokens_from_line(line) {
+        return Ok(LineAction::PromptTokens(snap));
+    }
     let acc = RefCell::new(Collected::default());
     let dispatch = parse_with_collector(line, &acc);
     if dispatch == SseDispatch::Plain {
@@ -249,6 +310,64 @@ mod tests {
             LineAction::WriteOut(s) => assert_eq!(s, "你好"),
             other => panic!("unexpected {other:?}"),
         }
+    }
+
+    #[test]
+    fn dump_keeps_control_frames_and_drops_deltas() {
+        assert!(dump_worthy(
+            r#"{"type":"RUN_FINISHED","tiktokenPromptTokens":{"prompt_tokens":1}}"#
+        ));
+        assert!(dump_worthy(
+            r#"{"type":"CUSTOM","customType":"conversation_saved"}"#
+        ));
+        // 控制类事件也留：真没快照时，要靠它判断 serve 发了什么。
+        assert!(dump_worthy(r#"{"type":"RUN_STARTED","threadId":"t"}"#));
+        // 正文 / 思维链 / 工具参数增量是高频路径，必须排除。
+        assert!(!dump_worthy(
+            r#"{"type":"TEXT_MESSAGE_CONTENT","delta":"hi"}"#
+        ));
+        assert!(!dump_worthy(
+            r#"{"type":"REASONING_MESSAGE_CONTENT","delta":"想"}"#
+        ));
+        assert!(!dump_worthy(r#"{"type":"TOOL_CALL_ARGS","delta":"{}"}"#));
+    }
+
+    #[test]
+    fn run_finished_with_tiktoken_yields_prompt_tokens() {
+        // 形状照抄 fixtures/sse_ag_ui_golden.jsonl：快照挂在事件根，外层键是 camelCase。
+        let line = r#"{"type":"RUN_FINISHED","threadId":"th-1","runId":"run-2","tiktokenPromptTokens":{"prompt_tokens":900,"tiktoken_model":"gpt-4o","used_input_tokens":1100,"max_input_tokens":9000}}"#;
+        match classify_line(line).expect("classify") {
+            LineAction::PromptTokens(snap) => {
+                assert_eq!(snap.prompt_tokens, 900);
+                assert_eq!(snap.used_input_tokens, Some(1100));
+                assert_eq!(snap.max_input_tokens, Some(9000));
+            }
+            other => panic!("期望 PromptTokens，实际 {other:?}"),
+        }
+    }
+
+    #[test]
+    fn conversation_saved_custom_event_yields_prompt_tokens() {
+        // 第二个来源：`CUSTOM conversation_saved` 把快照放在 `data` 下。
+        let line = r#"{"type":"CUSTOM","customType":"conversation_saved","data":{"revision":43,"tiktokenPromptTokens":{"prompt_tokens":1200,"tiktoken_model":"gpt-4o","used_input_tokens":1500,"max_input_tokens":9000,"counting_source":"provider_usage"}}}"#;
+        match classify_line(line).expect("classify") {
+            LineAction::PromptTokens(snap) => {
+                assert_eq!(snap.prompt_tokens, 1200);
+                assert_eq!(snap.used_input_tokens, Some(1500));
+                assert_eq!(snap.counting_source.as_deref(), Some("provider_usage"));
+            }
+            other => panic!("期望 PromptTokens，实际 {other:?}"),
+        }
+    }
+
+    #[test]
+    fn non_ended_lines_are_never_prompt_tokens() {
+        // 守卫的回归：正文里出现 "token" 不该被当成用量帧。
+        let line = r#"{"type":"TEXT_MESSAGE_CONTENT","delta":"hello token"}"#;
+        assert!(!matches!(
+            classify_line(line).expect("classify"),
+            LineAction::PromptTokens(_)
+        ));
     }
 
     #[test]
