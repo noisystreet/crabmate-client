@@ -1,6 +1,6 @@
 # 多端 Client 共用逻辑抽取（规划）
 
-> **状态**：S1–S4 **已落地**；hash 交接键名、S5 health JSON 子集、**斜杠名字表**、**端点路径常量（`paths`）**、**通用 HTTP 错误文案（`messages`）** 均已落地；**S6（SSE / AG-UI 纯解析下沉）S6a–S6d 已落地**（S6a `prompt_tokens`、S6b `sse_dispatch`、S6c `ag_ui_parser`、S6d TUI 分类器适配器；S6e 可选缓做，见 §4.11 / §6）；**S7a（chat body 可选块取值规则）已落地**（见 §4.12 / §6）  
+> **状态**：S1–S4 **已落地**；hash 交接键名、S5 health JSON 子集、**斜杠名字表**、**端点路径常量（`paths`）**、**通用 HTTP 错误文案（`messages`）** 均已落地；**S6（SSE / AG-UI 纯解析下沉）S6a–S6d 已落地**（S6a `prompt_tokens`、S6b `sse_dispatch`、S6c `ag_ui_parser`、S6d TUI 分类器适配器；S6e 可选缓做，见 §4.11 / §6）；**S7a（chat body 可选块取值规则）已落地**（见 §4.12 / §6）；**S11（上下文用量口径）已落地**（见 §4.15）  
 > **范围**：`frontend`（WASM）、`crabmate-connect`（Desktop/Android 壳）、`crabmate-tui`（远程终端）之间的重复逻辑（原 `crabmate-tui-core` 已并入 `crabmate-tui` `src/serve/`，见 §2 注记）  
 > **关联**：[remote_cli_tui.md](./remote_cli_tui.md)、[tauri_gui_mvp_design.md](./tauri_gui_mvp_design.md)、[contract_pin.md](./contract_pin.md)、产品面对照 [client_capability_matrix.md](./client_capability_matrix.md)；Server [`client_shell_split.md`](https://github.com/noisystreet/CrabMate/blob/main/docs/design/client_shell_split.md)
 
@@ -89,6 +89,7 @@ frontend/                # wasm fetch 适配器 + UI；S1–S4 已用 client-api
 | `tool_display`（S8） | 工具调用 → 单行展示推导（非占位 summary 优先、语义槽、截断残片打捞）；实时 SSE / TUI 回放 / Web 水合三路径共用 |
 | `workspace_rel`（S9） | 工作区相对路径片段运算（`child_rel` / `parent_rel`；两端原本逐字等价） |
 | `client_llm_presets`（S10） | LLM 网关预设表（7 条 `id`+`url`）+ URL→id / 下标 / 显示名投影；`server` 必在首项、`custom` 必在末项为不变量 |
+| `context_axis`（S11） | 上下文用量口径：`ContextAxis`（`used` / `fixed` / `raw_cap` / `baseline_estimate`）、固定开销拆分、`ContextUsedWatermark`（滚动水位 + 压缩回落）、紧凑 token 文本、告警阈值 |
 
 ---
 
@@ -283,6 +284,34 @@ TUI 内部还有第三处内联匹配（`settings_panel_draw.rs::api_base_displa
 Web 的 `api_base_preset_select` 字符串链路（写入已保存模型预设的标签）不动。
 
 ---
+
+### 4.15 上下文用量口径（S11 已落地）
+
+| 端 | 路径 |
+|----|------|
+| frontend | `app/status_context.rs`（轴线与文本，已改为消费共享实现并 re-export）、`chat_session_state.rs`（`ContextUsedWatermark` 改 re-export）、`app/context_usage_page.rs` |
+| tui | **尚未消费**：状态行暂无 context 段（`status.rs` / `status_stack.rs` 无该字段） |
+
+共享实现（`crabmate_client_api::context_axis`）：
+
+| 项 | 规则 |
+|----|------|
+| `ContextAxis` | 显示口径 `used / raw_cap`（分子分母都含每轮固定开销）；`fixed` 为用量条灰段；`baseline_estimate` = 无服务端实测、仅有 `GET /status` 基线（文本带 `~`） |
+| `context_axis_split` | `F = used − (message_tokens + attachment_tokens)`；缺 `used_input_tokens` / `message_tokens` 返回 `None`（调用方退化为 `fixed = 0`）；content 超 `used` 时 `saturating_sub` 记 0，不 panic |
+| `context_axis_apply_watermark` | 单调不减；`baseline_estimate` 不施水位；水位 `key` 与当前 cid 不一致时不施（切会话 / 重发流换 cid 的瞬间不得把旧峰值搬到新会话） |
+| `ContextUsedWatermark` | `observe` 取滚动最大且 `key` 变化即重置；`reset` **允许回落**（压缩 / 裁剪后必须跟着降，否则状态栏停在旧峰值） |
+| `format_compact_tokens` / `format_compact_cap_tokens` | 已用保留一位小数 `k`、上限用整 `k`；阈值 `≥ 10_000` |
+| `CONTEXT_WARN_PCT` | 用量条告警阈值 `90.0`，原为 `status_context.rs` 与 `context_usage_page.rs` 两处字面量 |
+
+**留端**（装配而非口径，不进共享层）：
+
+| 留端项 | 原因 |
+|--------|------|
+| 分母「上下文窗口」的取值 | 需读本机设置与 `/status`（frontend `status_bar_effective_llm_context_tokens`），是各端偏好层 |
+| 分子的 tiktoken 快照匹配 | frontend 要按 `conversation_id` 比对活动会话（`status_bar_context_snapshot_for_active_session`） |
+| `status_context_meter_fill_class` | CSS 类名，属 presentation |
+
+**为 TUI 备好的部分**：`ContextAxis` + `ContextUsedWatermark` + 文本格式化即 TUI 状态行加 context chip 所需的全部口径（ADE 0005 要求「同口径 fill + 压缩后 drop」）。本轮只落共享层与 frontend 改造，TUI 侧尚无消费点，故 capability matrix 未变。
 
 ## 5. 明确不共享
 

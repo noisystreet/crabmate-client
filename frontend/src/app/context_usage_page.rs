@@ -12,9 +12,8 @@ use crate::i18n::{self, Locale};
 use crate::icon::icon_chevron_left;
 
 use super::status_context::{
-    ContextAxis, context_axis_apply_watermark, context_axis_used_pct, format_compact_tokens,
-    status_bar_context_axis, status_bar_context_snapshot_for_active_session,
-    status_bar_context_value_text,
+    ContextAxis, context_axis_apply_watermark, context_axis_used_pct, context_value_text,
+    format_compact_tokens, status_bar_context_axis, status_bar_context_snapshot_for_active_session,
 };
 use super::status_tasks_state::StatusTasksSignals;
 
@@ -325,8 +324,8 @@ fn context_usage_notes(baseline_estimate: bool, reserved: Option<u32>, locale: L
 fn context_usage_loaded_view(data: &ContextUsageData, locale: Locale) -> AnyView {
     let axis = data.axis_watermark;
     let current = data.axis_current;
-    let summary = status_bar_context_value_text(axis);
-    let current_summary = status_bar_context_value_text(current);
+    let summary = context_value_text(axis);
+    let current_summary = context_value_text(current);
     // 峰值虚线仅在「峰值高于当前」时渲染；aria 与之同步，避免描述不存在的虚线。
     let peak = (axis.used > current.used && axis.raw_cap != 0).then(|| summary.clone());
     let aria = i18n::context_usage_bar_aria(locale, &current_summary, peak.as_deref());
