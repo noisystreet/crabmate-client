@@ -1,6 +1,6 @@
 # TUI 易用性规划（对齐 Desktop 聊天体验）
 
-> **状态**：Wave 1 已落地 W1.1 全屏 `/resume`、W1.2 忙时排队、W1.3 会话级草稿、W1.4 复制（OSC52 / 外部工具）、W1.6 多行粘贴（bracketed paste，`CM_TUI_PASTE=off` 可关）；**W1.5 会话列输入过滤仍未落地**（`session_filter` 等在 `tui_mode` 无对应字段）。W2.1 历史回放已落地**最新页**（`GET /conversation/messages`，更早的分页未做），W2.2 只剩左栏 `d` 与行内重命名（改名仍缺 serve 端点）。Wave 3 仍为方案。逐波按本文落地；每波独立 PR，落地后必须同 PR 更新 [`client_capability_matrix.md`](./client_capability_matrix.md) 对应格（§4）。
+> **状态**：Wave 1 已落地 W1.1 全屏 `/resume`、W1.2 忙时排队、W1.3 会话级草稿、W1.4 复制（OSC52 / 外部工具）、W1.6 多行粘贴（bracketed paste，`CM_TUI_PASTE=off` 可关）；**W1.5 会话列输入过滤仍未落地**（`session_filter` 等在 `tui_mode` 无对应字段）。W2.1 历史回放已落地**最新页**（`GET /conversation/messages`，更早的分页未做）；W2.2 **删除**已落地（左栏 `Delete` 先确认 / `Shift+Delete` 直删，在途回合拒绝），**只缺重命名**（无 serve 端点）；W3.1 `/` 补全菜单也已落地（`tui_mode/slash_menu.rs`：内建命令 + `GET /skills` 候选）。Wave 2 的 W2.3 / W2.4 与 Wave 3 其余项仍为方案。逐波按本文落地；每波独立 PR，落地后必须同 PR 更新 [`client_capability_matrix.md`](./client_capability_matrix.md) 对应格（§4）。
 > **范围**：`crabmate-tui`（全屏 `tui` 为主，`repl` 相应联动）；候选与取舍参照 Desktop / Web（`frontend/`）聊天体验，**语义对齐，不追求 UI 复刻**。
 > **关联**：[`remote_cli_tui.md`](./remote_cli_tui.md)（TUI 母方案，P1–P5）、[`client_capability_matrix.md`](./client_capability_matrix.md)（TUI 行 L53–L81）、[`tui_settings_panel.md`](./tui_settings_panel.md)（设置面板，W3 遗留）、[`chat_ui_todo.md`](./chat_ui_todo.md)（Desktop 聊天 UI 已勾项 = “已做过”的参照，不要当缺口重做）、[`contract_pin.md`](./contract_pin.md)（契约钉点）、Server `docs/`（SSE / user-data / 会话权威）
 
@@ -18,14 +18,15 @@
 
 | # | 缺口（TUI 现状） | Desktop 参照 | 影响 |
 |---|---|---|---|
-| G1 | 全屏 `tui` 无 `/resume`：`start_turn` 中 `stream_resume` 写死 `None`，控制斜杠表也无 `/resume`（`tui_mode/mod.rs`、`tui_mode/controls.rs`） | in-app stream resume（矩阵 L62，TUI=yes 目前仅 repl 路径） | 远程断线/取消未送达时全屏只能重开一轮，丢上下文 |
+| G1 | ~~全屏 `tui` 无 `/resume`~~ → **已落地**：断线 / 取消未送达时保留断点，控制斜杠表已有 `/resume`（`tui_mode/resume.rs`、`controls.rs`） | in-app stream resume（矩阵 L62） | 远程断线/取消未送达时全屏只能重开一轮，丢上下文 |
 | G2 | ~~回合进行中 Enter 仅提示并保留输入~~ → **已落地**：忙时 Enter 进排队槽，回合**正常**结束后自动发出；Esc 清队；取消 / 出错则退回输入框（`tui_mode/drafts.rs`） | 忙时排队下一句 + 排队 chip + 结束后自动发出（`composer_follow_up.rs`） | 用户意图被打断，长回合场景需干等或反复重试 |
 | G3 | ~~composer 为全局单缓冲，不保存/不恢复各会话草稿~~ → **已落地**：按 `conversation_id` 换入换出，`/conv new` 起空白（`tui_mode/drafts.rs`） | 每次切会话 flush 当前草稿、回来恢复（`composer.rs`、`session_ops.rs::flush_active_composer_draft`） | 遗留草稿会“串”到下一个会话；切走再回来内容丢失 |
-| G4 | 无任何复制路径：未启用鼠标捕获、无剪贴板调用（`tui_mode` 全目录无 Mouse/Clipboard/OSC52） | 消息 copy + 代码块「复制」按钮（`md_code_copy.rs`、`tui_actions_bar.rs`） | 终端里想取走一段代码/回复只能手工选中或重打 |
-| G5 | 会话列表无 CRUD/过滤/导出：左栏仅 use/new/refresh（`mod.rs`）；repl `/conv list` 只读（`slash.rs:199-245`）。`/conv new` 已改为**写**服务端会话索引（`serve/sessions.rs`：`GET` → 复用或插入空白行 → 全量 `PUT`，首轮结束回填 `server_conversation_id`，切走回收空白行，首条消息按 Web 规则起名，语义对齐 Web 的 `prefer_or_create_empty_session` / `reclaim_disposable_blank_session` / `title_from_user_prompt`），左栏与 Web/Desktop 同步可见；仍无重命名/删除 UI | 排序 + 标题过滤 + 全文搜索 + 重命名/删除/导出（`session_rail.rs`、`session_list_modal.rs`） | 会话一多靠翻，无清理手段 |
-| G6 | 切换会话后 transcript 从空开始，**无历史回放**（矩阵 L53；`state.rs`「v1 无历史回放」） | 会话水合 + 顶部「加载更早」prepend（`session_hydrate.rs`、`tui_stream_view.rs`） | 续聊时看不到前文，须先切到别的壳回顾 |
-| G7 | 无 retry / regen / branch / 编辑用户消息 | 消息回合菜单（`message_row_actions.rs`、`user_message_edit.rs`） | 模型答错只能整轮重发或手动复制改写 |
-| G8 | 审批浮层命令预览截断（宽 78/高 8，`render.rs:550-562`） | 底部审批条可展开完整命令 + 失败保留重试（`approval_modal.rs`） | 长命令看不到全貌，易误判 |
+| G4 | ~~无任何复制路径~~ → **已落地**（`tui_mode/clipboard.rs`）：`/copy [assistant\|user]`（别名 `/yank`）与 `Ctrl+Y`。**残余**：粒度固定为「最近一条非空消息」，不能指定中间某条；鼠标捕获占用了终端原生拖选（需 Shift+拖） | 消息 copy + 代码块「复制」按钮（`md_code_copy.rs`、`tui_actions_bar.rs`） | 终端里想取走一段代码/回复只能手工选中或重打 |
+| G5 | 会话列表：左栏 use/new/refresh + **删除**（`Delete` 先确认 / `Shift+Delete` 直删，`tui_mode/sidebar_keys.rs`）；`/conv new` 已改为**写**服务端会话索引（`serve/sessions.rs`：`GET` → 复用或插入空白行 → 全量 `PUT`，首轮结束回填 `server_conversation_id`，切走回收空白行，首条消息按 Web 规则起名），左栏与 Web/Desktop 同步可见；仍缺重命名（**无 serve 端点**）、标题过滤、跨会话搜索、导出 | 排序 + 标题过滤 + 全文搜索 + 重命名/删除/导出（`session_rail.rs`、`session_list_modal.rs`） | 会话一多靠翻，无过滤手段 |
+| G6 | ~~切换会话后 transcript 从空开始~~ → **部分落地**：切换 / 启动回放 `GET /conversation/messages` 的**最新一页**；`has_older` 时只提示「更早的消息暂不回放」，**没有「加载更早」**（`tui_mode/history.rs`） | 会话水合 + 顶部「加载更早」prepend（`session_hydrate.rs`、`tui_stream_view.rs`） | 续聊时看不到前文，须先切到别的壳回顾 |
+| G7 | 无 retry / regen / branch / 编辑用户消息（`controls.rs` 无对应命令，`tui_mode` 里无 `regen`/`branch`） | 消息回合菜单（`message_row_actions.rs`、`user_message_edit.rs`） | 模型答错只能整轮重发或手动复制改写 |
+| G8 | 审批浮层把命令截成**一行**且无法展开（`overlay.rs:21-23` 固定 78×9，预览经 `truncate_display` 只留单行） | 底部审批条可展开完整命令 + 失败保留重试（`approval_modal.rs`） | 长命令看不到全貌，易误判 |
+| G9 | 澄清问卷（`clarification_questionnaire`）在 TUI 无交互 UI：`serve/chat_classify.rs` 只有 `clarify_trace` 钩子，没有表单 | 问卷表单（Web `frontend`） | 模型需要澄清时 TUI 这侧拿不到结构化提问 |
 
 另有与 Desktop 同步暂缓/不做项，见 §2 非目标（勿误当缺口）。
 
@@ -56,7 +57,7 @@
 
 ### Wave 1 · 纯客户端（无新契约，推荐先做）
 
-#### W1.1 全屏断线续传 `/resume`（G1）
+#### W1.1 全屏断线续传 `/resume`（G1）— 已落地（`tui_mode/resume.rs`）
 
 - **参照**：repl `/resume`（`main.rs:499-594` 断点记录 + `stream_resume:{job_id,after_seq}` 重挂）；Desktop in-app resume（矩阵 L62）。
 - **方案**：把「断点记录」从 repl 提升为 turn 层通用状态——全屏回合意外中断（网络 `InterruptedStream` / 取消未送达）时在 `state.rs` 记录 `{text, conversation_id, job_id, after_seq}`，状态栏/系统行提示「断线：输入 /resume 续传」；新增 `/resume` 控制斜杠（`controls.rs` 解析 → `mod.rs` 以 `stream_resume` 重新 attach）。已确认取消/正常结束的回合不可续，与 repl 一致。
@@ -109,19 +110,19 @@
 
 > 前置：核对 serve 是否提供「会话消息分页读取」「会话删除/改名」端点（TUI `/conv list` 已证明会话列表存在；Desktop 水合数据源在 serve 侧）。未 pin 前不落地，禁止用猜测端点写代码。
 
-#### W2.1 会话历史回放 + 「加载更早」（G6）
+#### W2.1 会话历史回放 + 「加载更早」（G6）— 最新页已落地，分页未做
 
 - **参照**：Desktop `session_hydrate.rs` 水合 + 顶部「加载更早」prepend 且滚动锚定不跳（`scroll_shell.rs::compensate_after_prepend`）。
 - **方案**：切换会话（Enter/`/conv use`）时按需拉最近一页历史渲染（复用行模型，thinking/工具行转摘要）；顶部「↑ 加载更早」翻页；prepend 时视口补偿。更新矩阵 L53 描述。
 - **落点**：`state.rs`、`mod.rs`、`worker.rs`、`render.rs`；契约侧 tui `serve/` 模块（原 `crabmate-tui-core`）。
 - **依赖**：serve 消息分页端点；行模型需能承载多页（`lines` 追加 + `prepend` 区）。
 
-#### W2.2 会话重命名/删除（G5 的一部分）
+#### W2.2 会话重命名/删除（G5 的一部分）— 删除已落地，重命名待端点
 
 - **参照**：Desktop 行内重命名 + 删除确认（`session_modal_row.rs`、`session_ops.rs`）。
-- **方案**：左栏新增操作：`d` 删除选中会话（弹确认：当前在途流式会话拒绝）、重命名行内编辑。
-- **已落地（部分）**：契约钉 0.6.0 提供 `DELETE /conversation/{conversation_id}`（幂等 204）；repl `/conv delete [<id>|current]` 已接（`slash.rs`），仅删服务端记录，不动 Web 侧栏索引。待续：左栏 `d` / 行内重命名（改名仍无端点）。
-- **依赖**：左栏 `d` 需在途流守卫与确认文案（对齐 Desktop）；重命名仍缺 serve 端点。
+- **已落地**：左栏 `Delete` 进入确认态（`y` 确认、其它键取消）、`Shift+Delete` 免确认直删，在途回合拒绝删除——对齐 Desktop 的两级快捷键（`tui_mode/sidebar_keys.rs`，纯逻辑有单测）。删除走契约钉的 `DELETE /conversation/{conversation_id}`（幂等 204）；repl 另有 `/conv delete [<id>|current]`（`slash.rs`），只删服务端记录、不动 Web 侧栏索引。
+- **未做**：行内重命名——**仍缺 serve 端点**，客户端不能自造 `PUT`；左栏也没有过滤/搜索（见 G5 / W1.5）。
+- **依赖**：重命名需 Server 先提供端点并在 `contract_pin.md` 钉住；不得猜路径。
 
 #### W2.3 回合 重试 / 再生 / 编辑用户消息（G7）
 
@@ -138,7 +139,7 @@
 
 ### Wave 3 · 锦上添花 / 开放决策
 
-- **W3.1 斜杠补全列表**：composer 输入 `/` 前缀时弹出内建命令候选（`controls.rs` 表）上下选择/Enter 采纳；skills 补全需先确认 skills 数据源（Desktop `/` 菜单含 skills），未确认前只补内建命令。
+- **W3.1 斜杠补全列表** — **已落地**（`tui_mode/slash_menu.rs`）：composer 输入 `/` 前缀弹出候选（内建命令 `controls.rs` 表 + `GET /skills` 的 skill），↑↓ 选择 · Tab/Enter 采纳 · Esc 关闭；候选为空时底部说明 skill 为何缺失。
 - **W3.2 审批浮层看完整命令**：G8，浮层内加「展开完整命令」键（或 PgDn 查看超长命令），对齐 Desktop 审批条可展开。
 - **W3.3 阅读增强**：OSC8 超链接（wezterm/kitty 可点击 URL）、工具行/thinking 详情整段展开（受 SSE 负载约束，先验证负载是否携带完整文本）。
 - **W3.4 设置面板补齐 W3 遗留**：MCP 全局开关与 `tool_timeout_secs`、Session SQLite 开关——实现归属 [`tui_settings_panel.md`](./tui_settings_panel.md) §7，本规划仅列入口不展开。
@@ -153,9 +154,10 @@
 | W1.2/W1.3/W1.4/W1.5 | L53「Full-screen TUI」Notes / L60「Control slashes」 | Notes 追加排队/草稿/复制/过滤描述 |
 | W1.6 | L53「Full-screen TUI」Notes | 多行输入一栏补「整段粘贴经括号粘贴一次落地，`CM_TUI_PASTE=off` 可关」 |
 | W2.1 | L53 Notes「switching sessions starts a fresh transcript」 | 改为「切换可翻历史」 |
-| W2.2 | L61「Web session list + resume…」TUI 列/Notes | 补 CRUD 能力描述 |
+| W2.2 | L62「Web session list + resume…」TUI 列/Notes | 删除已补（`Delete` / `Shift+Delete`）；重命名待 serve 端点 |
 | W2.3 | L59「Ask/Plan/Act…」附近或新增行 | 视方案形态在 chat/tools 段新增或并入 Notes |
 | W2.4 | L61 Notes | 补导出能力 |
+| W3.1 | L60「Control slashes」TUI 列 | 已同步（TUI 有 `/` 补全菜单，含 skills 候选） |
 
 > 矩阵维护规则：改了用户可见能力就必须在同 PR 更新对应格（§顶注），不允许“下个 PR 再补”。
 
@@ -171,6 +173,7 @@
   - W1.4：kitty/wezterm 下复制助手消息/代码块 → 粘贴到编辑器；不支持终端给出提示。
   - W1.5：左栏输入字母过滤 → 选中使用；清空恢复全量。
   - W1.6：从编辑器复制一段多行文本粘进 composer → 整段落进输入框（含换行，光标在末尾）、**不会**被当成交付；粘贴内容夹 `Tab` 不切换焦点；单次超 32K 字符时 transcript 提示截断。`CM_TUI_PASTE=off` 时回到逐字符按键的旧行为。
+  - W2.2：左栏选中会话按 `Delete` → 出现确认提示，`y` 删除、其它键取消；回合进行中按 `Delete` 应被拒绝并说明原因；`Shift+Delete` 免确认直删。
 - **无浏览器 E2E**：TUI 不属 Playwright 范围（`remote_cli_tui.md`）。
 
 ---
