@@ -8,7 +8,11 @@ use std::time::Duration;
 use crate::serve::{ApprovalDecision, ApprovalGate, CommandApprovalData, TermError};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
+use super::TuiApp;
+use super::render;
+use super::state::ApprovalOverlay;
 use super::worker::UiEvent;
+use ratatui::layout::Rect;
 
 /// 一条待 UI 决策的审批请求（携带回传通道）。
 pub struct ApprovalPrompt {
@@ -149,6 +153,85 @@ pub fn decision_for_key(key: &KeyEvent, choice: &mut ApprovalChoice) -> Option<A
     }
 }
 
+/// 展开态下 `PgUp` / `PgDn` 一步滚几行。
+const APPROVAL_PAGE_STEP: usize = 8;
+
+/// 浮层「看完整命令」的按键：`Ctrl+E` 展开/收起；展开后 `↑/↓`（vim 的 `k`/`j`）逐行、
+/// `PgUp`/`PgDn` 翻页、`Home`/`End` 到首尾。返回 `true` 表示已消费——这些键既不能
+/// 参与决策，也不能漏到输入框。
+///
+/// `bounds` 是命令区的（总行数, 可显示行数），由渲染侧同一套折行算出。上界必须精确：
+/// 否则 `End` 会停在渲染时才被截掉的越界值上，之后按 `↑` 看起来像失灵。
+pub(super) fn approval_view_key(
+    key: &KeyEvent,
+    overlay: &mut ApprovalOverlay,
+    bounds: (usize, usize),
+) -> bool {
+    if key.modifiers.contains(KeyModifiers::CONTROL) {
+        // Ctrl+E：审批期间它本来空闲（thinking 折叠只在回合内才有意义）。
+        if !matches!(key.code, KeyCode::Char('e')) {
+            return false;
+        }
+        overlay.expanded = !overlay.expanded;
+        overlay.scroll = 0;
+        return true;
+    }
+    if !overlay.expanded {
+        return false;
+    }
+    let (total, body) = bounds;
+    let max_scroll = total.saturating_sub(body);
+    let next = match key.code {
+        KeyCode::Up | KeyCode::Char('k') => overlay.scroll.saturating_sub(1),
+        KeyCode::Down | KeyCode::Char('j') => overlay.scroll.saturating_add(1),
+        KeyCode::PageUp => overlay.scroll.saturating_sub(APPROVAL_PAGE_STEP),
+        KeyCode::PageDown => overlay.scroll.saturating_add(APPROVAL_PAGE_STEP),
+        KeyCode::Home => 0,
+        KeyCode::End => max_scroll,
+        _ => return false,
+    };
+    overlay.scroll = next.min(max_scroll);
+    true
+}
+
+/// 浮层画在「聊天主体」上，而 `last_size` 是整屏：这里按固定 6 行估掉 composer
+/// 边框 + 内容 + 状态栏。估大的方向只让滚动上界略宽，渲染侧还会再夹一次。
+const APPROVAL_CHROME_ROWS: u16 = 6;
+
+// 用显式生命周期而不是 `impl TuiApp<'_>`：lizard 的 Rust 解析器把 `'_` 当成
+// 未闭合的字符字面量，会从这一行开始把后面所有函数体吞进同一个函数（fn-nloc 会误报）。
+impl<'a> TuiApp<'a> {
+    /// 审批浮层期间的按键：先给「看完整命令」（`Ctrl+E` 展开、展开后滚动），再落到决策。
+    ///
+    /// 顺序不能反：展开态下 `↑/↓` 是滚动、`PgUp/PgDn` 是翻页；若先问 [`decision_for_key`]，
+    /// 方向键会被当成「移动选项」，滚动就永远不生效。
+    pub(super) fn on_approval_key(&mut self, key: &KeyEvent) {
+        let bounds = self.approval_view_bounds();
+        let handled = self
+            .st
+            .approval
+            .as_mut()
+            .is_some_and(|ap| approval_view_key(key, ap, bounds));
+        if handled {
+            return;
+        }
+        if let Some(decision) = decision_for_key(key, &mut self.st.approval_choice) {
+            let via_ctrl_abort = super::is_ctrl_abort(key);
+            self.answer_approval(decision, via_ctrl_abort);
+        }
+    }
+
+    /// 浮层命令区的（总行数, 可显示行数）：与渲染同一套折行，用来夹住滚动上界。
+    fn approval_view_bounds(&self) -> (usize, usize) {
+        let Some(ap) = self.st.approval.as_ref() else {
+            return (0, 0);
+        };
+        let (w, h) = self.last_size;
+        let area = Rect::new(0, 0, w, h.saturating_sub(APPROVAL_CHROME_ROWS));
+        render::approval_scroll_bounds(area, ap, ap.expanded)
+    }
+}
+
 /// 决策后写入 transcript 的结果词。
 pub fn decision_summary(decision: &ApprovalDecision) -> &'static str {
     match decision {
@@ -157,6 +240,10 @@ pub fn decision_summary(decision: &ApprovalDecision) -> &'static str {
         ApprovalDecision::AllowAlways => "已允许（始终）",
     }
 }
+
+#[cfg(test)]
+#[path = "approve_view_tests.rs"]
+mod approve_view_tests;
 
 #[cfg(test)]
 mod tests {

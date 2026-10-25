@@ -16,6 +16,9 @@ use unicode_width::UnicodeWidthStr;
 use super::{Palette, PanelContent, UiState, paint_bg, truncate_display};
 // 选项枚举在 `approve`（与按键→决策的逻辑同处）。
 use super::super::approve::ApprovalChoice;
+// 展开态与滚动位置存在浮层对象上（`state`）；折行与粘贴归一化同口径（`text`）。
+use super::super::state::ApprovalOverlay;
+use super::super::text::wrap_display;
 
 /// 审批浮层宽高上限。
 const OVERLAY_MAX_WIDTH: u16 = 78;
@@ -127,40 +130,185 @@ pub(crate) fn settings_panel_content_width(area: Rect) -> usize {
     content_inner_rect(settings_panel_layout(area).content).width as usize
 }
 
+/// 浮层「看完整命令」展开档的留白（左右各 2 列，上下共 4 行）。
+const APPROVAL_MARGIN: u16 = 4;
+/// 展开档的宽度上限：再宽反而要横着扫，读命令不如窄一点折行。
+const APPROVAL_EXPANDED_MAX_WIDTH: u16 = 120;
+/// 展开档至少这么高（边框 2 + 命令 1 + 尾部 5 + 余量），否则不如留在收起档。
+const APPROVAL_EXPANDED_MIN_HEIGHT: u16 = 9;
+/// 尾巴固定行数（不含 allowlist）：空行 + 状态 + 选项 + 两行提示。
+const APPROVAL_TAIL_BASE_ROWS: usize = 5;
+
+/// 审批浮层的布局结果。
+struct ApprovalLayout {
+    /// 浮层矩形；`is_empty()` 表示这块地方画不下。
+    rect: Rect,
+    /// 命令折行后的总行数（收起档也按折行计，只是只画第 1 行）。
+    total: usize,
+}
+
+impl ApprovalLayout {
+    /// 命令区折行宽度：扣掉边框左右各 1 列，再各留 1 列内缩。
+    /// 渲染与 `total` 必须同源，否则滚动上界会与实际能画的行数对不上。
+    fn text_width(&self) -> usize {
+        self.rect.width.saturating_sub(4).max(1) as usize
+    }
+}
+
+/// 计算浮层矩形与命令总行数。收起档保持原来的 78×9，展开档铺满可用区域。
+fn approval_layout(area: Rect, ap: &ApprovalOverlay, expanded: bool) -> ApprovalLayout {
+    const EMPTY: ApprovalLayout = ApprovalLayout {
+        rect: Rect::new(0, 0, 0, 0),
+        total: 0,
+    };
+    let width_cap = if expanded {
+        APPROVAL_EXPANDED_MAX_WIDTH
+    } else {
+        OVERLAY_MAX_WIDTH
+    };
+    let width = area.width.saturating_sub(APPROVAL_MARGIN).min(width_cap);
+    let (height, min_height) = if expanded {
+        (
+            area.height.saturating_sub(APPROVAL_MARGIN),
+            APPROVAL_EXPANDED_MIN_HEIGHT,
+        )
+    } else {
+        (OVERLAY_HEIGHT, OVERLAY_HEIGHT)
+    };
+    if width == 0 || height < min_height {
+        return EMPTY;
+    }
+    let rect = centered(area, width, height);
+    let mut layout = ApprovalLayout { rect, total: 1 };
+    layout.total = wrap_display(&ap.preview(), layout.text_width()).len();
+    layout
+}
+
+/// 尾巴行数（含 allowlist 行）：渲染与按键夹滚动上界共用。
+fn approval_tail_rows(has_allowlist: bool) -> usize {
+    APPROVAL_TAIL_BASE_ROWS + usize::from(has_allowlist)
+}
+
+/// 命令区的（总行数, 可显示行数）。
+///
+/// 按键侧用它夹住 `scroll` 上界——`End` 要能停在最后一页、`↑` 要能从那里往上走，
+/// 光靠渲染时截断做不到（那会让 `scroll` 停在越界值上，`↑` 看起来失灵）。
+pub(crate) fn approval_scroll_bounds(
+    area: Rect,
+    ap: &ApprovalOverlay,
+    expanded: bool,
+) -> (usize, usize) {
+    let layout = approval_layout(area, ap, expanded);
+    if layout.rect.is_empty() {
+        return (0, 0);
+    }
+    let rows = layout.rect.height.saturating_sub(2) as usize;
+    let body = rows
+        .saturating_sub(approval_tail_rows(ap.allowlist_key.is_some()))
+        .max(1);
+    (layout.total, body)
+}
+
 /// 审批浮层：命令预览 + 按键提示，居中浮在聊天主体上。
+///
+/// 两档：**收起**（默认，命令区 1 行、超宽截断）与**展开**（`Ctrl+E`，铺满可用高度、
+/// 按显示宽折行并可滚动）。展开档就是 G8 的修法——审批问的是「要不要放行这条命令」，
+/// 命令看不全等于让人闭眼签字。
 pub(super) fn render_approval_overlay(frame: &mut Frame, st: &UiState, area: Rect) {
     let Some(ap) = &st.approval else {
         return;
     };
-    let width = area.width.saturating_sub(4).min(OVERLAY_MAX_WIDTH);
-    if width == 0 || area.height < OVERLAY_HEIGHT {
+    let layout = approval_layout(area, ap, ap.expanded);
+    if layout.rect.is_empty() {
         return;
     }
-    // 纵向居中而不是贴底：贴底时它和状态栏、composer 提示挤在一起，容易被当成
-    // 一行普通输出扫过去；居中之后才像「卡住等你决策」的模态。方块大小不变，
-    // 所以 8 行内容仍完整可见。
-    let rect = centered(area, width, OVERLAY_HEIGHT);
-    // 先清空矩形内字形，再整体铺底色：浮层必须是独立色块，
-    // 不能与底下聊天区残留文本/上一帧内容视觉重叠。底色跟主题走——
-    // 固定深底在浅色主题下会让正文色（深字）不可读。
     let pal = &st.palette;
-    frame.render_widget(Clear, rect);
-    paint_bg(frame, rect, pal.overlay_bg);
+    let block = approval_block(pal, ap.expanded);
+    let inner = block.inner(layout.rect);
+    // 先清空矩形内字形，再整体铺底色：浮层必须是独立色块，不能与底下聊天区残留
+    // 文本/上一帧内容视觉重叠。底色跟主题走——固定深底在浅色主题下会让正文色不可读。
+    frame.render_widget(Clear, layout.rect);
+    paint_bg(frame, layout.rect, pal.overlay_bg);
+    frame.render_widget(block, layout.rect);
+
+    let rows = inner.height as usize;
+    let body_h = rows
+        .saturating_sub(approval_tail_rows(ap.allowlist_key.is_some()))
+        .max(1);
+    let scroll = ap.scroll.min(layout.total.saturating_sub(body_h));
+    let body_area = Rect::new(inner.x, inner.y, inner.width, body_h as u16);
+    frame.render_widget(
+        Paragraph::new(approval_command_lines(ap, pal, &layout, body_h, scroll)),
+        body_area,
+    );
+    let tail_area = Rect::new(
+        inner.x,
+        inner.y.saturating_add(body_h as u16),
+        inner.width,
+        rows.saturating_sub(body_h) as u16,
+    );
+    frame.render_widget(
+        Paragraph::new(approval_tail_lines(ap, st, &layout, body_h, scroll)),
+        tail_area,
+    );
+}
+
+/// 浮层边框与标题；标题随展开态变化，让「再按一次能收起」始终可见。
+fn approval_block(pal: &Palette, expanded: bool) -> Block<'static> {
+    let title = if expanded {
+        " 命令审批（等待决策 · 已展开） "
+    } else {
+        " 命令审批（等待决策） "
+    };
     // 边框 / 标题用 `err`：这是「回合被阻塞、等你决策」的状态，与正常的 accent 边框
     // 区分开；`mono` 下 `err` 已退化为 `Reset`，仍有边框与标题可辨。
-    let block = Block::default()
+    Block::default()
         .borders(Borders::ALL)
         .border_style(Style::new().fg(pal.err))
         .title(Span::styled(
-            " 命令审批（等待决策） ",
+            title,
             Style::new().fg(pal.err).add_modifier(Modifier::BOLD),
-        ));
-    let inner = block.inner(rect);
-    let preview = truncate_display(&ap.preview(), inner.width.saturating_sub(2) as usize);
-    let mut lines: Vec<Line<'static>> = vec![Line::from(Span::styled(
-        preview,
-        Style::new().fg(pal.fg).add_modifier(Modifier::BOLD),
-    ))];
+        ))
+}
+
+/// 命令区文本：收起档一行（超宽以 `…` 收尾），展开档按宽度折行后按 `scroll` 取窗口。
+fn approval_command_lines(
+    ap: &ApprovalOverlay,
+    pal: &Palette,
+    layout: &ApprovalLayout,
+    body_h: usize,
+    scroll: usize,
+) -> Vec<Line<'static>> {
+    let style = Style::new().fg(pal.fg).add_modifier(Modifier::BOLD);
+    if !ap.expanded {
+        // 收起档：语义换行压成空格再截断——`Line` 里夹 `\n` 会被 Paragraph 当成
+        // 换行，把「一行预览」变成两行，后面的提示行就被顶掉。
+        let one_line = ap
+            .preview()
+            .chars()
+            .map(|c| if c.is_control() { ' ' } else { c })
+            .collect::<String>();
+        let text = truncate_display(&one_line, layout.text_width());
+        return vec![Line::from(Span::styled(text, style))];
+    }
+    wrap_display(&ap.preview(), layout.text_width())
+        .into_iter()
+        .skip(scroll)
+        .take(body_h)
+        .map(|text| Line::from(Span::styled(text, style)))
+        .collect()
+}
+
+/// 尾巴：allowlist（可选）、状态、三个选项、两行提示。
+fn approval_tail_lines(
+    ap: &ApprovalOverlay,
+    st: &UiState,
+    layout: &ApprovalLayout,
+    body_h: usize,
+    scroll: usize,
+) -> Vec<Line<'static>> {
+    let pal = &st.palette;
+    let mut lines: Vec<Line<'static>> = Vec::new();
     if let Some(key) = ap
         .allowlist_key
         .as_deref()
@@ -182,14 +330,33 @@ pub(super) fn render_approval_overlay(frame: &mut Frame, st: &UiState, area: Rec
     // 反色块比括号更容易一眼扫到当前会提交哪一项。
     lines.push(choice_line(st.approval_choice, pal));
     lines.push(Line::from(Span::styled(
-        "[←/→] 选择   [Enter] 确认   [Esc] 拒绝   [Ctrl+C] 拒绝",
+        approval_key_hint(ap.expanded, layout, body_h, scroll),
         Style::new().fg(pal.accent),
     )));
     lines.push(Line::from(Span::styled(
         "Ctrl+C 只拒绝本命令；回合继续，取消需再按一次 Ctrl+C",
         Style::new().fg(pal.muted),
     )));
-    frame.render_widget(Paragraph::new(lines).block(block), rect);
+    lines
+}
+
+/// 按键提示行。收起档必须把 `Ctrl+E` 放进这一行——它是唯一的「看完整命令」入口，
+/// 藏在第二行或超出宽度被截掉都等于没有。
+fn approval_key_hint(
+    expanded: bool,
+    layout: &ApprovalLayout,
+    body_h: usize,
+    scroll: usize,
+) -> String {
+    if !expanded {
+        return "[←/→] 选择   [Enter] 确认   [Esc] 拒绝   [Ctrl+E] 展开看完整".to_string();
+    }
+    let first = (scroll + 1).min(layout.total.max(1));
+    let last = (scroll + body_h).min(layout.total);
+    format!(
+        "[Ctrl+E] 收起   [↑/↓ PgUp/PgDn Home/End] 滚动   第 {first}-{last} / {} 行",
+        layout.total
+    )
 }
 
 /// 三个动作选项排成一行；选中项加 `err` 底色块。
