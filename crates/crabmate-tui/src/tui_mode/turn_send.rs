@@ -72,6 +72,8 @@ impl TuiApp<'_> {
         // 新回合：清上轮工具行映射并回到最新视图（搜索词保留、锚点释放）。
         self.st.reset_run_tools();
         self.st.view_offset = 0;
+        // 与 `view_offset = 0` 配套：视口状态有两份，只清一份会让「在顶」残留到下一帧。
+        self.st.body_at_top = false;
         self.st.release_search_anchor();
         // 断点要能把这一轮原样重发出去（`/resume`）。
         self.sent_turn = Some(TurnEcho {

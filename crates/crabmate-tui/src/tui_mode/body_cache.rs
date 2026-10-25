@@ -202,6 +202,45 @@ pub(super) fn history_banner_row(st: &UiState, width: usize) -> Option<BodyRow> 
     })
 }
 
+/// 正文视口的滚动窗口（纯计算，便于单测；渲染层只负责把 `start..end` 画出来）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct ScrollWindow {
+    /// 要画的物理行区间（半开）。
+    pub start: usize,
+    pub end: usize,
+    /// 视口是否已贴到内容顶（内容不足一屏时恒 `false`：没有可滚的余量）。
+    pub at_top: bool,
+}
+
+/// 算正文视口：`anchor_pos` 是搜索命中行的**物理**行号（`/find` 跳转时优先它）。
+///
+/// 两条路径都过同一处 `.min(max_back)` 兜底。搜索锚定的 `end` 理论上不会小于
+/// `min(viewport, rows_total)`，但那是要推导才成立的不变量 —— 不值得让渲染层依赖它，
+/// 也不值得让下一个人猜「为什么这里不用 clamp」。
+pub(super) fn scroll_window(
+    rows_total: usize,
+    viewport: usize,
+    view_offset: usize,
+    anchor_pos: Option<usize>,
+) -> ScrollWindow {
+    let max_back = rows_total.saturating_sub(viewport);
+    let back = match anchor_pos {
+        // 搜索锚定：把目标行放到视口上 1/3 处。
+        Some(pos) => {
+            let want_start = pos.saturating_sub(viewport / 3);
+            rows_total.saturating_sub((want_start + viewport).min(rows_total))
+        }
+        None => view_offset,
+    }
+    .min(max_back);
+    let end = rows_total.saturating_sub(back);
+    ScrollWindow {
+        start: end.saturating_sub(viewport),
+        end,
+        at_top: rows_total > viewport && back >= max_back,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -238,6 +277,42 @@ mod tests {
         st.lines[0] = LogLine::replayed(LineKind::User, "新的一行", false, None);
         st.lines[1] = LogLine::replayed(LineKind::Assistant, "新的二行", false, None);
         assert_same_as_full_rebuild(&st, &mut cache, 80);
+    }
+
+    /// 视口窗口的三种态：内容不足一屏时不算「在顶」；`back == max_back` 才算；中间不算。
+    /// 这条判定决定「前插是否继续贴顶」和「PgUp 要不要续翻」，改错会静默失效。
+    #[test]
+    fn scroll_window_marks_top_only_when_pinned_and_scrollable() {
+        // 不足一屏：没有可滚的余量，谈不上「在顶」。
+        let short = scroll_window(5, 10, crate::tui_mode::state::SCROLL_TOP, None);
+        assert!(!short.at_top, "内容不足一屏不该判在顶");
+        assert_eq!((short.start, short.end), (0, 5));
+
+        // 贴顶哨兵：clamp 到 max_back，视口顶对齐第一行。
+        let top = scroll_window(100, 10, crate::tui_mode::state::SCROLL_TOP, None);
+        assert!(top.at_top);
+        assert_eq!((top.start, top.end), (0, 10), "贴顶时画前 10 行");
+
+        // 回到底部：跟随最新。
+        let bottom = scroll_window(100, 10, 0, None);
+        assert!(!bottom.at_top);
+        assert_eq!((bottom.start, bottom.end), (90, 100));
+
+        // 恰好停在顶上（PgUp 累积到 max_back，不是哨兵）同样算在顶。
+        let exactly = scroll_window(100, 10, 90, None);
+        assert!(exactly.at_top, "back == max_back 就是贴顶");
+    }
+
+    /// 搜索锚定分支一样受 `max_back` 兜底：命中首行不越界（且等于贴顶），命中末行贴着下沿。
+    #[test]
+    fn scroll_window_clamps_the_search_anchor() {
+        let first = scroll_window(100, 10, 0, Some(0));
+        assert_eq!((first.start, first.end), (0, 10));
+        assert!(first.at_top, "锚定到首行等于贴顶");
+
+        let last = scroll_window(100, 10, 0, Some(99));
+        assert_eq!((last.start, last.end), (90, 100), "末行落在视口下沿");
+        assert!(!last.at_top);
     }
 
     /// 顶部分页提示（`/older`）也走「缓存 vs 全量重建」同一条路：两路必须产出同一行，

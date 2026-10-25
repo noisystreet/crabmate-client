@@ -36,7 +36,7 @@ fn status_info() -> StatusInfo {
 }
 
 /// 渲染一屏并取回缓冲区（无侧栏：聊天列即整屏，断言不必再算侧栏边界）。
-fn render_screen(st: &UiState) -> Buffer {
+fn render_screen(st: &mut UiState) -> Buffer {
     let rows = build_body_rows(st, chat_body_width(false, W));
     let info = status_info();
     let mut terminal = Terminal::new(TestBackend::new(W, H)).expect("terminal");
@@ -56,7 +56,7 @@ fn cell_background_replaces_themed_fills() {
     let mut st = UiState::new();
     st.set_palette(Palette::from_theme(Some("shadcn-dark")));
     let probe = (1u16, H - 1); // 状态栏：主题 chrome_bg 铺的格
-    let base = render_screen(&st);
+    let base = render_screen(&mut st);
     assert_eq!(
         base[probe].bg, st.palette.chrome_bg,
         "基线：状态栏空白处应是 chrome_bg"
@@ -64,7 +64,7 @@ fn cell_background_replaces_themed_fills() {
 
     let tint = Color::Rgb(12, 34, 56);
     st.bg_cells = Some(BgCells::solid(W, H, tint));
-    let painted = render_screen(&st);
+    let painted = render_screen(&mut st);
     assert_eq!(
         painted[probe].bg, tint,
         "格子背景应覆盖主题底色（否则图根本出不来）"
@@ -85,11 +85,11 @@ fn cell_background_keeps_every_non_theme_fill() {
     let mut st = UiState::new();
     st.set_palette(Palette::from_theme(Some("shadcn-dark")));
     st.push_line(LineKind::User, "hi"); // 用户气泡自带 accent 底色
-    let base = render_screen(&st);
+    let base = render_screen(&mut st);
     let pal = st.palette;
     let tint = Color::Rgb(12, 34, 56);
     st.bg_cells = Some(BgCells::solid(W, H, tint));
-    let painted = render_screen(&st);
+    let painted = render_screen(&mut st);
 
     let mut kept = 0usize;
     for y in 0..H {
@@ -167,7 +167,7 @@ fn every_theme_paints_bands_and_chat_area_from_palette_slots() {
         st.set_palette(pal);
         st.sidebar_visible = false;
         st.push_line(LineKind::User, "hi");
-        let buf = render_screen(&st);
+        let buf = render_screen(&mut st);
 
         // 状态栏 = chrome_bg（"框"），聊天区 = bg（"纸"）。两处都做反向断言：
         // 只要涂到了另一个槽位的颜色，就说明取色写反了，不管涂了多少格。
@@ -208,7 +208,7 @@ fn composer_border_follows_focus() {
     st.sidebar_visible = false;
     st.focus = Focus::Input;
 
-    let focused = render_screen(&st);
+    let focused = render_screen(&mut st);
     let corner = row_with(&focused, "┌");
     let x = (0..W)
         .find(|&x| focused[(x, corner)].symbol() == "┌")
@@ -220,7 +220,7 @@ fn composer_border_follows_focus() {
     );
 
     st.focus = Focus::Sidebar;
-    let blurred = render_screen(&st);
+    let blurred = render_screen(&mut st);
     let corner = row_with(&blurred, "┌");
     let x = (0..W)
         .find(|&x| blurred[(x, corner)].symbol() == "┌")
@@ -245,7 +245,7 @@ fn search_hit_reaches_the_buffer_and_vanishes_without_search() {
     st.push_line(LineKind::Assistant, "hello world");
     st.push_line(LineKind::Assistant, "nothing to see");
 
-    let quiet = render_screen(&st);
+    let quiet = render_screen(&mut st);
     assert_eq!(
         painted_cells(&quiet, pal.hit),
         0,
@@ -253,7 +253,7 @@ fn search_hit_reaches_the_buffer_and_vanishes_without_search() {
     );
 
     st.start_search("hello");
-    let hit = render_screen(&st);
+    let hit = render_screen(&mut st);
     assert!(
         painted_cells(&hit, pal.hit) >= "hello".len(),
         "命中行的 hello 应至少有 5 个格子铺 hit 底色，实际 {}",
@@ -269,7 +269,7 @@ fn inline_code_gets_code_background() {
     st.set_palette(pal);
     st.sidebar_visible = false;
     st.push_line(LineKind::Assistant, "run `cargo test` now");
-    let buf = render_screen(&st);
+    let buf = render_screen(&mut st);
     let y = row_with(&buf, "cargo");
     assert!(
         (0..W).any(|x| buf[(x, y)].bg == pal.code_bg),
@@ -289,7 +289,7 @@ fn mono_mode_paints_no_color_at_all() {
     st.push_line(LineKind::User, "hello");
     st.push_line(LineKind::Assistant, "world `code`");
     st.start_search("world");
-    let buf = render_screen(&st);
+    let buf = render_screen(&mut st);
     for y in 0..H {
         for x in 0..W {
             let cell = &buf[(x, y)];
@@ -320,7 +320,7 @@ fn code_block_renders_label_and_background_without_fence_marks() {
     st.set_palette(pal);
     st.sidebar_visible = false;
     st.push_line(LineKind::Assistant, "```rust\nlet x = 1;\n```");
-    let buf = render_screen(&st);
+    let buf = render_screen(&mut st);
 
     // 语言标签行存在、代码行存在
     let label_y = row_with(&buf, "rust");
@@ -376,7 +376,7 @@ fn table_renders_without_pipes_on_screen() {
         LineKind::Assistant,
         "| 模型 | 上下文 |\n| --- | --- |\n| gpt-4o | 128k |",
     );
-    let buf = render_screen(&st);
+    let buf = render_screen(&mut st);
     let mut saw_rule = false;
     for y in 0..H {
         let t = text_row(&buf, y);
@@ -403,7 +403,7 @@ fn structural_markers_do_not_reach_the_screen() {
         LineKind::Assistant,
         "# 一级\n\n---\n\n- [x] 完成\n- [ ] 待办",
     );
-    let buf = render_screen(&st);
+    let buf = render_screen(&mut st);
     let rows: Vec<String> = (0..H).map(|y| text_row(&buf, y)).collect();
     let joined = rows.join("\n");
     assert!(!joined.contains('#'), "标题标记不该上屏：{joined}");
@@ -430,7 +430,7 @@ fn transparent_theme_leaves_both_background_slots_to_the_terminal() {
     st.sidebar_visible = false;
     st.push_line(LineKind::User, "hi");
     st.push_line(LineKind::Assistant, "行内 `code` 也要留底");
-    let buf = render_screen(&st);
+    let buf = render_screen(&mut st);
     let half = W as usize / 2;
 
     assert!(

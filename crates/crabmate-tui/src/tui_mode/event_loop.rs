@@ -247,7 +247,7 @@ impl TuiApp<'_> {
         let screen = Rect::new(0, 0, w, h);
         let panel = self.settings_content(render::settings_panel_content_width(screen));
         terminal
-            .draw(|f| render::draw(f, &self.st, &info, self.body.as_slice(), panel.as_ref()))
+            .draw(|f| render::draw(f, &mut self.st, &info, self.body.as_slice(), panel.as_ref()))
             .context("tui draw failed")?;
         // 背景要在 draw 之后重放：kitty 让图像跟着文本一起滚动（规范明确），
         // 而 ratatui 的差分绘制只认字符网格，不会替我们维持图像层。
