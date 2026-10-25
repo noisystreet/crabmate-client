@@ -5,10 +5,10 @@
 //!
 //! **两种模式**（`CM_TUI_LOOP`）：
 //!
-//! - `interval`（默认，改造前的行为）：固定节流（有消息 2ms / 空闲 50ms），
-//!   静止期也每轮 `draw`。
-//! - `event`：阻塞等事件 + 动画 deadline + 1s 兜底；兜底醒来时若没有动画、
+//! - `event`（默认）：阻塞等事件 + 动画 deadline + 1s 兜底；兜底醒来时若没有动画、
 //!   尺寸也没变，这一帧整帧跳过 —— 静态空闲不产生终端写入。
+//! - `interval`（`CM_TUI_LOOP=interval` 回退）：固定节流（有消息 2ms / 空闲 50ms），
+//!   静止期也每轮 `draw`，留作一个版本的回退口。
 //!
 //! 尺寸真值**永远现查**（`read_terminal_size`）：`Resize` 事件只作唤醒源，
 //! 绝不作为尺寸来源 —— 一旦 SIGWINCH 丢失，把事件当来源就会永久错排。
@@ -31,19 +31,20 @@ use super::state::Focus;
 /// 事件循环模式（`CM_TUI_LOOP`）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum LoopMode {
-    /// 固定节流轮询（改造前的行为）。
+    /// 固定节流轮询（改造前的行为，`CM_TUI_LOOP=interval` 的回退口）。
     Interval,
-    /// 事件唤醒 + 1s 兜底。
+    /// 事件唤醒 + 1s 兜底（默认）。
     Event,
 }
 
-/// 解析 `CM_TUI_LOOP`：只认 `event`，其余（含拼错、未设置）一律回落到 `interval`。
+/// 解析 `CM_TUI_LOOP`：只有 `interval` 显式回退到固定节流轮询，
+/// 其余（含未设置、拼错）一律走事件驱动。
 ///
-/// 宽松解析与 `CM_TUI_THEME` 一致：拼错的开关不该把壳启动搞崩。
+/// 宽松解析与 `CM_TUI_THEME` 一致：拼错的开关不该把壳启动搞崩，按「未设置」处理。
 pub(super) fn loop_mode_from(raw: Option<&str>) -> LoopMode {
     match raw.map(str::trim).map(str::to_ascii_lowercase).as_deref() {
-        Some("event") => LoopMode::Event,
-        _ => LoopMode::Interval,
+        Some("interval") => LoopMode::Interval,
+        _ => LoopMode::Event,
     }
 }
 
@@ -251,18 +252,19 @@ mod tests {
     use super::{IDLE_FALLBACK, LoopMode, MIN_TICK, idle_frame_is_noop, loop_mode_from, next_wait};
 
     #[test]
-    fn loop_mode_defaults_to_interval() {
-        assert_eq!(
-            loop_mode_from(None),
-            LoopMode::Interval,
-            "未设置走改造前行为"
-        );
-        assert_eq!(loop_mode_from(Some("")), LoopMode::Interval);
+    fn loop_mode_defaults_to_event() {
+        assert_eq!(loop_mode_from(None), LoopMode::Event, "未设置走事件驱动");
+        assert_eq!(loop_mode_from(Some("")), LoopMode::Event);
+        // 未知值按「未设置」处理：拼错的开关不该改变行为，也不该让壳启动失败。
+        // 样例刻意用非单词串 —— 若拿「event 的常见拼错」当真单词写进代码，typos 钩子
+        // 会在提交时把它自动改回 event，断言就悄悄变成「event 也回落 event」。
+        assert_eq!(loop_mode_from(Some("not-a-mode")), LoopMode::Event);
+    }
+
+    #[test]
+    fn loop_mode_interval_is_the_explicit_opt_out() {
         assert_eq!(loop_mode_from(Some("interval")), LoopMode::Interval);
-        // 未知值不报错、也不改变行为：与 `CM_TUI_THEME` 的宽松策略一致。
-        // 样例刻意用非单词串：若拿「event 的常见拼错」当成真单词写进代码，typos 钩子会
-        // 在提交时把它自动改回 event，断言就悄悄变成「event 也回落 interval」——测试自假。
-        assert_eq!(loop_mode_from(Some("not-a-mode")), LoopMode::Interval);
+        assert_eq!(loop_mode_from(Some(" Interval ")), LoopMode::Interval);
     }
 
     #[test]
