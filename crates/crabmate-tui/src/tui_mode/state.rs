@@ -63,6 +63,10 @@ pub struct ApprovalOverlay {
     pub allowlist_key: Option<String>,
     /// 决策回传通道（worker 的 gate 阻塞在对应 recv 上）。
     pub answer: Sender<ApprovalDecision>,
+    /// 「看完整命令」展开态：收起时命令区只占 1 行（截断），展开时铺满可用高度。
+    pub expanded: bool,
+    /// 展开态下命令区的滚动起点（行号，渲染时再夹一次上界）。
+    pub scroll: usize,
 }
 
 impl ApprovalOverlay {
@@ -749,6 +753,10 @@ impl UiState {
             args: req.args.clone(),
             allowlist_key: req.allowlist_key.clone(),
             answer,
+            // 每次新请求都从未展开、未滚动开始：上一条审批展开到第 40 行，不该让
+            // 下一条一打开就停在半截命令上。
+            expanded: false,
+            scroll: 0,
         });
         // 每次新请求都把光标复位到默认项：上一条审批停在哪一项，不该影响下一次的
         // 默认回答（否则「上次点了始终允许」会让下一条审批一回车就自动放行）。

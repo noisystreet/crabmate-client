@@ -197,6 +197,8 @@ fn approval_overlay_is_centered_and_uses_the_error_border() {
         args: "-rf build".into(),
         allowlist_key: None,
         answer: tx,
+        expanded: false,
+        scroll: 0,
     });
     let pal = st.palette;
     let buf = render_frame(&st, None);
@@ -232,6 +234,8 @@ fn approval_overlay_fills_its_whole_rect_with_the_card_background() {
         args: "-rf build".into(),
         allowlist_key: None,
         answer: tx,
+        expanded: false,
+        scroll: 0,
     });
     let pal = st.palette;
     let buf = render_frame(&st, None);
@@ -293,6 +297,8 @@ fn the_selected_choice_reaches_the_buffer_as_a_filled_block() {
         args: "-rf build".into(),
         allowlist_key: None,
         answer: tx,
+        expanded: false,
+        scroll: 0,
     });
     // 选中「拒绝」（最后一格），色块应画在这一项上。
     st.approval_choice = ApprovalChoice::Deny;
@@ -321,4 +327,58 @@ fn the_selected_choice_reaches_the_buffer_as_a_filled_block() {
     } else {
         panic!("选中「仅此一次」后没有 err 底色块");
     }
+}
+
+/// 展开档要把**整条**命令画出来。
+///
+/// 收起档只有 1 行预览（多行命令的第二行根本不在屏幕上），`Ctrl+E` 展开后它必须出现——
+/// 这正是 G8「长命令看不到全貌」的回归点：审批问的是「要不要放行这条命令」，
+/// 看不到后面还有什么就等于让人闭眼签字。
+#[test]
+fn expanding_the_approval_overlay_reveals_the_rest_of_the_command() {
+    let mut st = UiState::new();
+    st.set_palette(Palette::from_theme(Some("shadcn-dark")));
+    st.sidebar_visible = false;
+    let (tx, _rx) = std::sync::mpsc::channel();
+    st.approval = Some(ApprovalOverlay {
+        command: "bash".into(),
+        args: "-c 'echo first\necho second'".into(),
+        allowlist_key: None,
+        answer: tx,
+        expanded: false,
+        scroll: 0,
+    });
+
+    let screen_text = |buf: &Buffer| -> String {
+        (0..H)
+            .map(|y| row_text(buf, y))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+
+    let compact = screen_text(&render_frame(&st, None));
+    // 收起档把语义换行压成空格（`Line` 里夹 `\n` 会把提示行顶掉），整条命令只占一行。
+    assert!(
+        compact.contains("echo first"),
+        "收起档应显示第一行：{compact}"
+    );
+    let command_rows = |text: &str| text.lines().filter(|l| l.contains("echo ")).count();
+    assert_eq!(
+        command_rows(&compact),
+        1,
+        "收起档只能给 1 行（这就是要修的问题）：{compact}"
+    );
+
+    if let Some(ap) = st.approval.as_mut() {
+        ap.expanded = true;
+    }
+    let expanded = screen_text(&render_frame(&st, None));
+    assert!(
+        command_rows(&expanded) >= 2 && expanded.contains("echo second"),
+        "展开后第二行必须独立成行可见：{expanded}"
+    );
+    assert!(
+        expanded.contains("已展开") || expanded.contains("Ctrl+E"),
+        "标题或提示行要给出收起入口：{expanded}"
+    );
 }

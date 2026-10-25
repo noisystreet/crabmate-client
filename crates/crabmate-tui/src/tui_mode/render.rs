@@ -404,6 +404,9 @@ fn display_lines(st: &UiState, width: usize) -> Vec<Line<'static>> {
 // 截断规则已下沉到 [`super::text`]：`render.rs` 贴着 920 行门禁，且状态栏 / 左右侧栏 /
 // 设置面板共用同一条「显示宽 ≤ width」的不变式。这里保留再导出，历史调用方不必搬家。
 pub(super) use super::text::truncate_display;
+// 审批浮层的「命令区总共多少行 / 能画多少行」要按键侧也用：滚动上界必须与渲染同源，
+// 否则 `End` 会停在一个渲染时才被截掉的越界值上。
+pub(super) use overlay::approval_scroll_bounds;
 
 /// 工作区展示名：路径 basename（根目录/空串回退原路径文本）。
 pub(super) fn workspace_basename(path: &str) -> String {

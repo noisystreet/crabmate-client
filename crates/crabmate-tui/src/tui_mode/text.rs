@@ -37,6 +37,43 @@ pub(super) fn truncate_display(text: &str, width: usize) -> String {
     out
 }
 
+/// tab 展开成几个空格（与 `state_paste` 的粘贴归一化同口径）。
+const TAB_AS_SPACES: &str = "    ";
+
+/// 按显示宽**折行**（保留原文的 `\n`），结果每行显示宽恒 ≤ `width`。
+///
+/// 与 [`truncate_display`] 互补：那个丢掉溢出部分，这个把溢出挪到下一行。审批浮层
+/// 「看完整命令」用的就是后者——它的原始缺陷正是「截断成一行、看不到后面还有什么」。
+///
+/// 归一化口径与粘贴一致：`\t` 展开成 4 空格、其它控制字符（含 CRLF 的 `\r`）丢弃，
+/// 否则裸 `\x1b` 会被 ratatui 当成转义序列的开头画乱整屏。
+pub(super) fn wrap_display(text: &str, width: usize) -> Vec<String> {
+    if width == 0 {
+        return Vec::new();
+    }
+    let mut out: Vec<String> = Vec::new();
+    for logical in text.split('\n') {
+        let expanded = logical.replace('\t', TAB_AS_SPACES);
+        let mut line = String::new();
+        let mut used = 0usize;
+        for ch in expanded.chars() {
+            if ch.is_control() {
+                continue;
+            }
+            let cw = ch.width().unwrap_or(0);
+            // `used > 0` 兜住「单字符比整行还宽」：硬放一行，别在原地死循环。
+            if used + cw > width && used > 0 {
+                out.push(std::mem::take(&mut line));
+                used = 0;
+            }
+            line.push(ch);
+            used += cw;
+        }
+        out.push(line);
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -65,5 +102,39 @@ mod tests {
         }
         assert_eq!(truncate_display("abcdef", 4), "abc…");
         assert_eq!(truncate_display("你好吗", 3), "你…");
+    }
+
+    #[test]
+    fn wrap_splits_on_width_and_keeps_logical_newlines() {
+        // 语义换行保留：三行输入仍是三行，不会被折行抹平。
+        assert_eq!(wrap_display("ab\ncd", 8), vec!["ab", "cd"]);
+        // 超宽折成两行（而不是截断丢内容）。
+        assert_eq!(wrap_display("abcdef", 4), vec!["abcd", "ef"]);
+        // CJK 按 2 列计：宽度 4 只放得下两个汉字。
+        assert_eq!(wrap_display("你好吗", 4), vec!["你好", "吗"]);
+        assert_eq!(wrap_display("", 4), vec![""]);
+        assert!(wrap_display("abc", 0).is_empty());
+    }
+
+    #[test]
+    fn wrap_drops_control_chars_and_expands_tabs() {
+        // 裸 `\x1b` / CRLF 的 `\r` 都不能进渲染（前者会画乱整屏）。
+        assert_eq!(wrap_display("a\u{1b}b\r\nc", 8), vec!["ab", "c"]);
+        assert_eq!(wrap_display("\tx", 8), vec!["    x"]);
+    }
+
+    #[test]
+    fn wrapped_lines_never_exceed_the_width() {
+        let long = "x".repeat(100);
+        for (text, width) in [
+            ("abcdefg", 3),
+            ("这是一段比较长的中文命令 --flag value", 7),
+            (long.as_str(), 13),
+        ] {
+            for line in wrap_display(text, width) {
+                let w = UnicodeWidthStr::width(line.as_str());
+                assert!(w <= width, "「{line}」{w} 列，超出 {width}");
+            }
+        }
     }
 }

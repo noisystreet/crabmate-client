@@ -25,7 +25,7 @@
 | G5 | 会话列表：左栏 use/new/refresh + **删除**（`Delete` 先确认 / `Shift+Delete` 直删，`tui_mode/sidebar_keys.rs`）；`/conv new` 已改为**写**服务端会话索引（`serve/sessions.rs`：`GET` → 复用或插入空白行 → 全量 `PUT`，首轮结束回填 `server_conversation_id`，切走回收空白行，首条消息按 Web 规则起名），左栏与 Web/Desktop 同步可见；仍缺重命名（**无 serve 端点**）、标题过滤、跨会话搜索、导出 | 排序 + 标题过滤 + 全文搜索 + 重命名/删除/导出（`session_rail.rs`、`session_list_modal.rs`） | 会话一多靠翻，无过滤手段 |
 | G6 | ~~切换会话后 transcript 从空开始~~ → **部分落地**：切换 / 启动回放 `GET /conversation/messages` 的**最新一页**；`has_older` 时只提示「更早的消息暂不回放」，**没有「加载更早」**（`tui_mode/history.rs`） | 会话水合 + 顶部「加载更早」prepend（`session_hydrate.rs`、`tui_stream_view.rs`） | 续聊时看不到前文，须先切到别的壳回顾 |
 | G7 | 无 retry / regen / branch / 编辑用户消息（`controls.rs` 无对应命令，`tui_mode` 里无 `regen`/`branch`） | 消息回合菜单（`message_row_actions.rs`、`user_message_edit.rs`） | 模型答错只能整轮重发或手动复制改写 |
-| G8 | 审批浮层把命令截成**一行**且无法展开（`overlay.rs:21-23` 固定 78×9，预览经 `truncate_display` 只留单行） | 底部审批条可展开完整命令 + 失败保留重试（`approval_modal.rs`） | 长命令看不到全貌，易误判 |
+| G8 | ~~审批浮层把命令截成一行且无法展开~~ → **已落地**：`Ctrl+E` 在 78×9 收起档与铺满主体区的展开档之间切换，展开档按显示宽折行（`text::wrap_display`）并支持 ↑/↓、PgUp/PgDn、Home/End 滚动，提示行显示「第 x-y / N 行」（`overlay.rs`） | 底部审批条可展开完整命令 + 失败保留重试（`approval_modal.rs`） | 长命令看不到全貌，易误判 |
 | G9 | 澄清问卷（`clarification_questionnaire`）在 TUI 无交互 UI：`serve/chat_classify.rs` 只有 `clarify_trace` 钩子，没有表单 | 问卷表单（Web `frontend`） | 模型需要澄清时 TUI 这侧拿不到结构化提问 |
 
 另有与 Desktop 同步暂缓/不做项，见 §2 非目标（勿误当缺口）。
@@ -140,7 +140,7 @@
 ### Wave 3 · 锦上添花 / 开放决策
 
 - **W3.1 斜杠补全列表** — **已落地**（`tui_mode/slash_menu.rs`）：composer 输入 `/` 前缀弹出候选（内建命令 `controls.rs` 表 + `GET /skills` 的 skill），↑↓ 选择 · Tab/Enter 采纳 · Esc 关闭；候选为空时底部说明 skill 为何缺失。
-- **W3.2 审批浮层看完整命令**：G8，浮层内加「展开完整命令」键（或 PgDn 查看超长命令），对齐 Desktop 审批条可展开。
+- **W3.2 审批浮层看完整命令** — **已落地**（G8）：`Ctrl+E` 展开/收起，展开档按宽度折行 + 可滚动，提示行给出位置；收起档的单行预览也把语义换行压成空格（不再因为 `Line` 里夹 `\n` 把提示行顶掉）。
 - **W3.3 阅读增强**：OSC8 超链接（wezterm/kitty 可点击 URL）、工具行/thinking 详情整段展开（受 SSE 负载约束，先验证负载是否携带完整文本）。
 - **W3.4 设置面板补齐 W3 遗留**：MCP 全局开关与 `tool_timeout_secs`、Session SQLite 开关——实现归属 [`tui_settings_panel.md`](./tui_settings_panel.md) §7，本规划仅列入口不展开。
 
@@ -158,6 +158,7 @@
 | W2.3 | L59「Ask/Plan/Act…」附近或新增行 | 视方案形态在 chat/tools 段新增或并入 Notes |
 | W2.4 | L61 Notes | 补导出能力 |
 | W3.1 | L60「Control slashes」TUI 列 | 已同步（TUI 有 `/` 补全菜单，含 skills 候选） |
+| W3.2 | L55「`POST /chat/stream` + command approval」TUI Notes | 补 `Ctrl+E` 展开看完整命令（折行 + 滚动）、收起档单行截断 |
 
 > 矩阵维护规则：改了用户可见能力就必须在同 PR 更新对应格（§顶注），不允许“下个 PR 再补”。
 
@@ -174,6 +175,7 @@
   - W1.5：左栏输入字母过滤 → 选中使用；清空恢复全量。
   - W1.6：从编辑器复制一段多行文本粘进 composer → 整段落进输入框（含换行，光标在末尾）、**不会**被当成交付；粘贴内容夹 `Tab` 不切换焦点；单次超 32K 字符时 transcript 提示截断。`CM_TUI_PASTE=off` 时回到逐字符按键的旧行为。
   - W2.2：左栏选中会话按 `Delete` → 出现确认提示，`y` 删除、其它键取消；回合进行中按 `Delete` 应被拒绝并说明原因；`Shift+Delete` 免确认直删。
+  - W3.2（G8）：触发一条长命令的审批 → 收起档只一行（超宽以 `…` 收尾），按 `Ctrl+E` 展开到主体区、命令按键宽折行、提示行显示「第 x-y / N 行」；`↑/↓`、`PgUp/PgDn`、`Home/End` 能滚到首尾（`End` 之后 `↑` 仍能回退）；再按 `Ctrl+E` 收起；展开态下 `Enter`/`Esc` 仍能决策。
 - **无浏览器 E2E**：TUI 不属 Playwright 范围（`remote_cli_tui.md`）。
 
 ---
