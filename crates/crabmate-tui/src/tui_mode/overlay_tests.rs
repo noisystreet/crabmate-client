@@ -32,7 +32,7 @@ fn status_info() -> StatusInfo {
     }
 }
 
-fn render_frame(st: &UiState, panel: Option<&PanelContent>) -> Buffer {
+fn render_frame(st: &mut UiState, panel: Option<&PanelContent>) -> Buffer {
     let rows = build_body_rows(st, chat_body_width(false, W));
     let info = status_info();
     let mut terminal = Terminal::new(TestBackend::new(W, H)).expect("terminal");
@@ -143,7 +143,7 @@ fn settings_page_covers_the_conversation() {
         lines: vec![Line::from("模型: demo")],
         ..Default::default()
     };
-    let buf = render_frame(&st, Some(&content));
+    let buf = render_frame(&mut st, Some(&content));
 
     assert!(
         (0..H).all(|y| !row_text(&buf, y).contains("UNIQUE-CONV-MARKER")),
@@ -171,7 +171,7 @@ fn settings_nav_keeps_the_active_section_visible_in_colourless_mode() {
         nav: vec![("模型".into(), true), ("会话".into(), false)],
         ..Default::default()
     };
-    let buf = render_frame(&st, Some(&content));
+    let buf = render_frame(&mut st, Some(&content));
     let l = settings_panel_layout(Rect::new(0, 0, W, H));
 
     let active = &buf[(1, l.nav.y)];
@@ -202,7 +202,7 @@ fn approval_overlay_is_centered_and_uses_the_error_border() {
         scroll: 0,
     });
     let pal = st.palette;
-    let buf = render_frame(&st, None);
+    let buf = render_frame(&mut st, None);
 
     let title_y = row_with(&buf, "命令审批");
     // 聊天主体 = 整屏 − 状态栏(1) − composer(内容行 + 上下边框)；
@@ -239,7 +239,7 @@ fn approval_overlay_fills_its_whole_rect_with_the_card_background() {
         scroll: 0,
     });
     let pal = st.palette;
-    let buf = render_frame(&st, None);
+    let buf = render_frame(&mut st, None);
 
     let body_h = H.saturating_sub(1).saturating_sub(composer_outer_rows(&st));
     let body = Rect::new(0, 0, W, body_h);
@@ -304,7 +304,7 @@ fn the_selected_choice_reaches_the_buffer_as_a_filled_block() {
     // 选中「拒绝」（最后一格），色块应画在这一项上。
     st.approval_choice = ApprovalChoice::Deny;
     let pal = st.palette;
-    let buf = render_frame(&st, None);
+    let buf = render_frame(&mut st, None);
 
     let y = row_with(&buf, "始终允许"); // 选项行
     let err_cells = (0..W).filter(|&x| buf[(x, y)].bg == pal.err).count();
@@ -317,7 +317,7 @@ fn the_selected_choice_reaches_the_buffer_as_a_filled_block() {
 
     // 换成选「仅此一次」后，色块位置随之改变（说明它跟着光标走，不是写死的）。
     st.approval_choice = ApprovalChoice::Once;
-    let buf = render_frame(&st, None);
+    let buf = render_frame(&mut st, None);
     let y2 = row_with(&buf, "始终允许");
     let first_err_x = (0..W).find(|&x| buf[(x, y2)].bg == pal.err);
     let last_err_x = (0..W).rev().find(|&x| buf[(x, y2)].bg == pal.err);
@@ -357,7 +357,7 @@ fn expanding_the_approval_overlay_reveals_the_rest_of_the_command() {
             .join("\n")
     };
 
-    let compact = screen_text(&render_frame(&st, None));
+    let compact = screen_text(&render_frame(&mut st, None));
     // 收起档把语义换行压成空格（`Line` 里夹 `\n` 会把提示行顶掉），整条命令只占一行。
     assert!(
         compact.contains("echo first"),
@@ -373,7 +373,7 @@ fn expanding_the_approval_overlay_reveals_the_rest_of_the_command() {
     if let Some(ap) = st.approval.as_mut() {
         ap.expanded = true;
     }
-    let expanded = screen_text(&render_frame(&st, None));
+    let expanded = screen_text(&render_frame(&mut st, None));
     assert!(
         command_rows(&expanded) >= 2 && expanded.contains("echo second"),
         "展开后第二行必须独立成行可见：{expanded}"

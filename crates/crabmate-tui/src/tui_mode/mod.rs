@@ -536,7 +536,14 @@ impl TuiApp<'_> {
             KeyCode::End if is_ctrl(&key, KeyCode::End) => self.st.scroll_bottom(),
             KeyCode::Home => self.st.cursor_home(),
             KeyCode::End => self.st.cursor_end(),
-            KeyCode::PageUp => self.st.scroll_page(true),
+            // 到顶还继续 PgUp，就是「我要看更早的」：静默续翻一页（拒绝理由不落行）。
+            KeyCode::PageUp => {
+                let was_at_top = self.st.body_at_top;
+                self.st.scroll_page(true);
+                if was_at_top {
+                    history::load_older_on_top(self);
+                }
+            }
             KeyCode::PageDown => self.st.scroll_page(false),
             // 多行编辑时 ↑/↓ 走行内光标；单行仍保留"滚动 transcript"的旧行为。
             KeyCode::Up if self.st.is_multiline() => self.st.move_cursor_vert(true),

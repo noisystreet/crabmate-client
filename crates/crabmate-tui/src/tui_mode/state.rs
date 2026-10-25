@@ -247,6 +247,12 @@ pub struct HistoryRequest {
     pub title: String,
 }
 
+/// 「贴到内容顶」的哨兵偏移：远大于任何真实行数，渲染时被 clamp 到 `max_back`。
+///
+/// 用哨兵而不是 `max_back` 本身，是因为状态层不知道物理行数与视口高度 ——
+/// 每次渲染都会重算 clamp，哨兵自然贴到**当前**内容顶（内容变长后也一样）。
+pub const SCROLL_TOP: usize = usize::MAX / 4;
+
 /// 全屏 UI 状态；仅由事件循环触碰（单线程）。
 #[derive(Debug, Default)]
 pub struct UiState {
@@ -273,8 +279,13 @@ pub struct UiState {
     /// 只保留最后一条：与 Desktop 的排队 chip 同语义，连按 Enter 视为「改主意」。
     /// 取消 / 出错的回合不自动发出，见 `drafts::queued_outcome`。
     pub queued: Option<String>,
-    /// 从底部回看的物理行数（0 = 跟随最新）。
+    /// 从底部回看的物理行数（0 = 跟随最新；`SCROLL_TOP` = 贴到内容顶）。
     pub view_offset: usize,
+    /// transcript 视口是否已贴到内容顶（`render_body` 每帧回写）。
+    ///
+    /// 只有渲染层知道 `max_back`（物理行数 − 视口高度），所以「在顶」由它判定；
+    /// `/older` 前插据此决定是否继续贴顶（否则刚加载的那页会落在视口上方看不见）。
+    pub body_at_top: bool,
     /// PgUp/PgDn 页步（由事件循环按终端高度刷新）。
     pub page_rows: usize,
     /// 键盘焦点（输入框 / 左栏会话）。
@@ -882,7 +893,7 @@ impl UiState {
     }
 
     pub fn scroll_top(&mut self) {
-        self.view_offset = usize::MAX / 4;
+        self.view_offset = SCROLL_TOP;
         self.release_search_anchor();
     }
 

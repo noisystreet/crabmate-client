@@ -1,9 +1,9 @@
 //! 历史分页（`/older`）与回放行落地的状态逻辑。
 //!
 //! 从 `state.rs` 拆出的两个理由：那里贴着 920 行门禁；更重要的是「前插」要**同时**
-//! 平移四处行号索引（工具行映射、搜索命中、搜索锚点），这组不变式必须写在同一处 ——
-//! 漏掉任何一处，后续事件就会落到错误的行上（工具结果把历史消息改写成摘要、
-//! `/find` 跳到隔壁行）。
+//! 处理三处行号状态（工具行映射与搜索锚点整体平移、命中集合整表重扫），这组不变式
+//! 必须写在同一处 —— 漏掉任何一处，后续事件就会落到错误的行上（工具结果把历史消息
+//! 改写成摘要、`/find` 跳到隔壁行）。
 
 use super::{LineKind, LogLine, UiState};
 
@@ -39,6 +39,7 @@ impl UiState {
         self.lines.clear();
         self.tool_pending.clear();
         self.view_offset = 0;
+        self.body_at_top = false;
         self.history_page = None;
         self.search = None;
         self.search_cursor = None;
@@ -50,9 +51,10 @@ impl UiState {
     ///
     /// `rows` 是「旧 → 新」顺序（与服务端分页同向），前插后仍排在已加载内容之前。
     ///
-    /// 视口：`view_offset` 是「从底部回看的物理行数」，前插只动头部、不动底部，
-    /// 所以这里**不改** offset —— 用户看到的仍是原来那段内容（翻页瞬间会整体下移，
-    /// 滚动锚定补偿在 PR2 用逻辑行锚点做，不与本次语义混在一起）。
+    /// 视口：`view_offset` 是「从底部回看的物理行数」，前插只动头部、不动底部，所以
+    /// 默认**不改**它 —— 用户看到的仍是同一段内容（视线不动）。唯一例外是「已经贴顶」：
+    /// 那时贴顶等同于「正看着最早那条」，必须继续贴顶，否则刚加载的一页落在视口上方
+    /// 看不见、还要再按一次 Ctrl+Home（`body_at_top` 由 `render_body` 每帧回写）。
     pub fn prepend_replayed(&mut self, rows: Vec<(LineKind, String, Option<bool>)>) {
         let n = rows.len();
         if n == 0 {
@@ -82,6 +84,10 @@ impl UiState {
         //    比维护增量便宜得多，也让「跨页命中」真的可搜。
         if self.search.is_some() {
             self.rescan_search();
+        }
+        // ④ 贴顶例外见方法注释：在顶时把 offset 重新打到哨兵，渲染 clamp 后即贴新内容顶。
+        if self.body_at_top {
+            self.view_offset = super::SCROLL_TOP;
         }
     }
 
@@ -150,6 +156,38 @@ mod tests {
         assert_eq!(st.search_hits, vec![0, 1], "前插的命中也要被找到");
         assert_eq!(st.search_total, 2);
         assert_eq!(st.search_cursor, Some(1), "锚点跟着原来那一行平移");
+    }
+
+    /// 贴顶时前插必须**继续贴顶**：否则刚加载的一页落在视口上方，用户还得再按一次
+    /// Ctrl+Home 才看得到 —— 这正好抵消了「往上翻」的意图。
+    #[test]
+    fn prepend_at_top_keeps_the_view_pinned_to_the_top() {
+        let mut st = UiState::new();
+        st.push_line(LineKind::User, "最新页");
+        st.scroll_top();
+        st.body_at_top = true; // `render_body` 的回写：视口已贴到内容顶
+
+        st.prepend_replayed(vec![(LineKind::User, "更早页".to_string(), None)]);
+
+        assert_eq!(
+            st.view_offset,
+            super::super::SCROLL_TOP,
+            "在顶时前插要把 offset 重新打到哨兵，渲染 clamp 后才贴到新内容顶"
+        );
+    }
+
+    /// 不在顶时前插**不动** offset：`view_offset` 是「距底部行数」，头部插入不改变
+    /// 底部对齐，用户看到的就是同一段内容（这是 back 语义白拿的锚定）。
+    #[test]
+    fn prepend_while_scrolled_leaves_the_view_alone() {
+        let mut st = UiState::new();
+        st.push_line(LineKind::User, "最新页");
+        st.view_offset = 12;
+        st.body_at_top = false;
+
+        st.prepend_replayed(vec![(LineKind::User, "更早页".to_string(), None)]);
+
+        assert_eq!(st.view_offset, 12, "视线不动");
     }
 
     /// 空页是 no-op：服务端返回 0 行时不该动 transcript。

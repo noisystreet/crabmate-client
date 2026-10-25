@@ -515,7 +515,7 @@ fn paint_bg_cells(frame: &mut Frame, st: &UiState) {
 /// `panel` 为设置面板内容（`Some` 时最后绘制全屏浮层并隐藏 composer 光标）。
 pub fn draw(
     frame: &mut Frame,
-    st: &UiState,
+    st: &mut UiState,
     info: &StatusInfo,
     prepared: &[BodyRow],
     panel: Option<&PanelContent>,
@@ -532,7 +532,7 @@ pub fn draw(
     let p = panes(area, st.sidebar_visible, stack_rows);
 
     let spin = progress_mark_frame(st, info);
-    let pal = &st.palette;
+    let pal = st.palette; // 拷贝：下面要 `&mut st` 回写 `body_at_top`，底栏/浮层仍要调色板
 
     // 宽屏三列；窄屏 `left`/`right` 为 None，聊天列即整个主体。
     if let (Some(left), Some(right)) = (p.left, p.right) {
@@ -541,14 +541,14 @@ pub fn draw(
         let left_w = left.width.saturating_sub(2) as usize;
         let (rows, cursor, hint) = sessions_content(st, left_w);
         paint_bg(frame, left, pal.chrome_bg);
-        render_pane(frame, left, rows, cursor, hint, pal, left_w);
+        render_pane(frame, left, rows, cursor, hint, &pal, left_w);
         let right_w = right.width.saturating_sub(2) as usize;
         let (rows, cursor, hint) = workspace_content(st, right_w);
         paint_bg(frame, right, pal.chrome_bg);
-        render_pane(frame, right, rows, cursor, hint, pal, right_w);
+        render_pane(frame, right, rows, cursor, hint, &pal, right_w);
     }
     if let Some(rs) = p.right_status {
-        render_status_stack(frame, rs, st, info, pal);
+        render_status_stack(frame, rs, st, info, &pal);
     }
     render_chat_column(frame, st, p.chat, prepared, panel.is_none(), spin);
 
@@ -557,13 +557,13 @@ pub fn draw(
         paint_bg(frame, status_area, pal.chrome_bg);
         // 分段样式已在 `status_line` 里定好（label 淡色 / 值正文色 / 分隔极暗），此处不能再套
         // 整行 `fg + BOLD`：base style 的修饰位会盖到 label 上，淡化标签就白做了。
-        let status = status_line(info, status_area.width as usize, pal);
+        let status = status_line(info, status_area.width as usize, &pal);
         frame.render_widget(Paragraph::new(status), status_area);
     }
 
     // 设置面板浮层：整屏覆盖（含状态栏），最后绘制压住全部内容。
     if let Some(content) = panel {
-        render_settings_overlay(frame, area, content, pal);
+        render_settings_overlay(frame, area, content, &pal);
     } else {
         // 格子背景必须最后铺：它是「每格底色」，要盖掉前面各处 `paint_bg` 铺的主题底色，
         // 否则侧栏/状态栏会留成纯色块。模态浮层打开时不铺。
@@ -593,7 +593,7 @@ fn render_status_stack(
 /// 聊天列：上为主区消息（滚动 transcript），底部为 composer 输入区。
 fn render_chat_column(
     frame: &mut Frame,
-    st: &UiState,
+    st: &mut UiState,
     area: Rect,
     prepared: &[BodyRow],
     cursor_allowed: bool,
@@ -702,7 +702,7 @@ const BODY_EMPTY_HINT: &str = "输入消息开始对话 · Alt+Enter 换行 · C
 
 fn render_body(
     frame: &mut Frame,
-    st: &UiState,
+    st: &mut UiState,
     area: Rect,
     prepared: &[BodyRow],
     spin: Option<usize>,
@@ -731,27 +731,18 @@ fn render_body(
     let rows = prepared;
     let rows_total = rows.len();
     let viewport = (text_area.height as usize).saturating_sub(1).max(1);
-    let max_back = rows_total.saturating_sub(viewport);
-    let back = if let Some(target) = st.search_cursor {
-        // 搜索锚定：目标逻辑行置于视口上 1/3 处。
-        match rows.iter().position(|r| r.log_index == Some(target)) {
-            Some(pos) => {
-                let want_start = pos.saturating_sub(viewport / 3);
-                let end = (want_start + viewport).min(rows_total);
-                rows_total.saturating_sub(end)
-            }
-            None => st.view_offset.min(max_back),
-        }
-    } else {
-        st.view_offset.min(max_back)
-    };
-    let back = back.min(max_back);
-    let end = rows_total.saturating_sub(back);
-    let start = end.saturating_sub(viewport);
+    // 搜索命中行优先（`/find` 跳转要把它停在视口上 1/3 处）；窗口计算与 clamp 都在
+    // `body_cache::scroll_window` 里，那里有单测。
+    let anchor_pos = st
+        .search_cursor
+        .and_then(|target| rows.iter().position(|r| r.log_index == Some(target)));
+    let win = super::body_cache::scroll_window(rows_total, viewport, st.view_offset, anchor_pos);
+    // 在顶由渲染层回写：只有这里知道 `max_back`；前插保持贴顶、PgUp 续翻都读它。
+    st.body_at_top = win.at_top;
     // 折叠思考行的 spinner 在此替换标记：body memo 不含帧号，故不会触发重建。
     // 只命中最后一条逻辑行（`prepared` 里可能有多条历史折叠行）。
     let spin_target = spin.map(|_| st.lines.len().saturating_sub(1));
-    let shown = rows[start..end.min(rows_total)]
+    let shown = rows[win.start..win.end]
         .iter()
         .map(|r| {
             let line = r.line.clone();
