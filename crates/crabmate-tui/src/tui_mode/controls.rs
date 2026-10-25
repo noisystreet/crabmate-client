@@ -20,6 +20,8 @@ pub enum Control {
     Workspace(Option<String>),
     /// `/resume`：续传上一轮被中断的回合（`stream_resume:{job_id,after_seq}`）。
     Resume,
+    /// `/older`（别名 `/history`）：把更早一页历史前插到 transcript 头部。
+    Older,
     ConvNew,
     ConvRefresh,
     ConvUse(String),
@@ -96,6 +98,7 @@ pub fn parse_control(text: &str) -> Option<Control> {
         "settings" => Some(Control::Settings),
         slash::WORKSPACE | slash::CD => Some(Control::Workspace(arg_opt)),
         slash::RESUME => Some(Control::Resume),
+        "older" | "history" => Some(Control::Older),
         "find" | "search" | "grep" => Some(Control::Find(arg_opt)),
         "background" | "bg" => Some(Control::Background(arg_opt)),
         "copy" | "yank" => Some(Control::Copy(arg_opt)),
@@ -241,6 +244,15 @@ mod tests {
         assert!(parse_control("hello").is_none());
         assert!(parse_control("/my-skill").is_none());
         assert!(parse_control(" /model ").is_some());
+    }
+
+    #[test]
+    fn older_is_a_local_control() {
+        assert!(matches!(parse_control("/older"), Some(Control::Older)));
+        assert!(matches!(parse_control("/HISTORY"), Some(Control::Older)));
+        assert!(matches!(parse_control("  /Older  "), Some(Control::Older)));
+        // 不带 `/` 就是普通消息，不能拦。
+        assert!(parse_control("older stuff").is_none());
     }
 
     #[test]

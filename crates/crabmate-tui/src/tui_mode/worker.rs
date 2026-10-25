@@ -89,6 +89,8 @@ pub(super) enum UiEvent {
         /// 水合响应自带的用量快照：随回包一起走 `should_apply_reply` 门控
         /// （回包被丢弃时快照也不该生效，与 Web 端同口径）。
         snapshot: Option<TiktokenPromptTokensSnapshot>,
+        /// `None` = 最新页（切换会话回放）；`Some` = `/older` 前插页，值即请求用的游标。
+        before_index: Option<u32>,
     },
     /// 会话索引写入（`/conv new` 新建或复用空行 / 首轮后绑定 `conversation_id` / 切走回收）结果。
     SessionIndex {
@@ -487,6 +489,7 @@ fn job_conversation_history(
         conversation_id: conversation_id.to_string(),
         result,
         snapshot,
+        before_index,
     });
 }
 

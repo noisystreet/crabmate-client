@@ -28,6 +28,12 @@ mod paste;
 #[path = "state_context.rs"]
 mod context;
 
+// 历史分页（`/older` 前插）：与回放同源，单独成文件压 `state.rs` 行数。
+#[path = "state_history.rs"]
+mod history_page;
+
+pub use history_page::HistoryPage;
+
 /// `/` 补全菜单的会话内状态。
 #[derive(Debug, Default)]
 pub struct SlashMenuState {
@@ -256,6 +262,8 @@ pub struct UiState {
     ///
     /// 用户一发送消息或新建会话就清空：那时的回包已经没有落点，清屏会丢真实内容。
     pub history_pending: Option<HistoryRequest>,
+    /// 历史分页游标（`/older`）；`None` = 当前 transcript 不能往前翻。
+    pub history_page: Option<HistoryPage>,
     /// 是否有回合在跑（SSE 任务未结束）。
     pub running: bool,
     /// 当前回合是否已发过取消（第二次 Ctrl+C = 强退）。
@@ -368,17 +376,6 @@ impl UiState {
         // thinking 默认折叠；但"全局展开"开启时新建的 thinking 行也应保持展开。
         let collapsed = kind == LineKind::Thinking && !self.thinking_visible;
         self.lines.push(LogLine::new(kind, text, collapsed));
-        self.search_on_line_added();
-    }
-
-    /// 回放一行历史（`GET /conversation/messages`）。
-    ///
-    /// 历史行一律是**已结束**的：回放只转写落盘的结果，不存在「还在跑」。
-    /// `tool_ok` 是信封里的成败；服务端没给就是 `None`（标记显示 `?`，不猜）。
-    pub fn push_replayed_line(&mut self, kind: LineKind, text: &str, tool_ok: Option<bool>) {
-        let collapsed = kind == LineKind::Thinking && !self.thinking_visible;
-        self.lines
-            .push(LogLine::replayed(kind, text, collapsed, tool_ok));
         self.search_on_line_added();
     }
 
@@ -737,17 +734,6 @@ impl UiState {
         self.conversation_id
             .as_deref()
             .is_some_and(|c| row.server_conversation_id.as_deref() == Some(c))
-    }
-
-    /// 会话切换 / 新建：清空 transcript 回最新视图（v1 无历史回放）。
-    pub fn reset_transcript(&mut self) {
-        self.lines.clear();
-        self.tool_pending.clear();
-        self.view_offset = 0;
-        self.search = None;
-        self.search_cursor = None;
-        self.search_total = 0;
-        self.search_hits.clear();
     }
 
     // ── 审批浮层 ─────────────────────────────────────────────

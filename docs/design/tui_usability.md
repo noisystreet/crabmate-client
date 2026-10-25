@@ -1,6 +1,6 @@
 # TUI 易用性规划（对齐 Desktop 聊天体验）
 
-> **状态**：Wave 1 已落地 W1.1 全屏 `/resume`、W1.2 忙时排队、W1.3 会话级草稿、W1.4 复制（OSC52 / 外部工具）、W1.6 多行粘贴（bracketed paste，`CM_TUI_PASTE=off` 可关）；**W1.5 会话列输入过滤仍未落地**（`session_filter` 等在 `tui_mode` 无对应字段）。W2.1 历史回放已落地**最新页**（`GET /conversation/messages`，更早的分页未做）；W2.2 **删除**已落地（左栏 `Delete` 先确认 / `Shift+Delete` 直删，在途回合拒绝），**只缺重命名**（无 serve 端点）；W3.1 `/` 补全菜单也已落地（`tui_mode/slash_menu.rs`：内建命令 + `GET /skills` 候选）。Wave 2 的 W2.3 / W2.4 与 Wave 3 其余项仍为方案。逐波按本文落地；每波独立 PR，落地后必须同 PR 更新 [`client_capability_matrix.md`](./client_capability_matrix.md) 对应格（§4）。
+> **状态**：Wave 1 已落地 W1.1 全屏 `/resume`、W1.2 忙时排队、W1.3 会话级草稿、W1.4 复制（OSC52 / 外部工具）、W1.6 多行粘贴（bracketed paste，`CM_TUI_PASTE=off` 可关）；**W1.5 会话列输入过滤仍未落地**（`session_filter` 等在 `tui_mode` 无对应字段）。W2.1 历史回放已落地（`GET /conversation/messages` 最新页 + `/older` 按 `before_index` 前插更早页，视口补偿留待后续）；W2.2 **删除**已落地（左栏 `Delete` 先确认 / `Shift+Delete` 直删，在途回合拒绝），**只缺重命名**（无 serve 端点）；W3.1 `/` 补全菜单也已落地（`tui_mode/slash_menu.rs`：内建命令 + `GET /skills` 候选）。Wave 2 的 W2.3 / W2.4 与 Wave 3 其余项仍为方案。逐波按本文落地；每波独立 PR，落地后必须同 PR 更新 [`client_capability_matrix.md`](./client_capability_matrix.md) 对应格（§4）。
 > **范围**：`crabmate-tui`（全屏 `tui` 为主，`repl` 相应联动）；候选与取舍参照 Desktop / Web（`frontend/`）聊天体验，**语义对齐，不追求 UI 复刻**。
 > **关联**：[`remote_cli_tui.md`](./remote_cli_tui.md)（TUI 母方案，P1–P5）、[`client_capability_matrix.md`](./client_capability_matrix.md)（TUI 行 L53–L81）、[`tui_settings_panel.md`](./tui_settings_panel.md)（设置面板，W3 遗留）、[`chat_ui_todo.md`](./chat_ui_todo.md)（Desktop 聊天 UI 已勾项 = “已做过”的参照，不要当缺口重做）、[`contract_pin.md`](./contract_pin.md)（契约钉点）、Server `docs/`（SSE / user-data / 会话权威）
 
@@ -23,7 +23,7 @@
 | G3 | ~~composer 为全局单缓冲，不保存/不恢复各会话草稿~~ → **已落地**：按 `conversation_id` 换入换出，`/conv new` 起空白（`tui_mode/drafts.rs`） | 每次切会话 flush 当前草稿、回来恢复（`composer.rs`、`session_ops.rs::flush_active_composer_draft`） | 遗留草稿会“串”到下一个会话；切走再回来内容丢失 |
 | G4 | ~~无任何复制路径~~ → **已落地**（`tui_mode/clipboard.rs`）：`/copy [assistant\|user]`（别名 `/yank`）与 `Ctrl+Y`。**残余**：粒度固定为「最近一条非空消息」，不能指定中间某条；鼠标捕获占用了终端原生拖选（需 Shift+拖） | 消息 copy + 代码块「复制」按钮（`md_code_copy.rs`、`tui_actions_bar.rs`） | 终端里想取走一段代码/回复只能手工选中或重打 |
 | G5 | 会话列表：左栏 use/new/refresh + **删除**（`Delete` 先确认 / `Shift+Delete` 直删，`tui_mode/sidebar_keys.rs`）；`/conv new` 已改为**写**服务端会话索引（`serve/sessions.rs`：`GET` → 复用或插入空白行 → 全量 `PUT`，首轮结束回填 `server_conversation_id`，切走回收空白行，首条消息按 Web 规则起名），左栏与 Web/Desktop 同步可见；仍缺重命名（**无 serve 端点**）、标题过滤、跨会话搜索、导出 | 排序 + 标题过滤 + 全文搜索 + 重命名/删除/导出（`session_rail.rs`、`session_list_modal.rs`） | 会话一多靠翻，无过滤手段 |
-| G6 | ~~切换会话后 transcript 从空开始~~ → **部分落地**：切换 / 启动回放 `GET /conversation/messages` 的**最新一页**；`has_older` 时只提示「更早的消息暂不回放」，**没有「加载更早」**（`tui_mode/history.rs`） | 会话水合 + 顶部「加载更早」prepend（`session_hydrate.rs`、`tui_stream_view.rs`） | 续聊时看不到前文，须先切到别的壳回顾 |
+| G6 | ~~切换会话后 transcript 从空开始~~ → **已落地**：切换 / 启动回放 `GET /conversation/messages` 的**最新一页**；`/older`（别名 `/history`，也在 `/` 补全菜单里）按 `before_index` 前插更早一页（80 条/页），并**同时平移**工具行映射 / 搜索命中 / 搜索锚点（`tui_mode/history.rs`、`tui_mode/state_history.rs`、`tui_mode/body_cache.rs`）。**残余**：视口未补偿（前插后画面整体下移一页高度），滚动锚定留待下一个 PR | 会话水合 + 顶部「加载更早」prepend（`session_hydrate.rs`、`tui_stream_view.rs`） | 续聊时看不到前文，须先切到别的壳回顾 |
 | G7 | 无 retry / regen / branch / 编辑用户消息（`controls.rs` 无对应命令，`tui_mode` 里无 `regen`/`branch`） | 消息回合菜单（`message_row_actions.rs`、`user_message_edit.rs`） | 模型答错只能整轮重发或手动复制改写 |
 | G8 | ~~审批浮层把命令截成一行且无法展开~~ → **已落地**：`Ctrl+E` 在 78×9 收起档与铺满主体区的展开档之间切换，展开档按显示宽折行（`text::wrap_display`）并支持 ↑/↓、PgUp/PgDn、Home/End 滚动，提示行显示「第 x-y / N 行」（`overlay.rs`） | 底部审批条可展开完整命令 + 失败保留重试（`approval_modal.rs`） | 长命令看不到全貌，易误判 |
 | G9 | 澄清问卷（`clarification_questionnaire`）在 TUI 无交互 UI：`serve/chat_classify.rs` 只有 `clarify_trace` 钩子，没有表单 | 问卷表单（Web `frontend`） | 模型需要澄清时 TUI 这侧拿不到结构化提问 |
@@ -114,12 +114,14 @@
 
 > 前置：核对 serve 是否提供「会话消息分页读取」「会话删除/改名」端点（TUI `/conv list` 已证明会话列表存在；Desktop 水合数据源在 serve 侧）。未 pin 前不落地，禁止用猜测端点写代码。
 
-#### W2.1 会话历史回放 + 「加载更早」（G6）— 最新页已落地，分页未做
+#### W2.1 会话历史回放 + 「加载更早」（G6）— 已落地（最新页 + `/older` 前插）
+
+> **实现**：切换 / 启动回放照旧拉 `GET /conversation/messages` 的**最新一页**，回包里的 `window_start_index` / `has_older` 落进 `UiState::history_page`；`/older`（别名 `/history`）把 `window_start` 当 `before_index` 再请求一页，回包走 `prepend_replayed` **前插**（不清屏、不动会话绑定）。**前插要同时处理三处行号状态**：`tool_pending`（工具行映射）与 `search_cursor`（搜索锚点）跟着整体平移，`search_hits` 改为**整表重扫**（只平移会漏掉更早页里的命中，`/find` 于是计数偏小、跳不到它们；翻页低频，O(行数) 付得起），游标本身换成回包的 `window_start_index`。漏掉任何一处都会让后续事件落到错误的行上（工具结果改写历史消息、`/find` 跳到隔壁行）。进度点 `loading` 兼作「这次回包是不是我这次翻页」的判据；切走会话或开跑新回合后到达的回包直接丢弃并复位标记；**切换会话的回放还在途时 `/older` 一律拒绝** —— 那时 `conversation_id` 已改绑新会话而游标仍属于上一个会话，放行会把别的会话的一页前插进来。`window_start_index == 0` 视作「已到最早一条」，不认服务端同时给出的 `has_older`，避免反复请求同一页。顶部提示是 `body_cache` 生成的 `log_index: None` 物理行（「↑ 还有更早的消息：/older 加载」/「↑ 正在加载更早…」），因此缓存与全量重建逐行一致（`assert_same_as_full_rebuild` 覆盖），搜索锚点与 spinner 定位天然跳过它。**未做**：视口补偿（前插后画面整体下移，见 §2 目标 1 的后续 PR）。
+>
+> **依赖修正**：原方案写「依赖 serve 消息分页端点」——核对后该端点与 `before_index` 参数**早已就绪**（`serve/conversation.rs` 一直传 `CONVERSATION_MESSAGES_PAGE_LIMIT`，`ConversationMessagesResponse` 已带 `window_start_index`/`has_older`），TUI 只是永远传 `None`，所以本项属纯客户端改动，无新契约。
 
 - **参照**：Desktop `session_hydrate.rs` 水合 + 顶部「加载更早」prepend 且滚动锚定不跳（`scroll_shell.rs::compensate_after_prepend`）。
-- **方案**：切换会话（Enter/`/conv use`）时按需拉最近一页历史渲染（复用行模型，thinking/工具行转摘要）；顶部「↑ 加载更早」翻页；prepend 时视口补偿。更新矩阵 L53 描述。
-- **落点**：`state.rs`、`mod.rs`、`worker.rs`、`render.rs`；契约侧 tui `serve/` 模块（原 `crabmate-tui-core`）。
-- **依赖**：serve 消息分页端点；行模型需能承载多页（`lines` 追加 + `prepend` 区）。
+- **落点**：`tui_mode/history.rs`（门控 / 前插回包）、`tui_mode/state_history.rs`（游标 + `prepend_replayed`，压 `state.rs` 行数）、`tui_mode/body_cache.rs`（顶部提示行）、`tui_mode/controls.rs` + `slash_menu.rs`（`/older`）、`tui_mode/worker.rs`（回包带 `before_index`）。
 
 #### W2.2 会话重命名/删除（G5 的一部分）— 删除已落地，重命名待端点
 
@@ -157,7 +159,7 @@
 | W1.1 | L62「In-app stream resume after background」TUI 列/Notes | TUI 全屏补 `/resume`，Notes 补充（原仅 repl） |
 | W1.2/W1.3/W1.4/W1.5 | L53「Full-screen TUI」Notes / L60「Control slashes」 | Notes 追加排队/草稿/复制/过滤描述 |
 | W1.6 | L53「Full-screen TUI」Notes | 多行输入一栏补「整段粘贴经括号粘贴一次落地，`CM_TUI_PASTE=off` 可关」 |
-| W2.1 | L53 Notes「switching sessions starts a fresh transcript」 | 改为「切换可翻历史」 |
+| W2.1 | L53 Notes「switching sessions starts a fresh transcript」 | 已同步：切换回放最新页 + `/older` 经 `before_index` 前插（80 条/页），并平移工具行 / 搜索行号 |
 | W2.2 | L62「Web session list + resume…」TUI 列/Notes | 删除已补（`Delete` / `Shift+Delete`）；重命名待 serve 端点 |
 | W2.3 | L59「Ask/Plan/Act…」附近或新增行 | 视方案形态在 chat/tools 段新增或并入 Notes |
 | W2.4 | L61 Notes | 补导出能力 |

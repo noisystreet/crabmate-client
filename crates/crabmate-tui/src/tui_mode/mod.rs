@@ -346,6 +346,7 @@ impl TuiApp<'_> {
             Control::Copy(arg) => self.copy_last(arg),
             Control::Workspace(arg) => self.workspace_command(arg),
             Control::Resume => self.resume_turn(),
+            Control::Older => history::load_older(self),
             Control::Model(arg) => {
                 let echo = set_override_field(&mut self.overrides.model, arg, "model");
                 self.st.push_line(LineKind::System, &echo);
@@ -659,9 +660,10 @@ impl TuiApp<'_> {
             },
             UiEvent::ConversationHistory {
                 conversation_id,
+                before_index,
                 result,
                 snapshot,
-            } => history::on_result(self, &conversation_id, result, snapshot),
+            } => history::on_result(self, &conversation_id, before_index, result, snapshot),
             UiEvent::SessionIndex { result, op } => self.on_session_index(result, op),
             UiEvent::Status(result) => match result {
                 Ok(defaults) => self.st.serve_defaults = Some(defaults),
