@@ -7,8 +7,8 @@
 use crabmate_client_api::chat_body::llm_context_tokens_for_chat_body;
 use crabmate_client_api::context_axis::ContextUsedWatermark;
 use crabmate_client_api::context_axis::{
-    context_axis_apply_watermark, context_axis_from_snapshot, context_placeholder_text,
-    context_value_text,
+    context_axis_apply_watermark, context_axis_from_snapshot, context_axis_whole,
+    context_placeholder_text, context_value_text,
 };
 use crabmate_client_api::prompt_tokens::TiktokenPromptTokensSnapshot;
 
@@ -56,6 +56,14 @@ impl UiState {
         self.context = ContextUsage::default();
     }
 
+    /// 本会话当前是否已有实测快照（换会话的 `clear_usage` 之后、第一份实测到达之前为 `false`）。
+    ///
+    /// 回合末只有它为 `false` 时才去补拉用量：已实测的一轮没必要再拉一次整页历史。
+    #[must_use]
+    pub fn has_usage_snapshot(&self) -> bool {
+        self.context.snapshot.is_some()
+    }
+
     /// 状态行 `ctx` 段的文本：有实测时 `12.0k / 1000k (1.2%)`，没有时占位 `—`（`— / 1000k`）。
     ///
     /// **总是返回文本**（而不是「无数据就没有段」）：段整个消失时，用户无法区分
@@ -64,8 +72,22 @@ impl UiState {
     /// `cap_from_settings` 是本机设置里的上下文窗口（`context_tokens` 原文），**优先于**快照的
     /// `max_input_tokens`：后者是「窗口 − 输出预留 − 安全余量」，拿它当分母会让数字在首轮
     /// 前后于 1000k / 993k 之间跳变。
-    pub fn context_text(&self, cap_from_settings: Option<&str>) -> String {
+    /// `new_session_baseline` 是 `GET /status` 给的 system-only 粗估（按 agent role），
+    /// 只在**还没有 cid**（即还没有任何服务端实测）时使用，显示时带 `~` 标明是估算 ——
+    /// 与 Desktop 的 `status_bar_context_is_baseline_estimate` 同口径。
+    pub fn context_text(
+        &self,
+        cap_from_settings: Option<&str>,
+        new_session_baseline: Option<u32>,
+    ) -> String {
         let Some(snap) = self.context.snapshot.as_ref() else {
+            if let Some(used) = new_session_baseline.filter(|_| self.conversation_id.is_none()) {
+                return context_value_text(context_axis_whole(
+                    settings_cap(cap_from_settings),
+                    used,
+                    true,
+                ));
+            }
             return context_placeholder_text(settings_cap(cap_from_settings));
         };
         let Some(used) = used_tokens(snap) else {
@@ -156,17 +178,49 @@ mod tests {
         let mut st = UiState::new();
         st.conversation_id = Some("conv-1".to_string());
         st.set_prompt_tokens(snap(Some(116_900), 116_900, Some(993_000)));
-        assert_eq!(st.context_text(Some("1000000")), "116.9k / 1000k (11.7%)");
+        assert_eq!(
+            st.context_text(Some("1000000"), None),
+            "116.9k / 1000k (11.7%)"
+        );
         // 水位：下一轮实测回落时仍显示本会话峰值（`observe` 只取滚动最大）。
         st.set_prompt_tokens(snap(Some(100_000), 100_000, Some(993_000)));
-        assert_eq!(st.context_text(Some("1000000")), "116.9k / 1000k (11.7%)");
+        assert_eq!(
+            st.context_text(Some("1000000"), None),
+            "116.9k / 1000k (11.7%)"
+        );
     }
 
     #[test]
     fn no_snapshot_renders_placeholder_not_nothing() {
         // 段消失会让用户以为功能没生效；没有实测时给占位（有已知上限就带上分母）。
         let st = UiState::new();
-        assert_eq!(st.context_text(Some("1000000")), "— / 1000k");
-        assert_eq!(st.context_text(None), "—");
+        assert_eq!(st.context_text(Some("1000000"), None), "— / 1000k");
+        assert_eq!(st.context_text(None, None), "—");
+    }
+
+    /// 新会话（无 cid、无快照）用 `/status` 基线撑住，并带 `~` 标明是估算。
+    #[test]
+    fn new_session_shows_baseline_with_tilde() {
+        let mut st = UiState::new();
+        assert_eq!(
+            st.context_text(Some("1000000"), Some(12_000)),
+            "~12.0k / 1000k (1.2%)"
+        );
+        // 没有基线 → 仍是占位（不编数字）
+        assert_eq!(st.context_text(Some("1000000"), None), "— / 1000k");
+        // 有 cid（已有服务端会话）时基线不参与：等实测
+        st.conversation_id = Some("c1".to_string());
+        assert_eq!(st.context_text(Some("1000000"), Some(12_000)), "— / 1000k");
+    }
+
+    /// 实测优先于基线：有了快照就不该再显示估算值。
+    #[test]
+    fn measured_snapshot_wins_over_baseline() {
+        let mut st = UiState::new();
+        st.set_prompt_tokens(snap(Some(116_900), 116_900, Some(1_000_000)));
+        assert_eq!(
+            st.context_text(Some("1000000"), Some(12_000)),
+            "116.9k / 1000k (11.7%)"
+        );
     }
 }

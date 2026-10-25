@@ -165,7 +165,7 @@
 | W3.2 | L55「`POST /chat/stream` + command approval」TUI Notes | 补 `Ctrl+E` 展开看完整命令（折行 + 滚动）、收起档单行截断 |
 | W3.3 | L53「Full-screen TUI」Notes | 补「< 120 列时左右栏隐藏，当前工作区无指示」（G10，待落地） |
 | W3.4 | L54「Full-screen TUI」Notes | 补状态栏 `ctx` 上下文用量段（`tiktokenPromptTokens`（`RUN_FINISHED` / `conversation_saved`） + 会话内水位；口径来自 S11 `client-api::context_axis`；段恒在，无实测时占位 `—`）——已同步 |
-| W3.5 | 同格 Notes | 已修（见 G11）：`timeline_log` `kind=context_trim` 的 `after_tokens` 会把水位**回落**；另加两处清理 —— `/conv new` 与切换会话时 `UiState::clear_usage` 清空快照与水位，避免新会话仍显示上一个会话的数字 |
+| W3.5 | 同格 Notes | 已修（见 G11）：`timeline_log` `kind=context_trim` 的 `after_tokens` 会把水位**回落**；另加两处清理 —— `/conv new` 与切换会话时 `UiState::clear_usage` 清空快照与水位，避免新会话仍显示上一个会话的数字；新会话（无 cid）回落 `/status` 的 `tiktoken_new_session_baseline_by_agent_role` 并显示 `~` 估算前缀（对齐 Desktop）；另：首轮结束绑上 cid 后若这一轮仍无实测，回合末补拉 `GET /conversation/messages` 的快照（同 Desktop 流收尾水合，回包按 cid 门控），不再从 `~12k` 掉回 `—` |
 
 > 矩阵维护规则：改了用户可见能力就必须在同 PR 更新对应格（§顶注），不允许“下个 PR 再补”。
 

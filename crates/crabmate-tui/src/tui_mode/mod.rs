@@ -47,6 +47,7 @@ mod test_support;
 mod text;
 pub(crate) mod tool_summary;
 mod turn_send;
+mod usage_hydrate;
 mod worker;
 mod workspace_cmd;
 mod workspace_keys;
@@ -571,6 +572,9 @@ impl TuiApp<'_> {
             // `/conv new` 建的本地行还没有服务端 id：首轮结束就补上（左栏 `>` 与
             // `/conv use`、Web 端续聊都靠它）。
             self.bind_new_session(&cid);
+            // cid 一到，新会话的 `~` 基线就不再适用（`UiState::context_text` 只认「无 cid」）：
+            // 这一轮若没带实测，补一次用量水合，否则状态行会从 `~12k` 掉回占位 `—`。
+            self.hydrate_usage_if_unmeasured(&cid);
         }
         if let Some(msg) = error {
             self.st
@@ -601,6 +605,12 @@ impl TuiApp<'_> {
             UiEvent::Thinking(delta) => self.st.stream_delta(LineKind::Thinking, &delta),
             UiEvent::System(line) => self.st.push_line(LineKind::System, line.trim()),
             UiEvent::PromptTokens(snap) => self.st.set_prompt_tokens(*snap),
+            // 回合末补拉的用量（`GET /conversation/messages` 自带快照）：带 cid，
+            // 回包晚到（用户已切走）时丢弃，不把上个会话的数字挂到当前会话上。
+            UiEvent::UsageHydrated {
+                conversation_id,
+                snapshot,
+            } => self.on_usage_hydrated(&conversation_id, snapshot),
             // 压缩 / 裁剪后水位回落（ADR 0005）：只增不减会让数字虚高。
             UiEvent::ContextTrim(after) => self.st.reset_used(after),
             UiEvent::ToolStart {
@@ -733,10 +743,13 @@ impl TuiApp<'_> {
             };
         StatusInfo {
             api_base: self.client.config().api_base.clone(),
-            // 上下文用量：段恒显示，没有实测时是占位 `—`（见 `UiState::context_text`）。
-            context: self
-                .st
-                .context_text(stored.and_then(|p| p.context_tokens.as_deref())),
+            // 上下文用量：段恒显示；没有实测时是占位 `—`，新会话则回落 `GET /status` 的
+            // system 基线并带 `~`（见 `UiState::context_text`）。
+            context: self.st.context_text(
+                stored.and_then(|p| p.context_tokens.as_deref()),
+                defaults
+                    .and_then(|d| d.baseline_prompt_tokens(stored.and_then(|p| p.role.as_deref()))),
+            ),
             model: show(
                 &overrides.model,
                 stored.and_then(|p| p.model.as_deref()),
