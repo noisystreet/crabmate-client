@@ -24,6 +24,11 @@ pub const STATUS: &str = "status";
 pub const MODE: &str = "mode";
 /// `/role`（repl / tui-mode）。
 pub const ROLE: &str = "role";
+/// `/perm`（repl / tui-mode）：本轮随 `/chat` 发送的权限等级意图（`off` 清除）。
+///
+/// 与 `/mode` `/role` 同类：客户端侧 override，随下一条消息生效；服务端仍按
+/// min 链（`ceiling → role → session_mode → 本字段`）决定实际档位。
+pub const PERM: &str = "perm";
 /// `/resume`（repl / tui-mode）：续传上一轮被中断、serve 侧 job 可能仍在跑的回合。
 pub const RESUME: &str = "resume";
 /// `/quit`（repl / tui-mode）。
@@ -36,7 +41,7 @@ pub const QUIT_Q: &str = "q";
 #[cfg(test)]
 mod tests {
     use super::{
-        CD, CONV, HELP, HELP_Q, MODE, MODEL, QUIT, QUIT_EXIT, QUIT_Q, RESUME, ROLE, STATUS,
+        CD, CONV, HELP, HELP_Q, MODE, MODEL, PERM, QUIT, QUIT_EXIT, QUIT_Q, RESUME, ROLE, STATUS,
         WORKSPACE,
     };
 
@@ -51,6 +56,7 @@ mod tests {
         assert_eq!(STATUS, "status");
         assert_eq!(MODE, "mode");
         assert_eq!(ROLE, "role");
+        assert_eq!(PERM, "perm");
         assert_eq!(RESUME, "resume");
         assert_eq!(QUIT, "quit");
         assert_eq!(QUIT_EXIT, "exit");

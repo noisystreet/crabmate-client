@@ -24,6 +24,7 @@ pub(super) fn test_prefs() -> SessionPrefs {
         api_base: None,
         agent_role: None,
         session_mode: None,
+        permission_level: None,
     }
 }
 

@@ -25,6 +25,7 @@ pub fn is_control_slash(trimmed: &str) -> bool {
             | slash::STATUS
             | slash::MODE
             | slash::ROLE
+            | slash::PERM
             | slash::QUIT
             | slash::QUIT_EXIT
             | slash::QUIT_Q
@@ -126,6 +127,7 @@ fn print_help() {
   /model [name]         set client-side model override for later turns (off to clear)\n\
   /mode ask|plan|act    set session mode for later turns (off to clear)\n\
   /role <id>            set agent role for later turns (off to clear; list via /status)\n\
+  /perm <level>         set permission-level intent for later turns (off to clear; ceiling still applies)\n\
   settings panel        full-screen settings panel: run `crabmate-tui tui` then /settings or F2\n\
   /background <path>    full-screen background (tui only; kitty pixel tier, or per-cell colours elsewhere; off clears)\n\
   /resume               resume the last interrupted run (network drop)\n\
@@ -329,6 +331,9 @@ mod tests {
         assert!(is_control_slash("/Workspace /tmp"));
         assert!(is_control_slash("/conv list"));
         assert!(is_control_slash("/conv delete c1"));
+        // `/perm` 与 `/mode` `/role` 同类：必须拦截，否则会被当成普通消息发给模型。
+        assert!(is_control_slash("/perm read"));
+        assert!(is_control_slash("/perm off"));
         // `/btw` 是服务端短路的模型面命令：**不**拦截，原样发给 serve。
         assert!(!is_control_slash("/btw why"));
         assert!(!is_control_slash("/my-skill"));
