@@ -11,6 +11,7 @@ pub mod chat_body;
 pub mod client_llm_presets;
 pub mod context_axis;
 pub mod conversation_messages;
+pub mod conversation_state;
 pub mod handoff;
 pub mod health;
 pub mod markdown_inline;
@@ -47,6 +48,10 @@ pub use conversation_messages::{
     CONVERSATION_MESSAGES_PAGE_LIMIT, ConversationMessage, ConversationMessagesResponse,
     FIRST_TURN_WORKSPACE_CONTEXT_NAME, ReplayRow,
 };
+pub use conversation_state::{
+    ConversationStateOutcome, ConversationStatePatch, ConversationStateView,
+    classify_conversation_state_response,
+};
 pub use handoff::{
     API_BASE_HASH_KEY, BEARER_HASH_KEY, handoff_hash_fragment, is_handoff_hash_key,
     percent_encode_unreserved,
@@ -54,7 +59,7 @@ pub use handoff::{
 pub use health::health_degraded_note;
 pub use markdown_inline::{InlineSpan, parse_inline_markdown};
 pub use markdown_normalize::normalize_markdown_for_render;
-pub use messages::{http_error_message, http_error_text};
+pub use messages::{api_error_code, http_error_message, http_error_text};
 pub use permission::{
     CLAMP_ORDER, DEFAULT_LEVEL, LEVELS, is_known_level, normalize_level, ordered_clamped_axes,
 };

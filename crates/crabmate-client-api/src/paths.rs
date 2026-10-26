@@ -42,6 +42,17 @@ pub const SKILLS: &str = "/skills";
 /// 不要用 `/status` 探测（它对新老 serve 都会成功，无法区分能力）。
 pub const PERMISSION: &str = "/permission";
 
+/// 会话级运行态意图的空闲态写入口（`POST`；frontend / tui）。
+///
+/// 让「点一下、不发消息」也能改等级 / 会话模式 / 角色：请求体 `ConversationStatePatch`
+/// 三个字段都可选但至少给一个，只 `UPDATE` 传了的列（部分更新）。
+/// 响应 `ConversationStateView` 直接回带写后投影，所以调用方**不必**再打 [`PERMISSION`]。
+///
+/// 与 `GET /permission` 同一个受保护面（需 Bearer）。**404 有两种含义**，
+/// 必须按 body 里的 `error.code` 分流（见 `conversation_state::classify_conversation_state_response`），
+/// 不能只看状态码——老 serve 的 404 是「没有这条路由」，新 serve 的 404 是「会话不存在」。
+pub const CONVERSATION_STATE: &str = "/conversation/state";
+
 /// 取消指定 job 的 chat 流（tui / frontend）。
 #[must_use]
 pub fn chat_stream_cancel(job_id: &str) -> String {
@@ -112,8 +123,8 @@ pub fn permission(agent_role: Option<&str>, conversation_id: Option<&str>) -> St
 #[cfg(test)]
 mod tests {
     use super::{
-        CHAT_STREAM, HEALTH, SKILLS, WORKSPACE, chat_stream_cancel, conversation_delete,
-        conversation_messages, permission,
+        CHAT_STREAM, CONVERSATION_STATE, HEALTH, SKILLS, WORKSPACE, chat_stream_cancel,
+        conversation_delete, conversation_messages, permission,
     };
 
     #[test]
@@ -122,6 +133,9 @@ mod tests {
         assert_eq!(CHAT_STREAM, "/chat/stream");
         assert_eq!(WORKSPACE, "/workspace");
         assert_eq!(SKILLS, "/skills");
+        // 写入口与只读投影是两个端点：拼错就变成 GET 该路径，404 会被当成「老 serve」。
+        assert_eq!(CONVERSATION_STATE, "/conversation/state");
+        assert_ne!(CONVERSATION_STATE, super::PERMISSION);
     }
 
     #[test]

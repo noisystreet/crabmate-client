@@ -82,7 +82,8 @@ frontend/                # wasm fetch 适配器 + UI；S1–S4 已用 client-api
 | `health` | `/health` degraded 检查摘要（不含壳 CORS） |
 | `paths` | 跨端共用的端点路径常量与动态段构造器（≥2 端实际共用才收） |
 | `slash` | 跨端共用的斜杠控制命令名字表（handler 分端） |
-| `messages` | HTTP 错误体通用取错（`error` → `message` → `HTTP {status}`），display 层不属契约 |
+| `messages` | HTTP 错误体通用取错（`error` → `message` → `HTTP {status}`），display 层不属契约；另含嵌套 `{"error":{"code":…}}` 的 `api_error_code`（按 code 分流的唯一入口） |
+| `conversation_state` | `POST /conversation/state` 的响应分类（写入成功 / 会话不存在 / 老 serve 无此路由 / 其它失败）+ 契约类型 re-export；不做等级比较、不算 min 链 |
 | `prompt_tokens`（S6a） | tiktoken 快照 DTO + camelCase/snake_case 双键解析（无 IO） |
 | `sse_dispatch`（S6b） | AG-UI 控制面 DTO + `SseControlSink` 钩子组签名 + `SseDispatch` 三态（钩子实现留端） |
 | `ag_ui_parser`（S6c） | AG-UI 单行 JSON → 控制面分发（`parse_ag_ui_line`；仅 `serde_json` + `cm_sse_protocol`） |
@@ -335,7 +336,30 @@ Web 的 `api_base_preset_select` 字符串链路（写入已保存模型预设�
 
 **能力探测**：老 serve 没有 `/permission`（404），这是客户端判断「该 serve 是否支持权限等级」的唯一手段；**不要**用 `/status` 探测——它对新旧 serve 都会成功，无法区分能力。
 
-**状态**：词表与路径构造已落地；**前端（Desktop / Android / Web）已接**——设置页「工具」分区里的只读块（组件 `frontend/src/app/settings_permission_block.rs`，请求层 `frontend/src/api/http_permission.rs`，从 `http.rs` 拆出以守住单文件 920 行棘轮）：显示当前等级 + 来源、服务端上限 + 来源、可选档位、收窄轴（固定顺序，未知轴丢弃），并带一个手动「刷新」（连点只让最后一次请求落地）；文案在 `frontend/src/i18n/settings_permission.rs`（`settings.rs` 已近 920 行，按域拆出）——`ceiling_source` 在契约里是**裸字符串**（`config` / `derived_loopback` / `derived_non_loopback`），客户端负责本地化，未知来源原样透出而不并入「配置上限」；`/permission` 的 **404 显示「该 serve 不支持」而不是报错**（404 在读 body 之前判定——能力答案不该依赖只有 200 才需要的读取）。块底部另有一行说明「未按会话或角色收窄」，因为标签写的是「当前等级」而这里只是静态投影。TUI 尚未接入，且当前不传 `agent_role` / `conversation_id`（设置页没有「即将发送的角色」概念，按角色 / 会话收窄的档位属于聊天现场）——所以矩阵里 TUI 列为 `planned`、其余三列为 `reduced`（见 [`client_capability_matrix.md`](./client_capability_matrix.md)）。
+**状态**：词表与路径构造已落地；**前端（Desktop / Android / Web）已接**——设置页「工具」分区里的只读块（组件 `frontend/src/app/settings_permission_block.rs`，请求层 `frontend/src/api/http_permission.rs`，从 `http.rs` 拆出以守住单文件 920 行棘轮）：显示当前等级 + 来源、服务端上限 + 来源、可选档位、收窄轴（固定顺序，未知轴丢弃），并带一个手动「刷新」（连点只让最后一次请求落地）；文案在 `frontend/src/i18n/settings_permission.rs`（`settings.rs` 已近 920 行，按域拆出）——`ceiling_source` 在契约里是**裸字符串**（`config` / `derived_loopback` / `derived_non_loopback`），客户端负责本地化，未知来源原样透出而不并入「配置上限」；`/permission` 的 **404 显示「该 serve 不支持」而不是报错**（404 在读 body 之前判定——能力答案不该依赖只有 200 才需要的读取）。块底部另有一行说明「未按会话或角色收窄」，因为标签写的是「当前等级」而这里只是静态投影。TUI 已接：状态栏环境段最右端显示 `perm <线格式档位>`（`tui_mode/status.rs` 的 `PERM` 段 + `worker.rs` 的 `fetch_permission_level`，与 `/status` 同一个 worker 任务，避免拼出「旧 model + 新等级」），优先级最低——窄终端先丢它，`None`（老 serve / 未拉到）时整段消失而**不**回落配置默认档（`/status` 的 `permission_level_default` 回答的是「没意图时会落到哪」，不是「此刻是哪」）。详情（上限 / 可选档 / 收窄轴）仍只在 Desktop 设置页。两端都**不传** `agent_role` / `conversation_id`（设置页没有「即将发送的角色」概念，按角色 / 会话收窄的档位属于聊天现场），所以矩阵里四端都是 `reduced`（见 [`client_capability_matrix.md`](./client_capability_matrix.md)）。
+
+### 4.17 会话状态写入口（`POST /conversation/state`；共享层已落地，界面待接）
+
+服务端新增的**空闲态**写入口：不发消息也能改会话级运行态意图（`permission_level` / `session_mode` / `agent_role`），下一回合与 `GET /permission` 立刻读到新值。此前唯一的写入通道是 `/chat` 的字段，且落盘发生在**回合结束**，所以「点一下、不发消息」改不动任何东西。
+
+| 项 | 规则 |
+|----|------|
+| `paths::CONVERSATION_STATE` | `"/conversation/state"`，无查询参数；与 `GET /permission` 同面（受保护，需 Bearer）。与 `PERMISSION` 是两个端点，拼错会得到 404 并被误判成「老 serve」 |
+| 请求体 | **直接用契约的 `ConversationStatePatch`**（不镜像）：三字段皆可选但至少给一个；写入是**部分更新**（只 `UPDATE` 传了的列），所以切等级时不要顺带回传 `session_mode` / `agent_role`——那会把过期值写回去，或送一个未确认的角色吃 400 |
+| 响应 | `ConversationStateView`：`active_*` 是落库**意图**（允许高于生效上限），`permission` 是写后重算的投影。一次请求即可刷新选择器，不必再打 `GET /permission`；解析不出 View 时记为失败，不造「半截成功」 |
+| `messages::api_error_code` | 取 `{"error":{"code":…}}` 的嵌套 `code`；`http_error_text` 只认顶层字符串，拿人读文案反推分支就是把文案当契约 |
+| `classify_conversation_state_response(status, body)` | 收敛成 `Ok` / `NotFound` / `Unsupported` / `Failed{status, code}` 四态；成功载荷装箱，避免失败路径为它付内存 |
+| 复用 | `permission::normalize_level`（本地先拒未知档，服务端只会回 400）、`ordered_clamped_axes`（收窄轴顺序）；**不**新增任何等级比较或 min 链 |
+
+**404 两义（分类函数存在的理由）**：老 serve 没有这条路由 → axum 默认 404（body 不是 `ApiError` 形状）→ `Unsupported`；新 serve 会话不存在 / 已过期 → 404 + `CONVERSATION_NOT_FOUND` → `NotFound`。按状态码硬分会把「会话过期」显示成「该 serve 太旧」，或反过来让用户去重新绑定一个其实存在的会话。这个 `Unsupported` 必须与 `GET /permission` 的裸 404 落进**同一个** capability 状态，否则会出现「只读块说不支持、选择器说会话不存在」。
+
+**500 与 404 不能混**：库写失败回 `CONVERSATION_STORE_ERROR`（500，幂等可重试——同值重复 POST 只是重复 `UPDATE`），不能被当成「会话不存在」。服务端为此专门把这两条分开（`021d4606` / `630cd3b0`），客户端也要分开。
+
+**没有「清空意图」**：`permission_level: null` 经 serde 变 `None` = 未提供 = 不写该列；三字段全空撞 `EMPTY_CONVERSATION_STATE_PATCH` 400。所以 UI **不提供**「恢复服务端默认」，只能选具体档位（或关掉选择器）。
+
+**写序（单一意图源）**：回合结束的落盘只写「本回合请求里显式带的字段」，所以 `/chat` 必须永远带**用户当前选的意图**，而不是发送瞬间的快照——否则回合结束会把旧值写回，反向覆盖用户在建回合期间的空闲态切换（服务端刻意不拿旧快照回写）。
+
+**状态**：共享层（路径常量 / `api_error_code` / 四态分类）已落地并有单测；**界面尚未接**——Desktop 仍是只读块（§4.16），TUI 只有状态栏 `perm` 读数。剩余工作是请求层 + 选择器 + 状态栏「意图 → 生效」段，以及两端会话切换时清空意图。
 
 ## 5. 明确不共享
 
