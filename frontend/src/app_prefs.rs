@@ -369,6 +369,8 @@ mod status_baseline_prompt_tokens_tests {
             planner_executor_mode: "single_agent".into(),
             conversation_store_sqlite_path_configured: true,
             conversation_store_sqlite_active: true,
+            permission_level_default: String::new(),
+            permission_level_max: String::new(),
         }
     }
 

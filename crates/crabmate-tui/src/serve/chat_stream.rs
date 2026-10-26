@@ -615,6 +615,7 @@ mod tests {
             command: "x".into(),
             args: String::new(),
             allowlist_key: None,
+            permission_level: None,
         };
         assert_eq!(g.decide(&req).unwrap(), ApprovalDecision::AllowOnce);
     }
@@ -629,6 +630,7 @@ mod tests {
             command: "df".into(),
             args: "-h".into(),
             allowlist_key: Some("df".into()),
+            permission_level: None,
         };
         assert_eq!(g.decide(&req).unwrap(), ApprovalDecision::Deny);
         assert_eq!(g.seen.len(), 1);

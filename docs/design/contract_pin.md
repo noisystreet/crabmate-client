@@ -2,7 +2,7 @@
 
 > **权威发版策略**：Server 主仓 [`client_contract_versioning.md`](https://github.com/noisystreet/CrabMate/blob/main/docs/design/client_contract_versioning.md)  
 > **展示 crate 下沉**：Server [`client_display_crate_sink.md`](https://github.com/noisystreet/CrabMate/blob/main/docs/design/client_display_crate_sink.md)；本仓勾选 [`display_crate_sink.md`](./display_crate_sink.md)  
-> **单包 crates.io**：Server [`crates_io_single_package.md`](https://github.com/noisystreet/CrabMate/blob/main/docs/design/crates_io_single_package.md) — 钉 crates.io **`crabmate` `0.7.0`** + `features = ["protocol"]`。
+> **单包 crates.io**：Server [`crates_io_single_package.md`](https://github.com/noisystreet/CrabMate/blob/main/docs/design/crates_io_single_package.md) — 正式口径钉 crates.io **`crabmate`** + `features = ["protocol"]`；**当前为 git rev 过渡钉法**（Server 尚未发 `0.7.1`，见下）。
 > **UI 迁出计划**：[`frontend_migrate_plan.md`](https://github.com/noisystreet/CrabMate/blob/main/docs/design/frontend_migrate_plan.md) Phase B（本仓已迁入 `frontend/`）  
 > **本仓职责**：消费侧钉法 + 禁止 path 回主开发树。
 
@@ -22,7 +22,7 @@
 | 项 | 值 |
 |----|-----|
 | 源码迁入自 | 主仓 `eb0048bf…`（见 `frontend/SOURCE.md`） |
-| 契约 | crates.io **`crabmate` `0.7.0`** + `features = ["protocol"]` |
+| 契约 | **git rev 过渡**：`crabmate` @ `f0a1bc06`（https）+ `features = ["protocol"]` |
 | Playwright `serve` checkout | git tag **`v0.7.0`**（与 crates.io 包同源） |
 | lock | 提交 `frontend/Cargo.lock`、`crates/crabmate-tui/Cargo.lock`、`crates/crabmate-tool-card/Cargo.lock` |
 
@@ -33,18 +33,24 @@
 ## 钉主仓契约
 
 ```toml
-crabmate = { version = "0.7.0", default-features = false, features = ["protocol"] }
+# 过渡期（Server 未发 0.7.1）：钉不可变 rev
+crabmate = { git = "https://github.com/noisystreet/CrabMate", rev = "f0a1bc068d3b209da7ce36fde5caa21eea7ae093", default-features = false, features = ["protocol"] }
+
+# 正式口径（0.7.1 发布后换回，并提交 lock）
+crabmate = { version = "<semver>", default-features = false, features = ["protocol"] }
 ```
 
 `use` 只走 `crabmate::cm_types`、`cm_sse_protocol`、`cm_api_contract`、`cm_turn_layout`、`cm_display_rules`、`cm_chat_export`。不要 `crabmate::sse` / `crabmate::types`（仅 Server `server` feature 别名）。
 
 `crabmate-tool-card` 为本仓 path（W2：`crates/crabmate-tool-card`）；勿再 git 钉 Server 该包。
 
-crates.io **`crabmate` 0.7.0** 为默认渠道。未升级的 Client 仍可钉 crates.io / git **`v0.4.0` / `v0.5.0` / `v0.5.1` / `v0.5.2` / `v0.6.0`**；更旧版本可继续使用产品 tag **`v0.3.0`** / `client-contract-v0.2.0` 的旧多包名。
+crates.io **`crabmate`** 为正式渠道。**当前本仓钉 git rev（过渡）**：Server 尚未发布含 permission-levels 的版本，`0.7.1` 发布后换回 crates.io semver。未升级的 Client 仍可钉 crates.io / git **`v0.4.0` / `v0.5.0` / `v0.5.1` / `v0.5.2` / `v0.6.0`**；更旧版本可继续使用产品 tag **`v0.3.0`** / `client-contract-v0.2.0` 的旧多包名。
+
+钉 git 依赖会让 CI 多拉一次整仓（建议缓存 `~/.cargo/git`）；本地可用 `CARGO_NET_GIT_FETCH_WITH_CLI=true` + git `insteadOf` 把该 URL 重写到本地仓库，避免每次整仓 clone（`Cargo.toml` / lock 里仍是 https 源，不影响可分发）。
 
 `crabmate-types` 不再由 `frontend` **直接**依赖（W1：网关预设表在 `frontend/src/client_llm_presets.rs`）。
 
-升级契约时改 `version` 并提交 lock；打产品 tag 前 Server 须绿：`bash scripts/check-client-contract.sh`。
+升级契约时改 `version`（过渡期改 `rev`）并提交 lock；打产品 tag 前 Server 须绿：`bash scripts/check-client-contract.sh`。
 
 **禁止**：`path = "../crabmate_agent/..."` 或任何回主开发树的 Cargo path。
 

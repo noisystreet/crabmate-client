@@ -256,6 +256,7 @@ mod tests {
             command: command.to_string(),
             args: "".to_string(),
             allowlist_key: None,
+            permission_level: None,
         }
     }
 

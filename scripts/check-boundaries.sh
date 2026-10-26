@@ -41,26 +41,41 @@ grep -Eq '^tauri = .*optional = true' "$CONNECT_TOML" \
   || fail "crabmate-connect 的 tauri 依赖必须声明 optional = true（由壳经 feature = [\"tauri\"] 启用）"
 echo "[check-boundaries] crabmate-connect 默认 feature ok"
 
-# 3. 契约钉形状：全仓 Cargo.toml 中对 crates.io crabmate 的直接依赖必须命中同一形状
-PIN_PATTERN='^crabmate = \{ version = "[^"]+", default-features = false, features = \["protocol"\] \}$'
-pin_versions=""
+# 3. 契约钉形状：全仓 Cargo.toml 里对 crabmate 的直接依赖必须命中**同一条**钉法。
+#    两种形状二选一：
+#      - crates.io semver（正式口径）
+#      - git rev（服务端未发版时的过渡钉法；rev 不可变，可复现）
+#    禁止 path =（回 Server 主开发树）与 tag =（tag 可被移动，不可复现）。
+PIN_SEMVER='^crabmate = \{ version = "[^"]+", default-features = false, features = \["protocol"\] \}$'
+PIN_GIT_REV='^crabmate = \{ git = "[^"]+", rev = "[0-9a-f]{7,40}", default-features = false, features = \["protocol"\] \}$'
+pin_line=""
+pin_source=""
 while IFS= read -r toml; do
   [ -f "$toml" ] || continue
   while IFS= read -r line; do
-    if ! printf '%s\n' "$line" | grep -Eq "$PIN_PATTERN"; then
-      echo "error: 契约依赖未命中钉形状（crates.io crabmate + default-features = false + features = [\"protocol\"]）：" >&2
+    if printf '%s\n' "$line" | grep -Eq "$PIN_SEMVER"; then
+      :
+    elif printf '%s\n' "$line" | grep -Eq "$PIN_GIT_REV"; then
+      :
+    else
+      echo "error: 契约依赖未命中钉形状（crabmate + default-features = false + features = [\"protocol\"]）：" >&2
       echo "  $toml: $line" >&2
-      echo "允许的形状：crabmate = { version = \"<semver>\", default-features = false, features = [\"protocol\"] }" >&2
+      echo "允许的形状（二选一，且全仓必须一致）：" >&2
+      echo "  crabmate = { version = \"<semver>\", default-features = false, features = [\"protocol\"] }" >&2
+      echo "  crabmate = { git = \"<url>\", rev = \"<sha>\", default-features = false, features = [\"protocol\"] }" >&2
       exit 1
     fi
-    v="$(printf '%s\n' "$line" | sed -E 's/^crabmate = \{ version = "([^"]+)".*$/\1/')"
-    if [ -n "$pin_versions" ] && [ "$v" != "$pin_versions" ]; then
-      fail "crabmate 契约钉版本不一致：$pin_versions vs $v（$toml）"
+    if [ -n "$pin_line" ] && [ "$line" != "$pin_line" ]; then
+      echo "error: crabmate 契约钉不一致（全仓必须同一条钉法）：" >&2
+      echo "  基准（$pin_source）：$pin_line" >&2
+      echo "  此处（$toml）：$line" >&2
+      exit 1
     fi
-    pin_versions="$v"
+    pin_line="$line"
+    pin_source="$toml"
   done < <(grep '^crabmate = ' "$toml" || true)
 done < <(git ls-files '*/Cargo.toml' 'Cargo.toml')
-echo "[check-boundaries] 契约钉形状 ok（version = $pin_versions）"
+echo "[check-boundaries] 契约钉形状 ok（$pin_line）"
 
 if grep -Rn --include='Cargo.toml' 'crabmate-sse-protocol' . >/dev/null 2>&1; then
   echo "error: 发现旧包名 crabmate-sse-protocol（已改名 crates.io crabmate，禁止钉回）：" >&2

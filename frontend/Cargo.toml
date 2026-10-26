@@ -11,7 +11,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 # Server 线契约（禁止 path 回本地 crabmate_agent；勿开 server feature）
-crabmate = { version = "0.7.0", default-features = false, features = ["protocol"] }
+crabmate = { git = "https://github.com/noisystreet/CrabMate", rev = "f0a1bc068d3b209da7ce36fde5caa21eea7ae093", default-features = false, features = ["protocol"] }
 # 本仓 path（展示 crate / 共享逻辑；勿 path 回 Server）
 crabmate-tool-card = { path = "../crates/crabmate-tool-card" }
 crabmate-client-api = { path = "../crates/crabmate-client-api" }
