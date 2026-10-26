@@ -150,6 +150,17 @@
   z-index: 45;
 }
 
+/* 权限等级段：标签 + 可点的档位触发器（菜单复用 .status-mode-menu-*，故这里只管排版） */
+.status-chip-perm {
+  padding: 0 4px 0 8px;
+  gap: 4px;
+  overflow: visible;
+}
+
+.status-chip-perm:has(.status-mode-trigger-open) {
+  z-index: 45;
+}
+
 /* 状态栏「思考模式」两态开关（轨道 + 滑块沿用设置页 .settings-model-toggle-* 样式） */
 .status-chip-thinking {
   cursor: pointer;

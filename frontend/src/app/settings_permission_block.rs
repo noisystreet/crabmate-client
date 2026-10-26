@@ -38,6 +38,8 @@ struct LevelSelectCtx {
     locale: RwSignal<Locale>,
     /// 意图信号：与 `/chat` 发送路径读的是**同一个**（壳层 ctx）。
     selected: RwSignal<Option<String>>,
+    /// 该意图归属哪个本地会话（切会话时由壳层 effect 清空）。
+    owner: RwSignal<Option<String>>,
     /// 当前会话句柄；`None` = 无 ctx（单测 / Story），此时选择器只改本地意图。
     chat: Option<ChatSessionSignals>,
     state: RwSignal<PermissionState>,
@@ -106,6 +108,8 @@ fn apply_level_selection(level: &str, ctx: LevelSelectCtx) {
         return;
     };
     ctx.selected.set(Some(level.to_string()));
+    // 归属记在**选择这一刻**的会话上：之后切走就该清掉，而不是跟着跑到别的会话。
+    ctx.owner.set(ctx.chat.map(|c| c.active_id.get_untracked()));
     let loc = ctx.locale.get_untracked();
     let cid = ctx
         .chat
@@ -186,6 +190,9 @@ pub(crate) fn SettingsPermissionBlock(locale: RwSignal<Locale>) -> impl IntoView
         locale,
         selected: shell
             .map(|c| c.selected_permission_level)
+            .unwrap_or_else(|| RwSignal::new(None)),
+        owner: shell
+            .map(|c| c.permission_intent_owner)
             .unwrap_or_else(|| RwSignal::new(None)),
         chat: shell.map(|c| c.chat),
         state,

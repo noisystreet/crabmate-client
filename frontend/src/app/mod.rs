@@ -57,6 +57,7 @@ mod status_agent_role_menu;
 mod status_bar;
 mod status_context;
 mod status_fetch_state;
+mod status_permission_chip;
 mod status_session_mode_seg;
 mod status_tasks_state;
 mod status_tasks_wiring;
