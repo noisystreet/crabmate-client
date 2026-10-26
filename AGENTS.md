@@ -67,6 +67,8 @@
 - Scratch drafts go in **`agent_space/`** (gitignored); **do not** treat `agent_space/` as committed documentation
 - **EN/ZH doc sync**: when bilingual pairs exist, **update both sides in the same change** (never one side only). Current pair: `README.md` ↔ `README.zh-CN.md`. Facts, commands, paths, and constraints must match; wording may be localized; content drift is forbidden. `AGENTS.md` is English-only (no `AGENTS.zh-CN.md`)
 
+**Cargo commands are per-package — there is no root `Cargo.toml`.** Each Rust package is its own single-package workspace with its own `Cargo.lock` (`desktop-tauri/src-tauri`, `mobile-tauri/src-tauri`, `crates/{crabmate-client-api,crabmate-tool-card,crabmate-connect,crabmate-tui}`, `web-host`, `frontend`); ADR-0004 deliberately does not merge them. A bare `cargo <cmd>` at the repo root fails with `could not find Cargo.toml`, and `cargo test -p <name>` does not work either (there is no shared workspace to select from) — run it inside the package directory, or pass `--manifest-path <pkg>/Cargo.toml`, which is what the `Makefile` `fmt` / `clippy` loops already do. Repo-level entries: `make test` (every group) and `make test-<group>` (`test-client-api` / `test-frontend` / `test-tauri` / `test-tui` / `test-web-host` / `test-tool-card`). `scripts/check.sh` and pre-commit do **not** run `cargo test`, so `make test` is the only test entry point.
+
 ## Required Commands
 
 ```bash
