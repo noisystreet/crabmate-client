@@ -602,7 +602,7 @@ fn format_api_error_detail(message: &str, code: Option<&str>, request_id: Option
 }
 
 /// 读取响应文本（`resp.text()` + await + 转 String），错误信息与各调用点一致。
-async fn read_response_text(resp: &Response, loc: Locale) -> Result<String, String> {
+pub(crate) async fn read_response_text(resp: &Response, loc: Locale) -> Result<String, String> {
     let text = JsFuture::from(resp.text().map_err(|e| format!("text: {:?}", e))?)
         .await
         .map_err(|e| format!("read body: {:?}", e))?;
@@ -617,7 +617,7 @@ async fn response_text_fallback(resp: &Response) -> Result<String, String> {
 }
 
 /// 执行 `Request` 并把 fetch 结果转成 `Response`（`do_fetch_json` / `delete_no_content` 共用）。
-async fn do_fetch(req: &Request, loc: Locale) -> Result<Response, String> {
+pub(crate) async fn do_fetch(req: &Request, loc: Locale) -> Result<Response, String> {
     let w = window().ok_or_else(|| crate::i18n::api_err_no_window(loc).to_string())?;
     let resp_val = JsFuture::from(w.fetch_with_request(req))
         .await
@@ -629,7 +629,7 @@ async fn do_fetch(req: &Request, loc: Locale) -> Result<Response, String> {
 }
 
 /// 非 2xx 响应的错误消息（`do_fetch_json` / `delete_no_content` 同源，含 `error` detail 提取）。
-fn http_status_error(status: u16, body: &str, loc: Locale) -> String {
+pub(crate) fn http_status_error(status: u16, body: &str, loc: Locale) -> String {
     crate::i18n::api_err_http_status(loc, status, http_error_detail_from_body(body).as_str())
 }
 

@@ -6,6 +6,13 @@
 //! Client 侧铁律：不复制任何等级比较规则（`available` / `effective` 全由服务端算），
 //! 本模块只做「字符串归一」与「顺序声明」。
 
+/// `GET /permission` 的响应契约**直接取自契约 crate**，不在本仓镜像字段。
+///
+/// 线形状权威在 Server `cm_api_contract/permission.rs`（`level` / `level_source` /
+/// `ceiling` / `ceiling_source` / `available` / `clamped_by` / `caps`），
+/// 由契约 semver / git rev 钉住；客户端改字段只能随契约升级。
+pub use crabmate::cm_api_contract::permission::{PermissionLevelSource, PermissionView};
+
 /// 五档词表，**自低到高**（与服务端 `PermissionLevel` 的 serde 线格式一致）。
 pub const LEVELS: [&str; 5] = ["chat", "read", "workspace", "approved", "unrestricted"];
 
@@ -33,9 +40,29 @@ pub fn is_known_level(raw: &str) -> bool {
     normalize_level(raw).is_some()
 }
 
+/// 把服务端 `clamped_by` 排成 [`CLAMP_ORDER`] 的固定展示顺序，并**丢弃**词表外的轴。
+///
+/// 服务端本来就是这个顺序，这里再排一次是让 UI 不依赖数组顺序（服务端调换顺序不该让界面跳）；
+/// 未知轴丢弃而不是原样透出——它是服务端实现细节，客户端没有对应文案，硬渲染只会露出一个
+/// 英文标识符。全未命中（未被钳制）返回空 `Vec`，调用方据此显示「未收窄」。
+#[must_use]
+pub fn ordered_clamped_axes(clamped_by: &[String]) -> Vec<&'static str> {
+    CLAMP_ORDER
+        .iter()
+        .copied()
+        .filter(|axis| {
+            clamped_by
+                .iter()
+                .any(|raw| raw.trim().eq_ignore_ascii_case(axis))
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{CLAMP_ORDER, DEFAULT_LEVEL, LEVELS, is_known_level, normalize_level};
+    use super::{
+        CLAMP_ORDER, DEFAULT_LEVEL, LEVELS, is_known_level, normalize_level, ordered_clamped_axes,
+    };
 
     #[test]
     fn levels_are_the_five_wire_values_in_ascending_order() {
@@ -63,5 +90,22 @@ mod tests {
         assert_eq!(CLAMP_ORDER, ["ceiling", "role", "session_mode"]);
         // `sandbox` 在服务端文档里写过但代码没有，防止照着文档又加回来。
         assert!(!CLAMP_ORDER.contains(&"sandbox"));
+    }
+
+    #[test]
+    fn clamp_axes_follow_the_fixed_order_and_drop_unknown() {
+        // 服务端顺序被打乱、夹了一个客户端不认识的轴：输出仍是固定顺序，且只留认识的。
+        let raw = vec![
+            "session_mode".to_string(),
+            " Sandbox ".to_string(),
+            "ROLE".to_string(),
+        ];
+        assert_eq!(ordered_clamped_axes(&raw), vec!["role", "session_mode"]);
+        // 未被钳制 = 空输入，调用方据此显示「未收窄」。
+        assert!(ordered_clamped_axes(&[]).is_empty());
+        assert_eq!(
+            ordered_clamped_axes(&["ceiling".to_string()]),
+            vec!["ceiling"]
+        );
     }
 }

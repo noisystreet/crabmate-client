@@ -12,6 +12,7 @@ mod connect_handoff;
 mod github_oauth;
 pub(crate) mod github_secrets_local;
 mod http;
+mod http_permission;
 mod http_workspace_clone;
 mod http_workspace_fs_extra;
 mod http_workspace_projects;
@@ -56,6 +57,7 @@ pub use http::{
     post_workspace_file_write, post_workspace_file_write_opts, post_workspace_set, save_tasks,
     submit_chat_approval, upload_files_multipart,
 };
+pub use http_permission::{PermissionFetch, fetch_permission};
 pub use http_workspace_clone::{
     WorkspaceCloneRequest, WorkspaceCloneSseEvent, infer_project_name_from_clone_url,
     post_workspace_clone_stream,

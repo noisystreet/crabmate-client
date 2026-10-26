@@ -10,6 +10,7 @@ use super::super::settings_mcp_status::McpSettingsPageState;
 use super::super::settings_models_registry::{
     SettingsModelsRegistryBundle, SettingsModelsRegistryPanel,
 };
+use super::super::settings_permission_block::SettingsPermissionBlock;
 use super::super::settings_sections::{
     SettingsApiBaseBlock, SettingsAppearanceBlock, SettingsExecutorLlmBlock,
     SettingsExecutorLlmBlockBundle, SettingsLlmBlock, SettingsLlmBlockBundle, SettingsSessionBlock,
@@ -314,6 +315,7 @@ pub(super) fn SettingsPageContentPanels(
                     locale=appearance_locale
                     readonly_tool_ttl_cache_follow_server=readonly_tool_ttl_cache_follow_server
                 />
+                <SettingsPermissionBlock locale=appearance_locale />
             </Show>
 
             <Show when=move || active_section.get() == SettingsSection::Github>

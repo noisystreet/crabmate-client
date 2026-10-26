@@ -43,6 +43,7 @@ mod settings_mcp_status;
 mod settings_mcp_tools_list;
 mod settings_models_registry;
 mod settings_page;
+mod settings_permission_block;
 mod settings_sections;
 mod settings_toggle_switch;
 mod shell_confirm_dialog;
