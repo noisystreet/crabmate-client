@@ -18,7 +18,7 @@
 ├── desktop-tauri/
 ├── mobile-tauri/
 ├── web-host/                # binary crabmate-web (loopback static UI host)
-├── frontend/                # Business UI; contract crates.io crabmate 0.7.0 + protocol
+├── frontend/                # Business UI; contract crabmate + protocol (crates.io semver or git rev pin)
 ├── e2e/                     # Playwright (browser UI)
 ├── fixtures/                # golden JSONL fixtures (sse_ag_ui / turn_project_web)
 ├── .github/                 # workflows/ (ci, code-complexity, dependency-security, e2e-playwright, release, victauri-e2e-nightly) + dependabot / PR template
@@ -45,12 +45,12 @@
 
 - **Forbidden**: `path = "../crabmate_agent/..."` or any Cargo path dependency back into the Server monorepo tree
 - **Forbidden**: shell spawning / bundling a `crabmate serve` sidecar
-- Contract crate: crates.io **`crabmate` `0.7.0`** with `default-features = false, features = ["protocol"]` (see `frontend/Cargo.toml`). Do not pin old package names (`crabmate-sse-protocol`, …) and do not enable `server`.
+- Contract crate: **`crabmate`** with `default-features = false, features = ["protocol"]` (see `frontend/Cargo.toml`). Pin it **either** to crates.io semver (default) or — while Server has not published the needed version — to an immutable `git = <url>, rev = <sha>`; every manifest must carry the *same* pin line, and `path =` / `tag =` are forbidden (`tag` is movable, so not reproducible). Current pin: git rev `f0a1bc06` (permission-levels, pre-`0.7.1`); switch back to crates.io semver once released. Do not pin old package names (`crabmate-sse-protocol`, …) and do not enable `server`.
 - Playwright E2E CI checkouts Server `serve` at git tag **`v0.7.0`** (same commit as the crates.io package; see `docs/design/contract_pin.md`)
 - `crabmate-connect` is in-repo path only (`crates/crabmate-connect`); default features have **no** Tauri. Desktop/Android enable `features = ["tauri"]`
 - `crabmate-client-api` is in-repo path only (`crates/crabmate-client-api`); no Tauri / `web-sys` / `reqwest` / `tokio`
 - `crabmate-tool-card` is in-repo path only (`crates/crabmate-tool-card`); do not git-pin Server `crabmate-tool-card`
-- Boundary rules above are **mechanically enforced** by `scripts/check-boundaries.sh` (pre-commit hook + `scripts/check.sh`): client-api dependency purity, `crabmate-connect` default features stay Tauri-free, exact contract-pin shape across all manifests, and version consistency across all Rust packages
+- Boundary rules above are **mechanically enforced** by `scripts/check-boundaries.sh` (pre-commit hook + `scripts/check.sh`): client-api dependency purity, `crabmate-connect` default features stay Tauri-free, a single contract-pin shape (crates.io semver or git rev, byte-identical across all manifests), and version consistency across all Rust packages
 - Complexity **gates**: `lizard` CCN>10 fails globally (zero rule, no per-module caps); function params ≤ 9 (`fn-param-ratchet`); function nloc ≤ 200 and Rust file ≤ 920 lines (`fn-nloc-ratchet`) — enforced by pre-commit + `scripts/check.sh`
 - Package versions move in **lockstep** across all Rust packages; bump via `bash scripts/set-version.sh <semver>` (never hand-edit one Cargo.toml version)
 - Package list **single source**: `scripts/rust-pkg-dirs.txt` — consumed by the `Makefile` `fmt` / `clippy` / `clean` loops, `scripts/check.sh`, and `scripts/check-boundaries.sh`; adding a package only touches this file (plus Makefile `test-*` grouping / CI cache if needed)

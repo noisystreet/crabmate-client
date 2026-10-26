@@ -19,7 +19,7 @@ anyhow = "1"
 # 背景图走 kitty 协议要以 base64 传输；用锁文件里已有的 0.22，不再多拉一份。
 base64 = "0.23"
 clap = { version = "4", features = ["derive", "env"] }
-crabmate = { version = "0.7.0", default-features = false, features = ["protocol"] }
+crabmate = { git = "https://github.com/noisystreet/CrabMate", rev = "f0a1bc068d3b209da7ce36fde5caa21eea7ae093", default-features = false, features = ["protocol"] }
 crabmate-client-api = { path = "../crabmate-client-api" }
 # `role=tool` 落盘正文是 `{"crabmate_tool":{…}}` 信封；解包规则与 Web 水合共用一份。
 crabmate-tool-card = { path = "../crabmate-tool-card" }
