@@ -335,7 +335,7 @@ Web 的 `api_base_preset_select` 字符串链路（写入已保存模型预设�
 
 **能力探测**：老 serve 没有 `/permission`（404），这是客户端判断「该 serve 是否支持权限等级」的唯一手段；**不要**用 `/status` 探测——它对新旧 serve 都会成功，无法区分能力。
 
-**状态**：词表与路径构造已落地，**尚无 UI 消费方**，所以矩阵里对应行仍为 `planned`（见 [`client_capability_matrix.md`](./client_capability_matrix.md)）。
+**状态**：词表与路径构造已落地；**前端（Desktop / Android / Web）已接**——设置页「工具」分区里的只读块（组件 `frontend/src/app/settings_permission_block.rs`，请求层 `frontend/src/api/http_permission.rs`，从 `http.rs` 拆出以守住单文件 920 行棘轮）：显示当前等级 + 来源、服务端上限 + 来源、可选档位、收窄轴（固定顺序，未知轴丢弃），并带一个手动「刷新」（连点只让最后一次请求落地）；文案在 `frontend/src/i18n/settings_permission.rs`（`settings.rs` 已近 920 行，按域拆出）——`ceiling_source` 在契约里是**裸字符串**（`config` / `derived_loopback` / `derived_non_loopback`），客户端负责本地化，未知来源原样透出而不并入「配置上限」；`/permission` 的 **404 显示「该 serve 不支持」而不是报错**（404 在读 body 之前判定——能力答案不该依赖只有 200 才需要的读取）。块底部另有一行说明「未按会话或角色收窄」，因为标签写的是「当前等级」而这里只是静态投影。TUI 尚未接入，且当前不传 `agent_role` / `conversation_id`（设置页没有「即将发送的角色」概念，按角色 / 会话收窄的档位属于聊天现场）——所以矩阵里 TUI 列为 `planned`、其余三列为 `reduced`（见 [`client_capability_matrix.md`](./client_capability_matrix.md)）。
 
 ## 5. 明确不共享
 
