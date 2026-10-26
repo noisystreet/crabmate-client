@@ -282,7 +282,7 @@ dependencies = [
 [[package]]
 name = "crabmate"
 version = "0.7.0"
-source = "git+https://github.com/noisystreet/CrabMate?rev=f0a1bc068d3b209da7ce36fde5caa21eea7ae093#f0a1bc068d3b209da7ce36fde5caa21eea7ae093"
+source = "git+https://github.com/noisystreet/CrabMate?rev=630cd3b07735f1a9cddcb7274688179aea231257#630cd3b07735f1a9cddcb7274688179aea231257"
 dependencies = [
  "getrandom",
  "log",
