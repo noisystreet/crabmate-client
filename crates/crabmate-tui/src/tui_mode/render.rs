@@ -129,47 +129,16 @@ impl BodyRow {
     }
 }
 
-/// 消息前缀（宽 4–7 列；宽度参与折行计算，故与样式分开）。
-fn kind_prefix(kind: LineKind) -> &'static str {
-    match kind {
-        LineKind::User => "[你] ",
-        LineKind::Assistant => "[助手] ",
-        LineKind::Thinking => "[思考] ",
-        LineKind::Tool => "[工具] ",
-        LineKind::System => "[!] ",
-    }
-}
-
-/// 进行中工具行的进度位占位（`⠿` 与 spinner 帧同为 1 列宽，换帧不改折行点）。
-const TOOL_PROGRESS_MARK: &str = "⠿ ";
-
-/// 进行中工具行的完整前缀：`[工具] ` + 进度位（即 [`TOOL_PROGRESS_MARK`]）。
-/// 结束行不加进度位——它的文本自带 `✓ / ✗`，不重复。
-const TOOL_PREFIX_PROGRESS: &str = "[工具] ⠿ ";
-
-/// 逻辑行前缀：进行中的工具行多一个进度位。
-/// 进度位是**静态**占位，动画由渲染层换字符，因此不进入 body memo。
-pub(crate) fn prefix_for(log: &LogLine) -> &'static str {
-    // 只有「调用中」才加进度位；结束行不论成败是否已知，文本自带标记。
-    match (log.kind(), log.tool_state()) {
-        (LineKind::Tool, ToolState::Running) => TOOL_PREFIX_PROGRESS,
-        _ => kind_prefix(log.kind()),
-    }
-}
-/// 逻辑行前缀占用的**显示列数**（折行预算必须按列算，不能按字符数）：
-/// `[助手] ` 只有 5 个字符却占 7 列，按字符数留白会让每行首物理行超出正文区
-/// 1–2 列，末字被区域右缘裁掉——观感就是「行尾被切、没有折回来」。
-pub(crate) fn prefix_width(prefix: &str) -> usize {
-    UnicodeWidthStr::width(prefix)
-}
-
-/// 前缀样式：一律 muted + DIM，把亮度让给正文；系统告警要抢眼，保持 err + BOLD。
-fn prefix_style(kind: LineKind, pal: &Palette) -> Style {
-    if kind == LineKind::System {
-        return Style::new().fg(pal.err).add_modifier(Modifier::BOLD);
-    }
-    Style::new().fg(pal.muted).add_modifier(Modifier::DIM)
-}
+// 前缀（文本 / 显示列数 / 配色）单独成文件：前缀文本同时是折行预算的一部分，三件事
+// 必须一起改。与 `overlay` 同一布局（`#[path]` 子模块），`mod.rs` 不必为此多一行 ——
+// 它已贴着 920 行文件门禁。
+#[path = "prefix.rs"]
+mod prefix;
+pub(crate) use prefix::{TOOL_PROGRESS_MARK, prefix_for, prefix_style, prefix_width};
+// 这两个只被 `render_tests` 直接引用（生产路径经 `prefix_for` 间接用到），故只在测试
+// 构建里重导出：无条件 `pub(crate) use` 会让非测试构建报 unused import。
+#[cfg(test)]
+pub(crate) use prefix::{TOOL_PREFIX_PROGRESS, kind_prefix};
 
 /// 内容基色（工具行按结果另算，见 [`tool_content_style`]）。
 fn kind_style(kind: LineKind, pal: &Palette) -> Style {
@@ -221,7 +190,7 @@ fn progress_mark_frame(st: &UiState, info: &StatusInfo) -> Option<usize> {
 /// - 折叠思考行：标记在**内容** span 开头（`▸ `），故只动 `spans[1]`，避免误改
 ///   正文里恰好出现的 `▸`；极窄宽度下 [`fold_thinking`] 只输出单个 `▸`（无空格），
 ///   此时 `strip_prefix` 不命中，自然保留标记而不是渲染出超宽行。
-/// - 进行中工具行：进度位在**消息前缀**末尾（`[工具] ⠿ `），故只处理有成对
+/// - 进行中工具行：进度位在**消息前缀**末尾（`工具 ⠿ `），故只处理有成对
 ///   `(前缀, 内容)` span 的第一物理行，不会碰到正文。
 ///
 /// 两种标记都是「1 列字形 + 空格」，与 spinner 帧等宽，换帧不改变行宽。

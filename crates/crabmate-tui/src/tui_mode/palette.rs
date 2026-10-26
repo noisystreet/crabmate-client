@@ -21,6 +21,12 @@ pub(crate) struct Palette {
     pub muted: Color,
     /// 强调：链接、用户消息基色（`--accent`）。
     pub accent: Color,
+    /// 信息态（`--info`）：**工具行的消息前缀**用它。
+    ///
+    /// 不复用 `ok` / `err`：那两档已被工具行的**正文**按结果占用，同一行里绿色前缀 +
+    /// 红色内容会自相矛盾。也不复用 `hit`——那是 `/find` 命中色，混用会让「搜到」与
+    /// 「这是工具行」看起来是一回事。
+    pub info: Color,
     /// 搜索命中（非锚定行）；锚定行用它的反色块。独立于 `accent`，
     /// 否则会与用户消息的强调色混淆。
     pub hit: Color,
@@ -59,6 +65,7 @@ const DEFAULT_DARK: Palette = Palette {
     fg: rgb(0xee, 0xf1, 0xf6),
     muted: rgb(0x90, 0x99, 0xb4),
     accent: rgb(0x8f, 0xa4, 0xea),
+    info: rgb(0x6f, 0xb8, 0xd8),
     hit: rgb(0xe6, 0xc4, 0x5c),
     bg: rgb(0x16, 0x17, 0x27),
     chrome_bg: rgb(0x10, 0x11, 0x1f),
@@ -78,6 +85,7 @@ const HIGH_CONTRAST_DARK: Palette = Palette {
     fg: rgb(0xfa, 0xfa, 0xfa),
     muted: rgb(0xb8, 0xb8, 0xb8),
     accent: rgb(0xf5, 0xf5, 0xf5),
+    info: rgb(0xd0, 0xd0, 0xd0),
     hit: rgb(0xff, 0xe0, 0x66),
     bg: rgb(0x24, 0x24, 0x24),
     chrome_bg: rgb(0x1a, 0x1a, 0x1a),
@@ -95,6 +103,7 @@ const MATERIAL_DARK: Palette = Palette {
     fg: rgb(0xec, 0xec, 0xee),
     muted: rgb(0x97, 0x97, 0x9f),
     accent: rgb(0xc2, 0xc4, 0xcd),
+    info: rgb(0x95, 0x9e, 0xad),
     hit: rgb(0xe6, 0xc4, 0x5c),
     bg: rgb(0x1b, 0x1b, 0x1f),
     chrome_bg: rgb(0x14, 0x14, 0x17),
@@ -112,6 +121,7 @@ const SHADCN_DARK: Palette = Palette {
     fg: rgb(0xfa, 0xfa, 0xfa),
     muted: rgb(0xa1, 0xa1, 0xaa),
     accent: rgb(0x60, 0xa5, 0xfa),
+    info: rgb(0x38, 0xbd, 0xf8),
     hit: rgb(0xf5, 0xd0, 0x5a),
     bg: rgb(0x18, 0x18, 0x1b),
     chrome_bg: rgb(0x10, 0x10, 0x12),
@@ -177,6 +187,7 @@ const CRABMATE_LIGHT: Palette = Palette {
     fg: rgb(0x1c, 0x19, 0x13),
     muted: rgb(0x6b, 0x63, 0x57),
     accent: rgb(0x55, 0x70, 0x5b),
+    info: rgb(0x3a, 0x6e, 0x83),
     hit: rgb(0x8a, 0x6d, 0x00),
     bg: rgb(0xf0, 0xec, 0xe2),
     chrome_bg: rgb(0xf7, 0xf4, 0xec),
@@ -194,6 +205,7 @@ const SHADCN_LIGHT: Palette = Palette {
     fg: rgb(0x09, 0x09, 0x0b),
     muted: rgb(0x69, 0x69, 0x71),
     accent: rgb(0x25, 0x63, 0xeb),
+    info: rgb(0x03, 0x69, 0xa1),
     hit: rgb(0x8a, 0x6d, 0x00),
     bg: rgb(0xf4, 0xf4, 0xf5),
     chrome_bg: rgb(0xec, 0xec, 0xed),
@@ -211,6 +223,7 @@ const MONO: Palette = Palette {
     fg: Color::Reset,
     muted: Color::Reset,
     accent: Color::Reset,
+    info: Color::Reset,
     hit: Color::Reset,
     bg: Color::Reset,
     chrome_bg: Color::Reset,
@@ -275,6 +288,7 @@ impl Palette {
         p.fg = nearest_ansi(p.fg);
         p.muted = nearest_ansi(p.muted);
         p.accent = nearest_ansi(p.accent);
+        p.info = nearest_ansi(p.info);
         p.hit = nearest_ansi(p.hit);
         p.bg = nearest_ansi(p.bg);
         p.chrome_bg = nearest_ansi(p.chrome_bg);

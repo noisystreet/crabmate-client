@@ -93,7 +93,7 @@ impl ConversationMessagesResponse {
     /// - `system`：跳过（`crabmate_ui_sep` / `crabmate_timeline` 是 Web 专用卡片）；
     /// - `assistant`：先思考后正文，两者皆空（只带 `tool_calls`）时不产行——工具结果
     ///   行会紧跟其后单独出现，再造一张「调用卡」在终端里只是噪声；
-    /// - `tool`：`[工具] name` + 结果正文；
+    /// - `tool`：`工具 name` + 结果正文（前缀形态由各端渲染层决定，这里只约定行内容）；
     /// - 未知 `role`：跳过（宁可少显示，也不把不认识的东西当正文印出来）。
     #[must_use]
     pub fn replay_rows(&self) -> Vec<ReplayRow> {

@@ -229,10 +229,10 @@ fn with_progress_mark_replaces_mark_and_keeps_width() {
 /// 渲染期替换只认内容 span 的 `▸ ` 前缀，正文里出现的 `▸` 不能被误伤。
 #[test]
 fn with_progress_mark_leaves_other_content_untouched() {
-    let line = Line::from(vec![Span::raw("[思考] "), Span::raw("正文里有 ▸ 符号")]);
+    let line = Line::from(vec![Span::raw("思考 "), Span::raw("正文里有 ▸ 符号")]);
     assert_eq!(
         with_progress_mark(line, 3).to_string(),
-        "[思考] 正文里有 ▸ 符号"
+        "思考 正文里有 ▸ 符号"
     );
 }
 
@@ -255,13 +255,10 @@ fn in_flight_tool_row_gets_progress_slot() {
     st.tool_start("tc-1", "exec", None);
     let rows = body_rows(&st, 60);
     let plain = rows[0].line.to_string();
-    assert!(
-        plain.starts_with("[工具] ⠿ "),
-        "进行中应有进度位: {plain:?}"
-    );
+    assert!(plain.starts_with("工具 ⠿ "), "进行中应有进度位: {plain:?}");
 
     let spinning = with_progress_mark(rows[0].line.clone(), 2).to_string();
-    assert!(spinning.starts_with("[工具] ⠹ "), "第 2 帧: {spinning:?}");
+    assert!(spinning.starts_with("工具 ⠹ "), "第 2 帧: {spinning:?}");
     assert!(!spinning.contains('⠿'), "占位应被帧替换: {spinning:?}");
     assert_eq!(
         UnicodeWidthStr::width(plain.as_str()),
@@ -279,7 +276,7 @@ fn finished_tool_row_has_no_progress_slot() {
     st.tool_start("call-1", "exec", None);
     st.tool_end("call-1", "exec", Some(true), None);
     let plain = body_rows(&st, 60)[0].line.to_string();
-    assert!(plain.starts_with("[工具] "), "结束行无进度位: {plain:?}");
+    assert!(plain.starts_with("工具 "), "结束行无进度位: {plain:?}");
     assert!(!plain.contains('⠿'), "结束行不应有占位: {plain:?}");
 }
 
@@ -360,7 +357,7 @@ fn finished_tool_row_without_verdict_is_not_running() {
     st.tool_end("tc-1", "exec", None, Some("exit 0"));
     let plain = body_rows(&st, 60)[0].line.to_string();
     assert!(
-        plain.starts_with("[工具] ? exec"),
+        plain.starts_with("工具 ? exec"),
         "成败未知也要算结束: {plain:?}"
     );
     assert!(!plain.contains('⠿'), "结束行不应有进度位: {plain:?}");
@@ -509,7 +506,7 @@ fn visible_window_wide_char_cursor() {
     let content = "crabmate> 你好";
     let (start, c) = horizontal_window(content, 14, 6);
     let shown = cell_window(content, start, 6);
-    assert!(shown.contains('好'));
+    assert!(shown.contains("好"));
     assert_eq!(c, 6);
 }
 
@@ -579,21 +576,49 @@ fn collapsed_thinking_gets_fold_marker() {
 }
 
 #[test]
-fn prefix_is_dim_and_content_is_not() {
+fn prefixes_take_one_colour_per_role_and_stay_bold() {
+    let pal = super::Palette::default();
     let mut st = UiState::new();
     // 固定调色板：参数化断言不能随终端环境（NO_COLOR 等）漂移。
-    st.set_palette(super::Palette::default());
+    st.set_palette(pal);
     st.push_line(LineKind::User, "hi");
+    st.push_line(LineKind::Assistant, "yo");
+    st.push_line(LineKind::Tool, "exec");
+
     let rows = body_rows(&st, 40);
-    let spans = &rows[0].line.spans;
-    assert!(
-        spans[0].style.add_modifier.contains(Modifier::DIM),
-        "前缀应降噪为 DIM"
-    );
-    assert!(
-        !spans[1].style.add_modifier.contains(Modifier::DIM),
-        "正文不应被 DIM"
-    );
+    // 块间分隔行的 `log_index` 是 `None`，据此只取真正的逻辑行首物理行。
+    let prefixes: Vec<_> = rows
+        .iter()
+        .filter(|r| r.log_index.is_some())
+        .map(|r| r.line.spans[0].clone())
+        .collect();
+    assert_eq!(prefixes.len(), 3, "三条逻辑行各一个前缀");
+
+    let expect = [("你 ", pal.accent), ("助手 ", pal.fg), ("工具 ", pal.info)];
+    for (span, (text, fg)) in prefixes.iter().zip(expect) {
+        assert_eq!(span.content.as_ref(), text, "前缀文本与配色必须配对");
+        assert_eq!(span.style.fg, Some(fg), "{text} 前缀取角色色");
+        assert!(
+            span.style.add_modifier.contains(Modifier::BOLD),
+            "{text} 前缀应加粗"
+        );
+        assert!(
+            !span.style.add_modifier.contains(Modifier::DIM),
+            "{text} 前缀不再降噪为 DIM"
+        );
+    }
+
+    // 工具前缀不能撞工具正文的成败色：同一行里绿色前缀 + 红色内容会自相矛盾。
+    assert_ne!(pal.info, pal.ok);
+    assert_ne!(pal.info, pal.err);
+
+    // 正文仍按 `kind_style`：Assistant 不加粗，视觉重量留给前缀。
+    let assistant_body = rows
+        .iter()
+        .find(|r| r.log_index == Some(1))
+        .map(|r| r.line.spans[1].clone())
+        .expect("assistant 正文");
+    assert!(!assistant_body.style.add_modifier.contains(Modifier::BOLD));
 }
 
 #[test]
