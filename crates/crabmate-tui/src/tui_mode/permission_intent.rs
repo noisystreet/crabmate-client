@@ -22,6 +22,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::layout::Rect;
 
 use super::TuiApp;
+use super::serve_defaults::ServeDefaults;
 use super::worker::WorkerJob;
 use crate::tui_mode::controls::clear_word;
 use crate::tui_mode::state::LineKind;
@@ -352,10 +353,53 @@ impl TuiApp<'_> {
     /// 先清再拉，而不是等新投影回来才换：清掉之后该段暂时不显示（说「不知道」，比说错一个
     /// 档位好），回包一到就恢复。
     pub(super) fn forget_permission_view(&mut self) {
+        // 代数一起推进：切走前发出的 `POST /conversation/state` 回包可能还没回来，它带的是
+        // **上一个**会话的写后投影；不推进就会被 `on_permission_written` 的代数校验放行，
+        // 把刚清掉的 view 用旧会话的值填回来（菜单光标、状态行都会跟着错）。
+        self.st.permission_generation = self.st.permission_generation.wrapping_add(1);
+        // 已开的菜单同理：选项集是上一个会话的 `available`，留着让 Enter 一下就把那档写进新
+        // 会话。（正常路径切不了会话 —— 模态菜单会吞掉按键 —— 但鼠标点左栏同样不该留下它。）
+        self.st.permission_menu = None;
         if let Some(defaults) = self.st.serve_defaults.as_mut() {
             defaults.permission_view = None;
         }
         self.refresh_status();
+    }
+
+    /// 回合结束拿到 `conversation_id` 时收下它；**换了（或首次绑上）就重拉一次权限投影**。
+    ///
+    /// 为什么必须重拉：没有会话时 `/permission` 是裸请求，回的是「配置默认档 + 无会话意图」；
+    /// 有了 id 才是「这个会话此刻哪一档」（会话意图 + min 链）。不重拉，状态行会一直拿裸投影
+    /// 的默认档当这个会话的生效档 —— `status_values` 正是靠「有没有 id」区分这两件事的。
+    /// 普通回合 id 不变，因此不额外打这两个请求。
+    pub(super) fn adopt_turn_conversation(&mut self, conversation_id: &str) {
+        let changed = self.st.conversation_id.as_deref() != Some(conversation_id);
+        self.st.conversation_id = Some(conversation_id.to_string());
+        if changed {
+            self.refresh_status();
+        }
+    }
+
+    /// `UiEvent::Status` 落地：只在**仍是同一个会话**时接受。
+    ///
+    /// 这次请求带着发起时的 `conversation_id` 走（`WorkerJob::RefreshStatus`），而 `/permission`
+    /// 的生效档与 `available` 都是按会话算的；回包到达时用户可能已经切走或 `/conv new`，
+    /// 收下就等于把上一个会话的档位写进当前状态行。丢弃而不是先收再清：切换 / 新建路径
+    /// 已经带新 id 重发过刷新（见 [`Self::forget_permission_view`]）。
+    pub(super) fn on_serve_status(
+        &mut self,
+        conversation_id: Option<String>,
+        result: Result<ServeDefaults, String>,
+    ) {
+        if conversation_id.as_deref() != self.st.conversation_id.as_deref() {
+            return;
+        }
+        match result {
+            Ok(defaults) => self.st.serve_defaults = Some(defaults),
+            Err(e) => self
+                .st
+                .push_line(LineKind::System, &format!("拉取 serve 状态失败：{e}")),
+        }
     }
 
     /// 打开档位菜单，锚在 `anchor`（状态行 `perm` 段的矩形）。
@@ -493,6 +537,167 @@ mod menu_tests {
             anchor: anchor(),
         };
         assert_eq!(m.current(), None);
+    }
+}
+
+#[cfg(test)]
+mod session_guard_tests {
+    use std::sync::mpsc;
+
+    use super::super::TuiApp;
+    use super::super::serve_defaults::ServeDefaults;
+    use super::super::test_support::{test_app, test_client, test_prefs};
+    use super::super::worker::WorkerJob;
+    use super::PermissionMenu;
+
+    /// 造一份只带权限投影的 `ServeDefaults`（同 `mouse.rs` 的测试辅助：走 JSON 反序列化，
+    /// 不把契约里的枚举/六轴变体名在本仓再抄一遍）。
+    fn defaults_with_permission(level: &str) -> ServeDefaults {
+        let json = format!(
+            r#"{{"level":"{level}","level_source":"persisted","ceiling":"unrestricted",
+                 "ceiling_source":"derived_loopback",
+                 "available":["chat","read","workspace","approved","unrestricted"],
+                 "clamped_by":[],
+                 "caps":{{"tool_visibility":"full","external_tools":"allowed",
+                          "path_scope":"any","command_scope":"any","net_scope":"any",
+                          "approval":"audit_only"}}}}"#
+        );
+        ServeDefaults {
+            permission_view: Some(serde_json::from_str(&json).expect("permission view")),
+            ..Default::default()
+        }
+    }
+
+    fn app<'a>(
+        client: &'a super::super::super::serve::ServeClient,
+        prefs: &'a mut crate::SessionPrefs,
+        job_tx: mpsc::Sender<WorkerJob>,
+    ) -> TuiApp<'a> {
+        let (ui_tx, ui_rx) = mpsc::channel();
+        test_app(client, prefs, ui_rx, ui_tx, job_tx)
+    }
+
+    /// 切会话后，上一个会话的写权限回包才到：代数已推进 → 不落盘、不提示、不覆盖新投影。
+    #[test]
+    fn switching_sessions_drops_an_in_flight_permission_write() {
+        let client = test_client();
+        let mut prefs = test_prefs();
+        let (job_tx, _job_rx) = mpsc::channel();
+        let mut app = app(&client, &mut prefs, job_tx);
+
+        app.st.conversation_id = Some("A".to_string());
+        app.st.serve_defaults = Some(defaults_with_permission("approved"));
+        app.apply_permission_level("unrestricted");
+        let stale = app.st.permission_generation;
+
+        // 切会话 / `/conv new` 走的就是这一句（见 `switch_to_conv` / `reset_for_new_chat`）。
+        app.forget_permission_view();
+        assert_ne!(
+            app.st.permission_generation, stale,
+            "切换必须推进代数，否则旧回包会被当成合法的"
+        );
+
+        let lines = app.st.lines.len();
+        app.on_permission_written("unrestricted", Err("boom".into()), stale);
+        assert_eq!(
+            app.st.lines.len(),
+            lines,
+            "过期回包不该写提示（它属于上一个会话）"
+        );
+        assert!(
+            app.st
+                .serve_defaults
+                .as_ref()
+                .expect("defaults")
+                .permission_view
+                .is_none(),
+            "切换清掉的投影不能被旧会话的回包填回来"
+        );
+    }
+
+    /// 切换时还开着的档位菜单一并关掉：它的选项集属于上一个会话。
+    #[test]
+    fn switching_sessions_closes_the_menu() {
+        let client = test_client();
+        let mut prefs = test_prefs();
+        let (job_tx, _job_rx) = mpsc::channel();
+        let mut app = app(&client, &mut prefs, job_tx);
+
+        app.st.conversation_id = Some("A".to_string());
+        app.st.permission_menu = Some(PermissionMenu {
+            options: vec!["chat".into(), "read".into()],
+            selected: 0,
+            anchor: ratatui::layout::Rect::new(0, 0, 4, 1),
+        });
+
+        app.forget_permission_view();
+        assert!(app.st.permission_menu.is_none(), "换会话后菜单不该留着");
+    }
+
+    /// 回包带着**别的**会话的 id：整份投影丢弃（`/permission` 按会话算）。
+    #[test]
+    fn stale_status_reply_is_dropped() {
+        let client = test_client();
+        let mut prefs = test_prefs();
+        let (job_tx, _job_rx) = mpsc::channel();
+        let mut app = app(&client, &mut prefs, job_tx);
+
+        app.st.conversation_id = Some("B".to_string());
+        let lines = app.st.lines.len();
+        app.on_serve_status(
+            Some("A".to_string()),
+            Ok(defaults_with_permission("unrestricted")),
+        );
+        assert!(app.st.serve_defaults.is_none(), "A 的投影不能落到 B 上");
+
+        // 失败提示同样只在「它还是当前会话」时才该出现。
+        app.on_serve_status(Some("A".to_string()), Err("boom".into()));
+        assert_eq!(app.st.lines.len(), lines, "过期回包连错误都不提示");
+    }
+
+    /// 会话对得上（包括「都还没有会话」）：照常落地。
+    #[test]
+    fn matching_status_reply_lands() {
+        let client = test_client();
+        let mut prefs = test_prefs();
+        let (job_tx, _job_rx) = mpsc::channel();
+        let mut app = app(&client, &mut prefs, job_tx);
+
+        // 新会话：请求与当前都没有 cid，裸投影照收（`available` 就靠它，菜单要用）。
+        app.on_serve_status(None, Ok(defaults_with_permission("approved")));
+        assert!(app.st.serve_defaults.is_some());
+
+        app.st.conversation_id = Some("B".to_string());
+        app.on_serve_status(Some("B".to_string()), Ok(defaults_with_permission("read")));
+        assert_eq!(
+            app.st
+                .serve_defaults
+                .as_ref()
+                .expect("defaults")
+                .effective_level(),
+            Some("read")
+        );
+    }
+
+    /// 首次绑上（或换了）会话要带新 id 重拉一次；同一个 id 不重复打请求。
+    #[test]
+    fn adopting_a_turn_conversation_refreshes_the_projection_once() {
+        let client = test_client();
+        let mut prefs = test_prefs();
+        let (job_tx, job_rx) = mpsc::channel();
+        let mut app = app(&client, &mut prefs, job_tx);
+
+        app.adopt_turn_conversation("c1");
+        assert_eq!(app.st.conversation_id.as_deref(), Some("c1"));
+        match job_rx.try_recv().expect("首次绑定要重拉投影") {
+            WorkerJob::RefreshStatus { conversation_id } => {
+                assert_eq!(conversation_id.as_deref(), Some("c1"));
+            }
+            _ => panic!("期望 RefreshStatus"),
+        }
+
+        app.adopt_turn_conversation("c1");
+        assert!(job_rx.try_recv().is_err(), "同一个会话不该再打一次");
     }
 }
 

@@ -594,7 +594,8 @@ impl TuiApp<'_> {
             panel.unlock_after_turn();
         }
         if let Some(cid) = outcome.conversation_id {
-            self.st.conversation_id = Some(cid.clone());
+            // 收下 id；换了会话就顺带带新 id 重拉权限投影（理由见 `adopt_turn_conversation`）。
+            self.adopt_turn_conversation(&cid);
             // `/conv new` 建的本地行还没有服务端 id：首轮结束就补上（左栏 `>` 与
             // `/conv use`、Web 端续聊都靠它）。
             self.bind_new_session(&cid);
@@ -690,13 +691,10 @@ impl TuiApp<'_> {
                 snapshot,
             } => history::on_result(self, &conversation_id, before_index, result, snapshot),
             UiEvent::SessionIndex { result, op } => self.on_session_index(result, op),
-            UiEvent::Status(result) => match result {
-                Ok(defaults) => self.st.serve_defaults = Some(defaults),
-                Err(e) => {
-                    self.st
-                        .push_line(LineKind::System, &format!("拉取 serve 状态失败：{e}"));
-                }
-            },
+            UiEvent::Status {
+                conversation_id,
+                result,
+            } => self.on_serve_status(conversation_id, result),
             UiEvent::PermissionWritten {
                 level,
                 outcome,
