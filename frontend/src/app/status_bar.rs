@@ -343,6 +343,7 @@ fn StatusBarChipsLoaded(
                 llm_thinking_mode=llm_thinking_mode
                 locale=locale
             />
+            <crate::app::status_permission_chip::StatusPermissionChip locale=locale />
             <StatusBarContextChip
                 st=st
                 chat=chat

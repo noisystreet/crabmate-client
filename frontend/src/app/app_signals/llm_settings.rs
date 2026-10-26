@@ -41,6 +41,15 @@ pub struct LLMSettingsSignals {
     /// **单一意图源**：这里存的就是「用户当前选的」，`/chat` 与 `POST /conversation/state`
     /// 都读它，不在发送路径上做快照——否则回合结束的落盘会把旧值写回，反向覆盖用户中途的切换。
     pub selected_permission_level: RwSignal<Option<String>>,
+    /// 上面这份意图是**为哪个本地会话**选的（`ChatSessionSignals::active_id`）。
+    ///
+    /// 存在的理由是「切会话必须清意图」：意图是会话级属性，带着上一个会话选的档继续发，
+    /// 会让用户在毫无察觉的情况下用错等级跑工具（低档出错是可见的，高档出事是不可逆的）。
+    ///
+    /// 不用水合（`active_permission_level`）来覆盖意图：意图是 `Option`，`None` 的语义就是
+    /// 「沿用该会话已保存的值」，服务端照旧按 min 链决定；把服务端值写进意图，等于用户
+    /// 从没选过也被记成「选过」，此后切会话清理就无从判断。
+    pub permission_intent_owner: RwSignal<Option<String>>,
     /// 本机已保存的多条模型预设（与扁平 `client_llm` 并存；用于设置页下拉选用）。
     pub saved_model_presets: RwSignal<Vec<crate::api::SavedModelPreset>>,
 }
@@ -73,6 +82,7 @@ impl LLMSettingsSignals {
             session_mode_user_override: RwSignal::new(false),
             // 初始不表达意图：沿用会话持久值（serve 侧的 min 链自己会算）。
             selected_permission_level: RwSignal::new(None),
+            permission_intent_owner: RwSignal::new(None),
             saved_model_presets: RwSignal::new(load_saved_model_presets_from_storage()),
         }
     }

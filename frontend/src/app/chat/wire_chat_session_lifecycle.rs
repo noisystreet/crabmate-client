@@ -66,8 +66,34 @@ pub(crate) fn wire_chat_session_lifecycle_effects(args: WireChatSessionLifecycle
         app,
     } = args;
     let status_err = app.stream.status_err;
+    // 先取出权限意图相关信号：`wire_initial_sessions_from_storage` 会消费 `app`。
+    let permission_owner = app.llm_settings.permission_intent_owner;
+    let permission_level = app.llm_settings.selected_permission_level;
 
     wire_initial_sessions_from_storage(app);
+
+    // 切会话就清空权限意图与它的归属：等级是**会话级**属性，带过去会让用户在毫无察觉的
+    // 情况下用错档跑工具（低档会报错，高档出事不可逆）。
+    //
+    // 刻意不挂在水合回调里：同一个会话的回前台、流收尾都会重新水合
+    // （`bump_session_hydrate_nonce`），在那里清会把用户刚选的档误清掉。这里只看
+    // 「当前会话 id 是否还是意图归属的那个」，与请求时序无关。
+    {
+        let owner = permission_owner;
+        let level = permission_level;
+        let active_id = chat_session.active_id;
+        Effect::new(move |_| {
+            let current = active_id.get();
+            let Some(owner_id) = owner.get_untracked() else {
+                // 从没选过：`None` 本身就是「沿用会话持久值」，无需清理。
+                return;
+            };
+            if owner_id != current {
+                level.set(None);
+                owner.set(None);
+            }
+        });
+    }
     wire_web_ui_config_once_after_init(
         initialized,
         web_ui_config_loaded,

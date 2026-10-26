@@ -77,6 +77,30 @@ pub fn status_role_label(l: Locale) -> &'static str {
     }
 }
 
+/// 状态栏权限等级段的标签（值本身走 `settings_permission_level_label`，同一套词表）。
+pub fn status_perm_label(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "权限",
+        Locale::En => "Perm",
+    }
+}
+
+/// 权限菜单的无障碍名。
+pub fn status_perm_menu_label(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "切换权限等级",
+        Locale::En => "Switch permission level",
+    }
+}
+
+/// 悬停说明：明确「点一下能切」，否则用户会以为它和模型名一样只是读数。
+pub fn status_perm_title_attr(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "当前权限等级，点一下切换",
+        Locale::En => "Current permission level — click to switch",
+    }
+}
+
 /// 状态栏「思考模式」开关标签。
 pub fn status_chip_thinking(l: Locale) -> &'static str {
     match l {
