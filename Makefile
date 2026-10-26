@@ -68,7 +68,8 @@ help:
 	@echo "  make test-tui            crabmate-tui 测试"
 	@echo "  make test-web-host       crabmate-web 回环静态服务单测"
 	@echo "  make test-tool-card      crabmate-tool-card 金样（独立 workspace）"
-	@echo "  make test                test-frontend 然后 test-tauri 然后 test-tui 然后 test-web-host 然后 test-tool-card"
+	@echo "  make test-client-api     crabmate-client-api 纯逻辑单测（独立 workspace）"
+	@echo "  make test                test-client-api 然后 test-frontend 然后 test-tauri 然后 test-tui 然后 test-web-host 然后 test-tool-card"
 	@echo "  make ktlint-android      手改 Android Kotlin ktlint（edu/crabmate）"
 	@echo "  make fmt                 全部 Rust 包 cargo fmt（列表见 scripts/rust-pkg-dirs.txt）"
 	@echo "  make clippy              全部 Rust 包 clippy -D warnings（frontend 走 wasm32）"
@@ -183,6 +184,10 @@ tui-release:
 
 # --- 质检 ---
 
+# crabmate-client-api：纯逻辑（无 IO）单测。放在最前：其余包的编译都依赖它，跑得也最快。
+test-client-api:
+	cd "$(CLIENT_API_DIR)" && $(CARGO) test -- --nocapture
+
 # frontend：与壳分开；wasm check + lib 单测（跳过需 Server fixtures 的 golden）
 test-frontend: frontend-check
 	cd "$(FRONTEND_DIR)" && $(CARGO) test --lib -- --nocapture --skip golden_
@@ -205,7 +210,7 @@ test-web-host:
 test-tool-card:
 	cd "$(TOOL_CARD_DIR)" && $(CARGO) test -- --nocapture
 
-test: test-frontend test-tauri test-tui test-web-host test-tool-card
+test: test-client-api test-frontend test-tauri test-tui test-web-host test-tool-card
 
 check:
 	bash "$(ROOT)/scripts/check.sh"
