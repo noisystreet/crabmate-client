@@ -43,6 +43,9 @@ mod priority {
     pub(super) const PERM: u8 = 7;
 }
 
+/// `perm` 段的文案标签。渲染、栈内行号与鼠标命中三处共用，避免改动时漏掉一处。
+pub(super) const PERM_LABEL: &str = "perm";
+
 /// 段间分隔符（极暗竖线，与 A6 的分隔线同色系）。
 const SEPARATOR: &str = " │ ";
 /// 分隔符显示宽。
@@ -169,11 +172,16 @@ pub(super) fn environment_segments(info: &StatusInfo, budget: usize) -> Vec<Segm
     }
     // 权限等级排在显示顺序最右（紧邻右缘运行态）：它是"我这一轮最多能动到什么"，
     // 与 `serve` / `model` 同为环境事实，但读数频率低，所以优先级最低。
-    // 只有真拿到了才 push：`None` 是不确定（老 serve / 未拉到），不是"没权限"。
-    if let Some(level) = info.permission.as_deref() {
+    // 显示口径（意图优先、两者不同则并列）在 `permission_intent::perm_value`，与 Desktop
+    // 底栏 chip 共用同一套判定；两者都不知道时返回 `None` → 整段不 push
+    // （`None` 是不确定：老 serve / 未拉到，不是"没权限"）。
+    if let Some(value) = super::permission_intent::perm_value(
+        info.permission_intent.as_deref(),
+        info.permission.as_deref(),
+    ) {
         out.push(Segment {
-            label: "perm",
-            value: level.to_string(),
+            label: PERM_LABEL,
+            value,
             priority: priority::PERM,
         });
     }
@@ -233,6 +241,28 @@ fn fit_segments(segs: &[Segment], budget: usize) -> Vec<usize> {
     }
     chosen.sort_unstable();
     chosen
+}
+
+/// 横版底栏（窄屏）：`perm` 段占的列区间（相对行首，左闭右开）。`None` = 该段没显示。
+///
+/// 与 [`status_line_with`] 共用 `left_segments` / `fit_segments` / `Segment::width`，
+/// **不复制**排版算法 —— 鼠标命中与渲染必须同源，各算一遍就是「点偏一列」的来源。
+#[must_use]
+pub(super) fn perm_cols(info: &StatusInfo, width: usize) -> Option<(u16, u16)> {
+    let budget = width.saturating_sub(RIGHT_W);
+    let segs = left_segments(info, budget);
+    let mut used = 0usize;
+    for (n, &i) in fit_segments(&segs, budget).iter().enumerate() {
+        if n > 0 {
+            used += SEPARATOR_W;
+        }
+        let w = segs[i].width();
+        if segs[i].label == PERM_LABEL {
+            return Some((u16::try_from(used).ok()?, u16::try_from(used + w).ok()?));
+        }
+        used += w;
+    }
+    None
 }
 
 /// 追加一个分段，返回它实际占用的显示宽。

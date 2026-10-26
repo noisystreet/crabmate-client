@@ -27,6 +27,7 @@ mod mouse;
 mod palette;
 mod pane_width;
 mod paste;
+mod permission_intent;
 mod read_jobs;
 mod render;
 mod resume;
@@ -217,6 +218,9 @@ impl TuiApp<'_> {
         }
         // 切走前回收「/conv new 建的空行」并把服务端 active 指过去（对齐 Web reclaim）。
         self.leave_current_for_switch(&resume);
+        // 权限意图属于**上一个**会话：切走即清（同 Desktop 的 owner 规则）。留着它等于把
+        // 「为 A 选的档」静默用到 B —— 选低了会报错，选高了不会。`/mode` `/role` 不清。
+        self.overrides.permission_level = None;
         // 断点属于上一个会话的 transcript：换会话后不可续，避免正文落到别人的记录里。
         self.drop_resume_point();
         self.st.focus = Focus::Input;
@@ -224,6 +228,8 @@ impl TuiApp<'_> {
         self.swap_draft_in(Some(&resume));
         // 切换 = 换一份 transcript（同 Desktop）：清空后回放该会话的历史。
         history::replay_into(self, resume, title);
+        // 权限投影同样是**按会话**算的：宁可短暂不显示，也别拿上一个会话的档位撑场面。
+        self.forget_permission_view();
     }
 
     fn refresh_sessions(&mut self) {
@@ -283,8 +289,15 @@ impl TuiApp<'_> {
         self.st.focus = Focus::Workspace;
     }
 
-    fn refresh_status(&mut self) {
-        if self.job_tx.send(WorkerJob::RefreshStatus).is_err() {
+    /// 拉 serve 侧事实（`/status` + `/permission`），**带当前会话**（见 `WorkerJob::RefreshStatus`）。
+    pub(super) fn refresh_status(&mut self) {
+        if self
+            .job_tx
+            .send(WorkerJob::RefreshStatus {
+                conversation_id: self.st.conversation_id.clone(),
+            })
+            .is_err()
+        {
             self.st
                 .push_line(LineKind::System, "刷新状态失败：worker 已退出");
         }
@@ -359,14 +372,7 @@ impl TuiApp<'_> {
                 let echo = set_override_field(&mut self.overrides.agent_role, arg, "role");
                 self.st.push_line(LineKind::System, &echo);
             }
-            Control::Perm(arg) => {
-                let echo = set_override_field(
-                    &mut self.overrides.permission_level,
-                    arg,
-                    "permission level",
-                );
-                self.st.push_line(LineKind::System, &echo);
-            }
+            Control::Perm(arg) => self.submit_permission_slash(arg),
             Control::Status => {
                 self.refresh_status();
                 self.st.push_line(LineKind::System, "正在刷新 serve 状态…");
@@ -442,6 +448,10 @@ impl TuiApp<'_> {
         }
         if is_ctrl_c(&key) {
             self.on_ctrl_c();
+            return;
+        }
+        // 权限档位菜单（状态行 `perm` 段点开）：模态浮层，先吃方向键 / Enter / Esc。
+        if self.on_permission_menu_key(&key) {
             return;
         }
         // 顶层快捷键（F6 设置 / F3 状态栈）：打包成一个判定，给这条 if 链腾出 CCN。
@@ -687,6 +697,11 @@ impl TuiApp<'_> {
                         .push_line(LineKind::System, &format!("拉取 serve 状态失败：{e}"));
                 }
             },
+            UiEvent::PermissionWritten {
+                level,
+                outcome,
+                generation,
+            } => self.on_permission_written(&level, outcome, generation),
             UiEvent::WorkspacePath(path) => self.st.workspace_path = path,
             UiEvent::Workspace { result, keep } => self.on_workspace_root(result, keep),
             UiEvent::WorkspaceDir {
@@ -745,6 +760,8 @@ impl TuiApp<'_> {
         let overrides = &self.overrides;
         let stored = self.persisted.as_ref();
         let defaults = self.st.serve_defaults.as_ref();
+        // `perm` 段两侧：口径（含「无已绑定会话就不并列」）见 `perm_status_values`。
+        let (perm_effective, perm_intent) = self.perm_status_values();
         let show =
             |local: &Option<String>, stored: Option<&str>, remote: Option<&str>| match normalize(
                 local,
@@ -784,9 +801,10 @@ impl TuiApp<'_> {
             ),
             running: self.st.running,
             cancel_sent: self.st.cancel_sent,
-            // 权限等级随 `ServeDefaults` 一起来（worker 在同一个任务里拉了 `/permission`）；
-            // `None` 时状态行不显示该段，不拿配置默认值顶替。
-            permission: defaults.and_then(|d| d.permission_level.clone()),
+            // 权限等级随 `ServeDefaults` 一起来（worker 同任务拉 `/permission`）；两侧怎么取
+            // 见 `perm_status_values`，不同时渲染成 `意图→生效`（与 Desktop chip 同口径）。
+            permission: perm_effective,
+            permission_intent: perm_intent,
             spinner: self.spinner.frame(),
             view_offset: self.st.view_offset,
             search_term: self.st.search_term().map(str::to_string),

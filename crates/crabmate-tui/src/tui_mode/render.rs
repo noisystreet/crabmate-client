@@ -20,8 +20,8 @@ use super::ws_sidebar::{pane_list_area, sessions_content, sidebar_view, workspac
 // 浮层（审批 / 设置面板）拆到 `overlay.rs`：它们自成一套模板，也把本文件的行数
 // 从 920 门禁线附近拉开，给后续 B4 / B5 的改动留余量。
 #[path = "overlay.rs"]
-mod overlay;
-use overlay::{render_approval_overlay, render_settings_overlay};
+pub(super) mod overlay;
+use overlay::render_approval_overlay;
 // 面板内容必须按弹层内宽生成（否则居中后错位），所以把同一个矩形计算暴露给
 // `mod.rs` 的 `settings_content(...)` 调用点。
 pub(crate) use overlay::settings_panel_content_width;
@@ -80,6 +80,12 @@ pub struct StatusInfo {
     /// `permission_level_default` 之类的配置值来填这个空：那是"没会话意图时会落到哪"，不是
     /// "此刻是哪"，两者在角色上限收窄时并不相同。
     pub permission: Option<String>,
+    /// 权限等级**意图**（本地切换选的那一档，尚未被服务端确认时与上面那个不同）。
+    ///
+    /// 与 [`Self::permission`] 分开存是为了照 Desktop chip 的口径显示「意图 → 生效」：
+    /// 服务端允许意图高于生效（min 链钳制），只显示生效档会让用户以为切换没生效；
+    /// 而把意图改写成生效值又会让下一条 `/chat` 把被钳制的低档写回会话。
+    pub permission_intent: Option<String>,
 }
 
 /// 一条可渲染的 transcript 物理行。
@@ -571,14 +577,8 @@ pub fn draw(
         frame.render_widget(Paragraph::new(status), status_area);
     }
 
-    // 设置面板浮层：整屏覆盖（含状态栏），最后绘制压住全部内容。
-    if let Some(content) = panel {
-        render_settings_overlay(frame, area, content, &pal);
-    } else {
-        // 格子背景必须最后铺：它是「每格底色」，要盖掉前面各处 `paint_bg` 铺的主题底色，
-        // 否则侧栏/状态栏会留成纯色块。模态浮层打开时不铺。
-        paint_bg_cells(frame, st);
-    }
+    // 顶层：设置面板（整屏覆盖）或「格子背景 + 权限菜单」，顺序约束见 `render_top_layer`。
+    overlay::render_top_layer(frame, area, st, panel, &pal);
 }
 
 /// 右栏底部状态栈：铺条带色后逐行画（每段一行，值已按列宽截断）。

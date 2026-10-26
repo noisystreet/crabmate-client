@@ -25,7 +25,9 @@ pub use chat_stream::{
 };
 pub use client::ServeClient;
 pub use config::ConnectionConfig;
-pub use conversation::{ConversationMessagesResponse, fetch_conversation_messages};
+pub use conversation::{
+    ConversationMessagesResponse, fetch_conversation_messages, write_permission_level,
+};
 pub use error::TermError;
 pub use sessions::{
     DEFAULT_SESSION_TITLE, SessionIndexApplied, SessionIndexOp, SessionListRow, WebSessionsList,

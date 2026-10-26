@@ -14,6 +14,8 @@ use unicode_width::UnicodeWidthStr;
 // 本文件是 `render` 的子模块，`super::` 即 `render`：直接取它已引入的类型与私有
 // 工具函数（`paint_bg` 铺底、`truncate_display` 截断），不必再走 `super::super::…`。
 use super::{Palette, PanelContent, UiState, paint_bg, truncate_display};
+// 档位菜单的选项与光标状态在 `permission_intent`（与 `/perm` 同一处写入路径）。
+use super::super::permission_intent::PermissionMenu;
 // 选项枚举在 `approve`（与按键→决策的逻辑同处）。
 use super::super::approve::ApprovalChoice;
 // 展开态与滚动位置存在浮层对象上（`state`）；折行与粘贴归一化同口径（`text`）。
@@ -532,3 +534,112 @@ fn fill_cells(text: &str, width: usize) -> String {
 #[cfg(test)]
 #[path = "overlay_tests.rs"]
 mod tests;
+
+/// 档位菜单矩形：`count` 项、最长值 `widest` 列，贴着 `anchor`（`perm` 段）展开。
+///
+/// 渲染与鼠标命中**共用**这一个函数：各算一遍的漂移症状是「点第一项却确认了第二项」。
+/// `pub(crate)`：调用方在 `permission_intent`（`tui_mode` 层），隔着 `render` 一层。
+///
+/// 位置关系对齐 Desktop 底栏 chip 的 `position:fixed`：**右缘对齐 anchor 右缘**（`perm` 段
+/// 贴右栏底 / 底栏右侧，菜单向左长），**优先在 anchor 上方向上展开** —— 两处 anchor 都在
+/// 屏幕最底，往下开只能落屏外。上边不够高时退回下方，并夹回屏内。
+pub(crate) fn permission_menu_rect(area: Rect, anchor: Rect, count: usize, widest: usize) -> Rect {
+    let rows = u16::try_from(count).unwrap_or(u16::MAX).saturating_add(2);
+    // +6 = 边框 2 列 + 选中标记 2 列 + 右侧留白；下限 20 让短档位名也不显局促。
+    let width = u16::try_from(widest)
+        .unwrap_or(u16::MAX)
+        .saturating_add(6)
+        .max(20);
+    let rows = rows.max(3);
+    // 水平：菜单右缘对齐 anchor 右缘（`saturating_sub` 让 anchor 比菜单窄时不往左爆）；
+    // `min` 先夹右上界、再夹左上界 —— 顺序反了会在窄屏（width > area.width）下算出越界值。
+    let right = anchor.x.saturating_add(anchor.width);
+    let x = right
+        .saturating_sub(width)
+        .min(area.x.saturating_add(area.width.saturating_sub(width)))
+        .max(area.x);
+    // 垂直：优先贴 anchor 上沿向上开；上方放不下（窄屏只有几行时）就贴下沿往下开，
+    // 再夹回屏内。`max` 在前是因为上方算出来的值本来就 ≥ area.y。
+    let above = anchor.y.saturating_sub(rows);
+    let y = if above >= area.y {
+        above
+    } else {
+        anchor
+            .y
+            .saturating_add(anchor.height)
+            .min(area.y.saturating_add(area.height.saturating_sub(rows)))
+            .max(area.y)
+    };
+    Rect::new(x, y, width.min(area.width), rows.min(area.height))
+}
+
+/// 权限档位菜单：锚在 `perm` 段的小框，光标项反显。
+pub(super) fn render_permission_menu(
+    frame: &mut Frame,
+    area: Rect,
+    menu: &PermissionMenu,
+    pal: &Palette,
+) {
+    let widest = menu
+        .options
+        .iter()
+        .map(|o| UnicodeWidthStr::width(o.as_str()))
+        .max()
+        .unwrap_or(0);
+    let rect = permission_menu_rect(area, menu.anchor, menu.options.len(), widest);
+    frame.render_widget(Clear, rect);
+    paint_bg(frame, rect, pal.overlay_bg);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::new().fg(pal.border))
+        .title(Span::styled(
+            " 权限等级 / permission ",
+            Style::new().fg(pal.muted),
+        ));
+    let inner = block.inner(rect);
+    frame.render_widget(block, rect);
+    let lines: Vec<Line<'static>> = menu
+        .options
+        .iter()
+        .enumerate()
+        .map(|(i, opt)| {
+            let selected = i == menu.selected;
+            let marker = if selected { "▸ " } else { "  " };
+            // 反显用 `selection_bg`：无色模式下它退成 `Reset`，选中态由 `▸` 标记兜住。
+            let style = if selected {
+                Style::new()
+                    .bg(pal.selection_bg)
+                    .fg(pal.fg)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::new().fg(pal.fg)
+            };
+            Line::from(Span::styled(format!("{marker}{opt}"), style))
+        })
+        .collect();
+    frame.render_widget(Paragraph::new(lines), inner);
+}
+
+/// 顶层绘制：设置面板（整屏覆盖）或「格子背景 + 权限菜单」。
+///
+/// 收成一个函数的理由有两个：`render.rs::draw` 贴着 920 行门禁，尾部那 8 行分支换成一行
+/// 调用；更重要的是「菜单必须画在格子背景**之后**」这条顺序约束从此只存在于这里 ——
+/// 之前它只是一句注释，谁在后面再加一句 `paint_bg_cells` 都会把菜单盖掉。
+pub(super) fn render_top_layer(
+    frame: &mut Frame,
+    area: Rect,
+    st: &UiState,
+    panel: Option<&PanelContent>,
+    pal: &Palette,
+) {
+    if let Some(content) = panel {
+        render_settings_overlay(frame, area, content, pal);
+        return;
+    }
+    // 格子背景必须最后铺：它是「每格底色」，要盖掉前面各处 `paint_bg` 铺的主题底色，
+    // 否则侧栏 / 状态栏会留成纯色块。模态浮层打开时不铺。
+    super::paint_bg_cells(frame, st);
+    if let Some(menu) = st.permission_menu.as_ref() {
+        render_permission_menu(frame, area, menu, pal);
+    }
+}

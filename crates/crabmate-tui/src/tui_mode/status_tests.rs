@@ -21,6 +21,7 @@ fn base_info(api_base: &str) -> StatusInfo {
         search_total: 0,
         context: "—".to_string(),
         permission: None,
+        permission_intent: None,
     }
 }
 
@@ -533,4 +534,41 @@ fn perm_segment_is_dropped_first_when_narrow() {
     let narrow = status_text(&info, 24);
     assert!(!narrow.contains("perm"), "{narrow}");
     assert!(narrow.contains("serve"), "{narrow}");
+}
+
+#[test]
+fn perm_cols_points_at_the_columns_the_segment_actually_occupies() {
+    let mut info = base_info("http://127.0.0.1:8080");
+    info.permission = Some("approved".into());
+    let width = 200;
+    let text = status_text(&info, width);
+    let (start, end) = perm_cols(&info, width).expect("perm 段在");
+    // 命中区间必须正好是画出来的那几个字：列区间与画面同源，鼠标点击才有意义。
+    // 按**显示列**累加而不是 `chars` 下标 —— 右缘运行态含宽字符，按字符数会偏。
+    let (mut col, mut hit) = (0usize, String::new());
+    for ch in text.chars() {
+        if col >= start as usize && col < end as usize {
+            hit.push(ch);
+        }
+        col += UnicodeWidthStr::width(ch.to_string().as_str());
+    }
+    assert_eq!(hit, "perm approved");
+}
+
+#[test]
+fn perm_cols_is_none_when_the_segment_is_dropped() {
+    // 窄屏按优先级裁掉 perm：此时没有可点区域（点了不该弹菜单）。
+    let mut info = base_info("http://127.0.0.1:8080");
+    info.permission = Some("unrestricted".into());
+    assert!(perm_cols(&info, 24).is_none());
+}
+
+#[test]
+fn perm_segment_shows_intent_and_effective_when_they_differ() {
+    // 服务端允许意图高于生效（min 链钳制）：两个值都要出现，否则用户以为切换没生效。
+    let mut info = base_info("http://127.0.0.1:8080");
+    info.permission = Some("read".into());
+    info.permission_intent = Some("unrestricted".into());
+    let text = status_text(&info, 200);
+    assert!(text.contains("perm unrestricted→read"), "{text}");
 }

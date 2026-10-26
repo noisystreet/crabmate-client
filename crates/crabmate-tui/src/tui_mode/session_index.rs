@@ -252,6 +252,8 @@ impl TuiApp<'_> {
         // 旧会话的草稿先存回（`conversation_id` 马上要被清掉），再取「未绑定」那一份（通常是空）。
         self.swap_draft_in(None);
         self.st.conversation_id = None;
+        // 权限意图跟着会话走：新建即清（同 Desktop 的 owner 规则，见 `switch_to_conv`）。
+        self.overrides.permission_level = None;
         self.st.history_pending = None;
         // 新会话还没有任何实测：留着上一个会话的用量会让人以为新会话已经在吃上下文。
         self.st.clear_usage();
@@ -259,6 +261,9 @@ impl TuiApp<'_> {
         // 新会话是一份空 transcript：上一轮的断点无处可续（`/resume` 会拒绝）。
         self.drop_resume_point();
         self.st.focus = Focus::Input;
+        // 新会话的生效档由服务端按「无会话意图 → 配置默认」重算：旧投影属于上一个会话，
+        // 留着会让状态行与菜单停在上一个会话的档位上。
+        self.forget_permission_view();
     }
 
     /// 首轮结束拿到 `conversation_id` 后，把它补进 `/conv new` 建的那一行。

@@ -370,6 +370,9 @@ pub struct UiState {
     pub skills_loading: bool,
     /// 右栏底部状态栈是否折叠（`F3`）：`false` = 展开；窄屏无状态栈，此开关无效果。
     pub status_stack_collapsed: bool,
+    /// 权限写入代数（连选两档只认最后一次回包）与 `perm` 段菜单（`None` = 未打开）。
+    pub permission_generation: u64,
+    pub permission_menu: Option<crate::tui_mode::permission_intent::PermissionMenu>,
 }
 
 impl UiState {

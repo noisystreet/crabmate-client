@@ -4,6 +4,7 @@
 use std::collections::BTreeMap;
 
 use crabmate_client_api::context_axis::new_session_baseline_prompt_tokens;
+use crabmate_client_api::permission::PermissionView;
 use serde_json::Value;
 
 /// serve 默认偏好（`GET /status?view=shell`），override 未设置时状态行回退显示。
@@ -18,13 +19,16 @@ pub struct ServeDefaults {
     /// Desktop 就是这么做的：新会话没有实测，用 `GET /status` 给的基线撑住状态栏，
     /// 并带 `~` 前缀标明是估算（`status_bar_context_is_baseline_estimate`）。
     pub baseline_prompt_tokens_by_role: BTreeMap<String, u32>,
-    /// 当前权限等级（线格式：`chat` / `read` / `workspace` / `approved` / `unrestricted`）。
+    /// 当前权限投影（`GET /permission` 的完整响应）。
     ///
-    /// **不来自** `/status`：`/status` 只有 `permission_level_default` / `permission_level_max`
-    /// 两个配置值，回答不了"此刻实际生效哪一档"。这个值由 worker 另拉 `GET /permission`
-    /// 的 `level`（min 链之后的结果）后合并进来；`/permission` 404（老 serve）或拉取失败
-    /// 时保持 `None`，状态行就不显示这一段——不猜默认档。
-    pub permission_level: Option<String>,
+    /// **不来自** `/status`：那边只有 `permission_level_default` / `permission_level_max`
+    /// 两个配置值，回答不了「此刻实际生效哪一档」。worker 在拉默认偏好的同一个任务里
+    /// 另拉 `GET /permission` 合并进来；404（老 serve）或拉取失败时保持 `None`，
+    /// 状态行就不显示这一段——不猜默认档。
+    ///
+    /// 存整个投影而不是只存 `level`：切换菜单要的 `available` 也在这里。只留 level 的话，
+    /// 每次开菜单都得再打一次 `/permission`（Desktop chip 吃的也是同一份 view）。
+    pub permission_view: Option<PermissionView>,
 }
 
 impl ServeDefaults {
@@ -44,8 +48,27 @@ impl ServeDefaults {
             mode: field("default_session_mode"),
             baseline_prompt_tokens_by_role: baseline_by_role(v),
             // `/status` 不提供生效等级；由 worker 另拉 `/permission` 后回填。
-            permission_level: None,
+            permission_view: None,
         }
+    }
+
+    /// 此刻生效的档（min 链之后）。`None` = 不知道：老 serve 没有 `/permission`、
+    /// 还没拉到，或服务端给了空白。
+    #[must_use]
+    pub fn effective_level(&self) -> Option<&str> {
+        self.permission_view
+            .as_ref()
+            .map(|v| v.level.trim())
+            .filter(|s| !s.is_empty())
+    }
+
+    /// 选择器选项集（服务端算好的 `available`，自低到高）。没有投影时为空——
+    /// 客户端**不**用本地的五档词表兜底：那会把「服务端不让选的高档」也列出来。
+    #[must_use]
+    pub fn available_levels(&self) -> &[String] {
+        self.permission_view
+            .as_ref()
+            .map_or(&[], |v| v.available.as_slice())
     }
 
     /// 新会话的基线用量：显式角色 → 默认角色 → `""` 档。
