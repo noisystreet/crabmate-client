@@ -20,6 +20,8 @@ pub struct TurnPrefs<'a> {
     pub client_llm: Option<ClientLlm<'a>>,
     pub agent_role: Option<&'a str>,
     pub session_mode: Option<&'a str>,
+    /// 权限等级意图（`/perm`）；`None` = 不表达意图，沿用会话持久值。
+    pub permission_level: Option<&'a str>,
 }
 
 pub async fn run_turn(
@@ -46,6 +48,7 @@ pub async fn run_turn(
                 client_llm: prefs.client_llm,
                 agent_role: prefs.agent_role,
                 session_mode: prefs.session_mode,
+                permission_level: prefs.permission_level,
                 stream_resume: resume,
             },
             &mut stdout,

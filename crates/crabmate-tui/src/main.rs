@@ -150,6 +150,8 @@ struct SessionPrefs {
     api_base: Option<String>,
     agent_role: Option<String>,
     session_mode: Option<String>,
+    /// `/perm <level>` 设置的权限等级意图；`None` = 不表达意图（沿用会话持久值）。
+    permission_level: Option<String>,
 }
 
 impl SessionPrefs {
@@ -164,6 +166,7 @@ impl SessionPrefs {
             api_base,
             agent_role: None,
             session_mode: None,
+            permission_level: None,
         }
     }
 
@@ -176,12 +179,13 @@ impl SessionPrefs {
         )
     }
 
-    /// 随本轮发送的完整偏好（client_llm + agent_role + session_mode）。
+    /// 随本轮发送的完整偏好（client_llm + agent_role + session_mode + permission_level）。
     fn prefs(&self) -> TurnPrefs<'_> {
         TurnPrefs {
             client_llm: self.client_llm(),
             agent_role: self.agent_role.as_deref(),
             session_mode: self.session_mode.as_deref(),
+            permission_level: self.permission_level.as_deref(),
         }
     }
 }
@@ -500,6 +504,10 @@ async fn dispatch_repl_line(
             handle_role_slash(text, overrides);
             return Ok(true);
         }
+        Some("perm") => {
+            handle_perm_slash(text, overrides);
+            return Ok(true);
+        }
         _ => {}
     }
     if is_control_slash(text) {
@@ -744,6 +752,37 @@ fn handle_role_slash(text: &str, overrides: &mut SessionPrefs) {
     println!(
         "agent role: {}",
         overrides.agent_role.as_deref().unwrap_or_default()
+    );
+}
+
+/// `/perm [<level>]`：查看或设置本轮权限等级意图（`off` 清除）。
+///
+/// 与 `/mode` `/role` 同一套机制：只写客户端 override，随**下一条**消息发送；服务端仍按
+/// min 链（`ceiling → role → session_mode → permission_level`）决定实际档位，所以这里
+/// 允许设一个高于生效档的值——「我选了不受限，但仍被只读钳制」由状态栏 `perm` 段显示。
+///
+/// 不校验档位名：可选集由服务端 `GET /permission` 的 `available` 决定，客户端写死词表
+/// 只会在服务端新增档位时误拒；未知值由服务端按无效请求拒绝，报错比本地拦截更准确。
+fn handle_perm_slash(text: &str, overrides: &mut SessionPrefs) {
+    let arg = slash_arg(text);
+    if arg.is_empty() {
+        match overrides.permission_level.as_deref() {
+            Some(p) if !p.trim().is_empty() => println!("permission level: {p}"),
+            _ => println!(
+                "permission level: (不表达意图 — 沿用会话持久值；/perm <level> 设置，可选档位见状态栏或 Desktop 设置)"
+            ),
+        }
+        return;
+    }
+    if clear_word(&arg) {
+        overrides.permission_level = None;
+        println!("permission level intent cleared");
+        return;
+    }
+    overrides.permission_level = Some(arg);
+    println!(
+        "permission level: {}",
+        overrides.permission_level.as_deref().unwrap_or_default()
     );
 }
 

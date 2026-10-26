@@ -58,6 +58,9 @@ impl TuiApp<'_> {
             client_llm,
             agent_role: role,
             session_mode,
+            // 权限等级没有 user-data 那一层（服务端持会话状态，不是客户端偏好）：
+            // 只看 repl/tui 会话内的 override；None = 不表达意图。
+            permission_level: self.overrides.permission_level.clone(),
             temperature,
             readonly_tool_ttl_cache_secs,
             stream_resume,

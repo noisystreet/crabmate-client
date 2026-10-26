@@ -67,6 +67,8 @@ pub struct ChatStreamArgs<'a> {
     pub agent_role: Option<&'a str>,
     /// 会话模式（`session_mode`：ask / plan / act；缺省用 serve 默认）。
     pub session_mode: Option<&'a str>,
+    /// 权限等级意图（`permission_level`；缺省 = 不表达意图，沿用会话持久值）。
+    pub permission_level: Option<&'a str>,
     /// 续传已中断回合（`stream_resume:{job_id, after_seq}`）。
     pub stream_resume: Option<StreamResume>,
 }
@@ -80,6 +82,8 @@ pub struct ChatStreamOptions {
     pub client_llm: Option<ClientLlmFields>,
     pub agent_role: Option<String>,
     pub session_mode: Option<String>,
+    /// 权限等级意图；与 `agent_role` / `session_mode` 同为「本回合显式表达」的列。
+    pub permission_level: Option<String>,
     /// 顶层 `temperature`（f64；仅 `Some` 且有限且 `0.0..=2.0` 时随 body 发送，
     /// 语义对齐 Desktop `chat_temperature_override_from_storage`）。
     pub temperature: Option<f64>,
@@ -120,6 +124,7 @@ impl From<&ChatStreamArgs<'_>> for ChatStreamOptions {
             }),
             agent_role: a.agent_role.map(str::to_string),
             session_mode: a.session_mode.map(str::to_string),
+            permission_level: a.permission_level.map(str::to_string),
             temperature: None,
             readonly_tool_ttl_cache_secs: None,
             stream_resume: a.stream_resume,
@@ -330,6 +335,7 @@ fn chat_stream_body(opts: &ChatStreamOptions) -> Value {
     if let Some(map) = body.as_object_mut() {
         insert_trimmed_str(map, "agent_role", opts.agent_role.as_deref());
         insert_trimmed_str(map, "session_mode", opts.session_mode.as_deref());
+        insert_trimmed_str(map, "permission_level", opts.permission_level.as_deref());
     }
     if let Some(t) = temperature_for_chat_body(opts.temperature) {
         body["temperature"] = serde_json::json!(t);
@@ -827,6 +833,21 @@ mod tests {
         });
         assert!(body.get("agent_role").is_none());
         assert!(body.get("session_mode").is_none());
+    }
+
+    #[test]
+    fn chat_body_carries_permission_level_intent_and_trims_it() {
+        let body = chat_stream_body(&ChatStreamOptions {
+            permission_level: Some(" read ".into()),
+            ..base_opts()
+        });
+        assert_eq!(body["permission_level"], "read");
+        // 空白 = 不表达意图（沿用会话持久值），不能发一个空串过去被当成非法档位。
+        let blank = chat_stream_body(&ChatStreamOptions {
+            permission_level: Some("   ".into()),
+            ..base_opts()
+        });
+        assert!(blank.get("permission_level").is_none());
     }
 
     #[test]

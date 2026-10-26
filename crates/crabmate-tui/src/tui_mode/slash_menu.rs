@@ -114,6 +114,11 @@ pub fn builtin_items() -> Vec<SlashItem> {
             "会话模式 ask / plan / act（off 清除）",
         ),
         item(slash::ROLE, "/role ", "Agent role override（off 清除）"),
+        item(
+            slash::PERM,
+            "/perm ",
+            "权限等级意图（off 清除；上限仍由服务端 min 链决定）",
+        ),
         item("find", "/find ", "搜索并高亮记录（off 清除）"),
         item(
             "background",

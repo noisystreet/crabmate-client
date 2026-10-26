@@ -12,6 +12,8 @@ pub enum Control {
     Model(Option<String>),
     Mode(Option<String>),
     Role(Option<String>),
+    /// `/perm [<level>]`：本轮权限等级意图（`off` 清除）。
+    Perm(Option<String>),
     Status,
     /// `/settings`：打开设置面板（等同 F2）。
     Settings,
@@ -94,6 +96,7 @@ pub fn parse_control(text: &str) -> Option<Control> {
         slash::MODEL => Some(Control::Model(arg_opt)),
         slash::MODE => Some(Control::Mode(arg_opt)),
         slash::ROLE => Some(Control::Role(arg_opt)),
+        slash::PERM => Some(Control::Perm(arg_opt)),
         slash::STATUS => Some(Control::Status),
         "settings" => Some(Control::Settings),
         slash::WORKSPACE | slash::CD => Some(Control::Workspace(arg_opt)),
@@ -153,6 +156,12 @@ mod tests {
             parse_control("/role coder"),
             Some(Control::Role(Some(v))) if v == "coder"
         ));
+        // `/perm` 与 `/mode` `/role` 同类：带参设意图、空参查询/清除。
+        assert!(matches!(
+            parse_control("/perm read"),
+            Some(Control::Perm(Some(v))) if v == "read"
+        ));
+        assert!(matches!(parse_control("/perm"), Some(Control::Perm(None))));
     }
 
     #[test]

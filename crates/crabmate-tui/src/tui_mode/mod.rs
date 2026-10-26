@@ -359,6 +359,14 @@ impl TuiApp<'_> {
                 let echo = set_override_field(&mut self.overrides.agent_role, arg, "role");
                 self.st.push_line(LineKind::System, &echo);
             }
+            Control::Perm(arg) => {
+                let echo = set_override_field(
+                    &mut self.overrides.permission_level,
+                    arg,
+                    "permission level",
+                );
+                self.st.push_line(LineKind::System, &echo);
+            }
             Control::Status => {
                 self.refresh_status();
                 self.st.push_line(LineKind::System, "正在刷新 serve 状态…");
