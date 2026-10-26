@@ -32,6 +32,7 @@ use leptos::task::spawn_local;
 
 use crate::api::{SendChatStreamParams, send_chat_stream};
 use crate::app::chat::turn_lifecycle::TurnLifecycleEvent;
+use crate::app::shell_runtime_context::try_chat_shell_ctx;
 use crate::chat_session_state::ChatSessionSignals;
 use crate::i18n::Locale;
 
@@ -65,6 +66,10 @@ pub(super) fn make_attach_chat_stream(h: ComposerStreamHandles) -> AttachChatStr
         shell,
     } = h;
 
+    // 权限等级意图：从壳层 ctx 取**同一个信号**（设置页选择器也写它），并保留信号本身——
+    // 发送时才读值，这样「设置页刚改档、立刻发消息」用的是新档，而不是装配回调时的快照。
+    let selected_permission_level = try_chat_shell_ctx().map(|c| c.selected_permission_level);
+
     Arc::new({
         let shell_outer = shell.clone();
         let chat = chat;
@@ -90,6 +95,8 @@ pub(super) fn make_attach_chat_stream(h: ComposerStreamHandles) -> AttachChatStr
                 }
             };
             session_mode_user_override.set(false);
+            // 意图原样透传：归一发生在选择器落地那一刻，这里不再「修正」用户的选择。
+            let permission_level = selected_permission_level.and_then(|s| s.get_untracked());
             let cbs = callbacks::build_chat_stream_callbacks(Rc::clone(&prepared.stream_ctx));
 
             let gen_snapshot = prepared.attach_generation;
@@ -108,6 +115,7 @@ pub(super) fn make_attach_chat_stream(h: ComposerStreamHandles) -> AttachChatStr
                     conversation_id: conv,
                     agent_role,
                     session_mode,
+                    permission_level,
                     approval_session_id: Some(appr),
                     stream_resume_job_id: None,
                     stream_resume_after_seq: None,

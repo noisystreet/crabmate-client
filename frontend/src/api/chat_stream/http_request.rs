@@ -20,6 +20,8 @@ pub(super) struct ChatStreamPostBodyParts<'a> {
     pub(super) conversation_id: &'a Option<String>,
     pub(super) agent_role: &'a Option<String>,
     pub(super) session_mode: &'a Option<String>,
+    /// 会话级权限等级**意图**（`None` = 不传该字段，沿用会话持久值）。
+    pub(super) permission_level: &'a Option<String>,
     pub(super) approval_session_id: &'a Option<String>,
     pub(super) stream_resume_job_id: Option<u64>,
     pub(super) last_event_id: u64,
@@ -35,6 +37,7 @@ pub(super) fn build_chat_stream_post_body(
         conversation_id,
         agent_role,
         session_mode,
+        permission_level,
         approval_session_id,
         stream_resume_job_id,
         last_event_id,
@@ -61,6 +64,17 @@ pub(super) fn build_chat_stream_post_body(
         .filter(|s| !s.is_empty())
     {
         body["session_mode"] = serde_json::json!(mode);
+    }
+    // 权限等级**意图**：省略即「沿用会话持久值」，所以 `None` / 空白一律不写键
+    // （写 `null` 会变成一次显式写入的意图，与服务端「部分更新」的语义不符）。
+    // 这里不做归一，也不和 `permission.level` 比较：归一发生在选择器落地那一刻
+    // （`normalize_level`），比较只由 serve 的 min 链负责。
+    if let Some(level) = permission_level
+        .as_ref()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+    {
+        body["permission_level"] = serde_json::json!(level);
     }
     if !image_urls.is_empty() {
         body["image_urls"] = serde_json::json!(image_urls);
@@ -176,7 +190,50 @@ pub(super) async fn sleep_chat_stream_retry_backoff(attempt: u32) {
 
 #[cfg(test)]
 mod tests {
-    use super::{RETRY_BACKOFF_BASE_MS, chat_stream_retry_backoff_ms_with_jitter};
+    use super::{
+        ChatStreamPostBodyParts, RETRY_BACKOFF_BASE_MS, build_chat_stream_post_body,
+        chat_stream_retry_backoff_ms_with_jitter,
+    };
+
+    /// 只关心 `permission_level` 的 body：其余字段取空，便于隔离这一条规则。
+    fn body_with_permission(level: Option<String>) -> serde_json::Value {
+        let message = "hi".to_string();
+        let image_urls: Vec<String> = Vec::new();
+        let conversation_id: Option<String> = None;
+        let agent_role: Option<String> = None;
+        let session_mode: Option<String> = None;
+        let approval_session_id: Option<String> = None;
+        let clarify: Option<serde_json::Value> = None;
+        build_chat_stream_post_body(ChatStreamPostBodyParts {
+            message: &message,
+            image_urls: &image_urls,
+            conversation_id: &conversation_id,
+            agent_role: &agent_role,
+            session_mode: &session_mode,
+            permission_level: &level,
+            approval_session_id: &approval_session_id,
+            stream_resume_job_id: None,
+            last_event_id: 0,
+            clarify_questionnaire_answers: &clarify,
+        })
+        .expect("body")
+    }
+
+    #[test]
+    fn permission_level_is_sent_only_when_the_user_selected_one() {
+        // 不选 = **不写键**：省略即「沿用会话持久值」，而写 `null` 会被服务端当成一次显式写入。
+        assert!(body_with_permission(None).get("permission_level").is_none());
+        assert!(
+            body_with_permission(Some("  ".to_string()))
+                .get("permission_level")
+                .is_none()
+        );
+        // 选了就原样发（归一在选择器落地时做，发送路径不再二次改写）。
+        assert_eq!(
+            body_with_permission(Some(" workspace ".to_string()))["permission_level"],
+            "workspace"
+        );
+    }
 
     /// `unit = 0.5` 落在抖动区间中点：退避即为无抖动基数。
     #[test]
