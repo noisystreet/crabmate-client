@@ -99,7 +99,15 @@ pub(super) enum UiEvent {
         result: Result<SessionIndexApplied, String>,
         op: SessionIndexOp,
     },
-    Status(Result<ServeDefaults, String>),
+    /// serve 侧事实（`/status?view=shell` + `/permission`）。
+    ///
+    /// **带 `conversation_id`**：请求是带着发起时的会话走的（`/permission` 按会话算），回包
+    /// 却是异步的 —— 到达时用户可能已经切走或 `/conv new`，那份投影属于上一个会话，落到
+    /// 新会话的状态行就是「显示别人的档位」。收口在 [`TuiApp::on_serve_status`]。
+    Status {
+        conversation_id: Option<String>,
+        result: Result<ServeDefaults, String>,
+    },
     /// 权限等级意图落盘结果（`POST /conversation/state`）。
     ///
     /// 分两层不是冗余：`Err` = 请求**根本没拿到响应**（建请求 / 网络 / 读 body），
@@ -598,7 +606,10 @@ fn job_refresh_status(
     if let Ok(defaults) = result.as_mut() {
         defaults.permission_view = view;
     }
-    let _ = tx.send(UiEvent::Status(result));
+    let _ = tx.send(UiEvent::Status {
+        conversation_id: conversation_id.map(str::to_string),
+        result,
+    });
 }
 
 /// `GET /permission` 的完整投影：**404（老 serve）与任何失败都返回 `None`**。
