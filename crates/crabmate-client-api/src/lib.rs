@@ -17,6 +17,7 @@ pub mod markdown_inline;
 pub mod markdown_normalize;
 pub mod messages;
 pub mod paths;
+pub mod permission;
 pub mod prompt_tokens;
 pub mod secrets;
 pub mod session_model;
@@ -54,6 +55,7 @@ pub use health::health_degraded_note;
 pub use markdown_inline::{InlineSpan, parse_inline_markdown};
 pub use markdown_normalize::normalize_markdown_for_render;
 pub use messages::{http_error_message, http_error_text};
+pub use permission::{CLAMP_ORDER, DEFAULT_LEVEL, LEVELS, is_known_level, normalize_level};
 pub use prompt_tokens::{
     TiktokenPromptTokensSnapshot, parse_tiktoken_prompt_tokens_value, tiktoken_from_ag_ui_object,
 };
