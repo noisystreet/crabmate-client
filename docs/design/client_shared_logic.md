@@ -1,6 +1,6 @@
 # 多端 Client 共用逻辑抽取（规划）
 
-> **状态**：S1–S4 **已落地**；hash 交接键名、S5 health JSON 子集、**斜杠名字表**、**端点路径常量（`paths`）**、**通用 HTTP 错误文案（`messages`）** 均已落地；**S6（SSE / AG-UI 纯解析下沉）S6a–S6d 已落地**（S6a `prompt_tokens`、S6b `sse_dispatch`、S6c `ag_ui_parser`、S6d TUI 分类器适配器；S6e 可选缓做，见 §4.11 / §6）；**S7a（chat body 可选块取值规则）已落地**（见 §4.12 / §6）；**S11（上下文用量口径）已落地**（见 §4.15）  
+> **状态**：S1–S4 **已落地**；hash 交接键名、S5 health JSON 子集、**斜杠名字表**、**端点路径常量（`paths`）**、**通用 HTTP 错误文案（`messages`）** 均已落地；**S6（SSE / AG-UI 纯解析下沉）S6a–S6d 已落地**（S6a `prompt_tokens`、S6b `sse_dispatch`、S6c `ag_ui_parser`、S6d TUI 分类器适配器；S6e 可选缓做，见 §4.11 / §6）；**S7a（chat body 可选块取值规则）已落地**（见 §4.12 / §6）；**S11（上下文用量口径）已落地**（见 §4.15）；**S12（权限等级词表）已落地**（仅词表与路径构造，见 §4.9 / §4.16）  
 > **范围**：`frontend`（WASM）、`crabmate-connect`（Desktop/Android 壳）、`crabmate-tui`（远程终端）之间的重复逻辑（原 `crabmate-tui-core` 已并入 `crabmate-tui` `src/serve/`，见 §2 注记）  
 > **关联**：[remote_cli_tui.md](./remote_cli_tui.md)、[tauri_gui_mvp_design.md](./tauri_gui_mvp_design.md)、[contract_pin.md](./contract_pin.md)、产品面对照 [client_capability_matrix.md](./client_capability_matrix.md)；Server [`client_shell_split.md`](https://github.com/noisystreet/CrabMate/blob/main/docs/design/client_shell_split.md)
 
@@ -90,6 +90,7 @@ frontend/                # wasm fetch 适配器 + UI；S1–S4 已用 client-api
 | `workspace_rel`（S9） | 工作区相对路径片段运算（`child_rel` / `parent_rel`；两端原本逐字等价） |
 | `client_llm_presets`（S10） | LLM 网关预设表（7 条 `id`+`url`）+ URL→id / 下标 / 显示名投影；`server` 必在首项、`custom` 必在末项为不变量 |
 | `context_axis`（S11） | 上下文用量口径：`ContextAxis`（`used` / `fixed` / `raw_cap` / `baseline_estimate`）、固定开销拆分、`ContextUsedWatermark`（滚动水位 + 压缩回落）、紧凑 token 文本、告警阈值 |
+| `permission`（S12） | 五档权限等级线格式词表（`LEVELS`）、默认档（`DEFAULT_LEVEL`）、钳制展示顺序（`CLAMP_ORDER`）与 `normalize_level` 归一；**不含**任何等级比较 / 钳制规则（判定在 serve） |
 
 ---
 
@@ -312,6 +313,29 @@ Web 的 `api_base_preset_select` 字符串链路（写入已保存模型预设�
 | `status_context_meter_fill_class` | CSS 类名，属 presentation |
 
 **TUI 侧消费点**（随 S11 一并落地）：用量实测有两个来源：`GET /conversation/messages` 水合响应（snake_case `tiktoken_prompt_tokens`，新会话即有初始占用，Web/TUI 同口径）与 `RUN_FINISHED` / `CUSTOM conversation_saved` 流事件（camelCase `tiktokenPromptTokens`，不是顶层 `stream_ended` 子对象），`serve/chat_classify.rs` 把它摘成 `LineAction::PromptTokens`（子串守卫，只有终止帧才多解一次 JSON），经 `StreamSink::on_prompt_tokens` → `UiEvent::PromptTokens` 进 `UiState::set_prompt_tokens`，再由 `context_text` 拼出状态行 `ctx` 段。水位按服务端 `conversation_id` 归属：cid 还没绑上时只存快照、不记水位（宁缺不猜，否则切会话后旧峰值会挂到新会话上）。web / tui 因此共用同一份 fill 口径与阈值。**回落同样下沉**：`context_trim_after_used_tokens`（解析 `timeline_log` 的**字符串化** `detail`，取 `after_tokens`）与 `context_trim_watermark_reset`（`bound_active` / `after` / `cid` 三条件）也在 `context_axis`；TUI 的 `UiState::reset_used` 与 Web 的 `timeline_dispatch` 调的是同一套规则 —— 压缩 / 裁剪后水位回落，不再只增不减。另：`/conv new` 与切换会话会 `UiState::clear_usage`；新会话无 cid 时回落 `GET /status?view=shell` 的 `tiktoken_new_session_baseline_by_agent_role`（按 role 的 system-only 粗估，与 Desktop `status_bar_new_session_baseline_prompt_tokens` 同一查表顺序）并以 `~` 标明估算，避免新会话继续显示上一个会话的数字（`context_text` 只看 `snapshot`、不看 cid）；首轮结束回填 cid 后若这一轮仍无实测，TUI 另发 `WorkerJob::RefreshUsage` 只取水合响应里的 `tiktoken_prompt_tokens`，回包按 `conversation_id` 门控（晚到 = 已切走则丢弃）——与 Desktop 流收尾 `bump_session_hydrate_nonce` 同口径，避免基线失效后掉回占位 `—`。
+
+### 4.16 权限等级词表（S12 已落地；仅词表与路径）
+
+| 端 | 路径 |
+|----|------|
+| frontend | **尚未接入**（`app_prefs.rs` 的 `permission_level_default` / `permission_level_max` 是设置字段，不是这份词表） |
+| tui | **尚未接入**（`serve/chat_stream.rs` / `tui_mode/approve.rs` 的 `permission_level: None` 是 chat body 字段，不是这份词表） |
+
+共享实现（`crabmate_client_api::permission` + `paths::permission`）：
+
+| 项 | 规则 |
+|----|------|
+| `LEVELS` | 五档线格式，**自低到高**：`chat` / `read` / `workspace` / `approved` / `unrestricted`（与服务端 `PermissionLevel` 的 serde 线格式一致） |
+| `DEFAULT_LEVEL` | `approved`——服务端「无会话意图 + 无配置覆盖」时落地的档位；客户端只用于占位文案，不参与判定 |
+| `CLAMP_ORDER` | `ceiling` → `role` → `session_mode` 的**固定展示顺序**；服务端 `PermissionClamp` 只有这三个变体（文档里出现过的 `sandbox` 未实现，测试钉住不许照文档加回来） |
+| `normalize_level` / `is_known_level` | `trim` + 大小写不敏感；不认识的值返回 `None`，由调用方决定「忽略」还是「未知值兜底」，**不猜默认档** |
+| `paths::permission(agent_role, conversation_id)` | `GET /permission` 查询串：两个参数都按 RFC3986 分量编码，空白等同未指定（不发 `agent_role=` 这种空值）；都不给时返回裸路径，由服务端按配置默认等级 + 无会话意图处理 |
+
+**留端（铁律）**：等级比较、`available` / `effective` 计算、min 链钳制、六轴投影**全部**在 serve（`cm_types/permission_level.rs`），客户端不复制任何一条——共享层只做字符串归一与顺序声明，避免 Web / TUI 各写一份同义词后再漂移。
+
+**能力探测**：老 serve 没有 `/permission`（404），这是客户端判断「该 serve 是否支持权限等级」的唯一手段；**不要**用 `/status` 探测——它对新旧 serve 都会成功，无法区分能力。
+
+**状态**：词表与路径构造已落地，**尚无 UI 消费方**，所以矩阵里对应行仍为 `planned`（见 [`client_capability_matrix.md`](./client_capability_matrix.md)）。
 
 ## 5. 明确不共享
 
