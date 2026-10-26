@@ -30,6 +30,7 @@ fn status_info() -> StatusInfo {
         search_total: 0,
         context: "—".to_string(),
         permission: None,
+        permission_intent: None,
     }
 }
 
@@ -382,5 +383,38 @@ fn expanding_the_approval_overlay_reveals_the_rest_of_the_command() {
     assert!(
         expanded.contains("已展开") || expanded.contains("Ctrl+E"),
         "标题或提示行要给出收起入口：{expanded}"
+    );
+}
+
+/// 档位菜单锚在 `perm` 段上：右缘对齐、贴着上沿向上展开（不居中）。
+///
+/// 位置关系对齐 Desktop 底栏 chip 的 `position:fixed` —— 状态栈 / 底栏都在屏幕最底，
+/// 往下开只能落屏外。
+#[test]
+fn permission_menu_rect_anchors_above_the_status_segment() {
+    let area = Rect::new(0, 0, 80, 24);
+    // 右栏底部的那一行，28 列宽。
+    let anchor = Rect::new(50, 22, 28, 1);
+    let rect = permission_menu_rect(area, anchor, 5, 10);
+    assert_eq!(rect.y + rect.height, anchor.y, "下边对齐 anchor 上沿");
+    assert_eq!(
+        rect.x + rect.width,
+        anchor.x + anchor.width,
+        "右缘对齐 anchor 右缘"
+    );
+    assert_eq!(rect.height, 7, "5 项 + 上下边框");
+    assert_eq!(rect.width, 20, "10 列值 + 6 列装饰，落在 20 的下限");
+}
+
+/// 屏幕比菜单还矮时（窄屏几行）不越界：退回 anchor 下方并夹回屏内。
+#[test]
+fn permission_menu_rect_stays_inside_a_short_screen() {
+    let area = Rect::new(0, 0, 30, 4);
+    let anchor = Rect::new(24, 3, 6, 1);
+    let rect = permission_menu_rect(area, anchor, 5, 10);
+    assert!(rect.x >= area.x && rect.y >= area.y, "左上界");
+    assert!(
+        rect.x + rect.width <= area.x + area.width && rect.y + rect.height <= area.y + area.height,
+        "右下界：{rect:?} 必须落在 {area:?} 内"
     );
 }

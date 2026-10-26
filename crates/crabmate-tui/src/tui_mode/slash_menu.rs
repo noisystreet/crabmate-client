@@ -117,7 +117,7 @@ pub fn builtin_items() -> Vec<SlashItem> {
         item(
             slash::PERM,
             "/perm ",
-            "权限等级意图（off 清除；上限仍由服务端 min 链决定）",
+            "权限等级（off 清除；也可点状态行的 perm 段；上限仍由服务端 min 链决定）",
         ),
         item("find", "/find ", "搜索并高亮记录（off 清除）"),
         item(

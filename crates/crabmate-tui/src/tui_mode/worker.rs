@@ -8,6 +8,7 @@ use std::thread;
 
 use crossterm::event::{self, Event, KeyEvent, MouseButton, MouseEvent, MouseEventKind};
 
+use crabmate_client_api::conversation_state::ConversationStateOutcome;
 use crabmate_client_api::paths;
 use crabmate_client_api::permission::PermissionView;
 use crabmate_client_api::prompt_tokens::TiktokenPromptTokensSnapshot;
@@ -19,7 +20,7 @@ use crate::serve::{
     apply_web_session_op, fetch_conversation_messages, fetch_llm_overrides, fetch_user_data_prefs,
     fetch_web_sessions, fetch_workspace, fetch_workspace_dir, fetch_workspace_projects,
     put_llm_overrides, put_user_data_prefs, run_chat_stream_sink, set_workspace,
-    switch_workspace_project,
+    switch_workspace_project, write_permission_level,
 };
 
 use super::approve::{APPROVAL_WAIT, ApprovalPrompt, OverlayApprovalGate};
@@ -99,6 +100,18 @@ pub(super) enum UiEvent {
         op: SessionIndexOp,
     },
     Status(Result<ServeDefaults, String>),
+    /// 权限等级意图落盘结果（`POST /conversation/state`）。
+    ///
+    /// 分两层不是冗余：`Err` = 请求**根本没拿到响应**（建请求 / 网络 / 读 body），
+    /// `Ok(outcome)` = 拿到了 HTTP 响应，按共享层分类。合并会凭空造出一个不存在的状态码，
+    /// 也就分不清「服务端拒绝了」与「压根没连上」。
+    PermissionWritten {
+        level: String,
+        outcome: Result<ConversationStateOutcome, String>,
+        /// 发起时的代数：与 `UiState::permission_generation` 不等即丢弃（连选两档时只有
+        /// 最后一次落地，否则慢的那个回包会把界面刷回旧档）。
+        generation: u64,
+    },
     /// 工作区根路径（`GET /workspace`，随会话刷新顺带拉取；只更新右栏标题，不动目录树）。
     WorkspacePath(Option<String>),
     /// 工作区根目录列表（`GET /workspace`）：路径给右栏标题，entries 给目录树。
@@ -176,7 +189,15 @@ pub(super) enum WorkerJob {
         rel: String,
         generation: u64,
     },
-    RefreshStatus,
+    /// 拉 serve 侧事实（`/status?view=shell` + `/permission`）。
+    ///
+    /// **带 `conversation_id`**：`GET /permission` 的生效档是按会话算的（会话列里的意图 +
+    /// min 链），裸请求回的是「配置默认档 + 无会话意图」。不带 id 就会在状态行显示一个
+    /// 与实际生效档无关的值 —— 实测同一台 serve：裸请求 `approved/config`，带 id
+    /// `unrestricted/persisted`。
+    RefreshStatus {
+        conversation_id: Option<String>,
+    },
     /// 项目池列表（`GET /workspace/projects`）。
     WsProjects,
     /// 切换项目池内项目（`POST /workspace/projects`）。
@@ -193,6 +214,16 @@ pub(super) enum WorkerJob {
     SavePrefs(PrefsSave),
     /// 拉 skill 目录（`GET /skills`）：只给 `/` 补全菜单用。
     Skills,
+    /// 写会话级权限等级意图（`POST /conversation/state`，空闲态落盘）。
+    ///
+    /// 与 `/perm` 写下的本地 override 不是一回事：override 只影响**下一条** `/chat`，
+    /// 退出进程就没了；这里落库后，下次进同一个会话仍是这一档（Desktop chip 同语义）。
+    WritePermission {
+        conversation_id: String,
+        level: String,
+        /// 发起时的代数：连选两档时只有最后一次落地（同 Desktop chip 的 `generation`）。
+        generation: u64,
+    },
 }
 
 /// 全屏模式 sink：把流事件发往 UI 事件通道。
@@ -352,7 +383,9 @@ pub(super) fn spawn_worker(client: ServeClient, tx: Sender<UiEvent>) -> Sender<W
                 WorkerJob::WorkspaceDir { rel, generation } => {
                     job_workspace_dir(&rt, &client, &rel, generation, &tx);
                 }
-                WorkerJob::RefreshStatus => job_refresh_status(&rt, &client, &tx),
+                WorkerJob::RefreshStatus { conversation_id } => {
+                    job_refresh_status(&rt, &client, conversation_id.as_deref(), &tx)
+                }
                 WorkerJob::WsProjects => job_ws_projects(&rt, &client, &tx),
                 WorkerJob::WsSwitchProject(name) => job_ws_switch_project(&rt, &client, &name, &tx),
                 WorkerJob::WorkspaceQuery => job_workspace_query(&rt, &client, &tx),
@@ -361,6 +394,11 @@ pub(super) fn spawn_worker(client: ServeClient, tx: Sender<UiEvent>) -> Sender<W
                 WorkerJob::SaveLlm(save) => job_save_llm(&rt, &client, save, &tx),
                 WorkerJob::SavePrefs(save) => job_save_prefs(&rt, &client, save, &tx),
                 WorkerJob::Skills => job_skills(&rt, &client, &tx),
+                WorkerJob::WritePermission {
+                    conversation_id,
+                    level,
+                    generation,
+                } => job_write_permission(&rt, &client, &conversation_id, &level, generation, &tx),
             }
         }
     });
@@ -545,32 +583,72 @@ fn job_workspace_dir(
     });
 }
 
-/// serve 默认偏好（`/status?view=shell`）+ 当前生效权限等级（`/permission`）。
+/// serve 默认偏好（`/status?view=shell`）+ 当前生效权限投影（`/permission`）。
 ///
 /// 两个端点合进同一个任务：状态行要的是**同一时刻**的 serve 侧事实，分两次任务到达顺序随机，
 /// 会短暂拼出"旧 model + 新等级"这种没发生过的组合。
-fn job_refresh_status(rt: &tokio::runtime::Runtime, client: &ServeClient, tx: &Sender<UiEvent>) {
+fn job_refresh_status(
+    rt: &tokio::runtime::Runtime,
+    client: &ServeClient,
+    conversation_id: Option<&str>,
+    tx: &Sender<UiEvent>,
+) {
     let mut result = rt.block_on(fetch_serve_defaults(client));
-    let level = rt.block_on(fetch_permission_level(client));
+    let view = rt.block_on(fetch_permission_view(client, conversation_id));
     if let Ok(defaults) = result.as_mut() {
-        defaults.permission_level = level;
+        defaults.permission_view = view;
     }
     let _ = tx.send(UiEvent::Status(result));
 }
 
-/// `GET /permission` 的 `level`：**404（老 serve）与任何失败都返回 `None`**。
+/// `GET /permission` 的完整投影：**404（老 serve）与任何失败都返回 `None`**。
 ///
 /// 状态行少一段，而不是显示一个猜来的档位——等级是策略事实，猜错的方向可能是危险的
 /// （把 `chat` 显示成 `unrestricted` 才最糟）。需要细节时看 Desktop 设置页或 `/status`
 /// 里的 `permission_level_default` / `permission_level_max`。
-async fn fetch_permission_level(client: &ServeClient) -> Option<String> {
+///
+/// 存**整个** view（不再只取 `level`）：切换菜单的选项集就是 `available`，与 Desktop chip
+/// 吃同一份投影，避免「菜单列五档、服务端只让选三档」这种自造的分歧。
+///
+/// **带 `conversation_id`**：这是按会话算的投影（会话列里的意图 + min 链）。裸请求回的是
+/// 「配置默认档 + 无会话意图」，与状态行要回答的「此刻这个会话是哪一档」是两个问题 ——
+/// 混用会让状态行在刷新后跳回默认档，看起来像刚选的档自己丢掉了。
+async fn fetch_permission_view(
+    client: &ServeClient,
+    conversation_id: Option<&str>,
+) -> Option<PermissionView> {
     let view = client
-        .get_json_optional::<PermissionView>(&paths::permission(None, None))
+        .get_json_optional::<PermissionView>(&paths::permission(None, conversation_id))
         .await
         .ok()
         .flatten()?;
-    let level = view.level.trim();
-    (!level.is_empty()).then(|| level.to_string())
+    (!view.level.trim().is_empty()).then_some(view)
+}
+
+/// 权限等级意图落盘（`POST /conversation/state`）。
+///
+/// 只发 `permission_level` 一列：服务端是部分更新，顺带回传 `session_mode` / `agent_role`
+/// 会把过期值写回去（Desktop `apply_level` 同一条约束）。
+///
+/// 结局**不在这一层判定**：拿到响应就交给共享层
+/// [`classify_conversation_state_response`] —— 这条路由的 404 有「老 serve 没路由」与
+/// 「会话不存在」两种含义，两处各写一份判别就是新的漂移点。
+fn job_write_permission(
+    rt: &tokio::runtime::Runtime,
+    client: &ServeClient,
+    conversation_id: &str,
+    level: &str,
+    generation: u64,
+    tx: &Sender<UiEvent>,
+) {
+    let outcome = rt
+        .block_on(write_permission_level(client, conversation_id, level))
+        .map_err(|e| e.to_string());
+    let _ = tx.send(UiEvent::PermissionWritten {
+        level: level.to_string(),
+        outcome,
+        generation,
+    });
 }
 
 /// skill 目录（`GET /skills`）：只给 `/` 补全菜单的 skill 候选，失败如实回传。

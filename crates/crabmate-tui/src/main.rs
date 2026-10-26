@@ -505,7 +505,12 @@ async fn dispatch_repl_line(
             return Ok(true);
         }
         Some("perm") => {
-            handle_perm_slash(text, overrides);
+            // 与全屏 TUI / Desktop chip 同一语义：先写本地 override（下一条消息即可生效），
+            // 有已持久化会话再落盘（`POST /conversation/state`）。
+            let level = handle_perm_slash(text, overrides);
+            if let (Some(level), Some(cid)) = (level.as_deref(), conversation_id.as_deref()) {
+                persist_permission_level(client, cid, level).await;
+            }
             return Ok(true);
         }
         _ => {}
@@ -759,31 +764,66 @@ fn handle_role_slash(text: &str, overrides: &mut SessionPrefs) {
 ///
 /// 与 `/mode` `/role` 同一套机制：只写客户端 override，随**下一条**消息发送；服务端仍按
 /// min 链（`ceiling → role → session_mode → permission_level`）决定实际档位，所以这里
-/// 允许设一个高于生效档的值——「我选了不受限，但仍被只读钳制」由状态栏 `perm` 段显示。
+/// 允许设一个高于生效档的值——「我选了不受限，但仍被只读钳制」由 `GET /permission` 的
+/// 投影显示。
 ///
 /// 不校验档位名：可选集由服务端 `GET /permission` 的 `available` 决定，客户端写死词表
 /// 只会在服务端新增档位时误拒；未知值由服务端按无效请求拒绝，报错比本地拦截更准确。
-fn handle_perm_slash(text: &str, overrides: &mut SessionPrefs) {
+///
+/// 返回**要落盘的档**（`Some` = 调用方应 `POST /conversation/state`）。查询与清除返回
+/// `None`：清除只清本地 override，不动服务端持久值（Desktop chip 同样没有「清除」语义）。
+fn handle_perm_slash(text: &str, overrides: &mut SessionPrefs) -> Option<String> {
     let arg = slash_arg(text);
     if arg.is_empty() {
         match overrides.permission_level.as_deref() {
-            Some(p) if !p.trim().is_empty() => println!("permission level: {p}"),
+            Some(p) if !p.trim().is_empty() => println!("permission level intent: {p}"),
             _ => println!(
                 "permission level: (不表达意图 — 沿用会话持久值；/perm <level> 设置，可选档位见状态栏或 Desktop 设置)"
             ),
         }
-        return;
+        return None;
     }
     if clear_word(&arg) {
         overrides.permission_level = None;
         println!("permission level intent cleared");
-        return;
+        return None;
     }
-    overrides.permission_level = Some(arg);
-    println!(
-        "permission level: {}",
-        overrides.permission_level.as_deref().unwrap_or_default()
-    );
+    overrides.permission_level = Some(arg.clone());
+    println!("permission level intent: {arg}");
+    Some(arg)
+}
+
+/// 把权限等级意图落到服务端会话（`POST /conversation/state`）。
+///
+/// 拼 patch 与结局分类都在 [`crate::serve::write_permission_level`]：全屏 TUI 走的是同一个
+/// 函数，这里只管把结局打印出来 —— 这条路由的 404 有两义，判别分成两份就会漂移。
+///
+/// 失败**不回滚**本地 override：意图仍会随下一条消息发送，那时服务端还有一次机会。
+async fn persist_permission_level(client: &ServeClient, conversation_id: &str, level: &str) {
+    use crabmate_client_api::conversation_state::ConversationStateOutcome;
+    let outcome = match crate::serve::write_permission_level(client, conversation_id, level).await {
+        Ok(outcome) => outcome,
+        Err(e) => {
+            println!("permission level write failed: {e}");
+            return;
+        }
+    };
+    match outcome {
+        ConversationStateOutcome::Ok(view) => println!(
+            "permission level saved: {level} (effective: {})",
+            view.permission.level
+        ),
+        ConversationStateOutcome::NotFound => println!(
+            "permission level: conversation not found on serve — the intent applies with the next message"
+        ),
+        ConversationStateOutcome::Unsupported => println!(
+            "permission level: this serve has no /conversation/state — the intent applies with the next message"
+        ),
+        ConversationStateOutcome::Failed { status, code } => {
+            let detail = code.unwrap_or_else(|| format!("HTTP {status}"));
+            println!("permission level write failed: {detail}");
+        }
+    }
 }
 
 async fn maybe_probe(client: &ServeClient, no_probe: bool) -> Result<()> {

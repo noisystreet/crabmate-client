@@ -16,6 +16,7 @@ use super::layout::{contains, panes};
 use super::state::{Focus, LineKind};
 use super::workspace_tree::WsActivate;
 use super::ws_sidebar::{pane_list_area, sessions_content, sidebar_window, workspace_content};
+use super::{status, status_stack};
 
 impl TuiApp<'_> {
     /// 鼠标事件入口。
@@ -24,6 +25,14 @@ impl TuiApp<'_> {
     /// 「审批未决不得输入」「脏字段先确认」这类键盘侧门禁。
     pub(super) fn on_mouse(&mut self, ev: MouseEvent) {
         if self.st.approval.is_some() || self.panel.is_some() {
+            return;
+        }
+        // 状态区的点击（权限菜单模态优先，其次状态行 `perm` 段）先处理：两者都与左右两栏
+        // 不相交。不拦这一下的话，同一次点击还会继续落进下面的侧栏 / 聊天列分支 ——
+        // 表现为「点了一下菜单，会话却切走了」。
+        if ev.kind == MouseEventKind::Down(MouseButton::Left)
+            && self.on_status_click(ev.column, ev.row)
+        {
             return;
         }
         let (width, height) = self.last_size;
@@ -37,13 +46,8 @@ impl TuiApp<'_> {
         let on_right = p.right.is_some_and(|r| contains(r, column, row));
         let on_left = p.left.is_some_and(|r| contains(r, column, row));
         match ev.kind {
-            MouseEventKind::ScrollUp if on_right => self.scroll_workspace(true),
-            MouseEventKind::ScrollDown if on_right => self.scroll_workspace(false),
-            // 右栏以外的滚轮（聊天列 / 左栏）滚 transcript，步长与键盘单行时的 ↑/↓ 一致。
-            // 必须自己处理：捕获鼠标后终端不再把滚轮翻译成 ↑/↓（xterm alternate-scroll），
-            // 不接这段就会表现为「聊天区滚轮没反应」。
-            MouseEventKind::ScrollUp => self.st.scroll_lines(true, 3),
-            MouseEventKind::ScrollDown => self.st.scroll_lines(false, 3),
+            MouseEventKind::ScrollUp => self.on_scroll(true, on_right),
+            MouseEventKind::ScrollDown => self.on_scroll(false, on_right),
             MouseEventKind::Down(MouseButton::Left) if on_right => {
                 self.click_workspace(column, row);
             }
@@ -51,6 +55,7 @@ impl TuiApp<'_> {
             MouseEventKind::Down(MouseButton::Left) if on_left => {
                 self.click_sessions(column, row);
             }
+            // 状态行 `perm` 段与权限菜单已在入口处处理（`on_status_click`），这里只剩两栏。
             // 点右栏以外：想打字或看聊天，把焦点从侧栏收回输入框
             // （否则后续按键仍落在侧栏，用户会觉得「点了没反应」）。
             MouseEventKind::Down(MouseButton::Left) => {
@@ -62,6 +67,79 @@ impl TuiApp<'_> {
             }
             _ => {}
         }
+    }
+
+    /// 滚轮：右栏滚目录树（已聚焦时），其它位置滚 transcript。
+    ///
+    /// 右栏以外的滚轮（聊天列 / 左栏）步长与键盘单行时的 ↑/↓ 一致。必须自己处理：
+    /// 捕获鼠标后终端不再把滚轮翻译成 ↑/↓（xterm alternate-scroll），不接这段就会表现为
+    /// 「聊天区滚轮没反应」。
+    fn on_scroll(&mut self, up: bool, on_right: bool) {
+        if on_right {
+            self.scroll_workspace(up);
+            return;
+        }
+        self.st.scroll_lines(up, 3);
+    }
+
+    /// 状态区的左键点击：权限菜单开着时先交给它，否则命中 `perm` 段就开菜单
+    /// （菜单锚在这一段的矩形上，不居中）。
+    ///
+    /// 返回 `true` = 已消费（调用方立刻返回，不再走两栏 / 兜底分支）。
+    fn on_status_click(&mut self, column: u16, row: u16) -> bool {
+        if self.st.permission_menu.is_some() {
+            return self.on_permission_menu_click(column, row);
+        }
+        let Some(rect) = self.status_perm_rect() else {
+            return false;
+        };
+        if !contains(rect, column, row) {
+            return false;
+        }
+        self.open_permission_menu(rect);
+        true
+    }
+
+    /// 状态行 `perm` 段在屏幕上的矩形；`None` = 该段不存在。
+    ///
+    /// 宽屏取右栏状态栈的那一行（整行内宽都可点），窄屏取底栏那几列。两处位置都由渲染
+    /// 同一套函数算出（`status_stack::perm_row_index` / `status::perm_cols`），这里只做
+    /// 坐标换算 —— 排版算法重算一遍就会点偏。
+    ///
+    /// 返回矩形而不是 `bool`：调用方除了判定命中，还要拿它当菜单的锚点。
+    ///
+    /// 该段不存在时返回 `None`（老 serve 没有 `/permission`、窄屏按优先级被裁掉、
+    /// 状态栈处于折叠态），此时点击落到下面的兜底分支，与以前一样只是把焦点收回输入框。
+    fn status_perm_rect(&self) -> Option<Rect> {
+        let (width, height) = self.last_size;
+        let info = self.status_info();
+        let p = panes(
+            Rect::new(0, 0, width, height),
+            self.st.sidebar_visible,
+            self.status_stack_rows(),
+        );
+        if let Some(area) = p.right_status {
+            let inner_w = area.width.saturating_sub(2);
+            let idx = status_stack::perm_row_index(
+                &info,
+                inner_w as usize,
+                self.st.status_stack_collapsed,
+            )?;
+            return Some(Rect::new(
+                area.x.saturating_add(1),
+                area.y.saturating_add(idx),
+                inner_w,
+                1,
+            ));
+        }
+        let area = p.status?;
+        let (start, end) = status::perm_cols(&info, area.width as usize)?;
+        Some(Rect::new(
+            area.x.saturating_add(start),
+            area.y,
+            end.saturating_sub(start),
+            1,
+        ))
     }
 
     /// 滚轮：项目池子视图滚候选，目录树滚光标（复用 `ws_move` 的跳过占位语义）。
@@ -185,8 +263,9 @@ mod tests {
 
     use super::super::state::Focus;
     use super::super::test_support::{test_app, test_client, test_prefs};
-    use super::{TuiApp, item_index_at};
+    use super::{TuiApp, item_index_at, panes};
     use crate::serve::SessionListRow;
+    use ratatui::layout::Rect;
 
     fn row(id: &str, cid: Option<&str>) -> SessionListRow {
         SessionListRow {
@@ -366,5 +445,92 @@ mod tests {
             assert!(matches!(app.st.focus, Focus::Input), "窄屏没有左栏");
             assert!(app.st.conversation_id.is_none(), "窄屏不该切换会话");
         });
+    }
+
+    /// 造一份只带权限投影的 `ServeDefaults`（其余字段走 `Default`）。
+    ///
+    /// 用 JSON 反序列化而不是手写结构体：投影里的枚举/六轴命名以服务端契约为准，测试跟着
+    /// 契约形状走，就不必在本仓再抄一遍变体名（抄了就会在契约升级时悄然漂移）。
+    fn defaults_with_permission(level: &str) -> super::super::serve_defaults::ServeDefaults {
+        let json = format!(
+            r#"{{"level":"{level}","level_source":"persisted","ceiling":"unrestricted",
+                 "ceiling_source":"derived_loopback",
+                 "available":["chat","read","workspace","approved","unrestricted"],
+                 "clamped_by":[],
+                 "caps":{{"tool_visibility":"full","external_tools":"allowed",
+                          "path_scope":"any","command_scope":"any","net_scope":"any",
+                          "approval":"audit_only"}}}}"#
+        );
+        super::super::serve_defaults::ServeDefaults {
+            permission_view: Some(serde_json::from_str(&json).expect("permission view")),
+            ..Default::default()
+        }
+    }
+
+    /// 宽屏：`perm` 段可点，且锚点就是右栏状态栈里那一行、内宽与渲染一致（左右各留 1 列）。
+    ///
+    /// 用「逐行点一遍找出可点的那一行」而不是先算行号：行号来自 `status_stack::perm_row_index`，
+    /// 拿它当期望值等于两边同错同对。这里要验的是**点击到的那一行**和**渲染用的内宽**对得上。
+    #[test]
+    fn clicking_the_perm_segment_opens_a_menu_anchored_to_that_row() {
+        with_wide_app(|app| {
+            app.st.serve_defaults = Some(defaults_with_permission("approved"));
+            let (w, h) = app.last_size;
+            let p = panes(Rect::new(0, 0, w, h), true, app.status_stack_rows());
+            let rs = p.right_status.expect("宽屏有状态栈");
+            let mut anchor = None;
+            for row in rs.y..rs.y + rs.height {
+                click(app, rs.x + 1, row);
+                if let Some(menu) = app.st.permission_menu.as_ref() {
+                    anchor = Some(menu.anchor);
+                    break;
+                }
+            }
+            let anchor = anchor.expect("状态栈里应有可点的 perm 段");
+            assert_eq!(anchor.x, rs.x + 1, "内容列内缩 1 列");
+            assert_eq!(anchor.width, rs.width - 2, "与渲染共用内宽");
+            assert_eq!(anchor.height, 1, "只有一行");
+            // 菜单锚在这一行上，并向上展开（它是屏幕最底那几行之一）。
+            let menu = app.st.permission_menu.as_ref().expect("菜单已开");
+            let rect = crate::tui_mode::render::overlay::permission_menu_rect(
+                Rect::new(0, 0, w, h),
+                anchor,
+                menu.options.len(),
+                10,
+            );
+            assert_eq!(rect.y + rect.height, anchor.y, "下边贴 anchor 上沿");
+            assert_eq!(rect.x + rect.width, anchor.x + anchor.width, "右缘对齐");
+        });
+    }
+
+    /// 窄屏：`perm` 段在底栏那一行，锚点整段落在底栏内。
+    #[test]
+    fn clicking_the_perm_segment_opens_a_menu_on_the_bottom_bar() {
+        let client = test_client();
+        let mut prefs = test_prefs();
+        let (tx, rx) = mpsc::channel();
+        let (job_tx, _job_rx) = mpsc::channel();
+        let mut app = test_app(&client, &mut prefs, rx, tx, job_tx);
+        app.last_size = (60, 20);
+        app.st.sidebar_visible = false;
+        app.st.serve_defaults = Some(defaults_with_permission("approved"));
+        let (w, h) = app.last_size;
+        let p = panes(Rect::new(0, 0, w, h), false, app.status_stack_rows());
+        let bar = p.status.expect("窄屏有底栏");
+        let mut anchor = None;
+        for col in bar.x..bar.x + bar.width {
+            click(&mut app, col, bar.y);
+            if let Some(menu) = app.st.permission_menu.as_ref() {
+                anchor = Some(menu.anchor);
+                break;
+            }
+        }
+        let anchor = anchor.expect("底栏应有可点的 perm 段");
+        assert_eq!(anchor.y, bar.y, "命中在底栏那一行");
+        assert!(anchor.width > 0, "命中段非空");
+        assert!(
+            anchor.x >= bar.x && anchor.x + anchor.width <= bar.x + bar.width,
+            "命中段不能越出底栏：{anchor:?} vs {bar:?}"
+        );
     }
 }

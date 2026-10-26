@@ -69,6 +69,21 @@ fn visible_segments(info: &StatusInfo, width: usize) -> Vec<Segment> {
         .collect()
 }
 
+/// `perm` 段在栈内的行序号（0-based；运行指示另占最后一行）。
+///
+/// `None` = 折叠态（只画运行行）或该段被行预算裁掉 —— 两种情况下都不该有可点区域。
+/// 与 [`stack_lines_with`] 共用 [`visible_segments`]，不重算顺序（重算就会与画面错行）。
+#[must_use]
+pub(super) fn perm_row_index(info: &StatusInfo, width: usize, collapsed: bool) -> Option<u16> {
+    if collapsed {
+        return None;
+    }
+    let idx = visible_segments(info, width)
+        .iter()
+        .position(|s| s.label == super::status::PERM_LABEL)?;
+    u16::try_from(idx).ok()
+}
+
 /// 状态栈的每一行：各段一行，运行指示独占最后一行。
 pub(super) fn stack_lines(
     info: &StatusInfo,
@@ -146,6 +161,7 @@ mod tests {
             search_total: 0,
             context: "—".to_string(),
             permission: None,
+            permission_intent: None,
         }
     }
 
@@ -414,5 +430,18 @@ mod tests {
             let lw = UnicodeWidthStr::width(line.to_string().as_str());
             assert!(lw <= w, "行宽 {lw} 超过栏内宽 {w}：{:?}", line.to_string());
         }
+    }
+
+    #[test]
+    fn perm_row_index_is_the_line_that_shows_the_level() {
+        let mut i = info();
+        i.permission = Some("read".into());
+        let idx = perm_row_index(&i, 24, false).expect("展开态有 perm 行");
+        let lines = stack_lines_with(&i, 24, &pal(), false, true);
+        // 行号必须指向真画出来的那一行（与 `stack_lines_with` 同源，否则点击会错行）。
+        let row = &lines[idx as usize];
+        assert!(row.to_string().contains("read"), "{row:?}");
+        // 折叠态只剩运行行：没有 perm 行，也就没有可点区域。
+        assert!(perm_row_index(&i, 24, true).is_none());
     }
 }

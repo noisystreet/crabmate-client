@@ -299,6 +299,7 @@ fn progress_mark_frame_requires_live_folded_thinking() {
             search_total: 0,
             context: "—".to_string(),
             permission: None,
+            permission_intent: None,
         }
     }
     let mut st = UiState::new();
@@ -377,6 +378,7 @@ fn finished_tool_row_without_verdict_is_not_running() {
         search_total: 0,
         context: "—".to_string(),
         permission: None,
+        permission_intent: None,
     };
     assert_eq!(
         progress_mark_frame(&st, &info),

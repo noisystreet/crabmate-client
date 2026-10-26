@@ -33,6 +33,7 @@ fn status_info() -> StatusInfo {
         search_total: 0,
         context: "—".to_string(),
         permission: None,
+        permission_intent: None,
     }
 }
 
