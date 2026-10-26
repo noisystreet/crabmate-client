@@ -18,6 +18,13 @@ pub struct ServeDefaults {
     /// Desktop 就是这么做的：新会话没有实测，用 `GET /status` 给的基线撑住状态栏，
     /// 并带 `~` 前缀标明是估算（`status_bar_context_is_baseline_estimate`）。
     pub baseline_prompt_tokens_by_role: BTreeMap<String, u32>,
+    /// 当前权限等级（线格式：`chat` / `read` / `workspace` / `approved` / `unrestricted`）。
+    ///
+    /// **不来自** `/status`：`/status` 只有 `permission_level_default` / `permission_level_max`
+    /// 两个配置值，回答不了"此刻实际生效哪一档"。这个值由 worker 另拉 `GET /permission`
+    /// 的 `level`（min 链之后的结果）后合并进来；`/permission` 404（老 serve）或拉取失败
+    /// 时保持 `None`，状态行就不显示这一段——不猜默认档。
+    pub permission_level: Option<String>,
 }
 
 impl ServeDefaults {
@@ -36,6 +43,8 @@ impl ServeDefaults {
             role: field("default_agent_role_id"),
             mode: field("default_session_mode"),
             baseline_prompt_tokens_by_role: baseline_by_role(v),
+            // `/status` 不提供生效等级；由 worker 另拉 `/permission` 后回填。
+            permission_level: None,
         }
     }
 

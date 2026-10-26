@@ -103,16 +103,8 @@ fn rendered_chat_area_keeps_right_gutter() {
     let rows = build_body_rows(&st, chat_body_width(false, TERMINAL_W));
     let info = StatusInfo {
         api_base: "http://x".into(),
-        model: None,
-        role: None,
-        mode: None,
-        running: false,
-        cancel_sent: false,
-        spinner: 0,
-        view_offset: 0,
-        search_term: None,
-        search_total: 0,
         context: "—".to_string(),
+        ..StatusInfo::default()
     };
     let mut terminal = Terminal::new(TestBackend::new(TERMINAL_W, TERMINAL_H)).expect("terminal");
     terminal
@@ -306,6 +298,7 @@ fn progress_mark_frame_requires_live_folded_thinking() {
             search_term: None,
             search_total: 0,
             context: "—".to_string(),
+            permission: None,
         }
     }
     let mut st = UiState::new();
@@ -383,6 +376,7 @@ fn finished_tool_row_without_verdict_is_not_running() {
         search_term: None,
         search_total: 0,
         context: "—".to_string(),
+        permission: None,
     };
     assert_eq!(
         progress_mark_frame(&st, &info),
@@ -665,16 +659,8 @@ fn rendered_chat_area_keeps_all_characters() {
     let rows = build_body_rows(&st, chat_body_width(false, 80));
     let info = StatusInfo {
         api_base: "http://x".into(),
-        model: None,
-        role: None,
-        mode: None,
-        running: false,
-        cancel_sent: false,
-        spinner: 0,
-        view_offset: 0,
-        search_term: None,
-        search_total: 0,
         context: "—".to_string(),
+        ..StatusInfo::default()
     };
     let mut terminal = Terminal::new(TestBackend::new(80, 12)).expect("terminal");
     terminal
@@ -765,16 +751,8 @@ fn empty_composer_has_no_placeholder_by_default() {
     let rows = build_body_rows(&st, chat_body_width(false, 80));
     let info = StatusInfo {
         api_base: "http://x".into(),
-        model: None,
-        role: None,
-        mode: None,
-        running: false,
-        cancel_sent: false,
-        spinner: 0,
-        view_offset: 0,
-        search_term: None,
-        search_total: 0,
         context: "—".to_string(),
+        ..StatusInfo::default()
     };
     let mut terminal = Terminal::new(TestBackend::new(80, 12)).expect("terminal");
     terminal

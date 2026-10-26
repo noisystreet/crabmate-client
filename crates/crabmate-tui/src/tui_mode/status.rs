@@ -38,6 +38,9 @@ mod priority {
     pub(super) const CONTEXT: u8 = 4;
     pub(super) const MODE: u8 = 5;
     pub(super) const ROLE: u8 = 6;
+    /// 权限等级：常驻但对"现在该干什么"没有影响（它是授权上限，不是当前动作），
+    /// 窄屏时最先让位——丢它的代价只是看不到等级，丢 `ctx` / `find` 则丢的是正在变化的信息。
+    pub(super) const PERM: u8 = 7;
 }
 
 /// 段间分隔符（极暗竖线，与 A6 的分隔线同色系）。
@@ -162,6 +165,16 @@ pub(super) fn environment_segments(info: &StatusInfo, budget: usize) -> Vec<Segm
                 n => format!("「{term}」{n}处"),
             },
             priority: priority::FIND,
+        });
+    }
+    // 权限等级排在显示顺序最右（紧邻右缘运行态）：它是"我这一轮最多能动到什么"，
+    // 与 `serve` / `model` 同为环境事实，但读数频率低，所以优先级最低。
+    // 只有真拿到了才 push：`None` 是不确定（老 serve / 未拉到），不是"没权限"。
+    if let Some(level) = info.permission.as_deref() {
+        out.push(Segment {
+            label: "perm",
+            value: level.to_string(),
+            priority: priority::PERM,
         });
     }
     out

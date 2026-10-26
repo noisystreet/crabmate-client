@@ -9,6 +9,7 @@ use std::thread;
 use crossterm::event::{self, Event, KeyEvent, MouseButton, MouseEvent, MouseEventKind};
 
 use crabmate_client_api::paths;
+use crabmate_client_api::permission::PermissionView;
 use crabmate_client_api::prompt_tokens::TiktokenPromptTokensSnapshot;
 
 use crate::serve::{
@@ -544,10 +545,32 @@ fn job_workspace_dir(
     });
 }
 
-/// serve 默认偏好（`/status?view=shell`）。
+/// serve 默认偏好（`/status?view=shell`）+ 当前生效权限等级（`/permission`）。
+///
+/// 两个端点合进同一个任务：状态行要的是**同一时刻**的 serve 侧事实，分两次任务到达顺序随机，
+/// 会短暂拼出"旧 model + 新等级"这种没发生过的组合。
 fn job_refresh_status(rt: &tokio::runtime::Runtime, client: &ServeClient, tx: &Sender<UiEvent>) {
-    let result = rt.block_on(fetch_serve_defaults(client));
+    let mut result = rt.block_on(fetch_serve_defaults(client));
+    let level = rt.block_on(fetch_permission_level(client));
+    if let Ok(defaults) = result.as_mut() {
+        defaults.permission_level = level;
+    }
     let _ = tx.send(UiEvent::Status(result));
+}
+
+/// `GET /permission` 的 `level`：**404（老 serve）与任何失败都返回 `None`**。
+///
+/// 状态行少一段，而不是显示一个猜来的档位——等级是策略事实，猜错的方向可能是危险的
+/// （把 `chat` 显示成 `unrestricted` 才最糟）。需要细节时看 Desktop 设置页或 `/status`
+/// 里的 `permission_level_default` / `permission_level_max`。
+async fn fetch_permission_level(client: &ServeClient) -> Option<String> {
+    let view = client
+        .get_json_optional::<PermissionView>(&paths::permission(None, None))
+        .await
+        .ok()
+        .flatten()?;
+    let level = view.level.trim();
+    (!level.is_empty()).then(|| level.to_string())
 }
 
 /// skill 目录（`GET /skills`）：只给 `/` 补全菜单的 skill 候选，失败如实回传。

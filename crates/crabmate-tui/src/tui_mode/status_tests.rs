@@ -20,6 +20,7 @@ fn base_info(api_base: &str) -> StatusInfo {
         search_term: None,
         search_total: 0,
         context: "—".to_string(),
+        permission: None,
     }
 }
 
@@ -503,4 +504,33 @@ fn status_line_never_exceeds_its_width() {
         let lw = UnicodeWidthStr::width(text.as_str());
         assert!(lw <= w, "宽度 {w} 下溢出到 {lw}：{text:?}");
     }
+}
+
+#[test]
+fn perm_segment_shows_the_wire_level_at_the_right_edge() {
+    let mut info = base_info("http://127.0.0.1:8080");
+    info.permission = Some("approved".into());
+    let text = status_text(&info, 200);
+    assert!(text.contains("perm approved"), "{text}");
+    // 显示顺序：perm 在 `ctx` 之后（紧邻右缘运行态），不是夹在环境段中间。
+    let perm_at = text.find("perm approved").expect("perm 段");
+    let ctx_at = text.find("ctx").expect("ctx 段");
+    assert!(ctx_at < perm_at, "{text}");
+}
+
+#[test]
+fn perm_segment_is_absent_when_the_level_is_unknown() {
+    // 老 serve（404）与"还没拉到"都算未知：整段消失，不回落成配置默认档。
+    let text = status_text(&base_info("http://127.0.0.1:8080"), 200);
+    assert!(!text.contains("perm"), "{text}");
+}
+
+#[test]
+fn perm_segment_is_dropped_first_when_narrow() {
+    let mut info = base_info("http://127.0.0.1:8080");
+    info.permission = Some("unrestricted".into());
+    // 窄到只够 `serve` 段 + 右缘指示器：最低优先级的 perm 先让位，serve 仍在。
+    let narrow = status_text(&info, 24);
+    assert!(!narrow.contains("perm"), "{narrow}");
+    assert!(narrow.contains("serve"), "{narrow}");
 }
