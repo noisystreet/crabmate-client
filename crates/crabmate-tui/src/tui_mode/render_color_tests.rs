@@ -32,6 +32,7 @@ fn status_info() -> StatusInfo {
         search_term: None,
         search_total: 0,
         context: "—".to_string(),
+        permission: None,
     }
 }
 

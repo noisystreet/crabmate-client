@@ -22,6 +22,31 @@ impl ServeClient {
             .map_err(|e| TermError::Message(format!("decode JSON from {path}: {e}")))
     }
 
+    /// `GET`，但把 **404 当成「该端点不存在」**（`Ok(None)`）而不是错误。
+    ///
+    /// 只用于能力探测型端点：老 serve 没有 `/permission`，那个 404 是它唯一的信号；
+    /// 当成错误渲染，界面上就变成"有权限等级但读取失败"，与真相相反。
+    pub async fn get_json_optional<T: DeserializeOwned>(
+        &self,
+        path: &str,
+    ) -> Result<Option<T>, TermError> {
+        let url = self.url(path)?;
+        let resp = self
+            .http()
+            .get(&url)
+            .headers(self.auth_headers()?)
+            .timeout(REQUEST_TIMEOUT)
+            .send()
+            .await?;
+        if resp.status() == reqwest::StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+        let text = Self::read_success_text(resp).await?;
+        serde_json::from_str(&text)
+            .map(Some)
+            .map_err(|e| TermError::Message(format!("decode JSON from {path}: {e}")))
+    }
+
     pub async fn post_json(&self, path: &str, body: &Value) -> Result<Value, TermError> {
         let url = self.url(path)?;
         let mut headers = self.auth_headers()?;

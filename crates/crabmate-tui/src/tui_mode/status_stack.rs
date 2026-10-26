@@ -145,6 +145,7 @@ mod tests {
             search_term: None,
             search_total: 0,
             context: "—".to_string(),
+            permission: None,
         }
     }
 

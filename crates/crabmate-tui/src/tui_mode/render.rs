@@ -52,7 +52,11 @@ const MAX_COMPOSER_ROWS: usize = 4;
 // 配色见 [`Palette`]：状态栏 / 侧栏 / composer 用 `chrome_bg`，聊天区用 `bg`；正文 / 次要 / 强调 = `fg` / `muted` / `accent`（随 Desktop 主题）。
 
 /// 状态行展示信息（mod 层组装好的显示值，含 override 标记）。
-#[derive(Clone)]
+///
+/// 派生 `Default` 是给测试 fixture 用的：它们的任务是"其余字段取中性值"，
+/// 每加一个字段就让十来处 `StatusInfo { .. }` 各补一行，pure noise（而且 fn-nloc
+/// 把整个 `mod tests` 当一个函数，补一行就可能越界）。
+#[derive(Clone, Default)]
 pub struct StatusInfo {
     pub api_base: String,
     /// 生效模型；本地 override 时带 `*` 后缀。
@@ -70,6 +74,12 @@ pub struct StatusInfo {
     /// 搜索命中逻辑行数。
     pub search_total: usize,
     pub context: String,
+    /// 当前生效权限等级（线格式：`chat` / `read` / `workspace` / `approved` / `unrestricted`）。
+    ///
+    /// `None` = 不知道（老 serve 没有 `/permission`，或还没拉到）。**不要**回落到
+    /// `permission_level_default` 之类的配置值来填这个空：那是"没会话意图时会落到哪"，不是
+    /// "此刻是哪"，两者在角色上限收窄时并不相同。
+    pub permission: Option<String>,
 }
 
 /// 一条可渲染的 transcript 物理行。

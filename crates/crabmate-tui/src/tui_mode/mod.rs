@@ -776,6 +776,9 @@ impl TuiApp<'_> {
             ),
             running: self.st.running,
             cancel_sent: self.st.cancel_sent,
+            // 权限等级随 `ServeDefaults` 一起来（worker 在同一个任务里拉了 `/permission`）；
+            // `None` 时状态行不显示该段，不拿配置默认值顶替。
+            permission: defaults.and_then(|d| d.permission_level.clone()),
             spinner: self.spinner.frame(),
             view_offset: self.st.view_offset,
             search_term: self.st.search_term().map(str::to_string),
