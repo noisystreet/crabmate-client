@@ -22,7 +22,7 @@
 | 项 | 值 |
 |----|-----|
 | 源码迁入自 | 主仓 `eb0048bf…`（见 `frontend/SOURCE.md`） |
-| 契约 | **git rev 过渡**：`crabmate` @ `f0a1bc06`（https）+ `features = ["protocol"]` |
+| 契约 | **git rev 过渡**：`crabmate` @ `630cd3b0`（https）+ `features = ["protocol"]` |
 | Playwright `serve` checkout | git tag **`v0.7.0`**（与 crates.io 包同源） |
 | lock | 提交 `frontend/Cargo.lock`、`crates/crabmate-tui/Cargo.lock`、`crates/crabmate-tool-card/Cargo.lock` |
 
@@ -34,7 +34,7 @@
 
 ```toml
 # 过渡期（Server 未发 0.7.1）：钉不可变 rev
-crabmate = { git = "https://github.com/noisystreet/CrabMate", rev = "f0a1bc068d3b209da7ce36fde5caa21eea7ae093", default-features = false, features = ["protocol"] }
+crabmate = { git = "https://github.com/noisystreet/CrabMate", rev = "630cd3b07735f1a9cddcb7274688179aea231257", default-features = false, features = ["protocol"] }
 
 # 正式口径（0.7.1 发布后换回，并提交 lock）
 crabmate = { version = "<semver>", default-features = false, features = ["protocol"] }
@@ -44,7 +44,7 @@ crabmate = { version = "<semver>", default-features = false, features = ["protoc
 
 `crabmate-tool-card` 为本仓 path（W2：`crates/crabmate-tool-card`）；勿再 git 钉 Server 该包。
 
-crates.io **`crabmate`** 为正式渠道。**当前本仓钉 git rev（过渡）**：Server 尚未发布含 permission-levels 的版本，`0.7.1` 发布后换回 crates.io semver。未升级的 Client 仍可钉 crates.io / git **`v0.4.0` / `v0.5.0` / `v0.5.1` / `v0.5.2` / `v0.6.0`**；更旧版本可继续使用产品 tag **`v0.3.0`** / `client-contract-v0.2.0` 的旧多包名。
+crates.io **`crabmate`** 为正式渠道。**当前本仓钉 git rev（过渡）**：Server 尚未发布含 permission-levels 与空闲态会话状态写入口（`cm_api_contract/session_state.rs`，`POST /conversation/state`）的版本，`0.7.1` 发布后换回 crates.io semver。当前 rev `630cd3b0` 相对上一钉点（`f0a1bc06`）只多了三件事，都在会话状态写入口这条线上：新增该路由（`3d080382`）、缺 `conversation_id` 回 400 而非 422（`021d4606`）、库写失败回 500 而不是伪装成 404（`630cd3b0`）——最后一条尤其重要：客户端按 `error.code` 分流 404 的两义，若库故障回 404，客户端会把「写失败、可重试」显示成「会话不存在，请重新绑定」。升级时先只验证契约可见性（`cargo check --manifest-path crates/crabmate-client-api/Cargo.toml` + 一句 `use crabmate::cm_api_contract::session_state::ConversationStateView;`），再动业务代码；卡在那一步通常是 pin 没生效或 feature 未覆盖，**不要**误判成「服务端没实现」。未升级的 Client 仍可钉 crates.io / git **`v0.4.0` / `v0.5.0` / `v0.5.1` / `v0.5.2` / `v0.6.0`**；更旧版本可继续使用产品 tag **`v0.3.0`** / `client-contract-v0.2.0` 的旧多包名。
 
 钉 git 依赖会让 CI 多拉一次整仓（建议缓存 `~/.cargo/git`）；本地可用 `CARGO_NET_GIT_FETCH_WITH_CLI=true` + git `insteadOf` 把该 URL 重写到本地仓库，避免每次整仓 clone（`Cargo.toml` / lock 里仍是 https 源，不影响可分发）。
 

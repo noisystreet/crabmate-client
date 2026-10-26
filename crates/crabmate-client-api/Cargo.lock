@@ -17,7 +17,7 @@ checksum = "4e7648175b45a9a48536d676f68d918270699102aa8dab5496df06904c914600"
 [[package]]
 name = "crabmate"
 version = "0.7.0"
-source = "git+https://github.com/noisystreet/CrabMate?rev=f0a1bc068d3b209da7ce36fde5caa21eea7ae093#f0a1bc068d3b209da7ce36fde5caa21eea7ae093"
+source = "git+https://github.com/noisystreet/CrabMate?rev=630cd3b07735f1a9cddcb7274688179aea231257#630cd3b07735f1a9cddcb7274688179aea231257"
 dependencies = [
  "getrandom",
  "log",
