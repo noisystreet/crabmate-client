@@ -32,6 +32,15 @@ pub struct LLMSettingsSignals {
     pub selected_session_mode: RwSignal<String>,
     /// 用户已在底栏改选 mode；水合勿用服务端 `active_session_mode` 覆盖。
     pub session_mode_user_override: RwSignal<bool>,
+    /// 会话级权限等级**意图**（线格式五档之一；`None` = 不表达意图）。
+    ///
+    /// 与 `selected_session_mode` 的形状不同是刻意的：mode 总有一个具体值，而权限等级的
+    /// 「不传」本身是一个有意义的真实状态——`/chat` 省略该字段即沿用会话持久值，由 serve 的
+    /// min 链决定最终档位。压成某个默认档字符串就等于每次发消息都把意图钉死在该档上。
+    ///
+    /// **单一意图源**：这里存的就是「用户当前选的」，`/chat` 与 `POST /conversation/state`
+    /// 都读它，不在发送路径上做快照——否则回合结束的落盘会把旧值写回，反向覆盖用户中途的切换。
+    pub selected_permission_level: RwSignal<Option<String>>,
     /// 本机已保存的多条模型预设（与扁平 `client_llm` 并存；用于设置页下拉选用）。
     pub saved_model_presets: RwSignal<Vec<crate::api::SavedModelPreset>>,
 }
@@ -62,6 +71,8 @@ impl LLMSettingsSignals {
             agent_role_user_override: RwSignal::new(false),
             selected_session_mode: RwSignal::new("act".to_string()),
             session_mode_user_override: RwSignal::new(false),
+            // 初始不表达意图：沿用会话持久值（serve 侧的 min 链自己会算）。
+            selected_permission_level: RwSignal::new(None),
             saved_model_presets: RwSignal::new(load_saved_model_presets_from_storage()),
         }
     }

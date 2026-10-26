@@ -8,6 +8,7 @@ use leptos::task::spawn_local;
 use crate::api::{SendChatStreamParams, send_chat_stream};
 use crate::app::chat::session_hydrate::bump_session_hydrate_nonce;
 use crate::app::chat::turn_lifecycle::TurnLifecycleEvent;
+use crate::app::shell_runtime_context::try_chat_shell_ctx;
 use crate::chat_session_state::ChatSessionSignals;
 use crate::i18n::Locale;
 
@@ -74,6 +75,10 @@ pub(crate) fn spawn_foreground_stream_resume(args: ForegroundStreamResumeArgs) {
                 .with_untracked(|s| s.stream_conversation_id())
         });
     let agent_role = selected_agent_role.get_untracked();
+    // 权限等级意图：与正常发送路径读**同一个**信号（壳层 ctx），否则续传会把旧档带回去；
+    // 单测等无 ctx 场景退化为「不带该字段」＝沿用会话持久值，不猜。
+    let permission_level =
+        try_chat_shell_ctx().and_then(|c| c.selected_permission_level.get_untracked());
     let session_mode = {
         let m = selected_session_mode
             .get_untracked()
@@ -102,6 +107,7 @@ pub(crate) fn spawn_foreground_stream_resume(args: ForegroundStreamResumeArgs) {
             conversation_id: conv,
             agent_role,
             session_mode,
+            permission_level,
             approval_session_id: Some(appr),
             stream_resume_job_id: Some(job_id),
             stream_resume_after_seq: Some(after_seq),

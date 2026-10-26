@@ -20,6 +20,11 @@ pub struct ChatShellLeptosContext {
     pub locale: RwSignal<crate::i18n::Locale>,
     pub apply_assistant_display_filters: RwSignal<bool>,
     pub show_turn_context_inject: RwSignal<bool>,
+    /// 权限等级意图（与 [`AppSignals`] 的 `llm_settings.selected_permission_level` 同源）。
+    ///
+    /// 放在 ctx 里是为了让「设置页选择器」与「聊天发送路径」读**同一个**信号：
+    /// 两处各持一份副本，就会出现「设置页选了 workspace、发出去还是旧档」。
+    pub selected_permission_level: RwSignal<Option<String>>,
 }
 
 impl ChatShellLeptosContext {
@@ -31,6 +36,7 @@ impl ChatShellLeptosContext {
             locale: app.shell_ui.locale,
             apply_assistant_display_filters: app.shell_ui.apply_assistant_display_filters,
             show_turn_context_inject: app.shell_ui.show_turn_context_inject,
+            selected_permission_level: app.llm_settings.selected_permission_level,
         }
     }
 }

@@ -97,6 +97,65 @@ pub fn settings_permission_readonly_hint(l: Locale) -> &'static str {
     }
 }
 
+pub fn settings_permission_selector(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "切换档位",
+        Locale::En => "Switch level",
+    }
+}
+
+/// 没有表达过意图时的说明。刻意不说「默认」——那是配置默认，这里是「沿用会话已保存的」。
+pub fn settings_permission_intent_none(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "未选择（沿用会话已保存的档位）",
+        Locale::En => "No intent (this conversation's saved level applies)",
+    }
+}
+
+/// 尚未绑定已持久化会话：选择只写本地意图，随下一条消息生效。
+/// 服务端对写入口不做 upsert（空行会污染会话列表与 TTL 淘汰），所以这里不能假装成功。
+pub fn settings_permission_send_to_apply(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "已记录：绑定会话后发送一条消息即按此档执行。",
+        Locale::En => "Recorded: it applies to your next message once a conversation is bound.",
+    }
+}
+
+pub fn settings_permission_conversation_gone(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "该会话不存在或已过期，无法写入；请新建会话后再试。",
+        Locale::En => {
+            "That conversation no longer exists or expired; start a new one and try again."
+        }
+    }
+}
+
+pub fn settings_permission_write_failed(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "写入失败：",
+        Locale::En => "Write failed: ",
+    }
+}
+
+/// 500 `CONVERSATION_STORE_ERROR`：库写失败，写入是幂等的，重试即可——
+/// 不能沿用「会话不存在」的文案（那会让用户去重新绑定一个其实存在的会话）。
+pub fn settings_permission_write_retry(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "服务端写入失败，可重试：",
+        Locale::En => "Server write failed (retryable): ",
+    }
+}
+
+/// 本地归一失败：当前 serve 的词表与客户端不一致。
+pub fn settings_permission_unknown_level(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "该 serve 不接受这个档位（权限等级词表可能已变化）。",
+        Locale::En => {
+            "This serve does not accept that level (the level vocabulary may have changed)."
+        }
+    }
+}
+
 /// 不带 `agent_role` / `conversation_id` 时显示的说明。
 ///
 /// 设置页只取静态投影，而标签写的是「当前等级」——不说清这一点，用户会把它当成
