@@ -35,6 +35,12 @@ pub const CONFIG_SESSION_CONVERSATION_STORE: &str = "/config/session/conversatio
 /// 响应形如 `{enabled, skills_dir, skills_user_dir, skills_system_dir, skills[], error?}`；
 /// 客户端只用 `enabled` 与 `skills[].{id,description,path}` 来喂 `/` 补全菜单。
 pub const SKILLS: &str = "/skills";
+/// 权限等级投影（frontend / tui）。
+///
+/// 服务端 `protected_api` 上的只读策略投影；**老 serve 没有这个路由（404）**，
+/// 所以客户端同时拿它当「该 serve 是否支持权限等级」的探测端点——
+/// 不要用 `/status` 探测（它对新老 serve 都会成功，无法区分能力）。
+pub const PERMISSION: &str = "/permission";
 
 /// 取消指定 job 的 chat 流（tui / frontend）。
 #[must_use]
@@ -79,11 +85,35 @@ pub fn conversation_delete(conversation_id: &str) -> String {
     )
 }
 
+/// `GET /permission` 的查询串（`agent_role` / `conversation_id` 都可省）。
+///
+/// 两个参数都按查询参数做百分号编码；都不给（或只有空白）时返回裸路径——
+/// 服务端按配置默认等级 + 无会话意图处理。
+#[must_use]
+pub fn permission(agent_role: Option<&str>, conversation_id: Option<&str>) -> String {
+    let mut out = PERMISSION.to_string();
+    let mut sep = '?';
+    for (key, val) in [
+        ("agent_role", agent_role),
+        ("conversation_id", conversation_id),
+    ] {
+        let Some(val) = val.map(str::trim).filter(|s| !s.is_empty()) else {
+            continue;
+        };
+        out.push(sep);
+        sep = '&';
+        out.push_str(key);
+        out.push('=');
+        out.push_str(&crate::handoff::percent_encode_unreserved(val));
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         CHAT_STREAM, HEALTH, SKILLS, WORKSPACE, chat_stream_cancel, conversation_delete,
-        conversation_messages,
+        conversation_messages, permission,
     };
 
     #[test]
@@ -132,5 +162,24 @@ mod tests {
             conversation_messages("c1", Some(0), Some(40)),
             "/conversation/messages?conversation_id=c1"
         );
+    }
+
+    #[test]
+    fn permission_path_carries_optional_query() {
+        assert_eq!(permission(None, None), "/permission");
+        assert_eq!(
+            permission(Some("coder"), None),
+            "/permission?agent_role=coder"
+        );
+        assert_eq!(
+            permission(None, Some("ws:a/b")),
+            "/permission?conversation_id=ws%3Aa%2Fb"
+        );
+        assert_eq!(
+            permission(Some("coder"), Some("c1")),
+            "/permission?agent_role=coder&conversation_id=c1"
+        );
+        // 空白等同未指定，避免发出 `agent_role=` 这种空值。
+        assert_eq!(permission(Some("  "), Some("")), "/permission");
     }
 }
