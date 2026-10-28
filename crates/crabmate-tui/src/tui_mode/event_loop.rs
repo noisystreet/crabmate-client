@@ -196,7 +196,7 @@ impl TuiApp<'_> {
             .lane()
             .spinning()
             .then(|| self.lane().spinner.remaining());
-        let got = self.lane().rx.recv_timeout(next_wait(left));
+        let got = self.rx.recv_timeout(next_wait(left));
         match got {
             Ok(msg) => self.on_msg(msg),
             // 超时醒来只为画动画帧 / 兜底查尺寸，本轮没有消息。
@@ -218,7 +218,7 @@ impl TuiApp<'_> {
         let mut any = false;
         loop {
             // 同上：先取再分派，避免 `try_recv` 的临时借用与 `lane_mut()` 冲突。
-            let next = self.lane().rx.try_recv();
+            let next = self.rx.try_recv();
             let Ok(msg) = next else { break };
             any = true;
             self.on_msg(msg);

@@ -104,7 +104,6 @@ pub async fn run_tui(
         st: UiState::new(),
         drafts: drafts::Drafts::default(),
         spinner: spinner::Spinner::new(),
-        rx,
         tx: tx.clone(),
         job_tx,
         cancel: None,
@@ -122,6 +121,7 @@ pub async fn run_tui(
     let mut app = TuiApp {
         lanes: vec![lane],
         active: 0,
+        rx,
     };
     // 启动即拉一次会话 / 工作区根 / serve 默认状态 / user-data 设置快照（失败以系统行提示）。
     app.lane_mut().refresh_sessions();

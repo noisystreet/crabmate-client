@@ -95,8 +95,10 @@ struct LaneApp<'a> {
     drafts: drafts::Drafts,
     /// 生成中 spinner 帧（按墙钟推进；见 `spinner` 模块）。
     spinner: spinner::Spinner,
-    rx: Receiver<UiEvent>,
     /// UI 事件发送端：读请求 `spawn` 出去后自己回包，不经 worker 队列。
+    ///
+    /// 接收端**不在这里**：所有 lane 共用一个通道，`rx` 由外层 [`TuiApp`] 独占持有，
+    /// 否则多条 lane 会彼此抢消息（见 `docs/design/tui_multi_server.md` §4.2）。
     tx: Sender<UiEvent>,
     job_tx: Sender<WorkerJob>,
     cancel: Option<StreamCancel>,
@@ -129,6 +131,8 @@ struct TuiApp<'a> {
     lanes: Vec<LaneApp<'a>>,
     /// 当前聚焦的 lane 下标。W1 恒为 0。
     active: usize,
+    /// 所有 lane 共用的事件通道接收端：全进程只有这一个消费者，按标签分发。
+    rx: Receiver<UiEvent>,
 }
 
 impl<'a> TuiApp<'a> {
