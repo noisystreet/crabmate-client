@@ -108,7 +108,7 @@ fn rendered_chat_area_keeps_right_gutter() {
     };
     let mut terminal = Terminal::new(TestBackend::new(TERMINAL_W, TERMINAL_H)).expect("terminal");
     terminal
-        .draw(|f| draw(f, &mut st, &info, &rows, None))
+        .draw(|f| draw(f, &mut st, &info, &rows, None, &[]))
         .expect("draw");
     let buffer = terminal.backend().buffer();
     // 无侧栏时聊天列即整屏：正文区为 [1, 79)，故 x=0 与 x=79 两列必须是留白。
@@ -691,7 +691,7 @@ fn rendered_chat_area_keeps_all_characters() {
     };
     let mut terminal = Terminal::new(TestBackend::new(80, 12)).expect("terminal");
     terminal
-        .draw(|f| draw(f, &mut st, &info, &rows, None))
+        .draw(|f| draw(f, &mut st, &info, &rows, None, &[]))
         .expect("draw");
     let buffer = terminal.backend().buffer();
     let mut flat = String::new();
@@ -783,7 +783,7 @@ fn empty_composer_has_no_placeholder_by_default() {
     };
     let mut terminal = Terminal::new(TestBackend::new(80, 12)).expect("terminal");
     terminal
-        .draw(|f| draw(f, &mut st, &info, &rows, None))
+        .draw(|f| draw(f, &mut st, &info, &rows, None, &[]))
         .expect("draw");
     let screen: String = terminal
         .backend()

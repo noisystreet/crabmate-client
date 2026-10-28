@@ -8,7 +8,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-use super::layout::panes;
+use super::layout::panes_with_lanes;
 use super::md;
 use super::palette::Palette;
 use super::settings_panel::PanelContent;
@@ -504,6 +504,8 @@ pub fn draw(
     info: &StatusInfo,
     prepared: &[BodyRow],
     panel: Option<&PanelContent>,
+    // 外壳层算好的 lane 快照 `(名字, 是否当前)`；`len <= 1` 时不占版面。
+    lanes: &[(String, bool)],
 ) {
     let area = frame.area();
     // 右栏底部状态栈的行数（与 `status_stack::stack_lines` 同源，否则底部会空行 / 末段被裁）。
@@ -513,8 +515,15 @@ pub fn draw(
         WORKSPACE_PANE_WIDTH.saturating_sub(2) as usize,
         st.status_stack_collapsed,
     );
-    // 主体三列 / 底栏 / 状态栈的矩形与鼠标命中检测共用 `layout::panes`。
-    let p = panes(area, st.sidebar_visible, stack_rows);
+    // lane 列表只在该出现时占位：单 lane 时整块左栏还给会话列表（`layout` 里
+    // 会把它压到不超过左栏一半，避免 lane 多了把会话挤没）。
+    let lane_rows = if lanes.len() > 1 {
+        (lanes.len() as u16).saturating_add(1)
+    } else {
+        0
+    };
+    // 主体三列 / 底栏 / 状态栈 / 左栏 lane 区的矩形与鼠标命中检测共用 `layout`。
+    let p = panes_with_lanes(area, st.sidebar_visible, stack_rows, lane_rows);
 
     let spin = progress_mark_frame(st, info);
     let pal = st.palette; // 拷贝：下面要 `&mut st` 回写 `body_at_top`，底栏/浮层仍要调色板
@@ -531,6 +540,13 @@ pub fn draw(
         let (rows, cursor, hint) = workspace_content(st, right_w);
         paint_bg(frame, right, pal.chrome_bg);
         render_pane(frame, right, rows, cursor, hint, &pal, right_w);
+    }
+    // 左栏下半：lane 列表。与左栏同宽同底色，视觉上是同一列的两段。
+    if let Some(lane_pane) = p.left_lanes {
+        let lane_w = lane_pane.width.saturating_sub(2) as usize;
+        let rows = super::lane_list::lane_list_rows(lanes, lane_w, &pal);
+        paint_bg(frame, lane_pane, pal.chrome_bg);
+        render_pane(frame, lane_pane, rows, 0, None, &pal, lane_w);
     }
     if let Some(rs) = p.right_status {
         render_status_stack(frame, rs, st, info, &pal);
