@@ -1,7 +1,7 @@
 # TUI 多 serve 连接与多 agent 并行（多 lane）
 
-> **状态**：**方案（未开工）**，tracking Issue [#327](https://github.com/noisystreet/crabmate-client/issues/327)。本文只写设计与分期，不含实现。
-> **范围**：仅 `crates/crabmate-tui` 的全屏 `tui` 模式。**不改** Server 契约（SSE / 审批 / 错误码 / 工作区语义），**不覆盖** Desktop / Android / Web。
+> **状态**：**W1（LaneApp 抽取）与 W1b（事件来源标签）已落地**（`cc0c06f` / `b73ed83`）；W2–W5 未开工。tracking Issue [#327](https://github.com/noisystreet/crabmate-client/issues/327)。
+> **范围**：**§1–§8 仅覆盖 `crates/crabmate-tui` 的全屏 `tui` 模式**；**§9 是 Desktop 复用评估**（结论性分析，不含实施承诺）。**不改** Server 契约（SSE / 审批 / 错误码 / 工作区语义），**不覆盖** Android / Web。
 > **关联**：[`remote_cli_tui.md`](./remote_cli_tui.md)（TUI 母方案）、[`tui_settings_panel.md`](./tui_settings_panel.md)（设置面板，user-data 语义）、[`tui_usability.md`](./tui_usability.md)、[`client_shared_logic.md`](./client_shared_logic.md)（共享层边界）、[`contract_pin.md`](./contract_pin.md)（契约钉点）；Server `docs/design/user_data_dir.md`（user-data 权威）
 
 ---
@@ -251,3 +251,74 @@ api_base = "http://127.0.0.1:8082"
 | 同 workspace 8 路并发写 `conversations.db` 是否触发 `database is locked` | **未实测**；本方案默认拓扑不触发（每 workspace 一库） |
 | `SessionPrefs` 是否需要逐 lane（而非进程级） | W2 实现期按实际需要决定 |
 | 是否需要 per-profile 钥匙串槽（多 bearer） | 第一版不做，需要时另开 Issue（牵动 Desktop / Android 槽名约定） |
+
+---
+
+## 9. Desktop 复用评估（§1–§8 只覆盖 TUI，本节回答「Desktop 能不能复用」）
+
+### 9.1 结论
+
+- **纯逻辑层可完整复用**：`crabmate-client-api` / `crabmate-tool-card` / `crabmate-connect` 的 probe 与 handoff 与 lane 数量无关。
+- **TUI 的 lane 代码不能复用**：`LaneApp` / `UiEvent::Lane` / `TuiApp` 建立在 ratatui + 同步 `mpsc` + `current_thread` runtime 上，WASM 里没有这些；Leptos 是 signals + async。
+- **但设计结论可以照搬**：LaneId 来源标签、per-lane 状态树、审批队列、「代数门控留在 lane 内」。
+- Desktop 做多连接应当走 **多 WebView 窗口**，而不是在单窗口内做 lane（理由见 §9.4）。
+
+### 9.2 Desktop 的连接模型（源码事实）
+
+| 事实 | 位置 |
+|------|------|
+| Desktop 是**单 WebView 窗口**（label `"main"`），窗口辅助函数都依赖该 label | `desktop-tauri/src-tauri/src/main.rs:208-211` |
+| 连接流程：connect 页探测 → 经 **URL hash** 交接 `api_base` + 可选 bearer → 载入包内业务 UI | `crates/crabmate-connect/src/lib.rs:3-5`、`build_handoff_url`（`:31-34`） |
+| 前端 API 基址是 **thread_local 单值** `API_BASE_URL`，`api_base_url()` 全局读 | `frontend/src/api/browser.rs:31`、`:208-210` |
+| 持久化是**固定 localStorage 键** `crabmate-api-base-url` | `frontend/src/api/browser.rs:26` |
+| 前端另有 11 处 thread_local 全局状态（bearer、llm secrets、locale、滚动跟随、图片灯箱、github secrets…） | `frontend/src/**`（共 12 处 `thread_local!`） |
+| 连接 bearer 是**单钥匙串槽** `tauri_connect_web_api_bearer`，连接成功即覆盖写 | `crates/crabmate-connect/src/lib.rs:5` |
+
+即：**Desktop/Web 的「单连接」假设渗透在 12 个 thread_local 全局里**，比 TUI 更分散——TUI 只是 `TuiApp` 一个结构体持有 `client`，所以 TUI 能用「改结构归属」的手法低成本解耦，Desktop 不能照搬。
+
+### 9.3 分层复用判断
+
+| 层 | 判断 | 理由 |
+|----|------|------|
+| `crates/crabmate-client-api` | **完整复用** | 纯逻辑无 IO；TUI 已在用。URL 规范化、审批、workspace、sessions、chat body、hash handoff 都在这里 |
+| `crates/crabmate-tool-card` | **完整复用** | 同上 |
+| `crabmate-connect` 的 probe / handoff / normalize | **可复用** | `probe_server` / `build_handoff_url` / `normalize_base_url` 与 lane 数量无关 |
+| `crabmate-connect` 的 keyring / 「当前连接」 | **需改** | 单槽 + 全局当前 URL；多连接要 per-profile 槽与 per-window 状态 |
+| TUI 的 `LaneApp` / `UiEvent::Lane` / `TuiApp` | **不能复用** | ratatui + 同步 `mpsc` + `current_thread` runtime；WASM 无对应设施 |
+| 设计模式（§4.2 的来源标签、代数门控留在 lane 内、§4.4 审批队列） | **思路可复用** | 不能共享代码，能共享结论 |
+
+### 9.4 两条路
+
+#### 9.4.1 路线 A：多 WebView 窗口（推荐）
+
+每个窗口 = 独立 JS 堆 ⇒ **§9.2 那 12 处 thread_local 天然隔离**，一行都不用改。
+
+必须解决的三点：
+
+1. **localStorage 同 origin 共享**（硬性）：`crabmate-api-base-url` 是固定键，两个窗口会互踩 → 按 window label 分键（如 `crabmate-api-base-url:<label>`）。这是必改项，且**不能靠 WebView 隔离规避**（localStorage 属于 origin，不属于 WebView 实例）。
+2. **钥匙串单槽**（大概率可省）：多窗口若共用同一 bearer（一人一机多项目通常同 key），不需要改；只有真要 per-profile bearer 才加槽，且那会牵动 Desktop / Android 的槽名约定。
+3. **connect 流程假设单「当前连接」**（中等工作量）：`seed_connect_home` / `allowed_origin` / `navigation` 都以「这个窗口当前连谁」为前提，要改成 per-window 状态。
+
+#### 9.4.2 路线 B：单窗口内多 lane（对齐 TUI）
+
+要把 §9.2 的 12 处 thread_local 全部改成 per-lane context，再把会话 / 工作区 / 审批 / 设置状态树按 lane 切分。状态层是单连接长出来的，改造量显著大于 TUI 的 W1 + W1b，且**没有 W1b 那种「加个包装变体」的省力路径**（Leptos 的状态分散在各 `RwSignal`）。除非有「单窗口内必须并排看两路」的硬需求，不建议。
+
+### 9.5 与 TUI 共享的前提（§3 对 Desktop 同样成立）
+
+- 会话索引按 `ws_sha256` 分片、对话库在 `<workspace>/.crabmate/` ⇒ 不同 workspace 天然隔离
+- `chat_queue_max_concurrent` 是进程级、默认 2 ⇒ 并行的自然单位是「不同 serve 进程」
+- `allow_always` 每回合重建、不跨 client ⇒ 多窗口不存在跨端静默放行
+
+因此 Desktop 多窗口也应遵循同一条使用约定：**一窗口 = 一 workspace = 一 serve**。
+
+### 9.6 最小验证实验（改动量极小）
+
+在 `desktop-tauri` 加一个「新建连接窗口」命令，起第二个 WebView 载 connect 页，让两个窗口各自连不同 `serve`：
+
+- 预期立刻暴露 localStorage 键冲突（第二个窗口若沿用固定键，会覆盖第一个的 `api_base`）；
+- 由此确认 §9.4.1 第 1 点是**唯一的前置硬障碍**，其余两点可延后。
+
+### 9.7 非目标
+
+- 不在本节承诺 Desktop 的实施排期；它需要独立 Issue（本 Issue #327 只覆盖 TUI）。
+- 不做 Web 浏览器端的「多连接」（同一标签页只有一份 JS 堆，等同于路线 B，成本更高）。
