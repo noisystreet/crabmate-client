@@ -49,6 +49,10 @@ pub(super) fn test_app<'a>(
     tx: mpsc::Sender<UiEvent>,
     job_tx: mpsc::Sender<WorkerJob>,
 ) -> LaneApp<'a> {
+    // `rx` 不再交给 lane：它由外层 `TuiApp` 持有（见 `mod.rs`）。这里只把接收端
+    // 留在内存里让通道保持连通 —— 提前 drop 会让 lane 的 `tx.send` 全部失败，
+    // 而测试恰恰靠「发了什么事件」断言。
+    std::mem::forget(rx);
     LaneApp {
         id: LaneId(0),
         client,
@@ -58,7 +62,6 @@ pub(super) fn test_app<'a>(
         st: UiState::new(),
         drafts: Default::default(),
         spinner: Spinner::new(),
-        rx,
         tx,
         job_tx,
         cancel: None,
