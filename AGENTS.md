@@ -103,6 +103,23 @@ make victauri-e2e                # or ./scripts/victauri-e2e.sh all; needs a usa
 make e2e-playwright              # or ./scripts/e2e-playwright.sh; needs frontend/dist + serve; pre-commit only runs its format/lint
 ```
 
+## GitHub Flow
+
+Delivery model: branch from `main`, open a PR, merge back after checks are green. `main` stays releasable — no direct pushes for feature work, keep branches short-lived and PRs small.
+
+- **Start from an Issue**: new plans, designs and non-trivial refactors need a tracking Issue first (`gh issue create`) stating the problem, the intended scope and the explicit non-goals. Trivial fixes (typo, one-line bug fix) may skip it. Contract-level decisions (SSE / CORS / Bearer / API base / error codes) are authoritative in the **Server** repo — file there when the change is contract-level, and link it from the Client Issue.
+- **Link the PR to its Issue**: the PR body references the tracking Issue — `Closes #123` when the PR completes it, `Refs #123` when it only advances it (keep the Issue open in that case). Do not widen scope inside a PR; file a follow-up Issue instead.
+- **Branch naming**: `type/short-slug`, where `type` is one of the `commit-msg` types (`feat` / `fix` / `refactor` / `docs` / `test` / `chore` / `ci` / `build` / `style` / `perf` / `revert`). Include the Issue number when one exists (`feat/842-ltm-hybrid-retrieval`). `main` is the only long-lived branch; delete the branch after merge.
+- **Rebase before push**: `git fetch origin main` → `git rebase origin/main`, then re-run the gate. A `--force-with-lease` needed by the rebase requires explicit owner approval.
+
+## Release & versioning
+
+- **Version lockstep**: every Rust package carries the same version; bump via `bash scripts/set-version.sh <semver>` — never hand-edit one `Cargo.toml` (see **Hard Constraints**).
+- **Tag format**: `v*` (e.g. `v0.5.1`). `.github/workflows/release.yml` builds the **real** UI (`trunk build --release`) and produces the desktop / web / tui `.deb` artifacts plus the GitHub Release.
+- **Only tag a commit that is on `main`**: the workflow's `guard` job fails the run when the tag commit is not reachable from `origin/main` (`push tags only after merge`). Merge first, then tag.
+- **Release notes come from `CHANGELOG.md`**: move `[Unreleased]` into the version section **before** tagging — the notes are extracted from that section.
+- **The contract pin is not a Client release decision**: `docs/design/contract_pin.md` pins the Server contract, and the policy authority is the Server repo (`docs/design/client_contract_versioning.md`).
+
 ## Documentation Rules
 
 When updating docs:
