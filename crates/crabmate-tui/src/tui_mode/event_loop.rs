@@ -28,8 +28,9 @@ use ratatui::backend::{Backend, CrosstermBackend};
 use ratatui::layout::Rect;
 
 use super::render::{self, SIDEBAR_MIN_WIDTH};
+use super::shell::MOUSE_ON;
 use super::state::Focus;
-use super::{MOUSE_ON, TuiApp};
+use super::{LaneApp, TuiApp};
 
 /// 事件循环模式（`CM_TUI_LOOP`）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -156,12 +157,12 @@ impl TuiApp<'_> {
         let mut first = true;
         let mut last_draw = Instant::now();
         loop {
-            if self.exit {
+            if self.lane().exit {
                 return Ok(());
             }
             let had_event = self.collect_events(mode, first)?;
             first = false;
-            if self.exit {
+            if self.lane().exit {
                 return Ok(());
             }
             if mode == LoopMode::Event {
@@ -169,7 +170,7 @@ impl TuiApp<'_> {
                 throttle_frame(last_draw);
             }
             // 兜底醒来的空帧（无事件 / 无动画 / 尺寸未变）整帧跳过。
-            self.draw_frame(terminal, !had_event)?;
+            self.lane_mut().draw_frame(terminal, !had_event)?;
             last_draw = Instant::now();
             if mode == LoopMode::Interval {
                 // 改造前的节奏原样保留：有消息 2ms、空闲 50ms。
@@ -183,21 +184,28 @@ impl TuiApp<'_> {
     /// `interval`：非阻塞 drain（改造前语义），节流交给 [`Self::run_loop`] 的 sleep。
     /// `event`：先等一条（动画 deadline 或兜底），再 drain 积压 —— 一轮画完一次，
     /// 保住流式期「多块文本合并成一轮」的优先级。
+    ///
+    /// 取消息与分派拆成两句：`recv_timeout` 的临时值若留在 `match` 里，不可变借用
+    /// 会覆盖整个 `match` 体，`lane_mut()` 就借不到了。
     fn collect_events(&mut self, mode: LoopMode, first: bool) -> Result<bool> {
         if mode == LoopMode::Interval || first {
             return Ok(self.drain_events());
         }
         // 惰性求值：静止时不白算一次 `Instant::elapsed`。
-        let left = self.spinning().then(|| self.spinner.remaining());
-        match self.rx.recv_timeout(next_wait(left)) {
-            Ok(msg) => self.on_msg(msg),
+        let left = self
+            .lane()
+            .spinning()
+            .then(|| self.lane().spinner.remaining());
+        let got = self.lane().rx.recv_timeout(next_wait(left));
+        match got {
+            Ok(msg) => self.lane_mut().on_msg(msg),
             // 超时醒来只为画动画帧 / 兜底查尺寸，本轮没有消息。
             Err(RecvTimeoutError::Timeout) => return Ok(false),
-            // 结构上**不可达**：`TuiApp` 自持 `tx`，`run_loop` 期间它必然存活，
+            // 结构上**不可达**：`LaneApp` 自持 `tx`，`run_loop` 期间它必然存活，
             // channel 不会断开。保留这一支只为 match 穷尽；真发生就退出，
             // 绝不让循环空转。排查「画面停住」时不要先看这里。
             Err(RecvTimeoutError::Disconnected) => {
-                self.exit = true;
+                self.lane_mut().exit = true;
                 return Ok(false);
             }
         }
@@ -208,16 +216,21 @@ impl TuiApp<'_> {
     /// 非阻塞取完当前积压（与改造前的 `while let Ok(..)` 同语义）。
     fn drain_events(&mut self) -> bool {
         let mut any = false;
-        while let Ok(msg) = self.rx.try_recv() {
+        loop {
+            // 同上：先取再分派，避免 `try_recv` 的临时借用与 `lane_mut()` 冲突。
+            let next = self.lane().rx.try_recv();
+            let Ok(msg) = next else { break };
             any = true;
-            self.on_msg(msg);
-            if self.exit {
+            self.lane_mut().on_msg(msg);
+            if self.lane().exit {
                 break;
             }
         }
         any
     }
+}
 
+impl LaneApp<'_> {
     /// 生成中（spinner 该转）：取消中不转，与 `spinner::Spinner` 的调用约定一致。
     fn spinning(&self) -> bool {
         self.st.running && !self.st.cancel_sent

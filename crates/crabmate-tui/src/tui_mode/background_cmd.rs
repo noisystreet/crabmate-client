@@ -9,13 +9,13 @@ use std::path::Path;
 
 use ratatui::layout::Rect;
 
-use super::TuiApp;
+use super::LaneApp;
 use super::background;
 use super::controls::clear_word;
 use super::state::LineKind;
 use super::term_image;
 
-impl TuiApp<'_> {
+impl LaneApp<'_> {
     /// 每帧维护背景：像素档重放一次图像，格子档按当前尺寸重采样。
     pub(super) fn paint_background(&mut self, screen: Rect) {
         let (w, h) = (screen.width, screen.height);

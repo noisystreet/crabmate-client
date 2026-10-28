@@ -11,11 +11,11 @@
 //!    `last_event_id` 就是本端已消费到的位置。
 //!
 //! 单独成文件是为了压 `mod.rs` 的单文件行数门禁（≤920）；
-//! `TuiApp` 的私有字段对本模块可见（子模块可访问祖先模块的私有项）。
+//! `LaneApp` 的私有字段对本模块可见（子模块可访问祖先模块的私有项）。
 
 use crate::serve::{ChatStreamOutcome, StreamResume};
 
-use super::TuiApp;
+use super::LaneApp;
 use super::state::LineKind;
 
 /// 最近一次「serve 侧仍在跑、但本端已经断开」的回合断点。
@@ -77,7 +77,7 @@ pub fn resume_after_turn(
     })
 }
 
-impl TuiApp<'_> {
+impl LaneApp<'_> {
     /// 回合结束后更新断点，并在可续时把 `/resume` 这条路告诉用户。
     pub(super) fn record_turn_outcome(
         &mut self,

@@ -1,4 +1,4 @@
-//! TuiApp 的设置面板接线（`settings_panel.rs` 的子模块，压住面板文件行数门禁）：
+//! LaneApp 的设置面板接线（`settings_panel.rs` 的子模块，压住面板文件行数门禁）：
 //! 开/关面板、面板按键分发、每帧内容构建、保存请求下发与保存结果回写。
 
 use crossterm::event::KeyEvent;
@@ -6,7 +6,7 @@ use ratatui::style::Color;
 
 use crabmate_client_api::secrets::{KEYRING_SERVICE, SecretSlot};
 
-use super::super::TuiApp;
+use super::super::LaneApp;
 use super::super::palette::Palette;
 use super::super::settings::{LlmSave, PersistedSettings, PrefsSave};
 use super::super::state::LineKind;
@@ -14,7 +14,7 @@ use super::super::worker::WorkerJob;
 use super::field_label;
 use super::{FieldAction, FieldId, PanelContent, PanelCtx, PanelEffect, SaveGroup, SettingsPanel};
 
-impl TuiApp<'_> {
+impl LaneApp<'_> {
     /// 打开设置面板（`/settings` / F2）。回合进行中打开为只读并提示；
     /// 持久层快照尚未拉到（如启动时拉取失败）时借机重试一次。
     pub(crate) fn open_settings(&mut self) {

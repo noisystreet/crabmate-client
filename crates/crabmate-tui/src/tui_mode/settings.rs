@@ -60,7 +60,7 @@ impl FieldAction {
 
 /// `/user-data/llm-overrides` 的 `client_llm.{model,api_base,temperature,llm_thinking_mode,
 /// llm_context_tokens}` 保存动作。
-/// （密钥不在此列：`api_key` 只写本机钥匙串，见面板与 TuiApp 接线。）
+/// （密钥不在此列：`api_key` 只写本机钥匙串，见面板与 LaneApp 接线。）
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LlmSave {
     pub model: FieldAction,

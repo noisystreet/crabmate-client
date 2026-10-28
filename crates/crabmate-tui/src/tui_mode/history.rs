@@ -19,7 +19,7 @@ use unicode_width::UnicodeWidthChar;
 
 use super::state::{HistoryPage, HistoryRequest, LineKind};
 use super::tool_summary::{flatten_note, tool_end_text};
-use super::{TuiApp, WorkerJob};
+use super::{LaneApp, WorkerJob};
 
 /// 历史工具行正文只留首行的前若干**显示列宽**。
 ///
@@ -28,7 +28,7 @@ use super::{TuiApp, WorkerJob};
 const TOOL_HEAD_WIDTH: usize = 96;
 
 /// 请求回放：记下在途状态 → 绑定会话 → 清空 transcript → 发 worker job。
-pub(super) fn replay_into(app: &mut TuiApp<'_>, conversation_id: String, title: Option<&str>) {
+pub(super) fn replay_into(app: &mut LaneApp<'_>, conversation_id: String, title: Option<&str>) {
     let label = title.unwrap_or("(by id)").to_string();
     // 先记 pending 再绑定：回包到达时要靠它判断「是不是我这次请求」。
     app.st.history_pending = Some(HistoryRequest {
@@ -58,7 +58,7 @@ pub(super) fn replay_into(app: &mut TuiApp<'_>, conversation_id: String, title: 
 
 /// 回灌一页历史；过期回包直接丢弃。
 pub(super) fn on_result(
-    app: &mut TuiApp<'_>,
+    app: &mut LaneApp<'_>,
     conversation_id: &str,
     before_index: Option<u32>,
     result: Result<ConversationMessagesResponse, String>,
@@ -179,7 +179,7 @@ fn older_gate(
 }
 
 /// `/older`：把游标之前的一页历史拉回来并前插到 transcript 头部。
-pub(super) fn load_older(app: &mut TuiApp<'_>) {
+pub(super) fn load_older(app: &mut LaneApp<'_>) {
     match gate_older(app) {
         OlderGate::Enqueue {
             conversation_id,
@@ -192,7 +192,7 @@ pub(super) fn load_older(app: &mut TuiApp<'_>) {
 /// 滚到顶继续上翻（PgUp）自动续翻：与 `/older` 同一条路，但**拒绝时静默** ——
 /// 在顶连按 PgUp 是高频动作，每按一次就往 transcript 写一行提示只会变成噪音。
 /// 发请求失败同样静默：worker 已断时连按会刷出一屏一样的错误。
-pub(super) fn load_older_on_top(app: &mut TuiApp<'_>) {
+pub(super) fn load_older_on_top(app: &mut LaneApp<'_>) {
     if let OlderGate::Enqueue {
         conversation_id,
         before_index,
@@ -203,7 +203,7 @@ pub(super) fn load_older_on_top(app: &mut TuiApp<'_>) {
 }
 
 /// 门控求值：`/older` 与「到顶续翻」必须共用同一组理由，否则两条路径会各自漂移。
-fn gate_older(app: &TuiApp<'_>) -> OlderGate {
+fn gate_older(app: &LaneApp<'_>) -> OlderGate {
     older_gate(
         app.st.running,
         app.st.history_pending.is_some(),
@@ -213,7 +213,7 @@ fn gate_older(app: &TuiApp<'_>) -> OlderGate {
 }
 
 /// 真正发出翻页请求；`worker` 已退出时回滚在途标记，并按 `quiet` 决定是否说明原因。
-fn enqueue_older(app: &mut TuiApp<'_>, conversation_id: String, before_index: u32, quiet: bool) {
+fn enqueue_older(app: &mut LaneApp<'_>, conversation_id: String, before_index: u32, quiet: bool) {
     app.st.set_older_loading(true);
     let sent = app
         .job_tx
@@ -236,7 +236,7 @@ fn enqueue_older(app: &mut TuiApp<'_>, conversation_id: String, before_index: u3
 /// 其余情形（切走了 / 已开聊 / `/conv new`）把回包丢掉 —— 与 [`should_apply_reply`]
 /// 对切换回放的门控同源，只是这里认的是另一份在途标记。
 fn on_older_result(
-    app: &mut TuiApp<'_>,
+    app: &mut LaneApp<'_>,
     conversation_id: &str,
     result: Result<ConversationMessagesResponse, String>,
 ) {
@@ -302,7 +302,11 @@ fn should_apply_reply(running: bool, pending_matches: bool, current_matches: boo
 }
 
 /// 把一页历史写进 transcript。
-fn apply_page(app: &mut TuiApp<'_>, pending: &HistoryRequest, resp: &ConversationMessagesResponse) {
+fn apply_page(
+    app: &mut LaneApp<'_>,
+    pending: &HistoryRequest,
+    resp: &ConversationMessagesResponse,
+) {
     let rows = rows_to_lines(resp);
     app.st.reset_transcript();
     // 游标必须在 `reset_transcript` 之后写：它会连 `history_page` 一起清掉。
@@ -351,7 +355,7 @@ fn summary_line(pending: &HistoryRequest, resp: &ConversationMessagesResponse) -
 ///
 /// 只尝试一次：否则每次 `r` 刷新左栏都会重放并冲掉当前 transcript。之后只有用户的
 /// 显式动作（左栏 Enter / `/conv use`）才触发回放。
-pub(super) fn auto_replay_if_active(app: &mut TuiApp<'_>) {
+pub(super) fn auto_replay_if_active(app: &mut LaneApp<'_>) {
     if app.index.history_auto_replayed {
         return;
     }

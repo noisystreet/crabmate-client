@@ -2,11 +2,11 @@
 
 use crossterm::event::{KeyCode, KeyEvent};
 
-use super::TuiApp;
+use super::LaneApp;
 use super::state::{Focus, LineKind};
 use super::workspace_tree::WsActivate;
 
-impl TuiApp<'_> {
+impl LaneApp<'_> {
     /// 工作区目录树视图按键：浏览目录层级（Enter 展开/插入路径，→ 只展开，← 收起或回父目录）。
     pub(super) fn on_workspace_key(&mut self, key: KeyEvent) {
         if self.st.ws_pick.is_some() {

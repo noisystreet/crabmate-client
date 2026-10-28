@@ -6,13 +6,13 @@
 
 use crate::serve::{ChatStreamOptions, StreamCancel, StreamResume, new_approval_session_id};
 
-use super::TuiApp;
+use super::LaneApp;
 use super::resume::TurnEcho;
 use super::settings::{build_turn_client_llm, merge_turn, turn_temperature, turn_tool_cache_secs};
 use super::state::LineKind;
 use super::worker::{TurnRequest, WorkerJob};
 
-impl TuiApp<'_> {
+impl LaneApp<'_> {
     /// 组装一轮的 `ChatStreamOptions`：override ＞ user-data 合成随轮字段；空白不发送
     /// （回落 serve 默认）。
     pub(super) fn build_turn_opts(

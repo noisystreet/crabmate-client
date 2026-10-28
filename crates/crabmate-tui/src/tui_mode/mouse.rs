@@ -11,14 +11,14 @@
 use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
 
-use super::TuiApp;
+use super::LaneApp;
 use super::layout::{contains, panes};
 use super::state::{Focus, LineKind};
 use super::workspace_tree::WsActivate;
 use super::ws_sidebar::{pane_list_area, sessions_content, sidebar_window, workspace_content};
 use super::{status, status_stack};
 
-impl TuiApp<'_> {
+impl LaneApp<'_> {
     /// 鼠标事件入口。
     ///
     /// 审批浮层/设置面板占用键盘时同样不接受鼠标，否则会绕过
@@ -206,7 +206,7 @@ impl TuiApp<'_> {
     ///
     /// 单击即切换是刻意的：多要一次 `Enter` 只会让人以为「点了没反应」。切换的守卫不在这里
     /// 重写——回合进行中拒绝、空白会话只给提示、`/conv new` 的待绑定空行原地不动，全部由
-    /// [`TuiApp::use_selected`] 一个入口负责，鼠标与键盘不会给出两套结论。
+    /// [`LaneApp::use_selected`] 一个入口负责，鼠标与键盘不会给出两套结论。
     fn click_sessions(&mut self, column: u16, row: u16) {
         let (width, height) = self.last_size;
         let p = panes(
@@ -263,7 +263,7 @@ mod tests {
 
     use super::super::state::Focus;
     use super::super::test_support::{test_app, test_client, test_prefs};
-    use super::{TuiApp, item_index_at, panes};
+    use super::{LaneApp, item_index_at, panes};
     use crate::serve::SessionListRow;
     use ratatui::layout::Rect;
 
@@ -280,9 +280,9 @@ mod tests {
         }
     }
 
-    /// 宽屏（200×40、两栏可见）下的最小 `TuiApp`。
+    /// 宽屏（200×40、两栏可见）下的最小 `LaneApp`。
     /// 通道接收端留在作用域内：切换会话会入队历史回放，没人收就会被当成「worker 已退出」。
-    fn with_wide_app(f: impl FnOnce(&mut TuiApp<'_>)) {
+    fn with_wide_app(f: impl FnOnce(&mut LaneApp<'_>)) {
         let client = test_client();
         let mut prefs = test_prefs();
         let (tx, rx) = mpsc::channel();
@@ -293,7 +293,7 @@ mod tests {
         f(&mut app);
     }
 
-    fn click(app: &mut TuiApp<'_>, column: u16, row: u16) {
+    fn click(app: &mut LaneApp<'_>, column: u16, row: u16) {
         app.on_mouse(MouseEvent {
             kind: MouseEventKind::Down(MouseButton::Left),
             column,
@@ -302,7 +302,7 @@ mod tests {
         });
     }
 
-    fn scroll(app: &mut TuiApp<'_>, kind: MouseEventKind, column: u16, row: u16) {
+    fn scroll(app: &mut LaneApp<'_>, kind: MouseEventKind, column: u16, row: u16) {
         app.on_mouse(MouseEvent {
             kind,
             column,

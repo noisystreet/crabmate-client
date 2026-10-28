@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 
-use super::TuiApp;
+use super::LaneApp;
 use super::state::LineKind;
 
 /// 尚未绑定 `conversation_id` 的草稿所用的键。
@@ -82,7 +82,7 @@ fn queued_outcome(has_queued: bool, failed: bool, cancelled: bool) -> QueuedOutc
     }
 }
 
-impl TuiApp<'_> {
+impl LaneApp<'_> {
     /// 按会话换入换出输入草稿：先把当前输入存回**正在离开**的会话，再取目标会话那一份。
     ///
     /// `next` 是即将进入的 `conversation_id`（`None` = 还没绑定的新会话）。调用方必须保证

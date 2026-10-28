@@ -81,7 +81,7 @@ impl Section {
 }
 
 /// 面板管理的字段：外观 1 个 + 模型 6 个 + 会话 3 个。`Temperature/ThinkingMode/
-/// ContextTokens` 写 user-data `client_llm.*`；`ApiKey` 只写本机钥匙串（见 TuiApp
+/// ContextTokens` 写 user-data `client_llm.*`；`ApiKey` 只写本机钥匙串（见 LaneApp
 /// 接线）；`ToolCache` 写 prefs `disable_readonly_tool_ttl_cache`；`Theme` 写 prefs
 /// `theme`（与 Desktop 同一 slug 表，保存后立即重新解析配色）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -195,7 +195,7 @@ pub struct SettingsPanel {
     llm: LlmSave,
     /// 已编辑（staged）的 prefs 侧字段；`Write` = 待保存。
     prefs: PrefsSave,
-    /// 已编辑（staged）的 API 密钥动作（不随 `LlmSave` 走 user-data，见 TuiApp）。
+    /// 已编辑（staged）的 API 密钥动作（不随 `LlmSave` 走 user-data，见 LaneApp）。
     secret: FieldAction,
     /// API 密钥当前是否已设（CLI/env override 或钥匙串有值）；只读显示用。
     secret_set: bool,
@@ -247,14 +247,14 @@ impl SettingsPanel {
         self.llm.any() || self.prefs.any() || self.secret.is_write()
     }
 
-    /// API 密钥行当前是否"已设"（CLI/env override 或钥匙串有值）；由 TuiApp 打开
+    /// API 密钥行当前是否"已设"（CLI/env override 或钥匙串有值）；由 LaneApp 打开
     /// 面板及密钥保存成功后调用。只影响显示与清除提示，不代表 staged。
     pub(super) fn set_secret_set(&mut self, v: bool) {
         self.secret_set = v;
     }
 
     /// API 密钥保存动作落地后回调（`written` = 钥匙串里当前是否有值）：清 staged 并
-    /// 同步"已设"显示；失败时改动保留（由 TuiApp 提示，可重试）。
+    /// 同步"已设"显示；失败时改动保留（由 LaneApp 提示，可重试）。
     pub(super) fn secret_saved(&mut self, written: bool) {
         self.secret = FieldAction::Skip;
         self.secret_set = written;
@@ -294,7 +294,7 @@ impl SettingsPanel {
         }
     }
 
-    /// 底部提示行（给 TuiApp 在保存结果到达时写提示）。
+    /// 底部提示行（给 LaneApp 在保存结果到达时写提示）。
     pub(super) fn set_note(&mut self, text: String, color: Color) {
         self.note = Some((text, color));
     }

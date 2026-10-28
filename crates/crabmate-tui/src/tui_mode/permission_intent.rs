@@ -21,7 +21,7 @@ use crabmate_client_api::conversation_state::ConversationStateOutcome;
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::layout::Rect;
 
-use super::TuiApp;
+use super::LaneApp;
 use super::serve_defaults::ServeDefaults;
 use super::worker::WorkerJob;
 use crate::tui_mode::controls::clear_word;
@@ -87,7 +87,7 @@ pub(super) fn status_values(
     }
 }
 
-impl TuiApp<'_> {
+impl LaneApp<'_> {
     /// 状态行 `perm` 段的两侧值；口径见 [`status_values`]。
     ///
     /// 单独一个方法而不是在 `status_info` 里就地算：`status_info` 已贴着 `mod.rs` 的
@@ -343,7 +343,7 @@ impl PermissionMenu {
     }
 }
 
-impl TuiApp<'_> {
+impl LaneApp<'_> {
     /// 丢掉按旧会话算出来的权限投影，并按当前会话重拉。
     ///
     /// 切会话 / 新建会话时用：投影里的生效档与 `available` 都属于**上一个**会话。留着它的
@@ -544,7 +544,7 @@ mod menu_tests {
 mod session_guard_tests {
     use std::sync::mpsc;
 
-    use super::super::TuiApp;
+    use super::super::LaneApp;
     use super::super::serve_defaults::ServeDefaults;
     use super::super::test_support::{test_app, test_client, test_prefs};
     use super::super::worker::WorkerJob;
@@ -572,7 +572,7 @@ mod session_guard_tests {
         client: &'a super::super::super::serve::ServeClient,
         prefs: &'a mut crate::SessionPrefs,
         job_tx: mpsc::Sender<WorkerJob>,
-    ) -> TuiApp<'a> {
+    ) -> LaneApp<'a> {
         let (ui_tx, ui_rx) = mpsc::channel();
         test_app(client, prefs, ui_rx, ui_tx, job_tx)
     }
@@ -707,14 +707,14 @@ mod click_tests {
 
     use ratatui::layout::Rect;
 
-    use super::super::TuiApp;
+    use super::super::LaneApp;
     use super::super::test_support::{test_app, test_client, test_prefs};
     use super::PermissionMenu;
 
     /// 在 80×24 屏幕上开一个锚在右下角、3 个选项的菜单，并把渲染用的矩形交给断言。
     ///
     /// 矩形由 `permission_menu_rect`（绘制与命中**共用**的那一个）算出，测试不另算一份。
-    fn with_menu(f: impl FnOnce(&mut TuiApp<'_>, Rect)) {
+    fn with_menu(f: impl FnOnce(&mut LaneApp<'_>, Rect)) {
         let client = test_client();
         let mut prefs = test_prefs();
         let (tx, rx) = mpsc::channel();

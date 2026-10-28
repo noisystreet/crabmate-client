@@ -4,7 +4,7 @@
 //! 拆出本模块以压住 `mod.rs` 行数门禁（≤ 920 行）；索引的纯逻辑与 IO 见
 //! [`crate::serve::sessions`]。
 
-use super::TuiApp;
+use super::LaneApp;
 use super::state::{Focus, LineKind};
 use super::worker::WorkerJob;
 use crate::serve::{
@@ -159,7 +159,7 @@ pub(super) fn plan_workspace_switch_reclaim(
 
 /// 索引写入失败时要报给用户的那行提示；`None` 表示**静默**。
 ///
-/// 只有 `RemoveBlank` 静默，理由见 [`TuiApp::reclaim_blank_on_workspace_switch`]：回收是
+/// 只有 `RemoveBlank` 静默，理由见 [`LaneApp::reclaim_blank_on_workspace_switch`]：回收是
 /// 顺手动作，失败只留下一条可丢弃的空行，而它最常见的成因——行已被别的端删掉——本来就
 /// 无需用户知晓；切工作区路径上这条提示更与当前操作无关（用户刚切了工作区，却收到一句
 /// 讲回收失败的话）。残留行由 `NewBlank` 的复用规则兜底。
@@ -201,7 +201,7 @@ pub(super) struct UiIndexState {
     pub(super) pending_new_blank_left_bucket: bool,
 }
 
-impl TuiApp<'_> {
+impl LaneApp<'_> {
     /// `/conv new`：清空当前会话，并把新会话登记进服务端索引（左栏立即能看到，Web 端同步可见）。
     pub(super) fn new_session(&mut self) {
         if self.st.running {

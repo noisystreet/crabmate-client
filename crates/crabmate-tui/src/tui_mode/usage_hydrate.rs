@@ -16,10 +16,10 @@
 
 use crabmate_client_api::prompt_tokens::TiktokenPromptTokensSnapshot;
 
-use super::TuiApp;
+use super::LaneApp;
 use super::worker::WorkerJob;
 
-impl TuiApp<'_> {
+impl LaneApp<'_> {
     /// 首轮结束后绑上 cid 时补一次用量（只在**还没有实测**时发，避免每轮白拉一页历史）。
     ///
     /// 调用点是 `on_turn_done`：此时 `st.conversation_id` 刚被回填，基线分支同时失效 ——

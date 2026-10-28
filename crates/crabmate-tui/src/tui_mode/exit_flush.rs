@@ -20,7 +20,7 @@
 
 use std::time::{Duration, Instant};
 
-use super::TuiApp;
+use super::LaneApp;
 use crate::serve::{SessionIndexOp, apply_web_session_op};
 
 /// 普通退出的预算：一次索引写（`GET` + `PUT`）。
@@ -59,7 +59,7 @@ impl ExitFlushPlan {
     }
 }
 
-/// [`plan_exit_flush`] 的输入：只取决策需要的字段，免得把整个 `TuiApp` 拖进单测。
+/// [`plan_exit_flush`] 的输入：只取决策需要的字段，免得把整个 `LaneApp` 拖进单测。
 #[derive(Debug, Clone, Copy)]
 pub(super) struct ExitFlushView<'a> {
     /// 当前绑定的服务端会话（`None` = 还没发送过 / 刚 `/conv new` / 首轮未结束）。
@@ -93,7 +93,7 @@ pub(super) fn plan_exit_flush(view: ExitFlushView<'_>) -> ExitFlushPlan {
     ExitFlushPlan { bind, draft }
 }
 
-impl TuiApp<'_> {
+impl LaneApp<'_> {
     /// 退出落盘；返回需要告知用户的失败摘要（`None` = 没需求或已写入）。
     ///
     /// 失败只影响这条提示，**不影响退出码**：会话正文本来就在服务端，这里补的是
