@@ -122,6 +122,12 @@ enum Commands {
         /// Skip `/health` probe before first turn.
         #[arg(long = "no-probe")]
         no_probe: bool,
+        /// 额外连接，可重复：`--connect <name>=<url>`。
+        ///
+        /// 主连接仍是 `--api-base`，它恒为第一条 lane；这里每个 `name=url` 追加一条。
+        /// bearer 复用主连接的（一人一机多项目通常同一个 key）。
+        #[arg(long = "connect", value_name = "NAME=URL")]
+        connect: Vec<String>,
     },
     /// Probe terminal pixel-graphics support (kitty / sixel / iTerm2 / half-block); no network.
     ///
@@ -259,8 +265,17 @@ async fn run() -> Result<()> {
             conversation_id,
             no_probe,
         } => run_repl(&client, conversation_id, no_probe, yes, &mut overrides).await,
-        Commands::Tui { no_probe } => {
-            run_tui_cmd(&client, no_probe, no_keyring, yes, &mut overrides).await
+        Commands::Tui { no_probe, connect } => {
+            run_tui_cmd(
+                &client,
+                no_probe,
+                no_keyring,
+                yes,
+                &mut overrides,
+                &connect,
+                bearer.as_deref(),
+            )
+            .await
         }
         // 已在 `run` 开头提前返回（这里只是让 match 穷尽）。
         Commands::Caps => Ok(()),
@@ -273,10 +288,42 @@ async fn run_tui_cmd(
     no_keyring: bool,
     yes: bool,
     overrides: &mut SessionPrefs,
+    connect: &[String],
+    bearer: Option<&str>,
 ) -> Result<()> {
     ensure_tty()?;
     maybe_probe(client, no_probe).await?;
-    tui_mode::run_tui(client, overrides, yes, no_keyring).await
+    // 额外 lane：`--connect name=url`。主连接恒为第一条，`--connect` 依次追加。
+    let mut extras: Vec<(String, ServeClient)> = Vec::with_capacity(connect.len());
+    for spec in connect {
+        let (name, url) = parse_connect_spec(spec)?;
+        let cfg = ConnectionConfig::new(url, bearer.unwrap_or_default().to_string());
+        extras.push((name, ServeClient::new(cfg)?));
+    }
+    let mut lanes: Vec<(String, &ServeClient)> = Vec::with_capacity(extras.len() + 1);
+    lanes.push(("local".to_string(), client));
+    for (name, c) in &extras {
+        lanes.push((name.clone(), c));
+    }
+    tui_mode::run_tui(&lanes, overrides, yes, no_keyring).await
+}
+
+/// 解析 `--connect name=url`；`name` 留空时直接拿 URL 当名字（好认过没有）。
+fn parse_connect_spec(spec: &str) -> Result<(String, String)> {
+    let (name, url) = spec
+        .split_once('=')
+        .with_context(|| format!("--connect 需要 <name>=<url>，收到：{spec}"))?;
+    let url = url.trim().to_string();
+    if url.is_empty() {
+        anyhow::bail!("--connect 的 url 不能为空：{spec}");
+    }
+    let name = name.trim();
+    let name = if name.is_empty() {
+        url.clone()
+    } else {
+        name.to_string()
+    };
+    Ok((name, url))
 }
 
 /// 三个 `client_llm` 覆盖中任一非空才构造；全空返回 `None`（不发送 `client_llm` 整块）。
@@ -862,3 +909,6 @@ fn is_interrupted(err: &anyhow::Error) -> bool {
 #[cfg(test)]
 #[path = "main_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod connect_spec_tests;

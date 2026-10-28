@@ -62,10 +62,11 @@ impl Drop for ScreenGuard {
 
 /// 全屏 TUI 入口（M2）：状态行 + 左栏会话 + 流式 transcript + 单行输入。
 ///
-/// **W1 阶段只有一条 lane**：`client` / `overrides` 直接构成那条 lane。W2 起这里改为
-/// 遍历 profile 列表逐条装配（见 `docs/design/tui_multi_server.md` §6）。
+/// `lanes_spec` 为 `(名字, 客户端)` 列表，**第一条是初始激活的 lane**。每条 lane 各自
+/// 一个 worker 与一份 `overrides`；共用同一个事件通道，按 `LaneId` 分发
+/// （见 `docs/design/tui_multi_server.md` §4.2）。
 pub async fn run_tui(
-    client: &ServeClient,
+    lanes_spec: &[(String, &ServeClient)],
     overrides: &SessionPrefs,
     yes: bool,
     no_keyring: bool,
@@ -90,45 +91,51 @@ pub async fn run_tui(
 
     let (tx, rx) = mpsc::channel::<UiEvent>();
     spawn_key_reader(tx.clone());
-    // W1：唯一的 lane 编号为 0；W2 起按 profile 逐个分配。
-    let lane_id = LaneId(0);
-    let job_tx = spawn_worker(lane_id, client.clone(), tx.clone());
 
-    // W1：单 lane。W2 起按 profile 列表逐条建 lane（见 `docs/design/tui_multi_server.md` §6）。
-    let lane = LaneApp {
-        id: lane_id,
-        client,
-        overrides: overrides.clone(),
-        yes,
-        no_keyring,
-        st: UiState::new(),
-        drafts: drafts::Drafts::default(),
-        spinner: spinner::Spinner::new(),
-        tx: tx.clone(),
-        job_tx,
-        cancel: None,
-        exit: false,
-        quit_pending: false,
-        body: body_cache::BodyCache::default(),
-        panel: None,
-        persisted: None,
-        last_size: (0, 0),
-        index: session_index::UiIndexState::default(),
-        resume: None,
-        sent_turn: None,
-        bg: None,
-    };
+    // 逐条装配：每条 lane 一个 worker（各自的 SSE 流），共用这一个通道。
+    let mut lanes = Vec::with_capacity(lanes_spec.len());
+    for (i, (label, client)) in lanes_spec.iter().enumerate() {
+        let lane_id = LaneId(i as u32);
+        let job_tx = spawn_worker(lane_id, (*client).clone(), tx.clone());
+        lanes.push(LaneApp {
+            id: lane_id,
+            label: label.clone(),
+            client,
+            overrides: overrides.clone(),
+            yes,
+            no_keyring,
+            st: UiState::new(),
+            drafts: drafts::Drafts::default(),
+            spinner: spinner::Spinner::new(),
+            tx: tx.clone(),
+            job_tx,
+            cancel: None,
+            exit: false,
+            quit_pending: false,
+            body: body_cache::BodyCache::default(),
+            panel: None,
+            persisted: None,
+            last_size: (0, 0),
+            index: session_index::UiIndexState::default(),
+            resume: None,
+            sent_turn: None,
+            bg: None,
+        });
+    }
     let mut app = TuiApp {
-        lanes: vec![lane],
+        lanes,
         active: 0,
         rx,
     };
-    // 启动即拉一次会话 / 工作区根 / serve 默认状态 / user-data 设置快照（失败以系统行提示）。
-    app.lane_mut().refresh_sessions();
-    app.lane_mut().st.ws_begin_root_fetch();
-    app.lane_mut().refresh_workspace(false);
-    app.lane_mut().refresh_status();
-    app.lane_mut().load_user_settings();
+    // 每条 lane 都拉一次会话 / 工作区根 / serve 默认状态 / user-data 设置快照：
+    // 只刷当前 lane 的话，切过去会看到空的会话列表（切 lane 不该触发网络请求）。
+    for lane in app.lanes.iter_mut() {
+        lane.refresh_sessions();
+        lane.st.ws_begin_root_fetch();
+        lane.refresh_workspace(false);
+        lane.refresh_status();
+        lane.load_user_settings();
+    }
     let res = app.run_loop(&mut terminal);
     // 显式删背景图：退出备用屏幕时终端本会清空，但别把图像配额留到下一次运行。
     app.lane_mut().clear_background();
@@ -140,4 +147,57 @@ pub async fn run_tui(
         eprintln!("{warn}");
     }
     res
+}
+
+/// 外壳层动作：切 lane、导出渲染快照、鼠标命中。
+///
+/// **放这里而不是 `mod.rs`**：`mod.rs` 贴着 920 行门禁，而这三件事都只跟「有几条
+/// lane、当前是哪条」有关，与单条 lane 的行为无关 —— 正好是外壳该管的那一层。
+impl<'a> super::TuiApp<'a> {
+    /// 渲染用的 lane 快照：`(名字, 是否当前)`。
+    ///
+    /// 只导出名字与「谁是当前」，不导任何 lane 内部状态 —— 渲染层拿不到 `&mut`，
+    /// 也就不可能在某条 lane 的绘制里改到别人。
+    pub(super) fn lane_entries(&self) -> Vec<(String, bool)> {
+        self.lanes
+            .iter()
+            .enumerate()
+            .map(|(i, lane)| (lane.label.clone(), i == self.active))
+            .collect()
+    }
+
+    /// 在 lane 之间循环切换。
+    ///
+    /// 只换「看着谁」，不动任何 lane 的状态：在跑的回合、草稿、滚动位置都留在各自
+    /// lane 里，切回来还是原样（与 `tmux` 切窗口同语义）。`len <= 1` 是 no-op ——
+    /// 单 serve 时按 Alt+方向不报错也不留痕迹。
+    pub(super) fn switch_lane(&mut self, delta: isize) {
+        let n = self.lanes.len();
+        if n <= 1 {
+            return;
+        }
+        let n = n as isize;
+        self.active = (self.active as isize + delta).rem_euclid(n) as usize;
+    }
+
+    /// 鼠标落在左栏 lane 列表的某一行时，返回该 lane 的下标。
+    ///
+    /// 复用当前 lane 记下的终端尺寸与状态栈行数：一帧只有一个尺寸，各 lane 记的
+    /// 是同一个值，没必要为命中检测再存一份。
+    pub(super) fn lane_at_click(&self, m: &crossterm::event::MouseEvent) -> Option<usize> {
+        let lane = self.lane();
+        let (w, h) = lane.last_size;
+        let rows = if self.lanes.len() > 1 {
+            self.lanes.len() as u16 + 1
+        } else {
+            0
+        };
+        let p = super::layout::panes_with_lanes(
+            ratatui::layout::Rect::new(0, 0, w, h),
+            lane.st.sidebar_visible,
+            lane.status_stack_rows(),
+            rows,
+        );
+        super::layout::lane_hit(&p, self.lanes.len(), m.column, m.row)
+    }
 }

@@ -16,8 +16,12 @@ use super::render::{SIDEBAR_WIDTH, WORKSPACE_PANE_WIDTH};
 pub(super) struct Panes {
     /// 底栏；**仅窄屏**为 `Some`。
     pub status: Option<Rect>,
-    /// 左栏会话列（窄屏隐藏时为 `None`）。
+    /// 左栏会话列（窄屏隐藏时为 `None`）。**不含**底部 lane 列表。
     pub left: Option<Rect>,
+    /// 左栏底部的 lane 列表；单 lane 或窄屏时为 `None`。
+    ///
+    /// 和 `right` / `right_status` 一样，渲染与鼠标命中都只认这里给出的矩形。
+    pub left_lanes: Option<Rect>,
     /// 中列：transcript + composer。
     pub chat: Rect,
     /// 右栏目录树（**不含**底部状态栈）。
@@ -32,11 +36,25 @@ pub(super) struct Panes {
 /// 「树至少留 1 行」的范围内 —— 这条不变量放这里而不是让两边各算，是因为漂移的
 /// 表现是「树被挤没」，很难归因。
 pub(super) fn panes(area: Rect, sidebar_visible: bool, stack_rows: u16) -> Panes {
+    panes_with_lanes(area, sidebar_visible, stack_rows, 0)
+}
+
+/// 带 lane 列表的分区：左栏再切成「会话列表（上）/ lane 列表（下）」。
+///
+/// `lane_rows == 0`（单 lane）时左栏不下切 —— 单 serve 的用户不该看到半行空白，
+/// 也就不需要知道「lane」这个概念（`Panes::left_lanes` 为 `None`）。
+pub(super) fn panes_with_lanes(
+    area: Rect,
+    sidebar_visible: bool,
+    stack_rows: u16,
+    lane_rows: u16,
+) -> Panes {
     if !sidebar_visible {
         let rows = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(area);
         return Panes {
             status: Some(rows[1]),
             left: None,
+            left_lanes: None,
             chat: rows[0],
             right: None,
             right_status: None,
@@ -51,9 +69,15 @@ pub(super) fn panes(area: Rect, sidebar_visible: bool, stack_rows: u16) -> Panes
     let stack = stack_rows.min(cols[2].height.saturating_sub(1));
     let right_rows =
         Layout::vertical([Constraint::Min(1), Constraint::Length(stack)]).split(cols[2]);
+    // lane 区最多占左栏一半，且会话区至少留 1 行：这两条不变量放在这里而不是
+    // 让渲染各算一遍，否则「lane 多了把会话列表挤没」这种症状很难归因。
+    let lane_h = lane_rows.min(cols[0].height.saturating_sub(1) / 2);
+    let left_rows =
+        Layout::vertical([Constraint::Min(1), Constraint::Length(lane_h)]).split(cols[0]);
     Panes {
         status: None,
-        left: Some(cols[0]),
+        left: Some(left_rows[0]),
+        left_lanes: (lane_h > 0).then_some(left_rows[1]),
         chat: cols[1],
         right: Some(right_rows[0]),
         right_status: (stack > 0).then_some(right_rows[1]),
@@ -71,6 +95,20 @@ pub(super) fn contains(area: Rect, column: u16, row: u16) -> bool {
         && column < area.x.saturating_add(area.width)
         && row >= area.y
         && row < area.y.saturating_add(area.height)
+}
+
+/// 左栏 lane 列表里被点中的 lane 下标；标题行不算，越界返回 `None`。
+///
+/// 行号只在这里换算一次：绘制与命中都用 [`panes_with_lanes`] 的同一份矩形，
+/// 两边各算一遍迟早漂移（症状是「点第 2 条切到第 3 条」）。
+pub(super) fn lane_hit(p: &Panes, lanes_len: usize, column: u16, row: u16) -> Option<usize> {
+    let rect = p.left_lanes?;
+    if !contains(rect, column, row) {
+        return None;
+    }
+    // 首行是标题 `连接 [n]`，其后依次是各 lane。
+    let idx = usize::from(row.saturating_sub(rect.y)).checked_sub(1)?;
+    (idx < lanes_len).then_some(idx)
 }
 
 #[cfg(test)]
@@ -144,5 +182,34 @@ mod tests {
         assert!(!contains(r, 9, 5));
         assert!(!contains(Rect::new(10, 5, 0, 2), 10, 5), "空矩形不命中");
         assert!(!contains(Rect::new(10, 5, 4, 0), 10, 5), "空矩形不命中");
+    }
+
+    /// 单 lane（`lane_rows == 0`）：左栏不下切，与改造前逐字一致。
+    #[test]
+    fn zero_lane_rows_keeps_the_sidebar_whole() {
+        let p = panes_with_lanes(Rect::new(0, 0, 200, 40), true, 5, 0);
+        assert!(p.left_lanes.is_none(), "单 lane 不该凭空多出一块");
+        assert_eq!(p.left.unwrap().height, 40);
+    }
+
+    /// 多 lane：左栏下切，lane 区不超过一半、会话区至少留 1 行。
+    #[test]
+    fn lane_rows_split_the_sidebar_within_half() {
+        let p = panes_with_lanes(Rect::new(0, 0, 200, 40), true, 5, 3);
+        assert_eq!(p.left_lanes.expect("3 行 lane 区应当存在").height, 3);
+        assert_eq!(p.left.unwrap().height, 37);
+
+        // 超量请求被压到「一半」上限：40 行时最多 19 行（会话区留 21）。
+        let p = panes_with_lanes(Rect::new(0, 0, 200, 40), true, 5, 30);
+        assert_eq!(p.left_lanes.unwrap().height, 19);
+        assert_eq!(p.left.unwrap().height, 21);
+    }
+
+    /// 左栏隐藏时 lane 区也必须是 `None`：否则窄屏会画到不存在的列上。
+    #[test]
+    fn hidden_sidebar_has_no_lane_pane() {
+        let p = panes_with_lanes(Rect::new(0, 0, 80, 24), false, 5, 4);
+        assert!(p.left.is_none());
+        assert!(p.left_lanes.is_none());
     }
 }

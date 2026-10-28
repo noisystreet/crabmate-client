@@ -18,6 +18,12 @@ pub(super) enum TopHotkey {
     StatusStack,
     /// Ctrl+Y：复制最近一条助手回复（`yank` 的传统键位，终端一般不截获）。
     Copy,
+    /// Alt+→：切到下一条 lane。多 serve 并行时只换视图，不影响任何在跑的回合。
+    ///
+    /// 单 lane 时是 no-op（外层 `TuiApp::switch_lane` 在 `len <= 1` 直接返回）。
+    NextLane,
+    /// Alt+←：切到上一条 lane（循环）。
+    PrevLane,
 }
 
 /// 判定热键。
@@ -31,6 +37,9 @@ pub(super) fn of(key: &KeyEvent) -> Option<TopHotkey> {
     match (key.code, key.modifiers) {
         (KeyCode::F(3), KeyModifiers::NONE) => Some(TopHotkey::StatusStack),
         (KeyCode::Char('y'), KeyModifiers::CONTROL) => Some(TopHotkey::Copy),
+        // Alt+方向：切换 lane。裸方向键归输入框 / 列表，必须精确匹配 ALT。
+        (KeyCode::Right, KeyModifiers::ALT) => Some(TopHotkey::NextLane),
+        (KeyCode::Left, KeyModifiers::ALT) => Some(TopHotkey::PrevLane),
         _ => None,
     }
 }
@@ -81,5 +90,28 @@ mod tests {
         assert_eq!(of(&key(KeyCode::F(2), KeyModifiers::NONE)), None);
         assert_eq!(of(&key(KeyCode::Char(','), KeyModifiers::CONTROL)), None);
         assert_eq!(of(&key(KeyCode::Char(','), KeyModifiers::NONE)), None);
+    }
+
+    #[test]
+    fn alt_arrows_switch_lanes_but_bare_arrows_do_not() {
+        assert_eq!(
+            of(&key(KeyCode::Right, KeyModifiers::ALT)),
+            Some(TopHotkey::NextLane)
+        );
+        assert_eq!(
+            of(&key(KeyCode::Left, KeyModifiers::ALT)),
+            Some(TopHotkey::PrevLane)
+        );
+        // 裸方向键归输入框光标 / 列表选择，顶层绝不抢。
+        assert_eq!(of(&key(KeyCode::Right, KeyModifiers::NONE)), None);
+        assert_eq!(of(&key(KeyCode::Left, KeyModifiers::NONE)), None);
+        // Shift+Alt+方向也不认：精确匹配修饰键，避免和「按词选择」类终端行为打架。
+        assert_eq!(
+            of(&key(
+                KeyCode::Right,
+                KeyModifiers::ALT | KeyModifiers::SHIFT
+            )),
+            None
+        );
     }
 }

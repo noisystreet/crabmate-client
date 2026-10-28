@@ -170,7 +170,9 @@ impl TuiApp<'_> {
                 throttle_frame(last_draw);
             }
             // 兜底醒来的空帧（无事件 / 无动画 / 尺寸未变）整帧跳过。
-            self.lane_mut().draw_frame(terminal, !had_event)?;
+            // 先算 lane 快照再取 `lane_mut()`：两个借用会在同一条语句里打架。
+            let lanes = self.lane_entries();
+            self.lane_mut().draw_frame(terminal, !had_event, &lanes)?;
             last_draw = Instant::now();
             if mode == LoopMode::Interval {
                 // 改造前的节奏原样保留：有消息 2ms、空闲 50ms。
@@ -244,6 +246,7 @@ impl LaneApp<'_> {
         &mut self,
         terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
         skip_idle: bool,
+        lanes: &[(String, bool)],
     ) -> Result<()> {
         self.spinner.advance(self.spinning());
         let dims = read_terminal_size(terminal)?;
@@ -260,7 +263,16 @@ impl LaneApp<'_> {
         let screen = Rect::new(0, 0, w, h);
         let panel = self.settings_content(render::settings_panel_content_width(screen));
         terminal
-            .draw(|f| render::draw(f, &mut self.st, &info, self.body.as_slice(), panel.as_ref()))
+            .draw(|f| {
+                render::draw(
+                    f,
+                    &mut self.st,
+                    &info,
+                    self.body.as_slice(),
+                    panel.as_ref(),
+                    lanes,
+                )
+            })
             .context("tui draw failed")?;
         // 背景要在 draw 之后重放：kitty 让图像跟着文本一起滚动（规范明确），
         // 而 ratatui 的差分绘制只认字符网格，不会替我们维持图像层。

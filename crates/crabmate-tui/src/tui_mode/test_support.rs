@@ -36,13 +36,17 @@ pub(super) fn test_client() -> ServeClient {
     ServeClient::new(ConnectionConfig::new("http://127.0.0.1:1", "")).expect("client")
 }
 
-/// 构造一个最小 `LaneApp`：`yes` / `no_keyring` 都打开，其余为启动初始态。
+/// 构造一条 lane：`yes` / `no_keyring` 都打开，其余为启动初始态。
+///
+/// `id` 由调用方给 —— 外壳层测试要造**多条** lane，必须能区分事件来源。
+/// 单 lane 的常规测试用 [`test_app`] 即可。
 ///
 /// `rx` / `tx` 必须是同一对：单测没有 tokio runtime，读请求会退回队列；但若将来某个
 /// 测试跑在 `#[tokio::test]` 下，读请求就真的会 `spawn`，那时发到一个没人读的通道里
 /// 会让断言假通过。`job_tx` 同理 —— 要断言「发了哪些 worker 任务」就把接收端留在
 /// 调用方。
-pub(super) fn test_app<'a>(
+pub(super) fn test_lane<'a>(
+    id: LaneId,
     client: &'a ServeClient,
     prefs: &'a mut SessionPrefs,
     rx: mpsc::Receiver<UiEvent>,
@@ -54,7 +58,8 @@ pub(super) fn test_app<'a>(
     // 而测试恰恰靠「发了什么事件」断言。
     std::mem::forget(rx);
     LaneApp {
-        id: LaneId(0),
+        id,
+        label: format!("lane-{}", id.0),
         client,
         overrides: prefs.clone(),
         yes: true,
@@ -75,5 +80,108 @@ pub(super) fn test_app<'a>(
         resume: None,
         sent_turn: None,
         bg: None,
+    }
+}
+
+/// 单 lane 的常规测试入口（固定 `LaneId(0)`）。
+pub(super) fn test_app<'a>(
+    client: &'a ServeClient,
+    prefs: &'a mut SessionPrefs,
+    rx: mpsc::Receiver<UiEvent>,
+    tx: mpsc::Sender<UiEvent>,
+    job_tx: mpsc::Sender<WorkerJob>,
+) -> LaneApp<'a> {
+    test_lane(LaneId(0), client, prefs, rx, tx, job_tx)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::mpsc;
+
+    use super::super::TuiApp;
+    use super::super::worker::LaneId;
+    use super::{test_app, test_client, test_lane, test_prefs};
+
+    /// 造 n 条 lane 的外壳；`rx` 只用于占位（本模块测试不消费事件通道）。
+    fn shell<'a>(
+        client: &'a crate::serve::ServeClient,
+        prefs: &'a mut [crate::SessionPrefs],
+    ) -> TuiApp<'a> {
+        let mut lanes = Vec::new();
+        for (i, p) in prefs.iter_mut().enumerate() {
+            let (ltx, lrx) = mpsc::channel();
+            let (job_tx, _job_rx) = mpsc::channel();
+            lanes.push(test_lane(
+                LaneId(i as u32 + 1),
+                client,
+                p,
+                lrx,
+                ltx.clone(),
+                job_tx,
+            ));
+            drop(ltx);
+        }
+        let (_shell_tx, rx) = mpsc::channel();
+        TuiApp {
+            lanes,
+            active: 0,
+            rx,
+        }
+    }
+
+    #[test]
+    fn switch_lane_is_a_noop_with_a_single_lane() {
+        let client = test_client();
+        let mut prefs = [test_prefs()];
+        let mut app = shell(&client, &mut prefs);
+
+        app.switch_lane(1);
+        assert_eq!(app.active, 0, "单 lane 时切换必须无副作用");
+        app.switch_lane(-1);
+        assert_eq!(app.active, 0);
+    }
+
+    #[test]
+    fn switch_lane_cycles_in_both_directions() {
+        let client = test_client();
+        let mut prefs = [test_prefs(), test_prefs(), test_prefs()];
+        let mut app = shell(&client, &mut prefs);
+        assert_eq!(app.lane().id, LaneId(1));
+
+        app.switch_lane(1);
+        assert_eq!(app.lane().id, LaneId(2));
+        app.switch_lane(1);
+        assert_eq!(app.lane().id, LaneId(3));
+        // 到尾部后循环回第一条，而不是卡住或越界。
+        app.switch_lane(1);
+        assert_eq!(app.lane().id, LaneId(1));
+        // 反向：从第 1 条回到最后一条。
+        app.switch_lane(-1);
+        assert_eq!(app.lane().id, LaneId(3));
+    }
+
+    #[test]
+    fn switching_does_not_move_state_between_lanes() {
+        let client = test_client();
+        let mut prefs = [test_prefs(), test_prefs()];
+        let mut app = shell(&client, &mut prefs);
+
+        // 在 lane 1 里设一个 `/model` 覆盖，切走再切回来必须是同一份，
+        // 且 lane 2 完全不受影响（这正是 overrides 从 `&mut` 改自有值的理由）。
+        app.lane_mut().overrides.model = Some("lane-1-model".to_string());
+        app.switch_lane(1);
+        assert_eq!(app.lane().overrides.model, None, "lane 2 有自己的表达层");
+        app.switch_lane(-1);
+        assert_eq!(app.lane().overrides.model.as_deref(), Some("lane-1-model"));
+    }
+
+    #[test]
+    fn test_app_still_builds_a_single_default_lane() {
+        let client = test_client();
+        let mut prefs = test_prefs();
+        let (tx, rx) = mpsc::channel();
+        let (job_tx, _job_rx) = mpsc::channel();
+        let app = test_app(&client, &mut prefs, rx, tx, job_tx);
+        assert_eq!(app.id, LaneId(0), "常规测试默认 lane 编号保持不变");
     }
 }

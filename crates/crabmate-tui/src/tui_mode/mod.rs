@@ -21,6 +21,7 @@ mod exit_flush;
 mod help;
 mod history;
 mod hotkeys;
+mod lane_list;
 mod layout;
 mod md;
 mod mouse;
@@ -85,6 +86,8 @@ pub use self::shell::run_tui;
 struct LaneApp<'a> {
     /// 本条 lane 的标识：SSE 流事件按它分发（见外层 [`TuiApp::on_msg`]）。
     id: LaneId,
+    /// 左栏下半 lane 列表里显示的名字。W2 用 `local`；W3 起来自 profile 名。
+    label: String,
     client: &'a ServeClient,
     /// 本条 lane 自己的表达层（`/model` `/mode` `/role` `/perm` 与 CLI 初值）。
     ///
@@ -165,7 +168,25 @@ impl<'a> TuiApp<'a> {
                     lane.on_msg(*inner);
                 }
             }
-            other => self.lane_mut().on_msg(other),
+            other => {
+                // 切 lane 是外壳动作：必须在进入 lane 之前拦截（lane 无权切自己，
+                // 否则每条 lane 都要知道全局有几条）。
+                if let UiEvent::Key(k) = &other {
+                    match hotkeys::of(k) {
+                        Some(hotkeys::TopHotkey::NextLane) => return self.switch_lane(1),
+                        Some(hotkeys::TopHotkey::PrevLane) => return self.switch_lane(-1),
+                        _ => {}
+                    }
+                }
+                // 左栏下半的 lane 列表：点一下切过去，这次点击不进入 lane。
+                if let UiEvent::Mouse(m) = &other
+                    && let Some(idx) = self.lane_at_click(m)
+                {
+                    self.active = idx;
+                    return;
+                }
+                self.lane_mut().on_msg(other);
+            }
         }
     }
 }
@@ -537,6 +558,10 @@ impl LaneApp<'_> {
             Some(hotkeys::TopHotkey::Settings) => self.toggle_settings(),
             Some(hotkeys::TopHotkey::StatusStack) => self.st.toggle_status_stack(),
             Some(hotkeys::TopHotkey::Copy) => self.copy_last(None),
+            // 切 lane 是外壳动作，`TuiApp::on_msg` 已拦截，正常路径到不了这里；
+            // 留着只为穷尽分支（万一有人直接调 lane 的 on_key，也按「已消费」处理，
+            // 免得方向键再漏给输入框）。
+            Some(hotkeys::TopHotkey::NextLane | hotkeys::TopHotkey::PrevLane) => {}
             None => return false,
         }
         true
