@@ -109,6 +109,7 @@ Delivery model: branch from `main`, open a PR, merge back after checks are green
 
 - **Start from an Issue**: new plans, designs and non-trivial refactors need a tracking Issue first (`gh issue create`) stating the problem, the intended scope and the explicit non-goals. Trivial fixes (typo, one-line bug fix) may skip it. Contract-level decisions (SSE / CORS / Bearer / API base / error codes) are authoritative in the **Server** repo — file there when the change is contract-level, and link it from the Client Issue.
 - **Link the PR to its Issue**: the PR body references the tracking Issue — `Closes #123` when the PR completes it, `Refs #123` when it only advances it (keep the Issue open in that case). Do not widen scope inside a PR; file a follow-up Issue instead.
+- **Issue / PR templates**: `.github/ISSUE_TEMPLATE/` (`bug_report.md` / `feature_request.md` / `config.yml`) and `.github/pull_request_template.md`. `gh issue create` / `gh pr create` do **not** pick them up on their own — pass `-T/--template` or write the body in the same structure, otherwise the surface / Server-dependency fields get dropped. Contract-level defects belong in the **Server** repo (the templates say so in their comments).
 - **Branch naming**: `type/short-slug`, where `type` is one of the `commit-msg` types (`feat` / `fix` / `refactor` / `docs` / `test` / `chore` / `ci` / `build` / `style` / `perf` / `revert`). Include the Issue number when one exists (`feat/842-ltm-hybrid-retrieval`). `main` is the only long-lived branch; delete the branch after merge.
 - **Rebase before push**: `git fetch origin main` → `git rebase origin/main`, then re-run the gate. A `--force-with-lease` needed by the rebase requires explicit owner approval.
 
@@ -152,6 +153,7 @@ When updating docs:
 | Manual shell smoke steps | `docs/design/shell_smoke_runbook.md` |
 | Personal cloud (shell → remote API-only) | `docs/design/personal_cloud_runbook.md`; VPS/Caddy authority is Server |
 | Victauri / pre-commit / CI commands | `docs/TESTING.md` |
+| Issue / PR templates | `.github/ISSUE_TEMPLATE/` (`bug_report.md` / `feature_request.md` / `config.yml`) + `.github/pull_request_template.md`; keep the three issue files and the PR template consistent in the same PR |
 | Dependency audit (`cargo audit` / `cargo deny`) | `deny.toml`; CI `.github/workflows/dependency-security.yml`; not in pre-commit |
 | User/maintainer release notes | `CHANGELOG.md` (English; Keep a Changelog; move Unreleased into a version section on release) |
 | Contract pin tag / rev | `docs/design/contract_pin.md`; policy authority is Server |
