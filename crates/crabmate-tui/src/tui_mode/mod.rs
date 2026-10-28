@@ -86,7 +86,11 @@ struct LaneApp<'a> {
     /// 本条 lane 的标识：SSE 流事件按它分发（见外层 [`TuiApp::on_msg`]）。
     id: LaneId,
     client: &'a ServeClient,
-    overrides: &'a mut SessionPrefs,
+    /// 本条 lane 自己的表达层（`/model` `/mode` `/role` `/perm` 与 CLI 初值）。
+    ///
+    /// **自有而非借用**：多 lane 各自一份，`/model` 只影响当前 lane；
+    /// `&mut` 借用会让第二条 lane 无法构造（见 `docs/design/tui_multi_server.md` §4.1）。
+    overrides: SessionPrefs,
     yes: bool,
     /// `--no-keyring`：设置面板里 API 密钥行禁写（也不参与 key_set 判定）。
     no_keyring: bool,

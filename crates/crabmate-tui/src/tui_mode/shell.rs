@@ -66,7 +66,7 @@ impl Drop for ScreenGuard {
 /// 遍历 profile 列表逐条装配（见 `docs/design/tui_multi_server.md` §6）。
 pub async fn run_tui(
     client: &ServeClient,
-    overrides: &mut SessionPrefs,
+    overrides: &SessionPrefs,
     yes: bool,
     no_keyring: bool,
 ) -> Result<()> {
@@ -98,7 +98,7 @@ pub async fn run_tui(
     let lane = LaneApp {
         id: lane_id,
         client,
-        overrides,
+        overrides: overrides.clone(),
         yes,
         no_keyring,
         st: UiState::new(),
