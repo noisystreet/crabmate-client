@@ -146,6 +146,7 @@ When updating docs:
 | Coding-agent client (review / revert loop; not full IDE) | `docs/design/coding_agent_client.md` (Wave 1 checkboxes stay in `chat_ui_todo.md`; restore/changelog JSON authority is Server) |
 | TUI usability plan (align with Desktop chat) | `docs/design/tui_usability.md` |
 | TUI settings panel (align with Desktop settings) | `docs/design/tui_settings_panel.md` |
+| TUI multi-server / multi-lane parallel agents | `docs/design/tui_multi_server.md` |
 | Display-crate sink checklist (consumer side) | `docs/design/display_crate_sink.md` |
 | Icon unification (shared `Icon` component / `--icon-*` tokens) | `docs/design/icon_unification.md` |
 | Markdown rendering follow-ups | `docs/design/markdown_render_todo.md` |
