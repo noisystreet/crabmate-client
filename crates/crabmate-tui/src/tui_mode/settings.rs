@@ -22,7 +22,7 @@ pub const THINKING_SERVER: &str = "server";
 /// 思考模式除 `server`（跟随）外的显式取值（对齐 Desktop `client_llm.llm_thinking_mode`）。
 pub const THINKING_MODES: [&str; 2] = ["on", "off"];
 
-/// 上下文 tokens 上限（对齐前端 `settings_commit.rs` 的 `validate_llm_context_tokens_override`）。
+/// 上下文长度上限（对齐前端 `settings_commit.rs` 的 `validate_llm_context_tokens_override`）。
 pub const CONTEXT_TOKENS_MAX: u64 = 10_000_000;
 
 /// 只读工具缓存"禁用"的 staged 值（写 prefs `disable_readonly_tool_ttl_cache = true`，
@@ -69,7 +69,7 @@ pub struct LlmSave {
     pub temperature: FieldAction,
     /// 思考模式覆盖（`client_llm.llm_thinking_mode`；`Write(None)` = server / 跟随）。
     pub thinking: FieldAction,
-    /// 上下文 tokens 覆盖（`client_llm.llm_context_tokens`；空/`Write(None)` = 清除，回落 serve 默认）。
+    /// 上下文长度覆盖（`client_llm.llm_context_tokens`；空/`Write(None)` = 清除，回落 serve 默认）。
     pub context_tokens: FieldAction,
 }
 
@@ -140,7 +140,7 @@ pub struct PersistedSettings {
     pub temperature: Option<String>,
     /// 思考模式（仅 `on`/`off`；`server`/空 → `None` = 跟随 server）。
     pub thinking: Option<String>,
-    /// 上下文 tokens（trim 后存原文；非法/空 → `None` = 跟随 server；随轮仅 > 0 发送）。
+    /// 上下文长度（trim 后存原文；非法/空 → `None` = 跟随 server；随轮仅 > 0 发送）。
     pub context_tokens: Option<String>,
     pub role: Option<String>,
     pub session_mode: Option<String>,
@@ -271,7 +271,7 @@ pub fn is_valid_thinking_mode(v: &str) -> bool {
     t.is_empty() || t == THINKING_SERVER || THINKING_MODES.contains(&t)
 }
 
-/// 上下文 tokens 是否合法（对齐 Desktop `settings_commit.rs`）：trim 后空 = 合法（未设置）；
+/// 上下文长度是否合法（对齐 Desktop `settings_commit.rs`）：trim 后空 = 合法（未设置）；
 /// 非空需解析为 `u64` 且 ≤ [`CONTEXT_TOKENS_MAX`]（`0` 可存但不随轮发送，同 Desktop）。
 #[must_use]
 pub fn is_valid_context_tokens(v: &str) -> bool {

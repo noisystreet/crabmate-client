@@ -79,7 +79,7 @@ Desktop 设置共 8 个分区（`settings_page`）。逐区对齐结论见下表
 | 模型名 | `client_llm.model` | 文本 | 空 = 跟随 server | 自由文本 |
 | 网关 / API Base | `client_llm.api_base` | 预设下拉（server/ollama/deepseek/minimax/zhipu/moonshot/custom）+ 自定义 URL 文本 | `server` = 空（沿用服务端）；其余填 URL | 需 `http(s)://` 前缀（对齐 `client_llm_presets.rs` 与前端 URL 校验） |
 | 温度 | `client_llm.temperature`（Desktop 随轮单独 `chat_temperature_override`） | 数值文本 | 空 = 跟随 server | `0.0..=2.0` |
-| 上下文 tokens | `client_llm.llm_context_tokens` | 数值文本 | 空 = 跟随 server | 正整数 ≤ 10_000_000（`settings_commit.rs` 同区间） |
+| 上下文长度 | `client_llm.llm_context_tokens` | 数值文本 | 空 = 跟随 server | 正整数 ≤ 10_000_000（`settings_commit.rs` 同区间） |
 | 思考模式 | `client_llm.llm_thinking_mode` | 枚举 | `server` | `server / on / off` |
 | API 密钥 | 钥匙串 `SecretSlot::ClientLlm`（不是 serve 字段） | password 编辑 + 清除 | 未设 = 跟随 server 服务端 `API_KEY` | 仅本机，不回显明文；有「已设」标记 |
 
@@ -141,7 +141,7 @@ Desktop 设置共 8 个分区（`settings_page`）。逐区对齐结论见下表
 │ 外观   │  模型名            deepseek-chat*
 │ 模型 ▍ │  API Base          server
 │ 会话   │  温度              0.7
-│        │  上下文 tokens     (跟随 server)
+│        │  上下文长度         (跟随 server)
 │        │  思考模式          server
 │        │  API 密钥          已设置
 └────────┘
@@ -204,7 +204,7 @@ Desktop 设置共 8 个分区（`settings_page`）。逐区对齐结论见下表
 | Wave | 交付 | 验收 |
 |---|---|---|
 | **W1 面板骨架 + 模型/会话扁平字段**（**已落地**） | `/settings` + F6 页面；分区导航；三层显示；字段编辑：模型名、网关/api_base（预设表随 §6.4 对齐）、role、mode；`F2`（或 `S`）保存（`llm-overrides` / `prefs` 合并 PUT）；`Esc`/脏确认；回合中只读；`F6` 开关与 `F2` 保存已加入 `/help`（草案的「快捷键」面板分区**未落地**，信息仍只在 `/help` 输出里）；斜杠 `/model /mode /role` 保留 | 连本地 serve 冒烟：面板改 model/role/mode → 保存 → `/status` 与 Desktop 设置页可见 → 下一轮请求体带 `client_llm.model`；重启 TUI 后值仍在（user-data 层） |
-| **W2 完整 LLM 字段 + 密钥 + 工具开关**（**已落地**） | 温度/思考模式字段与 API 密钥写钥匙串槽 **已随面板一并落地**（校验区间对齐；密钥重启后从同一槽位回读；矩阵 auth Notes 已同步）；上下文 tokens、只读工具缓存开关、网关预设下拉（与 `client_llm_presets.rs` 同名表，双端同步注释已加；跨仓同步纪律见 §8）**已随收尾落地** | 校验区间对齐；密钥保存后重启可回读；上下文 tokens >0 随轮 `client_llm.llm_context_tokens`；关缓存开关后请求体出现 `readonly_tool_ttl_cache_secs: 0` |
+| **W2 完整 LLM 字段 + 密钥 + 工具开关**（**已落地**） | 温度/思考模式字段与 API 密钥写钥匙串槽 **已随面板一并落地**（校验区间对齐；密钥重启后从同一槽位回读；矩阵 auth Notes 已同步）；上下文长度、只读工具缓存开关、网关预设下拉（与 `client_llm_presets.rs` 同名表，双端同步注释已加；跨仓同步纪律见 §8）**已随收尾落地** | 校验区间对齐；密钥保存后重启可回读；上下文长度 >0 随轮 `client_llm.llm_context_tokens`；关缓存开关后请求体出现 `readonly_tool_ttl_cache_secs: 0` |
 | **W3 后置项（契约核对后 — 未落地）** | MCP 全局开关 + `tool_timeout_secs`（`/user-data/mcp-servers` 系端点）；Session SQLite 会话存储开关（`/status` 布尔 + POST）。**两项在 `tui_mode` 里都还没有对应代码** | 开关读/写与 Desktop 设置页同源一致；不实现服务器行管理 |
 | **W4 外观分区（主题）**（**已落地**） | 面板新增「外观」分区（导航首位，与 Desktop 同序）：`prefs.theme` 的 ←/→ 切换 + 合并写回；保存成功即用新值重解析配色；`palette.rs` 增 `THEME_OPTIONS`，并把 `crabmate-dark` 补进 `THEME_NAMES`（此前 `CM_TUI_THEME` 不认它） | 单测：选项→slug 映射、未知 slug（`system`）读透不改写、Esc 不落 staged、保存只进 prefs 组；冒烟：F6 → Tab 到「外观」→ 选 `crabmate-light` → `F2` → 配色立刻变化、`/user-data/prefs` 的 `theme` 同步、Desktop 设置页看到同值 |
 

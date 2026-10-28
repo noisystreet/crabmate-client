@@ -104,7 +104,7 @@ const fn field_label(field: FieldId) -> &'static str {
         FieldId::Model => "模型名",
         FieldId::ApiBase => "API Base",
         FieldId::Temperature => "温度",
-        FieldId::ContextTokens => "上下文 tokens",
+        FieldId::ContextTokens => "上下文长度",
         FieldId::ThinkingMode => "思考模式",
         FieldId::ApiKey => "API 密钥",
         FieldId::Role => "Agent role",
@@ -575,7 +575,7 @@ impl SettingsPanel {
     }
 
     /// 文本字段提交：trim 后空串 = 清除；API Base 需 http(s):// 前缀、温度需
-    /// 0.0..=2.0、上下文 tokens 需 ≤ 10_000_000 整数（非法则留在编辑态提示）；
+    /// 0.0..=2.0、上下文长度需 ≤ 10_000_000 整数（非法则留在编辑态提示）；
     /// 密钥空提交 = 清除。
     fn commit_text(&mut self) {
         let Some(Editing::Text { field, buf, .. }) = self.editing.take() else {
@@ -605,7 +605,7 @@ impl SettingsPanel {
             let cursor = buf.len();
             self.editing = Some(Editing::Text { field, buf, cursor });
             self.set_note(
-                "上下文需 0..=10_000_000 整数（留空保存 = 跟随 server）".to_string(),
+                "上下文长度需 0..=10_000_000 整数（留空保存 = 跟随 server）".to_string(),
                 Color::LightRed,
             );
             return;
@@ -876,7 +876,7 @@ mod tests;
 #[path = "settings_panel_w2_tests.rs"]
 mod tests_w2;
 
-// W2 收尾字段（上下文 tokens / 只读工具缓存 / 网关预设）单测独立成文件（同上）。
+// W2 收尾字段（上下文长度 / 只读工具缓存 / 网关预设）单测独立成文件（同上）。
 #[cfg(test)]
 #[path = "settings_panel_w3_tests.rs"]
 mod tests_w3;

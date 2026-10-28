@@ -41,7 +41,7 @@ fn draft_from_form_signals(s: &RegistryAddFormActionSignals) -> ManualPresetDraf
     }
 }
 
-/// 复用「保存全部」的同一条温度 / 上下文 token 校验，避免弹窗写入越界值。
+/// 复用「保存全部」的同一条温度 / 上下文长度校验，避免弹窗写入越界值。
 fn validate_manual_preset_overrides(d: &ManualPresetDraft, loc: Locale) -> Result<(), String> {
     crate::app::settings_commit::validate_temperature_override(&d.temperature, loc)?;
     crate::app::settings_commit::validate_llm_context_tokens_override(&d.ctx_tokens, loc)?;

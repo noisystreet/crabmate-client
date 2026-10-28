@@ -1,4 +1,4 @@
-//! 设置面板 W3（W2 收尾：上下文 tokens / 只读工具缓存开关 / 网关预设）的单测。
+//! 设置面板 W3（W2 收尾：上下文长度 / 只读工具缓存开关 / 网关预设）的单测。
 //!
 //! 独立成文件（`settings_panel.rs` 的 `#[path]` 子模块）：除行数门禁外，也避免
 //! 与旧字段单测混在同一文件时把 lizard 的函数体解析合并得过大。
@@ -52,7 +52,7 @@ fn context_tokens_invalid_commit_keeps_editing_with_note() {
     let c = ctx(&o, None);
     let mut p = SettingsPanel::new(false);
     for _ in 0..3 {
-        p.handle_key(&key(KeyCode::Down), &c); // 上下文 tokens 行
+        p.handle_key(&key(KeyCode::Down), &c); // 上下文长度行
     }
     assert_eq!(p.current_field(), FieldId::ContextTokens);
     p.handle_key(&key(KeyCode::Enter), &c);
@@ -102,7 +102,7 @@ fn context_tokens_row_shows_stored_value() {
     let text = lines_text(&p.content(&ctx(&o, Some(&stored)), 90));
     assert!(
         text.iter()
-            .any(|l| l.contains("上下文 tokens") && l.contains("32000"))
+            .any(|l| l.contains("上下文长度") && l.contains("32000"))
     );
 }
 
