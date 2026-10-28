@@ -8,7 +8,7 @@ use std::time::Duration;
 use crate::serve::{ApprovalDecision, ApprovalGate, CommandApprovalData, TermError};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use super::TuiApp;
+use super::LaneApp;
 use super::render;
 use super::state::ApprovalOverlay;
 use super::worker::UiEvent;
@@ -198,9 +198,9 @@ pub(super) fn approval_view_key(
 /// 边框 + 内容 + 状态栏。估大的方向只让滚动上界略宽，渲染侧还会再夹一次。
 const APPROVAL_CHROME_ROWS: u16 = 6;
 
-// 用显式生命周期而不是 `impl TuiApp<'_>`：lizard 的 Rust 解析器把 `'_` 当成
+// 用显式生命周期而不是 `impl LaneApp<'_>`：lizard 的 Rust 解析器把 `'_` 当成
 // 未闭合的字符字面量，会从这一行开始把后面所有函数体吞进同一个函数（fn-nloc 会误报）。
-impl<'a> TuiApp<'a> {
+impl<'a> LaneApp<'a> {
     /// 审批浮层期间的按键：先给「看完整命令」（`Ctrl+E` 展开、展开后滚动），再落到决策。
     ///
     /// 顺序不能反：展开态下 `↑/↓` 是滚动、`PgUp/PgDn` 是翻页；若先问 [`decision_for_key`]，

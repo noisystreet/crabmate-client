@@ -103,7 +103,7 @@ pub(super) enum UiEvent {
     ///
     /// **带 `conversation_id`**：请求是带着发起时的会话走的（`/permission` 按会话算），回包
     /// 却是异步的 —— 到达时用户可能已经切走或 `/conv new`，那份投影属于上一个会话，落到
-    /// 新会话的状态行就是「显示别人的档位」。收口在 [`TuiApp::on_serve_status`]。
+    /// 新会话的状态行就是「显示别人的档位」。收口在 [`LaneApp::on_serve_status`]。
     Status {
         conversation_id: Option<String>,
         result: Result<ServeDefaults, String>,

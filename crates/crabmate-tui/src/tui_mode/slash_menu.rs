@@ -19,7 +19,7 @@ use unicode_width::UnicodeWidthStr;
 
 use crabmate_client_api::slash;
 
-use super::TuiApp;
+use super::LaneApp;
 use super::palette::Palette;
 use super::state::UiState;
 use super::text::truncate_display;
@@ -247,7 +247,7 @@ fn accept_consumes(pass_when_empty: bool, accepted: bool) -> bool {
     accepted || !pass_when_empty
 }
 
-impl TuiApp<'_> {
+impl LaneApp<'_> {
     /// 菜单打开时接管这几个键；返回 `true` 表示已消费。
     pub(super) fn slash_menu_key(&mut self, key: &KeyEvent) -> bool {
         let n = self.st.slash_items().len();

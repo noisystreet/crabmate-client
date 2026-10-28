@@ -3,12 +3,12 @@
 //! 抽成独立模块有两个理由：一是把「哪些请求必须排队」和「哪些可以并发」分开写清楚，
 //! 二是压住 `mod.rs` 的行数（fn-nloc 门禁 ≤920）。
 
-use super::TuiApp;
+use super::LaneApp;
 use super::state::LineKind;
 use super::worker::{UiEvent, WorkerJob};
 use crate::serve::fetch_workspace_dir;
 
-impl TuiApp<'_> {
+impl LaneApp<'_> {
     /// 拉取子目录列表。
     ///
     /// 有 tokio runtime 时直接 `spawn`（生产路径）：目录展开是纯读，没有串行需求，排进

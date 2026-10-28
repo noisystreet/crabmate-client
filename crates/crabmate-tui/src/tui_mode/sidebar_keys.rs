@@ -12,7 +12,7 @@
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use super::TuiApp;
+use super::LaneApp;
 use super::state::{Focus, LineKind};
 use super::worker::WorkerJob;
 use crate::serve::{SessionIndexOp, SessionListRow, conversation_id_for_resume};
@@ -76,7 +76,7 @@ fn adjacent_session(sessions: &[SessionListRow], removed_idx: usize) -> Option<&
         .or_else(|| removed_idx.checked_sub(1).and_then(|i| sessions.get(i)))
 }
 
-impl TuiApp<'_> {
+impl LaneApp<'_> {
     /// Tab：从输入框跳到左栏会话，光标落在当前正在用的那一行（没有就第一行）。
     ///
     /// 从 `on_input_key` 下沉：那个 match 已贴着 lizard 的 CCN 门禁（≤ 10），

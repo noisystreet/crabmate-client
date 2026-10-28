@@ -1,7 +1,7 @@
-//! `TuiApp` 的测试构造辅助（仅 `#[cfg(test)]`）。
+//! `LaneApp` 的测试构造辅助（仅 `#[cfg(test)]`）。
 //!
-//! 事件循环里有几处「接线」只能在 `TuiApp` 层验证 —— 草稿换入换出、排队消息的去向、
-//! 回放失败后的回滚 —— 它们都不是纯函数，单测得先造出一个 `TuiApp`。
+//! 事件循环里有几处「接线」只能在 `LaneApp` 层验证 —— 草稿换入换出、排队消息的去向、
+//! 回放失败后的回滚 —— 它们都不是纯函数，单测得先造出一个 `LaneApp`。
 //!
 //! 这份构造器原本是 `workspace_cmd` 测试里的私有辅助。多个模块各写一份必然漂移，
 //! 而漂移的表现是「某个测试的初始状态与真实启动不一致」这种**假通过**，所以提到这里共用。
@@ -11,7 +11,7 @@ use std::sync::mpsc;
 use crate::SessionPrefs;
 use crate::serve::{ConnectionConfig, ServeClient};
 
-use super::TuiApp;
+use super::LaneApp;
 use super::spinner::Spinner;
 use super::state::UiState;
 use super::worker::{UiEvent, WorkerJob};
@@ -36,7 +36,7 @@ pub(super) fn test_client() -> ServeClient {
     ServeClient::new(ConnectionConfig::new("http://127.0.0.1:1", "")).expect("client")
 }
 
-/// 构造一个最小 `TuiApp`：`yes` / `no_keyring` 都打开，其余为启动初始态。
+/// 构造一个最小 `LaneApp`：`yes` / `no_keyring` 都打开，其余为启动初始态。
 ///
 /// `rx` / `tx` 必须是同一对：单测没有 tokio runtime，读请求会退回队列；但若将来某个
 /// 测试跑在 `#[tokio::test]` 下，读请求就真的会 `spawn`，那时发到一个没人读的通道里
@@ -48,8 +48,8 @@ pub(super) fn test_app<'a>(
     rx: mpsc::Receiver<UiEvent>,
     tx: mpsc::Sender<UiEvent>,
     job_tx: mpsc::Sender<WorkerJob>,
-) -> TuiApp<'a> {
-    TuiApp {
+) -> LaneApp<'a> {
+    LaneApp {
         client,
         overrides: prefs,
         yes: true,

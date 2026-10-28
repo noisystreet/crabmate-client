@@ -5,10 +5,10 @@
 //! 剩下的落进新草稿；夹带的 `Tab` 还会被当成焦点切换。开启后整段粘贴是一个事件，
 //! 走这条路径一次性写进输入框。
 
-use super::TuiApp;
+use super::LaneApp;
 use super::state::LineKind;
 
-impl TuiApp<'_> {
+impl LaneApp<'_> {
     /// 粘贴文本写进输入框光标处（**不提交**）。
     ///
     /// 超长内容由 [`super::state::UiState::insert_paste`] 截断，这里只负责告知一句。

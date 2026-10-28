@@ -7,7 +7,7 @@
 //! 时序约定：两条会真正切根的入口（`/workspace`、项目池）都在**发切换请求之前**先做空白行
 //! 回收 —— 会话索引端点只认 `workspaces/current`，切完再回收，请求就落到新桶上了。
 
-use super::TuiApp;
+use super::LaneApp;
 use super::state::LineKind;
 use super::worker::WorkerJob;
 use crate::workspace_path::{self, is_default_word};
@@ -90,7 +90,7 @@ fn ws_set_input(raw: &str, resolve: impl FnOnce(&str) -> Result<String, String>)
     }
 }
 
-impl TuiApp<'_> {
+impl LaneApp<'_> {
     /// `/workspace`（别名 `/cd`）：空参查当前根，带参按路径切换。
     ///
     /// 与项目池的差别只在**入口怎么选**：项目池走 `…/projects`，只能挑 serve 池内已有
