@@ -198,7 +198,7 @@ impl TuiApp<'_> {
             .then(|| self.lane().spinner.remaining());
         let got = self.lane().rx.recv_timeout(next_wait(left));
         match got {
-            Ok(msg) => self.lane_mut().on_msg(msg),
+            Ok(msg) => self.on_msg(msg),
             // 超时醒来只为画动画帧 / 兜底查尺寸，本轮没有消息。
             Err(RecvTimeoutError::Timeout) => return Ok(false),
             // 结构上**不可达**：`LaneApp` 自持 `tx`，`run_loop` 期间它必然存活，
@@ -221,7 +221,7 @@ impl TuiApp<'_> {
             let next = self.lane().rx.try_recv();
             let Ok(msg) = next else { break };
             any = true;
-            self.lane_mut().on_msg(msg);
+            self.on_msg(msg);
             if self.lane().exit {
                 break;
             }

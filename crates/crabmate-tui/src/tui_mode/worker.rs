@@ -159,7 +159,19 @@ pub(super) enum UiEvent {
     SavedPrefs(Result<PrefsSave, String>),
     /// skill 目录（`GET /skills`，供 `/` 补全菜单的 skill 候选）。
     Skills(Result<SkillsPayload, String>),
+    /// 带来源 lane 的事件：SSE 流增量与回合结果都由某条 lane 产生。
+    ///
+    /// `Box` 只为打破递归类型；解包集中在外层 `TuiApp::on_msg` 一处完成，
+    /// lane 内的业务 `match` 仍按裸变体写（见 `docs/design/tui_multi_server.md` §4.2）。
+    Lane(LaneId, Box<UiEvent>),
 }
+
+/// 一条 lane（连接）的稳定标识：单调递增、不回收（避免 ABA）。
+///
+/// **裸变体 = 全局输入**：键盘 / 鼠标 / 粘贴 / 尺寸从不带标签（`spawn_key_reader`
+/// 直接发裸 `UiEvent`），由外层路由给当前 lane。只有 SSE 流与回合结果带标签。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(super) struct LaneId(pub(super) u32);
 
 /// 回合后台任务：由持久 worker 线程串行消费。
 pub(super) struct TurnRequest {
@@ -234,50 +246,51 @@ pub(super) enum WorkerJob {
     },
 }
 
-/// 全屏模式 sink：把流事件发往 UI 事件通道。
+/// 全屏模式 sink：把流事件发往 UI 事件通道，并标注来源 lane。
 struct UiSink {
+    /// 产生这些流事件的 lane。UI 侧据此把增量写进对应的 transcript。
+    lane: LaneId,
     tx: Sender<UiEvent>,
+}
+
+impl UiSink {
+    /// 所有出站事件都带 lane 标签；通道关闭即视为 UI 已退出。
+    fn emit(&self, ev: UiEvent) -> Result<(), TermError> {
+        self.tx
+            .send(UiEvent::Lane(self.lane, Box::new(ev)))
+            .map_err(|_| TermError::Message("ui channel closed".into()))
+    }
 }
 
 impl StreamSink for UiSink {
     fn on_text(&mut self, delta: &str) -> Result<(), TermError> {
         if !delta.is_empty() {
-            self.tx
-                .send(UiEvent::Text(delta.to_string()))
-                .map_err(|_| TermError::Message("ui channel closed".into()))?;
+            self.emit(UiEvent::Text(delta.to_string()))?;
         }
         Ok(())
     }
 
     fn on_reasoning(&mut self, delta: &str) -> Result<(), TermError> {
         if !delta.is_empty() {
-            self.tx
-                .send(UiEvent::Thinking(delta.to_string()))
-                .map_err(|_| TermError::Message("ui channel closed".into()))?;
+            self.emit(UiEvent::Thinking(delta.to_string()))?;
         }
         Ok(())
     }
 
     fn on_system(&mut self, line: &str) -> Result<(), TermError> {
         if !line.is_empty() {
-            self.tx
-                .send(UiEvent::System(line.to_string()))
-                .map_err(|_| TermError::Message("ui channel closed".into()))?;
+            self.emit(UiEvent::System(line.to_string()))?;
         }
         Ok(())
     }
 
     fn on_context_trim(&mut self, after: u32) -> Result<(), TermError> {
-        self.tx
-            .send(UiEvent::ContextTrim(after))
-            .map_err(|_| TermError::Message("ui channel closed".into()))?;
+        self.emit(UiEvent::ContextTrim(after))?;
         Ok(())
     }
 
     fn on_prompt_tokens(&mut self, snap: &TiktokenPromptTokensSnapshot) -> Result<(), TermError> {
-        self.tx
-            .send(UiEvent::PromptTokens(Box::new(snap.clone())))
-            .map_err(|_| TermError::Message("ui channel closed".into()))
+        self.emit(UiEvent::PromptTokens(Box::new(snap.clone())))
     }
 
     fn on_tool_start(
@@ -286,13 +299,11 @@ impl StreamSink for UiSink {
         name: &str,
         note: Option<&str>,
     ) -> Result<(), TermError> {
-        self.tx
-            .send(UiEvent::ToolStart {
-                tool_call_id: tool_call_id.to_string(),
-                name: name.to_string(),
-                note: note.map(str::to_string),
-            })
-            .map_err(|_| TermError::Message("ui channel closed".into()))
+        self.emit(UiEvent::ToolStart {
+            tool_call_id: tool_call_id.to_string(),
+            name: name.to_string(),
+            note: note.map(str::to_string),
+        })
     }
 
     fn on_tool_end(
@@ -302,14 +313,12 @@ impl StreamSink for UiSink {
         ok: Option<bool>,
         note: Option<&str>,
     ) -> Result<(), TermError> {
-        self.tx
-            .send(UiEvent::ToolEnd {
-                tool_call_id: tool_call_id.to_string(),
-                name: name.to_string(),
-                ok,
-                note: note.map(str::to_string),
-            })
-            .map_err(|_| TermError::Message("ui channel closed".into()))
+        self.emit(UiEvent::ToolEnd {
+            tool_call_id: tool_call_id.to_string(),
+            name: name.to_string(),
+            ok,
+            note: note.map(str::to_string),
+        })
     }
 }
 
@@ -366,7 +375,11 @@ pub(super) fn is_actionable_mouse(kind: MouseEventKind) -> bool {
 /// 持久 worker：单 current-thread runtime 串行执行回合与刷新任务，
 /// 避免同一 `reqwest::Client` 跨多个临时 runtime 复用的连接池问题；
 /// UI 退出（job_tx drop）后 worker 自行退出。
-pub(super) fn spawn_worker(client: ServeClient, tx: Sender<UiEvent>) -> Sender<WorkerJob> {
+pub(super) fn spawn_worker(
+    lane: LaneId,
+    client: ServeClient,
+    tx: Sender<UiEvent>,
+) -> Sender<WorkerJob> {
     let (job_tx, job_rx) = mpsc::channel::<WorkerJob>();
     thread::spawn(move || {
         let rt = tokio::runtime::Builder::new_current_thread()
@@ -375,7 +388,7 @@ pub(super) fn spawn_worker(client: ServeClient, tx: Sender<UiEvent>) -> Sender<W
             .expect("worker runtime");
         while let Ok(job) = job_rx.recv() {
             match job {
-                WorkerJob::Turn(job) => run_turn_job(&rt, &client, *job, &tx),
+                WorkerJob::Turn(job) => run_turn_job(&rt, &client, *job, &tx, lane),
                 WorkerJob::RefreshSessions => job_refresh_sessions(&rt, &client, &tx),
                 WorkerJob::ConversationHistory {
                     conversation_id,
@@ -418,9 +431,13 @@ fn run_turn_job(
     client: &ServeClient,
     job: TurnRequest,
     tx: &Sender<UiEvent>,
+    lane: LaneId,
 ) {
     let result = rt.block_on(async {
-        let mut sink = UiSink { tx: tx.clone() };
+        let mut sink = UiSink {
+            lane,
+            tx: tx.clone(),
+        };
         let mut gate: Box<dyn ApprovalGate> = if job.yes {
             Box::new(AutoAllowOnce)
         } else {

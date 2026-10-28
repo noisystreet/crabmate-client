@@ -14,7 +14,7 @@ use crate::serve::{ConnectionConfig, ServeClient};
 use super::LaneApp;
 use super::spinner::Spinner;
 use super::state::UiState;
-use super::worker::{UiEvent, WorkerJob};
+use super::worker::{LaneId, UiEvent, WorkerJob};
 
 /// 空的会话级 override（`*` 覆盖），让状态行回落到 serve 默认。
 pub(super) fn test_prefs() -> SessionPrefs {
@@ -50,6 +50,7 @@ pub(super) fn test_app<'a>(
     job_tx: mpsc::Sender<WorkerJob>,
 ) -> LaneApp<'a> {
     LaneApp {
+        id: LaneId(0),
         client,
         overrides: prefs,
         yes: true,
