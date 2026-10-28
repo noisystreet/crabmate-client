@@ -96,7 +96,7 @@
 - [`context_axis_apply_watermark`](../../frontend/src/app/status_context.rs#L242-L257) → 施加会话内滚动水位（单调不减）；
 - 快照 [`TiktokenPromptTokensSnapshot`](../../crates/crabmate-client-api/src/prompt_tokens.rs) → 取 `tool_schema_tokens` / `reserved_output_tokens` 等附加桶。
 
-**分母口径（`raw_cap`）优先级**：本机设置「上下文 token 上限」(`client_llm.llm_context_tokens`) → `GET /status` 的 `llm_context_tokens` → 服务端 `max_input_tokens`。前两者都是「上下文窗口」口径（本机是用户设定，`/status` 是服务端同字段回读），服务端 `max_input_tokens` 则是「窗口 − 输出预留 − 安全余量」的派生预算、口径不同。若首轮前用窗口（如 `1000k`）、首轮后切成 `max_input_tokens`（如 `993k`），分母会在两值间跳变，引起困惑，也违背「最大可用量应恒定」的预期；故把 `max_input_tokens` 降为上限未知时的最后回退，让分母在整个会话内恒定。
+**分母口径（`raw_cap`）优先级**：本机设置「上下文长度」(`client_llm.llm_context_tokens`) → `GET /status` 的 `llm_context_tokens` → 服务端 `max_input_tokens`。前两者都是「上下文窗口」口径（本机是用户设定，`/status` 是服务端同字段回读），服务端 `max_input_tokens` 则是「窗口 − 输出预留 − 安全余量」的派生预算、口径不同。若首轮前用窗口（如 `1000k`）、首轮后切成 `max_input_tokens`（如 `993k`），分母会在两值间跳变，引起困惑，也违背「最大可用量应恒定」的预期；故把 `max_input_tokens` 降为上限未知时的最后回退，让分母在整个会话内恒定。
 
 **刷新时机（须在页面注明）**：`used` 只在回合末（`RUN_FINISHED`）或水合时刷新；流式进行中显示的是**上一回合末快照**。这是 ADR-0005 的已知时序特性，页面应显式提示，避免用户误以为数字卡住。
 
@@ -104,7 +104,7 @@
 
 ### 主图：横向堆叠条（stacked bar）
 
-一条 100% 宽、固定高度的矩形条，宽度轴 = `raw_cap`（**上下文窗口：本机设置「上下文 token 上限」优先，未设置时用 `/status` 的 `llm_context_tokens`**）。从左到右分段，每段宽 = `该桶 / raw_cap × 100%`：
+一条 100% 宽、固定高度的矩形条，宽度轴 = `raw_cap`（**上下文窗口：本机设置「上下文长度」优先，未设置时用 `/status` 的 `llm_context_tokens`**）。从左到右分段，每段宽 = `该桶 / raw_cap × 100%`：
 
 ```text
 ├─────────────────────────────── 100% = raw_cap ────────────────────────────────┤

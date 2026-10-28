@@ -344,15 +344,15 @@ pub fn settings_ph_temperature(l: Locale) -> &'static str {
 
 pub fn settings_err_context_tokens_invalid(l: Locale) -> &'static str {
     match l {
-        Locale::ZhHans => "上下文窗口须为非负整数",
-        Locale::En => "Context window must be a non-negative integer",
+        Locale::ZhHans => "上下文长度须为非负整数",
+        Locale::En => "Context length must be a non-negative integer",
     }
 }
 
 pub fn settings_err_context_tokens_range(l: Locale) -> &'static str {
     match l {
-        Locale::ZhHans => "上下文窗口过大（上限 10000000）",
-        Locale::En => "Context window too large (max 10000000)",
+        Locale::ZhHans => "上下文长度过大（上限 10000000）",
+        Locale::En => "Context length too large (max 10000000)",
     }
 }
 
@@ -733,8 +733,8 @@ pub fn settings_models_ph_api_key_keep(l: Locale) -> &'static str {
 
 pub fn settings_models_label_context_tokens(l: Locale) -> &'static str {
     match l {
-        Locale::ZhHans => "上下文 token（可选）",
-        Locale::En => "Context tokens (optional)",
+        Locale::ZhHans => "上下文长度（可选）",
+        Locale::En => "Context length (optional)",
     }
 }
 
