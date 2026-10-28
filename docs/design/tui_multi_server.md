@@ -105,26 +105,22 @@ pub(crate) struct TuiApp<'a> {
 
 ### 4.2 事件路由
 
+实现方式（**W1b 已落地**）：不拆枚举、不改 70 余处分派分支，只加一个自引用包装变体。
+
 ```rust
-pub(crate) enum UiEvent {
-    // 全局事件：不归属任何 lane
-    Key(KeyEvent), Paste(String), Mouse(MouseEvent), Resize,
-    // lane 事件：一律带来源
-    Lane { id: LaneId, ev: LaneEvent },
+pub(super) enum UiEvent {
+    // …既有变体全部保留（构造点与 lane 内的 match 一行不改）
+    /// 带来源 lane：SSE 流增量与回合结果由某条 lane 产生。
+    Lane(LaneId, Box<UiEvent>),
 }
 
-pub(crate) enum LaneEvent {
-    Text(String), Thinking(String), System(String),
-    ToolStart { .. }, ToolEnd { .. },
-    TurnDone { .. }, Approval { .. }, ApprovalExpired { .. },
-    Sessions(..), PromptTokens(..), ContextTrim(u32), UsageHydrated { .. },
-    ConversationHistory { .. }, SessionIndex { .. }, Status { .. },
-    PermissionWritten { .. }, Workspace { .. }, WorkspaceDir { .. },
-    WsProjects(..), WsProjectSwitch(..), Skills(..),
-}
+pub(super) struct LaneId(pub(super) u32);
 ```
 
-- **单通道 + 带 tag**（推荐）：`UiEvent::Lane { id, ev }`，`on_msg` 按 `id` 找 lane 后分派。改动集中在 `worker.rs` 的 `UiSink`（多一个 `id` 字段）与 `mod.rs` 的 `on_msg` 分派表。
+- **裸变体 = 全局输入**：键盘 / 鼠标 / 粘贴 / 尺寸从不带标签（`spawn_key_reader` 直接发裸 `UiEvent`），由外层路由给当前 lane。
+- **只有 SSE 流带标签**：`UiSink { lane, tx }` 的 `emit()` 统一包一层，`spawn_worker(lane, …)` 在装配时注入。
+- **解包只在一处**：`TuiApp::on_msg` 按 `LaneId` 找 lane 后调 `LaneApp::on_msg`；找不到（该 lane 已关闭）就丢弃，绝不把增量写进别人的 transcript。
+- **为什么不拆 `LaneEvent`**：`UiEvent` 有 25 个变体、70 余处构造与匹配点，拆分会让每个 struct 变体多补一层括号，diff 全是噪声；包装变体达到同样效果，且能随 W2 增量演进。
 - **每 lane 通道 + 统一转发**：隔离更强，但 `run_loop` 的 `recv_timeout` / drain 逻辑要改成 select，且会改变既有节流语义（`event_loop.rs:186-219`）——不推荐作为第一版。
 - **跨 lane 的「代数」门控必须留在 lane 内**：`ws_generation`、`permission_generation`、`UsageHydrated` / `Status` 的 `conversation_id` 校验，作用域都是「这一条会话流」，**不得**提升为全局代数（否则 A 的切会话会误丢 B 的回包）。
 

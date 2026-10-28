@@ -70,7 +70,7 @@ use self::controls::{Control, clear_word, parse_control, set_mode_field, set_ove
 use self::render::StatusInfo;
 use self::settings::{PersistedSettings, normalize};
 use self::settings_panel::SettingsPanel;
-use self::worker::{UiEvent, WorkerJob};
+use self::worker::{LaneId, UiEvent, WorkerJob};
 use super::SessionPrefs;
 use state::{Focus, LineKind, UiState};
 
@@ -83,6 +83,8 @@ pub use self::shell::run_tui;
 /// 访问因此**一行都不用改**。多 lane 只在外层 [`TuiApp`] 增一层路由，见
 /// `docs/design/tui_multi_server.md` §4.1。
 struct LaneApp<'a> {
+    /// 本条 lane 的标识：SSE 流事件按它分发（见外层 [`TuiApp::on_msg`]）。
+    id: LaneId,
     client: &'a ServeClient,
     overrides: &'a mut SessionPrefs,
     yes: bool,
@@ -139,6 +141,24 @@ impl<'a> TuiApp<'a> {
     /// 当前 lane（可变）。
     fn lane_mut(&mut self) -> &mut LaneApp<'a> {
         &mut self.lanes[self.active]
+    }
+
+    /// 事件入口：带 lane 标签的按 id 分发，其余交给当前 lane。
+    ///
+    /// 键盘 / 鼠标 / 粘贴 / 尺寸从不带标签（`spawn_key_reader` 发裸变体）：W1 阶段只有
+    /// 一条 lane，直接路由给当前 lane；W2 引入切换后这里也是「输入只作用于当前 lane」
+    /// 的落点（见 `docs/design/tui_multi_server.md` §4.2）。
+    fn on_msg(&mut self, msg: UiEvent) {
+        match msg {
+            UiEvent::Lane(id, inner) => {
+                // 目标 lane 已关闭（W2 起才可能出现）：丢弃，绝不把增量写进别的
+                // transcript —— 串台比丢一条增量难查得多。
+                if let Some(lane) = self.lanes.iter_mut().find(|l| l.id == id) {
+                    lane.on_msg(*inner);
+                }
+            }
+            other => self.lane_mut().on_msg(other),
+        }
     }
 }
 
@@ -641,6 +661,9 @@ impl LaneApp<'_> {
 
     fn on_msg(&mut self, msg: UiEvent) {
         match msg {
+            // 外层已按 `LaneId` 分发过；lane 内再见到标签只可能来自直连测试，
+            // 递归解包即可（不丢弃，避免测试构造的标签事件被静默吃掉）。
+            UiEvent::Lane(_, inner) => self.on_msg(*inner),
             UiEvent::Key(key) => self.on_key(key),
             // 粘贴整段进输入框（不改焦点、不提交）：见 `paste` 模块头注释。
             UiEvent::Paste(text) => self.on_paste(text),

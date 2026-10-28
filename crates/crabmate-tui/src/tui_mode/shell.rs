@@ -22,7 +22,7 @@ use crate::SessionPrefs;
 use crate::serve::ServeClient;
 
 use super::state::UiState;
-use super::worker::{UiEvent, spawn_key_reader, spawn_worker};
+use super::worker::{LaneId, UiEvent, spawn_key_reader, spawn_worker};
 use super::{LaneApp, TuiApp, body_cache, drafts, event_loop, session_index, spinner};
 
 /// 鼠标上报：只要按下/释放（1000）、按住时的拖动（1002）与 SGR 编码（1006）。
@@ -90,10 +90,13 @@ pub async fn run_tui(
 
     let (tx, rx) = mpsc::channel::<UiEvent>();
     spawn_key_reader(tx.clone());
-    let job_tx = spawn_worker(client.clone(), tx.clone());
+    // W1：唯一的 lane 编号为 0；W2 起按 profile 逐个分配。
+    let lane_id = LaneId(0);
+    let job_tx = spawn_worker(lane_id, client.clone(), tx.clone());
 
     // W1：单 lane。W2 起按 profile 列表逐条建 lane（见 `docs/design/tui_multi_server.md` §6）。
     let lane = LaneApp {
+        id: lane_id,
         client,
         overrides,
         yes,
