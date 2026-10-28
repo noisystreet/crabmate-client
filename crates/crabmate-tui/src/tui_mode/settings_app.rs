@@ -68,7 +68,7 @@ impl LaneApp<'_> {
                 return;
             };
             let ctx = PanelCtx {
-                overrides: self.overrides,
+                overrides: &self.overrides,
                 persisted: self.persisted.as_ref(),
                 serve_defaults: self.st.serve_defaults.as_ref(),
             };
@@ -89,7 +89,7 @@ impl LaneApp<'_> {
     pub(crate) fn settings_content(&self, width: usize) -> Option<PanelContent> {
         let panel = self.panel.as_ref()?;
         let ctx = PanelCtx {
-            overrides: self.overrides,
+            overrides: &self.overrides,
             persisted: self.persisted.as_ref(),
             serve_defaults: self.st.serve_defaults.as_ref(),
         };

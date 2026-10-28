@@ -144,6 +144,9 @@ struct ResumePoint {
 
 /// repl 会话内可变的偏好：`client_llm` 覆盖（model/api_base/api_key）+ agent role + session mode。
 /// chat 一次性用 `prefs()` 派生；空白值在发送层自动省略。
+///
+/// `Clone` 用于 TUI 多 lane：每条 lane 持有自己的一份覆盖（`/model` 只影响当前 lane）。
+#[derive(Clone)]
 struct SessionPrefs {
     api_key: Option<String>,
     model: Option<String>,

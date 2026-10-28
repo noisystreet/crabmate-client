@@ -56,7 +56,7 @@ pub(super) fn test_app<'a>(
     LaneApp {
         id: LaneId(0),
         client,
-        overrides: prefs,
+        overrides: prefs.clone(),
         yes: true,
         no_keyring: true,
         st: UiState::new(),
