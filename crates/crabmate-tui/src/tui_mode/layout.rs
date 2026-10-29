@@ -7,6 +7,9 @@ use ratatui::layout::{Constraint, Layout, Rect};
 
 use super::render::{SIDEBAR_WIDTH, WORKSPACE_PANE_WIDTH};
 
+/// lane 列表标题（`连接 [n]`）占的行数。
+const LANE_TITLE_ROWS: u16 = 1;
+
 /// 主体 / 底栏；宽屏时主体再分「左会话 | 聊天 | 右工作区」，右栏底部再切出状态栈。
 ///
 /// **宽屏没有底栏**（`status == None`）：状态改到右栏底部纵向排列，那一行还给正文 ——
@@ -18,7 +21,7 @@ pub(super) struct Panes {
     pub status: Option<Rect>,
     /// 左栏会话列（窄屏隐藏时为 `None`）。**不含**底部 lane 列表。
     pub left: Option<Rect>,
-    /// 左栏底部的 lane 列表；窄屏时为 `None`。**单 lane 也占位**（行数见 [`lane_rows`]）。
+    /// 左栏底部的 lane 列表；窄屏时为 `None`。**单 lane 也占位**（高度见 [`lane_pane_height`]）。
     ///
     /// 和 `right` / `right_status` 一样，渲染与鼠标命中都只认这里给出的矩形。
     pub left_lanes: Option<Rect>,
@@ -30,16 +33,37 @@ pub(super) struct Panes {
     pub right_status: Option<Rect>,
 }
 
-/// lane 区占用的行数：首行标题 + 每条 lane 一行；没有 lane 时不占版面。
+/// lane 区占左栏的高度：**固定为左栏的一半**（会话列表至少留 1 行）。
 ///
-/// **渲染与鼠标命中必须共用这一个口径**（`draw` 与 `TuiApp::lane_at_click`）：
-/// 两边各算一遍的症状是「点第 2 条切到第 3 条」，比画错更难归因。
-/// 单 lane 也占位 —— 否则「现在连的是哪台 serve、有没有别的连接」在界面上完全不可见。
-pub(super) fn lane_rows(lanes_len: usize) -> u16 {
+/// 与 lane 条数解耦：条数只影响区内画得出几条（见 [`lane_shown_len`]，放不下的在标题
+/// 补 `↓n`），不改变
+/// 「lane 区占左栏一半」这条版面契约 —— 否则每加一条连接会话列表就往上缩一截，
+/// 版面会随连接数抖动，切 lane 时整屏都在跳。
+pub(super) fn lane_pane_height(sidebar_height: u16, lanes_len: usize) -> u16 {
     if lanes_len == 0 {
         return 0;
     }
-    (lanes_len as u16).saturating_add(1)
+    (sidebar_height / 2).min(sidebar_height.saturating_sub(1))
+}
+
+/// lane 区内实际画得下的条数：**每条 lane 一行**，可用行不够时按行截断。
+///
+/// **渲染与鼠标命中必须共用这一个口径**（[`lane_index_at`] 是它的反函数）：两边各算
+/// 一遍的症状是「点第 2 行切到第 3 条」，比画错更难归因。
+///
+/// 装不下时不静默丢弃：渲染侧在标题行补 `↓n`，与侧栏列表的溢出计数同一手法。
+pub(super) fn lane_shown_len(avail_rows: u16, lanes_len: usize) -> usize {
+    lanes_len.min(usize::from(avail_rows))
+}
+
+/// lane 区内某一行（0-based、相对 lane 区顶端）对应的 lane 下标；标题行与空白区返回 `None`。
+pub(super) fn lane_index_at(area_height: u16, lanes_len: usize, row_in: u16) -> Option<usize> {
+    if row_in < LANE_TITLE_ROWS {
+        return None;
+    }
+    let avail = area_height.saturating_sub(LANE_TITLE_ROWS);
+    let idx = usize::from(row_in - LANE_TITLE_ROWS);
+    (idx < lane_shown_len(avail, lanes_len)).then_some(idx)
 }
 
 /// 按终端区域、侧栏可见性与状态栈高度切分。
@@ -53,13 +77,14 @@ pub(super) fn panes(area: Rect, sidebar_visible: bool, stack_rows: u16) -> Panes
 
 /// 带 lane 列表的分区：左栏再切成「会话列表（上）/ lane 列表（下）」。
 ///
-/// `lane_rows == 0`（没有任何 lane）时左栏不下切（`Panes::left_lanes` 为 `None`）。
-/// 行数请交给 [`lane_rows`] 算 —— 单 lane 也是 `2`（标题 + 一行），不再隐藏。
+/// `lanes_len == 0`（没有任何 lane）时左栏不下切（`Panes::left_lanes` 为 `None`）；
+/// 有一条及以上就固定切走左栏一半 —— **单 lane 也占位**，否则「现在连的是哪台 serve、
+/// 有没有别的连接」在界面上完全不可见。
 pub(super) fn panes_with_lanes(
     area: Rect,
     sidebar_visible: bool,
     stack_rows: u16,
-    lane_rows: u16,
+    lanes_len: usize,
 ) -> Panes {
     if !sidebar_visible {
         let rows = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(area);
@@ -81,9 +106,9 @@ pub(super) fn panes_with_lanes(
     let stack = stack_rows.min(cols[2].height.saturating_sub(1));
     let right_rows =
         Layout::vertical([Constraint::Min(1), Constraint::Length(stack)]).split(cols[2]);
-    // lane 区最多占左栏一半，且会话区至少留 1 行：这两条不变量放在这里而不是
-    // 让渲染各算一遍，否则「lane 多了把会话列表挤没」这种症状很难归因。
-    let lane_h = lane_rows.min(cols[0].height.saturating_sub(1) / 2);
+    // lane 区高度固定为左栏一半、会话区至少留 1 行：两条不变量都算在这里，渲染侧不再
+    // 各算一遍，否则「lane 区占了多高」会出现两份互相漂移的答案。
+    let lane_h = lane_pane_height(cols[0].height, lanes_len);
     let left_rows =
         Layout::vertical([Constraint::Min(1), Constraint::Length(lane_h)]).split(cols[0]);
     Panes {
@@ -109,18 +134,16 @@ pub(super) fn contains(area: Rect, column: u16, row: u16) -> bool {
         && row < area.y.saturating_add(area.height)
 }
 
-/// 左栏 lane 列表里被点中的 lane 下标；标题行不算，越界返回 `None`。
+/// 左栏 lane 列表里被点中的 lane 下标；标题行 / 空白区返回 `None`。
 ///
-/// 行号只在这里换算一次：绘制与命中都用 [`panes_with_lanes`] 的同一份矩形，
-/// 两边各算一遍迟早漂移（症状是「点第 2 条切到第 3 条」）。
+/// 行号换算只在 [`lane_index_at`] 里做一次：绘制与命中都用 [`panes_with_lanes`] 的
+/// 同一份矩形与同一份块高，两边各算一遍迟早漂移（症状是「点第 2 条切到第 3 条」）。
 pub(super) fn lane_hit(p: &Panes, lanes_len: usize, column: u16, row: u16) -> Option<usize> {
     let rect = p.left_lanes?;
     if !contains(rect, column, row) {
         return None;
     }
-    // 首行是标题 `连接 [n]`，其后依次是各 lane。
-    let idx = usize::from(row.saturating_sub(rect.y)).checked_sub(1)?;
-    (idx < lanes_len).then_some(idx)
+    lane_index_at(rect.height, lanes_len, row.saturating_sub(rect.y))
 }
 
 #[cfg(test)]
@@ -196,39 +219,36 @@ mod tests {
         assert!(!contains(Rect::new(10, 5, 4, 0), 10, 5), "空矩形不命中");
     }
 
-    /// 单 lane 也占位：`lane_rows(1)` 是 2 行（标题 + 那一条），左栏因此下切。
-    ///
-    /// 这条口径由 `draw` 与 `lane_at_click` 共用，所以按钮命中的行数必须跟着这里走。
+    /// lane 区高度**固定**为左栏一半：条数不影响版面高度（1 条与 8 条一样高）。
     #[test]
-    fn single_lane_still_takes_two_rows() {
-        assert_eq!(lane_rows(0), 0, "没有 lane 才不占版面");
-        assert_eq!(lane_rows(1), 2);
-        assert_eq!(lane_rows(8), 9);
-        let p = panes_with_lanes(Rect::new(0, 0, 200, 40), true, 5, lane_rows(1));
-        let lanes = p.left_lanes.expect("单 lane 也要有 lane 区");
-        assert_eq!(lanes.height, 2);
-        assert_eq!(p.left.unwrap().height, 38, "会话列表让出 2 行");
+    fn lane_pane_always_takes_half_of_the_sidebar() {
+        assert_eq!(lane_pane_height(40, 1), 20);
+        assert_eq!(lane_pane_height(40, 8), 20, "条数不改变版面高度");
+        assert_eq!(lane_pane_height(41, 3), 20, "奇数行向下取整");
+        assert_eq!(lane_pane_height(40, 0), 0, "没有 lane 才不占版面");
+        assert_eq!(lane_pane_height(2, 1), 1, "会话列表至少留 1 行");
+        assert_eq!(lane_pane_height(1, 3), 0, "连一行都让不出来就不切");
     }
 
-    /// 没有 lane（`lane_rows == 0`）：左栏不下切，整块留给会话列表。
     #[test]
-    fn zero_lane_rows_keeps_the_sidebar_whole() {
+    fn lanes_split_the_sidebar_at_the_half_line() {
+        let p = panes_with_lanes(Rect::new(0, 0, 200, 40), true, 5, 1);
+        let lanes = p.left_lanes.expect("单 lane 也要有 lane 区");
+        assert_eq!(lanes.height, 20);
+        assert_eq!(p.left.unwrap().height, 20, "会话列表让出另一半");
+
+        // 多 lane 也是同一块高度，只有里面的色块变矮。
+        let p = panes_with_lanes(Rect::new(0, 0, 200, 40), true, 5, 12);
+        assert_eq!(p.left_lanes.expect("lane 区仍在").height, 20);
+        assert_eq!(p.left.unwrap().height, 20);
+    }
+
+    /// 没有 lane（`lanes_len == 0`）：左栏不下切，整块留给会话列表。
+    #[test]
+    fn zero_lanes_keep_the_sidebar_whole() {
         let p = panes_with_lanes(Rect::new(0, 0, 200, 40), true, 5, 0);
         assert!(p.left_lanes.is_none(), "没有 lane 就不该凭空多出一块");
         assert_eq!(p.left.unwrap().height, 40);
-    }
-
-    /// 多 lane：左栏下切，lane 区不超过一半、会话区至少留 1 行。
-    #[test]
-    fn lane_rows_split_the_sidebar_within_half() {
-        let p = panes_with_lanes(Rect::new(0, 0, 200, 40), true, 5, 3);
-        assert_eq!(p.left_lanes.expect("3 行 lane 区应当存在").height, 3);
-        assert_eq!(p.left.unwrap().height, 37);
-
-        // 超量请求被压到「一半」上限：40 行时最多 19 行（会话区留 21）。
-        let p = panes_with_lanes(Rect::new(0, 0, 200, 40), true, 5, 30);
-        assert_eq!(p.left_lanes.unwrap().height, 19);
-        assert_eq!(p.left.unwrap().height, 21);
     }
 
     /// 左栏隐藏时 lane 区也必须是 `None`：否则窄屏会画到不存在的列上。
@@ -237,5 +257,29 @@ mod tests {
         let p = panes_with_lanes(Rect::new(0, 0, 80, 24), false, 5, 4);
         assert!(p.left.is_none());
         assert!(p.left_lanes.is_none());
+    }
+
+    /// 一条 lane 一行：可用行不够时按行截断（多出的由标题的 `↓n` 报出）。
+    #[test]
+    fn shown_len_keeps_one_row_per_lane() {
+        assert_eq!(lane_shown_len(19, 0), 0, "没有 lane 就没有行");
+        assert_eq!(lane_shown_len(0, 3), 0, "没有可用行就一条都画不了");
+        assert_eq!(lane_shown_len(19, 1), 1);
+        assert_eq!(lane_shown_len(19, 6), 6);
+        assert_eq!(lane_shown_len(19, 20), 19, "20 条只能画 19 条");
+    }
+
+    /// 命中与渲染同源：每条 lane 恰好一行，标题行与色条之下的空白不命中。
+    #[test]
+    fn lane_index_at_matches_one_row_per_lane() {
+        // 20 行 lane 区（19 行可用）+ 3 条 lane → 第 1..=3 行各一条。
+        assert_eq!(lane_index_at(20, 3, 0), None, "标题行不算");
+        assert_eq!(lane_index_at(20, 3, 1), Some(0));
+        assert_eq!(lane_index_at(20, 3, 2), Some(1));
+        assert_eq!(lane_index_at(20, 3, 3), Some(2));
+        assert_eq!(lane_index_at(20, 3, 4), None, "色条之下的空白不命中");
+        // 20 条挤在 19 行里：最后一行是第 19 条，第 20 条被截断。
+        assert_eq!(lane_index_at(20, 20, 19), Some(18));
+        assert_eq!(lane_index_at(20, 20, 20), None);
     }
 }
