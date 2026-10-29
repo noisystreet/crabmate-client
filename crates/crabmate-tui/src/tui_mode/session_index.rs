@@ -191,7 +191,7 @@ pub(super) struct UiIndexState {
     pub(super) pending_bind_conversation: Option<String>,
     /// `NewBlank` 在途期间发出的首条消息算出的标题：等行 id 到手再写。
     pub(super) pending_session_title: Option<String>,
-    /// 启动时的「回放上次会话」是否已尝试过（只做一次，避免每次刷新左栏都冲掉 transcript）。
+    /// 启动时回放 CLI 显式指定的会话是否已尝试过（只做一次，避免每次刷新左栏都冲掉 transcript）。
     pub(super) history_auto_replayed: bool,
     /// `NewBlank` 写出去了、回包才到达，而用户中途切了工作区。
     ///

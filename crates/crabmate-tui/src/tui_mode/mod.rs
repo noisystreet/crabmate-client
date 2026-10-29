@@ -754,8 +754,9 @@ impl LaneApp<'_> {
                     self.st.replace_sessions(list.sessions);
                     // 待定位的新建行只能在刷新回来的列表里按 id 找（见 `session_index`）。
                     self.apply_pending_select();
-                    // 启动后第一次拿到列表：回放上次在用的会话（只做一次）。
-                    history::auto_replay_if_active(self);
+                    // 启动后第一次拿到列表：只有 CLI 显式给了 conversation_id 才回放；
+                    // 不再自动续 serve 的 active 会话（见 `history::replay_explicit_conversation`）。
+                    history::replay_explicit_conversation(self);
                 }
                 Err(e) => {
                     self.st
