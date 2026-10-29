@@ -21,6 +21,7 @@ use ratatui::backend::CrosstermBackend;
 use crate::SessionPrefs;
 use crate::serve::ServeClient;
 
+use super::lane_list::LaneEntry;
 use super::state::UiState;
 use super::worker::{LaneId, UiEvent, spawn_key_reader, spawn_worker};
 use super::{LaneApp, TuiApp, body_cache, drafts, event_loop, session_index, spinner};
@@ -154,15 +155,22 @@ pub async fn run_tui(
 /// **放这里而不是 `mod.rs`**：`mod.rs` 贴着 920 行门禁，而这三件事都只跟「有几条
 /// lane、当前是哪条」有关，与单条 lane 的行为无关 —— 正好是外壳该管的那一层。
 impl<'a> super::TuiApp<'a> {
-    /// 渲染用的 lane 快照：`(名字, 是否当前)`。
+    /// 渲染用的 lane 快照：名字 + 各自当前绑定的工作区 + 谁是当前。
     ///
-    /// 只导出名字与「谁是当前」，不导任何 lane 内部状态 —— 渲染层拿不到 `&mut`，
+    /// 只导出渲染需要的三个字段，不导任何 lane 内部状态 —— 渲染层拿不到 `&mut`，
     /// 也就不可能在某条 lane 的绘制里改到别人。
-    pub(super) fn lane_entries(&self) -> Vec<(String, bool)> {
+    ///
+    /// 带工作区是「一实例一工作区」的直接后果：光有连接名，用户看不出两条 lane
+    /// 是不是同一个工作区（那正是切错目标的常见原因）。
+    pub(super) fn lane_entries(&self) -> Vec<LaneEntry> {
         self.lanes
             .iter()
             .enumerate()
-            .map(|(i, lane)| (lane.label.clone(), i == self.active))
+            .map(|(i, lane)| LaneEntry {
+                label: lane.label.clone(),
+                workspace: lane.st.workspace_path.clone(),
+                active: i == self.active,
+            })
             .collect()
     }
 

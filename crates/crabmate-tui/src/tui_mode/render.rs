@@ -504,8 +504,8 @@ pub fn draw(
     info: &StatusInfo,
     prepared: &[BodyRow],
     panel: Option<&PanelContent>,
-    // 外壳层算好的 lane 快照 `(名字, 是否当前)`；`len == 0` 时不占版面。
-    lanes: &[(String, bool)],
+    // 外壳层算好的 lane 快照（名字 / 工作区 / 是否当前）；`len == 0` 时不占版面。
+    lanes: &[super::lane_list::LaneEntry],
 ) {
     let area = frame.area();
     // 右栏底部状态栈的行数（与 `status_stack::stack_lines` 同源，否则底部会空行 / 末段被裁）。

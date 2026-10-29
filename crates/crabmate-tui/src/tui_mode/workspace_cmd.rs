@@ -7,9 +7,12 @@
 //! 时序约定：两条会真正切根的入口（`/workspace`、项目池）都在**发切换请求之前**先做空白行
 //! 回收 —— 会话索引端点只认 `workspaces/current`，切完再回收，请求就落到新桶上了。
 
+use crabmate_client_api::WorkspaceSetErrorKind;
+
 use super::LaneApp;
 use super::state::LineKind;
 use super::worker::WorkerJob;
+use crate::serve::WorkspaceSetError;
 use crate::workspace_path::{self, is_default_word};
 
 /// 切换成功的系统行：serve 用空路径表示「恢复默认根」，那时没有路径可打。
@@ -19,6 +22,18 @@ fn workspace_set_line(path: &str) -> String {
     } else {
         format!("已切换到工作区：{path}")
     }
+}
+
+/// 409 `WORKSPACE_ALREADY_SET` 的系统行：实例已绑别处，**换不了**。
+///
+/// 与「切换失败」分开写，是因为两者的下一步动作不同：普通失败可以换个路径再试，
+/// 这一条再试一百次也是 409 —— 出路只有「另起 lane」或「另起 serve 实例」。
+/// `server_message` 原样带上（里面有当前绑定路径），但不从里面抠路径做判断。
+fn workspace_already_set_line(server_message: &str) -> String {
+    format!(
+        "该实例已绑定其它工作区（一实例一工作区）：{server_message}；\
+         换工作区请另起 lane 或另起 serve 实例"
+    )
 }
 
 /// `/workspace <路径>` 请求结果的处理决定。
@@ -34,10 +49,14 @@ enum WsSetOutcome {
     Failed(String),
 }
 
-fn workspace_set_outcome(result: Result<String, String>) -> WsSetOutcome {
+fn workspace_set_outcome(result: Result<String, WorkspaceSetError>) -> WsSetOutcome {
     match result {
         Ok(path) => WsSetOutcome::Switched(workspace_set_line(&path)),
-        Err(e) => WsSetOutcome::Failed(format!("切换工作区失败：{e}")),
+        // 409 不是「切换失败」：这个实例不归本 lane 换工作区，重试无意义。
+        Err(e) if e.kind == WorkspaceSetErrorKind::AlreadySet => {
+            WsSetOutcome::Failed(workspace_already_set_line(&e.message))
+        }
+        Err(e) => WsSetOutcome::Failed(format!("切换工作区失败：{}", e.message)),
     }
 }
 
@@ -152,7 +171,7 @@ impl LaneApp<'_> {
     }
 
     /// `POST /workspace` 结果：成功后与项目池切换走同一收尾。
-    pub(super) fn on_workspace_set(&mut self, result: Result<String, String>) {
+    pub(super) fn on_workspace_set(&mut self, result: Result<String, WorkspaceSetError>) {
         match workspace_set_outcome(result) {
             // 只有服务端确认成功才重置树：失败时真实根未知（可能已生效也可能没），
             // 此时重置会让界面显示一个既非旧根、也未经确认的树。
@@ -244,7 +263,24 @@ mod tests {
         WsSetInput, WsSetOutcome, is_default_word, workspace_query_line, workspace_set_line,
         workspace_set_outcome, ws_set_input,
     };
-    use crate::serve::{SessionIndexApplied, SessionIndexOp, SessionListRow};
+    use crate::serve::{SessionIndexApplied, SessionIndexOp, SessionListRow, WorkspaceSetError};
+    use crabmate_client_api::WorkspaceSetErrorKind;
+
+    /// 普通失败（403 / 400 / 传输）：`kind` 只影响提示措辞，不影响「不许重置树」。
+    fn failed(msg: &str) -> WorkspaceSetError {
+        WorkspaceSetError {
+            kind: WorkspaceSetErrorKind::Failed,
+            message: msg.to_string(),
+        }
+    }
+
+    /// 409 `WORKSPACE_ALREADY_SET`：实例已绑别处。
+    fn already_set(msg: &str) -> WorkspaceSetError {
+        WorkspaceSetError {
+            kind: WorkspaceSetErrorKind::AlreadySet,
+            message: msg.to_string(),
+        }
+    }
 
     /// 左栏会话行：只有 id 有意义，其余按空会话缺省。
     fn row(id: &str) -> SessionListRow {
@@ -290,9 +326,9 @@ mod tests {
     /// 服务端拒绝时，回显必须读作「失败」，不能半个字像成功。
     #[test]
     fn failed_set_never_reads_as_success() {
-        let out = workspace_set_outcome(Err(
-            "工作区路径无效或不存在: No such file or directory (os error 2)".into(),
-        ));
+        let out = workspace_set_outcome(Err(failed(
+            "工作区路径无效或不存在: No such file or directory (os error 2)",
+        )));
         match out {
             WsSetOutcome::Failed(line) => {
                 assert!(line.contains("切换工作区失败"), "应明说失败：{line}");
@@ -303,6 +339,24 @@ mod tests {
                 assert!(!line.contains("已切换"), "失败行不能含成功措辞：{line}");
             }
             WsSetOutcome::Switched(l) => panic!("Err 走了成功分支：{l}"),
+        }
+    }
+
+    /// 409 的提示必须指向「另起 lane」，而不是让人以为换个路径重试就行。
+    #[test]
+    fn already_set_points_at_a_new_lane() {
+        let out = workspace_set_outcome(Err(already_set("该实例已绑定工作区 /abs/p")));
+        match out {
+            WsSetOutcome::Failed(line) => {
+                assert!(line.contains("一实例一工作区"), "应点明约束：{line}");
+                assert!(line.contains("另起 lane"), "应给出出路：{line}");
+                // 服务端原文里的当前绑定路径要露出来，用户才知道「绑到哪了」。
+                assert!(line.contains("/abs/p"), "应透传服务端原文：{line}");
+                // 不能读作「切换失败，再试一次」——重试永远不会成功。
+                assert!(!line.contains("切换工作区失败"), "不该混成普通失败：{line}");
+                assert!(!line.contains("已切换"), "失败行不能含成功措辞：{line}");
+            }
+            WsSetOutcome::Switched(l) => panic!("409 走了成功分支：{l}"),
         }
     }
 
@@ -319,12 +373,12 @@ mod tests {
             WsSetOutcome::Switched("已切换工作区：serve 默认根".into())
         );
         assert!(matches!(
-            workspace_set_outcome(Err("boom".into())),
+            workspace_set_outcome(Err(failed("boom"))),
             WsSetOutcome::Failed(_)
         ));
         // 失败行与成功行必须互斥（防止有人后来把两分支合并）。
         assert_ne!(
-            workspace_set_outcome(Err("x".into())),
+            workspace_set_outcome(Err(failed("x"))),
             workspace_set_outcome(Ok("x".into()))
         );
     }

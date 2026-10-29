@@ -40,10 +40,58 @@ pub fn api_error_code(val: &Value) -> Option<&str> {
         .filter(|s| !s.is_empty())
 }
 
+/// 从**顶层** `code` 取机器可读的 `code`（扁平错误体形状）。
+///
+/// 与 [`api_error_code`] 互补而**不互相污染**：后者认嵌套 `{"error":{"code":…}}`
+/// （受保护 API），本条认 `{"ok":false,"code":"…","error":"…"}`（如 `POST /workspace`
+/// 的 409 `WORKSPACE_ALREADY_SET`）。刻意不做「一种取不到就试另一种」的回退查找：
+/// 两种形状的 `code` 语义不同，混着找会让调用方在错误的形状上分支。
+#[must_use]
+pub fn top_level_error_code(val: &Value) -> Option<&str> {
+    val.get("code")?
+        .as_str()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{api_error_code, http_error_message, http_error_text};
+    use super::{api_error_code, http_error_message, http_error_text, top_level_error_code};
     use serde_json::json;
+
+    #[test]
+    fn top_level_error_code_reads_the_flat_wire_shape() {
+        // `POST /workspace` 的 409：`code` 与 `error`（人读文案）都在顶层。
+        assert_eq!(
+            top_level_error_code(&json!({
+                "ok": false,
+                "code": "WORKSPACE_ALREADY_SET",
+                "error": "该实例已绑定工作区 /abs/p"
+            })),
+            Some("WORKSPACE_ALREADY_SET")
+        );
+        // 嵌套形状没有顶层 `code`：不能把里层那个冒充成顶层（两者语义不同）。
+        assert_eq!(
+            top_level_error_code(&json!({"error": {"code": "CONVERSATION_NOT_FOUND"}})),
+            None
+        );
+        assert_eq!(top_level_error_code(&json!({"code": "  "})), None);
+        assert_eq!(top_level_error_code(&json!({"code": 7})), None);
+        assert_eq!(top_level_error_code(&json!({})), None);
+    }
+
+    /// 两条读取路径**互不污染**：各自只认自己那层，不做「取不到就换一层」的回退。
+    #[test]
+    fn nested_and_flat_codes_do_not_leak_into_each_other() {
+        let flat = json!({"ok": false, "code": "WORKSPACE_ALREADY_SET", "error": "x"});
+        assert_eq!(api_error_code(&flat), None, "扁平形状不该被嵌套读取命中");
+        let nested = json!({"error": {"code": "WORKSPACE_ALREADY_SET"}});
+        assert_eq!(
+            top_level_error_code(&nested),
+            None,
+            "嵌套形状不该被顶层读取命中"
+        );
+    }
 
     #[test]
     fn api_error_code_reads_the_nested_wire_shape() {

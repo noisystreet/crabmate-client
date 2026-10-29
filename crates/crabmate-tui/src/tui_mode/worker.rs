@@ -17,10 +17,10 @@ use crate::serve::{
     ApprovalGate, AutoAllowOnce, ChatStreamOptions, ChatStreamOutcome,
     ConversationMessagesResponse, ServeClient, SessionIndexApplied, SessionIndexOp, StreamCancel,
     StreamResume, StreamSink, TermError, WebSessionsList, WorkspaceDirData, WorkspaceProjectsData,
-    apply_web_session_op, fetch_conversation_messages, fetch_llm_overrides, fetch_user_data_prefs,
-    fetch_web_sessions, fetch_workspace, fetch_workspace_dir, fetch_workspace_projects,
-    put_llm_overrides, put_user_data_prefs, run_chat_stream_sink, set_workspace,
-    switch_workspace_project, write_permission_level,
+    WorkspaceSetError, apply_web_session_op, fetch_conversation_messages, fetch_llm_overrides,
+    fetch_user_data_prefs, fetch_web_sessions, fetch_workspace, fetch_workspace_dir,
+    fetch_workspace_projects, put_llm_overrides, put_user_data_prefs, run_chat_stream_sink,
+    set_workspace, switch_workspace_project, write_permission_level,
 };
 
 use super::approve::{APPROVAL_WAIT, ApprovalPrompt, OverlayApprovalGate};
@@ -150,7 +150,10 @@ pub(super) enum UiEvent {
     /// `/workspace`（空参）查询结果：serve 当前工作区根。
     WorkspaceQuery(Result<String, String>),
     /// `/workspace <路径>` 设置结果：成功为生效路径（空串＝serve 默认根）。
-    WorkspaceSet(Result<String, String>),
+    ///
+    /// 失败带 `kind`（不是裸字符串）：409 `WORKSPACE_ALREADY_SET`（一实例一工作区）
+    /// 要能提示「另起 lane」，而不是被当成普通网络错误让人重试。
+    WorkspaceSet(Result<String, WorkspaceSetError>),
     /// 启动时 user-data 设置快照（prefs + llm-overrides）拉取结果（合成持久层）。
     UserData(Result<PersistedSettings, String>),
     /// `llm-overrides` 保存结果：`Ok` 回传已应用动作（面板据此清 staged）。
@@ -731,15 +734,16 @@ fn job_workspace_query(rt: &tokio::runtime::Runtime, client: &ServeClient, tx: &
 /// 与项目池那条（`POST /workspace/projects`）是同一个后端状态的两种入口：项目池只能选
 /// 池内已有项目，这里把路径原样发出去（客户端不做白名单，能否落地由 serve 决定；
 /// 空串＝恢复 serve 默认）。
+///
+/// 失败**不压成字符串**：`WorkspaceSetError` 带 `kind`，UI 层才能把 409
+/// `WORKSPACE_ALREADY_SET` 提示成「另起 lane」而不是「重试」。
 fn job_workspace_set(
     rt: &tokio::runtime::Runtime,
     client: &ServeClient,
     path: &str,
     tx: &Sender<UiEvent>,
 ) {
-    let result = rt
-        .block_on(set_workspace(client, path))
-        .map_err(|e| e.to_string());
+    let result = rt.block_on(set_workspace(client, path));
     let _ = tx.send(UiEvent::WorkspaceSet(result));
 }
 

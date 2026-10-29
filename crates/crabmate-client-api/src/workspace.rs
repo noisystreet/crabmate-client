@@ -11,6 +11,14 @@
 use serde::Deserialize;
 use serde_json::Value;
 
+use crate::messages::{http_error_message, top_level_error_code};
+
+/// 服务端「一实例一工作区」冲突码：实例已绑定到别的路径。
+///
+/// 服务端把它放在错误体的**顶层** `code`（不是受保护 API 的嵌套 `error.code`），
+/// 见 [`top_level_error_code`]。取值是契约，不要改写大小写。
+pub const WORKSPACE_ALREADY_SET: &str = "WORKSPACE_ALREADY_SET";
+
 /// `GET /workspace` 摘要子集。
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct WorkspaceInfo {
@@ -92,13 +100,20 @@ pub fn parse_workspace_project_open_body(val: &Value) -> Result<String, Workspac
         .to_string())
 }
 
-/// `POST /workspace` 在 HTTP 2xx 下 JSON 语义失败的原因。
+/// `POST /workspace` 失败的原因。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorkspaceSetErrorKind {
     /// `ok` 非 true，且 body 无可用 `error` 文案（调用方可换成本地化默认句）。
     RejectedWithoutDetail,
     /// 服务端提供了 `error` 字符串。
     RejectedWithDetail,
+    /// HTTP 409 + 顶层 `WORKSPACE_ALREADY_SET`：实例已绑定别的路径（一实例一工作区）。
+    ///
+    /// 这一支**必须**与普通失败分开：它不是网络错误、重试也不会成功，
+    /// 客户端该做的是提示「另起实例/另起 lane」而不是「再试一次」。
+    AlreadySet,
+    /// 其它 HTTP 非 2xx（403 越界 / 400 非法路径 / 传输失败）。
+    Failed,
 }
 
 /// `POST /workspace` JSON 体解析失败。
@@ -141,10 +156,76 @@ pub fn parse_workspace_set_ok_body(val: &Value) -> Result<String, WorkspaceSetEr
         .to_string())
 }
 
+/// 把**非 2xx** 的 `POST /workspace` 响应分类成可分支的失败。
+///
+/// `status` 是 HTTP 状态码，`val` 是响应体解析出的 JSON（体不是 JSON 时传 `Value::Null`）。
+/// 只有「409 + 顶层 `WORKSPACE_ALREADY_SET`」落 [`WorkspaceSetErrorKind::AlreadySet`]；
+/// 其余（403 越界 / 400 非法路径 / 传输失败 / 未来形状漂移）一律
+/// [`WorkspaceSetErrorKind::Failed`]，文案取自 [`http_error_message`]，与服务端 `error`
+/// 原文一致 —— 文案不是契约，这里只负责显示。
+///
+/// **不从文案里抠当前绑定路径**：要当前根就另外 `GET /workspace`。
+#[must_use]
+pub fn classify_workspace_set_failure(status: u16, val: &Value) -> WorkspaceSetError {
+    let kind = if status == 409 && top_level_error_code(val) == Some(WORKSPACE_ALREADY_SET) {
+        WorkspaceSetErrorKind::AlreadySet
+    } else {
+        WorkspaceSetErrorKind::Failed
+    };
+    WorkspaceSetError {
+        kind,
+        message: http_error_message(val, status),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn already_set_409_with_top_level_code_is_branchable() {
+        let e = classify_workspace_set_failure(
+            409,
+            &json!({
+                "ok": false,
+                "code": WORKSPACE_ALREADY_SET,
+                "error": "该实例已绑定工作区 /abs/p"
+            }),
+        );
+        assert_eq!(e.kind, WorkspaceSetErrorKind::AlreadySet);
+        // 文案原样透传：路径从服务端 `error` 直接展示，不做解析。
+        assert_eq!(e.message, "该实例已绑定工作区 /abs/p");
+    }
+
+    /// 两个条件缺一不可：`409` 与顶层 `code` 都要对得上，否则退回普通失败（不猜）。
+    #[test]
+    fn already_set_requires_both_status_and_code() {
+        // 409 但无 `code`：未来形状漂移时不假装认得出。
+        let e = classify_workspace_set_failure(409, &json!({"ok": false, "error": "conflict"}));
+        assert_eq!(e.kind, WorkspaceSetErrorKind::Failed);
+        // 有 `code` 但状态码不是 409：不认。
+        let e = classify_workspace_set_failure(
+            400,
+            &json!({"ok": false, "code": WORKSPACE_ALREADY_SET}),
+        );
+        assert_eq!(e.kind, WorkspaceSetErrorKind::Failed);
+        // 嵌套形状（受保护 API）的 `code` 不是顶层 `code`：不认。
+        let e =
+            classify_workspace_set_failure(409, &json!({"error": {"code": WORKSPACE_ALREADY_SET}}));
+        assert_eq!(e.kind, WorkspaceSetErrorKind::Failed);
+    }
+
+    /// 其它失败维持既有文案口径：服务端 `error` 原文，无文案时回落 `HTTP {status}`。
+    #[test]
+    fn other_failures_keep_the_existing_text() {
+        let e = classify_workspace_set_failure(403, &json!({"ok": false, "error": "路径越界"}));
+        assert_eq!(e.kind, WorkspaceSetErrorKind::Failed);
+        assert_eq!(e.message, "路径越界");
+        let e = classify_workspace_set_failure(502, &Value::Null);
+        assert_eq!(e.kind, WorkspaceSetErrorKind::Failed);
+        assert_eq!(e.message, "HTTP 502");
+    }
 
     #[test]
     fn set_ok_returns_path() {
