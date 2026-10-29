@@ -187,13 +187,13 @@ impl<'a> super::TuiApp<'a> {
     pub(super) fn lane_at_click(&self, m: &crossterm::event::MouseEvent) -> Option<usize> {
         let lane = self.lane();
         let (w, h) = lane.last_size;
-        // 行数与 `draw` 共用 `layout::lane_rows`：单 lane 也占位，两边各算一遍会点错行。
-        let rows = super::layout::lane_rows(self.lanes.len());
+        // 版面与 `draw` 共用 `layout::panes_with_lanes`：lane 区高度、可用条数、命中换算
+        // 只有一份实现，两边各算一遍会点错行。
         let p = super::layout::panes_with_lanes(
             ratatui::layout::Rect::new(0, 0, w, h),
             lane.st.sidebar_visible,
             lane.status_stack_rows(),
-            rows,
+            self.lanes.len(),
         );
         super::layout::lane_hit(&p, self.lanes.len(), m.column, m.row)
     }

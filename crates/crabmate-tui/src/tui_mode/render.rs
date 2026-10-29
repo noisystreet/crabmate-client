@@ -504,7 +504,7 @@ pub fn draw(
     info: &StatusInfo,
     prepared: &[BodyRow],
     panel: Option<&PanelContent>,
-    // 外壳层算好的 lane 快照 `(名字, 是否当前)`；`len <= 1` 时不占版面。
+    // 外壳层算好的 lane 快照 `(名字, 是否当前)`；`len == 0` 时不占版面。
     lanes: &[(String, bool)],
 ) {
     let area = frame.area();
@@ -515,13 +515,11 @@ pub fn draw(
         WORKSPACE_PANE_WIDTH.saturating_sub(2) as usize,
         st.status_stack_collapsed,
     );
-    // lane 列表恒占「标题 + 每条一行」：**单 lane 也显示** —— 否则用户在界面上完全
-    // 看不出自己连的是哪台 serve、有没有别的连接。行数口径见 `layout::lane_rows`
-    //（鼠标命中用的是同一份，各算一遍会点错行）；`layout` 还会把它压到不超过
-    // 左栏一半，避免 lane 多了把会话挤没。
-    let lane_rows = super::layout::lane_rows(lanes.len());
+    // lane 列表**单 lane 也占位**：否则用户在界面上完全看不出自己连的是哪台 serve、
+    // 有没有别的连接。高度是左栏的一半（`layout::lane_pane_height`），与条数无关，
+    // 条数只影响区内画得出几条（放不下的在标题补 `↓n`）；鼠标命中用的是同一份口径。
     // 主体三列 / 底栏 / 状态栈 / 左栏 lane 区的矩形与鼠标命中检测共用 `layout`。
-    let p = panes_with_lanes(area, st.sidebar_visible, stack_rows, lane_rows);
+    let p = panes_with_lanes(area, st.sidebar_visible, stack_rows, lanes.len());
 
     let spin = progress_mark_frame(st, info);
     let pal = st.palette; // 拷贝：下面要 `&mut st` 回写 `body_at_top`，底栏/浮层仍要调色板
@@ -539,12 +537,11 @@ pub fn draw(
         paint_bg(frame, right, pal.chrome_bg);
         render_pane(frame, right, rows, cursor, hint, &pal, right_w);
     }
-    // 左栏下半：lane 列表。与左栏同宽同底色，视觉上是同一列的两段。
+    // 左栏下半：lane 列表。固定占左栏一半高度，与左栏同宽同底色，视觉上是同一列的两段。
+    // 每条 lane 一行整行宽的底色条（当前 lane 用选中底色），自上而下堆叠，条数少时下方留空。
     if let Some(lane_pane) = p.left_lanes {
-        let lane_w = lane_pane.width.saturating_sub(2) as usize;
-        let rows = super::lane_list::lane_list_rows(lanes, lane_w, &pal);
         paint_bg(frame, lane_pane, pal.chrome_bg);
-        render_pane(frame, lane_pane, rows, 0, None, &pal, lane_w);
+        super::lane_list::render_lane_list(frame, lane_pane, lanes, &pal);
     }
     if let Some(rs) = p.right_status {
         render_status_stack(frame, rs, st, info, &pal);
