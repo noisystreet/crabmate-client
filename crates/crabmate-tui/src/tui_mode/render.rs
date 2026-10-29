@@ -515,13 +515,11 @@ pub fn draw(
         WORKSPACE_PANE_WIDTH.saturating_sub(2) as usize,
         st.status_stack_collapsed,
     );
-    // lane 列表只在该出现时占位：单 lane 时整块左栏还给会话列表（`layout` 里
-    // 会把它压到不超过左栏一半，避免 lane 多了把会话挤没）。
-    let lane_rows = if lanes.len() > 1 {
-        (lanes.len() as u16).saturating_add(1)
-    } else {
-        0
-    };
+    // lane 列表恒占「标题 + 每条一行」：**单 lane 也显示** —— 否则用户在界面上完全
+    // 看不出自己连的是哪台 serve、有没有别的连接。行数口径见 `layout::lane_rows`
+    //（鼠标命中用的是同一份，各算一遍会点错行）；`layout` 还会把它压到不超过
+    // 左栏一半，避免 lane 多了把会话挤没。
+    let lane_rows = super::layout::lane_rows(lanes.len());
     // 主体三列 / 底栏 / 状态栈 / 左栏 lane 区的矩形与鼠标命中检测共用 `layout`。
     let p = panes_with_lanes(area, st.sidebar_visible, stack_rows, lane_rows);
 

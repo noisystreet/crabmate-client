@@ -1,6 +1,6 @@
 # TUI 多 serve 连接与多 agent 并行（多 lane）
 
-> **状态**：**W1（LaneApp 抽取）与 W1b（事件来源标签）已落地**（`cc0c06f` / `b73ed83`）；W2–W5 未开工。tracking Issue [#327](https://github.com/noisystreet/crabmate-client/issues/327)。
+> **状态**：**W1 / W1b / W2 已落地**（`LaneApp` 抽取 `cc0c06f`、事件来源标签 `b73ed83`；每 lane 独立 worker 与独立 `overrides`、`--connect <name>=<url>` 多 serve 装配、左栏 lane 列表与切换 ——`Alt+←/→` 或点行，**单 lane 也显示**）。**W3 部分落地**：多连接靠 `--connect`，`tui-connections.toml` 配置文件、启动逐 profile `/health` 探测、运行期 `/lane new` 均未做。**W4 / W5 未完成**：审批浮层随 `UiState` 下沉到每条 lane（不串台），但没有队列、来源标签、非活动 lane 的待审批提示与全局计数；状态栏无 `lanes N/M`，lane 行无状态点，`MAX_LANES` 上限未实现。tracking Issue [#327](https://github.com/noisystreet/crabmate-client/issues/327)。
 > **范围**：**§1–§8 仅覆盖 `crates/crabmate-tui` 的全屏 `tui` 模式**；**§9 是 Desktop 复用评估**（结论性分析，不含实施承诺）。**不改** Server 契约（SSE / 审批 / 错误码 / 工作区语义），**不覆盖** Android / Web。
 > **关联**：[`remote_cli_tui.md`](./remote_cli_tui.md)（TUI 母方案）、[`tui_settings_panel.md`](./tui_settings_panel.md)（设置面板，user-data 语义）、[`tui_usability.md`](./tui_usability.md)、[`client_shared_logic.md`](./client_shared_logic.md)（共享层边界）、[`contract_pin.md`](./contract_pin.md)（契约钉点）；Server `docs/design/user_data_dir.md`（user-data 权威）
 
@@ -179,6 +179,13 @@ api_base = "http://127.0.0.1:8082"
 - 非活动 lane 的流**照常全量累积**（transcript 数据都在内存里），只是不参与绘制；重绘只画 `active`。
 - 状态栏显示 `lane N/M` 与全局待审批计数，避免用户忘记还有别的 lane 在等审批。
 
+**已落地的部分（与上面的设想有出入，以代码为准）**：
+
+- lane 区落在左栏**下半**（`tui_mode/lane_list.rs`：标题 `连接 [n]` + 每行 `> 名称`），**单 lane 也显示**——隐藏时用户既看不出自己连的是哪台 serve，也看不出客户端支持多个连接。
+- 行数口径只有一处：`layout::lane_rows(lanes_len)`（`0` 表示没有 lane，否则 `1 + n`）；`render::draw` 与 `TuiApp::lane_at_click` 都调它，各算一遍的症状是「点第 2 条切到别的 lane」。
+- 切换是 `Alt+←/→` 或点某一行，只改 `active`，不打断在途回合；单连接时 `switch_lane` 直接返回（no-op），点击落在唯一那行等于不换。
+- **未落地**：lane 行状态点、`lanes N/M`、全局待审批计数、`Alt+1..8` 直达、`Ctrl+N`。
+
 ---
 
 ## 5. 并行拓扑
@@ -226,6 +233,8 @@ api_base = "http://127.0.0.1:8082"
 
 各波次遵循仓库既有小步纪律：**一项用户可见行为一个 PR**，每波更新 `docs/design/client_capability_matrix.md` 的 TUI 行与 `remote_cli_tui.md` 的状态行。
 
+**实际进度（截至 `2026-10`，以此为准）**：W1 / W1b / W2 已落地，且 W2 顺带把 W5 的「lane 列表 + 切换」做了（列表在下半、单 lane 也显示、`Alt+←/→` 与点击切视图）；W3 只落地了 `--connect name=url` 这一种装配方式（配置文件、启动探测与 `/lane new` 未做）；W4 与 W5 的剩余项未开工。
+
 ---
 
 ## 7. 风险
@@ -249,7 +258,8 @@ api_base = "http://127.0.0.1:8082"
 | 同一 `conversation_id` 并发两轮的期望语义（排队 / 拒绝 / 未定义） | 已确认**无互斥**；语义需 Server 侧确认或实测。本方案不依赖它（每 lane 独立会话） |
 | 工作区切换在途回合期间的行为 | Client 侧 `parse_workspace_set_ok_body` 支持 `error: "busy"`，但 Server 侧 grep 不到该字面量（疑为旧版兼容）；**不依赖**该保护 |
 | 同 workspace 8 路并发写 `conversations.db` 是否触发 `database is locked` | **未实测**；本方案默认拓扑不触发（每 workspace 一库） |
-| `SessionPrefs` 是否需要逐 lane（而非进程级） | W2 实现期按实际需要决定 |
+| `SessionPrefs` 是否需要逐 lane（而非进程级） | 已按 §4.3 落地：`overrides` 随 `LaneApp` 逐 lane 持有（`/model` 只影响当前 lane） |
+| lane 数上限（§4.3 建议 `MAX_LANES = 8`） | **未实现**：`--connect` 可重复任意条，启动与运行期都不校验；上限应与「每 lane 一个 worker 线程 + 各自连接池」的实际成本一起定 |
 | 是否需要 per-profile 钥匙串槽（多 bearer） | 第一版不做，需要时另开 Issue（牵动 Desktop / Android 槽名约定） |
 
 ---

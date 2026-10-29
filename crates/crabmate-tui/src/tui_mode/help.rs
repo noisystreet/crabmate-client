@@ -19,6 +19,7 @@ pub(super) const LINES: &[&str] = &[
     "按键：Alt+Enter 换行 · Ctrl+E 思考展开/折叠 · Ctrl+Y 复制最近回复 · Ctrl+W 工作区目录树 · PgUp/PgDn 翻页 · Ctrl+End 回底部 · 回合中 Enter 排队发送（输入框内 Esc 清队）",
     "设置面板：↑↓ 移动 · Enter 编辑 · Tab 切分区 · F2 保存 · Esc 关闭（有改动 Esc 先确认）",
     "会话栏：↑↓选 Enter用 n新建 r刷新 Del删除（再按 y/Enter 确认，Esc/n 或其它键取消）Shift+Del 直接删",
+    "连接：左栏下半列出本进程的全部 serve 连接（单条也显示，> 为当前）· Alt+←/→ 切换 · 点一行也可切",
     "工作区树：↑↓选 Enter/→展开 ◀收起/回父 r刷新 w回会话列表 Tab/Esc 回输入",
     "工作区切换：按 p 从项目池选择/切换（未设置=选择，已设置=切到另一项目；↑↓选 Enter切换 r刷新 Esc 返回）",
     "审批浮层：Enter=一次 · a=始终 · Esc/n=拒绝 · Ctrl+C 先拒绝、回合随后继续需再按取消",
