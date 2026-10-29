@@ -246,7 +246,7 @@ impl LaneApp<'_> {
         &mut self,
         terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
         skip_idle: bool,
-        lanes: &[(String, bool)],
+        lanes: &[super::lane_list::LaneEntry],
     ) -> Result<()> {
         self.spinner.advance(self.spinning());
         let dims = read_terminal_size(terminal)?;

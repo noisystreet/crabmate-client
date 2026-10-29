@@ -1,18 +1,18 @@
 //! `GET|POST /workspace`：查询 / 切换工作区根；`GET /workspace[?path=]` 目录列表；
 //! `GET/POST /workspace/projects`：项目池查询与切换。
 
-use serde_json::json;
+use serde_json::{Value, json};
 
 use crabmate_client_api::{
-    parse_workspace_project_open_body, parse_workspace_set_ok_body, paths,
-    percent_encode_unreserved,
+    WorkspaceSetErrorKind, classify_workspace_set_failure, parse_workspace_project_open_body,
+    parse_workspace_set_ok_body, paths, percent_encode_unreserved,
 };
 
 use crate::serve::client::ServeClient;
 use crate::serve::error::TermError;
 
 pub use crabmate_client_api::{
-    WorkspaceDirData, WorkspaceDirEntry, WorkspaceInfo, WorkspaceProjectsData,
+    WorkspaceDirData, WorkspaceDirEntry, WorkspaceInfo, WorkspaceProjectsData, WorkspaceSetError,
 };
 
 /// 当前工作区根（`GET /workspace`）。
@@ -47,10 +47,24 @@ pub async fn fetch_workspace_dir(
 }
 
 /// 切换工作区根（`POST /workspace`，body.path）。空串表示恢复 serve 默认。
-pub async fn set_workspace(client: &ServeClient, path: &str) -> Result<String, TermError> {
+///
+/// 返回 [`WorkspaceSetError`] 而不是 `TermError`：409 `WORKSPACE_ALREADY_SET`
+/// （一实例一工作区）必须能被调用方分辨出来 —— 它不是网络错误，重试也不会成功。
+pub async fn set_workspace(client: &ServeClient, path: &str) -> Result<String, WorkspaceSetError> {
     let body = json!({ "path": path });
-    let val = client.post_json(paths::WORKSPACE, &body).await?;
-    parse_workspace_set_ok_body(&val).map_err(|e| TermError::Message(e.message))
+    match client.post_json(paths::WORKSPACE, &body).await {
+        Ok(val) => parse_workspace_set_ok_body(&val),
+        // 非 2xx：体里可能是扁平 `code`（409 的那一支），也可能是纯文本/HTML（代理错误页）。
+        // 解析失败就按 `Value::Null` 交给分类函数，文案回落成 `HTTP {status}`。
+        Err(TermError::Http { status, body }) => {
+            let val: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
+            Err(classify_workspace_set_failure(status, &val))
+        }
+        Err(e) => Err(WorkspaceSetError {
+            kind: WorkspaceSetErrorKind::Failed,
+            message: e.to_string(),
+        }),
+    }
 }
 
 /// `GET /workspace/projects`：服务端项目池（enabled / pool_path / projects 名字）。

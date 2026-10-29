@@ -112,6 +112,10 @@ fn parse_workspace_set_response(
                     crate::i18n::api_err_workspace_set_failed(loc).to_string()
                 }
                 WorkspaceSetErrorKind::RejectedWithDetail => e.message,
+                // 2xx 分支不会产生这两个：它们只由**非 2xx** 的分类
+                // （`classify_workspace_set_failure`）给出。这里显式列出而不是用 `_`，
+                // 是为了将来再加变体时由编译器在这里提醒，而不是静默套用同一句文案。
+                WorkspaceSetErrorKind::AlreadySet | WorkspaceSetErrorKind::Failed => e.message,
             }
         });
     }

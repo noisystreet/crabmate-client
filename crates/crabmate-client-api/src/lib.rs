@@ -59,7 +59,7 @@ pub use handoff::{
 pub use health::health_degraded_note;
 pub use markdown_inline::{InlineSpan, parse_inline_markdown};
 pub use markdown_normalize::normalize_markdown_for_render;
-pub use messages::{api_error_code, http_error_message, http_error_text};
+pub use messages::{api_error_code, http_error_message, http_error_text, top_level_error_code};
 pub use permission::{
     CLAMP_ORDER, DEFAULT_LEVEL, LEVELS, is_known_level, normalize_level, ordered_clamped_axes,
 };
@@ -81,6 +81,7 @@ pub use sessions::{
 pub use tool_display::{ToolDisplayInput, is_placeholder_summary, tool_display_line};
 pub use url::normalize_api_base;
 pub use workspace::{
-    WorkspaceDirData, WorkspaceDirEntry, WorkspaceInfo, WorkspaceProjectsData,
-    WorkspaceSetErrorKind, parse_workspace_project_open_body, parse_workspace_set_ok_body,
+    WORKSPACE_ALREADY_SET, WorkspaceDirData, WorkspaceDirEntry, WorkspaceInfo,
+    WorkspaceProjectsData, WorkspaceSetError, WorkspaceSetErrorKind,
+    classify_workspace_set_failure, parse_workspace_project_open_body, parse_workspace_set_ok_body,
 };

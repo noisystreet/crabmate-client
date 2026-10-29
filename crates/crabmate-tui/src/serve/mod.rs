@@ -39,6 +39,6 @@ pub use user_data::{
     put_user_data_prefs,
 };
 pub use workspace::{
-    WorkspaceDirData, WorkspaceDirEntry, WorkspaceProjectsData, fetch_workspace,
+    WorkspaceDirData, WorkspaceDirEntry, WorkspaceProjectsData, WorkspaceSetError, fetch_workspace,
     fetch_workspace_dir, fetch_workspace_projects, set_workspace, switch_workspace_project,
 };

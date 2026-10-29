@@ -1,6 +1,6 @@
 # TUI 多 serve 连接与多 agent 并行（多 lane）
 
-> **状态**：**W1 / W1b / W2 已落地**（`LaneApp` 抽取 `cc0c06f`、事件来源标签 `b73ed83`；每 lane 独立 worker 与独立 `overrides`、`--connect <name>=<url>` 多 serve 装配、左栏 lane 列表与切换 ——`Alt+←/→` 或点行，**单 lane 也显示**）。**W3 部分落地**：多连接靠 `--connect`，`tui-connections.toml` 配置文件、启动逐 profile `/health` 探测、运行期 `/lane new` 均未做。**W4 / W5 未完成**：审批浮层随 `UiState` 下沉到每条 lane（不串台），但没有队列、来源标签、非活动 lane 的待审批提示与全局计数；状态栏无 `lanes N/M`，lane 行无状态点，`MAX_LANES` 上限未实现。tracking Issue [#327](https://github.com/noisystreet/crabmate-client/issues/327)。
+> **状态**：**W1 / W1b / W2 已落地**（`LaneApp` 抽取 `cc0c06f`、事件来源标签 `b73ed83`；每 lane 独立 worker 与独立 `overrides`、`--connect <name>=<url>` 多 serve 装配、左栏 lane 列表与切换 ——`Alt+←/→` 或点行，**单 lane 也显示**；lane 行带该 serve 当前的**工作区末段**，`POST /workspace` 的 409 `WORKSPACE_ALREADY_SET` 单独识别并提示「另起 lane」—— 见 §4.7）。**W3 部分落地**：多连接靠 `--connect`，`tui-connections.toml` 配置文件、启动逐 profile `/health` 探测、运行期 `/lane new` 均未做。**W4 / W5 未完成**：审批浮层随 `UiState` 下沉到每条 lane（不串台），但没有队列、来源标签、非活动 lane 的待审批提示与全局计数；状态栏无 `lanes N/M`，lane 行无状态点，`MAX_LANES` 上限未实现。tracking Issue [#327](https://github.com/noisystreet/crabmate-client/issues/327)。
 > **范围**：**§1–§8 仅覆盖 `crates/crabmate-tui` 的全屏 `tui` 模式**；**§9 是 Desktop 复用评估**（结论性分析，不含实施承诺）。**不改** Server 契约（SSE / 审批 / 错误码 / 工作区语义），**不覆盖** Android / Web。
 > **关联**：[`remote_cli_tui.md`](./remote_cli_tui.md)（TUI 母方案）、[`tui_settings_panel.md`](./tui_settings_panel.md)（设置面板，user-data 语义）、[`tui_usability.md`](./tui_usability.md)、[`client_shared_logic.md`](./client_shared_logic.md)（共享层边界）、[`contract_pin.md`](./contract_pin.md)（契约钉点）；Server `docs/design/user_data_dir.md`（user-data 权威）
 
@@ -186,6 +186,18 @@ api_base = "http://127.0.0.1:8082"
 - 切换是 `Alt+←/→` 或点某一行，只改 `active`，不打断在途回合；单连接时 `switch_lane` 直接返回（no-op），点击落在唯一那行等于不换。
 - **未落地**：lane 行状态点、`lanes N/M`、全局待审批计数、`Alt+1..8` 直达、`Ctrl+N`。
 
+### 4.7 工作区：一实例一工作区，所以 lane 行要带工作区
+
+**服务端的约束**（`POST /workspace` 的 409 语义；权威在 Server repo 的 `docs/design/ctl_workspace_unset.md` §2 ①，本仓不复制其正文）：实例已绑定某个路径后再提交**不同**路径返回 `409 WORKSPACE_ALREADY_SET`，不会静默换根 —— 一实例一工作区。
+
+三条直接后果（都已落地）：
+
+1. **lane 行显示该 serve 当前的工作区末段**（`连接 [n]` 区里 `名字 · 项目名`）。光有连接名，用户看不出两条 lane 是不是同一个工作区 —— 而在「一实例一工作区」下，那正是选错目标的常见原因。末段由**显示层**从 `UiState::workspace_path` 截取（完整路径在右栏标题里），lane 行是一行宽的窄条，整条路径会把名字挤没；剩余宽度不足 4 列时宁可不显示，也不挤出一个字母。`LaneEntry` 只带 `label` / `workspace` / `active`，仍不向渲染层暴露 lane 内部状态。
+2. **409 不等于「切换失败」**。`crabmate-client-api` 的 `classify_workspace_set_failure(status, body)` 把「409 + **顶层** `code == WORKSPACE_ALREADY_SET`」单独判成 `WorkspaceSetErrorKind::AlreadySet`（其余仍走 `Failed` + 服务端原文）；`UiEvent::WorkspaceSet` 因此携带结构化的 `WorkspaceSetError` 而不是裸字符串。TUI 的提示是「该实例已绑定其它工作区（一实例一工作区）：<服务端原文>；换工作区请另起 lane 或另起 serve 实例」—— 措辞刻意不提「重试」，因为重试永远不会成功。**不从文案里抠当前绑定路径**：要根就另外 `GET /workspace`。
+3. **不给 lane 加「工作区切换历史」**：那是把「一个 client 管多个工作区」塞回一个实例上，与 409 直接冲突。要并行不同工作区就**再加一条 lane**（§5.1 的默认拓扑本来就是「一 workspace 一 serve」）。
+
+**未做**：待绑定态（`GET /workspace` 回 `path: ""`）在 lane 行的显式标记（例如「待绑定」而不是留白），以及配合 `/lane new` 的「新增 lane 立即探测工作区」——后者取决于 W3 的运行期加 lane。Desktop / Web 侧的同名问题（切会话自动重放旧路径撞 409）不在本文件的 §1–§8 范围内（Desktop 走 §9.4.1 的多窗口路线）。
+
 ---
 
 ## 5. 并行拓扑
@@ -233,7 +245,7 @@ api_base = "http://127.0.0.1:8082"
 
 各波次遵循仓库既有小步纪律：**一项用户可见行为一个 PR**，每波更新 `docs/design/client_capability_matrix.md` 的 TUI 行与 `remote_cli_tui.md` 的状态行。
 
-**实际进度（截至 `2026-10`，以此为准）**：W1 / W1b / W2 已落地，且 W2 顺带把 W5 的「lane 列表 + 切换」做了（列表在下半、单 lane 也显示、`Alt+←/→` 与点击切视图）；W3 只落地了 `--connect name=url` 这一种装配方式（配置文件、启动探测与 `/lane new` 未做）；W4 与 W5 的剩余项未开工。
+**实际进度（截至 `2026-10`，以此为准）**：W1 / W1b / W2 已落地，且 W2 顺带把 W5 的「lane 列表 + 切换」做了（列表在下半、单 lane 也显示、`Alt+←/→` 与点击切视图）；lane 行随后补上了各自的工作区末段与 409 `WORKSPACE_ALREADY_SET` 的分支提示（§4.7，属 workspace binding 接入而非新波次）；W3 只落地了 `--connect name=url` 这一种装配方式（配置文件、启动探测与 `/lane new` 未做）；W4 与 W5 的剩余项未开工。
 
 ---
 
