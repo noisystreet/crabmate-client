@@ -34,6 +34,12 @@ pub enum Control {
     ///
     /// 走终端剪贴板（OSC52）或 `wl-copy` / `xclip` / `xsel`，见 [`super::clipboard`]。
     Copy(Option<String>),
+    /// `/ctl`：查 `crabmatectl` 控制面的实例列表（本地 unix socket，**只读**）。
+    ///
+    /// 只做查询，不新建 / 关闭实例：`add` / `remove` 要等 Server 侧的
+    /// `disable`/`update` 语义（软删除）与 `add.workspace` 可省略（待绑定）定下来，
+    /// 否则按键做出来只能是「必须预填目录」+「只能硬删」的半残形态。
+    Ctl,
 }
 
 pub fn clear_word(arg: &str) -> bool {
@@ -105,6 +111,9 @@ pub fn parse_control(text: &str) -> Option<Control> {
         "find" | "search" | "grep" => Some(Control::Find(arg_opt)),
         "background" | "bg" => Some(Control::Background(arg_opt)),
         "copy" | "yank" => Some(Control::Copy(arg_opt)),
+        // `ctl` / `lane`：`/ctl` 查控制面实例；`/lane` 是同一件事的别名
+        // （用户想的是「我这条 lane 从哪来」，但只读查询的入口只该有一个）。
+        "ctl" | "lane" => Some(Control::Ctl),
         slash::CONV => Some(match arg_opt {
             None => Control::ConvRefresh,
             Some(a) => match a.split_whitespace().next().unwrap_or("") {

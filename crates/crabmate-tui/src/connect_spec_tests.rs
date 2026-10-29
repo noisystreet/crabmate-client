@@ -3,7 +3,7 @@
 //! 独立成文件：`main.rs` 的行数贴着 `fn-nloc-ratchet` 的 920 行/文件上限，
 //! 而这几条纯解析用例与 CLI 其余部分没有耦合。
 
-use crate::parse_connect_spec;
+use crate::connect_spec::parse_connect_spec;
 
 #[test]
 fn parses_name_and_url() {

@@ -1,9 +1,11 @@
 //! `crabmate-tui`：连接远程 `crabmate serve` 的终端客户端（P3：chat / repl / 斜杠）。
 
 mod approval_tty;
+mod connect_spec;
 mod serve;
 mod slash;
 mod tui_mode;
+mod tui_wiring;
 mod turn;
 mod workspace_path;
 
@@ -20,7 +22,9 @@ use crabmate_client_api::secrets::{KEYRING_SERVICE, SecretSlot, WEB_API_BEARER_K
 use reedline::{DefaultPrompt, DefaultPromptSegment, Reedline, Signal};
 
 use crate::approval_tty::TtyApprovalGate;
+use crate::connect_spec::parse_connect_spec;
 use crate::slash::{handle_control_slash, is_control_slash};
+use crate::tui_wiring::TuiWiring;
 use crate::turn::{TurnPrefs, run_turn};
 
 #[derive(Debug, Parser)]
@@ -128,6 +132,10 @@ enum Commands {
         /// bearer 复用主连接的（一人一机多项目通常同一个 key）。
         #[arg(long = "connect", value_name = "NAME=URL")]
         connect: Vec<String>,
+        /// `--ctl-socket <path>`：`crabmatectl` 控制面 unix socket（`/ctl` 用；省略则用
+        /// 默认路径 `$XDG_RUNTIME_DIR/crabmate/ctl.sock`，仅当它存在才启用）。不监听 TCP。
+        #[arg(long = "ctl-socket", value_name = "PATH")]
+        ctl_socket: Option<String>,
     },
     /// Probe terminal pixel-graphics support (kitty / sixel / iTerm2 / half-block); no network.
     ///
@@ -265,15 +273,22 @@ async fn run() -> Result<()> {
             conversation_id,
             no_probe,
         } => run_repl(&client, conversation_id, no_probe, yes, &mut overrides).await,
-        Commands::Tui { no_probe, connect } => {
+        Commands::Tui {
+            no_probe,
+            connect,
+            ctl_socket,
+        } => {
             run_tui_cmd(
                 &client,
                 no_probe,
                 no_keyring,
                 yes,
                 &mut overrides,
-                &connect,
-                bearer.as_deref(),
+                TuiWiring {
+                    connect: &connect,
+                    ctl_socket: ctl_socket.as_deref(),
+                    bearer: bearer.as_deref(),
+                },
             )
             .await
         }
@@ -288,11 +303,15 @@ async fn run_tui_cmd(
     no_keyring: bool,
     yes: bool,
     overrides: &mut SessionPrefs,
-    connect: &[String],
-    bearer: Option<&str>,
+    wiring: TuiWiring<'_>,
 ) -> Result<()> {
     ensure_tty()?;
     maybe_probe(client, no_probe).await?;
+    let TuiWiring {
+        connect,
+        ctl_socket,
+        bearer,
+    } = wiring;
     // 额外 lane：`--connect name=url`。主连接恒为第一条，`--connect` 依次追加。
     let mut extras: Vec<(String, ServeClient)> = Vec::with_capacity(connect.len());
     for spec in connect {
@@ -305,25 +324,10 @@ async fn run_tui_cmd(
     for (name, c) in &extras {
         lanes.push((name.clone(), c));
     }
-    tui_mode::run_tui(&lanes, overrides, yes, no_keyring).await
-}
-
-/// 解析 `--connect name=url`；`name` 留空时直接拿 URL 当名字（好认过没有）。
-fn parse_connect_spec(spec: &str) -> Result<(String, String)> {
-    let (name, url) = spec
-        .split_once('=')
-        .with_context(|| format!("--connect 需要 <name>=<url>，收到：{spec}"))?;
-    let url = url.trim().to_string();
-    if url.is_empty() {
-        anyhow::bail!("--connect 的 url 不能为空：{spec}");
-    }
-    let name = name.trim();
-    let name = if name.is_empty() {
-        url.clone()
-    } else {
-        name.to_string()
-    };
-    Ok((name, url))
+    // 控制面 socket：显式 `--ctl-socket` 优先，否则仅当默认路径存在才启用（解析与理由见
+    // `serve::ctl::resolve_socket_arg`；启用提示由 `run_tui` 打）。
+    let ctl_socket = crate::serve::resolve_socket_arg(ctl_socket);
+    tui_mode::run_tui(&lanes, overrides, yes, no_keyring, ctl_socket.as_deref()).await
 }
 
 /// 三个 `client_llm` 覆盖中任一非空才构造；全空返回 `None`（不发送 `client_llm` 整块）。

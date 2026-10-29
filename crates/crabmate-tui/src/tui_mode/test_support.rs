@@ -80,6 +80,8 @@ pub(super) fn test_lane<'a>(
         resume: None,
         sent_turn: None,
         bg: None,
+        // 测试默认不启用控制面：`/ctl` 会走「未启用」分支，除非用例自己设路径。
+        ctl_socket: None,
     }
 }
 

@@ -3,12 +3,14 @@
 //!
 //! 拆分出本模块以控制 `mod.rs` 单文件行数（fn-nloc 门禁 ≤ 920）与函数复杂度。
 
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Sender};
 use std::thread;
 
 use crossterm::event::{self, Event, KeyEvent, MouseButton, MouseEvent, MouseEventKind};
 
 use crabmate_client_api::conversation_state::ConversationStateOutcome;
+use crabmate_client_api::ctl::CtlInstance;
 use crabmate_client_api::paths;
 use crabmate_client_api::permission::PermissionView;
 use crabmate_client_api::prompt_tokens::TiktokenPromptTokensSnapshot;
@@ -19,8 +21,8 @@ use crate::serve::{
     StreamResume, StreamSink, TermError, WebSessionsList, WorkspaceDirData, WorkspaceProjectsData,
     WorkspaceSetError, apply_web_session_op, fetch_conversation_messages, fetch_llm_overrides,
     fetch_user_data_prefs, fetch_web_sessions, fetch_workspace, fetch_workspace_dir,
-    fetch_workspace_projects, put_llm_overrides, put_user_data_prefs, run_chat_stream_sink,
-    set_workspace, switch_workspace_project, write_permission_level,
+    fetch_workspace_projects, list_instances, put_llm_overrides, put_user_data_prefs,
+    run_chat_stream_sink, set_workspace, switch_workspace_project, write_permission_level,
 };
 
 use super::approve::{APPROVAL_WAIT, ApprovalPrompt, OverlayApprovalGate};
@@ -154,6 +156,12 @@ pub(super) enum UiEvent {
     /// 失败带 `kind`（不是裸字符串）：409 `WORKSPACE_ALREADY_SET`（一实例一工作区）
     /// 要能提示「另起 lane」，而不是被当成普通网络错误让人重试。
     WorkspaceSet(Result<String, WorkspaceSetError>),
+    /// `crabmatectl` 控制面的实例列表（unix socket 上的 `{"op":"list"}`）。
+    ///
+    /// 失败给**已经面向用户**的文案（`CtlCallError::user_message`）：控制面的三类失败
+    /// （连不上 / 读写失败 / 被拒绝）处置各不相同，压成一个裸字符串再让 UI 重新猜分类
+    /// 没有意义 —— 分类留在 `serve::ctl`，UI 只负责显示。
+    CtlList(Result<Vec<CtlInstance>, String>),
     /// 启动时 user-data 设置快照（prefs + llm-overrides）拉取结果（合成持久层）。
     UserData(Result<PersistedSettings, String>),
     /// `llm-overrides` 保存结果：`Ok` 回传已应用动作（面板据此清 staged）。
@@ -237,6 +245,15 @@ pub(super) enum WorkerJob {
     SavePrefs(PrefsSave),
     /// 拉 skill 目录（`GET /skills`）：只给 `/` 补全菜单用。
     Skills,
+    /// 拉 `crabmatectl` 控制面的实例列表（unix socket，不是 HTTP）。
+    ///
+    /// 跑在**当前 lane 的 worker** 上而不是另起线程：`/ctl` 是低频手动命令，串行执行
+    /// 换来「谁执行就写进谁的 transcript」的自然语义；代价是最坏阻塞该 lane 5 s
+    /// （`serve::ctl` 的 IO 超时），期间该 lane 的其它拉取排队 —— 可接受。
+    CtlList {
+        /// 控制面 socket 路径（`--ctl-socket` 或默认路径）。
+        socket: PathBuf,
+    },
     /// 写会话级权限等级意图（`POST /conversation/state`，空闲态落盘）。
     ///
     /// 与 `/perm` 写下的本地 override 不是一回事：override 只影响**下一条** `/chat`，
@@ -418,6 +435,7 @@ pub(super) fn spawn_worker(
                 WorkerJob::SaveLlm(save) => job_save_llm(&rt, &client, save, &tx),
                 WorkerJob::SavePrefs(save) => job_save_prefs(&rt, &client, save, &tx),
                 WorkerJob::Skills => job_skills(&rt, &client, &tx),
+                WorkerJob::CtlList { socket } => job_ctl_list(&socket, &tx),
                 WorkerJob::WritePermission {
                     conversation_id,
                     level,
@@ -680,6 +698,15 @@ fn job_write_permission(
         outcome,
         generation,
     });
+}
+
+/// `crabmatectl` 控制面的实例列表。
+///
+/// **不需要 runtime**：这是 unix socket 上的同步 IO，不碰 reqwest 连接池。
+/// 失败直接取 `CtlCallError::user_message`（三类失败各有各的「该做什么」）。
+fn job_ctl_list(socket: &Path, tx: &Sender<UiEvent>) {
+    let result = list_instances(socket).map_err(|e| e.user_message());
+    let _ = tx.send(UiEvent::CtlList(result));
 }
 
 /// skill 目录（`GET /skills`）：只给 `/` 补全菜单的 skill 候选，失败如实回传。
