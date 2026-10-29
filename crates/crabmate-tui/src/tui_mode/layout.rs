@@ -18,7 +18,7 @@ pub(super) struct Panes {
     pub status: Option<Rect>,
     /// 左栏会话列（窄屏隐藏时为 `None`）。**不含**底部 lane 列表。
     pub left: Option<Rect>,
-    /// 左栏底部的 lane 列表；单 lane 或窄屏时为 `None`。
+    /// 左栏底部的 lane 列表；窄屏时为 `None`。**单 lane 也占位**（行数见 [`lane_rows`]）。
     ///
     /// 和 `right` / `right_status` 一样，渲染与鼠标命中都只认这里给出的矩形。
     pub left_lanes: Option<Rect>,
@@ -28,6 +28,18 @@ pub(super) struct Panes {
     pub right: Option<Rect>,
     /// 右栏底部的状态栈；无右栏时为 `None`（含 `stack_rows == 0`）。
     pub right_status: Option<Rect>,
+}
+
+/// lane 区占用的行数：首行标题 + 每条 lane 一行；没有 lane 时不占版面。
+///
+/// **渲染与鼠标命中必须共用这一个口径**（`draw` 与 `TuiApp::lane_at_click`）：
+/// 两边各算一遍的症状是「点第 2 条切到第 3 条」，比画错更难归因。
+/// 单 lane 也占位 —— 否则「现在连的是哪台 serve、有没有别的连接」在界面上完全不可见。
+pub(super) fn lane_rows(lanes_len: usize) -> u16 {
+    if lanes_len == 0 {
+        return 0;
+    }
+    (lanes_len as u16).saturating_add(1)
 }
 
 /// 按终端区域、侧栏可见性与状态栈高度切分。
@@ -41,8 +53,8 @@ pub(super) fn panes(area: Rect, sidebar_visible: bool, stack_rows: u16) -> Panes
 
 /// 带 lane 列表的分区：左栏再切成「会话列表（上）/ lane 列表（下）」。
 ///
-/// `lane_rows == 0`（单 lane）时左栏不下切 —— 单 serve 的用户不该看到半行空白，
-/// 也就不需要知道「lane」这个概念（`Panes::left_lanes` 为 `None`）。
+/// `lane_rows == 0`（没有任何 lane）时左栏不下切（`Panes::left_lanes` 为 `None`）。
+/// 行数请交给 [`lane_rows`] 算 —— 单 lane 也是 `2`（标题 + 一行），不再隐藏。
 pub(super) fn panes_with_lanes(
     area: Rect,
     sidebar_visible: bool,
@@ -184,11 +196,25 @@ mod tests {
         assert!(!contains(Rect::new(10, 5, 4, 0), 10, 5), "空矩形不命中");
     }
 
-    /// 单 lane（`lane_rows == 0`）：左栏不下切，与改造前逐字一致。
+    /// 单 lane 也占位：`lane_rows(1)` 是 2 行（标题 + 那一条），左栏因此下切。
+    ///
+    /// 这条口径由 `draw` 与 `lane_at_click` 共用，所以按钮命中的行数必须跟着这里走。
+    #[test]
+    fn single_lane_still_takes_two_rows() {
+        assert_eq!(lane_rows(0), 0, "没有 lane 才不占版面");
+        assert_eq!(lane_rows(1), 2);
+        assert_eq!(lane_rows(8), 9);
+        let p = panes_with_lanes(Rect::new(0, 0, 200, 40), true, 5, lane_rows(1));
+        let lanes = p.left_lanes.expect("单 lane 也要有 lane 区");
+        assert_eq!(lanes.height, 2);
+        assert_eq!(p.left.unwrap().height, 38, "会话列表让出 2 行");
+    }
+
+    /// 没有 lane（`lane_rows == 0`）：左栏不下切，整块留给会话列表。
     #[test]
     fn zero_lane_rows_keeps_the_sidebar_whole() {
         let p = panes_with_lanes(Rect::new(0, 0, 200, 40), true, 5, 0);
-        assert!(p.left_lanes.is_none(), "单 lane 不该凭空多出一块");
+        assert!(p.left_lanes.is_none(), "没有 lane 就不该凭空多出一块");
         assert_eq!(p.left.unwrap().height, 40);
     }
 
