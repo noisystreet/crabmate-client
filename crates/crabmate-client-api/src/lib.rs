@@ -12,6 +12,7 @@ pub mod client_llm_presets;
 pub mod context_axis;
 pub mod conversation_messages;
 pub mod conversation_state;
+pub mod ctl;
 pub mod handoff;
 pub mod health;
 pub mod markdown_inline;
@@ -51,6 +52,10 @@ pub use conversation_messages::{
 pub use conversation_state::{
     ConversationStateOutcome, ConversationStatePatch, ConversationStateView,
     classify_conversation_state_response,
+};
+pub use ctl::{
+    CtlError, CtlErrorKind, CtlInstance, CtlObserved, CtlRequest, OP_ADD, OP_LIST, OP_REMOVE,
+    parse_list_response,
 };
 pub use handoff::{
     API_BASE_HASH_KEY, BEARER_HASH_KEY, handoff_hash_fragment, is_handoff_hash_key,

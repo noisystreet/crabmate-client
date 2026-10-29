@@ -71,7 +71,9 @@ pub async fn run_tui(
     overrides: &SessionPrefs,
     yes: bool,
     no_keyring: bool,
+    ctl_socket: Option<&std::path::Path>,
 ) -> Result<()> {
+    announce_ctl_socket(ctl_socket);
     enable_raw_mode().context("enable raw mode")?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen).context("enter alternate screen")?;
@@ -121,6 +123,7 @@ pub async fn run_tui(
             resume: None,
             sent_turn: None,
             bg: None,
+            ctl_socket: ctl_socket.map(std::path::Path::to_path_buf),
         });
     }
     let mut app = TuiApp {
@@ -148,6 +151,21 @@ pub async fn run_tui(
         eprintln!("{warn}");
     }
     res
+}
+
+/// 控制面启用时提示一次（`/ctl` 可查实例）；未启用则完全沉默。
+///
+/// 沉默是刻意：默认路径没有 socket 是**正常状态**（大多数人不用 ctl），每次启动都报
+/// 「控制面连不上」只会变成噪音。单独成函数是为了让 `run_tui` 少一个分支
+/// （`lizard` 对 CCN 是零容忍的 >10）。
+fn announce_ctl_socket(ctl_socket: Option<&std::path::Path>) {
+    let Some(path) = ctl_socket else {
+        return;
+    };
+    eprintln!(
+        "[crabmate-tui] ctl 控制面：{}（/ctl 查看实例）",
+        path.display()
+    );
 }
 
 /// 外壳层动作：切 lane、导出渲染快照、鼠标命中。

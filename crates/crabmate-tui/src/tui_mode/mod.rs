@@ -15,6 +15,7 @@ mod body_cache;
 mod clipboard;
 // `controls` / `tool_summary` 提到 `pub(crate)`：清除词与控制字符剥离在 crate 根也要用。
 pub(crate) mod controls;
+mod ctl;
 mod drafts;
 mod event_loop;
 mod exit_flush;
@@ -128,6 +129,12 @@ struct LaneApp<'a> {
     sent_turn: Option<resume::TurnEcho>,
     /// `/background` 设置的 kitty 像素背景；`None` = 不画（默认关闭）。
     bg: Option<background::Background>,
+    /// `crabmatectl` 控制面 socket 路径；`None` = 控制面未启用（`/ctl` 会说明原因）。
+    ///
+    /// 全局资源（一个 socket 管所有实例）却存在**每条 lane** 上：`/ctl` 由当前 lane 的
+    /// worker 执行，结果写进当前 lane 的 transcript，所以按 lane 存一份读起来最自然；
+    /// 各 lane 的值在构造时相同，不存在「谁改了谁」的问题。
+    ctl_socket: Option<std::path::PathBuf>,
 }
 
 /// 多 lane 外壳：持有 N 条 lane 与当前聚焦的那条。
@@ -428,6 +435,7 @@ impl LaneApp<'_> {
             Control::Find(arg) => self.do_find(arg),
             Control::Background(arg) => self.set_background(arg),
             Control::Copy(arg) => self.copy_last(arg),
+            Control::Ctl => self.fetch_ctl_list(),
             Control::Workspace(arg) => self.workspace_command(arg),
             Control::Resume => self.resume_turn(),
             Control::Older => history::load_older(self),
@@ -806,6 +814,7 @@ impl LaneApp<'_> {
             UiEvent::WsProjectSwitch(result) => self.on_ws_project_switch(result),
             UiEvent::WorkspaceQuery(result) => self.on_workspace_query(result),
             UiEvent::WorkspaceSet(result) => self.on_workspace_set(result),
+            UiEvent::CtlList(result) => ctl::on_ctl_list(self, result),
             UiEvent::UserData(result) => self.on_user_data(result),
             UiEvent::SavedLlm(result) => self.on_settings_saved_llm(result),
             UiEvent::SavedPrefs(result) => self.on_settings_saved_prefs(result),
