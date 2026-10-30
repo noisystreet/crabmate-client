@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 use crabmate_client_api::ctl::{CtlInstance, LaneReadiness, lane_readiness};
 
-use super::worker::UiEvent;
+use super::worker::{LaneTx, UiEvent};
 use crate::serve::{add_instance, list_instances};
 
 /// `/lane new` 等实例就绪的轮询间隔。
@@ -23,9 +23,12 @@ const LANE_READY_POLL: Duration = Duration::from_millis(300);
 const LANE_READY_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// `/ctl` 与 `/lane`（空参）：拉一次实例列表。
-pub(super) fn job_ctl_list(socket: &Path, tx: &Sender<UiEvent>) {
+///
+/// 回包属于**发起这次 `/ctl` 的 lane**，所以要打标签：裸发会把它写进当前聚焦的
+/// 那条 transcript（切走之后再回来就看不到自己那条命令的结果了）。
+pub(super) fn job_ctl_list(socket: &Path, out: &LaneTx) {
     let result = list_instances(socket).map_err(|e| e.user_message());
-    let _ = tx.send(UiEvent::CtlList(result));
+    let _ = out.send(UiEvent::CtlList(result));
 }
 
 /// `/lane attach`：按名字在声明里找一条已就绪的实例，把 `base_url` 带回去。

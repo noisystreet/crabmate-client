@@ -58,6 +58,21 @@ pub(super) fn test_lane<'a>(
     // 留在内存里让通道保持连通 —— 提前 drop 会让 lane 的 `tx.send` 全部失败，
     // 而测试恰恰靠「发了什么事件」断言。
     std::mem::forget(rx);
+    lane_with_tx(id, client, prefs, tx, job_tx)
+}
+
+/// lane 的构造主体：**发送端由调用方决定**。
+///
+/// 多 lane 的外壳测试必须让每条 lane 都拿外壳那条通道的发送端（与生产同构：
+/// 全进程一个 `rx`，见 `mod.rs`），否则 `TuiApp::rx` 收不到任何事件；单 lane 的
+/// 常规测试走 [`test_app`]，自带一条没人读的通道。
+pub(super) fn lane_with_tx<'a>(
+    id: LaneId,
+    client: &'a ServeClient,
+    prefs: &'a mut SessionPrefs,
+    tx: mpsc::Sender<UiEvent>,
+    job_tx: mpsc::Sender<WorkerJob>,
+) -> LaneApp<'a> {
     LaneApp {
         id,
         label: format!("lane-{}", id.0),
@@ -100,34 +115,34 @@ pub(super) fn test_app<'a>(
 #[cfg(test)]
 mod tests {
     use std::sync::mpsc;
+    use std::time::Duration;
 
     use super::super::TuiApp;
-    use super::super::worker::LaneId;
-    use super::{test_app, test_client, test_lane, test_prefs};
+    use super::super::worker::{LaneId, LaneTx, UiEvent};
+    use super::{lane_with_tx, test_app, test_client, test_prefs};
 
-    /// 造 n 条 lane 的外壳；`rx` 只用于占位（本模块测试不消费事件通道）。
+    /// 造 n 条 lane 的外壳：所有 lane 共用外壳这条通道（生产同构）。
     fn shell<'a>(
         client: &'a crate::serve::ServeClient,
         prefs: &'a mut [crate::SessionPrefs],
     ) -> TuiApp<'a> {
+        let (shell_tx, rx) = mpsc::channel();
         let mut lanes = Vec::new();
         // 条数在借出去之前记下：`prefs` 会被逐条 `iter_mut` 借到 `'a`，循环后再
         // 读 `len()` 会与那份借用冲突。
         let count = prefs.len();
         for (i, p) in prefs.iter_mut().enumerate() {
-            let (ltx, lrx) = mpsc::channel();
             let (job_tx, _job_rx) = mpsc::channel();
-            lanes.push(test_lane(
+            // 每条 lane 都用**外壳那条**通道的发送端：生产里 `tx` 就是这个（一个 `rx`），
+            // 测试若给每条 lane 自成一条通道，`app.rx` 就永远收不到事件。
+            lanes.push(lane_with_tx(
                 LaneId(i as u32 + 1),
                 client,
                 p,
-                lrx,
-                ltx.clone(),
+                shell_tx.clone(),
                 job_tx,
             ));
-            drop(ltx);
         }
-        let (shell_tx, rx) = mpsc::channel();
         let next_lane_id = count as u32 + 1;
         TuiApp {
             lanes,
@@ -310,5 +325,46 @@ mod tests {
         assert_eq!(app.lanes.len(), 2, "不认识的名字不动任何 lane");
         let last = app.lanes[0].st.lines.last().expect("应有提示").text();
         assert!(last.contains("lane-1 / lane-2"), "{last}");
+    }
+
+    /// **一条 lane 自己的回包只影响它自己**（多 lane 的事件归属，P0）。
+    ///
+    /// 多 lane 共用**一条**事件通道，而外层 `TuiApp::on_msg` 对不带标签的事件一律交给
+    /// **当前 lane**（那是键盘 / 鼠标这类全局输入的落点）。所以每条 lane 的出站事件必须
+    /// 自带来源：否则 lane-2 的回合结束会清掉 lane-1 的 `running`（结果是**真正在跑的**
+    /// 那条 lane 永远停在「运行中」，`on_submit` 只会进排队，再也发不出下一轮），
+    /// 会话列表 / 工作区路径 / 审批浮层同理互相覆盖。
+    ///
+    /// 生产侧由 [`LaneTx`] 从类型上强制（拿不到裸通道就发不出裸事件），这里验证
+    /// 入口 `TuiApp::on_msg` 按标签分发 —— 事件经**真实出口**发出，而不是手写
+    /// `UiEvent::Lane` 猜一个形状。
+    #[test]
+    fn a_lanes_own_event_only_touches_that_lane() {
+        let client = test_client();
+        let mut prefs = [test_prefs(), test_prefs()];
+        let mut app = shell(&client, &mut prefs);
+        app.lanes[0].st.running = true;
+        app.lanes[1].st.running = true;
+
+        // lane-2 的 worker 报回合结束：走的是它自己的出口。
+        let out = LaneTx::new(app.lanes[1].id, app.lanes[1].tx.clone());
+        let _ = out.send(UiEvent::TurnDone {
+            outcome: Default::default(),
+            error: None,
+            interrupted: None,
+        });
+        // 带超时：接线若再退回「发到没人读的通道」，这里 5 秒内就该失败，
+        // 而不是让整个 `make test` 挂在一次阻塞的 `recv()` 上。
+        let ev = app
+            .rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("外壳通道里应有一条事件");
+        app.on_msg(ev);
+
+        assert!(app.lanes[0].st.running, "lane-1 的回合还在跑，不能被动结束");
+        assert!(
+            !app.lanes[1].st.running,
+            "回合结束只清自己那条 lane 的 running"
+        );
     }
 }

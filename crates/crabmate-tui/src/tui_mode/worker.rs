@@ -307,19 +307,39 @@ pub(super) enum WorkerJob {
     },
 }
 
-/// 全屏模式 sink：把流事件发往 UI 事件通道，并标注来源 lane。
-struct UiSink {
-    /// 产生这些流事件的 lane。UI 侧据此把增量写进对应的 transcript。
+/// 带来源 lane 的事件发送端：**lane 自己的出站事件一律经它发**。
+///
+/// 事件归属全靠 [`UiEvent::Lane`] 这层标签（见 `TuiApp::on_msg`），而裸事件会落到
+/// **当前聚焦的 lane**：漏一个标签，lane-2 的回合结束就会清掉 lane-1 的 `running`。
+/// 所以用类型兜住，而不是靠调用方记得包一层。外壳动作（`CtlLaneReady` / `LaneDetach`）
+/// 仍走裸 `Sender<UiEvent>`，在 `TuiApp::on_msg` 里被拦截。
+#[derive(Clone)]
+pub(super) struct LaneTx {
     lane: LaneId,
     tx: Sender<UiEvent>,
 }
 
-impl UiSink {
-    /// 所有出站事件都带 lane 标签；通道关闭即视为 UI 已退出。
-    fn emit(&self, ev: UiEvent) -> Result<(), TermError> {
+impl LaneTx {
+    pub(super) fn new(lane: LaneId, tx: Sender<UiEvent>) -> Self {
+        Self { lane, tx }
+    }
+
+    /// 打上来源 lane 后发出；通道关闭即视为 UI 已退出。
+    pub(super) fn send(&self, ev: UiEvent) -> Result<(), TermError> {
         self.tx
             .send(UiEvent::Lane(self.lane, Box::new(ev)))
             .map_err(|_| TermError::Message("ui channel closed".into()))
+    }
+}
+
+/// 全屏模式 sink：把流事件发往 UI 事件通道（经 [`LaneTx`] 标注来源 lane）。
+struct UiSink {
+    out: LaneTx,
+}
+
+impl UiSink {
+    fn emit(&self, ev: UiEvent) -> Result<(), TermError> {
+        self.out.send(ev)
     }
 }
 
@@ -447,36 +467,42 @@ pub(super) fn spawn_worker(
             .enable_all()
             .build()
             .expect("worker runtime");
+        // 两条出口：`out` 给 lane 自己的回包（自动打标签），`tx` 留给外壳动作。
+        let out = LaneTx::new(lane, tx.clone());
         while let Ok(job) = job_rx.recv() {
             match job {
-                WorkerJob::Turn(job) => run_turn_job(&rt, &client, *job, &tx, lane),
-                WorkerJob::RefreshSessions => job_refresh_sessions(&rt, &client, &tx),
+                WorkerJob::Turn(job) => run_turn_job(&rt, &client, *job, &out),
+                WorkerJob::RefreshSessions => job_refresh_sessions(&rt, &client, &out),
                 WorkerJob::ConversationHistory {
                     conversation_id,
                     before_index,
-                } => job_conversation_history(&rt, &client, &conversation_id, before_index, &tx),
+                } => job_conversation_history(&rt, &client, &conversation_id, before_index, &out),
                 WorkerJob::RefreshUsage { conversation_id } => {
-                    job_refresh_usage(&rt, &client, &conversation_id, &tx);
+                    job_refresh_usage(&rt, &client, &conversation_id, &out);
                 }
-                WorkerJob::SessionIndex(op) => job_session_index(&rt, &client, op, &tx),
+                WorkerJob::SessionIndex(op) => job_session_index(&rt, &client, op, &out),
                 WorkerJob::RefreshWorkspace { keep } => {
-                    job_refresh_workspace_root(&rt, &client, &tx, keep);
+                    job_refresh_workspace_root(&rt, &client, &out, keep);
                 }
                 WorkerJob::WorkspaceDir { rel, generation } => {
-                    job_workspace_dir(&rt, &client, &rel, generation, &tx);
+                    job_workspace_dir(&rt, &client, &rel, generation, &out);
                 }
                 WorkerJob::RefreshStatus { conversation_id } => {
-                    job_refresh_status(&rt, &client, conversation_id.as_deref(), &tx)
+                    job_refresh_status(&rt, &client, conversation_id.as_deref(), &out)
                 }
-                WorkerJob::WsProjects => job_ws_projects(&rt, &client, &tx),
-                WorkerJob::WsSwitchProject(name) => job_ws_switch_project(&rt, &client, &name, &tx),
-                WorkerJob::WorkspaceQuery => job_workspace_query(&rt, &client, &tx),
-                WorkerJob::WorkspaceSet(path) => job_workspace_set(&rt, &client, &path, &tx),
-                WorkerJob::LoadUserSettings => job_load_user_settings(&rt, &client, &tx),
-                WorkerJob::SaveLlm(save) => job_save_llm(&rt, &client, save, &tx),
-                WorkerJob::SavePrefs(save) => job_save_prefs(&rt, &client, save, &tx),
-                WorkerJob::Skills => job_skills(&rt, &client, &tx),
-                WorkerJob::CtlList { socket } => job_ctl_list(&socket, &tx),
+                WorkerJob::WsProjects => job_ws_projects(&rt, &client, &out),
+                WorkerJob::WsSwitchProject(name) => {
+                    job_ws_switch_project(&rt, &client, &name, &out)
+                }
+                WorkerJob::WorkspaceQuery => job_workspace_query(&rt, &client, &out),
+                WorkerJob::WorkspaceSet(path) => job_workspace_set(&rt, &client, &path, &out),
+                WorkerJob::LoadUserSettings => job_load_user_settings(&rt, &client, &out),
+                WorkerJob::SaveLlm(save) => job_save_llm(&rt, &client, save, &out),
+                WorkerJob::SavePrefs(save) => job_save_prefs(&rt, &client, save, &out),
+                WorkerJob::Skills => job_skills(&rt, &client, &out),
+                // `CtlList` 是这条 lane 自己 `/ctl` 的回包 → 打标签；
+                // `CtlLaneReady` 的目标 lane 还不存在 → 交外壳（裸发）。
+                WorkerJob::CtlList { socket } => job_ctl_list(&socket, &out),
                 WorkerJob::CtlAttach { socket, name } => job_ctl_attach(&socket, &name, &tx),
                 WorkerJob::CtlNew {
                     socket,
@@ -487,7 +513,7 @@ pub(super) fn spawn_worker(
                     conversation_id,
                     level,
                     generation,
-                } => job_write_permission(&rt, &client, &conversation_id, &level, generation, &tx),
+                } => job_write_permission(&rt, &client, &conversation_id, &level, generation, &out),
             }
         }
     });
@@ -498,19 +524,15 @@ fn run_turn_job(
     rt: &tokio::runtime::Runtime,
     client: &ServeClient,
     job: TurnRequest,
-    tx: &Sender<UiEvent>,
-    lane: LaneId,
+    out: &LaneTx,
 ) {
     let result = rt.block_on(async {
-        let mut sink = UiSink {
-            lane,
-            tx: tx.clone(),
-        };
+        let mut sink = UiSink { out: out.clone() };
         let mut gate: Box<dyn ApprovalGate> = if job.yes {
             Box::new(AutoAllowOnce)
         } else {
             Box::new(OverlayApprovalGate {
-                tx: tx.clone(),
+                out: out.clone(),
                 wait: APPROVAL_WAIT,
             })
         };
@@ -524,7 +546,7 @@ fn run_turn_job(
         .await
     });
     let (outcome, error, interrupted) = split_turn_result(result);
-    let _ = tx.send(UiEvent::TurnDone {
+    let _ = out.send(UiEvent::TurnDone {
         outcome,
         error,
         interrupted,
@@ -576,25 +598,25 @@ fn job_session_index(
     rt: &tokio::runtime::Runtime,
     client: &ServeClient,
     op: SessionIndexOp,
-    tx: &Sender<UiEvent>,
+    out: &LaneTx,
 ) {
     let result = rt
         .block_on(apply_web_session_op(client, &op))
         .map_err(|e| e.to_string());
-    let _ = tx.send(UiEvent::SessionIndex { result, op });
+    let _ = out.send(UiEvent::SessionIndex { result, op });
 }
 
 /// 会话列表 + 工作区路径刷新（静默；发送失败忽略，worker 随 UI 退出而停）。
-fn job_refresh_sessions(rt: &tokio::runtime::Runtime, client: &ServeClient, tx: &Sender<UiEvent>) {
+fn job_refresh_sessions(rt: &tokio::runtime::Runtime, client: &ServeClient, out: &LaneTx) {
     let result = rt
         .block_on(fetch_web_sessions(client))
         .map_err(|e| e.to_string());
-    let _ = tx.send(UiEvent::Sessions(result));
+    let _ = out.send(UiEvent::Sessions(result));
     let path = rt.block_on(fetch_workspace(client)).ok().and_then(|w| {
         let p = w.path.trim();
         (!p.is_empty()).then(|| p.to_string())
     });
-    let _ = tx.send(UiEvent::WorkspacePath(path));
+    let _ = out.send(UiEvent::WorkspacePath(path));
 }
 
 /// 拉一页会话历史（只读回放）。失败如实回传，提示文案由 UI 决定。
@@ -603,7 +625,7 @@ fn job_conversation_history(
     client: &ServeClient,
     conversation_id: &str,
     before_index: Option<u32>,
-    tx: &Sender<UiEvent>,
+    out: &LaneTx,
 ) {
     let fetched = rt.block_on(fetch_conversation_messages(
         client,
@@ -617,7 +639,7 @@ fn job_conversation_history(
         .ok()
         .and_then(|r| r.tiktoken_prompt_tokens.clone());
     let result = fetched.map_err(|e| e.to_string());
-    let _ = tx.send(UiEvent::ConversationHistory {
+    let _ = out.send(UiEvent::ConversationHistory {
         conversation_id: conversation_id.to_string(),
         result,
         snapshot,
@@ -633,13 +655,13 @@ fn job_refresh_usage(
     rt: &tokio::runtime::Runtime,
     client: &ServeClient,
     conversation_id: &str,
-    tx: &Sender<UiEvent>,
+    out: &LaneTx,
 ) {
     let snapshot = rt
         .block_on(fetch_conversation_messages(client, conversation_id, None))
         .ok()
         .and_then(|r| r.tiktoken_prompt_tokens);
-    let _ = tx.send(UiEvent::UsageHydrated {
+    let _ = out.send(UiEvent::UsageHydrated {
         conversation_id: conversation_id.to_string(),
         snapshot,
     });
@@ -649,13 +671,13 @@ fn job_refresh_usage(
 fn job_refresh_workspace_root(
     rt: &tokio::runtime::Runtime,
     client: &ServeClient,
-    tx: &Sender<UiEvent>,
+    out: &LaneTx,
     keep: bool,
 ) {
     let result = rt
         .block_on(fetch_workspace_dir(client, None))
         .map_err(|e| e.to_string());
-    let _ = tx.send(UiEvent::Workspace { result, keep });
+    let _ = out.send(UiEvent::Workspace { result, keep });
 }
 
 /// 展开目录的子列表。
@@ -664,12 +686,12 @@ fn job_workspace_dir(
     client: &ServeClient,
     rel: &str,
     generation: u64,
-    tx: &Sender<UiEvent>,
+    out: &LaneTx,
 ) {
     let result = rt
         .block_on(fetch_workspace_dir(client, Some(rel)))
         .map_err(|e| e.to_string());
-    let _ = tx.send(UiEvent::WorkspaceDir {
+    let _ = out.send(UiEvent::WorkspaceDir {
         rel: rel.to_string(),
         generation,
         result,
@@ -684,14 +706,14 @@ fn job_refresh_status(
     rt: &tokio::runtime::Runtime,
     client: &ServeClient,
     conversation_id: Option<&str>,
-    tx: &Sender<UiEvent>,
+    out: &LaneTx,
 ) {
     let mut result = rt.block_on(fetch_serve_defaults(client));
     let view = rt.block_on(fetch_permission_view(client, conversation_id));
     if let Ok(defaults) = result.as_mut() {
         defaults.permission_view = view;
     }
-    let _ = tx.send(UiEvent::Status {
+    let _ = out.send(UiEvent::Status {
         conversation_id: conversation_id.map(str::to_string),
         result,
     });
@@ -735,12 +757,12 @@ fn job_write_permission(
     conversation_id: &str,
     level: &str,
     generation: u64,
-    tx: &Sender<UiEvent>,
+    out: &LaneTx,
 ) {
     let outcome = rt
         .block_on(write_permission_level(client, conversation_id, level))
         .map_err(|e| e.to_string());
-    let _ = tx.send(UiEvent::PermissionWritten {
+    let _ = out.send(UiEvent::PermissionWritten {
         level: level.to_string(),
         outcome,
         generation,
@@ -748,22 +770,22 @@ fn job_write_permission(
 }
 
 /// skill 目录（`GET /skills`）：只给 `/` 补全菜单的 skill 候选，失败如实回传。
-fn job_skills(rt: &tokio::runtime::Runtime, client: &ServeClient, tx: &Sender<UiEvent>) {
+fn job_skills(rt: &tokio::runtime::Runtime, client: &ServeClient, out: &LaneTx) {
     let result = rt.block_on(async {
         client
             .get_json::<SkillsPayload>(paths::SKILLS)
             .await
             .map_err(|e| e.to_string())
     });
-    let _ = tx.send(UiEvent::Skills(result));
+    let _ = out.send(UiEvent::Skills(result));
 }
 
 /// 项目池列表（`GET /workspace/projects`）。
-fn job_ws_projects(rt: &tokio::runtime::Runtime, client: &ServeClient, tx: &Sender<UiEvent>) {
+fn job_ws_projects(rt: &tokio::runtime::Runtime, client: &ServeClient, out: &LaneTx) {
     let result = rt
         .block_on(fetch_workspace_projects(client))
         .map_err(|e| e.to_string());
-    let _ = tx.send(UiEvent::WsProjects(result));
+    let _ = out.send(UiEvent::WsProjects(result));
 }
 
 /// 切换项目池内项目（`POST /workspace/projects`）。
@@ -771,19 +793,19 @@ fn job_ws_switch_project(
     rt: &tokio::runtime::Runtime,
     client: &ServeClient,
     name: &str,
-    tx: &Sender<UiEvent>,
+    out: &LaneTx,
 ) {
     let result = rt
         .block_on(switch_workspace_project(client, name))
         .map_err(|e| e.to_string());
-    let _ = tx.send(UiEvent::WsProjectSwitch(result));
+    let _ = out.send(UiEvent::WsProjectSwitch(result));
 }
 
 /// `/workspace`（空参）：读 serve 当前工作区根（`GET /workspace`）。
 ///
 /// `fetch_workspace` 不像 `fetch_workspace_dir` 那样检查体内 `error`（2xx 也可能带
 /// 语义错误），这里补上：否则用户会看到「当前工作区：」空一行而不是失败原因。
-fn job_workspace_query(rt: &tokio::runtime::Runtime, client: &ServeClient, tx: &Sender<UiEvent>) {
+fn job_workspace_query(rt: &tokio::runtime::Runtime, client: &ServeClient, out: &LaneTx) {
     let result = match rt.block_on(fetch_workspace(client)) {
         Ok(w) => match w.error.as_deref().map(str::trim) {
             Some(e) if !e.is_empty() => Err(e.to_string()),
@@ -791,7 +813,7 @@ fn job_workspace_query(rt: &tokio::runtime::Runtime, client: &ServeClient, tx: &
         },
         Err(e) => Err(e.to_string()),
     };
-    let _ = tx.send(UiEvent::WorkspaceQuery(result));
+    let _ = out.send(UiEvent::WorkspaceQuery(result));
 }
 
 /// `/workspace <路径>`：按路径设置 serve 工作区根（`POST /workspace`）。
@@ -802,23 +824,14 @@ fn job_workspace_query(rt: &tokio::runtime::Runtime, client: &ServeClient, tx: &
 ///
 /// 失败**不压成字符串**：`WorkspaceSetError` 带 `kind`，UI 层才能把 409
 /// `WORKSPACE_ALREADY_SET` 提示成「另起 lane」而不是「重试」。
-fn job_workspace_set(
-    rt: &tokio::runtime::Runtime,
-    client: &ServeClient,
-    path: &str,
-    tx: &Sender<UiEvent>,
-) {
+fn job_workspace_set(rt: &tokio::runtime::Runtime, client: &ServeClient, path: &str, out: &LaneTx) {
     let result = rt.block_on(set_workspace(client, path));
-    let _ = tx.send(UiEvent::WorkspaceSet(result));
+    let _ = out.send(UiEvent::WorkspaceSet(result));
 }
 
 /// 启动时拉取 user-data 设置快照（`GET /user-data/prefs` + `GET /user-data/llm-overrides`）
 /// 并合成持久层；任一失败整体报错（面板/合成回退 override 与 serve 默认）。
-fn job_load_user_settings(
-    rt: &tokio::runtime::Runtime,
-    client: &ServeClient,
-    tx: &Sender<UiEvent>,
-) {
+fn job_load_user_settings(rt: &tokio::runtime::Runtime, client: &ServeClient, out: &LaneTx) {
     let result: Result<PersistedSettings, String> = rt.block_on(async {
         let prefs = fetch_user_data_prefs(client)
             .await
@@ -828,18 +841,13 @@ fn job_load_user_settings(
             .map_err(|e| e.to_string())?;
         Ok(PersistedSettings::from_snapshot(&prefs, &llm))
     });
-    let _ = tx.send(UiEvent::UserData(result));
+    let _ = out.send(UiEvent::UserData(result));
 }
 
 /// 保存 llm-overrides：先 GET 现值，只改 `client_llm.{model,api_base,temperature,
 /// llm_thinking_mode,llm_context_tokens}` 再全量 PUT
 /// （合并保真，不覆盖 `executor_llm/saved_models/execution_mode`）。
-fn job_save_llm(
-    rt: &tokio::runtime::Runtime,
-    client: &ServeClient,
-    save: LlmSave,
-    tx: &Sender<UiEvent>,
-) {
+fn job_save_llm(rt: &tokio::runtime::Runtime, client: &ServeClient, save: LlmSave, out: &LaneTx) {
     let result: Result<LlmSave, String> = rt.block_on(async {
         let dto = fetch_llm_overrides(client)
             .await
@@ -849,7 +857,7 @@ fn job_save_llm(
             .map_err(|e| e.to_string())?;
         Ok(save)
     });
-    let _ = tx.send(UiEvent::SavedLlm(result));
+    let _ = out.send(UiEvent::SavedLlm(result));
 }
 
 /// 保存 prefs：先 GET 现值，只改 `cm_role/session_mode/disable_readonly_tool_ttl_cache`
@@ -858,7 +866,7 @@ fn job_save_prefs(
     rt: &tokio::runtime::Runtime,
     client: &ServeClient,
     save: PrefsSave,
-    tx: &Sender<UiEvent>,
+    out: &LaneTx,
 ) {
     let result: Result<PrefsSave, String> = rt.block_on(async {
         let dto = fetch_user_data_prefs(client)
@@ -869,7 +877,7 @@ fn job_save_prefs(
             .map_err(|e| e.to_string())?;
         Ok(save)
     });
-    let _ = tx.send(UiEvent::SavedPrefs(result));
+    let _ = out.send(UiEvent::SavedPrefs(result));
 }
 
 #[cfg(test)]
