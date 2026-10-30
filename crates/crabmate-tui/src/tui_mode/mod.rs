@@ -120,6 +120,11 @@ struct LaneApp<'a> {
     tx: Sender<UiEvent>,
     job_tx: Sender<WorkerJob>,
     cancel: Option<StreamCancel>,
+    /// 本条 lane 发起的**进程级**退出请求（`/quit`、第二次 Ctrl+C、`quit_pending` 落地）。
+    ///
+    /// 语义是「退出整个 TUI」，不是「只摘掉这条 lane」（那个用 `/lane detach`），所以
+    /// 消费方是外壳：`TuiApp::exit_requested` 扫**全部** lane。只判当前 lane 会让后台
+    /// lane 的请求一直悬着，直到用户切过去才突然掀掉整个 TUI（issue #338）。
     exit: bool,
     /// `/quit`（`/exit`、`/q` 同义）请求在回合结束后退出（回合进行中先取消并等待）。
     quit_pending: bool,
@@ -405,7 +410,7 @@ impl LaneApp<'_> {
                         }
                         self.st.push_line(
                             LineKind::System,
-                            "正在取消回合…完成后退出（再按一次 Ctrl+C 强退）",
+                            "正在取消回合…完成后退出整个 TUI（所有连接；只摘一条用 /lane detach，再按一次 Ctrl+C 强退）",
                         );
                     } else {
                         self.exit = true;

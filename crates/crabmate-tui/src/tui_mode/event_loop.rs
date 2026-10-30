@@ -157,12 +157,13 @@ impl TuiApp<'_> {
         let mut first = true;
         let mut last_draw = Instant::now();
         loop {
-            if self.lane().exit {
+            // 退出判定在外壳层：任一条 lane 提的 `/quit` 都退出整个 TUI（issue #338）。
+            if self.exit_requested() {
                 return Ok(());
             }
             let had_event = self.collect_events(mode, first)?;
             first = false;
-            if self.lane().exit {
+            if self.exit_requested() {
                 return Ok(());
             }
             if mode == LoopMode::Event {
@@ -224,7 +225,7 @@ impl TuiApp<'_> {
             let Ok(msg) = next else { break };
             any = true;
             self.on_msg(msg);
-            if self.lane().exit {
+            if self.exit_requested() {
                 break;
             }
         }

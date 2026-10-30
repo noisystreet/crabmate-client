@@ -48,6 +48,12 @@ pub(super) enum LaneStatus {
     /// 所以左栏这一列是用户唯一能看见它的地方 —— 否则那条 lane 会静默停摆到
     /// `APPROVAL_WAIT`（600 s）超时。见 issue #337。
     WaitingApproval,
+    /// 已请求退出（`/quit` 在等这一轮结束，或 `exit` 已置位）。
+    ///
+    /// 与 [`Self::WaitingApproval`] 同一类问题：后台 lane 的那一行是**唯一**能看见
+    /// 「这个客户端马上要走」的地方。没有它，用户在别的 lane 干活时会被一个不打招呼的
+    /// 退出打断一遍 —— `/quit` 之后到真正退出之间可能隔着整轮生成（issue #338）。
+    Quitting,
 }
 
 impl LaneStatus {
@@ -61,6 +67,7 @@ impl LaneStatus {
             Self::Idle => "·",
             Self::Running => "●",
             Self::WaitingApproval => "▲",
+            Self::Quitting => "×",
         }
     }
 }
@@ -185,6 +192,11 @@ fn row_style(entry: &LaneEntry, palette: &Palette) -> Style {
             .add_modifier(Modifier::BOLD);
     }
     match entry.status {
+        // 退出请求和等审批一样「不会自己前进」，都用告警色；靠符号与 BOLD 区分两者。
+        LaneStatus::Quitting => Style::new()
+            .fg(palette.err)
+            .bg(palette.overlay_bg)
+            .add_modifier(Modifier::BOLD),
         LaneStatus::WaitingApproval => Style::new().fg(palette.err).bg(palette.overlay_bg),
         LaneStatus::Idle | LaneStatus::Running => {
             Style::new().fg(palette.fg).bg(palette.overlay_bg)
@@ -355,6 +367,7 @@ mod tests {
             LaneStatus::Idle,
             LaneStatus::Running,
             LaneStatus::WaitingApproval,
+            LaneStatus::Quitting,
         ] {
             let mark = status.mark();
             assert_eq!(UnicodeWidthStr::width(mark), 1, "`{mark}` 必须是单列");
@@ -363,13 +376,14 @@ mod tests {
             LaneStatus::Idle.mark(),
             LaneStatus::Running.mark(),
             LaneStatus::WaitingApproval.mark(),
+            LaneStatus::Quitting.mark(),
         ];
         marks.sort_unstable();
         marks.dedup();
         assert_eq!(
             marks.len(),
-            3,
-            "三种状态不能共用符号：否则分不出「在跑」与「等审批」"
+            4,
+            "四种状态不能共用符号：否则分不出「在跑」「等审批」与「正在退出」"
         );
     }
 
