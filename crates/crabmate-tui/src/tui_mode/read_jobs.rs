@@ -5,7 +5,7 @@
 
 use super::LaneApp;
 use super::state::LineKind;
-use super::worker::{UiEvent, WorkerJob};
+use super::worker::{LaneTx, UiEvent, WorkerJob};
 use crate::serve::fetch_workspace_dir;
 
 impl LaneApp<'_> {
@@ -25,12 +25,12 @@ impl LaneApp<'_> {
             // `into_owned`：spawn 出来的任务要求 `'static`，借来的那份活不到那时
             // （`ServeClient` 只含 `reqwest::Client` + 配置，克隆很轻）。
             let client = self.client.clone().into_owned();
-            let tx = self.tx.clone();
+            let out = LaneTx::new(self.id, self.tx.clone());
             handle.spawn(async move {
                 let result = fetch_workspace_dir(&client, Some(&rel))
                     .await
                     .map_err(|e| e.to_string());
-                let _ = tx.send(UiEvent::WorkspaceDir {
+                let _ = out.send(UiEvent::WorkspaceDir {
                     rel,
                     generation,
                     result,
