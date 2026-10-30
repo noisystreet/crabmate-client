@@ -173,6 +173,10 @@ impl<'a> TuiApp<'a> {
     fn on_msg(&mut self, msg: UiEvent) {
         match msg {
             UiEvent::Lane(id, inner) => {
+                // 后台 lane 弹审批先在本 lane 留一句提示：浮层只画当前 lane，不说一声
+                // 就是最长 600s 的静默停摆（见 issue #337）。提示归提示，事件仍要
+                // 分派给**它自己**那条 lane —— 浮层建在它的 `st` 上。
+                self.announce_background_approval(id, &inner);
                 // 目标 lane 已关闭（W2 起才可能出现）：丢弃，绝不把增量写进别的
                 // transcript —— 串台比丢一条增量难查得多。
                 if let Some(lane) = self.lanes.iter_mut().find(|l| l.id == id) {
@@ -184,6 +188,8 @@ impl<'a> TuiApp<'a> {
             UiEvent::CtlLaneReady { name, result } => self.on_lane_ready(name, result),
             // 摘连接同样改 `lanes`：`LaneApp` 手上没有那份 `&mut`（见 `shell::detach_lane`）。
             UiEvent::LaneDetach { name } => self.detach_lane(&name),
+            // 取消某条 lane 的回合也是外壳动作：`LaneApp` 只握着自己的 `cancel`。
+            UiEvent::LaneCancel { name } => self.cancel_lane(&name),
             other => {
                 // 切 lane 是外壳动作：必须在进入 lane 之前拦截（lane 无权切自己，
                 // 否则每条 lane 都要知道全局有几条）。
@@ -686,8 +692,8 @@ impl LaneApp<'_> {
             // 外层已按 `LaneId` 分发过；lane 内再见到标签只可能来自直连测试，
             // 递归解包即可（不丢弃，避免测试构造的标签事件被静默吃掉）。
             UiEvent::Lane(_, inner) => self.on_msg(*inner),
-            // 外壳动作：真正摘 lane 的是 `TuiApp`，lane 内见到只可能是测试直连。
-            UiEvent::LaneDetach { .. } => {}
+            // 外壳动作：真正摘 lane / 取消回合的是 `TuiApp`，lane 内见到只可能是测试直连。
+            UiEvent::LaneDetach { .. } | UiEvent::LaneCancel { .. } => {}
             UiEvent::Key(key) => self.on_key(key),
             // 粘贴整段进输入框（不改焦点、不提交）：见 `paste` 模块头注释。
             UiEvent::Paste(text) => self.on_paste(text),
