@@ -8,13 +8,14 @@
 //!
 //! - `/lane`（空参）/ `/lane list`：列出控制面实例（与 `/ctl` 同一实现，不再各写一份）。
 //! - `/lane attach <name>`：连上**已就绪**的实例，不改声明。
+//! - `/lane detach <name>`：只摘掉**本进程**的连接；声明与 serve 进程都不动（与 attach 对称）。
 //! - `/lane new <name> [workspace]`：新增一条声明并等它就绪（写盘由 ctl 完成）。
 //!
 //! 失败一律写进**发起命令的那条 lane**的 transcript：用户正看着它，而新 lane 此刻
 //! 还不存在，没有别的地方可写。
 
 use super::state::LineKind;
-use super::worker::WorkerJob;
+use super::worker::{UiEvent, WorkerJob};
 
 /// `/lane` 的子动作。
 #[derive(Debug)]
@@ -23,6 +24,8 @@ pub(crate) enum LaneCommand {
     List,
     /// `attach <name>`：连上已就绪的实例。
     Attach(String),
+    /// `detach <name>`：只摘掉本进程的连接（声明与 serve 进程都不动）。
+    Detach(String),
     /// `new <name> [workspace]`：新增声明并等它就绪。
     New {
         /// 实例名（`instances.toml` 的键）。
@@ -44,25 +47,32 @@ pub(crate) fn parse(arg: Option<&str>) -> Result<LaneCommand, String> {
     match sub.to_ascii_lowercase().as_str() {
         // `list` 后面跟东西就是手误：静默忽略会让人以为参数生效了。
         "list" | "ls" | "show" if tail.is_empty() => Ok(LaneCommand::List),
-        "attach" | "use" => attach_tail(tail).map(LaneCommand::Attach),
+        "attach" | "use" => one_name(tail, "attach").map(LaneCommand::Attach),
+        "detach" => one_name(tail, "detach").map(LaneCommand::Detach),
         "new" | "add" => new_tail(tail),
         _ => Err(usage()),
     }
 }
 
-/// 用法提示：三条子命令各给一个可照抄的例子。
+/// 用法提示：每条子命令各给一个可照抄的例子。
 fn usage() -> String {
-    "用法：/lane [list] · /lane attach <name> · /lane new <name> [workspace]".to_string()
+    "用法：/lane [list] · /lane attach <name> · /lane detach <name> · /lane new <name> [workspace]"
+        .to_string()
 }
 
-/// `attach` 之后只能是**一个**实例名：含空白一律报错，不去猜哪个是名字。
-fn attach_tail(tail: &str) -> Result<String, String> {
+/// `attach` / `detach` 之后只能是**一个**实例名：含空白一律报错，不去猜哪个是名字。
+///
+/// `verb` 只参与报错文案：两条子命令的名字规则一样，但让人照抄的命令必须是他刚打错的
+/// 那条 —— 对 `/lane detach foo bar` 回一句「`/lane attach <name>`」只会更糊涂。
+fn one_name(tail: &str, verb: &str) -> Result<String, String> {
     if tail.is_empty() {
-        return Err("缺实例名：`/lane attach <name>`（用 `/lane` 看现有实例）".to_string());
+        return Err(format!(
+            "缺实例名：`/lane {verb} <name>`（用 `/lane` 看现有连接与实例）"
+        ));
     }
     if tail.split_whitespace().count() > 1 {
         return Err(format!(
-            "实例名不能含空白：`{tail}`（用 `/lane` 看现有实例名）"
+            "实例名不能含空白：`{tail}`（用 `/lane` 看现有名称）"
         ));
     }
     Ok(tail.to_string())
@@ -102,6 +112,7 @@ impl super::LaneApp<'_> {
         match cmd {
             LaneCommand::List => self.fetch_ctl_list(),
             LaneCommand::Attach(name) => self.lane_attach(name),
+            LaneCommand::Detach(name) => self.lane_detach(name),
             LaneCommand::New { name, workspace } => self.lane_new(name, workspace),
         }
     }
@@ -120,6 +131,17 @@ impl super::LaneApp<'_> {
         {
             self.st
                 .push_line(LineKind::System, "连接未发出：worker 线程已退出");
+        }
+    }
+
+    /// `/lane detach <name>`：请外壳摘掉一条连接（`LaneApp` 没有 `lanes` 的 `&mut`）。
+    ///
+    /// 走**裸**事件（不带 `LaneId`）：被摘的可能正是发起命令的这条 lane，按 id 分发会
+    /// 落空 —— 与 `CtlLaneReady` 同一个理由。不查 ctl：这一步不动声明、也不停进程。
+    fn lane_detach(&mut self, name: String) {
+        if self.tx.send(UiEvent::LaneDetach { name }).is_err() {
+            self.st
+                .push_line(LineKind::System, "断开未发出：事件通道已关闭");
         }
     }
 
@@ -189,6 +211,18 @@ mod tests {
             parse(Some("attach proj-a extra")).is_err(),
             "两个词不猜哪个是名字"
         );
+    }
+
+    /// `detach` 与 `attach` 的名字规则一致；报错要照抄用户刚打的那条命令。
+    #[test]
+    fn detach_takes_exactly_one_name() {
+        assert!(matches!(
+            parse(Some("detach proj-a")),
+            Ok(LaneCommand::Detach(n)) if n == "proj-a"
+        ));
+        let err = parse(Some("detach")).unwrap_err();
+        assert!(err.contains("/lane detach"), "要指回刚打的那条：{err}");
+        assert!(parse(Some("detach a b")).is_err(), "两个词不猜哪个是名字");
     }
 
     #[test]

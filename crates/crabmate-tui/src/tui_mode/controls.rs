@@ -40,7 +40,10 @@ pub enum Control {
     /// 只是查询；新增连接走 [`Control::Lane`]（Server 已补上 `disable`/`enable` 与
     /// `add` 的字段面，所以运行期加 lane 不再被阻塞）。
     Ctl,
-    /// `/lane [list|attach <name>|new <name> [workspace]]`：运行期新增连接。
+    /// `/lane [list|attach <name>|detach <name>|new <name> [workspace]]`：运行期连接管理。
+    ///
+    /// `detach` 只摘**本进程**的连接：声明与 serve 进程都不动（与 `attach` 对称），所以
+    /// 它不经 ctl，也不进 worker。
     ///
     /// `Err` = 参数写错的用法提示：解析在 [`super::lane_cmd::parse`]，但报错文本要
     /// 写进 transcript，所以只在事件循环里打印。
@@ -209,6 +212,11 @@ mod tests {
         assert!(matches!(
             parse_control("/LANE new proj-b /data/proj-b"),
             Some(Control::Lane(Ok(lane_cmd::LaneCommand::New { .. })))
+        ));
+        // `detach` 只摘本进程的连接，与 `attach` 同一个名字规则。
+        assert!(matches!(
+            parse_control("/lane detach proj-a"),
+            Some(Control::Lane(Ok(lane_cmd::LaneCommand::Detach(n)))) if n == "proj-a"
         ));
         // 认不出的子命令给用法提示，不当成普通消息发给模型。
         assert!(matches!(

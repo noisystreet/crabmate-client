@@ -206,6 +206,7 @@ api_base = "http://127.0.0.1:8082"
 |------|--------|--------|
 | `/lane`（空参）/ `/lane list` | 列实例（与 `/ctl` 同一实现） | 无（只读 socket） |
 | `/lane attach <name>` | 在声明里找**已就绪**的实例，取 `base_url` 后直接连 | 无 |
+| `/lane detach <name>` | 只摘掉**本进程**的连接（连不上就报现有名字；最后一条不许摘） | 无（不动声明与进程） |
 | `/lane new <name> [workspace]` | `add` 写声明 → 轮询 `list` 到 `observed == ready` → 连 | 新增一条声明（ctl 负责起进程） |
 
 - **就绪判据只有一处**：`crabmate-client-api::ctl::lane_readiness` —— `ready` **且带 `base_url`** 才算 `Ready`；`failed` / `stopped` / `held` 直接 `Failed`（带 Server 的 `last_error`，它才是唯一知道原因的地方）；`starting` / `stale` / 缺 `observed` / 认不出的观测态一律 `Pending`。放纯逻辑里既为可测，也避免 worker 的轮询循环与 `/ctl` 的显示口径漂移。
@@ -213,9 +214,11 @@ api_base = "http://127.0.0.1:8082"
 - **轮询**：每 300 ms、上限 20 s（`up` 自己的 readiness 超时是 10 s，留一倍余量）。超时**不是**「起不来」的结论，文案让人「稍后 `/ctl` 复查、就绪后 `/lane attach`」。等待期间独占**发起命令那条 lane 的 worker**（该 lane 其它拉取排队），别的 lane 不受影响。
 - **装配**：`LaneApp::assemble` + `LaneTemplate`（存**启动时**的 `overrides` / `yes` / `no_keyring` / bearer / `ctl_socket` / `tx`）。存启动初值而不是「当前 lane 的现值」：当前 lane 的 `/model` 覆盖只属于它。`LaneApp::client` 因此从 `&'a ServeClient` 改成 `Cow<'a, ServeClient>` —— 启动装配仍零拷贝借用，运行期造出来的客户端自己持有。
 - **事件通道**：结果走 `UiEvent::CtlLaneReady { name, result }`，由 worker **裸发**（不包 `LaneId`）：目标 lane 此刻还不存在，按 id 分发只会被当成「已关闭的 lane」丢掉；由 `TuiApp` 拦截并装配 —— 单条 lane 无权改 `lanes`。
-- **同名不重连**：名字已在 `lanes` 里时只切过去并明说「已经是本进程的连接」。静默再连会让左栏出现两条同名 lane，而 `/ctl` 里只有一条实例。
+- **同名或同 URL 都不重连**：名字已在 `lanes` 里时只切过去并明说「已经是本进程的连接」；名字不同但 `base_url` 与某条 lane 相同（按 `same_api_base` 归一化比较：尾 `/`、大小写不算差异，`localhost` 与 `127.0.0.1` 仍是两个 Origin）也只切过去 —— 那是同一台 serve，重复连会各开一条 SSE、各读一份会话。静默再连会让左栏出现两条同名 lane，而 `/ctl` 里只有一条实例。
+- **`/lane detach <name>` 只摘本进程的账**：声明与 serve 进程都不动（`/lane` 的语义是「本进程连不连」，与 attach 对称；要停实例用 `crabmatectl down`）。摘掉即 drop 该 `LaneApp`，它的 job channel 随之关闭，worker 线程与那个 runtime（含在途请求、SSE）自行收尾，不另发停止信号；`LaneId` 单调递增不复用，残留事件按 id 分发时匹配不到，直接丢弃（不会串台）。两种情形明说而不硬做：名字不存在（把现有名字列出来，省得再猜）与**最后一条**（界面至少要有一条 lane，退出用 `/quit`）。
+- **主 lane 也按 URL 认领实例名**：启动 lane 的名字原本恒为 `local`。上面的同 URL 去重已经能拦住「同一台 serve 连两条」，但名字对不上时提示只能说「`local` 已经连着 …」，左栏的名字与 ctl 里的实例名仍是两套。启动时因此问一次控制面（`serve::ctl::primary_binding`）：`base_url` 与 `--api-base` 相同的实例，主 lane 直接用它的名字，`/lane attach server` 连同名/同 URL 两道闸都命中，只切过去并说「已经是本进程的连接」。比较只看 **URL**（`same_api_base`：去尾 `/`、不区分大小写；`localhost` 与 `127.0.0.1` 是两个 Origin，不合并），不看 `observed`（`stale` / `starting` 仍是那台 serve 的声明）。查不到（ctl 没起 / URL 未声明 / 回包读不懂）一律退回 `local`，**不拦启动** —— 这条查询只负责命名。
 - **新 lane 的首拉**与启动同一套（`LaneApp::bootstrap`：会话 / 工作区根 / serve 状态 / user-data 快照）：只刷当前 lane 的话，切过去会看到空的会话列表。
-- **未做**：`/lane close`（等 `disable` / `enable`）、per-profile bearer 槽（控制面里所有实例同机同用户，第一版共用主连接那份；某实例要求不同 Bearer 时症状是那条 lane 的拉取全错）、`MAX_LANES` 上限。
+- **未做**：`/lane close` —— Server 侧已补上 socket 的 `disable` / `enable`（`enabled = false` 是客户端软删的正式口径），但 TUI 还没接：`detach` 只断开本进程的连接，声明项仍在，要删声明/停实例目前只有 `crabmatectl`；per-profile bearer 槽（控制面里所有实例同机同用户，第一版共用主连接那份；某实例要求不同 Bearer 时症状是那条 lane 的拉取全错）、`MAX_LANES` 上限。
 
 ---
 

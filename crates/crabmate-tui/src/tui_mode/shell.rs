@@ -309,8 +309,11 @@ impl<'a> super::TuiApp<'a> {
 
     /// 装配并切到一条新 lane。
     ///
-    /// 同名连接已存在时**只切过去**：`--connect a=x --connect a=y` 这类手误若静默再连
-    /// 一次，左栏会出现两条同名 lane，`/ctl` 里却只有一条实例 —— 之后所有判断都会错。
+    /// 两重去重，缺一不可。**同名**只切过去：`--connect a=x --connect a=y` 这类手误若
+    /// 静默再连一次，左栏会出现两条同名 lane，`/ctl` 里却只有一条实例 —— 之后所有判断
+    /// 都会错。**同 URL** 也只切过去：名字不同不代表是两台 serve（启动 lane 的名字可能
+    /// 来自 `--api-base` 反查，也可能是 `local`），重复连接会让同一台 serve 各开一条
+    /// SSE、各读一份会话，左栏连接数还与 ctl 的进程数对不上。
     pub(super) fn attach_lane(&mut self, name: &str, base_url: &str) {
         if let Some(idx) = self.lanes.iter().position(|l| l.label == name) {
             self.active = idx;
@@ -318,6 +321,20 @@ impl<'a> super::TuiApp<'a> {
             lane.st.push_line(
                 LineKind::System,
                 &format!("`{name}` 已经是本进程的连接（已切过去）"),
+            );
+            return;
+        }
+        if let Some(idx) = self
+            .lanes
+            .iter()
+            .position(|l| crate::serve::same_api_base(&l.client.config().api_base, base_url))
+        {
+            self.active = idx;
+            let existing = self.lanes[idx].label.clone();
+            let lane = self.lane_mut();
+            lane.st.push_line(
+                LineKind::System,
+                &format!("`{existing}` 已经连着 {base_url}（同一条 serve 不重复连，已切过去）"),
             );
             return;
         }
@@ -347,6 +364,58 @@ impl<'a> super::TuiApp<'a> {
         let lane = self.lane_mut();
         lane.st
             .push_line(LineKind::System, &format!("已连接 `{name}`（{base_url}）"));
+    }
+
+    /// 现有连接的展示名，顺序即左栏顺序。
+    ///
+    /// 报错时把这份名字列给用户：他刚打错的是名字（大小写、全角、`local` 还是实例名），
+    /// 光说「没有这条」只会让人再猜一次。
+    fn lane_labels(&self) -> Vec<String> {
+        self.lanes.iter().map(|l| l.label.clone()).collect()
+    }
+
+    /// `UiEvent::LaneDetach`：摘掉本进程的一条连接（**只摘自己的账**）。
+    ///
+    /// 声明与 serve 进程都不动 —— `instances.toml` 归 ctl 写、进程归 ctl 管，`/lane` 的
+    /// 语义是「本进程连不连」，与 `/lane attach` 对称；要真停实例请用 `crabmatectl down`
+    /// 或 `/lane` 之后改声明。
+    ///
+    /// 两种情形明说而不是硬做：名字不存在（列出既有名字）与**最后一条**（TUI 至少要有
+    /// 一条 lane 才画得出界面，退出客户端用 `/quit`）。
+    pub(super) fn detach_lane(&mut self, name: &str) {
+        let Some(idx) = self.lanes.iter().position(|l| l.label == name) else {
+            let known = self.lane_labels().join(" / ");
+            self.lane_mut().st.push_line(
+                LineKind::System,
+                &format!("没有叫 `{name}` 的连接（现有：{known}）"),
+            );
+            return;
+        };
+        if self.lanes.len() == 1 {
+            self.lane_mut().st.push_line(
+                LineKind::System,
+                "这是唯一的连接，不能摘掉（要退出客户端用 `/quit`）",
+            );
+            return;
+        }
+        let mut removed = self.lanes.remove(idx);
+        // 先清背景图：它为这条 lane 申请过终端图像配额，留着会算到下一个用户头上。
+        removed.clear_background();
+        let label = removed.label.clone();
+        // drop 掉 `LaneApp` 即关闭它的 job channel：worker 线程的 `recv` 随即返回 `None`，
+        // 线程与它那个 runtime（含在途请求、SSE 连接）自行收尾，不需要另发停止信号。
+        drop(removed);
+        // 指针修位：摘的是当前之前的，整体前移一格；摘的正好是当前，就停在原位置（= 原来
+        // 它的下一条）；摘的是末尾那条当前，退回新的末尾。
+        if idx < self.active {
+            self.active -= 1;
+        } else if self.active >= self.lanes.len() {
+            self.active = self.lanes.len() - 1;
+        }
+        self.lane_mut().st.push_line(
+            LineKind::System,
+            &format!("已断开 `{label}`（声明与进程未动；要再连用 `/lane attach {label}`）"),
+        );
     }
 
     /// 鼠标落在左栏 lane 列表的某一行时，返回该 lane 的下标。
