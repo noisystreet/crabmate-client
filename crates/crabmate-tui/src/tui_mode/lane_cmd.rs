@@ -26,6 +26,11 @@ pub(crate) enum LaneCommand {
     Attach(String),
     /// `detach <name>`：只摘掉本进程的连接（声明与 serve 进程都不动）。
     Detach(String),
+    /// `cancel <name>`：取消这条 lane 正在跑的回合（不必先切过去）。
+    ///
+    /// 后台 lane 的审批浮层画不到屏幕上，没有这条命令就只能干等 `APPROVAL_WAIT`
+    /// 超时（600 s）才按拒绝收尾（见 issue #337）。
+    Cancel(String),
     /// `new <name> [workspace]`：新增声明并等它就绪。
     New {
         /// 实例名（`instances.toml` 的键）。
@@ -49,6 +54,7 @@ pub(crate) fn parse(arg: Option<&str>) -> Result<LaneCommand, String> {
         "list" | "ls" | "show" if tail.is_empty() => Ok(LaneCommand::List),
         "attach" | "use" => one_name(tail, "attach").map(LaneCommand::Attach),
         "detach" => one_name(tail, "detach").map(LaneCommand::Detach),
+        "cancel" | "kill" | "interrupt" => one_name(tail, "cancel").map(LaneCommand::Cancel),
         "new" | "add" => new_tail(tail),
         _ => Err(usage()),
     }
@@ -56,7 +62,7 @@ pub(crate) fn parse(arg: Option<&str>) -> Result<LaneCommand, String> {
 
 /// 用法提示：每条子命令各给一个可照抄的例子。
 fn usage() -> String {
-    "用法：/lane [list] · /lane attach <name> · /lane detach <name> · /lane new <name> [workspace]"
+    "用法：/lane [list] · /lane attach <name> · /lane detach <name> · /lane cancel <name> · /lane new <name> [workspace]"
         .to_string()
 }
 
@@ -113,6 +119,7 @@ impl super::LaneApp<'_> {
             LaneCommand::List => self.fetch_ctl_list(),
             LaneCommand::Attach(name) => self.lane_attach(name),
             LaneCommand::Detach(name) => self.lane_detach(name),
+            LaneCommand::Cancel(name) => self.lane_cancel(name),
             LaneCommand::New { name, workspace } => self.lane_new(name, workspace),
         }
     }
@@ -142,6 +149,17 @@ impl super::LaneApp<'_> {
         if self.tx.send(UiEvent::LaneDetach { name }).is_err() {
             self.st
                 .push_line(LineKind::System, "断开未发出：事件通道已关闭");
+        }
+    }
+
+    /// `/lane cancel <name>`：请外壳取消一条 lane 的回合（`LaneApp` 只能取消自己）。
+    ///
+    /// 走**裸**事件，理由同 [`Self::lane_detach`]：要取消的可能正是这条 lane，
+    /// 按 id 分发会落回它自己、在 `TuiApp::on_msg` 里变成「自己取消自己」的二次请求。
+    fn lane_cancel(&mut self, name: String) {
+        if self.tx.send(UiEvent::LaneCancel { name }).is_err() {
+            self.st
+                .push_line(LineKind::System, "取消未发出：事件通道已关闭");
         }
     }
 

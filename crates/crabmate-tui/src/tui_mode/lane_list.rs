@@ -28,6 +28,41 @@ pub(super) struct LaneEntry {
     pub workspace: Option<String>,
     /// 是否当前 lane。
     pub active: bool,
+    /// 这条 lane 此刻在做什么。
+    pub status: LaneStatus,
+}
+
+/// 一条 lane 当前处于什么阶段（渲染用的最小快照）。
+///
+/// 用枚举而不是「busy / 待审批」两个 bool：后者允许「空闲又在等审批」这种非法组合，
+/// 分支也会随标志数扩散。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum LaneStatus {
+    /// 没有在跑的回合。
+    Idle,
+    /// 回合进行中（审批之外的工作）。
+    Running,
+    /// 有审批浮层在等决策。
+    ///
+    /// **后台 lane 的这个状态画不到屏幕上**（每帧只画当前 lane 的 `draw_frame`），
+    /// 所以左栏这一列是用户唯一能看见它的地方 —— 否则那条 lane 会静默停摆到
+    /// `APPROVAL_WAIT`（600 s）超时。见 issue #337。
+    WaitingApproval,
+}
+
+impl LaneStatus {
+    /// 单列状态符号。
+    ///
+    /// 刻意都取**宽度确定是 1** 的字符：`⏸` 这类符号在部分终端算双列，会把整行撑破
+    /// （`every_row_fills_the_width` 会当场发现）；而无色模式下符号本身就是状态的
+    /// 唯一信息，不能省。
+    fn mark(self) -> &'static str {
+        match self {
+            Self::Idle => "·",
+            Self::Running => "●",
+            Self::WaitingApproval => "▲",
+        }
+    }
 }
 
 /// 画出整块 lane 区：标题行 + 每条 lane 一行底色条，行与行之间不留空行。
@@ -89,7 +124,7 @@ fn lane_title(total: usize, shown: usize) -> String {
     }
 }
 
-/// 一条 lane 的一行：整行宽的底色条，文字贴左，当前 lane 多一个 `▎`。
+/// 一条 lane 的一行：整行宽的底色条，文字贴左。
 ///
 /// 恒一行而不是「均分可用行」的色块：两行块在真终端上读起来像一个按钮，文字贴首行
 /// 之后第二行只剩一条没有信息的色带，还会把切换 lane 的文字基线撑得跟上面的会话
@@ -97,13 +132,18 @@ fn lane_title(total: usize, shown: usize) -> String {
 ///
 /// 整行补空格到 `width` —— 只给文字上底色的话，条会缩成「文字那么宽」，看起来仍是
 /// 一行高亮文字，而不是列表里的一行。
+///
+/// 头两列是「当前 lane 标记 + 状态符号」：`▎` 指明聚焦，符号（`·` / `●` / `▲`）说明
+/// 这条 lane 在做什么。两列都要 —— 后台 lane 在等审批时屏幕上看不到浮层，
+/// 「切过去」与「它卡住了」全靠这一列（见 issue #337）。
 fn lane_row(entry: &LaneEntry, width: usize, palette: &Palette) -> Line<'static> {
-    let mark = if entry.active { "▎" } else { " " };
-    // `mark + 空格` 占 2 列，剩下的才是名字与工作区名能用的宽度。
-    let avail = width.saturating_sub(2);
+    let cursor = if entry.active { "▎" } else { " " };
+    let mark = format!("{cursor}{}", entry.status.mark());
+    // `mark + 空格` 占 3 列，剩下的才是名字与工作区名能用的宽度。
+    let avail = width.saturating_sub(3);
     let body = lane_row_text(&entry.label, entry.workspace.as_deref(), avail);
     let text = pad_display(&truncate_display(&format!("{mark} {body}"), width), width);
-    Line::from(Span::styled(text, row_style(entry.active, palette)))
+    Line::from(Span::styled(text, row_style(entry, palette)))
 }
 
 /// 行内文字：`名字`，宽度够时补 `· 工作区末段`。
@@ -135,13 +175,20 @@ fn workspace_hint(path: &str) -> Option<&str> {
 
 /// 底色条样式：当前 lane 走 `palette.selection`（无色模式自动退回反色），其余用
 /// 「比条带底色亮一档」的 `overlay_bg`，这样条与 lane 区底色仍分得开。
-fn row_style(active: bool, palette: &Palette) -> Style {
-    if active {
-        palette
+///
+/// 等审批的那条非当前 lane 用告警色前景：它不会自己前进，用户得知道该切过去
+/// （无色模式下颜色退回 `Reset`，仍有 `▲` 这个符号兜底）。
+fn row_style(entry: &LaneEntry, palette: &Palette) -> Style {
+    if entry.active {
+        return palette
             .selection(palette.accent)
-            .add_modifier(Modifier::BOLD)
-    } else {
-        Style::new().fg(palette.fg).bg(palette.overlay_bg)
+            .add_modifier(Modifier::BOLD);
+    }
+    match entry.status {
+        LaneStatus::WaitingApproval => Style::new().fg(palette.err).bg(palette.overlay_bg),
+        LaneStatus::Idle | LaneStatus::Running => {
+            Style::new().fg(palette.fg).bg(palette.overlay_bg)
+        }
     }
 }
 
@@ -171,6 +218,7 @@ mod tests {
                 label: (*n).to_string(),
                 workspace: None,
                 active: i == 0,
+                status: LaneStatus::Idle,
             })
             .collect()
     }
@@ -181,6 +229,7 @@ mod tests {
             label: label.to_string(),
             workspace: workspace.map(str::to_string),
             active,
+            status: LaneStatus::Idle,
         }
     }
 
@@ -282,7 +331,7 @@ mod tests {
             vec![lane_with("local", Some("   "), true)],
         ] {
             let rows = lane_list_rows(&entries, 20, 20, &pal());
-            assert_eq!(rows[1].spans[0].content.trim(), "▎ local");
+            assert_eq!(rows[1].spans[0].content.trim(), "▎· local");
         }
     }
 
@@ -297,6 +346,66 @@ mod tests {
             "太窄时不该硬塞：{}",
             rows[1].spans[0].content
         );
+    }
+
+    /// 状态符号必须各不相同、且**都是单列**：双列符号会把整行撑破。
+    #[test]
+    fn status_marks_are_distinct_and_single_column() {
+        for status in [
+            LaneStatus::Idle,
+            LaneStatus::Running,
+            LaneStatus::WaitingApproval,
+        ] {
+            let mark = status.mark();
+            assert_eq!(UnicodeWidthStr::width(mark), 1, "`{mark}` 必须是单列");
+        }
+        let mut marks = vec![
+            LaneStatus::Idle.mark(),
+            LaneStatus::Running.mark(),
+            LaneStatus::WaitingApproval.mark(),
+        ];
+        marks.sort_unstable();
+        marks.dedup();
+        assert_eq!(
+            marks.len(),
+            3,
+            "三种状态不能共用符号：否则分不出「在跑」与「等审批」"
+        );
+    }
+
+    /// 等审批的**后台** lane 必须一眼能看见：符号 + 告警色，两样都要。
+    ///
+    /// 后台 lane 的浮层画不到屏幕上，这一行是唯一线索（issue #337）。
+    #[test]
+    fn waiting_approval_is_marked_and_tinted() {
+        let mut entries = lanes(&["lane-a", "lane-b"]);
+        entries[1].status = LaneStatus::WaitingApproval;
+        let rows = lane_list_rows(&entries, 30, 20, &pal());
+        let b = rows[2].spans[0].content.as_ref();
+        assert!(b.contains('▲'), "等审批要有状态符号：{b}");
+        assert_eq!(
+            rows[2].spans[0].style.fg,
+            Some(pal().err),
+            "非当前 lane 的等审批走告警色"
+        );
+    }
+
+    /// 当前 lane 的 `▎` 在任何状态下都要保留：否则「哪条是我正在看的」就没了。
+    #[test]
+    fn active_lane_keeps_its_cursor_mark_in_every_status() {
+        for status in [
+            LaneStatus::Idle,
+            LaneStatus::Running,
+            LaneStatus::WaitingApproval,
+        ] {
+            let mut entries = lanes(&["lane-a"]);
+            entries[0].status = status;
+            let rows = lane_list_rows(&entries, 30, 20, &pal());
+            assert!(
+                rows[1].spans[0].content.starts_with('▎'),
+                "{status:?} 时仍要标出当前 lane"
+            );
+        }
     }
 
     #[test]

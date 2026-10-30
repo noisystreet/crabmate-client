@@ -218,6 +218,15 @@ mod tests {
             parse_control("/lane detach proj-a"),
             Some(Control::Lane(Ok(lane_cmd::LaneCommand::Detach(n)))) if n == "proj-a"
         ));
+        // `cancel` 取消一条 lane 的回合（后台审批没有它就只能等 600s 超时）。
+        assert!(matches!(
+            parse_control("/lane cancel proj-a"),
+            Some(Control::Lane(Ok(lane_cmd::LaneCommand::Cancel(n)))) if n == "proj-a"
+        ));
+        assert!(
+            matches!(parse_control("/lane cancel"), Some(Control::Lane(Err(_)))),
+            "缺名字要给用法，不能静默变成 list"
+        );
         // 认不出的子命令给用法提示，不当成普通消息发给模型。
         assert!(matches!(
             parse_control("/lane close proj-a"),

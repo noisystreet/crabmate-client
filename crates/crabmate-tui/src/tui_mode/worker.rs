@@ -183,6 +183,11 @@ pub(super) enum UiEvent {
         /// 要摘掉的那条连接的 `label`。
         name: String,
     },
+    /// 取消某条 lane 的回合（`/lane cancel`, `name` = 连接的 `label`）：外壳动作，
+    /// 理由同 [`UiEvent::LaneDetach`] —— `LaneApp` 只有自己的 `cancel`，可能取消自己。
+    LaneCancel {
+        name: String,
+    },
     /// 启动时 user-data 设置快照（prefs + llm-overrides）拉取结果（合成持久层）。
     UserData(Result<PersistedSettings, String>),
     /// `llm-overrides` 保存结果：`Ok` 回传已应用动作（面板据此清 staged）。
@@ -337,41 +342,35 @@ struct UiSink {
     out: LaneTx,
 }
 
-impl UiSink {
-    fn emit(&self, ev: UiEvent) -> Result<(), TermError> {
-        self.out.send(ev)
-    }
-}
-
 impl StreamSink for UiSink {
     fn on_text(&mut self, delta: &str) -> Result<(), TermError> {
         if !delta.is_empty() {
-            self.emit(UiEvent::Text(delta.to_string()))?;
+            self.out.send(UiEvent::Text(delta.to_string()))?;
         }
         Ok(())
     }
 
     fn on_reasoning(&mut self, delta: &str) -> Result<(), TermError> {
         if !delta.is_empty() {
-            self.emit(UiEvent::Thinking(delta.to_string()))?;
+            self.out.send(UiEvent::Thinking(delta.to_string()))?;
         }
         Ok(())
     }
 
     fn on_system(&mut self, line: &str) -> Result<(), TermError> {
         if !line.is_empty() {
-            self.emit(UiEvent::System(line.to_string()))?;
+            self.out.send(UiEvent::System(line.to_string()))?;
         }
         Ok(())
     }
 
     fn on_context_trim(&mut self, after: u32) -> Result<(), TermError> {
-        self.emit(UiEvent::ContextTrim(after))?;
+        self.out.send(UiEvent::ContextTrim(after))?;
         Ok(())
     }
 
     fn on_prompt_tokens(&mut self, snap: &TiktokenPromptTokensSnapshot) -> Result<(), TermError> {
-        self.emit(UiEvent::PromptTokens(Box::new(snap.clone())))
+        self.out.send(UiEvent::PromptTokens(Box::new(snap.clone())))
     }
 
     fn on_tool_start(
@@ -380,7 +379,7 @@ impl StreamSink for UiSink {
         name: &str,
         note: Option<&str>,
     ) -> Result<(), TermError> {
-        self.emit(UiEvent::ToolStart {
+        self.out.send(UiEvent::ToolStart {
             tool_call_id: tool_call_id.to_string(),
             name: name.to_string(),
             note: note.map(str::to_string),
@@ -394,7 +393,7 @@ impl StreamSink for UiSink {
         ok: Option<bool>,
         note: Option<&str>,
     ) -> Result<(), TermError> {
-        self.emit(UiEvent::ToolEnd {
+        self.out.send(UiEvent::ToolEnd {
             tool_call_id: tool_call_id.to_string(),
             name: name.to_string(),
             ok,

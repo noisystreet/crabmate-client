@@ -22,7 +22,7 @@ use ratatui::backend::CrosstermBackend;
 use crate::SessionPrefs;
 use crate::serve::{ConnectionConfig, ServeClient};
 
-use super::lane_list::LaneEntry;
+use super::lane_list::{LaneEntry, LaneStatus};
 use super::state::{LineKind, UiState};
 use super::worker::{LaneId, UiEvent, WorkerJob, spawn_key_reader, spawn_worker};
 use super::{LaneApp, TuiApp, body_cache, drafts, event_loop, session_index, spinner};
@@ -164,6 +164,18 @@ fn announce_ctl_socket(ctl_socket: Option<&std::path::Path>) {
     );
 }
 
+/// lane 的渲染状态：**审批优先于「运行中」** —— 等审批的 lane 一定也在跑，
+/// 而用户必须看见的是「它在等人」，不是「它在干活」。
+fn lane_status(lane: &LaneApp<'_>) -> LaneStatus {
+    if lane.st.approval.is_some() {
+        LaneStatus::WaitingApproval
+    } else if lane.st.running {
+        LaneStatus::Running
+    } else {
+        LaneStatus::Idle
+    }
+}
+
 /// 运行期新增 lane 的装配模板（`/lane attach` / `/lane new`）。
 ///
 /// 存**启动时的**表达层初值，而不是「当前 lane 的现值」：当前 lane 的 `/model`
@@ -273,6 +285,7 @@ impl<'a> super::TuiApp<'a> {
                 label: lane.label.clone(),
                 workspace: lane.st.workspace_path.clone(),
                 active: i == self.active,
+                status: lane_status(lane),
             })
             .collect()
     }
@@ -364,6 +377,75 @@ impl<'a> super::TuiApp<'a> {
         let lane = self.lane_mut();
         lane.st
             .push_line(LineKind::System, &format!("已连接 `{name}`（{base_url}）"));
+    }
+
+    /// 后台 lane 弹出审批时，在**当前 lane** 留一条提示。
+    ///
+    /// 浮层只画当前 lane（`event_loop` 每帧只对 active 调 `draw_frame`），后台那条的
+    /// 审批在屏幕上**不可见**：不提示的话，用户看到的只是「lane-b 莫名不动了」，
+    /// 而它的 worker 正阻塞在 gate 上，最长 `APPROVAL_WAIT`（600 s）才按拒绝收尾。
+    pub(super) fn announce_background_approval(&mut self, from: LaneId, event: &UiEvent) {
+        if !matches!(event, UiEvent::Approval { .. }) {
+            return;
+        }
+        let Some(idx) = self.lanes.iter().position(|l| l.id == from) else {
+            return;
+        };
+        if idx == self.active {
+            return;
+        }
+        let label = self.lanes[idx].label.clone();
+        let lane = self.lane_mut();
+        lane.st.push_line(
+            LineKind::System,
+            &format!(
+                "`{label}` 正在等待审批：Alt+→ / Alt+← 切过去，或 `/lane cancel {label}` 取消它那一轮"
+            ),
+        );
+    }
+
+    /// `/lane cancel <name>`：取消指定 lane 正在跑的回合（不必先切过去）。
+    ///
+    /// 两件事缺一不可，否则会造出新 bug：
+    ///
+    /// - **撤掉浮层**：`drop(answer)` 让 gate 立刻走 `Disconnected → Deny`，不必干等
+    ///   600 s 超时；
+    /// - **置 `cancel_sent`**：`on_turn_done` 据此把排队消息退回输入框，而不是当成
+    ///   正常完成自动发出去（`drafts` 的保守边界：用户要的是「停下来」）。
+    pub(super) fn cancel_lane(&mut self, name: &str) {
+        let Some(idx) = self.lanes.iter().position(|l| l.label == name) else {
+            let known = self.lane_labels().join(" / ");
+            let lane = self.lane_mut();
+            lane.st.push_line(
+                LineKind::System,
+                &format!("没有名为 `{name}` 的连接（现有：{known}）"),
+            );
+            return;
+        };
+        let label = self.lanes[idx].label.clone();
+        let from = self.lane().label.clone();
+        let target = &mut self.lanes[idx];
+        if !target.st.running {
+            target
+                .st
+                .push_line(LineKind::System, &format!("`{label}` 当前没有在跑的回合"));
+            return;
+        }
+        let had_overlay = target.st.approval.take().is_some();
+        if let Some(cancel) = target.cancel.take() {
+            cancel.cancel();
+        }
+        // 与 Ctrl+C 同口径：`running` 留到 `TurnDone` 再清，这里只是「已请求取消」。
+        target.st.cancel_sent = true;
+        target.st.push_line(
+            LineKind::System,
+            &format!("已请求取消 `{label}` 的回合（来自 `{from}`）"),
+        );
+        if had_overlay {
+            target
+                .st
+                .push_line(LineKind::System, "审批浮层已撤销（按拒绝处理）");
+        }
     }
 
     /// 现有连接的展示名，顺序即左栏顺序。

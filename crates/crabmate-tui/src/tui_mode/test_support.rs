@@ -118,6 +118,8 @@ mod tests {
     use std::time::Duration;
 
     use super::super::TuiApp;
+    use super::super::approve::ApprovalPrompt;
+    use super::super::lane_list::LaneStatus;
     use super::super::worker::{LaneId, LaneTx, UiEvent};
     use super::{lane_with_tx, test_app, test_client, test_prefs};
 
@@ -366,5 +368,142 @@ mod tests {
             !app.lanes[1].st.running,
             "回合结束只清自己那条 lane 的 running"
         );
+    }
+
+    /// 审批请求的最小样本。
+    fn approval_req(command: &str) -> crate::serve::CommandApprovalData {
+        crate::serve::CommandApprovalData {
+            command: command.to_string(),
+            args: String::new(),
+            allowlist_key: None,
+            permission_level: None,
+        }
+    }
+
+    /// 左栏快照要把「在跑」与「等审批」分开：后台 lane 的浮层画不出来，
+    /// 状态列是唯一线索（issue #337）。
+    #[test]
+    fn lane_entries_carry_the_render_status() {
+        let client = test_client();
+        let mut prefs = [test_prefs(), test_prefs(), test_prefs()];
+        let mut app = shell(&client, &mut prefs);
+        app.lanes[0].st.running = true;
+        app.lanes[1].st.running = true;
+        let (answer, _answer_rx) = mpsc::channel();
+        app.lanes[1].st.begin_approval(&approval_req("rm"), answer);
+
+        let entries = app.lane_entries();
+        assert_eq!(entries[0].status, LaneStatus::Running);
+        assert_eq!(
+            entries[1].status,
+            LaneStatus::WaitingApproval,
+            "等审批优先于运行中：用户要知道它在等人"
+        );
+        assert_eq!(entries[2].status, LaneStatus::Idle);
+    }
+
+    /// 后台 lane 弹审批：当前 lane 留提示，但浮层仍建在**它自己**那条 lane 上。
+    #[test]
+    fn background_approval_is_announced_but_stays_on_its_own_lane() {
+        let client = test_client();
+        let mut prefs = [test_prefs(), test_prefs()];
+        let mut app = shell(&client, &mut prefs);
+        let (answer, _answer_rx) = mpsc::channel();
+
+        let out = LaneTx::new(app.lanes[1].id, app.lanes[1].tx.clone());
+        let _ = out.send(UiEvent::Approval {
+            prompt: ApprovalPrompt {
+                req: approval_req("rm"),
+                answer,
+            },
+        });
+        let ev = app.rx.recv_timeout(Duration::from_secs(5)).expect("事件");
+        app.on_msg(ev);
+
+        assert!(
+            app.lanes[1].st.approval.is_some(),
+            "浮层属于它自己那条 lane"
+        );
+        assert!(app.lanes[0].st.approval.is_none(), "不能串到当前 lane");
+        let last = app.lanes[0].st.lines.last().expect("应有提示").text();
+        assert!(last.contains("等待审批"), "{last}");
+    }
+
+    /// `/lane cancel`：撤浮层（`drop(answer)` 让 gate 立刻按拒绝收尾）+ 标记「取消」。
+    #[test]
+    fn cancelling_a_background_lane_clears_its_overlay_and_marks_the_cancel() {
+        let client = test_client();
+        let mut prefs = [test_prefs(), test_prefs()];
+        let mut app = shell(&client, &mut prefs);
+        let (answer, answer_rx) = mpsc::channel();
+        app.lanes[1].st.running = true;
+        app.lanes[1].st.begin_approval(&approval_req("rm"), answer);
+
+        app.cancel_lane("lane-2");
+
+        assert!(app.lanes[1].st.approval.is_none(), "浮层要撤掉");
+        assert!(
+            answer_rx.recv().is_err(),
+            "answer 必须被 drop：gate 靠 Disconnected 立刻收尾，不必等 600s"
+        );
+        assert!(
+            app.lanes[1].st.cancel_sent,
+            "要标成「取消」，否则排队消息会被当成正常完成自动发出去"
+        );
+        assert!(
+            app.lanes[1].st.running,
+            "running 留到 TurnDone 再清（与 Ctrl+C 同口径）"
+        );
+    }
+
+    /// 远程取消之后，排队消息要退回输入框 —— 不能因为「回合结束了」就替用户发出去。
+    #[test]
+    fn a_remotely_cancelled_turn_returns_the_queued_message_to_the_composer() {
+        let client = test_client();
+        let mut prefs = [test_prefs(), test_prefs()];
+        let mut app = shell(&client, &mut prefs);
+        app.lanes[1].st.running = true;
+        app.lanes[1].st.queue_message("排队的那句");
+        app.cancel_lane("lane-2");
+
+        let out = LaneTx::new(app.lanes[1].id, app.lanes[1].tx.clone());
+        let _ = out.send(UiEvent::TurnDone {
+            outcome: Default::default(),
+            error: None,
+            interrupted: None,
+        });
+        let ev = app.rx.recv_timeout(Duration::from_secs(5)).expect("事件");
+        app.on_msg(ev);
+
+        assert_eq!(app.lanes[1].st.input_snapshot(), "排队的那句");
+        assert!(app.lanes[1].st.queued.is_none());
+    }
+
+    /// 没有在跑回合的 lane：说清楚「没得取消」，不要造一个假的取消。
+    #[test]
+    fn cancelling_an_idle_lane_says_so() {
+        let client = test_client();
+        let mut prefs = [test_prefs(), test_prefs()];
+        let mut app = shell(&client, &mut prefs);
+
+        app.cancel_lane("lane-2");
+
+        assert!(!app.lanes[1].st.cancel_sent);
+        let last = app.lanes[1].st.lines.last().expect("应有提示").text();
+        assert!(last.contains("没有在跑的回合"), "{last}");
+    }
+
+    /// 名字打错：列出既有连接，别让人再猜一次。
+    #[test]
+    fn cancelling_an_unknown_lane_lists_the_known_ones() {
+        let client = test_client();
+        let mut prefs = [test_prefs(), test_prefs()];
+        let mut app = shell(&client, &mut prefs);
+
+        app.cancel_lane("lane-9");
+
+        let last = app.lanes[0].st.lines.last().expect("应有提示").text();
+        assert!(last.contains("lane-9"), "{last}");
+        assert!(last.contains("lane-1 / lane-2"), "{last}");
     }
 }
