@@ -141,6 +141,11 @@ pub fn builtin_items() -> Vec<SlashItem> {
             "/older",
             "加载更早的消息（分页向前，等同 /history）",
         ),
+        item(
+            "lane",
+            "/lane ",
+            "运行期加一条连接（attach <name> 连已就绪实例 / new <name> [workspace] 新建并等就绪）",
+        ),
         item(slash::QUIT, "/quit", "退出（/exit、/q 同义）"),
     ]
 }

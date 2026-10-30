@@ -54,8 +54,8 @@ pub use conversation_state::{
     classify_conversation_state_response,
 };
 pub use ctl::{
-    CtlError, CtlErrorKind, CtlInstance, CtlObserved, CtlRequest, OP_ADD, OP_LIST, OP_REMOVE,
-    parse_list_response,
+    AddOutcome, CtlError, CtlErrorKind, CtlInstance, CtlObserved, CtlRequest, LaneReadiness,
+    OP_ADD, OP_LIST, OP_REMOVE, lane_readiness, parse_add_response, parse_list_response,
 };
 pub use handoff::{
     API_BASE_HASH_KEY, BEARER_HASH_KEY, handoff_hash_fragment, is_handoff_hash_key,

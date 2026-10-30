@@ -216,7 +216,7 @@ impl<'a> LaneApp<'a> {
             return;
         }
         if let Some(decision) = decision_for_key(key, &mut self.st.approval_choice) {
-            let via_ctrl_abort = super::is_ctrl_abort(key);
+            let via_ctrl_abort = super::hotkeys::is_ctrl_abort(key);
             self.answer_approval(decision, via_ctrl_abort);
         }
     }

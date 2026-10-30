@@ -3,7 +3,7 @@
 //!
 //! 拆分出本模块以控制 `mod.rs` 单文件行数（fn-nloc 门禁 ≤ 920）与函数复杂度。
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::mpsc::{self, Sender};
 use std::thread;
 
@@ -21,14 +21,16 @@ use crate::serve::{
     StreamResume, StreamSink, TermError, WebSessionsList, WorkspaceDirData, WorkspaceProjectsData,
     WorkspaceSetError, apply_web_session_op, fetch_conversation_messages, fetch_llm_overrides,
     fetch_user_data_prefs, fetch_web_sessions, fetch_workspace, fetch_workspace_dir,
-    fetch_workspace_projects, list_instances, put_llm_overrides, put_user_data_prefs,
-    run_chat_stream_sink, set_workspace, switch_workspace_project, write_permission_level,
+    fetch_workspace_projects, put_llm_overrides, put_user_data_prefs, run_chat_stream_sink,
+    set_workspace, switch_workspace_project, write_permission_level,
 };
 
 use super::approve::{APPROVAL_WAIT, ApprovalPrompt, OverlayApprovalGate};
+// 控制面（unix socket）的三类 job 在 `worker_ctl`：它们不碰 reqwest 连接池。
 use super::serve_defaults::ServeDefaults;
 use super::settings::{LlmSave, PersistedSettings, PrefsSave, merge_llm_save, merge_prefs_save};
 use super::slash_menu::SkillsPayload;
+use super::worker_ctl::{job_ctl_attach, job_ctl_list, job_ctl_new};
 
 /// UI 事件（键盘线程与回合/拉取线程共同的生产者）。
 pub(super) enum UiEvent {
@@ -162,6 +164,17 @@ pub(super) enum UiEvent {
     /// （连不上 / 读写失败 / 被拒绝）处置各不相同，压成一个裸字符串再让 UI 重新猜分类
     /// 没有意义 —— 分类留在 `serve::ctl`，UI 只负责显示。
     CtlList(Result<Vec<CtlInstance>, String>),
+    /// 运行期新增 lane 的**外壳级**结果：`Ok(base_url)` = 可以连。
+    ///
+    /// 与 [`UiEvent::CtlList`] 不同，这条**不带 lane 标签**（worker 直接写通道，不经
+    /// [`UiSink`]）：新增 lane 改的是 `TuiApp::lanes`，而目标 lane 此刻还不存在，
+    /// 按 `LaneId` 分发只会被当成「已关闭的 lane」丢掉。
+    CtlLaneReady {
+        /// 实例名（将来那条 lane 的 `label`）。
+        name: String,
+        /// `Ok(serve 根 URL)` / `Err(面向用户的失败原因)`。
+        result: Result<String, String>,
+    },
     /// 启动时 user-data 设置快照（prefs + llm-overrides）拉取结果（合成持久层）。
     UserData(Result<PersistedSettings, String>),
     /// `llm-overrides` 保存结果：`Ok` 回传已应用动作（面板据此清 staged）。
@@ -253,6 +266,26 @@ pub(super) enum WorkerJob {
     CtlList {
         /// 控制面 socket 路径（`--ctl-socket` 或默认路径）。
         socket: PathBuf,
+    },
+    /// 连上控制面里**已就绪**的实例（`/lane attach <name>`）：只读 `list` 取 `base_url`。
+    CtlAttach {
+        /// 控制面 socket 路径。
+        socket: PathBuf,
+        /// 实例名（`instances.toml` 的键，也是将来那条 lane 的 `label`）。
+        name: String,
+    },
+    /// 新增声明并等它就绪（`/lane new <name> [workspace]`）。
+    ///
+    /// `add` 只写盘，真正起实例是 ctl 主循环的下一轮收敛，所以这里必须自己轮询
+    /// `list` 才拿得到 `base_url`（`add` 的响应里没有端口）。轮询会**阻塞本 lane 的
+    /// worker** 至多 [`LANE_READY_TIMEOUT`]：期间该 lane 的其它拉取排队。
+    CtlNew {
+        /// 控制面 socket 路径。
+        socket: PathBuf,
+        /// 新实例名。
+        name: String,
+        /// 声明的 `workspace`（Server 的 socket `add` 要求必填）。
+        workspace: String,
     },
     /// 写会话级权限等级意图（`POST /conversation/state`，空闲态落盘）。
     ///
@@ -436,6 +469,12 @@ pub(super) fn spawn_worker(
                 WorkerJob::SavePrefs(save) => job_save_prefs(&rt, &client, save, &tx),
                 WorkerJob::Skills => job_skills(&rt, &client, &tx),
                 WorkerJob::CtlList { socket } => job_ctl_list(&socket, &tx),
+                WorkerJob::CtlAttach { socket, name } => job_ctl_attach(&socket, &name, &tx),
+                WorkerJob::CtlNew {
+                    socket,
+                    name,
+                    workspace,
+                } => job_ctl_new(&socket, &name, &workspace, &tx),
                 WorkerJob::WritePermission {
                     conversation_id,
                     level,
@@ -698,15 +737,6 @@ fn job_write_permission(
         outcome,
         generation,
     });
-}
-
-/// `crabmatectl` 控制面的实例列表。
-///
-/// **不需要 runtime**：这是 unix socket 上的同步 IO，不碰 reqwest 连接池。
-/// 失败直接取 `CtlCallError::user_message`（三类失败各有各的「该做什么」）。
-fn job_ctl_list(socket: &Path, tx: &Sender<UiEvent>) {
-    let result = list_instances(socket).map_err(|e| e.user_message());
-    let _ = tx.send(UiEvent::CtlList(result));
 }
 
 /// skill 目录（`GET /skills`）：只给 `/` 补全菜单的 skill 候选，失败如实回传。

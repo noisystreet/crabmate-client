@@ -3,22 +3,32 @@
 //! 只做排版，不做判定 —— 可连性来自 [`CtlInstance::can_connect`]（`observed == ready`）。
 //! 单独成模块与成文件：这段要能单测（不该只能靠起一个真 socket 才验证得到文案）。
 
+use std::path::PathBuf;
+
 use crabmate_client_api::ctl::{CtlInstance, CtlObserved};
 
 use super::state::LineKind;
 use super::worker::WorkerJob;
 
-/// `/ctl`：把一次控制面查询排进**当前 lane 的** worker。
-///
-/// 未启用时不发请求、也不报错，而是说清「怎么启用」——这条通道存在的全部前提是
-/// 同机同用户的 `crabmatectl supervise --socket`，静默什么都不做会让人以为命令写错了。
+/// 控制面未启用时的提示（`/ctl` 与 `/lane` 共用：两处各写一份必然漂移）。
+const CTL_DISABLED_HINT: &str = "ctl 控制面未启用：启动时加 `--ctl-socket <path>`，或让 $XDG_RUNTIME_DIR/crabmate/ctl.sock 存在";
+
 impl super::LaneApp<'_> {
+    /// 取控制面 socket；未启用时写一句「怎么启用」并返回 `None`。
+    pub(super) fn ctl_socket_or_hint(&mut self) -> Option<PathBuf> {
+        let socket = self.ctl_socket.clone();
+        if socket.is_none() {
+            self.st.push_line(LineKind::System, CTL_DISABLED_HINT);
+        }
+        socket
+    }
+
+    /// `/ctl` 与 `/lane`（空参）：把一次控制面查询排进**当前 lane 的** worker。
+    ///
+    /// 未启用时不发请求、也不报错，而是说清「怎么启用」——这条通道存在的全部前提是
+    /// 同机同用户的 `crabmatectl supervise --socket`，静默什么都不做会让人以为命令写错了。
     pub(super) fn fetch_ctl_list(&mut self) {
-        let Some(socket) = self.ctl_socket.clone() else {
-            self.st.push_line(
-                LineKind::System,
-                "ctl 控制面未启用：启动时加 `--ctl-socket <path>`，或让 $XDG_RUNTIME_DIR/crabmate/ctl.sock 存在",
-            );
+        let Some(socket) = self.ctl_socket_or_hint() else {
             return;
         };
         self.st.push_line(LineKind::System, "正在查询 ctl 实例…");

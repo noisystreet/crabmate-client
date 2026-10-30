@@ -22,7 +22,9 @@ impl LaneApp<'_> {
     pub(super) fn fetch_ws_dir(&mut self, rel: String) -> bool {
         let generation = self.st.ws_generation;
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
-            let client = self.client.clone();
+            // `into_owned`：spawn 出来的任务要求 `'static`，借来的那份活不到那时
+            // （`ServeClient` 只含 `reqwest::Client` + 配置，克隆很轻）。
+            let client = self.client.clone().into_owned();
             let tx = self.tx.clone();
             handle.spawn(async move {
                 let result = fetch_workspace_dir(&client, Some(&rel))
