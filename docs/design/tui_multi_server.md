@@ -139,7 +139,8 @@ fn spawn_lane_worker(id: LaneId, client: ServeClient, tx: Sender<UiEvent>) -> Se
 
 - lane 数上限（建议 `MAX_LANES = 8`，与 §5 目标一致），启动时校验、运行期拒绝新增。
 - 每 lane 一条 SSE 流；**同一 lane 内仍是串行**（一次只跑一轮），这与现有 `st.running` 语义一致。
-- 退出路径：`flush_before_exit`（`mod.rs:910-912`）与 `exit_flush` 需要**逐 lane 遍历**，且要保留「有 lane 仍在跑 ⇒ 强制退出不等落定」的既有判定。
+- 退出路径（已落地，issue #338）：`/quit` 是**进程级**语义 —— `TuiApp::exit_requested()` 扫**全部** lane，任一条提出就立刻退出，不再等用户切过去（只判当前 lane 会让后台 lane 的请求悬着，切回时突然掀掉整个 TUI）。摘单条连接用 `/lane detach`。左栏用 `LaneStatus::Quitting`（`×`）显示「已请求退出」，因为从 `/quit` 到真正退出之间可能隔着整轮生成。
+- 退出落盘：`TuiApp::flush_all_before_exit()` **逐 lane 遍历**（`exit_flush`：补绑定 + 写草稿 + `clear_background`），**一份总预算**（`NORMAL_BUDGET` 1s / `FORCE_BUDGET` 400ms，按「任一 lane 仍在跑」选择）但**按剩余 lane 均分**：某台 serve 不可达时最多吃掉 1/N，不会让后面的 lane 颗粒无收、把草稿又丢掉一次。只落当前 lane 会让其它 lane 未发送的输入丢失（`Drafts` 是内存态）。
 
 ### 4.4 审批队列
 
@@ -281,7 +282,7 @@ api_base = "http://127.0.0.1:8082"
 | 4 | 跨 lane 代数门控被误提升为全局 | 明确写入 §4.2：门控留在 lane 内 |
 | 5 | 多进程资源放大（`fastembed` 等） | 文档写清拓扑建议；不强行单进程 8 路 |
 | 6 | 共享 data 根时 `prefs` / `llm_overrides` 互相覆盖 | profile 里显式钉 `model` / `llm_api_base`；文档约定「并行期间不保存设置面板」 |
-| 7 | 退出落盘语义在强退 + 多 lane 下变复杂 | 保留「仍在跑 ⇒ 不等落定」，逐 lane 遍历，与现状同向 |
+| 7 | 退出落盘语义在强退 + 多 lane 下变复杂 | 保留「仍在跑 ⇒ 不等落定」；逐 lane 遍历 + 共用一份总预算（issue #338 已落地） |
 
 ---
 

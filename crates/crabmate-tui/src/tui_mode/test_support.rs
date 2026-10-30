@@ -12,10 +12,10 @@ use std::sync::mpsc;
 use crate::SessionPrefs;
 use crate::serve::{ConnectionConfig, ServeClient};
 
-use super::LaneApp;
 use super::spinner::Spinner;
 use super::state::UiState;
 use super::worker::{LaneId, UiEvent, WorkerJob};
+use super::{LaneApp, LaneTemplate, TuiApp};
 
 /// 空的会话级 override（`*` 覆盖），让状态行回落到 serve 默认。
 pub(super) fn test_prefs() -> SessionPrefs {
@@ -112,61 +112,61 @@ pub(super) fn test_app<'a>(
     test_lane(LaneId(0), client, prefs, rx, tx, job_tx)
 }
 
+/// 造 n 条 lane 的外壳（`prefs.len()` 即 lane 数，第一条是激活的）。
+///
+/// 所有 lane 共用外壳这条通道 —— 与生产同构（全进程一个 `rx`，见 `mod.rs`）；
+/// 给每条 lane 自成一条通道的话，`app.rx` 就永远收不到事件。
+///
+/// 放在模块顶层而不是某个用例的私有辅助里：**外壳级**判定与收尾
+/// （`exit_requested`、退出落盘的逐 lane 遍历）都必须有多 lane 才测得出来。
+pub(super) fn test_shell<'a>(client: &'a ServeClient, prefs: &'a mut [SessionPrefs]) -> TuiApp<'a> {
+    let (shell_tx, rx) = mpsc::channel();
+    let mut lanes = Vec::new();
+    // 条数在借出去之前记下：`prefs` 会被逐条 `iter_mut` 借到 `'a`，循环后再
+    // 读 `len()` 会与那份借用冲突。
+    let count = prefs.len();
+    for (i, p) in prefs.iter_mut().enumerate() {
+        let (job_tx, _job_rx) = mpsc::channel();
+        lanes.push(lane_with_tx(
+            LaneId(i as u32 + 1),
+            client,
+            p,
+            shell_tx.clone(),
+            job_tx,
+        ));
+    }
+    let next_lane_id = count as u32 + 1;
+    TuiApp {
+        lanes,
+        active: 0,
+        rx,
+        next_lane_id,
+        template: LaneTemplate {
+            overrides: test_prefs(),
+            yes: true,
+            no_keyring: true,
+            bearer: String::new(),
+            ctl_socket: None,
+            tx: shell_tx,
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::mpsc;
     use std::time::Duration;
 
-    use super::super::TuiApp;
     use super::super::approve::ApprovalPrompt;
     use super::super::lane_list::LaneStatus;
     use super::super::worker::{LaneId, LaneTx, UiEvent};
-    use super::{lane_with_tx, test_app, test_client, test_prefs};
-
-    /// 造 n 条 lane 的外壳：所有 lane 共用外壳这条通道（生产同构）。
-    fn shell<'a>(
-        client: &'a crate::serve::ServeClient,
-        prefs: &'a mut [crate::SessionPrefs],
-    ) -> TuiApp<'a> {
-        let (shell_tx, rx) = mpsc::channel();
-        let mut lanes = Vec::new();
-        // 条数在借出去之前记下：`prefs` 会被逐条 `iter_mut` 借到 `'a`，循环后再
-        // 读 `len()` 会与那份借用冲突。
-        let count = prefs.len();
-        for (i, p) in prefs.iter_mut().enumerate() {
-            let (job_tx, _job_rx) = mpsc::channel();
-            // 每条 lane 都用**外壳那条**通道的发送端：生产里 `tx` 就是这个（一个 `rx`），
-            // 测试若给每条 lane 自成一条通道，`app.rx` 就永远收不到事件。
-            lanes.push(lane_with_tx(
-                LaneId(i as u32 + 1),
-                client,
-                p,
-                shell_tx.clone(),
-                job_tx,
-            ));
-        }
-        let next_lane_id = count as u32 + 1;
-        TuiApp {
-            lanes,
-            active: 0,
-            rx,
-            next_lane_id,
-            template: super::super::LaneTemplate {
-                overrides: test_prefs(),
-                yes: true,
-                no_keyring: true,
-                bearer: String::new(),
-                ctl_socket: None,
-                tx: shell_tx,
-            },
-        }
-    }
+    use super::{test_app, test_client, test_prefs, test_shell};
 
     #[test]
     fn switch_lane_is_a_noop_with_a_single_lane() {
         let client = test_client();
         let mut prefs = [test_prefs()];
-        let mut app = shell(&client, &mut prefs);
+        let mut app = test_shell(&client, &mut prefs);
 
         app.switch_lane(1);
         assert_eq!(app.active, 0, "单 lane 时切换必须无副作用");
@@ -178,7 +178,7 @@ mod tests {
     fn switch_lane_cycles_in_both_directions() {
         let client = test_client();
         let mut prefs = [test_prefs(), test_prefs(), test_prefs()];
-        let mut app = shell(&client, &mut prefs);
+        let mut app = test_shell(&client, &mut prefs);
         assert_eq!(app.lane().id, LaneId(1));
 
         app.switch_lane(1);
@@ -193,11 +193,36 @@ mod tests {
         assert_eq!(app.lane().id, LaneId(3));
     }
 
+    /// 后台 lane 的 `/quit` 必须被外壳看见（issue #338 的症状 A）。
+    ///
+    /// 旧判据是 `self.lane().exit`：后台 lane 在回合结束时置了自己的 `exit`，屏幕上却
+    /// 毫无反应，等用户切过去才突然退出整个 TUI。判据改成扫全部 lane 之后，「是谁提的」
+    /// 不再影响「要不要退」，`exit` 也不再随聚焦焦点漂移。
+    #[test]
+    fn exit_requested_sees_a_background_lane() {
+        let client = test_client();
+        let mut prefs = [test_prefs(), test_prefs()];
+        let mut app = test_shell(&client, &mut prefs);
+        assert!(!app.exit_requested(), "没请求时不退出");
+
+        // lane-2 在后台（active 仍是 lane-1）提了退出。
+        app.lanes[1].exit = true;
+        assert!(!app.lane().exit, "当前 lane 自己并没有请求");
+        assert!(
+            app.exit_requested(),
+            "任何一条 lane 请求都要退出整个 TUI，而不是等用户切过去"
+        );
+
+        // 切走不影响结论：退出语义不随焦点漂移。
+        app.switch_lane(1);
+        assert!(app.exit_requested());
+    }
+
     #[test]
     fn switching_does_not_move_state_between_lanes() {
         let client = test_client();
         let mut prefs = [test_prefs(), test_prefs()];
-        let mut app = shell(&client, &mut prefs);
+        let mut app = test_shell(&client, &mut prefs);
 
         // 在 lane 1 里设一个 `/model` 覆盖，切走再切回来必须是同一份，
         // 且 lane 2 完全不受影响（这正是 overrides 从 `&mut` 改自有值的理由）。
@@ -223,7 +248,7 @@ mod tests {
     fn attach_lane_appends_a_lane_and_switches_to_it() {
         let client = test_client();
         let mut prefs = [test_prefs()];
-        let mut app = shell(&client, &mut prefs);
+        let mut app = test_shell(&client, &mut prefs);
         let before = app.next_lane_id;
 
         app.attach_lane("proj-b", "http://127.0.0.1:8721/");
@@ -240,7 +265,7 @@ mod tests {
     fn attaching_an_existing_name_only_switches() {
         let client = test_client();
         let mut prefs = [test_prefs()];
-        let mut app = shell(&client, &mut prefs);
+        let mut app = test_shell(&client, &mut prefs);
         let label = app.lanes[0].label.clone();
 
         app.attach_lane(&label, "http://127.0.0.1:1/");
@@ -254,7 +279,7 @@ mod tests {
     fn attaching_a_different_name_on_the_same_url_only_switches() {
         let client = test_client();
         let mut prefs = [test_prefs()];
-        let mut app = shell(&client, &mut prefs);
+        let mut app = test_shell(&client, &mut prefs);
         // 尾斜杠与大小写不参与比较 —— 它们本来就是同一条 serve。
         let url = format!("{}/", client.config().api_base);
 
@@ -271,7 +296,7 @@ mod tests {
     fn detach_lane_removes_only_the_named_lane() {
         let client = test_client();
         let mut prefs = [test_prefs(), test_prefs(), test_prefs()];
-        let mut app = shell(&client, &mut prefs);
+        let mut app = test_shell(&client, &mut prefs);
 
         app.detach_lane("lane-2");
         let labels: Vec<&str> = app.lanes.iter().map(|l| l.label.as_str()).collect();
@@ -291,7 +316,7 @@ mod tests {
     fn detaching_the_active_middle_lane_stays_in_place() {
         let client = test_client();
         let mut prefs = [test_prefs(), test_prefs(), test_prefs()];
-        let mut app = shell(&client, &mut prefs);
+        let mut app = test_shell(&client, &mut prefs);
         app.active = 1;
 
         app.detach_lane("lane-2");
@@ -306,7 +331,7 @@ mod tests {
     fn detaching_the_last_lane_is_refused() {
         let client = test_client();
         let mut prefs = [test_prefs()];
-        let mut app = shell(&client, &mut prefs);
+        let mut app = test_shell(&client, &mut prefs);
 
         app.detach_lane("lane-1");
 
@@ -320,7 +345,7 @@ mod tests {
     fn detaching_an_unknown_name_lists_the_known_ones() {
         let client = test_client();
         let mut prefs = [test_prefs(), test_prefs()];
-        let mut app = shell(&client, &mut prefs);
+        let mut app = test_shell(&client, &mut prefs);
 
         app.detach_lane("lane-x");
 
@@ -344,7 +369,7 @@ mod tests {
     fn a_lanes_own_event_only_touches_that_lane() {
         let client = test_client();
         let mut prefs = [test_prefs(), test_prefs()];
-        let mut app = shell(&client, &mut prefs);
+        let mut app = test_shell(&client, &mut prefs);
         app.lanes[0].st.running = true;
         app.lanes[1].st.running = true;
 
@@ -385,12 +410,15 @@ mod tests {
     #[test]
     fn lane_entries_carry_the_render_status() {
         let client = test_client();
-        let mut prefs = [test_prefs(), test_prefs(), test_prefs()];
-        let mut app = shell(&client, &mut prefs);
+        let mut prefs = [test_prefs(), test_prefs(), test_prefs(), test_prefs()];
+        let mut app = test_shell(&client, &mut prefs);
         app.lanes[0].st.running = true;
         app.lanes[1].st.running = true;
         let (answer, _answer_rx) = mpsc::channel();
         app.lanes[1].st.begin_approval(&approval_req("rm"), answer);
+        // lane-4 的 `/quit` 还在等它这一轮结束：回合仍在跑，但状态必须已经显示「要退出」。
+        app.lanes[3].st.running = true;
+        app.lanes[3].quit_pending = true;
 
         let entries = app.lane_entries();
         assert_eq!(entries[0].status, LaneStatus::Running);
@@ -400,6 +428,11 @@ mod tests {
             "等审批优先于运行中：用户要知道它在等人"
         );
         assert_eq!(entries[2].status, LaneStatus::Idle);
+        assert_eq!(
+            entries[3].status,
+            LaneStatus::Quitting,
+            "退出请求压过「运行中」：否则退出前的等待窗口在别的 lane 上完全不可见"
+        );
     }
 
     /// 后台 lane 弹审批：当前 lane 留提示，但浮层仍建在**它自己**那条 lane 上。
@@ -407,7 +440,7 @@ mod tests {
     fn background_approval_is_announced_but_stays_on_its_own_lane() {
         let client = test_client();
         let mut prefs = [test_prefs(), test_prefs()];
-        let mut app = shell(&client, &mut prefs);
+        let mut app = test_shell(&client, &mut prefs);
         let (answer, _answer_rx) = mpsc::channel();
 
         let out = LaneTx::new(app.lanes[1].id, app.lanes[1].tx.clone());
@@ -434,7 +467,7 @@ mod tests {
     fn cancelling_a_background_lane_clears_its_overlay_and_marks_the_cancel() {
         let client = test_client();
         let mut prefs = [test_prefs(), test_prefs()];
-        let mut app = shell(&client, &mut prefs);
+        let mut app = test_shell(&client, &mut prefs);
         let (answer, answer_rx) = mpsc::channel();
         app.lanes[1].st.running = true;
         app.lanes[1].st.begin_approval(&approval_req("rm"), answer);
@@ -461,7 +494,7 @@ mod tests {
     fn a_remotely_cancelled_turn_returns_the_queued_message_to_the_composer() {
         let client = test_client();
         let mut prefs = [test_prefs(), test_prefs()];
-        let mut app = shell(&client, &mut prefs);
+        let mut app = test_shell(&client, &mut prefs);
         app.lanes[1].st.running = true;
         app.lanes[1].st.queue_message("排队的那句");
         app.cancel_lane("lane-2");
@@ -484,7 +517,7 @@ mod tests {
     fn cancelling_an_idle_lane_says_so() {
         let client = test_client();
         let mut prefs = [test_prefs(), test_prefs()];
-        let mut app = shell(&client, &mut prefs);
+        let mut app = test_shell(&client, &mut prefs);
 
         app.cancel_lane("lane-2");
 
@@ -498,7 +531,7 @@ mod tests {
     fn cancelling_an_unknown_lane_lists_the_known_ones() {
         let client = test_client();
         let mut prefs = [test_prefs(), test_prefs()];
-        let mut app = shell(&client, &mut prefs);
+        let mut app = test_shell(&client, &mut prefs);
 
         app.cancel_lane("lane-9");
 

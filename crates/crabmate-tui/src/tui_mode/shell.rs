@@ -137,13 +137,11 @@ pub async fn run_tui(
         lane.bootstrap();
     }
     let res = app.run_loop(&mut terminal);
-    // 显式删背景图：退出备用屏幕时终端本会清空，但别把图像配额留到下一次运行。
-    app.lane_mut().clear_background();
-    // 退出落盘（有界 best-effort）：`st.running` 仍为真 = 回合中被强退，不再等它落定。
-    let force = app.lane().st.running;
-    let warn = app.lane_mut().flush_before_exit(force).await;
+    // 退出收尾必须遍历**全部** lane（issue #338）：草稿是内存态、kitty 背景图配额是
+    // 终端级的，只处理当前 lane 会让后台 lane 未发送的输入直接丢失、图像配额留给下一次运行。
+    let warns = app.flush_all_before_exit().await;
     drop(guard);
-    if let Some(warn) = warn {
+    for warn in warns {
         eprintln!("{warn}");
     }
     res
@@ -164,10 +162,13 @@ fn announce_ctl_socket(ctl_socket: Option<&std::path::Path>) {
     );
 }
 
-/// lane 的渲染状态：**审批优先于「运行中」** —— 等审批的 lane 一定也在跑，
-/// 而用户必须看见的是「它在等人」，不是「它在干活」。
+/// lane 的渲染状态：**退出请求 > 审批 > 「运行中」** —— 等审批的 lane 一定也在跑，
+/// 而用户必须看见的是「它在等人」，不是「它在干活」；已经 `/quit` 的那条则连审批都
+/// 不该再抢注意力，整个客户端马上要走。
 fn lane_status(lane: &LaneApp<'_>) -> LaneStatus {
-    if lane.st.approval.is_some() {
+    if lane.exit || lane.quit_pending {
+        LaneStatus::Quitting
+    } else if lane.st.approval.is_some() {
         LaneStatus::WaitingApproval
     } else if lane.st.running {
         LaneStatus::Running
@@ -268,6 +269,16 @@ impl<'a> super::TuiApp<'a> {
     /// 当前 lane（可变）。
     pub(super) fn lane_mut(&mut self) -> &mut LaneApp<'a> {
         &mut self.lanes[self.active]
+    }
+
+    /// 是否有 lane 请求退出进程。
+    ///
+    /// `/quit` 是**进程级**语义（所有 lane 一并退出），摘单条连接用 `/lane detach`，
+    /// 所以判定必须扫全部 lane：只看 active 会让后台 lane 的 `/quit` 一直悬着 ——
+    /// 它自己的回合结束时置了 `exit`，屏幕上却什么都没发生，等用户切过去才突然退出
+    /// （issue #338 的症状 A）。`run_loop` / `drain_events` 都走这一个判据。
+    pub(super) fn exit_requested(&self) -> bool {
+        self.lanes.iter().any(|l| l.exit)
     }
 
     /// 渲染用的 lane 快照：名字 + 各自当前绑定的工作区 + 谁是当前。
