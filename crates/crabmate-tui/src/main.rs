@@ -319,14 +319,15 @@ async fn run_tui_cmd(
         let cfg = ConnectionConfig::new(url, bearer.unwrap_or_default().to_string());
         extras.push((name, ServeClient::new(cfg)?));
     }
+    // 控制面 socket 与主 lane 名：显式 `--ctl-socket` 优先、否则默认路径存在才启用；
+    // 主 lane 取 ctl 里的实例名，反查不到仍叫 `local`（见 `serve::ctl::primary_binding`）。
+    let (ctl_socket, primary) =
+        crate::serve::primary_binding(ctl_socket, &client.config().api_base);
     let mut lanes: Vec<(String, &ServeClient)> = Vec::with_capacity(extras.len() + 1);
-    lanes.push(("local".to_string(), client));
+    lanes.push((primary, client));
     for (name, c) in &extras {
         lanes.push((name.clone(), c));
     }
-    // 控制面 socket：显式 `--ctl-socket` 优先，否则仅当默认路径存在才启用（解析与理由见
-    // `serve::ctl::resolve_socket_arg`；启用提示由 `run_tui` 打）。
-    let ctl_socket = crate::serve::resolve_socket_arg(ctl_socket);
     tui_mode::run_tui(&lanes, overrides, yes, no_keyring, ctl_socket.as_deref()).await
 }
 

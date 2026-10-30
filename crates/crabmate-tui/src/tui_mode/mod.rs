@@ -182,6 +182,8 @@ impl<'a> TuiApp<'a> {
             // 新 lane 的装配是外壳动作：worker 以**裸事件**发出（目标 lane 尚不存在，
             // 按 id 分发无处可去），必须在这里拦。
             UiEvent::CtlLaneReady { name, result } => self.on_lane_ready(name, result),
+            // 摘连接同样改 `lanes`：`LaneApp` 手上没有那份 `&mut`（见 `shell::detach_lane`）。
+            UiEvent::LaneDetach { name } => self.detach_lane(&name),
             other => {
                 // 切 lane 是外壳动作：必须在进入 lane 之前拦截（lane 无权切自己，
                 // 否则每条 lane 都要知道全局有几条）。
@@ -684,6 +686,8 @@ impl LaneApp<'_> {
             // 外层已按 `LaneId` 分发过；lane 内再见到标签只可能来自直连测试，
             // 递归解包即可（不丢弃，避免测试构造的标签事件被静默吃掉）。
             UiEvent::Lane(_, inner) => self.on_msg(*inner),
+            // 外壳动作：真正摘 lane 的是 `TuiApp`，lane 内见到只可能是测试直连。
+            UiEvent::LaneDetach { .. } => {}
             UiEvent::Key(key) => self.on_key(key),
             // 粘贴整段进输入框（不改焦点、不提交）：见 `paste` 模块头注释。
             UiEvent::Paste(text) => self.on_paste(text),

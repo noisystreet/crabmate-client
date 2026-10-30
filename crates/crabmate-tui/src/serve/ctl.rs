@@ -17,6 +17,8 @@ use crabmate_client_api::ctl::{
     AddOutcome, CtlError, CtlInstance, CtlRequest, parse_add_response, parse_list_response,
 };
 
+use super::url::normalize_api_base;
+
 /// 单次读写超时：与 Server 侧 `IO_TIMEOUT`（5 s）对齐。
 ///
 /// 不设成 60 s（那是 Server 的 `HANDLE_TIMEOUT`）：超时太长会把界面冻在一个已经不响应的
@@ -147,6 +149,87 @@ pub fn add_instance(
     };
     let line = exchange(socket, &request.to_line())?;
     parse_add_response(&line).map_err(CtlCallError::Rejected)
+}
+
+/// 主 lane 的默认名字：ctl 里反查不到对应实例时用它。
+///
+/// 也是「`--api-base` 指向一台没有声明的 serve」时的唯一结果 —— 那种情况下
+/// 用户自己起的进程不属于任何实例，叫 `local` 才不撒谎。
+pub const LOCAL_LANE: &str = "local";
+
+/// 启动期给主 lane 定名字：ctl 里有同根 URL 的实例就用其实例名，否则 [`LOCAL_LANE`]。
+///
+/// 这是「一台 serve 只该有一条 lane」的启动侧一半。主连接是裸 `--api-base`，label
+/// 原本固定为 `local`；而运行期 `/lane attach <name>` 按 **label** 查重
+/// （`tui_mode/shell.rs` 的 `attach_lane`），于是同一台 serve 会被连成两条 lane
+/// （`local` + `server`）—— 左栏「连接 [N]」与 ctl 的进程数对不上，两条 lane 还各开
+/// 一条 SSE。按 `base_url` 反查把主 lane 直接命名成声明里的实例名之后，
+/// `/lane attach server` 会命中既有 lane、只切过去。
+///
+/// **失败一律回退**：ctl 没起、超时、回包读不懂都不该拦住 TUI 启动 —— 这条查询只负责
+/// 命名，不是连接前提。匹配只看 `base_url`，不看 `observed`：暂时 `stale` /
+/// `starting` 的实例仍是「这台 serve 的那条声明」，改名不会因此错位。
+#[must_use]
+pub fn primary_label(socket: Option<&Path>, api_base: &str) -> String {
+    let Some(socket) = socket else {
+        return LOCAL_LANE.to_string();
+    };
+    match list_instances(socket) {
+        Ok(items) => name_for_base_url(&items, api_base).unwrap_or_else(|| LOCAL_LANE.to_string()),
+        Err(_) => LOCAL_LANE.to_string(),
+    }
+}
+
+/// 启动期把「主连接」认领成控制面里的实例：解析 `--ctl-socket` 并反查主 lane 的名字。
+///
+/// 两件事并成一处是因为它们只在启动时一起发生，且顺序有依赖：没有 socket 就无从反查。
+/// socket 的解析沿用 [`resolve_socket_arg`] 的语义 —— 显式路径优先且 **不查存在性**
+/// （先开 TUI、后起 `supervise --socket` 是常见顺序），未给时才在默认路径存在时启用。
+#[must_use]
+pub fn primary_binding(arg: Option<&str>, api_base: &str) -> (Option<PathBuf>, String) {
+    let socket = resolve_socket_arg(arg);
+    let label = primary_label(socket.as_deref(), api_base);
+    (socket, label)
+}
+
+/// 在实例列表里按根 URL 找实例名。
+///
+/// 比较前两侧都过 [`normalize_api_base`]（去空白与尾 `/`）并转小写：`base_url` 不携带
+/// 路径，scheme / host 本就不区分大小写。`localhost` 与 `127.0.0.1` **不**视为同一个
+/// —— 那是两个 Origin，悄悄合并会让「我连的到底是哪台」失去答案。
+#[must_use]
+pub fn name_for_base_url(items: &[CtlInstance], api_base: &str) -> Option<String> {
+    let want = url_key(api_base)?;
+    items
+        .iter()
+        .find(|i| i.base_url.as_deref().and_then(url_key).as_deref() == Some(want.as_str()))
+        .map(|i| i.name.clone())
+}
+
+/// 两个根 URL 是否指向同一台 serve（归一化后相等）。
+///
+/// `/lane attach` 的去重用它：**名字不同不代表是两台 serve** —— 启动 lane 的名字可能来自
+/// 上面的反查，也可能是 `local`。重复连接会让同一台 serve 各开一条 SSE、各读一份会话，
+/// 左栏的连接数还会与 ctl 的进程数对不上。
+///
+/// 与 [`name_for_base_url`] 同一套比较口径，且同样不把 `localhost` 与 `127.0.0.1` 合并。
+#[must_use]
+pub fn same_api_base(a: &str, b: &str) -> bool {
+    match (url_key(a), url_key(b)) {
+        // 空串（没有 URL / 非绝对 http(s)）不构成「同一台」的证据，宁可放行让调用方去连。
+        (Some(x), Some(y)) => x == y,
+        _ => false,
+    }
+}
+
+/// 归一化后的比较键；空串（没有 `base_url` / 非绝对 http(s) URL）返回 `None`。
+///
+/// 先整体转小写再交给 [`normalize_api_base`]：后者用 `starts_with("http://")` 判绝对
+/// URL，大写的 `HTTP://` 会被它当成非法并返回空串。base_url 不携带路径，整体小写不改变
+/// 语义（scheme / host 本就不区分大小写）。
+fn url_key(url: &str) -> Option<String> {
+    let normalized = normalize_api_base(&url.trim().to_ascii_lowercase());
+    (!normalized.is_empty()).then_some(normalized)
 }
 
 /// 写一行、读一行。
@@ -290,6 +373,105 @@ mod tests {
         handle.join().expect("假服务端线程");
         assert!(matches!(err, CtlCallError::Io(_)), "{err:?}");
         let _ = std::fs::remove_dir_all(sock.parent().unwrap());
+    }
+
+    /// 启动期命名：ctl 里有同根 URL 的实例就用实例名，尾斜杠不参与比较。
+    #[test]
+    fn primary_label_uses_ctl_instance_name_for_same_url() {
+        let (sock, handle) = fake_ctl(
+            r#"{"ok":true,"instances":[{"name":"cuda","observed":"ready","base_url":"http://127.0.0.1:8080/"},{"name":"server","observed":"ready","base_url":"http://127.0.0.1:8081/"}]}"#,
+        );
+        let label = primary_label(Some(&sock), "http://127.0.0.1:8081");
+        handle.join().expect("假服务端线程");
+        assert_eq!(label, "server", "主连接应直接叫声明里的名字");
+        let _ = std::fs::remove_dir_all(sock.parent().unwrap());
+    }
+
+    /// 反查不到就是 `local`：URL 未声明 / 没给 socket 都不该改名。
+    #[test]
+    fn primary_label_falls_back_to_local() {
+        assert_eq!(
+            primary_label(None, "http://127.0.0.1:8081"),
+            LOCAL_LANE,
+            "没有控制面时无从反查"
+        );
+        let (sock, handle) = fake_ctl(
+            r#"{"ok":true,"instances":[{"name":"a","base_url":"http://127.0.0.1:8080"}]}"#,
+        );
+        let label = primary_label(Some(&sock), "http://127.0.0.1:8081");
+        handle.join().expect("假服务端线程");
+        assert_eq!(label, LOCAL_LANE, "URL 不在声明里就不改名");
+        let _ = std::fs::remove_dir_all(sock.parent().unwrap());
+    }
+
+    /// ctl 连不上只回退，不拦启动（一次命名查询不是连接前提）。
+    #[test]
+    fn primary_label_falls_back_when_ctl_is_down() {
+        let dir = std::env::temp_dir().join(format!(
+            "crabmate-ctl-down-{}-{:?}",
+            std::process::id(),
+            thread::current().id()
+        ));
+        std::fs::create_dir_all(&dir).expect("建临时目录");
+        let label = primary_label(Some(&dir.join("nope.sock")), "http://127.0.0.1:8081");
+        assert_eq!(label, LOCAL_LANE, "连不上就沿用 local");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 匹配只看 URL：`stale` 仍是「那台 serve 的声明」，空 `base_url` 不参与比较。
+    ///
+    /// 同 URL 判定（`same_api_base`）：尾斜杠与大小写不参与比较，`localhost` 不合并。
+    #[test]
+    fn name_for_base_url_ignores_observation_and_blank_urls() {
+        let items = vec![
+            CtlInstance {
+                name: "stale-one".to_string(),
+                observed: Some("stale".to_string()),
+                base_url: Some("http://127.0.0.1:8081/".to_string()),
+                ..CtlInstance::default()
+            },
+            CtlInstance {
+                name: "no-url".to_string(),
+                observed: Some("ready".to_string()),
+                ..CtlInstance::default()
+            },
+        ];
+        assert_eq!(
+            name_for_base_url(&items, "http://127.0.0.1:8081").as_deref(),
+            Some("stale-one")
+        );
+        assert_eq!(
+            name_for_base_url(&items, ""),
+            None,
+            "空 URL 不能匹配到没有 base_url 的实例"
+        );
+        assert_eq!(
+            name_for_base_url(&items, "http://localhost:8081"),
+            None,
+            "localhost 与 127.0.0.1 是两个 Origin，不合并"
+        );
+    }
+
+    /// 同 URL 判定：尾斜杠与大小写不影响，端口不同 / `localhost` 与 `127.0.0.1` 不算同一台。
+    #[test]
+    fn same_api_base_ignores_cosmetic_differences_only() {
+        assert!(same_api_base(
+            "http://127.0.0.1:8081/",
+            "http://127.0.0.1:8081"
+        ));
+        assert!(same_api_base(
+            "HTTP://127.0.0.1:8081",
+            "http://127.0.0.1:8081"
+        ));
+        assert!(!same_api_base(
+            "http://127.0.0.1:8081",
+            "http://127.0.0.1:8080"
+        ));
+        assert!(
+            !same_api_base("http://127.0.0.1:8081", "http://localhost:8081"),
+            "两个 Origin 不合并"
+        );
+        assert!(!same_api_base("", ""), "空串不是「同一台 serve」的证据");
     }
 
     /// 默认路径只从 `XDG_RUNTIME_DIR` 派生，不猜 `/tmp`。

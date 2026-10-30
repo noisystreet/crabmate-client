@@ -175,6 +175,14 @@ pub(super) enum UiEvent {
         /// `Ok(serve 根 URL)` / `Err(面向用户的失败原因)`。
         result: Result<String, String>,
     },
+    /// 摘掉本进程的一条连接（`/lane detach <name>`）：**外壳动作**，不动声明与进程。
+    ///
+    /// 与 [`UiEvent::CtlLaneReady`] 同路且同理：改的是 `TuiApp::lanes`，单条 lane 没有
+    /// 那份 `&mut`；而且被摘的可能正是发起命令的那条 lane，按 `LaneId` 分发会落空。
+    LaneDetach {
+        /// 要摘掉的那条连接的 `label`。
+        name: String,
+    },
     /// 启动时 user-data 设置快照（prefs + llm-overrides）拉取结果（合成持久层）。
     UserData(Result<PersistedSettings, String>),
     /// `llm-overrides` 保存结果：`Ok` 回传已应用动作（面板据此清 staged）。

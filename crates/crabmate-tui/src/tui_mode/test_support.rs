@@ -231,4 +231,84 @@ mod tests {
         assert_eq!(app.lanes.len(), 1, "同名不重复连");
         assert_eq!(app.active, 0, "切回已有的那条");
     }
+
+    /// 名字不同但 URL 相同也是「同一条 serve」：不重复连（否则各开一条 SSE、各读一份会话）。
+    #[test]
+    fn attaching_a_different_name_on_the_same_url_only_switches() {
+        let client = test_client();
+        let mut prefs = [test_prefs()];
+        let mut app = shell(&client, &mut prefs);
+        // 尾斜杠与大小写不参与比较 —— 它们本来就是同一条 serve。
+        let url = format!("{}/", client.config().api_base);
+
+        app.attach_lane("另一个名字", &url);
+
+        assert_eq!(app.lanes.len(), 1, "同 URL 不重复连");
+        assert_eq!(app.active, 0, "切回已连着的那条");
+        let last = app.lanes[0].st.lines.last().expect("应有提示").text();
+        assert!(last.contains("不重复连"), "{last}");
+    }
+
+    /// `/lane detach`：只摘命名的那条，其余 lane 与声明都不动。
+    #[test]
+    fn detach_lane_removes_only_the_named_lane() {
+        let client = test_client();
+        let mut prefs = [test_prefs(), test_prefs(), test_prefs()];
+        let mut app = shell(&client, &mut prefs);
+
+        app.detach_lane("lane-2");
+        let labels: Vec<&str> = app.lanes.iter().map(|l| l.label.as_str()).collect();
+        assert_eq!(labels, ["lane-1", "lane-3"]);
+        assert_eq!(app.active, 0, "摘的不是当前，指针不动");
+
+        // 摘掉末尾那条：指针必须仍在合法范围内。
+        app.detach_lane("lane-3");
+        assert_eq!(app.lanes.len(), 1);
+        assert_eq!(app.active, 0);
+        let last = app.lanes[0].st.lines.last().expect("应有提示").text();
+        assert!(last.contains("已断开 `lane-3`"), "{last}");
+    }
+
+    /// 摘当前且它不在末尾：停在原位置（= 原来的下一条），不跳到别处。
+    #[test]
+    fn detaching_the_active_middle_lane_stays_in_place() {
+        let client = test_client();
+        let mut prefs = [test_prefs(), test_prefs(), test_prefs()];
+        let mut app = shell(&client, &mut prefs);
+        app.active = 1;
+
+        app.detach_lane("lane-2");
+
+        assert_eq!(app.lanes.len(), 2);
+        assert_eq!(app.active, 1, "原位现在是原来的下一条");
+        assert_eq!(app.lane().label, "lane-3");
+    }
+
+    /// 最后一条不许摘：界面至少要有一条 lane（退出客户端用 `/quit`）。
+    #[test]
+    fn detaching_the_last_lane_is_refused() {
+        let client = test_client();
+        let mut prefs = [test_prefs()];
+        let mut app = shell(&client, &mut prefs);
+
+        app.detach_lane("lane-1");
+
+        assert_eq!(app.lanes.len(), 1, "唯一连接不许摘");
+        let last = app.lanes[0].st.lines.last().expect("应有提示").text();
+        assert!(last.contains("唯一的连接"), "{last}");
+    }
+
+    /// 名字不存在：列出既有名字，省得用户再猜一次。
+    #[test]
+    fn detaching_an_unknown_name_lists_the_known_ones() {
+        let client = test_client();
+        let mut prefs = [test_prefs(), test_prefs()];
+        let mut app = shell(&client, &mut prefs);
+
+        app.detach_lane("lane-x");
+
+        assert_eq!(app.lanes.len(), 2, "不认识的名字不动任何 lane");
+        let last = app.lanes[0].st.lines.last().expect("应有提示").text();
+        assert!(last.contains("lane-1 / lane-2"), "{last}");
+    }
 }

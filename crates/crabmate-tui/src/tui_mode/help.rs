@@ -9,7 +9,7 @@ pub(super) const LINES: &[&str] = &[
     "输入 / 弹出补全菜单（内建命令 + skill；↑↓ 选择 · Tab/Enter 补全 · Esc 关闭）",
     "/copy [assistant|user]（Ctrl+Y 同义）：复制最近一条消息到剪贴板（默认助手回复）",
     "/ctl：查 crabmatectl 控制面实例（本地 unix socket，只读；需 --ctl-socket 或默认 socket 已存在）",
-    "/lane：运行期再加一条连接 —— /lane（同 /ctl 列实例）· /lane attach <name>（连已就绪的实例）· /lane new <name> [workspace]（新增声明并等它就绪；工作区缺省用当前 lane 的）",
+    "/lane：运行期连接管理 —— /lane（同 /ctl 列实例）· /lane attach <name>（连已就绪的实例）· /lane detach <name>（只断开本进程这条连接，声明与进程都不动）· /lane new <name> [workspace]（新增声明并等它就绪；工作区缺省用当前 lane 的）",
     "/mode ask|plan|act · /role <id> · /perm <level>（off 清除；有会话时点选即落盘） · /model <name>",
     "/workspace <路径>（/cd 别名）切换 serve 工作区根；空参只看当前根；/workspace off 恢复 serve 默认根",
     "/settings（或 F6）：设置面板（模型名/API Base/温度/思考模式/API 密钥/Agent role/会话模式；F2 保存）",
