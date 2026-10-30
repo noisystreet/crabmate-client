@@ -44,6 +44,42 @@ pub(super) fn of(key: &KeyEvent) -> Option<TopHotkey> {
     }
 }
 
+/// Ctrl+C：取消回合（再按一次强退）。
+pub(super) fn is_ctrl_c(key: &KeyEvent) -> bool {
+    key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL)
+}
+
+/// Ctrl+C / Ctrl+D（审批浮层里的"中断式拒绝"；回合取消需在浮层关闭后再按一次）。
+pub(super) fn is_ctrl_abort(key: &KeyEvent) -> bool {
+    key.modifiers.contains(KeyModifiers::CONTROL)
+        && matches!(key.code, KeyCode::Char('c') | KeyCode::Char('d'))
+}
+
+/// Ctrl+O：提交输入（与 Enter 同义，多行编辑里更好按）。
+pub(super) fn is_ctrl_o(key: &KeyEvent) -> bool {
+    key.code == KeyCode::Char('o') && key.modifiers.contains(KeyModifiers::CONTROL)
+}
+
+/// Ctrl+W：输入焦点下进入左栏工作区目录树。
+pub(super) fn is_ctrl_w(key: &KeyEvent) -> bool {
+    key.code == KeyCode::Char('w') && key.modifiers.contains(KeyModifiers::CONTROL)
+}
+
+/// Ctrl+E：思考内容展开 / 折叠。
+pub(super) fn is_ctrl_e(key: &KeyEvent) -> bool {
+    key.code == KeyCode::Char('e') && key.modifiers.contains(KeyModifiers::CONTROL)
+}
+
+/// 任意 `Ctrl+<code>`（Home / End 等）。
+pub(super) fn is_ctrl(key: &KeyEvent, code: KeyCode) -> bool {
+    key.code == code && key.modifiers.contains(KeyModifiers::CONTROL)
+}
+
+/// Alt+Enter：输入框内换行（Enter 是提交）。
+pub(super) fn is_alt_enter(key: &KeyEvent) -> bool {
+    key.code == KeyCode::Enter && key.modifiers.contains(KeyModifiers::ALT)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

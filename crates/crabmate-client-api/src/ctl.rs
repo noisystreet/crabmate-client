@@ -300,12 +300,7 @@ fn error_from_value(val: &Value) -> CtlError {
 /// 成 [`CtlError`]；整体不是 JSON 或 `instances` 结构不符时为
 /// [`CtlErrorKind::Malformed`]。
 pub fn parse_list_response(line: &str) -> Result<Vec<CtlInstance>, CtlError> {
-    let val: Value = serde_json::from_str(line.trim())
-        .map_err(|e| CtlError::malformed(format!("响应不是 JSON：{e}")))?;
-    let ok = val.get("ok").and_then(Value::as_bool).unwrap_or(false);
-    if !ok {
-        return Err(error_from_value(&val));
-    }
+    let val = parse_ok_body(line)?;
     // `instances` 缺省按空列表（Server 成功响应总会带，但少一次失败更好）。
     let items = val
         .get("instances")
@@ -313,6 +308,116 @@ pub fn parse_list_response(line: &str) -> Result<Vec<CtlInstance>, CtlError> {
         .unwrap_or_else(|| Value::Array(Vec::new()));
     serde_json::from_value(items)
         .map_err(|e| CtlError::malformed(format!("instances 结构不符：{e}")))
+}
+
+/// 解析一行响应并确认 `ok: true`，返回整个对象（成功体的字段由调用方各取所需）。
+///
+/// 三种失败（不是 JSON / `ok:false` / 结构不符）都在这里收口，调用方只处理成功形状。
+fn parse_ok_body(line: &str) -> Result<Value, CtlError> {
+    let val: Value = serde_json::from_str(line.trim())
+        .map_err(|e| CtlError::malformed(format!("响应不是 JSON：{e}")))?;
+    if val.get("ok").and_then(Value::as_bool).unwrap_or(false) {
+        Ok(val)
+    } else {
+        Err(error_from_value(&val))
+    }
+}
+
+/// `add` 的响应（`{"ok":true,"name":…,"created":…}`）。
+///
+/// `created: false` **不是失败**：Server 对已声明的实例幂等返回且不改动它（覆盖会
+/// 悄悄丢掉手工写在声明里的 `env`），此时 `note` 说明接下来该怎么做。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AddOutcome {
+    /// 实例名（回显 Server 给的值，不用请求里那份——两者不同就说明契约变了）。
+    pub name: String,
+    /// 本次是否真的新建了声明。
+    pub created: bool,
+    /// Server 的补充说明；不承诺措辞。
+    pub note: Option<String>,
+}
+
+/// 解析 `add` 的**一行**响应。失败分类口径与 [`parse_list_response`] 相同。
+pub fn parse_add_response(line: &str) -> Result<AddOutcome, CtlError> {
+    let val = parse_ok_body(line)?;
+    Ok(AddOutcome {
+        name: val
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        created: val.get("created").and_then(Value::as_bool).unwrap_or(false),
+        note: val
+            .get("note")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|n| !n.is_empty())
+            .map(str::to_string),
+    })
+}
+
+/// 轮询 `list` 时对**某一条实例**的判读：此刻能不能据此新增一条 lane。
+///
+/// 这层判读刻意放在纯逻辑里：`add` 之后「什么时候算起来了」是多端共用的契约
+/// （只有 `observed == ready` 且带 `base_url` 才算），不该在 worker 的轮询循环里
+/// 现写一遍 —— 那种写法既测不了，也会与 `/ctl` 的显示口径漂移。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LaneReadiness {
+    /// 已就绪且带 `base_url`：可以连。
+    Ready(String),
+    /// 还在起 / 缺 URL / 记录与实际暂时不符：继续等。
+    Pending,
+    /// 起不来或不该连（`failed` / `stopped` / `held`）：再等也不会好。
+    Failed(String),
+    /// 声明里没有这条（`add` 之后极短窗口内、或名字写错）。
+    Missing,
+}
+
+/// 在 `list` 结果里判读某条实例就绪与否。
+///
+/// `stopped` / `held` 归 `Failed` 而不是 `Pending`：它们不是中间态，
+/// 继续轮询只会把「实例被停下」拖成 20 秒的超时，掩盖真正的结论。
+pub fn lane_readiness(items: &[CtlInstance], name: &str) -> LaneReadiness {
+    let Some(item) = items.iter().find(|i| i.name == name) else {
+        return LaneReadiness::Missing;
+    };
+    match item.observed_state() {
+        CtlObserved::Ready => {
+            match item
+                .base_url
+                .as_deref()
+                .map(str::trim)
+                .filter(|u| !u.is_empty())
+            {
+                // 就绪却不给 URL：再等一轮，绝不按端口猜一个地址出来。
+                None => LaneReadiness::Pending,
+                Some(url) => LaneReadiness::Ready(url.to_string()),
+            }
+        }
+        CtlObserved::Failed => LaneReadiness::Failed(reason_or(
+            item,
+            "实例启动失败（`/ctl` 可看详情；常见原因是工作区越界或端口冲突）",
+        )),
+        CtlObserved::Stopped => LaneReadiness::Failed(reason_or(
+            item,
+            "实例已停止（`crabmatectl up` 或 `enable` 后再连）",
+        )),
+        CtlObserved::Held => LaneReadiness::Failed(reason_or(
+            item,
+            "声明被设为 enabled=false（已摘下的 lane）：`enable` 之后再连",
+        )),
+        // `starting` / `stale` / 无 observed / 认不出的观测态：此刻连不上，但也还没定论。
+        _ => LaneReadiness::Pending,
+    }
+}
+
+/// 失败原因优先用 Server 的 `last_error`，没有才回落到本地文案。
+fn reason_or(item: &CtlInstance, fallback: &str) -> String {
+    item.last_error
+        .as_deref()
+        .map(str::trim)
+        .filter(|e| !e.is_empty())
+        .map_or_else(|| fallback.to_string(), str::to_string)
 }
 
 #[cfg(test)]
@@ -468,5 +573,106 @@ mod tests {
         let err = parse_list_response("not json at all").unwrap_err();
         assert_eq!(err.kind, CtlErrorKind::Malformed);
         assert_eq!(err.code, None);
+    }
+
+    #[test]
+    fn add_response_reports_created_and_note() {
+        let created =
+            parse_add_response(r#"{"ok":true,"name":"proj-a","created":true}"#).expect("应能解析");
+        assert_eq!(created.name, "proj-a");
+        assert!(created.created);
+        assert_eq!(created.note, None);
+
+        // 幂等命中：不是失败，但 note 要说清「没改动」。
+        let existing = parse_add_response(
+            r#"{"ok":true,"name":"proj-a","created":false,"note":"已存在，未改动"}"#,
+        )
+        .expect("应能解析");
+        assert!(!existing.created);
+        assert_eq!(existing.note.as_deref(), Some("已存在，未改动"));
+    }
+
+    #[test]
+    fn add_error_is_classified_by_code() {
+        let err = parse_add_response(
+            r#"{"ok":false,"code":"bad_workspace","error":"workspace 不存在或不是目录：/nope"}"#,
+        )
+        .unwrap_err();
+        assert_eq!(err.kind, CtlErrorKind::BadWorkspace);
+        assert_eq!(err.code.as_deref(), Some("bad_workspace"));
+    }
+
+    #[test]
+    fn add_response_without_ok_is_an_error_not_a_silent_success() {
+        // 缺 `ok` 一律按失败：把「没 ok」当成功会让 `/lane new` 报一个不存在的连接。
+        let err = parse_add_response(r#"{"name":"proj-a","created":true}"#).unwrap_err();
+        assert_eq!(err.kind, CtlErrorKind::Other);
+    }
+
+    fn ready_inst(name: &str, url: Option<&str>, last_error: Option<&str>) -> CtlInstance {
+        CtlInstance {
+            name: name.to_string(),
+            observed: Some("ready".to_string()),
+            base_url: url.map(str::to_string),
+            last_error: last_error.map(str::to_string),
+            ..CtlInstance::default()
+        }
+    }
+
+    #[test]
+    fn readiness_needs_ready_and_a_base_url() {
+        let items = vec![ready_inst("a", Some("http://127.0.0.1:8721/"), None)];
+        assert_eq!(
+            lane_readiness(&items, "a"),
+            LaneReadiness::Ready("http://127.0.0.1:8721/".to_string())
+        );
+        // 就绪但没 URL：不许按端口猜。
+        let no_url = vec![ready_inst("a", None, None)];
+        assert_eq!(lane_readiness(&no_url, "a"), LaneReadiness::Pending);
+        let blank_url = vec![ready_inst("a", Some("   "), None)];
+        assert_eq!(lane_readiness(&blank_url, "a"), LaneReadiness::Pending);
+    }
+
+    #[test]
+    fn readiness_treats_starting_as_pending_and_missing_as_missing() {
+        let starting = vec![CtlInstance {
+            name: "a".to_string(),
+            observed: Some("starting".to_string()),
+            ..CtlInstance::default()
+        }];
+        assert_eq!(lane_readiness(&starting, "a"), LaneReadiness::Pending);
+        assert_eq!(lane_readiness(&starting, "nope"), LaneReadiness::Missing);
+        assert_eq!(lane_readiness(&[], "a"), LaneReadiness::Missing);
+    }
+
+    /// `stopped` / `held` 不是中间态：继续轮询只会把结论拖成超时。
+    #[test]
+    fn readiness_fails_fast_on_terminal_states() {
+        for observed in ["failed", "stopped", "held"] {
+            let items = vec![CtlInstance {
+                name: "a".to_string(),
+                observed: Some(observed.to_string()),
+                ..CtlInstance::default()
+            }];
+            match lane_readiness(&items, "a") {
+                LaneReadiness::Failed(why) => assert!(!why.is_empty(), "{observed} 要给原因"),
+                other => panic!("{observed} 应判失败，实际 {other:?}"),
+            }
+        }
+    }
+
+    /// 失败原因优先 Server 的 `last_error`：那是唯一知道真正原因的地方。
+    #[test]
+    fn failure_prefers_server_last_error() {
+        let items = vec![CtlInstance {
+            name: "a".to_string(),
+            observed: Some("failed".to_string()),
+            last_error: Some("工作区不在白名单".to_string()),
+            ..CtlInstance::default()
+        }];
+        assert_eq!(
+            lane_readiness(&items, "a"),
+            LaneReadiness::Failed("工作区不在白名单".to_string())
+        );
     }
 }

@@ -13,7 +13,9 @@ use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use crabmate_client_api::ctl::{CtlError, CtlInstance, CtlRequest, parse_list_response};
+use crabmate_client_api::ctl::{
+    AddOutcome, CtlError, CtlInstance, CtlRequest, parse_add_response, parse_list_response,
+};
 
 /// 单次读写超时：与 Server 侧 `IO_TIMEOUT`（5 s）对齐。
 ///
@@ -123,6 +125,30 @@ pub fn list_instances(socket: &Path) -> Result<Vec<CtlInstance>, CtlCallError> {
     parse_list_response(&line).map_err(CtlCallError::Rejected)
 }
 
+/// 新增一条声明（`{"op":"add",...}`）。
+///
+/// `workspace` **必填**：Server 的 socket `add` 至今要求 `String`（`08291db6` 放开的是
+/// TOML 声明里的省略，不是这个 op），所以调用方得先拿到一个路径 —— `/lane new <name>`
+/// 用当前 lane 的工作区兜底，拿不到就明说要路径。
+///
+/// `created: false`（声明已存在）是幂等命中而不是失败：Server 不会覆盖既有声明，
+/// 因为那会悄悄丢掉手工写进去的 `env`。
+pub fn add_instance(
+    socket: &Path,
+    name: &str,
+    workspace: &str,
+) -> Result<AddOutcome, CtlCallError> {
+    let request = CtlRequest::Add {
+        name: name.to_string(),
+        workspace: workspace.to_string(),
+        profile: None,
+        port: None,
+        enabled: true,
+    };
+    let line = exchange(socket, &request.to_line())?;
+    parse_add_response(&line).map_err(CtlCallError::Rejected)
+}
+
 /// 写一行、读一行。
 fn exchange(socket: &Path, request_line: &str) -> Result<String, CtlCallError> {
     let mut stream = connect(socket)?;
@@ -200,6 +226,24 @@ mod tests {
         assert_eq!(items.len(), 2);
         assert!(items[0].can_connect());
         assert!(!items[1].can_connect(), "starting 不可连");
+        let _ = std::fs::remove_dir_all(sock.parent().unwrap());
+    }
+
+    /// `add` 只发 Server 白名单里的字段，并且把 `created` 原样带回给调用方。
+    #[test]
+    fn add_instance_sends_add_op_and_reports_created() {
+        let (sock, handle) = fake_ctl(r#"{"ok":true,"name":"proj-a","created":true}"#);
+        let out = add_instance(&sock, "proj-a", "/home/u/proj-a").expect("应成功");
+        let request = handle.join().expect("假服务端线程");
+        assert!(out.created, "新建声明应回 created=true");
+        assert!(request.contains(r#""op":"add""#), "{request}");
+        assert!(request.contains(r#""name":"proj-a""#), "{request}");
+        assert!(
+            request.contains(r#""workspace":"/home/u/proj-a""#),
+            "{request}"
+        );
+        // 多一个键就会被 Server 的字段白名单拒成 bad_request。
+        assert!(!request.contains("config"), "绝不夹带 config：{request}");
         let _ = std::fs::remove_dir_all(sock.parent().unwrap());
     }
 

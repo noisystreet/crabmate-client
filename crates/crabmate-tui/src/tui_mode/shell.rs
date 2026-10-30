@@ -4,6 +4,7 @@
 //! 从 `mod.rs` 拆出：那边已顶在 `fn-nloc-ratchet` 的 920 行/文件上限，而这块只负责
 //! 终端与接线，与「会话状态」无关，拆开后两边都留出余量。
 
+use std::borrow::Cow;
 use std::io;
 use std::sync::mpsc;
 
@@ -19,11 +20,11 @@ use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 
 use crate::SessionPrefs;
-use crate::serve::ServeClient;
+use crate::serve::{ConnectionConfig, ServeClient};
 
 use super::lane_list::LaneEntry;
-use super::state::UiState;
-use super::worker::{LaneId, UiEvent, spawn_key_reader, spawn_worker};
+use super::state::{LineKind, UiState};
+use super::worker::{LaneId, UiEvent, WorkerJob, spawn_key_reader, spawn_worker};
 use super::{LaneApp, TuiApp, body_cache, drafts, event_loop, session_index, spinner};
 
 /// 鼠标上报：只要按下/释放（1000）、按住时的拖动（1002）与 SGR 编码（1006）。
@@ -95,50 +96,45 @@ pub async fn run_tui(
     let (tx, rx) = mpsc::channel::<UiEvent>();
     spawn_key_reader(tx.clone());
 
+    // 运行期新增 lane（`/lane attach|new`）的装配模板。`bearer` 取主连接那份：
+    // 控制面里所有实例同机同用户，per-profile 槽会牵动 Desktop / Android 的槽名约定。
+    let template = LaneTemplate {
+        overrides: overrides.clone(),
+        yes,
+        no_keyring,
+        bearer: lanes_spec
+            .first()
+            .map(|(_, c)| c.config().bearer_token.clone())
+            .unwrap_or_default(),
+        ctl_socket: ctl_socket.map(std::path::Path::to_path_buf),
+        tx: tx.clone(),
+    };
+
     // 逐条装配：每条 lane 一个 worker（各自的 SSE 流），共用这一个通道。
     let mut lanes = Vec::with_capacity(lanes_spec.len());
     for (i, (label, client)) in lanes_spec.iter().enumerate() {
         let lane_id = LaneId(i as u32);
         let job_tx = spawn_worker(lane_id, (*client).clone(), tx.clone());
-        lanes.push(LaneApp {
-            id: lane_id,
-            label: label.clone(),
-            client,
-            overrides: overrides.clone(),
-            yes,
-            no_keyring,
-            st: UiState::new(),
-            drafts: drafts::Drafts::default(),
-            spinner: spinner::Spinner::new(),
-            tx: tx.clone(),
+        lanes.push(LaneApp::assemble(
+            lane_id,
+            label.clone(),
+            Cow::Borrowed(*client),
+            &template,
             job_tx,
-            cancel: None,
-            exit: false,
-            quit_pending: false,
-            body: body_cache::BodyCache::default(),
-            panel: None,
-            persisted: None,
-            last_size: (0, 0),
-            index: session_index::UiIndexState::default(),
-            resume: None,
-            sent_turn: None,
-            bg: None,
-            ctl_socket: ctl_socket.map(std::path::Path::to_path_buf),
-        });
+        ));
     }
+    let next_lane_id = lanes_spec.len() as u32;
     let mut app = TuiApp {
         lanes,
         active: 0,
         rx,
+        template,
+        next_lane_id,
     };
     // 每条 lane 都拉一次会话 / 工作区根 / serve 默认状态 / user-data 设置快照：
     // 只刷当前 lane 的话，切过去会看到空的会话列表（切 lane 不该触发网络请求）。
     for lane in app.lanes.iter_mut() {
-        lane.refresh_sessions();
-        lane.st.ws_begin_root_fetch();
-        lane.refresh_workspace(false);
-        lane.refresh_status();
-        lane.load_user_settings();
+        lane.bootstrap();
     }
     let res = app.run_loop(&mut terminal);
     // 显式删背景图：退出备用屏幕时终端本会清空，但别把图像配额留到下一次运行。
@@ -168,11 +164,100 @@ fn announce_ctl_socket(ctl_socket: Option<&std::path::Path>) {
     );
 }
 
-/// 外壳层动作：切 lane、导出渲染快照、鼠标命中。
+/// 运行期新增 lane 的装配模板（`/lane attach` / `/lane new`）。
 ///
-/// **放这里而不是 `mod.rs`**：`mod.rs` 贴着 920 行门禁，而这三件事都只跟「有几条
+/// 存**启动时的**表达层初值，而不是「当前 lane 的现值」：当前 lane 的 `/model`
+/// 覆盖只属于它，复制给新 lane 等于把 A 的临时选择静默带进 B。
+///
+/// 定义在这里而不是 `mod.rs`：那边贴着 920 行门禁，而它只被外壳（装配 + 新增 lane）
+/// 用到。
+pub(super) struct LaneTemplate {
+    /// 启动时的 `/model` `/mode` `/role` `/perm` 初值（CLI / env）。
+    pub(super) overrides: SessionPrefs,
+    /// `--yes`：审批自动放行。
+    pub(super) yes: bool,
+    /// `--no-keyring`：设置面板禁写密钥。
+    pub(super) no_keyring: bool,
+    /// Web API Bearer：控制面里所有实例同机同用户，第一版共用主连接那份
+    /// （per-profile 槽需要牵动 Desktop / Android 的槽名约定，见设计稿 §4.5）。
+    pub(super) bearer: String,
+    /// 控制面 socket（各 lane 相同：一个 socket 管所有实例）。
+    pub(super) ctl_socket: Option<std::path::PathBuf>,
+    /// 所有 lane 共用的事件通道发送端。
+    pub(super) tx: mpsc::Sender<UiEvent>,
+}
+
+/// lane 的装配与首拉：启动装配与 `/lane attach|new` 共用。
+///
+/// 字段清单只此一份：两处各写一遍的话，加字段时必有一边漏掉，而漏的那条 lane
+/// 会静默缺一项行为（例如没有 `ctl_socket` 就连 `/lane` 都用不了）。
+impl<'a> LaneApp<'a> {
+    /// 按模板装配一条 lane（worker 由调用方先 spawn）。
+    fn assemble(
+        id: LaneId,
+        label: String,
+        client: Cow<'a, ServeClient>,
+        template: &LaneTemplate,
+        job_tx: mpsc::Sender<WorkerJob>,
+    ) -> Self {
+        Self {
+            id,
+            label,
+            client,
+            overrides: template.overrides.clone(),
+            yes: template.yes,
+            no_keyring: template.no_keyring,
+            st: UiState::new(),
+            drafts: drafts::Drafts::default(),
+            spinner: spinner::Spinner::new(),
+            tx: template.tx.clone(),
+            job_tx,
+            cancel: None,
+            exit: false,
+            quit_pending: false,
+            body: body_cache::BodyCache::default(),
+            panel: None,
+            persisted: None,
+            last_size: (0, 0),
+            index: session_index::UiIndexState::default(),
+            resume: None,
+            sent_turn: None,
+            bg: None,
+            ctl_socket: template.ctl_socket.clone(),
+        }
+    }
+
+    /// 首次拉取：会话 / 工作区根 / serve 默认状态 / user-data 设置快照。
+    ///
+    /// 新增 lane 也要跑这一套：只刷当前 lane 的话，切过去会看到空的会话列表。
+    fn bootstrap(&mut self) {
+        self.refresh_sessions();
+        self.st.ws_begin_root_fetch();
+        self.refresh_workspace(false);
+        self.refresh_status();
+        self.load_user_settings();
+    }
+}
+
+/// 外壳层动作：取当前 lane、切 lane、装配新 lane、导出渲染快照、鼠标命中。
+///
+/// **放这里而不是 `mod.rs`**：`mod.rs` 贴着 920 行门禁，而这些事都只跟「有几条
 /// lane、当前是哪条」有关，与单条 lane 的行为无关 —— 正好是外壳该管的那一层。
 impl<'a> super::TuiApp<'a> {
+    /// 当前 lane（只读）。
+    ///
+    /// 放这里与 [`TuiApp::switch_lane`] 一起：`mod.rs` 贴着 920 行门禁，而这一对取值器
+    /// 只跟「当前是哪条」有关。`active` 只由本模块的 `switch_lane` / `attach_lane`
+    /// 与构造设置，越界即编程错误。
+    pub(super) fn lane(&self) -> &LaneApp<'a> {
+        &self.lanes[self.active]
+    }
+
+    /// 当前 lane（可变）。
+    pub(super) fn lane_mut(&mut self) -> &mut LaneApp<'a> {
+        &mut self.lanes[self.active]
+    }
+
     /// 渲染用的 lane 快照：名字 + 各自当前绑定的工作区 + 谁是当前。
     ///
     /// 只导出渲染需要的三个字段，不导任何 lane 内部状态 —— 渲染层拿不到 `&mut`，
@@ -204,6 +289,64 @@ impl<'a> super::TuiApp<'a> {
         }
         let n = n as isize;
         self.active = (self.active as isize + delta).rem_euclid(n) as usize;
+    }
+
+    /// `UiEvent::CtlLaneReady`：控制面回包后装配一条新 lane。
+    ///
+    /// 这条事件由 worker 以**裸事件**发出（不带 `LaneId`）：新 lane 还不存在，
+    /// 按 id 分发只会被当成「已关闭的 lane」丢掉。
+    pub(super) fn on_lane_ready(&mut self, name: String, result: Result<String, String>) {
+        match result {
+            Ok(base_url) => self.attach_lane(&name, &base_url),
+            // 失败写进**当前** lane：发起命令的人正看着那个 transcript。
+            Err(why) => {
+                let lane = self.lane_mut();
+                lane.st
+                    .push_line(LineKind::System, &format!("连接 `{name}` 失败：{why}"));
+            }
+        }
+    }
+
+    /// 装配并切到一条新 lane。
+    ///
+    /// 同名连接已存在时**只切过去**：`--connect a=x --connect a=y` 这类手误若静默再连
+    /// 一次，左栏会出现两条同名 lane，`/ctl` 里却只有一条实例 —— 之后所有判断都会错。
+    pub(super) fn attach_lane(&mut self, name: &str, base_url: &str) {
+        if let Some(idx) = self.lanes.iter().position(|l| l.label == name) {
+            self.active = idx;
+            let lane = self.lane_mut();
+            lane.st.push_line(
+                LineKind::System,
+                &format!("`{name}` 已经是本进程的连接（已切过去）"),
+            );
+            return;
+        }
+        let cfg = ConnectionConfig::new(base_url, self.template.bearer.clone());
+        let client = match ServeClient::new(cfg) {
+            Ok(c) => c,
+            Err(e) => {
+                let lane = self.lane_mut();
+                lane.st
+                    .push_line(LineKind::System, &format!("连接 `{name}` 失败：{e}"));
+                return;
+            }
+        };
+        let id = LaneId(self.next_lane_id);
+        self.next_lane_id += 1;
+        let job_tx = spawn_worker(id, client.clone(), self.template.tx.clone());
+        let lane = LaneApp::assemble(
+            id,
+            name.to_string(),
+            Cow::Owned(client),
+            &self.template,
+            job_tx,
+        );
+        self.lanes.push(lane);
+        self.active = self.lanes.len() - 1;
+        self.lane_mut().bootstrap();
+        let lane = self.lane_mut();
+        lane.st
+            .push_line(LineKind::System, &format!("已连接 `{name}`（{base_url}）"));
     }
 
     /// 鼠标落在左栏 lane 列表的某一行时，返回该 lane 的下标。

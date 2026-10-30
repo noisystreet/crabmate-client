@@ -136,7 +136,8 @@ impl LaneApp<'_> {
         if left.is_zero() {
             return Err("退出预算已用尽".to_string());
         }
-        let client = self.client;
+        // `Cow<ServeClient>` 解引用成 `&ServeClient`（不必为此 import 类型名）。
+        let client = &*self.client;
         match tokio::time::timeout(left, apply_web_session_op(client, op)).await {
             Ok(Ok(_)) => Ok(()),
             Ok(Err(e)) => Err(e.to_string()),

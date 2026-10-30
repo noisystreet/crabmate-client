@@ -2,6 +2,7 @@
 //!
 //! 拆到独立模块以压住 `mod.rs` 行数/CCN 门禁；`apply_control` 仍在事件循环层。
 
+use super::lane_cmd;
 use super::settings::SESSION_MODES;
 use crabmate_client_api::slash;
 
@@ -36,10 +37,14 @@ pub enum Control {
     Copy(Option<String>),
     /// `/ctl`：查 `crabmatectl` 控制面的实例列表（本地 unix socket，**只读**）。
     ///
-    /// 只做查询，不新建 / 关闭实例：`add` / `remove` 要等 Server 侧的
-    /// `disable`/`update` 语义（软删除）与 `add.workspace` 可省略（待绑定）定下来，
-    /// 否则按键做出来只能是「必须预填目录」+「只能硬删」的半残形态。
+    /// 只是查询；新增连接走 [`Control::Lane`]（Server 已补上 `disable`/`enable` 与
+    /// `add` 的字段面，所以运行期加 lane 不再被阻塞）。
     Ctl,
+    /// `/lane [list|attach <name>|new <name> [workspace]]`：运行期新增连接。
+    ///
+    /// `Err` = 参数写错的用法提示：解析在 [`super::lane_cmd::parse`]，但报错文本要
+    /// 写进 transcript，所以只在事件循环里打印。
+    Lane(Result<lane_cmd::LaneCommand, String>),
 }
 
 pub fn clear_word(arg: &str) -> bool {
@@ -111,9 +116,11 @@ pub fn parse_control(text: &str) -> Option<Control> {
         "find" | "search" | "grep" => Some(Control::Find(arg_opt)),
         "background" | "bg" => Some(Control::Background(arg_opt)),
         "copy" | "yank" => Some(Control::Copy(arg_opt)),
-        // `ctl` / `lane`：`/ctl` 查控制面实例；`/lane` 是同一件事的别名
-        // （用户想的是「我这条 lane 从哪来」，但只读查询的入口只该有一个）。
-        "ctl" | "lane" => Some(Control::Ctl),
+        // `ctl` 只读查询控制面实例；`lane` 是它的超集（空参等价 `/ctl`，另加
+        // `attach` / `new` 两个写入路径）。两者刻意不合并：`/ctl` 已在文档与 muscle
+        // memory 里，改语义比多一个入口更容易出错。
+        "ctl" => Some(Control::Ctl),
+        "lane" => Some(Control::Lane(lane_cmd::parse(arg_opt.as_deref()))),
         slash::CONV => Some(match arg_opt {
             None => Control::ConvRefresh,
             Some(a) => match a.split_whitespace().next().unwrap_or("") {
@@ -182,6 +189,35 @@ mod tests {
             parse_control("/copy user"),
             Some(Control::Copy(Some(v))) if v == "user"
         ));
+    }
+
+    /// `/lane` 的子命令解析与 `/ctl` 的分工：`/ctl` 仍只管只读查询。
+    #[test]
+    fn parse_control_lane_subcommands() {
+        assert!(matches!(
+            parse_control("/lane"),
+            Some(Control::Lane(Ok(lane_cmd::LaneCommand::List)))
+        ));
+        assert!(matches!(
+            parse_control("/lane list"),
+            Some(Control::Lane(Ok(lane_cmd::LaneCommand::List)))
+        ));
+        assert!(matches!(
+            parse_control("/lane attach proj-a"),
+            Some(Control::Lane(Ok(lane_cmd::LaneCommand::Attach(n)))) if n == "proj-a"
+        ));
+        assert!(matches!(
+            parse_control("/LANE new proj-b /data/proj-b"),
+            Some(Control::Lane(Ok(lane_cmd::LaneCommand::New { .. })))
+        ));
+        // 认不出的子命令给用法提示，不当成普通消息发给模型。
+        assert!(matches!(
+            parse_control("/lane close proj-a"),
+            Some(Control::Lane(Err(_)))
+        ));
+        // `/ctl` 没有被子命令语法改写：带参也照旧按只读查询处理。
+        assert!(matches!(parse_control("/ctl"), Some(Control::Ctl)));
+        assert!(matches!(parse_control("/ctl ls"), Some(Control::Ctl)));
     }
 
     #[test]

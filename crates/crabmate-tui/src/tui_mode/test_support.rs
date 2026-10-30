@@ -6,6 +6,7 @@
 //! 这份构造器原本是 `workspace_cmd` 测试里的私有辅助。多个模块各写一份必然漂移，
 //! 而漂移的表现是「某个测试的初始状态与真实启动不一致」这种**假通过**，所以提到这里共用。
 
+use std::borrow::Cow;
 use std::sync::mpsc;
 
 use crate::SessionPrefs;
@@ -60,7 +61,7 @@ pub(super) fn test_lane<'a>(
     LaneApp {
         id,
         label: format!("lane-{}", id.0),
-        client,
+        client: Cow::Borrowed(client),
         overrides: prefs.clone(),
         yes: true,
         no_keyring: true,
@@ -110,6 +111,9 @@ mod tests {
         prefs: &'a mut [crate::SessionPrefs],
     ) -> TuiApp<'a> {
         let mut lanes = Vec::new();
+        // 条数在借出去之前记下：`prefs` 会被逐条 `iter_mut` 借到 `'a`，循环后再
+        // 读 `len()` 会与那份借用冲突。
+        let count = prefs.len();
         for (i, p) in prefs.iter_mut().enumerate() {
             let (ltx, lrx) = mpsc::channel();
             let (job_tx, _job_rx) = mpsc::channel();
@@ -123,11 +127,21 @@ mod tests {
             ));
             drop(ltx);
         }
-        let (_shell_tx, rx) = mpsc::channel();
+        let (shell_tx, rx) = mpsc::channel();
+        let next_lane_id = count as u32 + 1;
         TuiApp {
             lanes,
             active: 0,
             rx,
+            next_lane_id,
+            template: super::super::LaneTemplate {
+                overrides: test_prefs(),
+                yes: true,
+                no_keyring: true,
+                bearer: String::new(),
+                ctl_socket: None,
+                tx: shell_tx,
+            },
         }
     }
 
@@ -185,5 +199,36 @@ mod tests {
         let (job_tx, _job_rx) = mpsc::channel();
         let app = test_app(&client, &mut prefs, rx, tx, job_tx);
         assert_eq!(app.id, LaneId(0), "常规测试默认 lane 编号保持不变");
+    }
+
+    /// `/lane attach` 的落地动作：加一条 lane 并切过去，编号不复用。
+    #[test]
+    fn attach_lane_appends_a_lane_and_switches_to_it() {
+        let client = test_client();
+        let mut prefs = [test_prefs()];
+        let mut app = shell(&client, &mut prefs);
+        let before = app.next_lane_id;
+
+        app.attach_lane("proj-b", "http://127.0.0.1:8721/");
+
+        assert_eq!(app.lanes.len(), 2, "应新增一条 lane");
+        assert_eq!(app.active, 1, "新增后切到它");
+        assert_eq!(app.lane().label, "proj-b");
+        assert_eq!(app.next_lane_id, before + 1, "编号单调递增");
+        assert_ne!(app.lanes[0].id, app.lanes[1].id, "LaneId 不能重复");
+    }
+
+    /// 同名连接已存在时只切过去：重复连会让左栏出现两条同名 lane。
+    #[test]
+    fn attaching_an_existing_name_only_switches() {
+        let client = test_client();
+        let mut prefs = [test_prefs()];
+        let mut app = shell(&client, &mut prefs);
+        let label = app.lanes[0].label.clone();
+
+        app.attach_lane(&label, "http://127.0.0.1:1/");
+
+        assert_eq!(app.lanes.len(), 1, "同名不重复连");
+        assert_eq!(app.active, 0, "切回已有的那条");
     }
 }

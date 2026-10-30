@@ -22,6 +22,7 @@ mod exit_flush;
 mod help;
 mod history;
 mod hotkeys;
+mod lane_cmd;
 mod lane_list;
 mod layout;
 mod md;
@@ -53,11 +54,13 @@ pub(crate) mod tool_summary;
 mod turn_send;
 mod usage_hydrate;
 mod worker;
+mod worker_ctl;
 mod workspace_cmd;
 mod workspace_keys;
 mod workspace_tree;
 mod ws_sidebar;
 
+use std::borrow::Cow;
 use std::sync::mpsc::{Receiver, Sender};
 
 use anyhow::Result;
@@ -69,9 +72,11 @@ use crate::serve::{
 
 use self::approve::decision_summary;
 use self::controls::{Control, clear_word, parse_control, set_mode_field, set_override_field};
+use self::hotkeys::{is_alt_enter, is_ctrl, is_ctrl_c, is_ctrl_e, is_ctrl_o, is_ctrl_w};
 use self::render::StatusInfo;
 use self::settings::{PersistedSettings, normalize};
 use self::settings_panel::SettingsPanel;
+use self::shell::LaneTemplate;
 use self::worker::{LaneId, UiEvent, WorkerJob};
 use super::SessionPrefs;
 use state::{Focus, LineKind, UiState};
@@ -89,7 +94,12 @@ struct LaneApp<'a> {
     id: LaneId,
     /// 左栏下半 lane 列表里显示的名字。W2 用 `local`；W3 起来自 profile 名。
     label: String,
-    client: &'a ServeClient,
+    /// 本条 lane 的连接。
+    ///
+    /// `Cow` 而非 `&'a ServeClient`：启动装配借 `main` 里那份（零拷贝），而
+    /// `/lane attach|new` 在运行期造出来的客户端没有可借的对象，只能自己持有。
+    /// 它 Deref 到 `&ServeClient`，所以其余代码一处都不用改。
+    client: Cow<'a, ServeClient>,
     /// 本条 lane 自己的表达层（`/model` `/mode` `/role` `/perm` 与 CLI 初值）。
     ///
     /// **自有而非借用**：多 lane 各自一份，`/model` 只影响当前 lane；
@@ -139,28 +149,22 @@ struct LaneApp<'a> {
 
 /// 多 lane 外壳：持有 N 条 lane 与当前聚焦的那条。
 ///
-/// **W1 阶段只有一条 lane**（`active` 恒为 0），行为与单连接完全一致；事件来源标识、
-/// 每 lane 独立 worker、切换 lane 在后续波次接入（见 `docs/design/tui_multi_server.md` §6）。
+/// 键盘 / 鼠标输入路由给当前 lane，SSE 与回合同步结果按 `LaneId` 分发；lane 的新增
+/// （`/lane attach|new`）与切换都是**外壳动作** —— 单条 lane 无权改 `lanes`，
+/// 否则每条都得知道全局有几条（见 `docs/design/tui_multi_server.md` §4.2）。
 struct TuiApp<'a> {
     lanes: Vec<LaneApp<'a>>,
     /// 当前聚焦的 lane 下标。W1 恒为 0。
     active: usize,
     /// 所有 lane 共用的事件通道接收端：全进程只有这一个消费者，按标签分发。
     rx: Receiver<UiEvent>,
+    /// 新增 lane 的装配模板（见 [`LaneTemplate`]）。
+    template: LaneTemplate,
+    /// 下一条 lane 的编号。**不复用**已退出 lane 的号：`LaneId` 单调递增才没有 ABA。
+    next_lane_id: u32,
 }
 
 impl<'a> TuiApp<'a> {
-    /// 当前 lane（只读）。
-    fn lane(&self) -> &LaneApp<'a> {
-        // `active` 只由 `switch_lane`（W2）与构造设置，越界即编程错误。
-        &self.lanes[self.active]
-    }
-
-    /// 当前 lane（可变）。
-    fn lane_mut(&mut self) -> &mut LaneApp<'a> {
-        &mut self.lanes[self.active]
-    }
-
     /// 事件入口：带 lane 标签的按 id 分发，其余交给当前 lane。
     ///
     /// 键盘 / 鼠标 / 粘贴 / 尺寸从不带标签（`spawn_key_reader` 发裸变体）：W1 阶段只有
@@ -175,6 +179,9 @@ impl<'a> TuiApp<'a> {
                     lane.on_msg(*inner);
                 }
             }
+            // 新 lane 的装配是外壳动作：worker 以**裸事件**发出（目标 lane 尚不存在，
+            // 按 id 分发无处可去），必须在这里拦。
+            UiEvent::CtlLaneReady { name, result } => self.on_lane_ready(name, result),
             other => {
                 // 切 lane 是外壳动作：必须在进入 lane 之前拦截（lane 无权切自己，
                 // 否则每条 lane 都要知道全局有几条）。
@@ -204,37 +211,6 @@ impl LaneApp<'_> {
         let width = render::chat_body_width(self.st.sidebar_visible, terminal_width);
         self.body.ensure(&self.st, width);
     }
-}
-
-fn is_ctrl_c(key: &KeyEvent) -> bool {
-    key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL)
-}
-
-/// Ctrl+C / Ctrl+D（审批浮层里的"中断式拒绝"；回合取消需在浮层关闭后再按一次）。
-fn is_ctrl_abort(key: &KeyEvent) -> bool {
-    key.modifiers.contains(KeyModifiers::CONTROL)
-        && matches!(key.code, KeyCode::Char('c') | KeyCode::Char('d'))
-}
-
-fn is_ctrl_o(key: &KeyEvent) -> bool {
-    key.code == KeyCode::Char('o') && key.modifiers.contains(KeyModifiers::CONTROL)
-}
-
-/// Ctrl+W：输入焦点下进入左栏工作区目录树。
-fn is_ctrl_w(key: &KeyEvent) -> bool {
-    key.code == KeyCode::Char('w') && key.modifiers.contains(KeyModifiers::CONTROL)
-}
-
-fn is_ctrl_e(key: &KeyEvent) -> bool {
-    key.code == KeyCode::Char('e') && key.modifiers.contains(KeyModifiers::CONTROL)
-}
-
-fn is_ctrl(key: &KeyEvent, code: KeyCode) -> bool {
-    key.code == code && key.modifiers.contains(KeyModifiers::CONTROL)
-}
-
-fn is_alt_enter(key: &KeyEvent) -> bool {
-    key.code == KeyCode::Enter && key.modifiers.contains(KeyModifiers::ALT)
 }
 
 impl LaneApp<'_> {
@@ -436,6 +412,9 @@ impl LaneApp<'_> {
             Control::Background(arg) => self.set_background(arg),
             Control::Copy(arg) => self.copy_last(arg),
             Control::Ctl => self.fetch_ctl_list(),
+            Control::Lane(Ok(cmd)) => self.lane_command(cmd),
+            // 用法提示写进 transcript：命令在输入框里已经消失，不留痕等于什么都没发生。
+            Control::Lane(Err(usage)) => self.st.push_line(LineKind::System, &usage),
             Control::Workspace(arg) => self.workspace_command(arg),
             Control::Resume => self.resume_turn(),
             Control::Older => history::load_older(self),
@@ -815,6 +794,9 @@ impl LaneApp<'_> {
             UiEvent::WorkspaceQuery(result) => self.on_workspace_query(result),
             UiEvent::WorkspaceSet(result) => self.on_workspace_set(result),
             UiEvent::CtlList(result) => ctl::on_ctl_list(self, result),
+            // 外壳级事件（新增 lane 的结果）：正常路径到不了 lane（`TuiApp::on_msg` 已拦），
+            // 这里只为穷尽匹配 —— 真要在 lane 内收到，说明通道接错了，静默忽略即可。
+            UiEvent::CtlLaneReady { .. } => {}
             UiEvent::UserData(result) => self.on_user_data(result),
             UiEvent::SavedLlm(result) => self.on_settings_saved_llm(result),
             UiEvent::SavedPrefs(result) => self.on_settings_saved_prefs(result),
