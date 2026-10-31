@@ -32,6 +32,7 @@ mod palette;
 mod pane_width;
 mod paste;
 mod permission_intent;
+mod pulse;
 mod read_jobs;
 mod render;
 mod resume;

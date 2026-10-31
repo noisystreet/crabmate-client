@@ -524,7 +524,7 @@ pub fn draw(
     info: &StatusInfo,
     prepared: &[BodyRow],
     panel: Option<&PanelContent>,
-    // 外壳层算好的 lane 快照（名字 / 工作区 / 是否当前）；`len == 0` 时不占版面。
+    // 外壳层算好的 lane 快照（名字 / 状态 / 是否当前）；`len == 0` 时不占版面。
     lanes: &[super::lane_list::LaneEntry],
 ) {
     let area = frame.area();

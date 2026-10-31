@@ -15,8 +15,8 @@ use unicode_width::UnicodeWidthStr;
 
 use super::layout::lane_shown_len;
 use super::palette::Palette;
-use super::spinner;
-use super::status::SPINNER_FRAMES;
+use super::pulse;
+use super::status::reduced_motion;
 use super::text::truncate_display;
 use super::worker::{LaneId, UiEvent};
 
@@ -34,8 +34,6 @@ const LANE_LABEL_MIN: usize = 4;
 pub(super) struct LaneEntry {
     /// lane 名（连接名）。
     pub label: String,
-    /// 该 lane 的 serve 当前工作区根。`None` = 还没取到（或待绑定的空根）。
-    pub workspace: Option<String>,
     /// 是否当前 lane。
     pub active: bool,
     /// 这条 lane 此刻在做什么。
@@ -46,8 +44,11 @@ pub(super) struct LaneEntry {
     pub context: Option<String>,
     /// 在途回合已耗时（秒）；空闲时 `None`。
     pub busy_secs: Option<u64>,
-    /// 生成中 spinner 的当前帧（`⠋`…）。非生成中为 `None`，此时用 [`LaneStatus::mark`]。
-    pub spin: Option<&'static str>,
+    /// 生成中「呼吸」的相位档（见 [`pulse`]）。非生成中为 `None`。
+    ///
+    /// 字形不随相位变化（仍是 `LaneStatus::Running` 的 `●`）：宽度恒定，既不会挤动
+    /// 折行点，也不必为一个动画多占一列。
+    pub pulse: Option<u64>,
 }
 
 /// 一条 lane 当前处于什么阶段（渲染用的最小快照）。
@@ -159,33 +160,47 @@ fn lane_title(total: usize, shown: usize) -> String {
 /// 整行补空格到 `width` —— 只给文字上底色的话，条会缩成「文字那么宽」，看起来仍是
 /// 一行高亮文字，而不是列表里的一行。
 ///
-/// 头两列是「当前 lane 标记 + 状态符号」：`▎` 指明聚焦，符号（`·` / `●` / `▲`）说明
-/// 这条 lane 在做什么。两列都要 —— 后台 lane 在等审批时屏幕上看不到浮层，
+/// 头两列是「当前 lane 标记 + 状态符号」：`▎` 指明聚焦，符号（`·` / `●` / `▲` / `×`）
+/// 说明这条 lane 在做什么。两列都要 —— 后台 lane 在等审批时屏幕上看不到浮层，
 /// 「切过去」与「它卡住了」全靠这一列（见 issue #337）。
+///
+/// 生成中**不换字形**：`●` 只做亮度呼吸（见 [`pulse`]）。行宽因此恒定，也不必为
+/// 「在动」多留一列；后台 lane 在不在动，仍然不必切过去才看得见。
+///
+/// 只画名字，不带工作区末段：这一行首先回答「哪条 lane」，而末段会把名字挤掉
+/// （工作区在右栏目录树的标题里，`/lane` 也列出全部）。
 fn lane_row(entry: &LaneEntry, width: usize, palette: &Palette) -> Line<'static> {
+    let base = row_style(entry, palette);
     let cursor = if entry.active { "▎" } else { " " };
-    // 生成中用 spinner 帧而不是 `●`：一条 lane 在不在动，不必先切过去看右栏才
-    // 知道 —— 这正是「多路并行」最该被看见的那一个事实。
-    let mark = match (entry.status, entry.spin) {
-        (LaneStatus::Running, Some(frame)) => frame,
-        (status, _) => status.mark(),
-    };
+    let mark = entry.status.mark();
+    // 只有相位存在时才换色：`pulse` 由 `lane_entries` 决定（在跑 + 没关动效）。
+    let head_style = entry
+        .pulse
+        .map_or(base, |step| base.fg(pulse::color_at(palette.accent, step)));
+    // 「标记 + 符号」恒 2 列（两者都被测试钉死单列）；宽度不足时先截它自己，
+    // 免得余下那段算出负预算。
+    let head = truncate_display(&format!("{cursor}{mark}"), width);
+    let head_w = UnicodeWidthStr::width(head.as_str());
+    let rest_w = width.saturating_sub(head_w);
     // 尾部读数最多占半行：这一行首先是「哪条 lane」，其次才是读数。
-    let tail_room = width.saturating_sub(3 + LANE_LABEL_MIN).min(width / 2);
+    let tail_room = width
+        .saturating_sub(head_w + 1 + LANE_LABEL_MIN)
+        .min(width / 2);
     let tail = lane_tail(entry, tail_room);
     let tail_w = UnicodeWidthStr::width(tail.as_str());
-    let gap = usize::from(!tail.is_empty());
-    // `mark + 空格` 占 3 列，剩下的才是名字与工作区名能用的宽度。
-    let avail = width.saturating_sub(3 + tail_w + gap);
-    let body = lane_row_text(&entry.label, entry.workspace.as_deref(), avail);
-    let mut text = format!("{cursor}{mark} {body}");
+    // 名字 + 尾部读数占满余下宽度；装不下时 `truncate_display` 从右切（名字优先）。
+    let mut rest = format!(" {}", entry.label);
     if !tail.is_empty() {
-        let used = UnicodeWidthStr::width(text.as_str());
-        text.push_str(&" ".repeat(width.saturating_sub(used + tail_w)));
-        text.push_str(&tail);
+        let used = UnicodeWidthStr::width(rest.as_str());
+        rest.push_str(&" ".repeat(rest_w.saturating_sub(used + tail_w)));
+        rest.push_str(&tail);
     }
-    let text = pad_display(&truncate_display(&text, width), width);
-    Line::from(Span::styled(text, row_style(entry, palette)))
+    let rest = pad_display(&truncate_display(&rest, rest_w), rest_w);
+    // 拆两个 span 只为让头部单独换色（呼吸）；余下整行共用底色条样式。
+    Line::from(vec![
+        Span::styled(head, head_style),
+        Span::styled(rest, base),
+    ])
 }
 
 /// 行尾读数：`62% 12s •`，按重要性**从右往左**排 —— 最右的未读点最重要（它就是
@@ -232,33 +247,6 @@ fn duration_text(secs: u64) -> String {
         60..=3599 => format!("{}m{:02}s", secs / 60, secs % 60),
         _ => format!("{}h{:02}m", secs / 3600, (secs % 3600) / 60),
     }
-}
-
-/// 行内文字：`名字`，宽度够时补 `· 工作区末段`。
-///
-/// 工作区只显示**末段**（完整路径在右栏标题里）：lane 行是一行一刀的窄条，整条路径
-/// 会把名字挤没。剩余宽度不够 4 列时宁可不显示 —— 挤出一个字母既没有信息量，也会让
-/// 「两条 lane 是不是同一个工作区」这件事看不出来。
-fn lane_row_text(label: &str, workspace: Option<&str>, avail: usize) -> String {
-    let Some(ws) = workspace.and_then(workspace_hint) else {
-        return label.to_string();
-    };
-    let used = UnicodeWidthStr::width(label) + 3; // " · "
-    if avail < used + 4 {
-        return label.to_string();
-    }
-    format!("{label} · {ws}")
-}
-
-/// 工作区根 → 行内末段名。空路径（待绑定 / 尚未取到）返回 `None`。
-///
-/// 同时接受 `/` 与 `\\` 分隔：serve 可能跑在 Windows 上，这条只是显示，不该因此消失。
-fn workspace_hint(path: &str) -> Option<&str> {
-    let trimmed = path.trim().trim_end_matches(['/', '\\']);
-    if trimmed.is_empty() {
-        return None;
-    }
-    trimmed.rsplit(['/', '\\']).next().filter(|s| !s.is_empty())
 }
 
 /// 底色条样式：当前 lane 走 `palette.selection`（无色模式自动退回反色），其余用
@@ -341,17 +329,18 @@ impl LaneTally {
 /// 拿到的依然是 `String` / `u64`，改不到任何 lane 的状态。
 impl super::TuiApp<'_> {
     pub(super) fn lane_entries(&self) -> Vec<LaneEntry> {
+        // 动效关掉时整块都不动：与状态行仪器条同一约束（录屏 / 远程终端 / 读屏）。
+        let breathe = !reduced_motion();
         self.lanes
             .iter()
             .enumerate()
             .map(|(i, lane)| {
                 let status = lane_status(lane);
                 let persisted = lane.persisted.as_ref();
-                // 耗时与 spinner 帧都从同一个起点算：从**发出**起（见 `turn_elapsed`）。
+                // 耗时与呼吸相位都从同一个起点算：从**发出**起（见 `turn_elapsed`）。
                 let elapsed = lane.turn_elapsed();
                 LaneEntry {
                     label: lane.label.clone(),
-                    workspace: lane.st.workspace_path.clone(),
                     active: i == self.active,
                     status,
                     unread: lane.unread,
@@ -364,9 +353,8 @@ impl super::TuiApp<'_> {
                         }),
                     ),
                     busy_secs: lane.turn_started.map(|_| elapsed.as_secs()),
-                    // 帧号来自墙钟：后台 lane 不必被谁推进，切过去之前它也在动。
-                    spin: spinner_turning(lane)
-                        .then(|| SPINNER_FRAMES[spinner::frame_at(elapsed) % SPINNER_FRAMES.len()]),
+                    // 相位来自墙钟：后台 lane 不必被谁推进，切过去之前它也在呼吸。
+                    pulse: (breathe && spinner_turning(lane)).then(|| pulse::step_at(elapsed)),
                 }
             })
             .collect()
@@ -414,14 +402,14 @@ fn lane_status(lane: &super::LaneApp<'_>) -> LaneStatus {
     }
 }
 
-/// 这条 lane 的 spinner 此刻该不该转。
+/// 这条 lane 的「在跑」指示此刻该不该动。
 ///
 /// 两个条件缺一不可：**渲染态是「运行中」**（等审批要画 `▲`、已请求退出画 `×`，
-/// 都不该被帧顶掉），以及**没有在取消**（取消中冻结，与状态行的 `cancel_sent`
+/// 都不该被呼吸顶掉），以及**没有在取消**（取消中冻结，与状态行的 `cancel_sent`
 /// 口径一致）。
 ///
 /// 唤醒源（`TuiApp::next_spinner_tick`）与左栏绘制共用这一个判定：两边各写一套
-/// 就会出现「一处算在转、另一处不算」，后台 lane 于是停在原地 —— 那正是本次要修
+/// 就会出现「一处算在动、另一处不算」，后台 lane 于是停在原地 —— 那正是本次要修
 /// 的症状，别在这里分叉。
 pub(super) fn spinner_turning(lane: &super::LaneApp<'_>) -> bool {
     matches!(lane_status(lane), LaneStatus::Running) && !lane.st.cancel_sent
@@ -437,7 +425,7 @@ mod tests {
         Palette::default()
     }
 
-    /// 只有名字、没有工作区、第一条是当前 lane —— 大多数测试只关心这个。
+    /// 只有名字、第一条是当前 lane —— 大多数测试只关心这个。
     fn lanes(names: &[&str]) -> Vec<LaneEntry> {
         names
             .iter()
@@ -450,14 +438,10 @@ mod tests {
             .collect()
     }
 
-    /// 带工作区的单条 lane（用来钉「工作区名怎么进这一行」）。
-    fn lane_with(label: &str, workspace: Option<&str>, active: bool) -> LaneEntry {
-        LaneEntry {
-            label: label.to_string(),
-            workspace: workspace.map(str::to_string),
-            active,
-            ..LaneEntry::default()
-        }
+    /// 一行的可见文本。`lane_row` 拆成两个 span（头部要单独呼吸换色），
+    /// 断言「这一行写了什么」必须拼起来看 —— 只读 `spans[0]` 现在只覆盖那 2 列。
+    fn row_text(line: &Line<'_>) -> String {
+        line.spans.iter().map(|s| s.content.as_ref()).collect()
     }
 
     /// 单 lane：标题 1 行 + 1 行底色条，其余行留空（版面高度固定，不随条数拉伸）。
@@ -469,7 +453,7 @@ mod tests {
         assert_eq!(rows[0].spans[0].content.as_ref(), "连接 [1]");
         // 唯一那条就是当前 lane，故整行都是选中底色。
         assert_eq!(rows[1].spans[0].style.bg, Some(pal().selection_bg));
-        assert!(rows[1].spans[0].content.contains("local"));
+        assert!(row_text(&rows[1]).contains("local"), "名字要写在这一行里");
     }
 
     /// 当前 lane 用选中底色 + 竖条标记；其它 lane 用一档抬升底色，每条各占一行。
@@ -533,46 +517,25 @@ mod tests {
         assert!(lane_list_rows(&lanes(&["a"]), 10, 0, &pal()).is_empty());
     }
 
-    /// 一实例一工作区：lane 行必须能看出「这两条连的是不同项目」。
+    /// 一实例一工作区，但那一行只写名字：工作区在右栏目录树标题与 `/lane` 里，
+    /// 挤进这条窄条只会把名字吃掉。
     #[test]
-    fn lane_row_shows_the_workspace_tail() {
-        let entries = vec![
-            lane_with("lane-a", Some("/data/work/proj-a"), true),
-            lane_with("lane-b", Some("/data/work/proj-b"), false),
-        ];
+    fn lane_row_carries_the_label_only() {
+        let entries = lanes(&["lane-a", "lane-b"]);
         let rows = lane_list_rows(&entries, 40, 20, &pal());
-        let a = rows[1].spans[0].content.as_ref();
-        let b = rows[2].spans[0].content.as_ref();
-        assert!(a.contains("proj-a"), "应显示工作区末段：{a}");
-        assert!(b.contains("proj-b"), "{b}");
-        // 只显示末段：整条路径在这条窄条里会把名字挤没。
-        assert!(!a.contains("/data/work"), "不该显示整条路径：{a}");
+        let a = row_text(&rows[1]);
+        let b = row_text(&rows[2]);
+        assert!(a.contains("lane-a"), "{a}");
+        assert!(b.contains("lane-b"), "{b}");
+        // 没有分隔符残留：不带工作区就只是一个名字，不是「名字 + 空尾巴」。
+        assert!(!a.contains(" · "), "不该留分隔符：{a}");
     }
 
-    /// 没取到工作区（或待绑定的空根）时，行里只有名字 —— 不能留一个空的分隔符。
+    /// 一行只写「标记 + 符号 + 名字」，没有尾巴：窄条里多一个字都是挤出来的。
     #[test]
-    fn missing_workspace_leaves_the_label_alone() {
-        for entries in [
-            lanes(&["local"]),
-            vec![lane_with("local", Some(""), true)],
-            vec![lane_with("local", Some("   "), true)],
-        ] {
-            let rows = lane_list_rows(&entries, 20, 20, &pal());
-            assert_eq!(rows[1].spans[0].content.trim(), "▎· local");
-        }
-    }
-
-    /// 宽度不够时宁可不显示工作区，也不要挤出一个字母。
-    #[test]
-    fn narrow_row_drops_the_workspace_hint() {
-        let entries = vec![lane_with("lane-a", Some("/data/work/proj-a"), true)];
-        // 14 列：`▎ ` + `lane-a` + ` · ` 之后只剩不到 4 列给名字。
-        let rows = lane_list_rows(&entries, 14, 20, &pal());
-        assert!(
-            !rows[1].spans[0].content.contains("proj-a"),
-            "太窄时不该硬塞：{}",
-            rows[1].spans[0].content
-        );
+    fn row_text_is_mark_plus_label() {
+        let rows = lane_list_rows(&lanes(&["local"]), 20, 20, &pal());
+        assert_eq!(row_text(&rows[1]).trim(), "▎· local");
     }
 
     /// 状态符号必须各不相同、且**都是单列**：双列符号会把整行撑破。
@@ -659,13 +622,13 @@ mod tests {
         entries[0].busy_secs = Some(12);
         entries[0].unread = true;
         let rows = lane_list_rows(&entries, 40, 20, &pal());
-        let line = rows[1].spans[0].content.as_ref();
+        let line = row_text(&rows[1]);
         assert!(line.ends_with('•'), "未读点必须在最右：{line}");
         assert!(line.contains("62%"), "{line}");
         assert!(line.contains("12s"), "{line}");
         // 读数不许把身份挤掉：这一行首先是「哪条 lane」。
         assert!(line.contains("lane-a"), "{line}");
-        assert_eq!(UnicodeWidthStr::width(line), 40);
+        assert_eq!(UnicodeWidthStr::width(line.as_str()), 40);
     }
 
     /// 窄行先丢 ctx、再丢耗时：留到最后的必须是未读点。
@@ -677,34 +640,48 @@ mod tests {
         entries[0].unread = true;
         // 16 列：尾部最多占 8 列，装不下三个读数。
         let rows = lane_list_rows(&entries, 16, 20, &pal());
-        let line = rows[1].spans[0].content.as_ref();
+        let line = row_text(&rows[1]);
         assert!(line.ends_with('•'), "{line}");
         assert!(!line.contains("100%"), "窄行先丢 ctx：{line}");
-        assert_eq!(UnicodeWidthStr::width(line), 16);
+        assert_eq!(UnicodeWidthStr::width(line.as_str()), 16);
 
         // 更窄（12 列）：耗时也让位，只剩那个点。
         let rows = lane_list_rows(&entries, 12, 20, &pal());
-        let line = rows[1].spans[0].content.as_ref();
+        let line = row_text(&rows[1]);
         assert!(line.ends_with('•'), "{line}");
         assert!(!line.contains("m0"), "耗时也要让位：{line}");
-        assert_eq!(UnicodeWidthStr::width(line), 12);
+        assert_eq!(UnicodeWidthStr::width(line.as_str()), 12);
     }
 
-    /// 生成中用 spinner 帧顶替 `●`：后台 lane 在不在动，不切过去也看得见。
+    /// 生成中不换字形：`●` 原地做亮度呼吸，行宽不变（不必为动画多占一列）。
     #[test]
-    fn running_lane_shows_the_spinner_frame() {
+    fn running_lane_breathes_without_changing_the_glyph() {
         let mut entries = lanes(&["lane-a"]);
         entries[0].status = LaneStatus::Running;
-        entries[0].spin = Some("⠹");
+        entries[0].pulse = Some(pulse::STEPS - 1);
         let rows = lane_list_rows(&entries, 30, 20, &pal());
-        let line = rows[1].spans[0].content.as_ref();
-        assert!(line.contains('⠹'), "{line}");
-        assert!(!line.contains('●'), "生成中不再画静态度点：{line}");
-        // 帧符号仍是单列，否则整行会被撑破。
-        assert_eq!(UnicodeWidthStr::width(line), 30);
+        let line = row_text(&rows[1]);
+        assert!(line.contains('●'), "字形仍是 `●`：{line}");
+        assert_eq!(
+            UnicodeWidthStr::width(line.as_str()),
+            30,
+            "呼吸不改行宽：{line}"
+        );
+        // 头两列（标记 + 符号）自成 span：只有它需要换色。
+        assert_eq!(rows[1].spans[0].content.as_ref(), "▎●");
+        assert_eq!(
+            rows[1].spans[0].style.fg,
+            Some(pulse::color_at(pal().accent, pulse::STEPS - 1)),
+            "呼吸只把头部前景压暗"
+        );
+        assert_ne!(
+            rows[1].spans[0].style.fg,
+            Some(pal().accent),
+            "最暗档不该等于原色，否则呼吸看不出来"
+        );
     }
 
-    /// 后台 lane 的 spinner 帧跟着墙钟走：它不进 `draw_frame`，也不该因此冻结。
+    /// 后台 lane 的呼吸相位跟着墙钟走：它不进 `draw_frame`，也不该因此冻结。
     #[test]
     fn background_lane_spinner_follows_the_clock() {
         let client = test_client();
@@ -720,15 +697,15 @@ mod tests {
         app.lanes[1].turn_started = Some(behind);
 
         let entries = app.lane_entries();
-        let front = entries[0].spin.expect("当前 lane 在跑就该有帧");
-        let back = entries[1].spin.expect("后台 lane 在跑就该有帧");
+        let front = entries[0].pulse.expect("当前 lane 在跑就该有呼吸相位");
+        let back = entries[1].pulse.expect("后台 lane 在跑就该有呼吸相位");
         assert_ne!(
             front, back,
-            "后台 lane 的帧号必须跟着墙钟走，不能停在切走时那一格"
+            "后台 lane 的相位必须跟着墙钟走，不能停在切走时那一档"
         );
     }
 
-    /// 取消中不转：状态行已经在说「取消中」，lane 行再转就是在骗人。
+    /// 取消中不呼吸：状态行已经在说「取消中」，lane 行再动就是在骗人。
     #[test]
     fn cancelling_lane_does_not_spin() {
         let client = test_client();
@@ -737,10 +714,7 @@ mod tests {
         app.lanes[0].st.running = true;
         app.lanes[0].st.cancel_sent = true;
         app.lanes[0].turn_started = Some(std::time::Instant::now());
-        assert!(
-            app.lane_entries()[0].spin.is_none(),
-            "取消中不该画推进中的帧"
-        );
+        assert!(app.lane_entries()[0].pulse.is_none(), "取消中不该继续呼吸");
     }
 
     /// 耗时换成定宽单位：`s` → `m` → `h`，不让秒数无限长。
@@ -776,17 +750,5 @@ mod tests {
         app.clear_active_unread();
         app.on_msg(Inbound::FromLane(first, UiEvent::Text("x".into())));
         assert!(!app.lane_entries()[0].unread);
-    }
-
-    #[test]
-    fn workspace_hint_takes_the_tail_and_ignores_empty() {
-        assert_eq!(workspace_hint("/data/work/proj-a"), Some("proj-a"));
-        assert_eq!(workspace_hint("/data/work/proj-a/"), Some("proj-a"));
-        assert_eq!(workspace_hint("proj"), Some("proj"));
-        // serve 可能跑在 Windows 上：反斜杠也要认。
-        assert_eq!(workspace_hint("C:\\work\\proj"), Some("proj"));
-        assert_eq!(workspace_hint(""), None);
-        assert_eq!(workspace_hint("   "), None);
-        assert_eq!(workspace_hint("/"), None);
     }
 }
