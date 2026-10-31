@@ -1,6 +1,6 @@
 # TUI 多 serve 连接与多 agent 并行（多 lane）
 
-> **状态**：**W1 / W1b / W2 已落地**（`LaneApp` 抽取 `cc0c06f`、事件来源标签 `b73ed83`；每 lane 独立 worker 与独立 `overrides`、`--connect <name>=<url>` 多 serve 装配、左栏 lane 列表与切换 ——`Alt+←/→` 或点行，**单 lane 也显示**；lane 行带该 serve 当前的**工作区末段**，`POST /workspace` 的 409 `WORKSPACE_ALREADY_SET` 单独识别并提示「另起 lane」—— 见 §4.7）。**W3 部分落地**：多连接靠 `--connect`；运行期**只读**查询控制面已落地（`--ctl-socket <path>` 或默认 `$XDG_RUNTIME_DIR/crabmate/ctl.sock`，`/ctl` 列出实例，**只有 `observed == ready` 算可连** —— 看 `state` 会把死实例当活的）。运行期**加连接**也已落地（§4.8）：`/lane attach <name>` 连声明里**已就绪**的实例，`/lane new <name> [workspace]` 经控制面 `add` 写声明 → 轮询到 `observed == ready` → 直接连上，两者都不用重启进程。仍未做：`tui-connections.toml` 配置文件、启动逐 profile `/health` 探测、`/lane close`（软摘一条声明要接 Server 的 `disable` / `enable`；硬 `remove` 会丢掉手写 `env` / `config`，不做）。**W4 / W5 未完成**：审批浮层随 `UiState` 下沉到每条 lane（不串台），但没有队列、来源标签、非活动 lane 的待审批提示与全局计数；状态栏无 `lanes N/M`，lane 行无状态点，`MAX_LANES` 上限未实现。tracking Issue [#327](https://github.com/noisystreet/crabmate-client/issues/327)。
+> **状态**：**W1 / W1b / W2 已落地**（`LaneApp` 抽取 `cc0c06f`、事件来源标签 `b73ed83`；每 lane 独立 worker 与独立 `overrides`、`--connect <name>=<url>` 多 serve 装配、左栏 lane 列表与切换 ——`Alt+←/→` 或点行，**单 lane 也显示**；lane 行带该 serve 当前的**工作区末段**，`POST /workspace` 的 409 `WORKSPACE_ALREADY_SET` 单独识别并提示「另起 lane」—— 见 §4.7）。**W3 部分落地**：多连接靠 `--connect`；运行期**只读**查询控制面已落地（`--ctl-socket <path>` 或默认 `$XDG_RUNTIME_DIR/crabmate/ctl.sock`，`/ctl` 列出实例，**只有 `observed == ready` 算可连** —— 看 `state` 会把死实例当活的）。运行期**加连接**也已落地（§4.8）：`/lane attach <name>` 连声明里**已就绪**的实例，`/lane new <name> [workspace]` 经控制面 `add` 写声明 → 轮询到 `observed == ready` → 直接连上，两者都不用重启进程。仍未做：`tui-connections.toml` 配置文件、启动逐 profile `/health` 探测、`/lane close`（软摘一条声明要接 Server 的 `disable` / `enable`；硬 `remove` 会丢掉手写 `env` / `config`，不做）。**W4 / W5 仍有缺口**：审批浮层随 `UiState` 下沉到每条 lane（不串台），后台 lane 弹审批会在当前 lane 留一行提示、`F4` 直接跳过去、`/lane cancel` 可取消它那一轮；仍无跨 lane 审批队列与全局待审批计数。状态栏无 `lanes N/M`（lane 行的 `·●▲×` 状态点已落地）。`MAX_LANES = 8` 已落地：启动超限直接报错，运行期 `/lane attach|new` 超限只在发起命令那条 lane 提示。tracking Issue [#327](https://github.com/noisystreet/crabmate-client/issues/327)。
 > **范围**：**§1–§8 仅覆盖 `crates/crabmate-tui` 的全屏 `tui` 模式**；**§9 是 Desktop 复用评估**（结论性分析，不含实施承诺）。**不改** Server 契约（SSE / 审批 / 错误码 / 工作区语义），**不覆盖** Android / Web。
 > **关联**：[`remote_cli_tui.md`](./remote_cli_tui.md)（TUI 母方案）、[`tui_settings_panel.md`](./tui_settings_panel.md)（设置面板，user-data 语义）、[`tui_usability.md`](./tui_usability.md)、[`client_shared_logic.md`](./client_shared_logic.md)（共享层边界）、[`contract_pin.md`](./contract_pin.md)（契约钉点）；Server `docs/design/user_data_dir.md`（user-data 权威）
 
@@ -146,9 +146,8 @@ fn spawn_lane_worker(id: LaneId, client: ServeClient, tx: Sender<UiEvent>) -> Se
 
 现状单浮层在多 lane 下会串台：用户以为在回答 A，实际 `answer` 通道属于 B。
 
-- `approval` 由 `Option<ApprovalOverlay>` 改为 `VecDeque<ApprovalRequest>`，元素带 `LaneId`。
-- 浮层一次只问一个，标题显示 `lane 名 + 排队数`（如 `proj-a · 还有 2 个待审批`）。
-- 等待上限沿用 `APPROVAL_WAIT = 600s`（`approve.rs:28`），但**排队时间要从等待上限里扣**：改为「入队时刻 + 上限」判定，超时按 `Deny` 收尾并向对应 lane 发 `ApprovalExpired`（现有语义见 `approve.rs:53-63`）。
+- **（未实施的设想）** 把审批收拢成跨 lane 的 `VecDeque<ApprovalRequest>`（元素带 `LaneId`）、浮层一次只问一个并在标题显示 `lane 名 + 排队数`（如 `proj-a · 还有 2 个待审批`）。现行实现是**每条 lane 各自一个浮层**：跨 lane 收拢会让 `answer` 通道（属于某条 lane 的 gate）画到别人的屏上，那正是串台。真正缺的是「一眼看见 + 一键跳过去」，已由 lane 行的 `▲`、后台提示与 `F4` 补上。
+- 等待上限沿用 `APPROVAL_WAIT = 600s`（`approve.rs:28`），超时按 `Deny` 收尾并向对应 lane 发 `ApprovalExpired`（现有语义见 `approve.rs:53-63`）。**不要**照旧稿改成「排队时间从上限里扣」：gate 在各自 lane 的 worker 线程上**同步阻塞**，一条 lane 同时只有一个待审批，不存在跨 lane 排队，等待本来就从请求发出时刻起算；将来真做全局队列时再按「入队时刻 + 上限」判定。
 - **默认拒绝方向不变**：超时 / UI 断开一律 `Deny`，多 lane 不改变这条保守策略。
 - 非活动 lane 的审批请求**必须**仍然入队（否则用户切到该 lane 才发现回合卡住）。
 
@@ -185,7 +184,8 @@ api_base = "http://127.0.0.1:8082"
 - lane 区落在左栏**下半**、**固定占左栏一半高度**（`layout::lane_pane_height`：有 lane 就切一半，会话列表至少留 1 行）。区内是 `tui_mode/lane_list.rs` 画的**一行一条的底色条**：标题 `连接 [n]` + 每条 lane 一行整行宽的实心底色（当前 lane 用 `selection` 底色 + `▎` 标记），**自上而下堆叠**，**每条恒占一行**（曾是「把可用行均分给各条、夹在 1..=2 行」；两行块在真终端上读起来像按钮而不像列表项，文字贴首行后第二行只剩一条没有信息的色带，还把切换 lane 的文字基线撑得跟上面的会话列表对不齐），条数少于可用行时下方留空、不拉伸。装不下时标题补 `↓n`，不静默丢弃。**单 lane 也显示**——隐藏时用户既看不出自己连的是哪台 serve，也看不出客户端支持多个连接。
 - 版面口径只有一处：lane 区高度 `lane_pane_height`、可用条数 `lane_shown_len`、行 → 下标 `lane_index_at` 都在 `layout`，`render` 与 `TuiApp::lane_at_click` 共用；各算一遍的症状是「点第 2 行切到别的 lane」。
 - 切换是 `Alt+←/→` 或点某一行，只改 `active`，不打断在途回合；单连接时 `switch_lane` 直接返回（no-op），点击落在唯一那行等于不换。
-- **未落地**：lane 行状态点、`lanes N/M`、全局待审批计数、`Alt+1..8` 直达、`Ctrl+N`。
+- **已落地（后续补齐）**：lane 行状态点（`·` 空闲 / `●` 运行中 / `▲` 待审批 / `×` 已请求退出，口径在 `lane_list::LaneStatus`）、后台审批提示文案，以及 `F4` 跳到下一条待审批的 lane（环形，从当前的下一条找起；无人等待时不动视图，只写一行说明）。
+- **未落地**：`lanes N/M`、全局待审批计数、`Alt+1..8` 直达、`Ctrl+N`。
 
 ### 4.7 工作区：一实例一工作区，所以 lane 行要带工作区
 
@@ -268,7 +268,7 @@ api_base = "http://127.0.0.1:8082"
 
 各波次遵循仓库既有小步纪律：**一项用户可见行为一个 PR**，每波更新 `docs/design/client_capability_matrix.md` 的 TUI 行与 `remote_cli_tui.md` 的状态行。
 
-**实际进度（截至 `2026-10`，以此为准）**：W1 / W1b / W2 已落地，且 W2 顺带把 W5 的「lane 列表 + 切换」做了（列表在下半、单 lane 也显示、`Alt+←/→` 与点击切视图）；lane 行随后补上了各自的工作区末段与 409 `WORKSPACE_ALREADY_SET` 的分支提示（§4.7，属 workspace binding 接入而非新波次）；W3 落地了两种装配方式 —— 启动时 `--connect name=url`、运行期 `/lane attach|new`（§4.8，经控制面 socket，不重启进程），仍缺 `tui-connections.toml` 配置文件与启动逐 profile `/health` 探测；W4 与 W5 的剩余项未开工。
+**实际进度（截至 `2026-10`，以此为准）**：W1 / W1b / W2 已落地，且 W2 顺带把 W5 的「lane 列表 + 切换」做了（列表在下半、单 lane 也显示、`Alt+←/→` 与点击切视图）；lane 行随后补上了各自的工作区末段与 409 `WORKSPACE_ALREADY_SET` 的分支提示（§4.7，属 workspace binding 接入而非新波次）；W3 落地了两种装配方式 —— 启动时 `--connect name=url`、运行期 `/lane attach|new`（§4.8，经控制面 socket，不重启进程），仍缺 `tui-connections.toml` 配置文件与启动逐 profile `/health` 探测；W4 的审批队列与 W5 的 `lanes N/M` / 全局待审批计数 / `Alt+1..8` 未开工；`MAX_LANES` 与「后台审批可发现性」（`F4`）已补齐。
 
 ---
 
@@ -294,7 +294,7 @@ api_base = "http://127.0.0.1:8082"
 | 工作区切换在途回合期间的行为 | Client 侧 `parse_workspace_set_ok_body` 支持 `error: "busy"`，但 Server 侧 grep 不到该字面量（疑为旧版兼容）；**不依赖**该保护 |
 | 同 workspace 8 路并发写 `conversations.db` 是否触发 `database is locked` | **未实测**；本方案默认拓扑不触发（每 workspace 一库） |
 | `SessionPrefs` 是否需要逐 lane（而非进程级） | 已按 §4.3 落地：`overrides` 随 `LaneApp` 逐 lane 持有（`/model` 只影响当前 lane） |
-| lane 数上限（§4.3 建议 `MAX_LANES = 8`） | **未实现**：`--connect` 可重复任意条，启动与运行期都不校验；上限应与「每 lane 一个 worker 线程 + 各自连接池」的实际成本一起定 |
+| lane 数上限（§4.3 `MAX_LANES = 8`） | **已实现**（`shell::MAX_LANES`）：启动走 `tui_mode::check_lane_capacity`，超限即报错退出（不静默只连前 N 条）；运行期 `/lane attach|new` 超限只在发起命令那条 lane 提示、不退出进程，且检查在两道去重**之后**（同名 / 同 URL 仍能切过去） |
 | 是否需要 per-profile 钥匙串槽（多 bearer） | 第一版不做，需要时另开 Issue（牵动 Desktop / Android 槽名约定） |
 
 ---

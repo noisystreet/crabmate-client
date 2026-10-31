@@ -24,6 +24,11 @@ pub(super) enum TopHotkey {
     NextLane,
     /// Alt+←：切到上一条 lane（循环）。
     PrevLane,
+    /// F4：切到**下一条在等审批**的 lane（循环，没有就留在原地并提示）。
+    ///
+    /// 后台 lane 的审批浮层画不到屏幕上（每帧只画当前 lane），左栏那一行的 `▲` 是唯一
+    /// 线索；三条以上时靠 [`Self::NextLane`] 逐个试等于让用户自己找。
+    NextApproval,
 }
 
 /// 判定热键。
@@ -36,6 +41,9 @@ pub(super) fn of(key: &KeyEvent) -> Option<TopHotkey> {
     }
     match (key.code, key.modifiers) {
         (KeyCode::F(3), KeyModifiers::NONE) => Some(TopHotkey::StatusStack),
+        // F4：跳到在等审批的那条 lane。F 系热键已用 F2（面板保存）/F3（状态栈）/F6（设置），
+        // 不与输入框的 Ctrl 组合抢键。
+        (KeyCode::F(4), KeyModifiers::NONE) => Some(TopHotkey::NextApproval),
         (KeyCode::Char('y'), KeyModifiers::CONTROL) => Some(TopHotkey::Copy),
         // Alt+方向：切换 lane。裸方向键归输入框 / 列表，必须精确匹配 ALT。
         (KeyCode::Right, KeyModifiers::ALT) => Some(TopHotkey::NextLane),
@@ -110,6 +118,17 @@ mod tests {
         );
         // 带修饰键的 F3 是别的终端语义，不抢。
         assert_eq!(of(&key(KeyCode::F(3), KeyModifiers::CONTROL)), None);
+    }
+
+    /// F4 只认裸键：带修饰键的 F4 属别的终端语义，而裸 `4` 就是输入框里的数字。
+    #[test]
+    fn f4_jumps_to_the_next_approval() {
+        assert_eq!(
+            of(&key(KeyCode::F(4), KeyModifiers::NONE)),
+            Some(TopHotkey::NextApproval)
+        );
+        assert_eq!(of(&key(KeyCode::F(4), KeyModifiers::CONTROL)), None);
+        assert_eq!(of(&key(KeyCode::Char('4'), KeyModifiers::NONE)), None);
     }
 
     #[test]

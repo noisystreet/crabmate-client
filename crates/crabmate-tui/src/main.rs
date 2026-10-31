@@ -319,6 +319,7 @@ async fn run_tui_cmd(
         let cfg = ConnectionConfig::new(url, bearer.unwrap_or_default().to_string());
         extras.push((name, ServeClient::new(cfg)?));
     }
+    tui_mode::check_lane_capacity(extras.len() + 1)?; // 见该函数的文档
     // 控制面 socket 与主 lane 名：显式 `--ctl-socket` 优先、否则默认路径存在才启用；
     // 主 lane 取 ctl 里的实例名，反查不到仍叫 `local`（见 `serve::ctl::primary_binding`）。
     let (ctl_socket, primary) =
