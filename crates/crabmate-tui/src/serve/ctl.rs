@@ -136,15 +136,21 @@ pub fn list_instances(socket: &Path) -> Result<Vec<CtlInstance>, CtlCallError> {
 ///
 /// `created: false`（声明已存在）是幂等命中而不是失败：Server 不会覆盖既有声明，
 /// 因为那会悄悄丢掉手工写进去的 `env`。
+///
+/// `profile` 只按**名字**引用 `profiles.toml` 里的预设（Server 的 `AddRequest.profile`
+/// 同样是 `Option<String>`，且它只过存在性 / 名字校验，不接受内联配置）。名字写错时
+/// Server 回的 `error` 原文会经 [`CtlCallError::user_message`] 透传出去 —— 本层不重复
+/// 校验一遍，那只会让两处口径各自漂移。
 pub fn add_instance(
     socket: &Path,
     name: &str,
     workspace: &str,
+    profile: Option<&str>,
 ) -> Result<AddOutcome, CtlCallError> {
     let request = CtlRequest::Add {
         name: name.to_string(),
         workspace: workspace.to_string(),
-        profile: None,
+        profile: profile.map(str::to_string),
         port: None,
         enabled: true,
     };
@@ -337,7 +343,7 @@ mod tests {
     #[test]
     fn add_instance_sends_add_op_and_reports_created() {
         let (sock, handle) = fake_ctl(r#"{"ok":true,"name":"proj-a","created":true}"#);
-        let out = add_instance(&sock, "proj-a", "/home/u/proj-a").expect("应成功");
+        let out = add_instance(&sock, "proj-a", "/home/u/proj-a", None).expect("应成功");
         let request = handle.join().expect("假服务端线程");
         assert!(out.created, "新建声明应回 created=true");
         assert!(request.contains(r#""op":"add""#), "{request}");
@@ -347,6 +353,26 @@ mod tests {
             "{request}"
         );
         // 多一个键就会被 Server 的字段白名单拒成 bad_request。
+        assert!(!request.contains("config"), "绝不夹带 config：{request}");
+        let _ = std::fs::remove_dir_all(sock.parent().unwrap());
+    }
+
+    /// `profile` 只传**名字**：请求行里有 `"profile"`，没有内联配置。
+    ///
+    /// Server 的 `add` 字段白名单是 `op` / `name` / `workspace` / `profile` / `port` /
+    /// `enabled`，所以这里两头都不能错：漏了是「以为指定了预设、其实用了默认」，
+    /// 夹带别的键则是 `bad_request`。
+    #[test]
+    fn add_instance_forwards_the_profile_name() {
+        let (sock, handle) = fake_ctl(r#"{"ok":true,"name":"proj-a","created":true}"#);
+        let out = add_instance(&sock, "proj-a", "/home/u/proj-a", Some("readonly-audit"))
+            .expect("应成功");
+        let request = handle.join().expect("假服务端线程");
+        assert!(out.created, "新建声明应回 created=true");
+        assert!(
+            request.contains(r#""profile":"readonly-audit""#),
+            "profile 必须按名字出现在请求行里：{request}"
+        );
         assert!(!request.contains("config"), "绝不夹带 config：{request}");
         let _ = std::fs::remove_dir_all(sock.parent().unwrap());
     }

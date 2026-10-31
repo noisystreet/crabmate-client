@@ -9,7 +9,7 @@
 //! - `/lane`（空参）/ `/lane list`：列出控制面实例（与 `/ctl` 同一实现，不再各写一份）。
 //! - `/lane attach <name>`：连上**已就绪**的实例，不改声明。
 //! - `/lane detach [<name>]`：只摘掉**本进程**的连接；声明与 serve 进程都不动（与 attach 对称）。
-//! - `/lane new <name> [workspace]`：新增一条声明并等它就绪（写盘由 ctl 完成）。
+//! - `/lane new <name> [workspace] [profile=<name>]`：新增一条声明并等它就绪（写盘由 ctl 完成）。
 //!
 //! 失败一律写进**发起命令的那条 lane**的 transcript：用户正看着它，而新 lane 此刻
 //! 还不存在，没有别的地方可写。
@@ -43,12 +43,17 @@ pub(crate) enum LaneCommand {
     Close(String),
     /// `open <name>`：撤销 [`LaneCommand::Close`]（`enabled = true`）。
     Open(String),
-    /// `new <name> [workspace]`：新增声明并等它就绪。
+    /// `new <name> [workspace] [profile=<name>]`：新增声明并等它就绪。
     New {
         /// 实例名（`instances.toml` 的键）。
         name: String,
         /// 显式给的工作区；`None` = 用当前 lane 的 serve 工作区兜底。
         workspace: Option<String>,
+        /// `profiles.toml` 里的预设名；`None` = 不指定（Server 用默认）。
+        ///
+        /// 只按名字引用，**不**在这里校验、也不接受内联配置：`profiles.toml` 在 serve
+        /// 那台机器上，客户端猜它有什么只会猜错。
+        profile: Option<String>,
     },
 }
 
@@ -77,7 +82,7 @@ pub(crate) fn parse(arg: Option<&str>) -> Result<LaneCommand, String> {
 
 /// 用法提示：每条子命令各给一个可照抄的例子。
 fn usage() -> String {
-    "用法：/lane [list] · /lane attach <name> · /lane detach [<name>]（缺省摘当前这条） · /lane cancel <name> · /lane new <name> [workspace] · /lane close <name> · /lane open <name>"
+    "用法：/lane [list] · /lane attach <name> · /lane detach [<name>]（缺省摘当前这条） · /lane cancel <name> · /lane new <name> [workspace] [profile=<name>] · /lane close <name> · /lane open <name>"
         .to_string()
 }
 
@@ -109,19 +114,79 @@ fn one_name(tail: &str, verb: &str) -> Result<String, String> {
     Ok(tail.to_string())
 }
 
-/// `new` 之后是 `名字 [工作区]`：工作区可以含空格，所以只按**第一个**空白切。
+/// `new` 之后是 `名字 [工作区]` 或 `名字 workspace=<路径> profile=<名>`。
+///
+/// 两种写法**不混用**：裸工作区只按第一个空白切（路径可以含空格），而一旦首 token 是
+/// `key=value` 形式（判据见 [`looks_like_kv`]），整段尾参就按空白切成参数 —— 混着写时
+/// 「这个空格属于路径还是参数」无解，猜错会悄悄换掉用户的工作区，所以宁可报用法。
 fn new_tail(tail: &str) -> Result<LaneCommand, String> {
-    let (name, workspace) = match tail.split_once(char::is_whitespace) {
-        Some((n, w)) => (n, Some(w.trim()).filter(|w| !w.is_empty())),
-        None => (tail, None),
+    let (name, rest) = match tail.split_once(char::is_whitespace) {
+        Some((n, w)) => (n, w.trim()),
+        None => (tail, ""),
     };
     if name.is_empty() {
-        return Err("缺实例名：`/lane new <name> [workspace]`".to_string());
+        return Err("缺实例名：`/lane new <name> [workspace] [profile=<name>]`".to_string());
     }
+    let (workspace, profile) = new_tail_args(rest)?;
     Ok(LaneCommand::New {
         name: name.to_string(),
-        workspace: workspace.map(str::to_string),
+        workspace,
+        profile,
     })
+}
+
+/// 这段尾参是不是 `key=value` 写法。
+///
+/// 判据是**首个 token 的 `=` 左侧只含字母**（`workspace` / `profile`，以及用户误写的
+/// `port` 之类）。`/data/profile=x` 的左侧带 `/`，仍按路径处理 —— 路径里出现 `=` 不该
+/// 让一条合法命令变成语法错误；反过来 `port=8080` 若被当成路径，只会换来一句「工作区
+/// 不存在」，说不清真正错在哪。
+fn looks_like_kv(rest: &str) -> bool {
+    let head = rest.split_whitespace().next().unwrap_or_default();
+    match head.split_once('=') {
+        Some((key, _)) => !key.is_empty() && key.chars().all(|c| c.is_ascii_alphabetic()),
+        None => false,
+    }
+}
+
+/// `new` 的尾参：整体是裸工作区，或一列 `workspace=` / `profile=` 键值。
+///
+/// `profile` 只收**名字**：值的合法性由 Server 侧 `profiles.toml` 决定，客户端不预读
+/// 那个文件（它在 serve 那台机器上，本机读到的那份未必是同一份）。
+fn new_tail_args(rest: &str) -> Result<(Option<String>, Option<String>), String> {
+    if rest.is_empty() {
+        return Ok((None, None));
+    }
+    if !looks_like_kv(rest) {
+        // 裸工作区：与 `/lane new <name> <路径>` 的旧写法逐字一致（可含空格）。
+        return Ok((Some(rest.to_string()), None));
+    }
+    let mut workspace = None;
+    let mut profile = None;
+    for token in rest.split_whitespace() {
+        let Some((key, value)) = token.split_once('=') else {
+            return Err(format!(
+                "认不出 `{token}`：`workspace=` / `profile=` 写法里每个参数都要是 `key=value`（例如 `/lane new <name> workspace=<路径> profile=<名>`）"
+            ));
+        };
+        let slot = match key {
+            "workspace" => &mut workspace,
+            "profile" => &mut profile,
+            other => {
+                return Err(format!(
+                    "不认识 `{other}=`：`/lane new` 只支持 `workspace=` / `profile=`"
+                ));
+            }
+        };
+        if value.is_empty() {
+            return Err(format!("`{key}=` 后面缺值"));
+        }
+        // 重复给同一个键是手误：静默取最后一个会让人以为前一次生效了。
+        if slot.replace(value.to_string()).is_some() {
+            return Err(format!("`{key}=` 给了不止一次"));
+        }
+    }
+    Ok((workspace, profile))
 }
 
 /// 新实例用哪个工作区：显式路径优先，否则拿当前 lane 的 serve 工作区兜底。
@@ -137,6 +202,14 @@ fn resolve_workspace(explicit: Option<String>, current: Option<&str>) -> Option<
     })
 }
 
+/// 提示行里的 profile 片段；没给就是空串。
+///
+/// 拼成空串而不是换一套文案：**未指定 `profile` 时的提示与加这个参数前逐字一致**，
+/// 既有的转录断言（和用户的 muscle memory）都不受影响。
+fn profile_note(profile: Option<&str>) -> String {
+    profile.map_or_else(String::new, |p| format!("，profile {p}"))
+}
+
 impl super::LaneApp<'_> {
     /// `/lane ...` 的分派（解析在 [`parse`]，执行全在 worker 线程）。
     pub(super) fn lane_command(&mut self, cmd: LaneCommand) {
@@ -147,7 +220,11 @@ impl super::LaneApp<'_> {
             LaneCommand::Cancel(name) => self.lane_cancel(name),
             LaneCommand::Close(name) => self.lane_toggle(name, false),
             LaneCommand::Open(name) => self.lane_toggle(name, true),
-            LaneCommand::New { name, workspace } => self.lane_new(name, workspace),
+            LaneCommand::New {
+                name,
+                workspace,
+                profile,
+            } => self.lane_new(name, workspace, profile),
         }
     }
 
@@ -234,11 +311,11 @@ impl super::LaneApp<'_> {
         }
     }
 
-    /// `/lane new <name> [workspace]`：写声明 + 等就绪（`add` 由 ctl 线程发）。
+    /// `/lane new <name> [workspace] [profile=<name>]`：写声明 + 等就绪（`add` 由 ctl 线程发）。
     ///
     /// 20 s 的就绪轮询在**外壳级的 ctl 线程**上跑（issue #350），所以这条 lane 的
     /// 会话 / 工作区 / 状态拉取不会排在它后面 —— 命令发出去就立刻返回。
-    fn lane_new(&mut self, name: String, workspace: Option<String>) {
+    fn lane_new(&mut self, name: String, workspace: Option<String>, profile: Option<String>) {
         let Some(ctl) = self.ctl_handle_or_hint() else {
             return;
         };
@@ -252,7 +329,10 @@ impl super::LaneApp<'_> {
         };
         self.st.push_line(
             LineKind::System,
-            &format!("正在新建 ctl 实例 `{name}`（工作区 {workspace}）并等它就绪…"),
+            &format!(
+                "正在新建 ctl 实例 `{name}`（工作区 {workspace}{}）并等它就绪…",
+                profile_note(profile.as_deref())
+            ),
         );
         if !self.enqueue_ctl(
             &ctl,
@@ -260,6 +340,7 @@ impl super::LaneApp<'_> {
                 from: self.id,
                 name,
                 workspace,
+                profile,
             },
         ) {
             self.st
@@ -393,23 +474,68 @@ mod tests {
         lane.ctl = Some(CtlHandle::detached(ctl_tx));
 
         // 工作区给死：本 lane 还没拉过 `GET /workspace`。
-        lane.lane_new("proj-c".to_string(), Some("/home/u/proj-c".to_string()));
+        lane.lane_new(
+            "proj-c".to_string(),
+            Some("/home/u/proj-c".to_string()),
+            None,
+        );
 
         match ctl_rx.try_recv() {
             Ok(CtlJob::New {
                 from,
                 name,
                 workspace,
+                profile,
             }) => {
                 assert_eq!(from, LaneId(4), "回执要回到发起它的 lane");
                 assert_eq!(name, "proj-c");
                 assert_eq!(workspace, "/home/u/proj-c");
+                assert_eq!(profile, None, "没给 profile 就不该凭空造一个");
             }
             _ => panic!("应派 CtlJob::New 给外壳级 ctl 通道"),
         }
         assert!(
             job_rx.try_recv().is_err(),
             "本 lane 的 worker 不该收到任何任务"
+        );
+    }
+
+    /// `profile` 原样进 `CtlJob::New`，并在「正在新建…」那句提示里露出来。
+    ///
+    /// 提示行必须带上它：否则用户敲了 `profile=readonly-audit` 却没有任何回显，
+    /// 只能事后靠 `/ctl` 确认那条声明到底用了哪个预设。
+    #[test]
+    fn lane_new_forwards_profile_and_says_which_one() {
+        use std::sync::mpsc;
+
+        use crate::tui_mode::test_support::{lane_with_tx, test_client, test_prefs};
+        use crate::tui_mode::worker::LaneId;
+        use crate::tui_mode::worker_ctl::CtlHandle;
+
+        let client = test_client();
+        let mut prefs = test_prefs();
+        let (tx, _rx) = mpsc::channel();
+        let (job_tx, _job_rx) = mpsc::channel();
+        let (ctl_tx, ctl_rx) = mpsc::channel();
+        let mut lane = lane_with_tx(LaneId(6), &client, &mut prefs, tx, job_tx);
+        lane.ctl = Some(CtlHandle::detached(ctl_tx));
+
+        lane.lane_new(
+            "proj-d".to_string(),
+            Some("/home/u/proj-d".to_string()),
+            Some("readonly-audit".to_string()),
+        );
+
+        match ctl_rx.try_recv() {
+            Ok(CtlJob::New { profile, .. }) => {
+                assert_eq!(profile.as_deref(), Some("readonly-audit"));
+            }
+            _ => panic!("应派 CtlJob::New 给外壳级 ctl 通道"),
+        }
+        let texts: Vec<String> = lane.st.lines.iter().map(|l| l.text().to_string()).collect();
+        assert!(
+            texts.iter().any(|t| t.contains("readonly-audit")),
+            "提示行要说清用了哪个 profile：{texts:?}"
         );
     }
 
@@ -456,21 +582,81 @@ mod tests {
     #[test]
     fn new_takes_name_and_optional_workspace() {
         match parse(Some("new proj-b")) {
-            Ok(LaneCommand::New { name, workspace }) => {
+            Ok(LaneCommand::New {
+                name,
+                workspace,
+                profile,
+            }) => {
                 assert_eq!(name, "proj-b");
                 assert_eq!(workspace, None, "缺工作区时交给当前 lane 兜底");
+                assert_eq!(profile, None, "缺 profile 时交给 Server 的默认");
             }
             _ => panic!("应解析为 new"),
         }
         // 工作区可以含空格：只按第一个空白切。
         match parse(Some("new proj-b /data/my proj")) {
-            Ok(LaneCommand::New { name, workspace }) => {
+            Ok(LaneCommand::New {
+                name,
+                workspace,
+                profile,
+            }) => {
                 assert_eq!(name, "proj-b");
                 assert_eq!(workspace.as_deref(), Some("/data/my proj"));
+                assert_eq!(profile, None, "裸路径写法不带 profile");
             }
             _ => panic!("应解析为 new"),
         }
         assert!(parse(Some("new")).is_err(), "缺名字要报错");
+    }
+
+    /// `profile` 只按名字传；`workspace=` / `profile=` 与裸路径不混用，错法一律报用法。
+    #[test]
+    fn new_takes_profile_by_name_only() {
+        match parse(Some(
+            "new proj-b workspace=/data/proj-b profile=readonly-audit",
+        )) {
+            Ok(LaneCommand::New {
+                name,
+                workspace,
+                profile,
+            }) => {
+                assert_eq!(name, "proj-b");
+                assert_eq!(workspace.as_deref(), Some("/data/proj-b"));
+                assert_eq!(profile.as_deref(), Some("readonly-audit"));
+            }
+            _ => panic!("应解析为带 profile 的 new"),
+        }
+        // 只给 profile：工作区仍交给当前 lane 兜底。
+        match parse(Some("new proj-b profile=readonly-audit")) {
+            Ok(LaneCommand::New {
+                workspace, profile, ..
+            }) => {
+                assert_eq!(workspace, None);
+                assert_eq!(profile.as_deref(), Some("readonly-audit"));
+            }
+            _ => panic!("应解析为 new"),
+        }
+        // 裸路径里带 `=` 也不算参数：整段都是工作区（存在性由 serve 判）。
+        match parse(Some("new proj-b /data/profile=x")) {
+            Ok(LaneCommand::New {
+                workspace, profile, ..
+            }) => {
+                assert_eq!(workspace.as_deref(), Some("/data/profile=x"));
+                assert_eq!(profile, None, "裸路径不该被拆成 profile");
+            }
+            _ => panic!("裸路径要整段当工作区"),
+        }
+        // 混用：进了 `key=value` 写法，裸词就没有位置了。
+        assert!(parse(Some("new proj-b workspace=/a /b")).is_err());
+        assert!(parse(Some("new proj-b profile=")).is_err(), "缺值要报错");
+        assert!(
+            parse(Some("new proj-b port=8080")).is_err(),
+            "只认 workspace / profile 两个键"
+        );
+        assert!(
+            parse(Some("new proj-b profile=a profile=b")).is_err(),
+            "同一个键给两次是手误"
+        );
     }
 
     #[test]
