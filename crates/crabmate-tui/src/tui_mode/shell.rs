@@ -19,6 +19,8 @@ use crossterm::terminal::{
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 
+use crabmate_client_api::ctl::{ToggleFailure, ToggleOutcome};
+
 use crate::SessionPrefs;
 use crate::serve::{ConnectionConfig, ServeClient};
 
@@ -195,6 +197,41 @@ pub(crate) fn check_lane_capacity(total: usize) -> Result<()> {
     anyhow::bail!(
         "连接数 {total} 超过上限 {MAX_LANES}（含主连接）：减少 `--connect`，或起来后用 `/lane detach` 摘掉不用的"
     )
+}
+
+/// `disable` / `enable` 的回执 → 写给用户的行（纯函数，措辞钉在测试里）。
+///
+/// 三种情形必须分开说，因为下一步动作完全不同：真改了、本来就是这样（幂等命中），
+/// 以及 `enable` 的「写成了但没清掉 `down` 标记」—— 最后一种只靠 Server 的 `warning`
+/// 才能发现，不露出来就会变成「声明是启用的，实例却永远起不来」。
+fn toggle_report_lines(name: &str, enabled: bool, out: &ToggleOutcome) -> Vec<String> {
+    let mut lines = Vec::with_capacity(3);
+    if out.changed {
+        if enabled {
+            lines.push(format!(
+                "已启用声明 `{name}`（enabled=true）：ctl 下一轮收敛会拉起它，就绪后 `/lane attach {name}`"
+            ));
+        } else {
+            lines.push(format!(
+                "已关闭声明 `{name}`（enabled=false）：ctl 会停掉该实例，声明与手写配置都留着；恢复用 `/lane open {name}`"
+            ));
+        }
+    } else {
+        let state = if enabled { "已启用" } else { "已是关闭" };
+        lines.push(format!("`{name}` 声明{state}（本次未改动，幂等命中）"));
+    }
+    if out.cleared_down {
+        lines.push("顺带清掉了 `down` 标记（此前它会让收敛一直跳过该实例）".to_string());
+    }
+    if let Some(warn) = out.warning.as_deref() {
+        lines.push(format!("注意：{warn}"));
+    }
+    if !out.changed
+        && let Some(note) = out.note.as_deref()
+    {
+        lines.push(format!("Server：{note}"));
+    }
+    lines
 }
 
 /// 从 `active` 的**下一条**起环形找第一条在等审批的 lane 下标。
@@ -587,6 +624,45 @@ impl<'a> super::TuiApp<'a> {
         );
     }
 
+    /// `UiEvent::CtlToggled`：写回执；关掉声明时顺手摘掉本进程那条连接。
+    ///
+    /// 先写回执再 detach：`detach_lane` 把「已断开…」写进**摘完之后**的当前 lane，
+    /// 顺序反了用户就先看到「已断开」，再看到为什么要断。
+    ///
+    /// **唯一一条连接不摘**：声明一关 ctl 就会停掉那个实例、这条 lane 随后下线，但界面
+    /// 至少要有一条 lane 才画得出来（`detach_lane` 同样拒绝最后一条）。所以这里只把后果
+    /// 说清：退出用 `/quit`，反悔用 `/lane open`。
+    pub(super) fn on_lane_toggled(&mut self, result: Result<ToggleOutcome, ToggleFailure>) {
+        let outcome = match result {
+            Ok(o) => o,
+            Err(f) => {
+                self.lane_mut().st.push_line(
+                    LineKind::System,
+                    &format!("`{}` 的声明未改动：{}", f.name, f.reason),
+                );
+                return;
+            }
+        };
+        // Server 必回 `enabled`；缺字段（旧 ctl）按 `false` 处理 —— 报告行落在「已关闭 /
+        // 已是关闭」两种措辞上，至少不会把方向说反。
+        let enabled = outcome.enabled.unwrap_or(false);
+        for line in toggle_report_lines(&outcome.name, enabled, &outcome) {
+            self.lane_mut().st.push_line(LineKind::System, &line);
+        }
+        let name = outcome.name.clone();
+        if enabled || !self.lanes.iter().any(|l| l.label == name) {
+            return;
+        }
+        if self.lanes.len() > 1 {
+            self.detach_lane(&name);
+            return;
+        }
+        self.lane_mut().st.push_line(
+            LineKind::System,
+            "这是唯一一条连接：ctl 会停掉该实例，这条 lane 随后下线；退出用 `/quit`，反悔用 `/lane open`",
+        );
+    }
+
     /// 鼠标落在左栏 lane 列表的某一行时，返回该 lane 的下标。
     ///
     /// 复用当前 lane 记下的终端尺寸与状态栈行数：一帧只有一个尺寸，各 lane 记的
@@ -608,7 +684,8 @@ impl<'a> super::TuiApp<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::{MAX_LANES, capacity_notice, next_approval_index};
+    use super::{MAX_LANES, capacity_notice, next_approval_index, toggle_report_lines};
+    use crabmate_client_api::ctl::ToggleOutcome;
 
     #[test]
     fn capacity_allows_up_to_the_cap_and_explains_the_way_out() {
@@ -644,6 +721,65 @@ mod tests {
     fn next_approval_returns_to_self_when_only_it_waits() {
         assert_eq!(next_approval_index(0, &[true]), Some(0));
         assert_eq!(next_approval_index(1, &[false, true]), Some(1));
+    }
+
+    fn outcome(
+        changed: bool,
+        enabled: bool,
+        cleared_down: bool,
+        warning: Option<&str>,
+    ) -> ToggleOutcome {
+        ToggleOutcome {
+            name: "proj-a".to_string(),
+            enabled: Some(enabled),
+            changed,
+            cleared_down,
+            note: None,
+            warning: warning.map(str::to_string),
+        }
+    }
+
+    /// 关闭要说清三件事：声明关了、进程会停、恢复走 `/lane open`。
+    #[test]
+    fn close_report_names_the_way_back() {
+        let lines = toggle_report_lines("proj-a", false, &outcome(true, false, false, None));
+        let text = lines.join("\n");
+        assert!(text.contains("已关闭声明"), "{text}");
+        assert!(text.contains("停掉该实例"), "{text}");
+        assert!(text.contains("/lane open proj-a"), "要给恢复的路：{text}");
+    }
+
+    /// 幂等命中不是成功也不是失败：说「本来就是这样」，别写成「已关闭」。
+    #[test]
+    fn idempotent_hit_says_nothing_changed() {
+        let mut out = outcome(false, false, false, None);
+        out.note = Some("声明中不存在该实例".to_string());
+        let text = toggle_report_lines("proj-a", false, &out).join("\n");
+        assert!(text.contains("幂等命中"), "{text}");
+        assert!(
+            text.contains("声明中不存在该实例"),
+            "要带 Server 的说明：{text}"
+        );
+        assert!(!text.contains("已关闭声明"), "{text}");
+    }
+
+    /// `enable` 的回执要指到 `/lane attach`，并把 `cleared_down` / `warning` 露出来。
+    #[test]
+    fn enable_report_points_at_attach_and_surfaces_warnings() {
+        let text = toggle_report_lines(
+            "proj-a",
+            true,
+            &outcome(
+                true,
+                true,
+                true,
+                Some("已写入 enabled = true，但清理 down 标记失败"),
+            ),
+        )
+        .join("\n");
+        assert!(text.contains("/lane attach proj-a"), "{text}");
+        assert!(text.contains("down"), "{text}");
+        assert!(text.contains("清理 down 标记失败"), "{text}");
     }
 
     #[test]

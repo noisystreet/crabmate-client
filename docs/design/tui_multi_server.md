@@ -209,6 +209,8 @@ api_base = "http://127.0.0.1:8082"
 | `/lane attach <name>` | 在声明里找**已就绪**的实例，取 `base_url` 后直接连 | 无 |
 | `/lane detach <name>` | 只摘掉**本进程**的连接（连不上就报现有名字；最后一条不许摘） | 无（不动声明与进程） |
 | `/lane new <name> [workspace]` | `add` 写声明 → 轮询 `list` 到 `observed == ready` → 连 | 新增一条声明（ctl 负责起进程） |
+| `/lane close <name>`（别名 `disable`） | 经 socket 的 `disable` 把声明标成 `enabled = false` | 改一条声明；ctl 会停掉该实例（声明与手写 `env` / `config` 留着） |
+| `/lane open <name>`（别名 `enable`） | 经 socket 的 `enable` 撤销上面那条 | 改一条声明；下一轮收敛把实例拉起 |
 
 - **就绪判据只有一处**：`crabmate-client-api::ctl::lane_readiness` —— `ready` **且带 `base_url`** 才算 `Ready`；`failed` / `stopped` / `held` 直接 `Failed`（带 Server 的 `last_error`，它才是唯一知道原因的地方）；`starting` / `stale` / 缺 `observed` / 认不出的观测态一律 `Pending`。放纯逻辑里既为可测，也避免 worker 的轮询循环与 `/ctl` 的显示口径漂移。
 - **`add.workspace` 必填**：socket `add` 至今要求 `String`（放开省略的是 TOML 声明那条路）。所以 `/lane new` 的 workspace 取「显式参数 ＞ 当前 lane 的 serve 工作区」，两者都没有（本 lane 待绑定）就明说要路径。`created: false`（声明已存在）是幂等命中，不当失败。
@@ -219,7 +221,8 @@ api_base = "http://127.0.0.1:8082"
 - **`/lane detach <name>` 只摘本进程的账**：声明与 serve 进程都不动（`/lane` 的语义是「本进程连不连」，与 attach 对称；要停实例用 `crabmatectl down`）。摘掉即 drop 该 `LaneApp`，它的 job channel 随之关闭，worker 线程与那个 runtime（含在途请求、SSE）自行收尾，不另发停止信号；`LaneId` 单调递增不复用，残留事件按 id 分发时匹配不到，直接丢弃（不会串台）。两种情形明说而不硬做：名字不存在（把现有名字列出来，省得再猜）与**最后一条**（界面至少要有一条 lane，退出用 `/quit`）。
 - **主 lane 也按 URL 认领实例名**：启动 lane 的名字原本恒为 `local`。上面的同 URL 去重已经能拦住「同一台 serve 连两条」，但名字对不上时提示只能说「`local` 已经连着 …」，左栏的名字与 ctl 里的实例名仍是两套。启动时因此问一次控制面（`serve::ctl::primary_binding`）：`base_url` 与 `--api-base` 相同的实例，主 lane 直接用它的名字，`/lane attach server` 连同名/同 URL 两道闸都命中，只切过去并说「已经是本进程的连接」。比较只看 **URL**（`same_api_base`：去尾 `/`、不区分大小写；`localhost` 与 `127.0.0.1` 是两个 Origin，不合并），不看 `observed`（`stale` / `starting` 仍是那台 serve 的声明）。查不到（ctl 没起 / URL 未声明 / 回包读不懂）一律退回 `local`，**不拦启动** —— 这条查询只负责命名。
 - **新 lane 的首拉**与启动同一套（`LaneApp::bootstrap`：会话 / 工作区根 / serve 状态 / user-data 快照）：只刷当前 lane 的话，切过去会看到空的会话列表。
-- **未做**：`/lane close` —— Server 侧已补上 socket 的 `disable` / `enable`（`enabled = false` 是客户端软删的正式口径），但 TUI 还没接：`detach` 只断开本进程的连接，声明项仍在，要删声明/停实例目前只有 `crabmatectl`；per-profile bearer 槽（控制面里所有实例同机同用户，第一版共用主连接那份；某实例要求不同 Bearer 时症状是那条 lane 的拉取全错）、`MAX_LANES` 上限。
+- **`/lane close|open` 只翻 `enabled`**：`enabled = false` 是 Server 文档里客户端软删 lane 的正式口径，socket 的 `disable` / `enable` 也只收 `op` + `name`（它们**不是** `update`：换 workspace/profile/port 仍是 `remove` + `add` 两步）。三条回执语义照抄 Server、不自己重推：`changed: false` 是幂等命中（「本来就是这样」，不是失败），`enable` 会顺手清 `down` 留下的 `desired_state = stopped`（`cleared_down`），那半步失败时 `ok` 仍为真但带 `warning` —— 不露出来就会变成「声明是启用的、实例永远起不来」。回执由 worker **裸发** `UiEvent::CtlToggled`（被关的可能正是发起命令的那条 lane），外壳据此写报告行；关掉声明时如果本进程正连着它，顺手 `detach`（实例马上被 ctl 停掉，留着只是一条死 SSE），**唯一一条连接例外** —— 只把「随后下线、退出用 `/quit`、反悔用 `/lane open`」说清，不摘（界面至少要有一条 lane）。
+- **未做**：per-profile bearer 槽（控制面里所有实例同机同用户，第一版共用主连接那份；某实例要求不同 Bearer 时症状是那条 lane 的拉取全错）、声明级硬删（socket 的 `remove` 会连手写 `env` / `config` 一起删掉，不做）。
 
 ---
 

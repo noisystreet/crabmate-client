@@ -27,6 +27,10 @@ pub const OP_ADD: &str = "add";
 pub const OP_REMOVE: &str = "remove";
 /// 见 [`OP_ADD`]。
 pub const OP_LIST: &str = "list";
+/// 见 [`OP_ADD`]。
+pub const OP_DISABLE: &str = "disable";
+/// 见 [`OP_ADD`]。
+pub const OP_ENABLE: &str = "enable";
 
 /// 一条控制面请求：序列化后正好一行 JSON。
 ///
@@ -58,6 +62,19 @@ pub enum CtlRequest {
     Remove {
         /// 实例名。
         name: String,
+    },
+    /// `{"op":"disable","name":…}` / `{"op":"enable","name":…}`：只翻声明里的 `enabled`。
+    ///
+    /// 用一个变体带 `enabled` 而不是 `Disable` / `Enable` 两个变体：op 字符串是 `enabled`
+    /// 的函数，拆成两支会让 [`Self::to_line`] 多一个分支（它贴着 CCN≤10）。
+    ///
+    /// Server 的字段白名单对这两个 op 只收 `op` + `name`（它们**不是** `update`）：
+    /// 换 `workspace` / `profile` / `port` 仍走 `remove` + `add` 的显式两步。
+    SetEnabled {
+        /// 实例名（Server 侧过 `validate_name`）。
+        name: String,
+        /// `false` = 保留声明但不该运行（客户端摘 lane 的软删除）；`true` = 放开。
+        enabled: bool,
     },
 }
 
@@ -97,6 +114,11 @@ impl CtlRequest {
             }
             Self::Remove { name } => {
                 obj.insert("op".to_string(), json!(OP_REMOVE));
+                obj.insert("name".to_string(), json!(name));
+            }
+            Self::SetEnabled { name, enabled } => {
+                let op = if *enabled { OP_ENABLE } else { OP_DISABLE };
+                obj.insert("op".to_string(), json!(op));
                 obj.insert("name".to_string(), json!(name));
             }
         }
@@ -356,6 +378,75 @@ pub fn parse_add_response(line: &str) -> Result<AddOutcome, CtlError> {
     })
 }
 
+/// `disable` / `enable` 的响应（`{"ok":true,"name":…,"enabled":…,"changed":…}`）。
+///
+/// 三条语义都来自 Server，客户端不要自己重推：
+///
+/// 1. `changed: false` 是**幂等命中**（值本就一致，或声明里没有这条），不是失败 ——
+///    重试安全，所以 UI 该说「本来就是这样」，而不是报错；
+/// 2. `enable` 会顺手收回 `down` 留下的 `desired_state = stopped`（`cleared_down`），
+///    否则收敛永远 `Skipped`：声明写着 `enabled = true`，实例却起不来；
+/// 3. 那半步失败时 Server 仍回 `ok:true`（`enabled` 已写盘），用 `warning` 说明 ——
+///    必须让它露出来，否则客户端会干等一个不会启动的实例。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToggleOutcome {
+    /// 实例名（回显 Server 给的值）。
+    pub name: String,
+    /// 期望的 `enabled`；响应缺该字段时为 `None`（调用方按请求值兜底）。
+    pub enabled: Option<bool>,
+    /// 本次是否真的改了声明。
+    pub changed: bool,
+    /// `enable` 是否顺手清掉了 `down` 标记。
+    pub cleared_down: bool,
+    /// Server 的补充说明（如「声明中不存在该实例」）；不承诺措辞。
+    pub note: Option<String>,
+    /// Server 的警告（半边写成了、半边没做成）；不承诺措辞。
+    pub warning: Option<String>,
+}
+
+/// `disable` / `enable` 失败时带回的上下文：界面要能说清**哪条实例**、**往哪个方向**翻。
+///
+/// 与 [`CtlError`] 分工：[`CtlError`] 是协议/传输层的分类（连不上 / 读写失败 / 被拒绝），
+/// 这里只是把请求的意图原样带回 —— 两者合起来才是用户看到的那一行。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToggleFailure {
+    /// 实例名。
+    pub name: String,
+    /// 请求的意图：`false` = 关闭。
+    pub enabled: bool,
+    /// 面向用户的失败原因（已含 `CtlCallError::user_message` 的分类语义）。
+    pub reason: String,
+}
+
+/// 解析 `disable` / `enable` 的**一行**响应。失败分类口径与 [`parse_list_response`] 相同。
+pub fn parse_toggle_response(line: &str) -> Result<ToggleOutcome, CtlError> {
+    let val = parse_ok_body(line)?;
+    Ok(ToggleOutcome {
+        name: val
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        enabled: val.get("enabled").and_then(Value::as_bool),
+        changed: val.get("changed").and_then(Value::as_bool).unwrap_or(false),
+        cleared_down: val
+            .get("cleared_down")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        note: opt_text(&val, "note"),
+        warning: opt_text(&val, "warning"),
+    })
+}
+
+/// 取一个可选的说明字段：缺省、非字符串、空白都归一成 `None`。
+fn opt_text(val: &Value, key: &str) -> Option<String> {
+    val.get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+}
+
 /// 轮询 `list` 时对**某一条实例**的判读：此刻能不能据此新增一条 lane。
 ///
 /// 这层判读刻意放在纯逻辑里：`add` 之后「什么时候算起来了」是多端共用的契约
@@ -423,6 +514,70 @@ fn reason_or(item: &CtlInstance, fallback: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `disable` / `enable` 只发 `op` + `name`：Server 对这两个 op 的字段白名单就这两项
+    /// （多一个直接 `bad_request`），也不该夹带 `workspace` / `config`。
+    #[test]
+    fn set_enabled_request_carries_only_op_and_name() {
+        let off = CtlRequest::SetEnabled {
+            name: "proj-a".to_string(),
+            enabled: false,
+        }
+        .to_line();
+        let val: Value = serde_json::from_str(&off).expect("应是一行 JSON");
+        let obj = val.as_object().expect("应是对象");
+        assert_eq!(obj.len(), 2, "只能有 op / name：{off}");
+        assert_eq!(val["op"].as_str(), Some("disable"));
+        assert_eq!(val["name"].as_str(), Some("proj-a"));
+
+        let on = CtlRequest::SetEnabled {
+            name: "proj-a".to_string(),
+            enabled: true,
+        }
+        .to_line();
+        let val: Value = serde_json::from_str(&on).expect("应是一行 JSON");
+        assert_eq!(val["op"].as_str(), Some("enable"));
+    }
+
+    /// 幂等命中不是失败：`changed:false` 与 `note` 要能原样带回（UI 据此说「本来就是这样」）。
+    #[test]
+    fn toggle_response_reports_idempotent_hit() {
+        let out = parse_toggle_response(
+            r#"{"ok":true,"name":"a","enabled":false,"changed":false,"note":"声明中不存在该实例"}"#,
+        )
+        .expect("应成功");
+        assert_eq!(out.name, "a");
+        assert_eq!(out.enabled, Some(false));
+        assert!(!out.changed);
+        assert!(!out.cleared_down);
+        assert_eq!(out.note.as_deref(), Some("声明中不存在该实例"));
+        assert!(out.warning.is_none());
+    }
+
+    /// `enable` 的 `cleared_down` 与 `warning` 都要露出来：后者是「只做成一半」的唯一线索。
+    #[test]
+    fn toggle_response_keeps_cleared_down_and_warning() {
+        let out = parse_toggle_response(
+            r#"{"ok":true,"name":"a","enabled":true,"changed":true,"cleared_down":true,"warning":"清理 down 标记失败（supervisor_gone）"}"#,
+        )
+        .expect("应成功");
+        assert!(out.changed);
+        assert!(out.cleared_down);
+        assert_eq!(
+            out.warning.as_deref(),
+            Some("清理 down 标记失败（supervisor_gone）")
+        );
+    }
+
+    #[test]
+    fn toggle_response_classifies_errors_by_code() {
+        let err = parse_toggle_response(
+            r#"{"ok":false,"code":"bad_request","error":"`disable` 不接受字段 `workspace`"}"#,
+        )
+        .unwrap_err();
+        assert_eq!(err.kind, CtlErrorKind::BadRequest);
+        assert_eq!(err.code.as_deref(), Some("bad_request"));
+    }
 
     #[test]
     fn list_request_omits_the_default_flag() {

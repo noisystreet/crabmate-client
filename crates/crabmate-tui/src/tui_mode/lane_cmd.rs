@@ -31,6 +31,13 @@ pub(crate) enum LaneCommand {
     /// 后台 lane 的审批浮层画不到屏幕上，没有这条命令就只能干等 `APPROVAL_WAIT`
     /// 超时（600 s）才按拒绝收尾（见 issue #337）。
     Cancel(String),
+    /// `close <name>`：把声明标成 `enabled = false`（Server 的软删口径）。
+    ///
+    /// 与 [`LaneCommand::Detach`] 不同：detach 只摘本进程的连接，声明还启用着、进程还在跑；
+    /// close 让 ctl 把声明关掉并停掉实例，而声明本身与手写的 `env` / `config` 都留着。
+    Close(String),
+    /// `open <name>`：撤销 [`LaneCommand::Close`]（`enabled = true`）。
+    Open(String),
     /// `new <name> [workspace]`：新增声明并等它就绪。
     New {
         /// 实例名（`instances.toml` 的键）。
@@ -55,6 +62,9 @@ pub(crate) fn parse(arg: Option<&str>) -> Result<LaneCommand, String> {
         "attach" | "use" => one_name(tail, "attach").map(LaneCommand::Attach),
         "detach" => one_name(tail, "detach").map(LaneCommand::Detach),
         "cancel" | "kill" | "interrupt" => one_name(tail, "cancel").map(LaneCommand::Cancel),
+        // `disable` / `enable` 是 Server 侧的 op 名，认它们只是省事，语义与 close / open 一致。
+        "close" | "disable" => one_name(tail, "close").map(LaneCommand::Close),
+        "open" | "enable" => one_name(tail, "open").map(LaneCommand::Open),
         "new" | "add" => new_tail(tail),
         _ => Err(usage()),
     }
@@ -62,7 +72,7 @@ pub(crate) fn parse(arg: Option<&str>) -> Result<LaneCommand, String> {
 
 /// 用法提示：每条子命令各给一个可照抄的例子。
 fn usage() -> String {
-    "用法：/lane [list] · /lane attach <name> · /lane detach <name> · /lane cancel <name> · /lane new <name> [workspace]"
+    "用法：/lane [list] · /lane attach <name> · /lane detach <name> · /lane cancel <name> · /lane new <name> [workspace] · /lane close <name> · /lane open <name>"
         .to_string()
 }
 
@@ -120,6 +130,8 @@ impl super::LaneApp<'_> {
             LaneCommand::Attach(name) => self.lane_attach(name),
             LaneCommand::Detach(name) => self.lane_detach(name),
             LaneCommand::Cancel(name) => self.lane_cancel(name),
+            LaneCommand::Close(name) => self.lane_toggle(name, false),
+            LaneCommand::Open(name) => self.lane_toggle(name, true),
             LaneCommand::New { name, workspace } => self.lane_new(name, workspace),
         }
     }
@@ -161,6 +173,33 @@ impl super::LaneApp<'_> {
             self.st
                 .push_line(LineKind::System, "取消未发出：事件通道已关闭");
         }
+    }
+
+    /// `/lane close|open`：请控制面翻声明里的 `enabled`（客户端不写 `instances.toml`）。
+    ///
+    /// 回执由 worker 以**裸** `UiEvent::CtlToggled` 发出（理由同 [`Self::lane_detach`]：
+    /// 被关的可能正是这条 lane），摘连接 / 措辞都在外壳层 `shell::on_lane_toggled`。
+    fn lane_toggle(&mut self, name: String, enabled: bool) {
+        let Some(socket) = self.ctl_socket.clone() else {
+            self.st.push_line(
+                LineKind::System,
+                "控制面未启用：`/lane close` 需要 `crabmatectl supervise --socket`（或 `--ctl-socket <path>`）",
+            );
+            return;
+        };
+        let verb = if enabled { "启用" } else { "关闭" };
+        let job = WorkerJob::CtlToggle {
+            socket,
+            name: name.clone(),
+            enabled,
+        };
+        if self.job_tx.send(job).is_err() {
+            self.st
+                .push_line(LineKind::System, "请求未发出：worker 线程已退出");
+            return;
+        }
+        self.st
+            .push_line(LineKind::System, &format!("正在{verb}声明 `{name}`…"));
     }
 
     /// `/lane new <name> [workspace]`：写声明 + 等就绪（`add` 由 worker 发）。
@@ -243,6 +282,30 @@ mod tests {
         assert!(parse(Some("detach a b")).is_err(), "两个词不猜哪个是名字");
     }
 
+    /// `close` / `open` 与 detach 一样只收一个名字；`disable` / `enable` 是同义别名。
+    #[test]
+    fn close_and_open_take_exactly_one_name() {
+        assert!(matches!(
+            parse(Some("close proj-a")),
+            Ok(LaneCommand::Close(n)) if n == "proj-a"
+        ));
+        assert!(matches!(
+            parse(Some("disable proj-a")),
+            Ok(LaneCommand::Close(n)) if n == "proj-a"
+        ));
+        assert!(matches!(
+            parse(Some("open proj-a")),
+            Ok(LaneCommand::Open(n)) if n == "proj-a"
+        ));
+        assert!(matches!(
+            parse(Some("enable proj-a")),
+            Ok(LaneCommand::Open(n)) if n == "proj-a"
+        ));
+        let err = parse(Some("close")).unwrap_err();
+        assert!(err.contains("/lane close"), "要指回刚打的那条：{err}");
+        assert!(parse(Some("close a b")).is_err(), "两个词不猜哪个是名字");
+    }
+
     #[test]
     fn new_takes_name_and_optional_workspace() {
         match parse(Some("new proj-b")) {
@@ -265,7 +328,7 @@ mod tests {
 
     #[test]
     fn unknown_subcommand_returns_usage() {
-        let err = parse(Some("close proj-a")).unwrap_err();
+        let err = parse(Some("zzz proj-a")).unwrap_err();
         assert!(err.contains("/lane attach"), "{err}");
         assert!(err.contains("/lane new"), "{err}");
     }

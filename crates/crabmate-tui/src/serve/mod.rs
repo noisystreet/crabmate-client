@@ -29,7 +29,7 @@ pub use config::ConnectionConfig;
 pub use conversation::{
     ConversationMessagesResponse, fetch_conversation_messages, write_permission_level,
 };
-pub use ctl::{add_instance, list_instances, primary_binding, same_api_base};
+pub use ctl::{add_instance, list_instances, primary_binding, same_api_base, set_instance_enabled};
 pub use error::TermError;
 pub use sessions::{
     DEFAULT_SESSION_TITLE, SessionIndexApplied, SessionIndexOp, SessionListRow, WebSessionsList,

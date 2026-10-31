@@ -8,10 +8,10 @@ use std::sync::mpsc::Sender;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crabmate_client_api::ctl::{CtlInstance, LaneReadiness, lane_readiness};
+use crabmate_client_api::ctl::{CtlInstance, LaneReadiness, ToggleFailure, lane_readiness};
 
-use super::worker::{LaneTx, UiEvent};
-use crate::serve::{add_instance, list_instances};
+use super::worker::{LaneTx, UiEvent, WorkerJob};
+use crate::serve::{add_instance, list_instances, set_instance_enabled};
 
 /// `/lane new` 等实例就绪的轮询间隔。
 const LANE_READY_POLL: Duration = Duration::from_millis(300);
@@ -49,6 +49,42 @@ pub(super) fn job_ctl_new(socket: &Path, name: &str, workspace: &str, tx: &Sende
         name: name.to_string(),
         result,
     });
+}
+
+/// `/lane close` / `/lane open`：翻声明里的 `enabled`，回执交给外壳。
+///
+/// 走**裸**事件（不经 `LaneTx`）：被关的可能正是发起命令的那条 lane，而回执还要驱动
+/// 「顺手 detach 它」这类外壳动作 —— 按 `LaneId` 分发只会落进一条正在消失的 lane。
+pub(super) fn job_ctl_toggle(socket: &Path, name: &str, enabled: bool, tx: &Sender<UiEvent>) {
+    let result = set_instance_enabled(socket, name, enabled).map_err(|e| ToggleFailure {
+        name: name.to_string(),
+        enabled,
+        reason: e.user_message(),
+    });
+    let _ = tx.send(UiEvent::CtlToggled(result));
+}
+
+/// 控制面 job 的统一派发：`worker.rs` 的 match 只认一个 `job @ (CtlList | …)` 臂。
+///
+/// 派发放在这里与实现同处：新增一个 socket op 时只动本文件，`worker.rs` 不再逐条
+/// 添加分支（那边贴着 920 行/文件上限）。
+pub(super) fn dispatch(job: WorkerJob, out: &LaneTx, tx: &Sender<UiEvent>) {
+    match job {
+        WorkerJob::CtlList { socket } => job_ctl_list(&socket, out),
+        WorkerJob::CtlAttach { socket, name } => job_ctl_attach(&socket, &name, tx),
+        WorkerJob::CtlNew {
+            socket,
+            name,
+            workspace,
+        } => job_ctl_new(&socket, &name, &workspace, tx),
+        WorkerJob::CtlToggle {
+            socket,
+            name,
+            enabled,
+        } => job_ctl_toggle(&socket, &name, enabled, tx),
+        // 调用方只把控制面 job 送进来（其余分支在 `worker.rs` 的 match 里先处理）。
+        _ => unreachable!("dispatch 只接受控制面 job"),
+    }
 }
 
 /// [`LaneReadiness`] → 「能不能据此建一条 lane」的结论（含该做什么）。

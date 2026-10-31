@@ -14,7 +14,8 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crabmate_client_api::ctl::{
-    AddOutcome, CtlError, CtlInstance, CtlRequest, parse_add_response, parse_list_response,
+    AddOutcome, CtlError, CtlInstance, CtlRequest, ToggleOutcome, parse_add_response,
+    parse_list_response, parse_toggle_response,
 };
 
 use super::url::normalize_api_base;
@@ -149,6 +150,26 @@ pub fn add_instance(
     };
     let line = exchange(socket, &request.to_line())?;
     parse_add_response(&line).map_err(CtlCallError::Rejected)
+}
+
+/// 关闭 / 放开一条声明的 `enabled`（`{"op":"disable"|"enable","name":…}`）。
+///
+/// 这是 `/lane close` / `/lane open` 的落点：`enabled = false` 是 Server 文档里
+/// **客户端软删 lane 的正式口径**（声明本身与手写的 `env` / `config` 都留着），
+/// 而硬 `remove` 会把它们一起删掉 —— 那不是 `/lane` 该代劳的事。
+///
+/// 幂等：目标不存在也回 `ok:true`（`changed:false` + `note`），所以调用方不必先 `list`。
+pub fn set_instance_enabled(
+    socket: &Path,
+    name: &str,
+    enabled: bool,
+) -> Result<ToggleOutcome, CtlCallError> {
+    let request = CtlRequest::SetEnabled {
+        name: name.to_string(),
+        enabled,
+    };
+    let line = exchange(socket, &request.to_line())?;
+    parse_toggle_response(&line).map_err(CtlCallError::Rejected)
 }
 
 /// 主 lane 的默认名字：ctl 里反查不到对应实例时用它。
@@ -327,6 +348,38 @@ mod tests {
         );
         // 多一个键就会被 Server 的字段白名单拒成 bad_request。
         assert!(!request.contains("config"), "绝不夹带 config：{request}");
+        let _ = std::fs::remove_dir_all(sock.parent().unwrap());
+    }
+
+    /// 关闭声明：发 `disable`，且只带 `name`（Server 的白名单就这两项）。
+    #[test]
+    fn set_instance_enabled_sends_the_matching_op() {
+        let (sock, handle) =
+            fake_ctl(r#"{"ok":true,"name":"proj-a","enabled":false,"changed":true}"#);
+        let out = set_instance_enabled(&sock, "proj-a", false).expect("应成功");
+        let request = handle.join().expect("假服务端线程");
+        assert!(out.changed, "第一次关闭应真的改了声明");
+        assert_eq!(out.enabled, Some(false));
+        assert!(request.contains(r#""op":"disable""#), "{request}");
+        assert!(request.contains(r#""name":"proj-a""#), "{request}");
+        assert!(
+            !request.contains("workspace") && !request.contains("config"),
+            "绝不夹带别的字段：{request}"
+        );
+        let _ = std::fs::remove_dir_all(sock.parent().unwrap());
+    }
+
+    /// 放开声明：发 `enable`，并把 `cleared_down` 原样带回（否则 UI 会漏掉「顺手清了
+    /// down 标记」这件事）。
+    #[test]
+    fn enabling_sends_enable_op_and_reports_cleared_down() {
+        let (sock, handle) = fake_ctl(
+            r#"{"ok":true,"name":"proj-a","enabled":true,"changed":true,"cleared_down":true}"#,
+        );
+        let out = set_instance_enabled(&sock, "proj-a", true).expect("应成功");
+        let request = handle.join().expect("假服务端线程");
+        assert!(out.cleared_down, "enable 顺手清 down 标记要带回");
+        assert!(request.contains(r#""op":"enable""#), "{request}");
         let _ = std::fs::remove_dir_all(sock.parent().unwrap());
     }
 
