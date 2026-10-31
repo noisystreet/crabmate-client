@@ -247,6 +247,7 @@ mod approve_view_tests;
 
 #[cfg(test)]
 mod tests {
+    use super::super::inbound::Inbound;
     use super::super::worker::LaneId;
     use super::*;
     use crossterm::event::KeyModifiers;
@@ -373,17 +374,17 @@ mod tests {
 
     #[test]
     fn overlay_gate_round_trips_via_channel() {
-        let (tx, rx) = mpsc::channel::<UiEvent>();
+        let (tx, rx) = mpsc::channel::<Inbound>();
         let mut gate = OverlayApprovalGate {
             out: LaneTx::new(LaneId(1), tx),
             wait: APPROVAL_WAIT,
         };
         let worker = std::thread::spawn(move || gate.decide(&req("rm")));
         // UI 侧收到请求
-        let UiEvent::Lane(_, inner) = rx.recv().expect("prompt") else {
+        let Inbound::FromLane(_, inner) = rx.recv().expect("prompt") else {
             panic!("expected a lane-tagged approval prompt");
         };
-        let UiEvent::Approval { prompt } = *inner else {
+        let UiEvent::Approval { prompt } = inner else {
             panic!("expected approval prompt");
         };
         assert_eq!(prompt.req.command, "rm");
@@ -396,16 +397,16 @@ mod tests {
 
     #[test]
     fn overlay_gate_denies_when_ui_drops() {
-        let (tx, rx) = mpsc::channel::<UiEvent>();
+        let (tx, rx) = mpsc::channel::<Inbound>();
         let mut gate = OverlayApprovalGate {
             out: LaneTx::new(LaneId(1), tx),
             wait: APPROVAL_WAIT,
         };
         let worker = std::thread::spawn(move || gate.decide(&req("rm")));
-        let UiEvent::Lane(_, inner) = rx.recv().expect("prompt") else {
+        let Inbound::FromLane(_, inner) = rx.recv().expect("prompt") else {
             panic!("expected a lane-tagged approval prompt");
         };
-        let UiEvent::Approval { prompt } = *inner else {
+        let UiEvent::Approval { prompt } = inner else {
             panic!("expected approval prompt");
         };
         drop(prompt.answer); // UI 退出未答复
@@ -416,26 +417,26 @@ mod tests {
     /// 否则整条 worker 线程永久停在这里，后续消息全部排队，且屏幕上没有任何提示。
     #[test]
     fn overlay_gate_times_out_as_deny() {
-        let (tx, rx) = mpsc::channel::<UiEvent>();
+        let (tx, rx) = mpsc::channel::<Inbound>();
         let mut gate = OverlayApprovalGate {
             out: LaneTx::new(LaneId(1), tx),
             wait: Duration::from_millis(30),
         };
         let worker = std::thread::spawn(move || gate.decide(&req("rm")));
-        let UiEvent::Lane(_, inner) = rx.recv().expect("prompt") else {
+        let Inbound::FromLane(_, inner) = rx.recv().expect("prompt") else {
             panic!("expected a lane-tagged approval prompt");
         };
-        let UiEvent::Approval { prompt } = *inner else {
+        let UiEvent::Approval { prompt } = inner else {
             panic!("expected approval prompt");
         };
         // 通道保持打开但不答复 —— 正是「UI 收到了却没人处理」那种状态。
         let decision = worker.join().unwrap().unwrap();
         assert_eq!(decision, ApprovalDecision::Deny, "超时按拒绝收尾");
         drop(prompt);
-        let UiEvent::Lane(_, inner) = rx.recv().expect("timeout notice") else {
+        let Inbound::FromLane(_, inner) = rx.recv().expect("timeout notice") else {
             panic!("expected a lane-tagged timeout notice");
         };
-        let UiEvent::ApprovalExpired { notice } = *inner else {
+        let UiEvent::ApprovalExpired { notice } = inner else {
             panic!("expected an ApprovalExpired after timeout");
         };
         assert!(notice.contains("拒绝"), "提示应说明按拒绝处理: {notice}");

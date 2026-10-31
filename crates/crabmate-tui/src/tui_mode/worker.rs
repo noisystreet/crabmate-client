@@ -10,7 +10,7 @@ use std::thread;
 use crossterm::event::{self, Event, KeyEvent, MouseButton, MouseEvent, MouseEventKind};
 
 use crabmate_client_api::conversation_state::ConversationStateOutcome;
-use crabmate_client_api::ctl::{CtlInstance, ToggleFailure, ToggleOutcome};
+use crabmate_client_api::ctl::CtlInstance;
 use crabmate_client_api::paths;
 use crabmate_client_api::permission::PermissionView;
 use crabmate_client_api::prompt_tokens::TiktokenPromptTokensSnapshot;
@@ -26,13 +26,15 @@ use crate::serve::{
 };
 
 use super::approve::{APPROVAL_WAIT, ApprovalPrompt, OverlayApprovalGate};
+use super::inbound::Inbound;
 // 控制面（unix socket）的三类 job 在 `worker_ctl`：它们不碰 reqwest 连接池。
 use super::serve_defaults::ServeDefaults;
 use super::settings::{LlmSave, PersistedSettings, PrefsSave, merge_llm_save, merge_prefs_save};
 use super::slash_menu::SkillsPayload;
 use super::worker_ctl;
 
-/// UI 事件（键盘线程与回合/拉取线程共同的生产者）。
+/// UI 事件的**载荷**（键盘线程与回合/拉取线程都会产出，但「归谁」由 [`Inbound`] 决定：
+/// 全局输入 / 某条 lane 的出站事件 / 外壳动作，见 [`super::inbound`]）。
 pub(super) enum UiEvent {
     Key(KeyEvent),
     /// 括号粘贴（bracketed paste）：终端把一次粘贴包成一个事件，**含其中的换行**。
@@ -164,32 +166,6 @@ pub(super) enum UiEvent {
     /// （连不上 / 读写失败 / 被拒绝）处置各不相同，压成一个裸字符串再让 UI 重新猜分类
     /// 没有意义 —— 分类留在 `serve::ctl`，UI 只负责显示。
     CtlList(Result<Vec<CtlInstance>, String>),
-    /// 运行期新增 lane 的**外壳级**结果：`Ok(base_url)` = 可以连。
-    ///
-    /// 与 [`UiEvent::CtlList`] 不同，这条**不带 lane 标签**（worker 直接写通道，不经
-    /// [`UiSink`]）：新增 lane 改的是 `TuiApp::lanes`，而目标 lane 此刻还不存在，
-    /// 按 `LaneId` 分发只会被当成「已关闭的 lane」丢掉。
-    CtlLaneReady {
-        /// 实例名（将来那条 lane 的 `label`）。
-        name: String,
-        /// `Ok(serve 根 URL)` / `Err(面向用户的失败原因)`。
-        result: Result<String, String>,
-    },
-    /// 摘掉本进程的一条连接（`/lane detach <name>`）：**外壳动作**，不动声明与进程。
-    ///
-    /// 与 [`UiEvent::CtlLaneReady`] 同路且同理：改的是 `TuiApp::lanes`，单条 lane 没有
-    /// 那份 `&mut`；而且被摘的可能正是发起命令的那条 lane，按 `LaneId` 分发会落空。
-    LaneDetach {
-        /// 要摘掉的那条连接的 `label`。
-        name: String,
-    },
-    /// 取消某条 lane 的回合（`/lane cancel`, `name` = 连接的 `label`）：外壳动作，
-    /// 理由同 [`UiEvent::LaneDetach`] —— `LaneApp` 只有自己的 `cancel`，可能取消自己。
-    LaneCancel {
-        name: String,
-    },
-    /// 翻声明 `enabled` 的回执（`/lane close|open`）：外壳动作，见 `shell::on_lane_toggled`。
-    CtlToggled(Result<ToggleOutcome, ToggleFailure>),
     /// 启动时 user-data 设置快照（prefs + llm-overrides）拉取结果（合成持久层）。
     UserData(Result<PersistedSettings, String>),
     /// `llm-overrides` 保存结果：`Ok` 回传已应用动作（面板据此清 staged）。
@@ -198,17 +174,12 @@ pub(super) enum UiEvent {
     SavedPrefs(Result<PrefsSave, String>),
     /// skill 目录（`GET /skills`，供 `/` 补全菜单的 skill 候选）。
     Skills(Result<SkillsPayload, String>),
-    /// 带来源 lane 的事件：SSE 流增量与回合结果都由某条 lane 产生。
-    ///
-    /// `Box` 只为打破递归类型；解包集中在外层 `TuiApp::on_msg` 一处完成，
-    /// lane 内的业务 `match` 仍按裸变体写（见 `docs/design/tui_multi_server.md` §4.2）。
-    Lane(LaneId, Box<UiEvent>),
 }
 
 /// 一条 lane（连接）的稳定标识：单调递增、不回收（避免 ABA）。
 ///
-/// **裸变体 = 全局输入**：键盘 / 鼠标 / 粘贴 / 尺寸从不带标签（`spawn_key_reader`
-/// 直接发裸 `UiEvent`），由外层路由给当前 lane。只有 SSE 流与回合结果带标签。
+/// 事件归属不再靠这层标签本身决定：`Inbound` 已经把「全局输入 / 某 lane 出站 /
+/// 外壳动作」分成三类（见 [`super::inbound`]），`LaneId` 只负责**认出是哪条**。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) struct LaneId(pub(super) u32);
 
@@ -322,25 +293,29 @@ pub(super) enum WorkerJob {
 
 /// 带来源 lane 的事件发送端：**lane 自己的出站事件一律经它发**。
 ///
-/// 事件归属全靠 [`UiEvent::Lane`] 这层标签（见 `TuiApp::on_msg`），而裸事件会落到
-/// **当前聚焦的 lane**：漏一个标签，lane-2 的回合结束就会清掉 lane-1 的 `running`。
-/// 所以用类型兜住，而不是靠调用方记得包一层。外壳动作（`CtlLaneReady` / `LaneDetach`）
-/// 仍走裸 `Sender<UiEvent>`，在 `TuiApp::on_msg` 里被拦截。
+/// 通道收 [`Inbound`]，`LaneTx` 是 [`Inbound::FromLane`] 的**唯一构造入口**：「忘记
+/// 包一层来源」这个错误曾经只靠注释约定，漏一次就把 lane-2 的回合结束写进 lane-1 的
+/// transcript —— 静默串台，不崩溃、不报错（issue #347）。外壳动作走 [`Inbound::Shell`]，
+/// 那条路径不经过这里。
+///
+/// **这不是封装边界**：持有 `Sender<Inbound>` 的地方（`LaneApp::tx` / `LaneTemplate::tx`
+/// / `spawn_worker` 的参数）仍能手写 `FromLane` 或把 lane 事件塞进 `Input`。类型消除的是
+/// 旧形态（`Sender<UiEvent>` + 全凭约定打标签），不是所有绕过路径。
 #[derive(Clone)]
 pub(super) struct LaneTx {
     lane: LaneId,
-    tx: Sender<UiEvent>,
+    tx: Sender<Inbound>,
 }
 
 impl LaneTx {
-    pub(super) fn new(lane: LaneId, tx: Sender<UiEvent>) -> Self {
+    pub(super) fn new(lane: LaneId, tx: Sender<Inbound>) -> Self {
         Self { lane, tx }
     }
 
     /// 打上来源 lane 后发出；通道关闭即视为 UI 已退出。
     pub(super) fn send(&self, ev: UiEvent) -> Result<(), TermError> {
         self.tx
-            .send(UiEvent::Lane(self.lane, Box::new(ev)))
+            .send(Inbound::FromLane(self.lane, ev))
             .map_err(|_| TermError::Message("ui channel closed".into()))
     }
 }
@@ -411,31 +386,33 @@ impl StreamSink for UiSink {
 }
 
 /// 键盘/鼠标读取线程：阻塞在 `event::read()`，按键与鼠标事件转为 `UiEvent`。
-pub(super) fn spawn_key_reader(tx: Sender<UiEvent>) {
+///
+/// 这些是**全局输入**（[`Inbound::Input`]）：不属于任何 lane，由外壳交给当前聚焦的那条。
+pub(super) fn spawn_key_reader(tx: Sender<Inbound>) {
     thread::spawn(move || {
         loop {
             match event::read() {
                 Ok(Event::Key(key)) => {
-                    if tx.send(UiEvent::Key(key)).is_err() {
+                    if tx.send(Inbound::Input(UiEvent::Key(key))).is_err() {
                         break;
                     }
                 }
                 // 括号粘贴：整段粘贴是一个事件（换行也在里面），交给输入框一次性插入。
                 Ok(Event::Paste(text)) => {
-                    if tx.send(UiEvent::Paste(text)).is_err() {
+                    if tx.send(Inbound::Input(UiEvent::Paste(text))).is_err() {
                         break;
                     }
                 }
                 // 只转发会被处理的那几类：捕获鼠标后终端会持续上报指针移动/拖动，
                 // 这类事件每条进 channel 都会让主循环把节流降到 2ms 白刷整帧。
                 Ok(Event::Mouse(m)) if is_actionable_mouse(m.kind) => {
-                    if tx.send(UiEvent::Mouse(m)).is_err() {
+                    if tx.send(Inbound::Input(UiEvent::Mouse(m))).is_err() {
                         break;
                     }
                 }
                 // 尺寸变化只作唤醒源：真值在 `draw_frame` 前现查（`sync_terminal_size`）。
                 Ok(Event::Resize(..)) => {
-                    if tx.send(UiEvent::Resize).is_err() {
+                    if tx.send(Inbound::Input(UiEvent::Resize)).is_err() {
                         break;
                     }
                 }
@@ -466,7 +443,7 @@ pub(super) fn is_actionable_mouse(kind: MouseEventKind) -> bool {
 pub(super) fn spawn_worker(
     lane: LaneId,
     client: ServeClient,
-    tx: Sender<UiEvent>,
+    tx: Sender<Inbound>,
 ) -> Sender<WorkerJob> {
     let (job_tx, job_rx) = mpsc::channel::<WorkerJob>();
     thread::spawn(move || {

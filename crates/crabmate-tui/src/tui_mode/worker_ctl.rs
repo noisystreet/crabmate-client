@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 
 use crabmate_client_api::ctl::{CtlInstance, LaneReadiness, ToggleFailure, lane_readiness};
 
+use super::inbound::{Inbound, ShellEvent};
 use super::worker::{LaneTx, UiEvent, WorkerJob};
 use crate::serve::{add_instance, list_instances, set_instance_enabled};
 
@@ -32,43 +33,43 @@ pub(super) fn job_ctl_list(socket: &Path, out: &LaneTx) {
 }
 
 /// `/lane attach`：按名字在声明里找一条已就绪的实例，把 `base_url` 带回去。
-pub(super) fn job_ctl_attach(socket: &Path, name: &str, tx: &Sender<UiEvent>) {
+pub(super) fn job_ctl_attach(socket: &Path, name: &str, tx: &Sender<Inbound>) {
     let result = list_instances(socket)
         .map_err(|e| e.user_message())
         .and_then(|items| ready_base_url(&items, name));
-    let _ = tx.send(UiEvent::CtlLaneReady {
+    let _ = tx.send(Inbound::Shell(ShellEvent::Ready {
         name: name.to_string(),
         result,
-    });
+    }));
 }
 
 /// `/lane new`：写声明 → 轮询到就绪。
-pub(super) fn job_ctl_new(socket: &Path, name: &str, workspace: &str, tx: &Sender<UiEvent>) {
+pub(super) fn job_ctl_new(socket: &Path, name: &str, workspace: &str, tx: &Sender<Inbound>) {
     let result = add_then_wait_ready(socket, name, workspace);
-    let _ = tx.send(UiEvent::CtlLaneReady {
+    let _ = tx.send(Inbound::Shell(ShellEvent::Ready {
         name: name.to_string(),
         result,
-    });
+    }));
 }
 
 /// `/lane close` / `/lane open`：翻声明里的 `enabled`，回执交给外壳。
 ///
-/// 走**裸**事件（不经 `LaneTx`）：被关的可能正是发起命令的那条 lane，而回执还要驱动
-/// 「顺手 detach 它」这类外壳动作 —— 按 `LaneId` 分发只会落进一条正在消失的 lane。
-pub(super) fn job_ctl_toggle(socket: &Path, name: &str, enabled: bool, tx: &Sender<UiEvent>) {
+/// 走 [`ShellEvent`]（不经 `LaneTx`）：被关的可能正是发起命令的那条 lane，而回执还要
+/// 驱动「顺手 detach 它」这类外壳动作 —— 按 `LaneId` 分发只会落进一条正在消失的 lane。
+pub(super) fn job_ctl_toggle(socket: &Path, name: &str, enabled: bool, tx: &Sender<Inbound>) {
     let result = set_instance_enabled(socket, name, enabled).map_err(|e| ToggleFailure {
         name: name.to_string(),
         enabled,
         reason: e.user_message(),
     });
-    let _ = tx.send(UiEvent::CtlToggled(result));
+    let _ = tx.send(Inbound::Shell(ShellEvent::Toggled(result)));
 }
 
 /// 控制面 job 的统一派发：`worker.rs` 的 match 只认一个 `job @ (CtlList | …)` 臂。
 ///
 /// 派发放在这里与实现同处：新增一个 socket op 时只动本文件，`worker.rs` 不再逐条
 /// 添加分支（那边贴着 920 行/文件上限）。
-pub(super) fn dispatch(job: WorkerJob, out: &LaneTx, tx: &Sender<UiEvent>) {
+pub(super) fn dispatch(job: WorkerJob, out: &LaneTx, tx: &Sender<Inbound>) {
     match job {
         WorkerJob::CtlList { socket } => job_ctl_list(&socket, out),
         WorkerJob::CtlAttach { socket, name } => job_ctl_attach(&socket, &name, tx),

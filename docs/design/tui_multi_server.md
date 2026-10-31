@@ -216,12 +216,12 @@ api_base = "http://127.0.0.1:8082"
 - **`add.workspace` 必填**：socket `add` 至今要求 `String`（放开省略的是 TOML 声明那条路）。所以 `/lane new` 的 workspace 取「显式参数 ＞ 当前 lane 的 serve 工作区」，两者都没有（本 lane 待绑定）就明说要路径。`created: false`（声明已存在）是幂等命中，不当失败。
 - **轮询**：每 300 ms、上限 20 s（`up` 自己的 readiness 超时是 10 s，留一倍余量）。超时**不是**「起不来」的结论，文案让人「稍后 `/ctl` 复查、就绪后 `/lane attach`」。等待期间独占**发起命令那条 lane 的 worker**（该 lane 其它拉取排队），别的 lane 不受影响。
 - **装配**：`LaneApp::assemble` + `LaneTemplate`（存**启动时**的 `overrides` / `yes` / `no_keyring` / bearer / `ctl_socket` / `tx`）。存启动初值而不是「当前 lane 的现值」：当前 lane 的 `/model` 覆盖只属于它。`LaneApp::client` 因此从 `&'a ServeClient` 改成 `Cow<'a, ServeClient>` —— 启动装配仍零拷贝借用，运行期造出来的客户端自己持有。
-- **事件通道**：结果走 `UiEvent::CtlLaneReady { name, result }`，由 worker **裸发**（不包 `LaneId`）：目标 lane 此刻还不存在，按 id 分发只会被当成「已关闭的 lane」丢掉；由 `TuiApp` 拦截并装配 —— 单条 lane 无权改 `lanes`。
+- **事件通道**：结果走 `Inbound::Shell(ShellEvent::Ready { name, result })`：目标 lane 此刻还不存在，按 `LaneId` 分发只会被当成「已关闭的 lane」丢掉；由 `TuiApp` 拦截并装配 —— 单条 lane 无权改 `lanes`。三类入站事件（全局输入 / 某条 lane 的出站事件 / 外壳动作）由 `Inbound` 在**类型上**分开，不再靠「记得包一层」的注释约定（issue #347）：lane 事件的常规出口是 `LaneTx`（它负责贴上 `LaneId`；持有裸 `Sender<Inbound>` 的位置仍能手写，但没有理由这么做），外壳动作 lane 根本收不到。
 - **同名或同 URL 都不重连**：名字已在 `lanes` 里时只切过去并明说「已经是本进程的连接」；名字不同但 `base_url` 与某条 lane 相同（按 `same_api_base` 归一化比较：尾 `/`、大小写不算差异，`localhost` 与 `127.0.0.1` 仍是两个 Origin）也只切过去 —— 那是同一台 serve，重复连会各开一条 SSE、各读一份会话。静默再连会让左栏出现两条同名 lane，而 `/ctl` 里只有一条实例。
-- **`/lane detach <name>` 只摘本进程的账**：声明与 serve 进程都不动（`/lane` 的语义是「本进程连不连」，与 attach 对称；要停实例用 `crabmatectl down`）。摘之前先**停掉它正在跑的回合**（`shell::abandon_turn`，与 `/lane cancel` 同源：撤审批浮层让 gate 立刻按拒绝收尾 + `StreamCancel` 计数 1 → worker 先 `POST /chat/stream/{job}/cancel`、再收尾 SSE，见 issue #339）—— 只 drop `LaneApp` 不够：worker 在 `run_turn_job` 的 `block_on` 里根本不看 job channel，要等**整个回合跑完**才回到 `recv`，期间 serve 侧 job 白跑一轮、事件又全被丢弃，线程与 runtime 也白占着。停完再 drop 该 `LaneApp`，它的 job channel 随之关闭，worker 线程与那个 runtime（含在途请求、SSE）随即退出；`LaneId` 单调递增不复用，残留事件按 id 分发时匹配不到，直接丢弃（不会串台）。两种情形明说而不硬做：名字不存在（把现有名字列出来，省得再猜）与**最后一条**（界面至少要有一条 lane，退出用 `/quit`）。
+- **`/lane detach <name>` 只摘本进程的账**：声明与 serve 进程都不动（`/lane` 的语义是「本进程连不连」，与 attach 对称；要停实例用 `crabmatectl down`）。摘之前先**停掉它正在跑的回合**（`LaneApp::wind_down`，与 `/lane cancel`、Ctrl+C、`/quit` 同源：撤审批浮层让 gate 立刻按拒绝收尾 + `StreamCancel` 计数 1 → worker 先 `POST /chat/stream/{job}/cancel`、再收尾 SSE，见 issue #339 / #346）—— 只 drop `LaneApp` 不够：worker 在 `run_turn_job` 的 `block_on` 里根本不看 job channel，要等**整个回合跑完**才回到 `recv`，期间 serve 侧 job 白跑一轮、事件又全被丢弃，线程与 runtime 也白占着。停完再 drop 该 `LaneApp`，它的 job channel 随之关闭，worker 线程与那个 runtime（含在途请求、SSE）随即退出；`LaneId` 单调递增不复用，残留事件按 id 分发时匹配不到，直接丢弃（不会串台）。两种情形明说而不硬做：名字不存在（把现有名字列出来，省得再猜）与**最后一条**（界面至少要有一条 lane，退出用 `/quit`）。
 - **主 lane 也按 URL 认领实例名**：启动 lane 的名字原本恒为 `local`。上面的同 URL 去重已经能拦住「同一台 serve 连两条」，但名字对不上时提示只能说「`local` 已经连着 …」，左栏的名字与 ctl 里的实例名仍是两套。启动时因此问一次控制面（`serve::ctl::primary_binding`）：`base_url` 与 `--api-base` 相同的实例，主 lane 直接用它的名字，`/lane attach server` 连同名/同 URL 两道闸都命中，只切过去并说「已经是本进程的连接」。比较只看 **URL**（`same_api_base`：去尾 `/`、不区分大小写；`localhost` 与 `127.0.0.1` 是两个 Origin，不合并），不看 `observed`（`stale` / `starting` 仍是那台 serve 的声明）。查不到（ctl 没起 / URL 未声明 / 回包读不懂）一律退回 `local`，**不拦启动** —— 这条查询只负责命名。
 - **新 lane 的首拉**与启动同一套（`LaneApp::bootstrap`：会话 / 工作区根 / serve 状态 / user-data 快照）：只刷当前 lane 的话，切过去会看到空的会话列表。
-- **`/lane close|open` 只翻 `enabled`**：`enabled = false` 是 Server 文档里客户端软删 lane 的正式口径，socket 的 `disable` / `enable` 也只收 `op` + `name`（它们**不是** `update`：换 workspace/profile/port 仍是 `remove` + `add` 两步）。三条回执语义照抄 Server、不自己重推：`changed: false` 是幂等命中（「本来就是这样」，不是失败），`enable` 会顺手清 `down` 留下的 `desired_state = stopped`（`cleared_down`），那半步失败时 `ok` 仍为真但带 `warning` —— 不露出来就会变成「声明是启用的、实例永远起不来」。回执由 worker **裸发** `UiEvent::CtlToggled`（被关的可能正是发起命令的那条 lane），外壳据此写报告行；关掉声明时如果本进程正连着它，顺手 `detach`（实例马上被 ctl 停掉，留着只是一条死 SSE），**唯一一条连接例外** —— 只把「随后下线、退出用 `/quit`、反悔用 `/lane open`」说清，不摘（界面至少要有一条 lane）。
+- **`/lane close|open` 只翻 `enabled`**：`enabled = false` 是 Server 文档里客户端软删 lane 的正式口径，socket 的 `disable` / `enable` 也只收 `op` + `name`（它们**不是** `update`：换 workspace/profile/port 仍是 `remove` + `add` 两步）。三条回执语义照抄 Server、不自己重推：`changed: false` 是幂等命中（「本来就是这样」，不是失败），`enable` 会顺手清 `down` 留下的 `desired_state = stopped`（`cleared_down`），那半步失败时 `ok` 仍为真但带 `warning` —— 不露出来就会变成「声明是启用的、实例永远起不来」。回执由 worker 走 `Inbound::Shell(ShellEvent::Toggled)`（被关的可能正是发起命令的那条 lane），外壳据此写报告行；关掉声明时如果本进程正连着它，顺手 `detach`（实例马上被 ctl 停掉，留着只是一条死 SSE），**唯一一条连接例外** —— 只把「随后下线、退出用 `/quit`、反悔用 `/lane open`」说清，不摘（界面至少要有一条 lane）。
 - **未做**：per-profile bearer 槽（控制面里所有实例同机同用户，第一版共用主连接那份；某实例要求不同 Bearer 时症状是那条 lane 的拉取全错）、声明级硬删（socket 的 `remove` 会连手写 `env` / `config` 一起删掉，不做）。
 
 ---
@@ -263,7 +263,7 @@ api_base = "http://127.0.0.1:8082"
 
 | 波次 | 交付 | 验收 | PR 边界 |
 |------|------|------|---------|
-| **W1** | `Lane` / `LaneId` 抽取；`UiEvent::Lane { id, ev }`；`TuiApp { lanes, active }`（恒为 1 lane） | 现有 `tui` 行为与交互逐字不变；`make test` 全绿；`mod.rs` 行数**下降**（当前 918 行，见风险 1） | 纯重构，不加功能 |
+| **W1** | `Lane` / `LaneId` 抽取；`Inbound`；`TuiApp { lanes, active }`（恒为 1 lane） | 现有 `tui` 行为与交互逐字不变；`make test` 全绿；`mod.rs` 行数**下降**（当前 918 行，见风险 1） | 纯重构，不加功能 |
 | **W2** | 每 lane 独立 worker + 独立 `cancel` + 切换 lane（配置文件可只有 1 项） | 两路连同一 serve 的不同 conversation 可同时流式；切换不打断在途回合 | 含 §4.3 |
 | **W3** | 多 profile 加载（`tui-connections.toml`）+ 启动时逐 profile `/health` 探测 + 失败提示不阻塞其它 lane | 3 路连 3 个不同 serve，各自独立 transcript；某台不可达时其余仍可用 | 含 §4.5 |
 | **W4** | 审批队列（带 lane 标签 + 排队数 + 入队时刻计超时） | 两路同时要求审批，逐个弹出且来源标注正确；非活动 lane 超时按拒绝收尾并留痕 | 含 §4.4 |
@@ -307,7 +307,7 @@ api_base = "http://127.0.0.1:8082"
 ### 9.1 结论
 
 - **纯逻辑层可完整复用**：`crabmate-client-api` / `crabmate-tool-card` / `crabmate-connect` 的 probe 与 handoff 与 lane 数量无关。
-- **TUI 的 lane 代码不能复用**：`LaneApp` / `UiEvent::Lane` / `TuiApp` 建立在 ratatui + 同步 `mpsc` + `current_thread` runtime 上，WASM 里没有这些；Leptos 是 signals + async。
+- **TUI 的 lane 代码不能复用**：`LaneApp` / `Inbound` / `TuiApp` 建立在 ratatui + 同步 `mpsc` + `current_thread` runtime 上，WASM 里没有这些；Leptos 是 signals + async。
 - **但设计结论可以照搬**：LaneId 来源标签、per-lane 状态树、审批队列、「代数门控留在 lane 内」。
 - Desktop 做多连接应当走 **多 WebView 窗口**，而不是在单窗口内做 lane（理由见 §9.4）。
 
@@ -332,7 +332,7 @@ api_base = "http://127.0.0.1:8082"
 | `crates/crabmate-tool-card` | **完整复用** | 同上 |
 | `crabmate-connect` 的 probe / handoff / normalize | **可复用** | `probe_server` / `build_handoff_url` / `normalize_base_url` 与 lane 数量无关 |
 | `crabmate-connect` 的 keyring / 「当前连接」 | **需改** | 单槽 + 全局当前 URL；多连接要 per-profile 槽与 per-window 状态 |
-| TUI 的 `LaneApp` / `UiEvent::Lane` / `TuiApp` | **不能复用** | ratatui + 同步 `mpsc` + `current_thread` runtime；WASM 无对应设施 |
+| TUI 的 `LaneApp` / `Inbound` / `TuiApp` | **不能复用** | ratatui + 同步 `mpsc` + `current_thread` runtime；WASM 无对应设施 |
 | 设计模式（§4.2 的来源标签、代数门控留在 lane 内、§4.4 审批队列） | **思路可复用** | 不能共享代码，能共享结论 |
 
 ### 9.4 两条路
