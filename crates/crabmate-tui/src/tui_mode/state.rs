@@ -227,12 +227,6 @@ impl LogLine {
         self.collapsed
     }
 
-    /// 过程摘要行的成员是否已展开（见 [`Self::run_open`]）。
-    #[must_use]
-    pub(crate) fn is_run_open(&self) -> bool {
-        self.run_open
-    }
-
     #[must_use]
     pub(crate) fn tool_state(&self) -> ToolState {
         self.tool_state

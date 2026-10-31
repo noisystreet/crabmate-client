@@ -500,10 +500,82 @@ fn enter_toggles_the_cursor_summary_and_keeps_the_cursor() {
     assert_eq!(st.fold_cursor, Some(idx), "光标留在原地");
     assert_eq!(summary_prefix(&st, idx), "▾ ");
 
-    assert!(st.fold_nav_key(&nav_key(KeyCode::Char(' '))));
-    assert_eq!(hidden_count(&st), 2, "Space 折回");
+    assert!(st.fold_nav_key(&nav_key(KeyCode::Enter)));
+    assert_eq!(hidden_count(&st), 2, "再按一下 Enter 折回");
     assert_eq!(summary_prefix(&st, idx), "▸ ");
     assert_eq!(st.fold_cursor, Some(idx), "光标仍留在原地");
+}
+
+/// 空格与 `Alt+Enter` 都不归导航。
+///
+/// 空格是**可打印字符** —— 占了它就等于「导航期间写不出 `a b`」，而用户无从预料；
+/// `Alt+Enter` 与输入框的「换行」是同一个键，抢走它就等于让导航悄悄变成模态。
+#[test]
+fn space_and_alt_enter_pass_through_while_navigating() {
+    let mut st = two_folded_runs();
+    st.begin_fold_nav();
+    let before = hidden_count(&st);
+
+    assert!(
+        !st.fold_nav_key(&nav_key(KeyCode::Char(' '))),
+        "空格要交回输入框"
+    );
+    let alt_enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::ALT);
+    assert!(!st.fold_nav_key(&alt_enter), "Alt+Enter 是换行");
+
+    assert_eq!(hidden_count(&st), before, "两者都不该切换");
+    assert!(st.fold_cursor.is_some(), "导航还开着");
+}
+
+/// 进导航 = 接管方向键**和视口**：`/find` 的锚点与 `/` 补全菜单都必须让位。
+///
+/// 搜索锚点优先于折叠光标，留着它就会出现「↑/↓ 在动、画面却钉在命中行上」；补全菜单
+/// 则和导航抢同一组键 —— 两个宿主同时在线，用户没法判断 ↑/↓ 会动谁。
+#[test]
+fn beginning_navigation_takes_over_the_viewport_and_the_menu() {
+    let mut st = state_with(&[
+        (LineKind::Tool, "✓ a"),
+        (LineKind::Tool, "✓ b"),
+        (LineKind::Assistant, "含关键词的答案"),
+    ]);
+    st.fold_process_runs(None);
+    assert!(st.start_search("关键词") > 0);
+    assert!(st.search_cursor.is_some(), "先有搜索锚点");
+    st.slash.dismissed = false;
+
+    st.begin_fold_nav();
+
+    assert_eq!(st.search_cursor, None, "搜索锚点让位给折叠光标");
+    assert!(st.slash.dismissed, "补全菜单一并关掉");
+    assert!(st.fold_cursor.is_some());
+}
+
+/// `/fold` 在导航开着时把光标带到它刚切换的那条。
+///
+/// 两套入口说的是同一件事：不联动的话「刚展开的不是光标这条」，接着按 Enter 就折错段。
+#[test]
+fn folder_command_moves_the_cursor_when_navigating() {
+    let mut st = two_folded_runs();
+    st.begin_fold_nav();
+    let recent = st.fold_cursor.expect("进了导航");
+
+    // `2` = 自底部数第 2 段，也就是更早那条。
+    st.fold_command(Some("2"));
+
+    let older = st.fold_cursor.expect("还在导航");
+    assert_ne!(older, recent, "光标跟着 /fold 走到更早那段");
+    assert_eq!(st.lines[older].kind(), LineKind::Process);
+    assert_eq!(summary_prefix(&st, older), "▾ ", "刚展开的就是光标这条");
+}
+
+/// 导航没开时 `/fold` 不顺手把人拖进模式。
+#[test]
+fn folder_command_leaves_the_cursor_alone_when_not_navigating() {
+    let mut st = two_folded_runs();
+
+    st.fold_command(Some("2"));
+
+    assert_eq!(st.fold_cursor, None, "键盘模式不该被命令悄悄改掉");
 }
 
 /// `Esc` 退出导航；别的键不归它 —— 字母照常交回输入框，导航还开着。

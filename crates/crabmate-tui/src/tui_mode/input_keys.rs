@@ -1,12 +1,10 @@
 //! 输入框焦点下的按键分发。
 //!
 //! 单独成文件的理由与 `sidebar_keys` / `workspace_keys` 相同：`mod.rs` 贴着 920 行文件
-//! 上限，而这条 `match` 本来就贴着 lizard 的 CCN ≤ 10 —— 折叠导航（`Ctrl+G`）一进来就
-//! 顶到 11。拆出来之后再加键只碰本文件。
+//! 上限，而这条 `match` 本来就贴着 lizard 的 CCN ≤ 10。
 //!
-//! 折叠导航的拦截放在最前面：`↑/↓/Enter/Space/Esc` 在导航里是「换一条 / 开合 / 退出」，
-//! 落进下面那条 match 就变成滚 transcript、提交、清排队 —— 同一个键两种意思，正是
-//! 「明明按了 Enter，却把半句话发出去了」的来源。
+//! **折叠导航不在这里**：它是显式模式、与焦点无关，拦在 `on_hotkey` 里（否则焦点在
+//! 侧栏时 `Ctrl+G` 完全没反应，因为 `on_key` 根本不进这条分支）。
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
@@ -17,14 +15,10 @@ use super::hotkeys::{is_alt_enter, is_ctrl, is_ctrl_e, is_ctrl_o, is_ctrl_w};
 impl LaneApp<'_> {
     /// 输入框焦点下的按键。
     ///
-    /// `Ctrl+<字母>` 的组合**不在这里**逐个开臂：进折叠导航走
-    /// [`super::UiState::fold_nav_key`]（未激活时它也认 `Ctrl+G`），其余组合（`Ctrl+C` /
-    /// `Ctrl+D` / `Ctrl+Z`）由事件循环层处理 —— 它们落到下面的 `_ => {}` 即可，因此不必
-    /// 为「吞掉它们」单开一个 or-pattern 臂。
+    /// `Ctrl+<字母>` 的组合**不在这里**逐个开臂：进折叠导航走 `on_hotkey`，其余组合
+    /// （`Ctrl+C` / `Ctrl+D` / `Ctrl+Z`）由事件循环层处理 —— 它们落到下面的 `_ => {}`
+    /// 即可，因此不必为「吞掉它们」单开一个 or-pattern 臂。
     pub(super) fn on_input_key(&mut self, key: KeyEvent) {
-        if self.st.fold_nav_key(&key) {
-            return;
-        }
         match key.code {
             KeyCode::Enter if is_alt_enter(&key) => self.st.insert_newline(),
             KeyCode::Enter => self.on_submit(),
@@ -74,5 +68,108 @@ impl LaneApp<'_> {
         if was_at_top {
             history::load_older_on_top(self);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::mpsc;
+
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+
+    use super::super::state::{Focus, LineKind};
+    use super::super::test_support::{test_app, test_client, test_prefs};
+    use super::LaneApp;
+
+    /// 这些必须在**外壳**上测：`UiState` 的单测碰不到 `on_key` 的分派顺序，而顺序错了
+    /// 逻辑再对也是「按了 Enter 把半句话发出去」。
+    fn app_with_two_runs(f: impl FnOnce(&mut LaneApp<'_>)) {
+        let client = test_client();
+        let mut prefs = test_prefs();
+        let (tx, rx) = mpsc::channel();
+        let (job_tx, _job_rx) = mpsc::channel();
+        let mut app = test_app(&client, &mut prefs, rx, tx, job_tx);
+        app.st.push_line(LineKind::Tool, "✓ a");
+        app.st.push_line(LineKind::Tool, "✓ b");
+        app.st.fold_process_runs(None);
+        f(&mut app);
+    }
+
+    fn key(code: KeyCode, modifiers: KeyModifiers) -> KeyEvent {
+        KeyEvent::new(code, modifiers)
+    }
+
+    fn hidden(app: &LaneApp<'_>) -> usize {
+        app.st.lines.iter().filter(|l| l.is_hidden()).count()
+    }
+
+    /// 导航激活时 `Enter` 归导航（开合），**不是**提交。
+    #[test]
+    fn enter_toggles_instead_of_submitting_while_navigating() {
+        app_with_two_runs(|app| {
+            assert_eq!(hidden(app), 2);
+
+            app.on_key(key(KeyCode::Char('g'), KeyModifiers::CONTROL));
+            assert!(app.st.fold_cursor.is_some(), "Ctrl+G 进导航");
+
+            app.on_key(key(KeyCode::Enter, KeyModifiers::NONE));
+
+            assert_eq!(hidden(app), 0, "Enter 拿去展开了");
+            assert!(
+                !app.st.lines.iter().any(|l| l.kind() == LineKind::User),
+                "不该冒出用户消息（提交会 push 一条）"
+            );
+        });
+    }
+
+    /// `Ctrl+G` 与焦点无关：焦点在侧栏 / 目录树时同样进导航。
+    ///
+    /// 挂在 `on_input_key` 里时这条不成立（`on_key` 在焦点不是 Input 时根本不走那条），
+    /// 而这正是最容易踩的路径 —— 刚点过会话栏的人按 `Ctrl+G` 会以为功能坏了。
+    #[test]
+    fn fold_navigation_opens_from_the_sidebar_and_the_tree() {
+        app_with_two_runs(|app| {
+            for focus in [Focus::Sidebar, Focus::Workspace] {
+                app.st.fold_cursor = None;
+                app.st.focus = focus;
+
+                app.on_key(key(KeyCode::Char('g'), KeyModifiers::CONTROL));
+
+                assert!(app.st.fold_cursor.is_some(), "{focus:?} 聚焦时也该进导航");
+            }
+        });
+    }
+
+    /// 设置面板是模态：面板开着时 `Ctrl+G` 不接管（面板本身仍能被 F6 关掉）。
+    #[test]
+    fn the_settings_panel_keeps_its_keys() {
+        app_with_two_runs(|app| {
+            app.toggle_settings();
+            assert!(app.panel.is_some(), "面板已打开");
+
+            app.on_key(key(KeyCode::Char('g'), KeyModifiers::CONTROL));
+
+            assert_eq!(app.st.fold_cursor, None, "面板里的 Ctrl+G 不该进导航");
+        });
+    }
+
+    /// 导航退出后 `Enter` 交回提交路径（这里用「输入框被读出」作代理断言：
+    /// 真正提交需要 worker 在跑，外壳测试只验「键回到了原来那条分支」）。
+    #[test]
+    fn esc_hands_the_keys_back_to_the_composer() {
+        app_with_two_runs(|app| {
+            app.on_key(key(KeyCode::Char('g'), KeyModifiers::CONTROL));
+            assert!(app.st.fold_cursor.is_some());
+
+            app.on_key(key(KeyCode::Esc, KeyModifiers::NONE));
+            assert_eq!(app.st.fold_cursor, None, "Esc 退出导航");
+
+            app.on_key(key(KeyCode::Char('x'), KeyModifiers::NONE));
+            assert!(
+                app.st.input_snapshot().contains('x'),
+                "字母重新落进输入框：{:?}",
+                app.st.input_snapshot()
+            );
+        });
     }
 }

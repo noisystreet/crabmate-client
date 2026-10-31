@@ -132,6 +132,14 @@ impl LogLine {
         }
     }
 
+    /// 摘要行是否处于展开态（`▸ ` / `▾ ` 的前缀由它决定）。
+    ///
+    /// 与 `is_hidden` / `is_sticky` 放一起：读折叠态的地方若各写各的判定，迟早出现
+    /// 「摘要说自己展开、成员还藏着」这种自相矛盾的行。
+    pub(crate) fn is_run_open(&self) -> bool {
+        self.run_open
+    }
+
     /// 摘要行开合（同 `set_collapsed`：没变不动版本）。只对 `LineKind::Process` 有意义。
     fn set_run_open(&mut self, open: bool) {
         if self.run_open != open {
@@ -268,8 +276,13 @@ impl UiState {
             self.push_line(LineKind::System, &msg);
             return;
         }
-        if self.toggle_process_run(idxs[idxs.len() - n]).is_none() {
+        let idx = idxs[idxs.len() - n];
+        if self.toggle_process_run(idx).is_none() {
             self.push_line(LineKind::System, "这条执行过程摘要没有可展开的内容");
+        } else if self.fold_cursor.is_some() {
+            // 导航开着时 `/fold` 与光标说的是同一件事：把光标挪到刚切换的那条，
+            // 否则「刚展开的不是光标这条」，接着按 Enter 就折错了段。
+            self.fold_cursor = Some(idx);
         }
     }
 
@@ -322,7 +335,14 @@ impl UiState {
             .iter()
             .rposition(|l| l.kind() == LineKind::Process)
         {
-            Some(idx) => self.fold_cursor = Some(idx),
+            Some(idx) => {
+                self.fold_cursor = Some(idx);
+                // 进模式 = 接管方向键**和视口**：搜索锚点优先于折叠光标，留着它就会出现
+                // 「↑/↓ 明明在动，画面却钉在 /find 的命中行上」；`/` 补全菜单则会和导航
+                // 抢同一组键 —— 两个宿主同时在线，只会互相拆台。
+                self.search_cursor = None;
+                self.slash.dismissed = true;
+            }
             None => self.push_line(LineKind::System, "没有可展开的执行过程"),
         }
     }
@@ -348,7 +368,12 @@ impl UiState {
             KeyCode::Esc => self.fold_cursor = None,
             KeyCode::Up => self.move_fold_cursor(false),
             KeyCode::Down => self.move_fold_cursor(true),
-            KeyCode::Enter | KeyCode::Char(' ') => self.toggle_cursor_run(),
+            // 只认**裸** `Enter`：`Alt+Enter` 是换行（与输入框同一套语义）。空格不做
+            // 开合键 —— 它是可打印字符，占了它就等于「导航期间写不出 `a b`」，而这一点
+            // 用户根本无从预料。
+            KeyCode::Enter if !key.modifiers.contains(KeyModifiers::ALT) => {
+                self.toggle_cursor_run();
+            }
             _ => return false,
         }
         true

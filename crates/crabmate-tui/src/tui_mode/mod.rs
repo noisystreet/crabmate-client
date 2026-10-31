@@ -568,6 +568,16 @@ impl LaneApp<'_> {
     /// 判定表在 [`hotkeys`]：这里只按结果分派，不再往上面那条 if 链（和本方法的
     /// 历史实现）里加分支 —— 两者都贴着 CCN≤10 门禁。
     fn on_hotkey(&mut self, key: &KeyEvent) -> bool {
+        // 折叠导航（`Ctrl+G` 进、`↑/↓/Enter/Esc` 留在里面）是**显式模式**而不是热键，
+        // 但同样与焦点无关：挂在 `on_input_key` 里会让「焦点在侧栏时按 Ctrl+G 毫无反应」
+        // —— `on_key` 在焦点不是 Input 时根本不走那条分支。
+        // 放在这里还意味着它**先于** `/` 补全菜单（后者在焦点分支之后）：导航里按 ↑/↓
+        // 是换摘要、不是选补全项，两个宿主不该同时在线。
+        // 设置面板是模态，而 `on_hotkey` 早于 `panel.is_some()` 分支（F6 要能从面板里
+        // 关掉它），所以这里显式让开。
+        if self.panel.is_none() && self.st.fold_nav_key(key) {
+            return true;
+        }
         match hotkeys::of(key) {
             Some(hotkeys::TopHotkey::Settings) => self.toggle_settings(),
             Some(hotkeys::TopHotkey::StatusStack) => self.st.toggle_status_stack(),

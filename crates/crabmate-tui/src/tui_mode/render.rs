@@ -10,7 +10,7 @@ use unicode_width::UnicodeWidthStr;
 
 use super::layout::panes_with_lanes;
 use super::md;
-use super::palette::Palette;
+use super::palette::{Palette, with_row_style};
 use super::settings_panel::PanelContent;
 use super::state::{Focus, LineKind, LogLine, ToolState, UiState};
 use super::status::{SPINNER_FRAMES, status_line};
@@ -780,7 +780,7 @@ fn render_body(
                 line = with_progress_mark(line, f);
             }
             if fold_cursor.is_some() && r.log_index == fold_cursor {
-                line = md::with_row_style(line, sel_style);
+                line = with_row_style(line, sel_style);
             }
             line
         })

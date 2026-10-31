@@ -257,6 +257,11 @@ impl LaneApp<'_> {
             BodyHit::Log(idx)
                 if self.st.lines.get(idx).map(LogLine::kind) == Some(LineKind::Process) =>
             {
+                // 键路必须跟光标一起过来：命中后我们 `return true`（不落到兜底的「收回
+                // 输入框」），若焦点还留在侧栏，接着按 ↑/↓ 走的是 `on_sidebar_key` ——
+                // 用户看到的是「点完摘要，方向键在乱动左边的列表」。
+                self.st.focus = Focus::Input;
+                self.st.confirm_delete = None;
                 self.st.fold_cursor = Some(idx);
                 self.st.toggle_process_run(idx);
                 true
@@ -320,7 +325,7 @@ mod tests {
 
     use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 
-    use super::super::state::Focus;
+    use super::super::state::{Focus, LineKind};
     use super::super::test_support::{test_app, test_client, test_prefs};
     use super::{BodyHit, LaneApp, body_hit, item_index_at, panes};
     use crate::serve::SessionListRow;
@@ -415,6 +420,56 @@ mod tests {
             matches!(body_hit(area, &rows, 0, 6), BodyHit::Outside),
             "正文区左缘外"
         );
+    }
+
+    /// 点摘要 = 切换 + 把键盘一起接过来。
+    ///
+    /// 「一起接过来」正是曾经的漏洞：命中后 `click_body` 直接 `return true`，跳过了兜底的
+    /// 「焦点收回输入框」，于是焦点留在侧栏时按 ↑/↓ 动的是会话选择 —— 用户看到的是
+    /// 「点完摘要，方向键在乱动左边的列表」。
+    #[test]
+    fn clicking_a_summary_toggles_it_and_takes_the_keyboard_from_the_sidebar() {
+        with_wide_app(|app| {
+            app.st.push_line(LineKind::Tool, "✓ a");
+            app.st.push_line(LineKind::Tool, "✓ b");
+            app.st.fold_process_runs(None);
+            let summary = app
+                .st
+                .lines
+                .iter()
+                .position(|l| l.kind() == LineKind::Process)
+                .expect("应有摘要行");
+            // 模拟一帧渲染的回写：正文区自 y=5 起，窗口第 0 行就是那条摘要。
+            app.st.body_area = Some(Rect::new(1, 5, 20, 6));
+            app.st.body_rows_log = vec![Some(summary)];
+            app.st.focus = Focus::Sidebar;
+            app.st.confirm_delete = Some("s-1".to_string());
+
+            assert!(app.click_body(2, 5), "点中摘要要消费这一下");
+
+            assert_eq!(app.st.fold_cursor, Some(summary));
+            assert_eq!(app.st.focus, Focus::Input, "键路必须跟光标一起过来");
+            assert!(app.st.confirm_delete.is_none(), "离开侧栏就作废待确认删除");
+            assert_eq!(
+                app.st.lines.iter().filter(|l| l.is_hidden()).count(),
+                0,
+                "摘要下的成员应已展开"
+            );
+        });
+    }
+
+    /// 点正文里的非摘要行：不消费（焦点照旧收回输入框），只把导航作废。
+    #[test]
+    fn clicking_a_plain_body_line_only_drops_the_cursor() {
+        with_wide_app(|app| {
+            app.st.push_line(LineKind::Assistant, "答案");
+            app.st.body_area = Some(Rect::new(1, 5, 20, 6));
+            app.st.body_rows_log = vec![Some(0)];
+            app.st.fold_cursor = Some(0);
+
+            assert!(!app.click_body(2, 5), "非摘要行不该吃掉这一下");
+            assert_eq!(app.st.fold_cursor, None, "导航作废");
+        });
     }
 
     #[test]
