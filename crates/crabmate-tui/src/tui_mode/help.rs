@@ -3,6 +3,8 @@
 //! 单独成文件是为了压住 `mod.rs` 的 920 行门禁：事件循环层只保留「逐行推进 transcript」，
 //! 文案随功能增删时也只改这里。顺序即显示顺序，按「命令 → 按键 → 各分区操作」分段。
 
+use super::state::{LineKind, UiState};
+
 /// `/help` 输出的每一行。
 pub(super) const LINES: &[&str] = &[
     "本地命令：/quit（/exit、/q 同义） /help /status /settings /mode /role /perm /model /find /background /workspace /resume /older /fold /conv /copy /ctl /lane",
@@ -27,3 +29,15 @@ pub(super) const LINES: &[&str] = &[
     "工作区切换：按 p 从项目池选择/切换（未设置=选择，已设置=切到另一项目；↑↓选 Enter切换 r刷新 Esc 返回）",
     "审批浮层：Enter=一次 · a=始终 · Esc/n=拒绝 · Ctrl+C 先拒绝、回合随后继续需再按取消",
 ];
+
+impl UiState {
+    /// `/help`：把文案表逐行推进 transcript。
+    ///
+    /// 与 [`LINES`] 同处一文件：文案随功能增删时只改这里，`mod.rs` 只需一行分发。
+    /// 从 `mod.rs` 搬过来是为了把它从 920 行文件门禁线差几行的位置退开。
+    pub(super) fn show_help(&mut self) {
+        for line in LINES {
+            self.push_line(LineKind::System, line);
+        }
+    }
+}

@@ -445,7 +445,7 @@ impl LaneApp<'_> {
                     self.quit_pending = true;
                 }
             }
-            Control::Help => self.show_help(),
+            Control::Help => self.st.show_help(),
             Control::Find(arg) => self.do_find(arg),
             Control::Fold => self.st.fold_command(),
             Control::Background(arg) => self.set_background(arg),
@@ -491,13 +491,6 @@ impl LaneApp<'_> {
                     &format!("不支持的 /conv 子命令：{arg}（支持 new / list / use <id>）"),
                 );
             }
-        }
-    }
-
-    /// `/help`：向 transcript 打印本地命令与快捷键说明（文案表见 [`help`]）。
-    fn show_help(&mut self) {
-        for line in help::LINES {
-            self.st.push_line(LineKind::System, line);
         }
     }
 
