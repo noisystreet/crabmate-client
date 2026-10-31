@@ -13,7 +13,6 @@ use super::approve::ApprovalChoice;
 use super::palette::Palette;
 use super::serve_defaults::ServeDefaults;
 use super::slash_menu::{SkillsCache, SkillsPayload, SlashItem, filtered_items, slash_prefix};
-use super::tool_summary::{tool_end_text, tool_row_text};
 use super::workspace_tree::{WsPickState, WsRow};
 
 // 搜索的命中集合与跳转：拆出去是为了增量维护（旧实现每个流式增量全量重扫，见文件头）。
@@ -31,6 +30,14 @@ mod context;
 // 历史分页（`/older` 前插）：与回放同源，单独成文件压 `state.rs` 行数。
 #[path = "state_history.rs"]
 mod history_page;
+
+// 执行过程的折叠 / 展开（issue #369）：纯结构操作，与搜索一样独立成文件压 `state.rs` 行数。
+#[path = "state_fold.rs"]
+mod fold;
+
+// 工具行的开始 / 结果回填（按 id 原位更新）：同上，拆出去压 `state.rs` 行数。
+#[path = "state_tools.rs"]
+mod tools;
 
 pub use history_page::HistoryPage;
 
@@ -51,6 +58,11 @@ pub enum LineKind {
     Thinking,
     Tool,
     System,
+    /// 一轮执行过程的摘要行（issue #369）：代表被它折叠掉的那段 Thinking / Tool 行。
+    ///
+    /// 不是一次工具调用，也不是用户输入：它只承载「这一轮干了多少事」的读数，
+    /// 前缀与配色因此与工具行同档，不抢答案的注意力。
+    Process,
 }
 
 /// 键盘焦点：底栏输入框、左栏会话列表或左栏工作区目录树。
@@ -146,6 +158,12 @@ pub struct LogLine {
     collapsed: bool,
     /// 工具行状态；仅供渲染分色与进度位，不参与文本（文本仍是 `tool_end_text` 的完整串）。
     tool_state: ToolState,
+    /// 被折叠进一条过程摘要行（issue #369）：`true` = 整行不渲染，展开时逐字还原。
+    /// 与 `collapsed`（一行折成一行预览）是两回事，见 [`Self::is_hidden`]。
+    hidden: bool,
+    /// 用户用 `/fold` 显式展开过（issue #369）：后续自动折叠不再碰它。
+    /// 没有这一位，展开的内容会在下一轮结束时被重新折回去 —— 用户意图被静默覆盖。
+    sticky_visible: bool,
     /// 行版本：内容 / 折叠 / 工具状态每变一次就换一个新值，供 body 行级缓存做指纹（O(1)）。
     /// 不用「文本长度」或逐行哈希：前者漏等长替换，后者每帧都要重算一遍全文。
     rev: u64,
@@ -161,6 +179,8 @@ impl LogLine {
             collapsed,
             // 非工具行没有状态可言；工具行由 `tool_start` 换成 `Running`。
             tool_state: ToolState::Finished(None),
+            hidden: false,
+            sticky_visible: false,
             rev: next_rev(),
         }
     }
@@ -370,6 +390,13 @@ pub struct UiState {
     pub skills_loading: bool,
     /// 右栏底部状态栈是否折叠（`F3`）：`false` = 展开；窄屏无状态栈，此开关无效果。
     pub status_stack_collapsed: bool,
+    /// 视口顶端那条逻辑行的下标（`render_body` 每帧回写）。
+    ///
+    /// 只有渲染层知道物理行与逻辑行的对应关系；折叠 / 展开改变了物理行数时，靠它把
+    /// 视线钉回原处（issue #369 的「回看也生效」）。
+    pub body_top_log: Option<usize>,
+    /// 折叠 / 展开后待下一帧恢复的视口锚点（`Some` = 还没钉回去）。
+    pub reanchor_log: Option<usize>,
     /// 权限写入代数（连选两档只认最后一次回包）与 `perm` 段菜单（`None` = 未打开）。
     pub permission_generation: u64,
     pub permission_menu: Option<crate::tui_mode::permission_intent::PermissionMenu>,
@@ -767,71 +794,6 @@ impl UiState {
         // 每次新请求都把光标复位到默认项：上一条审批停在哪一项，不该影响下一次的
         // 默认回答（否则「上次点了始终允许」会让下一条审批一回车就自动放行）。
         self.approval_choice = ApprovalChoice::default();
-    }
-
-    // ── 工具行摘要 ───────────────────────────────────────────
-
-    /// 工具开始：记一个「进行中」摘要行，RESULT 到达时原位补标记与状态。
-    ///
-    /// `note` 是事件里已经给出的「要执行什么」（`TOOL_CALL_START` 的 summary /
-    /// argsPreview）——一开始就显示，别等结果回来才让用户看到跑的是什么命令。
-    pub fn tool_start(&mut self, tool_call_id: &str, name: &str, note: Option<&str>) {
-        let display = if name.trim().is_empty() { "tool" } else { name };
-        let idx = self.lines.len();
-        self.lines.push(LogLine::with_tool_state(
-            LineKind::Tool,
-            &tool_row_text(display, note),
-            false,
-            ToolState::Running,
-        ));
-        // 没有 id 就无法按 id 找回这一行；结果到达时会另起一行，本行就此停在
-        // `Running`——与「id 缺失等于放弃了原位更新」的既有语义一致。
-        if !tool_call_id.is_empty() {
-            self.tool_pending.insert(tool_call_id.to_string(), idx);
-        }
-        self.search_on_line_added();
-    }
-
-    /// 工具结果：更新对应摘要行（note 与工具名重复时省略前缀，如 `✓ read file: hello.cpp`）；
-    /// 找不到 start（如续流中段）则补一行收尾。
-    pub fn tool_end(
-        &mut self,
-        tool_call_id: &str,
-        name: &str,
-        ok: Option<bool>,
-        note: Option<&str>,
-    ) {
-        let display = if name.trim().is_empty() { "tool" } else { name };
-        let text = tool_end_text(display, ok, note);
-        let idx = self.tool_pending.remove(tool_call_id);
-        match idx {
-            Some(i)
-                if self
-                    .lines
-                    .get(i)
-                    .is_some_and(|l| l.kind() == LineKind::Tool) =>
-            {
-                let line = &mut self.lines[i];
-                line.finish(text, ok);
-                // 原位替换了文本：命中集合要跟着改（可能是中间行，不是末尾）。
-                self.search_on_line_changed(i);
-            }
-            _ => {
-                // 没有对应的 start 行（续流中段）：直接补一行「已结束」。
-                self.lines.push(LogLine::with_tool_state(
-                    LineKind::Tool,
-                    &text,
-                    false,
-                    ToolState::Finished(ok),
-                ));
-                self.search_on_line_added();
-            }
-        }
-    }
-
-    /// 回合开始时清理上轮工具行映射。
-    pub fn reset_run_tools(&mut self) {
-        self.tool_pending.clear();
     }
 
     // ── thinking 折叠 ────────────────────────────────────────

@@ -25,6 +25,11 @@ pub enum Control {
     Resume,
     /// `/older`（别名 `/history`）：把更早一页历史前插到 transcript 头部。
     Older,
+    /// `/fold`：展开最近一条执行过程摘要（issue #369）。
+    ///
+    /// 折叠是自动的（回合结束 / 回放插入后），所以这里只需要「反悔」那一个方向 ——
+    /// 与 `/older` 相反：那个往回拿更多内容，这个把折起来的内容先放出来。
+    Fold,
     ConvNew,
     ConvRefresh,
     ConvUse(String),
@@ -117,6 +122,7 @@ pub fn parse_control(text: &str) -> Option<Control> {
         slash::RESUME => Some(Control::Resume),
         "older" | "history" => Some(Control::Older),
         "find" | "search" | "grep" => Some(Control::Find(arg_opt)),
+        "fold" | "unfold" => Some(Control::Fold),
         "background" | "bg" => Some(Control::Background(arg_opt)),
         "copy" | "yank" => Some(Control::Copy(arg_opt)),
         // `ctl` 只读查询控制面实例；`lane` 是它的超集（空参等价 `/ctl`，另加

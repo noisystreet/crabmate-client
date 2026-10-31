@@ -153,6 +153,8 @@ fn kind_style(kind: LineKind, pal: &Palette) -> Style {
         LineKind::Thinking => Style::new().fg(pal.muted),
         LineKind::Tool => Style::new().fg(pal.muted),
         LineKind::System => Style::new().fg(pal.err),
+        // 过程摘要行：与工具行同档色、不抢注意力（它只说「这里折了几步」）。
+        LineKind::Process => Style::new().fg(pal.info),
     }
 }
 
@@ -252,6 +254,11 @@ pub(crate) fn build_body_rows(st: &UiState, width: usize) -> Vec<BodyRow> {
     // 同类相邻（连续工具行）保持紧凑；`prev` 存 (类别, 前缀宽度) 供分隔线缩进。
     let mut prev: Option<(LineKind, usize)> = None;
     for (idx, log) in st.lines.iter().enumerate() {
+        // 被折进过程摘要的行整行不画（issue #369）。`prev` 不更新 —— 分隔线的缩进要按
+        // 最后一条**可见**行算，否则隐藏段后面会多出一条孤立分隔线。
+        if log.is_hidden() {
+            continue;
+        }
         let prefix_w = prefix_width(prefix_for(log));
         let matched = needle.is_some_and(|n| log.text().to_lowercase().contains(n));
         if let Some((_, prev_indent)) = prev.filter(|(k, _)| *k != log.kind()) {
@@ -285,6 +292,11 @@ pub(crate) fn line_rows(
     anchor: bool,
     pal: &Palette,
 ) -> Vec<BodyRow> {
+    // 被折进过程摘要的行：一个物理行都不出（issue #369）。折叠 / 展开只改 `hidden`，
+    // 缓存靠 `rev` 失效那一行，其余行不受影响。
+    if log.is_hidden() {
+        return Vec::new();
+    }
     let prefix = prefix_for(log);
     let prefix_w = prefix_width(prefix);
     let content_width = width.saturating_sub(prefix_w);
@@ -719,6 +731,8 @@ fn render_body(
         area.height,
     );
     if st.lines.is_empty() {
+        // 空 transcript 画不出锚点：留着它下一帧会按已失效的下标定位一次。
+        st.reanchor_log = None;
         let hint = Paragraph::new(Span::styled(
             BODY_EMPTY_HINT,
             Style::new().fg(st.palette.muted),
@@ -729,6 +743,13 @@ fn render_body(
     let rows = prepared;
     let rows_total = rows.len();
     let viewport = (text_area.height as usize).saturating_sub(1).max(1);
+    // 折叠 / 展开刚刚改变了物理行数：把原本在视口顶端的那条逻辑行钉回顶端，
+    // 否则用户正在回看的内容会突然上跳（`view_offset` 是「从底部回看的行数」）。
+    if let Some(target) = st.reanchor_log.take()
+        && let Some(pos) = rows.iter().position(|r| r.log_index == Some(target))
+    {
+        st.view_offset = rows_total.saturating_sub(pos + viewport);
+    }
     // 搜索命中行优先（`/find` 跳转要把它停在视口上 1/3 处）；窗口计算与 clamp 都在
     // `body_cache::scroll_window` 里，那里有单测。
     let anchor_pos = st
@@ -737,6 +758,8 @@ fn render_body(
     let win = super::body_cache::scroll_window(rows_total, viewport, st.view_offset, anchor_pos);
     // 在顶由渲染层回写：只有这里知道 `max_back`；前插保持贴顶、PgUp 续翻都读它。
     st.body_at_top = win.at_top;
+    // 视口顶端那条逻辑行：折叠 / 展开改变物理行数时，靠它把视线钉回原处（issue #369）。
+    st.body_top_log = rows[win.start..win.end].iter().find_map(|r| r.log_index);
     // 折叠思考行的 spinner 在此替换标记：body memo 不含帧号，故不会触发重建。
     // 只命中最后一条逻辑行（`prepared` 里可能有多条历史折叠行）。
     let spin_target = spin.map(|_| st.lines.len().saturating_sub(1));

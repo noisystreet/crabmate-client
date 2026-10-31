@@ -33,6 +33,8 @@ struct CachedLine {
     collapsed: bool,
     matched: bool,
     anchor: bool,
+    /// 被折进过程摘要（issue #369）：整行不出物理行，但缓存项保留以维持与 `lines` 一一对应。
+    hidden: bool,
 }
 
 impl CachedLine {
@@ -42,6 +44,7 @@ impl CachedLine {
             && self.collapsed == log.is_collapsed()
             && self.matched == matched
             && self.anchor == anchor
+            && self.hidden == log.is_hidden()
     }
 }
 
@@ -154,6 +157,20 @@ impl BodyCache {
             let matched = st.search_hits.binary_search(&i).is_ok();
             let is_anchor = anchor == Some(i);
             let start = self.flat.len();
+            // 被折进过程摘要（issue #369）：缓存项仍按 `lines` 一一对应地记，但不出物理行，
+            // 也不更新 `prev` —— 分隔线要按最后一条**可见**行缩进。
+            if log.is_hidden() {
+                self.lines.push(CachedLine {
+                    kind: log.kind(),
+                    rev: log.rev(),
+                    collapsed: log.is_collapsed(),
+                    hidden: true,
+                    matched,
+                    anchor: is_anchor,
+                });
+                self.starts.push(start);
+                continue;
+            }
             if let Some((_, prev_indent)) = prev.filter(|(k, _)| *k != log.kind()) {
                 self.flat.push(BodyRow::separator(width, prev_indent, pal));
             }
@@ -166,6 +183,7 @@ impl BodyCache {
                 collapsed: log.is_collapsed(),
                 matched,
                 anchor: is_anchor,
+                hidden: log.is_hidden(),
             });
             self.starts.push(start);
             prev = Some((log.kind(), prefix_w));

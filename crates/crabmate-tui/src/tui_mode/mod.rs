@@ -447,6 +447,7 @@ impl LaneApp<'_> {
             }
             Control::Help => self.show_help(),
             Control::Find(arg) => self.do_find(arg),
+            Control::Fold => self.st.fold_command(),
             Control::Background(arg) => self.set_background(arg),
             Control::Copy(arg) => self.copy_last(arg),
             Control::Ctl => self.fetch_ctl_list(),
@@ -717,6 +718,9 @@ impl LaneApp<'_> {
             return;
         }
         // 忙时排队的下一句：正常结束才自动发出（取消 / 出错退回输入框，见 `drafts`）。
+        // 一轮结束：把这轮的执行过程折成一条摘要（issue #369）。放在排队消息之前 ——
+        // 那条消息若立刻发出，新一轮的过程行应当接在这条摘要之后。
+        self.st.fold_after_turn(cancelled, failed);
         self.flush_queued_after_turn(failed, cancelled);
     }
 

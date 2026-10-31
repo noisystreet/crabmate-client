@@ -34,6 +34,8 @@
 
 > **2026-10-25 代码核对**：G1–G10 已逐条对着代码验过（`resume.rs` / `drafts.rs` / `clipboard.rs` / `sidebar_keys.rs` / `history.rs` / `overlay.rs` / `ws_sidebar.rs` / `status.rs`），表内状态即当时事实。G10 为本次核对新发现的缺口（顶栏删除后的遗留债）；G5 的「导出」与 G7 的 retry/regen/branch 仍依赖 serve 端点，不属可独立落地项。
 
+> **2026-10-31 补记**：新增缺口 G12「一轮的执行过程把 transcript 撑长」已落地（issue #369）——一轮的 `Thinking` / 工具行在回合结束时折成一条 `Process` 摘要行，`/older` 回放与滚动回看同样折叠，`/fold` 展开最近一条的原文。折叠单元是「**连续过程行段**」而不是回合区间（回放没有回合边界，区间会被前插错位）；`Assistant` / `System` 行永不折叠。落点见 `crates/crabmate-tui/src/tui_mode/state_fold.rs` 与 `CHANGELOG.md` 的 `[Unreleased]` 条目。
+
 ---
 
 ## 2. 目标与非目标
