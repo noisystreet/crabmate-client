@@ -10,9 +10,10 @@
      @color/cm_bg，且必须显式声明系统栏图标用浅色（windowLightStatusBar /
      windowLightNavigationBar = false）—— 底色恒为深色令牌，而 DayNight 的浅色变体默认给深色
      图标，漏声明就会在深色状态栏上看见一片空（图标与底色同色）。
-  3. **各启动页首绘底色**：frontend/index.html 的内联样式、desktop-tauri/splash.html 与
+  3. **各启动页首绘底色**：frontend/index.html 的内联样式与
      crates/crabmate-connect/assets/connect.html 的 bg0 变量，必须等于 --bg；否则首帧会闪出
-     另一种深色（未来令牌改浅色时则闪黑）。
+     另一种深色（未来令牌改浅色时则闪黑）。浅色主题的「首帧不闪」由 index.html 的预绘脚本与
+     app/shell_prefs_storage.rs 的本机主题镜像负责，不改变这里的色值约束。
 
 另外两处「抄漏也静默生效」的缺口一并堵上：
 
@@ -46,7 +47,6 @@ MIRRORED_TOKENS = ("bg", "surface", "text", "muted", "accent", "error")
 # 首绘底色：下面的正则在对应文件里必须命中且仅命中一次，否则说明声明被改名 / 搬走，门禁会静默失效。
 BOOT_BACKGROUNDS = (
     ("frontend/index.html", re.compile(r"background:\s*(#[0-9a-fA-F]{3,8})\s*;")),
-    ("desktop-tauri/splash.html", re.compile(r"--bg0:\s*(#[0-9a-fA-F]{3,8})\s*;")),
     ("crates/crabmate-connect/assets/connect.html", re.compile(r"--bg0:\s*(#[0-9a-fA-F]{3,8})\s*;")),
 )
 

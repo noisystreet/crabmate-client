@@ -2,7 +2,7 @@
 
 状态：已实施（第 1–3 步落地；第 4 步因前置条件未实测，按本方案指示退回并从方案中移除 —— 见文末「实施记录」）
 日期：2026-09-25
-范围：`frontend/` 业务 UI（Web / Desktop / Android 共用）；不含 `crates/crabmate-connect/assets/connect.html`、`desktop-tauri/splash.html` 两个独立启动页，也不含第三方 vendor 资源
+范围：`frontend/` 业务 UI（Web / Desktop / Android 共用）；不含 `crates/crabmate-connect/assets/connect.html` 这一独立启动页，也不含第三方 vendor 资源
 
 ## 背景
 
@@ -206,7 +206,7 @@ fn svg_common() -> (&'static str, &'static str, &'static str, &'static str, &'st
 ## 附：与既有文档的关系
 
 - 本方案是 `docs/design/ui_issue_todo.md` **Phase 1a–1d**（字号 / 语义色 / 高光前景 / 遮罩阴影 token 归一）的延续——那四期把「颜色与字号」字面量清到 0，本方案处理剩下的一类字面量：**图标**。
-- 「P2 · 样式与 token」中尚未勾选的「启动 splash 硬编码深色 `#07090e`」与本方案无关（那是启动底色，非图标），不要在本方案内顺带修改。
+- 「P2 · 样式与 token」中「启动 splash 硬编码深色 `#07090e`」与本方案无关（那是启动底色，非图标）；该条已由 #322 单独修复，不要在本方案内顺带修改。
 - 落地后在 `ui_issue_todo.md` 新增一条 P2 条目追踪，或在本文档顶部勾选状态；**单一信息源**：清单指本文档，本文档不复制清单内容。
 
 ## 实施记录（2026-09-25）

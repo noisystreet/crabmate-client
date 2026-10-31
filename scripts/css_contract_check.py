@@ -9,7 +9,6 @@
    - frontend：样式来源 = frontend/styles/*.css + frontend/themes/*.css + index.html 内联 <style>
                消费方   = frontend/src/**/*.rs + frontend/index.html
    - connect ：自包含页面（内联 style + 自身 class 消费）
-   - splash  ：自包含页面（内联 style + 自身 class 消费）
 2. 采集启发式：不猜测「全量 kebab 字符串」，只采信带证据的候选
    （attr / tuple / cond / fnbody / cooc / isstate）；只作 data-* 属性值的 token 记为噪声，
    不判违规。
@@ -43,13 +42,6 @@ SCOPES = [
         "css_globs": [],
         "css_files": ["crates/crabmate-connect/assets/connect.html"],
         "consumers": ["crates/crabmate-connect/assets/connect.html"],
-        "consumer_globs": [],
-    },
-    {
-        "name": "splash",
-        "css_globs": [],
-        "css_files": ["desktop-tauri/splash.html"],
-        "consumers": ["desktop-tauri/splash.html"],
         "consumer_globs": [],
     },
 ]

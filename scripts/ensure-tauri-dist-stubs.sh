@@ -7,14 +7,10 @@ cd "$ROOT"
 
 ensure_shell_dist() {
   local dir="$1"
-  local with_splash="${2:-0}"
   mkdir -p "$dir"
   [[ -f "${dir}/index.html" ]] || echo '<html></html>' >"${dir}/index.html"
   [[ -f "${dir}/connect.html" ]] || cp crates/crabmate-connect/assets/connect.html "${dir}/connect.html"
-  if [[ "${with_splash}" == "1" ]]; then
-    [[ -f "${dir}/splash.html" ]] || echo '<html></html>' >"${dir}/splash.html"
-  fi
 }
 
-ensure_shell_dist desktop-tauri/dist 1
-ensure_shell_dist mobile-tauri/dist 0
+ensure_shell_dist desktop-tauri/dist
+ensure_shell_dist mobile-tauri/dist
