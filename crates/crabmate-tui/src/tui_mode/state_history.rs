@@ -89,6 +89,9 @@ impl UiState {
         if self.body_at_top {
             self.view_offset = super::SCROLL_TOP;
         }
+        // ⑤ 回放出来的历史也按同一规则折叠（issue #369）：历史页没有回合边界，靠的正是
+        //    「连续过程行段」这个同一单元 —— 与实时路径同一个函数，因此行为一致。
+        self.fold_process_runs(None);
     }
 
     /// 回放（最新页 / 前插页）成功后记录游标。
