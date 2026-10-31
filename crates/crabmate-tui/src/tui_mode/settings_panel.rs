@@ -9,13 +9,14 @@ use unicode_width::UnicodeWidthStr;
 
 use super::SessionPrefs;
 use super::palette::THEME_OPTIONS;
-use super::render::{cell_window, horizontal_window, truncate_display};
+use super::render::truncate_display;
 use super::serve_defaults::ServeDefaults;
 use super::settings::{
     EffectiveView, FieldAction, Layer, LlmSave, PersistedSettings, PrefsSave, TOOL_CACHE_DISABLED,
     effective_value, is_valid_context_tokens, is_valid_temperature, normalize_str,
     validate_api_base,
 };
+use super::text::{cell_window, horizontal_window};
 
 /// 字段行标签列宽（cell；含标签与值之间间隔）。
 const LABEL_PAD: usize = 13;
