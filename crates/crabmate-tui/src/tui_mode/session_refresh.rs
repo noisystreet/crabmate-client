@@ -9,13 +9,15 @@
 //! [`SESSION_REFRESH_WINDOW`] 合并后统一发。**刷新语义不变**（回合结束必然刷新），只是
 //! 不再「一轮一发」。
 //!
-//! 本模块只收敛频次，**不按 serve 去重**：两条 lane 连同一台 serve 时仍各发一次（各自
-//! worker、各自的连接池）。按 `api_base` 去重必须同时把结果 fan-out 回同组的其它 lane，
-//! 否则那条 lane 的会话列表就再也不更新 —— 那是独立一步，见 issue #349。
+//! 本模块只管「什么时候发」。按 `api_base` 去重与回包 fan-out 在外壳
+//! （`TuiApp::flush_session_refresh` / `TuiApp::fanout_shared_refresh`）：那两件事要
+//! 看得到全部 lane 的连接信息，而这里只认 `LaneId`。
 
 use std::time::{Duration, Instant};
 
-use super::worker::LaneId;
+use crate::serve::same_api_base;
+
+use super::worker::{LaneId, UiEvent};
 
 /// 合并窗口：这段时间内积累的刷新意图只发一次。
 ///
@@ -70,6 +72,90 @@ impl SessionRefresh {
     }
 }
 
+/// 外壳侧的收敛点与广播：这两件事要看得到全部 lane 的连接信息，所以放在这里
+/// （`TuiApp` 的字段与 `LaneApp` 的意图位都在 `tui_mode` 模块内可见），而不是挤进
+/// 已经贴着 920 行上限的 `shell.rs`。
+impl super::TuiApp<'_> {
+    /// 把各 lane 的「回合结束待刷新」意图收敛成一次发送（issue #349）。
+    ///
+    /// 每轮帧循环调一次（`event_loop::run_loop`）：先收集意图，再按窗口合并发出去。
+    /// 窗口未到就什么都不发 —— 意图留在 [`SessionRefresh`] 里，下一轮的等待时长会把
+    /// 窗口剩余算进去，不会拖到 1s 兜底。
+    ///
+    /// 同一台 serve 只让**第一条** lane 去问：它的回包由 [`Self::fanout_shared_refresh`]
+    /// 复制给同组，所以被跳过的那条不是「不刷新」，只是不当第二个请求方。
+    pub(super) fn flush_session_refresh(&mut self, now: Instant) {
+        let wanted: Vec<LaneId> = self
+            .lanes
+            .iter()
+            .filter(|l| l.session_refresh_pending)
+            .map(|l| l.id)
+            .collect();
+        for id in wanted {
+            self.session_refresh.mark(id);
+        }
+        let mut claimed: Vec<String> = Vec::new();
+        for id in self.session_refresh.take_due(now) {
+            // 已 detach 的 lane：`detach_lane` 应该已经 `forget` 掉了，这里只是兜底。
+            let Some(lane) = self.lanes.iter_mut().find(|l| l.id == id) else {
+                continue;
+            };
+            lane.session_refresh_pending = false;
+            let base = lane.client.config().api_base.clone();
+            if claimed.iter().any(|c| same_api_base(c, base.as_str())) {
+                continue;
+            }
+            claimed.push(base);
+            lane.refresh_sessions();
+        }
+    }
+
+    /// 同一台 serve 的 lane 共用一份会话列表：代劳发请求的那条把回包复制给同组（issue #349）。
+    ///
+    /// 无状态广播，所以手动刷新（侧栏 `r` / `/conv refresh`）也会让同组一起更新 ——
+    /// 同一台 serve 本来就只有一份事实。只复制 [`UiEvent::Sessions`] 与
+    /// [`UiEvent::WorkspacePath`]：正文增量、审批、历史分页都属于**某条 lane 的会话**，
+    /// 复制过去就是串台。
+    ///
+    /// 启动期的 `bootstrap` 不走这里：那时每条 lane 各自首拉一次，属于启动瞬态。
+    pub(super) fn fanout_shared_refresh(&mut self, from: LaneId, ev: &UiEvent) {
+        if !matches!(ev, UiEvent::Sessions(_) | UiEvent::WorkspacePath(_)) {
+            return;
+        }
+        for id in self.shared_refresh_targets(from) {
+            let Some(lane) = self.lanes.iter_mut().find(|l| l.id == id) else {
+                continue;
+            };
+            match ev {
+                UiEvent::Sessions(result) => lane.on_msg(UiEvent::Sessions(result.clone())),
+                UiEvent::WorkspacePath(path) => lane.on_msg(UiEvent::WorkspacePath(path.clone())),
+                // 上面 `matches!` 已经挡掉其它变体。
+                _ => {}
+            }
+        }
+    }
+
+    /// 与 `from` 连同一台 serve 的其它 lane（`api_base` 按 [`same_api_base`] 比较，
+    /// 尾斜杠与大小写不算差异）。
+    fn shared_refresh_targets(&self, from: LaneId) -> Vec<LaneId> {
+        let Some(base) = self
+            .lanes
+            .iter()
+            .find(|l| l.id == from)
+            .map(|l| l.client.config().api_base.clone())
+        else {
+            return Vec::new();
+        };
+        self.lanes
+            .iter()
+            .filter(|l| {
+                l.id != from && same_api_base(base.as_str(), l.client.config().api_base.as_str())
+            })
+            .map(|l| l.id)
+            .collect()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::mpsc;
@@ -77,9 +163,12 @@ mod tests {
 
     use super::{SESSION_REFRESH_WINDOW, SessionRefresh};
     use crate::serve::ChatStreamOutcome;
+    use crate::serve::WebSessionsList;
     use crate::tui_mode::TuiApp;
     use crate::tui_mode::inbound::Inbound;
-    use crate::tui_mode::test_support::{test_client, test_prefs, test_shell_with_jobs};
+    use crate::tui_mode::test_support::{
+        test_client, test_client_at, test_prefs, test_shell_with_clients, test_shell_with_jobs,
+    };
     use crate::tui_mode::worker::{LaneId, UiEvent, WorkerJob};
 
     fn lane(n: u32) -> LaneId {
@@ -139,13 +228,13 @@ mod tests {
     }
 
     #[test]
+    /// 采集层不按 serve 去重：它只认 `LaneId`，不知道谁和谁连同一台。去重在外壳的
+    /// `flush_session_refresh`（按 `api_base`），所以这里两条都留下是正确的。
     fn lanes_are_independent_within_one_window() {
         let now = base();
         let mut r = SessionRefresh::default();
         r.mark(lane(1));
         r.mark(lane(2));
-        // 当前口径：不同 lane 各自要刷新自己的会话列表，所以两条都发（#349 的
-        // 按 serve 去重是后续一步，届时这里会变成一条 + fan-out）。
         assert_eq!(r.take_due(now), vec![lane(1), lane(2)]);
     }
 
@@ -216,10 +305,9 @@ mod tests {
     }
 
     #[test]
-    fn each_lane_still_gets_its_own_refresh() {
-        // 当前口径（#349 这一步只收敛频次）：不同 lane 各自刷新自己的会话列表，
-        // 所以两条都发。按 serve 去重必须同时 fan-out 结果，是后续一步 —— 到那时
-        // 这条断言应改成「1 条 + 同组两条 lane 都更新」。
+    fn lanes_on_the_same_serve_share_one_refresh() {
+        // 两条 lane 连同一台 serve（`test_shell_with_jobs` 给的是同一个 client）：
+        // 只让第一条去问，第二条等回包复制过去（issue #349 的去重面）。
         let client = test_client();
         let mut prefs = [test_prefs(), test_prefs()];
         let (mut app, jobs) = test_shell_with_jobs(&client, &mut prefs);
@@ -230,6 +318,79 @@ mod tests {
         app.flush_session_refresh(Instant::now());
 
         assert_eq!(sent_jobs(&jobs[0]), 1);
-        assert_eq!(sent_jobs(&jobs[1]), 1);
+        assert_eq!(sent_jobs(&jobs[1]), 0, "同一台 serve 不当第二个请求方");
+    }
+
+    #[test]
+    fn lanes_on_different_serves_refresh_separately() {
+        let first_client = test_client();
+        let second_client = test_client_at(2);
+        let mut prefs = [test_prefs(), test_prefs()];
+        let (mut app, jobs) = test_shell_with_clients(&[&first_client, &second_client], &mut prefs);
+        let (first, second) = (app.lanes[0].id, app.lanes[1].id);
+
+        finish_turn(&mut app, first);
+        finish_turn(&mut app, second);
+        app.flush_session_refresh(Instant::now());
+
+        assert_eq!(sent_jobs(&jobs[0]), 1);
+        assert_eq!(sent_jobs(&jobs[1]), 1, "不同 serve 各刷各的");
+    }
+
+    #[test]
+    fn sessions_result_reaches_every_lane_on_the_same_serve() {
+        let client = test_client();
+        let mut prefs = [test_prefs(), test_prefs()];
+        let (mut app, _jobs) = test_shell_with_jobs(&client, &mut prefs);
+        let first = app.lanes[0].id;
+
+        app.on_msg(Inbound::FromLane(
+            first,
+            UiEvent::Sessions(Ok(WebSessionsList {
+                sessions: Vec::new(),
+                active_session_id: Some("conv-x".into()),
+                raw_sessions: serde_json::Value::Null,
+            })),
+        ));
+
+        assert_eq!(app.lanes[0].st.active_session_id.as_deref(), Some("conv-x"));
+        assert_eq!(
+            app.lanes[1].st.active_session_id.as_deref(),
+            Some("conv-x"),
+            "同 serve 的第二条也要拿到这份列表"
+        );
+    }
+
+    #[test]
+    fn workspace_path_is_shared_between_lanes_on_the_same_serve() {
+        let client = test_client();
+        let mut prefs = [test_prefs(), test_prefs()];
+        let (mut app, _jobs) = test_shell_with_jobs(&client, &mut prefs);
+        let first = app.lanes[0].id;
+
+        app.on_msg(Inbound::FromLane(
+            first,
+            UiEvent::WorkspacePath(Some("/srv/a".into())),
+        ));
+
+        assert_eq!(app.lanes[1].st.workspace_path.as_deref(), Some("/srv/a"));
+    }
+
+    #[test]
+    fn workspace_path_is_not_shared_across_serves() {
+        let first_client = test_client();
+        let second_client = test_client_at(2);
+        let mut prefs = [test_prefs(), test_prefs()];
+        let (mut app, _jobs) =
+            test_shell_with_clients(&[&first_client, &second_client], &mut prefs);
+        let first = app.lanes[0].id;
+
+        app.on_msg(Inbound::FromLane(
+            first,
+            UiEvent::WorkspacePath(Some("/srv/a".into())),
+        ));
+
+        assert_eq!(app.lanes[0].st.workspace_path.as_deref(), Some("/srv/a"));
+        assert_eq!(app.lanes[1].st.workspace_path, None, "不同 serve 不许串台");
     }
 }
