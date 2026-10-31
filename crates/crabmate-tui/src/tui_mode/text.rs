@@ -1,7 +1,7 @@
-//! 按**显示列**截断文本的共用工具（CJK / 全角标点按 2 列计）。
+//! 按**显示列**截断 / 折行 / 水平滑窗的共用工具（CJK / 全角标点按 2 列计）。
 //!
 //! 从 `render.rs` 抽出：一是 `render.rs` 已贴着 920 行门禁，二是这条规则被状态栏、左右
-//! 侧栏、设置面板共用，留在渲染模块里容易被当成「只给状态行用」。
+//! 侧栏、设置面板、composer 共用，留在渲染模块里容易被当成「只给状态行用」。
 //!
 //! **不变式：返回值显示宽恒 ≤ `width`**（连结尾的 `…` 一起算）。
 //!
@@ -74,9 +74,144 @@ pub(super) fn wrap_display(text: &str, width: usize) -> Vec<String> {
     out
 }
 
+/// 水平滚动窗口：返回（可见起点显示列、光标在可见文本中的显示列）。
+///
+/// **不变式：`start` 落在字符边界上，且 `shown_cursor < width`。** 两条都得成立：
+/// [`cell_window`] 只整字跳过，起点若落在宽字符中间，实际渲染会比 `start` 少算 1 列，
+/// 光标于是被画到末尾汉字的**中间**（`shown_cursor == width` 时更糟——越界后被
+/// 光标定位 clamp 到 `width - 1`，正好压在后半个宽字上）。
+///
+/// 历史实现直接返回 `cursor + 1 - width`（再 `.min(total - width)`），两个取值都可能是
+/// 半个宽字的偏移，于是「一行汉字铺满后光标落在末字中间」。
+///
+/// 光标贴右缘、右侧留 1 列：起点至少要 `cursor + 1 - width`；再向列号增大方向取到最近的
+/// 字符起点（宁可多滚半个宽字出去，也不切半字），这样 `cursor - start ≤ width - 1` 恒成立。
+///
+/// 边界：`width == 1` 且光标前是宽字符时无字可显示（空窗口、光标列 0）——1 列放不下任何
+/// 汉字，与其画半个字，不如留白。
+pub(super) fn horizontal_window(text: &str, cursor_cell: usize, width: usize) -> (usize, usize) {
+    if width == 0 {
+        return (0, 0);
+    }
+    // 光标落在行内：不用滚动。注意判据是 `cursor_cell < width` 而不是「文本装得下」——
+    // 一行正好铺满（`cursor_cell == width`）时光标位就不在行内了，必须滚。
+    if cursor_cell < width {
+        return (0, cursor_cell);
+    }
+    let want = cursor_cell.saturating_add(1).saturating_sub(width);
+    // `min(cursor_cell)` 是防御而非算法需要：`cursor_cell` 正常由「同一段文本的光标前缀」
+    // 量宽得来，该前提下结果必然 ≤ 它；万一调用方传了不自洽的值，这里退化成「不滚动」，
+    // 而不是让裸减法下溢（debug 下 panic，release 下回绕成巨大列号被 `as u16` 截断）。
+    let start = char_start_at_or_after(text, want).min(cursor_cell);
+    (start, cursor_cell - start)
+}
+
+/// 返回 `≥ cell` 的最小**字符起点**（显示列）；走出文本尾部时返回文本总宽。
+///
+/// 唯一的硬前提是 `cell ≤ 光标列`：只在这个前提下结果才必然 ≤ 光标列。调用方做减法前
+/// 仍宜 clamp（见 [`horizontal_window`]），免得输入不自洽时下溢。
+fn char_start_at_or_after(text: &str, cell: usize) -> usize {
+    let mut used = 0usize;
+    for ch in text.chars() {
+        if used >= cell {
+            return used;
+        }
+        used += ch.width().unwrap_or(0);
+    }
+    used
+}
+
+/// 从显示列 `start` 起取 `cells` 列的可见串；宽字符整体跳/取，不切半字。
+///
+/// 只能整字跳，所以 `start` 落在宽字符中间时会把那个字整字画出来（实际起点比 `start`
+/// 少算 1 列）。需要光标对齐的调用方请用 [`horizontal_window`] 算 `start`，它保证落在
+/// 字符边界上。
+pub(super) fn cell_window(text: &str, start: usize, cells: usize) -> String {
+    let mut out = String::new();
+    let mut skipped = 0usize;
+    let mut taken = 0usize;
+    for ch in text.chars() {
+        let cw = ch.width().unwrap_or(0);
+        if skipped + cw <= start {
+            skipped += cw;
+            continue;
+        }
+        if taken + cw > cells {
+            break;
+        }
+        out.push(ch);
+        taken += cw;
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 窗口不变式的表驱动校验：起点必是字符边界（`cell_window` 从该处起算不丢列），
+    /// 且光标列落在可视宽内——否则光标会压在后半个宽字上或被裁到行外。
+    #[test]
+    fn horizontal_window_keeps_cursor_inside_and_on_char_boundary() {
+        for (content, cursor, width) in [
+            ("", 0, 4),
+            ("abc", 3, 4),
+            ("abcdefgh", 8, 4),
+            ("abcdefgh", 8, 0),
+            ("crabmate> 你好", 14, 6),
+            ("你好你好你", 10, 4),
+            ("你好你好你", 6, 3),
+            ("a你b好c", 7, 2),
+        ] {
+            let (start, c) = horizontal_window(content, cursor, width);
+            if width == 0 {
+                assert_eq!((start, c), (0, 0), "{content:?} @ {width}");
+                continue;
+            }
+            assert!(
+                start <= cursor,
+                "{content:?} @ {cursor}/{width}：起点越过光标"
+            );
+            assert!(c < width, "{content:?} @ {cursor}/{width}：光标列 {c} 越界");
+            // 起点落在字符边界 ⇔ 从 `start` 起的切片宽度正好等于「总宽 - start」。
+            let full = UnicodeWidthStr::width(content);
+            let tail = UnicodeWidthStr::width(cell_window(content, start, full).as_str());
+            assert_eq!(
+                tail,
+                full - start,
+                "{content:?} @ {cursor}/{width}：起点切了半个宽字"
+            );
+        }
+    }
+
+    /// `cell_window` 只能整字跳过：起点落在宽字符中间时把那个字整字画出，故调用方须先经
+    /// [`horizontal_window`] 对齐到字符边界。
+    #[test]
+    fn cell_window_keeps_wide_char_boundary() {
+        assert_eq!(cell_window("你好世界", 2, 4), "好世");
+        assert_eq!(cell_window("你a好b", 3, 3), "好b");
+    }
+
+    /// 一行汉字正好铺满：起点必须退到字符边界，否则光标压在后半个字上。
+    #[test]
+    fn wide_char_line_full_cursor_keeps_char_boundary() {
+        let content = "你好你好你";
+        let (start, c) = horizontal_window(content, 10, 4);
+        assert_eq!(start, 8, "起点须落在宽字符边界，而不是切半字");
+        // 右缘对齐受宽字 2 列限制，光标列只能到 width-2（宁可右缘空 2 列，也不压半个字）。
+        assert_eq!(cell_window(content, start, 4), "你");
+        assert_eq!(c, 2);
+    }
+
+    /// 调用方传了不自洽的 `cursor_cell`（超出文本宽）也不能下溢 panic：起点仍钳在文本尾部。
+    #[test]
+    fn horizontal_window_clamps_inconsistent_cursor() {
+        let (start, _c) = horizontal_window("ab", 99, 4);
+        assert_eq!(
+            start, 2,
+            "起点应钳到文本总宽，而不是越过 cursor_cell 后下溢"
+        );
+    }
 
     #[test]
     fn text_that_fits_is_returned_unchanged() {

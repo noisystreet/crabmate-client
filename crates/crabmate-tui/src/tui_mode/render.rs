@@ -6,7 +6,7 @@ use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+use unicode_width::UnicodeWidthStr;
 
 use super::layout::panes_with_lanes;
 use super::md;
@@ -393,6 +393,9 @@ fn display_lines(st: &UiState, width: usize) -> Vec<Line<'static>> {
 // 截断规则已下沉到 [`super::text`]：`render.rs` 贴着 920 行门禁，且状态栏 / 左右侧栏 /
 // 设置面板共用同一条「显示宽 ≤ width」的不变式。这里保留再导出，历史调用方不必搬家。
 pub(super) use super::text::truncate_display;
+// 输入行水平窗口（起点、光标显示列）与按显示列切片的规则同样住在 [`super::text`]：本文件
+// 自用（composer），设置面板自己 `use super::text::…`，不再经这里绕一层。
+use super::text::{cell_window, horizontal_window};
 // 审批浮层的「命令区总共多少行 / 能画多少行」要按键侧也用：滚动上界必须与渲染同源，
 // 否则 `End` 会停在一个渲染时才被截掉的越界值上。
 pub(super) use overlay::approval_scroll_bounds;
@@ -777,40 +780,6 @@ fn composer_window(
         .map(|l| cell_window(l, hstart, width))
         .collect();
     (shown, disp_row, shown_cursor, hstart)
-}
-
-/// 输入行水平窗口起点与光标在可见文本中的显示列（设置面板文本编辑复用）。
-pub(super) fn horizontal_window(content: &str, cursor_cell: usize, width: usize) -> (usize, usize) {
-    let total = UnicodeWidthStr::width(content);
-    if total <= width || width == 0 {
-        return (0, cursor_cell.min(total));
-    }
-    // 光标贴右缘前留 1 列：需要窗口起点 = cursor+1-width，再收尾 clamp 到 total-width。
-    let start = cursor_cell
-        .saturating_add(1)
-        .saturating_sub(width)
-        .min(total.saturating_sub(width));
-    (start, cursor_cell.saturating_sub(start))
-}
-
-/// 从显示列 `start` 起取 `cells` 列的可见串；宽字符整体跳/取，不切半字。
-pub(super) fn cell_window(text: &str, start: usize, cells: usize) -> String {
-    let mut out = String::new();
-    let mut skipped = 0usize;
-    let mut taken = 0usize;
-    for ch in text.chars() {
-        let cw = ch.width().unwrap_or(0);
-        if skipped + cw <= start {
-            skipped += cw;
-            continue;
-        }
-        if taken + cw > cells {
-            break;
-        }
-        out.push(ch);
-        taken += cw;
-    }
-    out
 }
 
 /// 画 composer 边框（或无边框退化）并返回可用内区；内区为空时返回 `None`。

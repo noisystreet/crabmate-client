@@ -489,27 +489,21 @@ fn sidebar_selected_row_gets_bar_and_selection_bg() {
     assert!(used <= width, "选中行超宽：{used} > {width}");
 }
 
+/// composer 绘制路径的端到端口径：宽字符行末时光标列落在可视宽内，窗口起点不切半字。
+/// 纯函数的边界用例归 `text.rs::tests`，这里只守「绘制侧拿到的四个返回值彼此自洽」。
 #[test]
-fn cell_window_keeps_wide_char_boundary() {
-    assert_eq!(cell_window("你好世界", 2, 4), "好世");
-    assert_eq!(cell_window("你a好b", 3, 3), "好b");
-}
-
-#[test]
-fn visible_window_scrolls_to_cursor_on_right() {
-    let (start, c) = horizontal_window("abcdefgh", 8, 4);
-    assert_eq!(cell_window("abcdefgh", start, 4), "efgh");
-    assert_eq!(c, 4);
-}
-
-#[test]
-fn visible_window_wide_char_cursor() {
-    // 光标在末尾(14)，可视宽 6 → 滚到光标附近。
-    let content = "crabmate> 你好";
-    let (start, c) = horizontal_window(content, 14, 6);
-    let shown = cell_window(content, start, 6);
-    assert!(shown.contains("好"));
-    assert_eq!(c, 6);
+fn composer_window_wide_char_cursor_stays_inside_width() {
+    let mut st = UiState::new();
+    st.focus = Focus::Input;
+    for ch in "你好你好你好".chars() {
+        st.insert_char(ch);
+    }
+    let width = 9;
+    let (shown, disp_row, c, hstart) = composer_window(&st, width, 1);
+    assert_eq!(disp_row, 0);
+    assert!(c < width, "光标列 {c} 越出可视宽 {width}");
+    assert_eq!(hstart, 4, "起点须落在宽字符边界");
+    assert_eq!(UnicodeWidthStr::width(shown[0].as_str()), 12 - hstart);
 }
 
 #[test]
