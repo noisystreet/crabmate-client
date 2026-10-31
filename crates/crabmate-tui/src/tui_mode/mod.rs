@@ -220,6 +220,9 @@ impl<'a> TuiApp<'a> {
                 // 就是最长 600s 的静默停摆（见 issue #337）。提示归提示，事件仍要
                 // 分派给**它自己**那条 lane —— 浮层建在它的 `st` 上。
                 self.announce_background_approval(id, &ev);
+                // 同一台 serve 的其它 lane 也要拿到这份事实：刷新已按 serve 去重，回包
+                // 得复制过去，否则被跳过的那条会话列表就再也不更新（issue #349）。
+                self.fanout_shared_refresh(id, &ev);
                 // 目标 lane 已关闭：丢弃，绝不把增量写进别的 transcript —— 串台比丢一条
                 // 增量难查得多，而这正是 `Inbound` 存在的理由。
                 if let Some(lane) = self.lanes.iter_mut().find(|l| l.id == id) {

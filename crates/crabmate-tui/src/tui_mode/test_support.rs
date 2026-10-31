@@ -30,12 +30,22 @@ pub(super) fn test_prefs() -> SessionPrefs {
     }
 }
 
-/// 不连网的 `ServeClient`。
-///
-/// 端口 1 必然连不上：接线测试只关心「状态怎么变」，任何真发出去的请求都应该失败得
-/// 明明白白，而不是悄悄打到某个本地 serve 上、让断言依赖外部环境。
+/// 不连网的 `ServeClient`（端口 1 必然连不上）。
 pub(super) fn test_client() -> ServeClient {
-    ServeClient::new(ConnectionConfig::new("http://127.0.0.1:1", "")).expect("client")
+    test_client_at(1)
+}
+
+/// 指定端口的「不连网」client。
+///
+/// 接线测试只关心「状态怎么变」，任何真发出去的请求都应该失败得明明白白，而不是悄悄
+/// 打到某个本地 serve 上、让断言依赖外部环境。多 serve 场景要能造**不同**的
+/// `api_base`，所以端口可指定。
+pub(super) fn test_client_at(port: u16) -> ServeClient {
+    ServeClient::new(ConnectionConfig::new(
+        format!("http://127.0.0.1:{port}"),
+        "",
+    ))
+    .expect("client")
 }
 
 /// 构造一条 lane：`yes` / `no_keyring` 都打开，其余为启动初始态。
@@ -133,13 +143,25 @@ pub(super) fn test_shell_with_jobs<'a>(
     client: &'a ServeClient,
     prefs: &'a mut [SessionPrefs],
 ) -> (TuiApp<'a>, Vec<mpsc::Receiver<WorkerJob>>) {
+    let clients: Vec<&'a ServeClient> = prefs.iter().map(|_| client).collect();
+    test_shell_with_clients(&clients, prefs)
+}
+
+/// 同 [`test_shell_with_jobs`]，但每条 lane 用**各自的** client（不同 `api_base`）。
+///
+/// 「同一台 serve 只问一次」与「不同 serve 各问各的」这两条规则只有在这里才测得出来。
+pub(super) fn test_shell_with_clients<'a>(
+    clients: &[&'a ServeClient],
+    prefs: &'a mut [SessionPrefs],
+) -> (TuiApp<'a>, Vec<mpsc::Receiver<WorkerJob>>) {
+    assert_eq!(clients.len(), prefs.len(), "每条 lane 一个 client");
     let (shell_tx, rx) = mpsc::channel();
     let mut lanes = Vec::new();
     let mut job_rxs = Vec::new();
     // 条数在借出去之前记下：`prefs` 会被逐条 `iter_mut` 借到 `'a`，循环后再
     // 读 `len()` 会与那份借用冲突。
     let count = prefs.len();
-    for (i, p) in prefs.iter_mut().enumerate() {
+    for (i, (p, client)) in prefs.iter_mut().zip(clients.iter()).enumerate() {
         let (job_tx, job_rx) = mpsc::channel();
         job_rxs.push(job_rx);
         lanes.push(lane_with_tx(

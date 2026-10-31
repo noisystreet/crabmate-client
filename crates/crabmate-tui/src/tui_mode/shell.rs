@@ -7,7 +7,6 @@
 use std::borrow::Cow;
 use std::io;
 use std::sync::mpsc;
-use std::time::Instant;
 
 use anyhow::{Context, Result};
 use crossterm::cursor::SetCursorStyle;
@@ -577,31 +576,6 @@ impl<'a> super::TuiApp<'a> {
     /// 光说「没有这条」只会让人再猜一次。
     fn lane_labels(&self) -> Vec<String> {
         self.lanes.iter().map(|l| l.label.clone()).collect()
-    }
-
-    /// 把各 lane 的「回合结束待刷新」意图收敛成一次发送（issue #349）。
-    ///
-    /// 每轮帧循环调一次（`event_loop::run_loop`）：先收集意图，再按窗口合并发出去。
-    /// 窗口未到就什么都不发 —— 意图留在 [`super::session_refresh::SessionRefresh`] 里，
-    /// 下一轮的等待时长会把窗口剩余算进去，不会拖到 1s 兜底。
-    pub(super) fn flush_session_refresh(&mut self, now: Instant) {
-        let wanted: Vec<LaneId> = self
-            .lanes
-            .iter()
-            .filter(|l| l.session_refresh_pending)
-            .map(|l| l.id)
-            .collect();
-        for id in wanted {
-            self.session_refresh.mark(id);
-        }
-        for id in self.session_refresh.take_due(now) {
-            // 已 detach 的 lane：`detach_lane` 应该已经 `forget` 掉了，这里只是兜底。
-            let Some(lane) = self.lanes.iter_mut().find(|l| l.id == id) else {
-                continue;
-            };
-            lane.session_refresh_pending = false;
-            lane.refresh_sessions();
-        }
     }
 
     /// `ShellEvent::Detach`：摘掉本进程的一条连接（**只摘自己的账**）。
