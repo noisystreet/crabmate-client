@@ -155,28 +155,40 @@ impl UiState {
     /// `suffix` 追加在读数之后（耗时 / 结局），由调用方给：实时路径知道这一轮跑了多久、
     /// 怎么结束的，回放路径不知道。已折过的段自动跳过，因此可以反复调用。
     pub fn fold_process_runs(&mut self, suffix: Option<&str>) {
+        self.fold_runs(&|_, _, _| suffix.map(str::to_string));
+    }
+
+    /// 折段主流程。`tail_of` 按段给收尾词 —— 回放与 `/fold` 一律 `None`，
+    /// 回合结束则逐段判断（见 `fold_after_turn` 与 `run_tail`）。
+    fn fold_runs(&mut self, tail_of: &dyn Fn(&Self, usize, usize) -> Option<String>) {
         let runs = self.process_runs();
         if runs.is_empty() {
             return;
         }
+        // 先算尾巴：`tail_of` 只读 `lines`，算完再动 `&mut self.lines`，借用不打架。
+        let tails: Vec<Option<String>> = runs
+            .iter()
+            .map(|&(start, end)| tail_of(self, start, end))
+            .collect();
         // 折完之后每段多出**一条**摘要行，所以视口锚点与折叠光标都要按这个偏移重算。
         // 不映射的话：段在锚点上方 → 钉到偏 N 行的地方；段跨过锚点 → 那一行已被隐藏、
         // 根本不产出物理行，`position` 找不到，reanchor 整个失效。必须在插入前算
         // （`runs` 是旧下标）。
         let top = self.body_top_log.map(|t| remap_after_fold(t, &runs));
         let cursor = self.fold_cursor.map(|c| remap_after_fold(c, &runs));
+        // 只有回合结束路径才清工具行映射：`/older` 前插也会调到这里，而它刚把映射
+        // 按前插量平移好（见 `state_history` 的 ①），清掉等于堵死「哪天放开回合内翻页」。
+        let turn_end = tails.iter().any(Option::is_some);
         // 从后往前：插入摘要行会让后面的下标整体 +1，倒序处理省掉一次重映射。
-        for (start, end) in runs.into_iter().rev() {
-            let summary = self.run_summary(start, end, suffix);
+        for ((start, end), tail) in runs.iter().copied().zip(tails.iter()).rev() {
+            let summary = self.run_summary(start, end, tail.as_deref());
             for line in &mut self.lines[start..end] {
                 line.set_hidden(true);
             }
             self.lines
                 .insert(start, LogLine::new(LineKind::Process, &summary, false));
         }
-        // 只有回合结束路径才清工具行映射：`/older` 前插也会调到这里，而它刚把映射
-        // 按前插量平移好（见 `state_history` 的 ①），清掉等于堵死「哪天放开回合内翻页」。
-        if suffix.is_some() {
+        if turn_end {
             self.tool_pending.clear();
         }
         // 光标跟着插入的摘要行走（见 `remap_after_fold`）：漏了这一步，导航会在折叠之后
@@ -423,15 +435,51 @@ impl UiState {
     /// 文案只能是聚合读数 —— 一句话的任务摘要要跨工具归纳，客户端拿不到（见 issue #369
     /// 的非目标）。将来 Server 若在回合结束事件里给出摘要，这里换文案即可，结构不用动。
     pub fn fold_after_turn(&mut self, cancelled: bool, failed: bool) {
-        // 取消优先于「出错」：`failed` 把 `interrupted.is_some()` 也算进去，而 Ctrl+C 的
-        // 常见结局正是「cancel 未送达 / 传输中断」——先判 `failed` 会把用户主动取消的
-        // 回合写成「出错」（见 `resume::record_turn_outcome` 对这两个来源的区分）。
-        let tail = match (cancelled, failed) {
-            (true, _) => " · 已取消",
-            (_, true) => " · 出错",
-            _ => " · 完成",
-        };
-        self.fold_process_runs(Some(tail));
+        self.fold_runs(&|st, start, end| {
+            Some(st.run_tail(start, end, cancelled, failed).to_string())
+        });
+    }
+
+    /// 一段执行过程的收尾词 —— **按段内事实**判，而不是按整轮状态一刀切。
+    ///
+    /// 一轮里可能有几段（模型的中途答案会把过程行断开），而取消只打断最后那一段。
+    /// 以前把整轮的 `cancelled` 贴到每一段上，于是「工具全 ✓、答案也给了」的段也
+    /// 写着「已取消」—— 展开一看全是绿的，摘要却在说取消。
+    ///
+    /// 判据只看段内能不能自证：
+    /// - 还有工具停在 `Running`（serve 没再给结果）→ 这一段确实没跑完，用整轮的结局词；
+    /// - 有工具判了失败（`✗`）→「有失败」；
+    /// - 工具都结束了 →「完成」，无论整轮后来是因为什么结束的；
+    /// - 纯思考段自己看不出成败 → 只能听整轮的。
+    fn run_tail(&self, start: usize, end: usize, cancelled: bool, failed: bool) -> &'static str {
+        let members = &self.lines[start..end];
+        let tools = members.iter().filter(|l| l.kind() == LineKind::Tool);
+        let mut running = false;
+        let mut any_tool = false;
+        let mut any_failed = false;
+        for line in tools {
+            any_tool = true;
+            running |= line.tool_state().is_running();
+            any_failed |= line.tool_state().ok() == Some(false);
+        }
+        if running {
+            return if cancelled {
+                " · 已取消"
+            } else {
+                " · 已中断"
+            };
+        }
+        if !any_tool {
+            return match (cancelled, failed) {
+                (true, _) => " · 已取消",
+                (_, true) => " · 出错",
+                _ => " · 完成",
+            };
+        }
+        if any_failed {
+            return " · 有失败";
+        }
+        " · 完成"
     }
 
     /// 所有「够长、还没被折」的过程行段（`[start, end)`，半开区间）。
