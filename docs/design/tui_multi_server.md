@@ -1,6 +1,6 @@
 # TUI 多 serve 连接与多 agent 并行（多 lane）
 
-> **状态**：**W1 / W1b / W2 已落地**（`LaneApp` 抽取 `cc0c06f`、事件来源标签 `b73ed83`；每 lane 独立 worker 与独立 `overrides`、`--connect <name>=<url>` 多 serve 装配、左栏 lane 列表与切换 ——`Alt+←/→` 或点行，**单 lane 也显示**；lane 行带该 serve 当前的**工作区末段**，`POST /workspace` 的 409 `WORKSPACE_ALREADY_SET` 单独识别并提示「另起 lane」—— 见 §4.7）。**W3 部分落地**：多连接靠 `--connect`；运行期**只读**查询控制面已落地（`--ctl-socket <path>` 或默认 `$XDG_RUNTIME_DIR/crabmate/ctl.sock`，`/ctl` 列出实例，**只有 `observed == ready` 算可连** —— 看 `state` 会把死实例当活的）。运行期**加连接**也已落地（§4.8）：`/lane attach <name>` 连声明里**已就绪**的实例，`/lane new <name> [workspace]` 经控制面 `add` 写声明 → 轮询到 `observed == ready` → 直接连上，两者都不用重启进程。仍未做：`tui-connections.toml` 配置文件、启动逐 profile `/health` 探测、`/lane close`（软摘一条声明要接 Server 的 `disable` / `enable`；硬 `remove` 会丢掉手写 `env` / `config`，不做）。**W4 / W5 仍有缺口**：审批浮层随 `UiState` 下沉到每条 lane（不串台），后台 lane 弹审批会在当前 lane 留一行提示、`F4` 直接跳过去、`/lane cancel` 可取消它那一轮；仍无跨 lane 审批队列与全局待审批计数。状态栏无 `lanes N/M`（lane 行的 `·●▲×` 状态点已落地）。`MAX_LANES = 8` 已落地：启动超限直接报错，运行期 `/lane attach|new` 超限只在发起命令那条 lane 提示。tracking Issue [#327](https://github.com/noisystreet/crabmate-client/issues/327)。
+> **状态**：**W1 / W1b / W2 已落地**（`LaneApp` 抽取 `cc0c06f`、事件来源标签 `b73ed83`；每 lane 独立 worker 与独立 `overrides`、`--connect <name>=<url>` 多 serve 装配、左栏 lane 列表与切换 ——`Alt+←/→` 或点行，**单 lane 也显示**；lane 行带该 serve 当前的**工作区末段**，`POST /workspace` 的 409 `WORKSPACE_ALREADY_SET` 单独识别并提示「另起 lane」—— 见 §4.7）。**W3 部分落地**：多连接靠 `--connect`；运行期**只读**查询控制面已落地（`--ctl-socket <path>` 或默认 `$XDG_RUNTIME_DIR/crabmate/ctl.sock`，`/ctl` 列出实例，**只有 `observed == ready` 算可连** —— 看 `state` 会把死实例当活的）。运行期**加连接**也已落地（§4.8）：`/lane attach <name>` 连声明里**已就绪**的实例，`/lane new <name> [workspace]` 经控制面 `add` 写声明 → 轮询到 `observed == ready` → 直接连上，两者都不用重启进程。仍未做：`tui-connections.toml` 配置文件与启动逐 profile `/health` 探测（余下两项见 [#353](https://github.com/noisystreet/crabmate-client/issues/353)）。`/lane close` / `/lane open` **已落地**（§4.8：软摘一条声明走控制面 `disable` / `enable`）；硬 `remove` 不做（会连手写 `env` / `config` 一起删掉）。**W4 / W5 仍有缺口**：审批浮层随 `UiState` 下沉到每条 lane（不串台），后台 lane 弹审批会在当前 lane 留一行提示、`F4` 直接跳过去、`/lane cancel` 可取消它那一轮；仍无跨 lane 审批队列（§4.4 已论证：收拢会让 `answer` 通道画到别人的屏上）。状态栏无 `lanes N/M` 与全局待审批计数 —— 已拆到 [#354](https://github.com/noisystreet/crabmate-client/issues/354)；lane 行的 `·●▲×` 状态点已落地。`MAX_LANES = 8` 已落地：启动超限直接报错，运行期 `/lane attach|new` 超限只在发起命令那条 lane 提示。tracking Issue [#327](https://github.com/noisystreet/crabmate-client/issues/327)。
 > **范围**：**§1–§8 仅覆盖 `crates/crabmate-tui` 的全屏 `tui` 模式**；**§9 是 Desktop 复用评估**（结论性分析，不含实施承诺）。**不改** Server 契约（SSE / 审批 / 错误码 / 工作区语义），**不覆盖** Android / Web。
 > **关联**：[`remote_cli_tui.md`](./remote_cli_tui.md)（TUI 母方案）、[`tui_settings_panel.md`](./tui_settings_panel.md)（设置面板，user-data 语义）、[`tui_usability.md`](./tui_usability.md)、[`client_shared_logic.md`](./client_shared_logic.md)（共享层边界）、[`contract_pin.md`](./contract_pin.md)（契约钉点）；Server `docs/design/user_data_dir.md`（user-data 权威）
 
@@ -185,7 +185,7 @@ api_base = "http://127.0.0.1:8082"
 - 版面口径只有一处：lane 区高度 `lane_pane_height`、可用条数 `lane_shown_len`、行 → 下标 `lane_index_at` 都在 `layout`，`render` 与 `TuiApp::lane_at_click` 共用；各算一遍的症状是「点第 2 行切到别的 lane」。
 - 切换是 `Alt+←/→` 或点某一行，只改 `active`，不打断在途回合；单连接时 `switch_lane` 直接返回（no-op），点击落在唯一那行等于不换。
 - **已落地（后续补齐）**：lane 行状态点（`·` 空闲 / `●` 运行中 / `▲` 待审批 / `×` 已请求退出，口径在 `lane_list::LaneStatus`）、后台审批提示文案，以及 `F4` 跳到下一条待审批的 lane（环形，从当前的下一条找起；无人等待时不动视图，只写一行说明）。
-- **未落地**：`lanes N/M`、全局待审批计数、`Alt+1..8` 直达、`Ctrl+N`。
+- **未落地**：`lanes N/M` 与全局待审批计数（[#354](https://github.com/noisystreet/crabmate-client/issues/354)）；`Alt+1..8` 直达与 `Ctrl+N` 不在该 Issue 范围（`Alt+←/→` 与点击已覆盖切换需求）。
 
 ### 4.7 工作区：一实例一工作区，所以 lane 行要带工作区
 
@@ -271,7 +271,7 @@ api_base = "http://127.0.0.1:8082"
 
 各波次遵循仓库既有小步纪律：**一项用户可见行为一个 PR**，每波更新 `docs/design/client_capability_matrix.md` 的 TUI 行与 `remote_cli_tui.md` 的状态行。
 
-**实际进度（截至 `2026-10`，以此为准）**：W1 / W1b / W2 已落地，且 W2 顺带把 W5 的「lane 列表 + 切换」做了（列表在下半、单 lane 也显示、`Alt+←/→` 与点击切视图）；lane 行随后补上了各自的工作区末段与 409 `WORKSPACE_ALREADY_SET` 的分支提示（§4.7，属 workspace binding 接入而非新波次）；W3 落地了两种装配方式 —— 启动时 `--connect name=url`、运行期 `/lane attach|new`（§4.8，经控制面 socket，不重启进程），仍缺 `tui-connections.toml` 配置文件与启动逐 profile `/health` 探测；W4 的审批队列与 W5 的 `lanes N/M` / 全局待审批计数 / `Alt+1..8` 未开工；`MAX_LANES` 与「后台审批可发现性」（`F4`）已补齐。
+**实际进度（截至 `2026-10`，以此为准）**：W1 / W1b / W2 已落地，且 W2 顺带把 W5 的「lane 列表 + 切换」做了（列表在下半、单 lane 也显示、`Alt+←/→` 与点击切视图）；lane 行随后补上了各自的工作区末段与 409 `WORKSPACE_ALREADY_SET` 的分支提示（§4.7，属 workspace binding 接入而非新波次）；W3 落地了两种装配方式 —— 启动时 `--connect name=url`、运行期 `/lane attach|new`（§4.8，经控制面 socket，不重启进程），仍缺 `tui-connections.toml` 配置文件与启动逐 profile `/health` 探测；W4 的跨 lane 审批队列按 §4.4 的结论不做（收拢会让某条 lane 的 `answer` 通道画到别人的屏上），W5 的 `lanes N/M` / 全局待审批计数 / `Alt+1..8` 已拆到 [#354](https://github.com/noisystreet/crabmate-client/issues/354)；`MAX_LANES` 与「后台审批可发现性」（`F4`）已补齐。
 
 ---
 
