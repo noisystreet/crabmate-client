@@ -3,32 +3,36 @@
 //!
 //! 拆分出本模块以控制 `mod.rs` 单文件行数（fn-nloc 门禁 ≤ 920）与函数复杂度。
 
+use std::future::Future;
 use std::sync::mpsc::{self, Sender};
+use std::sync::{Arc, Mutex};
 use std::thread;
 
 use crossterm::event::{self, Event, KeyEvent, MouseButton, MouseEvent, MouseEventKind};
+use tokio::sync::oneshot;
 
 use crabmate_client_api::conversation_state::ConversationStateOutcome;
 use crabmate_client_api::ctl::CtlInstance;
-use crabmate_client_api::paths;
-use crabmate_client_api::permission::PermissionView;
 use crabmate_client_api::prompt_tokens::TiktokenPromptTokensSnapshot;
 
 use crate::serve::{
     ApprovalGate, AutoAllowOnce, ChatStreamOptions, ChatStreamOutcome,
     ConversationMessagesResponse, ServeClient, SessionIndexApplied, SessionIndexOp, StreamCancel,
     StreamResume, StreamSink, TermError, WebSessionsList, WorkspaceDirData, WorkspaceProjectsData,
-    WorkspaceSetError, apply_web_session_op, fetch_conversation_messages, fetch_llm_overrides,
-    fetch_user_data_prefs, fetch_web_sessions, fetch_workspace, fetch_workspace_dir,
-    fetch_workspace_projects, put_llm_overrides, put_user_data_prefs, run_chat_stream_sink,
-    set_workspace, switch_workspace_project, write_permission_level,
+    WorkspaceSetError, run_chat_stream_sink,
 };
 
 use super::approve::{APPROVAL_WAIT, ApprovalPrompt, OverlayApprovalGate};
 use super::inbound::Inbound;
 use super::serve_defaults::ServeDefaults;
-use super::settings::{LlmSave, PersistedSettings, PrefsSave, merge_llm_save, merge_prefs_save};
+use super::settings::{LlmSave, PersistedSettings, PrefsSave};
 use super::slash_menu::SkillsPayload;
+use super::worker_jobs::{
+    job_conversation_history, job_load_user_settings, job_refresh_sessions, job_refresh_status,
+    job_refresh_usage, job_refresh_workspace_root, job_save_llm, job_save_prefs, job_session_index,
+    job_skills, job_workspace_dir, job_workspace_query, job_workspace_set, job_write_permission,
+    job_ws_projects, job_ws_switch_project,
+};
 
 /// UI 事件的**载荷**（键盘线程与回合/拉取线程都会产出，但「归谁」由 [`Inbound`] 决定：
 /// 全局输入 / 某条 lane 的出站事件 / 外壳动作，见 [`super::inbound`]）。
@@ -402,59 +406,260 @@ pub(super) fn is_actionable_mouse(kind: MouseEventKind) -> bool {
 /// 持久 worker：单 current-thread runtime 串行执行回合与刷新任务，
 /// 避免同一 `reqwest::Client` 跨多个临时 runtime 复用的连接池问题；
 /// UI 退出（job_tx drop）后 worker 自行退出。
+///
+/// 返回 job 发送端与 **job 级取消令牌**（issue #348）：令牌交给 lane，`/lane detach` /
+/// `/lane cancel` / `/quit` 一律经 `LaneApp::wind_down` 施加，不必知道此刻在跑哪个 job。
 pub(super) fn spawn_worker(
     lane: LaneId,
     client: ServeClient,
     tx: Sender<Inbound>,
-) -> Sender<WorkerJob> {
+) -> (Sender<WorkerJob>, JobCancel) {
+    let (job_tx, cancel, join) = spawn_worker_inner(lane, client, tx);
+    // 生产侧不要 join：lane 退出时线程自己收尾（见 `detach_lane`），进程退出也不等它。
+    drop(join);
+    (job_tx, cancel)
+}
+
+/// [`spawn_worker`] 的实现：多返回一个 `JoinHandle`，只给单测断言「取消后线程真的退出」。
+fn spawn_worker_inner(
+    lane: LaneId,
+    client: ServeClient,
+    tx: Sender<Inbound>,
+) -> (Sender<WorkerJob>, JobCancel, thread::JoinHandle<()>) {
     let (job_tx, job_rx) = mpsc::channel::<WorkerJob>();
-    thread::spawn(move || {
+    let cancel = JobCancel::default();
+    let worker_cancel = cancel.clone();
+    let join = thread::spawn(move || {
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .expect("worker runtime");
-        // 两条出口：`out` 给 lane 自己的回包（自动打标签），`tx` 留给外壳动作。
-        let out = LaneTx::new(lane, tx.clone());
+        let out = LaneTx::new(lane, tx);
         while let Ok(job) = job_rx.recv() {
-            match job {
-                WorkerJob::Turn(job) => run_turn_job(&rt, &client, *job, &out),
-                WorkerJob::RefreshSessions => job_refresh_sessions(&rt, &client, &out),
-                WorkerJob::ConversationHistory {
-                    conversation_id,
-                    before_index,
-                } => job_conversation_history(&rt, &client, &conversation_id, before_index, &out),
-                WorkerJob::RefreshUsage { conversation_id } => {
-                    job_refresh_usage(&rt, &client, &conversation_id, &out);
-                }
-                WorkerJob::SessionIndex(op) => job_session_index(&rt, &client, op, &out),
-                WorkerJob::RefreshWorkspace { keep } => {
-                    job_refresh_workspace_root(&rt, &client, &out, keep);
-                }
-                WorkerJob::WorkspaceDir { rel, generation } => {
-                    job_workspace_dir(&rt, &client, &rel, generation, &out);
-                }
-                WorkerJob::RefreshStatus { conversation_id } => {
-                    job_refresh_status(&rt, &client, conversation_id.as_deref(), &out)
-                }
-                WorkerJob::WsProjects => job_ws_projects(&rt, &client, &out),
-                WorkerJob::WsSwitchProject(name) => {
-                    job_ws_switch_project(&rt, &client, &name, &out)
-                }
-                WorkerJob::WorkspaceQuery => job_workspace_query(&rt, &client, &out),
-                WorkerJob::WorkspaceSet(path) => job_workspace_set(&rt, &client, &path, &out),
-                WorkerJob::LoadUserSettings => job_load_user_settings(&rt, &client, &out),
-                WorkerJob::SaveLlm(save) => job_save_llm(&rt, &client, save, &out),
-                WorkerJob::SavePrefs(save) => job_save_prefs(&rt, &client, save, &out),
-                WorkerJob::Skills => job_skills(&rt, &client, &out),
-                WorkerJob::WritePermission {
-                    conversation_id,
-                    level,
-                    generation,
-                } => job_write_permission(&rt, &client, &conversation_id, &level, generation, &out),
-            }
+            dispatch(&rt, &client, &out, &worker_cancel, job);
         }
     });
-    job_tx
+    (job_tx, cancel, join)
+}
+
+/// 一个 job 的执行入口。
+///
+/// **回合走自己的通道**：[`StreamCancel`] 的两段语义（第 1 次取消要 `POST /chat/stream/
+/// {job}/cancel`、第 2 次强退）不能被 job 级令牌替代，否则 serve 侧那一轮会白跑到底。
+/// 其余 16 个 job 全部套 [`run_cancellable`] —— 新增 job 时在这里补一行即可获得可中断性，
+/// 不必记得在函数内部写 `select!`（issue #348 的整类缺陷靠这条收口）。
+fn dispatch(
+    rt: &tokio::runtime::Runtime,
+    client: &ServeClient,
+    out: &LaneTx,
+    cancel: &JobCancel,
+    job: WorkerJob,
+) {
+    match job {
+        WorkerJob::Turn(job) => run_turn_job(rt, client, *job, out),
+        WorkerJob::RefreshSessions => run_cancellable(
+            rt,
+            cancel,
+            "刷新会话列表",
+            job_refresh_sessions(client, out),
+            out,
+        ),
+        WorkerJob::ConversationHistory {
+            conversation_id,
+            before_index,
+        } => run_cancellable(
+            rt,
+            cancel,
+            "拉取会话历史",
+            job_conversation_history(client, &conversation_id, before_index, out),
+            out,
+        ),
+        WorkerJob::RefreshUsage { conversation_id } => run_cancellable(
+            rt,
+            cancel,
+            "刷新上下文用量",
+            job_refresh_usage(client, &conversation_id, out),
+            out,
+        ),
+        WorkerJob::SessionIndex(op) => run_cancellable(
+            rt,
+            cancel,
+            "写会话索引",
+            job_session_index(client, op, out),
+            out,
+        ),
+        WorkerJob::RefreshWorkspace { keep } => run_cancellable(
+            rt,
+            cancel,
+            "刷新工作区目录",
+            job_refresh_workspace_root(client, out, keep),
+            out,
+        ),
+        WorkerJob::WorkspaceDir { rel, generation } => run_cancellable(
+            rt,
+            cancel,
+            "拉取子目录",
+            job_workspace_dir(client, &rel, generation, out),
+            out,
+        ),
+        WorkerJob::RefreshStatus { conversation_id } => run_cancellable(
+            rt,
+            cancel,
+            "刷新 serve 状态",
+            job_refresh_status(client, conversation_id.as_deref(), out),
+            out,
+        ),
+        WorkerJob::WsProjects => {
+            run_cancellable(rt, cancel, "拉取项目池", job_ws_projects(client, out), out)
+        }
+        WorkerJob::WsSwitchProject(name) => run_cancellable(
+            rt,
+            cancel,
+            "切换项目",
+            job_ws_switch_project(client, &name, out),
+            out,
+        ),
+        WorkerJob::WorkspaceQuery => run_cancellable(
+            rt,
+            cancel,
+            "查询工作区",
+            job_workspace_query(client, out),
+            out,
+        ),
+        WorkerJob::WorkspaceSet(path) => run_cancellable(
+            rt,
+            cancel,
+            "设置工作区",
+            job_workspace_set(client, &path, out),
+            out,
+        ),
+        WorkerJob::LoadUserSettings => run_cancellable(
+            rt,
+            cancel,
+            "拉取用户设置",
+            job_load_user_settings(client, out),
+            out,
+        ),
+        WorkerJob::SaveLlm(save) => run_cancellable(
+            rt,
+            cancel,
+            "保存模型设置",
+            job_save_llm(client, save, out),
+            out,
+        ),
+        WorkerJob::SavePrefs(save) => run_cancellable(
+            rt,
+            cancel,
+            "保存偏好设置",
+            job_save_prefs(client, save, out),
+            out,
+        ),
+        WorkerJob::Skills => {
+            run_cancellable(rt, cancel, "拉取 skill 目录", job_skills(client, out), out)
+        }
+        WorkerJob::WritePermission {
+            conversation_id,
+            level,
+            generation,
+        } => run_cancellable(
+            rt,
+            cancel,
+            "写权限等级",
+            job_write_permission(client, &conversation_id, &level, generation, out),
+            out,
+        ),
+    }
+}
+
+/// 每个**非回合** job 的取消令牌槽（issue #348）。
+///
+/// 为什么不是 lane 级 `Cancel`、也不是循环代数：槽里只放「当前正在跑的那一个 job 的
+/// `tx`」，[`Self::cancel`] 就是把它取出来 `send(())` 一次。job 之间的队列等待不参与取消
+/// —— 那些 job 还没开始跑，`job_tx` 一关它们根本不会执行 —— 所以不需要代数比较，也没有
+/// 「上一代的取消误伤下一次 job」的窗口：[`Self::arm`] 每次都建一条全新的 oneshot 通道。
+///
+/// 与 [`StreamCancel`] 刻意分开：后者的「第 1 次 = 取消回合 / 第 2 次 = 强退」是 Ctrl+C
+/// 的计数语义，而且回合取消得先 `POST /chat/stream/{job}/cancel` 才能在 serve 侧停下。
+/// 用 job 级令牌粗暴打断它，会让那次 POST 也一并消失。
+#[derive(Clone)]
+pub(super) struct JobCancel {
+    slot: Arc<Mutex<Option<oneshot::Sender<()>>>>,
+    /// 已发出的取消次数。只给单测断言「`wind_down` 真的动了令牌」用，不参与调度。
+    #[cfg(test)]
+    issued: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl Default for JobCancel {
+    fn default() -> Self {
+        Self {
+            slot: Arc::new(Mutex::new(None)),
+            #[cfg(test)]
+            issued: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        }
+    }
+}
+
+impl JobCancel {
+    /// 起一个 job：返回它的中断接收端，并把自己登记为「当前 job」。
+    ///
+    /// 调用方只能在 `select!` **结束之后** [`Self::disarm`]：disarm 会 drop 那个 `tx`，
+    /// 仍在等待的 `rx` 会立刻得到 `Err`，被 `select!` 当成「已完成」—— 那就成了假取消。
+    pub(super) fn arm(&self) -> oneshot::Receiver<()> {
+        let (tx, rx) = oneshot::channel();
+        *self.slot.lock().expect("job cancel slot") = Some(tx);
+        rx
+    }
+
+    /// job 结束后清空槽位，免得下一次 `cancel` 打到一个早已完成的 job 上。
+    pub(super) fn disarm(&self) {
+        self.slot.lock().expect("job cancel slot").take();
+    }
+
+    /// 请求中断当前 job；没有在跑的 job 时是空操作（幂等）。
+    ///
+    /// 语义只能是「**已请求**」：worker 可能刚好在同一刻跑完，回执在这一层无法确定。
+    pub(super) fn cancel(&self) {
+        if let Some(tx) = self.slot.lock().expect("job cancel slot").take() {
+            let _ = tx.send(());
+            #[cfg(test)]
+            self.issued
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+
+    /// 是否有一个 job 正在跑（只供措辞用：快照，不保证下一刻仍成立）。
+    pub(super) fn is_armed(&self) -> bool {
+        self.slot.lock().expect("job cancel slot").is_some()
+    }
+}
+
+/// 在 job 外面套一层取消：`select!` 上 [`JobCancel`]，被打断时发一条 system 行。
+///
+/// 这是本文件**唯一**给非回合 job 用的 `block_on` 出口 —— 16 个 job 一个都不用自己写
+/// `select!`，也就不会漏掉某个（漏一个就是 #348 那条「白等一个超时窗口」）。
+///
+/// 中断时那行是 best-effort：lane 已 detach 时它会被 `on_msg` 丢弃（按 `LaneId` 找不到
+/// 就丢），这正是想要的 —— 不再往已摘掉的 lane 里写东西。
+fn run_cancellable<F>(
+    rt: &tokio::runtime::Runtime,
+    cancel: &JobCancel,
+    label: &str,
+    job: F,
+    out: &LaneTx,
+) where
+    F: Future<Output = ()>,
+{
+    let rx = cancel.arm();
+    let interrupted = rt.block_on(async {
+        tokio::select! {
+            () = job => false,
+            _ = rx => true,
+        }
+    });
+    cancel.disarm();
+    if interrupted {
+        let _ = out.send(UiEvent::System(format!("已中断：{label}")));
+    }
 }
 
 fn run_turn_job(
@@ -522,304 +727,12 @@ fn split_turn_result(
     }
 }
 
-async fn fetch_serve_defaults(client: &ServeClient) -> Result<ServeDefaults, String> {
-    let v: serde_json::Value = client
-        .get_json(paths::STATUS_SHELL)
-        .await
-        .map_err(|e| e.to_string())?;
-    Ok(ServeDefaults::from_status(&v))
-}
-
-/// 写会话索引（`GET` 最新 → 改 → 全量 `PUT`）：新建空白行或把 `conversation_id` 绑到指定行。
-fn job_session_index(
-    rt: &tokio::runtime::Runtime,
-    client: &ServeClient,
-    op: SessionIndexOp,
-    out: &LaneTx,
-) {
-    let result = rt
-        .block_on(apply_web_session_op(client, &op))
-        .map_err(|e| e.to_string());
-    let _ = out.send(UiEvent::SessionIndex { result, op });
-}
-
-/// 会话列表 + 工作区路径刷新（静默；发送失败忽略，worker 随 UI 退出而停）。
-fn job_refresh_sessions(rt: &tokio::runtime::Runtime, client: &ServeClient, out: &LaneTx) {
-    let result = rt
-        .block_on(fetch_web_sessions(client))
-        .map_err(|e| e.to_string());
-    let _ = out.send(UiEvent::Sessions(result));
-    let path = rt.block_on(fetch_workspace(client)).ok().and_then(|w| {
-        let p = w.path.trim();
-        (!p.is_empty()).then(|| p.to_string())
-    });
-    let _ = out.send(UiEvent::WorkspacePath(path));
-}
-
-/// 拉一页会话历史（只读回放）。失败如实回传，提示文案由 UI 决定。
-fn job_conversation_history(
-    rt: &tokio::runtime::Runtime,
-    client: &ServeClient,
-    conversation_id: &str,
-    before_index: Option<u32>,
-    out: &LaneTx,
-) {
-    let fetched = rt.block_on(fetch_conversation_messages(
-        client,
-        conversation_id,
-        before_index,
-    ));
-    // 水合响应自带当前上下文快照：新会话 / 切换会话即可显示初始用量（与 Desktop 同口径），
-    // 不必等回合末的 `RUN_FINISHED`。
-    let snapshot = fetched
-        .as_ref()
-        .ok()
-        .and_then(|r| r.tiktoken_prompt_tokens.clone());
-    let result = fetched.map_err(|e| e.to_string());
-    let _ = out.send(UiEvent::ConversationHistory {
-        conversation_id: conversation_id.to_string(),
-        result,
-        snapshot,
-        before_index,
-    });
-}
-
-/// 回合末补用量快照：只留 `tiktoken_prompt_tokens`，消息正文丢弃。
-///
-/// 失败静默：状态行的用量段不是关键路径，拉不到就维持现状（占位 `—`），
-/// 不必往 transcript 里写一条与用户操作无关的报错。
-fn job_refresh_usage(
-    rt: &tokio::runtime::Runtime,
-    client: &ServeClient,
-    conversation_id: &str,
-    out: &LaneTx,
-) {
-    let snapshot = rt
-        .block_on(fetch_conversation_messages(client, conversation_id, None))
-        .ok()
-        .and_then(|r| r.tiktoken_prompt_tokens);
-    let _ = out.send(UiEvent::UsageHydrated {
-        conversation_id: conversation_id.to_string(),
-        snapshot,
-    });
-}
-
-/// 工作区根目录列表（工作区路径 + 目录树数据）。
-fn job_refresh_workspace_root(
-    rt: &tokio::runtime::Runtime,
-    client: &ServeClient,
-    out: &LaneTx,
-    keep: bool,
-) {
-    let result = rt
-        .block_on(fetch_workspace_dir(client, None))
-        .map_err(|e| e.to_string());
-    let _ = out.send(UiEvent::Workspace { result, keep });
-}
-
-/// 展开目录的子列表。
-fn job_workspace_dir(
-    rt: &tokio::runtime::Runtime,
-    client: &ServeClient,
-    rel: &str,
-    generation: u64,
-    out: &LaneTx,
-) {
-    let result = rt
-        .block_on(fetch_workspace_dir(client, Some(rel)))
-        .map_err(|e| e.to_string());
-    let _ = out.send(UiEvent::WorkspaceDir {
-        rel: rel.to_string(),
-        generation,
-        result,
-    });
-}
-
-/// serve 默认偏好（`/status?view=shell`）+ 当前生效权限投影（`/permission`）。
-///
-/// 两个端点合进同一个任务：状态行要的是**同一时刻**的 serve 侧事实，分两次任务到达顺序随机，
-/// 会短暂拼出"旧 model + 新等级"这种没发生过的组合。
-fn job_refresh_status(
-    rt: &tokio::runtime::Runtime,
-    client: &ServeClient,
-    conversation_id: Option<&str>,
-    out: &LaneTx,
-) {
-    let mut result = rt.block_on(fetch_serve_defaults(client));
-    let view = rt.block_on(fetch_permission_view(client, conversation_id));
-    if let Ok(defaults) = result.as_mut() {
-        defaults.permission_view = view;
-    }
-    let _ = out.send(UiEvent::Status {
-        conversation_id: conversation_id.map(str::to_string),
-        result,
-    });
-}
-
-/// `GET /permission` 的完整投影：**404（老 serve）与任何失败都返回 `None`**。
-///
-/// 状态行少一段，而不是显示一个猜来的档位——等级是策略事实，猜错的方向可能是危险的
-/// （把 `chat` 显示成 `unrestricted` 才最糟）。需要细节时看 Desktop 设置页或 `/status`
-/// 里的 `permission_level_default` / `permission_level_max`。
-///
-/// 存**整个** view（不再只取 `level`）：切换菜单的选项集就是 `available`，与 Desktop chip
-/// 吃同一份投影，避免「菜单列五档、服务端只让选三档」这种自造的分歧。
-///
-/// **带 `conversation_id`**：这是按会话算的投影（会话列里的意图 + min 链）。裸请求回的是
-/// 「配置默认档 + 无会话意图」，与状态行要回答的「此刻这个会话是哪一档」是两个问题 ——
-/// 混用会让状态行在刷新后跳回默认档，看起来像刚选的档自己丢掉了。
-async fn fetch_permission_view(
-    client: &ServeClient,
-    conversation_id: Option<&str>,
-) -> Option<PermissionView> {
-    let view = client
-        .get_json_optional::<PermissionView>(&paths::permission(None, conversation_id))
-        .await
-        .ok()
-        .flatten()?;
-    (!view.level.trim().is_empty()).then_some(view)
-}
-
-/// 权限等级意图落盘（`POST /conversation/state`）。
-///
-/// 只发 `permission_level` 一列：服务端是部分更新，顺带回传 `session_mode` / `agent_role`
-/// 会把过期值写回去（Desktop `apply_level` 同一条约束）。
-///
-/// 结局**不在这一层判定**：拿到响应就交给共享层
-/// [`classify_conversation_state_response`] —— 这条路由的 404 有「老 serve 没路由」与
-/// 「会话不存在」两种含义，两处各写一份判别就是新的漂移点。
-fn job_write_permission(
-    rt: &tokio::runtime::Runtime,
-    client: &ServeClient,
-    conversation_id: &str,
-    level: &str,
-    generation: u64,
-    out: &LaneTx,
-) {
-    let outcome = rt
-        .block_on(write_permission_level(client, conversation_id, level))
-        .map_err(|e| e.to_string());
-    let _ = out.send(UiEvent::PermissionWritten {
-        level: level.to_string(),
-        outcome,
-        generation,
-    });
-}
-
-/// skill 目录（`GET /skills`）：只给 `/` 补全菜单的 skill 候选，失败如实回传。
-fn job_skills(rt: &tokio::runtime::Runtime, client: &ServeClient, out: &LaneTx) {
-    let result = rt.block_on(async {
-        client
-            .get_json::<SkillsPayload>(paths::SKILLS)
-            .await
-            .map_err(|e| e.to_string())
-    });
-    let _ = out.send(UiEvent::Skills(result));
-}
-
-/// 项目池列表（`GET /workspace/projects`）。
-fn job_ws_projects(rt: &tokio::runtime::Runtime, client: &ServeClient, out: &LaneTx) {
-    let result = rt
-        .block_on(fetch_workspace_projects(client))
-        .map_err(|e| e.to_string());
-    let _ = out.send(UiEvent::WsProjects(result));
-}
-
-/// 切换项目池内项目（`POST /workspace/projects`）。
-fn job_ws_switch_project(
-    rt: &tokio::runtime::Runtime,
-    client: &ServeClient,
-    name: &str,
-    out: &LaneTx,
-) {
-    let result = rt
-        .block_on(switch_workspace_project(client, name))
-        .map_err(|e| e.to_string());
-    let _ = out.send(UiEvent::WsProjectSwitch(result));
-}
-
-/// `/workspace`（空参）：读 serve 当前工作区根（`GET /workspace`）。
-///
-/// `fetch_workspace` 不像 `fetch_workspace_dir` 那样检查体内 `error`（2xx 也可能带
-/// 语义错误），这里补上：否则用户会看到「当前工作区：」空一行而不是失败原因。
-fn job_workspace_query(rt: &tokio::runtime::Runtime, client: &ServeClient, out: &LaneTx) {
-    let result = match rt.block_on(fetch_workspace(client)) {
-        Ok(w) => match w.error.as_deref().map(str::trim) {
-            Some(e) if !e.is_empty() => Err(e.to_string()),
-            _ => Ok(w.path),
-        },
-        Err(e) => Err(e.to_string()),
-    };
-    let _ = out.send(UiEvent::WorkspaceQuery(result));
-}
-
-/// `/workspace <路径>`：按路径设置 serve 工作区根（`POST /workspace`）。
-///
-/// 与项目池那条（`POST /workspace/projects`）是同一个后端状态的两种入口：项目池只能选
-/// 池内已有项目，这里把路径原样发出去（客户端不做白名单，能否落地由 serve 决定；
-/// 空串＝恢复 serve 默认）。
-///
-/// 失败**不压成字符串**：`WorkspaceSetError` 带 `kind`，UI 层才能把 409
-/// `WORKSPACE_ALREADY_SET` 提示成「另起 lane」而不是「重试」。
-fn job_workspace_set(rt: &tokio::runtime::Runtime, client: &ServeClient, path: &str, out: &LaneTx) {
-    let result = rt.block_on(set_workspace(client, path));
-    let _ = out.send(UiEvent::WorkspaceSet(result));
-}
-
-/// 启动时拉取 user-data 设置快照（`GET /user-data/prefs` + `GET /user-data/llm-overrides`）
-/// 并合成持久层；任一失败整体报错（面板/合成回退 override 与 serve 默认）。
-fn job_load_user_settings(rt: &tokio::runtime::Runtime, client: &ServeClient, out: &LaneTx) {
-    let result: Result<PersistedSettings, String> = rt.block_on(async {
-        let prefs = fetch_user_data_prefs(client)
-            .await
-            .map_err(|e| e.to_string())?;
-        let llm = fetch_llm_overrides(client)
-            .await
-            .map_err(|e| e.to_string())?;
-        Ok(PersistedSettings::from_snapshot(&prefs, &llm))
-    });
-    let _ = out.send(UiEvent::UserData(result));
-}
-
-/// 保存 llm-overrides：先 GET 现值，只改 `client_llm.{model,api_base,temperature,
-/// llm_thinking_mode,llm_context_tokens}` 再全量 PUT
-/// （合并保真，不覆盖 `executor_llm/saved_models/execution_mode`）。
-fn job_save_llm(rt: &tokio::runtime::Runtime, client: &ServeClient, save: LlmSave, out: &LaneTx) {
-    let result: Result<LlmSave, String> = rt.block_on(async {
-        let dto = fetch_llm_overrides(client)
-            .await
-            .map_err(|e| e.to_string())?;
-        put_llm_overrides(client, &merge_llm_save(dto, &save))
-            .await
-            .map_err(|e| e.to_string())?;
-        Ok(save)
-    });
-    let _ = out.send(UiEvent::SavedLlm(result));
-}
-
-/// 保存 prefs：先 GET 现值，只改 `cm_role/session_mode/disable_readonly_tool_ttl_cache`
-/// 再全量 PUT（合并保真，不覆盖 `locale/theme/布局/IDE` 等字段）。
-fn job_save_prefs(
-    rt: &tokio::runtime::Runtime,
-    client: &ServeClient,
-    save: PrefsSave,
-    out: &LaneTx,
-) {
-    let result: Result<PrefsSave, String> = rt.block_on(async {
-        let dto = fetch_user_data_prefs(client)
-            .await
-            .map_err(|e| e.to_string())?;
-        put_user_data_prefs(client, &merge_prefs_save(dto, &save))
-            .await
-            .map_err(|e| e.to_string())?;
-        Ok(save)
-    });
-    let _ = out.send(UiEvent::SavedPrefs(result));
-}
-
 #[cfg(test)]
 mod tests {
-    use super::is_actionable_mouse;
+    use std::time::{Duration, Instant};
+
+    use super::super::test_support::test_client_at;
+    use super::*;
     use crossterm::event::{MouseButton, MouseEventKind};
 
     #[test]
@@ -848,5 +761,107 @@ mod tests {
         assert!(!is_actionable_mouse(MouseEventKind::Down(
             MouseButton::Middle
         )));
+    }
+
+    /// 真挂起的请求要能被取消打断 —— 这是 issue #348 的核心断言。
+    ///
+    /// 假 serve 只 accept、不回一个字节：`fetch_web_sessions` 会一直等响应头（真实上限是
+    /// `REQUEST_TIMEOUT` 30 s）。取消后 worker 必须在 2 s 内回到 `recv`，否则 detach 一条
+    /// 正在刷新的 lane 又要白等一整个超时窗口。
+    #[test]
+    fn a_hung_request_is_cut_and_the_worker_thread_exits() {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("bind");
+        let port = listener.local_addr().expect("addr").port();
+        // 攥住已建立的连接：drop 掉会被客户端当成断连，请求立即失败，就测不出「挂起」。
+        let keep = std::thread::spawn(move || {
+            let mut alive = Vec::new();
+            for stream in listener.incoming() {
+                match stream {
+                    Ok(s) => alive.push(s),
+                    Err(_) => break,
+                }
+            }
+            alive
+        });
+
+        let client = test_client_at(port);
+        let (ui_tx, ui_rx) = mpsc::channel();
+        let (job_tx, cancel, join) = spawn_worker_inner(LaneId(9), client, ui_tx);
+        job_tx.send(WorkerJob::RefreshSessions).expect("入队");
+
+        // 等它真的开跑：`arm` 之后才会进 `select!`。
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !cancel.is_armed() {
+            assert!(Instant::now() < deadline, "job 没有开始跑");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+
+        let stopped_at = Instant::now();
+        cancel.cancel();
+        // 关掉队列：worker 收尾后 `recv` 返回 `Err`，线程退出。
+        drop(job_tx);
+        drop(ui_rx);
+        join.join().expect("worker 线程");
+        assert!(
+            stopped_at.elapsed() < Duration::from_secs(2),
+            "取消后线程应立即退出，实际 {:?}",
+            stopped_at.elapsed()
+        );
+        drop(keep);
+    }
+
+    /// 取消要能打断「还没有结果」的 job，并留一行说明（lane 还在时才看得见）。
+    #[test]
+    fn cancel_interrupts_a_pending_job_and_says_so() {
+        let rt = test_runtime();
+        let (tx, rx) = mpsc::channel();
+        let out = LaneTx::new(LaneId(1), tx);
+        let cancel = JobCancel::default();
+        let canceller = cancel.clone();
+        let kick = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(20));
+            canceller.cancel();
+        });
+
+        let started = Instant::now();
+        run_cancellable(&rt, &cancel, "假拉取", std::future::pending::<()>(), &out);
+        kick.join().expect("canceller");
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "取消应立即生效，实际 {:?}",
+            started.elapsed()
+        );
+
+        match rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("应有 system 行")
+        {
+            Inbound::FromLane(LaneId(1), UiEvent::System(line)) => {
+                assert!(line.contains("假拉取"), "{line}");
+            }
+            _ => panic!("应是带 LaneId 的 system 行"),
+        }
+    }
+
+    /// 空闲时取消是空操作：不能把下一个 job 一起带走。
+    #[test]
+    fn cancel_while_idle_does_not_hit_the_next_job() {
+        let rt = test_runtime();
+        let (tx, rx) = mpsc::channel();
+        let out = LaneTx::new(LaneId(2), tx);
+        let cancel = JobCancel::default();
+        cancel.cancel();
+
+        let mut ran = false;
+        run_cancellable(&rt, &cancel, "假拉取", async { ran = true }, &out);
+        assert!(ran, "下一个 job 必须照常跑完");
+        assert!(rx.try_recv().is_err(), "不该发中断行");
+    }
+
+    fn test_runtime() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("rt")
     }
 }

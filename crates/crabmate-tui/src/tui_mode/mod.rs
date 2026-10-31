@@ -55,8 +55,10 @@ mod text;
 pub(crate) mod tool_summary;
 mod turn_send;
 mod usage_hydrate;
+mod wind_down;
 mod worker;
 mod worker_ctl;
+mod worker_jobs;
 mod workspace_cmd;
 mod workspace_keys;
 mod workspace_tree;
@@ -80,7 +82,7 @@ use self::render::StatusInfo;
 use self::settings::{PersistedSettings, normalize};
 use self::settings_panel::SettingsPanel;
 use self::shell::LaneTemplate;
-use self::worker::{LaneId, UiEvent, WorkerJob};
+use self::worker::{JobCancel, LaneId, UiEvent, WorkerJob};
 use super::SessionPrefs;
 use state::{Focus, LineKind, UiState};
 
@@ -123,6 +125,7 @@ struct LaneApp<'a> {
     /// 否则多条 lane 会彼此抢消息（见 `docs/design/tui_multi_server.md` §4.2）。
     tx: Sender<Inbound>,
     job_tx: Sender<WorkerJob>,
+    job_cancel: JobCancel,
     cancel: Option<StreamCancel>,
     /// 本条 lane 发起的**进程级**退出请求（`/quit`、第二次 Ctrl+C、`quit_pending` 落地）。
     ///

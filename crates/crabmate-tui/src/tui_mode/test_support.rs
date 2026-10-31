@@ -14,7 +14,7 @@ use crate::serve::{ConnectionConfig, ServeClient};
 
 use super::inbound::Inbound;
 use super::state::UiState;
-use super::worker::{LaneId, WorkerJob};
+use super::worker::{JobCancel, LaneId, WorkerJob};
 use super::{LaneApp, LaneTemplate, TuiApp};
 
 /// 空的会话级 override（`*` 覆盖），让状态行回落到 serve 默认。
@@ -94,6 +94,9 @@ pub(super) fn lane_with_tx<'a>(
         drafts: Default::default(),
         tx,
         job_tx,
+        // 测试默认没有在跑的 job：`wind_down` 施加取消时是空操作。
+        // 要断言「真的动了令牌」的用例自己 `arm()` 一个接收端再触。
+        job_cancel: JobCancel::default(),
         cancel: None,
         exit: false,
         quit_pending: false,
@@ -823,5 +826,39 @@ mod tests {
         let last = app.lanes[0].st.lines.last().expect("应有提示").text();
         assert!(last.contains("lane-9"), "{last}");
         assert!(last.contains("lane-1 / lane-2"), "{last}");
+    }
+
+    /// `wind_down` **无条件**施加 job 级取消（issue #348）：没有回合在跑时，这条 lane 也
+    /// 可能卡在一次 HTTP 拉取里，detach / quit 不该为它白等一个超时窗口。
+    #[test]
+    fn wind_down_cancels_an_in_flight_job_while_no_turn_is_running() {
+        let client = test_client();
+        let mut prefs = test_prefs();
+        let (job_tx, _job_rx) = mpsc::channel();
+        let (ui_tx, ui_rx) = mpsc::channel();
+        let mut lane = test_app(&client, &mut prefs, ui_rx, ui_tx, job_tx);
+        // 假装 worker 正握着某个 job 的令牌。
+        let mut interrupted = lane.job_cancel.arm();
+        assert!(!lane.st.running, "前提：没有回合在跑");
+
+        let stopped = lane.wind_down();
+
+        assert!(stopped.job, "应报告「有一个 job 在跑」");
+        assert!(!stopped.running, "没有回合就不该说自己取消了回合");
+        assert!(interrupted.try_recv().is_ok(), "令牌必须真的被施加");
+    }
+
+    /// 空转的 lane：`wind_down` 什么都不做，调用点的措辞靠这几个 `false` 分支。
+    #[test]
+    fn wind_down_on_an_idle_lane_is_a_no_op() {
+        let client = test_client();
+        let mut prefs = test_prefs();
+        let (job_tx, _job_rx) = mpsc::channel();
+        let (ui_tx, ui_rx) = mpsc::channel();
+        let mut lane = test_app(&client, &mut prefs, ui_rx, ui_tx, job_tx);
+
+        let stopped = lane.wind_down();
+
+        assert!(!stopped.job && !stopped.running && !stopped.overlay);
     }
 }
