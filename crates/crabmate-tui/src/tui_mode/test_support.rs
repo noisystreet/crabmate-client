@@ -12,9 +12,10 @@ use std::sync::mpsc;
 use crate::SessionPrefs;
 use crate::serve::{ConnectionConfig, ServeClient};
 
+use super::inbound::Inbound;
 use super::spinner::Spinner;
 use super::state::UiState;
-use super::worker::{LaneId, UiEvent, WorkerJob};
+use super::worker::{LaneId, WorkerJob};
 use super::{LaneApp, LaneTemplate, TuiApp};
 
 /// 空的会话级 override（`*` 覆盖），让状态行回落到 serve 默认。
@@ -50,8 +51,8 @@ pub(super) fn test_lane<'a>(
     id: LaneId,
     client: &'a ServeClient,
     prefs: &'a mut SessionPrefs,
-    rx: mpsc::Receiver<UiEvent>,
-    tx: mpsc::Sender<UiEvent>,
+    rx: mpsc::Receiver<Inbound>,
+    tx: mpsc::Sender<Inbound>,
     job_tx: mpsc::Sender<WorkerJob>,
 ) -> LaneApp<'a> {
     // `rx` 不再交给 lane：它由外层 `TuiApp` 持有（见 `mod.rs`）。这里只把接收端
@@ -70,7 +71,7 @@ pub(super) fn lane_with_tx<'a>(
     id: LaneId,
     client: &'a ServeClient,
     prefs: &'a mut SessionPrefs,
-    tx: mpsc::Sender<UiEvent>,
+    tx: mpsc::Sender<Inbound>,
     job_tx: mpsc::Sender<WorkerJob>,
 ) -> LaneApp<'a> {
     LaneApp {
@@ -105,8 +106,8 @@ pub(super) fn lane_with_tx<'a>(
 pub(super) fn test_app<'a>(
     client: &'a ServeClient,
     prefs: &'a mut SessionPrefs,
-    rx: mpsc::Receiver<UiEvent>,
-    tx: mpsc::Sender<UiEvent>,
+    rx: mpsc::Receiver<Inbound>,
+    tx: mpsc::Sender<Inbound>,
     job_tx: mpsc::Sender<WorkerJob>,
 ) -> LaneApp<'a> {
     test_lane(LaneId(0), client, prefs, rx, tx, job_tx)
@@ -161,6 +162,7 @@ mod tests {
 
     use super::super::approve::ApprovalPrompt;
     use super::super::controls::Control;
+    use super::super::inbound::{Inbound, ShellEvent};
     use super::super::lane_list::LaneStatus;
     use super::super::worker::{LaneId, LaneTx, UiEvent};
     use super::{test_app, test_client, test_prefs, test_shell};
@@ -580,6 +582,56 @@ mod tests {
         );
         assert!(app.lanes[0].quit_pending, "取消完再退，不是立刻退");
         assert!(!app.lanes[0].exit, "还在取消中，本轮还没走");
+    }
+
+    /// 目标 lane 已摘除时，`FromLane` 事件必须被丢弃，**不能**落到当前 lane（issue #347）。
+    ///
+    /// 这正是 `Inbound` 存在的理由：改动前漏一个 `Lane` 标签，事件就静默落到当前聚焦的
+    /// lane 上。类型层面已经发不出「没标签的 lane 事件」，分发端还得保证「找不到就丢」。
+    #[test]
+    fn from_lane_event_without_a_target_lane_is_dropped() {
+        let client = test_client();
+        let mut prefs = [test_prefs()];
+        let mut app = test_shell(&client, &mut prefs);
+        // 一个**从未装配**的 LaneId：等价于那条 lane 已被 `/lane detach` 摘掉。
+        let gone = LaneId(app.next_lane_id);
+        app.lanes[0].st.running = true;
+
+        app.on_msg(Inbound::FromLane(
+            gone,
+            UiEvent::TurnDone {
+                outcome: Default::default(),
+                error: Some("某个已摘除 lane 的回合结束".to_string()),
+                interrupted: None,
+            },
+        ));
+
+        assert!(
+            app.lanes[0].st.running,
+            "没有归属的回合结束不能清掉当前 lane 的 running（那正是串台）"
+        );
+    }
+
+    /// `Inbound::Shell` 必须真的走到外壳：`ShellEvent::Detach` 摘掉一条 lane（issue #347）。
+    ///
+    /// 覆盖的是**分发层**：`lane_cmd` 只负责把事件发出去，`on_shell` 才是唯一能改
+    /// `lanes` 的地方。旧代码由 `on_msg` 的内联 match 直调，这一层一直没有测试。
+    #[test]
+    fn shell_event_detach_reaches_the_shell() {
+        let client = test_client();
+        let mut prefs = [test_prefs(), test_prefs()];
+        let mut app = test_shell(&client, &mut prefs);
+        assert_eq!(app.lanes.len(), 2, "前提：两条 lane");
+
+        app.on_msg(Inbound::Shell(ShellEvent::Detach {
+            name: "lane-2".to_string(),
+        }));
+
+        assert_eq!(app.lanes.len(), 1, "摘连接是外壳动作，必须真生效");
+        assert_eq!(
+            app.lanes[0].label, "lane-1",
+            "摘的必须是指名的那条，而不是当前 lane"
+        );
     }
 
     /// `/lane detach` 摘掉一条**正在跑**的 lane：必须先停掉它那一轮（issue #339）。

@@ -22,6 +22,7 @@ mod exit_flush;
 mod help;
 mod history;
 mod hotkeys;
+mod inbound;
 mod lane_cmd;
 mod lane_list;
 mod layout;
@@ -73,6 +74,7 @@ use crate::serve::{
 use self::approve::decision_summary;
 use self::controls::{Control, clear_word, parse_control, set_mode_field, set_override_field};
 use self::hotkeys::{is_alt_enter, is_ctrl, is_ctrl_c, is_ctrl_e, is_ctrl_o, is_ctrl_w};
+use self::inbound::{Inbound, ShellEvent};
 use self::render::StatusInfo;
 use self::settings::{PersistedSettings, normalize};
 use self::settings_panel::SettingsPanel;
@@ -120,7 +122,7 @@ struct LaneApp<'a> {
     ///
     /// 接收端**不在这里**：所有 lane 共用一个通道，`rx` 由外层 [`TuiApp`] 独占持有，
     /// 否则多条 lane 会彼此抢消息（见 `docs/design/tui_multi_server.md` §4.2）。
-    tx: Sender<UiEvent>,
+    tx: Sender<Inbound>,
     job_tx: Sender<WorkerJob>,
     cancel: Option<StreamCancel>,
     /// 本条 lane 发起的**进程级**退出请求（`/quit`、第二次 Ctrl+C、`quit_pending` 落地）。
@@ -165,7 +167,7 @@ struct TuiApp<'a> {
     /// 当前聚焦的 lane 下标。W1 恒为 0。
     active: usize,
     /// 所有 lane 共用的事件通道接收端：全进程只有这一个消费者，按标签分发。
-    rx: Receiver<UiEvent>,
+    rx: Receiver<Inbound>,
     /// 新增 lane 的装配模板（见 [`LaneTemplate`]）。
     template: LaneTemplate,
     /// 下一条 lane 的编号。**不复用**已退出 lane 的号：`LaneId` 单调递增才没有 ABA。
@@ -173,37 +175,17 @@ struct TuiApp<'a> {
 }
 
 impl<'a> TuiApp<'a> {
-    /// 事件入口：带 lane 标签的按 id 分发，其余交给当前 lane。
+    /// 事件入口：三种来源各走各的路（见 [`Inbound`]）。
     ///
-    /// 键盘 / 鼠标 / 粘贴 / 尺寸从不带标签（`spawn_key_reader` 发裸变体）：W1 阶段只有
-    /// 一条 lane，直接路由给当前 lane；W2 引入切换后这里也是「输入只作用于当前 lane」
-    /// 的落点（见 `docs/design/tui_multi_server.md` §4.2）。
-    fn on_msg(&mut self, msg: UiEvent) {
+    /// 分类由**类型**保证，不靠调用方记得包一层（issue #347）：lane 的出站事件只能经
+    /// `LaneTx` 变成 [`Inbound::FromLane`]，外壳动作走 [`Inbound::Shell`]，键盘 / 鼠标 /
+    /// 粘贴 / 尺寸是 [`Inbound::Input`]。
+    fn on_msg(&mut self, msg: Inbound) {
         match msg {
-            UiEvent::Lane(id, inner) => {
-                // 后台 lane 弹审批先在本 lane 留一句提示：浮层只画当前 lane，不说一声
-                // 就是最长 600s 的静默停摆（见 issue #337）。提示归提示，事件仍要
-                // 分派给**它自己**那条 lane —— 浮层建在它的 `st` 上。
-                self.announce_background_approval(id, &inner);
-                // 目标 lane 已关闭（W2 起才可能出现）：丢弃，绝不把增量写进别的
-                // transcript —— 串台比丢一条增量难查得多。
-                if let Some(lane) = self.lanes.iter_mut().find(|l| l.id == id) {
-                    lane.on_msg(*inner);
-                }
-            }
-            // 新 lane 的装配是外壳动作：worker 以**裸事件**发出（目标 lane 尚不存在，
-            // 按 id 分发无处可去），必须在这里拦。
-            UiEvent::CtlLaneReady { name, result } => self.on_lane_ready(name, result),
-            // 摘连接同样改 `lanes`：`LaneApp` 手上没有那份 `&mut`（见 `shell::detach_lane`）。
-            UiEvent::LaneDetach { name } => self.detach_lane(&name),
-            // 取消某条 lane 的回合也是外壳动作：`LaneApp` 只握着自己的 `cancel`。
-            UiEvent::LaneCancel { name } => self.cancel_lane(&name),
-            // 翻声明的回执是外壳动作：关掉声明后还要顺手摘掉本进程那条连接。
-            UiEvent::CtlToggled(result) => self.on_lane_toggled(result),
-            other => {
-                // 切 lane 是外壳动作：必须在进入 lane 之前拦截（lane 无权切自己，
-                // 否则每条 lane 都要知道全局有几条）。
-                if let UiEvent::Key(k) = &other {
+            // 全局输入：作用于**当前** lane。切 lane 与点 lane 列表是外壳动作，必须在
+            // 进入 lane 之前拦截（lane 无权切自己，否则每条都要知道全局有几条）。
+            Inbound::Input(ev) => {
+                if let UiEvent::Key(k) = &ev {
                     match hotkeys::of(k) {
                         Some(hotkeys::TopHotkey::NextLane) => return self.switch_lane(1),
                         Some(hotkeys::TopHotkey::PrevLane) => return self.switch_lane(-1),
@@ -216,14 +198,41 @@ impl<'a> TuiApp<'a> {
                     }
                 }
                 // 左栏下半的 lane 列表：点一下切过去，这次点击不进入 lane。
-                if let UiEvent::Mouse(m) = &other
+                if let UiEvent::Mouse(m) = &ev
                     && let Some(idx) = self.lane_at_click(m)
                 {
                     self.active = idx;
                     return;
                 }
-                self.lane_mut().on_msg(other);
+                self.lane_mut().on_msg(ev);
             }
+            // 某条 lane 的出站事件：按 id 分发。
+            Inbound::FromLane(id, ev) => {
+                // 后台 lane 弹审批先在本 lane 留一句提示：浮层只画当前 lane，不说一声
+                // 就是最长 600s 的静默停摆（见 issue #337）。提示归提示，事件仍要
+                // 分派给**它自己**那条 lane —— 浮层建在它的 `st` 上。
+                self.announce_background_approval(id, &ev);
+                // 目标 lane 已关闭：丢弃，绝不把增量写进别的 transcript —— 串台比丢一条
+                // 增量难查得多，而这正是 `Inbound` 存在的理由。
+                if let Some(lane) = self.lanes.iter_mut().find(|l| l.id == id) {
+                    lane.on_msg(ev);
+                }
+            }
+            Inbound::Shell(ev) => self.on_shell(ev),
+        }
+    }
+
+    /// 外壳动作：只有这一层能改 `lanes`（单条 lane 没有那份 `&mut`）。
+    fn on_shell(&mut self, ev: ShellEvent) {
+        match ev {
+            // 新 lane 的装配：目标 lane 此刻还不存在，按 id 分发无处可去。
+            ShellEvent::Ready { name, result } => self.on_lane_ready(name, result),
+            // 摘连接：`LaneApp` 手上没有 `lanes` 的 `&mut`（见 `shell::detach_lane`）。
+            ShellEvent::Detach { name } => self.detach_lane(&name),
+            // 取消某条 lane 的回合：`LaneApp` 只握着自己的 `cancel`。
+            ShellEvent::Cancel { name } => self.cancel_lane(&name),
+            // 翻声明的回执：关掉声明后还要顺手摘掉本进程那条连接。
+            ShellEvent::Toggled(result) => self.on_lane_toggled(result),
         }
     }
 }
@@ -695,12 +704,6 @@ impl LaneApp<'_> {
 
     fn on_msg(&mut self, msg: UiEvent) {
         match msg {
-            // 外层已按 `LaneId` 分发过；lane 内再见到标签只可能来自直连测试，
-            // 递归解包即可（不丢弃，避免测试构造的标签事件被静默吃掉）。
-            UiEvent::Lane(_, inner) => self.on_msg(*inner),
-            // 外壳动作：真正摘 lane / 取消回合 / 处理翻声明回执的是 `TuiApp`，
-            // lane 内见到只可能是测试直连。
-            UiEvent::LaneDetach { .. } | UiEvent::LaneCancel { .. } | UiEvent::CtlToggled(_) => {}
             UiEvent::Key(key) => self.on_key(key),
             // 粘贴整段进输入框（不改焦点、不提交）：见 `paste` 模块头注释。
             UiEvent::Paste(text) => self.on_paste(text),
@@ -811,9 +814,6 @@ impl LaneApp<'_> {
             UiEvent::WorkspaceQuery(result) => self.on_workspace_query(result),
             UiEvent::WorkspaceSet(result) => self.on_workspace_set(result),
             UiEvent::CtlList(result) => ctl::on_ctl_list(self, result),
-            // 外壳级事件（新增 lane 的结果）：正常路径到不了 lane（`TuiApp::on_msg` 已拦），
-            // 这里只为穷尽匹配 —— 真要在 lane 内收到，说明通道接错了，静默忽略即可。
-            UiEvent::CtlLaneReady { .. } => {}
             UiEvent::UserData(result) => self.on_user_data(result),
             UiEvent::SavedLlm(result) => self.on_settings_saved_llm(result),
             UiEvent::SavedPrefs(result) => self.on_settings_saved_prefs(result),

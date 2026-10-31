@@ -14,8 +14,9 @@
 //! 失败一律写进**发起命令的那条 lane**的 transcript：用户正看着它，而新 lane 此刻
 //! 还不存在，没有别的地方可写。
 
+use super::inbound::{Inbound, ShellEvent};
 use super::state::LineKind;
-use super::worker::{UiEvent, WorkerJob};
+use super::worker::WorkerJob;
 
 /// `/lane` 的子动作。
 #[derive(Debug)]
@@ -155,10 +156,15 @@ impl super::LaneApp<'_> {
 
     /// `/lane detach <name>`：请外壳摘掉一条连接（`LaneApp` 没有 `lanes` 的 `&mut`）。
     ///
-    /// 走**裸**事件（不带 `LaneId`）：被摘的可能正是发起命令的这条 lane，按 id 分发会
-    /// 落空 —— 与 `CtlLaneReady` 同一个理由。不查 ctl：这一步不动声明、也不停进程。
+    /// 走 [`ShellEvent`]（只到外壳，不进任何 lane）：被摘的可能正是发起命令的这条，
+    /// 按 `LaneId` 分发会落空 —— 与 `LaneReady` 同一个理由。不查 ctl：这一步不动声明、
+    /// 也不停进程。
     fn lane_detach(&mut self, name: String) {
-        if self.tx.send(UiEvent::LaneDetach { name }).is_err() {
+        if self
+            .tx
+            .send(Inbound::Shell(ShellEvent::Detach { name }))
+            .is_err()
+        {
             self.st
                 .push_line(LineKind::System, "断开未发出：事件通道已关闭");
         }
@@ -166,10 +172,14 @@ impl super::LaneApp<'_> {
 
     /// `/lane cancel <name>`：请外壳取消一条 lane 的回合（`LaneApp` 只能取消自己）。
     ///
-    /// 走**裸**事件，理由同 [`Self::lane_detach`]：要取消的可能正是这条 lane，
-    /// 按 id 分发会落回它自己、在 `TuiApp::on_msg` 里变成「自己取消自己」的二次请求。
+    /// 走 [`ShellEvent`]，理由同 [`Self::lane_detach`]：要取消的可能正是这条 lane，
+    /// 按 `LaneId` 分发会落回它自己、在 `TuiApp::on_msg` 里变成「自己取消自己」。
     fn lane_cancel(&mut self, name: String) {
-        if self.tx.send(UiEvent::LaneCancel { name }).is_err() {
+        if self
+            .tx
+            .send(Inbound::Shell(ShellEvent::Cancel { name }))
+            .is_err()
+        {
             self.st
                 .push_line(LineKind::System, "取消未发出：事件通道已关闭");
         }
@@ -177,7 +187,7 @@ impl super::LaneApp<'_> {
 
     /// `/lane close|open`：请控制面翻声明里的 `enabled`（客户端不写 `instances.toml`）。
     ///
-    /// 回执由 worker 以**裸** `UiEvent::CtlToggled` 发出（理由同 [`Self::lane_detach`]：
+    /// 回执由 worker 以 `ShellEvent::LaneToggled` 发出（理由同 [`Self::lane_detach`]：
     /// 被关的可能正是这条 lane），摘连接 / 措辞都在外壳层 `shell::on_lane_toggled`。
     fn lane_toggle(&mut self, name: String, enabled: bool) {
         let Some(socket) = self.ctl_socket.clone() else {

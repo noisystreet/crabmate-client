@@ -24,6 +24,7 @@ use crabmate_client_api::ctl::{ToggleFailure, ToggleOutcome};
 use crate::SessionPrefs;
 use crate::serve::{ConnectionConfig, ServeClient};
 
+use super::inbound::Inbound;
 use super::lane_list::{LaneEntry, LaneStatus};
 use super::state::{LineKind, UiState};
 use super::worker::{LaneId, UiEvent, WorkerJob, spawn_key_reader, spawn_worker};
@@ -95,7 +96,7 @@ pub async fn run_tui(
     // 会导致清屏（及首帧绘制）一直等到用户第一次按键才完成。
     terminal.clear().context("clear screen")?;
 
-    let (tx, rx) = mpsc::channel::<UiEvent>();
+    let (tx, rx) = mpsc::channel::<Inbound>();
     spawn_key_reader(tx.clone());
 
     // 运行期新增 lane（`/lane attach|new`）的装配模板。`bearer` 取主连接那份：
@@ -286,7 +287,7 @@ pub(super) struct LaneTemplate {
     /// 控制面 socket（各 lane 相同：一个 socket 管所有实例）。
     pub(super) ctl_socket: Option<std::path::PathBuf>,
     /// 所有 lane 共用的事件通道发送端。
-    pub(super) tx: mpsc::Sender<UiEvent>,
+    pub(super) tx: mpsc::Sender<Inbound>,
 }
 
 /// lane 的装配与首拉：启动装配与 `/lane attach|new` 共用。
