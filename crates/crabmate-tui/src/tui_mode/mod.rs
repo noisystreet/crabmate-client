@@ -117,8 +117,6 @@ struct LaneApp<'a> {
     st: UiState,
     /// 会话级输入草稿：切会话 / 新建时换入换出（见 `drafts`）。
     drafts: drafts::Drafts,
-    /// 生成中 spinner 帧（按墙钟推进；见 `spinner` 模块）。
-    spinner: spinner::Spinner,
     /// UI 事件发送端：读请求 `spawn` 出去后自己回包，不经 worker 队列。
     ///
     /// 接收端**不在这里**：所有 lane 共用一个通道，`rx` 由外层 [`TuiApp`] 独占持有，
@@ -909,7 +907,7 @@ impl LaneApp<'_> {
             // 见 `perm_status_values`，不同时渲染成 `意图→生效`（与 Desktop chip 同口径）。
             permission: perm_effective,
             permission_intent: perm_intent,
-            spinner: self.spinner.frame(),
+            spinner: spinner::frame_at(self.turn_elapsed()),
             view_offset: self.st.view_offset,
             search_term: self.st.search_term().map(str::to_string),
             search_total: self.st.search_total,

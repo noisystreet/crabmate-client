@@ -13,7 +13,6 @@ use crate::SessionPrefs;
 use crate::serve::{ConnectionConfig, ServeClient};
 
 use super::inbound::Inbound;
-use super::spinner::Spinner;
 use super::state::UiState;
 use super::worker::{LaneId, WorkerJob};
 use super::{LaneApp, LaneTemplate, TuiApp};
@@ -93,7 +92,6 @@ pub(super) fn lane_with_tx<'a>(
         no_keyring: true,
         st: UiState::new(),
         drafts: Default::default(),
-        spinner: Spinner::new(),
         tx,
         job_tx,
         cancel: None,

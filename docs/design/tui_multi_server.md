@@ -93,7 +93,7 @@ pub(crate) struct TuiApp<'a> {
     lanes: Vec<Lane>,
     active: LaneId,
     overrides: &'a mut SessionPrefs,   // 进程级：只作用于「当前 lane 的下一轮」
-    // 其余进程级字段：spinner / last_size / exit / quit_pending / panel / bg
+    // 其余进程级字段：last_size / exit / quit_pending / panel / bg
 }
 ```
 
@@ -185,7 +185,7 @@ api_base = "http://127.0.0.1:8082"
 - 版面口径只有一处：lane 区高度 `lane_pane_height`、可用条数 `lane_shown_len`、行 → 下标 `lane_index_at` 都在 `layout`，`render` 与 `TuiApp::lane_at_click` 共用；各算一遍的症状是「点第 2 行切到别的 lane」。
 - 切换是 `Alt+←/→`、`Ctrl+N`（与 `Alt+→` **同一个热键**，不是第二套「下一条」）、`Alt+1..8` 直达第 n 条（序号与左栏列表自上而下一致），或点某一行；只改 `active`，不打断在途回合；单连接时 `switch_lane` 直接返回（no-op），点击落在唯一那行等于不换。`Alt+1..8` 是**绝对**目标、不环回：`Alt+7` 而只有 3 条时视图不动、只写一行说明 —— `Alt+数字` 是最容易被 tmux / 终端吞掉的组合键，静默失败会被当成「键没送达」，而绕回第 1 条又比不动更容易让人迷路。
 - **已落地（后续补齐）**：lane 行状态点（`·` 空闲 / `●` 运行中 / `▲` 待审批 / `×` 已请求退出，口径在 `lane_list::LaneStatus`）、后台审批提示文案，以及 `F4` 跳到下一条待审批的 lane（环形，从当前的下一条找起；无人等待时不动视图，只写一行说明）。
-- **已落地（lane 行读数）**：每条 lane 的行尾带三样读数——上下文占比（`62%`，与状态行 `ctx` 段同一条轴线，见 `UiState::context_pct_text`）、在途回合耗时（`12s` / `2m05s`，从**发出**算起、回合结束清零）、以及后台 lane 有新输出时的未读点 `•`（帧循环每帧熄一次，不写在各切换出口上）。运行中的 lane 用 `SPINNER_FRAMES` 的当前帧顶替 `●`，所以「它在动」不必切过去才看得见。宽度不够时**从左边丢读数**（先 `ctx`、再耗时），未读点留到最后——宁可少一个数字，也不能丢掉「这条 lane 有话要说」。`lane_entries` 随之从 `shell.rs` 迁到 `lane_list.rs`（后者只负责这一行；前者贴着 920 行门禁）。
+- **已落地（lane 行读数）**：每条 lane 的行尾带三样读数——上下文占比（`62%`，与状态行 `ctx` 段同一条轴线，见 `UiState::context_pct_text`）、在途回合耗时（`12s` / `2m05s`，从**发出**算起、回合结束清零）、以及后台 lane 有新输出时的未读点 `•`（帧循环每帧熄一次，不写在各切换出口上）。运行中的 lane 用 `SPINNER_FRAMES` 的当前帧顶替 `●`，所以「它在动」不必切过去才看得见。帧号由**墙钟推导**（`spinner::frame_at(turn_elapsed())`）：后台 lane 不进 `draw_frame` 也照样在动，谁也不推谁；配套两条口径缺一不可 —— 唤醒源取全部在跑 lane 里最近的一次换帧（否则当前 lane 一空闲就退回 1s 兜底，「一帧」变「一秒一格」），空帧跳过判定也按**任一条** lane 在动画算（否则当前空闲时整帧被跳过，帧号再变也画不出来）。宽度不够时**从左边丢读数**（先 `ctx`、再耗时），未读点留到最后——宁可少一个数字，也不能丢掉「这条 lane 有话要说」。`lane_entries` 随之从 `shell.rs` 迁到 `lane_list.rs`（后者只负责这一行；前者贴着 920 行门禁）。
 - **已落地（状态栏总览）**：`lanes n/8` 常显（`status.rs` 的 `lanes` 段，`n` 与左栏 `连接 [n]` 同源、上限取 `shell::MAX_LANES`）；有 lane 在等审批时值变 `2/8 ▲1`，**无人等待时不画 `▲0`**。待审批数复用 `LaneStatus::WaitingApproval`（与 `▲` / `F4` 同一判定），并**并进 `lanes` 段而不单独占一段**：纵版状态栈的行数由段数决定，而鼠标命中走另一条链算行数，两条链各数一遍段数、差一行就是「点状态栈点到别处」。窄屏时 `lanes` 优先级最低、最先让位，不去挤 `ctx` / `model`。
 - **已落地（切换热键）**：`Alt+1..8` 直达第 n 条（绝对索引、不环回，越界不切视图只留一行说明）与 `Ctrl+N` 切下一条（与 `Alt+→` 同一个热键），`/help` 的连接行同步写进了这两个键（[#361](https://github.com/noisystreet/crabmate-client/issues/361)）。
 

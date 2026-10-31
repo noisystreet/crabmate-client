@@ -27,7 +27,7 @@ use crate::serve::{ConnectionConfig, ServeClient};
 use super::inbound::Inbound;
 use super::state::{LineKind, UiState};
 use super::worker::{LaneId, UiEvent, WorkerJob, spawn_key_reader, spawn_worker};
-use super::{LaneApp, TuiApp, body_cache, drafts, event_loop, session_index, spinner, worker_ctl};
+use super::{LaneApp, TuiApp, body_cache, drafts, event_loop, session_index, worker_ctl};
 
 /// 鼠标上报：只要按下/释放（1000）、按住时的拖动（1002）与 SGR 编码（1006）。
 ///
@@ -303,7 +303,6 @@ impl<'a> LaneApp<'a> {
             no_keyring: template.no_keyring,
             st: UiState::new(),
             drafts: drafts::Drafts::default(),
-            spinner: spinner::Spinner::new(),
             tx: template.tx.clone(),
             job_tx,
             cancel: None,
