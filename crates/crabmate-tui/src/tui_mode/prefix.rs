@@ -22,6 +22,7 @@ pub(crate) fn kind_prefix(kind: LineKind) -> &'static str {
         LineKind::Tool => "工具 ",
         LineKind::System => "! ",
         // 过程摘要行（issue #369）：`▸` 与 thinking 折叠行的标记同形，读作「这里折了一段」。
+        // 展开态（成员放回来）在 [`prefix_for`] 里换成 `▾`：SUMMARY_OPEN。
         LineKind::Process => "▸ ",
     }
 }
@@ -39,6 +40,9 @@ pub(crate) fn prefix_for(log: &LogLine) -> &'static str {
     // 只有「调用中」才加进度位；结束行不论成败是否已知，文本自带标记。
     match (log.kind(), log.tool_state()) {
         (LineKind::Tool, ToolState::Running) => TOOL_PREFIX_PROGRESS,
+        // 摘要行的两个方向：`▸` 收起、`▾` 已展开。两者都是 1 列字形 + 空格，
+        // 所以折行预算不因为开合而变（[`prefix_width`] 只算一次）。
+        (LineKind::Process, _) if log.is_run_open() => "▾ ",
         _ => kind_prefix(log.kind()),
     }
 }
