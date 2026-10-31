@@ -9,6 +9,7 @@
 //! `NO_COLOR` / `TERM=dumb` 时退到无色模式（靠修饰位区分，不靠颜色）。
 
 use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span};
 
 use super::term_image::{self, ColorDepth};
 
@@ -363,6 +364,23 @@ const ANSI16: [(Color, u8, u8, u8); 16] = [
     (Color::White, 255, 255, 255),
 ];
 
+/// 给整行套一层样式补丁（折叠光标用：底色 / 反色是「这一条就是当前那个把手」的唯一提示）。
+///
+/// 放在**渲染之后**调用，而不是把「选中」编进 `line_rows` / body 缓存的指纹：选中态
+/// 每按一次 `↑/↓` 就变一次，进指纹等于每按一下就让那一行重建，还会把 `CachedLine` 的
+/// 字段面再抬一个。与 `render::with_progress_mark`（spinner 帧）同一条路子。
+///
+/// 落在本模块是因为它只跟 [`Palette::selection`] 配套使用 —— 那是「选中态怎么表达」的
+/// 唯一定义（无色模式退反色），而把它放进 `render.rs` 会让那个文件继续贴着 920 行门禁。
+pub(crate) fn with_row_style(line: Line<'static>, patch: Style) -> Line<'static> {
+    let spans: Vec<Span<'static>> = line
+        .spans
+        .into_iter()
+        .map(|s| Span::styled(s.content, s.style.patch(patch)))
+        .collect();
+    Line::from(spans)
+}
+
 fn is_gray_scale(c: Color) -> bool {
     matches!(
         c,
@@ -395,6 +413,24 @@ fn nearest_ansi(c: Color) -> Color {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 折叠光标：整行套选中样式，**内容一字不改**（它只是把手，不是新的状态行）。
+    ///
+    /// 只染行首那一格是常见的手滑 —— 那时光标看起来像「半个字符的强调」，而不是
+    /// 「当前这条」。无色模式走 `REVERSED`，色值本身由其它用例管。
+    #[test]
+    fn row_style_patches_every_span_and_keeps_the_text() {
+        let line = Line::from(vec![Span::raw("▸ "), Span::raw("2 个工具 · 完成")]);
+        let styled = with_row_style(line, Style::new().bg(Color::Red));
+
+        assert_eq!(styled.spans.len(), 2);
+        assert!(
+            styled.spans.iter().all(|s| s.style.bg == Some(Color::Red)),
+            "每个 span 都要带上底色"
+        );
+        let text: String = styled.spans.iter().map(|s| s.content.as_ref()).collect();
+        assert_eq!(text, "▸ 2 个工具 · 完成", "内容不该被改写");
+    }
 
     #[test]
     fn known_themes_map_and_unknown_falls_back() {

@@ -795,21 +795,45 @@ fn empty_composer_has_no_placeholder_by_default() {
     );
 }
 
-/// 折叠光标：整行套选中底色，**内容一字不改**（它只是把手，不是新的状态行）。
+/// 正文窗口必须原样回写给鼠标层：`body_rows_log` 是「物理行 → 逻辑行」的唯一来源。
 ///
-/// 无色模式下 `Palette::selection` 换成 `REVERSED`，具体色值由 palette 的单测管；
-/// 这里锁「所有 span 都打上补丁、文本原样」—— 只染行首那一格是常见的手滑（那时
-/// 光标看起来像半个字符的强调，而不是「当前这条」）。
+/// 写错位置（少算 composer / 状态栏、拿错 `rows` 的切片）在界面上只表现为「点到的行
+/// 与反色的行差一格」，肉眼几乎看不出来，但点哪儿都别扭 —— 所以这里钉住长度与内容。
 #[test]
-fn fold_cursor_style_patches_every_span_and_keeps_the_text() {
-    let line = Line::from(vec![Span::raw("▸ "), Span::raw("2 个工具 · 完成")]);
-    let styled = md::with_row_style(line, Style::new().bg(Color::Red));
+fn render_body_writes_back_the_window_for_the_mouse() {
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
 
-    assert_eq!(styled.spans.len(), 2);
-    assert!(
-        styled.spans.iter().all(|s| s.style.bg == Some(Color::Red)),
-        "每个 span 都要带上底色"
+    const W: u16 = 80;
+    const H: u16 = 12;
+    let mut st = UiState::new();
+    st.set_palette(super::Palette::default());
+    st.sidebar_visible = false;
+    st.push_line(LineKind::User, "第一行");
+    st.push_line(LineKind::Assistant, "第二行");
+    let rows = build_body_rows(&st, chat_body_width(false, W));
+    let info = StatusInfo {
+        api_base: "http://x".into(),
+        context: "—".to_string(),
+        ..StatusInfo::default()
+    };
+    let mut terminal = Terminal::new(TestBackend::new(W, H)).expect("terminal");
+    terminal
+        .draw(|f| draw(f, &mut st, &info, &rows, None, &[], &[]))
+        .expect("draw");
+
+    let area = st.body_area.expect("渲染后必须回写正文区矩形");
+    assert!(area.height > 0, "正文区不该是零高");
+    // 内容不满屏时窗口只有内容那么多行 —— 回写的长度跟着窗口走，不是跟着区域高走。
+    let expected = rows.len().min(area.height as usize);
+    assert_eq!(
+        st.body_rows_log.len(),
+        expected,
+        "窗口内每个有内容的物理行都要有一条映射（没有的留空，由 `body_hit` 兜成 Gap）"
     );
-    let text: String = styled.spans.iter().map(|s| s.content.as_ref()).collect();
-    assert_eq!(text, "▸ 2 个工具 · 完成", "内容不该被改写");
+    assert_eq!(
+        st.body_rows_log.last().copied().flatten(),
+        Some(st.lines.len() - 1),
+        "贴底渲染：最后一条物理行对应最后一条逻辑行"
+    );
 }

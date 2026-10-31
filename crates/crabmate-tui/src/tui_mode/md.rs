@@ -7,25 +7,11 @@
 //! 命中改黄前景且保留修饰位），保证与普通行的高亮观感一致。
 
 use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::{Line, Span};
+use ratatui::text::Span;
 use unicode_width::UnicodeWidthChar;
 
 use super::palette::Palette;
 use crabmate_client_api::{InlineSpan, normalize_markdown_for_render, parse_inline_markdown};
-
-/// 给整行套一层样式补丁（折叠光标：底色 / 反色是「这一条就是当前那个把手」的唯一提示）。
-///
-/// 放在**渲染之后**调用，而不是把「选中」编进 `line_rows` / body 缓存的指纹里：选中态
-/// 每按一次 `↑/↓` 就变一次，进指纹等于每按一下就让那一行重建，还会把 `CachedLine` 的
-/// 字段面再抬一个。与 `super::render::with_progress_mark`（spinner 帧）同一条路子。
-pub(crate) fn with_row_style(line: Line<'static>, patch: Style) -> Line<'static> {
-    let spans: Vec<Span<'static>> = line
-        .spans
-        .into_iter()
-        .map(|s| Span::styled(s.content, s.style.patch(patch)))
-        .collect();
-    Line::from(spans)
-}
 
 /// 行内 markdown 片段 → 渲染样式（前景仅在需要区分时给出，其余随基色）。
 /// 行内代码 / 链接跟主题走（`muted`→`accent`→`code_bg`），无色模式退到修饰位。
