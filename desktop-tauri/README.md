@@ -40,7 +40,7 @@ cd desktop-tauri/src-tauri
 cargo tauri dev
 ```
 
-- **`prepare-sidecar.sh`**（名称历史遗留）会把 **`connect.html`** 拷进 **`desktop-tauri/dist/`**（若存在亦同步遗留 `splash.html`）；业务 UI 优先本仓 **`frontend/dist`**。**`make desktop-release` / `cargo tauri build`** 经 **`before-desktop-build.sh`** 先跑 **`trunk build --release`**（需 **`wasm-opt`**），并拒绝把 debug 大体积 WASM 打进包。开发可用 **`make frontend`**；覆盖路径用 **`CRABMATE_FRONTEND_DIST`**；**`CM_PREPARE_SKIP_FRONTEND=1`** 或 **`CRABMATE_FRONTEND_DIST=-`** 跳过 UI 同步（CI stub）。
+- **`prepare-sidecar.sh`**（名称历史遗留）会把 **`connect.html`** 拷进 **`desktop-tauri/dist/`**；业务 UI 优先本仓 **`frontend/dist`**。**`make desktop-release` / `cargo tauri build`** 经 **`before-desktop-build.sh`** 先跑 **`trunk build --release`**（需 **`wasm-opt`**），并拒绝把 debug 大体积 WASM 打进包。开发可用 **`make frontend`**；覆盖路径用 **`CRABMATE_FRONTEND_DIST`**；**`CM_PREPARE_SKIP_FRONTEND=1`** 或 **`CRABMATE_FRONTEND_DIST=-`** 跳过 UI 同步（CI stub）。
 - 可选：**`CM_DESKTOP_SUGGESTED_URL`** 作为**无连接历史时**的地址框预填与自动登录兜底。
 
 ## 打包

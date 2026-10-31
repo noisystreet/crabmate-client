@@ -5,7 +5,7 @@
 frontend/src/icon.rs（`Icon` 组件 + `--icon-*`），但这两类退化都不会立刻报错：
 再手写一个 `<svg>` 照样能跑，再写一个 `width: 14px` 也照样能跑 —— 只能靠机械检查拦住。
 
-本门禁两条规则（扫描范围仅 frontend；connect / splash 无共享 Icon 组件，不在范围内）：
+本门禁两条规则（扫描范围仅 frontend；connect 无共享 Icon 组件，不在范围内）：
 
   1. **`frontend/src/**/*.rs`（除 icon.rs）不得出现字面 `<svg`** —— 图标一律走
      `Icon` 组件或其 helper；`icon.rs` 是模板的唯一落点。

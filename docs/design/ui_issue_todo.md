@@ -64,7 +64,7 @@
 
 ## P2 · 样式与 token
 
-- [ ] 启动 splash 硬编码深色 `#07090e`，浅色用户首帧深闪：`frontend/index.html`（同值亦见于 `desktop-tauri/splash.html`、`crates/crabmate-connect/assets/connect.html` 与 Android `values*/themes.xml`）。**部分修（2026-09-25）**：色值已收成单一来源并加门禁——Android 侧四个底色槽全部改引用镜像令牌 `@color/cm_bg`（`res/values/colors.xml` 的 `cm_*` 逐项等于 `tokens.css` 的 `--<token>`），启动页三处 `#07090e` 与 `--bg` 同值且「声明必须恰好命中一次」，由 `scripts/check-token-mirrors.sh` 冻结（见下条）。**未修（需独立行为改动）**：浅色偏好用户的首帧深闪——`data-theme` 由 WASM 水合后才写入，`index.html` 内联样式在 trunk 注入的 `<link>` 之前，故首绘恒深色；正解是在 `index.html` 加预绘脚本、从 localStorage 快照同步读出主题再写 `data-theme`，属独立后续项。
+- [x] 启动 splash 硬编码深色 `#07090e`，浅色用户首帧深闪：`frontend/index.html`（同值亦见于 `crates/crabmate-connect/assets/connect.html` 与 Android `values*/themes.xml`）。**色值（2026-09-25）**：收成单一来源并加门禁——Android 侧四个底色槽全部改引用镜像令牌 `@color/cm_bg`（`res/values/colors.xml` 的 `cm_*` 逐项等于 `tokens.css` 的 `--<token>`），启动页底色与 `--bg` 同值且「声明必须恰好命中一次」，由 `scripts/check-token-mirrors.sh` 冻结。**行为（#322）**：`index.html` 的 `<head>` 加内联预绘脚本，首绘前从本机镜像 `crabmate.theme.pref` 读出偏好 slug（`system` 按 OS 明暗解析）并写 `data-theme`，配合 `data-theme$='-light'` 浅色覆层（只引用 token，不新增色值），浅色用户首帧即浅色；镜像由 `frontend/src/app/shell_prefs_storage.rs` 的 `persist_theme_to_storage_and_dom` 单点写入、`read_shell_ui_initial_snapshot` 读同一个键——否则水合后的 DOM 同步 Effect 会把预绘结果冲回深色，闪帧变成「浅 → 深 → 浅」。**已知限制**：镜像为空（首次安装 / 清过存储）仍走深色基线（`DEFAULT_THEME_SLUG` 是 `shadcn-light`，不能当基线，否则深色用户首访闪浅色）；Android 原生启动窗（`cm_bg`）与桌面窗口底色（`BOOT_SHELL_BG`）仍是深色，冷启动会先见一帧深色原生背景。
 
 ## P3 · 次要
 

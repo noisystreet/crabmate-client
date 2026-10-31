@@ -5,7 +5,7 @@
 # 每行必须写理由；CSS 一旦补上规则、或消费方被删除，本行必须同步删除（门禁会报错）。
 #
 # 格式：<scope>:<token>   # <理由>
-#   scope ∈ frontend | connect | splash
+#   scope ∈ frontend | connect
 
 frontend:approval-modal-backdrop    # 与 .modal-backdrop 同元素，遮罩样式全部来自基类；本类名仅作分层/语义标识（无独立 z-index 需求）
 frontend:ide-goto-bar    # 与 .ide-find-bar 同元素，浮条布局来自基类；本类名区分「跳转行」与「查找」两种语义

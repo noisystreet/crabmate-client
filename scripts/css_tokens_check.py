@@ -19,7 +19,7 @@ token（CSS 自定义属性）是深色 / 浅色 / 高对比主题的颜色与�
 白名单失效（token 已在 CSS 定义 / 已无任何引用 / 拼写笔误）同样失败。
 
 扫描范围刻意与 scripts/check-css-breakpoints.sh 的 CSS_DIRS 一致：不含构建产物
-（`frontend/dist`、`*/target`），也不含 connect / splash 等自持变量的独立迷你页面。
+（`frontend/dist`、`*/target`），也不含 connect 等自持变量的独立迷你页面。
 """
 
 from __future__ import annotations

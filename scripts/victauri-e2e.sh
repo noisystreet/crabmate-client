@@ -18,7 +18,7 @@
 #   CM_E2E_SHOW_WINDOWS   默认 1（映射 WebView，否则 bridge 常失败）
 #   CM_DESKTOP_SERVE_PORT 本脚本拉起的 serve 端口（默认 18080）
 #   CM_DESKTOP_SERVE_URL  可覆盖（默认 http://127.0.0.1:$CM_DESKTOP_SERVE_PORT/）
-#   CRABMATE_FRONTEND_DIST  可选：同步进 desktop dist（否则仅 connect/splash）
+#   CRABMATE_FRONTEND_DIST  可选：同步进 desktop dist（否则仅 connect）
 #   REAL_LLM_E2E          仅 real_llm 套件需要
 #   VICTAURI_INSIDE_XVFB  内部：已由 xvfb-run 重入，勿手动设置
 

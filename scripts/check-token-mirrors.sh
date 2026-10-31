@@ -5,7 +5,7 @@
 #   2. Android 主题：res/values*/themes.xml 不得出现颜色字面量，应用主题四个底色必须引用
 #      @color/cm_bg，且必须显式声明系统栏图标用浅色（windowLightStatusBar /
 #      windowLightNavigationBar = false）；
-#   3. 首绘底色：frontend/index.html 内联样式、desktop-tauri/splash.html 与
+#   3. 首绘底色：frontend/index.html 内联样式与
 #      crates/crabmate-connect/assets/connect.html 的 bg0 必须等于 --bg。
 #
 # 三条规则都是精确相等、无白名单：改值必须两侧同改，声明被改名 / 搬走同样失败（防门禁静默失效）。

@@ -70,7 +70,58 @@
           animation: none;
         }
       }
+      /* 浅色主题首帧：data-theme 由下方预绘脚本在首绘前写入，浅色用户的启动页第一帧即浅色。
+         上面那行深色 background 字面量保持不动（镜像门禁要求它恰好命中一次），覆层只引用
+         token，不新增色值副本；-light 后缀与 app_prefs::theme_css_is_light 同口径。 */
+      html[data-theme$='-light'],
+      html[data-theme$='-light'] body {
+        background: var(--bg);
+        color: var(--text);
+      }
+      html[data-theme$='-light'] #cm-boot-splash {
+        /* 浅色下不铺深色径向渐变（#1c1f33 无对应 token），直接平铺 --bg */
+        background: var(--bg);
+      }
+      html[data-theme$='-light'] #cm-boot-splash .cm-boot-mark {
+        color: var(--accent);
+        background: var(--surface);
+        border-color: var(--border);
+      }
+      html[data-theme$='-light'] #cm-boot-splash .cm-boot-status {
+        color: var(--muted);
+      }
+      html[data-theme$='-light'] #cm-boot-splash .cm-boot-loader {
+        border-color: var(--accent-dim);
+        border-top-color: var(--accent);
+      }
     </style>
+    <!-- 预绘主题：偏好真源在 serve 的 /user-data/prefs（异步），首帧只能依据本机镜像
+         （键与取值规则见 frontend/src/app/shell_prefs_storage.rs）。缺失 / 非法 / 存储不可用
+         一律不写属性，由 :root 的深色基线兜底；system 在此按 OS 明暗解析，与
+         resolve_data_theme_slug 在「桌面原生 OS 提示未知」时的分支等价（拿不到按浅色）。
+         不抄主题白名单：非法值匹配不到任何 data-theme 规则，自然回落深色。 -->
+    <script>
+      (function () {
+        try {
+          var raw = window.localStorage.getItem('crabmate.theme.pref');
+          if (!raw) return;
+          var pref = raw.trim();
+          if (!/^[a-z0-9-]{1,32}$/.test(pref)) return;
+          if (pref === 'system') {
+            var prefersDark = false;
+            try {
+              prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+            } catch (_) {
+              prefersDark = false;
+            }
+            pref = prefersDark ? 'crabmate-dark' : 'crabmate-light';
+          }
+          document.documentElement.setAttribute('data-theme', pref);
+        } catch (_) {
+          /* 存储被禁 / localStorage 抛错：保留 :root 深色基线，不阻塞水合 */
+        }
+      })();
+    </script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link

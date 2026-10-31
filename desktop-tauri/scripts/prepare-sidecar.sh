@@ -61,19 +61,12 @@ elif [[ -n "${dist_src}" && -f "${dist_src}/index.html" ]]; then
     echo "ok: release WASM size check passed (${#wasm_found[@]} file(s))"
   fi
 else
-  echo "note: no frontend dist found (ok for shell-only; connect/splash still copied)" >&2
+  echo "note: no frontend dist found (ok for shell-only; connect still copied)" >&2
   echo "  run: make frontend-release   # or set CRABMATE_FRONTEND_DIST" >&2
   if [[ "${CM_PREPARE_REQUIRE_OPTIMIZED_WASM:-0}" == "1" || "${CM_PREPARE_REQUIRE_OPTIMIZED_WASM:-}" == "true" ]]; then
     echo "error: release desktop build requires frontend dist" >&2
     exit 1
   fi
-fi
-
-# 启动画面
-splash_src="${desktop_root}/splash.html"
-if [[ -f "${splash_src}" ]]; then
-  cp "${splash_src}" "${dist_dest}/splash.html"
-  echo "copied splash.html -> ${dist_dest}"
 fi
 
 # 桌面/移动共用连接页（源：crates/crabmate-connect/assets）
