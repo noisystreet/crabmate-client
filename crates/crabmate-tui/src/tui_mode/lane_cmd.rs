@@ -16,7 +16,7 @@
 
 use super::inbound::{Inbound, ShellEvent};
 use super::state::LineKind;
-use super::worker::WorkerJob;
+use super::worker_ctl::CtlJob;
 
 /// `/lane` 的子动作。
 #[derive(Debug)]
@@ -153,16 +153,18 @@ impl super::LaneApp<'_> {
 
     /// `/lane attach <name>`：只读查询，不动声明。
     fn lane_attach(&mut self, name: String) {
-        let Some(socket) = self.ctl_socket_or_hint() else {
+        let Some(ctl) = self.ctl_handle_or_hint() else {
             return;
         };
         self.st
             .push_line(LineKind::System, &format!("正在连接 ctl 实例 `{name}`…"));
-        if self
-            .job_tx
-            .send(WorkerJob::CtlAttach { socket, name })
-            .is_err()
-        {
+        if !self.enqueue_ctl(
+            &ctl,
+            CtlJob::Attach {
+                from: self.id,
+                name,
+            },
+        ) {
             self.st
                 .push_line(LineKind::System, "连接未发出：worker 线程已退出");
         }
@@ -206,10 +208,10 @@ impl super::LaneApp<'_> {
 
     /// `/lane close|open`：请控制面翻声明里的 `enabled`（客户端不写 `instances.toml`）。
     ///
-    /// 回执由 worker 以 `ShellEvent::LaneToggled` 发出（理由同 [`Self::lane_detach`]：
+    /// 回执由 ctl 线程以 `ShellEvent::Toggled` 发出（理由同 [`Self::lane_detach`]：
     /// 被关的可能正是这条 lane），摘连接 / 措辞都在外壳层 `shell::on_lane_toggled`。
     fn lane_toggle(&mut self, name: String, enabled: bool) {
-        let Some(socket) = self.ctl_socket.clone() else {
+        let Some(ctl) = self.ctl.clone() else {
             self.st.push_line(
                 LineKind::System,
                 "控制面未启用：`/lane close` 需要 `crabmatectl supervise --socket`（或 `--ctl-socket <path>`）",
@@ -217,23 +219,27 @@ impl super::LaneApp<'_> {
             return;
         };
         let verb = if enabled { "启用" } else { "关闭" };
-        let job = WorkerJob::CtlToggle {
-            socket,
-            name: name.clone(),
-            enabled,
-        };
-        if self.job_tx.send(job).is_err() {
-            self.st
-                .push_line(LineKind::System, "请求未发出：worker 线程已退出");
-            return;
-        }
+        // 先写「正在…」再入队：排队提示由 `enqueue_ctl` 追加在后面，两条的顺序才是
+        // 「我在做什么 → 为什么还没回」。四条命令都沿用这个次序。
         self.st
             .push_line(LineKind::System, &format!("正在{verb}声明 `{name}`…"));
+        let job = CtlJob::Toggle {
+            from: self.id,
+            name,
+            enabled,
+        };
+        if !self.enqueue_ctl(&ctl, job) {
+            self.st
+                .push_line(LineKind::System, "请求未发出：worker 线程已退出");
+        }
     }
 
-    /// `/lane new <name> [workspace]`：写声明 + 等就绪（`add` 由 worker 发）。
+    /// `/lane new <name> [workspace]`：写声明 + 等就绪（`add` 由 ctl 线程发）。
+    ///
+    /// 20 s 的就绪轮询在**外壳级的 ctl 线程**上跑（issue #350），所以这条 lane 的
+    /// 会话 / 工作区 / 状态拉取不会排在它后面 —— 命令发出去就立刻返回。
     fn lane_new(&mut self, name: String, workspace: Option<String>) {
-        let Some(socket) = self.ctl_socket_or_hint() else {
+        let Some(ctl) = self.ctl_handle_or_hint() else {
             return;
         };
         let Some(workspace) = resolve_workspace(workspace, self.st.workspace_path.as_deref())
@@ -248,15 +254,14 @@ impl super::LaneApp<'_> {
             LineKind::System,
             &format!("正在新建 ctl 实例 `{name}`（工作区 {workspace}）并等它就绪…"),
         );
-        if self
-            .job_tx
-            .send(WorkerJob::CtlNew {
-                socket,
+        if !self.enqueue_ctl(
+            &ctl,
+            CtlJob::New {
+                from: self.id,
                 name,
                 workspace,
-            })
-            .is_err()
-        {
+            },
+        ) {
             self.st
                 .push_line(LineKind::System, "新建未发出：worker 线程已退出");
         }
@@ -364,6 +369,88 @@ mod tests {
             }
             _ => panic!("应发 ShellEvent::Detach"),
         }
+    }
+
+    /// `/lane new` 不再占用本 lane 的 worker（issue #350）：它排进**外壳级** ctl 通道，
+    /// `job_tx` 一个任务都收不到。
+    ///
+    /// 这是那个 issue 的核心验收：20 s 的就绪轮询原先排在本 lane 的 worker 队列里，
+    /// 期间该 lane 的会话 / 工作区 / 状态刷新全都排队。现在「发出去就返回」。
+    #[test]
+    fn lane_new_goes_to_the_ctl_plane_not_the_lane_worker() {
+        use std::sync::mpsc;
+
+        use crate::tui_mode::test_support::{lane_with_tx, test_client, test_prefs};
+        use crate::tui_mode::worker::LaneId;
+        use crate::tui_mode::worker_ctl::CtlHandle;
+
+        let client = test_client();
+        let mut prefs = test_prefs();
+        let (tx, _rx) = mpsc::channel();
+        let (job_tx, job_rx) = mpsc::channel();
+        let (ctl_tx, ctl_rx) = mpsc::channel();
+        let mut lane = lane_with_tx(LaneId(4), &client, &mut prefs, tx, job_tx);
+        lane.ctl = Some(CtlHandle::detached(ctl_tx));
+
+        // 工作区给死：本 lane 还没拉过 `GET /workspace`。
+        lane.lane_new("proj-c".to_string(), Some("/home/u/proj-c".to_string()));
+
+        match ctl_rx.try_recv() {
+            Ok(CtlJob::New {
+                from,
+                name,
+                workspace,
+            }) => {
+                assert_eq!(from, LaneId(4), "回执要回到发起它的 lane");
+                assert_eq!(name, "proj-c");
+                assert_eq!(workspace, "/home/u/proj-c");
+            }
+            _ => panic!("应派 CtlJob::New 给外壳级 ctl 通道"),
+        }
+        assert!(
+            job_rx.try_recv().is_err(),
+            "本 lane 的 worker 不该收到任何任务"
+        );
+    }
+
+    /// 控制面被占着时，第二条命令**按下那一刻**就说清自己在排队（issue #350）。
+    ///
+    /// 这个 refactor 把控制面收敛到一条线程，于是 `/lane new` 的 20 s 轮询期间别人敲的
+    /// 命令会排在那次轮询之后：不解释，用户看到的就是一条没有回包的卡住命令。
+    /// 提示只能由发送侧写 —— ctl 线程轮到它才知道自己排第几。
+    #[test]
+    fn second_control_call_says_it_is_queued() {
+        use std::sync::mpsc;
+
+        use crate::tui_mode::test_support::{lane_with_tx, test_client, test_prefs};
+        use crate::tui_mode::worker::LaneId;
+        use crate::tui_mode::worker_ctl::CtlHandle;
+
+        let client = test_client();
+        let mut prefs = test_prefs();
+        let (tx, _rx) = mpsc::channel();
+        let (job_tx, _job_rx) = mpsc::channel();
+        let mut lane = lane_with_tx(LaneId(5), &client, &mut prefs, tx, job_tx);
+        let (ctl_tx, ctl_rx) = mpsc::channel();
+        lane.ctl = Some(CtlHandle::detached(ctl_tx));
+
+        lane.lane_attach("proj-a".to_string());
+        let after_first = lane.st.lines.len();
+        lane.lane_attach("proj-b".to_string());
+
+        assert!(ctl_rx.try_recv().is_ok(), "第一条应已入队");
+        assert!(ctl_rx.try_recv().is_ok(), "第二条也要入队，只是排在后面");
+        let texts: Vec<String> = lane.st.lines.iter().map(|l| l.text().to_string()).collect();
+        assert!(
+            !texts[..after_first].iter().any(|t| t.contains("排队中")),
+            "第一条前面没人，不该报排队：{texts:?}"
+        );
+        assert!(
+            texts[after_first..]
+                .iter()
+                .any(|t| t.contains("排队中") && t.contains("前面还有 1 条")),
+            "第二条要说明前面还压着一条：{texts:?}"
+        );
     }
 
     #[test]

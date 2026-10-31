@@ -27,7 +27,7 @@ use crate::serve::{ConnectionConfig, ServeClient};
 use super::inbound::Inbound;
 use super::state::{LineKind, UiState};
 use super::worker::{LaneId, UiEvent, WorkerJob, spawn_key_reader, spawn_worker};
-use super::{LaneApp, TuiApp, body_cache, drafts, event_loop, session_index, spinner};
+use super::{LaneApp, TuiApp, body_cache, drafts, event_loop, session_index, spinner, worker_ctl};
 
 /// 鼠标上报：只要按下/释放（1000）、按住时的拖动（1002）与 SGR 编码（1006）。
 ///
@@ -98,6 +98,10 @@ pub async fn run_tui(
     let (tx, rx) = mpsc::channel::<Inbound>();
     spawn_key_reader(tx.clone());
 
+    // 控制面调用在外壳级执行（issue #350）：一个线程、一份 socket、天然串行。
+    // 每条 lane 只拿到发送端，结果按发起它的 `LaneId` 回到那条 lane 的 transcript。
+    let ctl = ctl_socket.map(|path| worker_ctl::spawn(path.to_path_buf(), tx.clone()));
+
     // 运行期新增 lane（`/lane attach|new`）的装配模板。`bearer` 取主连接那份：
     // 控制面里所有实例同机同用户，per-profile 槽会牵动 Desktop / Android 的槽名约定。
     let template = LaneTemplate {
@@ -108,7 +112,7 @@ pub async fn run_tui(
             .first()
             .map(|(_, c)| c.config().bearer_token.clone())
             .unwrap_or_default(),
-        ctl_socket: ctl_socket.map(std::path::Path::to_path_buf),
+        ctl,
         tx: tx.clone(),
     };
 
@@ -269,8 +273,10 @@ pub(super) struct LaneTemplate {
     /// Web API Bearer：控制面里所有实例同机同用户，第一版共用主连接那份
     /// （per-profile 槽需要牵动 Desktop / Android 的槽名约定，见设计稿 §4.5）。
     pub(super) bearer: String,
-    /// 控制面 socket（各 lane 相同：一个 socket 管所有实例）。
-    pub(super) ctl_socket: Option<std::path::PathBuf>,
+    /// 外壳级控制面通道（各 lane 相同：一个 socket 管所有实例）。
+    /// 存通道句柄而不是 socket：socket 只由 `worker_ctl` 的线程持有，调用也在那里串行
+    /// 发生（issue #350）。`None` = 没启用控制面（`/ctl` 会说明怎么启用）。
+    pub(super) ctl: Option<worker_ctl::CtlHandle>,
     /// 所有 lane 共用的事件通道发送端。
     pub(super) tx: mpsc::Sender<Inbound>,
 }
@@ -278,7 +284,7 @@ pub(super) struct LaneTemplate {
 /// lane 的装配与首拉：启动装配与 `/lane attach|new` 共用。
 ///
 /// 字段清单只此一份：两处各写一遍的话，加字段时必有一边漏掉，而漏的那条 lane
-/// 会静默缺一项行为（例如没有 `ctl_socket` 就连 `/lane` 都用不了）。
+/// 会静默缺一项行为（例如没有 `ctl` 就连 `/lane` 都用不了）。
 impl<'a> LaneApp<'a> {
     /// 按模板装配一条 lane（worker 由调用方先 spawn）。
     fn assemble(
@@ -311,7 +317,7 @@ impl<'a> LaneApp<'a> {
             resume: None,
             sent_turn: None,
             bg: None,
-            ctl_socket: template.ctl_socket.clone(),
+            ctl: template.ctl.clone(),
             session_refresh_pending: false,
             unread: false,
             turn_started: None,
@@ -413,17 +419,36 @@ impl<'a> super::TuiApp<'a> {
         }
     }
 
-    /// `UiEvent::CtlLaneReady`：控制面回包后装配一条新 lane。
+    /// 按 `LaneId` 找 lane；找不到（已被 `/lane detach` 摘掉）就退回当前 lane。
     ///
-    /// 这条事件由 worker 以**裸事件**发出（不带 `LaneId`）：新 lane 还不存在，
-    /// 按 id 分发只会被当成「已关闭的 lane」丢掉。
-    pub(super) fn on_lane_ready(&mut self, name: String, result: Result<String, String>) {
+    /// 控制面回执的目标是**发起命令的那条**（issue #350：执行挪到了外壳级，归属仍按
+    /// `LaneId`）。退回当前 lane 而不是丢弃：结果不该凭空消失，用户仍要能看到它。
+    pub(super) fn lane_by_id_or_active(&mut self, id: LaneId) -> &mut LaneApp<'a> {
+        let idx = self
+            .lanes
+            .iter()
+            .position(|l| l.id == id)
+            .unwrap_or(self.active);
+        &mut self.lanes[idx]
+    }
+
+    /// `ShellEvent::Ready`：控制面回包后装配一条新 lane。
+    ///
+    /// 走外壳事件而不是 `UiEvent`：新 lane 还不存在，按 id 分发只会被当成「已关闭的
+    /// lane」丢掉。`from` 只用于**失败**分支 —— 那条 lane 已经在了。
+    pub(super) fn on_lane_ready(
+        &mut self,
+        from: LaneId,
+        name: String,
+        result: Result<String, String>,
+    ) {
         match result {
             Ok(base_url) => self.attach_lane(&name, &base_url),
-            // 失败写进**当前** lane：发起命令的人正看着那个 transcript。
+            // 失败写回**发起命令的那条** lane：`/lane new` 的 20 s 轮询期间用户很可能
+            // 已经切走了，写进「当前」那条等于把别人的失败放到你的屏上。
             Err(why) => {
-                let lane = self.lane_mut();
-                lane.st
+                self.lane_by_id_or_active(from)
+                    .st
                     .push_line(LineKind::System, &format!("连接 `{name}` 失败：{why}"));
             }
         }
@@ -630,7 +655,7 @@ impl<'a> super::TuiApp<'a> {
         }
     }
 
-    /// `UiEvent::CtlToggled`：写回执；关掉声明时顺手摘掉本进程那条连接。
+    /// `ShellEvent::Toggled`：写回执；关掉声明时顺手摘掉本进程那条连接。
     ///
     /// 先写回执再 detach：`detach_lane` 把「已断开…」写进**摘完之后**的当前 lane，
     /// 顺序反了用户就先看到「已断开」，再看到为什么要断。
@@ -638,11 +663,15 @@ impl<'a> super::TuiApp<'a> {
     /// **唯一一条连接不摘**：声明一关 ctl 就会停掉那个实例、这条 lane 随后下线，但界面
     /// 至少要有一条 lane 才画得出来（`detach_lane` 同样拒绝最后一条）。所以这里只把后果
     /// 说清：退出用 `/quit`，反悔用 `/lane open`。
-    pub(super) fn on_lane_toggled(&mut self, result: Result<ToggleOutcome, ToggleFailure>) {
+    pub(super) fn on_lane_toggled(
+        &mut self,
+        from: LaneId,
+        result: Result<ToggleOutcome, ToggleFailure>,
+    ) {
         let outcome = match result {
             Ok(o) => o,
             Err(f) => {
-                self.lane_mut().st.push_line(
+                self.lane_by_id_or_active(from).st.push_line(
                     LineKind::System,
                     &format!("`{}` 的声明未改动：{}", f.name, f.reason),
                 );
@@ -653,7 +682,9 @@ impl<'a> super::TuiApp<'a> {
         // 已是关闭」两种措辞上，至少不会把方向说反。
         let enabled = outcome.enabled.unwrap_or(false);
         for line in toggle_report_lines(&outcome.name, enabled, &outcome) {
-            self.lane_mut().st.push_line(LineKind::System, &line);
+            self.lane_by_id_or_active(from)
+                .st
+                .push_line(LineKind::System, &line);
         }
         let name = outcome.name.clone();
         if enabled || !self.lanes.iter().any(|l| l.label == name) {
@@ -663,7 +694,7 @@ impl<'a> super::TuiApp<'a> {
             self.detach_lane(&name);
             return;
         }
-        self.lane_mut().st.push_line(
+        self.lane_by_id_or_active(from).st.push_line(
             LineKind::System,
             "这是唯一一条连接：ctl 会停掉该实例，这条 lane 随后下线；退出用 `/quit`，反悔用 `/lane open`",
         );

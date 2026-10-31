@@ -107,8 +107,8 @@ pub(super) fn lane_with_tx<'a>(
         resume: None,
         sent_turn: None,
         bg: None,
-        // 测试默认不启用控制面：`/ctl` 会走「未启用」分支，除非用例自己设路径。
-        ctl_socket: None,
+        // 测试默认不启用控制面：`/ctl` 会走「未启用」分支，除非用例自己塞一个发送端。
+        ctl: None,
         session_refresh_pending: false,
         unread: false,
         turn_started: None,
@@ -185,7 +185,7 @@ pub(super) fn test_shell_with_clients<'a>(
             yes: true,
             no_keyring: true,
             bearer: String::new(),
-            ctl_socket: None,
+            ctl: None,
             tx: shell_tx,
         },
         session_refresh: Default::default(),
@@ -303,6 +303,41 @@ mod tests {
         assert_eq!(app.lane().label, "proj-b");
         assert_eq!(app.next_lane_id, before + 1, "编号单调递增");
         assert_ne!(app.lanes[0].id, app.lanes[1].id, "LaneId 不能重复");
+    }
+
+    /// 控制面回执里的失败写回**发起命令的那条** lane（issue #350）。
+    ///
+    /// 控制面调用已由外壳级线程执行，归属仍按 `LaneId`：`/lane new` 的 20 s 轮询期间
+    /// 用户很可能已经切走了，写进「当前」那条等于把别人的失败放到你的屏上。
+    #[test]
+    fn control_plane_failure_lands_in_the_lane_that_asked() {
+        let client = test_client();
+        let mut prefs = [test_prefs(), test_prefs()];
+        let mut app = test_shell(&client, &mut prefs);
+
+        // lane-2 发起的 `/lane new` 失败了，而当前看的是 lane-1。
+        app.on_lane_ready(
+            LaneId(2),
+            "proj-c".to_string(),
+            Err("工作区不在白名单".to_string()),
+        );
+
+        assert!(
+            app.lanes[1]
+                .st
+                .lines
+                .iter()
+                .any(|l| l.text().contains("连接 `proj-c` 失败：工作区不在白名单")),
+            "失败要写进发起命令的那条 lane"
+        );
+        assert!(
+            !app.lanes[0]
+                .st
+                .lines
+                .iter()
+                .any(|l| l.text().contains("proj-c")),
+            "另一条 lane 不该看到别人的失败"
+        );
     }
 
     /// 同名连接已存在时只切过去：重复连会让左栏出现两条同名 lane。
