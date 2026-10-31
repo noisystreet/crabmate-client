@@ -85,6 +85,8 @@ impl LaneApp<'_> {
         });
         self.st.running = true;
         self.st.cancel_sent = false;
+        // 耗时从「发出」算起：排队与建连同样是用户在等。
+        self.turn_started = Some(std::time::Instant::now());
         let cancel = StreamCancel::new();
         self.cancel = Some(cancel.clone());
         let job = TurnRequest {

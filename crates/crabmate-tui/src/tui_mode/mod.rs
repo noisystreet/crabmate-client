@@ -161,6 +161,10 @@ struct LaneApp<'a> {
     /// 只置位、不在这里发请求：每条 lane 每轮各发一次 `RefreshSessions` 就是 N 倍
     /// 扇出，外壳按窗口合并后再发（issue #349）。
     session_refresh_pending: bool,
+    /// 后台 lane 有新输出、用户还没看（左栏那一行的未读点）。由外壳置位 / 清零。
+    unread: bool,
+    /// 在途回合的开始时刻（左栏显示耗时）；`None` = 空闲。从**发出**算起：首 token 之前的排队与建连同样是等。
+    turn_started: Option<std::time::Instant>,
 }
 
 /// 多 lane 外壳：持有 N 条 lane 与当前聚焦的那条。
@@ -223,6 +227,8 @@ impl<'a> TuiApp<'a> {
                 // 同一台 serve 的其它 lane 也要拿到这份事实：刷新已按 serve 去重，回包
                 // 得复制过去，否则被跳过的那条会话列表就再也不更新（issue #349）。
                 self.fanout_shared_refresh(id, &ev);
+                // 后台 lane 说了话、用户还没看：点亮左栏那一行（切过去即熄）。
+                self.mark_background_unread(id, &ev);
                 // 目标 lane 已关闭：丢弃，绝不把增量写进别的 transcript —— 串台比丢一条
                 // 增量难查得多，而这正是 `Inbound` 存在的理由。
                 if let Some(lane) = self.lanes.iter_mut().find(|l| l.id == id) {
@@ -683,6 +689,7 @@ impl LaneApp<'_> {
         self.st.running = false;
         self.st.cancel_sent = false;
         self.cancel = None;
+        self.turn_started = None;
         // 断点：只有「serve 侧 job 可能仍在跑」才留（规则与 repl 同源，见 `resume`）。
         self.record_turn_outcome(&outcome, interrupted);
         // 只读的设置面板随回合结束自动解锁（保留面板，不需重开）。

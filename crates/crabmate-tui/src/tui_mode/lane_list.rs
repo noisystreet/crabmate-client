@@ -15,12 +15,21 @@ use unicode_width::UnicodeWidthStr;
 
 use super::layout::lane_shown_len;
 use super::palette::Palette;
+use super::status::SPINNER_FRAMES;
 use super::text::truncate_display;
+use super::worker::{LaneId, UiEvent};
+
+/// 名字至少留几列才值得画尾部读数：不足就整段尾部让位给名字。
+const LANE_LABEL_MIN: usize = 4;
 
 /// 外壳层算好的单条 lane 快照：只含**渲染需要**的字段。
 ///
 /// 故意不导 lane 内部状态（transcript / 草稿 / 游标）：渲染层拿不到 `&mut`，
 /// 也就不可能在某条 lane 的绘制里改到别人。
+///
+/// `Default` 是为了让测试只写关心的那几个字段 —— 这里的字段只会越加越多，
+/// 每加一个就改一遍四个测试构造函数，迟早漏掉一处。
+#[derive(Default)]
 pub(super) struct LaneEntry {
     /// lane 名（连接名）。
     pub label: String,
@@ -30,15 +39,24 @@ pub(super) struct LaneEntry {
     pub active: bool,
     /// 这条 lane 此刻在做什么。
     pub status: LaneStatus,
+    /// 后台 lane 产生了新输出、用户还没切过去看（切过去即清零）。
+    pub unread: bool,
+    /// 上下文用量短文本（`62%` / `~1%`）；没有实测也没有基线时 `None`。
+    pub context: Option<String>,
+    /// 在途回合已耗时（秒）；空闲时 `None`。
+    pub busy_secs: Option<u64>,
+    /// 生成中 spinner 的当前帧（`⠋`…）。非生成中为 `None`，此时用 [`LaneStatus::mark`]。
+    pub spin: Option<&'static str>,
 }
 
 /// 一条 lane 当前处于什么阶段（渲染用的最小快照）。
 ///
 /// 用枚举而不是「busy / 待审批」两个 bool：后者允许「空闲又在等审批」这种非法组合，
 /// 分支也会随标志数扩散。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(super) enum LaneStatus {
     /// 没有在跑的回合。
+    #[default]
     Idle,
     /// 回合进行中（审批之外的工作）。
     Running,
@@ -145,12 +163,74 @@ fn lane_title(total: usize, shown: usize) -> String {
 /// 「切过去」与「它卡住了」全靠这一列（见 issue #337）。
 fn lane_row(entry: &LaneEntry, width: usize, palette: &Palette) -> Line<'static> {
     let cursor = if entry.active { "▎" } else { " " };
-    let mark = format!("{cursor}{}", entry.status.mark());
+    // 生成中用 spinner 帧而不是 `●`：一条 lane 在不在动，不必先切过去看右栏才
+    // 知道 —— 这正是「多路并行」最该被看见的那一个事实。
+    let mark = match (entry.status, entry.spin) {
+        (LaneStatus::Running, Some(frame)) => frame,
+        (status, _) => status.mark(),
+    };
+    // 尾部读数最多占半行：这一行首先是「哪条 lane」，其次才是读数。
+    let tail_room = width.saturating_sub(3 + LANE_LABEL_MIN).min(width / 2);
+    let tail = lane_tail(entry, tail_room);
+    let tail_w = UnicodeWidthStr::width(tail.as_str());
+    let gap = usize::from(!tail.is_empty());
     // `mark + 空格` 占 3 列，剩下的才是名字与工作区名能用的宽度。
-    let avail = width.saturating_sub(3);
+    let avail = width.saturating_sub(3 + tail_w + gap);
     let body = lane_row_text(&entry.label, entry.workspace.as_deref(), avail);
-    let text = pad_display(&truncate_display(&format!("{mark} {body}"), width), width);
+    let mut text = format!("{cursor}{mark} {body}");
+    if !tail.is_empty() {
+        let used = UnicodeWidthStr::width(text.as_str());
+        text.push_str(&" ".repeat(width.saturating_sub(used + tail_w)));
+        text.push_str(&tail);
+    }
+    let text = pad_display(&truncate_display(&text, width), width);
     Line::from(Span::styled(text, row_style(entry, palette)))
+}
+
+/// 行尾读数：`62% 12s •`，按重要性**从右往左**排 —— 最右的未读点最重要（它就是
+/// 「切过去看看」的理由），其次是耗时，再次是上下文占比。
+///
+/// 宽度不够时从**左边**丢：先丢 `ctx`，再丢耗时，未读点留到最后。宁可少一个数字，
+/// 也不能把「这条 lane 有话要说」丢掉。
+fn lane_tail(entry: &LaneEntry, room: usize) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(ctx) = entry.context.as_deref() {
+        parts.push(ctx.to_string());
+    }
+    if let Some(secs) = entry.busy_secs {
+        parts.push(duration_text(secs));
+    }
+    if entry.unread {
+        parts.push("•".to_string());
+    }
+    while !parts.is_empty() && tail_width(&parts) > room {
+        parts.remove(0);
+    }
+    parts.join(" ")
+}
+
+/// 尾部文本占的列数（含分隔空格）。
+fn tail_width(parts: &[String]) -> usize {
+    if parts.is_empty() {
+        return 0;
+    }
+    let glyphs: usize = parts
+        .iter()
+        .map(|p| UnicodeWidthStr::width(p.as_str()))
+        .sum();
+    glyphs + parts.len() - 1
+}
+
+/// 回合耗时短文本：`45s` / `2m05s` / `1h02m`。
+///
+/// 定宽优先于精确：60 秒后跳到 `m` 而不是继续累秒，否则 3 分钟就是四位数宽度，
+/// 在这一行里会把名字挤掉。
+fn duration_text(secs: u64) -> String {
+    match secs {
+        0..=59 => format!("{secs}s"),
+        60..=3599 => format!("{}m{:02}s", secs / 60, secs % 60),
+        _ => format!("{}h{:02}m", secs / 3600, (secs % 3600) / 60),
+    }
 }
 
 /// 行内文字：`名字`，宽度够时补 `· 工作区末段`。
@@ -213,9 +293,89 @@ fn pad_display(text: &str, width: usize) -> String {
     out
 }
 
+/// 外壳侧的投影：把每条 lane 的读数压成渲染需要的字段。
+///
+/// 放在这个文件而不是 `shell.rs` 有两个理由：它的唯一用途就是「给 lane 行提供数据」；
+/// 而 `shell.rs` 贴着 920 行门禁，读数只会越加越多。
+///
+/// 仍是**投影**而不是暴露 lane：这里读出 `UiState` 的几个数字就地拼成文本，渲染层
+/// 拿到的依然是 `String` / `u64`，改不到任何 lane 的状态。
+impl super::TuiApp<'_> {
+    pub(super) fn lane_entries(&self) -> Vec<LaneEntry> {
+        self.lanes
+            .iter()
+            .enumerate()
+            .map(|(i, lane)| {
+                let status = lane_status(lane);
+                let persisted = lane.persisted.as_ref();
+                LaneEntry {
+                    label: lane.label.clone(),
+                    workspace: lane.st.workspace_path.clone(),
+                    active: i == self.active,
+                    status,
+                    unread: lane.unread,
+                    // 与状态行 `ctx` 段同一条轴线（见 `UiState::context_pct_text`），
+                    // 只是省成占比。
+                    context: lane.st.context_pct_text(
+                        persisted.and_then(|p| p.context_tokens.as_deref()),
+                        lane.st.serve_defaults.as_ref().and_then(|d| {
+                            d.baseline_prompt_tokens(persisted.and_then(|p| p.role.as_deref()))
+                        }),
+                    ),
+                    busy_secs: lane.turn_started.map(|at| at.elapsed().as_secs()),
+                    spin: matches!(status, LaneStatus::Running)
+                        .then(|| SPINNER_FRAMES[lane.spinner.frame() % SPINNER_FRAMES.len()]),
+                }
+            })
+            .collect()
+    }
+    /// 非当前 lane 收到新输出时点亮未读点。
+    ///
+    /// 只认 [`UiEvent::Text`] 与 [`UiEvent::TurnDone`]：工具行的起止属于「过程」，
+    /// 要人回来看的是「它说了什么」与「它答完了」。
+    pub(super) fn mark_background_unread(&mut self, from: LaneId, ev: &UiEvent) {
+        if !matches!(ev, UiEvent::Text(_) | UiEvent::TurnDone { .. }) {
+            return;
+        }
+        let Some(idx) = self.lanes.iter().position(|l| l.id == from) else {
+            return;
+        };
+        if idx != self.active {
+            self.lanes[idx].unread = true;
+        }
+    }
+
+    /// 当前 lane 已经摆在眼前，未读点该熄了。每帧调用。
+    ///
+    /// 不逐条写在切换路径上（`Alt+←/→`、点击、`F4`、`/lane attach` 各有出口）：漏一处的
+    /// 表现是「切过去了那个点亮着不走」，而每帧改一个 bool 的代价是零。
+    pub(super) fn clear_active_unread(&mut self) {
+        if let Some(lane) = self.lanes.get_mut(self.active) {
+            lane.unread = false;
+        }
+    }
+}
+
+/// lane 的渲染状态：**退出请求 > 审批 > 「运行中」** —— 等审批的 lane 一定也在跑，
+/// 而用户必须看见的是「它在等人」，不是「它在干活」；已经 `/quit` 的那条则连审批都
+/// 不该再抢注意力，整个客户端马上要走。
+fn lane_status(lane: &super::LaneApp<'_>) -> LaneStatus {
+    if lane.exit || lane.quit_pending {
+        LaneStatus::Quitting
+    } else if lane.st.approval.is_some() {
+        LaneStatus::WaitingApproval
+    } else if lane.st.running {
+        LaneStatus::Running
+    } else {
+        LaneStatus::Idle
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tui_mode::inbound::Inbound;
+    use crate::tui_mode::test_support::{test_client, test_prefs, test_shell_with_jobs};
 
     fn pal() -> Palette {
         Palette::default()
@@ -228,9 +388,8 @@ mod tests {
             .enumerate()
             .map(|(i, n)| LaneEntry {
                 label: (*n).to_string(),
-                workspace: None,
                 active: i == 0,
-                status: LaneStatus::Idle,
+                ..LaneEntry::default()
             })
             .collect()
     }
@@ -241,7 +400,7 @@ mod tests {
             label: label.to_string(),
             workspace: workspace.map(str::to_string),
             active,
-            status: LaneStatus::Idle,
+            ..LaneEntry::default()
         }
     }
 
@@ -420,6 +579,94 @@ mod tests {
                 "{status:?} 时仍要标出当前 lane"
             );
         }
+    }
+
+    /// 尾部读数：上下文占比、耗时、未读点同时出现，未读点在最右。
+    #[test]
+    fn tail_shows_context_busy_and_unread_right_aligned() {
+        let mut entries = lanes(&["lane-a"]);
+        entries[0].context = Some("62%".to_string());
+        entries[0].busy_secs = Some(12);
+        entries[0].unread = true;
+        let rows = lane_list_rows(&entries, 40, 20, &pal());
+        let line = rows[1].spans[0].content.as_ref();
+        assert!(line.ends_with('•'), "未读点必须在最右：{line}");
+        assert!(line.contains("62%"), "{line}");
+        assert!(line.contains("12s"), "{line}");
+        // 读数不许把身份挤掉：这一行首先是「哪条 lane」。
+        assert!(line.contains("lane-a"), "{line}");
+        assert_eq!(UnicodeWidthStr::width(line), 40);
+    }
+
+    /// 窄行先丢 ctx、再丢耗时：留到最后的必须是未读点。
+    #[test]
+    fn tail_drops_readings_before_the_unread_dot() {
+        let mut entries = lanes(&["lane-a"]);
+        entries[0].context = Some("100%".to_string());
+        entries[0].busy_secs = Some(125);
+        entries[0].unread = true;
+        // 16 列：尾部最多占 8 列，装不下三个读数。
+        let rows = lane_list_rows(&entries, 16, 20, &pal());
+        let line = rows[1].spans[0].content.as_ref();
+        assert!(line.ends_with('•'), "{line}");
+        assert!(!line.contains("100%"), "窄行先丢 ctx：{line}");
+        assert_eq!(UnicodeWidthStr::width(line), 16);
+
+        // 更窄（12 列）：耗时也让位，只剩那个点。
+        let rows = lane_list_rows(&entries, 12, 20, &pal());
+        let line = rows[1].spans[0].content.as_ref();
+        assert!(line.ends_with('•'), "{line}");
+        assert!(!line.contains("m0"), "耗时也要让位：{line}");
+        assert_eq!(UnicodeWidthStr::width(line), 12);
+    }
+
+    /// 生成中用 spinner 帧顶替 `●`：后台 lane 在不在动，不切过去也看得见。
+    #[test]
+    fn running_lane_shows_the_spinner_frame() {
+        let mut entries = lanes(&["lane-a"]);
+        entries[0].status = LaneStatus::Running;
+        entries[0].spin = Some("⠹");
+        let rows = lane_list_rows(&entries, 30, 20, &pal());
+        let line = rows[1].spans[0].content.as_ref();
+        assert!(line.contains('⠹'), "{line}");
+        assert!(!line.contains('●'), "生成中不再画静态度点：{line}");
+        // 帧符号仍是单列，否则整行会被撑破。
+        assert_eq!(UnicodeWidthStr::width(line), 30);
+    }
+
+    /// 耗时换成定宽单位：`s` → `m` → `h`，不让秒数无限长。
+    #[test]
+    fn busy_duration_switches_units_to_stay_narrow() {
+        assert_eq!(duration_text(0), "0s");
+        assert_eq!(duration_text(59), "59s");
+        assert_eq!(duration_text(60), "1m00s");
+        assert_eq!(duration_text(3599), "59m59s");
+        assert_eq!(duration_text(3600), "1h00m");
+        assert_eq!(duration_text(7325), "2h02m");
+    }
+
+    /// 后台 lane 的新输出点亮未读点，当前 lane 的不点亮；切过去即熄。
+    #[test]
+    fn background_output_marks_unread_but_the_active_lane_does_not() {
+        let client = test_client();
+        let mut prefs = [test_prefs(), test_prefs()];
+        let (mut app, _jobs) = test_shell_with_jobs(&client, &mut prefs);
+        let (first, second) = (app.lanes[0].id, app.lanes[1].id);
+
+        app.on_msg(Inbound::FromLane(second, UiEvent::Text("hi".into())));
+        assert!(!app.lane_entries()[0].unread, "当前 lane 不该亮未读");
+        assert!(app.lane_entries()[1].unread, "后台 lane 有输出要亮");
+
+        // 切过去即熄（帧循环每帧调用 `clear_active_unread`）。
+        app.active = 1;
+        app.clear_active_unread();
+        assert!(!app.lane_entries()[1].unread);
+
+        // 回到第一条：它自己说话不点亮自己，否则那个点永远亮着。
+        app.active = 0;
+        app.clear_active_unread();
+        app.on_msg(Inbound::FromLane(first, UiEvent::Text("x".into())));
+        assert!(!app.lane_entries()[0].unread);
     }
 
     #[test]

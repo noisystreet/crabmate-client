@@ -25,7 +25,6 @@ use crate::SessionPrefs;
 use crate::serve::{ConnectionConfig, ServeClient};
 
 use super::inbound::Inbound;
-use super::lane_list::{LaneEntry, LaneStatus};
 use super::state::{LineKind, UiState};
 use super::worker::{LaneId, UiEvent, WorkerJob, spawn_key_reader, spawn_worker};
 use super::{LaneApp, TuiApp, body_cache, drafts, event_loop, session_index, spinner};
@@ -253,21 +252,6 @@ fn next_approval_index(active: usize, waiting: &[bool]) -> Option<usize> {
         .find(|&i| waiting[i])
 }
 
-/// lane 的渲染状态：**退出请求 > 审批 > 「运行中」** —— 等审批的 lane 一定也在跑，
-/// 而用户必须看见的是「它在等人」，不是「它在干活」；已经 `/quit` 的那条则连审批都
-/// 不该再抢注意力，整个客户端马上要走。
-fn lane_status(lane: &LaneApp<'_>) -> LaneStatus {
-    if lane.exit || lane.quit_pending {
-        LaneStatus::Quitting
-    } else if lane.st.approval.is_some() {
-        LaneStatus::WaitingApproval
-    } else if lane.st.running {
-        LaneStatus::Running
-    } else {
-        LaneStatus::Idle
-    }
-}
-
 /// 运行期新增 lane 的装配模板（`/lane attach` / `/lane new`）。
 ///
 /// 存**启动时的**表达层初值，而不是「当前 lane 的现值」：当前 lane 的 `/model`
@@ -329,6 +313,8 @@ impl<'a> LaneApp<'a> {
             bg: None,
             ctl_socket: template.ctl_socket.clone(),
             session_refresh_pending: false,
+            unread: false,
+            turn_started: None,
         }
     }
 
@@ -371,26 +357,6 @@ impl<'a> super::TuiApp<'a> {
     /// （issue #338 的症状 A）。`run_loop` / `drain_events` 都走这一个判据。
     pub(super) fn exit_requested(&self) -> bool {
         self.lanes.iter().any(|l| l.exit)
-    }
-
-    /// 渲染用的 lane 快照：名字 + 各自当前绑定的工作区 + 谁是当前。
-    ///
-    /// 只导出渲染需要的三个字段，不导任何 lane 内部状态 —— 渲染层拿不到 `&mut`，
-    /// 也就不可能在某条 lane 的绘制里改到别人。
-    ///
-    /// 带工作区是「一实例一工作区」的直接后果：光有连接名，用户看不出两条 lane
-    /// 是不是同一个工作区（那正是切错目标的常见原因）。
-    pub(super) fn lane_entries(&self) -> Vec<LaneEntry> {
-        self.lanes
-            .iter()
-            .enumerate()
-            .map(|(i, lane)| LaneEntry {
-                label: lane.label.clone(),
-                workspace: lane.st.workspace_path.clone(),
-                active: i == self.active,
-                status: lane_status(lane),
-            })
-            .collect()
     }
 
     /// 在 lane 之间循环切换。
