@@ -26,9 +26,9 @@ use super::status::{
 
 /// 展开态最多占的行数（含运行态那一行）。
 ///
-/// 8 行已是 24 行终端的三分之一，再高就把目录树挤成一条缝。超出的段按优先级丢弃 ——
+/// 9 行已是 24 行终端的近一半，再高就把目录树挤成一条缝。超出的段按优先级丢弃 ——
 /// 与横版 `fit_segments` 同一套优先级，只是把「列预算」换成「行预算」。
-const MAX_STACK_ROWS: u16 = 8;
+const MAX_STACK_ROWS: u16 = 9;
 
 /// 状态栈占几行。
 ///
@@ -48,9 +48,10 @@ pub(super) fn stack_rows(info: &StatusInfo, width: usize, collapsed: bool) -> u1
 /// 横版是「装不进列预算就整段丢弃」，纵版同理，只是预算是行数；两者共用
 /// `Segment::priority`，避免出现「横条里 serve 优先、栈里 img 优先」这种自相矛盾。
 ///
-/// **裁剪分支目前走不到**：[`environment_segments`] 最多 6 段（含 `ctx`），而阈值是
-/// `MAX_STACK_ROWS - 1 = 7`，于是 `keep == segs.len()` 恒成立、提前返回。留着它是给
-/// 「以后加段」预留 —— 真加到第 8 段时，`stack_never_exceeds_the_row_budget` 会先失败。
+/// **裁剪分支目前走不到**：[`environment_segments`] 最多 8 段（`serve` / `model` / `role` /
+/// `mode` / `ctx` / `perm` / `find` / `lanes`），而阈值是 `MAX_STACK_ROWS - 1 = 8`，于是
+/// `keep == segs.len()` 恒成立、提前返回。留着它是给「以后加段」预留 —— 真加到第 9 段时，
+/// `stack_never_exceeds_the_row_budget` 会先失败。
 fn visible_segments(info: &StatusInfo, width: usize) -> Vec<Segment> {
     let segs = environment_segments(info, width);
     let keep = (MAX_STACK_ROWS as usize).saturating_sub(1).min(segs.len());
@@ -149,6 +150,7 @@ mod tests {
 
     fn info() -> StatusInfo {
         StatusInfo {
+            lanes: Default::default(),
             api_base: "http://127.0.0.1:8080".into(),
             model: Some("gpt-x".into()),
             role: Some("coder".into()),
@@ -203,8 +205,8 @@ mod tests {
         let t = texts(&stack_lines_with(&i, 24, &pal(), false, true));
         assert_eq!(
             t.len(),
-            1 + 5,
-            "serve/model/role/mode/ctx + 运行指示：{t:?}"
+            1 + 6,
+            "serve/model/role/mode/ctx/lanes + 运行指示：{t:?}"
         );
         assert!(t[0].starts_with("serve"), "{t:?}");
         assert!(t[1].starts_with("model"), "{t:?}");
@@ -212,16 +214,18 @@ mod tests {
         assert!(t[3].starts_with("mode"), "{t:?}");
         // `ctx` 段恒在（无实测时值是占位 `—`）：段消失会让人误判「功能没生效」。
         assert!(t[4].starts_with("ctx"), "{t:?}");
+        // `lanes` 段也恒在（单 lane 是 `1/8`）：它是唯一能看出「还能加几条」的地方。
+        assert!(t[5].starts_with("lanes"), "{t:?}");
         // 运行指示贴**最底**（desktop 的 chips → run indicator 顺序）；切回合时
         // 只有这一行变，上面的段不跟着挪。
-        assert!(t[5].contains("空闲"), "运行指示应在最下一行：{t:?}");
+        assert!(t[6].contains("空闲"), "运行指示应在最下一行：{t:?}");
         // 与各段的值同列：第一列（label 列）留空，运行态从第二列起。
         assert!(
-            t[5].starts_with(&" ".repeat(LABEL_COL_W)),
+            t[6].starts_with(&" ".repeat(LABEL_COL_W)),
             "运行指示应缩进到第二列：{t:?}"
         );
         assert_eq!(
-            UnicodeWidthStr::width(t[5].as_str()),
+            UnicodeWidthStr::width(t[6].as_str()),
             LABEL_COL_W + UnicodeWidthStr::width("○ 空闲"),
             "第二列起排，不该再补到列宽：{t:?}"
         );
@@ -372,8 +376,8 @@ mod tests {
 
     /// 行预算哨兵：段数不得超过 `MAX_STACK_ROWS - 1`，且行数必须与渲染同源。
     ///
-    /// 当前 `environment_segments` 最多 5 段，`visible_segments` 里的按优先级丢弃
-    /// **走不到**（阈值 7）。所以这条断言不是「验证裁剪生效」，而是「一旦加段越过阈值
+    /// 当前 `environment_segments` 最多 8 段，`visible_segments` 里的按优先级丢弃
+    /// **走不到**（阈值 8）。所以这条断言不是「验证裁剪生效」，而是「一旦加段越过阈值
     /// 就先炸」——免得哪天悄悄撑破右栏，还以为是布局算错了。
     #[test]
     fn stack_never_exceeds_the_row_budget() {

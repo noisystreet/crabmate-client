@@ -880,6 +880,8 @@ impl LaneApp<'_> {
                 },
             };
         StatusInfo {
+            // lane 计数属于外壳：`draw_frame` 用 lane 快照覆盖。这里留中性值，段数不变。
+            lanes: Default::default(),
             api_base: self.client.config().api_base.clone(),
             // 上下文用量：段恒显示；没有实测时是占位 `—`，新会话则回落 `GET /status` 的
             // system 基线并带 `~`（见 `UiState::context_text`）。

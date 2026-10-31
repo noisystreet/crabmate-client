@@ -284,6 +284,7 @@ fn finished_tool_row_has_no_progress_slot() {
 fn progress_mark_frame_requires_live_folded_thinking() {
     fn info(running: bool, cancel_sent: bool) -> StatusInfo {
         StatusInfo {
+            lanes: Default::default(),
             api_base: "http://x".into(),
             model: None,
             role: None,
@@ -363,6 +364,7 @@ fn finished_tool_row_without_verdict_is_not_running() {
     assert!(!plain.contains('⠿'), "结束行不应有进度位: {plain:?}");
 
     let info = StatusInfo {
+        lanes: Default::default(),
         api_base: "http://x".into(),
         model: None,
         role: None,

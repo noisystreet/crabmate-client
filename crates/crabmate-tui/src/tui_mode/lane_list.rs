@@ -293,6 +293,44 @@ fn pad_display(text: &str, width: usize) -> String {
     out
 }
 
+/// 有名字与状态点了，还缺两组计数：连了几条（`lanes 2/8`）、几条在等审批。
+///
+/// 合成一个值而不是两个字段，是为了让「两处不得各算一份」成为类型事实：状态栏拿到
+/// 这一个值，就没机会自己再数一遍 `lanes.len()`。
+#[derive(Debug, Clone, Copy, Default)]
+pub(super) struct LaneTally {
+    /// 已连接数。与左栏标题 `连接 [n]` 是**同一个数字**。
+    pub connected: usize,
+    /// 正在等审批的 lane 数（0 = 状态栏不显示该段）。
+    ///
+    /// 判定复用 [`lane_status`]，也就是左栏 `▲` 与 `F4` 的 `next_approval_index` 用的那一个：
+    /// 各判一遍的症状是「左栏亮着 `▲`、状态栏说没有人在等」。
+    pub pending_approvals: usize,
+}
+
+impl LaneEntry {
+    /// 这条 lane 现在在等审批（左栏 `▲`、`F4` 跳转与状态栏计数**共用**这一判定）。
+    ///
+    /// `status` 本来就是 [`lane_status`] 的结果，这里只是给它一个名字：读 `▲` 的那几处
+    /// 不必各自再写一遍 `== LaneStatus::WaitingApproval`。
+    pub(super) fn is_waiting_approval(&self) -> bool {
+        self.status == LaneStatus::WaitingApproval
+    }
+}
+
+impl LaneTally {
+    /// 按外壳交给渲染的那份 lane 快照数（`draw_frame` 的 `lanes` 参数就是它）。
+    ///
+    /// 用快照而不是再读一遍 `TuiApp::lanes`：左栏画的就是这批 entry，两处读不同来源迟早
+    /// 出现「左栏两条、状态栏三条」。
+    pub(super) fn from_entries(entries: &[LaneEntry]) -> Self {
+        Self {
+            connected: entries.len(),
+            pending_approvals: entries.iter().filter(|e| e.is_waiting_approval()).count(),
+        }
+    }
+}
+
 /// 外壳侧的投影：把每条 lane 的读数压成渲染需要的字段。
 ///
 /// 放在这个文件而不是 `shell.rs` 有两个理由：它的唯一用途就是「给 lane 行提供数据」；
@@ -329,6 +367,7 @@ impl super::TuiApp<'_> {
             })
             .collect()
     }
+
     /// 非当前 lane 收到新输出时点亮未读点。
     ///
     /// 只认 [`UiEvent::Text`] 与 [`UiEvent::TurnDone`]：工具行的起止属于「过程」，
@@ -561,6 +600,20 @@ mod tests {
             Some(pal().err),
             "非当前 lane 的等审批走告警色"
         );
+    }
+
+    /// 状态栏的两组计数与左栏同源：`connected` 是 entries 条数，`pending_approvals`
+    /// 只数 `▲` 那一种状态 —— 两处判定不同就会「左栏亮 `▲`、状态栏说 0」。
+    #[test]
+    fn tally_counts_entries_and_waiting_lanes() {
+        let mut entries = lanes(&["lane-a", "lane-b", "lane-c"]);
+        entries[1].status = LaneStatus::WaitingApproval;
+        entries[2].status = LaneStatus::WaitingApproval;
+        let tally = LaneTally::from_entries(&entries);
+        assert_eq!(tally.connected, 3);
+        assert_eq!(tally.pending_approvals, 2);
+        // 没人等审批时是 0（状态栏据此**不画** ▲ 后缀）。
+        assert_eq!(LaneTally::from_entries(&entries[..1]).pending_approvals, 0);
     }
 
     /// 当前 lane 的 `▎` 在任何状态下都要保留：否则「哪条是我正在看的」就没了。

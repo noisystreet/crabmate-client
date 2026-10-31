@@ -41,10 +41,30 @@ mod priority {
     /// 权限等级：常驻但对"现在该干什么"没有影响（它是授权上限，不是当前动作），
     /// 窄屏时最先让位——丢它的代价只是看不到等级，丢 `ctx` / `find` 则丢的是正在变化的信息。
     pub(super) const PERM: u8 = 7;
+    /// 连接计数：**最后**让位。它不回答"现在该干什么"，只回答"我还连着什么"；
+    /// 而且左栏标题的 `连接 [n]` 就在旁边（单 lane 时还恒为 1）—— 丢它的代价最小。
+    /// 反过来，让它去挤 `ctx` / `model` 会造成"为了一个恒定的数字压掉正在变化的信息"。
+    pub(super) const LANES: u8 = 8;
 }
 
 /// `perm` 段的文案标签。渲染、栈内行号与鼠标命中三处共用，避免改动时漏掉一处。
 pub(super) const PERM_LABEL: &str = "perm";
+
+/// `lanes` 段的文案标签（5 列，正好填满状态栈的定宽 label 列）。
+pub(super) const LANES_LABEL: &str = "lanes";
+
+/// `lanes` 段的取值：`2/8`，有 lane 在等审批时后缀 ` ▲2`。
+///
+/// 待审批数**并进这一段**，不单独占一段：纵版状态栈的行数由段数决定，而鼠标命中走的是
+/// 另一条调用链（`status_stack_rows`）；两条链各数一遍段数，差一行就是「点状态栈点到别处」。
+/// 段数恒定、只在值里区分有无，这个错位来源就不存在了。`▲` 与左栏等待态同形，含义一致。
+pub(super) fn lanes_text(info: &StatusInfo) -> String {
+    let mut text = format!("{}/{}", info.lanes.connected, super::shell::MAX_LANES);
+    if info.lanes.pending_approvals > 0 {
+        text.push_str(&format!(" ▲{}", info.lanes.pending_approvals));
+    }
+    text
+}
 
 /// 段间分隔符（极暗竖线，与 A6 的分隔线同色系）。
 const SEPARATOR: &str = " │ ";
@@ -185,6 +205,13 @@ pub(super) fn environment_segments(info: &StatusInfo, budget: usize) -> Vec<Segm
             priority: priority::PERM,
         });
     }
+    // 连接计数**恒占一段**（单 lane 显示 `1/8`）：段数不随计数变化，纵版行数与鼠标命中
+    // 才能与横版共用同一份 `fit_segments` / `stack_rows`。
+    out.push(Segment {
+        label: LANES_LABEL,
+        value: lanes_text(info),
+        priority: priority::LANES,
+    });
     out
 }
 

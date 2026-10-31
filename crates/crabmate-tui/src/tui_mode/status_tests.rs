@@ -9,6 +9,7 @@ use super::*;
 
 fn base_info(api_base: &str) -> StatusInfo {
     StatusInfo {
+        lanes: Default::default(),
         api_base: api_base.into(),
         model: None,
         role: None,
@@ -571,4 +572,47 @@ fn perm_segment_shows_intent_and_effective_when_they_differ() {
     info.permission_intent = Some("unrestricted".into());
     let text = status_text(&info, 200);
     assert!(text.contains("perm unrestricted→read"), "{text}");
+}
+
+/// `lanes` 段常显：单 lane 也要看得出上限（`1/8`），否则「还能再加几条」无从判断。
+#[test]
+fn lanes_segment_always_shows_the_cap() {
+    let mut info = base_info("http://x");
+    info.lanes = crate::tui_mode::lane_list::LaneTally {
+        connected: 1,
+        pending_approvals: 0,
+    };
+    let text = status_text(&info, 200);
+    assert!(text.contains("lanes 1/8"), "{text}");
+    // 没人等审批时不出现 `▲0`：常驻的零是噪声，也会让人以为真有 lane 在等。
+    assert!(!text.contains('▲'), "{text}");
+}
+
+/// 有 lane 等审批时，数量作为后缀并入**同一个**段（段数恒定，纵版行数与鼠标命中才不漂）。
+#[test]
+fn lanes_segment_appends_the_pending_approval_count() {
+    let mut info = base_info("http://x");
+    info.lanes = crate::tui_mode::lane_list::LaneTally {
+        connected: 3,
+        pending_approvals: 2,
+    };
+    let text = status_text(&info, 200);
+    assert!(text.contains("lanes 3/8 ▲2"), "{text}");
+}
+
+/// 窄屏先丢 `lanes`：它只是一个恒定的连接计数，不允许挤掉 `ctx` / `model`。
+#[test]
+fn lanes_is_dropped_before_context_and_model() {
+    let mut info = base_info("http://127.0.0.1:8080");
+    info.model = Some("gpt-x".into());
+    info.context = "10k/100k (10%)".into();
+    info.lanes = crate::tui_mode::lane_list::LaneTally {
+        connected: 2,
+        pending_approvals: 1,
+    };
+    // 72 列：serve + model + ctx 装得下，再多的 `lanes` 才轮不到 —— 它优先级最低。
+    let text = status_text(&info, 72);
+    assert!(text.contains("ctx"), "ctx 不该被 lanes 挤掉：{text}");
+    assert!(text.contains("model"), "model 不该被 lanes 挤掉：{text}");
+    assert!(!text.contains("lanes"), "lanes 应最先让位：{text}");
 }
