@@ -486,4 +486,59 @@ mod tests {
         handle.join().expect("假服务端线程");
         let _ = std::fs::remove_dir_all(sock.parent().unwrap());
     }
+
+    /// 声明被 close 掉时 `/lane attach` 要当场说清「先 open」：`observed` 此时可能仍是
+    /// `starting`（Server 对「有声明、无状态记录」的回法），照它判就会让人一直等一个永远
+    /// 不启动的实例（issue #373）。
+    #[test]
+    fn closed_declaration_points_at_lane_open() {
+        let mut closed = inst("proj-a", "starting", None);
+        closed.enabled = Some(false);
+        let err = ready_base_url(&[closed], "proj-a").unwrap_err();
+        assert!(err.contains("enabled = false"), "{err}");
+        assert!(err.contains("/lane open proj-a"), "要给出下一步命令：{err}");
+    }
+
+    /// `/lane new` 撞上同名且已关闭的声明时不能白等满超时：`add` 是幂等命中（不是失败），
+    /// 所以 `◌` 先出现，但第一轮 `list` 就该把它收敛成 `✗` + 「先 open」。
+    ///
+    /// 假控制面只备了两条响应（`add` + 一次 `list`）：真进了轮询循环，第二次 `list` 会撞上
+    /// 没人 accept 的 socket，回执就不会是 `/lane open` 那句，`seen.len()` 也不再是 2。
+    #[test]
+    fn new_on_a_closed_declaration_does_not_wait_out_the_timeout() {
+        let (sock, handle) = fake_ctl(&[
+            r#"{"ok":true,"name":"proj-a","created":false,"note":"已存在，未改动"}"#,
+            r#"{"ok":true,"instances":[{"name":"proj-a","observed":"starting","enabled":false}]}"#,
+        ]);
+        let (tx, rx) = mpsc::channel();
+        let ctl = spawn(sock.clone(), tx);
+        ctl.enqueue(CtlJob::New {
+            from: LaneId(5),
+            name: "proj-a".to_string(),
+            workspace: "/home/u/proj-a".to_string(),
+            profile: None,
+        })
+        .expect("派发");
+        drop(ctl);
+        match rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("应有 Pending")
+        {
+            Inbound::Shell(ShellEvent::Pending { name }) => assert_eq!(name, "proj-a"),
+            _ => panic!("第一条应是 Pending：幂等命中也算写成功，声明确实存在"),
+        }
+        match rx.recv_timeout(Duration::from_secs(5)).expect("应有回包") {
+            Inbound::Shell(ShellEvent::NewSettled { from, outcome, .. }) => {
+                assert_eq!(from, LaneId(5));
+                assert!(
+                    matches!(&outcome, NewOutcome::Failed(why) if why.contains("/lane open proj-a")),
+                    "应立刻指向 /lane open，而不是 TimedOut：{outcome:?}"
+                );
+            }
+            _ => panic!("应回 ShellEvent::NewSettled"),
+        }
+        let seen = handle.join().expect("假服务端线程");
+        assert_eq!(seen.len(), 2, "不该有多余的 list 轮询：{seen:?}");
+        let _ = std::fs::remove_dir_all(sock.parent().unwrap());
+    }
 }
