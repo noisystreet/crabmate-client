@@ -162,6 +162,58 @@ fn announce_ctl_socket(ctl_socket: Option<&std::path::Path>) {
     );
 }
 
+/// 本进程最多同时维持多少条连接（lane）。
+///
+/// 只防手滑：`--connect` 可重复任意次、`/lane attach` 可反复敲，而每条 lane 的代价是
+/// 一个 worker 线程 + 一个 `current_thread` runtime + 一份连接池，serve 那侧还各有自己的
+/// 并发上限（`chat_queue_max_concurrent` 默认 2）。它**不是**性能目标 —— 真要 8 路并行
+/// 得配 8 个 serve，见 `docs/design/tui_multi_server.md` §5.2。
+const MAX_LANES: usize = 8;
+
+/// 还能不能再加一条 lane：超限时返回**可照抄**的提示。
+///
+/// 抽成纯函数只为可测：真攒 8 条 lane 要起 8 条线程与 8 份 runtime，单测里不值得。
+fn capacity_notice(current: usize) -> Option<String> {
+    (current >= MAX_LANES).then(|| {
+        format!(
+            "已达连接上限 {MAX_LANES} 条（现有 {current} 条）：先 `/lane detach <name>` 摘掉不用的再用 `/lane attach` / `/lane new`"
+        )
+    })
+}
+
+/// 启动装配前的连接数校验（`--connect` 可重复任意次）。
+///
+/// 这里**报错退出**而不是只连前 N 条：那样用户会对着另一台 serve 干活，屏幕上却没有任何
+/// 迹象说明少了人。运行期的同一道闸在 `attach_lane`（那里只提示、不退出进程 —— 一条
+/// 已经跑起来的 TUI 不该因为多敲一次 `/lane new` 就整个消失）。
+///
+/// 放 `shell` 而不是 `main`：`main.rs` 顶着 `fn-nloc-ratchet` 的 920 行/文件上限。
+pub(crate) fn check_lane_capacity(total: usize) -> Result<()> {
+    if total <= MAX_LANES {
+        return Ok(());
+    }
+    anyhow::bail!(
+        "连接数 {total} 超过上限 {MAX_LANES}（含主连接）：减少 `--connect`，或起来后用 `/lane detach` 摘掉不用的"
+    )
+}
+
+/// 从 `active` 的**下一条**起环形找第一条在等审批的 lane 下标。
+///
+/// `waiting` 是各 lane「此刻有没有审批浮层」的派生快照 —— 审批槽本身住在那条 lane 的
+/// `UiState` 里，这里只做下标选择（纯函数好测：真实 `TuiApp` 要起 N 条线程）。
+///
+/// 只有「唯一在等的就是它自己」时才会返回它自己（环形走满一圈）；否则「下一条」优先，
+/// 免得这个热键停在原地、看起来像没生效。
+fn next_approval_index(active: usize, waiting: &[bool]) -> Option<usize> {
+    let n = waiting.len();
+    if n == 0 {
+        return None;
+    }
+    (1..=n)
+        .map(|step| (active + step) % n)
+        .find(|&i| waiting[i])
+}
+
 /// lane 的渲染状态：**退出请求 > 审批 > 「运行中」** —— 等审批的 lane 一定也在跑，
 /// 而用户必须看见的是「它在等人」，不是「它在干活」；已经 `/quit` 的那条则连审批都
 /// 不该再抢注意力，整个客户端马上要走。
@@ -315,6 +367,25 @@ impl<'a> super::TuiApp<'a> {
         self.active = (self.active as isize + delta).rem_euclid(n) as usize;
     }
 
+    /// F4：切到下一条**在等审批**的 lane（环形，从当前的下一条找起）。
+    ///
+    /// 后台 lane 的浮层画不到屏幕上（`event_loop` 每帧只对 active 调 `draw_frame`），
+    /// 左栏那一行的 `▲` 是唯一线索；三条以上时用 `Alt+→` 逐个试等于让用户自己找。
+    ///
+    /// 一条都没在等时**不切换**，只留一句：按了键却什么都没发生，比切错地方更让人懵。
+    /// 单 lane（`n == 1`）时若自己就在等审批，命中的是它自己 —— 浮层本来就在眼前，
+    /// 等价于 no-op，不另写提示。
+    pub(super) fn focus_next_approval(&mut self) {
+        let waiting: Vec<bool> = self.lanes.iter().map(|l| l.st.approval.is_some()).collect();
+        match next_approval_index(self.active, &waiting) {
+            Some(idx) => self.active = idx,
+            None => self.lane_mut().st.push_line(
+                LineKind::System,
+                "当前没有在等待审批的连接（浮层只画当前连接，F4 才会跳过去）",
+            ),
+        }
+    }
+
     /// `UiEvent::CtlLaneReady`：控制面回包后装配一条新 lane。
     ///
     /// 这条事件由 worker 以**裸事件**发出（不带 `LaneId`）：新 lane 还不存在，
@@ -360,6 +431,13 @@ impl<'a> super::TuiApp<'a> {
                 LineKind::System,
                 &format!("`{existing}` 已经连着 {base_url}（同一条 serve 不重复连，已切过去）"),
             );
+            return;
+        }
+        // 名额检查刻意放在两道去重**之后**：已达上限时 `/lane attach <现有名字>`
+        // 仍要能切过去 —— 那并不新增线程或连接，被上限挡住只会让人以为「连接坏了」。
+        if let Some(notice) = capacity_notice(self.lanes.len()) {
+            let lane = self.lane_mut();
+            lane.st.push_line(LineKind::System, &notice);
             return;
         }
         let cfg = ConnectionConfig::new(base_url, self.template.bearer.clone());
@@ -409,9 +487,7 @@ impl<'a> super::TuiApp<'a> {
         let lane = self.lane_mut();
         lane.st.push_line(
             LineKind::System,
-            &format!(
-                "`{label}` 正在等待审批：Alt+→ / Alt+← 切过去，或 `/lane cancel {label}` 取消它那一轮"
-            ),
+            &format!("`{label}` 正在等待审批：F4 跳到它，或 `/lane cancel {label}` 取消它那一轮"),
         );
     }
 
@@ -527,5 +603,52 @@ impl<'a> super::TuiApp<'a> {
             self.lanes.len(),
         );
         super::layout::lane_hit(&p, self.lanes.len(), m.column, m.row)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{MAX_LANES, capacity_notice, next_approval_index};
+
+    #[test]
+    fn capacity_allows_up_to_the_cap_and_explains_the_way_out() {
+        assert_eq!(capacity_notice(1), None, "1 条远未到上限");
+        assert_eq!(capacity_notice(MAX_LANES - 1), None, "差一条时才允许再加");
+        for current in [MAX_LANES, MAX_LANES + 1] {
+            let notice = capacity_notice(current).expect("到上限后必须给提示");
+            assert!(notice.contains(&MAX_LANES.to_string()), "{notice}");
+            assert!(
+                notice.contains("/lane detach"),
+                "要给出可照抄的出路：{notice}"
+            );
+        }
+    }
+
+    #[test]
+    fn next_approval_starts_right_after_the_active_lane() {
+        // 0 空闲、1 在等 → 从 0 的下一步命中 1。
+        assert_eq!(next_approval_index(0, &[false, true, false]), Some(1));
+        // 从 2 出发：先回绕到 0（空闲），再到 1（在等）。
+        assert_eq!(next_approval_index(2, &[false, true, true]), Some(1));
+    }
+
+    /// 自己也在等时优先跳**别的** lane：停在原地等于这个热键没用。
+    #[test]
+    fn next_approval_skips_the_active_lane_when_others_wait() {
+        assert_eq!(next_approval_index(0, &[true, false, true]), Some(2));
+        assert_eq!(next_approval_index(1, &[true, true]), Some(0));
+    }
+
+    /// 只有自己在等 → 回到自己（浮层本来就在眼前，切不切都一样）。
+    #[test]
+    fn next_approval_returns_to_self_when_only_it_waits() {
+        assert_eq!(next_approval_index(0, &[true]), Some(0));
+        assert_eq!(next_approval_index(1, &[false, true]), Some(1));
+    }
+
+    #[test]
+    fn next_approval_is_none_when_nobody_waits() {
+        assert_eq!(next_approval_index(0, &[]), None, "空列表不能除零");
+        assert_eq!(next_approval_index(0, &[false, false]), None);
     }
 }

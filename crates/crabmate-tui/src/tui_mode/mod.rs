@@ -83,6 +83,9 @@ use state::{Focus, LineKind, UiState};
 
 // 入口 re-export：`main.rs` 调 `tui_mode::run_tui`（实现已拆到 `shell` 模块）。
 pub use self::shell::run_tui;
+// 连接数上限与启动校验放 `shell`（装配 lane 的那一层），`main` 只留一行调用 ——
+// `main.rs` 顶着 `fn-nloc-ratchet` 的 920 行/文件上限。
+pub(crate) use self::shell::check_lane_capacity;
 
 /// 一条连接（lane）的完整 UI 状态与依赖。
 ///
@@ -202,6 +205,11 @@ impl<'a> TuiApp<'a> {
                     match hotkeys::of(k) {
                         Some(hotkeys::TopHotkey::NextLane) => return self.switch_lane(1),
                         Some(hotkeys::TopHotkey::PrevLane) => return self.switch_lane(-1),
+                        // 跳到在等审批的那条：同样必须在外壳层做（要知道全局有几条、
+                        // 谁在等），而且不能让这次按键漏进 lane 的输入框。
+                        Some(hotkeys::TopHotkey::NextApproval) => {
+                            return self.focus_next_approval();
+                        }
                         _ => {}
                     }
                 }
@@ -558,10 +566,14 @@ impl LaneApp<'_> {
             Some(hotkeys::TopHotkey::Settings) => self.toggle_settings(),
             Some(hotkeys::TopHotkey::StatusStack) => self.st.toggle_status_stack(),
             Some(hotkeys::TopHotkey::Copy) => self.copy_last(None),
-            // 切 lane 是外壳动作，`TuiApp::on_msg` 已拦截，正常路径到不了这里；
-            // 留着只为穷尽分支（万一有人直接调 lane 的 on_key，也按「已消费」处理，
-            // 免得方向键再漏给输入框）。
-            Some(hotkeys::TopHotkey::NextLane | hotkeys::TopHotkey::PrevLane) => {}
+            // 切 lane / 跳到待审批 lane 都是外壳动作，`TuiApp::on_msg` 已拦截，正常路径
+            // 到不了这里；留着只为穷尽分支（万一有人直接调 lane 的 on_key，也按「已消费」
+            // 处理，免得方向键再漏给输入框）。
+            Some(
+                hotkeys::TopHotkey::NextLane
+                | hotkeys::TopHotkey::PrevLane
+                | hotkeys::TopHotkey::NextApproval,
+            ) => {}
             None => return false,
         }
         true
