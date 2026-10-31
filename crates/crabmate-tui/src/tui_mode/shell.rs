@@ -373,6 +373,27 @@ impl<'a> super::TuiApp<'a> {
         self.active = (self.active as isize + delta).rem_euclid(n) as usize;
     }
 
+    /// Alt+1..8：直达第 `n` 条 lane（1-based，序号与左栏列表**自上而下**一致）。
+    ///
+    /// 与 [`Self::switch_lane`] 的分工是「绝对目标」对「相对移动」：这里直接写
+    /// `active`，不做 `rem_euclid` 环回 —— 按 `Alt+7` 却因为只有 3 条而绕到第 1 条，
+    /// 是比「什么都不发生」更容易让人迷路的行为。
+    ///
+    /// 越界**不切视图**，只留一句（与 `F4` 无人等待时同一个出口）：按了键却毫无反应，
+    /// 用户会以为键没送达 —— 而 `Alt+数字` 恰好就是最容易被终端吞掉的那类组合键。
+    /// 单 lane 时 `Alt+1` 落在自己身上，等价 no-op，不写提示。
+    pub(super) fn goto_lane(&mut self, n: usize) {
+        let total = self.lanes.len();
+        if (1..=total).contains(&n) {
+            self.active = n - 1;
+            return;
+        }
+        self.lane_mut().st.push_line(
+            LineKind::System,
+            &format!("Alt+{n}：这里只有 {total} 条连接（Alt+1..{total} 直达）"),
+        );
+    }
+
     /// F4：切到下一条**在等审批**的 lane（环形，从当前的下一条找起）。
     ///
     /// 后台 lane 的浮层画不到屏幕上（`event_loop` 每帧只对 active 调 `draw_frame`），
@@ -729,6 +750,7 @@ pub(super) struct WindDown {
 #[cfg(test)]
 mod tests {
     use super::{MAX_LANES, capacity_notice, next_approval_index, toggle_report_lines};
+    use crate::tui_mode::test_support::{test_client, test_prefs, test_shell};
     use crabmate_client_api::ctl::ToggleOutcome;
 
     #[test]
@@ -743,6 +765,33 @@ mod tests {
                 "要给出可照抄的出路：{notice}"
             );
         }
+    }
+
+    /// `Alt+1..8` 是**绝对**目标，不是 `switch_lane` 那种环回：越界时视图留在原地，
+    /// 只留一行说明。静默失败在这里尤其危险 —— `Alt+数字` 是最容易被 tmux / 终端吞掉的
+    /// 组合键，用户分不清「终端没送达」和「送达了但没这条连接」（issue #361）。
+    #[test]
+    fn goto_lane_is_absolute_and_explains_out_of_range() {
+        let client = test_client();
+        let mut prefs = [test_prefs(), test_prefs(), test_prefs()];
+        let mut app = test_shell(&client, &mut prefs);
+
+        app.goto_lane(3);
+        assert_eq!(app.active, 2, "Alt+3 落到第 3 条（与左栏自上而下同序号）");
+        app.goto_lane(1);
+        assert_eq!(app.active, 0, "Alt+1 回到第 1 条");
+
+        let before = app.lanes[0].st.lines.len();
+        app.goto_lane(7);
+        assert_eq!(app.active, 0, "越界不切视图（更不能绕回第 1 条）");
+        assert_eq!(app.lanes[0].st.lines.len(), before + 1, "要留一行说明");
+        let last = app.lanes[0].st.lines.last().expect("说明行");
+        assert!(last.text().contains("Alt+7"), "got {}", last.text());
+        assert!(
+            last.text().contains("3 条连接"),
+            "要说清这里到底有几条：{}",
+            last.text()
+        );
     }
 
     #[test]
