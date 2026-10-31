@@ -3,40 +3,71 @@
 //! 只做排版，不做判定 —— 可连性来自 [`CtlInstance::can_connect`]（`observed == ready`）。
 //! 单独成模块与成文件：这段要能单测（不该只能靠起一个真 socket 才验证得到文案）。
 
-use std::path::PathBuf;
-
 use crabmate_client_api::ctl::{CtlInstance, CtlObserved};
 
 use super::state::LineKind;
-use super::worker::WorkerJob;
+use super::worker_ctl::{CtlHandle, CtlJob, Queued};
 
 /// 控制面未启用时的提示（`/ctl` 与 `/lane` 共用：两处各写一份必然漂移）。
 const CTL_DISABLED_HINT: &str = "ctl 控制面未启用：启动时加 `--ctl-socket <path>`，或让 $XDG_RUNTIME_DIR/crabmate/ctl.sock 存在";
 
 impl super::LaneApp<'_> {
-    /// 取控制面 socket；未启用时写一句「怎么启用」并返回 `None`。
-    pub(super) fn ctl_socket_or_hint(&mut self) -> Option<PathBuf> {
-        let socket = self.ctl_socket.clone();
-        if socket.is_none() {
+    /// 取控制面通道句柄；未启用时写一句「怎么启用」并返回 `None`。
+    pub(super) fn ctl_handle_or_hint(&mut self) -> Option<CtlHandle> {
+        let ctl = self.ctl.clone();
+        if ctl.is_none() {
             self.st.push_line(LineKind::System, CTL_DISABLED_HINT);
         }
-        socket
+        ctl
     }
 
-    /// `/ctl` 与 `/lane`（空参）：把一次控制面查询排进**当前 lane 的** worker。
+    /// 派一次控制面调用；排在别人后面时先解释一句。
+    ///
+    /// 返回 `false` = 没发出去（ctl 线程已退出）：失败文案留给调用方 —— 四条命令的措辞
+    /// 不同（查询 / 连接 / 新建 / 翻转），这里替它们决定只会多一处漂移。
+    ///
+    /// 排队提示必须在**发送侧**写（issue #350）：控制面只有一个线程，`/lane new` 的
+    /// 20 s 就绪轮询期间别人敲的命令就排在那次轮询后面，而「正在查询…」早已写到屏上
+    /// 了 —— 不解释，用户看到的就是一条卡住的命令。
+    pub(super) fn enqueue_ctl(&mut self, ctl: &CtlHandle, job: CtlJob) -> bool {
+        match ctl.enqueue(job) {
+            Ok(Queued::Immediate) => true,
+            Ok(Queued::Behind(ahead)) => {
+                self.st.push_line(LineKind::System, &queue_notice(ahead));
+                true
+            }
+            Err(_) => false,
+        }
+    }
+
+    /// `/ctl` 与 `/lane`（空参）：把一次控制面查询派给**外壳级**的 ctl 线程。
     ///
     /// 未启用时不发请求、也不报错，而是说清「怎么启用」——这条通道存在的全部前提是
     /// 同机同用户的 `crabmatectl supervise --socket`，静默什么都不做会让人以为命令写错了。
+    ///
+    /// 不排进**本 lane 的** worker（issue #350）：那个队列装着回合与各种拉取，
+    /// 一次最坏 5 s 的控制面 IO 排在后面，整条 lane 的界面就停更了。
     pub(super) fn fetch_ctl_list(&mut self) {
-        let Some(socket) = self.ctl_socket_or_hint() else {
+        let Some(ctl) = self.ctl_handle_or_hint() else {
             return;
         };
         self.st.push_line(LineKind::System, "正在查询 ctl 实例…");
-        if self.job_tx.send(WorkerJob::CtlList { socket }).is_err() {
+        if !self.enqueue_ctl(&ctl, CtlJob::List { from: self.id }) {
             self.st
                 .push_line(LineKind::System, "ctl 查询未发出：worker 线程已退出");
         }
     }
+}
+
+/// 「排在别人后面」的解释。
+///
+/// 纯函数：这句只在多条 lane 抢同一个 ctl 时出现，手敲两条命令几乎撞不到，只能单测文案。
+/// 说清两件事 —— 为什么没反应（ctl 是单写者、逐条执行），以及在等什么（`/lane new`
+/// 的就绪轮询最长 20 s，是唯一会占位那么久的调用）。
+fn queue_notice(ahead: usize) -> String {
+    format!(
+        "控制面调用排队中：前面还有 {ahead} 条未返回（ctl 是单写者，逐条执行）——`/lane new` 的就绪轮询最长 20 s，通常在等它"
+    )
 }
 
 /// `UiEvent::CtlList`：把查询结果写进发起它的那条 lane 的 transcript。

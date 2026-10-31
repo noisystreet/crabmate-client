@@ -150,12 +150,12 @@ struct LaneApp<'a> {
     sent_turn: Option<resume::TurnEcho>,
     /// `/background` 设置的 kitty 像素背景；`None` = 不画（默认关闭）。
     bg: Option<background::Background>,
-    /// `crabmatectl` 控制面 socket 路径；`None` = 控制面未启用（`/ctl` 会说明原因）。
+    /// 外壳级控制面通道；`None` = 控制面未启用（`/ctl` 会说明原因）。
     ///
-    /// 全局资源（一个 socket 管所有实例）却存在**每条 lane** 上：`/ctl` 由当前 lane 的
-    /// worker 执行，结果写进当前 lane 的 transcript，所以按 lane 存一份读起来最自然；
-    /// 各 lane 的值在构造时相同，不存在「谁改了谁」的问题。
-    ctl_socket: Option<std::path::PathBuf>,
+    /// 只存**通道**，不存 socket：socket 是全局资源（一个管所有实例），由
+    /// `worker_ctl` 那个线程独占持有，调用也在那里串行发生（issue #350）；
+    /// 归属靠消息里的 `LaneId` 认，排第几由句柄里的计数当场告知。
+    ctl: Option<worker_ctl::CtlHandle>,
     /// 回合结束、待外壳统一发送的会话刷新意图（见 [`session_refresh`]）。
     ///
     /// 只置位、不在这里发请求：每条 lane 每轮各发一次 `RefreshSessions` 就是 N 倍
@@ -244,13 +244,13 @@ impl<'a> TuiApp<'a> {
     fn on_shell(&mut self, ev: ShellEvent) {
         match ev {
             // 新 lane 的装配：目标 lane 此刻还不存在，按 id 分发无处可去。
-            ShellEvent::Ready { name, result } => self.on_lane_ready(name, result),
+            ShellEvent::Ready { from, name, result } => self.on_lane_ready(from, name, result),
             // 摘连接：`LaneApp` 手上没有 `lanes` 的 `&mut`（见 `shell::detach_lane`）。
             ShellEvent::Detach { name } => self.detach_lane(&name),
             // 取消某条 lane 的回合：`LaneApp` 只握着自己的 `cancel`。
             ShellEvent::Cancel { name } => self.cancel_lane(&name),
             // 翻声明的回执：关掉声明后还要顺手摘掉本进程那条连接。
-            ShellEvent::Toggled(result) => self.on_lane_toggled(result),
+            ShellEvent::Toggled { from, result } => self.on_lane_toggled(from, result),
         }
     }
 }

@@ -3,7 +3,6 @@
 //!
 //! 拆分出本模块以控制 `mod.rs` 单文件行数（fn-nloc 门禁 ≤ 920）与函数复杂度。
 
-use std::path::PathBuf;
 use std::sync::mpsc::{self, Sender};
 use std::thread;
 
@@ -27,11 +26,9 @@ use crate::serve::{
 
 use super::approve::{APPROVAL_WAIT, ApprovalPrompt, OverlayApprovalGate};
 use super::inbound::Inbound;
-// 控制面（unix socket）的三类 job 在 `worker_ctl`：它们不碰 reqwest 连接池。
 use super::serve_defaults::ServeDefaults;
 use super::settings::{LlmSave, PersistedSettings, PrefsSave, merge_llm_save, merge_prefs_save};
 use super::slash_menu::SkillsPayload;
-use super::worker_ctl;
 
 /// UI 事件的**载荷**（键盘线程与回合/拉取线程都会产出，但「归谁」由 [`Inbound`] 决定：
 /// 全局输入 / 某条 lane 的出站事件 / 外壳动作，见 [`super::inbound`]）。
@@ -244,41 +241,6 @@ pub(super) enum WorkerJob {
     SavePrefs(PrefsSave),
     /// 拉 skill 目录（`GET /skills`）：只给 `/` 补全菜单用。
     Skills,
-    /// 拉 `crabmatectl` 控制面的实例列表（unix socket，不是 HTTP）。
-    ///
-    /// 跑在**当前 lane 的 worker** 上而不是另起线程：`/ctl` 是低频手动命令，串行执行
-    /// 换来「谁执行就写进谁的 transcript」的自然语义；代价是最坏阻塞该 lane 5 s
-    /// （`serve::ctl` 的 IO 超时），期间该 lane 的其它拉取排队 —— 可接受。
-    CtlList {
-        /// 控制面 socket 路径（`--ctl-socket` 或默认路径）。
-        socket: PathBuf,
-    },
-    /// 连上控制面里**已就绪**的实例（`/lane attach <name>`）：只读 `list` 取 `base_url`。
-    CtlAttach {
-        /// 控制面 socket 路径。
-        socket: PathBuf,
-        /// 实例名（`instances.toml` 的键，也是将来那条 lane 的 `label`）。
-        name: String,
-    },
-    /// 新增声明并等它就绪（`/lane new <name> [workspace]`）。
-    ///
-    /// `add` 只写盘，真正起实例是 ctl 主循环的下一轮收敛，所以这里必须自己轮询
-    /// `list` 才拿得到 `base_url`（`add` 的响应里没有端口）。轮询会**阻塞本 lane 的
-    /// worker** 至多 [`LANE_READY_TIMEOUT`]：期间该 lane 的其它拉取排队。
-    CtlNew {
-        /// 控制面 socket 路径。
-        socket: PathBuf,
-        /// 新实例名。
-        name: String,
-        /// 声明的 `workspace`（Server 的 socket `add` 要求必填）。
-        workspace: String,
-    },
-    /// 翻一条声明的 `enabled`（`/lane close|open`）：只写声明、不轮询（见 `worker_ctl`）。
-    CtlToggle {
-        socket: PathBuf,
-        name: String,
-        enabled: bool,
-    },
     /// 写会话级权限等级意图（`POST /conversation/state`，空闲态落盘）。
     ///
     /// 与 `/perm` 写下的本地 override 不是一回事：override 只影响**下一条** `/chat`，
@@ -484,13 +446,6 @@ pub(super) fn spawn_worker(
                 WorkerJob::SaveLlm(save) => job_save_llm(&rt, &client, save, &out),
                 WorkerJob::SavePrefs(save) => job_save_prefs(&rt, &client, save, &out),
                 WorkerJob::Skills => job_skills(&rt, &client, &out),
-                // `CtlList` 是这条 lane 自己 `/ctl` 的回包 → 打标签；
-                // `CtlLaneReady` 的目标 lane 还不存在 → 交外壳（裸发）。
-                // 控制面 job（list / attach / new / toggle）的派发收在 `worker_ctl`。
-                job @ (WorkerJob::CtlList { .. }
-                | WorkerJob::CtlAttach { .. }
-                | WorkerJob::CtlNew { .. }
-                | WorkerJob::CtlToggle { .. }) => worker_ctl::dispatch(job, &out, &tx),
                 WorkerJob::WritePermission {
                     conversation_id,
                     level,

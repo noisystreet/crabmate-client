@@ -36,6 +36,12 @@ pub(super) enum ShellEvent {
     ///
     /// 目标 lane 此刻还不存在，按 `LaneId` 分发无处可去 —— 这正是它必须留在外壳的原因。
     Ready {
+        /// 发起命令的那条 lane。
+        ///
+        /// 控制面调用已由外壳级的 ctl 线程执行（issue #350），执行位置不再等于归属：
+        /// 失败原因必须写回**发起者**的 transcript，而不是「回包到达时聚焦的那条」——
+        /// `/lane new` 的 20 s 轮询期间用户很可能已经切走了。
+        from: LaneId,
         /// 实例名（将来那条 lane 的 `label`）。
         name: String,
         /// `Ok(serve 根 URL)` / `Err(面向用户的失败原因)`。
@@ -54,5 +60,11 @@ pub(super) enum ShellEvent {
         name: String,
     },
     /// 翻声明 `enabled` 的回执（`/lane close|open`）：关掉后还要顺手摘掉本进程那条连接。
-    Toggled(Result<ToggleOutcome, ToggleFailure>),
+    Toggled {
+        /// 发起命令的那条 lane（理由同 [`Self::Ready`] 的 `from`：执行在外壳级，
+        /// 归属仍按 `LaneId` —— 被关的可能正是发起命令的这条）。
+        from: LaneId,
+        /// Server 的回执，或说明「为什么没改」。
+        result: Result<ToggleOutcome, ToggleFailure>,
+    },
 }
