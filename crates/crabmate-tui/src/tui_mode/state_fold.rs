@@ -5,8 +5,14 @@
 //! 实时与回放里是同一个定义 —— 两处复用同一个函数，且幂等（生成的 `Process` 行不是
 //! 过程行，不会被再折一次）。
 //!
-//! 段内原文**全部保留**（只标 [`LogLine::is_hidden`]），摘要行另插一条。改写段首行会
-//! 让展开无法逐字还原，那是这一层唯一的不可逆损失，不能接受。
+//! 段内原文**全部保留**（只标 [`LogLine::is_hidden`]），折叠时在段首**插入**一条摘要行；
+//! 开合之后不再增删行。改写段首行会让展开无法逐字还原，那是这一层唯一的不可逆损失，
+//! 不能接受。
+//!
+//! 展开是**可逆**的（`/fold` 就是 toggle）：摘要行始终保留，开合只翻成员的 `hidden`，
+//! 外加一个 `run_open` 位决定前缀 `▸ ` / `▾ `。所以在折叠态与展开态之间来回切换是
+//! 逐字还原，行数也不变 —— 视口锚点、`tool_pending` 这类按下标记的东西不会因为一次
+//! toggle 整体错位。第一版（PR370）的展开会删掉摘要行，那让「再折回」无从下手。
 //!
 //! 为什么不用 `LogLine::collapsed`：那个的语义是「一行折成一行预览」（`fold_thinking`），
 //! `Ctrl+E` 靠它表达 thinking 展开。复用它会让「展开思考」把整段也一起展开。
@@ -25,6 +31,41 @@ const MIN_RUN: usize = 2;
 /// `User` 与 `Process` 自然不在内。
 fn is_process(kind: LineKind) -> bool {
     matches!(kind, LineKind::Thinking | LineKind::Tool)
+}
+
+/// `/fold` 的目标（`Last` = 无参数，最近一条）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FoldTarget {
+    Last,
+    /// 从底部数第 n 条（1 起）：`1` 与 [`Self::Last`] 同义，留着数字只是让
+    /// 「倒数第几条」能一次说清。
+    Nth(usize),
+    /// 全部展开。
+    All,
+    /// 全部折回。
+    Close,
+}
+
+/// `/fold [n|all|close]` 的参数解析。
+///
+/// 与 [`super::hotkeys::of`] 同一手法：早返回 + 查表式 match，让 `fold_command` 那条
+/// 分派不往 CCN 10 上再加分支；用法提示作为 `Err` 交给调用方写进 transcript
+/// （与 `/lane` 的 `Err(usage)` 同一条规矩）。
+fn parse_fold_arg(arg: Option<&str>) -> Result<FoldTarget, String> {
+    const USAGE: &str = "用法：/fold [n|all|close] —— n 从底部数（1 起），all 全展开，close 全折回";
+    let Some(raw) = arg.map(str::trim).filter(|a| !a.is_empty()) else {
+        return Ok(FoldTarget::Last);
+    };
+    if raw.eq_ignore_ascii_case("all") {
+        return Ok(FoldTarget::All);
+    }
+    if matches!(raw, "close" | "none" | "off") {
+        return Ok(FoldTarget::Close);
+    }
+    match raw.parse::<usize>() {
+        Ok(n) if n >= 1 => Ok(FoldTarget::Nth(n)),
+        _ => Err(USAGE.to_string()),
+    }
 }
 
 /// 折叠 / 展开只经由本文件改这几个标记：它们成对出现，谁在别处直接改，
@@ -46,9 +87,19 @@ impl LogLine {
         self.sticky_visible
     }
 
-    fn set_sticky(&mut self) {
-        if !self.sticky_visible {
-            self.sticky_visible = true;
+    /// `sticky` 是**双向**的：展开时置上（下一轮结束的自动折叠别把它收走），折回时
+    /// 清掉（否则这一段再也折不上，只能切会话重新回放）。
+    fn set_sticky(&mut self, sticky: bool) {
+        if self.sticky_visible != sticky {
+            self.sticky_visible = sticky;
+            self.touch();
+        }
+    }
+
+    /// 摘要行开合（同 `set_collapsed`：没变不动版本）。只对 `LineKind::Process` 有意义。
+    fn set_run_open(&mut self, open: bool) {
+        if self.run_open != open {
+            self.run_open = open;
             self.touch();
         }
     }
@@ -96,56 +147,137 @@ impl UiState {
         self.after_fold_change(top);
     }
 
-    /// 展开第 `idx` 行那条摘要（把它的成员行放回来、自己删掉）。返回是否真的做了。
-    pub fn unfold_process_run(&mut self, idx: usize) -> bool {
+    /// 摘要行之后连续属于本段的过程行（`[start, end)`，半开）。
+    ///
+    /// 顺序即结构，两种态共用一份判据：折叠态成员带 `hidden`，展开态成员带 `sticky`。
+    /// 认这两种标记（而不是只认 `hidden`）让 toggle 不必先问「它现在是哪一态」；
+    /// 遇到的第一个两者皆无的过程行 = 本段结束 —— 那可能是下一轮刚起的工具行，
+    /// 没折过，不该被这一下带走。
+    fn run_members(&self, idx: usize) -> Option<(usize, usize)> {
+        let start = idx + 1;
+        let mut end = start;
+        while let Some(line) = self.lines.get(end) {
+            let member = is_process(line.kind()) && (line.is_hidden() || line.is_sticky());
+            if !member {
+                break;
+            }
+            end += 1;
+        }
+        (end > start).then_some((start, end))
+    }
+
+    /// 把第 `idx` 行那条摘要设成 `open`（成员显隐 + `sticky` 一起改）。返回是否改了。
+    fn set_run_state(&mut self, idx: usize, open: bool) -> bool {
         if self.lines.get(idx).map(LogLine::kind) != Some(LineKind::Process) {
             return false;
         }
-        // 摘要行之后连续的隐藏行就是它的成员：折叠时正是这样排的，顺序即结构。
-        let start = idx + 1;
-        let mut end = start;
-        while end < self.lines.len() && self.lines[end].is_hidden() {
-            end += 1;
-        }
-        if end == start {
-            // 没有成员 = 不是我们折出来的（或已被展开）—— 不删，免得吃掉一行。
+        let Some((start, end)) = self.run_members(idx) else {
             return false;
-        }
+        };
         let top = self.body_top_log;
         for line in &mut self.lines[start..end] {
-            line.set_hidden(false);
-            // `sticky`：这是用户显式要看的原文，下一轮结束的自动折叠不该再把它收走。
-            line.set_sticky();
+            line.set_hidden(!open);
+            // `sticky`：展开时这是用户显式要看的原文，下一轮结束的自动折叠不该收走；
+            // 折回时清掉，否则这一段再也折不上。
+            line.set_sticky(open);
         }
-        self.lines.remove(idx);
+        self.lines[idx].set_run_open(open);
         self.after_fold_change(top);
         true
     }
 
-    /// 展开最后一条过程摘要（`/fold`）。没有可展开的段时返回 `false`。
-    pub fn unfold_last_process_run(&mut self) -> bool {
-        let Some(idx) = self
-            .lines
-            .iter()
-            .rposition(|l| l.kind() == LineKind::Process)
-        else {
-            return false;
-        };
-        self.unfold_process_run(idx)
+    /// 切换第 `idx` 行那条摘要的展开态，返回切换后的状态（`None` = 不是摘要行 / 没有成员）。
+    ///
+    /// 摘要行**始终保留**：开合只翻成员的 `hidden`，所以来回切换逐字还原、行数不变。
+    pub fn toggle_process_run(&mut self, idx: usize) -> Option<bool> {
+        let open = !self.lines.get(idx)?.is_run_open();
+        self.set_run_state(idx, open).then_some(open)
     }
 
-    /// `/fold`：展开最近一条过程摘要，并把结果说清楚。
-    pub fn fold_command(&mut self) {
-        if self.unfold_last_process_run() {
+    /// 所有摘要行的下标（自上而下）。
+    fn summary_indices(&self) -> Vec<usize> {
+        self.lines
+            .iter()
+            .enumerate()
+            .filter(|(_, l)| l.kind() == LineKind::Process)
+            .map(|(i, _)| i)
+            .collect()
+    }
+
+    /// `/fold [n|all|close]`：切换执行过程的展开态。
+    ///
+    /// 折叠是自动的（回合结束 / 回放插入后），这条命令管另一个方向。摘要行始终在，所以
+    /// 它同时是「展开」与「折回」：无参数 = 最近一条（与 PR370 的手感一致）；`<n>` =
+    /// 从底部数第 n 条（1 起，`1` 与无参数同义）；`all` 全展开；`close`（`none` /
+    /// `off` 同义）全折回。
+    pub fn fold_command(&mut self, arg: Option<&str>) {
+        let target = match parse_fold_arg(arg) {
+            Ok(target) => target,
+            Err(usage) => {
+                self.push_line(LineKind::System, &usage);
+                return;
+            }
+        };
+        match target {
+            FoldTarget::All => self.report_all_runs(true),
+            FoldTarget::Close => self.report_all_runs(false),
+            FoldTarget::Last => self.toggle_from_bottom(1),
+            FoldTarget::Nth(n) => self.toggle_from_bottom(n),
+        }
+    }
+
+    /// 从底部数第 `n` 条摘要切换一次；没成时把原因写清楚（两种「没成」不是一回事）。
+    fn toggle_from_bottom(&mut self, n: usize) {
+        let idxs = self.summary_indices();
+        if idxs.is_empty() {
+            self.push_line(LineKind::System, "没有可展开的执行过程");
             return;
         }
-        // 两种「没展开」不是一回事：一条摘要行都没有，和有一条但成员已经不在（不一致态）。
-        let msg = if self.lines.iter().any(|l| l.kind() == LineKind::Process) {
-            "最近一条执行过程摘要没有可还原的内容"
+        if n == 0 || n > idxs.len() {
+            let msg = format!("只有 {} 条执行过程摘要（n 从底部数，1 起）", idxs.len());
+            self.push_line(LineKind::System, &msg);
+            return;
+        }
+        if self.toggle_process_run(idxs[idxs.len() - n]).is_none() {
+            self.push_line(LineKind::System, "这条执行过程摘要没有可展开的内容");
+        }
+    }
+
+    /// `all` / `close`：把所有摘要设成同一态，并回报**实际**改了几条。
+    ///
+    /// 只对「当前态与目标不同」的摘要动手：`set_run_state` 只校验「是摘要行 + 有成员」，
+    /// 拿它的返回值直接累加，会让连按两次 `/fold all` 都说「已展开 N 段」—— 用户据此
+    /// 以为画面该变了，实际什么都没动。
+    fn report_all_runs(&mut self, open: bool) {
+        let what = if open { "展开" } else { "折回" };
+        let targets: Vec<usize> = self
+            .summary_indices()
+            .into_iter()
+            .filter(|&idx| self.lines[idx].is_run_open() != open)
+            .collect();
+        if targets.is_empty() {
+            let msg = self.bulk_idle_notice(what, open);
+            self.push_line(LineKind::System, &msg);
+            return;
+        }
+        let mut changed = 0;
+        for idx in targets.into_iter().rev() {
+            if self.set_run_state(idx, open) {
+                changed += 1;
+            }
+        }
+        let msg = format!("已{what} {changed} 段执行过程");
+        self.push_line(LineKind::System, &msg);
+    }
+
+    /// 一条都不用动时的说法：**没有摘要** 与 **都已经是目标态** 是两件事 ——
+    /// 「没有可折回的执行过程」在「已经全折回」时会读成「这里没有执行过程」。
+    fn bulk_idle_notice(&self, what: &str, open: bool) -> String {
+        if self.summary_indices().is_empty() {
+            format!("没有可{what}的执行过程")
         } else {
-            "没有可展开的执行过程"
-        };
-        self.push_line(LineKind::System, msg);
+            format!("执行过程都已是{}", if open { "展开态" } else { "收起态" })
+        }
     }
 
     /// 一轮结束时的折叠：调用点只关心「这一轮怎么结束的」。
@@ -240,6 +372,7 @@ mod tests {
     use crate::tui_mode::render;
 
     use super::super::{LineKind, UiState};
+    use super::{FoldTarget, parse_fold_arg};
 
     /// 造一份最小 transcript（`push_line` 走真实路径，行号与 `search_hits` 才一致）。
     fn state_with(rows: &[(LineKind, &str)]) -> UiState {
@@ -260,6 +393,17 @@ mod tests {
 
     fn hidden_count(st: &UiState) -> usize {
         st.lines.iter().filter(|l| l.is_hidden()).count()
+    }
+
+    /// 第 `idx` 条逻辑行在**真实渲染**里的前缀（用户唯一看得见的状态：
+    /// 折叠 `▸ ` / 展开 `▾ `）。必须走 `build_body_rows`：字段读对了但缓存没失效，
+    /// 屏幕上照样是旧标记 —— 那种情况只有渲染断言能抓到。
+    fn summary_prefix(st: &UiState, idx: usize) -> String {
+        render::build_body_rows(st, 40)
+            .iter()
+            .find(|r| r.log_index == Some(idx))
+            .and_then(|r| r.line.spans.first().map(|s| s.content.to_string()))
+            .unwrap_or_default()
     }
 
     /// 一轮的工具行折成一条摘要，原文全部保留。
@@ -294,9 +438,9 @@ mod tests {
         );
     }
 
-    /// 展开逐字还原（不是重新概括）。
+    /// 展开 / 折回双向都逐字还原（不是重新概括），且摘要行始终在。
     #[test]
-    fn unfolding_restores_the_hidden_rows_verbatim() {
+    fn toggling_restores_the_hidden_rows_verbatim_both_ways() {
         let mut st = state_with(&[
             (LineKind::User, "问"),
             (LineKind::Tool, "✓ read_file — a.rs"),
@@ -310,19 +454,184 @@ mod tests {
             .position(|l| l.kind() == LineKind::Process)
             .expect("应有摘要行");
 
-        assert!(st.unfold_process_run(summary));
-
+        assert_eq!(st.toggle_process_run(summary), Some(true), "第一次是展开");
         assert_eq!(
             visible(&st),
             vec![
                 (LineKind::User, "问".to_string()),
+                // 摘要行**保留**：它是 toggle 的把手，删掉就再也折不回去。
+                (LineKind::Process, "2 个工具 · 完成".to_string()),
                 (LineKind::Tool, "✓ read_file — a.rs".to_string()),
                 (LineKind::Tool, "✓ search_replace — b.rs".to_string()),
                 (LineKind::Assistant, "答".to_string()),
             ],
-            "展开后与折叠前逐字一致"
+            "展开后成员与折叠前逐字一致，另加摘要行本身"
         );
+        assert_eq!(hidden_count(&st), 0, "成员行全部回到可见");
+        assert_eq!(st.lines.len(), 5, "toggle 不插不删行");
+        assert!(st.lines[summary].is_run_open(), "摘要行记着自己的开合");
+        assert_eq!(summary_prefix(&st, summary), "▾ ", "展开态渲染出 ▾");
+
+        assert_eq!(st.toggle_process_run(summary), Some(false), "第二次是折回");
+        assert_eq!(
+            visible(&st),
+            vec![
+                (LineKind::User, "问".to_string()),
+                (LineKind::Process, "2 个工具 · 完成".to_string()),
+                (LineKind::Assistant, "答".to_string()),
+            ],
+            "折回后只剩摘要"
+        );
+        assert_eq!(hidden_count(&st), 2);
+        assert_eq!(st.lines.len(), 5, "折回同样不改行数");
+        assert!(!st.lines[summary].is_run_open());
+        assert_eq!(summary_prefix(&st, summary), "▸ ", "折回态渲染回 ▸");
+
+        // 折回后把 `sticky` 清干净了，所以还能再展开一次（否则这段就锁死了）。
+        assert_eq!(st.toggle_process_run(summary), Some(true), "折回后可再展开");
         assert_eq!(hidden_count(&st), 0);
+    }
+
+    /// `/fold` 的参数解析：无参 = 最近一条，数字从底部数，`all` / `close` 两个方向。
+    #[test]
+    fn fold_arg_parsing() {
+        assert_eq!(parse_fold_arg(None), Ok(FoldTarget::Last));
+        assert_eq!(parse_fold_arg(Some("   ")), Ok(FoldTarget::Last));
+        assert_eq!(parse_fold_arg(Some("ALL")), Ok(FoldTarget::All));
+        assert_eq!(parse_fold_arg(Some("close")), Ok(FoldTarget::Close));
+        assert_eq!(parse_fold_arg(Some("off")), Ok(FoldTarget::Close));
+        assert_eq!(parse_fold_arg(Some("2")), Ok(FoldTarget::Nth(2)));
+        // `0` 与 `1` 是两种错法：0 越界，1 等价无参 —— 所以只认 `>= 1`。
+        assert!(parse_fold_arg(Some("0")).is_err());
+        assert!(parse_fold_arg(Some("x")).is_err(), "非数字给用法提示");
+    }
+
+    /// `/fold <n>` 从底部数：`2` 命中的是**较早**那一段，不是最近那段。
+    #[test]
+    fn fold_with_an_index_unfolds_the_nth_run_from_the_bottom() {
+        let mut st = state_with(&[
+            (LineKind::Tool, "✓ a"),
+            (LineKind::Tool, "✓ b"),
+            (LineKind::Assistant, "中间结论"),
+            (LineKind::Tool, "✓ c"),
+            (LineKind::Tool, "✓ d"),
+        ]);
+        st.fold_process_runs(Some(" · 完成"));
+        assert_eq!(hidden_count(&st), 4, "两段都折上了");
+
+        st.fold_command(Some("2"));
+
+        let open: Vec<bool> = st
+            .lines
+            .iter()
+            .filter(|l| l.kind() == LineKind::Process)
+            .map(|l| l.is_run_open())
+            .collect();
+        assert_eq!(open, vec![true, false], "只有倒数第 2 条（较早那段）展开");
+        assert_eq!(hidden_count(&st), 2, "最近那段仍折叠");
+    }
+
+    /// 越界的 `n` 只给提示，不动任何一段。
+    #[test]
+    fn fold_with_a_too_large_index_only_explains_itself() {
+        let mut st = state_with(&[(LineKind::Tool, "✓ a"), (LineKind::Tool, "✓ b")]);
+        st.fold_process_runs(None);
+
+        st.fold_command(Some("3"));
+
+        assert_eq!(hidden_count(&st), 2, "越界不该展开任何段");
+        let last = st.lines.last().expect("应有提示行");
+        assert_eq!(last.kind(), LineKind::System);
+        assert!(last.text().contains("只有 1 条"), "{}", last.text());
+    }
+
+    /// `/fold all` 全展开、`/fold close` 全折回，两个方向分别回显改了几段。
+    #[test]
+    fn fold_all_and_close_move_every_run() {
+        let mut st = state_with(&[
+            (LineKind::Tool, "✓ a"),
+            (LineKind::Tool, "✓ b"),
+            (LineKind::Assistant, "中间结论"),
+            (LineKind::Tool, "✓ c"),
+            (LineKind::Tool, "✓ d"),
+        ]);
+        st.fold_process_runs(None);
+
+        st.fold_command(Some("all"));
+        assert_eq!(hidden_count(&st), 0, "全部展开");
+        assert!(
+            st.lines
+                .last()
+                .expect("回显")
+                .text()
+                .contains("已展开 2 段")
+        );
+        // 再按一次 `all`：一段都没动，就不能照抄上一次的「已展开 2 段」——
+        // 用户会据此以为画面该变了。
+        st.fold_command(Some("all"));
+        assert_eq!(hidden_count(&st), 0, "重复 all 不该改变任何东西");
+        assert!(
+            st.lines
+                .last()
+                .expect("回显")
+                .text()
+                .contains("都已是展开态"),
+            "{}",
+            st.lines.last().expect("回显").text()
+        );
+
+        st.fold_command(Some("close"));
+        assert_eq!(hidden_count(&st), 4, "全部折回");
+        assert!(
+            st.lines
+                .last()
+                .expect("回显")
+                .text()
+                .contains("已折回 2 段")
+        );
+        // `close` 同理：都已经收起时说「都已是收起态」，而不是再报一次「已折回 2 段」，
+        // 更不是「没有可折回的执行过程」（那读起来像「这里没有执行过程」）。
+        st.fold_command(Some("close"));
+        assert!(
+            st.lines
+                .last()
+                .expect("回显")
+                .text()
+                .contains("都已是收起态"),
+            "{}",
+            st.lines.last().expect("回显").text()
+        );
+        assert!(
+            st.lines
+                .iter()
+                .filter(|l| l.kind() == LineKind::Process)
+                .all(|l| !l.is_run_open()),
+            "折回后没有一条仍记着展开"
+        );
+    }
+
+    /// 一条摘要都没有时，`/fold` 说明「没有可展开的」而不是静默。
+    #[test]
+    fn fold_without_any_summary_says_so() {
+        let mut st = state_with(&[(LineKind::User, "问"), (LineKind::Assistant, "答")]);
+
+        st.fold_command(None);
+
+        let last = st.lines.last().expect("应有提示行");
+        assert_eq!(last.text(), "没有可展开的执行过程");
+    }
+
+    /// 非法参数给用法，且不碰 transcript 里已有的过程段。
+    #[test]
+    fn fold_with_a_bad_argument_prints_usage() {
+        let mut st = state_with(&[(LineKind::Tool, "✓ a"), (LineKind::Tool, "✓ b")]);
+        st.fold_process_runs(None);
+
+        st.fold_command(Some("bogus"));
+
+        assert_eq!(hidden_count(&st), 2, "参数错不该展开任何段");
+        let last = st.lines.last().expect("应有用法行");
+        assert!(last.text().contains("用法：/fold"), "{}", last.text());
     }
 
     /// 一条过程行不值得折：折了只是换个说法。
@@ -482,13 +791,13 @@ mod tests {
         assert_eq!(visible(&st)[0].1, "2 个工具 · 已取消");
     }
 
-    /// `/fold` 展开的原文，下一轮结束时不被重新折回去。
+    /// `/fold` 展开的原文，下一轮结束时不被重新折回去；新的一轮单独成段。
     #[test]
     fn an_expanded_run_is_not_refolded_on_the_next_turn() {
         let mut st = state_with(&[(LineKind::Tool, "✓ a"), (LineKind::Tool, "✓ b")]);
         st.fold_process_runs(Some(" · 完成"));
-        st.fold_command(); // 等价 `/fold`
-        assert_eq!(visible(&st).len(), 2, "展开后原文可见");
+        st.fold_command(None); // 等价 `/fold`
+        assert_eq!(visible(&st).len(), 3, "摘要 + 两条原文");
 
         st.push_line(LineKind::Tool, "✓ c");
         st.push_line(LineKind::Tool, "✓ d");
@@ -500,9 +809,9 @@ mod tests {
                 .iter()
                 .filter(|(k, _)| *k == LineKind::Process)
                 .count(),
-            1,
-            "只折新的一轮：{shown:?}"
+            2,
+            "旧段仍展开、新段单独折：{shown:?}"
         );
-        assert_eq!(shown.len(), 3, "两条原文 + 一条新摘要：{shown:?}");
+        assert_eq!(shown.len(), 4, "摘要A + 两条旧原文 + 摘要B：{shown:?}");
     }
 }

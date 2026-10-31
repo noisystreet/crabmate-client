@@ -441,7 +441,7 @@ impl LaneApp<'_> {
             }
             Control::Help => self.st.show_help(),
             Control::Find(arg) => self.do_find(arg),
-            Control::Fold => self.st.fold_command(),
+            Control::Fold(arg) => self.st.fold_command(arg.as_deref()),
             Control::Background(arg) => self.set_background(arg),
             Control::Copy(arg) => self.copy_last(arg),
             Control::Ctl => self.fetch_ctl_list(),

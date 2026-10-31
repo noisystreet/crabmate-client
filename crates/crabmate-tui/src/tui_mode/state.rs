@@ -164,6 +164,12 @@ pub struct LogLine {
     /// 用户用 `/fold` 显式展开过（issue #369）：后续自动折叠不再碰它。
     /// 没有这一位，展开的内容会在下一轮结束时被重新折回去 —— 用户意图被静默覆盖。
     sticky_visible: bool,
+    /// 过程摘要行（`LineKind::Process`）的成员是否处于展开态：`false` = 折叠（`▸ `），
+    /// `true` = 展开（`▾ `）。只对这一种行有意义；其它行恒为 `false`。
+    ///
+    /// 与 `collapsed` 刻意分开：那个是「一行折成一行预览」（thinking），把摘要行的
+    /// 开合塞进去会让 `Ctrl+E` 的全局 thinking 切换顺手改掉过程段的开合。
+    run_open: bool,
     /// 行版本：内容 / 折叠 / 工具状态每变一次就换一个新值，供 body 行级缓存做指纹（O(1)）。
     /// 不用「文本长度」或逐行哈希：前者漏等长替换，后者每帧都要重算一遍全文。
     rev: u64,
@@ -181,6 +187,7 @@ impl LogLine {
             tool_state: ToolState::Finished(None),
             hidden: false,
             sticky_visible: false,
+            run_open: false,
             rev: next_rev(),
         }
     }
@@ -216,6 +223,12 @@ impl LogLine {
     #[must_use]
     pub(crate) fn is_collapsed(&self) -> bool {
         self.collapsed
+    }
+
+    /// 过程摘要行的成员是否已展开（见 [`Self::run_open`]）。
+    #[must_use]
+    pub(crate) fn is_run_open(&self) -> bool {
+        self.run_open
     }
 
     #[must_use]
