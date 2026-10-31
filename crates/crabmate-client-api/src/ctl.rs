@@ -472,6 +472,17 @@ pub fn lane_readiness(items: &[CtlInstance], name: &str) -> LaneReadiness {
     let Some(item) = items.iter().find(|i| i.name == name) else {
         return LaneReadiness::Missing;
     };
+    // 声明被关掉是**事实**，不该靠 `observed` 去猜（issue #373）：Server 的 `disable`
+    // 会停掉实例、状态文件随之消失，于是 `list` 对「有声明、无状态记录」只回
+    // `observed = "starting"`。先判 `enabled` 再判 `observed`，否则 `/lane attach` 一个
+    // 刚 close 的实例会说「还没就绪」，`/lane new` 撞上同名已关闭的声明要白等满 20 s。
+    //
+    // 优先于 `observed == ready`：两者冲突说明状态记录是陈旧的，而连到一个即将被停掉的
+    // 实例比多问一句更糟。`enabled` 缺失（旧版 ctl 不返回该字段）时不进这一支，
+    // 判读与加这个短路之前逐字一致。
+    if item.enabled == Some(false) {
+        return LaneReadiness::Failed(closed_note(name));
+    }
     match item.observed_state() {
         CtlObserved::Ready => {
             match item
@@ -500,6 +511,17 @@ pub fn lane_readiness(items: &[CtlInstance], name: &str) -> LaneReadiness {
         // `starting` / `stale` / 无 observed / 认不出的观测态：此刻连不上，但也还没定论。
         _ => LaneReadiness::Pending,
     }
+}
+
+/// 声明被 close 掉时的原因文案：`/lane attach` 与 `/lane new` 两条入口的动作相同
+/// （先 `/lane open` 再连，或者换一个名字），所以一条文案两用。
+///
+/// 主句用控制面的 op 名（`enable`），TUI 命令名放括注：本 crate 是共享纯逻辑，不该把
+/// 某个壳的命令名当成唯一说法（Desktop 将来复用时那句话就不成立了）。
+fn closed_note(name: &str) -> String {
+    format!(
+        "实例 {name} 的声明已关闭（enabled = false）：先 `/lane open {name}`（控制面是 `enable`）再连，或换一个名字"
+    )
 }
 
 /// 失败原因优先用 Server 的 `last_error`，没有才回落到本地文案。
@@ -829,5 +851,55 @@ mod tests {
             lane_readiness(&items, "a"),
             LaneReadiness::Failed("工作区不在白名单".to_string())
         );
+    }
+
+    /// 声明被 close 是**事实**：即便 `observed` 还写着 `starting`（Server 对「有声明、
+    /// 无状态记录」的回法）也要立刻判失败，并指出回到可用状态的那一步（issue #373）。
+    ///
+    /// `ready` 也在表里：`disable` 会停掉实例，两者同时成立说明状态记录是陈旧的，按
+    /// 「可连」处理会连到一个即将被停掉的实例。
+    #[test]
+    fn closed_declaration_fails_fast_whatever_observed_says() {
+        for observed in ["starting", "", "ready"] {
+            let items = vec![CtlInstance {
+                name: "a".to_string(),
+                observed: Some(observed.to_string()),
+                base_url: Some("http://127.0.0.1:8721/".to_string()),
+                enabled: Some(false),
+                ..CtlInstance::default()
+            }];
+            match lane_readiness(&items, "a") {
+                LaneReadiness::Failed(why) => {
+                    assert!(
+                        why.contains("enabled = false"),
+                        "observed={observed}: {why}"
+                    );
+                    assert!(why.contains("/lane open a"), "要给出下一步命令：{why}");
+                }
+                other => panic!("observed={observed} 且 enabled=false 应判失败，实际 {other:?}"),
+            }
+        }
+    }
+
+    /// `enabled` 缺失（旧版 ctl 不返回该字段）或为 `true` 时，判读与加这个短路之前逐字
+    /// 一致 —— 这是本次改动唯一的兼容性边界。
+    #[test]
+    fn absent_or_true_enabled_keeps_the_old_readiness() {
+        for enabled in [None, Some(true)] {
+            let starting = vec![CtlInstance {
+                name: "a".to_string(),
+                observed: Some("starting".to_string()),
+                enabled,
+                ..CtlInstance::default()
+            }];
+            assert_eq!(lane_readiness(&starting, "a"), LaneReadiness::Pending);
+
+            let mut ready = ready_inst("a", Some("http://127.0.0.1:8721/"), None);
+            ready.enabled = enabled;
+            assert_eq!(
+                lane_readiness(&[ready], "a"),
+                LaneReadiness::Ready("http://127.0.0.1:8721/".to_string())
+            );
+        }
     }
 }
