@@ -10,7 +10,7 @@ use std::thread;
 use crossterm::event::{self, Event, KeyEvent, MouseButton, MouseEvent, MouseEventKind};
 
 use crabmate_client_api::conversation_state::ConversationStateOutcome;
-use crabmate_client_api::ctl::CtlInstance;
+use crabmate_client_api::ctl::{CtlInstance, ToggleFailure, ToggleOutcome};
 use crabmate_client_api::paths;
 use crabmate_client_api::permission::PermissionView;
 use crabmate_client_api::prompt_tokens::TiktokenPromptTokensSnapshot;
@@ -30,7 +30,7 @@ use super::approve::{APPROVAL_WAIT, ApprovalPrompt, OverlayApprovalGate};
 use super::serve_defaults::ServeDefaults;
 use super::settings::{LlmSave, PersistedSettings, PrefsSave, merge_llm_save, merge_prefs_save};
 use super::slash_menu::SkillsPayload;
-use super::worker_ctl::{job_ctl_attach, job_ctl_list, job_ctl_new};
+use super::worker_ctl;
 
 /// UI 事件（键盘线程与回合/拉取线程共同的生产者）。
 pub(super) enum UiEvent {
@@ -188,6 +188,8 @@ pub(super) enum UiEvent {
     LaneCancel {
         name: String,
     },
+    /// 翻声明 `enabled` 的回执（`/lane close|open`）：外壳动作，见 `shell::on_lane_toggled`。
+    CtlToggled(Result<ToggleOutcome, ToggleFailure>),
     /// 启动时 user-data 设置快照（prefs + llm-overrides）拉取结果（合成持久层）。
     UserData(Result<PersistedSettings, String>),
     /// `llm-overrides` 保存结果：`Ok` 回传已应用动作（面板据此清 staged）。
@@ -299,6 +301,12 @@ pub(super) enum WorkerJob {
         name: String,
         /// 声明的 `workspace`（Server 的 socket `add` 要求必填）。
         workspace: String,
+    },
+    /// 翻一条声明的 `enabled`（`/lane close|open`）：只写声明、不轮询（见 `worker_ctl`）。
+    CtlToggle {
+        socket: PathBuf,
+        name: String,
+        enabled: bool,
     },
     /// 写会话级权限等级意图（`POST /conversation/state`，空闲态落盘）。
     ///
@@ -501,13 +509,11 @@ pub(super) fn spawn_worker(
                 WorkerJob::Skills => job_skills(&rt, &client, &out),
                 // `CtlList` 是这条 lane 自己 `/ctl` 的回包 → 打标签；
                 // `CtlLaneReady` 的目标 lane 还不存在 → 交外壳（裸发）。
-                WorkerJob::CtlList { socket } => job_ctl_list(&socket, &out),
-                WorkerJob::CtlAttach { socket, name } => job_ctl_attach(&socket, &name, &tx),
-                WorkerJob::CtlNew {
-                    socket,
-                    name,
-                    workspace,
-                } => job_ctl_new(&socket, &name, &workspace, &tx),
+                // 控制面 job（list / attach / new / toggle）的派发收在 `worker_ctl`。
+                job @ (WorkerJob::CtlList { .. }
+                | WorkerJob::CtlAttach { .. }
+                | WorkerJob::CtlNew { .. }
+                | WorkerJob::CtlToggle { .. }) => worker_ctl::dispatch(job, &out, &tx),
                 WorkerJob::WritePermission {
                     conversation_id,
                     level,

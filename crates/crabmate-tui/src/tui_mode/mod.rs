@@ -198,6 +198,8 @@ impl<'a> TuiApp<'a> {
             UiEvent::LaneDetach { name } => self.detach_lane(&name),
             // 取消某条 lane 的回合也是外壳动作：`LaneApp` 只握着自己的 `cancel`。
             UiEvent::LaneCancel { name } => self.cancel_lane(&name),
+            // 翻声明的回执是外壳动作：关掉声明后还要顺手摘掉本进程那条连接。
+            UiEvent::CtlToggled(result) => self.on_lane_toggled(result),
             other => {
                 // 切 lane 是外壳动作：必须在进入 lane 之前拦截（lane 无权切自己，
                 // 否则每条 lane 都要知道全局有几条）。
@@ -709,8 +711,9 @@ impl LaneApp<'_> {
             // 外层已按 `LaneId` 分发过；lane 内再见到标签只可能来自直连测试，
             // 递归解包即可（不丢弃，避免测试构造的标签事件被静默吃掉）。
             UiEvent::Lane(_, inner) => self.on_msg(*inner),
-            // 外壳动作：真正摘 lane / 取消回合的是 `TuiApp`，lane 内见到只可能是测试直连。
-            UiEvent::LaneDetach { .. } | UiEvent::LaneCancel { .. } => {}
+            // 外壳动作：真正摘 lane / 取消回合 / 处理翻声明回执的是 `TuiApp`，
+            // lane 内见到只可能是测试直连。
+            UiEvent::LaneDetach { .. } | UiEvent::LaneCancel { .. } | UiEvent::CtlToggled(_) => {}
             UiEvent::Key(key) => self.on_key(key),
             // 粘贴整段进输入框（不改焦点、不提交）：见 `paste` 模块头注释。
             UiEvent::Paste(text) => self.on_paste(text),

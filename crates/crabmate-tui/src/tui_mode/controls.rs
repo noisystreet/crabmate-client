@@ -227,9 +227,18 @@ mod tests {
             matches!(parse_control("/lane cancel"), Some(Control::Lane(Err(_)))),
             "缺名字要给用法，不能静默变成 list"
         );
-        // 认不出的子命令给用法提示，不当成普通消息发给模型。
+        // `close` / `open` 翻声明里的 `enabled`：软删与撤销（`disable` / `enable` 是别名）。
         assert!(matches!(
             parse_control("/lane close proj-a"),
+            Some(Control::Lane(Ok(lane_cmd::LaneCommand::Close(n)))) if n == "proj-a"
+        ));
+        assert!(matches!(
+            parse_control("/lane open proj-a"),
+            Some(Control::Lane(Ok(lane_cmd::LaneCommand::Open(n)))) if n == "proj-a"
+        ));
+        // 认不出的子命令给用法提示，不当成普通消息发给模型。
+        assert!(matches!(
+            parse_control("/lane zzz proj-a"),
             Some(Control::Lane(Err(_)))
         ));
         // `/ctl` 没有被子命令语法改写：带参也照旧按只读查询处理。
