@@ -41,7 +41,8 @@ pub(super) enum ShellEvent {
         /// `Ok(serve 根 URL)` / `Err(面向用户的失败原因)`。
         result: Result<String, String>,
     },
-    /// 摘掉本进程的一条连接（`/lane detach`）：被摘的可能正是发起命令的那条 lane。
+    /// 摘掉本进程的一条连接（`/lane detach [<name>]`，缺省 = 当前 lane）：被摘的可能正是
+    /// 发起命令的那条 lane。
     Detach {
         /// 要摘掉的那条连接的 `label`。
         name: String,

@@ -8,7 +8,7 @@
 //!
 //! - `/lane`（空参）/ `/lane list`：列出控制面实例（与 `/ctl` 同一实现，不再各写一份）。
 //! - `/lane attach <name>`：连上**已就绪**的实例，不改声明。
-//! - `/lane detach <name>`：只摘掉**本进程**的连接；声明与 serve 进程都不动（与 attach 对称）。
+//! - `/lane detach [<name>]`：只摘掉**本进程**的连接；声明与 serve 进程都不动（与 attach 对称）。
 //! - `/lane new <name> [workspace]`：新增一条声明并等它就绪（写盘由 ctl 完成）。
 //!
 //! 失败一律写进**发起命令的那条 lane**的 transcript：用户正看着它，而新 lane 此刻
@@ -25,8 +25,12 @@ pub(crate) enum LaneCommand {
     List,
     /// `attach <name>`：连上已就绪的实例。
     Attach(String),
-    /// `detach <name>`：只摘掉本进程的连接（声明与 serve 进程都不动）。
-    Detach(String),
+    /// `detach [<name>]`：只摘掉本进程的连接（声明与 serve 进程都不动）。
+    ///
+    /// 名字缺省 = **当前 lane**：执行时由 `LaneApp` 的 `label` 兜底（解析层不知道
+    /// 当前是哪条）。想断开的通常就是眼前这条，而它的名字还得先 `/lane` 查一遍才写得对；
+    /// 写了名字仍按名字走 —— 「和当前同名」不是改语义的理由。
+    Detach(Option<String>),
     /// `cancel <name>`：取消这条 lane 正在跑的回合（不必先切过去）。
     ///
     /// 后台 lane 的审批浮层画不到屏幕上，没有这条命令就只能干等 `APPROVAL_WAIT`
@@ -61,7 +65,7 @@ pub(crate) fn parse(arg: Option<&str>) -> Result<LaneCommand, String> {
         // `list` 后面跟东西就是手误：静默忽略会让人以为参数生效了。
         "list" | "ls" | "show" if tail.is_empty() => Ok(LaneCommand::List),
         "attach" | "use" => one_name(tail, "attach").map(LaneCommand::Attach),
-        "detach" => one_name(tail, "detach").map(LaneCommand::Detach),
+        "detach" => detach_tail(tail),
         "cancel" | "kill" | "interrupt" => one_name(tail, "cancel").map(LaneCommand::Cancel),
         // `disable` / `enable` 是 Server 侧的 op 名，认它们只是省事，语义与 close / open 一致。
         "close" | "disable" => one_name(tail, "close").map(LaneCommand::Close),
@@ -73,8 +77,18 @@ pub(crate) fn parse(arg: Option<&str>) -> Result<LaneCommand, String> {
 
 /// 用法提示：每条子命令各给一个可照抄的例子。
 fn usage() -> String {
-    "用法：/lane [list] · /lane attach <name> · /lane detach <name> · /lane cancel <name> · /lane new <name> [workspace] · /lane close <name> · /lane open <name>"
+    "用法：/lane [list] · /lane attach <name> · /lane detach [<name>]（缺省摘当前这条） · /lane cancel <name> · /lane new <name> [workspace] · /lane close <name> · /lane open <name>"
         .to_string()
+}
+
+/// `detach` 的名字可选：缺省摘**当前 lane**（解析层不知道当前是哪条，交给 `LaneApp` 的
+/// `label` 兜底）。这是它与 `attach` 唯一的语法分歧 —— `attach` 无参必然是手误（连哪条
+/// 都得说清），而 `detach` 无参有天然默认值：你正看着的那条。
+fn detach_tail(tail: &str) -> Result<LaneCommand, String> {
+    if tail.is_empty() {
+        return Ok(LaneCommand::Detach(None));
+    }
+    one_name(tail, "detach").map(|n| LaneCommand::Detach(Some(n)))
 }
 
 /// `attach` / `detach` 之后只能是**一个**实例名：含空白一律报错，不去猜哪个是名字。
@@ -154,12 +168,17 @@ impl super::LaneApp<'_> {
         }
     }
 
-    /// `/lane detach <name>`：请外壳摘掉一条连接（`LaneApp` 没有 `lanes` 的 `&mut`）。
+    /// `/lane detach [<name>]`：请外壳摘掉一条连接（`LaneApp` 没有 `lanes` 的 `&mut`）。
+    ///
+    /// 名字缺省用**本 lane 的 `label`**：`self` 就是发起命令的那条 lane，而外壳查表用的
+    /// 正是 `label`（见 `TuiApp::detach_lane`）。写 `self` 的 `label` 而不是「当前 lane 的
+    /// label」——二者在生产里恒等（命令只在自己 lane 的输入行里敲），而从这里看不到外壳。
     ///
     /// 走 [`ShellEvent`]（只到外壳，不进任何 lane）：被摘的可能正是发起命令的这条，
     /// 按 `LaneId` 分发会落空 —— 与 `LaneReady` 同一个理由。不查 ctl：这一步不动声明、
     /// 也不停进程。
-    fn lane_detach(&mut self, name: String) {
+    fn lane_detach(&mut self, name: Option<String>) {
+        let name = name.unwrap_or_else(|| self.label.clone());
         if self
             .tx
             .send(Inbound::Shell(ShellEvent::Detach { name }))
@@ -280,15 +299,19 @@ mod tests {
         );
     }
 
-    /// `detach` 与 `attach` 的名字规则一致；报错要照抄用户刚打的那条命令。
+    /// `detach` 的名字可省略：缺省摘**当前 lane**（执行侧用本 lane 的 `label` 兜底）。
+    ///
+    /// 显式名字仍按名字走；两个词照旧报错 —— 「空参合法」不等于可以糊弄多参。
     #[test]
-    fn detach_takes_exactly_one_name() {
+    fn detach_defaults_to_the_current_lane() {
+        assert!(matches!(
+            parse(Some("detach")),
+            Ok(LaneCommand::Detach(None))
+        ));
         assert!(matches!(
             parse(Some("detach proj-a")),
-            Ok(LaneCommand::Detach(n)) if n == "proj-a"
+            Ok(LaneCommand::Detach(Some(n))) if n == "proj-a"
         ));
-        let err = parse(Some("detach")).unwrap_err();
-        assert!(err.contains("/lane detach"), "要指回刚打的那条：{err}");
         assert!(parse(Some("detach a b")).is_err(), "两个词不猜哪个是名字");
     }
 
@@ -314,6 +337,33 @@ mod tests {
         let err = parse(Some("close")).unwrap_err();
         assert!(err.contains("/lane close"), "要指回刚打的那条：{err}");
         assert!(parse(Some("close a b")).is_err(), "两个词不猜哪个是名字");
+    }
+
+    /// 无参 `/lane detach` 在外壳侧摘的就是**这条 lane**：`LaneApp` 用自身 `label` 兜底。
+    ///
+    /// 解析层只能给出 `None`（它不知道当前是哪条），所以这条接线只能在 `LaneApp` 上验。
+    #[test]
+    fn detach_without_name_targets_this_lane() {
+        use std::sync::mpsc;
+
+        use crate::tui_mode::inbound::{Inbound, ShellEvent};
+        use crate::tui_mode::test_support::{lane_with_tx, test_client, test_prefs};
+        use crate::tui_mode::worker::LaneId;
+
+        let client = test_client();
+        let mut prefs = test_prefs();
+        let (tx, rx) = mpsc::channel();
+        let (job_tx, _job_rx) = mpsc::channel();
+        let mut lane = lane_with_tx(LaneId(7), &client, &mut prefs, tx, job_tx);
+
+        lane.lane_command(LaneCommand::Detach(None));
+
+        match rx.recv().expect("应发出 Detach") {
+            Inbound::Shell(ShellEvent::Detach { name }) => {
+                assert_eq!(name, "lane-7", "缺省摘当前这条")
+            }
+            _ => panic!("应发 ShellEvent::Detach"),
+        }
     }
 
     #[test]
