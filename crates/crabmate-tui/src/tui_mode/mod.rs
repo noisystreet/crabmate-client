@@ -23,6 +23,7 @@ mod help;
 mod history;
 mod hotkeys;
 mod inbound;
+mod input_keys;
 mod lane_cmd;
 mod lane_list;
 mod layout;
@@ -78,7 +79,7 @@ use crate::serve::{
 
 use self::approve::decision_summary;
 use self::controls::{Control, clear_word, parse_control, set_mode_field, set_override_field};
-use self::hotkeys::{is_alt_enter, is_ctrl, is_ctrl_c, is_ctrl_e, is_ctrl_o, is_ctrl_w};
+use self::hotkeys::is_ctrl_c;
 use self::inbound::Inbound;
 use self::pending_lane::PendingLanes;
 use self::render::StatusInfo;
@@ -614,54 +615,6 @@ impl LaneApp<'_> {
                 "回合仍在跑：再按一次 Ctrl+C 可取消当前回合",
             );
         }
-    }
-
-    fn on_input_key(&mut self, key: KeyEvent) {
-        match key.code {
-            KeyCode::Enter if is_alt_enter(&key) => self.st.insert_newline(),
-            KeyCode::Enter => self.on_submit(),
-            KeyCode::Char('o') if is_ctrl_o(&key) => self.on_submit(),
-            // Ctrl+W：宽屏时聚焦右栏工作区目录树（窄屏忽略，侧栏本就隐藏）。
-            KeyCode::Char('w') if is_ctrl_w(&key) && self.st.sidebar_visible => {
-                self.focus_workspace();
-            }
-            KeyCode::Char('e') if is_ctrl_e(&key) => self.st.toggle_thinking_with_notice(),
-            KeyCode::Char('c') | KeyCode::Char('d') | KeyCode::Char('z')
-                if key.modifiers.contains(KeyModifiers::CONTROL) => {}
-            // Esc：清掉排队消息（审批浮层 / `/` 菜单 / 设置面板的 Esc 在前面的层就消费了）。
-            KeyCode::Esc => {
-                self.clear_queued_on_esc();
-            }
-            KeyCode::Tab => self.focus_sidebar_on_current(),
-            KeyCode::Char(ch) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
-                self.st.insert_char(ch);
-            }
-            KeyCode::Backspace => self.st.backspace(),
-            KeyCode::Left => self.st.cursor_left(),
-            KeyCode::Right => self.st.cursor_right(),
-            KeyCode::Home if is_ctrl(&key, KeyCode::Home) => self.st.scroll_top(),
-            KeyCode::End if is_ctrl(&key, KeyCode::End) => self.st.scroll_bottom(),
-            KeyCode::Home => self.st.cursor_home(),
-            KeyCode::End => self.st.cursor_end(),
-            // 到顶还继续 PgUp，就是「我要看更早的」：静默续翻一页（拒绝理由不落行）。
-            KeyCode::PageUp => {
-                let was_at_top = self.st.body_at_top;
-                self.st.scroll_page(true);
-                if was_at_top {
-                    history::load_older_on_top(self);
-                }
-            }
-            KeyCode::PageDown => self.st.scroll_page(false),
-            // 多行编辑时 ↑/↓ 走行内光标；单行仍保留"滚动 transcript"的旧行为。
-            KeyCode::Up if self.st.is_multiline() => self.st.move_cursor_vert(true),
-            KeyCode::Down if self.st.is_multiline() => self.st.move_cursor_vert(false),
-            KeyCode::Up => self.st.scroll_lines(true, 3),
-            KeyCode::Down => self.st.scroll_lines(false, 3),
-            _ => {}
-        }
-        // 草稿变了：收敛 `/` 菜单的选中项与「Esc 关闭」状态，并确保 skill 候选已拉过。
-        self.st.slash_after_input();
-        self.maybe_fetch_skills();
     }
 
     fn on_turn_done(

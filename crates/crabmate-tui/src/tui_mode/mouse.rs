@@ -13,7 +13,7 @@ use ratatui::layout::Rect;
 
 use super::LaneApp;
 use super::layout::{contains, panes};
-use super::state::{Focus, LineKind};
+use super::state::{Focus, LineKind, LogLine};
 use super::workspace_tree::WsActivate;
 use super::ws_sidebar::{pane_list_area, sessions_content, sidebar_window, workspace_content};
 use super::{status, status_stack};
@@ -58,7 +58,12 @@ impl LaneApp<'_> {
             // 状态行 `perm` 段与权限菜单已在入口处处理（`on_status_click`），这里只剩两栏。
             // 点右栏以外：想打字或看聊天，把焦点从侧栏收回输入框
             // （否则后续按键仍落在侧栏，用户会觉得「点了没反应」）。
+            // 正文区：落在过程摘要行上 = 切换它的开合（见 `click_body`）。没命中就往下
+            // 走兜底，把焦点收回输入框 —— 点聊天区的人多半是想接着打字。
             MouseEventKind::Down(MouseButton::Left) => {
+                if self.click_body(column, row) {
+                    return;
+                }
                 if matches!(self.st.focus, Focus::Sidebar | Focus::Workspace) {
                     self.st.focus = Focus::Input;
                     // 焦点离开会话栏：作废待确认删除，免得回来按 y 误删。
@@ -233,6 +238,60 @@ impl LaneApp<'_> {
         self.st.selected = idx;
         self.use_selected();
     }
+
+    /// 左键点正文区：落在过程摘要行上就切换它的开合，并把折叠光标落上去（之后可直接用
+    /// `↑/↓` 换一条、`Enter` 再切）。返回 `true` = 已消费。
+    ///
+    /// 点在别的正文行（答案 / 用户消息 / 分隔线）上**不**消费：那一下的本意通常是
+    /// 「回到输入框」，吞掉它会让焦点停在侧栏不动，正是「点了没反应」的来源。
+    fn click_body(&mut self, column: u16, row: u16) -> bool {
+        let Some(area) = self.st.body_area else {
+            return false;
+        };
+        match body_hit(area, &self.st.body_rows_log, column, row) {
+            BodyHit::Outside | BodyHit::Gap => {
+                // 点在分隔行 / 空白：导航作废（光标已不在可见内容上），焦点交回兜底分支。
+                self.st.fold_cursor = None;
+                false
+            }
+            BodyHit::Log(idx)
+                if self.st.lines.get(idx).map(LogLine::kind) == Some(LineKind::Process) =>
+            {
+                self.st.fold_cursor = Some(idx);
+                self.st.toggle_process_run(idx);
+                true
+            }
+            BodyHit::Log(_) => {
+                self.st.fold_cursor = None;
+                false
+            }
+        }
+    }
+}
+
+/// 正文区的点击落点。
+enum BodyHit {
+    /// 不在正文区内（composer、两侧栏、状态区）。
+    Outside,
+    /// 在正文区内，但这一行不对应任何逻辑行（块间分隔线 / 窗口末尾的空白）。
+    Gap,
+    /// 落在第 n 条逻辑行上。
+    Log(usize),
+}
+
+/// 屏幕坐标 → 逻辑行。
+///
+/// 窗口内容（`body_area` + 逐物理行的 `log_index`）由 `render_body` 每帧回写，这里只做
+/// 一次减法：在 `mouse.rs` 里重算一遍折行 / 分隔线 / 窗口偏移，是「点到的行与反色的行
+/// 错开」的唯一来源（左栏的 `hit_item` 也正是因为共用渲染口径才不出错）。
+fn body_hit(area: Rect, rows: &[Option<usize>], column: u16, row: u16) -> BodyHit {
+    if !contains(area, column, row) {
+        return BodyHit::Outside;
+    }
+    match rows.get((row - area.y) as usize).copied().flatten() {
+        Some(idx) => BodyHit::Log(idx),
+        None => BodyHit::Gap,
+    }
 }
 
 /// 鼠标坐标 → 条目下标：内容区（[`pane_list_area`]）与裁剪窗口（[`sidebar_window`]）都取
@@ -263,7 +322,7 @@ mod tests {
 
     use super::super::state::Focus;
     use super::super::test_support::{test_app, test_client, test_prefs};
-    use super::{LaneApp, item_index_at, panes};
+    use super::{BodyHit, LaneApp, body_hit, item_index_at, panes};
     use crate::serve::SessionListRow;
     use ratatui::layout::Rect;
 
@@ -326,6 +385,36 @@ mod tests {
     #[test]
     fn rows_past_window_end_are_none() {
         assert_eq!(item_index_at(4, 3, 6), None, "列表末尾空白不选中");
+    }
+
+    /// 正文区点击：物理行 → 逻辑行只做一次减法（窗口起点与矩形都来自渲染层的回写）。
+    ///
+    /// 断言里带上「同一条逻辑行的第二个物理行」与「分隔行」：折行与块间分隔线正是
+    /// 在 `mouse.rs` 里重算排版时最容易错开一格的两处。
+    #[test]
+    fn body_hit_maps_window_rows_to_log_indices() {
+        // 区域高 5 行、窗口内容只有 4 行：最后一行是「窗口末尾的空白」。
+        let area = Rect::new(1, 5, 20, 5);
+        let rows = vec![None, Some(7), Some(7), Some(9)];
+
+        assert!(
+            matches!(body_hit(area, &rows, 1, 5), BodyHit::Gap),
+            "分隔行不对应任何逻辑行"
+        );
+        assert!(matches!(body_hit(area, &rows, 1, 6), BodyHit::Log(7)));
+        assert!(
+            matches!(body_hit(area, &rows, 1, 7), BodyHit::Log(7)),
+            "同一条的第二个物理行仍是 7"
+        );
+        assert!(matches!(body_hit(area, &rows, 1, 8), BodyHit::Log(9)));
+        assert!(
+            matches!(body_hit(area, &rows, 1, 9), BodyHit::Gap),
+            "窗口末尾没有内容"
+        );
+        assert!(
+            matches!(body_hit(area, &rows, 0, 6), BodyHit::Outside),
+            "正文区左缘外"
+        );
     }
 
     #[test]

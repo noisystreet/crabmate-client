@@ -45,6 +45,10 @@ impl UiState {
         self.search_cursor = None;
         self.search_total = 0;
         self.search_hits.clear();
+        // 折叠光标与鼠标命中表都指着旧排版：切会话后行全换了，留着只会指错行。
+        self.fold_cursor = None;
+        self.body_area = None;
+        self.body_rows_log.clear();
     }
 
     /// 把一页更早的历史前插到 transcript 头部。
@@ -77,8 +81,9 @@ impl UiState {
         for idx in self.tool_pending.values_mut() {
             *idx += n;
         }
-        // ② 搜索锚点是逻辑行号，先跟着平移。
+        // ② 搜索锚点与折叠光标都是逻辑行号，先跟着平移。
         self.search_cursor = self.search_cursor.map(|cursor| cursor + n);
+        self.fold_cursor = self.fold_cursor.map(|cursor| cursor + n);
         // ③ 命中集合**不靠平移**：只平移会漏掉刚前插进来的行（更早页里的命中），于是
         //    `/find` 的计数偏小、跳转也跳不到它们。翻页是低频操作，整表重扫（O(行数)）
         //    比维护增量便宜得多，也让「跨页命中」真的可搜。

@@ -753,10 +753,12 @@ fn render_body(
     {
         st.view_offset = rows_total.saturating_sub(pos + viewport);
     }
-    // 搜索命中行优先（`/find` 跳转要把它停在视口上 1/3 处）；窗口计算与 clamp 都在
+    // 搜索命中行优先（`/find` 跳转要把它停在视口上 1/3 处）；折叠导航开着时改用它 ——
+    // 刚按过 ↑/↓ 的人要的正是「把这一条带到眼前」。窗口计算与 clamp 都在
     // `body_cache::scroll_window` 里，那里有单测。
     let anchor_pos = st
         .search_cursor
+        .or(st.fold_cursor)
         .and_then(|target| rows.iter().position(|r| r.log_index == Some(target)));
     let win = super::body_cache::scroll_window(rows_total, viewport, st.view_offset, anchor_pos);
     // 在顶由渲染层回写：只有这里知道 `max_back`；前插保持贴顶、PgUp 续翻都读它。
@@ -766,16 +768,30 @@ fn render_body(
     // 折叠思考行的 spinner 在此替换标记：body memo 不含帧号，故不会触发重建。
     // 只命中最后一条逻辑行（`prepared` 里可能有多条历史折叠行）。
     let spin_target = spin.map(|_| st.lines.len().saturating_sub(1));
+    let fold_cursor = st.fold_cursor;
+    let sel_style = st.palette.selection(st.palette.fg);
     let shown = rows[win.start..win.end]
         .iter()
         .map(|r| {
-            let line = r.line.clone();
-            match (spin, spin_target) {
-                (Some(f), Some(idx)) if r.log_index == Some(idx) => with_progress_mark(line, f),
-                _ => line,
+            let mut line = r.line.clone();
+            if let (Some(f), Some(idx)) = (spin, spin_target)
+                && r.log_index == Some(idx)
+            {
+                line = with_progress_mark(line, f);
             }
+            if fold_cursor.is_some() && r.log_index == fold_cursor {
+                line = md::with_row_style(line, sel_style);
+            }
+            line
         })
         .collect::<Vec<_>>();
+    // 鼠标要的是「物理行 → 逻辑行」，而这份对应只在这里存在：连窗口一起回写，与
+    // `body_top_log` 同一条规矩 —— 在 `mouse.rs` 里重算一遍排版，点下去一定错行。
+    st.body_area = Some(text_area);
+    st.body_rows_log = rows[win.start..win.end]
+        .iter()
+        .map(|r| r.log_index)
+        .collect();
     frame.render_widget(Paragraph::new(shown), text_area);
 }
 
