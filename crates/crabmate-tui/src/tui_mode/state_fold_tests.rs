@@ -621,14 +621,76 @@ fn folding_after_a_prepend_keeps_the_cursor_on_its_own_run() {
     assert!(st.lines[moved].text().contains("2 个工具"), "指向自己那段");
 }
 
-/// 用户主动取消的回合说「已取消」，不说「出错」—— `failed` 里含着 `interrupted`。
+/// 纯思考段自己看不出成败，结局词听整轮的；且取消优先于「出错」。
+///
+/// `failed` 把 `interrupted.is_some()` 也算进去，而 Ctrl+C 的常见结局正是「cancel 未送达 /
+/// 传输中断」—— 先判 `failed` 会把用户主动取消的回合写成「出错」（见
+/// `resume::record_turn_outcome` 对这两个来源的区分）。
 #[test]
-fn cancel_wins_over_error_in_the_tail() {
-    let mut st = state_with(&[(LineKind::Tool, "✓ a"), (LineKind::Tool, "✓ b")]);
+fn cancel_wins_over_error_for_a_thinking_only_run() {
+    let mut st = state_with(&[
+        (LineKind::Thinking, "…想想…"),
+        (LineKind::Thinking, "…再想想…"),
+    ]);
 
     st.fold_after_turn(true, true);
 
-    assert_eq!(visible(&st)[0].1, "2 个工具 · 已取消");
+    assert_eq!(visible(&st)[0].1, "2 段思考 · 已取消");
+}
+
+/// 取消只标它真正打断的那一段。
+///
+/// 一轮里出现多段很常见（模型的中途答案会把过程行断开），而 Ctrl+C 只打断最后一段。
+/// 以前把整轮的 `cancelled` 贴到每一段上，于是「工具全 ✓、答案也给了」的段也写着
+/// 「已取消」—— 展开一看全是绿的，摘要却在说取消。
+#[test]
+fn cancel_only_marks_the_run_it_actually_interrupted() {
+    let mut st = state_with(&[]);
+    // 第一段：两个工具都拿到了结果。
+    st.tool_start("c1", "read", Some("a.rs"));
+    st.tool_end("c1", "read", Some(true), None);
+    st.tool_start("c2", "read", Some("b.rs"));
+    st.tool_end("c2", "read", Some(true), None);
+    // 中途答案把过程行断开 → 两段。
+    st.push_line(LineKind::Assistant, "先看这两个文件");
+    // 第二段：一个跑完、一个还在跑的时候被取消。
+    st.tool_start("c3", "write", Some("c.rs"));
+    st.tool_end("c3", "write", Some(true), None);
+    st.tool_start("c4", "write", Some("d.rs"));
+
+    st.fold_after_turn(true, false);
+
+    let shown = visible(&st);
+    assert_eq!(shown[0].1, "2 个工具 · 完成", "前一段跑完了：{shown:?}");
+    assert_eq!(shown[2].1, "2 个工具 · 已取消", "后一段被打断：{shown:?}");
+}
+
+/// 段里有工具判了失败（`✗`）：说「有失败」，不跟着整轮说「完成」。
+#[test]
+fn a_run_with_a_failed_tool_says_so() {
+    let mut st = state_with(&[]);
+    st.tool_start("c1", "read", Some("a.rs"));
+    st.tool_end("c1", "read", Some(false), None);
+    st.tool_start("c2", "read", Some("b.rs"));
+    st.tool_end("c2", "read", Some(true), None);
+
+    st.fold_after_turn(false, true);
+
+    assert_eq!(visible(&st)[0].1, "2 个工具 · 有失败");
+}
+
+/// 整轮后来出错（比如最后一次模型调用挂了），但这一段工具全成功 —— 这一段仍是「完成」。
+#[test]
+fn a_finished_run_stays_done_even_if_the_turn_failed_later() {
+    let mut st = state_with(&[]);
+    st.tool_start("c1", "read", Some("a.rs"));
+    st.tool_end("c1", "read", Some(true), None);
+    st.tool_start("c2", "read", Some("b.rs"));
+    st.tool_end("c2", "read", Some(true), None);
+
+    st.fold_after_turn(false, true);
+
+    assert_eq!(visible(&st)[0].1, "2 个工具 · 完成");
 }
 
 /// `/fold` 展开的原文，下一轮结束时不被重新折回去；新的一轮单独成段。
