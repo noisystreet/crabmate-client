@@ -32,7 +32,21 @@ const LANE_READY_POLL: Duration = Duration::from_millis(300);
 ///
 /// 到点**不是**「实例起不来」的结论（它可能仍在起），所以文案分开说 ——
 /// 把还在启动的实例报成失败，会让人去重试一件正在发生的事。
-const LANE_READY_TIMEOUT: Duration = Duration::from_secs(20);
+pub(super) const LANE_READY_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// `/lane new` 的结局。
+///
+/// 三态而不是 `Result<String, String>`：超时**不是**失败结论（实例可能仍在起），两者的
+/// 文案与后续动作都不同 —— 折进一个 `Err` 就只能靠比较字符串把两者分开。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum NewOutcome {
+    /// 就绪，值是 serve 根 URL。
+    Ready(String),
+    /// ctl 报 `failed`（或 `add` 本身被拒）：原因已经面向用户。
+    Failed(String),
+    /// 20 s 内没就绪。
+    TimedOut,
+}
 
 /// 外壳派给控制面线程的一次调用。
 ///
@@ -182,8 +196,25 @@ fn run(job: CtlJob, socket: &Path, tx: &Sender<Inbound>) {
             workspace,
             profile,
         } => {
-            let result = add_then_wait_ready(socket, &name, &workspace, profile.as_deref());
-            let _ = tx.send(Inbound::Shell(ShellEvent::Ready { from, name, result }));
+            // 写声明与「就绪」之间最长隔着 20 s 的轮询：不先回一条 `Pending`，
+            // 左栏在这段时间里什么都不显示，用户读到的是「命令没生效」。
+            if let Err(why) = add_instance(socket, &name, &workspace, profile.as_deref())
+                .map_err(|e| e.user_message())
+            {
+                let _ = tx.send(Inbound::Shell(ShellEvent::NewSettled {
+                    from,
+                    name,
+                    outcome: NewOutcome::Failed(why),
+                }));
+                return;
+            }
+            let _ = tx.send(Inbound::Shell(ShellEvent::Pending { name: name.clone() }));
+            let outcome = wait_ready(socket, &name);
+            let _ = tx.send(Inbound::Shell(ShellEvent::NewSettled {
+                from,
+                name,
+                outcome,
+            }));
         }
         CtlJob::Toggle {
             from,
@@ -214,30 +245,25 @@ fn ready_base_url(items: &[CtlInstance], name: &str) -> Result<String, String> {
     }
 }
 
-/// `add` 之后轮询到就绪。
+/// 写完声明后轮询到就绪。
 ///
 /// 必须轮询：`add` 的响应只有 `created`，端口与 URL 要等 ctl 收敛完才出现在 `list` 里。
-fn add_then_wait_ready(
-    socket: &Path,
-    name: &str,
-    workspace: &str,
-    profile: Option<&str>,
-) -> Result<String, String> {
-    add_instance(socket, name, workspace, profile).map_err(|e| e.user_message())?;
+/// 三种结局分开返回（见 [`NewOutcome`]）：到点仍没就绪是 `TimedOut`，不是失败。
+fn wait_ready(socket: &Path, name: &str) -> NewOutcome {
     let deadline = Instant::now() + LANE_READY_TIMEOUT;
     loop {
-        let items = list_instances(socket).map_err(|e| e.user_message())?;
+        let items = match list_instances(socket) {
+            Ok(items) => items,
+            Err(e) => return NewOutcome::Failed(e.user_message()),
+        };
         match lane_readiness(&items, name) {
-            LaneReadiness::Ready(url) => return Ok(url),
-            LaneReadiness::Failed(why) => return Err(why),
+            LaneReadiness::Ready(url) => return NewOutcome::Ready(url),
+            LaneReadiness::Failed(why) => return NewOutcome::Failed(why),
             // `Missing` 也继续等：声明刚落盘、ctl 还没读到它。
             LaneReadiness::Pending | LaneReadiness::Missing => {}
         }
         if Instant::now() >= deadline {
-            return Err(format!(
-                "实例 {name} 在 {} s 内未就绪（可能仍在启动）：`/ctl` 复查，就绪后 `/lane attach {name}`",
-                LANE_READY_TIMEOUT.as_secs()
-            ));
+            return NewOutcome::TimedOut;
         }
         thread::sleep(LANE_READY_POLL);
     }
@@ -380,8 +406,8 @@ mod tests {
         assert_eq!(ctl.in_flight.load(Ordering::SeqCst), 0);
     }
 
-    /// `/lane new` 失败（ctl 报 `failed`）时，原因回到**发起命令那条 lane** 的外壳事件，
-    /// 并且 `profile` 按名字进 `add` 的请求行（壳层只转发，不做校验）。
+    /// `/lane new` 失败（ctl 报 `failed`）时，先回一条「启动中」再回结局，并且失败原因
+    /// 回到**发起命令那条 lane** 的外壳事件；`profile` 按名字进 `add` 的请求行。
     #[test]
     fn new_failure_returns_to_the_requesting_lane() {
         let (sock, handle) = fake_ctl(&[
@@ -398,13 +424,29 @@ mod tests {
         })
         .expect("派发");
         drop(ctl);
+        // 第一条必须是 `Pending`：写声明与就绪之间最长 20 s，左栏要先有 `◌`。
+        match rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("应有 Pending")
+        {
+            Inbound::Shell(ShellEvent::Pending { name }) => assert_eq!(name, "proj-c"),
+            _ => panic!("第一条应是 ShellEvent::Pending"),
+        }
         match rx.recv_timeout(Duration::from_secs(5)).expect("应有回包") {
-            Inbound::Shell(ShellEvent::Ready { from, name, result }) => {
+            Inbound::Shell(ShellEvent::NewSettled {
+                from,
+                name,
+                outcome,
+            }) => {
                 assert_eq!(from, LaneId(7), "回执回到发起它的 lane");
                 assert_eq!(name, "proj-c");
-                assert_eq!(result.unwrap_err(), "工作区不在白名单");
+                assert_eq!(
+                    outcome,
+                    NewOutcome::Failed("工作区不在白名单".to_string()),
+                    "失败原因要用 Server 的 last_error 原文"
+                );
             }
-            _ => panic!("应回 ShellEvent::Ready"),
+            _ => panic!("应回 ShellEvent::NewSettled"),
         }
         let seen = handle.join().expect("假服务端线程");
         assert!(
@@ -412,6 +454,36 @@ mod tests {
                 .is_some_and(|r| r.contains(r#""profile":"readonly-audit""#)),
             "profile 要原样进 add 的请求行：{seen:?}"
         );
+        let _ = std::fs::remove_dir_all(sock.parent().unwrap());
+    }
+
+    /// `add` 本身被拒时**没有**「启动中」这一态：声明都没写成功，画 `◌` 是撒谎。
+    #[test]
+    fn rejected_add_reports_failure_without_a_pending_row() {
+        let (sock, handle) =
+            fake_ctl(&[r#"{"ok":false,"code":"bad_workspace","error":"工作区不存在"}"#]);
+        let (tx, rx) = mpsc::channel();
+        let ctl = spawn(sock.clone(), tx);
+        ctl.enqueue(CtlJob::New {
+            from: LaneId(2),
+            name: "proj-c".to_string(),
+            workspace: "/nope".to_string(),
+            profile: None,
+        })
+        .expect("派发");
+        drop(ctl);
+        match rx.recv_timeout(Duration::from_secs(5)).expect("应有回包") {
+            Inbound::Shell(ShellEvent::NewSettled { from, outcome, .. }) => {
+                assert_eq!(from, LaneId(2));
+                assert!(
+                    matches!(&outcome, NewOutcome::Failed(why) if why.contains("工作区不存在")),
+                    "{outcome:?}"
+                );
+            }
+            // 不打印事件本身：`Inbound` 不实现 `Debug`（里面握着通道与状态）。
+            _ => panic!("第一条就该是结局，不能先报启动中"),
+        }
+        handle.join().expect("假服务端线程");
         let _ = std::fs::remove_dir_all(sock.parent().unwrap());
     }
 }

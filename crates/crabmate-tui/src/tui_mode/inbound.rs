@@ -47,6 +47,26 @@ pub(super) enum ShellEvent {
         /// `Ok(serve 根 URL)` / `Err(面向用户的失败原因)`。
         result: Result<String, String>,
     },
+    /// `/lane new` 的声明写成功：ctl 正在起实例。
+    ///
+    /// 单独一条事件而不是等 `Ready` 一起回：写声明与「就绪」之间隔着最长 20 s 的轮询
+    /// （`LANE_READY_TIMEOUT`），期间左栏什么都不显示，用户读到的是「命令没生效」。
+    Pending {
+        /// 实例名（将来那条 lane 的 `label`）。
+        name: String,
+    },
+    /// `/lane new` 的结局。
+    ///
+    /// 与 [`Self::Ready`] 分开：attach 只有「连上 / 没连上」两种，而 new 多一个
+    /// 「20 s 没就绪」—— 那不是失败结论（实例可能还在起），文案与后续动作都不同。
+    NewSettled {
+        /// 发起命令的那条 lane（理由同 [`Self::Ready`] 的 `from`）。
+        from: LaneId,
+        /// 实例名。
+        name: String,
+        /// 就绪 / 失败 / 超时。
+        outcome: super::worker_ctl::NewOutcome,
+    },
     /// 摘掉本进程的一条连接（`/lane detach [<name>]`，缺省 = 当前 lane）：被摘的可能正是
     /// 发起命令的那条 lane。
     Detach {

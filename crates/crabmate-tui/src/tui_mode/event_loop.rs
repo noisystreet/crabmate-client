@@ -203,7 +203,12 @@ impl TuiApp<'_> {
             // 快照之前熄未读点：当前 lane 就在眼前，那个点没有存在意义。
             self.clear_active_unread();
             let lanes = self.lane_entries();
-            self.lane_mut().draw_frame(terminal, !had_event, &lanes)?;
+            // 待就绪行同处 lane 区段但不属于 `lanes`：先拷一份快照，否则 `self.pending`
+            // 与 `lane_mut()` 会同时借 `self`。
+            let pending: Vec<super::pending_lane::PendingLane> =
+                self.pending.iter().cloned().collect();
+            self.lane_mut()
+                .draw_frame(terminal, !had_event, &lanes, &pending)?;
             last_draw = Instant::now();
             if mode == LoopMode::Interval {
                 // 改造前的节奏原样保留：有消息 2ms、空闲 50ms。
@@ -301,6 +306,7 @@ impl LaneApp<'_> {
         terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
         skip_idle: bool,
         lanes: &[super::lane_list::LaneEntry],
+        pending: &[super::pending_lane::PendingLane],
     ) -> Result<()> {
         let dims = read_terminal_size(terminal)?;
         let animating = lanes_animating(lanes);
@@ -328,6 +334,7 @@ impl LaneApp<'_> {
                     self.body.as_slice(),
                     panel.as_ref(),
                     lanes,
+                    pending,
                 )
             })
             .context("tui draw failed")?;

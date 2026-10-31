@@ -44,7 +44,7 @@ fn render_screen(st: &mut UiState) -> Buffer {
     let info = status_info();
     let mut terminal = Terminal::new(TestBackend::new(W, H)).expect("terminal");
     terminal
-        .draw(|f| draw(f, st, &info, &rows, None, &[]))
+        .draw(|f| draw(f, st, &info, &rows, None, &[], &[]))
         .expect("draw");
     terminal.backend().buffer().clone()
 }

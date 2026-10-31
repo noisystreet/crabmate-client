@@ -190,6 +190,7 @@ pub(super) fn test_shell_with_clients<'a>(
             tx: shell_tx,
         },
         session_refresh: Default::default(),
+        pending: Default::default(),
     };
     (app, job_rxs)
 }
