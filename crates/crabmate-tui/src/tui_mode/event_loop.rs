@@ -188,6 +188,8 @@ impl TuiApp<'_> {
             }
             // 兜底醒来的空帧（无事件 / 无动画 / 尺寸未变）整帧跳过。
             // 先算 lane 快照再取 `lane_mut()`：两个借用会在同一条语句里打架。
+            // 快照之前熄未读点：当前 lane 就在眼前，那个点没有存在意义。
+            self.clear_active_unread();
             let lanes = self.lane_entries();
             self.lane_mut().draw_frame(terminal, !had_event, &lanes)?;
             last_draw = Instant::now();

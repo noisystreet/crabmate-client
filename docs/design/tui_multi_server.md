@@ -185,6 +185,7 @@ api_base = "http://127.0.0.1:8082"
 - 版面口径只有一处：lane 区高度 `lane_pane_height`、可用条数 `lane_shown_len`、行 → 下标 `lane_index_at` 都在 `layout`，`render` 与 `TuiApp::lane_at_click` 共用；各算一遍的症状是「点第 2 行切到别的 lane」。
 - 切换是 `Alt+←/→` 或点某一行，只改 `active`，不打断在途回合；单连接时 `switch_lane` 直接返回（no-op），点击落在唯一那行等于不换。
 - **已落地（后续补齐）**：lane 行状态点（`·` 空闲 / `●` 运行中 / `▲` 待审批 / `×` 已请求退出，口径在 `lane_list::LaneStatus`）、后台审批提示文案，以及 `F4` 跳到下一条待审批的 lane（环形，从当前的下一条找起；无人等待时不动视图，只写一行说明）。
+- **已落地（lane 行读数）**：每条 lane 的行尾带三样读数——上下文占比（`62%`，与状态行 `ctx` 段同一条轴线，见 `UiState::context_pct_text`）、在途回合耗时（`12s` / `2m05s`，从**发出**算起、回合结束清零）、以及后台 lane 有新输出时的未读点 `•`（帧循环每帧熄一次，不写在各切换出口上）。运行中的 lane 用 `SPINNER_FRAMES` 的当前帧顶替 `●`，所以「它在动」不必切过去才看得见。宽度不够时**从左边丢读数**（先 `ctx`、再耗时），未读点留到最后——宁可少一个数字，也不能丢掉「这条 lane 有话要说」。`lane_entries` 随之从 `shell.rs` 迁到 `lane_list.rs`（后者只负责这一行；前者贴着 920 行门禁）。
 - **未落地**：`lanes N/M` 与全局待审批计数（[#354](https://github.com/noisystreet/crabmate-client/issues/354)）；`Alt+1..8` 直达与 `Ctrl+N` 不在该 Issue 范围（`Alt+←/→` 与点击已覆盖切换需求）。
 
 ### 4.7 工作区：一实例一工作区，所以 lane 行要带工作区

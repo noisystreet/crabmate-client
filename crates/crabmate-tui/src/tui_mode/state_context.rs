@@ -7,8 +7,8 @@
 use crabmate_client_api::chat_body::llm_context_tokens_for_chat_body;
 use crabmate_client_api::context_axis::ContextUsedWatermark;
 use crabmate_client_api::context_axis::{
-    context_axis_apply_watermark, context_axis_from_snapshot, context_axis_whole,
-    context_placeholder_text, context_value_text,
+    ContextAxis, context_axis_apply_watermark, context_axis_from_snapshot, context_axis_used_pct,
+    context_axis_whole, context_placeholder_text, context_value_text,
 };
 use crabmate_client_api::prompt_tokens::TiktokenPromptTokensSnapshot;
 
@@ -80,27 +80,69 @@ impl UiState {
         cap_from_settings: Option<&str>,
         new_session_baseline: Option<u32>,
     ) -> String {
+        match self.context_axis(cap_from_settings, new_session_baseline) {
+            Some(axis) => context_value_text(axis),
+            // 没有实测也没有基线：占位分母仍按「有快照就取快照上限」的规则给 ——
+            // 段整个消失会让人误判「功能没生效」。
+            None => context_placeholder_text(self.placeholder_cap(cap_from_settings)),
+        }
+    }
+
+    /// 状态行 `ctx` 段的**短形式**：`62%` / `~1%`。
+    ///
+    /// 左栏 lane 行只有十几列宽，塞不下 `12.0k / 1000k (62%)`；口径与 [`Self::context_text`]
+    /// 完全一致（同一条轴线：settings 上限优先、会话内水位、估算带 `~`），只是把分子分母
+    /// 省成占比。**没有任何用量信息时返回 `None`** —— 状态行有位置放 `—` 提醒「还没实测」，
+    /// lane 行没有，画一个空占位只是噪声。
+    pub fn context_pct_text(
+        &self,
+        cap_from_settings: Option<&str>,
+        new_session_baseline: Option<u32>,
+    ) -> Option<String> {
+        let axis = self.context_axis(cap_from_settings, new_session_baseline)?;
+        if axis.raw_cap == 0 {
+            return None;
+        }
+        let prefix = if axis.baseline_estimate { "~" } else { "" };
+        Some(format!(
+            "{prefix}{:.0}%",
+            context_axis_used_pct(axis).min(999.0)
+        ))
+    }
+
+    /// 把「本机设置上限 / 快照 / 会话水位」拼成一条轴线；`None` = 既没有实测也没有基线。
+    ///
+    /// 状态行与 lane 行的两种文案都必须走这里：各拼一遍的后果是同一个数字在两处显示成
+    /// 不同值（`ctx` 段带水位、lane 行不带），比不显示更难排查。
+    fn context_axis(
+        &self,
+        cap_from_settings: Option<&str>,
+        new_session_baseline: Option<u32>,
+    ) -> Option<ContextAxis> {
         let Some(snap) = self.context.snapshot.as_ref() else {
-            if let Some(used) = new_session_baseline.filter(|_| self.conversation_id.is_none()) {
-                return context_value_text(context_axis_whole(
-                    settings_cap(cap_from_settings),
-                    used,
-                    true,
-                ));
-            }
-            return context_placeholder_text(settings_cap(cap_from_settings));
+            let used = new_session_baseline.filter(|_| self.conversation_id.is_none())?;
+            return Some(context_axis_whole(
+                settings_cap(cap_from_settings),
+                used,
+                true,
+            ));
         };
-        let Some(used) = used_tokens(snap) else {
-            return context_placeholder_text(cap_tokens(cap_from_settings, snap));
-        };
+        let used = used_tokens(snap)?;
         let cap = cap_tokens(cap_from_settings, snap);
         let axis = context_axis_from_snapshot(snap, cap, used);
-        let axis = context_axis_apply_watermark(
+        Some(context_axis_apply_watermark(
             axis,
             self.conversation_id.as_deref(),
             &self.context.watermark,
-        );
-        context_value_text(axis)
+        ))
+    }
+
+    /// 占位文本的分母：有快照时用快照上限，否则用本机设置。
+    fn placeholder_cap(&self, cap_from_settings: Option<&str>) -> u32 {
+        match self.context.snapshot.as_ref() {
+            Some(snap) => cap_tokens(cap_from_settings, snap),
+            None => settings_cap(cap_from_settings),
+        }
     }
 }
 
@@ -171,6 +213,53 @@ mod tests {
     fn used_prefers_server_count_and_falls_back_to_prompt_tokens() {
         assert_eq!(used_tokens(&snap(Some(500), 400, None)), Some(500));
         assert_eq!(used_tokens(&snap(None, 400, None)), Some(400));
+    }
+
+    /// lane 行的短形式与状态行的 `ctx` 段必须同一条轴线，只是省成占比。
+    ///
+    /// 各算一遍的后果是同一个数字在两处显示成不同值 —— 比不显示更难排查。
+    #[test]
+    fn pct_text_is_the_short_form_of_the_same_axis() {
+        let mut st = UiState::new();
+        st.conversation_id = Some("c1".to_string());
+        st.set_prompt_tokens(snap(Some(620_000), 620_000, Some(993_000)));
+        assert_eq!(
+            st.context_pct_text(Some("1000000"), None).as_deref(),
+            Some("62%")
+        );
+        assert!(
+            st.context_text(Some("1000000"), None).contains("62.0%"),
+            "长形式该是同一个占比：{}",
+            st.context_text(Some("1000000"), None)
+        );
+    }
+
+    /// 没有任何用量信息时短形式返回 `None`：lane 行没有位置放 `—` 这种占位。
+    #[test]
+    fn pct_text_is_absent_without_measurement_or_baseline() {
+        assert_eq!(UiState::new().context_pct_text(Some("1000000"), None), None);
+        // 只有基线（新会话）：带 `~`，与 `ctx` 段同口径。
+        assert_eq!(
+            UiState::new()
+                .context_pct_text(Some("1000000"), Some(12_000))
+                .as_deref(),
+            Some("~1%")
+        );
+    }
+
+    /// 实测优先于基线，且水位照常生效 —— 短形式不能漏掉这两条规则。
+    #[test]
+    fn pct_text_follows_watermark_and_prefers_measurement() {
+        let mut st = UiState::new();
+        st.conversation_id = Some("c1".to_string());
+        st.set_prompt_tokens(snap(Some(120_000), 120_000, Some(993_000)));
+        // 下一轮实测回落，水位仍显示本会话峰值。
+        st.set_prompt_tokens(snap(Some(100_000), 100_000, Some(993_000)));
+        assert_eq!(
+            st.context_pct_text(Some("1000000"), Some(12_000))
+                .as_deref(),
+            Some("12%")
+        );
     }
 
     #[test]

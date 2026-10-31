@@ -110,6 +110,8 @@ pub(super) fn lane_with_tx<'a>(
         // 测试默认不启用控制面：`/ctl` 会走「未启用」分支，除非用例自己设路径。
         ctl_socket: None,
         session_refresh_pending: false,
+        unread: false,
+        turn_started: None,
     }
 }
 
