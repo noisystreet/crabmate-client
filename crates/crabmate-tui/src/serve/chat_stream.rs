@@ -219,6 +219,15 @@ impl StreamCancel {
         let n = *self.tx.borrow();
         let _ = self.tx.send(n.saturating_add(1));
     }
+
+    /// 已请求的次数（1 = 取消当前回合，2 = 强退）。
+    ///
+    /// 只给 crate 内测试断言接线用（`/lane detach` 是否真的动了这条 lane 的取消句柄）：
+    /// 生产侧一律通过 [`Self::cancel`] 施加、通过 `rx` 观察，不需要读这个数。
+    #[cfg(test)]
+    pub(crate) fn requests(&self) -> u8 {
+        *self.rx.borrow()
+    }
 }
 
 /// 运行一轮流式对话：正文写到 `out`，思维链等写到 `err`。

@@ -157,6 +157,8 @@ mod tests {
     use std::sync::mpsc;
     use std::time::Duration;
 
+    use crate::serve::StreamCancel;
+
     use super::super::approve::ApprovalPrompt;
     use super::super::lane_list::LaneStatus;
     use super::super::worker::{LaneId, LaneTx, UiEvent};
@@ -487,6 +489,73 @@ mod tests {
             app.lanes[1].st.running,
             "running 留到 TurnDone 再清（与 Ctrl+C 同口径）"
         );
+    }
+
+    /// `/lane detach` 摘掉一条**正在跑**的 lane：必须先停掉它那一轮（issue #339）。
+    ///
+    /// 只 drop `LaneApp` 不够 —— worker 在 `run_turn_job` 的 `block_on` 里不看 job
+    /// channel，会等整个 SSE 回合跑完才回到 `recv`：serve 侧 job 白跑一轮、事件又全被
+    /// 丢弃，线程与 runtime 也白占着。
+    #[test]
+    fn detaching_a_running_lane_requests_cancel() {
+        let client = test_client();
+        let mut prefs = [test_prefs(), test_prefs()];
+        let mut app = test_shell(&client, &mut prefs);
+        app.lanes[1].st.running = true;
+        let cancel = StreamCancel::new();
+        app.lanes[1].cancel = Some(cancel.clone());
+
+        app.detach_lane("lane-2");
+
+        assert_eq!(
+            cancel.requests(),
+            1,
+            "摘掉前要请求取消（1 = 取消当前回合，2 才会被当成强退）"
+        );
+        assert_eq!(app.lanes.len(), 1, "lane 本身照旧摘掉");
+        let last = app.lanes[0].st.lines.last().expect("应有提示").text();
+        assert!(
+            last.contains("lane-2") && last.contains("已请求取消"),
+            "{last}"
+        );
+        assert!(
+            last.contains("仍会跑完"),
+            "取消是否送达只有 worker 知道，措辞不能承诺 serve 侧一定停了：{last}"
+        );
+    }
+
+    /// 摘一条卡在审批上的 lane：`answer` 必须被 drop，否则 gate 要干等到 600 s。
+    #[test]
+    fn detaching_a_lane_waiting_for_approval_drops_the_answer() {
+        let client = test_client();
+        let mut prefs = [test_prefs(), test_prefs()];
+        let mut app = test_shell(&client, &mut prefs);
+        let (answer, answer_rx) = mpsc::channel();
+        app.lanes[1].st.running = true;
+        app.lanes[1].st.begin_approval(&approval_req("rm"), answer);
+
+        app.detach_lane("lane-2");
+
+        assert!(
+            answer_rx.recv().is_err(),
+            "answer 必须被 drop：gate 靠 Disconnected 立刻收尾，不必等 600s"
+        );
+        let last = app.lanes[0].st.lines.last().expect("应有提示").text();
+        assert!(last.contains("审批浮层已按拒绝撤销"), "{last}");
+    }
+
+    /// 空闲 lane 被摘：不要凭空说「已请求取消」，否则用户会以为白白杀掉了一轮。
+    #[test]
+    fn detaching_an_idle_lane_says_nothing_about_cancel() {
+        let client = test_client();
+        let mut prefs = [test_prefs(), test_prefs()];
+        let mut app = test_shell(&client, &mut prefs);
+
+        app.detach_lane("lane-2");
+
+        let last = app.lanes[0].st.lines.last().expect("应有提示").text();
+        assert!(last.contains("已断开 `lane-2`"), "{last}");
+        assert!(!last.contains("取消"), "空闲 lane 没有回合可取消：{last}");
     }
 
     /// 远程取消之后，排队消息要退回输入框 —— 不能因为「回合结束了」就替用户发出去。

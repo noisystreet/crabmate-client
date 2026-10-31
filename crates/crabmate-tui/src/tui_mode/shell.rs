@@ -530,12 +530,10 @@ impl<'a> super::TuiApp<'a> {
 
     /// `/lane cancel <name>`：取消指定 lane 正在跑的回合（不必先切过去）。
     ///
-    /// 两件事缺一不可，否则会造出新 bug：
-    ///
-    /// - **撤掉浮层**：`drop(answer)` 让 gate 立刻走 `Disconnected → Deny`，不必干等
-    ///   600 s 超时；
-    /// - **置 `cancel_sent`**：`on_turn_done` 据此把排队消息退回输入框，而不是当成
-    ///   正常完成自动发出去（`drafts` 的保守边界：用户要的是「停下来」）。
+    /// 停下这一轮的两步收在 [`abandon_turn`]（与 `/lane detach` 共用）；这里只补一件
+    /// 只有「取消但保留 lane」才需要的事：**置 `cancel_sent`** —— `on_turn_done` 据此
+    /// 把排队消息退回输入框，而不是当成正常完成自动发出去（`drafts` 的保守边界：
+    /// 用户要的是「停下来」）。
     pub(super) fn cancel_lane(&mut self, name: &str) {
         let Some(idx) = self.lanes.iter().position(|l| l.label == name) else {
             let known = self.lane_labels().join(" / ");
@@ -548,16 +546,13 @@ impl<'a> super::TuiApp<'a> {
         };
         let label = self.lanes[idx].label.clone();
         let from = self.lane().label.clone();
+        let stopped = abandon_turn(&mut self.lanes[idx]);
         let target = &mut self.lanes[idx];
-        if !target.st.running {
+        if !stopped.running {
             target
                 .st
                 .push_line(LineKind::System, &format!("`{label}` 当前没有在跑的回合"));
             return;
-        }
-        let had_overlay = target.st.approval.take().is_some();
-        if let Some(cancel) = target.cancel.take() {
-            cancel.cancel();
         }
         // 与 Ctrl+C 同口径：`running` 留到 `TurnDone` 再清，这里只是「已请求取消」。
         target.st.cancel_sent = true;
@@ -565,7 +560,7 @@ impl<'a> super::TuiApp<'a> {
             LineKind::System,
             &format!("已请求取消 `{label}` 的回合（来自 `{from}`）"),
         );
-        if had_overlay {
+        if stopped.overlay {
             target
                 .st
                 .push_line(LineKind::System, "审批浮层已撤销（按拒绝处理）");
@@ -608,6 +603,10 @@ impl<'a> super::TuiApp<'a> {
         // 先清背景图：它为这条 lane 申请过终端图像配额，留着会算到下一个用户头上。
         removed.clear_background();
         let label = removed.label.clone();
+        // 摘之前先停掉它正在跑的回合。只 drop `LaneApp` 不够：worker 在 `run_turn_job`
+        // 的 `block_on` 里根本不看 job channel，要等**整个回合跑完**才回到 `recv` ——
+        // 期间 serve 侧 job 白跑一轮、事件又全被丢弃，线程与 runtime 也白占着（issue #339）。
+        let stopped = abandon_turn(&mut removed);
         // drop 掉 `LaneApp` 即关闭它的 job channel：worker 线程的 `recv` 随即返回 `None`，
         // 线程与它那个 runtime（含在途请求、SSE 连接）自行收尾，不需要另发停止信号。
         drop(removed);
@@ -622,6 +621,21 @@ impl<'a> super::TuiApp<'a> {
             LineKind::System,
             &format!("已断开 `{label}`（声明与进程未动；要再连用 `/lane attach {label}`）"),
         );
+        if stopped.running {
+            // 说「已请求」而不是「已取消」：cancel 有没有送达只有 worker 知道
+            // （`cancel_acknowledged`），而这条 lane 已经摘掉、回执没地方写。
+            let overlay = if stopped.overlay {
+                "，审批浮层已按拒绝撤销"
+            } else {
+                ""
+            };
+            self.lane_mut().st.push_line(
+                LineKind::System,
+                &format!(
+                    "`{label}` 的在跑回合已请求取消{overlay}（serve 侧若未确认，该 job 可能仍会跑完）"
+                ),
+            );
+        }
     }
 
     /// `UiEvent::CtlToggled`：写回执；关掉声明时顺手摘掉本进程那条连接。
@@ -680,6 +694,43 @@ impl<'a> super::TuiApp<'a> {
         );
         super::layout::lane_hit(&p, self.lanes.len(), m.column, m.row)
     }
+}
+
+/// 停掉一条 lane 正在跑的回合：撤审批浮层 + 请求取消；`/lane cancel` 与 `/lane detach` 共用。
+///
+/// 两件事缺一不可，少一步就造出新 bug：
+///
+/// - **撤掉浮层**：`drop(answer)` 让 gate 立刻走 `Disconnected → Deny`，不必干等
+///   `APPROVAL_WAIT`（600 s）超时才收尾 —— 少这一步，线程与 runtime 照样白占一整个
+///   审批窗口；
+/// - **`cancel()`**：计数 1 唤醒 `wait_for_cancel`，worker 先
+///   `POST /chat/stream/{job}/cancel` 让 serve 停掉 job，再收尾 SSE。
+///
+/// 返回这一轮原本是否在跑、以及有没有撤掉浮层，由调用方决定措辞（`/lane cancel` 说
+/// 「已请求取消」，`/lane detach` 说「断开时顺手取消」）—— 动作同源，话不必一样。
+fn abandon_turn(lane: &mut LaneApp<'_>) -> AbandonedTurn {
+    if !lane.st.running {
+        // 没有在跑的回合：`cancel` 与浮层此时不该在（`on_turn_done` 会清），
+        // 真在也是上一轮收尾的残留，不动它。
+        return AbandonedTurn::default();
+    }
+    let overlay = lane.st.approval.take().is_some();
+    if let Some(cancel) = lane.cancel.take() {
+        cancel.cancel();
+    }
+    AbandonedTurn {
+        running: true,
+        overlay,
+    }
+}
+
+/// [`abandon_turn`] 的结果：只在**措辞**上分叉，两个调用点都不需要更多信息。
+#[derive(Debug, Default, Clone, Copy)]
+struct AbandonedTurn {
+    /// 原本有在跑的回合（`false` = 什么都没做）。
+    running: bool,
+    /// 原本有审批浮层（`true` = `answer` 已被 drop，gate 按拒绝收尾）。
+    overlay: bool,
 }
 
 #[cfg(test)]
