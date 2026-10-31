@@ -40,10 +40,10 @@ pub enum Control {
     /// 只是查询；新增连接走 [`Control::Lane`]（Server 已补上 `disable`/`enable` 与
     /// `add` 的字段面，所以运行期加 lane 不再被阻塞）。
     Ctl,
-    /// `/lane [list|attach <name>|detach <name>|new <name> [workspace]]`：运行期连接管理。
+    /// `/lane [list|attach <name>|detach [<name>]|new <name> [workspace]]`：运行期连接管理。
     ///
     /// `detach` 只摘**本进程**的连接：声明与 serve 进程都不动（与 `attach` 对称），所以
-    /// 它不经 ctl，也不进 worker。
+    /// 它不经 ctl，也不进 worker。名字缺省 = **当前 lane**（不必先 `/lane` 查自己叫什么）。
     ///
     /// `Err` = 参数写错的用法提示：解析在 [`super::lane_cmd::parse`]，但报错文本要
     /// 写进 transcript，所以只在事件循环里打印。
@@ -213,10 +213,14 @@ mod tests {
             parse_control("/LANE new proj-b /data/proj-b"),
             Some(Control::Lane(Ok(lane_cmd::LaneCommand::New { .. })))
         ));
-        // `detach` 只摘本进程的连接，与 `attach` 同一个名字规则。
+        // `detach` 只摘本进程的连接；名字缺省摘当前 lane（`cancel` 仍必须点名）。
         assert!(matches!(
             parse_control("/lane detach proj-a"),
-            Some(Control::Lane(Ok(lane_cmd::LaneCommand::Detach(n)))) if n == "proj-a"
+            Some(Control::Lane(Ok(lane_cmd::LaneCommand::Detach(Some(n))))) if n == "proj-a"
+        ));
+        assert!(matches!(
+            parse_control("/lane detach"),
+            Some(Control::Lane(Ok(lane_cmd::LaneCommand::Detach(None))))
         ));
         // `cancel` 取消一条 lane 的回合（后台审批没有它就只能等 600s 超时）。
         assert!(matches!(

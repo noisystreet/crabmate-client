@@ -139,7 +139,7 @@ fn spawn_lane_worker(id: LaneId, client: ServeClient, tx: Sender<UiEvent>) -> Se
 
 - lane 数上限（建议 `MAX_LANES = 8`，与 §5 目标一致），启动时校验、运行期拒绝新增。
 - 每 lane 一条 SSE 流；**同一 lane 内仍是串行**（一次只跑一轮），这与现有 `st.running` 语义一致。
-- 退出路径（已落地，issue #338）：`/quit` 是**进程级**语义 —— `TuiApp::exit_requested()` 扫**全部** lane，任一条提出就立刻退出，不再等用户切过去（只判当前 lane 会让后台 lane 的请求悬着，切回时突然掀掉整个 TUI）。摘单条连接用 `/lane detach`。左栏用 `LaneStatus::Quitting`（`×`）显示「已请求退出」，因为从 `/quit` 到真正退出之间可能隔着整轮生成。
+- 退出路径（已落地，issue #338）：`/quit` 是**进程级**语义 —— `TuiApp::exit_requested()` 扫**全部** lane，任一条提出就立刻退出，不再等用户切过去（只判当前 lane 会让后台 lane 的请求悬着，切回时突然掀掉整个 TUI）。摘单条连接用 `/lane detach [<name>]`（缺省摘当前这条）。左栏用 `LaneStatus::Quitting`（`×`）显示「已请求退出」，因为从 `/quit` 到真正退出之间可能隔着整轮生成。
 - 退出落盘：`TuiApp::flush_all_before_exit()` **逐 lane 遍历**（`exit_flush`：补绑定 + 写草稿 + `clear_background`），**一份总预算**（`NORMAL_BUDGET` 1s / `FORCE_BUDGET` 400ms，按「任一 lane 仍在跑」选择）但**按剩余 lane 均分**：某台 serve 不可达时最多吃掉 1/N，不会让后面的 lane 颗粒无收、把草稿又丢掉一次。只落当前 lane 会让其它 lane 未发送的输入丢失（`Drafts` 是内存态）。
 
 ### 4.4 审批队列
@@ -207,7 +207,7 @@ api_base = "http://127.0.0.1:8082"
 |------|--------|--------|
 | `/lane`（空参）/ `/lane list` | 列实例（与 `/ctl` 同一实现） | 无（只读 socket） |
 | `/lane attach <name>` | 在声明里找**已就绪**的实例，取 `base_url` 后直接连 | 无 |
-| `/lane detach <name>` | 只摘掉**本进程**的连接（连不上就报现有名字；最后一条不许摘） | 无（不动声明与进程） |
+| `/lane detach [<name>]` | 只摘掉**本进程**的连接（**名字缺省 = 当前 lane**；连不上就报现有名字；最后一条不许摘） | 无（不动声明与进程） |
 | `/lane new <name> [workspace]` | `add` 写声明 → 轮询 `list` 到 `observed == ready` → 连 | 新增一条声明（ctl 负责起进程） |
 | `/lane close <name>`（别名 `disable`） | 经 socket 的 `disable` 把声明标成 `enabled = false` | 改一条声明；ctl 会停掉该实例（声明与手写 `env` / `config` 留着） |
 | `/lane open <name>`（别名 `enable`） | 经 socket 的 `enable` 撤销上面那条 | 改一条声明；下一轮收敛把实例拉起 |
@@ -218,7 +218,7 @@ api_base = "http://127.0.0.1:8082"
 - **装配**：`LaneApp::assemble` + `LaneTemplate`（存**启动时**的 `overrides` / `yes` / `no_keyring` / bearer / `ctl_socket` / `tx`）。存启动初值而不是「当前 lane 的现值」：当前 lane 的 `/model` 覆盖只属于它。`LaneApp::client` 因此从 `&'a ServeClient` 改成 `Cow<'a, ServeClient>` —— 启动装配仍零拷贝借用，运行期造出来的客户端自己持有。
 - **事件通道**：结果走 `Inbound::Shell(ShellEvent::Ready { name, result })`：目标 lane 此刻还不存在，按 `LaneId` 分发只会被当成「已关闭的 lane」丢掉；由 `TuiApp` 拦截并装配 —— 单条 lane 无权改 `lanes`。三类入站事件（全局输入 / 某条 lane 的出站事件 / 外壳动作）由 `Inbound` 在**类型上**分开，不再靠「记得包一层」的注释约定（issue #347）：lane 事件的常规出口是 `LaneTx`（它负责贴上 `LaneId`；持有裸 `Sender<Inbound>` 的位置仍能手写，但没有理由这么做），外壳动作 lane 根本收不到。
 - **同名或同 URL 都不重连**：名字已在 `lanes` 里时只切过去并明说「已经是本进程的连接」；名字不同但 `base_url` 与某条 lane 相同（按 `same_api_base` 归一化比较：尾 `/`、大小写不算差异，`localhost` 与 `127.0.0.1` 仍是两个 Origin）也只切过去 —— 那是同一台 serve，重复连会各开一条 SSE、各读一份会话。静默再连会让左栏出现两条同名 lane，而 `/ctl` 里只有一条实例。
-- **`/lane detach <name>` 只摘本进程的账**：声明与 serve 进程都不动（`/lane` 的语义是「本进程连不连」，与 attach 对称；要停实例用 `crabmatectl down`）。摘之前先**停掉它正在跑的回合**（`LaneApp::wind_down`，与 `/lane cancel`、Ctrl+C、`/quit` 同源：撤审批浮层让 gate 立刻按拒绝收尾 + `StreamCancel` 计数 1 → worker 先 `POST /chat/stream/{job}/cancel`、再收尾 SSE，见 issue #339 / #346）—— 只 drop `LaneApp` 不够：worker 在 `run_turn_job` 的 `block_on` 里根本不看 job channel，要等**整个回合跑完**才回到 `recv`，期间 serve 侧 job 白跑一轮、事件又全被丢弃，线程与 runtime 也白占着。停完再 drop 该 `LaneApp`，它的 job channel 随之关闭，worker 线程与那个 runtime（含在途请求、SSE）随即退出；`LaneId` 单调递增不复用，残留事件按 id 分发时匹配不到，直接丢弃（不会串台）。两种情形明说而不硬做：名字不存在（把现有名字列出来，省得再猜）与**最后一条**（界面至少要有一条 lane，退出用 `/quit`）。
+- **`/lane detach [<name>]` 只摘本进程的账**：声明与 serve 进程都不动（`/lane` 的语义是「本进程连不连」，与 attach 对称；要停实例用 `crabmatectl down`）。**名字缺省 = 当前 lane**：解析层只能给出 `None`（它不知道当前是哪条），由 `LaneApp` 用自身 `label` 兜底 —— 外壳查表用的正是这个字符串，所以 `/lane detach` 摘的就是你正看着的那条，不必先 `/lane` 查自己叫什么。摘之前先**停掉它正在跑的回合**（`LaneApp::wind_down`，与 `/lane cancel`、Ctrl+C、`/quit` 同源：撤审批浮层让 gate 立刻按拒绝收尾 + `StreamCancel` 计数 1 → worker 先 `POST /chat/stream/{job}/cancel`、再收尾 SSE，见 issue #339 / #346）—— 只 drop `LaneApp` 不够：worker 在 `run_turn_job` 的 `block_on` 里根本不看 job channel，要等**整个回合跑完**才回到 `recv`，期间 serve 侧 job 白跑一轮、事件又全被丢弃，线程与 runtime 也白占着。停完再 drop 该 `LaneApp`，它的 job channel 随之关闭，worker 线程与那个 runtime（含在途请求、SSE）随即退出；`LaneId` 单调递增不复用，残留事件按 id 分发时匹配不到，直接丢弃（不会串台）。两种情形明说而不硬做：名字不存在（把现有名字列出来，省得再猜）与**最后一条**（界面至少要有一条 lane，退出用 `/quit`）。
 - **主 lane 也按 URL 认领实例名**：启动 lane 的名字原本恒为 `local`。上面的同 URL 去重已经能拦住「同一台 serve 连两条」，但名字对不上时提示只能说「`local` 已经连着 …」，左栏的名字与 ctl 里的实例名仍是两套。启动时因此问一次控制面（`serve::ctl::primary_binding`）：`base_url` 与 `--api-base` 相同的实例，主 lane 直接用它的名字，`/lane attach server` 连同名/同 URL 两道闸都命中，只切过去并说「已经是本进程的连接」。比较只看 **URL**（`same_api_base`：去尾 `/`、不区分大小写；`localhost` 与 `127.0.0.1` 是两个 Origin，不合并），不看 `observed`（`stale` / `starting` 仍是那台 serve 的声明）。查不到（ctl 没起 / URL 未声明 / 回包读不懂）一律退回 `local`，**不拦启动** —— 这条查询只负责命名。
 - **新 lane 的首拉**与启动同一套（`LaneApp::bootstrap`：会话 / 工作区根 / serve 状态 / user-data 快照）：只刷当前 lane 的话，切过去会看到空的会话列表。
 - **`/lane close|open` 只翻 `enabled`**：`enabled = false` 是 Server 文档里客户端软删 lane 的正式口径，socket 的 `disable` / `enable` 也只收 `op` + `name`（它们**不是** `update`：换 workspace/profile/port 仍是 `remove` + `add` 两步）。三条回执语义照抄 Server、不自己重推：`changed: false` 是幂等命中（「本来就是这样」，不是失败），`enable` 会顺手清 `down` 留下的 `desired_state = stopped`（`cleared_down`），那半步失败时 `ok` 仍为真但带 `warning` —— 不露出来就会变成「声明是启用的、实例永远起不来」。回执由 worker 走 `Inbound::Shell(ShellEvent::Toggled)`（被关的可能正是发起命令的那条 lane），外壳据此写报告行；关掉声明时如果本进程正连着它，顺手 `detach`（实例马上被 ctl 停掉，留着只是一条死 SSE），**唯一一条连接例外** —— 只把「随后下线、退出用 `/quit`、反悔用 `/lane open`」说清，不摘（界面至少要有一条 lane）。

@@ -196,7 +196,7 @@ pub(crate) fn check_lane_capacity(total: usize) -> Result<()> {
         return Ok(());
     }
     anyhow::bail!(
-        "连接数 {total} 超过上限 {MAX_LANES}（含主连接）：减少 `--connect`，或起来后用 `/lane detach` 摘掉不用的"
+        "连接数 {total} 超过上限 {MAX_LANES}（含主连接）：减少 `--connect`，或起来后用 `/lane detach <name>` 摘掉不用的"
     )
 }
 
@@ -576,7 +576,7 @@ impl<'a> super::TuiApp<'a> {
         self.lanes.iter().map(|l| l.label.clone()).collect()
     }
 
-    /// `UiEvent::LaneDetach`：摘掉本进程的一条连接（**只摘自己的账**）。
+    /// `ShellEvent::Detach`：摘掉本进程的一条连接（**只摘自己的账**）。
     ///
     /// 声明与 serve 进程都不动 —— `instances.toml` 归 ctl 写、进程归 ctl 管，`/lane` 的
     /// 语义是「本进程连不连」，与 `/lane attach` 对称；要真停实例请用 `crabmatectl down`
