@@ -15,6 +15,7 @@ use unicode_width::UnicodeWidthStr;
 
 use super::layout::lane_shown_len;
 use super::palette::Palette;
+use super::spinner;
 use super::status::SPINNER_FRAMES;
 use super::text::truncate_display;
 use super::worker::{LaneId, UiEvent};
@@ -346,6 +347,8 @@ impl super::TuiApp<'_> {
             .map(|(i, lane)| {
                 let status = lane_status(lane);
                 let persisted = lane.persisted.as_ref();
+                // 耗时与 spinner 帧都从同一个起点算：从**发出**起（见 `turn_elapsed`）。
+                let elapsed = lane.turn_elapsed();
                 LaneEntry {
                     label: lane.label.clone(),
                     workspace: lane.st.workspace_path.clone(),
@@ -360,9 +363,10 @@ impl super::TuiApp<'_> {
                             d.baseline_prompt_tokens(persisted.and_then(|p| p.role.as_deref()))
                         }),
                     ),
-                    busy_secs: lane.turn_started.map(|at| at.elapsed().as_secs()),
-                    spin: matches!(status, LaneStatus::Running)
-                        .then(|| SPINNER_FRAMES[lane.spinner.frame() % SPINNER_FRAMES.len()]),
+                    busy_secs: lane.turn_started.map(|_| elapsed.as_secs()),
+                    // 帧号来自墙钟：后台 lane 不必被谁推进，切过去之前它也在动。
+                    spin: spinner_turning(lane)
+                        .then(|| SPINNER_FRAMES[spinner::frame_at(elapsed) % SPINNER_FRAMES.len()]),
                 }
             })
             .collect()
@@ -408,6 +412,19 @@ fn lane_status(lane: &super::LaneApp<'_>) -> LaneStatus {
     } else {
         LaneStatus::Idle
     }
+}
+
+/// 这条 lane 的 spinner 此刻该不该转。
+///
+/// 两个条件缺一不可：**渲染态是「运行中」**（等审批要画 `▲`、已请求退出画 `×`，
+/// 都不该被帧顶掉），以及**没有在取消**（取消中冻结，与状态行的 `cancel_sent`
+/// 口径一致）。
+///
+/// 唤醒源（`TuiApp::next_spinner_tick`）与左栏绘制共用这一个判定：两边各写一套
+/// 就会出现「一处算在转、另一处不算」，后台 lane 于是停在原地 —— 那正是本次要修
+/// 的症状，别在这里分叉。
+pub(super) fn spinner_turning(lane: &super::LaneApp<'_>) -> bool {
+    matches!(lane_status(lane), LaneStatus::Running) && !lane.st.cancel_sent
 }
 
 #[cfg(test)]
@@ -685,6 +702,45 @@ mod tests {
         assert!(!line.contains('●'), "生成中不再画静态度点：{line}");
         // 帧符号仍是单列，否则整行会被撑破。
         assert_eq!(UnicodeWidthStr::width(line), 30);
+    }
+
+    /// 后台 lane 的 spinner 帧跟着墙钟走：它不进 `draw_frame`，也不该因此冻结。
+    #[test]
+    fn background_lane_spinner_follows_the_clock() {
+        let client = test_client();
+        let mut prefs = [test_prefs(), test_prefs()];
+        let (mut app, _jobs) = test_shell_with_jobs(&client, &mut prefs);
+        // 两条都在跑：当前 lane 刚发出，后台那条已经跑了 0.25s。
+        app.lanes[0].st.running = true;
+        app.lanes[0].turn_started = Some(std::time::Instant::now());
+        let behind = std::time::Instant::now()
+            .checked_sub(std::time::Duration::from_millis(250))
+            .expect("系统时钟不支持回退 Instant");
+        app.lanes[1].st.running = true;
+        app.lanes[1].turn_started = Some(behind);
+
+        let entries = app.lane_entries();
+        let front = entries[0].spin.expect("当前 lane 在跑就该有帧");
+        let back = entries[1].spin.expect("后台 lane 在跑就该有帧");
+        assert_ne!(
+            front, back,
+            "后台 lane 的帧号必须跟着墙钟走，不能停在切走时那一格"
+        );
+    }
+
+    /// 取消中不转：状态行已经在说「取消中」，lane 行再转就是在骗人。
+    #[test]
+    fn cancelling_lane_does_not_spin() {
+        let client = test_client();
+        let mut prefs = [test_prefs()];
+        let (mut app, _jobs) = test_shell_with_jobs(&client, &mut prefs);
+        app.lanes[0].st.running = true;
+        app.lanes[0].st.cancel_sent = true;
+        app.lanes[0].turn_started = Some(std::time::Instant::now());
+        assert!(
+            app.lane_entries()[0].spin.is_none(),
+            "取消中不该画推进中的帧"
+        );
     }
 
     /// 耗时换成定宽单位：`s` → `m` → `h`，不让秒数无限长。

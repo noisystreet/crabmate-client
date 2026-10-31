@@ -27,8 +27,10 @@ use ratatui::Terminal;
 use ratatui::backend::{Backend, CrosstermBackend};
 use ratatui::layout::Rect;
 
+use super::lane_list::spinner_turning;
 use super::render::{self, SIDEBAR_MIN_WIDTH};
 use super::shell::MOUSE_ON;
+use super::spinner;
 use super::state::Focus;
 use super::{LaneApp, TuiApp};
 
@@ -99,10 +101,20 @@ pub(super) fn next_wait(
 
 /// 兜底醒来的那一帧是否可以整帧跳过。
 ///
-/// 三个条件同时成立才是空帧：不是被事件叫醒、没有动画在跑、终端尺寸也没变。
-/// 只要有一个不成立就必须画 —— 界面是即时模式，`draw` 是唯一的输出手段。
-pub(super) fn idle_frame_is_noop(skip_idle: bool, spinning: bool, size_changed: bool) -> bool {
-    skip_idle && !spinning && !size_changed
+/// 三个条件同时成立才是空帧：不是被事件叫醒、**任一条 lane 的**动画都不在跑、
+/// 终端尺寸也没变。只要有一个不成立就必须画 —— 界面是即时模式，`draw` 是唯一的
+/// 输出手段；判成空帧就等于那条后台 lane 的 spinner 停在原地。
+pub(super) fn idle_frame_is_noop(skip_idle: bool, animating: bool, size_changed: bool) -> bool {
+    skip_idle && !animating && !size_changed
+}
+
+/// 快照里有没有 lane 正在画动画（左栏的 spinner 帧）。
+///
+/// [`LaneApp::draw_frame`] 用它决定兜底空帧能不能整帧跳过。判**当前** lane 会让
+/// 「当前空闲、后台在跑」被跳过 —— 帧号由墙钟推导之后，那条 lane 的帧再新也画不
+/// 出来，症状与原缺陷一模一样。
+pub(super) fn lanes_animating(lanes: &[super::lane_list::LaneEntry]) -> bool {
+    lanes.iter().any(|entry| entry.spin.is_some())
 }
 
 /// 距上一次 `draw` 不足 [`MIN_FRAME_INTERVAL`] 就先补足睡眠。
@@ -200,6 +212,18 @@ impl TuiApp<'_> {
         }
     }
 
+    /// 所有在转的 lane 里最近的一次换帧时刻；没有就是 `None`。
+    ///
+    /// 必须扫**全部** lane（[`spinner_turning`] 与左栏「帧该显示」同一个判定）：
+    /// 只看当前 lane 的话，它一空闲唤醒源就退回兜底，后台 lane 的动画跟着停。
+    fn next_spinner_tick(&self) -> Option<Duration> {
+        self.lanes
+            .iter()
+            .filter(|lane| spinner_turning(lane))
+            .map(|lane| spinner::next_tick(lane.turn_elapsed()))
+            .min()
+    }
+
     /// 收集本轮输入，返回「本轮是否收到过消息」。
     ///
     /// `interval`：非阻塞 drain（改造前语义），节流交给 [`Self::run_loop`] 的 sleep。
@@ -212,11 +236,9 @@ impl TuiApp<'_> {
         if mode == LoopMode::Interval || first {
             return Ok(self.drain_events());
         }
-        // 惰性求值：静止时不白算一次 `Instant::elapsed`。
-        let left = self
-            .lane()
-            .spinning()
-            .then(|| self.lane().spinner.remaining());
+        // 唤醒按**全部**在跑 lane 里最近的一次换帧算：只看当前 lane 的话，
+        // 它一空闲就退回 1s 兜底，后台 lane 的 spinner 退化成「1 秒一帧」。
+        let left = self.next_spinner_tick();
         // 会话刷新的窗口剩余同样是唤醒源（见 `next_wait`）。
         let refresh_left = self.session_refresh.until_due(Instant::now());
         let got = self.rx.recv_timeout(next_wait(left, refresh_left));
@@ -254,24 +276,35 @@ impl TuiApp<'_> {
 }
 
 impl LaneApp<'_> {
-    /// 生成中（spinner 该转）：取消中不转，与 `spinner::Spinner` 的调用约定一致。
-    fn spinning(&self) -> bool {
-        self.st.running && !self.st.cancel_sent
+    /// 在途回合已过的时间；空闲时为零。
+    ///
+    /// spinner 帧号（[`spinner::frame_at`]）、左栏耗时与唤醒 deadline 都从这一处取：
+    /// 从**发出**算起，首 token 之前的排队与建连同样是等。
+    ///
+    /// 定义在 `event_loop` 而不是 `mod.rs` / `shell.rs`：那两个文件都贴着 920 行门禁，
+    /// 而它的三个调用点里有两个就在本文件。
+    pub(super) fn turn_elapsed(&self) -> Duration {
+        self.turn_started.map_or(Duration::ZERO, |at| at.elapsed())
     }
 
-    /// 画一帧：推进动画 → 拉尺寸 → 排版 → draw → 重放背景 → flush。
+    /// 画一帧：拉尺寸 → 排版 → draw → 重放背景 → flush。
+    ///
+    /// 动画**不在这里推进**：帧号由墙钟推导（见 [`spinner`]），后台 lane 的帧
+    /// 也不经过本方法 —— 谁都推不了别人，只能各自看时间。
     ///
     /// `skip_idle`：本轮是兜底超时醒来的（没有事件）。配合「无动画 + 尺寸未变」
-    /// 就跳过整帧 —— 静止期不写终端。
+    /// 就跳过整帧 —— 静止期不写终端。「有动画」取**快照里任一条 lane**：只判
+    /// 当前 lane 会让「当前空闲、后台在跑」的帧被整帧跳过，那条 lane 的 spinner
+    /// 就永远画不到新帧。
     fn draw_frame(
         &mut self,
         terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
         skip_idle: bool,
         lanes: &[super::lane_list::LaneEntry],
     ) -> Result<()> {
-        self.spinner.advance(self.spinning());
         let dims = read_terminal_size(terminal)?;
-        if idle_frame_is_noop(skip_idle, self.spinning(), dims != self.last_size) {
+        let animating = lanes_animating(lanes);
+        if idle_frame_is_noop(skip_idle, animating, dims != self.last_size) {
             return Ok(());
         }
         self.apply_size(dims);
@@ -323,12 +356,16 @@ impl LaneApp<'_> {
 #[cfg(test)]
 mod tests {
     use std::sync::mpsc;
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
+    use super::super::lane_list::{LaneEntry, LaneStatus};
     use super::super::state::Focus;
-    use super::super::test_support::{test_app, test_client, test_prefs};
+    use super::super::test_support::{test_app, test_client, test_prefs, test_shell};
     use super::super::worker::UiEvent;
-    use super::{IDLE_FALLBACK, LoopMode, MIN_TICK, idle_frame_is_noop, loop_mode_from, next_wait};
+    use super::{
+        IDLE_FALLBACK, LoopMode, MIN_TICK, idle_frame_is_noop, lanes_animating, loop_mode_from,
+        next_wait, spinner,
+    };
 
     #[test]
     fn loop_mode_defaults_to_event() {
@@ -395,6 +432,66 @@ mod tests {
         assert!(!idle_frame_is_noop(false, false, false), "事件唤醒必须画");
         assert!(!idle_frame_is_noop(true, true, false), "动画帧必须画");
         assert!(!idle_frame_is_noop(true, false, true), "尺寸变了必须画");
+    }
+
+    /// 「当前 lane 空闲、后台 lane 在跑」的兜底帧不许跳过。
+    ///
+    /// 帧号改由墙钟推导之后，这是它唯一能落到屏幕上的出口：`lanes_animating` 若
+    /// 仍判当前 lane（改之前的写法），后台那条的帧再新也会被整帧跳过 —— 症状与
+    /// 原缺陷一模一样，只是成因从「没人推进」变成「没人画」。
+    #[test]
+    fn idle_frames_keep_painting_while_a_background_lane_runs() {
+        let turning = |label: &str| LaneEntry {
+            label: label.to_string(),
+            status: LaneStatus::Running,
+            spin: Some("⠹"),
+            ..Default::default()
+        };
+
+        // 两条都在跑：有动画就得画。
+        let both = [turning("lane-a"), turning("lane-b")];
+        assert!(lanes_animating(&both));
+        assert!(!idle_frame_is_noop(true, lanes_animating(&both), false));
+
+        // 只有后台那条在跑（当前 lane 空闲、`spin` 为 `None`）：仍要画。
+        let background = [LaneEntry::default(), turning("lane-b")];
+        assert!(lanes_animating(&background), "当前 lane 空闲不该连累后台");
+        assert!(!idle_frame_is_noop(
+            true,
+            lanes_animating(&background),
+            false
+        ));
+
+        // 全空闲才是空帧 —— 静态期仍然不写终端。
+        let idle = [LaneEntry::default()];
+        assert!(!lanes_animating(&idle));
+        assert!(idle_frame_is_noop(true, lanes_animating(&idle), false));
+    }
+
+    /// 唤醒源要看**全部**在跑 lane。
+    ///
+    /// 只按当前 lane 算的话，它一空闲就退回 `IDLE_FALLBACK`(1s)：后台 lane 的帧号
+    /// 虽然跟着墙钟走，却没人唤醒、没人画，肉眼看仍是「1 秒一格」。
+    #[test]
+    fn wake_source_covers_background_lanes() {
+        let client = test_client();
+        let mut prefs = [test_prefs(), test_prefs()];
+        let mut app = test_shell(&client, &mut prefs);
+        // 当前 lane 空闲，后台那条在跑。
+        app.lanes[1].st.running = true;
+        app.lanes[1].turn_started = Some(Instant::now());
+
+        let left = app
+            .next_spinner_tick()
+            .expect("后台 lane 在跑就该有动画 deadline");
+        assert!(
+            left <= spinner::SPINNER_INTERVAL,
+            "不能退到兜底：{left:?} 超过一个换帧间隔"
+        );
+
+        // 全空闲才回到「没有动画」，此时才轮到 1s 兜底。
+        app.lanes[1].st.running = false;
+        assert!(app.next_spinner_tick().is_none());
     }
 
     /// 窄屏隐藏左栏、焦点收回输入框；宽屏恢复。
