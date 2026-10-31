@@ -108,13 +108,13 @@ pub(super) fn idle_frame_is_noop(skip_idle: bool, animating: bool, size_changed:
     skip_idle && !animating && !size_changed
 }
 
-/// 快照里有没有 lane 正在画动画（左栏的 spinner 帧）。
+/// 快照里有没有 lane 正在呼吸（左栏 `●` 的亮度动画）。
 ///
 /// [`LaneApp::draw_frame`] 用它决定兜底空帧能不能整帧跳过。判**当前** lane 会让
-/// 「当前空闲、后台在跑」被跳过 —— 帧号由墙钟推导之后，那条 lane 的帧再新也画不
+/// 「当前空闲、后台在跑」被跳过 —— 相位由墙钟推导之后，那条 lane 的相位再新也画不
 /// 出来，症状与原缺陷一模一样。
 pub(super) fn lanes_animating(lanes: &[super::lane_list::LaneEntry]) -> bool {
-    lanes.iter().any(|entry| entry.spin.is_some())
+    lanes.iter().any(|entry| entry.pulse.is_some())
 }
 
 /// 距上一次 `draw` 不足 [`MIN_FRAME_INTERVAL`] 就先补足睡眠。
@@ -294,8 +294,8 @@ impl LaneApp<'_> {
     ///
     /// `skip_idle`：本轮是兜底超时醒来的（没有事件）。配合「无动画 + 尺寸未变」
     /// 就跳过整帧 —— 静止期不写终端。「有动画」取**快照里任一条 lane**：只判
-    /// 当前 lane 会让「当前空闲、后台在跑」的帧被整帧跳过，那条 lane 的 spinner
-    /// 就永远画不到新帧。
+    /// 当前 lane 会让「当前空闲、后台在跑」的帧被整帧跳过，那条 lane 的呼吸就永远
+    /// 落不到屏幕上。
     fn draw_frame(
         &mut self,
         terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
@@ -444,7 +444,7 @@ mod tests {
         let turning = |label: &str| LaneEntry {
             label: label.to_string(),
             status: LaneStatus::Running,
-            spin: Some("⠹"),
+            pulse: Some(1),
             ..Default::default()
         };
 
@@ -453,7 +453,7 @@ mod tests {
         assert!(lanes_animating(&both));
         assert!(!idle_frame_is_noop(true, lanes_animating(&both), false));
 
-        // 只有后台那条在跑（当前 lane 空闲、`spin` 为 `None`）：仍要画。
+        // 只有后台那条在跑（当前 lane 空闲、`pulse` 为 `None`）：仍要画。
         let background = [LaneEntry::default(), turning("lane-b")];
         assert!(lanes_animating(&background), "当前 lane 空闲不该连累后台");
         assert!(!idle_frame_is_noop(
