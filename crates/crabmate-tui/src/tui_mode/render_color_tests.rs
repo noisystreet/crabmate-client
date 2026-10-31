@@ -21,6 +21,7 @@ const H: u16 = 12;
 
 fn status_info() -> StatusInfo {
     StatusInfo {
+        lanes: Default::default(),
         api_base: "http://probe".into(),
         model: Some("m".into()),
         role: None,

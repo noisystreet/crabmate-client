@@ -278,7 +278,10 @@ impl LaneApp<'_> {
         let (w, h) = dims;
         // 内容/宽度/搜索未变时复用已构建的 body 物理行，避免每帧全量 tokenize+wrap。
         self.prepare_body(w);
-        let info = self.status_info();
+        let mut info = self.status_info();
+        // 连接计数取自外壳交来的渲染快照：左栏画的就是这批 entry，状态栏另数一份
+        // 迟早出现「左栏两条、状态栏一条」。
+        info.lanes = super::lane_list::LaneTally::from_entries(lanes);
         // 设置面板改成居中弹层后，内容必须按**弹层内宽**排版：用与绘制同源的
         // `settings_panel_content_width`，否则会出现「画 76 列、按 78 列生成」的错位。
         let screen = Rect::new(0, 0, w, h);

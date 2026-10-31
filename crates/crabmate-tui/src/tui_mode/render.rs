@@ -86,6 +86,11 @@ pub struct StatusInfo {
     /// 服务端允许意图高于生效（min 链钳制），只显示生效档会让用户以为切换没生效；
     /// 而把意图改写成生效值又会让下一条 `/chat` 把被钳制的低档写回会话。
     pub permission_intent: Option<String>,
+    /// 连接计数（`lanes 2/8` 与待审批条数）。
+    ///
+    /// 一个值带两数、由 `TuiApp::lane_tally` 一处数出来：状态栏自己再数一遍
+    /// `lanes.len()` 就会和左栏 `连接 [n]` 对不上。
+    pub lanes: super::lane_list::LaneTally,
 }
 
 /// 一条可渲染的 transcript 物理行。

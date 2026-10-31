@@ -171,7 +171,7 @@ fn announce_ctl_socket(ctl_socket: Option<&std::path::Path>) {
 /// 一个 worker 线程 + 一个 `current_thread` runtime + 一份连接池，serve 那侧还各有自己的
 /// 并发上限（`chat_queue_max_concurrent` 默认 2）。它**不是**性能目标 —— 真要 8 路并行
 /// 得配 8 个 serve，见 `docs/design/tui_multi_server.md` §5.2。
-const MAX_LANES: usize = 8;
+pub(super) const MAX_LANES: usize = 8;
 
 /// 还能不能再加一条 lane：超限时返回**可照抄**的提示。
 ///
