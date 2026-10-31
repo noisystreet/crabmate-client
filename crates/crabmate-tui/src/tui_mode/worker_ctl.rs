@@ -51,7 +51,7 @@ pub(super) enum CtlJob {
         /// 实例名（`instances.toml` 的键，也是将来那条 lane 的 `label`）。
         name: String,
     },
-    /// `/lane new <name> [workspace]`：写声明 → 轮询到就绪。
+    /// `/lane new <name> [workspace] [profile=<name>]`：写声明 → 轮询到就绪。
     New {
         /// 发起这次新建的 lane。
         from: LaneId,
@@ -59,6 +59,11 @@ pub(super) enum CtlJob {
         name: String,
         /// 声明的 `workspace`（Server 的 socket `add` 要求必填）。
         workspace: String,
+        /// `profiles.toml` 里的预设名；`None` = 用 Server 的默认（行为与加这个字段前一致）。
+        ///
+        /// 原样转发，不在客户端校验：名字写错由 Server 的 `add` 回 `bad_request`，
+        /// 那句 `error` 原文才是用户要看的（`profiles.toml` 在 serve 那台机器上）。
+        profile: Option<String>,
     },
     /// `/lane close|open`：翻声明里的 `enabled`（只写声明、不轮询）。
     Toggle {
@@ -175,8 +180,9 @@ fn run(job: CtlJob, socket: &Path, tx: &Sender<Inbound>) {
             from,
             name,
             workspace,
+            profile,
         } => {
-            let result = add_then_wait_ready(socket, &name, &workspace);
+            let result = add_then_wait_ready(socket, &name, &workspace, profile.as_deref());
             let _ = tx.send(Inbound::Shell(ShellEvent::Ready { from, name, result }));
         }
         CtlJob::Toggle {
@@ -211,8 +217,13 @@ fn ready_base_url(items: &[CtlInstance], name: &str) -> Result<String, String> {
 /// `add` 之后轮询到就绪。
 ///
 /// 必须轮询：`add` 的响应只有 `created`，端口与 URL 要等 ctl 收敛完才出现在 `list` 里。
-fn add_then_wait_ready(socket: &Path, name: &str, workspace: &str) -> Result<String, String> {
-    add_instance(socket, name, workspace).map_err(|e| e.user_message())?;
+fn add_then_wait_ready(
+    socket: &Path,
+    name: &str,
+    workspace: &str,
+    profile: Option<&str>,
+) -> Result<String, String> {
+    add_instance(socket, name, workspace, profile).map_err(|e| e.user_message())?;
     let deadline = Instant::now() + LANE_READY_TIMEOUT;
     loop {
         let items = list_instances(socket).map_err(|e| e.user_message())?;
@@ -247,11 +258,12 @@ mod tests {
         }
     }
 
-    /// 在临时目录里起一个假控制面：按 `replies` 顺序，每个连接回一条响应。
+    /// 在临时目录里起一个假控制面：按 `replies` 顺序，每个连接回一条响应，
+    /// 并把收到的请求行按序收回来（好断言「壳层真的把字段发出去了」）。
     ///
     /// 与 `serve::ctl` 的测试各自成一份：那边的假服务端只回一次，而 `/lane new`
     /// 要「先 add 再 list」，两次请求必须由同一个假服务端接。
-    fn fake_ctl(replies: &'static [&'static str]) -> (PathBuf, thread::JoinHandle<()>) {
+    fn fake_ctl(replies: &'static [&'static str]) -> (PathBuf, thread::JoinHandle<Vec<String>>) {
         let dir = std::env::temp_dir().join(format!(
             "crabmate-ctl-worker-{}-{:?}",
             std::process::id(),
@@ -261,16 +273,19 @@ mod tests {
         let sock = dir.join("ctl.sock");
         let listener = UnixListener::bind(&sock).expect("绑定 socket");
         let handle = thread::spawn(move || {
+            let mut seen = Vec::new();
             for reply in replies {
                 let Ok((mut stream, _)) = listener.accept() else {
-                    return;
+                    break;
                 };
                 let mut request = String::new();
                 let _ = BufReader::new(&stream).read_line(&mut request);
+                seen.push(request.trim().to_string());
                 let _ = stream.write_all(reply.as_bytes());
                 let _ = stream.write_all(b"\n");
                 let _ = stream.flush();
             }
+            seen
         });
         (sock, handle)
     }
@@ -365,7 +380,8 @@ mod tests {
         assert_eq!(ctl.in_flight.load(Ordering::SeqCst), 0);
     }
 
-    /// `/lane new` 失败（ctl 报 `failed`）时，原因回到**发起命令那条 lane** 的外壳事件。
+    /// `/lane new` 失败（ctl 报 `failed`）时，原因回到**发起命令那条 lane** 的外壳事件，
+    /// 并且 `profile` 按名字进 `add` 的请求行（壳层只转发，不做校验）。
     #[test]
     fn new_failure_returns_to_the_requesting_lane() {
         let (sock, handle) = fake_ctl(&[
@@ -378,6 +394,7 @@ mod tests {
             from: LaneId(7),
             name: "proj-c".to_string(),
             workspace: "/home/u/proj-c".to_string(),
+            profile: Some("readonly-audit".to_string()),
         })
         .expect("派发");
         drop(ctl);
@@ -389,7 +406,12 @@ mod tests {
             }
             _ => panic!("应回 ShellEvent::Ready"),
         }
-        handle.join().expect("假服务端线程");
+        let seen = handle.join().expect("假服务端线程");
+        assert!(
+            seen.first()
+                .is_some_and(|r| r.contains(r#""profile":"readonly-audit""#)),
+            "profile 要原样进 add 的请求行：{seen:?}"
+        );
         let _ = std::fs::remove_dir_all(sock.parent().unwrap());
     }
 }

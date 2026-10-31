@@ -11,7 +11,7 @@ pub(super) const LINES: &[&str] = &[
     "输入 / 弹出补全菜单（内建命令 + skill；↑↓ 选择 · Tab/Enter 补全 · Esc 关闭）",
     "/copy [assistant|user]（Ctrl+Y 同义）：复制最近一条消息到剪贴板（默认助手回复）",
     "/ctl：查 crabmatectl 控制面实例（本地 unix socket，只读；需 --ctl-socket 或默认 socket 已存在）",
-    "/lane：运行期连接管理 —— /lane（同 /ctl 列实例）· /lane attach <name>（连已就绪的实例）· /lane detach [<name>]（只断开本进程这条连接，名字缺省就是当前这条；声明与进程都不动）· /lane cancel <name>（取消它正在跑的回合，不必先切过去）· /lane new <name> [workspace]（新增声明并等它就绪；工作区缺省用当前 lane 的）· /lane close <name>（把声明标成 enabled=false 并让 ctl 停掉实例，声明与手写配置都留着）· /lane open <name>（撤销 close）；连接条数有上限，超限时按提示 `/lane detach <name>` 摘掉不用的",
+    "/lane：运行期连接管理 —— /lane（同 /ctl 列实例）· /lane attach <name>（连已就绪的实例）· /lane detach [<name>]（只断开本进程这条连接，名字缺省就是当前这条；声明与进程都不动）· /lane cancel <name>（取消它正在跑的回合，不必先切过去）· /lane new <name> [workspace] [profile=<name>]（新增声明并等它就绪；工作区缺省用当前 lane 的；profile 只按名字引用 profiles.toml）· /lane close <name>（把声明标成 enabled=false 并让 ctl 停掉实例，声明与手写配置都留着）· /lane open <name>（撤销 close）；连接条数有上限，超限时按提示 `/lane detach <name>` 摘掉不用的",
     "/mode ask|plan|act · /role <id> · /perm <level>（off 清除；有会话时点选即落盘） · /model <name>",
     "/workspace <路径>（/cd 别名）切换 serve 工作区根；空参只看当前根；/workspace off 恢复 serve 默认根",
     "/settings（或 F6）：设置面板（模型名/API Base/温度/思考模式/API 密钥/Agent role/会话模式；F2 保存）",
