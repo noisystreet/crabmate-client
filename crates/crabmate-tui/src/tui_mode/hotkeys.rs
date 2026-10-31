@@ -29,6 +29,11 @@ pub(super) enum TopHotkey {
     /// 后台 lane 的审批浮层画不到屏幕上（每帧只画当前 lane），左栏那一行的 `▲` 是唯一
     /// 线索；三条以上时靠 [`Self::NextLane`] 逐个试等于让用户自己找。
     NextApproval,
+    /// Alt+1..8：**直达**第 n 条 lane（1-based，序号与左栏列表自上而下一致）。
+    ///
+    /// 与 [`Self::NextLane`] 的区别是「绝对目标」而不是「相对移动」：八条连接时从第 1
+    /// 条到第 8 条，按方向键要七次，按这一个键就够。越界**不切视图**，只留一句提示。
+    GotoLane(usize),
 }
 
 /// 判定热键。
@@ -45,9 +50,18 @@ pub(super) fn of(key: &KeyEvent) -> Option<TopHotkey> {
         // 不与输入框的 Ctrl 组合抢键。
         (KeyCode::F(4), KeyModifiers::NONE) => Some(TopHotkey::NextApproval),
         (KeyCode::Char('y'), KeyModifiers::CONTROL) => Some(TopHotkey::Copy),
+        // Ctrl+N：切下一条 lane。与 Alt+→ **同一条**实现（同一个 `switch_lane(1)`），
+        // 不是第二套「下一条」规则 —— 两个键给出同一结果，才不需要记两套语义。
+        (KeyCode::Char('n'), KeyModifiers::CONTROL) => Some(TopHotkey::NextLane),
         // Alt+方向：切换 lane。裸方向键归输入框 / 列表，必须精确匹配 ALT。
         (KeyCode::Right, KeyModifiers::ALT) => Some(TopHotkey::NextLane),
         (KeyCode::Left, KeyModifiers::ALT) => Some(TopHotkey::PrevLane),
+        // Alt+1..8：直达。**同样精确匹配 ALT**（不放宽成 `contains`）：`Alt+Shift+数字`
+        // 是另一回事，而且 `Alt+Enter` / `Alt+方向` 的修饰符匹配不能因为加数字被顺手放宽。
+        // 上限 8 与 `shell::MAX_LANES` 同值，更靠后的数字键不必认。
+        (KeyCode::Char(c @ '1'..='8'), KeyModifiers::ALT) => {
+            c.to_digit(10).map(|n| TopHotkey::GotoLane(n as usize))
+        }
         _ => None,
     }
 }
@@ -145,6 +159,49 @@ mod tests {
         assert_eq!(of(&key(KeyCode::F(2), KeyModifiers::NONE)), None);
         assert_eq!(of(&key(KeyCode::Char(','), KeyModifiers::CONTROL)), None);
         assert_eq!(of(&key(KeyCode::Char(','), KeyModifiers::NONE)), None);
+    }
+
+    #[test]
+    fn alt_digits_goto_the_lane_with_that_number() {
+        for n in 1..=8u32 {
+            let digit = char::from_digit(n, 10).expect("1..=8 都是数字");
+            assert_eq!(
+                of(&key(KeyCode::Char(digit), KeyModifiers::ALT)),
+                Some(TopHotkey::GotoLane(n as usize)),
+                "Alt+{digit}"
+            );
+        }
+    }
+
+    /// 只认**裸** Alt+数字：裸数字归输入框（要能打数字），`Ctrl+数字` 是别处的约定，
+    /// `Alt+Shift+数字` 又是一种组合，`0` / `9` 超出 `MAX_LANES = 8`。
+    /// 放宽任一条，都会让别的键悄悄变成切 lane。
+    #[test]
+    fn only_bare_alt_digits_one_to_eight_goto_a_lane() {
+        for modifiers in [
+            KeyModifiers::NONE,
+            KeyModifiers::CONTROL,
+            KeyModifiers::ALT | KeyModifiers::SHIFT,
+        ] {
+            assert_eq!(
+                of(&key(KeyCode::Char('3'), modifiers)),
+                None,
+                "{modifiers:?} 不该被当成直达"
+            );
+        }
+        assert_eq!(of(&key(KeyCode::Char('0'), KeyModifiers::ALT)), None);
+        assert_eq!(of(&key(KeyCode::Char('9'), KeyModifiers::ALT)), None);
+    }
+
+    /// `Ctrl+N` 与 `Alt+→` 返回**同一个**热键，所以下游只有一条「下一条」实现。
+    #[test]
+    fn ctrl_n_is_the_same_next_lane_as_alt_right() {
+        assert_eq!(
+            of(&key(KeyCode::Char('n'), KeyModifiers::CONTROL)),
+            of(&key(KeyCode::Right, KeyModifiers::ALT)),
+        );
+        // 裸 `n` 仍然是输入框里的字母。
+        assert_eq!(of(&key(KeyCode::Char('n'), KeyModifiers::NONE)), None);
     }
 
     #[test]

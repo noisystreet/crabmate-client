@@ -201,6 +201,7 @@ impl<'a> TuiApp<'a> {
                     match hotkeys::of(k) {
                         Some(hotkeys::TopHotkey::NextLane) => return self.switch_lane(1),
                         Some(hotkeys::TopHotkey::PrevLane) => return self.switch_lane(-1),
+                        Some(hotkeys::TopHotkey::GotoLane(n)) => return self.goto_lane(n),
                         // 跳到在等审批的那条：同样必须在外壳层做（要知道全局有几条、
                         // 谁在等），而且不能让这次按键漏进 lane 的输入框。
                         Some(hotkeys::TopHotkey::NextApproval) => {
@@ -581,14 +582,11 @@ impl LaneApp<'_> {
             Some(hotkeys::TopHotkey::Settings) => self.toggle_settings(),
             Some(hotkeys::TopHotkey::StatusStack) => self.st.toggle_status_stack(),
             Some(hotkeys::TopHotkey::Copy) => self.copy_last(None),
-            // 切 lane / 跳到待审批 lane 都是外壳动作，`TuiApp::on_msg` 已拦截，正常路径
-            // 到不了这里；留着只为穷尽分支（万一有人直接调 lane 的 on_key，也按「已消费」
-            // 处理，免得方向键再漏给输入框）。
-            Some(
-                hotkeys::TopHotkey::NextLane
-                | hotkeys::TopHotkey::PrevLane
-                | hotkeys::TopHotkey::NextApproval,
-            ) => {}
+            // 切 lane / 跳待审批 / 直达第 n 条都是外壳动作，`TuiApp::on_msg` 已拦截；
+            // 到不了这里也按「已消费」兜住，免得方向键 / 数字键再漏给输入框。
+            // 不再逐条列举：新增的 lane 级热键本来就该在 `on_msg` 拦，列在这里只会
+            // 跟着每一处新热键一起改（`mod.rs` 贴着 920 行门禁）。
+            Some(_) => {}
             None => return false,
         }
         true

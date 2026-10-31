@@ -175,7 +175,7 @@ api_base = "http://127.0.0.1:8082"
 ### 4.6 UI 与交互
 
 - 左栏顶部增加 lane 区（或复用现有左栏会话列表上方的标题行区域），每项：`名称 + 状态点`（空闲 / 运行中 / 待审批 / 出错）。
-- 切换：`Ctrl+N` 下一个 lane（或 `Alt+1..8` 直达），切换只改 `active`，**不打断**任何在途回合。
+- 切换：`Ctrl+N`（或 `Alt+→`）下一个 lane，`Alt+1..8` 直达第 n 条，切换只改 `active`，**不打断**任何在途回合。
 - 非活动 lane 的流**照常全量累积**（transcript 数据都在内存里），只是不参与绘制；重绘只画 `active`。
 - 状态栏显示 `lane N/M` 与全局待审批计数，避免用户忘记还有别的 lane 在等审批。
 
@@ -183,11 +183,11 @@ api_base = "http://127.0.0.1:8082"
 
 - lane 区落在左栏**下半**、**固定占左栏一半高度**（`layout::lane_pane_height`：有 lane 就切一半，会话列表至少留 1 行）。区内是 `tui_mode/lane_list.rs` 画的**一行一条的底色条**：标题 `连接 [n]` + 每条 lane 一行整行宽的实心底色（当前 lane 用 `selection` 底色 + `▎` 标记），**自上而下堆叠**，**每条恒占一行**（曾是「把可用行均分给各条、夹在 1..=2 行」；两行块在真终端上读起来像按钮而不像列表项，文字贴首行后第二行只剩一条没有信息的色带，还把切换 lane 的文字基线撑得跟上面的会话列表对不齐），条数少于可用行时下方留空、不拉伸。装不下时标题补 `↓n`，不静默丢弃。**单 lane 也显示**——隐藏时用户既看不出自己连的是哪台 serve，也看不出客户端支持多个连接。
 - 版面口径只有一处：lane 区高度 `lane_pane_height`、可用条数 `lane_shown_len`、行 → 下标 `lane_index_at` 都在 `layout`，`render` 与 `TuiApp::lane_at_click` 共用；各算一遍的症状是「点第 2 行切到别的 lane」。
-- 切换是 `Alt+←/→` 或点某一行，只改 `active`，不打断在途回合；单连接时 `switch_lane` 直接返回（no-op），点击落在唯一那行等于不换。
+- 切换是 `Alt+←/→`、`Ctrl+N`（与 `Alt+→` **同一个热键**，不是第二套「下一条」）、`Alt+1..8` 直达第 n 条（序号与左栏列表自上而下一致），或点某一行；只改 `active`，不打断在途回合；单连接时 `switch_lane` 直接返回（no-op），点击落在唯一那行等于不换。`Alt+1..8` 是**绝对**目标、不环回：`Alt+7` 而只有 3 条时视图不动、只写一行说明 —— `Alt+数字` 是最容易被 tmux / 终端吞掉的组合键，静默失败会被当成「键没送达」，而绕回第 1 条又比不动更容易让人迷路。
 - **已落地（后续补齐）**：lane 行状态点（`·` 空闲 / `●` 运行中 / `▲` 待审批 / `×` 已请求退出，口径在 `lane_list::LaneStatus`）、后台审批提示文案，以及 `F4` 跳到下一条待审批的 lane（环形，从当前的下一条找起；无人等待时不动视图，只写一行说明）。
 - **已落地（lane 行读数）**：每条 lane 的行尾带三样读数——上下文占比（`62%`，与状态行 `ctx` 段同一条轴线，见 `UiState::context_pct_text`）、在途回合耗时（`12s` / `2m05s`，从**发出**算起、回合结束清零）、以及后台 lane 有新输出时的未读点 `•`（帧循环每帧熄一次，不写在各切换出口上）。运行中的 lane 用 `SPINNER_FRAMES` 的当前帧顶替 `●`，所以「它在动」不必切过去才看得见。宽度不够时**从左边丢读数**（先 `ctx`、再耗时），未读点留到最后——宁可少一个数字，也不能丢掉「这条 lane 有话要说」。`lane_entries` 随之从 `shell.rs` 迁到 `lane_list.rs`（后者只负责这一行；前者贴着 920 行门禁）。
 - **已落地（状态栏总览）**：`lanes n/8` 常显（`status.rs` 的 `lanes` 段，`n` 与左栏 `连接 [n]` 同源、上限取 `shell::MAX_LANES`）；有 lane 在等审批时值变 `2/8 ▲1`，**无人等待时不画 `▲0`**。待审批数复用 `LaneStatus::WaitingApproval`（与 `▲` / `F4` 同一判定），并**并进 `lanes` 段而不单独占一段**：纵版状态栈的行数由段数决定，而鼠标命中走另一条链算行数，两条链各数一遍段数、差一行就是「点状态栈点到别处」。窄屏时 `lanes` 优先级最低、最先让位，不去挤 `ctx` / `model`。
-- **未落地**：`Alt+1..8` 直达与 `Ctrl+N` 不在 [#354](https://github.com/noisystreet/crabmate-client/issues/354) 范围（`Alt+←/→` 与点击已覆盖切换需求）。
+- **已落地（切换热键）**：`Alt+1..8` 直达第 n 条（绝对索引、不环回，越界不切视图只留一行说明）与 `Ctrl+N` 切下一条（与 `Alt+→` 同一个热键），`/help` 的连接行同步写进了这两个键（[#361](https://github.com/noisystreet/crabmate-client/issues/361)）。
 
 ### 4.7 工作区：一实例一工作区，所以 lane 行要带工作区
 
@@ -273,7 +273,7 @@ api_base = "http://127.0.0.1:8082"
 
 各波次遵循仓库既有小步纪律：**一项用户可见行为一个 PR**，每波更新 `docs/design/client_capability_matrix.md` 的 TUI 行与 `remote_cli_tui.md` 的状态行。
 
-**实际进度（截至 `2026-10`，以此为准）**：W1 / W1b / W2 已落地，且 W2 顺带把 W5 的「lane 列表 + 切换」做了（列表在下半、单 lane 也显示、`Alt+←/→` 与点击切视图）；lane 行随后补上了各自的工作区末段与 409 `WORKSPACE_ALREADY_SET` 的分支提示（§4.7，属 workspace binding 接入而非新波次）；W3 落地了两种装配方式 —— 启动时 `--connect name=url`、运行期 `/lane attach|new`（§4.8，经控制面 socket，不重启进程），仍缺 `tui-connections.toml` 配置文件与启动逐 profile `/health` 探测；W4 的跨 lane 审批队列按 §4.4 的结论不做（收拢会让某条 lane 的 `answer` 通道画到别人的屏上），W5 的 `lanes n/8` / 全局待审批计数已落地（[#354](https://github.com/noisystreet/crabmate-client/issues/354)），`Alt+1..8` 与 `Ctrl+N` 仍未做；`MAX_LANES` 与「后台审批可发现性」（`F4`）已补齐。
+**实际进度（截至 `2026-10`，以此为准）**：W1 / W1b / W2 已落地，且 W2 顺带把 W5 的「lane 列表 + 切换」做了（列表在下半、单 lane 也显示、`Alt+←/→` 与点击切视图）；lane 行随后补上了各自的工作区末段与 409 `WORKSPACE_ALREADY_SET` 的分支提示（§4.7，属 workspace binding 接入而非新波次）；W3 落地了两种装配方式 —— 启动时 `--connect name=url`、运行期 `/lane attach|new`（§4.8，经控制面 socket，不重启进程），仍缺 `tui-connections.toml` 配置文件与启动逐 profile `/health` 探测；W4 的跨 lane 审批队列按 §4.4 的结论不做（收拢会让某条 lane 的 `answer` 通道画到别人的屏上），W5 的 `lanes n/8` / 全局待审批计数已落地（[#354](https://github.com/noisystreet/crabmate-client/issues/354)），`Alt+1..8` 直达与 `Ctrl+N` 也已落地（[#361](https://github.com/noisystreet/crabmate-client/issues/361)）；`MAX_LANES` 与「后台审批可发现性」（`F4`）已补齐。
 
 ---
 
