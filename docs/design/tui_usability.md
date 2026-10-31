@@ -34,7 +34,7 @@
 
 > **2026-10-25 代码核对**：G1–G10 已逐条对着代码验过（`resume.rs` / `drafts.rs` / `clipboard.rs` / `sidebar_keys.rs` / `history.rs` / `overlay.rs` / `ws_sidebar.rs` / `status.rs`），表内状态即当时事实。G10 为本次核对新发现的缺口（顶栏删除后的遗留债）；G5 的「导出」与 G7 的 retry/regen/branch 仍依赖 serve 端点，不属可独立落地项。
 
-> **2026-10-31 补记**：新增缺口 G12「一轮的执行过程把 transcript 撑长」已落地（issue #369）——一轮的 `Thinking` / 工具行在回合结束时折成一条 `Process` 摘要行，`/older` 回放与滚动回看同样折叠。折叠单元是「**连续过程行段**」而不是回合区间（回放没有回合边界，区间会被前插错位）；`Assistant` / `System` 行永不折叠。**展开是可逆的**：摘要行始终保留，`/fold [n|all|close]` 切换它的开合（前缀 `▸ ` 收起 / `▾ ` 已展开；无参=最近一条，`n` 从底部数，`all` 全展开，`close` 全折回），`sticky` 随开合双向设置，所以折回的段下一轮仍会被自动折叠。落点见 `crates/crabmate-tui/src/tui_mode/state_fold.rs` 与 `CHANGELOG.md` 的 `[Unreleased]` 条目。
+> **2026-10-31 补记**：新增缺口 G12「一轮的执行过程把 transcript 撑长」已落地（issue #369）——一轮的 `Thinking` / 工具行在回合结束时折成一条 `Process` 摘要行，`/older` 回放与滚动回看同样折叠。折叠单元是「**连续过程行段**」而不是回合区间（回放没有回合边界，区间会被前插错位）；`Assistant` / `System` 行永不折叠。**展开是可逆的**：摘要行始终保留，`/fold [n|all|close]` 切换它的开合（前缀 `▸ ` 收起 / `▾ ` 已展开；无参=最近一条，`n` 从底部数，`all` 全展开，`close` 全折回），`sticky` 随开合双向设置，所以折回的段下一轮仍会被自动折叠。**也能用光标挑**（`Ctrl+G`）：摘要之间 `↑/↓`、`Enter`/`Space` 开合、`Esc` 退出，左键点摘要同义；`/older` 前插与回合结束插入摘要行时，光标按插入量重映射（与视口锚点同一份 `remap_after_fold`），否则「按了 Enter 之后 ↑↓ 好像卡住」就是它指到了别的段。落点见 `crates/crabmate-tui/src/tui_mode/state_fold.rs` 与 `CHANGELOG.md` 的 `[Unreleased]` 条目。
 
 ---
 

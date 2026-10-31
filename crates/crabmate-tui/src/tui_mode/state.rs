@@ -7,6 +7,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::Sender;
 
+use ratatui::layout::Rect;
+
 use crate::serve::{ApprovalDecision, CommandApprovalData, SessionListRow, WorkspaceDirEntry};
 
 use super::approve::ApprovalChoice;
@@ -410,6 +412,20 @@ pub struct UiState {
     pub body_top_log: Option<usize>,
     /// 折叠 / 展开后待下一帧恢复的视口锚点（`Some` = 还没钉回去）。
     pub reanchor_log: Option<usize>,
+    /// 折叠光标（`Ctrl+G`）：指向一条 `Process` 摘要行。`↑/↓` 在摘要之间移动、
+    /// `Enter` / `Space` 切换开合、`Esc` 退出。`None` = 未激活，输入框照常收键。
+    ///
+    /// 与 `search_cursor` 分开：`after_fold_change` 每次切换都会释放搜索锚点（那是
+    /// `/find` 的语义），而折叠光标必须停在原地 —— 两者混用就是「展开完接着想按 ↓ 时
+    /// 位置丢了」。
+    pub fold_cursor: Option<usize>,
+    /// 正文区最近一帧的矩形，以及该窗口内**每个物理行**对应的逻辑行下标。
+    ///
+    /// 鼠标只认「点在哪个物理行」，而那份排版只有渲染层知道（`body_top_log` 只记了
+    /// 首行）。回写全窗口是为了让 `mouse.rs` 直接用，而不是在那边重算一套折行/分隔线
+    /// 规则 —— 重算就会点偏。`None` / 空 = 还没画过，点击不生效。
+    pub body_area: Option<Rect>,
+    pub body_rows_log: Vec<Option<usize>>,
     /// 权限写入代数（连选两档只认最后一次回包）与 `perm` 段菜单（`None` = 未打开）。
     pub permission_generation: u64,
     pub permission_menu: Option<crate::tui_mode::permission_intent::PermissionMenu>,

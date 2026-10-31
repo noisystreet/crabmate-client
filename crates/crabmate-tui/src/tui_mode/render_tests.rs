@@ -794,3 +794,22 @@ fn empty_composer_has_no_placeholder_by_default() {
         "默认不应画 composer 占位提示"
     );
 }
+
+/// 折叠光标：整行套选中底色，**内容一字不改**（它只是把手，不是新的状态行）。
+///
+/// 无色模式下 `Palette::selection` 换成 `REVERSED`，具体色值由 palette 的单测管；
+/// 这里锁「所有 span 都打上补丁、文本原样」—— 只染行首那一格是常见的手滑（那时
+/// 光标看起来像半个字符的强调，而不是「当前这条」）。
+#[test]
+fn fold_cursor_style_patches_every_span_and_keeps_the_text() {
+    let line = Line::from(vec![Span::raw("▸ "), Span::raw("2 个工具 · 完成")]);
+    let styled = md::with_row_style(line, Style::new().bg(Color::Red));
+
+    assert_eq!(styled.spans.len(), 2);
+    assert!(
+        styled.spans.iter().all(|s| s.style.bg == Some(Color::Red)),
+        "每个 span 都要带上底色"
+    );
+    let text: String = styled.spans.iter().map(|s| s.content.as_ref()).collect();
+    assert_eq!(text, "▸ 2 个工具 · 完成", "内容不该被改写");
+}
