@@ -160,6 +160,7 @@ mod tests {
     use crate::serve::StreamCancel;
 
     use super::super::approve::ApprovalPrompt;
+    use super::super::controls::Control;
     use super::super::lane_list::LaneStatus;
     use super::super::worker::{LaneId, LaneTx, UiEvent};
     use super::{test_app, test_client, test_prefs, test_shell};
@@ -489,6 +490,96 @@ mod tests {
             app.lanes[1].st.running,
             "running 留到 TurnDone 再清（与 Ctrl+C 同口径）"
         );
+    }
+
+    /// Ctrl+C 卡在审批浮层上：浮层必须撤掉，gate 立刻按拒绝收尾（issue #346）。
+    ///
+    /// 少这一步，SSE 消费仍阻塞在 gate 的 `recv` 上 —— 取消计数 +1 也白搭，要等满
+    /// `APPROVAL_WAIT`（600 s）才收尾，而屏幕上早已写着「正在取消回合…」。
+    #[test]
+    fn ctrl_c_with_an_approval_overlay_drops_the_answer() {
+        let client = test_client();
+        let mut prefs = [test_prefs()];
+        let mut app = test_shell(&client, &mut prefs);
+        let (answer, answer_rx) = mpsc::channel();
+        app.lanes[0].st.running = true;
+        app.lanes[0].st.begin_approval(&approval_req("rm"), answer);
+        let cancel = StreamCancel::new();
+        app.lanes[0].cancel = Some(cancel.clone());
+
+        app.lanes[0].on_ctrl_c();
+
+        assert!(app.lanes[0].st.approval.is_none(), "浮层要撤掉");
+        assert!(
+            answer_rx.recv().is_err(),
+            "answer 必须被 drop：gate 靠 Disconnected 立刻收尾，不必等 600s"
+        );
+        assert_eq!(cancel.requests(), 1, "取消只请求一次（2 才会被当成强退）");
+        assert!(
+            app.lanes[0].st.cancel_sent,
+            "要标成「取消」，排队消息才会退回输入框"
+        );
+        assert!(!app.lanes[0].exit, "第一次 Ctrl+C 不是退出");
+    }
+
+    /// 第一次 Ctrl+C 取消、第二次强退 —— 收尾收敛后这条既有语义不能被带偏。
+    #[test]
+    fn second_ctrl_c_while_cancelling_exits() {
+        let client = test_client();
+        let mut prefs = [test_prefs()];
+        let mut app = test_shell(&client, &mut prefs);
+        app.lanes[0].st.running = true;
+        let cancel = StreamCancel::new();
+        app.lanes[0].cancel = Some(cancel.clone());
+
+        app.lanes[0].on_ctrl_c();
+        assert_eq!(cancel.requests(), 1, "第一次只请求取消");
+        assert!(!app.lanes[0].exit);
+
+        app.lanes[0].on_ctrl_c();
+        assert!(app.lanes[0].exit, "第二次直接强退");
+        assert_eq!(
+            cancel.requests(),
+            1,
+            "强退不该再追加一次取消（那会被误当成 `>= 2` 的强退信号）"
+        );
+    }
+
+    /// 空闲 lane 上 Ctrl+C 就是退出：没有回合可取消时不该留下任何取消痕迹。
+    #[test]
+    fn ctrl_c_on_an_idle_lane_exits_immediately() {
+        let client = test_client();
+        let mut prefs = [test_prefs()];
+        let mut app = test_shell(&client, &mut prefs);
+
+        app.lanes[0].on_ctrl_c();
+
+        assert!(app.lanes[0].exit, "空闲时 Ctrl+C 就是退出");
+        assert!(
+            !app.lanes[0].st.cancel_sent,
+            "没有回合可取消，不该留下取消标记（否则排队消息会被误当成被取消）"
+        );
+    }
+
+    /// `/quit` 卡在审批浮层上：同样必须撤浮层，否则退出要白等 600 s（issue #346）。
+    #[test]
+    fn quitting_while_waiting_for_approval_drops_the_answer() {
+        let client = test_client();
+        let mut prefs = [test_prefs()];
+        let mut app = test_shell(&client, &mut prefs);
+        let (answer, answer_rx) = mpsc::channel();
+        app.lanes[0].st.running = true;
+        app.lanes[0].st.begin_approval(&approval_req("rm"), answer);
+
+        app.lanes[0].apply_control(Control::Quit);
+
+        assert!(app.lanes[0].st.approval.is_none(), "浮层要撤掉");
+        assert!(
+            answer_rx.recv().is_err(),
+            "answer 必须被 drop：gate 靠 Disconnected 立刻收尾"
+        );
+        assert!(app.lanes[0].quit_pending, "取消完再退，不是立刻退");
+        assert!(!app.lanes[0].exit, "还在取消中，本轮还没走");
     }
 
     /// `/lane detach` 摘掉一条**正在跑**的 lane：必须先停掉它那一轮（issue #339）。

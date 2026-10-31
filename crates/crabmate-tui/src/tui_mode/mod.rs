@@ -238,18 +238,10 @@ impl LaneApp<'_> {
 
 impl LaneApp<'_> {
     fn on_ctrl_c(&mut self) {
-        if !self.st.running {
-            self.exit = true;
-            return;
-        }
-        if !self.st.cancel_sent {
-            self.st.cancel_sent = true;
-            self.st
-                .push_line(LineKind::System, "正在取消回合…（再按一次 Ctrl+C 强退）");
-            if let Some(c) = &self.cancel {
-                c.cancel();
-            }
-        } else {
+        // 第一次 = 取消（走统一收尾：卡在审批浮层时也立刻撤掉，否则 gate 要等满
+        // `APPROVAL_WAIT` 才收尾，而屏幕早已写着「正在取消回合…」—— issue #346）；
+        // 第二次 = 强退。空闲 lane 上直接退出。
+        if !self.request_stop("正在取消回合…（再按一次 Ctrl+C 强退）") {
             self.exit = true;
         }
     }
@@ -412,22 +404,17 @@ impl LaneApp<'_> {
     fn apply_control(&mut self, control: Control) {
         match control {
             Control::Quit => {
-                if self.st.running {
-                    if !self.st.cancel_sent {
-                        self.st.cancel_sent = true;
-                        if let Some(c) = &self.cancel {
-                            c.cancel();
-                        }
-                        self.st.push_line(
-                            LineKind::System,
-                            "正在取消回合…完成后退出整个 TUI（所有连接；只摘一条用 /lane detach，再按一次 Ctrl+C 强退）",
-                        );
-                    } else {
-                        self.exit = true;
-                    }
-                    self.quit_pending = true;
-                } else {
+                // 忙时先取消并等这一轮收尾，走与 Ctrl+C 同一个收尾入口（**撤审批浮层**
+                // 也在里面 —— 少了它，卡审批的回合要等满 `APPROVAL_WAIT` 才收尾，
+                // 退出就白等 600 s，issue #346）；已经在取消中则直接退出。
+                let stopping = self.request_stop(
+                    "正在取消回合…完成后退出整个 TUI（所有连接；只摘一条用 /lane detach，再按一次 Ctrl+C 强退）",
+                );
+                if !stopping {
                     self.exit = true;
+                }
+                if self.st.running {
+                    self.quit_pending = true;
                 }
             }
             Control::Help => self.show_help(),
