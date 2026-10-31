@@ -31,6 +31,7 @@ mod mouse;
 mod palette;
 mod pane_width;
 mod paste;
+mod pending_lane;
 mod permission_intent;
 mod pulse;
 mod read_jobs;
@@ -78,7 +79,8 @@ use crate::serve::{
 use self::approve::decision_summary;
 use self::controls::{Control, clear_word, parse_control, set_mode_field, set_override_field};
 use self::hotkeys::{is_alt_enter, is_ctrl, is_ctrl_c, is_ctrl_e, is_ctrl_o, is_ctrl_w};
-use self::inbound::{Inbound, ShellEvent};
+use self::inbound::Inbound;
+use self::pending_lane::PendingLanes;
 use self::render::StatusInfo;
 use self::settings::{PersistedSettings, normalize};
 use self::settings_panel::SettingsPanel;
@@ -186,6 +188,11 @@ struct TuiApp<'a> {
     next_lane_id: u32,
     /// 回合结束后的会话刷新收敛点：各 lane 置意图位，这里按窗口合并后统一发。
     session_refresh: session_refresh::SessionRefresh,
+    /// 待就绪的 lane：`/lane new` 已写声明、ctl 还没把它起好。
+    ///
+    /// 左栏画成 `◌` / `✗` 一行（见 [`pending_lane`]），**不**进 `lanes` —— 它们还不是
+    /// 连接：没有 URL、没有事件通道，也点不进去。
+    pending: PendingLanes,
 }
 
 impl<'a> TuiApp<'a> {
@@ -239,20 +246,6 @@ impl<'a> TuiApp<'a> {
                 }
             }
             Inbound::Shell(ev) => self.on_shell(ev),
-        }
-    }
-
-    /// 外壳动作：只有这一层能改 `lanes`（单条 lane 没有那份 `&mut`）。
-    fn on_shell(&mut self, ev: ShellEvent) {
-        match ev {
-            // 新 lane 的装配：目标 lane 此刻还不存在，按 id 分发无处可去。
-            ShellEvent::Ready { from, name, result } => self.on_lane_ready(from, name, result),
-            // 摘连接：`LaneApp` 手上没有 `lanes` 的 `&mut`（见 `shell::detach_lane`）。
-            ShellEvent::Detach { name } => self.detach_lane(&name),
-            // 取消某条 lane 的回合：`LaneApp` 只握着自己的 `cancel`。
-            ShellEvent::Cancel { name } => self.cancel_lane(&name),
-            // 翻声明的回执：关掉声明后还要顺手摘掉本进程那条连接。
-            ShellEvent::Toggled { from, result } => self.on_lane_toggled(from, result),
         }
     }
 }

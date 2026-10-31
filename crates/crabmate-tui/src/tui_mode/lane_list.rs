@@ -95,11 +95,12 @@ impl LaneStatus {
 /// 画出整块 lane 区：标题行 + 每条 lane 一行底色条，行与行之间不留空行。
 ///
 /// 色条左右各内缩 1 列（与左右侧栏的内容区同口径）；条数少于可用行时下方留空
-/// （不拉伸），多于可用行时按行截断并在标题补 `↓n`。
+/// （不拉伸），多于可用行时按行截断并在标题补 `↓n`。待就绪的 lane 排在真连接之后。
 pub(super) fn render_lane_list(
     frame: &mut Frame,
     area: Rect,
     lanes: &[LaneEntry],
+    pending: &[super::pending_lane::PendingLane],
     palette: &Palette,
 ) {
     let inner = Rect::new(
@@ -111,7 +112,7 @@ pub(super) fn render_lane_list(
     if inner.width == 0 || inner.height == 0 {
         return;
     }
-    let rows = lane_list_rows(lanes, inner.width as usize, inner.height, palette);
+    let rows = lane_list_rows(lanes, pending, inner.width as usize, inner.height, palette);
     frame.render_widget(Paragraph::new(rows), inner);
 }
 
@@ -121,6 +122,7 @@ pub(super) fn render_lane_list(
 /// 渲染不该为了画一行去借遍所有 lane（那会把借用冲突引到渲染路径上）。
 fn lane_list_rows(
     lanes: &[LaneEntry],
+    pending: &[super::pending_lane::PendingLane],
     width: usize,
     height: u16,
     palette: &Palette,
@@ -138,6 +140,12 @@ fn lane_list_rows(
     )));
     for entry in lanes.iter().take(shown) {
         rows.push(lane_row(entry, width, palette));
+    }
+    // 待就绪行**排在真连接之后**：`layout::lane_index_at` 只把前 `lanes.len()` 行映射成
+    // 下标，于是它们点不到 —— 点一行却切到某条真 lane，比点不动糟得多。
+    let room = avail.saturating_sub(shown as u16) as usize;
+    for item in pending.iter().take(room) {
+        rows.push(pending_row(item, width, palette));
     }
     rows
 }
@@ -201,6 +209,56 @@ fn lane_row(entry: &LaneEntry, width: usize, palette: &Palette) -> Line<'static>
         Span::styled(head, head_style),
         Span::styled(rest, base),
     ])
+}
+
+/// 一条待就绪 lane 的一行：`◌ name`（启动中 / 超时）或 `✗ name`（起不来）。
+///
+/// 与 [`lane_row`] 一样整行补空格到 `width` —— 只给文字上底色的话，条会缩成「文字那么
+/// 宽」，看起来像一行普通文字而不是列表项。但它**没有** `▎` 与读数：这条还不在
+/// `lanes` 里，既不能聚焦，也没有上下文 / 耗时 / 未读点。
+///
+/// 失败用错误色：那是一条需要用户动手的信号。启动中 / 超时用淡色 —— 它自己会变，
+/// 不该抢真连接的注意力。
+fn pending_row(
+    item: &super::pending_lane::PendingLane,
+    width: usize,
+    palette: &Palette,
+) -> Line<'static> {
+    use super::pending_lane::PendingState;
+
+    let base = Style::new().fg(palette.muted).bg(palette.overlay_bg);
+    let head_style = match item.state {
+        PendingState::Failed(_) => base.fg(palette.err),
+        PendingState::Starting | PendingState::TimedOut => base,
+    };
+    let head = item.state.mark();
+    let head_w = UnicodeWidthStr::width(head);
+    let rest_w = width.saturating_sub(head_w);
+    let text = pending_text(item, rest_w);
+    Line::from(vec![
+        Span::styled(head, head_style),
+        Span::styled(pad_display(&truncate_display(&text, rest_w), rest_w), base),
+    ])
+}
+
+/// `名字` + 右对齐尾注（`超时` / 失败原文）；装不下时从右截断，名字优先。
+fn pending_text(item: &super::pending_lane::PendingLane, width: usize) -> String {
+    let mut text = format!(" {}", item.name);
+    let note = item.state.note();
+    if note.is_empty() {
+        return text;
+    }
+    // 尾注最多占半行：这一行的主语是名字。
+    let used = UnicodeWidthStr::width(text.as_str());
+    let room = width.saturating_sub(used + 1).min(width / 2);
+    if room == 0 {
+        return text;
+    }
+    let note = truncate_display(note, room);
+    let gap = width.saturating_sub(used + UnicodeWidthStr::width(note.as_str()));
+    text.push_str(&" ".repeat(gap));
+    text.push_str(&note);
+    text
 }
 
 /// 行尾读数：`62% 12s •`，按重要性**从右往左**排 —— 最右的未读点最重要（它就是
@@ -425,6 +483,11 @@ mod tests {
         Palette::default()
     }
 
+    /// 测试里的 lane 区行：默认没有待就绪行（那一条路径单独测：`pending_rows_*`）。
+    fn rows_of(lanes: &[LaneEntry], width: usize, height: u16) -> Vec<Line<'static>> {
+        lane_list_rows(lanes, &[], width, height, &pal())
+    }
+
     /// 只有名字、第一条是当前 lane —— 大多数测试只关心这个。
     fn lanes(names: &[&str]) -> Vec<LaneEntry> {
         names
@@ -447,7 +510,7 @@ mod tests {
     /// 单 lane：标题 1 行 + 1 行底色条，其余行留空（版面高度固定，不随条数拉伸）。
     #[test]
     fn one_lane_takes_one_row_under_the_title() {
-        let rows = lane_list_rows(&lanes(&["local"]), 20, 20, &pal());
+        let rows = rows_of(&lanes(&["local"]), 20, 20);
         // 1（标题）+ 1（那条 lane）= 2 行有内容，其余交给调用方的底色。
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].spans[0].content.as_ref(), "连接 [1]");
@@ -459,7 +522,7 @@ mod tests {
     /// 当前 lane 用选中底色 + 竖条标记；其它 lane 用一档抬升底色，每条各占一行。
     #[test]
     fn active_lane_is_marked_and_tinted() {
-        let rows = lane_list_rows(&lanes(&["a", "b"]), 20, 20, &pal());
+        let rows = rows_of(&lanes(&["a", "b"]), 20, 20);
         // 一条一行：a = rows[1]，b = rows[2]。
         let a = &rows[1];
         let b = &rows[2];
@@ -469,10 +532,70 @@ mod tests {
         assert_eq!(b.spans[0].style.bg, Some(pal().overlay_bg));
     }
 
+    /// 待就绪行排在真连接之后，各占一行；失败那行带 `✗` 与原因原文。
+    ///
+    /// 位置是刻意的：`layout::lane_index_at` 只把前 `lanes.len()` 行映射成下标，
+    /// 所以这些行点不动 —— 点一行却切到某条真 lane，比点不动糟得多。
+    #[test]
+    fn pending_rows_follow_the_connections() {
+        use crate::tui_mode::pending_lane::{PendingLane, PendingState};
+
+        let pending = vec![
+            PendingLane {
+                name: "proj-c".to_string(),
+                state: PendingState::Starting,
+            },
+            PendingLane {
+                name: "proj-d".to_string(),
+                state: PendingState::Failed("工作区不在白名单".to_string()),
+            },
+        ];
+        let rows = lane_list_rows(&lanes(&["local"]), &pending, 40, 20, &pal());
+        let texts: Vec<String> = rows.iter().map(row_text).collect();
+        assert_eq!(texts.len(), 4, "标题 + 1 条真连接 + 2 条待就绪：{texts:?}");
+        assert!(texts[1].contains("local"), "{texts:?}");
+        assert!(
+            texts[2].contains('◌') && texts[2].contains("proj-c"),
+            "启动中那行要带 ◌ 与名字：{texts:?}"
+        );
+        assert!(
+            texts[3].contains('✗') && texts[3].contains("proj-d"),
+            "{texts:?}"
+        );
+        assert!(
+            texts[3].contains("工作区不在白名单"),
+            "失败原因要露出来：{texts:?}"
+        );
+        assert!(
+            !texts[2].contains('▎'),
+            "待就绪行没有聚焦标记（它不在 lanes 里）：{texts:?}"
+        );
+        // 标题行不铺底色（不补宽），所以只查各行条。
+        for row in &texts[1..] {
+            assert_eq!(UnicodeWidthStr::width(row.as_str()), 40, "{row:?}");
+        }
+    }
+
+    /// 超时仍画 `◌` —— 实例可能还在起，只是加一句「超时」。
+    #[test]
+    fn timed_out_row_still_reads_as_starting() {
+        use crate::tui_mode::pending_lane::{PendingLane, PendingState};
+
+        let pending = vec![PendingLane {
+            name: "proj-c".to_string(),
+            state: PendingState::TimedOut,
+        }];
+        let rows = lane_list_rows(&lanes(&["local"]), &pending, 40, 20, &pal());
+        let text = row_text(&rows[2]);
+        assert!(text.contains('◌'), "{text}");
+        assert!(text.contains("超时"), "{text}");
+        assert!(!text.contains('✗'), "超时不是失败结论：{text}");
+    }
+
     /// 每行宽度恒等于内容区宽度：色块必须是矩形，不是「文字那么宽」的底色。
     #[test]
     fn every_row_fills_the_width() {
-        let rows = lane_list_rows(&lanes(&["local", "很长很长的连接名字"]), 16, 20, &pal());
+        let rows = rows_of(&lanes(&["local", "很长很长的连接名字"]), 16, 20);
         for r in &rows {
             let w: usize = r
                 .spans
@@ -497,7 +620,7 @@ mod tests {
     fn overflow_is_reported_in_the_title() {
         let names: Vec<String> = (0..30).map(|i| format!("lane{i}")).collect();
         let refs: Vec<&str> = names.iter().map(String::as_str).collect();
-        let rows = lane_list_rows(&lanes(&refs), 20, 10, &pal());
+        let rows = rows_of(&lanes(&refs), 20, 10);
         // 可用 9 行、块高 1 → 画 9 条，标题报 ↓21。
         assert_eq!(rows[0].spans[0].content.as_ref(), "连接 [30] ↓21");
         assert_eq!(rows.len(), 10);
@@ -506,15 +629,15 @@ mod tests {
     /// 只有标题行放得下时（高度 1）不 panic，且标题如实报出「全部被截掉」。
     #[test]
     fn one_row_only_shows_the_title() {
-        let rows = lane_list_rows(&lanes(&["a", "b"]), 20, 1, &pal());
+        let rows = rows_of(&lanes(&["a", "b"]), 20, 1);
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].spans[0].content.as_ref(), "连接 [2] ↓2");
     }
 
     #[test]
     fn zero_height_or_width_draws_nothing() {
-        assert!(lane_list_rows(&lanes(&["a"]), 0, 10, &pal()).is_empty());
-        assert!(lane_list_rows(&lanes(&["a"]), 10, 0, &pal()).is_empty());
+        assert!(rows_of(&lanes(&["a"]), 0, 10).is_empty());
+        assert!(rows_of(&lanes(&["a"]), 10, 0).is_empty());
     }
 
     /// 一实例一工作区，但那一行只写名字：工作区在右栏目录树标题与 `/lane` 里，
@@ -522,7 +645,7 @@ mod tests {
     #[test]
     fn lane_row_carries_the_label_only() {
         let entries = lanes(&["lane-a", "lane-b"]);
-        let rows = lane_list_rows(&entries, 40, 20, &pal());
+        let rows = rows_of(&entries, 40, 20);
         let a = row_text(&rows[1]);
         let b = row_text(&rows[2]);
         assert!(a.contains("lane-a"), "{a}");
@@ -534,7 +657,7 @@ mod tests {
     /// 一行只写「标记 + 符号 + 名字」，没有尾巴：窄条里多一个字都是挤出来的。
     #[test]
     fn row_text_is_mark_plus_label() {
-        let rows = lane_list_rows(&lanes(&["local"]), 20, 20, &pal());
+        let rows = rows_of(&lanes(&["local"]), 20, 20);
         assert_eq!(row_text(&rows[1]).trim(), "▎· local");
     }
 
@@ -572,7 +695,7 @@ mod tests {
     fn waiting_approval_is_marked_and_tinted() {
         let mut entries = lanes(&["lane-a", "lane-b"]);
         entries[1].status = LaneStatus::WaitingApproval;
-        let rows = lane_list_rows(&entries, 30, 20, &pal());
+        let rows = rows_of(&entries, 30, 20);
         let b = rows[2].spans[0].content.as_ref();
         assert!(b.contains('▲'), "等审批要有状态符号：{b}");
         assert_eq!(
@@ -606,7 +729,7 @@ mod tests {
         ] {
             let mut entries = lanes(&["lane-a"]);
             entries[0].status = status;
-            let rows = lane_list_rows(&entries, 30, 20, &pal());
+            let rows = rows_of(&entries, 30, 20);
             assert!(
                 rows[1].spans[0].content.starts_with('▎'),
                 "{status:?} 时仍要标出当前 lane"
@@ -621,7 +744,7 @@ mod tests {
         entries[0].context = Some("62%".to_string());
         entries[0].busy_secs = Some(12);
         entries[0].unread = true;
-        let rows = lane_list_rows(&entries, 40, 20, &pal());
+        let rows = rows_of(&entries, 40, 20);
         let line = row_text(&rows[1]);
         assert!(line.ends_with('•'), "未读点必须在最右：{line}");
         assert!(line.contains("62%"), "{line}");
@@ -639,14 +762,14 @@ mod tests {
         entries[0].busy_secs = Some(125);
         entries[0].unread = true;
         // 16 列：尾部最多占 8 列，装不下三个读数。
-        let rows = lane_list_rows(&entries, 16, 20, &pal());
+        let rows = rows_of(&entries, 16, 20);
         let line = row_text(&rows[1]);
         assert!(line.ends_with('•'), "{line}");
         assert!(!line.contains("100%"), "窄行先丢 ctx：{line}");
         assert_eq!(UnicodeWidthStr::width(line.as_str()), 16);
 
         // 更窄（12 列）：耗时也让位，只剩那个点。
-        let rows = lane_list_rows(&entries, 12, 20, &pal());
+        let rows = rows_of(&entries, 12, 20);
         let line = row_text(&rows[1]);
         assert!(line.ends_with('•'), "{line}");
         assert!(!line.contains("m0"), "耗时也要让位：{line}");
@@ -659,7 +782,7 @@ mod tests {
         let mut entries = lanes(&["lane-a"]);
         entries[0].status = LaneStatus::Running;
         entries[0].pulse = Some(pulse::STEPS - 1);
-        let rows = lane_list_rows(&entries, 30, 20, &pal());
+        let rows = rows_of(&entries, 30, 20);
         let line = row_text(&rows[1]);
         assert!(line.contains('●'), "字形仍是 `●`：{line}");
         assert_eq!(

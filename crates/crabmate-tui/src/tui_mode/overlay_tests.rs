@@ -40,7 +40,7 @@ fn render_frame(st: &mut UiState, panel: Option<&PanelContent>) -> Buffer {
     let info = status_info();
     let mut terminal = Terminal::new(TestBackend::new(W, H)).expect("terminal");
     terminal
-        .draw(|f| draw(f, st, &info, &rows, panel, &[]))
+        .draw(|f| draw(f, st, &info, &rows, panel, &[], &[]))
         .expect("draw");
     terminal.backend().buffer().clone()
 }

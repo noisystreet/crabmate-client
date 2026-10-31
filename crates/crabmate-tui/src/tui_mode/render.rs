@@ -526,6 +526,9 @@ pub fn draw(
     panel: Option<&PanelContent>,
     // 外壳层算好的 lane 快照（名字 / 状态 / 是否当前）；`len == 0` 时不占版面。
     lanes: &[super::lane_list::LaneEntry],
+    // 待就绪的 lane（`/lane new` 已写声明、ctl 还没起好）：排在真连接之后，
+    // 不属于 `lanes` —— 它们还不是连接，也没有点击目标。
+    pending: &[super::pending_lane::PendingLane],
 ) {
     let area = frame.area();
     // 右栏底部状态栈的行数（与 `status_stack::stack_lines` 同源，否则底部会空行 / 末段被裁）。
@@ -561,7 +564,7 @@ pub fn draw(
     // 每条 lane 一行整行宽的底色条（当前 lane 用选中底色），自上而下堆叠，条数少时下方留空。
     if let Some(lane_pane) = p.left_lanes {
         paint_bg(frame, lane_pane, pal.chrome_bg);
-        super::lane_list::render_lane_list(frame, lane_pane, lanes, &pal);
+        super::lane_list::render_lane_list(frame, lane_pane, lanes, pending, &pal);
     }
     if let Some(rs) = p.right_status {
         render_status_stack(frame, rs, st, info, &pal);

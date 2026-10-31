@@ -24,7 +24,7 @@ use crabmate_client_api::ctl::{ToggleFailure, ToggleOutcome};
 use crate::SessionPrefs;
 use crate::serve::{ConnectionConfig, ServeClient};
 
-use super::inbound::Inbound;
+use super::inbound::{Inbound, ShellEvent};
 use super::state::{LineKind, UiState};
 use super::worker::{JobCancel, LaneId, UiEvent, WorkerJob, spawn_key_reader, spawn_worker};
 use super::{LaneApp, TuiApp, body_cache, drafts, event_loop, session_index, worker_ctl};
@@ -138,6 +138,7 @@ pub async fn run_tui(
         template,
         next_lane_id,
         session_refresh: Default::default(),
+        pending: Default::default(),
     };
     // 每条 lane 都拉一次会话 / 工作区根 / serve 默认状态 / user-data 设置快照：
     // 只刷当前 lane 的话，切过去会看到空的会话列表（切 lane 不该触发网络请求）。
@@ -456,6 +457,28 @@ impl<'a> super::TuiApp<'a> {
         }
     }
 
+    /// 外壳动作：只有这一层能改 `lanes`（单条 lane 没有那份 `&mut`）。
+    pub(super) fn on_shell(&mut self, ev: ShellEvent) {
+        match ev {
+            // 新 lane 的装配：目标 lane 此刻还不存在，按 id 分发无处可去。
+            ShellEvent::Ready { from, name, result } => self.on_lane_ready(from, name, result),
+            // `/lane new` 的「启动中」：先把那一行摆出来，别让 20 s 的轮询看起来像没生效。
+            ShellEvent::Pending { name } => self.pending.upsert(&name),
+            // `/lane new` 的结局：就绪 → 装配；失败 / 超时 → 留在列表里并写回发起者。
+            ShellEvent::NewSettled {
+                from,
+                name,
+                outcome,
+            } => self.on_lane_new_settled(from, name, outcome),
+            // 摘连接：`LaneApp` 手上没有 `lanes` 的 `&mut`（见 `shell::detach_lane`）。
+            ShellEvent::Detach { name } => self.detach_lane(&name),
+            // 取消某条 lane 的回合：`LaneApp` 只握着自己的 `cancel`。
+            ShellEvent::Cancel { name } => self.cancel_lane(&name),
+            // 翻声明的回执：关掉声明后还要顺手摘掉本进程那条连接。
+            ShellEvent::Toggled { from, result } => self.on_lane_toggled(from, result),
+        }
+    }
+
     /// 装配并切到一条新 lane。
     ///
     /// 两重去重，缺一不可。**同名**只切过去：`--connect a=x --connect a=y` 这类手误若
@@ -734,6 +757,7 @@ impl<'a> super::TuiApp<'a> {
 #[cfg(test)]
 mod tests {
     use super::{MAX_LANES, capacity_notice, next_approval_index, toggle_report_lines};
+
     use crate::tui_mode::test_support::{test_client, test_prefs, test_shell};
     use crabmate_client_api::ctl::ToggleOutcome;
 
