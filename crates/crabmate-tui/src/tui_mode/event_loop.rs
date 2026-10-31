@@ -77,10 +77,23 @@ const MIN_FRAME_INTERVAL: Duration = Duration::from_millis(2);
 /// 下一轮最多等多久。
 ///
 /// `spinner_left`：`Some(剩余)` = 生成中（按动画帧唤醒）；`None` = 静止（用兜底）。
-pub(super) fn next_wait(spinner_left: Option<Duration>) -> Duration {
-    match spinner_left {
+/// `refresh_left`：还有多久该补发一次「回合结束后的会话刷新」（`None` = 没有待发）。
+///
+/// 刷新 deadline 必须作为一个等待源参与：它若短于兜底，而回合结束后界面正处在
+/// 静止态，下一轮就要等到 `IDLE_FALLBACK`（1s）才醒 —— 新会话会在左栏迟迟不出现
+/// （issue #349）。
+pub(super) fn next_wait(
+    spinner_left: Option<Duration>,
+    refresh_left: Option<Duration>,
+) -> Duration {
+    let idle = match spinner_left {
         Some(left) => left.max(MIN_TICK),
         None => IDLE_FALLBACK,
+    };
+    match refresh_left {
+        // 与动画帧同一口径：不足一帧也等满一帧，别把 `recv_timeout(0)` 变成忙转。
+        Some(left) => idle.min(left.max(MIN_TICK)),
+        None => idle,
     }
 }
 
@@ -166,6 +179,9 @@ impl TuiApp<'_> {
             if self.exit_requested() {
                 return Ok(());
             }
+            // 回合结束后的会话刷新在这里收敛：各 lane 只置意图位，按窗口合并再发
+            // （issue #349）。先发请求、再画当前状态。
+            self.flush_session_refresh(Instant::now());
             if mode == LoopMode::Event {
                 // 帧率下限（`interval` 靠循环末尾那个 sleep）。
                 throttle_frame(last_draw);
@@ -199,7 +215,9 @@ impl TuiApp<'_> {
             .lane()
             .spinning()
             .then(|| self.lane().spinner.remaining());
-        let got = self.rx.recv_timeout(next_wait(left));
+        // 会话刷新的窗口剩余同样是唤醒源（见 `next_wait`）。
+        let refresh_left = self.session_refresh.until_due(Instant::now());
+        let got = self.rx.recv_timeout(next_wait(left, refresh_left));
         match got {
             Ok(msg) => self.on_msg(msg),
             // 超时醒来只为画动画帧 / 兜底查尺寸，本轮没有消息。
@@ -332,18 +350,37 @@ mod tests {
     #[test]
     fn wait_animates_while_generating() {
         let left = Duration::from_millis(80);
-        assert_eq!(next_wait(Some(left)), left, "生成中按动画帧唤醒");
+        assert_eq!(next_wait(Some(left), None), left, "生成中按动画帧唤醒");
     }
 
     #[test]
     fn wait_clamps_zero_to_min_tick() {
         // 已过期不能算成 0，否则 `recv_timeout(0)` 变成忙转。
-        assert_eq!(next_wait(Some(Duration::ZERO)), MIN_TICK);
+        assert_eq!(next_wait(Some(Duration::ZERO), None), MIN_TICK);
     }
 
     #[test]
     fn wait_idle_falls_back() {
-        assert_eq!(next_wait(None), IDLE_FALLBACK);
+        assert_eq!(next_wait(None, None), IDLE_FALLBACK);
+    }
+
+    #[test]
+    fn wait_is_capped_by_a_pending_session_refresh() {
+        // 窗口剩余比兜底短就得按它醒，否则新会话要等到 1s 兜底才进左栏。
+        assert_eq!(
+            next_wait(None, Some(Duration::from_millis(30))),
+            Duration::from_millis(30)
+        );
+        // 已经到点 / 比一帧还短：按最短帧醒，本轮就能发出去，但不忙转。
+        assert_eq!(next_wait(None, Some(Duration::ZERO)), MIN_TICK);
+        // 动画帧更急时听动画帧的。
+        assert_eq!(
+            next_wait(
+                Some(Duration::from_millis(8)),
+                Some(Duration::from_millis(90))
+            ),
+            MIN_TICK
+        );
     }
 
     #[test]

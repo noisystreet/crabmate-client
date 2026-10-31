@@ -99,6 +99,7 @@ pub(super) fn lane_with_tx<'a>(
         bg: None,
         // 测试默认不启用控制面：`/ctl` 会走「未启用」分支，除非用例自己设路径。
         ctl_socket: None,
+        session_refresh_pending: false,
     }
 }
 
@@ -121,13 +122,26 @@ pub(super) fn test_app<'a>(
 /// 放在模块顶层而不是某个用例的私有辅助里：**外壳级**判定与收尾
 /// （`exit_requested`、退出落盘的逐 lane 遍历）都必须有多 lane 才测得出来。
 pub(super) fn test_shell<'a>(client: &'a ServeClient, prefs: &'a mut [SessionPrefs]) -> TuiApp<'a> {
+    test_shell_with_jobs(client, prefs).0
+}
+
+/// 同 [`test_shell`]，另把各 lane 的 `job_rx` 交出来。
+///
+/// 回合结束后的会话刷新收敛到外壳（issue #349）之后，「发没发、发了几次」只能靠
+/// `job_rx` 断言 —— 事件通道上看不到这条边界。
+pub(super) fn test_shell_with_jobs<'a>(
+    client: &'a ServeClient,
+    prefs: &'a mut [SessionPrefs],
+) -> (TuiApp<'a>, Vec<mpsc::Receiver<WorkerJob>>) {
     let (shell_tx, rx) = mpsc::channel();
     let mut lanes = Vec::new();
+    let mut job_rxs = Vec::new();
     // 条数在借出去之前记下：`prefs` 会被逐条 `iter_mut` 借到 `'a`，循环后再
     // 读 `len()` 会与那份借用冲突。
     let count = prefs.len();
     for (i, p) in prefs.iter_mut().enumerate() {
-        let (job_tx, _job_rx) = mpsc::channel();
+        let (job_tx, job_rx) = mpsc::channel();
+        job_rxs.push(job_rx);
         lanes.push(lane_with_tx(
             LaneId(i as u32 + 1),
             client,
@@ -137,7 +151,7 @@ pub(super) fn test_shell<'a>(client: &'a ServeClient, prefs: &'a mut [SessionPre
         ));
     }
     let next_lane_id = count as u32 + 1;
-    TuiApp {
+    let app = TuiApp {
         lanes,
         active: 0,
         rx,
@@ -150,7 +164,9 @@ pub(super) fn test_shell<'a>(client: &'a ServeClient, prefs: &'a mut [SessionPre
             ctl_socket: None,
             tx: shell_tx,
         },
-    }
+        session_refresh: Default::default(),
+    };
+    (app, job_rxs)
 }
 
 #[cfg(test)]

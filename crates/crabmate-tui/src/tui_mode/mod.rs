@@ -37,6 +37,7 @@ mod render;
 mod resume;
 mod serve_defaults;
 mod session_index;
+mod session_refresh;
 mod settings;
 mod settings_panel;
 mod shell;
@@ -155,6 +156,11 @@ struct LaneApp<'a> {
     /// worker 执行，结果写进当前 lane 的 transcript，所以按 lane 存一份读起来最自然；
     /// 各 lane 的值在构造时相同，不存在「谁改了谁」的问题。
     ctl_socket: Option<std::path::PathBuf>,
+    /// 回合结束、待外壳统一发送的会话刷新意图（见 [`session_refresh`]）。
+    ///
+    /// 只置位、不在这里发请求：每条 lane 每轮各发一次 `RefreshSessions` 就是 N 倍
+    /// 扇出，外壳按窗口合并后再发（issue #349）。
+    session_refresh_pending: bool,
 }
 
 /// 多 lane 外壳：持有 N 条 lane 与当前聚焦的那条。
@@ -172,6 +178,8 @@ struct TuiApp<'a> {
     template: LaneTemplate,
     /// 下一条 lane 的编号。**不复用**已退出 lane 的号：`LaneId` 单调递增才没有 ABA。
     next_lane_id: u32,
+    /// 回合结束后的会话刷新收敛点：各 lane 置意图位，这里按窗口合并后统一发。
+    session_refresh: session_refresh::SessionRefresh,
 }
 
 impl<'a> TuiApp<'a> {
@@ -692,8 +700,9 @@ impl LaneApp<'_> {
             self.st
                 .push_line(LineKind::System, &format!("回合出错：{msg}"));
         }
-        // 回合后会话列表可能变化（新会话绑定 id / 标题），静默刷新。
-        self.refresh_sessions();
+        // 回合后会话列表可能变化（新会话绑定 id / 标题）。只置意图位，由外壳按窗口
+        // 合并后统一发（issue #349）。
+        self.session_refresh_pending = true;
         if self.quit_pending {
             self.exit = true;
             return;
