@@ -3,7 +3,10 @@
 //! 与状态栈那个 chip（[`super::status_connection_chip`]）的分工：
 //!
 //! - chip 在**右列**、随状态栈一起被窄屏规则隐藏，单连接时是「进设置」的按钮；
-//! - 这里在**左栏**、每窗口一行，单连接也显示 —— 位置与 TUI 的「左栏下半」同位。
+//! - 这里在**左栏**、每窗口一行，单连接也显示 —— 版面与 TUI 的「左栏下半」是
+//!   同一条口径：恒占左栏一半高度、与条数无关（`tui_multi_server.md` §4.6 的
+//!   `layout::lane_pane_height`），条数少时下方留空、不拉伸。落地在
+//!   `frontend/styles/sidebar.css` 的 `.nav-rail-connections`（`flex: 0 0 50%`）。
 //!
 //! 数据面复用 [`connection_feed`]：那是应用级 signal（每个 WASM 实例一份），订阅只装一次，
 //! 两个消费者读同一份名单。
