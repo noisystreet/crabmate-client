@@ -307,17 +307,24 @@ pub async fn tauri_list_connections_json() -> Result<String, String> {
 
 /// 订阅 `connections_changed`；回调收到 JSON 文本。
 ///
-/// 返回 `Ok(false)` = 这个壳没有 event 能力（浏览器 / 老壳），调用方应退化为「只读一次
-/// 名单」，**不要**当成错误。注册成功返回 `Ok(true)`。
+/// 返回 `Ok(None)` = 这个壳没有 event 能力（浏览器 / 老壳），调用方应退化为「只读一次
+/// 名单」，**不要**当成错误。注册成功返回 `Ok(Some(unlisten))` —— 调用方**必须**在
+/// 卸载时调用它：否则回调会继续 `set` 一个已经 drop 的 signal。
 #[cfg(target_arch = "wasm32")]
-pub async fn tauri_listen_connections_changed(cb: js_sys::Function) -> Result<bool, String> {
+pub async fn tauri_listen_connections_changed(
+    cb: js_sys::Function,
+) -> Result<Option<wasm_bindgen::JsValue>, String> {
     if !tauri_shell_available() {
-        return Ok(false);
+        return Ok(None);
     }
     let value = JsFuture::from(listen_tauri_connections_changed(&cb))
         .await
         .map_err(|e| format!("{e:?}"))?;
-    Ok(!value.is_null() && !value.is_undefined())
+    if value.is_null() || value.is_undefined() {
+        Ok(None)
+    } else {
+        Ok(Some(value))
+    }
 }
 
 /// 把自己的连接登记进壳的协调面（`register_connection`）。
