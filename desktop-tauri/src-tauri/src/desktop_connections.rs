@@ -270,6 +270,47 @@ pub(crate) fn open_connection(
     Ok(snapshot)
 }
 
+/// 开一条**待连接**窗口：只载连接页，连哪台 `serve` 由用户在新窗口里选。
+///
+/// 与 [`open_connection`] 的分工：那条已经有 `api_base`，建完直接交接进业务 UI；这条把
+/// 选址交给连接页。设置页的按钮因此不必先读一个 draft 基址，也就不会和旁边「保存基址」
+/// （改**当前窗口**连谁）的语义打架。
+///
+/// 连接成功后由业务 UI 的 `StatusConnectionChip` 调 `register_connection` 自报，
+/// 那条占位快照随之被真实 `authority` 覆盖（同一个 window label）。在此之前它在名单里是
+/// **空基址**的一条 —— chip 的单条分支对空基址整段不渲染，多连接列表里则显示为无名行。
+///
+/// 占位仍然必须先做：`unique_key` 只看注册表，不占位时连点两次会拿到同一个 label，
+/// 而 `WebviewWindowBuilder` 遇重名 label 直接失败（与 [`open_connection`] 同一理由）。
+#[tauri::command]
+pub(crate) fn open_connect_window(
+    app: AppHandle,
+    display_name: Option<String>,
+) -> Result<ConnectionSnapshot, String> {
+    let state = registry(&app).ok_or_else(|| "连接注册表未就绪".to_string())?;
+    let name = display_name.unwrap_or_default();
+    // 空基址：`ConnectionKey::derive` 退到 `FALLBACK_KEY`，`unique_key` 在其上加序号。
+    let key = state.unique_key(Some(name.as_str()), "");
+    let mut snapshot = ConnectionSnapshot::new(name, "");
+    snapshot.key = key.clone();
+    state.upsert(key.as_str(), snapshot.clone());
+
+    if let Err(error) = crate::desktop_main_window::create_pending_connection_window(
+        &app,
+        key.as_str(),
+        &snapshot.display_name,
+    ) {
+        // 建窗失败：撤掉占位，别在列表里留一条打不开的连接。
+        state.remove(key.as_str());
+        return Err(error);
+    }
+
+    snapshot.active = true;
+    state.upsert(snapshot.key.as_str(), snapshot.clone());
+    broadcast(&app);
+    Ok(snapshot)
+}
+
 /// 窗口报告状态变化（回合开始 / 等审批 / 空闲）。
 ///
 /// 进入等审批时会按需发系统通知 —— 见 [`notify_approval`]。

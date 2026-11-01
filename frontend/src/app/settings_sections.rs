@@ -359,6 +359,38 @@ pub(crate) fn SettingsApiBaseBlock(
     }
 }
 
+/// Connection 段的「新建连接窗口」（桌面多窗口）。
+///
+/// 只有一个按钮，且**不读**旁边 `SettingsApiBaseBlock` 的 draft：那个 block 的语义是
+/// 「改**当前窗口**连谁」，本按钮是「再开一个窗口走连接页」，吃同一个 draft 会让两个
+/// 动作看起来是一回事。
+///
+/// 非桌面壳（Android / Web 共用同一份 WASM）不渲染：`open_connect_window` 只存在于桌面壳，
+/// 浏览器里没有 `__TAURI__`，点了就是静默无事 —— 藏起来比留一个没反应的按钮好。
+#[component]
+pub(crate) fn SettingsConnectionNewWindowBlock(locale: RwSignal<Locale>) -> impl IntoView {
+    view! {
+        <Show when=move || crate::tauri_shell::tauri_shell_available()>
+            <div class="settings-block" data-testid="settings-connection-new-window-block">
+                <h3 class="settings-block-title">
+                    {move || i18n::settings_connection_new_window_title(locale.get())}
+                </h3>
+                <p class="settings-hint">
+                    {move || i18n::settings_connection_new_window_hint(locale.get())}
+                </p>
+                <button
+                    type="button"
+                    class="btn btn-primary btn-sm"
+                    data-testid="settings-connection-new-window"
+                    on:click=move |_| crate::tauri_shell::tauri_open_connect_window(None)
+                >
+                    {move || i18n::settings_connection_new_window(locale.get())}
+                </button>
+            </div>
+        </Show>
+    }
+}
+
 #[component]
 pub(crate) fn SettingsLlmBlock(bundle: SettingsLlmBlockBundle) -> impl IntoView {
     let SettingsLlmBlockBundle {

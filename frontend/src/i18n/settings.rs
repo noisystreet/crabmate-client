@@ -404,6 +404,29 @@ pub fn settings_section_connection_desc(_l: Locale) -> &'static str {
     ""
 }
 
+pub fn settings_connection_new_window_title(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "多连接",
+        Locale::En => "Multiple connections",
+    }
+}
+
+pub fn settings_connection_new_window(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "新建连接窗口",
+        Locale::En => "New connection window",
+    }
+}
+
+pub fn settings_connection_new_window_hint(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "新窗口从连接页开始，连哪台 serve 在那边选。一个窗口一条连接，互不影响。",
+        Locale::En => {
+            "The new window starts on the connect page, so pick the serve there. One connection per window."
+        }
+    }
+}
+
 pub fn settings_section_appearance_title(l: Locale) -> &'static str {
     match l {
         Locale::ZhHans => "外观与界面",

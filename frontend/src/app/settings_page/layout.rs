@@ -12,10 +12,10 @@ use super::super::settings_models_registry::{
 };
 use super::super::settings_permission_block::SettingsPermissionBlock;
 use super::super::settings_sections::{
-    SettingsApiBaseBlock, SettingsAppearanceBlock, SettingsExecutorLlmBlock,
-    SettingsExecutorLlmBlockBundle, SettingsLlmBlock, SettingsLlmBlockBundle, SettingsSessionBlock,
-    SettingsSessionTypographyBundle, SettingsShortcutsBlock, SettingsToolsBlock,
-    SettingsWebApiBearerBlock,
+    SettingsApiBaseBlock, SettingsAppearanceBlock, SettingsConnectionNewWindowBlock,
+    SettingsExecutorLlmBlock, SettingsExecutorLlmBlockBundle, SettingsLlmBlock,
+    SettingsLlmBlockBundle, SettingsSessionBlock, SettingsSessionTypographyBundle,
+    SettingsShortcutsBlock, SettingsToolsBlock, SettingsWebApiBearerBlock,
 };
 use super::hash_routing::{SettingsSection, write_settings_section_to_hash};
 use super::section_copy::{section_desc, section_title};
@@ -250,6 +250,7 @@ pub(super) fn SettingsPageContentPanels(
                     input_id="settings-page-api-base"
                     save_nonce=web_api_bearer_save_nonce
                 />
+                <SettingsConnectionNewWindowBlock locale=appearance_locale />
             </Show>
             <Show when=move || active_section.get() == SettingsSection::Appearance>
                 <SettingsAppearanceBlock

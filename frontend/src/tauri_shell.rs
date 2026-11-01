@@ -85,6 +85,13 @@ export function invokeTauriFocusConnection(key) {
   return tauriInvoke("focus_connection", { key });
 }
 
+// 只开一个连接页窗口（连哪台 serve 由用户在新窗口里选）；不带基址。
+export function invokeTauriOpenConnectWindow(displayName) {
+  return tauriInvoke("open_connect_window", {
+    displayName: displayName ?? null,
+  });
+}
+
 // 返回 Promise<unlisten|null>。null 表示这个壳没有 event 能力（浏览器 / 老壳），
 // 调用方据此退化为「只读一次名单」，而不是当成错误。
 export function listenTauriConnectionsChanged(cb) {
@@ -165,6 +172,8 @@ extern "C" {
     ) -> js_sys::Promise;
     #[wasm_bindgen(js_name = invokeTauriFocusConnection)]
     fn invoke_tauri_focus_connection(key: &str) -> js_sys::Promise;
+    #[wasm_bindgen(js_name = invokeTauriOpenConnectWindow)]
+    fn invoke_tauri_open_connect_window(display_name: Option<String>) -> js_sys::Promise;
     #[wasm_bindgen(js_name = listenTauriConnectionsChanged)]
     fn listen_tauri_connections_changed(cb: &js_sys::Function) -> js_sys::Promise;
     #[wasm_bindgen(js_name = installChatExternalLinkHandler)]
@@ -360,6 +369,29 @@ pub fn tauri_focus_connection(key: &str) {
         let _ = tauri_invoke_void(invoke_tauri_focus_connection(&key)).await;
     });
 }
+
+/// 开一个**只载连接页**的新窗口（桌面多窗口）。
+///
+/// 与 [`tauri_focus_connection`] 同为 fire-and-forget：建窗失败（注册表未就绪、同名 label）
+/// 只落在壳日志里。所以调用方要把按钮的渲染条件绑在 [`tauri_shell_available`] 上 ——
+/// 非桌面壳里这条命令根本不存在，点了只会静默无事。
+#[cfg(target_arch = "wasm32")]
+pub fn tauri_open_connect_window(display_name: Option<&str>) {
+    if !tauri_shell_available() {
+        return;
+    }
+    let name = display_name.map(str::to_string);
+    spawn_local(async move {
+        let _ = tauri_invoke_void(invoke_tauri_open_connect_window(name)).await;
+    });
+}
+
+/// 非 wasm（测试 / SSR）下开窗是 no-op。
+///
+/// 与 [`tauri_focus_connection`] 同理：它被设置页 `view!` 的点击处理引用，而那段代码在
+/// 两个目标下都编译。
+#[cfg(not(target_arch = "wasm32"))]
+pub fn tauri_open_connect_window(_: Option<&str>) {}
 
 /// 在系统默认浏览器中打开 URL。
 ///

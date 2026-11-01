@@ -328,6 +328,7 @@ fn main() {
             desktop_connections::list_connections,
             desktop_connections::connections_tally,
             desktop_connections::open_connection,
+            desktop_connections::open_connect_window,
             desktop_connections::register_connection,
             desktop_connections::report_connection_status,
             desktop_connections::report_connection_unread,
