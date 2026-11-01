@@ -22,8 +22,11 @@ const MAIN_UI_HEIGHT: f64 = 840.0;
 const CONNECT_FALLBACK_WIDTH: f64 = 480.0;
 const CONNECT_FALLBACK_HEIGHT: f64 = 420.0;
 
-/// WebView 底色（与前端深色壳一致）。
-const BOOT_SHELL_BG: Color = Color(0x0A, 0x0D, 0x12, 0xFF);
+/// WebView 底色（与前端深色壳一致，等于 `frontend/styles/tokens.css` 的 `--bg`）。
+///
+/// 无法引用 CSS 变量，只能把色值抄一份，故与启动页底色同理由
+/// `scripts/check-token-mirrors.sh` 冻结：改 `--bg` 未同步改这里即失败。
+const BOOT_SHELL_BG: Color = Color(0x07, 0x09, 0x0E, 0xFF);
 
 /// 主屏（或第一块屏）工作区：逻辑宽高 + 物理原点（供连接页铺满，页内 CSS 居中卡片）。
 #[derive(Clone, Copy, Debug)]
