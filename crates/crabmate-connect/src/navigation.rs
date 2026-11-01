@@ -77,9 +77,11 @@ pub fn decide_shell_navigation(
 }
 
 #[cfg(feature = "tauri")]
-fn clear_allowed_serve_origin<R: Runtime>(app: &AppHandle<R>) {
+fn clear_allowed_serve_origin<R: Runtime>(app: &AppHandle<R>, label: &str) {
     if let Some(allowed) = app.try_state::<AllowedServeOrigin>() {
-        allowed.clear();
+        // 只摘本窗口那条：多窗口时全清会连带删掉别的窗口的兜底白名单，
+        // 而那个窗口并没有断开。
+        allowed.clear_label(label);
     }
 }
 
@@ -93,14 +95,15 @@ fn clear_allowed_serve_origin<R: Runtime>(app: &AppHandle<R>) {
 #[must_use]
 pub fn allow_shell_navigation<R: Runtime>(webview: &Webview<R>, url: &Url) -> bool {
     let app = webview.app_handle();
+    let label = webview.label();
     let allowed_matches = app
         .try_state::<AllowedServeOrigin>()
-        .is_some_and(|s| s.matches_url(url));
+        .is_some_and(|s| s.matches_url(label, url));
     let decision = decide_shell_navigation(url, None, allowed_matches);
     match decision {
         ShellNavigationDecision::Allow => true,
         ShellNavigationDecision::AllowClearServeOrigin => {
-            clear_allowed_serve_origin(app);
+            clear_allowed_serve_origin(app, label);
             true
         }
         ShellNavigationDecision::Deny => false,
@@ -112,9 +115,9 @@ pub fn allow_shell_navigation<R: Runtime>(webview: &Webview<R>, url: &Url) -> bo
 /// Android 侧 `WebView.loadUrl` 有时不走 `on_navigation`；断开回连接页须在 page load 再清一次，
 /// 避免旧 serve Origin 仍被放行。加载包内业务 UI **不会**清空。
 #[cfg(feature = "tauri")]
-pub fn clear_allowed_if_app_origin_loaded<R: Runtime>(app: &AppHandle<R>, url: &Url) {
+pub fn clear_allowed_if_app_origin_loaded<R: Runtime>(app: &AppHandle<R>, label: &str, url: &Url) {
     if is_connect_page_url(url) {
-        clear_allowed_serve_origin(app);
+        clear_allowed_serve_origin(app, label);
     }
 }
 

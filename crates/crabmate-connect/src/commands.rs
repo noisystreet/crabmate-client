@@ -14,11 +14,6 @@ use crate::keyring_llm::{LlmSecretSlot, read_llm_secret, write_llm_secret};
 use crate::probe::probe_server;
 use crate::recent_urls::{self, RECENT_FILE_NAME};
 
-fn main_window(app: &AppHandle) -> Result<tauri::WebviewWindow, String> {
-    app.get_webview_window("main")
-        .ok_or_else(|| "主窗口未就绪".to_string())
-}
-
 /// 探测 `/health` + `/user-data/prefs` 后加载**包内业务 UI**，经 hash 交接 API 基址与 Bearer。
 ///
 /// 成功连接后写入系统钥匙串（非空覆盖；空串删除条目）。
@@ -29,6 +24,7 @@ fn main_window(app: &AppHandle) -> Result<tauri::WebviewWindow, String> {
 #[tauri::command]
 pub async fn connect_remote(
     app: AppHandle,
+    window: tauri::WebviewWindow,
     url: String,
     bearer: Option<String>,
     manual: Option<bool>,
@@ -39,7 +35,9 @@ pub async fn connect_remote(
     probe_server(&api_base, &bearer).await?;
 
     if let Some(allowed) = app.try_state::<AllowedServeOrigin>() {
-        allowed.set_from_url(&api_base);
+        // 按**发起连接的窗口**记：多窗口各连一台 serve 时，这条白名单不能互相覆盖
+        // （进程级单值会让先连的那个窗口丢掉放行依据）。
+        allowed.set_from_url(window.label(), &api_base);
     }
 
     // 空串删除钥匙串条目；非空覆盖写入（Android 无后端时由连接页写 Keystore）。
@@ -47,7 +45,6 @@ pub async fn connect_remote(
         eprintln!("[crabmate-connect] keyring write skipped: {e}");
     }
 
-    let window = main_window(&app)?;
     if let Ok(current) = window.url() {
         remember_connect_home(&current);
     }
@@ -66,14 +63,14 @@ pub async fn connect_remote(
 ///
 /// 同时清除本机连接 Bearer 槽（桌面钥匙串）；Android Keystore 由业务 UI 在断开前经桥清除。
 #[tauri::command]
-pub async fn disconnect_remote(app: AppHandle) -> Result<(), String> {
+pub async fn disconnect_remote(app: AppHandle, window: tauri::WebviewWindow) -> Result<(), String> {
     if let Some(allowed) = app.try_state::<AllowedServeOrigin>() {
-        allowed.clear();
+        // 只摘本窗口：别的窗口还连着它们各自的 serve。
+        allowed.clear_label(window.label());
     }
     if let Err(e) = write_connect_bearer_unchecked("") {
         eprintln!("[crabmate-connect] keyring clear on disconnect skipped: {e}");
     }
-    let window = main_window(&app)?;
     let mut home = connect_home_url();
     home.set_query(Some("manual=1"));
     window
