@@ -206,7 +206,7 @@ fn os_prefers_dark_theme() -> Option<bool> {
 }
 
 fn main_webview_window(app: &tauri::AppHandle) -> Result<WebviewWindow, String> {
-    app.get_webview_window("main")
+    app.get_webview_window(desktop_main_window::MAIN_WINDOW_LABEL)
         .ok_or_else(|| "main window not found".into())
 }
 
@@ -285,7 +285,7 @@ fn main() {
             tauri_plugin_window_state::Builder::default()
                 // 几何恢复由 `create_main_window_*` 在 `show()` 前后同步处理，
                 // 避免插件异步 restore 造成默认尺寸闪一下。
-                .skip_initial_state("main")
+                .skip_initial_state(desktop_main_window::MAIN_WINDOW_LABEL)
                 .with_state_flags(desktop_window_state_flags())
                 .build(),
         )

@@ -70,6 +70,13 @@ enum MainWindowMode {
     DirectUi,
 }
 
+/// 主窗口的 label。
+///
+/// 现在只有这一个窗口，但**所有**按 label 找窗口的地方都走这个常量（导航钩子、
+/// `AllowedServeOrigin` 的白名单键、`get_webview_window`）。多窗口化时把它换成每个
+/// 窗口自己的 label 即可，不必再去各处的字符串字面量里捞。
+pub(crate) const MAIN_WINDOW_LABEL: &str = "main";
+
 /// E2E / `CM_DESKTOP_SKIP_CONNECT`：包内业务 UI + API 基址指向已运行的 `serve`。
 pub(crate) fn create_main_window_from_url(
     app_handle: &tauri::AppHandle,
@@ -79,7 +86,7 @@ pub(crate) fn create_main_window_from_url(
         .map_err(|e| format!("invalid serve url `{ready_url}`: {e}"))?;
     let backend_origin = api_base.origin();
     if let Some(allowed) = app_handle.try_state::<crabmate_connect::AllowedServeOrigin>() {
-        allowed.set_from_url(&api_base);
+        allowed.set_from_url(MAIN_WINDOW_LABEL, &api_base);
     }
     let bearer = std::env::var("CM_WEB_API_BEARER_TOKEN").unwrap_or_default();
     // 与 connect_remote 一致：非空 Bearer 写入钥匙串，供包内 UI 刷新后水合（不落明文 LS）。
@@ -94,6 +101,7 @@ pub(crate) fn create_main_window_from_url(
     // 先挂 App 资产，再 navigate 带 hash 交接（避免 External 解析差异）。
     let window = finish_create_main_window(
         app_handle,
+        MAIN_WINDOW_LABEL,
         WebviewUrl::App("index.html".into()),
         backend_origin,
         MainWindowMode::DirectUi,
@@ -122,6 +130,7 @@ pub(crate) fn create_main_window_connect_page(
     let backend_origin = placeholder.origin();
     let window = finish_create_main_window(
         app_handle,
+        MAIN_WINDOW_LABEL,
         WebviewUrl::App("connect.html".into()),
         backend_origin,
         MainWindowMode::ConnectPage,
@@ -202,12 +211,13 @@ fn is_tauri_localhost_host(url: &Url) -> bool {
 
 fn is_trusted_serve_navigation(
     app: &tauri::AppHandle,
+    label: &str,
     url: &Url,
     backend_origin: &url::Origin,
 ) -> bool {
     let allowed = app
         .try_state::<crabmate_connect::AllowedServeOrigin>()
-        .is_some_and(|s| s.matches_url(url));
+        .is_some_and(|s| s.matches_url(label, url));
     url.origin() == *backend_origin || allowed
 }
 
@@ -224,12 +234,20 @@ fn deny_and_open_external(app: &tauri::AppHandle, url: &Url) -> bool {
     false
 }
 
-fn allow_http_navigation(app: &tauri::AppHandle, url: &Url, backend_origin: &url::Origin) -> bool {
+fn allow_http_navigation(
+    app: &tauri::AppHandle,
+    label: &str,
+    url: &Url,
+    backend_origin: &url::Origin,
+) -> bool {
     if is_tauri_localhost_host(url) {
         return true;
     }
-    let trusted = is_trusted_serve_navigation(app, url, backend_origin);
-    if let Some(w) = app.get_webview_window("main")
+    let trusted = is_trusted_serve_navigation(app, label, url, backend_origin);
+    // 用**发起导航的那个窗口**的当前页判同源。原先写死 `"main"`：单窗口时没问题，
+    // 多窗口时会拿 main 的 URL 去判别的窗口要去哪儿 —— 误判成跨源后把 URL 甩给外部
+    // 浏览器，而那个地址本来就在本窗口的白名单里。
+    if let Some(w) = app.get_webview_window(label)
         && let Ok(cur) = w.url()
     {
         if is_connect_page_url(&cur) {
@@ -242,11 +260,16 @@ fn allow_http_navigation(app: &tauri::AppHandle, url: &Url, backend_origin: &url
     trusted || deny_and_open_external(app, url)
 }
 
-fn on_main_navigation(app: &tauri::AppHandle, url: &Url, backend_origin: &url::Origin) -> bool {
+fn on_main_navigation(
+    app: &tauri::AppHandle,
+    label: &str,
+    url: &Url,
+    backend_origin: &url::Origin,
+) -> bool {
     match url.scheme() {
         "tauri" | "asset" => true,
         "mailto" => deny_and_open_external(app, url),
-        "http" | "https" => allow_http_navigation(app, url, backend_origin),
+        "http" | "https" => allow_http_navigation(app, label, url, backend_origin),
         _ => false,
     }
 }
@@ -323,11 +346,13 @@ fn spawn_reveal_fallback(app_handle: &tauri::AppHandle, revealed: Arc<AtomicBool
 
 fn finish_create_main_window(
     app_handle: &tauri::AppHandle,
+    label: &str,
     webview_url: WebviewUrl,
     backend_origin: url::Origin,
     mode: MainWindowMode,
 ) -> Result<WebviewWindow, String> {
     let app_handle_clone = app_handle.clone();
+    let nav_label = label.to_string();
     let revealed = Arc::new(AtomicBool::new(false));
     let revealed_on_load = Arc::clone(&revealed);
     let connect_geo = matches!(mode, MainWindowMode::ConnectPage)
@@ -336,7 +361,7 @@ fn finish_create_main_window(
     let (width, height) = main_window_builder_size(mode, connect_geo);
 
     // 连接页：builder 即铺满工作区（勿用居中小窗；未映射时 center/position 常被忽略）。
-    let mut builder = WebviewWindowBuilder::new(app_handle, "main", webview_url)
+    let mut builder = WebviewWindowBuilder::new(app_handle, label, webview_url)
         .title("CrabMate Desktop")
         .inner_size(width, height)
         .resizable(matches!(mode, MainWindowMode::DirectUi))
@@ -349,7 +374,9 @@ fn finish_create_main_window(
         builder = builder.position(geo.logical_x, geo.logical_y);
     }
     let window = builder
-        .on_navigation(move |url| on_main_navigation(&app_handle_clone, url, &backend_origin))
+        .on_navigation(move |url| {
+            on_main_navigation(&app_handle_clone, &nav_label, url, &backend_origin)
+        })
         .on_page_load(move |window, payload| {
             handle_main_page_load(&window, payload.event(), payload.url(), &revealed_on_load);
         })

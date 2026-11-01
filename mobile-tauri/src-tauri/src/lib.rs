@@ -14,6 +14,7 @@ fn navigation_guard_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R>
         .on_page_load(|webview, payload| {
             crabmate_connect::clear_allowed_if_app_origin_loaded(
                 webview.app_handle(),
+                webview.label(),
                 payload.url(),
             );
         })
