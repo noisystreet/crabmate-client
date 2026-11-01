@@ -89,7 +89,7 @@ fn toggle_main_window<R: Runtime>(app: &AppHandle<R>) {
     }
 }
 
-fn show_and_focus<R: Runtime>(window: &tauri::WebviewWindow<R>) {
+pub(crate) fn show_and_focus<R: Runtime>(window: &tauri::WebviewWindow<R>) {
     if let Err(error) = window.show() {
         eprintln!("[crabmate-desktop] failed to show window: {error}");
         return;
