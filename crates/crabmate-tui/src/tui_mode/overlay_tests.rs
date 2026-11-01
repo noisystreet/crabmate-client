@@ -23,6 +23,7 @@ fn status_info() -> StatusInfo {
         model: None,
         role: None,
         mode: None,
+        thinking: None,
         running: false,
         cancel_sent: false,
         spinner: 0,

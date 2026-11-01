@@ -11,6 +11,7 @@
 
 use std::sync::OnceLock;
 
+use crabmate_client_api::url::api_base_authority;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use unicode_width::UnicodeWidthStr;
@@ -37,14 +38,17 @@ mod priority {
     // 上下文用量比 mode / role 更常被盯：窄屏时先丢后两者。
     pub(super) const CONTEXT: u8 = 4;
     pub(super) const MODE: u8 = 5;
-    pub(super) const ROLE: u8 = 6;
+    /// 思考模式：与 `mode` 同属「一进界面就知道」，但一回合内可能反复开关，
+    /// 比 `role` 更常被瞄一眼；排在 `mode` 之后、`role` 之前。
+    pub(super) const THINKING: u8 = 6;
+    pub(super) const ROLE: u8 = 7;
     /// 权限等级：常驻但对"现在该干什么"没有影响（它是授权上限，不是当前动作），
     /// 窄屏时最先让位——丢它的代价只是看不到等级，丢 `ctx` / `find` 则丢的是正在变化的信息。
-    pub(super) const PERM: u8 = 7;
+    pub(super) const PERM: u8 = 8;
     /// 连接计数：**最后**让位。它不回答"现在该干什么"，只回答"我还连着什么"；
     /// 而且左栏标题的 `连接 [n]` 就在旁边（单 lane 时还恒为 1）—— 丢它的代价最小。
     /// 反过来，让它去挤 `ctx` / `model` 会造成"为了一个恒定的数字压掉正在变化的信息"。
-    pub(super) const LANES: u8 = 8;
+    pub(super) const LANES: u8 = 9;
 }
 
 /// `perm` 段的文案标签。渲染、栈内行号与鼠标命中三处共用，避免改动时漏掉一处。
@@ -52,6 +56,9 @@ pub(super) const PERM_LABEL: &str = "perm";
 
 /// `lanes` 段的文案标签（5 列，正好填满状态栈的定宽 label 列）。
 pub(super) const LANES_LABEL: &str = "lanes";
+
+/// `think` 段的文案标签（5 列，与 `serve` / `model` / `lanes` 同为定宽 label 列的满宽）。
+pub(super) const THINK_LABEL: &str = "think";
 
 /// `lanes` 段的取值：`2/8`，有 lane 在等审批时后缀 ` ▲2`。
 ///
@@ -105,22 +112,20 @@ impl Segment {
 /// `serve` 段的 label 显示宽（`serve` + 1 空格），用于判断值能占多少列。
 const SERVE_LABEL_W: usize = 6;
 
-/// 把 base URL 削成 `host:port`（去 scheme、去路径）。
+/// 把 base URL 削成 `host:port`（去 scheme、去路径、去 userinfo）。
+///
+/// 实现共用 [`api_base_authority`]，与 Desktop 状态栈的「连接」chip 同一份规则
+/// （`frontend/src/app/status_connection_chip.rs`）—— 两端显示的是**同一件事**
+/// （这一屏的数据来自哪台 serve），两个实现分开写的那段时间里，这里漏了 userinfo：
+/// `--api-base http://user:pass@127.0.0.1:8080` 会把凭据画到终端上，进录屏 / 截图。
 fn host_port(api_base: &str) -> String {
-    let base = api_base.trim();
-    let without_scheme = base
-        .strip_prefix("https://")
-        .or_else(|| base.strip_prefix("http://"))
-        .unwrap_or(base);
-    let host = without_scheme
-        .split('/')
-        .next()
-        .unwrap_or(without_scheme)
-        .trim();
-    if host.is_empty() {
-        base.to_string()
+    let authority = api_base_authority(api_base);
+    if authority.is_empty() {
+        // 认不出基址时退回原样，而不是留空：状态栈里空值读起来像「没连上」，
+        // 实际只是格式不规范，用户需要看到自己填了什么才能改。
+        api_base.trim().to_string()
     } else {
-        host.to_string()
+        authority
     }
 }
 
@@ -171,6 +176,19 @@ pub(super) fn environment_segments(info: &StatusInfo, budget: usize) -> Vec<Segm
             label: "mode",
             value: v.to_string(),
             priority: priority::MODE,
+        });
+    }
+    // 思考模式：与 Desktop 状态栏的「思考」开关**同口径**——那边只有 `on` 算开
+    // （`frontend/src/app/status_bar.rs` 的 `thinking_mode_is_on`），`server` 也显示为关。
+    // 两端读的是同一份 user-data 字段，口径不一致就等于同一个设置在两个界面里给两个答案。
+    //
+    // `None` = 还没拉到 user-data：整段不 push，而不是画成「关」——那会把「不知道」
+    // 说成「关掉了」。与 `permission` 段的 `None` 语义一致。
+    if let Some(v) = info.thinking.as_deref() {
+        out.push(Segment {
+            label: THINK_LABEL,
+            value: v.to_string(),
+            priority: priority::THINKING,
         });
     }
     // 显示顺序排在 `mode` 之后，但优先级高于 `mode` / `role`（见 `priority`）。

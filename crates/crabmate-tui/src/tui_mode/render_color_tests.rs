@@ -26,6 +26,7 @@ fn status_info() -> StatusInfo {
         model: Some("m".into()),
         role: None,
         mode: None,
+        thinking: None,
         running: false,
         cancel_sent: false,
         spinner: 0,
