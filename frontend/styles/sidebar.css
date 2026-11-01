@@ -712,3 +712,84 @@
     background: color-mix(in srgb, var(--muted) 14%, var(--border-subtle));
   }
 }
+
+/* —— 左栏连接区（桌面多窗口）——
+   会话列表下方常驻，与 TUI 的左栏 lane 区同位（`tui_multi_server.md`）。
+   DOM 在 `.nav-rail` 内，所以窄屏抽屉打开时自动跟着进去，不需要额外的媒体查询。 */
+.nav-rail-connections {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--border-subtle);
+  max-height: 42%;
+  overflow-y: auto;
+}
+
+.nav-rail-connections-label {
+  padding: 0 4px 2px;
+  color: var(--muted);
+  font-size: var(--text-xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.nav-rail-connection-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  padding: 4px 6px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) ease,
+    color var(--dur-fast) ease;
+}
+
+/* 单连接时禁用点击：没有「别的窗口」可切，改基址归右列 chip。 */
+.nav-rail-connection-row:disabled {
+  cursor: default;
+}
+
+.nav-rail-connection-row:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.nav-rail-connection-row--active {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.nav-rail-connection-glyph {
+  flex-shrink: 0;
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+
+.nav-rail-connection-glyph--waiting {
+  color: var(--warn);
+}
+
+.nav-rail-connection-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nav-rail-connection-meta {
+  flex-shrink: 0;
+  color: var(--muted);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}

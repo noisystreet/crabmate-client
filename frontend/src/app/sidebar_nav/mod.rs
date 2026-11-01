@@ -16,6 +16,7 @@ use leptos::prelude::*;
 use crate::session_ops::clamp_session_ctx_menu_pos;
 
 use super::app_shell_ctx::SidebarNavSignals;
+use super::nav_rail_connections::NavRailConnections;
 
 use super::shell_runtime_context::expect_chat_shell_ctx;
 
@@ -119,6 +120,7 @@ pub fn sidebar_nav_view(signals: SidebarNavSignals) -> impl IntoView {
                     apply_assistant_display_filters,
                 })}
             </div>
+            <NavRailConnections locale=locale />
         </aside>
 
         <SessionContextMenuLayer
