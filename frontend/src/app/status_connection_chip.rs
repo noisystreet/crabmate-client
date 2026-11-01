@@ -29,9 +29,24 @@
 //! 唯一能看到全量 URL 的地方），真放不下才退 `host:port`；这里恒为 `host:port`，
 //! 完整 URL 交给 `title`。**别把其中一边「统一」成另一边** —— 拉平会丢掉对应平台
 //! 唯一的那项能力：TUI 失去全量 URL，本 chip 失去悬停可读的完整地址。
+//!
+//! # 多连接（桌面多窗口）
+//!
+//! 桌面壳里同时可以开多个窗口，每个窗口连一台 `serve`（#391）。此时这一屏的不再是
+//! 「唯一那条连接」，而是**全部窗口的连接**——数据来自壳的协调面
+//! （`list_connections` + `connections_changed`），由 `desktop-tauri` 的
+//! `ConnectionRegistry` 维护。点了哪条就切到那个窗口（`focus_connection`）。
+//!
+//! 单连接（含 Android / Web，它们只有一条）时**保持原样**：仍然是可点的单条 chip、
+//! 点击跳设置页。所以这份改造对另外两端是零行为变化，只是多了一次「壳是否支持名单」
+//! 的探测。浏览器里那次探测会失败（没有 `__TAURI__`），退回单条。
+//!
+//! 窗口之间是**完全遮挡**的（都铺满工作区），所以「有别的连接在等审批」只能靠这里和
+//! 系统通知——见 `desktop_connections::notify_approval`。
 
 use leptos::prelude::*;
 
+use crabmate_client_api::connections::ConnectionSnapshot;
 use crabmate_client_api::url::api_base_authority;
 
 use crate::api::api_base_url;
@@ -54,6 +69,71 @@ fn connection_chip_text(base: &str) -> Option<String> {
     }
 }
 
+/// 一条连接在 chip 上显示的名字；用户没起名时退回 `host:port`。
+///
+/// 抽出来是为了能测：名字与地址都在时用名字（用户取的就是给人读的），否则用地址
+/// （否则会出现一个空 label 的 chip，点都不知道点的是什么）。
+#[must_use]
+fn connection_chip_name(snapshot: &ConnectionSnapshot) -> String {
+    let name = snapshot.display_name.trim();
+    if name.is_empty() {
+        snapshot.authority.clone()
+    } else {
+        name.to_string()
+    }
+}
+
+/// 从 `connections_changed` 的 JSON 里取出名单。
+///
+/// 解析失败返回 `None` 而不是空表：**空表**的含义是「没有连接」（会退回单条 chip），
+/// 而解析失败是「不知道」，两者不该混为一谈——混了就会在协议变动时静默退回单条。
+#[must_use]
+fn parse_connection_list(json: &str) -> Option<Vec<ConnectionSnapshot>> {
+    serde_json::from_str::<Vec<ConnectionSnapshot>>(json).ok()
+}
+
+/// 安装名单订阅（只装一次）。
+///
+/// 先 `list_connections` 补首帧，再订阅增量：反之会漏掉「上一次广播到订阅生效之间」
+/// 发生的变化，那正是窗口刚开出来、注册表刚登记完的那一瞬间。
+#[cfg(target_arch = "wasm32")]
+fn install_connections_feed(connections: RwSignal<Vec<ConnectionSnapshot>>) {
+    use std::cell::Cell;
+
+    use wasm_bindgen::JsCast;
+    use wasm_bindgen::closure::Closure;
+    use wasm_bindgen_futures::spawn_local;
+
+    thread_local! {
+        static INSTALLED: Cell<bool> = const { Cell::new(false) };
+    }
+
+    // 组件函数体在一次挂载里只跑一次，但状态栈重挂载时不该重复订阅。
+    if INSTALLED.with(|f| f.replace(true)) {
+        return;
+    }
+
+    spawn_local(async move {
+        if let Ok(json) = crate::tauri_shell::tauri_list_connections_json().await
+            && let Some(list) = parse_connection_list(&json)
+        {
+            connections.set(list);
+        }
+
+        let apply = move |json: String| {
+            // 解析失败时保持现状：一次坏帧不该把列表清空。
+            if let Some(list) = parse_connection_list(&json) {
+                connections.set(list);
+            }
+        };
+        let cb = Closure::<dyn FnMut(String)>::new(apply);
+        let func: js_sys::Function = cb.into_js_value().unchecked_into();
+        // 返回值表示「这个壳有没有 event 能力」。false 时名单就停在首帧——浏览器与
+        // 老壳的正常路径，不是错误，所以这里不处理。
+        let _ = crate::tauri_shell::tauri_listen_connections_changed(func).await;
+    });
+}
+
 #[component]
 pub fn StatusConnectionChip(
     locale: RwSignal<Locale>,
@@ -70,8 +150,16 @@ pub fn StatusConnectionChip(
         i18n::status_chip_connection_tooltip(locale.get(), api_base.get().as_str())
     });
 
+    let connections = RwSignal::new(Vec::<ConnectionSnapshot>::new());
+    #[cfg(target_arch = "wasm32")]
+    install_connections_feed(connections);
+
+    // 只有两条以上才切成列表：一条时那个「列表」就是现在这个 chip，改掉它只是让
+    // 单连接用户多一次点击（还得点回设置页才能换基址）。
+    let multi = Memo::new(move |_| connections.get().len() > 1);
+
     view! {
-        <Show when=move || text.get().is_some()>
+        <Show when=move || text.get().is_some() && !multi.get()>
             <button
                 type="button"
                 class="status-chip status-chip-connection"
@@ -87,12 +175,42 @@ pub fn StatusConnectionChip(
                 <span class="status-chip-value">{move || text.get().unwrap_or_default()}</span>
             </button>
         </Show>
+        <Show when=move || multi.get()>
+            <For
+                each=move || connections.get()
+                key=|snapshot| snapshot.key.clone()
+                children=move |snapshot| {
+                    let key = snapshot.key.as_str().to_string();
+                    let name = connection_chip_name(&snapshot);
+                    let authority = snapshot.authority.clone();
+                    let tooltip = format!("{name} · {authority}");
+                    // 等审批的那条打个标记：窗口互相完全遮挡，列表是用户唯一能看见
+                    // 「谁在等我」的地方（系统通知在它没被聚焦时也会发一条）。
+                    let pending = snapshot.status == crabmate_client_api::connections::ConnectionStatus::WaitingApproval;
+                    view! {
+                        <button
+                            type="button"
+                            class="status-chip status-chip-connection"
+                            data-testid="status-connection-chip"
+                            prop:title=tooltip
+                            on:click=move |_| crate::tauri_shell::tauri_focus_connection(&key)
+                        >
+                            <span class="status-chip-label">
+                                {if pending { "▲ " } else { "" }}{name}
+                            </span>
+                            <span class="status-chip-value">{authority}</span>
+                        </button>
+                    }
+                }
+            />
+        </Show>
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::connection_chip_text;
+    use super::{connection_chip_name, connection_chip_text, parse_connection_list};
+    use crabmate_client_api::connections::ConnectionSnapshot;
 
     #[test]
     fn host_and_port_survive_but_scheme_and_path_do_not() {
@@ -114,5 +232,62 @@ mod tests {
         assert_eq!(connection_chip_text("   "), None);
         // 认不出的基址同样不渲染，而不是把原件当地址画出来。
         assert_eq!(connection_chip_text("not-a-url"), None);
+    }
+
+    #[test]
+    fn named_connection_shows_its_name() {
+        let mut snapshot = ConnectionSnapshot::new("生产环境", "http://a:1");
+        snapshot.authority = "a:1".to_string();
+        assert_eq!(connection_chip_name(&snapshot), "生产环境");
+
+        // 空白名不是「起名为空格」：`rename` 会忽略它并**保留原名**（见
+        // `ConnectionSnapshot::rename`），所以这里仍应是名字而不是地址。
+        snapshot.rename("   ");
+        assert_eq!(connection_chip_name(&snapshot), "生产环境");
+    }
+
+    #[test]
+    fn an_unnamed_connection_falls_back_to_its_address() {
+        // `ConnectionSnapshot::new` 本身就会把空名换成地址，所以走正常构造拿不到
+        // 「空 display_name」这个状态。但前端拿到的快照是**反序列化**来的（壳经 JSON
+        // 传过来），不保证一定经过 `new`；UI 侧的回退是为那条路径留的。
+        let mut snapshot = ConnectionSnapshot::new("x", "http://a:1");
+        snapshot.authority = "a:1".to_string();
+        snapshot.display_name = String::new();
+        assert!(snapshot.display_name.is_empty());
+        assert_eq!(connection_chip_name(&snapshot), "a:1");
+    }
+
+    #[test]
+    fn a_broken_frame_is_unknown_not_empty() {
+        // 空数组 = 真的没有连接（退回单条 chip）；坏 JSON = 不知道。
+        // 两者若混为一谈，协议一变就会静默退回单条，看不出出了问题。
+        assert_eq!(parse_connection_list("[]").map(|v| v.len()), Some(0));
+        assert!(parse_connection_list("not json").is_none());
+        assert!(parse_connection_list(r#"{"unexpected":"shape"}"#).is_none());
+    }
+
+    #[test]
+    fn a_round_tripped_list_keeps_the_fields_the_ui_reads() {
+        // 桌面壳经 JSON 传过来，字段名由 serde 决定；这条测的就是「壳写的名字 =
+        // 前端读的名字」，改名会在这里断。
+        let json = r#"[{
+            "key": "prod",
+            "display_name": "生产环境",
+            "api_base": "http://a:1",
+            "authority": "a:1",
+            "status": "WaitingApproval",
+            "unread": true,
+            "active": false
+        }]"#;
+        let list = parse_connection_list(json).expect("should parse");
+        assert_eq!(list.len(), 1);
+        assert_eq!(connection_chip_name(&list[0]), "生产环境");
+        assert_eq!(list[0].authority, "a:1");
+        assert_eq!(
+            list[0].status,
+            crabmate_client_api::connections::ConnectionStatus::WaitingApproval
+        );
+        assert!(list[0].unread);
     }
 }
