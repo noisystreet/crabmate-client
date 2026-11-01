@@ -3,6 +3,8 @@
 //! 独立成文件：与 settings_panel / render 同理，避免 lizard 对超大测试文件的
 //! 函数体合并跨度超过 fn-nloc 门禁。
 
+use ratatui::style::Color;
+
 use super::*;
 use unicode_width::UnicodeWidthStr;
 

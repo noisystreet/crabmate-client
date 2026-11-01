@@ -8,10 +8,10 @@ fn pal() -> super::Palette {
     super::Palette::default()
 }
 
-fn has_gray(chars: &[(Style, char)], c: char) -> bool {
+fn has_muted(chars: &[(Style, char)], c: char) -> bool {
     chars
         .iter()
-        .any(|(s, ch)| *ch == c && s.fg == Some(Color::Gray))
+        .any(|(s, ch)| *ch == c && s.fg == Some(pal().muted))
 }
 
 fn has_bold(chars: &[(Style, char)], c: char) -> bool {
@@ -53,8 +53,8 @@ fn list_and_quote_markers_render() {
     assert!(!has_bold(&ul, '项'));
     // 有序列表：编号保留（数字携带顺序信息）
     let ol = assistant_styled_text("1. 有序", &pal(), 0);
-    assert!(has_gray(&ol, '1'));
-    assert!(has_gray(&ol, '.'));
+    assert!(has_muted(&ol, '1'));
+    assert!(has_muted(&ol, '.'));
     // 引用：`>` 换成竖条，连续几行自然连成一条线
     let quote = assistant_styled_text("> 引用", &pal(), 0);
     assert!(!quote.iter().any(|(_, ch)| *ch == '>'), "`>` 不该上屏");
@@ -130,7 +130,7 @@ fn spaced_asterisks_mid_line_not_treated_as_list() {
     let chars = assistant_styled_text("a * b * c", &pal(), 0);
     let joined: String = chars.iter().map(|(_, ch)| *ch).collect();
     assert_eq!(joined, "a * b * c");
-    assert!(!has_bold(&chars, 'b') && !chars.iter().any(|(s, _)| s.fg == Some(Color::Gray)));
+    assert!(!has_bold(&chars, 'b') && !chars.iter().any(|(s, _)| s.fg == Some(pal().muted)));
 }
 
 #[test]
@@ -146,8 +146,8 @@ fn glued_markers_match_desktop_normalize_semantics() {
     let ul_text: String = ul.iter().map(|(_, ch)| *ch).collect();
     assert_eq!(ul_text, "• 规范");
     let ol = assistant_styled_text("1.下一步", &pal(), 0);
-    assert!(has_gray(&ol, '1'));
-    assert!(has_gray(&ol, '.'));
+    assert!(has_muted(&ol, '1'));
+    assert!(has_muted(&ol, '.'));
     let q = assistant_styled_text(">正文", &pal(), 0);
     let q_text: String = q.iter().map(|(_, ch)| *ch).collect();
     assert_eq!(q_text, "▎ 正文", "粘连引用也换成竖条");
@@ -164,14 +164,14 @@ fn glued_markers_match_desktop_normalize_semantics() {
 fn ascii_flags_and_asterisk_emphasis_stay_untouched() {
     // normalize 对 ASCII 粘连不补空格：`-rf` 不是列表
     let rf = assistant_styled_text("-rf", &pal(), 0);
-    assert!(!rf.iter().any(|(s, _)| s.fg == Some(Color::Gray)));
+    assert!(!rf.iter().any(|(s, _)| s.fg == Some(pal().muted)));
     // 行首 `*强调*` 走斜体而非列表
     let em = assistant_styled_text("*强调*", &pal(), 0);
     assert!(
         em.iter()
             .any(|(s, ch)| *ch == '强' && s.add_modifier.contains(Modifier::ITALIC))
     );
-    assert!(!em.iter().any(|(s, _)| s.fg == Some(Color::Gray)));
+    assert!(!em.iter().any(|(s, _)| s.fg == Some(pal().muted)));
 }
 
 #[test]

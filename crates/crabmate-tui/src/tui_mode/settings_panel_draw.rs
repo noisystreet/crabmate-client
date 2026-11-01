@@ -3,6 +3,7 @@
 //! `settings_panel.rs` 的 `#[path]` 子模块：压住面板文件行数门禁。逻辑与测试仍
 //! 在父模块组装，这里直接 `use super::*;` 访问父模块私有项。
 
+use super::super::palette::FieldTone;
 use super::*;
 
 /// 主题「未设置」在面板里的显示名（下拉项、字段值、底栏共用一份措辞）。
@@ -18,7 +19,7 @@ impl SettingsPanel {
                 "标记：* = override · ~ = 未保存 · 留空保存 = 跟随 server",
                 width,
             ),
-            Style::new().fg(Color::DarkGray),
+            ctx.pal.tone_style(FieldTone::Unset),
         )));
         let mut cursor = None;
         for (i, field) in self.section.fields().iter().enumerate() {
@@ -31,7 +32,7 @@ impl SettingsPanel {
             // 主题 9 个候选、也全是展示用选项：编辑中就在行下方把列表摊开，
             // 比在底栏读一行「当前循环到哪」再连按 ←→ 直观。
             if *field == FieldId::Theme {
-                lines.extend(self.theme_dropdown(width));
+                lines.extend(self.theme_dropdown(width, ctx.pal));
             }
         }
         PanelContent {
@@ -41,7 +42,7 @@ impl SettingsPanel {
             badge: settings_badge(self),
             nav: nav_items(self),
             // 底栏单独返回：绘制侧把它贴到页面底部，而不是跟字段行一起往上堆。
-            footer: footer_lines(self, width),
+            footer: footer_lines(self, width, ctx.pal),
         }
     }
 
@@ -60,7 +61,10 @@ impl SettingsPanel {
         } else {
             Style::new()
         };
-        let label_span = Span::styled(label.clone(), base.fg(Color::Gray));
+        let label_span = Span::styled(
+            label.clone(),
+            base.patch(ctx.pal.tone_style(FieldTone::Muted)),
+        );
         if let Some(Editing::Text {
             field: ef,
             buf,
@@ -73,13 +77,14 @@ impl SettingsPanel {
             let cursor_cell = UnicodeWidthStr::width(prefix.as_str());
             let (hstart, shown_cursor) = horizontal_window(&full, cursor_cell, area);
             let visible = cell_window(&full, hstart, area);
-            let value_span = Span::styled(visible, base.fg(Color::White));
+            let value_span =
+                Span::styled(visible, base.patch(ctx.pal.tone_style(FieldTone::Value)));
             let line = Line::from(vec![label_span, value_span]);
             return (line, Some(LABEL_PAD + shown_cursor));
         }
-        let (text, color) = self.value_cell(ctx, field);
+        let (text, tone) = self.value_cell(ctx, field);
         let visible = truncate_display(&text, area);
-        let value_span = Span::styled(visible, base.fg(color));
+        let value_span = Span::styled(visible, base.patch(ctx.pal.tone_style(tone)));
         (Line::from(vec![label_span, value_span]), None)
     }
 
@@ -91,7 +96,7 @@ impl SettingsPanel {
     /// 候选多于 [`THEME_DROPDOWN_MAX_ROWS`] 时开窗滚动，窗口跟着 `pick` 走：绘制侧
     /// `render_settings_body` 是 `take(inner.height)` 硬裁，全铺的话小终端里被裁掉的
     /// 正是尾部，选中项可能整个消失 —— 而那条路径没有任何滚动机制能救它。
-    fn theme_dropdown(&self, width: usize) -> Vec<Line<'static>> {
+    fn theme_dropdown(&self, width: usize, pal: &Palette) -> Vec<Line<'static>> {
         let Some(Editing::Theme { pick }) = &self.editing else {
             return Vec::new();
         };
@@ -100,20 +105,20 @@ impl SettingsPanel {
         let indent = " ".repeat(LABEL_PAD + 2);
         let mut out = Vec::with_capacity(end - start + 2);
         if start > 0 {
-            out.push(dropdown_ellipsis(&indent, start, width));
+            out.push(dropdown_ellipsis(&indent, start, width, pal));
         }
         for i in start..end {
-            out.push(theme_option_line(&indent, i, i == *pick, width));
+            out.push(theme_option_line(&indent, i, i == *pick, width, pal));
         }
         if end < total {
-            out.push(dropdown_ellipsis(&indent, total - end, width));
+            out.push(dropdown_ellipsis(&indent, total - end, width, pal));
         }
         out
     }
 
     /// 字段值列文本与颜色：staged（~）＞ override（*）＞ user-data ＞ serve 默认 ＞ 跟随 server。
     /// API 密钥不走三层合成（staged / 已设态两态）；工具缓存、主题各有独立行文案。
-    fn value_cell(&self, ctx: &PanelCtx<'_>, field: FieldId) -> (String, Color) {
+    fn value_cell(&self, ctx: &PanelCtx<'_>, field: FieldId) -> (String, FieldTone) {
         if field == FieldId::ApiKey {
             return self.secret_cell();
         }
@@ -125,14 +130,14 @@ impl SettingsPanel {
         }
         match self.staged(field) {
             FieldAction::Write(Some(v)) => {
-                (format!("{}~", value_text(field, v)), Color::LightYellow)
+                (format!("{}~", value_text(field, v)), FieldTone::Pending)
             }
             FieldAction::Write(None) => {
                 // 清除后回落：显示 serve 默认（若有）。
                 let (_, _, remote) = ctx.sources(field);
                 match remote.and_then(normalize_str) {
-                    Some(v) => (format!("{}~", value_text(field, &v)), Color::LightYellow),
-                    None => ("(跟随 server)~".to_string(), Color::LightYellow),
+                    Some(v) => (format!("{}~", value_text(field, &v)), FieldTone::Pending),
+                    None => ("(跟随 server)~".to_string(), FieldTone::Pending),
                 }
             }
             FieldAction::Skip => match ctx.effective(field) {
@@ -141,35 +146,41 @@ impl SettingsPanel {
                     value,
                 } => (
                     format!("{}*", value_text(field, &value.unwrap_or_default())),
-                    Color::LightCyan,
+                    FieldTone::Override,
                 ),
                 EffectiveView {
                     layer: Layer::Stored,
                     value,
-                } => (value_text(field, &value.unwrap_or_default()), Color::White),
+                } => (
+                    value_text(field, &value.unwrap_or_default()),
+                    FieldTone::Value,
+                ),
                 EffectiveView {
                     layer: Layer::Default,
                     value,
-                } => (value_text(field, &value.unwrap_or_default()), Color::Gray),
+                } => (
+                    value_text(field, &value.unwrap_or_default()),
+                    FieldTone::Muted,
+                ),
                 EffectiveView {
                     layer: Layer::Follow,
                     value: _,
-                } => ("(跟随 server)".to_string(), Color::DarkGray),
+                } => ("(跟随 server)".to_string(), FieldTone::Unset),
             },
         }
     }
 
     /// 只读工具缓存行值：staged（~）＞ user-data 禁用（白字）＞ 开/跟随 server。
-    fn tool_cache_cell(&self, ctx: &PanelCtx<'_>) -> (String, Color) {
+    fn tool_cache_cell(&self, ctx: &PanelCtx<'_>) -> (String, FieldTone) {
         match self.staged(FieldId::ToolCache) {
-            FieldAction::Write(Some(_)) => ("关（禁用缓存）~".to_string(), Color::LightYellow),
-            FieldAction::Write(None) => ("开（跟随 server）~".to_string(), Color::LightYellow),
+            FieldAction::Write(Some(_)) => ("关（禁用缓存）~".to_string(), FieldTone::Pending),
+            FieldAction::Write(None) => ("开（跟随 server）~".to_string(), FieldTone::Pending),
             FieldAction::Skip => match ctx.effective(FieldId::ToolCache) {
                 EffectiveView {
                     layer: Layer::Stored,
                     value: Some(_),
-                } => ("关（禁用缓存）".to_string(), Color::White),
-                _ => ("开（跟随 server）".to_string(), Color::DarkGray),
+                } => ("关（禁用缓存）".to_string(), FieldTone::Value),
+                _ => ("开（跟随 server）".to_string(), FieldTone::Unset),
             },
         }
     }
@@ -178,27 +189,29 @@ impl SettingsPanel {
     ///
     /// 空值不叫「跟随 server」：`prefs.theme` 缺失时 TUI 回落到自己的产品默认
     /// （透明底色），与 serve 配置无关，写成「跟随 server」会误导。
-    fn theme_cell(&self, ctx: &PanelCtx<'_>) -> (String, Color) {
+    fn theme_cell(&self, ctx: &PanelCtx<'_>) -> (String, FieldTone) {
         match self.staged(FieldId::Theme) {
-            FieldAction::Write(Some(v)) => (format!("{v}~"), Color::LightYellow),
-            FieldAction::Write(None) => (format!("{THEME_NONE_LABEL}~"), Color::LightYellow),
+            FieldAction::Write(Some(v)) => (format!("{v}~"), FieldTone::Pending),
+            FieldAction::Write(None) => (format!("{THEME_NONE_LABEL}~"), FieldTone::Pending),
             FieldAction::Skip => match ctx.effective(FieldId::Theme).value {
-                Some(v) => (v, Color::White),
-                None => (THEME_NONE_LABEL.to_string(), Color::DarkGray),
+                Some(v) => (v, FieldTone::Value),
+                None => (THEME_NONE_LABEL.to_string(), FieldTone::Unset),
             },
         }
     }
 
     /// API 密钥行值：staged 写 = 掩码 + `~`；staged 清除 = `清除~`；未编辑按已设态显示。
-    fn secret_cell(&self) -> (String, Color) {
+    fn secret_cell(&self) -> (String, FieldTone) {
         match &self.secret {
             FieldAction::Write(Some(v)) => (
                 format!("••••（{} 字符）~", v.chars().count()),
-                Color::LightYellow,
+                FieldTone::Pending,
             ),
-            FieldAction::Write(None) => ("清除~".to_string(), Color::LightYellow),
-            FieldAction::Skip if self.secret_set => ("已设（钥匙串）".to_string(), Color::White),
-            FieldAction::Skip => ("未设（跟随 serve）".to_string(), Color::DarkGray),
+            FieldAction::Write(None) => ("清除~".to_string(), FieldTone::Pending),
+            FieldAction::Skip if self.secret_set => {
+                ("已设（钥匙串）".to_string(), FieldTone::Value)
+            }
+            FieldAction::Skip => ("未设（跟随 serve）".to_string(), FieldTone::Unset),
         }
     }
 }
@@ -246,16 +259,16 @@ fn settings_badge(panel: &SettingsPanel) -> Option<String> {
 }
 
 /// 面板底栏两行：动态提示 + 按键说明（每行文案各自独立成函数，控制 CCN ≤ 10）。
-fn footer_lines(panel: &SettingsPanel, width: usize) -> Vec<Line<'static>> {
+fn footer_lines(panel: &SettingsPanel, width: usize, pal: &Palette) -> Vec<Line<'static>> {
     let hint = footer_hint(panel);
-    let (msg, mcolor) = footer_msg(panel);
+    let (msg, level) = footer_msg(panel);
     let mut out = vec![Line::from(Span::styled(
         truncate_display(&msg, width),
-        Style::new().fg(mcolor),
+        pal.notice_style(level),
     ))];
     out.push(Line::from(Span::styled(
         truncate_display(&hint, width),
-        Style::new().fg(Color::DarkGray),
+        pal.tone_style(FieldTone::Unset),
     )));
     out
 }
@@ -282,7 +295,7 @@ fn footer_hint(panel: &SettingsPanel) -> String {
 }
 
 /// 底栏动态提示（枚举循环预览 / 编辑引导 / 浏览态状态）。
-fn footer_msg(panel: &SettingsPanel) -> (String, Color) {
+fn footer_msg(panel: &SettingsPanel) -> (String, NoticeLevel) {
     match &panel.editing {
         Some(Editing::Mode { pick }) => mode_cycle_text(*pick),
         Some(Editing::Think { pick }) => think_cycle_text(*pick),
@@ -290,10 +303,10 @@ fn footer_msg(panel: &SettingsPanel) -> (String, Color) {
         Some(Editing::Theme { pick }) => theme_cycle_text(*pick),
         Some(Editing::Gateway { pick, .. }) => gateway_cycle_text(*pick),
         Some(Editing::Text { field, .. }) => match &panel.note {
-            Some((note, color)) => (note.clone(), *color),
+            Some((note, level)) => (note.clone(), *level),
             None => (
                 format!("编辑「{}」：输入 · Backspace · ←→", field_label(*field)),
-                Color::Gray,
+                NoticeLevel::Muted,
             ),
         },
         None => browse_msg(panel),
@@ -301,7 +314,7 @@ fn footer_msg(panel: &SettingsPanel) -> (String, Color) {
 }
 
 /// 会话模式 ←→ 循环的可视化预览。
-fn mode_cycle_text(pick: usize) -> (String, Color) {
+fn mode_cycle_text(pick: usize) -> (String, NoticeLevel) {
     let mut text = String::from("会话模式：");
     for (i, opt) in mode_options().iter().enumerate() {
         if i == pick {
@@ -310,11 +323,11 @@ fn mode_cycle_text(pick: usize) -> (String, Color) {
         text.push_str(opt.unwrap_or("(跟随 server)"));
         text.push(' ');
     }
-    (text, Color::Gray)
+    (text, NoticeLevel::Muted)
 }
 
 /// 思考模式 ←→ 循环的可视化预览。
-fn think_cycle_text(pick: usize) -> (String, Color) {
+fn think_cycle_text(pick: usize) -> (String, NoticeLevel) {
     let mut text = String::from("思考模式：");
     for (i, opt) in think_options().iter().enumerate() {
         if i == pick {
@@ -323,11 +336,11 @@ fn think_cycle_text(pick: usize) -> (String, Color) {
         text.push_str(opt.unwrap_or("(跟随 server)"));
         text.push(' ');
     }
-    (text, Color::Gray)
+    (text, NoticeLevel::Muted)
 }
 
 /// 只读工具缓存 ←→ 循环的可视化预览。
-fn tool_cycle_text(pick: usize) -> (String, Color) {
+fn tool_cycle_text(pick: usize) -> (String, NoticeLevel) {
     let mut text = String::from("只读工具缓存：");
     for (i, opt) in tool_options().iter().enumerate() {
         if i == pick {
@@ -341,23 +354,23 @@ fn tool_cycle_text(pick: usize) -> (String, Color) {
         text.push_str(label);
         text.push(' ');
     }
-    (text, Color::Gray)
+    (text, NoticeLevel::Muted)
 }
 
 /// 主题编辑态的底栏提示：只报当前选中项。
 ///
 /// 候选列表已经在字段行下方摊开（`theme_dropdown`），这里再拼整串只会让高亮项被
 /// `truncate_display` 截掉 —— 底栏的职责是「说清现在选到哪」，不是复述列表。
-fn theme_cycle_text(pick: usize) -> (String, Color) {
+fn theme_cycle_text(pick: usize) -> (String, NoticeLevel) {
     let label = THEME_OPTIONS
         .get(pick)
         .and_then(|opt| *opt)
         .unwrap_or(THEME_NONE_LABEL);
-    (format!("主题：{label}"), Color::Gray)
+    (format!("主题：{label}"), NoticeLevel::Muted)
 }
 
 /// 网关预设 ←→ 循环的可视化预览（URL 一并显示，避免只看 id 不知落点）。
-fn gateway_cycle_text(pick: usize) -> (String, Color) {
+fn gateway_cycle_text(pick: usize) -> (String, NoticeLevel) {
     let mut text = String::from("网关：");
     for (i, p) in API_BASE_PRESETS.iter().enumerate() {
         if i == pick {
@@ -371,30 +384,36 @@ fn gateway_cycle_text(pick: usize) -> (String, Color) {
         }
         text.push(' ');
     }
-    (text, Color::Gray)
+    (text, NoticeLevel::Muted)
 }
 
 /// 浏览态提示行（非编辑、非模式循环时）。
-fn browse_msg(panel: &SettingsPanel) -> (String, Color) {
+fn browse_msg(panel: &SettingsPanel) -> (String, NoticeLevel) {
     if panel.confirm_close {
-        return ("未保存改动：y 放弃 / Esc 返回".to_string(), Color::Yellow);
+        return (
+            "未保存改动：y 放弃 / Esc 返回".to_string(),
+            NoticeLevel::Warn,
+        );
     }
     if panel.is_saving() {
-        return ("保存中…".to_string(), Color::LightCyan);
+        return ("保存中…".to_string(), NoticeLevel::Info);
     }
-    if let Some((note, color)) = &panel.note {
-        return (note.clone(), *color);
+    if let Some((note, level)) = &panel.note {
+        return (note.clone(), *level);
     }
     if panel.read_only {
         return (
             "回合进行中：只读（结束后自动解锁）".to_string(),
-            Color::LightYellow,
+            NoticeLevel::Warn,
         );
     }
     if panel.is_dirty() {
-        return ("未保存改动：S 保存".to_string(), Color::LightYellow);
+        return ("未保存改动：S 保存".to_string(), NoticeLevel::Warn);
     }
-    ("留空保存 = 清除（跟随 server）".to_string(), Color::Gray)
+    (
+        "留空保存 = 清除（跟随 server）".to_string(),
+        NoticeLevel::Muted,
+    )
 }
 
 /// 主题下拉一次最多显示几行候选。
@@ -419,11 +438,11 @@ fn dropdown_window(pick: usize, total: usize, max: usize) -> (usize, usize) {
 }
 
 /// 窗口外那一侧的省略行（`rest` = 还有几项没显示）。
-fn dropdown_ellipsis(indent: &str, rest: usize, width: usize) -> Line<'static> {
+fn dropdown_ellipsis(indent: &str, rest: usize, width: usize, pal: &Palette) -> Line<'static> {
     let text = format!("{indent}  ⋯ 还有 {rest} 项");
     Line::from(Span::styled(
         truncate_display(&text, width),
-        Style::new().fg(Color::DarkGray),
+        pal.tone_style(FieldTone::Unset),
     ))
 }
 
@@ -431,7 +450,13 @@ fn dropdown_ellipsis(indent: &str, rest: usize, width: usize) -> Line<'static> {
 ///
 /// 截断只作用于名称：整行（含缩进）一起截的话，窄终端下缩进会先吃掉宽度，
 /// 主题名只剩半截甚至空串。
-fn theme_option_line(indent: &str, i: usize, here: bool, width: usize) -> Line<'static> {
+fn theme_option_line(
+    indent: &str,
+    i: usize,
+    here: bool,
+    width: usize,
+    pal: &Palette,
+) -> Line<'static> {
     let label = THEME_OPTIONS[i].unwrap_or(THEME_NONE_LABEL);
     let avail = width.saturating_sub(indent.len() + 2);
     let marker = if here { "▸ " } else { "  " };
@@ -439,7 +464,7 @@ fn theme_option_line(indent: &str, i: usize, here: bool, width: usize) -> Line<'
     let style = if here {
         Style::new().add_modifier(Modifier::REVERSED)
     } else {
-        Style::new().fg(Color::DarkGray)
+        pal.tone_style(FieldTone::Unset)
     };
     Line::from(Span::styled(text, style))
 }

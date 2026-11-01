@@ -26,8 +26,11 @@ bash "$ROOT/scripts/check-css-tokens.sh"
 echo "[check] css literals budget (per-file font-size / color / border-radius literals in frontend/styles must match css_literals_budget.txt)"
 bash "$ROOT/scripts/check-css-literals.sh"
 
-echo "[check] design token mirrors (Android res / boot pages must mirror tokens.css :root)"
+echo "[check] design token mirrors (Android res / boot pages / desktop window / TUI palette must mirror tokens.css)"
 bash "$ROOT/scripts/check-token-mirrors.sh"
+
+echo "[check] tui palette usage (no named / literal colors outside palette.rs)"
+bash "$ROOT/scripts/check-tui-palette-usage.sh"
 
 echo "[check] icons (no literal <svg> outside icon.rs; svg rule sizes must be var(--icon-*))"
 bash "$ROOT/scripts/check-icons.sh"

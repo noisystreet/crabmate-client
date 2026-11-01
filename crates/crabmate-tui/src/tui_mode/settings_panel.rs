@@ -3,12 +3,12 @@
 //! 的纯逻辑在 [`super::settings`]，本文件只负责交互状态与可视行生成。
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use unicode_width::UnicodeWidthStr;
 
 use super::SessionPrefs;
-use super::palette::THEME_OPTIONS;
+use super::palette::{NoticeLevel, Palette, THEME_OPTIONS};
 use super::render::truncate_display;
 use super::serve_defaults::ServeDefaults;
 use super::settings::{
@@ -209,7 +209,7 @@ pub struct SettingsPanel {
     /// prefs 组保存请求在途（结果未回）。
     saving_prefs: bool,
     /// 底部提示行（编辑错误 / 只读提示 / 保存结果等）。
-    note: Option<(String, Color)>,
+    note: Option<(String, NoticeLevel)>,
 }
 
 impl Default for SettingsPanel {
@@ -296,8 +296,12 @@ impl SettingsPanel {
     }
 
     /// 底部提示行（给 LaneApp 在保存结果到达时写提示）。
-    pub(super) fn set_note(&mut self, text: String, color: Color) {
-        self.note = Some((text, color));
+    ///
+    /// 只收语义级别，颜色由 [`Palette::notice_style`] 决定。以前调用点直接传
+    /// `Color::LightRed` 这类命名色：主题切换影响不到它们，`NO_COLOR` / `TERM=dumb`
+    /// 下也照样带色（`mono()` 只抹 palette 的槽，抹不掉调用点硬写的命名色）。
+    pub(super) fn set_note(&mut self, text: String, level: NoticeLevel) {
+        self.note = Some((text, level));
     }
 
     /// 一组保存结果返回。`ok` 时清空该组 staged 与在途标记；失败保留 staged 供重试。
@@ -325,7 +329,7 @@ impl SettingsPanel {
     pub(super) fn unlock_after_turn(&mut self) {
         if self.read_only {
             self.read_only = false;
-            self.set_note("回合结束：面板已解锁".to_string(), Color::LightGreen);
+            self.set_note("回合结束：面板已解锁".to_string(), NoticeLevel::Ok);
         }
     }
 
@@ -412,7 +416,7 @@ impl SettingsPanel {
         if self.read_only {
             self.set_note(
                 "回合进行中：只读（结束后自动解锁）".to_string(),
-                Color::LightYellow,
+                NoticeLevel::Warn,
             );
             return;
         }
@@ -588,7 +592,10 @@ impl SettingsPanel {
             let buf: Vec<char> = text.chars().collect();
             let cursor = buf.len();
             self.editing = Some(Editing::Text { field, buf, cursor });
-            self.set_note("API Base 需 http(s):// 开头".to_string(), Color::LightRed);
+            self.set_note(
+                "API Base 需 http(s):// 开头".to_string(),
+                NoticeLevel::Error,
+            );
             return;
         }
         if field == FieldId::Temperature && !is_valid_temperature(&text) {
@@ -597,7 +604,7 @@ impl SettingsPanel {
             self.editing = Some(Editing::Text { field, buf, cursor });
             self.set_note(
                 "温度需 0.0..=2.0（留空保存 = 跟随 server）".to_string(),
-                Color::LightRed,
+                NoticeLevel::Error,
             );
             return;
         }
@@ -607,7 +614,7 @@ impl SettingsPanel {
             self.editing = Some(Editing::Text { field, buf, cursor });
             self.set_note(
                 "上下文长度需 0..=10_000_000 整数（留空保存 = 跟随 server）".to_string(),
-                Color::LightRed,
+                NoticeLevel::Error,
             );
             return;
         }
@@ -726,11 +733,11 @@ impl SettingsPanel {
     /// S 保存：staged 全空时提示；否则标记在途并返回保存请求（含两组暂存动作 + 密钥）。
     fn request_save(&mut self) -> PanelEffect {
         if self.read_only {
-            self.set_note("回合进行中：不能保存".to_string(), Color::LightYellow);
+            self.set_note("回合进行中：不能保存".to_string(), NoticeLevel::Warn);
             return PanelEffect::None;
         }
         if !self.is_dirty() {
-            self.set_note("无改动可保存".to_string(), Color::LightYellow);
+            self.set_note("无改动可保存".to_string(), NoticeLevel::Warn);
             return PanelEffect::None;
         }
         let llm = self.llm.clone();
@@ -765,6 +772,8 @@ pub struct PanelCtx<'a> {
     pub overrides: &'a SessionPrefs,
     pub persisted: Option<&'a PersistedSettings>,
     pub serve_defaults: Option<&'a ServeDefaults>,
+    /// 面板配色：值列色调与提示级别都靠它解析，面板自己不再挑颜色。
+    pub pal: &'a Palette,
 }
 
 impl PanelCtx<'_> {

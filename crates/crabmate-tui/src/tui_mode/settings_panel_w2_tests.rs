@@ -30,6 +30,7 @@ fn ctx<'a>(o: &'a SessionPrefs, persisted: Option<&'a PersistedSettings>) -> Pan
         overrides: o,
         persisted,
         serve_defaults: None,
+        pal: &Palette::DARK,
     }
 }
 
