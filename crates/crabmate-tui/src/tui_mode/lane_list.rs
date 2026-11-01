@@ -182,7 +182,9 @@ fn lane_row(entry: &LaneEntry, width: usize, palette: &Palette) -> Line<'static>
     let cursor = if entry.active { "▎" } else { " " };
     let mark = entry.status.mark();
     // 只有相位存在时才换色：`pulse` 由 `lane_entries` 决定（在跑 + 没关动效）。
-    let head_style = entry
+    // 换色只染**状态符号**：`▎` 是「当前聚焦」的静态标记，让它跟着亮暗会读成整行在跳，
+    // 而那一列本来也不表示「在动」（它只回答「我在哪条 lane」）。
+    let mark_style = entry
         .pulse
         .map_or(base, |step| base.fg(pulse::color_at(palette.accent, step)));
     // 「标记 + 符号」恒 2 列（两者都被测试钉死单列）；宽度不足时先截它自己，
@@ -204,9 +206,14 @@ fn lane_row(entry: &LaneEntry, width: usize, palette: &Palette) -> Line<'static>
         rest.push_str(&tail);
     }
     let rest = pad_display(&truncate_display(&rest, rest_w), rest_w);
-    // 拆两个 span 只为让头部单独换色（呼吸）；余下整行共用底色条样式。
+    // 三段 span：`▎`（静态）+ 状态符号（呼吸）+ 余下整行（底色条）。
+    // 拆开是为了让呼吸只落在符号那一列 —— 见上面 `mark_style` 的注释。
+    let mut head_chars = head.chars();
+    let cursor_cell = head_chars.next().map(String::from).unwrap_or_default();
+    let mark_cell: String = head_chars.collect();
     Line::from(vec![
-        Span::styled(head, head_style),
+        Span::styled(cursor_cell, base),
+        Span::styled(mark_cell, mark_style),
         Span::styled(rest, base),
     ])
 }
@@ -696,10 +703,11 @@ mod tests {
         let mut entries = lanes(&["lane-a", "lane-b"]);
         entries[1].status = LaneStatus::WaitingApproval;
         let rows = rows_of(&entries, 30, 20);
-        let b = rows[2].spans[0].content.as_ref();
-        assert!(b.contains('▲'), "等审批要有状态符号：{b}");
+        // 前两列拆成两个 span（`▎`/空格 + 状态符号），符号因此落在第二格。
+        let mark = rows[2].spans[1].content.as_ref();
+        assert!(mark.contains('▲'), "等审批要有状态符号：{mark}");
         assert_eq!(
-            rows[2].spans[0].style.fg,
+            rows[2].spans[1].style.fg,
             Some(pal().err),
             "非当前 lane 的等审批走告警色"
         );
@@ -790,17 +798,23 @@ mod tests {
             30,
             "呼吸不改行宽：{line}"
         );
-        // 头两列（标记 + 符号）自成 span：只有它需要换色。
-        assert_eq!(rows[1].spans[0].content.as_ref(), "▎●");
+        // 竖条（`▎`）与符号（`●`）各成一列：呼吸只落在符号上。
+        assert_eq!(rows[1].spans[0].content.as_ref(), "▎");
+        assert_eq!(rows[1].spans[1].content.as_ref(), "●");
         assert_eq!(
-            rows[1].spans[0].style.fg,
+            rows[1].spans[1].style.fg,
             Some(pulse::color_at(pal().accent, pulse::STEPS - 1)),
-            "呼吸只把头部前景压暗"
+            "呼吸只把状态符号的前景压暗"
         );
         assert_ne!(
-            rows[1].spans[0].style.fg,
+            rows[1].spans[1].style.fg,
             Some(pal().accent),
             "最暗档不该等于原色，否则呼吸看不出来"
+        );
+        assert_eq!(
+            rows[1].spans[0].style.fg,
+            Some(pal().accent),
+            "左栏竖条是「我在哪条 lane」的静态标记，不跟着呼吸"
         );
     }
 
