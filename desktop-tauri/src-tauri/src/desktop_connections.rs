@@ -76,6 +76,8 @@ impl ConnectionRegistry {
     ///
     /// `active` 一律 `false`：广播是给**所有**窗口的，同一份 payload 不可能对每个窗口
     /// 都对 —— 谁是自己那条由接收方比对 key 决定。在这里填只会让每个窗口都看到错的。
+    /// （返回值那条路径是另一件事：`open_connection` / `register_connection` 回给调用方
+    /// 的是「**你自己**在运行」，所以那里是 `true`。两句话，不是两套口径。）
     pub(crate) fn snapshots(&self) -> Vec<ConnectionSnapshot> {
         let mut out: Vec<ConnectionSnapshot> = self
             .entries()
