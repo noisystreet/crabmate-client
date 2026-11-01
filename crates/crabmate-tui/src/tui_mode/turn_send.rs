@@ -37,13 +37,19 @@ impl LaneApp<'_> {
             &self.overrides.session_mode,
             stored.and_then(|p| p.session_mode.as_deref()),
         );
-        // 随轮 client_llm：override（model/api_base/api_key）＞ user-data（thinking/context）；
-        // 装配纯逻辑见 `settings::build_turn_client_llm`（空白不发送，回落 serve 默认）。
+        // 随轮 client_llm：override（model/api_base/api_key/thinking）＞ user-data
+        // （context）；装配纯逻辑见 `settings::build_turn_client_llm`（空白不发送，回落
+        // serve 默认）。thinking 的 override 由状态栏 `think` 开关写入 —— 点完立刻发下一轮
+        // 也得按新值走，不能等 user-data 回包。
+        let thinking = merge_turn(
+            &self.overrides.thinking,
+            stored.and_then(|p| p.thinking.as_deref()),
+        );
         let client_llm = build_turn_client_llm(
             model.as_deref(),
             api_base.as_deref(),
             self.overrides.api_key.as_deref(),
-            stored.and_then(|p| p.thinking.as_deref()),
+            thinking.as_deref(),
             stored.and_then(|p| p.context_tokens.as_deref()),
         );
         // 温度（顶层 body.temperature，对齐 Desktop）：persisted 存原文，parse 有效才发送。

@@ -50,6 +50,7 @@ mod spinner;
 mod state;
 mod status;
 mod status_stack;
+mod status_thinking;
 // `caps` 子命令要打印探测结果，`main` 侧需直接读（见 `term_image.rs` 头注释）。
 pub(crate) mod term_image;
 #[cfg(test)]
@@ -861,15 +862,14 @@ impl LaneApp<'_> {
                 stored.and_then(|p| p.session_mode.as_deref()),
                 defaults.and_then(|d| d.mode.as_deref()),
             ),
-            // 思考模式：归约成 `开` / `关` 后再交给渲染层 —— 判定口径与 Desktop
-            // 状态栏的开关**同一条**（`thinking_mode_is_on`：只有 `on` 算开，
-            // `server` 也算关）。两端读同一份 user-data 字段，判定分家就等于
-            // 同一个设置在两个界面里给两个答案。
-            thinking: stored
-                .and_then(|p| p.thinking.as_deref())
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .map(|v| if v == "on" { "开" } else { "关" }.to_string()),
+            // 思考模式：`think` 段是**开关**（点一下就切，见 `status_thinking`），取值归一到
+            // `开` / `关` 再交给渲染层 —— 判定口径与 Desktop 状态栏那颗 chip 是**同一条**
+            // （只有 `on` 算开，`server` 也算关）。user-data 到手后段恒显（没存值 = 跟随
+            // server = 关），否则开关会时隐时现；还没拉到才是 `None` = 不画段。
+            thinking: status_thinking::switch_label(
+                self.overrides.thinking.as_deref(),
+                self.persisted.as_ref(),
+            ),
             running: self.st.running,
             cancel_sent: self.st.cancel_sent,
             // 权限等级随 `ServeDefaults` 一起来（worker 同任务拉 `/permission`）；两侧怎么取

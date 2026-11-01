@@ -26,6 +26,7 @@ pub(super) fn test_prefs() -> SessionPrefs {
         agent_role: None,
         session_mode: None,
         permission_level: None,
+        thinking: None,
     }
 }
 

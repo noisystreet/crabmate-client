@@ -170,6 +170,9 @@ struct SessionPrefs {
     session_mode: Option<String>,
     /// `/perm <level>` 设置的权限等级意图；`None` = 不表达意图（沿用会话持久值）。
     permission_level: Option<String>,
+    /// 状态栏 `think` 开关点出来的思考模式意图（`on` / `off`）；`None` = 不表达意图
+    /// （沿用 user-data 已存值）。落盘回包一到就清掉，见 `tui_mode::status_thinking`。
+    thinking: Option<String>,
 }
 
 impl SessionPrefs {
@@ -185,6 +188,7 @@ impl SessionPrefs {
             agent_role: None,
             session_mode: None,
             permission_level: None,
+            thinking: None,
         }
     }
 
