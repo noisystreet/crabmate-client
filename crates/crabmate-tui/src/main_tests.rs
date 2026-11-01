@@ -3,40 +3,10 @@
 use super::{
     ResumePoint, SessionPrefs, TermError, after_turn_outcome, cancel_failed_keeps_resume,
     capture_resume_point, handle_mode_slash, handle_model_slash, handle_role_slash,
-    repl_control_head, with_shell_keyring_fallback,
+    repl_control_head,
 };
 use crate::serve::ChatStreamOutcome;
 use anyhow::anyhow;
-
-#[test]
-fn explicit_value_wins_over_keyring() {
-    let v = with_shell_keyring_fallback(Some(" tok "), false, || panic!("must not read keyring"));
-    assert_eq!(v.as_deref(), Some("tok"));
-}
-
-#[test]
-fn explicit_empty_disables_keyring_fallback() {
-    let v = with_shell_keyring_fallback(Some("   "), false, || panic!("must not read keyring"));
-    assert!(v.is_none());
-}
-
-#[test]
-fn missing_value_falls_back_to_keyring() {
-    let v = with_shell_keyring_fallback(None, false, || Some("keyring-secret".into()));
-    assert_eq!(v.as_deref(), Some("keyring-secret"));
-}
-
-#[test]
-fn no_keyring_skips_fallback() {
-    let v = with_shell_keyring_fallback(None, true, || panic!("must not read keyring"));
-    assert!(v.is_none());
-}
-
-#[test]
-fn missing_entry_yields_none() {
-    let v = with_shell_keyring_fallback(None, false, || None);
-    assert!(v.is_none());
-}
 
 #[test]
 fn interrupted_stream_error_records_resume_point() {

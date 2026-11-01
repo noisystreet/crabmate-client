@@ -3,6 +3,7 @@
 mod approval_tty;
 mod connect_spec;
 mod serve;
+mod shell_keyring;
 mod slash;
 mod tui_mode;
 mod tui_wiring;
@@ -18,7 +19,7 @@ use crate::serve::{
 };
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
-use crabmate_client_api::secrets::{KEYRING_SERVICE, SecretSlot, WEB_API_BEARER_KEYRING_ACCOUNT};
+use crabmate_client_api::secrets::SecretSlot;
 use reedline::{DefaultPrompt, DefaultPromptSegment, Reedline, Signal};
 
 use crate::approval_tty::TtyApprovalGate;
@@ -249,7 +250,7 @@ async fn run() -> Result<()> {
         );
         return Ok(());
     }
-    let bearer = resolve_bearer(&cli);
+    let bearer = shell_keyring::resolve_bearer(cli.bearer.as_deref(), cli.no_keyring);
     let client = build_client(&cli, bearer.as_deref())?;
     let Cli {
         llm_api_key,
@@ -349,26 +350,11 @@ fn client_llm_overrides<'a>(
     any.then_some(llm)
 }
 
-/// `--bearer` / `CM_WEB_API_BEARER_TOKEN` 缺省（未提供）时回退读桌面壳钥匙串的 Web Bearer 槽。
-fn resolve_bearer(cli: &Cli) -> Option<String> {
-    let cli_value = cli.bearer.as_deref();
-    let fell_back = !cli.no_keyring && cli_value.is_none();
-    let value = with_shell_keyring_fallback(cli_value, cli.no_keyring, || {
-        keyring_secret(WEB_API_BEARER_KEYRING_ACCOUNT)
-    });
-    if fell_back && value.is_some() {
-        eprintln!(
-            "[crabmate-tui] Web Bearer 未提供，已回退读取桌面壳钥匙串（--no-keyring 可关闭）"
-        );
-    }
-    value
-}
-
 /// `--llm-api-key` / `CM_API_KEY` 缺省（未提供）时回退读桌面壳钥匙串的 `client_llm` 密钥槽。
 fn resolve_llm_key(llm_api_key: Option<&str>, no_keyring: bool) -> Option<String> {
     let fell_back = !no_keyring && llm_api_key.is_none();
-    let value = with_shell_keyring_fallback(llm_api_key, no_keyring, || {
-        keyring_secret(SecretSlot::ClientLlm.keyring_account())
+    let value = shell_keyring::with_shell_keyring_fallback(llm_api_key, no_keyring, || {
+        shell_keyring::keyring_secret(SecretSlot::ClientLlm.keyring_account())
     });
     if fell_back && value.is_some() {
         eprintln!(
@@ -376,40 +362,6 @@ fn resolve_llm_key(llm_api_key: Option<&str>, no_keyring: bool) -> Option<String
         );
     }
     value
-}
-
-/// 显式值优先：`Some(非空)` 用显式值；`Some(空)` 表示"明确不带、不回退"；
-/// 仅 `None`（未提供）且未禁用回退时才交给 `read`（钥匙串）补位。
-fn with_shell_keyring_fallback(
-    cli_value: Option<&str>,
-    no_keyring: bool,
-    read: impl FnOnce() -> Option<String>,
-) -> Option<String> {
-    match cli_value {
-        Some(raw) => {
-            let trimmed = raw.trim();
-            if trimmed.is_empty() {
-                None
-            } else {
-                Some(trimmed.to_string())
-            }
-        }
-        None if no_keyring => None,
-        None => read(),
-    }
-}
-
-/// 读系统钥匙串条目（service 与桌面壳一致：`com.crabmate.credentials`）。
-/// 无条目 / 钥匙串不可用 / 空值返回 `None`（调用方静默回退）。
-fn keyring_secret(account: &str) -> Option<String> {
-    let entry = keyring::Entry::new(KEYRING_SERVICE, account).ok()?;
-    let raw = entry.get_password().ok()?;
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        None
-    } else {
-        Some(trimmed.to_string())
-    }
 }
 
 fn build_client(cli: &Cli, bearer: Option<&str>) -> Result<ServeClient> {

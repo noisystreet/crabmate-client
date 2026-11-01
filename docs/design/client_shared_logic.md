@@ -53,6 +53,8 @@ frontend & tui (serve/) ──┴── crabmate（protocol feature；crates.io 
 
   **2026-10**：会话 / 消息的**本地**数据模型下沉为 `crabmate-client-api::session_model`（原 `frontend/src/storage.rs` 的 `ChatSession` / `StoredMessage` / `StoredMessageState`、7 个常量，以及 `session_workspace_partition.rs` / `session_ops.rs` 里的会话判定）。它不是契约类型——服务端把这个数组当 JSON 透传存储——所以不受 `contract_pin.md` 约束。时间与熵源改为注入（`new_session_id(now_ms, entropy)` / `new_empty_session(..., now_ms, ...)`），共享层保持纯函数；`frontend` 侧 `make_session_id` / `ensure_at_least_one` / `insert_empty_session` / `prefer_or_create_empty_session` 只注入 `js_sys` 的时钟与随机数。`frontend/src/storage.rs` 改为 `pub use` 共享类型，`crate::storage::X` 的既有引用（59 个文件）零改动；`session_is_blank_chat` / `session_is_unbound_empty_chat` / `is_disposable_blank_session` / `reclaim_disposable_blank_session` 改为调用同一份实现。**动机**：TUI 的 `/conv new` 与 Desktop 各写过一份「空白会话 / 可丢弃空白行 / 复用或新建」判定，已经漂移过（TUI 曾把缺失标题当作默认标题，而 Web 的 `is_default_session_title("")` 返回 `false`）。TUI 侧现已接入同一批类型：会话索引行的判定改为把该行反序列化成 `ChatSession` 后调共享判定，**写回仍走原始 JSON**（不按瘦行重建，保住别的端写入的 `messages`），解析失败的行一律不认作空白行（不误复用、不误删）。标题规则也一并下沉：`is_default_session_title` 移入共享层，`title_from_user_prompt` 由调用方提供本地化默认值（Web 传 `New chat`、TUI 传 `新会话`）。
 
+**2026-11**：桌面壳 Web Bearer 的**分槽账户名**拼接下沉为 `crabmate-client-api::secrets::scoped_bearer_account`（配 `DESKTOP_MAIN_WINDOW_LABEL` 常量）。此前 `crabmate-connect` 自己 `format!` 一份（`<account>:<label>`，多窗口按窗口分槽），TUI 的钥匙串回退读的却是不分槽的旧槽——而 connect 的迁移逻辑会把旧槽搬进分槽槽后删掉它，于是桌面跑过一次之后 TUI 永远读到 `None`，请求不带 `Authorization`，`serve` 回 401（失败静默，症状指向服务端配置而非客户端槽名）。现在写方与读方共用同一份拼接；TUI 按「分槽主窗口槽 → 不分槽旧槽」探测、首个命中即停，并在 stderr 说明取自哪个槽。仍属「只共享名字常量 + 纯拼接」这一档：读写 IO 各端自实现（见 §1 非目标）。
+
 ---
 
 ## 3. 拟建布局

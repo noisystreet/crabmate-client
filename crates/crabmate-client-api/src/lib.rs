@@ -74,7 +74,10 @@ pub use permission::{
 pub use prompt_tokens::{
     TiktokenPromptTokensSnapshot, parse_tiktoken_prompt_tokens_value, tiktoken_from_ag_ui_object,
 };
-pub use secrets::{KEYRING_SERVICE, SecretSlot, WEB_API_BEARER_KEYRING_ACCOUNT};
+pub use secrets::{
+    DESKTOP_MAIN_WINDOW_LABEL, KEYRING_SERVICE, SecretSlot, WEB_API_BEARER_KEYRING_ACCOUNT,
+    scoped_bearer_account,
+};
 pub use session_model::{
     CURRENT_LAYOUT_SCHEMA_VERSION, ChatSession, DEFAULT_CHAT_SESSION_TITLE,
     LEGACY_LAYOUT_SCHEMA_VERSION, StoredMessage, StoredMessageState, TIMELINE_UI_STATE_KEY,

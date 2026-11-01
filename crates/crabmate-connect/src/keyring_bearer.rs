@@ -14,17 +14,12 @@
 //! 的映射，注释里写着「进程级单值会让先连的那个窗口丢掉放行依据」。Bearer 只是当时
 //! 漏掉的那一半。
 //!
-//! service / 账户名常量见 [`crabmate_client_api::secrets`]。
+//! 账户名的拼接在共享层（[`crabmate_client_api::secrets::scoped_bearer_account`]），
+//! TUI 的钥匙串回退读的是同一份——两处各写一遍就是下一个「读得到但认证不上」。
 
-use crabmate_client_api::secrets::{KEYRING_SERVICE, WEB_API_BEARER_KEYRING_ACCOUNT};
-
-/// 分槽后的账户名。
-///
-/// 用 `:` 分隔而不是嵌进服务名：`KEYRING_SERVICE` 是所有 CrabMate 条目共享的命名空间，
-/// 在账户名里加后缀不会污染它，也方便排查脚本按前缀列出全部连接槽。
-fn scoped_account(label: &str) -> String {
-    format!("{WEB_API_BEARER_KEYRING_ACCOUNT}:{label}")
-}
+use crabmate_client_api::secrets::{
+    KEYRING_SERVICE, WEB_API_BEARER_KEYRING_ACCOUNT, scoped_bearer_account,
+};
 
 fn entry_for(account: &str) -> Result<keyring::Entry, String> {
     keyring::Entry::new(KEYRING_SERVICE, account).map_err(|e| format!("系统钥匙串不可用: {e}"))
@@ -66,7 +61,7 @@ fn write_account(account: &str, bearer: &str) -> Result<(), String> {
 /// 旧槽 —— 否则升级后每个窗口都「丢了」凭据、得重连一次；而留着旧槽会把同一份凭据
 /// 分发给每一个窗口，那正是这次要修的串号。
 pub fn read_connect_bearer_for(label: &str) -> Result<Option<String>, String> {
-    let scoped = scoped_account(label);
+    let scoped = scoped_bearer_account(label);
     if let Some(found) = read_account(&scoped)? {
         return Ok(Some(found));
     }
@@ -94,27 +89,26 @@ pub fn write_connect_bearer_on_connect(label: &str, bearer: &str) -> Result<bool
 
 /// 无条件写入该窗口的槽（测试 / 显式更新）。空串删除条目。
 pub fn write_connect_bearer_for(label: &str, bearer: &str) -> Result<(), String> {
-    write_account(&scoped_account(label), bearer)
+    write_account(&scoped_bearer_account(label), bearer)
 }
 
 /// 只清除某个窗口的槽。
 ///
 /// 断开的窗口只该带走自己的凭据 —— 别的窗口还连着它们各自的 `serve`。
 pub fn clear_connect_bearer_for(label: &str) -> Result<(), String> {
-    write_account(&scoped_account(label), "")
+    write_account(&scoped_bearer_account(label), "")
 }
 
 #[cfg(test)]
 mod tests {
-    use super::scoped_account;
-    use crabmate_client_api::secrets::WEB_API_BEARER_KEYRING_ACCOUNT;
+    use crabmate_client_api::secrets::{WEB_API_BEARER_KEYRING_ACCOUNT, scoped_bearer_account};
 
     #[test]
     fn each_window_gets_its_own_account_name() {
         // 两个窗口必须落在两个账户名上，否则又回到「后写的覆盖先写的」。
-        assert_ne!(scoped_account("main"), scoped_account("prod"));
+        assert_ne!(scoped_bearer_account("main"), scoped_bearer_account("prod"));
         assert_eq!(
-            scoped_account("prod"),
+            scoped_bearer_account("prod"),
             format!("{WEB_API_BEARER_KEYRING_ACCOUNT}:prod")
         );
     }
@@ -122,9 +116,12 @@ mod tests {
     #[test]
     fn the_legacy_account_name_is_not_reused_for_scoped_writes() {
         // 迁移读的是这个无后缀的账户名；若分槽后仍写它，就又变成共享槽了。
-        assert_ne!(scoped_account("main"), WEB_API_BEARER_KEYRING_ACCOUNT);
         assert_ne!(
-            scoped_account(WEB_API_BEARER_KEYRING_ACCOUNT),
+            scoped_bearer_account("main"),
+            WEB_API_BEARER_KEYRING_ACCOUNT
+        );
+        assert_ne!(
+            scoped_bearer_account(WEB_API_BEARER_KEYRING_ACCOUNT),
             WEB_API_BEARER_KEYRING_ACCOUNT
         );
     }
