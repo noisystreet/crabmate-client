@@ -553,12 +553,12 @@ fn perm_segment_is_dropped_first_when_narrow() {
 }
 
 #[test]
-fn perm_cols_points_at_the_columns_the_segment_actually_occupies() {
+fn segment_cols_points_at_the_perm_columns() {
     let mut info = base_info("http://127.0.0.1:8080");
     info.permission = Some("approved".into());
     let width = 200;
     let text = status_text(&info, width);
-    let (start, end) = perm_cols(&info, width).expect("perm 段在");
+    let (start, end) = segment_cols(&info, width, PERM_LABEL).expect("perm 段在");
     // 命中区间必须正好是画出来的那几个字：列区间与画面同源，鼠标点击才有意义。
     // 按**显示列**累加而不是 `chars` 下标 —— 右缘运行态含宽字符，按字符数会偏。
     let (mut col, mut hit) = (0usize, String::new());
@@ -572,11 +572,36 @@ fn perm_cols_points_at_the_columns_the_segment_actually_occupies() {
 }
 
 #[test]
-fn perm_cols_is_none_when_the_segment_is_dropped() {
+fn segment_cols_is_none_when_the_perm_segment_is_dropped() {
     // 窄屏按优先级裁掉 perm：此时没有可点区域（点了不该弹菜单）。
     let mut info = base_info("http://127.0.0.1:8080");
     info.permission = Some("unrestricted".into());
-    assert!(perm_cols(&info, 24).is_none());
+    assert!(segment_cols(&info, 24, PERM_LABEL).is_none());
+}
+
+/// `think` 段同样是可点区域（窄屏底栏）：区间落在 `think 开` 那几列上。
+#[test]
+fn think_cols_points_at_the_switch_columns() {
+    let mut info = base_info("http://127.0.0.1:8080");
+    info.thinking = Some("开".into());
+    let width = 200;
+    let text = status_text(&info, width);
+    let (start, end) = segment_cols(&info, width, THINK_LABEL).expect("think 段在");
+    let (mut col, mut hit) = (0usize, String::new());
+    for ch in text.chars() {
+        if col >= start as usize && col < end as usize {
+            hit.push(ch);
+        }
+        col += UnicodeWidthStr::width(ch.to_string().as_str());
+    }
+    assert_eq!(hit, "think 开");
+}
+
+/// 还不知道思考模式时没有该段，也就没有可点区域（点了不该静默改状态）。
+#[test]
+fn think_cols_is_none_when_the_mode_is_unknown() {
+    let info = base_info("http://127.0.0.1:8080");
+    assert!(segment_cols(&info, 200, THINK_LABEL).is_none());
 }
 
 #[test]

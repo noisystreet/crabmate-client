@@ -88,7 +88,7 @@ impl LaneApp<'_> {
         self.st.scroll_lines(up, 3);
     }
 
-    /// 状态区的左键点击：权限菜单开着时先交给它，否则命中 `perm` 段就开菜单
+    /// 状态区的左键点击：权限菜单开着时先交给它；否则 `perm` 段开菜单、`think` 段切开关
     /// （菜单锚在这一段的矩形上，不居中）。
     ///
     /// 返回 `true` = 已消费（调用方立刻返回，不再走两栏 / 兜底分支）。
@@ -96,27 +96,44 @@ impl LaneApp<'_> {
         if self.st.permission_menu.is_some() {
             return self.on_permission_menu_click(column, row);
         }
-        let Some(rect) = self.status_perm_rect() else {
-            return false;
-        };
-        if !contains(rect, column, row) {
-            return false;
+        if let Some(rect) = self.status_perm_rect()
+            && contains(rect, column, row)
+        {
+            self.open_permission_menu(rect);
+            return true;
         }
-        self.open_permission_menu(rect);
-        true
+        // 思考开关：与 Desktop 底栏那颗 chip 同功能（点一下切一档），
+        // 值归一与落盘都在 `status_thinking`。
+        if let Some(rect) = self.status_think_rect()
+            && contains(rect, column, row)
+        {
+            self.toggle_thinking_mode();
+            return true;
+        }
+        false
     }
 
-    /// 状态行 `perm` 段在屏幕上的矩形；`None` = 该段不存在。
+    /// `perm` 段在屏幕上的矩形；`None` = 该段不存在。
+    fn status_perm_rect(&self) -> Option<Rect> {
+        self.status_segment_rect(status::PERM_LABEL)
+    }
+
+    /// `think` 段（思考模式开关）在屏幕上的矩形；`None` = 该段不存在。
+    fn status_think_rect(&self) -> Option<Rect> {
+        self.status_segment_rect(status::THINK_LABEL)
+    }
+
+    /// 状态区某一段在屏幕上的矩形；`None` = 该段不存在 / 被裁掉。
     ///
     /// 宽屏取右栏状态栈的那一行（整行内宽都可点），窄屏取底栏那几列。两处位置都由渲染
-    /// 同一套函数算出（`status_stack::perm_row_index` / `status::perm_cols`），这里只做
+    /// 同一套函数算出（`status_stack::segment_row_index` / `status::segment_cols`），这里只做
     /// 坐标换算 —— 排版算法重算一遍就会点偏。
     ///
-    /// 返回矩形而不是 `bool`：调用方除了判定命中，还要拿它当菜单的锚点。
+    /// 返回矩形而不是 `bool`：`perm` 那边除判定命中还要拿它当菜单的锚点。
     ///
     /// 该段不存在时返回 `None`（老 serve 没有 `/permission`、窄屏按优先级被裁掉、
     /// 状态栈处于折叠态），此时点击落到下面的兜底分支，与以前一样只是把焦点收回输入框。
-    fn status_perm_rect(&self) -> Option<Rect> {
+    fn status_segment_rect(&self, label: &str) -> Option<Rect> {
         let (width, height) = self.last_size;
         let info = self.status_info();
         let p = panes(
@@ -126,10 +143,11 @@ impl LaneApp<'_> {
         );
         if let Some(area) = p.right_status {
             let inner_w = area.width.saturating_sub(2);
-            let idx = status_stack::perm_row_index(
+            let idx = status_stack::segment_row_index(
                 &info,
                 inner_w as usize,
                 self.st.status_stack_collapsed,
+                label,
             )?;
             return Some(Rect::new(
                 area.x.saturating_add(1),
@@ -139,7 +157,7 @@ impl LaneApp<'_> {
             ));
         }
         let area = p.status?;
-        let (start, end) = status::perm_cols(&info, area.width as usize)?;
+        let (start, end) = status::segment_cols(&info, area.width as usize, label)?;
         Some(Rect::new(
             area.x.saturating_add(start),
             area.y,
@@ -655,7 +673,7 @@ mod tests {
 
     /// 宽屏：`perm` 段可点，且锚点就是右栏状态栈里那一行、内宽与渲染一致（左右各留 1 列）。
     ///
-    /// 用「逐行点一遍找出可点的那一行」而不是先算行号：行号来自 `status_stack::perm_row_index`，
+    /// 用「逐行点一遍找出可点的那一行」而不是先算行号：行号来自 `status_stack::segment_row_index`，
     /// 拿它当期望值等于两边同错同对。这里要验的是**点击到的那一行**和**渲染用的内宽**对得上。
     #[test]
     fn clicking_the_perm_segment_opens_a_menu_anchored_to_that_row() {
@@ -718,5 +736,58 @@ mod tests {
             anchor.x >= bar.x && anchor.x + anchor.width <= bar.x + bar.width,
             "命中段不能越出底栏：{anchor:?} vs {bar:?}"
         );
+    }
+
+    /// 宽屏：`think` 段可点 —— 点一下把意图翻到另一端，并派一发 `SaveLlm` 落盘。
+    ///
+    /// 断言走 **override**（`overrides.thinking`）而不是画出来的字：那正是「点了有反应」
+    /// 的定义（状态行与下一轮 `chat` 都读它），而 render 的字串已由 status 的单测覆盖。
+    #[test]
+    fn clicking_the_think_segment_flips_the_switch_and_saves() {
+        use crate::tui_mode::settings::{FieldAction, PersistedSettings};
+        use crate::tui_mode::worker::WorkerJob;
+
+        let client = test_client();
+        let mut prefs = test_prefs();
+        let (tx, rx) = mpsc::channel();
+        let (job_tx, job_rx) = mpsc::channel();
+        let mut app = test_app(&client, &mut prefs, rx, tx, job_tx);
+        app.last_size = (200, 40);
+        app.st.sidebar_visible = true;
+        // user-data 到手且当前是「关」：状态栈里因此有可点的 think 行。
+        app.persisted = Some(PersistedSettings {
+            thinking: Some("off".into()),
+            ..Default::default()
+        });
+        let (w, h) = app.last_size;
+        let rs = panes(Rect::new(0, 0, w, h), true, app.status_stack_rows())
+            .right_status
+            .expect("宽屏有状态栈");
+        let mut flipped = false;
+        for row in rs.y..rs.y + rs.height {
+            click(&mut app, rs.x + 1, row);
+            if app.overrides.thinking.is_some() {
+                flipped = true;
+                break;
+            }
+        }
+        assert!(flipped, "状态栈里应有可点的 think 段");
+        assert_eq!(app.overrides.thinking.as_deref(), Some("on"), "关 → 开");
+        match job_rx.try_recv().expect("点开关要派发 SaveLlm") {
+            WorkerJob::SaveLlm(save) => assert_eq!(
+                save.thinking,
+                FieldAction::Write(Some("on".into())),
+                "落盘值与屏上一致"
+            ),
+            _ => panic!("点开关应派发 SaveLlm"),
+        }
+        // 再点一下（同一个矩形）：回到「关」，而不是重复写同一个值。
+        for r in rs.y..rs.y + rs.height {
+            click(&mut app, rs.x + 1, r);
+            if app.overrides.thinking.as_deref() == Some("off") {
+                break;
+            }
+        }
+        assert_eq!(app.overrides.thinking.as_deref(), Some("off"), "开 → 关");
     }
 }

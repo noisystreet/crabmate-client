@@ -178,12 +178,17 @@ pub(super) fn environment_segments(info: &StatusInfo, budget: usize) -> Vec<Segm
             priority: priority::MODE,
         });
     }
-    // 思考模式：与 Desktop 状态栏的「思考」开关**同口径**——那边只有 `on` 算开
+    // 思考模式：与 Desktop 状态栏的「思考」开关**同口径、同功能**——那边只有 `on` 算开
     // （`frontend/src/app/status_bar.rs` 的 `thinking_mode_is_on`），`server` 也显示为关。
     // 两端读的是同一份 user-data 字段，口径不一致就等于同一个设置在两个界面里给两个答案。
     //
-    // `None` = 还没拉到 user-data：整段不 push，而不是画成「关」——那会把「不知道」
-    // 说成「关掉了」。与 `permission` 段的 `None` 语义一致。
+    // 这一段是**开关**而不是只读读数：宽屏点状态栈那一行、窄屏点底栏这几列就切一档
+    // （`status_thinking::toggle_thinking_mode`；命中区间走 `segment_cols` /
+    // `status_stack::segment_row_index`，与渲染同源）。所以 user-data 到手后它恒显 ——
+    // 时隐时现的开关等于「想点的时候找不到」。
+    //
+    // `None` = 还没拉到 user-data（且本地没点过）：整段不 push，而不是画成「关」——那会把
+    // 「不知道」说成「关掉了」。与 `permission` 段的 `None` 语义一致。
     if let Some(v) = info.thinking.as_deref() {
         out.push(Segment {
             label: THINK_LABEL,
@@ -288,12 +293,13 @@ fn fit_segments(segs: &[Segment], budget: usize) -> Vec<usize> {
     chosen
 }
 
-/// 横版底栏（窄屏）：`perm` 段占的列区间（相对行首，左闭右开）。`None` = 该段没显示。
+/// 横版底栏（窄屏）：某一段占的列区间（相对行首，左闭右开）。`None` = 该段没显示 / 被裁掉。
 ///
 /// 与 [`status_line_with`] 共用 `left_segments` / `fit_segments` / `Segment::width`，
 /// **不复制**排版算法 —— 鼠标命中与渲染必须同源，各算一遍就是「点偏一列」的来源。
+/// 两个调用方（`perm` 段开菜单、`think` 段切开关）都走这里：多一段可点就别再抄一份。
 #[must_use]
-pub(super) fn perm_cols(info: &StatusInfo, width: usize) -> Option<(u16, u16)> {
+pub(super) fn segment_cols(info: &StatusInfo, width: usize, label: &str) -> Option<(u16, u16)> {
     let budget = width.saturating_sub(RIGHT_W);
     let segs = left_segments(info, budget);
     let mut used = 0usize;
@@ -302,7 +308,7 @@ pub(super) fn perm_cols(info: &StatusInfo, width: usize) -> Option<(u16, u16)> {
             used += SEPARATOR_W;
         }
         let w = segs[i].width();
-        if segs[i].label == PERM_LABEL {
+        if segs[i].label == label {
             return Some((u16::try_from(used).ok()?, u16::try_from(used + w).ok()?));
         }
         used += w;

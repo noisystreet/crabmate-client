@@ -210,6 +210,13 @@ impl LaneApp<'_> {
                 if save.api_base.is_write() {
                     self.overrides.api_base = None;
                 }
+                // 思考模式：面板里改的值落地后同样清掉状态栏开关留下的 override —— 但只在
+                // 「刚保存的就是它」时清。连点两下开关时第一枪的回包会晚于第二枪的意图，
+                // 无脑清会把状态行退回旧值（看着像「点两次只生效一次」）。
+                super::super::status_thinking::clear_intent_if_saved(
+                    &mut self.overrides.thinking,
+                    &save,
+                );
                 let names = llm_saved_names(&save);
                 self.st.push_line(
                     LineKind::System,

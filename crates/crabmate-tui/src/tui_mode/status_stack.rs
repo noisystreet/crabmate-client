@@ -76,18 +76,26 @@ fn visible_segments(info: &StatusInfo, width: usize) -> Vec<Segment> {
         .collect()
 }
 
-/// `perm` 段在栈内的行序号（0-based；运行指示另占最后一行）。
+/// 某一段在栈内的行序号（0-based；运行指示另占最后一行）。
 ///
 /// `None` = 折叠态（只画运行行）或该段被行预算裁掉 —— 两种情况下都不该有可点区域。
 /// 与 [`stack_lines_with`] 共用 [`visible_segments`]，不重算顺序（重算就会与画面错行）。
+///
+/// 按 `label` 取而不是各写一份：`perm`（开档位菜单）与 `think`（切思考开关）是同一件事
+/// 的两个实例，抄第二份的那天就会漏掉一侧的裁剪分支，表现为「窄屏点了点不动」。
 #[must_use]
-pub(super) fn perm_row_index(info: &StatusInfo, width: usize, collapsed: bool) -> Option<u16> {
+pub(super) fn segment_row_index(
+    info: &StatusInfo,
+    width: usize,
+    collapsed: bool,
+    label: &str,
+) -> Option<u16> {
     if collapsed {
         return None;
     }
     let idx = visible_segments(info, width)
         .iter()
-        .position(|s| s.label == super::status::PERM_LABEL)?;
+        .position(|s| s.label == label)?;
     u16::try_from(idx).ok()
 }
 
@@ -477,15 +485,30 @@ mod tests {
     }
 
     #[test]
-    fn perm_row_index_is_the_line_that_shows_the_level() {
+    fn segment_row_index_is_the_line_that_shows_the_level() {
         let mut i = info();
         i.permission = Some("read".into());
-        let idx = perm_row_index(&i, 24, false).expect("展开态有 perm 行");
+        let idx = segment_row_index(&i, 24, false, super::super::status::PERM_LABEL)
+            .expect("展开态有 perm 行");
         let lines = stack_lines_with(&i, 24, &pal(), false, true);
         // 行号必须指向真画出来的那一行（与 `stack_lines_with` 同源，否则点击会错行）。
         let row = &lines[idx as usize];
         assert!(row.to_string().contains("read"), "{row:?}");
         // 折叠态只剩运行行：没有 perm 行，也就没有可点区域。
-        assert!(perm_row_index(&i, 24, true).is_none());
+        assert!(segment_row_index(&i, 24, true, super::super::status::PERM_LABEL).is_none());
+    }
+
+    /// `think` 段同样可点（切思考开关）：行号指向画着「开/关」的那一行。
+    #[test]
+    fn segment_row_index_finds_the_think_row() {
+        let mut i = info();
+        i.thinking = Some("关".into());
+        let idx = segment_row_index(&i, 24, false, super::super::status::THINK_LABEL)
+            .expect("展开态有 think 行");
+        let lines = stack_lines_with(&i, 24, &pal(), false, true);
+        assert!(lines[idx as usize].to_string().contains("关"), "{lines:?}");
+        // 没有该段（未知 / 未拉到 user-data）时没有可点区域。
+        let i = info();
+        assert!(segment_row_index(&i, 24, false, super::super::status::THINK_LABEL).is_none());
     }
 }
