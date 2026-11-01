@@ -18,6 +18,9 @@ tokio = { version = "1", features = ["sync"] }
 url = "2"
 serde_json = "1"
 crabmate-connect = { path = "../../crates/crabmate-connect", features = ["tauri"] }
+# 多窗口连接注册表直接用共享快照类型（`ConnectionSnapshot` / `ConnectionStatus`），
+# 避免在 Desktop 侧再定义一个只在显示层长得一样的结构。
+crabmate-client-api = { path = "../../crates/crabmate-client-api" }
 base64 = "0.23"
 tauri-plugin-single-instance = "2.4.3"
 tauri-plugin-window-state = "2.4.1"

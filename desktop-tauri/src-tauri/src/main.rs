@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod desktop_connections;
 mod desktop_lifecycle;
 mod desktop_main_window;
 mod os_theme;
@@ -323,12 +324,30 @@ fn main() {
             crabmate_connect::set_connect_bearer,
             crabmate_connect::get_llm_secret,
             crabmate_connect::set_llm_secret,
+            desktop_connections::list_connections,
+            desktop_connections::connections_tally,
+            desktop_connections::register_connection,
+            desktop_connections::report_connection_status,
+            desktop_connections::report_connection_unread,
+            desktop_connections::rename_connection,
+            desktop_connections::focus_connection,
         ])
+        .on_window_event(|window, event| {
+            // 窗口销毁 = 那条连接没了。只摘自己那条，并广播给剩下的窗口。
+            if matches!(event, tauri::WindowEvent::Destroyed) {
+                let app = window.app_handle();
+                if let Some(state) = app.try_state::<desktop_connections::ConnectionRegistry>() {
+                    state.remove(window.label());
+                    desktop_connections::broadcast(app);
+                }
+            }
+        })
         .setup(move |app| {
             desktop_lifecycle::setup_tray(app);
             os_theme::spawn_linux_color_scheme_watcher(app.handle().clone());
             app.manage(crabmate_connect::SuggestedServerUrl::default());
             app.manage(crabmate_connect::AllowedServeOrigin::default());
+            app.manage(desktop_connections::ConnectionRegistry::default());
 
             if let Err(e) = open_main_window(app.handle()) {
                 eprintln!("[crabmate-desktop] startup failed: {e}");
