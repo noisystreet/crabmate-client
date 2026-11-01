@@ -524,6 +524,7 @@ mod tests {
             Ok(SessionIndexApplied {
                 local_id: "s_old".into(),
                 reused_blank: false,
+                created_blank_id: None,
             }),
             SessionIndexOp::NewBlank {
                 title: "新会话".into(),

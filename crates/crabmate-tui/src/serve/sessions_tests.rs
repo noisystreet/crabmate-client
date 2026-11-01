@@ -145,6 +145,7 @@ fn put_body_omits_absent_active_id() {
         active_session_id: None,
         local_id: "s".into(),
         reused_blank: false,
+        created_blank_id: None,
     };
     let body = put_sessions_body(&applied);
     assert!(body.get("active_session_id").is_none(), "None 不写");
@@ -155,6 +156,7 @@ fn put_body_omits_absent_active_id() {
         active_session_id: Some("s1".into()),
         local_id: "s1".into(),
         reused_blank: false,
+        created_blank_id: None,
     };
     assert_eq!(
         put_sessions_body(&applied)["active_session_id"],
@@ -381,6 +383,12 @@ fn delete_last_row_leaves_one_default_blank() {
     assert_eq!(rows[0]["title"], json!("新会话"));
     assert_eq!(rows[0]["messages"], json!([]));
     assert_eq!(applied.active_session_id.as_deref(), Some("s_new"));
+    assert_eq!(
+        applied.created_blank_id.as_deref(),
+        Some("s_new"),
+        "补出来的行 id 必须回传给 UI 认领，否则那一轮既不绑定 cid 也不起名"
+    );
+    assert_eq!(applied.local_id, "s1", "local_id 仍报被删的那一行");
 }
 
 #[test]
