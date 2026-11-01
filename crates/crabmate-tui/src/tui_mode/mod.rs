@@ -525,6 +525,9 @@ impl LaneApp<'_> {
     }
 
     fn on_key(&mut self, key: KeyEvent) {
+        // 键盘接管：焦点不再算「鼠标点出来的」，侧栏底部的按键提示行随之恢复
+        // （鼠标点击后不画那条提示，见 `UiState::pane_hint_visible`）。
+        self.st.focus_by_pointer = false;
         // 审批浮层优先：只认决策键与「看完整命令」的键（Ctrl+E 展开 / 展开后滚动），
         // 其余输入一律忽略（防多重审批叠栈）。
         if self.st.approval.is_some() {

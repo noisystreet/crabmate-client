@@ -66,6 +66,7 @@ impl LaneApp<'_> {
                 }
                 if matches!(self.st.focus, Focus::Sidebar | Focus::Workspace) {
                     self.st.focus = Focus::Input;
+                    self.st.focus_by_pointer = false;
                     // 焦点离开会话栏：作废待确认删除，免得回来按 y 误删。
                     self.st.confirm_delete = None;
                 }
@@ -177,6 +178,8 @@ impl LaneApp<'_> {
             return;
         };
         self.st.focus = Focus::Workspace;
+        // 焦点是点出来的：底部按键提示行不画（键一按就恢复，见 `LaneApp::on_key`）。
+        self.st.focus_by_pointer = true;
         // 用渲染同一份内容算行数，避免再维护一遍「标题 + 占位行」的行数口径。
         let content_width = right.width.saturating_sub(2) as usize;
         let (rows, cursor, _hint) = workspace_content(&self.st, content_width);
@@ -223,6 +226,8 @@ impl LaneApp<'_> {
             return; // 窄屏：左栏不存在
         };
         self.st.focus = Focus::Sidebar;
+        // 焦点是点出来的：底部按键提示行不画（键一按就恢复，见 `LaneApp::on_key`）。
+        self.st.focus_by_pointer = true;
         // 焦点/选中行一换，待确认删除即作废：否则会「确认的是这一行、删掉的是另一行」。
         self.st.confirm_delete = None;
         // 列内左右各留 1 列：与 `render_pane` 的内宽口径必须是同一个值。
@@ -261,6 +266,7 @@ impl LaneApp<'_> {
                 // 输入框」），若焦点还留在侧栏，接着按 ↑/↓ 走的是 `on_sidebar_key` ——
                 // 用户看到的是「点完摘要，方向键在乱动左边的列表」。
                 self.st.focus = Focus::Input;
+                self.st.focus_by_pointer = false;
                 self.st.confirm_delete = None;
                 self.st.fold_cursor = Some(idx);
                 self.st.toggle_process_run(idx);
@@ -323,10 +329,13 @@ fn item_index_at(rel_row: usize, start: usize, end: usize) -> Option<usize> {
 mod tests {
     use std::sync::mpsc;
 
-    use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+    use crossterm::event::{
+        KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+    };
 
     use super::super::state::{Focus, LineKind};
     use super::super::test_support::{test_app, test_client, test_prefs};
+    use super::super::ws_sidebar::{sessions_content, workspace_content};
     use super::{BodyHit, LaneApp, body_hit, item_index_at, panes};
     use crate::serve::SessionListRow;
     use ratatui::layout::Rect;
@@ -420,6 +429,39 @@ mod tests {
             matches!(body_hit(area, &rows, 0, 6), BodyHit::Outside),
             "正文区左缘外"
         );
+    }
+
+    /// 点侧栏 = 焦点由鼠标带来：底部按键提示行不画；按一下键就恢复（`on_key` 清标记）。
+    #[test]
+    fn clicking_a_pane_hides_the_key_hint_until_a_key_arrives() {
+        with_wide_app(|app| {
+            app.st.replace_sessions(vec![row("s1", Some("c1"))]);
+            let p = panes(Rect::new(0, 0, 200, 40), true, app.status_stack_rows());
+
+            let left = p.left.expect("宽屏应有左栏");
+            click(app, left.x + 1, left.y); // 标题行：只切焦点
+            assert_eq!(app.st.focus, Focus::Sidebar);
+            assert!(app.st.focus_by_pointer, "鼠标点出来的焦点要打标记");
+            assert!(
+                sessions_content(&app.st, 20).2.is_none(),
+                "鼠标点进会话栏时不显示按键提示"
+            );
+
+            let right = p.right.expect("宽屏应有右栏");
+            click(app, right.x + 1, right.y);
+            assert_eq!(app.st.focus, Focus::Workspace);
+            assert!(
+                workspace_content(&app.st, 20).2.is_none(),
+                "鼠标点进工作区时不显示按键提示"
+            );
+
+            app.on_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+            assert!(!app.st.focus_by_pointer, "键盘接管要清掉鼠标标记");
+            assert!(
+                workspace_content(&app.st, 20).2.is_some(),
+                "键盘带来的焦点照旧显示提示"
+            );
+        });
     }
 
     /// 点摘要 = 切换 + 把键盘一起接过来。

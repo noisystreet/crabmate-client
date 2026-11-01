@@ -378,7 +378,10 @@ fn workspace_pick_rows(st: &UiState, width: usize) -> Vec<Line<'static>> {
     rows
 }
 
-/// 左栏会话可视内容：返回（行、光标、聚焦时提示文案）。
+/// 左栏会话可视内容：返回（行、光标、键盘聚焦时提示文案）。
+///
+/// 提示文案只在 [`UiState::pane_hint_visible`] 成立时给（焦点是键盘带来的）：鼠标
+/// 点进来的焦点不画那一行。
 ///
 /// 删除确认态（`Delete` 已按一次、还没确认）时提示行换成确认文案：不弹浮层，
 /// 但必须让人一眼看出「现在按 y 会真的删掉」。
@@ -386,7 +389,7 @@ pub(super) fn sessions_content(
     st: &UiState,
     width: usize,
 ) -> (Vec<Line<'static>>, usize, Option<&'static str>) {
-    let hint = (st.focus == Focus::Sidebar).then(|| {
+    let hint = st.pane_hint_visible(Focus::Sidebar).then(|| {
         if st.confirm_delete.is_some() {
             SIDEBAR_DELETE_HINT
         } else {
@@ -396,8 +399,9 @@ pub(super) fn sessions_content(
     (sidebar_rows(st, width), st.selected, hint)
 }
 
-/// 右栏工作区可视内容：返回（行、光标、聚焦时提示文案）。
-/// 右栏宽屏默认显示；光标反色与按键提示仅在 `Focus::Workspace` 聚焦时出现。
+/// 右栏工作区可视内容：返回（行、光标、键盘聚焦时提示文案）。
+/// 右栏宽屏默认显示；光标反色与按键提示仅在 `Focus::Workspace` 聚焦时出现
+/// （提示还要是键盘带来的焦点，见 [`UiState::pane_hint_visible`]）。
 pub(super) fn workspace_content(
     st: &UiState,
     width: usize,
@@ -406,10 +410,13 @@ pub(super) fn workspace_content(
         (
             workspace_pick_rows(st, width),
             st.ws_cursor,
-            (st.focus == Focus::Workspace).then_some(WORKSPACE_PICK_HINT),
+            st.pane_hint_visible(Focus::Workspace)
+                .then_some(WORKSPACE_PICK_HINT),
         )
     } else {
-        let hint = (st.focus == Focus::Workspace).then(|| workspace_hint(st));
+        let hint = st
+            .pane_hint_visible(Focus::Workspace)
+            .then(|| workspace_hint(st));
         (workspace_sidebar_rows(st, width), st.ws_cursor, hint)
     }
 }
@@ -559,6 +566,25 @@ mod tests {
         let (rows, _, hint) = sessions_content(&st, 60);
         assert!(rows[0].to_string().contains("会话"));
         assert!(hint.is_some());
+    }
+
+    /// 鼠标点出来的焦点不画底部按键提示（点击后那行只会挤掉一行内容）。
+    #[test]
+    fn pointer_focus_hides_pane_hints() {
+        let mut st = ready_ws_state();
+        st.focus = Focus::Workspace;
+        st.focus_by_pointer = true;
+        let (_, _, hint) = workspace_content(&st, 60);
+        assert!(hint.is_none(), "鼠标点进工作区时不显示按键提示");
+
+        st.focus = Focus::Sidebar;
+        let (_, _, hint) = sessions_content(&st, 60);
+        assert!(hint.is_none(), "鼠标点进会话栏时不显示按键提示");
+
+        // 键盘接管后（`on_key` 清掉这一位）提示照旧回来。
+        st.focus_by_pointer = false;
+        let (_, _, hint) = sessions_content(&st, 60);
+        assert!(hint.is_some(), "键盘带来的焦点要显示提示");
     }
 
     /// 删除确认态：提示行必须换成确认文案，不能让「下一键就删」悄悄发生。

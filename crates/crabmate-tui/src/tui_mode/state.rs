@@ -319,6 +319,9 @@ pub struct UiState {
     pub page_rows: usize,
     /// 键盘焦点（输入框 / 左栏会话）。
     pub focus: Focus,
+    /// 当前焦点是否由鼠标点击带来（`true` = 点出来的）。鼠标点过之后侧栏底部那行按键
+    /// 提示只是白占一行，因此不画；任意键按下即清空（见 `LaneApp::on_key`）。
+    pub focus_by_pointer: bool,
     /// 左栏会话列表（`fetch_web_sessions` 快照，未经本地转换）。
     pub sessions: Vec<SessionListRow>,
     /// 左栏选中项下标。
@@ -434,6 +437,13 @@ impl UiState {
             palette: Palette::resolve(None),
             ..Self::default()
         }
+    }
+
+    /// 侧栏 / 工作区底部的按键提示行是否该画：焦点在这一栏、且是键盘带来的焦点
+    /// （鼠标点进来的焦点不画，那行只会挤掉一行内容）。
+    #[must_use]
+    pub fn pane_hint_visible(&self, focus: Focus) -> bool {
+        self.focus == focus && !self.focus_by_pointer
     }
 
     pub fn push_line(&mut self, kind: LineKind, text: &str) {
