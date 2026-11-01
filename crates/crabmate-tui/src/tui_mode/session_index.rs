@@ -127,6 +127,24 @@ pub(super) fn plan_new_blank_outcome(
     }
 }
 
+/// 删除把左栏删空时，该不该认领服务端补出来的那条空白行（纯判定）。
+///
+/// 服务端删空后会补一条默认空白行（对齐 Web `ensure_at_least_one`），它的行 id 只有
+/// 服务端知道。不认领它，首轮结束后既不会 `BindServer` 也不会起名——两处都只认
+/// `local_new_session` 指向的行——用户看到的就是「会话没绑定、标题一直是新会话」。
+///
+/// 两个不认领的情形：
+/// - 当前还在别的会话上（`has_conversation`）：补出来的行不是这次对话的落点；
+/// - `NewBlank` 在途（`new_blank_pending`）：它的回包会经 [`NewBlankOutcome::Adopt`]
+///   认领同一行，这里再认领一次只会多打一行提示。
+pub(super) fn plan_after_delete_blank(
+    created_blank: Option<&str>,
+    has_conversation: bool,
+    new_blank_pending: bool,
+) -> Option<&str> {
+    created_blank.filter(|_| !has_conversation && !new_blank_pending)
+}
+
 /// 切工作区时该不该回收当前那条「`/conv new` 建、还没人认领」的空行（纯判定）。
 ///
 /// 返回 `(要删的行 id, active 的新落点)`。两个条件缺一不可：
@@ -441,7 +459,8 @@ impl LaneApp<'_> {
             // 退出落盘发生在退出路径上，屏幕上已经没有可看的地方，静默即可。
             SessionIndexOp::FlushExit { .. } => {}
             // 删除：左栏刷新后那行自然消失，不必额外打一行（发起时已提示「正在删除…」）。
-            SessionIndexOp::Delete { .. } => {}
+            // 例外是「删空」：服务端会补一条默认空白行，得认领它，否则没有人去绑定它。
+            SessionIndexOp::Delete { .. } => self.adopt_after_delete(&applied),
         }
         self.refresh_sessions();
     }
@@ -524,6 +543,34 @@ impl LaneApp<'_> {
             self.st.selected = idx;
         }
         self.index.pending_select_session = None;
+    }
+
+    /// `Delete` 回包的处理：删空后服务端补出来的空白行要认领（判定见
+    /// [`plan_after_delete_blank`]）。抽成独立方法是为了不给 `on_session_index`
+    /// 再加一个分支——lizard 的 CCN>10 是全局硬门禁。
+    fn adopt_after_delete(&mut self, applied: &SessionIndexApplied) {
+        let adopted = plan_after_delete_blank(
+            applied.created_blank_id.as_deref(),
+            self.st.conversation_id.is_some(),
+            self.index.new_session_pending,
+        );
+        if let Some(local_id) = adopted {
+            self.adopt_created_blank(local_id);
+        }
+    }
+
+    /// 认领「删空后服务端补出来的空白行」：它是接下来的对话唯一能落地的行。
+    ///
+    /// 与 `NewBlank` 的 Adopt 同义，只是行 id 来自 `Delete` 的回包。不认领它的表现是
+    /// 首轮结束后这条会话既不绑定 `conversation_id`、也不换成消息摘要标题。
+    fn adopt_created_blank(&mut self, local_id: &str) {
+        self.index.local_new_session = Some(local_id.to_string());
+        // 与 `NewBlank` 一样按 id 等刷新后定位，不按下标猜。
+        self.index.pending_select_session = Some(local_id.to_string());
+        self.st.push_line(
+            LineKind::System,
+            "左栏已删空：已补一条新会话行，接下来的对话会登记在它上面",
+        );
     }
 }
 
@@ -680,6 +727,7 @@ mod tests {
         let applied = SessionIndexApplied {
             local_id: "s_new".into(),
             reused_blank: true,
+            created_blank_id: None,
         };
         assert_eq!(
             plan_new_blank_outcome(&applied, false, None, Some("标题"), None),
@@ -698,6 +746,7 @@ mod tests {
         let applied = SessionIndexApplied {
             local_id: "s_new".into(),
             reused_blank: false,
+            created_blank_id: None,
         };
         assert_eq!(
             plan_new_blank_outcome(&applied, true, Some("c1"), None, Some("s1".into())),
@@ -715,6 +764,7 @@ mod tests {
         let applied = SessionIndexApplied {
             local_id: "s_new".into(),
             reused_blank: false,
+            created_blank_id: None,
         };
         assert_eq!(
             plan_new_blank_outcome(&applied, true, None, Some("标题"), Some("s1".into())),
@@ -722,6 +772,95 @@ mod tests {
                 local_id: "s_new".into(),
                 next_active: Some("s1".into()),
             }
+        );
+    }
+
+    /// 回归用例：左栏删空后服务端补出来的那一行必须进入待绑定记账。
+    ///
+    /// 不认领的表现就是用户报的那一例：首轮结束只刷新列表，既不 `BindServer`
+    /// 也不 `SetTitle`，左栏那条「新会话」一直是默认标题、也不带绑定标记。
+    #[test]
+    fn adopted_blank_after_delete_receives_bind_and_title() {
+        use std::sync::mpsc;
+
+        use super::super::test_support::{test_app, test_client, test_prefs};
+
+        let client = test_client();
+        let mut prefs = test_prefs();
+        let (job_tx, job_rx) = mpsc::channel();
+        let (ui_tx, ui_rx) = mpsc::channel();
+        let mut app = test_app(&client, &mut prefs, ui_rx, ui_tx, job_tx);
+        assert!(app.st.conversation_id.is_none(), "起始就在新会话上");
+
+        app.on_session_index(
+            Ok(SessionIndexApplied {
+                local_id: "s_del".into(),
+                reused_blank: false,
+                created_blank_id: Some("s_new".into()),
+            }),
+            SessionIndexOp::Delete {
+                local_id: "s_del".into(),
+                next_active: None,
+                server_conversation_id: None,
+            },
+        );
+        assert_eq!(
+            app.index.local_new_session.as_deref(),
+            Some("s_new"),
+            "补出来的空白行要进入待绑定记账"
+        );
+        // 收尾刷新先入队（与生产同序），之后才是首轮的绑定。
+        assert!(
+            matches!(job_rx.try_recv(), Ok(WorkerJob::RefreshSessions)),
+            "删除回包后要刷新左栏"
+        );
+
+        // 首条消息就是这一行的标题（与 Web 同规则）。这一步**必须排在绑定之前**：
+        // `bind_new_session` 的成功回包会把 `local_new_session` 清成 `None`。
+        app.retitle_new_session_for_first_turn("帮我查下日志");
+        match job_rx.try_recv() {
+            Ok(WorkerJob::SessionIndex(SessionIndexOp::SetTitle { local_id, title })) => {
+                assert_eq!(local_id, "s_new", "标题要写到补出来的那一行上");
+                assert_eq!(title, "帮我查下日志");
+            }
+            _ => panic!("首条消息应发出 SetTitle"),
+        }
+
+        app.bind_new_session("c1");
+        match job_rx.try_recv() {
+            Ok(WorkerJob::SessionIndex(SessionIndexOp::BindServer {
+                local_id,
+                conversation_id,
+            })) => {
+                assert_eq!(local_id, "s_new", "cid 要绑到补出来的那一行上");
+                assert_eq!(conversation_id, "c1");
+            }
+            _ => panic!("首轮绑定应发出 BindServer"),
+        }
+    }
+
+    /// 删空后补出来的空白行要认领；当前在别的会话上、或 `NewBlank` 在途时不认领。
+    #[test]
+    fn delete_that_empties_the_list_adopts_the_created_blank() {
+        assert_eq!(
+            plan_after_delete_blank(Some("s_new"), false, false),
+            Some("s_new"),
+            "删空后补的空白行必须被认领，否则那一轮既不会绑定也不会起名"
+        );
+        assert_eq!(
+            plan_after_delete_blank(Some("s_new"), true, false),
+            None,
+            "当前还在别的会话上：补出来的行不是这次对话的落点"
+        );
+        assert_eq!(
+            plan_after_delete_blank(Some("s_new"), false, true),
+            None,
+            "NewBlank 在途：它的回包会 Adopt 同一行"
+        );
+        assert_eq!(
+            plan_after_delete_blank(None, false, false),
+            None,
+            "没补行（还有别的会话）：没有要认领的"
         );
     }
 }

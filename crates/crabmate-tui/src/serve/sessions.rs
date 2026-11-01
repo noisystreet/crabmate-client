@@ -139,6 +139,12 @@ pub struct AppliedIndex {
     pub local_id: String,
     /// `NewBlank` 是复用了已有空白行（`true`）还是新插入一行（`false`）。
     pub reused_blank: bool,
+    /// `Delete` 把索引删空后补出来的那条默认空白行 id（对齐 Web `ensure_at_least_one`）。
+    ///
+    /// 与 `local_id`（被删的那一行）分开报：那行已经不存在了，UI 真正要认领的是这条
+    /// 新行——不认领它，首轮结束后既不会 `BindServer` 也不会起名（两处都只认
+    /// `local_new_session` 指向的行），左栏那条「新会话」就会一直停在默认标题上。
+    pub created_blank_id: Option<String>,
 }
 
 /// 写入成功后回传 UI 的最小信息（不带整份索引）。
@@ -148,6 +154,10 @@ pub struct SessionIndexApplied {
     pub local_id: String,
     /// `NewBlank` 是否复用了已有空白行。
     pub reused_blank: bool,
+    /// `Delete` 删空后补出来的空白行 id（其余 op 为 `None`）。
+    ///
+    /// 那条行不是 `NewBlank` 建的，`local_new_session` 里没有它；UI 据本字段认领。
+    pub created_blank_id: Option<String>,
 }
 
 impl IndexStamp {
@@ -194,6 +204,7 @@ pub fn apply_index_op(
                     active_session_id: Some(id.clone()),
                     local_id: id,
                     reused_blank: true,
+                    created_blank_id: None,
                 });
             }
             rows.insert(0, blank_row(&stamp.new_local_id, title, stamp.now_ms));
@@ -202,6 +213,7 @@ pub fn apply_index_op(
                 active_session_id: Some(stamp.new_local_id.clone()),
                 local_id: stamp.new_local_id.clone(),
                 reused_blank: false,
+                created_blank_id: None,
             })
         }
         SessionIndexOp::BindServer {
@@ -220,6 +232,7 @@ pub fn apply_index_op(
                 active_session_id: active.map(str::to_string),
                 local_id: local_id.clone(),
                 reused_blank: false,
+                created_blank_id: None,
             })
         }
         SessionIndexOp::RemoveBlank {
@@ -243,6 +256,7 @@ pub fn apply_index_op(
                 active_session_id: active.map(str::to_string),
                 local_id: local_id.clone(),
                 reused_blank: false,
+                created_blank_id: None,
             })
         }
         SessionIndexOp::FlushExit {
@@ -269,6 +283,7 @@ pub fn apply_index_op(
                 active_session_id: active.map(str::to_string),
                 local_id: local_id.clone(),
                 reused_blank: false,
+                created_blank_id: None,
             })
         }
         SessionIndexOp::Delete {
@@ -339,6 +354,7 @@ pub async fn apply_web_session_op(
     Ok(SessionIndexApplied {
         local_id: applied.local_id,
         reused_blank: applied.reused_blank,
+        created_blank_id: applied.created_blank_id,
     })
 }
 
@@ -488,6 +504,7 @@ fn remove_blank_row(
             active_session_id: Some(next.to_string()),
             local_id: local_id.to_string(),
             reused_blank: false,
+            created_blank_id: None,
         };
     }
     rows.remove(idx);
@@ -528,6 +545,7 @@ fn delete_row(
             active_session_id: Some(stamp.new_local_id.clone()),
             local_id: local_id.to_string(),
             reused_blank: false,
+            created_blank_id: Some(stamp.new_local_id.clone()),
         };
     }
     if !was_active {
@@ -537,6 +555,7 @@ fn delete_row(
             active_session_id: active.map(str::to_string),
             local_id: local_id.to_string(),
             reused_blank: false,
+            created_blank_id: None,
         };
     }
     let next = next_active
@@ -548,6 +567,7 @@ fn delete_row(
         active_session_id: next,
         local_id: local_id.to_string(),
         reused_blank: false,
+        created_blank_id: None,
     }
 }
 
@@ -562,6 +582,7 @@ fn applied_without_removal(
         active_session_id: active.map(str::to_string),
         local_id: local_id.to_string(),
         reused_blank: false,
+        created_blank_id: None,
     }
 }
 
