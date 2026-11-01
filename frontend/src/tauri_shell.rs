@@ -74,6 +74,13 @@ export function invokeTauriListConnections() {
   return tauriInvoke("list_connections", {});
 }
 
+export function invokeTauriRegisterConnection(apiBase, displayName) {
+  return tauriInvoke("register_connection", {
+    apiBase,
+    displayName: displayName ?? null,
+  });
+}
+
 export function invokeTauriFocusConnection(key) {
   return tauriInvoke("focus_connection", { key });
 }
@@ -151,6 +158,11 @@ extern "C" {
     fn invoke_tauri_disconnect_remote() -> js_sys::Promise;
     #[wasm_bindgen(js_name = invokeTauriListConnections)]
     fn invoke_tauri_list_connections() -> js_sys::Promise;
+    #[wasm_bindgen(js_name = invokeTauriRegisterConnection)]
+    fn invoke_tauri_register_connection(
+        api_base: &str,
+        display_name: Option<String>,
+    ) -> js_sys::Promise;
     #[wasm_bindgen(js_name = invokeTauriFocusConnection)]
     fn invoke_tauri_focus_connection(key: &str) -> js_sys::Promise;
     #[wasm_bindgen(js_name = listenTauriConnectionsChanged)]
@@ -194,18 +206,15 @@ fn invoke_tauri_os_prefers_dark_theme() -> js_sys::Promise {
 fn invoke_tauri_disconnect_remote() -> js_sys::Promise {
     js_sys::Promise::resolve(&wasm_bindgen::JsValue::UNDEFINED)
 }
+
+/// 非 wasm（测试 / SSR）下切窗口是 no-op。
+///
+/// 只有这一个需要 stub：它是唯一在 `cfg` 之外被调用（`view!` 的点击处理）的多窗口 API。
+/// `list` / `register` / `listen` 全部由 `#[cfg(target_arch = "wasm32")]` 的
+/// `install_connections_feed` 独占调用，host 目标上给它们留 stub 只会变成 dead code
+/// （`-D warnings` 直接拒），所以这里干脆不定义。
 #[cfg(not(target_arch = "wasm32"))]
-fn invoke_tauri_list_connections() -> js_sys::Promise {
-    js_sys::Promise::resolve(&wasm_bindgen::JsValue::UNDEFINED)
-}
-#[cfg(not(target_arch = "wasm32"))]
-fn invoke_tauri_focus_connection(_: &str) -> js_sys::Promise {
-    js_sys::Promise::resolve(&wasm_bindgen::JsValue::UNDEFINED)
-}
-#[cfg(not(target_arch = "wasm32"))]
-fn listen_tauri_connections_changed(_: &js_sys::Function) -> js_sys::Promise {
-    js_sys::Promise::resolve(&wasm_bindgen::JsValue::NULL)
-}
+pub fn tauri_focus_connection(_: &str) {}
 
 /// 是否在 **桌面** Tauri WebView 内运行。
 /// Android 远程薄客户端虽可能注入 `__TAURI__`，但无本机选目录等桌面命令，须视为非桌面壳。
@@ -283,6 +292,7 @@ pub fn tauri_disconnect_remote() {
 ///
 /// 这里**不**在这里反序列化：结构由 `crabmate_client_api::connections::ConnectionSnapshot`
 /// 定义，解析属于调用方，本层只负责「把壳里的答案原样拿回来」。
+#[cfg(target_arch = "wasm32")]
 pub async fn tauri_list_connections_json() -> Result<String, String> {
     if !tauri_shell_available() {
         return Err("not in tauri shell".to_string());
@@ -299,6 +309,7 @@ pub async fn tauri_list_connections_json() -> Result<String, String> {
 ///
 /// 返回 `Ok(false)` = 这个壳没有 event 能力（浏览器 / 老壳），调用方应退化为「只读一次
 /// 名单」，**不要**当成错误。注册成功返回 `Ok(true)`。
+#[cfg(target_arch = "wasm32")]
 pub async fn tauri_listen_connections_changed(cb: js_sys::Function) -> Result<bool, String> {
     if !tauri_shell_available() {
         return Ok(false);
@@ -309,7 +320,30 @@ pub async fn tauri_listen_connections_changed(cb: js_sys::Function) -> Result<bo
     Ok(!value.is_null() && !value.is_undefined())
 }
 
+/// 把自己的连接登记进壳的协调面（`register_connection`）。
+///
+/// 没有这一步，注册表里就只有「用 `open_connection` 开出来的窗口」—— main 窗口自己在
+/// 名单里缺席，于是列表永远只有一条（或干脆不切列表）。幂等：重复调用是覆盖，无害。
+///
+/// 返回 `Result` 而不是 fire-and-forget：调用方要**先登记再取名单**，顺序反了会读到
+/// 一份不含自己的列表，`len` 永远差一条。
+#[cfg(target_arch = "wasm32")]
+pub async fn tauri_register_connection(
+    api_base: &str,
+    display_name: Option<&str>,
+) -> Result<(), String> {
+    if !tauri_shell_available() || api_base.trim().is_empty() {
+        return Ok(());
+    }
+    tauri_invoke_void(invoke_tauri_register_connection(
+        api_base,
+        display_name.map(str::to_string),
+    ))
+    .await
+}
+
 /// 切到某条连接对应的窗口（`focus_connection`）。
+#[cfg(target_arch = "wasm32")]
 pub fn tauri_focus_connection(key: &str) {
     if !tauri_shell_available() {
         return;

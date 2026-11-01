@@ -194,8 +194,13 @@ pub(crate) fn connections_tally(app: AppHandle) -> ConnectionTally {
 
 /// 窗口报告「我连上了谁」。
 ///
-/// 由业务 UI 在连接成功后调用（拿得到 `api_base` 与用户取的名字）。`key` 由注册表分配
-/// 并回传 —— 前端要把它存下来当作「我是谁」。
+/// 由业务 UI 在连接成功后调用（拿得到 `api_base` 与用户取的名字）。
+///
+/// `key` **恒等于 window label**（`ConnectionKey::from_raw` 只做 slug 化，label 本身
+/// 已经是合规的）。这条等式是整套协调面的地基：`focus_connection`、`report_connection_status`、
+/// `rename_connection`、窗口 `Destroyed` 清理全部按 label 查。窗口自报时 label 早已确定，
+/// **不需要**再分配一次 key —— 再分配只会得到一个与 label 不同的值，于是
+/// `focus_connection(key)` 永远找不到那个窗口。
 #[tauri::command]
 pub(crate) fn register_connection(
     app: AppHandle,
@@ -205,11 +210,8 @@ pub(crate) fn register_connection(
 ) -> Result<ConnectionSnapshot, String> {
     let state = registry(&app).ok_or_else(|| "连接注册表未就绪".to_string())?;
     let base = crabmate_connect::normalize_base_url(&api_base)?;
-    let preferred = display_name;
-    let mut snapshot =
-        ConnectionSnapshot::new(preferred.clone().unwrap_or_default(), base.as_str());
-    // 以注册表的分配为准：`new` 派生的是基础 key，撞名时这里会带后缀。
-    snapshot.key = state.unique_key(preferred.as_deref(), base.as_str());
+    let mut snapshot = ConnectionSnapshot::new(display_name.unwrap_or_default(), base.as_str());
+    snapshot.key = ConnectionKey::from_raw(window.label());
     snapshot.active = true;
     state.upsert(window.label(), snapshot.clone());
     broadcast(&app);
@@ -236,17 +238,28 @@ pub(crate) fn open_connection(
     let preferred = display_name;
     let key = state.unique_key(preferred.as_deref(), base.as_str());
 
-    // 先建窗口、后登记：建窗失败就不该在列表里留一条打不开的连接。
-    crate::desktop_main_window::create_connection_window(
+    // 先**占位**再建窗。`unique_key` 返回时锁已经释放，两个并发的 `open_connection`
+    // （用户在两个窗口里同时点「新连接」）会拿到同一个 key，而
+    // `WebviewWindowBuilder::new` 遇到重名 label 会失败 —— 表现为「偶尔开不出来」。
+    // 占位让第二个请求在 `unique_key` 里就看见它已存在，从而换到 `-2`。
+    // 占位期间不广播，所以用户在列表里看不到这一条。
+    let mut snapshot =
+        ConnectionSnapshot::new(preferred.clone().unwrap_or_default(), base.as_str());
+    snapshot.key = key.clone();
+    state.upsert(key.as_str(), snapshot.clone());
+
+    if let Err(error) = crate::desktop_main_window::create_connection_window(
         &app,
         key.as_str(),
         &base,
         preferred.as_deref().unwrap_or_default(),
         bearer.as_deref().unwrap_or_default(),
-    )?;
+    ) {
+        // 建窗失败：撤掉占位，别在列表里留一条打不开的连接。
+        state.remove(key.as_str());
+        return Err(error);
+    }
 
-    let mut snapshot = ConnectionSnapshot::new(preferred.unwrap_or_default(), base.as_str());
-    snapshot.key = key;
     snapshot.active = true;
     // 注册表的键是 window label，而这里 label 就是 key（`create_connection_window`
     // 用的同一个值），所以两者一致。
