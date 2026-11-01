@@ -1,11 +1,11 @@
 //! 桌面壳窗口生命周期：单实例唤醒、最小化到托盘与系统托盘。
 
+use crabmate_client_api::secrets::DESKTOP_MAIN_WINDOW_LABEL as MAIN_WINDOW_LABEL;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{App, AppHandle, Manager, Runtime};
 
-const MAIN_WINDOW_LABEL: &str = "main";
 const TRAY_ID: &str = "crabmate-main";
 const TRAY_TOGGLE_ID: &str = "tray-toggle-main";
 const TRAY_QUIT_ID: &str = "tray-quit";

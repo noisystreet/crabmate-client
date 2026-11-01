@@ -41,16 +41,35 @@ pub(crate) fn with_shell_keyring_fallback(
 }
 
 /// 读系统钥匙串条目（service 与桌面壳一致：`com.crabmate.credentials`）。
-/// 无条目 / 钥匙串不可用 / 空值返回 `None`（调用方静默回退）。
-pub(crate) fn keyring_secret(account: &str) -> Option<String> {
-    let entry = keyring::Entry::new(KEYRING_SERVICE, account).ok()?;
-    let raw = entry.get_password().ok()?;
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        None
-    } else {
-        Some(trimmed.to_string())
+///
+/// 三态而不是两态：`Ok(None)` 是「没有这个槽」，`Err` 是「钥匙串读不了」（后端不可用 /
+/// 被锁 / 无 D-Bus）。混成一个 `Option` 会把后者报成前者，而两者对 401 的下一步动作
+/// 相反 —— 一个该去桌面连一次，一个该去修钥匙串。口径与 `crabmate-connect` 的
+/// `read_account` 一致。
+fn read_account(account: &str) -> Result<Option<String>, String> {
+    let entry = keyring::Entry::new(KEYRING_SERVICE, account)
+        .map_err(|e| format!("系统钥匙串不可用: {e}"))?;
+    match entry.get_password() {
+        Ok(secret) => {
+            let trimmed = secret.trim();
+            if trimmed.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(trimmed.to_string()))
+            }
+        }
+        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(e) => Err(format!("读取系统钥匙串失败: {e}")),
     }
+}
+
+/// 宽松版：读不到就是 `None`。
+///
+/// 只给模型密钥那条路径用 —— 它只关心「有没有值」，且未命中时本来就不出声（见
+/// `resolve_llm_key`）。Bearer 路径必须用 [`read_account`]：那里要把「不可用」与
+/// 「没存过」分开报。
+pub(crate) fn keyring_secret(account: &str) -> Option<String> {
+    read_account(account).ok().flatten()
 }
 
 /// Bearer 槽的探测顺序：分槽后的主窗口槽，再是分槽前的裸槽。
@@ -89,29 +108,51 @@ fn miss_note(accounts: &[String]) -> String {
     )
 }
 
-/// 回退读桌面壳钥匙串里的 Web Bearer，并说明结果取自哪个槽。
+/// 钥匙串读不了时的一行 stderr。
+///
+/// 与 [`miss_note`] 分开：那条说的是「没存过」，这条说的是「读不了」。两者都表现为
+/// 「未取到 Web Bearer」，但下一步动作相反 —— 混成一句就把排查又推回起点。
+#[must_use]
+fn unavailable_note(accounts: &[String], error: &str) -> String {
+    format!(
+        "[crabmate-tui] 读不到桌面壳钥匙串（{error}）；试过 {}；若 serve 启用 Bearer 鉴权，请改用 --bearer / CM_WEB_API_BEARER_TOKEN，或修好系统钥匙串后重试",
+        accounts.join(", ")
+    )
+}
+
+/// 回退读桌面壳钥匙串里的 Web Bearer，并说明结果取自哪个槽 / 为何没取到。
 fn read_shell_bearer_slot() -> Option<String> {
     let accounts = bearer_account_candidates();
-    match first_keyring_hit(&accounts, keyring_secret) {
-        Some((account, secret)) => {
+    match first_keyring_hit(&accounts, read_account) {
+        Ok(Some((account, secret))) => {
             eprintln!("{}", hit_note(&account));
             Some(secret)
         }
-        None => {
+        Ok(None) => {
             eprintln!("{}", miss_note(&accounts));
+            None
+        }
+        Err(error) => {
+            eprintln!("{}", unavailable_note(&accounts, &error));
             None
         }
     }
 }
 
 /// 按顺序读候选槽，返回首个命中的 `(账户名, 值)`。
+///
+/// 任一槽读取失败即 `Err`，不再往下探：钥匙串后端不可用是全局故障，下一个槽不会更好；
+/// 而把同一次故障说成「两个槽都没有」，正是这条链路要消灭的归因错误。
 fn first_keyring_hit(
     accounts: &[String],
-    read: impl Fn(&str) -> Option<String>,
-) -> Option<(String, String)> {
-    accounts
-        .iter()
-        .find_map(|account| read(account).map(|secret| (account.clone(), secret)))
+    read: impl Fn(&str) -> Result<Option<String>, String>,
+) -> Result<Option<(String, String)>, String> {
+    for account in accounts {
+        if let Some(secret) = read(account)? {
+            return Ok(Some((account.clone(), secret)));
+        }
+    }
+    Ok(None)
 }
 
 #[cfg(test)]

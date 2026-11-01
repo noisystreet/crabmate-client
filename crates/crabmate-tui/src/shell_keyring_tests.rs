@@ -7,7 +7,8 @@ use crabmate_client_api::secrets::{
 };
 
 use super::{
-    bearer_account_candidates, first_keyring_hit, hit_note, miss_note, with_shell_keyring_fallback,
+    bearer_account_candidates, first_keyring_hit, hit_note, miss_note, unavailable_note,
+    with_shell_keyring_fallback,
 };
 
 #[test]
@@ -61,8 +62,9 @@ fn first_hit_stops_at_the_scoped_slot() {
     let probes = RefCell::new(Vec::new());
     let hit = first_keyring_hit(&accounts, |account| {
         probes.borrow_mut().push(account.to_string());
-        Some(format!("secret-for-{account}"))
+        Ok(Some(format!("secret-for-{account}")))
     })
+    .expect("probe should not fail")
     .expect("hit");
 
     assert_eq!(hit.0, accounts[0]);
@@ -77,8 +79,9 @@ fn legacy_slot_still_answers_when_the_scoped_one_is_missing() {
     let accounts = bearer_account_candidates();
     let legacy = WEB_API_BEARER_KEYRING_ACCOUNT.to_string();
     let hit = first_keyring_hit(&accounts, |account| {
-        (account == legacy).then(|| "legacy-token".to_string())
+        Ok((account == legacy).then(|| "legacy-token".to_string()))
     })
+    .expect("probe should not fail")
     .expect("legacy hit");
 
     assert_eq!(hit.0, legacy);
@@ -90,7 +93,7 @@ fn no_slot_means_no_credentials() {
     // 两个槽都空时必须如实返回 None：调用方据此判定「未提供 Bearer」，
     // 而不是拿空串去发一个注定 401 的匿名请求。
     let accounts = bearer_account_candidates();
-    assert!(first_keyring_hit(&accounts, |_| None).is_none());
+    assert_eq!(first_keyring_hit(&accounts, |_| Ok(None)), Ok(None));
 }
 
 #[test]
@@ -114,4 +117,36 @@ fn miss_note_lists_probed_slots_and_conditions_the_advice() {
     // 「没有槽」不等于「需要 Bearer」（同 Origin 本地 serve 就不需要），
     // 所以建议必须挂在条件从句上，不能无条件让人去加 --bearer。
     assert!(note.contains("serve 启用 Bearer 鉴权时"), "{note}");
+}
+
+#[test]
+fn a_failing_probe_does_not_fall_through_to_the_next_slot() {
+    // 钥匙串后端不可用是全局故障：读到 `Err` 就停，不能当成「这个槽没有、再看下一个」，
+    // 否则同一次故障会被报成「两个槽都没存过」。
+    let accounts = bearer_account_candidates();
+    let probes = RefCell::new(Vec::new());
+    let outcome = first_keyring_hit(&accounts, |account| {
+        probes.borrow_mut().push(account.to_string());
+        Err("系统钥匙串不可用: no session bus".to_string())
+    });
+
+    assert_eq!(outcome, Err("系统钥匙串不可用: no session bus".to_string()));
+    assert_eq!(probes.borrow().len(), 1);
+}
+
+#[test]
+fn an_unreadable_keyring_is_not_reported_as_an_empty_one() {
+    let accounts = bearer_account_candidates();
+    let note = unavailable_note(&accounts, "系统钥匙串不可用: no session bus");
+    // 必须说「读不了」而不是「没存过」：前者该去修钥匙串，后者该去桌面连一次 ——
+    // 两者都表现为「未取到 Bearer」，混成一句就把排查推回起点。
+    assert!(note.contains("读不到桌面壳钥匙串"), "{note}");
+    assert!(note.contains("no session bus"), "{note}");
+    assert!(!note.contains("没有可用槽"), "{note}");
+    // 手动出口照样给，但仍然挂在条件从句上。
+    assert!(note.contains("--bearer"), "{note}");
+    assert!(note.contains("serve 启用 Bearer 鉴权"), "{note}");
+    for account in &accounts {
+        assert!(note.contains(account.as_str()), "缺少 {account}：{note}");
+    }
 }
