@@ -67,6 +67,36 @@ NATIVE_WINDOW_BACKGROUNDS = (
     ),
 )
 
+# TUI 终端配色板：唯一一个还需要手抄 RGB 的镜像面。
+#
+# 声明分两层，两边都由源码注释给出，脚本只负责比对（声明与值不对称就红）：
+#   1. struct 字段的 doc 写着 `--xxx` 的槽 → 必须等于该主题文件里 --xxx 的值；
+#      没写 token 的槽（hit / chrome_bg / selection_bg / overlay_bg / code_bg / ok / err）
+#      是终端专用色阶，不绑定任何 CSS token。
+#   2. 每个 const 的 doc 用 `themes/x.css` 或 `tokens.css` 声明它的来源主题。
+TUI_PALETTE_RS = ROOT / "crates" / "crabmate-tui" / "src" / "tui_mode" / "palette.rs"
+THEMES_DIR = ROOT / "frontend" / "themes"
+
+# 刻意的偏差，不是漏抄：浅色主题的聊天区底色取 surface-hover 而不是 surface
+# （整屏纯白在终端里刺眼，压暗一档后正文/次要信息的对比仍够）。写在这里逐项登记，
+# 而不是把比对放宽成「差得不多也算过」。
+TUI_SLOT_TOKEN_OVERRIDE = {
+    ("CRABMATE_LIGHT", "bg"): "--surface-hover",
+    ("SHADCN_LIGHT", "bg"): "--surface-hover",
+}
+
+TUI_PALETTE_CONST_RE = re.compile(
+    r"const\s+([A-Z][A-Z0-9_]*)\s*:\s*Palette\s*=\s*Palette\s*\{(?P<body>.*?)\n\};\s*$",
+    re.M | re.S,
+)
+TUI_PALETTE_FIELD_RE = re.compile(
+    r"(\w+)\s*:\s*rgb\(\s*(0x[0-9a-fA-F]{2})\s*,\s*(0x[0-9a-fA-F]{2})\s*,\s*(0x[0-9a-fA-F]{2})\s*\)"
+)
+TUI_SLOT_TOKEN_RE = re.compile(r"`(--[A-Za-z0-9_-]+)`")
+THEME_FILE_RE = re.compile(r"`themes/([A-Za-z0-9_-]+\.css)`")
+TUI_STRUCT_RE = re.compile(r"pub\(crate\) struct Palette \{(.*?)\n\}", re.S)
+TUI_STRUCT_FIELD_RE = re.compile(r"^pub (\w+): Color,")
+
 # 应用主题里必须逐项出现的项（键 → 允许的取值）。
 REQUIRED_THEME_ITEMS = {
     "android:windowBackground": "@color/cm_bg",
@@ -286,6 +316,118 @@ def check_kotlin_color_consumption(failures: list[str]) -> None:
                 )
 
 
+def theme_file_tokens(name: str) -> dict[str, str] | None:
+    """`frontend/themes/<name>` 里 6 位 hex 形式的颜色声明（首个定义为准）。"""
+    path = THEMES_DIR / name
+    if not path.is_file():
+        return None
+    out: dict[str, str] = {}
+    for token, value in DECL_RE.findall(strip_css_comments(read(path))):
+        m = HEX6_RE.match(value.strip())
+        if m:
+            out.setdefault(token, "#" + m.group(1).lower())
+    return out
+
+
+def preceding_doc(text: str, pos: int) -> str:
+    """紧贴 `pos` 之前的连续 `///` 行（中间夹空行不算，防止把上一项的 doc 认成本项的）。"""
+    lines: list[str] = []
+    for line in reversed(text[:pos].split("\n")):
+        s = line.strip()
+        if s.startswith("///"):
+            lines.append(s)
+        elif s == "" and not lines:
+            continue
+        else:
+            break
+    return " ".join(reversed(lines))
+
+
+def palette_struct_tokens(text: str) -> dict[str, str]:
+    """槽 → `--token`：只收字段 doc 里写了 ``--xxx`` 的那些（没写的是终端专用色）。"""
+    body = TUI_STRUCT_RE.search(text)
+    if not body:
+        return {}
+    out: dict[str, str] = {}
+    doc: list[str] = []
+    for line in body.group(1).split("\n"):
+        s = line.strip()
+        if s.startswith("///"):
+            doc.append(s)
+            continue
+        field = TUI_STRUCT_FIELD_RE.match(s)
+        if field:
+            hit = TUI_SLOT_TOKEN_RE.search(" ".join(doc))
+            if hit:
+                out[field.group(1)] = hit.group(1)
+            doc = []
+    return out
+
+
+def check_tui_palette(failures: list[str]) -> None:
+    """TUI `palette.rs` 的每个主题 const 必须与它声明的来源主题逐槽相等。
+
+    声明与值谁写的都不能「只改一边」：`--token` 标注写错 → 取不到值即失败；
+    主题名写错 → 找不到文件即失败；值改了没改另一边 → 不相等即失败。
+    """
+    if not TUI_PALETTE_RS.is_file():
+        failures.append(f"{rel(TUI_PALETTE_RS)} 不存在")
+        return
+    text = read(TUI_PALETTE_RS)
+    slot_tokens = palette_struct_tokens(text)
+    if not slot_tokens:
+        failures.append(
+            f"{rel(TUI_PALETTE_RS)} 没解析出任何带 ``--token`` 标注的槽；"
+            "标注丢了门禁会静默失效"
+        )
+        return
+    roots: dict[str, str] | None = None
+    consts = 0
+    for m in TUI_PALETTE_CONST_RE.finditer(text):
+        name = m.group(1)
+        slots = {
+            field: "#%02x%02x%02x" % (int(r, 16), int(g, 16), int(b, 16))
+            for field, r, g, b in TUI_PALETTE_FIELD_RE.findall(m.group("body"))
+        }
+        # 全 `Color::Reset` / `..OTHER` 派生的 const（MONO、透明变体）没有 rgb 值，不参与比对。
+        if not slots:
+            continue
+        consts += 1
+        doc = preceding_doc(text, m.start())
+        theme = THEME_FILE_RE.search(doc)
+        if theme:
+            source = theme_file_tokens(theme.group(1))
+            if source is None:
+                failures.append(
+                    f"{name} 声明来源 themes/{theme.group(1)}，但 frontend/themes 下没有这个文件"
+                )
+                continue
+        elif "`tokens.css`" in doc:
+            if roots is None:
+                roots = root_token_colors(read(TOKENS_CSS))
+            source = roots
+        else:
+            failures.append(
+                f"{name} 有 {len(slots)} 个 rgb 槽，但 doc 里没声明来源主题"
+                "（``themes/x.css`` 或 ``tokens.css``）；新增主题漏写会静默不被校验"
+            )
+            continue
+        for slot, got in sorted(slots.items()):
+            token = TUI_SLOT_TOKEN_OVERRIDE.get((name, slot)) or slot_tokens.get(slot)
+            if token is None:
+                continue
+            want = source.get(token)
+            if want is None:
+                failures.append(f"{name}.{slot} 声明取 {token}，但来源主题里没有这个 token")
+            elif got != want:
+                failures.append(f"{name}.{slot} = {got} 与 {token} = {want} 不一致")
+    if consts == 0:
+        failures.append(
+            f"{rel(TUI_PALETTE_RS)} 里没解析出任何带 rgb 槽的 Palette const；"
+            "正则与源码结构不符，门禁会静默失效"
+        )
+
+
 def main() -> int:
     if not TOKENS_CSS.is_file():
         print(f"{rel(TOKENS_CSS)} 不存在", file=sys.stderr)
@@ -297,6 +439,7 @@ def main() -> int:
     check_boot_backgrounds(tokens, failures)
     check_native_window_backgrounds(tokens, failures)
     check_kotlin_color_consumption(failures)
+    check_tui_palette(failures)
     if failures:
         print("设计令牌镜像门禁失败（单一来源 = frontend/styles/tokens.css 的 :root）：", file=sys.stderr)
         for item in failures:

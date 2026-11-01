@@ -31,11 +31,11 @@ pub(crate) struct Palette {
     /// 搜索命中（非锚定行）；锚定行用它的反色块。独立于 `accent`，
     /// 否则会与用户消息的强调色混淆。
     pub hit: Color,
-    /// 聊天区底色。
+    /// 聊天区底色（`--surface`；浅色主题刻意改取 surface-hover 一档，见脚本的 TUI_SLOT_TOKEN_OVERRIDE）。
     pub bg: Color,
     /// 状态栏 / 侧栏 / composer 底色（比 `bg` 再压一档，形成条带）。
     pub chrome_bg: Color,
-    /// 列表选中行底色（桌面 `--surface-hover` 一档）。
+    /// 列表选中行底色（终端专用：桌面那档是 color-mix，例值取不到）。
     ///
     /// 无色模式下会被抹成 `Reset`，选中态改由 [`Palette::selection`] 退回反色表达。
     pub selection_bg: Color,
@@ -49,10 +49,13 @@ pub(crate) struct Palette {
     pub border: Color,
     /// 行内代码底色。
     pub code_bg: Color,
-    /// 工具成功。
+    /// 工具成功。**终端专用色阶**：比 Web 的 success 语义色更饱和 —— 终端字号小、
+    /// 格子少，低饱和的 Web 语义色在 16 色降级后容易糊进 `muted`。故不跟随该 token。
     pub ok: Color,
-    /// 工具失败 / 系统告警。
+    /// 工具失败 / 系统告警。同为终端专用色阶，理由同 [`Palette::ok`]（不跟随 error 语义色）。
     pub err: Color,
+    /// 注意态（`--warn`）：未保存改动、待重试、被改写的值。
+    pub notice: Color,
     /// 无色模式：所有颜色为 `Reset`，区分只靠 `DIM` / `BOLD` / `REVERSED`。
     pub mono: bool,
 }
@@ -78,6 +81,7 @@ const DEFAULT_DARK: Palette = Palette {
     code_bg: rgb(0x1f, 0x20, 0x33),
     ok: rgb(0x6c, 0xc4, 0x9a),
     err: rgb(0xf2, 0x77, 0x7a),
+    notice: rgb(0xc4, 0x9a, 0x6e),
     mono: false,
 };
 
@@ -96,6 +100,7 @@ const HIGH_CONTRAST_DARK: Palette = Palette {
     code_bg: rgb(0x2c, 0x2c, 0x2c),
     ok: rgb(0x66, 0xff, 0x99),
     err: rgb(0xff, 0x6b, 0x6b),
+    notice: rgb(0xc6, 0xc6, 0xc6),
     mono: false,
 };
 
@@ -114,6 +119,7 @@ const MATERIAL_DARK: Palette = Palette {
     code_bg: rgb(0x24, 0x24, 0x28),
     ok: rgb(0x6c, 0xc4, 0x9a),
     err: rgb(0xf2, 0x77, 0x7a),
+    notice: rgb(0xc2, 0x98, 0x68),
     mono: false,
 };
 
@@ -132,6 +138,7 @@ const SHADCN_DARK: Palette = Palette {
     code_bg: rgb(0x27, 0x27, 0x2a),
     ok: rgb(0x6c, 0xc4, 0x9a),
     err: rgb(0xf2, 0x77, 0x7a),
+    notice: rgb(0xfb, 0xbf, 0x24),
     mono: false,
 };
 
@@ -198,6 +205,7 @@ const CRABMATE_LIGHT: Palette = Palette {
     code_bg: rgb(0xe8, 0xe2, 0xd6),
     ok: rgb(0x2f, 0x7d, 0x4f),
     err: rgb(0xb4, 0x23, 0x18),
+    notice: rgb(0x83, 0x66, 0x28),
     mono: false,
 };
 
@@ -216,6 +224,7 @@ const SHADCN_LIGHT: Palette = Palette {
     code_bg: rgb(0xe8, 0xe8, 0xea),
     ok: rgb(0x2f, 0x7d, 0x4f),
     err: rgb(0xb4, 0x23, 0x18),
+    notice: rgb(0xb4, 0x53, 0x09),
     mono: false,
 };
 
@@ -234,8 +243,47 @@ const MONO: Palette = Palette {
     code_bg: Color::Reset,
     ok: Color::Reset,
     err: Color::Reset,
+    notice: Color::Reset,
     mono: true,
 };
+
+/// 提示行的语义级别（**内容**）。调用方只说「这是什么」，颜色由 [`Palette`] 决定（**样式**）。
+///
+/// 之前调用点直接传 `Color::LightYellow` / `LightRed` / `LightGreen`：命名色不经过
+/// [`Palette::resolve_with`]，于是主题切换不影响它们、`NO_COLOR` / `TERM=dumb` 下仍然
+/// 带色（`mono()` 只抹 palette 的槽），「未保存」与「待重试」也各自挑色。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum NoticeLevel {
+    /// 中性引导 / 预览文本（按键提示、`←→` 循环预览）。
+    Muted,
+    /// 中性信息（已保存、面板解锁）。
+    Info,
+    /// 需要注意（未保存改动、只读、无改动可保存）。
+    Warn,
+    /// 失败（保存失败、输入校验不通过）。
+    Error,
+    /// 成功（写入完成）。
+    Ok,
+}
+
+/// 设置面板值列的色调（**内容**）：说的是一格值**是什么性质**，不是它该长什么颜色。
+///
+/// 换成枚举的直接理由和 [`NoticeLevel`] 一样——原来的 `Color::White` / `Gray` /
+/// `DarkGray` 让「值来自 user-data」在切主题后仍旧是那三档 ANSI 灰，
+/// 与 `fg` / `muted` 的实际色值对不上。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FieldTone {
+    /// 当前生效值。
+    Value,
+    /// 次要值 / 只读说明。
+    Muted,
+    /// 未设置（占位措辞）：比 [`FieldTone::Muted`] 再淡一档，靠 `DIM` 表达。
+    Unset,
+    /// 已 staged、尚未保存的改写值。
+    Pending,
+    /// 来自 override 层的值（带 `*` 标记）。
+    Override,
+}
 
 /// 结构体兜底：**实底深色**，与 [`Palette::from_theme`] 的「未设置 → 透明」刻意不同。
 ///
@@ -244,11 +292,17 @@ const MONO: Palette = Palette {
 /// 任何拿它当夹具的用例都会静默失去条带色（`render_tests` / `status` 里就有十几处）。
 impl Default for Palette {
     fn default() -> Self {
-        DEFAULT_DARK
+        Self::DARK
     }
 }
 
 impl Palette {
+    /// 实底深色基线（与 `DEFAULT_DARK` 同值）：测试夹具与「没有主题上下文」时的借用目标。
+    ///
+    /// `PanelCtx.pal` 是借用字段，而测试里的 `ctx()` helper 返回 `PanelCtx<'a>`，喂不了
+    /// 临时值 —— `&Palette::DARK` 走常量提升，可以直接给 `'static`。
+    pub(crate) const DARK: Self = DEFAULT_DARK;
+
     /// Desktop 主题名 → 配色板；未知 / 空 → 默认深色（不回落到不可读的随机取值）。
     #[must_use]
     pub(crate) fn from_theme(theme: Option<&str>) -> Self {
@@ -280,6 +334,34 @@ impl Palette {
     #[must_use]
     pub(crate) fn is_mono(&self) -> bool {
         self.mono
+    }
+
+    /// 值列色调 → 样式（唯一的「色调怎么画」定义）。
+    ///
+    /// 无色模式下 `fg` / `muted` 全是 `Reset`，层级仍靠 `DIM` 与 `REVERSED` 表达：
+    /// `Unset` 淡一档、`Busy` 也淡一档，两者靠**文本本身**区分（「(跟随 server)」vs「保存中…」）。
+    #[must_use]
+    pub(crate) fn tone_style(&self, tone: FieldTone) -> Style {
+        match tone {
+            FieldTone::Value => Style::new().fg(self.fg),
+            FieldTone::Muted => Style::new().fg(self.muted),
+            FieldTone::Unset => Style::new().fg(self.muted).add_modifier(Modifier::DIM),
+            FieldTone::Pending => Style::new().fg(self.notice),
+            FieldTone::Override => Style::new().fg(self.info),
+        }
+    }
+
+    /// 提示级别 → 样式。无色模式下四个色槽都是 `Reset`，区别只剩文本措辞。
+    #[must_use]
+    pub(crate) fn notice_style(&self, level: NoticeLevel) -> Style {
+        let color = match level {
+            NoticeLevel::Muted => self.muted,
+            NoticeLevel::Info => self.info,
+            NoticeLevel::Warn => self.notice,
+            NoticeLevel::Error => self.err,
+            NoticeLevel::Ok => self.ok,
+        };
+        Style::new().fg(color)
     }
 
     /// 把 `Rgb` 降到最接近的 16 色（非真彩终端用）；已是命名色则原样返回。

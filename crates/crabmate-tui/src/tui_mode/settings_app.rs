@@ -2,7 +2,6 @@
 //! 开/关面板、面板按键分发、每帧内容构建、保存请求下发与保存结果回写。
 
 use crossterm::event::KeyEvent;
-use ratatui::style::Color;
 
 use crabmate_client_api::secrets::{KEYRING_SERVICE, SecretSlot};
 
@@ -12,7 +11,10 @@ use super::super::settings::{LlmSave, PersistedSettings, PrefsSave};
 use super::super::state::LineKind;
 use super::super::worker::WorkerJob;
 use super::field_label;
-use super::{FieldAction, FieldId, PanelContent, PanelCtx, PanelEffect, SaveGroup, SettingsPanel};
+use super::{
+    FieldAction, FieldId, NoticeLevel, PanelContent, PanelCtx, PanelEffect, SaveGroup,
+    SettingsPanel,
+};
 
 impl LaneApp<'_> {
     /// 打开设置面板（`/settings` / F2）。回合进行中打开为只读并提示；
@@ -71,6 +73,7 @@ impl LaneApp<'_> {
                 overrides: &self.overrides,
                 persisted: self.persisted.as_ref(),
                 serve_defaults: self.st.serve_defaults.as_ref(),
+                pal: &self.st.palette,
             };
             panel.handle_key(&key, &ctx)
         };
@@ -92,6 +95,7 @@ impl LaneApp<'_> {
             overrides: &self.overrides,
             persisted: self.persisted.as_ref(),
             serve_defaults: self.st.serve_defaults.as_ref(),
+            pal: &self.st.palette,
         };
         Some(panel.content(&ctx, width))
     }
@@ -160,7 +164,7 @@ impl LaneApp<'_> {
             panel.save_group_result(SaveGroup::Prefs, false);
             panel.set_note(
                 "保存取消：改动保留，可按 S 重试".to_string(),
-                Color::LightRed,
+                NoticeLevel::Error,
             );
         }
     }
@@ -216,7 +220,7 @@ impl LaneApp<'_> {
                 );
                 if let Some(panel) = self.panel.as_mut() {
                     panel.save_group_result(SaveGroup::Llm, true);
-                    panel.set_note("已保存到 serve user-data".to_string(), Color::LightGreen);
+                    panel.set_note("已保存到 serve user-data".to_string(), NoticeLevel::Ok);
                 }
             }
             Err(e) => {
@@ -226,7 +230,10 @@ impl LaneApp<'_> {
                 );
                 if let Some(panel) = self.panel.as_mut() {
                     panel.save_group_result(SaveGroup::Llm, false);
-                    panel.set_note("保存失败：改动保留，按 S 重试".to_string(), Color::LightRed);
+                    panel.set_note(
+                        "保存失败：改动保留，按 S 重试".to_string(),
+                        NoticeLevel::Error,
+                    );
                 }
             }
         }
@@ -261,7 +268,7 @@ impl LaneApp<'_> {
                 );
                 if let Some(panel) = self.panel.as_mut() {
                     panel.save_group_result(SaveGroup::Prefs, true);
-                    panel.set_note("已保存到 serve user-data".to_string(), Color::LightGreen);
+                    panel.set_note("已保存到 serve user-data".to_string(), NoticeLevel::Ok);
                 }
             }
             Err(e) => {
@@ -271,7 +278,10 @@ impl LaneApp<'_> {
                 );
                 if let Some(panel) = self.panel.as_mut() {
                     panel.save_group_result(SaveGroup::Prefs, false);
-                    panel.set_note("保存失败：改动保留，按 S 重试".to_string(), Color::LightRed);
+                    panel.set_note(
+                        "保存失败：改动保留，按 S 重试".to_string(),
+                        NoticeLevel::Error,
+                    );
                 }
             }
         }

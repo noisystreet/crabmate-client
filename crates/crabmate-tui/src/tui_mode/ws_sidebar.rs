@@ -56,14 +56,14 @@ fn workspace_title(st: &UiState, width: usize) -> Line<'static> {
     let left = truncate_display(&name, name_w);
     let mut spans = vec![Span::styled(
         left.clone(),
-        Style::new().fg(Color::White).add_modifier(Modifier::BOLD),
+        Style::new().fg(st.palette.fg).add_modifier(Modifier::BOLD),
     )];
     if !counter.is_empty() {
         let pad = width
             .saturating_sub(UnicodeWidthStr::width(left.as_str()))
             .saturating_sub(counter_w);
         spans.push(Span::styled(" ".repeat(pad), Style::new()));
-        spans.push(Span::styled(counter, Style::new().fg(Color::Gray)));
+        spans.push(Span::styled(counter, Style::new().fg(st.palette.muted)));
     }
     Line::from(spans)
 }

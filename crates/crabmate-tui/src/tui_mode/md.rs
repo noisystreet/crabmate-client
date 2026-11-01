@@ -6,7 +6,7 @@
 //! 折成按显示宽度的物理行。搜索高亮叠加规则也在此统一（锚定整行反色、
 //! 命中改黄前景且保留修饰位），保证与普通行的高亮观感一致。
 
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::Span;
 use unicode_width::UnicodeWidthChar;
 
@@ -392,7 +392,14 @@ fn push_marker(
         Some(b'>') => push_quote(out, rest, indent, pal, width),
         _ => {
             let marker: String = rest[..marker_len].to_string();
-            let marker_st = Style::new().fg(Color::Gray);
+            // 与上面的 bullet 分支同一规则：有序列表的序号是次要信息，有彩跟 `muted`、
+            // 无色模式退回无色。这里曾经直写 `Color::Gray`——既不受主题影响，
+            // `NO_COLOR` / `TERM=dumb` 下也照样带色（`mono()` 只抹 palette 的槽）。
+            let marker_st = if pal.is_mono() {
+                Style::new()
+            } else {
+                Style::new().fg(pal.muted)
+            };
             out.extend(marker.chars().map(|c| (marker_st, c)));
             let mut used = indent + marker_len;
             if content_at > marker_len {
