@@ -15,14 +15,18 @@
      另一种深色（未来令牌改浅色时则闪黑）。浅色主题的「首帧不闪」由 index.html 的预绘脚本与
      app/shell_prefs_storage.rs 的本机主题镜像负责，不改变这里的色值约束。
 
-另外两处「抄漏也静默生效」的缺口一并堵上：
+另外三处「抄漏也静默生效」的缺口一并堵上：
 
   4. **主题里的颜色引用必须真实存在**：res/values*/themes.xml 出现的 @color/<name> 要在
      res/values*/colors.xml 里有定义 —— 拼错（cm_textt）只在 AAPT 构建期报错，门禁先行拦下。
   5. **手写 Kotlin 只能消费镜像令牌**：app/src/main/java/edu/crabmate 下的 Kotlin 若直接用
      R.color.<非 cm_*>，就绕开了镜像比对（值可以随便写），故一并禁止。
+  6. **桌面原生窗口底色**：desktop-tauri/src-tauri/src/desktop_main_window.rs 的 BOOT_SHELL_BG
+     必须等于 --bg —— 窗口以 visible(false) 建、page load 之后才 show，原生底色平时露不出来，
+     但缩放 / 合成器重绘的间隙仍会闪一层；抄成旧色阶（曾经的 #0a0d12）就闪另一种深色，
+     也让「启动底色单一来源」事实上不成立。
 
-五条规则都是「精确相等」，没有白名单：要改值就必须同时改两侧。
+六条规则都是「精确相等」，没有白名单：要改值就必须同时改两侧。
 """
 
 from __future__ import annotations
@@ -48,6 +52,19 @@ MIRRORED_TOKENS = ("bg", "surface", "text", "muted", "accent", "error")
 BOOT_BACKGROUNDS = (
     ("frontend/index.html", re.compile(r"background:\s*(#[0-9a-fA-F]{3,8})\s*;")),
     ("crates/crabmate-connect/assets/connect.html", re.compile(r"--bg0:\s*(#[0-9a-fA-F]{3,8})\s*;")),
+)
+
+# 原生窗口底色：Rust 侧只能写成 `Color(r, g, b, a)` 字节，同样「声明必须恰好命中一次」。
+# 正则允许 rustfmt 换行 / 空格，但把常量名与类型一起锚住 —— 改名即命中 0 处而非静默跳过。
+NATIVE_WINDOW_BACKGROUNDS = (
+    (
+        "desktop-tauri/src-tauri/src/desktop_main_window.rs",
+        re.compile(
+            r"const BOOT_SHELL_BG: Color = Color\(\s*"
+            r"(0x[0-9a-fA-F]{2})\s*,\s*(0x[0-9a-fA-F]{2})\s*,"
+            r"\s*(0x[0-9a-fA-F]{2})\s*,\s*(0x[0-9a-fA-F]{2})\s*,?\s*\)\s*;"
+        ),
+    ),
 )
 
 # 应用主题里必须逐项出现的项（键 → 允许的取值）。
@@ -226,6 +243,33 @@ def check_boot_backgrounds(tokens: dict[str, str], failures: list[str]) -> None:
             failures.append(f"{relative} 首绘底色 {hits[0]} 与 --bg {want} 不一致")
 
 
+def check_native_window_backgrounds(tokens: dict[str, str], failures: list[str]) -> None:
+    """桌面原生窗口底色同样只能抄色值：与 --bg 逐通道相等，且声明恰好命中一次。"""
+    want = tokens.get("--bg")
+    if want is None:
+        # --bg 缺失已由 check_boot_backgrounds 报出，这里不重复。
+        return
+    for relative, pattern in NATIVE_WINDOW_BACKGROUNDS:
+        path = ROOT / relative
+        if not path.is_file():
+            failures.append(f"{relative} 不存在")
+            continue
+        hits = pattern.findall(read(path))
+        if len(hits) != 1:
+            failures.append(
+                f"{relative} 命中原生窗口底色声明 {len(hits)} 处（应为 1）；"
+                "常量被改名 / 搬走后门禁会静默失效"
+            )
+            continue
+        red, green, blue, alpha = (int(part, 16) for part in hits[0])
+        if alpha != 0xFF:
+            failures.append(f"{relative} 的原生窗口底色 alpha = 0x{alpha:02X}；须为不透明 0xFF")
+            continue
+        got = f"#{red:02x}{green:02x}{blue:02x}"
+        if got != want:
+            failures.append(f"{relative} 的原生窗口底色 {got} 与 --bg {want} 不一致")
+
+
 def check_kotlin_color_consumption(failures: list[str]) -> None:
     """手写 Kotlin 只能消费 cm_* 镜像令牌；直接用别的颜色资源即绕过整条镜像链。"""
     files = sorted(p for p in ANDROID_KOTLIN.glob("**/*.kt") if "generated" not in p.parts)
@@ -251,6 +295,7 @@ def main() -> int:
     check_colors_xml(tokens, failures)
     check_themes(declared_color_names(), failures)
     check_boot_backgrounds(tokens, failures)
+    check_native_window_backgrounds(tokens, failures)
     check_kotlin_color_consumption(failures)
     if failures:
         print("设计令牌镜像门禁失败（单一来源 = frontend/styles/tokens.css 的 :root）：", file=sys.stderr)
