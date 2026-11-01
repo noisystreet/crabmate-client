@@ -714,16 +714,23 @@
 }
 
 /* —— 左栏连接区（桌面多窗口）——
-   会话列表下方常驻，与 TUI 的左栏 lane 区同位（`tui_multi_server.md`）。
+   版面口径与 TUI 的 lane 区同源（`tui_multi_server.md` §4.6 的
+   `layout::lane_pane_height`）：**恒占左栏下半、高度为左栏的一半，与条数无关**。
+   曾经是「会话列表下方、按内容高度贴底」（`max-height: 42%`），于是一条连接时
+   分界线落在左栏 ~85% 处、条数一变还会上浮，而 TUI 恒在中线 —— 两个壳的左栏
+   读起来不是同一张版面。`flex-basis` 是 `lane_pane_height` 那条除法的 CSS 写法；
+   `max-height` 必须一起去掉，否则 42% 会把 50% 的 basis 夹回去。
+   条数少时下方留空、不拉伸（TUI 也是这样）；内容超出半栏时区内滚动
+   （`min-height: 0` 让溢出走滚动而不是撑破 basis）。
    DOM 在 `.nav-rail` 内，所以窄屏抽屉打开时自动跟着进去，不需要额外的媒体查询。 */
 .nav-rail-connections {
-  flex-shrink: 0;
+  flex: 0 0 50%;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 2px;
   padding: 8px 10px;
   border-top: 1px solid var(--border-subtle);
-  max-height: 42%;
   overflow-y: auto;
 }
 
