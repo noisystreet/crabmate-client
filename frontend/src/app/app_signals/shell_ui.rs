@@ -48,6 +48,17 @@ pub struct ShellUISignals {
     pub session_chat_font_size: RwSignal<f64>,
     /// 视口宽度 ≤ [`crate::app_prefs::MOBILE_LAYOUT_BREAKPOINT_PX`]（由 `matchMedia` 维护）。
     pub is_narrow_viewport: RwSignal<bool>,
+    /// 当前这一屏连的 `serve` 基址（[`api_base_url`](crate::api::api_base_url) 的**响应式镜像**）。
+    ///
+    /// 基址的唯一真源仍是 `crate::api::browser` 的 thread_local（所有请求都读那里）；
+    /// 这里只是让界面能在「设置 → 连接」改完基址后立刻换字。两处各持一份**独立**状态
+    /// 就会得到「改了基址、状态栈还写着旧 host」——那恰好是这个字段要回答的问题。
+    ///
+    /// 写入面因此只有一处：`save_api_base_click`（`settings_sections.rs`）在
+    /// `set_api_base_url` 之后写本字段。启动交接（URL hash）**不需要**额外写 ——
+    /// `bootstrap_app_shell` 在 [`AppSignals::new`](super::AppSignals::new) 之前就消费完它，
+    /// 所以下面 `new()` 里读到的 thread_local 已经是终值，不必先空后闪。
+    pub api_base: RwSignal<String>,
 }
 
 impl ShellUISignals {
@@ -78,6 +89,9 @@ impl ShellUISignals {
             session_chat_font: RwSignal::new(s.session_chat_font),
             session_chat_font_size: RwSignal::new(s.session_chat_font_size),
             is_narrow_viewport: RwSignal::new(false),
+            // 启动初值直接取 thread_local：连接交接（URL hash）在挂载前就写完了，
+            // 若这里给空串，首个「连接」chip 会先闪一下空态再出现。
+            api_base: RwSignal::new(crate::api::api_base_url()),
         }
     }
 }

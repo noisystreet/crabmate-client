@@ -55,6 +55,7 @@ mod side_column_workspace_scroll;
 mod sidebar_nav;
 mod status_agent_role_menu;
 mod status_bar;
+mod status_connection_chip;
 mod status_context;
 mod status_fetch_state;
 mod status_permission_chip;
