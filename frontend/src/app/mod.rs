@@ -28,6 +28,7 @@ mod ide_settings_page;
 mod ide_tabs_bar;
 mod layout_mode_segment;
 mod mobile_shell_header;
+mod nav_rail_connections;
 mod session_list_modal;
 pub(crate) mod session_mode_defaults;
 mod settings_close_guard;

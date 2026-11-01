@@ -74,7 +74,7 @@ fn connection_chip_text(base: &str) -> Option<String> {
 /// 抽出来是为了能测：名字与地址都在时用名字（用户取的就是给人读的），否则用地址
 /// （否则会出现一个空 label 的 chip，点都不知道点的是什么）。
 #[must_use]
-fn connection_chip_name(snapshot: &ConnectionSnapshot) -> String {
+pub(crate) fn connection_chip_name(snapshot: &ConnectionSnapshot) -> String {
     let name = snapshot.display_name.trim();
     if name.is_empty() {
         snapshot.authority.clone()
@@ -111,7 +111,7 @@ fn parse_connection_list(json: &str) -> Option<Vec<ConnectionSnapshot>> {
 /// 代价是这一份在 `api_base` 上取了首次调用者的值。同一窗口内 `api_base` 不变
 /// （换 serve = 换窗口或重载页面），所以这个前提成立。
 #[cfg(target_arch = "wasm32")]
-fn connection_feed(api_base: String) -> ArcRwSignal<Vec<ConnectionSnapshot>> {
+pub(crate) fn connection_feed(api_base: String) -> ArcRwSignal<Vec<ConnectionSnapshot>> {
     thread_local! {
         static FEED: std::cell::OnceCell<ArcRwSignal<Vec<ConnectionSnapshot>>> =
             const { std::cell::OnceCell::new() };
@@ -130,7 +130,7 @@ fn connection_feed(api_base: String) -> ArcRwSignal<Vec<ConnectionSnapshot>> {
 
 /// 非 wasm（测试 / SSR）：没有壳，也就没有名单来源。
 #[cfg(not(target_arch = "wasm32"))]
-fn connection_feed(_: String) -> ArcRwSignal<Vec<ConnectionSnapshot>> {
+pub(crate) fn connection_feed(_: String) -> ArcRwSignal<Vec<ConnectionSnapshot>> {
     ArcRwSignal::new(Vec::new())
 }
 
