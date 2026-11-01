@@ -13,6 +13,7 @@ use std::sync::{Mutex, MutexGuard};
 
 use crabmate_client_api::{ConnectionKey, ConnectionSnapshot, ConnectionStatus, ConnectionTally};
 use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
+use tauri_plugin_notification::NotificationExt;
 
 /// 名单变化的广播事件名。
 ///
@@ -97,12 +98,25 @@ impl ConnectionRegistry {
         ConnectionTally::from_statuses(statuses)
     }
 
-    /// 改某条连接的状态；返回是否真的存在这一条。
-    pub(crate) fn set_status(&self, label: &str, status: ConnectionStatus) -> bool {
-        self.entries().get_mut(label).is_some_and(|snapshot| {
+    /// 改某条连接的状态；返回**旧状态**（`None` = 没有这一条）。
+    ///
+    /// 返回旧状态而不是 `bool`：调用方要靠「刚进入等审批」这个**边沿**决定发不发通知。
+    /// 一直等审批时重复上报不该反复弹，而「当前是不是等审批」无法区分「刚进入」。
+    pub(crate) fn set_status(
+        &self,
+        label: &str,
+        status: ConnectionStatus,
+    ) -> Option<ConnectionStatus> {
+        self.entries().get_mut(label).map(|snapshot| {
+            let previous = snapshot.status;
             snapshot.status = status;
-            true
+            previous
         })
+    }
+
+    /// 读某条连接的快照（发通知时要用显示名与基址）。
+    pub(crate) fn snapshot(&self, label: &str) -> Option<ConnectionSnapshot> {
+        self.entries().get(label).cloned()
     }
 
     /// 改未读标记。
@@ -134,6 +148,31 @@ pub(crate) fn broadcast(app: &AppHandle) {
     let payload = state.snapshots();
     if let Err(error) = app.emit(CONNECTIONS_CHANGED, payload) {
         eprintln!("[crabmate-desktop] connections broadcast failed: {error}");
+    }
+}
+
+/// 某条连接进入等审批、而它的窗口不在前台时，发一条系统通知。
+///
+/// 为什么需要：连接窗口是「铺满工作区」的（`apply_main_ui_geometry`），后开的窗口会
+/// 完全盖住先开的 —— 被盖住的那个即使弹了审批框，用户也看不见它。TUI 侧是同一个问题
+/// （#337，后台 lane 的审批画不到主屏），那边靠左栏的 `▲` 列解决；Desktop 的窗口会被
+/// 整个遮住，所以必须有能跳出窗口的提醒。
+///
+/// 通知失败只记日志：Linux 上可能没有通知守护进程，而「审批本身」不该因此受影响。
+fn notify_approval(app: &AppHandle, snapshot: &ConnectionSnapshot) {
+    let body = if snapshot.authority.is_empty() {
+        String::from("有一条审批在等你的决定")
+    } else {
+        format!("{} · {}", snapshot.display_name, snapshot.authority)
+    };
+    if let Err(error) = app
+        .notification()
+        .builder()
+        .title("CrabMate：等待审批")
+        .body(body)
+        .show()
+    {
+        eprintln!("[crabmate-desktop] approval notification failed: {error}");
     }
 }
 
@@ -178,16 +217,32 @@ pub(crate) fn register_connection(
 }
 
 /// 窗口报告状态变化（回合开始 / 等审批 / 空闲）。
+///
+/// 进入等审批时会按需发系统通知 —— 见 [`notify_approval`]。
 #[tauri::command]
 pub(crate) fn report_connection_status(
     app: AppHandle,
     window: WebviewWindow,
     status: ConnectionStatus,
 ) {
-    if let Some(state) = registry(&app)
-        && state.set_status(window.label(), status)
+    let Some(state) = registry(&app) else {
+        return;
+    };
+    let Some(previous) = state.set_status(window.label(), status) else {
+        return;
+    };
+    broadcast(&app);
+
+    // 只在**刚进入**等审批、且那个窗口不在前台时通知：
+    // - 不在前台才需要提醒（用户正看着它的时候，审批框就在眼前，弹通知只是噪音）；
+    // - 靠 `previous` 判边沿，一直等审批时重复上报不会反复弹。
+    let entered_approval = status == ConnectionStatus::WaitingApproval
+        && previous != ConnectionStatus::WaitingApproval;
+    if entered_approval
+        && !window.is_focused().unwrap_or(false)
+        && let Some(snapshot) = state.snapshot(window.label())
     {
-        broadcast(&app);
+        notify_approval(&app, &snapshot);
     }
 }
 
@@ -275,14 +330,22 @@ mod tests {
         let registry = ConnectionRegistry::default();
         registry.upsert("win-a", snapshot("a", "http://a:1"));
         registry.upsert("win-b", snapshot("b", "http://b:2"));
-        assert!(registry.set_status("win-b", ConnectionStatus::WaitingApproval));
+        assert!(
+            registry
+                .set_status("win-b", ConnectionStatus::WaitingApproval)
+                .is_some()
+        );
 
         let tally = registry.tally();
         assert_eq!(tally.connected, 2);
         assert_eq!(tally.pending_approvals, 1);
 
         // 退出中的连接仍占一个位置（与 `LaneTally::from_entries` 同口径）。
-        assert!(registry.set_status("win-a", ConnectionStatus::Quitting));
+        assert!(
+            registry
+                .set_status("win-a", ConnectionStatus::Quitting)
+                .is_some()
+        );
         assert_eq!(registry.tally().connected, 2);
     }
 
@@ -290,9 +353,27 @@ mod tests {
     fn status_updates_for_an_unknown_window_are_ignored() {
         let registry = ConnectionRegistry::default();
         // 窗口已关（`Destroyed` 先到、状态后到）：静默忽略，不 panic。
-        assert!(!registry.set_status("gone", ConnectionStatus::Running));
+        assert!(
+            registry
+                .set_status("gone", ConnectionStatus::Running)
+                .is_none()
+        );
         assert!(!registry.set_unread("gone", true));
         assert!(!registry.rename("gone", "x"));
+    }
+
+    #[test]
+    fn the_approval_edge_is_visible_to_the_caller() {
+        // 通知只在「刚进入等审批」时发，所以 set_status 必须让调用方看得到旧状态：
+        // 反复上报 `WaitingApproval` 不能反复弹通知。
+        let registry = ConnectionRegistry::default();
+        registry.upsert("win-a", snapshot("a", "http://a:1"));
+
+        let first = registry.set_status("win-a", ConnectionStatus::WaitingApproval);
+        assert_eq!(first, Some(ConnectionStatus::Idle));
+        let again = registry.set_status("win-a", ConnectionStatus::WaitingApproval);
+        assert_eq!(again, Some(ConnectionStatus::WaitingApproval));
+        // 第二次上报的旧状态已是 WaitingApproval，调用方据此不再发通知。
     }
 
     #[test]

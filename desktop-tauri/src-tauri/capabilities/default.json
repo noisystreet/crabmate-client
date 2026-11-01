@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "主窗口：核心 API、Victauri 调试、对话框与系统浏览器打开链接。remote 仅回环：远程 serve 无桌面 IPC（外链走 window.open 回退）。",
-  "windows": ["main", "default"],
+  "description": "所有应用窗口：核心 API、Victauri 调试、对话框、系统浏览器与审批通知。windows 用通配是因为连接窗口的 label 运行期才分配（如 prod-2），无法在编译期枚举；这些窗口同样只加载包内 UI。remote 仅回环：远程 serve 无桌面 IPC（外链走 window.open 回退）。",
+  "windows": ["*"],
   "remote": {
     "urls": [
       "http://127.0.0.1:*",
@@ -13,6 +13,7 @@
     "core:default",
     "dialog:default",
     "opener:default",
-    "window-state:default"
+    "window-state:default",
+    "notification:default"
   ]
 }
