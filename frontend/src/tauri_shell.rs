@@ -297,10 +297,16 @@ pub fn tauri_disconnect_remote() {
     });
 }
 
-/// 读一次全部连接的 JSON 文本（桌面多窗口协调面 `list_connections`）。
+/// 读一次全部连接名单（桌面多窗口协调面 `list_connections`）。
 ///
-/// 这里**不**在这里反序列化：结构由 `crabmate_client_api::connections::ConnectionSnapshot`
-/// 定义，解析属于调用方，本层只负责「把壳里的答案原样拿回来」。
+/// 壳返回的是**快照数组**（`Vec<ConnectionSnapshot>` 经 serde → JS 数组），不是 JSON
+/// 文本，所以这里先 `JSON.stringify` 成文本再交出去：结构仍由
+/// `crabmate_client_api::connections::ConnectionSnapshot` 定义，解析属于调用方。
+///
+/// 为什么不把 `JsValue` 直接交给调用方：`parse_connection_list` 收 `&str`，非 wasm 目标
+/// 上的 `cargo test` 也跑同一条解析；改用 `serde-wasm-bindgen` 解析 `JsValue` 会为一条
+/// 首帧多引一个依赖。**别把 `as_string()` 单独当成功路径** —— 壳返回数组时它恒为
+/// `None`，历史上正是这一条让左栏连接区永远空白（见 `install_connections_feed`）。
 #[cfg(target_arch = "wasm32")]
 pub async fn tauri_list_connections_json() -> Result<String, String> {
     if !tauri_shell_available() {
@@ -309,9 +315,19 @@ pub async fn tauri_list_connections_json() -> Result<String, String> {
     let value = JsFuture::from(invoke_tauri_list_connections())
         .await
         .map_err(|e| format!("{e:?}"))?;
-    value
-        .as_string()
-        .ok_or_else(|| "list_connections did not return JSON text".to_string())
+    // 老壳若本来就回文本，原样透传（这是唯一跳过 stringify 的快路径）。
+    if let Some(text) = value.as_string() {
+        return Ok(text);
+    }
+    // `null` / `undefined` = 这个壳不认识这个命令：按空名单处理，与「没有连接」同义
+    // （空表会退回单条 chip，而「不知道」不该被当成错误）。
+    if value.is_null() || value.is_undefined() {
+        return Ok("[]".to_string());
+    }
+    let text: String = js_sys::JSON::stringify(&value)
+        .map_err(|e| format!("list_connections result not serializable: {e:?}"))?
+        .into();
+    Ok(text)
 }
 
 /// 订阅 `connections_changed`；回调收到 JSON 文本。

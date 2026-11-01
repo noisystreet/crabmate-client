@@ -134,10 +134,17 @@ pub(crate) fn connection_feed(_: String) -> ArcRwSignal<Vec<ConnectionSnapshot>>
     ArcRwSignal::new(Vec::new())
 }
 
-/// 先 `register` 补自己的位置，再 `list` 补首帧，最后订阅增量。
+/// 先订阅、再 `register`、最后 `list` 补首帧。
 ///
-/// 顺序不能反：注册表里没有「我」时，`list` 会返回一份只含别的窗口的名单 ——
-/// `len` 永远差一条，多窗口下凑不到 2，chip 就永远不切成列表。
+/// 三步的顺序都有理由，任何一步换位都会退化成「名单永远空」：
+///
+/// - **订阅必须早于 `register`**：壳在登记那一刻就广播一次全量名单，订阅晚一步就收
+///   不到那一次 —— 而它正是「我自己那条」进列表的时机（窗口自己不会再有别的上报）。
+/// - `register` 必须早于 `list`：注册表里没有「我」时，`list` 会返回一份只含别的
+///   窗口的名单 —— `len` 永远差一条，多窗口下凑不到 2，chip 就永远不切成列表。
+/// - `list` 只在名单**仍为空**时落盘：广播可能已经先到并给出更新的快照，用首帧把它
+///   覆盖回去会让状态往回倒一帧（这也是 `as_string()` 那条老 bug 之外的第二重保险，
+///   首帧读不到不再是致命的）。
 #[cfg(target_arch = "wasm32")]
 fn install_connections_feed(feed: ArcRwSignal<Vec<ConnectionSnapshot>>, api_base: String) {
     use wasm_bindgen::JsCast;
@@ -145,18 +152,13 @@ fn install_connections_feed(feed: ArcRwSignal<Vec<ConnectionSnapshot>>, api_base
     use wasm_bindgen_futures::spawn_local;
 
     spawn_local(async move {
-        let _ = crate::tauri_shell::tauri_register_connection(&api_base, None).await;
-
-        if let Ok(json) = crate::tauri_shell::tauri_list_connections_json().await
-            && let Some(list) = parse_connection_list(&json)
-        {
-            feed.set(list);
-        }
-
-        let apply = move |json: String| {
-            // 解析失败时保持现状：一次坏帧不该把列表清空。
-            if let Some(list) = parse_connection_list(&json) {
-                feed.set(list);
+        let apply = {
+            let feed = feed.clone();
+            move |json: String| {
+                // 解析失败时保持现状：一次坏帧不该把列表清空。
+                if let Some(list) = parse_connection_list(&json) {
+                    feed.set(list);
+                }
             }
         };
         let cb = Closure::<dyn FnMut(String)>::new(apply);
@@ -164,6 +166,15 @@ fn install_connections_feed(feed: ArcRwSignal<Vec<ConnectionSnapshot>>, api_base
         // `Ok(None)` = 这个壳没有 event 能力（浏览器 / 老壳）：名单停在首帧，不是错误。
         // 句柄故意丢弃：订阅与这份全局 signal 同寿，没有需要退订的时刻。
         let _ = crate::tauri_shell::tauri_listen_connections_changed(func).await;
+
+        let _ = crate::tauri_shell::tauri_register_connection(&api_base, None).await;
+
+        if feed.get_untracked().is_empty()
+            && let Ok(json) = crate::tauri_shell::tauri_list_connections_json().await
+            && let Some(list) = parse_connection_list(&json)
+        {
+            feed.set(list);
+        }
     });
 }
 
