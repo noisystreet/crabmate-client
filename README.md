@@ -118,7 +118,7 @@ make tui
 ./crates/crabmate-tui/target/debug/crabmate-tui caps   # terminal pixel-graphics / colour depth probe (needs no server)
 ```
 
-A bearer-mode `serve` without a server-side model `API_KEY` returns `LLM_API_KEY_REQUIRED`; pass a client-owned key with `--llm-api-key` (or `CM_API_KEY` / `CM_MODEL` / `CM_API_BASE`). Missing `--bearer` / `--llm-api-key` falls back to the Desktop shell's saved secrets in the same OS keyring (read-only; `--no-keyring` disables it).
+A bearer-mode `serve` without a server-side model `API_KEY` returns `LLM_API_KEY_REQUIRED`; pass a client-owned key with `--llm-api-key` (or `CM_API_KEY` / `CM_MODEL` / `CM_API_BASE`). Missing `--bearer` / `--llm-api-key` falls back to the Desktop shell's saved secrets in the same OS keyring (read-only; `--no-keyring` disables it). The Web Bearer is looked up in the Desktop main window's per-window slot first, then in the pre-per-window slot.
 
 `caps` prints what the terminal reports for colour depth and pixel graphics (`kitty` / `sixel` / `iterm2` / `halfblock` / `none`). It reads environment variables only — no escape-sequence query, no `serve` connection — and it **under-reports on purpose**: inside tmux / screen the pixel protocols are not selected unless you force one with `CM_TUI_IMAGE=kitty` (also `none` / `halfblock` / `sixel` / `iterm2`).
 

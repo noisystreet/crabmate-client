@@ -32,7 +32,7 @@
 | 子命令（终态） | `connect`（探测）· `chat`（单轮/管道）· `repl`（交互行编辑）· `tui`（全屏，M1–M4 已落地） |
 | 契约 | crates.io `crabmate` `0.7.0` + `protocol`（与 `frontend` 同一钉点） |
 | HTTP 客户端 | `reqwest` + rustls；SSE 解析对齐协议 crate |
-| 连接配置 | 复用/对齐 connect 键：`api_base`、Web Bearer；密钥读取与壳**同源**（read-only 回退，见 §4），不写壳槽位 |
+| 连接配置 | 复用/对齐 connect 键：`api_base`、Web Bearer；密钥读取与壳**同源**（read-only 回退，见 §4），不写壳槽位。Bearer 在壳侧**按窗口分槽**（`<account>:<label>`），TUI 按「分槽主窗口槽 → 不分槽旧槽」顺序读；多窗口时无法把 `--api-base` 映射到窗口 label，只取主窗口那一份，连别的 `serve` 时用 `--bearer` |
 | GitHub | 原生端：钥匙串槽 `github` + `X-CrabMate-GitHub-Token`；无浏览器 Cookie 路径 |
 | 审批 | `POST /chat/approval`；TTY 用菜单/读行；`--yes` 对齐 Server `chat --yes` 语义（仅远程放行决策，执行仍在 serve） |
 

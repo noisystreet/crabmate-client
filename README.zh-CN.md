@@ -118,7 +118,7 @@ make tui
 ./crates/crabmate-tui/target/debug/crabmate-tui caps   # 终端像素图 / 颜色深度探测（不需要 serve）
 ```
 
-bearer 鉴权但服务端未设模型 `API_KEY` 的 serve 会返回 `LLM_API_KEY_REQUIRED`；可用 `--llm-api-key` 自带模型密钥（或 `CM_API_KEY` / `CM_MODEL` / `CM_API_BASE`）。`--bearer` / `--llm-api-key` 缺省时会 **read-only 回退读取桌面壳已保存在同一系统钥匙串里的密钥**（`--no-keyring` 可关闭回退）。
+bearer 鉴权但服务端未设模型 `API_KEY` 的 serve 会返回 `LLM_API_KEY_REQUIRED`；可用 `--llm-api-key` 自带模型密钥（或 `CM_API_KEY` / `CM_MODEL` / `CM_API_BASE`）。`--bearer` / `--llm-api-key` 缺省时会 **read-only 回退读取桌面壳已保存在同一系统钥匙串里的密钥**（`--no-keyring` 可关闭回退）。其中 Web Bearer 先读桌面主窗口的分槽条目（多窗口按窗口分槽），再退回旧版的不分槽条目。
 
 `caps` 打印终端自报的颜色深度与像素图能力（`kitty` / `sixel` / `iterm2` / `halfblock` / `none`）。它只读环境变量——不做转义序列查询、不连 `serve`——并且**故意宁可漏报**：在 tmux / screen 里默认不选像素协议，除非用 `CM_TUI_IMAGE=kitty` 强制（也接受 `none` / `halfblock` / `sixel` / `iterm2`）。
 
