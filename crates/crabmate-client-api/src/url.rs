@@ -57,9 +57,11 @@ pub fn join_api_path(base: &str, path: &str) -> Result<String, ApiUrlError> {
 /// API 基址的 `host[:port]` 短文本（RFC 3986 的 authority，去 userinfo）；不是绝对
 /// `http(s)` 基址时返回空串。
 ///
-/// 用途是**窄**位置：WASM 状态栈的「连接」chip、TUI 的 lane 行。这些位置要回答的
-/// 只有「我连的是哪台 serve」，scheme 每行都一样，path 也不该出现在基址里，
-/// 真正能区分两台 serve 的只有 host 与**端口**；完整 URL 留给 `title`。
+/// 用途是**窄**位置，目前两个消费者：WASM 状态栈的「连接」chip 恒用它；TUI 状态栈的
+/// `serve` 段在列宽不够时才退到它（够宽时显示完整 base——终端没有 hover，那是 TUI 唯一
+/// 能看到全量 URL 的地方）。这些位置要回答的只有「我连的是哪台 serve」，scheme 每行都
+/// 一样，path 也不该出现在基址里，真正能区分两台 serve 的只有 host 与**端口**；
+/// 完整 URL 留给 `title`。
 ///
 /// 与 `frontend` 的 `api::browser::api_base_host` **不是**同一件事，刻意不同名：
 /// 那个返回 host **不含端口**，喂给 loopback 判定（`127.0.0.1:8080` 与
