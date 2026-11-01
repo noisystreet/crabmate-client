@@ -294,6 +294,11 @@ fn save_api_base_click(
     }
     crate::api::set_api_base_url(trimmed);
     let normalized = crate::api::api_base_url();
+    // 同步响应式镜像：状态栈的「连接」chip 据此换字。真源仍是 `api::browser`
+    // 的 thread_local —— 这里只把「刚改过」这件事广播出去，避免两处各读一份。
+    if let Some(shell) = crate::app::shell_runtime_context::try_chat_shell_ctx() {
+        shell.api_base.set(normalized.clone());
+    }
     draft.set(normalized.clone());
     let cleared = normalized.is_empty();
     feedback.set(Some(if cleared {

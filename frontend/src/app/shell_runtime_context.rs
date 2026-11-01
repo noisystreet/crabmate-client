@@ -27,6 +27,11 @@ pub struct ChatShellLeptosContext {
     pub selected_permission_level: RwSignal<Option<String>>,
     /// 该意图归属哪个本地会话（切会话时据此清空，见 `llm_settings` 的同名字段）。
     pub permission_intent_owner: RwSignal<Option<String>>,
+    /// 当前这一屏连的 `serve` 基址（与 [`AppSignals::shell_ui`] 的 `api_base` 同源）。
+    ///
+    /// 放进 ctx 而非各组件自读 thread_local：状态栈的「连接」chip 与设置页的
+    /// 「连接」区块必须看到**同一个**值，否则改完基址回到聊天仍是旧 host。
+    pub api_base: RwSignal<String>,
 }
 
 impl ChatShellLeptosContext {
@@ -40,6 +45,7 @@ impl ChatShellLeptosContext {
             show_turn_context_inject: app.shell_ui.show_turn_context_inject,
             selected_permission_level: app.llm_settings.selected_permission_level,
             permission_intent_owner: app.llm_settings.permission_intent_owner,
+            api_base: app.shell_ui.api_base,
         }
     }
 }
