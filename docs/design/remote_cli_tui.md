@@ -135,3 +135,23 @@ crates/
 
 1. **传输中断会丢掉 `conversation_id`**（`crates/crabmate-tui/src/tui_mode/worker.rs`）。`run_chat_stream_sink` 里 `consume_sse_response(...).await?` 用 `?` 直接抛出，而 `TermError::InterruptedStream` 只带 `job_id` / `after_seq`，那时已填好的 `conversation_id` 随 `ChatStreamOutcome` 一起丢弃（错误分支统一返回 `ChatStreamOutcome::default()`）。后果：首轮传输中断后 `st.conversation_id` 不会绑定、`bind_new_session` 不执行，左栏那行继续没有 server id，要到下一条消息才绑上，Web / Desktop 侧也看不到这一轮。修法要给 `TermError::InterruptedStream` 增加 `conversation_id`（或让 sink 返回部分 outcome），会牵动 `src/turn.rs` 的自动续流与 repl，故单列一项。
 2. **全屏不自动续流**。`repl` / `chat` 在已拿到 job 句柄的传输中断上会静默重试 2 次（`0.5s × 第 n 次` 退避，见 §4 能力映射），全屏 `tui` 的事件循环没有重试结构，只能由用户敲 `/resume`。若要与行模式对齐，需在 worker 里补一层重试循环，并决定「正在重试」在状态栏如何呈现（现有 `✳ 取消中` 之外是否需要第四个状态）。
+
+---
+
+## 10. Web Bearer 的来源与 401 归因
+
+`serve` 的受保护路由（`/chat*`、`/user-data/*`、`/workspace*` 等）在配置了 `web_api_bearer_token` 时要求 `Authorization: Bearer` 或 `X-API-Key`，而 **`/health` 不校验**。所以「`/connect` 探测通过、随后拉会话列表 401」是可能状态，不是矛盾 —— 排查必须从鉴权头出发，而不是从连通性出发。
+
+**取值顺序**（`crates/crabmate-tui/src/shell_keyring.rs`）：
+
+1. 显式 `--bearer` / `CM_WEB_API_BEARER_TOKEN`（`--no-keyring` 或显式空串会关闭回退）；
+2. 桌面壳的按窗口分槽 `tauri_connect_web_api_bearer:main`；
+3. 分槽前的裸槽 `tauri_connect_web_api_bearer`（只对从未跑过分槽桌面版本的安装有效）。
+
+账户名拼接只有一份（`crabmate_client-api::secrets::scoped_bearer_account`），桌面壳写、TUI 读共用 —— 两处各写一遍 `format!` 就会回到 #394 那个「桌面能用、TUI 401」的形态。已知边界：TUI 无法把 `--api-base` 映射到窗口 label，多桌面窗口时只能拿到主窗口那份。
+
+**归因口径**（`src/serve/error.rs` / `src/serve/client.rs`）：
+
+- 非 2xx 先按 JSON 错误体取人读文案与稳定 `code`，渲染成 `<CODE>: <message>`；扁平 `{code, message, request_id}` 与嵌套 `{error: {code, message}}` **分开取**、不互相回退（两种 `code` 语义不同），取不到才回落 `HTTP {status}: <截断 body>`。
+- 401 **且本连接没有 Bearer** 时，再补一句成因（`--bearer` / 环境变量未提供、钥匙串槽未命中）。带了 Bearer 的 401 不补：那是「有凭据但不匹配」，下一步动作相反。
+- 钥匙串探测的命中槽名与「全部未命中」都写一行 stderr；但全屏 `tui` 占用 alternate screen，那行读不到 —— 所以结论性的成因必须落在错误文案里，这也是本条与 §9 那些「只在 stderr 提示」的做法不同之处。

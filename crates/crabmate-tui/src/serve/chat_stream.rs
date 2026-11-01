@@ -323,10 +323,9 @@ async fn post_chat_stream(
         return Ok(resp);
     }
     let text = resp.text().await.unwrap_or_default();
-    Err(TermError::Http {
-        status: status.as_u16(),
-        body: text.trim().chars().take(800).collect(),
-    })
+    // 交给 `error_for` 统一：SSE attach 失败的 401 也要走 `{code, message}` 解析，
+    // 否则流式入口的报错又是「HTTP 401: {整段 JSON}」。
+    Err(client.error_for(status.as_u16(), &text))
 }
 
 fn chat_stream_body(opts: &ChatStreamOptions) -> Value {
