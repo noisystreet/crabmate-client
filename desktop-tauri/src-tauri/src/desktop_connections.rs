@@ -216,6 +216,45 @@ pub(crate) fn register_connection(
     Ok(snapshot)
 }
 
+/// 开一条新连接（新窗口）。
+///
+/// 几何走「覆盖」：连接窗口都铺满工作区（`apply_main_ui_geometry`），后开的自然叠在
+/// 先开的上面 —— 视觉上像切标签，实现上仍是各自独立的 WebView。这正是选多窗口的理由：
+/// 不必给前端的 `thread_local` 做分区。
+///
+/// 覆盖也带来一个后果：被盖住的窗口看不见自己的审批框，所以 `report_connection_status`
+/// 会在它进入等审批时发系统通知（见 `notify_approval`）。
+#[tauri::command]
+pub(crate) fn open_connection(
+    app: AppHandle,
+    api_base: String,
+    display_name: Option<String>,
+    bearer: Option<String>,
+) -> Result<ConnectionSnapshot, String> {
+    let state = registry(&app).ok_or_else(|| "连接注册表未就绪".to_string())?;
+    let base = crabmate_connect::normalize_base_url(&api_base)?;
+    let preferred = display_name;
+    let key = state.unique_key(preferred.as_deref(), base.as_str());
+
+    // 先建窗口、后登记：建窗失败就不该在列表里留一条打不开的连接。
+    crate::desktop_main_window::create_connection_window(
+        &app,
+        key.as_str(),
+        &base,
+        preferred.as_deref().unwrap_or_default(),
+        bearer.as_deref().unwrap_or_default(),
+    )?;
+
+    let mut snapshot = ConnectionSnapshot::new(preferred.unwrap_or_default(), base.as_str());
+    snapshot.key = key;
+    snapshot.active = true;
+    // 注册表的键是 window label，而这里 label 就是 key（`create_connection_window`
+    // 用的同一个值），所以两者一致。
+    state.upsert(snapshot.key.as_str(), snapshot.clone());
+    broadcast(&app);
+    Ok(snapshot)
+}
+
 /// 窗口报告状态变化（回合开始 / 等审批 / 空闲）。
 ///
 /// 进入等审批时会按需发系统通知 —— 见 [`notify_approval`]。
