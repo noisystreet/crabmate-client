@@ -70,6 +70,26 @@ export function invokeTauriDisconnectRemote() {
   return tauriInvoke("disconnect_remote", {});
 }
 
+export function invokeTauriListConnections() {
+  return tauriInvoke("list_connections", {});
+}
+
+export function invokeTauriFocusConnection(key) {
+  return tauriInvoke("focus_connection", { key });
+}
+
+// 返回 Promise<unlisten|null>。null 表示这个壳没有 event 能力（浏览器 / 老壳），
+// 调用方据此退化为「只读一次名单」，而不是当成错误。
+export function listenTauriConnectionsChanged(cb) {
+  const ev = globalThis.__TAURI__ && globalThis.__TAURI__.event;
+  if (!ev || typeof ev.listen !== "function") {
+    return Promise.resolve(null);
+  }
+  return ev.listen("connections_changed", (payload) => {
+    cb(JSON.stringify(payload.payload));
+  });
+}
+
 export function installChatExternalLinkHandler() {
   if (globalThis.__crabmateChatExternalLinkHandlerInstalled) {
     return;
@@ -129,6 +149,12 @@ extern "C" {
     fn invoke_tauri_os_prefers_dark_theme() -> js_sys::Promise;
     #[wasm_bindgen(js_name = invokeTauriDisconnectRemote)]
     fn invoke_tauri_disconnect_remote() -> js_sys::Promise;
+    #[wasm_bindgen(js_name = invokeTauriListConnections)]
+    fn invoke_tauri_list_connections() -> js_sys::Promise;
+    #[wasm_bindgen(js_name = invokeTauriFocusConnection)]
+    fn invoke_tauri_focus_connection(key: &str) -> js_sys::Promise;
+    #[wasm_bindgen(js_name = listenTauriConnectionsChanged)]
+    fn listen_tauri_connections_changed(cb: &js_sys::Function) -> js_sys::Promise;
     #[wasm_bindgen(js_name = installChatExternalLinkHandler)]
     fn install_chat_external_link_handler();
 }
@@ -167,6 +193,18 @@ fn invoke_tauri_os_prefers_dark_theme() -> js_sys::Promise {
 #[cfg(not(target_arch = "wasm32"))]
 fn invoke_tauri_disconnect_remote() -> js_sys::Promise {
     js_sys::Promise::resolve(&wasm_bindgen::JsValue::UNDEFINED)
+}
+#[cfg(not(target_arch = "wasm32"))]
+fn invoke_tauri_list_connections() -> js_sys::Promise {
+    js_sys::Promise::resolve(&wasm_bindgen::JsValue::UNDEFINED)
+}
+#[cfg(not(target_arch = "wasm32"))]
+fn invoke_tauri_focus_connection(_: &str) -> js_sys::Promise {
+    js_sys::Promise::resolve(&wasm_bindgen::JsValue::UNDEFINED)
+}
+#[cfg(not(target_arch = "wasm32"))]
+fn listen_tauri_connections_changed(_: &js_sys::Function) -> js_sys::Promise {
+    js_sys::Promise::resolve(&wasm_bindgen::JsValue::NULL)
 }
 
 /// 是否在 **桌面** Tauri WebView 内运行。
@@ -238,6 +276,47 @@ pub fn tauri_disconnect_remote() {
     }
     spawn_local(async move {
         let _ = tauri_invoke_void(invoke_tauri_disconnect_remote()).await;
+    });
+}
+
+/// 读一次全部连接的 JSON 文本（桌面多窗口协调面 `list_connections`）。
+///
+/// 这里**不**在这里反序列化：结构由 `crabmate_client_api::connections::ConnectionSnapshot`
+/// 定义，解析属于调用方，本层只负责「把壳里的答案原样拿回来」。
+pub async fn tauri_list_connections_json() -> Result<String, String> {
+    if !tauri_shell_available() {
+        return Err("not in tauri shell".to_string());
+    }
+    let value = JsFuture::from(invoke_tauri_list_connections())
+        .await
+        .map_err(|e| format!("{e:?}"))?;
+    value
+        .as_string()
+        .ok_or_else(|| "list_connections did not return JSON text".to_string())
+}
+
+/// 订阅 `connections_changed`；回调收到 JSON 文本。
+///
+/// 返回 `Ok(false)` = 这个壳没有 event 能力（浏览器 / 老壳），调用方应退化为「只读一次
+/// 名单」，**不要**当成错误。注册成功返回 `Ok(true)`。
+pub async fn tauri_listen_connections_changed(cb: js_sys::Function) -> Result<bool, String> {
+    if !tauri_shell_available() {
+        return Ok(false);
+    }
+    let value = JsFuture::from(listen_tauri_connections_changed(&cb))
+        .await
+        .map_err(|e| format!("{e:?}"))?;
+    Ok(!value.is_null() && !value.is_undefined())
+}
+
+/// 切到某条连接对应的窗口（`focus_connection`）。
+pub fn tauri_focus_connection(key: &str) {
+    if !tauri_shell_available() {
+        return;
+    }
+    let key = key.to_string();
+    spawn_local(async move {
+        let _ = tauri_invoke_void(invoke_tauri_focus_connection(&key)).await;
     });
 }
 
