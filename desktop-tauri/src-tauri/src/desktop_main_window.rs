@@ -448,6 +448,43 @@ pub(crate) fn create_connection_window(
     Ok(())
 }
 
+/// 建一个**待连接**窗口：只载连接页，连哪台 `serve` 由用户在那个窗口里选。
+///
+/// 与 [`create_connection_window`] 的分工：那条已经知道 `api_base`，建完直接交接进业务 UI；
+/// 这条只知道「要再开一条」，把选址交给连接页。设置页的按钮因此不必先读一个 draft 基址 ——
+/// 否则它会和旁边「保存基址」（改**当前窗口**连谁）的语义打架。
+///
+/// 白名单不在这里写：连接页探测成功后由 `connect_remote` 按 `window.label()` 记
+/// （`crates/crabmate-connect/src/commands.rs`），所以多窗口各选各的地址不会互相覆盖。
+/// 这也意味着本函数无需 `AllowedServeOrigin`，与 [`create_main_window_connect_page`] 同口径。
+pub(crate) fn create_pending_connection_window(
+    app: &tauri::AppHandle,
+    label: &str,
+    display_name: &str,
+) -> Result<(), String> {
+    let placeholder = Url::parse("http://tauri.localhost/connect.html")
+        .map_err(|e| format!("invalid connect placeholder url: {e}"))?;
+    let backend_origin = placeholder.origin();
+    let window = finish_create_main_window(
+        app,
+        label,
+        WebviewUrl::App("connect.html".into()),
+        backend_origin,
+        MainWindowMode::ConnectPage,
+    )?;
+    // 标题带连接名：窗口都铺满工作区时，标题栏是唯一能区分它们的静态标记
+    // （同 `create_connection_window`）。`finish_create_main_window` 的标题是固定的。
+    if !display_name.is_empty() {
+        let _ = window.set_title(&format!("CrabMate · {display_name}"));
+    }
+    if let Ok(current) = window.url() {
+        crabmate_connect::seed_connect_home(&current);
+    } else {
+        crabmate_connect::seed_connect_home(&placeholder);
+    }
+    Ok(())
+}
+
 fn reveal_main_window_once(window: &WebviewWindow, revealed: &AtomicBool) {
     if revealed.swap(true, Ordering::SeqCst) {
         return;
