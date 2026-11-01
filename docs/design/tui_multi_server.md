@@ -309,6 +309,11 @@ api_base = "http://127.0.0.1:8082"
 
 ## 9. Desktop 复用评估（§1–§8 只覆盖 TUI，本节回答「Desktop 能不能复用」）
 
+> **状态（#391 起）**：本节 §9.4 的结论**已落地** —— Desktop 走多窗口路线，一个连接一个
+> WebView 窗口。实施细节、踩过的坑与冒烟步骤见
+> [`desktop_multi_window.md`](./desktop_multi_window.md)。本节保留作为当时的评估依据；
+> 若要改动 Desktop 的连接模型，先读那一份。
+
 ### 9.1 结论
 
 - **纯逻辑层可完整复用**：`crabmate-client-api` / `crabmate-tool-card` / `crabmate-connect` 的 probe 与 handoff 与 lane 数量无关。
