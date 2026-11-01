@@ -5,7 +5,7 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 use crate::serve::client::{REQUEST_TIMEOUT, ServeClient};
-use crate::serve::error::{TermError, http_error};
+use crate::serve::error::TermError;
 
 impl ServeClient {
     pub async fn get_json<T: DeserializeOwned>(&self, path: &str) -> Result<T, TermError> {
@@ -17,7 +17,7 @@ impl ServeClient {
             .timeout(REQUEST_TIMEOUT)
             .send()
             .await?;
-        let text = Self::read_success_text(resp).await?;
+        let text = self.read_success_text(resp).await?;
         serde_json::from_str(&text)
             .map_err(|e| TermError::Message(format!("decode JSON from {path}: {e}")))
     }
@@ -41,7 +41,7 @@ impl ServeClient {
         if resp.status() == reqwest::StatusCode::NOT_FOUND {
             return Ok(None);
         }
-        let text = Self::read_success_text(resp).await?;
+        let text = self.read_success_text(resp).await?;
         serde_json::from_str(&text)
             .map(Some)
             .map_err(|e| TermError::Message(format!("decode JSON from {path}: {e}")))
@@ -61,7 +61,7 @@ impl ServeClient {
             .await?;
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
-        ensure_ok(status, &text)?;
+        self.ensure_ok(status, &text)?;
         if text.trim().is_empty() {
             return Ok(Value::Null);
         }
@@ -84,7 +84,7 @@ impl ServeClient {
             .await?;
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
-        ensure_ok(status, &text)
+        self.ensure_ok(status, &text)
     }
 
     /// `DELETE` 无内容响应端点（如 `/conversation/{id}` 幂等 204）：2xx 即成功，不解析 body。
@@ -99,21 +99,22 @@ impl ServeClient {
             .await?;
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
-        ensure_ok(status, &text)
+        self.ensure_ok(status, &text)
     }
 
-    async fn read_success_text(resp: reqwest::Response) -> Result<String, TermError> {
+    async fn read_success_text(&self, resp: reqwest::Response) -> Result<String, TermError> {
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
-        ensure_ok(status, &text)?;
+        self.ensure_ok(status, &text)?;
         Ok(text)
     }
-}
 
-/// 2xx 视为成功；否则按响应体组装错误（`http_error` 会优先提取 JSON `error` 字段）。
-fn ensure_ok(status: reqwest::StatusCode, text: &str) -> Result<(), TermError> {
-    if status.is_success() {
-        return Ok(());
+    /// 2xx 视为成功；否则按响应体组装错误（见 [`ServeClient::error_for`]：401 且本连接
+    /// 没有 Bearer 时会补一句成因）。
+    fn ensure_ok(&self, status: reqwest::StatusCode, text: &str) -> Result<(), TermError> {
+        if status.is_success() {
+            return Ok(());
+        }
+        Err(self.error_for(status.as_u16(), text))
     }
-    Err(http_error(status.as_u16(), text))
 }

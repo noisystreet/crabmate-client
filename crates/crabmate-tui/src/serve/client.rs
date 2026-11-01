@@ -99,7 +99,7 @@ impl ServeClient {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
         if !status.is_success() {
-            return Err(http_error(status.as_u16(), &body));
+            return Err(self.error_for(status.as_u16(), &body));
         }
         if let Some(note) = health_degraded_note(&body) {
             eprintln!("[crabmate-tui] /health degraded (optional checks failed): {note}");
@@ -128,7 +128,7 @@ impl ServeClient {
             .timeout(REQUEST_TIMEOUT)
             .send()
             .await?;
-        Self::ensure_success(resp).await
+        self.ensure_success(resp).await
     }
 
     /// `POST /chat/stream/{job_id}/cancel`：让 serve 停掉该回合（仅 abort SSE 不够）。
@@ -162,15 +162,73 @@ impl ServeClient {
         if status.as_u16() == 410 {
             return Ok(());
         }
-        Err(http_error(status.as_u16(), &body))
+        Err(self.error_for(status.as_u16(), &body))
     }
 
-    async fn ensure_success(resp: reqwest::Response) -> Result<(), TermError> {
+    async fn ensure_success(&self, resp: reqwest::Response) -> Result<(), TermError> {
         let status = resp.status();
         if status.is_success() {
             return Ok(());
         }
         let body = resp.text().await.unwrap_or_default();
-        Err(http_error(status.as_u16(), &body))
+        Err(self.error_for(status.as_u16(), &body))
+    }
+
+    /// 非 2xx → `TermError`，并在「401 且本连接没有 Bearer」时补上成因。
+    ///
+    /// 两个条件同时成立时，只写 `UNAUTHORIZED` 等于让用户去查服务端：真因在客户端没拿到
+    /// Bearer（[`crate::shell_keyring`] 的提示只落在 stderr，全屏 TUI 起来后看不见）。
+    /// 带了 Bearer 的 401 **不**补这句 —— 那时是「有凭据但不匹配」，处置方向完全不同。
+    pub(super) fn error_for(&self, status: u16, text: &str) -> TermError {
+        let err = http_error(status, text);
+        if status != 401 || !self.cfg.bearer_token.is_empty() {
+            return err;
+        }
+        TermError::Message(format!(
+            "{err}（本次请求未携带 Web API Bearer：--bearer / CM_WEB_API_BEARER_TOKEN 未提供，桌面壳钥匙串槽也未命中）"
+        ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn client_with_bearer(bearer: &str) -> ServeClient {
+        ServeClient::new(ConnectionConfig::new("http://127.0.0.1:9", bearer)).expect("build client")
+    }
+
+    const UNAUTHORIZED: &str = r#"{"code":"UNAUTHORIZED","message":"缺少或无效的 Web API 凭证"}"#;
+
+    /// 401 + 本连接没有 Bearer：文案要同时说清「凭证缺失」和「是客户端没带」。
+    #[test]
+    fn unauthorized_without_bearer_names_the_missing_credential() {
+        let msg = client_with_bearer("")
+            .error_for(401, UNAUTHORIZED)
+            .to_string();
+        assert!(msg.contains("UNAUTHORIZED"), "{msg}");
+        assert!(msg.contains("未携带 Web API Bearer"), "{msg}");
+    }
+
+    /// 401 + 有 Bearer：那是「有凭据但不匹配」，不该再劝用户去配 Bearer。
+    #[test]
+    fn unauthorized_with_bearer_keeps_the_server_text() {
+        assert_eq!(
+            client_with_bearer("secret")
+                .error_for(401, UNAUTHORIZED)
+                .to_string(),
+            "UNAUTHORIZED: 缺少或无效的 Web API 凭证"
+        );
+    }
+
+    /// 其它状态码与 Bearer 无关，别把提示塞进 502 / 403。
+    #[test]
+    fn other_statuses_never_mention_the_bearer() {
+        assert_eq!(
+            client_with_bearer("")
+                .error_for(403, r#"{"error":"forbidden"}"#)
+                .to_string(),
+            "forbidden"
+        );
     }
 }
