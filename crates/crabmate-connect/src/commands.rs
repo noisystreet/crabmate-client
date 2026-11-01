@@ -5,9 +5,12 @@ use std::path::PathBuf;
 use tauri::{AppHandle, Manager, State};
 use url::Url;
 
+use crabmate_client_api::url::api_base_authority;
+
 use crate::allowed_origin::AllowedServeOrigin;
 use crate::cleartext::enforce_cleartext_connect_policy;
 use crate::connect_home::{SuggestedServerUrl, connect_home_url, remember_connect_home};
+use crate::existing_connection::ExistingConnectionProbe;
 use crate::handoff::{build_local_ui_handoff_url, local_business_ui_url, normalize_base_url};
 use crate::keyring_bearer::{
     clear_connect_bearer_for, read_connect_bearer_for, write_connect_bearer_for,
@@ -35,6 +38,18 @@ pub async fn connect_remote(
     let api_base = normalize_base_url(&url)?;
     enforce_cleartext_connect_policy(&api_base)?;
     probe_server(&api_base, &bearer).await?;
+
+    // 同一台 serve 已经有窗口在连 → 不建第二条。
+    //
+    // 对齐 TUI 的 `/lane attach`：同一个 `base_url` 上换一个名字只切过去、不新增 lane
+    // （`tui_multi_server.md`）。放在 `probe_server` **之后**：地址都不可达时不该先谈占用。
+    // 本窗口留在连接页（不导航），所以错误信息回到连接页的错误位，用户看得见为什么没进去。
+    if let Some(existing) = same_serve_window(&app, window.label(), &api_base) {
+        focus_existing_window(&app, &existing);
+        return Err(String::from(
+            "这台 serve 已经在另一个窗口里连着，已切过去；同一个 serve 不需要开两个窗口",
+        ));
+    }
 
     if let Some(allowed) = app.try_state::<AllowedServeOrigin>() {
         // 按**发起连接的窗口**记：多窗口各连一台 serve 时，这条白名单不能互相覆盖
@@ -81,6 +96,23 @@ pub async fn disconnect_remote(app: AppHandle, window: tauri::WebviewWindow) -> 
         .navigate(home)
         .map_err(|e| format!("无法返回连接页: {e}"))?;
     Ok(())
+}
+
+/// 除 `label` 之外，是否已有窗口连着同一台 `serve`。
+///
+/// 没有 [`ExistingConnectionProbe`] state（浏览器 / Android / 老壳）→ `None`：那些壳
+/// 只有一条连接，没有第二条可以撞。
+fn same_serve_window(app: &AppHandle, label: &str, api_base: &Url) -> Option<String> {
+    let probe = app.try_state::<ExistingConnectionProbe>()?;
+    probe.same_serve_window(label, &api_base_authority(api_base.as_str()))
+}
+
+/// 把已有那个窗口提到前台（它可能被本窗口盖着，也可能最小化了）。
+fn focus_existing_window(app: &AppHandle, label: &str) {
+    if let Some(target) = app.get_webview_window(label) {
+        let _ = target.unminimize();
+        let _ = target.set_focus();
+    }
 }
 
 fn recent_connect_urls_path(app: &AppHandle) -> Result<PathBuf, String> {

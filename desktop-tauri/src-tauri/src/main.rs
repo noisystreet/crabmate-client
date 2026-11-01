@@ -351,6 +351,18 @@ fn main() {
             app.manage(crabmate_connect::SuggestedServerUrl::default());
             app.manage(crabmate_connect::AllowedServeOrigin::default());
             app.manage(desktop_connections::ConnectionRegistry::default());
+            // `connect_remote` 住在 crabmate-connect、注册表住在这里，依赖方向不允许反向引用，
+            // 所以用闭包把「同一台 serve 是否已有窗口」这个查询注入过去。
+            // 闭包持 `AppHandle` 再取 state：`ConnectionRegistry` 不是 `Clone`，
+            // 而 `State<'_, T>` 借用 `App`，捕不进 `'static` 闭包。
+            let probe_handle = app.handle().clone();
+            app.manage(crabmate_connect::ExistingConnectionProbe::new(
+                move |label: &str, authority: &str| {
+                    probe_handle
+                        .try_state::<desktop_connections::ConnectionRegistry>()
+                        .and_then(|state| state.existing_window_for_authority(label, authority))
+                },
+            ));
 
             if let Err(e) = open_main_window(app.handle()) {
                 eprintln!("[crabmate-desktop] startup failed: {e}");

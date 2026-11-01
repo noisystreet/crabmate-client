@@ -14,6 +14,7 @@
 mod allowed_origin;
 mod cleartext;
 mod connect_home;
+mod existing_connection;
 mod handoff;
 mod keyring_bearer;
 mod keyring_llm;
@@ -28,6 +29,7 @@ mod commands;
 pub use allowed_origin::AllowedServeOrigin;
 pub use cleartext::enforce_cleartext_connect_policy;
 pub use connect_home::{SuggestedServerUrl, seed_connect_home};
+pub use existing_connection::{ExistingConnectionProbe, SameServeLookup};
 pub use handoff::{
     API_BASE_HASH_KEY, BEARER_HASH_KEY, build_handoff_url, build_local_ui_handoff_url,
     local_business_ui_url, normalize_base_url,

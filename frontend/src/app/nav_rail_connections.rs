@@ -16,8 +16,8 @@
 //!
 //! `active` 不来自快照：`ConnectionRegistry::snapshots()` 广播时**强制** `active = false`
 //! （同一份 payload 不可能对每个窗口都成立），所以这里按 `authority` 与自己的 `api_base`
-//! 比对。局限：两个窗口连**同一台** serve 时两条都会高亮 —— 那种情况本来就无法用
-//! `host:port` 区分。
+//! 比对。唯一会让两行同时亮的场景（两个窗口连同一台 serve）已在连接时被
+//! `ExistingConnectionProbe` 挡住 —— 同一个 `base_url` 只切过去、不新增第二条。
 
 use leptos::prelude::*;
 

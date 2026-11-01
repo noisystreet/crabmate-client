@@ -72,6 +72,28 @@ impl ConnectionRegistry {
         ConnectionKey::from_raw(&format!("{}-{}", base.as_str(), guard.len() + 1))
     }
 
+    /// 除 `exclude` 之外，是否有窗口连着 `authority`（`host:port`）。
+    ///
+    /// 供 `crabmate-connect` 的 `connect_remote` 用：同一台 serve 第二次连接只切过去，
+    /// 不新建（对齐 TUI `/lane attach` —— 同一个 `base_url` 换名字不新增 lane）。
+    /// 返回 label 而不是快照：调用方只需要知道「切到哪个窗口」。
+    ///
+    /// 空 `authority` 一律不算命中。占位条目（`open_connect_window` 建窗后、连上之前）
+    /// 的基址就是空的，把它当成「已占用」会让新窗口连不上任何地址。
+    pub(crate) fn existing_window_for_authority(
+        &self,
+        exclude: &str,
+        authority: &str,
+    ) -> Option<String> {
+        if authority.is_empty() {
+            return None;
+        }
+        self.entries()
+            .iter()
+            .find(|(label, snapshot)| label.as_str() != exclude && snapshot.authority == authority)
+            .map(|(label, _)| label.clone())
+    }
+
     /// 全部连接，按 key 排序（UI 顺序稳定）。
     ///
     /// `active` 一律 `false`：广播是给**所有**窗口的，同一份 payload 不可能对每个窗口
@@ -381,6 +403,30 @@ mod tests {
 
     fn snapshot(name: &str, base: &str) -> ConnectionSnapshot {
         ConnectionSnapshot::new(name, base)
+    }
+
+    /// 去重的判据：同 authority、排除自己、空基址不算。
+    #[test]
+    fn existing_window_for_authority_skips_self_and_empty_base() {
+        let registry = ConnectionRegistry::default();
+        registry.upsert("main", snapshot("prod", "http://127.0.0.1:8080"));
+        let authority = snapshot("prod", "http://127.0.0.1:8080").authority;
+
+        // 另一个窗口连同一台 serve → 命中 `main`。
+        assert_eq!(
+            registry.existing_window_for_authority("connection-2", &authority),
+            Some("main".to_string())
+        );
+        // 自己那一台不算冲突（否则重连会被自己挡住）。
+        assert_eq!(
+            registry.existing_window_for_authority("main", &authority),
+            None
+        );
+        // 空基址（`open_connect_window` 的占位条目）不算占用 —— 否则新窗口连不上任何地址。
+        assert_eq!(
+            registry.existing_window_for_authority("connection-2", ""),
+            None
+        );
     }
 
     #[test]
