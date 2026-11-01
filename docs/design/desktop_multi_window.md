@@ -170,7 +170,7 @@ TUI 在左栏下半画 lane 区（`tui_multi_server.md` §4.6），Desktop 现�
 | 何时显示 | 桌面壳且名单非空。**单连接也显示**（对齐 TUI：不显示就看不出连的是谁，也看不出支持多连接） |
 | 点击 | `focus_connection(key)` → 切到那个窗口（换整个 JS 堆，不是切 lane） |
 | 单连接 | 行内按钮 `disabled`：没有别的窗口可切，而「改基址」归右列 chip，两个入口不重复 |
-| 高亮 | 按 `authority` 与自己的 `api_base` 比对 —— 广播的 `snapshots()` **强制** `active = false`（同一份 payload 不可能对每个窗口都成立）。局限：两窗口连同一台 serve 时两条都高亮 |
+| 高亮 | 按 `authority` 与自己的 `api_base` 比对 —— 广播的 `snapshots()` **强制** `active = false`（同一份 payload 不可能对每个窗口都成立）。唯一会让两行同时亮的场景（两个窗口连同一台 serve）已由连接时去重挡住，见下节 |
 | 状态字形 | `·` 空闲 / `●` 运行中 / `▲` 等审批 / `×` 已请求退出（与 TUI 同口径，呼吸动画只在终端） |
 | 窄屏 | 不需要额外媒体查询：DOM 在 `.nav-rail` 内，抽屉打开时自动跟着进去 |
 
@@ -189,3 +189,20 @@ TUI 在左栏下半画 lane 区（`tui_multi_server.md` §4.6），Desktop 现�
   label，`WebviewWindowBuilder` 遇重名直接失败（与 `open_connection` 同一理由）。
 - 占位那条在新窗口连上前是**空基址**（chip 的单条分支对空基址整段不渲染；多连接列表里
   显示为无名行）。连上后由业务 UI 的 `StatusConnectionChip` 调 `register_connection` 覆盖。
+
+### 同一台 `serve` 只连一个窗口（连接时去重）
+
+一个 serve 不需要两个窗口 —— 两个窗口连同一台时，注册表里会有两条相同 `authority`
+的记录，「切到哪一条」无从判断（左栏两行都会高亮，见上文局限）。口径与 TUI 的
+`/lane attach` 一致：**同一个 `base_url` 上换一个名字只切过去、不新增 lane**。
+
+拦截点在 `connect_remote` 的 `probe_server` **之后**：
+
+| 项 | 设计 |
+|---|---|
+| 时机 | 探测成功之后。地址都不可达时不该先谈「谁占着」——那会把「连不上」误报成「已占用」 |
+| 不在开窗时拦 | 「新建连接窗口」**不带**地址（B 案），开窗那一刻没有基址可比 |
+| 命中后 | `focus_connection` 的同类动作（`unminimize` + `set_focus`）切到已有窗口；本窗口**留在连接页**并返回错误，所以「为什么没进去」写在用户正在看的那一屏 |
+| 判据 | `authority`（`host:port`）相等且不是自己。尾斜杠、scheme 大小写因此不算不同 |
+| 空基址 | 一律不算命中：占位条目（建窗后、连上之前）的 `authority` 就是空的 |
+| 依赖方向 | 注册表在 `desktop-tauri`、命令在 `crabmate-connect`，方向是 desktop → connect，所以**不能反向引用**。`ExistingConnectionProbe` 是一个闭包壳（`crates/crabmate-connect/src/existing_connection.rs`），壳在 `setup` 里 `manage` 一份；命令取不到该 state（浏览器 / Android / 老壳）就当作无冲突——那些壳本来只有一条连接 |
