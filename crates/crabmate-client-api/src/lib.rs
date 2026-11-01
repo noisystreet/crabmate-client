@@ -9,6 +9,7 @@ pub mod approval;
 pub mod auth;
 pub mod chat_body;
 pub mod client_llm_presets;
+pub mod connections;
 pub mod context_axis;
 pub mod conversation_messages;
 pub mod conversation_state;
@@ -45,6 +46,7 @@ pub use chat_body::{
     llm_context_tokens_for_chat_body, merge_chat_stream_core_fields,
     readonly_tool_ttl_cache_secs_for_chat_body, temperature_for_chat_body,
 };
+pub use connections::{ConnectionKey, ConnectionSnapshot, ConnectionStatus, ConnectionTally};
 pub use conversation_messages::{
     CONVERSATION_MESSAGES_PAGE_LIMIT, ConversationMessage, ConversationMessagesResponse,
     FIRST_TURN_WORKSPACE_CONTEXT_NAME, ReplayRow,
