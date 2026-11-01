@@ -97,44 +97,72 @@ fn parse_connection_list(json: &str) -> Option<Vec<ConnectionSnapshot>> {
 ///
 /// 先 `list_connections` 补首帧，再订阅增量：反之会漏掉「上一次广播到订阅生效之间」
 /// 发生的变化，那正是窗口刚开出来、注册表刚登记完的那一瞬间。
+/// 全部窗口的连接名单（每个 WASM 实例一份）。
+///
+/// 做成全局而不是每组件一份，是因为它描述的是**整个应用**的状态（所有窗口连了谁），
+/// 不是某个组件自己的状态。这样三个问题一起消失：
+///
+/// - 订阅只装一次，状态栈重挂载不会重复订阅；
+/// - 重建后的新组件读的还是同一份 —— 之前的进程级 `INSTALLED` 标志配上每实例 signal，
+///   会让重挂载后的 signal 永远等不到填充（列表冻结在空，退化成单条 chip）；
+/// - 订阅与 signal 同寿（都到页面结束），所以**不需要** unlisten：回调永远不会
+///   `set` 一个已经 drop 的 signal。
+///
+/// 代价是这一份在 `api_base` 上取了首次调用者的值。同一窗口内 `api_base` 不变
+/// （换 serve = 换窗口或重载页面），所以这个前提成立。
 #[cfg(target_arch = "wasm32")]
-fn install_connections_feed(connections: RwSignal<Vec<ConnectionSnapshot>>, api_base: String) {
-    use std::cell::Cell;
+fn connection_feed(api_base: String) -> ArcRwSignal<Vec<ConnectionSnapshot>> {
+    thread_local! {
+        static FEED: std::cell::OnceCell<ArcRwSignal<Vec<ConnectionSnapshot>>> =
+            const { std::cell::OnceCell::new() };
+    }
 
+    FEED.with(|cell| {
+        cell.get_or_init(|| {
+            let feed = ArcRwSignal::new(Vec::new());
+            // `ArcRwSignal` 不是 `Copy`：订阅拿到的是同一信号的另一句柄。
+            install_connections_feed(feed.clone(), api_base);
+            feed
+        })
+        .clone()
+    })
+}
+
+/// 非 wasm（测试 / SSR）：没有壳，也就没有名单来源。
+#[cfg(not(target_arch = "wasm32"))]
+fn connection_feed(_: String) -> ArcRwSignal<Vec<ConnectionSnapshot>> {
+    ArcRwSignal::new(Vec::new())
+}
+
+/// 先 `register` 补自己的位置，再 `list` 补首帧，最后订阅增量。
+///
+/// 顺序不能反：注册表里没有「我」时，`list` 会返回一份只含别的窗口的名单 ——
+/// `len` 永远差一条，多窗口下凑不到 2，chip 就永远不切成列表。
+#[cfg(target_arch = "wasm32")]
+fn install_connections_feed(feed: ArcRwSignal<Vec<ConnectionSnapshot>>, api_base: String) {
     use wasm_bindgen::JsCast;
     use wasm_bindgen::closure::Closure;
     use wasm_bindgen_futures::spawn_local;
 
-    thread_local! {
-        static INSTALLED: Cell<bool> = const { Cell::new(false) };
-    }
-
-    // 组件函数体在一次挂载里只跑一次，但状态栈重挂载时不该重复订阅。
-    if INSTALLED.with(|f| f.replace(true)) {
-        return;
-    }
-
     spawn_local(async move {
-        // **先登记，再取名单**：反过来会读到一份不含自己的列表 —— main 窗口自己没在
-        // 里面时 `len` 永远差一条，多窗口下就凑不到 2，chip 也就永远不切成列表。
         let _ = crate::tauri_shell::tauri_register_connection(&api_base, None).await;
 
         if let Ok(json) = crate::tauri_shell::tauri_list_connections_json().await
             && let Some(list) = parse_connection_list(&json)
         {
-            connections.set(list);
+            feed.set(list);
         }
 
         let apply = move |json: String| {
             // 解析失败时保持现状：一次坏帧不该把列表清空。
             if let Some(list) = parse_connection_list(&json) {
-                connections.set(list);
+                feed.set(list);
             }
         };
         let cb = Closure::<dyn FnMut(String)>::new(apply);
         let func: js_sys::Function = cb.into_js_value().unchecked_into();
-        // 返回值表示「这个壳有没有 event 能力」。false 时名单就停在首帧——浏览器与
-        // 老壳的正常路径，不是错误，所以这里不处理。
+        // `Ok(None)` = 这个壳没有 event 能力（浏览器 / 老壳）：名单停在首帧，不是错误。
+        // 句柄故意丢弃：订阅与这份全局 signal 同寿，没有需要退订的时刻。
         let _ = crate::tauri_shell::tauri_listen_connections_changed(func).await;
     });
 }
@@ -155,13 +183,16 @@ pub fn StatusConnectionChip(
         i18n::status_chip_connection_tooltip(locale.get(), api_base.get().as_str())
     });
 
-    let connections = RwSignal::new(Vec::<ConnectionSnapshot>::new());
-    #[cfg(target_arch = "wasm32")]
-    install_connections_feed(connections, api_base.get_untracked());
+    // 包一层 `StoredValue`：`ArcRwSignal` 不是 `Copy`，而 `view!` 里多处闭包都要用它。
+    // `StoredValue` 是 `Copy` 且 `get_value()` 只是 clone 一个 Arc 句柄，代价可忽略。
+    let connections = StoredValue::new(connection_feed(api_base.get_untracked()));
 
     // 只有两条以上才切成列表：一条时那个「列表」就是现在这个 chip，改掉它只是让
     // 单连接用户多一次点击（还得点回设置页才能换基址）。
-    let multi = Memo::new(move |_| connections.get().len() > 1);
+    //
+    // 这里的 clone 是必须的：`ArcRwSignal` 不是 `Copy`，`Memo` 的闭包要 move 一份，
+    // `For` 的 `each` 还要另一份。
+    let multi = Memo::new(move |_| connections.get_value().get().len() > 1);
 
     view! {
         <Show when=move || text.get().is_some() && !multi.get()>
@@ -182,7 +213,7 @@ pub fn StatusConnectionChip(
         </Show>
         <Show when=move || multi.get()>
             <For
-                each=move || connections.get()
+                each=move || connections.get_value().get()
                 key=|snapshot| snapshot.key.clone()
                 children=move |snapshot| {
                     let key = snapshot.key.as_str().to_string();
