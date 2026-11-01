@@ -26,9 +26,14 @@ use super::status::{
 
 /// 展开态最多占的行数（含运行态那一行）。
 ///
-/// 9 行已是 24 行终端的近一半，再高就把目录树挤成一条缝。超出的段按优先级丢弃 ——
-/// 与横版 `fit_segments` 同一套优先级，只是把「列预算」换成「行预算」。
-const MAX_STACK_ROWS: u16 = 9;
+/// **10 行是这次抬上去的**（原 9）：加 `think` 段是为了与 Desktop 右列栈对齐，
+/// 代价是 24 行终端里状态栈占掉 42%、目录树少一行 —— 这是有意的取舍，不是漏算。
+/// 再往上加段前先想清楚：24 行终端只剩 14 行给目录树与输入框，11 行会让目录树
+/// 在常见窗口高度下只显示 3 条。
+///
+/// 超出的段按优先级丢弃 —— 与横版 `fit_segments` 同一套优先级，只是把「列预算」
+/// 换成「行预算」。
+const MAX_STACK_ROWS: u16 = 10;
 
 /// 状态栈占几行。
 ///
@@ -48,10 +53,11 @@ pub(super) fn stack_rows(info: &StatusInfo, width: usize, collapsed: bool) -> u1
 /// 横版是「装不进列预算就整段丢弃」，纵版同理，只是预算是行数；两者共用
 /// `Segment::priority`，避免出现「横条里 serve 优先、栈里 img 优先」这种自相矛盾。
 ///
-/// **裁剪分支目前走不到**：[`environment_segments`] 最多 8 段（`serve` / `model` / `role` /
-/// `mode` / `ctx` / `perm` / `find` / `lanes`），而阈值是 `MAX_STACK_ROWS - 1 = 8`，于是
-/// `keep == segs.len()` 恒成立、提前返回。留着它是给「以后加段」预留 —— 真加到第 9 段时，
-/// `stack_never_exceeds_the_row_budget` 会先失败。
+/// **裁剪分支目前走不到**：[`environment_segments`] 最多 9 段（`serve` / `model` /
+/// `role` / `mode` / `think` / `ctx` / `find` / `perm` / `lanes`），而阈值是
+/// `MAX_STACK_ROWS - 1 = 9`，于是
+/// `keep == segs.len()` 恒成立、提前返回。留着它是给「以后加段」预留 —— 真加到第
+/// 10 段时，`stack_never_exceeds_the_row_budget` 会先失败。
 fn visible_segments(info: &StatusInfo, width: usize) -> Vec<Segment> {
     let segs = environment_segments(info, width);
     let keep = (MAX_STACK_ROWS as usize).saturating_sub(1).min(segs.len());
@@ -155,6 +161,7 @@ mod tests {
             model: Some("gpt-x".into()),
             role: Some("coder".into()),
             mode: Some("plan".into()),
+            thinking: None,
             running: false,
             cancel_sent: false,
             spinner: 0,
@@ -376,15 +383,19 @@ mod tests {
 
     /// 行预算哨兵：段数不得超过 `MAX_STACK_ROWS - 1`，且行数必须与渲染同源。
     ///
-    /// 当前 `environment_segments` 最多 8 段，`visible_segments` 里的按优先级丢弃
-    /// **走不到**（阈值 8）。所以这条断言不是「验证裁剪生效」，而是「一旦加段越过阈值
-    /// 就先炸」——免得哪天悄悄撑破右栏，还以为是布局算错了。
+    /// 这里把**所有可选段都填上**（`think` / `perm` / `find`），让 `environment_segments`
+    /// 真正产出 9 段 —— 只跑默认 fixture 的话可选段是 `None`，这条会宽松地通过，
+    /// 等真填满时才在别的测试里炸。当前 9 段仍小于阈值 9 + 1，
+    /// `visible_segments` 的按优先级丢弃**走不到**；所以这条断言不是「验证裁剪生效」，
+    /// 而是「一旦加段越过阈值就先炸」——免得哪天悄悄撑破右栏，还以为是布局算错了。
     #[test]
     fn stack_never_exceeds_the_row_budget() {
         let mut i = info();
         i.search_term = Some("ab".into());
         i.search_total = 3;
         i.view_offset = 12;
+        i.permission = Some("read".into());
+        i.thinking = Some("关".into());
         let segs = environment_segments(&i, 24);
         // 段数必须 ≤ `MAX_STACK_ROWS - 1`（留一行给运行指示），即 < `MAX_STACK_ROWS`。
         assert!(
@@ -420,6 +431,35 @@ mod tests {
             .find(|s| s.starts_with("ctx"))
             .unwrap_or_else(|| panic!("纵向状态栈里应有 ctx 行，实际：{t:?}"));
         assert!(ctx.contains('—'), "{ctx}");
+    }
+
+    /// `think` 段排在 `mode` 之后、`ctx` 之前（与 Desktop 右列栈里
+    /// 「模型 → 角色 → 思考 → 权限 → ctx」的相对次序同构）。
+    #[test]
+    fn think_segment_sits_between_mode_and_ctx() {
+        let mut i = info();
+        i.thinking = Some("开".into());
+        let t = texts(&stack_lines_with(&i, 40, &pal(), false, true));
+        let pos = |label: &str| {
+            t.iter()
+                .position(|l| l.starts_with(label))
+                .unwrap_or_else(|| panic!("缺 {label} 行：{t:?}"))
+        };
+        assert!(pos("mode") < pos("think"), "{t:?}");
+        assert!(pos("think") < pos("ctx"), "{t:?}");
+        let think = &t[pos("think")];
+        assert!(think.contains("开"), "{think}");
+    }
+
+    /// 没拉到 user-data 时整段不画：画成「关」会把「不知道」说成「关掉了」。
+    #[test]
+    fn think_segment_is_absent_when_unknown() {
+        let i = info();
+        let t = texts(&stack_lines_with(&i, 40, &pal(), false, true));
+        assert!(
+            !t.iter().any(|l| l.starts_with("think")),
+            "未知不等于关：{t:?}"
+        );
     }
 
     /// 纵向栈每行都必须 ≤ 栏内宽：超了 ratatui 会折行，把「运行指示」那行挤走，

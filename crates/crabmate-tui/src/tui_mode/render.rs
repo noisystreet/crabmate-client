@@ -63,6 +63,10 @@ pub struct StatusInfo {
     pub model: Option<String>,
     pub role: Option<String>,
     pub mode: Option<String>,
+    /// 思考模式，**已按 Desktop 状态栏开关的口径归一化**（`开` / `关`）；线格式
+    /// （`on` / `off` / `server`）不漏到渲染层，两端对 `server` 同判（Desktop 只认 `on`）。
+    /// `None` = 未拉到 user-data（**不是**「关」）——画成「关」等于把「不知道」说成「关掉了」。
+    pub thinking: Option<String>,
     pub running: bool,
     pub cancel_sent: bool,
     /// 生成中 spinner 帧号（事件循环按时间推进；空闲 / 取消中不显示）。

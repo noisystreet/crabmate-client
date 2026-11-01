@@ -14,6 +14,7 @@ fn base_info(api_base: &str) -> StatusInfo {
         model: None,
         role: None,
         mode: None,
+        thinking: None,
         running: false,
         cancel_sent: false,
         spinner: 0,
@@ -36,6 +37,20 @@ fn host_port_strips_scheme_and_path() {
     assert_eq!(host_port("  http://x  "), "x");
     // 没有 scheme 时原样保留首段，不做猜测。
     assert_eq!(host_port("localhost:9000"), "localhost:9000");
+    // userinfo **不**上屏：`--api-base http://user:pass@host:8080` 曾经把凭据
+    // 画在状态栈里（终端会进录屏 / 截图）。现在与 Desktop 的「连接」chip
+    // 共用 `api_base_authority`，这条规则只写一次。
+    assert_eq!(
+        host_port("http://user:pass@127.0.0.1:8080"),
+        "127.0.0.1:8080"
+    );
+    assert_eq!(
+        host_port("https://tok:en@serve.internal:8443/prefix"),
+        "serve.internal:8443"
+    );
+    // 认不出的基址退回原样，而不是留空：状态栈里空值读起来像「没连上」，
+    // 而实际只是格式不规范——用户得看见自己填了什么才能改。
+    assert_eq!(host_port("http://"), "http://");
 }
 
 #[test]

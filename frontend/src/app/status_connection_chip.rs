@@ -21,6 +21,14 @@
 //!
 //! 点击跳「设置 → 连接」：这是唯一能改基址的地方，且用户此刻想问的往往正是
 //! 「我想换一台」——把它做成可点而不是纯标签。
+//!
+//! **与 TUI 的 `serve` 段是同一件事**（`crates/crabmate-tui/src/tui_mode/status.rs`
+//! 的 `serve_value`）：两端都回答「这一屏的数据来自哪台 serve」，都经
+//! `api_base_authority()` 剥掉 scheme / 路径 / userinfo。差别只有一处，且是**刻意的**：
+//! 终端没有 hover，`title` 那套用不了，所以 TUI 在列宽够时显示**完整** base（那是它
+//! 唯一能看到全量 URL 的地方），真放不下才退 `host:port`；这里恒为 `host:port`，
+//! 完整 URL 交给 `title`。**别把其中一边「统一」成另一边** —— 拉平会丢掉对应平台
+//! 唯一的那项能力：TUI 失去全量 URL，本 chip 失去悬停可读的完整地址。
 
 use leptos::prelude::*;
 
