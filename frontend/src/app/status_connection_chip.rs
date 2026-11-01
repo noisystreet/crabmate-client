@@ -87,6 +87,7 @@ fn connection_chip_name(snapshot: &ConnectionSnapshot) -> String {
 ///
 /// 解析失败返回 `None` 而不是空表：**空表**的含义是「没有连接」（会退回单条 chip），
 /// 而解析失败是「不知道」，两者不该混为一谈——混了就会在协议变动时静默退回单条。
+#[cfg(any(target_arch = "wasm32", test))]
 #[must_use]
 fn parse_connection_list(json: &str) -> Option<Vec<ConnectionSnapshot>> {
     serde_json::from_str::<Vec<ConnectionSnapshot>>(json).ok()
@@ -97,7 +98,7 @@ fn parse_connection_list(json: &str) -> Option<Vec<ConnectionSnapshot>> {
 /// 先 `list_connections` 补首帧，再订阅增量：反之会漏掉「上一次广播到订阅生效之间」
 /// 发生的变化，那正是窗口刚开出来、注册表刚登记完的那一瞬间。
 #[cfg(target_arch = "wasm32")]
-fn install_connections_feed(connections: RwSignal<Vec<ConnectionSnapshot>>) {
+fn install_connections_feed(connections: RwSignal<Vec<ConnectionSnapshot>>, api_base: String) {
     use std::cell::Cell;
 
     use wasm_bindgen::JsCast;
@@ -114,6 +115,10 @@ fn install_connections_feed(connections: RwSignal<Vec<ConnectionSnapshot>>) {
     }
 
     spawn_local(async move {
+        // **先登记，再取名单**：反过来会读到一份不含自己的列表 —— main 窗口自己没在
+        // 里面时 `len` 永远差一条，多窗口下就凑不到 2，chip 也就永远不切成列表。
+        let _ = crate::tauri_shell::tauri_register_connection(&api_base, None).await;
+
         if let Ok(json) = crate::tauri_shell::tauri_list_connections_json().await
             && let Some(list) = parse_connection_list(&json)
         {
@@ -152,7 +157,7 @@ pub fn StatusConnectionChip(
 
     let connections = RwSignal::new(Vec::<ConnectionSnapshot>::new());
     #[cfg(target_arch = "wasm32")]
-    install_connections_feed(connections);
+    install_connections_feed(connections, api_base.get_untracked());
 
     // 只有两条以上才切成列表：一条时那个「列表」就是现在这个 chip，改掉它只是让
     // 单连接用户多一次点击（还得点回设置页才能换基址）。

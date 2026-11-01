@@ -9,7 +9,9 @@ use crate::allowed_origin::AllowedServeOrigin;
 use crate::cleartext::enforce_cleartext_connect_policy;
 use crate::connect_home::{SuggestedServerUrl, connect_home_url, remember_connect_home};
 use crate::handoff::{build_local_ui_handoff_url, local_business_ui_url, normalize_base_url};
-use crate::keyring_bearer::{read_connect_bearer, write_connect_bearer_unchecked};
+use crate::keyring_bearer::{
+    clear_connect_bearer_for, read_connect_bearer_for, write_connect_bearer_for,
+};
 use crate::keyring_llm::{LlmSecretSlot, read_llm_secret, write_llm_secret};
 use crate::probe::probe_server;
 use crate::recent_urls::{self, RECENT_FILE_NAME};
@@ -41,7 +43,9 @@ pub async fn connect_remote(
     }
 
     // 空串删除钥匙串条目；非空覆盖写入（Android 无后端时由连接页写 Keystore）。
-    if let Err(e) = write_connect_bearer_unchecked(bearer.trim()) {
+    // 按发起连接的窗口写各自的槽：别的窗口还连着它们各自的 serve，不能覆盖（见
+    // `keyring_bearer` 模块文档）。
+    if let Err(e) = write_connect_bearer_for(window.label(), bearer.trim()) {
         eprintln!("[crabmate-connect] keyring write skipped: {e}");
     }
 
@@ -68,7 +72,7 @@ pub async fn disconnect_remote(app: AppHandle, window: tauri::WebviewWindow) -> 
         // 只摘本窗口：别的窗口还连着它们各自的 serve。
         allowed.clear_label(window.label());
     }
-    if let Err(e) = write_connect_bearer_unchecked("") {
+    if let Err(e) = clear_connect_bearer_for(window.label()) {
         eprintln!("[crabmate-connect] keyring clear on disconnect skipped: {e}");
     }
     let mut home = connect_home_url();
@@ -136,9 +140,12 @@ pub fn remove_recent_connect_url(app: AppHandle, url: String) -> Result<(), Stri
 }
 
 /// 系统钥匙串中的连接 Bearer（若有）。
+///
+/// 按调用它的窗口读各自的槽：这个值会被拿去水合该窗口的会话，读错了就会拿着别的
+/// `serve` 的凭据连过去。
 #[tauri::command]
-pub fn get_connect_bearer() -> Option<String> {
-    match read_connect_bearer() {
+pub fn get_connect_bearer(window: tauri::WebviewWindow) -> Option<String> {
+    match read_connect_bearer_for(window.label()) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("[crabmate-connect] keyring read skipped: {e}");
@@ -147,12 +154,12 @@ pub fn get_connect_bearer() -> Option<String> {
     }
 }
 
-/// 写入或清除连接用 Web API Bearer（空串删除钥匙串条目）。
+/// 写入或清除该窗口的连接用 Web API Bearer（空串删除钥匙串条目）。
 ///
 /// 供包内业务 UI 设置页保存/清除；连接成功路径仍走 [`connect_remote`]。
 #[tauri::command]
-pub fn set_connect_bearer(bearer: String) -> Result<(), String> {
-    write_connect_bearer_unchecked(&bearer)
+pub fn set_connect_bearer(window: tauri::WebviewWindow, bearer: String) -> Result<(), String> {
+    write_connect_bearer_for(window.label(), &bearer)
 }
 
 /// 系统钥匙串中的密钥槽（`client_llm` / `executor_llm` / `saved_models` / `github`）。
