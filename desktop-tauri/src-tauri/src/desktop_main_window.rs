@@ -75,7 +75,10 @@ enum MainWindowMode {
 /// 现在只有这一个窗口，但**所有**按 label 找窗口的地方都走这个常量（导航钩子、
 /// `AllowedServeOrigin` 的白名单键、`get_webview_window`）。多窗口化时把它换成每个
 /// 窗口自己的 label 即可，不必再去各处的字符串字面量里捞。
-pub(crate) const MAIN_WINDOW_LABEL: &str = "main";
+///
+/// 值来自共享层：Bearer 的分槽账户名带同一个后缀，TUI 的钥匙串回退也读它。这里再写
+/// 一遍 `"main"` 只是抄写副本 —— 改名时 Desktop 照样编译通过，TUI 静默 miss。
+pub(crate) use crabmate_client_api::secrets::DESKTOP_MAIN_WINDOW_LABEL as MAIN_WINDOW_LABEL;
 
 /// E2E / `CM_DESKTOP_SKIP_CONNECT`：包内业务 UI + API 基址指向已运行的 `serve`。
 pub(crate) fn create_main_window_from_url(
@@ -337,7 +340,7 @@ fn spawn_reveal_fallback(app_handle: &tauri::AppHandle, revealed: Arc<AtomicBool
         let revealed = Arc::clone(&revealed);
         let app = app_fallback.clone();
         let _ = app_fallback.run_on_main_thread(move || {
-            if let Some(main) = app.get_webview_window("main") {
+            if let Some(main) = app.get_webview_window(MAIN_WINDOW_LABEL) {
                 reveal_main_window_once(&main, &revealed);
             }
         });

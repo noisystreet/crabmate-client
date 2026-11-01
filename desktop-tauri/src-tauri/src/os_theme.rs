@@ -4,6 +4,8 @@
 //! WebView 的 `prefers-color-scheme` 会恒为浅色，导致前端 `theme=system` 失效。
 //! 探测顺序：xdg-desktop-portal → GNOME gsettings → `GTK_THEME` / gtk settings.ini → KDE kdeglobals。
 
+#[cfg(target_os = "linux")]
+use crate::desktop_main_window::MAIN_WINDOW_LABEL;
 use tauri::{AppHandle, Theme};
 
 #[cfg(target_os = "linux")]
@@ -300,7 +302,7 @@ fn apply_detected_theme(app: &AppHandle) {
     let handle = app.clone();
     // 主窗可能已关；忽略回调失败。
     let _ = app.run_on_main_thread(move || {
-        if let Some(win) = handle.get_webview_window("main") {
+        if let Some(win) = handle.get_webview_window(MAIN_WINDOW_LABEL) {
             let _ = win.set_theme(Some(theme));
         }
     });
