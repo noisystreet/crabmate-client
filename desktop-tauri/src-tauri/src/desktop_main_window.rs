@@ -388,6 +388,66 @@ fn finish_create_main_window(
     Ok(window)
 }
 
+/// 建一个「连接窗口」：直接进业务 UI，几何与 main 的会话窗一致（铺满工作区）。
+///
+/// 这是多窗口里的「第二个及以后」。与 [`finish_create_main_window`] 的差别只有两点：
+/// 没有连接页 / 直接 UI 之分（总是直接 UI），也不要 reveal 防白屏那套 —— 那是为了
+/// 「先藏、定位好再显示」不让人看到默认尺寸闪一下，这里建完立刻 show。
+///
+/// 白名单按 `label` 记（见 `AllowedServeOrigin`），导航守卫按 `label` 取窗口
+/// （见 `allow_http_navigation`）—— 两处都靠这个参数，所以 label 必须是最终的窗口名。
+pub(crate) fn create_connection_window(
+    app: &tauri::AppHandle,
+    label: &str,
+    api_base: &Url,
+    display_name: &str,
+    bearer: &str,
+) -> Result<(), String> {
+    let backend_origin = api_base.origin();
+    if let Some(allowed) = app.try_state::<crabmate_connect::AllowedServeOrigin>() {
+        allowed.set_from_url(label, api_base);
+    }
+
+    let home = Url::parse("http://tauri.localhost/connect.html")
+        .map_err(|e| format!("invalid local connect placeholder: {e}"))?;
+    let ui = crabmate_connect::local_business_ui_url(&home);
+    let target = crabmate_connect::build_local_ui_handoff_url(ui, api_base, bearer);
+
+    let nav_label = label.to_string();
+    let app_handle_clone = app.clone();
+    // 标题带连接名：两个窗口都铺满工作区时，标题栏是**唯一**能区分它们的静态标记。
+    let title = if display_name.is_empty() {
+        String::from("CrabMate")
+    } else {
+        format!("CrabMate · {display_name}")
+    };
+
+    let window = WebviewWindowBuilder::new(app, label, WebviewUrl::App("index.html".into()))
+        .title(title)
+        .inner_size(MAIN_UI_WIDTH, MAIN_UI_HEIGHT)
+        .resizable(true)
+        .background_color(BOOT_SHELL_BG)
+        .visible(false)
+        .theme(os_theme::initial_window_theme())
+        .on_navigation(move |url| {
+            on_main_navigation(&app_handle_clone, &nav_label, url, &backend_origin)
+        })
+        .build()
+        .map_err(|e| format!("failed to create connection window: {e}"))?;
+
+    window
+        .navigate(target)
+        .map_err(|e| format!("failed to open local UI with API handoff: {e}"))?;
+
+    // 几何必须在 show 之后应用：X11 / Wayland 上未映射时 maximize 与 current_monitor
+    // 都不可靠（见 `apply_main_ui_geometry` 的 doc）。
+    window
+        .show()
+        .map_err(|e| format!("failed to show connection window: {e}"))?;
+    apply_main_ui_geometry(&window);
+    Ok(())
+}
+
 fn reveal_main_window_once(window: &WebviewWindow, revealed: &AtomicBool) {
     if revealed.swap(true, Ordering::SeqCst) {
         return;

@@ -327,6 +327,7 @@ fn main() {
             crabmate_connect::set_llm_secret,
             desktop_connections::list_connections,
             desktop_connections::connections_tally,
+            desktop_connections::open_connection,
             desktop_connections::register_connection,
             desktop_connections::report_connection_status,
             desktop_connections::report_connection_unread,
