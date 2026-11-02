@@ -76,6 +76,7 @@ mod workspace_cmd;
 mod workspace_keys;
 mod workspace_tree;
 mod ws_sidebar;
+mod ws_truncate;
 
 use std::borrow::Cow;
 use std::sync::mpsc::{Receiver, Sender};

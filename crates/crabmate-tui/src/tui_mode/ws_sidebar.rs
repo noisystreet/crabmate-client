@@ -7,7 +7,7 @@
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+use unicode_width::UnicodeWidthStr;
 
 use super::palette::Palette;
 use super::render::{
@@ -15,6 +15,7 @@ use super::render::{
 };
 use super::state::{Focus, UiState};
 use super::workspace_tree::WsRow;
+use super::ws_truncate::middle_ellipsis;
 
 /// 工作区树（目录行）聚焦时的按键提示。宽度必须 ≤ 侧栏内宽
 /// （`SIDEBAR_WIDTH` - 1 = 25 列），否则 `render_pane` 会直接裁掉尾部按键；中文按 2 列计。
@@ -68,35 +69,11 @@ fn workspace_title(st: &UiState, width: usize) -> Line<'static> {
     Line::from(spans)
 }
 
-/// 名称按显示宽度做尾部截断：保留开头 `…` 与末尾字符，深层目录仍能看清文件名。
-fn truncate_name_tail(name: &str, width: usize) -> String {
-    if width == 0 {
-        return String::new();
-    }
-    if UnicodeWidthStr::width(name) <= width {
-        return name.to_string();
-    }
-    if width == 1 {
-        return "…".to_string();
-    }
-    let budget = width - 1;
-    let mut tail: Vec<char> = Vec::new();
-    let mut used = 0usize;
-    for ch in name.chars().rev() {
-        let cw = ch.width().unwrap_or(0);
-        if used + cw > budget {
-            break;
-        }
-        tail.push(ch);
-        used += cw;
-    }
-    let mut out = String::from("…");
-    out.extend(tail.into_iter().rev());
-    out
-}
-
-/// 单棵树行文本：缩进 + 目录 `▾/▸`（文件占位空格对齐）+ 名称（超宽保留尾部）。
-fn ws_row_text(row: &WsRow, width: usize) -> String {
+/// 单棵树行文本 + 名称是否被省略（供提示行判断要不要补全名）。
+///
+/// 缩进 + 目录 `▾/▸`（文件用空格对齐）+ 名称；名称超宽时中段省略，见
+/// [`middle_ellipsis`]：开头与扩展名都保留，避免同目录长名被压成一串 `…xx.rs`。
+fn ws_row_text(row: &WsRow, width: usize) -> (String, bool) {
     let pad = "  ".repeat(usize::from(row.indent));
     let glyph = if row.is_dir {
         if row.expanded { "▾ " } else { "▸ " }
@@ -106,12 +83,23 @@ fn ws_row_text(row: &WsRow, width: usize) -> String {
     let prefix = format!("{pad}{glyph}");
     let prefix_w = UnicodeWidthStr::width(prefix.as_str());
     if prefix_w >= width {
-        return truncate_display(&prefix, width);
+        return (truncate_display(&prefix, width), true);
     }
-    format!(
-        "{prefix}{}",
-        truncate_name_tail(&row.name, width - prefix_w)
+    let room = width - prefix_w;
+    let clipped = UnicodeWidthStr::width(row.name.as_str()) > room;
+    (
+        format!("{prefix}{}", middle_ellipsis(&row.name, room)),
+        clipped,
     )
+}
+
+/// 该行在给定内宽下是否画不全。
+///
+/// 高亮行左缘多一个 `▎`（`push_sidebar_line` 按 `width - 1` 再截一次），所以
+/// 「名称本身没超」也可能被那一列挤掉——两种都算画不全，提示行才需要补全名。
+fn ws_row_clipped(row: &WsRow, width: usize) -> bool {
+    let (text, name_clipped) = ws_row_text(row, width);
+    name_clipped || UnicodeWidthStr::width(text.as_str()) > width.saturating_sub(1)
 }
 
 /// 追加一条侧栏行；`highlight` 时左缘加 `▎` 竖条 + 选中底色。
@@ -178,7 +166,7 @@ fn workspace_sidebar_rows(st: &UiState, width: usize) -> Vec<Line<'static>> {
         };
         push_sidebar_line(
             &mut rows,
-            ws_row_text(row, width),
+            ws_row_text(row, width).0,
             fg,
             highlight && i == st.ws_cursor,
             pal,
@@ -388,37 +376,64 @@ fn workspace_pick_rows(st: &UiState, width: usize) -> Vec<Line<'static>> {
 pub(super) fn sessions_content(
     st: &UiState,
     width: usize,
-) -> (Vec<Line<'static>>, usize, Option<&'static str>) {
+) -> (Vec<Line<'static>>, usize, Option<Line<'static>>) {
     let hint = st.pane_hint_visible(Focus::Sidebar).then(|| {
-        if st.confirm_delete.is_some() {
-            SIDEBAR_DELETE_HINT
-        } else {
-            SIDEBAR_HINT
-        }
+        hint_line(
+            if st.confirm_delete.is_some() {
+                SIDEBAR_DELETE_HINT
+            } else {
+                SIDEBAR_HINT
+            },
+            &st.palette,
+        )
     });
     (sidebar_rows(st, width), st.selected, hint)
 }
 
-/// 右栏工作区可视内容：返回（行、光标、键盘聚焦时提示文案）。
+/// 右栏工作区可视内容：返回（行、光标、键盘聚焦时提示行）。
 /// 右栏宽屏默认显示；光标反色与按键提示仅在 `Focus::Workspace` 聚焦时出现
 /// （提示还要是键盘带来的焦点，见 [`UiState::pane_hint_visible`]）。
 pub(super) fn workspace_content(
     st: &UiState,
     width: usize,
-) -> (Vec<Line<'static>>, usize, Option<&'static str>) {
+) -> (Vec<Line<'static>>, usize, Option<Line<'static>>) {
     if st.ws_pick.is_some() {
-        (
-            workspace_pick_rows(st, width),
-            st.ws_cursor,
-            st.pane_hint_visible(Focus::Workspace)
-                .then_some(WORKSPACE_PICK_HINT),
-        )
+        let hint = st
+            .pane_hint_visible(Focus::Workspace)
+            .then(|| hint_line(WORKSPACE_PICK_HINT, &st.palette));
+        (workspace_pick_rows(st, width), st.ws_cursor, hint)
     } else {
         let hint = st
             .pane_hint_visible(Focus::Workspace)
-            .then(|| workspace_hint(st));
+            .then(|| workspace_hint_line(st, width));
         (workspace_sidebar_rows(st, width), st.ws_cursor, hint)
     }
+}
+
+/// 提示行统一走 `Line`：工作区栏在光标行画不全时要换成完整相对路径，不再只有静态文案
+/// （`render_pane` 的 `hint` 因此收 `Line`；颜色一律 `muted`，与原有的提示行一致）。
+fn hint_line(text: &'static str, pal: &Palette) -> Line<'static> {
+    Line::from(Span::styled(text, Style::new().fg(pal.muted)))
+}
+
+/// 工作区栏的提示行：光标行被截断时改成「完整相对路径」，否则照旧给键位。
+///
+/// 终端没有 hover/tooltip 这类第二展示位，长文件名一旦被省略就再也看不到全名；
+/// 而提示行比行内多出缩进与字形两段预算（缩进 2 列/层 + `▸ ` 2 列 + 高亮竖条 1 列），
+/// 是这一列里唯一还能多放十几个字符的地方。键位本身仍可由 `/help` 与空会话首屏
+/// 提示获得，所以这里优先让人认清「当前选的是哪个文件」。
+fn workspace_hint_line(st: &UiState, width: usize) -> Line<'static> {
+    let pal = &st.palette;
+    if let Some(row) = st.ws_rows.get(st.ws_cursor)
+        && !row.placeholder
+        && ws_row_clipped(row, width)
+    {
+        return Line::from(Span::styled(
+            middle_ellipsis(&row.rel, width),
+            Style::new().fg(pal.muted),
+        ));
+    }
+    hint_line(workspace_hint(st), pal)
 }
 
 /// 按光标所在行选择提示文案（文件行强调 Enter 插入路径）。
@@ -593,13 +608,15 @@ mod tests {
         let mut st = ready_ws_state();
         st.focus = Focus::Sidebar;
         let (_, _, hint) = sessions_content(&st, 60);
-        assert_eq!(hint, Some(SIDEBAR_HINT), "平时是按键提示");
-        assert!(hint.unwrap().contains("Del"), "平时要提示删除键");
+        let text = hint.expect("键盘聚焦要给提示").to_string();
+        assert_eq!(text, SIDEBAR_HINT, "平时是按键提示");
+        assert!(text.contains("Del"), "平时要提示删除键");
 
         st.confirm_delete = Some("s1".to_string());
         let (_, _, hint) = sessions_content(&st, 60);
-        assert_eq!(hint, Some(SIDEBAR_DELETE_HINT), "确认态换确认文案");
-        assert!(!hint.unwrap().contains("Del删"), "确认态不再重复按键说明");
+        let text = hint.expect("确认态也要给提示").to_string();
+        assert_eq!(text, SIDEBAR_DELETE_HINT, "确认态换确认文案");
+        assert!(!text.contains("Del删"), "确认态不再重复按键说明");
     }
 
     #[test]
@@ -726,18 +743,21 @@ mod tests {
         let mut st = UiState::new();
         st.focus = Focus::Workspace;
         let (_, _, hint) = workspace_content(&st, 60);
-        assert!(hint.unwrap().contains("未设置"), "路径为空给未设置提示");
+        assert!(
+            hint.unwrap().to_string().contains("未设置"),
+            "路径为空给未设置提示"
+        );
         st.workspace_path = Some("/data/proj".to_string());
         st.ws_ready = true;
         let (_, _, hint) = workspace_content(&st, 60);
-        let hint = hint.unwrap();
+        let hint = hint.unwrap().to_string();
         assert!(hint.contains("Enter展开"), "正常树给树提示");
         assert!(hint.contains('p'), "提示 p 切项目");
         assert!(hint.contains('w'), "提示 w 回会话栏");
         st.ws_pick = Some(super::super::workspace_tree::WsPickState::default());
         let (rows, _, hint) = workspace_content(&st, 60);
         assert!(rows[0].to_string().contains("项目池"));
-        assert!(hint.unwrap().contains("Enter切换"));
+        assert!(hint.unwrap().to_string().contains("Enter切换"));
     }
 
     #[test]
@@ -772,10 +792,60 @@ mod tests {
     #[test]
     fn deep_row_keeps_filename_tail() {
         let row = ws_row(2, "a/b/c/module_name.rs", "module_name.rs", false, false);
-        let text = ws_row_text(&row, 14);
+        let (text, clipped) = ws_row_text(&row, 14);
         assert!(UnicodeWidthStr::width(text.as_str()) <= 14);
         assert!(text.ends_with("name.rs"), "保留尾部文件名：{text}");
         assert!(text.contains('…'), "中段省略：{text}");
+        assert!(clipped, "名称超宽要报告给提示行");
+    }
+
+    /// 中段省略的核心收益：窄栏下开头与扩展名同时在，同目录长名才区分得开。
+    #[test]
+    fn narrow_row_keeps_name_head_and_extension() {
+        let row = ws_row(
+            2,
+            "src/api/crabmate_super_long_module_name.rs",
+            "crabmate_super_long_module_name.rs",
+            false,
+            false,
+        );
+        let (text, clipped) = ws_row_text(&row, 20);
+        assert!(UnicodeWidthStr::width(text.as_str()) <= 20, "{text}");
+        assert!(clipped);
+        assert!(!text.contains("crabmate_super_long"), "整体已超宽：{text}");
+        assert!(text.contains("…"), "{text}");
+        // 缩进 + glyph 之后名称只剩 14 列，头尾都要有内容。
+        assert!(text.contains("crab"), "保留名称开头：{text}");
+        assert!(text.ends_with(".rs"), "保留扩展名：{text}");
+    }
+
+    /// 光标行画不全时，提示行改显示完整相对路径（终端没有 hover，这是唯一的第二展示位）。
+    #[test]
+    fn clipped_cursor_row_puts_full_rel_on_hint_line() {
+        let mut st = ready_ws_state();
+        st.focus = Focus::Workspace;
+        st.ws_cursor = 2;
+        st.ws_rows[2].rel = "src/deep/nested/very_long_module_name.rs".to_string();
+        st.ws_rows[2].name = "very_long_module_name.rs".to_string();
+        st.ws_rows[2].indent = 3;
+        let (_, _, hint) = workspace_content(&st, SIDEBAR_WIDTH as usize - 2);
+        let hint = hint.expect("聚焦要提示").to_string();
+        // 提示行比行内多出缩进 + 字形 + 高亮竖条，所以放下的是「路径」而不是裸文件名；
+        // 仍超过列宽时继续省略，但首尾都给出来（这里放得下 `src/deep/` 前缀）。
+        assert!(hint.starts_with("src/deep/"), "提示行给出相对路径：{hint}");
+        assert!(hint.ends_with("module_name.rs"), "{hint}");
+        assert_ne!(hint, WORKSPACE_FILE_HINT, "被截断时不再让位给键位提示");
+    }
+
+    /// 名字放得下时提示行保持键位，别把提示位长期占掉。
+    #[test]
+    fn fitting_cursor_row_keeps_key_hint() {
+        let mut st = ready_ws_state();
+        st.focus = Focus::Workspace;
+        st.ws_cursor = 2; // README.md，宽度充裕
+        let (_, _, hint) = workspace_content(&st, SIDEBAR_WIDTH as usize - 2);
+        let hint = hint.expect("聚焦要提示").to_string();
+        assert_eq!(hint, WORKSPACE_FILE_HINT, "{hint}");
     }
 
     #[test]
@@ -784,6 +854,6 @@ mod tests {
         st.focus = Focus::Workspace;
         st.ws_cursor = 2; // README.md
         let (_, _, hint) = workspace_content(&st, 60);
-        assert!(hint.unwrap().contains("插路径"));
+        assert!(hint.unwrap().to_string().contains("插路径"));
     }
 }

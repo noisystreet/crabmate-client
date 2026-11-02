@@ -676,7 +676,7 @@ fn render_pane(
     area: Rect,
     rows: Vec<Line<'static>>,
     cursor: usize,
-    hint: Option<&'static str>,
+    hint: Option<Line<'static>>,
     pal: &Palette,
     width: usize,
 ) {
@@ -688,13 +688,13 @@ fn render_pane(
     let shown = sidebar_view(&rows, list_area.height as usize, cursor, width, pal);
     let list = Paragraph::new(shown).style(Style::new().fg(pal.fg));
     frame.render_widget(list, list_area);
-    // 提示行占列内最后一行（高度不足 2 行时没有提示位）。
+    // 提示行占列内最后一行（高度不足 2 行时没有提示位）。内容自带样式：会话栏是静态
+    // 键位，工作区栏在光标行被截断时会改成完整相对路径。
     if area.height >= 2
         && let Some(text) = hint
     {
         let hint_area = Rect::new(area.x + 1, area.y + area.height - 1, area.width - 1, 1);
-        let hint_p = Paragraph::new(Span::styled(text, Style::new().fg(pal.muted)));
-        frame.render_widget(hint_p, hint_area);
+        frame.render_widget(Paragraph::new(text), hint_area);
     }
 }
 
