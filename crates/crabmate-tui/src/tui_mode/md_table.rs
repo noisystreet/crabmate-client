@@ -181,7 +181,9 @@ fn render_row(
             out.extend((0..TABLE_GAP).map(|_| (Style::new(), ' ')));
         }
         let cell = cells.get(c).copied().unwrap_or("");
-        let mut chars = inline_styled_chars(cell, pal);
+        // 表格按列截断、不折行，链接的屏幕列在这里没有稳定的落脚点：丢掉链接标记
+        // （文字仍带 accent + 下划线），宁可不可点，也不给一个会点错列的热区。
+        let mut chars = inline_styled_chars(cell, pal).into_chars();
         if header {
             chars = chars
                 .into_iter()

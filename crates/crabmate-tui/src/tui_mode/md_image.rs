@@ -10,6 +10,7 @@
 //! 看着像漏渲染。
 
 use super::*;
+use crate::tui_mode::md::md_links::{link_style, push_plain_with_urls};
 
 /// 行内片段：普通文本，或一张图（只保留 alt）。
 enum InlinePiece<'a> {
@@ -20,8 +21,8 @@ enum InlinePiece<'a> {
 /// 行内渲染入口：先把图片切出来，普通文本仍交给共享 parser。
 ///
 /// alt 内部**不再扫图片**（`push_image` 走 `push_inline`），避免递归。
-pub(super) fn inline_styled_chars(part: &str, pal: &Palette) -> Vec<(Style, char)> {
-    let mut out = Vec::new();
+pub(super) fn inline_styled_chars(part: &str, pal: &Palette) -> PartChars {
+    let mut out = PartChars::default();
     for piece in split_images(part) {
         match piece {
             InlinePiece::Text(t) => push_inline(&mut out, t, pal),
@@ -32,18 +33,27 @@ pub(super) fn inline_styled_chars(part: &str, pal: &Palette) -> Vec<(Style, char
 }
 
 /// 普通文本片段：走共享 parser 得到 Bold/Italic/Code/Link 等 span。
-fn push_inline(out: &mut Vec<(Style, char)>, text: &str, pal: &Palette) {
+///
+/// 链接按**整段**追加（`push_link`）：它的字符区间要留给折行层换算成屏幕列，
+/// 而 URL 就是这条区间的载荷。
+fn push_inline(out: &mut PartChars, text: &str, pal: &Palette) {
     if text.is_empty() {
         return;
     }
     for span in parse_inline_markdown(text) {
         let st = md_span_style(&span, pal);
-        out.extend(span_text(&span).chars().map(|c| (st, c)));
+        match &span {
+            InlineSpan::Link { text, url } => out.push_link(st, text, url),
+            // 裸 URL 走同一条链接路径（等价于 `[url](url)`）：模型最常直接吐地址，
+            // 不给热区的话那串字就是死的 —— 鼠标上报已经把点击从终端截走了。
+            InlineSpan::Text(t) => push_plain_with_urls(out, st, link_style(pal), t),
+            other => out.extend(span_text(other).chars().map(|c| (st, c))),
+        }
     }
 }
 
 /// 图片降级：`[图]`（accent）+ 空格 + alt（alt 里的行内样式照常生效）。
-fn push_image(out: &mut Vec<(Style, char)>, alt: &str, pal: &Palette) {
+fn push_image(out: &mut PartChars, alt: &str, pal: &Palette) {
     let tag = if pal.is_mono() {
         Style::new()
     } else {

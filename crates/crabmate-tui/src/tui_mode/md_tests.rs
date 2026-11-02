@@ -5,6 +5,7 @@
 
 use ratatui::style::Color;
 
+use super::md_links::link_style;
 use super::*;
 use unicode_width::UnicodeWidthStr;
 
@@ -536,4 +537,174 @@ fn wrapped_ordered_item_hangs_after_number() {
         assert!(r.starts_with("   "), "续行应缩进 3 列：{r:?}");
         assert!(!r.starts_with("1."), "续行不该重复编号：{r:?}");
     }
+}
+
+/// 把「显示列区间」映射回字符，用来验证热区真的盖在链接文字上。
+fn col_slice(chars: &[(Style, char)], start: u16, end: u16) -> String {
+    let mut out = String::new();
+    let mut col = 0u16;
+    for &(_, ch) in chars {
+        let cw = u16::try_from(ch.to_string().width()).unwrap_or(0);
+        if col >= start && col + cw <= end {
+            out.push(ch);
+        }
+        col += cw;
+    }
+    out
+}
+
+/// 链接的屏幕列与折行同源：报出来的区间正盖在那几个字符上。
+#[test]
+fn link_columns_land_on_the_link_characters() {
+    let styled = assistant_styled("[文档](https://x) 后面", &pal(), 0);
+    let rows = wrap_styled_rows(&styled, 40);
+    assert_eq!(rows.len(), 1);
+    let (start, end, url) = rows[0].links[0].clone();
+    assert_eq!(url, "https://x");
+    // 展示文本只有「文档」（两个汉字 = 4 列），URL 不上屏
+    assert_eq!((start, end), (0, 4));
+    assert_eq!(col_slice(&rows[0].chars, start, end), "文档");
+}
+
+/// 链接被折行切开：每行各得一段，两段指向同一个 URL —— 屏幕上分成几块，
+/// 每一块都得能点。
+#[test]
+fn wrapped_link_reports_one_range_per_row() {
+    let styled = assistant_styled("[abcd](https://x)", &pal(), 0);
+    let rows = wrap_styled_rows(&styled, 2);
+    assert_eq!(rows.len(), 2, "宽 2 应折成 ab / cd");
+    for row in &rows {
+        assert_eq!(row.links, vec![(0, 2, "https://x".to_string())]);
+    }
+}
+
+/// 两条链接紧贴（中间没有间隔字符）：必须分成两段，否则点右边那条会打开左边那条。
+#[test]
+fn adjacent_links_do_not_merge() {
+    let styled = assistant_styled("[a](https://one)[b](https://two)", &pal(), 0);
+    let rows = wrap_styled_rows(&styled, 40);
+    let links = &rows[0].links;
+    assert_eq!(links.len(), 2, "两段不能并成一段");
+    assert_eq!((links[0].0, links[0].1), (0, 1));
+    assert_eq!(links[0].2, "https://one");
+    assert_eq!((links[1].0, links[1].1), (1, 2));
+    assert_eq!(links[1].2, "https://two");
+}
+
+/// 没有链接的行不该有任何热区（否则点空白也会拉起浏览器）。
+#[test]
+fn plain_text_rows_have_no_links() {
+    let styled = assistant_styled("没有链接的正文", &pal(), 0);
+    let rows = wrap_styled_rows(&styled, 40);
+    assert!(rows.iter().all(|r| r.links.is_empty()));
+}
+
+/// 列表项正文里的链接也要能点：`wrap_body` 插续行前缀时区间必须跟着右移。
+#[test]
+fn list_item_link_survives_the_hanging_prefix() {
+    let styled = assistant_styled("- [文档](https://x)", &pal(), 0);
+    let rows = wrap_styled_rows(&styled, 40);
+    let links = &rows[0].links;
+    assert_eq!(links.len(), 1, "列表项的链接不能丢");
+    let (start, end, url) = links[0].clone();
+    assert_eq!(url, "https://x");
+    // `• ` 占 2 列，所以「文档」从第 2 列开始
+    assert_eq!((start, end), (2, 6));
+    assert_eq!(col_slice(&rows[0].chars, start, end), "文档");
+}
+
+// ---- 裸 URL 也按 `[url](url)` 渲染 ----
+//
+// 背景：共享 parser 只认 `[文字](url)`，而模型最常直接吐裸地址。那些字在屏幕上由
+// 终端自己画了下划线，但本程序开着鼠标上报（`shell.rs` 的 `MOUSE_ON`），点击被送进
+// 本进程、终端自己的链接处理器收不到 —— 于是「点下去毫无反应」。这一组用例钉住
+// 「裸 URL 有热区」以及几条不该被改写的边界。
+
+/// 裸 URL 变成链接，展示文本就是地址本身（屏幕上与改写前逐字一致）。
+#[test]
+fn bare_url_becomes_a_link_showing_the_address() {
+    let styled = assistant_styled("见 https://example.com/a?b=1 末尾", &pal(), 0);
+    let rows = wrap_styled_rows(&styled, 60);
+    assert_eq!(rows.len(), 1);
+    let (start, end, url) = rows[0].links[0].clone();
+    assert_eq!(url, "https://example.com/a?b=1");
+    assert_eq!(
+        col_slice(&rows[0].chars, start, end),
+        "https://example.com/a?b=1",
+        "热区必须正好盖在地址本身上"
+    );
+}
+
+/// 句中裸 URL 前后的文字仍是普通文本（不能把整行都变成链接）。
+#[test]
+fn bare_url_leaves_surrounding_text_plain() {
+    let styled = assistant_styled("见 https://x.com 末尾", &pal(), 0);
+    let rows = wrap_styled_rows(&styled, 60);
+    assert_eq!(rows[0].links.len(), 1);
+    let link = link_style(&pal());
+    let underlined: String = rows[0]
+        .chars
+        .iter()
+        .filter(|(s, _)| s.add_modifier.contains(Modifier::UNDERLINED))
+        .map(|(_, ch)| *ch)
+        .collect();
+    assert_eq!(underlined, "https://x.com", "只有地址带链接样式");
+    assert!(link.add_modifier.contains(Modifier::UNDERLINED));
+}
+
+/// 尾部标点属于句子，不属于地址：全角逗号、半角句号、外层的右括号都要剥掉。
+#[test]
+fn bare_url_drops_trailing_punctuation() {
+    for (text, want) in [
+        ("见 https://x.com，然后呢", "https://x.com"),
+        ("见 https://x.com。", "https://x.com"),
+        ("(见 https://x.com)", "https://x.com"),
+        ("见 https://x.com.", "https://x.com"),
+    ] {
+        let styled = assistant_styled(text, &pal(), 0);
+        let rows = wrap_styled_rows(&styled, 60);
+        assert_eq!(rows[0].links[0].2, want, "输入：{text}");
+    }
+}
+
+/// 地址内部成对的括号要保留（维基式条目名），不能一见到 `)` 就截断。
+#[test]
+fn bare_url_keeps_a_balanced_parenthesis() {
+    let styled = assistant_styled("见 https://x.com/Rust_(lang) 末尾", &pal(), 0);
+    let rows = wrap_styled_rows(&styled, 60);
+    assert_eq!(rows[0].links[0].2, "https://x.com/Rust_(lang)");
+}
+
+/// 行内代码里的地址是人写给人看的字面量，不该变成可点目标。
+#[test]
+fn url_inside_inline_code_stays_plain() {
+    let styled = assistant_styled("用 `https://x.com` 就够了", &pal(), 0);
+    let rows = wrap_styled_rows(&styled, 60);
+    assert!(rows.iter().all(|r| r.links.is_empty()));
+}
+
+/// 代码块同理：`code_line_chars` 不过行内解析。
+#[test]
+fn url_inside_code_fence_stays_plain() {
+    let styled = assistant_styled("```\ncurl https://x.com\n```", &pal(), 40);
+    let rows = wrap_styled_rows(&styled, 60);
+    assert!(rows.iter().all(|r| r.links.is_empty()));
+}
+
+/// 已经是 `[url](url)` 的不能再被裸 URL 扫描二次改写：仍是一条，指向自己。
+#[test]
+fn markdown_link_whose_text_is_a_url_is_not_rewritten() {
+    let styled = assistant_styled("[https://x.com](https://x.com)", &pal(), 0);
+    let rows = wrap_styled_rows(&styled, 60);
+    assert_eq!(rows[0].links.len(), 1, "重复登记会变成两个叠在一起的热区");
+    assert_eq!(rows[0].links[0].2, "https://x.com");
+}
+
+/// 只有 scheme 没有正文（`https://` 后面直接断开）按普通文本处理：
+/// 打开一个空地址没有意义。
+#[test]
+fn bare_scheme_without_a_body_is_not_a_link() {
+    let styled = assistant_styled("格式是 https:// 开头", &pal(), 0);
+    let rows = wrap_styled_rows(&styled, 60);
+    assert!(rows.iter().all(|r| r.links.is_empty()));
 }

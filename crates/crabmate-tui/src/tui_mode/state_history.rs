@@ -49,6 +49,9 @@ impl UiState {
         self.fold_cursor = None;
         self.body_area = None;
         self.body_rows_log.clear();
+        // 链接热区与命中表同源，一起作废：留着会让「切到新会话后的第一次点击」
+        // 打开上一个会话里的地址。
+        self.body_links.clear();
     }
 
     /// 把一页更早的历史前插到 transcript 头部。
