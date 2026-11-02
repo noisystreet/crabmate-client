@@ -113,7 +113,8 @@ fn kind_style(kind: LineKind, pal: &Palette) -> Style {
         LineKind::Assistant => Style::new().fg(pal.fg),
         LineKind::Thinking => Style::new().fg(pal.muted),
         LineKind::Tool => Style::new().fg(pal.muted),
-        LineKind::System => Style::new().fg(pal.err),
+        // 中性档：这一档混有真失败与「已加载 3 条」类通报，不能按结果判色（详见 `prefix::kind_prefix`）。
+        LineKind::System => Style::new().fg(pal.muted),
         // 过程摘要行：与工具行同档色、不抢注意力（它只说「这里折了几步」）。
         LineKind::Process => Style::new().fg(pal.info),
     }
@@ -907,3 +908,9 @@ mod tests;
 #[cfg(test)]
 #[path = "render_color_tests.rs"]
 mod color_tests;
+
+// 系统行的前缀 / 配色断言：`render_tests.rs` 叠上 #410 的链接热区测试后已到 912 行，
+// 再放这三支就顶过 920 行门禁，故按关注点再拆一个文件（与 `color_tests` 同一手法）。
+#[cfg(test)]
+#[path = "render_system_tests.rs"]
+mod system_tests;
