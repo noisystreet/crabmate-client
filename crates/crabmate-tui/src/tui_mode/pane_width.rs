@@ -59,6 +59,19 @@ impl PaneWidths {
         right: WORKSPACE_PANE_WIDTH,
     };
 
+    /// 只按**各自的**上下限夹取，不按终端宽度让位。
+    ///
+    /// 落盘读回的值走这条（见 `pane_store`）：读盘发生在建窗之前，那时还没有终端宽度
+    /// 可供让位；让位留到绘制时的 [`Self::clamped`]。两处共用同一对 clamp —— 文件里的值
+    /// 与窗口里的值用两套边界，正是「手改了一下就再也对不上」的来源。
+    #[must_use]
+    pub(crate) fn clamped_to_ranges(self) -> Self {
+        Self {
+            left: self.left.clamp(MIN_SIDEBAR_COLS, MAX_SIDEBAR_COLS),
+            right: self.right.clamp(MIN_WORKSPACE_COLS, MAX_WORKSPACE_COLS),
+        }
+    }
+
     /// 按终端宽度夹取：两栏各自落在 `[MIN, MAX]`，且合计不超过 `终端宽度 - MIN_CHAT_COLS`。
     ///
     /// 超出预算时**先压右栏、再压左栏**：右栏底部是状态栈（挤窄只是把 `ctx` 行截断），
@@ -71,8 +84,7 @@ impl PaneWidths {
     /// `layout::panes_with_lanes` 内部还会再夹一次，两处结果必然相同。
     #[must_use]
     pub(crate) fn clamped(self, terminal_width: u16) -> Self {
-        let left = self.left.clamp(MIN_SIDEBAR_COLS, MAX_SIDEBAR_COLS);
-        let right = self.right.clamp(MIN_WORKSPACE_COLS, MAX_WORKSPACE_COLS);
+        let Self { left, right } = self.clamped_to_ranges();
         // 预算 = 两栏能合占的最大列数。`saturating_sub` 保证极窄终端下算成 0 而不是下溢。
         let budget = terminal_width.saturating_sub(MIN_CHAT_COLS);
         if left.saturating_add(right) <= budget {
@@ -128,6 +140,16 @@ impl super::state::UiState {
             widths: self.pane,
         }
     }
+
+    /// 用落盘的宽度初始化（`pane_store::load` 的返回值，见 issue #407 的 P2）。
+    ///
+    /// 不改 `UiState::new()` 的签名：它有几十处调用（多半在测试里），多一个参数会把
+    /// 「默认版面」从 `Default` 里挪到每个调用点。装配 lane 时覆盖这一个字段就够了。
+    #[must_use]
+    pub(crate) fn with_pane(mut self, widths: PaneWidths) -> Self {
+        self.pane = widths.clamped_to_ranges();
+        self
+    }
 }
 
 #[cfg(test)]
@@ -136,6 +158,7 @@ mod tests {
         MAX_SIDEBAR_COLS, MAX_WORKSPACE_COLS, MIN_CHAT_COLS, MIN_SIDEBAR_COLS, MIN_WORKSPACE_COLS,
         PaneLayout, PaneWidths, SIDEBAR_WIDTH, WORKSPACE_PANE_WIDTH,
     };
+    use crate::tui_mode::state::UiState;
 
     #[test]
     fn defaults_match_the_historical_constants() {
@@ -259,5 +282,30 @@ mod tests {
         let got = layout.clamped(120);
         assert!(!got.visible, "夹取宽度不该顺手改可见性");
         assert!(got.widths.left <= MAX_SIDEBAR_COLS);
+    }
+
+    /// `with_pane`（装配时灌入落盘宽度）只做**各自范围**的夹取：读盘时还不知道终端多宽，
+    /// 按终端让位属于绘制层。
+    #[test]
+    fn with_pane_clamps_each_range_without_yielding_to_a_terminal() {
+        let st = UiState::new().with_pane(PaneWidths {
+            left: 60000,
+            right: 1,
+        });
+        assert_eq!(st.pane.left, MAX_SIDEBAR_COLS);
+        assert_eq!(st.pane.right, MIN_WORKSPACE_COLS);
+    }
+
+    /// 宽请求原样保留：`MAX_SIDEBAR_COLS + MAX_WORKSPACE_COLS` 在窄终端里会被让位压下去，
+    /// 但读盘不该替用户做这个决定（否则「大终端存的宽度」一进小窗口就被改写）。
+    #[test]
+    fn with_pane_keeps_a_request_a_narrow_terminal_would_squeeze() {
+        let wide = PaneWidths {
+            left: MAX_SIDEBAR_COLS,
+            right: MAX_WORKSPACE_COLS,
+        };
+        let st = UiState::new().with_pane(wide);
+        assert_eq!(st.pane, wide);
+        assert_eq!(st.pane_layout().widths, wide, "版面读的也是这一份");
     }
 }

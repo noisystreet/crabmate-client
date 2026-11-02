@@ -25,9 +25,12 @@ use crate::SessionPrefs;
 use crate::serve::{ConnectionConfig, ServeClient};
 
 use super::inbound::{Inbound, ShellEvent};
+use super::pane_width::PaneWidths;
 use super::state::{LineKind, UiState};
 use super::worker::{JobCancel, LaneId, UiEvent, WorkerJob, spawn_key_reader, spawn_worker};
-use super::{LaneApp, TuiApp, body_cache, drafts, event_loop, session_index, worker_ctl};
+use super::{
+    LaneApp, TuiApp, body_cache, drafts, event_loop, pane_store, session_index, worker_ctl,
+};
 
 /// 鼠标上报：只要按下/释放（1000）、按住时的拖动（1002）与 SGR 编码（1006）。
 ///
@@ -104,10 +107,15 @@ pub async fn run_tui(
 
     // 运行期新增 lane（`/lane attach|new`）的装配模板。`bearer` 取主连接那份：
     // 控制面里所有实例同机同用户，per-profile 槽会牵动 Desktop / Android 的槽名约定。
+    // 列宽目的地与初值在**这里**各算一次（issue #407 的 P2）：拖拽结束是高频动作，
+    // 不该每次去读环境变量；「有没有地方可存」也是启动时的一次性事实。
+    let pane_sink = pane_store::PaneStore::from_env();
     let template = LaneTemplate {
         overrides: overrides.clone(),
         yes,
         no_keyring,
+        pane: pane_sink.load(),
+        pane_store: pane_sink,
         bearer: lanes_spec
             .first()
             .map(|(_, c)| c.config().bearer_token.clone())
@@ -272,6 +280,13 @@ pub(super) struct LaneTemplate {
     pub(super) yes: bool,
     /// `--no-keyring`：设置面板禁写密钥。
     pub(super) no_keyring: bool,
+    /// 两栏列宽的初始值（本机落盘读到的，见 `pane_store`）；每条 lane 装配时各抄一份。
+    ///
+    /// 放进模板而不是让 `assemble` 自己读盘：`/lane attach|new` 在事件循环里跑，
+    /// 每新增一条 lane 读一次文件没有意义，而「读到的值」与「启动时的值」也不该不同。
+    pub(super) pane: PaneWidths,
+    /// 列宽落到哪个文件（同一次读盘解析出来的目的地，随 lane 持有）。
+    pub(super) pane_store: pane_store::PaneStore,
     /// Web API Bearer：控制面里所有实例同机同用户，第一版共用主连接那份
     /// （per-profile 槽需要牵动 Desktop / Android 的槽名约定，见设计稿 §4.5）。
     pub(super) bearer: String,
@@ -288,8 +303,8 @@ pub(super) struct LaneTemplate {
 /// 字段清单只此一份：两处各写一遍的话，加字段时必有一边漏掉，而漏的那条 lane
 /// 会静默缺一项行为（例如没有 `ctl` 就连 `/lane` 都用不了）。
 impl<'a> LaneApp<'a> {
-    /// 按模板装配一条 lane（worker 由调用方先 spawn）。
-    fn assemble(
+    /// 按模板装配一条 lane（worker 由调用方先 spawn）。`pub(super)` 只为测试：`test_support` 直接构造会绕过它，而「落盘宽度真的进了 `st.pane`」正是 P2 的承诺（本文件贴着 920 行门禁，说明写在这里）。
+    pub(super) fn assemble(
         id: LaneId,
         label: String,
         client: Cow<'a, ServeClient>,
@@ -304,7 +319,7 @@ impl<'a> LaneApp<'a> {
             overrides: template.overrides.clone(),
             yes: template.yes,
             no_keyring: template.no_keyring,
-            st: UiState::new(),
+            st: UiState::new().with_pane(template.pane),
             drafts: drafts::Drafts::default(),
             tx: template.tx.clone(),
             job_tx,
@@ -317,6 +332,11 @@ impl<'a> LaneApp<'a> {
             persisted: None,
             last_size: (0, 0),
             pane_drag: None,
+            // 装配时的宽度就是「已经保存过的值」：它来自读盘（或默认），没拖过就不该写文件。
+            // 夹取与 `with_pane` 同一条，否则「刚启动就已经和磁盘不一致」会立刻触发一次写。
+            pane_saved: template.pane.clamped_to_ranges(),
+            pane_save_warned: false,
+            pane_store: template.pane_store.clone(),
             index: session_index::UiIndexState::default(),
             resume: None,
             sent_turn: None,

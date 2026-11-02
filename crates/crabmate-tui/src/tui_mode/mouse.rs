@@ -27,7 +27,11 @@ impl LaneApp<'_> {
         if self.st.approval.is_some() || self.panel.is_some() {
             // 浮层开着时可能刚好松开左键：拖拽态留着，下一次 `Drag` 会接着改宽，
             // 而用户看到的是一次「点了浮层，栏宽自己变了」。
-            self.pane_drag = None;
+            if let Some(drag) = self.pane_drag.take() {
+                // 手势在这里被强行结束，而宽度可能已经改过：不落盘的话，屏幕上写着新宽度，
+                // 重启后却回到默认 —— 而那次 `Up` 已经被浮层吃掉，不会再进来一次。
+                self.persist_pane_widths(drag.edge);
+            }
             return;
         }
         if self.on_mouse_prelude(&ev) {

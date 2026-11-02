@@ -16,7 +16,13 @@ use super::inbound::Inbound;
 use super::pane_width::{PaneLayout, PaneWidths};
 use super::state::UiState;
 use super::worker::{JobCancel, LaneId, WorkerJob};
-use super::{LaneApp, LaneTemplate, TuiApp};
+use super::{LaneApp, TuiApp};
+
+// 列宽落盘的辅助函数与「装配接线」测试放在同目录的另一文件：本文件贴着 920 行门禁。
+#[path = "test_support_panes.rs"]
+mod panes;
+
+use self::panes::{test_pane_store, test_template};
 
 /// 两栏可见、默认宽度（宽屏用例的基准版面）。
 ///
@@ -126,6 +132,10 @@ pub(super) fn lane_with_tx<'a>(
         persisted: None,
         last_size: (0, 0),
         pane_drag: None,
+        // 装配态与 `assemble` 同构：「已保存的值 = 当前宽度」，没拖过就不会写文件。
+        pane_saved: PaneWidths::DEFAULT,
+        pane_save_warned: false,
+        pane_store: test_pane_store(),
         index: Default::default(),
         resume: None,
         sent_turn: None,
@@ -203,14 +213,7 @@ pub(super) fn test_shell_with_clients<'a>(
         active: 0,
         rx,
         next_lane_id,
-        template: LaneTemplate {
-            overrides: test_prefs(),
-            yes: true,
-            no_keyring: true,
-            bearer: String::new(),
-            ctl: None,
-            tx: shell_tx,
-        },
+        template: test_template(PaneWidths::DEFAULT, shell_tx),
         session_refresh: Default::default(),
         pending: Default::default(),
     };
