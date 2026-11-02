@@ -92,7 +92,7 @@ pub(super) fn render_chat_column(
     if st.editor.open {
         frame.render_widget(Block::default().style(Style::new().bg(pal.bg)), body_area);
         let lines = super::editor_view::view_lines(
-            &st.editor,
+            &mut st.editor,
             st.workspace_path.as_deref(),
             body_area.width as usize,
             body_area.height as usize,
