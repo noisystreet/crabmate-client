@@ -41,6 +41,9 @@ bash "$ROOT/scripts/check-modal-shell.sh"
 echo "[check] xml comments (no double-dash inside XML comments)"
 bash "$ROOT/scripts/check-xml-comments.sh"
 
+echo "[check] changelog entry style ([Unreleased] entries stay short; released sections are frozen)"
+bash "$ROOT/scripts/check-changelog-style.sh"
+
 echo "[check] cargo fmt (all packages in scripts/rust-pkg-dirs.txt)"
 while IFS= read -r dir; do
   echo "[check] cargo fmt $dir"
