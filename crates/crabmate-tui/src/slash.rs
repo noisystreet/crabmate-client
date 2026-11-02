@@ -32,6 +32,10 @@ pub fn is_control_slash(trimmed: &str) -> bool {
             // `/background` 只对全屏 tui 有意义；repl 里也拦住，免得被当成普通消息发给模型。
             | "background"
             | "bg"
+            // 同理：`/editor` / `/chat` 切的是全屏 tui 的主视图，repl 里没有可切的东西。
+            | "editor"
+            | "view"
+            | "chat"
     )
 }
 
@@ -66,6 +70,12 @@ pub async fn handle_control_slash(
         "background" | "bg" => {
             eprintln!(
                 "/background 只在全屏 tui 里可用：`crabmate-tui tui` 后执行 /background <图片路径>（off 关闭）"
+            );
+            Ok(true)
+        }
+        "editor" | "view" | "chat" => {
+            eprintln!(
+                "/editor 与 /chat 只在全屏 tui 里可用：`crabmate-tui tui` 后执行（前者打开只读文件视图，后者切回聊天）"
             );
             Ok(true)
         }

@@ -54,6 +54,16 @@ pub enum Control {
     /// `Err` = 参数写错的用法提示：解析在 [`super::lane_cmd::parse`]，但报错文本要
     /// 写进 transcript，所以只在事件循环里打印。
     Lane(Result<lane_cmd::LaneCommand, String>),
+    /// `/editor [<相对路径>]`：进入只读编辑器视图（issue #418）。
+    ///
+    /// 无参 = 进入视图并沿用上次打开的文件；带参数 = 直接打开该文件。只读：不做保存与编辑，
+    /// 写回涉及变更集与冲突语义，属 Desktop IDE 的范围。
+    Editor(Option<String>),
+    /// `/chat`：从编辑器视图切回聊天（幂等）。
+    ///
+    /// 已经在聊天视图时只写一行说明 —— 命令成功过一次之后再执行它是无害的，
+    /// 报错会让人怀疑自己是不是切错了地方。
+    Chat,
 }
 
 pub fn clear_word(arg: &str) -> bool {
@@ -131,6 +141,11 @@ pub fn parse_control(text: &str) -> Option<Control> {
         // memory 里，改语义比多一个入口更容易出错。
         "ctl" => Some(Control::Ctl),
         "lane" => Some(Control::Lane(lane_cmd::parse(arg_opt.as_deref()))),
+        // `/editor`（别名 `/view`）与 `/chat` 是一对：前者把主区切成只读文件视图，
+        // 后者切回来。做成命令而不是纯快捷键，是因为「回到聊天」必须能被说出来 ——
+        // 编辑器视图占的正是聊天区，快捷键只在提示行里有，命令还在 `/help` 与补全里。
+        "editor" | "view" => Some(Control::Editor(arg_opt)),
+        "chat" => Some(Control::Chat),
         slash::CONV => Some(match arg_opt {
             None => Control::ConvRefresh,
             Some(a) => match a.split_whitespace().next().unwrap_or("") {

@@ -7,13 +7,15 @@ use super::state::{LineKind, UiState};
 
 /// `/help` 输出的每一行。
 pub(super) const LINES: &[&str] = &[
-    "本地命令：/quit（/exit、/q 同义） /help /status /settings /mode /role /perm /model /find /background /workspace /resume /older /fold /conv /copy /ctl /lane",
+    "本地命令：/quit（/exit、/q 同义） /help /status /settings /mode /role /perm /model /find /background /workspace /resume /older /fold /conv /copy /ctl /lane /editor /chat",
     "输入 / 弹出补全菜单（内建命令 + skill；↑↓ 选择 · Tab/Enter 补全 · Esc 关闭）",
     "/copy [assistant|user]（Ctrl+Y 同义）：复制最近一条消息到剪贴板（默认助手回复）",
     "/ctl：查 crabmatectl 控制面实例（本地 unix socket，只读；需 --ctl-socket 或默认 socket 已存在）",
     "/lane：运行期连接管理 —— /lane（同 /ctl 列实例）· /lane attach <name>（连已就绪的实例）· /lane detach [<name>]（只断开本进程这条连接，名字缺省就是当前这条；声明与进程都不动）· /lane cancel <name>（取消它正在跑的回合，不必先切过去）· /lane new <name> [workspace] [profile=<name>]（新增声明并等它就绪；工作区缺省用当前 lane 的；profile 只按名字引用 profiles.toml）· /lane close <name>（把声明标成 enabled=false 并让 ctl 停掉实例，声明与手写配置都留着）· /lane open <name>（撤销 close）；连接条数有上限，超限时按提示 `/lane detach <name>` 摘掉不用的",
     "/mode ask|plan|act · /role <id> · /perm <level>（off 清除；有会话时点选即落盘） · /model <name>",
     "/workspace <路径>（/cd 别名）切换 serve 工作区根；空参只看当前根；/workspace off 恢复 serve 默认根",
+    "/editor [<相对路径>]（/view 同义）把主区切成只读文件视图（右侧目录树按 Enter 也能打开）；PgUp/PgDn 滚一屏、Alt+↑/↓ 滚一行、Ctrl+Home/End 跳首尾；只读，不做保存",
+    "/chat 从编辑器视图切回聊天（Esc 同义，输入框为空时）；切视图不打断正在跑的回合",
     "/settings（或 F6）：设置面板（模型名/API Base/温度/思考模式/API 密钥/Agent role/会话模式；F2 保存）",
     "/find <词> 搜索并高亮 · /find（空参）跳下一处 · /find off 清除",
     "/background <图片路径>：全屏背景（kitty 走真像素，其余终端用每格底色；图会压暗保正文可读；off 关闭）",

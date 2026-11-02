@@ -2,7 +2,7 @@
 //! 主区 transcript / 底栏输入 / 审批浮层。布局纯函数为主，便于单测。
 
 use ratatui::Frame;
-use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
@@ -557,7 +557,15 @@ pub fn draw(
     // 两栏各一条分隔线：画在内容之后，落点是列内本来就空着的留白列，不影响排版。
     // 具体理由与「上下两段贯穿」的口径见 `pane_render::paint_pane_dividers`。
     paint_pane_dividers(frame, &p, &pal);
-    render_chat_column(frame, st, p.chat, prepared, panel.is_none(), spin);
+    super::pane_render::render_chat_column(
+        frame,
+        st,
+        p.chat,
+        prepared,
+        panel.is_none(),
+        spin,
+        &pal,
+    );
 
     // 底栏**只在窄屏存在**：宽屏的状态已进右栏底部，那一行还给正文。
     if let Some(status_area) = p.status {
@@ -591,30 +599,24 @@ fn render_status_stack(
     frame.render_widget(Paragraph::new(lines), inner);
 }
 
-/// 聊天列：上为主区消息（滚动 transcript），底部为 composer 输入区。
-fn render_chat_column(
+/// 主区（transcript + 审批浮层 + `/` 补全菜单）的绘制入口，供 `pane_render` 调用。
+///
+/// 三者共用同一矩形且顺序有约束（浮层压 transcript、菜单让位给浮层），所以留在一起，
+/// 不让调用方各画各的。
+pub(super) fn render_body_and_overlays(
     frame: &mut Frame,
     st: &mut UiState,
-    area: Rect,
+    body_area: Rect,
     prepared: &[BodyRow],
-    cursor_allowed: bool,
     spin: Option<usize>,
 ) {
-    // composer 含上下边框；至少给聊天区留 1 行，极小终端下不把 transcript 挤没。
-    let rows = composer_outer_rows(st)
-        .min(area.height.saturating_sub(1))
-        .max(1);
-    let parts = Layout::vertical([Constraint::Min(1), Constraint::Length(rows)]).split(area);
-    let body_area = parts[0];
     render_body(frame, st, body_area, prepared, spin);
+    // 浮层压 transcript，`/` 菜单让位给浮层：两者互斥，写成一支而不是两个 if。
     if st.approval.is_some() {
         render_approval_overlay(frame, st, body_area);
-    }
-    // `/` 补全菜单贴在 composer 正上方；审批浮层（回合被阻塞）优先，此时不画。
-    if st.approval.is_none() {
+    } else {
         super::slash_menu::render_slash_menu(frame, st, body_area);
     }
-    render_input(frame, st, parts[1], cursor_allowed);
 }
 
 /// composer 内容行数：随输入行数增长，最多 `MAX_COMPOSER_ROWS`（单行恒为 1）。
@@ -623,7 +625,7 @@ fn composer_rows(st: &UiState) -> u16 {
 }
 
 /// composer 占用总行数：内容行 + 上下边框。
-fn composer_outer_rows(st: &UiState) -> u16 {
+pub(super) fn composer_outer_rows(st: &UiState) -> u16 {
     composer_rows(st).saturating_add(2)
 }
 
@@ -875,7 +877,7 @@ fn composer_cursor_pos(inner: Rect, shown_cursor: usize, disp_row: usize) -> (u1
     (col, row)
 }
 
-fn render_input(frame: &mut Frame, st: &UiState, area: Rect, cursor_allowed: bool) {
+pub(super) fn render_input(frame: &mut Frame, st: &UiState, area: Rect, cursor_allowed: bool) {
     if area.width <= 1 || area.height == 0 {
         return;
     }

@@ -21,6 +21,7 @@ mod clipboard;
 pub(crate) mod controls;
 mod ctl;
 mod drafts;
+mod editor_view;
 mod event_loop;
 mod exit_flush;
 mod help;
@@ -75,6 +76,7 @@ mod worker_jobs;
 mod workspace_cmd;
 mod workspace_keys;
 mod workspace_tree;
+mod ws_event;
 mod ws_sidebar;
 mod ws_truncate;
 
@@ -479,6 +481,8 @@ impl LaneApp<'_> {
             // 用法提示写进 transcript：命令在输入框里已经消失，不留痕等于什么都没发生。
             Control::Lane(Err(usage)) => self.st.push_line(LineKind::System, &usage),
             Control::Workspace(arg) => self.workspace_command(arg),
+            Control::Editor(arg) => self.editor_command(arg),
+            Control::Chat => self.editor_close(),
             Control::Resume => self.resume_turn(),
             Control::Older => history::load_older(self),
             Control::Model(arg) => {
@@ -792,26 +796,10 @@ impl LaneApp<'_> {
             } => self.on_permission_written(&level, outcome, generation),
             UiEvent::WorkspacePath(path) => self.st.workspace_path = path,
             UiEvent::Workspace { result, keep } => self.on_workspace_root(result, keep),
-            UiEvent::WorkspaceDir {
-                rel,
-                generation,
-                result,
-            } => {
-                // 代数不符 = 中途切过工作区：这条结果属于旧工作区，丢弃。否则会把 A 的
-                // 目录内容写进 B 的缓存，用户随后在 B 展开同名目录会看到 A 的内容。
-                if generation == self.st.ws_generation {
-                    match result {
-                        Ok(data) => self.st.ws_dir_ok(&rel, data),
-                        Err(e) => {
-                            if self.st.ws_dir_failed(&rel) {
-                                self.st.push_line(
-                                    LineKind::System,
-                                    &format!("展开 {rel} 失败：{e}（← 可重试）"),
-                                );
-                            }
-                        }
-                    }
-                }
+            // 目录 / 文件两类拉取结果共用一道 `ws_generation` 门控，实现见 `ws_event`：
+            // 代数不符就丢弃（中途切过工作区，旧结果属于旧工作区）。
+            ev @ (UiEvent::WorkspaceDir { .. } | UiEvent::WorkspaceFile { .. }) => {
+                self.on_ws_event(ev)
             }
             UiEvent::WsProjects(result) => self.st.ws_pick_projects(result),
             UiEvent::WsProjectSwitch(result) => self.on_ws_project_switch(result),

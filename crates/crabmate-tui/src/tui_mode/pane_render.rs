@@ -4,13 +4,15 @@
 //! 而这两件事只依赖「版面 + 调色板」，与 transcript / composer 的排版无关。
 
 use ratatui::Frame;
-use ratatui::layout::Rect;
+use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::Style;
-use ratatui::widgets::{Block, Borders};
+use ratatui::widgets::{Block, Borders, Paragraph};
 
 use super::layout::Panes;
 use super::palette::Palette;
 use super::pane_width::PaneLayout;
+use super::render::BodyRow;
+use super::state::UiState;
 
 /// 计算 build_body_rows 使用的聊天区宽度（与 `draw` 里传给 `render_body` 的区域一致：
 /// 聊天列内左右各留 1 列空隙，与侧栏 / composer 边框的对称留白对齐）。
@@ -63,4 +65,42 @@ fn paint_edge(frame: &mut Frame, area: Rect, borders: Borders, pal: &Palette) {
         .borders(borders)
         .border_style(Style::new().fg(pal.border));
     frame.render_widget(block, area);
+}
+
+/// 聊天列：上为主区（transcript 或只读文件视图），底部为 composer 输入区。
+///
+/// 从 `render.rs` 搬来（issue #418）：编辑器视图让这里多出一条分支，而那个文件贴着 920 行
+/// 门禁。搬的是**布局**，主区内部与 composer 的画法仍在 `render.rs` —— 浮层与补全菜单的
+/// 绘制顺序在那边，拆开两边都会重新长出各自的一份。
+pub(super) fn render_chat_column(
+    frame: &mut Frame,
+    st: &mut UiState,
+    area: Rect,
+    prepared: &[BodyRow],
+    cursor_allowed: bool,
+    spin: Option<usize>,
+    pal: &Palette,
+) {
+    // composer 含上下边框；至少给聊天区留 1 行，极小终端下不把 transcript 挤没。
+    let rows = super::render::composer_outer_rows(st)
+        .min(area.height.saturating_sub(1))
+        .max(1);
+    let parts = Layout::vertical([Constraint::Min(1), Constraint::Length(rows)]).split(area);
+    let body_area = parts[0];
+    // 编辑器视图只替换主区：composer 留着，`/chat` 与 `/editor <另一个文件>` 才能直接敲，
+    // 该 lane 的在途回合也照常可见（切视图不打断回合）。
+    if st.editor.open {
+        frame.render_widget(Block::default().style(Style::new().bg(pal.bg)), body_area);
+        let lines = super::editor_view::view_lines(
+            &st.editor,
+            st.workspace_path.as_deref(),
+            body_area.width as usize,
+            body_area.height as usize,
+            pal,
+        );
+        frame.render_widget(Paragraph::new(lines), body_area);
+    } else {
+        super::render::render_body_and_overlays(frame, st, body_area, prepared, spin);
+    }
+    super::render::render_input(frame, st, parts[1], cursor_allowed);
 }

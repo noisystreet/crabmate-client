@@ -6,7 +6,7 @@
 use super::LaneApp;
 use super::state::LineKind;
 use super::worker::{LaneTx, UiEvent, WorkerJob};
-use crate::serve::fetch_workspace_dir;
+use crate::serve::{fetch_workspace_dir, fetch_workspace_file};
 
 impl LaneApp<'_> {
     /// 拉取子目录列表。
@@ -51,6 +51,34 @@ impl LaneApp<'_> {
             self.st.ws_dir_failed(&rel);
             return false;
         }
+        true
+    }
+
+    /// 拉取文件内容（只读 GET，与目录展开同一条直发路径）。
+    ///
+    /// 返回 `false` = 没能发起：当前不在 tokio runtime 里（只有单测会出现，生产路径
+    /// `run_tui` 恒在 runtime 内）。此时视图状态保持调用方设的 `loading`，测试可以据此
+    /// 断言「发起了、还没回包」，而不是看到一个假成功。
+    ///
+    /// 回包带发起时的 `generation`：中途切了工作区就把旧内容丢掉（与目录缓存同一口径，
+    /// 否则会把 A 工作区的文件画在 B 的标题下）。
+    pub(super) fn fetch_ws_file(&mut self, rel: String) -> bool {
+        let generation = self.st.ws_generation;
+        let Ok(handle) = tokio::runtime::Handle::try_current() else {
+            return false;
+        };
+        let client = self.client.clone().into_owned();
+        let out = LaneTx::new(self.id, self.tx.clone());
+        handle.spawn(async move {
+            let result = fetch_workspace_file(&client, &rel)
+                .await
+                .map_err(|e| e.to_string());
+            let _ = out.send(UiEvent::WorkspaceFile {
+                rel,
+                generation,
+                result,
+            });
+        });
         true
     }
 }

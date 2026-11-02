@@ -19,6 +19,12 @@ impl LaneApp<'_> {
     /// （`Ctrl+C` / `Ctrl+D` / `Ctrl+Z`）由事件循环层处理 —— 它们落到下面的 `_ => {}`
     /// 即可，因此不必为「吞掉它们」单开一个 or-pattern 臂。
     pub(super) fn on_input_key(&mut self, key: KeyEvent) {
+        // 编辑器视图先拿滚动键与 Esc：它们与 composer 的 PgUp / 方向键语义冲突，
+        // 不拦在最前面就会「滚了半页 transcript、文件纹丝不动」。
+        if self.st.editor.open && self.on_editor_key(&key) {
+            self.st.slash_after_input();
+            return;
+        }
         match key.code {
             KeyCode::Enter if is_alt_enter(&key) => self.st.insert_newline(),
             KeyCode::Enter => self.on_submit(),
@@ -67,6 +73,49 @@ impl LaneApp<'_> {
         self.st.scroll_page(true);
         if was_at_top {
             history::load_older_on_top(self);
+        }
+    }
+
+    /// 编辑器视图的按键（返回 `true` = 已消费）。
+    ///
+    /// 只接管与「滚 transcript / 移动光标」冲突的那些：`PgUp` / `PgDn` 滚一屏、
+    /// `Alt+↑/↓` 滚一行、`Ctrl+Home` / `Ctrl+End` 跳首尾、输入为空时 `Esc` 回聊天。
+    ///
+    /// 其余字符照常进 composer —— `/chat` 与 `/editor <另一个文件>` 必须还能直接敲，
+    /// 否则「切回来」就只能靠记住快捷键。`Home` / `End` 不加修饰时仍归输入框（行首 / 行尾），
+    /// 因为编辑器里最常用的粗定位是 PgUp/PgDn，而不是这两个键。
+    fn on_editor_key(&mut self, key: &KeyEvent) -> bool {
+        let page = self.st.page_rows.max(1) as isize;
+        match key.code {
+            KeyCode::Esc if self.st.current_input().is_empty() => {
+                self.editor_close();
+                true
+            }
+            KeyCode::PageUp => {
+                self.st.editor.scroll_by(-page);
+                true
+            }
+            KeyCode::PageDown => {
+                self.st.editor.scroll_by(page);
+                true
+            }
+            KeyCode::Up if key.modifiers.contains(KeyModifiers::ALT) => {
+                self.st.editor.scroll_by(-1);
+                true
+            }
+            KeyCode::Down if key.modifiers.contains(KeyModifiers::ALT) => {
+                self.st.editor.scroll_by(1);
+                true
+            }
+            KeyCode::Home if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.st.editor.scroll_to_top();
+                true
+            }
+            KeyCode::End if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.st.editor.scroll_to_bottom();
+                true
+            }
+            _ => false,
         }
     }
 }
