@@ -13,6 +13,7 @@ use crate::serve::{ApprovalDecision, CommandApprovalData, SessionListRow, Worksp
 
 use super::approve::ApprovalChoice;
 use super::palette::Palette;
+use super::pane_width::PaneWidths;
 use super::serve_defaults::ServeDefaults;
 use super::slash_menu::{SkillsCache, SkillsPayload, SlashItem, filtered_items, slash_prefix};
 use super::workspace_tree::{WsPickState, WsRow};
@@ -338,6 +339,8 @@ pub struct UiState {
     pub active_session_id: Option<String>,
     /// 当前是否宽到显示左栏（由渲染层每帧刷新）。
     pub sidebar_visible: bool,
+    /// 左右两栏的**列宽**（用户选择；要夹取后的值请走 `pane_layout()`，见 `pane_width` 与 issue #407）。
+    pub pane: PaneWidths,
     /// 当前工作区路径（`GET /workspace`；右栏标题显示，未获取为 None）。
     pub workspace_path: Option<String>,
     /// 工作区目录树：根列表是否已成功加载（false 时渲染占位）。

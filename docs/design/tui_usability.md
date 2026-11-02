@@ -14,7 +14,7 @@
 
 ### 1.2 TUI 现状与缺口对照
 
-`crabmate-tui` 已具备：全屏 transcript + 状态栏、左栏会话 use/new/refresh（**并有鼠标：单击会话行即选中并切换**，滚轮刻意不碰列表）、右栏工作区目录树 + 项目池、审批浮层、thinking 折叠、工具行摘要、会话内 `/find`、多行输入（Alt+Enter 换行；粘贴一段多行文本时整段落进输入框，不会被当成多次回车提交）、设置面板（模型/会话两分区，W1+W2 落地）、repl `/resume` 断线续传。与 Desktop 对照，下列**用户高频操作缺口**是本规划的对象：
+`crabmate-tui` 已具备：全屏 transcript + 状态栏、左栏会话 use/new/refresh（**并有鼠标：单击会话行即选中并切换**，滚轮刻意不碰列表）、右栏工作区目录树 + 项目池、审批浮层、thinking 折叠、工具行摘要、会话内 `/find`、多行输入（Alt+Enter 换行；粘贴一段多行文本时整段落进输入框，不会被当成多次回车提交）、设置面板（模型/会话两分区，W1+W2 落地）、repl `/resume` 断线续传、**两侧栏列宽参数化 + 一列分隔线**（#407 P0，见下方补记）。与 Desktop 对照，下列**用户高频操作缺口**是本规划的对象：
 
 | # | 缺口（TUI 现状） | Desktop 参照 | 影响 |
 |---|---|---|---|
@@ -35,6 +35,8 @@
 > **2026-10-25 代码核对**：G1–G10 已逐条对着代码验过（`resume.rs` / `drafts.rs` / `clipboard.rs` / `sidebar_keys.rs` / `history.rs` / `overlay.rs` / `ws_sidebar.rs` / `status.rs`），表内状态即当时事实。G10 为本次核对新发现的缺口（顶栏删除后的遗留债）；G5 的「导出」与 G7 的 retry/regen/branch 仍依赖 serve 端点，不属可独立落地项。
 
 > **2026-10-31 补记**：新增缺口 G12「一轮的执行过程把 transcript 撑长」已落地（issue #369）——一轮的 `Thinking` / 工具行在回合结束时折成一条 `Process` 摘要行，`/older` 回放与滚动回看同样折叠。折叠单元是「**连续过程行段**」而不是回合区间（回放没有回合边界，区间会被前插错位）；`Assistant` / `System` 行永不折叠。**展开是可逆的**：摘要行始终保留，`/fold [n|all|close]` 切换它的开合（前缀 `▸ ` 收起 / `▾ ` 已展开；无参=最近一条，`n` 从底部数，`all` 全展开，`close` 全折回），`sticky` 随开合双向设置，所以折回的段下一轮仍会被自动折叠。**也能用光标挑**（`Ctrl+G`，任何焦点都能进）：摘要之间 `↑/↓`、`Enter` 开合、`Esc` 退出，左键点摘要同义（并把焦点带回输入框，否则接着按 `↑↓` 走的是侧栏）；空格与 `Alt+Enter` **不**归导航（前者是可打印字符、后者是换行）。进导航 = 接管方向键与视口：`/find` 锚点与 `/` 补全菜单都必须让位，否则就是「↑↓ 在动、画面钉在命中行」；`/fold <n>` 在导航开着时把光标带到它刚切过的那条。`/older` 前插与回合结束插入摘要行时，光标按插入量重映射（与视口锚点同一份 `remap_after_fold`），否则「按了 Enter 之后 ↑↓ 好像卡住」就是它指到了别的段。落点见 `crates/crabmate-tui/src/tui_mode/state_fold.rs` 与 `CHANGELOG.md` 的 `[Unreleased]` 条目。
+
+> **2026-11-02 补记**：新增缺口 G13「左右两栏列宽写死在编译期」——`pane_width.rs` 的 `SIDEBAR_WIDTH = 26` / `WORKSPACE_PANE_WIDTH = 34`：窄终端下两栏挤掉正文，宽终端下两栏又白占几十列，而两栏**没有边框**（边界只是聊天列的留白，用户看不出边界在哪）。Desktop 的侧栏可拖拽（`frontend/src/app_prefs.rs`：`side_width` 默认 280px、区间 200..560）。**P0 已落地**（issue #407）：`PaneWidths { left, right }` + `MIN/MAX` 边界 + **幂等**的 `clamped(terminal_width)`（聊天列 `MIN_CHAT_COLS = 40` 保底；超预算时先压右栏、再压左栏，因为右栏挤窄只是把 `ctx` 行截断，左栏挤窄就读不出会话标题了）；`layout::panes_with_lanes` 改收 `PaneLayout { visible, widths }` 并在函数内再夹一次（幂等），于是它仍是**全部矩形**（两栏 / lane 区 / 状态栈 / 聊天列）的唯一来源 —— 渲染与鼠标命中不可能出现「画的是夹取后的、点的是夹取前的」。`chat_body_width` 与 `LaneApp::status_stack_rows` 同口径读**右栏内宽**：状态栈的行数取决于内宽，两处不同源的症状是「点状态栈点到别的段」，而不是画面上的错位。两栏各画一列 `Palette::border` 分隔线，并贯穿左栏下半的 lane 区与右栏底部的状态栈（上下两段不同列会变成两条半截线）。默认值仍是 26 / 34，所以 P0 的可见变化**只有那条竖线**。**P0.5 已落地**（issue #407）：按住任一栏的分隔线拖动即可改宽。要点：`worker::is_actionable_mouse` 放行左键 `Drag` / `Up`（悬停 `Moved` 仍然丢弃 —— 1002 模式下只有按住键才产生 `Drag`）、`shell::lane_at_click` 补 `MouseEventKind` 判定（否则拖动经过左栏下半会当场切 lane）、分隔线命中**抢在** `click_sessions` / `click_workspace` 之前（否则一次拖宽会顺带把会话切走）、同一列重复的拖拽事件不写状态（事件循环每条消息都整帧重绘，宽度没变时 transcript 缓存仍命中）。换算（命中哪条线、指针第几列 → 多宽）是 `pane_drag.rs` 的纯函数，事件接线与入口门禁在 `mouse_drag.rs`（`mouse.rs` 也已贴着 920 行门禁）；宽度**按指针列重算**而非累加增量 —— 累加会让「拖到边界被夹住、再拖回来」时指针与分隔线错位。拖拽态放 `LaneApp` 而不是 `UiState`：它是一次手势的中间态，进 `st` 会让「同尺寸同内容」的两帧不再相等；审批 / 设置浮层接管鼠标时当场清掉它。**未做**（按 #407 的分期，不是遗漏）：P1 `/panes left <n> | right <n> | reset`（`CM_TUI_MOUSE=off` 时的等价通道）与双击分隔线复位；P2 落盘 —— **不要**复用 Desktop 的 `user-data/prefs.side_width`：那是像素值，TUI 是字符列，同一个键会让两端互相覆盖。另：`render.rs` / `state.rs` 都贴着 920 行/文件的 `fn-nloc-ratchet` 门禁，P0 的渲染侧改动因此拆到新模块 `pane_render.rs`，`pane_layout()` 取值器放在 `pane_width.rs` 的 `impl UiState` 里。
 
 ---
 

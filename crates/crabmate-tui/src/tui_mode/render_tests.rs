@@ -1,7 +1,9 @@
 use super::*;
 // 状态行自身（分段取舍 / 右缘运行态）的断言已归 `status.rs::tests`；这里只留渲染层用得着的
 // 帧表——折叠思考行与进行中工具行仍共用它做「换字形不改宽」的校验。
+use super::super::pane_width::{PaneLayout, PaneWidths, SIDEBAR_WIDTH, WORKSPACE_PANE_WIDTH};
 use super::super::status::SPINNER_FRAMES;
+use super::super::test_support::{narrow_layout, visible_layout};
 use crate::serve::SessionListRow;
 
 #[test]
@@ -77,11 +79,27 @@ fn search_marks_and_anchors_rows() {
 fn chat_body_width_matches_layout() {
     // 聊天列内左右各留 1 列空隙（与侧栏 / composer 的对称留白一致），
     // 故正文预算恒为「列宽 − 2」，不能只减左侧那 1 列。
-    assert_eq!(chat_body_width(false, 100), 98);
+    assert_eq!(chat_body_width(narrow_layout(), 100), 98);
     assert_eq!(
-        chat_body_width(true, 100),
+        chat_body_width(visible_layout(), 100),
         100 - (SIDEBAR_WIDTH + WORKSPACE_PANE_WIDTH) as usize - 2
     );
+}
+
+/// 用户把两栏调宽后，正文预算跟着收窄；终端不够宽时按**夹取后**的宽度算
+/// （多算一列，折行就会比绘制区宽，行尾被右缘裁掉）。
+#[test]
+fn chat_body_width_follows_the_clamped_pane_widths() {
+    let wide = PaneLayout {
+        visible: true,
+        widths: PaneWidths {
+            left: 40,
+            right: 50,
+        },
+    };
+    assert_eq!(chat_body_width(wide, 200), 200 - 90 - 2);
+    // 100 列放不下 90 ⇒ 夹取后两栏只占 60（预算 100-40），正文仍守住 40 列。
+    assert_eq!(chat_body_width(wide, 100), 40 - 2);
 }
 
 /// 正文绘制区必须与 `chat_body_width` 同步收窄：两处都按「列宽 − 1」算会贴到列右缘，
@@ -100,7 +118,7 @@ fn rendered_chat_area_keeps_right_gutter() {
     st.push_line(LineKind::Assistant, &"中".repeat(38));
     st.push_line(LineKind::Tool, &"工具输出abcd ".repeat(12));
     st.push_line(LineKind::User, &"中文内容abc ".repeat(20));
-    let rows = build_body_rows(&st, chat_body_width(false, TERMINAL_W));
+    let rows = build_body_rows(&st, chat_body_width(narrow_layout(), TERMINAL_W));
     let info = StatusInfo {
         api_base: "http://x".into(),
         context: "—".to_string(),
@@ -681,7 +699,7 @@ fn rendered_chat_area_keeps_all_characters() {
     st.set_palette(super::Palette::default());
     st.sidebar_visible = false;
     st.push_line(LineKind::Assistant, &text);
-    let rows = build_body_rows(&st, chat_body_width(false, 80));
+    let rows = build_body_rows(&st, chat_body_width(narrow_layout(), 80));
     let info = StatusInfo {
         api_base: "http://x".into(),
         context: "—".to_string(),
@@ -773,7 +791,7 @@ fn empty_composer_has_no_placeholder_by_default() {
     let mut st = UiState::new();
     st.set_palette(Palette::default());
     st.sidebar_visible = false;
-    let rows = build_body_rows(&st, chat_body_width(false, 80));
+    let rows = build_body_rows(&st, chat_body_width(narrow_layout(), 80));
     let info = StatusInfo {
         api_base: "http://x".into(),
         context: "—".to_string(),
@@ -813,7 +831,7 @@ fn render_body_writes_back_the_window_for_the_mouse() {
     st.sidebar_visible = false;
     st.push_line(LineKind::User, "第一行");
     st.push_line(LineKind::Assistant, "第二行");
-    let rows = build_body_rows(&st, chat_body_width(false, W));
+    let rows = build_body_rows(&st, chat_body_width(narrow_layout(), W));
     let info = StatusInfo {
         api_base: "http://x".into(),
         context: "—".to_string(),

@@ -11,6 +11,7 @@
 
 use super::super::background::BgCells;
 use super::*;
+use crate::tui_mode::test_support::narrow_layout;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
@@ -41,7 +42,7 @@ fn status_info() -> StatusInfo {
 
 /// 渲染一屏并取回缓冲区（无侧栏：聊天列即整屏，断言不必再算侧栏边界）。
 fn render_screen(st: &mut UiState) -> Buffer {
-    let rows = build_body_rows(st, chat_body_width(false, W));
+    let rows = build_body_rows(st, chat_body_width(narrow_layout(), W));
     let info = status_info();
     let mut terminal = Terminal::new(TestBackend::new(W, H)).expect("terminal");
     terminal

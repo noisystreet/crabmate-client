@@ -2,10 +2,13 @@
 //!
 //! 抽成纯函数是为了让**渲染与鼠标点击共用同一套矩形**：两边各算一遍迟早漂移，
 //! 而漂移的症状（点到隔壁列、点错行）比渲染错位更难察觉。
+//!
+//! 两栏宽度来自 [`PaneLayout`]（用户选择 + 可见性），并在本文件里按终端宽度夹取一次 ——
+//! 这里是「所有矩形」的唯一来源，夹在这里就不可能出现「画的是夹取后的、点的是夹取前的」。
 
 use ratatui::layout::{Constraint, Layout, Rect};
 
-use super::render::{SIDEBAR_WIDTH, WORKSPACE_PANE_WIDTH};
+use super::pane_width::PaneLayout;
 
 /// lane 列表标题（`连接 [n]`）占的行数。
 const LANE_TITLE_ROWS: u16 = 1;
@@ -66,13 +69,13 @@ pub(super) fn lane_index_at(area_height: u16, lanes_len: usize, row_in: u16) -> 
     (idx < lane_shown_len(avail, lanes_len)).then_some(idx)
 }
 
-/// 按终端区域、侧栏可见性与状态栈高度切分。
+/// 按终端区域、两栏版面与状态栈高度切分。
 ///
 /// `stack_rows` 由调用方算（见 `status_stack::stack_rows`），这里只负责把它压到
 /// 「树至少留 1 行」的范围内 —— 这条不变量放这里而不是让两边各算，是因为漂移的
 /// 表现是「树被挤没」，很难归因。
-pub(super) fn panes(area: Rect, sidebar_visible: bool, stack_rows: u16) -> Panes {
-    panes_with_lanes(area, sidebar_visible, stack_rows, 0)
+pub(super) fn panes(area: Rect, layout: PaneLayout, stack_rows: u16) -> Panes {
+    panes_with_lanes(area, layout, stack_rows, 0)
 }
 
 /// 带 lane 列表的分区：左栏再切成「会话列表（上）/ lane 列表（下）」。
@@ -82,11 +85,16 @@ pub(super) fn panes(area: Rect, sidebar_visible: bool, stack_rows: u16) -> Panes
 /// 有没有别的连接」在界面上完全不可见。
 pub(super) fn panes_with_lanes(
     area: Rect,
-    sidebar_visible: bool,
+    layout: PaneLayout,
     stack_rows: u16,
     lanes_len: usize,
 ) -> Panes {
-    if !sidebar_visible {
+    // 宽度在这里夹一次：终端缩小、或用户把两栏拖宽之后再缩小窗口，都会让「用户的选择」
+    // 暂时越界。本函数是**全部**矩形（两栏、lane 区、状态栈、聊天列）的唯一来源，
+    // 夹在这里就不可能出现「画的是夹取后的、点的是夹取前的」。`clamped` 幂等，
+    // 调用方（`draw` 要先知道右栏内宽才能算状态栈行数）先夹过也没关系。
+    let layout = layout.clamped(area.width);
+    if !layout.visible {
         let rows = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(area);
         return Panes {
             status: Some(rows[1]),
@@ -98,9 +106,9 @@ pub(super) fn panes_with_lanes(
         };
     }
     let cols = Layout::horizontal([
-        Constraint::Length(SIDEBAR_WIDTH),
+        Constraint::Length(layout.widths.left),
         Constraint::Min(0),
-        Constraint::Length(WORKSPACE_PANE_WIDTH),
+        Constraint::Length(layout.widths.right),
     ])
     .split(area);
     let stack = stack_rows.min(cols[2].height.saturating_sub(1));
@@ -148,11 +156,30 @@ pub(super) fn lane_hit(p: &Panes, lanes_len: usize, column: u16, row: u16) -> Op
 
 #[cfg(test)]
 mod tests {
+    use super::super::pane_width::{
+        MIN_CHAT_COLS, MIN_WORKSPACE_COLS, PaneWidths, SIDEBAR_WIDTH, WORKSPACE_PANE_WIDTH,
+    };
     use super::*;
+
+    /// 两栏可见、默认宽度（宽屏用例的基准版面）。
+    fn visible_default() -> PaneLayout {
+        PaneLayout {
+            visible: true,
+            widths: PaneWidths::DEFAULT,
+        }
+    }
+
+    /// 窄屏：两栏隐藏。
+    fn hidden() -> PaneLayout {
+        PaneLayout {
+            visible: false,
+            widths: PaneWidths::DEFAULT,
+        }
+    }
 
     /// 宽屏：200 列 × 40 行，状态栈 5 行。
     fn wide() -> Panes {
-        panes(Rect::new(0, 0, 200, 40), true, 5)
+        panes(Rect::new(0, 0, 200, 40), visible_default(), 5)
     }
 
     #[test]
@@ -179,9 +206,60 @@ mod tests {
         assert_eq!(right.y + right.height, stack.y, "树与状态栈上下相接");
     }
 
+    /// 用户把左栏调宽：三列按新宽度重排，聊天列吸收差额（`Min(0)` 那一段）。
+    #[test]
+    fn wider_left_pane_takes_columns_from_the_chat_column() {
+        let layout = PaneLayout {
+            visible: true,
+            widths: PaneWidths {
+                left: 40,
+                right: WORKSPACE_PANE_WIDTH,
+            },
+        };
+        let p = panes(Rect::new(0, 0, 200, 40), layout, 5);
+        let left = p.left.expect("宽屏有左栏");
+        assert_eq!(left.width, 40);
+        assert_eq!(p.chat.x, 40, "聊天列紧接左栏");
+        assert_eq!(p.chat.width, 200 - 40 - WORKSPACE_PANE_WIDTH);
+        assert_eq!(p.right.expect("宽屏有右栏").x, 200 - WORKSPACE_PANE_WIDTH);
+    }
+
+    /// 终端缩小到「两栏的请求宽度放不下」：由本函数夹取，聊天列仍守住保底 ——
+    /// 这正是「夹取只写在一处」的意义，调用方完全不必知道终端有多宽。
+    #[test]
+    fn layout_clamps_widths_against_the_terminal_and_keeps_the_chat_column() {
+        let layout = PaneLayout {
+            visible: true,
+            widths: PaneWidths {
+                left: 60,
+                right: 80,
+            },
+        };
+        let p = panes(Rect::new(0, 0, 130, 40), layout, 5);
+        let left = p.left.expect("宽屏有左栏");
+        let right = p.right.expect("宽屏有右栏");
+        assert!(
+            right.width >= MIN_WORKSPACE_COLS,
+            "右栏不低于自身下限：{}",
+            right.width
+        );
+        // 130 - 40(聊天保底) - 60(左栏) = 30：右栏让到刚好够用，左栏一列不动。
+        assert_eq!(
+            right.width,
+            130 - MIN_CHAT_COLS - left.width,
+            "预算不够时由右栏先让步"
+        );
+        assert_eq!(p.chat.width, MIN_CHAT_COLS, "正文正好保住保底");
+        assert_eq!(
+            left.width + p.chat.width + right.width,
+            130,
+            "三列拼满且不重叠"
+        );
+    }
+
     #[test]
     fn narrow_layout_keeps_the_bottom_bar() {
-        let p = panes(Rect::new(0, 0, 80, 24), false, 5);
+        let p = panes(Rect::new(0, 0, 80, 24), hidden(), 5);
         assert!(p.left.is_none());
         assert!(p.right.is_none());
         assert!(p.right_status.is_none(), "没有右栏就没有状态栈");
@@ -195,14 +273,14 @@ mod tests {
     #[test]
     fn stack_rows_are_clamped_so_the_tree_keeps_a_row() {
         // 要求 40 行状态栈、终端只有 6 行 → 树至少留 1 行。
-        let p = panes(Rect::new(0, 0, 200, 6), true, 40);
+        let p = panes(Rect::new(0, 0, 200, 6), visible_default(), 40);
         assert_eq!(p.right.expect("宽屏有右栏").height, 1, "树至少留一行");
         assert_eq!(p.right_status.expect("仍有状态栈").height, 5);
     }
 
     #[test]
     fn zero_stack_rows_leaves_the_tree_full_height() {
-        let p = panes(Rect::new(0, 0, 200, 40), true, 0);
+        let p = panes(Rect::new(0, 0, 200, 40), visible_default(), 0);
         assert!(p.right_status.is_none());
         assert_eq!(p.right.expect("宽屏有右栏").height, 40);
     }
@@ -232,13 +310,13 @@ mod tests {
 
     #[test]
     fn lanes_split_the_sidebar_at_the_half_line() {
-        let p = panes_with_lanes(Rect::new(0, 0, 200, 40), true, 5, 1);
+        let p = panes_with_lanes(Rect::new(0, 0, 200, 40), visible_default(), 5, 1);
         let lanes = p.left_lanes.expect("单 lane 也要有 lane 区");
         assert_eq!(lanes.height, 20);
         assert_eq!(p.left.unwrap().height, 20, "会话列表让出另一半");
 
         // 多 lane 也是同一块高度，只有里面的色块变矮。
-        let p = panes_with_lanes(Rect::new(0, 0, 200, 40), true, 5, 12);
+        let p = panes_with_lanes(Rect::new(0, 0, 200, 40), visible_default(), 5, 12);
         assert_eq!(p.left_lanes.expect("lane 区仍在").height, 20);
         assert_eq!(p.left.unwrap().height, 20);
     }
@@ -246,7 +324,7 @@ mod tests {
     /// 没有 lane（`lanes_len == 0`）：左栏不下切，整块留给会话列表。
     #[test]
     fn zero_lanes_keep_the_sidebar_whole() {
-        let p = panes_with_lanes(Rect::new(0, 0, 200, 40), true, 5, 0);
+        let p = panes_with_lanes(Rect::new(0, 0, 200, 40), visible_default(), 5, 0);
         assert!(p.left_lanes.is_none(), "没有 lane 就不该凭空多出一块");
         assert_eq!(p.left.unwrap().height, 40);
     }
@@ -254,7 +332,7 @@ mod tests {
     /// 左栏隐藏时 lane 区也必须是 `None`：否则窄屏会画到不存在的列上。
     #[test]
     fn hidden_sidebar_has_no_lane_pane() {
-        let p = panes_with_lanes(Rect::new(0, 0, 80, 24), false, 5, 4);
+        let p = panes_with_lanes(Rect::new(0, 0, 80, 24), hidden(), 5, 4);
         assert!(p.left.is_none());
         assert!(p.left_lanes.is_none());
     }

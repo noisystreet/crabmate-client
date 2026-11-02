@@ -29,7 +29,10 @@ mod lane_list;
 mod layout;
 mod md;
 mod mouse;
+mod mouse_drag;
 mod palette;
+mod pane_drag;
+mod pane_render;
 mod pane_width;
 mod paste;
 mod pending_lane;
@@ -148,6 +151,11 @@ struct LaneApp<'a> {
     persisted: Option<PersistedSettings>,
     /// 上一帧的终端尺寸：鼠标命中检测要按同一套分区重算矩形。
     last_size: (u16, u16),
+    /// 正在拖拽的分隔线（`None` = 没在拖；按下开始、松开结束，见 `pane_drag`）。
+    ///
+    /// 放 `LaneApp` 而不是 `UiState`：它是一次指针手势的中间态，不是可渲染的界面状态 ——
+    /// 放 `st` 里会让「同尺寸同内容的两帧」不再相等，反而更难判「要不要重绘」。
+    pane_drag: Option<pane_drag::PaneDrag>,
     /// `/conv new` 的会话索引状态（新建 / 在途 / 待起名 / 待绑定，见 `session_index`）。
     index: session_index::UiIndexState,
     /// 可 `/resume` 的断点（serve 侧 job 可能仍在跑；保留规则见 `resume` 模块）。
@@ -255,7 +263,7 @@ impl<'a> TuiApp<'a> {
 impl LaneApp<'_> {
     /// 先把 body 缓存推到最新：流式期只重建被改动的那一行，其余行复用。
     fn prepare_body(&mut self, terminal_width: u16) {
-        let width = render::chat_body_width(self.st.sidebar_visible, terminal_width);
+        let width = render::chat_body_width(self.st.pane_layout(), terminal_width);
         self.body.ensure(&self.st, width);
     }
 }
@@ -809,9 +817,12 @@ impl LaneApp<'_> {
     /// `draw` 是自由函数、`on_mouse` 是方法，两处各算一遍的话，行数一漂就是
     /// 「点击右栏点到了别的行」或「状态栈底部空一行」—— 都属于难归因的症状。
     pub(super) fn status_stack_rows(&self) -> u16 {
+        // 内宽取**本帧终端**夹取后的右栏宽：`render::draw` 里算行数用的是同一个值。
+        // 两处若一处用用户选择、一处用夹取结果，栈就会差一行，而鼠标点段正是按行号命中。
+        let layout = self.st.pane_layout().clamped(self.last_size.0);
         status_stack::stack_rows(
             &self.status_info(),
-            render::WORKSPACE_PANE_WIDTH.saturating_sub(2) as usize,
+            layout.widths.right.saturating_sub(2) as usize,
             self.st.status_stack_collapsed,
         )
     }

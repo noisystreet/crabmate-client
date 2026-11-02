@@ -8,6 +8,7 @@ use super::super::*; // render：draw / UiState / Palette / StatusInfo / build_b
 use super::*; // overlay：settings_panel_layout / settings_panel_content_width / choice_line
 use crate::tui_mode::approve::ApprovalChoice;
 use crate::tui_mode::state::ApprovalOverlay;
+use crate::tui_mode::test_support::narrow_layout;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
@@ -37,7 +38,7 @@ fn status_info() -> StatusInfo {
 }
 
 fn render_frame(st: &mut UiState, panel: Option<&PanelContent>) -> Buffer {
-    let rows = build_body_rows(st, chat_body_width(false, W));
+    let rows = build_body_rows(st, chat_body_width(narrow_layout(), W));
     let info = status_info();
     let mut terminal = Terminal::new(TestBackend::new(W, H)).expect("terminal");
     terminal

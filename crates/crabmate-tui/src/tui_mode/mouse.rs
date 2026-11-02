@@ -25,20 +25,18 @@ impl LaneApp<'_> {
     /// 「审批未决不得输入」「脏字段先确认」这类键盘侧门禁。
     pub(super) fn on_mouse(&mut self, ev: MouseEvent) {
         if self.st.approval.is_some() || self.panel.is_some() {
+            // 浮层开着时可能刚好松开左键：拖拽态留着，下一次 `Drag` 会接着改宽，
+            // 而用户看到的是一次「点了浮层，栏宽自己变了」。
+            self.pane_drag = None;
             return;
         }
-        // 状态区的点击（权限菜单模态优先，其次状态行 `perm` 段）先处理：两者都与左右两栏
-        // 不相交。不拦这一下的话，同一次点击还会继续落进下面的侧栏 / 聊天列分支 ——
-        // 表现为「点了一下菜单，会话却切走了」。
-        if ev.kind == MouseEventKind::Down(MouseButton::Left)
-            && self.on_status_click(ev.column, ev.row)
-        {
+        if self.on_mouse_prelude(&ev) {
             return;
         }
         let (width, height) = self.last_size;
         let p = panes(
             Rect::new(0, 0, width, height),
-            self.st.sidebar_visible,
+            self.st.pane_layout(),
             self.status_stack_rows(),
         );
         let (column, row) = (ev.column, ev.row);
@@ -92,7 +90,9 @@ impl LaneApp<'_> {
     /// （菜单锚在这一段的矩形上，不居中）。
     ///
     /// 返回 `true` = 已消费（调用方立刻返回，不再走两栏 / 兜底分支）。
-    fn on_status_click(&mut self, column: u16, row: u16) -> bool {
+    ///
+    /// `pub(super)`：入口门禁在 `mouse_drag::on_mouse_prelude` 里，与拖拽同处一层。
+    pub(super) fn on_status_click(&mut self, column: u16, row: u16) -> bool {
         if self.st.permission_menu.is_some() {
             return self.on_permission_menu_click(column, row);
         }
@@ -138,7 +138,7 @@ impl LaneApp<'_> {
         let info = self.status_info();
         let p = panes(
             Rect::new(0, 0, width, height),
-            self.st.sidebar_visible,
+            self.st.pane_layout(),
             self.status_stack_rows(),
         );
         if let Some(area) = p.right_status {
@@ -189,7 +189,7 @@ impl LaneApp<'_> {
         let (width, height) = self.last_size;
         let p = panes(
             Rect::new(0, 0, width, height),
-            self.st.sidebar_visible,
+            self.st.pane_layout(),
             self.status_stack_rows(),
         );
         let Some(right) = p.right else {
@@ -237,7 +237,7 @@ impl LaneApp<'_> {
         let (width, height) = self.last_size;
         let p = panes(
             Rect::new(0, 0, width, height),
-            self.st.sidebar_visible,
+            self.st.pane_layout(),
             self.status_stack_rows(),
         );
         let Some(left) = p.left else {
@@ -352,7 +352,9 @@ mod tests {
     };
 
     use super::super::state::{Focus, LineKind};
-    use super::super::test_support::{test_app, test_client, test_prefs};
+    use super::super::test_support::{
+        narrow_layout, test_app, test_client, test_prefs, visible_layout,
+    };
     use super::super::ws_sidebar::{sessions_content, workspace_content};
     use super::{BodyHit, LaneApp, body_hit, item_index_at, panes};
     use crate::serve::SessionListRow;
@@ -399,6 +401,99 @@ mod tests {
             column,
             row,
             modifiers: KeyModifiers::NONE,
+        });
+    }
+
+    fn drag(app: &mut LaneApp<'_>, column: u16, row: u16) {
+        app.on_mouse(MouseEvent {
+            kind: MouseEventKind::Drag(MouseButton::Left),
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        });
+    }
+
+    fn release(app: &mut LaneApp<'_>, column: u16, row: u16) {
+        app.on_mouse(MouseEvent {
+            kind: MouseEventKind::Up(MouseButton::Left),
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        });
+    }
+
+    /// 宽屏下两栏的矩形（拖拽命中与断言都按它算，不另抄一份尺寸）。
+    fn side_panes(app: &LaneApp<'_>) -> (Rect, Rect) {
+        let p = panes(
+            Rect::new(0, 0, 200, 40),
+            app.st.pane_layout(),
+            app.status_stack_rows(),
+        );
+        (p.left.expect("宽屏有左栏"), p.right.expect("宽屏有右栏"))
+    }
+
+    /// 按住左栏分隔线拖动：改宽度，但**不**顺带把会话切走（issue #407 P0.5）。
+    ///
+    /// 分隔线那一列落在左栏矩形里，所以「先判拖拽、再判点行」的顺序错了，表现就是
+    /// 一次拖宽手势里会话被换掉。
+    #[test]
+    fn dragging_the_left_divider_resizes_without_switching_sessions() {
+        with_wide_app(|app| {
+            app.st
+                .replace_sessions(vec![row("s1", None), row("s2", None)]);
+            let (left, _) = side_panes(app);
+            let divider = left.x + left.width - 1;
+            let selected = app.st.selected;
+
+            click(app, divider, left.y);
+            assert_eq!(app.st.selected, selected, "按在分隔线上不该切会话");
+            assert_eq!(app.st.focus, Focus::Input, "也不该把焦点抢到侧栏");
+
+            drag(app, 40, left.y);
+            assert_eq!(
+                app.st.pane.left, 41,
+                "指针停在第 40 列 → 分隔线跟着到第 40 列"
+            );
+            release(app, 40, left.y);
+        });
+    }
+
+    /// 右栏分隔线是它的**左**边缘：宽度 = 终端宽 - 指针列。
+    #[test]
+    fn dragging_the_right_divider_moves_its_own_edge() {
+        with_wide_app(|app| {
+            let (_, right) = side_panes(app);
+            click(app, right.x, right.y);
+            drag(app, 150, right.y);
+            assert_eq!(app.st.pane.right, 50, "指针在第 150 列 → 右栏宽 50");
+            release(app, 150, right.y);
+        });
+    }
+
+    /// 起点不在分隔线上（例如在正文里按住左键划一下）不该改宽。
+    #[test]
+    fn dragging_from_the_chat_column_leaves_the_panes_alone() {
+        with_wide_app(|app| {
+            let before = app.st.pane;
+            click(app, 90, 10);
+            drag(app, 40, 10);
+            assert_eq!(app.st.pane, before, "起点不是分隔线就不该改宽");
+            release(app, 40, 10);
+        });
+    }
+
+    /// 松开之后再拖不该继续改宽：拖拽态在 `Up` 时就结束了。
+    #[test]
+    fn dragging_after_release_does_not_resize() {
+        with_wide_app(|app| {
+            let (left, _) = side_panes(app);
+            let divider = left.x + left.width - 1;
+            click(app, divider, left.y);
+            drag(app, 40, left.y);
+            release(app, 40, left.y);
+            let settled = app.st.pane;
+            drag(app, 100, left.y);
+            assert_eq!(app.st.pane, settled, "没按住就不该跟着指针变");
         });
     }
 
@@ -454,7 +549,11 @@ mod tests {
     fn clicking_a_pane_hides_the_key_hint_until_a_key_arrives() {
         with_wide_app(|app| {
             app.st.replace_sessions(vec![row("s1", Some("c1"))]);
-            let p = panes(Rect::new(0, 0, 200, 40), true, app.status_stack_rows());
+            let p = panes(
+                Rect::new(0, 0, 200, 40),
+                app.st.pane_layout(),
+                app.status_stack_rows(),
+            );
 
             let left = p.left.expect("宽屏应有左栏");
             click(app, left.x + 1, left.y); // 标题行：只切焦点
@@ -680,7 +779,11 @@ mod tests {
         with_wide_app(|app| {
             app.st.serve_defaults = Some(defaults_with_permission("approved"));
             let (w, h) = app.last_size;
-            let p = panes(Rect::new(0, 0, w, h), true, app.status_stack_rows());
+            let p = panes(
+                Rect::new(0, 0, w, h),
+                visible_layout(),
+                app.status_stack_rows(),
+            );
             let rs = p.right_status.expect("宽屏有状态栈");
             let mut anchor = None;
             for row in rs.y..rs.y + rs.height {
@@ -719,7 +822,11 @@ mod tests {
         app.st.sidebar_visible = false;
         app.st.serve_defaults = Some(defaults_with_permission("approved"));
         let (w, h) = app.last_size;
-        let p = panes(Rect::new(0, 0, w, h), false, app.status_stack_rows());
+        let p = panes(
+            Rect::new(0, 0, w, h),
+            narrow_layout(),
+            app.status_stack_rows(),
+        );
         let bar = p.status.expect("窄屏有底栏");
         let mut anchor = None;
         for col in bar.x..bar.x + bar.width {
@@ -760,9 +867,13 @@ mod tests {
             ..Default::default()
         });
         let (w, h) = app.last_size;
-        let rs = panes(Rect::new(0, 0, w, h), true, app.status_stack_rows())
-            .right_status
-            .expect("宽屏有状态栈");
+        let rs = panes(
+            Rect::new(0, 0, w, h),
+            visible_layout(),
+            app.status_stack_rows(),
+        )
+        .right_status
+        .expect("宽屏有状态栈");
         let mut flipped = false;
         for row in rs.y..rs.y + rs.height {
             click(&mut app, rs.x + 1, row);
