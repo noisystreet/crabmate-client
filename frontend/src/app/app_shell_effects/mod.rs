@@ -11,6 +11,7 @@
 //! **注册顺序**仍见 [`super::app_shell_bootstrap::bootstrap_app_shell`]（及 [`super::app_shell_init::init_app_shell`]）。
 
 mod approval_follow;
+mod connection_report;
 mod escape;
 mod ide_hotkeys;
 mod keyboard_inset;
@@ -23,6 +24,7 @@ mod sync_dom;
 mod viewport;
 
 pub use approval_follow::wire_approval_expanded_follows_pending;
+pub use connection_report::{ConnectionReportSignals, wire_connection_status_report};
 pub use escape::{ShellEscapeSignals, wire_escape_key_layered_dismiss};
 pub use ide_hotkeys::{IdeEditorHotkeySignals, wire_ide_editor_hotkeys};
 pub use keyboard_inset::wire_visual_viewport_keyboard_inset;

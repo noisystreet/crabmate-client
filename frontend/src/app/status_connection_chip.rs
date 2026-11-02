@@ -134,6 +134,27 @@ pub(crate) fn connection_feed(_: String) -> ArcRwSignal<Vec<ConnectionSnapshot>>
     ArcRwSignal::new(Vec::new())
 }
 
+/// 「本窗口已进壳的注册表」。
+///
+/// 上报方（`app_shell_effects::connection_report`）必须在**登记之后**才发第一帧状态：
+/// 壳按 window label 查注册表，未登记的 label 会被 `set_status` 静默丢弃
+/// （返回 `None` 就 return），而登记是在 [`install_connections_feed`] 里 spawn 出去的
+/// 一次异步调用 —— 首帧的 `Effect` 很可能比它先跑，那一次上报就白发了。
+///
+/// 用信号而不是 `bool`：订阅方要在**登记完成的那一刻**补发一次当前状态，而那时它
+/// 自己订阅的其它信号（回合生命周期 / 待审批）可能一个都没变过。
+///
+/// 非 wasm（浏览器 / 测试）初值即 `true`：那里没有注册表，也就没有「等登记」这件事，
+/// 让它停在 `false` 只会让将来的订阅方永远不发。
+pub(crate) fn connections_registered() -> RwSignal<bool> {
+    thread_local! {
+        static REGISTERED: std::cell::OnceCell<RwSignal<bool>> =
+            const { std::cell::OnceCell::new() };
+    }
+
+    REGISTERED.with(|cell| *cell.get_or_init(|| RwSignal::new(!cfg!(target_arch = "wasm32"))))
+}
+
 /// 先订阅、再 `register`、最后 `list` 补首帧。
 ///
 /// 三步的顺序都有理由，任何一步换位都会退化成「名单永远空」：
@@ -167,7 +188,12 @@ fn install_connections_feed(feed: ArcRwSignal<Vec<ConnectionSnapshot>>, api_base
         // 句柄故意丢弃：订阅与这份全局 signal 同寿，没有需要退订的时刻。
         let _ = crate::tauri_shell::tauri_listen_connections_changed(func).await;
 
-        let _ = crate::tauri_shell::tauri_register_connection(&api_base, None).await;
+        // 登记成功才置位：上报方据此补发第一帧状态。失败（老壳不认识这条命令）时
+        // 保持 `false` —— 那种壳里也没有第二个窗口要读它，停在不上报是对的。
+        let registered = crate::tauri_shell::tauri_register_connection(&api_base, None).await;
+        if registered.is_ok() && crate::tauri_shell::tauri_shell_available() {
+            connections_registered().set(true);
+        }
 
         if feed.get_untracked().is_empty()
             && let Ok(json) = crate::tauri_shell::tauri_list_connections_json().await

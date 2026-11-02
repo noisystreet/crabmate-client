@@ -11,6 +11,7 @@
 //! | 4a | 工作区 / 变更集域（依赖 `refresh_workspace`）。 |
 //! | 4b | `/status`、`/tasks` 与侧栏任务面可见时的 `Effect`。 |
 //! | 4c | 工作区路径插入 composer、流式壳、聊天列 `wire_*`（与 4a 共用 `refresh_workspace`）。 |
+//! | 5 | 本窗口的连接状态 / 未读上报给桌面壳（左栏「连接」区读它）。 |
 //!
 //! 聊天主列内部顺序见 [`super::chat::wire_chat_domain`]。
 
@@ -19,12 +20,13 @@ use std::sync::Arc;
 use leptos::prelude::*;
 
 use super::app_shell_effects::{
-    IdeEditorHotkeySignals, SessionDeleteHotkeySignals, ShellEscapeSignals,
-    WireMobileNavEdgeSwipeSignals, WireMobileSideEdgeSwipeSignals, WireNarrowViewportSignals,
-    WireSettingsLlmDraftsSignals, WireSyncThemeSignals, wire_approval_expanded_follows_pending,
-    wire_close_shell_chrome_when_ide_layout, wire_escape_key_layered_dismiss,
-    wire_ide_editor_hotkeys, wire_mobile_nav_edge_swipe, wire_mobile_side_edge_swipe,
-    wire_narrow_viewport_layout, wire_session_delete_hotkey, wire_settings_llm_drafts_on_open,
+    ConnectionReportSignals, IdeEditorHotkeySignals, SessionDeleteHotkeySignals,
+    ShellEscapeSignals, WireMobileNavEdgeSwipeSignals, WireMobileSideEdgeSwipeSignals,
+    WireNarrowViewportSignals, WireSettingsLlmDraftsSignals, WireSyncThemeSignals,
+    wire_approval_expanded_follows_pending, wire_close_shell_chrome_when_ide_layout,
+    wire_connection_status_report, wire_escape_key_layered_dismiss, wire_ide_editor_hotkeys,
+    wire_mobile_nav_edge_swipe, wire_mobile_side_edge_swipe, wire_narrow_viewport_layout,
+    wire_session_delete_hotkey, wire_settings_llm_drafts_on_open,
     wire_sidebar_rail_when_ide_layout, wire_sync_bg_decor_to_storage_and_dom,
     wire_sync_locale_html_lang, wire_sync_session_typography_to_storage_and_dom,
     wire_sync_tauri_shell_dom, wire_sync_theme_to_storage_and_dom,
@@ -106,6 +108,7 @@ pub(super) fn run_shell_wiring_in_order(app: &AppSignals) -> ShellWiringOutput {
     let refresh_workspace = make_refresh_workspace_for_shell(app);
     let wiring_tail =
         wire_phase4_workspace_status_and_chat_domain(app, Arc::clone(&refresh_workspace));
+    wire_phase5_connection_report(app);
 
     ShellWiringOutput {
         refresh_workspace,
@@ -375,4 +378,16 @@ fn make_refresh_workspace_for_shell(app: &AppSignals) -> RefreshWorkspaceFn {
         app.to_workspace_panel(),
         app.shell_ui.locale.get_untracked(),
     )
+}
+
+/// 阶段 5：把本窗口的连接状态 / 未读上报给桌面壳（左栏「连接」区的字形与行尾读数）。
+///
+/// 放在最后：它只读 `turn_lifecycle` 与 `pending_approval`（阶段 1/4c 已装好写入方），
+/// 没有产物要交给别人；而**上报本身**由 `connections_registered` 把关 —— 壳登记
+/// 完成之前不发，所以早跑晚跑都不会丢第一帧。
+fn wire_phase5_connection_report(app: &AppSignals) {
+    wire_connection_status_report(ConnectionReportSignals {
+        turn_lifecycle: app.stream.turn_lifecycle,
+        pending_approval: app.approval.pending_approval,
+    });
 }

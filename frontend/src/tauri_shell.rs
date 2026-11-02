@@ -4,6 +4,8 @@
 use wasm_bindgen::prelude::wasm_bindgen;
 use wasm_bindgen_futures::{JsFuture, spawn_local};
 
+use crabmate_client_api::connections::ConnectionStatus;
+
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(inline_js = r#"
 export function hasTauriInvoke() {
@@ -83,6 +85,17 @@ export function invokeTauriRegisterConnection(apiBase, displayName) {
 
 export function invokeTauriFocusConnection(key) {
   return tauriInvoke("focus_connection", { key });
+}
+
+// 上报本窗口的连接状态 / 未读：壳写注册表并广播给所有窗口（左栏「连接」区读它）。
+// 状态用字符串字面量（`ConnectionStatus::as_str()`）而不是枚举对象：壳侧按 serde
+// 的外部标记反序列化，两边的字面量必须逐字一致。
+export function invokeTauriReportConnectionStatus(status) {
+  return tauriInvoke("report_connection_status", { status });
+}
+
+export function invokeTauriReportConnectionUnread(unread) {
+  return tauriInvoke("report_connection_unread", { unread });
 }
 
 // 只开一个连接页窗口（连哪台 serve 由用户在新窗口里选）；不带基址。
@@ -172,6 +185,10 @@ extern "C" {
     ) -> js_sys::Promise;
     #[wasm_bindgen(js_name = invokeTauriFocusConnection)]
     fn invoke_tauri_focus_connection(key: &str) -> js_sys::Promise;
+    #[wasm_bindgen(js_name = invokeTauriReportConnectionStatus)]
+    fn invoke_tauri_report_connection_status(status: &str) -> js_sys::Promise;
+    #[wasm_bindgen(js_name = invokeTauriReportConnectionUnread)]
+    fn invoke_tauri_report_connection_unread(unread: bool) -> js_sys::Promise;
     #[wasm_bindgen(js_name = invokeTauriOpenConnectWindow)]
     fn invoke_tauri_open_connect_window(display_name: Option<String>) -> js_sys::Promise;
     #[wasm_bindgen(js_name = listenTauriConnectionsChanged)]
@@ -218,12 +235,21 @@ fn invoke_tauri_disconnect_remote() -> js_sys::Promise {
 
 /// 非 wasm（测试 / SSR）下切窗口是 no-op。
 ///
-/// 只有这一个需要 stub：它是唯一在 `cfg` 之外被调用（`view!` 的点击处理）的多窗口 API。
 /// `list` / `register` / `listen` 全部由 `#[cfg(target_arch = "wasm32")]` 的
 /// `install_connections_feed` 独占调用，host 目标上给它们留 stub 只会变成 dead code
 /// （`-D warnings` 直接拒），所以这里干脆不定义。
+///
+/// 但 `focus` 与两个 `report_*` 必须留着：它们由**两个目标下都会编译**的代码调用
+/// （`view!` 的点击处理、`app_shell_effects::connection_report` 的 `Effect`），
+/// 而那条 effect 在 host 上第一条判断就是 `tauri_shell_available()`，不会真的走到这里。
 #[cfg(not(target_arch = "wasm32"))]
 pub fn tauri_focus_connection(_: &str) {}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn tauri_report_connection_status(_: ConnectionStatus) {}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn tauri_report_connection_unread(_: bool) {}
 
 /// 是否在 **桌面** Tauri WebView 内运行。
 /// Android 远程薄客户端虽可能注入 `__TAURI__`，但无本机选目录等桌面命令，须视为非桌面壳。
@@ -383,6 +409,33 @@ pub fn tauri_focus_connection(key: &str) {
     let key = key.to_string();
     spawn_local(async move {
         let _ = tauri_invoke_void(invoke_tauri_focus_connection(&key)).await;
+    });
+}
+
+/// 上报本窗口的连接状态（壳的 `report_connection_status`）。
+///
+/// fire-and-forget：这是一次**显示层**上报，失败只意味着左栏那行的字形不更新，而
+/// 调用它的是一条 `Effect`（没有交互点，也没有能显示错误的位置）。系统通知由壳在
+/// 「刚进入等审批」那个边沿自己判 —— 这里只如实上报当前值，不在前端重复判边沿。
+#[cfg(target_arch = "wasm32")]
+pub fn tauri_report_connection_status(status: ConnectionStatus) {
+    if !tauri_shell_available() {
+        return;
+    }
+    let literal = status.as_str();
+    spawn_local(async move {
+        let _ = tauri_invoke_void(invoke_tauri_report_connection_status(literal)).await;
+    });
+}
+
+/// 上报本窗口的未读标记（壳的 `report_connection_unread`）。
+#[cfg(target_arch = "wasm32")]
+pub fn tauri_report_connection_unread(unread: bool) {
+    if !tauri_shell_available() {
+        return;
+    }
+    spawn_local(async move {
+        let _ = tauri_invoke_void(invoke_tauri_report_connection_unread(unread)).await;
     });
 }
 
