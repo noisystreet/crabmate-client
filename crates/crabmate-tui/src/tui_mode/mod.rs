@@ -33,6 +33,7 @@ mod mouse_drag;
 mod palette;
 mod pane_drag;
 mod pane_render;
+mod pane_store;
 mod pane_width;
 mod paste;
 mod pending_lane;
@@ -156,6 +157,19 @@ struct LaneApp<'a> {
     /// 放 `LaneApp` 而不是 `UiState`：它是一次指针手势的中间态，不是可渲染的界面状态 ——
     /// 放 `st` 里会让「同尺寸同内容的两帧」不再相等，反而更难判「要不要重绘」。
     pane_drag: Option<pane_drag::PaneDrag>,
+    /// 上次**落盘**的两栏列宽（`pane_store`，issue #407 的 P2）。
+    ///
+    /// 同时充当「宽度是否变过」的判据：落盘只在 `st.pane` 与它不同时发生 ——
+    /// 左键松开是高频动作（点会话、点树都会有），每次都写文件既无意义，
+    /// 也会把「上次保存的值」变成噪声。写失败时**不**更新它，于是下一次手势会再试。
+    pane_saved: pane_width::PaneWidths,
+    /// 落盘失败的提示是否已经说过。
+    ///
+    /// 鼠标手势是高频动作，每拖一次就再报一次会把 transcript 刷成日志；但完全不说是
+    /// 更坏的选择 —— 用户会以为宽度存下来了，下次启动回到默认却查不出原因。
+    pane_save_warned: bool,
+    /// 列宽落到哪个文件（装配时解析一次，随 lane 持有；见 `pane_store`）。
+    pane_store: pane_store::PaneStore,
     /// `/conv new` 的会话索引状态（新建 / 在途 / 待起名 / 待绑定，见 `session_index`）。
     index: session_index::UiIndexState,
     /// 可 `/resume` 的断点（serve 侧 job 可能仍在跑；保留规则见 `resume` 模块）。
