@@ -82,6 +82,12 @@ impl LaneApp<'_> {
             self.scroll_workspace(up);
             return;
         }
+        // 编辑器视图占着聊天列：此时该滚的是文件本身。继续滚 transcript 看不见任何变化
+        // （那块内容被视图整片盖住），而「滚轮没反应」和「文件到底了」在屏幕上长得一样。
+        if self.st.editor.open {
+            self.editor_wheel(up);
+            return;
+        }
         self.st.scroll_lines(up, 3);
     }
 
