@@ -165,6 +165,10 @@ struct LaneApp<'a> {
     /// 放 `LaneApp` 而不是 `UiState`：它是一次指针手势的中间态，不是可渲染的界面状态 ——
     /// 放 `st` 里会让「同尺寸同内容的两帧」不再相等，反而更难判「要不要重绘」。
     pane_drag: Option<pane_drag::PaneDrag>,
+    /// 右栏左键的双击识别（`/editor` 视图下双击文件行 = 打开它，见 [`mouse::ClickTracker`]）。
+    ///
+    /// 与 `pane_drag` 同处一层、同样的理由：一次指针手势的中间态，不是可渲染状态。
+    ws_click: mouse::ClickTracker,
     /// 上次**落盘**的两栏列宽（`pane_store`，issue #407 的 P2）。
     ///
     /// 同时充当「宽度是否变过」的判据：落盘只在 `st.pane` 与它不同时发生 ——

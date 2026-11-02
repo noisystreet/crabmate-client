@@ -22,6 +22,11 @@ use super::ws_truncate::middle_ellipsis;
 const WORKSPACE_HINT: &str = "Enter展开 ←收 r刷 p池 w栏";
 /// 文件行的提示：Enter 把相对路径插入输入框。
 const WORKSPACE_FILE_HINT: &str = "Enter插路径 ←父 r刷 w栏";
+/// 编辑器视图下文件行的提示：Enter（或鼠标双击）打开这个文件。
+///
+/// 视图开着时 `ws_activate` 的调用方改走 `open_editor`，插路径的含义已经不成立 ——
+/// 提示还写「插路径」就是骗人。同样 ≤ 25 列（本行 24 列）。
+const WORKSPACE_FILE_OPEN_HINT: &str = "Enter/双击开 ←父 r刷 w栏";
 /// 工作区未设置（根路径为空）时的按键提示。
 const WORKSPACE_UNSET_HINT: &str = "未设置：p 选项目池 · r刷";
 /// 项目池「选择/切换工作区」子视图的按键提示。
@@ -436,13 +441,19 @@ fn workspace_hint_line(st: &UiState, width: usize) -> Line<'static> {
     hint_line(workspace_hint(st), pal)
 }
 
-/// 按光标所在行选择提示文案（文件行强调 Enter 插入路径）。
+/// 按光标所在行选择提示文案（文件行强调 Enter 插入路径；编辑器视图下强调打开）。
 fn workspace_hint(st: &UiState) -> &'static str {
     if st.workspace_path.is_none() {
         return WORKSPACE_UNSET_HINT;
     }
     match st.ws_rows.get(st.ws_cursor) {
-        Some(row) if !row.placeholder && !row.is_dir => WORKSPACE_FILE_HINT,
+        Some(row) if !row.placeholder && !row.is_dir => {
+            if st.editor.open {
+                WORKSPACE_FILE_OPEN_HINT
+            } else {
+                WORKSPACE_FILE_HINT
+            }
+        }
         _ => WORKSPACE_HINT,
     }
 }
@@ -766,6 +777,7 @@ mod tests {
         for hint in [
             WORKSPACE_HINT,
             WORKSPACE_FILE_HINT,
+            WORKSPACE_FILE_OPEN_HINT,
             WORKSPACE_UNSET_HINT,
             WORKSPACE_PICK_HINT,
             SIDEBAR_HINT,
@@ -776,6 +788,23 @@ mod tests {
                 "提示超宽会被裁切：{hint}"
             );
         }
+    }
+
+    #[test]
+    fn file_row_hint_says_open_while_the_editor_view_is_open() {
+        // `ready_ws_state` 的光标停在 README.md（文件行）
+        let mut st = ready_ws_state();
+        st.focus = Focus::Workspace;
+        assert_eq!(workspace_hint(&st), WORKSPACE_FILE_HINT);
+        st.editor.open_file("README.md", 0);
+        assert_eq!(
+            workspace_hint(&st),
+            WORKSPACE_FILE_OPEN_HINT,
+            "编辑器视图下 Enter 是打开，提示不能还写「插路径」"
+        );
+        // 目录行仍是展开提示：视图开着也只是文件行的语义变了
+        st.ws_cursor = 0;
+        assert_eq!(workspace_hint(&st), WORKSPACE_HINT);
     }
 
     #[test]
