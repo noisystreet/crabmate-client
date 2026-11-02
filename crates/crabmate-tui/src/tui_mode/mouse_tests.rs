@@ -622,6 +622,29 @@ fn double_click_in_chat_view_does_not_open_the_editor() {
     });
 }
 
+/// 真实的事件序列（`Down` → `Up` → `Down` → `Up`）必须能打开文件。
+///
+/// 上面那条用例把 `double` 直接喂给 `apply_workspace_click`，绕过了 `ClickTracker`
+/// 与 `on_mouse`：真机上「双击没反应」恰好只可能坏在这一段，所以这里走整条路。
+#[test]
+fn a_real_down_up_down_sequence_opens_the_file() {
+    with_wide_app(|app| {
+        ws_root_with_one_file(app);
+        app.st.editor.open_file("src/lib.rs", 0);
+        let (_, right) = side_panes(app);
+        let (c, r) = (right.x + 2, right.y + 1);
+        click(app, c, r);
+        release(app, c, r);
+        click(app, c, r);
+        release(app, c, r);
+        assert_eq!(
+            app.st.editor.rel.as_deref(),
+            Some("README.md"),
+            "真实序列下双击该打开这一行指向的文件"
+        );
+    });
+}
+
 /// 双击识别：同一行、窗口内的第二次按下才算；换行 / 超窗口都是两次单击。
 #[test]
 fn click_tracker_needs_the_same_row_within_the_window() {
