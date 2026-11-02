@@ -13,9 +13,29 @@ use crate::SessionPrefs;
 use crate::serve::{ConnectionConfig, ServeClient};
 
 use super::inbound::Inbound;
+use super::pane_width::{PaneLayout, PaneWidths};
 use super::state::UiState;
 use super::worker::{JobCancel, LaneId, WorkerJob};
 use super::{LaneApp, LaneTemplate, TuiApp};
+
+/// 两栏可见、默认宽度（宽屏用例的基准版面）。
+///
+/// 宽度改成运行期可调之后（issue #407），`layout::panes` / `chat_body_width` 都要一份
+/// 「版面」入参；各测试文件各写一份必然漂移，所以收在这里 —— 与 `test_prefs` 同一理由。
+pub(super) fn visible_layout() -> PaneLayout {
+    PaneLayout {
+        visible: true,
+        widths: PaneWidths::DEFAULT,
+    }
+}
+
+/// 窄屏：两栏隐藏（聊天列独占整宽）。
+pub(super) fn narrow_layout() -> PaneLayout {
+    PaneLayout {
+        visible: false,
+        widths: PaneWidths::DEFAULT,
+    }
+}
 
 /// 空的会话级 override（`*` 覆盖），让状态行回落到 serve 默认。
 pub(super) fn test_prefs() -> SessionPrefs {
@@ -105,6 +125,7 @@ pub(super) fn lane_with_tx<'a>(
         panel: None,
         persisted: None,
         last_size: (0, 0),
+        pane_drag: None,
         index: Default::default(),
         resume: None,
         sent_turn: None,

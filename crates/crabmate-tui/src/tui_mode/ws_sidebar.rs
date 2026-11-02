@@ -434,7 +434,7 @@ fn workspace_hint(st: &UiState) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::super::render::SIDEBAR_WIDTH;
+    use super::super::pane_width::SIDEBAR_WIDTH;
     use super::*;
 
     fn ws_row(indent: u8, rel: &str, name: &str, is_dir: bool, expanded: bool) -> WsRow {

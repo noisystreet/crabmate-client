@@ -28,18 +28,9 @@ pub(crate) use overlay::settings_panel_content_width;
 
 /// 低于此宽度隐藏左右栏（等价 repl 布局）。
 pub const SIDEBAR_MIN_WIDTH: u16 = 120;
-pub(crate) use super::pane_width::{SIDEBAR_WIDTH, WORKSPACE_PANE_WIDTH};
-
-/// 计算 build_body_rows 使用的聊天区宽度（与 draw 里传给 render_body 的区域一致：
-/// 聊天列内左右各留 1 列空隙，与侧栏 / composer 边框的对称留白对齐）。
-pub(crate) fn chat_body_width(sidebar_visible: bool, terminal_width: u16) -> usize {
-    let col = if sidebar_visible {
-        terminal_width.saturating_sub(SIDEBAR_WIDTH + WORKSPACE_PANE_WIDTH)
-    } else {
-        terminal_width
-    };
-    (col as usize).saturating_sub(2)
-}
+// 正文预算换算与两栏分隔线拆到 `pane_render`（本文件贴着 920 行/文件的 `fn-nloc-ratchet`
+// 门禁）。这里 re-export，调用点（`mod.rs` 与各测试）仍写 `render::chat_body_width`。
+pub(super) use super::pane_render::{chat_body_width, paint_pane_dividers};
 /// 左栏会话栏聚焦时的按键提示。宽度必须 ≤ 侧栏内宽（`SIDEBAR_WIDTH` - 1 = 25 列），
 /// 否则 `render_pane` 会直接裁掉尾部的键；中文按 2 列计。
 pub(super) const SIDEBAR_HINT: &str = "↑↓ Enter用 Del删 n新 r刷";
@@ -536,17 +527,21 @@ pub fn draw(
 ) {
     let area = frame.area();
     // 右栏底部状态栈的行数（与 `status_stack::stack_lines` 同源，否则底部会空行 / 末段被裁）。
-    // 状态栈在右栏：内宽取右栏（`WORKSPACE_PANE_WIDTH - 2`，列内左右各留 1 列）。
+    // 状态栈在右栏：内宽取右栏（列宽 - 2，列内左右各留 1 列）。列宽先按本帧终端夹取 ——
+    // 夹取与 `panes_with_lanes` 同一份（幂等），否则「按 34 列算行数、按 20 列画栈」
+    // 会让栈里多出或少掉一行，而鼠标点段用的是行数，一漂就点到别的段。
+    let layout = st.pane_layout().clamped(area.width);
     let stack_rows = status_stack::stack_rows(
         info,
-        WORKSPACE_PANE_WIDTH.saturating_sub(2) as usize,
+        layout.widths.right.saturating_sub(2) as usize,
         st.status_stack_collapsed,
     );
     // lane 列表**单 lane 也占位**：否则用户在界面上完全看不出自己连的是哪台 serve、
     // 有没有别的连接。高度是左栏的一半（`layout::lane_pane_height`），与条数无关，
     // 条数只影响区内画得出几条（放不下的在标题补 `↓n`）；鼠标命中用的是同一份口径。
     // 主体三列 / 底栏 / 状态栈 / 左栏 lane 区的矩形与鼠标命中检测共用 `layout`。
-    let p = panes_with_lanes(area, st.sidebar_visible, stack_rows, lanes.len());
+    // 宽度已在上面夹过一次；`panes_with_lanes` 内部再夹一次（幂等），所以两处一致。
+    let p = panes_with_lanes(area, layout, stack_rows, lanes.len());
 
     let spin = progress_mark_frame(st, info);
     let pal = st.palette; // 拷贝：下面要 `&mut st` 回写 `body_at_top`，底栏/浮层仍要调色板
@@ -573,6 +568,9 @@ pub fn draw(
     if let Some(rs) = p.right_status {
         render_status_stack(frame, rs, st, info, &pal);
     }
+    // 两栏各一条分隔线：画在内容之后，落点是列内本来就空着的留白列，不影响排版。
+    // 具体理由与「上下两段贯穿」的口径见 `pane_render::paint_pane_dividers`。
+    paint_pane_dividers(frame, &p, &pal);
     render_chat_column(frame, st, p.chat, prepared, panel.is_none(), spin);
 
     // 底栏**只在窄屏存在**：宽屏的状态已进右栏底部，那一行还给正文。

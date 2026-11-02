@@ -1,7 +1,7 @@
 //! 右栏底部的纵向状态栈（对齐 desktop 的 `.side-status-stack`）。
 //!
 //! desktop 早已把底栏迁进右栏底部、改成 `flex-direction: column` + 可折叠；TUI 这一轮
-//! 才跟上。**动机不只是「像 desktop」**：右栏只有 [`super::render::WORKSPACE_PANE_WIDTH`] 列，
+//! 才跟上。**动机不只是「像 desktop」**：右栏只有 [`super::pane_width::WORKSPACE_PANE_WIDTH`] 列，
 //! 横排在这么窄的地方必然一路截断（`serve http://… │ model … │ role …` 三项就放不下），
 //! 纵向每段一行反而能把值显示全。
 //!
@@ -477,7 +477,7 @@ mod tests {
         let mut i = info();
         // 最宽的真实值：两位数百分比 + 四位数 k。
         i.context = "999.9k / 1000k (99.9%)".into();
-        let w = crate::tui_mode::render::WORKSPACE_PANE_WIDTH.saturating_sub(2) as usize;
+        let w = crate::tui_mode::pane_width::WORKSPACE_PANE_WIDTH.saturating_sub(2) as usize;
         for line in stack_lines_with(&i, w, &pal(), false, true) {
             let lw = UnicodeWidthStr::width(line.to_string().as_str());
             assert!(lw <= w, "行宽 {lw} 超过栏内宽 {w}：{:?}", line.to_string());

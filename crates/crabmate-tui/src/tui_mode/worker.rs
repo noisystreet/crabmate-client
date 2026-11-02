@@ -392,14 +392,21 @@ pub(super) fn spawn_key_reader(tx: Sender<Inbound>) {
 
 /// 鼠标事件里真正会被 `on_mouse` 处理的那几类；其余在读取线程就丢弃。
 ///
-/// 捕获鼠标后终端会持续上报指针移动（`Moved`）与拖动（`Drag`），而 `run_loop`
-/// 每收到一条消息就把节流从 50ms 降到 2ms 并整帧重绘——这类事件一条也不该进去。
+/// 终端会持续上报指针移动（`Moved`），而 `run_loop` 每收到一条消息就把节流从 50ms
+/// 降到 2ms 并整帧重绘 —— 悬停移动因此一条也不该进去（我们开的是 1002 模式：只有
+/// 按住键时才产生 `Drag`，与悬停无关）。
+///
+/// `Drag` / `Up`（左键）是分隔线拖拽要用的（issue #407 P0.5）。它们只在**按住左键**
+/// 期间出现，代价是「按住左键在正文里划一下」也会走一趟 `on_mouse` —— 那边认不出
+/// 分隔线就什么也不改（见 `LaneApp::on_pane_drag`）。
 pub(super) fn is_actionable_mouse(kind: MouseEventKind) -> bool {
     matches!(
         kind,
         MouseEventKind::Down(MouseButton::Left)
             | MouseEventKind::ScrollUp
             | MouseEventKind::ScrollDown
+            | MouseEventKind::Drag(MouseButton::Left)
+            | MouseEventKind::Up(MouseButton::Left)
     )
 }
 
@@ -735,14 +742,17 @@ mod tests {
     use super::*;
     use crossterm::event::{MouseButton, MouseEventKind};
 
+    /// 悬停移动一条都不进 channel（否则主循环按 2ms 整帧重绘）；左键拖拽与松开要进来
+    /// —— 分隔线改宽靠它们（issue #407 P0.5）。
     #[test]
-    fn pointer_motion_and_drags_are_dropped() {
-        // 指针划过 / 按住拖动：一条都不进 channel（否则主循环按 2ms 整帧重绘）。
+    fn hover_motion_is_dropped_but_left_drags_get_through() {
         assert!(!is_actionable_mouse(MouseEventKind::Moved));
+        assert!(is_actionable_mouse(MouseEventKind::Drag(MouseButton::Left)));
+        assert!(is_actionable_mouse(MouseEventKind::Up(MouseButton::Left)));
+        // 右键拖拽与改宽无关，仍然丢弃。
         assert!(!is_actionable_mouse(MouseEventKind::Drag(
-            MouseButton::Left
+            MouseButton::Right
         )));
-        assert!(!is_actionable_mouse(MouseEventKind::Up(MouseButton::Left)));
     }
 
     #[test]

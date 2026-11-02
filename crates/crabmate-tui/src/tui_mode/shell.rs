@@ -316,6 +316,7 @@ impl<'a> LaneApp<'a> {
             panel: None,
             persisted: None,
             last_size: (0, 0),
+            pane_drag: None,
             index: session_index::UiIndexState::default(),
             resume: None,
             sent_turn: None,
@@ -740,13 +741,19 @@ impl<'a> super::TuiApp<'a> {
     /// 复用当前 lane 记下的终端尺寸与状态栈行数：一帧只有一个尺寸，各 lane 记的
     /// 是同一个值，没必要为命中检测再存一份。
     pub(super) fn lane_at_click(&self, m: &crossterm::event::MouseEvent) -> Option<usize> {
+        // 只有**按下左键**才算「点了一条 lane」：读取线程现在会放行 `Drag` / `Up`
+        // （分隔线拖拽要用，issue #407 P0.5），而拖动分隔线经过左栏下半时，不判这一下
+        // 就会变成「拖宽顺手切走会话」。
+        if m.kind != crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left) {
+            return None;
+        }
         let lane = self.lane();
         let (w, h) = lane.last_size;
         // 版面与 `draw` 共用 `layout::panes_with_lanes`：lane 区高度、可用条数、命中换算
         // 只有一份实现，两边各算一遍会点错行。
         let p = super::layout::panes_with_lanes(
             ratatui::layout::Rect::new(0, 0, w, h),
-            lane.st.sidebar_visible,
+            lane.st.pane_layout(),
             lane.status_stack_rows(),
             self.lanes.len(),
         );
