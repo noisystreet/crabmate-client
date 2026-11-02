@@ -18,8 +18,8 @@ use crabmate_client_api::prompt_tokens::TiktokenPromptTokensSnapshot;
 use crate::serve::{
     ApprovalGate, AutoAllowOnce, ChatStreamOptions, ChatStreamOutcome,
     ConversationMessagesResponse, ServeClient, SessionIndexApplied, SessionIndexOp, StreamCancel,
-    StreamResume, StreamSink, TermError, WebSessionsList, WorkspaceDirData, WorkspaceProjectsData,
-    WorkspaceSetError, run_chat_stream_sink,
+    StreamResume, StreamSink, TermError, WebSessionsList, WorkspaceDirData, WorkspaceFile,
+    WorkspaceProjectsData, WorkspaceSetError, run_chat_stream_sink,
 };
 
 use super::approve::{APPROVAL_WAIT, ApprovalPrompt, OverlayApprovalGate};
@@ -142,6 +142,15 @@ pub(super) enum UiEvent {
         /// 这条结果属于旧工作区，必须丢弃（否则会把 A 的目录内容写进 B 的缓存）。
         generation: u64,
         result: Result<WorkspaceDirData, String>,
+    },
+    /// 工作区文件内容（`GET /workspace/file?path=`）结果，供只读编辑器视图使用。
+    ///
+    /// `generation` 与 [`UiEvent::WorkspaceDir`] 同一口径：回包代已变＝中途切过工作区，
+    /// 那条内容属于旧工作区，必须丢弃 —— 否则会把 A 工作区的文件画在 B 的标题下。
+    WorkspaceFile {
+        rel: String,
+        generation: u64,
+        result: Result<WorkspaceFile, String>,
     },
     /// 审批等待超时（[`APPROVAL_WAIT`]）。
     ///

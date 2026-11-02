@@ -33,10 +33,15 @@ impl LaneApp<'_> {
                         self.fetch_ws_dir(rel);
                     }
                 }
-                // 文件：插入相对路径并回输入框，省得手敲路径。
+                // 编辑器视图下 Enter 是「打开这个文件」；聊天视图下保持原行为（插路径），
+                // 那条路径的用途（让 agent 去读）仍然成立，换掉只会打断既有肌肉记忆。
                 Some(WsActivate::File(rel)) => {
-                    self.st.insert_workspace_path(&rel);
-                    self.st.focus = Focus::Input;
+                    if self.st.editor.open {
+                        self.open_editor(&rel);
+                    } else {
+                        self.st.insert_workspace_path(&rel);
+                        self.st.focus = Focus::Input;
+                    }
                 }
                 None => {}
             },

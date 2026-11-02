@@ -11,12 +11,10 @@ use ratatui::layout::Rect;
 
 use crate::serve::{ApprovalDecision, CommandApprovalData, SessionListRow, WorkspaceDirEntry};
 
-use super::approve::ApprovalChoice;
-use super::palette::Palette;
-use super::pane_width::PaneWidths;
-use super::serve_defaults::ServeDefaults;
 use super::slash_menu::{SkillsCache, SkillsPayload, SlashItem, filtered_items, slash_prefix};
 use super::workspace_tree::{WsPickState, WsRow};
+use super::{approve::ApprovalChoice, editor_view::EditorState, palette::Palette};
+use super::{pane_width::PaneWidths, serve_defaults::ServeDefaults};
 
 // 搜索的命中集合与跳转：拆出去是为了增量维护（旧实现每个流式增量全量重扫，见文件头）。
 #[path = "state_search.rs"]
@@ -372,8 +370,9 @@ pub struct UiState {
     pub ws_cursor: usize,
     /// 刷新时目标行在展开目录内、需等子列表重载后才能定位的 rel（best-effort）。
     pub ws_pending_cursor: Option<String>,
-    /// 项目池「选择/切换工作区」子视图（`Some` 时工作区列改列候选项目）。
+    /// 项目池子视图（`Some` 时工作区列改列候选项目）；`editor` 是只读文件视图（`editor_view`）。
     pub ws_pick: Option<WsPickState>,
+    pub editor: EditorState,
     /// 审批浮层（回合暂停等待决策）。
     pub approval: Option<ApprovalOverlay>,
     /// 审批浮层里方向键选中的那一项（浮层关闭后保留，下次打开时复位）。
