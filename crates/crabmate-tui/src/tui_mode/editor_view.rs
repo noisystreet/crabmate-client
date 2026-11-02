@@ -216,6 +216,16 @@ pub(super) fn view_lines(
             "  正在读取…".to_string(),
             Style::default().fg(pal.muted),
         )));
+    } else if ed.rel.is_none() {
+        // 视图开了但还没选文件（`/editor` 无参首次进入）：这里必须说清「怎么进来」，
+        // 不然一片空白会被读成「还是空文件」。两种进法分别对应命令与目录树。
+        out.push(Line::from(Span::styled(
+            clip(
+                "  未选文件：/editor <工作区相对路径>，或在右栏目录树上双击文件行",
+                width,
+            ),
+            Style::default().fg(pal.muted),
+        )));
     } else if ed.lines.is_empty() {
         out.push(Line::from(Span::styled(
             "  （空文件）".to_string(),
@@ -260,10 +270,13 @@ impl LaneApp<'_> {
                     self.st.editor.open_file(&rel, self.st.ws_generation);
                     let _ = self.fetch_ws_file(rel);
                 }
-                None => self.st.push_line(
-                    LineKind::System,
-                    "编辑器视图：/editor <工作区相对路径> 打开文件（也可在右栏目录树上按 Enter）；/chat 返回聊天",
-                ),
+                // 还没打开过任何文件：**照样把视图打开**，占位文案由 `view_lines` 给。
+                //
+                // 以前这里只往聊天区塞一行用法提示、视图保持关闭，看起来就是「/editor
+                // 没生效」；更要紧的是树上双击/Enter 打开文件只在视图开着时才生效，
+                // 于是用户先 `/editor`、再双击文件行 -- 两步都没有反应。而那一行提示
+                // 本身也看不见：聊天区正被视图占着的话，提示落在被遮住的那一栏。
+                None => self.st.editor.open = true,
             },
         }
     }
@@ -386,6 +399,27 @@ mod tests {
         app(|a| {
             a.editor_command(Some("   ".to_string()));
             assert!(!a.st.editor.open, "空路径只该给用法提示");
+        });
+    }
+
+    /// 只输入 `/editor`（这条 lane 还没打开过文件）也要进视图。
+    ///
+    /// 只往聊天区塞一行用法提示的话，用户看到的是「命令没生效」；更糟的是树上
+    /// 双击/Enter 打开文件只在视图开着时才生效，于是他接着点也没反应。
+    #[test]
+    fn a_bare_editor_command_opens_the_view_without_a_file() {
+        app(|a| {
+            a.editor_command(None);
+            assert!(a.st.editor.open, "只输入 /editor 也要进视图");
+            assert!(a.st.editor.rel.is_none(), "没有文件就不该编一个路径出来");
+            let rows = super::view_lines(&a.st.editor, None, 60, 20, &a.st.palette);
+            let text = rows
+                .iter()
+                .map(std::string::ToString::to_string)
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(text.contains("未选文件"), "占位行要说清怎么选文件：{text}");
+            assert!(!text.contains("空文件"), "没选文件不能报「空文件」：{text}");
         });
     }
 
