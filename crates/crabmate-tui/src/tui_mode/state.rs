@@ -426,6 +426,8 @@ pub struct UiState {
     /// 规则 —— 重算就会点偏。`None` / 空 = 还没画过，点击不生效。
     pub body_area: Option<Rect>,
     pub body_rows_log: Vec<Option<usize>>,
+    /// 该窗口内每个物理行上的链接热区（与 `body_rows_log` 逐行对齐，`render_body` 回写）。
+    pub body_links: Vec<Vec<crate::tui_mode::links::RowLink>>,
     /// 权限写入代数（连选两档只认最后一次回包）与 `perm` 段菜单（`None` = 未打开）。
     pub permission_generation: u64,
     pub permission_menu: Option<crate::tui_mode::permission_intent::PermissionMenu>,

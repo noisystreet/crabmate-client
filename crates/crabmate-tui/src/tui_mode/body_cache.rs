@@ -217,6 +217,8 @@ pub(super) fn history_banner_row(st: &UiState, width: usize) -> Option<BodyRow> 
                 .fg(st.palette.muted)
                 .add_modifier(Modifier::DIM),
         )),
+        // 分页提示不是链接，也不属于任何逻辑行。
+        links: Vec::new(),
     })
 }
 

@@ -8,7 +8,7 @@
 //! 所有状态变更都复用键盘已有的状态机（`ws_*` / `use_selected`），避免出现「鼠标能点出、
 //! 的状态（占位行不可选中、收起父目录后光标归位等不变量因此自动一致）。
 
-use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
 
 use super::LaneApp;
@@ -62,16 +62,9 @@ impl LaneApp<'_> {
             // （否则后续按键仍落在侧栏，用户会觉得「点了没反应」）。
             // 正文区：落在过程摘要行上 = 切换它的开合（见 `click_body`）。没命中就往下
             // 走兜底，把焦点收回输入框 —— 点聊天区的人多半是想接着打字。
+            // 正文区（含聊天列）：链接 → 折叠 → 兜底收焦点，顺序与理由见 `body_click`。
             MouseEventKind::Down(MouseButton::Left) => {
-                if self.click_body(column, row) {
-                    return;
-                }
-                if matches!(self.st.focus, Focus::Sidebar | Focus::Workspace) {
-                    self.st.focus = Focus::Input;
-                    self.st.focus_by_pointer = false;
-                    // 焦点离开会话栏：作废待确认删除，免得回来按 y 误删。
-                    self.st.confirm_delete = None;
-                }
+                self.on_body_click(column, row, ev.modifiers.contains(KeyModifiers::CONTROL))
             }
             _ => {}
         }
@@ -271,7 +264,7 @@ impl LaneApp<'_> {
     ///
     /// 点在别的正文行（答案 / 用户消息 / 分隔线）上**不**消费：那一下的本意通常是
     /// 「回到输入框」，吞掉它会让焦点停在侧栏不动，正是「点了没反应」的来源。
-    fn click_body(&mut self, column: u16, row: u16) -> bool {
+    pub(super) fn click_body(&mut self, column: u16, row: u16) -> bool {
         let Some(area) = self.st.body_area else {
             return false;
         };

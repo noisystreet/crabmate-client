@@ -213,7 +213,12 @@ fn env_present(keys: &[&str]) -> bool {
         .any(|k| std::env::var_os(k).is_some_and(|v| !v.is_empty()))
 }
 
-fn in_ssh_session() -> bool {
+/// 是否跑在 SSH 会话里（`SSH_CONNECTION` 等由 sshd 注入）。
+///
+/// `pub(super)`：正文链接的打开路径要用同一条判定 —— 远端会话里拉起的浏览器不在
+/// 用户眼前，只能降级成复制（见 `links::plan`）。两处各判一次就会出现
+/// 「复制走远端、打开走本地」的分叉。
+pub(super) fn in_ssh_session() -> bool {
     env_present(&["SSH_CONNECTION", "SSH_TTY", "SSH_CLIENT"])
 }
 

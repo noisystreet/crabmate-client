@@ -28,17 +28,19 @@ pub(crate) fn md_span_style(span: &InlineSpan, pal: &Palette) -> Style {
             }
         }
         InlineSpan::Strike(_) => Style::new().add_modifier(Modifier::CROSSED_OUT),
-        InlineSpan::Link { .. } => {
-            if pal.is_mono() {
-                Style::new().add_modifier(Modifier::UNDERLINED)
-            } else {
-                Style::new()
-                    .fg(pal.accent)
-                    .add_modifier(Modifier::UNDERLINED)
-            }
-        }
+        // 样式在 `md_links::link_style` 单源：裸 URL 也要走这条（见 `md_image` 的
+        // 文本分支），两处各写一遍迟早分叉。
+        InlineSpan::Link { .. } => md_links::link_style(pal),
     }
 }
+
+// 链接（URL 随字符流走 + 折行后的屏幕列）单独成文件：本文件贴着 920 行门禁，
+// 而这块自成一套（字符容器 + 列换算），与「markdown 怎么解析」关系松散。
+#[path = "md_links.rs"]
+mod md_links;
+#[cfg(test)]
+pub(crate) use md_links::wrap_styled_chars;
+pub(crate) use md_links::{PartChars, remap_links, wrap_styled_rows};
 
 /// 片段文本（Link 取展示文本）。
 fn span_text(span: &InlineSpan) -> &str {
@@ -86,11 +88,11 @@ pub(crate) fn wrap_physical(text: &str, width: usize) -> Vec<String> {
     rows
 }
 
-/// 单段（不含换行）行内文本 → 带 markdown 样式的字符流。
+/// 单段（不含换行）行内文本 → 带 markdown 样式的字符流（链接连同 URL 一起带出）。
 ///
 /// 图片（`![alt](url)`）先由 [`inline_image`] 切出去降级成 `[图] alt`：
 /// 终端显示不了位图，而共享 parser 不认 `![`（会把 `!` 单独留成文本）。
-pub(crate) fn inline_styled_chars(part: &str, pal: &Palette) -> Vec<(Style, char)> {
+pub(crate) fn inline_styled_chars(part: &str, pal: &Palette) -> PartChars {
     inline_image::inline_styled_chars(part, pal)
 }
 
@@ -250,26 +252,31 @@ fn hang_pad(n: usize) -> Vec<(Style, char)> {
 /// 为什么不交给 `wrap_styled_chars`：那一层只看到字符流，拿不到「这是哪个块的
 /// 续行」—— 悬挂缩进只能在**生成字符流时**就插好，否则续行会顶到第 0 列。
 fn wrap_body(
-    body: Vec<(Style, char)>,
+    body: PartChars,
     mut used: usize,
     cont: Vec<(Style, char)>,
     width: usize,
-) -> Vec<(Style, char)> {
+) -> PartChars {
     if width == 0 {
         return body;
     }
     let cont_w = display_width(&cont);
-    let mut out: Vec<(Style, char)> = Vec::new();
-    for (s, ch) in body {
+    let mut out = PartChars::default();
+    // 每个正文字符落在输出流的哪个下标。续行前缀是**插入**进去的，链接区间必须跟着
+    // 一起平移 —— 否则折行之后点下去会整体往前错一个前缀宽度。
+    let mut pos_map: Vec<usize> = Vec::with_capacity(body.len());
+    for &(s, ch) in body.iter() {
         let cw = ch.width().unwrap_or(0);
         if used + cw > width && used > cont_w {
             out.push((Style::new(), '\n'));
             out.extend(cont.iter().copied());
             used = cont_w;
         }
+        pos_map.push(out.len());
         out.push((s, ch));
         used += cw;
     }
+    out.links = remap_links(&body.links, &pos_map);
     out
 }
 
@@ -301,7 +308,7 @@ fn heading_prefix(level: usize, pal: &Palette) -> Vec<(Style, char)> {
 /// 早前把 `###` 灰化留在行内，问题有二：白占 2～6 列；且 H1–H6 除字数外看起来
 /// 完全一样，长文档里读不出骨架。
 fn push_heading(
-    out: &mut Vec<(Style, char)>,
+    out: &mut PartChars,
     level: usize,
     body: &str,
     pal: &Palette,
@@ -316,16 +323,13 @@ fn push_heading(
     let used = indent + display_width(&prefix);
     out.extend(prefix);
     // 行内样式（粗体/代码底纹）叠加在标题样式之上，不是被覆盖。
-    let chars: Vec<(Style, char)> = inline_styled_chars(body, pal)
-        .into_iter()
-        .map(|(s, c)| (s.patch(base), c))
-        .collect();
-    out.extend(wrap_body(chars, used, hang_pad(used), width));
+    let chars = inline_styled_chars(body, pal).patched(base);
+    out.absorb(wrap_body(chars, used, hang_pad(used), width));
 }
 
 /// 任务列表：`☑` / `☐` 取代 `[x]` / `[ ]` —— 省一列，且方框本身就是列表语义。
 fn push_task(
-    out: &mut Vec<(Style, char)>,
+    out: &mut PartChars,
     checked: bool,
     body: &str,
     pal: &Palette,
@@ -340,7 +344,7 @@ fn push_task(
     out.push((st, if checked { '☑' } else { '☐' }));
     out.push((Style::new(), ' '));
     let used = indent + 2;
-    out.extend(wrap_body(
+    out.absorb(wrap_body(
         inline_styled_chars(body, pal),
         used,
         hang_pad(used),
@@ -364,7 +368,7 @@ fn bullet_char(indent: usize) -> char {
 /// - 引用 `>`：换成竖条 `▎`。连续几行的竖条自然连成一条线，范围一眼可见；
 ///   嵌套（`> > x`）就叠几条
 fn push_marker(
-    out: &mut Vec<(Style, char)>,
+    out: &mut PartChars,
     marker_len: usize,
     content_at: usize,
     rest: &str,
@@ -382,7 +386,7 @@ fn push_marker(
             out.push((bullet_st, bullet_char(indent)));
             out.push((Style::new(), ' '));
             let used = indent + 2;
-            out.extend(wrap_body(
+            out.absorb(wrap_body(
                 inline_styled_chars(&rest[content_at..], pal),
                 used,
                 hang_pad(used),
@@ -406,7 +410,7 @@ fn push_marker(
                 out.push((Style::new(), ' '));
                 used += 1;
             }
-            out.extend(wrap_body(
+            out.absorb(wrap_body(
                 inline_styled_chars(&rest[content_at..], pal),
                 used,
                 hang_pad(used),
@@ -418,13 +422,7 @@ fn push_marker(
 
 /// 引用：每个 `>` 换成一个竖条，嵌套就叠几条；**折行后的续行同样带竖条**，
 /// 这样一整个引用块在屏幕上始终是一条连续的竖线。
-fn push_quote(
-    out: &mut Vec<(Style, char)>,
-    rest: &str,
-    indent: usize,
-    pal: &Palette,
-    width: usize,
-) {
+fn push_quote(out: &mut PartChars, rest: &str, indent: usize, pal: &Palette, width: usize) {
     let bar = if pal.is_mono() {
         Style::new()
     } else {
@@ -444,17 +442,18 @@ fn push_quote(
         .flat_map(|_| [(bar, '▎'), (Style::new(), ' ')])
         .collect();
     let used = indent + bars * 2;
-    out.extend(wrap_body(inline_styled_chars(body, pal), used, cont, width));
+    out.absorb(wrap_body(inline_styled_chars(body, pal), used, cont, width));
 }
 
 /// 单行：行首标记（分隔线/标题/任务列表/列表/引用）渲染 + 其余部分行内 md。
 ///
 /// 宽容识别只影响样式判定，不增删正文；只有**结构性标记**（分隔线、标题 `#`、
 /// 任务列表的 `[ ]`）不上屏 —— 它们由更明确的视觉形式替代。
-fn styled_part_chars(part: &str, pal: &Palette, width: usize) -> Vec<(Style, char)> {
+fn styled_part_chars(part: &str, pal: &Palette, width: usize) -> PartChars {
     let indent = leading_indent(part);
     let rest = &part[indent..];
-    let mut out: Vec<(Style, char)> = part[..indent].chars().map(|c| (Style::new(), c)).collect();
+    let mut out = PartChars::default();
+    out.extend(part[..indent].chars().map(|c| (Style::new(), c)));
     if is_rule(rest.as_bytes()) {
         out.extend(rule_chars(width, pal));
         return out;
@@ -597,16 +596,18 @@ fn split_padded(cells: Vec<(Style, char)>, width: usize, st: Style) -> Vec<(Styl
 }
 
 /// 追加一行（首行前不补换行）；空段落也要过这里，否则段落间距会消失。
-fn push_row(out: &mut Vec<(Style, char)>, first: &mut bool, row: Vec<(Style, char)>) {
+///
+/// `row` 带着自己的链接区间进来，`absorb` 会把它平移到整段字符流的坐标系上。
+fn push_row(out: &mut PartChars, first: &mut bool, row: PartChars) {
     if !*first {
         out.push((Style::new(), '\n'));
     }
-    out.extend(row);
     *first = false;
+    out.absorb(row);
 }
 
 /// 去掉末尾的换行（CommonMark：文档结尾的空行不算段落）。
-fn trim_tail(out: &mut Vec<(Style, char)>) {
+fn trim_tail(out: &mut PartChars) {
     while let Some(&(_, '\n')) = out.last() {
         out.pop();
     }
@@ -619,7 +620,7 @@ fn emit_table(
     pal: &Palette,
     width: usize,
     in_fence: bool,
-    out: &mut Vec<(Style, char)>,
+    out: &mut PartChars,
     first: &mut bool,
 ) -> Option<usize> {
     // 围栏内的 `|` 是代码内容，不是表格。
@@ -628,7 +629,7 @@ fn emit_table(
     }
     let (lines, consumed) = table::table_rows(rows, i, pal, width)?;
     for line in lines {
-        push_row(out, first, line);
+        push_row(out, first, line.into());
     }
     Some(consumed)
 }
@@ -645,13 +646,23 @@ fn emit_table(
 ///
 /// `code_width` 是代码块要铺满的目标显示宽度（让整个块是个等宽矩形）；
 /// 传 `0` 表示不铺满（纯文本场景与大多数用例只关心内容，不关心块宽）。
+/// 纯字符流版本（不带链接）：只剩测试与纯文本场景在用。
+#[cfg(test)]
 pub(crate) fn assistant_styled_text(
     text: &str,
     pal: &Palette,
     code_width: usize,
 ) -> Vec<(Style, char)> {
+    assistant_styled(text, pal, code_width).into_chars()
+}
+
+/// 同 [`assistant_styled_text`]，但把**链接区间**一起带出。
+///
+/// 折行层拿不到 URL（字符流里只剩一个下划线修饰位），所以链接必须在这一层记录字符
+/// 区间、随字符流一起往下走，最后由 [`wrap_styled_rows`] 换算成屏幕列。
+pub(crate) fn assistant_styled(text: &str, pal: &Palette, code_width: usize) -> PartChars {
     let text = normalize_markdown_for_render(text);
-    let mut out = Vec::new();
+    let mut out = PartChars::default();
     let mut first = true;
     let mut in_fence = false;
     // 开头视为「上一行为空」，让首部空行不产生间距。
@@ -669,7 +680,7 @@ pub(crate) fn assistant_styled_text(
             if opening {
                 let label = fence_open_chars(part, pal, code_width);
                 if !label.is_empty() {
-                    push_row(&mut out, &mut first, label);
+                    push_row(&mut out, &mut first, label.into());
                 }
             }
             prev_blank = false;
@@ -688,8 +699,8 @@ pub(crate) fn assistant_styled_text(
             i += 1;
             continue;
         }
-        let row = if in_fence {
-            code_line_chars(part, pal, code_width)
+        let row: PartChars = if in_fence {
+            code_line_chars(part, pal, code_width).into()
         } else {
             styled_part_chars(part, pal, code_width)
         };
@@ -703,41 +714,6 @@ pub(crate) fn assistant_styled_text(
         trim_tail(&mut out);
     }
     out
-}
-
-/// 按显示宽度把带样式字符流折成物理行（控制字符丢弃）。
-///
-/// `\n` 一律落行——包括当前行为空时：空行要保留成一行空白，段落间距才存在
-/// （对齐 desktop 的 `.msg-md-prose p { margin }`）。普通纯文本走
-/// [`wrap_physical`]，仍折叠空行。
-pub(crate) fn wrap_styled_chars(styled: &[(Style, char)], width: usize) -> Vec<Vec<(Style, char)>> {
-    let mut rows: Vec<Vec<(Style, char)>> = Vec::new();
-    let mut row: Vec<(Style, char)> = Vec::new();
-    let mut row_width = 0usize;
-    for &(st, ch) in styled {
-        if ch == '\n' {
-            rows.push(std::mem::take(&mut row));
-            row_width = 0;
-            continue;
-        }
-        if ch.is_control() {
-            continue;
-        }
-        let cw = ch.width().unwrap_or(0);
-        if !row.is_empty() && row_width + cw > width {
-            rows.push(std::mem::take(&mut row));
-            row_width = 0;
-        }
-        row.push((st, ch));
-        row_width += cw;
-    }
-    if !row.is_empty() {
-        rows.push(row);
-    }
-    if rows.is_empty() {
-        rows.push(Vec::new());
-    }
-    rows
 }
 
 /// 叠加行内样式到行基色上（md 未给前景/底色时随基色）。

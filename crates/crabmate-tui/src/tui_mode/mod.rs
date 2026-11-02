@@ -12,6 +12,10 @@ mod approve;
 mod background;
 mod background_cmd;
 mod body_cache;
+// 正文区左键点击的分派（链接 / 折叠 / 兜底）：`on_mouse` 与本文件都贴着门禁，
+// 单独成文件后两边都有余量。
+#[path = "body_click.rs"]
+mod body_click;
 mod clipboard;
 // `controls` / `tool_summary` 提到 `pub(crate)`：清除词与控制字符剥离在 crate 根也要用。
 pub(crate) mod controls;
@@ -27,6 +31,7 @@ mod input_keys;
 mod lane_cmd;
 mod lane_list;
 mod layout;
+mod links;
 mod md;
 mod mouse;
 mod mouse_drag;

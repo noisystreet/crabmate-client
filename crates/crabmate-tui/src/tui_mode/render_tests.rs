@@ -857,3 +857,56 @@ fn render_body_writes_back_the_window_for_the_mouse() {
         "贴底渲染：最后一条物理行对应最后一条逻辑行"
     );
 }
+
+/// 链接热区与 `body_rows_log` 必须逐行对齐，且列**相对正文区左边界**（前缀已计入）。
+///
+/// 少了这层对齐，`click_link` 的 `row - area.y` 会索引到别人的行 ——
+/// 表现为「点这条链接，打开的是另一条的地址」。
+#[test]
+fn render_body_writes_back_link_hit_areas() {
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+
+    const W: u16 = 80;
+    const H: u16 = 12;
+    let mut st = UiState::new();
+    st.set_palette(super::Palette::default());
+    st.sidebar_visible = false;
+    st.push_line(LineKind::Assistant, "见 [文档](https://example.com) 末尾");
+    let rows = build_body_rows(&st, chat_body_width(narrow_layout(), W));
+    let info = StatusInfo {
+        api_base: "http://x".into(),
+        context: "—".to_string(),
+        ..StatusInfo::default()
+    };
+    let mut terminal = Terminal::new(TestBackend::new(W, H)).expect("terminal");
+    terminal
+        .draw(|f| draw(f, &mut st, &info, &rows, None, &[], &[]))
+        .expect("draw");
+
+    assert_eq!(
+        st.body_links.len(),
+        st.body_rows_log.len(),
+        "链接表与行映射表必须逐行对齐"
+    );
+    let links: Vec<_> = st.body_links.iter().flatten().collect();
+    assert_eq!(links.len(), 1, "这一行只有一条链接");
+    let link = links[0];
+    assert_eq!(link.url, "https://example.com");
+    // 「助手 」= 5 列、「见 」= 3 列、两个汉字 4 列 → 8..12
+    assert_eq!((link.start_col, link.end_col), (8, 12));
+
+    // 用与鼠标同一套「减法 + 区间」复核：热区内的列命中，前后各差一列都不命中。
+    let row_idx = st
+        .body_rows_log
+        .iter()
+        .position(Option::is_some)
+        .expect("应有内容行");
+    let row_links = &st.body_links[row_idx];
+    assert_eq!(
+        crate::tui_mode::links::hit(row_links, 8),
+        Some("https://example.com")
+    );
+    assert_eq!(crate::tui_mode::links::hit(row_links, 7), None);
+    assert_eq!(crate::tui_mode::links::hit(row_links, 12), None);
+}

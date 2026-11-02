@@ -151,7 +151,7 @@
 
 - **W3.1 斜杠补全列表** — **已落地**（`tui_mode/slash_menu.rs`）：composer 输入 `/` 前缀弹出候选（内建命令 `controls.rs` 表 + `GET /skills` 的 skill），↑↓ 选择 · Tab/Enter 采纳 · Esc 关闭；候选为空时底部说明 skill 为何缺失。
 - **W3.2 审批浮层看完整命令** — **已落地**（G8）：`Ctrl+E` 展开/收起，展开档按宽度折行 + 可滚动，提示行给出位置；收起档的单行预览也把语义换行压成空格（不再因为 `Line` 里夹 `\n` 把提示行顶掉）。
-- **W3.3 阅读增强**：OSC8 超链接（wezterm/kitty 可点击 URL）、工具行/thinking 详情整段展开（受 SSE 负载约束，先验证负载是否携带完整文本）。
+- **W3.3 阅读增强** — **链接部分已落地（应用内，不是 OSC 8）**：正文里的 `[文字](url)` 与裸 `http(s)://…` 都能打开（**`Ctrl+单击`** 命中链接文字即拉起系统浏览器（`xdg-open` → `gio open` → `sensible-browser` → `open`），普通单击仍是「回到输入框」；裸地址按 `[url](url)` 登记 —— 显示文本就是地址本身，屏幕上逐字不变，尾随标点会剥掉，行内代码与代码块里的地址保持字面量）。**OSC 8 明确不做**：本程序开着鼠标上报（`shell.rs` 的 1000/1002/1006），点击会被送进本进程、终端自己的链接处理器收不到，OSC 8 在这套捕获模式下收益为零；应用内命中表不依赖终端能力，长 URL 折行后逐段都能点。落点：`tui_mode/links.rs`（URL 校验 / 打开器 / `click_link`）、`body_click.rs`（链接 → 折叠 → 「回输入框」的分派）、`body_row.rs`（`BodyRow` + 热区）、`md_links.rs`（`PartChars` + 折行换算列）；`render_body` 每帧回写 `UiState::body_links`（与 `body_rows_log` 逐行对齐，鼠标侧只做减法）。边界：只放行 `http(s)`（拒 `javascript:` / `data:` / `file:` / 控制字符 / >2048 字节）；SSH 会话降级为「已复制链接 + 说明」（复用 `clipboard::in_ssh_session` 与 OSC52），无打开器或拉起失败同样回落复制；表格单元格内的链接不可点（按列截断，没有稳定列）；**每种结果都写一行回执**，因为静默失败就是「点了没反应」。仍待做：**工具行 / thinking 详情整段展开**（受 SSE 负载约束，先验证负载是否携带完整文本）。
 - **W3.4 设置面板补齐 W3 遗留**：MCP 全局开关与 `tool_timeout_secs`、Session SQLite 开关——实现归属 [`tui_settings_panel.md`](./tui_settings_panel.md) §7，本规划仅列入口不展开。
 
 ---
@@ -170,6 +170,7 @@
 | W3.1 | L60「Control slashes」TUI 列 | 已同步（TUI 有 `/` 补全菜单，含 skills 候选） |
 | W3.2 | L55「`POST /chat/stream` + command approval」TUI Notes | 补 `Ctrl+E` 展开看完整命令（折行 + 滚动）、收起档单行截断 |
 | W3.3 | L53「Full-screen TUI」Notes | 补「< 120 列时左右栏隐藏，当前工作区无指示」（G10，待落地） |
+| W3.3（链接） | L57「Full-screen TUI」Notes | 已同步：`Ctrl+单击` 打开正文链接（应用内命中表，不依赖 OSC 8；SSH 降级为复制；只放行 http(s)） |
 | W3.4 | L54「Full-screen TUI」Notes | 补状态栏 `ctx` 上下文用量段（`tiktokenPromptTokens`（`RUN_FINISHED` / `conversation_saved`） + 会话内水位；口径来自 S11 `client-api::context_axis`；段恒在，无实测时占位 `—`）——已同步 |
 | W3.5 | 同格 Notes | 已修（见 G11）：`timeline_log` `kind=context_trim` 的 `after_tokens` 会把水位**回落**；另加两处清理 —— `/conv new` 与切换会话时 `UiState::clear_usage` 清空快照与水位，避免新会话仍显示上一个会话的数字；新会话（无 cid）回落 `/status` 的 `tiktoken_new_session_baseline_by_agent_role` 并显示 `~` 估算前缀（对齐 Desktop）；另：首轮结束绑上 cid 后若这一轮仍无实测，回合末补拉 `GET /conversation/messages` 的快照（同 Desktop 流收尾水合，回包按 cid 门控），不再从 `~12k` 掉回 `—` |
 

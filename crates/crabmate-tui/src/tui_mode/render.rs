@@ -9,6 +9,7 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 use unicode_width::UnicodeWidthStr;
 
 use super::layout::panes_with_lanes;
+use super::links::RowLink;
 use super::md;
 use super::palette::{Palette, with_row_style};
 use super::settings_panel::PanelContent;
@@ -88,46 +89,11 @@ pub struct StatusInfo {
     pub lanes: super::lane_list::LaneTally,
 }
 
-/// 一条可渲染的 transcript 物理行。
-#[derive(Clone)]
-pub struct BodyRow {
-    /// 所属逻辑行下标（供搜索锚点定位）；块间分隔行不属于任何逻辑行，为 `None`。
-    /// 用 `Option` 而非哨兵下标，是为了让"分隔行不该被锚点命中"成为类型级事实——
-    /// 锚点查找按 `Some(target)` 匹配，无需依赖“首匹配/末匹配”之类的取行顺序。
-    pub log_index: Option<usize>,
-    pub line: Line<'static>,
-}
-
-impl BodyRow {
-    /// 内容行：逻辑行 `idx` 的一个物理行。
-    fn content(idx: usize, line: Line<'static>) -> Self {
-        Self {
-            log_index: Some(idx),
-            line,
-        }
-    }
-
-    /// 块间分隔行：极暗的满宽细线，不归属任何逻辑行（搜索锚点据此跳过）。
-    /// `indent` 取上一条逻辑行的前缀宽度，让线与上方块内容左对齐；
-    /// `width` 小于 `indent` 或极窄时 `rule` 退化为 0，此时等同空行，不会 panic。
-    pub(crate) fn separator(width: usize, indent: usize, pal: &Palette) -> Self {
-        let indent = indent.min(width);
-        let rule = width.saturating_sub(indent);
-        let mut text = String::with_capacity(width);
-        text.push_str(&" ".repeat(indent));
-        text.push_str(&"─".repeat(rule));
-        // 无色模式没有可靠的“极暗”色，退回 DIM；`─` 本身已能表达分隔。
-        let style = if pal.mono {
-            Style::new().add_modifier(Modifier::DIM)
-        } else {
-            Style::new().fg(pal.border)
-        };
-        Self {
-            log_index: None,
-            line: Line::from(Span::styled(text, style)),
-        }
-    }
-}
+// `BodyRow`（物理行 + 链接热区）单独成文件：`render.rs` 贴着 920 行文件门禁，
+// 而它只是数据结构与命中查询，与「怎么画」关系松散（与下面的 `prefix` 同一手法）。
+#[path = "body_row.rs"]
+mod body_row;
+pub use body_row::BodyRow;
 
 // 前缀（文本 / 显示列数 / 配色）单独成文件：前缀文本同时是折行预算的一部分，三件事
 // 必须一起改。与 `overlay` 同一布局（`#[path]` 子模块），`mod.rs` 不必为此多一行 ——
@@ -346,7 +312,11 @@ fn plain_body_rows(cx: &RowCtx<'_>) -> Vec<BodyRow> {
             ));
         }
         spans.push(Span::styled(phys, row_style));
-        rows.push(BodyRow::content(cx.idx, Line::from(spans)));
+        // 纯文本行（用户 / 工具 / 系统 / 折叠后的思考）不做行内 markdown 解析，因此
+        // 这里没有链接热区：**已知差异** —— 这些行里的 URL 仍不可点（终端自己的
+        // 链接处理器也收不到点击，本程序开着鼠标上报）。要给它们热区，得在
+        // `wrap_physical` 之后另算一次列，那是独立的一件事。
+        rows.push(BodyRow::content(cx.idx, Line::from(spans), Vec::new()));
         first = false;
     }
     rows
@@ -356,9 +326,9 @@ fn plain_body_rows(cx: &RowCtx<'_>) -> Vec<BodyRow> {
 fn assistant_body_rows(cx: &RowCtx<'_>) -> Vec<BodyRow> {
     // 代码块要铺成等宽矩形，得知道可用宽度；首行的 `prefix` 会占几列，先扣掉。
     let code_width = cx.content_width.saturating_sub(prefix_width(cx.prefix));
-    let styled = md::assistant_styled_text(cx.text, cx.pal, code_width);
+    let styled = md::assistant_styled(cx.text, cx.pal, code_width);
     let mut rows = Vec::new();
-    for (row_no, row) in md::wrap_styled_chars(&styled, cx.content_width)
+    for (row_no, wrapped) in md::wrap_styled_rows(&styled, cx.content_width)
         .into_iter()
         .enumerate()
     {
@@ -374,15 +344,30 @@ fn assistant_body_rows(cx: &RowCtx<'_>) -> Vec<BodyRow> {
             spans.push(Span::styled(cx.prefix.to_string(), pstyle));
         }
         spans.extend(md::styled_row_spans(
-            &row,
+            &wrapped.chars,
             cx.style,
             cx.matched,
             cx.anchor_log && is_first,
             cx.pal,
         ));
-        rows.push(BodyRow::content(cx.idx, Line::from(spans)));
+        // 链接列与 `wrapped.chars` 出自同一次折行；首行前面还站着前缀，整行右移。
+        let links = shift_links(&wrapped.links, is_first, prefix_width(cx.prefix));
+        rows.push(BodyRow::content(cx.idx, Line::from(spans), links));
     }
     rows
+}
+
+/// 行内链接列 → 正文区坐标：首行前面还有前缀（`You ` / `tool ` 之类），整段右移。
+fn shift_links(links: &[(u16, u16, String)], first: bool, prefix_w: usize) -> Vec<RowLink> {
+    let shift = u16::try_from(if first { prefix_w } else { 0 }).unwrap_or(u16::MAX);
+    links
+        .iter()
+        .map(|(start, end, url)| RowLink {
+            start_col: start + shift,
+            end_col: end + shift,
+            url: url.clone(),
+        })
+        .collect()
 }
 
 /// 测试便捷名（仅测试引用 build_body_rows）。
@@ -793,6 +778,12 @@ fn render_body(
     st.body_rows_log = rows[win.start..win.end]
         .iter()
         .map(|r| r.log_index)
+        .collect();
+    // 链接热区与 `body_rows_log` 共用同一份窗口与坐标原点：鼠标侧只做减法，
+    // 绝不重算折行（重算就会点偏）。
+    st.body_links = rows[win.start..win.end]
+        .iter()
+        .map(|r| r.links.clone())
         .collect();
     frame.render_widget(Paragraph::new(shown), text_area);
 }
