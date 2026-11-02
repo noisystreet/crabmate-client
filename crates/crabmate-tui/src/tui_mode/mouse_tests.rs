@@ -673,6 +673,24 @@ fn click_tracker_needs_the_same_row_within_the_window() {
     );
 }
 
+/// 视图开着时，聊天列上的滚轮滚的是**文件**，不是被它整片遮住的 transcript。
+///
+/// 滚错对象在屏幕上表现为「滚轮坏了」：内容不动，而 transcript 在看不见的地方跑远了。
+#[test]
+fn the_wheel_over_the_chat_column_scrolls_the_open_file_view() {
+    with_wide_app(|app| {
+        let body: String = (1..=40).map(|i| format!("l{i}\n")).collect();
+        app.st.editor.open_file("src/lib.rs", 0);
+        app.st.editor.accept(&body);
+        let (left, right) = side_panes(app);
+        let column = left.x + left.width + (right.x - left.x - left.width) / 2;
+        scroll(app, MouseEventKind::ScrollDown, column, 2);
+        assert_eq!(app.st.editor.scroll, 3, "一格 3 行，与聊天区滚轮同一步长");
+        scroll(app, MouseEventKind::ScrollUp, column, 2);
+        assert_eq!(app.st.editor.scroll, 0, "往回滚回到顶部");
+    });
+}
+
 /// 超出窗口就是两次单击：慢慢点两下不该打开文件。
 #[test]
 fn click_tracker_expires_after_the_window() {

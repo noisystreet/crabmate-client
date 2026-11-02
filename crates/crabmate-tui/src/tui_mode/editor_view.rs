@@ -27,6 +27,12 @@ use crate::serve::{FILE_VIEW_MAX_LINES, WorkspaceFile};
 /// 也对得上（不引入「看起来错位」这种最难查的观感问题）。
 const TAB_WIDTH: usize = 4;
 
+/// 滚轮一格滚几行。
+///
+/// 与聊天区 transcript 的滚轮步长取同一个数：终端里的滚轮事件是离散的，一格只走一行
+/// 读起来像「滚了没动」，一整屏又太粗 —— 一次跳过去就找不回刚看到的那一行。
+const WHEEL_LINES: usize = 3;
+
 /// 视图自身的行数下限（标题 / 内容 / 提示）：再矮就没有内容可言，渲染层保证不低于它。
 pub(super) const MIN_VIEW_ROWS: usize = 3;
 
@@ -248,7 +254,8 @@ pub(super) fn view_lines(
     }
 
     // 提示行：告诉人「怎么回去」。这是第一版唯一的键位来源（`/help` 里也有一行）。
-    let mut hint = String::from("PgUp/PgDn · Alt+↑/↓ 滚动 · /chat 或 Esc 返回 · /editor <路径>");
+    let mut hint =
+        String::from("PgUp/PgDn · 滚轮/Alt+↑↓ 滚动 · /chat 或 Esc 返回 · /editor <路径>");
     if ed.truncated {
         hint.push_str(" · 已截断");
     }
@@ -296,6 +303,16 @@ impl LaneApp<'_> {
         let _ = self.fetch_ws_file(rel);
     }
 
+    /// 滚轮：一格滚 [`WHEEL_LINES`] 行。
+    ///
+    /// 视图开着时它占的正是聊天列，滚轮继续滚 transcript 只能表现为「滚了没反应」——
+    /// 那部分内容被视图整片盖住。步长与聊天区滚轮取同一个数，上下界沿用
+    /// [`EditorState::scroll_by`]（末行可顶到顶部，`less` 的行为）。
+    pub(super) fn editor_wheel(&mut self, up: bool) {
+        let step = WHEEL_LINES as isize;
+        self.st.editor.scroll_by(if up { -step } else { step });
+    }
+
     /// `/chat`：回到聊天视图（幂等）。
     pub(super) fn editor_close(&mut self) {
         if self.st.editor.open {
@@ -341,7 +358,7 @@ mod tests {
     use std::sync::mpsc;
 
     use super::super::test_support::{test_app, test_client, test_prefs};
-    use super::{EditorState, LaneApp, MIN_VIEW_ROWS, basename, clip, normalize_rel};
+    use super::{EditorState, LaneApp, MIN_VIEW_ROWS, WHEEL_LINES, basename, clip, normalize_rel};
     use crate::serve::WorkspaceFile;
 
     /// 外壳层的最小夹具：编辑器状态与命令都在 `LaneApp` 上，只测 `EditorState` 会漏掉
@@ -500,6 +517,53 @@ mod tests {
         assert_eq!(basename("/home/u/proj"), "proj");
         assert_eq!(basename("/home/u/proj/"), "proj");
         assert_eq!(basename("proj"), "proj");
+    }
+
+    /// 渲染后的整段文本（标题、行号、提示行都在里面）。
+    fn view_text(a: &LaneApp<'_>, width: usize, height: usize) -> String {
+        super::view_lines(&a.st.editor, None, width, height, &a.st.palette)
+            .iter()
+            .map(std::string::ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// 行号列画的是**绝对行号**，滚动之后跟着各自的内容走。
+    ///
+    /// 两种坏法都能被这条抓住：没画行号（整列消失），以及滚动后按可见序号重新编号
+    /// （从 1 数起 —— 看文件尾部时会误以为自己在文件开头）。
+    #[test]
+    fn line_numbers_are_absolute_and_follow_the_scroll() {
+        app(|a| {
+            a.st.editor.open_file("src/lib.rs", 0);
+            a.st.editor.accept_limited("l1\nl2\nl3\nl4\n", 100);
+            // 视口 5 行 = 3 行内容：滚 3 行后被收敛到 1，画面是 l2 / l3 / l4
+            a.editor_wheel(false);
+            let text = view_text(a, 60, 5);
+            assert!(text.contains("  4 │ l4"), "行号要跟着内容走：{text}");
+            assert!(text.contains("  2 │ l2"), "{text}");
+            assert!(!text.contains("  1 │ l1"), "滚出去的行不该还在：{text}");
+        });
+    }
+
+    /// 滚轮一格 [`WHEEL_LINES`] 行，顶部与末尾都夹住。
+    #[test]
+    fn the_wheel_moves_three_lines_and_clamps_at_both_ends() {
+        app(|a| {
+            a.st.editor.open_file("a.rs", 0);
+            let body: String = (1..=40).map(|i| format!("l{i}\n")).collect();
+            a.st.editor.accept_limited(&body, 100);
+            a.editor_wheel(false);
+            assert_eq!(a.st.editor.scroll, WHEEL_LINES, "一格 = 3 行");
+            a.editor_wheel(true);
+            assert_eq!(a.st.editor.scroll, 0);
+            a.editor_wheel(true);
+            assert_eq!(a.st.editor.scroll, 0, "顶部再往上不越界");
+            for _ in 0..40 {
+                a.editor_wheel(false);
+            }
+            assert_eq!(a.st.editor.scroll, 39, "末尾夹在末行");
+        });
     }
 
     #[test]
