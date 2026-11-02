@@ -94,6 +94,7 @@ bash scripts/check-tui-palette-usage.sh  # tui_mode must not hard-code named / l
 bash scripts/check-icons.sh              # no literal <svg> outside icon.rs; svg rule sizes must be var(--icon-*)
 bash scripts/check-modal-shell.sh        # role / aria-modal only emitted by app/focusable_menu.rs
 bash scripts/check-xml-comments.sh       # no `--` inside XML comment bodies (XML 1.0 §2.5; aapt2 fails resource merging)
+bash scripts/check-changelog-style.sh    # `[Unreleased]` entries ≤ 800 chars; released sections are frozen
 bash scripts/ensure-tauri-dist-stubs.sh  # desktop/mobile dist stubs for tauri codegen
 bash scripts/set-version.sh 0.5.1        # bump all Rust package versions (+ Cargo.locks) in one step
 bash scripts/lizard-rust.sh              # any function with CCN>10 fails (global zero rule; no per-module caps)
@@ -159,7 +160,7 @@ When updating docs:
 | Victauri / pre-commit / CI commands | `docs/TESTING.md` |
 | Issue / PR templates | `.github/ISSUE_TEMPLATE/` (`bug_report.md` / `feature_request.md` / `config.yml`) + `.github/pull_request_template.md`; keep the three issue files and the PR template consistent in the same PR |
 | Dependency audit (`cargo audit` / `cargo deny`) | `deny.toml`; CI `.github/workflows/dependency-security.yml`; not in pre-commit |
-| User/maintainer release notes | `CHANGELOG.md` (English; Keep a Changelog; move Unreleased into a version section on release) |
+| User/maintainer release notes | `CHANGELOG.md` (English; Keep a Changelog; move Unreleased into a version section on release). **Entry style**: one `[Unreleased]` entry ≤ 800 characters — what changed, why it matters, what it costs; mechanisms / alternatives / verification counts go to the PR body, durable rationale goes to `docs/design/`. Released sections are **frozen** (they are the published release notes `release.yml` extracts verbatim): never rewrite them, add a `**Summary**` paragraph above a long section instead. Enforced by `scripts/check-changelog-style.sh` (hook + `scripts/check.sh`; `[Unreleased]` only) |
 | Contract pin tag / rev | `docs/design/contract_pin.md`; policy authority is Server |
 | SSE / CORS / Bearer / API base / `CM_WEB_*` / error codes + `request_id` / contract semver | **Server** `docs/`; this repo only links |
 | `client-contract-v*` release policy | **Server** `docs/design/client_contract_versioning.md` (linked below); this repo only pins the shape in `docs/design/contract_pin.md` |
