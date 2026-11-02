@@ -60,7 +60,7 @@ pub enum LineKind {
     Assistant,
     Thinking,
     Tool,
-    System,
+    System, // 系统通报行：成败混在一起，故按「过程通报」判色（见 `prefix::kind_prefix`）。
     /// 一轮执行过程的摘要行（issue #369）：代表被它折叠掉的那段 Thinking / Tool 行。
     ///
     /// 不是一次工具调用，也不是用户输入：它只承载「这一轮干了多少事」的读数，

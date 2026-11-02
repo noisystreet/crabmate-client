@@ -20,7 +20,11 @@ pub(crate) fn kind_prefix(kind: LineKind) -> &'static str {
         LineKind::Assistant => "助手 ",
         LineKind::Thinking => "思考 ",
         LineKind::Tool => "工具 ",
-        LineKind::System => "! ",
+        // 系统行既有真失败（「载入历史失败：…」），也有中性通报（「已加载更早的 3 条」、
+        // `/help` 的帮助正文），而 `LineKind` 不区分这两类（见 `state::LineKind`）。
+        // 原先的 `! ` 读作警号，配上正文的 err 红，等于把每条通报都说成告警；
+        // 标签化成角色名后，成败由正文自己那句话交代，与工具行同一口径。
+        LineKind::System => "系统 ",
         // 过程摘要行（issue #369）：`▸` 与 thinking 折叠行的标记同形，读作「这里折了一段」。
         // 展开态（成员放回来）在 [`prefix_for`] 里换成 `▾`：SUMMARY_OPEN。
         LineKind::Process => "▸ ",
@@ -63,6 +67,9 @@ pub(crate) fn prefix_width(prefix: &str) -> usize {
 /// 无色模式（`NO_COLOR` / `TERM=dumb`）所有 `Color` 都被抹成 `Reset`，颜色这一维等于
 /// 消失，必须改由修饰位分组：User / System 用 BOLD（要抢眼）、Thinking 用 DIM（低优先）、
 /// 其余不加修饰。否则五类前缀全长一样，比改动前更难分辨。
+///
+/// System 在有色模式下已改成中性档（见下方 `fg` 分支），但无色模式下 BOLD 仍要留着：
+/// 它与 Thinking 的前缀文本同宽、同色相，只剩 BOLD / DIM 这一维能分开。
 pub(crate) fn prefix_style(kind: LineKind, pal: &Palette) -> Style {
     if pal.mono {
         return match kind {
@@ -76,7 +83,9 @@ pub(crate) fn prefix_style(kind: LineKind, pal: &Palette) -> Style {
         LineKind::Assistant => pal.fg,
         LineKind::Thinking => pal.muted,
         LineKind::Tool => pal.info,
-        LineKind::System => pal.err,
+        // 与工具行同档：系统行也是「过程在说什么」，不是答案本身。取 `info` 而不是
+        // `muted` 是为了和 `思考 ` 分开 —— 后者的前缀同为低优先色，两者只差文字。
+        LineKind::System => pal.info,
         // 过程摘要行（issue #369）：与工具行同色系，它是「工具 / 思考的容器」。
         LineKind::Process => pal.info,
     };
