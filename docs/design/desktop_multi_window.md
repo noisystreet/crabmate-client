@@ -45,9 +45,26 @@ Desktop 做不到同样的形状，因为业务 UI 的状态是 **12 个 `thread
 | `register_connection(api_base, display_name?)` | 每个窗口自报 | 把自己放进名单（否则 main 永远缺席） |
 | `focus_connection(key)` | 前端列表点击 | 切到某窗口 |
 
+另两条是**本窗口自报读数**，壳不猜（左栏那行画的就是它们）：
+
+| 命令 | 谁调 | 作用 |
+|---|---|---|
+| `report_connection_status(status)` | 本窗口 `app_shell_effects::connection_report` | 回合开始 / 等审批 / 结束的边沿写状态；「刚进入等审批」的系统通知也在这里判 |
+| `report_connection_unread(unread)` | 同上 | 窗口失焦期间有后台回合 → `•`；重新聚焦 → 清零 |
+
+合成的**规则**不在这两层：`crabmate-client-api::connections` 的
+`connection_status_from_turn`（等审批压过运行中）与 `connection_unread_after`
+（前台清零 / 后台有回合置位 / 后台已空闲保持原值）是 TUI lane 行也在用的同一份口径。
+
 **`register_connection` 必须有调用者。** 只有 `open_connection` 会登记时，main 窗口自己
 不在名单里 —— `len` 永远凑不到 2，chip 就不会切成列表，功能在用户眼里等于没生效。
 这是实现期真实踩到的坑，见 §7。
+
+同理，**`report_connection_*` 也必须有调用者** —— 而且顺序是「先登记、再上报」：注册表按
+window label 查，未登记的 label 会被 `set_status` 静默丢弃，而 `register_connection` 是一次
+异步调用。所以上报的触发条件里带着 `status_connection_chip::connections_registered()`，
+登记完成那一刻补发第一帧（否则「首帧丢一次、之后状态又没再变」＝ 永远不更新，症状与
+`#399` 报的完全一样）。
 
 ## 4. `key` 恒等于 window label
 
@@ -133,6 +150,12 @@ signal」这个问题**不存在**，而不是被兜住。
 ## 10. 已知限制
 
 - 通知不撤不并（桌面插件无 id / 撤销 API）。
+- **行尾读数的 `context` / `busy_secs` 在 Desktop 上是空的**：壳侧没有任何命令写这两个
+  字段（`ConnectionSnapshot::new` 之后没人赋值），`report_connection_status` /
+  `report_connection_unread` 只覆盖 `status` / `unread`。要补得新增一条壳命令（外加一个
+  秒级 tick），属独立 issue —— 别指望「把桥补全」就能让那两个读数出现。
+- **`rename_connection` 目前没有调用者**：`display_name` 只在连上时经
+  `register_connection` 传进来，界面上没有改名入口。桥与入口应该一起做，否则补了也看不出来。
 - `snapshots()` 广播时强制 `active = false`，而 `open_connection` / `register_connection`
   的返回值里是 `true` —— 前者给「别人」看（列表里谁是焦点不归注册表判），后者给调用方看
   「你自己」。两套口径是有意的，但容易误读。
@@ -148,6 +171,10 @@ signal」这个问题**不存在**，而不是被兜住。
 3. 状态栈「连接」chip 应变成 2 条；点条目应切到对应窗口；**左栏那两行点也应切窗口**。
 4. **窗口 A 断开 → 窗口 B 刷新后仍应能认证**（这条专验 Bearer 分槽）。
 5. 窗口 B 触发审批 → 切到 A → 应收到系统通知，且 B 那行状态字形应变 `▲`。
+6. 在一个窗口发一个回合并**留在那个窗口** → 那行变 `●`，回合结束回 `·`（第 5 步验的是
+   后台那条，这一步验前台这条；两者读数来自同一份上报，但边沿不同）。
+7. 窗口 B 发一个回合后立刻切到 A → B 那行尾出现 `•`；切回 B → `•` 消失（并且**不会**
+   在 A 自己的行上出现）。
 
 第 4 步最值得跑：它验的是迁移与分槽，而这两块 CI 完全覆盖不到。
 
@@ -172,6 +199,8 @@ TUI 在左栏下半画 lane 区（`tui_multi_server.md` §4.6），Desktop 现�
 | 单连接 | 行内按钮 `disabled`：没有别的窗口可切，而「改基址」归右列 chip，两个入口不重复 |
 | 高亮 | 按 `authority` 与自己的 `api_base` 比对 —— 广播的 `snapshots()` **强制** `active = false`（同一份 payload 不可能对每个窗口都成立）。唯一会让两行同时亮的场景（两个窗口连同一台 serve）已由连接时去重挡住，见下节 |
 | 状态字形 | `·` 空闲 / `●` 运行中 / `▲` 等审批 / `×` 已请求退出（与 TUI 同口径，呼吸动画只在终端） |
+| 状态 / 未读来源 | 本窗口自报（`report_connection_status` / `report_connection_unread`），规则在 `crabmate-client-api::connections`；**先登记再上报**（`connections_registered()` 把关），否则首帧会被注册表静默丢弃。壳不猜任何一项 |
+| 行尾读数 | 只有 `•`（未读）在 Desktop 上有来源；`context` / `busy_secs` 仍为空，见 §10 |
 | 窄屏 | 不需要额外媒体查询：DOM 在 `.nav-rail` 内，抽屉打开时自动跟着进去 |
 
 **这不是 §12 说的「单窗口内并排多 lane」。** 同一时刻只显示一个窗口的会话；行是导航，

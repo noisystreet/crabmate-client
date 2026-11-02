@@ -151,6 +151,24 @@ pub enum ConnectionStatus {
     Quitting,
 }
 
+impl ConnectionStatus {
+    /// IPC / JSON 里的稳定字面量。
+    ///
+    /// 前端把状态上报给桌面壳时走的是字符串（Tauri 的 IPC 参数就是 JSON），壳侧按
+    /// serde 派生的外部标记反序列化。两边的字面量必须逐字一致 —— 写死在这里，是让
+    /// 「改枚举变体名」变成一处编译期可见的改动，而不是前端某个闭包里一句无声的
+    /// 字符串。一致性由单测钉住（见 `status_wire_literals_match_the_serde_shape`）。
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Idle => "Idle",
+            Self::Running => "Running",
+            Self::WaitingApproval => "WaitingApproval",
+            Self::Quitting => "Quitting",
+        }
+    }
+}
+
 /// 一条连接的**渲染快照**：只含显示需要的字段。
 ///
 /// 这是 TUI 的 `LaneEntry` 与 Desktop 连接列表的公共形状 —— 单连接就是长度为 1 的
@@ -259,6 +277,44 @@ impl ConnectionSnapshot {
             self.status,
             ConnectionStatus::Running | ConnectionStatus::WaitingApproval
         )
+    }
+}
+
+/// 由「回合是否在跑」与「是否有审批在等」合成一条连接此刻的状态。
+///
+/// 优先级是**等审批 > 运行中 > 空闲**。审批期间的回合确实还在跑，但「卡住等人」
+/// 是更强、也是唯一需要跳出窗口提醒的那个信号（被盖住的窗口看不见自己的审批框），
+/// 所以它压过 `Running`。写反的后果很具体：左栏那行的 `▲` 永远画不出来，而它正是
+/// 用户从别的窗口发现「那条连接在等我」的唯一线索。
+#[must_use]
+pub fn connection_status_from_turn(turn_busy: bool, waiting_approval: bool) -> ConnectionStatus {
+    if waiting_approval {
+        ConnectionStatus::WaitingApproval
+    } else if turn_busy {
+        ConnectionStatus::Running
+    } else {
+        ConnectionStatus::Idle
+    }
+}
+
+/// 未读标记的**下一个值**。
+///
+/// 三条规则，顺序即优先级：
+/// 1. 窗口在前台 → 清零。用户正看着它，`•` 只剩噪音。
+/// 2. 窗口在后台且回合在跑 → 置位。后台确实在产生输出。
+/// 3. 其余（后台、已空闲）→ **保持原值**。回合结束后用户还没回来看，那个 `•` 是
+///    「这儿有东西」的唯一线索，不能因为此刻没在跑就抹掉。
+///
+/// 返回「下一值」而不是「要不要变」：调用方每次重算即得终值，不必自己记住
+/// 「这个 `•` 是不是我置的」才能决定该不该清 —— 那正是最容易与真实状态走散的地方。
+#[must_use]
+pub fn connection_unread_after(focused: bool, turn_busy: bool, was_unread: bool) -> bool {
+    if focused {
+        false
+    } else if turn_busy {
+        true
+    } else {
+        was_unread
     }
 }
 
@@ -563,5 +619,52 @@ mod tests {
         let tally = ConnectionTally::from_snapshots(&[running, waiting, idle]);
         assert_eq!(tally.connected, 3);
         assert_eq!(tally.pending_approvals, 1);
+    }
+
+    #[test]
+    fn a_pending_approval_outranks_a_running_turn() {
+        // 审批期间回合也在跑，但 `▲` 是唯一能让用户从别的窗口发现「这条卡住了」的信号。
+        assert_eq!(
+            connection_status_from_turn(true, true),
+            ConnectionStatus::WaitingApproval
+        );
+        assert_eq!(
+            connection_status_from_turn(true, false),
+            ConnectionStatus::Running
+        );
+        assert_eq!(
+            connection_status_from_turn(false, false),
+            ConnectionStatus::Idle
+        );
+    }
+
+    #[test]
+    fn unread_is_cleared_by_focus_and_kept_after_the_turn_ends() {
+        // 前台：无论此前有没有 `•` 都清掉。
+        assert!(!connection_unread_after(true, true, true));
+        assert!(!connection_unread_after(true, false, true));
+        // 后台且回合在跑：置位。
+        assert!(connection_unread_after(false, true, false));
+        // 后台且已空闲：保住原值（回合结束了，但用户还没回来看）。
+        assert!(connection_unread_after(false, false, true));
+        assert!(!connection_unread_after(false, false, false));
+    }
+
+    #[test]
+    fn status_wire_literals_match_the_serde_shape() {
+        // 壳侧按 serde 派生的外部标记反序列化 `report_connection_status(status)`，
+        // 前端上报的是 `as_str()`：两边的字面量一旦走散，上报会在壳的反序列化那步
+        // 失败（命令是 fire-and-forget，症状只会是「行不更新」）。
+        for status in [
+            ConnectionStatus::Idle,
+            ConnectionStatus::Running,
+            ConnectionStatus::WaitingApproval,
+            ConnectionStatus::Quitting,
+        ] {
+            assert_eq!(
+                serde_json::to_value(status).expect("serialize"),
+                serde_json::Value::from(status.as_str())
+            );
+        }
     }
 }
