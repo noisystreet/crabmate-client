@@ -36,6 +36,41 @@ const WHEEL_LINES: usize = 3;
 /// 视图自身的行数下限（标题 / 内容 / 提示）：再矮就没有内容可言，渲染层保证不低于它。
 pub(super) const MIN_VIEW_ROWS: usize = 3;
 
+/// 视图的渲染模式。
+///
+/// 由扩展名决定（`.md` / `.markdown` 走预览），`/editor --md|--src` 可覆盖。两种模式的
+/// **行不是一回事**：源码模式一行 = 文件一行、带行号、不折行；md 预览一行 = 折行后的物理
+/// 行、无行号。行号与语义渲染无法兼得（理由见 `editor_md`），所以这里是显式的二选一，
+/// 而不是一个 `is_markdown` 布尔旗标散在滚动逻辑里。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(super) enum EditorMode {
+    /// 源码视图：带行号，超宽行裁切（`…`），滚动按源码行。
+    #[default]
+    Source,
+    /// markdown 预览：按语义重排 + 折行，滚动按物理行。
+    Markdown,
+}
+
+impl EditorMode {
+    /// 按扩展名判定（大小写不敏感）；`md` 与 `markdown` 两种写法都收。
+    pub(super) fn for_path(rel: &str) -> Self {
+        let ext = rel.rsplit_once('.').map_or("", |(_, tail)| tail);
+        if ext.eq_ignore_ascii_case("md") || ext.eq_ignore_ascii_case("markdown") {
+            Self::Markdown
+        } else {
+            Self::Source
+        }
+    }
+
+    /// 标题里显示的模式名（两个模式都要写出来：不写就看不出为什么没有行号）。
+    fn label(self) -> &'static str {
+        match self {
+            Self::Source => "源码",
+            Self::Markdown => "md 预览",
+        }
+    }
+}
+
 /// 只读文件视图的状态（每条 lane 一份，随 [`super::state::UiState`] 走）。
 #[derive(Debug, Default)]
 pub(super) struct EditorState {
@@ -45,8 +80,19 @@ pub(super) struct EditorState {
     pub rel: Option<String>,
     /// 已按 `\n` 切好的行（`\r` 已去掉、tab 已展开）。
     pub lines: Vec<String>,
-    /// 顶部行偏移（渲染前按视口收敛）。
+    /// 源码视图的顶部行偏移（源码行；渲染前按视口收敛）。
     pub scroll: usize,
+    /// 当前渲染模式（扩展名判定，`/editor --md|--src` 覆盖）。
+    pub mode: EditorMode,
+    /// md 预览的顶部行偏移（**物理行**）。
+    ///
+    /// 与 [`Self::scroll`] 分开存：两者的「一行」不是一回事，共用一个字段会在切模式时
+    /// 把位置扔到不相干的地方（源码第 800 行 ≠ 第 800 条折行）。
+    pub md_scroll: usize,
+    /// 内容版本：每次装内容 / 失败都 +1，md 缓存据此判断要不要重算。
+    pub text_rev: u64,
+    /// md 预览缓存（`None` = 还没渲染过，或内容刚变）。
+    pub md_cache: Option<super::editor_md::MdRows>,
     /// 读取在途。
     pub loading: bool,
     /// 读取失败文案（成功时清空）。
@@ -58,16 +104,30 @@ pub(super) struct EditorState {
 }
 
 impl EditorState {
-    /// 进入视图并开始读某个文件。
+    /// 进入视图并开始读某个文件（模式按扩展名判定）。
     pub fn open_file(&mut self, rel: &str, generation: u64) {
+        self.open_file_with_mode(rel, generation, None);
+    }
+
+    /// [`Self::open_file`] + 显式模式（`/editor --md|--src`）；`None` = 按扩展名自动。
+    pub fn open_file_with_mode(&mut self, rel: &str, generation: u64, mode: Option<EditorMode>) {
         self.open = true;
         self.rel = Some(rel.to_string());
         self.lines.clear();
         self.scroll = 0;
+        self.md_scroll = 0;
+        self.mode = mode.unwrap_or_else(|| EditorMode::for_path(rel));
         self.loading = true;
         self.error = None;
         self.truncated = false;
         self.generation = generation;
+        self.invalidate_md();
+    }
+
+    /// 内容变了：md 缓存必须作废（否则会继续画上一份文件），版本号推进用作缓存键。
+    fn invalidate_md(&mut self) {
+        self.text_rev = self.text_rev.wrapping_add(1);
+        self.md_cache = None;
     }
 
     /// 内容回包（`generation` 不符时由调用方丢弃，这里只管装）。
@@ -79,7 +139,7 @@ impl EditorState {
     }
 
     /// [`Self::accept`] 的可测版本（上限可注入，测试不必造两万行）。
-    fn accept_limited(&mut self, text: &str, max_lines: usize) {
+    pub(super) fn accept_limited(&mut self, text: &str, max_lines: usize) {
         self.loading = false;
         self.error = None;
         let mut rows: Vec<String> = text
@@ -90,6 +150,8 @@ impl EditorState {
         rows.truncate(max_lines);
         self.lines = rows;
         self.scroll = 0;
+        self.md_scroll = 0;
+        self.invalidate_md();
     }
 
     /// 读取失败：视图留着（标题仍显示是哪个文件），内容区换成这一句。
@@ -97,7 +159,9 @@ impl EditorState {
         self.loading = false;
         self.lines.clear();
         self.scroll = 0;
+        self.md_scroll = 0;
         self.error = Some(msg);
+        self.invalidate_md();
     }
 
     /// 返回聊天视图。文件与滚动位置保留：再 `/editor` 进来还是同一处。
@@ -110,20 +174,56 @@ impl EditorState {
     ///
     /// 上界用「末行」而不是「末页」：允许把最后一行顶到屏幕最上方，看文件尾部时不必先猜
     /// 视口高度（`less` 的行为）。渲染层的 `visible` 会再做一次裁剪。
+    ///
+    /// 「一行」在两种模式下含义不同（源码行 / 折行后的物理行），由 [`Self::line_count`]
+    /// 与 [`Self::scroll_slot`] 统一分派 —— 按键侧不必知道当前是哪种模式。
     pub fn scroll_by(&mut self, delta: isize) {
-        let last = self.lines.len().saturating_sub(1);
-        let next = self.scroll.saturating_add_signed(delta);
-        self.scroll = next.min(last);
+        let last = self.line_count().saturating_sub(1);
+        let next = self.scroll_slot().saturating_add_signed(delta);
+        *self.scroll_slot_mut() = next.min(last);
     }
 
-    /// Home：回到文件顶部。
+    /// Home：回到顶部。
     pub fn scroll_to_top(&mut self) {
-        self.scroll = 0;
+        *self.scroll_slot_mut() = 0;
     }
 
     /// End：跳到最后一行。
     pub fn scroll_to_bottom(&mut self) {
-        self.scroll = self.lines.len().saturating_sub(1);
+        let last = self.line_count().saturating_sub(1);
+        *self.scroll_slot_mut() = last;
+    }
+
+    /// 当前模式下「一共多少行」：源码行 / md 物理行。
+    ///
+    /// md 的行数只有渲染过才知道（折行依赖宽度），所以缓存未建时算 0 —— 那只会发生在
+    /// 「内容刚变、下一帧还没画」的一瞬，此时任何偏移都不该沿用旧值。
+    fn line_count(&self) -> usize {
+        match self.mode {
+            EditorMode::Source => self.lines.len(),
+            EditorMode::Markdown => self.md_rows_len(),
+        }
+    }
+
+    /// md 预览有多少条物理行（还没渲染过就是 0）。
+    pub fn md_rows_len(&self) -> usize {
+        self.md_cache.as_ref().map_or(0, |c| c.rows.len())
+    }
+
+    /// 当前模式的偏移字段（源码行 / 物理行）。
+    fn scroll_slot(&self) -> &usize {
+        match self.mode {
+            EditorMode::Source => &self.scroll,
+            EditorMode::Markdown => &self.md_scroll,
+        }
+    }
+
+    /// [`Self::scroll_slot`] 的可写版本。
+    fn scroll_slot_mut(&mut self) -> &mut usize {
+        match self.mode {
+            EditorMode::Source => &mut self.scroll,
+            EditorMode::Markdown => &mut self.md_scroll,
+        }
     }
 
     /// 内容区能显示几行（去掉标题与提示行）。
@@ -131,11 +231,11 @@ impl EditorState {
         height.saturating_sub(2).max(1)
     }
 
-    /// 渲染前把 `scroll` 收敛到可达范围（文件变短、终端变矮之后）。
+    /// 渲染前把当前偏移收敛到可达范围（文件变短、终端变矮之后）。
     fn clamped_scroll(&self, height: usize) -> usize {
         let rows = Self::visible_rows(height);
-        let max_start = self.lines.len().saturating_sub(rows);
-        self.scroll.min(max_start)
+        let max_start = self.line_count().saturating_sub(rows);
+        (*self.scroll_slot()).min(max_start)
     }
 }
 
@@ -186,8 +286,12 @@ fn basename(path: &str) -> &str {
 ///
 /// 标题里的 workspace 末段是**防串台的主要线索**：多 lane 各绑不同工作区，同一路径
 /// （比如 `src/main.rs`）在两条 lane 里是完全不同的文件，标题不写就看不出自己看的是哪份。
+/// 标题还必须写出**当前模式**：md 预览没有行号栏，不说明的话那看起来就是「行号坏了」。
+///
+/// 取 `&mut` 是因为 md 预览要维护自己的渲染缓存（宽度 / 主题 / 内容版本作键）；源码视图
+/// 走不到那条路径，但这个签名让调用点只有一种形态。
 pub(super) fn view_lines(
-    ed: &EditorState,
+    ed: &mut EditorState,
     workspace: Option<&str>,
     width: usize,
     height: usize,
@@ -207,11 +311,28 @@ pub(super) fn view_lines(
         ),
     ]));
     out.push(Line::from(Span::styled(
-        clip(&format!("  工作区 {ws}"), width),
+        clip(&format!("  工作区 {ws} · {}", ed.mode.label()), width),
         Style::default().fg(pal.muted),
     )));
 
+    out.extend(content_lines(ed, width, height, pal));
+    // 提示行：告诉人「怎么回去」，以及**怎么切模式**（否则「没有行号」只能靠猜）。
+    out.push(hint_line(ed, width, pal));
+    out
+}
+
+/// 内容区（标题与提示行之外）：读取态 / 未选文件 / 空文件 / 正文。
+///
+/// 从 [`view_lines`] 拆出来只为 CCN 门禁（整条 if 链 + 两种模式的渲染挤在一个函数里
+/// 已经 11），顺序不变：占位文案必须先于正文判断，否则空文件会被读成「未选文件」。
+fn content_lines(
+    ed: &mut EditorState,
+    width: usize,
+    height: usize,
+    pal: &Palette,
+) -> Vec<Line<'static>> {
     let rows = EditorState::visible_rows(height);
+    let mut out: Vec<Line<'static>> = Vec::new();
     if let Some(err) = ed.error.as_deref() {
         out.push(Line::from(Span::styled(
             clip(&format!("  读取失败：{err}"), width),
@@ -238,54 +359,126 @@ pub(super) fn view_lines(
             Style::default().fg(pal.muted),
         )));
     } else {
-        let start = ed.clamped_scroll(height);
-        let gutter = ed.lines.len().to_string().len().max(3);
-        for (i, text) in ed.lines.iter().enumerate().skip(start).take(rows) {
-            let no = format!("{:>gutter$} ", i + 1, gutter = gutter);
-            out.push(Line::from(vec![
-                Span::styled(no, Style::default().fg(pal.muted)),
-                Span::styled("│ ", Style::default().fg(pal.border)),
-                Span::styled(
-                    clip(text, width.saturating_sub(gutter + 2)),
-                    Style::default().fg(pal.fg),
-                ),
-            ]));
+        match ed.mode {
+            EditorMode::Source => source_body(ed, width, height, rows, pal, &mut out),
+            // md 预览：没有行号栏，整列宽度都归正文（折行在渲染层做，见 `editor_md`）。
+            EditorMode::Markdown => out.extend(super::editor_md::md_body(ed, width, rows, pal)),
         }
     }
-
-    // 提示行：告诉人「怎么回去」。这是第一版唯一的键位来源（`/help` 里也有一行）。
-    let mut hint =
-        String::from("PgUp/PgDn · 滚轮/Alt+↑↓ 滚动 · /chat 或 Esc 返回 · /editor <路径>");
-    if ed.truncated {
-        hint.push_str(" · 已截断");
-    }
-    out.push(Line::from(Span::styled(
-        clip(&hint, width),
-        Style::default().fg(pal.muted),
-    )));
     out
 }
 
-impl LaneApp<'_> {
-    /// `/editor [<相对路径>]`：进入视图；给了路径就直接打开。
-    pub(super) fn editor_command(&mut self, arg: Option<String>) {
-        match arg {
-            Some(rel) => self.open_editor(&rel),
-            None => match self.st.editor.rel.clone() {
-                // 再进来时重读一次：文件可能已经被 agent 改过，显示旧内容是更坏的选择。
-                Some(rel) => {
-                    self.st.editor.open_file(&rel, self.st.ws_generation);
-                    let _ = self.fetch_ws_file(rel);
-                }
-                // 还没打开过任何文件：**照样把视图打开**，占位文案由 `view_lines` 给。
-                //
-                // 以前这里只往聊天区塞一行用法提示、视图保持关闭，看起来就是「/editor
-                // 没生效」；更要紧的是树上双击/Enter 打开文件只在视图开着时才生效，
-                // 于是用户先 `/editor`、再双击文件行 -- 两步都没有反应。而那一行提示
-                // 本身也看不见：聊天区正被视图占着的话，提示落在被遮住的那一栏。
-                None => self.st.editor.open = true,
-            },
+/// 源码正文：绝对行号 + `│` + 按显示宽裁切的一行。
+///
+/// 行号是**绝对**的（滚动后跟着各自内容走）：按可见序号重编号会让人误以为自己在文件开头。
+fn source_body(
+    ed: &EditorState,
+    width: usize,
+    height: usize,
+    rows: usize,
+    pal: &Palette,
+    out: &mut Vec<Line<'static>>,
+) {
+    let start = ed.clamped_scroll(height);
+    let gutter = ed.lines.len().to_string().len().max(3);
+    for (i, text) in ed.lines.iter().enumerate().skip(start).take(rows) {
+        let no = format!("{:>gutter$} ", i + 1, gutter = gutter);
+        out.push(Line::from(vec![
+            Span::styled(no, Style::default().fg(pal.muted)),
+            Span::styled("│ ", Style::default().fg(pal.border)),
+            Span::styled(
+                clip(text, width.saturating_sub(gutter + 2)),
+                Style::default().fg(pal.fg),
+            ),
+        ]));
+    }
+}
+
+/// 提示行：滚动键位 + 返回方式 + 切模式 + 两类截断说明。
+fn hint_line(ed: &EditorState, width: usize, pal: &Palette) -> Line<'static> {
+    let mut hint = match ed.mode {
+        EditorMode::Source => {
+            String::from("PgUp/PgDn · 滚轮/Alt+↑↓ 滚动 · /chat 或 Esc 返回 · /editor --md 预览")
         }
+        EditorMode::Markdown => String::from(
+            "md 预览 · PgUp/PgDn · 滚轮/Alt+↑↓ 滚动 · /chat 或 Esc 返回 · /editor --src 看源码",
+        ),
+    };
+    if ed.truncated {
+        hint.push_str(" · 已截断");
+    }
+    // 预览自己的上限（[`super::editor_md::MD_MAX_SOURCE_LINES`]）：截断了就得说出来，
+    // 否则「文档就这么长」和「只解析了前面一段」在屏幕上长得一样。
+    if ed.mode == EditorMode::Markdown
+        && let Some(cut) = ed.md_cache.as_ref().filter(|c| c.is_cut())
+    {
+        hint.push_str(&format!(" · 仅前 {} 行", cut.source_lines));
+    }
+    Line::from(Span::styled(
+        clip(&hint, width),
+        Style::default().fg(pal.muted),
+    ))
+}
+
+impl LaneApp<'_> {
+    /// `/editor [--md|--src] [<相对路径>]`：进入视图；给了路径就直接打开。
+    ///
+    /// 模式开关只认**第一个** token（见 [`parse_editor_arg`]），所以文件名里的 `--md`
+    /// 不会被当成开关。
+    pub(super) fn editor_command(&mut self, arg: Option<String>) {
+        let (mode, target) = parse_editor_arg(arg.as_deref());
+        // 「没给参数」与「给了参数但没路径」是两件事：
+        // - `/editor`：沿用当前文件（或先把视图打开）；
+        // - `/editor --md`：同上，但换模式；
+        // - `/editor    `：**只有空白**，仍按用法错误处理（与改造前一致，别让它悄悄变成
+        //   「打开视图」—— 输入法误触更容易发生在这条上）。
+        let Some(target) = target else {
+            return self.editor_reopen_current(mode);
+        };
+        if target.trim().is_empty() {
+            if mode.is_none() {
+                self.editor_usage();
+                return;
+            }
+            return self.editor_reopen_current(mode);
+        }
+        self.open_editor_with_mode(&target, mode);
+    }
+
+    /// 无路径的 `/editor`：重读当前文件，或（还没打开过文件时）只把视图打开。
+    ///
+    /// 重读而不是沿用旧内容：文件可能已经被 agent 改过，显示旧内容是更坏的选择。
+    fn editor_reopen_current(&mut self, mode: Option<EditorMode>) {
+        match self.st.editor.rel.clone() {
+            Some(rel) => {
+                self.st
+                    .editor
+                    .open_file_with_mode(&rel, self.st.ws_generation, mode);
+                let _ = self.fetch_ws_file(rel);
+            }
+            // 还没打开过任何文件：**照样把视图打开**，占位文案由 `view_lines` 给。
+            //
+            // 以前这里只往聊天区塞一行用法提示、视图保持关闭，看起来就是「/editor
+            // 没生效」；更要紧的是树上双击/Enter 打开文件只在视图开着时才生效，
+            // 于是用户先 `/editor`、再双击文件行 -- 两步都没有反应。而那一行提示
+            // 本身也看不见：聊天区正被视图占着的话，提示落在被遮住的那一栏。
+            None => {
+                self.st.editor.open = true;
+                // 开关先记下：真打开文件时由 `open_file` 按扩展名重判，
+                // 所以这里只管「当前没有文件可切」时的显示。
+                if let Some(m) = mode {
+                    self.st.editor.mode = m;
+                }
+            }
+        }
+    }
+
+    /// 用法提示（路径为空时）。
+    fn editor_usage(&mut self) {
+        self.st.push_line(
+            LineKind::System,
+            "用法：/editor [--md|--src] <工作区相对路径>",
+        );
     }
 
     /// 打开某个文件（`/editor <rel>`、目录树 Enter）。
@@ -293,13 +486,24 @@ impl LaneApp<'_> {
     /// 只接受工作区相对路径：`/editor /etc/passwd` 这类绝对路径交给 serve 判（它会拒绝），
     /// 客户端不自己做前缀检查 —— 那条规则在 Server，抄一份只会两边漂移。
     pub(super) fn open_editor(&mut self, rel: &str) {
+        self.open_editor_with_mode(rel, None);
+    }
+
+    /// [`Self::open_editor`] + 显式模式（`None` = 按扩展名判定）。
+    pub(super) fn open_editor_with_mode(&mut self, rel: &str, mode: Option<EditorMode>) {
         let rel = normalize_rel(rel);
         if rel.is_empty() {
-            self.st
-                .push_line(LineKind::System, "用法：/editor <工作区相对路径>");
+            self.editor_usage();
             return;
         }
-        self.st.editor.open_file(&rel, self.st.ws_generation);
+        // `None` 走不带覆盖的入口：模式按扩展名判定，那是唯一一处默认口径。
+        if let Some(m) = mode {
+            self.st
+                .editor
+                .open_file_with_mode(&rel, self.st.ws_generation, Some(m));
+        } else {
+            self.st.editor.open_file(&rel, self.st.ws_generation);
+        }
         let _ = self.fetch_ws_file(rel);
     }
 
@@ -341,6 +545,30 @@ impl LaneApp<'_> {
                 .accept(f.content.as_deref().unwrap_or_default()),
             Err(e) => self.st.editor.fail(e),
         }
+    }
+}
+
+/// 拆 `/editor` 的参数：`--md` / `--src` 是模式开关，剩下的是路径。
+///
+/// 只把**第一个** token 当开关：路径本身可能带空格，把开关判定限制在首位，文件名里的
+/// `--md` 就不会被误当成开关。开关后面没有路径时返回空串，由调用方理解为「切当前文件」。
+fn parse_editor_arg(raw: Option<&str>) -> (Option<EditorMode>, Option<String>) {
+    let Some(raw) = raw else {
+        return (None, None);
+    };
+    let mode = match raw.split_whitespace().next() {
+        Some("--md") => Some(EditorMode::Markdown),
+        Some("--src" | "--source") => Some(EditorMode::Source),
+        _ => None,
+    };
+    match mode {
+        // `split_whitespace` 会把多个空格压成一个，路径按单空格拼回（终端里手敲的路径
+        // 本来也不会用连续空格），后面的 `normalize_rel` 再统一去空白。
+        Some(_) => {
+            let rest = raw.split_whitespace().skip(1).collect::<Vec<_>>().join(" ");
+            (mode, Some(rest))
+        }
+        None => (None, Some(raw.to_string())),
     }
 }
 
@@ -429,7 +657,7 @@ mod tests {
             a.editor_command(None);
             assert!(a.st.editor.open, "只输入 /editor 也要进视图");
             assert!(a.st.editor.rel.is_none(), "没有文件就不该编一个路径出来");
-            let rows = super::view_lines(&a.st.editor, None, 60, 20, &a.st.palette);
+            let rows = super::view_lines(&mut a.st.editor, None, 60, 20, &a.st.palette);
             let text = rows
                 .iter()
                 .map(std::string::ToString::to_string)
@@ -520,8 +748,8 @@ mod tests {
     }
 
     /// 渲染后的整段文本（标题、行号、提示行都在里面）。
-    fn view_text(a: &LaneApp<'_>, width: usize, height: usize) -> String {
-        super::view_lines(&a.st.editor, None, width, height, &a.st.palette)
+    fn view_text(a: &mut LaneApp<'_>, width: usize, height: usize) -> String {
+        super::view_lines(&mut a.st.editor, None, width, height, &a.st.palette)
             .iter()
             .map(std::string::ToString::to_string)
             .collect::<Vec<_>>()

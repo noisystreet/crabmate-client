@@ -40,7 +40,7 @@ pub(crate) fn md_span_style(span: &InlineSpan, pal: &Palette) -> Style {
 mod md_links;
 #[cfg(test)]
 pub(crate) use md_links::wrap_styled_chars;
-pub(crate) use md_links::{PartChars, remap_links, wrap_styled_rows};
+pub(crate) use md_links::{PartChars, WrappedRow, remap_links, wrap_styled_rows};
 
 /// 片段文本（Link 取展示文本）。
 fn span_text(span: &InlineSpan) -> &str {

@@ -21,6 +21,9 @@ mod clipboard;
 pub(crate) mod controls;
 mod ctl;
 mod drafts;
+// `/editor` 的 markdown 预览单独成文件：`editor_view.rs` 与 `md.rs` 都贴着门禁，而这一块
+// 是「复用的 md 管线 + 自己的缓存」，自成一件。
+mod editor_md;
 mod editor_view;
 mod event_loop;
 mod exit_flush;
