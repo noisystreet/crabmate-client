@@ -132,6 +132,7 @@ pub(super) fn lane_with_tx<'a>(
         persisted: None,
         last_size: (0, 0),
         pane_drag: None,
+        ws_click: Default::default(),
         // 装配态与 `assemble` 同构：「已保存的值 = 当前宽度」，没拖过就不会写文件。
         pane_saved: PaneWidths::DEFAULT,
         pane_save_warned: false,

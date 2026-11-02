@@ -332,6 +332,7 @@ impl<'a> LaneApp<'a> {
             persisted: None,
             last_size: (0, 0),
             pane_drag: None,
+            ws_click: Default::default(),
             // 装配时的宽度就是「已经保存过的值」：它来自读盘（或默认），没拖过就不该写文件。
             // 夹取与 `with_pane` 同一条，否则「刚启动就已经和磁盘不一致」会立刻触发一次写。
             pane_saved: template.pane.clamped_to_ranges(),
