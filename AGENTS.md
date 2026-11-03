@@ -50,9 +50,9 @@
 - `crabmate-connect` is in-repo path only (`crates/crabmate-connect`); default features have **no** Tauri. Desktop/Android enable `features = ["tauri"]`
 - `crabmate-client-api` is in-repo path only (`crates/crabmate-client-api`); no Tauri / `web-sys` / `reqwest` / `tokio`
 - `crabmate-tool-card` is in-repo path only (`crates/crabmate-tool-card`); do not git-pin Server `crabmate-tool-card`
-- Boundary rules above are **mechanically enforced** by `scripts/check-boundaries.sh` (pre-commit hook + `scripts/check.sh`): client-api dependency purity, `crabmate-connect` default features stay Tauri-free, a single contract-pin shape (crates.io semver or git rev, byte-identical across all manifests), and version consistency across all Rust packages
+- Boundary rules above are **mechanically enforced** by `scripts/check-boundaries.sh` (pre-commit hook + `scripts/check.sh`): client-api dependency purity, `crabmate-connect` default features stay Tauri-free, a single contract-pin shape (crates.io semver or git rev, byte-identical across all manifests), and version consistency across all Rust packages plus the shells' `tauri.conf.json` top-level `version`
 - Complexity **gates**: `lizard` CCN>10 fails globally (zero rule, no per-module caps); function params ≤ 9 (`fn-param-ratchet`); function nloc ≤ 200 and Rust file ≤ 920 lines (`fn-nloc-ratchet`) — enforced by pre-commit + `scripts/check.sh`
-- Package versions move in **lockstep** across all Rust packages; bump via `bash scripts/set-version.sh <semver>` (never hand-edit one Cargo.toml version)
+- Package versions move in **lockstep** across all Rust packages **and the shells' `tauri.conf.json`**, which Tauri stamps the .deb / APK version from; bump via `bash scripts/set-version.sh <semver>` (never hand-edit one Cargo.toml or one tauri.conf.json version)
 - Package list **single source**: `scripts/rust-pkg-dirs.txt` — consumed by the `Makefile` `fmt` / `clippy` / `clean` loops, `scripts/check.sh`, and `scripts/check-boundaries.sh`; adding a package only touches this file (plus Makefile `test-*` grouping / CI cache if needed)
 - Responsive breakpoint **single source**: `MOBILE_LAYOUT_BREAKPOINT_PX` in `frontend/src/app_prefs.rs`; `@media` cannot use `var()`, so CSS repeats the value under constraint — narrow `max-width: N` pairs with complementary `min-width: N + 1` (never cross-written) and other breakpoints are registered in `scripts/check-css-breakpoints.sh`; enforced by that hook + `scripts/check.sh`
 - Class-name **contract gate**: every class name a consumer emits (this repo's Rust / HTML) must have a rule in the same scope's CSS (frontend / connect; third-party vendor JS runtime classes are out of contract) — intentional hooks / layer names go into `scripts/css_contract_allowlist.txt` with a `# reason`, and a stale entry (rule added, consumer gone, scope typo) fails too; enforced by `scripts/check-css-contract.sh` (hook + `scripts/check.sh`)
@@ -84,7 +84,7 @@ make desktop-release         # .deb (auto trunk --release UI)
 make web-release             # crabmate-web .deb (trunk --release + loopback static host)
 make tui-release             # crabmate-tui .deb (binary only; no icon, no config)
 bash scripts/check-no-main-path.sh
-bash scripts/check-boundaries.sh         # mechanical boundary rules (client-api purity / connect default features / contract pin shape / version sync)
+bash scripts/check-boundaries.sh         # mechanical boundary rules (client-api purity / connect default features / contract pin shape / version sync incl. shell tauri.conf.json)
 bash scripts/check-css-breakpoints.sh    # responsive breakpoints must match MOBILE_LAYOUT_BREAKPOINT_PX (single source)
 bash scripts/check-css-contract.sh       # consumer class names need CSS rules in the same scope, or an allowlist entry
 bash scripts/check-css-tokens.sh         # var(--x) must be defined in styles/themes; no color literal in var() fallback; themes must cover the same tokens
@@ -96,7 +96,7 @@ bash scripts/check-modal-shell.sh        # role / aria-modal only emitted by app
 bash scripts/check-xml-comments.sh       # no `--` inside XML comment bodies (XML 1.0 §2.5; aapt2 fails resource merging)
 bash scripts/check-changelog-style.sh    # `[Unreleased]` entries ≤ 800 chars; released sections are frozen
 bash scripts/ensure-tauri-dist-stubs.sh  # desktop/mobile dist stubs for tauri codegen
-bash scripts/set-version.sh 0.5.1        # bump all Rust package versions (+ Cargo.locks) in one step
+bash scripts/set-version.sh 0.5.1        # bump all Rust package versions (+ Cargo.locks + shell tauri.conf.json) in one step
 bash scripts/lizard-rust.sh              # any function with CCN>10 fails (global zero rule; no per-module caps)
 bash scripts/fn-param-ratchet.sh         # function param cap: lizard max params <= 9
 bash scripts/fn-nloc-ratchet.sh          # function nloc <= 200 and Rust file <= 920 lines
@@ -118,7 +118,7 @@ Delivery model: branch from `main`, open a PR, merge back after checks are green
 
 ## Release & versioning
 
-- **Version lockstep**: every Rust package carries the same version; bump via `bash scripts/set-version.sh <semver>` — never hand-edit one `Cargo.toml` (see **Hard Constraints**).
+- **Version lockstep**: every Rust package carries the same version, and each shell's `tauri.conf.json` repeats it (Tauri stamps the .deb / APK from there); bump via `bash scripts/set-version.sh <semver>` — never hand-edit one `Cargo.toml` or one shell `tauri.conf.json` (see **Hard Constraints**).
 - **Tag format**: `v*` (e.g. `v0.5.1`). `.github/workflows/release.yml` builds the **real** UI (`trunk build --release`) and produces the desktop / web / tui `.deb` artifacts plus the GitHub Release.
 - **Only tag a commit that is on `main`**: the workflow's `guard` job fails the run when the tag commit is not reachable from `origin/main` (`push tags only after merge`). Merge first, then tag.
 - **Release notes come from `CHANGELOG.md`**: move `[Unreleased]` into the version section **before** tagging — the notes are extracted from that section.

@@ -5,6 +5,7 @@
 #   3. 契约钉形状：crabmate = { version, default-features = false, features = ["protocol"] }，
 #      全仓唯一形状、版本一致；禁止钉旧包名 crabmate-sse-protocol
 #   4. 全部 Rust 包版本一致（以 scripts/rust-pkg-dirs.txt 首个包为基准）
+#   5. 壳 tauri.conf.json 的顶层 version 与包版本一致（Tauri 打 .deb / APK 以它为准）
 # 包目录单一来源：scripts/rust-pkg-dirs.txt
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -98,6 +99,16 @@ while IFS= read -r dir; do
     base_dir="$dir"
   elif [ "$v" != "$base_version" ]; then
     fail "包版本不一致：$dir = $v，基准 $base_dir = $base_version（用 scripts/set-version.sh 统一改版）"
+  fi
+  # 壳的 tauri.conf.json 自带顶层 version：Tauri 打 .deb / APK 时以它为准，
+  # 只跟 Cargo.toml 一致而漏了它，安装包版本会悄悄停在旧值。
+  conf="$dir/tauri.conf.json"
+  if [ -f "$conf" ]; then
+    n_conf="$(grep -c -E '^  "version": ' "$conf" || true)"
+    [ "$n_conf" = "1" ] || fail "$conf 顶层 version 行数 = $n_conf（期望恰好 1 行）"
+    conf_version="$(sed -n -E 's/^  "version": "(.*)",$/\1/p' "$conf")"
+    [ "$conf_version" = "$base_version" ] \
+      || fail "壳版本不一致：$conf = $conf_version，基准 $base_dir = $base_version（用 scripts/set-version.sh 统一改版）"
   fi
 done < <(grep -v -e '^#' -e '^$' "$PKG_LIST")
 echo "[check-boundaries] 版本一致性 ok（基准 $base_dir = $base_version）"
