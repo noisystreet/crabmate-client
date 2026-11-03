@@ -141,6 +141,7 @@ impl SettingsPanel {
                 serve_fact(d.and_then(|d| d.effective_level().map(str::to_string)))
             }
             FieldId::KeyGlobal
+            | FieldId::KeyChat
             | FieldId::KeySettings
             | FieldId::KeyEditor
             | FieldId::LocalSecret
@@ -269,7 +270,9 @@ impl SettingsPanel {
     fn mcp_timeout_cell(&self, ctx: &PanelCtx<'_>) -> (String, FieldTone) {
         match self.staged(FieldId::McpToolTimeout) {
             FieldAction::Write(Some(v)) => (format!("{v} 秒~"), FieldTone::Pending),
-            FieldAction::Write(None) => ("(不改)~".to_string(), FieldTone::Pending),
+            // `commit_text` 已把留空提交落成 `Skip`，这一支只在外部构造时可达；仍不带
+            // `~`：它的语义是「不改」，不是「待保存」。
+            FieldAction::Write(None) => ("(不改)".to_string(), FieldTone::Unset),
             FieldAction::Skip => match ctx.persisted.and_then(|p| p.mcp_tool_timeout_secs) {
                 Some(s) => (format!("{s} 秒"), FieldTone::Value),
                 None => ("(该 serve 未提供)".to_string(), FieldTone::Unset),
@@ -321,8 +324,10 @@ fn serve_fact(v: Option<String>) -> (String, FieldTone) {
 /// 读，也没有可写的落点，所以在面板里只展示、Enter 给一句提示。
 fn static_note(field: FieldId) -> &'static str {
     match field {
-        FieldId::KeyGlobal => "F6 设置 · F2 保存 · F3 状态栈 · Ctrl+T 视图 · Ctrl+C 取消回合",
-        FieldId::KeySettings => "↑↓ 移动 · Tab 分区 · Enter 编辑 · F2/S 保存 · Esc 关闭",
+        FieldId::KeyGlobal => "F6 设置 · F2 保存 · F3 状态栈 · F4 待审批",
+        // 对话区键位单列一行：挤进上一行会在 80 列终端被截掉尾部（这栏的值就是事实）。
+        FieldId::KeyChat => "Ctrl+T 视图 · Ctrl+E 思考 · Ctrl+Y 复制 · Ctrl+C 取消回合",
+        FieldId::KeySettings => "↑↓ 移动 · Tab/Shift+Tab 分区 · Enter 编辑 · F2/S 保存 · Esc 关闭",
         FieldId::KeyEditor => "PgUp/PgDn 翻页 · 退格关预览 · 滚轮滚动文件",
         FieldId::LocalSecret => "API 密钥只进本机钥匙串（不写 serve user-data）",
         FieldId::LocalSave => "保存 = 先 GET、再改自己的键、再全量 PUT（不覆盖 Desktop/Web 字段）",

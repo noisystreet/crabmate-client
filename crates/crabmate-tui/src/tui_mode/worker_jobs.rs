@@ -22,7 +22,7 @@ use super::settings::{
 use super::slash_menu::SkillsPayload;
 use super::worker::{LaneTx, UiEvent};
 use crate::serve::{
-    ServeClient, SessionIndexOp, apply_web_session_op, fetch_conversation_messages,
+    ServeClient, SessionIndexOp, TermError, apply_web_session_op, fetch_conversation_messages,
     fetch_llm_overrides, fetch_mcp_servers, fetch_user_data_prefs, fetch_web_sessions,
     fetch_workspace, fetch_workspace_dir, fetch_workspace_projects, put_llm_overrides,
     put_mcp_servers, put_user_data_prefs, set_session_conversation_store, set_workspace,
@@ -260,11 +260,19 @@ pub(super) async fn job_load_user_settings(client: &ServeClient, out: &LaneTx) {
             .await
             .map_err(|e| e.to_string())?;
         // MCP 是可选端点：失败只让那一栏显示「未提供」，不拖垮 prefs/llm 的加载。
-        let mcp = fetch_mcp_servers(client).await.unwrap_or_else(|e| {
-            eprintln!("[crabmate-tui] GET /user-data/mcp-servers failed: {e}");
-            None
-        });
-        Ok(PersistedSettings::from_snapshot(&prefs, &llm, mcp.as_ref()))
+        // 但要分清「404 = 这个 serve 没有该端点」与「这次没拉到」—— 后者由面板重开时
+        // 重拉（`open_settings` 认 `mcp_fetch_failed`）。压成同一个 `None` 就再也没有
+        // 第二次机会了，而提示还会指错方向（「版本过旧」）。
+        let (mcp, mcp_fetch_failed) = match fetch_mcp_servers(client).await {
+            Ok(v) => (v, false),
+            Err(e) => {
+                eprintln!("[crabmate-tui] GET /user-data/mcp-servers failed: {e}");
+                (None, true)
+            }
+        };
+        let mut persisted = PersistedSettings::from_snapshot(&prefs, &llm, mcp.as_ref());
+        persisted.mcp_fetch_failed = mcp_fetch_failed;
+        Ok(persisted)
     }
     .await;
     let _ = out.send(UiEvent::UserData(result));
@@ -310,7 +318,7 @@ pub(super) async fn job_save_store(client: &ServeClient, sqlite: bool, out: &Lan
     let result = set_session_conversation_store(client, sqlite)
         .await
         .map(|()| sqlite)
-        .map_err(|e| e.to_string());
+        .map_err(|e| save_error_text(&e));
     let _ = out.send(UiEvent::SavedStore(result));
 }
 
@@ -320,13 +328,64 @@ pub(super) async fn job_save_mcp(client: &ServeClient, save: McpSave, out: &Lane
     let result: Result<McpSave, String> = async {
         let dto = fetch_mcp_servers(client)
             .await
-            .map_err(|e| e.to_string())?
+            .map_err(|e| save_error_text(&e))?
             .ok_or_else(|| "该 serve 没有 /user-data/mcp-servers（版本过旧）".to_string())?;
         put_mcp_servers(client, &merge_mcp_save(dto, &save))
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| save_error_text(&e))?;
         Ok(save)
     }
     .await;
     let _ = out.send(UiEvent::SavedMcp(result));
+}
+
+/// 保存失败 → 给用户看的文案：**区分「serve 已经表态」与「这次没拿到」**。
+///
+/// `TermError::Message` 在这条路径上几乎都是 serve 的 JSON 错误体（`code: message`）：
+/// 同一个请求体再发一次结果不会变，所以不能像网络错误那样写「可按 S 重试」。
+/// 反过来 5xx / 网关 HTML / 传输错误值得重试，也要把话说出来。
+fn save_error_text(e: &TermError) -> String {
+    match e {
+        // serve 明确拒绝：文案里已经带了原因，原样给人读，不再套一层。
+        TermError::Message(m) => m.clone(),
+        TermError::Http { status, .. } if (400..500u16).contains(status) => {
+            format!("{e}（serve 拒绝：改值后再试）")
+        }
+        _ => format!("{e}（网络/传输失败，可按 S 重试）"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::save_error_text;
+    use crate::serve::TermError;
+
+    /// 业务拒绝（带错误码）原样呈现，且不承诺重试 —— 重试同一个值永远不会成功。
+    #[test]
+    fn server_rejection_is_passed_through_without_a_retry_hint() {
+        let e = TermError::Message("MCP_TIMEOUT_INVALID: 超时需 1..=3600 秒".to_string());
+        let text = save_error_text(&e);
+        assert_eq!(text, "MCP_TIMEOUT_INVALID: 超时需 1..=3600 秒");
+        assert!(!text.contains("重试"), "业务拒绝不该承诺重试：{text}");
+    }
+
+    /// 5xx / 非 JSON 错误体：这类重试可能成功，提示要说出来。
+    #[test]
+    fn transport_failures_say_retry_is_fine() {
+        let e = TermError::Http {
+            status: 502,
+            body: "<html>bad gateway</html>".to_string(),
+        };
+        assert!(save_error_text(&e).contains("可按 S 重试"));
+    }
+
+    /// 4xx 但响应体不成形（网关 / 反向代理）同样算 serve 拒绝。
+    #[test]
+    fn bare_4xx_counts_as_a_rejection() {
+        let e = TermError::Http {
+            status: 409,
+            body: String::new(),
+        };
+        assert!(save_error_text(&e).contains("serve 拒绝"));
+    }
 }

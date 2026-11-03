@@ -33,7 +33,10 @@ impl LaneApp<'_> {
             || (!self.no_keyring && keyring_slot_has(SecretSlot::ClientLlm.keyring_account()));
         panel.set_secret_set(key_set);
         self.panel = Some(panel);
-        if self.persisted.is_none() {
+        // 快照还没拉到就借机重试；另外 MCP 那次 GET 单独失败过（不是 404）也重来一次 ——
+        // 否则启动时一次网络抖动会让 MCP 分区整会话不可编辑，还提示成「版本过旧」。
+        let mcp_retry = self.persisted.as_ref().is_some_and(|p| p.mcp_fetch_failed);
+        if self.persisted.is_none() || mcp_retry {
             self.load_user_settings();
         }
         if read_only {
@@ -167,12 +170,14 @@ impl LaneApp<'_> {
         }
     }
 
-    /// 密钥环节失败：不发 user-data 任务，复位在途标记（staged 保留供重试）。
+    /// 密钥环节失败：**一组都不下发**，所以四组的在途标记全部复位（不只是 llm/prefs）。
+    ///
+    /// 这里漏一组就是死锁：`is_saving()` 恒真 → `handle_key` 在它那里提前返回，连
+    /// Esc / F6 都关不掉面板。staged 保留，改好后可按 S 重试。
     fn cancel_save_for_secret(&mut self, msg: &str) {
         self.st.push_line(LineKind::System, msg);
         if let Some(panel) = self.panel.as_mut() {
-            panel.save_group_result(SaveGroup::Llm, false);
-            panel.save_group_result(SaveGroup::Prefs, false);
+            panel.cancel_all_saves();
             panel.set_note(
                 "保存取消：改动保留，可按 S 重试".to_string(),
                 NoticeLevel::Error,
@@ -199,12 +204,7 @@ impl LaneApp<'_> {
         let store_ok = self.send_group(store_pending, WorkerJob::SaveStore(store_is_on(&store)));
         let mcp_ok = self.send_group(mcp_pending, WorkerJob::SaveMcp(mcp));
         if !(llm_ok && prefs_ok && store_ok && mcp_ok) {
-            self.on_save_dispatch_failure(SaveDispatch {
-                llm: llm_ok,
-                prefs: prefs_ok,
-                store: store_ok,
-                mcp: mcp_ok,
-            });
+            self.on_save_dispatch_failure();
             return;
         }
         if llm_pending || prefs_pending || store_pending || mcp_pending {
@@ -218,27 +218,33 @@ impl LaneApp<'_> {
         !pending || self.job_tx.send(job).is_ok()
     }
 
-    /// worker 已退出导致下发失败：复位在途标记、保留 staged 可重试。
-    fn on_save_dispatch_failure(&mut self, sent: SaveDispatch) {
+    /// worker 已退出导致下发失败：复位**全部**在途标记、保留 staged 可重试。
+    ///
+    /// 不复位「已经 send 成功的那几组」是错的：通道关闭只发生在 worker 线程结束时，
+    /// 那时先发出去的任务同样不会执行，回包也永远不会来 —— 留着标记就是等死锁。
+    fn on_save_dispatch_failure(&mut self) {
         self.st.push_line(
             LineKind::System,
             "设置保存失败：worker 已退出（改动保留，可重试）",
         );
+        if let Some(panel) = self.panel.as_mut() {
+            panel.cancel_all_saves();
+        }
+    }
+
+    /// 保存请求被 worker 取消（Ctrl+C / 退出）：正常回包不会再来，标记必须清掉。
+    ///
+    /// 与 [`Self::on_save_dispatch_failure`] 分开只是因为提示措辞不同（一个说 worker
+    /// 没了，一个说被中断）；复位动作是同一个 —— 面板不在乎原因，只在乎「还有人在等吗」。
+    pub(crate) fn on_settings_save_interrupted(&mut self) {
         let Some(panel) = self.panel.as_mut() else {
             return;
         };
-        if !sent.llm {
-            panel.save_group_result(SaveGroup::Llm, false);
-        }
-        if !sent.prefs {
-            panel.save_group_result(SaveGroup::Prefs, false);
-        }
-        if !sent.store {
-            panel.save_group_result(SaveGroup::Store, false);
-        }
-        if !sent.mcp {
-            panel.save_group_result(SaveGroup::Mcp, false);
-        }
+        panel.cancel_all_saves();
+        panel.set_note(
+            "保存被中断：改动保留，可按 S 重试".to_string(),
+            NoticeLevel::Warn,
+        );
     }
 
     /// llm-overrides 保存结果：成功 → 内存持久层同样更新 + 清本地 override + 面板落地。
@@ -357,14 +363,11 @@ impl LaneApp<'_> {
             Err(e) => {
                 self.st.push_line(
                     LineKind::System,
-                    &format!("保存 MCP 设置失败：{e}（面板保留改动，可按 S 重试）"),
+                    &format!("保存 MCP 设置失败：{e}（面板保留改动）"),
                 );
                 if let Some(panel) = self.panel.as_mut() {
                     panel.save_group_result(SaveGroup::Mcp, false);
-                    panel.set_note(
-                        "保存失败：改动保留，按 S 重试".to_string(),
-                        NoticeLevel::Error,
-                    );
+                    panel.set_note("保存失败：改动保留".to_string(), NoticeLevel::Error);
                 }
             }
         }
@@ -397,28 +400,15 @@ impl LaneApp<'_> {
             Err(e) => {
                 self.st.push_line(
                     LineKind::System,
-                    &format!("切换会话存储失败：{e}（面板保留改动，可按 S 重试）"),
+                    &format!("切换会话存储失败：{e}（面板保留改动）"),
                 );
                 if let Some(panel) = self.panel.as_mut() {
                     panel.save_group_result(SaveGroup::Store, false);
-                    panel.set_note(
-                        "切换失败：改动保留，按 S 重试".to_string(),
-                        NoticeLevel::Error,
-                    );
+                    panel.set_note("切换失败：改动保留".to_string(), NoticeLevel::Error);
                 }
             }
         }
     }
-}
-
-/// 一组保存任务的下发结果（`true` = 已发出且通道仍在）。
-///
-/// 四个 bool 名字自带语义，比 `[bool; 4]` 好在调用点不会写错位置。
-struct SaveDispatch {
-    llm: bool,
-    prefs: bool,
-    store: bool,
-    mcp: bool,
 }
 
 /// 会话存储 switch 动作 → 请求体里的 `sqlite` 布尔（只有 `Write(Some("on"))` 是 true）。

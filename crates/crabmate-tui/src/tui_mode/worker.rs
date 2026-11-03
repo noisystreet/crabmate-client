@@ -3,7 +3,12 @@
 //!
 //! 拆分出本模块以控制 `mod.rs` 单文件行数（fn-nloc 门禁 ≤ 920）与函数复杂度。
 
-use std::future::Future;
+// 非回合 job 的取消封装单独成文件：本模块贴着 920 行上限。
+// `#[path]` 与 `settings_panel.rs` 拆子模块的写法一致（`worker.rs` 的子模块默认会去
+// `worker/` 目录找，这里不想为两个函数新开一层目录）。
+#[path = "worker_cancel.rs"]
+mod worker_cancel;
+
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -22,6 +27,7 @@ use crate::serve::{
     WorkspaceProjectsData, WorkspaceSetError, run_chat_stream_sink,
 };
 
+use self::worker_cancel::{run_cancellable, run_save_job};
 use super::approve::{APPROVAL_WAIT, ApprovalPrompt, OverlayApprovalGate};
 use super::inbound::Inbound;
 use super::serve_defaults::ServeDefaults;
@@ -186,6 +192,11 @@ pub(super) enum UiEvent {
     SavedStore(Result<bool, String>),
     /// MCP 标量保存结果：`Ok` 回传已应用动作（面板据此清 staged、持久层同步）。
     SavedMcp(Result<McpSave, String>),
+    /// 保存类 job 被取消（Ctrl+C / 退出）：`Saved*` 回包**不会再来**。
+    ///
+    /// 必须单独走一个事件，而不是靠 `System("已中断：…")` 那句提示：面板的在途标记
+    /// 得有人清，否则它停在「保存中」之后连 Esc 都关不掉（见 `SettingsPanel::cancel_all_saves`）。
+    SaveInterrupted,
     /// skill 目录（`GET /skills`，供 `/` 补全菜单的 skill 候选）。
     Skills(Result<SkillsPayload, String>),
 }
@@ -564,28 +575,28 @@ fn dispatch(
             job_load_user_settings(client, out),
             out,
         ),
-        WorkerJob::SaveLlm(save) => run_cancellable(
+        WorkerJob::SaveLlm(save) => run_save_job(
             rt,
             cancel,
             "保存模型设置",
             job_save_llm(client, save, out),
             out,
         ),
-        WorkerJob::SavePrefs(save) => run_cancellable(
+        WorkerJob::SavePrefs(save) => run_save_job(
             rt,
             cancel,
             "保存偏好设置",
             job_save_prefs(client, save, out),
             out,
         ),
-        WorkerJob::SaveStore(sqlite) => run_cancellable(
+        WorkerJob::SaveStore(sqlite) => run_save_job(
             rt,
             cancel,
             "切换会话存储",
             job_save_store(client, sqlite, out),
             out,
         ),
-        WorkerJob::SaveMcp(save) => run_cancellable(
+        WorkerJob::SaveMcp(save) => run_save_job(
             rt,
             cancel,
             "保存 MCP 设置",
@@ -668,35 +679,6 @@ impl JobCancel {
     /// 是否有一个 job 正在跑（只供措辞用：快照，不保证下一刻仍成立）。
     pub(super) fn is_armed(&self) -> bool {
         self.slot.lock().expect("job cancel slot").is_some()
-    }
-}
-
-/// 在 job 外面套一层取消：`select!` 上 [`JobCancel`]，被打断时发一条 system 行。
-///
-/// 这是本文件**唯一**给非回合 job 用的 `block_on` 出口 —— 16 个 job 一个都不用自己写
-/// `select!`，也就不会漏掉某个（漏一个就是 #348 那条「白等一个超时窗口」）。
-///
-/// 中断时那行是 best-effort：lane 已 detach 时它会被 `on_msg` 丢弃（按 `LaneId` 找不到
-/// 就丢），这正是想要的 —— 不再往已摘掉的 lane 里写东西。
-fn run_cancellable<F>(
-    rt: &tokio::runtime::Runtime,
-    cancel: &JobCancel,
-    label: &str,
-    job: F,
-    out: &LaneTx,
-) where
-    F: Future<Output = ()>,
-{
-    let rx = cancel.arm();
-    let interrupted = rt.block_on(async {
-        tokio::select! {
-            () = job => false,
-            _ = rx => true,
-        }
-    });
-    cancel.disarm();
-    if interrupted {
-        let _ = out.send(UiEvent::System(format!("已中断：{label}")));
     }
 }
 

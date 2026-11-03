@@ -130,6 +130,12 @@ pub async fn put_llm_overrides(
 /// `env` / `headers` / `bearer` 这类机密，面板既不展示也不编辑。因此 `servers` 用
 /// `Vec<Value>` 原样透传 —— 全量 PUT 时把服务端给的结构照搬回去，既保真又不会因为
 /// 这里少一个字段（服务端新增的键）而把它们抹掉。
+///
+/// **前提（端点契约，不是本文件的自由选择）**：GET 必须**全量**返回这些条目、不做脱敏。
+/// 若哪天把 `bearer` 之类打成 `***`，这里的原样回写就会把掩码写回磁盘，真正的密钥被
+/// 静默覆盖。前端 `McpServersFileDto` 同样是整份 PUT，所以这条约束两边一致。
+/// 另一个已知窗口：保存是读-改-写（GET → 改两个标量 → PUT），两端之间别处（Desktop/Web）
+/// 的增删会被这次回写覆盖 —— 只改标量的端点若能收窄成 PATCH，这个窗口才会消失。
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct McpServersFileDto {
     /// 服务端文件格式版本：TUI 不改它，`None` 时序列化时省略（不写入 `null`）。

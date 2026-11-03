@@ -819,6 +819,7 @@ impl LaneApp<'_> {
             UiEvent::SavedPrefs(result) => self.on_settings_saved_prefs(result),
             UiEvent::SavedStore(result) => self.on_settings_saved_store(result),
             UiEvent::SavedMcp(result) => self.on_settings_saved_mcp(result),
+            UiEvent::SaveInterrupted => self.on_settings_save_interrupted(),
         }
     }
 

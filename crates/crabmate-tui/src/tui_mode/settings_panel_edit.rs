@@ -136,57 +136,29 @@ impl SettingsPanel {
         }
     }
 
-    /// 文本字段提交：trim 后空串 = 清除；API Base 需 http(s):// 前缀、温度需
-    /// 0.0..=2.0、上下文长度需 ≤ 10_000_000 整数（非法则留在编辑态提示）；
-    /// 密钥空提交 = 清除。
+    /// 文本字段提交：校验交给 [`text_validation_error`]，落地动作交给 [`text_commit_action`]。
+    ///
+    /// 只留「取缓冲 → 校验 → 落地」三跳：四个字段的区间校验各自的 `if` 曾把这个函数顶到
+    /// CCN>10，而它们本来就是「哪些字段有区间」的一张表，拆出去更好读。
     fn commit_text(&mut self) {
         let Some(Editing::Text { field, buf, .. }) = self.editing.take() else {
             return;
         };
         let text: String = buf.into_iter().collect();
         let text = text.trim().to_string();
-        if field == FieldId::ApiBase && !validate_api_base(&text) {
-            let buf: Vec<char> = text.chars().collect();
-            let cursor = buf.len();
-            self.editing = Some(Editing::Text { field, buf, cursor });
-            self.set_note(
-                "API Base 需 http(s):// 开头".to_string(),
-                NoticeLevel::Error,
-            );
+        if let Some(msg) = text_validation_error(field, &text) {
+            self.reopen_text_edit(field, text, msg);
             return;
         }
-        if field == FieldId::Temperature && !is_valid_temperature(&text) {
-            let buf: Vec<char> = text.chars().collect();
-            let cursor = buf.len();
-            self.editing = Some(Editing::Text { field, buf, cursor });
-            self.set_note(
-                "温度需 0.0..=2.0（留空保存 = 跟随 server）".to_string(),
-                NoticeLevel::Error,
-            );
-            return;
-        }
-        if field == FieldId::ContextTokens && !is_valid_context_tokens(&text) {
-            let buf: Vec<char> = text.chars().collect();
-            let cursor = buf.len();
-            self.editing = Some(Editing::Text { field, buf, cursor });
-            self.set_note(
-                "上下文长度需 0..=10_000_000 整数（留空保存 = 跟随 server）".to_string(),
-                NoticeLevel::Error,
-            );
-            return;
-        }
-        if field == FieldId::McpToolTimeout && !is_valid_mcp_timeout(&text) {
-            let buf: Vec<char> = text.chars().collect();
-            let cursor = buf.len();
-            self.editing = Some(Editing::Text { field, buf, cursor });
-            self.set_note(
-                "工具超时需 1..=3600 整数秒（留空提交 = 不改）".to_string(),
-                NoticeLevel::Error,
-            );
-            return;
-        }
-        let value = if text.is_empty() { None } else { Some(text) };
-        self.set_staged(field, FieldAction::Write(value));
+        self.set_staged(field, text_commit_action(field, text));
+    }
+
+    /// 校验没过：留在编辑态（缓冲原样保留）并给一句人话。
+    fn reopen_text_edit(&mut self, field: FieldId, text: String, msg: &str) {
+        let buf: Vec<char> = text.chars().collect();
+        let cursor = buf.len();
+        self.editing = Some(Editing::Text { field, buf, cursor });
+        self.set_note(msg.to_string(), NoticeLevel::Error);
     }
 
     /// 会话模式枚举确认：写入当前选项（`None` = 跟随 server）。
@@ -306,6 +278,35 @@ impl SettingsPanel {
         };
         move_pick(pick, up, THEME_OPTIONS.len());
     }
+}
+
+/// 文本字段的取值校验：`Some(提示)` = 非法（留在编辑态），`None` = 放行。
+///
+/// 「哪些字段有区间、区间是什么」收在这一张表里，`commit_text` 只负责取缓冲与落地。
+fn text_validation_error(field: FieldId, text: &str) -> Option<&'static str> {
+    match field {
+        FieldId::ApiBase if !validate_api_base(text) => Some("API Base 需 http(s):// 开头"),
+        FieldId::Temperature if !is_valid_temperature(text) => {
+            Some("温度需 0.0..=2.0（留空保存 = 跟随 server）")
+        }
+        FieldId::ContextTokens if !is_valid_context_tokens(text) => {
+            Some("上下文长度需 0..=10_000_000 整数（留空保存 = 跟随 server）")
+        }
+        FieldId::McpToolTimeout if !is_valid_mcp_timeout(text) => {
+            Some("工具超时需 1..=3600 整数秒（留空提交 = 不改）")
+        }
+        _ => None,
+    }
+}
+
+/// 文本提交要落到哪个动作：只有 MCP 超时的「留空」是 `Skip`（不改），其余空 = 清除。
+fn text_commit_action(field: FieldId, text: String) -> FieldAction {
+    if field == FieldId::McpToolTimeout && text.is_empty() {
+        // 那个端点没有可清除的用户键（`merge_mcp_save` 对 `Write(None)` 不做任何事）；
+        // 落成 `Skip` 才不会让面板变脏、也不会白发一次内容不变的 PUT。
+        return FieldAction::Skip;
+    }
+    FieldAction::Write((!text.is_empty()).then_some(text))
 }
 
 /// ←/→ 移动循环类编辑的光标（Mode / Think / Tool / Toggle / Theme / Gateway）。

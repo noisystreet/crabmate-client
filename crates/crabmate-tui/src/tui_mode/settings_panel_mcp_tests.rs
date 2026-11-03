@@ -75,7 +75,9 @@ fn rows_show_the_server_side_values() {
         pal: &Palette::DARK,
     };
     let p = panel_on_mcp(FieldId::McpGlobalEnabled);
-    assert!(row_text(&p, &c, FieldId::McpGlobalEnabled).contains('开'));
+    // 用字符串而不是 char 字面量：`lizard` 的 Rust 解析器会把「单引号包一个中文字符」
+    // 当成生命周期的起点，导致整个文件的函数边界算错（`fn-nloc` 门禁会把后面几个测试并进来）。
+    assert!(row_text(&p, &c, FieldId::McpGlobalEnabled).contains("开"));
     assert!(row_text(&p, &c, FieldId::McpToolTimeout).contains("45 秒"));
     let servers = row_text(&p, &c, FieldId::McpServers);
     assert!(servers.contains("3 个"), "实际：{servers}");
@@ -234,4 +236,62 @@ fn merge_keeps_the_server_list_and_schema_version() {
     assert_eq!(merged.tool_timeout_secs, 120);
     assert_eq!(merged.schema_version, Some(2), "格式版本原样带回");
     assert_eq!(merged.servers, base.servers, "条目（含 env）必须一字不改");
+}
+
+/// 超时留空提交 = 「不改」：不该让面板变脏，也不该产生保存请求。
+///
+/// 那个端点没有可清除的用户键，`Write(None)` 会让 `McpSave::any()` 为真、白发一次
+/// 内容不变的 PUT，再回一句「已保存」—— 用户以为改了什么。
+#[test]
+fn blank_timeout_commit_is_a_no_op() {
+    let o = overrides();
+    let persisted = persisted_mcp(true, 60, 1);
+    let c = PanelCtx {
+        overrides: &o,
+        persisted: Some(&persisted),
+        serve_defaults: None,
+        pal: &Palette::DARK,
+    };
+    let mut p = panel_on_mcp(FieldId::McpToolTimeout);
+    p.handle_key(&key(KeyCode::Enter), &c);
+    for _ in 0..2 {
+        p.handle_key(&key(KeyCode::Backspace), &c);
+    }
+    p.handle_key(&key(KeyCode::Enter), &c);
+    assert!(p.editing.is_none(), "留空提交应退出编辑态");
+    assert_eq!(
+        p.staged(FieldId::McpToolTimeout),
+        &FieldAction::Skip,
+        "留空 = 不改，不是「清除」"
+    );
+    assert!(!p.is_dirty(), "无改动的面板不该变脏");
+    assert!(matches!(
+        p.handle_key(&key(KeyCode::Char('s')), &c),
+        PanelEffect::None
+    ));
+}
+
+/// 拉取失败（不是 404）时的提示要指向「重开面板会重试」，而不是「版本过旧」。
+#[test]
+fn fetch_failure_hint_points_at_the_retry_not_the_version() {
+    let o = overrides();
+    let mut persisted = persisted_mcp(true, 60, 1);
+    persisted.mcp_global_enabled = None;
+    persisted.mcp_tool_timeout_secs = None;
+    persisted.mcp_fetch_failed = true;
+    let c = PanelCtx {
+        overrides: &o,
+        persisted: Some(&persisted),
+        serve_defaults: None,
+        pal: &Palette::DARK,
+    };
+    let mut p = panel_on_mcp(FieldId::McpGlobalEnabled);
+    assert!(matches!(
+        p.handle_key(&key(KeyCode::Enter), &c),
+        PanelEffect::None
+    ));
+    let (note, level) = p.note.clone().expect("应给出提示");
+    assert!(note.contains("重开面板会重试"), "实际提示：{note}");
+    assert!(!note.contains("版本过旧"), "别把拉取失败说成版本旧：{note}");
+    assert_eq!(level, NoticeLevel::Warn);
 }

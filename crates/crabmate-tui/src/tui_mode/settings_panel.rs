@@ -200,6 +200,7 @@ impl SettingsPanel {
             | FieldId::ConnModel
             | FieldId::ConnPermission
             | FieldId::KeyGlobal
+            | FieldId::KeyChat
             | FieldId::KeySettings
             | FieldId::KeyEditor
             | FieldId::LocalSecret
@@ -228,6 +229,7 @@ impl SettingsPanel {
             | FieldId::ConnModel
             | FieldId::ConnPermission
             | FieldId::KeyGlobal
+            | FieldId::KeyChat
             | FieldId::KeySettings
             | FieldId::KeyEditor
             | FieldId::LocalSecret
@@ -275,6 +277,20 @@ impl SettingsPanel {
             }
         }
         !self.is_saving()
+    }
+
+    /// 取消**全部**在途标记（不动 staged）：请求根本没发出去、或回包不会再来的路径都走这里。
+    ///
+    /// 单组复位的写法漏掉一组就会让面板永远停在「保存中」——`handle_key` 在 `is_saving`
+    /// 处提前返回，那时 `Enter` / `Tab` / `F2` / `Esc` 全部失效（F6 也只是转成 Esc 进
+    /// 同一个分支），面板只能靠杀进程关掉。所以这里不给单组版本 —— 回包路径上的
+    /// 单组清理由 [`Self::save_group_result`] 负责，两者语义不同：一个是「这一组有结果了」，
+    /// 一个是「谁都别再等了」。
+    pub(super) fn cancel_all_saves(&mut self) {
+        self.saving_llm = false;
+        self.saving_prefs = false;
+        self.saving_store = false;
+        self.saving_mcp = false;
     }
 
     /// 回合结束（`TurnDone`）：若是回合进行中打开的只读面板，转为可编辑并提示；
@@ -354,6 +370,14 @@ impl SettingsPanel {
     fn cycle_section(&mut self, forward: bool) {
         let len = Section::ALL.len();
         let idx = self.section as usize;
+        // `ALL` 的下标必须等于枚举判别式（下面按 `idx` 索引它，也按 `section as usize`
+        // 反查选中项）。加一条断言把这条隐式契约钉死：调换枚举顺序时立刻炸测试，
+        // 而不是等某个分区莫名跳到别处。
+        debug_assert_eq!(
+            Section::ALL[idx],
+            self.section,
+            "Section::ALL 的顺序必须与枚举判别式一致"
+        );
         let next = if forward {
             (idx + 1) % len
         } else {
@@ -436,7 +460,7 @@ impl SettingsPanel {
         // 值未知或服务端不支持时不让进编辑态 —— 按下去也只会被拒。
         if field == FieldId::SessionSqlite || field == FieldId::McpGlobalEnabled {
             if !ctx.toggle_editable(field) {
-                self.set_note(toggle_blocked_note(field), NoticeLevel::Warn);
+                self.set_note(toggle_blocked_note(ctx, field), NoticeLevel::Warn);
                 return;
             }
             let pick = match self.staged(field) {
@@ -562,6 +586,7 @@ impl PanelCtx<'_> {
             | FieldId::ConnModel
             | FieldId::ConnPermission
             | FieldId::KeyGlobal
+            | FieldId::KeyChat
             | FieldId::KeySettings
             | FieldId::KeyEditor
             | FieldId::LocalSecret
@@ -598,6 +623,7 @@ impl PanelCtx<'_> {
             FieldId::ConnModel
             | FieldId::ConnPermission
             | FieldId::KeyGlobal
+            | FieldId::KeyChat
             | FieldId::KeySettings
             | FieldId::KeyEditor
             | FieldId::LocalSecret
@@ -623,6 +649,7 @@ impl PanelCtx<'_> {
             FieldId::ConnModel
             | FieldId::ConnPermission
             | FieldId::KeyGlobal
+            | FieldId::KeyChat
             | FieldId::KeySettings
             | FieldId::KeyEditor
             | FieldId::LocalSecret
@@ -660,11 +687,16 @@ impl PanelCtx<'_> {
 
 /// 二值开关被拒时的说明：两种原因（服务端不支持 / 值未知）要分开讲，因为处置不同
 /// —— 前者只能换 serve，后者等 `/status` 拉回来就好。
-fn toggle_blocked_note(field: FieldId) -> String {
+fn toggle_blocked_note(ctx: &PanelCtx<'_>, field: FieldId) -> String {
     if field == FieldId::SessionSqlite {
-        "该 serve 不支持切换会话存储（未配置 SQLite 路径或版本过旧）".to_string()
+        return "该 serve 不支持切换会话存储（未配置 SQLite 路径或版本过旧）".to_string();
+    }
+    // MCP 的「没有值」有两种成因，处置完全不同：端点不存在（换 serve 才行）与这次拉取
+    // 失败（重开面板会重拉，见 `LaneApp::open_settings`）。说反了用户就会白跑一趟换 serve。
+    if ctx.persisted.is_some_and(|p| p.mcp_fetch_failed) {
+        "MCP 配置这次没拉到（网络/解码失败）；重开面板会重试".to_string()
     } else {
-        "该 serve 未提供 MCP 配置（版本过旧或尚未拉到）".to_string()
+        "该 serve 未提供 MCP 配置（版本过旧）".to_string()
     }
 }
 
