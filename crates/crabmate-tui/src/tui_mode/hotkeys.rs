@@ -76,6 +76,17 @@ pub(super) fn of(key: &KeyEvent) -> Option<TopHotkey> {
     }
 }
 
+// 快捷键的「键位 + 人读措辞」表（面板「快捷键」栏与 `/help` 的单一来源）单独成文件：
+// 那张表不带任何单引号，而本文件里的字符字面量会让 `lizard` 的 C 风格词法器把单引号
+// 当成未闭合的字符字面量、跨行吞掉花括号，`fn-nloc` 门禁于是把函数跨度算成一整团。
+#[path = "hotkey_docs.rs"]
+mod docs;
+pub(crate) use self::docs::{HotkeyGroup, group_line};
+// `group_items` 只有单测直接用到（面板与 `/help` 都走 `group_line`）：放进无条件重导出
+// 会让非测试构建报 unused。
+#[cfg(test)]
+pub(crate) use self::docs::group_items;
+
 /// Ctrl+C：取消回合（再按一次强退）。
 pub(super) fn is_ctrl_c(key: &KeyEvent) -> bool {
     key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL)

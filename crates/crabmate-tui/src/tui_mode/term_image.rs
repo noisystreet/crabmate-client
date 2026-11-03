@@ -52,7 +52,8 @@ impl ColorDepth {
         self >= Self::Ansi256
     }
 
-    fn name(self) -> &'static str {
+    /// 面板与 `caps` 子命令共用的显示名。
+    pub(crate) fn name(self) -> &'static str {
         match self {
             Self::Mono => "mono",
             Self::Ansi16 => "ansi16",

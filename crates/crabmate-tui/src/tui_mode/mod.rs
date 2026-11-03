@@ -56,6 +56,8 @@ mod session_index;
 mod session_refresh;
 mod settings;
 mod settings_panel;
+// 「本地行为」栏的 `CM_TUI_*` 生效值（只读；调运行时同一个判定函数）。
+mod settings_panel_env;
 mod shell;
 mod sidebar_keys;
 mod slash_menu;

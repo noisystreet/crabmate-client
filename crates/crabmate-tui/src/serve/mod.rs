@@ -26,7 +26,7 @@ pub use chat_stream::{
     StreamResume, StreamSink, run_chat_stream, run_chat_stream_sink,
 };
 pub use client::ServeClient;
-pub use config::ConnectionConfig;
+pub use config::{BearerSource, ConnectionConfig};
 pub use conversation::{
     ConversationMessagesResponse, fetch_conversation_messages, write_permission_level,
 };

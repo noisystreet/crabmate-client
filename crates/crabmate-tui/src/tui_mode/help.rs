@@ -2,11 +2,16 @@
 //!
 //! 单独成文件是为了压住 `mod.rs` 的 920 行门禁：事件循环层只保留「逐行推进 transcript」，
 //! 文案随功能增删时也只改这里。顺序即显示顺序，按「命令 → 按键 → 各分区操作」分段。
+//!
+//! **快捷键那几行不在这里手写**：由 [`super::hotkeys`] 的键位表生成，加一个顶层热键时
+//! `/help` 与设置面板「快捷键」栏一起自动跟上（#433）。这里的两个常量只放判定散在各
+//! 模块、没有热键条目的那几条键。
 
+use super::hotkeys::{self, HotkeyGroup};
 use super::state::{LineKind, UiState};
 
-/// `/help` 输出的每一行。
-pub(super) const LINES: &[&str] = &[
+/// 命令清单（`/x`）。
+const COMMAND_LINES: &[&str] = &[
     "本地命令：/quit（/exit、/q 同义） /help /status /settings /mode /role /perm /model /find /background /workspace /resume /older /fold /conv /copy /ctl /lane /editor /chat",
     "输入 / 弹出补全菜单（内建命令 + skill；↑↓ 选择 · Tab/Enter 补全 · Esc 关闭）",
     "/copy [assistant|user]（Ctrl+Y 同义）：复制最近一条消息到剪贴板（默认助手回复）",
@@ -23,22 +28,41 @@ pub(super) const LINES: &[&str] = &[
     "/resume 续传上一轮被中断的回合（serve 侧 job 仍在跑时；Ctrl+C 的 cancel 未送达也可续）",
     "/fold [n|all|close]：切换执行过程的展开态（每轮结束自动折叠；/older 回放与回看同样折叠）—— 空参=最近一条，n 从底部数，all 全展开，close 全折回；折叠导航开着时光标会跟到切过的那条",
     "/older（/history 同义）把更早一页历史前插到当前对话（切换会话只载入最新一页时用；滚到顶再按 PgUp 会自动续翻；跨页命中仍可 /find）",
-    "按键：Alt+Enter 换行 · Ctrl+E 思考展开/折叠 · Ctrl+T 聊天/文件视图切换 · Ctrl+G 折叠导航（任何焦点都能进；↑↓ 选摘要 · Enter 开合 · Esc 退出 · 再按一次回到最近一条） · Ctrl+Y 复制最近回复 · Ctrl+W 工作区目录树 · F4 跳到在等审批的连接 · PgUp/PgDn 翻页 · Ctrl+End 回底部 · 回合中 Enter 排队发送（输入框内 Esc 清队）",
-    "设置面板：↑↓ 移动 · Enter 编辑 · Tab 切分区 · F2 保存 · Esc 关闭（有改动 Esc 先确认）",
+];
+
+/// 判定散在别的模块、没有热键条目的键（快捷键分组之外的那些）。
+const MISC_KEYS_LINE: &str = "其它按键：Ctrl+G 折叠导航（任何焦点都能进；↑↓ 选摘要 · Enter 开合 · Esc 退出 · 再按一次回到最近一条） · PgUp/PgDn 翻页 · Ctrl+End 回底部 · 回合中 Enter 排队发送（输入框内 Esc 清队）";
+
+/// 分区域操作（会话栏 / 连接 / 工作区 / 审批浮层）。
+const TAIL_LINES: &[&str] = &[
     "会话栏：↑↓选 Enter用 n新建 r刷新 Del删除（再按 y/Enter 确认，Esc/n 或其它键取消）Shift+Del 直接删",
-    "连接：左栏下半列出本进程的全部 serve 连接（单条也显示，> 为当前）· Alt+←/→ 或 Ctrl+N 切换 · Alt+1..8 直达第 n 条 · 点一行也可切",
+    "连接：左栏下半列出本进程的全部 serve 连接（单条也显示，> 为当前）· 切换见上面「全局」 · 点一行也可切",
     "工作区树：↑↓选 Enter/→展开 ◀收起/回父 r刷新 w回会话列表 Tab/Esc 回输入",
     "工作区切换：按 p 从项目池选择/切换（未设置=选择，已设置=切到另一项目；↑↓选 Enter切换 r刷新 Esc 返回）",
     "审批浮层：Enter=一次 · a=始终 · Esc/n=拒绝 · Ctrl+C 先拒绝、回合随后继续需再按取消",
 ];
 
 impl UiState {
-    /// `/help`：把文案表逐行推进 transcript。
+    /// `/help`：命令 → 快捷键（按键位表生成）→ 分区域操作，逐行推进 transcript。
     ///
-    /// 与 [`LINES`] 同处一文件：文案随功能增删时只改这里，`mod.rs` 只需一行分发。
+    /// 与文案表同处一文件：文案随功能增删时只改这里，`mod.rs` 只需一行分发。
     /// 从 `mod.rs` 搬过来是为了把它从 920 行文件门禁线差几行的位置退开。
     pub(super) fn show_help(&mut self) {
-        for line in LINES {
+        for line in COMMAND_LINES {
+            self.push_line(LineKind::System, line);
+        }
+        // 四行由 `hotkeys` 的键位表生成：新增顶层热键时这里与设置面板一起自动跟上，
+        // 不会再出现「面板写了、/help 漏了」这种手写字符串的漂移（#433）。
+        for group in HotkeyGroup::ALL {
+            let line = format!(
+                "快捷键（{}）：{}",
+                group.label(),
+                hotkeys::group_line(group)
+            );
+            self.push_line(LineKind::System, &line);
+        }
+        self.push_line(LineKind::System, MISC_KEYS_LINE);
+        for line in TAIL_LINES {
             self.push_line(LineKind::System, line);
         }
     }

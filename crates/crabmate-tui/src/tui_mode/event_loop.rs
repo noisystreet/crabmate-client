@@ -207,8 +207,13 @@ impl TuiApp<'_> {
             // 与 `lane_mut()` 会同时借 `self`。
             let pending: Vec<super::pending_lane::PendingLane> =
                 self.pending.iter().cloned().collect();
+            // 面板「连接」栏要说「第几条」，而序号只有外壳知道：每帧交给当前 lane。
+            let lane_pos = super::settings_panel::LanePos {
+                index: self.active + 1,
+                total: self.lanes.len(),
+            };
             self.lane_mut()
-                .draw_frame(terminal, !had_event, &lanes, &pending)?;
+                .draw_frame(terminal, !had_event, &lanes, &pending, lane_pos)?;
             last_draw = Instant::now();
             if mode == LoopMode::Interval {
                 // 改造前的节奏原样保留：有消息 2ms、空闲 50ms。
@@ -307,6 +312,7 @@ impl LaneApp<'_> {
         skip_idle: bool,
         lanes: &[super::lane_list::LaneEntry],
         pending: &[super::pending_lane::PendingLane],
+        lane_pos: super::settings_panel::LanePos,
     ) -> Result<()> {
         let dims = read_terminal_size(terminal)?;
         let animating = lanes_animating(lanes);
@@ -324,7 +330,7 @@ impl LaneApp<'_> {
         // 设置面板改成居中弹层后，内容必须按**弹层内宽**排版：用与绘制同源的
         // `settings_panel_content_width`，否则会出现「画 76 列、按 78 列生成」的错位。
         let screen = Rect::new(0, 0, w, h);
-        let panel = self.settings_content(render::settings_panel_content_width(screen));
+        let panel = self.settings_content(render::settings_panel_content_width(screen), lane_pos);
         terminal
             .draw(|f| {
                 render::draw(

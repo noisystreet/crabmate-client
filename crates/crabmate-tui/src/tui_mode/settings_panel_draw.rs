@@ -3,8 +3,12 @@
 //! `settings_panel.rs` 的 `#[path]` 子模块：压住面板文件行数门禁。逻辑与测试仍
 //! 在父模块组装，这里直接 `use super::*;` 访问父模块私有项。
 
+use super::super::hotkeys::{self, HotkeyGroup};
 use super::super::palette::FieldTone;
+use super::super::settings_panel_env::{self as env, EnvSwitch};
+use super::super::text::wrap_display;
 use super::*;
+use crate::serve::BearerSource;
 
 /// 主题「未设置」在面板里的显示名（下拉项、字段值、底栏共用一份措辞）。
 const THEME_NONE_LABEL: &str = "默认（透明）";
@@ -14,21 +18,20 @@ impl SettingsPanel {
     pub fn content(&self, ctx: &PanelCtx<'_>, width: usize) -> PanelContent {
         let mut lines: Vec<Line<'static>> = Vec::new();
         // 分区说明行：对应 desktop 内容区标题下的 `settings-content-desc`。
+        // 只读三栏不能沿用「留空保存 = 跟随 server」——它们根本没有可保存的值。
         lines.push(Line::from(Span::styled(
-            truncate_display(
-                "标记：* = override · ~ = 未保存 · 留空保存 = 跟随 server",
-                width,
-            ),
+            truncate_display(section_hint(self.section), width),
             ctx.pal.tone_style(FieldTone::Unset),
         )));
         let mut cursor = None;
         for (i, field) in self.section.fields().iter().enumerate() {
             let selected = i == self.row;
-            let (line, edit_col) = self.field_line(ctx, *field, width, selected);
+            let (rows, edit_col) = self.field_lines(ctx, *field, width, selected);
             if let Some(col) = edit_col {
+                // 编辑态永远是单行，光标落在这一组的首行。
                 cursor = Some((lines.len(), col));
             }
-            lines.push(line);
+            lines.extend(rows);
             // 主题 9 个候选、也全是展示用选项：编辑中就在行下方把列表摊开，
             // 比在底栏读一行「当前循环到哪」再连按 ←→ 直观。
             if *field == FieldId::Theme {
@@ -46,14 +49,18 @@ impl SettingsPanel {
         }
     }
 
-    /// 单字段行：标签 + 值（编辑中的文本字段显示缓冲并给出光标列）。
-    fn field_line(
+    /// 单字段行：标签 + 值。
+    ///
+    /// 只读说明行可能**折成多行**：80 列终端上这栏的值就是事实（键位、开关的生效值），
+    /// 被 `truncate_display` 截掉尾部等于丢事实（#433）。文本编辑态仍是一行，
+    /// 并返回光标列。
+    fn field_lines(
         &self,
         ctx: &PanelCtx<'_>,
         field: FieldId,
         width: usize,
         selected: bool,
-    ) -> (Line<'static>, Option<usize>) {
+    ) -> (Vec<Line<'static>>, Option<usize>) {
         let label = pad_cells(field_label(field), LABEL_PAD);
         let area = width.saturating_sub(LABEL_PAD);
         let base = if selected {
@@ -61,10 +68,7 @@ impl SettingsPanel {
         } else {
             Style::new()
         };
-        let label_span = Span::styled(
-            label.clone(),
-            base.patch(ctx.pal.tone_style(FieldTone::Muted)),
-        );
+        let label_style = base.patch(ctx.pal.tone_style(FieldTone::Muted));
         if let Some(Editing::Text {
             field: ef,
             buf,
@@ -77,15 +81,28 @@ impl SettingsPanel {
             let cursor_cell = UnicodeWidthStr::width(prefix.as_str());
             let (hstart, shown_cursor) = horizontal_window(&full, cursor_cell, area);
             let visible = cell_window(&full, hstart, area);
-            let value_span =
-                Span::styled(visible, base.patch(ctx.pal.tone_style(FieldTone::Value)));
-            let line = Line::from(vec![label_span, value_span]);
-            return (line, Some(LABEL_PAD + shown_cursor));
+            let line = Line::from(vec![
+                Span::styled(label, label_style),
+                Span::styled(visible, base.patch(ctx.pal.tone_style(FieldTone::Value))),
+            ]);
+            return (vec![line], Some(LABEL_PAD + shown_cursor));
         }
         let (text, tone) = self.value_cell(ctx, field);
-        let visible = truncate_display(&text, area);
-        let value_span = Span::styled(visible, base.patch(ctx.pal.tone_style(tone)));
-        (Line::from(vec![label_span, value_span]), None)
+        let value_style = base.patch(ctx.pal.tone_style(tone));
+        let rows = wrap_note(&text, area)
+            .into_iter()
+            .enumerate()
+            .map(|(i, chunk)| {
+                // 续行把标签列留白：读者一眼看出这是同一行的续行，而不是新字段。
+                let head = if i == 0 {
+                    Span::styled(label.clone(), label_style)
+                } else {
+                    Span::styled(" ".repeat(LABEL_PAD), label_style)
+                };
+                Line::from(vec![head, Span::styled(chunk, value_style)])
+            })
+            .collect();
+        (rows, None)
     }
 
     /// 主题下拉列表：仅在主题行处于编辑态时非空。
@@ -131,8 +148,20 @@ impl SettingsPanel {
         self.layered_cell(ctx, field)
     }
 
-    /// 只读行的值：连接那两行读 serve 事实，其余几行是静态说明。`None` = 不是只读行。
+    /// 只读行的值：连接栏读本连接 / serve 事实，快捷键栏由键位表生成，本地行为栏
+    /// 读 `CM_TUI_*` 的生效值与行为事实。`None` = 不是只读行。
     fn readonly_cell(&self, ctx: &PanelCtx<'_>, field: FieldId) -> Option<(String, FieldTone)> {
+        if let Some(cell) = conn_cell(ctx, field) {
+            return Some(cell);
+        }
+        // 快捷键：值就是 `hotkeys` 表里那一组条目（新加热键不必改这里的代码）。
+        if let Some(group) = shortcut_group(field) {
+            return Some((hotkeys::group_line(group), FieldTone::Value));
+        }
+        // `CM_TUI_*` 开关：值是运行时判定函数的结论，不是这里再解析一遍环境变量。
+        if let Some(switch) = EnvSwitch::of(field) {
+            return Some((env::row_value(switch), FieldTone::Value));
+        }
         let d = ctx.serve_defaults;
         Some(match field {
             FieldId::McpServers => self.mcp_servers_cell(ctx),
@@ -140,13 +169,9 @@ impl SettingsPanel {
             FieldId::ConnPermission => {
                 serve_fact(d.and_then(|d| d.effective_level().map(str::to_string)))
             }
-            FieldId::KeyGlobal
-            | FieldId::KeyChat
-            | FieldId::KeySettings
-            | FieldId::KeyEditor
-            | FieldId::LocalSecret
-            | FieldId::LocalSave
-            | FieldId::LocalMarkdown => (static_note(field).to_string(), FieldTone::Unset),
+            FieldId::LocalSecret => prose_cell(LOCAL_SECRET_NOTE),
+            FieldId::LocalSave => prose_cell(LOCAL_SAVE_NOTE),
+            FieldId::LocalMarkdown => prose_cell(LOCAL_MARKDOWN_NOTE),
             _ => return None,
         })
     }
@@ -318,22 +343,126 @@ fn serve_fact(v: Option<String>) -> (String, FieldTone) {
     }
 }
 
-/// 只读说明行的文案（快捷键 / 本地行为）：单一来源，改一处就够。
+/// 本地行为栏的三条行为事实（不是设置项，也没有可写的落点）。
+const LOCAL_SECRET_NOTE: &str = "API 密钥只进本机钥匙串（不写 serve user-data）";
+const LOCAL_SAVE_NOTE: &str = "保存 = 先 GET、再改自己的键、再全量 PUT（不覆盖 Desktop/Web 字段）";
+const LOCAL_MARKDOWN_NOTE: &str = "/editor 打开 .md 走 markdown 预览（只读渲染）";
+
+/// 行为事实行的值：白字（不是「未设置」，也不是错误）+ 原文。
+fn prose_cell(text: &'static str) -> (String, FieldTone) {
+    (text.to_string(), FieldTone::Value)
+}
+
+/// 快捷键分区行 ↦ [`HotkeyGroup`]（`None` = 不是快捷键行）。
 ///
-/// 这些行不是「设置项」而是**事实陈述**：TUI 的快捷键与本地安全语义不能从 serve
-/// 读，也没有可写的落点，所以在面板里只展示、Enter 给一句提示。
-fn static_note(field: FieldId) -> &'static str {
+/// 分组与字段的对应写在这里一处：键位表本身只管「哪一组有哪些键」。
+fn shortcut_group(field: FieldId) -> Option<HotkeyGroup> {
     match field {
-        FieldId::KeyGlobal => "F6 设置 · F2 保存 · F3 状态栈 · F4 待审批",
-        // 对话区键位单列一行：挤进上一行会在 80 列终端被截掉尾部（这栏的值就是事实）。
-        FieldId::KeyChat => "Ctrl+T 视图 · Ctrl+E 思考 · Ctrl+Y 复制 · Ctrl+C 取消回合",
-        FieldId::KeySettings => "↑↓ 移动 · Tab/Shift+Tab 分区 · Enter 编辑 · F2/S 保存 · Esc 关闭",
-        FieldId::KeyEditor => "PgUp/PgDn 翻页 · 退格关预览 · 滚轮滚动文件",
-        FieldId::LocalSecret => "API 密钥只进本机钥匙串（不写 serve user-data）",
-        FieldId::LocalSave => "保存 = 先 GET、再改自己的键、再全量 PUT（不覆盖 Desktop/Web 字段）",
-        FieldId::LocalMarkdown => "/editor 打开 .md 走 markdown 预览（只读渲染）",
-        _ => "",
+        FieldId::KeyGlobal => Some(HotkeyGroup::Global),
+        FieldId::KeyChat => Some(HotkeyGroup::Chat),
+        FieldId::KeySettings => Some(HotkeyGroup::Panel),
+        FieldId::KeyEditor => Some(HotkeyGroup::Editor),
+        _ => None,
     }
+}
+
+/// 分区说明行：每栏一句「这栏是什么」，而不是统一的 `*`/`~` 标记说明。
+///
+/// 只读三栏的价值在「读事实」，把它们和可写栏用同一句「留空保存 = 跟随 server」
+/// 盖过去，会让人以为它们也能编辑。
+fn section_hint(section: Section) -> &'static str {
+    match section {
+        Section::Connection => "标记：本连接的事实（只读；Bearer 只报来源不报值）",
+        Section::Shortcuts => "标记：键位来自热键表（新加热键自动出现在这里与 /help）",
+        Section::Local => "标记：CM_TUI_* 开关的当前生效值（改需重启）；整栏只读",
+        _ => "标记：* = override · ~ = 未保存 · 留空保存 = 跟随 server",
+    }
+}
+
+/// 连接栏的事实行：`api_base` / lane 名与序号 / Bearer 来源。`None` = 不是这几行。
+///
+/// 拿不到就写「未提供」而不是留空：三行里最关键的就是「我到底连了哪里、带了什么凭据」。
+fn conn_cell(ctx: &PanelCtx<'_>, field: FieldId) -> Option<(String, FieldTone)> {
+    let unknown = |what: &str| (format!("({what} 未提供)"), FieldTone::Unset);
+    Some(match field {
+        FieldId::ConnApiBase => match ctx.conn {
+            Some(c) if !c.api_base.is_empty() => (c.api_base.clone(), FieldTone::Value),
+            _ => unknown("api_base"),
+        },
+        FieldId::ConnLane => match ctx.conn {
+            Some(c) => (
+                format!("{}（第 {}/{} 条）", c.label, c.pos.index, c.pos.total),
+                FieldTone::Value,
+            ),
+            None => unknown("lane"),
+        },
+        FieldId::ConnBearer => match ctx.conn {
+            Some(c) => (bearer_text(c.bearer).to_string(), FieldTone::Value),
+            None => unknown("Bearer"),
+        },
+        _ => return None,
+    })
+}
+
+/// Web Bearer 来源的人读措辞。**只报来源**：值本身永不上屏（与 API 密钥行同口径）。
+fn bearer_text(source: BearerSource) -> &'static str {
+    match source {
+        BearerSource::Cli => "启动参数或环境（--bearer / CM_WEB_API_BEARER_TOKEN）",
+        BearerSource::Keyring => "本机钥匙串（桌面壳槽；连的不是同一台 serve 时用 --bearer 覆盖）",
+        BearerSource::Missing => "未提供（serve 开了 Bearer 鉴权就会 401）",
+    }
+}
+
+/// 只读值的折行：先按 ` · ` 分项贪心装行，单项本身超宽再按显示列硬折。
+///
+/// 只读栏的值**就是事实**（键位、开关的生效值）：80 列终端上被 `truncate_display`
+/// 截掉尾部的尾几个键，正是 #433 要消灭的东西，所以这列折行而不是截断。
+pub(super) fn wrap_note(text: &str, width: usize) -> Vec<String> {
+    if width == 0 {
+        return vec![String::new()];
+    }
+    let mut out: Vec<String> = Vec::new();
+    let mut line = String::new();
+    for item in text.split(NOTE_SEP) {
+        let item = item.trim();
+        if item.is_empty() || push_item(&mut line, item, width) {
+            continue;
+        }
+        // 这一项装不下：先把已装的这一行收尾，再把这一项（可能仍超宽）折开。
+        if !line.is_empty() {
+            out.push(std::mem::take(&mut line));
+        }
+        let mut chunks = wrap_display(item, width);
+        line = chunks.pop().unwrap_or_default();
+        out.append(&mut chunks);
+    }
+    if !line.is_empty() {
+        out.push(line);
+    }
+    if out.is_empty() {
+        out.push(String::new());
+    }
+    out
+}
+
+/// 只读值的分项分隔符（面板行内统一用它分段，折行也只在这里断）。
+const NOTE_SEP: &str = " · ";
+
+/// 试把一项追加到当前行（带分隔符）；装得下返回 `true`。
+fn push_item(line: &mut String, item: &str, width: usize) -> bool {
+    let extra = if line.is_empty() {
+        UnicodeWidthStr::width(item)
+    } else {
+        UnicodeWidthStr::width(NOTE_SEP) + UnicodeWidthStr::width(item)
+    };
+    if UnicodeWidthStr::width(line.as_str()) + extra > width {
+        return false;
+    }
+    if !line.is_empty() {
+        line.push_str(NOTE_SEP);
+    }
+    line.push_str(item);
+    true
 }
 
 /// 二值开关的极简措辞（MCP 全局开关用）：`开` / `关`。

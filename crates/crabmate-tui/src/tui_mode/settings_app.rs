@@ -12,8 +12,8 @@ use super::super::state::LineKind;
 use super::super::worker::WorkerJob;
 use super::field_label;
 use super::{
-    FieldAction, FieldId, NoticeLevel, PanelContent, PanelCtx, PanelEffect, SaveGroup,
-    SettingsPanel,
+    ConnectionFacts, FieldAction, FieldId, LanePos, NoticeLevel, PanelContent, PanelCtx,
+    PanelEffect, SaveGroup, SettingsPanel,
 };
 
 impl LaneApp<'_> {
@@ -76,6 +76,8 @@ impl LaneApp<'_> {
                 overrides: &self.overrides,
                 persisted: self.persisted.as_ref(),
                 serve_defaults: self.st.serve_defaults.as_ref(),
+                // 按键处理只读三层合成与二值开关的可编辑性，不读连接事实。
+                conn: None,
                 pal: &self.st.palette,
             };
             panel.handle_key(&key, &ctx)
@@ -96,15 +98,34 @@ impl LaneApp<'_> {
     }
 
     /// 面板当前帧内容（供 render 画全屏浮层）；面板未打开返回 `None`。
-    pub(crate) fn settings_content(&self, width: usize) -> Option<PanelContent> {
+    ///
+    /// `pos` 是外壳每帧交下来的「第几条 / 共几条」：单条 lane 无权知道全局有几条
+    /// （见 `docs/design/tui_multi_server.md` §4.2），所以在绘制入口一路传进来。
+    pub(crate) fn settings_content(&self, width: usize, pos: LanePos) -> Option<PanelContent> {
         let panel = self.panel.as_ref()?;
+        let facts = self.conn_facts(pos);
         let ctx = PanelCtx {
             overrides: &self.overrides,
             persisted: self.persisted.as_ref(),
             serve_defaults: self.st.serve_defaults.as_ref(),
+            conn: Some(&facts),
             pal: &self.st.palette,
         };
         Some(panel.content(&ctx, width))
+    }
+
+    /// 面板「连接」栏读的事实：本连接的 `api_base` / lane 名与序号 / Bearer 来源。
+    ///
+    /// 全部来自已有对象（`ServeClient` 的 `ConnectionConfig` + 左栏的 `label` + 外壳
+    /// 每帧交下来的 [`LanePos`]）：面板不再自己推断任何一项，也就不会与左栏/真实连接漂移。
+    fn conn_facts(&self, pos: LanePos) -> ConnectionFacts {
+        let cfg = self.client.config();
+        ConnectionFacts {
+            api_base: cfg.api_base.clone(),
+            label: self.label.clone(),
+            pos,
+            bearer: cfg.bearer_source,
+        }
     }
 
     /// 保存请求：先同步落地 API 密钥（本机钥匙串，不进 serve user-data），再按 staged
