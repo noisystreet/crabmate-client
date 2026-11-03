@@ -197,3 +197,43 @@ fn footer_preview_uses_the_same_wording_as_the_row() {
         "底栏循环预览应与行同一份措辞：{footer}"
     );
 }
+
+/// **回归**：四组在途标记必须能被一次性清掉。
+///
+/// 密钥环节失败（`--no-keyring` / 钥匙串不可用）时一组任务都没发出去，复位却只覆盖
+/// llm/prefs 的话，`saving_store` / `saving_mcp` 会永远留着 —— `is_saving()` 恒真，
+/// `handle_key` 在它那里提前返回，连 Esc 都关不掉面板。这条测试钉住「清完还能操作」。
+#[test]
+fn cancel_all_saves_unblocks_the_panel_with_every_group_pending() {
+    let o = overrides();
+    let d = serve(Some(true), Some(true));
+    let c = ctx(&o, Some(&d));
+    let mut p = panel_on_store_row();
+    // staged 一个 store 改动并按下 S：面板进入「保存中」
+    p.handle_key(&key(KeyCode::Enter), &c);
+    p.handle_key(&key(KeyCode::Right), &c);
+    p.handle_key(&key(KeyCode::Enter), &c);
+    let PanelEffect::Save { .. } = p.handle_key(&key(KeyCode::Char('s')), &c) else {
+        panic!("S 应产生保存请求");
+    };
+    assert!(p.is_saving());
+    // 其它组同时也在途（`request_save` 里四组各自置位）
+    p.saving_llm = true;
+    p.saving_prefs = true;
+    p.saving_mcp = true;
+
+    p.cancel_all_saves();
+    assert!(!p.is_saving(), "四组都要清掉，否则面板死在「保存中」");
+    assert!(p.is_dirty(), "staged 改动要保留，供改好后重试");
+
+    // 面板恢复可操作：Esc 走「脏确认」，而不是被保存在途拦掉。
+    assert!(matches!(
+        p.handle_key(&key(KeyCode::Esc), &c),
+        PanelEffect::None
+    ));
+    assert!(p.confirm_close, "Esc 应进入放弃确认");
+    assert!(matches!(
+        p.handle_key(&key(KeyCode::Char('y')), &c),
+        PanelEffect::Close
+    ));
+}

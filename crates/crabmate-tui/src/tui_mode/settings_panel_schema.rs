@@ -175,7 +175,12 @@ impl Section {
                 FieldId::McpServers,
             ],
             Section::Connection => &[FieldId::ConnModel, FieldId::ConnPermission],
-            Section::Shortcuts => &[FieldId::KeyGlobal, FieldId::KeySettings, FieldId::KeyEditor],
+            Section::Shortcuts => &[
+                FieldId::KeyGlobal,
+                FieldId::KeyChat,
+                FieldId::KeySettings,
+                FieldId::KeyEditor,
+            ],
             Section::Local => &[
                 FieldId::LocalSecret,
                 FieldId::LocalSave,
@@ -218,8 +223,13 @@ pub(crate) enum FieldId {
     ConnModel,
     /// 只读：本会话生效的权限档（`/permission` 的 min 链结果）。
     ConnPermission,
-    /// 只读：全局快捷键一览。
+    /// 只读：全局快捷键一览（F 系功能键）。
     KeyGlobal,
+    /// 只读：对话区快捷键（视图 / 思考 / 复制 / 取消）。
+    ///
+    /// 与 [`FieldId::KeyGlobal`] 分两行而不是挤一行：终端 80 列下挤成一条会被
+    /// `truncate_display` 截掉尾部的键位 —— 而这栏的值**就是**事实，截掉即失真。
+    KeyChat,
     /// 只读：设置面板内快捷键。
     KeySettings,
     /// 只读：编辑器 / 会话视图快捷键。
@@ -251,6 +261,7 @@ pub(crate) const fn field_label(field: FieldId) -> &'static str {
         FieldId::ConnModel => "serve 模型",
         FieldId::ConnPermission => "权限档",
         FieldId::KeyGlobal => "全局键",
+        FieldId::KeyChat => "对话键",
         FieldId::KeySettings => "面板键",
         FieldId::KeyEditor => "编辑器键",
         FieldId::LocalSecret => "密钥存储",

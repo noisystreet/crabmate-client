@@ -530,3 +530,26 @@ fn save_payload_any_ignores_skip_new_fields() {
     };
     assert!(!p.any());
 }
+
+/// `McpSave::any()` 只认「真的待写」：`tool_timeout = Write(None)` 是「留空提交 = 不改」，
+/// 算成待写就会白发一次内容不变的 PUT。
+#[test]
+fn mcp_save_any_ignores_a_blank_timeout() {
+    let blank = McpSave {
+        global_enabled: FieldAction::Skip,
+        tool_timeout: FieldAction::Write(None),
+    };
+    assert!(!blank.any(), "留空提交不是待写");
+
+    let timeout = McpSave {
+        global_enabled: FieldAction::Skip,
+        tool_timeout: FieldAction::Write(Some("30".to_string())),
+    };
+    assert!(timeout.any());
+
+    let toggle = McpSave {
+        global_enabled: FieldAction::Write(Some(STORE_OFF.to_string())),
+        tool_timeout: FieldAction::Skip,
+    };
+    assert!(toggle.any());
+}

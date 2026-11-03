@@ -63,9 +63,9 @@ Desktop 设置共 8 个分区（`settings_page`）。逐区对齐结论见下表
 | **Llm（模型配置）** | **reduced→主模型扁平字段**：对齐 `client_llm.{api_base,model,temperature,llm_context_tokens,llm_thinking_mode}` + 密钥 | Desktop 的“注册表 + 主/执行器套用”面向多预设管理；TUI 只管理当前主模型这一份（§4.2 / §4.3） |
 | **Tools**（readonly tool TTL 缓存开关） | **reduced（已落地）**：对齐同名字段（§4.2），但**没有独立 Tools 分区**——开关落在面板「会话」分区第三行 | 开关 = serve prefs 布尔 + 随轮发送 `readonly_tool_ttl_cache_secs`，语义一致即可用 |
 | **Session**（SQLite 会话存储 + 字体） | **reduced（已落地）**：`role` / `session_mode` / 只读工具缓存 / **SQLite 开关**在同一「会话」分区；字体 **no** | SQLite 开关是 serve 级动作（`POST /config/session/conversation-store`，当前值读 `/status`），与字体（CSS 渲染）本就是两回事 |
-| **Shortcuts**（只读快捷键说明） | **landed（只读三行）**：全局键 / 面板键 / 编辑器键 | 值本身即说明文案（`static_note`，单一来源）；`/help` 仍是完整入口，面板内只做速查 |
+| **Shortcuts**（只读快捷键说明） | **landed（只读四行）**：全局键 / 对话键 / 面板键 / 编辑器键 | 值本身即说明文案（`static_note`，单一来源）；全局键与对话键**分两行**是因为挤成一条会在 80 列终端被 `truncate_display` 截掉尾部键位，而这栏的值就是事实。`/help` 仍是完整入口，面板内只做速查 |
 | **Github** | **no** | 矩阵 L48 TUI=no（Device Flow 需外开浏览器/原生钥匙串/Cookie，终端都没有） |
-| **Mcp** | **partial（已落地）**：全局开关 `global_enabled` + `tool_timeout_secs` 可读写；服务器清单是**只读**一行（数量 / 启用数），行编辑 **no** | MCP 实体在 serve user-data（`/user-data/mcp-servers` 全量 DTO）、stdio 在 serve 机拉起；条目带 `env` / `headers` / `bearer`，终端面板既不展示也不编辑，PUT 时原样回写 |
+| **Mcp** | **partial（已落地）**：全局开关 `global_enabled` + `tool_timeout_secs` 可读写；服务器清单是**只读**一行（数量 / 启用数），行编辑 **no** | MCP 实体在 serve user-data（`/user-data/mcp-servers` 全量 DTO）、stdio 在 serve 机拉起；条目带 `env` / `headers` / `bearer`，终端面板既不展示也不编辑，PUT 时原样回写。**代价**：保存是读-改-写（GET → 改两个标量 → 全量 PUT），GET 与 PUT 之间别处（Desktop/Web）的增删会被这次回写覆盖；前提是 GET 不脱敏那些机密字段，否则掩码会被写回去 —— 两点都要 Server 侧契约保证 |
 | IDE 编辑器设置页（独立入口） | **no** | 内嵌 CodeMirror 才有；远程终端无 WebView |
 
 ### 4.2 TUI 设置面板的字段清单（对齐列）

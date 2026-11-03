@@ -173,6 +173,12 @@ pub struct PersistedSettings {
     pub mcp_server_count: Option<usize>,
     /// 其中启用的数量（只读展示）。
     pub mcp_enabled_count: Option<usize>,
+    /// 上一次拉取 MCP 配置是否失败（网络 / 解码；**不含** 404）。
+    ///
+    /// 用来区分「这个 serve 真没有该端点」与「这次没拉到」—— 后者重开面板会重拉一次
+    /// （`LaneApp::open_settings` 认这个标记），前者不该反复打无用请求。缺了它，启动时
+    /// 一次网络抖动就会让 MCP 整会话不可编辑，且提示的还是「版本过旧」。
+    pub mcp_fetch_failed: bool,
 }
 
 impl PersistedSettings {
@@ -214,6 +220,8 @@ impl PersistedSettings {
                     })
                     .count()
             }),
+            // 拉取失败由 worker 在拿到结果后按需置位（`from_snapshot` 只装配成功的那份）。
+            mcp_fetch_failed: false,
         }
     }
 
@@ -494,10 +502,14 @@ pub struct McpSave {
 }
 
 impl McpSave {
-    /// 是否有任一字段待写。
+    /// 是否有任一字段**真的待写**。
+    ///
+    /// `tool_timeout` 的 `Write(None)` 不算：留空提交 = 「不改」（那个端点没有可清除的
+    /// 用户键，见 [`merge_mcp_save`]）。把它算成待写就会白发一次内容不变的 PUT，
+    /// 再回一句「已保存」—— 用户以为改了什么。
     #[must_use]
     pub fn any(&self) -> bool {
-        self.global_enabled.is_write() || self.tool_timeout.is_write()
+        self.global_enabled.is_write() || matches!(&self.tool_timeout, FieldAction::Write(Some(_)))
     }
 
     /// 保存成功后清空 staged。
