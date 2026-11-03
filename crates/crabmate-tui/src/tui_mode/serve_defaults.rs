@@ -29,6 +29,16 @@ pub struct ServeDefaults {
     /// 存整个投影而不是只存 `level`：切换菜单要的 `available` 也在这里。只留 level 的话，
     /// 每次开菜单都得再打一次 `/permission`（Desktop chip 吃的也是同一份 view）。
     pub permission_view: Option<PermissionView>,
+    /// 会话存储当前是否走 SQLite（`/status.conversation_store_sqlite_active`）。
+    ///
+    /// `None` = 这个 serve 的 `/status` 没有该字段（老版本）：面板行显示「未提供」
+    /// 而不是「关」—— 两者对用户意味着完全不同的操作。
+    pub conversation_store_sqlite_active: Option<bool>,
+    /// 服务端是否配置了 SQLite 会话存储路径（`..._path_configured`）。
+    ///
+    /// `Some(false)` = 开关该置灰（对齐前端 disabled）：此时即便 `sqlite` 发 true
+    /// 也不会生效，让用户按下去再报错是更差的体验。
+    pub conversation_store_sqlite_path_configured: Option<bool>,
 }
 
 impl ServeDefaults {
@@ -49,7 +59,29 @@ impl ServeDefaults {
             baseline_prompt_tokens_by_role: baseline_by_role(v),
             // `/status` 不提供生效等级；由 worker 另拉 `/permission` 后回填。
             permission_view: None,
+            conversation_store_sqlite_active: v
+                .get("conversation_store_sqlite_active")
+                .and_then(Value::as_bool),
+            conversation_store_sqlite_path_configured: v
+                .get("conversation_store_sqlite_path_configured")
+                .and_then(Value::as_bool),
         }
+    }
+
+    /// 会话存储开关当前态；`None` = 这个 serve 的 `/status` 不识此字段（老版本）。
+    #[must_use]
+    pub fn store_sqlite_active(&self) -> Option<bool> {
+        self.conversation_store_sqlite_active
+    }
+
+    /// 该 serve 是否允许在面板里切换会话存储。
+    ///
+    /// 两个条件缺一不可：不知道当前值就表达不出「切到另一边」；服务端没配置
+    /// SQLite 路径时 `sqlite: true` 必被拒（前端对同一状态也是 disable）。
+    #[must_use]
+    pub fn store_toggle_supported(&self) -> bool {
+        self.conversation_store_sqlite_active.is_some()
+            && self.conversation_store_sqlite_path_configured != Some(false)
     }
 
     /// 此刻生效的档（min 链之后）。`None` = 不知道：老 serve 没有 `/permission`、
@@ -137,6 +169,30 @@ mod tests {
         // 服务端没给基线：宁可不显示
         let none = ServeDefaults::from_status(&json!({"model": "m"}));
         assert_eq!(none.baseline_prompt_tokens(None), None);
+    }
+
+    #[test]
+    fn store_fields_gate_the_toggle() {
+        let disabled = ServeDefaults::from_status(&json!({
+            "conversation_store_sqlite_active": false,
+            "conversation_store_sqlite_path_configured": false
+        }));
+        assert_eq!(disabled.store_sqlite_active(), Some(false));
+        assert!(
+            !disabled.store_toggle_supported(),
+            "服务端未配置 SQLite 路径 → 不给切"
+        );
+
+        let ok = ServeDefaults::from_status(&json!({
+            "conversation_store_sqlite_active": true,
+            "conversation_store_sqlite_path_configured": true
+        }));
+        assert!(ok.store_toggle_supported());
+
+        // 老 serve：字段缺失 → 「不知道」而不是「关」，且不给切。
+        let old = ServeDefaults::from_status(&json!({ "model": "m" }));
+        assert_eq!(old.store_sqlite_active(), None);
+        assert!(!old.store_toggle_supported());
     }
 
     #[test]

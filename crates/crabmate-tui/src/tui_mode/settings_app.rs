@@ -7,7 +7,7 @@ use crabmate_client_api::secrets::{KEYRING_SERVICE, SecretSlot};
 
 use super::super::LaneApp;
 use super::super::palette::Palette;
-use super::super::settings::{LlmSave, PersistedSettings, PrefsSave};
+use super::super::settings::{LlmSave, PersistedSettings, PrefsSave, STORE_ON};
 use super::super::state::LineKind;
 use super::super::worker::WorkerJob;
 use super::field_label;
@@ -82,9 +82,12 @@ impl LaneApp<'_> {
             PanelEffect::Close => {
                 self.panel = None;
             }
-            PanelEffect::Save { llm, prefs, secret } => {
-                self.submit_settings_save(*llm, *prefs, secret)
-            }
+            PanelEffect::Save {
+                llm,
+                prefs,
+                secret,
+                store,
+            } => self.submit_settings_save(*llm, *prefs, secret, store),
         }
     }
 
@@ -103,9 +106,15 @@ impl LaneApp<'_> {
     /// 保存请求：先同步落地 API 密钥（本机钥匙串，不进 serve user-data），再按 staged
     /// 分组下发 worker 任务（先 GET 再合并改自己管理的键再全量 PUT）。密钥环节失败
     /// （`--no-keyring` 或钥匙串不可用）时整单取消并复位在途标记，staged 保留可重试。
-    fn submit_settings_save(&mut self, llm: LlmSave, prefs: PrefsSave, secret: FieldAction) {
+    fn submit_settings_save(
+        &mut self,
+        llm: LlmSave,
+        prefs: PrefsSave,
+        secret: FieldAction,
+        store: FieldAction,
+    ) {
         if !secret.is_write() {
-            self.dispatch_user_data_saves(llm, prefs);
+            self.dispatch_user_data_saves(llm, prefs, store);
             return;
         }
         if self.no_keyring {
@@ -122,7 +131,7 @@ impl LaneApp<'_> {
         match keyring_write(account, value.as_deref()) {
             Ok(()) => {
                 self.on_secret_written(value.map(|s| s.trim().to_string()));
-                self.dispatch_user_data_saves(llm, prefs);
+                self.dispatch_user_data_saves(llm, prefs, store);
             }
             Err(e) => {
                 self.cancel_save_for_secret(&format!(
@@ -171,29 +180,46 @@ impl LaneApp<'_> {
 
     /// 下发 llm/prefs 两组保存任务（密钥已先行落地）。worker 已退出导致发送失败时复位
     /// 在途标记，面板保留改动可重试，避免卡在"保存中"。
-    fn dispatch_user_data_saves(&mut self, llm: LlmSave, prefs: PrefsSave) {
+    fn dispatch_user_data_saves(&mut self, llm: LlmSave, prefs: PrefsSave, store: FieldAction) {
         let llm_pending = llm.any();
         let prefs_pending = prefs.any();
-        let llm_ok = !llm_pending || self.job_tx.send(WorkerJob::SaveLlm(llm)).is_ok();
-        let prefs_ok = !prefs_pending || self.job_tx.send(WorkerJob::SavePrefs(prefs)).is_ok();
-        if !llm_ok || !prefs_ok {
-            self.st.push_line(
-                LineKind::System,
-                "设置保存失败：worker 已退出（改动保留，可重试）",
-            );
-            if let Some(panel) = self.panel.as_mut() {
-                if !llm_ok {
-                    panel.save_group_result(SaveGroup::Llm, false);
-                }
-                if !prefs_ok {
-                    panel.save_group_result(SaveGroup::Prefs, false);
-                }
-            }
+        let store_pending = store.is_write();
+        // 三组各自下发；无改动的组不发任务（视为成功）。
+        let llm_ok = self.send_group(llm_pending, WorkerJob::SaveLlm(llm));
+        let prefs_ok = self.send_group(prefs_pending, WorkerJob::SavePrefs(prefs));
+        let store_ok = self.send_group(store_pending, WorkerJob::SaveStore(store_is_on(&store)));
+        if !(llm_ok && prefs_ok && store_ok) {
+            self.on_save_dispatch_failure(llm_ok, prefs_ok, store_ok);
             return;
         }
-        if llm_pending || prefs_pending {
+        if llm_pending || prefs_pending || store_pending {
             self.st
                 .push_line(LineKind::System, "正在保存设置到 serve user-data…");
+        }
+    }
+
+    /// 只在「该组有改动」时下发；返回该组是否算成功（无改动的组恒为成功）。
+    fn send_group(&self, pending: bool, job: WorkerJob) -> bool {
+        !pending || self.job_tx.send(job).is_ok()
+    }
+
+    /// worker 已退出导致下发失败：复位在途标记、保留 staged 可重试。
+    fn on_save_dispatch_failure(&mut self, llm_ok: bool, prefs_ok: bool, store_ok: bool) {
+        self.st.push_line(
+            LineKind::System,
+            "设置保存失败：worker 已退出（改动保留，可重试）",
+        );
+        let Some(panel) = self.panel.as_mut() else {
+            return;
+        };
+        if !llm_ok {
+            panel.save_group_result(SaveGroup::Llm, false);
+        }
+        if !prefs_ok {
+            panel.save_group_result(SaveGroup::Prefs, false);
+        }
+        if !store_ok {
+            panel.save_group_result(SaveGroup::Store, false);
         }
     }
 
@@ -293,6 +319,51 @@ impl LaneApp<'_> {
             }
         }
     }
+
+    /// 会话存储切换结果：成功即把本地已知值改成新值（面板行、状态都读它），
+    /// 失败保留 staged 供重试。
+    ///
+    /// 本地值必须跟着改：这个开关不在 user-data 快照里，`persisted` 更新不了它；
+    /// 不写回 `serve_defaults` 的话，保存成功后行会退回旧值，看起来像没生效。
+    pub(crate) fn on_settings_saved_store(&mut self, result: Result<bool, String>) {
+        match result {
+            Ok(sqlite) => {
+                self.st
+                    .serve_defaults
+                    .get_or_insert_with(Default::default)
+                    .conversation_store_sqlite_active = Some(sqlite);
+                self.st.push_line(
+                    LineKind::System,
+                    &format!(
+                        "会话存储已切换：{}（serve 侧生效；Desktop/Web 设置页看到同一个开关）",
+                        if sqlite { "SQLite" } else { "文件存储" }
+                    ),
+                );
+                if let Some(panel) = self.panel.as_mut() {
+                    panel.save_group_result(SaveGroup::Store, true);
+                    panel.set_note("会话存储已切换".to_string(), NoticeLevel::Ok);
+                }
+            }
+            Err(e) => {
+                self.st.push_line(
+                    LineKind::System,
+                    &format!("切换会话存储失败：{e}（面板保留改动，可按 S 重试）"),
+                );
+                if let Some(panel) = self.panel.as_mut() {
+                    panel.save_group_result(SaveGroup::Store, false);
+                    panel.set_note(
+                        "切换失败：改动保留，按 S 重试".to_string(),
+                        NoticeLevel::Error,
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// 会话存储 switch 动作 → 请求体里的 `sqlite` 布尔（只有 `Write(Some("on"))` 是 true）。
+fn store_is_on(action: &FieldAction) -> bool {
+    matches!(action, FieldAction::Write(Some(v)) if v.trim() == STORE_ON)
 }
 
 fn llm_saved_names(save: &LlmSave) -> Vec<&'static str> {

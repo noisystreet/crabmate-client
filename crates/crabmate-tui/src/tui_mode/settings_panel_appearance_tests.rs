@@ -175,7 +175,9 @@ fn theme_save_goes_to_prefs_group_only() {
     p.handle_key(&key(KeyCode::Enter), &c);
     p.handle_key(&key(KeyCode::Right), &c); // shadcn-transparent
     p.handle_key(&key(KeyCode::Enter), &c);
-    let PanelEffect::Save { llm, prefs, secret } = p.handle_key(&key(KeyCode::Char('s')), &c)
+    let PanelEffect::Save {
+        llm, prefs, secret, ..
+    } = p.handle_key(&key(KeyCode::Char('s')), &c)
     else {
         panic!("主题改动应产生保存请求");
     };

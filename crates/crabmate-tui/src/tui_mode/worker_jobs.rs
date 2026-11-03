@@ -22,7 +22,8 @@ use crate::serve::{
     ServeClient, SessionIndexOp, apply_web_session_op, fetch_conversation_messages,
     fetch_llm_overrides, fetch_user_data_prefs, fetch_web_sessions, fetch_workspace,
     fetch_workspace_dir, fetch_workspace_projects, put_llm_overrides, put_user_data_prefs,
-    set_workspace, switch_workspace_project, write_permission_level,
+    set_session_conversation_store, set_workspace, switch_workspace_project,
+    write_permission_level,
 };
 
 /// 写会话索引（`GET` 最新 → 改 → 全量 `PUT`）：新建空白行或把 `conversation_id` 绑到指定行。
@@ -292,4 +293,15 @@ pub(super) async fn job_save_prefs(client: &ServeClient, save: PrefsSave, out: &
     }
     .await;
     let _ = out.send(UiEvent::SavedPrefs(result));
+}
+
+/// 切换会话存储（`POST /config/session/conversation-store`）。
+///
+/// 不做「先 GET 再合并」：这个端点是一次动作而不是全量 DTO，没有别的键会被覆盖。
+pub(super) async fn job_save_store(client: &ServeClient, sqlite: bool, out: &LaneTx) {
+    let result = set_session_conversation_store(client, sqlite)
+        .await
+        .map(|()| sqlite)
+        .map_err(|e| e.to_string());
+    let _ = out.send(UiEvent::SavedStore(result));
 }

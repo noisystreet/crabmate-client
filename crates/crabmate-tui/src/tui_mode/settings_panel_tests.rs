@@ -122,29 +122,30 @@ fn tab_cycles_section_and_arrows_move_row() {
     let mut p = SettingsPanel::new(false);
     assert_eq!(p.section, Section::Llm);
     assert_eq!(p.current_field(), FieldId::Model);
-    for expected in [
-        FieldId::ApiBase,
-        FieldId::Temperature,
-        FieldId::ContextTokens,
-        FieldId::ThinkingMode,
-        FieldId::ApiKey,
-    ] {
+    // 分区内 ↓ 逐行走到最后一格，再按一次仍停在最后一格（clamp）。
+    // 用 `Section::fields()` 而不是硬编码列表：以后加字段这个测试不必跟着改。
+    for expected in &Section::Llm.fields()[1..] {
         p.handle_key(&key(KeyCode::Down), &c);
-        assert_eq!(p.current_field(), expected);
+        assert_eq!(p.current_field(), *expected);
     }
     p.handle_key(&key(KeyCode::Down), &c);
-    assert_eq!(p.current_field(), FieldId::ApiKey, "底行 clamp");
+    assert_eq!(p.current_field(), FieldId::ApiKey, "模型分区底行 clamp");
     p.handle_key(&key(KeyCode::Up), &c);
     assert_eq!(p.current_field(), FieldId::ThinkingMode);
+    // Tab 切到会话分区，光标回首行；同样走到最后一格验证 clamp。
     p.handle_key(&key(KeyCode::Tab), &c);
     assert_eq!(p.section, Section::Session);
     assert_eq!(p.current_field(), FieldId::Role);
-    for expected in [FieldId::SessionMode, FieldId::ToolCache] {
+    for expected in &Section::Session.fields()[1..] {
         p.handle_key(&key(KeyCode::Down), &c);
-        assert_eq!(p.current_field(), expected);
+        assert_eq!(p.current_field(), *expected);
     }
     p.handle_key(&key(KeyCode::Down), &c);
-    assert_eq!(p.current_field(), FieldId::ToolCache, "会话分区底行 clamp");
+    assert_eq!(
+        p.current_field(),
+        FieldId::SessionSqlite,
+        "会话分区底行 clamp"
+    );
     p.handle_key(&key(KeyCode::BackTab), &c);
     assert_eq!(p.section, Section::Llm);
 }

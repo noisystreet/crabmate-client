@@ -173,7 +173,9 @@ fn api_key_staging_and_save_effect_carries_secret() {
     assert!(p.is_dirty());
     // S → Save 效果带 secret（llm/prefs 均空）
     let (llm, prefs, secret) = match p.handle_key(&key(KeyCode::Char('s')), &c) {
-        PanelEffect::Save { llm, prefs, secret } => (*llm, *prefs, secret),
+        PanelEffect::Save {
+            llm, prefs, secret, ..
+        } => (*llm, *prefs, secret),
         _ => panic!("expected save"),
     };
     assert!(!llm.any());
