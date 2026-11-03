@@ -196,7 +196,15 @@ impl SettingsPanel {
             FieldId::McpGlobalEnabled => &self.mcp.global_enabled,
             FieldId::McpToolTimeout => &self.mcp.tool_timeout,
             // 只读信息行：永远没有 staged 动作。
-            FieldId::McpServers => &READ_ONLY,
+            FieldId::McpServers
+            | FieldId::ConnModel
+            | FieldId::ConnPermission
+            | FieldId::KeyGlobal
+            | FieldId::KeySettings
+            | FieldId::KeyEditor
+            | FieldId::LocalSecret
+            | FieldId::LocalSave
+            | FieldId::LocalMarkdown => &READ_ONLY,
         }
     }
 
@@ -215,8 +223,16 @@ impl SettingsPanel {
             FieldId::SessionSqlite => self.store = action,
             FieldId::McpGlobalEnabled => self.mcp.global_enabled = action,
             FieldId::McpToolTimeout => self.mcp.tool_timeout = action,
-            // 只读行不接受写入（面板不会为它产生动作，这里只是穷尽 match）。
-            FieldId::McpServers => {}
+            // 只读行不接受写入（面板不会为它们产生动作，这里只是穷尽 match）。
+            FieldId::McpServers
+            | FieldId::ConnModel
+            | FieldId::ConnPermission
+            | FieldId::KeyGlobal
+            | FieldId::KeySettings
+            | FieldId::KeyEditor
+            | FieldId::LocalSecret
+            | FieldId::LocalSave
+            | FieldId::LocalMarkdown => {}
         }
     }
 
@@ -354,6 +370,14 @@ impl SettingsPanel {
             self.set_note(
                 "回合进行中：只读（结束后自动解锁）".to_string(),
                 NoticeLevel::Warn,
+            );
+            return;
+        }
+        // 三栏整栏只读（连接 / 快捷键 / 本地行为）：值本身就是说明，没有可编辑项。
+        if is_readonly_section(self.section) {
+            self.set_note(
+                "这一栏是只读说明：值本身就是当前事实".to_string(),
+                NoticeLevel::Muted,
             );
             return;
         }
@@ -534,7 +558,15 @@ impl PanelCtx<'_> {
             | FieldId::SessionSqlite
             | FieldId::McpGlobalEnabled
             | FieldId::McpToolTimeout
-            | FieldId::McpServers => None,
+            | FieldId::McpServers
+            | FieldId::ConnModel
+            | FieldId::ConnPermission
+            | FieldId::KeyGlobal
+            | FieldId::KeySettings
+            | FieldId::KeyEditor
+            | FieldId::LocalSecret
+            | FieldId::LocalSave
+            | FieldId::LocalMarkdown => None,
             FieldId::Role => self.overrides.agent_role.as_deref(),
             FieldId::SessionMode => self.overrides.session_mode.as_deref(),
         };
@@ -561,6 +593,16 @@ impl PanelCtx<'_> {
             // 超时要显示「60 秒」这类数值文本，`sources` 只给 `&str`，所以在 `mcp_timeout_cell`
             // 里直接读持久层；服务器数量同理（只读信息行）。
             FieldId::McpToolTimeout | FieldId::McpServers => None,
+            // 连接 / 快捷键 / 本地行为三栏整栏只读：值本身就是说明（`draw` 里直接取，
+            // 连接那两行还要读 `/status` 与 `/permission`，不在三层合成里）。
+            FieldId::ConnModel
+            | FieldId::ConnPermission
+            | FieldId::KeyGlobal
+            | FieldId::KeySettings
+            | FieldId::KeyEditor
+            | FieldId::LocalSecret
+            | FieldId::LocalSave
+            | FieldId::LocalMarkdown => None,
         };
         let remote = match field {
             FieldId::Model => d.and_then(|d| d.model.as_deref()),
@@ -578,6 +620,14 @@ impl PanelCtx<'_> {
                 .map(|on| if on { STORE_ON } else { STORE_OFF }),
             // MCP 两项的当前值在 user-data（不是 `/status`）；服务器数量是只读信息行。
             FieldId::McpGlobalEnabled | FieldId::McpToolTimeout | FieldId::McpServers => None,
+            FieldId::ConnModel
+            | FieldId::ConnPermission
+            | FieldId::KeyGlobal
+            | FieldId::KeySettings
+            | FieldId::KeyEditor
+            | FieldId::LocalSecret
+            | FieldId::LocalSave
+            | FieldId::LocalMarkdown => None,
             FieldId::Role => d.and_then(|d| d.role.as_deref()),
             FieldId::SessionMode => d.and_then(|d| d.mode.as_deref()),
         };
@@ -695,3 +745,8 @@ mod tests_store;
 #[cfg(test)]
 #[path = "settings_panel_mcp_tests.rs"]
 mod tests_mcp;
+
+// 只读三栏（连接 / 快捷键 / 本地行为）单测独立成文件（同上）。
+#[cfg(test)]
+#[path = "settings_panel_local_tests.rs"]
+mod tests_local;

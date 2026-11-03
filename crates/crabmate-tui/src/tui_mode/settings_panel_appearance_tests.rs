@@ -47,8 +47,8 @@ fn appearance_section_leads_the_nav_and_holds_only_theme() {
     let labels: Vec<&str> = content.nav.iter().map(|(l, _)| l.as_str()).collect();
     assert_eq!(
         labels,
-        vec!["外观", "模型", "会话", "MCP"],
-        "导航顺序对齐 Desktop（MCP 在会话之后）"
+        vec!["外观", "模型", "会话", "MCP", "连接", "快捷键", "本地行为"],
+        "导航顺序对齐 Desktop（可写四栏在前，只读三栏在后）"
     );
     assert!(
         matches!(&content.nav[..], [(_, selected), ..] if !*selected),
@@ -198,13 +198,18 @@ fn theme_section_is_reachable_from_the_last_section_by_tab() {
     let o = SessionPrefs::from_options(None, None, None);
     let c = ctx(&o, None);
     let mut p = SettingsPanel::new(false);
-    // 模型 → 会话 → MCP → 外观（Tab 从最后一个分区回绕到第一个）
-    p.handle_key(&key(KeyCode::Tab), &c);
-    assert_eq!(p.section, Section::Session);
-    p.handle_key(&key(KeyCode::Tab), &c);
-    assert_eq!(p.section, Section::Mcp);
-    p.handle_key(&key(KeyCode::Tab), &c);
-    assert_eq!(p.section, Section::Appearance);
+    // 模型 → 会话 → MCP → 连接 → 快捷键 → 本地行为 → 外观（Tab 从最后一栏回绕）
+    for expected in [
+        Section::Session,
+        Section::Mcp,
+        Section::Connection,
+        Section::Shortcuts,
+        Section::Local,
+        Section::Appearance,
+    ] {
+        p.handle_key(&key(KeyCode::Tab), &c);
+        assert_eq!(p.section, expected);
+    }
     assert_eq!(p.row, 0, "切分区后行光标回到首行");
 }
 

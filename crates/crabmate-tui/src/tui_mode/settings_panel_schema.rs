@@ -107,10 +107,11 @@ pub(crate) fn theme_index_of(v: Option<&str>) -> usize {
         .unwrap_or(0)
 }
 
-/// 面板分区：外观 / 模型 / 会话（扁平字段，写 serve user-data）。
+/// 面板分区：外观 / 模型 / 会话 / MCP / 连接 / 快捷键 / 本地行为。
 ///
-/// 顺序与 Desktop 设置页导航一致（外观在模型之前），`ALL` 的下标必须与枚举判别式
-/// 对齐——[`SettingsPanel::cycle_section`] 用 `section as usize` 索引。
+/// 前四栏可写（写 serve user-data 或本机钥匙串）；后三栏整栏**只读**，值本身就是
+/// 说明文案。`ALL` 的下标必须与枚举判别式对齐——[`SettingsPanel::cycle_section`]
+/// 用 `section as usize` 索引。
 ///
 /// 放在本文件而不是父模块：与「分区 → 字段」表同源，且父模块要压 920 行门禁。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -119,14 +120,23 @@ pub(crate) enum Section {
     Llm,
     Session,
     Mcp,
+    /// 只读：serve 侧默认模型 / 生效权限档。
+    Connection,
+    /// 只读：全局 / 面板 / 编辑器快捷键。
+    Shortcuts,
+    /// 只读：密钥存储、保存语义、Markdown 预览这些「行为事实」。
+    Local,
 }
 
 impl Section {
-    pub(crate) const ALL: [Section; 4] = [
+    pub(crate) const ALL: [Section; 7] = [
         Section::Appearance,
         Section::Llm,
         Section::Session,
         Section::Mcp,
+        Section::Connection,
+        Section::Shortcuts,
+        Section::Local,
     ];
 
     pub(crate) const fn label(self) -> &'static str {
@@ -135,6 +145,9 @@ impl Section {
             Section::Llm => "模型",
             Section::Session => "会话",
             Section::Mcp => "MCP",
+            Section::Connection => "连接",
+            Section::Shortcuts => "快捷键",
+            Section::Local => "本地行为",
         }
     }
 
@@ -161,8 +174,23 @@ impl Section {
                 FieldId::McpToolTimeout,
                 FieldId::McpServers,
             ],
+            Section::Connection => &[FieldId::ConnModel, FieldId::ConnPermission],
+            Section::Shortcuts => &[FieldId::KeyGlobal, FieldId::KeySettings, FieldId::KeyEditor],
+            Section::Local => &[
+                FieldId::LocalSecret,
+                FieldId::LocalSave,
+                FieldId::LocalMarkdown,
+            ],
         }
     }
+}
+
+/// 整栏只读的分区（连接 / 快捷键 / 本地行为）：没有可编辑字段。
+pub(crate) const fn is_readonly_section(section: Section) -> bool {
+    matches!(
+        section,
+        Section::Connection | Section::Shortcuts | Section::Local
+    )
 }
 
 /// 面板管理的字段：外观 1 个 + 模型 6 个 + 会话 3 个。`Temperature/ThinkingMode/
@@ -186,6 +214,22 @@ pub(crate) enum FieldId {
     McpToolTimeout,
     /// 只读信息行：服务器数量 / 启用数。清单本身留给 Desktop/Web 设置页。
     McpServers,
+    /// 只读：serve 给的默认模型。
+    ConnModel,
+    /// 只读：本会话生效的权限档（`/permission` 的 min 链结果）。
+    ConnPermission,
+    /// 只读：全局快捷键一览。
+    KeyGlobal,
+    /// 只读：设置面板内快捷键。
+    KeySettings,
+    /// 只读：编辑器 / 会话视图快捷键。
+    KeyEditor,
+    /// 只读：密钥只进本机钥匙串。
+    LocalSecret,
+    /// 只读：保存语义（先 GET 再改自己的键再全量 PUT）。
+    LocalSave,
+    /// 只读：`.md` 走 markdown 预览。
+    LocalMarkdown,
 }
 
 pub(crate) const fn field_label(field: FieldId) -> &'static str {
@@ -204,5 +248,13 @@ pub(crate) const fn field_label(field: FieldId) -> &'static str {
         FieldId::McpGlobalEnabled => "MCP 开关",
         FieldId::McpToolTimeout => "工具超时",
         FieldId::McpServers => "服务器",
+        FieldId::ConnModel => "serve 模型",
+        FieldId::ConnPermission => "权限档",
+        FieldId::KeyGlobal => "全局键",
+        FieldId::KeySettings => "面板键",
+        FieldId::KeyEditor => "编辑器键",
+        FieldId::LocalSecret => "密钥存储",
+        FieldId::LocalSave => "保存语义",
+        FieldId::LocalMarkdown => "Markdown",
     }
 }

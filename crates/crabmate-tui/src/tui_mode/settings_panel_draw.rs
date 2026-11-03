@@ -122,16 +122,45 @@ impl SettingsPanel {
     /// 统一走 [`Self::layered_cell`]。拆成两跳是为了 CCN 门禁：一行一个 `if` 加回
     /// 三层 `match` 会直接越过上限。
     fn value_cell(&self, ctx: &PanelCtx<'_>, field: FieldId) -> (String, FieldTone) {
-        match field {
+        if let Some(cell) = self.readonly_cell(ctx, field) {
+            return cell;
+        }
+        if let Some(cell) = self.special_cell(ctx, field) {
+            return cell;
+        }
+        self.layered_cell(ctx, field)
+    }
+
+    /// 只读行的值：连接那两行读 serve 事实，其余几行是静态说明。`None` = 不是只读行。
+    fn readonly_cell(&self, ctx: &PanelCtx<'_>, field: FieldId) -> Option<(String, FieldTone)> {
+        let d = ctx.serve_defaults;
+        Some(match field {
+            FieldId::McpServers => self.mcp_servers_cell(ctx),
+            FieldId::ConnModel => serve_fact(d.and_then(|d| d.model.clone())),
+            FieldId::ConnPermission => {
+                serve_fact(d.and_then(|d| d.effective_level().map(str::to_string)))
+            }
+            FieldId::KeyGlobal
+            | FieldId::KeySettings
+            | FieldId::KeyEditor
+            | FieldId::LocalSecret
+            | FieldId::LocalSave
+            | FieldId::LocalMarkdown => (static_note(field).to_string(), FieldTone::Unset),
+            _ => return None,
+        })
+    }
+
+    /// 有独立文案的字段（密钥 / 工具缓存 / 主题 / 会话存储 / MCP 两项）。`None` = 走三层合成。
+    fn special_cell(&self, ctx: &PanelCtx<'_>, field: FieldId) -> Option<(String, FieldTone)> {
+        Some(match field {
             FieldId::ApiKey => self.secret_cell(),
             FieldId::ToolCache => self.tool_cache_cell(ctx),
             FieldId::Theme => self.theme_cell(ctx),
             FieldId::SessionSqlite => self.store_cell(ctx),
             FieldId::McpGlobalEnabled => self.mcp_enabled_cell(ctx),
             FieldId::McpToolTimeout => self.mcp_timeout_cell(ctx),
-            FieldId::McpServers => self.mcp_servers_cell(ctx),
-            _ => self.layered_cell(ctx, field),
-        }
+            _ => return None,
+        })
     }
 
     /// 三层合成值（override ＞ user-data ＞ serve 默认）；空白一律视为未设置。
@@ -275,6 +304,30 @@ impl SettingsPanel {
             }
             FieldAction::Skip => ("未设（跟随 serve）".to_string(), FieldTone::Unset),
         }
+    }
+}
+
+/// 只读行拿不到 serve 值时的统一落款（不假装知道）。
+fn serve_fact(v: Option<String>) -> (String, FieldTone) {
+    match v {
+        Some(t) => (t, FieldTone::Value),
+        None => ("(该 serve 未提供)".to_string(), FieldTone::Unset),
+    }
+}
+
+/// 只读说明行的文案（快捷键 / 本地行为）：单一来源，改一处就够。
+///
+/// 这些行不是「设置项」而是**事实陈述**：TUI 的快捷键与本地安全语义不能从 serve
+/// 读，也没有可写的落点，所以在面板里只展示、Enter 给一句提示。
+fn static_note(field: FieldId) -> &'static str {
+    match field {
+        FieldId::KeyGlobal => "F6 设置 · F2 保存 · F3 状态栈 · Ctrl+T 视图 · Ctrl+C 取消回合",
+        FieldId::KeySettings => "↑↓ 移动 · Tab 分区 · Enter 编辑 · F2/S 保存 · Esc 关闭",
+        FieldId::KeyEditor => "PgUp/PgDn 翻页 · 退格关预览 · 滚轮滚动文件",
+        FieldId::LocalSecret => "API 密钥只进本机钥匙串（不写 serve user-data）",
+        FieldId::LocalSave => "保存 = 先 GET、再改自己的键、再全量 PUT（不覆盖 Desktop/Web 字段）",
+        FieldId::LocalMarkdown => "/editor 打开 .md 走 markdown 预览（只读渲染）",
+        _ => "",
     }
 }
 
@@ -511,6 +564,12 @@ fn browse_msg(panel: &SettingsPanel) -> (String, NoticeLevel) {
         return (
             "回合进行中：只读（结束后自动解锁）".to_string(),
             NoticeLevel::Warn,
+        );
+    }
+    if is_readonly_section(panel.section) {
+        return (
+            "本栏只读：值就是当前事实（Enter 无动作）".to_string(),
+            NoticeLevel::Muted,
         );
     }
     if panel.is_dirty() {
