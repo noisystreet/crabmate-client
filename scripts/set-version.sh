@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# 统一设置全部 Rust 包版本（scripts/rust-pkg-dirs.txt 列出的所有包，含各自 Cargo.lock）。
+# 统一设置全部 Rust 包版本（scripts/rust-pkg-dirs.txt 列出的所有包，含各自 Cargo.lock），
+# 以及壳包自带顶层 version 的 tauri.conf.json（Tauri 打 .deb / APK 时以它为准）。
 # 版本一致性由 scripts/check-boundaries.sh 守护；手动改单个包会被 CI 拒绝。
 # 用法：scripts/set-version.sh <semver>   例：scripts/set-version.sh 0.5.1
 set -euo pipefail
@@ -35,6 +36,24 @@ while IFS= read -r dir; do
   # 同步该包自身在 Cargo.lock 中的版本（-w 仅动 workspace 成员，不碰依赖钉版本）
   (cd "$dir" && (cargo update -w --offline >/dev/null 2>&1 || cargo update -w >/dev/null)) \
     || echo "[set-version] 警告: $dir 的 Cargo.lock 未同步（稍后构建时会自动更新）" >&2
+  # 壳的 tauri.conf.json 自带顶层 version：Tauri 打 .deb / APK 时以它为准，
+  # 只改 Cargo.toml 会让安装包版本停在旧值，所以包目录里有就一起改。
+  conf="$dir/tauri.conf.json"
+  if [ -f "$conf" ]; then
+    n_conf="$(grep -c -E '^  "version": ' "$conf" || true)"
+    if [ "$n_conf" != "1" ]; then
+      echo "error: $conf 顶层 version 行数 = $n_conf（期望恰好 1 行）" >&2
+      exit 1
+    fi
+    old_conf="$(sed -n -E 's/^  "version": "(.*)",$/\1/p' "$conf")"
+    if [ "$old_conf" = "$NEW" ]; then
+      echo "[set-version] $conf 已是 $NEW"
+    else
+      # 只改第一处（顶层）：嵌套的同名键缩进不同，正则不会命中
+      sed -i "0,/^  \"version\": \".*\",\$/s//  \"version\": \"$NEW\",/" "$conf"
+      echo "[set-version] $conf: $old_conf -> $NEW"
+    fi
+  fi
 done < <(grep -v -e '^#' -e '^$' "$PKG_LIST")
 
-echo "[set-version] 全部包版本已设为 $NEW；请检查 git diff 后提交"
+echo "[set-version] 全部包版本已设为 $NEW（Cargo.toml + Cargo.lock + 壳 tauri.conf.json）；请检查 git diff 后提交"

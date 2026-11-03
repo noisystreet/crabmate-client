@@ -110,10 +110,10 @@ make dependency-security
 
 ```bash
 bash scripts/check-boundaries.sh   # 边界机械检查（也是 pre-commit 钩子 + check.sh 一环）
-bash scripts/set-version.sh 0.5.1  # 一次改全部包版本 + 各自 Cargo.lock
+bash scripts/set-version.sh 0.5.1  # 一次改全部包版本 + 各自 Cargo.lock + 壳 tauri.conf.json（Tauri 打包版本以它为准）
 ```
 
-`check-boundaries` 守护四件事：`crabmate-client-api` 纯度（禁 reqwest / tokio / tauri / web-sys / wasm-bindgen）、`crabmate-connect` 默认 feature 不含 Tauri、crates.io `crabmate` 契约钉形状唯一（`default-features = false, features = ["protocol"]`；禁旧包名 `crabmate-sse-protocol`）、全部包版本一致。改版本必须走 `set-version.sh`，手改单个 Cargo.toml 会被该检查拒绝。
+`check-boundaries` 守护五件事：`crabmate-client-api` 纯度（禁 reqwest / tokio / tauri / web-sys / wasm-bindgen）、`crabmate-connect` 默认 feature 不含 Tauri、crates.io `crabmate` 契约钉形状唯一（`default-features = false, features = ["protocol"]`；禁旧包名 `crabmate-sse-protocol`）、全部包版本一致、壳 `tauri.conf.json` 顶层 `version` 与包版本一致（Tauri 打 .deb / APK 以它为准）。改版本必须走 `set-version.sh`，手改单个 Cargo.toml 或 tauri.conf.json 会被该检查拒绝。
 
 ## Playwright（浏览器 Web UI E2E）
 
