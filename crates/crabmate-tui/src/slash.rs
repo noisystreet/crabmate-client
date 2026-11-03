@@ -2,10 +2,13 @@
 
 use std::io::{self, Write};
 
+use crate::conv_export;
 use crate::serve::{
-    ServeClient, conversation_id_for_resume, fetch_web_sessions, fetch_workspace, set_workspace,
+    ServeClient, conversation_id_for_resume, fetch_all_pages, fetch_web_sessions, fetch_workspace,
+    set_workspace,
 };
 use anyhow::Result;
+use crabmate_client_api::chat_export::{ExportFormat, export_messages};
 use crabmate_client_api::{paths, slash};
 use serde_json::Value;
 
@@ -226,6 +229,7 @@ async fn handle_conv(
         }
         "list" | "ls" => list_web_sessions(client, conversation_id).await,
         "delete" | "rm" => delete_conversation(client, args.get(1).copied(), conversation_id).await,
+        "export" => export_conversation(client, &args[1..], conversation_id).await,
         other => anyhow::bail!("unknown /conv subcommand '{other}'; try /help"),
     }
 }
@@ -263,6 +267,60 @@ async fn delete_conversation(
         *conversation_id = None;
     }
     println!("deleted server conversation {cid} (idempotent); local sidebar index untouched");
+    Ok(())
+}
+
+/// `/conv export [json|markdown|both] [--out <路径>] [--id <会话 id>]`：把整段会话导出成
+/// Desktop 同形的 Markdown / JSON。
+///
+/// 不给 `--out` 时写 stdout —— 只在行模式里成立：全屏 `tui` 用 alt-screen，把几万字打进
+/// UI 既没人读、也会刷掉当前对话，那边默认落一个文件（见 `tui_mode::export`）。
+///
+/// 翻页 / 合并 / 渲染与全屏共用（`serve::fetch_all_pages` +
+/// `crabmate_client_api::chat_export` + [`crate::conv_export`]），这里只决定出口。
+async fn export_conversation(
+    client: &ServeClient,
+    args: &[&str],
+    conversation_id: &Option<String>,
+) -> Result<()> {
+    let cmd = conv_export::parse_args(&args.join(" ")).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let bound = cmd
+        .id
+        .clone()
+        .or_else(|| conversation_id.clone())
+        .map(|c| c.trim().to_string())
+        .filter(|c| !c.is_empty());
+    let Some(cid) = bound else {
+        anyhow::bail!(
+            "{}（当前会话未绑定：先 /conv use <id>，或给 --id）",
+            ExportFormat::USAGE
+        );
+    };
+    let pages = fetch_all_pages(client, &cid).await?;
+    let messages = export_messages(&pages);
+    let artifacts =
+        conv_export::render_artifacts(cmd.format, &messages).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let page_count = u32::try_from(pages.len()).unwrap_or(u32::MAX);
+    match cmd.out.as_deref() {
+        None => {
+            conv_export::print_artifacts(&artifacts)?;
+            eprintln!(
+                "exported {page_count} page(s) / {} message(s) to stdout",
+                messages.len()
+            );
+        }
+        Some(out) => {
+            let targets =
+                conv_export::resolve_targets(&artifacts, Some(out), &conv_export::now_stamp())
+                    .map_err(|e| anyhow::anyhow!("{e}"))?;
+            let written = conv_export::write_artifacts(&artifacts, &targets)
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+            for line in conv_export::report_lines(&artifacts, &written, page_count, messages.len())
+            {
+                println!("{line}");
+            }
+        }
+    }
     Ok(())
 }
 
