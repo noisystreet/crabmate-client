@@ -42,6 +42,9 @@ struct LevelSelectCtx {
     owner: RwSignal<Option<String>>,
     /// 当前会话句柄；`None` = 无 ctx（单测 / Story），此时选择器只改本地意图。
     chat: Option<ChatSessionSignals>,
+    /// 回合是否在途（与「停止」门闩同源，见 `ChatShellLeptosContext::perm_turn_in_flight`）。
+    /// `None` = 无壳层 ctx，此时不做忙时守卫。
+    turn_in_flight: Option<Memo<bool>>,
     state: RwSignal<PermissionState>,
     /// 与刷新共用代次：连点两档时只有最后一次落地。
     generation: RwSignal<u32>,
@@ -107,6 +110,15 @@ fn apply_level_selection(level: &str, ctx: LevelSelectCtx) {
         ));
         return;
     };
+    // 回合进行中一律不换档（与底栏 chip、TUI `apply_permission_level` 同一条守卫）：
+    // 本轮 `/chat` 早已带着开跑时的档位发出去了。**不改意图信号**——那会让「被拒」
+    // 变成「悄悄延后到下一轮生效」，而用户以为自己已经切好了。
+    if ctx.turn_in_flight.is_some_and(|m| m.get_untracked()) {
+        ctx.note.set(Some(
+            i18n::settings_permission_turn_running(ctx.locale.get_untracked()).to_string(),
+        ));
+        return;
+    }
     ctx.selected.set(Some(level.to_string()));
     // 归属记在**选择这一刻**的会话上：之后切走就该清掉，而不是跟着跑到别的会话。
     ctx.owner.set(ctx.chat.map(|c| c.active_id.get_untracked()));
@@ -195,6 +207,7 @@ pub(crate) fn SettingsPermissionBlock(locale: RwSignal<Locale>) -> impl IntoView
             .map(|c| c.permission_intent_owner)
             .unwrap_or_else(|| RwSignal::new(None)),
         chat: shell.map(|c| c.chat),
+        turn_in_flight: shell.map(|c| c.perm_turn_in_flight),
         state,
         generation,
         note,
