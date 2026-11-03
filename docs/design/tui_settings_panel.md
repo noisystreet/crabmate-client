@@ -1,6 +1,6 @@
 # TUI 设置面板（对齐 Desktop 设置）
 
-> **状态**：**W1 / W2 / W4 已落地**（`/settings` + F6，三个分区共十个字段——外观 `theme`；模型 `model` / `api_base` / `temperature` / `llm_context_tokens` / `llm_thinking_mode` / API 密钥；会话 `role` / `session_mode` / 只读工具缓存开关）；**W3 后置项未落地**（MCP `global_enabled` / `tool_timeout_secs`、Session SQLite 开关）。§4.1 里「连接（只读信息）」「快捷键」「本地行为」三个分区**仍只是方案、面板里没有**。落地按 §7「分期」逐波提交（§8 是落地纪律）。
+> **状态**：**W1 / W2 / W3 / W4 已全部落地**（`/settings` + F6，七个分区）。**可写四栏**：外观 `theme`；模型 `model` / `api_base` / `temperature` / `llm_context_tokens` / `llm_thinking_mode` / API 密钥；会话 `role` / `session_mode` / 只读工具缓存开关 / 会话存储 SQLite 开关；MCP `global_enabled` / `tool_timeout_secs`。**只读三栏**：连接（serve 默认模型 + 生效权限档）、快捷键、本地行为（值即说明，Enter 无动作）。仍**不做**的：MCP 服务器行编辑、GitHub、字体/背景/IDE、`locale`。
 > **范围**：`crabmate-tui`（`tui` 全屏为主，`repl` 仅入口引导）；设置**选项字段与语义尽量对齐 Desktop**（`frontend/` Settings），不追求 UI 像素一致。
 > **关联**：[`remote_cli_tui.md`](./remote_cli_tui.md)（TUI 母方案）、[`client_capability_matrix.md`](./client_capability_matrix.md)（能力单元格，改动须同 PR 更新）、[`contract_pin.md`](./contract_pin.md)（契约钉点）、Server `docs/`（SSE / user-data / 配置权威）
 
@@ -54,23 +54,23 @@ Desktop（`frontend/` Settings）的设置不是这样：**字段实体与持久
 
 ### 4.1 分区级结论
 
-Desktop 设置共 8 个分区（`settings_page`）。逐区对齐结论见下表 —— **注意「TUI 对齐结论」列混合了「已落地」与「仅方案」两种状态**，当前面板真正实现了的只有**外观 / 模型 / 会话**三个分区（`settings_panel.rs::Section`），其余结论仍是待做/不做项：
+Desktop 设置共 8 个分区（`settings_page`）。逐区对齐结论见下表 —— 面板实际分区是**七个**（`settings_panel_schema.rs::Section`）：可写的外观 / 模型 / 会话 / MCP，加只读的连接 / 快捷键 / 本地行为。
 
 | Desktop 分区 | TUI 对齐结论 | 依据 / 理由 |
 |---|---|---|
-| **Connection**（Web Bearer + serve API 基址） | **no（尚未落地）**：面板没有连接分区；连接信息仍只能从 CLI/env/钥匙串得知，编辑走 CLI/env/钥匙串回退 | 两者在启动期定死（`ServeClient` 由 `ConnectionConfig` 建一次），会话中改需重建 client+worker，不划算；草案里的「面板内只读展示」未实现 |
+| **Connection**（Web Bearer + serve API 基址） | **partial（只读两行）**：显示 serve 默认模型与**本会话生效权限档**；地址 / Bearer **仍不可在面板内改** | 两者在启动期定死（`ServeClient` 由 `ConnectionConfig` 建一次），会话中改需重建 client+worker，不划算；只读展示已落地（`PanelCtx` 读 `/status` + `/permission`） |
 | **Appearance**（locale/theme/bg_decor/show_turn_context_inject） | **reduced：只有 `theme`**（W4 已落地） | TUI 一直在按 `prefs.theme` 上色（`palette.rs::from_theme`），W4 起面板新增「外观」分区，可切换并写回同一键；`locale` / `bg_decor` / `show_turn_context_inject` 仍 **no**——CSS/DOM/`matchMedia` 渲染，终端无对应（矩阵 TUI 格已是 `no`） |
 | **Llm（模型配置）** | **reduced→主模型扁平字段**：对齐 `client_llm.{api_base,model,temperature,llm_context_tokens,llm_thinking_mode}` + 密钥 | Desktop 的“注册表 + 主/执行器套用”面向多预设管理；TUI 只管理当前主模型这一份（§4.2 / §4.3） |
 | **Tools**（readonly tool TTL 缓存开关） | **reduced（已落地）**：对齐同名字段（§4.2），但**没有独立 Tools 分区**——开关落在面板「会话」分区第三行 | 开关 = serve prefs 布尔 + 随轮发送 `readonly_tool_ttl_cache_secs`，语义一致即可用 |
-| **Session**（SQLite 会话存储 + 字体） | **reduced（部分落地）**：面板「会话」分区已含 `role` / `session_mode` / 只读工具缓存；**SQLite 开关未落地（归 W3）**；字体 **no** | SQLite 开关本来就是 serve 级（`/status` 驱动），字体属 CSS 渲染 |
-| **Shortcuts**（只读快捷键说明） | **no（尚未落地）**：面板没有「快捷键」分区；快捷键说明仍只在 `/help` 输出里 | 复用现有 `/help` 文案的思路可行，但需新增一个只读分区才会出现在面板内 |
+| **Session**（SQLite 会话存储 + 字体） | **reduced（已落地）**：`role` / `session_mode` / 只读工具缓存 / **SQLite 开关**在同一「会话」分区；字体 **no** | SQLite 开关是 serve 级动作（`POST /config/session/conversation-store`，当前值读 `/status`），与字体（CSS 渲染）本就是两回事 |
+| **Shortcuts**（只读快捷键说明） | **landed（只读三行）**：全局键 / 面板键 / 编辑器键 | 值本身即说明文案（`static_note`，单一来源）；`/help` 仍是完整入口，面板内只做速查 |
 | **Github** | **no** | 矩阵 L48 TUI=no（Device Flow 需外开浏览器/原生钥匙串/Cookie，终端都没有） |
-| **Mcp** | **未落地（W3 后置）**：草案的全局开关 `global_enabled` + `tool_timeout_secs` 读/改都还没进面板（`tui_mode` 内无对应代码）；服务器行管理 **no** | MCP 实体在 serve user-data、stdio 在 serve 机拉起；Web UI 本身也只回 `has_*` 摘要、逐字段编辑走 JSON 导入（`user_data.rs` DTO），终端面板做行编辑收益低 |
+| **Mcp** | **partial（已落地）**：全局开关 `global_enabled` + `tool_timeout_secs` 可读写；服务器清单是**只读**一行（数量 / 启用数），行编辑 **no** | MCP 实体在 serve user-data（`/user-data/mcp-servers` 全量 DTO）、stdio 在 serve 机拉起；条目带 `env` / `headers` / `bearer`，终端面板既不展示也不编辑，PUT 时原样回写 |
 | IDE 编辑器设置页（独立入口） | **no** | 内嵌 CodeMirror 才有；远程终端无 WebView |
 
 ### 4.2 TUI 设置面板的字段清单（对齐列）
 
-按面板**实际分区**「外观 / 模型 / 会话」分组（`settings_panel.rs::Section`，共十字段）。校验区间、空值语义、键名对照 Desktop 同名字段（引用前端证据见后）。文末「连接（只读信息）」与「本地」两小节是**未落地**的草案，保留作后续参考。
+按面板**实际分区**「外观 / 模型 / 会话 / MCP」（可写）与「连接 / 快捷键 / 本地行为」（只读）分组（`settings_panel_schema.rs::Section`）。校验区间、空值语义、键名对照 Desktop 同名字段（引用前端证据见后）。
 
 **模型（写 `/user-data/llm-overrides` 的 `client_llm.*`，合并保真）**
 
@@ -96,26 +96,36 @@ Desktop 设置共 8 个分区（`settings_page`）。逐区对齐结论见下表
 | Agent role | `prefs.cm_role`（`/status` `default_agent_role_id`） | 文本 | 空 = serve 默认 | 可用 role 列表以 `/status` 为准，无独立枚举端点则文本输入 |
 | 会话模式 | `prefs.session_mode` | 枚举 | 空 = serve 默认 | `ask / plan / act`（与 `/mode` 校验一致） |
 | 只读工具缓存 | `prefs.disable_readonly_tool_ttl_cache`（取反） | 开关 | 开 = 跟随 server | 关时随轮发送 `readonly_tool_ttl_cache_secs: 0` |
+| 会话存储（SQLite） | `POST /config/session/conversation-store` 的 `sqlite`（当前值读 `/status.conversation_store_sqlite_active`） | 开关（开 / 关） | 没有「跟随」档 | 服务端未配 SQLite 路径（`..._path_configured = false`）或老 serve 缺字段时**不给进编辑态** |
 
-**连接（只读信息，编辑引导 CLI/env）**
+**MCP（写 `/user-data/mcp-servers` 的两个标量，`servers` / `schema_version` 原样回写）**
+
+| 项 | 键 / 端点 | 类型 | 空值语义 | 备注 |
+|---|---|---|---|---|
+| MCP 全局开关 | `global_enabled` | 开关（开 / 关） | 没有「跟随」档 | 老 serve 404 → 显示「未提供」并拒绝编辑 |
+| 工具超时 | `tool_timeout_secs` | 整数秒 1..=3600 | 留空提交 = 不改 | `0` 被拒（服务端读作「立刻超时」而不是「不限」） |
+| 服务器（只读） | `servers[]` 的计数 / 启用数 | 只读信息行 | — | 条目含 `env` / `headers` / `bearer`，终端不展示不编辑；行编辑留给 Desktop/Web |
+
+**连接（只读两行，`PanelCtx` 读 serve 事实）**
 
 | 项 | 展示 |
 |---|---|
-| serve API 基址 | 当前生效 `api_base`（来源标注：flag/env/默认） |
-| Web Bearer | 已提供 / 来自钥匙串回退 / 未提供（`--no-keyring` 时提示）——**只读**，注明「Web Bearer ≠ 模型 API_KEY」 |
+| serve 默认模型 | `/status` 的 `model`；缺失 → 「(该 serve 未提供)」 |
+| 生效权限档 | `/permission` 投影的 `effective_level`（本会话 min 链结果）；缺失 → 「(该 serve 未提供)」 |
 
-**本地（非 Desktop 对齐项，TUI 自有 — 未落地：面板没有「本地行为」分区）**
+**本地（只读三行，值即说明）**
 
-| 项 | 说明 |
+| 项 | 文案要点 |
 |---|---|
-| 自动审批（`--yes`） | 草案：会话内切换等价物，仅影响放行决策、执行仍在 serve。**当前只能在启动时用 `--yes`** |
-| thinking 默认折叠 | 草案：读当前全局态并一键切默认（进程级）。**当前只有 `Ctrl+E` 折叠 thinking** |
+| 密钥存储 | API 密钥只进本机钥匙串，不写 serve user-data |
+| 保存语义 | 先 GET、再改自己的键、再全量 PUT（不覆盖 Desktop/Web 字段） |
+| Markdown | `/editor` 打开 `.md` 走 markdown 预览（只读渲染） |
 
 ### 4.3 明确不做的字段（避免误配）
 
 - `saved_models[]` 注册表增删改、`executor_llm.*`、`execution_mode`：TUI 写 `llm-overrides` 时**原样合并保留**，不展示、不编辑。
 - 每台 MCP 服务器的 command/args/env/cwd/url/Bearer、GitHub 全部字段、字体/背景装饰、`locale`、IDE 全字段、`show_turn_context_inject`。
-- 会话「切换会话存储 SQLite」归 §7 后置（需确认 POST 端点契约）而非 W1/W2。
+- 会话「切换会话存储 SQLite」已落地（`POST /config/session/conversation-store`）；MCP 服务器**行**（command/args/env/cwd/url/bearer）仍不做，只做两个标量 + 只读计数。
 
 ---
 
@@ -199,13 +209,13 @@ Desktop 设置共 8 个分区（`settings_page`）。逐区对齐结论见下表
 
 ## 7. 分期（逐波小步 PR）
 
-状态以行内标注为准：**W1 / W2 / W4 已落地，W3 未落地**（核对方式：`grep -rn "global_enabled\|tool_timeout" crates/crabmate-tui/src` 目前为空）。
+状态以行内标注为准：**W1 / W2 / W3 / W4 均已落地**，另加只读三栏（连接 / 快捷键 / 本地行为）。
 
 | Wave | 交付 | 验收 |
 |---|---|---|
-| **W1 面板骨架 + 模型/会话扁平字段**（**已落地**） | `/settings` + F6 页面；分区导航；三层显示；字段编辑：模型名、网关/api_base（预设表随 §6.4 对齐）、role、mode；`F2`（或 `S`）保存（`llm-overrides` / `prefs` 合并 PUT）；`Esc`/脏确认；回合中只读；`F6` 开关与 `F2` 保存已加入 `/help`（草案的「快捷键」面板分区**未落地**，信息仍只在 `/help` 输出里）；斜杠 `/model /mode /role` 保留 | 连本地 serve 冒烟：面板改 model/role/mode → 保存 → `/status` 与 Desktop 设置页可见 → 下一轮请求体带 `client_llm.model`；重启 TUI 后值仍在（user-data 层） |
+| **W1 面板骨架 + 模型/会话扁平字段**（**已落地**） | `/settings` + F6 页面；分区导航；三层显示；字段编辑：模型名、网关/api_base（预设表随 §6.4 对齐）、role、mode；`F2`（或 `S`）保存（`llm-overrides` / `prefs` 合并 PUT）；`Esc`/脏确认；回合中只读；`F6` 开关与 `F2` 保存已加入 `/help`（「快捷键」面板分区在后续波次落地，见只读三栏）；斜杠 `/model /mode /role` 保留 | 连本地 serve 冒烟：面板改 model/role/mode → 保存 → `/status` 与 Desktop 设置页可见 → 下一轮请求体带 `client_llm.model`；重启 TUI 后值仍在（user-data 层） |
 | **W2 完整 LLM 字段 + 密钥 + 工具开关**（**已落地**） | 温度/思考模式字段与 API 密钥写钥匙串槽 **已随面板一并落地**（校验区间对齐；密钥重启后从同一槽位回读；矩阵 auth Notes 已同步）；上下文长度、只读工具缓存开关、网关预设下拉（与 `client_llm_presets.rs` 同名表，双端同步注释已加；跨仓同步纪律见 §8）**已随收尾落地** | 校验区间对齐；密钥保存后重启可回读；上下文长度 >0 随轮 `client_llm.llm_context_tokens`；关缓存开关后请求体出现 `readonly_tool_ttl_cache_secs: 0` |
-| **W3 后置项（契约核对后 — 未落地）** | MCP 全局开关 + `tool_timeout_secs`（`/user-data/mcp-servers` 系端点）；Session SQLite 会话存储开关（`/status` 布尔 + POST）。**两项在 `tui_mode` 里都还没有对应代码** | 开关读/写与 Desktop 设置页同源一致；不实现服务器行管理 |
+| **W3 后置项**（**已落地**） | MCP 全局开关 + `tool_timeout_secs`（`GET`/`PUT /user-data/mcp-servers`，只改这两个标量，`servers` / `schema_version` 原样回写）；Session SQLite 开关（`POST /config/session/conversation-store`，当前值读 `/status`）；两栏都是**独立保存组**（失败各自保留 staged 供重试） | 开关读/写与 Desktop 设置页同源一致；MCP 不实现服务器行管理（清单只显示数量）；老 serve 缺端点/字段时显示「未提供」并拒绝编辑 |
 | **W4 外观分区（主题）**（**已落地**） | 面板新增「外观」分区（导航首位，与 Desktop 同序）：`prefs.theme` 的 ←/→ 切换 + 合并写回；保存成功即用新值重解析配色；`palette.rs` 增 `THEME_OPTIONS`，并把 `crabmate-dark` 补进 `THEME_NAMES`（此前 `CM_TUI_THEME` 不认它） | 单测：选项→slug 映射、未知 slug（`system`）读透不改写、Esc 不落 staged、保存只进 prefs 组；冒烟：F6 → Tab 到「外观」→ 选 `crabmate-light` → `F2` → 配色立刻变化、`/user-data/prefs` 的 `theme` 同步、Desktop 设置页看到同值 |
 
 各 Wave 内**一项用户可见行为一个 PR**（引用 `coding_agent_client.md` 约束第 5 条的小步纪律）。
