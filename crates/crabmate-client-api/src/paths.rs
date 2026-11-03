@@ -28,6 +28,11 @@ pub const USER_DATA_WORKSPACE_SESSIONS: &str = "/user-data/workspaces/current/se
 pub const USER_DATA_PREFS: &str = "/user-data/prefs";
 /// LLM 覆盖配置（tui / frontend）。
 pub const USER_DATA_LLM_OVERRIDES: &str = "/user-data/llm-overrides";
+/// MCP 服务器配置（tui / frontend）。
+///
+/// TUI 只读写 `global_enabled` / `tool_timeout_secs` 两个标量，`servers` 原样回写：
+/// 条目里带 `env` / `headers` / `bearer` 这类机密，不在终端里编辑。
+pub const USER_DATA_MCP_SERVERS: &str = "/user-data/mcp-servers";
 /// 会话存储配置（frontend）。
 pub const CONFIG_SESSION_CONVERSATION_STORE: &str = "/config/session/conversation-store";
 /// 可调用的 skill 目录（tui / frontend）。

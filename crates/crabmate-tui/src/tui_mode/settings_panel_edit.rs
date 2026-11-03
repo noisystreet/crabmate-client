@@ -12,11 +12,12 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::super::palette::{NoticeLevel, THEME_OPTIONS};
 use super::super::settings::{
-    FieldAction, is_valid_context_tokens, is_valid_temperature, validate_api_base,
+    FieldAction, is_valid_context_tokens, is_valid_mcp_timeout, is_valid_temperature,
+    validate_api_base,
 };
 use super::{
     API_BASE_PRESETS, FieldId, GATEWAY_CUSTOM_ID, GATEWAY_SERVER_ID, SettingsPanel, mode_options,
-    move_pick, store_options, think_options, tool_options,
+    move_pick, think_options, toggle_options, tool_options,
 };
 
 /// 行编辑状态：文本编辑（含缓冲与光标）、模式/思考/工具缓存/会话存储枚举循环、
@@ -47,12 +48,12 @@ pub(crate) enum Editing {
         pick: usize,
         prefill: String,
     },
-    /// 会话存储（SQLite）开关：`pick` 0 = 开 / 1 = 关。
+    /// 二值开关（开 / 关）：会话存储（SQLite）与 MCP 全局开关共用。
     ///
-    /// 不复用 [`Editing::Tool`]：那个的选项表是「跟随 server / 关」，而这里的后端只有
-    /// 一个二值开关（`POST /config/session/conversation-store`），没有「跟随」这一态 ——
-    /// 当前值来自 `/status`，不是可清除的 user-data 键。
-    Store {
+    /// `field` 一起带上，因为两处的保存目标不同（一个 `POST /config/session/...`，
+    /// 一个进 `/user-data/mcp-servers`）—— 用同一个编辑态但各自落到自己的 staged 槽。
+    Toggle {
+        field: FieldId,
         pick: usize,
     },
 }
@@ -66,7 +67,7 @@ enum EditAction {
     CommitTool,
     CommitTheme,
     CommitGateway,
-    CommitStore,
+    CommitToggle,
     Insert(char),
     Backspace,
     MoveLeft,
@@ -99,7 +100,7 @@ impl SettingsPanel {
             Some(Editing::Mode { .. }) => cycle_action(key.code, EditAction::CommitMode),
             Some(Editing::Think { .. }) => cycle_action(key.code, EditAction::CommitThink),
             Some(Editing::Tool { .. }) => cycle_action(key.code, EditAction::CommitTool),
-            Some(Editing::Store { .. }) => cycle_action(key.code, EditAction::CommitStore),
+            Some(Editing::Toggle { .. }) => cycle_action(key.code, EditAction::CommitToggle),
             Some(Editing::Theme { .. }) => theme_action(key.code),
             Some(Editing::Gateway { .. }) => cycle_action(key.code, EditAction::CommitGateway),
             None => None,
@@ -128,7 +129,7 @@ impl SettingsPanel {
             EditAction::CommitMode => self.commit_mode(),
             EditAction::CommitThink => self.commit_think(),
             EditAction::CommitTool => self.commit_tool(),
-            EditAction::CommitStore => self.commit_store(),
+            EditAction::CommitToggle => self.commit_toggle(),
             EditAction::CommitTheme => self.commit_theme(),
             EditAction::CommitGateway => self.commit_gateway(),
             _ => {}
@@ -174,6 +175,16 @@ impl SettingsPanel {
             );
             return;
         }
+        if field == FieldId::McpToolTimeout && !is_valid_mcp_timeout(&text) {
+            let buf: Vec<char> = text.chars().collect();
+            let cursor = buf.len();
+            self.editing = Some(Editing::Text { field, buf, cursor });
+            self.set_note(
+                "工具超时需 1..=3600 整数秒（留空提交 = 不改）".to_string(),
+                NoticeLevel::Error,
+            );
+            return;
+        }
         let value = if text.is_empty() { None } else { Some(text) };
         self.set_staged(field, FieldAction::Write(value));
     }
@@ -205,13 +216,13 @@ impl SettingsPanel {
         self.set_staged(FieldId::ToolCache, FieldAction::Write(value));
     }
 
-    /// 会话存储（SQLite）确认：`on` / `off` 两态，没有「跟随」这一档。
-    fn commit_store(&mut self) {
-        let Some(Editing::Store { pick }) = self.editing.take() else {
+    /// 二值开关确认（会话存储 / MCP 全局开关）：写入当前选项，落到该字段自己的槽。
+    fn commit_toggle(&mut self) {
+        let Some(Editing::Toggle { field, pick }) = self.editing.take() else {
             return;
         };
-        let value = store_options()[pick].map(str::to_string);
-        self.set_staged(FieldId::SessionSqlite, FieldAction::Write(value));
+        let value = toggle_options()[pick].map(str::to_string);
+        self.set_staged(field, FieldAction::Write(value));
     }
 
     /// 主题确认：写入当前选项（下标 0 = `None` = 清除 prefs 键、回到产品默认透明）。
@@ -297,7 +308,7 @@ impl SettingsPanel {
     }
 }
 
-/// ←/→ 移动循环类编辑的光标（Mode / Think / Tool / Store / Theme / Gateway）。
+/// ←/→ 移动循环类编辑的光标（Mode / Think / Tool / Toggle / Theme / Gateway）。
 ///
 /// 分派留在编辑态这一层：参数是私有的 [`Editing`]，选项表与下标算术在
 /// [`super::schema`]。
@@ -306,7 +317,7 @@ fn move_cycle_pick(editing: &mut Editing, left: bool) {
         Editing::Mode { pick } => move_pick(pick, left, mode_options().len()),
         Editing::Think { pick } => move_pick(pick, left, think_options().len()),
         Editing::Tool { pick } => move_pick(pick, left, tool_options().len()),
-        Editing::Store { pick } => move_pick(pick, left, store_options().len()),
+        Editing::Toggle { pick, .. } => move_pick(pick, left, toggle_options().len()),
         Editing::Theme { pick } => move_pick(pick, left, THEME_OPTIONS.len()),
         Editing::Gateway { pick, .. } => move_pick(pick, left, API_BASE_PRESETS.len()),
         Editing::Text { .. } => {}

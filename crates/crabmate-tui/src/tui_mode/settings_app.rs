@@ -7,7 +7,7 @@ use crabmate_client_api::secrets::{KEYRING_SERVICE, SecretSlot};
 
 use super::super::LaneApp;
 use super::super::palette::Palette;
-use super::super::settings::{LlmSave, PersistedSettings, PrefsSave, STORE_ON};
+use super::super::settings::{LlmSave, McpSave, PersistedSettings, PrefsSave, STORE_ON};
 use super::super::state::LineKind;
 use super::super::worker::WorkerJob;
 use super::field_label;
@@ -87,7 +87,8 @@ impl LaneApp<'_> {
                 prefs,
                 secret,
                 store,
-            } => self.submit_settings_save(*llm, *prefs, secret, store),
+                mcp,
+            } => self.submit_settings_save(*llm, *prefs, secret, store, *mcp),
         }
     }
 
@@ -112,9 +113,10 @@ impl LaneApp<'_> {
         prefs: PrefsSave,
         secret: FieldAction,
         store: FieldAction,
+        mcp: McpSave,
     ) {
         if !secret.is_write() {
-            self.dispatch_user_data_saves(llm, prefs, store);
+            self.dispatch_user_data_saves(llm, prefs, store, mcp);
             return;
         }
         if self.no_keyring {
@@ -131,7 +133,7 @@ impl LaneApp<'_> {
         match keyring_write(account, value.as_deref()) {
             Ok(()) => {
                 self.on_secret_written(value.map(|s| s.trim().to_string()));
-                self.dispatch_user_data_saves(llm, prefs, store);
+                self.dispatch_user_data_saves(llm, prefs, store, mcp);
             }
             Err(e) => {
                 self.cancel_save_for_secret(&format!(
@@ -180,19 +182,32 @@ impl LaneApp<'_> {
 
     /// 下发 llm/prefs 两组保存任务（密钥已先行落地）。worker 已退出导致发送失败时复位
     /// 在途标记，面板保留改动可重试，避免卡在"保存中"。
-    fn dispatch_user_data_saves(&mut self, llm: LlmSave, prefs: PrefsSave, store: FieldAction) {
+    fn dispatch_user_data_saves(
+        &mut self,
+        llm: LlmSave,
+        prefs: PrefsSave,
+        store: FieldAction,
+        mcp: McpSave,
+    ) {
         let llm_pending = llm.any();
         let prefs_pending = prefs.any();
         let store_pending = store.is_write();
-        // 三组各自下发；无改动的组不发任务（视为成功）。
+        let mcp_pending = mcp.any();
+        // 四组各自下发；无改动的组不发任务（视为成功）。
         let llm_ok = self.send_group(llm_pending, WorkerJob::SaveLlm(llm));
         let prefs_ok = self.send_group(prefs_pending, WorkerJob::SavePrefs(prefs));
         let store_ok = self.send_group(store_pending, WorkerJob::SaveStore(store_is_on(&store)));
-        if !(llm_ok && prefs_ok && store_ok) {
-            self.on_save_dispatch_failure(llm_ok, prefs_ok, store_ok);
+        let mcp_ok = self.send_group(mcp_pending, WorkerJob::SaveMcp(mcp));
+        if !(llm_ok && prefs_ok && store_ok && mcp_ok) {
+            self.on_save_dispatch_failure(SaveDispatch {
+                llm: llm_ok,
+                prefs: prefs_ok,
+                store: store_ok,
+                mcp: mcp_ok,
+            });
             return;
         }
-        if llm_pending || prefs_pending || store_pending {
+        if llm_pending || prefs_pending || store_pending || mcp_pending {
             self.st
                 .push_line(LineKind::System, "正在保存设置到 serve user-data…");
         }
@@ -204,7 +219,7 @@ impl LaneApp<'_> {
     }
 
     /// worker 已退出导致下发失败：复位在途标记、保留 staged 可重试。
-    fn on_save_dispatch_failure(&mut self, llm_ok: bool, prefs_ok: bool, store_ok: bool) {
+    fn on_save_dispatch_failure(&mut self, sent: SaveDispatch) {
         self.st.push_line(
             LineKind::System,
             "设置保存失败：worker 已退出（改动保留，可重试）",
@@ -212,14 +227,17 @@ impl LaneApp<'_> {
         let Some(panel) = self.panel.as_mut() else {
             return;
         };
-        if !llm_ok {
+        if !sent.llm {
             panel.save_group_result(SaveGroup::Llm, false);
         }
-        if !prefs_ok {
+        if !sent.prefs {
             panel.save_group_result(SaveGroup::Prefs, false);
         }
-        if !store_ok {
+        if !sent.store {
             panel.save_group_result(SaveGroup::Store, false);
+        }
+        if !sent.mcp {
+            panel.save_group_result(SaveGroup::Mcp, false);
         }
     }
 
@@ -320,10 +338,42 @@ impl LaneApp<'_> {
         }
     }
 
+    /// MCP 标量保存结果：成功 → 内存持久层同步更新 + 面板落地；失败保留 staged。
+    pub(crate) fn on_settings_saved_mcp(&mut self, result: Result<McpSave, String>) {
+        match result {
+            Ok(save) => {
+                self.persisted
+                    .get_or_insert_with(PersistedSettings::default)
+                    .apply_mcp_saved(&save);
+                self.st.push_line(
+                    LineKind::System,
+                    "MCP 设置已保存（全局开关 / 工具超时；服务器清单仍在 Desktop/Web 编辑）",
+                );
+                if let Some(panel) = self.panel.as_mut() {
+                    panel.save_group_result(SaveGroup::Mcp, true);
+                    panel.set_note("MCP 设置已保存".to_string(), NoticeLevel::Ok);
+                }
+            }
+            Err(e) => {
+                self.st.push_line(
+                    LineKind::System,
+                    &format!("保存 MCP 设置失败：{e}（面板保留改动，可按 S 重试）"),
+                );
+                if let Some(panel) = self.panel.as_mut() {
+                    panel.save_group_result(SaveGroup::Mcp, false);
+                    panel.set_note(
+                        "保存失败：改动保留，按 S 重试".to_string(),
+                        NoticeLevel::Error,
+                    );
+                }
+            }
+        }
+    }
+
     /// 会话存储切换结果：成功即把本地已知值改成新值（面板行、状态都读它），
     /// 失败保留 staged 供重试。
     ///
-    /// 本地值必须跟着改：这个开关不在 user-data 快照里，`persisted` 更新不了它；
+    /// 本地值必须跟着改：这个开关不在 user-data 快照里，`persisted` 更新不了它 ——
     /// 不写回 `serve_defaults` 的话，保存成功后行会退回旧值，看起来像没生效。
     pub(crate) fn on_settings_saved_store(&mut self, result: Result<bool, String>) {
         match result {
@@ -359,6 +409,16 @@ impl LaneApp<'_> {
             }
         }
     }
+}
+
+/// 一组保存任务的下发结果（`true` = 已发出且通道仍在）。
+///
+/// 四个 bool 名字自带语义，比 `[bool; 4]` 好在调用点不会写错位置。
+struct SaveDispatch {
+    llm: bool,
+    prefs: bool,
+    store: bool,
+    mcp: bool,
 }
 
 /// 会话存储 switch 动作 → 请求体里的 `sqlite` 布尔（只有 `Write(Some("on"))` 是 true）。

@@ -39,8 +39,8 @@ pub use sessions::{
     title_from_user_prompt,
 };
 pub use user_data::{
-    LlmOverridesDto, UserPrefsDto, fetch_llm_overrides, fetch_user_data_prefs, put_llm_overrides,
-    put_user_data_prefs,
+    LlmOverridesDto, McpServersFileDto, UserPrefsDto, fetch_llm_overrides, fetch_mcp_servers,
+    fetch_user_data_prefs, put_llm_overrides, put_mcp_servers, put_user_data_prefs,
 };
 pub use workspace::{
     FILE_VIEW_MAX_LINES, WorkspaceDirData, WorkspaceDirEntry, WorkspaceFile, WorkspaceProjectsData,

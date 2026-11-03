@@ -45,7 +45,11 @@ fn appearance_section_leads_the_nav_and_holds_only_theme() {
     let p = SettingsPanel::new(false);
     let content = p.content(&ctx(&o, None), 90);
     let labels: Vec<&str> = content.nav.iter().map(|(l, _)| l.as_str()).collect();
-    assert_eq!(labels, vec!["外观", "模型", "会话"], "导航顺序对齐 Desktop");
+    assert_eq!(
+        labels,
+        vec!["外观", "模型", "会话", "MCP"],
+        "导航顺序对齐 Desktop（MCP 在会话之后）"
+    );
     assert!(
         matches!(&content.nav[..], [(_, selected), ..] if !*selected),
         "默认停在模型分区（最常用），外观靠 Tab/BackTab 到达"
@@ -194,9 +198,11 @@ fn theme_section_is_reachable_from_the_last_section_by_tab() {
     let o = SessionPrefs::from_options(None, None, None);
     let c = ctx(&o, None);
     let mut p = SettingsPanel::new(false);
-    // 模型 → 会话 → 外观
+    // 模型 → 会话 → MCP → 外观（Tab 从最后一个分区回绕到第一个）
     p.handle_key(&key(KeyCode::Tab), &c);
     assert_eq!(p.section, Section::Session);
+    p.handle_key(&key(KeyCode::Tab), &c);
+    assert_eq!(p.section, Section::Mcp);
     p.handle_key(&key(KeyCode::Tab), &c);
     assert_eq!(p.section, Section::Appearance);
     assert_eq!(p.row, 0, "切分区后行光标回到首行");

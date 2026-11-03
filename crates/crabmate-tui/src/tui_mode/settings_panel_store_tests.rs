@@ -130,7 +130,13 @@ fn commit_off_then_save_emits_store_action() {
     // 当前是「开」→ 进编辑态 pick 0
     p.handle_key(&key(KeyCode::Enter), &c);
     assert!(
-        matches!(p.editing, Some(Editing::Store { pick: 0 })),
+        matches!(
+            p.editing,
+            Some(Editing::Toggle {
+                field: FieldId::SessionSqlite,
+                pick: 0
+            })
+        ),
         "编辑起点应落在当前生效值上"
     );
     // → 挪到「关」，Enter 提交
