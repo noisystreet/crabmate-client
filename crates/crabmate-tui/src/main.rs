@@ -2,6 +2,7 @@
 
 mod approval_tty;
 mod connect_spec;
+mod conv_export;
 mod serve;
 mod shell_keyring;
 mod slash;

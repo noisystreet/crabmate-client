@@ -4,6 +4,7 @@
 //! 历史一律从这里按需拉取。**哪条消息出哪一行**的归一是共享层
 //! [`crabmate_client_api::conversation_messages`]，本模块只管 HTTP 与参数编码。
 
+use crabmate_client_api::chat_export::EXPORT_MAX_PAGES;
 use crabmate_client_api::conversation_messages::CONVERSATION_MESSAGES_PAGE_LIMIT;
 use crabmate_client_api::conversation_state::{
     ConversationStateOutcome, ConversationStatePatch, classify_conversation_state_response,
@@ -31,6 +32,37 @@ pub async fn fetch_conversation_messages(
         before_index,
     );
     client.get_json(&path).await
+}
+
+/// 把一整段会话**全部**翻完（新 → 旧逐页），供导出使用。
+///
+/// 端点一页一页给（[`CONVERSATION_MESSAGES_PAGE_LIMIT`] 条/页），收敛条件与 `/older` 同口径：
+/// `window_start_index == 0` 或 `has_older == false` 即到底 —— `window_start == 0` 即使服务端
+/// 仍说 `has_older` 也不再请求，否则会拿着同一个游标原地打转。
+///
+/// 页数上限 [`EXPORT_MAX_PAGES`]：超了**报错**。导出件少了半段而读的人不知道，
+/// 比明确失败糟得多。
+pub async fn fetch_all_pages(
+    client: &ServeClient,
+    conversation_id: &str,
+) -> Result<Vec<ConversationMessagesResponse>, TermError> {
+    let mut pages: Vec<ConversationMessagesResponse> = Vec::new();
+    let mut before_index: Option<u32> = None;
+    loop {
+        if pages.len() >= EXPORT_MAX_PAGES as usize {
+            return Err(TermError::Message(format!(
+                "会话超过 {EXPORT_MAX_PAGES} 页（每页 {CONVERSATION_MESSAGES_PAGE_LIMIT} 条），已停止导出；请改用 Web / Desktop 或分段查看"
+            )));
+        }
+        let page = fetch_conversation_messages(client, conversation_id, before_index).await?;
+        let window_start = page.window_start_index;
+        let more = page.has_older && window_start > 0 && !page.messages.is_empty();
+        pages.push(page);
+        if !more {
+            return Ok(pages);
+        }
+        before_index = Some(window_start);
+    }
 }
 
 /// `POST /conversation/state`：会话级运行态意图的**空闲态**写入口。

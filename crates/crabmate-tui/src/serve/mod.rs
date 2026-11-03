@@ -28,7 +28,8 @@ pub use chat_stream::{
 pub use client::ServeClient;
 pub use config::{BearerSource, ConnectionConfig};
 pub use conversation::{
-    ConversationMessagesResponse, fetch_conversation_messages, write_permission_level,
+    ConversationMessagesResponse, fetch_all_pages, fetch_conversation_messages,
+    write_permission_level,
 };
 pub use ctl::{add_instance, list_instances, primary_binding, same_api_base, set_instance_enabled};
 pub use error::TermError;
