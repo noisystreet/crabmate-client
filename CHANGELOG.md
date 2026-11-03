@@ -11,6 +11,10 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ## [Unreleased]
 
+### Added
+
+- **TUI: `/conv export` writes a whole conversation as the same Markdown / JSON Desktop exports (#426).** Archiving meant drag-selecting the terminal, and the history endpoint only hands out 80 messages at a time. `/conv export [json|markdown|both] [--out <path>] [--id <id>]` walks it end to end in the repl and the full-screen client, reusing the contract display projection so the artifacts match Desktop's. Cost: ≤200 pages then an error rather than a truncated file; the full-screen client defaults to `chat_export_<UTC stamp>.md/json` in the working directory, not stdout. Refused mid-turn, and a reply outliving a `/conv use` switch is dropped unwritten. Verified: `crabmate-tui` 1128 green (12 new), `crabmate-client-api` 256 (9 new); no real `serve`. No protocol change.
+
 ## [0.8.0-alpha.2] - 2026-11-03
 
 ### Fixed

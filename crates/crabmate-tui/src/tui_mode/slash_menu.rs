@@ -5,8 +5,9 @@
 //!
 //! 为什么菜单不并入 `controls::parse_control`：那是**提交时**的语义（决定这行文本是命令
 //! 还是消息），这里只是输入期的候选提示。两者共用 `crabmate_client_api::slash` 的名字表，
-//! 但候选清单是端内自己列的 —— Web 有 `/agent` `/export` `/config` 这些 TUI 没有 handler
-//! 的命令，照抄会给出「选了也没用」的项。
+//! 但候选清单是端内自己列的 —— Web 有 `/agent` `/config` 这些 TUI 没有 handler 的命令，
+//! 照抄会给出「选了也没用」的项。导出是同一回事的另一半：Web 是顶层 `/export`，TUI 归到
+//! `/conv export`（见 `tui_mode/export.rs`），所以候选表里仍然只有 `/conv` 一项。
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::Frame;
