@@ -139,6 +139,23 @@ impl LaneApp<'_> {
                 .push_line(LineKind::System, "permission level: (empty, ignored)");
             return;
         }
+        // 回合进行中一律不换档，与 `/workspace <路径>` / 项目池切换同一条守卫
+        // （`workspace_cmd::switch_ws_project`）：本轮 `/chat` 早已带着开跑时的档位发出，
+        // 飞行中的工具按哪一档判定不该在一轮内前后不一致。
+        //
+        // 不做「先改意图、等回合结束再落盘」：那正是中间态的来源 —— 意图立刻变、生效投影
+        // 要等写回包（而 worker 串行，写权限排在回合后面），状态行于是挂着
+        // `意图→生效`，读起来像「服务端把我钳制了」，实际只是还没发出去。
+        if self.st.running {
+            self.st.push_line(
+                LineKind::System,
+                concat!(
+                    "permission level: a turn is running — switch after it finishes ",
+                    "(this turn keeps the level it started with)"
+                ),
+            );
+            return;
+        }
         self.overrides.permission_level = Some(level.to_string());
         // 不校验词表：可选集由服务端 `available` 决定，本地写死会在服务端新增档位时误拒；
         // 未知值由服务端按无效请求拒绝，报错比本地拦截更准确（`/perm` 原本就是这个口径）。
@@ -406,7 +423,20 @@ impl LaneApp<'_> {
     ///
     /// 没有投影就不开：`available` 是服务端算的，本地拿五档词表顶替会列出「不让选的档」。
     /// 这条提示同时也是「为什么点了没反应」的答案。
+    ///
+    /// 回合进行中同样不开（与 [`Self::apply_permission_level`] 同一条守卫）：开一个选不动的
+    /// 菜单比直接说原因更困惑，而菜单本身就是**写入**入口，没有只看不写的用法。
     pub(super) fn open_permission_menu(&mut self, anchor: Rect) {
+        if self.st.running {
+            self.st.push_line(
+                LineKind::System,
+                concat!(
+                    "permission level: a turn is running — switch after it finishes ",
+                    "(this turn keeps the level it started with)"
+                ),
+            );
+            return;
+        }
         let Some(defaults) = self.st.serve_defaults.as_ref() else {
             self.st.push_line(
                 LineKind::System,
@@ -613,6 +643,80 @@ mod session_guard_tests {
                 .is_none(),
             "切换清掉的投影不能被旧会话的回包填回来"
         );
+    }
+
+    /// 回合进行中：换档被拒，且**不动**本地 override —— 对齐 `/workspace <路径>` 换根的
+    /// 同一条守卫（飞行中的工具不该在一轮内看到两个档位）。
+    ///
+    /// 回归用例：曾经允许回合中换档。意图立刻写进 override，而落盘请求要排在 worker 队列里
+    /// （回合独占 worker，见 `worker::spawn_worker_inner`），于是状态行整个回合都挂着
+    /// `unrestricted→approved` —— 读起来像「服务端把我钳制到了 approved」，实际只是请求
+    /// 还没出站。
+    #[test]
+    fn a_running_turn_rejects_a_level_switch() {
+        let client = test_client();
+        let mut prefs = test_prefs();
+        let (job_tx, job_rx) = mpsc::channel();
+        let mut app = app(&client, &mut prefs, job_tx);
+
+        app.st.conversation_id = Some("A".to_string());
+        app.st.serve_defaults = Some(defaults_with_permission("approved"));
+        app.st.running = true;
+
+        let before = app.st.lines.len();
+        app.apply_permission_level("unrestricted");
+
+        assert!(
+            app.overrides.permission_level.is_none(),
+            "回合中不得改意图：它会随下一轮 /chat 一起发出去"
+        );
+        assert!(job_rx.try_recv().is_err(), "回合中不得发写权限请求");
+        assert_eq!(app.st.lines.len(), before + 1, "被拒必须给出原因");
+    }
+
+    /// 守卫不能误伤正常路径：没在跑回合时照旧写 override 并发落盘（Desktop chip 同语义）。
+    #[test]
+    fn an_idle_view_still_applies_a_level_switch() {
+        let client = test_client();
+        let mut prefs = test_prefs();
+        let (job_tx, job_rx) = mpsc::channel();
+        let mut app = app(&client, &mut prefs, job_tx);
+
+        app.st.conversation_id = Some("A".to_string());
+        app.st.serve_defaults = Some(defaults_with_permission("approved"));
+
+        app.apply_permission_level("unrestricted");
+
+        assert_eq!(
+            app.overrides.permission_level.as_deref(),
+            Some("unrestricted")
+        );
+        assert!(
+            matches!(
+                job_rx.try_recv(),
+                Ok(WorkerJob::WritePermission { level, .. }) if level == "unrestricted"
+            ),
+            "空闲时必须发出落盘请求"
+        );
+    }
+
+    /// 回合进行中点 `perm` 段：不打开菜单（它是纯写入入口，选不动的菜单只会更困惑），
+    /// 直接说明原因。
+    #[test]
+    fn a_running_turn_does_not_open_the_permission_menu() {
+        let client = test_client();
+        let mut prefs = test_prefs();
+        let (job_tx, _job_rx) = mpsc::channel();
+        let mut app = app(&client, &mut prefs, job_tx);
+
+        app.st.serve_defaults = Some(defaults_with_permission("approved"));
+        app.st.running = true;
+
+        let before = app.st.lines.len();
+        app.open_permission_menu(ratatui::layout::Rect::new(0, 0, 4, 1));
+
+        assert!(app.st.permission_menu.is_none(), "回合中不开菜单");
+        assert_eq!(app.st.lines.len(), before + 1, "点了要有回音");
     }
 
     /// 切换时还开着的档位菜单一并关掉：它的选项集属于上一个会话。
