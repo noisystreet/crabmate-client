@@ -1,6 +1,6 @@
 [package]
 name = "crabmate-mobile"
-version = "0.8.0-alpha.0"
+version = "0.8.0-alpha.1"
 description = "CrabMate Android remote client (Tauri thin shell)"
 authors = ["crabmate contributors"]
 edition = "2024"

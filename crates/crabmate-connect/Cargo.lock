@@ -703,7 +703,7 @@ dependencies = [
 
 [[package]]
 name = "crabmate-client-api"
-version = "0.8.0-alpha.0"
+version = "0.8.0-alpha.1"
 dependencies = [
  "crabmate",
  "serde",
@@ -712,7 +712,7 @@ dependencies = [
 
 [[package]]
 name = "crabmate-connect"
-version = "0.8.0-alpha.0"
+version = "0.8.0-alpha.1"
 dependencies = [
  "crabmate-client-api",
  "keyring",

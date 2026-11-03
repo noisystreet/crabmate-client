@@ -11,6 +11,8 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ## [Unreleased]
 
+## [0.8.0-alpha.1] - 2026-11-03
+
 ### Added
 
 - **TUI: the status bar now shows the pane (`view chat` / `view file`), and `Ctrl+T` toggles it.** Once `/editor` covered the chat column, only the view's own title row said so, and the way back was a command to remember. The segment is clickable like `think` / `perm` and always present, so the segment count never moves; it yields to `perm` / `lanes` when the stack fills up. `Ctrl+T` lives in the focus-independent hotkey table (`on_input_key` hands the scroll keys to the editor view first, which would kill it exactly when returning matters), and both directions reuse `/editor` and `/chat`, so 「re-read the open file」 and 「focus back to the composer」 have one implementation. Verified: `crabmate-tui` 1072 green (6 new); not seen in a real terminal. No protocol change.
