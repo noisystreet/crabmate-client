@@ -58,23 +58,23 @@ pub fn status_chip_context(l: Locale) -> &'static str {
     }
 }
 
-/// 状态栈「连接」chip 的标签：这一屏的数据来自哪台 `serve`。
+/// 左栏「连接」区的标题词：会话列表下方那一块名单。
 ///
 /// 用「连接」而不是「服务端 / API Base」：前者是 TUI lane 区的同一个词
-/// （`连接 [n]`），两端的用户在说同一件事时用同一个词。
-pub fn status_chip_connection(l: Locale) -> &'static str {
+/// （`连接 [n/8]`），两端的用户在说同一件事时用同一个词。
+pub fn connections_pane_label(l: Locale) -> &'static str {
     match l {
         Locale::ZhHans => "连接",
         Locale::En => "Connection",
     }
 }
 
-/// 状态栈「连接」chip 的 `title`：完整基址 + 改它的去处。
+/// 左栏连接行的 `title`（单连接时这一行同时是「改基址」的入口）：完整基址 + 改它的去处。
 ///
-/// 为什么把原文重复一遍：chip 正文本为了宽度只留 `host:port`，而用户点开它的
+/// 为什么把原文重复一遍：行内正文本只留 `host:port` / 用户起的名字，而用户点开它的
 /// 动机常常就是「完整的那个地址是什么」。空基址时说「同源」而不是留空——
 /// 空字符串的 tooltip 等于什么都没说。
-pub fn status_chip_connection_tooltip(l: Locale, base: &str) -> String {
+pub fn connection_row_tooltip(l: Locale, base: &str) -> String {
     let base = base.trim();
     match l {
         Locale::ZhHans => {

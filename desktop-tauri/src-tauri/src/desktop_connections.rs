@@ -298,9 +298,9 @@ pub(crate) fn open_connection(
 /// 选址交给连接页。设置页的按钮因此不必先读一个 draft 基址，也就不会和旁边「保存基址」
 /// （改**当前窗口**连谁）的语义打架。
 ///
-/// 连接成功后由业务 UI 的 `StatusConnectionChip` 调 `register_connection` 自报，
+/// 连接成功后由业务 UI 的 `connection_feed` 订阅路径调 `register_connection` 自报，
 /// 那条占位快照随之被真实 `authority` 覆盖（同一个 window label）。在此之前它在名单里是
-/// **空基址**的一条 —— chip 的单条分支对空基址整段不渲染，多连接列表里则显示为无名行。
+/// **空基址**的一条 —— 空基址在左栏列表里显示为无名行（同 Origin 时整块不渲染）。
 ///
 /// 占位仍然必须先做：`unique_key` 只看注册表，不占位时连点两次会拿到同一个 label，
 /// 而 `WebviewWindowBuilder` 遇重名 label 直接失败（与 [`open_connection`] 同一理由）。

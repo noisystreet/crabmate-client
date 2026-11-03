@@ -45,25 +45,18 @@ mod priority {
     /// 权限等级：常驻但对"现在该干什么"没有影响（它是授权上限，不是当前动作），
     /// 窄屏时最先让位——丢它的代价只是看不到等级，丢 `ctx` / `find` 则丢的是正在变化的信息。
     pub(super) const PERM: u8 = 8;
-    /// 当前视图（`chat` / `file`）：排在 `perm` **之后**、`lanes` 之前。
+    /// 当前视图（`chat` / `file`）：排在 `perm` **之后**，两条版式中都最先让位。
     ///
     /// 让位顺序是刻意这么排的：`perm` 是安全相关读数（「这一轮最多能动到什么」），
     /// 窄屏先丢它比先丢「我在哪」更疼 —— 视图状态在文件视图开着时屏幕上本来就有
-    /// 标题行交底，而 `lanes` 只是个恒定数字（左栏标题已有一份），所以让它最先让位。
+    /// 标题行交底，所以让它最先让位。
     pub(super) const VIEW_MODE: u8 = 9;
-    /// 连接计数：**最后**让位。它不回答"现在该干什么"，只回答"我还连着什么"；
-    /// 而且左栏标题的 `连接 [n]` 就在旁边（单 lane 时还恒为 1）—— 丢它的代价最小。
-    /// 反过来，让它去挤 `ctx` / `model` 会造成"为了一个恒定的数字压掉正在变化的信息"。
-    pub(super) const LANES: u8 = 10;
 }
 
 /// `perm` 段的文案标签。渲染、栈内行号与鼠标命中三处共用，避免改动时漏掉一处。
 pub(super) const PERM_LABEL: &str = "perm";
 
-/// `lanes` 段的文案标签（5 列，正好填满状态栈的定宽 label 列）。
-pub(super) const LANES_LABEL: &str = "lanes";
-
-/// `think` 段的文案标签（5 列，与 `serve` / `model` / `lanes` 同为定宽 label 列的满宽）。
+/// `think` 段的文案标签（5 列，与 `serve` / `model` 同为定宽 label 列的满宽）。
 pub(super) const THINK_LABEL: &str = "think";
 
 /// `view` 段的文案标签：主区当前是聊天还是只读文件视图（值 `chat` / `file`）。
@@ -72,19 +65,6 @@ pub(super) const THINK_LABEL: &str = "think";
 /// 也不叫 `editor`：那会与编辑器内部的源码 / markdown 两种渲染模式混为一谈。
 /// 与斜杠命令 `/view`（`/editor` 的别名）同一个词，看到就知道该怎么切。
 pub(super) const VIEW_LABEL: &str = "view";
-
-/// `lanes` 段的取值：`2/8`，有 lane 在等审批时后缀 ` ▲2`。
-///
-/// 待审批数**并进这一段**，不单独占一段：纵版状态栈的行数由段数决定，而鼠标命中走的是
-/// 另一条调用链（`status_stack_rows`）；两条链各数一遍段数，差一行就是「点状态栈点到别处」。
-/// 段数恒定、只在值里区分有无，这个错位来源就不存在了。`▲` 与左栏等待态同形，含义一致。
-pub(super) fn lanes_text(info: &StatusInfo) -> String {
-    let mut text = format!("{}/{}", info.lanes.connected, super::shell::MAX_LANES);
-    if info.lanes.pending_approvals > 0 {
-        text.push_str(&format!(" ▲{}", info.lanes.pending_approvals));
-    }
-    text
-}
 
 /// `view` 段的取值：`chat` / `file`（主区是聊天列，还是被只读文件视图占着）。
 ///
@@ -135,8 +115,8 @@ const SERVE_LABEL_W: usize = 6;
 
 /// 把 base URL 削成 `host:port`（去 scheme、去路径、去 userinfo）。
 ///
-/// 实现共用 [`api_base_authority`]，与 Desktop 状态栈的「连接」chip 同一份规则
-/// （`frontend/src/app/status_connection_chip.rs`）—— 两端显示的是**同一件事**
+/// 实现共用 [`api_base_authority`]，与 Desktop 左栏连接行的地址同一份规则
+/// （`frontend/src/app/connection_feed.rs`）—— 两端显示的是**同一件事**
 /// （这一屏的数据来自哪台 serve），两个实现分开写的那段时间里，这里漏了 userinfo：
 /// `--api-base http://user:pass@127.0.0.1:8080` 会把凭据画到终端上，进录屏 / 截图。
 fn host_port(api_base: &str) -> String {
@@ -267,13 +247,6 @@ pub(super) fn environment_segments(info: &StatusInfo, budget: usize) -> Vec<Segm
             priority: priority::PERM,
         });
     }
-    // 连接计数**恒占一段**（单 lane 显示 `1/8`）：段数不随计数变化，纵版行数与鼠标命中
-    // 才能与横版共用同一份 `fit_segments` / `stack_rows`。
-    out.push(Segment {
-        label: LANES_LABEL,
-        value: lanes_text(info),
-        priority: priority::LANES,
-    });
     out
 }
 

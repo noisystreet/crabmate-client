@@ -161,23 +161,6 @@
   z-index: 45;
 }
 
-/* 连接段：这一屏的数据来自哪台 serve（与 TUI lane 行同一件事）。
-   button 不继承父级字号，不写 font-size 会让值比相邻 chip 大一档。
-   刻意**不**设 max-width：`.status-chips` 是 `flex-direction: column` +
-   `align-items: stretch`，每个 chip 都撑满右列宽度（「同宽」是既有视觉约定），
-   单独收窄这一条会让它跟上面四条不齐；长 host 由 `.status-chip-value` 自带的
-   `max-width` / `overflow: hidden` / ellipsis 兜住。窄屏由 `mobile.css` 的
-   data-narrow-viewport 规则统一隐藏。 */
-.status-chip-connection {
-  cursor: pointer;
-  font-size: inherit;
-  transition: border-color 0.15s ease;
-}
-
-.status-chip-connection:hover {
-  border-color: color-mix(in srgb, var(--border) 60%, var(--text));
-}
-
 /* 状态栏「思考模式」两态开关（轨道 + 滑块沿用设置页 .settings-model-toggle-* 样式） */
 .status-chip-thinking {
   cursor: pointer;

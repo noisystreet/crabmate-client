@@ -19,7 +19,6 @@ use super::chat::bump_session_hydrate_nonce;
 use super::settings_page::{SettingsSection, navigate_to_settings};
 use super::shell_runtime_context::expect_chat_shell_ctx;
 use super::status_agent_role_menu::{AgentRoleMenuProps, StatusAgentRoleMenu};
-use super::status_connection_chip::StatusConnectionChip;
 use super::status_context::{StatusBarContextChip, observe_context_watermark};
 use super::status_fetch_state::status_bar_should_show_skeleton;
 use super::status_tasks_state::StatusTasksSignals;
@@ -380,12 +379,6 @@ fn StatusBarChipsRow(
             class="status-chips"
             class:status-chips--role-menu-open=move || role_menu_open.get()
         >
-            // 「连接」chip 刻意留在下面那条 `move ||` **之外**：它读的是本地状态
-            // （这一屏连的是哪台 serve），不依赖 `/status` / 用户偏好 / 会话水合。
-            // 放进分支里，`/status` 一失败就只剩错误面板——偏偏在最需要「是哪台
-            // serve 出事了」的时候把它藏起来。骨架屏同理：远端还没回话时，
-            // 「我连的是谁」已经知道了。
-            <StatusConnectionChip locale=locale settings_page=settings_page />
             {move || {
                 if let Some(err) = conversation_hydration_err.get() {
                     return view! {

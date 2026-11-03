@@ -42,6 +42,7 @@ pub fn sidebar_nav_view(signals: SidebarNavSignals) -> impl IntoView {
         chat_find_panel_open,
         session_context_menu,
         sidebar_rail_collapsed,
+        settings_page,
     } = signals;
     let shell_chat = expect_chat_shell_ctx();
     let chat = shell_chat.chat;
@@ -120,7 +121,7 @@ pub fn sidebar_nav_view(signals: SidebarNavSignals) -> impl IntoView {
                     apply_assistant_display_filters,
                 })}
             </div>
-            <NavRailConnections locale=locale />
+            <NavRailConnections locale=locale settings_page=settings_page />
         </aside>
 
         <SessionContextMenuLayer
