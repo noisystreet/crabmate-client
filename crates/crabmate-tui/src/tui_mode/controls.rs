@@ -34,6 +34,11 @@ pub enum Control {
     ConvNew,
     ConvRefresh,
     ConvUse(String),
+    /// `/conv export [json|markdown|both] [--out <路径>] [--id <id>]`。
+    ///
+    /// `Err` 是**给用户看**的用法错误（未知格式 / 缺 flag 值），与 `Control::Lane(Err(_))`
+    /// 同一条约定：命令已经从输入框消失，解析失败也必须留下痕迹。
+    ConvExport(Result<crate::conv_export::ExportCmd, String>),
     ConvUnknown(String),
     /// `/background [图片路径]`：全屏背景（kitty 走像素，其余用每格底色；空参查状态，`off` 关闭）。
     Background(Option<String>),
@@ -146,20 +151,44 @@ pub fn parse_control(text: &str) -> Option<Control> {
         // 编辑器视图占的正是聊天区，快捷键只在提示行里有，命令还在 `/help` 与补全里。
         "editor" | "view" => Some(Control::Editor(arg_opt)),
         "chat" => Some(Control::Chat),
-        slash::CONV => Some(match arg_opt {
-            None => Control::ConvRefresh,
-            Some(a) => match a.split_whitespace().next().unwrap_or("") {
-                "new" | "clear" => Control::ConvNew,
-                "list" | "ls" | "show" => Control::ConvRefresh,
-                "use" | "switch" => match a.split_whitespace().nth(1) {
-                    Some(id) if !id.is_empty() => Control::ConvUse(id.to_string()),
-                    _ => Control::ConvUnknown(a),
-                },
-                _ => Control::ConvUnknown(a),
-            },
-        }),
+        slash::CONV => Some(parse_conv(arg_opt.as_deref())),
         _ => None,
     }
+}
+
+/// `/conv <sub> …` 的分派。
+///
+/// 单独一层是因为 `parse_control` 的臂已经很多（CCN 门禁）：子命令每加一个都往那个 match
+/// 里塞，迟早超 10。
+fn parse_conv(arg: Option<&str>) -> Control {
+    let Some(arg) = arg else {
+        return Control::ConvRefresh;
+    };
+    match arg.split_whitespace().next().unwrap_or("") {
+        "new" | "clear" => Control::ConvNew,
+        "list" | "ls" | "show" => Control::ConvRefresh,
+        "use" | "switch" => match arg.split_whitespace().nth(1) {
+            Some(id) if !id.is_empty() => Control::ConvUse(id.to_string()),
+            _ => Control::ConvUnknown(arg.to_string()),
+        },
+        "export" => Control::ConvExport(export_args(arg)),
+        _ => Control::ConvUnknown(arg.to_string()),
+    }
+}
+
+/// `export` 之后的那截参数交给 [`crate::conv_export::parse_args`]；只写 `/conv export`
+/// 就是缺省格式（`json`，与 Web `/export` 同口径）。
+fn export_args(arg: &str) -> Result<crate::conv_export::ExportCmd, String> {
+    let rest = arg.trim().strip_prefix("export").unwrap_or("").trim();
+    crate::conv_export::parse_args(rest)
+}
+
+/// `/conv` 未知子命令的提示。
+///
+/// 放在这里而不是 `mod.rs` 的 match 里：那里贴着 920 行门禁，一条多行 `format!` 就超标。
+#[must_use]
+pub fn conv_unknown_message(arg: &str) -> String {
+    format!("不支持的 /conv 子命令：{arg}（支持 new / list / use <id> / export）")
 }
 
 #[cfg(test)]
@@ -213,6 +242,37 @@ mod tests {
         assert!(matches!(
             parse_control("/copy user"),
             Some(Control::Copy(Some(v))) if v == "user"
+        ));
+    }
+
+    /// `/conv export`：格式词只有 Web 那三种，其余走 `--out` / `--id`；未知格式给用法。
+    #[test]
+    fn parse_control_conv_export() {
+        use crabmate_client_api::chat_export::ExportFormat;
+        assert!(matches!(
+            parse_control("/conv export"),
+            Some(Control::ConvExport(Ok(cmd))) if cmd.format == ExportFormat::Json
+        ));
+        assert!(matches!(
+            parse_control("/conv export markdown --out /tmp/a.md"),
+            Some(Control::ConvExport(Ok(cmd)))
+                if cmd.format == ExportFormat::Markdown
+                    && cmd.out.as_deref() == Some("/tmp/a.md")
+        ));
+        assert!(matches!(
+            parse_control("/conv export both --id c-1"),
+            Some(Control::ConvExport(Ok(cmd)))
+                if cmd.format == ExportFormat::Both && cmd.id.as_deref() == Some("c-1")
+        ));
+        // 解析失败不是「什么都不做」：`Err` 带着用法文案一路走到 transcript。
+        assert!(matches!(
+            parse_control("/conv export pdf"),
+            Some(Control::ConvExport(Err(usage))) if usage.contains("用法")
+        ));
+        // 未知子命令仍然落到 `ConvUnknown`（别被 `export` 前缀吃掉）。
+        assert!(matches!(
+            parse_control("/conv exportt"),
+            Some(Control::ConvUnknown(_))
         ));
     }
 

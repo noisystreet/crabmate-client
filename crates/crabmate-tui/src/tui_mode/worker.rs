@@ -16,10 +16,12 @@ use std::thread;
 use crossterm::event::{self, Event, KeyEvent, MouseButton, MouseEvent, MouseEventKind};
 use tokio::sync::oneshot;
 
+use crabmate_client_api::chat_export::ExportFormat;
 use crabmate_client_api::conversation_state::ConversationStateOutcome;
 use crabmate_client_api::ctl::CtlInstance;
 use crabmate_client_api::prompt_tokens::TiktokenPromptTokensSnapshot;
 
+use crate::conv_export::ExportDone;
 use crate::serve::{
     ApprovalGate, AutoAllowOnce, ChatStreamOptions, ChatStreamOutcome,
     ConversationMessagesResponse, ServeClient, SessionIndexApplied, SessionIndexOp, StreamCancel,
@@ -34,10 +36,11 @@ use super::serve_defaults::ServeDefaults;
 use super::settings::{LlmSave, McpSave, PersistedSettings, PrefsSave};
 use super::slash_menu::SkillsPayload;
 use super::worker_jobs::{
-    job_conversation_history, job_load_user_settings, job_refresh_sessions, job_refresh_status,
-    job_refresh_usage, job_refresh_workspace_root, job_save_llm, job_save_mcp, job_save_prefs,
-    job_save_store, job_session_index, job_skills, job_workspace_dir, job_workspace_query,
-    job_workspace_set, job_write_permission, job_ws_projects, job_ws_switch_project,
+    job_conversation_history, job_export_conversation, job_load_user_settings,
+    job_refresh_sessions, job_refresh_status, job_refresh_usage, job_refresh_workspace_root,
+    job_save_llm, job_save_mcp, job_save_prefs, job_save_store, job_session_index, job_skills,
+    job_workspace_dir, job_workspace_query, job_workspace_set, job_write_permission,
+    job_ws_projects, job_ws_switch_project,
 };
 
 /// UI 事件的**载荷**（键盘线程与回合/拉取线程都会产出，但「归谁」由 [`Inbound`] 决定：
@@ -107,6 +110,9 @@ pub(super) enum UiEvent {
         /// `None` = 最新页（切换会话回放）；`Some` = `/older` 前插页，值即请求用的游标。
         before_index: Option<u32>,
     },
+    /// 会话导出结果（`/conv export`）：正文已在 worker 里渲染完，写盘留在 UI 线程 ——
+    /// 只有那边知道这次导出是否还属于当前绑定（见 `tui_mode::export`）。
+    Exported(Box<ExportDone>),
     /// 会话索引写入（`/conv new` 新建或复用空行 / 首轮后绑定 `conversation_id` / 切走回收）结果。
     SessionIndex {
         result: Result<SessionIndexApplied, String>,
@@ -231,6 +237,14 @@ pub(super) enum WorkerJob {
     /// `~12k` 掉回占位 `—`。Desktop 用同一招兜底（流收尾后 `bump_session_hydrate_nonce`）。
     RefreshUsage {
         conversation_id: String,
+    },
+    /// 导出整段会话（`/conv export`）：翻完所有页 → 渲染 → [`UiEvent::Exported`]。
+    ///
+    /// 与 [`WorkerJob::ConversationHistory`] 不同：这条要**全量**。
+    ExportConversation {
+        conversation_id: String,
+        format: ExportFormat,
+        out_path: Option<String>,
     },
     /// 写会话索引（`GET` → 改 → 全量 `PUT`）：新建空白行 / 绑定 `conversation_id` /
     /// 删除行（删除时会连服务端对话一起清，见 `apply_web_session_op`）。
@@ -514,6 +528,17 @@ fn dispatch(
             cancel,
             "刷新上下文用量",
             job_refresh_usage(client, &conversation_id, out),
+            out,
+        ),
+        WorkerJob::ExportConversation {
+            conversation_id,
+            format,
+            out_path,
+        } => run_cancellable(
+            rt,
+            cancel,
+            "导出会话",
+            job_export_conversation(client, &conversation_id, format, out_path, out),
             out,
         ),
         WorkerJob::SessionIndex(op) => run_cancellable(

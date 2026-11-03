@@ -144,6 +144,7 @@ pub(super) fn lane_with_tx<'a>(
         // 测试默认不启用控制面：`/ctl` 会走「未启用」分支，除非用例自己塞一个发送端。
         ctl: None,
         session_refresh_pending: false,
+        export_pending: None,
         unread: false,
         turn_started: None,
     }

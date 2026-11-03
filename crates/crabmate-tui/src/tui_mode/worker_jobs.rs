@@ -11,6 +11,7 @@
 //! `worker::spawn_worker` 那一层。一个 job 内部若被中断，**已发出的**事件保留、
 //! 后面的不再发 —— 与「某一步请求失败」的现状同构，UI 侧本来就要容忍半截结果。
 
+use crabmate_client_api::chat_export::{ExportFormat, export_messages};
 use crabmate_client_api::paths;
 use crabmate_client_api::permission::PermissionView;
 
@@ -21,12 +22,13 @@ use super::settings::{
 };
 use super::slash_menu::SkillsPayload;
 use super::worker::{LaneTx, UiEvent};
+use crate::conv_export::{self, ExportDone};
 use crate::serve::{
-    ServeClient, SessionIndexOp, TermError, apply_web_session_op, fetch_conversation_messages,
-    fetch_llm_overrides, fetch_mcp_servers, fetch_user_data_prefs, fetch_web_sessions,
-    fetch_workspace, fetch_workspace_dir, fetch_workspace_projects, put_llm_overrides,
-    put_mcp_servers, put_user_data_prefs, set_session_conversation_store, set_workspace,
-    switch_workspace_project, write_permission_level,
+    ServeClient, SessionIndexOp, TermError, apply_web_session_op, fetch_all_pages,
+    fetch_conversation_messages, fetch_llm_overrides, fetch_mcp_servers, fetch_user_data_prefs,
+    fetch_web_sessions, fetch_workspace, fetch_workspace_dir, fetch_workspace_projects,
+    put_llm_overrides, put_mcp_servers, put_user_data_prefs, set_session_conversation_store,
+    set_workspace, switch_workspace_project, write_permission_level,
 };
 
 /// 写会话索引（`GET` 最新 → 改 → 全量 `PUT`）：新建空白行或把 `conversation_id` 绑到指定行。
@@ -92,6 +94,38 @@ pub(super) async fn job_refresh_usage(client: &ServeClient, conversation_id: &st
         conversation_id: conversation_id.to_string(),
         snapshot,
     });
+}
+
+/// 导出整段会话（`/conv export`）：翻完所有页 → 渲染正文 → [`UiEvent::Exported`]。
+///
+/// 渲染是纯 CPU，留在 worker；写盘交给 UI 线程 —— 只有那边能判断这份回包是否仍属于
+/// 当前绑定（拉取期间用户可能已经切走，见 `tui_mode::export::on_result`）。
+pub(super) async fn job_export_conversation(
+    client: &ServeClient,
+    conversation_id: &str,
+    format: ExportFormat,
+    out_path: Option<String>,
+    tx: &LaneTx,
+) {
+    let fetched = fetch_all_pages(client, conversation_id).await;
+    let (result, pages, messages) = match fetched {
+        Ok(fetched) => {
+            let messages = export_messages(&fetched);
+            (
+                conv_export::render_artifacts(format, &messages),
+                u32::try_from(fetched.len()).unwrap_or(u32::MAX),
+                messages.len(),
+            )
+        }
+        Err(e) => (Err(e.to_string()), 0, 0),
+    };
+    let _ = tx.send(UiEvent::Exported(Box::new(ExportDone {
+        conversation_id: conversation_id.to_string(),
+        out: out_path,
+        pages,
+        messages,
+        result,
+    })));
 }
 
 /// 工作区根目录列表（工作区路径 + 目录树数据）。
