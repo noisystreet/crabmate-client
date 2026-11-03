@@ -11,6 +11,12 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ## [Unreleased]
 
+### Added
+
+- **TUI: the settings panel can switch the session store between SQLite and file storage.** `POST /config/session/conversation-store` was reachable only from Desktop/Web — the TUI could show the current state via `/status` but not change it. The row is a two-state toggle (no 「follow server」 option) and is its **own save group**: a business `ok: false` keeps the staged value and prints the server's reason, instead of being mistaken for 「retry」. A serve without a configured SQLite path — or one whose `/status` lacks the fields — refuses to enter edit mode. Verified: `crabmate-tui` 1088 green (7 new); not seen in a real terminal. No protocol change.
+- **TUI: an MCP section edits `global_enabled` / `tool_timeout_secs` of `/user-data/mcp-servers`.** Only those two scalars are editable: server entries carry `env` / `headers` / `bearer`, so the list shows as a count and is copied back verbatim on the full-DTO PUT (`Vec<Value>`, deliberately not re-typed). An old serve without the endpoint says 「未提供」 and refuses editing rather than silently assuming 「off」. Verified: `crabmate-tui` 1088 green (8 new); not seen in a real terminal. No protocol change.
+- **TUI: three read-only settings sections — 连接 / 快捷键 / 本地行为.** Connection rows read serve facts (default model, effective permission level); the shortcut rows and the local rows (key storage, save semantics, `.md` preview) *are* the facts, so `Enter` only prints a hint and never dirties the panel. Cost: seven sections now, so reaching 外观 takes more `Tab` presses. Verified: `crabmate-tui` 1092 green (4 new). No protocol change.
+
 ## [0.8.0-alpha.1] - 2026-11-03
 
 ### Added
