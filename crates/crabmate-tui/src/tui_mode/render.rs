@@ -87,6 +87,8 @@ pub struct StatusInfo {
     /// 一个值带两数、由 `TuiApp::lane_tally` 一处数出来：状态栏自己再数一遍
     /// `lanes.len()` 就会和左栏 `连接 [n]` 对不上。
     pub lanes: super::lane_list::LaneTally,
+    /// 主区是不是只读文件视图（`st.editor.open`）：`bool` 无「不知道」态，`Default` = 聊天。
+    pub editor_open: bool,
 }
 
 // `BodyRow`（物理行 + 链接热区）单独成文件：`render.rs` 贴着 920 行文件门禁，

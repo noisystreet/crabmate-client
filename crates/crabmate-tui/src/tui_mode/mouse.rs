@@ -101,31 +101,38 @@ impl LaneApp<'_> {
         if self.st.permission_menu.is_some() {
             return self.on_permission_menu_click(column, row);
         }
-        if let Some(rect) = self.status_perm_rect()
-            && contains(rect, column, row)
-        {
+        if let Some(rect) = self.hit_status_segment(status::PERM_LABEL, column, row) {
             self.open_permission_menu(rect);
             return true;
         }
         // 思考开关：与 Desktop 底栏那颗 chip 同功能（点一下切一档），
         // 值归一与落盘都在 `status_thinking`。
-        if let Some(rect) = self.status_think_rect()
-            && contains(rect, column, row)
+        if self
+            .hit_status_segment(status::THINK_LABEL, column, row)
+            .is_some()
         {
             self.toggle_thinking_mode();
+            return true;
+        }
+        // 视图开关：与 `Ctrl+T` / `/editor` / `/chat` 同一入口 —— 状态栏这一段是
+        // 「我现在在哪」的唯一常驻指示，点它就该能切，而不是只能记住快捷键。
+        if self
+            .hit_status_segment(status::VIEW_LABEL, column, row)
+            .is_some()
+        {
+            self.toggle_view();
             return true;
         }
         false
     }
 
-    /// `perm` 段在屏幕上的矩形；`None` = 该段不存在。
-    fn status_perm_rect(&self) -> Option<Rect> {
-        self.status_segment_rect(status::PERM_LABEL)
-    }
-
-    /// `think` 段（思考模式开关）在屏幕上的矩形；`None` = 该段不存在。
-    fn status_think_rect(&self) -> Option<Rect> {
-        self.status_segment_rect(status::THINK_LABEL)
+    /// 屏幕坐标是否落在某一段状态段上；命中就返回该段矩形（`perm` 拿它当菜单锚点）。
+    ///
+    /// 三段（`perm` / `think` / `view`）共用这一个判定：各写一份 `if let … && contains(…)`
+    /// 会让「点得到吗」这一件事在同一个函数里付三份圈复杂度（`lizard` 的 CCN 门禁）。
+    fn hit_status_segment(&self, label: &str, column: u16, row: u16) -> Option<Rect> {
+        let rect = self.status_segment_rect(label)?;
+        contains(rect, column, row).then_some(rect)
     }
 
     /// 状态区某一段在屏幕上的矩形；`None` = 该段不存在 / 被裁掉。

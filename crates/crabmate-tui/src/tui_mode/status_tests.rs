@@ -10,6 +10,7 @@ use super::*;
 fn base_info(api_base: &str) -> StatusInfo {
     StatusInfo {
         lanes: Default::default(),
+        editor_open: false,
         api_base: api_base.into(),
         model: None,
         role: None,
@@ -25,6 +26,23 @@ fn base_info(api_base: &str) -> StatusInfo {
         permission: None,
         permission_intent: None,
     }
+}
+
+/// `view` 段恒在：聊天 `chat`、文件视图 `file`。
+///
+/// 段消失或时隐时现等于「想点的时候找不到」—— 它是状态栏上唯一的视图指示，
+/// 也是 `Ctrl+T` 之外唯一的点击入口。
+#[test]
+fn view_segment_reports_chat_or_file() {
+    let info = base_info("http://127.0.0.1:8080");
+    let chat = status_text(&info, 200);
+    assert!(chat.contains("view chat"), "{chat}");
+
+    let mut file = base_info("http://127.0.0.1:8080");
+    file.editor_open = true;
+    let file_text = status_text(&file, 200);
+    assert!(file_text.contains("view file"), "{file_text}");
+    assert!(!file_text.contains("view chat"), "{file_text}");
 }
 
 #[test]

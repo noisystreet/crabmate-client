@@ -18,6 +18,11 @@ pub(super) enum TopHotkey {
     StatusStack,
     /// Ctrl+Y：复制最近一条助手回复（`yank` 的传统键位，终端一般不截获）。
     Copy,
+    /// Ctrl+T：聊天 ↔ 只读文件视图（与 `/editor` / `/chat` 是同一对入口）。
+    ///
+    /// 必须挂在这张与焦点无关的表里，不能进 `on_input_key`：那里开头就让编辑器视图
+    /// 接管滚动键，而「切回聊天」恰恰要在视图开着时能按下去。
+    ToggleView,
     /// Alt+→：切到下一条 lane。多 serve 并行时只换视图，不影响任何在跑的回合。
     ///
     /// 单 lane 时是 no-op（外层 `TuiApp::switch_lane` 在 `len <= 1` 直接返回）。
@@ -50,6 +55,11 @@ pub(super) fn of(key: &KeyEvent) -> Option<TopHotkey> {
         // 不与输入框的 Ctrl 组合抢键。
         (KeyCode::F(4), KeyModifiers::NONE) => Some(TopHotkey::NextApproval),
         (KeyCode::Char('y'), KeyModifiers::CONTROL) => Some(TopHotkey::Copy),
+        // Ctrl+T：视图切换。与 `Ctrl+E`（思考开关）同一组「toggle」语义。
+        // 不用 F 系：F2/F3/F4/F6 已被面板开关与状态栈占用，而 F5 的通用语义是「刷新」，
+        // 放在视图切换上会让人以为「按了没反应」。也不碰 Ctrl+B / Ctrl+A ——
+        // 那是 tmux / screen 的前缀键，在复用器里根本到不了这里。
+        (KeyCode::Char('t'), KeyModifiers::CONTROL) => Some(TopHotkey::ToggleView),
         // Ctrl+N：切下一条 lane。与 Alt+→ **同一条**实现（同一个 `switch_lane(1)`），
         // 不是第二套「下一条」规则 —— 两个键给出同一结果，才不需要记两套语义。
         (KeyCode::Char('n'), KeyModifiers::CONTROL) => Some(TopHotkey::NextLane),
@@ -116,6 +126,17 @@ mod tests {
             of(&key(KeyCode::Char('y'), KeyModifiers::CONTROL)),
             Some(TopHotkey::Copy)
         );
+    }
+
+    /// Ctrl+T 切视图；裸 `t` 必须留给输入框（要能打出这个字母），`Alt+T` 是别的终端语义。
+    #[test]
+    fn ctrl_t_toggles_the_view() {
+        assert_eq!(
+            of(&key(KeyCode::Char('t'), KeyModifiers::CONTROL)),
+            Some(TopHotkey::ToggleView)
+        );
+        assert_eq!(of(&key(KeyCode::Char('t'), KeyModifiers::NONE)), None);
+        assert_eq!(of(&key(KeyCode::Char('t'), KeyModifiers::ALT)), None);
     }
 
     #[test]

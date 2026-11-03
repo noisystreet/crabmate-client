@@ -530,6 +530,22 @@ impl LaneApp<'_> {
         }
     }
 
+    /// `Ctrl+T` / 点状态栏 `view` 段：聊天 ↔ 编辑器视图。
+    ///
+    /// 两个方向都复用现成入口，**不另写一份「打开」逻辑**：`/editor` 的语义（重读当前
+    /// 文件、还没打开过文件时开一个占位视图、切视图不打断在跑的回合）就是唯一定义，
+    /// 抄第二份的那天起两个入口就会给出不同结果。
+    ///
+    /// 关闭方向走 [`Self::editor_close`]，连带那行系统提示与「焦点交回输入框」——
+    /// 按 Ctrl+T 回来本来就是接着打字。
+    pub(super) fn toggle_view(&mut self) {
+        if self.st.editor.open {
+            self.editor_close();
+        } else {
+            self.editor_reopen_current(None);
+        }
+    }
+
     /// 文件内容回包。
     ///
     /// 只认「当前视图正在看的那一份」：读取在途时又打开了另一个文件（`/editor b.rs`），
@@ -616,6 +632,41 @@ mod tests {
             // 幂等：已经在聊天时再 /chat 只是多说一句，不改状态
             a.editor_close();
             assert!(!a.st.editor.open);
+        });
+    }
+
+    /// `Ctrl+T` / 点状态栏：一次开、一次关，且**复用** `/editor` 与 `/chat` 的语义。
+    ///
+    /// 特意分两段断言：打开方向要重读当前文件（不沿用旧内容），关闭方向要把焦点
+    /// 交回输入框（切回来就是为了接着打字）。
+    #[test]
+    fn toggle_view_flips_both_ways() {
+        app(|a| {
+            a.toggle_view();
+            assert!(a.st.editor.open, "关 → 开");
+            assert!(a.st.editor.rel.is_none(), "没有文件就开占位视图，不编路径");
+
+            a.toggle_view();
+            assert!(!a.st.editor.open, "开 → 关");
+            assert!(matches!(a.st.focus, super::super::state::Focus::Input));
+        });
+    }
+
+    /// 已经有文件时再切回来，必须重读那一份：文件可能已被 agent 改过，
+    /// 沿用旧内容比多一次 GET 更坏。
+    #[test]
+    fn toggle_view_rereads_the_open_file() {
+        app(|a| {
+            a.editor_command(Some("src/lib.rs".to_string()));
+            a.toggle_view();
+            assert!(!a.st.editor.open);
+            a.toggle_view();
+            assert!(a.st.editor.open);
+            assert_eq!(a.st.editor.rel.as_deref(), Some("src/lib.rs"));
+            assert!(
+                a.st.editor.loading,
+                "重读在途（单测没有 runtime，停在 loading）"
+            );
         });
     }
 

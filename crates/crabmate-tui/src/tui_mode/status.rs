@@ -45,10 +45,16 @@ mod priority {
     /// 权限等级：常驻但对"现在该干什么"没有影响（它是授权上限，不是当前动作），
     /// 窄屏时最先让位——丢它的代价只是看不到等级，丢 `ctx` / `find` 则丢的是正在变化的信息。
     pub(super) const PERM: u8 = 8;
+    /// 当前视图（`chat` / `file`）：排在 `perm` **之后**、`lanes` 之前。
+    ///
+    /// 让位顺序是刻意这么排的：`perm` 是安全相关读数（「这一轮最多能动到什么」），
+    /// 窄屏先丢它比先丢「我在哪」更疼 —— 视图状态在文件视图开着时屏幕上本来就有
+    /// 标题行交底，而 `lanes` 只是个恒定数字（左栏标题已有一份），所以让它最先让位。
+    pub(super) const VIEW_MODE: u8 = 9;
     /// 连接计数：**最后**让位。它不回答"现在该干什么"，只回答"我还连着什么"；
     /// 而且左栏标题的 `连接 [n]` 就在旁边（单 lane 时还恒为 1）—— 丢它的代价最小。
     /// 反过来，让它去挤 `ctx` / `model` 会造成"为了一个恒定的数字压掉正在变化的信息"。
-    pub(super) const LANES: u8 = 9;
+    pub(super) const LANES: u8 = 10;
 }
 
 /// `perm` 段的文案标签。渲染、栈内行号与鼠标命中三处共用，避免改动时漏掉一处。
@@ -59,6 +65,13 @@ pub(super) const LANES_LABEL: &str = "lanes";
 
 /// `think` 段的文案标签（5 列，与 `serve` / `model` / `lanes` 同为定宽 label 列的满宽）。
 pub(super) const THINK_LABEL: &str = "think";
+
+/// `view` 段的文案标签：主区当前是聊天还是只读文件视图（值 `chat` / `file`）。
+///
+/// 叫 `view` 而不是 `mode`：`mode` 段已经是 `ask` / `plan` / `act` 的会话模式，
+/// 也不叫 `editor`：那会与编辑器内部的源码 / markdown 两种渲染模式混为一谈。
+/// 与斜杠命令 `/view`（`/editor` 的别名）同一个词，看到就知道该怎么切。
+pub(super) const VIEW_LABEL: &str = "view";
 
 /// `lanes` 段的取值：`2/8`，有 lane 在等审批时后缀 ` ▲2`。
 ///
@@ -71,6 +84,14 @@ pub(super) fn lanes_text(info: &StatusInfo) -> String {
         text.push_str(&format!(" ▲{}", info.lanes.pending_approvals));
     }
     text
+}
+
+/// `view` 段的取值：`chat` / `file`（主区是聊天列，还是被只读文件视图占着）。
+///
+/// 用两个稳定的短词而不是「聊天 / 文件」：值越短，窄屏横版整段被丢的概率越低；
+/// 而且这一段是**开关**，词形要能一眼对上 `/chat` 与 `/editor` 两个命令。
+pub(super) fn view_text(editor_open: bool) -> String {
+    if editor_open { "file" } else { "chat" }.to_string()
 }
 
 /// 段间分隔符（极暗竖线，与 A6 的分隔线同色系）。
@@ -196,6 +217,24 @@ pub(super) fn environment_segments(info: &StatusInfo, budget: usize) -> Vec<Segm
             priority: priority::THINKING,
         });
     }
+    // 当前视图：与 `think` 一样是**开关**而不是只读读数 —— 宽屏点状态栈那一行、窄屏点
+    // 底栏这几列就切一档（`LaneApp::toggle_view`，与 `Ctrl+T` / `/editor` / `/chat`
+    // 同一入口），命中区间走 `segment_cols` / `status_stack::segment_row_index`，
+    // 与渲染同源。
+    //
+    // 它还是**唯一**的视图指示：视图占的正是聊天列，transcript 被整片盖住之后，屏幕上
+    // 除了视图自己的标题行没有别的地方能回答「我是不是还在文件里」。所以段值用两个
+    // 稳定的短词，而不是把标题行当成唯一线索。
+    //
+    // **恒占一段**（`chat` 也算）：段数不随开关变化，纵版行数与鼠标命中才能与横版
+    // 共用同一份 `fit_segments` / `stack_rows`（与 `lanes` 同一条理由）。视图状态是
+    // bool，所以不需要 `thinking` / `perm` 那种「`None` 就不 push」的分支 ——
+    // 没有「不知道在哪」这种状态。
+    out.push(Segment {
+        label: VIEW_LABEL,
+        value: view_text(info.editor_open),
+        priority: priority::VIEW_MODE,
+    });
     // 显示顺序排在 `mode` 之后，但优先级高于 `mode` / `role`（见 `priority`）。
     // 无条件 push：没有实测时值是占位 `—`，段消失会让人误判「功能没生效」。
     out.push(Segment {
