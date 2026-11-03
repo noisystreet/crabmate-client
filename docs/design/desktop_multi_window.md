@@ -10,8 +10,9 @@
 ## 1. 结论先行
 
 - 一个连接 = 一个 WebView 窗口，各自连一台 `serve`，各自一份 JS 堆。
-- 窗口**互相完全遮挡**（都铺满工作区），切换靠**左栏「连接」区**（会话列表下方，每个窗口一行）
-  与状态栈「连接」chip 的列表；两处读同一份名单，见 §13。
+- 窗口**互相完全遮挡**（都铺满工作区），切换靠**左栏「连接」区**（会话列表下方，每个窗口一行）。
+  那里是**唯一**的名单：右列状态栈原先还有一排 `.status-chip`，同一条信息画两个角落必然会散，
+  现已撤掉；点击目标按条数分岔 —— 多连接切窗口，单连接进「设置 → 连接」（改基址的唯一入口），见 §13。
 - 连接身份 `key` **恒等于 window label**。这是整套协调面的地基。
 - 白名单与 Bearer 都按 window label 分槽。
 
@@ -35,7 +36,7 @@ Desktop 做不到同样的形状，因为业务 UI 的状态是 **12 个 `thread
 |---|---|
 | 契约（纯逻辑） | `crabmate_client_api::connections`：`ConnectionKey` / `ConnectionSnapshot` / `ConnectionStatus` / `ConnectionTally` |
 | 壳侧注册表 | `desktop-tauri/src-tauri/src/desktop_connections.rs`：`ConnectionRegistry`（`label → snapshot`）+ `connections_changed` 事件 |
-| 前端读取 | `frontend/src/app/status_connection_chip.rs`：一份应用级 `ArcRwSignal`，先 `register` 再 `list` 再 `listen` |
+| 前端读取 | `frontend/src/app/connection_feed.rs`：一份应用级 `ArcRwSignal`，先 `listen`（订阅）再 `register` 再 `list` |
 
 三条命令构成对外面：
 
@@ -57,12 +58,12 @@ Desktop 做不到同样的形状，因为业务 UI 的状态是 **12 个 `thread
 （前台清零 / 后台有回合置位 / 后台已空闲保持原值）是 TUI lane 行也在用的同一份口径。
 
 **`register_connection` 必须有调用者。** 只有 `open_connection` 会登记时，main 窗口自己
-不在名单里 —— `len` 永远凑不到 2，chip 就不会切成列表，功能在用户眼里等于没生效。
+不在名单里 —— `len` 永远凑不到 2，左栏「连接」区就永远只有自己那一行（切窗口在用户眼里等于没生效）。
 这是实现期真实踩到的坑，见 §7。
 
 同理，**`report_connection_*` 也必须有调用者** —— 而且顺序是「先登记、再上报」：注册表按
 window label 查，未登记的 label 会被 `set_status` 静默丢弃，而 `register_connection` 是一次
-异步调用。所以上报的触发条件里带着 `status_connection_chip::connections_registered()`，
+异步调用。所以上报的触发条件里带着 `connection_feed::connections_registered()`，
 登记完成那一刻补发第一帧（否则「首帧丢一次、之后状态又没再变」＝ 永远不更新，症状与
 `#399` 报的完全一样）。
 
@@ -168,7 +169,7 @@ signal」这个问题**不存在**，而不是被兜住。
 1. **设置 → 连接 → 新建连接窗口** → 应新建一个停在连接页的窗口（标题栏 `CrabMate · 名称`）。
    在那里填地址连上后，两个窗口的左栏「连接」区都应出现两行，当前窗口那行高亮。
 2. 开两条连接 → 第二个窗口应盖在 main 上，标题栏带连接名。
-3. 状态栈「连接」chip 应变成 2 条；点条目应切到对应窗口；**左栏那两行点也应切窗口**。
+3. 左栏「连接」区应有 2 行（标题报 `连接 [2]`）；点任一行应切到对应窗口。右列状态栈里**不应**再有「连接」chip。
 4. **窗口 A 断开 → 窗口 B 刷新后仍应能认证**（这条专验 Bearer 分槽）。
 5. 窗口 B 触发审批 → 切到 A → 应收到系统通知，且 B 那行状态字形应变 `▲`。
 6. 在一个窗口发一个回合并**留在那个窗口** → 那行变 `●`，回合结束回 `·`（第 5 步验的是
@@ -193,10 +194,10 @@ TUI 在左栏下半画 lane 区（`tui_multi_server.md` §4.6），Desktop 现�
 
 | 项 | 设计 |
 |---|---|
-| 数据面 | 复用 `status_connection_chip::connection_feed` —— 应用级 signal，订阅只装一次，与右列 chip 读同一份 |
+| 数据面 | 复用 `connection_feed::connection_feed` —— 应用级 signal，订阅只装一次，左栏与状态上报读同一份 |
 | 何时显示 | 桌面壳且名单非空。**单连接也显示**（对齐 TUI：不显示就看不出连的是谁，也看不出支持多连接） |
 | 点击 | `focus_connection(key)` → 切到那个窗口（换整个 JS 堆，不是切 lane） |
-| 单连接 | 行内按钮 `disabled`：没有别的窗口可切，而「改基址」归右列 chip，两个入口不重复 |
+| 单连接 | 行仍可点，但进「设置 → 连接」：没有别的窗口可切，而那个入口（原先由右列那颗单条 chip 提供）现在是改基址的唯一路径 |
 | 高亮 | 按 `authority` 与自己的 `api_base` 比对 —— 广播的 `snapshots()` **强制** `active = false`（同一份 payload 不可能对每个窗口都成立）。唯一会让两行同时亮的场景（两个窗口连同一台 serve）已由连接时去重挡住，见下节 |
 | 状态字形 | `·` 空闲 / `●` 运行中 / `▲` 等审批 / `×` 已请求退出（与 TUI 同口径，呼吸动画只在终端） |
 | 状态 / 未读来源 | 本窗口自报（`report_connection_status` / `report_connection_unread`），规则在 `crabmate-client-api::connections`；**先登记再上报**（`connections_registered()` 把关），否则首帧会被注册表静默丢弃。壳不猜任何一项 |
@@ -216,8 +217,8 @@ TUI 在左栏下半画 lane 区（`tui_multi_server.md` §4.6），Desktop 现�
   吃同一个 draft 会让两个动作看起来是一回事。
 - 建窗前先 `unique_key` **占位**：`unique_key` 只看注册表，不占位时连点两次会拿到同一个
   label，`WebviewWindowBuilder` 遇重名直接失败（与 `open_connection` 同一理由）。
-- 占位那条在新窗口连上前是**空基址**（chip 的单条分支对空基址整段不渲染；多连接列表里
-  显示为无名行）。连上后由业务 UI 的 `StatusConnectionChip` 调 `register_connection` 覆盖。
+- 占位那条在新窗口连上前是**空基址**（左栏列表里显示为无名行；空基址 = 同 Origin 时整块不渲染）。
+  连上后由业务 UI 的 `connection_feed` 订阅路径调 `register_connection` 覆盖。
 
 ### 同一台 `serve` 只连一个窗口（连接时去重）
 

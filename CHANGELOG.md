@@ -11,6 +11,10 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Desktop listed connections twice; TUI counted lanes in the wrong corner.** The right status stack drew a `.status-chip` per connection while the left rail drew the same list — two readings that drift. The chip is gone (`status_connection_chip` → `connection_feed`) and the rail pane owns it: header `连接 [n]`, one row per window, a click switches windows — or, with a single connection, opens Settings → Connection, which lost its only other entry. TUI moved `连接 [n/8] ▲k` from the status stack's `lanes` segment into the left lane pane's header, next to `/lane attach` and `F4`. The stack drops that segment and `StatusInfo::lanes` is deleted; full fill is 9 of 9 rows, nothing truncated. Verified: both test suites and `scripts/check.sh` green; not seen on a real screen. No protocol change.
+
 ### Added
 
 - **TUI: the three read-only settings sections now report live facts (#433).** 连接 shows this connection's `api_base`, the lane name with its 1-based position, and where the Web Bearer came from (`--bearer` / keychain slot / not provided — never the value). 快捷键 is generated from one hotkey table, so a new top-level hotkey shows up in the panel and in `/help` without editing either; rows wrap instead of being truncated at 80 columns. 本地行为 lists the effective `CM_TUI_*` switches by calling the same predicates the runtime uses, probed once per process, with 「改需重启」 stated once. Cost: 本地行为 is eleven rows now, so on a very short terminal the tail sits below the fold. Verified: `crabmate-tui` 1117 green (25 new); not seen in a real terminal. No protocol change.

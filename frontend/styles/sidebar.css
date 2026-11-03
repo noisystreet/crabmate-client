@@ -761,12 +761,7 @@
     color var(--dur-fast) ease;
 }
 
-/* 单连接时禁用点击：没有「别的窗口」可切，改基址归右列 chip。 */
-.nav-rail-connection-row:disabled {
-  cursor: default;
-}
-
-.nav-rail-connection-row:hover:not(:disabled) {
+.nav-rail-connection-row:hover {
   background: var(--surface-hover);
   color: var(--text);
 }

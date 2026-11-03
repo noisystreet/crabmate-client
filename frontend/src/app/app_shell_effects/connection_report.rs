@@ -34,7 +34,7 @@ use crate::tauri_shell::{
     tauri_report_connection_status, tauri_report_connection_unread, tauri_shell_available,
 };
 
-use super::super::status_connection_chip::connections_registered;
+use super::super::connection_feed::connections_registered;
 
 /// 上报所需的两个信号（都是「本窗口此刻在干什么」的既有来源）。
 pub struct ConnectionReportSignals {

@@ -869,8 +869,6 @@ impl LaneApp<'_> {
                 },
             };
         StatusInfo {
-            // lane 计数属于外壳：`draw_frame` 用 lane 快照覆盖。这里留中性值，段数不变。
-            lanes: Default::default(),
             // 视图归本 lane：`UiState` 自带 `editor`，外壳不需要覆盖（切 lane 就是换一份
             // `st`），所以这里直接读实况。
             editor_open: self.st.editor.open,

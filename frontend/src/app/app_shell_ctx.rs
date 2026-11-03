@@ -127,6 +127,9 @@ pub struct SidebarNavSignals {
     pub chat_find_panel_open: RwSignal<bool>,
     pub session_context_menu: RwSignal<Option<SessionContextAnchor>>,
     pub sidebar_rail_collapsed: RwSignal<bool>,
+    /// 「设置」页开关：左栏连接行在**单连接**时就是「改基址」的入口
+    /// （右列那颗 chip 合并进左栏之后，这里是它唯一的去处）。
+    pub settings_page: RwSignal<bool>,
 }
 
 /// 右列侧栏所需句柄（阶段 B：避免向 `side_column_view` 传递整份 [`AppShellCtx`]）。
@@ -189,6 +192,7 @@ impl AppShellCtx {
             chat_find_panel_open: self.signals.chat_composer.chat_find_panel_open,
             session_context_menu: self.signals.sidebar.session_context_menu,
             sidebar_rail_collapsed: self.signals.sidebar.sidebar_rail_collapsed,
+            settings_page: self.signals.modal.settings_page,
         }
     }
 

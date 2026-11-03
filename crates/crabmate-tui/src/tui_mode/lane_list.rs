@@ -135,7 +135,7 @@ fn lane_list_rows(
     let shown = lane_shown_len(avail, lanes.len());
     let mut rows = Vec::with_capacity(height as usize);
     rows.push(Line::from(Span::styled(
-        truncate_display(&lane_title(lanes.len(), shown), width),
+        truncate_display(&lane_title(LaneTally::from_entries(lanes), shown), width),
         Style::new().fg(palette.fg).add_modifier(Modifier::BOLD),
     )));
     for entry in lanes.iter().take(shown) {
@@ -150,13 +150,22 @@ fn lane_list_rows(
     rows
 }
 
-/// 标题：`连接 [总数]`，装不下时补 `↓n`（被截掉的条数）。
-fn lane_title(total: usize, shown: usize) -> String {
-    if shown < total {
-        format!("连接 [{total}] ↓{}", total - shown)
-    } else {
-        format!("连接 [{total}]")
+/// 标题：`连接 [n/8] ▲k`，装不下时补 `↓m`（被截掉的条数）。
+///
+/// 容量（`/MAX_LANES`）与全局待审批数（`▲k`）原先长在状态栈的 `lanes` 段里（右下角）。
+/// 那一行已撤掉：这两项的**操作对象**都在左栏这一块（`/lane attach` 加不了就超了上限、
+/// `F4` 跳的正是 `▲` 那条），留在右下角只是同一件事的第二份读数。
+///
+/// `↓m` 与 `▲k` 并存：前者说「这里没画全」，后者说「有条目在等人」，两件事互不替代。
+fn lane_title(tally: LaneTally, shown: usize) -> String {
+    let mut text = format!("连接 [{}/{}]", tally.connected, super::shell::MAX_LANES);
+    if shown < tally.connected {
+        text.push_str(&format!(" ↓{}", tally.connected - shown));
     }
+    if tally.pending_approvals > 0 {
+        text.push_str(&format!(" ▲{}", tally.pending_approvals));
+    }
+    text
 }
 
 /// 一条 lane 的一行：整行宽的底色条，文字贴左。
@@ -347,23 +356,26 @@ fn pad_display(text: &str, width: usize) -> String {
     out
 }
 
-/// 有名字与状态点了，还缺两组计数：连了几条（`lanes 2/8`）、几条在等审批。
+/// 有名字与状态点了，还缺两组计数：连了几条（`连接 [2/8]`）、几条在等审批（`▲k`）。
 ///
-/// 合成一个值而不是两个字段，是为了让「两处不得各算一份」成为类型事实：状态栏拿到
+/// 合成一个值而不是两个字段，是为了让「两处不得各算一份」成为类型事实：左栏标题拿到
 /// 这一个值，就没机会自己再数一遍 `lanes.len()`。
+///
+/// 这两项原本由状态栈的 `lanes` 段显示（右下角），现已并入左栏标题 —— 同一条信息在
+/// 两个角落各画一遍，久了必然对不上，而左栏才是「加一条 / 跳过去」的操作位置。
 #[derive(Debug, Clone, Copy, Default)]
 pub(super) struct LaneTally {
-    /// 已连接数。与左栏标题 `连接 [n]` 是**同一个数字**。
+    /// 已连接数。与左栏标题 `连接 [n/8]` 是**同一个数字**。
     pub connected: usize,
-    /// 正在等审批的 lane 数（0 = 状态栏不显示该段）。
+    /// 正在等审批的 lane 数（0 = 标题不显示 `▲` 后缀）。
     ///
     /// 判定复用 [`lane_status`]，也就是左栏 `▲` 与 `F4` 的 `next_approval_index` 用的那一个：
-    /// 各判一遍的症状是「左栏亮着 `▲`、状态栏说没有人在等」。
+    /// 各判一遍的症状是「左栏亮着 `▲`、标题说没有人在等」。
     pub pending_approvals: usize,
 }
 
 impl LaneEntry {
-    /// 这条 lane 现在在等审批（左栏 `▲`、`F4` 跳转与状态栏计数**共用**这一判定）。
+    /// 这条 lane 现在在等审批（左栏 `▲`、`F4` 跳转与标题的 `▲k` **共用**这一判定）。
     ///
     /// `status` 本来就是 [`lane_status`] 的结果，这里只是给它一个名字：读 `▲` 的那几处
     /// 不必各自再写一遍 `== LaneStatus::WaitingApproval`。
@@ -376,7 +388,7 @@ impl LaneTally {
     /// 按外壳交给渲染的那份 lane 快照数（`draw_frame` 的 `lanes` 参数就是它）。
     ///
     /// 用快照而不是再读一遍 `TuiApp::lanes`：左栏画的就是这批 entry，两处读不同来源迟早
-    /// 出现「左栏两条、状态栏三条」。
+    /// 出现「标题说两条、下面画了三条」。
     pub(super) fn from_entries(entries: &[LaneEntry]) -> Self {
         Self {
             connected: entries.len(),
@@ -520,7 +532,7 @@ mod tests {
         let rows = rows_of(&lanes(&["local"]), 20, 20);
         // 1（标题）+ 1（那条 lane）= 2 行有内容，其余交给调用方的底色。
         assert_eq!(rows.len(), 2);
-        assert_eq!(rows[0].spans[0].content.as_ref(), "连接 [1]");
+        assert_eq!(rows[0].spans[0].content.as_ref(), "连接 [1/8]");
         // 唯一那条就是当前 lane，故整行都是选中底色。
         assert_eq!(rows[1].spans[0].style.bg, Some(pal().selection_bg));
         assert!(row_text(&rows[1]).contains("local"), "名字要写在这一行里");
@@ -629,7 +641,7 @@ mod tests {
         let refs: Vec<&str> = names.iter().map(String::as_str).collect();
         let rows = rows_of(&lanes(&refs), 20, 10);
         // 可用 9 行、块高 1 → 画 9 条，标题报 ↓21。
-        assert_eq!(rows[0].spans[0].content.as_ref(), "连接 [30] ↓21");
+        assert_eq!(rows[0].spans[0].content.as_ref(), "连接 [30/8] ↓21");
         assert_eq!(rows.len(), 10);
     }
 
@@ -638,7 +650,18 @@ mod tests {
     fn one_row_only_shows_the_title() {
         let rows = rows_of(&lanes(&["a", "b"]), 20, 1);
         assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].spans[0].content.as_ref(), "连接 [2] ↓2");
+        assert_eq!(rows[0].spans[0].content.as_ref(), "连接 [2/8] ↓2");
+    }
+
+    /// 有人等审批时，左栏标题承担原先状态栈 `lanes ▲k` 那一段的职责
+    /// （右下角那一行已撤，计数只能在这里）。
+    #[test]
+    fn title_reports_the_pending_approval_count() {
+        let mut entries = lanes(&["a", "b", "c"]);
+        entries[1].status = LaneStatus::WaitingApproval;
+        entries[2].status = LaneStatus::WaitingApproval;
+        let rows = rows_of(&entries, 20, 20);
+        assert_eq!(rows[0].spans[0].content.as_ref(), "连接 [3/8] ▲2");
     }
 
     #[test]
