@@ -9,10 +9,10 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
 
-use crate::tui_mode::LaneTemplate;
 use crate::tui_mode::inbound::Inbound;
 use crate::tui_mode::pane_store::PaneStore;
 use crate::tui_mode::pane_width::PaneWidths;
+use crate::tui_mode::shell::LaneTemplate;
 use crate::tui_mode::test_support::test_prefs;
 
 /// 单测的列宽落盘目的地：进程内一个**唯一**的临时文件（每条 lane 一个）。
@@ -45,6 +45,9 @@ pub(super) fn test_template(pane: PaneWidths, tx: mpsc::Sender<Inbound>) -> Lane
         pane,
         pane_store: test_pane_store(),
         bearer: String::new(),
+        // 测试连接没有显式 Bearer：面板「连接」栏显示「未提供」，与真实启动
+        // （钥匙串没命中）同一状态。
+        bearer_source: Default::default(),
         ctl: None,
         tx,
     }

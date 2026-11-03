@@ -16,6 +16,7 @@ use super::settings::{
     STORE_ON, TOOL_CACHE_DISABLED, effective_value, normalize_str,
 };
 use super::text::{cell_window, horizontal_window};
+use crate::serve::BearerSource;
 
 /// 只读信息行的占位动作：`staged()` 必须返回引用，所以需要一个静态值。
 ///
@@ -197,6 +198,9 @@ impl SettingsPanel {
             FieldId::McpToolTimeout => &self.mcp.tool_timeout,
             // 只读信息行：永远没有 staged 动作。
             FieldId::McpServers
+            | FieldId::ConnLane
+            | FieldId::ConnApiBase
+            | FieldId::ConnBearer
             | FieldId::ConnModel
             | FieldId::ConnPermission
             | FieldId::KeyGlobal
@@ -205,7 +209,15 @@ impl SettingsPanel {
             | FieldId::KeyEditor
             | FieldId::LocalSecret
             | FieldId::LocalSave
-            | FieldId::LocalMarkdown => &READ_ONLY,
+            | FieldId::LocalMarkdown
+            | FieldId::EnvMouse
+            | FieldId::EnvPaste
+            | FieldId::EnvClipboard
+            | FieldId::EnvLoop
+            | FieldId::EnvColor
+            | FieldId::EnvImage
+            | FieldId::EnvMotion
+            | FieldId::EnvTilde => &READ_ONLY,
         }
     }
 
@@ -226,6 +238,9 @@ impl SettingsPanel {
             FieldId::McpToolTimeout => self.mcp.tool_timeout = action,
             // 只读行不接受写入（面板不会为它们产生动作，这里只是穷尽 match）。
             FieldId::McpServers
+            | FieldId::ConnLane
+            | FieldId::ConnApiBase
+            | FieldId::ConnBearer
             | FieldId::ConnModel
             | FieldId::ConnPermission
             | FieldId::KeyGlobal
@@ -234,7 +249,15 @@ impl SettingsPanel {
             | FieldId::KeyEditor
             | FieldId::LocalSecret
             | FieldId::LocalSave
-            | FieldId::LocalMarkdown => {}
+            | FieldId::LocalMarkdown
+            | FieldId::EnvMouse
+            | FieldId::EnvPaste
+            | FieldId::EnvClipboard
+            | FieldId::EnvLoop
+            | FieldId::EnvColor
+            | FieldId::EnvImage
+            | FieldId::EnvMotion
+            | FieldId::EnvTilde => {}
         }
     }
 
@@ -559,8 +582,44 @@ pub struct PanelCtx<'a> {
     pub overrides: &'a SessionPrefs,
     pub persisted: Option<&'a PersistedSettings>,
     pub serve_defaults: Option<&'a ServeDefaults>,
+    /// 本连接的事实（`api_base` / lane 名与序号 / Bearer 来源）；`None` = 调用方没给
+    /// （测试里那些不关心连接的三层合成用例），面板写「未提供」而不是编一个值。
+    pub conn: Option<&'a ConnectionFacts>,
     /// 面板配色：值列色调与提示级别都靠它解析，面板自己不再挑颜色。
     pub pal: &'a Palette,
+}
+
+/// 本连接的事实（只读）：设置面板「连接」栏就是它的投影。
+///
+/// **只报 Bearer 来源，绝不报值**：面板是排障入口，不是凭据出口；而「带了没带」这个
+/// 问题只有来源能答（空值可能是显式空，也可能是钥匙串没命中）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConnectionFacts {
+    /// 生效 `api_base`（`ConnectionConfig` 已规范化）。
+    pub api_base: String,
+    /// 左栏那一行的名字。
+    pub label: String,
+    /// 在左栏里的位置（1-based）。
+    pub pos: LanePos,
+    pub bearer: BearerSource,
+}
+
+/// 本 lane 在左栏里的位置：1-based 序号 + 总数（与左栏列表自上而下一致）。
+///
+/// 由外壳每帧交给当前 lane：单条 lane 无权知道全局有几条（见
+/// `docs/design/tui_multi_server.md` §4.2），而「第几条」正是多连接时把面板与左栏那一行
+/// 对上的唯一线索。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LanePos {
+    pub index: usize,
+    pub total: usize,
+}
+
+impl Default for LanePos {
+    /// 单连接（也是测试的默认）：第 1 条 / 共 1 条。
+    fn default() -> Self {
+        Self { index: 1, total: 1 }
+    }
 }
 
 impl PanelCtx<'_> {
@@ -583,6 +642,9 @@ impl PanelCtx<'_> {
             | FieldId::McpGlobalEnabled
             | FieldId::McpToolTimeout
             | FieldId::McpServers
+            | FieldId::ConnLane
+            | FieldId::ConnApiBase
+            | FieldId::ConnBearer
             | FieldId::ConnModel
             | FieldId::ConnPermission
             | FieldId::KeyGlobal
@@ -591,7 +653,15 @@ impl PanelCtx<'_> {
             | FieldId::KeyEditor
             | FieldId::LocalSecret
             | FieldId::LocalSave
-            | FieldId::LocalMarkdown => None,
+            | FieldId::LocalMarkdown
+            | FieldId::EnvMouse
+            | FieldId::EnvPaste
+            | FieldId::EnvClipboard
+            | FieldId::EnvLoop
+            | FieldId::EnvColor
+            | FieldId::EnvImage
+            | FieldId::EnvMotion
+            | FieldId::EnvTilde => None,
             FieldId::Role => self.overrides.agent_role.as_deref(),
             FieldId::SessionMode => self.overrides.session_mode.as_deref(),
         };
@@ -620,7 +690,10 @@ impl PanelCtx<'_> {
             FieldId::McpToolTimeout | FieldId::McpServers => None,
             // 连接 / 快捷键 / 本地行为三栏整栏只读：值本身就是说明（`draw` 里直接取，
             // 连接那两行还要读 `/status` 与 `/permission`，不在三层合成里）。
-            FieldId::ConnModel
+            FieldId::ConnLane
+            | FieldId::ConnApiBase
+            | FieldId::ConnBearer
+            | FieldId::ConnModel
             | FieldId::ConnPermission
             | FieldId::KeyGlobal
             | FieldId::KeyChat
@@ -628,7 +701,15 @@ impl PanelCtx<'_> {
             | FieldId::KeyEditor
             | FieldId::LocalSecret
             | FieldId::LocalSave
-            | FieldId::LocalMarkdown => None,
+            | FieldId::LocalMarkdown
+            | FieldId::EnvMouse
+            | FieldId::EnvPaste
+            | FieldId::EnvClipboard
+            | FieldId::EnvLoop
+            | FieldId::EnvColor
+            | FieldId::EnvImage
+            | FieldId::EnvMotion
+            | FieldId::EnvTilde => None,
         };
         let remote = match field {
             FieldId::Model => d.and_then(|d| d.model.as_deref()),
@@ -646,7 +727,10 @@ impl PanelCtx<'_> {
                 .map(|on| if on { STORE_ON } else { STORE_OFF }),
             // MCP 两项的当前值在 user-data（不是 `/status`）；服务器数量是只读信息行。
             FieldId::McpGlobalEnabled | FieldId::McpToolTimeout | FieldId::McpServers => None,
-            FieldId::ConnModel
+            FieldId::ConnLane
+            | FieldId::ConnApiBase
+            | FieldId::ConnBearer
+            | FieldId::ConnModel
             | FieldId::ConnPermission
             | FieldId::KeyGlobal
             | FieldId::KeyChat
@@ -654,7 +738,15 @@ impl PanelCtx<'_> {
             | FieldId::KeyEditor
             | FieldId::LocalSecret
             | FieldId::LocalSave
-            | FieldId::LocalMarkdown => None,
+            | FieldId::LocalMarkdown
+            | FieldId::EnvMouse
+            | FieldId::EnvPaste
+            | FieldId::EnvClipboard
+            | FieldId::EnvLoop
+            | FieldId::EnvColor
+            | FieldId::EnvImage
+            | FieldId::EnvMotion
+            | FieldId::EnvTilde => None,
             FieldId::Role => d.and_then(|d| d.role.as_deref()),
             FieldId::SessionMode => d.and_then(|d| d.mode.as_deref()),
         };

@@ -1,6 +1,6 @@
 # TUI 设置面板（对齐 Desktop 设置）
 
-> **状态**：**W1 / W2 / W3 / W4 已全部落地**（`/settings` + F6，七个分区）。**可写四栏**：外观 `theme`；模型 `model` / `api_base` / `temperature` / `llm_context_tokens` / `llm_thinking_mode` / API 密钥；会话 `role` / `session_mode` / 只读工具缓存开关 / 会话存储 SQLite 开关；MCP `global_enabled` / `tool_timeout_secs`。**只读三栏**：连接（serve 默认模型 + 生效权限档）、快捷键、本地行为（值即说明，Enter 无动作）。仍**不做**的：MCP 服务器行编辑、GitHub、字体/背景/IDE、`locale`。
+> **状态**：**W1 / W2 / W3 / W4 已全部落地**（`/settings` + F6，七个分区）。**可写四栏**：外观 `theme`；模型 `model` / `api_base` / `temperature` / `llm_context_tokens` / `llm_thinking_mode` / API 密钥；会话 `role` / `session_mode` / 只读工具缓存开关 / 会话存储 SQLite 开关；MCP `global_enabled` / `tool_timeout_secs`。**只读三栏**：连接（本连接 `api_base` / lane 名与序号 / Web Bearer 来源 + serve 默认模型 + 生效权限档）、快捷键（由 `hotkey_docs.rs` 的键位表生成）、本地行为（`CM_TUI_*` 开关的当前生效值 + 三条行为事实）；值即事实，Enter 无动作。仍**不做**的：MCP 服务器行编辑、GitHub、字体/背景/IDE、`locale`。
 > **范围**：`crabmate-tui`（`tui` 全屏为主，`repl` 仅入口引导）；设置**选项字段与语义尽量对齐 Desktop**（`frontend/` Settings），不追求 UI 像素一致。
 > **关联**：[`remote_cli_tui.md`](./remote_cli_tui.md)（TUI 母方案）、[`client_capability_matrix.md`](./client_capability_matrix.md)（能力单元格，改动须同 PR 更新）、[`contract_pin.md`](./contract_pin.md)（契约钉点）、Server `docs/`（SSE / user-data / 配置权威）
 
@@ -58,12 +58,12 @@ Desktop 设置共 8 个分区（`settings_page`）。逐区对齐结论见下表
 
 | Desktop 分区 | TUI 对齐结论 | 依据 / 理由 |
 |---|---|---|
-| **Connection**（Web Bearer + serve API 基址） | **partial（只读两行）**：显示 serve 默认模型与**本会话生效权限档**；地址 / Bearer **仍不可在面板内改** | 两者在启动期定死（`ServeClient` 由 `ConnectionConfig` 建一次），会话中改需重建 client+worker，不划算；只读展示已落地（`PanelCtx` 读 `/status` + `/permission`） |
+| **Connection**（Web Bearer + serve API 基址） | **partial（只读五行）**：本连接 `api_base` / lane 名与序号 / Web Bearer **来源**（`--bearer` / 本机钥匙串 / 未提供，绝不显示值）+ serve 默认模型 + **本会话生效权限档**；地址 / Bearer **仍不可在面板内改** | 前三行读 `ConnectionConfig`（`api_base` / `bearer_source`）与左栏的 lane 序号，后两行读 `/status` + `/permission`。「连错 serve」「以为带了 token 其实没带」是排障时最先要确认的两件事，而改它们要重建 client+worker，所以只读展示（#433） |
 | **Appearance**（locale/theme/bg_decor/show_turn_context_inject） | **reduced：只有 `theme`**（W4 已落地） | TUI 一直在按 `prefs.theme` 上色（`palette.rs::from_theme`），W4 起面板新增「外观」分区，可切换并写回同一键；`locale` / `bg_decor` / `show_turn_context_inject` 仍 **no**——CSS/DOM/`matchMedia` 渲染，终端无对应（矩阵 TUI 格已是 `no`） |
 | **Llm（模型配置）** | **reduced→主模型扁平字段**：对齐 `client_llm.{api_base,model,temperature,llm_context_tokens,llm_thinking_mode}` + 密钥 | Desktop 的“注册表 + 主/执行器套用”面向多预设管理；TUI 只管理当前主模型这一份（§4.2 / §4.3） |
 | **Tools**（readonly tool TTL 缓存开关） | **reduced（已落地）**：对齐同名字段（§4.2），但**没有独立 Tools 分区**——开关落在面板「会话」分区第三行 | 开关 = serve prefs 布尔 + 随轮发送 `readonly_tool_ttl_cache_secs`，语义一致即可用 |
 | **Session**（SQLite 会话存储 + 字体） | **reduced（已落地）**：`role` / `session_mode` / 只读工具缓存 / **SQLite 开关**在同一「会话」分区；字体 **no** | SQLite 开关是 serve 级动作（`POST /config/session/conversation-store`，当前值读 `/status`），与字体（CSS 渲染）本就是两回事 |
-| **Shortcuts**（只读快捷键说明） | **landed（只读四行）**：全局键 / 对话键 / 面板键 / 编辑器键 | 值本身即说明文案（`static_note`，单一来源）；全局键与对话键**分两行**是因为挤成一条会在 80 列终端被 `truncate_display` 截掉尾部键位，而这栏的值就是事实。`/help` 仍是完整入口，面板内只做速查 |
+| **Shortcuts**（只读快捷键说明） | **landed（只读四行，按热键表生成）**：全局键 / 对话键 / 面板键 / 编辑器键 | 键位与措辞的单一来源是 `tui_mode/hotkey_docs.rs`：顶层热键在 `TopHotkey::doc_index` 里**穷尽 match**，加一个变体不补措辞编译不过，面板与 `/help` 同时跟上（#433）。四行仍按「在哪儿按」分组；值列超宽时**折行**而不是截断（`wrap_note`：先按 ` · ` 分项装行，单项超宽再按显示列硬折）。表单独成文件还有一层原因：`lizard` 的 C 风格词法器把单引号当字符字面量开头、跨行吞花括号，而 `&'static` 这种写法会让 `fn-nloc` 门禁误报 |
 | **Github** | **no** | 矩阵 L48 TUI=no（Device Flow 需外开浏览器/原生钥匙串/Cookie，终端都没有） |
 | **Mcp** | **partial（已落地）**：全局开关 `global_enabled` + `tool_timeout_secs` 可读写；服务器清单是**只读**一行（数量 / 启用数），行编辑 **no** | MCP 实体在 serve user-data（`/user-data/mcp-servers` 全量 DTO）、stdio 在 serve 机拉起；条目带 `env` / `headers` / `bearer`，终端面板既不展示也不编辑，PUT 时原样回写。**代价**：保存是读-改-写（GET → 改两个标量 → 全量 PUT），GET 与 PUT 之间别处（Desktop/Web）的增删会被这次回写覆盖；前提是 GET 不脱敏那些机密字段，否则掩码会被写回去 —— 两点都要 Server 侧契约保证 |
 | IDE 编辑器设置页（独立入口） | **no** | 内嵌 CodeMirror 才有；远程终端无 WebView |
@@ -106,20 +106,35 @@ Desktop 设置共 8 个分区（`settings_page`）。逐区对齐结论见下表
 | 工具超时 | `tool_timeout_secs` | 整数秒 1..=3600 | 留空提交 = 不改 | `0` 被拒（服务端读作「立刻超时」而不是「不限」） |
 | 服务器（只读） | `servers[]` 的计数 / 启用数 | 只读信息行 | — | 条目含 `env` / `headers` / `bearer`，终端不展示不编辑；行编辑留给 Desktop/Web |
 
-**连接（只读两行，`PanelCtx` 读 serve 事实）**
+**连接（只读五行，`PanelCtx` 读本连接与 serve 事实）**
 
 | 项 | 展示 |
 |---|---|
+| lane | 左栏那一行的名字 + 「第 i/n 条」（序号由外壳每帧交下来，见 `LanePos`） |
+| 连接地址 | `ConnectionConfig.api_base`（已规范化）；空 → 「(api_base 未提供)」 |
+| Web Bearer | **只报来源**：`启动参数或环境（--bearer / CM_WEB_API_BEARER_TOKEN）` / `本机钥匙串（桌面壳槽…）` / `未提供（serve 开了 Bearer 鉴权就会 401）`。值永不上屏 |
 | serve 默认模型 | `/status` 的 `model`；缺失 → 「(该 serve 未提供)」 |
 | 生效权限档 | `/permission` 投影的 `effective_level`（本会话 min 链结果）；缺失 → 「(该 serve 未提供)」 |
 
-**本地（只读三行，值即说明）**
+来源在解析的同一处定下来（`shell_keyring::bearer_source`：显式非空 → 启动参数；否则有值 → 钥匙串；都没有 → 未提供。
+**显式给空值**算「未提供」而不是「钥匙串」，与 `--no-keyring` 同语义），值本身逆推不出来。
 
-| 项 | 文案要点 |
+**本地（只读十一行：三条行为事实 + 八个 `CM_TUI_*` 开关的生效值）**
+
+| 项 | 展示 |
 |---|---|
 | 密钥存储 | API 密钥只进本机钥匙串，不写 serve user-data |
 | 保存语义 | 先 GET、再改自己的键、再全量 PUT（不覆盖 Desktop/Web 字段） |
 | Markdown | `/editor` 打开 `.md` 走 markdown 预览（只读渲染） |
+| 鼠标捕获 / 括号粘贴 | `开（捕获鼠标）` / `关（终端原生拖选）` 这类措辞，后接环境变量名 |
+| 复制通道 | `terminal 剪贴板` / `wl-copy` / `不可用：<原因>`（与 `/copy` 共用 `clipboard::resolved_route`） |
+| 事件循环 | `事件驱动` / `固定节流`（`CM_TUI_LOOP`） |
+| 色深 / 背景图 | `TermImageCaps::probe()` 的 `depth()` / `pick()`（`CM_TUI_COLOR` / `CM_TUI_IMAGE`） |
+| 动效 / `~` 展开 | `status::reduced_motion()` / `workspace_path::expand_tilde_enabled()` |
+
+每行都是 `<生效值> · <环境变量名>`：只说「关」而不说关的是哪一个，对排障没用。「改需重启」由分区说明行**统一交代一次**。
+判定一律调用运行时那**一个**函数（面板不重新 `env::var`），且进程内只探一次（`settings_panel_env::cached`）——
+`CM_TUI_CLIPBOARD` 的选路要扫 PATH，每帧一次是浪费。**不能改**：环境变量在 exec 时定型。
 
 ### 4.3 明确不做的字段（避免误配）
 
@@ -251,4 +266,5 @@ Desktop 设置共 8 个分区（`settings_page`）。逐区对齐结论见下表
 ## 10. 验证
 
 - 单测：字段校验（温度区间/上下文上限/思考枚举，对齐 Desktop）、合并 PUT 构造（不丢 `saved_models`/非管理 prefs 键）、三层显示合成、`/settings` 解析与脏确认逻辑。沿用现有 CCN/行数门禁（大逻辑拆 `settings_panel.rs`，避免 `mod.rs` 超限）。
+- 只读三栏（#433）：快捷键栏的每个条目都来自热键表（`shortcut_rows_come_from_the_hotkey_table`）、80 列不截断、`CM_TUI_*` 生效值与环境变量名同行、连接栏三种 Bearer 来源各自成句、`EnvSwitch::ALL` 与 `Section::Local` 同序。
 - 冒烟（`docs/design/shell_smoke_runbook.md` 同风格）：连本地 serve → F6 开面板 → 改模型 → F2 保存 → `/status` 变化 + 请求体含 `client_llm`；改 role/mode 同验；重启 TUI 仍在；Desktop 设置页可见同值；密钥保存后 `--no-keyring` 不读。

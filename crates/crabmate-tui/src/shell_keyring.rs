@@ -14,6 +14,27 @@ use crabmate_client_api::secrets::{
     scoped_bearer_account,
 };
 
+use crate::serve::BearerSource;
+
+/// Bearer 的来源判定（设置面板「连接」栏展示用；只报来源，不报值）。
+///
+/// 两个入参就够：显式值（`--bearer` 与 `CM_WEB_API_BEARER_TOKEN` 在 clap 层已合并为
+/// `Cli.bearer`）和 [`resolve_bearer`] 的最终结果。显式非空 → 启动参数；否则有值
+/// → 钥匙串回退命中；都没有 → 未提供。**显式给空值**也是「未提供」而不是「钥匙串」：
+/// 那是「明确不带、也不回退」的写法，与 `--no-keyring` 同一个语义。
+///
+/// 纯函数：值本身逆推不出来（空值可能是显式空、也可能是读不到钥匙串），所以来源必须
+/// 在解析的同一处定下来，不能让面板再猜一遍。
+pub(crate) fn bearer_source(explicit: Option<&str>, resolved: Option<&str>) -> BearerSource {
+    let explicit_set = explicit.map(str::trim).is_some_and(|v| !v.is_empty());
+    let resolved_set = resolved.map(str::trim).is_some_and(|v| !v.is_empty());
+    match (explicit_set, resolved_set) {
+        (true, _) => BearerSource::Cli,
+        (false, true) => BearerSource::Keyring,
+        (false, false) => BearerSource::Missing,
+    }
+}
+
 /// `--bearer` / `CM_WEB_API_BEARER_TOKEN` 缺省（未提供）时回退读桌面壳钥匙串的 Web Bearer 槽。
 pub(crate) fn resolve_bearer(explicit: Option<&str>, no_keyring: bool) -> Option<String> {
     with_shell_keyring_fallback(explicit, no_keyring, read_shell_bearer_slot)

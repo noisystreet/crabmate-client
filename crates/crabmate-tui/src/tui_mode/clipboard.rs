@@ -130,8 +130,11 @@ pub(crate) fn tool_args(name: &str) -> &'static [&'static str] {
     }
 }
 
-/// 按环境选路并真正投递；返回实际用的路径（成功提示要显示它）。
-pub(crate) fn deliver(text: &str) -> Result<CopyRoute, String> {
+/// 当前环境**会选**哪条投递路径（不真正投递）。
+///
+/// `/copy` 与设置面板「本地行为」栏共用这一个结论：面板不能自己再解析一遍环境变量，
+/// 否则「面板说走工具、实际走了 OSC52」这种分叉迟早出现（#433）。
+pub(crate) fn resolved_route() -> Result<CopyRoute, String> {
     let override_ = std::env::var("CM_TUI_CLIPBOARD").ok();
     let is_ssh = in_ssh_session();
     let mux = multiplexer();
@@ -142,12 +145,18 @@ pub(crate) fn deliver(text: &str) -> Result<CopyRoute, String> {
     } else {
         find_tool()
     };
-    let route = choose_route(
+    choose_route(
         override_.as_deref(),
         is_ssh,
         tool,
         mux != Multiplexer::Screen,
-    )?;
+    )
+}
+
+/// 按环境选路并真正投递；返回实际用的路径（成功提示要显示它）。
+pub(crate) fn deliver(text: &str) -> Result<CopyRoute, String> {
+    let route = resolved_route()?;
+    let mux = multiplexer();
     match route {
         CopyRoute::Osc52 => write_osc52(text, mux)?,
         // 工具在、却用不了（没有 DISPLAY / 没有 wl 服务）时终端剪贴板可能仍然可用，

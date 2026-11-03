@@ -72,6 +72,7 @@ fn rows_show_the_server_side_values() {
         overrides: &o,
         persisted: Some(&persisted),
         serve_defaults: None,
+        conn: None,
         pal: &Palette::DARK,
     };
     let p = panel_on_mcp(FieldId::McpGlobalEnabled);
@@ -95,6 +96,7 @@ fn missing_mcp_endpoint_is_flagged_not_assumed_off() {
         overrides: &o,
         persisted: None,
         serve_defaults: None,
+        conn: None,
         pal: &Palette::DARK,
     };
     for field in [
@@ -118,6 +120,7 @@ fn toggle_edit_commits_off_into_the_mcp_group() {
         overrides: &o,
         persisted: Some(&persisted),
         serve_defaults: None,
+        conn: None,
         pal: &Palette::DARK,
     };
     let mut p = panel_on_mcp(FieldId::McpGlobalEnabled);
@@ -149,6 +152,7 @@ fn toggle_without_a_known_value_stays_in_browse_mode() {
         overrides: &o,
         persisted: None,
         serve_defaults: None,
+        conn: None,
         pal: &Palette::DARK,
     };
     let mut p = panel_on_mcp(FieldId::McpGlobalEnabled);
@@ -168,6 +172,7 @@ fn timeout_edit_prefills_and_rejects_zero() {
         overrides: &o,
         persisted: Some(&persisted),
         serve_defaults: None,
+        conn: None,
         pal: &Palette::DARK,
     };
     let mut p = panel_on_mcp(FieldId::McpToolTimeout);
@@ -205,6 +210,7 @@ fn server_list_row_is_read_only() {
         overrides: &o,
         persisted: Some(&persisted),
         serve_defaults: None,
+        conn: None,
         pal: &Palette::DARK,
     };
     let mut p = panel_on_mcp(FieldId::McpServers);
@@ -250,6 +256,7 @@ fn blank_timeout_commit_is_a_no_op() {
         overrides: &o,
         persisted: Some(&persisted),
         serve_defaults: None,
+        conn: None,
         pal: &Palette::DARK,
     };
     let mut p = panel_on_mcp(FieldId::McpToolTimeout);
@@ -283,6 +290,7 @@ fn fetch_failure_hint_points_at_the_retry_not_the_version() {
         overrides: &o,
         persisted: Some(&persisted),
         serve_defaults: None,
+        conn: None,
         pal: &Palette::DARK,
     };
     let mut p = panel_on_mcp(FieldId::McpGlobalEnabled);

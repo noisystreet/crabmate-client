@@ -174,17 +174,33 @@ impl Section {
                 FieldId::McpToolTimeout,
                 FieldId::McpServers,
             ],
-            Section::Connection => &[FieldId::ConnModel, FieldId::ConnPermission],
+            Section::Connection => &[
+                FieldId::ConnLane,
+                FieldId::ConnApiBase,
+                FieldId::ConnBearer,
+                FieldId::ConnModel,
+                FieldId::ConnPermission,
+            ],
             Section::Shortcuts => &[
                 FieldId::KeyGlobal,
                 FieldId::KeyChat,
                 FieldId::KeySettings,
                 FieldId::KeyEditor,
             ],
+            // 前三条是行为事实（密钥落点 / 保存语义 / Markdown 预览）；其后是 `CM_TUI_*`
+            // 环境开关的**当前生效值**（顺序跟 `settings_panel_env::EnvSwitch::ALL`）。
             Section::Local => &[
                 FieldId::LocalSecret,
                 FieldId::LocalSave,
                 FieldId::LocalMarkdown,
+                FieldId::EnvMouse,
+                FieldId::EnvPaste,
+                FieldId::EnvClipboard,
+                FieldId::EnvLoop,
+                FieldId::EnvColor,
+                FieldId::EnvImage,
+                FieldId::EnvMotion,
+                FieldId::EnvTilde,
             ],
         }
     }
@@ -240,6 +256,28 @@ pub(crate) enum FieldId {
     LocalSave,
     /// 只读：`.md` 走 markdown 预览。
     LocalMarkdown,
+    /// 只读：本连接的 `api_base`（「连错 serve 了」时第一眼要看的东西）。
+    ConnApiBase,
+    /// 只读：本连接在左栏里的名字与序号。
+    ConnLane,
+    /// 只读：Web Bearer 的**来源**（本机钥匙串 / 启动参数或环境 / 未提供），绝不报值。
+    ConnBearer,
+    /// 只读：`CM_TUI_MOUSE` 的当前生效值。
+    EnvMouse,
+    /// 只读：`CM_TUI_PASTE` 的当前生效值。
+    EnvPaste,
+    /// 只读：`CM_TUI_CLIPBOARD` 的当前生效值（`/copy` 会走哪条路）。
+    EnvClipboard,
+    /// 只读：`CM_TUI_LOOP` 的当前生效值。
+    EnvLoop,
+    /// 只读：`CM_TUI_COLOR` 的当前生效值。
+    EnvColor,
+    /// 只读：`CM_TUI_IMAGE` 的当前生效值。
+    EnvImage,
+    /// 只读：`CM_TUI_REDUCED_MOTION` 的当前生效值。
+    EnvMotion,
+    /// 只读：`CM_TUI_EXPAND_TILDE` 的当前生效值。
+    EnvTilde,
 }
 
 pub(crate) const fn field_label(field: FieldId) -> &'static str {
@@ -260,6 +298,9 @@ pub(crate) const fn field_label(field: FieldId) -> &'static str {
         FieldId::McpServers => "服务器",
         FieldId::ConnModel => "serve 模型",
         FieldId::ConnPermission => "权限档",
+        FieldId::ConnApiBase => "连接地址",
+        FieldId::ConnLane => "lane",
+        FieldId::ConnBearer => "Web Bearer",
         FieldId::KeyGlobal => "全局键",
         FieldId::KeyChat => "对话键",
         FieldId::KeySettings => "面板键",
@@ -267,5 +308,13 @@ pub(crate) const fn field_label(field: FieldId) -> &'static str {
         FieldId::LocalSecret => "密钥存储",
         FieldId::LocalSave => "保存语义",
         FieldId::LocalMarkdown => "Markdown",
+        FieldId::EnvMouse => "鼠标捕获",
+        FieldId::EnvPaste => "括号粘贴",
+        FieldId::EnvClipboard => "复制通道",
+        FieldId::EnvLoop => "事件循环",
+        FieldId::EnvColor => "色深",
+        FieldId::EnvImage => "背景图",
+        FieldId::EnvMotion => "动效",
+        FieldId::EnvTilde => "~ 展开",
     }
 }

@@ -321,7 +321,9 @@ async fn run_tui_cmd(
     let mut extras: Vec<(String, ServeClient)> = Vec::with_capacity(connect.len());
     for spec in connect {
         let (name, url) = parse_connect_spec(spec)?;
-        let cfg = ConnectionConfig::new(url, bearer.unwrap_or_default().to_string());
+        // 额外 lane 与主连接共用同一份 Bearer，因此也共用它的来源（面板展示用）。
+        let cfg = ConnectionConfig::new(url, bearer.unwrap_or_default().to_string())
+            .with_bearer_source(client.config().bearer_source);
         extras.push((name, ServeClient::new(cfg)?));
     }
     tui_mode::check_lane_capacity(extras.len() + 1)?; // 见该函数的文档
@@ -383,7 +385,12 @@ fn build_client(cli: &Cli, bearer: Option<&str>) -> Result<ServeClient> {
         .filter(|s| !s.is_empty())
         .unwrap_or_default()
         .to_string();
-    Ok(ServeClient::new(ConnectionConfig::new(api_base, bearer))?)
+    // 面板「连接」栏只报来源：值本身逆推不出是哪来的（空值可能是显式空，也可能是
+    // 钥匙串没命中），所以在解析的同一处定下来（`shell_keyring::bearer_source`）。
+    let source = shell_keyring::bearer_source(cli.bearer.as_deref(), Some(bearer.as_str()));
+    Ok(ServeClient::new(
+        ConnectionConfig::new(api_base, bearer).with_bearer_source(source),
+    )?)
 }
 
 async fn run_connect(client: &ServeClient) -> Result<()> {

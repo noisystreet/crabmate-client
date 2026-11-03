@@ -30,6 +30,7 @@ fn ctx<'a>(o: &'a SessionPrefs, defaults: Option<&'a ServeDefaults>) -> PanelCtx
         overrides: o,
         persisted: None,
         serve_defaults: defaults,
+        conn: None,
         pal: &Palette::DARK,
     }
 }
