@@ -8,6 +8,7 @@ pub mod ag_ui_parser;
 pub mod approval;
 pub mod auth;
 pub mod chat_body;
+pub mod chat_export;
 pub mod client_llm_presets;
 pub mod connections;
 pub mod context_axis;
@@ -45,6 +46,10 @@ pub use chat_body::{
     ChatStreamCoreFields, build_chat_stream_core_body, insert_trimmed_str,
     llm_context_tokens_for_chat_body, merge_chat_stream_core_fields,
     readonly_tool_ttl_cache_secs_for_chat_body, temperature_for_chat_body,
+};
+pub use chat_export::{
+    EXPORT_MAX_PAGES, EXPORT_TOOL_SUMMARY_MAX_CHARS, ExportFormat, export_filename_stem,
+    export_json, export_markdown, export_messages,
 };
 pub use connections::{ConnectionKey, ConnectionSnapshot, ConnectionStatus, ConnectionTally};
 pub use conversation_messages::{
