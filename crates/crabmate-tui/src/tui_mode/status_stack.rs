@@ -53,11 +53,16 @@ pub(super) fn stack_rows(info: &StatusInfo, width: usize, collapsed: bool) -> u1
 /// 横版是「装不进列预算就整段丢弃」，纵版同理，只是预算是行数；两者共用
 /// `Segment::priority`，避免出现「横条里 serve 优先、栈里 img 优先」这种自相矛盾。
 ///
-/// **裁剪分支目前走不到**：[`environment_segments`] 最多 9 段（`serve` / `model` /
-/// `role` / `mode` / `think` / `ctx` / `find` / `perm` / `lanes`），而阈值是
-/// `MAX_STACK_ROWS - 1 = 9`，于是
-/// `keep == segs.len()` 恒成立、提前返回。留着它是给「以后加段」预留 —— 真加到第
-/// 10 段时，`stack_never_exceeds_the_row_budget` 会先失败。
+/// **裁剪分支从第 10 段起生效**：[`environment_segments`] 全填充是 10 段（`serve` /
+/// `model` / `role` / `mode` / `think` / `view` / `ctx` / `find` / `perm` / `lanes`），
+/// 阈值是 `MAX_STACK_ROWS - 1 = 9` —— 多出来的那一段按优先级让位（`lanes` 的
+/// priority 最大，最先丢）。常见组合（`role` 与 `find` 不同时有值）仍在 9 段以内，
+/// 走提前返回。
+///
+/// **不为 `view` 段抬 `MAX_STACK_ROWS`**：10 行已经是 24 行终端能接受的上限（再多一行，
+/// 目录树就只剩 3 条）。加段就该落进这 9 行预算，落不进就按优先级让位 —— `view` 的
+/// priority 排在 `perm` 之后、`lanes` 之前，所以全填充时先丢 `lanes`（安全相关的
+/// `perm` 保得住；`view` 只在更极端的组合下才会让位）。
 fn visible_segments(info: &StatusInfo, width: usize) -> Vec<Segment> {
     let segs = environment_segments(info, width);
     let keep = (MAX_STACK_ROWS as usize).saturating_sub(1).min(segs.len());
@@ -160,11 +165,13 @@ fn segment_line(seg: &Segment, width: usize, pal: &Palette) -> Line<'static> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::status::{LANES_LABEL, PERM_LABEL, VIEW_LABEL};
     use super::*;
 
     fn info() -> StatusInfo {
         StatusInfo {
             lanes: Default::default(),
+            editor_open: false,
             api_base: "http://127.0.0.1:8080".into(),
             model: Some("gpt-x".into()),
             role: Some("coder".into()),
@@ -220,27 +227,31 @@ mod tests {
         let t = texts(&stack_lines_with(&i, 24, &pal(), false, true));
         assert_eq!(
             t.len(),
-            1 + 6,
-            "serve/model/role/mode/ctx/lanes + 运行指示：{t:?}"
+            1 + 7,
+            "serve/model/role/mode/view/ctx/lanes + 运行指示：{t:?}"
         );
         assert!(t[0].starts_with("serve"), "{t:?}");
         assert!(t[1].starts_with("model"), "{t:?}");
         assert!(t[2].starts_with("role"), "{t:?}");
         assert!(t[3].starts_with("mode"), "{t:?}");
+        // `view` 段恒在（`chat` 也算）：它是「主区现在是不是文件视图」的唯一指示，
+        // 也是这一段的点击入口 —— 隐掉就等于「想点的时候找不到」。
+        assert!(t[4].starts_with("view"), "{t:?}");
+        assert!(t[4].contains("chat"), "{t:?}");
         // `ctx` 段恒在（无实测时值是占位 `—`）：段消失会让人误判「功能没生效」。
-        assert!(t[4].starts_with("ctx"), "{t:?}");
+        assert!(t[5].starts_with("ctx"), "{t:?}");
         // `lanes` 段也恒在（单 lane 是 `1/8`）：它是唯一能看出「还能加几条」的地方。
-        assert!(t[5].starts_with("lanes"), "{t:?}");
+        assert!(t[6].starts_with("lanes"), "{t:?}");
         // 运行指示贴**最底**（desktop 的 chips → run indicator 顺序）；切回合时
         // 只有这一行变，上面的段不跟着挪。
-        assert!(t[6].contains("空闲"), "运行指示应在最下一行：{t:?}");
+        assert!(t[7].contains("空闲"), "运行指示应在最下一行：{t:?}");
         // 与各段的值同列：第一列（label 列）留空，运行态从第二列起。
         assert!(
-            t[6].starts_with(&" ".repeat(LABEL_COL_W)),
+            t[7].starts_with(&" ".repeat(LABEL_COL_W)),
             "运行指示应缩进到第二列：{t:?}"
         );
         assert_eq!(
-            UnicodeWidthStr::width(t[6].as_str()),
+            UnicodeWidthStr::width(t[7].as_str()),
             LABEL_COL_W + UnicodeWidthStr::width("○ 空闲"),
             "第二列起排，不该再补到列宽：{t:?}"
         );
@@ -389,13 +400,13 @@ mod tests {
         }
     }
 
-    /// 行预算哨兵：段数不得超过 `MAX_STACK_ROWS - 1`，且行数必须与渲染同源。
+    /// 行预算哨兵：**展示**的段数不得超过 `MAX_STACK_ROWS - 1`，且行数必须与渲染同源。
     ///
     /// 这里把**所有可选段都填上**（`think` / `perm` / `find`），让 `environment_segments`
-    /// 真正产出 9 段 —— 只跑默认 fixture 的话可选段是 `None`，这条会宽松地通过，
-    /// 等真填满时才在别的测试里炸。当前 9 段仍小于阈值 9 + 1，
-    /// `visible_segments` 的按优先级丢弃**走不到**；所以这条断言不是「验证裁剪生效」，
-    /// 而是「一旦加段越过阈值就先炸」——免得哪天悄悄撑破右栏，还以为是布局算错了。
+    /// 真正产出 10 段 —— 正好越过阈值，于是这条同时压住两件事：裁剪路径确实接管了，
+    /// 且展示出来的行数没有撑破右栏。
+    ///
+    /// 只跑默认 fixture 的话可选段是 `None`，这条会宽松地通过，等真填满时才在别的测试里炸。
     #[test]
     fn stack_never_exceeds_the_row_budget() {
         let mut i = info();
@@ -405,16 +416,44 @@ mod tests {
         i.permission = Some("read".into());
         i.thinking = Some("关".into());
         let segs = environment_segments(&i, 24);
-        // 段数必须 ≤ `MAX_STACK_ROWS - 1`（留一行给运行指示），即 < `MAX_STACK_ROWS`。
+        assert_eq!(
+            segs.len(),
+            MAX_STACK_ROWS as usize,
+            "fixture 应正好越过一行预算（多出的那段按优先级让位）"
+        );
+        let kept = visible_segments(&i, 24);
         assert!(
-            segs.len() < MAX_STACK_ROWS as usize,
-            "段数 {} 越过行预算，需要重新审视 visible_segments 的裁剪路径",
-            segs.len()
+            kept.len() < MAX_STACK_ROWS as usize,
+            "展示段数 {} 越过行预算",
+            kept.len()
         );
         let rows = stack_rows(&i, 24, false);
         assert!(rows <= MAX_STACK_ROWS, "{rows}");
         let lines = stack_lines_with(&i, 24, &pal(), false, true);
         assert_eq!(rows as usize, lines.len(), "行数必须与渲染同源");
+    }
+
+    /// 越过预算时按优先级丢段：`lanes`（priority 最大）先让位；`serve` / `find` /
+    /// `view` / `perm` 这些「正在变化」或「我在哪」的段必须保住。
+    #[test]
+    fn overflow_drops_the_least_important_segment() {
+        let mut i = info();
+        i.search_term = Some("ab".into());
+        i.search_total = 3;
+        i.permission = Some("read".into());
+        i.thinking = Some("关".into());
+        let kept = visible_segments(&i, 24);
+        assert!(
+            !kept.iter().any(|s| s.label == LANES_LABEL),
+            "最先让位的应是 lanes"
+        );
+        let kept_labels: Vec<&str> = kept.iter().map(|s| s.label).collect();
+        for label in ["serve", "find", VIEW_LABEL, PERM_LABEL] {
+            assert!(
+                kept_labels.contains(&label),
+                "{label} 不该被丢：{kept_labels:?}"
+            );
+        }
     }
 
     #[test]

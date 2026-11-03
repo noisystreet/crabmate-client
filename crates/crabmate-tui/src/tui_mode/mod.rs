@@ -625,6 +625,7 @@ impl LaneApp<'_> {
             Some(hotkeys::TopHotkey::Settings) => self.toggle_settings(),
             Some(hotkeys::TopHotkey::StatusStack) => self.st.toggle_status_stack(),
             Some(hotkeys::TopHotkey::Copy) => self.copy_last(None),
+            Some(hotkeys::TopHotkey::ToggleView) => self.toggle_view(),
             // 切 lane / 跳待审批 / 直达第 n 条都是外壳动作，`TuiApp::on_msg` 已拦截；
             // 到不了这里也按「已消费」兜住，免得方向键 / 数字键再漏给输入框。
             // 不再逐条列举：新增的 lane 级热键本来就该在 `on_msg` 拦，列在这里只会
@@ -865,6 +866,9 @@ impl LaneApp<'_> {
         StatusInfo {
             // lane 计数属于外壳：`draw_frame` 用 lane 快照覆盖。这里留中性值，段数不变。
             lanes: Default::default(),
+            // 视图归本 lane：`UiState` 自带 `editor`，外壳不需要覆盖（切 lane 就是换一份
+            // `st`），所以这里直接读实况。
+            editor_open: self.st.editor.open,
             api_base: self.client.config().api_base.clone(),
             // 上下文用量：段恒显示；没有实测时是占位 `—`，新会话则回落 `GET /status` 的
             // system 基线并带 `~`（见 `UiState::context_text`）。

@@ -499,6 +499,37 @@ fn clicking_the_perm_segment_opens_a_menu_on_the_bottom_bar() {
     );
 }
 
+/// 宽屏：`view` 段可点 —— 点一下切到文件视图，再点同一行切回聊天。
+///
+/// 断言走 `st.editor.open`（「点了有反应」的定义），与 `/editor` / `/chat` / `Ctrl+T`
+/// 是同一份状态：段上的字已由 status 的单测覆盖，这里只压「点得到、点得动」。
+#[test]
+fn clicking_the_view_segment_toggles_the_main_pane() {
+    with_wide_app(|app| {
+        let (w, h) = app.last_size;
+        let rs = panes(
+            Rect::new(0, 0, w, h),
+            visible_layout(),
+            app.status_stack_rows(),
+        )
+        .right_status
+        .expect("宽屏有状态栈");
+        assert!(!app.st.editor.open, "起始在聊天视图");
+        let mut view_row = None;
+        for row in rs.y..rs.y + rs.height {
+            click(app, rs.x + 1, row);
+            if app.st.editor.open {
+                view_row = Some(row);
+                break;
+            }
+        }
+        let view_row = view_row.expect("状态栈里应有可点的 view 段");
+        // 段的位置不随开关变化（段数恒定、顺序恒定），所以同一行再点一次就该切回去。
+        click(app, rs.x + 1, view_row);
+        assert!(!app.st.editor.open, "再点同一行应切回聊天");
+    });
+}
+
 /// 宽屏：`think` 段可点 —— 点一下把意图翻到另一端，并派一发 `SaveLlm` 落盘。
 ///
 /// 断言走 **override**（`overrides.thinking`）而不是画出来的字：那正是「点了有反应」

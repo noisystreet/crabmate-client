@@ -121,6 +121,7 @@ fn rendered_chat_area_keeps_right_gutter() {
     let rows = build_body_rows(&st, chat_body_width(narrow_layout(), TERMINAL_W));
     let info = StatusInfo {
         api_base: "http://x".into(),
+        editor_open: false,
         context: "—".to_string(),
         ..StatusInfo::default()
     };
@@ -303,6 +304,7 @@ fn progress_mark_frame_requires_live_folded_thinking() {
     fn info(running: bool, cancel_sent: bool) -> StatusInfo {
         StatusInfo {
             lanes: Default::default(),
+            editor_open: false,
             api_base: "http://x".into(),
             model: None,
             role: None,
@@ -384,6 +386,7 @@ fn finished_tool_row_without_verdict_is_not_running() {
 
     let info = StatusInfo {
         lanes: Default::default(),
+        editor_open: false,
         api_base: "http://x".into(),
         model: None,
         role: None,
@@ -702,6 +705,7 @@ fn rendered_chat_area_keeps_all_characters() {
     let rows = build_body_rows(&st, chat_body_width(narrow_layout(), 80));
     let info = StatusInfo {
         api_base: "http://x".into(),
+        editor_open: false,
         context: "—".to_string(),
         ..StatusInfo::default()
     };
@@ -794,6 +798,7 @@ fn empty_composer_has_no_placeholder_by_default() {
     let rows = build_body_rows(&st, chat_body_width(narrow_layout(), 80));
     let info = StatusInfo {
         api_base: "http://x".into(),
+        editor_open: false,
         context: "—".to_string(),
         ..StatusInfo::default()
     };
@@ -834,6 +839,7 @@ fn render_body_writes_back_the_window_for_the_mouse() {
     let rows = build_body_rows(&st, chat_body_width(narrow_layout(), W));
     let info = StatusInfo {
         api_base: "http://x".into(),
+        editor_open: false,
         context: "—".to_string(),
         ..StatusInfo::default()
     };
@@ -876,6 +882,7 @@ fn render_body_writes_back_link_hit_areas() {
     let rows = build_body_rows(&st, chat_body_width(narrow_layout(), W));
     let info = StatusInfo {
         api_base: "http://x".into(),
+        editor_open: false,
         context: "—".to_string(),
         ..StatusInfo::default()
     };
