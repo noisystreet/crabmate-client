@@ -12,8 +12,8 @@ use super::palette::{NoticeLevel, Palette, THEME_OPTIONS};
 use super::render::truncate_display;
 use super::serve_defaults::ServeDefaults;
 use super::settings::{
-    EffectiveView, FieldAction, Layer, LlmSave, PersistedSettings, PrefsSave, TOOL_CACHE_DISABLED,
-    effective_value, normalize_str,
+    EffectiveView, FieldAction, Layer, LlmSave, PersistedSettings, PrefsSave, STORE_OFF, STORE_ON,
+    TOOL_CACHE_DISABLED, effective_value, normalize_str,
 };
 use super::text::{cell_window, horizontal_window};
 
@@ -42,11 +42,16 @@ pub(super) fn is_save_key(key: &KeyEvent) -> bool {
     ) && !key.modifiers.contains(KeyModifiers::CONTROL)
 }
 
-/// 保存结果属于哪一组（llm-overrides / prefs）。
+/// 保存结果属于哪一组（llm-overrides / prefs / 会话存储开关）。
+///
+/// 会话存储是**第三组**而不塞进 `Prefs`：它走 `POST /config/session/conversation-store`
+/// 而不是全量 DTO 合并 PUT，失败语义（业务拒绝 vs 网络错误）也不同，混进一组会让
+/// 「prefs 保存成功」这条提示盖掉一个真正失败的动作。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SaveGroup {
     Llm,
     Prefs,
+    Store,
 }
 
 /// 面板按键处理结果（状态已内部更新；副作用交给调用方）。
@@ -60,6 +65,8 @@ pub(super) enum PanelEffect {
         prefs: Box<PrefsSave>,
         /// API 密钥保存动作（写钥匙串，不进 `LlmSave`；`Skip` = 无动作）。
         secret: FieldAction,
+        /// 会话存储开关动作（`Write(Some("on"|"off"))`；`Skip` = 无动作）。
+        store: FieldAction,
     },
     /// 请求关闭面板（已通过脏确认或本来干净）。
     Close,
@@ -77,6 +84,10 @@ pub struct SettingsPanel {
     llm: LlmSave,
     /// 已编辑（staged）的 prefs 侧字段；`Write` = 待保存。
     prefs: PrefsSave,
+    /// 已编辑（staged）的会话存储开关；`Write(Some("on"|"off"))` = 待保存。
+    ///
+    /// 独立于 `PrefsSave`：它不是 user-data 键，保存动作是 `POST /config/session/conversation-store`。
+    store: FieldAction,
     /// 已编辑（staged）的 API 密钥动作（不随 `LlmSave` 走 user-data，见 LaneApp）。
     secret: FieldAction,
     /// API 密钥当前是否已设（CLI/env override 或钥匙串有值）；只读显示用。
@@ -89,6 +100,8 @@ pub struct SettingsPanel {
     saving_llm: bool,
     /// prefs 组保存请求在途（结果未回）。
     saving_prefs: bool,
+    /// 会话存储开关保存请求在途（结果未回）。
+    saving_store: bool,
     /// 底部提示行（编辑错误 / 只读提示 / 保存结果等）。
     note: Option<(String, NoticeLevel)>,
 }
@@ -108,25 +121,27 @@ impl SettingsPanel {
             row: 0,
             llm: LlmSave::default(),
             prefs: PrefsSave::default(),
+            store: FieldAction::Skip,
             secret: FieldAction::Skip,
             secret_set: false,
             editing: None,
             confirm_close: false,
             saving_llm: false,
             saving_prefs: false,
+            saving_store: false,
             note: None,
         }
     }
 
     /// 是否有任一组保存请求在途（期间禁止编辑/保存/关闭）。
     fn is_saving(&self) -> bool {
-        self.saving_llm || self.saving_prefs
+        self.saving_llm || self.saving_prefs || self.saving_store
     }
 
     /// 是否有未保存的 staged 改动（含 API 密钥动作）。
     #[must_use]
     pub fn is_dirty(&self) -> bool {
-        self.llm.any() || self.prefs.any() || self.secret.is_write()
+        self.llm.any() || self.prefs.any() || self.secret.is_write() || self.store.is_write()
     }
 
     /// API 密钥行当前是否"已设"（CLI/env override 或钥匙串有值）；由 LaneApp 打开
@@ -158,6 +173,7 @@ impl SettingsPanel {
             FieldId::SessionMode => &self.prefs.session_mode,
             FieldId::ToolCache => &self.prefs.tool_cache,
             FieldId::Theme => &self.prefs.theme,
+            FieldId::SessionSqlite => &self.store,
         }
     }
 
@@ -173,6 +189,7 @@ impl SettingsPanel {
             FieldId::SessionMode => self.prefs.session_mode = action,
             FieldId::ToolCache => self.prefs.tool_cache = action,
             FieldId::Theme => self.prefs.theme = action,
+            FieldId::SessionSqlite => self.store = action,
         }
     }
 
@@ -199,6 +216,12 @@ impl SettingsPanel {
                 self.saving_prefs = false;
                 if ok {
                     self.prefs.clear();
+                }
+            }
+            SaveGroup::Store => {
+                self.saving_store = false;
+                if ok {
+                    self.store = FieldAction::Skip;
                 }
             }
         }
@@ -352,6 +375,23 @@ impl SettingsPanel {
             self.editing = Some(Editing::Theme { pick });
             return;
         }
+        // 会话存储（SQLite）：只有两态，当前值来自 `/status`。服务端没配 SQLite 路径
+        // 或这个 serve 的 `/status` 没有该字段时，不让进编辑态 —— 按下去也只会被拒。
+        if field == FieldId::SessionSqlite {
+            if !ctx.store_toggle_supported() {
+                self.set_note(
+                    "该 serve 不支持切换会话存储（未配置 SQLite 路径或版本过旧）".to_string(),
+                    NoticeLevel::Warn,
+                );
+                return;
+            }
+            let pick = match self.staged(field) {
+                FieldAction::Write(Some(v)) => store_index_of(Some(v)),
+                _ => store_index_of(ctx.effective(field).value.as_deref()),
+            };
+            self.editing = Some(Editing::Store { pick });
+            return;
+        }
         // API Base：网关预设循环（server / ollama / … / 自定义 URL）。自定义在预设里 Enter
         // 后落到文本编辑（缓冲预填当前生效值，免重输长 URL）。
         if field == FieldId::ApiBase {
@@ -396,12 +436,15 @@ impl SettingsPanel {
         let llm = self.llm.clone();
         let prefs = self.prefs.clone();
         let secret = self.secret.clone();
+        let store = self.store.clone();
         self.saving_llm = llm.any();
         self.saving_prefs = prefs.any();
+        self.saving_store = store.is_write();
         PanelEffect::Save {
             llm: Box::new(llm),
             prefs: Box::new(prefs),
             secret,
+            store,
         }
     }
 }
@@ -430,7 +473,8 @@ impl PanelCtx<'_> {
             | FieldId::ThinkingMode
             | FieldId::ToolCache
             | FieldId::Theme
-            | FieldId::ApiKey => None,
+            | FieldId::ApiKey
+            | FieldId::SessionSqlite => None,
             FieldId::Role => self.overrides.agent_role.as_deref(),
             FieldId::SessionMode => self.overrides.session_mode.as_deref(),
         };
@@ -448,6 +492,8 @@ impl PanelCtx<'_> {
                 .and_then(|p| p.tool_cache_disabled)
                 .and_then(|d| d.then_some(TOOL_CACHE_DISABLED)),
             FieldId::Theme => p.and_then(|p| p.theme.as_deref()),
+            // 会话存储不是 user-data 键：没有持久层这一层。
+            FieldId::SessionSqlite => None,
         };
         let remote = match field {
             FieldId::Model => d.and_then(|d| d.model.as_deref()),
@@ -459,6 +505,10 @@ impl PanelCtx<'_> {
             | FieldId::ToolCache
             | FieldId::Theme
             | FieldId::ApiKey => None,
+            // 会话存储反过来：`/status` 的布尔是唯一来源，没有 override / user-data 层。
+            FieldId::SessionSqlite => d
+                .and_then(|d| d.store_sqlite_active())
+                .map(|on| if on { STORE_ON } else { STORE_OFF }),
             FieldId::Role => d.and_then(|d| d.role.as_deref()),
             FieldId::SessionMode => d.and_then(|d| d.mode.as_deref()),
         };
@@ -469,6 +519,12 @@ impl PanelCtx<'_> {
     fn effective(&self, field: FieldId) -> EffectiveView {
         let (l, s, r) = self.sources(field);
         effective_value(l, s, r)
+    }
+
+    /// 会话存储开关是否可编辑：该 serve 给了当前值，且配置了 SQLite 路径。
+    fn store_toggle_supported(&self) -> bool {
+        self.serve_defaults
+            .is_some_and(ServeDefaults::store_toggle_supported)
     }
 }
 
@@ -539,3 +595,8 @@ mod tests_w3;
 #[cfg(test)]
 #[path = "settings_panel_appearance_tests.rs"]
 mod tests_appearance;
+
+// 会话存储（SQLite）开关单测独立成文件：它是第三组保存（非 user-data 快照）。
+#[cfg(test)]
+#[path = "settings_panel_store_tests.rs"]
+mod tests_store;

@@ -32,6 +32,12 @@ pub const CONTEXT_TOKENS_MAX: u64 = 10_000_000;
 /// `Some(false)`；TUI 用删除键（`None`）表示，缺省即跟随，两端行为一致。
 pub const TOOL_CACHE_DISABLED: &str = "off";
 
+/// 会话存储开关的两态取值（面板 ↔ `POST /config/session/conversation-store` 的
+/// `sqlite`）。这里**没有**「跟随 server」这一档：该端点是一次动作，当前值只能从
+/// `/status` 读，不存在可清除的 user-data 键。
+pub const STORE_ON: &str = "on";
+pub const STORE_OFF: &str = "off";
+
 /// 一个键的保存动作（面板管理键：model / api_base / temperature / thinking /
 /// context_tokens / cm_role / session_mode / tool_cache）。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

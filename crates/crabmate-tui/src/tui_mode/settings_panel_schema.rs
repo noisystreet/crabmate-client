@@ -7,7 +7,9 @@
 //! （`Editing` 分派类逻辑留在父模块——它是私有的状态机类型。）
 
 use super::super::palette::THEME_OPTIONS;
-use super::super::settings::{SESSION_MODES, THINKING_MODES, TOOL_CACHE_DISABLED};
+use super::super::settings::{
+    SESSION_MODES, STORE_OFF, STORE_ON, THINKING_MODES, TOOL_CACHE_DISABLED,
+};
 
 /// 会话模式编辑选项长度 =「跟随 server」+ [`SESSION_MODES`]。
 pub(crate) const MODE_OPTIONS_LEN: usize = SESSION_MODES.len() + 1;
@@ -78,6 +80,22 @@ pub(crate) fn tool_index_of(v: Option<&str>) -> usize {
     usize::from(v == Some(TOOL_CACHE_DISABLED))
 }
 
+/// 会话存储（SQLite）编辑选项长度：开 / 关（没有「跟随 server」这一档）。
+pub(crate) const STORE_OPTIONS_LEN: usize = 2;
+
+/// 会话存储编辑选项（0 = 开，1 = 关）。
+pub(crate) fn store_options() -> [Option<&'static str>; STORE_OPTIONS_LEN] {
+    [Some(STORE_ON), Some(STORE_OFF)]
+}
+
+/// 会话存储选项下标 → 值（`off` → 1 = 关；`on` / 未知 / `None` → 0 = 开）。
+///
+/// `None` 只可能来自「还没读到 `/status`」；那种情况面板根本不让进编辑态
+/// （`PanelCtx::store_toggle_supported` 先拦），所以这里的回落不影响保存语义。
+pub(crate) fn store_index_of(v: Option<&str>) -> usize {
+    usize::from(v.map(str::trim) == Some(STORE_OFF))
+}
+
 /// 主题选项下标 → 值（按 [`THEME_OPTIONS`] 顺序；未知 slug（含 `system`、
 /// Desktop 侧新增主题）回 0 =「默认」——只影响编辑起点，读取路径不改写持久层）。
 pub(crate) fn theme_index_of(v: Option<&str>) -> usize {
@@ -125,7 +143,12 @@ impl Section {
                 FieldId::ThinkingMode,
                 FieldId::ApiKey,
             ],
-            Section::Session => &[FieldId::Role, FieldId::SessionMode, FieldId::ToolCache],
+            Section::Session => &[
+                FieldId::Role,
+                FieldId::SessionMode,
+                FieldId::ToolCache,
+                FieldId::SessionSqlite,
+            ],
         }
     }
 }
@@ -146,6 +169,7 @@ pub(crate) enum FieldId {
     Role,
     SessionMode,
     ToolCache,
+    SessionSqlite,
 }
 
 pub(crate) const fn field_label(field: FieldId) -> &'static str {
@@ -160,5 +184,6 @@ pub(crate) const fn field_label(field: FieldId) -> &'static str {
         FieldId::Role => "Agent role",
         FieldId::SessionMode => "会话模式",
         FieldId::ToolCache => "只读工具缓存",
+        FieldId::SessionSqlite => "会话存储（SQLite）",
     }
 }

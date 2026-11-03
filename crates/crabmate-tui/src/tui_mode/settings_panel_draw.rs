@@ -128,6 +128,9 @@ impl SettingsPanel {
         if field == FieldId::Theme {
             return self.theme_cell(ctx);
         }
+        if field == FieldId::SessionSqlite {
+            return self.store_cell(ctx);
+        }
         match self.staged(field) {
             FieldAction::Write(Some(v)) => {
                 (format!("{}~", value_text(field, v)), FieldTone::Pending)
@@ -200,6 +203,21 @@ impl SettingsPanel {
         }
     }
 
+    /// 会话存储（SQLite）行值：staged（~）＞ `/status` 当前态 ＞ 「该 serve 未提供」。
+    ///
+    /// 未知不显示成「关」：那会让用户以为面板知道当前状态，而按下去要动的是另一个值。
+    fn store_cell(&self, ctx: &PanelCtx<'_>) -> (String, FieldTone) {
+        match self.staged(FieldId::SessionSqlite) {
+            FieldAction::Write(Some(v)) => {
+                (format!("{}~", store_label(Some(v))), FieldTone::Pending)
+            }
+            _ => match ctx.effective(FieldId::SessionSqlite).value {
+                Some(v) => (store_label(Some(&v)).to_string(), FieldTone::Value),
+                None => ("(该 serve 未提供)".to_string(), FieldTone::Unset),
+            },
+        }
+    }
+
     /// API 密钥行值：staged 写 = 掩码 + `~`；staged 清除 = `清除~`；未编辑按已设态显示。
     fn secret_cell(&self) -> (String, FieldTone) {
         match &self.secret {
@@ -213,6 +231,15 @@ impl SettingsPanel {
             }
             FieldAction::Skip => ("未设（跟随 serve）".to_string(), FieldTone::Unset),
         }
+    }
+}
+
+/// 会话存储开关的显示措辞（行值与底栏预览共用，避免同一个值两种叫法）。
+fn store_label(v: Option<&str>) -> &'static str {
+    match v {
+        Some(STORE_ON) => "开（SQLite）",
+        Some(STORE_OFF) => "关（文件存储）",
+        _ => "(该 serve 未提供)",
     }
 }
 
@@ -287,6 +314,7 @@ fn footer_hint(panel: &SettingsPanel) -> String {
         Some(Editing::Mode { .. })
         | Some(Editing::Think { .. })
         | Some(Editing::Tool { .. })
+        | Some(Editing::Store { .. })
         | Some(Editing::Gateway { .. }) => "[←/→] 循环  [Enter] 确定  [Esc] 取消".to_string(),
         Some(Editing::Text { .. }) => "[Enter] 确定  [Esc] 取消编辑".to_string(),
         None if panel.read_only => "[↑↓] 浏览  [Tab] 分区  [Esc] 关闭".to_string(),
@@ -300,6 +328,7 @@ fn footer_msg(panel: &SettingsPanel) -> (String, NoticeLevel) {
         Some(Editing::Mode { pick }) => mode_cycle_text(*pick),
         Some(Editing::Think { pick }) => think_cycle_text(*pick),
         Some(Editing::Tool { pick }) => tool_cycle_text(*pick),
+        Some(Editing::Store { pick }) => store_cycle_text(*pick),
         Some(Editing::Theme { pick }) => theme_cycle_text(*pick),
         Some(Editing::Gateway { pick, .. }) => gateway_cycle_text(*pick),
         Some(Editing::Text { field, .. }) => match &panel.note {
@@ -352,6 +381,19 @@ fn tool_cycle_text(pick: usize) -> (String, NoticeLevel) {
             "开(跟随 server)"
         };
         text.push_str(label);
+        text.push(' ');
+    }
+    (text, NoticeLevel::Muted)
+}
+
+/// 会话存储 ←→ 循环的可视化预览（两态，没有「跟随」）。
+fn store_cycle_text(pick: usize) -> (String, NoticeLevel) {
+    let mut text = String::from("会话存储：");
+    for (i, opt) in store_options().iter().enumerate() {
+        if i == pick {
+            text.push('▸');
+        }
+        text.push_str(store_label(*opt));
         text.push(' ');
     }
     (text, NoticeLevel::Muted)

@@ -817,6 +817,7 @@ impl LaneApp<'_> {
             UiEvent::UserData(result) => self.on_user_data(result),
             UiEvent::SavedLlm(result) => self.on_settings_saved_llm(result),
             UiEvent::SavedPrefs(result) => self.on_settings_saved_prefs(result),
+            UiEvent::SavedStore(result) => self.on_settings_saved_store(result),
         }
     }
 

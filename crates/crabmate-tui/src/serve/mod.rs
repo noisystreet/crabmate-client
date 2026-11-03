@@ -12,6 +12,7 @@ mod conversation;
 mod ctl;
 mod error;
 mod json_api;
+mod session_store;
 mod sessions;
 mod url;
 pub(crate) mod user_data;
@@ -31,6 +32,7 @@ pub use conversation::{
 };
 pub use ctl::{add_instance, list_instances, primary_binding, same_api_base, set_instance_enabled};
 pub use error::TermError;
+pub use session_store::set_session_conversation_store;
 pub use sessions::{
     DEFAULT_SESSION_TITLE, SessionIndexApplied, SessionIndexOp, SessionListRow, WebSessionsList,
     apply_web_session_op, conversation_id_for_resume, fetch_web_sessions, is_default_session_title,

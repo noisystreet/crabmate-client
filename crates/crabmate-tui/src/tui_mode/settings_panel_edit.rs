@@ -16,10 +16,11 @@ use super::super::settings::{
 };
 use super::{
     API_BASE_PRESETS, FieldId, GATEWAY_CUSTOM_ID, GATEWAY_SERVER_ID, SettingsPanel, mode_options,
-    move_pick, think_options, tool_options,
+    move_pick, store_options, think_options, tool_options,
 };
 
-/// 行编辑状态：文本编辑（含缓冲与光标）、模式/思考/工具缓存枚举循环、网关预设循环。
+/// 行编辑状态：文本编辑（含缓冲与光标）、模式/思考/工具缓存/会话存储枚举循环、
+/// 网关预设循环。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Editing {
     Text {
@@ -46,6 +47,14 @@ pub(crate) enum Editing {
         pick: usize,
         prefill: String,
     },
+    /// 会话存储（SQLite）开关：`pick` 0 = 开 / 1 = 关。
+    ///
+    /// 不复用 [`Editing::Tool`]：那个的选项表是「跟随 server / 关」，而这里的后端只有
+    /// 一个二值开关（`POST /config/session/conversation-store`），没有「跟随」这一态 ——
+    /// 当前值来自 `/status`，不是可清除的 user-data 键。
+    Store {
+        pick: usize,
+    },
 }
 
 /// 编辑态按键动作（先在不可变借用下解析，再执行以避开自引用借用）。
@@ -57,6 +66,7 @@ enum EditAction {
     CommitTool,
     CommitTheme,
     CommitGateway,
+    CommitStore,
     Insert(char),
     Backspace,
     MoveLeft,
@@ -69,78 +79,59 @@ enum EditAction {
 impl SettingsPanel {
     /// 编辑态按键：文本字符输入/Backspace/←→ 光标、Enter 提交、Esc 取消；
     /// ↑↓ 与 Tab 忽略（避免误跳行/误切分区）。
+    ///
+    /// 拆成「解析 → 应用」两跳是为了 CCN 门禁：七个编辑态各自的键映射放进
+    /// [`text_action`] / [`cycle_action`] / [`theme_action`]，这里只剩分派。
     pub(super) fn edit_key(&mut self, key: &KeyEvent) {
         if key.modifiers.contains(KeyModifiers::CONTROL) {
             return;
         }
-        let action = match &self.editing {
-            Some(Editing::Text { .. }) => match key.code {
-                KeyCode::Esc => Some(EditAction::Cancel),
-                KeyCode::Enter => Some(EditAction::CommitText),
-                KeyCode::Char(c) => Some(EditAction::Insert(c)),
-                KeyCode::Backspace => Some(EditAction::Backspace),
-                KeyCode::Left => Some(EditAction::MoveLeft),
-                KeyCode::Right => Some(EditAction::MoveRight),
-                _ => None,
-            },
-            Some(Editing::Mode { .. }) => match key.code {
-                KeyCode::Esc => Some(EditAction::Cancel),
-                KeyCode::Enter => Some(EditAction::CommitMode),
-                KeyCode::Left => Some(EditAction::MoveLeft),
-                KeyCode::Right => Some(EditAction::MoveRight),
-                _ => None,
-            },
-            Some(Editing::Think { .. }) => match key.code {
-                KeyCode::Esc => Some(EditAction::Cancel),
-                KeyCode::Enter => Some(EditAction::CommitThink),
-                KeyCode::Left => Some(EditAction::MoveLeft),
-                KeyCode::Right => Some(EditAction::MoveRight),
-                _ => None,
-            },
-            Some(Editing::Tool { .. }) => match key.code {
-                KeyCode::Esc => Some(EditAction::Cancel),
-                KeyCode::Enter => Some(EditAction::CommitTool),
-                KeyCode::Left => Some(EditAction::MoveLeft),
-                KeyCode::Right => Some(EditAction::MoveRight),
-                _ => None,
-            },
-            Some(Editing::Theme { .. }) => match key.code {
-                KeyCode::Esc => Some(EditAction::Cancel),
-                KeyCode::Enter => Some(EditAction::CommitTheme),
-                // 主题是「下拉」而不是「循环」：候选有 9 个，↑↓ 逐项走过一遍比记住顺序
-                // 连按 ←→ 更符合直觉。←→ 保留，习惯循环的人不必改手。
-                KeyCode::Up => Some(EditAction::PickUp),
-                KeyCode::Down => Some(EditAction::PickDown),
-                KeyCode::Left => Some(EditAction::MoveLeft),
-                KeyCode::Right => Some(EditAction::MoveRight),
-                _ => None,
-            },
-            Some(Editing::Gateway { .. }) => match key.code {
-                KeyCode::Esc => Some(EditAction::Cancel),
-                KeyCode::Enter => Some(EditAction::CommitGateway),
-                KeyCode::Left => Some(EditAction::MoveLeft),
-                KeyCode::Right => Some(EditAction::MoveRight),
-                _ => None,
-            },
-            None => None,
-        };
-        let Some(action) = action else {
+        let Some(action) = self.edit_action_of(key) else {
             return;
         };
+        self.apply_edit_action(action);
+    }
+
+    /// 当前编辑态 + 按键 → 动作（`None` = 该键在这个编辑态下无意义）。
+    fn edit_action_of(&self, key: &KeyEvent) -> Option<EditAction> {
+        match &self.editing {
+            Some(Editing::Text { .. }) => text_action(key.code),
+            Some(Editing::Mode { .. }) => cycle_action(key.code, EditAction::CommitMode),
+            Some(Editing::Think { .. }) => cycle_action(key.code, EditAction::CommitThink),
+            Some(Editing::Tool { .. }) => cycle_action(key.code, EditAction::CommitTool),
+            Some(Editing::Store { .. }) => cycle_action(key.code, EditAction::CommitStore),
+            Some(Editing::Theme { .. }) => theme_action(key.code),
+            Some(Editing::Gateway { .. }) => cycle_action(key.code, EditAction::CommitGateway),
+            None => None,
+        }
+    }
+
+    /// 应用一个动作（光标移动 / 插入 / 提交分派）。
+    fn apply_edit_action(&mut self, action: EditAction) {
         match action {
             EditAction::Cancel => self.editing = None,
-            EditAction::CommitText => self.commit_text(),
-            EditAction::CommitMode => self.commit_mode(),
-            EditAction::CommitThink => self.commit_think(),
-            EditAction::CommitTool => self.commit_tool(),
-            EditAction::CommitTheme => self.commit_theme(),
-            EditAction::CommitGateway => self.commit_gateway(),
             EditAction::Insert(c) => self.edit_insert(c),
             EditAction::Backspace => self.edit_backspace(),
             EditAction::MoveLeft => self.edit_move(true),
             EditAction::MoveRight => self.edit_move(false),
             EditAction::PickUp => self.pick_step(true),
             EditAction::PickDown => self.pick_step(false),
+            // 六个 commit 各自落到一个字段，单独一跳（否则这里 CCN 超标）。
+            other => self.apply_commit(other),
+        }
+    }
+
+    /// 提交类动作 → 对应字段的 `commit_*`。
+    fn apply_commit(&mut self, action: EditAction) {
+        match action {
+            EditAction::CommitText => self.commit_text(),
+            EditAction::CommitMode => self.commit_mode(),
+            EditAction::CommitThink => self.commit_think(),
+            EditAction::CommitTool => self.commit_tool(),
+            EditAction::CommitStore => self.commit_store(),
+            EditAction::CommitTheme => self.commit_theme(),
+            EditAction::CommitGateway => self.commit_gateway(),
+            _ => {}
         }
     }
 
@@ -214,6 +205,15 @@ impl SettingsPanel {
         self.set_staged(FieldId::ToolCache, FieldAction::Write(value));
     }
 
+    /// 会话存储（SQLite）确认：`on` / `off` 两态，没有「跟随」这一档。
+    fn commit_store(&mut self) {
+        let Some(Editing::Store { pick }) = self.editing.take() else {
+            return;
+        };
+        let value = store_options()[pick].map(str::to_string);
+        self.set_staged(FieldId::SessionSqlite, FieldAction::Write(value));
+    }
+
     /// 主题确认：写入当前选项（下标 0 = `None` = 清除 prefs 键、回到产品默认透明）。
     fn commit_theme(&mut self) {
         let Some(Editing::Theme { pick }) = self.editing.take() else {
@@ -269,7 +269,8 @@ impl SettingsPanel {
         }
     }
 
-    /// 编辑态 ←/→：文本字段移动光标；模式/思考/工具/主题/网关枚举移动选项（↑↓ 不动）。
+    /// 编辑态 ←/→：文本字段移动光标；模式/思考/工具/主题/网关/会话存储枚举移动选项
+    /// （↑↓ 不动）。
     fn edit_move(&mut self, left: bool) {
         match &mut self.editing {
             Some(Editing::Text { buf, cursor, .. }) => {
@@ -296,7 +297,7 @@ impl SettingsPanel {
     }
 }
 
-/// ←/→ 移动循环类编辑的光标（Mode / Think / Tool / Theme / Gateway）。
+/// ←/→ 移动循环类编辑的光标（Mode / Think / Tool / Store / Theme / Gateway）。
 ///
 /// 分派留在编辑态这一层：参数是私有的 [`Editing`]，选项表与下标算术在
 /// [`super::schema`]。
@@ -305,8 +306,45 @@ fn move_cycle_pick(editing: &mut Editing, left: bool) {
         Editing::Mode { pick } => move_pick(pick, left, mode_options().len()),
         Editing::Think { pick } => move_pick(pick, left, think_options().len()),
         Editing::Tool { pick } => move_pick(pick, left, tool_options().len()),
+        Editing::Store { pick } => move_pick(pick, left, store_options().len()),
         Editing::Theme { pick } => move_pick(pick, left, THEME_OPTIONS.len()),
         Editing::Gateway { pick, .. } => move_pick(pick, left, API_BASE_PRESETS.len()),
         Editing::Text { .. } => {}
+    }
+}
+
+/// 文本编辑态的键映射：可输入字符、退格、光标左右、Enter 提交、Esc 取消。
+fn text_action(code: KeyCode) -> Option<EditAction> {
+    match code {
+        KeyCode::Esc => Some(EditAction::Cancel),
+        KeyCode::Enter => Some(EditAction::CommitText),
+        KeyCode::Char(c) => Some(EditAction::Insert(c)),
+        KeyCode::Backspace => Some(EditAction::Backspace),
+        KeyCode::Left => Some(EditAction::MoveLeft),
+        KeyCode::Right => Some(EditAction::MoveRight),
+        _ => None,
+    }
+}
+
+/// 枚举循环编辑态的键映射（模式 / 思考 / 工具缓存 / 会话存储 / 网关共用）。
+fn cycle_action(code: KeyCode, commit: EditAction) -> Option<EditAction> {
+    match code {
+        KeyCode::Esc => Some(EditAction::Cancel),
+        KeyCode::Enter => Some(commit),
+        KeyCode::Left => Some(EditAction::MoveLeft),
+        KeyCode::Right => Some(EditAction::MoveRight),
+        _ => None,
+    }
+}
+
+/// 主题编辑态的键映射：在循环之外**多认 ↑↓**（下拉逐项走）。
+///
+/// 主题是「下拉」而不是「循环」：候选有 9 个，↑↓ 逐项走过一遍比记住顺序连按 ←→
+/// 更符合直觉。←→ 仍保留，习惯循环的人不必改手。
+fn theme_action(code: KeyCode) -> Option<EditAction> {
+    match code {
+        KeyCode::Up => Some(EditAction::PickUp),
+        KeyCode::Down => Some(EditAction::PickDown),
+        other => cycle_action(other, EditAction::CommitTheme),
     }
 }
