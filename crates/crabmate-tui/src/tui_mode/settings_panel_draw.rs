@@ -117,20 +117,25 @@ impl SettingsPanel {
     }
 
     /// 字段值列文本与颜色：staged（~）＞ override（*）＞ user-data ＞ serve 默认 ＞ 跟随 server。
-    /// API 密钥不走三层合成（staged / 已设态两态）；工具缓存、主题各有独立行文案。
+    ///
+    /// 先分派「有自己一套文案」的字段（密钥 / 工具缓存 / 主题 / 会话存储 / MCP），其余
+    /// 统一走 [`Self::layered_cell`]。拆成两跳是为了 CCN 门禁：一行一个 `if` 加回
+    /// 三层 `match` 会直接越过上限。
     fn value_cell(&self, ctx: &PanelCtx<'_>, field: FieldId) -> (String, FieldTone) {
-        if field == FieldId::ApiKey {
-            return self.secret_cell();
+        match field {
+            FieldId::ApiKey => self.secret_cell(),
+            FieldId::ToolCache => self.tool_cache_cell(ctx),
+            FieldId::Theme => self.theme_cell(ctx),
+            FieldId::SessionSqlite => self.store_cell(ctx),
+            FieldId::McpGlobalEnabled => self.mcp_enabled_cell(ctx),
+            FieldId::McpToolTimeout => self.mcp_timeout_cell(ctx),
+            FieldId::McpServers => self.mcp_servers_cell(ctx),
+            _ => self.layered_cell(ctx, field),
         }
-        if field == FieldId::ToolCache {
-            return self.tool_cache_cell(ctx);
-        }
-        if field == FieldId::Theme {
-            return self.theme_cell(ctx);
-        }
-        if field == FieldId::SessionSqlite {
-            return self.store_cell(ctx);
-        }
+    }
+
+    /// 三层合成值（override ＞ user-data ＞ serve 默认）；空白一律视为未设置。
+    fn layered_cell(&self, ctx: &PanelCtx<'_>, field: FieldId) -> (String, FieldTone) {
         match self.staged(field) {
             FieldAction::Write(Some(v)) => {
                 (format!("{}~", value_text(field, v)), FieldTone::Pending)
@@ -218,6 +223,45 @@ impl SettingsPanel {
         }
     }
 
+    /// MCP 全局开关行值：staged（~）＞ mcp-servers 文件里的布尔 ＞ 「该 serve 未提供」。
+    fn mcp_enabled_cell(&self, ctx: &PanelCtx<'_>) -> (String, FieldTone) {
+        match self.staged(FieldId::McpGlobalEnabled) {
+            FieldAction::Write(Some(v)) => {
+                (format!("{}~", toggle_label(Some(v))), FieldTone::Pending)
+            }
+            _ => match ctx.effective(FieldId::McpGlobalEnabled).value {
+                Some(v) => (toggle_label(Some(&v)).to_string(), FieldTone::Value),
+                None => ("(该 serve 未提供)".to_string(), FieldTone::Unset),
+            },
+        }
+    }
+
+    /// MCP 工具超时行值：staged（~）＞ 持久层秒数 ＞ 「该 serve 未提供」。
+    fn mcp_timeout_cell(&self, ctx: &PanelCtx<'_>) -> (String, FieldTone) {
+        match self.staged(FieldId::McpToolTimeout) {
+            FieldAction::Write(Some(v)) => (format!("{v} 秒~"), FieldTone::Pending),
+            FieldAction::Write(None) => ("(不改)~".to_string(), FieldTone::Pending),
+            FieldAction::Skip => match ctx.persisted.and_then(|p| p.mcp_tool_timeout_secs) {
+                Some(s) => (format!("{s} 秒"), FieldTone::Value),
+                None => ("(该 serve 未提供)".to_string(), FieldTone::Unset),
+            },
+        }
+    }
+
+    /// MCP 服务器**只读**信息行：只报数量，编辑入口指向 Desktop/Web。
+    fn mcp_servers_cell(&self, ctx: &PanelCtx<'_>) -> (String, FieldTone) {
+        match ctx
+            .persisted
+            .and_then(|p| p.mcp_server_count.zip(p.mcp_enabled_count))
+        {
+            Some((total, on)) => (
+                format!("{total} 个（{on} 启用）· 在 Desktop/Web 编辑"),
+                FieldTone::Value,
+            ),
+            None => ("(该 serve 未提供)".to_string(), FieldTone::Unset),
+        }
+    }
+
     /// API 密钥行值：staged 写 = 掩码 + `~`；staged 清除 = `清除~`；未编辑按已设态显示。
     fn secret_cell(&self) -> (String, FieldTone) {
         match &self.secret {
@@ -231,6 +275,15 @@ impl SettingsPanel {
             }
             FieldAction::Skip => ("未设（跟随 serve）".to_string(), FieldTone::Unset),
         }
+    }
+}
+
+/// 二值开关的极简措辞（MCP 全局开关用）：`开` / `关`。
+fn toggle_label(v: Option<&str>) -> &'static str {
+    if v.map(str::trim) == Some(STORE_OFF) {
+        "关"
+    } else {
+        "开"
     }
 }
 
@@ -314,7 +367,7 @@ fn footer_hint(panel: &SettingsPanel) -> String {
         Some(Editing::Mode { .. })
         | Some(Editing::Think { .. })
         | Some(Editing::Tool { .. })
-        | Some(Editing::Store { .. })
+        | Some(Editing::Toggle { .. })
         | Some(Editing::Gateway { .. }) => "[←/→] 循环  [Enter] 确定  [Esc] 取消".to_string(),
         Some(Editing::Text { .. }) => "[Enter] 确定  [Esc] 取消编辑".to_string(),
         None if panel.read_only => "[↑↓] 浏览  [Tab] 分区  [Esc] 关闭".to_string(),
@@ -328,7 +381,7 @@ fn footer_msg(panel: &SettingsPanel) -> (String, NoticeLevel) {
         Some(Editing::Mode { pick }) => mode_cycle_text(*pick),
         Some(Editing::Think { pick }) => think_cycle_text(*pick),
         Some(Editing::Tool { pick }) => tool_cycle_text(*pick),
-        Some(Editing::Store { pick }) => store_cycle_text(*pick),
+        Some(Editing::Toggle { field, pick }) => toggle_cycle_text(*field, *pick),
         Some(Editing::Theme { pick }) => theme_cycle_text(*pick),
         Some(Editing::Gateway { pick, .. }) => gateway_cycle_text(*pick),
         Some(Editing::Text { field, .. }) => match &panel.note {
@@ -386,14 +439,25 @@ fn tool_cycle_text(pick: usize) -> (String, NoticeLevel) {
     (text, NoticeLevel::Muted)
 }
 
-/// 会话存储 ←→ 循环的可视化预览（两态，没有「跟随」）。
-fn store_cycle_text(pick: usize) -> (String, NoticeLevel) {
-    let mut text = String::from("会话存储：");
-    for (i, opt) in store_options().iter().enumerate() {
+/// 二值开关 ←→ 循环的可视化预览（按字段选标题与措辞，两处共用一份结构）。
+fn toggle_cycle_text(field: FieldId, pick: usize) -> (String, NoticeLevel) {
+    let (title, labels) = if field == FieldId::SessionSqlite {
+        (
+            "会话存储：",
+            [store_label(Some(STORE_ON)), store_label(Some(STORE_OFF))],
+        )
+    } else {
+        (
+            "MCP：",
+            [toggle_label(Some(STORE_ON)), toggle_label(Some(STORE_OFF))],
+        )
+    };
+    let mut text = String::from(title);
+    for (i, label) in labels.iter().enumerate() {
         if i == pick {
             text.push('▸');
         }
-        text.push_str(store_label(*opt));
+        text.push_str(label);
         text.push(' ');
     }
     (text, NoticeLevel::Muted)

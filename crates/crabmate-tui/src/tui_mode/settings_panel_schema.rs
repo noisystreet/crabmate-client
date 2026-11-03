@@ -80,19 +80,18 @@ pub(crate) fn tool_index_of(v: Option<&str>) -> usize {
     usize::from(v == Some(TOOL_CACHE_DISABLED))
 }
 
-/// 会话存储（SQLite）编辑选项长度：开 / 关（没有「跟随 server」这一档）。
-pub(crate) const STORE_OPTIONS_LEN: usize = 2;
-
-/// 会话存储编辑选项（0 = 开，1 = 关）。
-pub(crate) fn store_options() -> [Option<&'static str>; STORE_OPTIONS_LEN] {
+/// 二值开关（开 / 关）的编辑选项：会话存储与 MCP 全局开关共用这一份词表。
+///
+/// 没有 `None` 档：这两处后端都只有 on/off，不存在「跟随 server」。
+pub(crate) fn toggle_options() -> [Option<&'static str>; 2] {
     [Some(STORE_ON), Some(STORE_OFF)]
 }
 
-/// 会话存储选项下标 → 值（`off` → 1 = 关；`on` / 未知 / `None` → 0 = 开）。
+/// 二值开关选项下标 → 值（`off` → 1 = 关；`on` / 未知 / `None` → 0 = 开）。
 ///
-/// `None` 只可能来自「还没读到 `/status`」；那种情况面板根本不让进编辑态
-/// （`PanelCtx::store_toggle_supported` 先拦），所以这里的回落不影响保存语义。
-pub(crate) fn store_index_of(v: Option<&str>) -> usize {
+/// `None` 只可能来自「还没读到服务端当前值」；那种情况面板根本不让进编辑态，
+/// 所以这里的回落不影响保存语义。
+pub(crate) fn toggle_index_of(v: Option<&str>) -> usize {
     usize::from(v.map(str::trim) == Some(STORE_OFF))
 }
 
@@ -119,16 +118,23 @@ pub(crate) enum Section {
     Appearance,
     Llm,
     Session,
+    Mcp,
 }
 
 impl Section {
-    pub(crate) const ALL: [Section; 3] = [Section::Appearance, Section::Llm, Section::Session];
+    pub(crate) const ALL: [Section; 4] = [
+        Section::Appearance,
+        Section::Llm,
+        Section::Session,
+        Section::Mcp,
+    ];
 
     pub(crate) const fn label(self) -> &'static str {
         match self {
             Section::Appearance => "外观",
             Section::Llm => "模型",
             Section::Session => "会话",
+            Section::Mcp => "MCP",
         }
     }
 
@@ -148,6 +154,12 @@ impl Section {
                 FieldId::SessionMode,
                 FieldId::ToolCache,
                 FieldId::SessionSqlite,
+            ],
+            // 只有两个标量可改；`McpServers` 是**只读**信息行（清单编辑留给 Desktop/Web）。
+            Section::Mcp => &[
+                FieldId::McpGlobalEnabled,
+                FieldId::McpToolTimeout,
+                FieldId::McpServers,
             ],
         }
     }
@@ -170,6 +182,10 @@ pub(crate) enum FieldId {
     SessionMode,
     ToolCache,
     SessionSqlite,
+    McpGlobalEnabled,
+    McpToolTimeout,
+    /// 只读信息行：服务器数量 / 启用数。清单本身留给 Desktop/Web 设置页。
+    McpServers,
 }
 
 pub(crate) const fn field_label(field: FieldId) -> &'static str {
@@ -185,5 +201,8 @@ pub(crate) const fn field_label(field: FieldId) -> &'static str {
         FieldId::SessionMode => "会话模式",
         FieldId::ToolCache => "只读工具缓存",
         FieldId::SessionSqlite => "会话存储（SQLite）",
+        FieldId::McpGlobalEnabled => "MCP 开关",
+        FieldId::McpToolTimeout => "工具超时",
+        FieldId::McpServers => "服务器",
     }
 }

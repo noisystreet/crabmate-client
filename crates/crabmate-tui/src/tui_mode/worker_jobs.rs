@@ -15,15 +15,18 @@ use crabmate_client_api::paths;
 use crabmate_client_api::permission::PermissionView;
 
 use super::serve_defaults::ServeDefaults;
-use super::settings::{LlmSave, PersistedSettings, PrefsSave, merge_llm_save, merge_prefs_save};
+use super::settings::{
+    LlmSave, McpSave, PersistedSettings, PrefsSave, merge_llm_save, merge_mcp_save,
+    merge_prefs_save,
+};
 use super::slash_menu::SkillsPayload;
 use super::worker::{LaneTx, UiEvent};
 use crate::serve::{
     ServeClient, SessionIndexOp, apply_web_session_op, fetch_conversation_messages,
-    fetch_llm_overrides, fetch_user_data_prefs, fetch_web_sessions, fetch_workspace,
-    fetch_workspace_dir, fetch_workspace_projects, put_llm_overrides, put_user_data_prefs,
-    set_session_conversation_store, set_workspace, switch_workspace_project,
-    write_permission_level,
+    fetch_llm_overrides, fetch_mcp_servers, fetch_user_data_prefs, fetch_web_sessions,
+    fetch_workspace, fetch_workspace_dir, fetch_workspace_projects, put_llm_overrides,
+    put_mcp_servers, put_user_data_prefs, set_session_conversation_store, set_workspace,
+    switch_workspace_project, write_permission_level,
 };
 
 /// 写会话索引（`GET` 最新 → 改 → 全量 `PUT`）：新建空白行或把 `conversation_id` 绑到指定行。
@@ -256,7 +259,12 @@ pub(super) async fn job_load_user_settings(client: &ServeClient, out: &LaneTx) {
         let llm = fetch_llm_overrides(client)
             .await
             .map_err(|e| e.to_string())?;
-        Ok(PersistedSettings::from_snapshot(&prefs, &llm))
+        // MCP 是可选端点：失败只让那一栏显示「未提供」，不拖垮 prefs/llm 的加载。
+        let mcp = fetch_mcp_servers(client).await.unwrap_or_else(|e| {
+            eprintln!("[crabmate-tui] GET /user-data/mcp-servers failed: {e}");
+            None
+        });
+        Ok(PersistedSettings::from_snapshot(&prefs, &llm, mcp.as_ref()))
     }
     .await;
     let _ = out.send(UiEvent::UserData(result));
@@ -304,4 +312,21 @@ pub(super) async fn job_save_store(client: &ServeClient, sqlite: bool, out: &Lan
         .map(|()| sqlite)
         .map_err(|e| e.to_string());
     let _ = out.send(UiEvent::SavedStore(result));
+}
+
+/// 保存 MCP 标量：先 GET 现值，只改 `global_enabled` / `tool_timeout_secs` 再全量 PUT
+/// （服务器条目与 `schema_version` 原样带回，见 [`merge_mcp_save`]）。
+pub(super) async fn job_save_mcp(client: &ServeClient, save: McpSave, out: &LaneTx) {
+    let result: Result<McpSave, String> = async {
+        let dto = fetch_mcp_servers(client)
+            .await
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "该 serve 没有 /user-data/mcp-servers（版本过旧）".to_string())?;
+        put_mcp_servers(client, &merge_mcp_save(dto, &save))
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(save)
+    }
+    .await;
+    let _ = out.send(UiEvent::SavedMcp(result));
 }

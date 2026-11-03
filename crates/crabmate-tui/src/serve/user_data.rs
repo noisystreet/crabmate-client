@@ -124,6 +124,59 @@ pub async fn put_llm_overrides(
         .await
 }
 
+/// `GET/PUT /user-data/mcp-servers` 的完整 DTO（镜像前端 `McpServersFileDto`）。
+///
+/// TUI 只读写两个**标量**（`global_enabled` / `tool_timeout_secs`）：服务器条目里带
+/// `env` / `headers` / `bearer` 这类机密，面板既不展示也不编辑。因此 `servers` 用
+/// `Vec<Value>` 原样透传 —— 全量 PUT 时把服务端给的结构照搬回去，既保真又不会因为
+/// 这里少一个字段（服务端新增的键）而把它们抹掉。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct McpServersFileDto {
+    /// 服务端文件格式版本：TUI 不改它，`None` 时序列化时省略（不写入 `null`）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schema_version: Option<u32>,
+    #[serde(default = "mcp_global_enabled_default")]
+    pub global_enabled: bool,
+    #[serde(default = "mcp_tool_timeout_default")]
+    pub tool_timeout_secs: u64,
+    /// 服务器条目：原样回写，不解析（见类型注释）。
+    #[serde(default)]
+    pub servers: Vec<Value>,
+}
+
+/// 缺省全局开关为**开**（与前端 `default_true` 同语义：老文件没有该键时 MCP 仍是启用的）。
+fn mcp_global_enabled_default() -> bool {
+    true
+}
+
+/// 缺省工具超时 60 秒（与前端 `default_mcp_timeout` 对齐）。
+fn mcp_tool_timeout_default() -> u64 {
+    60
+}
+
+/// `GET /user-data/mcp-servers`。
+///
+/// 404 → `None`（老 serve 没有这个端点）：MCP 分区据此显示「未提供」，而不是把
+/// 整个设置快照的加载拖垮。
+pub async fn fetch_mcp_servers(
+    client: &ServeClient,
+) -> Result<Option<McpServersFileDto>, TermError> {
+    client.get_json_optional(paths::USER_DATA_MCP_SERVERS).await
+}
+
+/// `PUT /user-data/mcp-servers`（全量 DTO；2xx 即成功，不解析响应体）。
+pub async fn put_mcp_servers(
+    client: &ServeClient,
+    file: &McpServersFileDto,
+) -> Result<(), TermError> {
+    client
+        .put_json_no_content(
+            paths::USER_DATA_MCP_SERVERS,
+            &serde_json::to_value(file).map_err(|e| TermError::Message(e.to_string()))?,
+        )
+        .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

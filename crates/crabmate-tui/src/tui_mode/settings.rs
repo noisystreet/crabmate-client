@@ -10,7 +10,7 @@ use crabmate_client_api::{
     temperature_for_chat_body,
 };
 
-use crate::serve::{ClientLlmFields, LlmOverridesDto, UserPrefsDto};
+use crate::serve::{ClientLlmFields, LlmOverridesDto, McpServersFileDto, UserPrefsDto};
 
 /// 会话模式枚举的合法取值（与 `/mode` 斜杠一致；面板枚举与校验共用，避免漂移）。
 pub const SESSION_MODES: [&str; 3] = ["ask", "plan", "act"];
@@ -37,6 +37,12 @@ pub const TOOL_CACHE_DISABLED: &str = "off";
 /// `/status` 读，不存在可清除的 user-data 键。
 pub const STORE_ON: &str = "on";
 pub const STORE_OFF: &str = "off";
+
+/// MCP 工具调用超时上限（秒）= 1 小时（对齐前端校验）。
+///
+/// 下限是 1 而不是 0：`0` 在服务端读作「立刻超时」，不是「不限」—— 允许它等于给
+/// 用户一个「一按就全失败」的开关。
+pub const MCP_TOOL_TIMEOUT_MAX: u64 = 3600;
 
 /// 一个键的保存动作（面板管理键：model / api_base / temperature / thinking /
 /// context_tokens / cm_role / session_mode / tool_cache）。
@@ -156,13 +162,31 @@ pub struct PersistedSettings {
     /// 主题名（prefs `theme`；与 Desktop 同一 slug 表）。面板可改，保存后立即
     /// 重新解析配色；空 = 清除键 = TUI 产品默认（透明）。
     pub theme: Option<String>,
+    /// MCP 全局开关（`/user-data/mcp-servers.global_enabled`）。
+    ///
+    /// `None` = 这个 serve 没有那个端点（或拉取失败）：面板该行显示「未提供」并拒绝编辑，
+    /// 而不是假装已知的「开」。
+    pub mcp_global_enabled: Option<bool>,
+    /// MCP 工具调用超时（秒）。
+    pub mcp_tool_timeout_secs: Option<u64>,
+    /// 已配置的 MCP 服务器数量（只读展示）。
+    pub mcp_server_count: Option<usize>,
+    /// 其中启用的数量（只读展示）。
+    pub mcp_enabled_count: Option<usize>,
 }
 
 impl PersistedSettings {
-    /// 从 user-data 快照（prefs + llm-overrides）合成持久层；空白视为未设置，
+    /// 从 user-data 快照（prefs + llm-overrides + mcp-servers）合成持久层；空白视为未设置，
     /// 非法会话模式值（旧文件遗留）丢弃并回落 serve 默认。
+    ///
+    /// `mcp` 用 `Option`：那个端点是可选的（老 serve 404），缺了它只让 MCP 分区显示
+    /// 「未提供」，不该连带 prefs/llm 一起加载失败。
     #[must_use]
-    pub fn from_snapshot(prefs: &UserPrefsDto, llm: &LlmOverridesDto) -> Self {
+    pub fn from_snapshot(
+        prefs: &UserPrefsDto,
+        llm: &LlmOverridesDto,
+        mcp: Option<&McpServersFileDto>,
+    ) -> Self {
         Self {
             model: normalize(&llm.client_llm.model),
             api_base: normalize(&llm.client_llm.api_base),
@@ -179,6 +203,17 @@ impl PersistedSettings {
             // 原样保留任意 slug（含 Desktop 侧新增 / `system`），面板不认识的
             // 值在编辑态回落到「默认」选项，不会在读取时丢弃用户已有设置。
             theme: normalize(&prefs.theme),
+            mcp_global_enabled: mcp.map(|m| m.global_enabled),
+            mcp_tool_timeout_secs: mcp.map(|m| m.tool_timeout_secs),
+            mcp_server_count: mcp.map(|m| m.servers.len()),
+            mcp_enabled_count: mcp.map(|m| {
+                m.servers
+                    .iter()
+                    .filter(|s| {
+                        s.get("enabled").and_then(serde_json::Value::as_bool) != Some(false)
+                    })
+                    .count()
+            }),
         }
     }
 
@@ -197,6 +232,18 @@ impl PersistedSettings {
         apply_slot(&mut self.session_mode, &save.session_mode);
         apply_tool_cache_action(&mut self.tool_cache_disabled, &save.tool_cache);
         apply_slot(&mut self.theme, &save.theme);
+    }
+
+    /// MCP 侧保存成功后在内存做同样更新（未编辑的键不动）。
+    pub fn apply_mcp_saved(&mut self, save: &McpSave) {
+        if let FieldAction::Write(v) = &save.global_enabled {
+            self.mcp_global_enabled = Some(v.as_deref().map(str::trim) != Some(STORE_OFF));
+        }
+        if let FieldAction::Write(Some(v)) = &save.tool_timeout
+            && let Ok(secs) = v.trim().parse::<u64>()
+        {
+            self.mcp_tool_timeout_secs = Some(secs);
+        }
     }
 }
 
@@ -431,6 +478,61 @@ pub fn merge_prefs_save(mut base: UserPrefsDto, save: &PrefsSave) -> UserPrefsDt
     apply_slot(&mut base.session_mode, &save.session_mode);
     apply_tool_cache_action(&mut base.disable_readonly_tool_ttl_cache, &save.tool_cache);
     apply_slot(&mut base.theme, &save.theme);
+    base
+}
+
+/// `/user-data/mcp-servers` 的保存动作：只有 TUI 会改的两个标量。
+///
+/// 服务器清单（`servers`）**不在**这里：条目里带 `env` / `headers` / `bearer`，终端
+/// 面板既不展示也不编辑，PUT 时原样回写。清单的增删改留给 Desktop/Web 设置页。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct McpSave {
+    /// `on` / `off`（空 = 不改）。
+    pub global_enabled: FieldAction,
+    /// 秒数原文（空 = 不改；写回前已按 [`is_valid_mcp_timeout`] 校验）。
+    pub tool_timeout: FieldAction,
+}
+
+impl McpSave {
+    /// 是否有任一字段待写。
+    #[must_use]
+    pub fn any(&self) -> bool {
+        self.global_enabled.is_write() || self.tool_timeout.is_write()
+    }
+
+    /// 保存成功后清空 staged。
+    pub fn clear(&mut self) {
+        self.global_enabled = FieldAction::Skip;
+        self.tool_timeout = FieldAction::Skip;
+    }
+}
+
+/// MCP 工具超时是否合法：trim 后空 = 未设置（合法，等于不改）；非空需 1..=3600 整数秒。
+#[must_use]
+pub fn is_valid_mcp_timeout(v: &str) -> bool {
+    let t = v.trim();
+    if t.is_empty() {
+        return true;
+    }
+    matches!(t.parse::<u64>(), Ok(n) if (1..=MCP_TOOL_TIMEOUT_MAX).contains(&n))
+}
+
+/// 合并写回 `/user-data/mcp-servers`：只改 `global_enabled` / `tool_timeout_secs`。
+///
+/// `servers` 与 `schema_version` 一律原样带回（TUI 不编辑条目、不改格式版本）。
+/// `tool_timeout` 留空 = 不改：这个端点没有「跟随 server」这一态，缺省值由服务端
+/// 文件本身给出。
+#[must_use]
+pub fn merge_mcp_save(mut base: McpServersFileDto, save: &McpSave) -> McpServersFileDto {
+    if let FieldAction::Write(v) = &save.global_enabled {
+        // 空值按「开」处理：开关只有两态，与 `apply_tool_cache_action` 的取舍一致。
+        base.global_enabled = v.as_deref().map(str::trim) != Some(STORE_OFF);
+    }
+    if let FieldAction::Write(Some(v)) = &save.tool_timeout
+        && let Ok(secs) = v.trim().parse::<u64>()
+    {
+        base.tool_timeout_secs = secs;
+    }
     base
 }
 

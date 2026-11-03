@@ -12,10 +12,15 @@ use super::palette::{NoticeLevel, Palette, THEME_OPTIONS};
 use super::render::truncate_display;
 use super::serve_defaults::ServeDefaults;
 use super::settings::{
-    EffectiveView, FieldAction, Layer, LlmSave, PersistedSettings, PrefsSave, STORE_OFF, STORE_ON,
-    TOOL_CACHE_DISABLED, effective_value, normalize_str,
+    EffectiveView, FieldAction, Layer, LlmSave, McpSave, PersistedSettings, PrefsSave, STORE_OFF,
+    STORE_ON, TOOL_CACHE_DISABLED, effective_value, normalize_str,
 };
 use super::text::{cell_window, horizontal_window};
+
+/// 只读信息行的占位动作：`staged()` 必须返回引用，所以需要一个静态值。
+///
+/// 它永远是 `Skip`，因此既不会让面板变脏，也不会进任何一组保存请求。
+const READ_ONLY: FieldAction = FieldAction::Skip;
 
 /// 字段行标签列宽（cell；含标签与值之间间隔）。
 const LABEL_PAD: usize = 13;
@@ -52,6 +57,8 @@ pub enum SaveGroup {
     Llm,
     Prefs,
     Store,
+    /// MCP 标量（`/user-data/mcp-servers` 的全局开关 / 工具超时）。
+    Mcp,
 }
 
 /// 面板按键处理结果（状态已内部更新；副作用交给调用方）。
@@ -67,6 +74,8 @@ pub(super) enum PanelEffect {
         secret: FieldAction,
         /// 会话存储开关动作（`Write(Some("on"|"off"))`；`Skip` = 无动作）。
         store: FieldAction,
+        /// MCP 标量动作（全局开关 / 工具超时；两者都 `Skip` = 无动作）。
+        mcp: Box<McpSave>,
     },
     /// 请求关闭面板（已通过脏确认或本来干净）。
     Close,
@@ -88,6 +97,8 @@ pub struct SettingsPanel {
     ///
     /// 独立于 `PrefsSave`：它不是 user-data 键，保存动作是 `POST /config/session/conversation-store`。
     store: FieldAction,
+    /// 已编辑（staged）的 MCP 标量（`/user-data/mcp-servers` 的全局开关 / 工具超时）。
+    mcp: McpSave,
     /// 已编辑（staged）的 API 密钥动作（不随 `LlmSave` 走 user-data，见 LaneApp）。
     secret: FieldAction,
     /// API 密钥当前是否已设（CLI/env override 或钥匙串有值）；只读显示用。
@@ -102,6 +113,8 @@ pub struct SettingsPanel {
     saving_prefs: bool,
     /// 会话存储开关保存请求在途（结果未回）。
     saving_store: bool,
+    /// MCP 组保存请求在途（结果未回）。
+    saving_mcp: bool,
     /// 底部提示行（编辑错误 / 只读提示 / 保存结果等）。
     note: Option<(String, NoticeLevel)>,
 }
@@ -122,6 +135,7 @@ impl SettingsPanel {
             llm: LlmSave::default(),
             prefs: PrefsSave::default(),
             store: FieldAction::Skip,
+            mcp: McpSave::default(),
             secret: FieldAction::Skip,
             secret_set: false,
             editing: None,
@@ -129,19 +143,24 @@ impl SettingsPanel {
             saving_llm: false,
             saving_prefs: false,
             saving_store: false,
+            saving_mcp: false,
             note: None,
         }
     }
 
     /// 是否有任一组保存请求在途（期间禁止编辑/保存/关闭）。
     fn is_saving(&self) -> bool {
-        self.saving_llm || self.saving_prefs || self.saving_store
+        self.saving_llm || self.saving_prefs || self.saving_store || self.saving_mcp
     }
 
     /// 是否有未保存的 staged 改动（含 API 密钥动作）。
     #[must_use]
     pub fn is_dirty(&self) -> bool {
-        self.llm.any() || self.prefs.any() || self.secret.is_write() || self.store.is_write()
+        self.llm.any()
+            || self.prefs.any()
+            || self.secret.is_write()
+            || self.store.is_write()
+            || self.mcp.any()
     }
 
     /// API 密钥行当前是否"已设"（CLI/env override 或钥匙串有值）；由 LaneApp 打开
@@ -174,6 +193,10 @@ impl SettingsPanel {
             FieldId::ToolCache => &self.prefs.tool_cache,
             FieldId::Theme => &self.prefs.theme,
             FieldId::SessionSqlite => &self.store,
+            FieldId::McpGlobalEnabled => &self.mcp.global_enabled,
+            FieldId::McpToolTimeout => &self.mcp.tool_timeout,
+            // 只读信息行：永远没有 staged 动作。
+            FieldId::McpServers => &READ_ONLY,
         }
     }
 
@@ -190,6 +213,10 @@ impl SettingsPanel {
             FieldId::ToolCache => self.prefs.tool_cache = action,
             FieldId::Theme => self.prefs.theme = action,
             FieldId::SessionSqlite => self.store = action,
+            FieldId::McpGlobalEnabled => self.mcp.global_enabled = action,
+            FieldId::McpToolTimeout => self.mcp.tool_timeout = action,
+            // 只读行不接受写入（面板不会为它产生动作，这里只是穷尽 match）。
+            FieldId::McpServers => {}
         }
     }
 
@@ -222,6 +249,12 @@ impl SettingsPanel {
                 self.saving_store = false;
                 if ok {
                     self.store = FieldAction::Skip;
+                }
+            }
+            SaveGroup::Mcp => {
+                self.saving_mcp = false;
+                if ok {
+                    self.mcp.clear();
                 }
             }
         }
@@ -375,21 +408,42 @@ impl SettingsPanel {
             self.editing = Some(Editing::Theme { pick });
             return;
         }
-        // 会话存储（SQLite）：只有两态，当前值来自 `/status`。服务端没配 SQLite 路径
-        // 或这个 serve 的 `/status` 没有该字段时，不让进编辑态 —— 按下去也只会被拒。
-        if field == FieldId::SessionSqlite {
-            if !ctx.store_toggle_supported() {
-                self.set_note(
-                    "该 serve 不支持切换会话存储（未配置 SQLite 路径或版本过旧）".to_string(),
-                    NoticeLevel::Warn,
-                );
+        // 二值开关（会话存储 / MCP 全局开关）：只有 on/off 两态，当前值来自服务端。
+        // 值未知或服务端不支持时不让进编辑态 —— 按下去也只会被拒。
+        if field == FieldId::SessionSqlite || field == FieldId::McpGlobalEnabled {
+            if !ctx.toggle_editable(field) {
+                self.set_note(toggle_blocked_note(field), NoticeLevel::Warn);
                 return;
             }
             let pick = match self.staged(field) {
-                FieldAction::Write(Some(v)) => store_index_of(Some(v)),
-                _ => store_index_of(ctx.effective(field).value.as_deref()),
+                FieldAction::Write(Some(v)) => toggle_index_of(Some(v)),
+                _ => toggle_index_of(ctx.effective(field).value.as_deref()),
             };
-            self.editing = Some(Editing::Store { pick });
+            self.editing = Some(Editing::Toggle { field, pick });
+            return;
+        }
+        // MCP 工具超时：从当前值起编（预填），留空提交 = 不改。
+        if field == FieldId::McpToolTimeout {
+            let prefill = match self.staged(field) {
+                FieldAction::Write(Some(v)) => v.clone(),
+                FieldAction::Write(None) => String::new(),
+                FieldAction::Skip => ctx
+                    .persisted
+                    .and_then(|p| p.mcp_tool_timeout_secs)
+                    .map(|s| s.to_string())
+                    .unwrap_or_default(),
+            };
+            let buf: Vec<char> = prefill.chars().collect();
+            let cursor = buf.len();
+            self.editing = Some(Editing::Text { field, buf, cursor });
+            return;
+        }
+        // MCP 服务器清单是**只读**信息行：条目里带 env / headers / bearer，不在终端里编辑。
+        if field == FieldId::McpServers {
+            self.set_note(
+                "服务器清单请在 Desktop / Web 设置页编辑（终端只显示数量）".to_string(),
+                NoticeLevel::Muted,
+            );
             return;
         }
         // API Base：网关预设循环（server / ollama / … / 自定义 URL）。自定义在预设里 Enter
@@ -437,14 +491,17 @@ impl SettingsPanel {
         let prefs = self.prefs.clone();
         let secret = self.secret.clone();
         let store = self.store.clone();
+        let mcp = self.mcp.clone();
         self.saving_llm = llm.any();
         self.saving_prefs = prefs.any();
         self.saving_store = store.is_write();
+        self.saving_mcp = mcp.any();
         PanelEffect::Save {
             llm: Box::new(llm),
             prefs: Box::new(prefs),
             secret,
             store,
+            mcp: Box::new(mcp),
         }
     }
 }
@@ -474,7 +531,10 @@ impl PanelCtx<'_> {
             | FieldId::ToolCache
             | FieldId::Theme
             | FieldId::ApiKey
-            | FieldId::SessionSqlite => None,
+            | FieldId::SessionSqlite
+            | FieldId::McpGlobalEnabled
+            | FieldId::McpToolTimeout
+            | FieldId::McpServers => None,
             FieldId::Role => self.overrides.agent_role.as_deref(),
             FieldId::SessionMode => self.overrides.session_mode.as_deref(),
         };
@@ -494,6 +554,13 @@ impl PanelCtx<'_> {
             FieldId::Theme => p.and_then(|p| p.theme.as_deref()),
             // 会话存储不是 user-data 键：没有持久层这一层。
             FieldId::SessionSqlite => None,
+            // MCP 全局开关：值在 user-data 的 mcp-servers 文件里（布尔），映射成 on/off。
+            FieldId::McpGlobalEnabled => p
+                .and_then(|p| p.mcp_global_enabled)
+                .map(|on| if on { STORE_ON } else { STORE_OFF }),
+            // 超时要显示「60 秒」这类数值文本，`sources` 只给 `&str`，所以在 `mcp_timeout_cell`
+            // 里直接读持久层；服务器数量同理（只读信息行）。
+            FieldId::McpToolTimeout | FieldId::McpServers => None,
         };
         let remote = match field {
             FieldId::Model => d.and_then(|d| d.model.as_deref()),
@@ -509,6 +576,8 @@ impl PanelCtx<'_> {
             FieldId::SessionSqlite => d
                 .and_then(|d| d.store_sqlite_active())
                 .map(|on| if on { STORE_ON } else { STORE_OFF }),
+            // MCP 两项的当前值在 user-data（不是 `/status`）；服务器数量是只读信息行。
+            FieldId::McpGlobalEnabled | FieldId::McpToolTimeout | FieldId::McpServers => None,
             FieldId::Role => d.and_then(|d| d.role.as_deref()),
             FieldId::SessionMode => d.and_then(|d| d.mode.as_deref()),
         };
@@ -525,6 +594,27 @@ impl PanelCtx<'_> {
     fn store_toggle_supported(&self) -> bool {
         self.serve_defaults
             .is_some_and(ServeDefaults::store_toggle_supported)
+    }
+
+    /// 二值开关这一行是否可编辑。
+    ///
+    /// 两个前提：**知道当前值**（否则「切到另一边」无从表达），且（仅会话存储）服务端
+    /// 配置了 SQLite 路径 —— 否则 `sqlite: true` 必被拒。
+    fn toggle_editable(&self, field: FieldId) -> bool {
+        if self.effective(field).value.is_none() {
+            return false;
+        }
+        field != FieldId::SessionSqlite || self.store_toggle_supported()
+    }
+}
+
+/// 二值开关被拒时的说明：两种原因（服务端不支持 / 值未知）要分开讲，因为处置不同
+/// —— 前者只能换 serve，后者等 `/status` 拉回来就好。
+fn toggle_blocked_note(field: FieldId) -> String {
+    if field == FieldId::SessionSqlite {
+        "该 serve 不支持切换会话存储（未配置 SQLite 路径或版本过旧）".to_string()
+    } else {
+        "该 serve 未提供 MCP 配置（版本过旧或尚未拉到）".to_string()
     }
 }
 
@@ -600,3 +690,8 @@ mod tests_appearance;
 #[cfg(test)]
 #[path = "settings_panel_store_tests.rs"]
 mod tests_store;
+
+// MCP 分区单测独立成文件（同上）：只读信息行 + 两个标量。
+#[cfg(test)]
+#[path = "settings_panel_mcp_tests.rs"]
+mod tests_mcp;

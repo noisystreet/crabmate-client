@@ -296,7 +296,7 @@ fn persisted_snapshot_picks_fields_and_trims_blanks() {
         },
         ..Default::default()
     };
-    let p = PersistedSettings::from_snapshot(&prefs, &llm);
+    let p = PersistedSettings::from_snapshot(&prefs, &llm, None);
     assert_eq!(p.role.as_deref(), Some("coder"), "cm_role 归一化后保留");
     assert_eq!(p.session_mode, None, "空白 session_mode 视为未设置");
     assert_eq!(p.model.as_deref(), Some("gpt-x"));
@@ -315,7 +315,7 @@ fn snapshot_drops_invalid_temperature_and_thinking() {
         },
         ..Default::default()
     };
-    let p = PersistedSettings::from_snapshot(&UserPrefsDto::default(), &llm);
+    let p = PersistedSettings::from_snapshot(&UserPrefsDto::default(), &llm, None);
     assert_eq!(p.temperature, None, "超区间温度回落 serve 默认");
     assert_eq!(p.thinking, None, "server/空思考模式 = 跟随 server");
 
@@ -326,7 +326,7 @@ fn snapshot_drops_invalid_temperature_and_thinking() {
         },
         ..Default::default()
     };
-    let p = PersistedSettings::from_snapshot(&UserPrefsDto::default(), &llm);
+    let p = PersistedSettings::from_snapshot(&UserPrefsDto::default(), &llm, None);
     assert_eq!(p.temperature, None, "空白温度视为未设置");
 }
 
@@ -336,7 +336,7 @@ fn snapshot_drops_invalid_session_mode() {
         session_mode: Some("Bogus".into()),
         ..Default::default()
     };
-    let p = PersistedSettings::from_snapshot(&prefs, &LlmOverridesDto::default());
+    let p = PersistedSettings::from_snapshot(&prefs, &LlmOverridesDto::default(), None);
     assert_eq!(p.session_mode, None, "非法 session_mode 回落 serve 默认");
 }
 
@@ -477,7 +477,7 @@ fn snapshot_picks_context_tokens_and_tool_cache() {
         },
         ..Default::default()
     };
-    let p = PersistedSettings::from_snapshot(&prefs, &llm);
+    let p = PersistedSettings::from_snapshot(&prefs, &llm, None);
     assert_eq!(p.context_tokens.as_deref(), Some("8000"), "trim 后存原文");
     assert_eq!(p.tool_cache_disabled, Some(true), "镜像 disable 标记");
 
@@ -493,7 +493,7 @@ fn snapshot_picks_context_tokens_and_tool_cache() {
         disable_readonly_tool_ttl_cache: Some(false),
         ..Default::default()
     };
-    let p = PersistedSettings::from_snapshot(&prefs, &llm);
+    let p = PersistedSettings::from_snapshot(&prefs, &llm, None);
     assert_eq!(p.context_tokens, None, "超上限丢弃");
     assert_eq!(p.tool_cache_disabled, Some(false), "显式跟随非禁用");
 }

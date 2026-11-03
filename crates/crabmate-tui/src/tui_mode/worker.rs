@@ -25,13 +25,13 @@ use crate::serve::{
 use super::approve::{APPROVAL_WAIT, ApprovalPrompt, OverlayApprovalGate};
 use super::inbound::Inbound;
 use super::serve_defaults::ServeDefaults;
-use super::settings::{LlmSave, PersistedSettings, PrefsSave};
+use super::settings::{LlmSave, McpSave, PersistedSettings, PrefsSave};
 use super::slash_menu::SkillsPayload;
 use super::worker_jobs::{
     job_conversation_history, job_load_user_settings, job_refresh_sessions, job_refresh_status,
-    job_refresh_usage, job_refresh_workspace_root, job_save_llm, job_save_prefs, job_save_store,
-    job_session_index, job_skills, job_workspace_dir, job_workspace_query, job_workspace_set,
-    job_write_permission, job_ws_projects, job_ws_switch_project,
+    job_refresh_usage, job_refresh_workspace_root, job_save_llm, job_save_mcp, job_save_prefs,
+    job_save_store, job_session_index, job_skills, job_workspace_dir, job_workspace_query,
+    job_workspace_set, job_write_permission, job_ws_projects, job_ws_switch_project,
 };
 
 /// UI 事件的**载荷**（键盘线程与回合/拉取线程都会产出，但「归谁」由 [`Inbound`] 决定：
@@ -184,6 +184,8 @@ pub(super) enum UiEvent {
     SavedPrefs(Result<PrefsSave, String>),
     /// 会话存储开关保存结果：`Ok` 回传实际落地的 `sqlite` 值（面板据此更新显示态）。
     SavedStore(Result<bool, String>),
+    /// MCP 标量保存结果：`Ok` 回传已应用动作（面板据此清 staged、持久层同步）。
+    SavedMcp(Result<McpSave, String>),
     /// skill 目录（`GET /skills`，供 `/` 补全菜单的 skill 候选）。
     Skills(Result<SkillsPayload, String>),
 }
@@ -256,6 +258,8 @@ pub(super) enum WorkerJob {
     SavePrefs(PrefsSave),
     /// 切换会话存储（`POST /config/session/conversation-store`；`true` = SQLite）。
     SaveStore(bool),
+    /// 保存 MCP 标量（`PUT /user-data/mcp-servers`；只带全局开关 / 工具超时）。
+    SaveMcp(McpSave),
     /// 拉 skill 目录（`GET /skills`）：只给 `/` 补全菜单用。
     Skills,
     /// 写会话级权限等级意图（`POST /conversation/state`，空闲态落盘）。
@@ -579,6 +583,13 @@ fn dispatch(
             cancel,
             "切换会话存储",
             job_save_store(client, sqlite, out),
+            out,
+        ),
+        WorkerJob::SaveMcp(save) => run_cancellable(
+            rt,
+            cancel,
+            "保存 MCP 设置",
+            job_save_mcp(client, save, out),
             out,
         ),
         WorkerJob::Skills => {
