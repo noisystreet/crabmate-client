@@ -89,3 +89,76 @@ pub(crate) fn theme_index_of(v: Option<&str>) -> usize {
         .position(|opt| *opt == Some(v))
         .unwrap_or(0)
 }
+
+/// 面板分区：外观 / 模型 / 会话（扁平字段，写 serve user-data）。
+///
+/// 顺序与 Desktop 设置页导航一致（外观在模型之前），`ALL` 的下标必须与枚举判别式
+/// 对齐——[`SettingsPanel::cycle_section`] 用 `section as usize` 索引。
+///
+/// 放在本文件而不是父模块：与「分区 → 字段」表同源，且父模块要压 920 行门禁。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Section {
+    Appearance,
+    Llm,
+    Session,
+}
+
+impl Section {
+    pub(crate) const ALL: [Section; 3] = [Section::Appearance, Section::Llm, Section::Session];
+
+    pub(crate) const fn label(self) -> &'static str {
+        match self {
+            Section::Appearance => "外观",
+            Section::Llm => "模型",
+            Section::Session => "会话",
+        }
+    }
+
+    pub(crate) const fn fields(self) -> &'static [FieldId] {
+        match self {
+            Section::Appearance => &[FieldId::Theme],
+            Section::Llm => &[
+                FieldId::Model,
+                FieldId::ApiBase,
+                FieldId::Temperature,
+                FieldId::ContextTokens,
+                FieldId::ThinkingMode,
+                FieldId::ApiKey,
+            ],
+            Section::Session => &[FieldId::Role, FieldId::SessionMode, FieldId::ToolCache],
+        }
+    }
+}
+
+/// 面板管理的字段：外观 1 个 + 模型 6 个 + 会话 3 个。`Temperature/ThinkingMode/
+/// ContextTokens` 写 user-data `client_llm.*`；`ApiKey` 只写本机钥匙串（见 LaneApp
+/// 接线）；`ToolCache` 写 prefs `disable_readonly_tool_ttl_cache`；`Theme` 写 prefs
+/// `theme`（与 Desktop 同一 slug 表，保存后立即重新解析配色）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FieldId {
+    Theme,
+    Model,
+    ApiBase,
+    Temperature,
+    ContextTokens,
+    ThinkingMode,
+    ApiKey,
+    Role,
+    SessionMode,
+    ToolCache,
+}
+
+pub(crate) const fn field_label(field: FieldId) -> &'static str {
+    match field {
+        FieldId::Theme => "主题",
+        FieldId::Model => "模型名",
+        FieldId::ApiBase => "API Base",
+        FieldId::Temperature => "温度",
+        FieldId::ContextTokens => "上下文长度",
+        FieldId::ThinkingMode => "思考模式",
+        FieldId::ApiKey => "API 密钥",
+        FieldId::Role => "Agent role",
+        FieldId::SessionMode => "会话模式",
+        FieldId::ToolCache => "只读工具缓存",
+    }
+}
