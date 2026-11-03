@@ -11,6 +11,8 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ## [Unreleased]
 
+## [0.8.0-alpha.2] - 2026-11-03
+
 ### Fixed
 
 - **Desktop listed connections twice; TUI counted lanes in the wrong corner.** The right status stack drew a `.status-chip` per connection while the left rail drew the same list — two readings that drift. The chip is gone (`status_connection_chip` → `connection_feed`) and the rail pane owns it: header `连接 [n]`, one row per window, a click switches windows — or, with a single connection, opens Settings → Connection, which lost its only other entry. TUI moved `连接 [n/8] ▲k` from the status stack's `lanes` segment into the left lane pane's header, next to `/lane attach` and `F4`. The stack drops that segment and `StatusInfo::lanes` is deleted; full fill is 9 of 9 rows, nothing truncated. Verified: both test suites and `scripts/check.sh` green; not seen on a real screen. No protocol change.

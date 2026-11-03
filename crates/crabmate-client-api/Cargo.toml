@@ -1,6 +1,6 @@
 [package]
 name = "crabmate-client-api"
-version = "0.8.0-alpha.1"
+version = "0.8.0-alpha.2"
 edition = "2024"
 license = "Apache-2.0"
 description = "Pure shared client logic for CrabMate (URL / auth / secrets / approval / workspace / sessions / chat body / hash handoff / health JSON; no IO)"
