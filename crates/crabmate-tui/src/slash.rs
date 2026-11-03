@@ -150,6 +150,8 @@ fn print_help() {
   /conv new             clear conversation_id (next turn starts fresh)\n\
   /conv use <id>        set conversation_id for continuation\n\
   /conv delete [<id>]   delete a server-persisted conversation (idempotent 204)\n\
+  /conv export [...]    export a whole conversation: [json|markdown|both] [--out <path>] [--id <id>]\n\
+                        (same md/json shape as Desktop; no --out prints to stdout)\n\
   /quit /exit /q        exit repl\n\
 model-side slash (sent to serve; serve short-circuits, nothing is persisted):\n\
   /btw <question>       off-the-record side question (no tools, not added to history)"

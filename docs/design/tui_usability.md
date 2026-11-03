@@ -1,6 +1,6 @@
 # TUI 易用性规划（对齐 Desktop 聊天体验）
 
-> **状态**：Wave 1 已落地 W1.1 全屏 `/resume`、W1.2 忙时排队、W1.3 会话级草稿、W1.4 复制（OSC52 / 外部工具）、W1.6 多行粘贴（bracketed paste，`CM_TUI_PASTE=off` 可关）；**W1.5 会话列输入过滤仍未落地**（`session_filter` 等在 `tui_mode` 无对应字段）。W2.1 历史回放已落地（`GET /conversation/messages` 最新页 + `/older` 按 `before_index` 前插更早页，贴顶保持 + PgUp 到顶自续翻）；W2.2 **删除**已落地（左栏 `Delete` 先确认 / `Shift+Delete` 直删，在途回合拒绝），**只缺重命名**（无 serve 端点）；W3.1 `/` 补全菜单也已落地（`tui_mode/slash_menu.rs`：内建命令 + `GET /skills` 候选）。Wave 2 的 W2.3 / W2.4 与 Wave 3 其余项仍为方案。逐波按本文落地；每波独立 PR，落地后必须同 PR 更新 [`client_capability_matrix.md`](./client_capability_matrix.md) 对应格（§4）。
+> **状态**：Wave 1 已落地 W1.1 全屏 `/resume`、W1.2 忙时排队、W1.3 会话级草稿、W1.4 复制（OSC52 / 外部工具）、W1.6 多行粘贴（bracketed paste，`CM_TUI_PASTE=off` 可关）；**W1.5 会话列输入过滤仍未落地**（`session_filter` 等在 `tui_mode` 无对应字段）。W2.1 历史回放已落地（`GET /conversation/messages` 最新页 + `/older` 按 `before_index` 前插更早页，贴顶保持 + PgUp 到顶自续翻）；W2.2 **删除**已落地（左栏 `Delete` 先确认 / `Shift+Delete` 直删，在途回合拒绝），**只缺重命名**（无 serve 端点）；W2.4 **会话导出**已落地（`/conv export [json|markdown|both] [--out <路径>] [--id <id>]`，repl 与全屏共用 `crabmate_client_api::chat_export` 的展示投影，全量靠逐页往回拉）；W3.1 `/` 补全菜单也已落地（`tui_mode/slash_menu.rs`：内建命令 + `GET /skills` 候选）。Wave 2 的 W2.3 与 Wave 3 其余项仍为方案。逐波按本文落地；每波独立 PR，落地后必须同 PR 更新 [`client_capability_matrix.md`](./client_capability_matrix.md) 对应格（§4）。
 > **范围**：`crabmate-tui`（全屏 `tui` 为主，`repl` 相应联动）；候选与取舍参照 Desktop / Web（`frontend/`）聊天体验，**语义对齐，不追求 UI 复刻**。
 > **关联**：[`remote_cli_tui.md`](./remote_cli_tui.md)（TUI 母方案，P1–P5）、[`client_capability_matrix.md`](./client_capability_matrix.md)（TUI 行 L53–L81）、[`tui_settings_panel.md`](./tui_settings_panel.md)（设置面板，W3 遗留）、[`chat_ui_todo.md`](./chat_ui_todo.md)（Desktop 聊天 UI 已勾项 = “已做过”的参照，不要当缺口重做）、[`contract_pin.md`](./contract_pin.md)（契约钉点）、Server `docs/`（SSE / user-data / 会话权威）
 
@@ -145,11 +145,17 @@
 - **落点**：`state.rs`（回合索引）、`mod.rs`、`worker.rs`；`POST /chat/branch` 语义复用（契约已 pin，无需新端点）。
 - **风险**：行模型改「回合感知」是本规划**回归面最大**的一项（render/scroll/find/折叠均遍历 `lines`），需先抽出回合段数据结构再动 UI。
 
-#### W2.4 会话导出（Markdown / JSON）
+#### W2.4 会话导出（Markdown / JSON）— **已落地**
 
 - **参照**：Desktop `session_export.rs`（`cm_chat_export projection=display`；Markdown 与 CLI 同规则）。
-- **方案**：repl `/conv export [json|markdown] <id>` → 写 stdout/文件；与 Desktop 导出的过滤规则子集对齐（跳过 system、工具带摘要）。
+- **命令**：`/conv export [json|markdown|both] [--out <路径>] [--id <id>]`（repl 与全屏 `tui` 同一套；格式词与 Web `/export` 同名同义，缺省 `json`）。
+- **口径**：信封与 Markdown 骨架直接来自契约 crate（`DisplayChatSessionFile` / `markdown_from_role_bodies`），逐条过滤沿用 `conversation_messages::replay_rows`（跳过 `system` 卡片与首轮工作区注入、工具名从调用侧 `tool_calls` 回填、工具正文折成一行 ≤200 字摘要）；**思考并进紧随其后的助手正文**（展示投影没有 thinking role）。
+- **全量**：端点 80 条/页，故导出是「逐页往回拉到 `window_start_index == 0`」，上限 `EXPORT_MAX_PAGES = 200`（≈16k 条），超限**报错**而不截断。客户端翻页 vs 服务端全量端点这一项按**客户端翻页**结案：不改 Server 契约。
+- **出口**：repl 不给 `--out` 写 stdout；全屏 `tui` 不给 `--out` 落到当前目录 `chat_export_<UTC 时间戳>.md/.json`（alt-screen 里打几万字既没人读也会刷掉对话）。`--out` 给目录 → 目录 + 默认文件名；给文件名且 `both` → 只换后缀。
+- **落点**：`crabmate-client-api/src/chat_export.rs`（纯逻辑）、`crates/crabmate-tui/src/conv_export.rs`（解析 / 渲染 / 落盘）、`tui_mode/export.rs`（门控 + 报告）、`tui_mode/conv_cmd.rs`（`/conv` 子命令落地）、`serve::fetch_all_pages`、`slash.rs`（repl）；`help.rs` 更新文案。
+- **门控**：回合在跑拒绝（会读到半截会话）、会话未绑定且无 `--id` 拒绝、已有一次导出在途拒绝；回包按 `export_pending` 比对，期间切走则**不写盘**。导出不写会话索引、不动 transcript、不改绑定。
 - **依赖**：会话历史读取端点（与 W2.1 同源）。
+- **未做**：不做 PDF / HTML、不导出图片附件（TUI 的 Markdown 图片本来就降级为 `[图] alt`）、不做导出后上传；不接 `context_inject` 旁注开关（TUI 没有该设置，服务端那两条 `system` 卡片天然被跳过 —— 与 Desktop 的已知差异）。
 
 ### Wave 3 · 锦上添花 / 开放决策
 
@@ -170,7 +176,7 @@
 | W2.1 | L53 Notes「switching sessions starts a fresh transcript」 | 已同步：切换回放最新页 + `/older` 经 `before_index` 前插（80 条/页），并平移工具行 / 搜索行号 |
 | W2.2 | L62「Web session list + resume…」TUI 列/Notes | 删除已补（`Delete` / `Shift+Delete`）；重命名待 serve 端点 |
 | W2.3 | L59「Ask/Plan/Act…」附近或新增行 | 视方案形态在 chat/tools 段新增或并入 Notes |
-| W2.4 | L61 Notes | 补导出能力 |
+| W2.4 | L63「Control slashes」TUI 列/Notes | 已同步：TUI 补 `/conv export [json\|markdown\|both] [--out <路径>] [--id <id>]`（与 Desktop 同一份展示投影）；仍标 `reduced`（无系统文件对话框，路径由用户给） |
 | W3.1 | L60「Control slashes」TUI 列 | 已同步（TUI 有 `/` 补全菜单，含 skills 候选） |
 | W3.2 | L55「`POST /chat/stream` + command approval」TUI Notes | 补 `Ctrl+E` 展开看完整命令（折行 + 滚动）、收起档单行截断 |
 | W3.3 | L53「Full-screen TUI」Notes | 补「< 120 列时左右栏隐藏，当前工作区无指示」（G10，待落地） |
