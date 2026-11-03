@@ -19,6 +19,7 @@ mod body_click;
 mod clipboard;
 // `controls` / `tool_summary` 提到 `pub(crate)`：清除词与控制字符剥离在 crate 根也要用。
 pub(crate) mod controls;
+mod conv_cmd;
 mod ctl;
 mod drafts;
 // `/editor` 的 markdown 预览单独成文件：`editor_view.rs` 与 `md.rs` 都贴着门禁，而这一块
@@ -27,6 +28,8 @@ mod editor_md;
 mod editor_view;
 mod event_loop;
 mod exit_flush;
+// `/conv export` 的门控与报告：`mod.rs` 贴着 920 行门禁，命令本身另有 3 道门要写。
+mod export;
 mod help;
 mod history;
 mod hotkeys;
@@ -206,6 +209,8 @@ struct LaneApp<'a> {
     /// 只置位、不在这里发请求：每条 lane 每轮各发一次 `RefreshSessions` 就是 N 倍
     /// 扇出，外壳按窗口合并后再发（issue #349）。
     session_refresh_pending: bool,
+    /// 在途的 `/conv export`（值＝这次要导的会话 id）：回包靠它判「是不是我这次请求」。
+    export_pending: Option<String>,
     /// 后台 lane 有新输出、用户还没看（左栏那一行的未读点）。由外壳置位 / 清零。
     unread: bool,
     /// 在途回合的开始时刻（左栏显示耗时）；`None` = 空闲。从**发出**算起：首 token 之前的排队与建连同样是等。
@@ -512,22 +517,11 @@ impl LaneApp<'_> {
                 self.st.push_line(LineKind::System, "正在刷新 serve 状态…");
             }
             Control::Settings => self.open_settings(),
-            Control::ConvNew => {
-                self.new_session();
-            }
-            Control::ConvRefresh => {
-                self.refresh_sessions();
-                self.st.push_line(LineKind::System, "正在刷新会话列表…");
-            }
-            Control::ConvUse(id) => {
-                self.switch_to_conv(id, None);
-            }
-            Control::ConvUnknown(arg) => {
-                self.st.push_line(
-                    LineKind::System,
-                    &format!("不支持的 /conv 子命令：{arg}（支持 new / list / use <id>）"),
-                );
-            }
+            other @ (Control::ConvNew
+            | Control::ConvRefresh
+            | Control::ConvUse(_)
+            | Control::ConvUnknown(_)
+            | Control::ConvExport(_)) => self.apply_conv_control(other),
         }
     }
 
@@ -794,6 +788,8 @@ impl LaneApp<'_> {
                 result,
                 snapshot,
             } => history::on_result(self, &conversation_id, before_index, result, snapshot),
+            // 导出正文已在 worker 里渲染好：这里只判「还属不属于当前绑定」再落盘。
+            UiEvent::Exported(done) => export::on_result(self, *done),
             UiEvent::SessionIndex { result, op } => self.on_session_index(result, op),
             UiEvent::Status {
                 conversation_id,

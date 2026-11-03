@@ -104,6 +104,17 @@ pub fn render_artifacts(
     Ok(out)
 }
 
+/// 一次导出任务的结果（worker → UI）：正文已在 worker 里渲染好，写盘留在 UI 线程 ——
+/// 只有那边知道这次导出是否还属于当前会话绑定。
+#[derive(Debug)]
+pub struct ExportDone {
+    pub conversation_id: String,
+    pub out: Option<String>,
+    pub pages: u32,
+    pub messages: usize,
+    pub result: Result<Vec<Artifact>, String>,
+}
+
 /// `~` / `~/…` → `$HOME/…`；`~user` 直接拒绝（要查 passwd / NSS，猜错会静默落进别人的目录）。
 ///
 /// 刻意**不**复用 [`crate::workspace_path::resolve`]：那个路径属于 **serve 主机**
