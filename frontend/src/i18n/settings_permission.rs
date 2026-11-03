@@ -156,6 +156,18 @@ pub fn settings_permission_unknown_level(l: Locale) -> &'static str {
     }
 }
 
+/// 回合进行中不许换档：本轮 `/chat` 已带着开跑时的档位发出去了。
+///
+/// 与 TUI 的 `permission_intent::apply_permission_level` 同一条守卫、同一句口径。
+pub fn settings_permission_turn_running(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "本轮对话进行中：结束后再切换权限等级（本轮沿用开始时的档位）。",
+        Locale::En => {
+            "A turn is running: switch after it finishes (this turn keeps the level it started with)."
+        }
+    }
+}
+
 /// 不带 `agent_role` / `conversation_id` 时显示的说明。
 ///
 /// 设置页只取静态投影，而标签写的是「当前等级」——不说清这一点，用户会把它当成

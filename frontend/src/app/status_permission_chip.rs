@@ -43,6 +43,9 @@ struct LevelSelect {
     selected: RwSignal<Option<String>>,
     owner: RwSignal<Option<String>>,
     chat: Option<ChatSessionSignals>,
+    /// 回合是否在途（与「停止」门闩同源，见 `ChatShellLeptosContext::perm_turn_in_flight`）。
+    /// `None` = 无壳层 ctx（单测 / Story），此时不做忙时守卫。
+    turn_in_flight: Option<Memo<bool>>,
     /// 生效投影（本 chip 自己的缓存，成功写入后用响应刷新）。
     view: RwSignal<Option<PermissionView>>,
     /// 丢弃过期响应（连点两档时只有最后一次落地）。
@@ -170,6 +173,16 @@ fn apply_level(level: &str, sel: LevelSelect) {
         ));
         return;
     };
+    // 回合进行中一律不换档（与 TUI `permission_intent::apply_permission_level` 同一条守卫）：
+    // 本轮 `/chat` 早已带着开跑时的档位发出去了，飞行中的工具不该在一轮内看到两个档位。
+    // **不改意图信号** —— 改了就会随下一轮 `/chat` 发出去，「被拒」于是变成
+    // 「悄悄延后生效」，而那正是 TUI 那个假中间态的 Desktop 版。
+    if sel.turn_in_flight.is_some_and(|m| m.get_untracked()) {
+        sel.note.set(Some(
+            i18n::settings_permission_turn_running(loc).to_string(),
+        ));
+        return;
+    }
     sel.selected.set(Some(level.to_string()));
     sel.note.set(None);
     // 归属记在**选择这一刻**的会话上：之后切走就该清掉，而不是跟着跑到别的会话。
@@ -322,6 +335,7 @@ pub fn StatusPermissionChip(locale: RwSignal<Locale>) -> impl IntoView {
             .map(|c| c.permission_intent_owner)
             .unwrap_or_else(|| RwSignal::new(None)),
         chat: shell.map(|c| c.chat),
+        turn_in_flight: shell.map(|c| c.perm_turn_in_flight),
         view,
         generation,
         note,
@@ -380,6 +394,69 @@ pub fn StatusPermissionChip(locale: RwSignal<Locale>) -> impl IntoView {
 mod tests {
     use super::chip_text;
     use crate::i18n::Locale;
+
+    /// 回合进行中：chip 不换档、**不写意图**，只把原因挂到 `note`（chip 的 title）。
+    ///
+    /// 回归用例：曾经允许回合中换档 —— 意图立刻变、落盘要等这一轮结束，chip 于是
+    /// 一直显示 `意图 → 生效`，读起来像「服务端把我钳制了」。
+    #[test]
+    fn a_running_turn_blocks_the_chip_level_switch() {
+        use leptos::prelude::*;
+
+        use super::{LevelSelect, apply_level};
+
+        let selected = RwSignal::new(None::<String>);
+        let note = RwSignal::new(None::<String>);
+        let sel = LevelSelect {
+            locale: RwSignal::new(Locale::ZhHans),
+            selected,
+            owner: RwSignal::new(None),
+            chat: None,
+            turn_in_flight: Some(Memo::new(move |_| true)),
+            view: RwSignal::new(None),
+            generation: RwSignal::new(0_u32),
+            note,
+        };
+
+        apply_level("unrestricted", sel);
+
+        assert_eq!(
+            selected.get_untracked(),
+            None,
+            "回合中不得改意图：它会随下一轮 /chat 发出去"
+        );
+        assert_eq!(
+            note.get_untracked().as_deref(),
+            Some(crate::i18n::settings_permission_turn_running(
+                Locale::ZhHans
+            )),
+            "被拒必须给出原因"
+        );
+    }
+
+    /// 空闲时照旧写入意图（守卫不能误伤正常路径）。
+    #[test]
+    fn an_idle_turn_still_applies_the_chip_level_switch() {
+        use leptos::prelude::*;
+
+        use super::{LevelSelect, apply_level};
+
+        let selected = RwSignal::new(None::<String>);
+        let sel = LevelSelect {
+            locale: RwSignal::new(Locale::ZhHans),
+            selected,
+            owner: RwSignal::new(None),
+            chat: None,
+            turn_in_flight: Some(Memo::new(move |_| false)),
+            view: RwSignal::new(None),
+            generation: RwSignal::new(0_u32),
+            note: RwSignal::new(None::<String>),
+        };
+
+        apply_level("unrestricted", sel);
+
+        assert_eq!(selected.get_untracked().as_deref(), Some("unrestricted"));
+    }
 
     #[test]
     fn intent_wins_and_both_values_show_when_they_differ() {

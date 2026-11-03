@@ -10,6 +10,7 @@
 use leptos::prelude::*;
 
 use crate::app::app_signals::{AppSignals, ChatComposerSignals};
+use crate::app::turn_lifecycle::turn_lifecycle_stream_turn_busy;
 use crate::chat_session_state::ChatSessionSignals;
 
 /// 聊天域：会话 / 作曲器、界面语言与助手正文过滤（与 [`AppSignals`] 内对应字段同源）。
@@ -32,11 +33,31 @@ pub struct ChatShellLeptosContext {
     /// 放进 ctx 而非各组件自读 thread_local：状态栈的「连接」chip 与设置页的
     /// 「连接」区块必须看到**同一个**值，否则改完基址回到聊天仍是旧 host。
     pub api_base: RwSignal<String>,
+    /// 单轮 `/chat/stream` 是否在途（与 `ChatStreamBusyMemos::stream_turn_busy_ui`
+    /// 同一谓词、同一输入，见 [`Self::from_app_signals`]）。
+    ///
+    /// 权限等级的两个写入入口（底栏 chip 与设置页选择器）用它守卫：回合进行中不换档，
+    /// 因为本轮 `/chat` 早已带着开跑时的档位发出去了，飞行中的工具不该在一轮内看到两个档位。
+    /// 与 TUI 的 `permission_intent::apply_permission_level` 是同一条守卫。
+    pub perm_turn_in_flight: Memo<bool>,
 }
 
 impl ChatShellLeptosContext {
     #[must_use]
     pub fn from_app_signals(app: &AppSignals) -> Self {
+        // 「回合在途」：与 `ChatStreamBusyMemos::stream_turn_busy_ui`
+        // （`chat_session_state::make_chat_stream_busy_memos`）**同一谓词、同一输入**。
+        // 两处各建一个 memo 而不是共享同一个对象：busy memos 在聊天域 wire 之后才有，
+        // 而本 ctx 在 `App` 根就 provide 了。共享的是**判定口径**——改一边必须同时改另一边，
+        // 否则「停止」门闩与权限换档守卫会对同一个回合给出两种答案。
+        let stream = app.stream.clone();
+        let perm_turn_in_flight = Memo::new(move |_| {
+            let _ = stream.stream_abort_epoch.get();
+            turn_lifecycle_stream_turn_busy(
+                stream.turn_lifecycle.get(),
+                stream.abort_cell.lock().unwrap().is_some(),
+            )
+        });
         Self {
             chat: app.chat,
             composer: app.chat_composer,
@@ -46,6 +67,7 @@ impl ChatShellLeptosContext {
             selected_permission_level: app.llm_settings.selected_permission_level,
             permission_intent_owner: app.llm_settings.permission_intent_owner,
             api_base: app.shell_ui.api_base,
+            perm_turn_in_flight,
         }
     }
 }
