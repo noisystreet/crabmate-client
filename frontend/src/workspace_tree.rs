@@ -214,13 +214,27 @@ struct WorkspaceSubtreeSignals {
     locale: RwSignal<Locale>,
 }
 
+/// 文件行上的三个手势回调。
+///
+/// 打包传参而不是三个独立形参：`WorkspaceTreeFileRow` 已经顶着形参数棘轮（`row_class` /
+/// `name` / `rel` / `chrome` / `locale` …），再拆三个就过线了。分开保留是因为它们的**语义**
+/// 不同：双击在 Desktop 上是「在编辑器打开」，`Enter` 仍是「插入 `@` 引用」，单击只在窄屏插引用。
+#[derive(Clone, Copy)]
+struct WorkspaceFileRowHandlers {
+    /// 鼠标双击（`dblclick`）。
+    double_click: StoredValue<Arc<dyn Fn(String) + Send + Sync>>,
+    /// 键盘 `Enter` / `Space`。
+    activate: StoredValue<Arc<dyn Fn(String) + Send + Sync>>,
+    /// 单击。
+    single_click: StoredValue<Arc<dyn Fn(String) + Send + Sync>>,
+}
+
 #[derive(Clone, Copy)]
 struct WorkspaceTreeEnv {
     subtree: WorkspaceSubtreeSignals,
     chrome: WorkspaceTreeChromeSignals,
     create_actions: StoredValue<WorkspaceContextMenuActions>,
-    on_file_double_click: StoredValue<Arc<dyn Fn(String) + Send + Sync>>,
-    on_file_single_click: StoredValue<Arc<dyn Fn(String) + Send + Sync>>,
+    file_handlers: WorkspaceFileRowHandlers,
     workspace_err: RwSignal<Option<String>>,
 }
 
@@ -407,8 +421,7 @@ fn WorkspaceTreeNodes(
                                         parent_rel=parent_for_row.clone()
                                         chrome=env.chrome
                                         locale=env.subtree.locale
-                                        on_file_double_click=env.on_file_double_click
-                                        on_file_single_click=env.on_file_single_click
+                                        handlers=env.file_handlers
                                     />
                                 </Show>
                             </>
@@ -463,8 +476,7 @@ fn WorkspaceTreeFileRow(
     parent_rel: String,
     chrome: WorkspaceTreeChromeSignals,
     locale: RwSignal<Locale>,
-    on_file_double_click: StoredValue<Arc<dyn Fn(String) + Send + Sync>>,
-    on_file_single_click: StoredValue<Arc<dyn Fn(String) + Send + Sync>>,
+    handlers: WorkspaceFileRowHandlers,
 ) -> impl IntoView {
     let rel_dbl = rel.clone();
     let rel_click = rel.clone();
@@ -506,15 +518,17 @@ fn WorkspaceTreeFileRow(
                 if try_consume_suppress_click() {
                     return;
                 }
-                (on_file_single_click.get_value())(rel_click.clone());
+                (handlers.single_click.get_value())(rel_click.clone());
             }
             on:dblclick=move |_| {
-                (on_file_double_click.get_value())(rel_dbl.clone());
+                (handlers.double_click.get_value())(rel_dbl.clone());
             }
             on:keydown=move |ev: web_sys::KeyboardEvent| {
                 if ev.key() == "Enter" || ev.key() == " " {
                     ev.prevent_default();
-                    (on_file_double_click.get_value())(rel_activate.clone());
+                    // 键盘走 `activate`（插路径），不跟鼠标双击共用回调：双击已经改成
+                    // 「在编辑器打开」，纯键盘不该被一起改掉。
+                    (handlers.activate.get_value())(rel_activate.clone());
                     return;
                 }
                 if let Some((x, y)) = crate::a11y::context_menu_keydown_anchor(&ev) {
@@ -752,6 +766,7 @@ pub struct WorkspaceFilesystemTreeInput {
     pub workspace_err: RwSignal<Option<String>>,
     pub create_actions: StoredValue<WorkspaceContextMenuActions>,
     pub on_file_double_click: StoredValue<Arc<dyn Fn(String) + Send + Sync>>,
+    pub on_file_activate: StoredValue<Arc<dyn Fn(String) + Send + Sync>>,
     pub on_file_single_click: StoredValue<Arc<dyn Fn(String) + Send + Sync>>,
 }
 
@@ -768,6 +783,7 @@ pub fn WorkspaceFilesystemTree(input: WorkspaceFilesystemTreeInput) -> impl Into
         workspace_err,
         create_actions,
         on_file_double_click,
+        on_file_activate,
         on_file_single_click,
     } = input;
     let env = WorkspaceTreeEnv {
@@ -779,8 +795,11 @@ pub fn WorkspaceFilesystemTree(input: WorkspaceFilesystemTreeInput) -> impl Into
         },
         chrome,
         create_actions,
-        on_file_double_click,
-        on_file_single_click,
+        file_handlers: WorkspaceFileRowHandlers {
+            double_click: on_file_double_click,
+            activate: on_file_activate,
+            single_click: on_file_single_click,
+        },
         workspace_err,
     };
     let drop_hl = WorkspaceDropHighlight::new();

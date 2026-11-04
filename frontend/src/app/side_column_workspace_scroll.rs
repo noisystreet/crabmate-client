@@ -32,6 +32,7 @@ fn WorkspaceSideCardLoaded(
     locale: RwSignal<Locale>,
     ws: WorkspacePanelSignals,
     insert_workspace_file_ref: StoredValue<Arc<dyn Fn(String) + Send + Sync>>,
+    on_file_double_click: StoredValue<Arc<dyn Fn(String) + Send + Sync>>,
     on_file_single_click: StoredValue<Arc<dyn Fn(String) + Send + Sync>>,
     ctx_actions: StoredValue<WorkspaceContextMenuActions>,
 ) -> impl IntoView {
@@ -76,7 +77,8 @@ fn WorkspaceSideCardLoaded(
                     locale,
                     workspace_err: ws.workspace_err,
                     create_actions: ctx_actions,
-                    on_file_double_click: insert_workspace_file_ref,
+                    on_file_double_click,
+                    on_file_activate: insert_workspace_file_ref,
                     on_file_single_click,
                 } />
                 <WorkspaceContextMenuLayer
@@ -100,6 +102,7 @@ pub(crate) fn WorkspaceSideCardScrollInner(
     locale: RwSignal<Locale>,
     ws: WorkspacePanelSignals,
     insert_workspace_file_ref: StoredValue<Arc<dyn Fn(String) + Send + Sync>>,
+    on_file_double_click: StoredValue<Arc<dyn Fn(String) + Send + Sync>>,
     on_file_single_click: StoredValue<Arc<dyn Fn(String) + Send + Sync>>,
     ctx_actions: StoredValue<WorkspaceContextMenuActions>,
 ) -> impl IntoView {
@@ -113,6 +116,7 @@ pub(crate) fn WorkspaceSideCardScrollInner(
                         locale=locale
                         ws=ws
                         insert_workspace_file_ref=insert_workspace_file_ref
+                        on_file_double_click=on_file_double_click
                         on_file_single_click=on_file_single_click
                         ctx_actions=ctx_actions
                     />
