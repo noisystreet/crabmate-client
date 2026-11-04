@@ -27,10 +27,9 @@ use super::app_shell_effects::{
     wire_connection_status_report, wire_escape_key_layered_dismiss, wire_ide_editor_hotkeys,
     wire_mobile_nav_edge_swipe, wire_mobile_side_edge_swipe, wire_narrow_viewport_layout,
     wire_session_delete_hotkey, wire_settings_llm_drafts_on_open,
-    wire_sidebar_rail_when_ide_layout, wire_sync_bg_decor_to_storage_and_dom,
-    wire_sync_locale_html_lang, wire_sync_session_typography_to_storage_and_dom,
-    wire_sync_tauri_shell_dom, wire_sync_theme_to_storage_and_dom,
-    wire_visual_viewport_keyboard_inset,
+    wire_sync_bg_decor_to_storage_and_dom, wire_sync_locale_html_lang,
+    wire_sync_session_typography_to_storage_and_dom, wire_sync_tauri_shell_dom,
+    wire_sync_theme_to_storage_and_dom, wire_visual_viewport_keyboard_inset,
 };
 use super::app_signals::AppSignals;
 use super::approval_modal::ApprovalModalSignals;
@@ -130,7 +129,6 @@ fn wire_phase1_chat_session_lifecycle(app: &AppSignals) {
 /// 阶段 2：偏好写入 `/user-data/prefs`、与 `document` 同步、设置页 LLM 草稿打开时填充。
 fn wire_phase2_persisted_prefs_dom_and_settings_hooks(app: &AppSignals) {
     crate::user_prefs_sync::wire_persist_user_prefs_to_server(app.clone());
-    wire_sidebar_rail_when_ide_layout(IdeLayoutToggleSignals::from_app_signals(app));
     wire_close_shell_chrome_when_ide_layout(
         app.shell_ui.editor_layout_mode,
         app.sidebar.mobile_nav_open,

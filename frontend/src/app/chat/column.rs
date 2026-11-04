@@ -701,14 +701,16 @@ fn ChatComposerPane(signals: ChatComposerPaneSignals) -> impl IntoView {
 /// 卸载会把 CodeMirror 句柄与已打开的标签一起丢掉，也会让 transcript 的滚动锚点归零。
 /// composer 不进主区——与 TUI 的 `/editor` 视图同一个口径（切视图不打断正在跑的回合）。
 pub fn chat_column_view(shell: ChatColumnShell, ide_body: AnyView) -> impl IntoView {
-    let home_end_nav = ChatColumnHomeEndNav::from_composer(&shell.app.chat_composer);
-    let run_send_clarify_sv = StoredValue::new(shell.run_send_message.clone());
     let editor_open = shell.app.shell_ui.editor_layout_mode;
+    // Home/End 归对话主区：编辑器打开时整列让位（见 `keydown_handler_when_chat_visible`）。
+    let home_end_nav = ChatColumnHomeEndNav::from_composer(&shell.app.chat_composer)
+        .keydown_handler_when_chat_visible(editor_open);
+    let run_send_clarify_sv = StoredValue::new(shell.run_send_message.clone());
     view! {
                 <div
                     class="chat-column"
                     data-testid="chat-column"
-                    on:keydown:capture=home_end_nav.keydown_handler()
+                    on:keydown:capture=home_end_nav
                 >
                     <div class="chat-body">
                         <div
