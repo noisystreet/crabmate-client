@@ -129,6 +129,8 @@ fn merge_rows(rows: Vec<ReplayRow>) -> Vec<DisplayExportMessage> {
                 flush_thinking(&mut out, &mut thinking);
                 out.push(message("user", text, None));
             }
+            // 技能行不进导出件：导出是对话存档，ADR 0003 划的是「主列可见」，不是「导出可见」。
+            ReplayRow::SkillInject(_) => {}
             ReplayRow::Tool { name, body } => {
                 flush_thinking(&mut out, &mut thinking);
                 // 空结果不出一行：Markdown 按 role 分段渲染，一个没有正文的小节只是噪音

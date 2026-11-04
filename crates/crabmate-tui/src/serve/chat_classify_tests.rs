@@ -29,3 +29,21 @@ fn other_timeline_log_kinds_do_not_reset_usage() {
         "只有 context_trim 才能重置水位"
     );
 }
+
+/// `kind=context_inject` 且 `detail.skills` 非空：这一轮确实调用了 skill，要成一行技能行
+/// （对齐 Desktop 的 skill 卡；路径 / `.md` 归一在共享层做）。
+#[test]
+fn context_inject_with_skills_yields_skill_line() {
+    let line = concat!(
+        r#"{"type":"CUSTOM","customType":"timeline_log","data":{"kind":"context_inject","#,
+        r#""title":"本轮已注入上下文","#,
+        r#""detail":"{\"skills\":[\"rust-style\",\".crabmate/skills/code-review.md\"],\"forced\":true}"}}"#
+    );
+    match classify_line(line) {
+        Ok(LineAction::SkillInject(info)) => {
+            assert_eq!(info.skills, vec!["rust-style", "code-review"]);
+            assert!(info.forced);
+        }
+        other => panic!("期望 SkillInject，得到 {other:?}"),
+    }
+}

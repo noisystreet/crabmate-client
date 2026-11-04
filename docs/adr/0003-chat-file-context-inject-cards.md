@@ -47,6 +47,7 @@ Proposed
 - **默认在主列可见**，不受上述「显示每轮注入」开关影响——用户必须能明确确认 skill 确实被调用；导出仍随该开关（避免导出原始 JSON 旁注）。
 - **语义独立于工具卡**：不复用 `ToolCardInput` / `tool_process_body_html`，不显示「助手 / 系统」角色标签，回合 class 为 `chat-tui-turn--skill`；因为 skill 不是 `tool_call`，不得伪装成工具调用。
 - **流式与水合同形**：流式 `title + "\n" + detail` 的 assistant 快照与服务端 `system` marker（`{kind,title,detail}`，`detail` 为 JSON 字符串）共用 `timeline_scan::context_inject_skills` 解析；水合时若服务端已有等价 skill 注入行则丢弃本地快照，避免双卡。
+- **终端形态（TUI）**：解析已下沉 `crates/crabmate-client-api/src/timeline_skill.rs`（Desktop 与 TUI 同一份口径）。TUI 没有卡片，落一行 `✦ 已调用 skill：code-review`（`LineKind::Skill`，前缀 `✦ `、accent 色；多技能按注入顺序以 `、` 连接，`forced` 时尾部「（显式）」）：实时由 `timeline_log` 的 `kind=context_inject` 进 `StreamSink::on_skill_inject`，历史回放由 `ReplayRow::SkillInject` 落同一行文案，两者共用 `tui_mode::skill_line`。技能行**不**进 `/conv export`（导出仍是对话存档）。未对齐项：TUI 的 `show_turn_context_inject` 偏好目前只反序列化、未接线——技能行无条件显示，而无 `skills` 的注入旁注在 TUI 不显示。
 - **无结构化 `skills` 不画卡**：仅 `kinds`（如 `count_hit`）仍走上面的开关旁注路径。
 
 ### 契约与依赖方向

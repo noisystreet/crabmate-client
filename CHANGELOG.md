@@ -11,6 +11,10 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ## [Unreleased]
 
+### Added
+
+- **TUI: a turn that loaded a skill now says which one.** Desktop has drawn a skill card since 0.6.0, but the terminal dropped the `context_inject` event, so 「用了 skill」 was invisible there. It now writes one line — `✦ 已调用 skill：code-review` (`、`-joined, 「（显式）」 when picked with `/<id>`) — for the live turn and for history replay, on the same parse Desktop uses (moved into `crabmate-client-api` so the two cannot drift). Not in `/conv export`: that is a conversation archive. Cost: one transcript line per injected turn; the 「显示每轮注入」 pref stays unwired — skill lines always show, other inject notes still do not. Verified: `crabmate-tui` 1157, `crabmate-client-api` 261, `frontend` 765; not seen in a real terminal. No protocol change.
+
 ### Fixed
 
 - **Desktop: the skill card leads with the skill name instead of a generic title.** The injected-skill card read 「已调用 skill」 and left `code-review` to a small pill behind it, so a glance told you a skill ran but not which one. The name now sits in the title line right after the label (`已调用 skill：code-review`), mono at label weight, with the 「显式」 marker pushed behind it; several skills list in injection order. Cost: none — same `context_inject` parse, no protocol change. Verified: `frontend` tests green; not seen on a real screen.

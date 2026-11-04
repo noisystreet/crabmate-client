@@ -393,6 +393,13 @@ fn rows_to_lines(resp: &ConversationMessagesResponse) -> Vec<(LineKind, String, 
                 let (text, ok) = tool_history_row(&name, &body);
                 (LineKind::Tool, text, ok)
             }
+            // 技能行与实时路径共用 `skill_line` 的文案：同一条注入不能在现场和回放里
+            // 说两种话。
+            ReplayRow::SkillInject(info) => (
+                LineKind::Skill,
+                super::skill_line::skill_line_text(&info),
+                None,
+            ),
         })
         .collect()
 }

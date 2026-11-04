@@ -63,6 +63,7 @@ mod settings_panel;
 mod settings_panel_env;
 mod shell;
 mod sidebar_keys;
+mod skill_line;
 mod slash_menu;
 mod spinner;
 mod state;
@@ -734,6 +735,11 @@ impl LaneApp<'_> {
             } => self.on_usage_hydrated(&conversation_id, snapshot),
             // 压缩 / 裁剪后水位回落（ADR 0005）：只增不减会让数字虚高。
             UiEvent::ContextTrim(after) => self.st.reset_used(after),
+            // 本轮注入的 skill（ADR 0003）：与 Desktop 的 skill 卡同义——只要 detail 里有
+            // skills 就成行，不受「显示每轮注入」开关影响。
+            UiEvent::SkillInject(info) => self
+                .st
+                .push_line(LineKind::Skill, &skill_line::skill_line_text(&info)),
             UiEvent::ToolStart {
                 tool_call_id,
                 name,
