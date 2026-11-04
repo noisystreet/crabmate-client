@@ -161,6 +161,23 @@
   z-index: 45;
 }
 
+/* 主区视图 chip（`chat` / `file`）：与 TUI 状态栈的 `view` 段同一个开关，值同词。
+   它取代了原先顶栏那颗布局按钮 —— 右列在任何布局宽度下都在，这是唯一一个
+   「窄屏 / rail 收起时不用开抽屉也点得到」的入口。 */
+.status-chip-view {
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+.status-chip-view:hover {
+  border-color: color-mix(in srgb, var(--border) 60%, var(--text));
+}
+
+.status-chip-view--active {
+  border-color: color-mix(in srgb, var(--accent) 32%, var(--border));
+  color: var(--accent);
+}
+
 /* 状态栏「思考模式」两态开关（轨道 + 滑块沿用设置页 .settings-model-toggle-* 样式） */
 .status-chip-thinking {
   cursor: pointer;

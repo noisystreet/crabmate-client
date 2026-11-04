@@ -48,20 +48,6 @@ pub fn ide_layout_toggle_aria(l: Locale, editor_layout_mode: bool) -> &'static s
     }
 }
 
-pub fn ide_workspace_title(l: Locale) -> &'static str {
-    match l {
-        Locale::ZhHans => "工作区",
-        Locale::En => "Workspace",
-    }
-}
-
-pub fn ide_open_hint(l: Locale) -> &'static str {
-    match l {
-        Locale::ZhHans => "单击或双击文件在新标签页打开。",
-        Locale::En => "Click or double-click a file to open it in a new tab.",
-    }
-}
-
 pub fn ide_tabs_aria(l: Locale) -> &'static str {
     match l {
         Locale::ZhHans => "已打开文件",

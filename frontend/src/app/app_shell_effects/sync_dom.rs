@@ -127,9 +127,9 @@ pub fn wire_sync_session_typography_to_storage_and_dom(
 }
 
 /// `<html>` 布局标记；Tauri 下始终无边框（Web 顶栏不受影响）。
-pub fn wire_sync_tauri_shell_dom(editor_layout_mode: RwSignal<bool>) {
-    Effect::new(move |_| {
-        shell_prefs_storage::apply_shell_layout_dom_flags(editor_layout_mode.get());
+pub fn wire_sync_tauri_shell_dom() {
+    Effect::new(|_| {
+        shell_prefs_storage::apply_shell_layout_dom_flags();
     });
     Effect::new(|_| {
         crate::tauri_shell::tauri_apply_frameless_window_chrome();

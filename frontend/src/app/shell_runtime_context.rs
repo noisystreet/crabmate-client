@@ -10,6 +10,7 @@
 use leptos::prelude::*;
 
 use crate::app::app_signals::{AppSignals, ChatComposerSignals};
+use crate::app::ide_layout_switch::IdeLayoutToggleSignals;
 use crate::app::turn_lifecycle::turn_lifecycle_stream_turn_busy;
 use crate::chat_session_state::ChatSessionSignals;
 
@@ -40,6 +41,12 @@ pub struct ChatShellLeptosContext {
     /// 因为本轮 `/chat` 早已带着开跑时的档位发出去了，飞行中的工具不该在一轮内看到两个档位。
     /// 与 TUI 的 `permission_intent::apply_permission_level` 是同一条守卫。
     pub perm_turn_in_flight: Memo<bool>,
+    /// 对话 / 编辑器主区切换（同源 `AppSignals::shell_ui.editor_layout_mode`）。
+    ///
+    /// 状态栈的 `view` chip 与 TUI 的 `view` 段是同一个开关：读它决定显示 `chat` / `file`，
+    /// 写它切换主区。走 ctx 而不是再穿一层 props —— 状态栈挂在右列深处，
+    /// 与 `side_status_stack_view` 里已有的 ctx 消费方同一口径。
+    pub layout_toggle: IdeLayoutToggleSignals,
 }
 
 impl ChatShellLeptosContext {
@@ -68,6 +75,7 @@ impl ChatShellLeptosContext {
             permission_intent_owner: app.llm_settings.permission_intent_owner,
             api_base: app.shell_ui.api_base,
             perm_turn_in_flight,
+            layout_toggle: IdeLayoutToggleSignals::from_app_signals(app),
         }
     }
 }

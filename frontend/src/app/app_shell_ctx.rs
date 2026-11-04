@@ -27,7 +27,6 @@ use crate::app_prefs::SidePanelView;
 use super::app_signals::AppSignals;
 use super::chat::ChatColumnShell;
 use super::context_usage_page::ContextUsagePageViewInput;
-use super::ide_layout_switch::IdeLayoutToggleSignals;
 use super::ide_settings_page::IdeSettingsPageViewInput;
 use super::settings_page::{SettingsPageFormSignals, SettingsPageViewInput};
 use super::status_tasks_state::StatusTasksSignals;
@@ -43,7 +42,6 @@ pub struct MobileShellHeaderSignals {
     pub editor_layout_mode: RwSignal<bool>,
     pub is_narrow_viewport: RwSignal<bool>,
     pub ide_menu_bar_bridge: RwSignal<Option<super::ide_menu_bar::IdeMenuBarBridge>>,
-    pub layout_toggle: IdeLayoutToggleSignals,
     pub workspace_pick: super::workspace_root_actions::WorkspaceRootPickHandle,
     pub ide_menubar_dropdown_open: RwSignal<bool>,
     /// 迷你运行点兜底：右列抽屉收起时在顶栏展示运行态色点，点击打开工作区抽屉。
@@ -311,7 +309,6 @@ impl AppShellCtx {
             editor_layout_mode: self.signals.shell_ui.editor_layout_mode,
             is_narrow_viewport: self.signals.shell_ui.is_narrow_viewport,
             ide_menu_bar_bridge: self.signals.shell_ui.ide_menu_bar_bridge,
-            layout_toggle: IdeLayoutToggleSignals::from_app_signals(&self.signals),
             workspace_pick: super::workspace_root_actions::WorkspaceRootPickHandle {
                 locale: self.signals.shell_ui.locale,
                 chat: self.signals.chat,

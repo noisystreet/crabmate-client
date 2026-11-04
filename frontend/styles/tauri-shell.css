@@ -69,34 +69,27 @@ html[data-tauri-shell] .shell-main-header-mobile.shell-topbar {
   display: grid !important;
 }
 
-/* 会话模式：侧栏品牌区不再承担窗口拖拽（全宽顶栏已覆盖） */
-html[data-tauri-shell]:not([data-ide-layout]) .nav-rail-brand {
+/* 侧栏品牌区不再承担窗口拖拽（全宽顶栏已覆盖）；编辑器只占主区，侧栏一直存在，
+   所以这里不再区分「是否 IDE 布局」。 */
+html[data-tauri-shell] .nav-rail-brand {
   -webkit-app-region: no-drag;
 }
 
-html[data-tauri-shell][data-ide-layout] .ide-layout-left-chrome .nav-rail-brand {
-  -webkit-app-region: drag;
-}
-
-html[data-tauri-shell][data-ide-layout] .ide-layout-left-chrome .nav-rail-brand-main {
-  -webkit-app-region: no-drag;
-}
-
-html[data-tauri-shell]:not([data-ide-layout]) .side-column .shell-main-toolbar,
-html[data-tauri-shell]:not([data-ide-layout]) .shell-main-toolbar--rail-float {
+html[data-tauri-shell] .side-column .shell-main-toolbar,
+html[data-tauri-shell] .shell-main-toolbar--rail-float {
   -webkit-app-region: drag;
   padding-right: 10px;
 }
 
-html[data-tauri-shell]:not([data-ide-layout]) .side-column .shell-main-toolbar button,
-html[data-tauri-shell]:not([data-ide-layout]) .side-column .shell-main-toolbar .toolbar-view-wrap,
-html[data-tauri-shell]:not([data-ide-layout]) .shell-main-toolbar--rail-float button,
-html[data-tauri-shell]:not([data-ide-layout]) .shell-main-toolbar--rail-float .toolbar-view-wrap {
+html[data-tauri-shell] .side-column .shell-main-toolbar button,
+html[data-tauri-shell] .side-column .shell-main-toolbar .toolbar-view-wrap,
+html[data-tauri-shell] .shell-main-toolbar--rail-float button,
+html[data-tauri-shell] .shell-main-toolbar--rail-float .toolbar-view-wrap {
   -webkit-app-region: no-drag;
 }
 
 /* 侧栏收起时：浮动工具条避开全宽顶栏 */
-html[data-tauri-shell]:not([data-ide-layout]) .shell-main-toolbar--rail-float {
+html[data-tauri-shell] .shell-main-toolbar--rail-float {
   top: calc(var(--shell-topbar-h) + max(10px, env(safe-area-inset-top, 0px)));
 }
 

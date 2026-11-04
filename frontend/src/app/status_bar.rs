@@ -22,6 +22,7 @@ use super::status_agent_role_menu::{AgentRoleMenuProps, StatusAgentRoleMenu};
 use super::status_context::{StatusBarContextChip, observe_context_watermark};
 use super::status_fetch_state::status_bar_should_show_skeleton;
 use super::status_tasks_state::StatusTasksSignals;
+use super::status_view_chip::StatusViewChip;
 
 // ---- 类名契约（状态 → 类名）----
 // 集中构造，避免同一类名在多个组件里就地手写；与 `styles/status.css` 选择器一一对应，改动须同步下方单测。
@@ -352,6 +353,8 @@ fn StatusBarChipsLoaded(
                 locale=locale
                 context_usage_page=context_usage_page
             />
+            // 主区视图开关：排在权限段之后、与 TUI 状态栈的 `view` 段同一个位置口径。
+            <StatusViewChip />
         </>
     }
 }

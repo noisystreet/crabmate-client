@@ -18,10 +18,6 @@ html[data-cm-mobile-shell] {
   );
 }
 
-html[data-cm-mobile-shell] .shell-topbar-layout-start {
-  display: none !important;
-}
-
 html[data-cm-mobile-shell] .shell-topbar {
   padding-top: max(
     var(--cm-safe-top),
@@ -90,10 +86,6 @@ html[data-cm-mobile-shell] .shell-topbar {
   gap: 0.1rem;
   flex-shrink: 0;
   min-width: max-content;
-}
-
-.shell-topbar-layout-start {
-  padding-right: 0.15rem;
 }
 
 /* 顶栏正中：工作区根路径（只读标题；相对视口居中） */
@@ -181,17 +173,6 @@ html[data-cm-mobile-shell] .shell-topbar {
 .shell-topbar-end .btn-sm {
   min-height: 1.75rem;
   padding-block: 0;
-}
-
-.shell-topbar .layout-mode-toggle-btn,
-.shell-topbar .shell-topbar-layout-toggle {
-  width: 2rem;
-  min-width: 2rem;
-  min-height: 1.75rem;
-  margin: 0;
-  padding: 0;
-  line-height: 1;
-  flex-shrink: 0;
 }
 
 .shell-topbar .tauri-window-controls {

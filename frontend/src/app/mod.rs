@@ -19,15 +19,16 @@ pub(crate) mod focusable_menu;
 mod github_embed_page;
 mod github_wiring;
 mod ide_confirm_dialog;
+mod ide_editor_body;
 mod ide_editor_pane;
 mod ide_find_bar;
-mod ide_layout;
 mod ide_layout_switch;
 mod ide_menu_bar;
 mod ide_new_file_modal;
+mod ide_session;
 mod ide_settings_page;
 mod ide_tabs_bar;
-mod layout_mode_segment;
+mod layout_toggle_hotkey;
 mod mobile_shell_header;
 mod nav_rail_connections;
 mod session_list_modal;
@@ -63,6 +64,7 @@ mod status_permission_chip;
 mod status_session_mode_seg;
 mod status_tasks_state;
 mod status_tasks_wiring;
+mod status_view_chip;
 mod tauri_window_controls;
 mod web_api_bearer_recovery;
 mod wire_workspace_domain;
@@ -84,9 +86,11 @@ use chat::ChatFindBar;
 use chat::chat_column_view;
 use context_usage_page::ContextUsagePageView;
 use ide_confirm_dialog::IdeConfirmDialog;
-use ide_layout::{IdeLayoutShellSignals, IdeLayoutView};
+use ide_editor_body::IdeEditorBody;
 use ide_layout_switch::IdeLayoutToggleSignals;
+use ide_session::{IdeSession, IdeSessionInput};
 use ide_settings_page::IdeSettingsPageView;
+use layout_toggle_hotkey::wire_layout_toggle_hotkey;
 use mobile_shell_header::mobile_shell_header_view;
 use session_list_modal::session_list_modal_view;
 use settings_page::SettingsPageView;
@@ -100,17 +104,17 @@ use workspace_project_modal::workspace_project_modal_view;
 
 use leptos::prelude::*;
 
-/// 根容器类名：随折叠 / 贴边 / IDE 布局变化（集中计算，减少 App 内 reactive 闭包数）。
-fn app_root_class_name(collapsed: bool, snap: bool, ide_layout: bool) -> String {
+/// 根容器类名：随折叠 / 贴边变化（集中计算，减少 App 内 reactive 闭包数）。
+///
+/// 编辑器不再挂在根容器上：它只替换聊天列主区（与 TUI `/editor` 同一位置口径），
+/// 侧栏与右列照旧，所以没有 `app-root--ide-layout` 这一档了。
+fn app_root_class_name(collapsed: bool, snap: bool) -> String {
     let mut c = String::from("app-root app-shell-ds");
     if collapsed {
         c.push_str(" sidebar-rail-collapsed");
     }
     if snap {
         c.push_str(" sidebar-rail-snap");
-    }
-    if ide_layout {
-        c.push_str(" app-root--ide-layout");
     }
     c
 }
@@ -127,11 +131,10 @@ fn shell_main_hidden(
 #[component]
 fn SidebarRailRevealBtn(
     sidebar_rail_collapsed: RwSignal<bool>,
-    editor_layout_mode: RwSignal<bool>,
     locale: RwSignal<Locale>,
 ) -> impl IntoView {
     view! {
-        <Show when=move || sidebar_rail_collapsed.get() && !editor_layout_mode.get()>
+        <Show when=move || sidebar_rail_collapsed.get()>
             <button
                 type="button"
                 class="btn btn-secondary sidebar-rail-reveal-btn"
@@ -163,13 +166,31 @@ pub fn App() -> impl IntoView {
     let sidebar_nav_signals = app_ctx.sidebar_nav_signals();
     let side_column_view_signals = app_ctx.side_column_view_signals();
 
+    // IDE 会话（状态 + 副作用）在这里建一次：视图挂在聊天列主区里，切回聊天也不丢状态。
+    let layout_toggle = IdeLayoutToggleSignals::from_app_signals(&app_ctx.signals);
+    wire_layout_toggle_hotkey(layout_toggle);
+    let ide_session = IdeSession::new(IdeSessionInput {
+        locale: app_ctx.signals.shell_ui.locale,
+        shell_ui: app_ctx.signals.shell_ui,
+        chrome: app_ctx.signals.ide_chrome,
+        editor: app_ctx.signals.ide_editor,
+        layout_toggle,
+        ide_settings_page: app_ctx.signals.modal.ide_settings_page,
+        chat: app_ctx.signals.chat,
+        composer_draft: app_ctx.signals.chat_composer.draft,
+        workspace_panel: app_ctx.signals.to_workspace_panel(),
+        refresh_workspace: app_ctx.refresh_workspace.clone(),
+        initialized: app_ctx.signals.initialized,
+        editor_visible: app_ctx.signals.shell_ui.editor_layout_mode,
+    });
+    let ide_body_view: AnyView = view! { <IdeEditorBody signals=ide_session.body() /> }.into_any();
+
     view! {
         <div
             class=move || {
                 app_root_class_name(
                     app_ctx.signals.sidebar.sidebar_rail_collapsed.get(),
                     app_ctx.signals.sidebar.sidebar_rail_snap.get(),
-                    app_ctx.signals.shell_ui.editor_layout_mode.get(),
                 )
             }
         >
@@ -177,7 +198,6 @@ pub fn App() -> impl IntoView {
 
             <SidebarRailRevealBtn
                 sidebar_rail_collapsed=app_ctx.signals.sidebar.sidebar_rail_collapsed
-                editor_layout_mode=app_ctx.signals.shell_ui.editor_layout_mode
                 locale=app_ctx.signals.shell_ui.locale
             />
 
@@ -191,7 +211,6 @@ pub fn App() -> impl IntoView {
                         app_ctx.signals.modal.context_usage_page,
                     )
                 }
-                class:shell-main--ide-layout=move || app_ctx.signals.shell_ui.editor_layout_mode.get()
             >
                 {mobile_shell_header_view(mobile_shell_header_signals)}
 
@@ -203,37 +222,9 @@ pub fn App() -> impl IntoView {
                     class:main-row-resizing=move || app_ctx.signals.resize.side_resize_dragging.get()
                     class="main-row"
                 >
-                    <div
-                        class="main-row-chat-layer"
-                        class:main-row-chat-layer--hidden=move || {
-                            app_ctx.signals.shell_ui.editor_layout_mode.get()
-                        }
-                    >
-                        {chat_column_view(app_ctx.chat_column.clone())}
+                    <div class="main-row-chat-layer">
+                        {chat_column_view(app_ctx.chat_column.clone(), ide_body_view)}
                         {side_column_view(side_column_view_signals.clone())}
-                    </div>
-                    <div
-                        class="main-row-ide-layer"
-                        class:main-row-ide-layer--hidden=move || {
-                            !app_ctx.signals.shell_ui.editor_layout_mode.get()
-                        }
-                    >
-                        <IdeLayoutView shell=IdeLayoutShellSignals {
-                            locale: app_ctx.signals.shell_ui.locale,
-                            shell_ui: app_ctx.signals.shell_ui,
-                            chrome: app_ctx.signals.ide_chrome,
-                            editor: app_ctx.signals.ide_editor,
-                            layout_toggle: IdeLayoutToggleSignals::from_app_signals(&app_ctx.signals),
-                            ide_settings_page: app_ctx.signals.modal.ide_settings_page,
-                            ide_menubar_dropdown_open: app_ctx.signals.shell_ui.ide_menubar_dropdown_open,
-                            chat: app_ctx.signals.chat,
-                            composer_draft: app_ctx.signals.chat_composer.draft,
-                            workspace_panel: app_ctx.signals.to_workspace_panel(),
-                            refresh_workspace: app_ctx.refresh_workspace.clone(),
-                            initialized: app_ctx.signals.initialized,
-                            editor_visible: app_ctx.signals.shell_ui.editor_layout_mode,
-                            insert_workspace_file_ref: app_ctx.insert_workspace_file_ref,
-                        } />
                     </div>
                 </div>
             </div>
@@ -247,6 +238,8 @@ pub fn App() -> impl IntoView {
             {workspace_browser_pick_modal_view(workspace_browser_pick_modal_signals)}
 
             {changelist_modal_view(changelist_modal_signals)}
+
+            {ide_session.modals_view()}
 
             <ApprovalModal signals=approval_modal_signals />
 

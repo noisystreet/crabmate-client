@@ -1,142 +1,22 @@
-/* IDE 布局：主区内工作区 + 编辑器 */
+/* IDE 编辑器体：只占聊天列主区（与 TUI `/editor` 同一位置口径）。
+   标签栏 / 查找条 / CodeMirror 都在这里；整屏 IDE 布局、左工作区树与叠层已删除。 */
 
-/* 与 `SideColumnViewSignals` 内 `Rc` 等非 Send 类型兼容：两态同挂载，叠层 + 轻量淡入淡出（勿用 `Show` 包裹含侧栏的子视图）。 */
-.shell-main .main-row {
-  position: relative;
-}
-
-.main-row-chat-layer,
-.main-row-ide-layer {
-  position: absolute;
-  inset: 0;
+/* 对话层：主区里唯一的常驻层 —— 编辑器替换的是聊天列主区（见 `layout-chat.css`
+   的 `.chat-body`），不再是叠在主区上的第二层，所以这里没有显隐与过渡了。 */
+.main-row-chat-layer {
   display: flex;
-  flex: none;
-  min-height: 0;
+  flex: 1;
   min-width: 0;
+  min-height: 0;
   align-items: stretch;
-  opacity: 1;
-  visibility: visible;
-  pointer-events: auto;
-  z-index: 1;
-  transition: opacity var(--dur-layout-mode) var(--ease-out-soft);
 }
 
-.main-row-chat-layer--hidden,
-.main-row-ide-layer--hidden {
-  opacity: 0;
-  visibility: hidden;
-  pointer-events: none;
-  z-index: 0;
-  transition:
-    opacity var(--dur-layout-mode) var(--ease-out-soft),
-    visibility 0s linear var(--dur-layout-mode);
-}
-
-.main-row-chat-layer:not(.main-row-chat-layer--hidden),
-.main-row-ide-layer:not(.main-row-ide-layer--hidden) {
-  transition:
-    opacity var(--dur-layout-mode) var(--ease-out-soft),
-    visibility 0s linear 0s;
-}
-
-.shell-main--ide-layout .main-row {
+/* 编辑器体：标签栏 + 编辑区纵向撑满聊天列主区 */
+.ide-editor-body {
+  display: flex;
   flex: 1;
-  min-height: 0;
-  display: flex;
-}
-
-/* 窄屏 IDE：左栏（品牌 + 工作区）与编辑器纵向堆叠 */
-@media (max-width: 768px) {
-  .ide-layout-body {
-    flex-direction: column;
-  }
-
-  .ide-layout-left {
-    width: 100%;
-    min-width: 0;
-    max-width: none;
-    max-height: min(42vh, 360px);
-    flex-shrink: 0;
-  }
-
-  /* 窄屏纵向堆叠时给编辑器保留足够高度，避免被左栏压得过矮 */
-  .ide-layout-right {
-    flex: 1;
-    min-height: min(48vh, 320px);
-  }
-}
-
-.ide-layout-root {
-  display: flex;
   flex-direction: column;
-  flex: 1;
   min-width: 0;
-  min-height: 0;
-  gap: 0;
-}
-
-/* 顶栏菜单 / 文件路径样式见 `shell-topbar.css`（会话与 IDE 共用） */
-
-.ide-layout-body {
-  display: flex;
-  flex: 1;
-  min-height: 0;
-  min-width: 0;
-}
-
-.ide-layout-left {
-  width: var(--nav-rail-w);
-  min-width: var(--nav-rail-w);
-  max-width: var(--nav-rail-w);
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  border-right: 1px solid var(--border);
-  background: var(--nav-rail-bg);
-  min-height: 0;
-}
-
-.ide-layout-left-chrome {
-  flex-shrink: 0;
-  border-bottom: 1px solid var(--border-subtle);
-  background: var(--nav-rail-bg);
-}
-
-.ide-layout-left-chrome .nav-rail-brand {
-  padding-bottom: 6px;
-}
-
-.ide-layout-left-head {
-  padding: 0.65rem 0.75rem 0.35rem;
-  border-bottom: 1px solid var(--border-subtle);
-}
-
-.ide-pane-title {
-  font-weight: 600;
-  font-size: var(--text-base);
-}
-
-.ide-open-hint {
-  margin: 0.35rem 0 0;
-  font-size: var(--text-sm);
-  opacity: 0.78;
-  line-height: 1.35;
-}
-
-.ide-workspace-scroll {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-  padding: 0.35rem 0.5rem 0.75rem;
-  display: flex;
-  flex-direction: column;
-}
-
-.ide-layout-right {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
   min-height: 0;
 }
 

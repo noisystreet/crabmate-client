@@ -152,7 +152,7 @@ pub(crate) fn apply_loaded_prefs_to_dom(app: &AppSignals) {
         &app.shell_ui.session_chat_font.get_untracked(),
         app.shell_ui.session_chat_font_size.get_untracked(),
     );
-    apply_shell_layout_dom_flags(app.shell_ui.editor_layout_mode.get_untracked());
+    apply_shell_layout_dom_flags();
 }
 
 /// 会话模式界面 / 聊天列字体与字号：在 `<html>` 上维护 `--crabmate-ui-font-family` /
@@ -238,8 +238,12 @@ pub(crate) fn read_agent_role_initial() -> Option<String> {
     None
 }
 
-/// Tauri 壳标记与 IDE 布局标记（`data-tauri-shell` / `data-ide-layout`：窗口装饰与菜单栏拖拽，不隐藏 Web 顶栏）。
-pub(crate) fn apply_shell_layout_dom_flags(editor_layout_mode: bool) {
+/// Tauri 壳标记（`data-tauri-shell`：窗口装饰，不隐藏 Web 顶栏）。
+///
+/// 原先还有 `data-ide-layout`：整屏编辑器替换主区时，CSS 靠它隐藏会话侧栏、
+/// 把窗口拖拽区让给左工作区树。编辑器改为只占聊天主区后两个前提都不成立，
+/// 标记随之删除 —— 留一个没人读的属性只会让下一个人以为它还在起作用。
+pub(crate) fn apply_shell_layout_dom_flags() {
     let Some(doc) = web_sys::window().and_then(|w| w.document()) else {
         return;
     };
@@ -250,11 +254,6 @@ pub(crate) fn apply_shell_layout_dom_flags(editor_layout_mode: bool) {
         let _ = root.set_attribute("data-tauri-shell", "");
     } else {
         let _ = root.remove_attribute("data-tauri-shell");
-    }
-    if editor_layout_mode {
-        let _ = root.set_attribute("data-ide-layout", "");
-    } else {
-        let _ = root.remove_attribute("data-ide-layout");
     }
 }
 
