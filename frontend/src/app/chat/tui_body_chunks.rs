@@ -189,6 +189,9 @@ fn user_text_body_chunks(
 }
 
 /// skill 调用卡：语义独立于工具卡，明确告知本轮确实调用了 skill（不得伪装成 `tool_call`）。
+///
+/// 卡片主体是 skill 名称——标签只作弱色前缀，名称紧跟其后排在标题行内
+/// （读作「已调用 skill：code-review」），避免只剩一个泛化标题。
 fn skill_inject_card_html(info: &crate::timeline_scan::SkillInjectInfo, locale: Locale) -> String {
     let label = plaintext_to_safe_html(crate::i18n::msg_skill_inject_card_label(locale));
     let forced = if info.forced {
@@ -210,7 +213,7 @@ fn skill_inject_card_html(info: &crate::timeline_scan::SkillInjectInfo, locale: 
         "<div class=\"chat-tui-skill-inject\" data-testid=\"chat-tui-skill-inject\">\
          <span class=\"chat-tui-skill-inject-mark\" aria-hidden=\"true\">✦</span>\
          <span class=\"chat-tui-skill-inject-label\">{label}</span>\
-         {forced}{chips}</div>"
+         {chips}{forced}</div>"
     )
 }
 

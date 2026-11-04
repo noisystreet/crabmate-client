@@ -279,8 +279,12 @@ fn skill_inject_turn_renders_dedicated_card_without_role_label() {
         output.contains("data-testid=\"chat-tui-skill-inject\""),
         "got {output}"
     );
-    assert!(output.contains("已调用 skill"), "got {output}");
+    assert!(output.contains("已调用 skill："), "got {output}");
     assert!(output.contains("rust-style"), "got {output}");
+    // 名称紧跟标签排在标题行内，且排在「显式」标记之前：卡片主体是 skill 名称。
+    let chip_at = output.find("chat-tui-skill-inject-chip").expect("chip");
+    let forced_at = output.find("chat-tui-skill-inject-forced").expect("forced");
+    assert!(chip_at < forced_at, "got {output}");
     assert!(
         output.contains("chat-tui-skill-inject-forced"),
         "got {output}"

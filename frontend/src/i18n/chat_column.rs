@@ -232,11 +232,11 @@ pub fn msg_skill_invoke_suffix(l: Locale) -> &'static str {
     }
 }
 
-/// 聊天主列 skill 调用卡：标题（明确告知本轮确实调用了 skill）。
+/// 聊天主列 skill 调用卡：名称前的弱色前缀；卡片主体是紧跟其后的 skill 名称。
 pub fn msg_skill_inject_card_label(l: Locale) -> &'static str {
     match l {
-        Locale::ZhHans => "已调用 skill",
-        Locale::En => "Skill invoked",
+        Locale::ZhHans => "已调用 skill：",
+        Locale::En => "Skill invoked: ",
     }
 }
 
