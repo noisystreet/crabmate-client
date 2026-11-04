@@ -13,9 +13,13 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Added
 
+- **TUI: the `/` menu now offers `/fold` `/copy` `/ctl` `/editor` `/chat`.** Each had a handler and a `/help` line but no completion item, so they were only findable by reading help. A second test now pins the reverse direction — every parsable primary command must have a menu item — because the old one only checked that an offered item parses. Cost: none; aliases (`/cd` `/yank` `/view` …) still only parse. Verified: `crabmate-tui` tests green. No protocol change.
+
 - **TUI: a turn that loaded a skill now says which one.** Desktop has drawn a skill card since 0.6.0, but the terminal dropped the `context_inject` event, so 「用了 skill」 was invisible there. It now writes one line — `✦ 已调用 skill：code-review` (`、`-joined, 「（显式）」 when picked with `/<id>`) — for the live turn and for history replay, on the same parse Desktop uses (moved into `crabmate-client-api` so the two cannot drift). Not in `/conv export`: that is a conversation archive. Cost: one transcript line per injected turn; the 「显示每轮注入」 pref stays unwired — skill lines always show, other inject notes still do not. Verified: `crabmate-tui` 1157, `crabmate-client-api` 261, `frontend` 765; not seen in a real terminal. No protocol change.
 
 ### Fixed
+
+- **TUI repl: `/perm` was listed in `/help` but never ran.** The line-mode dispatcher recognised only `resume` / `model` / `mode` / `role`, so `/perm read` fell through to the control-slash handler — which lists `perm` in its intercept set but has no arm for it — and answered 「unknown control slash /perm」. `perm` is now dispatched like `mode` / `role`: local intent, persisted to the session when one is bound. Verified: `crabmate-tui` tests green; not tried in a live repl. No protocol change.
 
 - **Desktop: the skill card leads with the skill name instead of a generic title.** The injected-skill card read 「已调用 skill」 and left `code-review` to a small pill behind it, so a glance told you a skill ran but not which one. The name now sits in the title line right after the label (`已调用 skill：code-review`), mono at label weight, with the 「显式」 marker pushed behind it; several skills list in injection order. Cost: none — same `context_inject` parse, no protocol change. Verified: `frontend` tests green; not seen on a real screen.
 

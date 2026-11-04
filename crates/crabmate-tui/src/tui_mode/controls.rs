@@ -114,6 +114,51 @@ pub fn set_mode_field(slot: &mut Option<String>, arg: Option<String>) -> String 
     }
 }
 
+/// [`parse_control`] 认得的全部 head（含别名），仅测试用。
+///
+/// `bool` = 是否是**主命令**：主命令必须有补全菜单项（`slash_menu::builtin_items`），
+/// 别名（`/h` `/cd` `/yank` …）只在解析器里存在、菜单不单列。
+///
+/// 这张表与 `parse_control` 的 `match` 是两份，靠两个测试从两侧夹住：
+/// `head_spec_matches_parser`（表里每个都要能解析）与
+/// `slash_menu::tests::every_parsable_command_is_reachable_from_the_menu`（主命令都要在菜单里）。
+/// **已知盲区**：新增命令只改 `match` 不改这里时两条测试都仍然通过 —— 清单不会自己长出来，
+/// 所以改 `match` 时必须同时改这张表。
+#[cfg(test)]
+pub const HEAD_SPEC: &[(&str, bool)] = &[
+    ("quit", true),
+    ("exit", false),
+    ("q", false),
+    ("help", true),
+    ("h", false),
+    ("model", true),
+    ("mode", true),
+    ("role", true),
+    ("perm", true),
+    ("status", true),
+    ("settings", true),
+    ("workspace", true),
+    ("cd", false),
+    ("resume", true),
+    ("older", true),
+    ("history", false),
+    ("find", true),
+    ("search", false),
+    ("grep", false),
+    ("fold", true),
+    ("unfold", false),
+    ("background", true),
+    ("bg", false),
+    ("copy", true),
+    ("yank", false),
+    ("ctl", true),
+    ("lane", true),
+    ("editor", true),
+    ("view", false),
+    ("chat", true),
+    ("conv", true),
+];
+
 /// 解析控制斜杠：`/model [x]` `/mode [ask|plan|act]` `/role [id]` `/status`
 /// `/find [词]` `/help` `/conv`(刷新) `/conv new` `/quit`（`/exit`、`/q` 同义）
 /// `/workspace [路径]`（`/cd` 别名）`/settings` `/resume`。
@@ -196,6 +241,17 @@ pub fn conv_unknown_message(arg: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `HEAD_SPEC` 里的每个 head 都必须仍能被解析：清单过期时先在这里失败。
+    #[test]
+    fn head_spec_matches_parser() {
+        for (head, _) in HEAD_SPEC {
+            assert!(
+                parse_control(&format!("/{head}")).is_some(),
+                "HEAD_SPEC 里的 /{head} 已不是可解析命令（清单过期）"
+            );
+        }
+    }
 
     #[test]
     fn parse_control_known_slashes() {
