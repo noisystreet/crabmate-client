@@ -33,6 +33,27 @@ fn home_end_ignore_for_form_like_target(he: &web_sys::HtmlElement) -> bool {
 }
 
 impl ChatColumnHomeEndNav {
+    /// 只在对话主区生效的 Home/End：编辑器视图打开时整列让位。
+    ///
+    /// 编辑器（`IdeEditorBody`）挂在同一个 `.chat-column` 里，所以这个 capture 级处理器
+    /// 会一并看到它的按键。正文区 `.cm-content` 是 contenteditable，已被
+    /// [`home_end_ignore_for_form_like_target`] 放过（编辑本身不受影响）；但标签栏按钮这
+    /// 类非输入元素不在那份名单里 —— 那时按 Home/End 会 `preventDefault` 并去滚动一个
+    /// 看不见的 transcript，操作者的感受就是「按键没反应」。所以按视图整体让位，
+    /// 而不是继续往名单里补元素。
+    pub fn keydown_handler_when_chat_visible(
+        self,
+        editor_open: RwSignal<bool>,
+    ) -> impl Fn(web_sys::KeyboardEvent) + Clone + 'static {
+        let inner = self.keydown_handler();
+        move |ev: web_sys::KeyboardEvent| {
+            if editor_open.get_untracked() {
+                return;
+            }
+            inner(ev);
+        }
+    }
+
     pub fn keydown_handler(self) -> impl Fn(web_sys::KeyboardEvent) + Clone + 'static {
         move |ev: web_sys::KeyboardEvent| {
             let key = ev.key();

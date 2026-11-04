@@ -77,11 +77,7 @@
       border-color 0.2s ease;
   }
 
-  /* 退出 IDE 回到对话：侧栏宽度瞬时到位，避免 0→全宽「弹出」 */
-  .app-root.app-shell-ds.sidebar-rail-snap .nav-rail {
-    transition: none !important;
-  }
-
+  /* 侧栏折叠：宽度归零（不改偏好，直接由标志位驱动） */
   .app-root.app-shell-ds.sidebar-rail-collapsed .nav-rail {
     width: 0 !important;
     min-width: 0;

@@ -104,17 +104,15 @@ use workspace_project_modal::workspace_project_modal_view;
 
 use leptos::prelude::*;
 
-/// 根容器类名：随折叠 / 贴边变化（集中计算，减少 App 内 reactive 闭包数）。
+/// 根容器类名：随侧栏折叠 / 贴边变化（集中计算，减少 App 内 reactive 闭包数）。
 ///
 /// 编辑器不再挂在根容器上：它只替换聊天列主区（与 TUI `/editor` 同一位置口径），
-/// 侧栏与右列照旧，所以没有 `app-root--ide-layout` 这一档了。
-fn app_root_class_name(collapsed: bool, snap: bool) -> String {
+/// 侧栏与右列照旧，所以没有 `app-root--ide-layout` 这一档，也没有「切换视图时抑制
+/// 侧栏宽度过渡」的 `sidebar-rail-snap` 了。
+fn app_root_class_name(collapsed: bool) -> String {
     let mut c = String::from("app-root app-shell-ds");
     if collapsed {
         c.push_str(" sidebar-rail-collapsed");
-    }
-    if snap {
-        c.push_str(" sidebar-rail-snap");
     }
     c
 }
@@ -188,10 +186,7 @@ pub fn App() -> impl IntoView {
     view! {
         <div
             class=move || {
-                app_root_class_name(
-                    app_ctx.signals.sidebar.sidebar_rail_collapsed.get(),
-                    app_ctx.signals.sidebar.sidebar_rail_snap.get(),
-                )
+                app_root_class_name(app_ctx.signals.sidebar.sidebar_rail_collapsed.get())
             }
         >
             {sidebar_nav_view(sidebar_nav_signals)}

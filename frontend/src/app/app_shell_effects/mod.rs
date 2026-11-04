@@ -31,9 +31,7 @@ pub use keyboard_inset::wire_visual_viewport_keyboard_inset;
 pub(crate) use keyboard_inset::{on_composer_focus_keep_visible, on_mobile_focus_keep_visible};
 pub use mobile_nav_swipe::{WireMobileNavEdgeSwipeSignals, wire_mobile_nav_edge_swipe};
 pub use mobile_side_swipe::{WireMobileSideEdgeSwipeSignals, wire_mobile_side_edge_swipe};
-pub use persist_prefs::{
-    wire_close_shell_chrome_when_ide_layout, wire_sidebar_rail_when_ide_layout,
-};
+pub use persist_prefs::wire_close_shell_chrome_when_ide_layout;
 pub use session_delete_hotkey::{SessionDeleteHotkeySignals, wire_session_delete_hotkey};
 pub use settings_llm_open::{WireSettingsLlmDraftsSignals, wire_settings_llm_drafts_on_open};
 pub use sync_dom::{
