@@ -156,6 +156,15 @@ pub trait StreamSink {
     fn on_context_trim(&mut self, _after: u32) -> Result<(), TermError> {
         Ok(())
     }
+    /// 本轮注入的 skill（`timeline_log` 的 `kind=context_inject` 且 `detail.skills` 非空）：
+    /// 全屏 TUI 落一行技能行（对齐 Desktop 的 skill 卡）；文本模式默认忽略——
+    /// 它没有卡片，过程行已经能把这一轮讲清楚。
+    fn on_skill_inject(
+        &mut self,
+        _info: &crabmate_client_api::timeline_skill::SkillInjectInfo,
+    ) -> Result<(), TermError> {
+        Ok(())
+    }
     /// 工具开始（AG-UI `TOOL_CALL_START`，serve v2 协议）。文本模式默认忽略；
     /// 全屏 TUI 用它渲染"工具行摘要"的开始态。
     ///

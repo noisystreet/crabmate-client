@@ -9,6 +9,12 @@
 #[path = "worker_cancel.rs"]
 mod worker_cancel;
 
+// 全屏 sink（流事件 → UI 事件）也单独成文件：本模块贴着 920 行上限。
+#[path = "worker_sink.rs"]
+mod worker_sink;
+
+use self::worker_sink::UiSink;
+
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -25,7 +31,7 @@ use crate::conv_export::ExportDone;
 use crate::serve::{
     ApprovalGate, AutoAllowOnce, ChatStreamOptions, ChatStreamOutcome,
     ConversationMessagesResponse, ServeClient, SessionIndexApplied, SessionIndexOp, StreamCancel,
-    StreamResume, StreamSink, TermError, WebSessionsList, WorkspaceDirData, WorkspaceFile,
+    StreamResume, TermError, WebSessionsList, WorkspaceDirData, WorkspaceFile,
     WorkspaceProjectsData, WorkspaceSetError, run_chat_stream_sink,
 };
 
@@ -91,6 +97,9 @@ pub(super) enum UiEvent {
     PromptTokens(Box<TiktokenPromptTokensSnapshot>),
     /// 上下文用量**回落**（`timeline_log` 的 `kind=context_trim`）：压缩 / 裁剪后的用量。
     ContextTrim(u32),
+    /// 本轮注入的 skill（`timeline_log` 的 `kind=context_inject` 且 `detail.skills` 非空）：
+    /// UI 落一行技能行（对齐 Desktop 的 skill 卡，ADR 0003）。
+    SkillInject(crabmate_client_api::timeline_skill::SkillInjectInfo),
     /// 回合末补的用量快照（`GET /conversation/messages` 的 `tiktoken_prompt_tokens`）。
     ///
     /// 与 [`UiEvent::PromptTokens`] 同口径，但**带 `conversation_id`**：这条回包是异步的，
@@ -325,71 +334,6 @@ impl LaneTx {
         self.tx
             .send(Inbound::FromLane(self.lane, ev))
             .map_err(|_| TermError::Message("ui channel closed".into()))
-    }
-}
-
-/// 全屏模式 sink：把流事件发往 UI 事件通道（经 [`LaneTx`] 标注来源 lane）。
-struct UiSink {
-    out: LaneTx,
-}
-
-impl StreamSink for UiSink {
-    fn on_text(&mut self, delta: &str) -> Result<(), TermError> {
-        if !delta.is_empty() {
-            self.out.send(UiEvent::Text(delta.to_string()))?;
-        }
-        Ok(())
-    }
-
-    fn on_reasoning(&mut self, delta: &str) -> Result<(), TermError> {
-        if !delta.is_empty() {
-            self.out.send(UiEvent::Thinking(delta.to_string()))?;
-        }
-        Ok(())
-    }
-
-    fn on_system(&mut self, line: &str) -> Result<(), TermError> {
-        if !line.is_empty() {
-            self.out.send(UiEvent::System(line.to_string()))?;
-        }
-        Ok(())
-    }
-
-    fn on_context_trim(&mut self, after: u32) -> Result<(), TermError> {
-        self.out.send(UiEvent::ContextTrim(after))?;
-        Ok(())
-    }
-
-    fn on_prompt_tokens(&mut self, snap: &TiktokenPromptTokensSnapshot) -> Result<(), TermError> {
-        self.out.send(UiEvent::PromptTokens(Box::new(snap.clone())))
-    }
-
-    fn on_tool_start(
-        &mut self,
-        tool_call_id: &str,
-        name: &str,
-        note: Option<&str>,
-    ) -> Result<(), TermError> {
-        self.out.send(UiEvent::ToolStart {
-            tool_call_id: tool_call_id.to_string(),
-            name: name.to_string(),
-            note: note.map(str::to_string),
-        })
-    }
-
-    fn on_tool_end(
-        &mut self,
-        tool_call_id: &str,
-        name: &str,
-        ok: Option<bool>,
-        note: Option<&str>,
-    ) -> Result<(), TermError> {
-        self.out.send(UiEvent::ToolEnd {
-            tool_call_id: tool_call_id.to_string(),
-            name: name.to_string(),
-            ok,
-            note: note.map(str::to_string),
-        })
     }
 }
 

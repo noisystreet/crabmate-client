@@ -114,6 +114,8 @@ fn kind_style(kind: LineKind, pal: &Palette) -> Style {
         LineKind::System => Style::new().fg(pal.muted),
         // 过程摘要行：与工具行同档色、不抢注意力（它只说「这里折了几步」）。
         LineKind::Process => Style::new().fg(pal.info),
+        // 技能行：正文按常规正文色（名称要读得清），识别度交给 accent 前缀 `✦ `。
+        LineKind::Skill => Style::new().fg(pal.fg),
     }
 }
 

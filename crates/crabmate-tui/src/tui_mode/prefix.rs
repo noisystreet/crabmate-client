@@ -28,6 +28,8 @@ pub(crate) fn kind_prefix(kind: LineKind) -> &'static str {
         // 过程摘要行（issue #369）：`▸` 与 thinking 折叠行的标记同形，读作「这里折了一段」。
         // 展开态（成员放回来）在 [`prefix_for`] 里换成 `▾`：SUMMARY_OPEN。
         LineKind::Process => "▸ ",
+        // 技能行：`✦` 与 Desktop skill 卡的标记同形；1 列字形 + 空格，折行预算不变。
+        LineKind::Skill => "✦ ",
     }
 }
 
@@ -75,7 +77,9 @@ pub(crate) fn prefix_style(kind: LineKind, pal: &Palette) -> Style {
         return match kind {
             LineKind::User | LineKind::System => Style::new().add_modifier(Modifier::BOLD),
             LineKind::Thinking => Style::new().add_modifier(Modifier::DIM),
-            LineKind::Assistant | LineKind::Tool | LineKind::Process => Style::new(),
+            LineKind::Assistant | LineKind::Tool | LineKind::Process | LineKind::Skill => {
+                Style::new()
+            }
         };
     }
     let fg = match kind {
@@ -88,6 +92,9 @@ pub(crate) fn prefix_style(kind: LineKind, pal: &Palette) -> Style {
         LineKind::System => pal.info,
         // 过程摘要行（issue #369）：与工具行同色系，它是「工具 / 思考的容器」。
         LineKind::Process => pal.info,
+        // 技能行取 accent：Desktop 的 skill 卡也是 accent 系；与工具行的 info 分开——
+        // 「这一轮调了 skill」和「某个工具跑了什么」不是同一件事。
+        LineKind::Skill => pal.accent,
     };
     Style::new().fg(fg).add_modifier(Modifier::BOLD)
 }

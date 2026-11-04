@@ -28,10 +28,12 @@ pub(crate) async fn dispatch_line_action(
 
 /// 非审批行：纯 sink 调用（`WriteOut` 与 `Plain` 都写正文，合并一支）。
 fn dispatch_sink_action(action: LineAction, sink: &mut dyn StreamSink) -> Result<(), TermError> {
+    // 旁注 / 用量类先分派：它们每多一种，正文分派表不该跟着多一个分支（CCN 门禁）。
+    let Some(action) = dispatch_note_action(action, sink)? else {
+        return Ok(());
+    };
     match action {
         LineAction::Skip => {}
-        LineAction::PromptTokens(snap) => sink.on_prompt_tokens(&snap)?,
-        LineAction::ContextTrim { after } => sink.on_context_trim(after)?,
         LineAction::WriteOut(s) | LineAction::Plain(s) => sink.on_text(&s)?,
         LineAction::WriteErr(s) => sink.on_reasoning(&s)?,
         LineAction::System(s) => sink.on_system(&s)?,
@@ -49,8 +51,30 @@ fn dispatch_sink_action(action: LineAction, sink: &mut dyn StreamSink) -> Result
         } => sink.on_tool_end(&tool_call_id, &name, ok, note.as_deref())?,
         // 入口已拦下审批分支；这支只为 match 穷尽，真走到这里就是分派逻辑错了。
         LineAction::Approve(_) => debug_assert!(false, "审批分支应由 dispatch_line_action 处理"),
+        // 已由 `dispatch_note_action` 处理；同上，只为穷尽。
+        LineAction::PromptTokens(_)
+        | LineAction::ContextTrim { .. }
+        | LineAction::SkillInject(_) => {
+            debug_assert!(false, "旁注类动作应由 dispatch_note_action 处理")
+        }
     }
     Ok(())
+}
+
+/// 旁注 / 用量类的分派：处理后返回 `None`，其余动作原样交回正文分派。
+///
+/// 这三类（用量快照 / 水位回落 / skill）都是「不写正文，只动状态或落一行旁注」，
+/// 与正文 action 的处置方式不同；单独一支免得正文那张表跟着旁注种类一起膨胀。
+fn dispatch_note_action(
+    action: LineAction,
+    sink: &mut dyn StreamSink,
+) -> Result<Option<LineAction>, TermError> {
+    match action {
+        LineAction::PromptTokens(snap) => sink.on_prompt_tokens(&snap).map(|()| None),
+        LineAction::ContextTrim { after } => sink.on_context_trim(after).map(|()| None),
+        LineAction::SkillInject(info) => sink.on_skill_inject(&info).map(|()| None),
+        other => Ok(Some(other)),
+    }
 }
 
 /// 单行审批决策：把选择回传给 serve；读决策失败时尽力 deny，避免审批会话悬挂。

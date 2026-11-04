@@ -20,6 +20,7 @@ use crabmate_client_api::sse_dispatch::{
     CommandApprovalData, SseClarifyTraceHooks, SseControlSink, SseDispatch, SseNoticeTimelineHooks,
     SseTurnPhaseHooks, SseWorkspaceToolHooks, TimelineLogInfo, ToolResultInfo,
 };
+use crabmate_client_api::timeline_skill::{SkillInjectInfo, skill_inject_from_detail};
 use crabmate_client_api::tool_display::{ToolDisplayInput, tool_display_line};
 use serde_json::Value;
 
@@ -73,6 +74,9 @@ pub(crate) enum LineAction {
     ContextTrim {
         after: u32,
     },
+    /// `CUSTOM timeline_log` 里 `kind=context_inject` 且 `detail.skills` 非空：
+    /// 这一轮确实调用了 skill。Desktop 画 skill 卡，TUI 画一行技能行（ADR 0003）。
+    SkillInject(SkillInjectInfo),
     Plain(String),
 }
 
@@ -170,16 +174,25 @@ fn parse_with_collector(line: &str, acc: &RefCell<Collected>) -> SseDispatch {
     let mut on_tool_result = |info: ToolResultInfo| acc.borrow_mut().tool_result(info);
     let mut on_approval = |req: CommandApprovalData| acc.borrow_mut().approve(req);
     let mut on_approval_invalid = || acc.borrow_mut().system(MALFORMED_APPROVAL_HINT);
-    // `timeline_log` 的 `context_trim`：压缩 / 裁剪后水位回落（ADR 0005）。
-    // `detail` 是字符串化 JSON，解析规则在共享层（与 Web 端同一份口径）。
-    let mut on_timeline_log = |info: TimelineLogInfo| {
-        if info.kind != "context_trim" {
-            return;
+    // `timeline_log`：裁剪后水位回落（ADR 0005）/ 本轮注入的 skill（ADR 0003）。
+    // 两者 `detail` 都是字符串化 JSON，解析规则在共享层（与 Web 端同一份口径）。
+    let mut on_timeline_log = |info: TimelineLogInfo| match info.kind.trim() {
+        "context_trim" => {
+            let Some(after) = context_trim_after_used_tokens(info.detail.as_deref()) else {
+                return;
+            };
+            acc.borrow_mut().trim(after);
         }
-        let Some(after) = context_trim_after_used_tokens(info.detail.as_deref()) else {
-            return;
-        };
-        acc.borrow_mut().trim(after);
+        // 带 `skills` 就是真的调用了 skill：无条件成行（对齐 Desktop 的 skill 卡，
+        // 它同样不受「显示每轮注入」开关影响）。
+        "context_inject" => {
+            let detail = info.detail.as_deref().unwrap_or("");
+            let Some(skill) = skill_inject_from_detail(detail) else {
+                return;
+            };
+            acc.borrow_mut().skill_inject(skill);
+        }
+        _ => {}
     };
     let mut sink = SseControlSink {
         on_error: &mut on_error,
@@ -220,6 +233,8 @@ struct Collected {
     run_error: Option<String>,
     /// `context_trim` 的裁剪后用量（`detail.after_tokens`）。
     context_trim: Option<u32>,
+    /// `context_inject` 里本轮被调用的 skill（detail 无 skills 时为 `None`）。
+    skill_inject: Option<SkillInjectInfo>,
 }
 
 impl Collected {
@@ -258,6 +273,10 @@ impl Collected {
     fn trim(&mut self, after: u32) {
         self.context_trim.get_or_insert(after);
     }
+
+    fn skill_inject(&mut self, info: SkillInjectInfo) {
+        self.skill_inject.get_or_insert(info);
+    }
 }
 
 /// 槽位 → 终端动作（单行数据块至多命中一类；多命中时按下方顺序取优先级）。
@@ -266,8 +285,8 @@ fn resolve(collected: Collected) -> Result<LineAction, TermError> {
         // 回合终止：交由上层收口（与 `chat_stream` 的 `?` 传播一致）。
         return Err(TermError::RunError(msg));
     }
-    if let Some(after) = collected.context_trim {
-        return Ok(LineAction::ContextTrim { after });
+    if let Some(action) = timeline_action(&collected) {
+        return Ok(action);
     }
     Ok(if let Some(req) = collected.approval {
         LineAction::Approve(req)
@@ -290,6 +309,15 @@ fn resolve(collected: Collected) -> Result<LineAction, TermError> {
     } else {
         LineAction::Skip
     })
+}
+
+/// 旁注类动作（`context_trim` 的水位回落 / `context_inject` 的 skill）：单行数据块
+/// 至多命中一类。抽出来是为了 `resolve` 的分支数不随旁注种类增长而爆掉 CCN 门禁。
+fn timeline_action(collected: &Collected) -> Option<LineAction> {
+    if let Some(after) = collected.context_trim {
+        return Some(LineAction::ContextTrim { after });
+    }
+    collected.skill_inject.clone().map(LineAction::SkillInject)
 }
 
 /// 摘要行：`metadata.summary` 优先；缺省回退 `content` 首行截断（不跨行）。

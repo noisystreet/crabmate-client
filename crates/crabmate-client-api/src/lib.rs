@@ -28,6 +28,7 @@ pub mod session_model;
 pub mod sessions;
 pub mod slash;
 pub mod sse_dispatch;
+pub mod timeline_skill;
 pub mod tool_display;
 pub mod url;
 pub mod workspace;

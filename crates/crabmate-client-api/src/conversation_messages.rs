@@ -82,7 +82,13 @@ pub enum ReplayRow {
     User(String),
     Thinking(String),
     Assistant(String),
-    Tool { name: String, body: String },
+    Tool {
+        name: String,
+        body: String,
+    },
+    /// 本轮注入的 skill（`timeline_log` 的 `kind=context_inject` 且带 `skills`）：
+    /// Desktop 主列画 skill 卡，TUI 画一行技能行。其余 timeline 旁注仍跳过。
+    SkillInject(crate::timeline_skill::SkillInjectInfo),
 }
 
 impl ConversationMessagesResponse {
@@ -90,7 +96,9 @@ impl ConversationMessagesResponse {
     ///
     /// 规则（与 Desktop 的可视结果对齐，但**不做**时间线卡片/折叠分组）：
     /// - `user`：跳过首轮工作区上下文注入条，其余照出；
-    /// - `system`：跳过（`crabmate_ui_sep` / `crabmate_timeline` 是 Web 专用卡片）；
+    /// - `system`：只出本轮注入的 skill（`context_inject` 且带 `skills`）；其余旁注
+    ///   （`crabmate_ui_sep` / 裁剪摘要）仍跳过 —— 终端没有卡片，把旁注 JSON 搬进
+    ///   transcript 只是噪音；
     /// - `assistant`：先思考后正文，两者皆空（只带 `tool_calls`）时不产行——工具结果
     ///   行会紧跟其后单独出现，再造一张「调用卡」在终端里只是噪声；
     /// - `tool`：`工具 name` + 结果正文（前缀形态由各端渲染层决定，这里只约定行内容）；
@@ -128,6 +136,16 @@ impl ConversationMessagesResponse {
                     name: msg.tool_label(&tool_names),
                     body: msg.display_text(),
                 }),
+                // 本轮注入的 skill：与 Desktop 的 skill 卡同义，回放里也要能看见
+                // 「这一轮用了哪个 skill」。门控在共享层（普通消息不会被误判）。
+                "system" => {
+                    let text = msg.display_text();
+                    if let Some(info) =
+                        crate::timeline_skill::skill_inject_from_timeline_text(&text)
+                    {
+                        out.push(ReplayRow::SkillInject(info));
+                    }
+                }
                 _ => {}
             }
         }

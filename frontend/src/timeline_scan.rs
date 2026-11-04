@@ -270,107 +270,16 @@ pub fn is_turn_context_inject_timeline_message(m: &StoredMessage) -> bool {
     is_turn_context_inject_timeline_text(&m.text)
 }
 
-/// 本轮 skill 调用信息（Server 0.6.0 `context_inject` 的 `detail.skills` / `detail.forced`）。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SkillInjectInfo {
-    /// 归一化后的展示名（取路径 basename、去 `.md` 后缀，保序去重）。
-    pub skills: Vec<String>,
-    /// 用户显式 `/<skill-id>` 选用（Server 强制注入）。
-    pub forced: bool,
-}
-
-/// 去 `.md` 后缀（ASCII 大小写不敏感）。
-fn strip_md_suffix(s: &str) -> &str {
-    let Some(i) = s.len().checked_sub(3) else {
-        return s;
-    };
-    if s.is_char_boundary(i) && s[i..].eq_ignore_ascii_case(".md") {
-        &s[..i]
-    } else {
-        s
-    }
-}
-
-/// skill 展示名：`rust-style` 与 `.crabmate/skills/rust-style.md` 归一为同一 id。
-fn skill_display_name(raw: &str) -> Option<String> {
-    let t = raw.trim();
-    if t.is_empty() {
-        return None;
-    }
-    let base = t.rsplit(['/', '\\']).next().unwrap_or(t).trim();
-    let base = strip_md_suffix(base).trim();
-    if base.is_empty() {
-        None
-    } else {
-        Some(base.to_string())
-    }
-}
-
-fn skill_inject_from_detail_value(v: &serde_json::Value) -> Option<SkillInjectInfo> {
-    let arr = v.get("skills")?.as_array()?;
-    let mut skills: Vec<String> = Vec::new();
-    for raw in arr.iter().filter_map(|s| s.as_str()) {
-        let Some(name) = skill_display_name(raw) else {
-            continue;
-        };
-        if !skills.contains(&name) {
-            skills.push(name);
-        }
-    }
-    if skills.is_empty() {
-        return None;
-    }
-    Some(SkillInjectInfo {
-        skills,
-        forced: v
-            .get("forced")
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false),
-    })
-}
-
-/// 水合外层 JSON 的 `detail` 是字符串；流式正文是 `title\n<detail>`；也接受纯 detail JSON。
-fn context_inject_detail_value(text: &str) -> Option<serde_json::Value> {
-    let t = text.trim();
-    if t.is_empty() {
-        return None;
-    }
-    if let Ok(v) = serde_json::from_str::<serde_json::Value>(t) {
-        if let Some(detail) = v.get("detail").and_then(|d| d.as_str()) {
-            return serde_json::from_str(detail.trim()).ok();
-        }
-        return v.is_object().then_some(v);
-    }
-    let (_, rest) = t.split_once('\n')?;
-    let v: serde_json::Value = serde_json::from_str(rest.trim()).ok()?;
-    if let Some(detail) = v.get("detail").and_then(|d| d.as_str()) {
-        return serde_json::from_str(detail.trim()).ok();
-    }
-    v.is_object().then_some(v)
-}
-
-/// 从已确认是 `context_inject` 的 detail 中提取 skill 调用信息；无 skill 或非法输入 → `None`。
+/// skill 注入的解析口径在共享层（`crabmate_client_api::timeline_skill`）：Desktop 的 skill 卡
+/// 与 TUI 的技能行必须按同一份规则认 `detail`，否则两端会对「这条注入算了哪些 skill」给出
+/// 不同答案。这里只留 Desktop 专属的部分——门控
+/// [`is_turn_context_inject_timeline_text`]（同时供裁剪卡与「显示每轮注入」开关）与消息级判定。
 ///
-/// 三种落盘形态均支持：水合 `{kind,title,detail}`（`detail` 为 JSON 字符串）、流式
-/// `title\n<detail>`、纯 detail JSON。展示层据此画独立 skill 卡（不得伪造成 `tool_call`）。
-///
-/// 对任意消息正文请改用 [`skill_inject_from_timeline_text`]：本函数不做注入门控。
-#[must_use]
-pub fn context_inject_skills(text: &str) -> Option<SkillInjectInfo> {
-    skill_inject_from_detail_value(&context_inject_detail_value(text)?)
-}
-
-/// 从任意消息正文提取 skill 调用，先过 `context_inject` 门控。
-///
-/// 门控避免把正文恰为 `{"skills":[...]}` 的普通消息误判为注入旁注：合法注入行必须带
-/// `kind=context_inject`，或 detail 同时含 `skills` + `forced`（Server 0.6.0 恒定输出）。
-#[must_use]
-pub fn skill_inject_from_timeline_text(text: &str) -> Option<SkillInjectInfo> {
-    if !is_turn_context_inject_timeline_text(text) {
-        return None;
-    }
-    context_inject_skills(text)
-}
+/// [`context_inject_skills`] **不做**注入门控（调用方已确认是注入旁注时用它）。
+pub use crabmate_client_api::timeline_skill::{
+    SkillInjectInfo, skill_inject_from_detail as context_inject_skills,
+    skill_inject_from_timeline_text,
+};
 
 /// 含 skill 调用的上下文注入旁注（主列默认可见）。
 #[must_use]
