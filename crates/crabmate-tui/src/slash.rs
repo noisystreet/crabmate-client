@@ -9,6 +9,7 @@ use crate::serve::{
 };
 use anyhow::Result;
 use crabmate_client_api::chat_export::{ExportFormat, export_messages};
+use crabmate_client_api::slash_heads::{self, Head};
 use crabmate_client_api::{paths, slash};
 use serde_json::Value;
 
@@ -40,6 +41,26 @@ pub fn is_control_slash(trimmed: &str) -> bool {
             | "view"
             | "chat"
     )
+}
+
+/// repl 的**前置层**拦截：这几个命令要拿 `SessionPrefs` / 断点状态，走不到
+/// [`handle_control_slash`]（那里只有 serve 请求与打印）。
+///
+/// 返回规范 head（由 `slash_heads::head_of` 归一，别名如 `/exit` 也认），
+/// 于是调用方只需对主命令写臂，新增别名不必再改这里。
+///
+/// 注意 `is_control_slash` 的拦截集**大于** `slash_caps::supported(Surface::Repl)`：
+/// `/background` `/editor` `/chat` 在 repl 里没有 handler，但会被拦下来回一句
+/// 「只在全屏可用」—— 拦与做是两件事，别把两者当成同一个集合。
+#[must_use]
+pub fn repl_pre_turn_head(text: &str) -> Option<Head> {
+    let t = text.trim();
+    let rest = t.strip_prefix('/')?;
+    let raw = rest.split_whitespace().next().unwrap_or("");
+    match slash_heads::head_of(raw)? {
+        head @ (Head::Resume | Head::Model | Head::Mode | Head::Role | Head::Perm) => Some(head),
+        _ => None,
+    }
 }
 
 /// 处理控制斜杠。返回 `Ok(false)` 表示用户请求退出 repl。
@@ -388,6 +409,41 @@ async fn list_web_sessions(client: &ServeClient, conversation_id: &Option<String
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// repl 分成两层拦：`repl_pre_turn_head`（要 SessionPrefs / 断点）与
+    /// `handle_control_slash`（serve 请求）。能力表里每一条都必须被其中一层接住，
+    /// 否则用户敲了只会原样发给模型 —— 那正是 `/perm` 曾经的形态。
+    #[test]
+    fn repl_capability_table_is_reachable_from_both_dispatchers() {
+        use crabmate_client_api::slash_caps::{Surface, supported};
+        for head in supported(Surface::Repl) {
+            let line = format!("/{}", head.as_str());
+            assert!(
+                is_control_slash(&line) || repl_pre_turn_head(&line) == Some(*head),
+                "{line} 在 caps 里但两层分派都不认"
+            );
+        }
+    }
+
+    /// 不带 `/` 的行即使首词是 `model` / `resume` 也要发给模型 —— 前置层只认 `/<head>`。
+    /// （原在 `main_tests.rs`，随 `repl_pre_turn_head` 一起搬到这里。）
+    #[test]
+    fn plain_messages_are_not_swallowed_as_pre_turn_control() {
+        assert_eq!(repl_pre_turn_head("model gpt-5 please"), None);
+        assert_eq!(repl_pre_turn_head("resume where we left"), None);
+        assert_eq!(repl_pre_turn_head("  model  "), None);
+        assert_eq!(repl_pre_turn_head("mode act now"), None);
+        assert_eq!(repl_pre_turn_head("role coder please"), None);
+        // 带 `/` 的归一成规范 head（大小写不敏感，别名也认）。
+        assert_eq!(repl_pre_turn_head("/model gpt-5"), Some(Head::Model));
+        assert_eq!(repl_pre_turn_head("/mode plan"), Some(Head::Mode));
+        assert_eq!(repl_pre_turn_head("/ROLE coder"), Some(Head::Role));
+        assert_eq!(repl_pre_turn_head("/RESUME"), Some(Head::Resume));
+        assert_eq!(repl_pre_turn_head("/perm read"), Some(Head::Perm));
+        // 前缀不同、或归给 `handle_control_slash` 的命令都不该被这一层拿走。
+        assert_eq!(repl_pre_turn_head("/models"), None);
+        assert_eq!(repl_pre_turn_head("/status"), None);
+    }
 
     #[test]
     fn detects_control_slashes() {

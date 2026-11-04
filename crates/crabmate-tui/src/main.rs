@@ -21,11 +21,12 @@ use crate::serve::{
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 use crabmate_client_api::secrets::SecretSlot;
+use crabmate_client_api::slash_heads::Head;
 use reedline::{DefaultPrompt, DefaultPromptSegment, Reedline, Signal};
 
 use crate::approval_tty::TtyApprovalGate;
 use crate::connect_spec::parse_connect_spec;
-use crate::slash::{handle_control_slash, is_control_slash};
+use crate::slash::{handle_control_slash, is_control_slash, repl_pre_turn_head};
 use crate::tui_wiring::TuiWiring;
 use crate::turn::{TurnPrefs, run_turn};
 
@@ -508,23 +509,23 @@ async fn dispatch_repl_line(
         return Ok(true);
     }
     // 仅形如 `/resume` `/model` 等控制输入才拦截；普通消息即使首词为 model/resume 也要发给模型。
-    match repl_control_head(text) {
-        Some("resume") => {
+    match repl_pre_turn_head(text) {
+        Some(Head::Resume) => {
             return resume_turn(client, conversation_id, resume, overrides, yes).await;
         }
-        Some("model") => {
+        Some(Head::Model) => {
             handle_model_slash(text, overrides);
             return Ok(true);
         }
-        Some("mode") => {
+        Some(Head::Mode) => {
             handle_mode_slash(text, overrides);
             return Ok(true);
         }
-        Some("role") => {
+        Some(Head::Role) => {
             handle_role_slash(text, overrides);
             return Ok(true);
         }
-        Some("perm") => {
+        Some(Head::Perm) => {
             // 与全屏 TUI / Desktop chip 同一语义：先写本地 override（下一条消息即可生效），
             // 有已持久化会话再落盘（`POST /conversation/state`）。
             let level = handle_perm_slash(text, overrides);
@@ -670,29 +671,6 @@ fn capture_resume_point(
         after_seq: *after_seq,
     });
     true
-}
-
-/// 识别 main 层拦截的 repl 控制斜杠（仅 `/` 开头才返回命令名；普通消息不拦截）。
-fn repl_control_head(text: &str) -> Option<&'static str> {
-    let t = text.trim();
-    let rest = t.strip_prefix('/')?;
-    match rest
-        .split_whitespace()
-        .next()
-        .unwrap_or("")
-        .to_ascii_lowercase()
-        .as_str()
-    {
-        "resume" => Some("resume"),
-        "model" => Some("model"),
-        "mode" => Some("mode"),
-        "role" => Some("role"),
-        // `/perm` 必须在这里出现：`is_control_slash` 认它（`slash::PERM`），但
-        // `handle_control_slash` 的 match 没有 perm 臂，漏了这行它就会掉进
-        // 「unknown control slash /perm」，而 `/help` 明明写着支持。
-        "perm" => Some("perm"),
-        _ => None,
-    }
 }
 
 /// 取斜杠后的参数（trim；无参为空串）。
