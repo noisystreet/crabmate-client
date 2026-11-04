@@ -24,6 +24,34 @@
   overflow-y: visible;
 }
 
+/* `mode` 与 `think` 同排一行、各占一半：两者都是「一回合内会反复动」的开关，各占一行
+   时右列白花两行高度。`role` 不吃这条 —— 角色名比 `Ask` 与开关状态长，挤半行只会先变成
+   省略号，所以它仍在下一行独占整行。 */
+.status-chips-pair {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* 覆盖 `.status-chip { flex: 0 0 auto }`：同排的两颗按 1:1 分掉这一行的宽度。 */
+.status-chips-pair > .status-chip {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+/* 半宽里内部 wrap 必须自己收缩（`.status-agent-role-trigger` 的 `max-width` 会顶住不动）。 */
+.status-chips-pair .status-mode-wrap,
+.status-chips-pair .status-agent-role-wrap {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* 开关轨道是固定宽的小图形，别跟着半宽一起被压扁。 */
+.status-chips-pair .settings-model-toggle-track {
+  flex: 0 0 auto;
+}
+
 /* —— 右列状态栈容器（原底栏迁入；纵向堆叠 + 可折叠）—— */
 .side-status-stack {
   display: flex;

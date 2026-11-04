@@ -154,17 +154,25 @@ impl LaneApp<'_> {
             self.status_stack_rows(),
         );
         if let Some(area) = p.right_status {
-            let inner_w = area.width.saturating_sub(2);
+            let inner_w = area.width.saturating_sub(2) as usize;
             let idx = status_stack::segment_row_index(
                 &info,
-                inner_w as usize,
+                inner_w,
+                self.st.status_stack_collapsed,
+                label,
+            )?;
+            // `mode` 与 `think` 同排一行：行号相同，靠列区间分左右。`think` 只占右半，
+            // 点左半（`mode` 那侧）不该切开关。
+            let (start, end) = status_stack::segment_cols_in_row(
+                &info,
+                inner_w,
                 self.st.status_stack_collapsed,
                 label,
             )?;
             return Some(Rect::new(
-                area.x.saturating_add(1),
+                area.x.saturating_add(1).saturating_add(start),
                 area.y.saturating_add(idx),
-                inner_w,
+                end.saturating_sub(start),
                 1,
             ));
         }

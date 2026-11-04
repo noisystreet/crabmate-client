@@ -6,7 +6,8 @@
 //! 纵向每段一行反而能把值显示全。
 //!
 //! 三形态（矩形由 `layout::panes` 负责，本模块只负责行）：
-//! - 宽屏展开：各段一行 + **运行指示独占最后一行**（最多 [`MAX_STACK_ROWS`] 行，超出的按优先级丢弃）
+//! - 宽屏展开：各段一行，**但 `mode` 与 `think` 同排一行（左右各半）**；
+//!   **运行指示独占最后一行**（最多 [`MAX_STACK_ROWS`] 行，超出的按优先级丢弃）
 //! - 宽屏折叠：只留运行指示那一行
 //! - 两种形态都按**两列**排：第一列 label、第二列值。运行指示那一行不例外 ——
 //!   第一列放回看提示（`↑N`，可空），第二列放运行态。回看提示因此不需要独立行，
@@ -20,16 +21,15 @@ use unicode_width::UnicodeWidthStr;
 use super::palette::Palette;
 use super::render::{StatusInfo, truncate_display};
 use super::status::{
-    LABEL_COL_W, LABEL_W, Segment, environment_segments, reduced_motion, running_kind,
-    running_row_with_view, view_back_text,
+    LABEL_COL_W, LABEL_W, MODE_LABEL, Segment, THINK_LABEL, environment_segments, reduced_motion,
+    running_kind, running_row_with_view, view_back_text,
 };
 
 /// 展开态最多占的行数（含运行态那一行）。
 ///
-/// **10 行是这次抬上去的**（原 9）：加 `think` 段是为了与 Desktop 右列栈对齐，
-/// 代价是 24 行终端里状态栈占掉 42%、目录树少一行 —— 这是有意的取舍，不是漏算。
-/// 再往上加段前先想清楚：24 行终端只剩 14 行给目录树与输入框，11 行会让目录树
-/// 在常见窗口高度下只显示 3 条。
+/// **10 行是上限，当前全填充只用 9 行**：`think` 与 `mode` 同排之后省回了它原先独占的
+/// 那一行。再往上加段前先想清楚：24 行终端里状态栈会占掉四成、11 行会让目录树在常见
+/// 窗口高度下只显示 3 条。
 ///
 /// 超出的段按优先级丢弃 —— 与横版 `fit_segments` 同一套优先级，只是把「列预算」
 /// 换成「行预算」。
@@ -44,7 +44,7 @@ pub(super) fn stack_rows(info: &StatusInfo, width: usize, collapsed: bool) -> u1
     if collapsed {
         return 1;
     }
-    let rows = 1 + visible_segments(info, width).len();
+    let rows = 1 + segment_rows(info, width).len();
     (rows as u16).min(MAX_STACK_ROWS)
 }
 
@@ -54,10 +54,13 @@ pub(super) fn stack_rows(info: &StatusInfo, width: usize, collapsed: bool) -> u1
 /// `Segment::priority`，避免出现「横条里 serve 优先、栈里 img 优先」这种自相矛盾。
 ///
 /// **裁剪分支目前没有触发条件**：[`environment_segments`] 全填充是 9 段（`serve` /
-/// `model` / `role` / `mode` / `think` / `view` / `ctx` / `find` / `perm`），正好等于阈值
+/// `model` / `mode` / `think` / `role` / `view` / `ctx` / `find` / `perm`），正好等于阈值
 /// `MAX_STACK_ROWS - 1 = 9`。逻辑留着，是因为它是「加段就按优先级让位」这条纪律的唯一
 /// 实现：下次有人再 push 一段，第一件事就是这里丢最不重要的那段，而不是让状态栈长到
 /// 11 行去挤目录树。
+///
+/// 段数与行数**不再相等**：`mode` / `think` 同排（[`segment_rows`]）之后，9 段只画 8 行 ——
+/// 裁剪仍按段算，省下来的那行是留给目录树的。
 ///
 /// **不为 `view` 段抬 `MAX_STACK_ROWS`**：10 行已经是 24 行终端能接受的上限（再多一行，
 /// 目录树就只剩 3 条）。加段就该落进这 9 行预算，落不进就按优先级让位 —— `view` 的
@@ -80,10 +83,50 @@ fn visible_segments(info: &StatusInfo, width: usize) -> Vec<Segment> {
         .collect()
 }
 
+/// 纵向栈的一行：通常只有一段；`mode` 与 `think` 同排时是两段（左 `mode`、右 `think`）。
+type SegmentRow = Vec<Segment>;
+
+/// 同排两段之间的视觉间隔（列）：左半末尾让出一列，右半从下一列起。
+const PAIR_GAP: usize = 1;
+
+/// 同排两段的列区间（相对行首，左闭右开）：左右各占一半，左半末尾留 [`PAIR_GAP`] 列。
+///
+/// 渲染（[`pair_line`]）与鼠标命中（[`segment_cols_in_row`]）共用这一份，各算一遍就是
+/// 「点偏一列」的来源。窄到 `width < 2` 时两段都退化成空区间，由调用方按空矩形处理。
+fn pair_cols(width: usize) -> [(usize, usize); 2] {
+    let half = width / 2;
+    [(0, half.saturating_sub(PAIR_GAP)), (half, width)]
+}
+
+/// 一行显示哪几段（按**显示顺序**）；`mode` 与 `think` 合成一行，其余每段独占一行。
+///
+/// 合并放在**段级裁剪之后**：`think` 是可选段（`None` = 还没拉到 user-data），被行预算
+/// 丢掉时这一行就只剩 `mode` —— 与合并前一样，不会留下一个空着的右半。
+///
+/// 只认这两个 label：别的段（`serve` / `model` / `ctx` …）的值都长，挤半行只会变成
+/// 一片省略号，省下来的那一行不值得。
+fn segment_rows(info: &StatusInfo, width: usize) -> Vec<SegmentRow> {
+    let mut rows: Vec<SegmentRow> = Vec::new();
+    for seg in visible_segments(info, width) {
+        let pairs_with_previous = matches!(seg.label, MODE_LABEL | THINK_LABEL)
+            && rows.last().is_some_and(|prev: &SegmentRow| {
+                prev.len() == 1 && matches!(prev[0].label, MODE_LABEL | THINK_LABEL)
+            });
+        if pairs_with_previous && let Some(last) = rows.last_mut() {
+            last.push(seg);
+            continue;
+        }
+        rows.push(vec![seg]);
+    }
+    rows
+}
+
 /// 某一段在栈内的行序号（0-based；运行指示另占最后一行）。
 ///
 /// `None` = 折叠态（只画运行行）或该段被行预算裁掉 —— 两种情况下都不该有可点区域。
-/// 与 [`stack_lines_with`] 共用 [`visible_segments`]，不重算顺序（重算就会与画面错行）。
+/// 与 [`stack_lines_with`] 共用 [`segment_rows`]，不重算顺序（重算就会与画面错行）。
+/// 同排的两段（`mode` / `think`）返回**同一个行号**，左右之分交给
+/// [`segment_cols_in_row`]。
 ///
 /// 按 `label` 取而不是各写一份：`perm`（开档位菜单）与 `think`（切思考开关）是同一件事
 /// 的两个实例，抄第二份的那天就会漏掉一侧的裁剪分支，表现为「窄屏点了点不动」。
@@ -97,10 +140,38 @@ pub(super) fn segment_row_index(
     if collapsed {
         return None;
     }
-    let idx = visible_segments(info, width)
+    let idx = segment_rows(info, width)
         .iter()
-        .position(|s| s.label == label)?;
+        .position(|row| row.iter().any(|s| s.label == label))?;
     u16::try_from(idx).ok()
+}
+
+/// 某一段在它那一行里占的列区间（相对行首，左闭右开）。
+///
+/// 独占行 → 整行；同排行 → 左半 / 右半。鼠标命中靠它把「点了 `think` 的右半」与
+/// 「点了 `mode` 的左半」分开 —— `mode` 在 TUI 里没有点击语义，右半因此是唯一的热区。
+#[must_use]
+pub(super) fn segment_cols_in_row(
+    info: &StatusInfo,
+    width: usize,
+    collapsed: bool,
+    label: &str,
+) -> Option<(u16, u16)> {
+    if collapsed {
+        return None;
+    }
+    for row in segment_rows(info, width) {
+        let Some(pos) = row.iter().position(|s| s.label == label) else {
+            continue;
+        };
+        let (start, end) = if row.len() < 2 {
+            (0, width)
+        } else {
+            pair_cols(width)[pos.min(1)]
+        };
+        return Some((u16::try_from(start).ok()?, u16::try_from(end).ok()?));
+    }
+    None
 }
 
 /// 状态栈的每一行：各段一行，运行指示独占最后一行。
@@ -128,15 +199,24 @@ fn stack_lines_with(
     if collapsed {
         return vec![Line::from(running)];
     }
-    let mut out: Vec<Line<'static>> = visible_segments(info, width)
+    let mut out: Vec<Line<'static>> = segment_rows(info, width)
         .iter()
-        .map(|seg| segment_line(seg, width, pal))
+        .map(|row| row_line(row, width, pal))
         .collect();
     // 运行指示排**最后一行**、缩进到第二列（与各段的值同列）：desktop 的
     // `.side-status-stack` 里 chips 在前、run indicator 在后，纵向 column 下它就贴着最底。
     // 位置固定在最底的好处是：切回合只有这一行变，上面的段不跟着挪。
     out.push(Line::from(running));
     out
+}
+
+/// 一行：单段整行；`mode` + `think` 同排时左右各半。
+fn row_line(row: &[Segment], width: usize, pal: &Palette) -> Line<'static> {
+    match row {
+        [one] => segment_line(one, width, pal),
+        [left, right, ..] => pair_line(left, right, width, pal),
+        [] => Line::default(),
+    }
 }
 
 /// 一段一行：`label` 淡色（补齐到定宽列）+ 值正文色；值超宽按**列**截断。
@@ -147,19 +227,50 @@ fn stack_lines_with(
 /// 调用方只喂 [`environment_segments`] 的段，其 label 一律非空；横版的回看段
 /// （label 为空）走 `status::status_line`，不经过这里。
 fn segment_line(seg: &Segment, width: usize, pal: &Palette) -> Line<'static> {
-    let value_style = Style::new().fg(pal.fg);
+    Line::from(segment_spans(seg, width, pal))
+}
+
+/// 同排两段：左半 `mode`、右半 `think`，各自在自己的半列里截断，中间留 [`PAIR_GAP`] 列。
+///
+/// 右半从 `pair_cols` 算出的固定列起，**不是**跟着左半实际宽度走 —— 左半值短的时候
+/// 右半也得留在自己那半里，否则「各占一半」在视觉上就成了「谁短谁靠中间」。
+fn pair_line(left: &Segment, right: &Segment, width: usize, pal: &Palette) -> Line<'static> {
+    let [(left_start, left_end), (right_start, right_end)] = pair_cols(width);
+    let mut spans = segment_spans(left, left_end.saturating_sub(left_start), pal);
+    let pad = (right_start.saturating_sub(left_start)).saturating_sub(spans_width(&spans));
+    if pad > 0 {
+        spans.push(Span::raw(" ".repeat(pad)));
+    }
+    spans.extend(segment_spans(
+        right,
+        right_end.saturating_sub(right_start),
+        pal,
+    ));
+    Line::from(spans)
+}
+
+/// 一段的 span（label 补齐到定宽列 + 空格 + 截断后的值），宽度以 `budget` 为上限。
+fn segment_spans(seg: &Segment, budget: usize, pal: &Palette) -> Vec<Span<'static>> {
     debug_assert!(!seg.label.is_empty(), "状态栈的段必须有 label");
     // `Paragraph` 不补位：标签必须自己补齐到定宽列，值才会落在同一列。
     let mut label = String::from(seg.label);
     label.push_str(&" ".repeat(LABEL_W.saturating_sub(UnicodeWidthStr::width(seg.label))));
-    Line::from(vec![
+    vec![
         Span::styled(label, Style::new().fg(pal.muted)),
         Span::styled(" ", Style::new()),
         Span::styled(
-            truncate_display(&seg.value, width.saturating_sub(LABEL_COL_W)),
-            value_style,
+            truncate_display(&seg.value, budget.saturating_sub(LABEL_COL_W)),
+            Style::new().fg(pal.fg),
         ),
-    ])
+    ]
+}
+
+/// span 序列的显示宽（`pair_line` 补位用；宽字符按列算，不按字节）。
+fn spans_width(spans: &[Span<'static>]) -> usize {
+    spans
+        .iter()
+        .map(|s| UnicodeWidthStr::width(s.content.as_ref()))
+        .sum()
 }
 
 #[cfg(test)]
@@ -227,7 +338,7 @@ mod tests {
         assert_eq!(
             t.len(),
             1 + 6,
-            "view/serve/model/role/mode/ctx + 运行指示：{t:?}"
+            "view/serve/model/mode/role/ctx + 运行指示（fixture 没有 think，mode 独占该行）：{t:?}"
         );
         // 第 1 行是 `view`（`chat` 也算）：它是「主区现在是不是文件视图」的唯一指示，
         // 也是这一段的点击入口 —— 隐掉就等于「想点的时候找不到」。
@@ -236,8 +347,9 @@ mod tests {
         assert!(t[0].contains("chat"), "{t:?}");
         assert!(t[1].starts_with("serve"), "{t:?}");
         assert!(t[2].starts_with("model"), "{t:?}");
-        assert!(t[3].starts_with("role"), "{t:?}");
-        assert!(t[4].starts_with("mode"), "{t:?}");
+        // `mode` 在 `role` 之上：`think` 与它同排（左右各半），`role` 落到下一行。
+        assert!(t[3].starts_with("mode"), "{t:?}");
+        assert!(t[4].starts_with("role"), "{t:?}");
         // `ctx` 段恒在（无实测时值是占位 `—`）：段消失会让人误判「功能没生效」。
         assert!(t[5].starts_with("ctx"), "{t:?}");
         // 连接计数（`连接 [n/8] ▲k`）**不在这里**：它长在左栏 lane 区的标题行，
@@ -271,14 +383,14 @@ mod tests {
         let t = texts(&stack_lines_with(&i, 24, &pal(), false, true));
         // 第 1 行是 `view`（短值 `chat`），数值段从 `serve` 起：环境事实仍必须对齐同一列。
         assert!(t[1].starts_with("serve 127"), "{t:?}");
-        assert!(t[3].starts_with("role  coder"), "短标签要补齐：{t:?}");
-        assert!(t[4].starts_with("mode  plan"), "短标签要补齐：{t:?}");
+        assert!(t[3].starts_with("mode  plan"), "短标签要补齐：{t:?}");
+        assert!(t[4].starts_with("role  coder"), "短标签要补齐：{t:?}");
         // 定宽列的真正判据：值起始列逐行相等（这几段全是 ASCII，字节偏移即列）。
         for (line, value) in [
             (&t[1], "127.0.0.1:8080"),
             (&t[2], "gpt-x"),
-            (&t[3], "coder"),
-            (&t[4], "plan"),
+            (&t[3], "plan"),
+            (&t[4], "coder"),
         ] {
             let col = line
                 .find(value)
@@ -431,6 +543,9 @@ mod tests {
         assert_eq!(kept.len(), segs.len(), "用满预算时不该丢段");
         let rows = stack_rows(&i, 24, false);
         assert!(rows <= MAX_STACK_ROWS, "{rows}");
+        // 段数 9、行数 9（含运行行）：`mode` / `think` 同排省掉一行，因此行数恰好等于
+        // 段数（合并前是 10）。这一条同时钉住「合并真的发生了」与「没有偷偷多出一行」。
+        assert_eq!(rows, segs.len() as u16, "{rows}");
         let lines = stack_lines_with(&i, 24, &pal(), false, true);
         assert_eq!(rows as usize, lines.len(), "行数必须与渲染同源");
     }
@@ -499,22 +614,50 @@ mod tests {
         assert!(t[2].starts_with("serve"), "{t:?}");
     }
 
-    /// `think` 段排在 `mode` 之后、`ctx` 之前（与 Desktop 右列栈里
-    /// 「view → perm → 模型 → 角色 → 思考 → ctx」的相对次序同构）。
+    /// `think` 与 `mode` **同一行**、左右各占一半，`role` 落到下一行。
+    ///
+    /// 这一行装的是「一回合内会动、但不值得各占一行」的两个开关：同排省下的那一行留给
+    /// 目录树。各占一半是硬约束 —— 右半从行宽中线起，不跟着左半的实际长度漂。
     #[test]
-    fn think_segment_sits_between_mode_and_ctx() {
+    fn think_shares_the_mode_row_half_each() {
         let mut i = info();
         i.thinking = Some("开".into());
-        let t = texts(&stack_lines_with(&i, 40, &pal(), false, true));
-        let pos = |label: &str| {
-            t.iter()
-                .position(|l| l.starts_with(label))
-                .unwrap_or_else(|| panic!("缺 {label} 行：{t:?}"))
-        };
-        assert!(pos("mode") < pos("think"), "{t:?}");
-        assert!(pos("think") < pos("ctx"), "{t:?}");
-        let think = &t[pos("think")];
-        assert!(think.contains("开"), "{think}");
+        let w = 40;
+        let t = texts(&stack_lines_with(&i, w, &pal(), false, true));
+        let mode_row = t
+            .iter()
+            .position(|l| {
+                l.strip_prefix(MODE_LABEL)
+                    .is_some_and(|rest| rest.starts_with(' '))
+            })
+            .unwrap_or_else(|| panic!("缺 {MODE_LABEL} 行：{t:?}"));
+        let row = &t[mode_row];
+        // 同一行里两段都在：`mode` 打头、`think` 从右半起。
+        assert!(row.contains(THINK_LABEL), "row={row:?} t={t:?}");
+        assert!(row.contains('开'), "think 的值要在同一行：{row:?}");
+        assert_eq!(
+            row.find(THINK_LABEL),
+            Some(w / 2),
+            "think 应从行宽中线起（各占一半）：{row:?}"
+        );
+        // 值也各自落在自己的半区里：`plan` 在第 6 列，`开` 在中线 + `LABEL_COL_W`。
+        assert!(row.starts_with("mode  plan"), "{row:?}");
+        assert_eq!(
+            display_col_of(row, '开'),
+            Some(w / 2 + LABEL_COL_W),
+            "{row:?}"
+        );
+        // `role` 紧接在这一行之后（`mode` / `think` 同排，`role` 独占下一行）。
+        assert!(
+            t[mode_row + 1].starts_with("role"),
+            "role 应在 mode/think 那一行之后：{t:?}"
+        );
+        // 段数 7、行数 6：合并真的省了一行，而不是把 think 藏掉了。
+        assert_eq!(
+            t.len(),
+            1 + 6,
+            "view/serve/model/[mode|think]/role/ctx + 运行指示：{t:?}"
+        );
     }
 
     /// 没拉到 user-data 时整段不画：画成「关」会把「不知道」说成「关掉了」。
@@ -568,5 +711,31 @@ mod tests {
         // 没有该段（未知 / 未拉到 user-data）时没有可点区域。
         let i = info();
         assert!(segment_row_index(&i, 24, false, super::super::status::THINK_LABEL).is_none());
+    }
+
+    /// 同排的两段共用一个行号，列区间却一左一右：鼠标命中靠它把「点了 `mode` 左半」与
+    /// 「点了 `think` 右半」分开（`mode` 在 TUI 里没有点击语义）。
+    #[test]
+    fn pair_segments_share_the_row_but_not_the_columns() {
+        let mut i = info();
+        i.thinking = Some("关".into());
+        let w = 40;
+        let mode_row = segment_row_index(&i, w, false, MODE_LABEL).expect("展开态有 mode 行");
+        let think_row = segment_row_index(&i, w, false, THINK_LABEL).expect("展开态有 think 行");
+        assert_eq!(mode_row, think_row, "同排就该同一行");
+        let mode_cols = segment_cols_in_row(&i, w, false, MODE_LABEL).expect("mode 列区间");
+        let think_cols = segment_cols_in_row(&i, w, false, THINK_LABEL).expect("think 列区间");
+        assert_eq!(mode_cols.0, 0, "左半从行首起：{mode_cols:?}");
+        assert_eq!(think_cols.0, 20, "右半从行宽中线起：{think_cols:?}");
+        assert_eq!(think_cols.1, 40, "右半到行尾：{think_cols:?}");
+        assert!(
+            mode_cols.1 <= think_cols.0,
+            "两半不重叠：{mode_cols:?} {think_cols:?}"
+        );
+        // 独占行的段仍是整行，且不与 `mode` 抢行（`role` 在下一行）。
+        assert_eq!(segment_cols_in_row(&i, w, false, "role"), Some((0, 40)));
+        assert_ne!(segment_row_index(&i, w, false, "role"), Some(mode_row));
+        // 折叠态只画运行行：没有可点区域。
+        assert!(segment_cols_in_row(&i, w, true, THINK_LABEL).is_none());
     }
 }

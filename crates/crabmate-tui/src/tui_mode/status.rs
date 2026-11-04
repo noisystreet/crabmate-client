@@ -60,6 +60,12 @@ mod priority {
 /// `perm` 段的文案标签。渲染、栈内行号与鼠标命中三处共用，避免改动时漏掉一处。
 pub(super) const PERM_LABEL: &str = "perm";
 
+/// `mode` 段的文案标签（`ask` / `plan` / `act` 的会话模式）。
+///
+/// 提成常量而不是就地写 `"mode"`：纵向状态栈要按 label 把 `mode` 与 `think` 排进同一行
+/// （`status_stack::segment_rows`），两边各写一份字面量，改一侧就静默不合并了。
+pub(super) const MODE_LABEL: &str = "mode";
+
 /// `think` 段的文案标签（5 列，与 `serve` / `model` 同为定宽 label 列的满宽）。
 pub(super) const THINK_LABEL: &str = "think";
 
@@ -158,7 +164,11 @@ fn serve_value(api_base: &str, segment_budget: usize) -> String {
     }
 }
 
-/// 环境段：`view` / `perm` / `serve` / `model` / `role` / `mode` / `think` / `ctx` / `find`。
+/// 环境段：`view` / `perm` / `serve` / `model` / `mode` / `think` / `role` / `ctx` / `find`。
+///
+/// 纵向状态栈把 `mode` 与 `think` 排进**同一行**（左右各半，见
+/// `status_stack::segment_rows`），`role` 因此紧接在那一行下面 —— 与 Desktop 右列栈里
+/// 「mode + think 一行、role 独占一行」同构。
 ///
 /// **这里的顺序就是显示顺序，与优先级无关**；前两段固定是 `view` / `perm`，与 Desktop
 /// 右列状态栈的前两颗 chip 同序（见下方 `environment_segments` 的第一段注释）。
@@ -218,21 +228,9 @@ pub(super) fn environment_segments(info: &StatusInfo, budget: usize) -> Vec<Segm
             priority: priority::MODEL,
         });
     }
-    // 段恒在：与 Desktop 右列那颗「角色」chip 对齐 —— 那颗 chip 永远有值（没显式选就显示
-    // 「默认」）。缺值时整段消失会让两端字段集一眼就对不上，而「这一轮用的是哪个角色」正是
-    // 最容易看错的一项。`None` = 本地没覆盖、user-data 没存、serve 也没给默认 —— 那就是
-    // 「用 serve 的默认角色」，不是「不知道」（后者是 `perm` / `think` 的语义）。
-    out.push(Segment {
-        label: ROLE_LABEL,
-        value: info
-            .role
-            .clone()
-            .unwrap_or_else(|| DEFAULT_ROLE_TEXT.to_string()),
-        priority: priority::ROLE,
-    });
     if let Some(v) = info.mode.as_deref() {
         out.push(Segment {
-            label: "mode",
+            label: MODE_LABEL,
             value: v.to_string(),
             priority: priority::MODE,
         });
@@ -255,6 +253,22 @@ pub(super) fn environment_segments(info: &StatusInfo, budget: usize) -> Vec<Segm
             priority: priority::THINKING,
         });
     }
+    // 段恒在：与 Desktop 右列那颗「角色」chip 对齐 —— 那颗 chip 永远有值（没显式选就显示
+    // 「默认」）。缺值时整段消失会让两端字段集一眼就对不上，而「这一轮用的是哪个角色」正是
+    // 最容易看错的一项。`None` = 本地没覆盖、user-data 没存、serve 也没给默认 —— 那就是
+    // 「用 serve 的默认角色」，不是「不知道」（后者是 `perm` / `think` 的语义）。
+    //
+    // **排在 `mode` / `think` 之后**：这两段在纵向栈里同排一行（左 `mode`、右 `think`），
+    // `role` 因此落到它们下面一行 —— 与 Desktop 右列栈里「mode + think 一行、role 独占一行」
+    // 同构。角色名比 `Ask` 与开关状态长得多，挤半行只会先变成一片省略号。
+    out.push(Segment {
+        label: ROLE_LABEL,
+        value: info
+            .role
+            .clone()
+            .unwrap_or_else(|| DEFAULT_ROLE_TEXT.to_string()),
+        priority: priority::ROLE,
+    });
     // 显示顺序排在 `mode` 之后，但优先级高于 `mode` / `role`（见 `priority`）。
     // 无条件 push：没有实测时值是占位 `—`，段消失会让人误判「功能没生效」。
     out.push(Segment {

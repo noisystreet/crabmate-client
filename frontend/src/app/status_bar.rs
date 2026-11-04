@@ -387,6 +387,36 @@ fn StatusBarChipsLoaded(
                     status_bar_effective_model(sd.as_ref(), stored_model.as_str())
                 }}</span>
             </span>
+            // 会话模式（`ask` / `plan` / `act`）与思考开关**同一行、各占一半**：两者都是
+            // 「一回合内会反复动」的开关，各占一行时右列白花两行高度；`role` 留在它们下面
+            // 独占一行 —— 角色名比 `Ask` 与开关状态长，挤半行只会先变成省略号。
+            // 与 TUI 状态栈同构（`crates/crabmate-tui/src/tui_mode/status_stack.rs` 的
+            // `segment_rows`：`mode` + `think` 同排、`role` 紧随其后）。
+            //
+            // `mode` 的切换入口也在这里 —— 输入框下方那颗同名选择器已删除：同一件事挂两个
+            // 菜单，两份 `menu_open` 迟早不同步，而右列本来就常驻（窄屏 / rail 收起时也在）。
+            <div class="status-chips-pair">
+                <span
+                    class="status-chip status-chip-mode"
+                    class:status-chip-mode--open=move || mode_menu_open.get()
+                    data-testid="status-mode-chip"
+                >
+                    <span class="status-chip-label">
+                        {move || i18n::status_mode_label(locale.get())}
+                    </span>
+                    <StatusSessionModeSeg props=SessionModeSegProps {
+                        locale,
+                        chat,
+                        selected_session_mode,
+                        session_mode_user_override,
+                        menu_open: mode_menu_open,
+                    } />
+                </span>
+                <StatusBarThinkingToggle
+                    llm_thinking_mode=llm_thinking_mode
+                    locale=locale
+                />
+            </div>
             <span
                 class="status-chip status-chip-role"
                 prop:title=move || i18n::status_role_title_attr(locale.get())
@@ -405,30 +435,6 @@ fn StatusBarChipsLoaded(
                     menu_open: role_menu_open,
                 } />
             </span>
-            // 会话模式（`ask` / `plan` / `act`）：与 TUI 的 `mode` 段同一件事、同一个位置
-            // （`role` 之后、`think` 之前）。**切换入口也在这里** —— 输入框下方那颗同名选择器
-            // 已删除：同一件事挂两个菜单，两份 `menu_open` 迟早不同步，而右列本来就常驻
-            // （窄屏 / rail 收起时也在）。
-            <span
-                class="status-chip status-chip-mode"
-                class:status-chip-mode--open=move || mode_menu_open.get()
-                data-testid="status-mode-chip"
-            >
-                <span class="status-chip-label">
-                    {move || i18n::status_mode_label(locale.get())}
-                </span>
-                <StatusSessionModeSeg props=SessionModeSegProps {
-                    locale,
-                    chat,
-                    selected_session_mode,
-                    session_mode_user_override,
-                    menu_open: mode_menu_open,
-                } />
-            </span>
-            <StatusBarThinkingToggle
-                llm_thinking_mode=llm_thinking_mode
-                locale=locale
-            />
             <StatusBarContextChip
                 st=st
                 chat=chat
@@ -673,9 +679,10 @@ fn StatusBarFooterBody(signals: StatusBarFooterSignals) -> impl IntoView {
 /// 右列状态栈：把底栏的 chip 纵向堆叠进右侧工作区列，可折叠展开。
 ///
 /// 次序与 **TUI 状态栈的前两行同源**：`view`（视图）在最上、`perm`（权限）第二，其后才是
-/// `model` / `role` / `think` / `ctx`，运行指示贴最底。两端各按自己的直觉排，读起来就是
-/// 「同一个开关在这里排第一、在那里排最后」（实现见 [`StatusBarChipsLoaded`] 与
-/// `crates/crabmate-tui/src/tui_mode/status.rs` 的 `environment_segments`）。
+/// `model` / `mode` + `think`（同一行，各占一半）/ `role` / `ctx`，运行指示贴最底。两端各按
+/// 自己的直觉排，读起来就是「同一个开关在这里排第一、在那里排最后」（实现见
+/// [`StatusBarChipsLoaded`] 与 `crates/crabmate-tui/src/tui_mode/status.rs` 的
+/// `environment_segments`）。
 ///
 /// - 是否挂载由调用方（右列）判定；挂载后常驻显示，仅由表头按钮折叠展开。
 /// - `data-testid="status-bar"` 保留在内部 [`StatusBarFooterBody`] 的 `<footer>` 上，e2e 锚点不变。
