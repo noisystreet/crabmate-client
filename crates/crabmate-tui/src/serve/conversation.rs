@@ -55,14 +55,22 @@ pub async fn fetch_all_pages(
             )));
         }
         let page = fetch_conversation_messages(client, conversation_id, before_index).await?;
-        let window_start = page.window_start_index;
-        let more = page.has_older && window_start > 0 && !page.messages.is_empty();
+        before_index = next_cursor(&page);
         pages.push(page);
-        if !more {
+        if before_index.is_none() {
             return Ok(pages);
         }
-        before_index = Some(window_start);
     }
+}
+
+/// 下一页的游标；`None` = 已经到底。
+///
+/// 收敛条件与 `/older`（`tui_mode::history::older_gate`）同口径：`has_older == false`
+/// 即到底；`window_start_index == 0` 即使服务端仍说 `has_older` 也不再请求 —— 否则会拿
+/// 同一个游标原地打转。空页同样当到底：服务端不会再给出新东西。
+fn next_cursor(page: &ConversationMessagesResponse) -> Option<u32> {
+    let start = page.window_start_index;
+    (page.has_older && start > 0 && !page.messages.is_empty()).then_some(start)
 }
 
 /// `POST /conversation/state`：会话级运行态意图的**空闲态**写入口。
@@ -117,4 +125,49 @@ pub async fn write_permission_level(
     };
     let (status, body) = post_conversation_state(client, &patch).await?;
     Ok(classify_conversation_state_response(status, &body))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn page(v: serde_json::Value) -> ConversationMessagesResponse {
+        serde_json::from_value(v).expect("response parses")
+    }
+
+    /// 收敛条件：「还有更早」且游标确实往前退且这页非空，才继续翻。
+    ///
+    /// 导出要的是**全量**，翻页循环写错一处就是「少半段而读的人不知道」：这条把三种
+    /// 到底的姿势都钉住（`has_older == false` / 游标已是 0 / 空页）。
+    #[test]
+    fn next_cursor_stops_on_each_end_of_history() {
+        let more = page(serde_json::json!({
+            "window_start_index": 40,
+            "has_older": true,
+            "messages": [{"role": "user", "content": "x"}]
+        }));
+        assert_eq!(next_cursor(&more), Some(40));
+
+        let first = page(serde_json::json!({
+            "window_start_index": 40,
+            "has_older": false,
+            "messages": [{"role": "user", "content": "x"}]
+        }));
+        assert_eq!(next_cursor(&first), None, "服务端说没有更早的了");
+
+        // 服务端自相矛盾（说还有更早，但游标已经是 0）：不能再请求，否则原地打转。
+        let stuck = page(serde_json::json!({
+            "window_start_index": 0,
+            "has_older": true,
+            "messages": [{"role": "user", "content": "x"}]
+        }));
+        assert_eq!(next_cursor(&stuck), None);
+
+        let empty = page(serde_json::json!({
+            "window_start_index": 40,
+            "has_older": true,
+            "messages": []
+        }));
+        assert_eq!(next_cursor(&empty), None, "空页不会再给出新东西");
+    }
 }

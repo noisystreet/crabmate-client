@@ -26,14 +26,15 @@ pub struct ExportCmd {
 /// 位置参数只认一个格式词（与 Web `/export [json|markdown|both]` 同形），其余全走
 /// `--out` / `--id`：路径与会话 id 都塞进位置参数时，一个带空格或恰好像 id 的路径就分不清了。
 pub fn parse_args(raw: &str) -> Result<ExportCmd, String> {
+    let words = tokenize(raw)?;
     let mut format = None;
     let mut out = None;
     let mut id = None;
-    let mut words = raw.split_whitespace();
-    while let Some(word) = words.next() {
-        match word {
-            "--out" | "-o" => out = Some(flag_value(&mut words, "--out")?),
-            "--id" => id = Some(flag_value(&mut words, "--id")?),
+    let mut rest = words.iter();
+    while let Some(word) = rest.next() {
+        match word.as_str() {
+            "--out" | "-o" => out = Some(flag_value(&mut rest, "--out")?),
+            "--id" => id = Some(flag_value(&mut rest, "--id")?),
             other if other.starts_with('-') => {
                 return Err(format!("未知参数 {other}；{}", ExportFormat::USAGE));
             }
@@ -55,10 +56,49 @@ pub fn parse_args(raw: &str) -> Result<ExportCmd, String> {
     })
 }
 
-fn flag_value<'a>(words: &mut impl Iterator<Item = &'a str>, flag: &str) -> Result<String, String> {
+/// 按空白切词，但**双引号里的空白不切**（`--out "我的 导出.md"`）。
+///
+/// 只认双引号：这是应用内的命令栏，再引一套规则（单引号 / 反斜杠转义）只会让
+/// 「为什么 `'a b'` 报错」变成新的坑。
+fn tokenize(raw: &str) -> Result<Vec<String>, String> {
+    let mut words: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    let mut quoted = false;
+    let mut started = false;
+    for ch in raw.chars() {
+        match ch {
+            '"' => {
+                quoted = !quoted;
+                started = true;
+            }
+            c if c.is_whitespace() && !quoted => {
+                if started {
+                    words.push(std::mem::take(&mut cur));
+                    started = false;
+                }
+            }
+            c => {
+                cur.push(c);
+                started = true;
+            }
+        }
+    }
+    if quoted {
+        return Err(format!("引号没有闭合；{}", ExportFormat::USAGE));
+    }
+    if started {
+        words.push(cur);
+    }
+    Ok(words)
+}
+
+fn flag_value<'a>(
+    words: &mut impl Iterator<Item = &'a String>,
+    flag: &str,
+) -> Result<String, String> {
     words
         .next()
-        .map(str::trim)
+        .map(|v| v.trim())
         .filter(|v| !v.is_empty())
         .map(str::to_string)
         .ok_or_else(|| format!("{flag} 缺参数值；{}", ExportFormat::USAGE))
@@ -104,8 +144,8 @@ pub fn render_artifacts(
     Ok(out)
 }
 
-/// 一次导出任务的结果（worker → UI）：正文已在 worker 里渲染好，写盘留在 UI 线程 ——
-/// 只有那边知道这次导出是否还属于当前会话绑定。
+/// 一次导出任务的结果（worker → UI）：正文已在 worker 里渲染好，写盘留在 UI 线程
+/// （那边才有 transcript 与报告出口）。`conversation_id` 供报告在用户已切走时点名归属。
 #[derive(Debug)]
 pub struct ExportDone {
     pub conversation_id: String,
@@ -275,6 +315,16 @@ mod tests {
         assert!(parse_args("pdf").is_err(), "未知格式要拒");
         assert!(parse_args("--nope").is_err(), "未知 flag 要拒");
         assert!(parse_args("--out").is_err(), "缺值要拒");
+        // 带空格的路径用双引号包住（命令栏没有 shell，不加引号只会报「多余的参数」）。
+        assert_eq!(
+            parse_args(r#"--out "/tmp/我 的导出.md" md"#),
+            Ok(ExportCmd {
+                format: ExportFormat::Markdown,
+                out: Some("/tmp/我 的导出.md".to_string()),
+                id: None
+            })
+        );
+        assert!(parse_args(r#"--out "/tmp/x.md"#).is_err(), "引号不闭合要拒");
     }
 
     #[test]

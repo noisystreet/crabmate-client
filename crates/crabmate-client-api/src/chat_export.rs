@@ -131,7 +131,12 @@ fn merge_rows(rows: Vec<ReplayRow>) -> Vec<DisplayExportMessage> {
             }
             ReplayRow::Tool { name, body } => {
                 flush_thinking(&mut out, &mut thinking);
-                out.push(message("tool", tool_summary(&body), Some(name)));
+                // 空结果不出一行：Markdown 按 role 分段渲染，一个没有正文的小节只是噪音
+                // （`role=tool` 的 `content` 可能是空数组或纯空白）。
+                let summary = tool_summary(&body);
+                if !summary.is_empty() {
+                    out.push(message("tool", summary, Some(name)));
+                }
             }
         }
     }
@@ -365,6 +370,21 @@ mod tests {
         assert_eq!(v["projection"], "display");
         assert_eq!(v["schema"], "crabmate.chat_session");
         assert_eq!(v["messages"][0]["role"], "user");
+    }
+
+    /// 空结果的工具不进导出件：Markdown 按 role 分段，空小节只是噪音。
+    #[test]
+    fn empty_tool_bodies_are_skipped() {
+        let resp = page(json!({
+            "messages": [
+                {"role": "user", "content": "跑一下"},
+                {"role": "tool", "name": "run_command", "content": "  \n\t\n"}
+            ]
+        }));
+        assert_eq!(
+            roles(&export_messages(&[resp])),
+            vec![("user".to_string(), "跑一下".to_string())]
+        );
     }
 
     #[test]

@@ -209,8 +209,8 @@ struct LaneApp<'a> {
     /// 只置位、不在这里发请求：每条 lane 每轮各发一次 `RefreshSessions` 就是 N 倍
     /// 扇出，外壳按窗口合并后再发（issue #349）。
     session_refresh_pending: bool,
-    /// 在途的 `/conv export`（值＝这次要导的会话 id）：回包靠它判「是不是我这次请求」。
-    export_pending: Option<String>,
+    /// 有一次 `/conv export` 在途。只做「一次一个」的门：回包一律落盘（见 `export.rs`）。
+    export_in_flight: bool,
     /// 后台 lane 有新输出、用户还没看（左栏那一行的未读点）。由外壳置位 / 清零。
     unread: bool,
     /// 在途回合的开始时刻（左栏显示耗时）；`None` = 空闲。从**发出**算起：首 token 之前的排队与建连同样是等。
@@ -308,7 +308,10 @@ impl LaneApp<'_> {
     fn on_ctrl_c(&mut self) {
         // 第一次 = 取消（走统一收尾：卡在审批浮层时也立刻撤掉，否则 gate 要等满
         // `APPROVAL_WAIT` 才收尾，而屏幕早已写着「正在取消回合…」—— issue #346）；
-        // 第二次 = 强退。空闲 lane 上直接退出。
+        // 第二次 = 强退。空闲 lane 上直接退出 —— 但导出没有取消通道，别让它顺手退掉整个 TUI。
+        if export::on_ctrl_c(self) {
+            return;
+        }
         if !self.request_stop("正在取消回合…（再按一次 Ctrl+C 强退）") {
             self.exit = true;
         }
@@ -788,7 +791,7 @@ impl LaneApp<'_> {
                 result,
                 snapshot,
             } => history::on_result(self, &conversation_id, before_index, result, snapshot),
-            // 导出正文已在 worker 里渲染好：这里只判「还属不属于当前绑定」再落盘。
+            // 导出正文已在 worker 里渲染好：这里清在途标记后落盘（归属见 `export.rs`）。
             UiEvent::Exported(done) => export::on_result(self, *done),
             UiEvent::SessionIndex { result, op } => self.on_session_index(result, op),
             UiEvent::Status {

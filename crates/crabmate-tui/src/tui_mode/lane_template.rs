@@ -99,7 +99,7 @@ impl<'a> LaneApp<'a> {
             bg: None,
             ctl: template.ctl.clone(),
             session_refresh_pending: false,
-            export_pending: None,
+            export_in_flight: false,
             unread: false,
             turn_started: None,
         }
