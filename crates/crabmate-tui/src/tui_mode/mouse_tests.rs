@@ -549,6 +549,9 @@ fn clicking_the_think_segment_flips_the_switch_and_saves() {
     // user-data 到手且当前是「关」：状态栈里因此有可点的 think 行。
     app.persisted = Some(PersistedSettings {
         thinking: Some("off".into()),
+        // `mode` 也要填上：think 只在**与 mode 同排**时占右半；没有 mode 时它退化成独占
+        // 整行，这条用例就压不住「左右分开」那件事了。
+        session_mode: Some("act".into()),
         ..Default::default()
     });
     let (w, h) = app.last_size;
@@ -559,15 +562,25 @@ fn clicking_the_think_segment_flips_the_switch_and_saves() {
     )
     .right_status
     .expect("宽屏有状态栈");
-    let mut flipped = false;
-    for row in rs.y..rs.y + rs.height {
-        click(&mut app, rs.x + 1, row);
-        if app.overrides.thinking.is_some() {
-            flipped = true;
-            break;
-        }
-    }
-    assert!(flipped, "状态栈里应有可点的 think 段");
+    // `think` 与 `mode` 同排：`think` 只占那一行的**右半**，点左半（`mode` 那侧）不该切开关。
+    let info = app.status_info();
+    let inner_w = rs.width.saturating_sub(2) as usize;
+    let think_row =
+        super::status_stack::segment_row_index(&info, inner_w, false, super::status::THINK_LABEL)
+            .expect("展开态有 think 行");
+    let (start, _end) =
+        super::status_stack::segment_cols_in_row(&info, inner_w, false, super::status::THINK_LABEL)
+            .expect("think 段有列区间");
+    assert!(start > 0, "think 应在右半，不与 mode 争左半：{start}");
+    // 左半是 mode：点它不该翻转（那条热区只属于 think 自己）。
+    click(&mut app, rs.x + 1, rs.y + think_row);
+    assert!(
+        app.overrides.thinking.is_none(),
+        "左半是 mode，不该切思考开关"
+    );
+    // 右半才是 think 的热区。
+    let think_col = rs.x.saturating_add(1).saturating_add(start);
+    click(&mut app, think_col, rs.y + think_row);
     assert_eq!(app.overrides.thinking.as_deref(), Some("on"), "关 → 开");
     match job_rx.try_recv().expect("点开关要派发 SaveLlm") {
         WorkerJob::SaveLlm(save) => assert_eq!(
@@ -577,13 +590,8 @@ fn clicking_the_think_segment_flips_the_switch_and_saves() {
         ),
         _ => panic!("点开关应派发 SaveLlm"),
     }
-    // 再点一下（同一个矩形）：回到「关」，而不是重复写同一个值。
-    for r in rs.y..rs.y + rs.height {
-        click(&mut app, rs.x + 1, r);
-        if app.overrides.thinking.as_deref() == Some("off") {
-            break;
-        }
-    }
+    // 再点同一处：回到「关」，而不是重复写同一个值。
+    click(&mut app, think_col, rs.y + think_row);
     assert_eq!(app.overrides.thinking.as_deref(), Some("off"), "开 → 关");
 }
 
