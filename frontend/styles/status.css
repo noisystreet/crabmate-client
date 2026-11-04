@@ -178,6 +178,38 @@
   color: var(--accent);
 }
 
+/* 状态栈里的 mode 段（`ask` / `plan` / `act`）：原先那颗选择器挂在输入框下方，本轮搬进右列。 */
+.status-chip-mode {
+  padding: 0 4px 0 8px;
+  gap: 4px;
+  overflow: visible;
+}
+
+.status-chip-mode--open {
+  z-index: 45;
+}
+
+/* 只改装外层容器：菜单仍走 Portal（`.status-mode-menu--portal`），不受这里的布局影响。 */
+.status-chip-mode .status-mode-wrap {
+  flex: 1 1 auto;
+  display: flex;
+  min-width: 0;
+}
+
+.status-chip-mode .status-mode-trigger {
+  flex: 1 1 auto;
+  justify-content: flex-end;
+  max-width: none;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
 /* 状态栏「思考模式」两态开关（轨道 + 滑块沿用设置页 .settings-model-toggle-* 样式） */
 .status-chip-thinking {
   cursor: pointer;

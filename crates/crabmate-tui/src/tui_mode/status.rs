@@ -41,10 +41,14 @@ mod priority {
     /// 思考模式：与 `mode` 同属「一进界面就知道」，但一回合内可能反复开关，
     /// 比 `role` 更常被瞄一眼；排在 `mode` 之后、`role` 之前。
     pub(super) const THINKING: u8 = 6;
-    pub(super) const ROLE: u8 = 7;
-    /// 权限等级：常驻但对"现在该干什么"没有影响（它是授权上限，不是当前动作），
-    /// 窄屏时最先让位——丢它的代价只是看不到等级，丢 `ctx` / `find` 则丢的是正在变化的信息。
-    pub(super) const PERM: u8 = 8;
+    /// 权限等级：常驻但对"现在该干什么"没有影响（它是授权上限，不是当前动作）。
+    ///
+    /// **排在 `role` 之前**：`role` 自本轮起恒显（缺值画 `默认`，见 [`DEFAULT_ROLE_TEXT`]），
+    /// 成了一条永远占位的环境事实 —— 窄屏该让位的是它，而不是这条安全读数。
+    pub(super) const PERM: u8 = 7;
+    /// 角色：与 Desktop 那颗「角色」chip 对齐，缺值画 `默认`，因此恒占位。
+    /// 优先级排在 `perm` 之后：它是「一进界面就知道」的环境事实，让位代价最小。
+    pub(super) const ROLE: u8 = 8;
     /// 当前视图（`chat` / `file`）：排在 `perm` **之后**，两条版式中都最先让位。
     ///
     /// 让位顺序是刻意这么排的：`perm` 是安全相关读数（「这一轮最多能动到什么」），
@@ -65,6 +69,16 @@ pub(super) const THINK_LABEL: &str = "think";
 /// 也不叫 `editor`：那会与编辑器内部的源码 / markdown 两种渲染模式混为一谈。
 /// 与斜杠命令 `/view`（`/editor` 的别名）同一个词，看到就知道该怎么切。
 pub(super) const VIEW_LABEL: &str = "view";
+
+/// `role` 段的 label（`serve` / `model` 同一列组）。
+pub(super) const ROLE_LABEL: &str = "role";
+
+/// `role` 段在三个来源都为空时的值。
+///
+/// 这不是「不知道」（那是 `perm` / `think` 的 `None` 语义），而是「没有显式指定，用 serve 的
+/// 默认角色」—— Desktop 那颗「角色」chip 在同一情形下也是这么说的（`status_default_option`），
+/// 两端必须同一个意思。
+pub(super) const DEFAULT_ROLE_TEXT: &str = "默认";
 
 /// `view` 段的取值：`chat` / `file`（主区是聊天列，还是被只读文件视图占着）。
 ///
@@ -144,7 +158,10 @@ fn serve_value(api_base: &str, segment_budget: usize) -> String {
     }
 }
 
-/// 环境段：`serve` / `model` / `role` / `mode` / `find`（顺序即显示顺序，与优先级无关）。
+/// 环境段：`view` / `perm` / `serve` / `model` / `role` / `mode` / `think` / `ctx` / `find`。
+///
+/// **这里的顺序就是显示顺序，与优先级无关**；前两段固定是 `view` / `perm`，与 Desktop
+/// 右列状态栈的前两颗 chip 同序（见下方 `environment_segments` 的第一段注释）。
 ///
 /// **不含回看提示**：纵向状态栈把它并进运行指示那一行（见
 /// [`running_row_with_view`]），既不占独立行、折叠态也照样可见；只有横版底栏
@@ -153,11 +170,47 @@ fn serve_value(api_base: &str, segment_budget: usize) -> String {
 /// **不含会话 id**：desktop 的状态区也没有它，而整行放一个被截断的 id 没有信息量
 /// （要看当前会话，左栏有 `*` 标记）。
 pub(super) fn environment_segments(info: &StatusInfo, budget: usize) -> Vec<Segment> {
-    let mut out = vec![Segment {
+    let mut out: Vec<Segment> = Vec::new();
+    // **前两段固定是 `view` 与 `perm`，且「先 view、后 perm」** —— 与 Desktop 右列状态栈的
+    // 前两颗 chip 同序（`frontend/src/app/status_bar.rs` 的 `StatusBarChipsLoaded`）。这两项
+    // 回答「我在哪个视图」与「这一轮最多能动到什么」，扫一眼的优先级高于 `serve` / `model`
+    // 这类环境事实；两端位置一致，才不会出现「同一个开关在这里排第一、在那里排最后」。
+    //
+    // 显示顺序与 [`Segment::priority`]（窄屏 / 行预算裁剪用）**刻意解耦**：`view` 的优先级
+    // 仍排在 `perm` 之后，而全填充正好用满行预算，所以目前不触发裁剪；将来再加段时，先让位
+    // 的仍是它。
+    //
+    // 第 1 段恒为 `view`（`chat` 也算）：它是「主区现在是不是文件视图」的**唯一**指示 ——
+    // 视图占的正是聊天列，transcript 被整片盖住之后，屏幕上除了视图自己的标题行没有别处能
+    // 回答这件事。它同时是这一段自己的点击入口（`LaneApp::toggle_view`，与 `Ctrl+T` /
+    // `/editor` / `/chat` 同一入口；命中区间走 `segment_cols` /
+    // `status_stack::segment_row_index`，与渲染同源）。段数不随开关变化，纵版行数与鼠标
+    // 命中才能与横版共用同一份 `fit_segments` / `stack_rows`；状态是 bool，所以不需要
+    // `thinking` / `perm` 那种「`None` 就不 push」的分支 —— 没有「不知道在哪」这种状态。
+    out.push(Segment {
+        label: VIEW_LABEL,
+        value: view_text(info.editor_open),
+        priority: priority::VIEW_MODE,
+    });
+    // 第 2 段是 `perm`，但**它不是恒在的**：`None` = 意图与实测都拿不到（老 serve / 未拉到
+    // user-data）→ 整段不 push，第二行让给 `serve`。画成某个具体档位等于把「不知道」说成
+    // 「没权限」。显示口径（意图优先、两者不同则并列）在 `permission_intent::perm_value`，
+    // 与 Desktop 底栏 chip 共用同一套判定。
+    if let Some(value) = super::permission_intent::perm_value(
+        info.permission_intent.as_deref(),
+        info.permission.as_deref(),
+    ) {
+        out.push(Segment {
+            label: PERM_LABEL,
+            value,
+            priority: priority::PERM,
+        });
+    }
+    out.push(Segment {
         label: "serve",
         value: serve_value(&info.api_base, budget),
         priority: priority::SERVE,
-    }];
+    });
     if let Some(v) = info.model.as_deref() {
         out.push(Segment {
             label: "model",
@@ -165,13 +218,18 @@ pub(super) fn environment_segments(info: &StatusInfo, budget: usize) -> Vec<Segm
             priority: priority::MODEL,
         });
     }
-    if let Some(v) = info.role.as_deref() {
-        out.push(Segment {
-            label: "role",
-            value: v.to_string(),
-            priority: priority::ROLE,
-        });
-    }
+    // 段恒在：与 Desktop 右列那颗「角色」chip 对齐 —— 那颗 chip 永远有值（没显式选就显示
+    // 「默认」）。缺值时整段消失会让两端字段集一眼就对不上，而「这一轮用的是哪个角色」正是
+    // 最容易看错的一项。`None` = 本地没覆盖、user-data 没存、serve 也没给默认 —— 那就是
+    // 「用 serve 的默认角色」，不是「不知道」（后者是 `perm` / `think` 的语义）。
+    out.push(Segment {
+        label: ROLE_LABEL,
+        value: info
+            .role
+            .clone()
+            .unwrap_or_else(|| DEFAULT_ROLE_TEXT.to_string()),
+        priority: priority::ROLE,
+    });
     if let Some(v) = info.mode.as_deref() {
         out.push(Segment {
             label: "mode",
@@ -197,24 +255,6 @@ pub(super) fn environment_segments(info: &StatusInfo, budget: usize) -> Vec<Segm
             priority: priority::THINKING,
         });
     }
-    // 当前视图：与 `think` 一样是**开关**而不是只读读数 —— 宽屏点状态栈那一行、窄屏点
-    // 底栏这几列就切一档（`LaneApp::toggle_view`，与 `Ctrl+T` / `/editor` / `/chat`
-    // 同一入口），命中区间走 `segment_cols` / `status_stack::segment_row_index`，
-    // 与渲染同源。
-    //
-    // 它还是**唯一**的视图指示：视图占的正是聊天列，transcript 被整片盖住之后，屏幕上
-    // 除了视图自己的标题行没有别的地方能回答「我是不是还在文件里」。所以段值用两个
-    // 稳定的短词，而不是把标题行当成唯一线索。
-    //
-    // **恒占一段**（`chat` 也算）：段数不随开关变化，纵版行数与鼠标命中才能与横版
-    // 共用同一份 `fit_segments` / `stack_rows`（与 `lanes` 同一条理由）。视图状态是
-    // bool，所以不需要 `thinking` / `perm` 那种「`None` 就不 push」的分支 ——
-    // 没有「不知道在哪」这种状态。
-    out.push(Segment {
-        label: VIEW_LABEL,
-        value: view_text(info.editor_open),
-        priority: priority::VIEW_MODE,
-    });
     // 显示顺序排在 `mode` 之后，但优先级高于 `mode` / `role`（见 `priority`）。
     // 无条件 push：没有实测时值是占位 `—`，段消失会让人误判「功能没生效」。
     out.push(Segment {
@@ -230,21 +270,6 @@ pub(super) fn environment_segments(info: &StatusInfo, budget: usize) -> Vec<Segm
                 n => format!("「{term}」{n}处"),
             },
             priority: priority::FIND,
-        });
-    }
-    // 权限等级排在显示顺序最右（紧邻右缘运行态）：它是"我这一轮最多能动到什么"，
-    // 与 `serve` / `model` 同为环境事实，但读数频率低，所以优先级最低。
-    // 显示口径（意图优先、两者不同则并列）在 `permission_intent::perm_value`，与 Desktop
-    // 底栏 chip 共用同一套判定；两者都不知道时返回 `None` → 整段不 push
-    // （`None` 是不确定：老 serve / 未拉到，不是"没权限"）。
-    if let Some(value) = super::permission_intent::perm_value(
-        info.permission_intent.as_deref(),
-        info.permission.as_deref(),
-    ) {
-        out.push(Segment {
-            label: PERM_LABEL,
-            value,
-            priority: priority::PERM,
         });
     }
     out

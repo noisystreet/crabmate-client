@@ -29,7 +29,6 @@ use super::tui_actions_bar::TuiTurnActionHandlers;
 use super::tui_stream_view::ChatTuiStreamView;
 use super::user_message_edit::UserMessageEdit;
 use crate::api::upload_files_multipart;
-use crate::app::status_session_mode_seg::{SessionModeSegProps, StatusSessionModeSeg};
 use crate::chat_session_state::ChatSessionSignals;
 use crate::i18n;
 use crate::icon::{Icon, IconStyle};
@@ -509,10 +508,6 @@ fn ComposerQueuedChip(
 #[component]
 fn ComposerBarActions(
     locale: RwSignal<crate::i18n::Locale>,
-    chat: ChatSessionSignals,
-    selected_session_mode: RwSignal<String>,
-    session_mode_user_override: RwSignal<bool>,
-    composer_mode_open: RwSignal<bool>,
     composer_stop_enabled: Memo<bool>,
     initialized: RwSignal<bool>,
     run_send_message: Arc<dyn Fn() + Send + Sync>,
@@ -520,13 +515,6 @@ fn ComposerBarActions(
 ) -> impl IntoView {
     view! {
         <div class="composer-bar-actions">
-            <StatusSessionModeSeg props=SessionModeSegProps {
-                locale,
-                chat,
-                selected_session_mode,
-                session_mode_user_override,
-                menu_open: composer_mode_open,
-            } />
             <Show when=move || composer_stop_enabled.get()>
                 <button
                     type="button"
@@ -597,13 +585,13 @@ fn ChatComposerPane(signals: ChatComposerPaneSignals) -> impl IntoView {
         workspace_path,
         insert_workspace_file_ref,
         chat,
-        selected_session_mode,
-        session_mode_user_override,
         stream_follow_up,
+        // `selected_session_mode` / `session_mode_user_override` 仍在这个信号束里，
+        // 但输入框已不再显示 mode —— 那颗选择器搬进了右列状态栈。
+        ..
     } = signals;
 
     let drop_hl = ComposerDropHighlight::new();
-    let composer_mode_open = RwSignal::new(false);
 
     view! {
         <div
@@ -680,10 +668,6 @@ fn ChatComposerPane(signals: ChatComposerPaneSignals) -> impl IntoView {
                     />
                     <ComposerBarActions
                         locale=locale
-                        chat=chat
-                        selected_session_mode=selected_session_mode
-                        session_mode_user_override=session_mode_user_override
-                        composer_mode_open=composer_mode_open
                         composer_stop_enabled=composer_stop_enabled
                         initialized=initialized
                         run_send_message=run_send_message.clone()

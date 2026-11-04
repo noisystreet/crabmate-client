@@ -218,7 +218,8 @@ mod tests {
         assert_eq!(stack_rows(&i, 24, true), 1);
     }
 
-    /// 展开态：运行态一行 + 每段一行，且顺序与横版一致（serve 在最前）。
+    /// 展开态：运行态一行 + 每段一行，且顺序与横版一致
+    /// （`view` / `perm` 在前两行，见 `environment_segments`）。
     #[test]
     fn expanded_lists_every_segment_one_per_line() {
         let i = info();
@@ -226,16 +227,17 @@ mod tests {
         assert_eq!(
             t.len(),
             1 + 6,
-            "serve/model/role/mode/view/ctx + 运行指示：{t:?}"
+            "view/serve/model/role/mode/ctx + 运行指示：{t:?}"
         );
-        assert!(t[0].starts_with("serve"), "{t:?}");
-        assert!(t[1].starts_with("model"), "{t:?}");
-        assert!(t[2].starts_with("role"), "{t:?}");
-        assert!(t[3].starts_with("mode"), "{t:?}");
-        // `view` 段恒在（`chat` 也算）：它是「主区现在是不是文件视图」的唯一指示，
+        // 第 1 行是 `view`（`chat` 也算）：它是「主区现在是不是文件视图」的唯一指示，
         // 也是这一段的点击入口 —— 隐掉就等于「想点的时候找不到」。
-        assert!(t[4].starts_with("view"), "{t:?}");
-        assert!(t[4].contains("chat"), "{t:?}");
+        // 这个 fixture 没有 `perm`（未拉到 user-data → 整段不 push），所以第 2 行是 `serve`。
+        assert!(t[0].starts_with("view"), "{t:?}");
+        assert!(t[0].contains("chat"), "{t:?}");
+        assert!(t[1].starts_with("serve"), "{t:?}");
+        assert!(t[2].starts_with("model"), "{t:?}");
+        assert!(t[3].starts_with("role"), "{t:?}");
+        assert!(t[4].starts_with("mode"), "{t:?}");
         // `ctx` 段恒在（无实测时值是占位 `—`）：段消失会让人误判「功能没生效」。
         assert!(t[5].starts_with("ctx"), "{t:?}");
         // 连接计数（`连接 [n/8] ▲k`）**不在这里**：它长在左栏 lane 区的标题行，
@@ -267,15 +269,16 @@ mod tests {
     fn values_start_at_one_column() {
         let i = info();
         let t = texts(&stack_lines_with(&i, 24, &pal(), false, true));
-        assert!(t[0].starts_with("serve 127"), "{t:?}");
-        assert!(t[2].starts_with("role  coder"), "短标签要补齐：{t:?}");
-        assert!(t[3].starts_with("mode  plan"), "短标签要补齐：{t:?}");
+        // 第 1 行是 `view`（短值 `chat`），数值段从 `serve` 起：环境事实仍必须对齐同一列。
+        assert!(t[1].starts_with("serve 127"), "{t:?}");
+        assert!(t[3].starts_with("role  coder"), "短标签要补齐：{t:?}");
+        assert!(t[4].starts_with("mode  plan"), "短标签要补齐：{t:?}");
         // 定宽列的真正判据：值起始列逐行相等（这几段全是 ASCII，字节偏移即列）。
         for (line, value) in [
-            (&t[0], "127.0.0.1:8080"),
-            (&t[1], "gpt-x"),
-            (&t[2], "coder"),
-            (&t[3], "plan"),
+            (&t[1], "127.0.0.1:8080"),
+            (&t[2], "gpt-x"),
+            (&t[3], "coder"),
+            (&t[4], "plan"),
         ] {
             let col = line
                 .find(value)
@@ -478,8 +481,26 @@ mod tests {
         assert!(ctx.contains('—'), "{ctx}");
     }
 
+    /// 前两行固定是 `view` / `perm`，且「先 view、后 perm」 —— 与 Desktop 右列状态栈的
+    /// 前两颗 chip 同序（`StatusBarChipsLoaded` 里先 `StatusViewChip` 再 `StatusPermissionChip`）。
+    ///
+    /// 这条钉的是**次序**，不是「包含哪几段」：两端各按自己的直觉排，读起来就是同一个开关
+    /// 在这里排第一、在那里排最后。
+    #[test]
+    fn view_and_perm_are_the_first_two_rows() {
+        let mut i = info();
+        i.permission = Some("read".into());
+        let t = texts(&stack_lines_with(&i, 40, &pal(), false, true));
+        assert!(t[0].starts_with(VIEW_LABEL), "{t:?}");
+        assert!(t[0].contains("chat"), "{t:?}");
+        assert!(t[1].starts_with(PERM_LABEL), "{t:?}");
+        assert!(t[1].contains("read"), "{t:?}");
+        // `serve` 让到第三行：次序是排出来的，不是「谁先 push 谁在前」的巧合。
+        assert!(t[2].starts_with("serve"), "{t:?}");
+    }
+
     /// `think` 段排在 `mode` 之后、`ctx` 之前（与 Desktop 右列栈里
-    /// 「模型 → 角色 → 思考 → 权限 → ctx」的相对次序同构）。
+    /// 「view → perm → 模型 → 角色 → 思考 → ctx」的相对次序同构）。
     #[test]
     fn think_segment_sits_between_mode_and_ctx() {
         let mut i = info();
