@@ -143,10 +143,31 @@ pub fn builtin_items() -> Vec<SlashItem> {
             "加载更早的消息（分页向前，等同 /history）",
         ),
         item(
+            "fold",
+            "/fold ",
+            "执行过程的展开态（空参=最近一条，n 从底部数，all 全展开，close 全折回；/unfold 同义）",
+        ),
+        item(
             "lane",
             "/lane ",
             "运行期加一条连接（attach <name> 连已就绪实例 / new <name> [workspace] 新建并等就绪）",
         ),
+        item(
+            "copy",
+            "/copy ",
+            "复制到剪贴板（默认最近一条助手回复，user 你自己的上一条，path 当前文件的相对路径；/yank、Ctrl+Y 同义）",
+        ),
+        item(
+            "ctl",
+            "/ctl",
+            "查 crabmatectl 控制面实例（本地 unix socket，只读）",
+        ),
+        item(
+            "editor",
+            "/editor ",
+            "只读文件视图（可选 --md / --src 与相对路径；/view 同义，/chat 切回聊天）",
+        ),
+        item("chat", "/chat", "从编辑器视图切回聊天"),
         item(slash::QUIT, "/quit", "退出（/exit、/q 同义）"),
     ]
 }
@@ -486,6 +507,24 @@ mod tests {
             assert!(
                 crate::tui_mode::controls::parse_control(&line).is_some(),
                 "菜单项 {line} 不是可解析的控制命令"
+            );
+        }
+    }
+
+    /// 反向：`HEAD_SPEC` 标为主命令的 head 都必须能从这里选到。
+    ///
+    /// 上面那条是单向的（菜单项 → 可解析），`/fold` `/copy` `/ctl` `/editor` `/chat` 这类
+    /// 「有 handler 却没有候选」的缺口它看不见 —— 那正是补齐这一批之前的真实状态。
+    #[test]
+    fn every_parsable_command_is_reachable_from_the_menu() {
+        let keys: Vec<String> = builtin_items().into_iter().map(|it| it.match_key).collect();
+        for (head, is_primary) in crate::tui_mode::controls::HEAD_SPEC {
+            if !*is_primary {
+                continue;
+            }
+            assert!(
+                keys.iter().any(|k| k == head),
+                "可解析的 /{head} 没有进补全菜单（用户只能靠 /help 知道）"
             );
         }
     }

@@ -687,6 +687,10 @@ fn repl_control_head(text: &str) -> Option<&'static str> {
         "model" => Some("model"),
         "mode" => Some("mode"),
         "role" => Some("role"),
+        // `/perm` 必须在这里出现：`is_control_slash` 认它（`slash::PERM`），但
+        // `handle_control_slash` 的 match 没有 perm 臂，漏了这行它就会掉进
+        // 「unknown control slash /perm」，而 `/help` 明明写着支持。
+        "perm" => Some("perm"),
         _ => None,
     }
 }
