@@ -178,6 +178,24 @@ fn workspace_ctx_can_open_in_editor(
         && open_in_editor.is_some_and(WorkspaceOpenInEditorSignals::available)
 }
 
+/// 「在编辑器打开这个文件」的唯一写入口：右键菜单的「在编辑器查看」与工作区文件行双击共用。
+///
+/// 返回 `false` = 当前布局没有编辑器（窄屏 / Android 远端薄客户端），调用方应回到自己的
+/// 兜底行为（插入 `@` 引用），而不是把这次双击吞掉。
+///
+/// 桥接本身包含「先切进编辑器布局再打开」（`ide_session` 消费 nonce 的那条 Effect），所以
+/// 双击可以从聊天视图直接打开 —— TUI 的「双击打开」只在文件视图开着时成立，那是因为它的
+/// 视图占用聊天列；Desktop 的编辑器只替换聊天列 body，切过去不丢任何状态。
+pub(crate) fn open_file_in_editor(sig: WorkspaceOpenInEditorSignals, rel: String) -> bool {
+    if !sig.available() {
+        return false;
+    }
+    // 先写路径再递增 nonce：消费端以 nonce 变化触发，读取时路径须已就位。
+    sig.path.set(Some(rel));
+    sig.nonce.update(|n| *n = n.wrapping_add(1));
+    true
+}
+
 fn open_in_editor_from_open_menu(
     menu: RwSignal<Option<WorkspaceContextAnchor>>,
     open_in_editor: WorkspaceOpenInEditorSignals,
@@ -192,9 +210,8 @@ fn open_in_editor_from_open_menu(
         return;
     };
     menu.set(None);
-    // 先写路径再递增 nonce：消费端以 nonce 变化触发，读取时路径须已就位。
-    open_in_editor.path.set(Some(rel));
-    open_in_editor.nonce.update(|n| *n = n.wrapping_add(1));
+    // 菜单项只在 `available` 时展示，这里不会返回 `false`。
+    let _ = open_file_in_editor(open_in_editor, rel);
 }
 
 fn start_create_from_open_menu(
@@ -504,5 +521,44 @@ pub fn WorkspaceContextMenuLayer(
                 </crate::app::focusable_menu::FocusableRoleMenu>
             </div>
         </Show>
+    }
+}
+
+#[cfg(test)]
+mod open_in_editor_tests {
+    use leptos::prelude::*;
+
+    use super::{WorkspaceOpenInEditorSignals, open_file_in_editor};
+
+    fn signals(narrow: bool) -> WorkspaceOpenInEditorSignals {
+        WorkspaceOpenInEditorSignals {
+            nonce: RwSignal::new(0),
+            path: RwSignal::new(None),
+            narrow: RwSignal::new(narrow),
+        }
+    }
+
+    /// 宽屏：写路径 + 递增 nonce（消费端只认 nonce 变化）。
+    #[test]
+    fn opens_the_file_and_bumps_the_nonce() {
+        if crate::mobile_remote::mobile_remote_client() {
+            return; // 远端薄客户端没有编辑器，这条不适用
+        }
+        let sig = signals(false);
+        assert!(open_file_in_editor(sig, "src/main.rs".to_string()));
+        assert_eq!(sig.path.get(), Some("src/main.rs".to_string()));
+        assert_eq!(sig.nonce.get(), 1);
+        // 同一个文件再打开一次也要递增：否则「已经在编辑器里」的那次双击会被当重放吞掉。
+        assert!(open_file_in_editor(sig, "src/main.rs".to_string()));
+        assert_eq!(sig.nonce.get(), 2);
+    }
+
+    /// 窄屏：明确说「不行」，且一个信号都不写 —— 写了会在切到宽屏后被重放。
+    #[test]
+    fn a_narrow_layout_declines_without_touching_the_signals() {
+        let sig = signals(true);
+        assert!(!open_file_in_editor(sig, "src/main.rs".to_string()));
+        assert_eq!(sig.path.get(), None);
+        assert_eq!(sig.nonce.get(), 0);
     }
 }

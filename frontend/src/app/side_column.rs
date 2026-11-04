@@ -199,6 +199,26 @@ fn SideColumnDebugConsoleCard(
     }
 }
 
+/// 工作区文件行双击的落点：**在编辑器打开**，对齐 TUI 的「双击文件行 = 打开它」
+/// （`crates/crabmate-tui/src/tui_mode/mouse.rs` 的 `apply_workspace_click`）。
+///
+/// 与 TUI 的差别只在门槛：TUI 要求文件视图已开着（它的视图占用聊天列），Desktop 的桥接自带
+/// 「先切进编辑器布局」，所以聊天视图下双击也能直接打开。没有编辑器的布局（窄屏 / Android
+/// 远端薄客户端）退回插入 `@` 引用 —— 那条路径本来就是为它们准备的，别让一次双击落空。
+///
+/// 抽成模块级函数而不是写在组件体里：`SideColumnWorkspaceCard` 的圈复杂度贴着门禁，体内多
+/// 一个 `if` 就超。
+fn workspace_double_click_handler(
+    open_in_editor: WorkspaceOpenInEditorSignals,
+    insert_workspace_file_ref: StoredValue<Arc<dyn Fn(String) + Send + Sync>>,
+) -> StoredValue<Arc<dyn Fn(String) + Send + Sync>> {
+    StoredValue::new(Arc::new(move |rel: String| {
+        if !crate::workspace_context_menu::open_file_in_editor(open_in_editor, rel.clone()) {
+            (insert_workspace_file_ref.get_value())(rel);
+        }
+    }) as Arc<dyn Fn(String) + Send + Sync>)
+}
+
 #[component]
 fn SideColumnWorkspaceCard(
     locale: RwSignal<Locale>,
@@ -218,6 +238,9 @@ fn SideColumnWorkspaceCard(
             (insert_sv.get_value())(rel);
         }
     }) as Arc<dyn Fn(String) + Send + Sync>);
+    // 双击文件行 = **在编辑器打开**（见 `workspace_double_click_handler`）。
+    let on_file_double_click =
+        workspace_double_click_handler(open_in_editor, insert_workspace_file_ref);
     let refresh_after_mutation = make_refresh_workspace_after_mutation(ws, locale.get_untracked());
     let ctx_actions = StoredValue::new(WorkspaceContextMenuActions {
         refresh_after_mutation,
@@ -256,6 +279,7 @@ fn SideColumnWorkspaceCard(
                             locale=locale
                             ws=ws
                             insert_workspace_file_ref=insert_workspace_file_ref
+                            on_file_double_click=on_file_double_click
                             on_file_single_click=on_file_single_click
                             ctx_actions=ctx_actions
                         />
