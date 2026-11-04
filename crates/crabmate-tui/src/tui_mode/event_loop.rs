@@ -323,6 +323,9 @@ impl LaneApp<'_> {
         let (w, h) = dims;
         // 内容/宽度/搜索未变时复用已构建的 body 物理行，避免每帧全量 tokenize+wrap。
         self.prepare_body(w);
+        // `/editor` 视图的第二行标题要写「这是哪条连接」：多 lane 才有值（单 lane 恒等于当前
+        // 这条，只占宽度）。口径唯一在 `lane_list::current_label`，这里只搬一次快照。
+        self.st.editor.lane_label = super::lane_list::current_label(lanes).map(str::to_owned);
         let info = self.status_info();
         // 设置面板改成居中弹层后，内容必须按**弹层内宽**排版：用与绘制同源的
         // `settings_panel_content_width`，否则会出现「画 76 列、按 78 列生成」的错位。

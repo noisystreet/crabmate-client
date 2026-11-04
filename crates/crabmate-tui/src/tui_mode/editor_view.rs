@@ -17,9 +17,18 @@ use ratatui::text::{Line, Span};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use super::LaneApp;
+use super::md;
 use super::palette::Palette;
 use super::state::{Focus, LineKind};
 use crate::serve::{FILE_VIEW_MAX_LINES, WorkspaceFile};
+
+// 文件内查找（`Ctrl+F`）单独成文件，理由与 `editor_md` 相同：本文件与 `md.rs` 都贴着
+// `fn-nloc` 的 920 行/文件门禁。挂在这里（而不是 `mod.rs`）也是这个原因 —— `mod.rs`
+// 只剩几行余量。
+#[path = "editor_find.rs"]
+pub(super) mod editor_find;
+
+use self::editor_find::FindState;
 
 /// 一个制表位展开成几个空格。
 ///
@@ -101,6 +110,15 @@ pub(super) struct EditorState {
     pub truncated: bool,
     /// 发起读取时的 [`super::state::UiState::ws_generation`]。
     pub generation: u64,
+    /// 文件内查找（`Ctrl+F`）。与聊天区 `/find` 是两份状态，见 [`editor_find`] 模块头。
+    pub find: FindState,
+    /// 本 lane 的名字，`None` = 单 lane（或还没算出来）。
+    ///
+    /// 只给第二行标题用：多 lane 时「这是哪条连接」是唯一线索（同一个相对路径在两条 lane 里
+    /// 是两个不同的文件，各绑各的 workspace）。放 `EditorState` 而不是 `UiState` —— 读它的
+    /// 只有这一处渲染，`view_lines` 因此不必多一个参数；由外壳每帧按 lane 快照刷新，口径唯一
+    /// 在 [`super::lane_list::current_label`]。
+    pub lane_label: Option<String>,
 }
 
 impl EditorState {
@@ -165,9 +183,13 @@ impl EditorState {
     }
 
     /// 返回聊天视图。文件与滚动位置保留：再 `/editor` 进来还是同一处。
+    ///
+    /// 查找**输入态**顺手关掉（查询词与高亮留着）：带着输入态离开视图，再进来敲的第一下
+    /// 会悄悄进查找词而不是 composer —— 那时屏幕上没有任何东西提示这件事。
     pub fn close(&mut self) {
         self.open = false;
         self.loading = false;
+        self.find.close();
     }
 
     /// 滚动 `delta` 行，夹在 `[0, 末行]`。
@@ -229,6 +251,70 @@ impl EditorState {
     /// 内容区能显示几行（去掉标题与提示行）。
     fn visible_rows(height: usize) -> usize {
         height.saturating_sub(2).max(1)
+    }
+
+    /// 内容区此刻有没有正文（读取中 / 读取失败 / 未选文件 / 空文件）。
+    ///
+    /// 与 [`content_lines`] 的 if 链一一对应；单独成方法只为让那条贴着 CCN 门禁的 if 链
+    /// 不必再多一个条件。
+    fn has_no_body(&self) -> bool {
+        self.loading || self.error.is_some() || self.rel.is_none() || self.lines.is_empty()
+    }
+
+    /// 让查找的命中集合跟上当前（查询词 / 内容 / 模式 / 行数 / 折行宽度）。
+    ///
+    /// 两条调用路径都必须调：渲染前（画高亮要正确的行号）与按键跳转前（`Enter` 直接读
+    /// `hits`）。md 预览的命中按**物理行**算，而物理行只有渲染过才知道 —— 缓存还没建时
+    /// 直接返回、下一帧渲染时补上（按错的物理行跳比不跳更糟）。
+    pub fn sync_find(&mut self) {
+        match self.mode {
+            EditorMode::Source => {
+                let lines = &self.lines;
+                let key = editor_find::FindKey {
+                    rev: self.text_rev,
+                    mode: self.mode,
+                    rows: lines.len(),
+                    width: 0,
+                };
+                self.find.sync(key, |i, needle| {
+                    editor_find::line_matches(&lines[i], needle)
+                });
+            }
+            EditorMode::Markdown => {
+                let Some(cache) = self.md_cache.as_ref() else {
+                    return;
+                };
+                // 宽度由缓存给出（`ensure_rows` 已把 0 兜到 1）：预览的行是折行折出来的，
+                // 宽度变了而物理行数恰好不变时，只有它能说明命中集合已经过期。
+                let key = editor_find::FindKey {
+                    rev: self.text_rev,
+                    mode: self.mode,
+                    rows: cache.rows.len(),
+                    width: cache.width,
+                };
+                // 每行的可见字符拼进**同一个** buffer 再判：几千条物理行逐行新建 `String`
+                // 会在按键路径上分配几千次。
+                let mut row_text = String::new();
+                self.find.sync(key, |i, needle| {
+                    let Some(row) = cache.rows.get(i) else {
+                        return false;
+                    };
+                    row_text.clear();
+                    row_text.extend(row.chars.iter().map(|(_, ch)| *ch));
+                    editor_find::line_matches(&row_text, needle)
+                });
+            }
+        }
+    }
+
+    /// 把某一行顶到视口中间附近（查找跳转用），两端夹在可达范围内。
+    ///
+    /// 居中而不是「顶到最上面」：找一处命中通常要看它**上下**的上下文，命中行贴着屏幕
+    /// 顶边时上一行永远看不见。
+    pub fn reveal_row(&mut self, row: usize, visible: usize) {
+        let last = self.line_count().saturating_sub(1);
+        let offset = visible.saturating_sub(1) / 2;
+        *self.scroll_slot_mut() = row.saturating_sub(offset).min(last);
     }
 
     /// 渲染前把当前偏移收敛到可达范围（文件变短、终端变矮之后）。
@@ -311,7 +397,7 @@ pub(super) fn view_lines(
         ),
     ]));
     out.push(Line::from(Span::styled(
-        clip(&format!("  工作区 {ws} · {}", ed.mode.label()), width),
+        clip(&title_line(ed.mode, ws, ed.lane_label.as_deref()), width),
         Style::default().fg(pal.muted),
     )));
 
@@ -319,6 +405,19 @@ pub(super) fn view_lines(
     // 提示行：告诉人「怎么回去」，以及**怎么切模式**（否则「没有行号」只能靠猜）。
     out.push(hint_line(ed, width, pal));
     out
+}
+
+/// 第二行标题：`工作区 <末段> · <模式>`，多 lane 时再补 `lane <名字>`。
+///
+/// lane 名只在**多 lane** 时出现：单 lane 时它恒等于「当前这条」，写上去只占宽度。多 lane
+/// 时它是「这是哪条连接」的唯一线索 —— 同一个相对路径在两条 lane 里是两个不同的文件
+/// （各绑各的 workspace），缺了它就看不出自己看的是哪一份。
+fn title_line(mode: EditorMode, ws: &str, lane: Option<&str>) -> String {
+    let mut title = format!("  工作区 {ws} · {}", mode.label());
+    if let Some(lane) = lane {
+        title.push_str(&format!(" · lane {lane}"));
+    }
+    title
 }
 
 /// 内容区（标题与提示行之外）：读取态 / 未选文件 / 空文件 / 正文。
@@ -332,6 +431,10 @@ fn content_lines(
     pal: &Palette,
 ) -> Vec<Line<'static>> {
     let rows = EditorState::visible_rows(height);
+    // 没有正文可搜时先把命中集合作废：提示行读它，残留会让「查找 foo 第 1 / 3 处」
+    // 一直挂在读取中 / 失败的画面上（`hits` 空着说「无匹配」同样是错话，见 `showing`）。
+    let no_body = ed.has_no_body();
+    ed.find.set_body_absent(no_body);
     let mut out: Vec<Line<'static>> = Vec::new();
     if let Some(err) = ed.error.as_deref() {
         out.push(Line::from(Span::styled(
@@ -360,7 +463,11 @@ fn content_lines(
         )));
     } else {
         match ed.mode {
-            EditorMode::Source => source_body(ed, width, height, rows, pal, &mut out),
+            EditorMode::Source => {
+                // 命中集合先跟上内容：高亮是按行号画的，行号错了就画在别的行上。
+                ed.sync_find();
+                source_body(ed, width, height, rows, pal, &mut out);
+            }
             // md 预览：没有行号栏，整列宽度都归正文（折行在渲染层做，见 `editor_md`）。
             EditorMode::Markdown => out.extend(super::editor_md::md_body(ed, width, rows, pal)),
         }
@@ -383,27 +490,44 @@ fn source_body(
     let gutter = ed.lines.len().to_string().len().max(3);
     for (i, text) in ed.lines.iter().enumerate().skip(start).take(rows) {
         let no = format!("{:>gutter$} ", i + 1, gutter = gutter);
+        // 高亮走聊天区同一套判据（`md::highlight_override`）：命中行改 `hit` 前景、
+        // 锚定行整行反色。行号一起染，命中行才在左栏也看得出来。
+        let (matched, anchor) = (ed.find.is_hit(i), ed.find.is_anchor(i));
         out.push(Line::from(vec![
-            Span::styled(no, Style::default().fg(pal.muted)),
+            Span::styled(
+                no,
+                md::highlight_override(Style::default().fg(pal.muted), matched, anchor, pal),
+            ),
             Span::styled("│ ", Style::default().fg(pal.border)),
             Span::styled(
                 clip(text, width.saturating_sub(gutter + 2)),
-                Style::default().fg(pal.fg),
+                md::highlight_override(Style::default().fg(pal.fg), matched, anchor, pal),
             ),
         ]));
     }
 }
 
-/// 提示行：滚动键位 + 返回方式 + 切模式 + 两类截断说明。
+/// 提示行：查找态 / 滚动键位 + 返回方式 + 切模式 + 两类截断说明。
 fn hint_line(ed: &EditorState, width: usize, pal: &Palette) -> Line<'static> {
-    let mut hint = match ed.mode {
+    // 查找输入态：整行让给它。此刻每个键都归查找，底下再写「Esc 返回聊天」只会让人误以为
+    // Esc 是退视图（那是输入框为空时的事；查找态里 Esc 只关查找）。
+    if let Some(prompt) = ed.find.prompt() {
+        return Line::from(Span::styled(
+            clip(&prompt, width),
+            Style::default().fg(pal.hit),
+        ));
+    }
+    // 命中读数排在**最前**：它是查找唯一的反馈（视图占着主区，写进 transcript 也看不见），
+    // 而窄终端只会从尾部裁。
+    let mut hint = ed.find.inline_note().unwrap_or_default();
+    hint.push_str(match ed.mode {
         EditorMode::Source => {
-            String::from("PgUp/PgDn · 滚轮/Alt+↑↓ 滚动 · /chat 或 Esc 返回 · /editor --md 预览")
+            "PgUp/PgDn · 滚轮/Alt+↑↓ 滚动 · Ctrl+F 查找 · Ctrl+Y 复制路径 · /chat 或 Esc 返回 · /editor --md 预览"
         }
-        EditorMode::Markdown => String::from(
-            "md 预览 · PgUp/PgDn · 滚轮/Alt+↑↓ 滚动 · /chat 或 Esc 返回 · /editor --src 看源码",
-        ),
-    };
+        EditorMode::Markdown => {
+            "md 预览 · PgUp/PgDn · 滚轮/Alt+↑↓ 滚动 · Ctrl+F 查找 · Ctrl+Y 复制路径 · /chat 或 Esc 返回 · /editor --src 看源码"
+        }
+    });
     if ed.truncated {
         hint.push_str(" · 已截断");
     }
@@ -597,259 +721,8 @@ fn normalize_rel(raw: &str) -> String {
     trimmed.trim_end_matches('/').to_string()
 }
 
+// 单测单独成文件：本文件要同时守住 920 行/文件与「查找别挤进来」两条门禁，而这一块测试
+// 只是读状态、与渲染无关（`#[path]` 只换文件，模块路径仍是 `editor_view::tests`）。
 #[cfg(test)]
-mod tests {
-    use std::sync::mpsc;
-
-    use super::super::test_support::{test_app, test_client, test_prefs};
-    use super::{EditorState, LaneApp, MIN_VIEW_ROWS, WHEEL_LINES, basename, clip, normalize_rel};
-    use crate::serve::WorkspaceFile;
-
-    /// 外壳层的最小夹具：编辑器状态与命令都在 `LaneApp` 上，只测 `EditorState` 会漏掉
-    /// 「命令到底有没有接上」这一层。
-    fn app(f: impl FnOnce(&mut LaneApp<'_>)) {
-        let client = test_client();
-        let mut prefs = test_prefs();
-        let (tx, rx) = mpsc::channel();
-        let (job_tx, _job_rx) = mpsc::channel();
-        let mut app = test_app(&client, &mut prefs, rx, tx, job_tx);
-        f(&mut app);
-    }
-
-    #[test]
-    fn editor_command_opens_and_chat_returns() {
-        app(|a| {
-            a.editor_command(Some("src/lib.rs".to_string()));
-            assert!(a.st.editor.open);
-            assert_eq!(a.st.editor.rel.as_deref(), Some("src/lib.rs"));
-            // 没有 tokio runtime（单测）时停在 loading：不是假成功，也不是空文件
-            assert!(a.st.editor.loading);
-
-            a.editor_close();
-            assert!(!a.st.editor.open);
-            assert!(matches!(a.st.focus, super::super::state::Focus::Input));
-
-            // 幂等：已经在聊天时再 /chat 只是多说一句，不改状态
-            a.editor_close();
-            assert!(!a.st.editor.open);
-        });
-    }
-
-    /// `Ctrl+T` / 点状态栏：一次开、一次关，且**复用** `/editor` 与 `/chat` 的语义。
-    ///
-    /// 特意分两段断言：打开方向要重读当前文件（不沿用旧内容），关闭方向要把焦点
-    /// 交回输入框（切回来就是为了接着打字）。
-    #[test]
-    fn toggle_view_flips_both_ways() {
-        app(|a| {
-            a.toggle_view();
-            assert!(a.st.editor.open, "关 → 开");
-            assert!(a.st.editor.rel.is_none(), "没有文件就开占位视图，不编路径");
-
-            a.toggle_view();
-            assert!(!a.st.editor.open, "开 → 关");
-            assert!(matches!(a.st.focus, super::super::state::Focus::Input));
-        });
-    }
-
-    /// 已经有文件时再切回来，必须重读那一份：文件可能已被 agent 改过，
-    /// 沿用旧内容比多一次 GET 更坏。
-    #[test]
-    fn toggle_view_rereads_the_open_file() {
-        app(|a| {
-            a.editor_command(Some("src/lib.rs".to_string()));
-            a.toggle_view();
-            assert!(!a.st.editor.open);
-            a.toggle_view();
-            assert!(a.st.editor.open);
-            assert_eq!(a.st.editor.rel.as_deref(), Some("src/lib.rs"));
-            assert!(
-                a.st.editor.loading,
-                "重读在途（单测没有 runtime，停在 loading）"
-            );
-        });
-    }
-
-    #[test]
-    fn a_reply_for_a_file_we_already_left_is_dropped() {
-        app(|a| {
-            a.editor_command(Some("a.rs".to_string()));
-            a.editor_command(Some("b.rs".to_string()));
-            a.on_workspace_file(
-                "a.rs",
-                Ok(WorkspaceFile {
-                    content: Some("OLD".to_string()),
-                    error: None,
-                }),
-            );
-            assert_eq!(a.st.editor.rel.as_deref(), Some("b.rs"));
-            assert!(
-                a.st.editor.lines.is_empty(),
-                "a.rs 的迟到回包不能写进 b.rs 的视图"
-            );
-        });
-    }
-
-    #[test]
-    fn opening_a_blank_path_does_not_switch_the_view() {
-        app(|a| {
-            a.editor_command(Some("   ".to_string()));
-            assert!(!a.st.editor.open, "空路径只该给用法提示");
-        });
-    }
-
-    /// 只输入 `/editor`（这条 lane 还没打开过文件）也要进视图。
-    ///
-    /// 只往聊天区塞一行用法提示的话，用户看到的是「命令没生效」；更糟的是树上
-    /// 双击/Enter 打开文件只在视图开着时才生效，于是他接着点也没反应。
-    #[test]
-    fn a_bare_editor_command_opens_the_view_without_a_file() {
-        app(|a| {
-            a.editor_command(None);
-            assert!(a.st.editor.open, "只输入 /editor 也要进视图");
-            assert!(a.st.editor.rel.is_none(), "没有文件就不该编一个路径出来");
-            let rows = super::view_lines(&mut a.st.editor, None, 60, 20, &a.st.palette);
-            let text = rows
-                .iter()
-                .map(std::string::ToString::to_string)
-                .collect::<Vec<_>>()
-                .join("\n");
-            assert!(text.contains("未选文件"), "占位行要说清怎么选文件：{text}");
-            assert!(!text.contains("空文件"), "没选文件不能报「空文件」：{text}");
-        });
-    }
-
-    #[test]
-    fn paths_are_normalized_before_the_request() {
-        assert_eq!(normalize_rel("  ./src/lib.rs  "), "src/lib.rs");
-        assert_eq!(normalize_rel("src/"), "src");
-        // `..` 不做折叠：越权判定在 serve，客户端折叠后可能与服务端解析出不同的文件
-        assert_eq!(normalize_rel("../x"), "../x");
-    }
-
-    #[test]
-    fn tabs_expand_and_cr_is_dropped() {
-        let mut ed = EditorState::default();
-        ed.open_file("src/lib.rs", 7);
-        ed.accept_limited("fn main() {\r\n\tlet x = 1;\r\n}\r\n", 100);
-        assert_eq!(ed.lines[0], "fn main() {");
-        // tab 展开成 4 空格，行尾 `\r` 不留
-        assert_eq!(ed.lines[1], "    let x = 1;");
-        assert_eq!(ed.lines[2], "}");
-        assert!(!ed.loading && ed.error.is_none() && !ed.truncated);
-    }
-
-    #[test]
-    fn over_limit_is_truncated_and_says_so() {
-        let mut ed = EditorState::default();
-        ed.accept_limited("a\nb\nc\nd\n", 2);
-        assert_eq!(ed.lines, vec!["a".to_string(), "b".to_string()]);
-        assert!(ed.truncated, "截断要能被提示行说出来");
-    }
-
-    #[test]
-    fn scroll_clamps_within_file() {
-        let mut ed = EditorState::default();
-        ed.accept_limited("a\nb\nc\n", 100);
-        ed.scroll_by(-5);
-        assert_eq!(ed.scroll, 0, "不能滚到负偏移");
-        ed.scroll_by(99);
-        assert_eq!(ed.scroll, 2, "上界是末行");
-        ed.scroll_to_top();
-        assert_eq!(ed.scroll, 0);
-        ed.scroll_to_bottom();
-        assert_eq!(ed.scroll, 2);
-    }
-
-    #[test]
-    fn failure_clears_content_but_keeps_the_file_name() {
-        let mut ed = EditorState::default();
-        ed.open_file("bin/blob", 1);
-        ed.accept("旧内容");
-        ed.fail("二进制文件不支持预览".to_string());
-        assert!(ed.lines.is_empty());
-        assert_eq!(ed.rel.as_deref(), Some("bin/blob"));
-        assert!(ed.error.as_deref().unwrap_or("").contains("二进制"));
-        assert!(!ed.loading);
-    }
-
-    #[test]
-    fn close_keeps_the_cursor_for_the_next_visit() {
-        let mut ed = EditorState::default();
-        ed.accept_limited("a\nb\nc\n", 100);
-        ed.scroll_by(2);
-        ed.close();
-        assert!(!ed.open);
-        assert_eq!(ed.scroll, 2, "再 /editor 回来还应停在同一处");
-    }
-
-    #[test]
-    fn clip_keeps_wide_chars_whole() {
-        assert_eq!(clip("abc", 5), "abc");
-        assert_eq!(clip("abcdef", 4), "abc…");
-        // 全角按 2 列算：3 个全角 = 6 列，宽度 4 只能放 1 个 + 省略号
-        assert_eq!(clip("笔记说明", 4), "笔…");
-    }
-
-    #[test]
-    fn basename_matches_the_right_pane_title() {
-        assert_eq!(basename("/home/u/proj"), "proj");
-        assert_eq!(basename("/home/u/proj/"), "proj");
-        assert_eq!(basename("proj"), "proj");
-    }
-
-    /// 渲染后的整段文本（标题、行号、提示行都在里面）。
-    fn view_text(a: &mut LaneApp<'_>, width: usize, height: usize) -> String {
-        super::view_lines(&mut a.st.editor, None, width, height, &a.st.palette)
-            .iter()
-            .map(std::string::ToString::to_string)
-            .collect::<Vec<_>>()
-            .join("\n")
-    }
-
-    /// 行号列画的是**绝对行号**，滚动之后跟着各自的内容走。
-    ///
-    /// 两种坏法都能被这条抓住：没画行号（整列消失），以及滚动后按可见序号重新编号
-    /// （从 1 数起 —— 看文件尾部时会误以为自己在文件开头）。
-    #[test]
-    fn line_numbers_are_absolute_and_follow_the_scroll() {
-        app(|a| {
-            a.st.editor.open_file("src/lib.rs", 0);
-            a.st.editor.accept_limited("l1\nl2\nl3\nl4\n", 100);
-            // 视口 5 行 = 3 行内容：滚 3 行后被收敛到 1，画面是 l2 / l3 / l4
-            a.editor_wheel(false);
-            let text = view_text(a, 60, 5);
-            assert!(text.contains("  4 │ l4"), "行号要跟着内容走：{text}");
-            assert!(text.contains("  2 │ l2"), "{text}");
-            assert!(!text.contains("  1 │ l1"), "滚出去的行不该还在：{text}");
-        });
-    }
-
-    /// 滚轮一格 [`WHEEL_LINES`] 行，顶部与末尾都夹住。
-    #[test]
-    fn the_wheel_moves_three_lines_and_clamps_at_both_ends() {
-        app(|a| {
-            a.st.editor.open_file("a.rs", 0);
-            let body: String = (1..=40).map(|i| format!("l{i}\n")).collect();
-            a.st.editor.accept_limited(&body, 100);
-            a.editor_wheel(false);
-            assert_eq!(a.st.editor.scroll, WHEEL_LINES, "一格 = 3 行");
-            a.editor_wheel(true);
-            assert_eq!(a.st.editor.scroll, 0);
-            a.editor_wheel(true);
-            assert_eq!(a.st.editor.scroll, 0, "顶部再往上不越界");
-            for _ in 0..40 {
-                a.editor_wheel(false);
-            }
-            assert_eq!(a.st.editor.scroll, 39, "末尾夹在末行");
-        });
-    }
-
-    #[test]
-    fn view_rows_never_collapse_below_one() {
-        // 高度只够标题 + 提示时，内容区仍是 1 行而不是 0（否则整屏像是空的）
-        assert_eq!(EditorState::visible_rows(MIN_VIEW_ROWS), 1);
-        assert_eq!(EditorState::visible_rows(0), 1);
-        assert_eq!(EditorState::visible_rows(10), 8);
-    }
-}
+#[path = "editor_view_tests.rs"]
+mod tests;

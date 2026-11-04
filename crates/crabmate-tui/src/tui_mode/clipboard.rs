@@ -189,14 +189,28 @@ pub(crate) fn oversized_note(route: CopyRoute, text_len: usize) -> Option<String
 
 /// `/copy` 的完整流程，返回给用户看的一行结果（成功与失败都是文案）。
 ///
+/// `path` 是 `/editor` 视图里那个文件的相对路径，`view_open` 表示视图此刻开着：
+/// **视图开着时 `/copy` 与 `Ctrl+Y` 复制的是文件路径**（那时屏幕上只有文件，「最近一条回复」
+/// 既看不见也用不上）。要复制回复就 `/copy assistant`，或在聊天视图里按 `Ctrl+Y`。
+///
 /// 文案也在这里生成：`mod.rs` 贴着 920 行门禁，事件循环层只负责把它推进 transcript。
 /// `arg` 写错时报错而**不**退回默认——打错目标却静默复制了另一种内容，
 /// 比直接说「不支持」更容易让人把错东西粘出去。
-pub(crate) fn run(lines: &[LogLine], arg: Option<&str>) -> String {
+pub(crate) fn run(
+    lines: &[LogLine],
+    arg: Option<&str>,
+    path: Option<&str>,
+    view_open: bool,
+) -> String {
+    if is_path_target(arg, view_open) {
+        return path_notice(path);
+    }
     let kind = match arg {
         None | Some("" | "assistant" | "a" | "last") => LineKind::Assistant,
         Some("user" | "u") => LineKind::User,
-        Some(other) => return format!("不支持的 /copy 目标：{other}（支持 assistant / user）"),
+        Some(other) => {
+            return format!("不支持的 /copy 目标：{other}（支持 assistant / user / path）");
+        }
     };
     let label = match kind {
         LineKind::User => "你的消息",
@@ -215,6 +229,48 @@ pub(crate) fn run(lines: &[LogLine], arg: Option<&str>) -> String {
         notice.push_str(&note);
     }
     notice
+}
+
+/// 这次复制的是不是**文件路径**：显式 `/copy path`，或没写目标但文件视图开着。
+///
+/// 其余目标（`assistant` / `user`）即使视图开着也照常复制消息 —— 那是唯一的出口，
+/// 否则「视图开着想复制刚那段回复」就没有任何命令可用了。
+fn is_path_target(arg: Option<&str>, view_open: bool) -> bool {
+    match arg {
+        Some(target) => matches!(target, "path" | "p" | "file"),
+        None => view_open,
+    }
+}
+
+/// 复制文件**相对路径**（不是内容：内容走终端原生选择，一次粘贴几十 KB 正文只会更糟）。
+///
+/// `None` = 视图开着但还没打开过文件（`/editor` 无参进来的占位视图）：说清怎么先打开一个，
+/// 而不是回一句「复制失败」。
+fn path_notice(path: Option<&str>) -> String {
+    let Some(path) = path else {
+        return "没有打开文件：/editor <工作区相对路径> 打开后，/copy path 或 Ctrl+Y 复制它的路径"
+            .to_string();
+    };
+    match deliver(path) {
+        Ok(route) => format!("已复制文件路径 {path}（经 {}）", route.label()),
+        Err(err) => format!("复制失败：{err}"),
+    }
+}
+
+impl super::LaneApp<'_> {
+    /// `/copy` 与 `Ctrl+Y` 的入口：结果写一行系统提示（视图开着时复制的是文件路径）。
+    ///
+    /// 放在这里而不是 `mod.rs`：后者贴着 920 行门禁，而这条流程的参数全都来自
+    /// 「文件视图在不在、开着哪个文件」这两个状态。
+    pub(super) fn copy_last(&mut self, arg: Option<String>) {
+        let notice = run(
+            &self.st.lines,
+            arg.as_deref(),
+            self.st.editor.rel.as_deref(),
+            self.st.editor.open,
+        );
+        self.st.push_line(LineKind::System, &notice);
+    }
 }
 
 fn env_present(keys: &[&str]) -> bool {
@@ -338,6 +394,26 @@ mod tests {
             last_message_text(&lines, LineKind::Assistant).as_deref(),
             Some("正文")
         );
+    }
+
+    /// 视图开着时 `/copy` 与 `Ctrl+Y` 复制的是**文件路径**；没有文件就说怎么先打开。
+    ///
+    /// 只断言路由与文案（不真投递）：投递会去写终端剪贴板，单测不该依赖那个。
+    #[test]
+    fn an_open_view_targets_the_path_instead_of_a_message() {
+        let lines = vec![line(LineKind::Assistant, "正文")];
+        // 视图开着但还没打开文件（`/editor` 占位视图）：不投递，也不说「复制失败」。
+        let notice = run(&lines, None, None, true);
+        assert!(notice.contains("没有打开文件"), "{notice}");
+        // 显式 `path` 目标在聊天视图里同样成立。
+        let notice = run(&lines, Some("path"), None, false);
+        assert!(notice.contains("没有打开文件"), "{notice}");
+        // 点了名要回复时照常走消息 —— 视图开着也这样，否则那条路就没出口了。
+        let notice = run(&[], Some("assistant"), Some("src/lib.rs"), true);
+        assert!(notice.contains("没有可复制的"), "{notice}");
+        // 打错目标时把 path 也列进支持范围。
+        let notice = run(&lines, Some("zzz"), None, false);
+        assert!(notice.contains("path"), "{notice}");
     }
 
     #[test]

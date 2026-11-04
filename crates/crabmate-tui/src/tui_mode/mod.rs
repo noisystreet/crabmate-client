@@ -557,12 +557,6 @@ impl LaneApp<'_> {
         }
     }
 
-    /// `/copy` 与 Ctrl+Y：复制最近一条消息，结果写成一行系统提示（流程见 [`clipboard::run`]）。
-    fn copy_last(&mut self, arg: Option<String>) {
-        let notice = clipboard::run(&self.st.lines, arg.as_deref());
-        self.st.push_line(LineKind::System, &notice);
-    }
-
     fn on_key(&mut self, key: KeyEvent) {
         // 键盘接管：焦点不再算「鼠标点出来的」，侧栏底部的按键提示行随之恢复
         // （鼠标点击后不画那条提示，见 `UiState::pane_hint_visible`）。
