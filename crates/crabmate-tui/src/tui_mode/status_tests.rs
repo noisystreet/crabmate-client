@@ -207,7 +207,8 @@ fn labels_use_muted_and_values_use_fg() {
     info.model = Some("gpt-x".into());
     let line = status_line(&info, 200, &pal);
     let spans = &line.spans;
-    assert_eq!(spans[0].content, "serve");
+    // 第 1 段是 `view`（与 Desktop 状态栈第 1 颗 chip 同序，见 `environment_segments`）。
+    assert_eq!(spans[0].content, VIEW_LABEL);
     assert_eq!(spans[0].style.fg, Some(pal.muted), "label 走淡色");
     assert_eq!(spans[1].content, " ");
     assert_eq!(spans[2].style.fg, Some(pal.fg), "值走正文色");
@@ -541,15 +542,18 @@ fn status_line_never_exceeds_its_width() {
 }
 
 #[test]
-fn perm_segment_shows_the_wire_level_at_the_right_edge() {
+fn perm_segment_sits_right_after_view() {
     let mut info = base_info("http://127.0.0.1:8080");
     info.permission = Some("approved".into());
     let text = status_text(&info, 200);
     assert!(text.contains("perm approved"), "{text}");
-    // 显示顺序：perm 在 `ctx` 之后（紧邻右缘运行态），不是夹在环境段中间。
+    // 显示顺序：`view` 之后紧接 `perm`（与 Desktop 右列状态栈前两颗 chip 同序），
+    // 而不是排在行尾。
+    let view_at = text.find(VIEW_LABEL).expect("view 段");
     let perm_at = text.find("perm approved").expect("perm 段");
     let ctx_at = text.find("ctx").expect("ctx 段");
-    assert!(ctx_at < perm_at, "{text}");
+    assert!(view_at < perm_at, "{text}");
+    assert!(perm_at < ctx_at, "{text}");
 }
 
 #[test]

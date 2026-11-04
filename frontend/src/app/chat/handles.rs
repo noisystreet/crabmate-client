@@ -172,8 +172,6 @@ pub(crate) struct ChatComposerPaneSignals {
     /// 将工作区相对路径插入 composer（双击树 / 拖放到输入区共用）。
     pub insert_workspace_file_ref: StoredValue<Arc<dyn Fn(String) + Send + Sync>>,
     pub chat: ChatSessionSignals,
-    pub selected_session_mode: RwSignal<String>,
-    pub session_mode_user_override: RwSignal<bool>,
     pub stream_follow_up: RwSignal<super::composer_follow_up::ComposerStreamFollowUp>,
 }
 
@@ -259,8 +257,6 @@ impl ChatColumnShell {
             },
             insert_workspace_file_ref: self.insert_workspace_file_ref,
             chat: app.chat,
-            selected_session_mode: app.llm_settings.selected_session_mode,
-            session_mode_user_override: app.llm_settings.session_mode_user_override,
             stream_follow_up: self.stream_follow_up,
         }
     }

@@ -1,12 +1,14 @@
-//! 状态栈：模型、角色、思考模式、会话用量、运行态。
+//! 状态栈：视图、权限、serve、模型、角色、思考模式、会话用量、运行态。
 //!
 //! 原底部状态栏已迁入右侧工作区列，纵向堆叠且可折叠（[`side_status_stack_view`]）；
 //! 右列收起时由浮动 rail / 移动端顶栏的迷你运行点（[`StatusRunDotButton`]）兜底。
 
 use std::sync::Arc;
 
+use crabmate_client_api::url::api_base_authority;
 use leptos::prelude::*;
 
+use crate::api::api_base_url;
 use crate::api::load_client_llm_text_fields_from_storage;
 use crate::app_prefs::status_bar_effective_model;
 use crate::chat_session_state::ChatStreamBusyMemos;
@@ -21,6 +23,7 @@ use super::shell_runtime_context::expect_chat_shell_ctx;
 use super::status_agent_role_menu::{AgentRoleMenuProps, StatusAgentRoleMenu};
 use super::status_context::{StatusBarContextChip, observe_context_watermark};
 use super::status_fetch_state::status_bar_should_show_skeleton;
+use super::status_session_mode_seg::{SessionModeSegProps, StatusSessionModeSeg};
 use super::status_tasks_state::StatusTasksSignals;
 use super::status_view_chip::StatusViewChip;
 
@@ -208,6 +211,9 @@ struct StatusBarChipsSignals {
 
 #[component]
 fn StatusBarChipsSkeleton(locale: RwSignal<Locale>) -> impl IntoView {
+    // 骨架只覆盖**要等 `/status` 的那几颗** chip（model / role / ctx）：`view` 是本地状态、
+    // `perm` 来自 user-data，把它们塞进骨架会画出一个点得动却没有数据的假开关。所以这里的
+    // 次序与 [`StatusBarChipsLoaded`] 的真实次序**不逐项对应**，这是有意的。
     view! {
         <div
             class="status-chips-skeleton"
@@ -227,6 +233,57 @@ fn StatusBarChipsSkeleton(locale: RwSignal<Locale>) -> impl IntoView {
                 <span class="skeleton skeleton-context-bar"></span>
             </span>
         </div>
+    }
+}
+
+/// `serve` chip 的可见值：`host:port`。
+///
+/// 空基址（浏览器与 serve 同 Origin，`make web-release` 那一份就是）说「同源」而不是留空：
+/// 空 chip 读起来像「没连上」。
+#[must_use]
+fn serve_short_value(api_base: &str, locale: Locale) -> String {
+    let authority = api_base_authority(api_base);
+    if authority.is_empty() {
+        i18n::status_chip_same_origin(locale).to_string()
+    } else {
+        authority
+    }
+}
+
+/// `serve` chip 的 `title`：完整基址（空基址时那句话与可见值同一句）。
+///
+/// 右列只有几百像素，带路径前缀的自建地址会把后面几颗 chip 全挤走 —— 所以可见值只放
+/// `host:port`，完整 URL 由 `title` 承载（与左栏连接行是同一条口径）。
+#[must_use]
+fn serve_title(api_base: &str, locale: Locale) -> String {
+    let base = api_base.trim();
+    if base.is_empty() {
+        i18n::status_chip_same_origin(locale).to_string()
+    } else {
+        base.to_string()
+    }
+}
+
+/// 状态栈的 `serve` chip：这个窗口连的是哪台 serve。
+///
+/// 与 TUI 状态栈的 `serve` 段是同一件事、同一个词（`crates/crabmate-tui/src/tui_mode/status.rs`
+/// 的 `environment_segments`）。位置也在同一处：`view` / `perm` 之后、`model` 之前 ——
+/// 「我在哪个视图、能动到什么、连的是哪台」这三件事挨着，跨客户端对照时不用挪眼睛。
+#[component]
+fn StatusBarServeChip(locale: RwSignal<Locale>) -> impl IntoView {
+    view! {
+        <span
+            class="status-chip"
+            data-testid="status-serve-chip"
+            prop:title=move || serve_title(&api_base_url(), locale.get())
+        >
+            <span class="status-chip-label">
+                {move || i18n::status_chip_serve(locale.get())}
+            </span>
+            <span class="status-chip-value">
+                {move || serve_short_value(&api_base_url(), locale.get())}
+            </span>
+        </span>
     }
 }
 
@@ -295,6 +352,7 @@ fn StatusBarThinkingToggle(
 fn StatusBarChipsLoaded(
     chips: StatusBarChipsSignals,
     role_menu_open: RwSignal<bool>,
+    mode_menu_open: RwSignal<bool>,
 ) -> impl IntoView {
     let StatusBarChipsSignals {
         st,
@@ -311,6 +369,13 @@ fn StatusBarChipsLoaded(
     let chat = expect_chat_shell_ctx().chat;
     view! {
         <>
+            // 前两颗 chip 固定是「视图」与「权限」，且「先 view、后 perm」 —— 与 TUI 状态栈的
+            // 前两行同序（`crates/crabmate-tui/src/tui_mode/status.rs` 的 `environment_segments`）。
+            // 这两项回答「我在哪个视图」与「这一轮最多能动到什么」，比 model / role 这类环境
+            // 事实更常被扫到；两端位置一致，才不会出现同一个开关一端排第一、一端排最后。
+            <StatusViewChip />
+            <crate::app::status_permission_chip::StatusPermissionChip locale=locale />
+            <StatusBarServeChip locale=locale />
             <span class="status-chip">
                 <span class="status-chip-label">
                     {move || i18n::status_chip_model(locale.get())}
@@ -340,11 +405,30 @@ fn StatusBarChipsLoaded(
                     menu_open: role_menu_open,
                 } />
             </span>
+            // 会话模式（`ask` / `plan` / `act`）：与 TUI 的 `mode` 段同一件事、同一个位置
+            // （`role` 之后、`think` 之前）。**切换入口也在这里** —— 输入框下方那颗同名选择器
+            // 已删除：同一件事挂两个菜单，两份 `menu_open` 迟早不同步，而右列本来就常驻
+            // （窄屏 / rail 收起时也在）。
+            <span
+                class="status-chip status-chip-mode"
+                class:status-chip-mode--open=move || mode_menu_open.get()
+                data-testid="status-mode-chip"
+            >
+                <span class="status-chip-label">
+                    {move || i18n::status_mode_label(locale.get())}
+                </span>
+                <StatusSessionModeSeg props=SessionModeSegProps {
+                    locale,
+                    chat,
+                    selected_session_mode,
+                    session_mode_user_override,
+                    menu_open: mode_menu_open,
+                } />
+            </span>
             <StatusBarThinkingToggle
                 llm_thinking_mode=llm_thinking_mode
                 locale=locale
             />
-            <crate::app::status_permission_chip::StatusPermissionChip locale=locale />
             <StatusBarContextChip
                 st=st
                 chat=chat
@@ -353,10 +437,17 @@ fn StatusBarChipsLoaded(
                 locale=locale
                 context_usage_page=context_usage_page
             />
-            // 主区视图开关：排在权限段之后、与 TUI 状态栈的 `view` 段同一个位置口径。
-            <StatusViewChip />
         </>
     }
+}
+
+/// 状态栈「有上拉菜单打开」的判定：`role` / `mode` 两颗 chip 各有自己的菜单。
+///
+/// 抽成函数是因为它出现在 `class:` 绑定里 —— 就地写 `||` 会把 `StatusBarChipsRow` 的
+/// 圈复杂度顶上 `lizard` 的 10 上限（这一层本来就在边缘）。
+#[must_use]
+fn any_status_menu_open(role_open: bool, mode_open: bool) -> bool {
+    role_open || mode_open
 }
 
 #[component]
@@ -377,10 +468,15 @@ fn StatusBarChipsRow(
         ..
     } = chips;
     let role_menu_open = RwSignal::new(false);
+    let mode_menu_open = RwSignal::new(false);
     view! {
         <div
             class="status-chips"
-            class:status-chips--role-menu-open=move || role_menu_open.get()
+            // 两个上拉菜单打开时都要放行溢出：菜单本体走 Portal（`position: fixed`），
+            // 但触发按钮的 z-index 仍在这一层，裁切会让箭头/悬浮态被吃掉。
+            class:status-chips--role-menu-open=move || {
+                any_status_menu_open(role_menu_open.get(), mode_menu_open.get())
+            }
         >
             {move || {
                 if let Some(err) = conversation_hydration_err.get() {
@@ -430,7 +526,11 @@ fn StatusBarChipsRow(
                     .into_any()
                 } else {
                     view! {
-                        <StatusBarChipsLoaded chips=chips role_menu_open=role_menu_open />
+                        <StatusBarChipsLoaded
+                            chips=chips
+                            role_menu_open=role_menu_open
+                            mode_menu_open=mode_menu_open
+                        />
                     }
                     .into_any()
                 }
@@ -570,7 +670,12 @@ fn StatusBarFooterBody(signals: StatusBarFooterSignals) -> impl IntoView {
     }
 }
 
-/// 右列状态栈：把原底栏的（模型 / 角色 / 思考 / 会话 / 运行态）纵向堆叠进右侧工作区列，可折叠展开。
+/// 右列状态栈：把底栏的 chip 纵向堆叠进右侧工作区列，可折叠展开。
+///
+/// 次序与 **TUI 状态栈的前两行同源**：`view`（视图）在最上、`perm`（权限）第二，其后才是
+/// `model` / `role` / `think` / `ctx`，运行指示贴最底。两端各按自己的直觉排，读起来就是
+/// 「同一个开关在这里排第一、在那里排最后」（实现见 [`StatusBarChipsLoaded`] 与
+/// `crates/crabmate-tui/src/tui_mode/status.rs` 的 `environment_segments`）。
 ///
 /// - 是否挂载由调用方（右列）判定；挂载后常驻显示，仅由表头按钮折叠展开。
 /// - `data-testid="status-bar"` 保留在内部 [`StatusBarFooterBody`] 的 `<footer>` 上，e2e 锚点不变。
@@ -632,6 +737,40 @@ pub fn StatusRunDotButton(
                 <span class="status-run-dot" aria-hidden="true"></span>
             </span>
         </button>
+    }
+}
+
+#[cfg(test)]
+mod serve_chip_tests {
+    use super::{any_status_menu_open, serve_short_value, serve_title};
+    use crate::i18n::{self, Locale};
+
+    /// 任一菜单打开就放行溢出；两颗都关才恢复裁切。
+    #[test]
+    fn any_menu_open_covers_both_chips() {
+        assert!(!any_status_menu_open(false, false));
+        assert!(any_status_menu_open(true, false));
+        assert!(any_status_menu_open(false, true));
+        assert!(any_status_menu_open(true, true));
+    }
+
+    /// 可见值只放 `host:port`，完整基址留给 `title`：右列宽度放不下一条带路径的 URL。
+    #[test]
+    fn serve_chip_shows_the_authority_and_keeps_the_full_base_in_the_title() {
+        let base = "https://serve.example.com:8443/prefix";
+        assert_eq!(
+            serve_short_value(base, Locale::En),
+            "serve.example.com:8443"
+        );
+        assert_eq!(serve_title(base, Locale::En), base);
+    }
+
+    /// 空基址（浏览器同 Origin）说「同源」，不留空 —— 空 chip 读起来像「没连上」。
+    #[test]
+    fn serve_chip_says_same_origin_for_an_empty_base() {
+        let same = i18n::status_chip_same_origin(Locale::ZhHans).to_string();
+        assert_eq!(serve_short_value("", Locale::ZhHans), same);
+        assert_eq!(serve_title("   ", Locale::ZhHans), same);
     }
 }
 

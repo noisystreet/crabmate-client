@@ -51,6 +51,24 @@ pub fn status_chip_model(l: Locale) -> &'static str {
     }
 }
 
+/// 状态栈 `serve` 段的标签。
+///
+/// 两端同词、不翻译：TUI 的段 label 就是 `serve`，而这一项说的正是「连的是哪台 serve」——
+/// 译成「服务端」反而要多一层对照，且右列宽度里少两列。
+pub fn status_chip_serve(_: Locale) -> &'static str {
+    "serve"
+}
+
+/// `serve` 段在空基址时的值：浏览器与 serve 同 Origin（没有显式基址）。
+///
+/// 留空读起来像「没连上」，而这是**正常**形态 —— `make web-release` 那一份就是如此。
+pub fn status_chip_same_origin(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "同源",
+        Locale::En => "same origin",
+    }
+}
+
 pub fn status_chip_context(l: Locale) -> &'static str {
     match l {
         Locale::ZhHans => "会话",
