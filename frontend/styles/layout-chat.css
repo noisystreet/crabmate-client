@@ -518,16 +518,14 @@
   border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--border));
 }
 
+/* 名称是卡片主体：不再套胶囊，按标题行文本排（mono + 标签字重）。 */
 .chat-tui-skill-inject-chip {
   flex: 0 0 auto;
-  padding: 0.05em 0.5em;
-  border-radius: var(--radius-pill);
   font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: var(--text-sm);
-  line-height: 1.5;
+  font-size: var(--text-md);
+  font-weight: var(--font-weight-label, 600);
+  line-height: 1.45;
   color: var(--text);
-  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
-  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
 }
 
 /* —— 工具回合：扁平 mono —— */

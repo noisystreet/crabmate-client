@@ -11,6 +11,10 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Desktop: the skill card leads with the skill name instead of a generic title.** The injected-skill card read 「已调用 skill」 and left `code-review` to a small pill behind it, so a glance told you a skill ran but not which one. The name now sits in the title line right after the label (`已调用 skill：code-review`), mono at label weight, with the 「显式」 marker pushed behind it; several skills list in injection order. Cost: none — same `context_inject` parse, no protocol change. Verified: `frontend` tests green; not seen on a real screen.
+
 ### Added
 
 - **TUI: `/editor` gained in-file find, copy-path and a lane label (#421).** Locating a line meant scrolling by eye, and with several lanes the title never said *which* connection the file came from. `Ctrl+F` finds inside the open file — state separate from `/find`, so neither clears the other; `Enter`/`Shift+Enter` walk matches, `Esc` only leaves find, and the hint line shows `n / N` or 「无匹配」 while the file has a body (per source line, or per wrapped row in the preview). `Ctrl+Y` / `/copy path` copy the relative path. The title's second row adds `lane <name>` with several lanes. Cost: while find is open the view takes the typed keys and swallows the draft/focus keys (`Esc` first for a slash command). Verified: `crabmate-tui` 1154 green; not seen in a real terminal. No protocol change.
