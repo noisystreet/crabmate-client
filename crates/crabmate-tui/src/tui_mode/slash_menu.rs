@@ -18,7 +18,7 @@ use ratatui::widgets::{Clear, Paragraph};
 use serde::Deserialize;
 use unicode_width::UnicodeWidthStr;
 
-use crabmate_client_api::slash;
+use crabmate_client_api::slash_heads::Head;
 
 use super::LaneApp;
 use super::palette::Palette;
@@ -28,8 +28,6 @@ use super::worker::WorkerJob;
 
 /// 菜单最多显示多少行（超出时窗口跟随光标）。
 const MAX_MENU_ROWS: usize = 8;
-/// skill 候选上限：与 Web 端一致，避免几百个 skill 把菜单撑成搜索页。
-const MAX_SKILL_ROWS: usize = 24;
 
 /// `GET /skills` 的单项（只反序列化菜单要用的字段）。
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -70,167 +68,85 @@ impl SkillsCache {
     }
 }
 
-/// 候选项来源：端内命令 / skill。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SlashKind {
-    Builtin,
-    Skill,
-}
+/// 候选项与来源都来自共享层（与 Web 同一份结构），端内只决定「列哪些命令、写什么文案」。
+pub use crabmate_client_api::slash_menu::MenuItem as SlashItem;
 
-/// 菜单里的一个候选。
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SlashItem {
-    pub kind: SlashKind,
-    /// 前缀匹配键（不含 `/`）。
-    pub match_key: String,
-    /// 接受后写进输入框的全文。
-    pub insert: String,
-    /// 左侧展示（含 `/`）。
-    pub label: String,
-    pub description: String,
-}
+/// 草稿处于 `/` 前缀态时返回 `/` 之后的前缀（与 Web 同一判定）。
+pub use crabmate_client_api::slash_menu::slash_prefix;
 
-/// TUI 端内命令清单（`controls::parse_control` 认得、且本端有 handler 的那些）。
+/// TUI 端内命令清单：顺序即菜单展示顺序，来自共享的 [`Head::ALL`]。
+///
+/// 每个主命令的插入文本与说明在 [`builtin_item`] 里用**穷尽 match** 给出 —— 新增一个
+/// `Head` 变体时编译器会拦住，于是「有 handler 却没有候选」不会再出现
+/// （`/fold` `/copy` `/ctl` `/editor` `/chat` 曾漏在这里，只能靠读 `/help` 找到）。
 #[must_use]
 pub fn builtin_items() -> Vec<SlashItem> {
-    let item = |key: &str, insert: &str, desc: &str| SlashItem {
-        kind: SlashKind::Builtin,
-        match_key: key.to_string(),
-        insert: insert.to_string(),
-        label: format!("/{key}"),
-        description: desc.to_string(),
-    };
-    vec![
-        item(slash::HELP, "/help", "命令与快捷键说明"),
-        item(
-            slash::STATUS,
-            "/status",
-            "刷新 serve 模型 / 端点 / 会话模式",
-        ),
-        item("settings", "/settings", "设置面板（等同 F2）"),
-        item(slash::MODEL, "/model ", "模型 override（off 清除）"),
-        item(
-            slash::MODE,
-            "/mode ",
-            "会话模式 ask / plan / act（off 清除）",
-        ),
-        item(slash::ROLE, "/role ", "Agent role override（off 清除）"),
-        item(
-            slash::PERM,
+    Head::ALL.iter().copied().map(builtin_item).collect()
+}
+
+fn builtin_item(head: Head) -> SlashItem {
+    let (insert, desc) = match head {
+        Head::Help => ("/help", "命令与快捷键说明"),
+        Head::Status => ("/status", "刷新 serve 模型 / 端点 / 会话模式"),
+        Head::Settings => ("/settings", "设置面板（等同 F2）"),
+        Head::Model => ("/model ", "模型 override（off 清除）"),
+        Head::Mode => ("/mode ", "会话模式 ask / plan / act（off 清除）"),
+        Head::Role => ("/role ", "Agent role override（off 清除）"),
+        Head::Perm => (
             "/perm ",
             "权限等级（off 清除；也可点状态行的 perm 段；上限仍由服务端 min 链决定）",
         ),
-        item("find", "/find ", "搜索并高亮记录（off 清除）"),
-        item(
-            "background",
+        Head::Find => ("/find ", "搜索并高亮记录（off 清除）"),
+        Head::Background => (
             "/background ",
             "全屏背景（kitty 走像素，其余用每格底色；off 关闭，图会压暗）",
         ),
-        item(
-            slash::WORKSPACE,
+        Head::Workspace => (
             "/workspace ",
             "查看 / 切换 serve 工作区根（~/ 展开、off 恢复默认，/cd 别名）",
         ),
-        item(slash::CONV, "/conv ", "会话列表 / 切换 / 新建 / 导出"),
-        item(
-            slash::RESUME,
-            "/resume",
-            "续传被中断的回合（serve 侧 job 仍在跑时）",
-        ),
-        item(
-            "older",
-            "/older",
-            "加载更早的消息（分页向前，等同 /history）",
-        ),
-        item(
-            "fold",
+        Head::Conv => ("/conv ", "会话列表 / 切换 / 新建 / 导出"),
+        Head::Resume => ("/resume", "续传被中断的回合（serve 侧 job 仍在跑时）"),
+        Head::Older => ("/older", "加载更早的消息（分页向前，等同 /history）"),
+        Head::Fold => (
             "/fold ",
             "执行过程的展开态（空参=最近一条，n 从底部数，all 全展开，close 全折回；/unfold 同义）",
         ),
-        item(
-            "lane",
+        Head::Lane => (
             "/lane ",
             "运行期加一条连接（attach <name> 连已就绪实例 / new <name> [workspace] 新建并等就绪）",
         ),
-        item(
-            "copy",
+        Head::Copy => (
             "/copy ",
             "复制到剪贴板（默认最近一条助手回复，user 你自己的上一条，path 当前文件的相对路径；/yank、Ctrl+Y 同义）",
         ),
-        item(
-            "ctl",
+        Head::Ctl => (
             "/ctl",
             "查 crabmatectl 控制面实例（本地 unix socket，只读）",
         ),
-        item(
-            "editor",
+        Head::Editor => (
             "/editor ",
             "只读文件视图（可选 --md / --src 与相对路径；/view 同义，/chat 切回聊天）",
         ),
-        item("chat", "/chat", "从编辑器视图切回聊天"),
-        item(slash::QUIT, "/quit", "退出（/exit、/q 同义）"),
-    ]
-}
-
-/// 草稿是否处于「仅 `/` + 可选前缀、尚无空白」的浮层态；返回 `/` 之后的前缀。
-#[must_use]
-pub fn slash_prefix(draft: &str) -> Option<&str> {
-    let s = draft.trim_start();
-    let rest = s.strip_prefix('/')?;
-    if rest.contains(char::is_whitespace) || rest.contains('/') {
-        return None;
-    }
-    Some(rest)
-}
-
-fn matches_prefix(item: &SlashItem, prefix: &str) -> bool {
-    prefix.is_empty()
-        || item
-            .match_key
-            .to_ascii_lowercase()
-            .starts_with(&prefix.to_ascii_lowercase())
-}
-
-fn skill_item(s: &SkillEntry) -> SlashItem {
-    let desc = if s.description.trim().is_empty() {
-        s.path.clone()
-    } else {
-        s.description.trim().to_string()
+        Head::Chat => ("/chat", "从编辑器视图切回聊天"),
+        Head::Quit => ("/quit", "退出（/exit、/q 同义）"),
     };
-    SlashItem {
-        kind: SlashKind::Skill,
-        match_key: s.id.clone(),
-        insert: format!("/{} ", s.id),
-        label: format!("/{}", s.id),
-        description: desc,
-    }
+    SlashItem::builtin(head.as_str(), insert, desc)
 }
 
 /// 按前缀过滤：内建命令在前，skill 在后（按 id 排序并截断）。
 #[must_use]
 pub fn filtered_items(prefix: &str, cache: Option<&SkillsCache>) -> Vec<SlashItem> {
-    let mut out: Vec<SlashItem> = builtin_items()
-        .into_iter()
-        .filter(|it| matches_prefix(it, prefix))
-        .collect();
-    if let Some(cache) = cache
-        && cache.enabled
-    {
-        let mut skills: Vec<SlashItem> = cache
-            .skills
-            .iter()
-            .map(skill_item)
-            .filter(|it| matches_prefix(it, prefix))
-            .collect();
-        skills.sort_by(|a, b| {
-            a.match_key
-                .to_ascii_lowercase()
-                .cmp(&b.match_key.to_ascii_lowercase())
-        });
-        skills.truncate(MAX_SKILL_ROWS);
-        out.extend(skills);
-    }
-    out
+    let skills = cache
+        .filter(|c| c.enabled)
+        .map(|c| {
+            c.skills
+                .iter()
+                .map(|s| SlashItem::skill(&s.id, &s.description, &s.path))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    crabmate_client_api::slash_menu::assemble(prefix, builtin_items(), skills)
 }
 
 /// 菜单打开时，一个按键归一化后的动作。
@@ -433,6 +349,8 @@ pub(super) fn render_slash_menu(frame: &mut Frame, st: &UiState, area: Rect) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // 只有测试还会按来源分流（生产侧 SlashItem 自带 `kind`，不必命名类型）。
+    use crabmate_client_api::slash_menu::MenuKind as SlashKind;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
     use ratatui::style::Color;
@@ -511,20 +429,23 @@ mod tests {
         }
     }
 
-    /// 反向：`HEAD_SPEC` 标为主命令的 head 都必须能从这里选到。
+    /// 反向：每个主命令都必须能从这里选到。
     ///
     /// 上面那条是单向的（菜单项 → 可解析），`/fold` `/copy` `/ctl` `/editor` `/chat` 这类
     /// 「有 handler 却没有候选」的缺口它看不见 —— 那正是补齐这一批之前的真实状态。
+    /// 清单现在是共享的 `Head::ALL`，不再是端内手抄的第二份表。
     #[test]
     fn every_parsable_command_is_reachable_from_the_menu() {
         let keys: Vec<String> = builtin_items().into_iter().map(|it| it.match_key).collect();
-        for (head, is_primary) in crate::tui_mode::controls::HEAD_SPEC {
-            if !*is_primary {
-                continue;
-            }
+        for head in crabmate_client_api::slash_heads::Head::ALL {
+            let key = head.as_str();
             assert!(
-                keys.iter().any(|k| k == head),
-                "可解析的 /{head} 没有进补全菜单（用户只能靠 /help 知道）"
+                keys.iter().any(|k| k == key),
+                "可解析的 /{key} 没有进补全菜单（用户只能靠 /help 知道）"
+            );
+            assert!(
+                crate::tui_mode::controls::parse_control(&format!("/{key}")).is_some(),
+                "菜单里的 /{key} 不是可解析的控制命令"
             );
         }
     }

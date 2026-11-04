@@ -5,10 +5,13 @@
 //! 单端命令（web 的 `agent`/`export`/`config`/…、tui-mode 的
 //! `settings`/`find`/`h`）与其 handler 一起留在端内，避免出现
 //! 「拦截了但没有 handler」的超集误伤。
+//!
+//! **别名归一与主命令身份不在本模块**：见 [`super::slash_heads`]（`/<head>` → `Head`）。
+//! 这里只放跨端同名的**字符串常量**；谁认哪些命令、哪个别名指向谁，由 `head_of` 决定。
 
 /// `/help`（repl / tui-mode / web）。
 pub const HELP: &str = "help";
-/// `/help` 别名（repl / web）。
+/// `/help` 别名（repl / web / tui-mode —— 三端都经 `slash_heads::head_of` 归一）。
 pub const HELP_Q: &str = "?";
 /// `/workspace`（repl / web）。
 pub const WORKSPACE: &str = "workspace";

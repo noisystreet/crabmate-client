@@ -1,21 +1,18 @@
 //! Web composer：`/` 浮层（内建命令 + skill）状态与菜单组件。
 
 use crabmate_client_api::slash;
+use crabmate_client_api::slash_menu::assemble;
+pub(super) use crabmate_client_api::slash_menu::{
+    MenuItem as SlashMenuItem, MenuKind as SlashItemKind,
+};
 use leptos::html::Textarea;
 use leptos::prelude::*;
 
-use crate::api::{SkillListItem, SkillsListData, fetch_skills};
+use crate::api::{SkillsListData, fetch_skills};
 use crate::i18n::{self, Locale};
 
-/// 草稿是否处于「仅 `/` + 可选前缀、尚无空白」的浮层态。
-pub(super) fn slash_skill_prefix(draft: &str) -> Option<&str> {
-    let s = draft.trim_start();
-    let rest = s.strip_prefix('/')?;
-    if rest.contains(|c: char| c.is_whitespace()) || rest.contains('/') {
-        return None;
-    }
-    Some(rest)
-}
+/// 草稿是否处于「仅 `/` + 可选前缀、尚无空白」的浮层态（与 TUI 同一判定）。
+pub(super) use crabmate_client_api::slash_menu::slash_prefix as slash_skill_prefix;
 
 /// IME 组字中：勿拦截方向键/Enter，也勿触发发送。
 pub(super) fn keydown_is_ime_composing(ev: &web_sys::KeyboardEvent) -> bool {
@@ -24,24 +21,6 @@ pub(super) fn keydown_is_ime_composing(ev: &web_sys::KeyboardEvent) -> bool {
     }
     // 旧引擎在 composition 期间常报 keyCode 229。
     ev.key_code() == 229
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum SlashItemKind {
-    Builtin,
-    Skill,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) struct SlashMenuItem {
-    pub kind: SlashItemKind,
-    /// 前缀匹配键（不含 `/`）。
-    pub match_key: String,
-    /// 写入草稿的全文。
-    pub insert: String,
-    /// 左侧展示（含 `/`）。
-    pub label: String,
-    pub description: String,
 }
 
 fn web_builtin_slash_items(locale: Locale) -> Vec<SlashMenuItem> {
@@ -140,66 +119,21 @@ fn web_builtin_slash_items(locale: Locale) -> Vec<SlashMenuItem> {
     ]
 }
 
-fn item_matches_prefix(item: &SlashMenuItem, prefix: &str) -> bool {
-    if prefix.is_empty() {
-        return true;
-    }
-    let p = prefix.to_ascii_lowercase();
-    item.match_key.to_ascii_lowercase().starts_with(&p)
-        || item
-            .label
-            .trim_start_matches('/')
-            .to_ascii_lowercase()
-            .starts_with(&p)
-}
-
-fn skill_to_menu_item(s: &SkillListItem) -> SlashMenuItem {
-    let desc = if s.description.trim().is_empty() {
-        s.path.clone()
-    } else {
-        s.description.clone()
-    };
-    SlashMenuItem {
-        kind: SlashItemKind::Skill,
-        match_key: s.id.clone(),
-        insert: format!("/{} ", s.id),
-        label: format!("/{}", s.id),
-        description: desc,
-    }
-}
-
 fn build_filtered_menu(
     prefix: &str,
     locale: Locale,
     cache: Option<&SkillsListData>,
 ) -> Vec<SlashMenuItem> {
-    let mut out: Vec<SlashMenuItem> = web_builtin_slash_items(locale)
-        .into_iter()
-        .filter(|it| item_matches_prefix(it, prefix))
-        .collect();
-    if let Some(cache) = cache
-        && cache.enabled
-    {
-        let mut skills: Vec<SlashMenuItem> = cache
-            .skills
-            .iter()
-            .filter(|s| {
-                prefix.is_empty()
-                    || s.id
-                        .to_ascii_lowercase()
-                        .starts_with(&prefix.to_ascii_lowercase())
-            })
-            .map(skill_to_menu_item)
-            .collect();
-        skills.sort_by(|a, b| {
-            a.match_key
-                .to_ascii_lowercase()
-                .cmp(&b.match_key.to_ascii_lowercase())
-        });
-        skills.truncate(24);
-        out.extend(skills);
-    }
-    out
+    let skills = cache
+        .filter(|c| c.enabled)
+        .map(|c| {
+            c.skills
+                .iter()
+                .map(|s| SlashMenuItem::skill(&s.id, &s.description, &s.path))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    assemble(prefix, web_builtin_slash_items(locale), skills)
 }
 
 pub(super) fn apply_slash_item(
@@ -633,6 +567,7 @@ fn slash_menu_body(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::api::SkillListItem;
 
     #[test]
     fn slash_prefix_rejects_whitespace_and_extra_slash() {
