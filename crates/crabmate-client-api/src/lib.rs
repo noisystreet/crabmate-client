@@ -27,6 +27,7 @@ pub mod secrets;
 pub mod session_model;
 pub mod sessions;
 pub mod slash;
+pub mod slash_caps;
 pub mod slash_heads;
 pub mod slash_menu;
 pub mod sse_dispatch;

@@ -2,7 +2,8 @@
 
 use std::sync::Arc;
 
-use crabmate_client_api::slash;
+use crabmate_client_api::slash_caps::{Surface, supports};
+use crabmate_client_api::slash_heads::{Head, head_of};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
@@ -24,37 +25,66 @@ use crate::session_ops::{
 };
 use crate::storage::StoredMessage;
 
-/// 是否为 Web 控制斜杠（应拦截，不发送给模型）。`/<skill-id>` 除外。
-#[must_use]
-pub(super) fn is_web_control_slash(trimmed: &str) -> bool {
+/// Web 端**独占**的斜杠 head（TUI 没有 handler，故不在 `slash_heads` 里）。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WebOnly {
+    Agent,
+    Export,
+    Config,
+    ApiBase,
+    Context,
+    Clear,
+    ApiKey,
+    Skills,
+    Version,
+}
+
+/// `/<head>` 的 head（去 `/`、取首词、小写）。不是 `/` 开头返回 `None`。
+fn slash_head(trimmed: &str) -> Option<String> {
     let s = trimmed.trim();
-    if !s.starts_with('/') {
-        return false;
-    }
-    let head = s[1..]
+    s.strip_prefix('/')?
         .split_whitespace()
         .next()
-        .unwrap_or("")
-        .to_ascii_lowercase();
-    matches!(
-        head.as_str(),
-        slash::HELP
-            | slash::HELP_Q
-            | slash::WORKSPACE
-            | slash::CD
-            | slash::MODEL
-            | "agent"
-            | "export"
-            | "config"
-            | "api-base"
-            | "apibase"
-            | "context"
-            | "clear"
-            | "api-key"
-            | "apikey"
-            | "skills"
-            | "version"
-    )
+        .map(|h| h.to_ascii_lowercase())
+}
+
+fn web_only_head(raw: &str) -> Option<WebOnly> {
+    Some(match raw {
+        "agent" => WebOnly::Agent,
+        "export" => WebOnly::Export,
+        "config" => WebOnly::Config,
+        // `apibase` / `apikey` 是无连字符的肌肉记忆写法，与带连字符的一样收。
+        "api-base" | "apibase" => WebOnly::ApiBase,
+        "context" => WebOnly::Context,
+        "clear" => WebOnly::Clear,
+        "api-key" | "apikey" => WebOnly::ApiKey,
+        "skills" => WebOnly::Skills,
+        "version" => WebOnly::Version,
+        _ => return None,
+    })
+}
+
+/// `/help` 的正文。列全本端拦截集，否则「敲了有用但 help 没写」与「help 写了却没用」
+/// 一样难查（`/version` 曾漏在这里）。
+const HELP_TEXT: &str = "常用控制命令（不经模型）：\n\
+/help · /version · /workspace · /agent · /model\n\
+/api-base · /export · /config · /context\n\
+/skills · /clear · /api-key（密钥不进对话）";
+
+/// 是否为 Web 控制斜杠（应拦截，不发送给模型）。`/<skill-id>` 除外。
+///
+/// 「这一端支不支持」不再手写：共享 head 查 `slash_caps`（`Surface::Desktop`），
+/// 端独占的查 [`web_only_head`]。两边都由测试与分派表夹住 —— 改一处漏一处会有测试失败，
+/// 而不是变成「拦下来没人实现」或「实现了却敲不出来」。
+#[must_use]
+pub(super) fn is_web_control_slash(trimmed: &str) -> bool {
+    let Some(head) = slash_head(trimmed) else {
+        return false;
+    };
+    match head_of(&head) {
+        Some(h) => supports(Surface::Desktop, h),
+        None => web_only_head(&head).is_some(),
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -76,59 +106,90 @@ pub(super) fn try_handle_web_control_slash(
     if !is_web_control_slash(text) {
         return false;
     }
+    let Some(head) = slash_head(text) else {
+        return false;
+    };
     let loc = ctx.locale.get_untracked();
-    let parts: Vec<&str> = text.split_whitespace().collect();
-    let head = parts
-        .first()
-        .map(|s| s.trim_start_matches('/').to_ascii_lowercase())
-        .unwrap_or_default();
-    let args: Vec<&str> = parts.into_iter().skip(1).collect();
+    let args: Vec<&str> = text.split_whitespace().skip(1).collect();
 
-    match head.as_str() {
-        slash::HELP | slash::HELP_Q => {
-            set_ok(
-                ctx.chat,
-                shell,
-                "常用控制命令（不经模型）：\n\
-/workspace · /agent · /model · /api-base\n\
-/export · /config · /context · /skills\n\
-/clear · /api-key（密钥不进对话）",
-            );
-        }
-        "version" => {
-            set_ok(
-                ctx.chat,
-                shell,
-                format!("CrabMate Web · {}", env!("CARGO_PKG_VERSION")),
-            );
-        }
-        "clear" => {
-            let id = ctx.chat.active_id.get_untracked();
-            ctx.chat.update_sessions_composer(|list| {
-                if let Some(s) = list.iter_mut().find(|s| s.id == id) {
-                    s.messages.clear();
-                    s.draft.clear();
-                    s.history_total = None;
-                    s.history_window_start = None;
-                    s.history_has_older = None;
-                }
-            });
-            ctx.draft.set(String::new());
-            set_ok(ctx.chat, shell, "已清空当前会话消息。");
-        }
-        slash::WORKSPACE | slash::CD => handle_workspace(&args, shell, ctx.chat, loc),
-        "agent" => handle_agent(&args, shell, ctx),
-        "export" => handle_export(&args, shell, ctx, loc),
-        "config" => handle_config(&args, shell, ctx.chat, loc),
-        slash::MODEL => handle_model(&args, shell, ctx.chat, loc),
-        "api-base" | "apibase" => handle_api_base(&args, shell, ctx.chat, loc),
-        "context" => handle_context(shell, ctx.chat, loc),
-        "skills" => handle_skills(shell, ctx.chat, loc),
-        "api-key" | "apikey" => handle_api_key(&args, shell, ctx.chat, loc),
-        _ => set_ok(ctx.chat, shell, format!("未知控制命令 /{head}；输入 /help")),
+    // 共享 head 与端独占 head 分两层分派：前者由 `slash_caps` 决定谁能进来，
+    // 后者不在 `Head` 里（TUI 没有 handler），必须单独查表。
+    let consumed = match head_of(&head) {
+        Some(h) => dispatch_shared(h, &args, shell, ctx, loc),
+        None => match web_only_head(&head) {
+            Some(which) => {
+                dispatch_web_only(which, &args, shell, ctx, loc);
+                true
+            }
+            None => false,
+        },
+    };
+    if consumed {
+        ctx.draft.set(String::new());
     }
-    ctx.draft.set(String::new());
+    consumed
+}
+
+/// 共享 head 的分派。`supports(Surface::Desktop, …)` 说支持而这里没臂 = 真 bug：
+/// 兜底写一句提示，不要静默吞掉命令（那正是本轮重构要消灭的失效形态）。
+fn dispatch_shared(
+    head: Head,
+    args: &[&str],
+    shell: &ComposerStreamShell,
+    ctx: WebSlashControlCtx,
+    loc: Locale,
+) -> bool {
+    match head {
+        Head::Help => set_ok(ctx.chat, shell, HELP_TEXT),
+        Head::Workspace => handle_workspace(args, shell, ctx.chat, loc),
+        Head::Model => handle_model(args, shell, ctx.chat, loc),
+        other => set_ok(
+            ctx.chat,
+            shell,
+            format!("未知控制命令 /{}；输入 /help", other.as_str()),
+        ),
+    }
     true
+}
+
+fn dispatch_web_only(
+    which: WebOnly,
+    args: &[&str],
+    shell: &ComposerStreamShell,
+    ctx: WebSlashControlCtx,
+    loc: Locale,
+) {
+    match which {
+        WebOnly::Agent => handle_agent(args, shell, ctx),
+        WebOnly::Export => handle_export(args, shell, ctx, loc),
+        WebOnly::Config => handle_config(args, shell, ctx.chat, loc),
+        WebOnly::ApiBase => handle_api_base(args, shell, ctx.chat, loc),
+        WebOnly::Context => handle_context(shell, ctx.chat, loc),
+        WebOnly::Clear => handle_clear(shell, ctx),
+        WebOnly::ApiKey => handle_api_key(args, shell, ctx.chat, loc),
+        WebOnly::Skills => handle_skills(shell, ctx.chat, loc),
+        WebOnly::Version => set_ok(
+            ctx.chat,
+            shell,
+            format!("CrabMate Web · {}", env!("CARGO_PKG_VERSION")),
+        ),
+    }
+}
+
+/// `/clear`：只清本地这段 transcript，**不**动 serve 上的会话记录。
+fn handle_clear(shell: &ComposerStreamShell, ctx: WebSlashControlCtx) {
+    let id = ctx.chat.active_id.get_untracked();
+    ctx.chat.update_sessions_composer(|list| {
+        if let Some(s) = list.iter_mut().find(|s| s.id == id) {
+            s.messages.clear();
+            s.draft.clear();
+            s.history_total = None;
+            s.history_window_start = None;
+            s.history_has_older = None;
+        }
+    });
+    ctx.draft.set(String::new());
+    set_ok(ctx.chat, shell, "已清空当前会话消息。");
 }
 
 /// 控制斜杠成功/说明：写入会话 system 气泡（不经模型、导出时跳过），勿塞状态栏以免右下角叠字。
@@ -517,5 +578,85 @@ fn handle_api_key(
             shell,
             "用法: /api-key status · /api-key set <密钥> · /api-key clear",
         ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crabmate_client_api::slash_caps::supported;
+
+    /// 拦截判定与能力表必须互为镜像：表里有 → 拦得住；表里没有 → 原样发给模型。
+    ///
+    /// 这条以前是「两份手写名单」（拦截一份、分派一份），漏一处就是
+    /// 「拦下来没人实现」或「实现了却敲不出来」—— 现在两侧都指向 `slash_caps`。
+    #[test]
+    fn caps_and_the_intercept_list_cannot_drift() {
+        for head in supported(Surface::Desktop) {
+            let line = format!("/{}", head.as_str());
+            assert!(is_web_control_slash(&line), "{line} 在 caps 里却没被拦截");
+        }
+        for head in Head::ALL {
+            if supports(Surface::Desktop, *head) {
+                continue;
+            }
+            let line = format!("/{}", head.as_str());
+            assert!(
+                !is_web_control_slash(&line),
+                "{line} 不在 caps 里却被拦截 —— 会变成「拦下来没人实现」"
+            );
+        }
+    }
+
+    #[test]
+    fn web_only_heads_are_intercepted() {
+        for line in [
+            "/agent",
+            "/export",
+            "/config",
+            "/api-base",
+            "/apibase",
+            "/context",
+            "/clear",
+            "/api-key",
+            "/apikey",
+            "/skills",
+            "/version",
+        ] {
+            assert!(is_web_control_slash(line), "{line} 是端独占命令却没被拦截");
+        }
+        // 大小写与前缀空白同样认（`slash_head` 负责归一）。
+        assert!(is_web_control_slash("  /VERSION  "));
+        assert!(is_web_control_slash("/Agent list"));
+    }
+
+    #[test]
+    fn unknown_and_skill_slashes_pass_through() {
+        // `/my-skill` 是运行期才知道的 skill；`/data/proj` 是路径。都不该被拦。
+        for line in ["/my-skill", "/data/proj", "hello", "/", ""] {
+            assert!(!is_web_control_slash(line), "{line} 不该被当成控制命令");
+        }
+    }
+
+    /// `/help` 正文必须覆盖本端拦截集：`/version` 曾经「能敲但 help 不写」。
+    #[test]
+    fn help_text_lists_every_intercepted_head() {
+        for head in supported(Surface::Desktop) {
+            let needle = format!("/{}", head.as_str());
+            assert!(HELP_TEXT.contains(&needle), "help 漏了 {needle}");
+        }
+        for name in [
+            "/agent",
+            "/export",
+            "/config",
+            "/api-base",
+            "/context",
+            "/clear",
+            "/api-key",
+            "/skills",
+            "/version",
+        ] {
+            assert!(HELP_TEXT.contains(name), "help 漏了 {name}");
+        }
     }
 }

@@ -85,6 +85,7 @@ frontend/                # wasm fetch 适配器 + UI；S1–S4 已用 client-api
 | `paths` | 跨端共用的端点路径常量与动态段构造器（≥2 端实际共用才收） |
 | `slash` | 跨端共用的斜杠控制命令名字表（handler 分端） |
 | `slash_heads` | 斜杠 head 的规范形与别名归一（`/<head>` → `Head`，`Head::ALL` 即 TUI 菜单顺序）；**不含** handler |
+| `slash_caps` | 各端支持的共享 head 能力表（`Surface::Desktop` / `Tui` / `Repl`）；端独占命令不进表，端内拦截判定由它派生 |
 | `slash_menu` | `/` 补全菜单机制（触发判定 / `MenuItem` / 前缀过滤 / 内建优先 + skill 排序截断）；命令**文案**与 skill **来源**留端 |
 | `messages` | HTTP 错误体通用取错（`error` → `message` → `HTTP {status}`），display 层不属契约；另含嵌套 `{"error":{"code":…}}` 的 `api_error_code`（按 code 分流的唯一入口） |
 | `conversation_state` | `POST /conversation/state` 的响应分类（写入成功 / 会话不存在 / 老 serve 无此路由 / 其它失败）+ 契约类型 re-export；不做等级比较、不算 min 链 |
@@ -161,6 +162,8 @@ GitHub：`X-CrabMate-GitHub-Token` 目前主要在 frontend（+ 壳钥匙串槽�
 共享：`crabmate_client_api::slash` 常量（`help` / `?` / `workspace` / `cd` / `model` / `conv` / `status` / `mode` / `role` / `quit` / `exit` / `q`）——只收 **≥2 端共用**的命令 head；handler 分端。单端命令（web 的 `agent` / `export` / `config` / `api-base` / `clear` / `api-key` / `skills` 等，tui-mode 的 `settings` / `find`）与 handler 一起留端，避免「拦截了但没 handler」的超集误伤。
 
 **S5b（已落地）：菜单机制 + head 归一。** 两端原本各有一份逐字同构的 `/` 浮层实现（触发条件、`MenuItem` 字段、skill 项规则、「内建在前 + 按 id 排序 + 截断 24」），现已收进 `crabmate_client_api::slash_menu`（`slash_prefix` / `MenuItem::builtin` / `MenuItem::skill` / `matches_prefix` / `assemble`）——**命令文案仍留端**（Web 走 i18n，TUI 是编译期常量），skill **来源**两端类型不同（`SkillListItem` / `SkillEntry`）由端内 map 成 `MenuItem`。同一次改动把「主命令 + 别名」从散落的 match arm 收成 `crabmate_client_api::slash_heads`（`Head` + `head_of`）：执行端只对主命令写 arm（**穷尽 match**，新增变体编译器会拦），TUI 菜单从 `Head::ALL` 派生。两类静默失效因此消失 —— `slash.rs` 的模块注释描述的「只收 ≥2 端共用名字」仍在，但**别名归一**与**菜单候选**现在各有唯一出处：`/perm`（repl 里被拦截却没有 handler）与 `/fold` `/copy` `/ctl` `/editor` `/chat`（TUI 有 handler 却没有候选）分别是这两类。拦截判定 `is_*_control_slash` **仍不共享**：两端 handler 集不同，合成超集必然出现「拦了没 handler」，Web 的 `agent` / `config` / `api-key` / `version` 等端独占命令不进 `head_of`。
+
+**S5c（已落地）：能力表。** 「这一端认不认 `/mode`」原本是三份手抄名单（Web 拦截、Web 分派、TUI 菜单），`/version` 就是由此变成「能敲但 `/help` 不写」。现在 `crabmate_client_api::slash_caps` 按端给一次（`Surface::Desktop` / `Tui` / `Repl`），Web 的 `is_web_control_slash` 由它派生，端独占命令（`agent` / `config` / `api-key` …）另走端内表。两侧都有测试夹：表中每条都必须「拦得住且能分派」，表外的共享 head 必须原样发给模型。**`is_control_slash` 的拦截集刻意大于 `Surface::Repl`**：它还接住 `/background` `/editor` `/chat` 只为了回一句「只在全屏可用」——拦与做是两件事。
 
 ### 4.7 Health 探测子集（已落地）
 

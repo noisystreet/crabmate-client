@@ -3,7 +3,6 @@
 use super::{
     ResumePoint, SessionPrefs, TermError, after_turn_outcome, cancel_failed_keeps_resume,
     capture_resume_point, handle_mode_slash, handle_model_slash, handle_role_slash,
-    repl_control_head,
 };
 use crate::serve::ChatStreamOutcome;
 use anyhow::anyhow;
@@ -94,21 +93,6 @@ fn model_slash_sets_and_clears_override() {
     handle_model_slash("/model off", &mut o);
     assert!(o.model.is_none());
     assert!(o.client_llm().is_none());
-}
-
-#[test]
-fn plain_messages_are_not_swallowed_as_control() {
-    assert_eq!(repl_control_head("model gpt-5 please"), None);
-    assert_eq!(repl_control_head("resume where we left"), None);
-    assert_eq!(repl_control_head("  model  "), None);
-    assert_eq!(repl_control_head("mode act now"), None);
-    assert_eq!(repl_control_head("role coder please"), None);
-    assert_eq!(repl_control_head("/model gpt-5"), Some("model"));
-    assert_eq!(repl_control_head("/mode plan"), Some("mode"));
-    assert_eq!(repl_control_head("/ROLE coder"), Some("role"));
-    assert_eq!(repl_control_head("/RESUME"), Some("resume"));
-    assert_eq!(repl_control_head("/models"), None);
-    assert_eq!(repl_control_head("/status"), None);
 }
 
 #[test]
