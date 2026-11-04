@@ -4,7 +4,7 @@
 
 use super::lane_cmd;
 use super::settings::SESSION_MODES;
-use crabmate_client_api::slash;
+use crabmate_client_api::slash_heads::{Head, head_of};
 
 /// 控制斜杠（本地处理，不发给模型）。`/` 开头的未知命令视为普通消息。
 pub enum Control {
@@ -114,51 +114,6 @@ pub fn set_mode_field(slot: &mut Option<String>, arg: Option<String>) -> String 
     }
 }
 
-/// [`parse_control`] 认得的全部 head（含别名），仅测试用。
-///
-/// `bool` = 是否是**主命令**：主命令必须有补全菜单项（`slash_menu::builtin_items`），
-/// 别名（`/h` `/cd` `/yank` …）只在解析器里存在、菜单不单列。
-///
-/// 这张表与 `parse_control` 的 `match` 是两份，靠两个测试从两侧夹住：
-/// `head_spec_matches_parser`（表里每个都要能解析）与
-/// `slash_menu::tests::every_parsable_command_is_reachable_from_the_menu`（主命令都要在菜单里）。
-/// **已知盲区**：新增命令只改 `match` 不改这里时两条测试都仍然通过 —— 清单不会自己长出来，
-/// 所以改 `match` 时必须同时改这张表。
-#[cfg(test)]
-pub const HEAD_SPEC: &[(&str, bool)] = &[
-    ("quit", true),
-    ("exit", false),
-    ("q", false),
-    ("help", true),
-    ("h", false),
-    ("model", true),
-    ("mode", true),
-    ("role", true),
-    ("perm", true),
-    ("status", true),
-    ("settings", true),
-    ("workspace", true),
-    ("cd", false),
-    ("resume", true),
-    ("older", true),
-    ("history", false),
-    ("find", true),
-    ("search", false),
-    ("grep", false),
-    ("fold", true),
-    ("unfold", false),
-    ("background", true),
-    ("bg", false),
-    ("copy", true),
-    ("yank", false),
-    ("ctl", true),
-    ("lane", true),
-    ("editor", true),
-    ("view", false),
-    ("chat", true),
-    ("conv", true),
-];
-
 /// 解析控制斜杠：`/model [x]` `/mode [ask|plan|act]` `/role [id]` `/status`
 /// `/find [词]` `/help` `/conv`(刷新) `/conv new` `/quit`（`/exit`、`/q` 同义）
 /// `/workspace [路径]`（`/cd` 别名）`/settings` `/resume`。
@@ -170,36 +125,37 @@ pub fn parse_control(text: &str) -> Option<Control> {
         Some((h, a)) => (h.trim(), a.trim().to_string()),
         None => (rest, String::new()),
     };
-    let head = head.to_ascii_lowercase();
+    // 别名（`/q` `/h` `/cd` `/yank` …）由 `head_of` 归一，这里只写**主命令**的臂：
+    // `match` 是穷尽的，新增 `Head` 变体时编译器会在这里拦下缺的那一条。
+    let head = head_of(head)?;
     let arg_opt = (!arg.is_empty()).then_some(arg);
-    match head.as_str() {
-        slash::QUIT | slash::QUIT_EXIT | slash::QUIT_Q => Some(Control::Quit),
-        slash::HELP | "h" => Some(Control::Help),
-        slash::MODEL => Some(Control::Model(arg_opt)),
-        slash::MODE => Some(Control::Mode(arg_opt)),
-        slash::ROLE => Some(Control::Role(arg_opt)),
-        slash::PERM => Some(Control::Perm(arg_opt)),
-        slash::STATUS => Some(Control::Status),
-        "settings" => Some(Control::Settings),
-        slash::WORKSPACE | slash::CD => Some(Control::Workspace(arg_opt)),
-        slash::RESUME => Some(Control::Resume),
-        "older" | "history" => Some(Control::Older),
-        "find" | "search" | "grep" => Some(Control::Find(arg_opt)),
-        "fold" | "unfold" => Some(Control::Fold(arg_opt)),
-        "background" | "bg" => Some(Control::Background(arg_opt)),
-        "copy" | "yank" => Some(Control::Copy(arg_opt)),
+    match head {
+        Head::Quit => Some(Control::Quit),
+        Head::Help => Some(Control::Help),
+        Head::Model => Some(Control::Model(arg_opt)),
+        Head::Mode => Some(Control::Mode(arg_opt)),
+        Head::Role => Some(Control::Role(arg_opt)),
+        Head::Perm => Some(Control::Perm(arg_opt)),
+        Head::Status => Some(Control::Status),
+        Head::Settings => Some(Control::Settings),
+        Head::Workspace => Some(Control::Workspace(arg_opt)),
+        Head::Resume => Some(Control::Resume),
+        Head::Older => Some(Control::Older),
+        Head::Find => Some(Control::Find(arg_opt)),
+        Head::Fold => Some(Control::Fold(arg_opt)),
+        Head::Background => Some(Control::Background(arg_opt)),
+        Head::Copy => Some(Control::Copy(arg_opt)),
         // `ctl` 只读查询控制面实例；`lane` 是它的超集（空参等价 `/ctl`，另加
         // `attach` / `new` 两个写入路径）。两者刻意不合并：`/ctl` 已在文档与 muscle
         // memory 里，改语义比多一个入口更容易出错。
-        "ctl" => Some(Control::Ctl),
-        "lane" => Some(Control::Lane(lane_cmd::parse(arg_opt.as_deref()))),
+        Head::Ctl => Some(Control::Ctl),
+        Head::Lane => Some(Control::Lane(lane_cmd::parse(arg_opt.as_deref()))),
         // `/editor`（别名 `/view`）与 `/chat` 是一对：前者把主区切成只读文件视图，
         // 后者切回来。做成命令而不是纯快捷键，是因为「回到聊天」必须能被说出来 ——
         // 编辑器视图占的正是聊天区，快捷键只在提示行里有，命令还在 `/help` 与补全里。
-        "editor" | "view" => Some(Control::Editor(arg_opt)),
-        "chat" => Some(Control::Chat),
-        slash::CONV => Some(parse_conv(arg_opt.as_deref())),
-        _ => None,
+        Head::Editor => Some(Control::Editor(arg_opt)),
+        Head::Chat => Some(Control::Chat),
+        Head::Conv => Some(parse_conv(arg_opt.as_deref())),
     }
 }
 
@@ -241,17 +197,6 @@ pub fn conv_unknown_message(arg: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// `HEAD_SPEC` 里的每个 head 都必须仍能被解析：清单过期时先在这里失败。
-    #[test]
-    fn head_spec_matches_parser() {
-        for (head, _) in HEAD_SPEC {
-            assert!(
-                parse_control(&format!("/{head}")).is_some(),
-                "HEAD_SPEC 里的 /{head} 已不是可解析命令（清单过期）"
-            );
-        }
-    }
 
     #[test]
     fn parse_control_known_slashes() {
