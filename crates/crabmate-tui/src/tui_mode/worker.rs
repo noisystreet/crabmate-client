@@ -110,8 +110,8 @@ pub(super) enum UiEvent {
         /// `None` = 最新页（切换会话回放）；`Some` = `/older` 前插页，值即请求用的游标。
         before_index: Option<u32>,
     },
-    /// 会话导出结果（`/conv export`）：正文已在 worker 里渲染完，写盘留在 UI 线程 ——
-    /// 只有那边知道这次导出是否还属于当前绑定（见 `tui_mode::export`）。
+    /// 会话导出结果（`/conv export`）：正文已在 worker 里渲染完，写盘留在 UI 线程
+    /// （那边才有 transcript 与报告出口，见 `tui_mode::export`）。
     Exported(Box<ExportDone>),
     /// 会话索引写入（`/conv new` 新建或复用空行 / 首轮后绑定 `conversation_id` / 切走回收）结果。
     SessionIndex {

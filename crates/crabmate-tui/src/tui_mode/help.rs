@@ -24,7 +24,7 @@ const COMMAND_LINES: &[&str] = &[
     "/settings（或 F6）：设置面板（模型名/API Base/温度/思考模式/API 密钥/Agent role/会话模式；F2 保存）",
     "/find <词> 搜索并高亮 · /find（空参）跳下一处 · /find off 清除",
     "/background <图片路径>：全屏背景（kitty 走真像素，其余终端用每格底色；图会压暗保正文可读；off 关闭）",
-    "/conv list 刷新 · /conv use <id> 切换 · /conv new 新会话 · /conv export [json|markdown|both] [--out <路径>] [--id <id>] 导出整段会话（与 Desktop 同形的 md/json；不给 --out 落到当前目录的 chat_export_<时间戳>，可导别的会话）",
+    "/conv list 刷新 · /conv use <id> 切换 · /conv new 新会话 · /conv export [json|markdown|both] [--out <路径>] [--id <id>] 导出整段会话（与 Desktop 同形的 md/json；不给 --out 落到当前目录的 chat_export_<时间戳>，可导别的会话；md 同 markdown，--out 不建父目录）",
     "/resume 续传上一轮被中断的回合（serve 侧 job 仍在跑时；Ctrl+C 的 cancel 未送达也可续）",
     "/fold [n|all|close]：切换执行过程的展开态（每轮结束自动折叠；/older 回放与回看同样折叠）—— 空参=最近一条，n 从底部数，all 全展开，close 全折回；折叠导航开着时光标会跟到切过的那条",
     "/older（/history 同义）把更早一页历史前插到当前对话（切换会话只载入最新一页时用；滚到顶再按 PgUp 会自动续翻；跨页命中仍可 /find）",
