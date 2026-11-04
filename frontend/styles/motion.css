@@ -37,8 +37,7 @@
     transform: none;
   }
 
-  .main-row-chat-layer,
-  .main-row-ide-layer {
+  .main-row-chat-layer {
     transition: none;
   }
 

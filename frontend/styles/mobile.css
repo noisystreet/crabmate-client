@@ -395,11 +395,6 @@ html[data-cm-mobile-shell] .composer-input--mirror-overlay {
     font-size: var(--text-md);
   }
 
-  /* 窄屏：隐藏会话/IDE 切换，固定会话模式 */
-  .shell-topbar-layout-start {
-    display: none !important;
-  }
-
   /* 窄屏通用弹窗居中，避开底部系统导航 + 软键盘（审批同此，勿贴底以免被手势条/底栏/键盘遮挡） */
   .modal-backdrop {
     align-items: center;

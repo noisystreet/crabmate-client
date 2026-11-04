@@ -176,6 +176,32 @@
   transition: border-color 0.22s ease;
 }
 
+/* 聊天列主区：transcript 与编辑器两层**常驻挂载**、只切显隐。
+   卸载会连带丢掉 CodeMirror 句柄 / 已打开标签，并让 transcript 的滚动锚点归零；
+   绝对定位让两层互不挤压（`.messages` 仍是各自的滚动容器）。 */
+.chat-body {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+}
+
+.chat-body-pane {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* 用 visibility 而非 display：隐藏的一层仍保留尺寸，CodeMirror 不必重建测距 */
+.chat-body-pane--hidden {
+  visibility: hidden;
+  pointer-events: none;
+}
+
 /* 仅作滚动容器：勿对 transcript 子项做纵 flex 压缩，否则 overflow 会把回合压成一行高 */
 .messages {
   flex: 1;

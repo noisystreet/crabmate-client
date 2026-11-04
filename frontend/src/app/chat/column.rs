@@ -695,16 +695,36 @@ fn ChatComposerPane(signals: ChatComposerPaneSignals) -> impl IntoView {
     }
 }
 
-pub fn chat_column_view(shell: ChatColumnShell) -> impl IntoView {
+/// 聊天列：主区（transcript 或编辑器）在上、composer 在下。
+///
+/// `ide_body` 由壳层传入（`IdeSession::body` 的信号束）。两层都**常驻挂载**、只切显隐：
+/// 卸载会把 CodeMirror 句柄与已打开的标签一起丢掉，也会让 transcript 的滚动锚点归零。
+/// composer 不进主区——与 TUI 的 `/editor` 视图同一个口径（切视图不打断正在跑的回合）。
+pub fn chat_column_view(shell: ChatColumnShell, ide_body: AnyView) -> impl IntoView {
     let home_end_nav = ChatColumnHomeEndNav::from_composer(&shell.app.chat_composer);
     let run_send_clarify_sv = StoredValue::new(shell.run_send_message.clone());
+    let editor_open = shell.app.shell_ui.editor_layout_mode;
     view! {
                 <div
                     class="chat-column"
                     data-testid="chat-column"
                     on:keydown:capture=home_end_nav.keydown_handler()
                 >
-                    <ChatMessagesPane signals=shell.messages_pane_signals() />
+                    <div class="chat-body">
+                        <div
+                            class="chat-body-pane"
+                            class:chat-body-pane--hidden=move || editor_open.get()
+                        >
+                            <ChatMessagesPane signals=shell.messages_pane_signals() />
+                        </div>
+                        <div
+                            class="chat-body-pane"
+                            data-testid="chat-body-editor"
+                            class:chat-body-pane--hidden=move || !editor_open.get()
+                        >
+                            {ide_body}
+                        </div>
+                    </div>
                     <ChatComposerPane signals=shell.composer_pane_signals(run_send_clarify_sv) />
                 </div>
     }

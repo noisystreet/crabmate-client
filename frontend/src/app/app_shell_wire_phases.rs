@@ -152,7 +152,7 @@ fn wire_phase2_persisted_prefs_dom_and_settings_hooks(app: &AppSignals) {
         app.shell_ui.session_chat_font,
         app.shell_ui.session_chat_font_size,
     );
-    wire_sync_tauri_shell_dom(app.shell_ui.editor_layout_mode);
+    wire_sync_tauri_shell_dom();
     wire_narrow_viewport_layout(WireNarrowViewportSignals {
         is_narrow_viewport: app.shell_ui.is_narrow_viewport,
         side_panel_view: app.shell_ui.side_panel_view,

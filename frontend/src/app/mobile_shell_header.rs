@@ -9,12 +9,10 @@ use crate::mobile_remote::mobile_remote_client;
 use crate::tauri_shell::tauri_shell_available;
 
 use super::app_shell_ctx::MobileShellHeaderSignals;
-use super::ide_layout_switch::IdeLayoutToggleSignals;
 use super::ide_menu_bar::{
     IdeMenuBarBridge, IdeMenuBarTopbarContent, IdeMenuId, ShellTopbarFileMenu,
     ShellTopbarMenuBackdrop,
 };
-use super::layout_mode_segment::LayoutModeSegment;
 use super::status_bar::StatusRunDotButton;
 use super::tauri_window_controls::TauriWindowControls;
 use super::workspace_root_actions::{ShellTopbarWorkspaceRoot, WorkspaceRootPickHandle};
@@ -111,29 +109,20 @@ fn ShellTopbarFileStatusSlot(
     }
 }
 
-/// 顶栏 leading 槽：窄屏布局切换 + IDE/会话菜单（按 editor 模式二选一）。
+/// 顶栏 leading 槽：IDE / 会话菜单（按 editor 模式二选一）。
+///
+/// 布局切换不在顶栏：它与 TUI 一致地放在状态栈里（`view` chip），
+/// 窄屏与移动远端也就能用同一入口（顶栏按钮只存在于桌面宽屏）。
 #[component]
 fn ShellTopbarLeadingSlot(
     locale: RwSignal<Locale>,
     editor_layout_mode: RwSignal<bool>,
-    is_narrow_viewport: RwSignal<bool>,
-    layout_toggle: IdeLayoutToggleSignals,
     workspace_pick: WorkspaceRootPickHandle,
     ide_menu_bar_bridge: RwSignal<Option<IdeMenuBarBridge>>,
     ide_menubar_dropdown_open: RwSignal<bool>,
 ) -> impl IntoView {
-    let show_layout_toggle = move || !is_narrow_viewport.get() && !mobile_remote_client();
     view! {
         <div class="shell-topbar-leading">
-            <Show when=show_layout_toggle>
-                <div class="shell-topbar-start shell-topbar-layout-start">
-                    <LayoutModeSegment
-                        locale=locale
-                        layout_toggle=layout_toggle
-                        extra_class="shell-topbar-layout-toggle"
-                    />
-                </div>
-            </Show>
             <Show
                 when=move || editor_layout_mode.get()
                 fallback=move || {
@@ -158,7 +147,6 @@ pub fn mobile_shell_header_view(signals: MobileShellHeaderSignals) -> impl IntoV
         editor_layout_mode,
         is_narrow_viewport,
         ide_menu_bar_bridge,
-        layout_toggle,
         workspace_pick,
         ide_menubar_dropdown_open,
         side_panel_view,
@@ -176,8 +164,6 @@ pub fn mobile_shell_header_view(signals: MobileShellHeaderSignals) -> impl IntoV
             <ShellTopbarLeadingSlot
                 locale=locale
                 editor_layout_mode=editor_layout_mode
-                is_narrow_viewport=is_narrow_viewport
-                layout_toggle=layout_toggle
                 workspace_pick=workspace_pick
                 ide_menu_bar_bridge=ide_menu_bar_bridge
                 ide_menubar_dropdown_open=ide_menubar_dropdown_open

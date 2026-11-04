@@ -146,6 +146,17 @@ pub fn status_chip_thinking(l: Locale) -> &'static str {
     }
 }
 
+/// 状态栈「主区视图」chip 的标签（值固定为 `chat` / `file`，与 TUI 同词）。
+///
+/// 只本地化标签、不本地化值：TUI 状态栈也有这个段（label `view`，值 `chat` / `file`），
+/// 值两端一致才方便对照；标签跟随各端排版惯例（TUI 要凑 5 列定宽，Web 侧栏是横向 chip）。
+pub fn status_chip_view(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "视图",
+        Locale::En => "View",
+    }
+}
+
 /// 状态栏「思考模式」开关 `title`（悬停提示）。
 pub fn status_thinking_tooltip(l: Locale) -> &'static str {
     match l {
