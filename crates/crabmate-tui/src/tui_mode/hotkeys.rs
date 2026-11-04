@@ -113,6 +113,14 @@ pub(super) fn is_ctrl_e(key: &KeyEvent) -> bool {
     key.code == KeyCode::Char('e') && key.modifiers.contains(KeyModifiers::CONTROL)
 }
 
+/// Ctrl+F：`/editor` 视图里的**文件内**查找（聊天区的 `/find` 搜的是 transcript）。
+///
+/// 不挂进顶层热键表：它只在文件视图里有意义（见 `input_keys::on_editor_key`），而顶层表是
+/// 「任何焦点都能按」的。两个同名能力强凑成一个键位，只会让其中一边在另一半场景下按了没反应。
+pub(super) fn is_ctrl_f(key: &KeyEvent) -> bool {
+    key.code == KeyCode::Char('f') && key.modifiers.contains(KeyModifiers::CONTROL)
+}
+
 /// 任意 `Ctrl+<code>`（Home / End 等）。
 pub(super) fn is_ctrl(key: &KeyEvent, code: KeyCode) -> bool {
     key.code == code && key.modifiers.contains(KeyModifiers::CONTROL)

@@ -94,6 +94,8 @@ pub(super) fn md_body(
     pal: &Palette,
 ) -> Vec<Line<'static>> {
     ensure_rows(ed, width, pal);
+    // 查找的命中按**物理行**算，物理行只有这一步之后才存在（见 `EditorState::sync_find`）。
+    ed.sync_find();
     let Some(cache) = ed.md_cache.as_ref() else {
         return Vec::new();
     };
@@ -102,12 +104,14 @@ pub(super) fn md_body(
     cache
         .rows
         .iter()
+        .enumerate()
         .skip(start)
         .take(rows)
-        .map(|row| {
+        .map(|(i, row)| {
             // 链接**这轮不接热区**：样式照常（链接色），但点击不响应。与 `plain_body_rows`
             // 里那条「已知差异」同一口径 —— 宁可先说清楚，也不做一个点了没反应的热区。
-            Line::from(md::styled_row_spans(&row.chars, base, false, false, pal))
+            let (matched, anchor) = (ed.find.is_hit(i), ed.find.is_anchor(i));
+            Line::from(md::styled_row_spans(&row.chars, base, matched, anchor, pal))
         })
         .collect()
 }

@@ -10,7 +10,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::LaneApp;
 use super::history;
-use super::hotkeys::{is_alt_enter, is_ctrl, is_ctrl_e, is_ctrl_o, is_ctrl_w};
+use super::hotkeys::{is_alt_enter, is_ctrl, is_ctrl_e, is_ctrl_f, is_ctrl_o, is_ctrl_w};
 
 impl LaneApp<'_> {
     /// 输入框焦点下的按键。
@@ -85,6 +85,10 @@ impl LaneApp<'_> {
     /// 否则「切回来」就只能靠记住快捷键。`Home` / `End` 不加修饰时仍归输入框（行首 / 行尾），
     /// 因为编辑器里最常用的粗定位是 PgUp/PgDn，而不是这两个键。
     fn on_editor_key(&mut self, key: &KeyEvent) -> bool {
+        // 查找相关的键先来：`Ctrl+F` 进查找态，其后字符进的是**查找词**，不是 composer。
+        if self.on_editor_find_key(key) {
+            return true;
+        }
         let page = self.st.page_rows.max(1) as isize;
         match key.code {
             KeyCode::Esc if self.st.current_input().is_empty() => {
@@ -116,6 +120,64 @@ impl LaneApp<'_> {
                 true
             }
             _ => false,
+        }
+    }
+
+    /// 查找态的按键（返回 `true` = 已消费）：`Ctrl+F` 进入，之后 `Enter` / `Shift+Enter`
+    /// 跳下 / 上一处、普通字符进查找词、`Backspace` 退格、`Esc` 只关查找（**不退视图** ——
+    /// 退视图是输入框为空时的 Esc，两件事）。
+    ///
+    /// 字符不进 composer 是这里的全部意义：查找态里敲 `a` 必须是在找 `a`，而不是在起草消息。
+    fn on_editor_find_key(&mut self, key: &KeyEvent) -> bool {
+        if is_ctrl_f(key) {
+            self.st.editor.find.begin();
+            return true;
+        }
+        if !self.st.editor.find.open {
+            return false;
+        }
+        match key.code {
+            KeyCode::Esc => self.st.editor.find.close(),
+            KeyCode::Enter => self.editor_find_step(!key.modifiers.contains(KeyModifiers::SHIFT)),
+            KeyCode::Backspace => {
+                self.st.editor.find.pop();
+                self.editor_find_reveal();
+            }
+            KeyCode::Char(ch)
+                if !key
+                    .modifiers
+                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+            {
+                self.st.editor.find.push(ch);
+                self.editor_find_reveal();
+            }
+            // 这几个键在查找态里必须自己吞掉：它们否则改的是**草稿 / 焦点**，而屏幕上
+            // 没有任何东西解释「我明明在找东西，怎么把半句话发出去了 / 焦点怎么跑了」。
+            // `Ctrl+O` 是提交、`Ctrl+W` 是进目录树、`Ctrl+E` 是折叠思考、`Tab` 是切焦点。
+            KeyCode::Tab => {}
+            KeyCode::Char('o' | 'w' | 'e' | 'O' | 'W' | 'E')
+                if key.modifiers.contains(KeyModifiers::CONTROL) => {}
+            // 其余（方向键 / Home / End / Delete / `Ctrl+C` / `Ctrl+T` / `Ctrl+Y` …）照旧
+            // 漏给上层：取消回合与切视图都属于「逃生」，查找态不该把它们扣住。
+            _ => return false,
+        }
+        true
+    }
+
+    /// 跳到下一处 / 上一处：先让命中集合跟上内容（查询词或文件可能刚变），再滚到锚点。
+    fn editor_find_step(&mut self, forward: bool) {
+        self.st.editor.sync_find();
+        self.st.editor.find.cycle(forward);
+        self.editor_find_reveal();
+    }
+
+    /// 把查找锚点滚进视口（没有命中就什么都不动）。
+    fn editor_find_reveal(&mut self) {
+        let visible = self.st.page_rows.max(1);
+        let ed = &mut self.st.editor;
+        ed.sync_find();
+        if let Some(row) = ed.find.anchor_row() {
+            ed.reveal_row(row, visible);
         }
     }
 }
@@ -219,6 +281,114 @@ mod tests {
                 "字母重新落进输入框：{:?}",
                 app.st.input_snapshot()
             );
+        });
+    }
+    /// `Ctrl+F` 之后敲的字符进**查找词**，不进 composer；`Esc` 只关查找、不退视图。
+    ///
+    /// 这条守的是「两件事不能混」：查找态里敲 `a` 必须是在找 `a`，一旦漏给 composer，
+    /// 用户就会在起草一条消息的同时莫名其妙地找了一堆东西。
+    #[test]
+    fn ctrl_f_takes_the_typing_away_from_the_composer() {
+        app_with_two_runs(|app| {
+            app.st.editor.open = true;
+            app.st.editor.accept_limited("alpha\nbeta\n", 100);
+
+            app.on_key(key(KeyCode::Char('f'), KeyModifiers::CONTROL));
+            assert!(app.st.editor.find.open, "Ctrl+F 进查找态");
+
+            app.on_key(key(KeyCode::Char('a'), KeyModifiers::NONE));
+            app.on_key(key(KeyCode::Char('l'), KeyModifiers::NONE));
+            assert_eq!(app.st.editor.find.query, "al");
+            assert!(
+                app.st.input_snapshot().is_empty(),
+                "查找态里字符不该落进 composer：{:?}",
+                app.st.input_snapshot()
+            );
+
+            app.on_key(key(KeyCode::Enter, KeyModifiers::NONE));
+            assert_eq!(app.st.editor.find.hits, vec![0], "alpha 是唯一命中行");
+            assert!(
+                !app.st.lines.iter().any(|l| l.kind() == LineKind::User),
+                "查找态里的 Enter 是「下一处」，不是提交"
+            );
+
+            app.on_key(key(KeyCode::Esc, KeyModifiers::NONE));
+            assert!(!app.st.editor.find.open, "Esc 只关查找");
+            assert!(
+                app.st.editor.open,
+                "视图还开着（退视图是输入框为空时的 Esc）"
+            );
+        });
+    }
+
+    /// 查找态里 `Ctrl+O` / `Tab` 也不能漏给上层：前者会提交草稿、后者会切焦点。
+    ///
+    /// `Ctrl+O` 是最意外的一条 —— 屏幕上没有任何东西解释「我在找东西，怎么半句话发出去了」。
+    #[test]
+    fn find_mode_keeps_the_draft_and_the_focus() {
+        app_with_two_runs(|app| {
+            app.st.editor.open = true;
+            app.st.editor.accept_limited("alpha\nbeta\n", 100);
+            // 先写一个字进 composer（编辑器视图里普通字符照旧进 composer）。
+            app.on_key(key(KeyCode::Char('d'), KeyModifiers::NONE));
+            app.on_key(key(KeyCode::Char('f'), KeyModifiers::CONTROL));
+            assert!(app.st.editor.find.open);
+
+            app.on_key(key(KeyCode::Char('o'), KeyModifiers::CONTROL));
+            app.on_key(key(KeyCode::Tab, KeyModifiers::NONE));
+
+            assert!(
+                !app.st.lines.iter().any(|l| l.kind() == LineKind::User),
+                "查找态里 Ctrl+O 不该提交"
+            );
+            assert!(
+                app.st.input_snapshot().contains('d'),
+                "草稿还在：{:?}",
+                app.st.input_snapshot()
+            );
+            assert!(app.st.editor.find.open, "这两个键都不退查找态");
+        });
+    }
+
+    /// `Enter` 跳到下一处并把锚点滚进视口：只改锚点不滚屏，屏幕上等于什么都没发生。
+    #[test]
+    fn enter_walks_the_hits_and_scrolls_to_them() {
+        app_with_two_runs(|app| {
+            app.st.editor.open = true;
+            let mut body = String::new();
+            for i in 1..=40 {
+                if i % 10 == 0 {
+                    body.push_str(&format!("hit{i}\n"));
+                } else {
+                    body.push_str(&format!("plain{i}\n"));
+                }
+            }
+            app.st.editor.accept_limited(&body, 100);
+
+            app.on_key(key(KeyCode::Char('f'), KeyModifiers::CONTROL));
+            for ch in "hit".chars() {
+                app.on_key(key(KeyCode::Char(ch), KeyModifiers::NONE));
+            }
+            assert_eq!(
+                app.st.editor.find.hits.len(),
+                4,
+                "{:?}",
+                app.st.editor.find.hits
+            );
+            let first = app.st.editor.scroll;
+
+            app.on_key(key(KeyCode::Enter, KeyModifiers::NONE));
+            assert_eq!(app.st.editor.find.position(), Some((2, 4)));
+            assert!(
+                app.st.editor.scroll >= first,
+                "滚动要跟着锚点走（{} → {}）",
+                first,
+                app.st.editor.scroll
+            );
+
+            // 上一处（Shift+Enter）反向走到第一处。
+            app.on_key(key(KeyCode::Enter, KeyModifiers::SHIFT));
+            assert_eq!(app.st.editor.find.position(), Some((1, 4)));
         });
     }
 }

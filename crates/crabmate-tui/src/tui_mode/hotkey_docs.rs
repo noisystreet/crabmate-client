@@ -57,7 +57,11 @@ const TOP_DOCS: [(&str, &str, HotkeyGroup); 8] = [
     ("Alt+→/Ctrl+N", "切下一条连接", HotkeyGroup::Global),
     ("Alt+1..8", "直达第 n 条连接", HotkeyGroup::Global),
     ("Ctrl+T", "聊天/文件视图切换", HotkeyGroup::Chat),
-    ("Ctrl+Y", "复制最近一条回复", HotkeyGroup::Chat),
+    (
+        "Ctrl+Y",
+        "复制最近一条回复（文件视图里是文件路径）",
+        HotkeyGroup::Chat,
+    ),
 ];
 
 /// 不属于 [`TopHotkey`] 的键（判定不在 `hotkeys::of` 的查表里），但同样要进面板与 `/help`。
@@ -65,7 +69,7 @@ const TOP_DOCS: [(&str, &str, HotkeyGroup); 8] = [
 /// 分两类：对话区那几条就是 `hotkeys.rs` 里的 `is_*` 判据；面板与编辑器那几条判定在
 /// 设置面板的状态机与 `editor_view` / `input_keys` 里（它们本来就没有可查询的 id），
 /// 这里只产出文案 —— 改键位时那两处各自都有单测，措辞漂移则由「面板与表同源」的单测看守。
-const FIXED_DOCS: [(&str, &str, HotkeyGroup); 13] = [
+const FIXED_DOCS: [(&str, &str, HotkeyGroup); 15] = [
     ("Ctrl+C", "取消回合（再按一次强退）", HotkeyGroup::Chat),
     ("Ctrl+E", "思考展开/折叠", HotkeyGroup::Chat),
     ("Ctrl+O", "提交输入（Enter 同义）", HotkeyGroup::Chat),
@@ -79,6 +83,12 @@ const FIXED_DOCS: [(&str, &str, HotkeyGroup); 13] = [
     ("PgUp/PgDn", "翻页", HotkeyGroup::Editor),
     ("退格", "关预览", HotkeyGroup::Editor),
     ("滚轮", "滚动文件", HotkeyGroup::Editor),
+    ("Ctrl+F", "文件内查找（不是 /find）", HotkeyGroup::Editor),
+    (
+        "Ctrl+Y",
+        "复制当前文件路径（聊天视图里是复制回复）",
+        HotkeyGroup::Editor,
+    ),
 ];
 
 impl TopHotkey {
@@ -191,5 +201,19 @@ mod tests {
                 of(&KeyEvent::new(code, modifiers)).unwrap_or_else(|| panic!("{keys} 未命中"));
             assert_eq!(TOP_DOCS[hotkey.doc_index()].0, keys);
         }
+    }
+
+    /// 同一个键位（`Ctrl+Y`）在两种视图里是两件事：两条措辞都得把**另一边的**语义写出来，
+    /// 否则看面板的人会以为其中一条是错的。
+    #[test]
+    fn ctrl_y_documents_both_views() {
+        let chat = TOP_DOCS[TopHotkey::Copy.doc_index()].1;
+        let editor = FIXED_DOCS
+            .iter()
+            .find(|doc| doc.0 == "Ctrl+Y")
+            .map(|doc| doc.1)
+            .expect("编辑器分组里要有 Ctrl+Y");
+        assert!(chat.contains("路径"), "{chat}");
+        assert!(editor.contains("回复"), "{editor}");
     }
 }
