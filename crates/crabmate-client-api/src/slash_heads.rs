@@ -2,7 +2,7 @@
 //!
 //! 各端原本在自己的解析器里手写「主命令 + 别名」两组 arm，于是同一张名单存在两三份 ——
 //! 解析用一份、补全菜单用一份。改名或新增时漏掉一处就**静默**失效：`/perm` 在 repl 里
-//! 曾经既被拦截表认作控制命令（`is_control_slash` 含 `slash::PERM`）、又没有 handler arm，
+//! 曾经既被拦截表认作控制命令（`is_control_slash` 认 `/perm`）、又没有 handler arm，
 //! 于是它就掉进「unknown control slash」，而 `/help` 明明写着支持。
 //!
 //! 这里只做一件事：`/<head>` → [`Head`]。别名（`q` `exit` `h` `cd` `yank` …）归一到主命令，
@@ -11,9 +11,10 @@
 //! - 执行端只对主命令写 arm（`match` 穷尽，新增变体时编译器会拦）；
 //! - 补全菜单从 [`Head::ALL`] 派生，不会再出现「有 handler 却没有候选」。
 //!
-//! **这不是共享「命令集」**：主命令是各端 handler 的子集（Web 没有 `fold` / `lane`，
-//! TUI 没有 `agent` / `config` / `api-key`），端内 `match` 的 `_ =>` 分支才是
-//! 「本端不支持」的落点；端独占命令与其别名不进这张表。
+//! **这不是共享「命令集」**：主命令是各端 handler 的子集，具体哪端认哪条由
+//! `slash_caps` 回答（例如 Web 没有 `fold` / `lane`，TUI 没有 `api-key`）；端内
+//! `match` 的 `_ =>` 分支才是「本端不支持」的落点。端独占命令（`clear` / `api-base` /
+//! `api-key`）与其别名不进这张表。
 
 /// 斜杠命令的规范形（`/<head>` 去掉别名后的身份）。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

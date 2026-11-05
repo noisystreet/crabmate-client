@@ -72,7 +72,7 @@ crates/
 | 断线续传 | TUI SSE mirror | 传输层中断（`TermError::InterruptedStream`，已拿到 job 句柄）时**自动续流**：`chat` / `repl` 自动重发 `stream_resume:{job_id,after_seq}`，上限 2 次、退避 `0.5s × 第 n 次`（`src/turn.rs`）；用尽后仍可 repl `/resume` 手动续（job 取响应头 `x-stream-job-id`；cancel 已送达的回合不可续，cancel 未送达时 job 可能仍在跑、仍可续）。全屏 `tui` **不自动续流**（事件循环里没有重试循环），但同样可 `/resume` 手动续：断点在 `tui_mode/resume.rs` 里按同一规则保留（传输中断，或 Ctrl+C 且 cancel 未送达），续流时复用普通回合的 `ChatStreamOptions` 装配、只多一个 `stream_resume`，且不重发用户消息那一行；切会话 / `/conv new` 会作废断点（transcript 已换） |
 | 审批 | 进程内 dialoguer | SSE 控制面 + `POST /chat/approval` |
 | 回合取消 | 进程内中断 | Ctrl+C → `POST /chat/stream/{job_id}/cancel`（job 取响应头 `x-stream-job-id`；旧 serve 无路由时降级为本地中断） |
-| 斜杠 /skills | 同进程 | 经 stream 内置命令或后续 REST |
+| 斜杠 /skills | 同进程 | `GET /skills`（与 `/` 补全菜单同一份缓存） |
 | 工作区 | 本地 path | `POST /workspace`、`GET /workspace/...` |
 | 会话列表/分支 | SQLite 同库 | `/user-data/.../sessions`、`POST /chat/branch` |
 | 模型密钥 | 本机 keyring → 回合注入 | 每轮请求体 `client_llm.{api_key,model,api_base}`（同 WASM UI 设置子集）；CLI/env 提供，缺省时 read-only 回退壳钥匙串 |

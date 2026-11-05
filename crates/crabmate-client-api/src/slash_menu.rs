@@ -7,7 +7,7 @@
 //! - 命令**文案**留在端内（Web 走 i18n，TUI 是编译期常量）；
 //! - skill **来源**两端的类型不同（`SkillListItem` / `SkillEntry`），由端内 map 成 [`MenuItem`]；
 //! - 拦截判定（`is_*_control_slash`）**不**共享：两端 handler 集不同，合成一个超集判定就会
-//!   出现「拦下来但没有 handler」，见 [`super::slash`] 的模块注释。
+//!   出现「拦下来但没有 handler」，见 [`super::slash_caps`] 的模块注释。
 
 /// 候选来源：端内命令 / skill。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
