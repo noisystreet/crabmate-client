@@ -239,6 +239,20 @@ pub(super) async fn job_skills(client: &ServeClient, out: &LaneTx) {
     let _ = out.send(UiEvent::Skills(result));
 }
 
+/// `POST /config/reload`：让 serve 重读磁盘配置（`/config reload`）。
+///
+/// 空 JSON 体：服务端把「重载」表达成一次无参 POST，客户端不猜任何字段。
+/// 成功信息是**空响应体**（前端 `post_config_reload` 同口径），所以这里只看 `Err`，
+/// 不解析 body —— 拿 body 猜成败会让「换了一版 serve 的返回格式」变成假失败。
+pub(super) async fn job_config_reload(client: &ServeClient, out: &LaneTx) {
+    let result = client
+        .post_json(paths::CONFIG_RELOAD, &serde_json::json!({}))
+        .await
+        .map(|_| ())
+        .map_err(|e| e.to_string());
+    let _ = out.send(UiEvent::ConfigReloaded(result));
+}
+
 /// 项目池列表（`GET /workspace/projects`）。
 pub(super) async fn job_ws_projects(client: &ServeClient, out: &LaneTx) {
     let result = fetch_workspace_projects(client)

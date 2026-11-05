@@ -42,7 +42,7 @@ use super::serve_defaults::ServeDefaults;
 use super::settings::{LlmSave, McpSave, PersistedSettings, PrefsSave};
 use super::slash_menu::SkillsPayload;
 use super::worker_jobs::{
-    job_conversation_history, job_export_conversation, job_load_user_settings,
+    job_config_reload, job_conversation_history, job_export_conversation, job_load_user_settings,
     job_refresh_sessions, job_refresh_status, job_refresh_usage, job_refresh_workspace_root,
     job_save_llm, job_save_mcp, job_save_prefs, job_save_store, job_session_index, job_skills,
     job_workspace_dir, job_workspace_query, job_workspace_set, job_write_permission,
@@ -127,6 +127,11 @@ pub(super) enum UiEvent {
         result: Result<SessionIndexApplied, String>,
         op: SessionIndexOp,
     },
+    /// serve 配置重载结果（`POST /config/reload`）。
+    ///
+    /// 只有成败一句话：重载后 serve 侧的事实（默认模型 / 工具开关）要等下一次 `/status`
+    /// 才反映到状态行，所以这里不携带 `ServeDefaults` —— 携带了就等于假装已经刷新过。
+    ConfigReloaded(Result<(), String>),
     /// serve 侧事实（`/status?view=shell` + `/permission`）。
     ///
     /// **带 `conversation_id`**：请求是带着发起时的会话走的（`/permission` 按会话算），回包
@@ -296,6 +301,11 @@ pub(super) enum WorkerJob {
     SaveMcp(McpSave),
     /// 拉 skill 目录（`GET /skills`）：只给 `/` 补全菜单用。
     Skills,
+    /// `POST /config/reload`：让 serve 重读磁盘配置（`/config reload`）。
+    ///
+    /// 走 worker 而不是在事件循环里 await：这条命令**会**等到 serve 重读完才回，
+    /// 磁盘慢的时候主线程就卡住了（raw mode 下连 Ctrl+C 都收不到）。
+    ConfigReload,
     /// 写会话级权限等级意图（`POST /conversation/state`，空闲态落盘）。
     ///
     /// 与 `/perm` 写下的本地 override 不是一回事：override 只影响**下一条** `/chat`，
@@ -575,6 +585,13 @@ fn dispatch(
         WorkerJob::Skills => {
             run_cancellable(rt, cancel, "拉取 skill 目录", job_skills(client, out), out)
         }
+        WorkerJob::ConfigReload => run_cancellable(
+            rt,
+            cancel,
+            "重载 serve 配置",
+            job_config_reload(client, out),
+            out,
+        ),
         WorkerJob::WritePermission {
             conversation_id,
             level,

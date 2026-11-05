@@ -5,9 +5,11 @@
 //!
 //! 为什么菜单不并入 `controls::parse_control`：那是**提交时**的语义（决定这行文本是命令
 //! 还是消息），这里只是输入期的候选提示。两者共用 `crabmate_client_api::slash` 的名字表，
-//! 但候选清单是端内自己列的 —— Web 有 `/agent` `/config` 这些 TUI 没有 handler 的命令，
-//! 照抄会给出「选了也没用」的项。导出是同一回事的另一半：Web 是顶层 `/export`，TUI 归到
-//! `/conv export`（见 `tui_mode/export.rs`），所以候选表里仍然只有 `/conv` 一项。
+//! 但候选清单是端内自己列的 —— Web 有的界面级命令（`/clear` `/api-base` `/api-key`）
+//! 在 TUI 没有 handler，照抄会给出「选了也没用」的项。导出曾是同一回事的另一半：
+//! Web 走顶层 `/export`，TUI 只有 `/conv export`，候选表里只写 `/conv`。issue #444 之后
+//! `/export` 成了独立的共享 head（`Head::Export`），解析后落到同一个 `Control::ConvExport`，
+//! 于是两条入口同时进候选表 —— 候选表仍然只描述「这一端真的能做」的命令。
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::Frame;
@@ -106,6 +108,15 @@ fn builtin_item(head: Head) -> SlashItem {
             "查看 / 切换 serve 工作区根（~/ 展开、off 恢复默认，/cd 别名）",
         ),
         Head::Conv => ("/conv ", "会话列表 / 切换 / 新建 / 导出"),
+        Head::Version => (
+            "/version",
+            "本次运行的 crabmate-tui 版本（本地，不请求 serve）",
+        ),
+        Head::Skills => ("/skills", "列出 serve 侧 skill（读 / 菜单同一份缓存）"),
+        Head::Context => ("/context", "上下文用量明细（与状态行 ctx 段同口径）"),
+        Head::Config => ("/config reload", "让 serve 重读磁盘配置"),
+        Head::Agent => ("/agent list", "列出可用 agent role（用 /role <id> 设置）"),
+        Head::Export => ("/export ", "导出当前会话（等同 /conv export）"),
         Head::Resume => ("/resume", "续传被中断的回合（serve 侧 job 仍在跑时）"),
         Head::Older => ("/older", "加载更早的消息（分页向前，等同 /history）"),
         Head::Fold => (

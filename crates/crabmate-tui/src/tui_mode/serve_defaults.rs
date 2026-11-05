@@ -39,6 +39,11 @@ pub struct ServeDefaults {
     /// `Some(false)` = 开关该置灰（对齐前端 disabled）：此时即便 `sqlite` 发 true
     /// 也不会生效，让用户按下去再报错是更差的体验。
     pub conversation_store_sqlite_path_configured: Option<bool>,
+    /// serve 可选的 agent role id（`/status.agent_role_ids`，服务端配置的 role 名）。
+    ///
+    /// `/agent list` 的唯一数据源：**不要**为了一条命令再打一次 `/status`。
+    /// 空 = 该 serve 没提供这个字段（老版本）或没配 role —— 命令里据空给不同提示。
+    pub agent_role_ids: Vec<String>,
 }
 
 impl ServeDefaults {
@@ -65,6 +70,7 @@ impl ServeDefaults {
             conversation_store_sqlite_path_configured: v
                 .get("conversation_store_sqlite_path_configured")
                 .and_then(Value::as_bool),
+            agent_role_ids: string_list(v, "agent_role_ids"),
         }
     }
 
@@ -115,6 +121,24 @@ impl ServeDefaults {
             self.role.as_deref(),
         )
     }
+}
+
+/// 解析字符串数组字段（`agent_role_ids` 之类）；缺失 / 非数组 / 非字符串项一律跳过。
+///
+/// 老 serve 没有这个字段时返回空 vec，而不是报错：`/agent list` 会据此说
+/// 「该 serve 未提供 role 列表」，比「拉取失败」准确 —— 请求其实是成功的。
+fn string_list(v: &Value, key: &str) -> Vec<String> {
+    v.get(key)
+        .and_then(Value::as_array)
+        .map(|a| {
+            a.iter()
+                .filter_map(Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// 解析 `tiktoken_new_session_baseline_by_agent_role`（role → tokens）；非对象 / 非数字项跳过。
@@ -193,6 +217,24 @@ mod tests {
         let old = ServeDefaults::from_status(&json!({ "model": "m" }));
         assert_eq!(old.store_sqlite_active(), None);
         assert!(!old.store_toggle_supported());
+    }
+
+    #[test]
+    fn agent_role_ids_skip_junk_and_default_to_empty() {
+        let d = ServeDefaults::from_status(&json!({
+            "agent_role_ids": ["coder", " writer ", 3, "", null]
+        }));
+        assert_eq!(
+            d.agent_role_ids,
+            vec!["coder".to_string(), "writer".to_string()],
+            "非字符串 / 空白项应被跳过，其余 trim 后保留"
+        );
+        // 老 serve 没有这个字段：空 vec 而不是错误，`/agent list` 据此说「未提供」。
+        assert!(
+            ServeDefaults::from_status(&json!({"model": "m"}))
+                .agent_role_ids
+                .is_empty()
+        );
     }
 
     #[test]
