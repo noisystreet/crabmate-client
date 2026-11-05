@@ -83,7 +83,6 @@ frontend/                # wasm fetch 适配器 + UI；S1–S4 已用 client-api
 | `handoff` | `#cm_api_base=` / `#cm_web_api_bearer=` 键名、RFC3986 分量编码、fragment 拼装（无 `history` / 无查询串） |
 | `health` | `/health` degraded 检查摘要（不含壳 CORS） |
 | `paths` | 跨端共用的端点路径常量与动态段构造器（≥2 端实际共用才收） |
-| `slash` | 跨端共用的斜杠控制命令名字表（handler 分端） |
 | `slash_heads` | 斜杠 head 的规范形与别名归一（`/<head>` → `Head`，`Head::ALL` 即 TUI 菜单顺序）；**不含** handler |
 | `slash_caps` | 各端支持的共享 head 能力表（`Surface::Desktop` / `Tui` / `Repl`）；端独占命令不进表，端内拦截判定由它派生 |
 | `slash_menu` | `/` 补全菜单机制（触发判定 / `MenuItem` / 前缀过滤 / 内建优先 + skill 排序截断）；命令**文案**与 skill **来源**留端 |
@@ -152,18 +151,24 @@ GitHub：`X-CrabMate-GitHub-Token` 目前主要在 frontend（+ 壳钥匙串槽�
 
 共享核心字段（S4）与**可选块取值规则**（S7a，见 §4.12）；图像 / `stream_resume` / `llm_thinking_mode` / `executor_llm` 等仍留各端（取值来源是本端存储 / 本端语义）。
 
-### 4.6 斜杠名字表（已落地）
+### 4.6 斜杠体系：head / 能力表 / 菜单（已落地）
 
 | 端 | 路径 |
 |----|------|
 | tui | `crates/crabmate-tui/src/slash.rs`、`tui_mode/controls.rs` |
 | frontend | `frontend/src/app/chat/composer_slash_control.rs`、`composer_slash_menu.rs` |
 
-共享：`crabmate_client_api::slash` 常量（`help` / `?` / `workspace` / `cd` / `model` / `conv` / `status` / `mode` / `role` / `quit` / `exit` / `q`）——只收 **≥2 端共用**的命令 head；handler 分端。单端命令（web 的 `agent` / `export` / `config` / `api-base` / `clear` / `api-key` / `skills` 等，tui-mode 的 `settings` / `find`）与 handler 一起留端，避免「拦截了但没 handler」的超集误伤。
+共享层分三件，端内只留 handler 与文案：
 
-**S5b（已落地）：菜单机制 + head 归一。** 两端原本各有一份逐字同构的 `/` 浮层实现（触发条件、`MenuItem` 字段、skill 项规则、「内建在前 + 按 id 排序 + 截断 24」），现已收进 `crabmate_client_api::slash_menu`（`slash_prefix` / `MenuItem::builtin` / `MenuItem::skill` / `matches_prefix` / `assemble`）——**命令文案仍留端**（Web 走 i18n，TUI 是编译期常量），skill **来源**两端类型不同（`SkillListItem` / `SkillEntry`）由端内 map 成 `MenuItem`。同一次改动把「主命令 + 别名」从散落的 match arm 收成 `crabmate_client_api::slash_heads`（`Head` + `head_of`）：执行端只对主命令写 arm（**穷尽 match**，新增变体编译器会拦），TUI 菜单从 `Head::ALL` 派生。两类静默失效因此消失 —— `slash.rs` 的模块注释描述的「只收 ≥2 端共用名字」仍在，但**别名归一**与**菜单候选**现在各有唯一出处：`/perm`（repl 里被拦截却没有 handler）与 `/fold` `/copy` `/ctl` `/editor` `/chat`（TUI 有 handler 却没有候选）分别是这两类。拦截判定 `is_*_control_slash` **仍不共享**：两端 handler 集不同，合成超集必然出现「拦了没 handler」，Web 的 `agent` / `config` / `api-key` / `version` 等端独占命令不进 `head_of`。
+- `slash_heads` —— 规范身份 + 别名归一（`/<head>` → `Head`，`Head::ALL` 即 TUI 菜单顺序）；
+- `slash_caps` —— 哪一端真的有 handler（`Surface::Desktop` / `Tui` / `Repl`），Web 的拦截判定由它派生；
+- `slash_menu` —— `/` 浮层机制（触发判定 / `MenuItem` / 前缀过滤 / 内建优先 + skill 排序截断）。
 
-**S5c（已落地）：能力表。** 「这一端认不认 `/mode`」原本是三份手抄名单（Web 拦截、Web 分派、TUI 菜单），`/version` 就是由此变成「能敲但 `/help` 不写」。现在 `crabmate_client_api::slash_caps` 按端给一次（`Surface::Desktop` / `Tui` / `Repl`），Web 的 `is_web_control_slash` 由它派生，端独占命令（`agent` / `config` / `api-key` …）另走端内表。两侧都有测试夹：表中每条都必须「拦得住且能分派」，表外的共享 head 必须原样发给模型。**`is_control_slash` 的拦截集刻意大于 `Surface::Repl`**：它还接住 `/background` `/editor` `/chat` 只为了回一句「只在全屏可用」——拦与做是两件事。
+**原 `crabmate_client_api::slash` 常量表已删除。** 它按「≥2 端共用」给命令分层，把 `agent` / `export` / `config` / `skills` 称作单端命令——issue #444 第一阶段之后这些都是共享 head，那条原则早就不成立；PR-A 补完 `mode` / `role` / `perm` / `status` 后，常量本身也成了**零使用者**（各端一律用 `Head::as_str()`）。留一个「看着是真相源、其实没人读、内容还是错的」模块比没有更糟：它先后误导过两次注释修订。端独占命令（Web 的 `clear` / `api-base` / `api-key`）既不进 `Head` 也不进能力表，由端内表判定。
+
+**S5b（已落地）：菜单机制 + head 归一。** 两端原本各有一份逐字同构的 `/` 浮层实现（触发条件、`MenuItem` 字段、skill 项规则、「内建在前 + 按 id 排序 + 截断 24」），现已收进 `crabmate_client_api::slash_menu`（`slash_prefix` / `MenuItem::builtin` / `MenuItem::skill` / `matches_prefix` / `assemble`）——**命令文案仍留端**（Web 走 i18n，TUI 是编译期常量），skill **来源**两端类型不同（`SkillListItem` / `SkillEntry`）由端内 map 成 `MenuItem`。同一次改动把「主命令 + 别名」从散落的 match arm 收成 `crabmate_client_api::slash_heads`（`Head` + `head_of`）：执行端只对主命令写 arm（**穷尽 match**，新增变体编译器会拦），TUI 菜单从 `Head::ALL` 派生。两类静默失效因此消失 —— **别名归一**与**菜单候选**现在各有唯一出处：`/perm`（repl 里被拦截却没有 handler）与 `/fold` `/copy` `/ctl` `/editor` `/chat`（TUI 有 handler 却没有候选）分别是这两类。拦截判定 `is_*_control_slash` **仍不共享**：两端 handler 集不同，合成超集必然出现「拦了没 handler」，端独占命令（Web 的 `clear` / `api-base` / `api-key`）不进 `head_of`。
+
+**S5c（已落地）：能力表。** 「这一端认不认 `/mode`」原本是三份手抄名单（Web 拦截、Web 分派、TUI 菜单），`/version` 就是由此变成「能敲但 `/help` 不写」。现在 `crabmate_client_api::slash_caps` 按端给一次（`Surface::Desktop` / `Tui` / `Repl`），Web 的 `is_web_control_slash` 由它派生，端独占命令（`clear` / `api-base` / `api-key`）另走端内表。两侧都有测试夹：表中每条都必须「拦得住且能分派」，表外的共享 head 必须原样发给模型。**`is_control_slash` 的拦截集刻意大于 `Surface::Repl`**：它还接住 `/background` `/editor` `/chat` 只为了回一句「只在全屏可用」——拦与做是两件事。
 
 ### 4.7 Health 探测子集（已落地）
 
@@ -368,7 +373,7 @@ Web 的 `api_base_preset_select` 字符串链路（写入已保存模型预设�
 
 **写序（单一意图源）**：回合结束的落盘只写「本回合请求里显式带的字段」，所以 `/chat` 必须永远带**用户当前选的意图**，而不是发送瞬间的快照——否则回合结束会把旧值写回，反向覆盖用户在建回合期间的空闲态切换（服务端刻意不拿旧快照回写）。
 
-**状态**：共享层（路径常量 / `api_error_code` / 四态分类）已落地并有单测；**前端（Desktop / Android / Web）已接意图选择器**——设置页「工具」分区的权限块升级为「只读投影 + 档位选择器」（`frontend/src/app/settings_permission_block.rs`，请求层 `frontend/src/api/http_conversation_state.rs`）：选项只列服务端给的 `available`，点一下先写**同一个**意图信号（与 `/chat` 发送路径同源，经 `ChatShellLeptosContext` 提供），已绑定会话时再 `POST /conversation/state` 立刻落盘并用响应自带的写后投影刷新显示；没有已持久化会话时只写本地意图并提示「发送后生效」（服务端不做 upsert）。四态落地：`Ok` 刷新投影、`NotFound` 提示会话过期、`Unsupported` 并入 `GET /permission` 的同一个 capability 状态、`Failed{500}` 说「可重试」而不是「会话不存在」。`/chat` 现在总是带用户当前选的意图（`permission_level` 省略 = 沿用会话持久值）。TUI 只有状态栏 `perm` 读数（§4.16），另加 `/perm [<level>]` 斜杠命令（repl 与全屏 `tui` 共用 `slash::PERM`）：与 `/mode` `/role` 同一套客户端 override，随**下一条**消息进 `permission_level`，`off` 清除；**不在客户端校验档位名**——可选集由 `GET /permission` 的 `available` 决定，写死词表只会在服务端新增档位时误拒，未知值交给服务端拒绝更准确。**底栏 chip 已补上**（`frontend/src/app/status_permission_chip.rs`）：显示 `意图 → 生效`（没表达意图就只显示生效档；两者都不知道则整段不渲染，不拿 `/status` 的 `permission_level_default` 顶替），点开复用 `.status-mode-menu-*` 的 Portal 菜单就地切档，写路径与设置页同规则。**会话切换清空意图**也做了：`permission_intent_owner` 记住这份意图是为哪个本地会话选的，壳层 effect 只看「当前会话 id 是否仍是归属」，与请求时序无关——刻意不挂在水合回调里，因为同一会话的回前台 / 流收尾都会重新水合，在那里清会把用户刚选的档误清。**不需要**水合 `active_permission_level`：意图是 `Option`，`None` 的语义就是「沿用该会话已保存的值」，把服务端值写进意图等于「没选过也被记成选过」，此后切会话清理就无从判断。
+**状态**：共享层（路径常量 / `api_error_code` / 四态分类）已落地并有单测；**前端（Desktop / Android / Web）已接意图选择器**——设置页「工具」分区的权限块升级为「只读投影 + 档位选择器」（`frontend/src/app/settings_permission_block.rs`，请求层 `frontend/src/api/http_conversation_state.rs`）：选项只列服务端给的 `available`，点一下先写**同一个**意图信号（与 `/chat` 发送路径同源，经 `ChatShellLeptosContext` 提供），已绑定会话时再 `POST /conversation/state` 立刻落盘并用响应自带的写后投影刷新显示；没有已持久化会话时只写本地意图并提示「发送后生效」（服务端不做 upsert）。四态落地：`Ok` 刷新投影、`NotFound` 提示会话过期、`Unsupported` 并入 `GET /permission` 的同一个 capability 状态、`Failed{500}` 说「可重试」而不是「会话不存在」。`/chat` 现在总是带用户当前选的意图（`permission_level` 省略 = 沿用会话持久值）。TUI 只有状态栏 `perm` 读数（§4.16），另加 `/perm [<level>]` 斜杠命令（repl 与全屏 `tui` 共用同一个 `/perm` head；issue #444 PR-A 之后 Web 也有这条命令）：与 `/mode` `/role` 同一套客户端 override，随**下一条**消息进 `permission_level`，`off` 清除；**不在客户端校验档位名**——可选集由 `GET /permission` 的 `available` 决定，写死词表只会在服务端新增档位时误拒，未知值交给服务端拒绝更准确。**底栏 chip 已补上**（`frontend/src/app/status_permission_chip.rs`）：显示 `意图 → 生效`（没表达意图就只显示生效档；两者都不知道则整段不渲染，不拿 `/status` 的 `permission_level_default` 顶替），点开复用 `.status-mode-menu-*` 的 Portal 菜单就地切档，写路径与设置页同规则。**会话切换清空意图**也做了：`permission_intent_owner` 记住这份意图是为哪个本地会话选的，壳层 effect 只看「当前会话 id 是否仍是归属」，与请求时序无关——刻意不挂在水合回调里，因为同一会话的回前台 / 流收尾都会重新水合，在那里清会把用户刚选的档误清。**不需要**水合 `active_permission_level`：意图是 `Option`，`None` 的语义就是「沿用该会话已保存的值」，把服务端值写进意图等于「没选过也被记成选过」，此后切会话清理就无从判断。
 
 ## 5. 明确不共享
 
@@ -396,7 +401,7 @@ Web 的 `api_base_preset_select` 字符串链路（写入已保存模型预设�
 | **S4** ✅ | `chat_body` 核心字段 builder | `client_sse_protocol` 钉点不易漏 |
 | **S5a** ✅ | hash 交接键名 + fragment 拼装；connect / frontend / `crabmate-web` 改依赖 | 键名与 `%2F` 编码单测对齐 |
 | **S5 health** ✅ | `health_degraded_note`；connect / tui-core 改依赖 | degraded JSON 单测；CORS 仍留 connect |
-| **S5 slash** ✅ | 斜杠名字表（`slash` 常量；单端命令与 handler 留端） | tui / web 控制命令匹配一致；WASM 体积与编译时间可接受 |
+| **S5 slash** ✅ | 斜杠三层：`slash_heads`（身份 + 别名）/ `slash_caps`（能力表）/ `slash_menu`（菜单机制）；端内只留 handler 与文案 | tui / web 控制命令匹配一致；WASM 体积与编译时间可接受 |
 | **S5 paths/messages** ✅ | 端点路径常量（`paths`）+ 通用 HTTP 取错（`messages`） | 40 处路径替换零字面量漂移；错误文案取值顺序统一 error 优先 |
 | **S6a** ✅ | `prompt_tokens`：`TiktokenPromptTokensSnapshot` + `parse_tiktoken_prompt_tokens_value` / `tiktoken_from_ag_ui_object` 下沉；frontend 侧 re-export | 既有 camelCase/snake_case 用例随迁通过；`apply_conversation_prompt_tokens_from_sse` 留端；frontend `wasm32` check |
 | **S6b** ✅ | `sse_dispatch`：DTO + 4 组钩子 + `SseDispatch` 下沉；`frontend/src/sse_dispatch/mod.rs` 改 `pub use crabmate_client_api::sse_dispatch::*;`（`types.rs` 删除） | 47 处 `crate::sse_dispatch::` 消费点零 import 改动（含 `CommandApprovalData` 转发）；`ToolJobState` 契约轮询样例等 4 个单测随迁通过；frontend `wasm32` check |
