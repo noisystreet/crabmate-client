@@ -87,6 +87,58 @@ pub fn connections_pane_label(l: Locale) -> &'static str {
     }
 }
 
+/// 左栏第二个分组的标题：控制面里声明过、还没连上的实例。
+///
+/// 与「连接」并列但语义不同 —— 上面那组是**已经连上的窗口**，这组是**还能连的实例**。
+/// 用「可连」而不是「可用」：`ready` 之外的状态也会出现在这里（带「启动中」/「不可连」
+/// 后缀），说「可用」就成了假话。
+pub fn ctl_group_label(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "可连实例",
+        Locale::En => "Available instances",
+    }
+}
+
+/// 「连接」按钮：把一条 ctl 实例开成新的连接窗口。
+pub fn ctl_row_connect(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "连接",
+        Locale::En => "Connect",
+    }
+}
+
+/// 「关闭」按钮：关掉一条已有的连接窗口（Desktop 的「断开」就是它）。
+pub fn ctl_row_close(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "关闭",
+        Locale::En => "Close",
+    }
+}
+
+/// 实例状态：正在启动（`observed == starting`）。
+pub fn ctl_state_starting(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "启动中",
+        Locale::En => "Starting",
+    }
+}
+
+/// 实例状态：不可连，附带原因（服务端 `last_error` 优先，其次 `observed` 原文）。
+pub fn ctl_state_unavailable(l: Locale, reason: &str) -> String {
+    match l {
+        Locale::ZhHans => format!("不可连（{reason}）"),
+        Locale::En => format!("unavailable ({reason})"),
+    }
+}
+
+/// 刷新按钮的 `title`：这份列表是只读查询，壳不会推送变化。
+pub fn ctl_refresh_tooltip(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "重新查询 crabmatectl 的实例列表（只读，不会自动刷新）",
+        Locale::En => "Re-query crabmatectl instances (read-only, no push updates)",
+    }
+}
+
 /// 左栏连接行的 `title`（单连接时这一行同时是「改基址」的入口）：完整基址 + 改它的去处。
 ///
 /// 为什么把原文重复一遍：行内正文本只留 `host:port` / 用户起的名字，而用户点开它的

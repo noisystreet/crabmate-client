@@ -105,6 +105,26 @@ export function invokeTauriOpenConnectWindow(displayName) {
   });
 }
 
+// 控制面里**声明过的**实例（只读）。没跑 `crabmatectl supervise --socket` 时返回 []，
+// 与「没有可连实例」同义 —— 调用方不要把它当错误显示。
+export function invokeTauriCtlListInstances() {
+  return tauriInvoke("ctl_list_instances", {});
+}
+
+// 按地址开一条新连接。已有 `open_connection` 命令；控制面「连接」按钮用它，
+// 语义与 TUI 的 `/lane attach` 等价：同一台 serve 撞 authority 时壳只聚焦既有窗口。
+export function invokeTauriOpenConnection(apiBase, displayName) {
+  return tauriInvoke("open_connection", {
+    apiBase,
+    displayName: displayName ?? null,
+  });
+}
+
+// 关掉某条连接窗口。Desktop 的「断开」就是它（关窗 = 注销，没有中间态）。
+export function invokeTauriCloseConnection(key) {
+  return tauriInvoke("close_connection", { key });
+}
+
 // 返回 Promise<unlisten|null>。null 表示这个壳没有 event 能力（浏览器 / 老壳），
 // 调用方据此退化为「只读一次名单」，而不是当成错误。
 export function listenTauriConnectionsChanged(cb) {
@@ -191,6 +211,15 @@ extern "C" {
     fn invoke_tauri_report_connection_unread(unread: bool) -> js_sys::Promise;
     #[wasm_bindgen(js_name = invokeTauriOpenConnectWindow)]
     fn invoke_tauri_open_connect_window(display_name: Option<String>) -> js_sys::Promise;
+    #[wasm_bindgen(js_name = invokeTauriCtlListInstances)]
+    fn invoke_tauri_ctl_list_instances() -> js_sys::Promise;
+    #[wasm_bindgen(js_name = invokeTauriOpenConnection)]
+    fn invoke_tauri_open_connection(
+        api_base: &str,
+        display_name: Option<String>,
+    ) -> js_sys::Promise;
+    #[wasm_bindgen(js_name = invokeTauriCloseConnection)]
+    fn invoke_tauri_close_connection(key: &str) -> js_sys::Promise;
     #[wasm_bindgen(js_name = listenTauriConnectionsChanged)]
     fn listen_tauri_connections_changed(cb: &js_sys::Function) -> js_sys::Promise;
     #[wasm_bindgen(js_name = installChatExternalLinkHandler)]
@@ -461,6 +490,73 @@ pub fn tauri_open_connect_window(display_name: Option<&str>) {
 /// 两个目标下都编译。
 #[cfg(not(target_arch = "wasm32"))]
 pub fn tauri_open_connect_window(_: Option<&str>) {}
+
+/// 控制面里声明过的实例（JSON 文本）。
+///
+/// 与 [`tauri_list_connections_json`] 同一套约定：壳回 `Vec<CtlInstance>`（JS 数组），
+/// 所以**不能**只试 `as_string()`；`null` / `undefined` 当空表 —— 老壳不认识这条命令，
+/// 而「不认识」与「本机没有可连实例」在界面上是同一件事（一块空分组）。
+#[cfg(target_arch = "wasm32")]
+pub async fn tauri_ctl_list_instances_json() -> Result<String, String> {
+    if !tauri_shell_available() {
+        return Err("not in tauri shell".to_string());
+    }
+    let value = JsFuture::from(invoke_tauri_ctl_list_instances())
+        .await
+        .map_err(|e| format!("{e:?}"))?;
+    if let Some(text) = value.as_string() {
+        return Ok(text);
+    }
+    if value.is_null() || value.is_undefined() {
+        return Ok("[]".to_string());
+    }
+    let text: String = js_sys::JSON::stringify(&value)
+        .map_err(|e| format!("ctl_list_instances result not serializable: {e:?}"))?
+        .into();
+    Ok(text)
+}
+
+/// 按地址开一条新连接（左栏「可连实例」那行的「连接」按钮）。
+///
+/// 返回 `Result` 而不是 fire-and-forget：地址不合法或建窗失败都要说得出原因，
+/// 而这是一次用户点击，有地方显示它。
+#[cfg(target_arch = "wasm32")]
+pub async fn tauri_open_connection(
+    api_base: &str,
+    display_name: Option<&str>,
+) -> Result<(), String> {
+    if !tauri_shell_available() {
+        return Err("not in tauri shell".to_string());
+    }
+    tauri_invoke_void(invoke_tauri_open_connection(
+        api_base,
+        display_name.map(str::to_string),
+    ))
+    .await
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn tauri_open_connection(_: &str, _: Option<&str>) -> Result<(), String> {
+    Err("not in tauri shell".to_string())
+}
+
+/// 关掉一条连接窗口（Desktop 的「断开」= 关窗 = 注销）。
+///
+/// fire-and-forget：失败只意味着那个窗口还在，用户能再点一次；调用方是点击处理，
+/// 没有能显示错误的稳定位置（与 [`tauri_open_connect_window`] 同一取舍）。
+#[cfg(target_arch = "wasm32")]
+pub fn tauri_close_connection(key: &str) {
+    if !tauri_shell_available() {
+        return;
+    }
+    let key = key.to_string();
+    spawn_local(async move {
+        let _ = tauri_invoke_void(invoke_tauri_close_connection(&key)).await;
+    });
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn tauri_close_connection(_: &str) {}
 
 /// 在系统默认浏览器中打开 URL。
 ///

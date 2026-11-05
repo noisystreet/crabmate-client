@@ -96,8 +96,9 @@ pub(crate) fn create_main_window_from_url(
     if let Err(e) = crabmate_connect::write_connect_bearer_on_connect(MAIN_WINDOW_LABEL, &bearer) {
         eprintln!("[crabmate-desktop] e2e keyring write skipped: {e}");
     }
-    let home = Url::parse("http://tauri.localhost/connect.html")
-        .map_err(|e| format!("invalid local connect placeholder: {e}"))?;
+    // 包内资产的 Origin 随平台不同（Linux / macOS 是 `tauri://localhost`），所以这里
+    // 不能手写 http 形式：那样导航到的是一个没有协议处理器的 host。
+    let home = crabmate_connect::default_connect_home();
     crabmate_connect::seed_connect_home(&home);
     let ui = crabmate_connect::local_business_ui_url(&home);
     let target = crabmate_connect::build_local_ui_handoff_url(ui, &api_base, &bearer);
@@ -128,8 +129,7 @@ pub(crate) fn create_main_window_connect_page(
             .state::<crabmate_connect::SuggestedServerUrl>()
             .set(Some(url.trim().to_string()));
     }
-    let placeholder = Url::parse("http://tauri.localhost/connect.html")
-        .map_err(|e| format!("invalid connect placeholder url: {e}"))?;
+    let placeholder = crabmate_connect::default_connect_home();
     let backend_origin = placeholder.origin();
     let window = finish_create_main_window(
         app_handle,
@@ -411,9 +411,10 @@ pub(crate) fn create_connection_window(
         allowed.set_from_url(label, api_base);
     }
 
-    let home = Url::parse("http://tauri.localhost/connect.html")
-        .map_err(|e| format!("invalid local connect placeholder: {e}"))?;
-    let ui = crabmate_connect::local_business_ui_url(&home);
+    // 与 `connect_remote`（连接页 → UI）同一条路：交接地址由**壳自己记住的资产 URL**
+    // 派生，不再手写一遍 Origin —— 那个字面量在 Linux / macOS 上指不到任何协议处理器，
+    // 导航静默失败（`navigate()` 照样返回 Ok），留给用户的只是一个空窗口。
+    let ui = crabmate_connect::local_business_ui_url(&crabmate_connect::connect_home_url());
     let target = crabmate_connect::build_local_ui_handoff_url(ui, api_base, bearer);
 
     let nav_label = label.to_string();
@@ -465,8 +466,7 @@ pub(crate) fn create_pending_connection_window(
     label: &str,
     display_name: &str,
 ) -> Result<(), String> {
-    let placeholder = Url::parse("http://tauri.localhost/connect.html")
-        .map_err(|e| format!("invalid connect placeholder url: {e}"))?;
+    let placeholder = crabmate_connect::default_connect_home();
     let backend_origin = placeholder.origin();
     let window = finish_create_main_window(
         app,
