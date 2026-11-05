@@ -31,6 +31,7 @@ pub mod slash_args;
 pub mod slash_caps;
 pub mod slash_heads;
 pub mod slash_menu;
+pub mod slash_render;
 pub mod sse_dispatch;
 pub mod timeline_skill;
 pub mod tool_display;

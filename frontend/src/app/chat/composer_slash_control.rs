@@ -6,6 +6,7 @@ use crabmate_client_api::chat_export::ExportFormat;
 use crabmate_client_api::slash_args::AgentSub;
 use crabmate_client_api::slash_caps::{Surface, supports};
 use crabmate_client_api::slash_heads::{Head, head_of};
+use crabmate_client_api::slash_render::{SkillRow, skill_lines};
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
@@ -695,12 +696,19 @@ fn handle_skills(shell: &ComposerStreamShell, chat: ChatSessionSignals, loc: Loc
                 );
             }
             Ok(d) => {
-                let mut lines = vec![format!("skills {} 个：", d.skills.len())];
-                for s in d.skills.iter().take(24) {
-                    lines.push(format!("  /{} — {}", s.id, s.description));
-                }
+                // 抬头 / 条目 / 截断尾行由共享层排版，与 TUI `/skills` 逐字一致 ——
+                // 此前这里漏了空描述的分支（会印出 `  /id — `）和截断尾行。
+                let rows: Vec<SkillRow> = d
+                    .skills
+                    .iter()
+                    .map(|s| SkillRow {
+                        id: s.id.as_str(),
+                        description: s.description.as_str(),
+                    })
+                    .collect();
+                let text = skill_lines(&rows).join("\n");
                 stream.status_err.set(None);
-                push_control_slash_notice(chat, lines.join("\n"));
+                push_control_slash_notice(chat, text);
             }
             Err(e) => stream.set_error(format!("列出 skills 失败: {e}")),
         }
