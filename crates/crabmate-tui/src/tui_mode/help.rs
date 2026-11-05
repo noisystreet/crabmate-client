@@ -12,7 +12,7 @@ use super::state::{LineKind, UiState};
 
 /// 命令清单（`/x`）。
 const COMMAND_LINES: &[&str] = &[
-    "本地命令：/quit（/exit、/q 同义） /help /status /settings /mode /role /perm /model /find /background /workspace /resume /older /fold /conv /copy /ctl /lane /editor /chat",
+    "本地命令：/quit（/exit、/q 同义） /help /status /settings /mode /role /perm /model /find /background /workspace /resume /older /fold /conv /copy /ctl /lane /editor /chat /version /skills /context /config /agent /export",
     "输入 / 弹出补全菜单（内建命令 + skill；↑↓ 选择 · Tab/Enter 补全 · Esc 关闭）",
     "/copy [assistant|user|path]（Ctrl+Y 同义）：复制到剪贴板 —— 默认最近一条助手回复，`user` 你自己的上一条，`path` 当前文件视图里那个文件的**相对路径**（视图开着时不写目标也走路径；内容是终端原生选择，不走这条）",
     "/ctl：查 crabmatectl 控制面实例（本地 unix socket，只读；需 --ctl-socket 或默认 socket 已存在）",
@@ -28,6 +28,7 @@ const COMMAND_LINES: &[&str] = &[
     "/resume 续传上一轮被中断的回合（serve 侧 job 仍在跑时；Ctrl+C 的 cancel 未送达也可续）",
     "/fold [n|all|close]：切换执行过程的展开态（每轮结束自动折叠；/older 回放与回看同样折叠）—— 空参=最近一条，n 从底部数，all 全展开，close 全折回；折叠导航开着时光标会跟到切过的那条",
     "/older（/history 同义）把更早一页历史前插到当前对话（切换会话只载入最新一页时用；滚到顶再按 PgUp 会自动续翻；跨页命中仍可 /find）",
+    "/version 本进程版本（不请求 serve） · /skills 列出 serve 侧 skill（读 / 菜单同一份缓存，不重新拉） · /context 上下文用量明细（与状态行 ctx 段同口径） · /config reload 让 serve 重读磁盘配置 · /agent list 列出可用 agent role（设置仍用 /role <id>） · /export 导出当前会话（等价 /conv export，同一产物）",
 ];
 
 /// 判定散在别的模块、没有热键条目的键（快捷键分组之外的那些）。
@@ -64,6 +65,27 @@ impl UiState {
         self.push_line(LineKind::System, MISC_KEYS_LINE);
         for line in TAIL_LINES {
             self.push_line(LineKind::System, line);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crabmate_client_api::slash_caps::{Surface, supported};
+
+    use super::COMMAND_LINES;
+
+    /// `/help` 的命令清单必须覆盖本端**每一个**能敲的共享 head。
+    ///
+    /// 这条夹逼以前只有 Web 那边（`help_text_lists_every_intercepted_head`）：`/version`
+    /// 曾经「能敲但 help 不写」，查起来像命令坏了。TUI 的清单是手写字面量，同样会漂 ——
+    /// 加 head 时忘了补文案，这里就红。
+    #[test]
+    fn help_lists_every_tui_head() {
+        let all = COMMAND_LINES.join("\n");
+        for head in supported(Surface::Tui) {
+            let needle = format!("/{}", head.as_str());
+            assert!(all.contains(&needle), "/help 命令清单漏了 {needle}");
         }
     }
 }
