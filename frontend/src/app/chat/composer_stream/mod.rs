@@ -18,7 +18,6 @@ mod per_stream_accum;
 mod shell_abort;
 mod stream_attach_lifecycle;
 pub(crate) mod stream_control_reducer;
-pub(crate) use stream_control_reducer::StreamControlEvent;
 mod stream_sse_scratch;
 mod stream_turn_scratch_state;
 mod stream_turn_state;

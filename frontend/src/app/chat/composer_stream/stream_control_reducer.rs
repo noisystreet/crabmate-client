@@ -22,23 +22,10 @@ pub(super) enum StreamControlPhase {
 }
 
 /// 由各 `ChatStreamCallbacks` 路径喂入的语义事件（非原始 JSON）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum StreamControlEvent {
-    ModelTextDelta,
-    AssistantAnswerPhase,
-    ToolCallDeclared,
-    ToolRunning(bool),
-    ToolOutputChunk,
-    ToolResult,
-    /// 非终态收尾（`stream_draining`）：进入 Draining 文案，**不**释放 abort/resume。
-    StreamDraining,
-    StreamEnded,
-    /// 正常 `on_done` 走完（含尾泡决策后）。
-    StreamDone,
-    StreamError,
-    /// `on_done` 早退：用户取消本轮（与 `StreamDone` 同属会话收口）。
-    StreamUserAbort,
-}
+///
+/// 定义已下沉 `crabmate-client-api::turn_lifecycle`（#458）：壳层 lifecycle 归约依赖它，
+/// 两端共用同一份；此处 re-export 保持 `composer_stream::StreamControlEvent` 路径不变。
+pub(crate) use crabmate_client_api::turn_lifecycle::StreamControlEvent;
 
 #[derive(Debug, Clone)]
 pub(super) struct StreamControlReducerState {
