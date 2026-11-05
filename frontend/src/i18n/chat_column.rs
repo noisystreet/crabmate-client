@@ -517,6 +517,43 @@ pub fn composer_slash_builtin_api_key(l: Locale) -> &'static str {
     }
 }
 
+/// issue #444：菜单项描述按 `Head` 一一对应，新增共享命令时这里与
+/// `composer_slash_menu::builtin_item` 一起被编译器提醒。
+pub fn composer_slash_builtin_version(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "客户端版本（本地，不请求 serve）",
+        Locale::En => "Client version (local; not requested from serve)",
+    }
+}
+
+pub fn composer_slash_builtin_status(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "serve 只读摘要（模型 / 端点 / 上下文 / 存储）",
+        Locale::En => "Read-only serve summary (model / endpoint / context / store)",
+    }
+}
+
+pub fn composer_slash_builtin_mode(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "会话模式 ask / plan / act（与底栏同一开关）",
+        Locale::En => "Session mode ask / plan / act (same switch as the status bar)",
+    }
+}
+
+pub fn composer_slash_builtin_role(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "设置 Agent 角色（列表见 /agent list）",
+        Locale::En => "Set agent role (list via /agent list)",
+    }
+}
+
+pub fn composer_slash_builtin_perm(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "权限等级意图（回合进行中不可切）",
+        Locale::En => "Permission-level intent (locked while a turn runs)",
+    }
+}
+
 pub fn composer_remove_image_aria(l: Locale) -> &'static str {
     match l {
         Locale::ZhHans => "移除图片",

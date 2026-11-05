@@ -1,13 +1,12 @@
 //! 跨端控制斜杠命令名字表（head；小写、不含 `/`；handler 留端）。
 //!
-//! 「公共交集 + 端特有」分层：本模块只收 ≥2 端共用的命令名与别名，
-//! 保证各端拦截判定与菜单 `match_key` 对同一命令用同一名字；
-//! 单端命令（web 的 `agent`/`export`/`config`/…、tui-mode 的
-//! `settings`/`find`/`h`）与其 handler 一起留在端内，避免出现
-//! 「拦截了但没有 handler」的超集误伤。
+//! **本模块只是字符串常量。** 命令的规范身份与别名归一在 [`super::slash_heads`]，
+//! 「哪一端真的有 handler」在 [`super::slash_caps`]，菜单候选与 `/help` 由各端从这两张表派生。
 //!
-//! **别名归一与主命令身份不在本模块**：见 [`super::slash_heads`]（`/<head>` → `Head`）。
-//! 这里只放跨端同名的**字符串常量**；谁认哪些命令、哪个别名指向谁，由 `head_of` 决定。
+//! 历史上这里按「≥2 端共用」分层，把 `agent` / `export` / `config` 称作单端命令 ——
+//! issue #444 之后（第一阶段的六条 + PR-A 的 `mode`/`role`/`perm`/`status`）它们都是
+//! 共享 head，那个说法不再成立。保留常量只为各端拼文案时不必再写一遍字面量；
+//! **别名归一与主命令身份不在本模块**，见 [`super::slash_heads`]（`/<head>` → `Head`）。
 
 /// `/help`（repl / tui-mode / web）。
 pub const HELP: &str = "help";

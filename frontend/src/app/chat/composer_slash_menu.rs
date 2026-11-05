@@ -1,6 +1,7 @@
 //! Web composer：`/` 浮层（内建命令 + skill）状态与菜单组件。
 
-use crabmate_client_api::slash;
+use crabmate_client_api::slash_caps::{Surface, supported};
+use crabmate_client_api::slash_heads::Head;
 use crabmate_client_api::slash_menu::assemble;
 pub(super) use crabmate_client_api::slash_menu::{
     MenuItem as SlashMenuItem, MenuKind as SlashItemKind,
@@ -24,99 +25,84 @@ pub(super) fn keydown_is_ime_composing(ev: &web_sys::KeyboardEvent) -> bool {
 }
 
 fn web_builtin_slash_items(locale: Locale) -> Vec<SlashMenuItem> {
-    vec![
-        SlashMenuItem {
-            kind: SlashItemKind::Builtin,
-            match_key: slash::HELP.to_string(),
-            insert: "/help".to_string(),
-            label: "/help".to_string(),
-            description: i18n::composer_slash_builtin_help(locale).to_string(),
-        },
-        SlashMenuItem {
-            kind: SlashItemKind::Builtin,
-            match_key: slash::WORKSPACE.to_string(),
-            insert: "/workspace ".to_string(),
-            label: "/workspace".to_string(),
-            description: i18n::composer_slash_builtin_workspace(locale).to_string(),
-        },
-        SlashMenuItem {
-            kind: SlashItemKind::Builtin,
-            match_key: "agent".to_string(),
-            insert: "/agent ".to_string(),
-            label: "/agent".to_string(),
-            description: i18n::composer_slash_builtin_agent(locale).to_string(),
-        },
-        SlashMenuItem {
-            kind: SlashItemKind::Builtin,
-            match_key: slash::MODEL.to_string(),
-            insert: "/model ".to_string(),
-            label: "/model".to_string(),
-            description: i18n::composer_slash_builtin_model(locale).to_string(),
-        },
-        SlashMenuItem {
-            kind: SlashItemKind::Builtin,
-            match_key: "api-base".to_string(),
-            insert: "/api-base ".to_string(),
-            label: "/api-base".to_string(),
-            description: i18n::composer_slash_builtin_api_base(locale).to_string(),
-        },
-        SlashMenuItem {
-            kind: SlashItemKind::Builtin,
-            match_key: "export".to_string(),
-            insert: "/export ".to_string(),
-            label: "/export".to_string(),
-            description: i18n::composer_slash_builtin_export(locale).to_string(),
-        },
-        SlashMenuItem {
-            kind: SlashItemKind::Builtin,
-            match_key: "config".to_string(),
-            insert: "/config".to_string(),
-            label: "/config".to_string(),
-            description: i18n::composer_slash_builtin_config(locale).to_string(),
-        },
-        SlashMenuItem {
-            kind: SlashItemKind::Builtin,
-            match_key: "context".to_string(),
-            insert: "/context".to_string(),
-            label: "/context".to_string(),
-            description: i18n::composer_slash_builtin_context(locale).to_string(),
-        },
-        SlashMenuItem {
-            kind: SlashItemKind::Builtin,
-            match_key: "clear".to_string(),
-            insert: "/clear".to_string(),
-            label: "/clear".to_string(),
-            description: i18n::composer_slash_builtin_clear(locale).to_string(),
-        },
-        SlashMenuItem {
-            kind: SlashItemKind::Builtin,
-            match_key: "api-key".to_string(),
-            insert: "/api-key ".to_string(),
-            label: "/api-key".to_string(),
-            description: i18n::composer_slash_builtin_api_key(locale).to_string(),
-        },
-        SlashMenuItem {
-            kind: SlashItemKind::Builtin,
-            match_key: "skills".to_string(),
-            insert: "/skills".to_string(),
-            label: "/skills".to_string(),
-            description: i18n::composer_slash_builtin_skills(locale).to_string(),
-        },
-        SlashMenuItem {
-            kind: SlashItemKind::Builtin,
-            match_key: "skills list".to_string(),
-            insert: "/skills list".to_string(),
-            label: "/skills list".to_string(),
-            description: i18n::composer_slash_builtin_skills_list(locale).to_string(),
-        },
-        SlashMenuItem {
-            kind: SlashItemKind::Builtin,
-            match_key: "btw".to_string(),
-            insert: "/btw ".to_string(),
-            label: "/btw".to_string(),
-            description: i18n::composer_slash_builtin_btw(locale).to_string(),
-        },
-    ]
+    let mut items: Vec<SlashMenuItem> = supported(Surface::Desktop)
+        .iter()
+        .filter_map(|head| builtin_item(*head, locale))
+        .collect();
+    // 端独占的三条（不在 `Head` 里，判定在 `composer_slash_control::web_only_head`）
+    // 加两个非 head 项：`/skills list` 是子命令简写，`/btw` 根本不是控制斜杠
+    // （发给 serve 由它短路）。
+    items.push(SlashMenuItem::builtin(
+        "clear",
+        "/clear",
+        i18n::composer_slash_builtin_clear(locale),
+    ));
+    items.push(SlashMenuItem::builtin(
+        "api-base",
+        "/api-base ",
+        i18n::composer_slash_builtin_api_base(locale),
+    ));
+    items.push(SlashMenuItem::builtin(
+        "api-key",
+        "/api-key ",
+        i18n::composer_slash_builtin_api_key(locale),
+    ));
+    items.push(SlashMenuItem::builtin(
+        "skills list",
+        "/skills list",
+        i18n::composer_slash_builtin_skills_list(locale),
+    ));
+    items.push(SlashMenuItem::builtin(
+        "btw",
+        "/btw ",
+        i18n::composer_slash_builtin_btw(locale),
+    ));
+    items
+}
+
+/// 共享 head → 菜单项（issue #444）。
+///
+/// 这里曾是手写 `vec![…]`，于是 `/version` 在第一阶段落地后一直没进菜单 ——
+/// 能敲、`/help` 也写了，但补全浮层不提示，而且没有测试会红（旧测试只断言
+/// 「某几项存在」）。现在成员与顺序都由 `slash_caps::supported(Desktop)` 决定，
+/// 而这个 `match` 是**穷尽**的：新增 `Head` 变体时编译器会要求在这里说明
+/// 「进不进 Desktop 菜单」。
+fn builtin_item(head: Head, locale: Locale) -> Option<SlashMenuItem> {
+    let (insert, desc) = match head {
+        Head::Help => ("/help", i18n::composer_slash_builtin_help(locale)),
+        Head::Status => ("/status", i18n::composer_slash_builtin_status(locale)),
+        Head::Model => ("/model ", i18n::composer_slash_builtin_model(locale)),
+        Head::Mode => ("/mode ", i18n::composer_slash_builtin_mode(locale)),
+        Head::Role => ("/role ", i18n::composer_slash_builtin_role(locale)),
+        Head::Perm => ("/perm ", i18n::composer_slash_builtin_perm(locale)),
+        Head::Workspace => (
+            "/workspace ",
+            i18n::composer_slash_builtin_workspace(locale),
+        ),
+        Head::Version => ("/version", i18n::composer_slash_builtin_version(locale)),
+        Head::Skills => ("/skills", i18n::composer_slash_builtin_skills(locale)),
+        Head::Context => ("/context", i18n::composer_slash_builtin_context(locale)),
+        Head::Config => ("/config", i18n::composer_slash_builtin_config(locale)),
+        Head::Agent => ("/agent ", i18n::composer_slash_builtin_agent(locale)),
+        Head::Export => ("/export ", i18n::composer_slash_builtin_export(locale)),
+        // 其余 head 在 Web 没有 handler（`slash_caps::DESKTOP` 不收）—— 列进菜单就是
+        // 「选了也没用」。`supported()` 已经过滤，这里给 `None` 只为让 match 穷尽；
+        // 两处不一致时 `menu_covers_every_desktop_head` 会指出是哪一条。
+        Head::Quit
+        | Head::Settings
+        | Head::Resume
+        | Head::Older
+        | Head::Find
+        | Head::Fold
+        | Head::Background
+        | Head::Copy
+        | Head::Ctl
+        | Head::Lane
+        | Head::Editor
+        | Head::Chat
+        | Head::Conv => return None,
+    };
+    Some(SlashMenuItem::builtin(head.as_str(), insert, desc))
 }
 
 fn build_filtered_menu(
@@ -581,6 +567,44 @@ mod tests {
         assert!(slash_skill_prefix("/skills list").is_none());
         assert!(slash_skill_prefix("/a/b").is_none());
         assert!(slash_skill_prefix("hi").is_none());
+    }
+
+    /// issue #444：Web 菜单必须覆盖 `slash_caps::DESKTOP` 的**每一条**。
+    ///
+    /// 这是补 `/version` 时缺的那半条门禁 —— 旧测试只断言「某几项存在」，看不见
+    /// 「有 handler 但菜单没有」，`/version` 就那样在菜单外待了一整个阶段。
+    #[test]
+    fn menu_covers_every_desktop_head() {
+        use crate::app::chat::composer_slash_control::is_web_control_slash;
+        use crabmate_client_api::slash_caps::{Surface, supported};
+
+        let items = web_builtin_slash_items(Locale::ZhHans);
+        let keys: Vec<&str> = items.iter().map(|it| it.match_key.as_str()).collect();
+        for head in supported(Surface::Desktop) {
+            assert!(
+                keys.contains(&head.as_str()),
+                "/{} 在 Desktop 能力表里却没有菜单项（用户只能盲敲）",
+                head.as_str()
+            );
+        }
+        // 端独占的三条同样必须在菜单里：它们不在 `supported(Desktop)` 里，所以
+        // 上面那条循环看不见 —— 重构时漏掉 `/api-base` 正是这样被 `dead_code` 警告
+        // 而不是测试发现的。
+        for key in ["clear", "api-base", "api-key"] {
+            assert!(
+                keys.contains(&key),
+                "/{key} 是端独占且有 handler 的命令，菜单漏了"
+            );
+        }
+        // 反向：菜单里的项必须真能被拦下来，否则「选了也只是发给模型」。
+        // `/btw` 是刻意的例外：整行发给 serve，由 serve 短路回答。
+        for key in &keys {
+            let line = format!("/{key}");
+            assert!(
+                is_web_control_slash(&line) || *key == "btw",
+                "{line} 在菜单里却拦不下来"
+            );
+        }
     }
 
     #[test]
