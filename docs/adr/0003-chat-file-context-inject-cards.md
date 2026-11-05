@@ -42,7 +42,7 @@ Proposed
 
 **已落地（软字段，非本仓发明契约）**：钉 pin 的 Server `timeline_log` 可带 `kind=context_inject` / `context_trim`（`detail` 形状见 Server `SSE协议.md`）。Client **默认不**把这些旁注画进主列；设置「外观 → 显示每轮注入与窗口裁剪信息」打开后才显示。会话导出（Markdown / JSON）同样**跟随该开关**：关闭时省略，开启时按助手段落导出（水合行可能为 `system`，导出统一按 `assistant` 输出以避免被 `system` 过滤跳过）。这不是阶段 B 的 living_docs 文件路径卡。
 
-**例外（skill 调用卡，本 ADR 阶段 C 的落地形态）**：`context_inject.detail` 含非空 `skills` 时，Client 渲染一张**独立**的 skill 调用卡（label「已调用 skill」/「Skill invoked」，`forced=true` 时附「显式 / explicit」标记，skills 归一化为 basename 去 `.md` 后保序去重）。该卡：
+**例外（skill 调用卡，本 ADR 阶段 C 的落地形态）**：`context_inject.detail` 含非空 `skills` 时，Client 渲染一张**独立**的 skill 调用卡（label「已调用 skill」/「Skill invoked」，`forced=true` 时附「显式 / explicit」标记，skills 归一化为 skill id 后保序去重（普通路径取 basename 去 `.md`；`<id>/SKILL.md` 这种约定布局取**所在目录名**，因为 `SKILL.md` 每张卡都一样、看不出是哪个 skill；只有上一层目录本身就是 `skills` 时才回退文件名，否则会显示成 `skills`））。该卡：
 
 - **默认在主列可见**，不受上述「显示每轮注入」开关影响——用户必须能明确确认 skill 确实被调用；导出仍随该开关（避免导出原始 JSON 旁注）。
 - **语义独立于工具卡**：不复用 `ToolCardInput` / `tool_process_body_html`，不显示「助手 / 系统」角色标签，回合 class 为 `chat-tui-turn--skill`；因为 skill 不是 `tool_call`，不得伪装成工具调用。

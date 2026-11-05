@@ -493,11 +493,12 @@ mod tests {
     }
 
     #[test]
-    fn skill_without_description_shows_its_path() {
+    fn skill_without_description_leaves_the_second_column_empty() {
         let c = cache(&["alpha"]);
         let items = filtered_items("alp", Some(&c));
         assert_eq!(items[0].insert, "/alpha ");
-        assert_eq!(items[0].description, "skills/alpha/SKILL.md");
+        // 回退的名字与 `/id` 相同：留空，菜单只画 `/alpha`（`menu_line` 自己补白）。
+        assert_eq!(items[0].description, "");
     }
 
     #[test]

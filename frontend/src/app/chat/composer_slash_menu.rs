@@ -496,7 +496,11 @@ fn slash_menu_item_view(
             }
         >
             <span class="composer-slash-menu-id">{item.label.clone()}</span>
-            <span class="composer-slash-menu-desc">{item.description.clone()}</span>
+            // 空描述不画第二列：`MenuItem::skill` 在名字与 `/id` 相同时就留空，画出来只是
+            // 一段没有内容的 gap。
+            {(!item.description.is_empty()).then(|| {
+                view! { <span class="composer-slash-menu-desc">{item.description.clone()}</span> }
+            })}
         </button>
     }
     .into_any()

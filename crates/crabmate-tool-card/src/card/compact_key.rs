@@ -176,6 +176,34 @@ fn read_file_line_count_from_json(v: &serde_json::Value) -> Option<usize> {
     }
 }
 
+/// skill 的约定文件名：`<id>/SKILL.md` 是 skill 的标准布局。
+const SKILL_FILE_NAME: &str = "SKILL.md";
+
+/// skill 根目录名：就在它下面的 md 没有 id 目录可退。
+const SKILLS_DIR_NAME: &str = "skills";
+
+/// 读 skill 文件时的展示名：`.crabmate/skills/api-design/SKILL.md` → `api-design`。
+///
+/// `SKILL.md` 是每个 skill 都一样的约定文件名，卡片上写它等于没说调用的是哪个 skill；所在
+/// 目录才是 skill 的身份。上一层目录就是 `skills` 时没有 id 目录可退，才保留文件名本身。
+/// 非 skill 文件返回 `None`，调用方照旧用原路径。
+///
+/// 与 `crabmate-client-api` 的 `timeline_skill::skill_display_name` 同一口径 —— 那边管
+/// skill 调用卡的展示名，这里管 `read_file` 工具卡的标题；两份实现是因为本 crate 被
+/// Server 以独立副本引用，不能反向依赖 client-api。
+fn skill_file_display_name(path: &str) -> Option<String> {
+    let mut parts = path.rsplit(['/', '\\']);
+    let base = parts.next().unwrap_or("").trim();
+    if !base.eq_ignore_ascii_case(SKILL_FILE_NAME) {
+        return None;
+    }
+    let id = parts
+        .next()
+        .map(str::trim)
+        .filter(|p| !p.is_empty() && !p.eq_ignore_ascii_case(SKILLS_DIR_NAME));
+    Some(id.unwrap_or(base).to_string())
+}
+
 fn compact_read_file_from_output(output: &str, loc: ToolCardLocale) -> Option<String> {
     let trimmed = output.trim();
     if trimmed.is_empty() {
@@ -187,10 +215,11 @@ fn compact_read_file_from_output(output: &str, loc: ToolCardLocale) -> Option<St
     if path.is_empty() {
         return None;
     }
+    let shown = skill_file_display_name(path).unwrap_or_else(|| path.to_string());
     let line_count = read_file_line_count_from_json(&v);
     Some(match line_count {
-        Some(n) => join_compact_parts(path, &locale::tool_read_file_lines_suffix(loc, n)),
-        None => path.to_string(),
+        Some(n) => join_compact_parts(&shown, &locale::tool_read_file_lines_suffix(loc, n)),
+        None => shown,
     })
 }
 

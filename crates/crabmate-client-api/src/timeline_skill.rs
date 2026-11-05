@@ -11,11 +11,17 @@ use serde_json::Value;
 /// 本轮 skill 调用信息（Server `context_inject` 的 `detail.skills` / `detail.forced`）。
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct SkillInjectInfo {
-    /// 归一化后的展示名（取路径 basename、去 `.md` 后缀，保序去重）。
+    /// 归一化后的展示名（见 [`skill_display_name`]；保序去重）。
     pub skills: Vec<String>,
     /// 用户显式 `/<skill-id>` 选用（Server 强制注入）。
     pub forced: bool,
 }
+
+/// skill 的约定文件名：`<id>/SKILL.md` 是 skill 的标准布局。
+const SKILL_FILE_NAME: &str = "SKILL.md";
+
+/// skill 根目录名：就在它下面的 md 没有 id 目录可退。
+const SKILLS_DIR_NAME: &str = "skills";
 
 /// 去 `.md` 后缀（ASCII 大小写不敏感）。
 fn strip_md_suffix(s: &str) -> &str {
@@ -29,14 +35,36 @@ fn strip_md_suffix(s: &str) -> &str {
     }
 }
 
-/// skill 展示名：`rust-style` 与 `.crabmate/skills/rust-style.md` 归一为同一 id。
+/// 路径的末两段：`(文件名, 上一层目录名)`；没有目录层级时第二项为 `None`。
+///
+/// 不做空段过滤：`dir/` 的末段是空串（「只有目录、没有文件名」），这与「取 basename」的老
+/// 口径一致，改动它会让尾斜杠路径从「无法取名」变成「叫 `dir`」。
+fn last_two_segments(s: &str) -> (&str, Option<&str>) {
+    let mut parts = s.rsplit(['/', '\\']);
+    let base = parts.next().unwrap_or("").trim();
+    (base, parts.next().map(str::trim).filter(|p| !p.is_empty()))
+}
+
+/// skill 展示名：`rust-style`、`.crabmate/skills/rust-style.md`、
+/// `.crabmate/skills/api-design/SKILL.md` 都归一成 skill 的 id。
+///
+/// `SKILL.md` 是 skill 的**约定文件名**，同一个名字每张卡都出现，看了不知道调用的是哪个
+/// skill —— 所以这类路径取**所在目录名**（`api-design`）。唯一的例外是上一层目录本身就是
+/// `skills`：那里没有 id 目录可退，只好用文件名本身（否则会显示成 `skills`）。
 #[must_use]
 pub fn skill_display_name(raw: &str) -> Option<String> {
     let t = raw.trim();
     if t.is_empty() {
         return None;
     }
-    let base = t.rsplit(['/', '\\']).next().unwrap_or(t).trim();
+    let (base, parent) = last_two_segments(t);
+    if base.is_empty() {
+        return None;
+    }
+    if base.eq_ignore_ascii_case(SKILL_FILE_NAME) {
+        let id = parent.filter(|p| !p.eq_ignore_ascii_case(SKILLS_DIR_NAME));
+        return Some(id.unwrap_or(base).to_string());
+    }
     let base = strip_md_suffix(base).trim();
     if base.is_empty() {
         None
@@ -196,6 +224,33 @@ mod tests {
         );
         assert_eq!(skill_display_name(""), None);
         assert_eq!(skill_display_name("   "), None);
+    }
+
+    /// `SKILL.md` 是每个 skill 都一样的约定文件名：用所在目录当名字，否则卡片上全是 `SKILL`。
+    #[test]
+    fn a_skill_file_is_named_after_its_directory() {
+        assert_eq!(
+            skill_display_name(".crabmate/skills/api-design/SKILL.md").as_deref(),
+            Some("api-design")
+        );
+        assert_eq!(
+            skill_display_name("skills/api-design/SKILL.md").as_deref(),
+            Some("api-design")
+        );
+        // 大小写不敏感 + Windows 分隔符
+        assert_eq!(
+            skill_display_name("skills\\api-design\\skill.MD").as_deref(),
+            Some("api-design")
+        );
+        // 上一层目录就是 `skills`：没有 id 可退，退回文件名本身（不能显示成 `skills`）。
+        assert_eq!(
+            skill_display_name(".crabmate/skills/SKILL.md").as_deref(),
+            Some("SKILL.md")
+        );
+        // 裸文件名，没有目录层级
+        assert_eq!(skill_display_name("SKILL.md").as_deref(), Some("SKILL.md"));
+        // 只有目录、没有文件名
+        assert_eq!(skill_display_name(".crabmate/skills/"), None);
     }
 
     #[test]
