@@ -64,7 +64,8 @@ fn web_only_head(raw: &str) -> Option<WebOnly> {
 const HELP_TEXT: &str = "常用控制命令（不经模型）：\n\
 /help · /version · /workspace · /agent · /model\n\
 /api-base · /export · /config · /context\n\
-/skills · /clear · /api-key（密钥不进对话）";
+/skills · /clear · /api-key（密钥不进对话）\n\
+/model set <id> 存本机（TUI 的 /model 只在那个进程有效）；/clear 只清本屏，服务端历史还在";
 
 /// 是否为 Web 控制斜杠（应拦截，不发送给模型）。`/<skill-id>` 除外。
 ///

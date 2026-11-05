@@ -184,7 +184,7 @@ fn print_help() {
   /help                 this text\n\
   /version              crabmate-tui version (local build; not requested from serve)\n\
   /status               show serve model / endpoint / session mode (GET /status)\n\
-  /model [name]         set client-side model override for later turns (off to clear)\n\
+  /model [name]         set this-process model override for later turns (off to clear; not saved — Web's /model set persists on device)\n\
   /mode ask|plan|act    set session mode for later turns (off to clear)\n\
   /role <id>            set agent role for later turns (off to clear; list via /status)\n\
   /perm <level>         set permission-level intent for later turns (off to clear; ceiling still applies)\n\
@@ -194,7 +194,7 @@ fn print_help() {
   /workspace [path]     show or set serve workspace root (off=serve default; ~/ expands via local HOME; /cd alias)\n\
   /conv                 show current conversation_id\n\
   /conv list            list Web sessions (user-data)\n\
-  /conv new             clear conversation_id (next turn starts fresh)\n\
+  /conv new             clear conversation_id (next turn starts fresh; there is no /clear — history stays on serve)\n\
   /conv use <id>        set conversation_id for continuation\n\
   /conv delete [<id>]   delete a server-persisted conversation (idempotent 204)\n\
   /conv export [...]    export a whole conversation: [json|markdown|both] [--out <path>] [--id <id>]\n\
