@@ -2,6 +2,8 @@
 
 use std::sync::Arc;
 
+use crabmate_client_api::chat_export::ExportFormat;
+use crabmate_client_api::slash_args::AgentSub;
 use crabmate_client_api::slash_caps::{Surface, supports};
 use crabmate_client_api::slash_heads::{Head, head_of};
 use leptos::prelude::*;
@@ -323,10 +325,13 @@ fn handle_workspace(
     });
 }
 
+/// `/agent [list|ls|set <id>]`：子命令分类交给 `slash_args::AgentSub`。
+///
+/// `ls` 曾经只有 TUI 认、这里漏掉 —— 同一条命令在 TUI 列角色、在这里打「用法」。
+/// 分类下沉后两端共用一份判定，端内只留「怎么列」「怎么写」。
 fn handle_agent(args: &[&str], shell: &ComposerStreamShell, ctx: WebSlashControlCtx) {
-    let sub = args.first().copied().unwrap_or("list");
-    match sub {
-        "list" => {
+    match AgentSub::parse(args) {
+        AgentSub::List => {
             let stream = shell.stream.clone();
             let chat = ctx.chat;
             let loc = ctx.locale.get_untracked();
@@ -350,16 +355,7 @@ fn handle_agent(args: &[&str], shell: &ComposerStreamShell, ctx: WebSlashControl
                 }
             });
         }
-        "set" => {
-            let id = args.get(1).copied().unwrap_or("").trim();
-            if id.is_empty() {
-                set_ok(
-                    ctx.chat,
-                    shell,
-                    "用法: /agent set <id> | /agent set default",
-                );
-                return;
-            }
+        AgentSub::Set(id) => {
             if id.eq_ignore_ascii_case("default") {
                 ctx.selected_agent_role.set(None);
                 ctx.agent_role_user_override.set(true);
@@ -370,8 +366,12 @@ fn handle_agent(args: &[&str], shell: &ComposerStreamShell, ctx: WebSlashControl
                 set_ok(ctx.chat, shell, format!("已设角色: {id}"));
             }
         }
-        _ if args.is_empty() => handle_agent(&["list"], shell, ctx),
-        _ => set_ok(
+        AgentSub::SetMissingId => set_ok(
+            ctx.chat,
+            shell,
+            "用法: /agent set <id> | /agent set default",
+        ),
+        AgentSub::Unknown(_) => set_ok(
             ctx.chat,
             shell,
             "用法: /agent · /agent list · /agent set <id>",
@@ -379,27 +379,33 @@ fn handle_agent(args: &[&str], shell: &ComposerStreamShell, ctx: WebSlashControl
     }
 }
 
+/// `/export [json|markdown|both]`：格式词表由 `chat_export::ExportFormat::parse` 认
+/// （`md` 别名、空串默认 `json` 都在那里），这里只决定导出哪几种。
+///
+/// 此前这里手写了一份 `"json" | "" / "markdown" | "md" / "both"` —— 共享层早有同一张表，
+/// 抄一份只是多了个漂移点。
 fn handle_export(args: &[&str], shell: &ComposerStreamShell, ctx: WebSlashControlCtx, loc: Locale) {
-    let kind = args.first().copied().unwrap_or("json").to_ascii_lowercase();
+    let Some(fmt) = ExportFormat::parse(args.first().copied().unwrap_or("")) else {
+        set_ok(ctx.chat, shell, "用法: /export [json|markdown|both]");
+        return;
+    };
     let id = ctx.chat.active_id.get_untracked();
     let filters = ctx.apply_assistant_display_filters.get_untracked();
     let include_inject = shell.show_turn_context_inject.get_untracked();
-    match kind.as_str() {
-        "json" | "" => {
-            export_session_json_for_id(ctx.chat.sessions, &id, loc, filters, include_inject);
-            set_ok(ctx.chat, shell, "已触发 JSON 导出下载");
-        }
-        "markdown" | "md" => {
-            export_session_markdown_for_id(ctx.chat.sessions, &id, loc, filters, include_inject);
-            set_ok(ctx.chat, shell, "已触发 Markdown 导出下载");
-        }
-        "both" => {
-            export_session_json_for_id(ctx.chat.sessions, &id, loc, filters, include_inject);
-            export_session_markdown_for_id(ctx.chat.sessions, &id, loc, filters, include_inject);
-            set_ok(ctx.chat, shell, "已触发 JSON + Markdown 导出下载");
-        }
-        _ => set_ok(ctx.chat, shell, "用法: /export [json|markdown|both]"),
+    let mut done: Vec<&str> = Vec::new();
+    if fmt.wants_json() {
+        export_session_json_for_id(ctx.chat.sessions, &id, loc, filters, include_inject);
+        done.push("JSON");
     }
+    if fmt.wants_markdown() {
+        export_session_markdown_for_id(ctx.chat.sessions, &id, loc, filters, include_inject);
+        done.push("Markdown");
+    }
+    set_ok(
+        ctx.chat,
+        shell,
+        format!("已触发 {} 导出下载", done.join(" + ")),
+    );
 }
 
 /// `/mode [ask|plan|act]`：与底栏 mode 段同一条写入路径。
