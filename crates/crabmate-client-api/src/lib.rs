@@ -35,6 +35,7 @@ pub mod slash_render;
 pub mod sse_dispatch;
 pub mod timeline_skill;
 pub mod tool_display;
+pub mod turn_lifecycle;
 pub mod url;
 pub mod workspace;
 pub mod workspace_rel;
