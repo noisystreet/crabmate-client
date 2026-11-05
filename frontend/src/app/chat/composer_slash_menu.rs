@@ -10,6 +10,7 @@ use leptos::html::Textarea;
 use leptos::prelude::*;
 
 use crate::api::{SkillsListData, fetch_skills};
+use crate::app::chat::composer_slash_control::WebOnly;
 use crate::i18n::{self, Locale};
 
 /// 草稿是否处于「仅 `/` + 可选前缀、尚无空白」的浮层态（与 TUI 同一判定）。
@@ -29,29 +30,17 @@ fn web_builtin_slash_items(locale: Locale) -> Vec<SlashMenuItem> {
         .iter()
         .filter_map(|head| builtin_item(*head, locale))
         .collect();
-    // 端独占的三条（不在 `Head` 里，判定在 `composer_slash_control::web_only_head`）
-    // 加两个非 head 项：`/skills list` 是子命令简写，`/btw` 根本不是控制斜杠
-    // （发给 serve 由它短路）。
-    items.push(SlashMenuItem::builtin(
-        "clear",
-        "/clear",
-        i18n::composer_slash_builtin_clear(locale),
-    ));
-    items.push(SlashMenuItem::builtin(
-        "api-base",
-        "/api-base ",
-        i18n::composer_slash_builtin_api_base(locale),
-    ));
-    items.push(SlashMenuItem::builtin(
-        "api-key",
-        "/api-key ",
-        i18n::composer_slash_builtin_api_key(locale),
-    ));
-    items.push(SlashMenuItem::builtin(
-        "skills list",
-        "/skills list",
-        i18n::composer_slash_builtin_skills_list(locale),
-    ));
+    // 端独占三条（不在 `Head` 里）从 `WebOnly::ALL` 派生：正名只有 `as_str()` 一处，
+    // 加第四条时不会再出现「判定表加了、菜单漏了」。
+    for which in WebOnly::ALL {
+        let (insert, desc) = match which {
+            WebOnly::ApiBase => ("/api-base ", i18n::composer_slash_builtin_api_base(locale)),
+            WebOnly::Clear => ("/clear", i18n::composer_slash_builtin_clear(locale)),
+            WebOnly::ApiKey => ("/api-key ", i18n::composer_slash_builtin_api_key(locale)),
+        };
+        items.push(SlashMenuItem::builtin(which.as_str(), insert, desc));
+    }
+    // `/btw` 不是控制斜杠（整行发给 serve，由它短路回答），但值得出现在菜单里。
     items.push(SlashMenuItem::builtin(
         "btw",
         "/btw ",
@@ -71,6 +60,7 @@ fn builtin_item(head: Head, locale: Locale) -> Option<SlashMenuItem> {
     let (insert, desc) = match head {
         Head::Help => ("/help", i18n::composer_slash_builtin_help(locale)),
         Head::Status => ("/status", i18n::composer_slash_builtin_status(locale)),
+        Head::Settings => ("/settings ", i18n::composer_slash_builtin_settings(locale)),
         Head::Model => ("/model ", i18n::composer_slash_builtin_model(locale)),
         Head::Mode => ("/mode ", i18n::composer_slash_builtin_mode(locale)),
         Head::Role => ("/role ", i18n::composer_slash_builtin_role(locale)),
@@ -89,7 +79,6 @@ fn builtin_item(head: Head, locale: Locale) -> Option<SlashMenuItem> {
         // 「选了也没用」。`supported()` 已经过滤，这里给 `None` 只为让 match 穷尽；
         // 两处不一致时 `menu_covers_every_desktop_head` 会指出是哪一条。
         Head::Quit
-        | Head::Settings
         | Head::Resume
         | Head::Older
         | Head::Find
@@ -590,10 +579,11 @@ mod tests {
         // 端独占的三条同样必须在菜单里：它们不在 `supported(Desktop)` 里，所以
         // 上面那条循环看不见 —— 重构时漏掉 `/api-base` 正是这样被 `dead_code` 警告
         // 而不是测试发现的。
-        for key in ["clear", "api-base", "api-key"] {
+        for which in WebOnly::ALL {
             assert!(
-                keys.contains(&key),
-                "/{key} 是端独占且有 handler 的命令，菜单漏了"
+                keys.contains(&which.as_str()),
+                "/{} 是端独占且有 handler 的命令，菜单漏了",
+                which.as_str()
             );
         }
         // 反向：菜单里的项必须真能被拦下来，否则「选了也只是发给模型」。
@@ -611,7 +601,6 @@ mod tests {
     fn builtins_always_available_without_cache() {
         let items = build_filtered_menu("", Locale::ZhHans, None);
         assert!(items.iter().any(|i| i.insert == "/skills"));
-        assert!(items.iter().any(|i| i.insert == "/skills list"));
         assert!(items.iter().any(|i| i.insert == "/help"));
         assert!(items.iter().any(|i| i.insert == "/context"));
         assert!(items.iter().any(|i| i.insert.starts_with("/workspace")));
@@ -635,7 +624,6 @@ mod tests {
         };
         let items = build_filtered_menu("sk", Locale::En, Some(&cache));
         assert!(items.iter().any(|i| i.insert == "/skills"));
-        assert!(items.iter().any(|i| i.insert == "/skills list"));
         assert!(!items.iter().any(|i| i.kind == SlashItemKind::Skill));
 
         let items = build_filtered_menu("cpp", Locale::En, Some(&cache));

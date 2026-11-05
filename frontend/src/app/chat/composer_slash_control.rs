@@ -17,6 +17,7 @@ use crate::api::{
     post_workspace_set,
 };
 use crate::app::chat::handles::ComposerStreamShell;
+use crate::app::settings_page::{SettingsSection, open_settings_from_hash};
 use crate::app::shell_runtime_context::try_chat_shell_ctx;
 use crate::app::status_permission_chip::{LevelOutcome, PermTarget, apply_permission_level};
 use crate::app::status_session_mode_seg::apply_session_mode_selection;
@@ -37,10 +38,37 @@ use crate::storage::StoredMessage;
 /// issue #444 之后三端都有 handler，已升级为共享 `Head`（查 `slash_caps`）：
 /// 留着就是第二份名单，`/version` 那种「能敲但 help 不写」的漂移会再来一次。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum WebOnly {
+pub(super) enum WebOnly {
     ApiBase,
     Clear,
     ApiKey,
+}
+
+impl WebOnly {
+    /// 全部端独占命令 —— 菜单与测试都从它派生，别再手抄第四遍。
+    ///
+    /// 这三条名字曾散在四处（判定表 / 菜单 push ×3 / 测试数组 / 展示侧保留词），
+    /// 我在补菜单时漏掉 `/api-base` 就是那么发生的。
+    pub(super) const ALL: &'static [Self] = &[Self::ApiBase, Self::Clear, Self::ApiKey];
+
+    /// 规范 head 名（不含 `/`）；无连字符写法是别名，不在本表里。
+    pub(super) fn as_str(self) -> &'static str {
+        match self {
+            Self::ApiBase => "api-base",
+            Self::Clear => "clear",
+            Self::ApiKey => "api-key",
+        }
+    }
+}
+
+fn web_only_head(raw: &str) -> Option<WebOnly> {
+    // `apibase` / `apikey` 是无连字符的肌肉记忆写法，与带连字符的一样收。
+    match raw {
+        "apibase" => Some(WebOnly::ApiBase),
+        "apikey" => Some(WebOnly::ApiKey),
+        // 正名只认 `WebOnly::as_str()` 一处，避免判定表与菜单各写一份。
+        other => WebOnly::ALL.iter().copied().find(|w| w.as_str() == other),
+    }
 }
 
 /// `/<head>` 的 head（去 `/`、取首词、小写）。不是 `/` 开头返回 `None`。
@@ -52,16 +80,6 @@ fn slash_head(trimmed: &str) -> Option<String> {
         .map(|h| h.to_ascii_lowercase())
 }
 
-fn web_only_head(raw: &str) -> Option<WebOnly> {
-    Some(match raw {
-        // `apibase` / `apikey` 是无连字符的肌肉记忆写法，与带连字符的一样收。
-        "api-base" | "apibase" => WebOnly::ApiBase,
-        "clear" => WebOnly::Clear,
-        "api-key" | "apikey" => WebOnly::ApiKey,
-        _ => return None,
-    })
-}
-
 /// `/help` 的正文。列全本端拦截集，否则「敲了有用但 help 没写」与「help 写了却没用」
 /// 一样难查（`/version` 曾漏在这里）。
 const HELP_TEXT: &str = "常用控制命令（不经模型）：\n\
@@ -69,7 +87,8 @@ const HELP_TEXT: &str = "常用控制命令（不经模型）：\n\
 /api-base · /export · /config · /context\n\
 /skills · /clear · /api-key（密钥不进对话）\n\
 /model set <id> 存本机（TUI 的 /model 只在那个进程有效）；/clear 只清本屏，服务端历史还在\n\
-/mode ask|plan|act · /role <id> · /perm <level> · /status（与底栏同一组开关）";
+/mode ask|plan|act · /role <id> · /perm <level> · /status（与底栏同一组开关）\n\
+/settings [<section>] 打开设置页（llm / mcp / tools …，与顶栏按钮同一个路由）";
 
 /// 是否为 Web 控制斜杠（应拦截，不发送给模型）。`/<skill-id>` 除外。
 ///
@@ -154,6 +173,9 @@ fn dispatch_shared(
         Head::Role => handle_role(args, shell, ctx),
         Head::Perm => handle_perm(args, shell, ctx),
         Head::Status => handle_status(shell, ctx),
+        // issue #444 PR-B：设置页早就有顶栏入口，命令只是第二个入口 ——
+        // 只写 `#/settings/<section>`，显隐由既有的 hashchange 监听器驱动（见 `handle_settings`）。
+        Head::Settings => handle_settings(args, shell, ctx.chat),
         // 曾放在 `WebOnly` 里的六条：三端都有 handler 之后归共享分派，
         // 但实现一行没改 —— 变的只是「谁能进来」的判定来源。
         Head::Version => set_ok(
@@ -203,6 +225,39 @@ fn handle_clear(shell: &ComposerStreamShell, ctx: WebSlashControlCtx) {
     });
     ctx.draft.set(String::new());
     set_ok(ctx.chat, shell, "已清空当前会话消息。");
+}
+
+/// `/settings [<section>]`：打开设置页并跳到分区（issue #444 PR-B）。
+///
+/// 只写 `#/settings/<section>`：显隐由 `settings_page_install_hashchange_listener` 统一驱动，
+/// 于是「点顶栏」与「敲命令」是同一条路由 —— 不存在「hash 变了但页面没开」的第二套状态，
+/// 也不用把 `settings_page` 信号穿进 composer 那几层 ctx。
+///
+/// 分区名与 URL slug 同源（`SettingsSection::from_slug`），所以 `/settings llm` 与
+/// `#/settings/llm` 是同一个目标；无参等同点顶栏（Appearance）。
+fn handle_settings(args: &[&str], shell: &ComposerStreamShell, chat: ChatSessionSignals) {
+    let Some(raw) = args.first().copied() else {
+        open_settings_from_hash(SettingsSection::Appearance);
+        set_ok(
+            chat,
+            shell,
+            format!("已打开设置页：{}", SettingsSection::Appearance.slug()),
+        );
+        return;
+    };
+    match SettingsSection::from_slug(raw) {
+        Some(section) => {
+            open_settings_from_hash(section);
+            set_ok(chat, shell, format!("已打开设置页：{}", section.slug()));
+        }
+        None => {
+            let names: Vec<&str> = SettingsSection::ALL.iter().map(|s| s.slug()).collect();
+            set_err(
+                shell,
+                format!("未知设置分区 `{raw}`；可用：{}", names.join(" / ")),
+            );
+        }
+    }
 }
 
 /// 控制斜杠成功/说明：写入会话 system 气泡（不经模型、导出时跳过），勿塞状态栏以免右下角叠字。
