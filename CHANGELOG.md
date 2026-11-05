@@ -13,6 +13,8 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Added
 
+- **Session mode words now have one home.** `ask` / `plan` / `act` had been hand-written in nine places — seven in the Web frontend, the TUI constant, plus one more inline `matches!` in the TUI CLI — so a new mode on the server would need nine edits. Missing one in a parser drops a legal value; missing one in a validator lets the user pick something that cannot be sent. `crabmate_client_api::session_mode::{SESSION_MODES, is_known_mode}` now owns the table. The check is byte-for-byte the old one (no trimming, no case folding), so there is no behavior change. Cost: one small module. No protocol change.
+
 - **Web `/agent ls` now lists roles instead of printing usage.** The TUI had always accepted `ls` as a synonym for `list`; the Web handler only matched `list`, so one command did two different things depending on the surface. The sub-command classification moved to `crabmate_client_api::slash_args::AgentSub`, which both ends now share (`List` / `Set(id)` / `SetMissingId` / `Unknown`), so a future sub-command can't drift this way. `SetMissingId` is kept distinct from `List` on purpose — merging them would make `/agent set` silently list roles. Cost: one small module in `crabmate-client-api`. No protocol change.
 
 - **Web `/export` now reuses the shared format parser.** It had hand-written the `json` / `markdown|md` / `both` table while `chat_export::ExportFormat::parse` already owned it (`md` alias and the empty-string default included). No behavior change; one fewer place to drift.

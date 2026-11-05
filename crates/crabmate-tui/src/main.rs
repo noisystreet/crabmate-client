@@ -21,6 +21,7 @@ use crate::serve::{
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 use crabmate_client_api::secrets::SecretSlot;
+use crabmate_client_api::session_mode::is_known_mode;
 use crabmate_client_api::slash_heads::Head;
 use reedline::{DefaultPrompt, DefaultPromptSegment, Reedline, Signal};
 
@@ -729,7 +730,7 @@ fn handle_mode_slash(text: &str, overrides: &mut SessionPrefs) {
         println!("session mode cleared");
         return;
     }
-    if !matches!(arg.as_str(), "ask" | "plan" | "act") {
+    if !is_known_mode(&arg) {
         eprintln!("invalid session mode '{arg}'; 可选 ask / plan / act（off 清除）");
         return;
     }

@@ -4,6 +4,7 @@
 //! 菜单经 [`Portal`] 挂到 `document.body`，并用 **`position: fixed`** 锚定触发按钮，
 //! 避免 `.shell-main { overflow: hidden }` 与 `.status-chips { overflow-y: hidden }` 裁切。
 
+use crabmate_client_api::session_mode::is_known_mode;
 use leptos::html;
 use leptos::portal::Portal;
 use leptos::prelude::*;
@@ -50,7 +51,7 @@ pub(crate) fn apply_session_mode_selection(
     mode: &str,
 ) -> bool {
     let mode = mode.trim().to_ascii_lowercase();
-    if !matches!(mode.as_str(), "ask" | "plan" | "act") {
+    if !is_known_mode(&mode) {
         return false;
     }
     if selected_session_mode.get_untracked() == mode {

@@ -1,5 +1,6 @@
 //! 回前台：软续传 `/chat/stream` 或清绑定后水合。
 
+use crabmate_client_api::session_mode::is_known_mode;
 use std::rc::Rc;
 
 use leptos::prelude::*;
@@ -84,11 +85,7 @@ pub(crate) fn spawn_foreground_stream_resume(args: ForegroundStreamResumeArgs) {
             .get_untracked()
             .trim()
             .to_ascii_lowercase();
-        if matches!(m.as_str(), "ask" | "plan" | "act") {
-            Some(m)
-        } else {
-            None
-        }
+        if is_known_mode(&m) { Some(m) } else { None }
     };
     let cbs = build_chat_stream_callbacks(Rc::clone(&prepared.stream_ctx));
     let gen_snapshot = prepared.attach_generation;

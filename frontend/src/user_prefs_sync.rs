@@ -1,5 +1,6 @@
 //! 壳层偏好经 **`/user-data/prefs`** 读写（不再使用 `localStorage`）。
 
+use crabmate_client_api::session_mode::is_known_mode;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -101,11 +102,7 @@ pub fn build_prefs_dto(app: &AppSignals) -> UserPrefsDto {
                 .get_untracked()
                 .trim()
                 .to_ascii_lowercase();
-            if matches!(m.as_str(), "ask" | "plan" | "act") {
-                Some(m)
-            } else {
-                None
-            }
+            if is_known_mode(&m) { Some(m) } else { None }
         },
         disable_readonly_tool_ttl_cache: Some(
             !crate::api::client_llm_storage::load_readonly_tool_ttl_cache_follow_server_from_memory(
@@ -236,7 +233,7 @@ fn apply_llm_prefs_dto(
     let mut prefs_had_session_mode = false;
     if let Some(ref m) = dto.session_mode {
         let t = m.trim().to_ascii_lowercase();
-        if matches!(t.as_str(), "ask" | "plan" | "act") {
+        if is_known_mode(&t) {
             prefs_had_session_mode = true;
             if !app.llm_settings.session_mode_user_override.get_untracked() {
                 app.llm_settings.selected_session_mode.set(t);

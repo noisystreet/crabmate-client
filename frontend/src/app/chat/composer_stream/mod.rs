@@ -24,6 +24,7 @@ mod stream_turn_scratch_state;
 mod stream_turn_state;
 mod turn_canonical;
 
+use crabmate_client_api::session_mode::is_known_mode;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -88,11 +89,7 @@ pub(super) fn make_attach_chat_stream(h: ComposerStreamHandles) -> AttachChatStr
             agent_role_user_override.set(false);
             let session_mode = {
                 let m = selected_session_mode.get().trim().to_ascii_lowercase();
-                if matches!(m.as_str(), "ask" | "plan" | "act") {
-                    Some(m)
-                } else {
-                    None
-                }
+                if is_known_mode(&m) { Some(m) } else { None }
             };
             session_mode_user_override.set(false);
             // 意图原样透传：归一发生在选择器落地那一刻，这里不再「修正」用户的选择。

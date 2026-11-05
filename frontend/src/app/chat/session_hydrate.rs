@@ -14,6 +14,7 @@
 //! - 空缓存或 v1 会话才调用
 //!   [`super::session_merge::merge_session_tail`] 执行 plain user 补回与 local 顺序回放。
 
+use crabmate_client_api::session_mode::is_known_mode;
 use std::collections::HashSet;
 
 use leptos::prelude::*;
@@ -303,7 +304,7 @@ fn apply_persisted_session_meta(
             .filter(|m| !m.is_empty())
     {
         let m = mode.to_ascii_lowercase();
-        if matches!(m.as_str(), "ask" | "plan" | "act") {
+        if is_known_mode(&m) {
             selected_session_mode.set(m);
         }
     }

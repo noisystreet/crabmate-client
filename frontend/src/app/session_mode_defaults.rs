@@ -1,12 +1,13 @@
 //! 从 `/status` 解析角色默认会话模式（与底栏换角、prefs 冷启动共用）。
 
 use crate::api::StatusData;
+use crabmate_client_api::session_mode::is_known_mode;
 
 /// 规范化 `ask` / `plan` / `act`；非法则 `None`。
 #[must_use]
 pub fn normalize_session_mode_slug(raw: &str) -> Option<String> {
     let m = raw.trim().to_ascii_lowercase();
-    matches!(m.as_str(), "ask" | "plan" | "act").then_some(m)
+    is_known_mode(&m).then_some(m)
 }
 
 /// 命名角色有配置则用之，否则回落全局 `default_session_mode`；清除角色时用全局默认。
