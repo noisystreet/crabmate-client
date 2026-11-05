@@ -24,6 +24,7 @@ pub mod paths;
 pub mod permission;
 pub mod prompt_tokens;
 pub mod secrets;
+pub mod session_mode;
 pub mod session_model;
 pub mod sessions;
 pub mod slash_args;

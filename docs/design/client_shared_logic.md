@@ -378,6 +378,14 @@ Web 的 `api_base_preset_select` 字符串链路（写入已保存模型预设�
 
 **状态**：共享层（路径常量 / `api_error_code` / 四态分类）已落地并有单测；**前端（Desktop / Android / Web）已接意图选择器**——设置页「工具」分区的权限块升级为「只读投影 + 档位选择器」（`frontend/src/app/settings_permission_block.rs`，请求层 `frontend/src/api/http_conversation_state.rs`）：选项只列服务端给的 `available`，点一下先写**同一个**意图信号（与 `/chat` 发送路径同源，经 `ChatShellLeptosContext` 提供），已绑定会话时再 `POST /conversation/state` 立刻落盘并用响应自带的写后投影刷新显示；没有已持久化会话时只写本地意图并提示「发送后生效」（服务端不做 upsert）。四态落地：`Ok` 刷新投影、`NotFound` 提示会话过期、`Unsupported` 并入 `GET /permission` 的同一个 capability 状态、`Failed{500}` 说「可重试」而不是「会话不存在」。`/chat` 现在总是带用户当前选的意图（`permission_level` 省略 = 沿用会话持久值）。TUI 只有状态栏 `perm` 读数（§4.16），另加 `/perm [<level>]` 斜杠命令（repl 与全屏 `tui` 共用同一个 `/perm` head；issue #444 PR-A 之后 Web 也有这条命令）：与 `/mode` `/role` 同一套客户端 override，随**下一条**消息进 `permission_level`，`off` 清除；**不在客户端校验档位名**——可选集由 `GET /permission` 的 `available` 决定，写死词表只会在服务端新增档位时误拒，未知值交给服务端拒绝更准确。**底栏 chip 已补上**（`frontend/src/app/status_permission_chip.rs`）：显示 `意图 → 生效`（没表达意图就只显示生效档；两者都不知道则整段不渲染，不拿 `/status` 的 `permission_level_default` 顶替），点开复用 `.status-mode-menu-*` 的 Portal 菜单就地切档，写路径与设置页同规则。**会话切换清空意图**也做了：`permission_intent_owner` 记住这份意图是为哪个本地会话选的，壳层 effect 只看「当前会话 id 是否仍是归属」，与请求时序无关——刻意不挂在水合回调里，因为同一会话的回前台 / 流收尾都会重新水合，在那里清会把用户刚选的档误清。**不需要**水合 `active_permission_level`：意图是 `Option`，`None` 的语义就是「沿用该会话已保存的值」，把服务端值写进意图等于「没选过也被记成选过」，此后切会话清理就无从判断。
 
+### 4.18 会话模式词表（S13 已落地；仅词表与判定）
+
+`ask` / `plan` / `act` 是 serve 契约里 `session_mode` 的合法取值，与 §4.16 的权限等级同属「契约词表」，但此前散在九处：Web 侧七处 `matches!(m.as_str(), "ask" | "plan" | "act")`（`user_prefs_sync` ×2、`session_mode_defaults`、`status_session_mode_seg`、`session_hydrate`、`composer_stream/mod`、`foreground_resume`），TUI 侧 `tui_mode/settings.rs` 的 `SESSION_MODES` 常量与 `main.rs` 里又一遍内联 `matches!`。
+
+现在词表在 `crabmate_client_api::session_mode`：`SESSION_MODES`（顺序即 UI 顺序）+ `is_known_mode(&str)`。**判定与改造前逐字等价** —— 不 trim、不折叠大小写；Web 那七处保持各自的「先 `trim().to_ascii_lowercase()` 再判定」，TUI CLI 保持严格比较。下沉的目的是让词表有唯一出处，不是顺手放宽输入。
+
+代价对照：服务端新增一档时，改造前要改九处，且漏改的两个方向都不显式失败 —— 漏在解析侧会把合法值当非法丢掉，漏在校验侧则让用户选得进去、发不出去。
+
 ## 5. 明确不共享
 
 | 类别 | 原因 | 代表 |
@@ -416,6 +424,7 @@ Web 的 `api_base_preset_select` 字符串链路（写入已保存模型预设�
 | **S7c**（可选） | C3：错误携带结构化 HTTP status，消除 `http_error_status_code` 括号反解（见 §4.10） | 改动面中，收益低中 |
 | **S9** ✅ | `workspace_rel`：`child_rel` / `parent_rel` 下沉；frontend `workspace_tree` 与 tui `tui_mode/workspace_tree` 改 `pub use` 转发（调用点零改动） | client-api 150 单测（含 5 个新增）；tui `workspace_tree` 既有断言通过；`wasm32` clippy；`check-boundaries.sh` ok |
 | **S10** ✅ | `client_llm_presets`：`PRESETS` + `select_id_for_url` / `index_for_url` / `display_id_for_url` 下沉；frontend `api_base_select_value_for_draft` 与 tui `API_BASE_PRESETS` / `gateway_pick_of` / `api_base_display` 改共享 | 两端表合一（删 TUI 第三处内联匹配与 Web 无消费的 `suggested_model`）；client-api 156 单测（含 11 个新增）；tui 623 全绿；`wasm32` clippy；`check-boundaries.sh` ok |
+| **S13** ✅ | `session_mode`：`SESSION_MODES` + `is_known_mode` 下沉；Web 七处内联 `matches!` 与 TUI 两处（常量 + CLI 校验）改共享 | client-api 新增 2 单测；frontend 762 / tui 1165 全绿；字面量零残留 |
 
 **建议开工顺序**：S0 → S1–S4 → S5a / S5 health → S5 slash / paths / messages（均已完成）→ **S6a → S6b → S6c → S6d**（均已完成；S6e 视 S6a–d 收益再定）→ **S7a**（已完成）→ **S8 / S9 / S10**（均已完成）→ S7b（需先拍板）。
 

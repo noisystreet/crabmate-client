@@ -12,8 +12,9 @@ use crabmate_client_api::{
 
 use crate::serve::{ClientLlmFields, LlmOverridesDto, McpServersFileDto, UserPrefsDto};
 
-/// 会话模式枚举的合法取值（与 `/mode` 斜杠一致；面板枚举与校验共用，避免漂移）。
-pub const SESSION_MODES: [&str; 3] = ["ask", "plan", "act"];
+/// 会话模式枚举的合法取值：词表在共享层（`crabmate_client_api::session_mode`），
+/// 与 `/mode` 斜杠、Web 侧的解析/校验同源。面板枚举与校验共用它，不再各写一份。
+pub use crabmate_client_api::session_mode::SESSION_MODES;
 
 /// 思考模式「跟随 server」的显式 user-data 值（Desktop 校验允许；TUI 持久层归一为
 /// `None` = 跟随 server，随轮不发送该键）。
