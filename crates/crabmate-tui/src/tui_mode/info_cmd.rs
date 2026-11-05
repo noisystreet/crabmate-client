@@ -7,6 +7,8 @@
 //! `/config reload` 是真的发请求 —— 命令层再打一次已经拉过的接口，就是给「两处数字
 //! 不一致」留门（`/skills` 尤其明显：菜单刚刷掉的 skill 会在命令输出里复活）。
 
+use crabmate_client_api::slash_args::AgentSub;
+
 use super::LaneApp;
 use super::controls::InfoCmd;
 use super::state::LineKind;
@@ -128,14 +130,19 @@ impl LaneApp<'_> {
     }
 
     /// `/agent [list]`：列可用 role。设置走 `/role`，这里只读。
+    ///
+    /// 子命令分类交给 `slash_args::AgentSub`：`ls` 曾经只有 TUI 认、Web 不认，
+    /// 同一条命令在两端一个列角色一个打用法 —— 那份 `match` 现在只留一处。
     pub(super) fn cmd_agent(&mut self, arg: Option<String>) {
-        match arg.as_deref().map(str::trim) {
-            None | Some("") | Some("list") | Some("ls") => self.list_agent_roles(),
-            Some("set") => self.st.push_line(
+        let owned = arg.unwrap_or_default();
+        let args: Vec<&str> = owned.split_whitespace().collect();
+        match AgentSub::parse(&args) {
+            AgentSub::List => self.list_agent_roles(),
+            AgentSub::Set(_) | AgentSub::SetMissingId => self.st.push_line(
                 LineKind::System,
                 "TUI 用 /role <id> 设置 agent role（/agent 只做列举）",
             ),
-            Some(other) => {
+            AgentSub::Unknown(other) => {
                 let msg =
                     format!("不支持的 /agent 子命令：{other}（支持 list；设置用 /role <id>）");
                 self.st.push_line(LineKind::System, &msg);

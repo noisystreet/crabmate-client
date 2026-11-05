@@ -86,6 +86,7 @@ frontend/                # wasm fetch 适配器 + UI；S1–S4 已用 client-api
 | `slash_heads` | 斜杠 head 的规范形与别名归一（`/<head>` → `Head`，`Head::ALL` 即 TUI 菜单顺序）；**不含** handler |
 | `slash_caps` | 各端支持的共享 head 能力表（`Surface::Desktop` / `Tui` / `Repl`）；端独占命令不进表，端内拦截判定由它派生 |
 | `slash_menu` | `/` 补全菜单机制（触发判定 / `MenuItem` / 前缀过滤 / 内建优先 + skill 排序截断）；命令**文案**与 skill **来源**留端 |
+| `slash_args` | 斜杠命令的**参数解析**（`AgentSub`：`list` / `ls` / 空参归一，`set` 携带 id）；**只做分类**，怎么写 / 报什么错 / 发不发请求全留端 |
 | `messages` | HTTP 错误体通用取错（`error` → `message` → `HTTP {status}`），display 层不属契约；另含嵌套 `{"error":{"code":…}}` 的 `api_error_code`（按 code 分流的唯一入口） |
 | `conversation_state` | `POST /conversation/state` 的响应分类（写入成功 / 会话不存在 / 老 serve 无此路由 / 其它失败）+ 契约类型 re-export；不做等级比较、不算 min 链 |
 | `prompt_tokens`（S6a） | tiktoken 快照 DTO + camelCase/snake_case 双键解析（无 IO） |
@@ -169,6 +170,8 @@ GitHub：`X-CrabMate-GitHub-Token` 目前主要在 frontend（+ 壳钥匙串槽�
 **S5b（已落地）：菜单机制 + head 归一。** 两端原本各有一份逐字同构的 `/` 浮层实现（触发条件、`MenuItem` 字段、skill 项规则、「内建在前 + 按 id 排序 + 截断 24」），现已收进 `crabmate_client_api::slash_menu`（`slash_prefix` / `MenuItem::builtin` / `MenuItem::skill` / `matches_prefix` / `assemble`）——**命令文案仍留端**（Web 走 i18n，TUI 是编译期常量），skill **来源**两端类型不同（`SkillListItem` / `SkillEntry`）由端内 map 成 `MenuItem`。同一次改动把「主命令 + 别名」从散落的 match arm 收成 `crabmate_client_api::slash_heads`（`Head` + `head_of`）：执行端只对主命令写 arm（**穷尽 match**，新增变体编译器会拦），TUI 菜单从 `Head::ALL` 派生。两类静默失效因此消失 —— **别名归一**与**菜单候选**现在各有唯一出处：`/perm`（repl 里被拦截却没有 handler）与 `/fold` `/copy` `/ctl` `/editor` `/chat`（TUI 有 handler 却没有候选）分别是这两类。拦截判定 `is_*_control_slash` **仍不共享**：两端 handler 集不同，合成超集必然出现「拦了没 handler」，端独占命令（Web 的 `clear` / `api-base` / `api-key`）不进 `head_of`。
 
 **S5c（已落地）：能力表。** 「这一端认不认 `/mode`」原本是三份手抄名单（Web 拦截、Web 分派、TUI 菜单），`/version` 就是由此变成「能敲但 `/help` 不写」。现在 `crabmate_client_api::slash_caps` 按端给一次（`Surface::Desktop` / `Tui` / `Repl`），Web 的 `is_web_control_slash` 由它派生，端独占命令（`clear` / `api-base` / `api-key`）另走端内表。两侧都有测试夹：表中每条都必须「拦得住且能分派」，表外的共享 head 必须原样发给模型。**`is_control_slash` 的拦截集刻意大于 `Surface::Repl`**：它还接住 `/background` `/editor` `/chat` 只为了回一句「只在全屏可用」——拦与做是两件事。
+
+**S5d（已落地）：参数解析。** 机制三层落地后，handler 里的「子命令串 → 意图」仍是两份手写 `match`，而且已经漂了：`/agent ls` 只有 TUI 认（`info_cmd.rs` 的 `Some("list") | Some("ls")`），Web 的 `handle_agent` 只匹配 `"list"` —— 同一条命令在一端列角色、在另一端打「用法」。现在归一到 `crabmate_client_api::slash_args::AgentSub::parse`（`List` / `Set(id)` / `SetMissingId` / `Unknown(raw)`），两端 `match` 只留「怎么列」「怎么写」；`SetMissingId` 与 `List` 刻意分开，合并会让 `/agent set` 静默列出角色。同一批把 Web `/export` 手写的格式词表换成既有的 `chat_export::ExportFormat::parse`（`md` 别名与空串默认 `json` 都在那里）。**只收纯分类**：`/config` 没有一起收 —— 它空参在 TUI 是「用法」、在 Web 是「摘要」，那是设计差异而非重复实现，抹平等于改行为。
 
 ### 4.7 Health 探测子集（已落地）
 
@@ -401,7 +404,7 @@ Web 的 `api_base_preset_select` 字符串链路（写入已保存模型预设�
 | **S4** ✅ | `chat_body` 核心字段 builder | `client_sse_protocol` 钉点不易漏 |
 | **S5a** ✅ | hash 交接键名 + fragment 拼装；connect / frontend / `crabmate-web` 改依赖 | 键名与 `%2F` 编码单测对齐 |
 | **S5 health** ✅ | `health_degraded_note`；connect / tui-core 改依赖 | degraded JSON 单测；CORS 仍留 connect |
-| **S5 slash** ✅ | 斜杠三层：`slash_heads`（身份 + 别名）/ `slash_caps`（能力表）/ `slash_menu`（菜单机制）；端内只留 handler 与文案 | tui / web 控制命令匹配一致；WASM 体积与编译时间可接受 |
+| **S5 slash** ✅ | 斜杠四层：`slash_heads`（身份 + 别名）/ `slash_caps`（能力表）/ `slash_menu`（菜单机制）/ `slash_args`（参数解析）；端内只留 handler 与文案 | tui / web 控制命令匹配一致；WASM 体积与编译时间可接受 |
 | **S5 paths/messages** ✅ | 端点路径常量（`paths`）+ 通用 HTTP 取错（`messages`） | 40 处路径替换零字面量漂移；错误文案取值顺序统一 error 优先 |
 | **S6a** ✅ | `prompt_tokens`：`TiktokenPromptTokensSnapshot` + `parse_tiktoken_prompt_tokens_value` / `tiktoken_from_ag_ui_object` 下沉；frontend 侧 re-export | 既有 camelCase/snake_case 用例随迁通过；`apply_conversation_prompt_tokens_from_sse` 留端；frontend `wasm32` check |
 | **S6b** ✅ | `sse_dispatch`：DTO + 4 组钩子 + `SseDispatch` 下沉；`frontend/src/sse_dispatch/mod.rs` 改 `pub use crabmate_client_api::sse_dispatch::*;`（`types.rs` 删除） | 47 处 `crate::sse_dispatch::` 消费点零 import 改动（含 `CommandApprovalData` 转发）；`ToolJobState` 契约轮询样例等 4 个单测随迁通过；frontend `wasm32` check |

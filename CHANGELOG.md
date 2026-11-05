@@ -13,6 +13,10 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Added
 
+- **Web `/agent ls` now lists roles instead of printing usage.** The TUI had always accepted `ls` as a synonym for `list`; the Web handler only matched `list`, so one command did two different things depending on the surface. The sub-command classification moved to `crabmate_client_api::slash_args::AgentSub`, which both ends now share (`List` / `Set(id)` / `SetMissingId` / `Unknown`), so a future sub-command can't drift this way. `SetMissingId` is kept distinct from `List` on purpose — merging them would make `/agent set` silently list roles. Cost: one small module in `crabmate-client-api`. No protocol change.
+
+- **Web `/export` now reuses the shared format parser.** It had hand-written the `json` / `markdown|md` / `both` table while `chat_export::ExportFormat::parse` already owned it (`md` alias and the empty-string default included). No behavior change; one fewer place to drift.
+
 - **Web: `/settings [<section>]` opens the settings page from the composer.** The page already existed behind the toolbar button, so this is a second entrance, not new state: the command writes `#/settings/<section>` — the same hash route the button uses — and the existing hashchange listener drives visibility, so the two cannot disagree. `/settings llm` (or `mcp`, `tools`, …) lands directly on that section; with no argument it opens the button's default. Cost: `slash_caps::DESKTOP` grew by one. No protocol change.
 
 - **Web `/` menu: dropped the duplicate `/skills list` row, and the three Web-only commands now come from one list.** `/skills list` and `/skills` were row-for-row identical (the handler ignores the argument), so the menu offered one command twice. The Web-only trio (`/clear` `/api-base` `/api-key`) had been hand-copied into the menu, a test array and the reserved-word list — adding a fourth would have missed one again (that is how `/api-base` went missing in the previous pass); menu and test now derive from `WebOnly::ALL`. Cost: one fewer menu row. No protocol change.
