@@ -38,6 +38,18 @@ pub enum Head {
     Editor,
     Chat,
     Conv,
+    /// `/version`：本地版本号（不发请求，与 serve 版本无关）。
+    Version,
+    /// `/skills`：列出 serve 侧已发现的 skill（读已有缓存，不重新拉）。
+    Skills,
+    /// `/context`：上下文用量明细（与状态栏 chip 同口径）。
+    Context,
+    /// `/config`：重载 serve 配置（`POST /config/reload`）。
+    Config,
+    /// `/agent`：列出可用 agent role；`set` 子命令仍由各端自己决定要不要做。
+    Agent,
+    /// `/export`：导出当前会话（与各端既有导出同一产物）。
+    Export,
 }
 
 impl Head {
@@ -65,6 +77,12 @@ impl Head {
             Self::Editor => "editor",
             Self::Chat => "chat",
             Self::Conv => "conv",
+            Self::Version => "version",
+            Self::Skills => "skills",
+            Self::Context => "context",
+            Self::Config => "config",
+            Self::Agent => "agent",
+            Self::Export => "export",
         }
     }
 
@@ -81,6 +99,12 @@ impl Head {
         Head::Background,
         Head::Workspace,
         Head::Conv,
+        Head::Version,
+        Head::Skills,
+        Head::Context,
+        Head::Config,
+        Head::Agent,
+        Head::Export,
         Head::Resume,
         Head::Older,
         Head::Fold,
@@ -121,6 +145,13 @@ pub fn head_of(raw: &str) -> Option<Head> {
         "editor" | "view" => Head::Editor,
         "chat" => Head::Chat,
         "conv" => Head::Conv,
+        // `ctx` / `cfg` 是状态行与设置页里的既有缩写，认它们不必再解释。
+        "version" => Head::Version,
+        "skills" => Head::Skills,
+        "context" | "ctx" => Head::Context,
+        "config" | "cfg" => Head::Config,
+        "agent" => Head::Agent,
+        "export" => Head::Export,
         _ => return None,
     })
 }
@@ -144,6 +175,8 @@ mod tests {
             ("bg", Head::Background),
             ("yank", Head::Copy),
             ("view", Head::Editor),
+            ("ctx", Head::Context),
+            ("cfg", Head::Config),
         ] {
             assert_eq!(head_of(alias), Some(want), "别名 {alias} 没有归一到主命令");
         }
@@ -165,8 +198,10 @@ mod tests {
         // `<skill-id>` 与普通文本都必须落到 None，否则会被拦下来却没人处理。
         assert_eq!(head_of("my-skill"), None);
         assert_eq!(head_of(""), None);
-        assert_eq!(head_of("agent"), None);
-        assert_eq!(head_of("export"), None);
+        // 端独占 head（Web 的 `api-base` / `clear` / `api-key`）不进这张表；
+        // 进了表就等于声称「三端都有 handler」，而它们仍各端自管。
+        assert_eq!(head_of("apibase"), None);
+        assert_eq!(head_of("clear"), None);
     }
 
     #[test]

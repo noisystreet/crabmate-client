@@ -26,7 +26,21 @@ pub enum Surface {
 
 /// Desktop / Web 的共享 head。注意它比 TUI 窄得多：`mode` / `role` / `perm` / `status`
 /// 在这一端只有状态栏 / 设置页入口，**没有**命令（敲出来会被当成普通消息发给模型）。
-const DESKTOP: &[Head] = &[Head::Help, Head::Workspace, Head::Model];
+///
+/// 反过来，曾由 Web 独占的 `version` / `skills` / `context` / `config` / `agent` / `export`
+/// 现在三端都有 handler（issue #444 第一阶段），所以进共享表 —— 留着「Web 独占」就是
+/// 第二份名单，`/version` 那种「能敲但 help 不写」的漂移会再来一次。
+const DESKTOP: &[Head] = &[
+    Head::Help,
+    Head::Workspace,
+    Head::Model,
+    Head::Version,
+    Head::Skills,
+    Head::Context,
+    Head::Config,
+    Head::Agent,
+    Head::Export,
+];
 
 /// 全屏 TUI：`parse_control` 对每个 head 都有臂，所以这里是全集。
 const TUI: &[Head] = &[
@@ -41,6 +55,12 @@ const TUI: &[Head] = &[
     Head::Background,
     Head::Workspace,
     Head::Conv,
+    Head::Version,
+    Head::Skills,
+    Head::Context,
+    Head::Config,
+    Head::Agent,
+    Head::Export,
     Head::Resume,
     Head::Older,
     Head::Fold,
@@ -54,6 +74,10 @@ const TUI: &[Head] = &[
 
 /// 行模式 repl：`background` / `editor` / `chat` 只回一句「只在全屏可用」，
 /// 不算有 handler，故不收。
+///
+/// `version` 收：版本号是本进程的编译期常量，不需要 serve，也不需要全屏 UI。
+/// 其余新增命令（`skills` / `context` / `config` / `agent` / `export`）在 repl 里
+/// 只回一句「只在全屏 tui 里可用」，同样不算 handler。
 const REPL: &[Head] = &[
     Head::Quit,
     Head::Help,
@@ -65,6 +89,7 @@ const REPL: &[Head] = &[
     Head::Workspace,
     Head::Resume,
     Head::Conv,
+    Head::Version,
 ];
 
 /// 某一端支持的共享 head（顺序即文档展示顺序，不参与判定）。
@@ -115,11 +140,21 @@ mod tests {
 
     #[test]
     fn desktop_only_has_command_forms_it_actually_implements() {
-        // 这三条是 Web 真正写过分派的共享命令；`mode` / `role` / `perm` / `status`
+        // 这九条是 Web 真正写过分派的共享命令；`mode` / `role` / `perm` / `status`
         // 在 Web 只有 UI 入口，不能出现在表里（否则会被拦下来却没有 handler）。
         assert_eq!(
             supported(Surface::Desktop),
-            &[Head::Help, Head::Workspace, Head::Model]
+            &[
+                Head::Help,
+                Head::Workspace,
+                Head::Model,
+                Head::Version,
+                Head::Skills,
+                Head::Context,
+                Head::Config,
+                Head::Agent,
+                Head::Export,
+            ]
         );
         for ui_only in [
             Head::Mode,

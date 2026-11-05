@@ -25,18 +25,19 @@ use crate::session_ops::{
 };
 use crate::storage::StoredMessage;
 
-/// Web 端**独占**的斜杠 head（TUI 没有 handler，故不在 `slash_heads` 里）。
+/// Web 端**真正独占**的斜杠 head（TUI 没有 handler，故不在 `slash_heads` 里）。
+///
+/// 只剩三条界面级的：`/api-base` 与 `/api-key` 改的是浏览器 / 壳的本机设置，
+/// `/clear` 清的是这段 Web transcript（不碰服务端会话）—— 它们在 TUI 没有等价落点。
+///
+/// `version` / `skills` / `context` / `config` / `agent` / `export` 曾在这张表里，
+/// issue #444 之后三端都有 handler，已升级为共享 `Head`（查 `slash_caps`）：
+/// 留着就是第二份名单，`/version` 那种「能敲但 help 不写」的漂移会再来一次。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum WebOnly {
-    Agent,
-    Export,
-    Config,
     ApiBase,
-    Context,
     Clear,
     ApiKey,
-    Skills,
-    Version,
 }
 
 /// `/<head>` 的 head（去 `/`、取首词、小写）。不是 `/` 开头返回 `None`。
@@ -50,16 +51,10 @@ fn slash_head(trimmed: &str) -> Option<String> {
 
 fn web_only_head(raw: &str) -> Option<WebOnly> {
     Some(match raw {
-        "agent" => WebOnly::Agent,
-        "export" => WebOnly::Export,
-        "config" => WebOnly::Config,
         // `apibase` / `apikey` 是无连字符的肌肉记忆写法，与带连字符的一样收。
         "api-base" | "apibase" => WebOnly::ApiBase,
-        "context" => WebOnly::Context,
         "clear" => WebOnly::Clear,
         "api-key" | "apikey" => WebOnly::ApiKey,
-        "skills" => WebOnly::Skills,
-        "version" => WebOnly::Version,
         _ => return None,
     })
 }
@@ -143,6 +138,18 @@ fn dispatch_shared(
         Head::Help => set_ok(ctx.chat, shell, HELP_TEXT),
         Head::Workspace => handle_workspace(args, shell, ctx.chat, loc),
         Head::Model => handle_model(args, shell, ctx.chat, loc),
+        // 曾放在 `WebOnly` 里的六条：三端都有 handler 之后归共享分派，
+        // 但实现一行没改 —— 变的只是「谁能进来」的判定来源。
+        Head::Version => set_ok(
+            ctx.chat,
+            shell,
+            format!("CrabMate Web · {}", env!("CARGO_PKG_VERSION")),
+        ),
+        Head::Skills => handle_skills(shell, ctx.chat, loc),
+        Head::Context => handle_context(shell, ctx.chat, loc),
+        Head::Config => handle_config(args, shell, ctx.chat, loc),
+        Head::Agent => handle_agent(args, shell, ctx),
+        Head::Export => handle_export(args, shell, ctx, loc),
         other => set_ok(
             ctx.chat,
             shell,
@@ -160,19 +167,9 @@ fn dispatch_web_only(
     loc: Locale,
 ) {
     match which {
-        WebOnly::Agent => handle_agent(args, shell, ctx),
-        WebOnly::Export => handle_export(args, shell, ctx, loc),
-        WebOnly::Config => handle_config(args, shell, ctx.chat, loc),
         WebOnly::ApiBase => handle_api_base(args, shell, ctx.chat, loc),
-        WebOnly::Context => handle_context(shell, ctx.chat, loc),
         WebOnly::Clear => handle_clear(shell, ctx),
         WebOnly::ApiKey => handle_api_key(args, shell, ctx.chat, loc),
-        WebOnly::Skills => handle_skills(shell, ctx.chat, loc),
-        WebOnly::Version => set_ok(
-            ctx.chat,
-            shell,
-            format!("CrabMate Web · {}", env!("CARGO_PKG_VERSION")),
-        ),
     }
 }
 
@@ -608,21 +605,17 @@ mod tests {
         }
     }
 
+    /// issue #444 之后这六条从「Web 独占」升级为共享 head：判定来源换了，
+    /// 「敲出来不发模型」的契约没变。
     #[test]
-    fn web_only_heads_are_intercepted() {
+    fn shared_info_heads_are_intercepted() {
         for line in [
-            "/agent",
-            "/export",
-            "/config",
-            "/api-base",
-            "/apibase",
-            "/context",
-            "/clear",
-            "/api-key",
-            "/apikey",
-            "/skills",
-            "/version",
+            "/agent", "/export", "/config", "/context", "/skills", "/version",
         ] {
+            assert!(is_web_control_slash(line), "{line} 是共享命令却没被拦截");
+        }
+        // 真正 Web 独占的三条（含无连字符的肌肉记忆写法）。
+        for line in ["/api-base", "/apibase", "/clear", "/api-key", "/apikey"] {
             assert!(is_web_control_slash(line), "{line} 是端独占命令却没被拦截");
         }
         // 大小写与前缀空白同样认（`slash_head` 负责归一）。

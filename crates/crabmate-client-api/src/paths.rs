@@ -33,6 +33,12 @@ pub const USER_DATA_LLM_OVERRIDES: &str = "/user-data/llm-overrides";
 /// TUI 只读写 `global_enabled` / `tool_timeout_secs` 两个标量，`servers` 原样回写：
 /// 条目里带 `env` / `headers` / `bearer` 这类机密，不在终端里编辑。
 pub const USER_DATA_MCP_SERVERS: &str = "/user-data/mcp-servers";
+/// serve 配置热重载（`POST`，空 JSON 体；tui / frontend）。
+///
+/// 与 serve REPL 的 `/config reload` 同源：重读磁盘配置并替换运行中的 `AgentConfig`。
+/// **这不改客户端任何本地状态** —— 客户端的 model / mode / role override 仍在
+/// `client_llm` 与请求体里，重载只让 serve 侧的事实（默认模型、工具开关等）跟上磁盘。
+pub const CONFIG_RELOAD: &str = "/config/reload";
 /// 会话存储配置（frontend）。
 pub const CONFIG_SESSION_CONVERSATION_STORE: &str = "/config/session/conversation-store";
 /// 可调用的 skill 目录（tui / frontend）。
@@ -128,8 +134,8 @@ pub fn permission(agent_role: Option<&str>, conversation_id: Option<&str>) -> St
 #[cfg(test)]
 mod tests {
     use super::{
-        CHAT_STREAM, CONVERSATION_STATE, HEALTH, SKILLS, WORKSPACE, chat_stream_cancel,
-        conversation_delete, conversation_messages, permission,
+        CHAT_STREAM, CONFIG_RELOAD, CONVERSATION_STATE, HEALTH, SKILLS, WORKSPACE,
+        chat_stream_cancel, conversation_delete, conversation_messages, permission,
     };
 
     #[test]
@@ -138,6 +144,7 @@ mod tests {
         assert_eq!(CHAT_STREAM, "/chat/stream");
         assert_eq!(WORKSPACE, "/workspace");
         assert_eq!(SKILLS, "/skills");
+        assert_eq!(CONFIG_RELOAD, "/config/reload");
         // 写入口与只读投影是两个端点：拼错就变成 GET 该路径，404 会被当成「老 serve」。
         assert_eq!(CONVERSATION_STATE, "/conversation/state");
         assert_ne!(CONVERSATION_STATE, super::PERMISSION);

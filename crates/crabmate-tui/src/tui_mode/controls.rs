@@ -71,6 +71,35 @@ pub enum Control {
     /// 已经在聊天视图时只写一行说明 —— 命令成功过一次之后再执行它是无害的，
     /// 报错会让人怀疑自己是不是切错了地方。
     Chat,
+    /// 信息类命令（issue #444）：`/version` `/skills` `/context` `/config` `/agent`。
+    ///
+    /// 五条共用**一个**变体：它们都是「读已有状态、写几行」的动作，处理函数整体在
+    /// `info_cmd` 里。若各占一个变体，`apply_control` 要多五行（`mod.rs` 有 920 行门禁），
+    /// 而事件循环那层其实只关心「这条要交给 info 处理」。
+    Info(InfoCmd),
+}
+
+/// [`Control::Info`] 的载荷（issue #444）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InfoCmd {
+    /// `/version`：本进程版本号（编译期常量，**不请求 serve**）。
+    ///
+    /// 与 `/status` 分工：那个回答「serve 是什么」，这个回答「我是什么版本」。
+    Version,
+    /// `/skills`：列出 serve 侧已发现的 skill（id + 描述）。
+    ///
+    /// 数据就是 `/` 补全菜单那份 `SkillsCache`：菜单已经拉过就直接印，
+    /// **不**为了一条命令再打一次 `GET /skills`。
+    Skills,
+    /// `/context`：上下文用量明细（与状态行 `ctx` 段、Desktop 用量页同口径）。
+    Context,
+    /// `/config reload`：让 serve 重读磁盘配置（`POST /config/reload`）。
+    /// 空参打用法 —— `/config` 猜不出用户想要什么，静默不做更糟。
+    Config(Option<String>),
+    /// `/agent [list]`：列可用 agent role（数据来自 `/status` 的 `agent_role_ids`）。
+    ///
+    /// 只做**只读列举**；设置走 `/role`，`set <id>` 这类写入口留在 Web。
+    Agent(Option<String>),
 }
 
 pub fn clear_word(arg: &str) -> bool {
@@ -156,6 +185,16 @@ pub fn parse_control(text: &str) -> Option<Control> {
         Head::Editor => Some(Control::Editor(arg_opt)),
         Head::Chat => Some(Control::Chat),
         Head::Conv => Some(parse_conv(arg_opt.as_deref())),
+        // `/export` 落到与 `/conv export` **同一个** `Control`：产物、投影、落盘报告都复用，
+        // 两条命令的差异只在入口。若给它单独一个 `Control`，两处渲染迟早走偏。
+        Head::Export => Some(Control::ConvExport(crate::conv_export::parse_args(
+            arg_opt.as_deref().unwrap_or(""),
+        ))),
+        Head::Version => Some(Control::Info(InfoCmd::Version)),
+        Head::Skills => Some(Control::Info(InfoCmd::Skills)),
+        Head::Context => Some(Control::Info(InfoCmd::Context)),
+        Head::Config => Some(Control::Info(InfoCmd::Config(arg_opt))),
+        Head::Agent => Some(Control::Info(InfoCmd::Agent(arg_opt))),
     }
 }
 
@@ -197,6 +236,45 @@ pub fn conv_unknown_message(arg: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// issue #444 的五条信息命令（`/export` 别名见下一条测试）。
+    #[test]
+    fn info_commands_parse() {
+        let info = |line: &str| match parse_control(line) {
+            Some(Control::Info(cmd)) => Some(cmd),
+            _ => None,
+        };
+        assert_eq!(info("/version"), Some(InfoCmd::Version));
+        assert_eq!(info("/skills"), Some(InfoCmd::Skills));
+        // `ctx` 是状态行里的既有缩写，认它不必再解释。
+        assert_eq!(info("/ctx"), Some(InfoCmd::Context));
+        assert_eq!(
+            info("/config reload"),
+            Some(InfoCmd::Config(Some("reload".into())))
+        );
+        assert_eq!(info("/config"), Some(InfoCmd::Config(None)));
+        assert_eq!(info("/agent"), Some(InfoCmd::Agent(None)));
+        assert_eq!(
+            info("/agent list"),
+            Some(InfoCmd::Agent(Some("list".into())))
+        );
+    }
+
+    /// `/export` 与 `/conv export` 必须**落到同一个 `Control`**：产物、投影、用法错误
+    /// 都只有一份实现，两条入口的差别只在字面量。
+    #[test]
+    fn export_and_conv_export_share_one_parser() {
+        for args in ["", "markdown", "--out /tmp/x.md", "--id c1", "bogus"] {
+            let direct = parse_control(&format!("/export {args}"));
+            let nested = parse_control(&format!("/conv export {args}"));
+            match (direct, nested) {
+                (Some(Control::ConvExport(a)), Some(Control::ConvExport(b))) => {
+                    assert_eq!(a, b, "参数 `{args}` 在两条入口下解析结果不一致");
+                }
+                _ => panic!("参数 `{args}` 没有落到 Control::ConvExport"),
+            }
+        }
+    }
 
     #[test]
     fn parse_control_known_slashes() {

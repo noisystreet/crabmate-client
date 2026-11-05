@@ -8,7 +8,8 @@ use crabmate_client_api::chat_body::llm_context_tokens_for_chat_body;
 use crabmate_client_api::context_axis::ContextUsedWatermark;
 use crabmate_client_api::context_axis::{
     ContextAxis, context_axis_apply_watermark, context_axis_from_snapshot, context_axis_used_pct,
-    context_axis_whole, context_placeholder_text, context_value_text,
+    context_axis_whole, context_placeholder_text, context_value_text, format_compact_cap_tokens,
+    format_compact_tokens,
 };
 use crabmate_client_api::prompt_tokens::TiktokenPromptTokensSnapshot;
 
@@ -108,6 +109,56 @@ impl UiState {
             "{prefix}{:.0}%",
             context_axis_used_pct(axis).min(999.0)
         ))
+    }
+
+    /// `/context` 的明细行：把状态行 `ctx` 段那一个数字拆开。
+    ///
+    /// 与 [`Self::context_text`] 共用同一条轴线（私有 `context_axis`），所以命令里的用量
+    /// 与状态栏 chip 永远一致 —— 两处各拼一遍正是 ADE 0005 要消灭的形态。
+    /// **恒返回非空**：没有实测时也说明「还没有实测」，空列表等于什么都没说。
+    #[must_use]
+    pub fn context_detail_lines(
+        &self,
+        cap_from_settings: Option<&str>,
+        new_session_baseline: Option<u32>,
+    ) -> Vec<String> {
+        let mut out = vec![format!(
+            "上下文用量：{}",
+            self.context_text(cap_from_settings, new_session_baseline)
+        )];
+        match self.context_axis(cap_from_settings, new_session_baseline) {
+            Some(axis) => {
+                out.push(format!(
+                    "used {} · 固定开销 {} · 上限 {}",
+                    format_compact_tokens(axis.used),
+                    format_compact_tokens(axis.fixed),
+                    format_compact_cap_tokens(axis.raw_cap)
+                ));
+                out.push(if axis.baseline_estimate {
+                    "来源：新会话还没有服务端实测，按 system 基线估算（文本带 ~）".to_string()
+                } else {
+                    "来源：服务端 tiktokenPromptTokens 实测".to_string()
+                });
+            }
+            None => out.push(
+                "来源：还没有 tiktokenPromptTokens 快照（发一轮，或等 /status 刷新）".to_string(),
+            ),
+        }
+        out.push(format!(
+            "分母：{}",
+            if settings_cap(cap_from_settings) > 0 {
+                "本机设置 context_tokens（优先于快照上限）"
+            } else {
+                "快照 max_input_tokens / 默认窗口"
+            }
+        ));
+        out.push(format!(
+            "会话：{}",
+            self.conversation_id
+                .as_deref()
+                .unwrap_or("未绑定（首轮结束才绑定；此时用 system 基线）")
+        ));
+        out
     }
 
     /// 把「本机设置上限 / 快照 / 会话水位」拼成一条轴线；`None` = 既没有实测也没有基线。

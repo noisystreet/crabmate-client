@@ -34,6 +34,7 @@ mod help;
 mod history;
 mod hotkeys;
 mod inbound;
+mod info_cmd;
 mod input_keys;
 mod lane_cmd;
 mod lane_list;
@@ -521,6 +522,7 @@ impl LaneApp<'_> {
                 self.st.push_line(LineKind::System, "正在刷新 serve 状态…");
             }
             Control::Settings => self.open_settings(),
+            Control::Info(cmd) => self.apply_info_control(cmd),
             other @ (Control::ConvNew
             | Control::ConvRefresh
             | Control::ConvUse(_)
@@ -821,6 +823,7 @@ impl LaneApp<'_> {
             UiEvent::SavedStore(result) => self.on_settings_saved_store(result),
             UiEvent::SavedMcp(result) => self.on_settings_saved_mcp(result),
             UiEvent::SaveInterrupted => self.on_settings_save_interrupted(),
+            UiEvent::ConfigReloaded(result) => self.on_config_reloaded(result),
         }
     }
 

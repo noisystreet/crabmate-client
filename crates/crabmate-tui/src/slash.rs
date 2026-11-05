@@ -9,39 +9,41 @@ use crate::serve::{
 };
 use anyhow::Result;
 use crabmate_client_api::chat_export::{ExportFormat, export_messages};
+use crabmate_client_api::paths;
+use crabmate_client_api::slash_caps::{self, Surface};
 use crabmate_client_api::slash_heads::{self, Head};
-use crabmate_client_api::{paths, slash};
 use serde_json::Value;
 
 /// 是否为本端控制斜杠（应拦截，不发送给模型）。
 #[must_use]
 pub fn is_control_slash(trimmed: &str) -> bool {
-    let Some(head) = slash_head(trimmed) else {
+    let Some(raw) = slash_head(trimmed) else {
         return false;
     };
-    matches!(
-        head.as_str(),
-        slash::HELP
-            | slash::HELP_Q
-            | slash::WORKSPACE
-            | slash::CD
-            | slash::CONV
-            | slash::STATUS
-            | slash::MODE
-            | slash::ROLE
-            | slash::PERM
-            | slash::QUIT
-            | slash::QUIT_EXIT
-            | slash::QUIT_Q
-            // `/background` 只对全屏 tui 有意义；repl 里也拦住，免得被当成普通消息发给模型。
-            | "background"
-            | "bg"
-            // 同理：`/editor` / `/chat` 切的是全屏 tui 的主视图，repl 里没有可切的东西。
-            | "editor"
-            | "view"
-            | "chat"
-    )
+    let Some(head) = slash_heads::head_of(&raw) else {
+        return false;
+    };
+    // 「这一端做不做」查能力表；只在全屏有意义的那几条不在表里，但**必须拦下来回一句
+    // 提示** —— 发给模型比多按一次键更糟。
+    slash_caps::supports(Surface::Repl, head) || FULL_SCREEN_ONLY.contains(&head)
 }
+
+/// repl 里没有 handler、但要拦下来回一句「只在全屏 tui 里可用」的 head。
+///
+/// 拦截集**大于** handler 集是刻意的（`slash_caps::supported(Surface::Repl)` 只描述
+/// 「有 handler」）。这里用枚举而不是字符串名单：别名（`/bg` `/view` …）由 `head_of`
+/// 归一，新增别名不必再改这里。
+const FULL_SCREEN_ONLY: &[Head] = &[
+    Head::Background,
+    Head::Editor,
+    Head::Chat,
+    // issue #444 新增命令里只有 `/version` 在 repl 有 handler，其余都在全屏里才有落点。
+    Head::Skills,
+    Head::Context,
+    Head::Config,
+    Head::Agent,
+    Head::Export,
+];
 
 /// repl 的**前置层**拦截：这几个命令要拿 `SessionPrefs` / 断点状态，走不到
 /// [`handle_control_slash`]（那里只有 serve 请求与打印）。
@@ -70,44 +72,67 @@ pub async fn handle_control_slash(
     conversation_id: &mut Option<String>,
 ) -> Result<bool> {
     let parts: Vec<&str> = line.split_whitespace().collect();
-    let head = slash_head(line).unwrap_or_default();
+    let head = slash_head(line).and_then(|h| slash_heads::head_of(&h));
     let args: Vec<&str> = parts.into_iter().skip(1).collect();
-    match head.as_str() {
-        slash::QUIT | slash::QUIT_EXIT | slash::QUIT_Q => Ok(false),
-        slash::HELP | slash::HELP_Q => {
+    match head {
+        Some(Head::Quit) => Ok(false),
+        Some(Head::Help) => {
             print_help();
             Ok(true)
         }
-        slash::STATUS => {
+        Some(Head::Version) => {
+            print_version();
+            Ok(true)
+        }
+        Some(Head::Status) => {
             handle_status(client).await?;
             Ok(true)
         }
-        slash::WORKSPACE | slash::CD => {
+        Some(Head::Workspace) => {
             handle_workspace(client, &args, conversation_id).await?;
             Ok(true)
         }
-        slash::CONV => {
+        Some(Head::Conv) => {
             handle_conv(client, &args, conversation_id).await?;
             Ok(true)
         }
         // 只对全屏 tui 有意义：给明确提示，别落进下面的 "unknown"。
-        "background" | "bg" => {
-            eprintln!(
-                "/background 只在全屏 tui 里可用：`crabmate-tui tui` 后执行 /background <图片路径>（off 关闭）"
-            );
+        Some(head) if FULL_SCREEN_ONLY.contains(&head) => {
+            eprintln!("{}", full_screen_only_hint(head));
             Ok(true)
         }
-        "editor" | "view" | "chat" => {
-            eprintln!(
-                "/editor 与 /chat 只在全屏 tui 里可用：`crabmate-tui tui` 后执行（前者打开只读文件视图，后者切回聊天）"
-            );
-            Ok(true)
-        }
+        // 兜底：真的是斜杠但本层不认（`/model` `/mode` `/role` `/perm` `/resume`
+        // 已被前置层拿走，正常不会到这里）。
         other => {
-            eprintln!("unknown control slash /{other}; try /help");
+            let shown =
+                other.map_or_else(|| line.trim().to_string(), |h| format!("/{}", h.as_str()));
+            eprintln!("unknown control slash {shown}; try /help");
             Ok(true)
         }
     }
+}
+
+/// 只在全屏 tui 里有落点的命令，回一句「去哪儿用」而不是「不认识」。
+///
+/// 「unknown control slash」会让人以为自己拼错了；这些命令拼得没错，只是端不对。
+fn full_screen_only_hint(head: Head) -> String {
+    let name = head.as_str();
+    match head {
+        Head::Background => format!(
+            "/{name} 只在全屏 tui 里可用：`crabmate-tui tui` 后执行 /background <图片路径>（off 关闭）"
+        ),
+        Head::Editor | Head::Chat => format!(
+            "/{name} 只在全屏 tui 里可用：`crabmate-tui tui` 后执行（/editor 打开只读文件视图，/chat 切回聊天）"
+        ),
+        _ => format!(
+            "/{name} 只在全屏 tui 里可用：`crabmate-tui tui` 后执行（repl 支持哪些控制命令见 /help）"
+        ),
+    }
+}
+
+/// `/version`：本进程版本号（编译期常量，不发请求）。
+fn print_version() {
+    println!("crabmate-tui {}", env!("CARGO_PKG_VERSION"));
 }
 
 /// `GET /status?view=shell`：打印 serve 当前模型 / 端点 / 会话模式等。
@@ -157,6 +182,7 @@ fn print_help() {
     eprintln!(
         "control slashes (not sent to the model):\n\
   /help                 this text\n\
+  /version              crabmate-tui version (local build; not requested from serve)\n\
   /status               show serve model / endpoint / session mode (GET /status)\n\
   /model [name]         set client-side model override for later turns (off to clear)\n\
   /mode ask|plan|act    set session mode for later turns (off to clear)\n\
@@ -464,6 +490,18 @@ mod tests {
         assert!(!is_control_slash("/btw why"));
         assert!(!is_control_slash("/my-skill"));
         assert!(!is_control_slash("hello"));
+        // issue #444：`/version` 在 repl 有 handler；其余新增命令没有，但必须拦住
+        // 回一句「只在全屏 tui 里可用」—— 发给模型比多按一次键更糟。
+        assert!(is_control_slash("/version"));
+        for line in [
+            "/skills",
+            "/ctx",
+            "/config reload",
+            "/agent list",
+            "/export",
+        ] {
+            assert!(is_control_slash(line), "{line} 在 repl 里应被拦下并提示");
+        }
     }
 
     /// repl 的 `/workspace` 载荷：清除词给空串（真去恢复默认根），普通路径原样透传。
