@@ -17,8 +17,11 @@ use crate::api::{
     post_workspace_set,
 };
 use crate::app::chat::handles::ComposerStreamShell;
+use crate::app::shell_runtime_context::try_chat_shell_ctx;
+use crate::app::status_permission_chip::{LevelOutcome, PermTarget, apply_permission_level};
+use crate::app::status_session_mode_seg::apply_session_mode_selection;
 use crate::chat_session_state::ChatSessionSignals;
-use crate::i18n::Locale;
+use crate::i18n::{self, Locale};
 use crate::session_ops::{
     export_session_json_for_id, export_session_markdown_for_id, make_message_id,
     message_created_ms, patch_active_session,
@@ -65,7 +68,8 @@ const HELP_TEXT: &str = "常用控制命令（不经模型）：\n\
 /help · /version · /workspace · /agent · /model\n\
 /api-base · /export · /config · /context\n\
 /skills · /clear · /api-key（密钥不进对话）\n\
-/model set <id> 存本机（TUI 的 /model 只在那个进程有效）；/clear 只清本屏，服务端历史还在";
+/model set <id> 存本机（TUI 的 /model 只在那个进程有效）；/clear 只清本屏，服务端历史还在\n\
+/mode ask|plan|act · /role <id> · /perm <level> · /status（与底栏同一组开关）";
 
 /// 是否为 Web 控制斜杠（应拦截，不发送给模型）。`/<skill-id>` 除外。
 ///
@@ -90,6 +94,10 @@ pub(super) struct WebSlashControlCtx {
     pub draft: RwSignal<String>,
     pub selected_agent_role: RwSignal<Option<String>>,
     pub agent_role_user_override: RwSignal<bool>,
+    /// 会话模式与「用户显式选过」标记：与底栏 Ask / Plan / Act 那组是**同一个**信号，
+    /// `/mode` 只是把同一件事写成命令形式（issue #444 PR-A）。
+    pub selected_session_mode: RwSignal<String>,
+    pub session_mode_user_override: RwSignal<bool>,
     pub apply_assistant_display_filters: RwSignal<bool>,
 }
 
@@ -139,6 +147,13 @@ fn dispatch_shared(
         Head::Help => set_ok(ctx.chat, shell, HELP_TEXT),
         Head::Workspace => handle_workspace(args, shell, ctx.chat, loc),
         Head::Model => handle_model(args, shell, ctx.chat, loc),
+        // issue #444 PR-A：这四条一直有 UI 入口，命令形式只是第二个入口 ——
+        // `/role` 归一到既有 `/agent set`、`/status` 归一到既有 `/config`（无参摘要），
+        // `/mode` / `/perm` 写的是状态栏那组同一信号。没有新增真相源。
+        Head::Mode => handle_mode(args, shell, ctx),
+        Head::Role => handle_role(args, shell, ctx),
+        Head::Perm => handle_perm(args, shell, ctx),
+        Head::Status => handle_status(shell, ctx),
         // 曾放在 `WebOnly` 里的六条：三端都有 handler 之后归共享分派，
         // 但实现一行没改 —— 变的只是「谁能进来」的判定来源。
         Head::Version => set_ok(
@@ -330,6 +345,131 @@ fn handle_export(args: &[&str], shell: &ComposerStreamShell, ctx: WebSlashContro
         }
         _ => set_ok(ctx.chat, shell, "用法: /export [json|markdown|both]"),
     }
+}
+
+/// `/mode [ask|plan|act]`：与底栏 mode 段同一条写入路径。
+///
+/// 它自己会往会话里写一条 system 提示，所以这里**不再补一句**（两条会重复）。
+/// 空参只显示当前档；`off` 不做 —— Web 的默认档来自服务端 prefs，清 override 得先
+/// 重新拉一次才算「恢复默认」，那是设置页的活，命令层不假装支持。
+fn handle_mode(args: &[&str], shell: &ComposerStreamShell, ctx: WebSlashControlCtx) {
+    let cur = ctx.selected_session_mode.get_untracked();
+    let Some(mode) = args
+        .first()
+        .copied()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    else {
+        set_ok(
+            ctx.chat,
+            shell,
+            format!("当前 mode={cur}（/mode ask|plan|act 切换；恢复默认用设置页）"),
+        );
+        return;
+    };
+    if !apply_session_mode_selection(
+        ctx.chat,
+        ctx.selected_session_mode,
+        ctx.session_mode_user_override,
+        ctx.locale.get_untracked(),
+        mode,
+    ) {
+        set_ok(
+            ctx.chat,
+            shell,
+            "用法: /mode ask|plan|act（恢复默认用设置页）",
+        );
+    }
+}
+
+/// `/role <id>`：`/agent set <id>` 的别名 —— 同一个写路径、同一句提示。
+fn handle_role(args: &[&str], shell: &ComposerStreamShell, ctx: WebSlashControlCtx) {
+    let Some(id) = args
+        .first()
+        .copied()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    else {
+        set_ok(
+            ctx.chat,
+            shell,
+            "用法: /role <id>（列表见 /agent list；default 清除）",
+        );
+        return;
+    };
+    handle_agent(&["set", id], shell, ctx);
+}
+
+/// `/perm [level]`：与底栏权限 chip 同一份守卫与落盘（`apply_permission_level`）。
+///
+/// 回合进行中会被同一条守卫拒绝且**不改意图** —— 命令形式不该比点选宽松。
+fn handle_perm(args: &[&str], shell: &ComposerStreamShell, ctx: WebSlashControlCtx) {
+    let loc = ctx.locale.get_untracked();
+    let level = args
+        .first()
+        .copied()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let Some(shell_ctx) = try_chat_shell_ctx() else {
+        set_ok(ctx.chat, shell, "/perm 需要聊天壳层上下文：请在应用内使用");
+        return;
+    };
+    let Some(level) = level else {
+        let cur = shell_ctx.selected_permission_level.get_untracked();
+        let shown = cur.unwrap_or_else(|| "（未选择，按 serve 生效档）".to_string());
+        set_ok(
+            ctx.chat,
+            shell,
+            format!("当前权限意图: {shown}（/perm <level> 切换）"),
+        );
+        return;
+    };
+    shell.stream.status_err.set(None);
+    let chat = ctx.chat;
+    apply_permission_level(
+        level,
+        PermTarget {
+            selected: shell_ctx.selected_permission_level,
+            owner: shell_ctx.permission_intent_owner,
+            chat: Some(chat),
+            turn_in_flight: Some(shell_ctx.perm_turn_in_flight),
+            // 命令层不维护 chip 那份「丢弃过期响应」的代次：连打两次时后一次本来就该赢。
+            generation: None,
+        },
+        loc,
+        move |outcome| push_control_slash_notice(chat, perm_outcome_text(outcome, loc)),
+    );
+}
+
+/// `/perm` 的落点：把与 chip 相同的那份 [`LevelOutcome`] 写成一行会话提示。
+fn perm_outcome_text(outcome: LevelOutcome, loc: Locale) -> String {
+    match outcome {
+        LevelOutcome::Applied(view) => format!("权限等级已写入：{}", view.level),
+        LevelOutcome::IntentOnly => i18n::settings_permission_send_to_apply(loc).to_string(),
+        LevelOutcome::UnknownLevel => i18n::settings_permission_unknown_level(loc).to_string(),
+        LevelOutcome::TurnRunning => i18n::settings_permission_turn_running(loc).to_string(),
+        LevelOutcome::ConversationGone => {
+            i18n::settings_permission_conversation_gone(loc).to_string()
+        }
+        LevelOutcome::Unsupported => i18n::settings_permission_unsupported(loc).to_string(),
+        LevelOutcome::WriteFailed { status, code } => {
+            let base = if status == 500 {
+                i18n::settings_permission_write_retry(loc)
+            } else {
+                i18n::settings_permission_write_failed(loc)
+            };
+            let detail = code.unwrap_or_else(|| format!("HTTP {status}"));
+            format!("{base} ({detail})")
+        }
+        LevelOutcome::IoError(e) => {
+            format!("{} {e}", i18n::settings_permission_write_failed(loc))
+        }
+    }
+}
+
+/// `/status`：`/config`（无参）的别名 —— 同一份只读摘要，不是第二次读取。
+fn handle_status(shell: &ComposerStreamShell, ctx: WebSlashControlCtx) {
+    handle_config(&[], shell, ctx.chat, ctx.locale.get_untracked());
 }
 
 fn handle_config(
@@ -649,6 +789,10 @@ mod tests {
             "/api-key",
             "/skills",
             "/version",
+            "/mode",
+            "/role",
+            "/perm",
+            "/status",
         ] {
             assert!(HELP_TEXT.contains(name), "help 漏了 {name}");
         }

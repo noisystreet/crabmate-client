@@ -35,6 +35,9 @@ struct ComposerSendCtx {
     draft: RwSignal<String>,
     selected_agent_role: RwSignal<Option<String>>,
     agent_role_user_override: RwSignal<bool>,
+    /// `/mode` 与底栏 Ask / Plan / Act 写的是同一组信号（issue #444 PR-A）。
+    selected_session_mode: RwSignal<String>,
+    session_mode_user_override: RwSignal<bool>,
     apply_assistant_display_filters: RwSignal<bool>,
 }
 
@@ -56,6 +59,8 @@ fn web_slash_intercepts_send(
         draft,
         selected_agent_role,
         agent_role_user_override,
+        selected_session_mode,
+        session_mode_user_override,
         apply_assistant_display_filters,
     } = ctx;
     imgs_empty
@@ -68,6 +73,8 @@ fn web_slash_intercepts_send(
                 draft,
                 selected_agent_role,
                 agent_role_user_override,
+                selected_session_mode,
+                session_mode_user_override,
                 apply_assistant_display_filters,
             },
         )
@@ -100,6 +107,8 @@ pub(crate) fn wire_chat_composer_streams(args: WireComposerStreamsArgs) -> ChatC
         draft,
         selected_agent_role,
         agent_role_user_override,
+        selected_session_mode,
+        session_mode_user_override,
         apply_assistant_display_filters,
     };
 
