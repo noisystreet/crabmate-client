@@ -46,6 +46,14 @@ Desktop 做不到同样的形状，因为业务 UI 的状态是 **12 个 `thread
 | `register_connection(api_base, display_name?)` | 每个窗口自报 | 把自己放进名单（否则 main 永远缺席） |
 | `focus_connection(key)` | 前端列表点击 | 切到某窗口 |
 
+**建完窗要导航到包内业务 UI（`index.html` + hash 交接），那个地址必须从
+`crabmate_connect::connect_home_url()` 派生** —— 连接页（`connect_remote`）走的是同一个函数，
+两条路因此共用一个 Origin。**不要手写 Origin 字面量**：包内页在 Linux / macOS 是
+`tauri://localhost`，`http://tauri.localhost` 只是 Windows / Android 上 wry 给 http(s) 注册出
+处理器的形式。写错的症状特别轻 —— `navigate()` 照样返回 `Ok`，load 在**异步**阶段失败，
+窗口里只剩底色，用户看到的就是「开了个空窗口」（#455 的左栏「连接」按钮踩过这条，修法见
+`crabmate_connect::default_connect_home`）。
+
 另两条是**本窗口自报读数**，壳不猜（左栏那行画的就是它们）：
 
 | 命令 | 谁调 | 作用 |
@@ -236,3 +244,71 @@ TUI 在左栏下半画 lane 区（`tui_multi_server.md` §4.6），Desktop 现�
 | 判据 | `authority`（`host:port`）相等且不是自己。尾斜杠、scheme 大小写因此不算不同 |
 | 空基址 | 一律不算命中：占位条目（建窗后、连上之前）的 `authority` 就是空的 |
 | 依赖方向 | 注册表在 `desktop-tauri`、命令在 `crabmate-connect`，方向是 desktop → connect，所以**不能反向引用**。`ExistingConnectionProbe` 是一个闭包壳（`crates/crabmate-connect/src/existing_connection.rs`），壳在 `setup` 里 `manage` 一份；命令取不到该 state（浏览器 / Android / 老壳）就当作无冲突——那些壳本来只有一条连接 |
+
+## 14. 左栏的「可连实例」分组与行内按钮（#455）
+
+第 13 节那排行只画**已经连上的窗口**。这一节补另一半：控制面里**声明过、还没连**的实例也进
+同一个左栏，并给每条行一个明确动作。
+
+| 分组 | 数据源 | 行内动作 |
+|---|---|---|
+| 连接（已连窗口） | `ConnectionRegistry`（`list_connections` + `connections_changed`） | 点击切窗口；非本窗口的行有「关闭」 |
+| 可连实例 | `ctl_list_instances`（只读 unix socket） | `ready` 且带基址的行有「连接」；其余只显示状态 |
+
+### 14.1 为什么壳侧再写一份 socket IO
+
+`crabmate-client-api` 是纯度层（不许 IO，见该 crate 的 `ctl.rs` 头注释），而 TUI 那份传输在
+`crates/crabmate-tui/src/serve/ctl.rs` —— 依赖方向不允许 desktop → tui。所以
+`desktop-tauri/src-tauri/src/desktop_ctl.rs` 自己拥有连接 / 超时 / 读一行；**协议形状与
+`observed` 词表仍然只有一份**（client-api 的 `ctl`）。
+
+只做 `list`：`add` / `remove` / `enable`·`disable` 会写 `instances.toml`，而
+`crabmatectl --watch` 已经是那个文件的写者。少一条连接由关窗口完成，不靠摘声明。
+
+### 14.2 四种结果，不是一个布尔
+
+`observed` 是七值枚举（`CtlObserved`），界面把它们收成三支 + 一处剔除：
+
+| 条件 | 渲染 |
+|---|---|
+| `ready` 且带 `base_url` | 可点「连接」（走既有 `open_connection`） |
+| `starting` | 「启动中」，无按钮 |
+| 其余（`failed` / `stopped` / `stale` / `held` / 缺失 / 未知） | 「不可连（原因）」，原因取服务端 `last_error`，其次 `observed` 原文 |
+| `enabled == false`，或已在某个窗口里连着 | **不渲染** |
+
+判据用 `CtlInstance::can_connect()`（只认 `ready`），**不看** `state` —— `stale` 是「记录说在跑
+但连不上」，信它会连到死端口（与 TUI `/ctl` 同一条规则）。`ready` 但缺 `base_url` 的实例落
+「不可连」而不是给一个点不动的按钮：没基址就开不了窗。
+
+### 14.3 这份列表是查询，不是订阅
+
+ctl 那条通道一问一答，没有推送。所以 `starting` 的实例**不会自己**变成 `ready`：分组标题右侧
+的「⟳」重发一次 `list`。没有它，一行「启动中」会永远停在那里，看起来像卡死。
+
+### 14.4 「关闭」就是「断开」
+
+多窗口路线下一条连接就是一个窗口，关窗即注销（§9）。所以行内按钮叫「关闭」而不是「断开」：
+不存在「窗口还在、连接没了」的状态。要那个状态得新增壳命令并处理 Bearer 槽 /
+`AllowedServeOrigin` / SSE 取消 / 前端状态回滚 —— 见 §12 与 #455 的非目标。
+
+本窗口那一行**不给**关闭按钮：关掉自己等于退出应用，那是标题栏 × 的事。
+
+### 14.5 覆盖边界（别在 UI 里承诺「所有」）
+
+能列出的是**已连窗口 + ctl 声明过的实例**。手工 `crabmate serve` 且从未进 ctl 的看不到
+—— 那需要 `include_unmanaged: true`，本实现沿用 TUI 的 `false`。
+
+### 14.6 尚未验证的部分
+
+本节的渲染与状态判定由单测覆盖（`ctl_rows_for_rail` 六条测试：ready / 缺基址 / starting 与
+failed 带原因 / stale 但 state 说 running / closed 声明 / 已连去重），`frontend` 与
+`desktop-tauri` 均 `cargo check` / `clippy -D warnings` 通过。**未在真实 `crabmatectl` 下跑过
+界面**：这台机器没有 `crabmatectl`，也没有图形会话，所以冒烟步骤见下。
+
+### 14.7 冒烟步骤（接着 §11 编号）
+
+8. 启动 `crabmatectl supervise --socket` 并声明一个实例，等它 `ready`。
+9. 开 Desktop：左栏「连接」区应出现第二个分组「可连实例」，那行右侧有「连接」。
+10. 点「连接」→ 新窗口连上该实例；左栏该行**消失**（它已在上半组）。
+11. 在任一非本窗口的行上点「×」→ 那个窗口关闭、行消失，本窗口不受影响。
+12. 把实例停掉后点「⟳」→ 该行变成「不可连（原因）」。

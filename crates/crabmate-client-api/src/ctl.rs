@@ -16,7 +16,7 @@
 //! 3. **认不出的值一律不猜**：未知 `observed` / 未知 `code` 各自落 `Unknown` / `Other`，
 //!    而不是折进某个已知分支。
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::messages::top_level_error_code;
@@ -182,7 +182,10 @@ impl CtlObserved {
 /// `list` 响应里的一条实例。字段全部可选：Server 可能新增字段，客户端不得因此解析失败。
 ///
 /// 刻意**不加** `deny_unknown_fields`：加字段是兼容变更，客户端必须容忍。
-#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+///
+/// `Serialize` 是给壳用的：Desktop 的 `ctl_list_instances` 直接把它回给前端
+/// （WASM 侧反序列化回同一个类型，再调 [`CtlInstance::can_connect`]），形状只留这一处。
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub struct CtlInstance {
     /// 实例名（`instances.toml` 的键）。
     pub name: String,

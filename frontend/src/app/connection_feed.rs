@@ -25,6 +25,7 @@
 use leptos::prelude::*;
 
 use crabmate_client_api::connections::ConnectionSnapshot;
+use crabmate_client_api::ctl::CtlInstance;
 
 /// 一条连接在左栏行上显示的名字；用户没起名时退回 `host:port`。
 ///
@@ -161,9 +162,64 @@ fn install_connections_feed(feed: ArcRwSignal<Vec<ConnectionSnapshot>>, api_base
     });
 }
 
+/// 控制面里**声明过的**实例（只读）。
+///
+/// 与 [`connection_feed`] 同一套「应用级 signal」的理由：它描述的是「本机有哪些 serve
+/// 可连」，不是某个组件自己的状态 —— 全局一份，左栏重挂载不重复拉取，也无需退订。
+///
+/// 数据来自壳的 `ctl_list_instances`（unix socket，见 `desktop_ctl.rs`）。壳把
+/// 「socket 不存在 / 连不上 / 超时」都收成空表，所以这里**没有错误态**：一块空分组
+/// 就是「本机现在没有可连实例」。
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn ctl_instances_feed() -> ArcRwSignal<Vec<CtlInstance>> {
+    thread_local! {
+        static FEED: std::cell::OnceCell<ArcRwSignal<Vec<CtlInstance>>> =
+            const { std::cell::OnceCell::new() };
+    }
+
+    FEED.with(|cell| {
+        cell.get_or_init(|| {
+            let feed = ArcRwSignal::new(Vec::new());
+            refresh_ctl_instances(feed.clone());
+            feed
+        })
+        .clone()
+    })
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn ctl_instances_feed() -> ArcRwSignal<Vec<CtlInstance>> {
+    ArcRwSignal::new(Vec::new())
+}
+
+/// 重新拉一次控制面列表。
+///
+/// 只读查询没有推送，`starting` 的实例不会自己变成 `ready` —— 左栏分组标题上的刷新
+/// 按钮就是它。解析失败保留上一份：一次坏帧不该把分组清空（与名单首帧同一条规则）。
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn refresh_ctl_instances(feed: ArcRwSignal<Vec<CtlInstance>>) {
+    wasm_bindgen_futures::spawn_local(async move {
+        if let Ok(json) = crate::tauri_shell::tauri_ctl_list_instances_json().await
+            && let Some(list) = parse_ctl_instances(&json)
+        {
+            feed.set(list);
+        }
+    });
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn refresh_ctl_instances(_: ArcRwSignal<Vec<CtlInstance>>) {}
+
+/// 壳回的 JSON → 实例列表。`None` = 「不知道」，空数组才是「没有」。
+#[cfg(any(target_arch = "wasm32", test))]
+#[must_use]
+fn parse_ctl_instances(json: &str) -> Option<Vec<CtlInstance>> {
+    serde_json::from_str::<Vec<CtlInstance>>(json).ok()
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{connection_display_name, parse_connection_list};
+    use super::{connection_display_name, parse_connection_list, parse_ctl_instances};
     use crabmate_client_api::connections::ConnectionSnapshot;
 
     #[test]
@@ -188,6 +244,30 @@ mod tests {
         snapshot.display_name = String::new();
         assert!(snapshot.display_name.is_empty());
         assert_eq!(connection_display_name(&snapshot), "a:1");
+    }
+
+    #[test]
+    fn a_ctl_frame_distinguishes_empty_from_broken() {
+        // 空数组 = 控制面里没有声明实例；坏 JSON = 不知道。与连接名单同一条规则。
+        assert_eq!(parse_ctl_instances("[]").map(|v| v.len()), Some(0));
+        assert!(parse_ctl_instances("not json").is_none());
+    }
+
+    #[test]
+    fn a_ctl_round_trip_keeps_the_fields_the_rail_reads() {
+        // 壳经 JSON 传回来，字段名由 serde 决定；这条测「壳写的名字 = 前端读的名字」。
+        let json = r#"[{
+            "name": "prod",
+            "observed": "ready",
+            "base_url": "http://127.0.0.1:8080",
+            "workspace": "/srv/app",
+            "enabled": true
+        }]"#;
+        let list = parse_ctl_instances(json).expect("should parse");
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].name, "prod");
+        // 判可连性走共享层的 `can_connect`（只认 ready），不是前端自己比字符串。
+        assert!(list[0].can_connect());
     }
 
     #[test]

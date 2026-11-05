@@ -397,6 +397,23 @@ pub(crate) fn focus_connection(app: AppHandle, key: String) -> Result<(), String
     Ok(())
 }
 
+/// 关掉一条连接窗口（`key` 恒等于 window label，见 `ConnectionKey` 的 doc）。
+///
+/// 左栏每行右侧的「关闭」用它。**这是「断开」在 Desktop 上的全部语义**：多窗口路线
+/// 下一条连接就是一个窗口，关窗即注销（`main.rs` 的 `Destroyed` 处理摘注册表并广播），
+/// 不存在「保留窗口但不连」的中间态 —— 那个状态还要处理 Bearer 槽、allowlist、SSE
+/// 取消与前端状态回滚，见 `docs/design/desktop_multi_window.md` §9 与 §14。
+///
+/// 调用方要自己排除「本窗口那一行」：关掉自己等于退出应用，而不是断开一条后台连接。
+#[tauri::command]
+pub(crate) fn close_connection(app: AppHandle, key: String) -> Result<(), String> {
+    let key = ConnectionKey::from_raw(&key);
+    let window = app
+        .get_webview_window(key.as_str())
+        .ok_or_else(|| format!("没有这个连接: {key}"))?;
+    window.close().map_err(|e| format!("关闭窗口失败: {e}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

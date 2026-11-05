@@ -28,7 +28,9 @@ mod commands;
 
 pub use allowed_origin::AllowedServeOrigin;
 pub use cleartext::enforce_cleartext_connect_policy;
-pub use connect_home::{SuggestedServerUrl, seed_connect_home};
+pub use connect_home::{
+    SuggestedServerUrl, connect_home_url, default_connect_home, seed_connect_home,
+};
 pub use existing_connection::{ExistingConnectionProbe, SameServeLookup};
 pub use handoff::{
     API_BASE_HASH_KEY, BEARER_HASH_KEY, build_handoff_url, build_local_ui_handoff_url,
