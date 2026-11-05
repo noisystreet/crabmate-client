@@ -8,14 +8,12 @@
 //! 不一致」留门（`/skills` 尤其明显：菜单刚刷掉的 skill 会在命令输出里复活）。
 
 use crabmate_client_api::slash_args::AgentSub;
+use crabmate_client_api::slash_render::{SkillRow, skill_lines};
 
 use super::LaneApp;
 use super::controls::InfoCmd;
 use super::state::LineKind;
 use super::worker::WorkerJob;
-
-/// `/skills` 最多印多少条（与 Web `/skills` 的上限一致）。
-const MAX_LISTED_SKILLS: usize = 24;
 
 impl LaneApp<'_> {
     /// `apply_control` 的唯一入口：事件循环只认 `Control::Info`，子命令分发留在这里。
@@ -73,24 +71,17 @@ impl LaneApp<'_> {
         if cache.skills.is_empty() {
             lines.push("当前未发现 skill（检查 serve 侧的 skills 目录）".to_string());
         } else {
-            lines.push(format!(
-                "skills {} 个（用 /<id> 调用）：",
-                cache.skills.len()
-            ));
-            for s in cache.skills.iter().take(MAX_LISTED_SKILLS) {
-                let desc = s.description.trim();
-                if desc.is_empty() {
-                    lines.push(format!("  /{}", s.id));
-                } else {
-                    lines.push(format!("  /{} — {}", s.id, desc));
-                }
-            }
-            if cache.skills.len() > MAX_LISTED_SKILLS {
-                lines.push(format!(
-                    "  …还有 {} 个（`/` 菜单里可以按前缀过滤）",
-                    cache.skills.len() - MAX_LISTED_SKILLS
-                ));
-            }
+            // 条目的排版（抬头 / 空描述不留破折号 / 截断尾行）在共享层，
+            // 与 Web `/skills` 逐字一致；只有「为什么是空的」这句留在这里。
+            let rows: Vec<SkillRow> = cache
+                .skills
+                .iter()
+                .map(|s| SkillRow {
+                    id: s.id.as_str(),
+                    description: s.description.as_str(),
+                })
+                .collect();
+            lines.extend(skill_lines(&rows));
         }
         self.push_lines(lines);
     }

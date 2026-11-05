@@ -13,6 +13,8 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Added
 
+- **Web `/skills` rendering now matches the TUI.** The two lists had drifted: a skill with an empty description printed as `/id — ` (dangling dash) on the Web, and the `…还有 N 个` truncation line existed only in the TUI. Both now call `crabmate_client_api::slash_render::skill_lines`, which also owns the `24`-item cap that used to be a literal in each surface. The Web header gains the `（用 /<id> 调用）` hint. Cost: one small module. No protocol change.
+
 - **Session mode words now have one home.** `ask` / `plan` / `act` had been hand-written in nine places — seven in the Web frontend, the TUI constant, plus one more inline `matches!` in the TUI CLI — so a new mode on the server would need nine edits. Missing one in a parser drops a legal value; missing one in a validator lets the user pick something that cannot be sent. `crabmate_client_api::session_mode::{SESSION_MODES, is_known_mode}` now owns the table. The check is byte-for-byte the old one (no trimming, no case folding), so there is no behavior change. Cost: one small module. No protocol change.
 
 - **Web `/agent ls` now lists roles instead of printing usage.** The TUI had always accepted `ls` as a synonym for `list`; the Web handler only matched `list`, so one command did two different things depending on the surface. The sub-command classification moved to `crabmate_client_api::slash_args::AgentSub`, which both ends now share (`List` / `Set(id)` / `SetMissingId` / `Unknown`), so a future sub-command can't drift this way. `SetMissingId` is kept distinct from `List` on purpose — merging them would make `/agent set` silently list roles. Cost: one small module in `crabmate-client-api`. No protocol change.

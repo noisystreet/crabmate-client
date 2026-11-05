@@ -87,6 +87,7 @@ frontend/                # wasm fetch 适配器 + UI；S1–S4 已用 client-api
 | `slash_caps` | 各端支持的共享 head 能力表（`Surface::Desktop` / `Tui` / `Repl`）；端独占命令不进表，端内拦截判定由它派生 |
 | `slash_menu` | `/` 补全菜单机制（触发判定 / `MenuItem` / 前缀过滤 / 内建优先 + skill 排序截断）；命令**文案**与 skill **来源**留端 |
 | `slash_args` | 斜杠命令的**参数解析**（`AgentSub`：`list` / `ls` / 空参归一，`set` 携带 id）；**只做分类**，怎么写 / 报什么错 / 发不发请求全留端 |
+| `slash_render` | 列表类命令的**行排版**（`SkillRow` + `skill_lines` → `Vec<String>`：抬头 / `  /id — 描述` / 空描述不留破折号 / 截断尾行 / 条数上限）；**空态文案留端** |
 | `messages` | HTTP 错误体通用取错（`error` → `message` → `HTTP {status}`），display 层不属契约；另含嵌套 `{"error":{"code":…}}` 的 `api_error_code`（按 code 分流的唯一入口） |
 | `conversation_state` | `POST /conversation/state` 的响应分类（写入成功 / 会话不存在 / 老 serve 无此路由 / 其它失败）+ 契约类型 re-export；不做等级比较、不算 min 链 |
 | `prompt_tokens`（S6a） | tiktoken 快照 DTO + camelCase/snake_case 双键解析（无 IO） |
@@ -172,6 +173,8 @@ GitHub：`X-CrabMate-GitHub-Token` 目前主要在 frontend（+ 壳钥匙串槽�
 **S5c（已落地）：能力表。** 「这一端认不认 `/mode`」原本是三份手抄名单（Web 拦截、Web 分派、TUI 菜单），`/version` 就是由此变成「能敲但 `/help` 不写」。现在 `crabmate_client_api::slash_caps` 按端给一次（`Surface::Desktop` / `Tui` / `Repl`），Web 的 `is_web_control_slash` 由它派生，端独占命令（`clear` / `api-base` / `api-key`）另走端内表。两侧都有测试夹：表中每条都必须「拦得住且能分派」，表外的共享 head 必须原样发给模型。**`is_control_slash` 的拦截集刻意大于 `Surface::Repl`**：它还接住 `/background` `/editor` `/chat` 只为了回一句「只在全屏可用」——拦与做是两件事。
 
 **S5d（已落地）：参数解析。** 机制三层落地后，handler 里的「子命令串 → 意图」仍是两份手写 `match`，而且已经漂了：`/agent ls` 只有 TUI 认（`info_cmd.rs` 的 `Some("list") | Some("ls")`），Web 的 `handle_agent` 只匹配 `"list"` —— 同一条命令在一端列角色、在另一端打「用法」。现在归一到 `crabmate_client_api::slash_args::AgentSub::parse`（`List` / `Set(id)` / `SetMissingId` / `Unknown(raw)`），两端 `match` 只留「怎么列」「怎么写」；`SetMissingId` 与 `List` 刻意分开，合并会让 `/agent set` 静默列出角色。同一批把 Web `/export` 手写的格式词表换成既有的 `chat_export::ExportFormat::parse`（`md` 别名与空串默认 `json` 都在那里）。**只收纯分类**：`/config` 没有一起收 —— 它空参在 TUI 是「用法」、在 Web 是「摘要」，那是设计差异而非重复实现，抹平等于改行为。
+
+**S5e（已落地）：列表行渲染。** `/skills` 的排版（抬头 / `  /id — 描述` / 空描述不留破折号 / 截断尾行 / 24 条上限）原先是两端各一份，并且已经漂了：Web 把空描述印成 `  /id — `（悬着分隔符），截断尾行则只有 TUI 有。现收进 `crabmate_client_api::slash_render`（`SkillRow` + `skill_lines` → `Vec<String>`）：输出 `Vec` 而非拼好的 `String`，TUI 的 `push_lines` 与 Web 的 `join("\n")` 各取所需，观感差异不受影响；`24` 这个上限也从两处字面量变成共享常量。**空态不进共享层** —— 两端对「为什么空」的解释不同（Web 带 serve 的 `skills_dir`，TUI 带 cache 里记下的错误串）。
 
 ### 4.7 Health 探测子集（已落地）
 
@@ -425,6 +428,7 @@ Web 的 `api_base_preset_select` 字符串链路（写入已保存模型预设�
 | **S9** ✅ | `workspace_rel`：`child_rel` / `parent_rel` 下沉；frontend `workspace_tree` 与 tui `tui_mode/workspace_tree` 改 `pub use` 转发（调用点零改动） | client-api 150 单测（含 5 个新增）；tui `workspace_tree` 既有断言通过；`wasm32` clippy；`check-boundaries.sh` ok |
 | **S10** ✅ | `client_llm_presets`：`PRESETS` + `select_id_for_url` / `index_for_url` / `display_id_for_url` 下沉；frontend `api_base_select_value_for_draft` 与 tui `API_BASE_PRESETS` / `gateway_pick_of` / `api_base_display` 改共享 | 两端表合一（删 TUI 第三处内联匹配与 Web 无消费的 `suggested_model`）；client-api 156 单测（含 11 个新增）；tui 623 全绿；`wasm32` clippy；`check-boundaries.sh` ok |
 | **S13** ✅ | `session_mode`：`SESSION_MODES` + `is_known_mode` 下沉；Web 七处内联 `matches!` 与 TUI 两处（常量 + CLI 校验）改共享 | client-api 新增 2 单测；frontend 762 / tui 1165 全绿；字面量零残留 |
+| **S14** ✅ | `slash_render`：`SkillRow` + `skill_lines` 下沉（`/skills` 抬头 / 条目 / 空描述 / 截断尾行 / 条数上限） | 5 个单测；TUI `cmd_skills` 与 Web `handle_skills` 同源；空态文案仍留端 |
 
 **建议开工顺序**：S0 → S1–S4 → S5a / S5 health → S5 slash / paths / messages（均已完成）→ **S6a → S6b → S6c → S6d**（均已完成；S6e 视 S6a–d 收益再定）→ **S7a**（已完成）→ **S8 / S9 / S10**（均已完成）→ S7b（需先拍板）。
 
