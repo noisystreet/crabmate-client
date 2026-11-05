@@ -37,20 +37,25 @@ struct SessionModeMenuPortalProps {
     menu_fixed_style: RwSignal<Option<String>>,
 }
 
-fn apply_session_mode_selection(
+/// 状态栏 mode 段与 `/mode` 共用的写入口。
+///
+/// 返回 `false` = 不是一个合法档位（调用方据此给用法提示，而不是静默吞掉 ——
+/// 静默正是「敲了没反应」的来源）。写成功后它自己往会话里写一条 system 提示，
+/// 所以 `/mode` 不必再补一句。
+pub(crate) fn apply_session_mode_selection(
     chat: ChatSessionSignals,
     selected_session_mode: RwSignal<String>,
     session_mode_user_override: RwSignal<bool>,
     locale: Locale,
     mode: &str,
-) {
+) -> bool {
     let mode = mode.trim().to_ascii_lowercase();
     if !matches!(mode.as_str(), "ask" | "plan" | "act") {
-        return;
+        return false;
     }
     if selected_session_mode.get_untracked() == mode {
         session_mode_user_override.set(true);
-        return;
+        return true;
     }
     selected_session_mode.set(mode.clone());
     session_mode_user_override.set(true);
@@ -72,6 +77,7 @@ fn apply_session_mode_selection(
             created_at: now,
         });
     });
+    true
 }
 
 fn menu_fixed_style_for_trigger(trigger: &web_sys::HtmlElement) -> String {

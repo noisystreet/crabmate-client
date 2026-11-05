@@ -164,38 +164,72 @@ fn wire_refresh_effect(sel: LevelSelect, locale: RwSignal<Locale>) {
     });
 }
 
-/// 点一个档位：写意图（含归属）→ 有会话则落盘 → 用结局刷新本 chip 或记一行提示。
-fn apply_level(level: &str, sel: LevelSelect) {
-    let loc = sel.locale.get_untracked();
+/// 写档位的结论。chip 写进自己的 `note` / `view`，斜杠命令写成一大会话提示 ——
+/// 两侧共用同一份判定，只是落点不同（`/perm` 不该有第二套守卫）。
+#[derive(Debug)]
+pub(crate) enum LevelOutcome {
+    /// 已写入意图且有已绑定会话，服务端回了新投影。
+    Applied(PermissionView),
+    /// 意图已记录，但没有已绑定会话：随下一条消息生效。
+    IntentOnly,
+    /// 词表里没有这个档（归一失败）。
+    UnknownLevel,
+    /// 回合进行中：拒绝，且**不改意图**。
+    TurnRunning,
+    /// 会话已不在。
+    ConversationGone,
+    /// 老 serve 没有该能力。
+    Unsupported,
+    /// 服务端写入失败。
+    WriteFailed { status: u16, code: Option<String> },
+    /// 传输层错误。
+    IoError(String),
+}
+
+/// 写档位所需的信号。chip 与 `/perm` 共用，避免两处各持副本。
+#[derive(Clone, Copy)]
+pub(crate) struct PermTarget {
+    pub selected: RwSignal<Option<String>>,
+    pub owner: RwSignal<Option<String>>,
+    pub chat: Option<ChatSessionSignals>,
+    /// `None` = 无壳层 ctx（单测 / Story），不做忙时守卫。
+    pub turn_in_flight: Option<Memo<bool>>,
+    /// 丢弃过期响应；`None` = 调用方不关心（斜杠命令）。
+    pub generation: Option<RwSignal<u32>>,
+}
+
+/// 点一个档位：写意图（含归属）→ 有会话则落盘 → 把结论交给 `done`。
+///
+/// 守卫顺序与 chip 点选一致：**先校验、再看回合**。回合中一律不换档（本轮 `/chat`
+/// 早已带着开跑时的档位发出去了，飞行中的工具不该在一轮内看到两个档位），
+/// 且**不改意图信号** —— 改了就会随下一轮 `/chat` 发出去，「被拒」于是变成
+/// 「悄悄延后生效」，而那正是 TUI 那个假中间态的 Desktop 版。
+pub(crate) fn apply_permission_level(
+    level: &str,
+    target: PermTarget,
+    loc: Locale,
+    done: impl Fn(LevelOutcome) + 'static,
+) {
     let Some(level) = normalize_level(level) else {
-        sel.note.set(Some(
-            i18n::settings_permission_unknown_level(loc).to_string(),
-        ));
+        done(LevelOutcome::UnknownLevel);
         return;
     };
-    // 回合进行中一律不换档（与 TUI `permission_intent::apply_permission_level` 同一条守卫）：
-    // 本轮 `/chat` 早已带着开跑时的档位发出去了，飞行中的工具不该在一轮内看到两个档位。
-    // **不改意图信号** —— 改了就会随下一轮 `/chat` 发出去，「被拒」于是变成
-    // 「悄悄延后生效」，而那正是 TUI 那个假中间态的 Desktop 版。
-    if sel.turn_in_flight.is_some_and(|m| m.get_untracked()) {
-        sel.note.set(Some(
-            i18n::settings_permission_turn_running(loc).to_string(),
-        ));
+    if target.turn_in_flight.is_some_and(|m| m.get_untracked()) {
+        done(LevelOutcome::TurnRunning);
         return;
     }
-    sel.selected.set(Some(level.to_string()));
-    sel.note.set(None);
+    target.selected.set(Some(level.to_string()));
     // 归属记在**选择这一刻**的会话上：之后切走就该清掉，而不是跟着跑到别的会话。
-    sel.owner.set(sel.chat.map(|c| c.active_id.get_untracked()));
-    let Some(chat) = sel.chat else {
+    target
+        .owner
+        .set(target.chat.map(|c| c.active_id.get_untracked()));
+    let Some(chat) = target.chat else {
+        done(LevelOutcome::IntentOnly);
         return;
     };
-    let cid = chat.session_sync.with(|s| s.stream_conversation_id());
-    let Some(cid) = cid else {
+    let Some(cid) = chat.session_sync.with(|s| s.stream_conversation_id()) else {
         // 没有已持久化会话：服务端不做 upsert，意图随下一条消息生效。
-        sel.note.set(Some(
-            i18n::settings_permission_send_to_apply(loc).to_string(),
-        ));
+        done(LevelOutcome::IntentOnly);
         return;
     };
     let patch = ConversationStatePatch {
@@ -205,44 +239,85 @@ fn apply_level(level: &str, sel: LevelSelect) {
         session_mode: None,
         agent_role: None,
     };
-    let mine = sel.generation.get_untracked().wrapping_add(1);
-    sel.generation.set(mine);
+    let mine = target.generation.map(|g| {
+        let m = g.get_untracked().wrapping_add(1);
+        g.set(m);
+        m
+    });
     spawn_local(async move {
         let outcome = post_conversation_state(&patch, loc).await;
-        if sel.generation.get_untracked() != mine {
+        let stale =
+            matches!((target.generation, mine), (Some(g), Some(m)) if g.get_untracked() != m);
+        if stale {
             return;
         }
-        match outcome {
-            Ok(ConversationStateOutcome::Ok(view)) => {
-                sel.note.set(None);
-                sel.view.set(Some(view.permission));
-            }
-            Ok(ConversationStateOutcome::NotFound) => {
-                sel.note.set(Some(
-                    i18n::settings_permission_conversation_gone(loc).to_string(),
-                ));
-            }
-            Ok(ConversationStateOutcome::Unsupported) => {
-                // 老 serve：连读都做不到，chip 本就不该显示；清空缓存让它消失。
-                sel.note
-                    .set(Some(i18n::settings_permission_unsupported(loc).to_string()));
-                sel.view.set(None);
-            }
+        done(match outcome {
+            Ok(ConversationStateOutcome::Ok(view)) => LevelOutcome::Applied(view.permission),
+            Ok(ConversationStateOutcome::NotFound) => LevelOutcome::ConversationGone,
+            Ok(ConversationStateOutcome::Unsupported) => LevelOutcome::Unsupported,
             Ok(ConversationStateOutcome::Failed { status, code }) => {
-                let base = if status == 500 {
-                    i18n::settings_permission_write_retry(loc)
-                } else {
-                    i18n::settings_permission_write_failed(loc)
-                };
-                let detail = code.unwrap_or_else(|| format!("HTTP {status}"));
-                sel.note.set(Some(format!("{base} ({detail})")));
+                LevelOutcome::WriteFailed { status, code }
             }
-            Err(e) => sel.note.set(Some(format!(
-                "{} {e}",
-                i18n::settings_permission_write_failed(loc)
-            ))),
-        }
+            Err(e) => LevelOutcome::IoError(e.to_string()),
+        });
     });
+}
+
+/// chip 的落点：结论写回自己的 `note` / `view`。
+fn apply_level(level: &str, sel: LevelSelect) {
+    let loc = sel.locale.get_untracked();
+    apply_permission_level(
+        level,
+        PermTarget {
+            selected: sel.selected,
+            owner: sel.owner,
+            chat: sel.chat,
+            turn_in_flight: sel.turn_in_flight,
+            generation: Some(sel.generation),
+        },
+        loc,
+        move |outcome| apply_level_note(sel, outcome, loc),
+    );
+}
+
+fn apply_level_note(sel: LevelSelect, outcome: LevelOutcome, loc: Locale) {
+    match outcome {
+        LevelOutcome::Applied(view) => {
+            sel.note.set(None);
+            sel.view.set(Some(view));
+        }
+        LevelOutcome::IntentOnly => sel.note.set(Some(
+            i18n::settings_permission_send_to_apply(loc).to_string(),
+        )),
+        LevelOutcome::UnknownLevel => sel.note.set(Some(
+            i18n::settings_permission_unknown_level(loc).to_string(),
+        )),
+        LevelOutcome::TurnRunning => sel.note.set(Some(
+            i18n::settings_permission_turn_running(loc).to_string(),
+        )),
+        LevelOutcome::ConversationGone => sel.note.set(Some(
+            i18n::settings_permission_conversation_gone(loc).to_string(),
+        )),
+        LevelOutcome::Unsupported => {
+            // 老 serve：连读都做不到，chip 本就不该显示；清空缓存让它消失。
+            sel.note
+                .set(Some(i18n::settings_permission_unsupported(loc).to_string()));
+            sel.view.set(None);
+        }
+        LevelOutcome::WriteFailed { status, code } => {
+            let base = if status == 500 {
+                i18n::settings_permission_write_retry(loc)
+            } else {
+                i18n::settings_permission_write_failed(loc)
+            };
+            let detail = code.unwrap_or_else(|| format!("HTTP {status}"));
+            sel.note.set(Some(format!("{base} ({detail})")));
+        }
+        LevelOutcome::IoError(e) => sel.note.set(Some(format!(
+            "{} {e}",
+            i18n::settings_permission_write_failed(loc)
+        ))),
+    }
 }
 
 #[component]

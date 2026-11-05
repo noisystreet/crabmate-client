@@ -24,16 +24,24 @@ pub enum Surface {
     Repl,
 }
 
-/// Desktop / Web 的共享 head。注意它比 TUI 窄得多：`mode` / `role` / `perm` / `status`
-/// 在这一端只有状态栏 / 设置页入口，**没有**命令（敲出来会被当成普通消息发给模型）。
+/// Desktop / Web 的共享 head。
 ///
-/// 反过来，曾由 Web 独占的 `version` / `skills` / `context` / `config` / `agent` / `export`
-/// 现在三端都有 handler（issue #444 第一阶段），所以进共享表 —— 留着「Web 独占」就是
-/// 第二份名单，`/version` 那种「能敲但 help 不写」的漂移会再来一次。
+/// `mode` / `role` / `perm` / `status` 也是命令（issue #444 PR-A），但**不新增真相源**：
+/// `/role` 归一到既有的 `/agent set`、`/status` 归一到既有的 `/config`（无参），
+/// `/mode` / `/perm` 写的是状态栏那组同一个信号。`conv` / `quit` / `resume` / `find` 等
+/// 仍只有端内形态（会话侧栏、进程退出、自动重挂、搜索框），敲出来会被当成普通消息发给模型。
+///
+/// 曾由 Web 独占的 `version` / `skills` / `context` / `config` / `agent` / `export`
+/// 在 issue #444 第一阶段升级为共享 head —— 留着「Web 独占」就是第二份名单，
+/// `/version` 那种「能敲但 help 不写」的漂移会再来一次。
 const DESKTOP: &[Head] = &[
     Head::Help,
-    Head::Workspace,
+    Head::Status,
     Head::Model,
+    Head::Mode,
+    Head::Role,
+    Head::Perm,
+    Head::Workspace,
     Head::Version,
     Head::Skills,
     Head::Context,
@@ -140,14 +148,19 @@ mod tests {
 
     #[test]
     fn desktop_only_has_command_forms_it_actually_implements() {
-        // 这九条是 Web 真正写过分派的共享命令；`mode` / `role` / `perm` / `status`
-        // 在 Web 只有 UI 入口，不能出现在表里（否则会被拦下来却没有 handler）。
+        // 这十三条是 Web 真正写过分派的共享命令。`mode` / `role` / `perm` / `status`
+        // 在 issue #444 PR-A 之后也算命令 —— 但都是既有实现的别名 / 同一组信号，
+        // 不是第二套真相源。
         assert_eq!(
             supported(Surface::Desktop),
             &[
                 Head::Help,
-                Head::Workspace,
+                Head::Status,
                 Head::Model,
+                Head::Mode,
+                Head::Role,
+                Head::Perm,
+                Head::Workspace,
                 Head::Version,
                 Head::Skills,
                 Head::Context,
@@ -156,13 +169,22 @@ mod tests {
                 Head::Export,
             ]
         );
+        // 这些仍只有 UI 入口或端内形态（会话侧栏 / 进程退出 / 自动重挂 / 搜索框 /
+        // 多窗口…），在 Web 敲出来会被当成普通消息发给模型。
         for ui_only in [
-            Head::Mode,
-            Head::Role,
-            Head::Perm,
-            Head::Status,
             Head::Conv,
             Head::Quit,
+            Head::Settings,
+            Head::Resume,
+            Head::Find,
+            Head::Older,
+            Head::Fold,
+            Head::Copy,
+            Head::Ctl,
+            Head::Lane,
+            Head::Editor,
+            Head::Chat,
+            Head::Background,
         ] {
             assert!(
                 !supports(Surface::Desktop, ui_only),
