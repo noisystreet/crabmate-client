@@ -46,11 +46,17 @@ impl MenuItem {
         }
     }
 
-    /// skill 项：`description` 空白时回落 `path` —— 菜单里只剩个 id 时不该是一片空白。
+    /// skill 项：`description` 空白时回退 skill 的**名字**，名字与左侧 `/id` 相同时留空。
+    ///
+    /// 回退整条 `path` 会让每行都长成 `skills/<id>/SKILL.md` —— 又长又行行相同，反而认不出是
+    /// 哪个 skill；名字（`skills/api-design/SKILL.md` → `api-design`）通常又正好等于 [`Self::label`]
+    /// 里的 `id`，再写一遍只是把同一个名字印两次。所以只在名字**不同于** id 时才填第二列
+    /// （例如 `skills/other/SKILL.md` 配 id `x`），否则留空让菜单只剩 `/alpha`。
     #[must_use]
     pub fn skill(id: &str, description: &str, path: &str) -> Self {
         let desc = if description.trim().is_empty() {
-            path.to_string()
+            let name = crate::timeline_skill::skill_display_name(path).unwrap_or_default();
+            if name == id { String::new() } else { name }
         } else {
             description.trim().to_string()
         };
@@ -160,15 +166,21 @@ mod tests {
     }
 
     #[test]
-    fn skill_item_falls_back_to_path_when_description_blank() {
+    fn skill_item_falls_back_to_a_name_that_differs_from_its_id() {
         let with_desc = MenuItem::skill("a", " 说明 ", "p");
         assert_eq!(with_desc.description, "说明");
         assert_eq!(with_desc.insert, "/a ");
         assert_eq!(with_desc.label, "/a");
 
-        let blank = MenuItem::skill("b", "   ", "skills/b/SKILL.md");
-        assert_eq!(blank.description, "skills/b/SKILL.md");
+        // 名字与 `id` 不同：第二列仍是有效的补充信息（不是整条路径）。
+        let blank = MenuItem::skill("x", "   ", "skills/other/SKILL.md");
+        assert_eq!(blank.description, "other");
         assert_eq!(blank.kind, MenuKind::Skill);
+
+        // 名字就是 `id`：再画一遍只是 `/b  b`，留空。
+        let same = MenuItem::skill("b", "   ", "skills/b/SKILL.md");
+        assert_eq!(same.description, "");
+        assert_eq!(same.label, "/b");
     }
 
     #[test]

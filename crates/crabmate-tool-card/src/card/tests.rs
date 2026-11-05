@@ -313,6 +313,31 @@ fn compact_read_file_prefers_json_header_in_output() {
 }
 
 #[test]
+fn compact_read_file_shows_the_skill_directory_instead_of_skill_md() {
+    let hdr = r#"{"kind":"crabmate_tool_output","tool":"read_file","version":1,"path":".crabmate/skills/api-design/SKILL.md","start_line":1,"end_line_shown":20,"line_count_returned":20,"total_lines":120,"truncated_by_max_lines":false,"has_more":true,"file_empty":false}"#;
+    let mut info = mk("");
+    info.name = "read_file".to_string();
+    info.summary = Some("read file: .crabmate/skills/api-design/SKILL.md".to_string());
+    info.output = format!("{hdr}\n...\n");
+    let out = tool_card_compact_text(&info, ToolCardLocale::ZhHans);
+    assert!(out.contains("api-design 120 行"), "compact={out}");
+    assert!(!out.contains("SKILL.md"), "不该显示约定文件名: {out}");
+}
+
+#[test]
+fn compact_read_file_keeps_skill_md_when_its_parent_is_the_skills_root() {
+    let hdr = r#"{"kind":"crabmate_tool_output","tool":"read_file","version":1,"path":".crabmate/skills/SKILL.md","start_line":1,"end_line_shown":20,"line_count_returned":20,"total_lines":40,"truncated_by_max_lines":false,"has_more":true,"file_empty":false}"#;
+    let mut info = mk("");
+    info.name = "read_file".to_string();
+    info.summary = Some("read file: .crabmate/skills/SKILL.md".to_string());
+    info.output = format!("{hdr}\n...\n");
+    let out = tool_card_compact_text(&info, ToolCardLocale::ZhHans);
+    // 上一层目录就是 `skills`：没有 id 可退，退回文件名本身（不能显示成 `skills`）。
+    assert!(out.contains("SKILL.md 40 行"), "compact={out}");
+    assert!(!out.contains("skills 40 行"), "compact={out}");
+}
+
+#[test]
 fn compact_search_prefers_structured_output_with_scope_and_hits() {
     let hdr = r#"{"kind":"crabmate_tool_output","tool":"search_in_files","version":1,"pattern":"TODO","root":".","match_count":7,"files_visited":20,"max_results":200,"truncated":false}"#;
     let mut info = mk("✅ search_in_files 成功");
