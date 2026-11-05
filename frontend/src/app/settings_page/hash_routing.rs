@@ -18,7 +18,19 @@ pub(crate) enum SettingsSection {
 }
 
 impl SettingsSection {
-    pub(super) fn slug(self) -> &'static str {
+    /// 全部分区（顺序即设置页导航顺序）：`/settings` 的错误提示要枚举它们。
+    pub(crate) const ALL: &'static [Self] = &[
+        Self::Connection,
+        Self::Appearance,
+        Self::Llm,
+        Self::Tools,
+        Self::Github,
+        Self::Mcp,
+        Self::Session,
+        Self::Shortcuts,
+    ];
+
+    pub(crate) fn slug(self) -> &'static str {
         match self {
             Self::Connection => "connection",
             Self::Appearance => "appearance",
@@ -31,7 +43,7 @@ impl SettingsSection {
         }
     }
 
-    pub(super) fn from_slug(s: &str) -> Option<Self> {
+    pub(crate) fn from_slug(s: &str) -> Option<Self> {
         match s {
             "connection" => Some(Self::Connection),
             "appearance" => Some(Self::Appearance),
@@ -106,6 +118,16 @@ pub(super) fn write_settings_section_to_hash(section: SettingsSection) {
     }
     // `set_hash` 会自动加 `#`；传入 `/settings/...` → `#/settings/...`
     let _ = win.location().set_hash(&target);
+}
+
+/// 从**没有** `settings_page` 句柄的位置（`/settings` 斜杠命令）打开设置页：只写 hash。
+///
+/// 显隐由 [`settings_page_install_hashchange_listener`] 统一驱动，所以「点顶栏」与
+/// 「敲命令」走同一条路由，不会出现两套开关；也避免了把 `settings_page` 信号穿进
+/// composer 的那几层 ctx（`ChatDomainSignals` → `WireComposerStreamsSessionSlice` →
+/// `ComposerSendCtx`）。
+pub(crate) fn open_settings_from_hash(section: SettingsSection) {
+    write_settings_section_to_hash(section);
 }
 
 /// 打开设置页并写入 `#/settings/<section>`（工具栏等入口）。

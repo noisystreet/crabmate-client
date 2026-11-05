@@ -28,7 +28,8 @@ pub enum Surface {
 ///
 /// `mode` / `role` / `perm` / `status` 也是命令（issue #444 PR-A），但**不新增真相源**：
 /// `/role` 归一到既有的 `/agent set`、`/status` 归一到既有的 `/config`（无参），
-/// `/mode` / `/perm` 写的是状态栏那组同一个信号。`conv` / `quit` / `resume` / `find` 等
+/// `/mode` / `/perm` 写的是状态栏那组同一个信号；`/settings` 写 `#/settings/<section>`，
+/// 与顶栏按钮同一条 hash 路由。`conv` / `quit` / `resume` / `find` 等
 /// 仍只有端内形态（会话侧栏、进程退出、自动重挂、搜索框），敲出来会被当成普通消息发给模型。
 ///
 /// 曾由 Web 独占的 `version` / `skills` / `context` / `config` / `agent` / `export`
@@ -37,6 +38,7 @@ pub enum Surface {
 const DESKTOP: &[Head] = &[
     Head::Help,
     Head::Status,
+    Head::Settings,
     Head::Model,
     Head::Mode,
     Head::Role,
@@ -148,14 +150,16 @@ mod tests {
 
     #[test]
     fn desktop_only_has_command_forms_it_actually_implements() {
-        // 这十三条是 Web 真正写过分派的共享命令。`mode` / `role` / `perm` / `status`
+        // 这十四条是 Web 真正写过分派的共享命令。`mode` / `role` / `perm` / `status`
         // 在 issue #444 PR-A 之后也算命令 —— 但都是既有实现的别名 / 同一组信号，
-        // 不是第二套真相源。
+        // 不是第二套真相源。`settings` 同理：顶栏按钮早已能进设置页，命令只是第二入口
+        // （写 `#/settings/<section>`，与顶栏走同一条 hash 路由）。
         assert_eq!(
             supported(Surface::Desktop),
             &[
                 Head::Help,
                 Head::Status,
+                Head::Settings,
                 Head::Model,
                 Head::Mode,
                 Head::Role,
@@ -174,7 +178,6 @@ mod tests {
         for ui_only in [
             Head::Conv,
             Head::Quit,
-            Head::Settings,
             Head::Resume,
             Head::Find,
             Head::Older,

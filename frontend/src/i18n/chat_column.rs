@@ -432,13 +432,6 @@ pub fn msg_context_trim_raw_json_label(l: Locale) -> &'static str {
     }
 }
 
-pub fn composer_slash_builtin_skills_list(l: Locale) -> &'static str {
-    match l {
-        Locale::ZhHans => "列出可 `/id` 调用的技能明细",
-        Locale::En => "List callable `/id` skills in detail",
-    }
-}
-
 /// Web 内建 `/btw`：旁路提问（结合上下文回答，不写入历史、不调用工具）。
 pub fn composer_slash_builtin_btw(l: Locale) -> &'static str {
     match l {
@@ -530,6 +523,13 @@ pub fn composer_slash_builtin_status(l: Locale) -> &'static str {
     match l {
         Locale::ZhHans => "serve 只读摘要（模型 / 端点 / 上下文 / 存储）",
         Locale::En => "Read-only serve summary (model / endpoint / context / store)",
+    }
+}
+
+pub fn composer_slash_builtin_settings(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "打开设置页（可带分区：llm / mcp / tools …）",
+        Locale::En => "Open the settings page (optionally a section: llm / mcp / tools …)",
     }
 }
 
