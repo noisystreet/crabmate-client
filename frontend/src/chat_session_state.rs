@@ -190,6 +190,30 @@ pub struct ChatStreamBusyMemos {
     pub model_status_busy: Memo<bool>,
 }
 
+/// 单轮「stream busy」Memo：`TurnLifecycle` 粗 busy ∨ **`AbortController` 槽位**。
+///
+/// 「停止」门闩、合成器可用性、权限换档守卫必须给出**同一个答案**。此前两处各自手写同形
+/// closure（本文件 [`make_chat_stream_busy_memos`] 与
+/// [`crate::app::shell_runtime_context`] 的 `perm_turn_in_flight`），只能靠注释「改一边必须
+/// 同时改另一边」约束；抽成这里后只剩一份。
+///
+/// `abort_present` 在 `stream_abort_epoch` 变化时才重算：槽位是 `Mutex`（非 signal），
+/// 它自身不会产生响应式依赖 —— 所以 closure 内先 `get()` 一次 epoch。
+#[must_use]
+pub fn make_stream_turn_busy_memo(
+    turn_lifecycle: RwSignal<crate::app::turn_lifecycle::TurnLifecycleState>,
+    stream_abort_epoch: RwSignal<u32>,
+    abort_present: Arc<dyn Fn() -> bool + Send + Sync>,
+) -> Memo<bool> {
+    Memo::new(move |_| {
+        let _ = stream_abort_epoch.get();
+        crate::app::turn_lifecycle::turn_lifecycle_stream_turn_busy(
+            turn_lifecycle.get(),
+            abort_present(),
+        )
+    })
+}
+
 /// 在 [`crate::app::chat::wire_chat_domain::wire_chat_domain_effects`] 内**单次**构造，经 [`crate::app::chat::handles::ChatColumnShell`] 下发到底栏 / 合成器 / 消息行。
 ///
 /// **`stream_turn_busy_ui`**：[`TurnLifecycle`] 粗 busy ∨ **`AbortController` 槽位**；
@@ -202,19 +226,14 @@ pub fn make_chat_stream_busy_memos(
     stream_abort_epoch: RwSignal<u32>,
     abort_present: Arc<dyn Fn() -> bool + Send + Sync>,
 ) -> ChatStreamBusyMemos {
-    use crate::app::turn_lifecycle::{
-        turn_lifecycle_model_ui_busy, turn_lifecycle_stream_turn_busy, turn_lifecycle_tool_ui_busy,
-    };
+    use crate::app::turn_lifecycle::{turn_lifecycle_model_ui_busy, turn_lifecycle_tool_ui_busy};
 
     let tool_timeline_busy_ui = Memo::new(move |_| {
         turn_lifecycle_tool_ui_busy(turn_lifecycle.get()) || session_has_loading_tool_message(chat)
     });
     let model_status_busy = Memo::new(move |_| turn_lifecycle_model_ui_busy(turn_lifecycle.get()));
-    let ap = Arc::clone(&abort_present);
-    let stream_turn_busy_ui = Memo::new(move |_| {
-        let _ = stream_abort_epoch.get();
-        turn_lifecycle_stream_turn_busy(turn_lifecycle.get(), ap())
-    });
+    let stream_turn_busy_ui =
+        make_stream_turn_busy_memo(turn_lifecycle, stream_abort_epoch, abort_present);
     ChatStreamBusyMemos {
         stream_turn_busy_ui,
         tool_timeline_busy_ui,
