@@ -76,6 +76,14 @@ impl<'a> LaneApp<'a> {
             template.draft_store.clone(),
             client.config().api_base.as_str(),
         );
+        let mut st = UiState::new().with_pane(template.pane);
+        // 上次退出时输入框里没发出去的那句（未绑定槽）直接回到输入框：那是「打到一半就
+        // 退出」最常见的形态，而要等一次 `/conv new` 才出现等于没恢复。带
+        // `--conversation-id` 启动时，随后的 `swap_draft_in(Some(cid))` 会先把这段存回
+        // 未绑定槽再取目标那份，所以两者不冲突。
+        if let Some(text) = drafts.load(None) {
+            st.set_input(text);
+        }
         Self {
             id,
             label,
@@ -83,7 +91,7 @@ impl<'a> LaneApp<'a> {
             overrides: template.overrides.clone(),
             yes: template.yes,
             no_keyring: template.no_keyring,
-            st: UiState::new().with_pane(template.pane),
+            st,
             drafts,
             tx: template.tx.clone(),
             job_tx,

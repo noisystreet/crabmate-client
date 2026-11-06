@@ -183,8 +183,14 @@ impl DraftStore {
 pub(crate) fn save_to(path: &Path, api_base: &str, drafts: &Partition) -> std::io::Result<()> {
     let mut all = load_all_from(path);
     let key = partition_key(api_base);
+    let dropped = all.remove(&key).is_some();
     if drafts.is_empty() {
-        all.remove(&key);
+        // 这个 serve 本来就没有草稿、磁盘上也没有它的分区 → **什么都不用写**。否则
+        // 每次退出都会重写一遍，甚至在一台从没存过草稿的机器上凭空造出这个文件。
+        // 反过来，文件里**有**这条记录时仍然要写（那是「草稿被清空，把记录删掉」）。
+        if !dropped {
+            return Ok(());
+        }
     } else {
         all.insert(key, drafts.clone());
     }
@@ -362,6 +368,16 @@ mod tests {
         save_to(&path, "http://a:1", &part(&[("c1", "有内容")])).expect("save");
         save_to(&path, "http://a:1", &Partition::new()).expect("clear");
         assert!(load_all_from(&path).is_empty(), "空分区不该留下记录");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// 从没存过草稿时不该因为一次退出就凭空造出这个文件。
+    #[test]
+    fn a_save_without_drafts_does_not_create_the_file() {
+        let dir = tmp_dir("no-create");
+        let path = dir.join(FILE_NAME);
+        save_to(&path, "http://a:1", &Partition::new()).expect("no-op save");
+        assert!(!path.exists(), "没有草稿就不该落盘");
         let _ = fs::remove_dir_all(&dir);
     }
 

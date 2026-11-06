@@ -87,7 +87,7 @@
 
 #### W1.3 会话级草稿保留/恢复（G3）— 已落地（`tui_mode/drafts.rs`）
 
-> **实现**：草稿按 `conversation_id` 存在表里，切会话 / `/conv new` 时换入换出；全空白视为无草稿。退出时仍由 `exit_flush` 把当前会话那一份写回服务端索引。**跨进程保留已补**（issue #430）：切走的会话也落本机 `$XDG_STATE_HOME/crabmate/tui-drafts.json`（`CM_TUI_DRAFTS_FILE` 可覆盖），装配 lane 时读回。两个设计点：**分区按 `api_base`**——两个 serve 的同名 `conversation_id` 不会互相串（扁平存会静默串）；**不做每键写盘**——只在切会话 / 退出写，所以异常退出最多丢「最后一次切会话之后敲的字」。本机文件与服务端索引那份草稿互不覆盖：本机代表「这台机器上打到一半的字」，不把服务端值回灌进输入框。
+> **实现**：草稿按 `conversation_id` 存在表里，切会话 / `/conv new` 时换入换出；全空白视为无草稿。退出时仍由 `exit_flush` 把当前会话那一份写回服务端索引。**跨进程保留已补**（issue #430）：切走的会话也落本机 `$XDG_STATE_HOME/crabmate/tui-drafts.json`（`CM_TUI_DRAFTS_FILE` 可覆盖），装配 lane 时读回。两个设计点：**分区按 `api_base`**——两个 serve 的同名 `conversation_id` 不会互相串（扁平存会静默串）；**不做每键写盘**——只在切会话 / 退出写，所以异常退出最多丢「最后一次切会话之后敲的字」。本机文件与服务端索引那份草稿互不覆盖：本机代表「这台机器上打到一半的字」，不把服务端值回灌进输入框。装配 lane 时**未绑定槽**（还没发过言的那段输入）直接回到输入框 —— 「打到一半就退出」是最常见形态，等一次 `/conv new` 才出现等于没恢复。
 
 - **参照**：Desktop `flush_active_composer_draft` / 切会话恢复。
 - **方案**：composer 文本按当前 `conversation_id` 缓存：切会话时保存旧缓冲并载入目标会话草稿，`/conv new` 新建时清空草稿，发送成功后清空该会话草稿。杜绝草稿“串会话”（现状见 §1.2 G3）。
