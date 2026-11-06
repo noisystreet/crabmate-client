@@ -11,7 +11,6 @@ use leptos::prelude::*;
 
 use crate::app::app_signals::{AppSignals, ChatComposerSignals};
 use crate::app::ide_layout_switch::IdeLayoutToggleSignals;
-use crate::app::turn_lifecycle::turn_lifecycle_stream_turn_busy;
 use crate::chat_session_state::ChatSessionSignals;
 
 /// 聊天域：会话 / 作曲器、界面语言与助手正文过滤（与 [`AppSignals`] 内对应字段同源）。
@@ -52,19 +51,15 @@ pub struct ChatShellLeptosContext {
 impl ChatShellLeptosContext {
     #[must_use]
     pub fn from_app_signals(app: &AppSignals) -> Self {
-        // 「回合在途」：与 `ChatStreamBusyMemos::stream_turn_busy_ui`
-        // （`chat_session_state::make_chat_stream_busy_memos`）**同一谓词、同一输入**。
-        // 两处各建一个 memo 而不是共享同一个对象：busy memos 在聊天域 wire 之后才有，
-        // 而本 ctx 在 `App` 根就 provide 了。共享的是**判定口径**——改一边必须同时改另一边，
-        // 否则「停止」门闩与权限换档守卫会对同一个回合给出两种答案。
-        let stream = app.stream.clone();
-        let perm_turn_in_flight = Memo::new(move |_| {
-            let _ = stream.stream_abort_epoch.get();
-            turn_lifecycle_stream_turn_busy(
-                stream.turn_lifecycle.get(),
-                stream.abort_cell.lock().unwrap().is_some(),
-            )
-        });
+        // 「回合在途」：判定实现由 `make_stream_turn_busy_memo` 唯一持有（#458）。
+        // 仍各建一个 memo 实例：busy memos 在聊天域 wire 之后才有，而本 ctx 在 `App` 根就
+        // provide 了。此后共享的是**实现**，不再是「两处手写同形 closure + 注释约束一致」。
+        let abort_cell = std::sync::Arc::clone(&app.stream.abort_cell);
+        let perm_turn_in_flight = crate::chat_session_state::make_stream_turn_busy_memo(
+            app.stream.turn_lifecycle,
+            app.stream.stream_abort_epoch,
+            std::sync::Arc::new(move || abort_cell.lock().unwrap().is_some()),
+        );
         Self {
             chat: app.chat,
             composer: app.chat_composer,
