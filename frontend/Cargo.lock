@@ -295,7 +295,7 @@ dependencies = [
 
 [[package]]
 name = "crabmate-client-api"
-version = "0.8.0-alpha.2"
+version = "0.8.0-alpha.3"
 dependencies = [
  "crabmate",
  "serde",
@@ -304,14 +304,14 @@ dependencies = [
 
 [[package]]
 name = "crabmate-tool-card"
-version = "0.8.0-alpha.2"
+version = "0.8.0-alpha.3"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "crabmate-web"
-version = "0.8.0-alpha.2"
+version = "0.8.0-alpha.3"
 dependencies = [
  "ammonia",
  "console_error_panic_hook",

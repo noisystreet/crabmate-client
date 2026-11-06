@@ -11,6 +11,8 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ## [Unreleased]
 
+## [0.8.0-alpha.3] - 2026-11-06
+
 ### Added
 
 - **Desktop: the left rail now lists the `crabmatectl` instances you have not connected, each with Connect; connected rows gained Close.** Previously it could only show existing windows, so attaching to a declared instance meant knowing its address. A read-only `ctl_list_instances` (`desktop-tauri/src-tauri/src/desktop_ctl.rs`, shapes from `crabmate-client-api::ctl`) feeds it: `ready` gets Connect (the existing `open_connection`), `starting` shows 「启动中」, the rest carry the Server's `last_error`, and closed declarations or already-open instances are omitted. It is a query, not a subscription, so the header's 「⟳」 re-fetches. Close closes the window: Desktop has no keepalive state. No protocol change.
