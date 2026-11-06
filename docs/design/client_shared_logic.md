@@ -389,6 +389,37 @@ Web 的 `api_base_preset_select` 字符串链路（写入已保存模型预设�
 
 代价对照：服务端新增一档时，改造前要改九处，且漏改的两个方向都不显式失败 —— 漏在解析侧会把合法值当非法丢掉，漏在校验侧则让用户选得进去、发不出去。
 
+### 4.19 单轮流式生命周期归约（S15 已落地；`turn_lifecycle`）
+
+> **编号提醒**：issue #458 与 `frontend/src/app/chat/turn_lifecycle/mod.rs` 的注释把这一步称作「中间层设计的 S1」。那是另一套编号（中间层 S1–S4 + W0-x，见 [`tui_multi_server.md`](./tui_multi_server.md) §9），与本文档 §6 分期表里的 **S1**（`url` + `auth` + `secrets` 常量，早已 ✅）**不是一回事**。本步在本文档记作 **S15**。
+
+| 端 | 路径 |
+|----|------|
+| frontend | `frontend/src/app/chat/turn_lifecycle/mod.rs` 退化成 13 行 `pub(crate) use`；原 `reducer.rs`（279 行）与 `tests.rs`（226 行）删除 |
+| tui | **未接入**：只有布尔 `st.running`（`tui_mode/turn_send.rs` 置位 / 清位），没有 `TurnLifecycleState`。要接得先有中间层 S2 的状态机，本步只留接入点 |
+
+共享实现（`crabmate_client_api::turn_lifecycle`）：
+
+| 项 | 规则 |
+|----|------|
+| `TurnPhase` | `Idle` / `Attaching` / `Streaming`（带 `StreamSubPhase`）/ `Draining` / `Terminal`（带 `TurnOutcome`）；除 `Idle` 外都记 `attach_generation` —— 迟到的旧 attach 事件靠代际比对丢弃，不靠时间戳 |
+| `TurnLifecycleEvent` | 壳侧喂入的六种语义事件：`AttachPrepared` / `HttpStreamOpened` / `SseControl` / `ShellReleased` / `UserAbortRequested` / `TimelineModelFinal`；`StreamControlEvent` 因被 `SseControl` 直接持有而一并迁入（前端 `composer_stream::stream_control_reducer` 保留同路径 re-export） |
+| `apply_turn_lifecycle` | 纯归约：给定状态 + 事件 → 新状态。无 IO、无 `js_sys`；信号读写与 dispatch 时机全留壳侧 |
+| `turn_lifecycle_coarse_busy` | `Attaching` / `Streaming` / `Draining` 三态；**不含** loading 占位与 abort 槽 |
+| `turn_lifecycle_model_ui_busy` | 状态栏「模型生成中」：`Attaching` / `Draining` / `Streaming` 的 `ModelOutput` 子阶段，且 `model_timeline_final` 之后一律 `false`（工具可能仍忙，但「模型在生成」已经不成立） |
+| `turn_lifecycle_tool_ui_busy` | 状态栏「工具执行中」与时间线门闩：仅 `Streaming` 的 `ToolUiBusy` 子阶段 |
+| `turn_lifecycle_stream_turn_busy(state, abort_present)` | `coarse_busy ∨ abort_present`：合成器可用性与「停止」按钮门闩 |
+
+**第二步：busy 判定从两份闭包收成一份实现。** 构造点只有 `chat_session_state::make_stream_turn_busy_memo`；`make_chat_stream_busy_memos` 与 `ChatShellLeptosContext::perm_turn_in_flight`（`app/shell_runtime_context.rs`）都改调它。此前两处各写一个同形 `Memo::new`，一致性只靠注释「改一边必须同时改另一边」维持。
+
+**一个谓词、四个界面**：`perm_turn_in_flight` 被设置页权限块、底栏 `perm` chip、`/perm` 命令的参数层共同读取。所以 `turn_lifecycle_stream_turn_busy` 同时是「停止」门闩与「回合进行中不许换档」的守卫 —— 改它等于同时改两个产品行为，不变量是「停止可点」与「换档被拒」永远同真同假。
+
+**留端（见 §5）**：Leptos 信号、`abort_cell` 的锁、SSE 钩子与 `dispatch` 时机都在壳侧；共享层只回答「给定状态与事件，现在忙不忙、下一个状态是什么」。
+
+**代价对照**：改造前 Web 有状态机、TUI 只有布尔旗标，跨端一致性靠人读代码；改造后至少「同一端内多个消费点」由编译器保证同源（改一处就全部改到）。跨端一致性仍取决于 TUI 是否真接入 —— 这也是本步把自己限制在「只搬不改」的原因，语义调整留给中间层 S2。
+
+**回归**：8 个测试随迁（client-api 289 → 297），前端 `wasm32` clippy 干净；`app/mod.rs` 的模块别名未动，`crate::app::turn_lifecycle::…` 与 `crate::app::chat::turn_lifecycle::…` 两条既有路径都继续成立，8 处消费点零改动。
+
 ## 5. 明确不共享
 
 | 类别 | 原因 | 代表 |
@@ -429,8 +460,9 @@ Web 的 `api_base_preset_select` 字符串链路（写入已保存模型预设�
 | **S10** ✅ | `client_llm_presets`：`PRESETS` + `select_id_for_url` / `index_for_url` / `display_id_for_url` 下沉；frontend `api_base_select_value_for_draft` 与 tui `API_BASE_PRESETS` / `gateway_pick_of` / `api_base_display` 改共享 | 两端表合一（删 TUI 第三处内联匹配与 Web 无消费的 `suggested_model`）；client-api 156 单测（含 11 个新增）；tui 623 全绿；`wasm32` clippy；`check-boundaries.sh` ok |
 | **S13** ✅ | `session_mode`：`SESSION_MODES` + `is_known_mode` 下沉；Web 七处内联 `matches!` 与 TUI 两处（常量 + CLI 校验）改共享 | client-api 新增 2 单测；frontend 762 / tui 1165 全绿；字面量零残留 |
 | **S14** ✅ | `slash_render`：`SkillRow` + `skill_lines` 下沉（`/skills` 抬头 / 条目 / 空描述 / 截断尾行 / 条数上限） | 5 个单测；TUI `cmd_skills` 与 Web `handle_skills` 同源；空态文案仍留端 |
+| **S15** ✅ | `turn_lifecycle`：单轮流式生命周期归约 + 四个 busy 谓词下沉（Web 接入、TUI 只留接入点）；`make_stream_turn_busy_memo` 归一两处手写 memo | 8 个测试随迁通过；client-api 289 → 297；frontend `wasm32` clippy；`check-boundaries.sh` ok |
 
-**建议开工顺序**：S0 → S1–S4 → S5a / S5 health → S5 slash / paths / messages（均已完成）→ **S6a → S6b → S6c → S6d**（均已完成；S6e 视 S6a–d 收益再定）→ **S7a**（已完成）→ **S8 / S9 / S10**（均已完成）→ S7b（需先拍板）。
+**建议开工顺序**：S0 → S1–S4 → S5a / S5 health → S5 slash / paths / messages（均已完成）→ **S6a → S6b → S6c → S6d**（均已完成；S6e 视 S6a–d 收益再定）→ **S7a**（已完成）→ **S8 / S9 / S10**（均已完成）→ S7b（需先拍板）→ **S15**（`turn_lifecycle` 归约，已完成，见 §4.19）。
 
 每步独立小 PR，均**不新增 crate**、不动 `scripts/rust-pkg-dirs.txt`；每步以 `make check`（含 frontend `wasm32` clippy）+ `make test` 收口。
 
