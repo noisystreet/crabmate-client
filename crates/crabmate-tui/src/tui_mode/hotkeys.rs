@@ -39,6 +39,11 @@ pub(super) enum TopHotkey {
     /// 与 [`Self::NextLane`] 的区别是「绝对目标」而不是「相对移动」：八条连接时从第 1
     /// 条到第 8 条，按方向键要七次，按这一个键就够。越界**不切视图**，只留一句提示。
     GotoLane(usize),
+    /// F7：重新打开收起过的澄清问卷（issue #424）。
+    ///
+    /// `Esc` 收起的问卷**不会被丢掉**：答案还没提交，只是暂时不挡 transcript。
+    /// 没有待填问卷时是 no-op（返回 `false`，交给后续分发）。
+    ReopenClarify,
 }
 
 /// 判定热键。
@@ -54,6 +59,8 @@ pub(super) fn of(key: &KeyEvent) -> Option<TopHotkey> {
         // F4：跳到在等审批的那条 lane。F 系热键已用 F2（面板保存）/F3（状态栈）/F6（设置），
         // 不与输入框的 Ctrl 组合抢键。
         (KeyCode::F(4), KeyModifiers::NONE) => Some(TopHotkey::NextApproval),
+        // F7：重开澄清问卷（F5 留给「刷新」语义，F6 是设置）。
+        (KeyCode::F(7), KeyModifiers::NONE) => Some(TopHotkey::ReopenClarify),
         (KeyCode::Char('y'), KeyModifiers::CONTROL) => Some(TopHotkey::Copy),
         // Ctrl+T：视图切换。与 `Ctrl+E`（思考开关）同一组「toggle」语义。
         // 不用 F 系：F2/F3/F4/F6 已被面板开关与状态栈占用，而 F5 的通用语义是「刷新」，

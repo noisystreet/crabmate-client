@@ -70,11 +70,17 @@ impl LaneApp<'_> {
             temperature,
             readonly_tool_ttl_cache_secs,
             stream_resume,
+            // 普通回合不带问卷答案；`start_turn_with_clarify` 装配后再填这一格。
+            clarify_questionnaire_answers: None,
         }
     }
 
     /// 把已组装好的回合交给 worker：重置运行态、记下原始输入、建取消通道。
     pub(super) fn dispatch_turn(&mut self, opts: ChatStreamOptions) {
+        // 新回合先收起问卷浮层（问卷本身不丢，`F7` 能重开）：否则它盖住这一段
+        // transcript，而浮层上的 `Enter` 是一条能再发一轮的模态 —— 两个 SSE 流会
+        // 并发写同一条 lane，`cancel` / `sent_turn` 也会被后发的那一轮顶掉。
+        self.st.clarify_open = false;
         // 在途的历史回包从此没有落点（见 `history::should_apply_reply`）：清掉它，
         // 免得晚到的历史把刚发出的这一轮冲掉。
         self.st.history_pending = None;

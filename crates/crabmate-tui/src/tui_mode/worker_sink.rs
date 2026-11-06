@@ -49,6 +49,13 @@ impl StreamSink for UiSink {
         self.out.send(UiEvent::SkillInject(info.clone()))
     }
 
+    fn on_clarify(
+        &mut self,
+        info: &crabmate_client_api::sse_dispatch::ClarificationQuestionnaireInfo,
+    ) -> Result<(), TermError> {
+        self.out.send(UiEvent::Clarify(info.clone()))
+    }
+
     fn on_prompt_tokens(&mut self, snap: &TiktokenPromptTokensSnapshot) -> Result<(), TermError> {
         self.out.send(UiEvent::PromptTokens(Box::new(snap.clone())))
     }

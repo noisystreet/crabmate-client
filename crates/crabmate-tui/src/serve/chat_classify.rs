@@ -17,8 +17,9 @@ use crabmate_client_api::prompt_tokens::{
     TiktokenPromptTokensSnapshot, tiktoken_from_ag_ui_object,
 };
 use crabmate_client_api::sse_dispatch::{
-    CommandApprovalData, SseClarifyTraceHooks, SseControlSink, SseDispatch, SseNoticeTimelineHooks,
-    SseTurnPhaseHooks, SseWorkspaceToolHooks, TimelineLogInfo, ToolResultInfo,
+    ClarificationQuestionnaireInfo, CommandApprovalData, SseClarifyTraceHooks, SseControlSink,
+    SseDispatch, SseNoticeTimelineHooks, SseTurnPhaseHooks, SseWorkspaceToolHooks, TimelineLogInfo,
+    ToolResultInfo,
 };
 use crabmate_client_api::timeline_skill::{SkillInjectInfo, skill_inject_from_detail};
 use crabmate_client_api::tool_display::{ToolDisplayInput, tool_display_line};
@@ -77,6 +78,12 @@ pub(crate) enum LineAction {
     /// `CUSTOM timeline_log` 里 `kind=context_inject` 且 `detail.skills` 非空：
     /// 这一轮确实调用了 skill。Desktop 画 skill 卡，TUI 画一行技能行（ADR 0003）。
     SkillInject(SkillInjectInfo),
+    /// `CUSTOM clarification_questionnaire`：模型要澄清，下发一份 1～12 题的问卷。
+    ///
+    /// TUI 把它做成待填表单（issue #424），答案随**下一条** `POST /chat/stream` 回传 ——
+    /// 与审批不同，它不阻塞本轮流：问卷到的时候这一轮可能还在跑（Server 是在工具成功
+    /// 后由 `execute_tools` 补发，工具结果还要回喂模型）。
+    Clarify(ClarificationQuestionnaireInfo),
     Plain(String),
 }
 
@@ -174,6 +181,8 @@ fn parse_with_collector(line: &str, acc: &RefCell<Collected>) -> SseDispatch {
     let mut on_tool_result = |info: ToolResultInfo| acc.borrow_mut().tool_result(info);
     let mut on_approval = |req: CommandApprovalData| acc.borrow_mut().approve(req);
     let mut on_approval_invalid = || acc.borrow_mut().system(MALFORMED_APPROVAL_HINT);
+    // 问卷题面整份到达（不是增量）：直接存槽位，交给上层开表单。
+    let mut on_clarify = |info: ClarificationQuestionnaireInfo| acc.borrow_mut().clarify(info);
     // `timeline_log`：裁剪后水位回落（ADR 0005）/ 本轮注入的 skill（ADR 0003）。
     // 两者 `detail` 都是字符串化 JSON，解析规则在共享层（与 Web 端同一份口径）。
     let mut on_timeline_log = |info: TimelineLogInfo| match info.kind.trim() {
@@ -207,7 +216,12 @@ fn parse_with_collector(line: &str, acc: &RefCell<Collected>) -> SseDispatch {
             ..SseWorkspaceToolHooks::default()
         },
         turn_phase: SseTurnPhaseHooks::default(),
-        clarify_trace: SseClarifyTraceHooks::default(),
+        clarify_trace: SseClarifyTraceHooks {
+            // issue #424：以前是 `::default()`（不注册钩子 → 事件落到 `Skip`），
+            // 终端用户只看到工具行、看不到题面。现在收进槽位交给 `LineAction::Clarify`。
+            on_clarification_questionnaire: Some(&mut on_clarify),
+            ..SseClarifyTraceHooks::default()
+        },
         notice_timeline: SseNoticeTimelineHooks {
             on_timeline_log: Some(&mut on_timeline_log),
             ..SseNoticeTimelineHooks::default()
@@ -235,6 +249,8 @@ struct Collected {
     context_trim: Option<u32>,
     /// `context_inject` 里本轮被调用的 skill（detail 无 skills 时为 `None`）。
     skill_inject: Option<SkillInjectInfo>,
+    /// `clarification_questionnaire` 的题面（一次整份到达）。
+    clarify: Option<ClarificationQuestionnaireInfo>,
 }
 
 impl Collected {
@@ -277,6 +293,10 @@ impl Collected {
     fn skill_inject(&mut self, info: SkillInjectInfo) {
         self.skill_inject.get_or_insert(info);
     }
+
+    fn clarify(&mut self, info: ClarificationQuestionnaireInfo) {
+        self.clarify.get_or_insert(info);
+    }
 }
 
 /// 槽位 → 终端动作（单行数据块至多命中一类；多命中时按下方顺序取优先级）。
@@ -317,7 +337,10 @@ fn timeline_action(collected: &Collected) -> Option<LineAction> {
     if let Some(after) = collected.context_trim {
         return Some(LineAction::ContextTrim { after });
     }
-    collected.skill_inject.clone().map(LineAction::SkillInject)
+    if let Some(info) = collected.skill_inject.clone() {
+        return Some(LineAction::SkillInject(info));
+    }
+    collected.clarify.clone().map(LineAction::Clarify)
 }
 
 /// 摘要行：`metadata.summary` 优先；缺省回退 `content` 首行截断（不跨行）。

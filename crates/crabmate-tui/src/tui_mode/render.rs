@@ -428,7 +428,7 @@ fn selected_row(st: &UiState, text: String, selected: bool) -> Line<'static> {
 }
 
 /// 给一块区域整体铺背景色（先于文字绘制，杜绝段落内容不足时的底色缺口）。
-fn paint_bg(frame: &mut Frame, rect: Rect, color: Color) {
+pub(super) fn paint_bg(frame: &mut Frame, rect: Rect, color: Color) {
     if rect.is_empty() {
         return;
     }
@@ -574,9 +574,12 @@ pub(super) fn render_body_and_overlays(
     spin: Option<usize>,
 ) {
     render_body(frame, st, body_area, prepared, spin);
-    // 浮层压 transcript，`/` 菜单让位给浮层：两者互斥，写成一支而不是两个 if。
+    // 浮层压 transcript，`/` 菜单让位给浮层：三者互斥，写成一条链而不是嵌套 if。
+    // 问卷排在审批之后：两者都是模态，但审批是流内阻塞门，先解决它。
     if st.approval.is_some() {
         render_approval_overlay(frame, st, body_area);
+    } else if st.clarify_open && st.clarify.is_some() {
+        super::clarify::render_clarify_overlay(frame, st, body_area);
     } else {
         super::slash_menu::render_slash_menu(frame, st, body_area);
     }

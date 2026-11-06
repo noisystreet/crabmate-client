@@ -6,9 +6,9 @@
 
 use crate::serve::approval::{ApprovalDecision, ApprovalGate, CommandApprovalData};
 use crate::serve::chat_classify::LineAction;
-use crate::serve::chat_stream::StreamSink;
 use crate::serve::client::ServeClient;
 use crate::serve::error::TermError;
+use crate::serve::stream_sink::StreamSink;
 
 /// 单行动作的副作用分派：审批分支要 `await`，其余走 [`dispatch_sink_action`]。
 pub(crate) async fn dispatch_line_action(
@@ -54,7 +54,8 @@ fn dispatch_sink_action(action: LineAction, sink: &mut dyn StreamSink) -> Result
         // 已由 `dispatch_note_action` 处理；同上，只为穷尽。
         LineAction::PromptTokens(_)
         | LineAction::ContextTrim { .. }
-        | LineAction::SkillInject(_) => {
+        | LineAction::SkillInject(_)
+        | LineAction::Clarify(_) => {
             debug_assert!(false, "旁注类动作应由 dispatch_note_action 处理")
         }
     }
@@ -63,7 +64,7 @@ fn dispatch_sink_action(action: LineAction, sink: &mut dyn StreamSink) -> Result
 
 /// 旁注 / 用量类的分派：处理后返回 `None`，其余动作原样交回正文分派。
 ///
-/// 这三类（用量快照 / 水位回落 / skill）都是「不写正文，只动状态或落一行旁注」，
+/// 这四类（用量快照 / 水位回落 / skill / 澄清问卷）都是「不写正文，只动状态或落一行旁注」，
 /// 与正文 action 的处置方式不同；单独一支免得正文那张表跟着旁注种类一起膨胀。
 fn dispatch_note_action(
     action: LineAction,
@@ -73,6 +74,7 @@ fn dispatch_note_action(
         LineAction::PromptTokens(snap) => sink.on_prompt_tokens(&snap).map(|()| None),
         LineAction::ContextTrim { after } => sink.on_context_trim(after).map(|()| None),
         LineAction::SkillInject(info) => sink.on_skill_inject(&info).map(|()| None),
+        LineAction::Clarify(info) => sink.on_clarify(&info).map(|()| None),
         other => Ok(Some(other)),
     }
 }

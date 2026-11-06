@@ -430,14 +430,7 @@ fn parse_clarification_questionnaire(data: &serde_json::Value) -> ClarificationQ
         .and_then(|q| q.as_array())
         .map(|arr| {
             arr.iter()
-                .filter_map(|f| {
-                    Some(ClarificationFormField {
-                        id: f.get("id")?.as_str()?.to_string(),
-                        label: f.get("label")?.as_str()?.to_string(),
-                        hint: f.get("hint")?.as_str().map(str::to_string),
-                        required: f.get("required").and_then(|r| r.as_bool()).unwrap_or(false),
-                    })
-                })
+                .filter_map(ClarificationFormField::from_ag_ui)
                 .collect()
         })
         .unwrap_or_default();

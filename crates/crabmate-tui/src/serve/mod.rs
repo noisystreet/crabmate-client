@@ -14,6 +14,8 @@ mod error;
 mod json_api;
 mod session_store;
 mod sessions;
+// 流回调 trait 单独成文件：`chat_stream` 贴着 920 行门禁，而加一个事件就要在里面占十来行。
+mod stream_sink;
 mod url;
 pub(crate) mod user_data;
 mod workspace;
@@ -23,14 +25,19 @@ pub use approval::{
 };
 pub use chat_stream::{
     ChatStreamArgs, ChatStreamOptions, ChatStreamOutcome, ClientLlm, ClientLlmFields, StreamCancel,
-    StreamResume, StreamSink, run_chat_stream, run_chat_stream_sink,
+    StreamResume, run_chat_stream, run_chat_stream_sink,
 };
 pub use client::ServeClient;
+pub use stream_sink::StreamSink;
+// 澄清问卷（issue #424）：题面类型与作答状态都来自共享层，这里转出给 `tui_mode` 用 ——
+// 前者是 SSE 事件载荷，后者承载「草稿 + 必填校验 + 序列化」。
 pub use config::{BearerSource, ConnectionConfig};
 pub use conversation::{
     ConversationMessagesResponse, fetch_all_pages, fetch_conversation_messages,
     write_permission_level,
 };
+pub use crabmate_client_api::clarify_form::PendingClarification;
+pub use crabmate_client_api::sse_dispatch::ClarificationQuestionnaireInfo;
 pub use ctl::{add_instance, list_instances, primary_binding, same_api_base, set_instance_enabled};
 pub use error::TermError;
 pub use session_store::set_session_conversation_store;

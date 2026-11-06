@@ -9,6 +9,7 @@ pub mod approval;
 pub mod auth;
 pub mod chat_body;
 pub mod chat_export;
+pub mod clarify_form;
 pub mod client_llm_presets;
 pub mod connections;
 pub mod context_axis;

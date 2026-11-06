@@ -100,6 +100,11 @@ pub(super) enum UiEvent {
     /// 本轮注入的 skill（`timeline_log` 的 `kind=context_inject` 且 `detail.skills` 非空）：
     /// UI 落一行技能行（对齐 Desktop 的 skill 卡，ADR 0003）。
     SkillInject(crabmate_client_api::timeline_skill::SkillInjectInfo),
+    /// 澄清问卷题面到达（`clarification_questionnaire`，issue #424）。
+    ///
+    /// **不是**审批那种阻塞门：UI 只把它记成「待填」，用户在浮层里答完后，
+    /// 答案随下一条 `POST /chat/stream` 走 `clarify_questionnaire_answers`。
+    Clarify(crabmate_client_api::sse_dispatch::ClarificationQuestionnaireInfo),
     /// 回合末补的用量快照（`GET /conversation/messages` 的 `tiktoken_prompt_tokens`）。
     ///
     /// 与 [`UiEvent::PromptTokens`] 同口径，但**带 `conversation_id`**：这条回包是异步的，

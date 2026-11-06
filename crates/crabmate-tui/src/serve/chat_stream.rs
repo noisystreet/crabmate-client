@@ -21,6 +21,7 @@ use crate::serve::chat_classify::classify_line;
 use crate::serve::chat_dispatch::dispatch_line_action;
 use crate::serve::client::ServeClient;
 use crate::serve::error::TermError;
+use crate::serve::stream_sink::StreamSink;
 
 /// 一轮 `/chat/stream` 结束后的摘要。
 #[derive(Debug, Clone, Default)]
@@ -91,6 +92,11 @@ pub struct ChatStreamOptions {
     /// 跟随 server 时 `None` 不发，语义对齐 Desktop `readonly_tool_ttl_cache_secs_for_chat_body`）。
     pub readonly_tool_ttl_cache_secs: Option<u64>,
     pub stream_resume: Option<StreamResume>,
+    /// 澄清问卷的逐题作答（issue #424）：`{ questionnaire_id, answers }`。
+    ///
+    /// 只有「提交问卷」那一条请求带它 —— 用户答完的下一轮就是本轮请求，服务端据此
+    /// 把答案接回上一轮留下的 `questionnaire_id`。普通回合恒 `None`（不发该键）。
+    pub clarify_questionnaire_answers: Option<serde_json::Value>,
 }
 
 /// `client_llm` 覆盖的 owned 字段；空白值不发送（规则与 [`ClientLlm`] 一致）。
@@ -128,74 +134,9 @@ impl From<&ChatStreamArgs<'_>> for ChatStreamOptions {
             temperature: None,
             readonly_tool_ttl_cache_secs: None,
             stream_resume: a.stream_resume,
+            // 文本 / REPL 路径没有问卷浮层（`on_clarify` 的默认实现是忽略），恒不带。
+            clarify_questionnaire_answers: None,
         }
-    }
-}
-
-/// 流增量 → 事件回调。文本模式（`chat`/`repl`）用写回 stdout/stderr 的实现；
-/// 全屏 `tui` 用一个发往 UI 事件通道的实现。
-pub trait StreamSink {
-    /// 助手正文增量（`TEXT_MESSAGE_CONTENT` / 未分类 Plain 行）。
-    fn on_text(&mut self, delta: &str) -> Result<(), TermError>;
-    /// 思维链增量（`REASONING_MESSAGE_CONTENT`）。
-    fn on_reasoning(&mut self, delta: &str) -> Result<(), TermError>;
-    /// 系统行（如 Ctrl+C 停止提示）；文本模式写 stderr，全屏显示为 transcript 系统行。
-    fn on_system(&mut self, _line: &str) -> Result<(), TermError> {
-        Ok(())
-    }
-    /// 上下文用量快照（`tiktokenPromptTokens`（`RUN_FINISHED` / `conversation_saved`））：全屏 TUI 用它更新状态行
-    /// 的上下文段与会话内水位；文本模式（`chat` / `repl`）没有状态行，默认忽略。
-    fn on_prompt_tokens(
-        &mut self,
-        _snap: &crabmate_client_api::prompt_tokens::TiktokenPromptTokensSnapshot,
-    ) -> Result<(), TermError> {
-        Ok(())
-    }
-    /// 上下文用量**回落**（`timeline_log` 的 `kind=context_trim`，携带裁剪后的 `used_input_tokens`）：
-    /// 全屏 TUI 用它把会话内水位从旧的峰值降下来；文本模式无状态行，默认忽略。
-    fn on_context_trim(&mut self, _after: u32) -> Result<(), TermError> {
-        Ok(())
-    }
-    /// 本轮注入的 skill（`timeline_log` 的 `kind=context_inject` 且 `detail.skills` 非空）：
-    /// 全屏 TUI 落一行技能行（对齐 Desktop 的 skill 卡）；文本模式默认忽略——
-    /// 它没有卡片，过程行已经能把这一轮讲清楚。
-    fn on_skill_inject(
-        &mut self,
-        _info: &crabmate_client_api::timeline_skill::SkillInjectInfo,
-    ) -> Result<(), TermError> {
-        Ok(())
-    }
-    /// 工具开始（AG-UI `TOOL_CALL_START`，serve v2 协议）。文本模式默认忽略；
-    /// 全屏 TUI 用它渲染"工具行摘要"的开始态。
-    ///
-    /// `note` = 事件自带的 `summary` / `argsPreview`（「要执行什么」）。
-    fn on_tool_start(
-        &mut self,
-        _tool_call_id: &str,
-        _name: &str,
-        _note: Option<&str>,
-    ) -> Result<(), TermError> {
-        Ok(())
-    }
-    /// `TOOL_CALL_ARGS`：参数全量帧。与 `on_tool_start` 分开到达，供实现方在参数补全后
-    /// 刷新工具行文本；默认忽略（文本模式无症状）。
-    fn on_tool_args(&mut self, _tool_call_id: &str, _args: &str) -> Result<(), TermError> {
-        Ok(())
-    }
-    /// 工具结果（`TOOL_CALL_RESULT`；非 partial 收尾帧）。`ok=None` = 无结果标记；
-    /// `note` 为 serve 摘要（`metadata.summary`），缺省回退输出内容截断。
-    fn on_tool_end(
-        &mut self,
-        _tool_call_id: &str,
-        _name: &str,
-        _ok: Option<bool>,
-        _note: Option<&str>,
-    ) -> Result<(), TermError> {
-        Ok(())
-    }
-    /// 流收尾（flush 等）。
-    fn on_finished(&mut self) -> Result<(), TermError> {
-        Ok(())
     }
 }
 
@@ -304,6 +245,23 @@ impl StreamSink for TextStreamSink<'_> {
         Ok(())
     }
 
+    /// 澄清问卷（issue #424）：文本模式必须**至少说出来**。
+    ///
+    /// 默认实现是空操作，而症状与 issue 修的那个「静默丢弃」一模一样：用户只看到
+    /// 工具行，服务端在等一份谁也不会提交的问卷。`chat` 一轮即退出，`repl` 的下一行
+    /// 会被当成普通消息，所以这里只提示换 `tui`，不假装能答。
+    fn on_clarify(
+        &mut self,
+        info: &crabmate_client_api::sse_dispatch::ClarificationQuestionnaireInfo,
+    ) -> Result<(), TermError> {
+        let _ = writeln!(
+            self.err,
+            "模型请求澄清（{} 题）：文本模式无法作答，请用 `crabmate-tui tui` 打开表单",
+            info.fields.len()
+        );
+        Ok(())
+    }
+
     fn on_finished(&mut self) -> Result<(), TermError> {
         let _ = self.out.flush();
         let _ = self.err.flush();
@@ -365,6 +323,10 @@ fn chat_stream_body(opts: &ChatStreamOptions) -> Value {
             "job_id": r.job_id,
             "after_seq": r.after_seq,
         });
+    }
+    // 只在提交问卷那一轮出现：普通回合不带该键，服务端按键存在性解析不受影响。
+    if let Some(cq) = opts.clarify_questionnaire_answers.as_ref() {
+        body["clarify_questionnaire_answers"] = cq.clone();
     }
     body
 }
@@ -629,6 +591,45 @@ mod tests {
             self.seen.push(req.clone());
             Ok(self.decision)
         }
+    }
+
+    /// 问卷答案只在**提交那一轮**出现；普通回合不带该键（服务端按键存在性解析）。
+    #[test]
+    fn clarify_answers_ride_only_the_submitting_turn() {
+        let plain = ChatStreamOptions {
+            message: "继续".into(),
+            ..ChatStreamOptions::default()
+        };
+        assert!(
+            chat_stream_body(&plain)
+                .get("clarify_questionnaire_answers")
+                .is_none(),
+            "普通回合不该带问卷答案"
+        );
+
+        let answering = ChatStreamOptions {
+            message: "（已回答澄清问卷）".into(),
+            clarify_questionnaire_answers: Some(serde_json::json!({
+                "questionnaire_id": "q-42",
+                "answers": {"name": "crabmate"}
+            })),
+            ..ChatStreamOptions::default()
+        };
+        let body = chat_stream_body(&answering);
+        assert_eq!(
+            body["clarify_questionnaire_answers"]["questionnaire_id"],
+            "q-42"
+        );
+        assert_eq!(
+            body["clarify_questionnaire_answers"]["answers"]["name"],
+            "crabmate"
+        );
+        // 题面本身不发回去：服务端按 `questionnaire_id` 认领，重发会撑大请求体。
+        assert!(
+            body["clarify_questionnaire_answers"]
+                .get("fields")
+                .is_none()
+        );
     }
 
     #[test]
