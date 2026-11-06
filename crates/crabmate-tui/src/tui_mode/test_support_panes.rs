@@ -73,7 +73,9 @@ mod tests {
     use std::borrow::Cow;
     use std::sync::mpsc;
 
-    use super::test_template;
+    use std::collections::BTreeMap;
+
+    use super::{test_draft_store, test_template};
     use crate::tui_mode::LaneApp;
     use crate::tui_mode::pane_width::PaneWidths;
     use crate::tui_mode::test_support::test_client;
@@ -111,5 +113,58 @@ mod tests {
             stored,
             "渲染读的是同一份，不是又一份默认值"
         );
+    }
+
+    /// 装配接线（#430）：本机草稿真的进了 `Drafts`，**而且**未绑定槽那句回到了输入框。
+    ///
+    /// 只进 `Drafts` 是不够的：启动时没有会话切换，输入框不会自己变成表里那份 —— 而
+    /// 「打到一半就退出」正是最常见的场景，所以这里测的必须是 `st.input`。
+    #[test]
+    fn assemble_restores_the_unbound_draft_into_the_composer() {
+        let client = test_client();
+        let api_base = client.config().api_base.clone();
+        let (tx, _rx) = mpsc::channel();
+        let (job_tx, _job_rx) = mpsc::channel();
+
+        let store = test_draft_store();
+        store
+            .save_partition(
+                &api_base,
+                &BTreeMap::from([(String::new(), "打到一半".to_string())]),
+            )
+            .expect("seed draft");
+
+        let mut template = test_template(PaneWidths::DEFAULT, tx);
+        template.draft_store = store;
+        let lane = LaneApp::assemble(
+            LaneId(2),
+            "local".to_string(),
+            Cow::Borrowed(&client),
+            &template,
+            job_tx,
+            JobCancel::default(),
+        );
+        assert_eq!(
+            lane.st.input_snapshot(),
+            "打到一半",
+            "上次没发出去的那句要回到输入框，而不是只在草稿表里躺着"
+        );
+    }
+
+    /// 没有存过草稿时输入框保持空的（别把「表里没有」当成空串写进去）。
+    #[test]
+    fn assemble_keeps_the_composer_empty_without_a_stored_draft() {
+        let client = test_client();
+        let (tx, _rx) = mpsc::channel();
+        let (job_tx, _job_rx) = mpsc::channel();
+        let lane = LaneApp::assemble(
+            LaneId(3),
+            "local".to_string(),
+            Cow::Borrowed(&client),
+            &test_template(PaneWidths::DEFAULT, tx),
+            job_tx,
+            JobCancel::default(),
+        );
+        assert!(lane.st.input_snapshot().is_empty());
     }
 }
