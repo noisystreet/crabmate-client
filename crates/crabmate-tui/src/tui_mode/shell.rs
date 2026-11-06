@@ -24,6 +24,7 @@ use crabmate_client_api::ctl::{ToggleFailure, ToggleOutcome};
 use crate::SessionPrefs;
 use crate::serve::{ConnectionConfig, ServeClient};
 
+use super::drafts::store::DraftStore;
 use super::inbound::{Inbound, ShellEvent};
 use super::state::LineKind;
 use super::worker::{LaneId, UiEvent, spawn_key_reader, spawn_worker};
@@ -107,12 +108,15 @@ pub async fn run_tui(
     // 列宽目的地与初值在**这里**各算一次（issue #407 的 P2）：拖拽结束是高频动作，
     // 不该每次去读环境变量；「有没有地方可存」也是启动时的一次性事实。
     let pane_sink = pane_store::PaneStore::from_env();
+    // 草稿同理（issue #430）：目的地算一次，写盘发生在切会话 / 退出。
+    let draft_sink = DraftStore::from_env();
     let template = LaneTemplate {
         overrides: overrides.clone(),
         yes,
         no_keyring,
         pane: pane_sink.load(),
         pane_store: pane_sink,
+        draft_store: draft_sink,
         bearer: lanes_spec
             .first()
             .map(|(_, c)| c.config().bearer_token.clone())

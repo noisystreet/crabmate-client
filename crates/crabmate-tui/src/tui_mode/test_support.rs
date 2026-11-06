@@ -22,7 +22,7 @@ use super::{LaneApp, TuiApp};
 #[path = "test_support_panes.rs"]
 mod panes;
 
-use self::panes::{test_pane_store, test_template};
+use self::panes::{test_draft_store, test_pane_store, test_template};
 
 /// 两栏可见、默认宽度（宽屏用例的基准版面）。
 ///
@@ -118,7 +118,7 @@ pub(super) fn lane_with_tx<'a>(
         yes: true,
         no_keyring: true,
         st: UiState::new(),
-        drafts: Default::default(),
+        drafts: super::drafts::Drafts::with_store(test_draft_store(), "http://test.invalid"),
         tx,
         job_tx,
         // 测试默认没有在跑的 job：`wind_down` 施加取消时是空操作。

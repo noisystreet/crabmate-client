@@ -9,6 +9,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
 
+use crate::tui_mode::drafts::store::DraftStore;
 use crate::tui_mode::inbound::Inbound;
 use crate::tui_mode::pane_store::PaneStore;
 use crate::tui_mode::pane_width::PaneWidths;
@@ -33,6 +34,20 @@ pub(super) fn test_pane_store() -> PaneStore {
     )))
 }
 
+/// 单测的草稿落盘目的地：进程内一个**唯一**的临时文件（每条 lane 一个）。
+///
+/// 理由与 [`test_pane_store`] 同：不能用 `Unavailable`（那会让每次切会话都以「草稿没能
+/// 保存」的提示收尾），也不能用 `from_env()`（切会话用例会真的写进跑测试那个人的
+/// `~/.local/state`）。
+pub(super) fn test_draft_store() -> DraftStore {
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    let nth = NEXT.fetch_add(1, Ordering::Relaxed);
+    DraftStore::at(std::env::temp_dir().join(format!(
+        "crabmate-tui-drafts-test-{}-{nth}.json",
+        std::process::id()
+    )))
+}
+
 /// 装配模板（启动与 `/lane attach|new` 共用同一份字段清单）。
 ///
 /// `pane` 可覆盖：测试要能直接问「落盘的宽度有没有进到新 lane 里」，而默认值会让
@@ -44,6 +59,7 @@ pub(super) fn test_template(pane: PaneWidths, tx: mpsc::Sender<Inbound>) -> Lane
         no_keyring: true,
         pane,
         pane_store: test_pane_store(),
+        draft_store: test_draft_store(),
         bearer: String::new(),
         // 测试连接没有显式 Bearer：面板「连接」栏显示「未提供」，与真实启动
         // （钥匙串没命中）同一状态。
