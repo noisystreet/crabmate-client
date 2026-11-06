@@ -10,6 +10,7 @@ use super::*;
 fn base_info(api_base: &str) -> StatusInfo {
     StatusInfo {
         editor_open: false,
+        workspace: None,
         api_base: api_base.into(),
         model: None,
         role: None,
@@ -646,4 +647,120 @@ fn status_bar_has_no_lanes_segment() {
     // 宽到足够放下所有段：不是挤掉的，是本来就不画。
     let text = status_text(&info, 200);
     assert!(!text.contains("lanes"), "lanes 段应只在左栏标题：{text}");
+}
+
+// ---- 窄屏工作区段（issue #425）----
+
+/// 只在左右栏隐藏时给值：宽屏右栏标题已经写着同一个名字，状态栈行预算又正好用满。
+#[test]
+fn narrow_workspace_text_only_fires_when_sidebars_are_hidden() {
+    assert_eq!(
+        narrow_workspace_text(true, Some("/data/proj")),
+        None,
+        "宽屏不重复：标题里已经有了"
+    );
+    assert_eq!(
+        narrow_workspace_text(false, Some("/data/proj")).as_deref(),
+        Some("proj"),
+        "取 basename，不把绝对路径塞进底栏"
+    );
+    // 尾斜杠与首尾空白：与右栏标题共用 `workspace_basename` + trim 的口径。
+    assert_eq!(
+        narrow_workspace_text(false, Some("  /data/proj/  ")).as_deref(),
+        Some("proj")
+    );
+}
+
+/// 未设置工作区时窄屏**不是空白**：宽屏右栏有显式 not-set，窄屏不能反而更差。
+#[test]
+fn narrow_workspace_text_says_unset_instead_of_blank() {
+    for path in [None, Some(""), Some("   ")] {
+        assert_eq!(
+            narrow_workspace_text(false, path).as_deref(),
+            Some(WS_UNSET_TEXT),
+            "空值要画成「未设置」，不是一片空白（那读起来像程序不知道）"
+        );
+    }
+}
+
+/// 超长目录名先截自己：别拿 `perm` 的列去换一个目录名。
+#[test]
+fn narrow_workspace_text_truncates_long_names() {
+    let long = format!("/data/{}", "a".repeat(60));
+    let text = narrow_workspace_text(false, Some(&long)).expect("窄屏有值");
+    assert!(
+        unicode_width::UnicodeWidthStr::width(text.as_str()) <= WS_MAX_W,
+        "截到 {WS_MAX_W} 列以内，实际 {text}"
+    );
+}
+
+/// 段真的画出来了：非宽屏时状态行含 `ws <名字>`。
+#[test]
+fn status_line_shows_the_workspace_segment_on_narrow_screens() {
+    let mut info = base_info("http://127.0.0.1:8080");
+    info.workspace = narrow_workspace_text(false, Some("/data/proj"));
+    let text = status_text(&info, 200);
+    assert!(text.contains("ws proj"), "{text}");
+}
+
+/// `workspace: None`（宽屏）时这一段根本不出现。
+#[test]
+fn status_line_hides_the_workspace_segment_on_wide_screens() {
+    let info = base_info("http://127.0.0.1:8080");
+    let text = status_text(&info, 200);
+    assert!(!text.contains("ws "), "宽屏不该冒出 ws 段：{text}");
+}
+
+/// 条件段的代价：窄屏比宽屏**多且只多一段**（其余段一个不多、一个不少）。
+///
+/// 这条是「段恒在」那个决定的可执行版本：`view` 段靠恒在让纵版行数与鼠标命中共用同一份
+/// `visible_segments`，而 `ws` 段只在窄屏存在 —— 能这么做的前提是窄屏不画状态栈。
+#[test]
+fn the_workspace_segment_is_the_only_extra_one_on_narrow_screens() {
+    let mut info = base_info("http://127.0.0.1:8080");
+    info.permission = Some("read".into());
+    let wide = environment_segments(&info, 200);
+    info.workspace = narrow_workspace_text(false, Some("/p"));
+    let narrow = environment_segments(&info, 200);
+    assert_eq!(narrow.len(), wide.len() + 1, "窄屏多且只多一段");
+    assert_eq!(
+        narrow.first().map(|s| s.label),
+        wide.first().map(|s| s.label),
+        "首段仍是 `view`（与 Desktop 同序）"
+    );
+}
+
+/// 80 列（最常见的窄终端）下 `ws` 与 `perm` 共存 —— issue #425 的主要目标宽度。
+///
+/// `perm` 提到 `serve` 同档（见 `priority::PERM`）之后，它的出现宽度从 100 前移到 80，
+/// 代价是 `model` / `ctx` 顺延 —— 这两项在窄屏里本来也排不上号。
+#[test]
+fn at_eighty_columns_workspace_and_perm_both_fit() {
+    let mut info = base_info("http://127.0.0.1:8080");
+    info.permission = Some("approved".into());
+    info.workspace = narrow_workspace_text(false, Some("/data/crabmate-client"));
+    let text = status_text(&info, 80);
+    assert!(text.contains("ws crabmate-clie"), "{text}");
+    assert!(text.contains("perm approved"), "{text}");
+}
+
+/// 60 列是物理下限：`serve` + `ws` 就吃掉预算，`perm` 进不来。
+///
+/// 这条**故意**把取舍钉死，而不是让它默默发生：50 列左右的预算里换任何一段进来都要挤掉
+/// 另一段，此处取 `ws`（窄屏下它是工作区名的唯一来源，而权限档位在宽屏状态栈、
+/// `/permission` 与审批弹窗里都还有出路）。80 列起两者共存，是上面那条测的。
+#[test]
+fn at_sixty_columns_the_budget_cannot_hold_both() {
+    let mut info = base_info("http://127.0.0.1:8080");
+    info.permission = Some("approved".into());
+    info.workspace = narrow_workspace_text(false, Some("/data/crabmate-client"));
+    let text = status_text(&info, 60);
+    assert!(
+        text.contains("ws crabmate-clie"),
+        "60 列 `ws` 仍要可见：{text}"
+    );
+    assert!(
+        !text.contains("perm approved"),
+        "60 列放不下 `perm`（已知下限，取舍见 `priority::PERM`）：{text}"
+    );
 }

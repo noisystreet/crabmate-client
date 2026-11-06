@@ -13,6 +13,8 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Added
 
+- **TUI: the narrow layout now tells you which workspace you are in.** Below `SIDEBAR_MIN_WIDTH` (120 columns) both side columns vanish, and the workspace name lived only in the right column's title — so a narrow or split terminal could not answer 「where do my commands run」 without a `/workspace` round-trip. The bottom status bar gains a `ws <basename>` segment (`ws 未设置` when no root is set, so narrow is never worse than wide). It only appears when the side columns are hidden: on wide terminals the title already says it, and the status stack's 9-row budget is full. `perm` moves up to share `serve`'s priority, which pulls it from 100 to 80 columns; the honest cost is that at ≈60 columns the budget cannot hold both `ws` and `perm`, and `ws` wins there. No protocol change.
+
 - **TUI: a draft left on a switched-away conversation now survives a restart.** The per-conversation draft table was memory-only, so quitting dropped everything except the focused conversation's text. It now persists to `$XDG_STATE_HOME/crabmate/tui-drafts.json` (`CM_TUI_DRAFTS_FILE` overrides) on session switch and on exit, and is read back when a lane is assembled. Entries are partitioned by `api_base`, so the same conversation id on two serves never leaks across. Writes are not per keystroke (a crash loses at most what was typed since the last switch), a corrupt file falls back to empty instead of failing startup, and the local copy never overwrites the server-side session-index draft. Cost: one module plus two fields on `Drafts`. No protocol change.
 
 ## [0.8.0-alpha.3] - 2026-11-06

@@ -281,6 +281,7 @@ mod tests {
     fn info() -> StatusInfo {
         StatusInfo {
             editor_open: false,
+            workspace: None,
             api_base: "http://127.0.0.1:8080".into(),
             model: Some("gpt-x".into()),
             role: Some("coder".into()),

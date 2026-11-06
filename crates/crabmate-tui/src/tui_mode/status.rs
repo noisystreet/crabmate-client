@@ -17,7 +17,7 @@ use ratatui::text::{Line, Span};
 use unicode_width::UnicodeWidthStr;
 
 use super::palette::Palette;
-use super::render::{StatusInfo, truncate_display};
+use super::render::{StatusInfo, truncate_display, workspace_basename};
 
 /// 生成中 spinner 帧（Braille 点阵，均 1 列宽，不破坏右对齐与截断计算）。
 pub(super) const SPINNER_FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -34,6 +34,18 @@ mod priority {
     pub(super) const FIND: u8 = 0;
     pub(super) const VIEW: u8 = 1;
     pub(super) const SERVE: u8 = 2;
+    /// 窄屏工作区指示（issue #425）：只在左右栏隐藏时才存在这一段。
+    ///
+    /// 与 `SERVE` **同档**：两者回答的是同一类问题 ——「这一屏在哪儿」（连的哪台 serve、
+    /// 命令跑在哪个项目里）。这也是**实测**逼出来的值：先按「`perm` 之后」的 8 试过，
+    /// 119 列才排得上号 —— 而 119 列已经贴到「左右栏显示」的边界，等于这条 issue 白做。
+    ///
+    /// **这个位置有代价，说白**：极窄终端（≈60 列，扣掉右缘运行指示只剩约 50 列）下
+    /// `serve` + `ws` 就把预算吃光，`perm` 可能让位。issue 里「`perm` 是安全相关，必须最后
+    /// 才丢」与「让它先于 `ctx` / `find` / `perm` 被裁掉是本末倒置」在 50 列内不可兼得 ——
+    /// 取后者：这一行是窄屏工作区名的**唯一**来源，而权限档位在宽屏状态栈、`/permission`
+    /// 与审批弹窗里都还有别的出路。
+    pub(super) const WORKSPACE: u8 = 2;
     pub(super) const MODEL: u8 = 3;
     // 上下文用量比 mode / role 更常被盯：窄屏时先丢后两者。
     pub(super) const CONTEXT: u8 = 4;
@@ -41,11 +53,17 @@ mod priority {
     /// 思考模式：与 `mode` 同属「一进界面就知道」，但一回合内可能反复开关，
     /// 比 `role` 更常被瞄一眼；排在 `mode` 之后、`role` 之前。
     pub(super) const THINKING: u8 = 6;
-    /// 权限等级：常驻但对"现在该干什么"没有影响（它是授权上限，不是当前动作）。
+    /// 权限等级：**安全读数，与 `serve` 同档先保住**。
     ///
-    /// **排在 `role` 之前**：`role` 自本轮起恒显（缺值画 `默认`，见 [`DEFAULT_ROLE_TEXT`]），
-    /// 成了一条永远占位的环境事实 —— 窄屏该让位的是它，而不是这条安全读数。
-    pub(super) const PERM: u8 = 7;
+    /// 原来是 7（排在 `ctx` / `mode` 之后、只在 `role` 之前），注释的理由是「它是授权上限，
+    /// 不是当前动作」。这条在 #425 被推翻：加上 `ws` 段后，100–118 列这一整段窗口里
+    /// `perm` 会被顶掉，而 issue 自己写着「`perm` 是安全相关，必须最后才丢」。按那个口径
+    /// 提到 `serve` / `ws` 同级 —— 显示顺序上 `perm` 是第 2 段，同值时先于 `model` / `ctx`。
+    ///
+    /// 仍然让不掉的物理下限：≈60 列（扣掉右缘运行指示只剩约 50 列）连
+    /// `serve` + `ws` 都勉强，`perm` 在那里确实进不来，见 `status_tests` 的
+    /// `at_sixty_columns_the_budget_cannot_hold_both`。
+    pub(super) const PERM: u8 = 3;
     /// 角色：与 Desktop 那颗「角色」chip 对齐，缺值画 `默认`，因此恒占位。
     /// 优先级排在 `perm` 之后：它是「一进界面就知道」的环境事实，让位代价最小。
     pub(super) const ROLE: u8 = 8;
@@ -92,6 +110,45 @@ pub(super) const DEFAULT_ROLE_TEXT: &str = "默认";
 /// 而且这一段是**开关**，词形要能一眼对上 `/chat` 与 `/editor` 两个命令。
 pub(super) fn view_text(editor_open: bool) -> String {
     if editor_open { "file" } else { "chat" }.to_string()
+}
+
+/// `workspace` 段的 label（只有窄屏才出现，见 [`narrow_workspace_text`]）。
+///
+/// 2 列，落在状态栈 5 列的定宽 label 列内（`labels_fit_the_fixed_column` 会守）。
+pub(super) const WS_LABEL: &str = "ws";
+
+/// 工作区未设置时的段值。
+///
+/// 对齐右栏的 not-set 提示（`ws_sidebar` 的「未设置：p 选项目池 · r刷」）：宽屏有显式的
+/// 「没设」，窄屏就不能退回一片空白 —— 那读起来像「程序不知道」，而实际是「确实没设」。
+pub(super) const WS_UNSET_TEXT: &str = "未设置";
+
+/// 窄屏工作区名的最大显示宽。
+///
+/// 超长目录名先截自己：状态行是「装不下就整段丢掉」的按优先级竞争，不截的话一个
+/// `my-really-long-project-name` 会把 `perm` 挤出去 —— 拿安全读数换一个目录名不划算。
+const WS_MAX_W: usize = 14;
+
+/// 窄屏工作区段的取值：`None` = 不显示这一段。
+///
+/// **只在一侧栏隐藏时给值**：宽屏的右栏标题（`ws_sidebar::workspace_title`）已经写着同一个
+/// 名字，而状态栈的 9 段行预算正好用满 —— 为一段重复信息挤掉 `ctx` / `find` 是本末倒置。
+/// 窄屏则相反：左右栏都没了，这是工作区名**唯一**的落点。
+///
+/// 判断条件与取值放在同一个函数里，调用方只传实况：两处各判一次，第一天就会漂成
+/// 「宽屏也冒出一段 ws」。
+///
+/// 取 `basename`（与右栏标题同一份规则，见 [`workspace_basename`]），不硬塞绝对路径。
+pub(super) fn narrow_workspace_text(sidebars_visible: bool, path: Option<&str>) -> Option<String> {
+    if sidebars_visible {
+        return None;
+    }
+    let name = path
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .map(workspace_basename)
+        .unwrap_or_else(|| WS_UNSET_TEXT.to_string());
+    Some(truncate_display(&name, WS_MAX_W))
 }
 
 /// 段间分隔符（极暗竖线，与 A6 的分隔线同色系）。
@@ -221,6 +278,15 @@ pub(super) fn environment_segments(info: &StatusInfo, budget: usize) -> Vec<Segm
         value: serve_value(&info.api_base, budget),
         priority: priority::SERVE,
     });
+    // 窄屏才有值（宽屏 `narrow_workspace_text` 返回 `None`）：显示顺序紧挨 `serve`，
+    // 两者都是「这一屏在哪儿」的定位信息，放在一起才不用扫两遍。
+    if let Some(v) = info.workspace.as_deref() {
+        out.push(Segment {
+            label: WS_LABEL,
+            value: v.to_string(),
+            priority: priority::WORKSPACE,
+        });
+    }
     if let Some(v) = info.model.as_deref() {
         out.push(Segment {
             label: "model",
