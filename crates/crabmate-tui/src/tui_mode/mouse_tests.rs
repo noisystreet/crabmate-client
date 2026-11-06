@@ -465,6 +465,14 @@ fn clicking_the_perm_segment_opens_a_menu_anchored_to_that_row() {
 }
 
 /// 窄屏：`perm` 段在底栏那一行，锚点整段落在底栏内。
+///
+/// **宽度从 60 提到 110**：`ws` 段（#425）与 `perm` 同为窄屏底栏的信息段，而 60 列扣掉
+/// 右缘运行指示只剩约 50 列 —— `serve` + `ws` 就吃掉了，`perm` 整段让位（真实取舍见
+/// `status::priority::WORKSPACE`）。这条测的是**命中链与渲染同源**，不是「60 列还剩几段」，
+/// 所以取一个能同时容纳两者的窄屏宽度（110 < `SIDEBAR_MIN_WIDTH`，仍是窄屏）。
+///
+/// 60 列下点不到 `perm` 这件事本身由 `status_tests` 的
+/// `at_sixty_columns_the_budget_cannot_hold_both` 显式钉住，不让它悄悄溜走。
 #[test]
 fn clicking_the_perm_segment_opens_a_menu_on_the_bottom_bar() {
     let client = test_client();
@@ -472,7 +480,7 @@ fn clicking_the_perm_segment_opens_a_menu_on_the_bottom_bar() {
     let (tx, rx) = mpsc::channel();
     let (job_tx, _job_rx) = mpsc::channel();
     let mut app = test_app(&client, &mut prefs, rx, tx, job_tx);
-    app.last_size = (60, 20);
+    app.last_size = (110, 20);
     app.st.sidebar_visible = false;
     app.st.serve_defaults = Some(defaults_with_permission("approved"));
     let (w, h) = app.last_size;

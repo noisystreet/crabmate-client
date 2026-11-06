@@ -43,48 +43,12 @@ pub(super) const SIDEBAR_DELETE_HINT: &str = "[y] 删除 [Esc] 取消";
 const MAX_COMPOSER_ROWS: usize = 4;
 // 配色见 [`Palette`]：状态栏 / 侧栏 / composer 用 `chrome_bg`，聊天区用 `bg`；正文 / 次要 / 强调 = `fg` / `muted` / `accent`（随 Desktop 主题）。
 
-/// 状态行展示信息（mod 层组装好的显示值，含 override 标记）。
-///
-/// 派生 `Default` 是给测试 fixture 用的：它们的任务是"其余字段取中性值"，
-/// 每加一个字段就让十来处 `StatusInfo { .. }` 各补一行，pure noise（而且 fn-nloc
-/// 把整个 `mod tests` 当一个函数，补一行就可能越界）。
-#[derive(Clone, Default)]
-pub struct StatusInfo {
-    pub api_base: String,
-    /// 生效模型；本地 override 时带 `*` 后缀。
-    pub model: Option<String>,
-    pub role: Option<String>,
-    pub mode: Option<String>,
-    /// 思考模式，**已按 Desktop 状态栏开关的口径归一化**（`开` / `关`）；线格式
-    /// （`on` / `off` / `server`）不漏到渲染层，两端对 `server` 同判（Desktop 只认 `on`）。
-    /// `None` = 未拉到 user-data（**不是**「关」）——画成「关」等于把「不知道」说成「关掉了」。
-    pub thinking: Option<String>,
-    pub running: bool,
-    pub cancel_sent: bool,
-    /// 生成中 spinner 帧号（事件循环按时间推进；空闲 / 取消中不显示）。
-    pub spinner: usize,
-    /// transcript 回看行数（>0 时显示 ↑N）。
-    pub view_offset: usize,
-    /// 活跃搜索词（/find）。
-    pub search_term: Option<String>,
-    /// 搜索命中逻辑行数。
-    pub search_total: usize,
-    pub context: String,
-    /// 当前生效权限等级（线格式：`chat` / `read` / `workspace` / `approved` / `unrestricted`）。
-    ///
-    /// `None` = 不知道（老 serve 没有 `/permission`，或还没拉到）。**不要**回落到
-    /// `permission_level_default` 之类的配置值来填这个空：那是"没会话意图时会落到哪"，不是
-    /// "此刻是哪"，两者在角色上限收窄时并不相同。
-    pub permission: Option<String>,
-    /// 权限等级**意图**（本地切换选的那一档，尚未被服务端确认时与上面那个不同）。
-    ///
-    /// 与 [`Self::permission`] 分开存是为了照 Desktop chip 的口径显示「意图 → 生效」：
-    /// 服务端允许意图高于生效（min 链钳制），只显示生效档会让用户以为切换没生效；
-    /// 而把意图改写成生效值又会让下一条 `/chat` 把被钳制的低档写回会话。
-    pub permission_intent: Option<String>,
-    /// 主区是不是只读文件视图（`st.editor.open`）：`bool` 无「不知道」态，`Default` = 聊天。
-    pub editor_open: bool,
-}
+// `StatusInfo`（状态栏 / 状态栈的显示快照）单独成文件：它是纯数据 + 口径文档，与「怎么画」
+// 无关；而 `render.rs` 正贴着 920 行的文件门禁 —— `ws` 段（#425）加一个字段就撞线。
+// `pub use` 保持 `render::StatusInfo` 这条既有路径不变，调用点零改动。
+#[path = "status_view.rs"]
+mod status_view;
+pub use status_view::StatusInfo;
 
 // `BodyRow`（物理行 + 链接热区）单独成文件：`render.rs` 贴着 920 行文件门禁，
 // 而它只是数据结构与命中查询，与「怎么画」关系松散（与下面的 `prefix` 同一手法）。

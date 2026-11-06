@@ -27,7 +27,7 @@
 | G7 | 无 retry / regen / branch / 编辑用户消息（`controls.rs` 无对应命令，`tui_mode` 里无 `regen`/`branch`） | 消息回合菜单（`message_row_actions.rs`、`user_message_edit.rs`） | 模型答错只能整轮重发或手动复制改写 |
 | G8 | ~~审批浮层把命令截成一行且无法展开~~ → **已落地**：`Ctrl+E` 在 78×9 收起档与铺满主体区的展开档之间切换，展开档按显示宽折行（`text::wrap_display`）并支持 ↑/↓、PgUp/PgDn、Home/End 滚动，提示行显示「第 x-y / N 行」（`overlay.rs`） | 底部审批条可展开完整命令 + 失败保留重试（`approval_modal.rs`） | 长命令看不到全貌，易误判 |
 | G9 | 澄清问卷（`clarification_questionnaire`）在 TUI 无交互 UI：`serve/chat_classify.rs` 只有 `clarify_trace` 钩子，没有表单 | 问卷表单（Web `frontend`） | 模型需要澄清时 TUI 这侧拿不到结构化提问 |
-| G10 | 窄终端（< 120 列）下**当前工作区不可见**：左右栏按 `sidebar_visible` 隐藏（`layout.rs::panes`），而工作区名只画在右栏（`ws_sidebar.rs::workspace_title`），顶栏已删除（`tui_visual_polish.md` §11.1）；状态行（`status.rs`）与右栏状态栈都不带 workspace 字段 | 顶栏工作区名 + 面包屑 | 窄屏 / 分屏时不知道命令跑在哪个项目，得先 `/workspace` 查一次 |
+| G10 | 窄终端（< 120 列）下**当前工作区不可见**：左右栏按 `sidebar_visible` 隐藏（`layout.rs::panes`），而工作区名只画在右栏（`ws_sidebar.rs::workspace_title`），顶栏已删除（`tui_visual_polish.md` §11.1）；状态行（`status.rs`）与右栏状态栈都不带 workspace 字段 | 顶栏工作区名 + 面包屑 | 窄屏 / 分屏时不知道命令跑在哪个项目，得先 `/workspace` 查一次。**已落地（#425）**：窄屏底栏加 `ws <basename>` 段（未设置时 `ws 未设置`），宽屏不加（右栏标题已交代）；80 列起与 `perm` 共存，60 列是物理下限 |
 | ~~G11~~ | ~~上下文用量水位压缩后不回落~~ **已修**：`serve/chat_classify.rs` 接上 `notice_timeline.on_timeline_log`，`kind=context_trim` 的 `detail.after_tokens` 经共享层 `context_trim_after_used_tokens` 解析后由 `UiState::reset_used` 落到 `ContextUsedWatermark::reset`（与 Web 端同一份口径） | ~~把 `context_trim` 的 `after_tokens` 接到 `ContextUsedWatermark::reset`~~ 已完成 | ~~压缩后 `ctx` 停在旧峰值~~ 已消除；回归用例：`context_trim_custom_event_yields_reset`（分类）+ `context_trim_reads_stringified_detail` / `context_trim_reset_needs_all_three_conditions`（口径） |
 
 另有与 Desktop 同步暂缓/不做项，见 §2 非目标（勿误当缺口）。
@@ -179,7 +179,7 @@
 | W2.4 | L63「Control slashes」TUI 列/Notes | 已同步：TUI 补 `/conv export [json\|markdown\|both] [--out <路径>] [--id <id>]`（与 Desktop 同一份展示投影）；仍标 `reduced`（无系统文件对话框，路径由用户给） |
 | W3.1 | L60「Control slashes」TUI 列 | 已同步（TUI 有 `/` 补全菜单，含 skills 候选） |
 | W3.2 | L55「`POST /chat/stream` + command approval」TUI Notes | 补 `Ctrl+E` 展开看完整命令（折行 + 滚动）、收起档单行截断 |
-| W3.3 | L53「Full-screen TUI」Notes | 补「< 120 列时左右栏隐藏，当前工作区无指示」（G10，待落地） |
+| W3.3 | L53「Full-screen TUI」Notes | 补「< 120 列时左右栏隐藏，当前工作区无指示」（G10）**→ 已落地，#425**：窄屏底栏 `ws` 段 |
 | W3.3（链接） | L57「Full-screen TUI」Notes | 已同步：`Ctrl+单击` 打开正文链接（应用内命中表，不依赖 OSC 8；SSH 降级为复制；只放行 http(s)） |
 | W3.4 | L54「Full-screen TUI」Notes | 补状态栏 `ctx` 上下文用量段（`tiktokenPromptTokens`（`RUN_FINISHED` / `conversation_saved`） + 会话内水位；口径来自 S11 `client-api::context_axis`；段恒在，无实测时占位 `—`）——已同步 |
 | W3.5 | 同格 Notes | 已修（见 G11）：`timeline_log` `kind=context_trim` 的 `after_tokens` 会把水位**回落**；另加两处清理 —— `/conv new` 与切换会话时 `UiState::clear_usage` 清空快照与水位，避免新会话仍显示上一个会话的数字；新会话（无 cid）回落 `/status` 的 `tiktoken_new_session_baseline_by_agent_role` 并显示 `~` 估算前缀（对齐 Desktop）；另：首轮结束绑上 cid 后若这一轮仍无实测，回合末补拉 `GET /conversation/messages` 的快照（同 Desktop 流收尾水合，回包按 cid 门控），不再从 `~12k` 掉回 `—` |

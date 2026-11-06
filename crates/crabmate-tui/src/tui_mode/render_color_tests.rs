@@ -23,6 +23,7 @@ const H: u16 = 12;
 fn status_info() -> StatusInfo {
     StatusInfo {
         editor_open: false,
+        workspace: None,
         api_base: "http://probe".into(),
         model: Some("m".into()),
         role: None,

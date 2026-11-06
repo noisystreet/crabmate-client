@@ -303,21 +303,12 @@ fn finished_tool_row_has_no_progress_slot() {
 fn progress_mark_frame_requires_live_folded_thinking() {
     fn info(running: bool, cancel_sent: bool) -> StatusInfo {
         StatusInfo {
-            editor_open: false,
             api_base: "http://x".into(),
-            model: None,
-            role: None,
-            mode: None,
-            thinking: None,
             running,
             cancel_sent,
             spinner: 7,
-            view_offset: 0,
-            search_term: None,
-            search_total: 0,
             context: "—".to_string(),
-            permission: None,
-            permission_intent: None,
+            ..StatusInfo::default()
         }
     }
     let mut st = UiState::new();
@@ -385,6 +376,7 @@ fn finished_tool_row_without_verdict_is_not_running() {
 
     let info = StatusInfo {
         editor_open: false,
+        workspace: None,
         api_base: "http://x".into(),
         model: None,
         role: None,
