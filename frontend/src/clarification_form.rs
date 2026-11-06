@@ -1,24 +1,7 @@
-//! Web 澄清问卷：SSE 下发后的待填状态（与 `sse_dispatch::ClarificationFormField` 对齐）。
+//! Web 澄清问卷：直接复用共享层的待填状态（`crabmate_client_api::clarify_form`）。
+//!
+//! 这里只做改名转发。两侧字段与 `from_sse` 本来一字不差，各存一份的代价是下次契约
+//! 加字段（例如题型将来带上候选列表）要记得改两处 —— 漏一处就是「Web 收不到新列」。
+//! 必填校验与序列化早已共用同一份实现，结构却各写一遍只会让这种漂移更难发现。
 
-use crate::sse_dispatch::{ClarificationFormField, ClarificationQuestionnaireInfo};
-
-#[derive(Clone)]
-pub struct PendingClarificationForm {
-    pub questionnaire_id: String,
-    pub intro: String,
-    pub fields: Vec<ClarificationFormField>,
-    /// 与 `fields` 等长；用户输入草稿。
-    pub values: Vec<String>,
-}
-
-impl PendingClarificationForm {
-    pub fn from_sse(info: ClarificationQuestionnaireInfo) -> Self {
-        let n = info.fields.len();
-        Self {
-            questionnaire_id: info.questionnaire_id,
-            intro: info.intro,
-            fields: info.fields,
-            values: vec![String::new(); n],
-        }
-    }
-}
+pub use crabmate_client_api::clarify_form::PendingClarification as PendingClarificationForm;

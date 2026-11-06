@@ -40,6 +40,11 @@ mod fold;
 #[path = "state_tools.rs"]
 mod tools;
 
+// 输入框的光标与按行导航（`backspace` / 方向键 / 行首行尾 / 上下行）：纯光标算术，
+// 只碰 `input` / `cursor`，拆出去压 `state.rs` 行数（issue #424 要加 `clarify` 字段）。
+#[path = "state_cursor.rs"]
+mod cursor_edit;
+
 pub use history_page::HistoryPage;
 
 /// `/` 补全菜单的会话内状态。
@@ -104,6 +109,80 @@ impl ApprovalOverlay {
         } else {
             format!("{cmd} {args}")
         }
+    }
+}
+
+/// 澄清问卷浮层（issue #424）：待填题面 + 逐题草稿 + 当前焦点。
+///
+/// 与 [`ApprovalOverlay`] 的**根本差别**：审批是流内阻塞门（`answer` 通道一回，SSE 线程
+/// 继续），问卷则要等用户答完、在下一条请求里随 `clarify_questionnaire_answers` 回传。
+/// 所以这里没有回传通道 —— 答案由发送侧从 [`Self::form`] 取。
+///
+/// 弹窗时机是**延迟**的：问卷到达时本轮可能还在流（Server 在工具成功后补发，工具结果
+/// 还要回喂），这时弹浮层会盖住仍在写的 transcript。所以先记状态，回合结束再开。
+#[derive(Debug, Clone)]
+pub struct ClarifyOverlay {
+    /// 共享层的作答状态：题面 + 与题等长的草稿。
+    pub form: crate::serve::PendingClarification,
+    /// 当前编辑的题（0-based；渲染与编辑前都会夹到界内）。
+    pub focus: usize,
+    /// 每题的编辑光标（**字符**下标，与 `form.values` 等长）。
+    pub cursors: Vec<usize>,
+    /// 上次提交时缺的必答题下标（提示用；任何编辑 / 切换都清掉）。
+    pub error: Option<usize>,
+}
+
+impl ClarifyOverlay {
+    /// 按 SSE 下发体开一份新表单。
+    #[must_use]
+    pub fn new(info: crate::serve::ClarificationQuestionnaireInfo) -> Self {
+        let n = info.fields.len();
+        Self {
+            form: crate::serve::PendingClarification::from_sse(info),
+            focus: 0,
+            cursors: vec![0; n],
+            error: None,
+        }
+    }
+
+    /// 题数。
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.form.fields.len()
+    }
+
+    /// 当前题下标（夹过界）。
+    #[must_use]
+    pub fn focus_index(&self) -> usize {
+        self.focus.min(self.len().saturating_sub(1))
+    }
+
+    /// 切到下一题（末题回绕到首题）。`false` = 只有一题，没动。
+    pub fn focus_next(&mut self) -> bool {
+        let n = self.len();
+        if n <= 1 {
+            return false;
+        }
+        self.focus = (self.focus_index() + 1) % n;
+        self.error = None;
+        true
+    }
+
+    /// 切到上一题（首题回绕到末题）。`false` = 只有一题，没动。
+    pub fn focus_prev(&mut self) -> bool {
+        let n = self.len();
+        if n <= 1 {
+            return false;
+        }
+        self.focus = (self.focus_index() + n - 1) % n;
+        self.error = None;
+        true
+    }
+
+    /// 当前题的草稿（可变）。
+    pub fn current_mut(&mut self) -> Option<&mut String> {
+        let i = self.focus_index();
+        self.form.values.get_mut(i)
     }
 }
 
@@ -378,6 +457,12 @@ pub struct UiState {
     pub approval: Option<ApprovalOverlay>,
     /// 审批浮层里方向键选中的那一项（浮层关闭后保留，下次打开时复位）。
     pub approval_choice: ApprovalChoice,
+    /// 待填澄清问卷（issue #424）。`Some` 时按 `clarify_open` 决定是否画浮层 ——
+    /// 问卷到得比本轮结束早，先记着、别挡还在写的 transcript。
+    pub clarify: Option<ClarifyOverlay>,
+    /// 浮层是否已展开。`TurnDone` 时对未填完的问卷置真；用户 `Esc` 关掉回到 `false`
+    /// （**问卷不丢**，底栏留提示，再按键可重开）。
+    pub clarify_open: bool,
     /// 格子背景采样表（`/background` 在无像素协议的终端上退到这一档；默认 `None`）。
     ///
     /// 放 `UiState` 而不是 `LaneApp`：只有渲染层读它，这样 `draw` 的签名不必多一个参数
@@ -658,123 +743,6 @@ impl UiState {
         self.skills = None;
         self.skills_loading = false;
         self.slash = SlashMenuState::default();
-    }
-
-    pub fn backspace(&mut self) {
-        if self.cursor == 0 {
-            return;
-        }
-        let idx = self.cursor - 1;
-        self.input.remove(idx);
-        self.cursor = idx;
-    }
-
-    pub fn cursor_left(&mut self) {
-        self.cursor = self.cursor.saturating_sub(1);
-    }
-
-    pub fn cursor_right(&mut self) {
-        if self.cursor < self.input.len() {
-            self.cursor += 1;
-        }
-    }
-
-    /// Home：当前行首（单行输入等价整串开头）。
-    pub fn cursor_home(&mut self) {
-        if let Some(line_start) = self.cursor_line_start() {
-            self.cursor = line_start;
-        } else {
-            self.cursor = 0;
-        }
-    }
-
-    /// End：当前行尾（不含行尾 `\n`）。
-    pub fn cursor_end(&mut self) {
-        if let Some(line_end) = self.cursor_line_end() {
-            self.cursor = line_end;
-        } else {
-            self.cursor = self.input.len();
-        }
-    }
-
-    /// 光标行起始字符下标。
-    fn cursor_line_start(&self) -> Option<usize> {
-        self.input[..self.cursor.min(self.input.len())]
-            .iter()
-            .rposition(|&c| c == '\n')
-            .map_or(Some(0), |nl| Some(nl + 1))
-    }
-
-    /// 光标行结束字符下标（不含行尾 `\n`）。
-    fn cursor_line_end(&self) -> Option<usize> {
-        let start = self.cursor_line_start()?;
-        let rest = &self.input[start.min(self.input.len())..];
-        rest.iter()
-            .position(|&c| c == '\n')
-            .map_or_else(|| Some(self.input.len()), |nl| Some(start + nl))
-    }
-
-    /// 光标所在行号与行内字符列。
-    #[must_use]
-    pub fn cursor_line_col(&self) -> (usize, usize) {
-        let mut line = 0;
-        let mut col = 0;
-        for (i, &c) in self.input.iter().enumerate() {
-            if i >= self.cursor {
-                break;
-            }
-            if c == '\n' {
-                line += 1;
-                col = 0;
-            } else {
-                col += 1;
-            }
-        }
-        (line, col)
-    }
-
-    /// 每行行首字符下标（含空串行）。
-    fn line_starts(&self) -> Vec<usize> {
-        let mut starts = vec![0usize];
-        for (i, &c) in self.input.iter().enumerate() {
-            if c == '\n' {
-                starts.push(i + 1);
-            }
-        }
-        starts
-    }
-
-    /// 按 `\n` 拆分输入为各行（不含换行符）。
-    #[must_use]
-    pub fn input_lines(&self) -> Vec<String> {
-        self.input
-            .split(|&c| c == '\n')
-            .map(|s| s.iter().collect())
-            .collect()
-    }
-
-    /// 输入总行数。
-    #[must_use]
-    pub fn input_line_count(&self) -> usize {
-        self.input.iter().filter(|&&c| c == '\n').count() + 1
-    }
-
-    /// 上/下行移动光标（列尽量保持，超出 clamp 到行尾）。
-    pub fn move_cursor_vert(&mut self, up: bool) {
-        let (line, col) = self.cursor_line_col();
-        let count = self.input_line_count();
-        if (up && line == 0) || (!up && line + 1 >= count) {
-            return;
-        }
-        let starts = self.line_starts();
-        let target = if up { line - 1 } else { line + 1 };
-        let start = starts[target];
-        let end = starts.get(target + 1).copied().unwrap_or(self.input.len());
-        let line_cols = self.input[start..end.min(self.input.len())]
-            .iter()
-            .take_while(|&&c| c != '\n')
-            .count();
-        self.cursor = start + col.min(line_cols);
     }
 
     /// 替换会话列表并 clamp 选中项。

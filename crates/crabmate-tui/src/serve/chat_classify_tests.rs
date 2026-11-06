@@ -5,6 +5,7 @@
 //! 的区间会被一路吞到文件末尾，CCN 报成 11（假阳性）。与 `status_tests.rs` 同一手法。
 
 use crate::serve::chat_classify::{LineAction, classify_line};
+use crabmate_client_api::sse_dispatch::ClarificationKind;
 
 /// `CUSTOM timeline_log`（`kind=context_trim`）：`detail` 是**字符串化 JSON**（`{"after_tokens":N}`），
 /// 不是嵌套对象 —— 当对象读会永远拿不到，现象就是「压缩后水位不回落」。
@@ -45,5 +46,33 @@ fn context_inject_with_skills_yields_skill_line() {
             assert!(info.forced);
         }
         other => panic!("期望 SkillInject，得到 {other:?}"),
+    }
+}
+
+/// `CUSTOM clarification_questionnaire`：显式注册钩子后必须变成 `LineAction::Clarify`。
+///
+/// 这正是 issue #424 的根因回归点：以前 `SseClarifyTraceHooks::default()` 不注册钩子，
+/// 事件一路落到 `Skip`，终端只看到工具行、题面整份凭据丢弃。
+#[test]
+fn clarification_questionnaire_yields_clarify_action() {
+    let line = concat!(
+        r#"{"type":"CUSTOM","customType":"clarification_questionnaire","#,
+        r#""data":{"questionnaireId":"q-42","intro":"需要确认两件事","#,
+        r#""questions":[{"id":"name","label":"项目名","required":true,"kind":"text"},"#,
+        r#"{"id":"style","label":"风格","hint":"可留空","kind":"choice"}]}}"#
+    );
+    match classify_line(line) {
+        Ok(LineAction::Clarify(info)) => {
+            assert_eq!(info.questionnaire_id, "q-42");
+            assert_eq!(info.fields.len(), 2);
+            assert_eq!(info.fields[0].id, "name");
+            assert!(info.fields[0].required);
+            // 题型只解析、不在这里拼文案：标记由渲染侧（`tui_mode::clarify`）自己映射，
+            // 共享层不替任何一端决定界面语言。
+            assert_eq!(info.fields[0].kind, ClarificationKind::Text);
+            assert_eq!(info.fields[1].kind, ClarificationKind::Choice);
+            assert_eq!(info.fields[1].hint.as_deref(), Some("可留空"));
+        }
+        other => panic!("期望 Clarify，得到 {other:?}"),
     }
 }

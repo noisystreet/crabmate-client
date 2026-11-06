@@ -16,6 +16,9 @@ mod body_cache;
 // 单独成文件后两边都有余量。
 #[path = "body_click.rs"]
 mod body_click;
+// 澄清问卷浮层（issue #424）：绘制 + 多题编辑 + 必填校验，独立成文件
+// 以免 `overlay.rs` / `state.rs` 撞 920 行门禁。
+mod clarify;
 mod clipboard;
 // `controls` / `tool_summary` 提到 `pub(crate)`：清除词与控制字符剥离在 crate 根也要用。
 pub(crate) mod controls;
@@ -263,6 +266,12 @@ impl<'a> TuiApp<'a> {
                         // 谁在等），而且不能让这次按键漏进 lane 的输入框。
                         Some(hotkeys::TopHotkey::NextApproval) => {
                             return self.focus_next_approval();
+                        }
+                        // F7：重开收起过的问卷。没有待填问卷时 `reopen_clarify` 是 no-op，
+                        // 但按键仍在这里吃掉 —— F7 没有第二含义，漏进输入框只会更好奇。
+                        Some(hotkeys::TopHotkey::ReopenClarify) => {
+                            self.lane_mut().reopen_clarify();
+                            return;
                         }
                         _ => {}
                     }
@@ -570,6 +579,11 @@ impl LaneApp<'_> {
             self.on_approval_key(&key);
             return;
         }
+        // 澄清问卷浮层：与审批同为模态，只认编辑 / 换题 / 提交 / Esc。
+        // 排在审批之后 —— 审批是流内阻塞门，优先级更高（同时出现时先解决审批）。
+        if self.consume_clarify_key(&key) {
+            return;
+        }
         if is_ctrl_c(&key) {
             self.on_ctrl_c();
             return;
@@ -712,6 +726,11 @@ impl LaneApp<'_> {
         // 那条消息若立刻发出，新一轮的过程行应当接在这条摘要之后。
         self.st.fold_after_turn(cancelled, failed);
         self.flush_queued_after_turn(failed, cancelled);
+        // 澄清问卷（issue #424）：到达时没弹（会挡住正在写的 transcript），此刻才展开。
+        // **排在排队消息之后**：那一句会立刻开一个新回合（`running` 又为真），
+        // `open_clarify_after_turn` 会因此让位 —— 否则浮层盖住新一段 transcript，
+        // 而 Enter 还会在没有守卫的路径上再发一轮。
+        self.open_clarify_after_turn();
     }
 
     fn on_msg(&mut self, msg: UiEvent) {
@@ -742,6 +761,10 @@ impl LaneApp<'_> {
             UiEvent::SkillInject(info) => self
                 .st
                 .push_line(LineKind::Skill, &skill_line::skill_line_text(&info)),
+            // 澄清问卷（issue #424）：**先记状态，不立刻弹**。问卷是 Server 在工具成功后
+            // 补发的，此刻本轮往往还在流 —— 浮层会盖住正在写的 transcript。`TurnDone`
+            // 时再展开（见 `on_turn_done`）。落一行 System 让用户在流结束前就知道有事要办。
+            UiEvent::Clarify(info) => self.begin_clarify(info),
             UiEvent::ToolStart {
                 tool_call_id,
                 name,
@@ -828,9 +851,23 @@ impl LaneApp<'_> {
     }
 
     fn start_turn(&mut self, message: &str) {
+        // 普通回合意味着上一份问卷的那一轮已作废（否则之后每轮结束都会再弹出来）。
+        self.discard_stale_clarify();
         // `/conv new` 建的空行还没有名字：首条消息就是它的标题（与 Web 同规则）。
         self.retitle_new_session_for_first_turn(message);
         let opts = self.build_turn_opts(message, None);
+        self.st.push_line(LineKind::User, message);
+        self.dispatch_turn(opts);
+    }
+
+    /// 提交澄清问卷（issue #424）：与 [`Self::start_turn`] 同一条路径，只多一份答案。
+    ///
+    /// 单独一个函数而不是给 `start_turn` 加 `Option` 参数：问卷提交是**唯一**会带
+    /// `clarify_questionnaire_answers` 的入口，加参数会让另外十来处调用点都要写 `None`。
+    fn start_turn_with_clarify(&mut self, message: &str, answers: serde_json::Value) {
+        self.retitle_new_session_for_first_turn(message);
+        let mut opts = self.build_turn_opts(message, None);
+        opts.clarify_questionnaire_answers = Some(answers);
         self.st.push_line(LineKind::User, message);
         self.dispatch_turn(opts);
     }

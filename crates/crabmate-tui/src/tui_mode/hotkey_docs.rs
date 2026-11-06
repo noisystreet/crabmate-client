@@ -49,7 +49,7 @@ impl HotkeyGroup {
 }
 
 /// 顶层热键的展示条目：`(键位, 人读措辞, 分组)`，顺序与 [`TopHotkey::doc_index`] 一致。
-const TOP_DOCS: [(&str, &str, HotkeyGroup); 8] = [
+const TOP_DOCS: [(&str, &str, HotkeyGroup); 9] = [
     ("F6", "设置面板", HotkeyGroup::Global),
     ("F3", "状态栈展开/折叠", HotkeyGroup::Global),
     ("F4", "跳到在等审批的连接", HotkeyGroup::Global),
@@ -61,6 +61,11 @@ const TOP_DOCS: [(&str, &str, HotkeyGroup); 8] = [
         "Ctrl+Y",
         "复制最近一条回复（文件视图里是文件路径）",
         HotkeyGroup::Chat,
+    ),
+    (
+        "F7",
+        "重开澄清问卷（Esc 收起后；没答完等于没回答）",
+        HotkeyGroup::Global,
     ),
 ];
 
@@ -96,7 +101,7 @@ impl TopHotkey {
     ///
     /// 新增变体时编译会先在 [`TopHotkey::doc_index`] 的穷尽 match 上失败（强制补条目），
     /// 再把它加到这里；漏加的表现是面板少一项。
-    pub(super) const ALL: [TopHotkey; 8] = [
+    pub(super) const ALL: [TopHotkey; 9] = [
         TopHotkey::Settings,
         TopHotkey::StatusStack,
         TopHotkey::NextApproval,
@@ -105,6 +110,7 @@ impl TopHotkey {
         TopHotkey::GotoLane(1),
         TopHotkey::ToggleView,
         TopHotkey::Copy,
+        TopHotkey::ReopenClarify,
     ];
 
     /// 该热键在 [`TOP_DOCS`] 里的下标。
@@ -121,6 +127,7 @@ impl TopHotkey {
             Self::GotoLane(_) => 5,
             Self::ToggleView => 6,
             Self::Copy => 7,
+            Self::ReopenClarify => 8,
         }
     }
 }
