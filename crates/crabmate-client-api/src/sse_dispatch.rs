@@ -225,12 +225,60 @@ pub struct ClarificationQuestionnaireInfo {
     pub fields: Vec<ClarificationFormField>,
 }
 
+/// 题型（契约 `ClarificationQuestionField.kind` 的封闭取值）。
+///
+/// 契约 0.8.0 的注释是「`text` 或 `choice`（**预留**；Web 当前均以文本提交）」，
+/// 且**没有候选列表字段** —— 所以 `Choice` 在这里的用途只是「标注这是选择题」，
+/// 答题形态仍是文本。补这个字段是为了不让题型信息在共享层被丢掉（TUI 要显示标记，
+/// Web 行为不变）；等契约给出 options 再谈候选光标。
+///
+/// 刻意**不带**展示文案：这个 crate 被 Web / TUI / connect 共用，Web 有 `Locale`
+/// 体系，把某一门语言写在这里就等于替它决定了界面语言。谁画标记谁自己拼字。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ClarificationKind {
+    #[default]
+    Text,
+    Choice,
+}
+
+impl ClarificationKind {
+    /// 线格式 → 题型。不认识的取值（含缺省）当 `Text`：画错一个标记比丢整题好。
+    #[must_use]
+    pub fn from_wire(raw: Option<&str>) -> Self {
+        match raw.map(str::trim) {
+            Some("choice") => Self::Choice,
+            _ => Self::Text,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ClarificationFormField {
     pub id: String,
     pub label: String,
     pub hint: Option<String>,
     pub required: bool,
+    pub kind: ClarificationKind,
+}
+
+impl ClarificationFormField {
+    /// 从 AG-UI `clarification_questionnaire.questions[]` 的单题 JSON 解析。
+    ///
+    /// 放在这里而不是 `ag_ui_parser`：`kind` 的封闭取值映射是这个结构的语义，
+    /// 散在解析器里就得让那边同时 import 字段类型与枚举（而那个文件正贴着行数门禁）。
+    /// `id` / `label` 缺失才算坏题（`filter_map` 丢掉）；其余字段都有确定的缺省。
+    #[must_use]
+    pub fn from_ag_ui(f: &Value) -> Option<Self> {
+        Some(Self {
+            id: f.get("id")?.as_str()?.to_string(),
+            label: f.get("label")?.as_str()?.to_string(),
+            // `hint` 是**可选**的：这里必须 `and_then` 而不是 `?` —— 用 `?` 会让
+            // 「没写 hint 的题」整道被 filter_map 丢掉（线上每份问卷都在丢，谁也看不出来）。
+            hint: f.get("hint").and_then(|h| h.as_str()).map(str::to_string),
+            required: f.get("required").and_then(|r| r.as_bool()).unwrap_or(false),
+            kind: ClarificationKind::from_wire(f.get("kind").and_then(|k| k.as_str())),
+        })
+    }
 }
 
 /// `thinking_trace`：Web 调试台用（不进聊天正文）。

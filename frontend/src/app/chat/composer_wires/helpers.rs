@@ -21,33 +21,24 @@ pub(super) fn user_line_and_clarify_from_shell(
     loc: Locale,
 ) -> Option<(String, Option<serde_json::Value>)> {
     if let Some(form) = shell.approval.pending_clarification.get() {
-        let mut answers = serde_json::Map::new();
-        let mut ok = true;
-        for (i, f) in form.fields.iter().enumerate() {
-            let v = form
-                .values
-                .get(i)
-                .map(|s| s.trim().to_string())
-                .unwrap_or_default();
-            if f.required && v.is_empty() {
-                ok = false;
-                break;
+        // 必填校验与「按题目 id 对齐」都在共享层（`crabmate_client_api::clarify_form`）：
+        // TUI 与 Web 各自写一遍的话，同一份问卷会在两端给出不同的「算不算填了」，
+        // 而用户只会觉得表单坏了。文案仍留在这边（Web 用既有 i18n 串）。
+        let cq = match crabmate_client_api::clarify_form::answers_json(
+            &form.questionnaire_id,
+            &form.fields,
+            &form.values,
+        ) {
+            Ok(v) => v,
+            Err(_) => {
+                shell
+                    .stream
+                    .status_err
+                    .set(Some(i18n::clarification_missing_required(loc).to_string()));
+                return None;
             }
-            answers.insert(f.id.clone(), serde_json::Value::String(v));
-        }
-        if !ok {
-            shell
-                .stream
-                .status_err
-                .set(Some(i18n::clarification_missing_required(loc).to_string()));
-            return None;
-        }
-        let qid = form.questionnaire_id.clone();
+        };
         shell.approval.pending_clarification.set(None);
-        let cq = serde_json::json!({
-            "questionnaire_id": qid,
-            "answers": serde_json::Value::Object(answers),
-        });
         Some((
             i18n::clarification_user_bubble_stub(loc).to_string(),
             Some(cq),
