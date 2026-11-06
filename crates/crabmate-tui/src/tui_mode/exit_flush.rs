@@ -109,6 +109,14 @@ impl LaneApp<'_> {
     /// 截止时刻由调用方给：多 lane 时外壳让所有 lane 共用同一份预算
     /// （见 [`TuiApp::flush_all_before_exit`]），lane 数不该放大退出延迟。
     pub(super) async fn flush_before_exit(&mut self, deadline: Instant) -> Option<String> {
+        // 本机草稿先落盘，且**独立于**下面那份预算：索引写会因为 serve 不响应而超时
+        // （`NORMAL_BUDGET` / `FORCE_BUDGET`），而「这台机器上打到一半的字」不该被一次
+        // 网络失败牵连 —— 它落在本机，不需要网络。
+        self.drafts.save(
+            self.st.conversation_id.as_deref(),
+            &self.st.input_snapshot(),
+        );
+        self.persist_drafts();
         let op = self.exit_flush_plan().into_op()?;
         match self.apply_index_op_within(&op, deadline).await {
             Ok(()) => None,

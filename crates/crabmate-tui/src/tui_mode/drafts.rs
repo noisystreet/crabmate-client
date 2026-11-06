@@ -12,10 +12,15 @@
 //! 一律把文本退回输入框 —— 用户按 Ctrl+C 的意图通常是「停下来」，此时替他再发一句
 //! 意外消息，比多发一次询问更糟。
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use super::LaneApp;
 use super::state::LineKind;
+
+// 本机落盘单独成文件（路径解析 / 原子写 / 分区合并各是一件），与「草稿属于哪个会话」
+// 无关。挂在这里而不是 `mod.rs`：那边贴着 920 行门禁。
+#[path = "draft_store.rs"]
+pub(crate) mod store;
 
 /// 尚未绑定 `conversation_id` 的草稿所用的键。
 ///
@@ -26,9 +31,27 @@ const UNBOUND: &str = "";
 ///
 /// **全空白视为「没有草稿」**：与 `plan_exit_flush` 的判定保持一致，否则一个空格就能让
 /// 空白会话钉在侧栏（`session_is_disposable_blank` 要求 `draft` 为空）。
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(super) struct Drafts {
     by_conversation: HashMap<String, String>,
+    /// 落盘目的地（`Default` = 不落盘）。
+    ///
+    /// 放在这里而不是 `LaneApp` 上：`mod.rs` 贴着 920 行门禁，而「草稿表落到哪」本来
+    /// 就只属于草稿表。单测与临时 lane 用默认值，不会写进真实的 state 目录。
+    store: store::DraftStore,
+    /// 落盘失败的提示是否已经说过：切会话是高频动作，每次都报会把 transcript 刷成日志，
+    /// 但完全不报更糟 —— 用户会以为草稿存下来了。
+    warned: bool,
+}
+
+impl Default for Drafts {
+    fn default() -> Self {
+        Self {
+            by_conversation: HashMap::new(),
+            store: store::DraftStore::Unavailable,
+            warned: false,
+        }
+    }
 }
 
 impl Drafts {
@@ -51,6 +74,52 @@ impl Drafts {
         self.by_conversation
             .get(&Self::key(conversation_id))
             .map(String::as_str)
+    }
+
+    /// 从本机落盘的分区载入；全空白的项一并丢掉（与 [`Self::save`] 同一判定）。
+    ///
+    /// 分区里的 `""` 键就是未绑定槽：`Self::key(None)` 也是 `""`，所以载入后仍然对得上。
+    pub(super) fn from_partition(partition: impl IntoIterator<Item = (String, String)>) -> Self {
+        let mut drafts = Self::default();
+        for (conversation_id, text) in partition {
+            drafts.save(Some(conversation_id.as_str()), &text);
+        }
+        drafts
+    }
+
+    /// 导出成可落盘的分区（`BTreeMap` 已排序，写出去的文件稳定）。
+    pub(super) fn as_partition(&self) -> BTreeMap<String, String> {
+        self.by_conversation
+            .iter()
+            .map(|(id, text)| (id.clone(), text.clone()))
+            .collect()
+    }
+
+    /// 装配 lane 用：绑定落盘目的地，并把该 serve 上次的草稿读回来。
+    ///
+    /// 分区按 `api_base`：不同 serve 的同名 `conversation_id` 绝不能互相串进来。
+    pub(super) fn with_store(store: store::DraftStore, api_base: &str) -> Self {
+        let partition = store.load_partition(api_base);
+        let mut drafts = Self::from_partition(partition);
+        drafts.store = store;
+        drafts
+    }
+
+    /// 落盘；返回**需要告知用户一次**的失败原因（已经提示过就是 `None`）。
+    ///
+    /// 只在切会话 / 退出时调：**不做每键写盘**（那是把磁盘当帧缓冲），代价是异常退出
+    /// 最多丢「最后一次切会话之后敲的字」。
+    pub(super) fn persist(&mut self, api_base: &str) -> Option<String> {
+        let partition = self.as_partition();
+        match self.store.save_partition(api_base, &partition) {
+            Ok(()) => None,
+            // 已经提示过就不再打扰：切会话是高频动作。
+            Err(_) if self.warned => None,
+            Err(reason) => {
+                self.warned = true;
+                Some(reason)
+            }
+        }
     }
 
     /// 当前存了几份非空草稿（测试用）。
@@ -83,6 +152,20 @@ fn queued_outcome(has_queued: bool, failed: bool, cancelled: bool) -> QueuedOutc
 }
 
 impl LaneApp<'_> {
+    /// 把整张草稿表落到本机（切会话 / 退出时各调一次）。
+    ///
+    /// **不做每键写盘**：那是把磁盘当帧缓冲。落盘时机只有三个 —— 切会话、提交清空、退出；
+    /// 代价是异常退出最多丢「最后一次切会话之后敲的字」。
+    pub(super) fn persist_drafts(&mut self) {
+        let api_base = self.client.config().api_base.clone();
+        if let Some(reason) = self.drafts.persist(&api_base) {
+            self.st.push_line(
+                LineKind::System,
+                &format!("草稿未能保存到本机（下次启动会丢）：{reason}"),
+            );
+        }
+    }
+
     /// 按会话换入换出输入草稿：先把当前输入存回**正在离开**的会话，再取目标会话那一份。
     ///
     /// `next` 是即将进入的 `conversation_id`（`None` = 还没绑定的新会话）。调用方必须保证
@@ -91,6 +174,9 @@ impl LaneApp<'_> {
         let current = self.st.input_snapshot();
         self.drafts
             .save(self.st.conversation_id.as_deref(), &current);
+        // 切走的那一刻就落盘：异常退出时丢的是「最后一次切会话之后敲的字」，
+        // 而不是整张表。
+        self.persist_drafts();
         let restored = self.drafts.load(next).unwrap_or_default().to_string();
         self.st.set_input(&restored);
     }
@@ -176,6 +262,43 @@ mod tests {
         d.save(Some("c1"), "  \n\t ");
         assert_eq!(d.load(Some("c1")), None);
         assert_eq!(d.len(), 0);
+    }
+
+    /// 落盘失败只提示一次：切会话是高频动作，每次都报会把 transcript 刷成日志。
+    #[test]
+    fn persist_reports_a_failure_only_once() {
+        let mut d = Drafts::default(); // 默认 store 是 `Unavailable`，写必然失败
+        assert!(d.persist("http://a:1").is_some(), "第一次要说");
+        assert!(d.persist("http://a:1").is_none(), "第二次不该再打扰");
+    }
+
+    /// 落盘分区与内存表往返：载入后同一会话仍取得到那份草稿。
+    #[test]
+    fn partition_round_trips_through_the_drafts_table() {
+        let mut d = Drafts::default();
+        d.save(Some("c1"), "写给 c1 的");
+        d.save(None, "未绑定的");
+        let partition = d.as_partition();
+        let loaded = Drafts::from_partition(partition);
+        assert_eq!(loaded.load(Some("c1")), Some("写给 c1 的"));
+        assert_eq!(
+            loaded.load(None),
+            Some("未绑定的"),
+            "未绑定槽的 \"\" 键要和 `key(None)` 对得上"
+        );
+        assert_eq!(loaded.len(), 2);
+    }
+
+    /// 落盘里若有空白项（手改文件 / 旧版本写进去的），载入时按「没有草稿」丢掉。
+    #[test]
+    fn blank_entries_from_disk_are_dropped_on_load() {
+        let loaded = Drafts::from_partition(vec![
+            ("c1".to_string(), "  \n".to_string()),
+            ("c2".to_string(), "有内容".to_string()),
+        ]);
+        assert_eq!(loaded.load(Some("c1")), None);
+        assert_eq!(loaded.load(Some("c2")), Some("有内容"));
+        assert_eq!(loaded.len(), 1);
     }
 
     /// 未绑定的输入用独立键：既不会被绑到某个真实会话，也不会互相覆盖。

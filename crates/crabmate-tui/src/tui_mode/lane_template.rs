@@ -39,6 +39,10 @@ pub(crate) struct LaneTemplate {
     pub(crate) pane: PaneWidths,
     /// 列宽落到哪个文件（同一次读盘解析出来的目的地，随 lane 持有）。
     pub(crate) pane_store: pane_store::PaneStore,
+    /// 草稿落到哪个文件（同一次读盘解析出来的目的地，随 lane 持有）。
+    ///
+    /// 与列宽同一个目录、**不同的文件**：两者损坏时的正确处理不一样（见 `draft_store`）。
+    pub(crate) draft_store: drafts::store::DraftStore,
     /// Web API Bearer：控制面里所有实例同机同用户，第一版共用主连接那份
     /// （per-profile 槽需要牵动 Desktop / Android 的槽名约定，见设计稿 §4.5）。
     pub(crate) bearer: String,
@@ -67,6 +71,11 @@ impl<'a> LaneApp<'a> {
         job_tx: mpsc::Sender<WorkerJob>,
         job_cancel: JobCancel,
     ) -> Self {
+        // 载入本机草稿必须在 `client` 被 move 进结构之前 —— 分区键就是它的 `api_base`。
+        let drafts = drafts::Drafts::with_store(
+            template.draft_store.clone(),
+            client.config().api_base.as_str(),
+        );
         Self {
             id,
             label,
@@ -75,7 +84,7 @@ impl<'a> LaneApp<'a> {
             yes: template.yes,
             no_keyring: template.no_keyring,
             st: UiState::new().with_pane(template.pane),
-            drafts: drafts::Drafts::default(),
+            drafts,
             tx: template.tx.clone(),
             job_tx,
             job_cancel,
