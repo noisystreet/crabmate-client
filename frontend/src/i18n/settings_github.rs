@@ -125,6 +125,20 @@ pub fn settings_github_disconnect(l: Locale) -> &'static str {
     }
 }
 
+/// 断开前的二次确认：会清除本机 GitHub token。
+/// Device Flow 展示中（user_code / verify_url 已出）的「取消授权」不产生不可逆后果，
+/// 因此不走这条文案。
+pub fn settings_github_disconnect_confirm(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => {
+            "断开 GitHub 将清除本机保存的授权与 token，之后需重新走一次 Device Flow 授权。"
+        }
+        Locale::En => {
+            "Disconnecting GitHub clears the locally stored authorization and token; you will have to run the device flow again."
+        }
+    }
+}
+
 pub fn settings_github_disconnect_partial(l: Locale, detail: &str) -> String {
     match l {
         Locale::ZhHans => {

@@ -179,6 +179,12 @@ fn bearer_placeholder(present: bool) -> &'static str {
     }
 }
 
+/// 空输入点保存 = 清除本机 Bearer；只有「本来就有 token」时才是破坏性操作，
+/// 本来就没配过时不该弹一次无后果的确认。
+fn bearer_clear_needs_confirm(token: &str, present: bool) -> bool {
+    token.trim().is_empty() && present
+}
+
 fn save_web_api_bearer(
     locale: Locale,
     draft: RwSignal<String>,
@@ -187,30 +193,57 @@ fn save_web_api_bearer(
     save_nonce: RwSignal<u64>,
 ) {
     let token = draft.get_untracked();
-    spawn_local(async move {
-        match crate::api::set_web_api_bearer_token_async(&token).await {
-            Ok(kind) => {
-                draft.set(String::new());
-                present.set(crate::api::web_api_bearer_token_is_set());
-                let cleared = token.trim().is_empty();
-                let msg = if cleared {
-                    i18n::settings_web_api_bearer_cleared(locale).to_string()
-                } else if kind == crate::api::PersistKind::BrowserInsecure {
-                    i18n::settings_web_api_bearer_saved_browser_insecure(locale).to_string()
-                } else {
-                    i18n::settings_web_api_bearer_saved(locale).to_string()
-                };
-                feedback.set(Some(msg));
-                // 仅非空保存后触发壳层恢复（重试 /status、水合）；清空时不乐观清错、不拉水合。
-                if !cleared {
-                    save_nonce.update(|n| *n = n.saturating_add(1));
-                }
+    if bearer_clear_needs_confirm(&token, present.get_untracked()) {
+        spawn_local(async move {
+            let ok = crate::confirm_dialog::confirm_in_page(
+                i18n::settings_web_api_bearer_clear_confirm(locale),
+                i18n::settings_web_api_bearer_clear_ok(locale),
+                i18n::ide_confirm_cancel(locale),
+            )
+            .await;
+            if ok {
+                apply_web_api_bearer(locale, String::new(), draft, present, feedback, save_nonce)
+                    .await;
             }
-            Err(e) => {
-                feedback.set(Some(e));
+        });
+        return;
+    }
+    spawn_local(async move {
+        apply_web_api_bearer(locale, token, draft, present, feedback, save_nonce).await;
+    });
+}
+
+/// 真正写 token 的路径（确认与否都走这里，保证两条分支只有「是否先确认」之别）。
+async fn apply_web_api_bearer(
+    locale: Locale,
+    token: String,
+    draft: RwSignal<String>,
+    present: RwSignal<bool>,
+    feedback: RwSignal<Option<String>>,
+    save_nonce: RwSignal<u64>,
+) {
+    match crate::api::set_web_api_bearer_token_async(&token).await {
+        Ok(kind) => {
+            draft.set(String::new());
+            present.set(crate::api::web_api_bearer_token_is_set());
+            let cleared = token.trim().is_empty();
+            let msg = if cleared {
+                i18n::settings_web_api_bearer_cleared(locale).to_string()
+            } else if kind == crate::api::PersistKind::BrowserInsecure {
+                i18n::settings_web_api_bearer_saved_browser_insecure(locale).to_string()
+            } else {
+                i18n::settings_web_api_bearer_saved(locale).to_string()
+            };
+            feedback.set(Some(msg));
+            // 仅非空保存后触发壳层恢复（重试 /status、水合）；清空时不乐观清错、不拉水合。
+            if !cleared {
+                save_nonce.update(|n| *n = n.saturating_add(1));
             }
         }
-    });
+        Err(e) => {
+            feedback.set(Some(e));
+        }
+    }
 }
 
 /// 局域网 / 非回环 `serve`：把与 `CM_WEB_API_BEARER_TOKEN` 相同的共享密钥写入本页请求头。
@@ -813,5 +846,31 @@ pub(crate) fn SettingsShortcutsBlock(
             <h3 class="settings-block-title">{move || i18n::settings_block_shortcuts(locale.get())}</h3>
             <p class=body_class>{move || i18n::settings_shortcuts_body(locale.get())}</p>
         </div>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::bearer_clear_needs_confirm;
+
+    /// 空输入 = 清除；只有「本来就有 token」时才需要确认，避免无后果的二次确认。
+    #[test]
+    fn bearer_clear_needs_confirm_only_when_token_present() {
+        assert!(bearer_clear_needs_confirm("", true));
+        assert!(bearer_clear_needs_confirm("   ", true));
+        assert!(bearer_clear_needs_confirm("\n\t", true));
+    }
+
+    /// 输入框还有内容时是在保存而非清除，不得弹清除确认。
+    #[test]
+    fn bearer_save_with_token_skips_confirm() {
+        assert!(!bearer_clear_needs_confirm("secret", true));
+        assert!(!bearer_clear_needs_confirm("  secret  ", true));
+    }
+
+    /// 本来就没配过 token：空输入保存没有任何后果，不弹确认。
+    #[test]
+    fn bearer_clear_without_token_skips_confirm() {
+        assert!(!bearer_clear_needs_confirm("", false));
     }
 }

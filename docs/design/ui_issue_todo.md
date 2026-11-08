@@ -58,7 +58,7 @@
 
 ## P2 · 空态与确认
 
-- [ ] 破坏性操作无确认：MCP 行删除（`settings_mcp_server_row_actions.rs`）、GitHub「断开」（`settings_github_block.rs`）、Web Bearer 空输入点保存=清除 token 无二次确认（`settings_sections.rs`）。
+- [x] 破坏性操作无确认：MCP 行删除（`settings_mcp_server_row_actions.rs`）、GitHub「断开」（`settings_github_block.rs`）、Web Bearer 空输入点保存=清除 token 无二次确认（`settings_sections.rs`）。**已修（#319）**：三处统一走 `confirm_dialog::confirm_in_page`（复用壳层确认框，未新增组件）；GitHub 在 Device Flow 展示中（`user_code` / `verify_url` 已出）语义是「取消授权」，不弹破坏性确认，按钮 `disabled` 与点击分支共用 `device_flow_ui_active` 判定；Bearer 仅在「本来已配置 token」时确认。
 
 - [ ] MCP「应用导入」绕过保存全部直接写服务端且无确认：`frontend/src/app/settings_mcp_json_import.rs`（与「破坏性操作无确认」一并留待后续）。
 

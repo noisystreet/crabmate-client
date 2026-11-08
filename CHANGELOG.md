@@ -23,6 +23,10 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 - **TUI: links inside markdown table cells are now clickable.** The table renderer stripped link markers, on the reasoning that a column-truncated cell has no stable screen column to hit — so a link kept its accent + underline, did nothing on `Ctrl+click`, and said nothing about why. The column range never had to be computed there: table rows are `PartChars`, `push_row` re-bases their spans, and `wrap_styled_rows` turns character spans into columns once. Rows now keep their links, and a cell cut down to the column width clips the spans that fall past `…` instead of leaving a hotspot over characters that were never drawn. No protocol change.
 
+### Fixed
+
+- **Settings: the three one-click destructive actions now ask first.** MCP row removal edited the form draft and dropped the row on a single click (a later 「保存」 wrote the removal to the server), GitHub 「断开」 cleared the local token, and saving an empty Web Bearer field silently cleared the token — none recoverable if misclicked. Each now routes through the existing in-page confirm (`confirm_in_page`, so no new modal component and no new a11y surface): the MCP prompt names the server being removed, GitHub tells a running Device Flow's 「取消授权」 apart from really disconnecting, and the Bearer prompt only fires when a token was actually set (an empty save on a clean profile stays silent). No protocol change.
+
 ## [0.8.0-alpha.3] - 2026-11-06
 
 ### Added

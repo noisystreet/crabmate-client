@@ -258,6 +258,25 @@ pub fn settings_web_api_bearer_cleared(l: Locale) -> &'static str {
     }
 }
 
+/// 空输入点保存 = 清除：清掉后需重新拿到服务端密钥才能连远端 `serve`，故先确认。
+pub fn settings_web_api_bearer_clear_confirm(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => {
+            "输入框为空即视为清除本机 Web Bearer；清除后需重新填入服务端密钥才能连接远端 serve。"
+        }
+        Locale::En => {
+            "An empty field clears the local Web Bearer; you will need the server token again to reach a remote serve."
+        }
+    }
+}
+
+pub fn settings_web_api_bearer_clear_ok(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "清除",
+        Locale::En => "Clear",
+    }
+}
+
 pub fn settings_web_api_bearer_status_set(l: Locale) -> &'static str {
     match l {
         Locale::ZhHans => "已配置",
