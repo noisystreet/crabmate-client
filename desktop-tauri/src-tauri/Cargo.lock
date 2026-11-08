@@ -2414,6 +2414,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "lazy_static"
+version = "1.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "20870f649af7073d53e38067b2a84312175d56ea15217e1b15bc83506ec50afb"
+
+[[package]]
 name = "libappindicator"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4154,6 +4160,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "sharded-slab"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f40ca3c46823713e0d4209592e8d6e826aa57e928f09752619fc696c499637f6"
+dependencies = [
+ "lazy_static",
+]
+
+[[package]]
 name = "shlex"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4880,6 +4895,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "thread_local"
+version = "1.1.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1ad99c4c6d32803332c548b1af0540b357b3f5fc0be8f6c6bfe8b2e6ae784070"
+dependencies = [
+ "cfg-if",
+]
+
+[[package]]
 name = "time"
 version = "0.3.55"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5164,6 +5188,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "tracing-subscriber"
+version = "0.3.23"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cb7f578e5945fb242538965c2d0b04418d38ec25c79d160cd279bf0731c8d319"
+dependencies = [
+ "sharded-slab",
+ "thread_local",
+ "tracing-core",
+]
+
+[[package]]
 name = "tray-icon"
 version = "0.25.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5295,9 +5330,9 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "victauri-core"
-version = "0.10.2"
+version = "0.10.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "23de48311bfdb5f39494eab95e948820eaf79969212ecf4d8f86f733e2c9749f"
+checksum = "cca94de5d29573b9f49eb03342cf7444a0e1ad415a2f1ed175b441a12558091f"
 dependencies = [
  "axum",
  "chrono",
@@ -5313,9 +5348,9 @@ dependencies = [
 
 [[package]]
 name = "victauri-macros"
-version = "0.10.2"
+version = "0.10.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "33c106cbf9e046dde0323981a71a2434242777a9e4b9327775489b5f4c3bdb0f"
+checksum = "0a152f51d9537b73e67dd2dd11cabe40444bc6856d558aeed84a6f814063967a"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
@@ -5325,9 +5360,9 @@ dependencies = [
 
 [[package]]
 name = "victauri-plugin"
-version = "0.10.1"
+version = "0.10.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f51f36760b022747b39fd8e46d71cff78b469b0bbc6020ed3d522c506e63ad0c"
+checksum = "c0020798d0460500402452a4bfee5b75597ad3672a3e21c962784ec583cf8ef0"
 dependencies = [
  "anyhow",
  "axum",
@@ -5336,6 +5371,7 @@ dependencies = [
  "flate2",
  "hyper",
  "hyper-util",
+ "log",
  "raw-window-handle",
  "regex",
  "rmcp",
@@ -5349,6 +5385,7 @@ dependencies = [
  "tokio",
  "tower",
  "tracing",
+ "tracing-subscriber",
  "url",
  "uuid",
  "victauri-core",
@@ -5359,9 +5396,9 @@ dependencies = [
 
 [[package]]
 name = "victauri-test"
-version = "0.10.1"
+version = "0.10.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a83dab85b04c5b3bdc8da35c664d8c3e61f4adb85049d2a669b8f154abae5bda"
+checksum = "3d01358a27b7f3b804051acc1afd2dd2ef4f4e84fdcff2622d3fe0b5bc96b2d7"
 dependencies = [
  "base64 0.22.1",
  "png 0.17.16",
