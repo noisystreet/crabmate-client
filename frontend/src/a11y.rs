@@ -133,6 +133,34 @@ pub fn schedule_focus_first_in_modal(container: &web_sys::Element) {
     });
 }
 
+/// 模态打开时把焦点指向指定 `data-testid` 的元素（「初始焦点」用）；找不到则回落到第一个可聚焦元素。
+///
+/// 破坏性确认要 `Enter` 直接确认，而 [`focus_first_in_modal_container`] 取的是 DOM 顺序第一个
+/// 可聚焦元素 —— 确认框 footer 里「取消」在前，于是 Enter 落到取消上。要让 Enter 确认，
+/// 必须能指定初始焦点；靠调整按钮 DOM 顺序做不到（那会把所有确认框的默认动作一起改掉）。
+pub fn schedule_focus_by_testid(container: &web_sys::Element, testid: &'static str) {
+    let container = container.clone();
+    spawn_local(async move {
+        TimeoutFuture::new(0).await;
+        if active_element_inside(&container) {
+            return;
+        }
+        let selector = format!("[data-testid=\"{testid}\"]");
+        let target = container
+            .query_selector(&selector)
+            .ok()
+            .flatten()
+            .and_then(|el| el.dyn_ref::<web_sys::HtmlElement>().cloned());
+        match target {
+            Some(el) => {
+                let _ = el.focus();
+            }
+            // 目标不存在（文案改版 / testid 改名）时不能把焦点留在弹窗外。
+            None => focus_first_in_modal_container(&container),
+        }
+    });
+}
+
 fn is_hidden_from_a11y_tree(el: &web_sys::HtmlElement) -> bool {
     let mut cur: Option<web_sys::Element> = Some(el.clone().unchecked_into());
     while let Some(node) = cur {

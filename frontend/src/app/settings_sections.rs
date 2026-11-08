@@ -191,9 +191,17 @@ fn save_web_api_bearer(
     present: RwSignal<bool>,
     feedback: RwSignal<Option<String>>,
     save_nonce: RwSignal<u64>,
+    pending: RwSignal<bool>,
 ) {
+    if pending.get_untracked() {
+        return;
+    }
     let token = draft.get_untracked();
-    if bearer_clear_needs_confirm(&token, present.get_untracked()) {
+    // 判定读 api 层真源而非本实例的 `present` 信号：设置页与弹窗可能各挂一个实例，
+    // 各自的 `present` 只是挂载时的快照（A 清除后 B 仍为 true）。误判成 true 只多弹一次确认，
+    // 误判成 false 会漏掉确认直接清除 —— 是真源才能保证不落到危险的那一侧。
+    if bearer_clear_needs_confirm(&token, crate::api::web_api_bearer_token_is_set()) {
+        pending.set(true);
         spawn_local(async move {
             let ok = crate::confirm_dialog::confirm_in_page(
                 i18n::settings_web_api_bearer_clear_confirm(locale),
@@ -201,6 +209,7 @@ fn save_web_api_bearer(
                 i18n::ide_confirm_cancel(locale),
             )
             .await;
+            pending.set(false);
             if ok {
                 apply_web_api_bearer(locale, String::new(), draft, present, feedback, save_nonce)
                     .await;
@@ -246,6 +255,40 @@ async fn apply_web_api_bearer(
     }
 }
 
+/// Bearer 的「保存」按钮。
+///
+/// 单独拆成组件：留在 `SettingsWebApiBearerBlock` 里会让该函数的 CCN 触到门禁上限。
+#[component]
+fn SettingsWebApiBearerSaveButton(
+    locale: RwSignal<Locale>,
+    draft: RwSignal<String>,
+    present: RwSignal<bool>,
+    feedback: RwSignal<Option<String>>,
+    save_nonce: RwSignal<u64>,
+    pending: RwSignal<bool>,
+) -> impl IntoView {
+    view! {
+        <button
+            type="button"
+            class="btn btn-primary btn-sm"
+            data-testid="settings-web-api-bearer-save"
+            prop:disabled=move || pending.get()
+            on:click=move |_| {
+                save_web_api_bearer(
+                    locale.get_untracked(),
+                    draft,
+                    present,
+                    feedback,
+                    save_nonce,
+                    pending,
+                );
+            }
+        >
+            {move || i18n::settings_web_api_bearer_save(locale.get())}
+        </button>
+    }
+}
+
 /// 局域网 / 非回环 `serve`：把与 `CM_WEB_API_BEARER_TOKEN` 相同的共享密钥写入本页请求头。
 #[component]
 pub(crate) fn SettingsWebApiBearerBlock(
@@ -258,6 +301,8 @@ pub(crate) fn SettingsWebApiBearerBlock(
     let draft = RwSignal::new(String::new());
     let feedback = RwSignal::new(None::<String>);
     let present = RwSignal::new(crate::api::web_api_bearer_token_is_set());
+    // 确认框 / 保存请求在途时禁用按钮，避免连点推多个请求。
+    let save_pending = RwSignal::new(false);
 
     view! {
         <div
@@ -286,22 +331,14 @@ pub(crate) fn SettingsWebApiBearerBlock(
                     on:input=move |ev| draft.set(event_target_value(&ev))
                 />
             </div>
-            <button
-                type="button"
-                class="btn btn-primary btn-sm"
-                data-testid="settings-web-api-bearer-save"
-                on:click=move |_| {
-                    save_web_api_bearer(
-                        locale.get_untracked(),
-                        draft,
-                        present,
-                        feedback,
-                        save_nonce,
-                    );
-                }
-            >
-                {move || i18n::settings_web_api_bearer_save(locale.get())}
-            </button>
+            <SettingsWebApiBearerSaveButton
+                locale=locale
+                draft=draft
+                present=present
+                feedback=feedback
+                save_nonce=save_nonce
+                pending=save_pending
+            />
             <Show when=move || feedback.get().is_some()>
                 <p class="settings-save-feedback" role="status" data-testid="settings-web-api-bearer-feedback">
                     {move || feedback.get().unwrap_or_default()}
@@ -850,27 +887,5 @@ pub(crate) fn SettingsShortcutsBlock(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::bearer_clear_needs_confirm;
-
-    /// 空输入 = 清除；只有「本来就有 token」时才需要确认，避免无后果的二次确认。
-    #[test]
-    fn bearer_clear_needs_confirm_only_when_token_present() {
-        assert!(bearer_clear_needs_confirm("", true));
-        assert!(bearer_clear_needs_confirm("   ", true));
-        assert!(bearer_clear_needs_confirm("\n\t", true));
-    }
-
-    /// 输入框还有内容时是在保存而非清除，不得弹清除确认。
-    #[test]
-    fn bearer_save_with_token_skips_confirm() {
-        assert!(!bearer_clear_needs_confirm("secret", true));
-        assert!(!bearer_clear_needs_confirm("  secret  ", true));
-    }
-
-    /// 本来就没配过 token：空输入保存没有任何后果，不弹确认。
-    #[test]
-    fn bearer_clear_without_token_skips_confirm() {
-        assert!(!bearer_clear_needs_confirm("", false));
-    }
-}
+#[path = "settings_sections_tests.rs"]
+mod tests;

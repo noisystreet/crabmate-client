@@ -30,6 +30,7 @@ fn ShellConfirmDialogPanel(locale: RwSignal<Locale>, modal: ModalSignals) -> imp
         <FocusableModalPanel
             class="modal ide-confirm-modal"
             labelledby="shell-confirm-title"
+            initial_focus_testid="shell-confirm-ok"
             on_escape=Callback::new(move |_| resolve_ide_confirm(confirm, false))
         >
             <div class="modal-head">
