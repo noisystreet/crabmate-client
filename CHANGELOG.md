@@ -25,6 +25,8 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Fixed
 
+- **TUI: a conversation started right after a restart kept the default 「新会话」 title.** Naming and `conversation_id` binding both keyed off `local_new_session`, which only a successful `/conv new` writeback creates and which does not survive the process. Restart with a leftover blank row in the sidebar, type a message without pressing `/conv new`, and that row stayed on the default title forever — no other path could reach it. Both are now also matched by the row's `server_conversation_id` once the first turn returns one, so naming no longer depends on who claims the row; the write still only touches a row whose title is still the default, and a conversation with no row in the index is skipped silently. No protocol change.
+
 - **Settings: the three one-click destructive actions now ask first.** MCP row removal dropped the row from the draft (a later save wrote it back), GitHub's Disconnect cleared the local token, and saving an empty Web Bearer field silently cleared the token — none recoverable if misclicked. Each now routes through the existing in-page confirm (`confirm_in_page`, so no new modal component or a11y surface). The MCP prompt names the server; GitHub skips the prompt only while a Device Flow runs on a still-disconnected account (an already-connected one is still asked); the Bearer prompt fires only when a token was actually set. The shared confirm panel gained an initial-focus prop so Enter confirms rather than cancels, and the buttons disable while a prompt is open. No protocol change.
 
 ## [0.8.0-alpha.3] - 2026-11-06

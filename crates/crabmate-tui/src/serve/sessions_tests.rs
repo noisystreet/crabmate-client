@@ -687,3 +687,67 @@ fn malformed_row_is_not_dropped_by_remove_blank() {
         "解析失败的行不可回收"
     );
 }
+
+#[test]
+fn set_title_by_server_renames_bound_row() {
+    // 重启后 `local_new_session` 已失效：只能靠行上的 `server_conversation_id` 反查。
+    let raw = json!([
+        {"id":"s_old","title":"新会话","messages":[],"server_conversation_id":"c1"},
+        {"id":"s_other","title":"另一个","messages":[]}
+    ]);
+    let applied = apply_index_op(
+        &raw,
+        Some("s_old"),
+        &SessionIndexOp::SetTitleByServer {
+            conversation_id: "c1".into(),
+            title: "帮我查下日志".into(),
+        },
+        &stamp("x"),
+    )
+    .expect("apply");
+    let rows = applied.sessions.as_array().expect("array");
+    assert_eq!(rows[0]["title"], json!("帮我查下日志"));
+    assert_eq!(rows[1]["title"], json!("另一个"), "只动命中那一行");
+    assert_eq!(applied.local_id, "s_old", "回传命中行的本地 id");
+}
+
+#[test]
+fn set_title_by_server_keeps_existing_title() {
+    // 别的端已经起过名：不能覆盖（与 `SetTitle` 共用同一条默认标题守卫）。
+    let raw = json!([{"id":"s1","title":"已起名","messages":[],"server_conversation_id":"c1"}]);
+    let applied = apply_index_op(
+        &raw,
+        Some("s1"),
+        &SessionIndexOp::SetTitleByServer {
+            conversation_id: "c1".into(),
+            title: "新名字".into(),
+        },
+        &stamp("x"),
+    )
+    .expect("apply");
+    assert_eq!(
+        applied.sessions.as_array().unwrap()[0]["title"],
+        json!("已起名")
+    );
+}
+
+#[test]
+fn set_title_by_server_missing_row_is_silent() {
+    // 会话从未登记到索引（用户没 `/conv new` 过）：静默跳过，不报错、不动别的行。
+    let raw = json!([{"id":"s1","title":"新会话","messages":[],"server_conversation_id":"c9"}]);
+    let applied = apply_index_op(
+        &raw,
+        Some("s1"),
+        &SessionIndexOp::SetTitleByServer {
+            conversation_id: "c1".into(),
+            title: "x".into(),
+        },
+        &stamp("y"),
+    )
+    .expect("找不到行不是错误");
+    assert_eq!(
+        applied.sessions.as_array().unwrap()[0]["title"],
+        json!("新会话")
+    );
+    assert_eq!(applied.local_id, "", "没命中行时 local_id 为空");
+}

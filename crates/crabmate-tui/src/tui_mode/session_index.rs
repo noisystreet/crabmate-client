@@ -187,6 +187,7 @@ fn index_failure_notice(op: &SessionIndexOp) -> Option<&'static str> {
         SessionIndexOp::BindServer { .. } => Some("会话未绑定到列表行"),
         SessionIndexOp::RemoveBlank { .. } => None,
         SessionIndexOp::SetTitle { .. } => Some("会话标题未写入会话列表"),
+        SessionIndexOp::SetTitleByServer { .. } => Some("会话标题未写入会话列表"),
         SessionIndexOp::FlushExit { .. } => Some("退出前的会话落盘未完成"),
         SessionIndexOp::Delete { .. } => Some("删除会话未写入会话列表"),
     }
@@ -209,6 +210,10 @@ pub(super) struct UiIndexState {
     pub(super) pending_bind_conversation: Option<String>,
     /// `NewBlank` 在途期间发出的首条消息算出的标题：等行 id 到手再写。
     pub(super) pending_session_title: Option<String>,
+    /// 没有待认领行时算出的首条消息标题：等首轮结束拿到 `conversation_id` 再按 cid 写回。
+    ///
+    /// 与 [`Self::pending_session_title`] 的分工：那个等**行 id**，这个等 **cid**。
+    pub(super) pending_cid_title: Option<String>,
     /// 启动时回放 CLI 显式指定的会话是否已尝试过（只做一次，避免每次刷新左栏都冲掉 transcript）。
     pub(super) history_auto_replayed: bool,
     /// `NewBlank` 写出去了、回包才到达，而用户中途切了工作区。
@@ -327,7 +332,14 @@ impl LaneApp<'_> {
             DeferredAction::Defer => {
                 self.index.pending_session_title = Some(title);
             }
-            DeferredAction::Skip => {}
+            DeferredAction::Skip => {
+                // 没有任何待认领的行（典型：重启后 `local_new_session` 已失效，左栏却留着
+                // 上次那条空行）。先记下标题，等首轮结束拿到 cid 再按 cid 反查行写回。
+                // 只在首轮记：之后 `conversation_id` 已非空，不该用后续消息覆盖首条标题。
+                if self.st.conversation_id.is_none() && self.index.pending_cid_title.is_none() {
+                    self.index.pending_cid_title = Some(title);
+                }
+            }
             DeferredAction::Now(local_id) => {
                 // 列表里已有这行就按它的真实标题判断（别端起过名就跳过）；还没刷新到
                 // 就当作默认标题——那正是 TUI 刚建、还没人起名的空白行。
@@ -347,6 +359,23 @@ impl LaneApp<'_> {
                 let _ = self.job_tx.send(WorkerJob::SessionIndex(op));
             }
         }
+    }
+
+    /// 首轮结束拿到 `conversation_id` 后，按 cid 反查左栏行补写标题。
+    ///
+    /// 兜底 [`Self::retitle_new_session_for_first_turn`] 的 `Skip` 路径：那条路径只在
+    /// `local_new_session` 有效时能起名，而它不跨进程存活（重启后左栏留着上次的空行、
+    /// 用户直接发消息，标题就永远停在默认值）。这里改用行上的 `server_conversation_id`
+    /// 反查，与「行有没有被认领」无关；写入侧仍只在标题是默认值时改。
+    pub(super) fn retitle_by_conversation(&mut self, conversation_id: &str) {
+        let Some(title) = self.index.pending_cid_title.take() else {
+            return;
+        };
+        let op = SessionIndexOp::SetTitleByServer {
+            conversation_id: conversation_id.to_string(),
+            title,
+        };
+        let _ = self.job_tx.send(WorkerJob::SessionIndex(op));
     }
 
     /// 索引写入结果：成功即刷新列表，新行 / `>` 标记都从服务端回读，
@@ -456,6 +485,8 @@ impl LaneApp<'_> {
             SessionIndexOp::RemoveBlank { .. } => {}
             // 起名同理：左栏刷新后自然显示新标题，不必额外打一行。
             SessionIndexOp::SetTitle { .. } => {}
+            // 按 cid 补名也是静默的：标题在左栏刷新后自然出现。
+            SessionIndexOp::SetTitleByServer { .. } => {}
             // 退出落盘发生在退出路径上，屏幕上已经没有可看的地方，静默即可。
             SessionIndexOp::FlushExit { .. } => {}
             // 删除：左栏刷新后那行自然消失，不必额外打一行（发起时已提示「正在删除…」）。
