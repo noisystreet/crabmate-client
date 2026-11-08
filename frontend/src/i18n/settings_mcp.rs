@@ -137,6 +137,19 @@ pub fn settings_mcp_remove(l: Locale) -> &'static str {
     }
 }
 
+/// 删除前的二次确认：按钮只改表单草案，但「保存」会把它写回服务端，
+/// 误删后只能凭记忆重建 id / command / args —— 因此文案要带上被删的 id。
+pub fn settings_mcp_remove_confirm(l: Locale, id: &str) -> String {
+    match l {
+        Locale::ZhHans => format!(
+            "将从列表中移除 MCP 服务器「{id}」，保存后写回服务端。误删需重新填写 id / command / args。"
+        ),
+        Locale::En => format!(
+            "Remove MCP server \"{id}\" from the list; saving writes the removal back to the server. Re-adding means retyping id / command / args."
+        ),
+    }
+}
+
 pub fn settings_mcp_name_label(l: Locale) -> &'static str {
     match l {
         Locale::ZhHans => "名称",

@@ -1,6 +1,7 @@
 //! MCP 设置页：单服务器行操作按钮。
 
 use leptos::prelude::*;
+use leptos::task::spawn_local;
 
 use super::settings_mcp_status::{McpSettingsSignals, spawn_probe_mcp_server};
 use crate::i18n::{self, Locale};
@@ -31,7 +32,19 @@ pub(crate) fn SettingsMcpServerRowActions(
                 data-testid="settings-mcp-remove"
                 on:click=move |_| {
                     let sid = id_remove.clone();
-                    set_file.update(|f| f.servers.retain(|s| s.id != sid));
+                    // 按钮只改表单草案，但「保存」会把它写回服务端；误点无处撤销，先确认再删。
+                    let loc = locale.get_untracked();
+                    spawn_local(async move {
+                        let ok = crate::confirm_dialog::confirm_in_page(
+                            &i18n::settings_mcp_remove_confirm(loc, &sid),
+                            i18n::settings_mcp_remove(loc),
+                            i18n::ide_confirm_cancel(loc),
+                        )
+                        .await;
+                        if ok {
+                            set_file.update(|f| f.servers.retain(|s| s.id != sid));
+                        }
+                    });
                 }
             >
                 {move || i18n::settings_mcp_remove(locale.get())}

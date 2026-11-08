@@ -469,6 +469,12 @@ fn disconnect_disabled(busy: bool, connected: bool, device_ui_active: bool) -> b
     busy || !connected
 }
 
+/// Device Flow 展示中（`user_code` / `verify_url` 已出）：同一个「断开」按钮此刻的语义是
+/// 「取消进行中的授权」，不产生不可逆后果。按钮 `disabled` 与点击分支共用本判定，避免口径漂移。
+fn device_flow_ui_active(user_code: Option<String>, verify_url: Option<String>) -> bool {
+    user_code.is_some() || verify_url.is_some()
+}
+
 fn reopen_disabled(busy: bool, verify_url: Option<String>) -> bool {
     let _ = busy;
     verify_url.is_none()
@@ -588,7 +594,7 @@ fn SettingsGithubBlockActions(
                     disconnect_disabled(
                         ui.busy.get(),
                         ui.github_set.get(),
-                        ui.user_code.get().is_some() || ui.verify_url.get().is_some(),
+                        device_flow_ui_active(ui.user_code.get(), ui.verify_url.get()),
                     )
                 }
                 on:click=move |_| on_disconnect.run(())
@@ -727,7 +733,24 @@ pub(crate) fn SettingsGithubBlock(
         spawn_device_connect(locale.get_untracked(), ui, auth_refresh_nonce, flow_gen);
     });
     let on_disconnect = Callback::new(move |_| {
-        spawn_device_disconnect(locale.get_untracked(), ui, auth_refresh_nonce, flow_gen);
+        let loc = locale.get_untracked();
+        // Device Flow 展示中按钮是「取消授权」，无不可逆后果，直接执行；
+        // 真正断开已连连接会清掉本机 token，先确认。判定放在点击时（而非闭包创建时）。
+        if device_flow_ui_active(ui.user_code.get_untracked(), ui.verify_url.get_untracked()) {
+            spawn_device_disconnect(loc, ui, auth_refresh_nonce, flow_gen);
+            return;
+        }
+        spawn_local(async move {
+            let ok = crate::confirm_dialog::confirm_in_page(
+                i18n::settings_github_disconnect_confirm(loc),
+                i18n::settings_github_disconnect(loc),
+                i18n::ide_confirm_cancel(loc),
+            )
+            .await;
+            if ok {
+                spawn_device_disconnect(loc, ui, auth_refresh_nonce, flow_gen);
+            }
+        });
     });
     let on_reopen = Callback::new(move |_| {
         if let Some(url) = ui.verify_url.get_untracked() {
@@ -751,10 +774,23 @@ pub(crate) fn SettingsGithubBlock(
 #[cfg(test)]
 mod tests {
     use super::{
-        disconnect_disabled, http_status_hint_in_error, is_device_flow_generation_current,
-        is_device_terminal, is_transient_device_poll_error, is_transient_http_status,
-        should_rollback_stale_device_token, should_stop_device_poll_on_error,
+        device_flow_ui_active, disconnect_disabled, http_status_hint_in_error,
+        is_device_flow_generation_current, is_device_terminal, is_transient_device_poll_error,
+        is_transient_http_status, should_rollback_stale_device_token,
+        should_stop_device_poll_on_error,
     };
+
+    /// Device Flow 展示中（`user_code` / `verify_url` 已出）时按钮是「取消授权」，
+    /// 点击分支据此跳过破坏性确认；两者都没出时才是真正断开。
+    #[test]
+    fn device_flow_ui_active_marks_cancel_semantics() {
+        assert!(device_flow_ui_active(Some("ABCD-1234".into()), None));
+        assert!(device_flow_ui_active(
+            None,
+            Some("https://github.com/login/device".into())
+        ));
+        assert!(!device_flow_ui_active(None, None));
+    }
 
     #[test]
     fn generation_matches_only_when_equal() {
