@@ -706,6 +706,9 @@ impl LaneApp<'_> {
             // `/conv new` 建的本地行还没有服务端 id：首轮结束就补上（左栏 `>` 与
             // `/conv use`、Web 端续聊都靠它）。
             self.bind_new_session(&cid);
+            // 没有待认领的行时（典型：重启后没按 `/conv new` 直接发消息），
+            // 按 cid 反查左栏行补标题；有认领行的路径已在 `start_turn` 起过名。
+            self.retitle_by_conversation(&cid);
             // cid 一到，新会话的 `~` 基线就不再适用（`UiState::context_text` 只认「无 cid」）：
             // 这一轮若没带实测，补一次用量水合，否则状态行会从 `~12k` 掉回占位 `—`。
             self.hydrate_usage_if_unmeasured(&cid);

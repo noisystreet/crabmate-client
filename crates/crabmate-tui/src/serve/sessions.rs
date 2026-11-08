@@ -90,6 +90,18 @@ pub enum SessionIndexOp {
         /// 新标题（已由 [`title_from_user_prompt`] 规整）。
         title: String,
     },
+    /// 按服务端 `conversation_id` 反查行并起名（[`SessionIndexOp::SetTitle`] 的兜底版）。
+    ///
+    /// `SetTitle` 只认本地行 id，而本地行 id 由 `NewBlank` 的回包建立、不跨进程存活。
+    /// 重启后左栏留着上次那条空行、用户又没按 `/conv new` 就直接发消息时，没有任何人
+    /// 认领它，标题就永远停在默认值。这里改用行上的 `server_conversation_id` 反查：
+    /// 认没认领都不影响，找到就写（同样只在标题仍是默认值时改）。
+    SetTitleByServer {
+        /// 服务端对话 id（`sessions[].server_conversation_id`）。
+        conversation_id: String,
+        /// 新标题（已由 [`title_from_user_prompt`] 规整）。
+        title: String,
+    },
     /// 退出收尾：一次 `GET → 应用 → PUT` 同时补绑定与草稿。
     ///
     /// **为什么合并成一次写入**：每次 op 都是「读全量索引 → 改 → 写全量」，两次独立
@@ -259,6 +271,22 @@ pub fn apply_index_op(
                 created_blank_id: None,
             })
         }
+        SessionIndexOp::SetTitleByServer {
+            conversation_id,
+            title,
+        } => {
+            let local_id =
+                retitle_by_server_conversation_id(&mut rows, conversation_id, title, stamp.now_ms);
+            // 找不到对应行不是错误：没登记到索引的会话本来就不在左栏（例如用户从未
+            // `/conv new` 过），静默跳过——报错会每轮弹一次，纯噪音。
+            Ok(AppliedIndex {
+                sessions: Value::Array(rows),
+                active_session_id: active.map(str::to_string),
+                local_id,
+                reused_blank: false,
+                created_blank_id: None,
+            })
+        }
         SessionIndexOp::FlushExit {
             local_id,
             conversation_id,
@@ -367,6 +395,37 @@ fn now_ms() -> i64 {
 
 fn row_id(row: &Value) -> Option<&str> {
     row.get("id")?.as_str()
+}
+
+/// 行上绑定的服务端对话 id（空白行没有这个字段 → `None`）。
+///
+/// `SetTitleByServer` 的反查键：本地行 id 会随进程消失，这个字段不随。
+fn row_server_conversation_id(row: &Value) -> Option<&str> {
+    row.get("server_conversation_id")?
+        .as_str()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+}
+
+/// 按 `server_conversation_id` 反查行并起名；返回命中行的本地行 id（未命中为空串）。
+///
+/// 单独成函数：`apply_index_op` 里内联这段会把它的 CCN 顶过门禁，而「找不到行 = 静默
+/// 成功」这条语义也正好收在一处。
+fn retitle_by_server_conversation_id(
+    rows: &mut [Value],
+    conversation_id: &str,
+    title: &str,
+    now_ms: i64,
+) -> String {
+    let Some(row) = rows
+        .iter_mut()
+        .find(|r| row_server_conversation_id(r) == Some(conversation_id))
+    else {
+        return String::new();
+    };
+    let local_id = row_id(row).unwrap_or_default().to_string();
+    set_default_title(row, title, now_ms);
+    local_id
 }
 
 /// 空白会话行：只写 Web `ChatSession` 的必需 / 常用字段（其余由 Web 侧 serde 缺省补齐）。
