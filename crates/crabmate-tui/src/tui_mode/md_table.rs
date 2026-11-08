@@ -1,7 +1,8 @@
 //! 极简表格渲染：**无竖线**，靠表头加粗 + 一条 `─` 分隔 + 列间两空格。
 //!
 //! 不用第三方表格库：`comfy-table` / `tabled` 交出的是一整块 `String`（或 ANSI），
-//! 而聊天区管线是 `Vec<(Style, char)>` 字符流 —— 要么丢掉它们的样式再自己解析，
+//! 而聊天区管线是带链接区间的 `PartChars`（字符流 + 链接的字符区间）—— 要么丢掉它们的
+//! 样式再自己解析，
 //! 要么为了接进来写一个 ANSI 反解析器，两头都不划算。这里用已有的 `unicode-width`
 //! 算宽度、用主题槽取色，直接产出字符流。
 //!
@@ -12,15 +13,20 @@
 use ratatui::style::{Modifier, Style};
 use unicode_width::UnicodeWidthChar;
 
-use super::{Palette, inline_styled_chars};
+use super::{Palette, PartChars, inline_styled_chars};
 
 /// 列间距（空格数）。
 const TABLE_GAP: usize = 2;
 /// 压缩时的单列下限：再窄就只剩省略号，没有信息量。
 const TABLE_MIN_COL: usize = 3;
 
-/// 一行渲染结果（带样式的字符序列）。
-type StyledRow = Vec<(Style, char)>;
+/// 一行渲染结果：字符流 + 单元格内链接的**字符区间**。
+///
+/// 曾经这里是裸 `Vec<(Style, char)>`，链接在 `render_row` 里被丢掉（理由写的是
+/// 「按列截断，没有稳定列」）。但屏幕列本来就不是这一层算的：`push_row` 会
+/// `absorb` 并平移链接区间，`wrap_styled_rows` 再统一换算成列。所以这一层只负责
+/// 把区间带着走，并在截断时把落在可见字符之外的区间裁掉 —— 热区因此与看到的字对齐。
+type StyledRow = PartChars;
 /// 整张表的渲染结果：若干行 + 消费掉的源行数。
 type TableBlock = (Vec<StyledRow>, usize);
 
@@ -175,37 +181,30 @@ fn render_row(
     pal: &Palette,
     header: bool,
 ) -> StyledRow {
-    let mut out: Vec<(Style, char)> = Vec::new();
+    let mut out = PartChars::default();
     for (c, w) in widths.iter().enumerate() {
         if c > 0 {
             out.extend((0..TABLE_GAP).map(|_| (Style::new(), ' ')));
         }
         let cell = cells.get(c).copied().unwrap_or("");
-        // 表格按列截断、不折行，链接的屏幕列在这里没有稳定的落脚点：丢掉链接标记
-        // （文字仍带 accent + 下划线），宁可不可点，也不给一个会点错列的热区。
-        let mut chars = inline_styled_chars(cell, pal).into_chars();
+        // 单元格里的链接**保留**：文字本来就带 accent + 下划线，丢掉标记就是
+        // 「看起来是链接、点不动、也不说为什么」。列宽截断时的裁剪在 `truncate_cell`。
+        let mut chars = inline_styled_chars(cell, pal);
         if header {
-            chars = chars
-                .into_iter()
-                .map(|(s, ch)| (s.add_modifier(Modifier::BOLD), ch))
-                .collect();
+            for (style, _) in chars.iter_mut() {
+                *style = style.add_modifier(Modifier::BOLD);
+            }
         }
         let used: usize = chars.iter().map(|(_, ch)| ch.width().unwrap_or(0)).sum();
-        out.extend(pad_cell(chars, used, *w, aligns[c], pal));
+        out.absorb(pad_cell(chars, used, *w, aligns[c], pal));
     }
     out
 }
 
 /// 按对齐填到列宽；超宽则截断并以 `…` 收尾（不折行 —— 表格里折行会撑乱行高）。
-fn pad_cell(
-    chars: Vec<(Style, char)>,
-    used: usize,
-    w: usize,
-    align: Align,
-    pal: &Palette,
-) -> Vec<(Style, char)> {
+fn pad_cell(cell: PartChars, used: usize, w: usize, align: Align, pal: &Palette) -> PartChars {
     if used > w {
-        return truncate_cell(chars, w, pal);
+        return truncate_cell(cell, w, pal);
     }
     let spare = w - used;
     let (left, right) = match align {
@@ -213,32 +212,55 @@ fn pad_cell(
         Align::Right => (spare, 0),
         Align::Center => (spare / 2, spare - spare / 2),
     };
-    let mut out: Vec<(Style, char)> = (0..left).map(|_| (Style::new(), ' ')).collect();
-    out.extend(chars);
+    let mut out = PartChars::default();
+    out.extend((0..left).map(|_| (Style::new(), ' ')));
+    // 左填充也是字符：`absorb` 会把单元格里的链接区间一起右移，
+    // 否则右对齐 / 居中的单元格热区会整体偏左。
+    out.absorb(cell);
     out.extend((0..right).map(|_| (Style::new(), ' ')));
     out
 }
 
-fn truncate_cell(chars: Vec<(Style, char)>, w: usize, pal: &Palette) -> Vec<(Style, char)> {
+/// 超宽单元格截断到列宽并补 `…`。
+///
+/// **落在被截掉部分的链接区间一并裁掉**：热区若越过 `…`，点下去打开的就是
+/// 屏幕上根本没画出来的那一截链接。
+fn truncate_cell(mut cell: PartChars, w: usize, pal: &Palette) -> PartChars {
     let budget = w.saturating_sub(1);
-    let mut out: Vec<(Style, char)> = Vec::new();
     let mut used = 0usize;
-    for (s, ch) in chars {
+    let mut keep = 0usize;
+    for (_, ch) in cell.iter() {
         let cw = ch.width().unwrap_or(0);
         if used + cw > budget {
             break;
         }
         used += cw;
-        out.push((s, ch));
+        keep += 1;
     }
-    out.push((rule_style(pal), '…'));
-    out
+    cell.truncate(keep);
+    clip_links(&mut cell, keep);
+    cell.push((rule_style(pal), '…'));
+    cell
+}
+
+/// 把链接区间裁到前 `keep` 个字符之内：越界的整条丢弃，跨界的收口。
+///
+/// `keep == 0` 时所有区间都被丢弃 —— 那是「列宽连一个字都放不下」的退化情形（列宽下限
+/// `TABLE_MIN_COL = 3` 让它在实践中不可达），留空热区比留一个指向 `…` 的更诚实。
+fn clip_links(cell: &mut PartChars, keep: usize) {
+    cell.links.retain_mut(|link| {
+        if link.start >= keep {
+            return false;
+        }
+        link.end = link.end.min(keep);
+        true
+    });
 }
 
 /// 表头下的分隔线：每列一条 `─`，列间空格。无竖线、无交叉点。
-fn rule_row(widths: &[usize], pal: &Palette) -> Vec<(Style, char)> {
+fn rule_row(widths: &[usize], pal: &Palette) -> PartChars {
     let st = rule_style(pal);
-    let mut out: Vec<(Style, char)> = Vec::new();
+    let mut out = PartChars::default();
     for (c, w) in widths.iter().enumerate() {
         if c > 0 {
             out.extend((0..TABLE_GAP).map(|_| (st, ' ')));

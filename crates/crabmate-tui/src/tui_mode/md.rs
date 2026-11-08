@@ -627,9 +627,10 @@ fn emit_table(
     if in_fence {
         return None;
     }
+    // 表格行自带链接区间（单元格里的链接），`push_row` 会把它整体平移进来。
     let (lines, consumed) = table::table_rows(rows, i, pal, width)?;
     for line in lines {
-        push_row(out, first, line.into());
+        push_row(out, first, line);
     }
     Some(consumed)
 }
@@ -653,7 +654,11 @@ pub(crate) fn assistant_styled_text(
     pal: &Palette,
     code_width: usize,
 ) -> Vec<(Style, char)> {
-    assistant_styled(text, pal, code_width).into_chars()
+    // 链接区间在这里有意丢掉：这些断言只看「画出哪些字符、什么样式」。
+    assistant_styled(text, pal, code_width)
+        .iter()
+        .cloned()
+        .collect()
 }
 
 /// 同 [`assistant_styled_text`]，但把**链接区间**一起带出。
