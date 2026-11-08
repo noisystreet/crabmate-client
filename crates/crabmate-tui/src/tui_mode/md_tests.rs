@@ -7,7 +7,7 @@ use ratatui::style::Color;
 
 use super::md_links::link_style;
 use super::*;
-use unicode_width::UnicodeWidthStr;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 /// 测试用固定深色调色板（不随默认主题与终端能力漂移）。
 fn pal() -> super::Palette {
@@ -327,6 +327,74 @@ fn table_column_width_uses_display_width() {
     assert_eq!(rows[3], "ab    22");
     // 两条数据行等宽
     assert_eq!(rows[2].width(), rows[3].width());
+}
+
+// ---------- 表格单元格里的链接（issue #428 第 2 条） ----------
+
+/// 取一行里 `[start, end)` 列区间覆盖到的可见文字。
+fn covered_text(row: &WrappedRow, start: u16, end: u16) -> String {
+    let mut out = String::new();
+    let mut col = 0usize;
+    for (_, ch) in &row.chars {
+        let cw = ch.width().unwrap_or(0);
+        if col >= usize::from(start) && col < usize::from(end) {
+            out.push(*ch);
+        }
+        col += cw;
+    }
+    out
+}
+
+/// 找到携带 `url` 热区的那一行，连同它的列区间。
+fn hotspot<'a>(rows: &'a [WrappedRow], url: &str) -> Option<(&'a WrappedRow, u16, u16)> {
+    rows.iter().find_map(|row| {
+        row.links
+            .iter()
+            .find(|(_, _, u)| u == url)
+            .map(|(start, end, _)| (row, *start, *end))
+    })
+}
+
+/// 单元格里的链接要留下热区，且热区正好压在链接文字那几列上。
+#[test]
+fn table_cell_link_gets_a_hotspot_on_its_columns() {
+    let text = "| [指南](https://example.com/a) | v |\n| --- | --- |\n| a | 1 |";
+    let rows = wrap_styled_rows(&assistant_styled(text, &pal(), 0), 200);
+    let (row, start, end) =
+        hotspot(&rows, "https://example.com/a").expect("表格单元格里的链接应登记热区");
+    assert_eq!(covered_text(row, start, end), "指南");
+}
+
+/// 单元格被列宽压到必须截断时，热区要跟着收口到 `…` 之前 ——
+/// 留一段越过 `…` 的热区，点下去打开的就是屏幕上没画出来的那截链接。
+#[test]
+fn truncated_table_cell_clips_the_link() {
+    let text = "| [非常长的链接文字](https://example.com/a) |\n| --- |\n| x |";
+    let rows = wrap_styled_rows(&assistant_styled(text, &pal(), 8), 200);
+    let (row, start, end) = hotspot(&rows, "https://example.com/a")
+        .expect("被截断的单元格前几个字仍在屏上，热区应收口而不是整条消失");
+    let shown = row_text(&row.chars);
+    // 结构性断言（不绑死具体几个字）：热区右端 == 可见文字去掉结尾 `…` 之后的显示宽度。
+    let visible = shown.strip_suffix('…').unwrap_or(&shown);
+    assert_eq!(usize::from(start), 0, "热区应从可见文字的开头起：{shown:?}");
+    assert_eq!(
+        usize::from(end),
+        visible.width(),
+        "热区应止于 `…` 之前：{shown:?}"
+    );
+    assert!(!covered_text(row, start, end).is_empty());
+}
+
+/// 右对齐单元格的链接区间要跟着左填充一起右移，否则热区整体偏左
+/// （把 `pad_cell` 里的 `absorb` 写回 `extend` 就会踩到）。
+#[test]
+fn right_aligned_cell_link_shifts_with_the_padding() {
+    // 表头比内容宽，右对齐才真的产生左填充。
+    let text = "| 名称 | 链接列 |\n| --- | ---: |\n| a | [文档](https://example.com/b) |";
+    let rows = wrap_styled_rows(&assistant_styled(text, &pal(), 0), 200);
+    let (row, start, end) =
+        hotspot(&rows, "https://example.com/b").expect("右对齐单元格里的链接应登记热区");
+    assert_eq!(covered_text(row, start, end), "文档");
 }
 
 /// 只有表头 + 分隔行也算表（流式输出到一半时就该以表格形态出现）。

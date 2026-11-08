@@ -21,6 +21,8 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 - **TUI: a draft left on a switched-away conversation now survives a restart.** The per-conversation draft table was memory-only, so quitting dropped everything except the focused conversation's text. It now persists to `$XDG_STATE_HOME/crabmate/tui-drafts.json` (`CM_TUI_DRAFTS_FILE` overrides) on session switch and on exit, and is read back when a lane is assembled. Entries are partitioned by `api_base`, so the same conversation id on two serves never leaks across. Writes are not per keystroke (a crash loses at most what was typed since the last switch), a corrupt file falls back to empty instead of failing startup, and the local copy never overwrites the server-side session-index draft. Cost: one module plus two fields on `Drafts`. No protocol change.
 
+- **TUI: links inside markdown table cells are now clickable.** The table renderer stripped link markers, on the reasoning that a column-truncated cell has no stable screen column to hit — so a link kept its accent + underline, did nothing on `Ctrl+click`, and said nothing about why. The column range never had to be computed there: table rows are `PartChars`, `push_row` re-bases their spans, and `wrap_styled_rows` turns character spans into columns once. Rows now keep their links, and a cell cut down to the column width clips the spans that fall past `…` instead of leaving a hotspot over characters that were never drawn. No protocol change.
+
 ## [0.8.0-alpha.3] - 2026-11-06
 
 ### Added

@@ -60,11 +60,6 @@ impl From<Vec<(Style, char)>> for PartChars {
 }
 
 impl PartChars {
-    /// 取出纯字符流（不带链接）。
-    pub(crate) fn into_chars(self) -> Vec<(Style, char)> {
-        self.chars
-    }
-
     /// 追加一段链接文字，并记下它在字符流里的区间。
     pub(super) fn push_link(&mut self, st: Style, text: &str, url: &str) {
         if text.is_empty() {
@@ -258,7 +253,8 @@ pub(super) fn link_style(pal: &Palette) -> Style {
 /// 送进本进程，终端自己的链接处理器再也收不到，见 `links.rs` 头注释）。
 ///
 /// **只该用在行内纯文本上**：行内代码（`` `https://x` ``）与代码块是人写给机器看的
-/// 字面量，不该变成可点目标；表格单元格另有按列截断的排版，热区在那里没有稳定列可依附。
+/// 字面量，不该变成可点目标；表格单元格走的是同一条字符流，列宽压缩与「`…` 之后
+/// 不再有热区」都在 `md_table` 里一次做完（见 `truncate_cell` 的 `clip_links`）。
 pub(super) fn push_plain_with_urls(
     out: &mut PartChars,
     text_st: Style,
