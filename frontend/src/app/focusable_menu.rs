@@ -5,8 +5,8 @@ use leptos::prelude::*;
 
 use crate::a11y::{
     capture_focus, handle_menu_keyboard, handle_modal_layer_keydown,
-    mouse_event_target_is_current_target, restore_focus_to, schedule_focus_first_in_modal,
-    schedule_focus_first_menu_item,
+    mouse_event_target_is_current_target, restore_focus_to, schedule_focus_by_testid,
+    schedule_focus_first_in_modal, schedule_focus_first_menu_item,
 };
 
 /// 自定义上下文 / 下拉菜单面板（须放在 `<Show>` 内，挂载时聚焦；关闭后焦点归还触发元素）。
@@ -99,6 +99,10 @@ pub(crate) fn FocusableModalPanel(
     #[prop(into)] labelledby: String,
     #[prop(optional)] testid: Option<&'static str>,
     #[prop(optional)] stop_pointerdown: bool,
+    /// 初始焦点指向哪个 `data-testid`。省略时聚焦容器内第一个可聚焦元素；
+    /// 破坏性确认必须传 `Some("shell-confirm-ok")`，否则 `Enter` 会落到「取消」按钮上。
+    #[prop(optional)]
+    initial_focus_testid: Option<&'static str>,
     on_escape: Callback<()>,
     children: Children,
 ) -> impl IntoView {
@@ -107,7 +111,10 @@ pub(crate) fn FocusableModalPanel(
     on_cleanup(move || restore_focus_to(restore_target.get_value().as_ref()));
     Effect::new(move |_| {
         if let Some(el) = dialog_ref.get() {
-            schedule_focus_first_in_modal(el.as_ref());
+            match initial_focus_testid {
+                Some(testid) => schedule_focus_by_testid(el.as_ref(), testid),
+                None => schedule_focus_first_in_modal(el.as_ref()),
+            }
         }
     });
     view! {

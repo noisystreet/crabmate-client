@@ -732,14 +732,23 @@ pub(crate) fn SettingsGithubBlock(
     let on_connect = Callback::new(move |_| {
         spawn_device_connect(locale.get_untracked(), ui, auth_refresh_nonce, flow_gen);
     });
+    // 确认框在途时忽略重复点击，否则连点会推多个请求（后到的确认打在已经断开的连接上）。
+    let disconnect_pending = RwSignal::new(false);
     let on_disconnect = Callback::new(move |_| {
+        if disconnect_pending.get_untracked() {
+            return;
+        }
         let loc = locale.get_untracked();
-        // Device Flow 展示中按钮是「取消授权」，无不可逆后果，直接执行；
-        // 真正断开已连连接会清掉本机 token，先确认。判定放在点击时（而非闭包创建时）。
-        if device_flow_ui_active(ui.user_code.get_untracked(), ui.verify_url.get_untracked()) {
+        // 只有「Device Flow 展示中**且尚未连接**」才是纯取消授权（无不可逆后果）。
+        // 已连接时哪怕 Device Flow 正在跑，这个按钮仍会 logout + 清掉本机 token —— 必须确认。
+        let cancel_only =
+            device_flow_ui_active(ui.user_code.get_untracked(), ui.verify_url.get_untracked())
+                && !ui.github_set.get_untracked();
+        if cancel_only {
             spawn_device_disconnect(loc, ui, auth_refresh_nonce, flow_gen);
             return;
         }
+        disconnect_pending.set(true);
         spawn_local(async move {
             let ok = crate::confirm_dialog::confirm_in_page(
                 i18n::settings_github_disconnect_confirm(loc),
@@ -747,6 +756,7 @@ pub(crate) fn SettingsGithubBlock(
                 i18n::ide_confirm_cancel(loc),
             )
             .await;
+            disconnect_pending.set(false);
             if ok {
                 spawn_device_disconnect(loc, ui, auth_refresh_nonce, flow_gen);
             }
