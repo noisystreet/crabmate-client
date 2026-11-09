@@ -774,8 +774,9 @@ impl LaneApp<'_> {
                 conversation_id,
                 snapshot,
             } => self.on_usage_hydrated(&conversation_id, snapshot),
-            // 压缩 / 裁剪后水位回落（ADR 0005）：只增不减会让数字虚高。
-            UiEvent::ContextTrim(after) => self.st.reset_used(after),
+            // 压缩 / 裁剪后水位回落（ADR 0005）：只增不减会让数字虚高。顺带落一行说明
+            // （#478）—— 否则用户只看到 `ctx` 自己变小，没有任何可读的原因。
+            UiEvent::ContextTrim(after) => self.st.note_context_trim(after),
             // 本轮注入的 skill（ADR 0003）：与 Desktop 的 skill 卡同义——只要 detail 里有
             // skills 就成行，不受「显示每轮注入」开关影响。
             UiEvent::SkillInject(info) => self
