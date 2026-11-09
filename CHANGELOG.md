@@ -11,6 +11,8 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ## [Unreleased]
 
+## [0.8.0-beta.0] - 2026-11-09
+
 ### Added
 
 - **TUI: diagnosing a frozen `ctx` no longer needs someone staring at the status bar.** `CM_TUI_SSE_DUMP` existed to answer "why did the context number stop moving", but it only wrote raw frames: telling whether a frame carried `tiktokenPromptTokens` meant reading JSON by eye, and a turn where *no* frame carried it looked exactly like a turn whose value was merely held back by the watermark (`max`). Each dumped frame now gets a preceding `{"kind":"frame","carries_snapshot":…}` record, and every turn writes one `{"kind":"turn_end","turn","measured","model_output","has_session_snapshot","cid"}` line, so a gap sits next to normal turns for comparison. Records carry no `type`, so `grep '"type"'` still yields frames only. Unset variable = no files, no behaviour change. Upstream of issue #472.

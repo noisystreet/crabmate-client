@@ -1,6 +1,6 @@
 [package]
 name = "crabmate-tui"
-version = "0.8.0-alpha.3"
+version = "0.8.0-beta.0"
 edition = "2024"
 license = "Apache-2.0"
 description = "CrabMate remote terminal client (HTTP/SSE to crabmate serve)"
