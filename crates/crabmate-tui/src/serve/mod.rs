@@ -16,6 +16,10 @@ mod session_store;
 mod sessions;
 // 流回调 trait 单独成文件：`chat_stream` 贴着 920 行门禁，而加一个事件就要在里面占十来行。
 mod stream_sink;
+// 文本模式的旁注文案与 `context_trim` 提示文案（issue #478）：同上，文案与「怎么写出去」
+// 分开，`chat_stream` 里只剩一行调用。
+mod text_notes;
+pub(crate) mod trim_line;
 mod url;
 pub(crate) mod user_data;
 mod workspace;

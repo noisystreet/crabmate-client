@@ -13,7 +13,9 @@ use crabmate_client_api::context_axis::{
 };
 use crabmate_client_api::prompt_tokens::TiktokenPromptTokensSnapshot;
 
-use super::UiState;
+use crate::serve::trim_line::{ContextTrimNotice, trim_line_text};
+
+use super::{LineKind, UiState};
 
 /// 上下文用量的两件状态：会话内水位 + 最近一次 `tiktokenPromptTokens` 快照。
 ///
@@ -24,6 +26,31 @@ pub struct ContextUsage {
     pub watermark: ContextUsedWatermark,
     /// 最近一次 `tiktokenPromptTokens` 的快照：固定开销拆分与上限兜底都用它。
     pub snapshot: Option<TiktokenPromptTokensSnapshot>,
+    /// 本轮压缩提示的记账（issue #478）：一轮一行，同轮改写。
+    pub trim: ContextTrimTurn,
+}
+
+/// 本轮 `context_trim` 的记账（issue #478）：一轮只占 transcript 一行。
+#[derive(Clone, Debug, Default)]
+pub struct ContextTrimTurn {
+    /// 本轮提示行的下标；`None` = 本轮还没写过。
+    ///
+    /// 存下标而非行内容：同一轮的压缩事件可能连续到达，`tool_pending` 用的也是这套
+    /// 「按行号原位更新」的约定；`prepend_replayed` 会平移它。
+    line: Option<usize>,
+    /// 本轮**第一次**压缩前的显示水位（`None` = 当时没有可信前置值）。
+    before: Option<u32>,
+    /// 本轮压缩次数。
+    count: u32,
+}
+
+impl ContextTrimTurn {
+    /// 历史前插 `n` 行后平移行下标（与 `tool_pending` 同一不变式）。
+    pub(super) fn shift_lines(&mut self, n: usize) {
+        if let Some(line) = self.line.as_mut() {
+            *line += n;
+        }
+    }
 }
 
 impl UiState {
@@ -46,6 +73,65 @@ impl UiState {
     pub fn reset_used(&mut self, after: u32) {
         if let Some(cid) = self.conversation_id.clone() {
             self.context.watermark.reset(&cid, after);
+        }
+    }
+
+    /// `context_trim`：水位回落到 `after`，并在 transcript 落**一行**说明（issue #478）。
+    ///
+    /// `before` 取状态行当前显示的分子（会话水位），不是服务端快照 —— 与 `ctx` 段同源，
+    /// 否则这行的两个数字都不是用户刚刚看到的那两个。拿不到可信水位时退化为只报
+    /// `after`：缺前置是常态（还没绑定会话），编一个 0 出来只会多一个错数字。
+    ///
+    /// 一轮只占一行：同一轮再压缩时**改写**那一行并累加次数。既避免刷屏，也避免
+    /// 「屏幕上的最终值」与这行公告各说一套 —— ADR 0005 要消灭的正是这种漂移。
+    pub fn note_context_trim(&mut self, after: u32) {
+        let before = self.displayed_watermark();
+        let turn = &mut self.context.trim;
+        if turn.count == 0 {
+            turn.before = before;
+        }
+        turn.count = turn.count.saturating_add(1);
+        let text = trim_line_text(&ContextTrimNotice {
+            before: turn.before,
+            after,
+            count: turn.count,
+        });
+        let line = turn.line;
+        self.reset_used(after);
+        self.place_trim_notice(line, &text);
+    }
+
+    /// 起回合复位：本轮的提示从自己那一行开始（`turn_send` 是唯一入口，同
+    /// `turn_usage_diag.begin`）。不复位的话，上一轮的行下标会指到这一轮的新行上。
+    pub fn reset_trim_notice(&mut self) {
+        self.context.trim = ContextTrimTurn::default();
+    }
+
+    /// 提示行落下或就地改写；原行已不在（回放 / 折叠挤走）就新开一行。
+    fn place_trim_notice(&mut self, line: Option<usize>, text: &str) {
+        if let Some(i) = line
+            && self
+                .lines
+                .get(i)
+                .is_some_and(|l| l.kind() == LineKind::System)
+        {
+            self.lines[i].set_text(text);
+            self.search_on_line_changed(i);
+            return;
+        }
+        let idx = self.lines.len();
+        self.push_line(LineKind::System, text);
+        self.context.trim.line = Some(idx);
+    }
+
+    /// 状态行当前显示的分子（压缩前的值）；没有属于当前会话的水位时为 `None`。
+    fn displayed_watermark(&self) -> Option<u32> {
+        let cid = self.conversation_id.as_deref()?;
+        let watermark = &self.context.watermark;
+        if watermark.key() == cid && watermark.used() > 0 {
+            Some(watermark.used())
+        } else {
+            None
         }
     }
 
@@ -219,7 +305,7 @@ fn cap_tokens(cap_from_settings: Option<&str>, snap: &TiktokenPromptTokensSnapsh
 
 #[cfg(test)]
 mod tests {
-    use super::{UiState, cap_tokens, used_tokens};
+    use super::{LineKind, UiState, cap_tokens, used_tokens};
     use crabmate_client_api::prompt_tokens::TiktokenPromptTokensSnapshot;
 
     fn snap(
@@ -361,6 +447,68 @@ mod tests {
         assert_eq!(
             st.context_text(Some("1000000"), Some(12_000)),
             "116.9k / 1000k (11.7%)"
+        );
+    }
+
+    /// `context_trim` 要落一行说明（#478）：状态行的 `ctx` 掉了，transcript 得说出原因。
+    #[test]
+    fn trim_writes_one_line_with_the_watermark_drop() {
+        let mut st = UiState::new();
+        st.conversation_id = Some("c1".to_string());
+        st.set_prompt_tokens(snap(Some(312_400), 312_400, Some(993_000)));
+        st.note_context_trim(251_100);
+        let last = st.lines.last().expect("应有一行提示");
+        assert_eq!(last.kind(), LineKind::System);
+        assert_eq!(last.text(), "上下文已压缩：312.4k → 251.1k");
+        // 水位同时回落到服务端给的值（ADR 0005 的后半句）。
+        assert_eq!(st.context.watermark.used(), 251_100);
+    }
+
+    /// 没有可信前置值时只报当前量，不编造 `before`；水位也不动（没有 cid 就没有归属）。
+    #[test]
+    fn trim_without_conversation_reports_after_only() {
+        let mut st = UiState::new();
+        st.set_prompt_tokens(snap(Some(300_000), 300_000, None));
+        st.note_context_trim(251_100);
+        assert_eq!(
+            st.lines.last().map(|l| l.text()),
+            Some("上下文已压缩：251.1k")
+        );
+        assert_eq!(st.context.watermark.used(), 0, "没有 cid 时水位不动");
+    }
+
+    /// 一轮多次压缩只占一行（改写而非追加）：屏幕上的数字与这行公告不能互相打架。
+    #[test]
+    fn repeated_trims_in_one_turn_rewrite_the_same_line() {
+        let mut st = UiState::new();
+        st.conversation_id = Some("c1".to_string());
+        st.set_prompt_tokens(snap(Some(312_400), 312_400, None));
+        st.note_context_trim(251_100);
+        let lines_after_first = st.lines.len();
+        st.note_context_trim(200_000);
+        assert_eq!(st.lines.len(), lines_after_first, "同一轮不该再开一行");
+        assert_eq!(
+            st.lines.last().map(|l| l.text()),
+            Some("上下文已压缩：312.4k → 200.0k（本轮 2 次）")
+        );
+        assert_eq!(st.context.watermark.used(), 200_000);
+    }
+
+    /// 起回合复位记账：下一轮的提示从自己那一行开始，不会改写上一轮的行。
+    #[test]
+    fn next_turn_starts_a_fresh_line() {
+        let mut st = UiState::new();
+        st.conversation_id = Some("c1".to_string());
+        st.set_prompt_tokens(snap(Some(312_400), 312_400, None));
+        st.note_context_trim(251_100);
+        let lines_before = st.lines.len();
+        st.reset_trim_notice();
+        st.set_prompt_tokens(snap(Some(260_000), 260_000, None));
+        st.note_context_trim(220_000);
+        assert_eq!(st.lines.len(), lines_before + 1);
+        assert_eq!(
+            st.lines.last().map(|l| l.text()),
+            Some("上下文已压缩：260.0k → 220.0k")
         );
     }
 }

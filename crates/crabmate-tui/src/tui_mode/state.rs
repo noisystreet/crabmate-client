@@ -333,6 +333,16 @@ impl LogLine {
         self.touch();
     }
 
+    /// 整行文本替换（旁注行的同轮改写，见 `state_context` 的 `note_context_trim`）。
+    ///
+    /// 与 `append` 分开：那里接的是增量，这里换的是整条公告（次数与两个数字都变了）。
+    fn set_text(&mut self, text: &str) {
+        if self.text != text {
+            self.text = text.to_string();
+            self.touch();
+        }
+    }
+
     /// 折叠态变化（没变就不动版本，免得白白让缓存重建）。
     fn set_collapsed(&mut self, collapsed: bool) {
         if self.collapsed != collapsed {

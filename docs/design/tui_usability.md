@@ -183,6 +183,7 @@
 | W3.3（链接） | L57「Full-screen TUI」Notes | 已同步：`Ctrl+单击` 打开正文链接（应用内命中表，不依赖 OSC 8；SSH 降级为复制；只放行 http(s)） |
 | W3.4 | L54「Full-screen TUI」Notes | 补状态栏 `ctx` 上下文用量段（`tiktokenPromptTokens`（`RUN_FINISHED` / `conversation_saved`） + 会话内水位；口径来自 S11 `client-api::context_axis`；段恒在，无实测时占位 `—`）——已同步 |
 | W3.5 | 同格 Notes | 已修（见 G11）：`timeline_log` `kind=context_trim` 的 `after_tokens` 会把水位**回落**；另加两处清理 —— `/conv new` 与切换会话时 `UiState::clear_usage` 清空快照与水位，避免新会话仍显示上一个会话的数字；新会话（无 cid）回落 `/status` 的 `tiktoken_new_session_baseline_by_agent_role` 并显示 `~` 估算前缀（对齐 Desktop）；另：首轮结束绑上 cid 后若这一轮仍无实测，回合末补拉 `GET /conversation/messages` 的快照（同 Desktop 流收尾水合，回包按 cid 门控），不再从 `~12k` 掉回 `—` |
+| W3.6 | L68「Per-turn inject / trim transcript notes」TUI 列 + Notes | 已落地（#478）：TUI 从 `no` → `partial` —— `context_trim` 每轮落**一行** `System`（`上下文已压缩：312.4k → 251.1k`；同轮第二次起改写该行并计次；无可信前置值时只报当前量，退化形态见 `serve::trim_line`）。`context_inject` 仍只有 skill 行，且**不加** Desktop 那个默认关闭的旁注开关。文本模式（`chat` / `repl`）同一句、无箭头。措辞三条准则随代码固化在 `trim_line.rs` 模块头：最小事实优先（差量是增强，缺前置不退化成沉默）、不陈述自己不知道的因（契约只给 `after_tokens`）、屏幕一行 / 细节走 `CM_TUI_SSE_DUMP`，不为一行提示加设置项 |
 
 > 矩阵维护规则：改了用户可见能力就必须在同 PR 更新对应格（§顶注），不允许“下个 PR 再补”。
 

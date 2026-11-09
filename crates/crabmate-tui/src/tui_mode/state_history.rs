@@ -84,6 +84,8 @@ impl UiState {
         for idx in self.tool_pending.values_mut() {
             *idx += n;
         }
+        // 本轮压缩提示的行下标同理（#478）：同一套「按行号原地改写」的状态。
+        self.context.trim.shift_lines(n);
         // ② 搜索锚点与折叠光标都是逻辑行号，先跟着平移。
         self.search_cursor = self.search_cursor.map(|cursor| cursor + n);
         self.fold_cursor = self.fold_cursor.map(|cursor| cursor + n);

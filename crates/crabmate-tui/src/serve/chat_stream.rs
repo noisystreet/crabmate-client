@@ -245,21 +245,20 @@ impl StreamSink for TextStreamSink<'_> {
         Ok(())
     }
 
-    /// 澄清问卷（issue #424）：文本模式必须**至少说出来**。
-    ///
-    /// 默认实现是空操作，而症状与 issue 修的那个「静默丢弃」一模一样：用户只看到
-    /// 工具行，服务端在等一份谁也不会提交的问卷。`chat` 一轮即退出，`repl` 的下一行
-    /// 会被当成普通消息，所以这里只提示换 `tui`，不假装能答。
+    /// 澄清问卷（issue #424）：文本模式必须**至少说出来**，文案与理由见 `text_notes`。
     fn on_clarify(
         &mut self,
         info: &crabmate_client_api::sse_dispatch::ClarificationQuestionnaireInfo,
     ) -> Result<(), TermError> {
-        let _ = writeln!(
-            self.err,
-            "模型请求澄清（{} 题）：文本模式无法作答，请用 `crabmate-tui tui` 打开表单",
-            info.fields.len()
-        );
-        Ok(())
+        self.on_system(&super::text_notes::clarify_unanswerable_line(
+            info.fields.len(),
+        ))
+    }
+
+    /// 压缩 / 裁剪（issue #478）：文本模式没有会话水位，只报最小事实（见 `trim_line`）。
+    fn on_context_trim(&mut self, after: u32) -> Result<(), TermError> {
+        let notice = super::trim_line::ContextTrimNotice::after_only(after);
+        self.on_system(&super::trim_line::trim_line_text(&notice))
     }
 
     fn on_finished(&mut self) -> Result<(), TermError> {
