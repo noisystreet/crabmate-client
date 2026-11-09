@@ -98,7 +98,14 @@
 
 **分母口径（`raw_cap`）优先级**：本机设置「上下文长度」(`client_llm.llm_context_tokens`) → `GET /status` 的 `llm_context_tokens` → 服务端 `max_input_tokens`。前两者都是「上下文窗口」口径（本机是用户设定，`/status` 是服务端同字段回读），服务端 `max_input_tokens` 则是「窗口 − 输出预留 − 安全余量」的派生预算、口径不同。若首轮前用窗口（如 `1000k`）、首轮后切成 `max_input_tokens`（如 `993k`），分母会在两值间跳变，引起困惑，也违背「最大可用量应恒定」的预期；故把 `max_input_tokens` 降为上限未知时的最后回退，让分母在整个会话内恒定。
 
-**刷新时机（须在页面注明）**：`used` 只在回合末（`RUN_FINISHED`）或水合时刷新；流式进行中显示的是**上一回合末快照**。这是 ADR-0005 的已知时序特性，页面应显式提示，避免用户误以为数字卡住。
+**刷新时机（页面旁注已覆盖，勿再写成「只在回合末」）**：快照落地是**事件驱动**的，但两端的取帧范围不同：
+
+- **Desktop / Web**：只在两处写入快照 —— `on_stream_ended`（`RUN_FINISHED` 带 `tiktokenPromptTokens`）与 `conversation_saved`（`frontend/src/app/chat/composer_stream/callbacks/builders/stream_phase_hooks.rs:42-46`、`stream_sync_callbacks.rs:54-58`）；
+- **TUI**：`chat_classify::prompt_tokens_from_line` 对**任何**携带该键的帧生效（`crates/crabmate-tui/src/serve/chat_classify.rs:129-135`，只做子串守卫、不看帧类型），因此**一轮中途**就可能立即刷新（已实测，见 issue #476）。
+
+服务端是否会在会话中途发 `conversation_saved`（这决定 Desktop 是否也中途更新）属 Server 侧事实，本仓不预设；可用 `CM_TUI_SSE_DUMP` 观察实际帧。页面旁注（`i18n::context_usage_note_refresh`）写「数据随每轮对话刷新」，两种口径都成立，不必改成「只在回合末」。
+
+水位语义不受此影响：`used` 仍按会话内只增（`observe` 取滚动最大），只有 `context_trim` 会 `reset` 回落（ADR-0005），所以中途刷新通常只表现为**上涨**；看到下降基本就是发生了裁剪 / 压缩。
 
 ## 矩形图设计（核心）
 
@@ -186,7 +193,7 @@
 |---|---|---|
 | 数据只到桶级 | 无法下钻，与 baobab 体验有本质差异 | 方案内明确为非目标；若产品确需下钻，须 Server 增字段（本仓不提） |
 | `reserved_output_tokens` 与 `raw_cap` 关系 | 已确认输出预留已从 `max_input_tokens` 扣除 | 固定作旁注，不作堆叠段 |
-| 刷新时机滞后 | 流式中显示上一回合末快照 | 页面注明；不为此改动水位逻辑（ADR-0005 明确不可删 `max`） |
+| 刷新时机 | Desktop/Web 只在 `RUN_FINISHED` 与 `conversation_saved` 两处写快照；TUI 取帧范围更宽，**一轮中途也会刷新**（已实测，见「刷新时机」节与 issue #476） | 页面旁注写「随每轮对话刷新」（两种口径都成立）；不为此改动水位逻辑（ADR-0005 明确不可删 `max`） |
 | 芯片从 span 改可点击 | 可能影响状态栏布局 | 先核 `.status-chip` 的 button 重置；必要时用 `role="button"` |
 | `tool_schema` 拆分的稳定性 | `F` 由反推得来，可能与真实分布有偏差 | 图例标注「反推」，与显式字段区分层级 |
 
