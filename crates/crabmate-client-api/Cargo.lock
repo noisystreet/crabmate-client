@@ -30,7 +30,7 @@ dependencies = [
 
 [[package]]
 name = "crabmate-client-api"
-version = "0.8.0-alpha.3"
+version = "0.8.0-beta.0"
 dependencies = [
  "crabmate",
  "serde",
