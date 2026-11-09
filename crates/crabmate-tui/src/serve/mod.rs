@@ -3,7 +3,7 @@
 //! **不**内嵌 Agent，**不** spawn `serve`。
 
 mod approval;
-mod chat_classify;
+pub(crate) mod chat_classify;
 mod chat_dispatch;
 mod chat_stream;
 mod client;

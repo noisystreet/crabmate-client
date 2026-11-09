@@ -63,6 +63,7 @@ mod session_index;
 mod session_refresh;
 mod settings;
 mod settings_panel;
+mod usage_diag;
 // 「本地行为」栏的 `CM_TUI_*` 生效值（只读；调运行时同一个判定函数）。
 mod settings_panel_env;
 mod shell;
@@ -696,6 +697,12 @@ impl LaneApp<'_> {
         self.turn_started = None;
         // 断点：只有「serve 侧 job 可能仍在跑」才留（规则与 repl 同源，见 `resume`）。
         self.record_turn_outcome(&outcome, interrupted);
+        // 诊断（#472）：本轮有没有收到用量快照。必须在下面 `if let Some(cid)` **之前**取 ——
+        // 那里会把 `outcome.conversation_id` move 走。每轮一条，供「状态行冻住」时对照。
+        self.st.turn_usage_diag.record_turn_end(
+            outcome.conversation_id.as_deref(),
+            self.st.has_usage_snapshot(),
+        );
         // 只读的设置面板随回合结束自动解锁（保留面板，不需重开）。
         if let Some(panel) = self.panel.as_mut() {
             panel.unlock_after_turn();
@@ -746,11 +753,21 @@ impl LaneApp<'_> {
             // 尺寸变化只为唤醒：真值在 `draw_frame` 前现查（`sync_terminal_size`）。
             // 变体刻意不携带尺寸，所以这里没有任何可缓存的 w/h。
             UiEvent::Resize => {}
-            UiEvent::Text(delta) => self.st.stream_delta(LineKind::Assistant, &delta),
+            UiEvent::Text(delta) => {
+                self.st.turn_usage_diag.mark_model_output();
+                self.st.stream_delta(LineKind::Assistant, &delta);
+            }
             UiEvent::Skills(result) => self.st.set_skills(result),
-            UiEvent::Thinking(delta) => self.st.stream_delta(LineKind::Thinking, &delta),
+            UiEvent::Thinking(delta) => {
+                self.st.turn_usage_diag.mark_model_output();
+                self.st.stream_delta(LineKind::Thinking, &delta);
+            }
             UiEvent::System(line) => self.st.push_line(LineKind::System, line.trim()),
-            UiEvent::PromptTokens(snap) => self.st.set_prompt_tokens(*snap),
+            UiEvent::PromptTokens(snap) => {
+                // 本轮收到过实测（#472 的逐轮判定要用）：任一帧即可，分类器不按帧类型过滤。
+                self.st.turn_usage_diag.mark_measured();
+                self.st.set_prompt_tokens(*snap);
+            }
             // 回合末补拉的用量（`GET /conversation/messages` 自带快照）：带 cid，
             // 回包晚到（用户已切走）时丢弃，不把上个会话的数字挂到当前会话上。
             UiEvent::UsageHydrated {
@@ -772,13 +789,19 @@ impl LaneApp<'_> {
                 tool_call_id,
                 name,
                 note,
-            } => self.st.tool_start(&tool_call_id, &name, note.as_deref()),
+            } => {
+                self.st.turn_usage_diag.mark_model_output();
+                self.st.tool_start(&tool_call_id, &name, note.as_deref());
+            }
             UiEvent::ToolEnd {
                 tool_call_id,
                 name,
                 ok,
                 note,
-            } => self.st.tool_end(&tool_call_id, &name, ok, note.as_deref()),
+            } => {
+                self.st.turn_usage_diag.mark_model_output();
+                self.st.tool_end(&tool_call_id, &name, ok, note.as_deref());
+            }
             UiEvent::Approval { prompt } => {
                 // 审批浮层优先级高于设置面板：面板（只读）开着时先关掉再弹审批，
                 // 避免按键被面板截走导致审批悬挂。
