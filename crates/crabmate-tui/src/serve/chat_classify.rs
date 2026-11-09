@@ -92,16 +92,52 @@ pub(crate) enum LineAction {
 /// 只在排查「状态栏没有 ctx」时打开。未设置时每行只多一次 `OnceLock` 读（无系统调用、
 /// 不碰文件），高频 token 流下开销可忽略；设置后也只写含关键字的那几帧，不会把整条流转存。
 fn dump_frame(line: &str) {
-    static PATH: OnceLock<Option<PathBuf>> = OnceLock::new();
-    let Some(path) = PATH.get_or_init(|| std::env::var_os("CM_TUI_SSE_DUMP").map(PathBuf::from))
-    else {
-        return;
-    };
     if !dump_worthy(line) {
         return;
     }
+    let Some(path) = dump_path() else {
+        return;
+    };
+    // 每帧先落一条判定记录：`carries_snapshot` 是排查「状态行冻住」时唯一的硬事实 ——
+    // 「这帧到底有没有带 `tiktokenPromptTokens`」不该靠人肉逐行读 JSON 去数。
+    let mut fields = serde_json::Map::new();
+    fields.insert(
+        "carries_snapshot".to_string(),
+        Value::from(carries_snapshot(line)),
+    );
+    append_diag("frame", Value::Object(fields));
     if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(path) {
         let _ = writeln!(f, "{line}");
+    }
+}
+
+/// 该帧是否携带用量快照：与 [`prompt_tokens_from_line`] 同一判据，避免两处口径漂移。
+fn carries_snapshot(line: &str) -> bool {
+    prompt_tokens_from_line(line).is_some()
+}
+
+/// dump 文件路径（`CM_TUI_SSE_DUMP` 未设时为 `None`）；原始帧与诊断记录共用同一份缓存。
+fn dump_path() -> Option<&'static PathBuf> {
+    static PATH: OnceLock<Option<PathBuf>> = OnceLock::new();
+    PATH.get_or_init(|| std::env::var_os("CM_TUI_SSE_DUMP").map(PathBuf::from))
+        .as_ref()
+}
+
+/// 追加一条**诊断记录**（与原始帧同文件）。
+///
+/// 记录里不带 `type` 字段 —— 真 SSE 帧一定有，所以两种行可以分开取：
+/// `grep '"type"'` 拿原始帧、`grep '"kind"'` 拿诊断记录。若把标记塞进原始行，
+/// 既破坏「一行一帧」的可读性，也会让按行重放的排查手段失效。
+pub(crate) fn append_diag(kind: &str, fields: Value) {
+    let Some(path) = dump_path() else {
+        return;
+    };
+    let Value::Object(mut map) = fields else {
+        return;
+    };
+    map.insert("kind".to_string(), Value::String(kind.to_string()));
+    if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(path) {
+        let _ = writeln!(f, "{}", Value::Object(map));
     }
 }
 
@@ -447,6 +483,20 @@ mod tests {
         assert!(!matches!(
             classify_line(line).expect("classify"),
             LineAction::PromptTokens(_)
+        ));
+    }
+
+    #[test]
+    fn carries_snapshot_follows_the_same_guard_as_extraction() {
+        // dump 标记必须与真正摘快照走同一判据：标记说「有」而分类拿不到，排查就会指错方向。
+        assert!(carries_snapshot(
+            r#"{"type":"RUN_FINISHED","tiktokenPromptTokens":{"prompt_tokens":9}}"#
+        ));
+        assert!(carries_snapshot(
+            r#"{"type":"CUSTOM","data":{"tiktoken_prompt_tokens":{"prompt_tokens":9}}}"#
+        ));
+        assert!(!carries_snapshot(
+            r#"{"type":"TEXT_MESSAGE_CONTENT","delta":"hello token"}"#
         ));
     }
 

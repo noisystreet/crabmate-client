@@ -97,6 +97,9 @@ impl LaneApp<'_> {
         });
         self.st.running = true;
         self.st.cancel_sent = false;
+        // 逐轮用量诊断的复位点（#472）：只有从这里复位，上一轮的「收到过快照」才不会漏到
+        // 这一轮 —— 漏了就会把缺帧的轮次误记成已实测。
+        self.st.turn_usage_diag.begin();
         // 耗时从「发出」算起：排队与建连同样是用户在等。
         self.turn_started = Some(std::time::Instant::now());
         let cancel = StreamCancel::new();

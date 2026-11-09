@@ -413,6 +413,8 @@ pub struct UiState {
     pub serve_defaults: Option<ServeDefaults>,
     /// 上下文用量（ADE 0005 同口径）：会话内水位 + 最近一次 `tiktokenPromptTokens` 快照。
     pub context: context::ContextUsage,
+    /// 逐轮用量诊断（只在 `CM_TUI_SSE_DUMP` 打开时写盘）：本轮收到过快照没有。
+    pub turn_usage_diag: super::usage_diag::TurnUsageDiag,
     /// serve 侧当前活跃会话（左栏 `*` 标记）。
     pub active_session_id: Option<String>,
     /// 当前是否宽到显示左栏（由渲染层每帧刷新）。
