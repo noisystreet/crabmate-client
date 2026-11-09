@@ -14,7 +14,7 @@ use super::state::{LineKind, UiState};
 const COMMAND_LINES: &[&str] = &[
     "本地命令：/quit（/exit、/q 同义） /help /status /settings /mode /role /perm /model /find /background /workspace /resume /older /fold /conv /copy /ctl /lane /editor /chat /version /skills /context /config /agent /export",
     "输入 / 弹出补全菜单（内建命令 + skill；↑↓ 选择 · Tab/Enter 补全 · Esc 关闭）",
-    "/copy [assistant|user|path]（Ctrl+Y 同义）：复制到剪贴板 —— 默认最近一条助手回复，`user` 你自己的上一条，`path` 当前文件视图里那个文件的**相对路径**（视图开着时不写目标也走路径；内容是终端原生选择，不走这条）",
+    "/copy [assistant|user|path|code [n]]（Ctrl+Y 同义）：复制到剪贴板 —— 默认最近一条助手回复，`user` 你自己的上一条，`path` 当前文件视图里那个文件的**相对路径**（视图开着时不写目标也走路径；内容是终端原生选择，不走这条），`code [n]` 最近一条助手回复里**倒数第 n 块代码围栏**（缺省 1 = 最后一块；复制的是源码，不带渲染的竖条与截断，回执写明语言标签与块序）",
     "/ctl：查 crabmatectl 控制面实例（本地 unix socket，只读；需 --ctl-socket 或默认 socket 已存在）",
     "/lane：运行期连接管理 —— /lane（同 /ctl 列实例）· /lane attach <name>（连已就绪的实例）· /lane detach [<name>]（只断开本进程这条连接，名字缺省就是当前这条；声明与进程都不动）· /lane cancel <name>（取消它正在跑的回合，不必先切过去）· /lane new <name> [workspace] [profile=<name>]（新增声明并等它就绪；工作区缺省用当前 lane 的；profile 只按名字引用 profiles.toml）· /lane close <name>（把声明标成 enabled=false 并让 ctl 停掉实例，声明与手写配置都留着）· /lane open <name>（撤销 close）；连接条数有上限，超限时按提示 `/lane detach <name>` 摘掉不用的",
     "/mode ask|plan|act · /role <id> · /perm <level>（off 清除；有会话时点选即落盘） · /model <name>（只在本进程有效，退出即失效；Web 的 /model set 存在本机）",

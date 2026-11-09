@@ -42,10 +42,11 @@ pub enum Control {
     ConvUnknown(String),
     /// `/background [图片路径]`：全屏背景（kitty 走像素，其余用每格底色；空参查状态，`off` 关闭）。
     Background(Option<String>),
-    /// `/copy [assistant|user|path]`（`/yank` 同义）：把内容或路径送进剪贴板。
+    /// `/copy [assistant|user|path|code [n]]`（`/yank` 同义）：把内容或路径送进剪贴板。
     ///
     /// 默认复制最近一条助手回复；`user` 复制自己的上一条；`path` 复制 `/editor` 视图里那个
-    /// 文件的**相对路径**（视图开着时不写目标也走这条 —— 那时屏幕上只有文件）。
+    /// 文件的**相对路径**（视图开着且没写目标时也走这条 —— 那时屏幕上只有文件）；
+    /// `code [n]` 复制最近一条助手回复里倒数第 n 块代码围栏（`n` 从 1 起，缺省 1）。
     /// 投递走终端剪贴板（OSC52）或 `wl-copy` / `xclip` / `xsel`，见 [`super::clipboard`]。
     Copy(Option<String>),
     /// `/ctl`：查 `crabmatectl` 控制面的实例列表（本地 unix socket，**只读**）。

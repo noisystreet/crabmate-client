@@ -801,6 +801,13 @@ mod table;
 #[path = "md_image.rs"]
 mod inline_image;
 
+// 围栏块提取（`/copy code [n]`，issue #428）单独成文件：见 md_fence.rs 头注释。
+// 放在 md.rs 里而不是 clipboard.rs：围栏状态机（`is_fence_switch` / `fence_lang`）在
+// 本文件，两处各写一套就会在混合 ``` / ~~~ 的正文里判出不同的块。
+#[path = "md_fence.rs"]
+mod md_fence;
+pub(crate) use md_fence::{FencedBlock, block_from_end, fenced_blocks};
+
 // 测试拆到独立文件：避免 lizard 函数体合并跨度超 fn-nloc 门禁（同 render / settings_panel 惯例）。
 #[cfg(test)]
 #[path = "md_tests.rs"]
