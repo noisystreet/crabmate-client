@@ -61,6 +61,22 @@ Accepted
 | **C. trim 时立刻可见回落（apply 用 `min` / authoritative 标记）** | `after_tokens` 无拆分字段，中途灰段 `F` 无从重算，只能整条按 `F=0` 渲染 → 短暂视觉伪影；暂缓，待产品需要再评估 |
 | **D. 每会话水位 Map（保留各会话峰值）** | 当前无「跨会话比较」需求，tooltip 已声明切换重置；按需再加 |
 
+## 修订 / Amendment（2026-11-09，issue #476）
+
+**观察**：TUI 里一段对话**中途**就能看到状态行 `ctx` 上升，与上文「已知时序特性」中「回落要到本轮末快照刷入后才可见」的前提不完全吻合。
+
+**机制（已核对代码）**：两端拿快照的**取帧范围不同**，Context 第 3 条（「只在回合末 `RUN_FINISHED` 帧刷新」）描述的是 Desktop 那条信号：
+
+- Desktop / Web：`chat.conversation_prompt_tokens` 只在两处写入 —— `on_stream_ended`（`RUN_FINISHED` 带快照）与 `conversation_saved`（`frontend/src/app/chat/composer_stream/callbacks/builders/stream_phase_hooks.rs:42-46`、`stream_sync_callbacks.rs:54-58`）；
+- TUI：`chat_classify::prompt_tokens_from_line` 对**任何**携带该键的帧生效（`crates/crabmate-tui/src/serve/chat_classify.rs:129-135`，只做子串守卫、不看帧类型），故一轮中途即刷新。
+
+**影响范围**：
+
+- 「回落延迟到回合末才可见」成立于「本轮中途没有新的携带快照的帧」这一前提。中途一旦有快照，回落就可在中途可见 —— TUI 上不保证该延迟；Desktop 取决于服务端是否在会话中途发 `conversation_saved`（Server 侧事实，本仓不预设）。
+- **决策不变**：上面 Decision 第 2 / 3 条（`max` 只增、`context_trim` 时 `reset` 回落）**一字不改** —— 中途快照只是让 `axis.used` 更早跟上真实值；删掉 `max` 仍会把 L5 skill 波动放回来。
+
+**待确认**：`conversation_saved` 的发出时机。若中途也发，则两端同一口径（都是事件驱动，「延迟」只在没有新帧的间隙里成立）；若只在末轮发，则 TUI 比 Desktop 更实时，属有意的端差，应记入能力矩阵而不是当缺陷修。
+
 ## 关联
 
 - 状态栏实现：[`frontend/src/app/status_context.rs`](../../frontend/src/app/status_context.rs)
