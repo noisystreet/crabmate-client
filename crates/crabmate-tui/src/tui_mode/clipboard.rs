@@ -14,6 +14,7 @@ use std::io::Write;
 
 use base64::Engine as _;
 
+use super::md::{FencedBlock, block_from_end, fenced_blocks};
 use super::state::{LineKind, LogLine};
 
 /// 外部剪贴板工具，按优先级排列（Wayland 优先于 X11）。
@@ -190,8 +191,9 @@ pub(crate) fn oversized_note(route: CopyRoute, text_len: usize) -> Option<String
 /// `/copy` 的完整流程，返回给用户看的一行结果（成功与失败都是文案）。
 ///
 /// `path` 是 `/editor` 视图里那个文件的相对路径，`view_open` 表示视图此刻开着：
-/// **视图开着时 `/copy` 与 `Ctrl+Y` 复制的是文件路径**（那时屏幕上只有文件，「最近一条回复」
-/// 既看不见也用不上）。要复制回复就 `/copy assistant`，或在聊天视图里按 `Ctrl+Y`。
+/// **视图开着且没写目标时，`/copy` 与 `Ctrl+Y` 复制的是文件路径**（那时屏幕上只有文件，
+/// 「最近一条回复」既看不见也用不上）。要复制回复就 `/copy assistant`，或在聊天视图里
+/// 按 `Ctrl+Y`。
 ///
 /// 文案也在这里生成：`mod.rs` 贴着 920 行门禁，事件循环层只负责把它推进 transcript。
 /// `arg` 写错时报错而**不**退回默认——打错目标却静默复制了另一种内容，
@@ -202,16 +204,63 @@ pub(crate) fn run(
     path: Option<&str>,
     view_open: bool,
 ) -> String {
-    if is_path_target(arg, view_open) {
+    if arg.is_none() && view_open {
         return path_notice(path);
     }
-    let kind = match arg {
-        None | Some("" | "assistant" | "a" | "last") => LineKind::Assistant,
-        Some("user" | "u") => LineKind::User,
-        Some(other) => {
-            return format!("不支持的 /copy 目标：{other}（支持 assistant / user / path）");
-        }
+    match parse_target(arg) {
+        Ok(Target::Path) => path_notice(path),
+        Ok(Target::Message(kind)) => copy_message(lines, kind),
+        Ok(Target::Code(n)) => copy_code_block(lines, n),
+        Err(msg) => msg,
+    }
+}
+
+/// `/copy` 的目标：整条消息 / 文件路径 / 某一块围栏代码。
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Target {
+    Message(LineKind),
+    Path,
+    /// 倒数第 `n` 块（`n` 从 1 起 = 最近一块）。
+    Code(usize),
+}
+
+/// 解析 `/copy` 的参数：按词切分，因为 `parse_control` 交下来的是**整段剩余**
+/// （`controls.rs` 的 `arg_opt`），`/copy code 2` 到这里是一个字符串而不是两个参数。
+///
+/// 认不出的目标一律报错而**不**退回默认：见 [`run`] 的说明。
+fn parse_target(arg: Option<&str>) -> Result<Target, String> {
+    let words: Vec<&str> = arg.unwrap_or("").split_whitespace().collect();
+    let Some((head, rest)) = words.split_first() else {
+        return Ok(Target::Message(LineKind::Assistant));
     };
+    match *head {
+        "assistant" | "a" | "last" => Ok(Target::Message(LineKind::Assistant)),
+        "user" | "u" => Ok(Target::Message(LineKind::User)),
+        "path" | "p" | "file" => Ok(Target::Path),
+        "code" | "c" => code_target(rest),
+        other => Err(format!(
+            "不支持的 /copy 目标：{other}（支持 assistant / user / path / code [n]）"
+        )),
+    }
+}
+
+/// `code [n]` 的序号：缺省 = 最近一块；`0` / 非数字 / 多余参数都报错，
+/// 而不是静默回落到「最近一块」（那会让人以为序号生效了）。
+fn code_target(rest: &[&str]) -> Result<Target, String> {
+    match rest {
+        [] => Ok(Target::Code(1)),
+        [n] => match n.parse::<usize>() {
+            Ok(v) if v >= 1 => Ok(Target::Code(v)),
+            _ => Err(format!(
+                "/copy code 的序号从 1 起（收到 {n}）；不带序号就是最近一块"
+            )),
+        },
+        _ => Err("用法：/copy code [n]（序号从 1 起，1 = 最近一块；不支持其它参数）".to_string()),
+    }
+}
+
+/// 复制最近一条指定种类的**整条**消息。
+fn copy_message(lines: &[LogLine], kind: LineKind) -> String {
     let label = match kind {
         LineKind::User => "你的消息",
         _ => "助手回复",
@@ -231,15 +280,57 @@ pub(crate) fn run(
     notice
 }
 
-/// 这次复制的是不是**文件路径**：显式 `/copy path`，或没写目标但文件视图开着。
+/// 复制最近一条助手回复里的第 `n` 块围栏代码（`n` 从末尾数起）。
 ///
-/// 其余目标（`assistant` / `user`）即使视图开着也照常复制消息 —— 那是唯一的出口，
-/// 否则「视图开着想复制刚那段回复」就没有任何命令可用了。
-fn is_path_target(arg: Option<&str>, view_open: bool) -> bool {
-    match arg {
-        Some(target) => matches!(target, "path" | "p" | "file"),
-        None => view_open,
+/// 只认助手回复：用户消息里极少出现围栏，而为此多开一套 `/copy code user 2` 的组合参数
+/// 与文案并不划算（整条用户消息仍有 `/copy user`）。
+fn copy_code_block(lines: &[LogLine], n: usize) -> String {
+    let Some(text) = last_message_text(lines, LineKind::Assistant) else {
+        return "没有可复制的助手回复".to_string();
+    };
+    let (block, total) = match pick_code_block(&text, n) {
+        Ok(picked) => picked,
+        Err(msg) => return msg,
+    };
+    let rows = block.code.lines().count();
+    let route = match deliver(&block.code) {
+        Ok(route) => route,
+        Err(err) => return format!("复制失败：{err}"),
+    };
+    let label = if block.lang.is_empty() {
+        "代码块".to_string()
+    } else {
+        format!("代码块 {}", block.lang)
+    };
+    let mut notice = format!(
+        "已复制{label}（倒数第 {n}/{total} 块，{rows} 行，经 {}）",
+        route.label()
+    );
+    if let Some(note) = oversized_note(route, block.code.len()) {
+        notice.push_str(&note);
     }
+    notice
+}
+
+/// 选中要复制的代码块（**不投递**）。
+///
+/// 选块与投递分开：单测要断言「选了哪一块 / 为什么选不到」，但投递会去写终端剪贴板，
+/// 单测不该依赖那个（同 `an_open_view_targets_the_path_instead_of_a_message` 的理由）。
+fn pick_code_block(text: &str, n: usize) -> Result<(FencedBlock, usize), String> {
+    let blocks = fenced_blocks(text);
+    let total = blocks.len();
+    if total == 0 {
+        return Err("最近一条助手回复里没有代码块（/copy assistant 复制整条）".to_string());
+    }
+    let Some(block) = block_from_end(&blocks, n) else {
+        return Err(format!(
+            "最近一条助手回复只有 {total} 个代码块（倒数第 {n} 块不存在；序号从 1 起、从最后一块数）"
+        ));
+    };
+    if block.code.trim().is_empty() {
+        return Err(format!("倒数第 {n} 块是空代码块（围栏里没有内容）"));
+    }
+    Ok((block.clone(), total))
 }
 
 /// 复制文件**相对路径**（不是内容：内容走终端原生选择，一次粘贴几十 KB 正文只会更糟）。
@@ -554,3 +645,9 @@ mod tests {
         }
     }
 }
+
+// `code [n]` 的解析与选块单独成文件：它们的用例只关心「选中哪一块」，
+// 与上面那份「投递路径 / 序列编码」的用例不是同一条关注点。
+#[cfg(test)]
+#[path = "clipboard_code_tests.rs"]
+mod code_tests;
