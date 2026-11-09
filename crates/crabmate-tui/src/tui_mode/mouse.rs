@@ -23,8 +23,10 @@ use super::{status, status_stack};
 impl LaneApp<'_> {
     /// 鼠标事件入口。
     ///
-    /// 审批浮层/设置面板占用键盘时同样不接受鼠标，否则会绕过
-    /// 「审批未决不得输入」「脏字段先确认」这类键盘侧门禁。
+    /// 审批浮层仍然**吃掉**所有鼠标：它占着键盘，「审批未决不得输入」这条门禁不该
+    /// 被指针绕过。设置面板不同 —— 它自己就是全屏页面，键盘已经全部归它，鼠标也该
+    /// 进去（点导航 / 点字段 / 滚轮移光标），但仍在下面的早退分支里，不与两栏的
+    /// 点击、拖拽共用命中区域。
     pub(super) fn on_mouse(&mut self, ev: MouseEvent) {
         if self.st.approval.is_some() || self.panel.is_some() {
             // 浮层开着时可能刚好松开左键：拖拽态留着，下一次 `Drag` 会接着改宽，
@@ -33,6 +35,11 @@ impl LaneApp<'_> {
                 // 手势在这里被强行结束，而宽度可能已经改过：不落盘的话，屏幕上写着新宽度，
                 // 重启后却回到默认 —— 而那次 `Up` 已经被浮层吃掉，不会再进来一次。
                 self.persist_pane_widths(drag.edge);
+            }
+            // 两者互斥（打开面板时会作废待确认的门禁），这里仍显式判一次：将来若
+            // 放宽互斥，鼠标也不会同时落到两个模态上。
+            if self.st.approval.is_none() {
+                self.on_settings_mouse(ev);
             }
             return;
         }

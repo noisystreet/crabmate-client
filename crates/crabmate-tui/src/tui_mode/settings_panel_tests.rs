@@ -336,7 +336,7 @@ fn panel_footer_lines_contain_key_hints() {
     let content = p.content(&c, 90);
     let text = footer_text(&content);
     assert!(text.iter().any(|l| l.contains("[F2] 保存")));
-    assert!(text.iter().any(|l| l.contains("[Tab] 分区")));
+    assert!(text.iter().any(|l| l.contains("[←→] 分区")));
     // 关闭键只剩 Esc：F2 已改为保存，底栏不能再提示「[Esc/F2] 关闭」。
     assert!(text.iter().any(|l| l.contains("[Esc] 关闭")));
     assert!(!text.iter().any(|l| l.contains("Esc/F2")));

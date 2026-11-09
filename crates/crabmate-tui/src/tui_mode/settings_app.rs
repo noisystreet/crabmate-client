@@ -1,12 +1,14 @@
 //! LaneApp 的设置面板接线（`settings_panel.rs` 的子模块，压住面板文件行数门禁）：
 //! 开/关面板、面板按键分发、每帧内容构建、保存请求下发与保存结果回写。
 
-use crossterm::event::KeyEvent;
+use crossterm::event::{KeyEvent, MouseButton, MouseEvent, MouseEventKind};
+use ratatui::layout::Rect;
 
 use crabmate_client_api::secrets::{KEYRING_SERVICE, SecretSlot};
 
 use super::super::LaneApp;
 use super::super::palette::Palette;
+use super::super::render::overlay;
 use super::super::settings::{LlmSave, McpSave, PersistedSettings, PrefsSave, STORE_ON};
 use super::super::state::LineKind;
 use super::super::worker::WorkerJob;
@@ -99,11 +101,16 @@ impl LaneApp<'_> {
 
     /// 面板当前帧内容（供 render 画全屏浮层）；面板未打开返回 `None`。
     ///
+    /// `&mut self` 而不是 `&self`：这一帧顺手把**行归属**记进面板（`remember_frame`），
+    /// 鼠标命中用的就是屏幕上这一份 —— 事后重算会点偏（见 `RowOwner`）。
+    ///
     /// `pos` 是外壳每帧交下来的「第几条 / 共几条」：单条 lane 无权知道全局有几条
     /// （见 `docs/design/tui_multi_server.md` §4.2），所以在绘制入口一路传进来。
-    pub(crate) fn settings_content(&self, width: usize, pos: LanePos) -> Option<PanelContent> {
-        let panel = self.panel.as_ref()?;
+    pub(crate) fn settings_content(&mut self, width: usize, pos: LanePos) -> Option<PanelContent> {
+        self.panel.as_ref()?;
+        // 连接栏的值先算：`conn_facts` 借整只 `self`，之后再取面板的可变借用。
         let facts = self.conn_facts(pos);
+        let panel = self.panel.as_mut()?;
         let ctx = PanelCtx {
             overrides: &self.overrides,
             persisted: self.persisted.as_ref(),
@@ -111,7 +118,59 @@ impl LaneApp<'_> {
             conn: Some(&facts),
             pal: &self.st.palette,
         };
-        Some(panel.content(&ctx, width))
+        let content = panel.content(&ctx, width);
+        panel.remember_frame(width, &content.row_owner);
+        Some(content)
+    }
+
+    /// 面板打开时的鼠标分发：滚轮 = ↑↓，左键 = 点导航 / 点字段 / 点主题候选。
+    ///
+    /// 只认 `Down(Left)` 与两个滚轮方向：`Up` / `Drag` 在面板里没有语义
+    /// （分隔线拖拽在浮层打开时已被 `mouse.rs` 结束并落盘）。
+    pub(crate) fn on_settings_mouse(&mut self, ev: MouseEvent) {
+        match ev.kind {
+            MouseEventKind::ScrollUp => self.settings_scroll(true),
+            MouseEventKind::ScrollDown => self.settings_scroll(false),
+            MouseEventKind::Down(MouseButton::Left) => self.settings_click(ev.column, ev.row),
+            _ => {}
+        }
+    }
+
+    fn settings_scroll(&mut self, up: bool) {
+        if let Some(panel) = self.panel.as_mut() {
+            panel.scroll_row(up);
+        }
+    }
+
+    /// 左键点击：先按**当前这一帧的排版宽度**取行归属，再交给 `SettingsPanel::click`。
+    ///
+    /// 宽度不一致（刚 resize、还没重绘）时直接放弃：那份映射描述的是上一屏，
+    /// 用一个过期的「第 r 行是谁」去改状态，正是这类功能最容易出的错。
+    fn settings_click(&mut self, column: u16, row: u16) {
+        let (width, height) = self.last_size;
+        let area = Rect::new(0, 0, width, height);
+        let content_width = overlay::settings_panel_content_width(area);
+        let hit = self.panel.as_ref().and_then(|panel| {
+            let rows = panel.frame_rows_for(content_width)?;
+            super::mouse::hit(area, rows, column, row)
+        });
+        let Some(hit) = hit else {
+            return;
+        };
+        let Some(panel) = self.panel.as_mut() else {
+            return;
+        };
+        // 与 `on_settings_key` 用同一份 ctx：点击只读三层合成与可编辑性，
+        // 不读连接事实（那一栏是只读展示，没有可点的语义）。
+        let ctx = PanelCtx {
+            overrides: &self.overrides,
+            persisted: self.persisted.as_ref(),
+            serve_defaults: self.st.serve_defaults.as_ref(),
+            conn: None,
+            pal: &self.st.palette,
+        };
+        // 关闭仍走 Esc / F6、保存仍走 F2：底栏不是按钮，点击不产生 effect。
+        panel.click(hit, &ctx);
     }
 
     /// 面板「连接」栏读的事实：本连接的 `api_base` / lane 名与序号 / Bearer 来源。
