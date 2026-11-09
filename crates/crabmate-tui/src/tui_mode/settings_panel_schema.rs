@@ -318,3 +318,19 @@ pub(crate) const fn field_label(field: FieldId) -> &'static str {
         FieldId::EnvTilde => "~ 展开",
     }
 }
+
+/// 内容区某一行的归属：鼠标命中的「屏幕行 → 字段」映射。
+///
+/// 必须在**渲染那一帧**顺手产出，不能事后重算：字段值会按可用宽度折行，主题行下方
+/// 还会插最多 9 行候选列表，所以「第 r 行属于哪个字段」取决于当帧的 `PanelCtx` 与
+/// 宽度 —— 而鼠标路径构造不出同一份 `ctx`（连接栏要 `LanePos`，键盘路径给 `None`）。
+/// 重算的后果是点一行、选中相邻那一行。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RowOwner {
+    /// 分区说明行、下拉的省略号行：不归属字段，点击无动作。
+    Prose,
+    /// 字段行（含折行续行）；`part` = 段内行号，0 = 首行。
+    Field { field: FieldId, part: usize },
+    /// 主题下拉的候选项；`pick` = `THEME_OPTIONS` 下标。
+    ThemeOption(usize),
+}

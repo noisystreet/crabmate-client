@@ -57,7 +57,7 @@ const SETTINGS_NAV_MIN_WIDTH: u16 = 44;
 
 /// 设置页四区矩形（顶栏 / 左导航 / 内容区 / 底栏），对齐 desktop 设置页骨架。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct SettingsPanelLayout {
+pub(crate) struct SettingsPanelLayout {
     /// 顶栏：标题 + 状态徽标，整行卡片色（不画分隔线）。
     pub header: Rect,
     /// 左导航轨；`width == 0` 表示终端太窄，不画导航（改用 Tab 切分区）。
@@ -79,7 +79,7 @@ pub(super) struct SettingsPanelLayout {
 /// 内容区宽度与 [`settings_panel_content_width`] 必须同源 —— 字段行是按宽度排版的
 /// （值列对齐、超长截断都在 `SettingsPanel::content(ctx, width)` 里做），
 /// 两边各算一套就会出现「画 60 列、按 64 列生成」这种错位。
-pub(super) fn settings_panel_layout(area: Rect) -> SettingsPanelLayout {
+pub(crate) fn settings_panel_layout(area: Rect) -> SettingsPanelLayout {
     if area.width < 20 || area.height < 8 {
         return SettingsPanelLayout {
             header: Rect::new(area.x, area.y, area.width, 0),
@@ -114,9 +114,10 @@ pub(super) fn settings_panel_layout(area: Rect) -> SettingsPanelLayout {
 
 /// 内容区扣掉左右内缩后的可绘矩形。
 ///
-/// 绘制（[`render_settings_body`]）与宽度计算（[`settings_panel_content_width`]）共用这一份，
-/// 从根上避免「画 60 列、按 64 列生成」这类错位 —— 包括极窄终端下内缩需要减半的情况。
-fn content_inner_rect(rect: Rect) -> Rect {
+/// 绘制（[`render_settings_body`]）、宽度计算（[`settings_panel_content_width`]）与
+/// 鼠标命中（`settings_panel_mouse::hit_content`）共用这一份：三处各算一遍就会出现
+/// 「画 60 列、按 64 列生成」或「点在这一列、判成上一列」这类错位。
+pub(crate) fn content_inner_rect(rect: Rect) -> Rect {
     // 内缩取一半宽（窄终端下两边各 1 列），避免把内容挤没。
     let pad = SETTINGS_CONTENT_PAD.min(rect.width / 2);
     Rect::new(

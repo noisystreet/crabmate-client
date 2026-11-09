@@ -118,6 +118,14 @@ pub struct SettingsPanel {
     saving_mcp: bool,
     /// 底部提示行（编辑错误 / 只读提示 / 保存结果等）。
     note: Option<(String, NoticeLevel)>,
+    /// 上一帧内容区的行归属（鼠标命中「第几行是哪个字段」用；见 [`RowOwner`]）。
+    ///
+    /// 放在面板自己身上，不进 `LaneApp`：`mod.rs` 已经贴着 920 行门禁，而这份缓存
+    /// 只在面板打开期间有意义，跟面板同生共死还能省掉一处 `Option` 判空。
+    frame_rows: Vec<RowOwner>,
+    /// 产出 `frame_rows` 时的排版宽度。宽度一变（终端 resize）这份映射就作废：
+    /// 折行数与主题下拉的位置都会跟着变。
+    frame_width: usize,
 }
 
 impl Default for SettingsPanel {
@@ -146,6 +154,8 @@ impl SettingsPanel {
             saving_store: false,
             saving_mcp: false,
             note: None,
+            frame_rows: Vec::new(),
+            frame_width: 0,
         }
     }
 
@@ -359,10 +369,13 @@ impl SettingsPanel {
             KeyCode::Down => {
                 self.move_row(false);
             }
-            KeyCode::Tab => {
+            // 浏览态 ←→ 与 Tab 同义：面板是「左导航 × 内容」两栏，方向键横着走一栏
+            // 是直觉，Tab 只是终端习惯的别名。编辑态到不了这里（`editing` 已在上面
+            // 提前 return，那边的 ←→ 属于光标 / 枚举循环）。
+            KeyCode::Tab | KeyCode::Right => {
                 self.cycle_section(true);
             }
-            KeyCode::BackTab => {
+            KeyCode::BackTab | KeyCode::Left => {
                 self.cycle_section(false);
             }
             KeyCode::Enter => self.begin_edit(ctx),
@@ -800,6 +813,11 @@ fn toggle_blocked_note(ctx: &PanelCtx<'_>, field: FieldId) -> String {
 #[derive(Default)]
 pub struct PanelContent {
     pub lines: Vec<Line<'static>>,
+    /// 与 `lines` 一一对应的行归属：鼠标命中「内容区第 r 行 → 字段」用。
+    ///
+    /// 只在渲染那一帧产出（见 [`RowOwner`] 的注释）：行数取决于当帧的 `PanelCtx`
+    /// 与排版宽度，鼠标侧重算会点偏。
+    pub row_owner: Vec<RowOwner>,
     /// 文本编辑光标：内容行下标 + cell 列（None = 不设硬件光标）。
     pub cursor: Option<(usize, usize)>,
     /// 顶栏标题（当前分区名）。
@@ -836,6 +854,11 @@ pub(crate) use self::edit::Editing;
 // 内容构建与行渲染（content / field_line / 值列 / 导航 / 底栏文案）独立成文件：压行数门禁。
 #[path = "settings_panel_draw.rs"]
 mod draw;
+
+// 鼠标支持（命中测试 + 点击/滚轮动作）独立成文件：`settings_panel.rs` 贴着 920 行
+// 门禁，而「屏幕坐标 → 面板语义」自成一层，回归的落点只可能在这一个文件里。
+#[path = "settings_panel_mouse.rs"]
+mod mouse;
 
 #[path = "settings_app.rs"]
 mod app;
@@ -874,3 +897,8 @@ mod tests_mcp;
 #[cfg(test)]
 #[path = "settings_panel_local_tests.rs"]
 mod tests_local;
+
+// 鼠标支持（行归属 / 命中 / 门禁）单测独立成文件（同上）。
+#[cfg(test)]
+#[path = "settings_panel_mouse_tests.rs"]
+mod tests_mouse;

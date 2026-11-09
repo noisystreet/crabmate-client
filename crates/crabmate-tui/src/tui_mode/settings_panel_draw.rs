@@ -17,12 +17,16 @@ impl SettingsPanel {
     /// 构建一帧面板内容：说明行 + 字段行 + 顶栏/导航/底栏元数据。
     pub fn content(&self, ctx: &PanelCtx<'_>, width: usize) -> PanelContent {
         let mut lines: Vec<Line<'static>> = Vec::new();
+        // 行归属与 `lines` 一一对应：鼠标按「内容区第 r 行」查它，两边一旦不齐就会
+        // 点一行选中相邻那行。说明行也占一格，只是不归属字段。
+        let mut row_owner: Vec<RowOwner> = Vec::new();
         // 分区说明行：对应 desktop 内容区标题下的 `settings-content-desc`。
         // 只读三栏不能沿用「留空保存 = 跟随 server」——它们根本没有可保存的值。
         lines.push(Line::from(Span::styled(
             truncate_display(section_hint(self.section), width),
             ctx.pal.tone_style(FieldTone::Unset),
         )));
+        row_owner.push(RowOwner::Prose);
         let mut cursor = None;
         for (i, field) in self.section.fields().iter().enumerate() {
             let selected = i == self.row;
@@ -31,15 +35,23 @@ impl SettingsPanel {
                 // 编辑态永远是单行，光标落在这一组的首行。
                 cursor = Some((lines.len(), col));
             }
+            // 折出来的续行也算这个字段（`part` 只用于区分首行/续行）。
+            row_owner.extend((0..rows.len()).map(|part| RowOwner::Field {
+                field: *field,
+                part,
+            }));
             lines.extend(rows);
             // 主题 9 个候选、也全是展示用选项：编辑中就在行下方把列表摊开，
             // 比在底栏读一行「当前循环到哪」再连按 ←→ 直观。
             if *field == FieldId::Theme {
-                lines.extend(self.theme_dropdown(width, ctx.pal));
+                let dropdown = self.theme_dropdown(width, ctx.pal);
+                row_owner.extend(dropdown.iter().map(|(_, owner)| *owner));
+                lines.extend(dropdown.into_iter().map(|(line, _)| line));
             }
         }
         PanelContent {
             lines,
+            row_owner,
             cursor,
             title: self.section.label().to_string(),
             badge: settings_badge(self),
@@ -113,7 +125,9 @@ impl SettingsPanel {
     /// 候选多于 [`THEME_DROPDOWN_MAX_ROWS`] 时开窗滚动，窗口跟着 `pick` 走：绘制侧
     /// `render_settings_body` 是 `take(inner.height)` 硬裁，全铺的话小终端里被裁掉的
     /// 正是尾部，选中项可能整个消失 —— 而那条路径没有任何滚动机制能救它。
-    fn theme_dropdown(&self, width: usize, pal: &Palette) -> Vec<Line<'static>> {
+    /// 返回 `(行, 归属)`：归属让鼠标能点到「第几个候选」，省略号行标 `Prose`
+    /// （点它没有动作）。两样在同一处产出，省得鼠标侧重算窗口边界。
+    fn theme_dropdown(&self, width: usize, pal: &Palette) -> Vec<(Line<'static>, RowOwner)> {
         let Some(Editing::Theme { pick }) = &self.editing else {
             return Vec::new();
         };
@@ -122,13 +136,16 @@ impl SettingsPanel {
         let indent = " ".repeat(LABEL_PAD + 2);
         let mut out = Vec::with_capacity(end - start + 2);
         if start > 0 {
-            out.push(dropdown_ellipsis(&indent, start, width, pal));
+            let line = dropdown_ellipsis(&indent, start, width, pal);
+            out.push((line, RowOwner::Prose));
         }
         for i in start..end {
-            out.push(theme_option_line(&indent, i, i == *pick, width, pal));
+            let line = theme_option_line(&indent, i, i == *pick, width, pal);
+            out.push((line, RowOwner::ThemeOption(i)));
         }
         if end < total {
-            out.push(dropdown_ellipsis(&indent, total - end, width, pal));
+            let line = dropdown_ellipsis(&indent, total - end, width, pal);
+            out.push((line, RowOwner::Prose));
         }
         out
     }
@@ -557,8 +574,10 @@ fn footer_hint(panel: &SettingsPanel) -> String {
         | Some(Editing::Toggle { .. })
         | Some(Editing::Gateway { .. }) => "[←/→] 循环  [Enter] 确定  [Esc] 取消".to_string(),
         Some(Editing::Text { .. }) => "[Enter] 确定  [Esc] 取消编辑".to_string(),
-        None if panel.read_only => "[↑↓] 浏览  [Tab] 分区  [Esc] 关闭".to_string(),
-        None => "[↑↓] 移动  [Enter] 编辑  [Tab] 分区  [F2] 保存  [Esc] 关闭".to_string(),
+        // 分区切换宣传 ←→（`Tab` / `Shift+Tab` 仍是同义别名，只是底栏宽度有限，
+        // 两栏布局里方向键更直观 —— 见 `handle_key`）。
+        None if panel.read_only => "[↑↓] 浏览  [←→] 分区  [Esc] 关闭".to_string(),
+        None => "[↑↓] 移动  [Enter] 编辑  [←→] 分区  [F2] 保存  [Esc] 关闭".to_string(),
     }
 }
 
