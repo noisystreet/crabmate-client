@@ -28,7 +28,10 @@ const OVERLAY_MAX_WIDTH: u16 = 78;
 const OVERLAY_HEIGHT: u16 = 9;
 
 /// 在 `area` 内居中放一个 `width × height` 的矩形；装不下时贴左上，绝不越界。
-fn centered(area: Rect, width: u16, height: u16) -> Rect {
+///
+/// `pub(crate)` 是给 `detail.rs` 用的（工具详情浮层与审批浮层同一套居中口径）：
+/// 两处各写一份「往中间放」的话，窄终端下的越界处理迟早只在一处修过。
+pub(crate) fn centered(area: Rect, width: u16, height: u16) -> Rect {
     let width = width.min(area.width);
     let height = height.min(area.height);
     let x = area.x.saturating_add(area.width.saturating_sub(width) / 2);

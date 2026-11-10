@@ -3,7 +3,7 @@
 //!
 //! 工作区目录树的状态逻辑在 [`super::workspace_tree`]（拆分以控制单文件行数）。
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::Sender;
 
@@ -39,6 +39,11 @@ mod fold;
 // 工具行的开始 / 结果回填（按 id 原位更新）：同上，拆出去压 `state.rs` 行数。
 #[path = "state_tools.rs"]
 mod tools;
+
+// `/detail` 的载荷类型（侧表值 + 浮层状态）：只为压本文件行数，仍从这里 re-export。
+#[path = "state_detail.rs"]
+mod detail_state;
+pub use detail_state::{DetailOverlay, ToolDetail};
 
 // 输入框的光标与按行导航（`backspace` / 方向键 / 行首行尾 / 上下行）：纯光标算术，
 // 只碰 `input` / `cursor`，拆出去压 `state.rs` 行数（issue #424 要加 `clarify` 字段）。
@@ -482,6 +487,19 @@ pub struct UiState {
     pub bg_cells: Option<super::background::BgCells>,
     /// 工具调用 id → transcript 行号（结果到达时原位更新摘要行）。
     tool_pending: HashMap<String, usize>,
+    /// 工具行行号 → 输出全文（`/detail`，issue #428 第 3 条）。
+    ///
+    /// 键是**行号**而不是 `tool_call_id`：结果到达时 `tool_pending` 正好持有那一行的行号，
+    /// 而「行号跟着前插一起平移」已经有现成的一处（`state_history::prepend_replayed`）。
+    /// 按 id 存就得在 `LogLine` 上挂 id，那是每一行都要改的结构体变动。
+    ///
+    /// `BTreeMap` 而不是 `HashMap`：`/detail` 的「从底部数第 n 条」与总量淘汰都要按行号
+    /// 顺序取，有序表省掉每次先排序。
+    pub(super) tool_details: BTreeMap<usize, ToolDetail>,
+    /// `tool_details` 当前占用的字符数（与被截断的那个量同口径：**字符**，不是字节）。
+    pub(super) detail_chars: usize,
+    /// `/detail` 浮层（`Some` 时占住主区，按键只认滚动与关闭）。
+    pub detail: Option<DetailOverlay>,
     /// 全局 thinking 展开开关（默认折叠）。
     thinking_visible: bool,
     /// 搜索词（/find；lowercase，trim）。

@@ -648,14 +648,14 @@ fn cancel_only_marks_the_run_it_actually_interrupted() {
     let mut st = state_with(&[]);
     // 第一段：两个工具都拿到了结果。
     st.tool_start("c1", "read", Some("a.rs"));
-    st.tool_end("c1", "read", Some(true), None);
+    st.tool_end("c1", "read", Some(true), None, None);
     st.tool_start("c2", "read", Some("b.rs"));
-    st.tool_end("c2", "read", Some(true), None);
+    st.tool_end("c2", "read", Some(true), None, None);
     // 中途答案把过程行断开 → 两段。
     st.push_line(LineKind::Assistant, "先看这两个文件");
     // 第二段：一个跑完、一个还在跑的时候被取消。
     st.tool_start("c3", "write", Some("c.rs"));
-    st.tool_end("c3", "write", Some(true), None);
+    st.tool_end("c3", "write", Some(true), None, None);
     st.tool_start("c4", "write", Some("d.rs"));
 
     st.fold_after_turn(true, false);
@@ -670,9 +670,9 @@ fn cancel_only_marks_the_run_it_actually_interrupted() {
 fn a_run_with_a_failed_tool_says_so() {
     let mut st = state_with(&[]);
     st.tool_start("c1", "read", Some("a.rs"));
-    st.tool_end("c1", "read", Some(false), None);
+    st.tool_end("c1", "read", Some(false), None, None);
     st.tool_start("c2", "read", Some("b.rs"));
-    st.tool_end("c2", "read", Some(true), None);
+    st.tool_end("c2", "read", Some(true), None, None);
 
     st.fold_after_turn(false, true);
 
@@ -684,9 +684,9 @@ fn a_run_with_a_failed_tool_says_so() {
 fn a_finished_run_stays_done_even_if_the_turn_failed_later() {
     let mut st = state_with(&[]);
     st.tool_start("c1", "read", Some("a.rs"));
-    st.tool_end("c1", "read", Some(true), None);
+    st.tool_end("c1", "read", Some(true), None, None);
     st.tool_start("c2", "read", Some("b.rs"));
-    st.tool_end("c2", "read", Some(true), None);
+    st.tool_end("c2", "read", Some(true), None, None);
 
     st.fold_after_turn(false, true);
 

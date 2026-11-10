@@ -123,6 +123,10 @@ fn builtin_item(head: Head) -> SlashItem {
             "/fold ",
             "执行过程的展开态（空参=最近一条，n 从底部数，all 全展开，close 全折回；/unfold 同义）",
         ),
+        Head::Detail => (
+            "/detail ",
+            "展开某次工具调用的输出全文（可滚动；缺省最近一条，n 从底部数；只覆盖本进程跑过的工具）",
+        ),
         Head::Lane => (
             "/lane ",
             "运行期加一条连接（attach <name> 连已就绪实例 / new <name> [workspace] 新建并等就绪）",

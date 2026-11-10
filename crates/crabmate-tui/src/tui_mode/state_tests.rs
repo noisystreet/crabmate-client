@@ -270,7 +270,7 @@ fn tool_start_shows_note_immediately() {
     let mut s = UiState::new();
     s.tool_start("tc-2", "run_command", Some("git status"));
     assert_eq!(s.lines.last().unwrap().text(), "git status");
-    s.tool_end("tc-2", "run_command", Some(true), Some("git status"));
+    s.tool_end("tc-2", "run_command", Some(true), Some("git status"), None);
     assert_eq!(s.lines.last().unwrap().text(), "✓ git status");
 }
 
@@ -280,7 +280,7 @@ fn tool_row_start_then_end_updates_in_place() {
     s.tool_start("tc-9", "exec", None);
     assert_eq!(s.lines.last().unwrap().kind(), LineKind::Tool);
     assert_eq!(s.lines.last().unwrap().text(), "exec");
-    s.tool_end("tc-9", "exec", Some(true), Some("exit 0"));
+    s.tool_end("tc-9", "exec", Some(true), Some("exit 0"), None);
     assert_eq!(s.lines.last().unwrap().text(), "✓ exec — exit 0");
     assert_eq!(s.lines.len(), 1);
 }
@@ -288,7 +288,7 @@ fn tool_row_start_then_end_updates_in_place() {
 #[test]
 fn tool_end_without_start_pushes_fallback_row() {
     let mut s = UiState::new();
-    s.tool_end("tc-miss", "patch", Some(false), Some("rejected"));
+    s.tool_end("tc-miss", "patch", Some(false), Some("rejected"), None);
     assert_eq!(s.lines.last().unwrap().text(), "✗ patch — rejected");
 }
 
@@ -332,7 +332,7 @@ fn search_total_refreshes_on_new_content() {
     // 工具行摘要更新为命中（原位文本变更也刷新）
     s.push_line(LineKind::Tool, "exec");
     assert_eq!(s.search_total, 1);
-    s.tool_end("tc-1", "exec", Some(true), Some("boom done"));
+    s.tool_end("tc-1", "exec", Some(true), Some("boom done"), None);
     assert_eq!(s.search_total, 2);
 }
 

@@ -293,7 +293,7 @@ fn finished_tool_row_has_no_progress_slot() {
     // 走与 `tool_end` 同一条路（原位回填），而不是直接改字段：
     // `LogLine` 的字段是私有的，正是为了不让「改了内容却忘了换行版本」悄悄发生。
     st.tool_start("call-1", "exec", None);
-    st.tool_end("call-1", "exec", Some(true), None);
+    st.tool_end("call-1", "exec", Some(true), None, None);
     let plain = body_rows(&st, 60)[0].line.to_string();
     assert!(plain.starts_with("工具 "), "结束行无进度位: {plain:?}");
     assert!(!plain.contains('⠿'), "结束行不应有占位: {plain:?}");
@@ -353,7 +353,7 @@ fn progress_mark_frame_requires_live_folded_thinking() {
         Some(7),
         "进行中工具行 + 末行"
     );
-    tool.tool_end("tc-1", "exec", Some(true), None);
+    tool.tool_end("tc-1", "exec", Some(true), None, None);
     assert_eq!(
         progress_mark_frame(&tool, &info(true, false)),
         None,
@@ -366,7 +366,7 @@ fn progress_mark_frame_requires_live_folded_thinking() {
 #[test]
 fn finished_tool_row_without_verdict_is_not_running() {
     let mut st = UiState::new();
-    st.tool_end("tc-1", "exec", None, Some("exit 0"));
+    st.tool_end("tc-1", "exec", None, Some("exit 0"), None);
     let plain = body_rows(&st, 60)[0].line.to_string();
     assert!(
         plain.starts_with("工具 ? exec"),
@@ -404,7 +404,7 @@ fn tool_block_separated_from_text_but_compact_inside() {
     let mut st = UiState::new();
     st.stream_delta(LineKind::Assistant, "先看看");
     st.tool_start("c1", "read_file", None);
-    st.tool_end("c1", "read_file", Some(true), Some("read file: a.rs"));
+    st.tool_end("c1", "read_file", Some(true), Some("read file: a.rs"), None);
     st.tool_start("c2", "grep", None);
     st.stream_delta(LineKind::Assistant, "结论");
     let rows = body_rows(&st, 80);
@@ -550,9 +550,9 @@ fn tool_row_colors_by_result() {
     // 固定调色板：参数化断言不能随终端环境（NO_COLOR 等）漂移。
     st.set_palette(super::Palette::default());
     st.tool_start("c1", "read_file", None);
-    st.tool_end("c1", "read_file", Some(true), None);
+    st.tool_end("c1", "read_file", Some(true), None, None);
     st.tool_start("c2", "grep", None);
-    st.tool_end("c2", "grep", Some(false), None);
+    st.tool_end("c2", "grep", Some(false), None, None);
     let pal = st.palette;
     let rows = body_rows(&st, 80);
     let filled: Vec<&BodyRow> = rows.iter().filter(|r| r.log_index.is_some()).collect();

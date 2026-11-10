@@ -83,6 +83,7 @@ fn builtin_item(head: Head, locale: Locale) -> Option<SlashMenuItem> {
         | Head::Older
         | Head::Find
         | Head::Fold
+        | Head::Detail
         | Head::Background
         | Head::Copy
         | Head::Ctl

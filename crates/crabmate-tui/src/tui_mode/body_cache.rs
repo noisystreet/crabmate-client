@@ -432,7 +432,7 @@ mod tests {
         let mut cache = BodyCache::default();
         assert_same_as_full_rebuild(&st, &mut cache, 80);
 
-        st.tool_end("id", "read_file", Some(true), Some("ok"));
+        st.tool_end("id", "read_file", Some(true), Some("ok"), None);
         assert_same_as_full_rebuild(&st, &mut cache, 80);
     }
 

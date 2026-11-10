@@ -12,7 +12,7 @@ use super::state::{LineKind, UiState};
 
 /// 命令清单（`/x`）。
 const COMMAND_LINES: &[&str] = &[
-    "本地命令：/quit（/exit、/q 同义） /help /status /settings /mode /role /perm /model /find /background /workspace /resume /older /fold /conv /copy /ctl /lane /editor /chat /version /skills /context /config /agent /export",
+    "本地命令：/quit（/exit、/q 同义） /help /status /settings /mode /role /perm /model /find /background /workspace /resume /older /fold /detail /conv /copy /ctl /lane /editor /chat /version /skills /context /config /agent /export",
     "输入 / 弹出补全菜单（内建命令 + skill；↑↓ 选择 · Tab/Enter 补全 · Esc 关闭）",
     "/copy [assistant|user|path|code [n]]（Ctrl+Y 同义）：复制到剪贴板 —— 默认最近一条助手回复，`user` 你自己的上一条，`path` 当前文件视图里那个文件的**相对路径**（视图开着时不写目标也走路径；内容是终端原生选择，不走这条），`code [n]` 最近一条助手回复里**倒数第 n 块代码围栏**（缺省 1 = 最后一块；复制的是源码，不带渲染的竖条与截断，回执写明语言标签与块序）",
     "/ctl：查 crabmatectl 控制面实例（本地 unix socket，只读；需 --ctl-socket 或默认 socket 已存在）",
@@ -27,6 +27,7 @@ const COMMAND_LINES: &[&str] = &[
     "/conv list 刷新 · /conv use <id> 切换 · /conv new 新会话 · /conv export [json|markdown|both] [--out <路径>] [--id <id>] 导出整段会话（与 Desktop 同形的 md/json；不给 --out 落到当前目录的 chat_export_<时间戳>，可导别的会话；md 同 markdown，--out 不建父目录） · /clear 不是 TUI 命令：要丢上下文用 /conv new（历史仍在 serve，切会话会重放回来）",
     "/resume 续传上一轮被中断的回合（serve 侧 job 仍在跑时；Ctrl+C 的 cancel 未送达也可续）",
     "/fold [n|all|close]：切换执行过程的展开态（每轮结束自动折叠；/older 回放与回看同样折叠）—— 空参=最近一条，n 从底部数，all 全展开，close 全折回；折叠导航开着时光标会跟到切过的那条",
+    "/detail [n]：展开某次工具调用的**输出全文**（只读浮层，可滚动）—— n 从底部数（1 起，缺省最近一条带详情的工具）；只有**本进程跑过的**工具带结构化输出，历史回放行没有。浮层里 ↑↓/PgUp/PgDn/Home/End 滚动、Esc（或 q）关闭；它不改 transcript —— 整段执行过程的开合仍用 /fold",
     "/older（/history 同义）把更早一页历史前插到当前对话（切换会话只载入最新一页时用；滚到顶再按 PgUp 会自动续翻；跨页命中仍可 /find）",
     "/version 本进程版本（不请求 serve） · /skills 列出 serve 侧 skill（读 / 菜单同一份缓存，不重新拉） · /context 上下文用量明细（与状态行 ctx 段同口径） · /config reload 让 serve 重读磁盘配置 · /agent list 列出可用 agent role（设置仍用 /role <id>） · /export 导出当前会话（等价 /conv export，同一产物）",
 ];
