@@ -181,7 +181,7 @@ mod tests {
 
         // 结果回填：文本换成结果摘要。这里不假设摘要的具体文案（工具名可能被
         // 改写成 `read file` 或省略），只断言**命中集合与正文一致**这个不变式。
-        s.tool_end("id-1", "read_file", Some(true), Some("hello"));
+        s.tool_end("id-1", "read_file", Some(true), Some("hello"), None);
         let hit = s
             .lines
             .first()

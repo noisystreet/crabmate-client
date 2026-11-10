@@ -48,7 +48,8 @@ fn dispatch_sink_action(action: LineAction, sink: &mut dyn StreamSink) -> Result
             name,
             ok,
             note,
-        } => sink.on_tool_end(&tool_call_id, &name, ok, note.as_deref())?,
+            detail,
+        } => sink.on_tool_end(&tool_call_id, &name, ok, note.as_deref(), detail.as_deref())?,
         // 入口已拦下审批分支；这支只为 match 穷尽，真走到这里就是分派逻辑错了。
         LineAction::Approve(_) => debug_assert!(false, "审批分支应由 dispatch_line_action 处理"),
         // 已由 `dispatch_note_action` 处理；同上，只为穷尽。

@@ -31,6 +31,12 @@ pub enum Control {
     /// 与 `/older` 相反：那个往回拿更多内容，这个把折起来的内容放出来。摘要行始终保留，
     /// 因此同一个命令既能展开也能折回；`n` 从底部数（1 起），`all` 全展开，`close` 全折回。
     Fold(Option<String>),
+    /// `/detail [n]`：展开某次工具调用的**输出全文**（issue #428 第 3 条）。
+    ///
+    /// 与 [`Control::Fold`] 分工：那个切「哪些行可见」（折叠态），这个只读一行现成的文本。
+    /// `n` 从底部数（1 起，缺省最近一条）；只有**本进程跑过**的工具带结构化输出，
+    /// 回放出来的历史行没有 —— 那种情况下命令会明说，而不是默默什么都不发生。
+    Detail(Option<String>),
     ConvNew,
     ConvRefresh,
     ConvUse(String),
@@ -173,6 +179,7 @@ pub fn parse_control(text: &str) -> Option<Control> {
         Head::Older => Some(Control::Older),
         Head::Find => Some(Control::Find(arg_opt)),
         Head::Fold => Some(Control::Fold(arg_opt)),
+        Head::Detail => Some(Control::Detail(arg_opt)),
         Head::Background => Some(Control::Background(arg_opt)),
         Head::Copy => Some(Control::Copy(arg_opt)),
         // `ctl` 只读查询控制面实例；`lane` 是它的超集（空参等价 `/ctl`，另加

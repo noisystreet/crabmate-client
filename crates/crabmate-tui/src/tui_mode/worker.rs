@@ -78,6 +78,11 @@ pub(super) enum UiEvent {
         name: String,
         ok: Option<bool>,
         note: Option<String>,
+        /// 工具输出全文（`ToolResultInfo.output` 原样，未截断）；只由 `/detail` 用。
+        ///
+        /// 与 `note` 分开走：`note` 是工具行**画出来**的那一行摘要，`detail` 只进侧表
+        /// （`UiState::tool_details`），不参与渲染，所以它变长不会让任何一帧的排版变重。
+        detail: Option<String>,
     },
     Approval {
         prompt: ApprovalPrompt,

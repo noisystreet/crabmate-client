@@ -38,6 +38,10 @@ impl UiState {
     pub fn reset_transcript(&mut self) {
         self.lines.clear();
         self.tool_pending.clear();
+        // 详情侧表同样按行号寻址：行都没了，留着就是指向别人的键。
+        self.tool_details.clear();
+        self.detail_chars = 0;
+        self.detail = None;
         self.view_offset = 0;
         self.body_at_top = false;
         self.history_page = None;
@@ -83,6 +87,18 @@ impl UiState {
         //    结果就会原地改写掉历史行。
         for idx in self.tool_pending.values_mut() {
             *idx += n;
+        }
+        // 详情侧表同样是「行号 → 内容」，跟工具行映射一起平移：漏掉这条，前插一页之后
+        // `/detail` 打开的会是隔壁那行的输出（`/fold` 当年踩的正是同一类坑）。
+        if !self.tool_details.is_empty() {
+            let shifted = std::mem::take(&mut self.tool_details)
+                .into_iter()
+                .map(|(row, detail)| (row + n, detail))
+                .collect();
+            self.tool_details = shifted;
+        }
+        if let Some(open) = self.detail.as_mut() {
+            open.line += n;
         }
         // 本轮压缩提示的行下标同理（#478）：同一套「按行号原地改写」的状态。
         self.context.trim.shift_lines(n);

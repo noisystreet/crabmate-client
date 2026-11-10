@@ -65,13 +65,19 @@ pub trait StreamSink {
         Ok(())
     }
     /// 工具结果（`TOOL_CALL_RESULT`；非 partial 收尾帧）。`ok=None` = 无结果标记；
-    /// `note` 为 serve 摘要（`metadata.summary`），缺省回退输出内容截断。
+    /// `note` 为 serve 摘要（`metadata.summary`），缺省回退输出内容截断；
+    /// `detail` 是输出**全文**（`ToolResultInfo.output` 原样；空输出为 `None`）。
+    ///
+    /// 全文与摘要同一帧到达，所以两者走**同一个**回调而不是再开一个 `on_tool_detail`：
+    /// 分两个回调就得保证「详情先于结束」的到达顺序，而结束回调正是消费
+    /// 「工具调用 id → 行号」映射的那一个，顺序错了详情就永远落不到行上。
     fn on_tool_end(
         &mut self,
         _tool_call_id: &str,
         _name: &str,
         _ok: Option<bool>,
         _note: Option<&str>,
+        _detail: Option<&str>,
     ) -> Result<(), TermError> {
         Ok(())
     }

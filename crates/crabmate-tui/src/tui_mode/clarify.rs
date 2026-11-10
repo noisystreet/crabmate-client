@@ -116,6 +116,15 @@ impl LaneApp<'_> {
         self.st.clarify_open && self.st.clarify.is_some() && self.on_clarify_key(key)
     }
 
+    /// 非阻塞模态浮层（澄清问卷 / 工具详情）的按键接管，供 `on_key` 那条 if 用。
+    ///
+    /// 合在一处是为了那条 if 链不随浮层种类增长而顶到 CCN 门禁；两个判定各自留在
+    /// 自己的模块里（问卷在本文件，详情在 `detail`）。问卷优先：它是等着作答的表单，
+    /// 而详情只是只读浏览。
+    pub(super) fn consume_modal_key(&mut self, key: &KeyEvent) -> bool {
+        self.consume_clarify_key(key) || self.consume_detail_key(key)
+    }
+
     /// 浮层按键。返回 `true` = 已消费（否则交回常规分发）。
     ///
     /// 分两层是为了压 CCN：这一层只认「离开 / 提交 / 换题」，字符编辑在

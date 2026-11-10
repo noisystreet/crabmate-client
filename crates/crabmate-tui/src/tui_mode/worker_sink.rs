@@ -79,12 +79,14 @@ impl StreamSink for UiSink {
         name: &str,
         ok: Option<bool>,
         note: Option<&str>,
+        detail: Option<&str>,
     ) -> Result<(), TermError> {
         self.out.send(UiEvent::ToolEnd {
             tool_call_id: tool_call_id.to_string(),
             name: name.to_string(),
             ok,
             note: note.map(str::to_string),
+            detail: detail.map(str::to_string),
         })
     }
 }

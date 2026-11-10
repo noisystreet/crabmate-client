@@ -24,6 +24,7 @@ mod clipboard;
 pub(crate) mod controls;
 mod conv_cmd;
 mod ctl;
+mod detail;
 mod drafts;
 // `/editor` 的 markdown 预览单独成文件：`editor_view.rs` 与 `md.rs` 都贴着门禁，而这一块
 // 是「复用的 md 管线 + 自己的缓存」，自成一件。
@@ -503,6 +504,7 @@ impl LaneApp<'_> {
             Control::Help => self.st.show_help(),
             Control::Find(arg) => self.do_find(arg),
             Control::Fold(arg) => self.st.fold_command(arg.as_deref()),
+            Control::Detail(arg) => self.st.open_detail_command(arg.as_deref()),
             Control::Background(arg) => self.set_background(arg),
             Control::Copy(arg) => self.copy_last(arg),
             Control::Ctl => self.fetch_ctl_list(),
@@ -580,9 +582,8 @@ impl LaneApp<'_> {
             self.on_approval_key(&key);
             return;
         }
-        // 澄清问卷浮层：与审批同为模态，只认编辑 / 换题 / 提交 / Esc。
-        // 排在审批之后 —— 审批是流内阻塞门，优先级更高（同时出现时先解决审批）。
-        if self.consume_clarify_key(&key) {
+        // 非阻塞模态浮层（问卷 / 工具详情）先吃键；阻塞门审批已在上一个分支拦下。
+        if self.consume_modal_key(&key) {
             return;
         }
         if is_ctrl_c(&key) {
@@ -799,9 +800,11 @@ impl LaneApp<'_> {
                 name,
                 ok,
                 note,
+                detail,
             } => {
                 self.st.turn_usage_diag.mark_model_output();
-                self.st.tool_end(&tool_call_id, &name, ok, note.as_deref());
+                self.st
+                    .tool_end(&tool_call_id, &name, ok, note.as_deref(), detail.as_deref());
             }
             UiEvent::Approval { prompt } => {
                 // 审批浮层优先级高于设置面板：面板（只读）开着时先关掉再弹审批，

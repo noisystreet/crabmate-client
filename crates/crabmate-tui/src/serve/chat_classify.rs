@@ -60,12 +60,18 @@ pub(crate) enum LineAction {
         tool_call_id: String,
         args: String,
     },
-    /// `TOOL_CALL_RESULT`（非 partial 收尾）：工具结束 + 结果摘要。
+    /// `TOOL_CALL_RESULT`（非 partial 收尾）：工具结束 + 结果摘要 + 结果全文。
+    ///
+    /// `note` 是**压成一行**的摘要（工具行只画得下一行），`detail` 是 `output` 原样全文 ——
+    /// 两者一起下发，而不是让上层再从 `detail` 里截一行出来：摘要要按 serve 的
+    /// `metadata.summary` 优先（见 [`tool_result_action`]），这层知识只在这里有。
     ToolResult {
         tool_call_id: String,
         name: String,
         ok: Option<bool>,
         note: Option<String>,
+        /// 完整输出（不含 partial 增量帧）；空输出为 `None`。
+        detail: Option<String>,
     },
     /// 带 `tiktokenPromptTokens` 的帧（`RUN_FINISHED` / `CUSTOM conversation_saved`）的用量快照：
     /// 这是唯一携带 `used_input_tokens` 的来源（状态行上下文段与会话内水位靠它）。
@@ -390,6 +396,10 @@ fn tool_result_action(info: ToolResultInfo) -> LineAction {
             .map(trim_tail)
             .filter(|s| !s.is_empty())
     });
+    // 全文一并带出（issue #428 第 3 条）：`output` 是契约里的完整字段，上界是 **Server 侧
+    // 工具输出的长度上限**，不是 SSE 流式截断 —— 这里少带一次，下游就只能看到摘要，
+    // 「整段展开」也就没有内容可展开。TUI 自己的内存上限在 `state_tools` 里管。
+    let detail = (!info.output.trim().is_empty()).then_some(info.output);
     LineAction::ToolResult {
         tool_call_id: info.tool_call_id.unwrap_or_default(),
         name: if info.name.is_empty() {
@@ -399,6 +409,7 @@ fn tool_result_action(info: ToolResultInfo) -> LineAction {
         },
         ok: info.ok,
         note,
+        detail,
     }
 }
 
@@ -652,11 +663,14 @@ mod tests {
                 name,
                 ok,
                 note,
+                detail,
             } => {
                 assert_eq!(tool_call_id, "tc-1");
                 assert_eq!(name, "exec");
                 assert_eq!(ok, Some(true));
                 assert_eq!(note.as_deref(), Some("exit 0"));
+                // 摘要与全文同时下发：`/detail` 展开的就是这个，别在这里丢掉。
+                assert_eq!(detail.as_deref(), Some("huge output..."));
             }
             other => panic!("unexpected {other:?}"),
         }
@@ -672,10 +686,19 @@ mod tests {
     fn tool_result_falls_back_to_content_first_line() {
         let data = r#"{"type":"TOOL_CALL_RESULT","toolCallId":"tc-1","content":"line1\nline2","metadata":{"name":"exec","ok":false,"exitCode":2}}"#;
         match classify_line(data).unwrap() {
-            LineAction::ToolResult { ok, note, name, .. } => {
+            LineAction::ToolResult {
+                ok,
+                note,
+                name,
+                detail,
+                ..
+            } => {
                 assert_eq!(ok, Some(false));
                 assert_eq!(name, "exec");
+                // 工具行只画得下一行（`note`），全文（`detail`）保留换行 ——
+                // 「摘要是一行、详情是全文」这条口径就靠这两个断言钉住。
                 assert_eq!(note.as_deref(), Some("line1"));
+                assert_eq!(detail.as_deref(), Some("line1\nline2"));
             }
             other => panic!("unexpected {other:?}"),
         }
