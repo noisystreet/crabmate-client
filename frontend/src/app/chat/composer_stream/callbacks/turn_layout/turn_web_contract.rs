@@ -1,4 +1,4 @@
-//! Web 块布局契约：`project_turn_web` → `TurnRowQueue` flush → `StoredMessage` 顺序。
+//! Web stored-sync 契约（v2）：`project_turn_web_v2` → `TurnRowQueue::sync_web_projection` → `StoredMessage` 顺序。
 
 #[cfg(test)]
 mod tests {
@@ -31,7 +31,7 @@ mod tests {
     }
 
     fn fixture_path() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../fixtures/turn_project_web_golden.jsonl")
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../fixtures/turn_web_v2_stored_sync.jsonl")
     }
 
     fn load_cases() -> Vec<(usize, WebGoldenCase)> {

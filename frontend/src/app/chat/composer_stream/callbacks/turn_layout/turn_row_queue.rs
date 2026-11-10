@@ -8,7 +8,7 @@ use crate::storage::{V2_COMMENTARY_ROW_ID_PREFIX, V2_FINAL_ANSWER_ROW_ID, V2_THI
 use super::super::super::turn_canonical::TurnCanonicalState;
 use super::projection_reconciler;
 
-/// 工具批结束后终答块的稳定 id（与 `project_turn_web` · `assistant_answer` 对应）。
+/// 工具批结束后终答块的稳定 id（对应 v1 `project_turn_web` 的 `assistant_answer` 行；v2 不投影它，改由 overlay flush 落在此行）。
 pub(crate) const FINAL_ANSWER_ROW_ID: &str = V2_FINAL_ANSWER_ROW_ID;
 
 pub(crate) fn commentary_row_id(tool_call_id: &str) -> String {
