@@ -40,11 +40,11 @@
 
 ## P2 · 移动端边界与体验
 
-- [ ] Android `adjustResize` 生效设备上 IME 可能双倍抬高 composer：`MainActivity.kt` 的 `--cm-ime-inset` 与 `--vv-keyboard-inset` 取 `max`，窗口已压缩时 `ime` 仍非零。
+- [x] Android `adjustResize` 生效设备上 IME 可能双倍抬高 composer：`MainActivity.kt` 的 `--cm-ime-inset` 与 `--vv-keyboard-inset` 取 `max`，窗口已压缩时 `ime` 仍非零。**已修（#321）**：`--cm-ime-inset` 改为**净**兜底 —— 以键盘收起时记录的 WebView 高度为基线，返回 `max(0, (ime − nav) − 窗口已缩掉的高度)`，于是 resize 生效时它自己归零、失效时（targetSdk 35+ 常态）仍给整份；另在 `addOnLayoutChangeListener` 里随布局补算一次，避免 insets 回调早于窗口变矮的那一帧留下整份 pad。
 
 - [ ] 左侧 20px 点击盲区：`frontend/styles/shell-ds.css` `.nav-rail-edge-hit` 为 `pointer-events:auto` 且无点击处理（右侧感应条为 `none`，左右不对称）。
 
-- [ ] 纯浏览器宽屏触控平板（>768px 非壳）软键盘不抬高 composer。
+- [x] 纯浏览器宽屏触控平板（>768px 非壳）软键盘不抬高 composer。**已修（#321）**：`keyboard_inset.rs` 在 `visualViewport` 真的报出键盘高度时给 `<html>` 挂 `data-kb-inset`（归零即摘），`mobile.css` 补 `html[data-kb-inset] .app-root.app-shell-ds` 的 padding 规则（放在壳规则之前，让壳侧 `--cm-safe-bottom` 兜底仍能覆盖）；同一属性也放开 `should_apply_keyboard_avoidance`，聚焦后的滚动/重算覆盖宽屏。用运行期事实而非宽度判断，桌面浏览器的 vv 抖动进不来。
 
 ## P2 · IDE 与工作区
 
