@@ -20,7 +20,7 @@
 ├── web-host/                # binary crabmate-web (loopback static UI host)
 ├── frontend/                # Business UI; contract crabmate + protocol (crates.io semver or git rev pin)
 ├── e2e/                     # Playwright (browser UI)
-├── fixtures/                # golden JSONL fixtures (sse_ag_ui / turn_project_web)
+├── fixtures/                # golden JSONL fixtures (sse_ag_ui / turn_web_v2_stored_sync)
 ├── .github/                 # workflows/ (ci, code-complexity, dependency-security, e2e-playwright, release, victauri-e2e-nightly) + dependabot / PR template
 ├── scripts/                 # one script per gate (check-*.sh, lizard / fn-param / fn-nloc ratchets, ktlint-android) + release / pack helpers, victauri-e2e, e2e-playwright, set-version; rust-pkg-dirs.txt = package list single source
 ├── docs/
