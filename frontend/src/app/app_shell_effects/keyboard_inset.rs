@@ -33,6 +33,14 @@ fn apply_keyboard_inset_css() {
     let _ = root
         .style()
         .set_property("--vv-keyboard-inset", &format!("{inset_px:.0}px"));
+    // `data-kb-inset` 是 CSS 侧的「键盘确实在」开关：宽屏纯浏览器平板既拿不到壳侧
+    // `--cm-ime-inset`，也不命中窄屏媒体查询（mobile.css），只能靠这个属性让 `.app-root` 抬高。
+    // 用运行期事实当开关，而不是按宽度猜 —— 桌面浏览器的 visualViewport 抖动进不来。
+    if inset_px > 0.0 {
+        let _ = root.set_attribute("data-kb-inset", "");
+    } else {
+        let _ = root.remove_attribute("data-kb-inset");
+    }
 }
 
 /// 立即重算 `--vv-keyboard-inset`（供 focus 等早于 `visualViewport` 事件的路径调用）。
@@ -54,8 +62,11 @@ fn root_has_attr(name: &str) -> bool {
 }
 
 fn should_apply_keyboard_avoidance() -> bool {
-    // 窄屏媒体查询，或 Android 远程壳（横屏可能 >768px）。
-    root_has_attr("data-narrow-viewport") || root_has_attr("data-cm-mobile-shell")
+    // 窄屏媒体查询、Android 远程壳（横屏可能 >768px），或 visualViewport 已报出键盘高度
+    // （宽屏纯浏览器平板：两条 CSS 规则都不命中，只能靠 `data-kb-inset`）。
+    root_has_attr("data-narrow-viewport")
+        || root_has_attr("data-cm-mobile-shell")
+        || root_has_attr("data-kb-inset")
 }
 
 fn composer_bar_element(ta: &web_sys::HtmlTextAreaElement) -> web_sys::HtmlElement {
