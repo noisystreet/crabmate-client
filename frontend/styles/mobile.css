@@ -12,9 +12,10 @@ html[data-cm-mobile-shell] .composer-ds .composer-input-stack .composer-input-fa
 }
 
 /*
- * 软键盘避让：窄屏浏览器 + Android 壳（横屏可能 >768px）都要抬高底部。
- * `--vv-keyboard-inset`：visualViewport；`--cm-ime-inset`：Android 壳 WindowInsets IME（targetSdk 35+ 兜底）。
- * `max` 取较大值，避免两侧同时报高度时叠双倍（同为键盘高度时结果仍为一份）。
+ * 软键盘避让：窄屏浏览器、Android 壳（横屏可能 >768px）、宽屏触控平板（`data-kb-inset`）都要抬高底部。
+ * `--vv-keyboard-inset`：主来源（visualViewport，凡支持它的环境都算）。
+ * `--cm-ime-inset`：Android 壳的**净**兜底 —— `MainActivity.kt` 已扣掉窗口因 `adjustResize`
+ * 缩掉的高度，所以窗口自己让位时它归零；两侧不会同时报满高度，`max` 因此仍是一份而不是两份。
  * 定义在 `:root`（而非 `.app-root`）：fixed 覆盖层（设置页 / 弹窗）不在 `.app-root` 子树内，
  * 只有全局变量才能让它们取到同一个键盘高度。
  */
@@ -30,6 +31,20 @@ html[data-cm-mobile-shell] .composer-ds .composer-input-stack .composer-input-fa
     box-sizing: border-box;
     transition: padding-bottom 0.12s ease-out;
   }
+}
+
+/*
+ * 纯浏览器宽屏触控（> 768px 且非壳）：上面两条都不命中，键盘弹出时 composer 会被盖住。
+ * `data-kb-inset` 由 `keyboard_inset.rs` 只在 visualViewport 真的报出键盘高度时挂上 ——
+ * 用运行期事实当开关，桌面浏览器的 vv 抖动进不来（按宽度猜会把它一起打开）。
+ * 放在壳规则之前：两者特异性相同，壳侧的自定义属性兜底要能覆盖这条。
+ */
+html[data-kb-inset] .app-root.app-shell-ds {
+  padding-bottom: calc(
+    var(--cm-keyboard-pad, 0px) + max(0px, env(safe-area-inset-bottom, 0px))
+  );
+  box-sizing: border-box;
+  transition: padding-bottom 0.12s ease-out;
 }
 
 html[data-cm-mobile-shell] .app-root.app-shell-ds {
