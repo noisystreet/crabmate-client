@@ -11,6 +11,10 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ## [Unreleased]
 
+### Added
+
+- **TUI: `/detail` expands a tool call's full output instead of its one-line summary.** Tool rows were folded to `output.lines().next()` trimmed at 160 chars before the UI ever saw them, so `/fold` could only open the surrounding *Process* run, never one call's output. `TOOL_CALL_RESULT`'s `output` now reaches the UI and is kept in a row → text side table (64K chars per tool, 4M total, oldest evicted first); `/detail [n]` shows it in a scrollable read-only overlay (`↑↓`/`PgUp`/`PgDn`/`Home`/`End`, `Esc`/`q` closes). Only tools run **in this process** carry structured output — a replayed history row answers with one line saying so instead of opening an empty box — and the ceiling is the Server's own output cap (the TUI's own truncation is labelled in the footer). No protocol change.
+
 ## [0.8.0-beta.0] - 2026-11-09
 
 ### Added
