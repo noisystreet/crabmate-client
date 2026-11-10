@@ -15,6 +15,10 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 - **TUI: `/detail` expands a tool call's full output instead of its one-line summary.** Tool rows were folded to `output.lines().next()` trimmed at 160 chars before the UI ever saw them, so `/fold` could only open the surrounding *Process* run, never one call's output. `TOOL_CALL_RESULT`'s `output` now reaches the UI and is kept in a row → text side table (64K chars per tool, 4M total, oldest evicted first); `/detail [n]` shows it in a scrollable read-only overlay (`↑↓`/`PgUp`/`PgDn`/`Home`/`End`, `Esc`/`q` closes). Only tools run **in this process** carry structured output — a replayed history row answers with one line saying so instead of opening an empty box — and the ceiling is the Server's own output cap (the TUI's own truncation is labelled in the footer). No protocol change.
 
+### Fixed
+
+- **Android / mobile: the soft keyboard no longer lifts the composer twice, and a wide touch browser now lifts it at all.** `--cm-ime-inset` was the raw `ime − nav` height even when `adjustResize` had already shrunk the window, so the composer got both; it now subtracts the WebView's own shrink since the keyboard was down and re-measures on layout (`adjustResize` lands after the insets callback) — zero where the window yields, full on `targetSdk 35+` where it does not. The pad also only applied to `≤768px` or the shell, leaving a wide touch browser's composer under the IME; `visualViewport` now marks `<html>` with `data-kb-inset` while a keyboard is really there — a runtime fact, not a width guess. No protocol change.
+
 ## [0.8.0-beta.0] - 2026-11-09
 
 ### Added
