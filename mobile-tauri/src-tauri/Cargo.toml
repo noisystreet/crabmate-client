@@ -19,7 +19,11 @@ crabmate-connect = { path = "../../crates/crabmate-connect", features = ["tauri"
 # 须经 JNI 注入 Context（见 src/android_tls.rs）；jni 版本与上游要求一致（0.22）。
 # 固定 =0.7.0：0.7.1 起 Android AAR 不再随 crate 打包，改由上游 GitHub 分支的 Maven 仓库分发
 #（本机构建环境访问 github 不稳定）；0.7.0 的 AAR 仍随 crate 打包、可离线构建。
-# 0.7.1 仅新增主机名尾部 `.` 的跨平台兼容处理（非安全修复），降级无安全影响。
+# 0.7.1 **并非**只有主机名尾部 `.` 的兼容处理：它还允许在 Android 上拉取 CRL 吊销数据
+#（OCSP 逐步弃用后越来越多 CA 只发 CRL），并修了「系统信任锚被系统用户禁用时的死循环」，
+# 两项都属安全相关。所以留在 0.7.0 的代价是「可离线构建优先」，不是「无安全影响」。
+# 升级须先做 Android Maven 迁移（AAR 改由 GitHub maven-archive 托管、坐标变 org.rustls），
+# 见 #488。
 [target.'cfg(target_os = "android")'.dependencies]
 jni = "0.22"
 rustls-platform-verifier = "=0.7.0"
