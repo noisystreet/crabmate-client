@@ -23,6 +23,13 @@ class MainActivity : TauriActivity() {
   private var appWebView: WebView? = null
   private var exitConfirmDialog: AlertDialog? = null
 
+  /**
+   * 键盘收起时的 WebView 高度（像素）：`--cm-ime-inset` 用它判断窗口是否已被 `adjustResize` 压缩。
+   *
+   * 0 = 还没量到过，此时按「窗口没给键盘让位」处理（保守给整份兜底）。
+   */
+  private var keyboardBaselinePx: Int = 0
+
   /** 流式 attach 期间为 true：`onPause` 后仍 `resumeTimers`，避免 SSE 被冻。 */
   private var streamKeepAliveWanted: Boolean = false
   private var lastKeepAliveLocale: String = ""
@@ -252,6 +259,14 @@ class MainActivity : TauriActivity() {
     webView.addJavascriptInterface(MobileBridge(), "CrabMateMobile")
     // 页面加载后注入上下安全区 / IME CSS 变量
     webView.post { injectSafeInsetsCss(webView, null) }
+    // `adjustResize` 是异步的：insets 回调可能先于窗口变矮到达，那一帧会算出整份兜底。
+    // 真正的布局变化到了再算一次，让「窗口已经让出多少」参与净高度计算。
+    // 注入 CSS 变量不改 WebView 尺寸，所以这里不会自激。
+    webView.addOnLayoutChangeListener { v, _, top, _, bottom, _, oldTop, _, oldBottom ->
+      if (bottom - top != oldBottom - oldTop) {
+        injectSafeInsetsCss(v as? WebView ?: webView, null)
+      }
+    }
     ViewCompat.setOnApplyWindowInsetsListener(webView) { v, insets ->
       injectSafeInsetsCss(v as? WebView ?: webView, insets)
       // 勿 CONSUMED：让 WebView/Chromium 仍能收到 insets（visualViewport / safe-area）。
@@ -264,7 +279,8 @@ class MainActivity : TauriActivity() {
 
   /**
    * 写入 Web 的安全区与软键盘 inset。
-   * `--cm-ime-inset`：IME 相对导航栏多出的高度（targetSdk 35+ 上 adjustResize 常不缩小窗口时的兜底）。
+   * `--cm-ime-inset`：IME 的**净**兜底高度（见 [imeInsetCssPx]；窗口已被 `adjustResize`
+   * 压缩时自动扣减到 0，避免与前端 `--vv-keyboard-inset` 叠加成双倍抬高）。
    */
   private fun injectSafeInsetsCss(
     webView: WebView,
@@ -272,7 +288,7 @@ class MainActivity : TauriActivity() {
   ) {
     val topPx = statusBarInsetCssPx()
     val bottomPx = navBarInsetCssPx()
-    val imePx = imeInsetCssPx(insets)
+    val imePx = imeInsetCssPx(webView, insets)
     val js =
       "(function(){try{var r=document.documentElement;" +
         "r.style.setProperty('--cm-safe-top','${topPx}px');" +
@@ -282,14 +298,43 @@ class MainActivity : TauriActivity() {
     webView.evaluateJavascript(js, null)
   }
 
-  /** 软键盘相对导航栏的额外高度（CSS px）；无键盘时为 0。 */
-  private fun imeInsetCssPx(insets: WindowInsetsCompat?): Int {
+  /**
+   * 软键盘相对导航栏的**净**高度（CSS px）；无键盘时为 0。
+   *
+   * `--cm-ime-inset` 是兜底而不是主来源：`targetSdk 35+` 上 `adjustResize` 常不缩小窗口，
+   * 那时窗口没给键盘让位，需要整份 IME 高度；而 resize 确实生效的设备上窗口高度已经缩掉
+   * 键盘，再补一份就会让 composer 抬高两次。两者只能靠「窗口实际缩了多少」区分，所以以
+   * 键盘收起时记录的 WebView 高度为基线，返回 `max(0, 净高度 - 已缩高度)` ——
+   * 窗口让出多少就减多少，于是 CSS 侧 `max(vv, ime)` 的结果退化成「有且仅有一份」。
+   */
+  private fun imeInsetCssPx(
+    webView: WebView,
+    insets: WindowInsetsCompat?,
+  ): Int {
     val density = resources.displayMetrics.density.coerceAtLeast(0.5f)
     val src = insets ?: ViewCompat.getRootWindowInsets(window.decorView) ?: return 0
+    if (!src.isVisible(WindowInsetsCompat.Type.ime())) {
+      // 键盘收起：此刻布局稳定，记下满高基线供下次弹起比对。
+      rememberKeyboardBaseline(webView)
+      return 0
+    }
     val ime = src.getInsets(WindowInsetsCompat.Type.ime()).bottom
     val nav = src.getInsets(WindowInsetsCompat.Type.navigationBars()).bottom
     // ime 通常含导航区；与 `--cm-safe-bottom` 分工，避免导航高度算两次。
-    return ((ime - nav).coerceAtLeast(0) / density).roundToInt()
+    val needPx = (ime - nav).coerceAtLeast(0)
+    if (needPx == 0) {
+      return 0
+    }
+    val shrunkPx = (keyboardBaselinePx - webView.height).coerceAtLeast(0)
+    return ((needPx - shrunkPx).coerceAtLeast(0) / density).roundToInt()
+  }
+
+  /** 记录无键盘时的 WebView 高度（像素）；尚未布局（高度为 0）时不覆盖已有基线。 */
+  private fun rememberKeyboardBaseline(webView: WebView) {
+    val height = webView.height
+    if (height > 0) {
+      keyboardBaselinePx = height
+    }
   }
 
   /** 仅当当前确为连接页时更新 home；勿用包内 index.html 覆盖。 */
