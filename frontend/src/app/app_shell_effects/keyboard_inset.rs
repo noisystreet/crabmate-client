@@ -19,28 +19,62 @@ fn apply_keyboard_inset_css() {
         return;
     };
 
-    let inset_px = (|| -> Option<f64> {
-        let vv = window.visual_viewport()?;
-        let layout_h = window.inner_height().ok()?.as_f64()?;
-        let vv_h = vv.height();
-        let vv_top = vv.offset_top();
-        // 键盘弹出时 visualViewport 变矮；offsetTop 可能上移。
-        // 若 Activity 已 adjustResize，innerHeight 与 vv 同步缩小 → inset≈0（由窗口变矮抬起 composer）。
-        Some((layout_h - vv_h - vv_top).max(0.0))
-    })()
-    .unwrap_or(0.0);
+    let inset_px = measured_keyboard_inset_px(&window);
 
     let _ = root
         .style()
         .set_property("--vv-keyboard-inset", &format!("{inset_px:.0}px"));
     // `data-kb-inset` 是 CSS 侧的「键盘确实在」开关：宽屏纯浏览器平板既拿不到壳侧
     // `--cm-ime-inset`，也不命中窄屏媒体查询（mobile.css），只能靠这个属性让 `.app-root` 抬高。
-    // 用运行期事实当开关，而不是按宽度猜 —— 桌面浏览器的 visualViewport 抖动进不来。
-    if inset_px > 0.0 {
+    apply_kb_inset_attr(&root, inset_px > 0.0);
+}
+
+/// `vv.scale()` 与 1 的容许偏差：pinch-zoom 会把它推离 1，浮点比较留一点余量。
+const KB_INSET_SCALE_EPSILON: f64 = 0.01;
+
+/// 可当键盘高度用的遮挡量（CSS px）；差值不可信时返回 0。
+///
+/// 两道闸门挡掉「不是键盘」的视口变化 —— 桌面浏览器缩放 / 滚动同样会让
+/// `visualViewport` 变矮，照单全收就会把 `.app-root` 凭空顶起一截：
+/// - **无触控输入**（`maxTouchPoints == 0`）：桌面鼠标环境本来就没有软键盘；
+/// - **`vv.scale() != 1`**：pinch-zoom 改的是 `scale`，软键盘不改。
+fn measured_keyboard_inset_px(window: &web_sys::Window) -> f64 {
+    if !has_touch_input(window) {
+        return 0.0;
+    }
+    let Some(vv) = window.visual_viewport() else {
+        return 0.0;
+    };
+    if (vv.scale() - 1.0).abs() > KB_INSET_SCALE_EPSILON {
+        return 0.0;
+    }
+    let Ok(layout_h) = window.inner_height() else {
+        return 0.0;
+    };
+    let Some(layout_h) = layout_h.as_f64() else {
+        return 0.0;
+    };
+    // 键盘弹出时 visualViewport 变矮；offsetTop 可能上移。
+    // 若 Activity 已 adjustResize，innerHeight 与 vv 同步缩小 → inset≈0（由窗口变矮抬起 composer）。
+    (layout_h - vv.height() - vv.offset_top()).max(0.0)
+}
+
+/// 只在状态真的翻转时写属性：`visualViewport` 的 scroll 与 window 的 resize 共用
+/// 一个回调，键盘在时反复写同值只会白白触发样式重算。
+fn apply_kb_inset_attr(root: &web_sys::HtmlElement, present: bool) {
+    if present == root.has_attribute("data-kb-inset") {
+        return;
+    }
+    if present {
         let _ = root.set_attribute("data-kb-inset", "");
     } else {
         let _ = root.remove_attribute("data-kb-inset");
     }
+}
+
+/// 设备是否可能有软键盘（`maxTouchPoints > 0`）。
+fn has_touch_input(window: &web_sys::Window) -> bool {
+    window.navigator().max_touch_points() > 0
 }
 
 /// 立即重算 `--vv-keyboard-inset`（供 focus 等早于 `visualViewport` 事件的路径调用）。
@@ -62,11 +96,16 @@ fn root_has_attr(name: &str) -> bool {
 }
 
 fn should_apply_keyboard_avoidance() -> bool {
-    // 窄屏媒体查询、Android 远程壳（横屏可能 >768px），或 visualViewport 已报出键盘高度
-    // （宽屏纯浏览器平板：两条 CSS 规则都不命中，只能靠 `data-kb-inset`）。
+    // 窄屏媒体查询、Android 远程壳（横屏可能 >768px），或设备本来就会有软键盘
+    // （宽屏纯浏览器平板）。这里**不看** `data-kb-inset`：那个属性正是本函数放行之后、
+    // 重算 inset 才挂上的，用它当门会让首次 focus 自锁在门外（宽屏平板上 focus 时的
+    // 「滚进视口 + 重试」那一半就永远不跑）。
+    let Some(window) = web_sys::window() else {
+        return false;
+    };
     root_has_attr("data-narrow-viewport")
         || root_has_attr("data-cm-mobile-shell")
-        || root_has_attr("data-kb-inset")
+        || has_touch_input(&window)
 }
 
 fn composer_bar_element(ta: &web_sys::HtmlTextAreaElement) -> web_sys::HtmlElement {

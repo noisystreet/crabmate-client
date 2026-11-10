@@ -313,15 +313,17 @@ class MainActivity : TauriActivity() {
   ): Int {
     val density = resources.displayMetrics.density.coerceAtLeast(0.5f)
     val src = insets ?: ViewCompat.getRootWindowInsets(window.decorView) ?: return 0
-    if (!src.isVisible(WindowInsetsCompat.Type.ime())) {
-      // 键盘收起：此刻布局稳定，记下满高基线供下次弹起比对。
+    val imePx = src.getInsets(WindowInsetsCompat.Type.ime()).bottom
+    if (!src.isVisible(WindowInsetsCompat.Type.ime()) || imePx == 0) {
+      // 只有 IME insets 真的归零时才记基线。单看 `isVisible` 不够：`adjustResize` 让出
+      // 空间后系统仍可能把它报成 not visible，而此刻 WebView 已经是缩小后的高度，记下去
+      // 就成了偏小的基线（旋转 / 分屏后会算出偏小的 shrunk，从而多给一份不该给的兜底）。
       rememberKeyboardBaseline(webView)
       return 0
     }
-    val ime = src.getInsets(WindowInsetsCompat.Type.ime()).bottom
     val nav = src.getInsets(WindowInsetsCompat.Type.navigationBars()).bottom
     // ime 通常含导航区；与 `--cm-safe-bottom` 分工，避免导航高度算两次。
-    val needPx = (ime - nav).coerceAtLeast(0)
+    val needPx = (imePx - nav).coerceAtLeast(0)
     if (needPx == 0) {
       return 0
     }
