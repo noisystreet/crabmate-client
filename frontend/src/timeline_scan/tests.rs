@@ -53,87 +53,9 @@ fn legacy_local_snapshot_dropped_when_server_has_same_assistant_text() {
     ));
 }
 
-#[test]
-fn parses_context_trim_after_tokens() {
-    // 正常 `after_tokens`。
-    assert_eq!(
-        context_trim_after_used_tokens(Some(r#"{"count_hit":true,"after_tokens":1234}"#)),
-        Some(1234)
-    );
-    // 无 `after_tokens` / `null` / 缺 detail → 不重置。
-    assert_eq!(
-        context_trim_after_used_tokens(Some(r#"{"n_before":3}"#)),
-        None
-    );
-    assert_eq!(
-        context_trim_after_used_tokens(Some(r#"{"after_tokens":null}"#)),
-        None
-    );
-    assert_eq!(context_trim_after_used_tokens(None), None);
-    // 空串 / 非 JSON → 不重置。
-    assert_eq!(context_trim_after_used_tokens(Some("  ")), None);
-    assert_eq!(context_trim_after_used_tokens(Some("not json")), None);
-}
-
-#[test]
-fn context_trim_watermark_reset_requires_all_conditions() {
-    // 四条件齐备 → 返回归属与回落值（0 亦为合法回落）。
-    assert_eq!(
-        context_trim_watermark_reset(true, Some(18000), Some("cid-1"), Some(true)),
-        Some(("cid-1", 18000))
-    );
-    assert_eq!(
-        context_trim_watermark_reset(true, Some(0), Some("cid-1"), Some(true)),
-        Some(("cid-1", 0))
-    );
-    // 后台流（本轮不被查看）→ 不重置，避免污染活跃会话。
-    assert_eq!(
-        context_trim_watermark_reset(false, Some(18000), Some("cid-1"), Some(true)),
-        None
-    );
-    // 解析不出 after_tokens → 不重置。
-    assert_eq!(
-        context_trim_watermark_reset(true, None, Some("cid-1"), Some(true)),
-        None
-    );
-    // 无服务端 conversation_id → 不重置。
-    assert_eq!(
-        context_trim_watermark_reset(true, Some(18000), None, Some(true)),
-        None
-    );
-}
-
-/// #1345：纯工具正文截断（`history_removed=false`）不回落水位；旧 Server 缺字段时保持旧行为。
-#[test]
-fn context_trim_watermark_reset_skips_tool_body_truncation_only() {
-    assert_eq!(
-        context_trim_watermark_reset(true, Some(18000), Some("cid-1"), Some(false)),
-        None,
-        "工具截断没动历史，水位应继续取滚动最大"
-    );
-    assert_eq!(
-        context_trim_watermark_reset(true, Some(18000), Some("cid-1"), None),
-        Some(("cid-1", 18000)),
-        "旧 Server 无 history_removed → 保持旧行为"
-    );
-}
-
-#[test]
-fn context_trim_history_removed_reads_detail() {
-    assert_eq!(
-        context_trim_history_removed(Some(r#"{"after_tokens":1,"history_removed":false}"#)),
-        Some(false)
-    );
-    assert_eq!(
-        context_trim_history_removed(Some(r#"{"after_tokens":1,"history_removed":true}"#)),
-        Some(true)
-    );
-    assert_eq!(
-        context_trim_history_removed(Some(r#"{"after_tokens":1}"#)),
-        None
-    );
-    assert_eq!(context_trim_history_removed(None), None);
-}
+// `context_trim_*` 三件套（after_tokens / history_removed / 水位判定）的语义由共享层单测覆盖：
+// `crates/crabmate-client-api/src/context_axis.rs`（Web 与 TUI 同一份实现）。
+// 本文件只保留 frontend 侧的时间线解析与去重逻辑，避免两处各写一份测试或实现（#1345）。
 
 #[test]
 fn context_trim_parsed_from_hydrate_stream_and_detail_forms() {

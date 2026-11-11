@@ -24,58 +24,14 @@ pub fn is_turn_context_inject_kind(kind: &str) -> bool {
     matches!(kind.trim(), "context_inject" | "context_trim")
 }
 
-/// 从 `timeline_log` `context_trim` 的 `detail` JSON 取裁剪 / 压缩后服务端 `used_input_tokens`
-/// （字段 `after_tokens`，见 Server `context_timeline::trim_event`）。
+/// `context_trim` 的解析与水位判定：**单一实现**在 `crabmate_client_api::context_axis`
+/// （Web 与 TUI 共用同一份，见 `docs/design/client_shared_logic.md`）。
 ///
-/// 缺失 / 空 / 非 JSON / `null` / 非无符号数 → `None`（此时不重置
-/// [`ContextUsedWatermark`](crate::chat_session_state::ContextUsedWatermark) 水位）。
-#[must_use]
-pub fn context_trim_after_used_tokens(detail: Option<&str>) -> Option<u32> {
-    let raw = detail?.trim();
-    if raw.is_empty() {
-        return None;
-    }
-    let v: serde_json::Value = serde_json::from_str(raw).ok()?;
-    u32::try_from(v.get("after_tokens")?.as_u64()?).ok()
-}
-
-/// `context_trim.detail` 的 `history_removed`（Server #1345）：本回合是否**真的**动过历史。
-///
-/// `Some(false)` = 只是工具正文被截断（视图层，服务端历史未变）；`Some(true)` = 删组 / 摘要 /
-/// 条数或字符裁剪；`None` = 旧 Server 无该字段或 `detail` 不可解析（按「未声明」保持旧行为）。
-#[must_use]
-pub fn context_trim_history_removed(detail: Option<&str>) -> Option<bool> {
-    let raw = detail?.trim();
-    if raw.is_empty() {
-        return None;
-    }
-    let v: serde_json::Value = serde_json::from_str(raw).ok()?;
-    v.get("history_removed")?.as_bool()
-}
-
-/// 判定 `context_trim` 事件是否应重置当前会话的上下文水位，并返回归属 `(conversation_id, after_tokens)`。
-///
-/// 纯函数（仅依赖入参，便于单测）；四条件缺一不可，任一缺失 → `None`：
-/// - `bound_active`：本轮流正被查看——后台流不得改全局水位（与 apply 侧 key 同口径）；
-/// - `after`：能从 `detail` 解析出裁剪后 `used_input_tokens`（[`context_trim_after_used_tokens`]）；
-/// - `cid`：存在服务端 `conversation_id`，水位以它归属；
-/// - `history_removed`：**不是** `Some(false)`。`Some(false)` 只是工具正文截断（#1345），
-///   历史没变，水位应继续取滚动最大；`None`（旧 Server）按旧行为回落。
-///
-/// 水位「会话内单调、真压缩后回落」的语义与理由见
-/// `docs/adr/0005-status-bar-context-watermark.md`。
-#[must_use]
-pub fn context_trim_watermark_reset(
-    bound_active: bool,
-    after: Option<u32>,
-    cid: Option<&str>,
-    history_removed: Option<bool>,
-) -> Option<(&str, u32)> {
-    if !bound_active || history_removed == Some(false) {
-        return None;
-    }
-    Some((cid?, after?))
-}
+/// 本文件此前另有一份同名实现，两处各自演进：`history_removed`（#1345）要改两遍才生效，
+/// 正是漂移的温床。这里只做 re-export，改语义请去共享层。
+pub use crabmate_client_api::context_axis::{
+    context_trim_after_used_tokens, context_trim_history_removed, context_trim_watermark_reset,
+};
 
 fn json_object_kind_is_inject(text: &str) -> bool {
     let Ok(v) = serde_json::from_str::<serde_json::Value>(text.trim()) else {
