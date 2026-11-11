@@ -45,7 +45,7 @@
 | 项 | 现状 |
 |----|------|
 | 壳 + connect + 业务 UI | **本仓**维护 |
-| 契约 crate | crates.io `crabmate` `0.8.0` + `protocol`（见 [contract_pin.md](docs/design/contract_pin.md)） |
+| 契约 crate | `crabmate` git rev `817157e0`（契约 tag `client-contract-v0.3.0`）+ `protocol`——crates.io 未跟上时的过渡钉法（见 [contract_pin.md](docs/design/contract_pin.md)） |
 | Server `serve` | 主仓；本机或远程启动，壳不 spawn |
 | 主仓 `frontend/` / Playwright | UI 与 Playwright **在本仓**；主仓 Phase C 后无 `frontend/` 源码 |
 

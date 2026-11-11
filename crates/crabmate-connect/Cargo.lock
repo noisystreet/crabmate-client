@@ -689,9 +689,8 @@ dependencies = [
 
 [[package]]
 name = "crabmate"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d6f749afeb1a7745ff647c2e68ab79763ade20101b16385d8c05b59d19b04f6c"
+version = "0.8.1-beta.0"
+source = "git+https://github.com/noisystreet/CrabMate?rev=817157e029e65dcb72c7e215c1994febe791cb05#817157e029e65dcb72c7e215c1994febe791cb05"
 dependencies = [
  "getrandom 0.4.3",
  "log",

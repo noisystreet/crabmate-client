@@ -37,7 +37,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: noisystreet/CrabMate
-          # 与契约钉点一致：crates.io crabmate 0.8.0（git tag v0.8.0）
+          # Server 最新产品 tag；早于当前契约 rev 817157e0，故本 E2E 覆盖不到 context_budget
           ref: v0.8.0
           path: crabmate-server
 

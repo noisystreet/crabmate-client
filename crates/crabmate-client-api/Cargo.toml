@@ -14,6 +14,6 @@ publish = false
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # 契约镜像单一来源（镜像瘦身：agent_space/client_api_mirror_thinning.md）；protocol feature 零依赖
-crabmate = { version = "0.8.0", default-features = false, features = ["protocol"] }
+crabmate = { git = "https://github.com/noisystreet/CrabMate", rev = "817157e029e65dcb72c7e215c1994febe791cb05", default-features = false, features = ["protocol"] }
 
 [dev-dependencies]
