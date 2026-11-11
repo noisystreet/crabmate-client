@@ -629,6 +629,49 @@ fn ConnectionRenameFooter(
 }
 
 #[cfg(test)]
+mod rename_tests {
+    use super::connection_rename_value;
+
+    #[test]
+    fn a_draft_is_trimmed_before_it_reaches_the_shell() {
+        assert_eq!(connection_rename_value("  构建机 "), "构建机");
+        // 中文名要原样保留：issue #415 的验收里明确写了「中文名也要能留」
+        assert_eq!(connection_rename_value("工作站 A"), "工作站 A");
+    }
+
+    #[test]
+    fn an_empty_draft_stays_empty_because_it_means_restore_the_default() {
+        // 空串不是「没填」：壳里 display_name 空 → 列表那行回退 host:port。
+        // 若这里把空串改成拒绝（或塞回旧名），「恢复默认名」就没有入口了。
+        assert_eq!(connection_rename_value("   "), "");
+    }
+}
+
+#[cfg(test)]
+mod rename_wiring_source_tests {
+    #[test]
+    fn the_rename_entry_is_a_right_click_menu_on_the_own_row() {
+        let src = include_str!("nav_rail_connections.rs");
+        // 壳侧只能改自己：右键处理器必须先判 is_active（别人那行不弹空菜单）
+        assert!(src.contains("on:contextmenu="));
+        assert!(src.contains("if !is_active {"));
+        // 键盘等价物（Shift+F10 / 菜单键）：行内已经没有可见按钮，删了它键盘用户就没入口
+        assert!(src.contains("context_menu_keydown_anchor"));
+        // 菜单项挂进共享的 role=menu 容器，类名留在 nav-rail scope（css-contract）
+        assert!(src.contains("nav-rail-ctx-menu"));
+        assert!(src.contains("role=\"menuitem\""));
+        assert!(src.contains("tauri_rename_connection"));
+        // 弹窗必须走共享 shell：modal-shell 门禁只允许 FocusableModalPanel 发 role / aria-modal
+        assert!(src.contains("FocusableModalPanel"));
+        assert!(src.contains("testid=\"nav-rail-rename-modal\""));
+        // 不落盘的口径必须在界面上说出来，否则用户会以为改名没生效
+        assert!(src.contains("connection_rename_hint"));
+        // testid 沿用旧值：定位脚本按它找入口，不该因为换成菜单就改名
+        assert!(src.contains("testid=\"nav-rail-connection-rename\""));
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::{CtlRowState, ctl_rows_for_rail};
     use crabmate_client_api::connections::ConnectionSnapshot;
