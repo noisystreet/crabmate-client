@@ -77,27 +77,62 @@ fn parses_context_trim_after_tokens() {
 
 #[test]
 fn context_trim_watermark_reset_requires_all_conditions() {
-    // 三条件齐备 → 返回归属与回落值（0 亦为合法回落）。
+    // 四条件齐备 → 返回归属与回落值（0 亦为合法回落）。
     assert_eq!(
-        context_trim_watermark_reset(true, Some(18000), Some("cid-1")),
+        context_trim_watermark_reset(true, Some(18000), Some("cid-1"), Some(true)),
         Some(("cid-1", 18000))
     );
     assert_eq!(
-        context_trim_watermark_reset(true, Some(0), Some("cid-1")),
+        context_trim_watermark_reset(true, Some(0), Some("cid-1"), Some(true)),
         Some(("cid-1", 0))
     );
     // 后台流（本轮不被查看）→ 不重置，避免污染活跃会话。
     assert_eq!(
-        context_trim_watermark_reset(false, Some(18000), Some("cid-1")),
+        context_trim_watermark_reset(false, Some(18000), Some("cid-1"), Some(true)),
         None
     );
     // 解析不出 after_tokens → 不重置。
     assert_eq!(
-        context_trim_watermark_reset(true, None, Some("cid-1")),
+        context_trim_watermark_reset(true, None, Some("cid-1"), Some(true)),
         None
     );
     // 无服务端 conversation_id → 不重置。
-    assert_eq!(context_trim_watermark_reset(true, Some(18000), None), None);
+    assert_eq!(
+        context_trim_watermark_reset(true, Some(18000), None, Some(true)),
+        None
+    );
+}
+
+/// #1345：纯工具正文截断（`history_removed=false`）不回落水位；旧 Server 缺字段时保持旧行为。
+#[test]
+fn context_trim_watermark_reset_skips_tool_body_truncation_only() {
+    assert_eq!(
+        context_trim_watermark_reset(true, Some(18000), Some("cid-1"), Some(false)),
+        None,
+        "工具截断没动历史，水位应继续取滚动最大"
+    );
+    assert_eq!(
+        context_trim_watermark_reset(true, Some(18000), Some("cid-1"), None),
+        Some(("cid-1", 18000)),
+        "旧 Server 无 history_removed → 保持旧行为"
+    );
+}
+
+#[test]
+fn context_trim_history_removed_reads_detail() {
+    assert_eq!(
+        context_trim_history_removed(Some(r#"{"after_tokens":1,"history_removed":false}"#)),
+        Some(false)
+    );
+    assert_eq!(
+        context_trim_history_removed(Some(r#"{"after_tokens":1,"history_removed":true}"#)),
+        Some(true)
+    );
+    assert_eq!(
+        context_trim_history_removed(Some(r#"{"after_tokens":1}"#)),
+        None
+    );
+    assert_eq!(context_trim_history_removed(None), None);
 }
 
 #[test]

@@ -17,6 +17,14 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Fixed
 
+- **Web / TUI: the context bar no longer drops on every tool-output truncation.** Server #1345 added
+  `history_removed` to `context_trim`, but both clients still reset the usage watermark on *any* trim event, so a
+  turn whose tool output exceeded the Server's 32 KiB cap pulled the bar down although no history was removed
+  (`removed_turn_groups=0`). The shared predicate (`context_trim_watermark_reset`) now needs
+  `history_removed != Some(false)`: tool-body truncation keeps the rolling peak, real group removal / summary still
+  drops it, and an older Server without the field keeps the previous behaviour. The status-chip tooltip also stopped
+  claiming that only history compaction can lower the number.
+
 - **Android / mobile: the soft keyboard no longer lifts the composer twice, and a wide touch browser now lifts it at all.** `--cm-ime-inset` was the raw `ime − nav` height even when `adjustResize` had already shrunk the window, so the composer got both; it now subtracts the WebView's own shrink since the keyboard was down and re-measures on layout (`adjustResize` lands after the insets callback) — zero where the window yields, full on `targetSdk 35+` where it does not. The pad also only applied to `≤768px` or the shell, leaving a wide touch browser's composer under the IME; `visualViewport` now marks `<html>` with `data-kb-inset` while a keyboard is really there — a runtime fact, not a width guess. No protocol change.
 
 ## [0.8.0-beta.0] - 2026-11-09

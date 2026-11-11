@@ -128,6 +128,7 @@ fn timeline_log_dispatch_context_trim(stream_ctx: &ChatStreamCallbackCtx, info: 
         stream_ctx.is_bound_session_active(),
         crate::timeline_scan::context_trim_after_used_tokens(info.detail.as_deref()),
         cid.as_deref(),
+        crate::timeline_scan::context_trim_history_removed(info.detail.as_deref()),
     );
     if let Some((cid, after)) = reset {
         stream_ctx

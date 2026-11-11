@@ -12,7 +12,9 @@ use std::path::PathBuf;
 use std::sync::OnceLock;
 
 use crabmate_client_api::ag_ui_parser::parse_ag_ui_line;
-use crabmate_client_api::context_axis::context_trim_after_used_tokens;
+use crabmate_client_api::context_axis::{
+    context_trim_after_used_tokens, context_trim_history_removed,
+};
 use crabmate_client_api::prompt_tokens::{
     TiktokenPromptTokensSnapshot, tiktoken_from_ag_ui_object,
 };
@@ -229,9 +231,15 @@ fn parse_with_collector(line: &str, acc: &RefCell<Collected>) -> SseDispatch {
     // 两者 `detail` 都是字符串化 JSON，解析规则在共享层（与 Web 端同一份口径）。
     let mut on_timeline_log = |info: TimelineLogInfo| match info.kind.trim() {
         "context_trim" => {
-            let Some(after) = context_trim_after_used_tokens(info.detail.as_deref()) else {
+            let detail = info.detail.as_deref();
+            let Some(after) = context_trim_after_used_tokens(detail) else {
                 return;
             };
+            // #1345：`history_removed == Some(false)` 只是工具正文被截断——历史没变，
+            // 水位不该回落，也就不该落一行「压缩」公告来解释一个不存在的回落。
+            if context_trim_history_removed(detail) == Some(false) {
+                return;
+            }
             acc.borrow_mut().trim(after);
         }
         // 带 `skills` 就是真的调用了 skill：无条件成行（对齐 Desktop 的 skill 卡，

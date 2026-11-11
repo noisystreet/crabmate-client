@@ -197,21 +197,39 @@ pub fn context_trim_after_used_tokens(detail: Option<&str>) -> Option<u32> {
     u32::try_from(v.get("after_tokens")?.as_u64()?).ok()
 }
 
+/// `context_trim.detail` 的 `history_removed`（Server #1345）：本回合是否**真的**动过历史。
+///
+/// `Some(false)` = 只是工具正文被截断（视图层，服务端历史未变）；`Some(true)` = 删组 / 摘要 /
+/// 条数或字符裁剪；`None` = 字段缺失（旧 Server）或 `detail` 不可解析——调用方按「未声明」
+/// 处理，保持旧行为（回落），以免升级期水位卡在旧峰值。
+#[must_use]
+pub fn context_trim_history_removed(detail: Option<&str>) -> Option<bool> {
+    let raw = detail?.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    let v: serde_json::Value = serde_json::from_str(raw).ok()?;
+    v.get("history_removed")?.as_bool()
+}
+
 /// `context_trim` 是否应把会话内水位**回落**到 `after_tokens`；返回归属 `(conversation_id, after)`。
 ///
-/// 三条件缺一不可，任一缺失 → `None`：
+/// 四条件缺一不可，任一缺失 → `None`：
 /// - `bound_active`：这一轮流正被查看（后台流不得改全局水位）；
 /// - `after`：能从 `detail` 解析出裁剪后的用量（[`context_trim_after_used_tokens`]）；
-/// - `cid`：有服务端 `conversation_id`，水位按会话归属。
+/// - `cid`：有服务端 `conversation_id`，水位按会话归属；
+/// - `history_removed`：**不是** `Some(false)`。`Some(false)` 是纯工具正文截断（#1345）——
+///   历史没变，水位应继续取滚动最大；`None`（旧 Server 无该字段）按旧行为回落。
 ///
-/// 「会话内单调、压缩 / 裁剪后回落」的语义与理由见 ADR 0005。
+/// 「会话内单调、真压缩后回落」的语义与理由见 ADR 0005。
 #[must_use]
 pub fn context_trim_watermark_reset(
     bound_active: bool,
     after: Option<u32>,
     cid: Option<&str>,
+    history_removed: Option<bool>,
 ) -> Option<(&str, u32)> {
-    if !bound_active {
+    if !bound_active || history_removed == Some(false) {
         return None;
     }
     Some((cid?, after?))
@@ -261,9 +279,9 @@ mod tests {
     use super::{
         ContextAxis, ContextUsedWatermark, context_axis_apply_watermark,
         context_axis_from_snapshot, context_axis_split, context_axis_used_pct, context_axis_whole,
-        context_placeholder_text, context_trim_after_used_tokens, context_trim_watermark_reset,
-        context_value_text, format_compact_cap_tokens, format_compact_tokens,
-        new_session_baseline_prompt_tokens,
+        context_placeholder_text, context_trim_after_used_tokens, context_trim_history_removed,
+        context_trim_watermark_reset, context_value_text, format_compact_cap_tokens,
+        format_compact_tokens, new_session_baseline_prompt_tokens,
     };
     use std::collections::BTreeMap;
 
@@ -443,14 +461,58 @@ mod tests {
     fn context_trim_reset_needs_all_three_conditions() {
         let after = Some(40_000);
         assert_eq!(
-            context_trim_watermark_reset(true, after, Some("c1")),
+            context_trim_watermark_reset(true, after, Some("c1"), Some(true)),
             Some(("c1", 40_000))
         );
         // 后台流不改水位
-        assert_eq!(context_trim_watermark_reset(false, after, Some("c1")), None);
+        assert_eq!(
+            context_trim_watermark_reset(false, after, Some("c1"), Some(true)),
+            None
+        );
         // 拿不到 after / cid 都不动
-        assert_eq!(context_trim_watermark_reset(true, None, Some("c1")), None);
-        assert_eq!(context_trim_watermark_reset(true, after, None), None);
+        assert_eq!(
+            context_trim_watermark_reset(true, None, Some("c1"), Some(true)),
+            None
+        );
+        assert_eq!(
+            context_trim_watermark_reset(true, after, None, Some(true)),
+            None
+        );
+    }
+
+    /// #1345：纯工具正文截断（`history_removed=false`）不得回落水位；字段缺失按旧行为回落。
+    #[test]
+    fn context_trim_reset_skips_tool_body_truncation_only() {
+        let after = Some(40_000);
+        assert_eq!(
+            context_trim_watermark_reset(true, after, Some("c1"), Some(false)),
+            None,
+            "工具截断不改变历史，水位应继续取滚动最大"
+        );
+        assert_eq!(
+            context_trim_watermark_reset(true, after, Some("c1"), None),
+            Some(("c1", 40_000)),
+            "旧 Server 无 history_removed 时保持旧行为"
+        );
+    }
+
+    #[test]
+    fn context_trim_history_removed_reads_stringified_detail() {
+        assert_eq!(
+            context_trim_history_removed(Some(r#"{"after_tokens":1,"history_removed":false}"#)),
+            Some(false)
+        );
+        assert_eq!(
+            context_trim_history_removed(Some(r#"{"after_tokens":1,"history_removed":true}"#)),
+            Some(true)
+        );
+        // 旧 Server / 不可解析 → None（未声明）
+        assert_eq!(
+            context_trim_history_removed(Some(r#"{"after_tokens":1}"#)),
+            None
+        );
+        assert_eq!(context_trim_history_removed(Some("not-json")), None);
+        assert_eq!(context_trim_history_removed(None), None);
     }
 
     fn baseline_map() -> BTreeMap<String, u32> {
