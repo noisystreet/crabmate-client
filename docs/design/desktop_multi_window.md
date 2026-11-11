@@ -163,8 +163,14 @@ signal」这个问题**不存在**，而不是被兜住。
   字段（`ConnectionSnapshot::new` 之后没人赋值），`report_connection_status` /
   `report_connection_unread` 只覆盖 `status` / `unread`。要补得新增一条壳命令（外加一个
   秒级 tick），属独立 issue —— 别指望「把桥补全」就能让那两个读数出现。
-- **`rename_connection` 目前没有调用者**：`display_name` 只在连上时经
-  `register_connection` 传进来，界面上没有改名入口。桥与入口应该一起做，否则补了也看不出来。
+- **`rename_connection` 只能改发起窗口自己那条**（#415 已接上入口）：壳按
+  `window.label()` 查注册表，没有「改别的窗口那一行」的路径 —— 所以左栏只有本窗口那行
+  右键能弹出「重命名」（别人那行不弹菜单），不去假装一个不存在的能力。键盘等价物是
+  `Shift+F10` / 菜单键：行内没有可见按钮，那一键就是键盘用户的唯一入口。
+  空名 = 恢复默认名（列表回退 `host:port`）。
+- **改出来的名字不落盘**：它活在 `ConnectionRegistry` 里，重启回到连接时那个名字
+  （弹窗正文已写明，避免「改了却没生效」的静默意外）。要跨重启保留，得先决定写
+  `user-data`（Server 契约层）还是壳侧另存，属独立 issue —— 别在实现里顺手加。
 - `snapshots()` 广播时强制 `active = false`，而 `open_connection` / `register_connection`
   的返回值里是 `true` —— 前者给「别人」看（列表里谁是焦点不归注册表判），后者给调用方看
   「你自己」。两套口径是有意的，但容易误读。
