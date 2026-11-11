@@ -822,6 +822,63 @@
   color: var(--error);
 }
 
+/* 连接行的右键菜单浮层：与左栏会话行同一套结构（layer / backdrop / menu / item），
+   但类名留在本 scope —— css-contract 要求消费方与规则同 scope。全部取设计令牌，
+   不给 font-size / color / border-radius 添新的字面量预算。 */
+.nav-rail-ctx-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 125;
+  pointer-events: none;
+}
+
+.nav-rail-ctx-backdrop {
+  position: absolute;
+  inset: 0;
+  pointer-events: auto;
+  background: transparent;
+  cursor: default;
+}
+
+.nav-rail-ctx-menu {
+  position: fixed;
+  z-index: 126;
+  min-width: 168px;
+  max-width: min(240px, 92vw);
+  padding: 6px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  box-shadow: var(--shadow-md);
+  pointer-events: auto;
+}
+
+.nav-rail-ctx-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 9px 11px;
+  margin: 0;
+  border: none;
+  border-radius: var(--radius-btn);
+  font-family: inherit;
+  font-size: var(--text-base);
+  font-weight: 500;
+  color: var(--text);
+  background: transparent;
+  cursor: pointer;
+  transition: background var(--dur-fast) ease;
+}
+
+.nav-rail-ctx-item:hover {
+  background: var(--surface-hover);
+}
+
+.nav-rail-ctx-item:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+}
+
 /* 「可连实例」分组（控制面里声明过、还没连的那些）。与上面的「连接」组之间画一条
    分隔线：两组语义不同，只靠标题区分不够 —— 上面是窗口，下面是还没开的实例。 */
 .nav-rail-ctl-group {

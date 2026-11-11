@@ -42,13 +42,17 @@ use crabmate_client_api::connections::{ConnectionSnapshot, ConnectionStatus};
 use crabmate_client_api::ctl::{CtlInstance, CtlObserved};
 use crabmate_client_api::url::api_base_authority;
 
+use crate::a11y::context_menu_keydown_anchor;
 use crate::api::api_base_url;
 use crate::i18n::{self, Locale};
-use crate::tauri_shell::{tauri_close_connection, tauri_focus_connection, tauri_shell_available};
+use crate::tauri_shell::{
+    tauri_close_connection, tauri_focus_connection, tauri_rename_connection, tauri_shell_available,
+};
 
 use super::connection_feed::{
     connection_display_name, connection_feed, ctl_instances_feed, refresh_ctl_instances,
 };
+use super::focusable_menu::{FocusableModalBackdrop, FocusableModalPanel, FocusableRoleMenu};
 use super::settings_page::{SettingsSection, navigate_to_settings};
 use super::shell_runtime_context::try_chat_shell_ctx;
 
@@ -174,22 +178,42 @@ pub(crate) fn ctl_rows_for_rail(
     rows
 }
 
+/// 连接行右键菜单的锚点：屏幕坐标 + 打开那一刻的名字。
+///
+/// 名字跟着锚点走而不是点的时候回查：菜单挂着的那段时间行可能被别处改名，点下去应当改的
+/// 仍是用户右键时看到的那一条。
+#[derive(Clone)]
+struct ConnectionMenuAnchor {
+    x: i32,
+    y: i32,
+    name: String,
+}
+
 /// 一行「已连接的窗口」。`multi` 为真时点击切到那个窗口；为假（只有一条连接）时点击
 /// 进「设置 → 连接」。
 ///
 /// 行右侧的「关闭」只出现在**别人**的窗口上：关掉自己那一行等于退出应用，不是断开一条
 /// 后台连接（本窗口自己的关闭在标题栏）。
+///
+/// **改名走右键菜单，不是行内按钮**：本窗口那行右键弹出一项「重命名」，键盘等价物是
+/// `Shift+F10` / 菜单键。别人那行不弹 —— 壳侧 `rename_connection` 收的是发起窗口自己的
+/// label，没有「改别的窗口那一行」的路径（见 `desktop_connections::rename_connection`），
+/// 弹一个空菜单等于假装那条能力存在。
 fn connection_row(
     snapshot: ConnectionSnapshot,
     own_authority: String,
     multi: bool,
     settings_page: RwSignal<bool>,
     locale: RwSignal<Locale>,
+    rename_menu: RwSignal<Option<ConnectionMenuAnchor>>,
 ) -> impl IntoView {
     let is_active = snapshot.authority == own_authority;
     let is_waiting = snapshot.status == ConnectionStatus::WaitingApproval;
     let glyph = status_glyph(snapshot.status);
     let name = connection_display_name(&snapshot);
+    // 菜单锚点要带上「打开那一刻」的名字：菜单挂着时行可能已经被别处改名。
+    let name_for_menu = name.clone();
+    let name_for_keydown = name.clone();
     let meta = row_meta(&snapshot);
     let authority = snapshot.authority.clone();
     let key = snapshot.key.as_str().to_string();
@@ -211,6 +235,34 @@ fn connection_row(
                 class:nav-rail-connection-row--active=is_active
                 prop:title=title
                 data-testid="nav-rail-connection-row"
+                on:contextmenu=move |ev: web_sys::MouseEvent| {
+                    // 别人那行不弹：改名这条能力在那行不存在，别假装有。
+                    if !is_active {
+                        return;
+                    }
+                    ev.prevent_default();
+                    ev.stop_propagation();
+                    rename_menu.set(Some(ConnectionMenuAnchor {
+                        x: ev.client_x(),
+                        y: ev.client_y(),
+                        name: name_for_menu.clone(),
+                    }));
+                }
+                on:keydown=move |ev: web_sys::KeyboardEvent| {
+                    // 右键菜单的键盘等价物（`Shift+F10` / 菜单键）：行内已经没有可见按钮，
+                    // 这一条是键盘用户唯一的入口，不能省。
+                    if !is_active {
+                        return;
+                    }
+                    let Some((x, y)) = context_menu_keydown_anchor(&ev) else {
+                        return;
+                    };
+                    rename_menu.set(Some(ConnectionMenuAnchor {
+                        x,
+                        y,
+                        name: name_for_keydown.clone(),
+                    }));
+                }
                 on:click=move |_| {
                     if multi {
                         tauri_focus_connection(&key);
@@ -325,6 +377,11 @@ pub(super) fn NavRailConnections(
     let instances = StoredValue::new(ctl_instances_feed());
     let ctl_rows =
         Signal::derive(move || ctl_rows_for_rail(&instances.get_value().get(), &rows.get()));
+    // 改名弹窗的目标：`Some(初始名)` = 打开。只可能是本窗口这一行 —— 壳侧
+    // `rename_connection` 没有「改别人」的路径。
+    let rename_target = RwSignal::new(None::<String>);
+    // 右键菜单的锚点（`Some` = 菜单打开）。只有本窗口那行会写它。
+    let rename_menu = RwSignal::new(None::<ConnectionMenuAnchor>);
 
     view! {
         <Show when=move || tauri_shell_available()>
@@ -350,6 +407,7 @@ pub(super) fn NavRailConnections(
                                 multi,
                                 settings_page,
                                 locale,
+                                rename_menu,
                             )
                         }
                     />
@@ -381,8 +439,192 @@ pub(super) fn NavRailConnections(
                         </div>
                     </Show>
                 </div>
+                <ConnectionContextMenuLayer
+                    menu=rename_menu
+                    rename_target=rename_target
+                    locale=locale
+                />
+                <ConnectionRenameModal target=rename_target locale=locale />
             </Show>
         </Show>
+    }
+}
+
+/// 连接行的右键菜单：坐标锚点 + 遮罩 + 共享的 `role=menu` 容器（与左栏会话行同一套）。
+///
+/// 只有一项「重命名」：连接行上别的动作（关闭 / 连接）已经是可见按钮，不必藏进菜单。
+/// 菜单项拿锚点里的名字去开弹窗，所以名字按用户右键那一刻看到的走。
+#[component]
+fn ConnectionContextMenuLayer(
+    menu: RwSignal<Option<ConnectionMenuAnchor>>,
+    rename_target: RwSignal<Option<String>>,
+    locale: RwSignal<Locale>,
+) -> impl IntoView {
+    let menu_style = Memo::new(move |_| {
+        menu.get()
+            .map(|a| format!("left:{}px;top:{}px;", a.x, a.y))
+            .unwrap_or_default()
+    });
+    view! {
+        <Show when=move || menu.get().is_some()>
+            <div class="nav-rail-ctx-layer">
+                <div
+                    class="nav-rail-ctx-backdrop"
+                    aria-hidden="true"
+                    on:click=move |_| menu.set(None)
+                ></div>
+                <FocusableRoleMenu
+                    class="nav-rail-ctx-menu"
+                    menu_style=menu_style
+                    on_escape=Callback::new(move |_| menu.set(None))
+                >
+                    <button
+                        type="button"
+                        class="nav-rail-ctx-item"
+                        role="menuitem"
+                        data-testid="nav-rail-connection-rename"
+                        on:click=move |_| {
+                            let Some(anchor) = menu.get() else {
+                                return;
+                            };
+                            menu.set(None);
+                            rename_target.set(Some(anchor.name));
+                        }
+                    >
+                        {move || i18n::connection_rename_action(locale.get())}
+                    </button>
+                </FocusableRoleMenu>
+            </div>
+        </Show>
+    }
+}
+
+/// 弹窗草稿 → 发给壳的名字。
+///
+/// 只 trim：空串是「恢复默认名」的**合法**取值（壳里 `display_name` 空 → 列表那行回退
+/// `host:port`），不能当成「没填」拒掉。
+fn connection_rename_value(draft: &str) -> String {
+    draft.trim().to_string()
+}
+
+/// 提交改名：把草稿交给壳并关窗。
+///
+/// 抽成普通函数而不是闭包：`Enter` 与「保存」按钮两处都要调，闭包在这里会被 move 两次。
+fn submit_connection_rename(target: RwSignal<Option<String>>, draft: RwSignal<String>) {
+    let name = connection_rename_value(&draft.get_untracked());
+    tauri_rename_connection(&name);
+    target.set(None);
+}
+
+/// 改名弹窗：输入 → `rename_connection`（**只改本窗口这一条**）。
+///
+/// 壳侧只动 `display_name`，`key` / window label / 会话绑定都不变，改完广播一份新名单，
+/// 所以所有窗口的左栏那行会立刻显示新名字。
+///
+/// 不落盘：名字活到本次运行结束（issue #415 定下的口径）。弹窗正文必须写出这一点 ——
+/// 否则用户会以为「改名没生效」，正是这条 issue 当初要避免的静默意外。
+#[component]
+fn ConnectionRenameModal(
+    target: RwSignal<Option<String>>,
+    locale: RwSignal<Locale>,
+) -> impl IntoView {
+    let draft = RwSignal::new(String::new());
+
+    // 每次打开都把当前名字填进输入框；`target` 从 `None` 变 `Some` 即「这次打开」。
+    Effect::new(move |_| {
+        if let Some(current) = target.get() {
+            draft.set(current);
+        }
+    });
+
+    view! {
+        <Show when=move || target.get().is_some()>
+            <FocusableModalBackdrop on_dismiss=Callback::new(move |_| target.set(None))>
+                <FocusableModalPanel
+                    class="modal"
+                    dialog_role="dialog"
+                    labelledby="nav-rail-rename-title"
+                    testid="nav-rail-rename-modal"
+                    initial_focus_testid="nav-rail-rename-input"
+                    on_escape=Callback::new(move |_| target.set(None))
+                >
+                    <div class="modal-head">
+                        <h2 class="modal-title" id="nav-rail-rename-title">
+                            {move || i18n::connection_rename_title(locale.get())}
+                        </h2>
+                    </div>
+                    <div class="modal-body">
+                        <ConnectionRenameInput
+                            draft=draft
+                            locale=locale
+                            on_submit=Callback::new(move |_| submit_connection_rename(target, draft))
+                        />
+                    </div>
+                    <ConnectionRenameFooter target=target draft=draft locale=locale />
+                </FocusableModalPanel>
+            </FocusableModalBackdrop>
+        </Show>
+    }
+}
+
+/// 改名弹窗的输入区（标签 + 输入框 + 口径说明）。
+///
+/// 单独成组件只为压 `lizard` 的 CCN：`view!` 里的分支全算在承载它那个函数头上，
+/// 超过 10 就直接红。
+#[component]
+fn ConnectionRenameInput(
+    draft: RwSignal<String>,
+    locale: RwSignal<Locale>,
+    on_submit: Callback<()>,
+) -> impl IntoView {
+    view! {
+        <label class="settings-field-label" for="nav-rail-rename-input">
+            {move || i18n::connection_rename_label(locale.get())}
+        </label>
+        <input
+            id="nav-rail-rename-input"
+            class="input"
+            type="text"
+            data-testid="nav-rail-rename-input"
+            prop:placeholder=move || i18n::connection_rename_placeholder(locale.get())
+            prop:value=move || draft.get()
+            on:input=move |ev| draft.set(event_target_value(&ev))
+            on:keydown=move |ev: web_sys::KeyboardEvent| {
+                if ev.key() == "Enter" {
+                    on_submit.run(());
+                }
+            }
+        />
+        <p class="modal-hint">{move || i18n::connection_rename_hint(locale.get())}</p>
+    }
+}
+
+/// 改名弹窗的按钮行：取消 / 保存。
+#[component]
+fn ConnectionRenameFooter(
+    target: RwSignal<Option<String>>,
+    draft: RwSignal<String>,
+    locale: RwSignal<Locale>,
+) -> impl IntoView {
+    view! {
+        <div class="modal-footer actions">
+            <button
+                type="button"
+                class="btn btn-secondary"
+                data-testid="nav-rail-rename-cancel"
+                on:click=move |_| target.set(None)
+            >
+                {move || i18n::ide_confirm_cancel(locale.get())}
+            </button>
+            <button
+                type="button"
+                class="btn btn-primary"
+                data-testid="nav-rail-rename-save"
+                on:click=move |_| submit_connection_rename(target, draft)
+            >
+                {move || i18n::connection_rename_save(locale.get())}
+            </button>
+        </div>
     }
 }
 

@@ -205,6 +205,8 @@ extern "C" {
     ) -> js_sys::Promise;
     #[wasm_bindgen(js_name = invokeTauriFocusConnection)]
     fn invoke_tauri_focus_connection(key: &str) -> js_sys::Promise;
+    #[wasm_bindgen(js_name = invokeTauriRenameConnection)]
+    fn invoke_tauri_rename_connection(name: &str) -> js_sys::Promise;
     #[wasm_bindgen(js_name = invokeTauriReportConnectionStatus)]
     fn invoke_tauri_report_connection_status(status: &str) -> js_sys::Promise;
     #[wasm_bindgen(js_name = invokeTauriReportConnectionUnread)]
@@ -268,7 +270,7 @@ fn invoke_tauri_disconnect_remote() -> js_sys::Promise {
 /// `install_connections_feed` 独占调用，host 目标上给它们留 stub 只会变成 dead code
 /// （`-D warnings` 直接拒），所以这里干脆不定义。
 ///
-/// 但 `focus` 与两个 `report_*` 必须留着：它们由**两个目标下都会编译**的代码调用
+/// 但 `focus` / `rename` 与两个 `report_*` 必须留着：它们由**两个目标下都会编译**的代码调用
 /// （`view!` 的点击处理、`app_shell_effects::connection_report` 的 `Effect`），
 /// 而那条 effect 在 host 上第一条判断就是 `tauri_shell_available()`，不会真的走到这里。
 #[cfg(not(target_arch = "wasm32"))]
@@ -441,6 +443,27 @@ pub fn tauri_focus_connection(key: &str) {
     });
 }
 
+/// 改**本窗口这条**连接的显示名（壳的 `rename_connection`）。
+///
+/// 只改自己：壳侧那条命令收的是发起窗口自己的 label，没有「改别的窗口那一行」的路径，
+/// 所以界面上这个入口只出现在 `is_active` 那行（`nav_rail_connections`）。
+///
+/// 空名会把 `display_name` 清空，列表那行随 `connection_display_name` 回退到 `host:port`
+/// —— 这就是「恢复默认名」，不需要第二条命令。
+///
+/// fire-and-forget：失败只意味着名字没变，用户能再点一次（与 [`tauri_close_connection`]
+/// 同一取舍）。名字不落盘，活到本次运行结束（口径见 issue #415）。
+#[cfg(target_arch = "wasm32")]
+pub fn tauri_rename_connection(name: &str) {
+    if !tauri_shell_available() {
+        return;
+    }
+    let name = name.to_string();
+    spawn_local(async move {
+        let _ = tauri_invoke_void(invoke_tauri_rename_connection(&name)).await;
+    });
+}
+
 /// 上报本窗口的连接状态（壳的 `report_connection_status`）。
 ///
 /// fire-and-forget：这是一次**显示层**上报，失败只意味着左栏那行的字形不更新，而
@@ -557,6 +580,10 @@ pub fn tauri_close_connection(key: &str) {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn tauri_close_connection(_: &str) {}
+
+/// 非 wasm 下改名是 no-op（入口只在桌面壳里渲染，见 `tauri_shell_available`）。
+#[cfg(not(target_arch = "wasm32"))]
+pub fn tauri_rename_connection(_: &str) {}
 
 /// 在系统默认浏览器中打开 URL。
 ///

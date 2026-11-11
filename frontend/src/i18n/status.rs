@@ -115,6 +115,61 @@ pub fn ctl_row_close(l: Locale) -> &'static str {
     }
 }
 
+/// 连接行右键菜单的「重命名」项（只出现在本窗口那一行：壳侧只能改自己）。
+pub fn connection_rename_action(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "重命名",
+        Locale::En => "Rename",
+    }
+}
+
+/// 改名弹窗的标题。
+pub fn connection_rename_title(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "改连接名字",
+        Locale::En => "Rename this connection",
+    }
+}
+
+/// 改名弹窗的输入框标签。
+pub fn connection_rename_label(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "名字",
+        Locale::En => "Name",
+    }
+}
+
+/// 改名弹窗的输入提示：空值是「恢复默认名」，不是「没填」。
+pub fn connection_rename_placeholder(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "留空则显示 host:port",
+        Locale::En => "Leave empty to show host:port",
+    }
+}
+
+/// 改名弹窗的口径说明：**必须写明不跨重启**，否则用户会以为「改了没生效」。
+///
+/// 名字只活在壳的注册表里（`ConnectionRegistry`），没有落盘 —— 这是 issue #415 定下的
+/// 「本机不持久化」口径；真要跨重启保留，得先决定写 `user-data`（Server 契约层）。
+pub fn connection_rename_hint(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => {
+            "只改显示名：窗口、会话与草稿都不受影响。名字活到本次运行结束，重启后回到连接时那个名字。"
+        }
+        Locale::En => {
+            "Display name only: the window, its sessions and drafts are untouched. The name lives until this run ends; a restart brings back the name it connected with."
+        }
+    }
+}
+
+/// 改名弹窗的保存按钮。
+pub fn connection_rename_save(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "保存",
+        Locale::En => "Save",
+    }
+}
+
 /// 实例状态：正在启动（`observed == starting`）。
 pub fn ctl_state_starting(l: Locale) -> &'static str {
     match l {

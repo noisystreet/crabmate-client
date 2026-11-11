@@ -21,7 +21,8 @@
 //!
 //! - `context` / `busy_secs` 那两个行尾读数：壳侧没有任何命令写它们
 //!   （`ConnectionSnapshot` 里只有 `new()` 留下的 `None`），补桥也变不出来；
-//! - `rename_connection`：没有改名入口，桥补上了也没有调用者。
+//! - `rename_connection`：入口是左栏本窗口那行的右键菜单（#415）。它只改显示名、与状态上报
+//!   无关，所以不在这里。
 
 use leptos::prelude::*;
 
