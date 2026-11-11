@@ -15,6 +15,10 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 - **TUI: `/detail` expands a tool call's full output instead of its one-line summary.** Tool rows were folded to `output.lines().next()` trimmed at 160 chars before the UI ever saw them, so `/fold` could only open the surrounding *Process* run, never one call's output. `TOOL_CALL_RESULT`'s `output` now reaches the UI and is kept in a row → text side table (64K chars per tool, 4M total, oldest evicted first); `/detail [n]` shows it in a scrollable read-only overlay (`↑↓`/`PgUp`/`PgDn`/`Home`/`End`, `Esc`/`q` closes). Only tools run **in this process** carry structured output — a replayed history row answers with one line saying so instead of opening an empty box — and the ceiling is the Server's own output cap (the TUI's own truncation is labelled in the footer). No protocol change.
 
+### Changed
+
+- **The contract pin moves to `client-contract-v0.3.0` (Server `817157e0`) as a transition git rev.** crates.io still tops out at `crabmate` 0.8.0, which lacks the new optional `StatusShellView.context_budget` and the "`used_input_tokens` is always a tiktoken estimate" change, so all three manifests pin an immutable rev (never the tag — it is movable). Client behaviour is unchanged: one test fixture needed `context_budget: None`, and the status bar keeps the conversation window as its denominator instead of `context_budget.max_input_tokens`. **Expect `used` to read 1–3% lower on providers that report usage** — the Server's new definition, not a regression. Cost: CI fetches the Server repo once more; E2E still checks out `v0.8.0`, which predates this rev.
+
 ### Fixed
 
 - **Web / TUI: the context bar no longer drops on every tool-output truncation.** Server #1345 added

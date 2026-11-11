@@ -223,7 +223,7 @@ Desktop 设置共 8 个分区（`settings_page`）。逐区对齐结论见下表
 
 ### 6.4 随轮发送
 
-保存到 user-data 后，新一轮回合仍按 Desktop 同规则随 body 发送（空值不发送）：`client_llm.{api_key?,api_base,model,llm_context_tokens?,llm_thinking_mode?}`、顶层 `temperature?`、`readonly_tool_ttl_cache_secs?`。**已实现**：顶层 `temperature`（f64，仅 0.0..=2.0）、`client_llm.llm_thinking_mode`（仅 on/off）与 `client_llm.llm_context_tokens`（仅 >0 的 JSON 数值）、顶层 `readonly_tool_ttl_cache_secs`（缓存开关关时 = 0）均已随 W2 落地；字段名与校验区间以**契约 crate**（当前 `crabmate` 0.8.0，钉点见 [`contract_pin.md`](./contract_pin.md)；此处不写死版本号，随钉点演进）与前端 `http_request.rs` L77-86 / `client_llm_storage.rs`（`client_llm_json_for_chat_body`、`readonly_tool_ttl_cache_secs_for_chat_body`）为准。
+保存到 user-data 后，新一轮回合仍按 Desktop 同规则随 body 发送（空值不发送）：`client_llm.{api_key?,api_base,model,llm_context_tokens?,llm_thinking_mode?}`、顶层 `temperature?`、`readonly_tool_ttl_cache_secs?`。**已实现**：顶层 `temperature`（f64，仅 0.0..=2.0）、`client_llm.llm_thinking_mode`（仅 on/off）与 `client_llm.llm_context_tokens`（仅 >0 的 JSON 数值）、顶层 `readonly_tool_ttl_cache_secs`（缓存开关关时 = 0）均已随 W2 落地；字段名与校验区间以**契约 crate**（当前钉点见 [`contract_pin.md`](./contract_pin.md)；此处不写死版本号，随钉点演进）与前端 `http_request.rs` L77-86 / `client_llm_storage.rs`（`client_llm_json_for_chat_body`、`readonly_tool_ttl_cache_secs_for_chat_body`）为准。
 
 ---
 

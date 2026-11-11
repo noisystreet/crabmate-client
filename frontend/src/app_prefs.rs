@@ -371,6 +371,8 @@ mod status_baseline_prompt_tokens_tests {
             conversation_store_sqlite_active: true,
             permission_level_default: String::new(),
             permission_level_max: String::new(),
+            // client-contract-v0.3.0 新增可选预算视图；本夹具只关心基线表，故留空。
+            context_budget: None,
         }
     }
 
@@ -418,6 +420,64 @@ mod status_baseline_prompt_tokens_tests {
             status_bar_context_used_tokens_without_hydrate(true, Some(&sd), Some("coder")),
             None
         );
+    }
+}
+
+#[cfg(test)]
+mod status_shell_view_contract_tests {
+    use crabmate::cm_api_contract::StatusShellView;
+
+    /// 与 `/status?view=shell` 的 wire 形状一致（snake_case）；`context_budget` 由
+    /// 契约 `client-contract-v0.3.0` 新增且可选，旧 Server 不带该键。
+    fn shell_view_json(with_budget: bool) -> serde_json::Value {
+        let mut v = serde_json::json!({
+            "status": "ok",
+            "model": "deepseek-chat",
+            "api_base": "https://api.deepseek.com/v1",
+            "agent_role_ids": ["default"],
+            "default_agent_role_id": "default",
+            "default_session_mode": "act",
+            "agent_role_default_session_modes": {},
+            "context_char_budget": 32000,
+            "llm_context_tokens": 64000,
+            "effective_context_char_budget": 32000,
+            "tiktoken_prompt_counting_model": "gpt-4",
+            "tiktoken_new_session_baseline_by_agent_role": {},
+            "executor_model": "",
+            "executor_api_base": "",
+            "planner_executor_mode": "single_agent",
+            "conversation_store_sqlite_path_configured": true,
+            "conversation_store_sqlite_active": true,
+            "permission_level_default": "",
+            "permission_level_max": "",
+        });
+        if with_budget {
+            v["context_budget"] = serde_json::json!({
+                "context_window_tokens": 64000,
+                "max_input_tokens": 58000,
+                "trigger_tokens": 48000,
+                "target_tokens": 40000,
+            });
+        }
+        v
+    }
+
+    #[test]
+    fn budget_fields_are_readable_when_the_server_sends_them() {
+        let parsed: StatusShellView = serde_json::from_value(shell_view_json(true))
+            .expect("shell view with context_budget parses");
+        let budget = parsed.context_budget.expect("context_budget is present");
+        assert_eq!(budget.context_window_tokens, 64000);
+        assert_eq!(budget.max_input_tokens, 58000);
+        assert_eq!(budget.trigger_tokens, 48000);
+        assert_eq!(budget.target_tokens, 40000);
+    }
+
+    #[test]
+    fn a_missing_budget_keeps_the_old_shape_parsable() {
+        let parsed: StatusShellView = serde_json::from_value(shell_view_json(false))
+            .expect("shell view without context_budget parses");
+        assert!(parsed.context_budget.is_none());
     }
 }
 
