@@ -13,6 +13,8 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Added
 
+- **Desktop: the left nav rail can rename the connection its window is on.** `rename_connection` was registered in the shell with zero callers, so a row's name stayed frozen at whatever it connected with (`host:port` when unnamed). Right-clicking the own row opens a one-item menu → a small modal (Enter saves, Esc / backdrop cancels, empty restores `host:port`; `Shift+F10` / the menu key opens it too). Only the own row: the command resolves the registry by the caller's window label, so renaming another window's entry is absent rather than hidden and no menu opens there. Display-only — `key`, window label, session bindings and drafts untouched — and it does **not** survive a restart (it lives in the shell registry, which the modal says). No protocol change.
+
 ### Changed
 
 ### Fixed
