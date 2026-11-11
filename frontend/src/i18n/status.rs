@@ -169,10 +169,10 @@ pub fn connection_row_tooltip(l: Locale, base: &str) -> String {
 pub fn status_chip_context_tooltip(l: Locale) -> &'static str {
     match l {
         Locale::ZhHans => {
-            "当前用量 used_input_tokens（message + attachment + 每轮固定开销：工具 JSON + 网关开销，tiktoken 粗估）占模型原始上下文窗口 max_input_tokens 的比例。灰段为固定开销，brand 段为会话内容；分子分母都含固定开销，故百分比即「离窗口上限还有多远」。数值取会话内滚动峰值，故正常对话中单调不减，仅在切换会话或服务端压缩 / 裁剪历史后回落。与网关计费可能有偏差。点击查看用量明细。"
+            "当前用量 used_input_tokens（message + attachment + 每轮固定开销：工具 JSON + 网关开销，tiktoken 粗估）占模型原始上下文窗口 max_input_tokens 的比例。灰段为固定开销，brand 段为会话内容；分子分母都含固定开销，故百分比即「离窗口上限还有多远」。数值取会话内滚动峰值，故正常对话中单调不减，仅在切换会话或服务端**真的**删除 / 摘要历史后回落（工具输出被截断只是视图层压缩，不改变水位）。与网关计费可能有偏差。点击查看用量明细。"
         }
         Locale::En => {
-            "Current usage used_input_tokens (message + attachment + per-turn fixed overhead: tool JSON + provider overhead, tiktoken estimate) against the model's raw context window max_input_tokens. The grey bar is the fixed overhead, the brand bar is conversation content; both numerator and denominator include fixed overhead, so the percentage is literally how close the window is to its limit. The value is a per-session rolling peak, so it never decreases during normal chat and only drops on session switch or after the server compacts / trims the history. May differ from provider billing. Click to view the detailed breakdown."
+            "Current usage used_input_tokens (message + attachment + per-turn fixed overhead: tool JSON + provider overhead, tiktoken estimate) against the model's raw context window max_input_tokens. The grey bar is the fixed overhead, the brand bar is conversation content; both numerator and denominator include fixed overhead, so the percentage is literally how close the window is to its limit. The value is a per-session rolling peak, so it never decreases during normal chat and only drops on session switch or after the server actually removes / summarizes history (tool-output truncation is a view-level compression and does not move the watermark). May differ from provider billing. Click to view the detailed breakdown."
         }
     }
 }
