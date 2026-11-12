@@ -102,8 +102,11 @@ export async function seedSession(
     `seedSession bucket must contain ${sid}`,
   ).toBe(true);
 
+  // `domcontentloaded` 而不是 `networkidle`：SPA 首屏后会挂水合 / 轮询请求，「500ms 无在途连接」
+  // 永远等不到；一超时就报 `page.goto: Timeout`，把真正的原因（服务没响应）盖成了超时。
+  // 就绪由下面的 composer 选择器保证（与 `session_assertions.ts` 的 reload 同口径）。
   await page.goto(homeUrlWithOptionalWebBearer("/"), {
-    waitUntil: "networkidle",
+    waitUntil: "domcontentloaded",
     timeout: 20000,
   });
   await page.waitForSelector('[data-testid="chat-composer-input"]', {
@@ -463,8 +466,9 @@ export async function setupRealLLMSession(
   }, cfg.thinkingMode);
 
   await applyWebApiBearerHeaders(page);
+  // 同 `seedSession`：等 `domcontentloaded` + composer，不用 `networkidle`（理由见那里）。
   await page.goto(homeUrlWithOptionalWebBearer("/"), {
-    waitUntil: "networkidle",
+    waitUntil: "domcontentloaded",
     timeout: 20000,
   });
   await page.waitForSelector('[data-testid="chat-composer-input"]', {
@@ -575,8 +579,9 @@ export async function setupRealLLMSessionPreferringKeyring(
   }, cfg.thinkingMode);
 
   await applyWebApiBearerHeaders(page);
+  // 同 `seedSession`：等 `domcontentloaded` + composer，不用 `networkidle`（理由见那里）。
   await page.goto(homeUrlWithOptionalWebBearer("/"), {
-    waitUntil: "networkidle",
+    waitUntil: "domcontentloaded",
     timeout: 20_000,
   });
   await page.waitForSelector('[data-testid="chat-composer-input"]', {

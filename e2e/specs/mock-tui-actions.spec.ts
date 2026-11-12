@@ -78,7 +78,9 @@ test("终端流：右键菜单含复制/再生/分支并可复制助手正文", 
 
 test("终端流：失败助手右键菜单可点重试", async ({ page }) => {
   await page.goto(homeUrlWithOptionalWebBearer("/"), {
-    waitUntil: "networkidle",
+    // 等 `domcontentloaded` 而非 `networkidle`：SPA 首屏后会挂水合 / 轮询请求，
+    // 「无在途连接」永远等不到；UI 就绪由下面的 composer 选择器保证。
+    waitUntil: "domcontentloaded",
     timeout: 20_000,
   });
   await page.waitForSelector('[data-testid="chat-composer-input"]', {

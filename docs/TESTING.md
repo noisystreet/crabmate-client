@@ -10,6 +10,8 @@ make test            # frontend → tauri → tui → web-host
 Victauri 全量 E2E（需 WebView / 外部 serve）另跑：`make victauri-e2e`。  
 Playwright（浏览器 UI，需纯 API `serve` + 客户端 `crabmate-web` 自托管）：`make e2e-playwright`。
 
+失败时先取 CI 的 `playwright-report` artifact —— 里面既有 html 报告，也有 `test-results/` 的失败截图与 trace。workflow 在开跑前会探活 `:8080/health` 与 `:4173/`，不可达时打印监听端口与进程存活情况，用来把「服务在测试前就已失联」与「测试自身失败」分开。页面就绪统一等 `domcontentloaded` + composer 选择器，**不要**用 `networkidle`：SPA 首屏后会挂水合 / 轮询请求，它永远等不到，超时错误还会盖住真正的原因。
+
 ## pre-commit
 
 ```bash

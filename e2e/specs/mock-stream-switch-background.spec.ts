@@ -87,7 +87,8 @@ async function seedTwoSessions(page: Page) {
   ).toBe(true);
 
   await page.goto(homeUrlWithOptionalWebBearer("/"), {
-    waitUntil: "networkidle",
+    // 同 `seedSession`：`domcontentloaded` + composer 就绪，不用 `networkidle`。
+    waitUntil: "domcontentloaded",
     timeout: 20000,
   });
   await page.waitForSelector('[data-testid="chat-composer-input"]', {
