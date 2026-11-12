@@ -113,6 +113,24 @@ jobs:
           npx playwright install chromium
         working-directory: e2e
 
+      - name: Pre-flight check (services still reachable)
+        run: |
+          # 开跑前再探活一次：把「服务在测试中途失联」与「测试自身失败」分开。
+          # 历史上这里的失败只有 `page.goto: Timeout`，既没有监听状态也没有进程信息，判不出是哪一种。
+          set -e
+          for target in http://127.0.0.1:8080/health http://127.0.0.1:4173/; do
+            if curl -sfS --max-time 10 -o /dev/null "$target"; then
+              echo "✅ 可达：$target"
+            else
+              echo "❌ 不可达：$target"
+              echo "--- 监听端口 ---"
+              ss -ltnp 2>/dev/null | grep -E ':(8080|4173)' || echo "(8080 / 4173 均无监听)"
+              echo "--- crabmate 进程 ---"
+              ps -eo pid,etime,cmd | grep '[c]rabmate' || echo "(无 crabmate 进程)"
+              exit 1
+            fi
+          done
+
       - name: Run mock SSE tests (layout baseline + overlay)
         run: |
           npx playwright test \
@@ -128,8 +146,7 @@ jobs:
             specs/mock-storage-consistency.spec.ts \
             specs/mock-v2-multi-turn-boundaries.spec.ts \
             specs/mock-mobile-shell.spec.ts \
-            specs/mock-hydrate-parse-failed.spec.ts \
-            --reporter=list
+            specs/mock-hydrate-parse-failed.spec.ts
         working-directory: e2e
         env:
           no_proxy: 127.0.0.1,localhost
@@ -141,7 +158,9 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: playwright-report
-          path: e2e/playwright-report/
+          path: |
+            e2e/playwright-report/
+            e2e/test-results/
           retention-days: 7
 
       - name: Stop servers

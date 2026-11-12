@@ -211,7 +211,8 @@ test("多轮助手正文不应合并为一条 stored_message", async ({ page, br
   const secondContext = await browser.newContext();
   const secondPage = await secondContext.newPage();
   await secondPage.goto(homeUrlWithOptionalWebBearer("/"), {
-    waitUntil: "networkidle",
+    // 同 `seedSession`：`domcontentloaded` + composer 就绪，不用 `networkidle`。
+    waitUntil: "domcontentloaded",
     timeout: 20_000,
   });
   await secondPage.waitForSelector('[data-testid="chat-composer-input"]');
