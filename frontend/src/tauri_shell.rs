@@ -87,6 +87,11 @@ export function invokeTauriFocusConnection(key) {
   return tauriInvoke("focus_connection", { key });
 }
 
+// 改本窗口那条连接行的显示名；空串表示清空 display_name（列表回退到 host:port）。
+export function invokeTauriRenameConnection(name) {
+  return tauriInvoke("rename_connection", { name });
+}
+
 // 上报本窗口的连接状态 / 未读：壳写注册表并广播给所有窗口（左栏「连接」区读它）。
 // 状态用字符串字面量（`ConnectionStatus::as_str()`）而不是枚举对象：壳侧按 serde
 // 的外部标记反序列化，两边的字面量必须逐字一致。
@@ -632,4 +637,41 @@ pub async fn tauri_fetch_os_prefers_dark_hint() -> Option<bool> {
     let dark = value.as_bool()?;
     crate::app_prefs::set_tauri_os_prefers_dark_hint(Some(dark));
     Some(dark)
+}
+
+#[cfg(test)]
+mod tests {
+    /// 每个 `wasm_bindgen` 的 `js_name` 绑定，在 inline JS 里都必须有同名 `export`。
+    ///
+    /// wasm-bindgen 不校验 `inline_js` 模块的导出名：声明了却没有对应的
+    /// `export function`，编译期照常通过，只有真正加载 wasm 时才会
+    /// `does not provide an export named ...` —— 表现是首帧白屏。2026-11-13 的
+    /// `invokeTauriRenameConnection` 就是这样漏的，30 个 mock E2E 全挂在「等 composer 出现」。
+    #[test]
+    fn every_js_name_binding_is_exported_by_inline_js() {
+        const SRC: &str = include_str!("tauri_shell.rs");
+        const ATTR: &str = "#[wasm_bindgen(js_name = ";
+
+        let mut missing = Vec::new();
+        for chunk in SRC.split(ATTR).skip(1) {
+            let name: String = chunk
+                .chars()
+                .take_while(|c| c.is_alphanumeric() || *c == '_')
+                .collect();
+            // 只认真正的属性（`js_name = Name)]`），跳过文档里出现的同名字样。
+            if !chunk[name.len()..].starts_with(")]") {
+                continue;
+            }
+            let exported = SRC.contains(&format!("export function {name}("))
+                || SRC.contains(&format!("export const {name}"));
+            if !exported {
+                missing.push(name);
+            }
+        }
+
+        assert!(
+            missing.is_empty(),
+            "inline JS 缺少这些导出：{missing:?}（加载 wasm 时会首帧白屏）"
+        );
+    }
 }
