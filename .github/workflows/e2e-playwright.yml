@@ -44,8 +44,9 @@ jobs:
       - name: Install system deps (OpenSSL / libssh2)
         run: sudo apt-get update && sudo apt-get install -y libssl-dev libssh2-1-dev
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: "1.100.0"
           targets: wasm32-unknown-unknown
 
       - uses: Swatinem/rust-cache@v2
