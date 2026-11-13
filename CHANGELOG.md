@@ -21,6 +21,10 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 - **The Rust toolchain is pinned, so pre-commit and CI run the same clippy.** CI installed a floating `stable` while a developer machine ran whatever `rustup default` resolved to; clippy 1.100 added a `needless_bool` branch (`if cond { return true; } false`) that a local 1.98 never reported, so a fully green `pre-commit run` still failed the PR's `check` job. `rust-toolchain.toml` now pins the version, every workflow installs that exact compiler, and `scripts/check-toolchain-pin.sh` (pre-commit + `scripts/check.sh`) fails on a floating or mismatched pin. Cost: the first `cargo` call after a pin bump downloads the toolchain.
 
+### Security
+
+- **Patched the four RustSec advisories `cargo audit` started failing on; none came from a Client change.** `quinn-proto` 0.11.18 → 0.11.19 (RUSTSEC-2026-0523 / -0524) and `quinn-udp` 0.5.15 → 0.5.16 (RUSTSEC-2026-0538) in all four lockfiles — `reqwest`'s `http3` feature is off, so those crates are locked but never built; `quinn-udp` 0.5.16 asks for `windows-sys` 0.59, so cargo unified a few wide-range Windows-only deps onto 0.59.0. `ammonia` 4.2.4 → 4.2.5 (RUSTSEC-2026-0533, mutation XSS via embedded SVG/MathML) does sanitize chat Markdown, so that one is real; frontend's 782 tests pass. Cost: none at runtime on Linux.
+
 ## [0.8.0-beta.1] - 2026-11-12
 
 ### Added
