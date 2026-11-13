@@ -27,11 +27,20 @@ export function apiUrl(path: string): string {
  * `opts.sidePanelView` 覆盖 `side_panel_view`（默认 `"hidden"`，即右列收起；
  * 需要状态栈可见的用例传 `"workspace"`）。
  * `opts.showTurnContextInject` 打开聊天主列的 `context_inject` / `context_trim` 旁注
- * （默认关，与产品默认一致）。*/
+ * （默认关，与产品默认一致）。
+ * `opts.session` 覆盖 / 追加会话字段（`server_conversation_id`、`server_revision`、
+ * `layout_schema_version`、`messages`、`title` …）。**必须在首帧前就写进桶**：页面已载入
+ * 后再 PUT 桶，会与 SPA 自己的 400ms 防抖回写竞态 —— 它用内存里的旧列表整体覆盖桶，
+ * 慢机器上（CI）表现为「reload 后会话回到 seed 前的空状态」，报错却是下游的元素不存在。
+ * 故本函数把「写桶 → 一次导航」绑在一起，调用方不要再「加载后改桶再 reload」。*/
 export async function seedSession(
   page: Page,
   sid: string,
-  opts: { sidePanelView?: string; showTurnContextInject?: boolean } = {},
+  opts: {
+    sidePanelView?: string;
+    showTurnContextInject?: boolean;
+    session?: Record<string, unknown>;
+  } = {},
 ) {
   await applyWebApiBearerHeaders(page);
 
@@ -62,6 +71,7 @@ export async function seedSession(
         updated_at: Date.now(),
         pinned: false,
         starred: false,
+        ...opts.session,
       },
     ],
     active_session_id: sid,
