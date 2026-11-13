@@ -1,0 +1,14 @@
+# 工具链单一来源：本地 pre-commit 与 CI 的 check job 跑的是同一条 clippy 命令，
+# 但工具链浮动时两边并不是同一个编译器 —— 1.100 给 needless_bool 加了新分支
+# （`if cond { return true; } false`），本地 1.98 全绿而 CI 在 `-D warnings` 下失败，
+# 表现就是「pre-commit 过了，PR 依然红」。升级版本时同步改这里的 channel
+# 与 .github/workflows/*.yml 里的 `with: toolchain:`（scripts/check-toolchain-pin.sh 守着）。
+#
+# 注意 rustup 从当前目录向上查找本文件，所以各子包（frontend / desktop-tauri/src-tauri / …）
+# 里的 cargo 也会用它；不要在各子包里再放 rust-toolchain.toml。
+#
+# 这里**不写** components / targets：那样 rustup 每次解析本文件都会去校验组件清单
+# （要联网，离线环境会卡在 "syncing channel updates"）。clippy / rustfmt 缺失时
+# cargo 会直接报错并提示 `rustup component add`，比静默联网更清楚。
+[toolchain]
+channel = "1.100.0"

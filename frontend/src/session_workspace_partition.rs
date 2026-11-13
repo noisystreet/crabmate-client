@@ -454,10 +454,7 @@ fn partition_effect_should_skip_reload(
         *prev_slot = Some(norm.to_string());
         return true;
     }
-    if prev_slot.as_deref() == Some(norm) {
-        return true;
-    }
-    false
+    prev_slot.as_deref() == Some(norm)
 }
 
 struct PartitionLoadCommitArgs {
