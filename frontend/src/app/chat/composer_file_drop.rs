@@ -1,9 +1,8 @@
 //! 将工作区文件拖放到 composer：插入 `@{rel}`；亦可落盘图片附件。
 
 use leptos::prelude::*;
-use leptos::task::spawn_local;
 
-use crate::api::upload_files_multipart;
+use super::composer_image_upload::enqueue_chat_image_uploads;
 use crate::i18n::{self, Locale};
 use crate::workspace_tree::CRABMATE_WS_REL_MIME;
 
@@ -203,65 +202,27 @@ fn file_looks_like_image(f: &web_sys::File) -> bool {
         || name.ends_with(".gif")
 }
 
-fn append_image_files_to_form(list: &web_sys::FileList, form: &web_sys::FormData) -> bool {
-    let n = list.length();
-    let mut any = false;
-    for i in 0..n {
+/// 从 `FileList` 收集图片（名字 + `File`），非图片略过；返回顺序即选择顺序。
+pub(crate) fn collect_image_files(list: &web_sys::FileList) -> Vec<(String, web_sys::File)> {
+    let mut out = Vec::new();
+    for i in 0..list.length() {
         let Some(f) = list.item(i) else {
             continue;
         };
         if !file_looks_like_image(&f) {
             continue;
         }
-        let name = f.name();
-        let _ = form.append_with_blob_and_filename("file", &f, &name);
-        any = true;
+        out.push((f.name(), f));
     }
-    any
+    out
 }
 
-fn upload_image_files_from_list(
-    list: web_sys::FileList,
-    locale: RwSignal<Locale>,
-    pending_images: RwSignal<Vec<String>>,
-    status_err: RwSignal<Option<String>>,
-) {
-    if list.length() == 0 {
-        return;
-    }
-    let form = web_sys::FormData::new().expect("FormData");
-    if !append_image_files_to_form(&list, &form) {
-        return;
-    }
-    spawn_local(async move {
-        match upload_files_multipart(&form, locale.get_untracked()).await {
-            Ok(urls) => {
-                pending_images.update(|v| {
-                    for u in urls {
-                        if v.len() >= 6 {
-                            break;
-                        }
-                        if !v.contains(&u) {
-                            v.push(u);
-                        }
-                    }
-                });
-                status_err.set(None);
-            }
-            Err(e) => {
-                status_err.set(Some(e));
-            }
-        }
-    });
-}
-
-fn append_image_items_to_form(
+/// 从 `DataTransferItemList` 收集图片：拖拽与粘贴都可能只在这里给出 `File`。
+fn collect_image_files_from_items(
     items: &web_sys::DataTransferItemList,
-    form: &web_sys::FormData,
-) -> bool {
-    let n = items.length();
-    let mut any = false;
-    for i in 0..n {
+) -> Vec<(String, web_sys::File)> {
+    let mut out = Vec::new();
+    for i in 0..items.length() {
         let Some(item) = items.get(i) else {
             continue;
         };
@@ -274,11 +235,9 @@ fn append_image_items_to_form(
         if !file_looks_like_image(&f) {
             continue;
         }
-        let name = f.name();
-        let _ = form.append_with_blob_and_filename("file", &f, &name);
-        any = true;
+        out.push((f.name(), f));
     }
-    any
+    out
 }
 
 /// 网页复制常同时带 `text/plain` 与预览图；有非空纯文本时放行默认粘贴。
@@ -297,39 +256,19 @@ pub(crate) fn handle_composer_image_paste(
     let Some(dt) = ev.clipboard_data() else {
         return;
     };
-    let form = web_sys::FormData::new().expect("FormData");
-    let mut any = false;
-    if let Some(files) = dt.files() {
-        any = append_image_files_to_form(&files, &form);
+    let mut files = Vec::new();
+    if let Some(list) = dt.files() {
+        files = collect_image_files(&list);
     }
-    if !any {
-        any = append_image_items_to_form(&dt.items(), &form);
+    if files.is_empty() {
+        files = collect_image_files_from_items(&dt.items());
     }
     let plain = dt.get_data("text/plain").unwrap_or_default();
-    if !should_intercept_image_paste(&plain, any) {
+    if !should_intercept_image_paste(&plain, !files.is_empty()) {
         return;
     }
     ev.prevent_default();
-    spawn_local(async move {
-        match upload_files_multipart(&form, locale.get_untracked()).await {
-            Ok(urls) => {
-                pending_images.update(|v| {
-                    for u in urls {
-                        if v.len() >= 6 {
-                            break;
-                        }
-                        if !v.contains(&u) {
-                            v.push(u);
-                        }
-                    }
-                });
-                status_err.set(None);
-            }
-            Err(e) => {
-                status_err.set(Some(e));
-            }
-        }
-    });
+    enqueue_chat_image_uploads(files, locale, pending_images, status_err);
 }
 
 fn file_list_image_flags(files: &web_sys::FileList) -> (bool, bool) {
@@ -373,7 +312,12 @@ pub(crate) fn handle_composer_file_drop(
     if let Some(files) = dt.files() {
         let (has_image, has_non_image) = file_list_image_flags(&files);
         if has_image {
-            upload_image_files_from_list(files, locale, pending_images, status_err);
+            enqueue_chat_image_uploads(
+                collect_image_files(&files),
+                locale,
+                pending_images,
+                status_err,
+            );
         }
         if has_non_image && !has_image {
             status_err.set(Some(

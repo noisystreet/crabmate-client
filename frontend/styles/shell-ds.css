@@ -939,6 +939,88 @@ img[data-cm-ws-hydrated="1"] {
   height: var(--icon-md);
 }
 
+/* 逐项上传状态：与待发缩略图区分开 —— 这里还没有 URL，只有名字与进度。 */
+.composer-uploading-images {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+}
+
+.composer-upload-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 4px 6px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--surface-hover);
+}
+
+.composer-upload-item-failed {
+  border-color: var(--error);
+  background: var(--error-bg);
+}
+
+.composer-upload-item-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-sm);
+  color: var(--text);
+}
+
+.composer-upload-item-state {
+  flex: 0 0 auto;
+  font-size: var(--text-sm);
+  color: var(--muted);
+}
+
+.composer-upload-item-remove {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-btn);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.composer-upload-item-remove svg {
+  width: var(--icon-md);
+  height: var(--icon-md);
+}
+
+.composer-upload-cancel {
+  align-self: flex-start;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-btn);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: var(--text-sm);
+}
+
+.composer-upload-cancel:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.composer-upload-cancel:focus-visible {
+  outline: var(--focus-ring-width) solid var(--focus-ring-color);
+  outline-offset: var(--focus-ring-offset);
+}
+
 .composer-clarification-panel {
   display: flex;
   flex-direction: column;

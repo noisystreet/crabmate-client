@@ -13,6 +13,7 @@ use leptos::prelude::*;
 use self::follow_up::{StreamFollowUpWiring, wire_stream_follow_up_effect};
 use self::helpers::{start_user_stream_turn, user_line_and_clarify_from_shell};
 use super::composer_follow_up::ComposerStreamFollowUp;
+use super::composer_image_upload::clear_chat_image_uploads;
 use super::composer_slash_control::{WebSlashControlCtx, try_handle_web_control_slash};
 use super::composer_stream::{ComposerStreamHandles, make_attach_chat_stream};
 use super::handles::{
@@ -168,6 +169,8 @@ pub(crate) fn wire_chat_composer_streams(args: WireComposerStreamsArgs) -> ChatC
                     });
                     draft.set(String::new());
                     pending_images.set(Vec::new());
+                    // 发送即收尾：还在传的附图结果会被丢弃，不会漏进下一条消息。
+                    clear_chat_image_uploads();
                 }
                 ComposerSendDecision::SendNow => {
                     start_user_stream_turn(
@@ -181,6 +184,8 @@ pub(crate) fn wire_chat_composer_streams(args: WireComposerStreamsArgs) -> ChatC
                     );
                     draft.set(String::new());
                     pending_images.set(Vec::new());
+                    // 发送即收尾：还在传的附图结果会被丢弃，不会漏进下一条消息。
+                    clear_chat_image_uploads();
                 }
             }
         }

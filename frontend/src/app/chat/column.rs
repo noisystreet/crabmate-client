@@ -3,7 +3,6 @@
 use std::sync::Arc;
 
 use leptos::prelude::{StoredValue, *};
-use leptos::task::spawn_local;
 use leptos_dom::helpers::event_target_value;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::Closure;
@@ -14,8 +13,10 @@ use super::composer_file_drop::{
     handle_composer_image_paste,
 };
 use super::composer_follow_up::ComposerStreamFollowUp;
+use super::composer_image_upload::enqueue_chat_image_uploads;
 use super::composer_input_stack::ComposerInputStack;
 use super::composer_pending_images::ComposerPendingImagesRow;
+use super::composer_uploading_images::ComposerUploadingImagesRow;
 use super::handles::{
     ChatColumnShell, ChatComposerPaneSignals, ChatFindOverlaySignals, ChatMessagesPaneSignals,
 };
@@ -28,7 +29,6 @@ use super::scroll_shell::{
 use super::tui_actions_bar::TuiTurnActionHandlers;
 use super::tui_stream_view::ChatTuiStreamView;
 use super::user_message_edit::UserMessageEdit;
-use crate::api::upload_files_multipart;
 use crate::chat_session_state::ChatSessionSignals;
 use crate::i18n;
 use crate::icon::{Icon, IconStyle};
@@ -234,37 +234,10 @@ fn handle_composer_image_input_change(
     let Some(list) = files else {
         return;
     };
-    let n = list.length();
-    if n == 0 {
-        return;
-    }
-    let form = web_sys::FormData::new().expect("FormData");
-    for i in 0..n {
-        if let Some(f) = list.item(i) {
-            let name = f.name();
-            let _ = form.append_with_blob_and_filename("file", &f, &name);
-        }
-    }
-    spawn_local(async move {
-        match upload_files_multipart(&form, locale.get_untracked()).await {
-            Ok(urls) => {
-                pending_images.update(|v| {
-                    for u in urls {
-                        if v.len() >= 6 {
-                            break;
-                        }
-                        if !v.contains(&u) {
-                            v.push(u);
-                        }
-                    }
-                });
-            }
-            Err(e) => {
-                status_err.set(Some(e));
-            }
-        }
-    });
+    // 先清空 input：同一批文件再选一次也要能触发 change。
     input.set_value("");
+    let picked = super::composer_file_drop::collect_image_files(&list);
+    enqueue_chat_image_uploads(picked, locale, pending_images, status_err);
 }
 
 fn click_hidden_composer_image_input() {
@@ -630,6 +603,7 @@ fn ChatComposerPane(signals: ChatComposerPaneSignals) -> impl IntoView {
                     status_err=status_err
                 />
                 <ComposerPendingImagesRow locale=locale pending_images=pending_images />
+                <ComposerUploadingImagesRow locale=locale />
                 <ComposerClarificationPanel
                     locale=locale
                     pending_clarification=pending_clarification
