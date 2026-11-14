@@ -43,6 +43,9 @@ impl LaneApp<'_> {
                 self.st.insert_char(ch);
             }
             KeyCode::Backspace => self.st.backspace(),
+            // Delete 是 Backspace 的对偶（向后删）。不开这个臂就会落到下面的 `_`，
+            // 也就是「按了没反应」—— 而光标不在行尾时正是最期待它生效的时刻。
+            KeyCode::Delete => self.st.delete_forward(),
             KeyCode::Left => self.st.cursor_left(),
             KeyCode::Right => self.st.cursor_right(),
             KeyCode::Home if is_ctrl(&key, KeyCode::Home) => self.st.scroll_top(),
