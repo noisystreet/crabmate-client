@@ -2,6 +2,7 @@
 //!
 //! 拆到独立模块以压住 `mod.rs` 行数/CCN 门禁；`apply_control` 仍在事件循环层。
 
+use super::conv_cmd::TurnCmd;
 use super::lane_cmd;
 use super::settings::SESSION_MODES;
 use crabmate_client_api::slash_heads::{Head, head_of};
@@ -44,6 +45,8 @@ pub enum Control {
     /// v1 只有命令入口，没有「左栏内逐字收窄」——原因见 issue #423 的评论（`n`/`r`/`w`
     /// 已被占用，字母即过滤会让它们随上下文变义）。
     ConvFilter(Option<String>),
+    /// `/conv retry` / `/conv edit`（issue #422）：对**最后一轮**重跑 / 改完重跑。
+    ConvTurn(TurnCmd),
     ConvUse(String),
     /// `/conv export [json|markdown|both] [--out <路径>] [--id <id>]`。
     ///
@@ -227,6 +230,10 @@ fn parse_conv(arg: Option<&str>) -> Control {
             None => Control::ConvRefresh,
         },
         "filter" => Control::ConvFilter(conv_filter_term(arg)),
+        // issue #422：只认这两个词（`regen` 有意不做别名 —— 与 Server 消 `ls` 同一条理由：
+        // 一件事两个名字，回执与文档迟早只更新一个）。
+        "retry" => Control::ConvTurn(TurnCmd::Retry),
+        "edit" => Control::ConvTurn(TurnCmd::Edit),
         "use" | "switch" => match arg.split_whitespace().nth(1) {
             Some(id) if !id.is_empty() => Control::ConvUse(id.to_string()),
             _ => Control::ConvUnknown(arg.to_string()),

@@ -42,18 +42,17 @@ use super::serve_defaults::ServeDefaults;
 use super::settings::{LlmSave, McpSave, PersistedSettings, PrefsSave};
 use super::slash_menu::SkillsPayload;
 use super::worker_jobs::{
-    job_config_reload, job_conversation_history, job_export_conversation, job_load_user_settings,
-    job_refresh_sessions, job_refresh_status, job_refresh_usage, job_refresh_workspace_root,
-    job_save_llm, job_save_mcp, job_save_prefs, job_save_store, job_session_index, job_skills,
-    job_workspace_dir, job_workspace_query, job_workspace_set, job_write_permission,
-    job_ws_projects, job_ws_switch_project,
+    job_config_reload, job_conv_branch, job_conversation_history, job_export_conversation,
+    job_load_user_settings, job_refresh_sessions, job_refresh_status, job_refresh_usage,
+    job_refresh_workspace_root, job_save_llm, job_save_mcp, job_save_prefs, job_save_store,
+    job_session_index, job_skills, job_workspace_dir, job_workspace_query, job_workspace_set,
+    job_write_permission, job_ws_projects, job_ws_switch_project,
 };
 
 /// 一条实例的 ctl 报告载荷（[`UiEvent::CtlReport`] 的内容）。
 ///
-/// 两个 op 各一支而不是共用 `String`：`status` 与 `restart` 的成功体本来就不同
-/// （后者多 `restarted` 与 `notes`），压成文本会把「怎么显示」提前固化在 worker 里，
-/// 也就没法给这两条路径各写一条能单测的渲染函数。
+/// 两个 op 各一支而不是共用 `String`：`status` 与 `restart` 的成功体不同（后者多
+/// `restarted` / `notes`），压成文本会提前固化「怎么显示」，也没法各写一条能单测的渲染函数。
 pub(super) enum CtlReport {
     /// `{"op":"status"}`：整份 `status_row`。
     Status(Result<CtlInstance, String>),
@@ -107,6 +106,8 @@ pub(super) enum UiEvent {
         interrupted: Option<StreamResume>,
     },
     Sessions(Result<WebSessionsList, String>),
+    /// `POST /chat/branch` 的结果：失败**类型化**（`NotFound` 要解绑定、`Conflict` 只提示）。
+    TurnBranched(Result<u64, crabmate_client_api::chat_branch::BranchFailure>),
     /// 上下文用量快照（`tiktokenPromptTokens`（`RUN_FINISHED` / `conversation_saved`））：更新状态行上下文段与会话内水位。
     ///
     /// `Box` 是因为它比其它变体大一个量级（7 个 `Option` + 2 个 `String`），没必要让每个
@@ -333,6 +334,10 @@ pub(super) enum WorkerJob {
     SaveMcp(McpSave),
     /// 拉 skill 目录（`GET /skills`）：只给 `/` 补全菜单用。
     Skills,
+    /// `POST /chat/branch`（issue #422）：序号与 revision 都在 job 内现算（归档会话直接报错）。
+    ConvBranch {
+        conversation_id: String,
+    },
     /// `POST /config/reload`：让 serve 重读磁盘配置（`/config reload`）。
     ///
     /// 走 worker 而不是在事件循环里 await：这条命令**会**等到 serve 重读完才回，
@@ -507,6 +512,13 @@ fn dispatch(
             cancel,
             "拉取会话历史",
             job_conversation_history(client, &conversation_id, before_index, out),
+            out,
+        ),
+        WorkerJob::ConvBranch { conversation_id } => run_cancellable(
+            rt,
+            cancel,
+            "回到上一轮",
+            job_conv_branch(client, &conversation_id, out),
             out,
         ),
         WorkerJob::RefreshUsage { conversation_id } => run_cancellable(

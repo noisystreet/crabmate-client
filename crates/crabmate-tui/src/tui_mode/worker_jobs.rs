@@ -11,6 +11,7 @@
 //! `worker::spawn_worker` 那一层。一个 job 内部若被中断，**已发出的**事件保留、
 //! 后面的不再发 —— 与「某一步请求失败」的现状同构，UI 侧本来就要容忍半截结果。
 
+use crabmate_client_api::chat_branch::{BranchFailure, user_ordinal_of_last_turn};
 use crabmate_client_api::chat_export::{ExportFormat, export_messages};
 use crabmate_client_api::paths;
 use crabmate_client_api::permission::PermissionView;
@@ -27,8 +28,9 @@ use crate::serve::{
     ServeClient, SessionIndexOp, TermError, apply_web_session_op, fetch_all_pages,
     fetch_conversation_messages, fetch_llm_overrides, fetch_mcp_servers, fetch_user_data_prefs,
     fetch_web_sessions, fetch_workspace, fetch_workspace_dir, fetch_workspace_projects,
-    put_llm_overrides, put_mcp_servers, put_user_data_prefs, set_session_conversation_store,
-    set_workspace, switch_workspace_project, write_permission_level,
+    post_chat_branch, put_llm_overrides, put_mcp_servers, put_user_data_prefs,
+    set_session_conversation_store, set_workspace, switch_workspace_project,
+    write_permission_level,
 };
 
 /// 写会话索引（`GET` 最新 → 改 → 全量 `PUT`）：新建空白行或把 `conversation_id` 绑到指定行。
@@ -42,6 +44,35 @@ pub(super) async fn job_session_index(client: &ServeClient, op: SessionIndexOp, 
         .await
         .map_err(|e| e.to_string());
     let _ = out.send(UiEvent::SessionIndex { result, op });
+}
+
+/// `POST /chat/branch`（issue #422）：把会话截到「最后一轮之前」，供 `/conv retry|edit` 重跑。
+///
+/// 序号与 revision **都现算**：`fetch_all_pages` → 数普通用户消息 → 用这一份回包里的
+/// revision。这就是 Desktop 的 PATH A′（未知 revision 时先补拉），只是这里一次往返做完 ——
+/// 客户端不维护 revision，也就没有「拿着旧 revision 撞 409」这条路径。
+///
+/// 归档会话算不准序号 → 直接失败（见 `user_ordinal_of_last_turn`）：宁可拒绝，也不能把
+/// 会话截到别处。
+pub(super) async fn job_conv_branch(client: &ServeClient, conversation_id: &str, out: &LaneTx) {
+    let result = branch_to_last_turn(client, conversation_id).await;
+    let _ = out.send(UiEvent::TurnBranched(result));
+}
+
+async fn branch_to_last_turn(
+    client: &ServeClient,
+    conversation_id: &str,
+) -> Result<u64, BranchFailure> {
+    let pages = fetch_all_pages(client, conversation_id)
+        .await
+        .map_err(|e| BranchFailure::Other(e.to_string()))?;
+    let ordinal = user_ordinal_of_last_turn(&pages)
+        .map_err(|e| BranchFailure::Other(e.message().to_string()))?;
+    let revision = pages
+        .first()
+        .map(|p| p.revision)
+        .ok_or_else(|| BranchFailure::Other("回放没有返回 revision，无法安全截断".to_string()))?;
+    post_chat_branch(client, conversation_id, ordinal, revision).await
 }
 
 /// 会话列表 + 工作区路径刷新（静默；发送失败忽略，worker 随 UI 退出而停）。

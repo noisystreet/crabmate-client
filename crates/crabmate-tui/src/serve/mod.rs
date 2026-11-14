@@ -29,6 +29,7 @@ mod workspace;
 pub use approval::{
     ApprovalDecision, ApprovalGate, AutoAllowOnce, CommandApprovalData, new_approval_session_id,
 };
+pub use branch::post_chat_branch;
 pub use chat_stream::{
     ChatStreamArgs, ChatStreamOptions, ChatStreamOutcome, ClientLlm, ClientLlmFields, StreamCancel,
     StreamResume, run_chat_stream, run_chat_stream_sink,

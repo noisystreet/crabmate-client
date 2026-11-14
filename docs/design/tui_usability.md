@@ -1,6 +1,6 @@
 # TUI 易用性规划（对齐 Desktop 聊天体验）
 
-> **状态**：Wave 1 已落地 W1.1 全屏 `/resume`、W1.2 忙时排队、W1.3 会话级草稿、W1.4 复制（OSC52 / 外部工具）、W1.6 多行粘贴（bracketed paste，`CM_TUI_PASTE=off` 可关）；**W1.5 会话列标题过滤已落地**（v1 走命令入口 `/conv filter <词>`；**左栏内逐字收窄仍未做**）。W2.1 历史回放已落地（`GET /conversation/messages` 最新页 + `/older` 按 `before_index` 前插更早页，贴顶保持 + PgUp 到顶自续翻）；W2.2 **删除**已落地（左栏 `Delete` 先确认 / `Shift+Delete` 直删，在途回合拒绝），**只缺重命名**（无 serve 端点）；W2.4 **会话导出**已落地（`/conv export [json|markdown|both] [--out <路径>] [--id <id>]`，repl 与全屏共用 `crabmate_client_api::chat_export` 的展示投影，全量靠逐页往回拉）；W3.1 `/` 补全菜单也已落地（`tui_mode/slash_menu.rs`：内建命令 + `GET /skills` 候选）。Wave 2 的 W2.3 与 Wave 3 其余项仍为方案。逐波按本文落地；每波独立 PR，落地后必须同 PR 更新 [`client_capability_matrix.md`](./client_capability_matrix.md) 对应格（§4）。
+> **状态**：Wave 1 已落地 W1.1 全屏 `/resume`、W1.2 忙时排队、W1.3 会话级草稿、W1.4 复制（OSC52 / 外部工具）、W1.6 多行粘贴（bracketed paste，`CM_TUI_PASTE=off` 可关）；**W1.5 会话列标题过滤已落地**（v1 走命令入口 `/conv filter <词>`；**左栏内逐字收窄仍未做**）。W2.1 历史回放已落地（`GET /conversation/messages` 最新页 + `/older` 按 `before_index` 前插更早页，贴顶保持 + PgUp 到顶自续翻）；W2.2 **删除**已落地（左栏 `Delete` 先确认 / `Shift+Delete` 直删，在途回合拒绝），**只缺重命名**（无 serve 端点）；W2.4 **会话导出**已落地（`/conv export [json|markdown|both] [--out <路径>] [--id <id>]`，repl 与全屏共用 `crabmate_client_api::chat_export` 的展示投影，全量靠逐页往回拉）；W3.1 `/` 补全菜单也已落地（`tui_mode/slash_menu.rs`：内建命令 + `GET /skills` 候选）。Wave 2 的 W2.3 回合重试 / 再生 / 编辑已落地（`/conv retry` / `/conv edit`，见下）；Wave 3 其余项仍为方案。逐波按本文落地；每波独立 PR，落地后必须同 PR 更新 [`client_capability_matrix.md`](./client_capability_matrix.md) 对应格（§4）。
 > **范围**：`crabmate-tui`（全屏 `tui` 为主，`repl` 相应联动）；候选与取舍参照 Desktop / Web（`frontend/`）聊天体验，**语义对齐，不追求 UI 复刻**。
 > **关联**：[`remote_cli_tui.md`](./remote_cli_tui.md)（TUI 母方案，P1–P5）、[`client_capability_matrix.md`](./client_capability_matrix.md)（TUI 行 L53–L81）、[`tui_settings_panel.md`](./tui_settings_panel.md)（设置面板，W3 遗留）、[`chat_ui_todo.md`](./chat_ui_todo.md)（Desktop 聊天 UI 已勾项 = “已做过”的参照，不要当缺口重做）、[`contract_pin.md`](./contract_pin.md)（契约钉点）、Server `docs/`（SSE / user-data / 会话权威）
 
@@ -139,12 +139,12 @@
 - **未做**：行内重命名——**仍缺 serve 端点**，客户端不能自造 `PUT`；左栏也没有过滤/搜索（见 G5 / W1.5）。
 - **依赖**：重命名需 Server 先提供端点并在 `contract_pin.md` 钉住；不得猜路径。
 
-#### W2.3 回合 重试 / 再生 / 编辑用户消息（G7）
+#### W2.3 回合 重试 / 再生 / 编辑用户消息（G7）— 已落地（`/conv retry` / `/conv edit`）
 
 - **参照**：Desktop `message_row_actions.rs`（regen/branch 优先 `POST /chat/branch`，NotFound/Conflict 走本地截断重试）、`user_message_edit.rs`。
-- **方案**：transcript 引入轻量「回合边界」（assistant 块 ↔ 触发它的 user 行）；新增 `/regen`（重发最后 user 消息再生该回合）、`/edit`（编辑最后 user 消息后重跑）；失败助手消息 `/retry`。流式中全部禁用。
-- **落点**：`state.rs`（回合索引）、`mod.rs`、`worker.rs`；`POST /chat/branch` 语义复用（契约已 pin，无需新端点）。
-- **风险**：行模型改「回合感知」是本规划**回归面最大**的一项（render/scroll/find/折叠均遍历 `lines`），需先抽出回合段数据结构再动 UI。
+- **已落地**：`/conv retry` 重跑上一轮 —— 服务端 `POST /chat/branch` 先把会话截到该轮用户消息之前，本地 `truncate_to_last_user_turn` 截到同一位置，再重发同一句；`/conv edit` 只把该句放回输入框，**提交时**才 branch，所以「打开来改又不改」不会动服务端历史。序号（`before_user_ordinal`）在客户端按分页历史现数并**跳过首轮工作区上下文注入条**；有归档回合时拒绝而不是猜（猜错会把会话截到别处）。`NotFound` 解开 `conversation_id` 绑定，`Conflict` 只提示先刷新、不动本地 transcript；流式中 / 有排队消息 / 上一发还在路上都拒绝并说明原因。
+- **落点**：`crabmate-client-api::chat_branch`（分类 + 序号）、`serve/branch.rs`（HTTP）、`state_truncate.rs`（截断原语）、`conv_cmd.rs`（命令与回包）、`worker_jobs::job_conv_branch`。
+- **不做**：回合段数据结构（本 issue 只到「最近一个回合」，回扫 + 截断已够；任意历史回合的重跑是另一件事）、分支树浏览、编辑 assistant 消息。
 
 #### W2.4 会话导出（Markdown / JSON）— **已落地**
 

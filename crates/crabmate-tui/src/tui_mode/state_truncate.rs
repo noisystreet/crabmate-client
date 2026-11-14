@@ -15,8 +15,6 @@ use super::{LineKind, UiState};
 
 impl UiState {
     /// 最后一条用户消息的（行下标，原文）。找不到（空 transcript / 只有系统提示）则 `None`。
-    // issue #422：命令接线在下一个提交（/conv retry）；此前只在单测里用到。
-    #[allow(dead_code)]
     #[must_use]
     pub fn last_user_turn(&self) -> Option<(usize, String)> {
         let idx = self
@@ -30,8 +28,6 @@ impl UiState {
     ///
     /// 幂等性说明：连续调用会**一轮一轮往回退**（第二次调用截掉的是上上轮），
     /// 这正是「重试也没成，再退一轮重来」的语义，因此不做「只能截一次」的限制。
-    // issue #422：命令接线在下一个提交（/conv retry）；此前只在单测里用到。
-    #[allow(dead_code)]
     pub fn truncate_to_last_user_turn(&mut self) -> Option<String> {
         let (idx, text) = self.last_user_turn()?;
         self.lines.truncate(idx);
