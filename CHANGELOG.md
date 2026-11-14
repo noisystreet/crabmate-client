@@ -19,6 +19,7 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Changed
 
+- **The `crabmatectl` command names in our hints now follow the Server's rename.** Upstream renamed three subcommands (`up` → `start`, `down` → `stop`, `ls` → `list`, no aliases kept). This repo never spawns that binary — it talks the control-plane socket, whose op set (`list` / `add` / `remove` / `disable` / `enable` / `restart` / `status`) is unchanged — so there is no contract-pin bump and no behaviour change. What was wrong was the advice: four user-facing strings told people to run `crabmatectl up` / `down`, which the new CLI answers with `unrecognized subcommand`. Cost: none.
 - **Android TLS: `rustls-platform-verifier` 0.7.1, together with the Gradle migration it requires.** 0.7.1 is the release that lets Android fetch CRL revocation data (as CAs drop OCSP) and fixes an infinite loop when a system trust anchor has been disabled — but it also stops shipping the pre-built AAR inside the crate, so the old `cargo metadata` + crate-local Maven repo trick can no longer work. The AAR now comes from upstream's GitHub `maven-archive` repository under the new `org.rustls` groupId, with the dependency deliberately unversioned and the version pulled from `Cargo.lock` by a Gradle `ValueSource` so the Kotlin component cannot drift from the Rust one. Cost: the first Android build needs network access to GitHub (Gradle caches it afterwards). No protocol change.
 
 ### Fixed

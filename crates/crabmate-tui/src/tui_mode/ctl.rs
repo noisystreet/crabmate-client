@@ -290,7 +290,7 @@ fn field(value: Option<&str>) -> &str {
 pub fn listing_lines(items: &[CtlInstance]) -> Vec<String> {
     if items.is_empty() {
         return vec![
-            "ctl: 声明里没有实例（`instances.toml` 为空）；新建请先改声明或用 `crabmatectl up`"
+            "ctl: 声明里没有实例（`instances.toml` 为空）；新建请先改声明或用 `crabmatectl start`"
                 .to_string(),
         ];
     }

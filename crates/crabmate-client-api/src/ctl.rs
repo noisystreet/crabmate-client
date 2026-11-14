@@ -659,7 +659,7 @@ pub fn lane_readiness(items: &[CtlInstance], name: &str) -> LaneReadiness {
         )),
         CtlObserved::Stopped => LaneReadiness::Failed(reason_or(
             item,
-            "实例已停止（`crabmatectl up` 或 `enable` 后再连）",
+            "实例已停止（`crabmatectl start` 或 `enable` 后再连）",
         )),
         CtlObserved::Held => LaneReadiness::Failed(reason_or(
             item,
