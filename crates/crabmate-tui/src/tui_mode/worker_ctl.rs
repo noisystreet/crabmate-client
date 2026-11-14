@@ -22,8 +22,10 @@ use std::time::{Duration, Instant};
 use crabmate_client_api::ctl::{CtlInstance, LaneReadiness, ToggleFailure, lane_readiness};
 
 use super::inbound::{Inbound, ShellEvent};
-use super::worker::{LaneId, LaneTx, UiEvent};
-use crate::serve::{add_instance, list_instances, set_instance_enabled};
+use super::worker::{CtlReport, LaneId, LaneTx, UiEvent};
+use crate::serve::{
+    add_instance, instance_status, list_instances, restart_instance, set_instance_enabled,
+};
 
 /// `/lane new` 等实例就绪的轮询间隔。
 const LANE_READY_POLL: Duration = Duration::from_millis(300);
@@ -87,6 +89,29 @@ pub(super) enum CtlJob {
         name: String,
         /// `true` = `enable`，`false` = `disable`。
         enabled: bool,
+    },
+    /// `/lane status <name>`：查**一条**实例的详情。
+    ///
+    /// 走 `status` op 而不是 `list` 取全量再筛：单条详情是多端共用的契约
+    /// （响应就是同一份 `status_row`），自己筛一遍既多传一份全量，也会与 `list` 的
+    /// 显示口径各自漂移。
+    Status {
+        /// 发起这次查询的 lane。
+        from: LaneId,
+        /// 实例名。
+        name: String,
+    },
+    /// `/lane restart <name>`：重启一条实例。
+    ///
+    /// **同步 op**（Server 跑完 down → up → 等就绪才回这一行，最长可能占满
+    /// `grace + timeout` ≤ 50 s）。它必须待在这条外壳级 ctl 线程上：放 UI 线程就是卡死，
+    /// 放到**某条 lane** 的 worker 上则会把那条 lane 的会话 / 工作区拉取全堵在后面
+    /// （与本模块头注释里 `/lane new` 的同一类问题）。
+    Restart {
+        /// 发起这次重启的 lane。
+        from: LaneId,
+        /// 实例名。
+        name: String,
     },
 }
 
@@ -178,57 +203,106 @@ pub(super) fn spawn(socket: PathBuf, tx: Sender<Inbound>) -> CtlHandle {
 /// 两条出口沿用 #347 的类型划分：`/ctl` 的回包属于那条 lane 自己，走 [`LaneTx`]
 /// 打 `LaneId` 标签；attach / new / toggle 是外壳动作（目标 lane 可能还不存在、
 /// 也可能正是被关掉的那条），走 [`ShellEvent`]。
+///
+/// 每个 op 一个函数而不是一个长 `match`：`status` / `restart` 进来之后分支数贴着
+/// CCN 门禁，而各分支之间本就没有共享状态（socket 与 tx 都按参数传）。
 fn run(job: CtlJob, socket: &Path, tx: &Sender<Inbound>) {
     match job {
-        CtlJob::List { from } => {
-            let result = list_instances(socket).map_err(|e| e.user_message());
-            let _ = LaneTx::new(from, tx.clone()).send(UiEvent::CtlList(result));
-        }
-        CtlJob::Attach { from, name } => {
-            let result = list_instances(socket)
-                .map_err(|e| e.user_message())
-                .and_then(|items| ready_base_url(&items, &name));
-            let _ = tx.send(Inbound::Shell(ShellEvent::Ready { from, name, result }));
-        }
+        CtlJob::List { from } => run_list(socket, tx, from),
+        CtlJob::Attach { from, name } => run_attach(socket, tx, from, &name),
         CtlJob::New {
             from,
             name,
             workspace,
             profile,
-        } => {
-            // 写声明与「就绪」之间最长隔着 20 s 的轮询：不先回一条 `Pending`，
-            // 左栏在这段时间里什么都不显示，用户读到的是「命令没生效」。
-            if let Err(why) = add_instance(socket, &name, &workspace, profile.as_deref())
-                .map_err(|e| e.user_message())
-            {
-                let _ = tx.send(Inbound::Shell(ShellEvent::NewSettled {
-                    from,
-                    name,
-                    outcome: NewOutcome::Failed(why),
-                }));
-                return;
-            }
-            let _ = tx.send(Inbound::Shell(ShellEvent::Pending { name: name.clone() }));
-            let outcome = wait_ready(socket, &name);
-            let _ = tx.send(Inbound::Shell(ShellEvent::NewSettled {
-                from,
-                name,
-                outcome,
-            }));
-        }
+        } => run_new(socket, tx, from, &name, &workspace, profile.as_deref()),
         CtlJob::Toggle {
             from,
             name,
             enabled,
-        } => {
-            let result = set_instance_enabled(socket, &name, enabled).map_err(|e| ToggleFailure {
-                name,
-                enabled,
-                reason: e.user_message(),
-            });
-            let _ = tx.send(Inbound::Shell(ShellEvent::Toggled { from, result }));
-        }
+        } => run_toggle(socket, tx, from, &name, enabled),
+        CtlJob::Status { from, name } => run_status(socket, tx, from, &name),
+        CtlJob::Restart { from, name } => run_restart(socket, tx, from, &name),
     }
+}
+
+/// `/ctl` 与 `/lane`（空参）：拉一次列表，回包打 `from` 标签。
+fn run_list(socket: &Path, tx: &Sender<Inbound>, from: LaneId) {
+    let result = list_instances(socket).map_err(|e| e.user_message());
+    let _ = LaneTx::new(from, tx.clone()).send(UiEvent::CtlList(result));
+}
+
+/// `/lane attach`：只读查询 → 判就绪 → 交外壳装配。
+fn run_attach(socket: &Path, tx: &Sender<Inbound>, from: LaneId, name: &str) {
+    let result = list_instances(socket)
+        .map_err(|e| e.user_message())
+        .and_then(|items| ready_base_url(&items, name));
+    let _ = tx.send(Inbound::Shell(ShellEvent::Ready {
+        from,
+        name: name.to_string(),
+        result,
+    }));
+}
+
+/// `/lane new`：写声明 → 先回一条 `Pending` → 轮询到就绪。
+fn run_new(
+    socket: &Path,
+    tx: &Sender<Inbound>,
+    from: LaneId,
+    name: &str,
+    workspace: &str,
+    profile: Option<&str>,
+) {
+    // 写声明与「就绪」之间最长隔着 20 s 的轮询：不先回一条 `Pending`，
+    // 左栏在这段时间里什么都不显示，用户读到的是「命令没生效」。
+    if let Err(why) = add_instance(socket, name, workspace, profile).map_err(|e| e.user_message()) {
+        let _ = tx.send(Inbound::Shell(ShellEvent::NewSettled {
+            from,
+            name: name.to_string(),
+            outcome: NewOutcome::Failed(why),
+        }));
+        return;
+    }
+    let _ = tx.send(Inbound::Shell(ShellEvent::Pending {
+        name: name.to_string(),
+    }));
+    let outcome = wait_ready(socket, name);
+    let _ = tx.send(Inbound::Shell(ShellEvent::NewSettled {
+        from,
+        name: name.to_string(),
+        outcome,
+    }));
+}
+
+/// `/lane close|open`：翻声明开关；回执走外壳（被关的可能正是发起命令的那条）。
+fn run_toggle(socket: &Path, tx: &Sender<Inbound>, from: LaneId, name: &str, enabled: bool) {
+    let result = set_instance_enabled(socket, name, enabled).map_err(|e| ToggleFailure {
+        name: name.to_string(),
+        enabled,
+        reason: e.user_message(),
+    });
+    let _ = tx.send(Inbound::Shell(ShellEvent::Toggled { from, result }));
+}
+
+/// `/lane status`：单条详情，回包按 `LaneId` 回到发起它的那条 lane。
+fn run_status(socket: &Path, tx: &Sender<Inbound>, from: LaneId, name: &str) {
+    let result = instance_status(socket, name).map_err(|e| e.user_message());
+    let _ = LaneTx::new(from, tx.clone()).send(UiEvent::CtlReport {
+        name: name.to_string(),
+        report: CtlReport::Status(result),
+    });
+}
+
+/// `/lane restart`：同步重启，可能占满 [`RESTART_BUDGET_SECS`]。
+///
+/// 回包也按 `LaneId` 走：重启的是**实例**，与「哪条 lane 连了它」无关，而报告要写进敲
+/// 命令的那条 transcript（回包到达时用户很可能已经切走了）。
+fn run_restart(socket: &Path, tx: &Sender<Inbound>, from: LaneId, name: &str) {
+    let result = restart_instance(socket, name, None, None).map_err(|e| e.user_message());
+    let _ = LaneTx::new(from, tx.clone()).send(UiEvent::CtlReport {
+        name: name.to_string(),
+        report: CtlReport::Restarted(result),
+    });
 }
 
 /// [`LaneReadiness`] → 「能不能据此建一条 lane」的结论（含该做什么）。

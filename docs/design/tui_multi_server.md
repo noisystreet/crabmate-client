@@ -213,6 +213,8 @@ api_base = "http://127.0.0.1:8082"
 | `/lane new <name> [workspace] [profile=<name>]` | `add` 写声明 → 轮询 `list` 到 `observed == ready` → 连 | 新增一条声明（ctl 负责起进程） |
 | `/lane close <name>`（别名 `disable`） | 经 socket 的 `disable` 把声明标成 `enabled = false` | 改一条声明；ctl 会停掉该实例（声明与手写 `env` / `config` 留着） |
 | `/lane open <name>`（别名 `enable`） | 经 socket 的 `enable` 撤销上面那条 | 改一条声明；下一轮收敛把实例拉起 |
+| `/lane status <name>`（别名 `show` / `info`） | 经 socket 的 `status` 查**单条**详情（响应就是同一份 `status_row`） | 无（只读） |
+| `/lane restart <name>` | 经 socket 的 `restart` 重启这条实例（**同步**：down → up → 等就绪才回，最长 50 s） | 换掉那个 serve 进程；声明不动，Server 的 `notes` 原样打出来 |
 
 - **就绪判据只有一处**：`crabmate-client-api::ctl::lane_readiness` —— `ready` **且带 `base_url`** 才算 `Ready`；`failed` / `stopped` / `held` 直接 `Failed`（带 Server 的 `last_error`，它才是唯一知道原因的地方）；`starting` / `stale` / 缺 `observed` / 认不出的观测态一律 `Pending`。**`enabled = false` 先于 `observed` 判 `Failed`**（[#373](https://github.com/noisystreet/crabmate-client/issues/373)）：`disable` 会停掉实例、状态文件随之消失，Server 于是对「有声明、无状态记录」只回 `observed = "starting"` —— 照它判，`/lane attach` 一个刚 close 的实例会说「还没就绪」，`/lane new` 撞上同名关闭声明要白等满 20 s。`enabled` 字段缺失（旧版 ctl 不返回它）时不进这一支，判读与之前逐字一致。放纯逻辑里既为可测，也避免 worker 的轮询循环与 `/ctl` 的显示口径漂移。
 - **`add.workspace` 必填**：socket `add` 至今要求 `String`（放开省略的是 TOML 声明那条路）。所以 `/lane new` 的 workspace 取「显式参数 ＞ 当前 lane 的 serve 工作区」，两者都没有（本 lane 待绑定）就明说要路径。`created: false`（声明已存在）是幂等命中，不当失败。
@@ -228,6 +230,7 @@ api_base = "http://127.0.0.1:8082"
 - **新 lane 的首拉**与启动同一套（`LaneApp::bootstrap`：会话 / 工作区根 / serve 状态 / user-data 快照）：只刷当前 lane 的话，切过去会看到空的会话列表。
 - **`/lane close|open` 只翻 `enabled`**：`enabled = false` 是 Server 文档里客户端软删 lane 的正式口径，socket 的 `disable` / `enable` 也只收 `op` + `name`（它们**不是** `update`：换 workspace/profile/port 仍是 `remove` + `add` 两步）。三条回执语义照抄 Server、不自己重推：`changed: false` 是幂等命中（「本来就是这样」，不是失败），`enable` 会顺手清 `down` 留下的 `desired_state = stopped`（`cleared_down`），那半步失败时 `ok` 仍为真但带 `warning` —— 不露出来就会变成「声明是启用的、实例永远起不来」。回执由 worker 走 `Inbound::Shell(ShellEvent::Toggled)`（被关的可能正是发起命令的那条 lane），外壳据此写报告行；关掉声明时如果本进程正连着它，顺手 `detach`（实例马上被 ctl 停掉，留着只是一条死 SSE），**唯一一条连接例外** —— 只把「随后下线、退出用 `/quit`、反悔用 `/lane open`」说清，不摘（界面至少要有一条 lane）。关掉之后再 `/lane attach` 它，由就绪判据直接答「声明已关闭（enabled = false）：先 `/lane open`」（[#373](https://github.com/noisystreet/crabmate-client/issues/373)），不再说「还没就绪」。
 - **未做**：per-profile bearer 槽（控制面里所有实例同机同用户，第一版共用主连接那份；某实例要求不同 Bearer 时症状是那条 lane 的拉取全错）、声明级硬删（socket 的 `remove` 会连手写 `env` / `config` 一起删掉，不做）。
+- **`/lane status|restart` 不新造形状**（[#497](https://github.com/noisystreet/crabmate-client/issues/497)）：`status` 的响应就是 `list` 行那份 `status_row`（外加 `ok`），所以共享层只多了 `parse_status_response`，单条详情不必再拉全量自己筛；`restart` = 同一份行 + `restarted` + `notes`。`restart` 在 Server 侧是**同步** op（down → up → 等就绪才回一行，`grace + timeout` ≤ 50 s），因此放在外壳级 ctl 线程上跑、socket 读超时按 50 s + 余量设，并在按下时先写一句「正在重启…」—— 排到 UI 线程上就是卡死，排到某条 lane 的 worker 上则会把那条 lane 的拉取全堵住（与 `/lane new` 的 20 s 轮询同一类问题）。`notes`（声明里的 `env` 丢了、profile 漂移、声明其实 `enabled = false`）必须打到屏幕上：否则「重启成功但行为不对」无从解释；失败按 `code` 说话（`instance_not_found` / `restart_budget_exceeded` / `port_in_use` / `identity_mismatch`），不是「没反应」。重启**不自动重连**：本进程连的就是它时只提示 `/lane detach` + `/lane attach`（换进程后 SSE 已断，若新实例换了地址，旧 `api_base` 就是死的）。
 
 ---
 

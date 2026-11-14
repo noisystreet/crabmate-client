@@ -9,6 +9,8 @@
 //! - `/lane`（空参）/ `/lane list`：列出控制面实例（与 `/ctl` 同一实现，不再各写一份）。
 //! - `/lane attach <name>`：连上**已就绪**的实例，不改声明。
 //! - `/lane detach [<name>]`：只摘掉**本进程**的连接；声明与 serve 进程都不动（与 attach 对称）。
+//! - `/lane status <name>`：查单条实例的详情（ctl 的 `status` op，响应即同一份 `status_row`）。
+//! - `/lane restart <name>`：重启一条实例（ctl 的 `restart` op，同步；最长约 50 s）。
 //! - `/lane new <name> [workspace] [profile=<name>]`：新增一条声明并等它就绪（写盘由 ctl 完成）。
 //!
 //! 失败一律写进**发起命令的那条 lane**的 transcript：用户正看着它，而新 lane 此刻
@@ -43,6 +45,16 @@ pub(crate) enum LaneCommand {
     Close(String),
     /// `open <name>`：撤销 [`LaneCommand::Close`]（`enabled = true`）。
     Open(String),
+    /// `status <name>`：查**一条**实例的详情（ctl 的 `status` op，只读）。
+    ///
+    /// 与空参 `/lane`（= 全量 `list`）分开：要看单条时 `list` 取全量自己筛既慢又容易与
+    /// 列表口径漂移，而 `status` 的响应就是同一份 `status_row`。
+    Status(String),
+    /// `restart <name>`：重启一条实例（ctl 的 `restart` op，**同步**，最长约 50 s）。
+    ///
+    /// TUI 被禁止 spawn `crabmatectl`、也不该自己写 `instances.toml`，所以这是「重启这条
+    /// lane」的唯一通道；批量重启不在协议里（要批量就自己按名字逐条敲）。
+    Restart(String),
     /// `new <name> [workspace] [profile=<name>]`：新增声明并等它就绪。
     New {
         /// 实例名（`instances.toml` 的键）。
@@ -75,6 +87,10 @@ pub(crate) fn parse(arg: Option<&str>) -> Result<LaneCommand, String> {
         // `disable` / `enable` 是 Server 侧的 op 名，认它们只是省事，语义与 close / open 一致。
         "close" | "disable" => one_name(tail, "close").map(LaneCommand::Close),
         "open" | "enable" => one_name(tail, "open").map(LaneCommand::Open),
+        // `show` 空参仍是 list（上面那条带 guard 的臂先命中）；带名字时它是 `status` 的
+        // 同义词 —— 比再加一个只有一字之差的动词更好记。
+        "status" | "info" | "show" => one_name(tail, "status").map(LaneCommand::Status),
+        "restart" => one_name(tail, "restart").map(LaneCommand::Restart),
         "new" | "add" => new_tail(tail),
         _ => Err(usage()),
     }
@@ -82,7 +98,7 @@ pub(crate) fn parse(arg: Option<&str>) -> Result<LaneCommand, String> {
 
 /// 用法提示：每条子命令各给一个可照抄的例子。
 fn usage() -> String {
-    "用法：/lane [list] · /lane attach <name> · /lane detach [<name>]（缺省摘当前这条） · /lane cancel <name> · /lane new <name> [workspace] [profile=<name>] · /lane close <name> · /lane open <name>"
+    "用法：/lane [list] · /lane status <name>（或 show） · /lane restart <name> · /lane attach <name> · /lane detach [<name>]（缺省摘当前这条） · /lane cancel <name> · /lane new <name> [workspace] [profile=<name>] · /lane close <name> · /lane open <name>"
         .to_string()
 }
 
@@ -220,6 +236,8 @@ impl super::LaneApp<'_> {
             LaneCommand::Cancel(name) => self.lane_cancel(name),
             LaneCommand::Close(name) => self.lane_toggle(name, false),
             LaneCommand::Open(name) => self.lane_toggle(name, true),
+            LaneCommand::Status(name) => self.lane_status(name),
+            LaneCommand::Restart(name) => self.lane_restart(name),
             LaneCommand::New {
                 name,
                 workspace,
@@ -308,6 +326,58 @@ impl super::LaneApp<'_> {
         if !self.enqueue_ctl(&ctl, job) {
             self.st
                 .push_line(LineKind::System, "请求未发出：worker 线程已退出");
+        }
+    }
+
+    /// `/lane status <name>`：查**一条**实例的详情（ctl 的 `status` op，只读）。
+    ///
+    /// 回执以 `UiEvent::CtlReport` 回到本 lane（`ctl::on_ctl_status` 排版）。只读，所以
+    /// 不需要排队以外的任何提示 —— 与 `/ctl` 一样在发送侧写一句「正在查询」。
+    fn lane_status(&mut self, name: String) {
+        let Some(ctl) = self.ctl_handle_or_hint() else {
+            return;
+        };
+        self.st.push_line(
+            LineKind::System,
+            &format!("正在查询实例 `{name}` 的详情（ctl `status`）…"),
+        );
+        if !self.enqueue_ctl(
+            &ctl,
+            CtlJob::Status {
+                from: self.id,
+                name,
+            },
+        ) {
+            self.st
+                .push_line(LineKind::System, "查询未发出：worker 线程已退出");
+        }
+    }
+
+    /// `/lane restart <name>`：重启一条实例（ctl 的 `restart` op，**同步**）。
+    ///
+    /// 先写一句「正在重启（最长约 50 s）」再入队：这个 op 在 Server 侧跑完 down → up →
+    /// 等就绪才回一行，不预先说明，用户会以为界面卡死（`enqueue_ctl` 的排队提示会接在
+    /// 这句后面，两条合起来才是「在做什么 + 为什么还没回」）。
+    fn lane_restart(&mut self, name: String) {
+        let Some(ctl) = self.ctl_handle_or_hint() else {
+            return;
+        };
+        self.st.push_line(
+            LineKind::System,
+            &format!(
+                "正在重启实例 `{name}`（先停再起，最长约 {} s；期间别退出客户端）…",
+                crabmate_client_api::ctl::RESTART_BUDGET_SECS
+            ),
+        );
+        if !self.enqueue_ctl(
+            &ctl,
+            CtlJob::Restart {
+                from: self.id,
+                name,
+            },
+        ) {
+            self.st
+                .push_line(LineKind::System, "重启未发出：worker 线程已退出");
         }
     }
 
@@ -664,6 +734,42 @@ mod tests {
         let err = parse(Some("zzz proj-a")).unwrap_err();
         assert!(err.contains("/lane attach"), "{err}");
         assert!(err.contains("/lane new"), "{err}");
+    }
+
+    /// `status` 与 `show <name>` 同义；**空参** `show` 仍是 list（旧肌肉记忆不变）。
+    #[test]
+    fn status_takes_one_name_and_show_stays_list_without_one() {
+        assert!(matches!(
+            parse(Some("status proj-a")),
+            Ok(LaneCommand::Status(n)) if n == "proj-a"
+        ));
+        assert!(matches!(
+            parse(Some("show proj-a")),
+            Ok(LaneCommand::Status(n)) if n == "proj-a"
+        ));
+        assert!(matches!(
+            parse(Some("info proj-a")),
+            Ok(LaneCommand::Status(n)) if n == "proj-a"
+        ));
+        assert!(
+            matches!(parse(Some("show")), Ok(LaneCommand::List)),
+            "空参 show 仍是列表（与 list / ls 同义）"
+        );
+        let err = parse(Some("status")).unwrap_err();
+        assert!(err.contains("/lane status"), "要指回刚打的那条：{err}");
+        assert!(parse(Some("status a b")).is_err(), "两个词不猜哪个是名字");
+    }
+
+    /// `/lane restart` 收一个名字：批量不在协议里，所以多给名字宁可报用法。
+    #[test]
+    fn restart_takes_exactly_one_name() {
+        assert!(matches!(
+            parse(Some("restart proj-a")),
+            Ok(LaneCommand::Restart(n)) if n == "proj-a"
+        ));
+        let err = parse(Some("restart")).unwrap_err();
+        assert!(err.contains("/lane restart"), "要指回刚打的那条：{err}");
+        assert!(parse(Some("restart a b")).is_err(), "两个词不猜哪个是名字");
     }
 
     #[test]

@@ -49,6 +49,11 @@ use crate::tauri_shell::{
     tauri_close_connection, tauri_focus_connection, tauri_rename_connection, tauri_shell_available,
 };
 
+// 「重启」按钮的状态与提示行单独成文件：本文件贴着 920 行门禁（`fn-nloc`）。
+#[path = "nav_rail_ctl_restart.rs"]
+mod ctl_restart;
+use ctl_restart::{CtlRestartNoticeLine, CtlRestartUi, run_ctl_restart};
+
 use super::connection_feed::{
     connection_display_name, connection_feed, ctl_instances_feed, refresh_ctl_instances,
 };
@@ -301,8 +306,17 @@ fn connection_row(
     }
 }
 
-/// 一行「可连的实例」：名字 + 状态读数 +（就绪时）「连接」按钮。
-fn ctl_row(row: CtlRow, locale: RwSignal<Locale>) -> impl IntoView {
+/// 一行「可连的实例」：名字 + 状态读数 + 「重启」+（就绪时）「连接」。
+///
+/// 「重启」对**所有**状态都出现：`failed` / `stale` 恰恰是最需要重启的状态（Server 侧
+/// 重启会重读声明与 env），而 `ready` 的实例也可能要拿新 env / profile 重起一次。
+/// 「连接」仍只在就绪且带基址时出现（见 [`ctl_rows_for_rail`]）。
+fn ctl_row(
+    row: CtlRow,
+    locale: RwSignal<Locale>,
+    restart: RwSignal<CtlRestartUi>,
+    refresh: Callback<()>,
+) -> impl IntoView {
     let CtlRow {
         name,
         api_base,
@@ -321,6 +335,10 @@ fn ctl_row(row: CtlRow, locale: RwSignal<Locale>) -> impl IntoView {
     let base_for_click = api_base;
     let name_for_click = name.clone();
     let name_for_title = name.clone();
+    let name_for_busy = name.clone();
+    let name_for_restart = name.clone();
+    // 在途判定按名字：ctl 只有一个线程，同一时刻只可能有一条重启在跑。
+    let busy = Memo::new(move |_| restart.get().busy.as_deref() == Some(name_for_busy.as_str()));
 
     view! {
         <div class="nav-rail-ctl-row" prop:title=api_base_for_title>
@@ -331,6 +349,39 @@ fn ctl_row(row: CtlRow, locale: RwSignal<Locale>) -> impl IntoView {
             >
                 {state_text}
             </span>
+            <button
+                type="button"
+                class="nav-rail-ctl-restart"
+                prop:title=i18n::ctl_restart_tooltip(locale.get_untracked())
+                data-testid="nav-rail-ctl-restart"
+                prop:disabled=move || busy.get()
+                on:click=move |_| {
+                    let name = name_for_restart.clone();
+                    // 先置在途再发请求：同步 op 最长 50 s，没有这一步用户看到的是「点了没反应」。
+                    restart.update(|ui| {
+                        ui.busy = Some(name.clone());
+                        ui.notice = None;
+                    });
+                    leptos::task::spawn_local(async move {
+                        let notice = run_ctl_restart(&name, locale.get_untracked()).await;
+                        restart.update(|ui| {
+                            ui.busy = None;
+                            ui.notice = Some(notice);
+                        });
+                        // 列表是只读查询（壳不推送）：重启后必须自己再拉一次，否则那行还停在
+                        // 旧状态 —— 用户会以为重启没生效。
+                        refresh.run(());
+                    });
+                }
+            >
+                {move || {
+                    if busy.get() {
+                        i18n::ctl_row_restarting(locale.get_untracked())
+                    } else {
+                        i18n::ctl_row_restart(locale.get_untracked())
+                    }
+                }}
+            </button>
             <Show when=move || connectable>
                 <button
                     type="button"
@@ -377,6 +428,11 @@ pub(super) fn NavRailConnections(
     let instances = StoredValue::new(ctl_instances_feed());
     let ctl_rows =
         Signal::derive(move || ctl_rows_for_rail(&instances.get_value().get(), &rows.get()));
+    // 「重启」的界面状态：在途那条 + 最近一次结果（`notes` 必须画出来，不能只进控制台）。
+    let restart = RwSignal::new(CtlRestartUi::default());
+    // 重启成功后重新拉一次列表：这份数据是只读查询，壳不会推。
+    let refresh_after_restart =
+        Callback::new(move |()| refresh_ctl_instances(instances.get_value()));
     // 改名弹窗的目标：`Some(初始名)` = 打开。只可能是本窗口这一行 —— 壳侧
     // `rename_connection` 没有「改别人」的路径。
     let rename_target = RwSignal::new(None::<String>);
@@ -434,8 +490,12 @@ pub(super) fn NavRailConnections(
                             <For
                                 each=move || ctl_rows.get()
                                 key=|row| row.name.clone()
-                                children=move |row| ctl_row(row, locale)
+                                children=move |row| {
+                                    ctl_row(row, locale, restart, refresh_after_restart)
+                                }
                             />
+                            // 重启结果（含 Server 的 `notes`）：只有这一处能把它摆给用户看。
+                            <CtlRestartNoticeLine restart=restart />
                         </div>
                     </Show>
                 </div>

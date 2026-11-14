@@ -336,9 +336,10 @@ fn main() {
             desktop_connections::rename_connection,
             desktop_connections::focus_connection,
             desktop_connections::close_connection,
-            // 控制面只读查询：左栏「可连实例」分组的数据源（`desktop_ctl` 头注释
-            // 说明为什么这份 socket IO 不在共享层）。
+            // 控制面查询与重启：左栏「可连实例」分组的数据源（`desktop_ctl` 头注释
+            // 说明为什么这份 socket IO 不在共享层，以及为什么只做 list / restart）。
             desktop_ctl::ctl_list_instances,
+            desktop_ctl::ctl_restart_instance,
         ])
         .on_window_event(|window, event| {
             // 窗口销毁 = 那条连接没了。只摘自己那条，并广播给剩下的窗口。

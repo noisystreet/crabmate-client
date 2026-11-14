@@ -870,6 +870,7 @@ impl LaneApp<'_> {
             UiEvent::WorkspaceQuery(result) => self.on_workspace_query(result),
             UiEvent::WorkspaceSet(result) => self.on_workspace_set(result),
             UiEvent::CtlList(result) => ctl::on_ctl_list(self, result),
+            UiEvent::CtlReport { name, report } => ctl::on_ctl_report(self, name, report),
             UiEvent::UserData(result) => self.on_user_data(result),
             UiEvent::SavedLlm(result) => self.on_settings_saved_llm(result),
             UiEvent::SavedPrefs(result) => self.on_settings_saved_prefs(result),

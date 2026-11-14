@@ -116,6 +116,16 @@ export function invokeTauriCtlListInstances() {
   return tauriInvoke("ctl_list_instances", {});
 }
 
+// 重启一条实例（ctl 的 restart）。**同步 op**：壳侧可能占满 50 s，别在 UI 线程上等。
+// grace / timeout 传 null 表示用 Server 的默认（各 10 s）；和不得超过 50 s，超了由 Server 拒绝。
+export function invokeTauriCtlRestartInstance(name, grace, timeout) {
+  return tauriInvoke("ctl_restart_instance", {
+    name,
+    grace: grace ?? null,
+    timeout: timeout ?? null,
+  });
+}
+
 // 按地址开一条新连接。已有 `open_connection` 命令；控制面「连接」按钮用它，
 // 语义与 TUI 的 `/lane attach` 等价：同一台 serve 撞 authority 时壳只聚焦既有窗口。
 export function invokeTauriOpenConnection(apiBase, displayName) {
@@ -220,6 +230,12 @@ extern "C" {
     fn invoke_tauri_open_connect_window(display_name: Option<String>) -> js_sys::Promise;
     #[wasm_bindgen(js_name = invokeTauriCtlListInstances)]
     fn invoke_tauri_ctl_list_instances() -> js_sys::Promise;
+    #[wasm_bindgen(js_name = invokeTauriCtlRestartInstance)]
+    fn invoke_tauri_ctl_restart_instance(
+        name: &str,
+        grace: Option<f64>,
+        timeout: Option<f64>,
+    ) -> js_sys::Promise;
     #[wasm_bindgen(js_name = invokeTauriOpenConnection)]
     fn invoke_tauri_open_connection(
         api_base: &str,
@@ -542,6 +558,38 @@ pub async fn tauri_ctl_list_instances_json() -> Result<String, String> {
         .map_err(|e| format!("ctl_list_instances result not serializable: {e:?}"))?
         .into();
     Ok(text)
+}
+
+/// 重启一条实例（左栏「可连实例」那行的「重启」）。
+///
+/// 回的是壳序列化后的 `RestartOutcome` JSON 文本，**不是** `bool`：`restarted` 与
+/// `notes` 都要给用户看（`notes` 是「env 丢了 / profile 漂移」的唯一出口）。
+///
+/// **这个调用可能占满 50 s**（ctl 的 `restart` 是同步 op）：只能在 `spawn_local` 里 await，
+/// 界面上要有在途标记，否则看起来就是点了一下没反应。
+///
+/// 失败（壳回 `Err(String)`）会变成 `Err(..)`，其中已含 Server 的 `code`。
+#[cfg(target_arch = "wasm32")]
+pub async fn tauri_ctl_restart_instance_json(name: &str) -> Result<String, String> {
+    if !tauri_shell_available() {
+        return Err("not in tauri shell".to_string());
+    }
+    // `None` → JS `null` → 壳侧 `Option<u64>` = None（Server 默认各 10 s）。
+    let value = JsFuture::from(invoke_tauri_ctl_restart_instance(name, None, None))
+        .await
+        .map_err(|e| format!("{e:?}"))?;
+    if let Some(text) = value.as_string() {
+        return Ok(text);
+    }
+    let text: String = js_sys::JSON::stringify(&value)
+        .map_err(|e| format!("ctl_restart_instance result not serializable: {e:?}"))?
+        .into();
+    Ok(text)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn tauri_ctl_restart_instance_json(_: &str) -> Result<String, String> {
+    Err("not in tauri shell".to_string())
 }
 
 /// 按地址开一条新连接（左栏「可连实例」那行的「连接」按钮）。

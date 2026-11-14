@@ -31,6 +31,17 @@ pub const OP_LIST: &str = "list";
 pub const OP_DISABLE: &str = "disable";
 /// 见 [`OP_ADD`]。
 pub const OP_ENABLE: &str = "enable";
+/// 见 [`OP_ADD`]：**一条 lane** 的详情（响应体就是 `status --json` 的那一行）。
+pub const OP_STATUS: &str = "status";
+/// 见 [`OP_ADD`]：同步重启**一条 lane**（down → up → 等就绪才回一行）。
+pub const OP_RESTART: &str = "restart";
+
+/// `restart` 的 `grace` + `timeout` 之和上限（秒）。
+///
+/// 契约在 Server：超过就回 `restart_budget_exceeded`，更大的宽限只能走 CLI。
+/// 客户端**不**据此提前拒绝（拒绝文案与错误码都是 Server 的权威），但 IO 侧的读超时
+/// 必须明显长于它 —— 这个 op 是同步的，响应可能真占满整个预算。
+pub const RESTART_BUDGET_SECS: u64 = 50;
 
 /// 一条控制面请求：序列化后正好一行 JSON。
 ///
@@ -76,6 +87,29 @@ pub enum CtlRequest {
         /// `false` = 保留声明但不该运行（客户端摘 lane 的软删除）；`true` = 放开。
         enabled: bool,
     },
+    /// `{"op":"status","name":…}`：**一条**实例的详情。
+    ///
+    /// 响应体就是 `status --json` 的那一行（字段集钉在 Server 的
+    /// `fixtures/ctl_contract.json` 的 `status_row`），外加一个 `ok` —— 所以解析复用
+    /// [`CtlInstance`]，**不**另写一套字段。拿单条详情不必再 `list` 取全量自己筛。
+    Status {
+        /// 实例名。
+        name: String,
+    },
+    /// `{"op":"restart","name":…,"grace":…,"timeout":…}`：同步重启一条实例。
+    ///
+    /// `grace` / `timeout` 省略时各取 Server 的默认 10 s；两者之和不得超过
+    /// [`RESTART_BUDGET_SECS`]（超出由 Server 回 `restart_budget_exceeded`）。
+    /// **这个 op 是同步的**：Server 跑完 down → up → 等就绪才回这一行，所以调用方必须
+    /// 把它放在 worker / 异步任务里，读超时也要按 [`RESTART_BUDGET_SECS`] 量级来设。
+    Restart {
+        /// 实例名。
+        name: String,
+        /// 优雅停止的宽限（秒）；`None` = Server 默认。
+        grace: Option<u64>,
+        /// 等新进程就绪的上限（秒）；`None` = Server 默认。
+        timeout: Option<u64>,
+    },
 }
 
 impl CtlRequest {
@@ -120,6 +154,26 @@ impl CtlRequest {
                 let op = if *enabled { OP_ENABLE } else { OP_DISABLE };
                 obj.insert("op".to_string(), json!(op));
                 obj.insert("name".to_string(), json!(name));
+            }
+            Self::Status { name } => {
+                obj.insert("op".to_string(), json!(OP_STATUS));
+                obj.insert("name".to_string(), json!(name));
+            }
+            Self::Restart {
+                name,
+                grace,
+                timeout,
+            } => {
+                obj.insert("op".to_string(), json!(OP_RESTART));
+                obj.insert("name".to_string(), json!(name));
+                // 两个字段缺省即 Server 的默认 10 s：只在显式给了时才写出
+                // （Server 对这两个 op 的字段白名单收它们，多写一个别的键就是 `bad_request`）。
+                if let Some(secs) = grace {
+                    obj.insert("grace".to_string(), json!(secs));
+                }
+                if let Some(secs) = timeout {
+                    obj.insert("timeout".to_string(), json!(secs));
+                }
             }
         }
         Value::Object(obj).to_string()
@@ -192,6 +246,12 @@ pub struct CtlInstance {
     /// 落盘态（四态）。**不要**用它判可连性，见 [`CtlObserved`]。
     #[serde(default)]
     pub state: Option<String>,
+    /// 声明期望的态（`running` / `stopped`）：`state` 与它不一致说明 ctl 正在收敛路上。
+    ///
+    /// 只有 `status` / `restart` 的响应带它（`list` 的行里 Server 也给，缺省即 `None`），
+    /// 所以这里按可选处理 —— 详情视图据此说得清「为什么它是 `starting`」。
+    #[serde(default)]
+    pub desired_state: Option<String>,
     /// 观测态；判可连性用它。
     #[serde(default)]
     pub observed: Option<String>,
@@ -253,25 +313,52 @@ pub enum CtlErrorKind {
     EmptyRequest,
     /// `handle_timeout`：主循环在超时内没处理完（可能卡在起实例）。
     HandleTimeout,
+    /// `instance_not_found`：`status` / `restart` 找不到该实例的**状态记录**。
+    ///
+    /// 与「声明里没有它」是两件事：声明可能还在、只是从没起过（停掉的实例状态文件会消失）。
+    InstanceNotFound,
+    /// `restart_budget_exceeded`：`grace + timeout` 超过 [`RESTART_BUDGET_SECS`]。
+    ///
+    /// 更大的宽限只能走 CLI（`crabmatectl restart <name> --grace …`），客户端不放宽上限。
+    RestartBudgetExceeded,
+    /// `port_in_use`：重启时要绑的端口被占（Server 在重启内部冒出）。
+    PortInUse,
+    /// `identity_mismatch`：端口上的进程不是 ctl 起的那个（Server 在重启内部冒出）。
+    IdentityMismatch,
     /// 响应体不是合法 JSON / 结构对不上（**客户端侧**判定，Server 不会发这个码）。
     Malformed,
     /// 认不出的 `code`（Server 将来新增）：原样带上，不折进上面任何一支。
     Other,
 }
 
+/// `code` → 分类的**唯一**映射表。
+///
+/// 表而不是 `match`：`from_code` 已经贴着 CCN 门禁（每多一个码就多一个分支），而这张表
+/// 只是数据 —— 新增一个码是加一行，不会把函数推过 10。
+const CODE_KINDS: &[(&str, CtlErrorKind)] = &[
+    ("bad_request", CtlErrorKind::BadRequest),
+    ("bad_workspace", CtlErrorKind::BadWorkspace),
+    ("socket_in_use", CtlErrorKind::SocketInUse),
+    ("supervisor_gone", CtlErrorKind::SupervisorGone),
+    ("empty_request", CtlErrorKind::EmptyRequest),
+    ("handle_timeout", CtlErrorKind::HandleTimeout),
+    ("instance_not_found", CtlErrorKind::InstanceNotFound),
+    (
+        "restart_budget_exceeded",
+        CtlErrorKind::RestartBudgetExceeded,
+    ),
+    ("port_in_use", CtlErrorKind::PortInUse),
+    ("identity_mismatch", CtlErrorKind::IdentityMismatch),
+];
+
 impl CtlErrorKind {
-    /// 按线上 `code` 分类。
+    /// 按线上 `code` 分类；表里没有的一律 [`CtlErrorKind::Other`]（不猜成某个已知原因）。
     #[must_use]
     pub fn from_code(code: &str) -> Self {
-        match code {
-            "bad_request" => Self::BadRequest,
-            "bad_workspace" => Self::BadWorkspace,
-            "socket_in_use" => Self::SocketInUse,
-            "supervisor_gone" => Self::SupervisorGone,
-            "empty_request" => Self::EmptyRequest,
-            "handle_timeout" => Self::HandleTimeout,
-            _ => Self::Other,
-        }
+        CODE_KINDS
+            .iter()
+            .find(|(known, _)| *known == code)
+            .map_or(Self::Other, |(_, kind)| *kind)
     }
 }
 
@@ -450,6 +537,73 @@ fn opt_text(val: &Value, key: &str) -> Option<String> {
         .map(str::to_string)
 }
 
+/// `restart` 的响应：同一份 `status_row` + `restarted` + `notes`。
+///
+/// `notes` 是 CLI 打到 stderr 的那批提示（声明里的 env 丢了、profile 漂移、声明
+/// `enabled = false` 等），**恒为数组**、可为空 —— 必须让用户看见：这些事实只有 Server
+/// 知道，客户端既不复述也不再判断一遍。
+///
+/// `Serialize` 与 [`CtlInstance`] 同一个用途：Desktop 的 `ctl_restart_instance` 直接把它
+/// 回给前端（WASM 侧反序列化回同一份形状），字段名只留这一处。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RestartOutcome {
+    /// 重启**之后**的状态行（响应里已经是新的 pid / state）。
+    pub instance: CtlInstance,
+    /// Server 是否真的重启了它。
+    pub restarted: bool,
+    /// 重启发出的提示；可能为空。
+    pub notes: Vec<String>,
+}
+
+/// 解析 `status` 的**一行**响应：整行就是一个 [`CtlInstance`]（外加 `ok`）。
+///
+/// 不为它另写一套字段：Server 的 `status_row` 与 `list` 的行**是同一份**
+/// （字段集钉在 `fixtures/ctl_contract.json`），复制一遍只会让两处各自漂移。
+pub fn parse_status_response(line: &str) -> Result<CtlInstance, CtlError> {
+    instance_from_value(parse_ok_body(line)?)
+}
+
+/// 解析 `restart` 的**一行**响应。失败分类口径与 [`parse_list_response`] 相同
+/// （`instance_not_found` / `restart_budget_exceeded` / `port_in_use` … 都按 `code`）。
+pub fn parse_restart_response(line: &str) -> Result<RestartOutcome, CtlError> {
+    let val = parse_ok_body(line)?;
+    let restarted = val
+        .get("restarted")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let notes = notes_from(&val);
+    let instance = instance_from_value(val)?;
+    Ok(RestartOutcome {
+        instance,
+        restarted,
+        notes,
+    })
+}
+
+/// 一个扁平对象 → [`CtlInstance`]；结构不符归 `Malformed`（不是传输故障）。
+fn instance_from_value(val: Value) -> Result<CtlInstance, CtlError> {
+    serde_json::from_value(val).map_err(|e| CtlError::malformed(format!("实例结构不符：{e}")))
+}
+
+/// 取 `notes` 数组里的字符串。
+///
+/// 缺省 / 非数组 / 非字符串项都跳过：契约说它恒为数组，但不该为一个值让整条成功响应
+/// 变成错误 —— 那些提示是附加信息，丢了比整条失败好。
+fn notes_from(val: &Value) -> Vec<String> {
+    val.get("notes")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// 轮询 `list` 时对**某一条实例**的判读：此刻能不能据此新增一条 lane。
 ///
 /// 这层判读刻意放在纯逻辑里：`add` 之后「什么时候算起来了」是多端共用的契约
@@ -537,372 +691,5 @@ fn reason_or(item: &CtlInstance, fallback: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// `disable` / `enable` 只发 `op` + `name`：Server 对这两个 op 的字段白名单就这两项
-    /// （多一个直接 `bad_request`），也不该夹带 `workspace` / `config`。
-    #[test]
-    fn set_enabled_request_carries_only_op_and_name() {
-        let off = CtlRequest::SetEnabled {
-            name: "proj-a".to_string(),
-            enabled: false,
-        }
-        .to_line();
-        let val: Value = serde_json::from_str(&off).expect("应是一行 JSON");
-        let obj = val.as_object().expect("应是对象");
-        assert_eq!(obj.len(), 2, "只能有 op / name：{off}");
-        assert_eq!(val["op"].as_str(), Some("disable"));
-        assert_eq!(val["name"].as_str(), Some("proj-a"));
-
-        let on = CtlRequest::SetEnabled {
-            name: "proj-a".to_string(),
-            enabled: true,
-        }
-        .to_line();
-        let val: Value = serde_json::from_str(&on).expect("应是一行 JSON");
-        assert_eq!(val["op"].as_str(), Some("enable"));
-    }
-
-    /// 幂等命中不是失败：`changed:false` 与 `note` 要能原样带回（UI 据此说「本来就是这样」）。
-    #[test]
-    fn toggle_response_reports_idempotent_hit() {
-        let out = parse_toggle_response(
-            r#"{"ok":true,"name":"a","enabled":false,"changed":false,"note":"声明中不存在该实例"}"#,
-        )
-        .expect("应成功");
-        assert_eq!(out.name, "a");
-        assert_eq!(out.enabled, Some(false));
-        assert!(!out.changed);
-        assert!(!out.cleared_down);
-        assert_eq!(out.note.as_deref(), Some("声明中不存在该实例"));
-        assert!(out.warning.is_none());
-    }
-
-    /// `enable` 的 `cleared_down` 与 `warning` 都要露出来：后者是「只做成一半」的唯一线索。
-    #[test]
-    fn toggle_response_keeps_cleared_down_and_warning() {
-        let out = parse_toggle_response(
-            r#"{"ok":true,"name":"a","enabled":true,"changed":true,"cleared_down":true,"warning":"清理 down 标记失败（supervisor_gone）"}"#,
-        )
-        .expect("应成功");
-        assert!(out.changed);
-        assert!(out.cleared_down);
-        assert_eq!(
-            out.warning.as_deref(),
-            Some("清理 down 标记失败（supervisor_gone）")
-        );
-    }
-
-    #[test]
-    fn toggle_response_classifies_errors_by_code() {
-        let err = parse_toggle_response(
-            r#"{"ok":false,"code":"bad_request","error":"`disable` 不接受字段 `workspace`"}"#,
-        )
-        .unwrap_err();
-        assert_eq!(err.kind, CtlErrorKind::BadRequest);
-        assert_eq!(err.code.as_deref(), Some("bad_request"));
-    }
-
-    #[test]
-    fn list_request_omits_the_default_flag() {
-        assert_eq!(
-            CtlRequest::List {
-                include_unmanaged: false
-            }
-            .to_line(),
-            r#"{"op":"list"}"#
-        );
-        assert_eq!(
-            CtlRequest::List {
-                include_unmanaged: true
-            }
-            .to_line(),
-            r#"{"include_unmanaged":true,"op":"list"}"#
-        );
-    }
-
-    /// `add` 的字段集必须与 Server 的白名单对齐：多一个键就会被 `bad_request` 拒。
-    #[test]
-    fn add_request_carries_only_the_allowed_fields() {
-        let line = CtlRequest::Add {
-            name: "proj-a".to_string(),
-            workspace: "/home/u/proj-a".to_string(),
-            profile: None,
-            port: None,
-            enabled: true,
-        }
-        .to_line();
-        assert_eq!(
-            line,
-            r#"{"name":"proj-a","op":"add","workspace":"/home/u/proj-a"}"#
-        );
-        // `enabled` 默认 true 时省略，false 时必须写出（否则语义丢失）。
-        let disabled = CtlRequest::Add {
-            name: "proj-a".to_string(),
-            workspace: "/w".to_string(),
-            profile: Some("heavy".to_string()),
-            port: Some(8721),
-            enabled: false,
-        }
-        .to_line();
-        assert!(disabled.contains(r#""enabled":false"#), "{disabled}");
-        assert!(disabled.contains(r#""profile":"heavy""#), "{disabled}");
-        assert!(disabled.contains(r#""port":8721"#), "{disabled}");
-        assert!(!disabled.contains("config"), "绝不夹带 config：{disabled}");
-    }
-
-    #[test]
-    fn remove_request_carries_op_and_name() {
-        assert_eq!(
-            CtlRequest::Remove {
-                name: "proj-a".to_string()
-            }
-            .to_line(),
-            r#"{"name":"proj-a","op":"remove"}"#
-        );
-    }
-
-    /// 可连性只认 `observed`，且只有 `ready` 为真 —— 这是本模块存在的首要理由。
-    #[test]
-    fn only_ready_is_connectable() {
-        assert!(CtlObserved::parse(Some("ready")).can_connect());
-        for other in ["starting", "stale", "stopped", "failed", "held", "???"] {
-            assert!(
-                !CtlObserved::parse(Some(other)).can_connect(),
-                "{other} 不该被判为可连"
-            );
-        }
-        assert!(!CtlObserved::parse(None).can_connect());
-        assert!(!CtlObserved::parse(Some("   ")).can_connect());
-    }
-
-    /// `stale`：记录说在跑、实际连不上。看 `state` 会误判成可连，看 `observed` 才拦得住。
-    #[test]
-    fn stale_record_is_not_connectable_even_when_state_looks_ready() {
-        let inst = CtlInstance {
-            name: "proj-a".to_string(),
-            state: Some("ready".to_string()),
-            observed: Some("stale".to_string()),
-            ..CtlInstance::default()
-        };
-        assert!(!inst.can_connect());
-        assert_eq!(inst.observed_state(), CtlObserved::Stale);
-    }
-
-    #[test]
-    fn unknown_observed_is_kept_verbatim() {
-        assert_eq!(
-            CtlObserved::parse(Some("draining")),
-            CtlObserved::Unknown("draining".to_string())
-        );
-    }
-
-    #[test]
-    fn list_response_parses_instances_and_tolerates_new_fields() {
-        let line = r#"{"ok":true,"instances":[
-            {"name":"proj-a","state":"running","observed":"ready",
-             "base_url":"http://127.0.0.1:8721","port":8721,"pid":4242,
-             "last_error":null,"workspace":"/home/u/proj-a","profile":null,
-             "enabled":true,"declared":true,"managed_by":null,"brand_new_field":1}
-        ]}"#;
-        let items = parse_list_response(line).expect("应能解析");
-        assert_eq!(items.len(), 1);
-        assert_eq!(items[0].name, "proj-a");
-        assert_eq!(items[0].base_url.as_deref(), Some("http://127.0.0.1:8721"));
-        assert_eq!(items[0].port, Some(8721));
-        assert!(items[0].can_connect());
-    }
-
-    #[test]
-    fn list_response_without_instances_is_empty() {
-        assert!(parse_list_response(r#"{"ok":true}"#).unwrap().is_empty());
-    }
-
-    #[test]
-    fn error_response_is_classified_by_code_not_by_text() {
-        let err = parse_list_response(
-            r#"{"ok":false,"code":"socket_in_use","error":"控制面已在使用：/run/u/c.sock"}"#,
-        )
-        .unwrap_err();
-        assert_eq!(err.kind, CtlErrorKind::SocketInUse);
-        assert_eq!(err.code.as_deref(), Some("socket_in_use"));
-        // 文案原样透传，但分类绝不依赖它。
-        assert!(err.message.contains("控制面已在使用"));
-    }
-
-    #[test]
-    fn unknown_code_does_not_fall_into_a_known_bucket() {
-        let err =
-            parse_list_response(r#"{"ok":false,"code":"brand_new","error":"x"}"#).unwrap_err();
-        assert_eq!(err.kind, CtlErrorKind::Other);
-        assert_eq!(err.code.as_deref(), Some("brand_new"));
-    }
-
-    /// 连 `code` 都没有的错误体：分类为 `Other`，不猜成某个已知原因。
-    #[test]
-    fn error_without_code_is_other() {
-        let err = parse_list_response(r#"{"ok":false,"error":"boom"}"#).unwrap_err();
-        assert_eq!(err.kind, CtlErrorKind::Other);
-        assert_eq!(err.code, None);
-        assert_eq!(err.message, "boom");
-    }
-
-    #[test]
-    fn non_json_response_is_malformed() {
-        let err = parse_list_response("not json at all").unwrap_err();
-        assert_eq!(err.kind, CtlErrorKind::Malformed);
-        assert_eq!(err.code, None);
-    }
-
-    #[test]
-    fn add_response_reports_created_and_note() {
-        let created =
-            parse_add_response(r#"{"ok":true,"name":"proj-a","created":true}"#).expect("应能解析");
-        assert_eq!(created.name, "proj-a");
-        assert!(created.created);
-        assert_eq!(created.note, None);
-
-        // 幂等命中：不是失败，但 note 要说清「没改动」。
-        let existing = parse_add_response(
-            r#"{"ok":true,"name":"proj-a","created":false,"note":"已存在，未改动"}"#,
-        )
-        .expect("应能解析");
-        assert!(!existing.created);
-        assert_eq!(existing.note.as_deref(), Some("已存在，未改动"));
-    }
-
-    #[test]
-    fn add_error_is_classified_by_code() {
-        let err = parse_add_response(
-            r#"{"ok":false,"code":"bad_workspace","error":"workspace 不存在或不是目录：/nope"}"#,
-        )
-        .unwrap_err();
-        assert_eq!(err.kind, CtlErrorKind::BadWorkspace);
-        assert_eq!(err.code.as_deref(), Some("bad_workspace"));
-    }
-
-    #[test]
-    fn add_response_without_ok_is_an_error_not_a_silent_success() {
-        // 缺 `ok` 一律按失败：把「没 ok」当成功会让 `/lane new` 报一个不存在的连接。
-        let err = parse_add_response(r#"{"name":"proj-a","created":true}"#).unwrap_err();
-        assert_eq!(err.kind, CtlErrorKind::Other);
-    }
-
-    fn ready_inst(name: &str, url: Option<&str>, last_error: Option<&str>) -> CtlInstance {
-        CtlInstance {
-            name: name.to_string(),
-            observed: Some("ready".to_string()),
-            base_url: url.map(str::to_string),
-            last_error: last_error.map(str::to_string),
-            ..CtlInstance::default()
-        }
-    }
-
-    #[test]
-    fn readiness_needs_ready_and_a_base_url() {
-        let items = vec![ready_inst("a", Some("http://127.0.0.1:8721/"), None)];
-        assert_eq!(
-            lane_readiness(&items, "a"),
-            LaneReadiness::Ready("http://127.0.0.1:8721/".to_string())
-        );
-        // 就绪但没 URL：不许按端口猜。
-        let no_url = vec![ready_inst("a", None, None)];
-        assert_eq!(lane_readiness(&no_url, "a"), LaneReadiness::Pending);
-        let blank_url = vec![ready_inst("a", Some("   "), None)];
-        assert_eq!(lane_readiness(&blank_url, "a"), LaneReadiness::Pending);
-    }
-
-    #[test]
-    fn readiness_treats_starting_as_pending_and_missing_as_missing() {
-        let starting = vec![CtlInstance {
-            name: "a".to_string(),
-            observed: Some("starting".to_string()),
-            ..CtlInstance::default()
-        }];
-        assert_eq!(lane_readiness(&starting, "a"), LaneReadiness::Pending);
-        assert_eq!(lane_readiness(&starting, "nope"), LaneReadiness::Missing);
-        assert_eq!(lane_readiness(&[], "a"), LaneReadiness::Missing);
-    }
-
-    /// `stopped` / `held` 不是中间态：继续轮询只会把结论拖成超时。
-    #[test]
-    fn readiness_fails_fast_on_terminal_states() {
-        for observed in ["failed", "stopped", "held"] {
-            let items = vec![CtlInstance {
-                name: "a".to_string(),
-                observed: Some(observed.to_string()),
-                ..CtlInstance::default()
-            }];
-            match lane_readiness(&items, "a") {
-                LaneReadiness::Failed(why) => assert!(!why.is_empty(), "{observed} 要给原因"),
-                other => panic!("{observed} 应判失败，实际 {other:?}"),
-            }
-        }
-    }
-
-    /// 失败原因优先 Server 的 `last_error`：那是唯一知道真正原因的地方。
-    #[test]
-    fn failure_prefers_server_last_error() {
-        let items = vec![CtlInstance {
-            name: "a".to_string(),
-            observed: Some("failed".to_string()),
-            last_error: Some("工作区不在白名单".to_string()),
-            ..CtlInstance::default()
-        }];
-        assert_eq!(
-            lane_readiness(&items, "a"),
-            LaneReadiness::Failed("工作区不在白名单".to_string())
-        );
-    }
-
-    /// 声明被 close 是**事实**：即便 `observed` 还写着 `starting`（Server 对「有声明、
-    /// 无状态记录」的回法）也要立刻判失败，并指出回到可用状态的那一步（issue #373）。
-    ///
-    /// `ready` 也在表里：`disable` 会停掉实例，两者同时成立说明状态记录是陈旧的，按
-    /// 「可连」处理会连到一个即将被停掉的实例。
-    #[test]
-    fn closed_declaration_fails_fast_whatever_observed_says() {
-        for observed in ["starting", "", "ready"] {
-            let items = vec![CtlInstance {
-                name: "a".to_string(),
-                observed: Some(observed.to_string()),
-                base_url: Some("http://127.0.0.1:8721/".to_string()),
-                enabled: Some(false),
-                ..CtlInstance::default()
-            }];
-            match lane_readiness(&items, "a") {
-                LaneReadiness::Failed(why) => {
-                    assert!(
-                        why.contains("enabled = false"),
-                        "observed={observed}: {why}"
-                    );
-                    assert!(why.contains("/lane open a"), "要给出下一步命令：{why}");
-                }
-                other => panic!("observed={observed} 且 enabled=false 应判失败，实际 {other:?}"),
-            }
-        }
-    }
-
-    /// `enabled` 缺失（旧版 ctl 不返回该字段）或为 `true` 时，判读与加这个短路之前逐字
-    /// 一致 —— 这是本次改动唯一的兼容性边界。
-    #[test]
-    fn absent_or_true_enabled_keeps_the_old_readiness() {
-        for enabled in [None, Some(true)] {
-            let starting = vec![CtlInstance {
-                name: "a".to_string(),
-                observed: Some("starting".to_string()),
-                enabled,
-                ..CtlInstance::default()
-            }];
-            assert_eq!(lane_readiness(&starting, "a"), LaneReadiness::Pending);
-
-            let mut ready = ready_inst("a", Some("http://127.0.0.1:8721/"), None);
-            ready.enabled = enabled;
-            assert_eq!(
-                lane_readiness(&[ready], "a"),
-                LaneReadiness::Ready("http://127.0.0.1:8721/".to_string())
-            );
-        }
-    }
-}
+#[path = "ctl_tests.rs"]
+mod tests;
