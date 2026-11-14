@@ -280,6 +280,22 @@ impl ConnectionSnapshot {
     }
 }
 
+/// 在途耗时短文本：`45s` / `2m05s` / `1h02m`。
+///
+/// 定宽优先于精确：60 秒后跳到 `m` 而不是继续累秒，否则 3 分钟就是四位数宽度，在左栏
+/// 那一行里会把连接名挤掉。
+///
+/// TUI 的 lane 行与 Desktop 的连接行共用这一份：各写一个 `match`，`2m05s` 与 `2m5s`
+/// 这种差别会先出现在一处、后出现在另一处，而两处显示的是同一条连接。
+#[must_use]
+pub fn busy_duration_text(secs: u64) -> String {
+    match secs {
+        0..=59 => format!("{secs}s"),
+        60..=3599 => format!("{}m{:02}s", secs / 60, secs % 60),
+        _ => format!("{}h{:02}m", secs / 3600, (secs % 3600) / 60),
+    }
+}
+
 /// 由「回合是否在跑」与「是否有审批在等」合成一条连接此刻的状态。
 ///
 /// 优先级是**等审批 > 运行中 > 空闲**。审批期间的回合确实还在跑，但「卡住等人」
@@ -403,6 +419,17 @@ fn truncate(mut key: String) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 与 TUI lane 行（`lane_tail`）同一条口径：`s` → `m` → `h`，不让秒数无限长。
+    #[test]
+    fn busy_duration_switches_units_to_stay_narrow() {
+        assert_eq!(busy_duration_text(0), "0s");
+        assert_eq!(busy_duration_text(59), "59s");
+        assert_eq!(busy_duration_text(60), "1m00s");
+        assert_eq!(busy_duration_text(3599), "59m59s");
+        assert_eq!(busy_duration_text(3600), "1h00m");
+        assert_eq!(busy_duration_text(7325), "2h02m");
+    }
 
     #[test]
     fn derives_from_the_authority_when_no_name_is_given() {
