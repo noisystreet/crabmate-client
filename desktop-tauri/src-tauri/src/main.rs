@@ -333,6 +333,7 @@ fn main() {
             desktop_connections::register_connection,
             desktop_connections::report_connection_status,
             desktop_connections::report_connection_unread,
+            desktop_connections::report_connection_metrics,
             desktop_connections::rename_connection,
             desktop_connections::focus_connection,
             desktop_connections::close_connection,
@@ -357,6 +358,10 @@ fn main() {
             app.manage(crabmate_connect::SuggestedServerUrl::default());
             app.manage(crabmate_connect::AllowedServeOrigin::default());
             app.manage(desktop_connections::ConnectionRegistry::default());
+
+            // 行尾读数的秒级推进（左栏「连接」区的在途耗时）。必须在 `manage` 之后：
+            // 线程第一次醒来时注册表得已经就位，否则它会当成「应用正在收尾」直接退。
+            desktop_connections::spawn_busy_ticker(app.handle().clone());
             // `connect_remote` 住在 crabmate-connect、注册表住在这里，依赖方向不允许反向引用，
             // 所以用闭包把「同一台 serve 是否已有窗口」这个查询注入过去。
             // 闭包持 `AppHandle` 再取 state：`ConnectionRegistry` 不是 `Clone`，

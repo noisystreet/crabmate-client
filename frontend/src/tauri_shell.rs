@@ -103,6 +103,15 @@ export function invokeTauriReportConnectionUnread(unread) {
   return tauriInvoke("report_connection_unread", { unread });
 }
 
+// 行尾读数：上下文用量短文本 + 在途开关。秒数由壳按 started_at 自己推进 ——
+// 这里只报「进入 / 离开在途」与「用量变了」，不要每秒发一次。
+export function invokeTauriReportConnectionMetrics(context, busy) {
+  return tauriInvoke("report_connection_metrics", {
+    context: context ?? null,
+    busy,
+  });
+}
+
 // 只开一个连接页窗口（连哪台 serve 由用户在新窗口里选）；不带基址。
 export function invokeTauriOpenConnectWindow(displayName) {
   return tauriInvoke("open_connect_window", {
@@ -226,6 +235,11 @@ extern "C" {
     fn invoke_tauri_report_connection_status(status: &str) -> js_sys::Promise;
     #[wasm_bindgen(js_name = invokeTauriReportConnectionUnread)]
     fn invoke_tauri_report_connection_unread(unread: bool) -> js_sys::Promise;
+    #[wasm_bindgen(js_name = invokeTauriReportConnectionMetrics)]
+    fn invoke_tauri_report_connection_metrics(
+        context: Option<String>,
+        busy: bool,
+    ) -> js_sys::Promise;
     #[wasm_bindgen(js_name = invokeTauriOpenConnectWindow)]
     fn invoke_tauri_open_connect_window(display_name: Option<String>) -> js_sys::Promise;
     #[wasm_bindgen(js_name = invokeTauriCtlListInstances)]
@@ -291,7 +305,7 @@ fn invoke_tauri_disconnect_remote() -> js_sys::Promise {
 /// `install_connections_feed` 独占调用，host 目标上给它们留 stub 只会变成 dead code
 /// （`-D warnings` 直接拒），所以这里干脆不定义。
 ///
-/// 但 `focus` / `rename` 与两个 `report_*` 必须留着：它们由**两个目标下都会编译**的代码调用
+/// 但 `focus` / `rename` 与三个 `report_*` 必须留着：它们由**两个目标下都会编译**的代码调用
 /// （`view!` 的点击处理、`app_shell_effects::connection_report` 的 `Effect`），
 /// 而那条 effect 在 host 上第一条判断就是 `tauri_shell_available()`，不会真的走到这里。
 #[cfg(not(target_arch = "wasm32"))]
@@ -302,6 +316,9 @@ pub fn tauri_report_connection_status(_: ConnectionStatus) {}
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn tauri_report_connection_unread(_: bool) {}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn tauri_report_connection_metrics(_: Option<String>, _: bool) {}
 
 /// 是否在 **桌面** Tauri WebView 内运行。
 /// Android 远程薄客户端虽可能注入 `__TAURI__`，但无本机选目录等桌面命令，须视为非桌面壳。
@@ -509,6 +526,24 @@ pub fn tauri_report_connection_unread(unread: bool) {
     }
     spawn_local(async move {
         let _ = tauri_invoke_void(invoke_tauri_report_connection_unread(unread)).await;
+    });
+}
+
+/// 上报本窗口的行尾读数（壳的 `report_connection_metrics`）。
+///
+/// fire-and-forget，与两个 `report_*` 同一个理由：这是一次显示层上报，失败只意味着左栏
+/// 行尾不更新，而调用它的是一条 `Effect`（没有能显示错误的位置）。
+///
+/// **不要每秒调它**：秒数由壳按 `started_at` 推进（`spawn_busy_ticker`），这里只在
+/// 「进入 / 离开在途」与「上下文用量变了」时各报一次 —— 每秒 IPC 会让每个窗口每秒多跑
+/// 一次序列化，而读数并不会更准。
+#[cfg(target_arch = "wasm32")]
+pub fn tauri_report_connection_metrics(context: Option<String>, busy: bool) {
+    if !tauri_shell_available() {
+        return;
+    }
+    spawn_local(async move {
+        let _ = tauri_invoke_void(invoke_tauri_report_connection_metrics(context, busy)).await;
     });
 }
 

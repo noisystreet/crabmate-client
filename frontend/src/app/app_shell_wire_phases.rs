@@ -380,12 +380,17 @@ fn make_refresh_workspace_for_shell(app: &AppSignals) -> RefreshWorkspaceFn {
 
 /// 阶段 5：把本窗口的连接状态 / 未读上报给桌面壳（左栏「连接」区的字形与行尾读数）。
 ///
-/// 放在最后：它只读 `turn_lifecycle` 与 `pending_approval`（阶段 1/4c 已装好写入方），
-/// 没有产物要交给别人；而**上报本身**由 `connections_registered` 把关 —— 壳登记
-/// 完成之前不发，所以早跑晚跑都不会丢第一帧。
+/// 放在最后：它只读阶段 1/4 已经装好的信号（回合生命周期、待审批、会话与 `/status`
+/// 用量），没有产物要交给别人；而**上报本身**由 `connections_registered` 把关 ——
+/// 壳登记完成之前不发，所以早跑晚跑都不会丢第一帧。
 fn wire_phase5_connection_report(app: &AppSignals) {
     wire_connection_status_report(ConnectionReportSignals {
         turn_lifecycle: app.stream.turn_lifecycle,
         pending_approval: app.approval.pending_approval,
+        // 行尾读数（issue #414）：上下文用量与状态栈同源，在途耗时只需一个 `busy` 开关。
+        chat: app.chat,
+        status: app.to_status_tasks(),
+        client_llm_storage_tick: app.llm_settings.client_llm_storage_tick,
+        selected_agent_role: app.llm_settings.selected_agent_role,
     });
 }
