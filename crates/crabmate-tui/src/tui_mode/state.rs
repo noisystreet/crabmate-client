@@ -55,6 +55,10 @@ mod cursor_edit;
 #[path = "state_session_filter.rs"]
 mod session_filter;
 
+// 截掉最后一轮（issue #422）：`/conv retry` / `/conv edit` 的本地半步，纯行算术。
+#[path = "state_truncate.rs"]
+mod truncate;
+
 pub use history_page::HistoryPage;
 
 /// `/` 补全菜单的会话内状态。

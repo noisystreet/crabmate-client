@@ -3,6 +3,8 @@
 //! **不**内嵌 Agent，**不** spawn `serve`。
 
 mod approval;
+// `POST /chat/branch`（issue #422）：回合重试 / 再生的服务端截断入口。
+mod branch;
 pub(crate) mod chat_classify;
 mod chat_dispatch;
 mod chat_stream;
