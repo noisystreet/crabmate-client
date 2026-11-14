@@ -519,8 +519,10 @@ fn source_body(
     ensure_hl(ed);
     let start = ed.clamped_scroll(height);
     let gutter = ed.lines.len().to_string().len().max(3);
-    // 正文可用宽度：行号栏（`{:>gutter$}` 加一个分隔空格）之后就是 `│ `。
-    let budget = width.saturating_sub(gutter + 2);
+    // 正文可用宽度：行号栏 `{:>gutter$}` + 一个分隔空格 + `│ ` 共 `gutter + 3` 列。
+    // 这里曾是 `gutter + 2`（少算那个空格），于是「恰好比可用宽多一个字」的行会多占
+    // 一列，被 `Paragraph` 从右边缘裁掉 —— 表现为最后一个字看不见。
+    let budget = width.saturating_sub(gutter + 3);
     // 语言与每行起始态都出自同一份缓存；`None` = 这个扩展名不上色。
     let lang = ed.hl.as_ref().and_then(|h| h.lang);
     for (i, text) in ed.lines.iter().enumerate().skip(start).take(rows) {
@@ -582,21 +584,31 @@ fn ensure_hl(ed: &mut EditorState) {
 ///
 /// 连续同款的段会合并：一行切成几百个单字符 span 会让 ratatui 每帧多做几百次比对，也让
 /// 「这一行几个 span」这类断言失去意义。
+///
+/// `avail` 是**正文**可用列数（行号栏已由调用方扣掉），不是整行宽。
+///
+/// 宽度一律**逐字符累加**。混用 `UnicodeWidthStr::width`（按连字簇算）与逐字符会得出两个
+/// 数：ZWJ 连字 emoji（`👨‍👩‍👧`）上 `width()` 算 1 簇，逐字符却算出 6 列，于是「判定不裁」
+/// 与「实际超宽」同时成立，右边缘又被裁掉 —— 宁可提前补 `…`，也不要两种口径并存。
 fn source_line_spans(
     text: &str,
     spans: &[HlSpan],
-    width: usize,
+    avail: usize,
     matched: bool,
     anchor: bool,
     pal: &Palette,
 ) -> Vec<Span<'static>> {
-    let total = text.width();
-    let clipped = total > width;
-    // 裁掉时给 `…` 留一列：与 [`clip`] 同一口径，避免超宽行比正文区多出一列。
-    let budget = if clipped {
-        width.saturating_sub(1)
+    let total: usize = text
+        .chars()
+        .map(|c| UnicodeWidthChar::width(c).unwrap_or(0))
+        .sum();
+    let clipped = total > avail;
+    // 裁掉时给 `…` 留一列；`avail == 0`（正文一列都没有）时什么都不放 ——
+    // 否则会凭空多出 1 列，而那一列必然被裁掉，看起来像「右边被啃了一口」。
+    let (keep, ellipsis) = if clipped {
+        (avail.saturating_sub(1), avail > 0)
     } else {
-        total
+        (total, false)
     };
     let mut out: Vec<Span<'static>> = Vec::new();
     let mut cur: Option<(String, Style)> = None;
@@ -604,7 +616,7 @@ fn source_line_spans(
     let mut it = spans.iter().peekable();
     for (idx, ch) in text.chars().enumerate() {
         let w = UnicodeWidthChar::width(ch).unwrap_or(0);
-        if used + w > budget {
+        if used + w > keep {
             break;
         }
         // span 已按起点升序（词法器逐段推进产出），游标单向走到底即可。
@@ -625,7 +637,7 @@ fn source_line_spans(
         );
         used += w;
     }
-    if clipped {
+    if ellipsis {
         let style = md::highlight_override(Style::default().fg(pal.fg), matched, anchor, pal);
         push_merged(&mut out, &mut cur, '…', style);
     }
