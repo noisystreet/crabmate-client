@@ -59,17 +59,17 @@ fn one_lane_takes_one_row_under_the_title() {
     assert!(row_text(&rows[1]).contains("local"), "名字要写在这一行里");
 }
 
-/// 当前 lane 用选中底色 + 竖条标记；其它 lane 用一档抬升底色，每条各占一行。
+/// 当前 lane 用选中底色；其它 lane 用一档抬升底色，每条各占一行。不画竖条。
 #[test]
-fn active_lane_is_marked_and_tinted() {
+fn active_lane_is_tinted_without_a_bar() {
     let rows = rows_of(&lanes(&["a", "b"]), 20, 20);
     // 一条一行：a = rows[1]，b = rows[2]。
     let a = &rows[1];
     let b = &rows[2];
-    assert!(a.spans[0].content.starts_with('▎'));
     assert_eq!(a.spans[0].style.bg, Some(pal().selection_bg));
-    assert!(!b.spans[0].content.starts_with('▎'));
     assert_eq!(b.spans[0].style.bg, Some(pal().overlay_bg));
+    assert!(!row_text(a).contains('▎'), "不再画竖条：{:?}", row_text(a));
+    assert!(!row_text(b).contains('▎'));
 }
 
 /// 待就绪行排在真连接之后，各占一行；失败那行带 `✗` 与原因原文。
@@ -107,8 +107,8 @@ fn pending_rows_follow_the_connections() {
         "失败原因要露出来：{texts:?}"
     );
     assert!(
-        !texts[2].contains('▎'),
-        "待就绪行没有聚焦标记（它不在 lanes 里）：{texts:?}"
+        texts[2].trim_start().starts_with('◌'),
+        "待就绪行首列就是它自己的符号（它不在 lanes 里）：{texts:?}"
     );
     // 标题行不铺底色（不补宽），所以只查各行条。
     for row in &texts[1..] {
@@ -205,11 +205,11 @@ fn lane_row_carries_the_label_only() {
     assert!(!a.contains(" · "), "不该留分隔符：{a}");
 }
 
-/// 一行只写「标记 + 符号 + 名字」，没有尾巴：窄条里多一个字都是挤出来的。
+/// 一行只写「符号 + 名字」，没有尾巴：窄条里多一个字都是挤出来的。
 #[test]
 fn row_text_is_mark_plus_label() {
     let rows = rows_of(&lanes(&["local"]), 20, 20);
-    assert_eq!(row_text(&rows[1]).trim(), "▎· local");
+    assert_eq!(row_text(&rows[1]).trim(), "· local");
 }
 
 /// 状态符号必须各不相同、且**都是单列**：双列符号会把整行撑破。
@@ -247,11 +247,11 @@ fn waiting_approval_is_marked_and_tinted() {
     let mut entries = lanes(&["lane-a", "lane-b"]);
     entries[1].status = LaneStatus::WaitingApproval;
     let rows = rows_of(&entries, 30, 20);
-    // 前两列拆成两个 span（`▎`/空格 + 状态符号），符号因此落在第二格。
-    let mark = rows[2].spans[1].content.as_ref();
+    // 首列就是状态符号（`▎` 那一列已去掉）。
+    let mark = rows[2].spans[0].content.as_ref();
     assert!(mark.contains('▲'), "等审批要有状态符号：{mark}");
     assert_eq!(
-        rows[2].spans[1].style.fg,
+        rows[2].spans[0].style.fg,
         Some(pal().err),
         "非当前 lane 的等审批走告警色"
     );
@@ -271,9 +271,9 @@ fn tally_counts_entries_and_waiting_lanes() {
     assert_eq!(LaneTally::from_entries(&entries[..1]).pending_approvals, 0);
 }
 
-/// 当前 lane 的 `▎` 在任何状态下都要保留：否则「哪条是我正在看的」就没了。
+/// 当前 lane 在任何状态下都铺选中底色：否则「哪条是我正在看的」就没了。
 #[test]
-fn active_lane_keeps_its_cursor_mark_in_every_status() {
+fn active_lane_keeps_its_tint_in_every_status() {
     for status in [
         LaneStatus::Idle,
         LaneStatus::Running,
@@ -282,8 +282,9 @@ fn active_lane_keeps_its_cursor_mark_in_every_status() {
         let mut entries = lanes(&["lane-a"]);
         entries[0].status = status;
         let rows = rows_of(&entries, 30, 20);
-        assert!(
-            rows[1].spans[0].content.starts_with('▎'),
+        assert_eq!(
+            rows[1].spans[0].style.bg,
+            Some(pal().selection_bg),
             "{status:?} 时仍要标出当前 lane"
         );
     }
@@ -342,23 +343,17 @@ fn running_lane_breathes_without_changing_the_glyph() {
         30,
         "呼吸不改行宽：{line}"
     );
-    // 竖条（`▎`）与符号（`●`）各成一列：呼吸只落在符号上。
-    assert_eq!(rows[1].spans[0].content.as_ref(), "▎");
-    assert_eq!(rows[1].spans[1].content.as_ref(), "●");
+    // 首列就是状态符号（`▎` 那一列已去掉）：呼吸只落在符号上。
+    assert_eq!(rows[1].spans[0].content.as_ref(), "●");
     assert_eq!(
-        rows[1].spans[1].style.fg,
+        rows[1].spans[0].style.fg,
         Some(pulse::color_at(pal().accent, pulse::STEPS - 1)),
         "呼吸只把状态符号的前景压暗"
     );
     assert_ne!(
-        rows[1].spans[1].style.fg,
-        Some(pal().accent),
-        "最暗档不该等于原色，否则呼吸看不出来"
-    );
-    assert_eq!(
         rows[1].spans[0].style.fg,
         Some(pal().accent),
-        "左栏竖条是「我在哪条 lane」的静态标记，不跟着呼吸"
+        "最暗档不该等于原色，否则呼吸看不出来"
     );
 }
 

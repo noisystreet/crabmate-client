@@ -113,36 +113,34 @@ fn row_glyph(row: &WsRow, icons: bool) -> &'static str {
     ws_file_kind::icon(ws_file_kind::file_kind(&row.name, false)).unwrap_or("  ")
 }
 
-/// 该行在给定内宽下是否画不全。
+/// 该行在给定内宽下是否画不全（名称被中段省略）。
 ///
-/// 高亮行左缘多一个 `▎`（`push_sidebar_line` 按 `width - 1` 再截一次），所以
-/// 「名称本身没超」也可能被那一列挤掉——两种都算画不全，提示行才需要补全名。
+/// 选中不再占用额外列，所以「名称本身是否被省略」就是唯一判据 —— 曾经这里还要为
+/// 高亮行的 `▎` 多扣一列，于是「名称明明放得下」也会被判成画不全。
 fn ws_row_clipped(row: &WsRow, width: usize) -> bool {
-    let (text, name_clipped) = ws_row_text(row, width, ws_file_kind::icons_enabled());
-    name_clipped || UnicodeWidthStr::width(text.as_str()) > width.saturating_sub(1)
+    ws_row_text(row, width, ws_file_kind::icons_enabled()).1
 }
 
-/// 追加一条侧栏行；`highlight` 时左缘加 `▎` 竖条 + 选中底色。
+/// 追加一条侧栏行。
 ///
-/// 竖条占 1 列，故高亮行按 `width - 1` 再截断一次：调用方按 `width` 截断过，直接拼上去
-/// 会让末列被 `Paragraph` 裁掉（与 `fae763b` 的「预算必须恒等于绘制区宽度」同一类问题）。
+/// 选中只换**样式**（[`Palette::selection`]：底色，无色模式退回反色），不画左缘竖条：
+/// 竖条要占一列，那一列会让文字在选中 / 未选中之间整体横移一格（每移一次光标视线就跳
+/// 一下），还得从这一行的宽度预算里再扣一列 —— 而这一栏每行都与鼠标命中共用同一份预算。
+///
+/// `text` 由调用方按 `width` 截断（[`ws_row_text`] / [`truncate_display`]），这里不再重复截。
 fn push_sidebar_line(
     rows: &mut Vec<Line<'static>>,
     text: String,
     fg: Color,
     highlight: bool,
     pal: &Palette,
-    width: usize,
 ) {
-    if !highlight {
-        rows.push(Line::from(Span::styled(text, Style::new().fg(fg))));
-        return;
-    }
-    let body = truncate_display(&text, width.saturating_sub(1));
-    rows.push(Line::from(vec![
-        Span::styled("▎", Style::new().fg(pal.accent)),
-        Span::styled(body, pal.selection(fg)),
-    ]));
+    let style = if highlight {
+        pal.selection(fg)
+    } else {
+        Style::new().fg(fg)
+    };
+    rows.push(Line::from(Span::styled(text, style)));
 }
 
 /// 工作区侧栏内容行：首行标题，其后为扁平树（加载中/错误/空目录占位）。
@@ -159,7 +157,7 @@ fn workspace_sidebar_rows(st: &UiState, width: usize) -> Vec<Line<'static>> {
             ),
             None => (truncate_display("（加载中…）", width), pal.muted),
         };
-        push_sidebar_line(&mut rows, text, fg, highlight_first, pal, width);
+        push_sidebar_line(&mut rows, text, fg, highlight_first, pal);
         return rows;
     }
     if st.ws_rows.is_empty() {
@@ -169,7 +167,6 @@ fn workspace_sidebar_rows(st: &UiState, width: usize) -> Vec<Line<'static>> {
             pal.muted,
             highlight_first,
             pal,
-            width,
         );
         return rows;
     }
@@ -192,7 +189,6 @@ fn workspace_sidebar_rows(st: &UiState, width: usize) -> Vec<Line<'static>> {
             fg,
             highlight && i == st.ws_cursor,
             pal,
-            width,
         );
     }
     rows
@@ -344,7 +340,6 @@ fn workspace_pick_rows(st: &UiState, width: usize) -> Vec<Line<'static>> {
             pal.muted,
             highlight_first,
             pal,
-            width,
         );
     } else if let Some(e) = pick.error.as_deref() {
         push_sidebar_line(
@@ -353,7 +348,6 @@ fn workspace_pick_rows(st: &UiState, width: usize) -> Vec<Line<'static>> {
             pal.err,
             highlight_first,
             pal,
-            width,
         );
     } else if !pick.enabled {
         push_sidebar_line(
@@ -362,7 +356,6 @@ fn workspace_pick_rows(st: &UiState, width: usize) -> Vec<Line<'static>> {
             pal.muted,
             highlight_first,
             pal,
-            width,
         );
     } else if pick.projects.is_empty() {
         push_sidebar_line(
@@ -371,7 +364,6 @@ fn workspace_pick_rows(st: &UiState, width: usize) -> Vec<Line<'static>> {
             pal.muted,
             highlight_first,
             pal,
-            width,
         );
     } else {
         for (i, name) in pick.projects.iter().enumerate() {
@@ -381,7 +373,6 @@ fn workspace_pick_rows(st: &UiState, width: usize) -> Vec<Line<'static>> {
                 pal.fg,
                 st.focus == Focus::Workspace && i == st.ws_cursor,
                 pal,
-                width,
             );
         }
     }
@@ -447,7 +438,7 @@ fn hint_line(text: &'static str, pal: &Palette) -> Line<'static> {
 /// 工作区栏的提示行：光标行被截断时改成「完整相对路径」，否则照旧给键位。
 ///
 /// 终端没有 hover/tooltip 这类第二展示位，长文件名一旦被省略就再也看不到全名；
-/// 而提示行比行内多出缩进与字形两段预算（缩进 2 列/层 + `▸ ` 2 列 + 高亮竖条 1 列），
+/// 而提示行比行内多出缩进与字形两段预算（缩进 2 列/层 + `▸ ` 2 列），
 /// 是这一列里唯一还能多放十几个字符的地方。键位本身仍可由 `/help` 与空会话首屏
 /// 提示获得，所以这里优先让人认清「当前选的是哪个文件」。
 fn workspace_hint_line(st: &UiState, width: usize) -> Line<'static> {
@@ -538,14 +529,15 @@ mod tests {
         assert!(rows[1].to_string().contains("▸ src"), "折叠目录带 ▸");
         assert!(rows[2].to_string().contains("lib.rs"), "缩进子行");
         assert!(!rows[2].to_string().contains("▸"));
-        // 光标行（README.md，cursor=2 → 行 3）：左缘竖条 + 选中底色（不再是反色）
-        assert_eq!(rows[3].spans[0].content, "▎", "选中行左缘竖条");
+        // 光标行（README.md，cursor=2 → 行 3）：只有选中底色，不画左缘竖条。
+        assert_eq!(rows[3].spans.len(), 1, "选中行不再拆出竖条 span");
+        assert!(!rows[3].spans[0].content.contains('▎'), "不画竖条");
         assert_eq!(
-            rows[3].spans[1].style.bg,
+            rows[3].spans[0].style.bg,
             Some(st.palette.selection_bg),
             "选中行应为 selection_bg 底色"
         );
-        assert_eq!(rows[1].spans.len(), 1, "未选中行不带竖条");
+        assert_eq!(rows[1].spans.len(), 1, "未选中行同样只有一个 span");
     }
 
     #[test]
@@ -568,7 +560,11 @@ mod tests {
     fn workspace_row_highlight_requires_workspace_focus() {
         let st = ready_ws_state(); // focus 默认 Input
         let rows = workspace_sidebar_rows(&st, 60);
-        assert_eq!(rows[3].spans.len(), 1, "非 Workspace 焦点不加竖条");
+        assert_ne!(
+            rows[3].spans[0].style.bg,
+            Some(st.palette.selection_bg),
+            "焦点不在本栏就不铺选中底色"
+        );
     }
 
     #[test]
@@ -578,7 +574,7 @@ mod tests {
         st.focus = Focus::Workspace;
         let rows = workspace_sidebar_rows(&st, 60);
         assert!(
-            rows[3].spans[1]
+            rows[3].spans[0]
                 .style
                 .add_modifier
                 .contains(Modifier::REVERSED),
@@ -767,10 +763,11 @@ mod tests {
         });
         let rows = workspace_pick_rows(&st, 60);
         assert_eq!(rows.len(), 3);
-        assert_eq!(rows[1].spans.len(), 1, "非光标行不带竖条");
-        assert_eq!(rows[2].spans[0].content, "▎", "光标行带竖条");
+        assert_eq!(rows[1].spans.len(), 1, "非光标行只有一个 span");
+        assert_eq!(rows[2].spans.len(), 1, "光标行同样只有一个 span");
+        assert!(!rows[2].spans[0].content.contains('▎'), "不画竖条");
         assert_eq!(
-            rows[2].spans[1].style.bg,
+            rows[2].spans[0].style.bg,
             Some(st.palette.selection_bg),
             "光标行应为 selection_bg 底色"
         );
@@ -886,7 +883,7 @@ mod tests {
         st.ws_rows[2].indent = 3;
         let (_, _, hint) = workspace_content(&st, SIDEBAR_WIDTH as usize - 2);
         let hint = hint.expect("聚焦要提示").to_string();
-        // 提示行比行内多出缩进 + 字形 + 高亮竖条，所以放下的是「路径」而不是裸文件名；
+        // 提示行比行内多出缩进 + 字形，所以放下的是「路径」而不是裸文件名；
         // 仍超过列宽时继续省略，但首尾都给出来（这里放得下 `src/deep/` 前缀）。
         assert!(hint.starts_with("src/deep/"), "提示行给出相对路径：{hint}");
         assert!(hint.ends_with("module_name.rs"), "{hint}");

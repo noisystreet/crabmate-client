@@ -475,30 +475,31 @@ fn sidebar_rows_untitled_and_truncate() {
     assert!(rows[1].to_string().contains("(untitled)") || rows[1].to_string().contains("…"));
 }
 
-/// 左会话栏选中态：竖条 + 选中底色；竖条颜色随焦点变，非聚焦时补 BOLD。
+/// 左会话栏选中态：只有底色（无色模式退回反色），不画左缘竖条。
 #[test]
-fn sidebar_selected_row_gets_bar_and_selection_bg() {
+fn sidebar_selected_row_gets_selection_bg_without_a_bar() {
     let mut st = UiState::new();
     st.set_palette(Palette::default());
     st.replace_sessions(vec![row("a", "Alpha", Some("c1")), row("b", "Beta", None)]);
     st.selected = 1;
     let width = 20;
     let rows = sidebar_rows(&st, width);
-    // 焦点在输入框：竖条退到 muted，但仍在；底色照旧。
-    assert_eq!(rows[2].spans[0].content, "▎", "选中行左缘应有竖条");
-    assert_eq!(rows[2].spans[0].style.fg, Some(st.palette.muted));
-    assert_eq!(rows[2].spans[1].style.bg, Some(st.palette.selection_bg));
+    // 焦点在输入框：底色更淡，但补 BOLD 仍能扫到。
+    assert_eq!(rows[2].spans.len(), 1, "选中行不再拆出竖条 span");
+    assert!(!rows[2].spans[0].content.contains('▎'), "不画竖条");
+    assert_eq!(rows[2].spans[0].style.bg, Some(st.palette.selection_bg));
     assert!(
-        rows[2].spans[1].style.add_modifier.contains(Modifier::BOLD),
+        rows[2].spans[0].style.add_modifier.contains(Modifier::BOLD),
         "非聚焦选中行补 BOLD，避免底色变淡后看不出当前会话"
     );
-    assert_eq!(rows[1].spans.len(), 1, "未选中行不带竖条");
-    // 焦点移到左栏：竖条改 accent。
+    assert_eq!(rows[1].spans.len(), 1, "未选中行同样只有一个 span");
+    // 焦点移到左栏：底色照旧，BOLD 去掉。
     st.focus = Focus::Sidebar;
     let rows = sidebar_rows(&st, width);
-    assert_eq!(rows[2].spans[0].style.fg, Some(st.palette.accent));
-    // 竖条占 1 列，故竖条 + 文本不得超过列宽预算。
-    let used = 1 + UnicodeWidthStr::width(rows[2].spans[1].content.as_ref());
+    assert_eq!(rows[2].spans[0].style.bg, Some(st.palette.selection_bg));
+    assert!(!rows[2].spans[0].style.add_modifier.contains(Modifier::BOLD));
+    // 选中行文本吃满整份宽度（不再为竖条扣一列）。
+    let used = UnicodeWidthStr::width(rows[2].spans[0].content.as_ref());
     assert!(used <= width, "选中行超宽：{used} > {width}");
 }
 

@@ -416,37 +416,29 @@ pub(super) fn sidebar_rows(st: &UiState, width: usize) -> Vec<Line<'static>> {
             row.title.trim()
         };
         let selected = st.selected == i;
-        // 竖条占 1 列：选中行的文本预算要减 1，否则末列会被 `Paragraph` 直接裁掉。
-        let budget = width.saturating_sub(usize::from(selected));
-        let text = truncate_display(&format!("{mark} {title}"), budget);
+        // 选中只换底色、不占额外列：文本预算就是整份 `width`（不再为竖条扣一列）。
+        let text = truncate_display(&format!("{mark} {title}"), width);
         rows.push(selected_row(st, text, selected));
     }
     rows
 }
 
-/// 选中行：左缘 `▎` 竖条（聚焦本栏时 `accent`，否则 `muted`）+ 选中底色。
+/// 选中行：只换**底色**（无色模式降级为反色），焦点不在本栏时再补 `BOLD`。
+///
+/// 不画左缘竖条：竖条要占一列，那一列会让文字在选中 / 未选中之间整体横移一格，还得从
+/// 行宽预算里扣一列（每行都与鼠标命中共用同一份预算）。「哪条被选中」由底色回答；
+/// 焦点是否在本栏靠 `BOLD` —— 底色在失焦时本来就淡一档。
 ///
 /// 未选中行保持裸文本（不设前景色，跟随终端默认），避免整列被 palette 接管。
-/// 底色在无色模式下降级为反色（见 [`Palette::selection`]）。
 fn selected_row(st: &UiState, text: String, selected: bool) -> Line<'static> {
     if !selected {
         return Line::from(Span::styled(text, Style::new()));
     }
-    let focused = st.focus == Focus::Sidebar;
-    let bar_fg = if focused {
-        st.palette.accent
-    } else {
-        st.palette.muted
-    };
-    // 焦点不在本栏时底色本来就更淡，再补 BOLD 让「当前是哪个会话」仍能一眼扫到。
     let mut body = st.palette.selection(st.palette.fg);
-    if !focused {
+    if st.focus != Focus::Sidebar {
         body = body.add_modifier(Modifier::BOLD);
     }
-    Line::from(vec![
-        Span::styled("▎", Style::new().fg(bar_fg)),
-        Span::styled(text, body),
-    ])
+    Line::from(Span::styled(text, body))
 }
 
 /// 给一块区域整体铺背景色（先于文字绘制，杜绝段落内容不足时的底色缺口）。

@@ -194,9 +194,12 @@ fn lane_title(tally: LaneTally, shown: usize) -> String {
 /// 整行补空格到 `width` —— 只给文字上底色的话，条会缩成「文字那么宽」，看起来仍是
 /// 一行高亮文字，而不是列表里的一行。
 ///
-/// 头两列是「当前 lane 标记 + 状态符号」：`▎` 指明聚焦，符号（`·` / `●` / `▲` / `×`）
-/// 说明这条 lane 在做什么。两列都要 —— 后台 lane 在等审批时屏幕上看不到浮层，
-/// 「切过去」与「它卡住了」全靠这一列（见 issue #337）。
+/// 首列是状态符号（`·` / `●` / `▲` / `×`）：这一列回答「这条 lane 在做什么」。
+/// 后台 lane 在等审批时屏幕上看不到浮层，「切过去」与「它卡住了」全靠它（见 issue #337）。
+///
+/// 「哪条是我正在看的」不靠标记列，靠**整行底色**（[`row_style`]：当前 lane 用 `selection`，
+/// 其它用抬升一档的 `overlay_bg`）。竖条要额外占一列，且切 lane 时会让文字整体横移一格；
+/// 底色本来就在，不必再用一列说同一件事。
 ///
 /// 生成中**不换字形**：`●` 只做亮度呼吸（见 [`pulse`]）。行宽因此恒定，也不必为
 /// 「在动」多留一列；后台 lane 在不在动，仍然不必切过去才看得见。
@@ -205,17 +208,12 @@ fn lane_title(tally: LaneTally, shown: usize) -> String {
 /// （工作区在右栏目录树的标题里，`/lane` 也列出全部）。
 fn lane_row(entry: &LaneEntry, width: usize, palette: &Palette) -> Line<'static> {
     let base = row_style(entry, palette);
-    let cursor = if entry.active { "▎" } else { " " };
-    let mark = entry.status.mark();
-    // 只有相位存在时才换色：`pulse` 由 `lane_entries` 决定（在跑 + 没关动效）。
-    // 换色只染**状态符号**：`▎` 是「当前聚焦」的静态标记，让它跟着亮暗会读成整行在跳，
-    // 而那一列本来也不表示「在动」（它只回答「我在哪条 lane」）。
     let mark_style = entry
         .pulse
         .map_or(base, |step| base.fg(pulse::color_at(palette.accent, step)));
-    // 「标记 + 符号」恒 2 列（两者都被测试钉死单列）；宽度不足时先截它自己，
-    // 免得余下那段算出负预算。
-    let head = truncate_display(&format!("{cursor}{mark}"), width);
+    // 首列就是状态符号本身（单列，由 `status_marks_are_distinct_and_single_column` 钉死）；
+    // 宽度不足时先截它，免得余下那段算出负预算。
+    let head = truncate_display(entry.status.mark(), width);
     let head_w = UnicodeWidthStr::width(head.as_str());
     let rest_w = width.saturating_sub(head_w);
     // 尾部读数最多占半行：这一行首先是「哪条 lane」，其次才是读数。
@@ -232,14 +230,10 @@ fn lane_row(entry: &LaneEntry, width: usize, palette: &Palette) -> Line<'static>
         rest.push_str(&tail);
     }
     let rest = pad_display(&truncate_display(&rest, rest_w), rest_w);
-    // 三段 span：`▎`（静态）+ 状态符号（呼吸）+ 余下整行（底色条）。
-    // 拆开是为了让呼吸只落在符号那一列 —— 见上面 `mark_style` 的注释。
-    let mut head_chars = head.chars();
-    let cursor_cell = head_chars.next().map(String::from).unwrap_or_default();
-    let mark_cell: String = head_chars.collect();
+    // 两段 span：状态符号（呼吸）+ 余下整行（底色条）。拆开是为了让呼吸只落在符号那一列
+    // —— 见上面 `mark_style` 的注释。`▎` 那一列已去掉，符号因此落到首列。
     Line::from(vec![
-        Span::styled(cursor_cell, base),
-        Span::styled(mark_cell, mark_style),
+        Span::styled(head, mark_style),
         Span::styled(rest, base),
     ])
 }
@@ -247,8 +241,8 @@ fn lane_row(entry: &LaneEntry, width: usize, palette: &Palette) -> Line<'static>
 /// 一条待就绪 lane 的一行：`◌ name`（启动中 / 超时）或 `✗ name`（起不来）。
 ///
 /// 与 [`lane_row`] 一样整行补空格到 `width` —— 只给文字上底色的话，条会缩成「文字那么
-/// 宽」，看起来像一行普通文字而不是列表项。但它**没有** `▎` 与读数：这条还不在
-/// `lanes` 里，既不能聚焦，也没有上下文 / 耗时 / 未读点。
+/// 宽」，看起来像一行普通文字而不是列表项。它**没有**读数：这条还不在 `lanes` 里，
+/// 既没有上下文 / 耗时 / 未读点，也不能聚焦。
 ///
 /// 失败用错误色：那是一条需要用户动手的信号。启动中 / 超时用淡色 —— 它自己会变，
 /// 不该抢真连接的注意力。
