@@ -37,6 +37,13 @@ pub struct ConversationMessagesResponse {
     pub revision: u64,
     #[serde(default)]
     pub messages: Vec<ConversationMessage>,
+    /// 该会话**已归档**（被上下文压缩移出 canonical）的原文；服务端只在本端显式请求时给。
+    ///
+    /// 回放不用它（归档内容不进 transcript），但算「会话级用户序号」时必须知道有没有：
+    /// 有归档时客户端数不到那些用户消息，序号会偏小 —— 见
+    /// [`crate::chat_branch::user_ordinal_of_last_turn`]，那里据此**拒绝**而不是猜一个序号。
+    #[serde(default)]
+    pub archive: Vec<ConversationMessage>,
     /// 过滤后可见消息总数。
     #[serde(default)]
     pub total_count: u32,
