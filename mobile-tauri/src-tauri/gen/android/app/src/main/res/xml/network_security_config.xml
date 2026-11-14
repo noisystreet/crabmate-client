@@ -3,6 +3,14 @@
   WebView 仍需访问局域网明文 serve（RFC1918 无法用 domain 列表表达），故 base 允许 cleartext。
   连接层另有策略（crabmate-connect）：公网 http 主机在 connect_remote 被拒绝，须 HTTPS。
   debug 构建同样允许明文，便于模拟器 / 本机调试。
+
+  **与 rustls-platform-verifier 的 AAR 的关系（#488）**：0.2.0 起的 AAR 自带清单同样声明
+  `android:networkSecurityConfig="@xml/network_security_config"`，并自带一份**同名**资源，内容是
+  只放行各家 CRL 分发域名的 allowlist（CRL 常见走明文 HTTP）。同名资源合并时以本应用为准，
+  所以**生效的是这一份**、上游那份 allowlist 在本应用里不落地。
+  当前 base-config 全局允许 cleartext，CRL 的明文拉取因此仍然可行；但若日后把 base 收紧成只放行
+  局域网域，CRL 吊销检查会**静默失效**（上游 allowlist 不会兜住），收紧时须同时把这些 CRL 域名
+  补进 domain-config。清单见上游 `tests/codegen.rs` 生成的 `network_security_config.xml`。
 -->
 <network-security-config>
     <base-config cleartextTrafficPermitted="true" />

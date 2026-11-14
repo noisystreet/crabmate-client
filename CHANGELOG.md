@@ -19,7 +19,11 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Changed
 
+- **Android TLS: `rustls-platform-verifier` 0.7.1, together with the Gradle migration it requires.** 0.7.1 is the release that lets Android fetch CRL revocation data (as CAs drop OCSP) and fixes an infinite loop when a system trust anchor has been disabled — but it also stops shipping the pre-built AAR inside the crate, so the old `cargo metadata` + crate-local Maven repo trick can no longer work. The AAR now comes from upstream's GitHub `maven-archive` repository under the new `org.rustls` groupId, with the dependency deliberately unversioned and the version pulled from `Cargo.lock` by a Gradle `ValueSource` so the Kotlin component cannot drift from the Rust one. Cost: the first Android build needs network access to GitHub (Gradle caches it afterwards). No protocol change.
+
 ### Fixed
+
+- **The Android build now actually compiles.** No CI job ever ran `tauri android build`, so `crabmate-connect`'s `focus_existing_window` could call `WebviewWindow::unminimize` — a desktop-only method — and nobody noticed: the Android target failed with `no method named unminimize found`. It now sits behind a `target_os` guard (this crate has no `build.rs`, so tauri's `desktop` cfg alias is unavailable — the same `target_os` style `connect_home.rs` already uses). Found while producing the real build evidence the 0.7.1 migration requires.
 
 - **The Rust toolchain is pinned, so pre-commit and CI run the same clippy.** CI installed a floating `stable` while a developer machine ran whatever `rustup default` resolved to; clippy 1.100 added a `needless_bool` branch (`if cond { return true; } false`) that a local 1.98 never reported, so a fully green `pre-commit run` still failed the PR's `check` job. `rust-toolchain.toml` now pins the version, every workflow installs that exact compiler, and `scripts/check-toolchain-pin.sh` (pre-commit + `scripts/check.sh`) fails on a floating or mismatched pin. Cost: the first `cargo` call after a pin bump downloads the toolchain.
 
