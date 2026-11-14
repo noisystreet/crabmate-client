@@ -38,7 +38,7 @@
 
 use leptos::prelude::*;
 
-use crabmate_client_api::connections::{ConnectionSnapshot, ConnectionStatus};
+use crabmate_client_api::connections::{ConnectionSnapshot, ConnectionStatus, busy_duration_text};
 use crabmate_client_api::ctl::{CtlInstance, CtlObserved};
 use crabmate_client_api::url::api_base_authority;
 
@@ -82,7 +82,8 @@ fn row_meta(snapshot: &ConnectionSnapshot) -> String {
         parts.push(context.to_string());
     }
     if let Some(secs) = snapshot.busy_secs {
-        parts.push(format!("{secs}s"));
+        // 与 TUI lane 行同一份格式（`12s` / `2m05s` / `1h02m`），别在这里再写一个 `match`。
+        parts.push(busy_duration_text(secs));
     }
     if snapshot.unread {
         parts.push(String::from("•"));
@@ -733,7 +734,7 @@ mod rename_wiring_source_tests {
 
 #[cfg(test)]
 mod tests {
-    use super::{CtlRowState, ctl_rows_for_rail};
+    use super::{CtlRowState, ctl_rows_for_rail, row_meta};
     use crabmate_client_api::connections::ConnectionSnapshot;
     use crabmate_client_api::ctl::CtlInstance;
 
@@ -749,6 +750,30 @@ mod tests {
 
     fn connected(base: &str) -> ConnectionSnapshot {
         ConnectionSnapshot::new("w", base)
+    }
+
+    #[test]
+    fn row_meta_joins_the_readings_and_skips_what_is_absent() {
+        let mut snapshot = connected("http://a:1");
+        // 空闲、没用量：行尾是空的（不画 `0s`、不画 `—`）。
+        assert_eq!(row_meta(&snapshot), "");
+
+        snapshot.context = Some("62%".to_string());
+        snapshot.busy_secs = Some(12);
+        assert_eq!(row_meta(&snapshot), "62% 12s");
+
+        // 超过一分钟换成 `m`（与 TUI lane 行同一份格式），未读点排最后。
+        snapshot.busy_secs = Some(125);
+        snapshot.unread = true;
+        assert_eq!(row_meta(&snapshot), "62% 2m05s •");
+    }
+
+    #[test]
+    fn a_blank_context_does_not_leave_a_double_space() {
+        let mut snapshot = connected("http://a:1");
+        snapshot.context = Some("   ".to_string());
+        snapshot.busy_secs = Some(3);
+        assert_eq!(row_meta(&snapshot), "3s");
     }
 
     #[test]

@@ -10,6 +10,7 @@
 
 use std::collections::HashMap;
 use std::sync::{Mutex, MutexGuard};
+use std::time::{Duration, Instant};
 
 use crabmate_client_api::{ConnectionKey, ConnectionSnapshot, ConnectionStatus, ConnectionTally};
 use tauri::{AppHandle, Emitter, Manager, WebviewWindow};
@@ -23,27 +24,74 @@ pub(crate) const CONNECTIONS_CHANGED: &str = "connections_changed";
 /// 撞名时尝试的后缀上限。
 const MAX_DEDUPE_SUFFIX: usize = 99;
 
-/// `window label → 该窗口的连接快照`。
+/// 在途读数的推进间隔。
+///
+/// 1 秒：`busy_secs` 是整秒读数，比它更快只是多一次广播；比它慢就会看到跳格。
+const TICK_INTERVAL: Duration = Duration::from_secs(1);
+
+/// 注册表里的一条：快照 + 壳侧才需要的计时基准。
+///
+/// `started_at` **不在**快照里：`busy_secs` 是「已耗时」，而读它的常常是**别的窗口**
+/// —— 那个窗口拿不到这条连接的开始时刻，只有进程内的注册表知道。
+/// 用 `Instant` 而不是 epoch 时间戳：挂起 / 系统时钟跳变不该让读数跳变。
+#[derive(Debug)]
+struct Entry {
+    snapshot: ConnectionSnapshot,
+    /// 回合发出的时刻；`None` = 没有在途回合。
+    started_at: Option<Instant>,
+}
+
+impl Entry {
+    fn new(snapshot: ConnectionSnapshot) -> Self {
+        Self {
+            snapshot,
+            started_at: None,
+        }
+    }
+
+    /// 此刻应显示的已耗时（`None` = 不画耗时）。
+    ///
+    /// 用 `saturating_duration_since`：这条路径每秒都会跑，把「不可能」写成饱和减法，
+    /// 好过任何一次 panic 让整个连接列表停摆。
+    fn busy_secs_at(&self, now: Instant) -> Option<u64> {
+        self.started_at
+            .map(|started| now.saturating_duration_since(started).as_secs())
+    }
+}
+
+/// `window label → 该窗口的连接`。
 ///
 /// key 用 label 而不是 `ConnectionKey`：两者同值（见 `ConnectionKey` 的 doc），但 label 是
 /// 平台身份、`key` 是契约身份 —— 用 label 做键，删除窗口时不必再从快照里反查。
+///
+/// 值带上 `started_at`：行尾那两列读数里，「上下文用量」随快照走，而「在途耗时」只能从
+/// 一个**开始时刻**推出来 —— 而开始时刻不属于契约（见 [`Entry`]）。
 #[derive(Debug, Default)]
-pub(crate) struct ConnectionRegistry(Mutex<HashMap<String, ConnectionSnapshot>>);
+pub(crate) struct ConnectionRegistry(Mutex<HashMap<String, Entry>>);
 
 impl ConnectionRegistry {
     /// 取锁；被 poison 时继续用里面的数据。
     ///
     /// 这里不 `unwrap`：注册表是 UI 的旁路数据，一次 panic 让整个应用的连接列表永久
     /// 不可用，比读到一份可能稍旧的名单糟得多。
-    fn entries(&self) -> MutexGuard<'_, HashMap<String, ConnectionSnapshot>> {
+    fn entries(&self) -> MutexGuard<'_, HashMap<String, Entry>> {
         self.0
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     /// 登记或更新一个窗口的连接。
+    ///
+    /// 覆盖时**保留** `started_at`：重复登记（重连后自报、改名后重报）不该把手上的秒表
+    /// 清零 —— 那会让读数先跳回 `0s` 再重新累。
     pub(crate) fn upsert(&self, label: &str, snapshot: ConnectionSnapshot) {
-        self.entries().insert(label.to_string(), snapshot);
+        let mut guard = self.entries();
+        match guard.get_mut(label) {
+            Some(entry) => entry.snapshot = snapshot,
+            None => {
+                guard.insert(label.to_string(), Entry::new(snapshot));
+            }
+        }
     }
 
     /// 窗口关掉了。
@@ -90,7 +138,9 @@ impl ConnectionRegistry {
         }
         self.entries()
             .iter()
-            .find(|(label, snapshot)| label.as_str() != exclude && snapshot.authority == authority)
+            .find(|(label, entry)| {
+                label.as_str() != exclude && entry.snapshot.authority == authority
+            })
             .map(|(label, _)| label.clone())
     }
 
@@ -101,12 +151,15 @@ impl ConnectionRegistry {
     /// （返回值那条路径是另一件事：`open_connection` / `register_connection` 回给调用方
     /// 的是「**你自己**在运行」，所以那里是 `true`。两句话，不是两套口径。）
     pub(crate) fn snapshots(&self) -> Vec<ConnectionSnapshot> {
+        // 时刻取一次：同一份 payload 里各行的「已耗时」必须同源，否则相邻两行会差一秒。
+        let now = Instant::now();
         let mut out: Vec<ConnectionSnapshot> = self
             .entries()
             .values()
-            .map(|snapshot| ConnectionSnapshot {
+            .map(|entry| ConnectionSnapshot {
                 active: false,
-                ..snapshot.clone()
+                busy_secs: entry.busy_secs_at(now),
+                ..entry.snapshot.clone()
             })
             .collect();
         out.sort_by(|a, b| a.key.cmp(&b.key));
@@ -117,7 +170,7 @@ impl ConnectionRegistry {
         let statuses: Vec<ConnectionStatus> = self
             .entries()
             .values()
-            .map(|snapshot| snapshot.status)
+            .map(|entry| entry.snapshot.status)
             .collect();
         ConnectionTally::from_statuses(statuses)
     }
@@ -131,32 +184,65 @@ impl ConnectionRegistry {
         label: &str,
         status: ConnectionStatus,
     ) -> Option<ConnectionStatus> {
-        self.entries().get_mut(label).map(|snapshot| {
-            let previous = snapshot.status;
-            snapshot.status = status;
+        self.entries().get_mut(label).map(|entry| {
+            let previous = entry.snapshot.status;
+            entry.snapshot.status = status;
+            // 回空闲即收掉秒表：metrics 通道丢一帧（页面崩、Effect 没跑）时，状态边沿是
+            // 唯一的兜底 —— 否则那一行会挂着一个只涨不收的读数。
+            if status == ConnectionStatus::Idle {
+                entry.started_at = None;
+            }
             previous
         })
     }
 
     /// 读某条连接的快照（发通知时要用显示名与基址）。
     pub(crate) fn snapshot(&self, label: &str) -> Option<ConnectionSnapshot> {
-        self.entries().get(label).cloned()
+        self.entries()
+            .get(label)
+            .map(|entry| entry.snapshot.clone())
     }
 
     /// 改未读标记。
     pub(crate) fn set_unread(&self, label: &str, unread: bool) -> bool {
-        self.entries().get_mut(label).is_some_and(|snapshot| {
-            snapshot.unread = unread;
+        self.entries().get_mut(label).is_some_and(|entry| {
+            entry.snapshot.unread = unread;
             true
         })
     }
 
     /// 改名（只动显示名，`key` 与 window label 不变）。
     pub(crate) fn rename(&self, label: &str, name: &str) -> bool {
-        self.entries().get_mut(label).is_some_and(|snapshot| {
-            snapshot.rename(name);
+        self.entries().get_mut(label).is_some_and(|entry| {
+            entry.snapshot.rename(name);
             true
         })
+    }
+
+    /// 写行尾读数（上下文短文本 + 在途开关）；返回是否有这一条。
+    ///
+    /// 与 [`Self::set_status`] 分开：那条的语义是「状态边沿」（返回值供通知判边沿），
+    /// 计量值跟着它一起搬会让一条命令同时承担两件事。
+    ///
+    /// `busy` 只决定**开始时刻**：已经记着的不重记（每秒重报不该把秒表推回 0），
+    /// `false` 才清。
+    pub(crate) fn set_metrics(&self, label: &str, context: Option<String>, busy: bool) -> bool {
+        self.entries().get_mut(label).is_some_and(|entry| {
+            entry.snapshot.context = context.filter(|text| !text.trim().is_empty());
+            if !busy {
+                entry.started_at = None;
+            } else if entry.started_at.is_none() {
+                entry.started_at = Some(Instant::now());
+            }
+            true
+        })
+    }
+
+    /// 有没有连接在跑：秒级 ticker 的唯一判据。
+    fn has_busy(&self) -> bool {
+        self.entries()
+            .values()
+            .any(|entry| entry.started_at.is_some())
     }
 }
 
@@ -173,6 +259,35 @@ pub(crate) fn broadcast(app: &AppHandle) {
     if let Err(error) = app.emit(CONNECTIONS_CHANGED, payload) {
         eprintln!("[crabmate-desktop] connections broadcast failed: {error}");
     }
+}
+
+/// 在途读数的秒级推进：**只在至少一条连接在跑时**广播。
+///
+/// 为什么需要它：`busy_secs` 是「已耗时」，而画那一行的是每个窗口 —— 前端本地秒表只能
+/// 让自己那条动，多窗口用户要看的恰恰是别人的那条。
+///
+/// 为什么按需：没有在途回合时一次也不广播（`has_busy` 为假就跳过），
+/// 所以最常见的空闲状态下这条线程只是醒着看一眼；在跑时也只是每秒一次
+/// `connections_changed`，与状态边沿走同一条广播路径，不引入新事件。
+///
+/// 用 detached `std::thread` 而不是 `tauri::async_runtime`：后者的 `sleep` 要 tokio 的
+/// `time` feature，而本 crate 只开了 `sync` —— 为一个 1 秒的定时器动依赖不值。
+/// 线程随进程退出而终止，没有需要回收的资源。
+pub(crate) fn spawn_busy_ticker(app: AppHandle) {
+    std::thread::spawn(move || {
+        loop {
+            std::thread::sleep(TICK_INTERVAL);
+            let Some(state) = app.try_state::<ConnectionRegistry>() else {
+                // 理论兜底，不是退出路径：注册表由 `setup` 的 `manage` 持有，线程自己也握着
+                // `AppHandle`，所以进程活着时 `try_state` 恒为 `Some`。真正的收尾是进程终止
+                // —— 这也是不为它加停止信号的理由（没有需要回收的资源）。
+                break;
+            };
+            if state.has_busy() {
+                broadcast(&app);
+            }
+        }
+    });
 }
 
 /// 某条连接进入等审批、而它的窗口不在前台时，发一条系统通知。
@@ -373,6 +488,25 @@ pub(crate) fn report_connection_unread(app: AppHandle, window: WebviewWindow, un
     }
 }
 
+/// 窗口报告行尾读数（上下文短文本 + 在途开关）。
+///
+/// 前台不每秒调它：秒数由壳从 `started_at` 推出（见 [`spawn_busy_ticker`]），窗口只在
+/// 「进入 / 离开在途」与「上下文用量变了」时各报一次。没有这条命令时左栏行尾永远是空的
+/// （见 `docs/design/desktop_multi_window.md` §10）。
+#[tauri::command]
+pub(crate) fn report_connection_metrics(
+    app: AppHandle,
+    window: WebviewWindow,
+    context: Option<String>,
+    busy: bool,
+) {
+    if let Some(state) = registry(&app)
+        && state.set_metrics(window.label(), context, busy)
+    {
+        broadcast(&app);
+    }
+}
+
 /// 改名：只动显示名，窗口 label 与 key 不变（见 `ConnectionSnapshot::rename`）。
 #[tauri::command]
 pub(crate) fn rename_connection(app: AppHandle, window: WebviewWindow, name: String) {
@@ -545,5 +679,67 @@ mod tests {
         assert_eq!(list[0].display_name, "生产环境");
         // key 不变 —— 否则窗口 label 与 focus_connection 的目标就对不上了。
         assert_eq!(list[0].key, key);
+    }
+
+    #[test]
+    fn metrics_fill_the_row_readings_and_idle_clears_the_clock() {
+        let registry = ConnectionRegistry::default();
+        registry.upsert("win-a", snapshot("a", "http://a:1"));
+
+        assert!(registry.set_metrics("win-a", Some("62%".to_string()), true));
+        let list = registry.snapshots();
+        // 刚进入在途就是 `0s`（与 TUI 同口径）：读数不必等到下一秒才出现。
+        assert_eq!(list[0].busy_secs, Some(0));
+        assert_eq!(list[0].context.as_deref(), Some("62%"));
+
+        // 状态回空闲是兜底：metrics 的终止帧丢了（页面崩、Effect 没跑）也不该一直涨。
+        registry.set_status("win-a", ConnectionStatus::Running);
+        registry.set_status("win-a", ConnectionStatus::Idle);
+        assert_eq!(registry.snapshots()[0].busy_secs, None);
+        // 上下文读数不随状态消失：它说的是「上次用了多少」，不是「正在用」。
+        assert_eq!(registry.snapshots()[0].context.as_deref(), Some("62%"));
+    }
+
+    #[test]
+    fn re_reporting_busy_does_not_restart_the_clock() {
+        let registry = ConnectionRegistry::default();
+        registry.upsert("win-a", snapshot("a", "http://a:1"));
+        registry.set_metrics("win-a", None, true);
+        let started = {
+            let guard = registry.entries();
+            guard["win-a"].started_at
+        };
+        // 每秒重报是合法调用（窗口不会自己算秒）；秒表被推回 0 的症状是读数永远停在 `0s`。
+        registry.set_metrics("win-a", None, true);
+        let again = {
+            let guard = registry.entries();
+            guard["win-a"].started_at
+        };
+        assert_eq!(started, again);
+    }
+
+    #[test]
+    fn blank_context_is_absent_and_unknown_windows_are_ignored() {
+        let registry = ConnectionRegistry::default();
+        registry.upsert("win-a", snapshot("a", "http://a:1"));
+        // 空串是「还没有用量」，不是「用量为零」的文本。
+        registry.set_metrics("win-a", Some("   ".to_string()), false);
+        assert_eq!(registry.snapshots()[0].context, None);
+        // 窗口已关（Destroyed 先到、读数后到）：静默忽略，与 `set_status` 同一条规则。
+        assert!(!registry.set_metrics("gone", Some("62%".to_string()), true));
+    }
+
+    #[test]
+    fn the_ticker_only_runs_while_something_is_in_flight() {
+        let registry = ConnectionRegistry::default();
+        registry.upsert("win-a", snapshot("a", "http://a:1"));
+        // 空闲时一次也不广播：这是「没有回合在跑」这个常态下零开销的前提。
+        assert!(!registry.has_busy());
+
+        registry.set_metrics("win-a", None, true);
+        assert!(registry.has_busy());
+
+        registry.set_metrics("win-a", None, false);
+        assert!(!registry.has_busy());
     }
 }
