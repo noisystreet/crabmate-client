@@ -58,18 +58,16 @@ pub(crate) struct Palette {
     pub err: Color,
     /// 注意态（`--warn`）：未保存改动、待重试、被改写的值。
     pub notice: Color,
-    /// 工作区树：源码类文件。
+    /// 工作区树：按语言 / 资产细分的文件色板。
     ///
-    /// 与 `file_config` / `file_doc` / `file_image` 一起构成目录树里「一眼分类型」的四档。
-    /// **终端专用色阶**：`tokens.css` 没有「文件类型」这个概念，所以这四档不绑定任何
+    /// **终端专用色阶**：`tokens.css` 没有「文件类型」这个概念，所以这些槽不绑定任何
     /// token（与 `ok` / `err` / `hit` 同级待遇），因此也不需要动任何 Desktop 主题文件。
-    pub file_code: Color,
-    /// 工作区树：配置类文件（`toml` / `yaml` / `json` / `Makefile` ……）。终端专用，理由同上。
-    pub file_config: Color,
-    /// 工作区树：文档类文件（`md` / `txt` / `LICENSE` ……）。终端专用，理由同上。
-    pub file_doc: Color,
-    /// 工作区树：图片类文件（`png` / `svg` ……）。终端专用，理由同上。
-    pub file_image: Color,
+    ///
+    /// 色相模仿 Material Icon Theme（Rust 橙、Python 蓝、JS 黄、TS 青蓝、Go 青、JVM 紫、
+    /// C 系蓝紫、脚本绿、Web 珊瑚、配置冷灰、锁文件灰、数据暗金、文档青绿、图片粉、
+    /// 字体音视频淡紫灰）。只按**明暗两端**各出一套：换个主题但明暗没变时，目录树里的
+    /// 「这是 Rust 还是 Python」不该跟着漂 —— 那是文件的属性，不是主题的属性。
+    pub lang: LangColors,
     /// 源码视图：注释。
     ///
     /// 与 `file_*` 同一取舍，**终端专用色阶**：`tokens.css` 没有「语法类别」这个概念，
@@ -94,6 +92,117 @@ const fn rgb(r: u8, g: u8, b: u8) -> Color {
     Color::Rgb(r, g, b)
 }
 
+/// 工作区树的语言 / 资产色板（[`Palette::ws_entry_color`] 的唯一颜色来源）。
+///
+/// 十五档对着 [`FileKind`] 的十五个非目录 / 非其它变体，一一对应 —— 渲染处只说「这是
+/// 什么文件」，颜色归这里（与 `syn_*` / `NoticeLevel` 同一条路）。
+///
+/// 为什么不给每个主题各写一份：这些色相是**类型身份**，不是主题表达。七套主题里四套深色
+/// 共用 [`LANG_DARK`]、两套浅色共用 [`LANG_LIGHT`]，新加主题只要挑明暗，不必重新调 15 个色。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LangColors {
+    pub rust: Color,
+    pub python: Color,
+    pub js: Color,
+    pub ts: Color,
+    pub go: Color,
+    pub jvm: Color,
+    pub native: Color,
+    pub shell: Color,
+    pub web: Color,
+    pub config: Color,
+    pub lock: Color,
+    pub data: Color,
+    pub doc: Color,
+    pub image: Color,
+    pub media: Color,
+}
+
+/// 深色底：色相取 Material Icon Theme 的原值，明度提到能在 `#16172（bg）` 上一眼分辨。
+const LANG_DARK: LangColors = LangColors {
+    rust: rgb(0xde, 0xa5, 0x84),
+    python: rgb(0x6f, 0xa8, 0xdc),
+    js: rgb(0xe5, 0xc0, 0x7b),
+    ts: rgb(0x4f, 0xa3, 0xd1),
+    go: rgb(0x3f, 0xc7, 0xc7),
+    jvm: rgb(0xc7, 0x92, 0xea),
+    native: rgb(0x82, 0xaa, 0xff),
+    shell: rgb(0x89, 0xe0, 0x51),
+    web: rgb(0xf0, 0x71, 0x78),
+    config: rgb(0xa8, 0xb0, 0xc0),
+    lock: rgb(0x8a, 0x8f, 0x98),
+    data: rgb(0xc9, 0xa2, 0x27),
+    doc: rgb(0x8f, 0xbc, 0xbb),
+    image: rgb(0xe7, 0x9a, 0xc0),
+    media: rgb(0xb0, 0xa0, 0xc0),
+};
+
+/// 浅色底：同一批色相压暗到 `#f0ece2` / `#f4f4f5` 上仍能读（照抄深色值会糊成一片浅色）。
+const LANG_LIGHT: LangColors = LangColors {
+    rust: rgb(0x8a, 0x4b, 0x2a),
+    python: rgb(0x1f, 0x5c, 0x86),
+    js: rgb(0x7a, 0x5b, 0x00),
+    ts: rgb(0x0e, 0x5c, 0x7a),
+    go: rgb(0x0b, 0x6e, 0x6e),
+    jvm: rgb(0x5b, 0x3d, 0x8f),
+    native: rgb(0x1f, 0x3f, 0x9e),
+    shell: rgb(0x2e, 0x6b, 0x12),
+    web: rgb(0x9e, 0x2b, 0x2e),
+    config: rgb(0x3f, 0x4a, 0x5a),
+    lock: rgb(0x4a, 0x4f, 0x57),
+    data: rgb(0x6b, 0x53, 0x00),
+    doc: rgb(0x2f, 0x5b, 0x45),
+    image: rgb(0x8f, 0x2f, 0x63),
+    media: rgb(0x4b, 0x3f, 0x6b),
+};
+
+/// 无色模式：全 `Reset`。漏一个就是「`NO_COLOR` 下目录树仍然带色」——
+/// 与 `palette.rs` 对 mono 的承诺正面冲突，而那种 bug 只在无色终端里可见。
+const LANG_MONO: LangColors = LangColors {
+    rust: Color::Reset,
+    python: Color::Reset,
+    js: Color::Reset,
+    ts: Color::Reset,
+    go: Color::Reset,
+    jvm: Color::Reset,
+    native: Color::Reset,
+    shell: Color::Reset,
+    web: Color::Reset,
+    config: Color::Reset,
+    lock: Color::Reset,
+    data: Color::Reset,
+    doc: Color::Reset,
+    image: Color::Reset,
+    media: Color::Reset,
+};
+
+impl LangColors {
+    /// 16 色降级：与 [`Palette::downgrade_basic`] 同一口径，逐槽取最近命名色。
+    ///
+    /// 真彩终端上十五档互不相同；降到 16 色后必然有若干档合并 —— 那是降级的固有代价，
+    /// 不是这里可以避免的（`nearest_ansi` 只答「最近的那个」，答不了「能不能分辨」）。
+    #[must_use]
+    fn downgraded(self) -> Self {
+        Self {
+            rust: nearest_ansi(self.rust),
+            python: nearest_ansi(self.python),
+            js: nearest_ansi(self.js),
+            ts: nearest_ansi(self.ts),
+            go: nearest_ansi(self.go),
+            jvm: nearest_ansi(self.jvm),
+            native: nearest_ansi(self.native),
+            shell: nearest_ansi(self.shell),
+            web: nearest_ansi(self.web),
+            config: nearest_ansi(self.config),
+            lock: nearest_ansi(self.lock),
+            data: nearest_ansi(self.data),
+            doc: nearest_ansi(self.doc),
+            image: nearest_ansi(self.image),
+            media: nearest_ansi(self.media),
+        }
+    }
+}
+
 /// 默认深色（`tokens.css` 根值；`theme` 缺失或未知时使用）。
 const DEFAULT_DARK: Palette = Palette {
     fg: rgb(0xee, 0xf1, 0xf6),
@@ -112,10 +221,7 @@ const DEFAULT_DARK: Palette = Palette {
     ok: rgb(0x6c, 0xc4, 0x9a),
     err: rgb(0xf2, 0x77, 0x7a),
     notice: rgb(0xc4, 0x9a, 0x6e),
-    file_code: rgb(0x7f, 0xc4, 0xe8),
-    file_config: rgb(0xb9, 0xa3, 0xe0),
-    file_doc: rgb(0xa8, 0xc8, 0x8a),
-    file_image: rgb(0xe7, 0x9a, 0xc0),
+    lang: LANG_DARK,
     // 语法高亮六档（源码视图）。与 `file_*` 同一取舍：**终端专用色阶**，不绑 token
     // —— `tokens.css` 没有「语法类别」这个概念，绑了就要同步改 5 个 theme css 并过镜像
     // 门禁，而 Desktop 侧的代码块高亮本身还没做。
@@ -146,10 +252,7 @@ const HIGH_CONTRAST_DARK: Palette = Palette {
     ok: rgb(0x66, 0xff, 0x99),
     err: rgb(0xff, 0x6b, 0x6b),
     notice: rgb(0xc6, 0xc6, 0xc6),
-    file_code: rgb(0xa8, 0xdc, 0xff),
-    file_config: rgb(0xd8, 0xc8, 0xff),
-    file_doc: rgb(0xd0, 0xf0, 0xb0),
-    file_image: rgb(0xff, 0xc0, 0xe0),
+    lang: LANG_DARK,
     // 高对比主题的主色刻意是灰阶，但语法档仍需可辨：取**高明度**彩色，
     // 与 `file_*` 四档在这个主题下的处理一致（它们同样是彩色）。
     syn_comment: rgb(0x9a, 0x9a, 0x9a),
@@ -177,10 +280,7 @@ const MATERIAL_DARK: Palette = Palette {
     ok: rgb(0x6c, 0xc4, 0x9a),
     err: rgb(0xf2, 0x77, 0x7a),
     notice: rgb(0xc2, 0x98, 0x68),
-    file_code: rgb(0x9a, 0xc8, 0xe0),
-    file_config: rgb(0xc0, 0xb0, 0xe0),
-    file_doc: rgb(0xb8, 0xd0, 0xa8),
-    file_image: rgb(0xe0, 0xb0, 0xc8),
+    lang: LANG_DARK,
     syn_comment: rgb(0x76, 0x76, 0x76),
     syn_str: rgb(0xa8, 0xd0, 0x8a),
     syn_number: rgb(0xe8, 0xa8, 0x7c),
@@ -206,10 +306,7 @@ const SHADCN_DARK: Palette = Palette {
     ok: rgb(0x6c, 0xc4, 0x9a),
     err: rgb(0xf2, 0x77, 0x7a),
     notice: rgb(0xfb, 0xbf, 0x24),
-    file_code: rgb(0x7d, 0xd3, 0xfc),
-    file_config: rgb(0xc4, 0xb5, 0xfd),
-    file_doc: rgb(0xbe, 0xd9, 0x8a),
-    file_image: rgb(0xf9, 0xa8, 0xd4),
+    lang: LANG_DARK,
     syn_comment: rgb(0x71, 0x71, 0x7a),
     syn_str: rgb(0x86, 0xef, 0xac),
     syn_number: rgb(0xfd, 0xba, 0x74),
@@ -283,10 +380,7 @@ const CRABMATE_LIGHT: Palette = Palette {
     ok: rgb(0x2f, 0x7d, 0x4f),
     err: rgb(0xb4, 0x23, 0x18),
     notice: rgb(0x83, 0x66, 0x28),
-    file_code: rgb(0x1f, 0x5c, 0x86),
-    file_config: rgb(0x5b, 0x3d, 0x8f),
-    file_doc: rgb(0x4a, 0x6b, 0x2a),
-    file_image: rgb(0x8f, 0x2f, 0x63),
+    lang: LANG_LIGHT,
     syn_comment: rgb(0x85, 0x7c, 0x6b),
     syn_str: rgb(0x3f, 0x6b, 0x26),
     syn_number: rgb(0x8a, 0x5a, 0x00),
@@ -312,10 +406,7 @@ const SHADCN_LIGHT: Palette = Palette {
     ok: rgb(0x2f, 0x7d, 0x4f),
     err: rgb(0xb4, 0x23, 0x18),
     notice: rgb(0xb4, 0x53, 0x09),
-    file_code: rgb(0x0e, 0x74, 0x90),
-    file_config: rgb(0x6d, 0x28, 0xd9),
-    file_doc: rgb(0x3f, 0x62, 0x12),
-    file_image: rgb(0x9d, 0x17, 0x4a),
+    lang: LANG_LIGHT,
     syn_comment: rgb(0x71, 0x71, 0x7a),
     syn_str: rgb(0x15, 0x80, 0x3d),
     syn_number: rgb(0xb4, 0x53, 0x09),
@@ -341,10 +432,7 @@ const MONO: Palette = Palette {
     ok: Color::Reset,
     err: Color::Reset,
     notice: Color::Reset,
-    file_code: Color::Reset,
-    file_config: Color::Reset,
-    file_doc: Color::Reset,
-    file_image: Color::Reset,
+    lang: LANG_MONO,
     // 无色模式：语法色一并抹平。漏一个就是「`NO_COLOR` 下源码视图仍然带色」，
     // 与 `palette.rs` 对 mono 的承诺正面冲突 —— 而那种 bug 只在无色终端里可见。
     syn_comment: Color::Reset,
@@ -504,10 +592,21 @@ impl Palette {
     pub(crate) fn ws_entry_color(&self, kind: FileKind) -> Color {
         match kind {
             FileKind::Dir => self.accent,
-            FileKind::Code => self.file_code,
-            FileKind::Config => self.file_config,
-            FileKind::Doc => self.file_doc,
-            FileKind::Image => self.file_image,
+            FileKind::Rust => self.lang.rust,
+            FileKind::Python => self.lang.python,
+            FileKind::Js => self.lang.js,
+            FileKind::Ts => self.lang.ts,
+            FileKind::Go => self.lang.go,
+            FileKind::Jvm => self.lang.jvm,
+            FileKind::Native => self.lang.native,
+            FileKind::Shell => self.lang.shell,
+            FileKind::Web => self.lang.web,
+            FileKind::Config => self.lang.config,
+            FileKind::Lock => self.lang.lock,
+            FileKind::Data => self.lang.data,
+            FileKind::Doc => self.lang.doc,
+            FileKind::Image => self.lang.image,
+            FileKind::Media => self.lang.media,
             FileKind::Other => self.fg,
         }
     }
@@ -529,10 +628,7 @@ impl Palette {
         p.code_bg = nearest_ansi(p.code_bg);
         p.ok = nearest_ansi(p.ok);
         p.err = nearest_ansi(p.err);
-        p.file_code = nearest_ansi(p.file_code);
-        p.file_config = nearest_ansi(p.file_config);
-        p.file_doc = nearest_ansi(p.file_doc);
-        p.file_image = nearest_ansi(p.file_image);
+        p.lang = p.lang.downgraded();
         p
     }
 
@@ -645,240 +741,5 @@ fn nearest_ansi(c: Color) -> Color {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// 折叠光标：整行套选中样式，**内容一字不改**（它只是把手，不是新的状态行）。
-    ///
-    /// 只染行首那一格是常见的手滑 —— 那时光标看起来像「半个字符的强调」，而不是
-    /// 「当前这条」。无色模式走 `REVERSED`，色值本身由其它用例管。
-    #[test]
-    fn row_style_patches_every_span_and_keeps_the_text() {
-        let line = Line::from(vec![Span::raw("▸ "), Span::raw("2 个工具 · 完成")]);
-        let styled = with_row_style(line, Style::new().bg(Color::Red));
-
-        assert_eq!(styled.spans.len(), 2);
-        assert!(
-            styled.spans.iter().all(|s| s.style.bg == Some(Color::Red)),
-            "每个 span 都要带上底色"
-        );
-        let text: String = styled.spans.iter().map(|s| s.content.as_ref()).collect();
-        assert_eq!(text, "▸ 2 个工具 · 完成", "内容不该被改写");
-    }
-
-    #[test]
-    fn known_themes_map_and_unknown_falls_back() {
-        assert_eq!(Palette::from_theme(Some("shadcn-dark")), SHADCN_DARK);
-        assert_eq!(
-            Palette::from_theme(Some(" crabmate-light ")),
-            CRABMATE_LIGHT
-        );
-        assert_eq!(
-            Palette::from_theme(Some("high-contrast-dark")),
-            HIGH_CONTRAST_DARK
-        );
-        // 旧的默认深色保留为显式可选项（透明成为默认后的回退入口）。
-        assert_eq!(Palette::from_theme(Some("default-dark")), DEFAULT_DARK);
-        // 未设置 / 空串 → 透明（产品默认）。
-        assert_eq!(Palette::from_theme(None), SHADCN_TRANSPARENT);
-        assert_eq!(Palette::from_theme(Some("")), SHADCN_TRANSPARENT);
-        // 不认识的名字 → 实底深色，而不是透明：静默变透明等于「一片黑、无处归因」。
-        assert_eq!(Palette::from_theme(Some("nope")), DEFAULT_DARK);
-        // `Default` 与 `from_theme(None)` 刻意解耦：结构体兜底要「有底色、可读」。
-        assert_eq!(Palette::default(), DEFAULT_DARK);
-    }
-
-    #[test]
-    fn light_themes_dim_the_chat_background() {
-        // 浅色主题聊天区底色取 --surface-hover（压暗一档），不等于纯白。
-        assert_eq!(CRABMATE_LIGHT.bg, rgb(0xf0, 0xec, 0xe2));
-        assert_eq!(SHADCN_LIGHT.bg, rgb(0xf4, 0xf4, 0xf5));
-        assert_ne!(SHADCN_LIGHT.bg, rgb(0xff, 0xff, 0xff));
-        // 浅色主题正文是深色，深色主题正文是浅色。
-        assert!(luma(CRABMATE_LIGHT.fg) < luma(CRABMATE_LIGHT.bg));
-        assert!(luma(DEFAULT_DARK.fg) > luma(DEFAULT_DARK.bg));
-    }
-
-    fn luma(c: Color) -> u32 {
-        match c {
-            Color::Rgb(r, g, b) => u32::from(r) + u32::from(g) + u32::from(b),
-            _ => 0,
-        }
-    }
-
-    #[test]
-    fn downgrade_leaves_no_rgb() {
-        let p = Palette::from_theme(Some("shadcn-dark")).downgrade_basic();
-        for c in [
-            p.fg,
-            p.muted,
-            p.accent,
-            p.hit,
-            p.bg,
-            p.chrome_bg,
-            p.border,
-            p.code_bg,
-            p.ok,
-            p.err,
-        ] {
-            assert!(
-                !matches!(c, Color::Rgb(..)),
-                "16 色模式下不应残留 Rgb: {c:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn nearest_ansi_picks_sensible_16_color() {
-        // 深底 → 黑；浅字 → xterm 的 color7（#e5e5e5，比纯白更接近 #eef1f6）；
-        // 蓝紫 accent → 亮蓝（不被灰阶抢走）。
-        assert_eq!(nearest_ansi(rgb(0x16, 0x17, 0x27)), Color::Black);
-        assert_eq!(nearest_ansi(rgb(0xee, 0xf1, 0xf6)), Color::Gray);
-        assert_eq!(nearest_ansi(rgb(0x8f, 0xa4, 0xea)), Color::LightBlue);
-        assert_eq!(nearest_ansi(rgb(0xff, 0xff, 0xff)), Color::White);
-        // 命名色原样返回
-        assert_eq!(nearest_ansi(Color::LightGreen), Color::LightGreen);
-    }
-
-    #[test]
-    fn resolve_honours_terminal_capabilities() {
-        let truecolor = |k: &str| match k {
-            "COLORTERM" => Some("truecolor".to_string()),
-            _ => None,
-        };
-        let p = Palette::resolve_with(Some("shadcn-dark"), &truecolor);
-        assert_eq!(p, SHADCN_DARK, "真彩终端保留 Rgb");
-
-        let plain = |_: &str| None;
-        let p = Palette::resolve_with(Some("shadcn-dark"), &plain);
-        assert_eq!(p, SHADCN_DARK.downgrade_basic(), "无真彩时降到 16 色");
-
-        let no_color = |k: &str| (k == "NO_COLOR").then(|| "1".to_string());
-        assert!(Palette::resolve_with(Some("shadcn-dark"), &no_color).is_mono());
-
-        let dumb = |k: &str| (k == "TERM").then(|| "dumb".to_string());
-        assert!(Palette::resolve_with(None, &dumb).is_mono());
-
-        let forced = |k: &str| (k == "CM_TUI_COLOR").then(|| "basic".to_string());
-        assert_eq!(
-            Palette::resolve_with(Some("crabmate-light"), &forced),
-            CRABMATE_LIGHT.downgrade_basic(),
-            "CM_TUI_COLOR=basic 强制 16 色"
-        );
-    }
-
-    #[test]
-    fn mono_has_no_colors() {
-        let m = Palette::mono();
-        assert!(m.is_mono());
-        assert_eq!(m.fg, Color::Reset);
-        assert_eq!(m.accent, Color::Reset);
-        // 无色模式下修饰位仍可用（调用方据此区分语义）。
-        assert_eq!(m.downgrade_basic(), m);
-    }
-
-    #[test]
-    fn transparent_theme_only_resets_the_two_background_slots() {
-        let t = Palette::from_theme(Some("shadcn-transparent"));
-        assert_eq!(t.bg, Color::Reset, "聊天区底色交给终端");
-        assert_eq!(t.chrome_bg, Color::Reset, "条带底色也交给终端");
-        assert_eq!(t.fg, SHADCN_DARK.fg, "前景沿用 shadcn-dark");
-        assert_eq!(t.border, SHADCN_DARK.border);
-        assert_ne!(t.border, Color::Reset, "边框必须是实色，否则整屏没有分区");
-        assert_ne!(t.code_bg, Color::Reset, "代码块底色保持实色");
-        assert!(!t.mono, "透明不等于无色：语义仍靠颜色区分");
-    }
-
-    #[test]
-    fn transparent_slots_survive_the_16_colour_downgrade() {
-        let p = SHADCN_TRANSPARENT.downgrade_basic();
-        assert_eq!(p.bg, Color::Reset, "降级不该把「透出终端」变成某个索引色");
-        assert_eq!(p.chrome_bg, Color::Reset);
-        assert_ne!(p.border, Color::Reset);
-    }
-
-    #[test]
-    fn every_listed_theme_name_maps_to_its_own_palette() {
-        // 显式期望表：漏接 `from_theme` 的预设会落到 `Some(_)` 的深色兜底，等值断言立刻变红。
-        let expected = [
-            ("crabmate-light", CRABMATE_LIGHT),
-            // 与 `tokens.css` 的 `:root` 深色基线同值；名字独立列入以便
-            // `CM_TUI_THEME` 能显式选它。
-            ("crabmate-dark", DEFAULT_DARK),
-            ("shadcn-light", SHADCN_LIGHT),
-            ("shadcn-dark", SHADCN_DARK),
-            ("material-dark", MATERIAL_DARK),
-            ("high-contrast-dark", HIGH_CONTRAST_DARK),
-            ("shadcn-transparent", SHADCN_TRANSPARENT),
-            ("default-dark", DEFAULT_DARK),
-        ];
-        assert_eq!(
-            expected.len(),
-            THEME_NAMES.len(),
-            "THEME_NAMES 与期望表不同步"
-        );
-        for (name, want) in expected {
-            assert_eq!(Palette::from_theme(Some(name)), want, "{name} 映射错了");
-        }
-    }
-
-    /// 面板可选列表必须与 `THEME_NAMES` 一一对应。
-    ///
-    /// 两张表是手写的：只加名字忘了加选项，那个主题在面板里就选不到（`from_theme`
-    /// 能映射、用户点不着）；只加选项忘了加名字，则选中后会被当成未知名静默回落到
-    /// `default-dark`。上面那个测试只校验 `from_theme` 的映射，两种漏接都拦不住。
-    #[test]
-    fn theme_options_and_theme_names_stay_in_lockstep() {
-        let options: Vec<&str> = THEME_OPTIONS.iter().flatten().copied().collect();
-        assert_eq!(
-            options.len() + 1,
-            THEME_OPTIONS.len(),
-            "除首项「默认」外，每个选项都该是一个具名主题"
-        );
-        assert_eq!(THEME_OPTIONS[0], None, "首项是清除 prefs 键的「默认」");
-        for name in THEME_NAMES {
-            assert!(
-                options.contains(&name),
-                "主题名 {name} 没有对应的面板选项，面板里选不到它"
-            );
-        }
-        for name in &options {
-            assert!(
-                THEME_NAMES.contains(name),
-                "面板选项 {name} 不在 THEME_NAMES 里，选中后会静默回落深色"
-            );
-        }
-    }
-
-    #[test]
-    fn cm_tui_theme_overrides_the_serve_pref_but_only_for_known_names() {
-        let env = |theme: &'static str| {
-            move |k: &str| match k {
-                "CM_TUI_THEME" => Some(theme.to_string()),
-                "CM_TUI_COLOR" => Some("truecolor".to_string()),
-                _ => None,
-            }
-        };
-        // 覆盖生效：serve 给的是浅色，本地仍拿到透明深色。
-        let p = Palette::resolve_with(Some("shadcn-light"), &env("shadcn-transparent"));
-        assert_eq!(p, SHADCN_TRANSPARENT);
-
-        // 未列出的主题名不生效：仍用 serve 的 prefs，而不是静默退默认深色。
-        // 这里刻意不用「拼写接近的错名」——pre-commit 的 typos 钩子带自动修正
-        // （`--write-changes`），会把错名当笔误改对，用例就失去意义了。
-        let p = Palette::resolve_with(Some("crabmate-light"), &env("no-such-theme"));
-        assert_eq!(p, CRABMATE_LIGHT, "未知主题名应忽略覆盖");
-    }
-    #[test]
-    fn colourless_mode_outranks_a_theme_choice() {
-        // `CM_TUI_COLOR=none` 的判定在主题之后：连透明主题也要退成 mono。
-        // 这条守着判定顺序，避免将来把主题解析挪到色深之后。
-        let env = |k: &str| match k {
-            "CM_TUI_THEME" => Some("shadcn-transparent".to_string()),
-            "CM_TUI_COLOR" => Some("none".to_string()),
-            _ => None,
-        };
-        let p = Palette::resolve_with(Some("shadcn-dark"), &env);
-        assert!(p.is_mono(), "无色模式应压过主题选择");
-    }
-}
+#[path = "palette_tests.rs"]
+mod tests;
