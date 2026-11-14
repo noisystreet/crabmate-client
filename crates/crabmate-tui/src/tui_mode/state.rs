@@ -50,6 +50,11 @@ pub use detail_state::{DetailOverlay, ToolDetail};
 #[path = "state_cursor.rs"]
 mod cursor_edit;
 
+// 左栏会话标题过滤（issue #423）：过滤词 / 可见行映射 / 选中吸附，纯算术 ——
+// 与上面几块同一手法搬出去，压住本文件的行数门禁。
+#[path = "state_session_filter.rs"]
+mod session_filter;
+
 pub use history_page::HistoryPage;
 
 /// `/` 补全菜单的会话内状态。
@@ -420,6 +425,7 @@ pub struct UiState {
     pub sessions: Vec<SessionListRow>,
     /// 左栏选中项下标。
     pub selected: usize,
+    pub session_filter: Option<String>, // 左栏标题过滤词（`/conv filter`；None = 不过滤，见 #423）
     /// 待确认删除的会话行 id（`Delete` 第一次按下；`Shift+Delete` / 确认后清空）。
     ///
     /// 放 `UiState` 而不是 `LaneApp`：侧栏底部的提示行要按它切换成确认文案。
@@ -775,23 +781,15 @@ impl UiState {
         self.slash = SlashMenuState::default();
     }
 
-    /// 替换会话列表并 clamp 选中项。
+    /// 替换会话列表并 clamp 选中项（吸附到可见行见 [`Self::snap_selected_to_visible`]）。
     pub fn replace_sessions(&mut self, sessions: Vec<SessionListRow>) {
         self.sessions = sessions;
         self.selected = self.selected.min(self.sessions.len().saturating_sub(1));
+        self.snap_selected_to_visible();
     }
 
-    /// 上/下移动左栏选中（空列表时不变）。
-    pub fn move_selection(&mut self, up: bool) {
-        if self.sessions.is_empty() {
-            return;
-        }
-        if up {
-            self.selected = self.selected.saturating_sub(1);
-        } else if self.selected + 1 < self.sessions.len() {
-            self.selected += 1;
-        }
-    }
+    // 上/下移动左栏选中在 [`super::state_session_filter`]：它必须只在**可见行**间走，
+    // 而那个模块才拥有过滤映射（放在这里要么重复实现，要么多一份口径）。
 
     /// 当前选中会话的可续聊 server conversation_id（无则 `None`）。
     #[must_use]

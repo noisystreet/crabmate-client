@@ -39,6 +39,11 @@ pub enum Control {
     Detail(Option<String>),
     ConvNew,
     ConvRefresh,
+    /// `/conv filter <词>`（`/conv list <词>` 同义）：按标题过滤左栏；空参或 `off` 清除。
+    ///
+    /// v1 只有命令入口，没有「左栏内逐字收窄」——原因见 issue #423 的评论（`n`/`r`/`w`
+    /// 已被占用，字母即过滤会让它们随上下文变义）。
+    ConvFilter(Option<String>),
     ConvUse(String),
     /// `/conv export [json|markdown|both] [--out <路径>] [--id <id>]`。
     ///
@@ -216,7 +221,12 @@ fn parse_conv(arg: Option<&str>) -> Control {
     };
     match arg.split_whitespace().next().unwrap_or("") {
         "new" | "clear" => Control::ConvNew,
-        "list" | "ls" | "show" => Control::ConvRefresh,
+        // `/conv list` 空参仍是刷新；带了词就按标题过滤（issue #423 的第 4 条）。
+        "list" | "ls" | "show" => match conv_filter_term(arg) {
+            Some(term) => Control::ConvFilter(Some(term)),
+            None => Control::ConvRefresh,
+        },
+        "filter" => Control::ConvFilter(conv_filter_term(arg)),
         "use" | "switch" => match arg.split_whitespace().nth(1) {
             Some(id) if !id.is_empty() => Control::ConvUse(id.to_string()),
             _ => Control::ConvUnknown(arg.to_string()),
@@ -233,12 +243,25 @@ fn export_args(arg: &str) -> Result<crate::conv_export::ExportCmd, String> {
     crate::conv_export::parse_args(rest)
 }
 
+/// 取子命令之后的过滤词：只写了子命令（或只写了 `off` 之类的清除词）时返回 `None`。
+///
+/// 清除词本身由 [`crate::tui_mode::state::UiState::set_session_filter`] 判定 —— 空串、
+/// 纯空白与 `off/none/clear` 都算清除，这里只负责「有没有第二个词」。
+fn conv_filter_term(arg: &str) -> Option<String> {
+    let mut words = arg.split_whitespace();
+    words.next()?; // 子命令本身
+    let rest = words.collect::<Vec<_>>().join(" ");
+    (!rest.is_empty()).then_some(rest)
+}
+
 /// `/conv` 未知子命令的提示。
 ///
 /// 放在这里而不是 `mod.rs` 的 match 里：那里贴着 920 行门禁，一条多行 `format!` 就超标。
 #[must_use]
 pub fn conv_unknown_message(arg: &str) -> String {
-    format!("不支持的 /conv 子命令：{arg}（支持 new / list / use <id> / export）")
+    format!(
+        "不支持的 /conv 子命令：{arg}（支持 new / list [<词>] / filter [<词>|off] / use <id> / export）"
+    )
 }
 
 #[cfg(test)]
@@ -282,6 +305,37 @@ mod tests {
                 _ => panic!("参数 `{args}` 没有落到 Control::ConvExport"),
             }
         }
+    }
+
+    /// issue #423：`/conv filter <词>` 设过滤，空参与 `off` 清过滤；`/conv list <词>` 同义，
+    /// 而**空参的 `list` 仍是刷新**（既有脚本与肌肉记忆都靠它）。
+    #[test]
+    fn conv_filter_parses_with_and_without_a_term() {
+        let filter = |line: &str| match parse_control(line) {
+            Some(Control::ConvFilter(term)) => Some(term),
+            _ => None,
+        };
+        assert_eq!(filter("/conv filter 登录"), Some(Some("登录".into())));
+        assert_eq!(
+            filter("/conv filter 两个 词"),
+            Some(Some("两个 词".into())),
+            "多个词原样保留成一个过滤词"
+        );
+        assert_eq!(filter("/conv filter"), Some(None), "空参 = 清过滤");
+        assert_eq!(
+            filter("/conv filter off"),
+            Some(Some("off".into())),
+            "清除词原样交给状态层判定"
+        );
+        assert_eq!(filter("/conv list 登录"), Some(Some("登录".into())));
+        assert!(matches!(
+            parse_control("/conv list"),
+            Some(Control::ConvRefresh)
+        ));
+        assert!(matches!(
+            parse_control("/conv ls"),
+            Some(Control::ConvRefresh)
+        ));
     }
 
     #[test]

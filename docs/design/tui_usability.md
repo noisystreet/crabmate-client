@@ -1,6 +1,6 @@
 # TUI 易用性规划（对齐 Desktop 聊天体验）
 
-> **状态**：Wave 1 已落地 W1.1 全屏 `/resume`、W1.2 忙时排队、W1.3 会话级草稿、W1.4 复制（OSC52 / 外部工具）、W1.6 多行粘贴（bracketed paste，`CM_TUI_PASTE=off` 可关）；**W1.5 会话列输入过滤仍未落地**（`session_filter` 等在 `tui_mode` 无对应字段）。W2.1 历史回放已落地（`GET /conversation/messages` 最新页 + `/older` 按 `before_index` 前插更早页，贴顶保持 + PgUp 到顶自续翻）；W2.2 **删除**已落地（左栏 `Delete` 先确认 / `Shift+Delete` 直删，在途回合拒绝），**只缺重命名**（无 serve 端点）；W2.4 **会话导出**已落地（`/conv export [json|markdown|both] [--out <路径>] [--id <id>]`，repl 与全屏共用 `crabmate_client_api::chat_export` 的展示投影，全量靠逐页往回拉）；W3.1 `/` 补全菜单也已落地（`tui_mode/slash_menu.rs`：内建命令 + `GET /skills` 候选）。Wave 2 的 W2.3 与 Wave 3 其余项仍为方案。逐波按本文落地；每波独立 PR，落地后必须同 PR 更新 [`client_capability_matrix.md`](./client_capability_matrix.md) 对应格（§4）。
+> **状态**：Wave 1 已落地 W1.1 全屏 `/resume`、W1.2 忙时排队、W1.3 会话级草稿、W1.4 复制（OSC52 / 外部工具）、W1.6 多行粘贴（bracketed paste，`CM_TUI_PASTE=off` 可关）；**W1.5 会话列标题过滤已落地**（v1 走命令入口 `/conv filter <词>`；**左栏内逐字收窄仍未做**）。W2.1 历史回放已落地（`GET /conversation/messages` 最新页 + `/older` 按 `before_index` 前插更早页，贴顶保持 + PgUp 到顶自续翻）；W2.2 **删除**已落地（左栏 `Delete` 先确认 / `Shift+Delete` 直删，在途回合拒绝），**只缺重命名**（无 serve 端点）；W2.4 **会话导出**已落地（`/conv export [json|markdown|both] [--out <路径>] [--id <id>]`，repl 与全屏共用 `crabmate_client_api::chat_export` 的展示投影，全量靠逐页往回拉）；W3.1 `/` 补全菜单也已落地（`tui_mode/slash_menu.rs`：内建命令 + `GET /skills` 候选）。Wave 2 的 W2.3 与 Wave 3 其余项仍为方案。逐波按本文落地；每波独立 PR，落地后必须同 PR 更新 [`client_capability_matrix.md`](./client_capability_matrix.md) 对应格（§4）。
 > **范围**：`crabmate-tui`（全屏 `tui` 为主，`repl` 相应联动）；候选与取舍参照 Desktop / Web（`frontend/`）聊天体验，**语义对齐，不追求 UI 复刻**。
 > **关联**：[`remote_cli_tui.md`](./remote_cli_tui.md)（TUI 母方案，P1–P5）、[`client_capability_matrix.md`](./client_capability_matrix.md)（TUI 行 L53–L81）、[`tui_settings_panel.md`](./tui_settings_panel.md)（设置面板，W3 遗留）、[`chat_ui_todo.md`](./chat_ui_todo.md)（Desktop 聊天 UI 已勾项 = “已做过”的参照，不要当缺口重做）、[`contract_pin.md`](./contract_pin.md)（契约钉点）、Server `docs/`（SSE / user-data / 会话权威）
 
@@ -103,12 +103,13 @@
 - **落点**：新增 `tui_mode/clipboard.rs`（纯序列化 + 探测），`render.rs`/`mod.rs` 接线；`md.rs` 暴露围栏边界。
 - **风险**：OSC52 需终端显式允许（tmux `set-clipboard on`）；SSH 到远端时剪贴板属本地终端，语义正确无需处理。密钥/敏感内容复制是用户主动行为，与 Desktop 同语义。
 
-#### W1.5 会话列输入过滤（G5 的一部分）
+#### W1.5 会话列标题过滤（G5 的一部分）— 已落地（v1）
 
 - **参照**：Desktop 侧栏搜索面板标题过滤（`search_panel.rs`）。
-- **方案**：左栏聚焦时输入普通字符进入过滤词（顶部或底行显示 `filter:`），`↑/↓` 在过滤结果间移动、Enter 使用、Esc/Backspace 清空退出；`/conv list` 同理可加尾参过滤。
-- **落点**：`state.rs`（`session_filter`）、`mod.rs`（左栏按键）、`render.rs`（左栏过滤态行渲染）。
-- **风险**：小。窄屏左栏不可见时过滤不生效（保持现状）。
+- **v1 已落地（命令入口）**：`/conv filter <词>`（`/conv list <词>` / `ls` / `show` 同义）按标题做大小写不敏感子串过滤，空标题按 `(untitled)` 参与匹配；空参或 `off`/`none`/`clear` 清除。左栏标题写成 `会话 [可见/总数] · filter: 词`，无匹配给 `（无匹配）` 占位行；`↑/↓` 只在可见行间走、`Enter` 使用，鼠标点击同样过可见映射。过滤生效时侧栏提示换成「`/conv filter off` 清过滤」。切会话（`/conv use`）与新建会话会清掉过滤 —— 否则会出现「切过去了但左栏看不见」。
+- **为什么不做「左栏内逐字收窄」**：左栏的裸字母键已占用（`n` 新建 / `r` 刷新 / `w` 跳右栏），字母即过滤会让它们随上下文变义且不可发现。状态模型（`session_filter` + 可见映射）与它完全兼容，将来只是多一层按键分流（见 issue #423 的评论）。
+- **落点**：`tui_mode/state_session_filter.rs`（过滤词 / 可见映射 / 选中吸附 / `move_selection`）、`controls.rs`（`/conv filter` 解析）、`conv_cmd.rs`（落地 + 回执）、`render.rs`（标题与占位行）、`ws_sidebar.rs`（光标口径 + 提示）、`mouse.rs`（点击过可见映射）。
+- **风险**：小。过滤只影响「显示 / 移动 / 鼠标命中」，`selected` 仍是全量下标，删除与切换链路未变；窄屏左栏不可见时过滤无副作用。
 
 #### W1.6 多行粘贴（bracketed paste）— 已落地（`tui_mode/paste.rs`、`tui_mode/state_paste.rs`）
 
@@ -198,7 +199,7 @@
   - W1.2：长回合中输入第二句 → 出现「已排队」系统行 → 回合**正常**结束才自动发出；取消 / 出错应退回输入框；输入框焦点下 Esc 清队（在侧栏 / 工作区树里要先 Esc 回输入框）。
   - W1.3：会话 A 输入半句 → 切 B 再切回 A → 半句仍在；`/conv new` 后为空。退出进程再启动、切回 A → 半句仍在（本机 `tui-drafts.json`）；`cat` 该文件能看到按 `api_base` 分区的条目，手改成坏 JSON 后启动仍正常（静默回落空表）。
   - W1.4：kitty/wezterm 下复制助手消息/代码块 → 粘贴到编辑器；不支持终端给出提示。
-  - W1.5：左栏输入字母过滤 → 选中使用；清空恢复全量。
+  - W1.5：`/conv filter 关键词` → 左栏只剩匹配项、标题显示 `会话 [m/n] · filter: 关键词` → `Tab` 进左栏 `↑↓` 只在结果间走、`Enter` 使用；`/conv filter off`（或空参）恢复全量；无匹配时显示 `（无匹配）` 且 `Enter`/`Delete` 不误伤。
   - W1.6：从编辑器复制一段多行文本粘进 composer → 整段落进输入框（含换行，光标在末尾）、**不会**被当成交付；粘贴内容夹 `Tab` 不切换焦点；单次超 32K 字符时 transcript 提示截断。`CM_TUI_PASTE=off` 时回到逐字符按键的旧行为。
   - W2.2：左栏选中会话按 `Delete` → 出现确认提示，`y` 删除、其它键取消；回合进行中按 `Delete` 应被拒绝并说明原因；`Shift+Delete` 免确认直删。
   - W3.2（G8）：触发一条长命令的审批 → 收起档只一行（超宽以 `…` 收尾），按 `Ctrl+E` 展开到主体区、命令按键宽折行、提示行显示「第 x-y / N 行」；`↑/↓`、`PgUp/PgDn`、`Home/End` 能滚到首尾（`End` 之后 `↑` 仍能回退）；再按 `Ctrl+E` 收起；展开态下 `Enter`/`Esc` 仍能决策。
