@@ -443,12 +443,12 @@ fn source_view_clips_wide_characters_by_display_width() {
         a.st.editor.open_file("src/lib.rs", 0);
         a.st.editor
             .accept_limited("// 汉字汉字汉字汉字汉字汉字\n", 100);
-        // 宽 20、行号栏 3 → 正文预算 15（裁切时给 `…` 留一列）。
+        // 视口 20、行号栏占 3 + 1 + 2 = 6 列 → 正文可用 14 列（裁切时给 `…` 留一列）。
         let rows = super::view_lines(&mut a.st.editor, None, 20, 10, &a.st.palette);
         let body = &rows[2].spans[2..];
         let text: String = body.iter().map(|s| s.content.as_ref()).collect();
         assert!(text.ends_with('…'), "超宽行要补省略号：{text:?}");
-        assert!(text.width() <= 15, "{text:?} 宽 {}", text.width());
+        assert!(text.width() <= 14, "{text:?} 宽 {}", text.width());
         assert!(text.starts_with("// 汉字"), "宽字符不得被切半：{text:?}");
     });
 }
@@ -530,4 +530,57 @@ fn mono_palette_wipes_every_syntax_colour() {
     ] {
         assert_eq!(color, Color::Reset, "{name} 在无色模式下必须 Reset");
     }
+}
+
+/// 每一行的总宽（行号 + `│ ` + 正文）都不得超过视口宽。
+///
+/// 这是渲染层唯一的硬约束：`pane_render` 把整段交给 `Paragraph`，超出的列从右边缘被裁掉
+/// —— 不崩、不报错，只是**最后一个字看不见**。曾经正文预算少算那一格分隔空格
+/// （`gutter + 2`），于是「恰好比可用宽多一个字」的行就踩这个坑，而且只在窄视口或长行上
+/// 偶发，从测试里看不出来。这里逐宽度扫一遍，把「总宽 ≤ 视口宽」变成不变量。
+#[test]
+fn source_rows_never_exceed_the_viewport_width() {
+    app(|a| {
+        a.st.editor.open_file("src/lib.rs", 0);
+        // 内容宽 16；行数 < 1000 → gutter 取 3 → 行号栏占 3 + 1 + 2 = 6 列。
+        a.st.editor.accept_limited("let abc = 12345;\n", 100);
+        let chrome = 3 + 3;
+        for width in chrome..=(chrome + 16 + 3) {
+            let rows = super::view_lines(&mut a.st.editor, None, width, 10, &a.st.palette);
+            let total: usize = rows[2]
+                .spans
+                .iter()
+                .map(|s| UnicodeWidthStr::width(s.content.as_ref()))
+                .sum();
+            assert!(
+                total <= width,
+                "视口宽 {width} 时该行占 {total} 列：{:?}",
+                rows[2]
+            );
+        }
+    });
+}
+
+/// 正文一列都放不下时不补 `…`。
+///
+/// 那一列必然被裁掉，看起来像「右边被啃了一口」；什么都不放至少是干净的。
+#[test]
+fn no_ellipsis_when_the_body_has_no_room() {
+    app(|a| {
+        a.st.editor.open_file("src/lib.rs", 0);
+        a.st.editor.accept_limited("let abc = 12345;\n", 100);
+        // 0..=6 都让正文预算归零（行号栏 6 列），只该剩行号与 `│ `。
+        for width in [0usize, 1, 5, 6] {
+            let rows = super::view_lines(&mut a.st.editor, None, width, 10, &a.st.palette);
+            assert_eq!(
+                rows[2].spans.len(),
+                2,
+                "视口宽 {width}：只该有行号与 `│ `，实际 {:?}",
+                rows[2]
+            );
+        }
+        // 刚好放下一列：这一列给 `…`，正文依然不出现。
+        let rows = super::view_lines(&mut a.st.editor, None, 7, 10, &a.st.palette);
+        assert_eq!(rows[2].spans.last().unwrap().content.as_ref(), "…");
+    });
 }
