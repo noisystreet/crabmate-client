@@ -28,6 +28,10 @@ use crate::serve::{FILE_VIEW_MAX_LINES, WorkspaceFile};
 #[path = "editor_find.rs"]
 pub(super) mod editor_find;
 
+// 词法分类器（issue #510 的 P1）：纯逻辑，挂在这里而不是 `mod.rs`——后者只剩 0 行余量。
+#[path = "editor_hl.rs"]
+pub(super) mod editor_hl;
+
 use self::editor_find::FindState;
 
 /// 一个制表位展开成几个空格。
