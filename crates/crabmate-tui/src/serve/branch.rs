@@ -17,8 +17,6 @@ use crate::serve::client::{REQUEST_TIMEOUT, ServeClient};
 /// `POST /chat/branch`：成功返回服务端的新 `revision`。
 ///
 /// 失败三分类见 [`BranchFailure`]：调用方据它决定「清绑定 / 提示先刷新 / 原样上抛」。
-// issue #422：命令接线在下一个提交（/conv retry）；此前只在单测里用到。
-#[allow(dead_code)]
 pub async fn post_chat_branch(
     client: &ServeClient,
     conversation_id: &str,

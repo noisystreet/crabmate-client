@@ -537,6 +537,7 @@ impl LaneApp<'_> {
             other @ (Control::ConvNew
             | Control::ConvRefresh
             | Control::ConvFilter(_)
+            | Control::ConvTurn(_)
             | Control::ConvUse(_)
             | Control::ConvUnknown(_)
             | Control::ConvExport(_)) => self.apply_conv_control(other),
@@ -751,14 +752,14 @@ impl LaneApp<'_> {
             UiEvent::Paste(text) => self.on_paste(text),
             // 鼠标：右栏工作区目录树的点击/滚轮（审批凥层/设置面板打开时内部直接忽略）。
             UiEvent::Mouse(m) => self.on_mouse(m),
-            // 尺寸变化只为唤醒：真值在 `draw_frame` 前现查（`sync_terminal_size`）。
-            // 变体刻意不携带尺寸，所以这里没有任何可缓存的 w/h。
+            // 尺寸变化只为唤醒：真值在 `draw_frame` 前现查（`sync_terminal_size`），变体不带尺寸。
             UiEvent::Resize => {}
             UiEvent::Text(delta) => {
                 self.st.turn_usage_diag.mark_model_output();
                 self.st.stream_delta(LineKind::Assistant, &delta);
             }
             UiEvent::Skills(result) => self.st.set_skills(result),
+            UiEvent::TurnBranched(result) => self.on_turn_branched(result),
             UiEvent::Thinking(delta) => {
                 self.st.turn_usage_diag.mark_model_output();
                 self.st.stream_delta(LineKind::Thinking, &delta);
@@ -769,8 +770,7 @@ impl LaneApp<'_> {
                 self.st.turn_usage_diag.mark_measured();
                 self.st.set_prompt_tokens(*snap);
             }
-            // 回合末补拉的用量（`GET /conversation/messages` 自带快照）：带 cid，
-            // 回包晚到（用户已切走）时丢弃，不把上个会话的数字挂到当前会话上。
+            // 回合末补拉的用量：带 cid，回包晚到（用户已切走）就丢弃，不挂到当前会话上。
             UiEvent::UsageHydrated {
                 conversation_id,
                 snapshot,

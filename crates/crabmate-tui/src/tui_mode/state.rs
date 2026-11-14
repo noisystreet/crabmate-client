@@ -55,7 +55,6 @@ mod cursor_edit;
 #[path = "state_session_filter.rs"]
 mod session_filter;
 
-// 截掉最后一轮（issue #422）：`/conv retry` / `/conv edit` 的本地半步，纯行算术。
 #[path = "state_truncate.rs"]
 mod truncate;
 
@@ -430,6 +429,7 @@ pub struct UiState {
     /// 左栏选中项下标。
     pub selected: usize,
     pub session_filter: Option<String>, // 左栏标题过滤词（`/conv filter`；None = 不过滤，见 #423）
+    pub pending_turn: super::conv_cmd::PendingTurn, // `/conv retry|edit` 的待办（issue #422）
     /// 待确认删除的会话行 id（`Delete` 第一次按下；`Shift+Delete` / 确认后清空）。
     ///
     /// 放 `UiState` 而不是 `LaneApp`：侧栏底部的提示行要按它切换成确认文案。

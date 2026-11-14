@@ -27,7 +27,7 @@ impl LaneApp<'_> {
         }
         match key.code {
             KeyCode::Enter if is_alt_enter(&key) => self.st.insert_newline(),
-            KeyCode::Enter => self.on_submit(),
+            KeyCode::Enter => self.submit_or_edit(),
             KeyCode::Char('o') if is_ctrl_o(&key) => self.on_submit(),
             // Ctrl+W：宽屏时聚焦右栏工作区目录树（窄屏忽略，侧栏本就隐藏）。
             KeyCode::Char('w') if is_ctrl_w(&key) && self.st.sidebar_visible => {
