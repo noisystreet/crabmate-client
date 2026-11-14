@@ -42,7 +42,10 @@ pub use conversation::{
 };
 pub use crabmate_client_api::clarify_form::PendingClarification;
 pub use crabmate_client_api::sse_dispatch::ClarificationQuestionnaireInfo;
-pub use ctl::{add_instance, list_instances, primary_binding, same_api_base, set_instance_enabled};
+pub use ctl::{
+    add_instance, instance_status, list_instances, primary_binding, restart_instance,
+    same_api_base, set_instance_enabled,
+};
 pub use error::TermError;
 pub use session_store::set_session_conversation_store;
 pub use sessions::{

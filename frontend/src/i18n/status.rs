@@ -194,6 +194,68 @@ pub fn ctl_refresh_tooltip(l: Locale) -> &'static str {
     }
 }
 
+/// 「重启」按钮：请 ctl 重启这条实例（同步 op，最长约 50 s）。
+pub fn ctl_row_restart(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "重启",
+        Locale::En => "Restart",
+    }
+}
+
+/// 在途时按钮上的字：说清「已经点过了」，否则用户会以为没反应并再点一次。
+pub fn ctl_row_restarting(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "重启中…",
+        Locale::En => "Restarting…",
+    }
+}
+
+/// 「重启」按钮的 `title`：这个动作会**换进程**，连着的窗口会掉线。
+pub fn ctl_restart_tooltip(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => {
+            "请 ctl 重启这条实例（先停再起，同步执行，最长约 50 s）；连着的窗口会掉线，需要重连"
+        }
+        Locale::En => {
+            "Ask ctl to restart this instance (stop then start, synchronous, up to ~50 s); connected windows drop and need a reconnect"
+        }
+    }
+}
+
+/// 重启成功的结论行（`notes` 由调用方拼在后面）。
+pub fn ctl_restart_done(l: Locale, name: &str) -> String {
+    match l {
+        Locale::ZhHans => format!("{name} 已重启"),
+        Locale::En => format!("{name} restarted"),
+    }
+}
+
+/// `restarted = false`：不是失败，但也**不是**「重启成功」，照 Server 的说法写。
+pub fn ctl_restart_unchanged(l: Locale, name: &str) -> String {
+    match l {
+        Locale::ZhHans => format!("{name} 未重启（Server 回 restarted = false）"),
+        Locale::En => format!("{name} was not restarted (server answered restarted = false)"),
+    }
+}
+
+/// 重启失败：带上 Server 的 `code`（`reason` 里已含），不让界面只剩「没反应」。
+pub fn ctl_restart_failed(l: Locale, name: &str, reason: &str) -> String {
+    match l {
+        Locale::ZhHans => format!("重启 {name} 失败：{reason}"),
+        Locale::En => format!("Restarting {name} failed: {reason}"),
+    }
+}
+
+/// 壳回的 JSON 读不懂（老壳 / 契约漂移）：说清「出了什么」而不是静默。
+pub fn ctl_restart_bad_reply(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "重启回执读不懂（壳与前端契约不一致）：刷新一下再看实例状态",
+        Locale::En => {
+            "Unreadable restart reply (shell/frontend contract mismatch); refresh and check the instance"
+        }
+    }
+}
+
 /// 左栏连接行的 `title`（单连接时这一行同时是「改基址」的入口）：完整基址 + 改它的去处。
 ///
 /// 为什么把原文重复一遍：行内正文本只留 `host:port` / 用户起的名字，而用户点开它的

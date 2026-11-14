@@ -24,7 +24,7 @@ use tokio::sync::oneshot;
 
 use crabmate_client_api::chat_export::ExportFormat;
 use crabmate_client_api::conversation_state::ConversationStateOutcome;
-use crabmate_client_api::ctl::CtlInstance;
+use crabmate_client_api::ctl::{CtlInstance, RestartOutcome};
 use crabmate_client_api::prompt_tokens::TiktokenPromptTokensSnapshot;
 
 use crate::conv_export::ExportDone;
@@ -48,6 +48,18 @@ use super::worker_jobs::{
     job_workspace_dir, job_workspace_query, job_workspace_set, job_write_permission,
     job_ws_projects, job_ws_switch_project,
 };
+
+/// 一条实例的 ctl 报告载荷（[`UiEvent::CtlReport`] 的内容）。
+///
+/// 两个 op 各一支而不是共用 `String`：`status` 与 `restart` 的成功体本来就不同
+/// （后者多 `restarted` 与 `notes`），压成文本会把「怎么显示」提前固化在 worker 里，
+/// 也就没法给这两条路径各写一条能单测的渲染函数。
+pub(super) enum CtlReport {
+    /// `{"op":"status"}`：整份 `status_row`。
+    Status(Result<CtlInstance, String>),
+    /// `{"op":"restart"}`：重启后的状态行 + Server 的 `notes`。
+    Restarted(Result<RestartOutcome, String>),
+}
 
 /// UI 事件的**载荷**（键盘线程与回合/拉取线程都会产出，但「归谁」由 [`Inbound`] 决定：
 /// 全局输入 / 某条 lane 的出站事件 / 外壳动作，见 [`super::inbound`]）。
@@ -212,6 +224,16 @@ pub(super) enum UiEvent {
     /// （连不上 / 读写失败 / 被拒绝）处置各不相同，压成一个裸字符串再让 UI 重新猜分类
     /// 没有意义 —— 分类留在 `serve::ctl`，UI 只负责显示。
     CtlList(Result<Vec<CtlInstance>, String>),
+    /// 单条实例的报告（`status` 详情 / `restart` 结局）。
+    ///
+    /// 两个 op 共用**一个**变体：`mod.rs` 的 `on_msg` 贴着 920 行门禁，一条分派比两条
+    /// 省一行；而两者的归属与渲染完全一致 —— 都写进敲命令的那条 lane 的 transcript。
+    CtlReport {
+        /// 实例名（失败分支也要说得清是哪条）。
+        name: String,
+        /// 详情或重启结局。
+        report: CtlReport,
+    },
     /// 启动时 user-data 设置快照（prefs + llm-overrides）拉取结果（合成持久层）。
     UserData(Result<PersistedSettings, String>),
     /// `llm-overrides` 保存结果：`Ok` 回传已应用动作（面板据此清 staged）。

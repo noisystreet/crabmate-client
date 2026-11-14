@@ -14,8 +14,9 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crabmate_client_api::ctl::{
-    AddOutcome, CtlError, CtlInstance, CtlRequest, ToggleOutcome, parse_add_response,
-    parse_list_response, parse_toggle_response,
+    AddOutcome, CtlError, CtlInstance, CtlRequest, RESTART_BUDGET_SECS, RestartOutcome,
+    ToggleOutcome, parse_add_response, parse_list_response, parse_restart_response,
+    parse_status_response, parse_toggle_response,
 };
 
 use super::url::normalize_api_base;
@@ -25,6 +26,13 @@ use super::url::normalize_api_base;
 /// 不设成 60 s（那是 Server 的 `HANDLE_TIMEOUT`）：超时太长会把界面冻在一个已经不响应的
 /// socket 上；`add` 起实例慢的那部分由 Server 自己等，客户端先放弃更安全（`list` 是只读的）。
 const IO_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// `restart` 的读超时：**必须**比 [`RESTART_BUDGET_SECS`] 长。
+///
+/// 与上面那条 5 s 的取舍相反，理由也正相反：`restart` 是**同步** op，Server 跑完
+/// down → up → 等就绪才回这一行，正常用满整个预算时 5 s 会把一次**成功**的重启读成
+/// 超时（用户会以为失败而重试，把一条正在起的实例再打一次）。留 20 s 余量给进程收尾。
+const RESTART_IO_TIMEOUT: Duration = Duration::from_secs(RESTART_BUDGET_SECS + 20);
 
 /// 单行响应上限：`list` 的响应是几十个短对象，1 MiB 已远超合理值。
 const MAX_RESPONSE_BYTES: u64 = 1024 * 1024;
@@ -178,6 +186,42 @@ pub fn set_instance_enabled(
     parse_toggle_response(&line).map_err(CtlCallError::Rejected)
 }
 
+/// 查**一条**实例的详情（`{"op":"status","name":…}`）。
+///
+/// 响应体就是 `status --json` 的那一行（与 `list` 的行**同一份**形状），所以直接返回
+/// [`CtlInstance`]：详情视图不必再拉全量 `list` 自己筛一条 —— 那种写法在实例很多时既
+/// 慢又容易与 `list` 的显示口径漂移。
+///
+/// 失败分类与 `list` 一致（`instance_not_found` 是「没有状态记录」，不是「名字写错」）。
+pub fn instance_status(socket: &Path, name: &str) -> Result<CtlInstance, CtlCallError> {
+    let request = CtlRequest::Status {
+        name: name.to_string(),
+    };
+    let line = exchange(socket, &request.to_line())?;
+    parse_status_response(&line).map_err(CtlCallError::Rejected)
+}
+
+/// 重启**一条**实例（`{"op":"restart",…}`），返回重启后的状态行与 Server 的提示。
+///
+/// **同步 op**：Server 跑完 down → up → 等就绪才回这一行，所以读超时按
+/// [`RESTART_IO_TIMEOUT`] 设，且**只能**从 worker 线程调用 —— UI 线程等 50 s 就是卡死。
+/// `grace` / `timeout` 一律原样转发（`None` = Server 默认 10 s）：预算上限也在 Server
+/// （`restart_budget_exceeded`），客户端不提前替它判。
+pub fn restart_instance(
+    socket: &Path,
+    name: &str,
+    grace: Option<u64>,
+    timeout: Option<u64>,
+) -> Result<RestartOutcome, CtlCallError> {
+    let request = CtlRequest::Restart {
+        name: name.to_string(),
+        grace,
+        timeout,
+    };
+    let line = exchange_within(socket, &request.to_line(), RESTART_IO_TIMEOUT)?;
+    parse_restart_response(&line).map_err(CtlCallError::Rejected)
+}
+
 /// 主 lane 的默认名字：ctl 里反查不到对应实例时用它。
 ///
 /// 也是「`--api-base` 指向一台没有声明的 serve」时的唯一结果 —— 那种情况下
@@ -261,7 +305,19 @@ fn url_key(url: &str) -> Option<String> {
 
 /// 写一行、读一行。
 fn exchange(socket: &Path, request_line: &str) -> Result<String, CtlCallError> {
-    let mut stream = connect(socket)?;
+    exchange_within(socket, request_line, IO_TIMEOUT)
+}
+
+/// 写一行、读一行，读写超时由调用方决定。
+///
+/// 只有 `restart` 用非默认值（见 [`RESTART_IO_TIMEOUT`]）：其余 op 都是「Server 立刻就能
+/// 回」的短请求，给它们 50 s 只会把「socket 那头没响应」拖成一次长卡。
+fn exchange_within(
+    socket: &Path,
+    request_line: &str,
+    io_timeout: Duration,
+) -> Result<String, CtlCallError> {
+    let mut stream = connect(socket, io_timeout)?;
     stream
         .write_all(format!("{request_line}\n").as_bytes())
         .and_then(|()| stream.flush())
@@ -279,15 +335,15 @@ fn exchange(socket: &Path, request_line: &str) -> Result<String, CtlCallError> {
 }
 
 /// 建连并设置读写超时。
-fn connect(socket: &Path) -> Result<UnixStream, CtlCallError> {
+fn connect(socket: &Path, io_timeout: Duration) -> Result<UnixStream, CtlCallError> {
     let stream = UnixStream::connect(socket).map_err(|e| CtlCallError::Connect {
         path: socket.to_path_buf(),
         detail: e.to_string(),
     })?;
     // 超时设不上不该让一次只读请求失败，但也不能假装成功：失败即视为 IO 错误。
     stream
-        .set_read_timeout(Some(IO_TIMEOUT))
-        .and_then(|()| stream.set_write_timeout(Some(IO_TIMEOUT)))
+        .set_read_timeout(Some(io_timeout))
+        .and_then(|()| stream.set_write_timeout(Some(io_timeout)))
         .map_err(|e| CtlCallError::Io(format!("设置超时失败：{e}")))?;
     Ok(stream)
 }
@@ -551,6 +607,64 @@ mod tests {
             "两个 Origin 不合并"
         );
         assert!(!same_api_base("", ""), "空串不是「同一台 serve」的证据");
+    }
+
+    /// `status` 走 `status` op，并原样解析那一行（与 `list` 的行同一形状）。
+    ///
+    /// 请求行只有 `op` + `name`：Server 对这两个 op 的字段白名单就这两项。
+    #[test]
+    fn instance_status_sends_status_op_and_parses_the_row() {
+        let (sock, handle) = fake_ctl(
+            r#"{"ok":true,"name":"proj-a","state":"ready","desired_state":"running","observed":"ready","base_url":"http://127.0.0.1:8081/","pid":4242}"#,
+        );
+        let inst = instance_status(&sock, "proj-a").expect("应成功");
+        let request = handle.join().expect("假服务端线程");
+        assert_eq!(request.trim(), r#"{"name":"proj-a","op":"status"}"#);
+        assert_eq!(inst.desired_state.as_deref(), Some("running"));
+        assert!(inst.can_connect());
+        let _ = std::fs::remove_dir_all(sock.parent().unwrap());
+    }
+
+    /// `restart` 缺省时不发 `grace` / `timeout`（Server 用默认 10 s），并把 `notes` 带回。
+    #[test]
+    fn restart_instance_sends_whitelisted_fields_and_keeps_notes() {
+        let (sock, handle) = fake_ctl(
+            r#"{"ok":true,"restarted":true,"name":"proj-a","state":"ready","pid":4243,"notes":["profile 漂移：heavy → default"]}"#,
+        );
+        let out = restart_instance(&sock, "proj-a", None, None).expect("应成功");
+        let request = handle.join().expect("假服务端线程");
+        assert_eq!(request.trim(), r#"{"name":"proj-a","op":"restart"}"#);
+        assert!(out.restarted);
+        assert_eq!(out.instance.pid, Some(4243));
+        assert_eq!(out.notes.len(), 1, "{:?}", out.notes);
+        let _ = std::fs::remove_dir_all(sock.parent().unwrap());
+    }
+
+    /// 重启被拒时按 Server 的 `code` 说话：`restart_budget_exceeded` 不能被报成「连不上」，
+    /// 也不能只剩一句「没反应」。
+    #[test]
+    fn restart_rejection_keeps_the_server_code() {
+        let (sock, handle) = fake_ctl(
+            r#"{"ok":false,"code":"restart_budget_exceeded","error":"grace + timeout 不得超过 50s"}"#,
+        );
+        let err = restart_instance(&sock, "proj-a", Some(40), Some(40)).unwrap_err();
+        let request = handle.join().expect("假服务端线程");
+        assert!(
+            request.contains(r#""grace":40"#) && request.contains(r#""timeout":40"#),
+            "显式给的预算要原样转发（让 Server 去拒）：{request}"
+        );
+        match &err {
+            CtlCallError::Rejected(e) => {
+                assert_eq!(
+                    e.kind,
+                    crabmate_client_api::ctl::CtlErrorKind::RestartBudgetExceeded
+                );
+                assert_eq!(e.code.as_deref(), Some("restart_budget_exceeded"));
+            }
+            other => panic!("应归 Rejected，实际 {other:?}"),
+        }
+        assert!(err.user_message().contains("restart_budget_exceeded"));
+        let _ = std::fs::remove_dir_all(sock.parent().unwrap());
     }
 
     /// 默认路径只从 `XDG_RUNTIME_DIR` 派生，不猜 `/tmp`。

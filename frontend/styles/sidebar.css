@@ -983,3 +983,44 @@
 .nav-rail-ctl-connect:hover {
   background: var(--surface-hover);
 }
+
+/* 「重启」：ctl 的 restart 是同步 op（最长约 50 s），按钮在途中禁用并转成「重启中…」。*/
+.nav-rail-ctl-restart {
+  flex-shrink: 0;
+  padding: 2px 6px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) ease,
+    color var(--dur-fast) ease;
+}
+
+.nav-rail-ctl-restart:hover:enabled {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.nav-rail-ctl-restart:disabled {
+  cursor: progress;
+  color: var(--warn);
+}
+
+/* 重启结果的提示行：`notes` 与错误码只有这一处能露出来（别让它们只进控制台）。 */
+.nav-rail-ctl-notice {
+  margin: 2px 4px 0;
+  padding: 2px 4px;
+  border-radius: var(--radius-sm);
+  background: var(--success-bg);
+  color: var(--text);
+  font-size: var(--text-xs);
+  word-break: break-word;
+}
+
+.nav-rail-ctl-notice--error {
+  background: var(--error-bg);
+  color: var(--error);
+}

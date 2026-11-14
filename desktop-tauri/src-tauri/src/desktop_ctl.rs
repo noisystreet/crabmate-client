@@ -5,22 +5,37 @@
 //! —— 依赖方向不允许 desktop 引用 tui。协议形状、`observed` 词表与错误分类仍然只有
 //! 一份（`crabmate_client_api::ctl`），本模块只做 socket 读写。
 //!
-//! **只做 `list`（只读）**：`add` / `remove` / `enable`·`disable` 会写 `instances.toml`，
-//! 而 `crabmatectl --watch` 已经是那个文件的写者；本仓再写一次就是两个写者竞争。
-//! 少一条连接由用户关窗口完成，不靠摘声明。
+//! **不做 `add` / `remove` / `enable`·`disable`**：那四个 op 会写 `instances.toml`，而
+//! `crabmatectl --watch` 已经是那个文件的写者；本仓再写一次就是两个写者竞争。少一条连接
+//! 由用户关窗口完成，不靠摘声明。
+//!
+//! **做 `list` 与 `restart`**：`list` 是只读查询；`restart` 是「**请 ctl** 重启一条实例」，
+//! 声明仍由 ctl 写 —— 客户端只是它的调用方，不构成第二个写入者。它也是 TUI
+//! `/lane restart` 的同一条通道（`serve::ctl::restart_instance`）。单条详情（`status`）
+//! 只有 TUI 用得上（`/lane status`）：桌面左栏那几行本来就从 `list` 来，多一条不画任何
+//! 东西的命令就是多一份没人调用的 IPC 面。
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use crabmate_client_api::ctl::{CtlInstance, CtlRequest, parse_list_response};
+use crabmate_client_api::ctl::{
+    CtlInstance, CtlRequest, RESTART_BUDGET_SECS, RestartOutcome, parse_list_response,
+    parse_restart_response,
+};
 
 /// 单次读写超时：与 Server 侧 `IO_TIMEOUT`（5 s）及 TUI 同一值。
 ///
 /// 不跟 Server 的 `HANDLE_TIMEOUT`（60 s）：超时太长会把界面冻在一个已经不响应的
-/// socket 上，而 `list` 是只读的，客户端先放弃再重试更安全。
+/// socket 上，而 `list` / `status` 是只读的，客户端先放弃再重试更安全。
 const IO_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// `restart` 的读写超时：**必须**明显长于 [`RESTART_BUDGET_SECS`]。
+///
+/// 与上面那条相反，理由也相反：`restart` 是**同步** op（down → up → 等就绪才回一行），
+/// 用 5 s 会把一次**成功**的重启读成超时，用户重试就等于把一条正在起的实例再打一次。
+const RESTART_IO_TIMEOUT: Duration = Duration::from_secs(RESTART_BUDGET_SECS + 20);
 
 /// 单行响应上限：`list` 是几十个短对象，1 MiB 已远超合理值（与 TUI 同值）。
 const MAX_RESPONSE_BYTES: u64 = 1024 * 1024;
@@ -39,19 +54,12 @@ fn default_socket_path_if_present() -> Option<PathBuf> {
     path.exists().then_some(path)
 }
 
-/// 发一条 `list` 并读一行回包。
-fn list_at(path: &Path) -> Result<Vec<CtlInstance>, String> {
+/// 发一行请求并读一行回包。超时由调用方按 op 决定（见两个 `*_IO_TIMEOUT`）。
+fn exchange(path: &Path, request: &str, io_timeout: Duration) -> Result<String, String> {
     let mut stream = UnixStream::connect(path).map_err(|e| format!("连接失败：{e}"))?;
     // 超时设不上不是致命错（某些平台/配置下会失败），继续尝试读写。
-    let _ = stream.set_read_timeout(Some(IO_TIMEOUT));
-    let _ = stream.set_write_timeout(Some(IO_TIMEOUT));
-
-    // `include_unmanaged: false` —— 与 TUI 同一口径：要的是**声明里的**实例
-    // （= 可能是 lane 的那些），不是人工 `up` 起的进程。
-    let request = CtlRequest::List {
-        include_unmanaged: false,
-    }
-    .to_line();
+    let _ = stream.set_read_timeout(Some(io_timeout));
+    let _ = stream.set_write_timeout(Some(io_timeout));
     writeln!(stream, "{request}").map_err(|e| format!("写入失败：{e}"))?;
 
     let mut reader = BufReader::new(stream).take(MAX_RESPONSE_BYTES);
@@ -62,7 +70,37 @@ fn list_at(path: &Path) -> Result<Vec<CtlInstance>, String> {
     if line.trim().is_empty() {
         return Err("控制面返回空响应".to_string());
     }
+    Ok(line)
+}
+
+/// 拉一次实例列表。
+///
+/// `include_unmanaged: false` —— 与 TUI 同一口径：要的是**声明里的**实例
+/// （= 可能是 lane 的那些），不是人工 `up` 起的进程。
+fn list_at(path: &Path) -> Result<Vec<CtlInstance>, String> {
+    let request = CtlRequest::List {
+        include_unmanaged: false,
+    }
+    .to_line();
+    let line = exchange(path, &request, IO_TIMEOUT)?;
     parse_list_response(&line).map_err(|e| format!("响应无法解析：{e:?}"))
+}
+
+/// 重启一条实例（`restart` op；同步，最长可占满 [`RESTART_BUDGET_SECS`]）。
+fn restart_at(
+    path: &Path,
+    name: &str,
+    grace: Option<u64>,
+    timeout: Option<u64>,
+) -> Result<RestartOutcome, String> {
+    let request = CtlRequest::Restart {
+        name: name.to_string(),
+        grace,
+        timeout,
+    }
+    .to_line();
+    let line = exchange(path, &request, RESTART_IO_TIMEOUT)?;
+    parse_restart_response(&line).map_err(|e| format!("响应无法解析：{e:?}"))
 }
 
 /// 控制面里**声明过的**实例（只读查询）。
@@ -88,9 +126,29 @@ pub(crate) async fn ctl_list_instances() -> Vec<CtlInstance> {
     .unwrap_or_default()
 }
 
+/// 重启一条实例（`{"op":"restart",…}`），回重启后的状态行与 Server 的 `notes`。
+///
+/// **同步 op**：服务端跑完 down → up → 等就绪才回这一行（最长 [`RESTART_BUDGET_SECS`]），
+/// 所以必须待在阻塞线程池里 —— 占住异步 worker 会让整个窗口（含其它窗口的调用）
+/// 在后端排队。`grace` / `timeout` 省略即 Server 默认各 10 s；预算上限也在 Server
+/// （`restart_budget_exceeded`），客户端不替它判。
+#[tauri::command]
+pub(crate) async fn ctl_restart_instance(
+    name: String,
+    grace: Option<u64>,
+    timeout: Option<u64>,
+) -> Result<RestartOutcome, String> {
+    let path = default_socket_path_if_present().ok_or_else(|| {
+        "控制面 socket 不存在（需要先跑 `crabmatectl supervise --socket`）".to_string()
+    })?;
+    tauri::async_runtime::spawn_blocking(move || restart_at(&path, &name, grace, timeout))
+        .await
+        .map_err(|e| format!("重启任务异常：{e}"))?
+}
+
 #[cfg(test)]
 mod tests {
-    use super::default_socket_path_if_present;
+    use super::{IO_TIMEOUT, RESTART_IO_TIMEOUT, default_socket_path_if_present};
 
     #[test]
     fn a_missing_default_socket_is_none_not_an_error() {
@@ -100,5 +158,15 @@ mod tests {
         if std::env::var_os("XDG_RUNTIME_DIR").is_none() {
             assert!(default_socket_path_if_present().is_none());
         }
+    }
+
+    /// `restart` 的读超时必须明显长于普通读：它是同步 op，用 5 s 会把**成功**读成超时。
+    #[test]
+    fn restart_waits_longer_than_a_read() {
+        assert!(RESTART_IO_TIMEOUT > IO_TIMEOUT);
+        assert!(
+            RESTART_IO_TIMEOUT.as_secs() > crabmate_client_api::ctl::RESTART_BUDGET_SECS,
+            "读超时要覆盖整个 grace + timeout 预算"
+        );
     }
 }

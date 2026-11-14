@@ -259,7 +259,7 @@ TUI 在左栏下半画 lane 区（`tui_multi_server.md` §4.6），Desktop 现�
 | 分组 | 数据源 | 行内动作 |
 |---|---|---|
 | 连接（已连窗口） | `ConnectionRegistry`（`list_connections` + `connections_changed`） | 点击切窗口；非本窗口的行有「关闭」 |
-| 可连实例 | `ctl_list_instances`（只读 unix socket） | `ready` 且带基址的行有「连接」；其余只显示状态 |
+| 可连实例 | `ctl_list_instances` / `ctl_restart_instance`（unix socket） | `ready` 且带基址的行有「连接」；其余只显示状态。每行另有「重启」（`restart` 是同步 op，在途中禁用按钮，回执的 `notes` 与 `pid` 写在分组下方一行 —— 见 #497） |
 
 ### 14.1 为什么壳侧再写一份 socket IO
 
@@ -270,6 +270,12 @@ TUI 在左栏下半画 lane 区（`tui_multi_server.md` §4.6），Desktop 现�
 
 只做 `list`：`add` / `remove` / `enable`·`disable` 会写 `instances.toml`，而
 `crabmatectl --watch` 已经是那个文件的写者。少一条连接由关窗口完成，不靠摘声明。
+
+**#497 起多一个 `restart`，它不破坏上面这条**：`restart` 不写 `instances.toml`，只是请 ctl
+重启一条实例（声明仍由 ctl 写），所以壳仍然不是第二个写入者。它是**同步** op（down → up →
+等就绪才回一行，最长约 50 s），因此读超时单独放宽到 50 s + 20 s、调用一律扔进
+`spawn_blocking`，并且按钮在途中禁用。`status`（单条详情）只留给 TUI —— 桌面这几行本来
+就从 `list` 来，多一条没人调用的 IPC 面不如不加。
 
 ### 14.2 四种结果，不是一个布尔
 
