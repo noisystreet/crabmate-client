@@ -93,14 +93,14 @@ mod workspace_cmd;
 mod workspace_keys;
 mod workspace_tree;
 mod ws_event;
+mod ws_file_kind;
 mod ws_sidebar;
 mod ws_truncate;
 
-use std::borrow::Cow;
-use std::sync::mpsc::{Receiver, Sender};
-
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use std::borrow::Cow;
+use std::sync::mpsc::{Receiver, Sender};
 
 use crate::serve::{
     ApprovalDecision, ChatStreamOutcome, ServeClient, StreamCancel, StreamResume, WorkspaceDirData,

@@ -16,6 +16,7 @@ use super::render::{
 };
 use super::state::{Focus, UiState};
 use super::workspace_tree::WsRow;
+use super::ws_file_kind;
 use super::ws_truncate::middle_ellipsis;
 
 /// 工作区树（目录行）聚焦时的按键提示。宽度必须 ≤ 侧栏内宽
@@ -77,16 +78,13 @@ fn workspace_title(st: &UiState, width: usize) -> Line<'static> {
 
 /// 单棵树行文本 + 名称是否被省略（供提示行判断要不要补全名）。
 ///
-/// 缩进 + 目录 `▾/▸`（文件用空格对齐）+ 名称；名称超宽时中段省略，见
-/// [`middle_ellipsis`]：开头与扩展名都保留，避免同目录长名被压成一串 `…xx.rs`。
-fn ws_row_text(row: &WsRow, width: usize) -> (String, bool) {
+/// 缩进 + 行首字形 + 名称；名称超宽时中段省略，见 [`middle_ellipsis`]：开头与扩展名都
+/// 保留，避免同目录长名被压成一串 `…xx.rs`。
+///
+/// `icons` 是显式参数而不是内部读开关：渲染单测要能同时覆盖「开」与「关」两种宽度预算。
+fn ws_row_text(row: &WsRow, width: usize, icons: bool) -> (String, bool) {
     let pad = "  ".repeat(usize::from(row.indent));
-    let glyph = if row.is_dir {
-        if row.expanded { "▾ " } else { "▸ " }
-    } else {
-        "  "
-    };
-    let prefix = format!("{pad}{glyph}");
+    let prefix = format!("{pad}{}", row_glyph(row, icons));
     let prefix_w = UnicodeWidthStr::width(prefix.as_str());
     if prefix_w >= width {
         return (truncate_display(&prefix, width), true);
@@ -99,12 +97,28 @@ fn ws_row_text(row: &WsRow, width: usize) -> (String, bool) {
     )
 }
 
+/// 行首字形：目录用折叠箭头，文件用类别标记（`icons` 关闭时留两列空白）。
+///
+/// 三者都是**恒 2 列**：`▸ ` / `▾ ` / `{ ` / `  `。宽度预算与鼠标命中用的是同一份
+/// 算术（行号定位，不看列），所以这里绝不能出现宽度可变的字形——某个终端把图标算成
+/// 2 列宽时，右栏整体就会错位。
+fn row_glyph(row: &WsRow, icons: bool) -> &'static str {
+    if row.is_dir {
+        return if row.expanded { "▾ " } else { "▸ " };
+    }
+    if !icons {
+        return "  ";
+    }
+    // `file_kind` 只接受 `is_dir`，这里已是文件分支，故传 `false`。
+    ws_file_kind::icon(ws_file_kind::file_kind(&row.name, false)).unwrap_or("  ")
+}
+
 /// 该行在给定内宽下是否画不全。
 ///
 /// 高亮行左缘多一个 `▎`（`push_sidebar_line` 按 `width - 1` 再截一次），所以
 /// 「名称本身没超」也可能被那一列挤掉——两种都算画不全，提示行才需要补全名。
 fn ws_row_clipped(row: &WsRow, width: usize) -> bool {
-    let (text, name_clipped) = ws_row_text(row, width);
+    let (text, name_clipped) = ws_row_text(row, width, ws_file_kind::icons_enabled());
     name_clipped || UnicodeWidthStr::width(text.as_str()) > width.saturating_sub(1)
 }
 
@@ -160,19 +174,21 @@ fn workspace_sidebar_rows(st: &UiState, width: usize) -> Vec<Line<'static>> {
         return rows;
     }
     let highlight = st.focus == Focus::Workspace;
+    // 每帧取一次：开关是进程级的，逐行再问一遍既无用又多一次 `OnceLock` 命中。
+    let icons = ws_file_kind::icons_enabled();
     for (i, row) in st.ws_rows.iter().enumerate() {
         // 目录 / 文件 / 占位三档颜色都取 palette：写死的 `LightCyan` / `White` 在浅色主题下
         // 会变成「浅底白字」，等于看不见。
         let fg = if row.placeholder {
             pal.muted
-        } else if row.is_dir {
-            pal.accent
         } else {
-            pal.fg
+            // 目录 / 代码 / 配置 / 文档 / 图片 / 其它：类型 → 槽的映射在 `Palette` 里，
+            // 这里只说「这行是什么」。自己挑槽的话，同一类型迟早会在这里和那里两个颜色。
+            pal.ws_entry_color(ws_file_kind::file_kind(&row.name, row.is_dir))
         };
         push_sidebar_line(
             &mut rows,
-            ws_row_text(row, width).0,
+            ws_row_text(row, width, icons).0,
             fg,
             highlight && i == st.ws_cursor,
             pal,
@@ -464,6 +480,10 @@ fn workspace_hint(st: &UiState) -> &'static str {
         _ => WORKSPACE_HINT,
     }
 }
+
+#[cfg(test)]
+#[path = "ws_sidebar_file_kind_tests.rs"]
+mod file_kind_tests;
 
 #[cfg(test)]
 mod tests {
@@ -828,7 +848,7 @@ mod tests {
     #[test]
     fn deep_row_keeps_filename_tail() {
         let row = ws_row(2, "a/b/c/module_name.rs", "module_name.rs", false, false);
-        let (text, clipped) = ws_row_text(&row, 14);
+        let (text, clipped) = ws_row_text(&row, 14, true);
         assert!(UnicodeWidthStr::width(text.as_str()) <= 14);
         assert!(text.ends_with("name.rs"), "保留尾部文件名：{text}");
         assert!(text.contains('…'), "中段省略：{text}");
@@ -845,7 +865,7 @@ mod tests {
             false,
             false,
         );
-        let (text, clipped) = ws_row_text(&row, 20);
+        let (text, clipped) = ws_row_text(&row, 20, true);
         assert!(UnicodeWidthStr::width(text.as_str()) <= 20, "{text}");
         assert!(clipped);
         assert!(!text.contains("crabmate_super_long"), "整体已超宽：{text}");
