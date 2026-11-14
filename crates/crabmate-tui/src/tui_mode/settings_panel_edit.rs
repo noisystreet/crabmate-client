@@ -70,6 +70,8 @@ enum EditAction {
     CommitToggle,
     Insert(char),
     Backspace,
+    /// `Delete`：删掉光标处（之后）的一个字符，光标不动。
+    Delete,
     MoveLeft,
     MoveRight,
     /// 下拉列表里向上/向下移动（主题用；到两端停住，不环绕）。
@@ -113,6 +115,7 @@ impl SettingsPanel {
             EditAction::Cancel => self.editing = None,
             EditAction::Insert(c) => self.edit_insert(c),
             EditAction::Backspace => self.edit_backspace(),
+            EditAction::Delete => self.edit_delete_forward(),
             EditAction::MoveLeft => self.edit_move(true),
             EditAction::MoveRight => self.edit_move(false),
             EditAction::PickUp => self.pick_step(true),
@@ -252,6 +255,19 @@ impl SettingsPanel {
         }
     }
 
+    /// 文本编辑：删掉光标处（之后）的一个字符，光标不动（`Backspace` 的对偶）。
+    ///
+    /// 缓冲是 `Vec<char>`，所以这里和 `edit_insert` 一样是纯下标操作 —— 不存在
+    /// 「按字节删切出半个汉字」的问题。
+    fn edit_delete_forward(&mut self) {
+        let Some(Editing::Text { buf, cursor, .. }) = &mut self.editing else {
+            return;
+        };
+        if *cursor < buf.len() {
+            buf.remove(*cursor);
+        }
+    }
+
     /// 编辑态 ←/→：文本字段移动光标；模式/思考/工具/主题/网关/会话存储枚举移动选项
     /// （↑↓ 不动）。
     fn edit_move(&mut self, left: bool) {
@@ -332,6 +348,7 @@ fn text_action(code: KeyCode) -> Option<EditAction> {
         KeyCode::Enter => Some(EditAction::CommitText),
         KeyCode::Char(c) => Some(EditAction::Insert(c)),
         KeyCode::Backspace => Some(EditAction::Backspace),
+        KeyCode::Delete => Some(EditAction::Delete),
         KeyCode::Left => Some(EditAction::MoveLeft),
         KeyCode::Right => Some(EditAction::MoveRight),
         _ => None,

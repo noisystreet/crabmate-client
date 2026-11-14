@@ -175,6 +175,11 @@ impl LaneApp<'_> {
                 ov.backspace();
                 true
             }
+            // `Delete` 是向后删的对偶：问卷答案常有几十个字，改中间的错字不该把右边重打。
+            KeyCode::Delete => {
+                ov.delete_forward();
+                true
+            }
             KeyCode::Left => {
                 ov.move_cursor(false);
                 true
@@ -265,6 +270,23 @@ impl ClarifyOverlay {
             v.remove(byte);
         }
         self.set_cursor(cursor - 1);
+        self.error = None;
+    }
+
+    /// 删掉光标**处**（之后）的一个字符：`backspace` 的对偶，光标不动。
+    ///
+    /// 光标已在末尾时是 no-op —— 与 `backspace` 在开头时对称。按字符走而不是按字节：
+    /// 中文一个字三字节，按字节删会切出半个字并让 `String::remove` 在非字符边界 panic。
+    pub(super) fn delete_forward(&mut self) {
+        let cursor = self.cursor();
+        if cursor >= self.current_len() {
+            return;
+        }
+        if let Some(v) = self.current_mut() {
+            let byte = char_to_byte(v, cursor);
+            v.remove(byte);
+        }
+        // 光标留在原处（向后删不移位），但「必答没填」的提示该撤掉了 —— 用户已经在改这一题。
         self.error = None;
     }
 
