@@ -563,7 +563,7 @@ impl<'a> super::TuiApp<'a> {
     /// `ShellEvent::Detach`：摘掉本进程的一条连接（**只摘自己的账**）。
     ///
     /// 声明与 serve 进程都不动 —— `instances.toml` 归 ctl 写、进程归 ctl 管，`/lane` 的
-    /// 语义是「本进程连不连」，与 `/lane attach` 对称；要真停实例请用 `crabmatectl down`
+    /// 语义是「本进程连不连」，与 `/lane attach` 对称；要真停实例请用 `crabmatectl stop`
     /// 或 `/lane` 之后改声明。
     ///
     /// 两种情形明说而不是硬做：名字不存在（列出既有名字）与**最后一条**（TUI 至少要有
