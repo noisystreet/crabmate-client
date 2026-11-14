@@ -561,6 +561,53 @@ pub fn composer_remove_image_aria(l: Locale) -> &'static str {
     }
 }
 
+/// 上传中那一行里的「取消」按钮（只停队列，已传成功的附图保留）。
+pub fn composer_upload_cancel(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "取消上传",
+        Locale::En => "Cancel upload",
+    }
+}
+
+pub fn composer_upload_queued_state(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "等待上传",
+        Locale::En => "Queued",
+    }
+}
+
+pub fn composer_upload_uploading_state(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "上传中…",
+        Locale::En => "Uploading…",
+    }
+}
+
+pub fn composer_upload_failed_state(l: Locale, reason: &str) -> String {
+    match l {
+        Locale::ZhHans => format!("上传失败：{reason}"),
+        Locale::En => format!("Upload failed: {reason}"),
+    }
+}
+
+/// 张数超限：数字取自 [`crate::chat_upload_plan::CHAT_IMAGE_MAX_COUNT`]，避免文案与校验漂开。
+pub fn composer_upload_too_many(l: Locale, dropped: usize) -> String {
+    let max = crate::chat_upload_plan::CHAT_IMAGE_MAX_COUNT;
+    match l {
+        Locale::ZhHans => format!("最多 {max} 张附图，请先少选 {dropped} 张"),
+        Locale::En => format!("At most {max} images — deselect {dropped} first"),
+    }
+}
+
+/// 单张超限：MiB 数与 [`crate::chat_upload_plan::CHAT_IMAGE_MAX_BYTES`] 同源。
+pub fn composer_upload_too_large(l: Locale, name: &str) -> String {
+    let mib = crate::chat_upload_plan::CHAT_IMAGE_MAX_BYTES / (1024 * 1024);
+    match l {
+        Locale::ZhHans => format!("{name} 超过 {mib} MiB，无法上传"),
+        Locale::En => format!("{name} is over {mib} MiB and cannot be uploaded"),
+    }
+}
+
 pub fn clarification_panel_title(l: Locale) -> &'static str {
     match l {
         Locale::ZhHans => "需要补充信息",

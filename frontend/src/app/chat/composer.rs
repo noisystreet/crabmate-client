@@ -14,6 +14,7 @@ use crate::clarification_form::PendingClarificationForm;
 use crate::session_sync::SessionSyncState;
 use crate::storage::ChatSession;
 
+use super::composer_image_upload::clear_chat_image_uploads;
 use super::composer_input_stack::autosize_composer_textarea;
 use super::composer_mirror::composer_workspace_at_refs_html;
 
@@ -46,6 +47,8 @@ fn apply_shell_after_active_session_changed(arg: ApplyShellAfterActiveSessionCha
     let d = active.map(|s| s.draft.clone()).unwrap_or_default();
     draft.set(d);
     pending_images.set(Vec::new());
+    // 切换会话即作废在传的附图上传（其结果会被丢弃，不会落到另一个会话上）。
+    clear_chat_image_uploads();
     pending_clarification.set(None);
     let st = active.map(|s| {
         let mut st = SessionSyncState::local_only();

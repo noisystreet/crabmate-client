@@ -14,6 +14,7 @@ pub(crate) mod github_secrets_local;
 mod http;
 mod http_conversation_state;
 mod http_permission;
+mod http_uploads;
 mod http_workspace_clone;
 mod http_workspace_fs_extra;
 mod http_workspace_projects;
@@ -60,6 +61,7 @@ pub use http::{
 };
 pub use http_conversation_state::post_conversation_state;
 pub use http_permission::{PermissionFetch, fetch_permission};
+pub use http_uploads::delete_upload_urls;
 pub use http_workspace_clone::{
     WorkspaceCloneRequest, WorkspaceCloneSseEvent, infer_project_name_from_clone_url,
     post_workspace_clone_stream,

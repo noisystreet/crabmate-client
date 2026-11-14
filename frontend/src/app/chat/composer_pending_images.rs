@@ -33,7 +33,7 @@ pub fn ComposerPendingImagesRow(
                                 type="button"
                                 class="composer-pending-img-remove"
                                 prop:aria-label=move || i18n::composer_remove_image_aria(locale.get())
-                                on:click=move |_| pending_images.update(|v| v.retain(|x| x != &u_rm))
+                                on:click=move |_| remove_pending_image(pending_images, u_rm.clone(), locale)
                             >{icon_x("")}</button>
                         </div>
                     }
@@ -41,6 +41,25 @@ pub fn ComposerPendingImagesRow(
             />
         </div>
     }
+}
+
+/// 移除待发附图：先从 composer 摘掉，再让 Server 删掉它的暂存文件。
+///
+/// 顺序不能反：先删文件的话，那张缩略图会在等网络期间变成「附图不存在」占位。
+fn remove_pending_image(
+    pending_images: RwSignal<Vec<String>>,
+    url: String,
+    locale: RwSignal<Locale>,
+) {
+    pending_images.update(|v| v.retain(|x| x != &url));
+    let targets = crate::chat_upload_plan::upload_delete_targets(std::slice::from_ref(&url));
+    if targets.is_empty() {
+        return;
+    }
+    spawn_local(async move {
+        // 删不掉也无所谓：Server 的暂存目录按龄 / 按总量清理。
+        let _ = crate::api::delete_upload_urls(&targets, locale.get_untracked()).await;
+    });
 }
 
 #[component]
