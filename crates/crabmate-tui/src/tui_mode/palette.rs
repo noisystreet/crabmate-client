@@ -11,6 +11,7 @@
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 
+use super::editor_view::editor_hl::SyntaxCat;
 use super::term_image::{self, ColorDepth};
 use super::ws_file_kind::FileKind;
 
@@ -69,6 +70,22 @@ pub(crate) struct Palette {
     pub file_doc: Color,
     /// 工作区树：图片类文件（`png` / `svg` ……）。终端专用，理由同上。
     pub file_image: Color,
+    /// 源码视图：注释。
+    ///
+    /// 与 `file_*` 同一取舍，**终端专用色阶**：`tokens.css` 没有「语法类别」这个概念，
+    /// 所以这六档不绑定任何 token（因此也不需要动任何 Desktop 主题文件）。只有
+    /// [`Palette::syntax_style`] 读它们 —— 调用点只说类别，颜色归这里。
+    pub syn_comment: Color,
+    /// 源码视图：字符串 / 字符字面量。
+    pub syn_str: Color,
+    /// 源码视图：数字字面量。
+    pub syn_number: Color,
+    /// 源码视图：关键字（含 C++ 的 `#include` 整行）。
+    pub syn_keyword: Color,
+    /// 源码视图：类型名（内置类型表 + `UpperCamel`）。
+    pub syn_type: Color,
+    /// 源码视图：函数名 / 宏（`name!`）。
+    pub syn_fn: Color,
     /// 无色模式：所有颜色为 `Reset`，区分只靠 `DIM` / `BOLD` / `REVERSED`。
     pub mono: bool,
 }
@@ -99,6 +116,17 @@ const DEFAULT_DARK: Palette = Palette {
     file_config: rgb(0xb9, 0xa3, 0xe0),
     file_doc: rgb(0xa8, 0xc8, 0x8a),
     file_image: rgb(0xe7, 0x9a, 0xc0),
+    // 语法高亮六档（源码视图）。与 `file_*` 同一取舍：**终端专用色阶**，不绑 token
+    // —— `tokens.css` 没有「语法类别」这个概念，绑了就要同步改 5 个 theme css 并过镜像
+    // 门禁，而 Desktop 侧的代码块高亮本身还没做。
+    //
+    // 取名对着 `SyntaxCat` 的六个变体一一对应；`Palette::syntax_style` 是唯一出口。
+    syn_comment: rgb(0x6b, 0x73, 0x90),
+    syn_str: rgb(0x9e, 0xce, 0x6a),
+    syn_number: rgb(0xff, 0x9e, 0x64),
+    syn_keyword: rgb(0xbb, 0x9a, 0xf7),
+    syn_type: rgb(0x7d, 0xcf, 0xff),
+    syn_fn: rgb(0x7a, 0xa2, 0xf7),
     mono: false,
 };
 
@@ -122,6 +150,14 @@ const HIGH_CONTRAST_DARK: Palette = Palette {
     file_config: rgb(0xd8, 0xc8, 0xff),
     file_doc: rgb(0xd0, 0xf0, 0xb0),
     file_image: rgb(0xff, 0xc0, 0xe0),
+    // 高对比主题的主色刻意是灰阶，但语法档仍需可辨：取**高明度**彩色，
+    // 与 `file_*` 四档在这个主题下的处理一致（它们同样是彩色）。
+    syn_comment: rgb(0x9a, 0x9a, 0x9a),
+    syn_str: rgb(0xc8, 0xf0, 0xa8),
+    syn_number: rgb(0xff, 0xd0, 0x80),
+    syn_keyword: rgb(0xff, 0xb0, 0xe8),
+    syn_type: rgb(0x90, 0xe0, 0xff),
+    syn_fn: rgb(0xb8, 0xc8, 0xff),
     mono: false,
 };
 
@@ -145,6 +181,12 @@ const MATERIAL_DARK: Palette = Palette {
     file_config: rgb(0xc0, 0xb0, 0xe0),
     file_doc: rgb(0xb8, 0xd0, 0xa8),
     file_image: rgb(0xe0, 0xb0, 0xc8),
+    syn_comment: rgb(0x76, 0x76, 0x76),
+    syn_str: rgb(0xa8, 0xd0, 0x8a),
+    syn_number: rgb(0xe8, 0xa8, 0x7c),
+    syn_keyword: rgb(0xc0, 0xa8, 0xe0),
+    syn_type: rgb(0x90, 0xc8, 0xd8),
+    syn_fn: rgb(0xa8, 0xb8, 0xe0),
     mono: false,
 };
 
@@ -168,6 +210,12 @@ const SHADCN_DARK: Palette = Palette {
     file_config: rgb(0xc4, 0xb5, 0xfd),
     file_doc: rgb(0xbe, 0xd9, 0x8a),
     file_image: rgb(0xf9, 0xa8, 0xd4),
+    syn_comment: rgb(0x71, 0x71, 0x7a),
+    syn_str: rgb(0x86, 0xef, 0xac),
+    syn_number: rgb(0xfd, 0xba, 0x74),
+    syn_keyword: rgb(0xd8, 0xb4, 0xfe),
+    syn_type: rgb(0x7d, 0xd3, 0xfc),
+    syn_fn: rgb(0x93, 0xc5, 0xfd),
     mono: false,
 };
 
@@ -239,6 +287,12 @@ const CRABMATE_LIGHT: Palette = Palette {
     file_config: rgb(0x5b, 0x3d, 0x8f),
     file_doc: rgb(0x4a, 0x6b, 0x2a),
     file_image: rgb(0x8f, 0x2f, 0x63),
+    syn_comment: rgb(0x85, 0x7c, 0x6b),
+    syn_str: rgb(0x3f, 0x6b, 0x26),
+    syn_number: rgb(0x8a, 0x5a, 0x00),
+    syn_keyword: rgb(0x6b, 0x3d, 0x8f),
+    syn_type: rgb(0x14, 0x66, 0x6b),
+    syn_fn: rgb(0x2b, 0x4f, 0x8f),
     mono: false,
 };
 
@@ -262,6 +316,12 @@ const SHADCN_LIGHT: Palette = Palette {
     file_config: rgb(0x6d, 0x28, 0xd9),
     file_doc: rgb(0x3f, 0x62, 0x12),
     file_image: rgb(0x9d, 0x17, 0x4a),
+    syn_comment: rgb(0x71, 0x71, 0x7a),
+    syn_str: rgb(0x15, 0x80, 0x3d),
+    syn_number: rgb(0xb4, 0x53, 0x09),
+    syn_keyword: rgb(0x7e, 0x22, 0xce),
+    syn_type: rgb(0x0f, 0x76, 0x6e),
+    syn_fn: rgb(0x1d, 0x4e, 0xd8),
     mono: false,
 };
 
@@ -285,6 +345,14 @@ const MONO: Palette = Palette {
     file_config: Color::Reset,
     file_doc: Color::Reset,
     file_image: Color::Reset,
+    // 无色模式：语法色一并抹平。漏一个就是「`NO_COLOR` 下源码视图仍然带色」，
+    // 与 `palette.rs` 对 mono 的承诺正面冲突 —— 而那种 bug 只在无色终端里可见。
+    syn_comment: Color::Reset,
+    syn_str: Color::Reset,
+    syn_number: Color::Reset,
+    syn_keyword: Color::Reset,
+    syn_type: Color::Reset,
+    syn_fn: Color::Reset,
     mono: true,
 };
 
@@ -390,6 +458,27 @@ impl Palette {
             FieldTone::Pending => Style::new().fg(self.notice),
             FieldTone::Override => Style::new().fg(self.info),
         }
+    }
+
+    /// 语法类别 → 前景样式（源码视图的唯一出口）。
+    ///
+    /// 返回 `Style` 而不是 `Color`，是为了让「语法色」今后与别的样式位（修饰位、底色）
+    /// 一起长出时调用点不必再改一次。无色模式下六个槽都是 `Reset`，于是这里给出的 `fg`
+    /// 就是「不指定」—— 与其余槽位同一口径，不额外判断 `mono`。
+    ///
+    /// 调用方负责**叠加顺序**：先本样式、后 `md::highlight_override`。查找命中因此压过
+    /// 语法色 —— 正在找的东西优先于装饰。
+    #[must_use]
+    pub(crate) fn syntax_style(&self, cat: SyntaxCat) -> Style {
+        let color = match cat {
+            SyntaxCat::Comment => self.syn_comment,
+            SyntaxCat::Str => self.syn_str,
+            SyntaxCat::Number => self.syn_number,
+            SyntaxCat::Keyword => self.syn_keyword,
+            SyntaxCat::Type => self.syn_type,
+            SyntaxCat::Function => self.syn_fn,
+        };
+        Style::new().fg(color)
     }
 
     /// 提示级别 → 样式。无色模式下四个色槽都是 `Reset`，区别只剩文本措辞。

@@ -1,5 +1,9 @@
 use std::sync::mpsc;
 
+use ratatui::style::Color;
+use unicode_width::UnicodeWidthStr;
+
+use super::super::palette::Palette;
 use super::super::test_support::{test_app, test_client, test_prefs};
 use super::{EditorState, LaneApp, MIN_VIEW_ROWS, WHEEL_LINES, basename, clip, normalize_rel};
 use crate::serve::WorkspaceFile;
@@ -371,4 +375,159 @@ fn find_highlights_reach_the_spans() {
         );
         assert_eq!(rows[3].spans[2].style.fg, Some(fg), "未命中行保持正文色");
     });
+}
+
+// ---- 语法着色接线（issue #510 的 P2） ----
+//
+// 这一组测的都是「纯词法器对了，但接进渲染路径时接错」才出现的故障：吞字、跨行状态
+// 没用上、查找色被语法色盖掉、缓存画到下一份文件上。词法器自己的单测在 `editor_hl_tests`。
+
+/// 关键字与注释各自成段、颜色取自 `syn_*`，且分段不吞字不重排。
+///
+/// 「不吞字」不是形式主义：分段按 char 区间切，`HlSpan` 错位一个字符的后果是屏幕上
+/// 少一个字 —— 比「没有颜色」难查得多。
+#[test]
+fn source_view_colours_keywords_and_comments() {
+    app(|a| {
+        a.st.editor.open_file("src/lib.rs", 0);
+        a.st.editor.accept_limited("let x = 1; // note\n", 100);
+        let rows = super::view_lines(&mut a.st.editor, None, 60, 10, &a.st.palette);
+        let pal = a.st.palette;
+        // span 0 = 行号、1 = 「│ 」、其余是正文分段。
+        let body = &rows[2].spans[2..];
+        let text: String = body.iter().map(|s| s.content.as_ref()).collect();
+        assert_eq!(text, "let x = 1; // note", "分段不能吞字：{body:?}");
+        assert_eq!(body[0].content.as_ref(), "let");
+        assert_eq!(body[0].style.fg, Some(pal.syn_keyword), "let 是关键字");
+        assert_eq!(body.last().expect("末段").content.as_ref(), "// note");
+        assert_eq!(
+            body.last().unwrap().style.fg,
+            Some(pal.syn_comment),
+            "注释走 syn_comment"
+        );
+        assert!(
+            body.iter().any(|s| s.style.fg == Some(pal.syn_number)),
+            "数字单独一段：{body:?}"
+        );
+    });
+}
+
+/// 跨行块注释的第二行**从行首**就是注释色：起始态来自 `scan_states`，不是从 `Normal` 重扫。
+#[test]
+fn source_view_block_comment_continues_on_the_next_line() {
+    app(|a| {
+        a.st.editor.open_file("src/lib.rs", 0);
+        a.st.editor
+            .accept_limited("let a = 1;\n/* open\nstill */ let b = 2;\n", 100);
+        let rows = super::view_lines(&mut a.st.editor, None, 60, 12, &a.st.palette);
+        let pal = a.st.palette;
+        // 两条标题占 `rows[0..2]`，源码行 i → `rows[2 + i]`；跨行注释的第二行是 i = 2。
+        let body = &rows[4].spans[2..];
+        assert_eq!(body[0].content.as_ref(), "still */");
+        assert_eq!(
+            body[0].style.fg,
+            Some(pal.syn_comment),
+            "第二行行首仍是注释"
+        );
+        assert!(
+            body.iter().any(|s| s.style.fg == Some(pal.syn_keyword)),
+            "闭合后同一行的 let 恢复成关键字：{body:?}"
+        );
+    });
+}
+
+/// 超宽行按**显示宽度**裁：宽字符不切半，末尾补 `…`，总宽不超出正文预算。
+#[test]
+fn source_view_clips_wide_characters_by_display_width() {
+    app(|a| {
+        a.st.editor.open_file("src/lib.rs", 0);
+        a.st.editor
+            .accept_limited("// 汉字汉字汉字汉字汉字汉字\n", 100);
+        // 宽 20、行号栏 3 → 正文预算 15（裁切时给 `…` 留一列）。
+        let rows = super::view_lines(&mut a.st.editor, None, 20, 10, &a.st.palette);
+        let body = &rows[2].spans[2..];
+        let text: String = body.iter().map(|s| s.content.as_ref()).collect();
+        assert!(text.ends_with('…'), "超宽行要补省略号：{text:?}");
+        assert!(text.width() <= 15, "{text:?} 宽 {}", text.width());
+        assert!(text.starts_with("// 汉字"), "宽字符不得被切半：{text:?}");
+    });
+}
+
+/// 内容变了，语法缓存必须重建 —— 否则会把上一份文件的关键字色画在新内容上。
+#[test]
+fn syntax_cache_rebuilds_when_the_content_changes() {
+    app(|a| {
+        a.st.editor.open_file("src/lib.rs", 0);
+        a.st.editor.accept_limited("let a = 1;\n", 100);
+        let _ = super::view_lines(&mut a.st.editor, None, 60, 10, &a.st.palette);
+        let first = a.st.editor.hl.as_ref().expect("首次渲染建缓存").rev;
+        assert_eq!(first, a.st.editor.text_rev, "缓存键跟进内容版本");
+
+        a.st.editor.accept_limited("// 只有注释\n", 100);
+        let _ = super::view_lines(&mut a.st.editor, None, 60, 10, &a.st.palette);
+        let second = a.st.editor.hl.as_ref().expect("重建").rev;
+        assert_ne!(second, first, "内容变了要重建");
+        assert_eq!(second, a.st.editor.text_rev);
+    });
+}
+
+/// 不认识的扩展名整份不上色（「认不出就不上色」），且仍然只占一段。
+#[test]
+fn unknown_extension_stays_plain() {
+    app(|a| {
+        a.st.editor.open_file("notes.xyz", 0);
+        a.st.editor.accept_limited("let x = 1; // note\n", 100);
+        let rows = super::view_lines(&mut a.st.editor, None, 60, 10, &a.st.palette);
+        let pal = a.st.palette;
+        let body = &rows[2].spans[2..];
+        assert_eq!(body.len(), 1, "不上色时整行一段：{body:?}");
+        assert_eq!(body[0].style.fg, Some(pal.fg));
+    });
+}
+
+/// 查找命中压过语法色：命中的整行同款，语法色不得冒出来。
+///
+/// 优先级是刻意的：正在找的东西 > 装饰。写反了的话，「搜到关键字那一行」看起来会像
+/// 没搜到 —— 而它恰好是搜索最常命中的行。
+#[test]
+fn find_highlight_wins_over_syntax_colour() {
+    app(|a| {
+        a.st.editor.open_file("src/lib.rs", 0);
+        a.st.editor.accept_limited("let alpha = 1;\n", 100);
+        for ch in "alpha".chars() {
+            a.st.editor.find.push(ch);
+        }
+        let rows = super::view_lines(&mut a.st.editor, None, 60, 10, &a.st.palette);
+        let pal = a.st.palette;
+        let body = &rows[2].spans[2..];
+        let first = body[0].style;
+        assert!(
+            body.iter().all(|s| s.style == first),
+            "命中行应整行同款：{body:?}"
+        );
+        assert!(
+            body.iter()
+                .all(|s| s.style.fg != Some(pal.syn_keyword) && s.style.fg != Some(pal.syn_number)),
+            "语法色必须被查找命中压过：{body:?}"
+        );
+    });
+}
+
+/// 无色模式：六个语法槽全部 `Reset`。
+///
+/// 看着琐碎，但漏一个的后果只在 `NO_COLOR` 终端里可见 —— 那正是最难被发现的一类回归。
+/// `MONO` 是手写 8 次字段，编译器补不出这一条。
+#[test]
+fn mono_palette_wipes_every_syntax_colour() {
+    let pal = Palette::mono();
+    for (name, color) in [
+        ("syn_comment", pal.syn_comment),
+        ("syn_str", pal.syn_str),
+        ("syn_number", pal.syn_number),
+        ("syn_keyword", pal.syn_keyword),
+        ("syn_type", pal.syn_type),
+        ("syn_fn", pal.syn_fn),
+    ] {
+        assert_eq!(color, Color::Reset, "{name} 在无色模式下必须 Reset");
+    }
 }

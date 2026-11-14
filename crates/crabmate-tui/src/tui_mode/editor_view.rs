@@ -33,6 +33,7 @@ pub(super) mod editor_find;
 pub(super) mod editor_hl;
 
 use self::editor_find::FindState;
+use self::editor_hl::{HlSpan, LexState};
 
 /// 一个制表位展开成几个空格。
 ///
@@ -84,6 +85,22 @@ impl EditorMode {
     }
 }
 
+/// 源码视图的语法高亮状态（缓存，见 [`EditorState::hl`]）。
+///
+/// 存「语言 + 每行**起始**词法态」而不是每行的 span：span 只在可见行上算，而起始态必须
+/// 从头算（块注释、raw string、围栏都可能从任意前面的行跨过来）。这一份因此与视口无关，
+/// 滚动时不必重算。
+#[derive(Debug)]
+pub(super) struct HlRows {
+    /// 算这份缓存时的 [`EditorState::text_rev`]，与当前值不等即作废。
+    rev: u64,
+    /// 判定出的语言；`None` = 扩展名不认识，整份不上色。
+    lang: Option<editor_hl::Language>,
+    /// 每行起始词法态，长度 = `lines.len() + 1`（末项是收尾态，当前没人读，留着是为了
+    /// 与 [`editor_hl::scan_states`] 的返回形状一致）。
+    states: Vec<LexState>,
+}
+
 /// 只读文件视图的状态（每条 lane 一份，随 [`super::state::UiState`] 走）。
 #[derive(Debug, Default)]
 pub(super) struct EditorState {
@@ -106,6 +123,11 @@ pub(super) struct EditorState {
     pub text_rev: u64,
     /// md 预览缓存（`None` = 还没渲染过，或内容刚变）。
     pub md_cache: Option<super::editor_md::MdRows>,
+    /// 源码视图的语法高亮状态（`None` = 还没算过，或内容刚变）。
+    ///
+    /// 与 [`Self::md_cache`] 分开：两者的键相同（`text_rev`），但 md 只在预览模式下建，
+    /// 源码模式永远用不到它。共用一份字段会让「切模式」看起来像是在作废另一份缓存。
+    pub hl: Option<HlRows>,
     /// 读取在途。
     pub loading: bool,
     /// 读取失败文案（成功时清空）。
@@ -143,13 +165,15 @@ impl EditorState {
         self.error = None;
         self.truncated = false;
         self.generation = generation;
-        self.invalidate_md();
+        self.invalidate_caches();
     }
 
-    /// 内容变了：md 缓存必须作废（否则会继续画上一份文件），版本号推进用作缓存键。
-    fn invalidate_md(&mut self) {
+    /// 内容变了：两份渲染缓存都必须作废（否则会继续画上一份文件的 md 排版与语法色），
+    /// 版本号推进用作缓存键。
+    fn invalidate_caches(&mut self) {
         self.text_rev = self.text_rev.wrapping_add(1);
         self.md_cache = None;
+        self.hl = None;
     }
 
     /// 内容回包（`generation` 不符时由调用方丢弃，这里只管装）。
@@ -173,7 +197,7 @@ impl EditorState {
         self.lines = rows;
         self.scroll = 0;
         self.md_scroll = 0;
-        self.invalidate_md();
+        self.invalidate_caches();
     }
 
     /// 读取失败：视图留着（标题仍显示是哪个文件），内容区换成这一句。
@@ -183,7 +207,7 @@ impl EditorState {
         self.scroll = 0;
         self.md_scroll = 0;
         self.error = Some(msg);
-        self.invalidate_md();
+        self.invalidate_caches();
     }
 
     /// 返回聊天视图。文件与滚动位置保留：再 `/editor` 进来还是同一处。
@@ -479,35 +503,153 @@ fn content_lines(
     out
 }
 
-/// 源码正文：绝对行号 + `│` + 按显示宽裁切的一行。
+/// 源码正文：绝对行号 + `│` + 按显示宽裁切、按语法类别分词的一行。
 ///
 /// 行号是**绝对**的（滚动后跟着各自内容走）：按可见序号重编号会让人误以为自己在文件开头。
+///
+/// 取 `&mut` 只为维护 [`EditorState::hl`]：每帧重扫全文不现实，见 [`ensure_hl`]。
 fn source_body(
-    ed: &EditorState,
+    ed: &mut EditorState,
     width: usize,
     height: usize,
     rows: usize,
     pal: &Palette,
     out: &mut Vec<Line<'static>>,
 ) {
+    ensure_hl(ed);
     let start = ed.clamped_scroll(height);
     let gutter = ed.lines.len().to_string().len().max(3);
+    // 正文可用宽度：行号栏（`{:>gutter$}` 加一个分隔空格）之后就是 `│ `。
+    let budget = width.saturating_sub(gutter + 2);
+    // 语言与每行起始态都出自同一份缓存；`None` = 这个扩展名不上色。
+    let lang = ed.hl.as_ref().and_then(|h| h.lang);
     for (i, text) in ed.lines.iter().enumerate().skip(start).take(rows) {
         let no = format!("{:>gutter$} ", i + 1, gutter = gutter);
         // 高亮走聊天区同一套判据（`md::highlight_override`）：命中行改 `hit` 前景、
         // 锚定行整行反色。行号一起染，命中行才在左栏也看得出来。
         let (matched, anchor) = (ed.find.is_hit(i), ed.find.is_anchor(i));
-        out.push(Line::from(vec![
-            Span::styled(
-                no,
-                md::highlight_override(Style::default().fg(pal.muted), matched, anchor, pal),
-            ),
-            Span::styled("│ ", Style::default().fg(pal.border)),
-            Span::styled(
-                clip(text, width.saturating_sub(gutter + 2)),
-                md::highlight_override(Style::default().fg(pal.fg), matched, anchor, pal),
-            ),
-        ]));
+        let spans = match (lang, ed.hl.as_ref().and_then(|h| h.states.get(i))) {
+            (Some(l), Some(state)) => editor_hl::classify_line(text, *state, l).0,
+            _ => Vec::new(),
+        };
+        let mut line = Vec::with_capacity(2 + spans.len().max(1));
+        line.push(Span::styled(
+            no,
+            md::highlight_override(Style::default().fg(pal.muted), matched, anchor, pal),
+        ));
+        line.push(Span::styled("│ ", Style::default().fg(pal.border)));
+        line.extend(source_line_spans(
+            text, &spans, budget, matched, anchor, pal,
+        ));
+        out.push(Line::from(line));
+    }
+}
+
+/// 让语法高亮状态跟上当前内容（内容或语言变了就重扫）。
+///
+/// 这是本模块唯一的性能陷阱：`source_body` 每帧只画几十行，但**起始态**必须从头扫出来
+/// （块注释 / raw string / 围栏可能从任意前面的行跨过来），而 [`FILE_VIEW_MAX_LINES`] 是
+/// 2 万行量级、`classify_line` 每行还要 `Vec<char>` 分配一次。逐帧重扫会直接掉帧，所以按
+/// [`EditorState::text_rev`] 缓存 —— 与 `md_cache` 同一口径，`invalidate_caches` 负责推进。
+///
+/// 语言一起存进缓存：两次 `open_file` 之间可能没有新内容（`text_rev` 相同），但 `rel` 变了
+/// 就是另一个文件，不能沿用旧语言。
+fn ensure_hl(ed: &mut EditorState) {
+    let lang = ed.rel.as_deref().and_then(editor_hl::language_for_path);
+    let fresh = ed
+        .hl
+        .as_ref()
+        .is_some_and(|h| h.rev == ed.text_rev && h.lang == lang);
+    if fresh {
+        return;
+    }
+    let states = match lang {
+        Some(l) => editor_hl::scan_states(&ed.lines, l),
+        None => Vec::new(),
+    };
+    ed.hl = Some(HlRows {
+        rev: ed.text_rev,
+        lang,
+        states,
+    });
+}
+
+/// 把一行正文切成「按语法类别分段 + 按显示宽度裁切」的 span 序列。
+///
+/// 两件事必须**在同一次遍历**里做完：[`HlSpan`] 的区间单位是 **char**，而裁剪预算按
+/// **显示宽度**算（宽字符占 2 列、`…` 占 1 列）。先 `clip()` 再按 char 切会因尾部追加了
+/// `…` 而整体错位，先切段再各自裁又会算出互相矛盾的边界。
+///
+/// 连续同款的段会合并：一行切成几百个单字符 span 会让 ratatui 每帧多做几百次比对，也让
+/// 「这一行几个 span」这类断言失去意义。
+fn source_line_spans(
+    text: &str,
+    spans: &[HlSpan],
+    width: usize,
+    matched: bool,
+    anchor: bool,
+    pal: &Palette,
+) -> Vec<Span<'static>> {
+    let total = text.width();
+    let clipped = total > width;
+    // 裁掉时给 `…` 留一列：与 [`clip`] 同一口径，避免超宽行比正文区多出一列。
+    let budget = if clipped {
+        width.saturating_sub(1)
+    } else {
+        total
+    };
+    let mut out: Vec<Span<'static>> = Vec::new();
+    let mut cur: Option<(String, Style)> = None;
+    let mut used = 0usize;
+    let mut it = spans.iter().peekable();
+    for (idx, ch) in text.chars().enumerate() {
+        let w = UnicodeWidthChar::width(ch).unwrap_or(0);
+        if used + w > budget {
+            break;
+        }
+        // span 已按起点升序（词法器逐段推进产出），游标单向走到底即可。
+        while it.peek().is_some_and(|s| s.end <= idx) {
+            it.next();
+        }
+        let base = match it.peek().filter(|s| idx >= s.start) {
+            Some(s) => pal.syntax_style(s.cat),
+            // 没有类别就是正文色 —— 词法器的「认不出就不上色」在这里落地。
+            None => Style::default().fg(pal.fg),
+        };
+        // 叠加顺序固定：语法色在前、查找命中在后。命中必须压过语法色。
+        push_merged(
+            &mut out,
+            &mut cur,
+            ch,
+            md::highlight_override(base, matched, anchor, pal),
+        );
+        used += w;
+    }
+    if clipped {
+        let style = md::highlight_override(Style::default().fg(pal.fg), matched, anchor, pal);
+        push_merged(&mut out, &mut cur, '…', style);
+    }
+    if let Some((text, style)) = cur.take() {
+        out.push(Span::styled(text, style));
+    }
+    out
+}
+
+/// 往「正在累积的段」上追加一个字符；款式变了就把上一段收进 `out`。
+fn push_merged(
+    out: &mut Vec<Span<'static>>,
+    cur: &mut Option<(String, Style)>,
+    ch: char,
+    style: Style,
+) {
+    match cur {
+        Some((text, s)) if *s == style => text.push(ch),
+        _ => {
+            if let Some((text, s)) = cur.take() {
+                out.push(Span::styled(text, s));
+            }
+            *cur = Some((ch.to_string(), style));
+        }
     }
 }
 
