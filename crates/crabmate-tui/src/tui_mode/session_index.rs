@@ -232,6 +232,9 @@ impl LaneApp<'_> {
                 .push_line(LineKind::System, "回合进行中：结束后再新建会话");
             return;
         }
+        // 新建的会话还没有标题（渲染成 `(untitled)`），在过滤态下多半不可见 ——
+        // 建完却「左栏看不见它」比丢掉过滤词更困惑，所以这里直接清掉过滤。
+        self.st.clear_session_filter();
         match decide_new_session(
             self.index.new_session_pending,
             self.index.local_new_session.as_deref(),

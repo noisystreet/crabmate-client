@@ -35,6 +35,8 @@ pub(super) use super::pane_render::{chat_body_width, paint_pane_dividers};
 /// 左栏会话栏聚焦时的按键提示。宽度必须 ≤ 侧栏内宽（`SIDEBAR_WIDTH` - 1 = 25 列），
 /// 否则 `render_pane` 会直接裁掉尾部的键；中文按 2 列计。
 pub(super) const SIDEBAR_HINT: &str = "↑↓ Enter用 Del删 n新 r刷";
+/// 过滤态下的侧栏提示：清过滤只能走命令（v1 没有「左栏内退格清空」这个入口）。
+pub(super) const SIDEBAR_FILTER_HINT: &str = "↑↓ Enter用 · /conv filter off 清过滤";
 /// 删除确认态的提示（`Delete` 已按一次）：y / Enter 删，Esc / n 取消。
 ///
 /// 与 Desktop 的确认框同语义，但借用侧栏底部提示行，不抢焦点、不开浮层。
@@ -368,7 +370,19 @@ pub(super) fn workspace_basename(path: &str) -> String {
 /// 左栏内容行：首行标题，其后每会话一行（`>` 当前，`*` serve 活跃，选中高亮）。
 pub(super) fn sidebar_rows(st: &UiState, width: usize) -> Vec<Line<'static>> {
     let mut rows: Vec<Line<'static>> = Vec::new();
-    let title = format!("会话 [{}]", st.sessions.len());
+    let visible = st.visible_indices();
+    // 过滤态把条数写成 `[可见/总数]`：只报总数的话，「怎么只剩两条」会像 bug。
+    let title = if st.session_filter_active() {
+        format!("会话 [{}/{}]", visible.len(), st.sessions.len())
+    } else {
+        format!("会话 [{}]", st.sessions.len())
+    };
+    // 过滤词挂在**标题行**而不是另起一行：`sidebar_window` 假定「首行标题、其余都是条目」，
+    // 多插一行会让滚动窗口与鼠标命中一起偏一行。
+    let title = match st.filter_term() {
+        Some(term) => format!("{title} · filter: {term}"),
+        None => title,
+    };
     rows.push(Line::from(Span::styled(
         truncate_display(&title, width),
         Style::new().fg(st.palette.fg).add_modifier(Modifier::BOLD),
@@ -380,7 +394,15 @@ pub(super) fn sidebar_rows(st: &UiState, width: usize) -> Vec<Line<'static>> {
         )));
         return rows;
     }
-    for (i, row) in st.sessions.iter().enumerate() {
+    if visible.is_empty() {
+        rows.push(Line::from(Span::styled(
+            truncate_display("（无匹配）", width),
+            Style::new().fg(st.palette.muted),
+        )));
+        return rows;
+    }
+    for &i in &visible {
+        let row = &st.sessions[i];
         let mark = if st.row_in_use(row) {
             ">"
         } else if st.active_session_id.as_deref() == Some(row.id.as_str()) {
@@ -886,3 +908,9 @@ mod color_tests;
 #[cfg(test)]
 #[path = "render_system_tests.rs"]
 mod system_tests;
+
+// 左栏**过滤态**的断言（issue #423）：标题条数 / 过滤词 / 无匹配占位行 / 提示行切换。
+// `render_tests.rs` 早已贴着门禁，故与上面两支同一手法再拆一个文件。
+#[cfg(test)]
+#[path = "render_filter_tests.rs"]
+mod filter_tests;

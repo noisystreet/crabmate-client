@@ -285,6 +285,23 @@ fn clicking_a_plain_body_line_only_drops_the_cursor() {
     });
 }
 
+/// 过滤生效时点击要过一遍可见映射：屏幕第 1 行是**第一条可见**会话，不是会话 0 号。
+#[test]
+fn click_maps_through_the_filter_to_the_right_session() {
+    with_wide_app(|app| {
+        app.st.replace_sessions(vec![
+            row("a", Some("c1")),
+            row("b", Some("c2")),
+            row("c", Some("c3")),
+        ]);
+        app.st.set_session_filter(Some("t-c".into()));
+        // 只剩 `t-c`（会话下标 2）可见，它画在标题行下面那一行。
+        click(app, 2, 1);
+        assert_eq!(app.st.selected, 2, "点可见行要落到它对应的会话上");
+        assert_eq!(app.st.conversation_id.as_deref(), Some("c3"));
+    });
+}
+
 #[test]
 fn empty_window_maps_to_nothing() {
     assert_eq!(item_index_at(1, 0, 0), None);

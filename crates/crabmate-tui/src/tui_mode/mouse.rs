@@ -296,14 +296,15 @@ impl LaneApp<'_> {
         // 列内左右各留 1 列：与 `render_pane` 的内宽口径必须是同一个值。
         let content_width = left.width.saturating_sub(2) as usize;
         let (rows, cursor, _hint) = sessions_content(&self.st, content_width);
-        let Some(idx) = hit_item(left, column, row, rows.len(), cursor) else {
+        let Some(pos) = hit_item(left, column, row, rows.len(), cursor) else {
             return; // 标题行 / 底部提示行 / 列表末尾的空白：只切焦点
         };
-        // 空列表时 `rows[1]` 是「（空）发一条消息后出现」占位行，不能当成会话 0 号。
-        if idx >= self.st.sessions.len() {
+        // `pos` 是**可见列表**里的位置（过滤生效后与会话下标不是一回事）；占位行
+        // （「（空）发一条消息后出现」/「（无匹配）」）在这里落空。
+        let Some(&session_idx) = self.st.visible_indices().get(pos) else {
             return;
-        }
-        self.st.selected = idx;
+        };
+        self.st.selected = session_idx;
         self.use_selected();
     }
 

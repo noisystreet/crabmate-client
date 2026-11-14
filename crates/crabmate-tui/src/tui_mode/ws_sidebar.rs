@@ -11,7 +11,8 @@ use unicode_width::UnicodeWidthStr;
 
 use super::palette::Palette;
 use super::render::{
-    SIDEBAR_DELETE_HINT, SIDEBAR_HINT, sidebar_rows, truncate_display, workspace_basename,
+    SIDEBAR_DELETE_HINT, SIDEBAR_FILTER_HINT, SIDEBAR_HINT, sidebar_rows, truncate_display,
+    workspace_basename,
 };
 use super::state::{Focus, UiState};
 use super::workspace_tree::WsRow;
@@ -383,16 +384,22 @@ pub(super) fn sessions_content(
     width: usize,
 ) -> (Vec<Line<'static>>, usize, Option<Line<'static>>) {
     let hint = st.pane_hint_visible(Focus::Sidebar).then(|| {
-        hint_line(
-            if st.confirm_delete.is_some() {
-                SIDEBAR_DELETE_HINT
-            } else {
-                SIDEBAR_HINT
-            },
-            &st.palette,
-        )
+        let text = if st.confirm_delete.is_some() {
+            SIDEBAR_DELETE_HINT
+        } else if st.session_filter_active() {
+            // 过滤态要告诉人「怎么清」：v1 的清空入口是命令，左栏里退格没有含义。
+            SIDEBAR_FILTER_HINT
+        } else {
+            SIDEBAR_HINT
+        };
+        hint_line(text, &st.palette)
     });
-    (sidebar_rows(st, width), st.selected, hint)
+    (
+        sidebar_rows(st, width),
+        // 光标是「可见列表里的位置」：过滤后行号已经不是会话下标了。
+        st.selected_visible_pos().unwrap_or(0),
+        hint,
+    )
 }
 
 /// 右栏工作区可视内容：返回（行、光标、键盘聚焦时提示行）。

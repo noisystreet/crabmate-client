@@ -120,8 +120,7 @@ use state::{Focus, LineKind, UiState};
 
 // 入口 re-export：`main.rs` 调 `tui_mode::run_tui`（实现已拆到 `shell` 模块）。
 pub use self::shell::run_tui;
-// 连接数上限与启动校验放 `shell`（装配 lane 的那一层），`main` 只留一行调用 ——
-// `main.rs` 顶着 `fn-nloc-ratchet` 的 920 行/文件上限。
+// 连接数上限与启动校验放 `shell`（装配 lane 的那一层）；`main.rs` 顶着 920 行/文件上限，只留一行调用。
 pub(crate) use self::shell::check_lane_capacity;
 
 /// 一条连接（lane）的完整 UI 状态与依赖。
@@ -537,6 +536,7 @@ impl LaneApp<'_> {
             Control::Info(cmd) => self.apply_info_control(cmd),
             other @ (Control::ConvNew
             | Control::ConvRefresh
+            | Control::ConvFilter(_)
             | Control::ConvUse(_)
             | Control::ConvUnknown(_)
             | Control::ConvExport(_)) => self.apply_conv_control(other),
