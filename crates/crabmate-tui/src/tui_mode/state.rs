@@ -45,7 +45,7 @@ mod tools;
 mod detail_state;
 pub use detail_state::{DetailOverlay, ToolDetail};
 
-// 输入框的光标与按行导航（`backspace` / 方向键 / 行首行尾 / 上下行）：纯光标算术，
+// 输入框的光标与按行导航（`backspace` / `delete_forward` / 方向键 / 行首行尾 / 上下行）：纯光标算术，
 // 只碰 `input` / `cursor`，拆出去压 `state.rs` 行数（issue #424 要加 `clarify` 字段）。
 #[path = "state_cursor.rs"]
 mod cursor_edit;

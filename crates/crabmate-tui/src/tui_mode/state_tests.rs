@@ -44,6 +44,35 @@ fn input_insert_and_backspace() {
 }
 
 #[test]
+fn delete_forward_removes_char_at_cursor() {
+    let mut s = UiState::new();
+    for ch in "abc".chars() {
+        s.insert_char(ch);
+    }
+    s.cursor_home();
+    s.delete_forward();
+    assert_eq!(s.current_input(), "bc", "光标在行首：删掉的是第一个字符");
+    assert_eq!(s.cursor, 0, "Delete 不动光标");
+    s.cursor_end();
+    s.delete_forward();
+    assert_eq!(s.current_input(), "bc", "光标已在末尾：无事发生");
+}
+
+#[test]
+fn delete_forward_joins_lines_on_newline() {
+    let mut s = UiState::new();
+    for ch in "a\nb".chars() {
+        s.insert_char(ch);
+    }
+    // 上移到第一行行尾 —— 正好压在那个 `\n` 上。
+    s.move_cursor_vert(true);
+    assert_eq!(s.cursor, 1);
+    s.delete_forward();
+    assert_eq!(s.current_input(), "ab");
+    assert_eq!(s.input_line_count(), 1);
+}
+
+#[test]
 fn insert_workspace_path_separates_and_appends_space() {
     let mut s = UiState::new();
     s.insert_workspace_path("src/main.rs");

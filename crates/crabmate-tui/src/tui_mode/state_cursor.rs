@@ -1,4 +1,4 @@
-//! 输入框的光标与按行导航（`backspace` / 方向键 / 行首行尾 / 上下行）。
+//! 输入框的光标与按行导航（`backspace` / `delete_forward` / 方向键 / 行首行尾 / 上下行）。
 //!
 //! 从 `state.rs` 搬出：`UiState` 的主 `impl` 已经四百多行，而这一组是纯光标算术 ——
 //! 只碰 `input` / `cursor` 两个私有字段，与其余状态无关。搬出去是因为 issue #424 要往
@@ -16,6 +16,17 @@ impl UiState {
         let idx = self.cursor - 1;
         self.input.remove(idx);
         self.cursor = idx;
+    }
+
+    /// Delete：删掉光标**之后**的一个字符（`backspace` 的对偶）。
+    ///
+    /// 光标已在末尾时什么都不做 —— 与 `backspace` 在开头时的行为对称。光标压在 `\n` 上时
+    /// 删掉的就是那个换行，两行随之接上；这也是多行草稿里唯一的「向后删换行」入口。
+    pub fn delete_forward(&mut self) {
+        if self.cursor >= self.input.len() {
+            return;
+        }
+        self.input.remove(self.cursor);
     }
 
     pub fn cursor_left(&mut self) {
