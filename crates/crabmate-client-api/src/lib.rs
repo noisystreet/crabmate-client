@@ -8,6 +8,7 @@ pub mod ag_ui_parser;
 pub mod approval;
 pub mod auth;
 pub mod chat_body;
+pub mod chat_branch;
 pub mod chat_export;
 pub mod clarify_form;
 pub mod client_llm_presets;
