@@ -593,7 +593,10 @@ fn footer_msg(panel: &SettingsPanel) -> (String, NoticeLevel) {
         Some(Editing::Text { field, .. }) => match &panel.note {
             Some((note, level)) => (note.clone(), *level),
             None => (
-                format!("编辑「{}」：输入 · Backspace · ←→", field_label(*field)),
+                format!(
+                    "编辑「{}」：输入 · Backspace/Delete · ←→",
+                    field_label(*field)
+                ),
                 NoticeLevel::Muted,
             ),
         },

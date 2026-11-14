@@ -414,3 +414,39 @@ fn turn_done_unlocks_read_only_panel() {
     p.unlock_after_turn();
     assert!(p.note.is_none(), "非只读面板解锁不应写提示");
 }
+
+// `Delete` 这一组放在**文件末尾**：`lizard` 的 Rust 词法器把上面的
+// `settings_open_key_detector` 区间一路算到了后方的某个 `}`（HEAD 上已正好 200 行、
+// 顶着门禁），插在它后面会直接把那条**误算**的 nloc 顶过上限；追加在末尾只增文件行数。
+
+/// 当前文本编辑缓冲（不在编辑态就 panic：用例要的是「按键真的落到文本编辑上」）。
+fn editing_text(p: &SettingsPanel) -> String {
+    match &p.editing {
+        Some(Editing::Text { buf, .. }) => buf.iter().collect(),
+        other => panic!("不在文本编辑态：{other:?}"),
+    }
+}
+
+#[test]
+fn text_edit_delete_removes_the_char_at_the_cursor() {
+    let o = overrides(None, None, None, None);
+    let c = ctx(&o, None);
+    let mut p = SettingsPanel::new(false);
+    p.handle_key(&key(KeyCode::Enter), &c); // 首行（模型名）进文本编辑
+    for _ in 0..32 {
+        p.handle_key(&key(KeyCode::Backspace), &c); // 清掉预填的当前值
+    }
+    for ch in "abc".chars() {
+        p.handle_key(&key(KeyCode::Char(ch)), &c);
+    }
+    for _ in 0..3 {
+        p.handle_key(&key(KeyCode::Left), &c); // 光标回到行首
+    }
+    p.handle_key(&key(KeyCode::Delete), &c);
+    assert_eq!(editing_text(&p), "bc", "删掉光标处的 a，光标不动");
+    for _ in 0..2 {
+        p.handle_key(&key(KeyCode::Right), &c); // 光标到末尾
+    }
+    p.handle_key(&key(KeyCode::Delete), &c);
+    assert_eq!(editing_text(&p), "bc", "末尾再按无事发生");
+}

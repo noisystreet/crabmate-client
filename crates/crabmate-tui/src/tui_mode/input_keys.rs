@@ -236,6 +236,23 @@ mod tests {
         });
     }
 
+    /// `Delete` 在输入框里是向后删。
+    ///
+    /// 必须在**外壳**上测：`UiState::delete_forward` 的单测保证算术对，这条保证
+    /// `on_input_key` 的臂真的接上了 —— 漏掉一条臂的表现就是「按了没反应」。
+    #[test]
+    fn delete_key_deletes_forward_in_the_composer() {
+        app_with_two_runs(|app| {
+            for ch in "abc".chars() {
+                app.on_key(key(KeyCode::Char(ch), KeyModifiers::NONE));
+            }
+            app.on_key(key(KeyCode::Left, KeyModifiers::NONE));
+            app.on_key(key(KeyCode::Delete, KeyModifiers::NONE));
+
+            assert_eq!(app.st.current_input(), "ab", "删掉光标处的 c，光标留在原处");
+        });
+    }
+
     /// `Ctrl+G` 与焦点无关：焦点在侧栏 / 目录树时同样进导航。
     ///
     /// 挂在 `on_input_key` 里时这条不成立（`on_key` 在焦点不是 Input 时根本不走那条），

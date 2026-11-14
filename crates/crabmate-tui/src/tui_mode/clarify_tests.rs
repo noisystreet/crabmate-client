@@ -211,3 +211,51 @@ fn short_and_empty_intro_keep_their_row_count() {
     assert_eq!(super::wrap_intro("请补充", 30), vec!["请补充".to_string()]);
     assert_eq!(super::wrap_intro("", 30), vec![String::new()]);
 }
+
+// `Delete` 这两个用例放在**文件末尾**：`lizard` 的 Rust 词法器会把本文件中间那几个
+// `#[test]` 的区间一路算到后方的某个 `}`（`fn-nloc` 报告里那条 163 行的
+// `chinese_editing_walks_by_chars` 就是它的产物），插在中间会把那条**误算**的 nloc
+// 顶过 200 门禁；追加在末尾只增文件行数，不动那些区间。
+
+/// 向后删：删掉光标处那**一个**字（中文按字符算），且光标不动。
+#[test]
+fn delete_forward_removes_one_char_and_keeps_the_cursor() {
+    let mut ov = overlay(&["名字"]);
+    for c in "中文".chars() {
+        ov.insert_char(c);
+    }
+    ov.move_cursor(false); // 光标落到「文」前面
+    ov.delete_forward();
+    assert_eq!(
+        ov.form.values[0], "中",
+        "删的是光标处那一个字，不是右边全部"
+    );
+    ov.delete_forward();
+    assert_eq!(ov.form.values[0], "中", "光标已在末尾：无事发生");
+    ov.move_cursor(false);
+    ov.delete_forward();
+    assert_eq!(ov.form.values[0], "", "行首也能继续向后删");
+}
+
+/// 走真实按键分派：浮层开着时 `Delete` 落在**答案草稿**上。
+///
+/// 与 `Backspace` 同一层，漏了臂的话这里会红，而不是等用户在终端里发现「没反应」。
+#[test]
+fn delete_key_edits_the_open_overlay() {
+    let client = test_client();
+    let mut prefs = test_prefs();
+    let (tx, rx) = mpsc::channel();
+    let (job_tx, _job_rx) = mpsc::channel();
+    let mut lane = test_app(&client, &mut prefs, rx, tx, job_tx);
+    lane.begin_clarify(info(&["名字"]));
+    lane.st.clarify_open = true;
+
+    for ch in "ab".chars() {
+        lane.on_key(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::NONE));
+    }
+    lane.on_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE));
+    lane.on_key(KeyEvent::new(KeyCode::Delete, KeyModifiers::NONE));
+
+    let ov = lane.st.clarify.as_ref().expect("问卷还在");
+    assert_eq!(ov.form.values[0], "a", "Delete 删掉了光标处的 b");
+}
