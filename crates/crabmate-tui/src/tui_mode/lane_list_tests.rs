@@ -1,6 +1,7 @@
 use super::*;
 use crate::tui_mode::inbound::Inbound;
 use crate::tui_mode::test_support::{test_client, test_prefs, test_shell_with_jobs};
+use crabmate_client_api::connections::busy_duration_text;
 
 fn pal() -> Palette {
     Palette::default()
@@ -400,12 +401,12 @@ fn cancelling_lane_does_not_spin() {
 /// 耗时换成定宽单位：`s` → `m` → `h`，不让秒数无限长。
 #[test]
 fn busy_duration_switches_units_to_stay_narrow() {
-    assert_eq!(duration_text(0), "0s");
-    assert_eq!(duration_text(59), "59s");
-    assert_eq!(duration_text(60), "1m00s");
-    assert_eq!(duration_text(3599), "59m59s");
-    assert_eq!(duration_text(3600), "1h00m");
-    assert_eq!(duration_text(7325), "2h02m");
+    assert_eq!(busy_duration_text(0), "0s");
+    assert_eq!(busy_duration_text(59), "59s");
+    assert_eq!(busy_duration_text(60), "1m00s");
+    assert_eq!(busy_duration_text(3599), "59m59s");
+    assert_eq!(busy_duration_text(3600), "1h00m");
+    assert_eq!(busy_duration_text(7325), "2h02m");
 }
 
 /// 后台 lane 的新输出点亮未读点，当前 lane 的不点亮；切过去即熄。

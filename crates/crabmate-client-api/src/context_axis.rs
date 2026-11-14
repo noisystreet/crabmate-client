@@ -184,6 +184,33 @@ pub fn context_value_text(axis: ContextAxis) -> String {
     )
 }
 
+/// 行尾占比短文本：`62%` / `~1%`（估算基线带 `~`）；上限未知时 `None`。
+///
+/// 与 [`context_value_text`] 同一条轴线，只省掉分子分母 —— 左栏连接行只有十几列宽，
+/// `12.0k / 1000k (62%)` 会把连接名整段挤掉。
+///
+/// `raw_cap == 0` 返回 `None` 而不是 `0%`：上限未知意味着占比无意义，画 `0%` 会被读成
+/// 「用量为零」。TUI 的 lane 行（`UiState::context_pct_text`）与 Desktop 的连接行共用它，
+/// 两端各拼一遍 `format!` 迟早在 `~` 前缀 / 999% 截断上分叉。
+///
+/// # 前置条件：调用方必须**先**施加用量水位
+///
+/// 本函数只做格式化，**不**施 [`context_axis_apply_watermark`]。四处调用点都要自己补这一步
+/// （状态栏 `ctx` chip / 用量可视化页 / TUI lane 行 / Desktop 连接行）：漏掉它，服务端
+/// `used` 短暂回落时（工具输出被截断等）该处会往下跳一下再涨回来，而别处仍是峰值 ——
+/// 同一个会话两个百分比，比不显示更难查。
+#[must_use]
+pub fn context_axis_pct_text(axis: ContextAxis) -> Option<String> {
+    if axis.raw_cap == 0 {
+        return None;
+    }
+    let prefix = if axis.baseline_estimate { "~" } else { "" };
+    Some(format!(
+        "{prefix}{:.0}%",
+        context_axis_used_pct(axis).min(999.0)
+    ))
+}
+
 /// 从 `timeline_log`（`kind=context_trim`）的 `detail` 解析裁剪 / 压缩后的 `used_input_tokens`。
 ///
 /// `detail` 是**字符串化 JSON**（`{"after_tokens": 40000, ...}`），不是嵌套对象 ——
@@ -278,10 +305,11 @@ pub fn new_session_baseline_prompt_tokens(
 mod tests {
     use super::{
         ContextAxis, ContextUsedWatermark, context_axis_apply_watermark,
-        context_axis_from_snapshot, context_axis_split, context_axis_used_pct, context_axis_whole,
-        context_placeholder_text, context_trim_after_used_tokens, context_trim_history_removed,
-        context_trim_watermark_reset, context_value_text, format_compact_cap_tokens,
-        format_compact_tokens, new_session_baseline_prompt_tokens,
+        context_axis_from_snapshot, context_axis_pct_text, context_axis_split,
+        context_axis_used_pct, context_axis_whole, context_placeholder_text,
+        context_trim_after_used_tokens, context_trim_history_removed, context_trim_watermark_reset,
+        context_value_text, format_compact_cap_tokens, format_compact_tokens,
+        new_session_baseline_prompt_tokens,
     };
     use std::collections::BTreeMap;
 
@@ -324,6 +352,37 @@ mod tests {
             baseline_estimate: false,
         };
         assert_eq!(context_value_text(axis), "116.9k / 1000k (11.7%)");
+    }
+
+    #[test]
+    fn pct_text_is_the_same_ratio_without_the_fractions() {
+        let axis = ContextAxis {
+            used: 116_900,
+            fixed: 0,
+            raw_cap: 1_000_000,
+            baseline_estimate: false,
+        };
+        // 与 `context_value_text` 同一个比值（11.7%），只是省成整数占比。
+        assert_eq!(context_axis_pct_text(axis).as_deref(), Some("12%"));
+
+        // 估算基线带 `~`：读者要能看出这个数是估的。
+        let estimate = ContextAxis {
+            baseline_estimate: true,
+            ..axis
+        };
+        assert_eq!(context_axis_pct_text(estimate).as_deref(), Some("~12%"));
+    }
+
+    #[test]
+    fn pct_text_is_absent_without_a_cap() {
+        // 上限未知时 `0%` 会被读成「用量为零」，所以宁可不画。
+        let no_cap = ContextAxis {
+            used: 12_000,
+            fixed: 0,
+            raw_cap: 0,
+            baseline_estimate: false,
+        };
+        assert_eq!(context_axis_pct_text(no_cap), None);
     }
 
     #[test]

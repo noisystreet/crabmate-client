@@ -7,7 +7,7 @@
 use crabmate_client_api::chat_body::llm_context_tokens_for_chat_body;
 use crabmate_client_api::context_axis::ContextUsedWatermark;
 use crabmate_client_api::context_axis::{
-    ContextAxis, context_axis_apply_watermark, context_axis_from_snapshot, context_axis_used_pct,
+    ContextAxis, context_axis_apply_watermark, context_axis_from_snapshot, context_axis_pct_text,
     context_axis_whole, context_placeholder_text, context_value_text, format_compact_cap_tokens,
     format_compact_tokens,
 };
@@ -187,14 +187,7 @@ impl UiState {
         new_session_baseline: Option<u32>,
     ) -> Option<String> {
         let axis = self.context_axis(cap_from_settings, new_session_baseline)?;
-        if axis.raw_cap == 0 {
-            return None;
-        }
-        let prefix = if axis.baseline_estimate { "~" } else { "" };
-        Some(format!(
-            "{prefix}{:.0}%",
-            context_axis_used_pct(axis).min(999.0)
-        ))
+        context_axis_pct_text(axis)
     }
 
     /// `/context` 的明细行：把状态行 `ctx` 段那一个数字拆开。

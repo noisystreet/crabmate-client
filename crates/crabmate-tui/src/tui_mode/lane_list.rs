@@ -6,6 +6,7 @@
 //! 版面口径全部来自 `layout`（`lane_shown_len` / `lane_index_at`）：
 //! 一行对应哪条 lane 与鼠标命中必须是同一份算法，否则会出现「点第 2 行切到第 3 条」。
 
+use crabmate_client_api::connections::busy_duration_text;
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
@@ -304,7 +305,7 @@ fn lane_tail(entry: &LaneEntry, room: usize) -> String {
         parts.push(ctx.to_string());
     }
     if let Some(secs) = entry.busy_secs {
-        parts.push(duration_text(secs));
+        parts.push(busy_duration_text(secs));
     }
     if entry.unread {
         parts.push("•".to_string());
@@ -325,18 +326,6 @@ fn tail_width(parts: &[String]) -> usize {
         .map(|p| UnicodeWidthStr::width(p.as_str()))
         .sum();
     glyphs + parts.len() - 1
-}
-
-/// 回合耗时短文本：`45s` / `2m05s` / `1h02m`。
-///
-/// 定宽优先于精确：60 秒后跳到 `m` 而不是继续累秒，否则 3 分钟就是四位数宽度，
-/// 在这一行里会把名字挤掉。
-fn duration_text(secs: u64) -> String {
-    match secs {
-        0..=59 => format!("{secs}s"),
-        60..=3599 => format!("{}m{:02}s", secs / 60, secs % 60),
-        _ => format!("{}h{:02}m", secs / 3600, (secs % 3600) / 60),
-    }
 }
 
 /// 底色条样式：当前 lane 走 `palette.selection`（无色模式自动退回反色），其余用
