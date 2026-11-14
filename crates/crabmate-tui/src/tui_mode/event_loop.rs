@@ -145,7 +145,10 @@ pub(super) fn paste_capture_enabled() -> bool {
 }
 
 /// 环境变量是否是「显式关闭」的那几种写法。
-fn env_flag_off(name: &str) -> bool {
+///
+/// `pub(super)`：工作区树的类别标记（`ws_file_kind::icons_enabled`）复用同一套取值规则，
+/// 免得 `CM_TUI_*` 开关各自实现一份「什么算 off」。
+pub(super) fn env_flag_off(name: &str) -> bool {
     matches!(
         std::env::var(name)
             .unwrap_or_default()

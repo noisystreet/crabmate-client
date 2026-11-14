@@ -12,6 +12,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 
 use super::term_image::{self, ColorDepth};
+use super::ws_file_kind::FileKind;
 
 /// 语义化配色板。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,6 +57,18 @@ pub(crate) struct Palette {
     pub err: Color,
     /// 注意态（`--warn`）：未保存改动、待重试、被改写的值。
     pub notice: Color,
+    /// 工作区树：源码类文件。
+    ///
+    /// 与 `file_config` / `file_doc` / `file_image` 一起构成目录树里「一眼分类型」的四档。
+    /// **终端专用色阶**：`tokens.css` 没有「文件类型」这个概念，所以这四档不绑定任何
+    /// token（与 `ok` / `err` / `hit` 同级待遇），因此也不需要动任何 Desktop 主题文件。
+    pub file_code: Color,
+    /// 工作区树：配置类文件（`toml` / `yaml` / `json` / `Makefile` ……）。终端专用，理由同上。
+    pub file_config: Color,
+    /// 工作区树：文档类文件（`md` / `txt` / `LICENSE` ……）。终端专用，理由同上。
+    pub file_doc: Color,
+    /// 工作区树：图片类文件（`png` / `svg` ……）。终端专用，理由同上。
+    pub file_image: Color,
     /// 无色模式：所有颜色为 `Reset`，区分只靠 `DIM` / `BOLD` / `REVERSED`。
     pub mono: bool,
 }
@@ -82,6 +95,10 @@ const DEFAULT_DARK: Palette = Palette {
     ok: rgb(0x6c, 0xc4, 0x9a),
     err: rgb(0xf2, 0x77, 0x7a),
     notice: rgb(0xc4, 0x9a, 0x6e),
+    file_code: rgb(0x7f, 0xc4, 0xe8),
+    file_config: rgb(0xb9, 0xa3, 0xe0),
+    file_doc: rgb(0xa8, 0xc8, 0x8a),
+    file_image: rgb(0xe7, 0x9a, 0xc0),
     mono: false,
 };
 
@@ -101,6 +118,10 @@ const HIGH_CONTRAST_DARK: Palette = Palette {
     ok: rgb(0x66, 0xff, 0x99),
     err: rgb(0xff, 0x6b, 0x6b),
     notice: rgb(0xc6, 0xc6, 0xc6),
+    file_code: rgb(0xa8, 0xdc, 0xff),
+    file_config: rgb(0xd8, 0xc8, 0xff),
+    file_doc: rgb(0xd0, 0xf0, 0xb0),
+    file_image: rgb(0xff, 0xc0, 0xe0),
     mono: false,
 };
 
@@ -120,6 +141,10 @@ const MATERIAL_DARK: Palette = Palette {
     ok: rgb(0x6c, 0xc4, 0x9a),
     err: rgb(0xf2, 0x77, 0x7a),
     notice: rgb(0xc2, 0x98, 0x68),
+    file_code: rgb(0x9a, 0xc8, 0xe0),
+    file_config: rgb(0xc0, 0xb0, 0xe0),
+    file_doc: rgb(0xb8, 0xd0, 0xa8),
+    file_image: rgb(0xe0, 0xb0, 0xc8),
     mono: false,
 };
 
@@ -139,6 +164,10 @@ const SHADCN_DARK: Palette = Palette {
     ok: rgb(0x6c, 0xc4, 0x9a),
     err: rgb(0xf2, 0x77, 0x7a),
     notice: rgb(0xfb, 0xbf, 0x24),
+    file_code: rgb(0x7d, 0xd3, 0xfc),
+    file_config: rgb(0xc4, 0xb5, 0xfd),
+    file_doc: rgb(0xbe, 0xd9, 0x8a),
+    file_image: rgb(0xf9, 0xa8, 0xd4),
     mono: false,
 };
 
@@ -206,6 +235,10 @@ const CRABMATE_LIGHT: Palette = Palette {
     ok: rgb(0x2f, 0x7d, 0x4f),
     err: rgb(0xb4, 0x23, 0x18),
     notice: rgb(0x83, 0x66, 0x28),
+    file_code: rgb(0x1f, 0x5c, 0x86),
+    file_config: rgb(0x5b, 0x3d, 0x8f),
+    file_doc: rgb(0x4a, 0x6b, 0x2a),
+    file_image: rgb(0x8f, 0x2f, 0x63),
     mono: false,
 };
 
@@ -225,6 +258,10 @@ const SHADCN_LIGHT: Palette = Palette {
     ok: rgb(0x2f, 0x7d, 0x4f),
     err: rgb(0xb4, 0x23, 0x18),
     notice: rgb(0xb4, 0x53, 0x09),
+    file_code: rgb(0x0e, 0x74, 0x90),
+    file_config: rgb(0x6d, 0x28, 0xd9),
+    file_doc: rgb(0x3f, 0x62, 0x12),
+    file_image: rgb(0x9d, 0x17, 0x4a),
     mono: false,
 };
 
@@ -244,6 +281,10 @@ const MONO: Palette = Palette {
     ok: Color::Reset,
     err: Color::Reset,
     notice: Color::Reset,
+    file_code: Color::Reset,
+    file_config: Color::Reset,
+    file_doc: Color::Reset,
+    file_image: Color::Reset,
     mono: true,
 };
 
@@ -364,6 +405,24 @@ impl Palette {
         Style::new().fg(color)
     }
 
+    /// 工作区树条目颜色（[`FileKind`] → 色槽）。
+    ///
+    /// 只给颜色、不给 `Style`：调用方要把它再交给 [`Self::selection`] 组成选中态，
+    /// 「选中行长什么样」仍然只有那一处定义。分类本身在 [`super::ws_file_kind`]，
+    /// 这里只做「类型 → 槽」的映射 —— 让渲染处不自己挑槽，是本文件上半部分
+    /// （[`NoticeLevel`] / [`FieldTone`]）已经走过的同一条路。
+    #[must_use]
+    pub(crate) fn ws_entry_color(&self, kind: FileKind) -> Color {
+        match kind {
+            FileKind::Dir => self.accent,
+            FileKind::Code => self.file_code,
+            FileKind::Config => self.file_config,
+            FileKind::Doc => self.file_doc,
+            FileKind::Image => self.file_image,
+            FileKind::Other => self.fg,
+        }
+    }
+
     /// 把 `Rgb` 降到最接近的 16 色（非真彩终端用）；已是命名色则原样返回。
     #[must_use]
     pub(crate) fn downgrade_basic(self) -> Self {
@@ -381,6 +440,10 @@ impl Palette {
         p.code_bg = nearest_ansi(p.code_bg);
         p.ok = nearest_ansi(p.ok);
         p.err = nearest_ansi(p.err);
+        p.file_code = nearest_ansi(p.file_code);
+        p.file_config = nearest_ansi(p.file_config);
+        p.file_doc = nearest_ansi(p.file_doc);
+        p.file_image = nearest_ansi(p.file_image);
         p
     }
 
