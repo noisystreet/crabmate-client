@@ -147,7 +147,9 @@ jobs:
             specs/mock-storage-consistency.spec.ts \
             specs/mock-v2-multi-turn-boundaries.spec.ts \
             specs/mock-mobile-shell.spec.ts \
-            specs/mock-hydrate-parse-failed.spec.ts
+            specs/mock-hydrate-parse-failed.spec.ts \
+            specs/mock-status-bar.spec.ts \
+            specs/mock-visible-messages.spec.ts
         working-directory: e2e
         env:
           no_proxy: 127.0.0.1,localhost
