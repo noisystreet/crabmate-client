@@ -19,6 +19,7 @@ use std::cell::RefCell;
 
 use web_sys::{Headers, Window};
 
+use super::connection_scope;
 use super::storage_scope;
 
 // 键名只有一处来源（[`super::storage_scope`]）：它们要和「本页属于哪个连接」组合成
@@ -26,11 +27,10 @@ use super::storage_scope;
 pub(crate) use super::storage_scope::{API_BASE_URL_KEY, WEB_API_BEARER_TOKEN_KEY};
 
 thread_local! {
-    static WEB_API_BEARER: RefCell<String> = const { RefCell::new(String::new()) };
-    static WEB_API_BEARER_HYDRATED: RefCell<bool> = const { RefCell::new(false) };
-    static API_BASE_URL: RefCell<String> = const { RefCell::new(String::new()) };
-    static API_BASE_HYDRATED: RefCell<bool> = const { RefCell::new(false) };
     /// 壳内 GitHub user token（由 `github_secrets_local` 水合）；浏览器路径保持空，靠 Cookie。
+    ///
+    /// 留在本模块而不进 [`connection_scope`]：它属于**账号**，不属于某台 `serve` ——
+    /// 换一条连接不该把 Device Flow 的结果丢掉。
     static REQUEST_GITHUB_TOKEN: RefCell<String> = const { RefCell::new(String::new()) };
 }
 
@@ -125,36 +125,31 @@ pub(crate) fn clear_local_storage_web_api_bearer() {
     write_local_storage_item(WEB_API_BEARER_TOKEN_KEY, "");
 }
 
-/// 仅写进程内内存（及 hydrate 标记）；不触碰 localStorage。
+/// 仅写进程内内存（及已水合标记）；不触碰 localStorage。
 pub(crate) fn set_web_api_bearer_token_memory_only(token: &str) {
-    let t = token.trim().to_string();
-    WEB_API_BEARER.with(|c| *c.borrow_mut() = t);
-    WEB_API_BEARER_HYDRATED.with(|h| *h.borrow_mut() = true);
+    // trim 与「置已水合」都在 `connection_scope::set_bearer` 里。
+    connection_scope::set_bearer(token);
 }
 
 /// 仅读进程内内存（不触发 localStorage hydrate）。
 pub(crate) fn web_api_bearer_token_memory_peek() -> String {
-    WEB_API_BEARER.with(|c| c.borrow().clone())
+    connection_scope::bearer()
 }
 
 fn hydrate_web_api_bearer_once() {
-    WEB_API_BEARER_HYDRATED.with(|h| {
-        if *h.borrow() {
-            return;
+    if connection_scope::bearer_settled() {
+        return;
+    }
+    connection_scope::mark_bearer_settled();
+    // 官方壳：不从明文 LS 水合（由 `hydrate_web_api_bearer_from_secure_store` 异步补齐）。
+    if super::web_api_bearer_local::secure_web_api_bearer_backend_available() {
+        return;
+    }
+    if let Some(t) = read_local_storage_web_api_bearer() {
+        if connection_scope::bearer().is_empty() {
+            connection_scope::set_bearer(&t);
         }
-        *h.borrow_mut() = true;
-        // 官方壳：不从明文 LS 水合（由 `hydrate_web_api_bearer_from_secure_store` 异步补齐）。
-        if super::web_api_bearer_local::secure_web_api_bearer_backend_available() {
-            return;
-        }
-        if let Some(t) = read_local_storage_web_api_bearer() {
-            WEB_API_BEARER.with(|c| {
-                if c.borrow().is_empty() {
-                    *c.borrow_mut() = t;
-                }
-            });
-        }
-    });
+    }
 }
 
 /// 规范化 API 基址：去空白与尾 `/`；非法时返回空（回退同 Origin）。
@@ -182,21 +177,20 @@ pub fn resolve_api_base_url(ls_raw: Option<&str>, build_default: &str) -> String
 }
 
 fn hydrate_api_base_once() {
-    API_BASE_HYDRATED.with(|h| {
-        if *h.borrow() {
-            return;
-        }
-        *h.borrow_mut() = true;
-        let chosen = resolve_api_base_url(
-            read_api_base_local_storage_raw().as_deref(),
-            &build_time_api_base_default(),
-        );
-        API_BASE_URL.with(|c| {
-            if c.borrow().is_empty() {
-                *c.borrow_mut() = chosen;
-            }
-        });
-    });
+    if connection_scope::base_settled() {
+        return;
+    }
+    // 先置「已决定」再读盘：后面不管读到什么都算数（包括「读到空、用构建期默认」），
+    // 不该因为一次空的读取就每次访问都重打一次 `localStorage`。
+    connection_scope::mark_base_settled();
+    let chosen = resolve_api_base_url(
+        read_api_base_local_storage_raw().as_deref(),
+        &build_time_api_base_default(),
+    );
+    // 已经把值写进来的路径（URL hash 交接 / 设置页）不能被这里覆盖。
+    if connection_scope::api_base().is_empty() {
+        connection_scope::set_api_base(&chosen);
+    }
 }
 
 /// 设置本页访问 CrabMate HTTP API 的 Bearer。
@@ -220,7 +214,7 @@ pub fn set_web_api_bearer_token(token: &str) {
 #[must_use]
 pub fn web_api_bearer_token() -> String {
     hydrate_web_api_bearer_once();
-    WEB_API_BEARER.with(|c| c.borrow().clone())
+    connection_scope::bearer()
 }
 
 /// 是否已配置非空 Web API Bearer（本页）。
@@ -232,8 +226,8 @@ pub fn web_api_bearer_token_is_set() -> bool {
 /// 设置远程 `serve` API 基址（空 = 同 Origin）。写入内存 + `localStorage`（空串仍保留键）。
 pub fn set_api_base_url(base: &str) {
     let t = normalize_api_base_url(base);
-    API_BASE_URL.with(|c| *c.borrow_mut() = t.clone());
-    API_BASE_HYDRATED.with(|h| *h.borrow_mut() = true);
+    // `set_api_base` 同时置「已决定」：调用方不用记得两步都做。
+    connection_scope::set_api_base(&t);
     write_api_base_local_storage(&t);
 }
 
@@ -241,7 +235,7 @@ pub fn set_api_base_url(base: &str) {
 #[must_use]
 pub fn api_base_url() -> String {
     hydrate_api_base_once();
-    API_BASE_URL.with(|c| c.borrow().clone())
+    connection_scope::api_base()
 }
 
 /// 从已规范化的 `http(s)://` API 基址取出 host（不含端口）。

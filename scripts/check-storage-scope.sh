@@ -45,4 +45,20 @@ for f in "$OWNER" "$INJECTOR"; do
   fi
 done
 
-echo "storage scope ok（分域键名单一来源：$OWNER；注入名两端一致）"
+# #457 W0-1：连接作用域（api_base + Web API Bearer）只允许 `api/connection_scope.rs` 持有。
+# 它们的值原本平铺在 `api/browser.rs` 的四个 thread_local 里，谁都能读写；再塞回一处，
+# 「只有一处存储」这条就名存实亡了。
+SCOPE_OWNER="frontend/src/api/connection_scope.rs"
+if [ ! -f "$SCOPE_OWNER" ]; then
+  echo "缺少 $SCOPE_OWNER：连接作用域的唯一持有者" >&2
+  exit 1
+fi
+scope_hits="$(grep -rnE 'static (API_BASE_URL|API_BASE_HYDRATED|WEB_API_BEARER|WEB_API_BEARER_HYDRATED)\b' frontend/src --include='*.rs' || true)"
+if [ -n "$scope_hits" ]; then
+  echo "以下位置又平铺了连接作用域的存储，它只能由 $SCOPE_OWNER 持有：" >&2
+  echo "$scope_hits" >&2
+  echo "改法：读走 api::api_base_url() / web_api_bearer_token()，写走 connection_scope::set_*。" >&2
+  exit 1
+fi
+
+echo "storage scope ok（分域键名单一来源：$OWNER；注入名两端一致；连接作用域单一持有者：$SCOPE_OWNER）"
