@@ -32,6 +32,9 @@ bash "$ROOT/scripts/check-token-mirrors.sh"
 echo "[check] tui palette usage (no named / literal colors outside palette.rs)"
 bash "$ROOT/scripts/check-tui-palette-usage.sh"
 
+echo "[check] storage scope (connection-scoped localStorage keys have one source)"
+bash "$ROOT/scripts/check-storage-scope.sh"
+
 echo "[check] icons (no literal <svg> outside icon.rs; svg rule sizes must be var(--icon-*))"
 bash "$ROOT/scripts/check-icons.sh"
 

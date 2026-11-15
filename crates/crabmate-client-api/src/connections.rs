@@ -25,11 +25,16 @@ const MAX_KEY_LEN: usize = 64;
 /// 产不出任何 slug 时的兜底名字。
 const FALLBACK_KEY: &str = "serve";
 
-/// 一条连接的稳定身份。
+/// 一条连接的稳定身份 —— 它是**连接的标识**，不是「窗口身份」的别名。
 ///
 /// 两个消费者：TUI 的 lane（用户给的 lane 名）、Desktop 的窗口（窗口 label）。
-/// 它同时是将来「按连接分区存储」的主键 —— 所以它必须**稳定**（同一条连接重连后
-/// 不变）且**可作为 Tauri window label**。
+/// 它同时是「按连接分区存储」的主键（`frontend/src/api/storage_scope.rs` 用它把
+/// `localStorage` 键分域），所以它必须**稳定**（同一条连接重连后不变）。
+///
+/// **与 window label 的关系**：Desktop 目前把 label 直接当作连接标识
+/// （注册表按 label 索引，建窗口时又把它注入页面的 `__CM_CONN_KEY__`），
+/// 也就是「**当前恰好相等**」——不是「定义上恒等」。解耦那条等式只需要改注册侧的
+/// 分配与注入值，本类型与前端分域逻辑都不用动（#457 W0-3）。
 #[derive(
     Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
 )]

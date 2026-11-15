@@ -335,11 +335,15 @@ pub(crate) fn connections_tally(app: AppHandle) -> ConnectionTally {
 ///
 /// 由业务 UI 在连接成功后调用（拿得到 `api_base` 与用户取的名字）。
 ///
-/// `key` **恒等于 window label**（`ConnectionKey::from_raw` 只做 slug 化，label 本身
-/// 已经是合规的）。这条等式是整套协调面的地基：`focus_connection`、`report_connection_status`、
-/// `rename_connection`、窗口 `Destroyed` 清理全部按 label 查。窗口自报时 label 早已确定，
-/// **不需要**再分配一次 key —— 再分配只会得到一个与 label 不同的值，于是
-/// `focus_connection(key)` 永远找不到那个窗口。
+/// `key` 是**连接标识**，当前恰好等于 window label（`ConnectionKey` 的 doc 记了这条
+/// 等式「由注册侧维持」而不是「定义上恒等」）。它仍是这套协调面的地基：
+/// `focus_connection`、`report_connection_status`、`rename_connection`、窗口 `Destroyed`
+/// 清理全部按 label 查。窗口自报时 label 早已确定，**不需要**再分配一次 key ——
+/// 再分配只会得到一个与 label 不同的值，于是 `focus_connection(key)` 永远找不到那个窗口。
+///
+/// 同一条 label 也被注入页面（`desktop_main_window::connection_scope_init_script`），
+/// 前端据此把 `localStorage` 键按连接分域 —— 三处（注册表键 / 注入值 / 键后缀）
+/// 必须同源，改分配方式时一起改。
 #[tauri::command]
 pub(crate) fn register_connection(
     app: AppHandle,
