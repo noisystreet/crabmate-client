@@ -149,7 +149,11 @@ jobs:
             specs/mock-mobile-shell.spec.ts \
             specs/mock-hydrate-parse-failed.spec.ts \
             specs/mock-status-bar.spec.ts \
-            specs/mock-visible-messages.spec.ts
+            specs/mock-visible-messages.spec.ts \
+            specs/mock-prefs-theme.spec.ts \
+            specs/mock-session-crud.spec.ts \
+            specs/mock-settings-page.spec.ts \
+            specs/mock-keyboard-scroll.spec.ts
         working-directory: e2e
         env:
           no_proxy: 127.0.0.1,localhost
