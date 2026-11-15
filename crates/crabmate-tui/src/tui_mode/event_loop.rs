@@ -124,6 +124,16 @@ fn throttle_frame(last_draw: Instant) {
     }
 }
 
+/// `interval` 模式的固定节流：有消息 2ms、空闲 50ms（改造前的节奏）。
+///
+/// `event` 模式不在这里睡（它由 [`throttle_frame`] 兜帧率下限）。抽成函数是为了
+/// `run_loop` 的 CCN：两处「画完再等」原来是同一段 `if`，而两条路径各留一份迟早分家。
+fn interval_sleep(mode: LoopMode, had_event: bool) {
+    if mode == LoopMode::Interval {
+        thread::sleep(Duration::from_millis(if had_event { 2 } else { 50 }));
+    }
+}
+
 /// 读终端尺寸。**只读**，不改任何派生态 —— 调用方先比尺寸、再决定要不要画。
 fn read_terminal_size(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<(u16, u16)> {
     let size = terminal.backend().size().context("terminal size")?;
@@ -201,6 +211,16 @@ impl TuiApp<'_> {
                 // 帧率下限（`interval` 靠循环末尾那个 sleep）。
                 throttle_frame(last_draw);
             }
+            // 未连接界面：没有 lane 可画，这条分支里一次 `lane_mut()` 都不能碰
+            // （`lanes` 为空时它直接索引会 panic）。空闲帧由 `draw_empty` 自己判空帧
+            // 跳过（`empty_shell::empty_frame_is_noop`），所以这里照旧把「有没有事件」
+            // 传下去 —— 判据只留一处，与普通界面同一个口径。
+            if self.lanes.is_empty() {
+                self.draw_empty(terminal, !had_event)?;
+                last_draw = Instant::now();
+                interval_sleep(mode, had_event);
+                continue;
+            }
             // 兜底醒来的空帧（无事件 / 无动画 / 尺寸未变）整帧跳过。
             // 先算 lane 快照再取 `lane_mut()`：两个借用会在同一条语句里打架。
             // 快照之前熄未读点：当前 lane 就在眼前，那个点没有存在意义。
@@ -218,10 +238,8 @@ impl TuiApp<'_> {
             self.lane_mut()
                 .draw_frame(terminal, !had_event, &lanes, &pending, lane_pos)?;
             last_draw = Instant::now();
-            if mode == LoopMode::Interval {
-                // 改造前的节奏原样保留：有消息 2ms、空闲 50ms。
-                thread::sleep(Duration::from_millis(if had_event { 2 } else { 50 }));
-            }
+            // 改造前的节奏原样保留：有消息 2ms、空闲 50ms。
+            interval_sleep(mode, had_event);
         }
     }
 
@@ -263,7 +281,12 @@ impl TuiApp<'_> {
             // channel 不会断开。保留这一支只为 match 穷尽；真发生就退出，
             // 绝不让循环空转。排查「画面停住」时不要先看这里。
             Err(RecvTimeoutError::Disconnected) => {
-                self.lane_mut().exit = true;
+                // 空态下没有 lane 可以承载「退出」这个意图，直接置外壳的退出位。
+                if self.lanes.is_empty() {
+                    self.empty.exit = true;
+                } else {
+                    self.lane_mut().exit = true;
+                }
                 return Ok(false);
             }
         }

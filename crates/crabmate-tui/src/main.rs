@@ -6,6 +6,7 @@ mod conv_export;
 mod serve;
 mod shell_keyring;
 mod slash;
+mod startup;
 mod tui_mode;
 mod tui_wiring;
 mod turn;
@@ -16,7 +17,7 @@ use std::process::ExitCode;
 
 use crate::serve::{
     ApprovalDecision, ApprovalGate, AutoAllowOnce, ChatStreamOutcome, ClientLlm,
-    CommandApprovalData, ConnectionConfig, ServeClient, StreamResume, TermError,
+    CommandApprovalData, ServeClient, StreamResume, TermError,
 };
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
@@ -26,7 +27,6 @@ use crabmate_client_api::slash_heads::Head;
 use reedline::{DefaultPrompt, DefaultPromptSegment, Reedline, Signal};
 
 use crate::approval_tty::TtyApprovalGate;
-use crate::connect_spec::parse_connect_spec;
 use crate::slash::{handle_control_slash, is_control_slash, repl_pre_turn_head};
 use crate::tui_wiring::TuiWiring;
 use crate::turn::{TurnPrefs, run_turn};
@@ -140,6 +140,12 @@ enum Commands {
         /// 默认路径 `$XDG_RUNTIME_DIR/crabmate/ctl.sock`，仅当它存在才启用）。不监听 TCP。
         #[arg(long = "ctl-socket", value_name = "PATH")]
         ctl_socket: Option<String>,
+        /// 启动时从控制面取第一条**可连**实例当主连接（免去手抄 `--api-base`）。
+        ///
+        /// 查询失败 / 一条都没就绪时**不**退出，而是进入未连接界面：那里 `/lane` 能
+        /// 看清控制面到底说了什么，再 `/lane attach <name>` 连上。
+        #[arg(long = "from-ctl")]
+        from_ctl: bool,
     },
     /// Probe terminal pixel-graphics support (kitty / sixel / iTerm2 / half-block); no network.
     ///
@@ -258,7 +264,35 @@ async fn run() -> Result<()> {
         return Ok(());
     }
     let bearer = shell_keyring::resolve_bearer(cli.bearer.as_deref(), cli.no_keyring);
-    let client = build_client(&cli, bearer.as_deref())?;
+    // Bearer 的来源与值在同一处定下来：设置面板「连接」栏只报来源（值本身逆推不出
+    // 是显式给的、钥匙串来的，还是压根没带），所以不能在构造 `ServeClient` 时才决定。
+    let bearer_source =
+        shell_keyring::bearer_source(cli.bearer.as_deref(), Some(bearer.as_deref().unwrap_or("")));
+    // `tui` 允许**没有主连接**（起来后在未连接界面里 `/lane attach|attach-url`）；
+    // 其余子命令仍然必须有 `--api-base`，缺了就在这里失败。子命令那三项在这里取出来，
+    // 是为了让 `startup::resolve_startup_api_base` 不必知道整个 `Cli`。
+    let (is_tui, from_ctl, ctl_socket_arg) = match &cli.command {
+        Commands::Tui {
+            from_ctl,
+            ctl_socket,
+            ..
+        } => (true, *from_ctl, ctl_socket.as_deref()),
+        _ => (false, false, None),
+    };
+    let api_base = startup::resolve_startup_api_base(
+        cli.api_base.as_deref(),
+        is_tui,
+        from_ctl,
+        ctl_socket_arg,
+    )?;
+    let client = match api_base {
+        Some(base) => Some(startup::build_client(
+            &base,
+            bearer.as_deref(),
+            bearer_source,
+        )?),
+        None => None,
+    };
     let Cli {
         llm_api_key,
         llm_model,
@@ -271,23 +305,47 @@ async fn run() -> Result<()> {
     let llm_key = resolve_llm_key(llm_api_key.as_deref(), no_keyring);
     let mut overrides = SessionPrefs::from_options(llm_key, llm_model, llm_api_base);
     match command {
-        Commands::Connect => run_connect(&client).await,
+        Commands::Connect => run_connect(startup::require_client(&client)?).await,
         Commands::Chat {
             message,
             conversation_id,
             no_probe,
-        } => run_chat(&client, message, conversation_id, no_probe, yes, &overrides).await,
+        } => {
+            run_chat(
+                startup::require_client(&client)?,
+                message,
+                conversation_id,
+                no_probe,
+                yes,
+                &overrides,
+            )
+            .await
+        }
         Commands::Repl {
             conversation_id,
             no_probe,
-        } => run_repl(&client, conversation_id, no_probe, yes, &mut overrides).await,
+        } => {
+            run_repl(
+                startup::require_client(&client)?,
+                conversation_id,
+                no_probe,
+                yes,
+                &mut overrides,
+            )
+            .await
+        }
         Commands::Tui {
             no_probe,
             connect,
             ctl_socket,
+            ..
         } => {
-            run_tui_cmd(
-                &client,
+            startup::run_tui_cmd(
+                client.as_ref(),
+                startup::TuiBearer {
+                    token: bearer.as_deref().unwrap_or_default(),
+                    source: bearer_source,
+                },
                 no_probe,
                 no_keyring,
                 yes,
@@ -295,7 +353,6 @@ async fn run() -> Result<()> {
                 TuiWiring {
                     connect: &connect,
                     ctl_socket: ctl_socket.as_deref(),
-                    bearer: bearer.as_deref(),
                 },
             )
             .await
@@ -303,43 +360,6 @@ async fn run() -> Result<()> {
         // 已在 `run` 开头提前返回（这里只是让 match 穷尽）。
         Commands::Caps => Ok(()),
     }
-}
-
-async fn run_tui_cmd(
-    client: &ServeClient,
-    no_probe: bool,
-    no_keyring: bool,
-    yes: bool,
-    overrides: &mut SessionPrefs,
-    wiring: TuiWiring<'_>,
-) -> Result<()> {
-    ensure_tty()?;
-    maybe_probe(client, no_probe).await?;
-    let TuiWiring {
-        connect,
-        ctl_socket,
-        bearer,
-    } = wiring;
-    // 额外 lane：`--connect name=url`。主连接恒为第一条，`--connect` 依次追加。
-    let mut extras: Vec<(String, ServeClient)> = Vec::with_capacity(connect.len());
-    for spec in connect {
-        let (name, url) = parse_connect_spec(spec)?;
-        // 额外 lane 与主连接共用同一份 Bearer，因此也共用它的来源（面板展示用）。
-        let cfg = ConnectionConfig::new(url, bearer.unwrap_or_default().to_string())
-            .with_bearer_source(client.config().bearer_source);
-        extras.push((name, ServeClient::new(cfg)?));
-    }
-    tui_mode::check_lane_capacity(extras.len() + 1)?; // 见该函数的文档
-    // 控制面 socket 与主 lane 名：显式 `--ctl-socket` 优先、否则默认路径存在才启用；
-    // 主 lane 取 ctl 里的实例名，反查不到仍叫 `local`（见 `serve::ctl::primary_binding`）。
-    let (ctl_socket, primary) =
-        crate::serve::primary_binding(ctl_socket, &client.config().api_base);
-    let mut lanes: Vec<(String, &ServeClient)> = Vec::with_capacity(extras.len() + 1);
-    lanes.push((primary, client));
-    for (name, c) in &extras {
-        lanes.push((name.clone(), c));
-    }
-    tui_mode::run_tui(&lanes, overrides, yes, no_keyring, ctl_socket.as_deref()).await
 }
 
 /// 三个 `client_llm` 覆盖中任一非空才构造；全空返回 `None`（不发送 `client_llm` 整块）。
@@ -371,29 +391,6 @@ fn resolve_llm_key(llm_api_key: Option<&str>, no_keyring: bool) -> Option<String
         );
     }
     value
-}
-
-fn build_client(cli: &Cli, bearer: Option<&str>) -> Result<ServeClient> {
-    let api_base = cli
-        .api_base
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .with_context(
-            || "missing --api-base / CRABMATE_API_BASE (absolute http(s) URL to crabmate serve)",
-        )?
-        .to_string();
-    let bearer = bearer
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .unwrap_or_default()
-        .to_string();
-    // 面板「连接」栏只报来源：值本身逆推不出是哪来的（空值可能是显式空，也可能是
-    // 钥匙串没命中），所以在解析的同一处定下来（`shell_keyring::bearer_source`）。
-    let source = shell_keyring::bearer_source(cli.bearer.as_deref(), Some(bearer.as_str()));
-    Ok(ServeClient::new(
-        ConnectionConfig::new(api_base, bearer).with_bearer_source(source),
-    )?)
 }
 
 async fn run_connect(client: &ServeClient) -> Result<()> {

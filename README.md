@@ -115,8 +115,11 @@ make tui
 ./crates/crabmate-tui/target/debug/crabmate-tui --api-base http://127.0.0.1:8080 --bearer "$CM_WEB_API_BEARER_TOKEN" chat "hello"
 ./crates/crabmate-tui/target/debug/crabmate-tui --api-base http://127.0.0.1:8080 repl   # interactive REPL
 ./crates/crabmate-tui/target/debug/crabmate-tui --api-base http://127.0.0.1:8080 tui    # full-screen TUI
+./crates/crabmate-tui/target/debug/crabmate-tui tui --from-ctl                          # no URL: first connectable ctl instance
 ./crates/crabmate-tui/target/debug/crabmate-tui caps   # terminal pixel-graphics / colour depth probe (needs no server)
 ```
+
+`tui` is the only subcommand that starts **without** a connection: `crabmate-tui tui` (no `--api-base`) opens an **unconnected screen** — `/lane` lists the instances a `crabmatectl supervise --socket` control plane declares, `/lane attach <name>` connects one, and `/lane attach-url <name>=<url>` dials an address directly (no declaration and **no control plane** needed, so any serve — a VPS, a throwaway one — works). `--from-ctl` does the lookup for you at startup: it uses the first instance the control plane reports as `ready` as the primary lane, and falls into the same unconnected screen when nothing is ready yet. `chat` / `repl` / `connect` still require `--api-base`.
 
 A bearer-mode `serve` without a server-side model `API_KEY` returns `LLM_API_KEY_REQUIRED`; pass a client-owned key with `--llm-api-key` (or `CM_API_KEY` / `CM_MODEL` / `CM_API_BASE`). Missing `--bearer` / `--llm-api-key` falls back to the Desktop shell's saved secrets in the same OS keyring (read-only; `--no-keyring` disables it). The Web Bearer is looked up in the Desktop main window's per-window slot first, then in the pre-per-window slot.
 

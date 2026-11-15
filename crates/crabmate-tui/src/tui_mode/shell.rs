@@ -22,7 +22,7 @@ use ratatui::backend::CrosstermBackend;
 use crabmate_client_api::ctl::{ToggleFailure, ToggleOutcome};
 
 use crate::SessionPrefs;
-use crate::serve::{ConnectionConfig, ServeClient};
+use crate::serve::{BearerSource, ConnectionConfig, ServeClient};
 
 use super::drafts::store::DraftStore;
 use super::inbound::{Inbound, ShellEvent};
@@ -67,11 +67,18 @@ impl Drop for ScreenGuard {
 
 /// 全屏 TUI 入口（M2）：状态行 + 左栏会话 + 流式 transcript + 单行输入。
 ///
-/// `lanes_spec` 为 `(名字, 客户端)` 列表，**第一条是初始激活的 lane**。每条 lane 各自
-/// 一个 worker 与一份 `overrides`；共用同一个事件通道，按 `LaneId` 分发
+/// `lanes_spec` 为 `(名字, 客户端)` 列表，**第一条是初始激活的 lane**；**可以为空** ——
+/// 那时进的是「未连接界面」（见 [`super::empty_shell`]）：一个只认 `/lane` / `/quit`
+/// 的最小输入行，连上第一条之后就不再出现。每条 lane 各自一个 worker 与一份
+/// `overrides`；共用同一个事件通道，按 `LaneId` 分发
 /// （见 `docs/design/tui_multi_server.md` §4.2）。
+///
+/// `bearer` 为 `(值, 来源)`：`/lane attach|new|attach-url` 造出来的新 lane 复用这一份。
+/// 它**必须**由调用方传入而不是从 `lanes_spec.first()` 反推 —— 空列表时那条路会把
+/// 命令行上显式给的 `--bearer` 悄悄丢掉。
 pub async fn run_tui(
     lanes_spec: &[(String, &ServeClient)],
+    bearer: (&str, BearerSource),
     overrides: &SessionPrefs,
     yes: bool,
     no_keyring: bool,
@@ -117,15 +124,11 @@ pub async fn run_tui(
         pane: pane_sink.load(),
         pane_store: pane_sink,
         draft_store: draft_sink,
-        bearer: lanes_spec
-            .first()
-            .map(|(_, c)| c.config().bearer_token.clone())
-            .unwrap_or_default(),
-        // 来源随主连接定一次：`--connect` 与 `/lane attach|new` 用的都是这份 Bearer。
-        bearer_source: lanes_spec
-            .first()
-            .map(|(_, c)| c.config().bearer_source)
-            .unwrap_or_default(),
+        // 值 / 来源都由调用方传入：从 `lanes_spec.first()` 反推的话，没有主连接
+        // （未连接界面）时那份 Bearer 会被静默丢掉，之后 `/lane attach-url` 连上去
+        // 就是一次没有凭据的请求。
+        bearer: bearer.0.to_string(),
+        bearer_source: bearer.1,
         ctl,
         tx: tx.clone(),
     };
@@ -153,6 +156,7 @@ pub async fn run_tui(
         next_lane_id,
         session_refresh: Default::default(),
         pending: Default::default(),
+        empty: Default::default(),
     };
     // 每条 lane 都拉一次会话 / 工作区根 / serve 默认状态 / user-data 设置快照：
     // 只刷当前 lane 的话，切过去会看到空的会话列表（切 lane 不该触发网络请求）。
@@ -303,7 +307,8 @@ impl<'a> super::TuiApp<'a> {
     /// 它自己的回合结束时置了 `exit`，屏幕上却什么都没发生，等用户切过去才突然退出
     /// （issue #338 的症状 A）。`run_loop` / `drain_events` 都走这一个判据。
     pub(super) fn exit_requested(&self) -> bool {
-        self.lanes.iter().any(|l| l.exit)
+        // 未连接界面的 `/quit` / Ctrl+C 没有 lane 可落（`empty.exit`），同样要能退出。
+        self.empty.exit || self.lanes.iter().any(|l| l.exit)
     }
 
     /// 在 lane 之间循环切换。
@@ -360,19 +365,6 @@ impl<'a> super::TuiApp<'a> {
         }
     }
 
-    /// 按 `LaneId` 找 lane；找不到（已被 `/lane detach` 摘掉）就退回当前 lane。
-    ///
-    /// 控制面回执的目标是**发起命令的那条**（issue #350：执行挪到了外壳级，归属仍按
-    /// `LaneId`）。退回当前 lane 而不是丢弃：结果不该凭空消失，用户仍要能看到它。
-    pub(super) fn lane_by_id_or_active(&mut self, id: LaneId) -> &mut LaneApp<'a> {
-        let idx = self
-            .lanes
-            .iter()
-            .position(|l| l.id == id)
-            .unwrap_or(self.active);
-        &mut self.lanes[idx]
-    }
-
     /// `ShellEvent::Ready`：控制面回包后装配一条新 lane。
     ///
     /// 走外壳事件而不是 `UiEvent`：新 lane 还不存在，按 id 分发只会被当成「已关闭的
@@ -387,11 +379,7 @@ impl<'a> super::TuiApp<'a> {
             Ok(base_url) => self.attach_lane(&name, &base_url),
             // 失败写回**发起命令的那条** lane：`/lane new` 的 20 s 轮询期间用户很可能
             // 已经切走了，写进「当前」那条等于把别人的失败放到你的屏上。
-            Err(why) => {
-                self.lane_by_id_or_active(from)
-                    .st
-                    .push_line(LineKind::System, &format!("连接 `{name}` 失败：{why}"));
-            }
+            Err(why) => self.shell_line_for(from, &format!("连接 `{name}` 失败：{why}")),
         }
     }
 
@@ -408,6 +396,9 @@ impl<'a> super::TuiApp<'a> {
                 name,
                 outcome,
             } => self.on_lane_new_settled(from, name, outcome),
+            // `/lane attach-url name=url`：地址直接来自用户，**不**经控制面 ——
+            // 未声明过的 serve（VPS、临时起的那台）也只能这么连。
+            ShellEvent::AttachUrl { name, url } => self.attach_lane(&name, &url),
             // 摘连接：`LaneApp` 手上没有 `lanes` 的 `&mut`（见 `shell::detach_lane`）。
             ShellEvent::Detach { name } => self.detach_lane(&name),
             // 取消某条 lane 的回合：`LaneApp` 只握着自己的 `cancel`。
@@ -425,13 +416,19 @@ impl<'a> super::TuiApp<'a> {
     /// 来自 `--api-base` 反查，也可能是 `local`），重复连接会让同一台 serve 各开一条
     /// SSE、各读一份会话，左栏连接数还与 ctl 的进程数对不上。
     pub(super) fn attach_lane(&mut self, name: &str, base_url: &str) {
+        // 地址形态先拦一道：`ServeClient::new` **不校验** `api_base`，而
+        // `normalize_api_base` 对非 `http(s)://` 前缀返回空串 —— 不拦就会造出一条
+        // `api_base = ""` 的「已连接」lane，之后每个请求才以「API base must be an
+        // absolute http(s) URL」失败。`/lane attach-url` 是手打地址，漏 scheme 极常见。
+        if crate::serve::normalize_api_base(base_url).is_empty() {
+            self.shell_line(&format!(
+                "`{name}` 的地址不是绝对 http(s) URL：`{base_url}`（是不是漏了 `http://`？）"
+            ));
+            return;
+        }
         if let Some(idx) = self.lanes.iter().position(|l| l.label == name) {
             self.active = idx;
-            let lane = self.lane_mut();
-            lane.st.push_line(
-                LineKind::System,
-                &format!("`{name}` 已经是本进程的连接（已切过去）"),
-            );
+            self.shell_line(&format!("`{name}` 已经是本进程的连接（已切过去）"));
             return;
         }
         if let Some(idx) = self
@@ -441,18 +438,15 @@ impl<'a> super::TuiApp<'a> {
         {
             self.active = idx;
             let existing = self.lanes[idx].label.clone();
-            let lane = self.lane_mut();
-            lane.st.push_line(
-                LineKind::System,
-                &format!("`{existing}` 已经连着 {base_url}（同一条 serve 不重复连，已切过去）"),
-            );
+            self.shell_line(&format!(
+                "`{existing}` 已经连着 {base_url}（同一条 serve 不重复连，已切过去）"
+            ));
             return;
         }
         // 名额检查刻意放在两道去重**之后**：已达上限时 `/lane attach <现有名字>`
         // 仍要能切过去 —— 那并不新增线程或连接，被上限挡住只会让人以为「连接坏了」。
         if let Some(notice) = capacity_notice(self.lanes.len()) {
-            let lane = self.lane_mut();
-            lane.st.push_line(LineKind::System, &notice);
+            self.shell_line(&notice);
             return;
         }
         let cfg = ConnectionConfig::new(base_url, self.template.bearer.clone())
@@ -460,9 +454,8 @@ impl<'a> super::TuiApp<'a> {
         let client = match ServeClient::new(cfg) {
             Ok(c) => c,
             Err(e) => {
-                let lane = self.lane_mut();
-                lane.st
-                    .push_line(LineKind::System, &format!("连接 `{name}` 失败：{e}"));
+                // 空态下 `lane_mut()` 会 panic：这条提示必须走外壳级的出口。
+                self.shell_line(&format!("连接 `{name}` 失败：{e}"));
                 return;
             }
         };
@@ -480,9 +473,31 @@ impl<'a> super::TuiApp<'a> {
         self.lanes.push(lane);
         self.active = self.lanes.len() - 1;
         self.lane_mut().bootstrap();
-        let lane = self.lane_mut();
-        lane.st
-            .push_line(LineKind::System, &format!("已连接 `{name}`（{base_url}）"));
+        self.shell_line(&format!("已连接 `{name}`（{base_url}）"));
+    }
+
+    /// 往外壳「说一句」：有当前 lane 就写进它的 transcript，没有（未连接界面）就写进
+    /// 空态视图。
+    ///
+    /// 外壳动作（attach / toggle / new）的提示都走这里：未连接界面下 `lane_mut()` 会
+    /// panic，而那些提示恰恰是「为什么没连上」唯一能露面的地方。
+    pub(super) fn shell_line(&mut self, text: &str) {
+        match self.lanes.get_mut(self.active) {
+            Some(lane) => lane.st.push_line(LineKind::System, text),
+            None => self.empty.push_line(text),
+        }
+    }
+
+    /// 同 [`Self::shell_line`]，但先按 `LaneId` 找发起者；找不到退回当前 lane / 空态。
+    ///
+    /// 控制面回执按 `from` 归属（issue #350）：`/lane new` 的 20 s 轮询期间用户可能已经
+    /// 切走，写进「当前」那条等于把别人的结果放到你的屏上。
+    pub(super) fn shell_line_for(&mut self, id: LaneId, text: &str) {
+        let Some(idx) = self.lanes.iter().position(|l| l.id == id) else {
+            self.shell_line(text);
+            return;
+        };
+        self.lanes[idx].st.push_line(LineKind::System, text);
     }
 
     /// 后台 lane 弹出审批时，在**当前 lane** 留一条提示。
@@ -645,10 +660,7 @@ impl<'a> super::TuiApp<'a> {
         let outcome = match result {
             Ok(o) => o,
             Err(f) => {
-                self.lane_by_id_or_active(from).st.push_line(
-                    LineKind::System,
-                    &format!("`{}` 的声明未改动：{}", f.name, f.reason),
-                );
+                self.shell_line_for(from, &format!("`{}` 的声明未改动：{}", f.name, f.reason));
                 return;
             }
         };
@@ -656,9 +668,7 @@ impl<'a> super::TuiApp<'a> {
         // 已是关闭」两种措辞上，至少不会把方向说反。
         let enabled = outcome.enabled.unwrap_or(false);
         for line in toggle_report_lines(&outcome.name, enabled, &outcome) {
-            self.lane_by_id_or_active(from)
-                .st
-                .push_line(LineKind::System, &line);
+            self.shell_line_for(from, &line);
         }
         let name = outcome.name.clone();
         if enabled || !self.lanes.iter().any(|l| l.label == name) {
@@ -668,8 +678,8 @@ impl<'a> super::TuiApp<'a> {
             self.detach_lane(&name);
             return;
         }
-        self.lane_by_id_or_active(from).st.push_line(
-            LineKind::System,
+        self.shell_line_for(
+            from,
             "这是唯一一条连接：ctl 会停掉该实例，这条 lane 随后下线；退出用 `/quit`，反悔用 `/lane open`",
         );
     }

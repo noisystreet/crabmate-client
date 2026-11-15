@@ -10,7 +10,8 @@ pub(crate) struct TuiWiring<'a> {
     /// `--connect name=url` 追加的额外 lane（主连接恒为第一条）。
     pub(crate) connect: &'a [String],
     /// `crabmatectl` 控制面 socket；`None` = 未启用。
+    ///
+    /// 没有主连接时它是**唯一**能连上去的通道，所以 `run_tui_cmd` 会先把它解析成
+    /// 可选路径，再据此决定「进未连接界面」还是「直接报错」。
     pub(crate) ctl_socket: Option<&'a str>,
-    /// Web API Bearer（额外 lane 复用主连接的）。
-    pub(crate) bearer: Option<&'a str>,
 }

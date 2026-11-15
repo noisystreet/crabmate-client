@@ -201,14 +201,23 @@ api_base = "http://127.0.0.1:8082"
 
 **未做**：`/lane new` 之后立即探测该实例工作区的专门提示 —— 新增 lane 的首拉会带上 `GET /workspace`（`LaneApp::bootstrap`，见 §4.8），「待绑定」只在右栏标题里体现。Desktop / Web 侧的同名问题（切会话自动重放旧路径撞 409）不在本文件的 §1–§8 范围内（Desktop 走 §9.4.1 的多窗口路线）。
 
-### 4.8 运行期加连接（`/lane attach` / `/lane new`）
+### 4.8 运行期加连接（`/lane attach` / `/lane attach-url` / `/lane new`）
 
-`--connect name=url` 只能在启动时装配。进程跑起来之后再加一条走**控制面**（`crabmatectl supervise --socket`）：声明的唯一写入者必须是 ctl —— 客户端直接写 `instances.toml` 会与 `--watch` 构成同一文件的两个写入者，而让客户端自己 spawn `crabmatectl` 等于把进程管理搬进 TUI。
+URL 有**三种来源**，三者并存而不是互相替代：
+
+| 来源 | 入口 | 需要控制面 | 能连未声明的 serve |
+|------|------|------------|--------------------|
+| 命令行 | `--api-base` / `--connect name=url` | 否 | 是 |
+| 声明 | `--from-ctl` / `/lane attach <name>` | 是 | 否 |
+| 手打 | `/lane attach-url <name>=<url>`（别名 `/connect`） | 否 | 是 |
+
+`--connect name=url` 只能在启动时装配。进程跑起来之后再加一条有两条路：**声明**那条走控制面（`crabmatectl supervise --socket`），**手打地址**那条完全不经 ctl —— 声明的唯一写入者必须是 ctl（客户端直接写 `instances.toml` 会与 `--watch` 构成同一文件的两个写入者，而让客户端自己 spawn `crabmatectl` 等于把进程管理搬进 TUI），但「连一个已经在跑的地址」不需要写任何声明，所以它不该被那道约束挡住：VPS 上那台、临时起的那台、别人的 serve 都只有这条路。两条路在 `attach_lane` 汇合，同 URL / 同名去重、`MAX_LANES` 上限与失败提示因此只实现一次。
 
 | 命令 | 做什么 | 副作用 |
 |------|--------|--------|
 | `/lane`（空参）/ `/lane list` | 列实例（与 `/ctl` 同一实现） | 无（只读 socket） |
 | `/lane attach <name>` | 在声明里找**已就绪**的实例，取 `base_url` 后直接连 | 无 |
+| `/lane attach-url <name>=<url>`（别名 `/connect` / `/url`） | 按用户给的地址直接连（`<name>=` 可省，省了就拿 URL 当名字） | 无（不写声明、不碰 ctl） |
 | `/lane detach [<name>]` | 只摘掉**本进程**的连接（**名字缺省 = 当前 lane**；连不上就报现有名字；最后一条不许摘） | 无（不动声明与进程） |
 | `/lane new <name> [workspace] [profile=<name>]` | `add` 写声明 → 轮询 `list` 到 `observed == ready` → 连 | 新增一条声明（ctl 负责起进程） |
 | `/lane close <name>`（别名 `disable`） | 经 socket 的 `disable` 把声明标成 `enabled = false` | 改一条声明；ctl 会停掉该实例（声明与手写 `env` / `config` 留着） |
@@ -231,6 +240,18 @@ api_base = "http://127.0.0.1:8082"
 - **`/lane close|open` 只翻 `enabled`**：`enabled = false` 是 Server 文档里客户端软删 lane 的正式口径，socket 的 `disable` / `enable` 也只收 `op` + `name`（它们**不是** `update`：换 workspace/profile/port 仍是 `remove` + `add` 两步）。三条回执语义照抄 Server、不自己重推：`changed: false` 是幂等命中（「本来就是这样」，不是失败），`enable` 会顺手清 `down` 留下的 `desired_state = stopped`（`cleared_down`），那半步失败时 `ok` 仍为真但带 `warning` —— 不露出来就会变成「声明是启用的、实例永远起不来」。回执由 worker 走 `Inbound::Shell(ShellEvent::Toggled)`（被关的可能正是发起命令的那条 lane），外壳据此写报告行；关掉声明时如果本进程正连着它，顺手 `detach`（实例马上被 ctl 停掉，留着只是一条死 SSE），**唯一一条连接例外** —— 只把「随后下线、退出用 `/quit`、反悔用 `/lane open`」说清，不摘（界面至少要有一条 lane）。关掉之后再 `/lane attach` 它，由就绪判据直接答「声明已关闭（enabled = false）：先 `/lane open`」（[#373](https://github.com/noisystreet/crabmate-client/issues/373)），不再说「还没就绪」。
 - **未做**：per-profile bearer 槽（控制面里所有实例同机同用户，第一版共用主连接那份；某实例要求不同 Bearer 时症状是那条 lane 的拉取全错）、声明级硬删（socket 的 `remove` 会连手写 `env` / `config` 一起删掉，不做）。
 - **`/lane status|restart` 不新造形状**（[#497](https://github.com/noisystreet/crabmate-client/issues/497)）：`status` 的响应就是 `list` 行那份 `status_row`（外加 `ok`），所以共享层只多了 `parse_status_response`，单条详情不必再拉全量自己筛；`restart` = 同一份行 + `restarted` + `notes`。`restart` 在 Server 侧是**同步** op（down → up → 等就绪才回一行，`grace + timeout` ≤ 50 s），因此放在外壳级 ctl 线程上跑、socket 读超时按 50 s + 余量设，并在按下时先写一句「正在重启…」—— 排到 UI 线程上就是卡死，排到某条 lane 的 worker 上则会把那条 lane 的拉取全堵住（与 `/lane new` 的 20 s 轮询同一类问题）。`notes`（声明里的 `env` 丢了、profile 漂移、声明其实 `enabled = false`）必须打到屏幕上：否则「重启成功但行为不对」无从解释；失败按 `code` 说话（`instance_not_found` / `restart_budget_exceeded` / `port_in_use` / `identity_mismatch`），不是「没反应」。重启**不自动重连**：本进程连的就是它时只提示 `/lane detach` + `/lane attach`（换进程后 SSE 已断，若新实例换了地址，旧 `api_base` 就是死的）。
+
+### 4.9 启动时没有连接（未连接界面）
+
+`--api-base` 从「启动硬前提」变成「三种来源之一」之后，`tui` 可以在一条 lane 都没有的情况下起来。这块屏在 `tui_mode/empty_shell.rs`，与普通界面的关系是**互斥**：`lanes` 非空时它根本不参与，第一条 lane 连上之后它再也不会回来（最后一条 lane 不允许摘，`detach_lane` 已经拒绝）。三条设计取舍：
+
+- **输入行自持，不塞进 `UiState`**：普通界面的输入框、焦点、审批浮层、状态栏全住在某条 `LaneApp` 的 `UiState` 里 —— 没有 lane 就没有输入框，用户要敲的 `/lane attach` 无处可敲。把 `UiState` 塞进外壳则要给每条 lane 的代码都加一个「这条其实没连上」的分支，与 `pending_lane` 不进 `lanes` 是同一个理由。
+- **只认「通向一条连接」的命令**：`/lane`（列表）/ `/lane attach` / `/lane attach-url`（`/connect` 同义）/ `/ctl` / `/help` / `/quit`；`/lane new|status|restart|close|open` 与 `/model` 一类一律答「先连上一条连接」并给出可照抄的那条命令 —— `new` 的工作区兜底要当前 lane，其余管理的本来就是「已在用的实例」。空态下敲出的所有结果都落在这块屏的历史行里（上限 200 行，取末尾）。被拒绝的命令**说清为什么**，不静默 no-op：静默会让人以为命令写错了。
+- **`--from-ctl` 失败不退出**：控制面里一条都没有 `ready`（或 ctl 连不上）时进这块屏而不是报错退出去 —— 这里 `/lane` 能把每条实例的观测态与 `last_error` 摆出来，比一句「没有可连实例」有用。判据只有 `crabmate-client-api::ctl::can_connect`（`observed == ready`）加非空 `base_url`，与 `/lane attach` 同一套（`serve::ctl::first_ready_base_url`）。
+- **没有控制面也能进这块屏**：`/lane attach-url` 本来就不经 ctl，所以空态的入口判据里**没有**「ctl 必须存在」这一条（早先的版本有，等于把单机、没装 `crabmatectl` 的机器挡在门外，而它恰恰是唯一能让「不设置 `--api-base` 也能启动」成立的那条路）。没有 ctl 时 `/lane` / `/ctl` 照常答「控制面未启用」，`/lane attach-url` 可用 —— 那块屏只在**需要一条连接**的地方才要求 ctl。
+- **地址形态在装配处拦一道**：`ServeClient::new` 不校验 `api_base`，而 `normalize_api_base` 对非 `http(s)://` 前缀返回空串 —— 不拦就会造出一条 `api_base = ""` 的「已连接」lane，之后每个请求才以「API base must be an absolute http(s) URL」失败。手打地址最容易漏 scheme，所以 `attach_lane` 先用同一份归一化判一遍，报错里点名「是不是漏了 `http://`」。
+
+客户端的退出判据因此多了一个来源：`exit_requested` 同时读 `lanes[*].exit` 与 `empty.exit`（`/quit`、Ctrl+C、Ctrl+D）。事件循环里空态是一条独立分支（`draw_empty`），那条路径上一次 `lane_mut()` 都不能碰。
 
 ---
 

@@ -10,7 +10,6 @@
 //! 点不到，也就不会误切到某条真 lane。
 
 use super::shell::MAX_LANES;
-use super::state::LineKind;
 use super::worker::LaneId;
 use super::worker_ctl;
 
@@ -157,14 +156,12 @@ impl<'a> super::TuiApp<'a> {
             }
             worker_ctl::NewOutcome::Failed(why) => {
                 self.pending.mark_failed(&name, &why);
-                self.lane_by_id_or_active(from)
-                    .st
-                    .push_line(LineKind::System, &format!("连接 `{name}` 失败：{why}"));
+                self.shell_line_for(from, &format!("连接 `{name}` 失败：{why}"));
             }
             worker_ctl::NewOutcome::TimedOut => {
                 self.pending.mark_timed_out(&name);
-                self.lane_by_id_or_active(from).st.push_line(
-                    LineKind::System,
+                self.shell_line_for(
+                    from,
                     &format!(
                         "实例 {name} 在 {} s 内未就绪（可能仍在启动）：`/ctl` 复查，就绪后 `/lane attach {name}`",
                         worker_ctl::LANE_READY_TIMEOUT.as_secs()
