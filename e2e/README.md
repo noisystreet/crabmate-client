@@ -21,7 +21,8 @@
 **核心原则**：纯前端行为的回归测试优选 Playwright，Tauri 特有行为留 victauri_test。
 
 > **迁移进行中（#152）**：Victauri 侧现存用例几乎全是页面行为（0 个调用 Tauri IPC），正分批迁入本目录；迁完 Victauri 只保留壳冒烟。已迁：`status-bar` / `visible-messages` / `prefs-theme` / `session-crud` / `settings-page` / `keyboard-scroll` / `sse-control` / `ui-layout` / `user-data-api` / `turn-layout` / `side-toolbar` / `scroll-send`。
-> 仍在 Victauri 的：`victauri_settings2`（直读设备钥匙串，浏览器无等价物）、`victauri_ide_layout`（引用的 `layout-mode-toggle` / `ide-layout-root` 已随 UI 重构消失，**需重写**）、`victauri_turn_layout` 的多工具一例（需按 V2 时序重写）、`victauri_conversation` / `victauri_pagination`（依赖 `CM_E2E_FIXTURES=1`）。
+> 仍在 Victauri 的：`victauri_settings2`（直读设备钥匙串，浏览器无等价物）、`victauri_conversation` / `victauri_pagination`（依赖 `CM_E2E_FIXTURES=1`）。
+> 已**删除**（测试对象已不存在，非迁移）：`victauri_ide_layout`（入口 testid `layout-mode-toggle` / `ide-layout-root` 随 UI 重构消失）与 `victauri_turn_layout` 的多工具用例（需按 AG-UI V2 时序重写）——因此 IDE 往返与多工具交错目前**没有自动化覆盖**。
 
 ## 前置条件
 
