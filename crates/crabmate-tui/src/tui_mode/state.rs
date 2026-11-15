@@ -378,10 +378,7 @@ pub struct HistoryRequest {
     pub title: String,
 }
 
-/// 「贴到内容顶」的哨兵偏移：远大于任何真实行数，渲染时被 clamp 到 `max_back`。
-///
-/// 用哨兵而不是 `max_back` 本身，是因为状态层不知道物理行数与视口高度 ——
-/// 每次渲染都会重算 clamp，哨兵自然贴到**当前**内容顶（内容变长后也一样）。
+/// 「贴到内容顶」的哨兵偏移：远大于任何真实行数，渲染时被 clamp 到 `max_back`（状态层不知道物理行数与视口高度，每次渲染重算即可贴到**当前**内容顶）。
 pub const SCROLL_TOP: usize = usize::MAX / 4;
 
 /// 全屏 UI 状态；仅由事件循环触碰（单线程）。
@@ -463,9 +460,7 @@ pub struct UiState {
     /// 否则会把 A 的目录内容写进 B 的缓存。
     pub ws_generation: u64,
     /// 缓存已过期、展开时该后台重拉的路径。
-    ///
-    /// 刷新不再清空缓存（否则整棵树会短暂塌成 `…`），改为标记过期：旧值继续显示，
-    /// 折叠目录下次展开时补拉一次，这样刷新也能覆盖到当时没展开的那些。
+    /// 刷新不清空缓存（否则整棵树会短暂塌成 `…`），改为标记过期：旧值继续显示，折叠目录下次展开时补拉。
     pub ws_dir_stale: HashSet<String>,
     /// 已展开的目录相对路径。
     pub ws_expanded: HashSet<String>,
@@ -475,6 +470,9 @@ pub struct UiState {
     pub ws_rows: Vec<WsRow>,
     /// 树光标（`ws_rows` 下标，超界时渲染前收敛）。
     pub ws_cursor: usize,
+    /// 两栏列表的窗口起点（**粘住**语义，渲染写回 / 命中只读；见 `sidebar_window`）。
+    pub ws_list_start: usize,
+    pub side_list_start: usize,
     /// 刷新时目标行在展开目录内、需等子列表重载后才能定位的 rel（best-effort）。
     pub ws_pending_cursor: Option<String>,
     /// 项目池子视图（`Some` 时工作区列改列候选项目）；`editor` 是只读文件视图（`editor_view`）。
