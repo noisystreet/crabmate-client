@@ -67,7 +67,7 @@ function multiChunkFrames(count: number): string[] {
 }
 
 test("已有消息的会话里发送新消息会滚到底", async ({ page }) => {
-  await seedScrollable(page, "s_e2e_scroll_send", 40);
+  await seedScrollable(page, "s_e2e_scroll_send", 60);
 
   await installMockSse(
     page,
@@ -78,11 +78,20 @@ test("已有消息的会话里发送新消息会滚到底", async ({ page }) => 
     ].join(""),
   );
 
-  // 先滚到顶，确保发送前不在底部
+  // 先滚到顶：用 scrollTop===0 判定，而不是「不在底部」——
+  // 后者在内容不足以滚动时会与 atBottom 的「就在底部」互为矛盾。
   await page.evaluate((sel) => {
     (document.querySelector(sel) as HTMLElement | null)?.scrollTo(0, 0);
   }, SCROLLER);
-  await expect.poll(() => atBottom(page)).toBe(false);
+  await expect
+    .poll(() =>
+      page.evaluate(
+        (sel) =>
+          (document.querySelector(sel) as HTMLElement | null)?.scrollTop ?? -1,
+        SCROLLER,
+      ),
+    )
+    .toBe(0);
 
   await sendMessage(page, "e2e scroll send test");
 
