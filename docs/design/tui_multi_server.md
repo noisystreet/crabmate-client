@@ -351,12 +351,12 @@ URL 有**三种来源**，三者并存而不是互相替代：
 |------|------|
 | Desktop 是**单 WebView 窗口**（label `"main"`），窗口辅助函数都依赖该 label | `desktop-tauri/src-tauri/src/main.rs:208-211` |
 | 连接流程：connect 页探测 → 经 **URL hash** 交接 `api_base` + 可选 bearer → 载入包内业务 UI | `crates/crabmate-connect/src/lib.rs:3-5`、`build_handoff_url`（`:31-34`） |
-| 前端 API 基址是 **thread_local 单值** `API_BASE_URL`，`api_base_url()` 全局读 | `frontend/src/api/browser.rs:31`、`:208-210` |
+| 前端的 API 基址与 Bearer 已收敛成一个 `ConnectionScope`（`frontend/src/api/connection_scope.rs` 唯一持有，规则与不变量在 `crabmate-client-api::connection_scope`）；`api_base_url()` / `web_api_bearer_token()` 仍是零参「读当前那一份」 | `frontend/src/api/connection_scope.rs`、`crates/crabmate-client-api/src/connection_scope.rs` |
 | 持久化曾是**固定 localStorage 键**（两个连接窗口互踩）：现已按连接标识分域 `<基础键>#<连接标识>`，无标识时沿用旧键名 | `frontend/src/api/storage_scope.rs`；标识由 `desktop-tauri/src-tauri/src/desktop_main_window.rs` 注入 `__CM_CONN_KEY__` |
-| 前端另有 11 处 thread_local 全局状态（bearer、llm secrets、locale、滚动跟随、图片灯箱、github secrets…） | `frontend/src/**`（共 12 处 `thread_local!`） |
+| 前端另有若干 thread_local 全局状态（llm secrets、locale、滚动跟随、图片灯箱、github secrets、连接名单…）—— **连接作用域已不在此列**（见上一行）；它们要么是应用级偏好，要么是每窗口一份的 UI 单例 | `frontend/src/**` |
 | 连接 bearer 是**单钥匙串槽** `tauri_connect_web_api_bearer`，连接成功即覆盖写 | `crates/crabmate-connect/src/lib.rs:5` |
 
-即：**Desktop/Web 的「单连接」假设渗透在 12 个 thread_local 全局里**，比 TUI 更分散——TUI 只是 `TuiApp` 一个结构体持有 `client`，所以 TUI 能用「改结构归属」的手法低成本解耦，Desktop 不能照搬。
+即：**Desktop/Web 的「单连接」假设原本渗透在十余处 thread_local 全局里**，比 TUI 更分散——TUI 只是 `TuiApp` 一个结构体持有 `client`，所以 TUI 能用「改结构归属」的手法低成本解耦，Desktop 不能照搬。连接作用域（基址 + Bearer）现已收成一处 `ConnectionScope`，但**读取口仍是零参**（`api_base_url()`），所以「这一次请求用哪一份」还没被回答 —— 那要等 W1 的显式传参。
 
 ### 9.3 分层复用判断
 

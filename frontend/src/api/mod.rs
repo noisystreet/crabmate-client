@@ -9,6 +9,7 @@ mod chat_stream;
 pub(crate) mod client_llm_cache;
 pub(crate) mod client_llm_storage;
 mod connect_handoff;
+pub(crate) mod connection_scope;
 mod github_oauth;
 pub(crate) mod github_secrets_local;
 mod http;
