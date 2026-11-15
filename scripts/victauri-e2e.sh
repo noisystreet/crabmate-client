@@ -235,7 +235,27 @@ bash "$DESKTOP_ROOT/scripts/prepare-sidecar.sh"
 # shellcheck source=victauri-capability.sh
 source "$ROOT/scripts/victauri-capability.sh"
 ensure_victauri_capability "$TAURI_DIR"
-trap 'restore_victauri_capability' EXIT
+
+# 统一收尾：恢复 capabilities，并无论从哪条路径退出都给出结论 + 日志尾部。
+# 原先结论只在 Phase 7 末尾打印，一旦中途 set -e 退出就只剩一行 exit code（#152）。
+finish() {
+    local code=$?
+    restore_victauri_capability
+    echo ""
+    if [ "$code" -eq 0 ]; then
+        echo "=== ALL PASSED ==="
+        return
+    fi
+    echo "=== FAILED (exit code ${code}) ===" >&2
+    for f in "${VICTAURI_E2E_LOG}" "${SERVE_LOG}"; do
+        echo "   log: ${f}" >&2
+        if [ -s "${f}" ]; then
+            echo "   --- tail -30 ${f} ---" >&2
+            tail -30 "${f}" >&2 || true
+        fi
+    done
+}
+trap finish EXIT
 
 cd "$TAURI_DIR"
 # 显式带 feature 构建壳二进制 + 测试（插件与 ACL 一致）
@@ -315,9 +335,27 @@ unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY
 
 EXIT=0
 
+# `BIN=$(find_test_bin …)` 在 `set -euo pipefail` 下会连同 `find` 的退出码一起
+# 静默终止整个脚本（2026-11 的 nightly 就是这样变成「一个用例都没跑、日志零诊断」的），
+# 所以这里把失败吞在函数内，deps 是否可用由 require_deps 先验。
 find_test_bin() {
     local name="$1"
-    find target/debug/deps -name "${name}-*" -not -name '*.d' 2>/dev/null | head -1
+    local bin=""
+    bin="$(find target/debug/deps -name "${name}-*" -not -name '*.d' 2>/dev/null | head -1 || true)"
+    printf '%s' "$bin"
+}
+
+# 测试二进制须由 cargo test --no-run 产出；缺失就报错，别让后面的 find 静默失败。
+require_deps() {
+    if [ ! -d target/debug/deps ]; then
+        echo "error: target/debug/deps 不存在（cwd=$(pwd)）—— cargo test --no-run 未产出测试二进制" >&2
+        return 1
+    fi
+}
+
+prepare_test_binaries() {
+    # 只留尾部避免刷屏；pipefail 让 cargo 的失败透出来（原来被 `2>/dev/null || true` 抹平）
+    cargo test --features victauri --no-fail-fast --no-run 2>&1 | tail -40
 }
 
 # 共用同一 WebView：套件内必须串行，否则 seed/reload 互踩。
@@ -332,21 +370,34 @@ if [ "$TEST" = "real_llm" ]; then
         cargo test --features victauri --test victauri_real_llm -- --nocapture --test-threads=1 || EXIT=$?
     fi
 elif [ "$TEST" = "all" ]; then
-    cargo test --features victauri --no-fail-fast --no-run 2>/dev/null || true
+    if ! prepare_test_binaries; then
+        echo "error: cargo test --no-run 失败（上面的 stderr 即真因）" >&2
+        exit 1
+    fi
+    require_deps || exit 1
     # 清单不含 victauri_two_turn（其多轮用例已由 Playwright
     # `mock-multi-turn` / `mock-v2-multi-turn-boundaries` 等价覆盖，见 e2e/README.md 分工），
     # 也不含 victauri_real_llm（需 REAL_LLM_E2E + 本机密钥，用 `./scripts/victauri-e2e.sh real_llm` 单跑）。
+    MISSING=""
     for name in victauri_e2e victauri_session_crud victauri_prefs_theme victauri_status_bar \
         victauri_settings victauri_settings2 victauri_keyboard victauri_conversation \
         victauri_user_data victauri_pagination victauri_visible_messages \
         victauri_sse_stub victauri_sse_more victauri_scroll_send victauri_ide_layout \
         victauri_turn_layout; do
         BIN=$(find_test_bin "$name")
-        if [ -n "$BIN" ]; then
-            echo ">>> $name"
-            "$BIN" --test-threads=1 || EXIT=$?
+        if [ -z "$BIN" ]; then
+            # 原先静默跳过：全部 suite 缺席也会走到 ALL PASSED（假绿）
+            echo "MISSING suite: $name —— cargo 没有产出该测试二进制" >&2
+            MISSING="${MISSING} ${name}"
+            EXIT=1
+            continue
         fi
+        echo ">>> $name"
+        "$BIN" --test-threads=1 || EXIT=$?
     done
+    if [ -n "$MISSING" ]; then
+        echo "error: 以下 suite 缺测试二进制（未执行）:${MISSING}" >&2
+    fi
 else
     cargo test --features victauri --test "$TEST" -- "$TEST_FILTER" --nocapture --test-threads=1 || EXIT=$?
 fi
@@ -361,10 +412,5 @@ pkill -f "crabmate serve --host 127.0.0.1 --port ${SERVE_PORT}" 2>/dev/null || t
 pkill -f "serve --host 127.0.0.1 --port ${SERVE_PORT}" 2>/dev/null || true
 wait 2>/dev/null || true
 
-echo ""
-if [ "$EXIT" -eq 0 ]; then
-    echo "=== ALL PASSED ==="
-else
-    echo "=== FAILED (exit code $EXIT) ==="
-fi
+# 结论与日志尾部统一由 finish（EXIT trap）打印，中途退出也不会没结论
 exit "$EXIT"
