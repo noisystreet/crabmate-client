@@ -20,7 +20,8 @@
 
 **核心原则**：纯前端行为的回归测试优选 Playwright，Tauri 特有行为留 victauri_test。
 
-> **迁移进行中（#152）**：Victauri 侧现存用例几乎全是页面行为（0 个调用 Tauri IPC），正分批迁入本目录；迁完 Victauri 只保留壳冒烟。已迁：`mock-status-bar` / `mock-visible-messages` / `mock-prefs-theme` / `mock-session-crud` / `mock-settings-page` / `mock-keyboard-scroll`。仍在 Victauri 的：`victauri_settings2`（直读设备钥匙串，浏览器无等价物）。
+> **迁移进行中（#152）**：Victauri 侧现存用例几乎全是页面行为（0 个调用 Tauri IPC），正分批迁入本目录；迁完 Victauri 只保留壳冒烟。已迁：`status-bar` / `visible-messages` / `prefs-theme` / `session-crud` / `settings-page` / `keyboard-scroll` / `sse-control` / `ui-layout` / `user-data-api` / `turn-layout` / `side-toolbar` / `scroll-send`。
+> 仍在 Victauri 的：`victauri_settings2`（直读设备钥匙串，浏览器无等价物）、`victauri_ide_layout`（引用的 `layout-mode-toggle` / `ide-layout-root` 已随 UI 重构消失，**需重写**）、`victauri_turn_layout` 的多工具一例（需按 V2 时序重写）、`victauri_conversation` / `victauri_pagination`（依赖 `CM_E2E_FIXTURES=1`）。
 
 ## 前置条件
 
@@ -249,6 +250,12 @@ GitHub Actions：本仓 `.github/workflows/e2e-playwright.yml`（PR → `main`�
 - `specs/mock-session-crud.spec.ts`（由 Victauri 迁入，#152）
 - `specs/mock-settings-page.spec.ts`（由 Victauri 迁入，#152）
 - `specs/mock-keyboard-scroll.spec.ts`（由 Victauri 迁入，#152）
+- `specs/mock-sse-control.spec.ts`（由 Victauri 迁入，#152）
+- `specs/mock-ui-layout.spec.ts`（由 Victauri 迁入，#152）
+- `specs/mock-user-data-api.spec.ts`（由 Victauri 迁入，#152）
+- `specs/mock-turn-layout.spec.ts`（由 Victauri 迁入，#152）
+- `specs/mock-side-toolbar.spec.ts`（由 Victauri 迁入，#152）
+- `specs/mock-scroll-send.spec.ts`（由 Victauri 迁入，#152）
 
 本地全量 mock：`make frontend` 后 `./scripts/e2e-playwright.sh`（自动起纯 API serve + `crabmate-web`；或手动起两者后 `cd e2e && CRABMATE_API_BASE=http://127.0.0.1:8080 no_proxy=127.0.0.1,localhost npx playwright test`）。
 

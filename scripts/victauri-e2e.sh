@@ -379,12 +379,15 @@ elif [ "$TEST" = "all" ]; then
     # `mock-multi-turn` / `mock-v2-multi-turn-boundaries` 等价覆盖，见 e2e/README.md 分工），
     # 也不含 victauri_real_llm（需 REAL_LLM_E2E + 本机密钥，用 `./scripts/victauri-e2e.sh real_llm` 单跑）。
     MISSING=""
-    # status_bar / visible_messages / session_crud / settings / prefs_theme / keyboard
-    # 已迁到 Playwright（e2e/specs，随 PR 门禁跑），见 #152。
-    # settings2 保留：它的两个用例直读设备钥匙串，属壳专属能力。
+    # 已迁到 Playwright（e2e/specs，随 PR 门禁跑）的 suite 不再列在这里：#152 的
+    # Wave 1–3 合计迁走 status_bar / visible_messages / session_crud / settings /
+    # prefs_theme / keyboard / scroll_send / sse_stub / sse_more / ui_layout /
+    # side_toolbar / user_data。
+    # 剩下的：壳冒烟（e2e）、壳专属钥匙串（settings2）、以及待重写的两处 ——
+    # conversation 与 pagination 依赖 `CM_E2E_FIXTURES=1`（阻塞），
+    # ide_layout 与 turn_layout 引用的 testid / V1 帧已过时（需重写）。
     for name in victauri_e2e victauri_settings2 victauri_conversation \
-        victauri_user_data victauri_pagination \
-        victauri_sse_stub victauri_sse_more victauri_scroll_send victauri_ide_layout \
+        victauri_pagination victauri_ide_layout \
         victauri_turn_layout; do
         BIN=$(find_test_bin "$name")
         if [ -z "$BIN" ]; then
