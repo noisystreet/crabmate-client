@@ -638,8 +638,9 @@ dependencies = [
 
 [[package]]
 name = "crabmate"
-version = "0.8.1-beta.0"
-source = "git+https://github.com/noisystreet/CrabMate?rev=817157e029e65dcb72c7e215c1994febe791cb05#817157e029e65dcb72c7e215c1994febe791cb05"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5107fc5ab1b105246c77d9c759196b062a3b1bf245638a2c1b5210b7ee7c05c9"
 dependencies = [
  "getrandom 0.4.3",
  "log",
@@ -651,7 +652,7 @@ dependencies = [
 
 [[package]]
 name = "crabmate-client-api"
-version = "0.8.0-beta.1"
+version = "0.9.0"
 dependencies = [
  "crabmate",
  "serde",
@@ -660,14 +661,14 @@ dependencies = [
 
 [[package]]
 name = "crabmate-tool-card"
-version = "0.8.0-beta.1"
+version = "0.9.0"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "crabmate-tui"
-version = "0.8.0-beta.1"
+version = "0.9.0"
 dependencies = [
  "anyhow",
  "base64 0.23.1",
@@ -3135,7 +3136,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
