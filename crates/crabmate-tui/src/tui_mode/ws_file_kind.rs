@@ -205,6 +205,38 @@ pub(super) fn icon(kind: FileKind) -> Option<&'static str> {
     }
 }
 
+/// 一个行首字形在终端里占几列：默认 1，`CM_TUI_ICON_WIDTH=2` 覆盖为 2。
+///
+/// **起因不是 Nerd Font，是现状就已经会错位**：`▸` / `▾` / `·` 全是 East Asian Width =
+/// `Ambiguous` 的字符，而 `unicode-width` 按 UAX #11 一律给 1 列。部分终端（iTerm2 的
+/// ambiguous-width 双宽选项、配了 `narrow_symbols` 的 kitty）会把它们画成 2 列 —— 于是
+/// 我们排的版比实际画面窄一列：整行右移、行尾被裁，而 `ws_row_text` 报的「名称是否被省略」
+/// 也跟着失真（提示行会在名称其实已被省略时说「放得下」）。
+///
+/// 不自动探测：字形宽度由**终端**决定，而 TUI 常跑在 SSH 另一端 —— 探测到的字体不是画字
+/// 的那一份。所以给一个显式覆盖，由知道自己终端设置的人打开。
+///
+/// 读一次就缓存（与 [`icons_enabled`] 同一个理由：每帧每行都会问）。测试不经过这里 ——
+/// 渲染收显式的 `GlyphPolicy`（见 `ws_sidebar`），开关状态不会渗进单测。
+#[must_use]
+pub(super) fn icon_columns() -> usize {
+    static COLS: OnceLock<usize> = OnceLock::new();
+    *COLS
+        .get_or_init(|| parse_icon_columns(&std::env::var("CM_TUI_ICON_WIDTH").unwrap_or_default()))
+}
+
+/// `CM_TUI_ICON_WIDTH` 的取值解析（纯函数，便于单测）。
+///
+/// 只认 `2`（`wide` 也认，方便记不住数字的人）；其余一律回到 1：拼错时保持今天的排版，
+/// 而不是悄悄改掉所有人的对齐。大小写归一化放在这里，而不是让调用方先转小写 ——
+/// 否则纯函数的行为取决于调用方有没有预处理。
+fn parse_icon_columns(raw: &str) -> usize {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "2" | "wide" => 2,
+        _ => 1,
+    }
+}
+
 /// 类别标记开关：默认开；`CM_TUI_FILE_ICONS=off|0|false|none` 关掉（只留颜色）。
 ///
 /// 读一次就缓存：这是**每帧每行**都会问的问题，而环境变量在进程生命周期内不会变。
@@ -313,8 +345,9 @@ mod tests {
         assert_eq!(kind("trailing."), FileKind::Other, "空扩展名不算扩展名");
     }
 
-    /// 标记必须恒 2 列：宽度预算（`ws_row_text`）与鼠标命中共用同一份算术，
-    /// 一旦某个终端把某符号渲染成 2 列宽，这一列就会整体错位。
+    /// 标记必须恒 2 列（字形 1 列 + 空格 1 列）：宽度预算（`ws_row_text`）与鼠标命中
+    /// 共用同一份算术，一旦某个终端把某符号渲染成 2 列宽，这一列就会整体错位。
+    /// 那种终端靠 `CM_TUI_ICON_WIDTH=2` 把预算跟着改成 3 列 —— 这个常量本身不变。
     #[test]
     fn every_icon_is_exactly_two_columns() {
         for kind in ALL_KINDS {
@@ -326,6 +359,18 @@ mod tests {
                 ),
                 None => assert_eq!(kind, FileKind::Dir, "只有目录没有标记"),
             }
+        }
+    }
+
+    /// `CM_TUI_ICON_WIDTH` 只认 1 与 2：拼错 / 空 / 别的数字都回到 1，也就是今天的行为
+    /// —— 一个笔误不该悄悄改掉所有人的对齐。
+    #[test]
+    fn icon_columns_override_accepts_only_two() {
+        for raw in ["2", " 2 ", "wide", "WIDE"] {
+            assert_eq!(parse_icon_columns(raw), 2, "{raw:?}");
+        }
+        for raw in ["", "1", "3", "0", "narrow", "off", "yes"] {
+            assert_eq!(parse_icon_columns(raw), 1, "{raw:?}");
         }
     }
 
