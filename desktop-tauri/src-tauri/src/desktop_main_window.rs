@@ -347,6 +347,28 @@ fn spawn_reveal_fallback(app_handle: &tauri::AppHandle, revealed: Arc<AtomicBool
     });
 }
 
+/// 把本窗口的连接标识注入页面，供前端把 `localStorage` 键按连接分域（#457 W0-2）。
+///
+/// **为什么是 `initialization_script` 而不是一条 `invoke` 命令**：前端的水合
+/// （`api::browser` 的 `hydrate_api_base_once`）是同步的，异步接口必然晚于它 —— 那就
+/// 会先读不分域键、后写分域键，读写域不一致，重启后配置读不回来。这个脚本先于页面
+/// 脚本执行，`api::storage_scope::connection_key` 因此同步可用。
+///
+/// 注入的值当前就是 `window.label()`（`ConnectionKey` 的 doc 里那条等式的注入侧）。
+/// 将来把「连接身份」与「窗口身份」解耦时，只改这里的入参，前端一行不用动。
+fn connection_scope_init_script(label: &str) -> String {
+    // 过一遍 `from_raw`，让注入值与注册表键**由同一个函数**保证相等：
+    // 注册表那边是 `ConnectionKey::from_raw(window.label())`（slug 化）。直接注入原值
+    // 只有在「label 已经是 slug」时才等价，而那全靠调用点自觉 —— 一旦有人传进带大写
+    // 或空格的名字，注册表 key 变成小写 slug、存储域仍是原值，症状正是
+    // 「换个窗口，配置跟着走」。这里用类型堵住，而不是靠注释约定。
+    let key = crabmate_client_api::ConnectionKey::from_raw(label);
+    format!(
+        "globalThis.__CM_CONN_KEY__={};",
+        serde_json::Value::String(key.as_str().to_string())
+    )
+}
+
 fn finish_create_main_window(
     app_handle: &tauri::AppHandle,
     label: &str,
@@ -372,7 +394,8 @@ fn finish_create_main_window(
         .decorations(false)
         .background_color(BOOT_SHELL_BG)
         .visible(false)
-        .theme(os_theme::initial_window_theme());
+        .theme(os_theme::initial_window_theme())
+        .initialization_script(connection_scope_init_script(label));
     if let Some(geo) = connect_geo {
         builder = builder.position(geo.logical_x, geo.logical_y);
     }
@@ -433,6 +456,7 @@ pub(crate) fn create_connection_window(
         .background_color(BOOT_SHELL_BG)
         .visible(false)
         .theme(os_theme::initial_window_theme())
+        .initialization_script(connection_scope_init_script(label))
         .on_navigation(move |url| {
             on_main_navigation(&app_handle_clone, &nav_label, url, &backend_origin)
         })

@@ -74,6 +74,13 @@ repos:
         pass_filenames: false
         always_run: true
         stages: [pre-commit]
+      - id: check-storage-scope
+        name: storage scope (connection-scoped localStorage keys have one source)
+        entry: bash scripts/check-storage-scope.sh
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
 
       - id: check-icons
         name: icons (no literal <svg> outside icon.rs; svg rule sizes must be var(--icon-*))

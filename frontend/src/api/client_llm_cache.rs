@@ -32,11 +32,6 @@ pub fn with_mem_mut<R>(f: impl FnOnce(&mut LlmMem) -> R) -> R {
     LLM_MEM.with(|c| f(&mut c.borrow_mut()))
 }
 
-/// 思考模式本机两态（`on` / `off`）：仅非机密偏好，存 webview `localStorage`；
-/// 服务端 `/user-data/llm-overrides` 不再存储该选项。
-#[cfg(target_arch = "wasm32")]
-const THINKING_MODE_LS_KEY: &str = "crabmate-llm-thinking-mode";
-
 /// 规范化思考模式：仅接受 `on`，其余（空 / 旧版 `server` / 未知值）一律视为 `off`。
 pub fn normalize_llm_thinking_mode(raw: &str) -> &'static str {
     if raw.trim() == "on" { "on" } else { "off" }
@@ -44,24 +39,18 @@ pub fn normalize_llm_thinking_mode(raw: &str) -> &'static str {
 
 #[cfg(target_arch = "wasm32")]
 fn read_thinking_mode_local_storage() -> Option<String> {
-    let w = super::browser::window()?;
-    let storage = w.local_storage().ok().flatten()?;
-    storage
-        .get_item(THINKING_MODE_LS_KEY)
-        .ok()
-        .flatten()
+    // 分域：思考模式跟着「这次连接」走（两台 serve 的模型配置本就不同），
+    // 键的拼接与旧键迁移都收在 `api::browser` 一处。
+    super::browser::read_scoped_local_storage_raw(super::storage_scope::LLM_THINKING_MODE_KEY)
         .map(|v| v.trim().to_string())
 }
 
 #[cfg(target_arch = "wasm32")]
 fn write_thinking_mode_local_storage(normalized: &str) {
-    let Some(w) = super::browser::window() else {
-        return;
-    };
-    let Ok(Some(storage)) = w.local_storage() else {
-        return;
-    };
-    let _ = storage.set_item(THINKING_MODE_LS_KEY, normalized);
+    super::browser::write_scoped_local_storage_raw(
+        super::storage_scope::LLM_THINKING_MODE_KEY,
+        normalized,
+    );
 }
 
 /// 同步把本机 `localStorage` 的思考模式恢复进进程内缓存（缺失 / 非法值视为 `off`）。

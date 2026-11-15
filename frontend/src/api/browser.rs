@@ -19,11 +19,11 @@ use std::cell::RefCell;
 
 use web_sys::{Headers, Window};
 
-/// 与历史文档 / `serve` 启动提示一致：纯浏览器侧引导缓存键（官方壳不得写入）。
-pub(crate) const WEB_API_BEARER_TOKEN_KEY: &str = "crabmate-api-bearer-token";
+use super::storage_scope;
 
-/// 跨 Origin 时指向远程 `serve` 根（无尾斜杠）；空 = 同 Origin。
-const API_BASE_URL_KEY: &str = "crabmate-api-base-url";
+// 键名只有一处来源（[`super::storage_scope`]）：它们要和「本页属于哪个连接」组合成
+// 分域键，散开定义就会出现「一个键分了域、另一个没分」的半迁移状态。
+pub(crate) use super::storage_scope::{API_BASE_URL_KEY, WEB_API_BEARER_TOKEN_KEY};
 
 thread_local! {
     static WEB_API_BEARER: RefCell<String> = const { RefCell::new(String::new()) };
@@ -36,14 +36,6 @@ thread_local! {
 
 pub fn window() -> Option<Window> {
     web_sys::window()
-}
-
-fn read_local_storage_item(key: &str) -> Option<String> {
-    let w = window()?;
-    let storage = w.local_storage().ok().flatten()?;
-    let v = storage.get_item(key).ok().flatten()?;
-    let t = v.trim().to_string();
-    if t.is_empty() { None } else { Some(t) }
 }
 
 fn write_local_storage_item(key: &str, value: &str) {
@@ -61,11 +53,44 @@ fn write_local_storage_item(key: &str, value: &str) {
     }
 }
 
-/// `None` = 无 storage / 键缺失；`Some` = 键存在（值可为空白，表示显式同 Origin）。
-fn read_api_base_local_storage_raw() -> Option<String> {
+/// 连接分域读：分域键优先；缺失时回落到旧键**并回填**（一次性迁移）。
+///
+/// 回填不是可选项：`localStorage` 里已有的基址键与思考模式键是分域之前写下的，
+/// 不搬过来等于把用户的基址与偏好重置成默认值。幂等性由
+/// [`storage_scope::resolve_scoped_read`] 保证（分域键存在就不看旧键）。
+///
+/// 不分域（纯浏览器 / Android / Desktop 主窗口）时两个键名相同，一次读取就是全部答案 ——
+/// 这条分支让单连接语义与迁移前的字节完全一致。
+#[must_use]
+pub(crate) fn read_scoped_local_storage_raw(base_key: &str) -> Option<String> {
     let w = window()?;
     let storage = w.local_storage().ok().flatten()?;
-    storage.get_item(API_BASE_URL_KEY).ok().flatten()
+    let key = storage_scope::scoped_key(base_key);
+    let scoped = storage.get_item(&key).ok().flatten();
+    if key == base_key {
+        return scoped;
+    }
+    let legacy = storage.get_item(base_key).ok().flatten();
+    let (value, backfill) = storage_scope::resolve_scoped_read(scoped, legacy);
+    if backfill && let Some(v) = value.as_deref() {
+        // 不要换成 `write_local_storage_item`：它把空串折成删除，而这里的空串是
+        // 「显式同 Origin」的**值**，折掉就等于把用户「清空过基址」这件事丢了 ——
+        // 下次启动会回落成构建期默认。`resolve_scoped_read` 的单测只覆盖纯函数，
+        // 守不住这一行。
+        let _ = storage.set_item(&key, v);
+    }
+    value
+}
+
+/// 连接分域写：空值删除该键（与 [`write_local_storage_item`] 同口径）。
+pub(crate) fn write_scoped_local_storage_raw(base_key: &str, value: &str) {
+    let key = storage_scope::scoped_key(base_key);
+    write_local_storage_item(&key, value);
+}
+
+/// `None` = 无 storage / 键缺失；`Some` = 键存在（值可为空白，表示显式同 Origin）。
+fn read_api_base_local_storage_raw() -> Option<String> {
+    read_scoped_local_storage_raw(API_BASE_URL_KEY)
 }
 
 fn write_api_base_local_storage(normalized: &str) {
@@ -76,18 +101,27 @@ fn write_api_base_local_storage(normalized: &str) {
         return;
     };
     // 显式空串保留键，避免刷新后回落到 `CRABMATE_API_BASE`。
-    let _ = storage.set_item(API_BASE_URL_KEY, normalized);
+    let scoped = storage_scope::scoped_key(API_BASE_URL_KEY);
+    let _ = storage.set_item(&scoped, normalized);
 }
 
 pub(crate) fn read_local_storage_web_api_bearer() -> Option<String> {
-    read_local_storage_item(WEB_API_BEARER_TOKEN_KEY)
+    read_scoped_local_storage_raw(WEB_API_BEARER_TOKEN_KEY).and_then(|v| {
+        let t = v.trim().to_string();
+        if t.is_empty() { None } else { Some(t) }
+    })
 }
 
 pub(crate) fn write_local_storage_web_api_bearer(token: &str) {
-    write_local_storage_item(WEB_API_BEARER_TOKEN_KEY, token);
+    write_scoped_local_storage_raw(WEB_API_BEARER_TOKEN_KEY, token);
 }
 
 pub(crate) fn clear_local_storage_web_api_bearer() {
+    // 两处都清：分域键（本页真正在用的那个）+ 旧键（分域之前写下的同名键）。
+    // 不分域时两者是同一个键，第二次 remove 只是幂等冗余 —— 不值得为省它加一个
+    // `connection_key().is_some()` 判断：那个判断读起来像安全门，实际只关乎
+    // 「此刻存不存在两个键」。
+    write_scoped_local_storage_raw(WEB_API_BEARER_TOKEN_KEY, "");
     write_local_storage_item(WEB_API_BEARER_TOKEN_KEY, "");
 }
 

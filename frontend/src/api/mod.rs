@@ -22,6 +22,7 @@ mod http_workspace_raw;
 pub(crate) mod llm_secrets_local;
 mod saved_models;
 mod session_store;
+pub(crate) mod storage_scope;
 pub mod user_data;
 pub(crate) mod web_api_bearer_local;
 

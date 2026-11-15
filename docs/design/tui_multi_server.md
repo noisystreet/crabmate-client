@@ -352,7 +352,7 @@ URL 有**三种来源**，三者并存而不是互相替代：
 | Desktop 是**单 WebView 窗口**（label `"main"`），窗口辅助函数都依赖该 label | `desktop-tauri/src-tauri/src/main.rs:208-211` |
 | 连接流程：connect 页探测 → 经 **URL hash** 交接 `api_base` + 可选 bearer → 载入包内业务 UI | `crates/crabmate-connect/src/lib.rs:3-5`、`build_handoff_url`（`:31-34`） |
 | 前端 API 基址是 **thread_local 单值** `API_BASE_URL`，`api_base_url()` 全局读 | `frontend/src/api/browser.rs:31`、`:208-210` |
-| 持久化是**固定 localStorage 键** `crabmate-api-base-url` | `frontend/src/api/browser.rs:26` |
+| 持久化曾是**固定 localStorage 键**（两个连接窗口互踩）：现已按连接标识分域 `<基础键>#<连接标识>`，无标识时沿用旧键名 | `frontend/src/api/storage_scope.rs`；标识由 `desktop-tauri/src-tauri/src/desktop_main_window.rs` 注入 `__CM_CONN_KEY__` |
 | 前端另有 11 处 thread_local 全局状态（bearer、llm secrets、locale、滚动跟随、图片灯箱、github secrets…） | `frontend/src/**`（共 12 处 `thread_local!`） |
 | 连接 bearer 是**单钥匙串槽** `tauri_connect_web_api_bearer`，连接成功即覆盖写 | `crates/crabmate-connect/src/lib.rs:5` |
 
@@ -377,13 +377,19 @@ URL 有**三种来源**，三者并存而不是互相替代：
 
 必须解决的三点：
 
-1. **localStorage 同 origin 共享**（硬性）：`crabmate-api-base-url` 是固定键，两个窗口会互踩 → 按 window label 分键（如 `crabmate-api-base-url:<label>`）。这是必改项，且**不能靠 WebView 隔离规避**（localStorage 属于 origin，不属于 WebView 实例）。
+1. **localStorage 同 origin 共享**（硬性，**已解决**）：键原本是固定名，两个窗口会互踩；现在按连接标识分域 `<基础键>#<连接标识>`，无标识时沿用旧键名（单连接语义不变），旧键值一次性迁移到分域键。标识由壳在建窗口时经 `initialization_script` 注入页面的 `__CM_CONN_KEY__`（同步、先于页面脚本）。见 #457 W0-2/W0-3 与 `frontend/src/api/storage_scope.rs`。这一步**不能**靠 WebView 隔离规避（localStorage 属于 origin，不属于 WebView 实例）。
 2. **钥匙串单槽**（大概率可省）：多窗口若共用同一 bearer（一人一机多项目通常同 key），不需要改；只有真要 per-profile bearer 才加槽，且那会牵动 Desktop / Android 的槽名约定。
 3. **connect 流程假设单「当前连接」**（中等工作量）：`seed_connect_home` / `allowed_origin` / `navigation` 都以「这个窗口当前连谁」为前提，要改成 per-window 状态。
 
 #### 9.4.2 路线 B：单窗口内多 lane（对齐 TUI）
 
 要把 §9.2 的 12 处 thread_local 全部改成 per-lane context，再把会话 / 工作区 / 审批 / 设置状态树按 lane 切分。状态层是单连接长出来的，改造量显著大于 TUI 的 W1 + W1b，且**没有 W1b 那种「加个包装变体」的省力路径**（Leptos 的状态分散在各 `RwSignal`）。除非有「单窗口内必须并排看两路」的硬需求，不建议。
+
+它估的成本在 #457 里被拆成三段，其中一段已经完成：
+
+1. **连接作用域收成一处**（`ConnectionScope`，= #457 W0-1，未做）—— 现在 `api_base` / bearer 仍散在 thread_local；
+2. **存储键按连接分域**（= #457 W0-2/W0-3，**已落地**）—— `localStorage` 属于 origin，这一条无论走 A 还是 B 都挡在前面，已按连接标识分键并带回一次性迁移；
+3. **每条 lane 一棵组件子树**（W1）—— 状态树按 lane 切分，这才是真正的大头。
 
 ### 9.5 与 TUI 共享的前提（§3 对 Desktop 同样成立）
 
