@@ -227,15 +227,14 @@ fn row_line(row: &[Segment], width: usize, pal: &Palette) -> Line<'static> {
 /// 调用方只喂 [`environment_segments`] 的段，其 label 一律非空；横版的回看段
 /// （label 为空）走 `status::status_line`，不经过这里。
 fn segment_line(seg: &Segment, width: usize, pal: &Palette) -> Line<'static> {
-    let mut spans = segment_spans(seg, width, pal);
-    pad_block(&mut spans, block_style(seg, pal), width);
-    Line::from(spans)
+    Line::from(segment_spans(seg, width, pal))
 }
 
 /// 同排两段：左半 `mode`、右半 `think`，各自在自己的半列里截断，中间留 [`PAIR_GAP`] 列。
 ///
 /// 右半从 `pair_cols` 算出的固定列起，**不是**跟着左半实际宽度走 —— 左半值短的时候
-/// 右半也得留在自己那半里，否则「各占一半」在视觉上就成了「谁短谁靠中间」。
+/// 右半也得留在自己那半里，否则「各占一半」在视觉上就成了「谁短谁靠中间」。做法是把
+/// 左半按它自己的实际宽度补齐到那个固定列，再整段拼上右半。
 fn pair_line(left: &Segment, right: &Segment, width: usize, pal: &Palette) -> Line<'static> {
     let [(left_start, left_end), (right_start, right_end)] = pair_cols(width);
     let left_budget = left_end.saturating_sub(left_start);
@@ -245,32 +244,33 @@ fn pair_line(left: &Segment, right: &Segment, width: usize, pal: &Palette) -> Li
     if pad > 0 {
         spans.push(Span::raw(" ".repeat(pad)));
     }
-    // 右半**先补齐再拼**：`pad_block` 按传进去的 span 总宽算留白，拼到左半之后再算会把
-    // 左半的宽度也算进去，块就永远补不满（`think` 的色块会缺一截）。
-    let mut tail = segment_spans(right, right_budget, pal);
-    pad_block(&mut tail, block_style(right, pal), right_budget);
-    spans.extend(tail);
+    spans.extend(segment_spans(right, right_budget, pal));
     Line::from(spans)
 }
 
 /// 一段的 span（label 补齐到定宽列 + 空格 + 截断后的值），宽度以 `budget` 为上限。
 ///
-/// 可切换的段（`Segment::actionable`：`view` / `perm` / `think`）整段套一层浅一档的
-/// 底色块（[`Palette::actionable_block`]），只读段不铺 —— 终端里既没有悬停态也没有指针
-/// 形状，两类段长得一样时，用户只能靠盲试去发现哪几行点得动。
+/// 可切换的段（`Segment::actionable`：`view` / `perm` / `think`）把**值**压在浅一档的
+/// 底色块（[`Palette::actionable_block`]）上，`label` 与分隔空格保持裸露的条带色，只读段
+/// 一格都不铺 —— 终端里既没有悬停态也没有指针形状，两类段长得一样时，用户只能靠盲试去
+/// 发现哪几行点得动。
+///
+/// 块只压值、不压 `label`：`label` 那一列在每行上都必须长得一样（它是「这个字段叫什么」，
+/// 不随能否点击变），跟着染色会把两列的视觉权重拉平，读起来像一整条告警条；真正会变、
+/// 也是被点真正改变的东西是值。代价是块宽不再等于可点列区间（[`segment_cols_in_row`]）——
+/// 命中仍是整段，值上的块只负责说「这段点得动」，不承诺「只有这一块能点」。
 fn segment_spans(seg: &Segment, budget: usize, pal: &Palette) -> Vec<Span<'static>> {
     debug_assert!(!seg.label.is_empty(), "状态栈的段必须有 label");
     // `Paragraph` 不补位：标签必须自己补齐到定宽列，值才会落在同一列。
     let mut label = String::from(seg.label);
     label.push_str(&" ".repeat(LABEL_W.saturating_sub(UnicodeWidthStr::width(seg.label))));
-    let block = block_style(seg, pal);
     vec![
-        Span::styled(label, block_fg(block, pal.muted)),
-        // 间隔空格也要带底色：漏了它，色块会被切成「标签一块 + 值一块」两截。
-        Span::styled(" ", block_fg(block, pal.fg)),
+        Span::styled(label, Style::new().fg(pal.muted)),
+        // 分隔空格不带底色：带了它块就从值前面伸出一格，看着像值的一部分。
+        Span::raw(" "),
         Span::styled(
             truncate_display(&seg.value, budget.saturating_sub(LABEL_COL_W)),
-            block_fg(block, pal.fg),
+            block_fg(block_style(seg, pal), pal.fg),
         ),
     ]
 }
@@ -280,23 +280,11 @@ fn block_style(seg: &Segment, pal: &Palette) -> Option<Style> {
     seg.actionable().then(|| pal.actionable_block())
 }
 
-/// 块内格子的样式：有块就叠上块样式，否则只有前景色。
+/// 值 span 的样式：有块就叠上块样式，否则只有前景色。
 fn block_fg(block: Option<Style>, fg: Color) -> Style {
     match block {
         Some(block) => block.fg(fg),
         None => Style::new().fg(fg),
-    }
-}
-
-/// 把可切换段补齐到 `budget` 列：块必须**右缘齐到预算列**，否则 `view chat` 这种短值
-/// 只会盖住文字，看起来是个碎块而不是一行色块。
-///
-/// 只读段不补：它们的行尾留白本来就露着条带色，补一串裸空格只是噪音。
-fn pad_block(spans: &mut Vec<Span<'static>>, block: Option<Style>, budget: usize) {
-    let Some(style) = block else { return };
-    let pad = budget.saturating_sub(spans_width(spans));
-    if pad > 0 {
-        spans.push(Span::styled(" ".repeat(pad), style));
     }
 }
 
@@ -777,33 +765,62 @@ mod tests {
         assert!(segment_cols_in_row(&i, w, true, THINK_LABEL).is_none());
     }
 
-    /// 可切换的段（`view` / `perm` / `think`）铺一层比条带色浅的底色块，只读段不铺。
+    /// 某段渲染出来的值文本（按标签取；fixture 的值都短，测试用的宽度下不会被截断）。
+    fn segment_value(i: &StatusInfo, width: usize, label: &str) -> String {
+        visible_segments(i, width)
+            .into_iter()
+            .find(|s| s.label == label)
+            .unwrap_or_else(|| panic!("缺 {label} 段"))
+            .value
+    }
+
+    /// 行内满足 `pred` 的列区间（0-based、左闭右开，相邻列合并）。
+    ///
+    /// 断言「底色盖在哪几列」比断言 span 个数稳：span 怎么切（label 补齐、分隔空格、
+    /// 配对补位）改一次就会变，列不会。
+    fn styled_cols(line: &Line<'static>, pred: impl Fn(&Style) -> bool) -> Vec<(usize, usize)> {
+        let mut out: Vec<(usize, usize)> = Vec::new();
+        let mut col = 0usize;
+        for span in &line.spans {
+            let w = UnicodeWidthStr::width(span.content.as_ref());
+            if w == 0 {
+                continue;
+            }
+            if pred(&span.style) {
+                match out.last_mut() {
+                    Some(last) if last.1 == col => last.1 += w,
+                    _ => out.push((col, col + w)),
+                }
+            }
+            col += w;
+        }
+        out
+    }
+
+    /// 可切换的段（`view` / `perm` / `think`）只把**值**压在浅色块上，只读段一格不铺。
     ///
     /// 终端里既没有悬停态也没有指针形状：两类段长得一样时，「这行点得动」只能靠盲试。
-    /// 块宽还必须等于该段的**可点列区间** —— 否则「看着能点」与「真能点」对不上。
+    /// 块只盖值、不盖 `label`、也不向行尾补齐 —— `label` 列是每行都一样的字段名，给它
+    /// 铺底色会把两列的视觉权重拉平，整行读起来像一条告警条。
     #[test]
-    fn actionable_segments_get_a_block_and_read_only_ones_do_not() {
+    fn actionable_segments_tint_their_value_only() {
         let mut i = info();
         i.permission = Some("read".into());
         i.thinking = Some("关".into());
         let pal = pal();
-        let width = 24;
+        let width = 40;
         let lines = stack_lines_with(&i, width, &pal, false, true);
 
         for label in [VIEW_LABEL, PERM_LABEL, THINK_LABEL] {
             let row = segment_row_index(&i, width, false, label).expect("展开态有这一行");
             let line = &lines[row as usize];
-            let block_w: usize = line
-                .spans
-                .iter()
-                .filter(|s| s.style.bg == Some(pal.overlay_bg))
-                .map(|s| UnicodeWidthStr::width(s.content.as_ref()))
-                .sum();
-            let (start, end) = segment_cols_in_row(&i, width, false, label).expect("可点列区间");
+            let (start, _) = segment_cols_in_row(&i, width, false, label).expect("可点列区间");
+            let value_w = UnicodeWidthStr::width(segment_value(&i, width, label).as_str());
+            let value_start = start as usize + LABEL_COL_W;
             assert_eq!(
-                block_w,
-                (end - start) as usize,
-                "{label} 的色块应铺满可点区间：{line:?}"
+                styled_cols(line, |s| s.bg == Some(pal.overlay_bg)),
+                vec![(value_start, value_start + value_w)],
+                "{label} 的浅色块应恰好盖住值（label 与分隔空格裸露）：{line:?}"
             );
         }
 
@@ -817,30 +834,28 @@ mod tests {
             );
         }
 
-        // `mode` 与 `think` 同排：色块只盖右半（`think`），左半（`mode`，只读）留条带色。
+        // `mode` 与 `think` 同排：色块只盖右半那个值，左半（`mode`，只读）留条带色。
         let row = segment_row_index(&i, width, false, MODE_LABEL).expect("mode 行");
         let (think_start, _) =
             segment_cols_in_row(&i, width, false, THINK_LABEL).expect("think 列");
         let line = &lines[row as usize];
-        let mut col = 0usize;
-        for span in &line.spans {
-            if col < think_start as usize {
-                assert!(
-                    span.style.bg.is_none(),
-                    "mode 半区不该有色块（色块只属于右半的 think）：{line:?}"
-                );
-            }
-            col += UnicodeWidthStr::width(span.content.as_ref());
-        }
+        let tinted = styled_cols(line, |s| s.bg == Some(pal.overlay_bg));
+        assert_eq!(tinted.len(), 1, "同一行只有右半那个值带块：{line:?}");
+        assert!(
+            tinted[0].0 >= think_start as usize,
+            "mode 半区不该有色块（色块只属于右半的 think）：{line:?}"
+        );
     }
 
     /// 无色模式：底色被抹成 `Reset`，改用下划线表达「这行点得动」（反色留给选中态）。
+    ///
+    /// 下划线同样只落在值上：`label` 跟着划线，整行就又回到「和别处没有区别」。
     #[test]
     fn mono_marks_actionable_segments_with_an_underline() {
         let mono = Palette::mono();
         let mut i = info();
         i.permission = Some("read".into());
-        let width = 24;
+        let width = 40;
         let lines = stack_lines_with(&i, width, &mono, false, true);
 
         let row = segment_row_index(&i, width, false, VIEW_LABEL).expect("view 行");
@@ -849,14 +864,14 @@ mod tests {
             line.spans.iter().all(|s| s.style.bg.is_none()),
             "无色模式不铺底色：{line:?}"
         );
-        assert!(
-            line.spans
-                .iter()
-                .any(|s| s.style.add_modifier.contains(Modifier::UNDERLINED)),
-            "无色模式该用下划线标出可点段：{line:?}"
+        let value_w = UnicodeWidthStr::width(segment_value(&i, width, VIEW_LABEL).as_str());
+        assert_eq!(
+            styled_cols(line, |s| s.add_modifier.contains(Modifier::UNDERLINED)),
+            vec![(LABEL_COL_W, LABEL_COL_W + value_w)],
+            "下划线只该落在值上：{line:?}"
         );
 
-        // 只读段不加下划线：整块都带下划线就等于没标。
+        // 只读段一处下划线都不该有：人人都有就等于没标。
         let row = segment_row_index(&i, width, false, "serve").expect("serve 行");
         let line = &lines[row as usize];
         assert!(
