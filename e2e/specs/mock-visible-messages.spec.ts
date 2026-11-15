@@ -11,7 +11,12 @@
 
 import { test, expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
-import { seedSession, openSessionInRail } from "../fixtures/helpers";
+import {
+  seedSession,
+  openSessionInRail,
+  sendMessage,
+  installMockSse,
+} from "../fixtures/helpers";
 
 /** 聊天列中可见的 assistant 回合数（与 victauri 版同口径）。 */
 async function visibleAssistantCount(page: Page): Promise<number> {
@@ -107,4 +112,36 @@ test("编排路由与 commentary 被隐藏，只显示终答", async ({ page }) 
   ).toBe(false);
 
   await expect.poll(() => visibleAssistantCount(page)).toBe(1);
+});
+
+test("实时流里的 orchestration_route 不进聊天气泡", async ({ page }) => {
+  // 上面三个用例走「历史播种」路径（伪造已落盘的 text），测的是
+  // `timeline_scan::is_orchestration_route_timeline_message` 那层文案兜底。
+  // 本用例走**真实 SSE 路径**，测的是 `timeline_dispatch.rs` 里
+  // `"orchestration_route" => {}` 这条按 kind 丢弃的实时分支 —— 那才是主路径。
+  // 事件形态取自 Server `orchestration_route.rs`（title 恒为 `编排路由：<mode>`）
+  // 与 `ag_ui_encode`（customType=timeline_log，data={kind,title,detail}）。
+  await seedSession(page, "s_e2e_sse_route");
+
+  await installMockSse(
+    page,
+    [
+      `id: 1\ndata: {"type":"CUSTOM","customType":"timeline_log","data":{"kind":"orchestration_route","title":"编排路由：freeform","detail":"freeform"}}\n\n`,
+      // 正文要先进入 answer_phase，否则 delta 不计入（delta_chars=0 → 「未进入正文阶段」）
+      `id: 2\ndata: {"type":"CUSTOM","customType":"assistant_answer_phase"}\n\n`,
+      `id: 3\ndata: 当前目录下有三个压缩包。\n\n`,
+      `id: 4\ndata: {"type":"RUN_FINISHED"}\n\n`,
+    ].join(""),
+  );
+
+  await sendMessage(page, "分析当前目录");
+
+  await expect(
+    page.getByText("当前目录下有三个压缩包。").first(),
+  ).toBeVisible();
+
+  expect(
+    await page.evaluate(() => document.body.innerText.includes("编排路由")),
+    "orchestration_route must not render as a chat bubble",
+  ).toBe(false);
 });
