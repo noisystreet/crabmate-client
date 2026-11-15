@@ -13,10 +13,11 @@ use super::links::RowLink;
 use super::md;
 use super::palette::{Palette, with_row_style};
 use super::settings_panel::PanelContent;
+use super::sidebar_window::{SidebarRows, render_pane};
 use super::state::{Focus, LineKind, LogLine, ToolState, UiState};
 use super::status::{SPINNER_FRAMES, status_line};
 use super::status_stack;
-use super::ws_sidebar::{pane_list_area, sessions_content, sidebar_view, workspace_content};
+use super::ws_sidebar::{sessions_content, workspace_content};
 
 // 浮层（审批 / 设置面板）拆到 `overlay.rs`：它们自成一套模板，也把本文件的行数
 // 从 920 门禁线附近拉开，给后续 B4 / B5 的改动留余量。
@@ -516,11 +517,33 @@ pub fn draw(
         let left_w = left.width.saturating_sub(2) as usize;
         let (rows, cursor, hint) = sessions_content(st, left_w);
         paint_bg(frame, left, pal.chrome_bg);
-        render_pane(frame, left, rows, cursor, hint, &pal, left_w);
+        render_pane(
+            frame,
+            left,
+            SidebarRows {
+                rows,
+                cursor,
+                hint,
+                width: left_w,
+            },
+            &pal,
+            &mut st.side_list_start,
+        );
         let right_w = right.width.saturating_sub(2) as usize;
         let (rows, cursor, hint) = workspace_content(st, right_w);
         paint_bg(frame, right, pal.chrome_bg);
-        render_pane(frame, right, rows, cursor, hint, &pal, right_w);
+        render_pane(
+            frame,
+            right,
+            SidebarRows {
+                rows,
+                cursor,
+                hint,
+                width: right_w,
+            },
+            &pal,
+            &mut st.ws_list_start,
+        );
     }
     // 左栏下半：lane 列表。固定占左栏一半高度，与左栏同宽同底色，视觉上是同一列的两段。
     // 每条 lane 一行整行宽的底色条（当前 lane 用选中底色），自上而下堆叠，条数少时下方留空。
@@ -651,36 +674,6 @@ fn composer_hint_enabled_with(env: &dyn Fn(&str) -> Option<String>) -> bool {
             "1" | "on" | "true" | "yes" | "enable"
         ),
         None => false,
-    }
-}
-
-/// 通用固定列渲染：内容窗口裁剪（含提示行）。内容行/光标/提示由 [`super::ws_sidebar`] 提供。
-/// 列内左右各留 1 列空隙（对齐聊天区观感），行宽按 `width - 2` 截断。
-/// `width` 与构建行时用的是同一个值（`列宽 - 2`），标题溢出计数也按它截断。
-fn render_pane(
-    frame: &mut Frame,
-    area: Rect,
-    rows: Vec<Line<'static>>,
-    cursor: usize,
-    hint: Option<Line<'static>>,
-    pal: &Palette,
-    width: usize,
-) {
-    if area.width <= 1 || area.height == 0 {
-        return;
-    }
-    // 内容区与提示行矩形同样跑鼠标命中检测用的那份计算。
-    let list_area = pane_list_area(area);
-    let shown = sidebar_view(&rows, list_area.height as usize, cursor, width, pal);
-    let list = Paragraph::new(shown).style(Style::new().fg(pal.fg));
-    frame.render_widget(list, list_area);
-    // 提示行占列内最后一行（高度不足 2 行时没有提示位）。内容自带样式：会话栏是静态
-    // 键位，工作区栏在光标行被截断时会改成完整相对路径。
-    if area.height >= 2
-        && let Some(text) = hint
-    {
-        let hint_area = Rect::new(area.x + 1, area.y + area.height - 1, area.width - 1, 1);
-        frame.render_widget(Paragraph::new(text), hint_area);
     }
 }
 

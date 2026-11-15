@@ -7,7 +7,6 @@
 //! `fetch_workspace_projects` / `/status`），避免全屏事件循环与 IO 互相阻塞。raw mode 下
 //! Ctrl+C 是按键事件，取消经 [`StreamCancel`] 走"外部取消"通道，不复用文本模式的
 //! `ctrl_c` 信号路径。
-
 mod approve;
 mod background;
 mod background_cmd;
@@ -69,6 +68,7 @@ mod usage_diag;
 mod settings_panel_env;
 mod shell;
 mod sidebar_keys;
+mod sidebar_window;
 mod skill_line;
 mod slash_menu;
 mod spinner;

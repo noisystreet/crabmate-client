@@ -4,7 +4,6 @@
 //! 拆出本模块以控制 `render.rs` 单文件行数（fn-nloc 门禁 ≤ 920）；数据侧见
 //! [`super::workspace_tree`]。
 
-use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use unicode_width::UnicodeWidthStr;
@@ -158,28 +157,28 @@ fn workspace_sidebar_rows(st: &UiState, width: usize) -> Vec<Line<'static>> {
 /// 不能浪费，标题行本来就在，且计数与裁剪共用 [`sidebar_window`] 的同一份窗口。
 pub(super) fn sidebar_view<'a>(
     rows: &[Line<'a>],
-    height: usize,
-    selected: usize,
+    start: usize,
+    end: usize,
     width: usize,
     pal: &Palette,
 ) -> Vec<Line<'a>> {
-    if height == 0 {
+    if rows.is_empty() {
         return Vec::new();
     }
-    if rows.len() <= height {
+    let items_len = rows.len() - 1;
+    if start == 0 && end >= items_len {
         return rows.to_vec();
     }
-    let (start, end) = sidebar_window(rows.len(), height, selected);
-    let mut out = Vec::with_capacity(height);
+    let mut out = Vec::with_capacity(end.saturating_sub(start) + 1);
     // `end` 是条目区右开区间，标题行占 `rows[0]`，故条目总数为 `rows.len() - 1`。
     out.push(title_with_overflow(
         &rows[0],
         start,
-        (rows.len() - 1).saturating_sub(end),
+        items_len.saturating_sub(end),
         width,
         pal,
     ));
-    out.extend(rows[start + 1..end + 1].iter().cloned());
+    out.extend(rows[start + 1..=end].iter().cloned());
     out
 }
 
@@ -247,37 +246,8 @@ fn title_with_overflow<'a>(
     Line::from(spans)
 }
 
-/// 条目区（不含固定的标题行）的可见窗口 `[start, end)`。
-///
-/// 渲染裁剪与鼠标命中检测必须共用这一份：各算一遍就会在「列表够长且光标接近底部」时
-/// 悄悄错开一行，而症状是点到的行和反色高亮不同行，极难察觉。
-pub(super) fn sidebar_window(rows_len: usize, height: usize, selected: usize) -> (usize, usize) {
-    let items_len = rows_len.saturating_sub(1);
-    if height == 0 || items_len == 0 {
-        return (0, 0);
-    }
-    if rows_len <= height {
-        return (0, items_len);
-    }
-    let item_max = height - 1;
-    let sel = selected.min(items_len - 1);
-    let start = if sel < item_max {
-        0
-    } else {
-        sel + 1 - item_max
-    };
-    (start, (start + item_max).min(items_len))
-}
-
-/// 侧栏列的内容区：去掉列内左留白 1 列与底部 1 行（按键提示）。
-/// 渲染与鼠标命中检测共用。
-pub(super) fn pane_list_area(area: Rect) -> Rect {
-    if area.width <= 1 || area.height == 0 {
-        return Rect::new(area.x, area.y, 0, 0);
-    }
-    let inner = Rect::new(area.x + 1, area.y, area.width - 1, area.height);
-    Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).split(inner)[0]
-}
+/// 列内容区与可见窗口见 [`super::sidebar_window`]（渲染与命中共用同一份）。
+pub(super) use super::sidebar_window::{pane_list_area, sidebar_window};
 
 /// 项目池「选择/切换工作区」内容行：首行标题，其后为候选项目（加载中/未启用/错误占位）。
 fn workspace_pick_rows(st: &UiState, width: usize) -> Vec<Line<'static>> {
@@ -616,7 +586,8 @@ mod tests {
         let pal = Palette::from_theme(Some("shadcn-dark"));
         let mut rows: Vec<Line<'static>> = vec![Line::from("header")];
         rows.extend((0..10).map(|i| Line::from(format!("item{i}"))));
-        let v = sidebar_view(&rows, 4, 7, 20, &pal);
+        let (s, e) = sidebar_window(rows.len(), 4, 7, 0);
+        let v = sidebar_view(&rows, s, e, 20, &pal);
         assert_eq!(v.len(), 4);
         assert!(v.last().unwrap().to_string().contains("item7"));
         assert!(v.first().unwrap().to_string().contains("header"));
@@ -628,7 +599,8 @@ mod tests {
         let mut rows: Vec<Line<'static>> = vec![Line::from("header")];
         rows.extend((0..10).map(|i| Line::from(format!("item{i}"))));
         // 高 4 行 = 标题 + 3 条；选中第 7 条 → 上方藏 5 条、下方藏 2 条。
-        let v = sidebar_view(&rows, 4, 7, 20, &pal);
+        let (s, e) = sidebar_window(rows.len(), 4, 7, 0);
+        let v = sidebar_view(&rows, s, e, 20, &pal);
         let title = v[0].to_string();
         assert!(title.contains("↑5"), "上方隐藏计数：{title}");
         assert!(title.contains("↓2"), "下方隐藏计数：{title}");
@@ -640,7 +612,8 @@ mod tests {
         let pal = Palette::from_theme(Some("shadcn-dark"));
         let mut rows: Vec<Line<'static>> = vec![Line::from("header")];
         rows.extend((0..3).map(|i| Line::from(format!("item{i}"))));
-        let v = sidebar_view(&rows, 5, 1, 20, &pal);
+        let (s, e) = sidebar_window(rows.len(), 5, 1, 0);
+        let v = sidebar_view(&rows, s, e, 20, &pal);
         assert_eq!(v.len(), 4);
         assert!(!v[0].to_string().contains('↑'), "没有隐藏行时不该出现计数");
     }
@@ -660,7 +633,8 @@ mod tests {
         ])];
         rows.extend((0..5).map(|i| Line::from(format!("item{i}"))));
         // 高 2 行 = 标题 + 1 条；选中第 0 条 → 下方藏 4 条。
-        let v = sidebar_view(&rows, 2, 0, 20, &pal);
+        let (s, e) = sidebar_window(rows.len(), 2, 0, 0);
+        let v = sidebar_view(&rows, s, e, 20, &pal);
         let head = &v[0];
         let text = head.to_string();
         assert!(text.contains("2/3"), "计数器该留下：{text}");

@@ -239,7 +239,14 @@ impl LaneApp<'_> {
         // 用渲染同一份内容算行数，避免再维护一遍「标题 + 占位行」的行数口径。
         let content_width = right.width.saturating_sub(2) as usize;
         let (rows, cursor, _hint) = workspace_content(&self.st, content_width);
-        let Some(idx) = hit_item(right, column, row, rows.len(), cursor) else {
+        let Some(idx) = hit_item(
+            right,
+            column,
+            row,
+            rows.len(),
+            cursor,
+            self.st.ws_list_start,
+        ) else {
             return; // 标题行 / 底部提示行 / 列表末尾的空白：只切焦点
         };
         if self.st.ws_pick.is_some() {
@@ -296,7 +303,14 @@ impl LaneApp<'_> {
         // 列内左右各留 1 列：与 `render_pane` 的内宽口径必须是同一个值。
         let content_width = left.width.saturating_sub(2) as usize;
         let (rows, cursor, _hint) = sessions_content(&self.st, content_width);
-        let Some(pos) = hit_item(left, column, row, rows.len(), cursor) else {
+        let Some(pos) = hit_item(
+            left,
+            column,
+            row,
+            rows.len(),
+            cursor,
+            self.st.side_list_start,
+        ) else {
             return; // 标题行 / 底部提示行 / 列表末尾的空白：只切焦点
         };
         // `pos` 是**可见列表**里的位置（过滤生效后与会话下标不是一回事）；占位行
@@ -410,12 +424,22 @@ fn body_hit(area: Rect, rows: &[Option<usize>], column: u16, row: u16) -> BodyHi
 /// 渲染用的那一份，两栏的「标题行占第 0 行、窗口末尾是空白」等口径因此只有一处定义。
 ///
 /// 落在标题行、底部提示行或窗口末尾的空白上返回 `None`（调用方只切焦点，不改选中）。
-fn hit_item(area: Rect, column: u16, row: u16, rows_len: usize, cursor: usize) -> Option<usize> {
+///
+/// `list_start` 是渲染写回的窗口起点（**粘住**）：命中必须读同一份，否则点击会先让
+/// 渲染侧把选中行钉到窗口底边、整列跳动，第二下落点随之漂移。
+fn hit_item(
+    area: Rect,
+    column: u16,
+    row: u16,
+    rows_len: usize,
+    cursor: usize,
+    list_start: usize,
+) -> Option<usize> {
     let list = pane_list_area(area);
     if !contains(list, column, row) {
         return None;
     }
-    let (start, end) = sidebar_window(rows_len, list.height as usize, cursor);
+    let (start, end) = sidebar_window(rows_len, list.height as usize, cursor, list_start);
     item_index_at((row - list.y) as usize, start, end)
 }
 
