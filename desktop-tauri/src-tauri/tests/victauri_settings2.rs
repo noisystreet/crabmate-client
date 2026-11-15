@@ -1,5 +1,11 @@
-//! Victauri 版 Phase 3 设置页 LLM/MCP 追加测试（fetch 拦截器存根）。
+//! Victauri 版设置页**壳专属**测试：模型密钥 / Web Bearer 的落盘位置（#152）。
 //!
+//! 这两个用例用 `window.__TAURI__.core.invoke('get_llm_secret')` /
+//! `invoke('get_connect_bearer')` 直读设备钥匙串，验证「密钥不进 localStorage」——
+//! 浏览器无钥匙串，无等价物，故**留在 Victauri**。
+//!
+//! 原先的第三个用例 `import_mcp_json_adds_server_rows` 已迁到
+//! `e2e/specs/mock-settings-page.spec.ts`（它只是页面行为）。
 
 use victauri_test::e2e_test;
 use victauri_test::locator::Locator;
@@ -150,35 +156,4 @@ e2e_test!(web_api_bearer_not_in_local_storage, |client| async move {
         .unwrap_or(false);
     assert!(secret_ok, "expected connect bearer in device keyring");
     assert!(ls_empty, "must not persist Web API Bearer in localStorage");
-});
-
-e2e_test!(import_mcp_json_adds_server_rows, |client| async move {
-    seed_settings_session(&mut client, "s_e2e_mcp_import").await;
-    open_settings(&mut client, "mcp").await;
-    let mcp_json = "{\"mcpServers\":{\"e2e-import\":{\"command\":\"npx\",\"args\":[\"-y\",\"echo\",\"mcp-e2e\"]}}}";
-    let _ = client.eval_js(&format!("(()=>{{const el=document.querySelector('[data-testid=\"settings-mcp-import-json\"]');if(!el)return;const s=Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype,'value').set;s.call(el,'{mcp_json}');el.dispatchEvent(new Event('input',{{bubbles:true}}));}})()")).await;
-    Locator::test_id("settings-mcp-import-apply")
-        .click(&mut client)
-        .await
-        .unwrap();
-    client
-        .wait_for("text", Some("已导入"), Some(10000), Some(200))
-        .await
-        .unwrap();
-    let _ = client.eval_js("window.__e2eMcpSaved=false;window.__origFetch5=window.fetch;window.fetch=(u,o)=>{if(typeof u==='string'&&u.includes('/user-data/mcp-servers')&&o&&o.method==='PUT'){window.__e2eMcpSaved=true;return Promise.resolve(new Response('',{status:204}));}return window.__origFetch5(u,o);};").await;
-    Locator::test_id("settings-mcp-save")
-        .click(&mut client)
-        .await
-        .unwrap();
-    client
-        .wait_for("text", Some("已保存"), Some(10000), Some(200))
-        .await
-        .ok();
-    let saved: bool = client
-        .eval_js("window.__e2eMcpSaved===true")
-        .await
-        .unwrap()
-        .as_bool()
-        .unwrap_or(false);
-    assert!(saved);
 });

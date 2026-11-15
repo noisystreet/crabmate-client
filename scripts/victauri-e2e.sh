@@ -379,9 +379,10 @@ elif [ "$TEST" = "all" ]; then
     # `mock-multi-turn` / `mock-v2-multi-turn-boundaries` 等价覆盖，见 e2e/README.md 分工），
     # 也不含 victauri_real_llm（需 REAL_LLM_E2E + 本机密钥，用 `./scripts/victauri-e2e.sh real_llm` 单跑）。
     MISSING=""
-    # status_bar / visible_messages 已迁到 Playwright（e2e/specs，随 PR 门禁跑），见 #152
-    for name in victauri_e2e victauri_session_crud victauri_prefs_theme \
-        victauri_settings victauri_settings2 victauri_keyboard victauri_conversation \
+    # status_bar / visible_messages / session_crud / settings / prefs_theme / keyboard
+    # 已迁到 Playwright（e2e/specs，随 PR 门禁跑），见 #152。
+    # settings2 保留：它的两个用例直读设备钥匙串，属壳专属能力。
+    for name in victauri_e2e victauri_settings2 victauri_conversation \
         victauri_user_data victauri_pagination \
         victauri_sse_stub victauri_sse_more victauri_scroll_send victauri_ide_layout \
         victauri_turn_layout; do

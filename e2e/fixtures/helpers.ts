@@ -40,6 +40,12 @@ export async function seedSession(
     sidePanelView?: string;
     showTurnContextInject?: boolean;
     session?: Record<string, unknown>;
+    /** 完整会话列表（多会话用例）；提供时忽略 `session`，且 `sid` 应在其中。 */
+    sessions?: Record<string, unknown>[];
+    /** 主题（默认 `crabmate-light`）。 */
+    theme?: string;
+    /** 右列宽度 px（默认 280）。 */
+    sideWidth?: number;
   } = {},
 ) {
   await applyWebApiBearerHeaders(page);
@@ -54,26 +60,24 @@ export async function seedSession(
 
   const prefs = {
     locale: "zh",
-    theme: "crabmate-light",
+    theme: opts.theme ?? "crabmate-light",
     side_panel_view: opts.sidePanelView ?? "hidden",
-    side_width: 280,
+    side_width: opts.sideWidth ?? 280,
     editor_layout_mode: false,
     status_bar_visible: true,
     show_turn_context_inject: opts.showTurnContextInject ?? false,
   };
+  const rawSessions = opts.sessions ?? [{ id: sid, ...opts.session }];
   const sessionsBody = {
-    sessions: [
-      {
-        id: sid,
-        title: "e2e",
-        draft: "",
-        messages: [],
-        updated_at: Date.now(),
-        pinned: false,
-        starred: false,
-        ...opts.session,
-      },
-    ],
+    sessions: rawSessions.map((s) => ({
+      title: "e2e",
+      draft: "",
+      messages: [],
+      updated_at: Date.now(),
+      pinned: false,
+      starred: false,
+      ...s,
+    })),
     active_session_id: sid,
   };
 
