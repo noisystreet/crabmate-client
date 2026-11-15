@@ -645,6 +645,25 @@ impl Palette {
         }
     }
 
+    /// 可切换项（状态栈里点得动的 `view` / `perm` / `think`）的底色块样式。
+    ///
+    /// 取 `overlay_bg`：它比状态栈的条带色（`chrome_bg`）亮一档，压在右栏底部就是一块
+    /// 「比周围浅」的色块 —— 既是可点线索，又不至于像 [`Self::selection`] 那样被读成
+    /// 「选中」。只读段不铺底色，两类段因此一眼可分：终端里没有悬停态，这是唯一能提前
+    /// 告诉用户「这几行点得动」的地方。
+    ///
+    /// 无色模式下底色被抹成 `Reset`，此时退回 `UNDERLINED`——与 [`Self::selection`] 同一条
+    /// 兜底思路（底色不可用就换修饰位表达同一件事），只是这里用下划线而不是反色，反色留给
+    /// 选中态。
+    #[must_use]
+    pub(crate) fn actionable_block(&self) -> Style {
+        if self.mono {
+            Style::new().add_modifier(Modifier::UNDERLINED)
+        } else {
+            Style::new().bg(self.overlay_bg)
+        }
+    }
+
     /// 按主题 + 终端能力解析出最终配色板（启动时一次）。
     #[must_use]
     pub(crate) fn resolve(theme: Option<&str>) -> Self {
