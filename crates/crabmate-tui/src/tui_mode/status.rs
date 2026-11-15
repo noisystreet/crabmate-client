@@ -188,8 +188,10 @@ impl Segment {
 
     /// 这一段点得动吗（`view` 切视图 / `perm` 开档位菜单 / `think` 切思考开关）。
     ///
-    /// 渲染据此给整段铺浅一档的底色块（[`Palette::actionable_block`]）：终端里既没有悬停
-    /// 提示、也没有指针形状，只读段与可切换段长得一样时，用户只能靠盲试去发现哪几行能点。
+    /// 渲染据此给这一段的**值**铺浅一档的底色块（[`Palette::actionable_block`]），`label`
+    /// 保持裸露的淡色 —— 终端里既没有悬停提示、也没有指针形状，只读段与可切换段长得一样时，
+    /// 用户只能靠盲试去发现哪几行能点。块只压值不压 `label`：`label` 列是每行都一样的字段名，
+    /// 染色会把两列的视觉权重拉平（`status_stack::segment_spans` 记了完整的取舍）。
     ///
     /// **这里的三个 label 必须与鼠标命中的三处一一对应**
     /// （`mouse::hit_status_segment` 的 `VIEW_LABEL` / `PERM_LABEL` / `THINK_LABEL`）：
