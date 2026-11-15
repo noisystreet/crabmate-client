@@ -20,6 +20,8 @@
 
 **核心原则**：纯前端行为的回归测试优选 Playwright，Tauri 特有行为留 victauri_test。
 
+> **迁移进行中（#152）**：Victauri 侧现存用例几乎全是页面行为（0 个调用 Tauri IPC），正分批迁入本目录；迁完 Victauri 只保留壳冒烟。已迁：`mock-status-bar` / `mock-visible-messages`。
+
 ## 前置条件
 
 ```bash
@@ -241,6 +243,8 @@ GitHub Actions：本仓 `.github/workflows/e2e-playwright.yml`（PR → `main`�
 - `specs/mock-v2-multi-turn-boundaries.spec.ts`
 - `specs/mock-mobile-shell.spec.ts`
 - `specs/mock-hydrate-parse-failed.spec.ts`
+- `specs/mock-status-bar.spec.ts`（由 Victauri 迁入，#152）
+- `specs/mock-visible-messages.spec.ts`（由 Victauri 迁入，#152）
 
 本地全量 mock：`make frontend` 后 `./scripts/e2e-playwright.sh`（自动起纯 API serve + `crabmate-web`；或手动起两者后 `cd e2e && CRABMATE_API_BASE=http://127.0.0.1:8080 no_proxy=127.0.0.1,localhost npx playwright test`）。
 
