@@ -82,9 +82,9 @@ fn workspace_rows_colour_entries_by_file_kind() {
 #[test]
 fn file_kind_icons_are_drawn_only_when_enabled() {
     let entry = row(0, "src/main.rs", "main.rs", false, false);
-    let (with_icon, _) = ws_row_text(&entry, 40, true);
+    let (with_icon, _) = ws_row_text(&entry, 40, GlyphPolicy::DEFAULT);
     assert!(with_icon.starts_with("{ "), "{with_icon}");
-    let (without, _) = ws_row_text(&entry, 40, false);
+    let (without, _) = ws_row_text(&entry, 40, GlyphPolicy::NO_ICONS);
     assert!(without.starts_with("  main.rs"), "{without}");
     // 名字起点相同：两列预算是恒定的，开关不该改变对齐。
     assert_eq!(
@@ -97,11 +97,23 @@ fn file_kind_icons_are_drawn_only_when_enabled() {
 #[test]
 fn directories_keep_the_fold_arrow_instead_of_an_icon() {
     let collapsed = row(0, "src", "src", true, false);
-    assert!(ws_row_text(&collapsed, 40, true).0.starts_with("▸ "));
+    assert!(
+        ws_row_text(&collapsed, 40, GlyphPolicy::DEFAULT)
+            .0
+            .starts_with("▸ ")
+    );
     let open = row(0, "src", "src", true, true);
-    assert!(ws_row_text(&open, 40, true).0.starts_with("▾ "));
+    assert!(
+        ws_row_text(&open, 40, GlyphPolicy::DEFAULT)
+            .0
+            .starts_with("▾ ")
+    );
     // 图标开关对目录无影响。
-    assert!(ws_row_text(&open, 40, false).0.starts_with("▾ "));
+    assert!(
+        ws_row_text(&open, 40, GlyphPolicy::NO_ICONS)
+            .0
+            .starts_with("▾ ")
+    );
 }
 
 /// 图标吃掉两列后名字仍不得溢出；极窄时只画字形，不留「只剩空白」的空洞。
@@ -114,13 +126,62 @@ fn the_icon_never_pushes_the_name_past_the_budget() {
         false,
         false,
     );
-    let (text, clipped) = ws_row_text(&entry, 12, true);
+    let (text, clipped) = ws_row_text(&entry, 12, GlyphPolicy::DEFAULT);
     assert!(clipped, "12 列放不下这么长的名字");
     assert!(UnicodeWidthStr::width(text.as_str()) <= 12, "{text}");
     // 宽度只够字形：名字整段让位，但字形本身还在。
-    let (narrow, clipped) = ws_row_text(&entry, 2, true);
+    let (narrow, clipped) = ws_row_text(&entry, 2, GlyphPolicy::DEFAULT);
     assert!(clipped);
     assert_eq!(UnicodeWidthStr::width(narrow.as_str()), 2, "{narrow}");
+}
+
+/// 字形占 2 列时（`CM_TUI_ICON_WIDTH=2`），名称预算少一列 —— 且「是否被省略」的判断
+/// 必须跟着变，否则提示行会说「放得下」而画面上名称已经被省略。
+///
+/// 这正是原实现的缺陷：宽度用 `UnicodeWidthStr::width(prefix)` 现测，`unicode-width` 恒把
+/// `▸` / `·` 这类 Ambiguous 字形算成 1 列，于是终端画 2 列时排版与画面差一列。
+#[test]
+fn a_two_column_glyph_costs_one_column_of_the_name() {
+    // 名称 9 列（`abcdef.rs`）。11 列内宽下：1 列字形还剩 9 列（2 + 9 = 11，正好放得下），
+    // 2 列字形只剩 8 列（3 + 9 = 12 > 11）必须省略 —— 同一个宽度，两种策略给两个答案。
+    let entry = row(0, "src/a.rs", "abcdef.rs", false, false);
+    let wide = GlyphPolicy {
+        icons: true,
+        columns: 2,
+    };
+    let (narrow_text, narrow_clipped) = ws_row_text(&entry, 11, GlyphPolicy::DEFAULT);
+    assert!(!narrow_clipped, "1 列字形放得下：{narrow_text}");
+    assert_eq!(narrow_text, "{ abcdef.rs");
+    let (wide_text, wide_clipped) = ws_row_text(&entry, 11, wide);
+    assert!(wide_clipped, "2 列字形放不下，必须省略：{wide_text}");
+    assert!(wide_text.contains('…'), "{wide_text}");
+    assert!(
+        UnicodeWidthStr::width(wide_text.as_str()) <= 11,
+        "{wide_text}"
+    );
+    // 再宽一列：2 列字形也放得下。
+    let (wide_ok, wide_ok_clipped) = ws_row_text(&entry, 12, wide);
+    assert!(!wide_ok_clipped, "12 列够 3 列前缀 + 9 列名称：{wide_ok}");
+    assert_eq!(wide_ok, "{ abcdef.rs");
+}
+
+/// 缩进也跟着字形列数走：每深入一层多 2 列，与字形本身无关，但两者加在一起才是
+/// 一个行首前缀 —— 少算任何一项，深层行的名称都会被多截一列。
+#[test]
+fn the_deeper_rows_add_two_columns_per_level() {
+    let deep = row(3, "a/b/c/x.rs", "x.rs", false, false);
+    for columns in [1, 2] {
+        let policy = GlyphPolicy {
+            icons: true,
+            columns,
+        };
+        let prefix = 2 * 3 + columns + 1;
+        let (text, clipped) = ws_row_text(&deep, prefix + 4, policy);
+        assert!(!clipped, "columns={columns} 恰好放得下：{text}");
+        // 再窄一列就放不下 4 列的 `x.rs`。
+        let (tight, tight_clipped) = ws_row_text(&deep, prefix + 3, policy);
+        assert!(tight_clipped, "columns={columns}：{tight}");
+    }
 }
 
 /// 无色模式：颜色全 `Reset`，类别标记仍在 —— 它不依赖配色，也不依赖字体。
