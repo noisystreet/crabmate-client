@@ -383,12 +383,13 @@ elif [ "$TEST" = "all" ]; then
     # Wave 1–3 合计迁走 status_bar / visible_messages / session_crud / settings /
     # prefs_theme / keyboard / scroll_send / sse_stub / sse_more / ui_layout /
     # side_toolbar / user_data。
-    # 剩下的：壳冒烟（e2e）、壳专属钥匙串（settings2）、以及待重写的两处 ——
-    # conversation 与 pagination 依赖 `CM_E2E_FIXTURES=1`（阻塞），
-    # ide_layout 与 turn_layout 引用的 testid / V1 帧已过时（需重写）。
+    # 已删除（不是迁移）：ide_layout 的 `layout-mode-toggle` / `ide-layout-root` 随 UI
+    # 重构消失、turn_layout 的多工具用例需按 AG-UI（V2）重写 —— 两者原处即为红，
+    # 留着只是噪音（见 #152）。
+    # 剩下的：壳冒烟（e2e）、壳专属钥匙串（settings2）、以及依赖
+    # `CM_E2E_FIXTURES=1` 的 conversation / pagination（阻塞待定）。
     for name in victauri_e2e victauri_settings2 victauri_conversation \
-        victauri_pagination victauri_ide_layout \
-        victauri_turn_layout; do
+        victauri_pagination; do
         BIN=$(find_test_bin "$name")
         if [ -z "$BIN" ]; then
             # 原先静默跳过：全部 suite 缺席也会走到 ALL PASSED（假绿）
