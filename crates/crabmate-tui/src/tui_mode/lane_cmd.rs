@@ -27,6 +27,18 @@ pub(crate) enum LaneCommand {
     List,
     /// `attach <name>`：连上已就绪的实例。
     Attach(String),
+    /// `attach-url <name>=<url>`：**直连一个地址**，不查控制面、不写声明。
+    ///
+    /// 与 [`LaneCommand::Attach`] 的分工是「地址从哪来」：`attach` 只知道实例名，地址由
+    /// ctl 的声明给出；这条由用户当场给出地址，所以 `instances.toml` 里没声明过的 serve
+    /// （VPS、临时起的那台、别人的 serve）也能连。`/connect` / `/url` 是同义别名 ——
+    /// 从 `--connect name=url` 迁移过来的人会先试 `/connect`。
+    AttachUrl {
+        /// 新 lane 的 `label`。
+        name: String,
+        /// serve 根 URL。
+        url: String,
+    },
     /// `detach [<name>]`：只摘掉本进程的连接（声明与 serve 进程都不动）。
     ///
     /// 名字缺省 = **当前 lane**：执行时由 `LaneApp` 的 `label` 兜底（解析层不知道
@@ -82,6 +94,7 @@ pub(crate) fn parse(arg: Option<&str>) -> Result<LaneCommand, String> {
         // `list` 后面跟东西就是手误：静默忽略会让人以为参数生效了。
         "list" | "ls" | "show" if tail.is_empty() => Ok(LaneCommand::List),
         "attach" | "use" => one_name(tail, "attach").map(LaneCommand::Attach),
+        "attach-url" | "connect" | "url" => attach_url_tail(tail),
         "detach" => detach_tail(tail),
         "cancel" | "kill" | "interrupt" => one_name(tail, "cancel").map(LaneCommand::Cancel),
         // `disable` / `enable` 是 Server 侧的 op 名，认它们只是省事，语义与 close / open 一致。
@@ -98,8 +111,25 @@ pub(crate) fn parse(arg: Option<&str>) -> Result<LaneCommand, String> {
 
 /// 用法提示：每条子命令各给一个可照抄的例子。
 fn usage() -> String {
-    "用法：/lane [list] · /lane status <name>（或 show） · /lane restart <name> · /lane attach <name> · /lane detach [<name>]（缺省摘当前这条） · /lane cancel <name> · /lane new <name> [workspace] [profile=<name>] · /lane close <name> · /lane open <name>"
+    "用法：/lane [list] · /lane status <name>（或 show） · /lane restart <name> · /lane attach <name> · /lane attach-url <name>=<url>（直连未声明的 serve；/connect 同义） · /lane detach [<name>]（缺省摘当前这条） · /lane cancel <name> · /lane new <name> [workspace] [profile=<name>] · /lane close <name> · /lane open <name>"
         .to_string()
+}
+
+/// `attach-url` 之后是 `<name>=<url>`（名字可省，省了就拿 URL 当名字）。
+///
+/// 复用 [`crate::connect_spec::parse_name_url`]：启动时的 `--connect` 与这条命令是同一种
+/// 写法，两份解析迟早会在「空名字算不算合法」上分家。`verb` 传命令原文，报错才指得回
+/// 用户刚打的那一条。
+fn attach_url_tail(tail: &str) -> Result<LaneCommand, String> {
+    if tail.is_empty() {
+        return Err(
+            "缺 `<name>=<url>`：`/lane attach-url proj-a=http://127.0.0.1:8080`（也可以只给 URL，名字就用 URL）"
+                .to_string(),
+        );
+    }
+    let (name, url) =
+        crate::connect_spec::parse_name_url(tail, "/lane attach-url").map_err(|e| e.to_string())?;
+    Ok(LaneCommand::AttachUrl { name, url })
 }
 
 /// `detach` 的名字可选：缺省摘**当前 lane**（解析层不知道当前是哪条，交给 `LaneApp` 的
@@ -232,6 +262,7 @@ impl super::LaneApp<'_> {
         match cmd {
             LaneCommand::List => self.fetch_ctl_list(),
             LaneCommand::Attach(name) => self.lane_attach(name),
+            LaneCommand::AttachUrl { name, url } => self.lane_attach_url(name, url),
             LaneCommand::Detach(name) => self.lane_detach(name),
             LaneCommand::Cancel(name) => self.lane_cancel(name),
             LaneCommand::Close(name) => self.lane_toggle(name, false),
@@ -262,6 +293,27 @@ impl super::LaneApp<'_> {
         ) {
             self.st
                 .push_line(LineKind::System, "连接未发出：worker 线程已退出");
+        }
+    }
+
+    /// `/lane attach-url <name>=<url>`：直连一个地址（不查控制面、不写声明）。
+    ///
+    /// 走 [`ShellEvent::AttachUrl`]：装配 lane 是外壳动作（`LaneApp` 没有 `lanes` 的
+    /// `&mut`），去重 / 上限 / 失败提示都收在 `attach_lane` 一处 —— 这条命令只是把地址
+    /// 从哪来换了个来源，不该再长出一份「连接坏了」的措辞。
+    ///
+    /// 不先探 `/health`：连不上要等首拉的回包才知道，而那时用户已经看到 lane 被切过去了。
+    /// 那与 `--connect` 的行为一致（启动时也只探主连接），两处判据因此不会分家。
+    fn lane_attach_url(&mut self, name: String, url: String) {
+        self.st
+            .push_line(LineKind::System, &format!("正在直连 `{name}`（{url}）…"));
+        if self
+            .tx
+            .send(Inbound::Shell(ShellEvent::AttachUrl { name, url }))
+            .is_err()
+        {
+            self.st
+                .push_line(LineKind::System, "连接未发出：事件通道已关闭");
         }
     }
 

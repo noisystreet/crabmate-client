@@ -115,8 +115,11 @@ make tui
 ./crates/crabmate-tui/target/debug/crabmate-tui --api-base http://127.0.0.1:8080 --bearer "$CM_WEB_API_BEARER_TOKEN" chat "你好"
 ./crates/crabmate-tui/target/debug/crabmate-tui --api-base http://127.0.0.1:8080 repl   # 交互 REPL
 ./crates/crabmate-tui/target/debug/crabmate-tui --api-base http://127.0.0.1:8080 tui    # 全屏 TUI
+./crates/crabmate-tui/target/debug/crabmate-tui tui --from-ctl                          # 不给 URL：取 ctl 里第一条可连实例
 ./crates/crabmate-tui/target/debug/crabmate-tui caps   # 终端像素图 / 颜色深度探测（不需要 serve）
 ```
+
+`tui` 是唯一**可以不连接就启动**的子命令：`crabmate-tui tui`（不带 `--api-base`）会进一块**未连接界面**——`/lane` 列出 `crabmatectl supervise --socket` 控制面声明的实例、`/lane attach <name>` 连上一条、`/lane attach-url <name>=<url>` 直接连某个地址（不需要声明，**也不需要控制面**，所以 VPS 上那台、临时起的那台都能连）。`--from-ctl` 则替你把这一步也省了：启动时取控制面里第一条 `ready` 实例当主连接，一条都没就绪就落进同一块未连接界面。`chat` / `repl` / `connect` 仍然必须有 `--api-base`。
 
 bearer 鉴权但服务端未设模型 `API_KEY` 的 serve 会返回 `LLM_API_KEY_REQUIRED`；可用 `--llm-api-key` 自带模型密钥（或 `CM_API_KEY` / `CM_MODEL` / `CM_API_BASE`）。`--bearer` / `--llm-api-key` 缺省时会 **read-only 回退读取桌面壳已保存在同一系统钥匙串里的密钥**（`--no-keyring` 可关闭回退）。其中 Web Bearer 先读桌面主窗口的分槽条目（多窗口按窗口分槽），再退回旧版的不分槽条目。
 

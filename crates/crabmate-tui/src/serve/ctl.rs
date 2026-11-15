@@ -348,9 +348,63 @@ fn connect(socket: &Path, io_timeout: Duration) -> Result<UnixStream, CtlCallErr
     Ok(stream)
 }
 
+/// 取第一条**可连**实例的 `(名字, base_url)`。
+///
+/// `--from-ctl` 用它把「启动时不许空手」的负担从用户手里拿走：控制面里已经被
+/// `crabmatectl` 起好（`observed == ready`）的实例可以直接当主 lane，不必再抄一遍 URL。
+///
+/// 判据只认 [`CtlInstance::can_connect`]（`observed == ready`）：`state` 写着 `ready`
+/// 而 `observed` 是 `stale` 的实例连过去就是一个死端口；`enabled = false` 的声明同理
+/// （它的 `observed` 不会是 `ready`，所以这一条不需要额外判断）。
+/// `base_url` 缺失或空白也不算可连 —— 没有地址就没有连接。
+#[must_use]
+pub fn first_ready_base_url(items: &[CtlInstance]) -> Option<(String, String)> {
+    // `find_map` 而不是 `find(..).and_then(..)`：后者在「第一条 ready 却没有地址」时就
+    // 整体返回 `None`，后面的实例再正常也接不上 —— 空地址是**缺字段**，不是「全都不行」。
+    items.iter().find_map(|item| {
+        if !item.can_connect() {
+            return None;
+        }
+        let url = item
+            .base_url
+            .as_deref()
+            .map(str::trim)
+            .filter(|u| !u.is_empty())?;
+        Some((item.name.clone(), url.to_string()))
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `--from-ctl` 的判据：只认 `observed == ready` **且**有非空 `base_url`。
+    ///
+    /// `ready` 但地址空白的实例不能当主连接（没有地址就没有连接）；`stale` 哪怕是
+    /// 声明里的第一条也要跳过 —— 连过去就是一个死端口。
+    #[test]
+    fn first_ready_base_url_skips_unconnectable_and_blank_urls() {
+        let at = |name: &str, observed: &str, url: Option<&str>| CtlInstance {
+            name: name.to_string(),
+            observed: Some(observed.to_string()),
+            base_url: url.map(str::to_string),
+            ..CtlInstance::default()
+        };
+        let items = [
+            at("stale", "stale", Some("http://127.0.0.1:9")),
+            at("blank", "ready", Some("  ")),
+            at("ok", "ready", Some("http://127.0.0.1:8080/")),
+        ];
+        assert_eq!(
+            first_ready_base_url(&items),
+            Some(("ok".to_string(), "http://127.0.0.1:8080/".to_string()))
+        );
+        assert_eq!(
+            first_ready_base_url(&[at("only-stale", "stale", Some("http://127.0.0.1:9"))]),
+            None
+        );
+        assert_eq!(first_ready_base_url(&[]), None);
+    }
     use std::io::BufWriter;
     use std::os::unix::net::UnixListener;
     use std::thread;

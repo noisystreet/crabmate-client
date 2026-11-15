@@ -46,8 +46,8 @@ pub use conversation::{
 pub use crabmate_client_api::clarify_form::PendingClarification;
 pub use crabmate_client_api::sse_dispatch::ClarificationQuestionnaireInfo;
 pub use ctl::{
-    add_instance, instance_status, list_instances, primary_binding, restart_instance,
-    same_api_base, set_instance_enabled,
+    add_instance, first_ready_base_url, instance_status, list_instances, primary_binding,
+    resolve_socket_arg, restart_instance, same_api_base, set_instance_enabled,
 };
 pub use error::TermError;
 pub use session_store::set_session_conversation_store;
@@ -56,6 +56,7 @@ pub use sessions::{
     apply_web_session_op, conversation_id_for_resume, fetch_web_sessions, is_default_session_title,
     title_from_user_prompt,
 };
+pub use url::normalize_api_base;
 pub use user_data::{
     LlmOverridesDto, McpServersFileDto, UserPrefsDto, fetch_llm_overrides, fetch_mcp_servers,
     fetch_user_data_prefs, put_llm_overrides, put_mcp_servers, put_user_data_prefs,

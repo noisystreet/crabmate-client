@@ -9,8 +9,8 @@ use super::state::LineKind;
 use super::worker::CtlReport;
 use super::worker_ctl::{CtlHandle, CtlJob, Queued};
 
-/// 控制面未启用时的提示（`/ctl` 与 `/lane` 共用：两处各写一份必然漂移）。
-const CTL_DISABLED_HINT: &str = "ctl 控制面未启用：启动时加 `--ctl-socket <path>`，或让 $XDG_RUNTIME_DIR/crabmate/ctl.sock 存在";
+/// 控制面未启用时的提示（`/ctl`、`/lane` 与未连接界面共用：三处各写一份必然漂移）。
+pub(super) const CTL_DISABLED_HINT: &str = "ctl 控制面未启用：启动时加 `--ctl-socket <path>`，或让 $XDG_RUNTIME_DIR/crabmate/ctl.sock 存在";
 
 impl super::LaneApp<'_> {
     /// 取控制面通道句柄；未启用时写一句「怎么启用」并返回 `None`。

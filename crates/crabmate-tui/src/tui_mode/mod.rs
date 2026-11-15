@@ -25,6 +25,7 @@ mod conv_cmd;
 mod ctl;
 mod detail;
 mod drafts;
+mod empty_shell; // 未连接界面（一条 lane 都没有时的那块屏）
 // `/editor` 的 markdown 预览单独成文件：`editor_view.rs` 与 `md.rs` 都贴着门禁，而这一块
 // 是「复用的 md 管线 + 自己的缓存」，自成一件。
 mod editor_md;
@@ -118,9 +119,9 @@ use self::worker::{JobCancel, LaneId, UiEvent, WorkerJob};
 use super::SessionPrefs;
 use state::{Focus, LineKind, UiState};
 
-// 入口 re-export：`main.rs` 调 `tui_mode::run_tui`（实现已拆到 `shell` 模块）。
+// 入口 re-export：`startup::run_tui_cmd` 调 `tui_mode::run_tui`（实现在 `shell`）。
 pub use self::shell::run_tui;
-// 连接数上限与启动校验放 `shell`（装配 lane 的那一层）；`main.rs` 顶着 920 行/文件上限，只留一行调用。
+// 连接数上限与启动校验也放 `shell`（装配 lane 的那一层），调用方只留一行。
 pub(crate) use self::shell::check_lane_capacity;
 
 /// 一条连接（lane）的完整 UI 状态与依赖。
@@ -135,9 +136,8 @@ struct LaneApp<'a> {
     label: String,
     /// 本条 lane 的连接。
     ///
-    /// `Cow` 而非 `&'a ServeClient`：启动装配借 `main` 里那份（零拷贝），而
-    /// `/lane attach|new` 在运行期造出来的客户端没有可借的对象，只能自己持有。
-    /// 它 Deref 到 `&ServeClient`，所以其余代码一处都不用改。
+    /// `Cow` 而非 `&'a ServeClient`：启动装配借 `startup` 那份（零拷贝），运行期
+    /// `/lane attach|new|attach-url` 造出来的没有可借对象，只能自己持有（Deref 到 `&ServeClient`）。
     client: Cow<'a, ServeClient>,
     /// 本条 lane 自己的表达层（`/model` `/mode` `/role` `/perm` 与 CLI 初值）。
     ///
@@ -160,9 +160,9 @@ struct LaneApp<'a> {
     cancel: Option<StreamCancel>,
     /// 本条 lane 发起的**进程级**退出请求（`/quit`、第二次 Ctrl+C、`quit_pending` 落地）。
     ///
-    /// 语义是「退出整个 TUI」，不是「只摘掉这条 lane」（那个用 `/lane detach`），所以
-    /// 消费方是外壳：`TuiApp::exit_requested` 扫**全部** lane。只判当前 lane 会让后台
-    /// lane 的请求一直悬着，直到用户切过去才突然掀掉整个 TUI（issue #338）。
+    /// 语义是「退出整个 TUI」（摘单条用 `/lane detach`），所以消费方是外壳：
+    /// `TuiApp::exit_requested` 扫**全部** lane —— 只判当前 lane 会让后台 lane 的请求
+    /// 一直悬着，直到用户切过去才突然退出（issue #338）。
     exit: bool,
     /// `/quit`（`/exit`、`/q` 同义）请求在回合结束后退出（回合进行中先取消并等待）。
     quit_pending: bool,
@@ -185,14 +185,13 @@ struct LaneApp<'a> {
     ws_click: mouse::ClickTracker,
     /// 上次**落盘**的两栏列宽（`pane_store`，issue #407 的 P2）。
     ///
-    /// 同时充当「宽度是否变过」的判据：落盘只在 `st.pane` 与它不同时发生 ——
-    /// 左键松开是高频动作（点会话、点树都会有），每次都写文件既无意义，
-    /// 也会把「上次保存的值」变成噪声。写失败时**不**更新它，于是下一次手势会再试。
+    /// 同时充当「宽度是否变过」的判据：只在 `st.pane` 与它不同时落盘（左键松开是
+    /// 高频动作），写失败时**不**更新它，于是下一次手势会再试。
     pane_saved: pane_width::PaneWidths,
     /// 落盘失败的提示是否已经说过。
     ///
-    /// 鼠标手势是高频动作，每拖一次就再报一次会把 transcript 刷成日志；但完全不说是
-    /// 更坏的选择 —— 用户会以为宽度存下来了，下次启动回到默认却查不出原因。
+    /// 每拖一次就报一次会把 transcript 刷成日志；但完全不说是更坏的选择 ——
+    /// 用户会以为宽度存下来了，下次启动回到默认却查不出原因。
     pane_save_warned: bool,
     /// 列宽落到哪个文件（装配时解析一次，随 lane 持有；见 `pane_store`）。
     pane_store: pane_store::PaneStore,
@@ -204,11 +203,10 @@ struct LaneApp<'a> {
     sent_turn: Option<resume::TurnEcho>,
     /// `/background` 设置的 kitty 像素背景；`None` = 不画（默认关闭）。
     bg: Option<background::Background>,
-    /// 外壳级控制面通道；`None` = 控制面未启用（`/ctl` 会说明原因）。
+    /// 外壳级控制面通道；`None` = 未启用（`/ctl` 会说明原因）。
     ///
-    /// 只存**通道**，不存 socket：socket 是全局资源（一个管所有实例），由
-    /// `worker_ctl` 那个线程独占持有，调用也在那里串行发生（issue #350）；
-    /// 归属靠消息里的 `LaneId` 认，排第几由句柄里的计数当场告知。
+    /// 只存**通道**不存 socket：socket 是全局资源，由 `worker_ctl` 那个线程独占并在
+    /// 那里串行调用（issue #350）；归属靠消息里的 `LaneId` 认。
     ctl: Option<worker_ctl::CtlHandle>,
     /// 回合结束、待外壳统一发送的会话刷新意图（见 [`session_refresh`]）。
     ///
@@ -230,7 +228,7 @@ struct LaneApp<'a> {
 /// 否则每条都得知道全局有几条（见 `docs/design/tui_multi_server.md` §4.2）。
 struct TuiApp<'a> {
     lanes: Vec<LaneApp<'a>>,
-    /// 当前聚焦的 lane 下标。W1 恒为 0。
+    /// 当前聚焦的 lane 下标（`lanes` 为空时无意义）。
     active: usize,
     /// 所有 lane 共用的事件通道接收端：全进程只有这一个消费者，按标签分发。
     rx: Receiver<Inbound>,
@@ -240,11 +238,9 @@ struct TuiApp<'a> {
     next_lane_id: u32,
     /// 回合结束后的会话刷新收敛点：各 lane 置意图位，这里按窗口合并后统一发。
     session_refresh: session_refresh::SessionRefresh,
-    /// 待就绪的 lane：`/lane new` 已写声明、ctl 还没把它起好。
-    ///
-    /// 左栏画成 `◌` / `✗` 一行（见 [`pending_lane`]），**不**进 `lanes` —— 它们还不是
-    /// 连接：没有 URL、没有事件通道，也点不进去。
+    /// 待就绪的 lane（`◌` / `✗`）：还不是连接，所以不进 `lanes`，详见 [`pending_lane`]。
     pending: PendingLanes,
+    empty: empty_shell::EmptyState,
 }
 
 impl<'a> TuiApp<'a> {
@@ -254,6 +250,10 @@ impl<'a> TuiApp<'a> {
     /// `LaneTx` 变成 [`Inbound::FromLane`]，外壳动作走 [`Inbound::Shell`]，键盘 / 鼠标 /
     /// 粘贴 / 尺寸是 [`Inbound::Input`]。
     fn on_msg(&mut self, msg: Inbound) {
+        // 没有 lane 时走未连接界面（下面每一支都假定当前 lane 存在）。
+        if self.lanes.is_empty() {
+            return self.on_empty_msg(msg);
+        }
         match msg {
             // 全局输入：作用于**当前** lane。切 lane 与点 lane 列表是外壳动作，必须在
             // 进入 lane 之前拦截（lane 无权切自己，否则每条都要知道全局有几条）。

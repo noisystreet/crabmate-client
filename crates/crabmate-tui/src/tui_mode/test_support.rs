@@ -218,8 +218,29 @@ pub(super) fn test_shell_with_clients<'a>(
         template: test_template(PaneWidths::DEFAULT, shell_tx),
         session_refresh: Default::default(),
         pending: Default::default(),
+        empty: Default::default(),
     };
     (app, job_rxs)
+}
+
+/// 空 `lanes` 的外壳：**未连接界面**（`empty_shell`）的测试入口。
+///
+/// `ctl` 由用例给（`CtlHandle::detached` 造一个只发不做的句柄，或 `None` 表示控制面
+/// 未启用）—— 空态能敲的命令全都落在它上面，这条接线不造出来就测不到。
+pub(super) fn test_shell_empty(ctl: Option<super::worker_ctl::CtlHandle>) -> TuiApp<'static> {
+    let (shell_tx, rx) = mpsc::channel();
+    let mut template = test_template(PaneWidths::DEFAULT, shell_tx);
+    template.ctl = ctl;
+    TuiApp {
+        lanes: Vec::new(),
+        active: 0,
+        rx,
+        next_lane_id: 0,
+        template,
+        session_refresh: Default::default(),
+        pending: Default::default(),
+        empty: Default::default(),
+    }
 }
 
 #[cfg(test)]

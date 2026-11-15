@@ -47,6 +47,19 @@ pub(super) enum ShellEvent {
         /// `Ok(serve 根 URL)` / `Err(面向用户的失败原因)`。
         result: Result<String, String>,
     },
+    /// `/lane attach-url <name>=<url>`：**不**经控制面的直连。
+    ///
+    /// 与 [`Self::Ready`] 只差「地址从哪来」：这条由用户当场给出，控制面可以不存在 ——
+    /// 未在 `instances.toml` 里声明过的 serve（VPS 上那台、临时起的那台）只有这条路。
+    /// 去重（同名 / 同 `api_base`、`localhost` 与 `127.0.0.1` 不合并）、上限与失败提示
+    /// 仍由 `attach_lane` 一处实现，所以它**不**另带 `from`：发起命令的 lane 就是当前
+    /// lane（命令只在自己那条的输入行里敲得出来），失败提示走 `shell_line` 落到那里。
+    AttachUrl {
+        /// 新 lane 的名字（`label`）。
+        name: String,
+        /// serve 根 URL（`http(s)://host:port`）。
+        url: String,
+    },
     /// `/lane new` 的声明写成功：ctl 正在起实例。
     ///
     /// 单独一条事件而不是等 `Ready` 一起回：写声明与「就绪」之间隔着最长 20 s 的轮询
