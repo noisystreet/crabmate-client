@@ -11,6 +11,10 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ## [Unreleased]
 
+### Fixed
+
+- **TUI: one failed `/permission` read no longer erases the status stack's `perm` row.** Cancelling the first turn with `Ctrl+C` binds a `conversation_id`, so the next refresh asks for the *per-conversation* projection; when that read came back empty (404 / timeout / blank level) the reply replaced `serve_defaults` wholesale and the safety readout vanished — permanently, since refreshes used to fire only when the id changed. A reply without a projection now keeps the last known one (a switch still clears it through `forget_permission_view`, so a level cannot follow you into another conversation), and a turn end also refetches while the projection is unknown. Cost: one extra `/status` + `/permission` per turn against a serve lacking that route. No protocol change.
+
 ## [0.9.0] - 2026-11-15
 
 ### Added

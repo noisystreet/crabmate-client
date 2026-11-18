@@ -26,6 +26,11 @@ pub struct ServeDefaults {
     /// 另拉 `GET /permission` 合并进来；404（老 serve）或拉取失败时保持 `None`，
     /// 状态行就不显示这一段——不猜默认档。
     ///
+    /// **「这次没读到」不该抹掉上一次读到的**：回包落地时会用
+    /// `permission_intent::keep_known_view` 把已有投影保下来，否则一次瞬时失败就让状态行上
+    /// 唯一的安全读数永久缺席。真正作废投影的是换会话 / `/conv new`，那条路径走
+    /// `forget_permission_view`：显式清空后按新会话重拉，所以档位不会跟着人走。
+    ///
     /// 存整个投影而不是只存 `level`：切换菜单要的 `available` 也在这里。只留 level 的话，
     /// 每次开菜单都得再打一次 `/permission`（Desktop chip 吃的也是同一份 view）。
     pub permission_view: Option<PermissionView>,
@@ -121,6 +126,26 @@ impl ServeDefaults {
             self.role.as_deref(),
         )
     }
+}
+
+/// 新回包里没有权限投影时，保住上一次读到的那一份。
+///
+/// `/permission` 的三种「没读到」（老 serve 的 404、请求失败、`level` 为空）在
+/// `worker_jobs::fetch_permission_view` 里都被归成 `None`，而回包落地是**整体替换**
+/// `ServeDefaults` —— 不保旧值，同一个会话里一次瞬时失败就会抹掉状态行上唯一的安全读数。
+///
+/// **「服务端没有这个能力」与「这次没读到」不该同归于尽**：前者由
+/// `permission_intent::forget_permission_view`（切会话 / `/conv new`）显式清空，那条路径
+/// 没有旧值可保，所以「档位不跟着人走」仍然成立。第一次读数就失败（`previous` 为空）时
+/// 仍是 `None`：状态行照旧不显示这一段，不猜档位。
+pub(super) fn keep_known_view(
+    previous: Option<&ServeDefaults>,
+    mut fresh: ServeDefaults,
+) -> ServeDefaults {
+    if fresh.permission_view.is_none() {
+        fresh.permission_view = previous.and_then(|d| d.permission_view.clone());
+    }
+    fresh
 }
 
 /// 解析字符串数组字段（`agent_role_ids` 之类）；缺失 / 非数组 / 非字符串项一律跳过。

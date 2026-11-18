@@ -22,7 +22,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::layout::Rect;
 
 use super::LaneApp;
-use super::serve_defaults::ServeDefaults;
+use super::serve_defaults::{ServeDefaults, keep_known_view};
 use super::worker::WorkerJob;
 use crate::tui_mode::controls::clear_word;
 use crate::tui_mode::state::LineKind;
@@ -233,6 +233,11 @@ impl LaneApp<'_> {
     }
 }
 
+// 读失败后的恢复路径（另置文件：本文件贴着 `fn-nloc-ratchet` 的 920 行上限）。
+#[cfg(test)]
+#[path = "permission_intent_read_tests.rs"]
+mod read_failure_tests;
+
 #[cfg(test)]
 mod tests {
     use super::{perm_value, status_values};
@@ -392,9 +397,21 @@ impl LaneApp<'_> {
     pub(super) fn adopt_turn_conversation(&mut self, conversation_id: &str) {
         let changed = self.st.conversation_id.as_deref() != Some(conversation_id);
         self.st.conversation_id = Some(conversation_id.to_string());
-        if changed {
+        // **投影缺失也重拉**：`/permission` 的一次失败（404 / 超时 / 空 level）会把投影归成
+        // `None`，而原先只在 id 变化时才发刷新 —— 同一个会话就再也补不回来，安全读数永久
+        // 缺席（首轮 Ctrl+C 后 `perm` 行消失即此）。代价：对没有该路由的老 serve，每回合结束
+        // 多打一对 `/status` + `/permission`；换来的是路由一旦可用就自动补上。
+        if changed || self.permission_view_unknown() {
             self.refresh_status();
         }
+    }
+
+    /// 状态行要的那份权限投影现在还没有（还没拉到 / 上次读失败 / 这个 serve 没有该路由）。
+    fn permission_view_unknown(&self) -> bool {
+        self.st
+            .serve_defaults
+            .as_ref()
+            .is_none_or(|d| d.permission_view.is_none())
     }
 
     /// `UiEvent::Status` 落地：只在**仍是同一个会话**时接受。
@@ -412,7 +429,17 @@ impl LaneApp<'_> {
             return;
         }
         match result {
-            Ok(defaults) => self.st.serve_defaults = Some(defaults),
+            // **这次没读到就保住上一次读到的**：`/permission` 的 404 / 失败 / 空 level 都被
+            // `worker_jobs::fetch_permission_view` 归成 `None`，而这里赋值是整体替换 —— 不保旧值，
+            // 一次瞬时失败就会把屏幕上唯一的安全读数抹掉（首轮 Ctrl+C 拿到 cid 后的那次按会话
+            // 刷新正是如此），且 `refresh_status` 平时不再发，抹掉就回不来了。
+            //
+            // 跨会话失效**不走这里**：切会话 / `/conv new` 走 `forget_permission_view`，它显式
+            // 把 view 置 `None` 再重拉，那时没有旧值可保。
+            Ok(defaults) => {
+                let kept = keep_known_view(self.st.serve_defaults.as_ref(), defaults);
+                self.st.serve_defaults = Some(kept);
+            }
             Err(e) => self
                 .st
                 .push_line(LineKind::System, &format!("拉取 serve 状态失败：{e}")),
@@ -800,8 +827,15 @@ mod session_guard_tests {
             _ => panic!("期望 RefreshStatus"),
         }
 
+        // 投影落地之后，同一个 id 再收尾一次：不再重复打请求。
+        // （首次 adopt 之后投影还是空的，那一次 `adopt_turn_conversation` 的重拉条件是
+        // 「id 变了 **或** 投影缺失」—— 见 `read_failure_tests`，两者不能混为一谈。）
+        app.on_serve_status(Some("c1".to_string()), Ok(defaults_with_permission("read")));
         app.adopt_turn_conversation("c1");
-        assert!(job_rx.try_recv().is_err(), "同一个会话不该再打一次");
+        assert!(
+            job_rx.try_recv().is_err(),
+            "同一个会话且投影已在 → 不该再打一次"
+        );
     }
 }
 
