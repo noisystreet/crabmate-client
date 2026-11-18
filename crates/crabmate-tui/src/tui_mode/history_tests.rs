@@ -482,3 +482,210 @@ fn summary_line_reports_revision_and_older_pages() {
     assert!(line.contains("revision 9"), "got {line}");
     assert!(line.contains("/older"), "got {line}");
 }
+
+/// 启动默认续接的回归用例。
+///
+/// 背景：这条行为被关过一次（只留显式 `conversation_id`），而 `tui` 子命令并没有那个
+/// flag —— 于是启动恒为空白 transcript，左栏却列着历史。本组用例把「默认要加载」钉住，
+/// 同时钉住几条不该变的前提（显式指定优先、只做一次、屏幕上已有内容时不抢屏）。
+mod startup_replay {
+    use std::sync::mpsc;
+
+    use crate::serve::{ServeClient, SessionListRow};
+    use crate::tui_mode::test_support::{test_app, test_client, test_prefs};
+    use crate::tui_mode::worker::WorkerJob;
+
+    use super::super::replay_startup_conversation;
+
+    /// 左栏一行：`(行 id, 服务端 cid, 标题)`。
+    fn row(id: &str, conv: Option<&str>, title: &str) -> SessionListRow {
+        SessionListRow {
+            id: id.to_string(),
+            title: title.to_string(),
+            updated_at: 0,
+            pinned: false,
+            starred: false,
+            server_conversation_id: conv.map(str::to_string),
+            server_revision: None,
+            workspace_root: None,
+        }
+    }
+
+    /// 一条 lane 的初态：`active` 是 serve 报的 active 会话行 id。
+    fn lane<'a>(
+        client: &'a ServeClient,
+        prefs: &'a mut crate::SessionPrefs,
+        rows: Vec<SessionListRow>,
+        active: Option<&str>,
+    ) -> (crate::tui_mode::LaneApp<'a>, mpsc::Receiver<WorkerJob>) {
+        let (ui_tx, ui_rx) = mpsc::channel();
+        let (job_tx, job_rx) = mpsc::channel();
+        let mut app = test_app(client, prefs, ui_rx, ui_tx, job_tx);
+        app.st.active_session_id = active.map(str::to_string);
+        app.st.replace_sessions(rows);
+        (app, job_rx)
+    }
+
+    /// 排出去的必须是「回放某个 cid」（`ConversationHistory{ before_index: None }`）。
+    fn replay_target(job_rx: &mpsc::Receiver<WorkerJob>) -> Option<String> {
+        match job_rx.try_recv().ok()? {
+            WorkerJob::ConversationHistory {
+                conversation_id,
+                before_index: None,
+            } => Some(conversation_id),
+            _ => None,
+        }
+    }
+
+    /// 默认行为：启动就把 serve 正在用的那个会话载进来（不是空白屏）。
+    #[test]
+    fn startup_replays_the_active_conversation() {
+        let client = test_client();
+        let mut prefs = test_prefs();
+        let (mut app, job_rx) = lane(
+            &client,
+            &mut prefs,
+            vec![
+                row("s1", Some("c1"), "旧问题"),
+                row("s2", Some("c2"), "在用"),
+            ],
+            Some("s2"),
+        );
+
+        replay_startup_conversation(&mut app);
+
+        assert_eq!(
+            app.st.conversation_id.as_deref(),
+            Some("c2"),
+            "active 行要被绑定上"
+        );
+        assert_eq!(
+            replay_target(&job_rx).as_deref(),
+            Some("c2"),
+            "要真的去拉那个会话的历史"
+        );
+    }
+
+    /// 显式指定优先：CLI / lane 给了 cid 就不看 active 行。
+    #[test]
+    fn an_explicit_conversation_wins_over_the_active_row() {
+        let client = test_client();
+        let mut prefs = test_prefs();
+        let (mut app, job_rx) = lane(
+            &client,
+            &mut prefs,
+            vec![
+                row("s1", Some("c1"), "旧问题"),
+                row("s2", Some("c2"), "在用"),
+            ],
+            Some("s2"),
+        );
+        app.st.conversation_id = Some("c9".to_string());
+
+        replay_startup_conversation(&mut app);
+
+        assert_eq!(app.st.conversation_id.as_deref(), Some("c9"));
+        assert_eq!(replay_target(&job_rx).as_deref(), Some("c9"));
+    }
+
+    /// 只做一次：左栏 `r` 刷新会反复走这条路径，再回放一次就冲掉了当前对话。
+    #[test]
+    fn the_startup_replay_happens_only_once() {
+        let client = test_client();
+        let mut prefs = test_prefs();
+        let (mut app, job_rx) = lane(
+            &client,
+            &mut prefs,
+            vec![row("s2", Some("c2"), "在用")],
+            Some("s2"),
+        );
+
+        replay_startup_conversation(&mut app);
+        assert!(replay_target(&job_rx).is_some());
+        replay_startup_conversation(&mut app);
+        assert!(
+            replay_target(&job_rx).is_none(),
+            "第二次不该再排一个回放 job"
+        );
+    }
+
+    /// 屏幕上已经有内容（索引晚到 / 用户先聊起来了）：不抢屏。
+    #[test]
+    fn an_occupied_transcript_is_left_alone() {
+        let client = test_client();
+        let mut prefs = test_prefs();
+        let (mut app, job_rx) = lane(
+            &client,
+            &mut prefs,
+            vec![row("s2", Some("c2"), "在用")],
+            Some("s2"),
+        );
+        app.st
+            .push_line(crate::tui_mode::state::LineKind::User, "先聊起来的一句");
+
+        replay_startup_conversation(&mut app);
+
+        assert_eq!(app.st.conversation_id, None, "不该绑定");
+        assert!(replay_target(&job_rx).is_none());
+    }
+
+    /// serve 没报 active（或那一行还没绑服务端 id）：宁可空白，也不挑一个「差不多的」。
+    #[test]
+    fn no_active_row_means_no_replay() {
+        let client = test_client();
+
+        // serve 没报 active。
+        let mut no_active = test_prefs();
+        let (mut app, job_rx) = lane(
+            &client,
+            &mut no_active,
+            vec![row("s1", Some("c1"), "旧问题")],
+            None,
+        );
+        replay_startup_conversation(&mut app);
+        assert!(replay_target(&job_rx).is_none(), "没有 active 就不回放");
+        assert_eq!(app.st.conversation_id, None);
+        drop(app);
+
+        // active 指着一行还没有 cid 的（例如 `/conv new` 建的空行）：不拉，也**不许挪光标**
+        // —— 那里可能是 `apply_pending_select` 刚按 id 定位好的行。
+        let mut blank_active = test_prefs();
+        let (mut app, job_rx) = lane(
+            &client,
+            &mut blank_active,
+            vec![row("s1", Some("c1"), "旧问题"), row("s2", None, "新会话")],
+            Some("s2"),
+        );
+        let before = app.st.selected;
+        replay_startup_conversation(&mut app);
+        assert!(replay_target(&job_rx).is_none(), "没有 cid 就没什么可拉");
+        assert_eq!(app.st.conversation_id, None);
+        assert_eq!(app.st.selected, before, "拿不到 cid 时选中行必须还原");
+    }
+
+    /// 已经有回放在途（首屏极快 + 用户先 `/conv use` 过）：不再叠一次请求。
+    #[test]
+    fn an_in_flight_replay_is_not_started_again() {
+        let client = test_client();
+        let mut prefs = test_prefs();
+        let (mut app, job_rx) = lane(
+            &client,
+            &mut prefs,
+            vec![row("s2", Some("c2"), "在用")],
+            Some("s2"),
+        );
+        app.st.conversation_id = Some("c2".to_string());
+        app.st.history_pending = Some(crate::tui_mode::state::HistoryRequest {
+            conversation_id: "c2".to_string(),
+            prev_conversation_id: None,
+            title: "在用".to_string(),
+        });
+
+        replay_startup_conversation(&mut app);
+
+        assert!(
+            replay_target(&job_rx).is_none(),
+            "在途回放已经会给出内容，别再排一个"
+        );
+    }
+}

@@ -351,15 +351,22 @@ fn summary_line(pending: &HistoryRequest, resp: &ConversationMessagesResponse) -
     )
 }
 
-/// 启动后第一次拿到会话列表：**只在 CLI `--conversation-id` 显式指定时**续接。
+/// 启动后第一次拿到会话列表：**默认续接** serve 侧「正在用的那个会话」并回放它。
 ///
-/// 不再回放 serve 侧的 `active_session_id`。那是 Web UI 的会话桶（当前工作区里
-/// 正在用的那个会话），TUI 启动擅自接管会让「打开一个终端」变成「接着上次/别人的
-/// 对话」；与「一实例一工作区」叠加时更糟——用户看到的工具目录未必是自己这次选的。
-/// 新会话与新工作区都应该来自显式动作（`/conv use`、左栏 Enter、`/workspace`）。
+/// 这条口径订正过一次，两头的理由都留在这里：
+/// - 曾经是「一拿到列表就回放 `active_session_id`」，后来因为「打开终端 = 接着上次 /
+///   别人的对话」「继承不是本次选的工具目录」而整段关掉，只留显式 `conversation_id`；
+/// - 但 `tui` 子命令**没有** `--conversation-id`（只有 `chat` / `repl` / `connect` 有），
+///   于是「显式续接」这条后路在全屏界面里不存在 —— 启动恒为空白 transcript，而左栏明明
+///   列着历史。现在恢复默认加载。
 ///
+/// 代价明着付、写在屏幕上：载入哪个会话由 [`replay_into`] 的系统行点名（「正在载入会话
+/// 「<title>」的历史…」），要开新对话用 `/conv new`，要换会话用左栏 Enter / `/conv use`。
+/// 多端共用同一台 serve 时两处会落在同一个会话上 —— 这是「默认续接」的固有代价。
+///
+/// 优先级：显式 `conversation_id`（CLI / lane 指定）＞ serve 的 `active_session_id` 那一行。
 /// 只尝试一次：否则每次 `r` 刷新左栏都会重放并冲掉当前 transcript。
-pub(super) fn replay_explicit_conversation(app: &mut LaneApp<'_>) {
+pub(super) fn replay_startup_conversation(app: &mut LaneApp<'_>) {
     if app.index.history_auto_replayed {
         return;
     }
@@ -369,10 +376,36 @@ pub(super) fn replay_explicit_conversation(app: &mut LaneApp<'_>) {
     if !app.st.lines.is_empty() {
         return;
     }
-    // CLI `--conversation-id` 显式指定（启动时 transcript 必为空）→ 回放它。
+    // 已经有一次回放在途（首屏极快、用户先 `/conv use` 过）：再发一次只会多打一个请求、
+    // 多一条「正在载入」行，晚到的回包还得靠 `should_apply_reply` 挡掉。
+    if app.st.history_pending.is_some() {
+        return;
+    }
     if let Some(existing) = app.st.conversation_id.clone() {
         replay_into(app, existing, None);
+        return;
     }
+    // serve 报的 active 会话 = 左栏标记为「在用」的那一行；找不到就放弃，宁可空白也不挑
+    // 一个「差不多的」会话喂给用户。
+    let Some(pos) = app
+        .st
+        .sessions
+        .iter()
+        .position(|r| Some(r.id.as_str()) == app.st.active_session_id.as_deref())
+    else {
+        return;
+    };
+    // 借选中态复用 `selected_resume`（「这行能不能续」只有那一份判定），拿不到就**把光标
+    // 还原**：那一行可能是 `/conv new` 刚建、还没有 cid 的空行，把光标留在那里等于悄悄
+    // 改掉 `apply_pending_select` 刚定位好的行。
+    let previous_selected = app.st.selected;
+    app.st.selected = pos;
+    let Some(resume) = app.st.selected_resume() else {
+        app.st.selected = previous_selected;
+        return;
+    };
+    let title = app.st.sessions[pos].title.trim().to_string();
+    replay_into(app, resume, (!title.is_empty()).then_some(title.as_str()));
 }
 
 /// 响应 → (行类型, 文本, 工具成败)。抽成纯函数便于单测：`apply_page` 剩下的只是作用到 `UiState`。
