@@ -67,6 +67,42 @@ fn morph_b_chunk_is_standalone_final(chunk: &str, commentary_len: usize) -> bool
         && t.chars().filter(|c| *c == '。').count() <= 2
 }
 
+/// 契约 `crabmate` 0.9.1 删除了 `cm_turn_layout::try_split_combined_post_tool_answer`：
+/// 它在 0.9.0 里已无 Server 生产调用者（自带 `#[allow(dead_code)]`「保留供未来复用」），
+/// 唯一消费者是本 UI 的 post-tool 形态 B 分流，故规则原样下沉到这里。
+/// 按终答分隔符把「旁注 + 终答」合并块拆回两段；不像合并块则 `None`。
+fn try_split_combined_post_tool_answer(combined: &str) -> Option<(String, String)> {
+    const MARKERS: &[&str] = &[
+        "\n\n**",
+        "\n---\n",
+        "。总结：",
+        "。总结:",
+        "。Summary:",
+        "。summary:",
+    ];
+    let trimmed = combined.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let mut best: Option<(usize, &str)> = None;
+    for marker in MARKERS {
+        if let Some(pos) = trimmed.rfind(marker)
+            && pos > 0
+            && best.is_none_or(|(p, _)| pos > p)
+        {
+            best = Some((pos, marker));
+        }
+    }
+    let (pos, marker) = best?;
+    let head = trimmed[..pos].trim();
+    let tail = trimmed[pos..].trim();
+    let tail = tail.strip_prefix(marker).unwrap_or(tail).trim();
+    if head.len() < 8 || tail.len() < 4 {
+        return None;
+    }
+    Some((head.to_string(), tail.to_string()))
+}
+
 fn apply_post_tool_plain_delta(
     stream_ctx: &ChatStreamCallbackCtx,
     accum: &PerStreamAccum,
@@ -82,9 +118,7 @@ fn apply_post_tool_plain_delta(
             accum.add_answer_delta_chars(chunk.chars().count());
             return;
         }
-        if let Some((commentary_part, final_part)) =
-            crabmate::cm_turn_layout::try_split_combined_post_tool_answer(chunk)
-        {
+        if let Some((commentary_part, final_part)) = try_split_combined_post_tool_answer(chunk) {
             if !commentary_part.is_empty() {
                 let _ = stream_ctx
                     .scratch
@@ -210,6 +244,23 @@ pub(super) fn chat_stream_on_reasoning_delta_builder(
 #[cfg(test)]
 mod tests {
     use super::super::super::stream_turn_state::StreamModelOutputLane;
+
+    #[test]
+    fn combined_post_tool_answer_splits_on_summary_marker() {
+        let (head, tail) = super::try_split_combined_post_tool_answer(
+            "先读了文件，再改了一处。\n\n**结论**：构建通过。",
+        )
+        .expect("markers present");
+        assert_eq!(head, "先读了文件，再改了一处。");
+        assert_eq!(tail, "**结论**：构建通过。");
+    }
+
+    #[test]
+    fn combined_post_tool_answer_ignores_plain_text() {
+        assert!(
+            super::try_split_combined_post_tool_answer("就是一句话的终答，没有分隔符。").is_none()
+        );
+    }
 
     #[test]
     fn reasoning_lane_routes_to_reasoning_overlay_not_commentary() {

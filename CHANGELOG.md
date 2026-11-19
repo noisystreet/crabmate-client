@@ -11,7 +11,17 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ## [Unreleased]
 
+### Added
+
 ### Changed
+
+### Fixed
+
+## [0.9.1-alpha.0] - 2026-11-19
+
+### Changed
+
+- **Contract pin moves to crates.io `crabmate` `0.9.1`; the one UI helper it removed now lives here.** Server `0.9.1` (tag `v0.9.1`) drops the `PlanStepV1` acceptance/retry/transition fields and the `AcceptanceSpec` verification kernel from its `protocol` face, with **no SSE or HTTP wire change** (`SSE_PROTOCOL_VERSION` stays v2). The only break for this repo was `cm_turn_layout::try_split_combined_post_tool_answer` — already dead code Server-side in `0.9.0`, with this UI as its sole consumer — so its marker-split rule moved into the Web UI unchanged (two unit tests). Playwright E2E now checks out `v0.9.1`. Cost: none at runtime.
 
 - **TUI: starting `tui` now loads the conversation you were last using instead of a blank transcript.** The first session-list load used to adopt the Server's `active_session_id`; that was switched off (only an explicit `conversation_id` replayed), but `tui` has no `--conversation-id` flag — the only surfaces that do are `chat` / `repl` / `connect` — so the start-up path was dead: the left column listed history over an empty screen. It now replays the active row once, only while the transcript is still empty (an explicit id still wins, and a sidebar refresh never re-replays). Cost: opening a terminal puts you back in that conversation — the loading line names it, `/conv new` starts a fresh one — and two clients on one serve land on the same conversation. No protocol change.
 

@@ -743,9 +743,9 @@ dependencies = [
 
 [[package]]
 name = "crabmate"
-version = "0.9.0"
+version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5107fc5ab1b105246c77d9c759196b062a3b1bf245638a2c1b5210b7ee7c05c9"
+checksum = "b691d600729049345b4a340142962bc243466c6b6e960c4b95dc7f192392d3a9"
 dependencies = [
  "getrandom 0.4.3",
  "log",
@@ -757,7 +757,7 @@ dependencies = [
 
 [[package]]
 name = "crabmate-client-api"
-version = "0.9.0"
+version = "0.9.1-alpha.0"
 dependencies = [
  "crabmate",
  "serde",
@@ -766,7 +766,7 @@ dependencies = [
 
 [[package]]
 name = "crabmate-connect"
-version = "0.9.0"
+version = "0.9.1-alpha.0"
 dependencies = [
  "crabmate-client-api",
  "keyring",
@@ -779,7 +779,7 @@ dependencies = [
 
 [[package]]
 name = "crabmate-desktop"
-version = "0.9.0"
+version = "0.9.1-alpha.0"
 dependencies = [
  "base64 0.23.1",
  "crabmate-client-api",
