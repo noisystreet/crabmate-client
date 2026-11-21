@@ -17,43 +17,9 @@
 //! 账户名的拼接在共享层（[`crabmate_client_api::secrets::scoped_bearer_account`]），
 //! TUI 的钥匙串回退读的是同一份——两处各写一遍就是下一个「读得到但认证不上」。
 
-use crabmate_client_api::secrets::{
-    KEYRING_SERVICE, WEB_API_BEARER_KEYRING_ACCOUNT, scoped_bearer_account,
-};
+use crabmate_client_api::secrets::{WEB_API_BEARER_KEYRING_ACCOUNT, scoped_bearer_account};
 
-fn entry_for(account: &str) -> Result<keyring::Entry, String> {
-    keyring::Entry::new(KEYRING_SERVICE, account).map_err(|e| format!("系统钥匙串不可用: {e}"))
-}
-
-fn read_account(account: &str) -> Result<Option<String>, String> {
-    match entry_for(account)?.get_password() {
-        Ok(secret) => {
-            let trimmed = secret.trim();
-            if trimmed.is_empty() {
-                Ok(None)
-            } else {
-                Ok(Some(trimmed.to_string()))
-            }
-        }
-        Err(keyring::Error::NoEntry) => Ok(None),
-        Err(e) => Err(format!("读取系统钥匙串失败: {e}")),
-    }
-}
-
-fn write_account(account: &str, bearer: &str) -> Result<(), String> {
-    let entry = entry_for(account)?;
-    let trimmed = bearer.trim();
-    if trimmed.is_empty() {
-        match entry.delete_credential() {
-            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-            Err(e) => Err(format!("清除系统钥匙串失败: {e}")),
-        }
-    } else {
-        entry
-            .set_password(trimmed)
-            .map_err(|e| format!("写入系统钥匙串失败: {e}"))
-    }
-}
+use crate::secret_backend::{read_trimmed, write_trimmed};
 
 /// 读某个窗口的 Bearer；无条目或空串返回 `None`。
 ///
@@ -62,14 +28,14 @@ fn write_account(account: &str, bearer: &str) -> Result<(), String> {
 /// 分发给每一个窗口，那正是这次要修的串号。
 pub fn read_connect_bearer_for(label: &str) -> Result<Option<String>, String> {
     let scoped = scoped_bearer_account(label);
-    if let Some(found) = read_account(&scoped)? {
+    if let Some(found) = read_trimmed(&scoped)? {
         return Ok(Some(found));
     }
-    let Some(legacy) = read_account(WEB_API_BEARER_KEYRING_ACCOUNT)? else {
+    let Some(legacy) = read_trimmed(WEB_API_BEARER_KEYRING_ACCOUNT)? else {
         return Ok(None);
     };
-    write_account(&scoped, &legacy)?;
-    if let Err(e) = write_account(WEB_API_BEARER_KEYRING_ACCOUNT, "") {
+    write_trimmed(&scoped, &legacy)?;
+    if let Err(e) = write_trimmed(WEB_API_BEARER_KEYRING_ACCOUNT, "") {
         // 删不掉只是脏数据，不影响正确性：读路径优先新槽。
         eprintln!("[crabmate-connect] legacy bearer slot cleanup skipped: {e}");
     }
@@ -89,19 +55,25 @@ pub fn write_connect_bearer_on_connect(label: &str, bearer: &str) -> Result<bool
 
 /// 无条件写入该窗口的槽（测试 / 显式更新）。空串删除条目。
 pub fn write_connect_bearer_for(label: &str, bearer: &str) -> Result<(), String> {
-    write_account(&scoped_bearer_account(label), bearer)
+    write_trimmed(&scoped_bearer_account(label), bearer)
 }
 
 /// 只清除某个窗口的槽。
 ///
 /// 断开的窗口只该带走自己的凭据 —— 别的窗口还连着它们各自的 `serve`。
 pub fn clear_connect_bearer_for(label: &str) -> Result<(), String> {
-    write_account(&scoped_bearer_account(label), "")
+    write_trimmed(&scoped_bearer_account(label), "")
 }
 
 #[cfg(test)]
 mod tests {
     use crabmate_client_api::secrets::{WEB_API_BEARER_KEYRING_ACCOUNT, scoped_bearer_account};
+
+    use super::{
+        clear_connect_bearer_for, read_connect_bearer_for, write_connect_bearer_for,
+        write_connect_bearer_on_connect,
+    };
+    use crate::secret_backend::{read_trimmed, testing, write_trimmed};
 
     #[test]
     fn each_window_gets_its_own_account_name() {
@@ -124,5 +96,76 @@ mod tests {
             scoped_bearer_account(WEB_API_BEARER_KEYRING_ACCOUNT),
             WEB_API_BEARER_KEYRING_ACCOUNT
         );
+    }
+
+    #[test]
+    fn bearer_round_trips_through_the_scoped_slot() {
+        let _backend = testing::install();
+        write_connect_bearer_for("main", "  bearer-abc\n").unwrap();
+
+        assert_eq!(
+            read_connect_bearer_for("main").unwrap().as_deref(),
+            Some("bearer-abc")
+        );
+    }
+
+    #[test]
+    fn one_window_bearer_does_not_leak_into_another() {
+        // #391 的回归：后连窗口覆盖先连窗口时运行时看不出来（凭据已在各窗口内存里），
+        // 症状要到下一次刷新 / 重开窗口才以 401 出现。
+        let _backend = testing::install();
+        write_connect_bearer_for("main", "bearer-main").unwrap();
+        write_connect_bearer_for("prod", "bearer-prod").unwrap();
+
+        assert_eq!(
+            read_connect_bearer_for("main").unwrap().as_deref(),
+            Some("bearer-main")
+        );
+        assert_eq!(
+            read_connect_bearer_for("prod").unwrap().as_deref(),
+            Some("bearer-prod")
+        );
+    }
+
+    #[test]
+    fn clearing_one_window_leaves_the_others_connected() {
+        let _backend = testing::install();
+        write_connect_bearer_for("main", "bearer-main").unwrap();
+        write_connect_bearer_for("prod", "bearer-prod").unwrap();
+
+        clear_connect_bearer_for("prod").unwrap();
+
+        assert_eq!(read_connect_bearer_for("prod").unwrap(), None);
+        assert_eq!(
+            read_connect_bearer_for("main").unwrap().as_deref(),
+            Some("bearer-main")
+        );
+    }
+
+    #[test]
+    fn legacy_slot_migrates_into_the_scoped_slot_and_is_cleared() {
+        // 升级路径：旧版只写无后缀槽。读到它要搬进本窗口的槽并删掉旧槽 —— 否则
+        // 要么每个窗口都「丢了」凭据、得重连，要么把同一份凭据分发给所有窗口。
+        let _backend = testing::install();
+        write_trimmed(WEB_API_BEARER_KEYRING_ACCOUNT, "legacy-bearer").unwrap();
+
+        let migrated = read_connect_bearer_for("main").unwrap();
+        assert_eq!(migrated.as_deref(), Some("legacy-bearer"));
+
+        assert_eq!(read_trimmed(WEB_API_BEARER_KEYRING_ACCOUNT).unwrap(), None);
+        assert_eq!(
+            read_trimmed(&scoped_bearer_account("main"))
+                .unwrap()
+                .as_deref(),
+            Some("legacy-bearer")
+        );
+    }
+
+    #[test]
+    fn connecting_without_a_bearer_writes_nothing() {
+        let _backend = testing::install();
+
+        assert!(!write_connect_bearer_on_connect("main", "   ").unwrap());
+        assert_eq!(read_connect_bearer_for("main").unwrap(), None);
     }
 }

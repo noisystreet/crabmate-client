@@ -22,6 +22,7 @@ mod navigation;
 mod probe;
 #[cfg_attr(not(feature = "tauri"), allow(dead_code))]
 mod recent_urls;
+mod secret_backend;
 
 #[cfg(feature = "tauri")]
 mod commands;

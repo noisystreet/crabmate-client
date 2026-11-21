@@ -386,10 +386,12 @@ elif [ "$TEST" = "all" ]; then
     # 已删除（不是迁移）：ide_layout 的 `layout-mode-toggle` / `ide-layout-root` 随 UI
     # 重构消失、turn_layout 的多工具用例需按 AG-UI（V2）重写 —— 两者原处即为红，
     # 留着只是噪音（见 #152）。
-    # 剩下的：壳冒烟（e2e）与壳专属钥匙串（settings2）。conversation / pagination 的
-    # 分页用例已由 `e2e/specs/mock-conversation-pagination.spec.ts` 用 `page.route`
-    # 覆盖，不再需要 `CM_E2E_FIXTURES=1` 的播种路由（#548）。
-    for name in victauri_e2e victauri_settings2; do
+    # 剩下的只有壳冒烟（e2e）。曾经的阻塞项都已落地：conversation / pagination 的
+    # 分页用例由 `e2e/specs/mock-conversation-pagination.spec.ts` 用 `page.route` 覆盖
+    # （不再需要 `CM_E2E_FIXTURES=1`）；settings2 的钥匙串断言由 `crates/crabmate-connect`
+    # 的 keyring 单测（内存后端）覆盖，其页面行为迁到
+    # `e2e/specs/mock-settings-model-registry.spec.ts`（#548）。
+    for name in victauri_e2e; do
         BIN=$(find_test_bin "$name")
         if [ -z "$BIN" ]; then
             # 原先静默跳过：全部 suite 缺席也会走到 ALL PASSED（假绿）

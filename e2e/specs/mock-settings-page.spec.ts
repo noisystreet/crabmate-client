@@ -4,10 +4,12 @@
  * 由 `desktop-tauri/src-tauri/tests/victauri_settings.rs`（3 个）与
  * `victauri_settings2.rs` 的 `import_mcp_json_adds_server_rows`（1 个）迁入（#152 Wave 2）。
  *
- * 注：`victauri_settings2` 另外两个用例（`model_and_api_key_save` /
- * `web_api_bearer_not_in_local_storage`）**不迁** —— 它们用
- * `window.__TAURI__.core.invoke('get_llm_secret')` / `invoke('get_connect_bearer')`
- * 直读设备钥匙串，属 Tauri 独占的 ②层能力，浏览器无等价物，仍留在 Victauri。
+ * 注：`victauri_settings2` 另外两个用例已拆解（#548 Wave 5），都不在本文件：
+ * `model_and_api_key_save` 的**页面行为**（新增预设 → 列表出现 → 服务端不含明文密钥）
+ * 迁到 `mock-settings-model-registry.spec.ts`，而它的「密钥进设备钥匙串」那半由
+ * `crates/crabmate-connect` 的 keyring 单测覆盖（浏览器没有钥匙串）；
+ * `web_api_bearer_not_in_local_storage` 按设计**降级**不改写 —— 浏览器路径本就允许
+ * 弱存储并弹显式警告，键名单一来源由 `scripts/check-storage-scope.sh` 守住。
  */
 
 import { test, expect } from "@playwright/test";

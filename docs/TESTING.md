@@ -139,10 +139,12 @@ make frontend
 ## Victauri（Desktop 壳 E2E）
 
 ```bash
-./scripts/victauri-e2e.sh all
-./scripts/victauri-e2e.sh victauri_scroll_send
+./scripts/victauri-e2e.sh all          # #548 后只剩壳冒烟（victauri_e2e）
+./scripts/victauri-e2e.sh victauri_e2e
 REAL_LLM_E2E=1 ./scripts/victauri-e2e.sh real_llm
 ```
+
+页面行为（分页 / 设置页 / 模型注册等）已陆续迁入 Playwright（`e2e/specs`，随 PR 门禁跑，见 `e2e/README.md` 的分工表）；钥匙串往返由 `crates/crabmate-connect` 的单测覆盖。这里留下的只有「真实 WebView 能否起来」这一层。
 
 `serve` 二进制解析顺序：`CM_DESKTOP_BACKEND_BIN` → `PATH` 中的 `crabmate` → 同级 `../crabmate_agent/target/debug/crabmate`（仅本地双轨）。正式验收应钉已发布/`PATH` 中的 `serve`。壳加载**包内** UI（Phase 2），脚本启动 `serve` 时**不传** `--with-web`（纯 API 即可）。
 
