@@ -174,8 +174,8 @@ fn parse_and_dispatch_sse_frame(
             *saw_stream_ended = true;
             (cbs.on_stream_ended)(StreamEndReason::Completed.to_string(), tiktoken);
         };
-    // 双序兼容：新序在落盘前发 stream_draining；旧序仅有 RUN_FINISHED 后尾部 saved。
-    // draining 只推进 UI（Draining），不置 saw_stream_ended，也不清 abort/resume。
+    // `stream_draining` 是终态前的收尾文案：只推进 UI（Draining），不置 `saw_stream_ended`，
+    // 也不清 abort/resume。
     let mut on_stream_draining = || {
         (cbs.on_stream_draining)();
     };
@@ -231,8 +231,8 @@ fn parse_and_dispatch_sse_frame(
             Ok(SseFrameKind::TextDelta)
         }
         crate::sse_dispatch::SseDispatch::StreamEnded => {
-            // RUN_FINISHED / RUN_ERROR 进入 Draining；旧序下 body 尾部仍可能有 conversation_saved。
-            // 新序下 saved 已在终态前到达。`on_done` 由 body 消费完成后的 send_helpers 统一调用。
+            // RUN_FINISHED / RUN_ERROR 进入 Draining；`conversation_saved` 必在终态前到达。
+            // `on_done` 由 body 消费完成后的 send_helpers 统一调用。
             Ok(SseFrameKind::StreamEnded)
         }
     }
@@ -255,6 +255,13 @@ pub(super) fn handle_sse_block(
     };
     // 勿对 `data` 全文 `trim`：模型/代理可能把词间空格单独打成一段 SSE，trim 会导致单词粘在一起。
     if data.is_empty() || is_sse_done_sentinel(&data) {
+        return Ok(SseFrameKind::Ignored);
+    }
+    // E4：终态是最后一条**回合业务事件**。终态之后到达的业务帧（`conversation_saved` / 工具帧 /
+    // 正文 delta …）一律丢弃——它们既不该在终态后出现（server 侧 S1 起不再下发），丢弃也不会丢
+    // 内容：`conversation_saved.revision` 与 tiktoken 都已在终态前到达。事件 id 仍在上面记录，
+    // 因此丢弃不会让 `stream_resume` 的 `after_seq` 出现空洞。
+    if *saw_stream_ended {
         return Ok(SseFrameKind::Ignored);
     }
     if let Some(kind) = check_stream_ended(&data, saw_stream_ended, cbs) {
@@ -362,8 +369,9 @@ mod tests {
         assert_eq!(ended.borrow().as_deref(), Some("completed"));
     }
 
+    /// 终态后的回合业务帧不再分发（E4/S1）：body 仍消费到 EOF，但帧被丢弃。
     #[test]
-    fn conversation_saved_after_run_finished_arrives_before_done() {
+    fn frames_after_terminal_are_dropped() {
         let done_count = Rc::new(Cell::new(0u32));
         let revision = Rc::new(Cell::new(0u64));
         let done_count_for_cb = Rc::clone(&done_count);
@@ -388,9 +396,13 @@ mod tests {
             &cbs,
             Locale::ZhHans,
         )
-        .expect("tail control frames should be consumed");
+        .expect("tail frames must stay consumed");
         assert!(saw_stream_ended);
-        assert_eq!(revision.get(), 7);
+        assert_eq!(revision.get(), 0, "终态后的 saved 必须被丢弃");
+        assert_eq!(
+            last_event_id, 14,
+            "事件 id 仍要记录，否则 resume 会重复拉帧"
+        );
         assert_eq!(done_count.get(), 0, "done belongs to body completion");
     }
 
@@ -432,9 +444,38 @@ mod tests {
         assert_eq!(ended_tokens.get(), Some(1111));
     }
 
-    /// Phase E1 新序：draining → saved → RUN_FINISHED；draining 不经 `on_stream_ended`、不置 saw。
+    /// 终态后的正文 delta 也不得再进气泡（未识别 type 会走 `Plain` 回落，以前会粘到正文尾部）。
     #[test]
-    fn saved_before_run_finished_dual_order_and_draining() {
+    fn text_delta_after_terminal_is_dropped() {
+        let text = Rc::new(RefCell::new(String::new()));
+        let text_for_cb = Rc::clone(&text);
+        let cbs = ChatStreamCallbacks {
+            on_delta: Rc::new(move |s| text_for_cb.borrow_mut().push_str(&s)),
+            ..callbacks_with_end_capture(Rc::new(RefCell::new(None)))
+        };
+        let mut buffer = concat!(
+            "id: 30\ndata: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"delta\":\"前\"}\n\n",
+            "id: 31\ndata: {\"type\":\"RUN_FINISHED\",\"threadId\":\"\",\"runId\":\"1\"}\n\n",
+            "id: 32\ndata: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"delta\":\"后\"}\n\n"
+        )
+        .to_string();
+        let mut last_event_id = 0u64;
+        let mut saw_stream_ended = false;
+        process_sse_buffer(
+            &mut buffer,
+            &mut last_event_id,
+            &mut saw_stream_ended,
+            &cbs,
+            Locale::ZhHans,
+        )
+        .expect("frames around the terminal must stay consumed");
+        assert_eq!(text.borrow().as_str(), "前", "终态后的 delta 必须被丢弃");
+        assert_eq!(last_event_id, 32);
+    }
+
+    /// 终态顺序：draining → saved → RUN_FINISHED；draining 不经 `on_stream_ended`、不置 saw。
+    #[test]
+    fn draining_saved_then_run_finished() {
         let ended = Rc::new(RefCell::new(Vec::<String>::new()));
         let ended_for_cb = Rc::clone(&ended);
         let draining_hits = Rc::new(Cell::new(0u32));
@@ -468,7 +509,7 @@ mod tests {
             &cbs,
             Locale::ZhHans,
         )
-        .expect("new terminal order frames should be consumed");
+        .expect("terminal order frames should be consumed");
         assert_eq!(revision.get(), 7);
         assert_eq!(
             draining_hits.get(),

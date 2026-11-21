@@ -21,7 +21,7 @@ fn context_inject_kind_and_json_body_detected() {
 }
 
 #[test]
-fn legacy_local_snapshot_dropped_when_server_has_same_assistant_text() {
+fn legacy_local_snapshot_dropped_for_export() {
     let snap = StoredMessage {
         id: "legacy-fr".into(),
         role: "assistant".into(),
@@ -34,7 +34,7 @@ fn legacy_local_snapshot_dropped_when_server_has_same_assistant_text() {
         tool_name: None,
         created_at: 0,
     };
-    let server = vec![StoredMessage {
+    let server = [StoredMessage {
         id: "srv".into(),
         role: "assistant".into(),
         text: "same answer".into(),
@@ -46,7 +46,6 @@ fn legacy_local_snapshot_dropped_when_server_has_same_assistant_text() {
         tool_name: None,
         created_at: 1,
     }];
-    assert!(!should_preserve_local_timeline_on_hydrate(&snap, &server));
     assert!(is_ephemeral_timeline_assistant_for_export(
         &snap,
         &[snap.clone(), server[0].clone()]
@@ -94,100 +93,6 @@ fn context_trim_parsed_from_hydrate_stream_and_detail_forms() {
 }
 
 #[test]
-fn local_trim_snapshot_dropped_when_server_has_equivalent_trim() {
-    let local = StoredMessage {
-        id: "local-trim".into(),
-        role: "assistant".into(),
-        text: "已裁剪历史\n{\"count_hit\":true,\"n_before\":40,\"n_after\":12}".into(),
-        reasoning_text: String::new(),
-        image_urls: vec![],
-        state: Some(timeline_state_local_snapshot()),
-        is_tool: false,
-        tool_call_id: None,
-        tool_name: None,
-        created_at: 0,
-    };
-    // 服务端落盘 detail 计数可能继续累加，`n_before` / 标题仍稳定。
-    let server = vec![StoredMessage {
-        id: "srv-trim".into(),
-        role: "system".into(),
-        text: r#"{"kind":"context_trim","title":"已裁剪历史","detail":"{\"count_hit\":true,\"n_before\":40,\"n_after\":8}"}"#
-            .into(),
-        reasoning_text: String::new(),
-        image_urls: vec![],
-        state: None,
-        is_tool: false,
-        tool_call_id: None,
-        tool_name: None,
-        created_at: 1,
-    }];
-    assert!(is_context_trim_timeline_message(&local));
-    assert!(!should_preserve_local_timeline_on_hydrate(&local, &server));
-}
-
-fn stored_trim_row(id: &str, role: &str, text: &str, local_snapshot: bool) -> StoredMessage {
-    StoredMessage {
-        id: id.into(),
-        role: role.into(),
-        text: text.into(),
-        reasoning_text: String::new(),
-        image_urls: vec![],
-        state: local_snapshot.then(timeline_state_local_snapshot),
-        is_tool: false,
-        tool_call_id: None,
-        tool_name: None,
-        created_at: 0,
-    }
-}
-
-#[test]
-fn trim_dedupe_requires_a_comparable_stable_key() {
-    let local = stored_trim_row(
-        "local",
-        "assistant",
-        "已裁剪历史\n{\"after_tokens\":3456}",
-        true,
-    );
-    // 同标题、after_tokens 相同、两侧都无 n_before → 同一事件（e2e fixture 形态）。
-    // 普通转义字符串：含 `\"` 的 raw string 会让 lizard 的 token 配对失准，误报超长函数。
-    let same = vec![stored_trim_row(
-        "srv-same",
-        "system",
-        "{\"kind\":\"context_trim\",\"title\":\"已裁剪历史\",\"detail\":\"{\\\"after_tokens\\\":3456}\"}",
-        false,
-    )];
-    assert!(!should_preserve_local_timeline_on_hydrate(&local, &same));
-
-    // 同标题、无共同键（本地只有 n_before，服务端只有 after_tokens）→ 保守保留。
-    let local_n = stored_trim_row(
-        "local-n",
-        "assistant",
-        "已裁剪历史\n{\"n_before\":40}",
-        true,
-    );
-    assert!(should_preserve_local_timeline_on_hydrate(&local_n, &same));
-}
-
-#[test]
-fn trim_dedupe_same_title_without_n_before_is_not_equivalent() {
-    // e2e fixture 形态：detail 只有 `after_tokens`，两侧都推不出 `n_before`。
-    let local = stored_trim_row(
-        "local",
-        "assistant",
-        "已裁剪历史\n{\"after_tokens\":3456}",
-        true,
-    );
-    let server = vec![stored_trim_row(
-        "srv",
-        "system",
-        "{\"kind\":\"context_trim\",\"title\":\"已裁剪历史\",\"detail\":\"{\\\"after_tokens\\\":9000}\"}",
-        false,
-    )];
-    // 同标题但 after_tokens 不同 → 不是同一事件，宁可保留本地快照。
-    assert!(should_preserve_local_timeline_on_hydrate(&local, &server));
-}
-
-#[test]
 fn parses_final_response_snapshot_without_msg_field() {
     let state =
         StoredMessageState::from_wire(r#"{"k":"cm_tl","t":"final_response_snapshot"}"#.into());
@@ -224,7 +129,6 @@ fn final_response_snapshot_dropped_when_server_has_same_text() {
         created_at: 1,
     }];
     assert!(is_ephemeral_timeline_assistant_for_export(&snap, &server));
-    assert!(!should_preserve_local_timeline_on_hydrate(&snap, &server));
 }
 
 #[test]
@@ -456,7 +360,7 @@ fn local_skill_inject_snapshot_dropped_when_server_has_equivalent() {
         tool_name: None,
         created_at: 0,
     };
-    let server = vec![StoredMessage {
+    let server = [StoredMessage {
         id: "srv-skill".into(),
         role: "system".into(),
         text: r#"{"kind":"context_inject","title":"本轮注入","detail":"{\"skills\":[\"rust-style\"],\"forced\":false}"}"#.into(),
@@ -470,7 +374,4 @@ fn local_skill_inject_snapshot_dropped_when_server_has_equivalent() {
     }];
     assert!(is_skill_inject_timeline_message(&snap));
     assert!(is_skill_inject_timeline_message(&server[0]));
-    assert!(!should_preserve_local_timeline_on_hydrate(&snap, &server));
-    // 服务端没有等价 skill 注入时保留本地快照。
-    assert!(should_preserve_local_timeline_on_hydrate(&snap, &[]));
 }

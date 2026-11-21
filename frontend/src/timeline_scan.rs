@@ -260,52 +260,6 @@ pub fn is_skill_inject_timeline_message(m: &StoredMessage) -> bool {
     !m.is_tool && skill_inject_from_timeline_text(&m.text).is_some()
 }
 
-/// 服务端已持久化等价 skill 注入（水合后丢弃流式本地快照，避免双卡）。
-fn server_has_equivalent_skill_inject(server_msgs: &[StoredMessage], local_text: &str) -> bool {
-    let Some(local) = skill_inject_from_timeline_text(local_text) else {
-        return false;
-    };
-    server_msgs
-        .iter()
-        .filter(|s| !s.is_tool)
-        .filter(|s| {
-            !s.state
-                .as_ref()
-                .is_some_and(|st| st.is_local_timeline_snapshot_row())
-        })
-        .filter_map(|s| skill_inject_from_timeline_text(&s.text))
-        .any(|info| info.skills == local.skills && info.forced == local.forced)
-}
-
-/// 两条 trim 事件是否指向同一轮：`title` 相同，且至少有一个可比的稳定键相等。
-///
-/// `SSE` 首次事件与落盘最终事件的计数会继续累加，因此 `n_before` 或 `after_tokens`
-/// 任一对齐即视为同一事件；两侧没有共同键时保守地视为不同，避免误删另一轮卡片。
-fn context_trim_rows_match(local: &ContextTrimInfo, server: &ContextTrimInfo) -> bool {
-    if server.title != local.title {
-        return false;
-    }
-    let same = |a: Option<u32>, b: Option<u32>| matches!((a, b), (Some(x), Some(y)) if x == y);
-    same(local.n_before, server.n_before) || same(local.after_tokens, server.after_tokens)
-}
-
-/// 服务端已持久化等价压缩 / 裁剪旁注（水合后丢弃流式本地快照，避免双卡）。
-fn server_has_equivalent_context_trim(server_msgs: &[StoredMessage], local_text: &str) -> bool {
-    let Some(local) = context_trim_from_timeline_text(local_text) else {
-        return false;
-    };
-    server_msgs
-        .iter()
-        .filter(|s| !s.is_tool)
-        .filter(|s| {
-            !s.state
-                .as_ref()
-                .is_some_and(|st| st.is_local_timeline_snapshot_row())
-        })
-        .filter_map(|s| context_trim_from_timeline_text(&s.text))
-        .any(|info| context_trim_rows_match(&local, &info))
-}
-
 /// 已落盘的编排路由旁注：导出与聊天列均跳过。
 pub fn is_orchestration_route_timeline_message(m: &StoredMessage) -> bool {
     !m.is_tool && is_orchestration_route_timeline_text(&m.text)
@@ -482,16 +436,6 @@ pub fn timeline_ui_snapshot_type(state: &StoredMessageState) -> Option<String> {
         .and_then(parse_timeline_ui_snapshot_type)
 }
 
-fn server_assistant_has_trimmed_text(server_msgs: &[StoredMessage], text: &str) -> bool {
-    let needle = text.trim();
-    if needle.is_empty() {
-        return false;
-    }
-    server_msgs
-        .iter()
-        .any(|m| m.role == "assistant" && !m.is_tool && m.text.trim() == needle)
-}
-
 /// 本地 timeline 旁注是否与同会话内「正式」助手行正文重复（兼容旧 `local_snapshot`）。
 pub fn is_timeline_snapshot_duplicate_of_canonical_assistant(
     m: &StoredMessage,
@@ -520,37 +464,6 @@ pub fn is_timeline_snapshot_duplicate_of_canonical_assistant(
                 .is_some_and(|s| s.is_local_timeline_snapshot_row())
             && other.text.trim() == needle
     })
-}
-
-/// 水合合并时：`final_response` 补偿旁注若与服务端助手正文重复则丢弃。
-pub fn should_preserve_local_timeline_on_hydrate(
-    m: &StoredMessage,
-    server_msgs: &[StoredMessage],
-) -> bool {
-    let Some(state) = m.state.as_ref() else {
-        return false;
-    };
-    if !state.is_local_timeline_snapshot_row() {
-        return false;
-    }
-    match timeline_ui_snapshot_type(state).as_deref() {
-        Some("final_response_snapshot") => !server_assistant_has_trimmed_text(server_msgs, &m.text),
-        Some("local_snapshot") | None => {
-            if is_skill_inject_timeline_message(m)
-                && server_has_equivalent_skill_inject(server_msgs, &m.text)
-            {
-                return false;
-            }
-            if is_context_trim_timeline_message(m)
-                && server_has_equivalent_context_trim(server_msgs, &m.text)
-            {
-                return false;
-            }
-            !server_assistant_has_trimmed_text(server_msgs, &m.text)
-                && !is_timeline_snapshot_duplicate_of_canonical_assistant(m, server_msgs)
-        }
-        _ => true,
-    }
 }
 
 /// 主列（TUI）应跳过的助手旁注：编排路由、工具前旁注状态、终答 snapshot、规划拒绝旁注、

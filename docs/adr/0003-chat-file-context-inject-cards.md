@@ -140,7 +140,7 @@ Client：按列表画卡；无列表则不画。水合测试从「skip 该 name�
 ## 关联
 
 - 编程 Agent 审查面：[`docs/design/coding_agent_client.md`](../design/coding_agent_client.md)（不替代本 ADR；还原/changelog JSON 仍归 Server）
-- 展示隐藏规则：Server `cm_display_rules`；本仓 [`session_merge.rs`](../../frontend/src/app/chat/session_merge.rs)、[`message_ex/parts.rs`](../../frontend/src/message_format/display/message_ex/parts.rs)
+- 展示隐藏规则：Server `cm_display_rules`；本仓 [`session_hydrate.rs`](../../frontend/src/app/chat/session_hydrate.rs)、[`message_ex/parts.rs`](../../frontend/src/message_format/display/message_ex/parts.rs)
 - 水合 skip：[`conversation_hydrate.rs`](../../frontend/src/conversation_hydrate.rs)
 - 首轮合并（Server 0.4.0）：`cm_internal::context_bootstrap::first_turn_inject` / `living_docs`
 - 线协议：Server [`SSE协议.md`](https://github.com/noisystreet/CrabMate/blob/main/docs/SSE协议.md)；本仓只链接

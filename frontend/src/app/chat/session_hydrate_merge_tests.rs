@@ -1,4 +1,4 @@
-use super::hydration_content_guard_outcome;
+use super::{drop_superseded_tool_call_stubs, hydration_content_guard_outcome};
 use crate::app::chat::session_hydrate::{
     SessionHydrationMergeOutcome, apply_hydrated_tail_if_newer, hydration_response_meta_is_fresh,
     hydration_revision_after_response, merge_tail_page_into_session_messages,
@@ -39,7 +39,6 @@ fn revision_response(revision: u64) -> ConversationMessagesResponse {
         active_agent_role: None,
         active_session_mode: None,
         tiktoken_prompt_tokens: None,
-        layout: None,
         context_artifacts: vec![],
     }
 }
@@ -59,21 +58,22 @@ fn plain_message(id: &str, role: &str, text: &str) -> StoredMessage {
     }
 }
 
+/// 同 revision 也合并（v2 追加是 no-op、legacy 快照替换幂等）；本地更新时才跳过。
 #[test]
-fn same_revision_keeps_nonempty_local_projection() {
+fn same_revision_still_reapplies_server_snapshot() {
     let local = plain_message("turn-commentary-tc_read", "assistant", "已关闭的本地旁注");
     let session = revision_session(vec![local], Some(7));
-    assert!(!should_merge_hydrated_messages(
+    assert!(should_merge_hydrated_messages(
         &session,
         &revision_response(7)
-    ));
-    assert!(!should_merge_hydrated_messages(
-        &session,
-        &revision_response(6)
     ));
     assert!(should_merge_hydrated_messages(
         &session,
         &revision_response(8)
+    ));
+    assert!(!should_merge_hydrated_messages(
+        &session,
+        &revision_response(6)
     ));
     assert!(should_merge_hydrated_messages(
         &revision_session(vec![], Some(7)),
@@ -157,7 +157,7 @@ fn newer_hydration_appends_server_only_turn_after_v2_projection() {
 }
 
 #[test]
-fn empty_v2_cache_uses_legacy_adapter_for_canonical_hydration() {
+fn empty_v2_cache_replaces_with_server_snapshot() {
     let mut session = revision_session(vec![], Some(7));
     session.layout_schema_version = CURRENT_LAYOUT_SCHEMA_VERSION;
     let hydrated = vec![plain_message("h-assistant", "assistant", "服务端终答")];
@@ -170,7 +170,7 @@ fn empty_v2_cache_uses_legacy_adapter_for_canonical_hydration() {
 }
 
 #[test]
-fn v1_history_still_uses_legacy_adapter() {
+fn v1_history_is_replaced_by_server_snapshot() {
     let mut session = revision_session(
         vec![plain_message("local-assistant", "assistant", "本地旧投影")],
         Some(1),
@@ -185,7 +185,7 @@ fn v1_history_still_uses_legacy_adapter() {
 }
 
 #[test]
-fn merge_tail_page_replays_server_answer_over_local_draft() {
+fn merge_tail_page_replaces_local_draft_with_server_snapshot() {
     let session = ChatSession {
         id: "sid".into(),
         layout_schema_version: LEGACY_LAYOUT_SCHEMA_VERSION,
@@ -225,7 +225,6 @@ fn merge_tail_page_replays_server_answer_over_local_draft() {
         active_agent_role: None,
         active_session_mode: None,
         tiktoken_prompt_tokens: None,
-        layout: None,
         context_artifacts: vec![],
     };
     let merged = merge_tail_page_into_session_messages(&session, hydrated, &resp);
@@ -234,7 +233,7 @@ fn merge_tail_page_replays_server_answer_over_local_draft() {
 }
 
 #[test]
-fn merge_tail_page_keeps_user_when_server_omits_user() {
+fn merge_tail_page_does_not_resurrect_user_the_server_omits() {
     let session = ChatSession {
         id: "sid".into(),
         layout_schema_version: LEGACY_LAYOUT_SCHEMA_VERSION,
@@ -271,20 +270,24 @@ fn merge_tail_page_keeps_user_when_server_omits_user() {
         active_agent_role: None,
         active_session_mode: None,
         tiktoken_prompt_tokens: None,
-        layout: None,
         context_artifacts: vec![],
     };
-    let merged = merge_tail_page_into_session_messages(&session, hydrated, &resp);
+    let merged = merge_tail_page_into_session_messages(&session, hydrated.clone(), &resp);
     let roles: Vec<_> = merged.iter().map(|m| m.role.as_str()).collect();
-    assert_eq!(roles, vec!["user", "assistant"]);
-    assert_eq!(merged[0].text, "你好");
-    assert_eq!(merged[1].id, "a-srv");
+    assert_eq!(
+        roles,
+        vec!["assistant"],
+        "服务端快照权威：本地 user 不再被补回"
+    );
+    // 真缺回合（尾页 user 变少）由水合前的内容守卫整页跳过，不靠合并层补行。
+    assert_eq!(
+        hydration_content_guard_outcome(&session, &hydrated, &resp),
+        Some(SessionHydrationMergeOutcome::SkippedHydratedUserRegression)
+    );
 }
 
 #[test]
-fn empty_cache_with_v2_layout_keeps_legacy_ids_and_schema() {
-    use crate::conversation_hydrate_layout::{ConversationLayoutMeta, ConversationLayoutSegment};
-
+fn empty_cache_keeps_legacy_ids_and_schema() {
     let mut session = revision_session(vec![], Some(0));
     let hydrated = vec![
         plain_message("u", "user", "go"),
@@ -295,18 +298,7 @@ fn empty_cache_with_v2_layout_keeps_legacy_ids_and_schema() {
             ..plain_message("h_t", "tool", "read")
         },
     ];
-    let mut resp = revision_response(4);
-    resp.layout = Some(ConversationLayoutMeta {
-        layout_schema_version: CURRENT_LAYOUT_SCHEMA_VERSION,
-        projection_hash: Some("ab".into()),
-        segments: vec![ConversationLayoutSegment {
-            turn_id: Some("u0".into()),
-            segment_id: "seg-before-tc1".into(),
-            segment_kind: "assistant_commentary".into(),
-            before_tool_call_id: Some("tc1".into()),
-            sequence: 0,
-        }],
-    });
+    let resp = revision_response(4);
     apply_hydrated_tail_if_newer(&mut session, hydrated, &resp);
     assert_eq!(session.layout_schema_version, LEGACY_LAYOUT_SCHEMA_VERSION);
     assert_eq!(session.messages[1].id, "h_a");
@@ -407,5 +399,96 @@ fn no_window_meta_falls_back_to_full_local_user_compare() {
     assert_eq!(
         hydration_content_guard_outcome(&session, &hydrated, &precheck_response(40, 100)),
         Some(SessionHydrationMergeOutcome::SkippedHydratedUserRegression)
+    );
+}
+
+/// 水合快照里「调用短卡 + 结果卡」并存时，短卡必须并入结果卡（冷启动只显示一张工具卡）。
+#[test]
+fn hydrate_stub_is_dropped_when_result_card_shares_the_tool_call_id() {
+    let rows = vec![
+        plain_message("u", "user", "现在时间是什么"),
+        StoredMessage {
+            is_tool: true,
+            tool_call_id: Some("tc_time".into()),
+            tool_name: Some("get_current_time".into()),
+            ..plain_message("stub", "assistant", "工具：get_current_time")
+        },
+        StoredMessage {
+            text: "get_current_time".into(),
+            reasoning_text: "当前时间：21:25:05".into(),
+            tool_call_id: Some("tc_time".into()),
+            tool_name: Some("get_current_time".into()),
+            ..{
+                let mut m = plain_message("result", "system", "");
+                m.is_tool = true;
+                m
+            }
+        },
+        plain_message("a", "assistant", "当前时间是 21:25:05。"),
+    ];
+    let ids: Vec<String> = drop_superseded_tool_call_stubs(rows)
+        .into_iter()
+        .map(|m| m.id)
+        .collect();
+    assert_eq!(ids, ["u", "result", "a"]);
+}
+
+#[test]
+fn hydrate_stub_survives_when_no_result_card_matches() {
+    let rows = vec![
+        StoredMessage {
+            is_tool: true,
+            tool_call_id: Some("tc_a".into()),
+            tool_name: Some("read_file".into()),
+            ..plain_message("stub-a", "assistant", "工具：read_file")
+        },
+        StoredMessage {
+            text: "read_file".into(),
+            reasoning_text: "body".into(),
+            tool_call_id: Some("tc_b".into()),
+            tool_name: Some("read_file".into()),
+            ..{
+                let mut m = plain_message("result-b", "system", "");
+                m.is_tool = true;
+                m
+            }
+        },
+    ];
+    let ids: Vec<String> = drop_superseded_tool_call_stubs(rows)
+        .into_iter()
+        .map(|m| m.id)
+        .collect();
+    assert_eq!(
+        ids,
+        ["stub-a", "result-b"],
+        "id 不同即另一次调用：短卡不得被同名结果吞掉"
+    );
+}
+
+/// 无 `tool_call_id` 的旧快照短卡：同名结果唯一 → 收编；多张同名结果 → 保留（无法判定是哪一次调用）。
+#[test]
+fn idless_hydrate_stub_is_dropped_only_when_the_same_name_result_is_unique() {
+    let stub = StoredMessage {
+        is_tool: true,
+        tool_name: Some("read_file".into()),
+        ..plain_message("stub", "assistant", "工具：read_file")
+    };
+    let mut result = plain_message("result", "system", "read_file");
+    result.is_tool = true;
+    result.tool_name = Some("read_file".into());
+
+    let unique = drop_superseded_tool_call_stubs(vec![stub.clone(), result.clone()]);
+    assert_eq!(
+        unique.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
+        ["result"]
+    );
+
+    let mut second = result.clone();
+    second.id = "result-2".into();
+    let ambiguous = drop_superseded_tool_call_stubs(vec![stub, result, second]);
+    assert_eq!(
+        ambiguous.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
+        ["stub", "result", "result-2"],
+        "同名结果不唯一时必须保守保留短卡"
     );
 }

@@ -132,7 +132,7 @@ mod serde_opt_stored_message_state {
 }
 
 /// 一条本地会话消息。
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StoredMessage {
     pub id: String,
     pub role: String,

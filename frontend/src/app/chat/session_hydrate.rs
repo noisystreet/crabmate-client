@@ -11,8 +11,8 @@
 //! ## 尾部合并
 //!
 //! - v2 finalized projection 保持不可变；服务端 revision 包含新增 user 回合时，仅追加该回合起的 canonical 后缀。
-//! - 空缓存或 v1 会话才调用
-//!   [`super::session_merge::merge_session_tail`] 执行 plain user 补回与 local 顺序回放。
+//! - 无 v2 投影（旧会话 / 冷启动）时**服务端快照权威**：保留已加载的更早前缀，只把与尾页重叠的本地段
+//!   换成服务端快照，并丢弃已被结果卡代表的水合调用短卡（[`drop_superseded_tool_call_stubs`]）。
 
 use crabmate_client_api::session_mode::is_known_mode;
 use std::collections::HashSet;
@@ -27,13 +27,10 @@ use crate::chat_session_state::ChatSessionSignals;
 use crate::conversation_hydrate::{
     ConversationMessagesResponse, stored_messages_for_hydration_or_parse_failed,
 };
-use crate::conversation_hydrate_layout::observe_hydration_dual_read;
 use crate::i18n::{self, Locale};
 use crate::message_loading::messages_have_any_loading;
 use crate::session_ops::title_from_user_prompt;
 use crate::storage::{ChatSession, LEGACY_LAYOUT_SCHEMA_VERSION, StoredMessage};
-
-use super::session_merge::merge_session_tail;
 
 fn count_user_role_bubbles(messages: &[StoredMessage]) -> usize {
     messages.iter().filter(|m| m.role == "user").count()
@@ -82,23 +79,27 @@ struct MergeHydrationIntoActiveSessionArgs<'a> {
     default_agent_role_id: Option<&'a str>,
 }
 
-/// 尾页合并（[`merge_tail_page_into_session_messages`]）会用服务端快照替换的本地范围：
-/// v2 projection 合并只追加服务端新回合（本地行不替换，返回空）；有窗口信息时仅返回
-/// `window_start_index` 之后的本地尾部；无窗口信息时整个本地列表都可能被覆盖。
+/// 尾页合并（[`merge_tail_page_into_session_messages`]）保留的本地前缀长度：
+/// v2 projection 合并只追加服务端新回合（本地行一条都不替换 → `len`）；有窗口信息时保留
+/// `window_start_index` 之前的本地行；无窗口信息时本地列表整体被服务端快照覆盖（`0`）。
+fn local_overwrite_prefix_len(session: &ChatSession, resp: &ConversationMessagesResponse) -> usize {
+    if session.has_v2_layout_projection() && session.has_v2_finalized_rows() {
+        return session.messages.len();
+    }
+    match session.history_window_start {
+        Some(local_start) if resp.window_start_index >= local_start => {
+            ((resp.window_start_index - local_start) as usize).min(session.messages.len())
+        }
+        _ => 0,
+    }
+}
+
+/// 尾页合并会用服务端快照替换的本地尾部（见 [`local_overwrite_prefix_len`]）。
 fn local_tail_within_hydration_overwrite_range<'a>(
     session: &'a ChatSession,
     resp: &ConversationMessagesResponse,
 ) -> &'a [StoredMessage] {
-    if session.has_v2_layout_projection() && session.has_v2_finalized_rows() {
-        return &[];
-    }
-    if let Some(local_start) = session.history_window_start
-        && resp.window_start_index >= local_start
-    {
-        let keep = ((resp.window_start_index - local_start) as usize).min(session.messages.len());
-        return &session.messages[keep..];
-    }
-    &session.messages
+    &session.messages[local_overwrite_prefix_len(session, resp)..]
 }
 
 /// 内容对比类守卫（空快照 / user 回退）：user 回退比较限定在尾页覆盖范围内，
@@ -155,7 +156,8 @@ fn apply_history_meta_from_response(
     }
 }
 
-/// 尾部水合：保留已加载的更早前缀，仅替换与服务器尾部重叠段。
+/// 尾部水合：v2 projection 只追加服务端新回合；否则服务端快照权威——保留已加载的更早前缀，
+/// 把与尾页重叠的本地段整体换成服务端快照（同 revision 重放亦幂等）。
 pub(crate) fn merge_tail_page_into_session_messages(
     session: &ChatSession,
     hydrated: Vec<StoredMessage>,
@@ -164,18 +166,65 @@ pub(crate) fn merge_tail_page_into_session_messages(
     if session.has_v2_layout_projection() && session.has_v2_finalized_rows() {
         return append_server_only_turns_to_v2_projection(session.messages.as_slice(), hydrated);
     }
-    let tail_start = resp.window_start_index;
-    if let Some(local_start) = session.history_window_start {
-        if tail_start >= local_start {
-            let keep = (tail_start - local_start) as usize;
-            let keep = keep.min(session.messages.len());
-            let local_tail = &session.messages[keep..];
-            let mut out: Vec<StoredMessage> = session.messages[..keep].to_vec();
-            out.extend(merge_session_tail(hydrated, local_tail));
-            return out;
-        }
+    let keep = local_overwrite_prefix_len(session, resp);
+    let mut out: Vec<StoredMessage> = session.messages[..keep].to_vec();
+    out.extend(drop_superseded_tool_call_stubs(hydrated));
+    out
+}
+
+/// 水合调用短卡：`assistant` 只有 `tool_calls`（空正文）时由 [`crate::conversation_hydrate`]
+/// 建出的占位卡，文案为「工具：name」/「Tool: name」/「工具调用」。
+fn is_hydrate_tool_call_stub(m: &StoredMessage) -> bool {
+    if !m.is_tool || !m.reasoning_text.trim().is_empty() {
+        return false;
     }
-    merge_session_tail(hydrated, session.messages.as_slice())
+    let t = m.text.trim();
+    t.starts_with("工具：")
+        || t.starts_with("Tool:")
+        || t == "工具调用"
+        || t.eq_ignore_ascii_case("tool call")
+        || t.eq_ignore_ascii_case("tool calls")
+}
+
+fn trimmed_nonempty(s: Option<&str>) -> Option<&str> {
+    s.map(str::trim).filter(|x| !x.is_empty())
+}
+
+/// 短卡是否已被某张结果卡代表：
+/// - 双边都有 `tool_call_id`：仅 id 相等才算（避免同名另一次调用的 orphan 短卡被误丢）；
+/// - 短卡无 id（旧快照）：仅当同名结果**唯一**时才收编——多张同名结果无法判定是哪一次调用，
+///   宁可多留一张短卡，也不要吞掉另一次调用的占位。
+fn tool_stub_superseded_by_result(stub: &StoredMessage, results: &[StoredMessage]) -> bool {
+    if let Some(stub_id) = trimmed_nonempty(stub.tool_call_id.as_deref()) {
+        return results
+            .iter()
+            .any(|m| trimmed_nonempty(m.tool_call_id.as_deref()) == Some(stub_id));
+    }
+    let Some(name) = trimmed_nonempty(stub.tool_name.as_deref()) else {
+        return false;
+    };
+    let same_name = results
+        .iter()
+        .filter(|m| trimmed_nonempty(m.tool_name.as_deref()) == Some(name))
+        .count();
+    same_name == 1
+}
+
+/// 丢弃已被同一次调用的结果卡代表的调用短卡，避免「工具短卡 → 终答 → 工具结果」夹心。
+///
+/// 整页判定而非按位置：短卡与结果卡谁先到都不影响结论（水合快照里两者顺序不稳定）。
+fn drop_superseded_tool_call_stubs(rows: Vec<StoredMessage>) -> Vec<StoredMessage> {
+    let results: Vec<StoredMessage> = rows
+        .iter()
+        .filter(|m| m.is_tool && !is_hydrate_tool_call_stub(m))
+        .cloned()
+        .collect();
+    if results.is_empty() {
+        return rows;
+    }
+    rows.into_iter()
+        .filter(|m| !(is_hydrate_tool_call_stub(m) && tool_stub_superseded_by_result(m, &results)))
+        .collect()
 }
 
 fn append_server_only_turns_to_v2_projection(
@@ -208,6 +257,11 @@ fn append_server_only_turns_to_v2_projection(
     combined
 }
 
+/// 是否把服务端快照写回会话：空缓存或服务端 revision 不低于本地即合并。
+///
+/// 同 revision 也合并：v2 projection 的追加是 no-op，无 v2 投影时服务端快照替换亦幂等，
+/// 因此不需要再为「保存竞态 + 重放」保留同 revision 止血守卫；内容真的没变时
+/// [`apply_hydrated_tail_if_newer`] 不会重新赋值，所以也不会触发持久化。本地 revision 更新时仍跳过。
 pub(crate) fn should_merge_hydrated_messages(
     session: &ChatSession,
     resp: &ConversationMessagesResponse,
@@ -215,7 +269,7 @@ pub(crate) fn should_merge_hydrated_messages(
     session.messages.is_empty()
         || session
             .server_revision
-            .is_none_or(|local_revision| local_revision < resp.revision)
+            .is_none_or(|local_revision| local_revision <= resp.revision)
 }
 
 pub(crate) fn hydration_revision_after_response(
@@ -244,17 +298,22 @@ pub(crate) fn apply_hydrated_tail_if_newer(
     }
     let preserved_v2_projection =
         session.has_v2_layout_projection() && session.has_v2_finalized_rows();
-    session.messages = merge_tail_page_into_session_messages(session, hydrated, resp);
+    let merged = merge_tail_page_into_session_messages(session, hydrated, resp);
+    // 内容未变就不重新赋值：`sessions` 信号变化会触发一次去抖持久化，否则同 revision 的每次
+    // 加载都会多发一次 `PUT /user-data/...`（内容相同、服务端幂等，但那是纯噪声）。
+    if merged == session.messages {
+        return;
+    }
+    session.messages = merged;
     if !preserved_v2_projection {
-        apply_hydration_layout_schema(session, resp);
+        apply_hydration_layout_schema(session);
     }
 }
 
-/// B3 双读：消费 `layout` 记差分；GET 还原的历史行保持 legacy id / schema。
-/// 流式活键不得 stamp 到持久化水合行。same-revision 守卫仍由
-/// [`should_merge_hydrated_messages`] 负责（E4 前不删）。
-fn apply_hydration_layout_schema(session: &mut ChatSession, resp: &ConversationMessagesResponse) {
-    let _ = observe_hydration_dual_read(&session.messages, resp.layout.as_ref());
+/// GET 还原的历史行没有稳定的 v2 projection key，因此整页换成服务端快照后仍标记 legacy：
+/// 后续水合继续走「服务端快照权威」，直到本回合流式写入 v2 finalized 行再升级。
+/// 流式活键不得 stamp 到持久化水合行。
+fn apply_hydration_layout_schema(session: &mut ChatSession) {
     session.layout_schema_version = LEGACY_LAYOUT_SCHEMA_VERSION;
 }
 
@@ -271,7 +330,6 @@ fn prepend_older_page_into_session(
     let mut combined = older;
     combined.append(&mut session.messages);
     session.messages = combined;
-    let _ = observe_hydration_dual_read(&session.messages, resp.layout.as_ref());
     apply_history_meta_from_response(session, resp);
 }
 
