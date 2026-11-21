@@ -51,11 +51,39 @@ struct ScopeState {
     /// 之后不会自动去钥匙串重读 —— 而清空正是用户的显式意图。多 lane 之后若要区分
     /// 「B 没水合过」与「B 被清空过」，得把它拆成两个标记（届时这两条路径会分开走）。
     bearer_settled: bool,
+    /// 这一份的 `localStorage` 域后缀（`<基础键>#<label>`）；`None` = 不分域。
+    ///
+    /// #558 项 3b：域必须**跟着 holder 走**，不能每次去问壳注入的全局值 —— 单窗口多
+    /// lane 时一个页面会同时存在多份 holder，而注入值只有一个（= 窗口 label）。单 lane
+    /// 时两者相等（[`ScopeHolder::new`] 就取注入值），所以单连接语义与迁移前一致。
+    ///
+    /// 为什么不用 `scope.identity()` 当域：`ConnectionKey::from_raw("")` 会回落到
+    /// `"serve"`（非空），于是「无标识」与「标识恰好是 serve」无法区分 —— 拿它判断
+    /// 「要不要加分域后缀」会静默改变纯浏览器路径的键名。
+    storage_label: Option<String>,
 }
 
 impl ScopeHolder {
+    /// 建一份 holder，域取壳注入的连接标识（单 lane / 主窗口的既有行为）。
     fn new() -> Self {
-        Self(Rc::new(RefCell::new(ScopeState::default())))
+        Self::new_with_storage_label(super::storage_scope::connection_key())
+    }
+
+    /// 建一份 holder，**显式指定** `localStorage` 域后缀（#558 项 3b）。
+    ///
+    /// 多 lane 时由 lane 容器给（`None` = 该 lane 不分域，等于历史键名）；这样
+    /// 「值写进哪份 holder」与「读写哪个存储域」是同一个答案，不会一半一半。
+    pub(crate) fn new_with_storage_label(storage_label: Option<String>) -> Self {
+        Self(Rc::new(RefCell::new(ScopeState {
+            storage_label,
+            ..ScopeState::default()
+        })))
+    }
+
+    /// 这一份的存储域后缀；`None` = 用历史键名（纯浏览器 / Android / 未注入）。
+    #[must_use]
+    pub(crate) fn storage_label(&self) -> Option<String> {
+        self.0.borrow().storage_label.clone()
     }
 
     /// 读这一份（第一次访问时建立空实例）。
@@ -82,7 +110,9 @@ impl ScopeHolder {
         self.0.borrow_mut().base_settled = true;
     }
 
-    fn is_base_settled(&self) -> bool {
+    /// 这一份的基址是否已经决定过（per-holder；`api::browser` 算指纹前要判它）。
+    #[must_use]
+    pub(crate) fn is_base_settled(&self) -> bool {
         self.0.borrow().base_settled
     }
 
@@ -153,6 +183,20 @@ pub(crate) fn active_holder() -> ScopeHolder {
     })
 }
 
+/// `holder` 是不是当前前台那一份（同一份 `Rc`，不是「值相等」）。
+///
+/// 用途只有一个：`api::browser` 的显式 holder 分布式读要把「零参路径原本隐含的基址
+/// 水合」补回来 —— 只有 ACTIVE 那一份该被顺手水合，别的 lane 的基址由它自己的启动
+/// 路径决定（#558 收窄后的口径：跨 lane 路径必须显式带 holder）。
+#[must_use]
+pub(crate) fn is_active(holder: &ScopeHolder) -> bool {
+    ACTIVE.with(|cell| {
+        cell.borrow()
+            .as_ref()
+            .is_some_and(|a| Rc::ptr_eq(&a.0, &holder.0))
+    })
+}
+
 /// 换一份新的空 scope（bootstrap / 新 lane 的起点）；旧的那份随之丢弃。
 pub(crate) fn install_new_holder() {
     ACTIVE.with(|cell| *cell.borrow_mut() = Some(ScopeHolder::new()));
@@ -193,15 +237,6 @@ pub(crate) fn mark_base_settled() {
     active_holder().mark_base_settled();
 }
 
-#[must_use]
-pub(crate) fn bearer_settled() -> bool {
-    active_holder().is_bearer_settled()
-}
-
-pub(crate) fn mark_bearer_settled() {
-    active_holder().mark_bearer_settled();
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -215,7 +250,9 @@ mod tests {
 
         set_bearer("  tok  ");
         assert_eq!(bearer(), "tok");
-        assert!(bearer_settled());
+        // 标记问 holder 本身（#558：`bearer_settled` / `mark_bearer_settled` 的零参
+        // 包装已删 —— 它们只是「转发给 ACTIVE」，留着等于给跨 lane 误用留门）。
+        assert!(active_holder().is_bearer_settled());
     }
 
     #[test]
@@ -260,5 +297,37 @@ mod tests {
         assert!(a.is_base_settled());
         assert!(!b.is_base_settled());
         assert!(!b.is_bearer_settled());
+    }
+
+    /// #558 项 3b 的地基：**存储域**也是 per-holder 的，不是每次去问壳注入值。
+    ///
+    /// 单窗口多 lane 时一个页面有多份 holder，而壳注入的连接标识只有一个（窗口
+    /// label）—— 域若仍取全局值，两条 lane 会读写同一个 `localStorage` 命名空间。
+    #[test]
+    fn holders_carry_their_own_storage_label() {
+        let a = ScopeHolder::new_with_storage_label(Some("win-a".to_string()));
+        let b = ScopeHolder::new_with_storage_label(Some("win-b".to_string()));
+        assert_eq!(a.storage_label().as_deref(), Some("win-a"));
+        assert_eq!(b.storage_label().as_deref(), Some("win-b"));
+
+        // 不分域（纯浏览器 / Android / 未注入标识）保持 `None`：键名退回历史形态。
+        assert_eq!(
+            ScopeHolder::new_with_storage_label(None).storage_label(),
+            None
+        );
+        // `new()` 取壳注入值；host 目标没有注入，所以是 `None`。
+        assert_eq!(ScopeHolder::new().storage_label(), None);
+    }
+
+    /// 域后缀与 `ACTIVE` 是两个独立维度：换了 ACTIVE 指针不改已有 holder 的域。
+    #[test]
+    fn swapping_the_active_holder_keeps_each_holders_label() {
+        let mine = ScopeHolder::new_with_storage_label(Some("lane-1".to_string()));
+        install_new_holder();
+        assert_eq!(
+            mine.storage_label().as_deref(),
+            Some("lane-1"),
+            "换前台不该重写别条 lane 的域"
+        );
     }
 }

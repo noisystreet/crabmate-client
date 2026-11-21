@@ -41,13 +41,18 @@ pub fn normalize_llm_thinking_mode(raw: &str) -> &'static str {
 fn read_thinking_mode_local_storage() -> Option<String> {
     // 分域：思考模式跟着「这次连接」走（两台 serve 的模型配置本就不同），
     // 键的拼接与旧键迁移都收在 `api::browser` 一处。
-    super::browser::read_scoped_local_storage_raw(super::storage_scope::LLM_THINKING_MODE_KEY)
-        .map(|v| v.trim().to_string())
+    // #558 项 3b：域也由 holder 给（单 lane 时等于壳注入值），不再自己取全局值。
+    super::browser::read_scoped_local_storage_raw_on(
+        &super::connection_scope::active_holder(),
+        super::storage_scope::LLM_THINKING_MODE_KEY,
+    )
+    .map(|v| v.trim().to_string())
 }
 
 #[cfg(target_arch = "wasm32")]
 fn write_thinking_mode_local_storage(normalized: &str) {
-    super::browser::write_scoped_local_storage_raw(
+    super::browser::write_scoped_local_storage_raw_on(
+        &super::connection_scope::active_holder(),
         super::storage_scope::LLM_THINKING_MODE_KEY,
         normalized,
     );
