@@ -190,6 +190,18 @@ opens there; the name is display-only (`key` / window label / session bindings u
 `ctl_restart_instance` is a synchronous op, so the row disables while it runs, then the group re-fetches — with the Server's `notes` and `restarted` / `pid` printed in one notice line, because a silent restart that dropped a declaration's `env` reads as “it worked” while behaviour quietly changed. Three states are rendered rather than one boolean (`ready` connectable / `starting` 「启动中」 / everything
 else carrying the Server's own `last_error`), `enabled = false` declarations and instances already open in a window are omitted, and the group header's 「⟳」 re-fetches because that channel is a query with no push. Close *is* the disconnect — closing the window is the only way to drop a connection (no keepalive state, see §14 of that file).
 
+**Since #561 the Desktop shape moved to route B: one window, N lanes.** The "one window per connection"
+paragraph above describes route A, which is kept as a *historical* capability (the shell commands and the
+registry stay registered; the UI no longer opens windows). 「连接」 now means **create a lane in the current
+window**: the container holds one runtime per lane (signals + wiring + chat shell), each lane mounts its own
+`app_body` subtree through `mount_to` so its `provide_context` belongs to that lane, and switching only swaps
+a `lane-slot--active` class — never rebuilds, so in-flight streams, drafts and scroll positions stay put.
+Storage follows the lane (`<injected key>-l<n>`), since `localStorage` belongs to the origin, not the view.
+Keys are the TUI's table (`Alt+←/→`, `Ctrl+N`, `Alt+1..8`, `F4` jumps to the next lane waiting on an
+approval). **Degradation (route B, deliberate)**: the left rail's lane list covers **this window only** — how
+many lanes other windows hold is not visible here; switch windows first. The WASM `thread_local` singletons
+are still keyed by connection through `ScopeHolder`, which is what makes the single-window shape possible.
+
 ### 注 4 · Settings panel editing serve user-data files
 
 

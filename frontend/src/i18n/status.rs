@@ -99,6 +99,17 @@ pub fn ctl_group_label(l: Locale) -> &'static str {
     }
 }
 
+/// 左栏「本窗口的 lane」分组标题（#561 S3b）。
+///
+/// 措辞带「本窗口」是刻意的：别的窗口里有几条 lane，这里看不到（§6.5 方案 B 的降级，
+/// 已写进 `client_capability_matrix.md`）。
+pub fn lane_rail_title(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "本窗口 lane",
+        Locale::En => "Lanes in this window",
+    }
+}
+
 /// 「连接」按钮：把一条 ctl 实例开成新的连接窗口。
 pub fn ctl_row_connect(l: Locale) -> &'static str {
     match l {

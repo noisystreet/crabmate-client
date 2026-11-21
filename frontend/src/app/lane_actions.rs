@@ -19,12 +19,28 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use leptos::prelude::RwSignal;
+
 /// 「新建 lane」动作的句柄：参数是这条 lane 要连的基址（`None` = 沿用当前基址 / 同 Origin）。
 type NewLaneAction = Rc<dyn Fn(Option<String>)>;
+
+/// 左栏 lane 列表的数据源（#561 S3b）：每条 lane 的展示地址 + 当前前台下标。
+///
+/// 两个都是 `RwSignal`（`Copy` 且 `Send + Sync`），所以能直接进 `move ||` 响应式闭包 ——
+/// 换成 `Rc<RefCell<Vec<_>>>` 会在那里报 `Rc cannot be sent between threads safely`
+/// （§5.2 实测的那道边界）。切换动作走 [`switch_to`]，同样不进闭包。
+type LaneRailSignals = (RwSignal<Vec<String>>, RwSignal<usize>);
+
+/// 点左栏某一行时切过去。
+type SwitchToAction = Rc<dyn Fn(usize)>;
 
 thread_local! {
     /// 本窗口的「新建 lane」动作；由 `App` 挂载时注册一次。
     static NEW_LANE: RefCell<Option<NewLaneAction>> = const { RefCell::new(None) };
+    /// 左栏 lane 列表的数据源。
+    static RAIL: RefCell<Option<LaneRailSignals>> = const { RefCell::new(None) };
+    /// 点左栏某一行时切过去。
+    static SWITCH_TO: RefCell<Option<SwitchToAction>> = const { RefCell::new(None) };
 }
 
 /// 注册本窗口的「新建 lane」动作（`App` 调一次）。
@@ -40,6 +56,29 @@ pub(crate) fn new_lane(base: Option<String>) {
     let action = NEW_LANE.with(|cell| cell.borrow().clone());
     if let Some(action) = action {
         action(base);
+    }
+}
+
+/// 注册左栏 lane 列表的数据源与切换动作（`App` 调一次）。
+pub(crate) fn register_rail(
+    labels: RwSignal<Vec<String>>,
+    active: RwSignal<usize>,
+    switch_to: Rc<dyn Fn(usize)>,
+) {
+    RAIL.with(|cell| *cell.borrow_mut() = Some((labels, active)));
+    SWITCH_TO.with(|cell| *cell.borrow_mut() = Some(switch_to));
+}
+
+/// 左栏 lane 列表的数据源；未注册时 `None`（非桌面壳 / 单测）。
+pub(crate) fn rail() -> Option<LaneRailSignals> {
+    RAIL.with(|cell| *cell.borrow())
+}
+
+/// 切到第 `index` 条 lane（未注册时静默返回）。
+pub(crate) fn switch_to(index: usize) {
+    let action = SWITCH_TO.with(|cell| cell.borrow().clone());
+    if let Some(action) = action {
+        action(index);
     }
 }
 
