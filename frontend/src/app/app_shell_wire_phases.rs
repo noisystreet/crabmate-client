@@ -87,7 +87,7 @@ struct Phase4WiringTail {
 }
 
 /// [`run_shell_wiring_in_order`] 的解构产物；[`super::app_shell_bootstrap::bootstrap_app_shell`] 唯一消费。
-pub(super) struct ShellWiringOutput {
+pub(crate) struct ShellWiringOutput {
     pub refresh_workspace: Arc<dyn Fn() + Send + Sync>,
     pub refresh_status: Arc<dyn Fn() + Send + Sync>,
     pub refresh_tasks: Arc<dyn Fn() + Send + Sync>,
@@ -99,7 +99,7 @@ pub(super) struct ShellWiringOutput {
 }
 
 /// 按固定顺序注册全部壳级 `wire_*` 并返回闭包 / 流式壳等产物。
-pub(super) fn run_shell_wiring_in_order(app: &AppSignals) -> ShellWiringOutput {
+pub(crate) fn run_shell_wiring_in_order(app: &AppSignals) -> ShellWiringOutput {
     wire_phase1_chat_session_lifecycle(app);
     wire_phase2_persisted_prefs_dom_and_settings_hooks(app);
     wire_phase3_escape_layered_dismiss(app);

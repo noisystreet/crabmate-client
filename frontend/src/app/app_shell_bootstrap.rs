@@ -2,13 +2,9 @@
 //! [`run_shell_wiring_in_order`](super::app_shell_wire_phases::run_shell_wiring_in_order)，
 //! 再组装 [`AppShellCtx`]。阶段语义见 [`super::app_shell_wire_phases`]；聊天主列内部顺序见 [`super::chat::wire_chat_domain`]。
 
-use std::rc::Rc;
-use std::sync::Arc;
-
 use super::app_shell_ctx::AppShellCtx;
 use super::app_shell_wire_phases::run_shell_wiring_in_order;
 use super::app_signals::AppSignals;
-use super::chat::ChatColumnShell;
 
 /// 执行所有 `wire_*` 注册、闭包构建与 [`AppShellCtx`] 组装（推荐新代码直接调用本函数）。
 pub fn bootstrap_app_shell() -> AppShellCtx {
@@ -24,10 +20,11 @@ pub fn bootstrap_app_shell() -> AppShellCtx {
         crate::tauri_shell::ensure_external_link_handler();
     }
 
-    // #561 阶段 3：先立 lane 容器（现在恒一条）。`current()` 拿到的就是改造前那份
-    // `AppSignals` —— 单连接行为零变化；容器只是把「当前是哪条」收成一个入口。
-    let lanes = super::app_signals::LaneSet::new_single(&super::app_signals::WindowSignals::new());
-    let app_signals: AppSignals = lanes.current();
+    // #561 阶段 3：第一刀把「当前 lane 的运行时」收进容器 —— 先建信号，跑完接线，
+    // 再把信号 + 接线产物 + 聊天列壳**一起**交给容器（每条 lane 一份）。
+    let window = super::app_signals::WindowSignals::new();
+    let app_signals: AppSignals =
+        AppSignals::new_lane(&window, crate::api::connection_scope::active_holder());
     // 官方壳：尽早从钥匙串 / Keystore 水合（hash 已写入内存时仅清明文 LS）。
     //
     // #558 项 1b：水合显式走「**这条 lane 自己的** holder」，不再靠零参口回落到 `ACTIVE`。
@@ -40,24 +37,8 @@ pub fn bootstrap_app_shell() -> AppShellCtx {
     crate::confirm_dialog::register_shell_confirm(app_signals.modal.confirm_signals());
     let wiring = run_shell_wiring_in_order(&app_signals);
 
-    let new_session = Rc::clone(&wiring.chat_wires.new_session);
+    // 接线产物与聊天列壳按 lane 存进容器（组装表达式见 `LaneRuntime::new`）。
+    let lanes = super::app_signals::LaneSet::new_single(app_signals, wiring);
 
-    AppShellCtx {
-        lanes,
-        new_session,
-        refresh_workspace: Arc::clone(&wiring.refresh_workspace),
-        refresh_tasks: Arc::clone(&wiring.refresh_tasks),
-        toggle_task: Arc::clone(&wiring.toggle_task),
-        refresh_status: Arc::clone(&wiring.refresh_status),
-        insert_workspace_file_ref: wiring.insert_workspace_file_ref,
-        chat_column: ChatColumnShell {
-            app: app_signals,
-            stream_shell: wiring.chat_stream_shell.clone(),
-            stream_busy_memos: wiring.stream_busy_memos,
-            run_send_message: wiring.chat_wires.run_send_message.clone(),
-            trigger_stop: Arc::clone(&wiring.chat_wires.cancel_stream),
-            stream_follow_up: wiring.chat_wires.stream_follow_up,
-            insert_workspace_file_ref: wiring.insert_workspace_file_ref,
-        },
-    }
+    AppShellCtx { lanes }
 }
