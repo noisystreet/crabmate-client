@@ -87,7 +87,10 @@ fn archive_stale_projection_rows(messages: &mut [crate::storage::StoredMessage],
     }
 }
 
-fn next_archived_row_id(messages: &[crate::storage::StoredMessage], row_id: &str) -> String {
+pub(super) fn next_archived_row_id(
+    messages: &[crate::storage::StoredMessage],
+    row_id: &str,
+) -> String {
     let mut seq = 1_usize;
     loop {
         let candidate = format!("{row_id}{ARCHIVED_ROW_SUFFIX}{seq}");

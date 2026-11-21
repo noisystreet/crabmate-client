@@ -23,6 +23,8 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Fixed
 
+- **A turn's final answer no longer gets a fresh random row id whenever the next turn starts.** `detach_final_answer_row_in_messages` renamed the already-displayed answer to a random id at every turn boundary, so a session's local row identities changed on each turn (persisted copies included) and no reload could ever see a stable id sequence. It now archives to `turn-final-answer#prev{n}` in order — the shape the hydration mapping and the commentary archiving already use, so the canonical key stays with the newest answer only. No wire change.
+
 ## [0.9.1-alpha.0] - 2026-11-19
 
 ### Changed
