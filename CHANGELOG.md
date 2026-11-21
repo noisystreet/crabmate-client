@@ -17,7 +17,7 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Changed
 
-- **"Connect" adds a hidden lane to the current window instead of opening a new one.**
+- **"Connect" adds a lane in this window; the rail lists lanes, `Alt+←/→` switches.**
 
 - **Each serve keeps its own base URL, thinking mode and Bearer after switching connections.**
 

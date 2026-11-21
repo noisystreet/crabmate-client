@@ -256,7 +256,7 @@ Web 侧没有「帧」，只有「挂载 / 卸载」，所以要先说清卸载�
 | **S1**（已完成） | `App` 只剩「取当前 lane → 交给 `app_body(rt: Rc<LaneRuntime>)`」；14 个 `*_signals()` / `*_view_input()` 搬到 `LaneRuntime`（`app_signals/lane_view_inputs.rs`），视图与 `provide_context` 进 `app/app_body.rs` | N=1 等价：826 测试 + wasm32 clippy + 桌面冒烟（xvfb + 真实 WebKitGTK）**均已通过** |
 | **S2**（已完成，挂载后隐藏） | `LaneSet::add_lane(scope)` + 窗口级动作注册表 `app/lane_actions.rs`；两处「连接」入口改调它，`App` 在 `.lane-layer` 容器上 `mount_to(app_body(rt))` | 冒烟能起 + 手测「点两次得到两条 lane」 |
 | **S3a**（已完成） | 切换只换 class（`lane-slot--active`，不重建子树）；键位 §6.6 全表 | 冒烟 + Playwright 布局用例；**切 lane 的行为需图形会话手测** |
-| **S3b**（待做） | 左栏「本窗口 lane 列表」（§6.5 方案 B）+ 点击切换；§6.5 的单窗口降级写进能力矩阵 | 手测：列表条数与当前前台一致 |
+| **S3b**（已完成） | 左栏「本窗口 lane 列表」（§6.5 方案 B）+ 点击切换；§6.5 的单窗口降级写进能力矩阵（注 3） | 单 lane 时整组不渲染；条数与前台高亮跟 `labels` / `active` 走 |
 
 与 TUI 的对应：
 
