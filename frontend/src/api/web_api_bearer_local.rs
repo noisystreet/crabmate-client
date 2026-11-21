@@ -5,22 +5,15 @@
 //!
 //! 连接页成功路径已写入安全存储；本模块供包内 UI 水合、设置保存/清除、断开清理。
 
-use std::cell::RefCell;
-
 use gloo_timers::future::TimeoutFuture;
 use wasm_bindgen_futures::JsFuture;
 
 use super::browser::{
     clear_local_storage_web_api_bearer, read_local_storage_web_api_bearer,
-    set_web_api_bearer_token_memory_only, web_api_bearer_token_memory_peek,
-    write_local_storage_web_api_bearer,
+    set_web_api_bearer_token_memory_only, write_local_storage_web_api_bearer,
 };
 use super::llm_secrets_local::PersistKind;
 use crate::i18n::{self, load_locale_from_storage};
-
-thread_local! {
-    static SECURE_HYDRATE_DONE: RefCell<bool> = const { RefCell::new(false) };
-}
 
 #[cfg(target_arch = "wasm32")]
 mod bridge {
@@ -201,26 +194,33 @@ async fn persist_secure_bearer(value: &str) -> Result<PersistKind, String> {
     Ok(PersistKind::BrowserInsecure)
 }
 
-/// 从钥匙串 / Keystore 水合内存；内存已有值时不覆盖。
+/// 从钥匙串 / Keystore 水合**前台默认**那份 scope；内存已有值时不覆盖。
 ///
 /// 壳内若发现 legacy localStorage，成功迁入安全存储后删除明文键。
 pub async fn hydrate_web_api_bearer_from_secure_store() {
+    hydrate_web_api_bearer_into(&super::connection_scope::active_holder()).await;
+}
+
+/// 从钥匙串 / Keystore 水合**指定的**那一份 scope（#558）。
+///
+/// 多 lane 时必须走这个：写进**哪个** holder 决定「哪条 lane 拿到凭据」。#558 之前唯一
+/// 的坑就是「水合写进全局、header 取自别处」→ 拿空 Bearer 发请求 → 401。
+pub async fn hydrate_web_api_bearer_into(holder: &super::connection_scope::ScopeHolder) {
     if !secure_web_api_bearer_backend_available() {
-        SECURE_HYDRATE_DONE.with(|h| *h.borrow_mut() = true);
+        holder.mark_bearer_settled();
         return;
     }
-    let mem = web_api_bearer_token_memory_peek();
-    if mem.trim().is_empty() {
+    if holder.bearer().trim().is_empty() {
         if let Some(t) = load_secure_bearer().await {
-            set_web_api_bearer_token_memory_only(&t);
+            holder.set_bearer(&t);
         } else if let Some(legacy) = read_local_storage_web_api_bearer() {
             match persist_secure_bearer(&legacy).await {
                 Ok(PersistKind::Durable) => {
-                    set_web_api_bearer_token_memory_only(&legacy);
+                    holder.set_bearer(&legacy);
                     clear_local_storage_web_api_bearer();
                 }
                 Ok(PersistKind::BrowserInsecure) | Err(_) => {
-                    set_web_api_bearer_token_memory_only(&legacy);
+                    holder.set_bearer(&legacy);
                 }
             }
         }
@@ -228,15 +228,17 @@ pub async fn hydrate_web_api_bearer_from_secure_store() {
         // hash 交接已写入内存：确保明文 LS 不残留
         clear_local_storage_web_api_bearer();
     }
-    SECURE_HYDRATE_DONE.with(|h| *h.borrow_mut() = true);
+    holder.mark_bearer_settled();
 }
 
-/// 在发起需鉴权的请求前调用：官方壳异步水合完成前阻塞到完成（幂等）。
-pub async fn ensure_web_api_bearer_hydrated() {
-    if SECURE_HYDRATE_DONE.with(|h| *h.borrow()) {
+/// [`hydrate_web_api_bearer_from_secure_store`] 的**显式 holder** 版本（#558）。
+///
+/// 幂等标记在 holder 上（per-holder）：A 那条 lane 读过盘，不代表 B 读过。
+pub async fn ensure_web_api_bearer_hydrated_into(holder: &super::connection_scope::ScopeHolder) {
+    if holder.is_bearer_settled() {
         return;
     }
-    hydrate_web_api_bearer_from_secure_store().await;
+    hydrate_web_api_bearer_into(holder).await;
 }
 
 /// 设置页保存/清除：先落盘再改内存；壳内清除明文 LS。

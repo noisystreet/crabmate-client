@@ -239,11 +239,6 @@ pub(crate) fn set_web_api_bearer_token_memory_only(token: &str) {
     connection_scope::set_bearer(token);
 }
 
-/// 仅读进程内内存（不触发 localStorage hydrate）。
-pub(crate) fn web_api_bearer_token_memory_peek() -> String {
-    connection_scope::bearer()
-}
-
 fn hydrate_web_api_bearer_once() {
     if connection_scope::bearer_settled() {
         return;
@@ -458,23 +453,32 @@ pub(crate) fn clear_request_github_token() {
     REQUEST_GITHUB_TOKEN.with(|c| c.borrow_mut().clear());
 }
 
-/// 设置 CORS + `credentials: include` + 鉴权头（含壳 GitHub token）。
-pub fn apply_api_auth(init: &web_sys::RequestInit) {
-    init.set_mode(web_sys::RequestMode::Cors);
-    init.set_credentials(web_sys::RequestCredentials::Include);
-    init.set_headers(&auth_headers());
+/// 发起受保护 API 请求前调用：壳内先完成 Bearer + GitHub token 水合，再 [`apply_api_auth_for`]。
+pub async fn prepare_api_auth(init: &web_sys::RequestInit) {
+    prepare_api_auth_on(&connection_scope::active_holder(), init).await;
 }
 
-/// 发起受保护 API 请求前调用：壳内先完成 Bearer + GitHub token 水合，再 [`apply_api_auth`]。
-pub async fn prepare_api_auth(init: &web_sys::RequestInit) {
-    ensure_web_api_bearer_hydrated_for_request().await;
+/// [`prepare_api_auth`] 的**显式 holder** 版本（#558）。
+///
+/// 关键不变式：**水合写进哪一份**，header 就必须取自**同一份**。两者错开就会拿空
+/// Bearer 发请求 —— 401，而且看起来像「serve 的密钥配错了」。
+pub async fn prepare_api_auth_on(
+    holder: &connection_scope::ScopeHolder,
+    init: &web_sys::RequestInit,
+) {
+    ensure_web_api_bearer_hydrated_for_request_on(holder).await;
     ensure_github_token_hydrated_for_request().await;
-    apply_api_auth(init);
+    apply_api_auth_for(holder, init);
 }
 
 /// 供不经 [`prepare_api_auth`] 组装 headers 的路径（如 SSE）在发请求前调用。
 pub async fn ensure_web_api_bearer_hydrated_for_request() {
-    super::web_api_bearer_local::ensure_web_api_bearer_hydrated().await;
+    ensure_web_api_bearer_hydrated_for_request_on(&connection_scope::active_holder()).await;
+}
+
+/// [`ensure_web_api_bearer_hydrated_for_request`] 的**显式 holder** 版本（#558）。
+pub async fn ensure_web_api_bearer_hydrated_for_request_on(holder: &connection_scope::ScopeHolder) {
+    super::web_api_bearer_local::ensure_web_api_bearer_hydrated_into(holder).await;
 }
 
 pub async fn ensure_github_token_hydrated_for_request() {
@@ -484,6 +488,22 @@ pub async fn ensure_github_token_hydrated_for_request() {
 pub fn auth_headers() -> Headers {
     // 保持旧语义：零参路径会触发 Bearer 水合（纯浏览器冷启动仍靠它取引导键）。
     auth_headers_with_bearer(&web_api_bearer_token())
+}
+
+/// [`auth_headers`] 的**显式 holder** 版本（#558）：凭证取自**这一份** scope。
+///
+/// **不**触发水合 —— 调用方应已走过
+/// [`ensure_web_api_bearer_hydrated_for_request_on`]，否则这一份里的 Bearer 可能还是
+/// 空的（那正是 401 的来源）。
+pub fn auth_headers_for(holder: &connection_scope::ScopeHolder) -> Headers {
+    auth_headers_with_bearer(&holder.bearer())
+}
+
+/// [`apply_api_auth`] 的**显式 holder** 版本（#558）。
+pub fn apply_api_auth_for(holder: &connection_scope::ScopeHolder, init: &web_sys::RequestInit) {
+    init.set_mode(web_sys::RequestMode::Cors);
+    init.set_credentials(web_sys::RequestCredentials::Include);
+    init.set_headers(&auth_headers_for(holder));
 }
 
 fn auth_headers_with_bearer(bearer: &str) -> Headers {
