@@ -2,6 +2,7 @@
 //!
 //! 首启会话加载、`/user-data` / DOM 偏好同步、全局 `Escape` 等壳级副作用见 `app_shell_effects`。聊天主路径（滚动、查找、输入/流式）见 `chat` 子模块；Workspace / 变更集、`/status` 与任务等接线已部分迁至 **`wire_workspace_domain`**、**`status_tasks_wiring`**、**`chat::wire_chat_session_lifecycle`**（阶段 B）。
 
+mod app_body;
 mod app_bootstrap_phase;
 mod app_shell_bootstrap;
 mod app_shell_ctx;
@@ -79,28 +80,8 @@ mod workspace_root_actions;
 
 use crate::i18n::{self, Locale};
 use crate::icon::icon_chevron_right;
+use app_body::app_body;
 use app_shell_init::init_app_shell;
-use approval_modal::ApprovalModal;
-use changelist_modal::changelist_modal_view;
-use chat::ChatFindBar;
-use chat::chat_column_view;
-use context_usage_page::ContextUsagePageView;
-use ide_confirm_dialog::IdeConfirmDialog;
-use ide_editor_body::IdeEditorBody;
-use ide_layout_switch::IdeLayoutToggleSignals;
-use ide_session::{IdeSession, IdeSessionInput};
-use ide_settings_page::IdeSettingsPageView;
-use layout_toggle_hotkey::wire_layout_toggle_hotkey;
-use mobile_shell_header::mobile_shell_header_view;
-use session_list_modal::session_list_modal_view;
-use settings_page::SettingsPageView;
-use shell_confirm_dialog::ShellConfirmDialog;
-use shell_runtime_context::ChatShellLeptosContext;
-use side_column::side_column_view;
-use sidebar_nav::sidebar_nav_view;
-use workspace_browser_pick_modal::workspace_browser_pick_modal_view;
-use workspace_clone_modal::workspace_clone_modal_view;
-use workspace_project_modal::workspace_project_modal_view;
 
 use leptos::prelude::*;
 
@@ -148,114 +129,9 @@ fn SidebarRailRevealBtn(
 #[component]
 pub fn App() -> impl IntoView {
     let app_ctx = init_app_shell();
-    // #561：当前前台那条 lane 的信号**在组件顶部取一次**，之后闭包只捕获其中的
-    // Copy 句柄。写成 `app_ctx.signals().chat` 会让 `move ||` 捕获整个 `AppShellCtx`
-    // （含 `Rc`），当场被 `Send + Sync` 打回 —— 与 #563 记录的 `Deref` 坑同源。
-    let signals = app_ctx.signals();
-    provide_context(ChatShellLeptosContext::from_app_signals(&signals));
-
-    // `AppShellCtx` 含 `Rc` 等，不满足 `Send`；子组件闭包不得捕获整 ctx（见 Leptos `ToChildren` 约束）。
-    // #561 S1：视图入参一律由「这条 lane」生成（`rt` 的 `signals` / `wiring` 字段），
-    // 不再经 `active` 指针 —— 这是 S1b-3 把视图抽成 `app_body(rt)` 的前提。
+    // #561 S1b-3：`App` 只做「取当前前台那条 lane 的运行时 → 交给视图主体」。视图与
+    // `provide_context` 都搬进了 `app_body`，于是 S2 用 `mount_to` 挂第二条 lane 时 owner
+    // 就是新子树的，ctx 不会串到第一条（§5.2「已知风险」）。
     let rt = app_ctx.current_runtime();
-    let approval_modal_signals = rt.approval_modal_signals();
-    let settings_page_view_input = rt.settings_page_view_input();
-    let ide_settings_page_view_input = rt.ide_settings_page_view_input();
-    let context_usage_page_view_input = rt.context_usage_page_view_input();
-    let mobile_shell_header_signals = rt.mobile_shell_header_signals();
-    let changelist_modal_signals = rt.changelist_modal_signals();
-    let session_list_modal_signals = rt.session_list_modal_signals();
-    let workspace_project_modal_signals = rt.workspace_project_modal_signals();
-    let workspace_clone_modal_signals = rt.workspace_clone_modal_signals();
-    let workspace_browser_pick_modal_signals = rt.workspace_browser_pick_modal_signals();
-    let sidebar_nav_signals = rt.sidebar_nav_signals();
-    let side_column_view_signals = rt.side_column_view_signals();
-
-    // IDE 会话（状态 + 副作用）在这里建一次：视图挂在聊天列主区里，切回聊天也不丢状态。
-    let layout_toggle = IdeLayoutToggleSignals::from_app_signals(&signals);
-    wire_layout_toggle_hotkey(layout_toggle);
-    let ide_session = IdeSession::new(IdeSessionInput {
-        locale: signals.shell_ui.locale,
-        shell_ui: signals.shell_ui,
-        chrome: signals.ide_chrome,
-        editor: signals.ide_editor,
-        layout_toggle,
-        ide_settings_page: signals.modal.ide_settings_page,
-        chat: signals.chat,
-        composer_draft: signals.chat_composer.draft,
-        workspace_panel: signals.to_workspace_panel(),
-        refresh_workspace: rt.wiring.refresh_workspace.clone(),
-        initialized: signals.initialized,
-        editor_visible: signals.shell_ui.editor_layout_mode,
-    });
-    let ide_body_view: AnyView = view! { <IdeEditorBody signals=ide_session.body() /> }.into_any();
-
-    view! {
-        <div
-            class=move || {
-                app_root_class_name(signals.sidebar.sidebar_rail_collapsed.get())
-            }
-        >
-            {sidebar_nav_view(sidebar_nav_signals)}
-
-            <SidebarRailRevealBtn
-                sidebar_rail_collapsed=signals.sidebar.sidebar_rail_collapsed
-                locale=signals.shell_ui.locale
-            />
-
-            <div
-                class="shell-main"
-                id="layout-mode-panel-main"
-                class:settings-page-hidden=move || {
-                    shell_main_hidden(
-                        signals.modal.settings_page,
-                        signals.modal.ide_settings_page,
-                        signals.modal.context_usage_page,
-                    )
-                }
-            >
-                {mobile_shell_header_view(mobile_shell_header_signals)}
-
-                <Show when=move || signals.chat_composer.chat_find_panel_open.get()>
-                    <ChatFindBar />
-                </Show>
-
-                <div
-                    class:main-row-resizing=move || signals.resize.side_resize_dragging.get()
-                    class="main-row"
-                >
-                    <div class="main-row-chat-layer">
-                        {chat_column_view(rt.chat_column.clone(), ide_body_view)}
-                        {side_column_view(side_column_view_signals.clone())}
-                    </div>
-                </div>
-            </div>
-
-            {session_list_modal_view(session_list_modal_signals)}
-
-            {workspace_project_modal_view(workspace_project_modal_signals)}
-
-            {workspace_clone_modal_view(workspace_clone_modal_signals)}
-
-            {workspace_browser_pick_modal_view(workspace_browser_pick_modal_signals)}
-
-            {changelist_modal_view(changelist_modal_signals)}
-
-            {ide_session.modals_view()}
-
-            <ApprovalModal signals=approval_modal_signals />
-
-            <SettingsPageView input=settings_page_view_input />
-            <IdeSettingsPageView input=ide_settings_page_view_input />
-            <ContextUsagePageView input=context_usage_page_view_input />
-            <IdeConfirmDialog
-                locale=signals.shell_ui.locale
-                chrome=signals.ide_chrome
-            />
-            <ShellConfirmDialog
-                locale=signals.shell_ui.locale
-                modal=signals.modal
-            />
-        </div>
-    }
+    app_body(rt)
 }

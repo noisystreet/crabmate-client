@@ -1,7 +1,7 @@
 //! 壳层 `*_view` 聚合为 [`AppShellCtx`]，压缩 `App` 内 `view!` 的长实参列表。
 //! **#561 S1**：子组件入参的组装方法已搬到 `LaneRuntime`（`app_signals::lane_view_inputs`），
-//! 本结构只剩「窗口级容器 + 两个取用口」—— [`Self::signals`]（当前 lane 的信号）与
-//! [`Self::current_runtime`]（那条 lane 的运行时句柄）。
+//! 本结构只剩「窗口级容器 + 一个取用口」—— [`Self::current_runtime`]（当前前台那条 lane
+//! 的运行时句柄）。
 //! **未使用** Leptos `Context` / `<Provider>` 承载整份壳层：状态含 `Rc<RefCell<…>>`、`Rc<dyn Fn()>` 等，
 //! 不满足 `provide_context` 的 `Send + Sync + 'static` 约束；以结构体 **`Clone`**（内部多为
 //! `Copy` / `Rc::clone` / `Arc::clone`）在 `*_view` 间传递即可。
@@ -173,15 +173,6 @@ pub struct AppShellCtx {
 }
 
 impl AppShellCtx {
-    /// 当前前台那条 lane 的一组信号。
-    ///
-    /// #561 起壳内一律经它取（改造前是 `signals` 字段，121 处直接访问）。切 lane 的
-    /// 语义因此只落在一处 —— 容器换当前下标，全壳跟着换。
-    #[must_use]
-    pub fn signals(&self) -> AppSignals {
-        self.lanes.current_signals()
-    }
-
     /// 取「当前前台那条 lane」的运行时句柄（`Rc`，常数开销、不持借用）。
     ///
     /// S1 起视图入参一律由它生成（`rt.xxx_signals()`），`active` 只在**取这一次**
