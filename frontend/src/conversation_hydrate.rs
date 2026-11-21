@@ -2,6 +2,7 @@
 
 use std::collections::HashSet;
 
+use crabmate::cm_api_contract::chat::ConversationLayoutMeta;
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -30,6 +31,12 @@ pub struct ConversationMessagesResponse {
     #[serde(default)]
     #[allow(dead_code)]
     pub context_artifacts: Vec<Value>,
+    /// 会话级布局元数据（服务端 v2 会话稳定写入；老会话为 `None`）。
+    ///
+    /// **会话级**，不随 `limit` / `before_index` 对 `messages` 切片：水合用它把历史行
+    /// 映射成稳定 v2 投影键（见 [`crabmate_client_api::layout_projection`]）。
+    #[serde(default)]
+    pub layout: Option<ConversationLayoutMeta>,
     pub messages: Vec<Value>,
     /// 过滤后可见消息总数。
     #[serde(default)]
@@ -525,6 +532,7 @@ mod tests {
             active_session_mode: None,
             tiktoken_prompt_tokens: None,
             context_artifacts: vec![],
+            layout: None,
             messages: raw,
             total_count: 2,
             window_start_index: 0,

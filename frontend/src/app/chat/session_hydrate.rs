@@ -11,11 +11,21 @@
 //! ## 尾部合并
 //!
 //! - v2 finalized projection 保持不可变；服务端 revision 包含新增 user 回合时，仅追加该回合起的 canonical 后缀。
+//! - 有会话级 `layout` 时先把本页历史行映射成稳定 v2 行键
+//!   （[`crate::layout_projection`]），对不齐则整页回落 legacy。
 //! - 无 v2 投影（旧会话 / 冷启动）时**服务端快照权威**：保留已加载的更早前缀，只把与尾页重叠的本地段
 //!   换成服务端快照，并丢弃已被结果卡代表的水合调用短卡（[`drop_superseded_tool_call_stubs`]）。
 
 use crabmate_client_api::session_mode::is_known_mode;
 use std::collections::HashSet;
+
+#[path = "session_hydrate_layout.rs"]
+mod layout_glue;
+
+pub(crate) use layout_glue::TailMergeOutcome;
+use layout_glue::{
+    append_server_only_turns_to_v2_projection, project_layout_rows, window_prefix_len,
+};
 
 use leptos::prelude::*;
 use leptos::task::spawn_local;
@@ -30,7 +40,9 @@ use crate::conversation_hydrate::{
 use crate::i18n::{self, Locale};
 use crate::message_loading::messages_have_any_loading;
 use crate::session_ops::title_from_user_prompt;
-use crate::storage::{ChatSession, LEGACY_LAYOUT_SCHEMA_VERSION, StoredMessage};
+use crate::storage::{
+    CURRENT_LAYOUT_SCHEMA_VERSION, ChatSession, LEGACY_LAYOUT_SCHEMA_VERSION, StoredMessage,
+};
 
 fn count_user_role_bubbles(messages: &[StoredMessage]) -> usize {
     messages.iter().filter(|m| m.role == "user").count()
@@ -86,12 +98,7 @@ fn local_overwrite_prefix_len(session: &ChatSession, resp: &ConversationMessages
     if session.has_v2_layout_projection() && session.has_v2_finalized_rows() {
         return session.messages.len();
     }
-    match session.history_window_start {
-        Some(local_start) if resp.window_start_index >= local_start => {
-            ((resp.window_start_index - local_start) as usize).min(session.messages.len())
-        }
-        _ => 0,
-    }
+    window_prefix_len(session, resp)
 }
 
 /// 尾页合并会用服务端快照替换的本地尾部（见 [`local_overwrite_prefix_len`]）。
@@ -162,14 +169,24 @@ pub(crate) fn merge_tail_page_into_session_messages(
     session: &ChatSession,
     hydrated: Vec<StoredMessage>,
     resp: &ConversationMessagesResponse,
-) -> Vec<StoredMessage> {
-    if session.has_v2_layout_projection() && session.has_v2_finalized_rows() {
-        return append_server_only_turns_to_v2_projection(session.messages.as_slice(), hydrated);
+) -> TailMergeOutcome {
+    // 短卡先丢：水合快照里「调用短卡 + 结果卡」是同一个 `tool_call_id`，
+    // 不先收编就会让 layout 段数与本地工具行数对不上，映射必然回落。
+    let hydrated = drop_superseded_tool_call_stubs(hydrated);
+    let (rows, layout_projected) = project_layout_rows(hydrated, resp);
+    crate::layout_debug_counters::note_hydration_layout_projection(layout_projected);
+    let messages = if session.has_v2_layout_projection() && session.has_v2_finalized_rows() {
+        append_server_only_turns_to_v2_projection(session, resp, rows)
+    } else {
+        let keep = local_overwrite_prefix_len(session, resp);
+        let mut out: Vec<StoredMessage> = session.messages[..keep].to_vec();
+        out.extend(rows);
+        out
+    };
+    TailMergeOutcome {
+        messages,
+        layout_projected,
     }
-    let keep = local_overwrite_prefix_len(session, resp);
-    let mut out: Vec<StoredMessage> = session.messages[..keep].to_vec();
-    out.extend(drop_superseded_tool_call_stubs(hydrated));
-    out
 }
 
 /// 水合调用短卡：`assistant` 只有 `tool_calls`（空正文）时由 [`crate::conversation_hydrate`]
@@ -227,36 +244,6 @@ fn drop_superseded_tool_call_stubs(rows: Vec<StoredMessage>) -> Vec<StoredMessag
         .collect()
 }
 
-fn append_server_only_turns_to_v2_projection(
-    local: &[StoredMessage],
-    hydrated: Vec<StoredMessage>,
-) -> Vec<StoredMessage> {
-    let local_user_count = count_user_role_bubbles(local);
-    let mut hydrated_user_count = 0;
-    let suffix_start = hydrated.iter().position(|message| {
-        if message.role != "user" {
-            return false;
-        }
-        let starts_new_turn = hydrated_user_count == local_user_count;
-        hydrated_user_count += 1;
-        starts_new_turn
-    });
-    let Some(suffix_start) = suffix_start else {
-        return local.to_vec();
-    };
-
-    let mut combined = local.to_vec();
-    let mut existing_ids: HashSet<_> = local.iter().map(|message| message.id.as_str()).collect();
-    combined.extend(
-        hydrated
-            .iter()
-            .skip(suffix_start)
-            .filter(|message| existing_ids.insert(message.id.as_str()))
-            .cloned(),
-    );
-    combined
-}
-
 /// 是否把服务端快照写回会话：空缓存或服务端 revision 不低于本地即合并。
 ///
 /// 同 revision 也合并：v2 projection 的追加是 no-op，无 v2 投影时服务端快照替换亦幂等，
@@ -298,14 +285,18 @@ pub(crate) fn apply_hydrated_tail_if_newer(
     }
     let preserved_v2_projection =
         session.has_v2_layout_projection() && session.has_v2_finalized_rows();
-    let merged = merge_tail_page_into_session_messages(session, hydrated, resp);
+    let outcome = merge_tail_page_into_session_messages(session, hydrated, resp);
     // 内容未变就不重新赋值：`sessions` 信号变化会触发一次去抖持久化，否则同 revision 的每次
     // 加载都会多发一次 `PUT /user-data/...`（内容相同、服务端幂等，但那是纯噪声）。
-    if merged == session.messages {
+    if outcome.messages == session.messages {
         return;
     }
-    session.messages = merged;
-    if !preserved_v2_projection {
+    session.messages = outcome.messages;
+    // 映射成功且真的落了 v2 键才 stamp：只有版本字段、没有稳定行键的会话仍按 legacy 处理
+    // （见 `ChatSession::has_v2_layout_projection` 的注释——空投影会让后续水合误判）。
+    if outcome.layout_projected && session.has_v2_finalized_rows() {
+        session.layout_schema_version = CURRENT_LAYOUT_SCHEMA_VERSION;
+    } else if !preserved_v2_projection {
         apply_hydration_layout_schema(session);
     }
 }
