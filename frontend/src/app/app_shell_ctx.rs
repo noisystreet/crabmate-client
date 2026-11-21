@@ -166,7 +166,11 @@ pub struct SideColumnViewSignals {
 /// [`init_app_shell`](super::app_shell_init::init_app_shell) 中的 wire 实参，不必再维护超长「逐字段拷贝」列表。
 #[derive(Clone)]
 pub struct AppShellCtx {
-    pub signals: AppSignals,
+    /// 窗口内的 lane 容器（#561 阶段 3）：现在恒一条。
+    ///
+    /// 壳内取信号一律经 [`Self::signals`]，于是「当前是哪条 lane」只有一个入口 ——
+    /// 将来切 lane 只改容器，不动 121 处调用点。
+    pub(crate) lanes: super::app_signals::LaneSet,
     pub new_session: Rc<dyn Fn()>,
     pub refresh_workspace: Arc<dyn Fn() + Send + Sync>,
     pub refresh_tasks: Arc<dyn Fn() + Send + Sync>,
@@ -177,65 +181,74 @@ pub struct AppShellCtx {
 }
 
 impl AppShellCtx {
+    /// 当前前台那条 lane 的一组信号。
+    ///
+    /// #561 起壳内一律经它取（改造前是 `signals` 字段，121 处直接访问）。切 lane 的
+    /// 语义因此只落在一处 —— 容器换当前下标，全壳跟着换。
+    #[must_use]
+    pub fn signals(&self) -> AppSignals {
+        self.lanes.current()
+    }
+
     pub fn sidebar_nav_signals(&self) -> SidebarNavSignals {
         SidebarNavSignals {
-            locale: self.signals.shell_ui.locale,
-            mobile_nav_open: self.signals.sidebar.mobile_nav_open,
-            session_modal: self.signals.modal.session_modal,
+            locale: self.signals().shell_ui.locale,
+            mobile_nav_open: self.signals().sidebar.mobile_nav_open,
+            session_modal: self.signals().modal.session_modal,
             new_session: self.new_session.clone(),
-            sidebar_session_query: self.signals.sidebar.sidebar_session_query,
-            global_message_query: self.signals.sidebar.global_message_query,
-            sidebar_search_panel_open: self.signals.sidebar.sidebar_search_panel_open,
-            sidebar_rail_ctx_menu: self.signals.sidebar.sidebar_rail_ctx_menu,
-            chat_find_panel_open: self.signals.chat_composer.chat_find_panel_open,
-            session_context_menu: self.signals.sidebar.session_context_menu,
-            sidebar_rail_collapsed: self.signals.sidebar.sidebar_rail_collapsed,
-            settings_page: self.signals.modal.settings_page,
+            sidebar_session_query: self.signals().sidebar.sidebar_session_query,
+            global_message_query: self.signals().sidebar.global_message_query,
+            sidebar_search_panel_open: self.signals().sidebar.sidebar_search_panel_open,
+            sidebar_rail_ctx_menu: self.signals().sidebar.sidebar_rail_ctx_menu,
+            chat_find_panel_open: self.signals().chat_composer.chat_find_panel_open,
+            session_context_menu: self.signals().sidebar.session_context_menu,
+            sidebar_rail_collapsed: self.signals().sidebar.sidebar_rail_collapsed,
+            settings_page: self.signals().modal.settings_page,
         }
     }
 
     pub fn side_column_view_signals(&self) -> SideColumnViewSignals {
         SideColumnViewSignals {
-            locale: self.signals.shell_ui.locale,
-            side_resize_dragging: self.signals.resize.side_resize_dragging,
-            side_panel_view: self.signals.shell_ui.side_panel_view,
-            side_width: self.signals.shell_ui.side_width,
-            side_resize_session: Rc::clone(&self.signals.resize.side_resize_session),
-            side_resize_handles: Rc::clone(&self.signals.resize.side_resize_handles),
-            view_menu_open: self.signals.shell_ui.view_menu_open,
-            settings_page: self.signals.modal.settings_page,
-            workspace_panel: self.signals.to_workspace_panel(),
-            status_tasks: self.signals.to_status_tasks(),
+            locale: self.signals().shell_ui.locale,
+            side_resize_dragging: self.signals().resize.side_resize_dragging,
+            side_panel_view: self.signals().shell_ui.side_panel_view,
+            side_width: self.signals().shell_ui.side_width,
+            side_resize_session: Rc::clone(&self.signals().resize.side_resize_session),
+            side_resize_handles: Rc::clone(&self.signals().resize.side_resize_handles),
+            view_menu_open: self.signals().shell_ui.view_menu_open,
+            settings_page: self.signals().modal.settings_page,
+            workspace_panel: self.signals().to_workspace_panel(),
+            status_tasks: self.signals().to_status_tasks(),
             refresh_workspace: Arc::clone(&self.refresh_workspace),
             refresh_tasks: Arc::clone(&self.refresh_tasks),
             toggle_task: Arc::clone(&self.toggle_task),
-            changelist_modal_open: self.signals.modal.changelist_modal_open,
-            changelist_fetch_nonce: self.signals.modal.changelist_fetch_nonce,
+            changelist_modal_open: self.signals().modal.changelist_modal_open,
+            changelist_fetch_nonce: self.signals().modal.changelist_fetch_nonce,
             insert_workspace_file_ref: self.insert_workspace_file_ref,
-            thinking_trace_log: self.signals.approval.thinking_trace_log,
-            is_narrow_viewport: self.signals.shell_ui.is_narrow_viewport,
-            ide_open_file_nonce: self.signals.shell_ui.ide_open_file_nonce,
-            ide_open_file_path: self.signals.shell_ui.ide_open_file_path,
-            chat: self.signals.chat,
+            thinking_trace_log: self.signals().approval.thinking_trace_log,
+            is_narrow_viewport: self.signals().shell_ui.is_narrow_viewport,
+            ide_open_file_nonce: self.signals().shell_ui.ide_open_file_nonce,
+            ide_open_file_path: self.signals().shell_ui.ide_open_file_path,
+            chat: self.signals().chat,
             status_bar: self.status_bar_footer_signals(),
         }
     }
 
     pub fn session_list_modal_signals(&self) -> SessionListModalSignals {
-        SessionListModalSignals::from_app_signals(&self.signals)
+        SessionListModalSignals::from_app_signals(&self.signals())
     }
 
     pub fn workspace_project_modal_signals(
         &self,
     ) -> super::workspace_project_modal::WorkspaceProjectModalSignals {
         super::workspace_project_modal::WorkspaceProjectModalSignals {
-            open: self.signals.workspace.workspace_project_modal_open,
+            open: self.signals().workspace.workspace_project_modal_open,
             workspace_pick: super::workspace_root_actions::WorkspaceRootPickHandle {
-                locale: self.signals.shell_ui.locale,
-                chat: self.signals.chat,
-                composer_draft: self.signals.chat_composer.draft,
-                ws: self.signals.to_workspace_panel(),
-                side_panel_view: self.signals.shell_ui.side_panel_view,
+                locale: self.signals().shell_ui.locale,
+                chat: self.signals().chat,
+                composer_draft: self.signals().chat_composer.draft,
+                ws: self.signals().to_workspace_panel(),
+                side_panel_view: self.signals().shell_ui.side_panel_view,
             },
         }
     }
@@ -244,14 +257,14 @@ impl AppShellCtx {
         &self,
     ) -> super::workspace_clone_modal::WorkspaceCloneModalSignals {
         super::workspace_clone_modal::WorkspaceCloneModalSignals {
-            open: self.signals.workspace.workspace_clone_modal_open,
-            settings_page: self.signals.modal.settings_page,
+            open: self.signals().workspace.workspace_clone_modal_open,
+            settings_page: self.signals().modal.settings_page,
             workspace_pick: super::workspace_root_actions::WorkspaceRootPickHandle {
-                locale: self.signals.shell_ui.locale,
-                chat: self.signals.chat,
-                composer_draft: self.signals.chat_composer.draft,
-                ws: self.signals.to_workspace_panel(),
-                side_panel_view: self.signals.shell_ui.side_panel_view,
+                locale: self.signals().shell_ui.locale,
+                chat: self.signals().chat,
+                composer_draft: self.signals().chat_composer.draft,
+                ws: self.signals().to_workspace_panel(),
+                side_panel_view: self.signals().shell_ui.side_panel_view,
             },
         }
     }
@@ -260,114 +273,114 @@ impl AppShellCtx {
         &self,
     ) -> super::workspace_browser_pick_modal::WorkspaceBrowserPickModalSignals {
         super::workspace_browser_pick_modal::WorkspaceBrowserPickModalSignals {
-            open: self.signals.workspace.workspace_browser_pick_modal_open,
+            open: self.signals().workspace.workspace_browser_pick_modal_open,
             workspace_pick: super::workspace_root_actions::WorkspaceRootPickHandle {
-                locale: self.signals.shell_ui.locale,
-                chat: self.signals.chat,
-                composer_draft: self.signals.chat_composer.draft,
-                ws: self.signals.to_workspace_panel(),
-                side_panel_view: self.signals.shell_ui.side_panel_view,
+                locale: self.signals().shell_ui.locale,
+                chat: self.signals().chat,
+                composer_draft: self.signals().chat_composer.draft,
+                ws: self.signals().to_workspace_panel(),
+                side_panel_view: self.signals().shell_ui.side_panel_view,
             },
         }
     }
 
     pub fn status_bar_footer_signals(&self) -> StatusBarFooterSignals {
         StatusBarFooterSignals {
-            status_tasks: self.signals.to_status_tasks(),
-            status_err: self.signals.stream.status_err,
+            status_tasks: self.signals().to_status_tasks(),
+            status_err: self.signals().stream.status_err,
             stream_busy_memos: self.chat_column.stream_busy_memos,
-            client_llm_storage_tick: self.signals.llm_settings.client_llm_storage_tick,
-            selected_agent_role: self.signals.llm_settings.selected_agent_role,
-            agent_role_user_override: self.signals.llm_settings.agent_role_user_override,
-            selected_session_mode: self.signals.llm_settings.selected_session_mode,
-            session_mode_user_override: self.signals.llm_settings.session_mode_user_override,
-            llm_thinking_mode: self.signals.llm_settings.llm_thinking_mode_draft,
+            client_llm_storage_tick: self.signals().llm_settings.client_llm_storage_tick,
+            selected_agent_role: self.signals().llm_settings.selected_agent_role,
+            agent_role_user_override: self.signals().llm_settings.agent_role_user_override,
+            selected_session_mode: self.signals().llm_settings.selected_session_mode,
+            session_mode_user_override: self.signals().llm_settings.session_mode_user_override,
+            llm_thinking_mode: self.signals().llm_settings.llm_thinking_mode_draft,
             refresh_status: Arc::clone(&self.refresh_status),
-            user_prefs_reload_nonce: self.signals.workspace.user_prefs_reload_nonce,
-            user_prefs_sync_phase: self.signals.workspace.user_prefs_sync_phase,
-            user_prefs_load_err: self.signals.workspace.user_prefs_load_err,
-            user_prefs_save_err: self.signals.workspace.user_prefs_save_err,
-            settings_page: self.signals.modal.settings_page,
-            conversation_hydration_err: self.signals.chat.conversation_hydration_err,
-            context_usage_page: self.signals.modal.context_usage_page,
+            user_prefs_reload_nonce: self.signals().workspace.user_prefs_reload_nonce,
+            user_prefs_sync_phase: self.signals().workspace.user_prefs_sync_phase,
+            user_prefs_load_err: self.signals().workspace.user_prefs_load_err,
+            user_prefs_save_err: self.signals().workspace.user_prefs_save_err,
+            settings_page: self.signals().modal.settings_page,
+            conversation_hydration_err: self.signals().chat.conversation_hydration_err,
+            context_usage_page: self.signals().modal.context_usage_page,
         }
     }
 
     pub fn changelist_modal_signals(&self) -> ChangelistModalSignals {
         ChangelistModalSignals {
-            changelist_modal_open: self.signals.modal.changelist_modal_open,
-            locale: self.signals.shell_ui.locale,
-            changelist_modal_body: self.signals.modal.changelist_modal_body,
-            changelist_fetch_nonce: self.signals.modal.changelist_fetch_nonce,
-            changelist_body_ref: self.signals.modal.changelist_body_ref,
+            changelist_modal_open: self.signals().modal.changelist_modal_open,
+            locale: self.signals().shell_ui.locale,
+            changelist_modal_body: self.signals().modal.changelist_modal_body,
+            changelist_fetch_nonce: self.signals().modal.changelist_fetch_nonce,
+            changelist_body_ref: self.signals().modal.changelist_body_ref,
         }
     }
 
     pub fn mobile_shell_header_signals(&self) -> MobileShellHeaderSignals {
         MobileShellHeaderSignals {
-            locale: self.signals.shell_ui.locale,
-            editor_layout_mode: self.signals.shell_ui.editor_layout_mode,
-            is_narrow_viewport: self.signals.shell_ui.is_narrow_viewport,
-            ide_menu_bar_bridge: self.signals.shell_ui.ide_menu_bar_bridge,
+            locale: self.signals().shell_ui.locale,
+            editor_layout_mode: self.signals().shell_ui.editor_layout_mode,
+            is_narrow_viewport: self.signals().shell_ui.is_narrow_viewport,
+            ide_menu_bar_bridge: self.signals().shell_ui.ide_menu_bar_bridge,
             workspace_pick: super::workspace_root_actions::WorkspaceRootPickHandle {
-                locale: self.signals.shell_ui.locale,
-                chat: self.signals.chat,
-                composer_draft: self.signals.chat_composer.draft,
-                ws: self.signals.to_workspace_panel(),
-                side_panel_view: self.signals.shell_ui.side_panel_view,
+                locale: self.signals().shell_ui.locale,
+                chat: self.signals().chat,
+                composer_draft: self.signals().chat_composer.draft,
+                ws: self.signals().to_workspace_panel(),
+                side_panel_view: self.signals().shell_ui.side_panel_view,
             },
-            ide_menubar_dropdown_open: self.signals.shell_ui.ide_menubar_dropdown_open,
-            side_panel_view: self.signals.shell_ui.side_panel_view,
-            status_tasks: self.signals.to_status_tasks(),
-            status_err: self.signals.stream.status_err,
+            ide_menubar_dropdown_open: self.signals().shell_ui.ide_menubar_dropdown_open,
+            side_panel_view: self.signals().shell_ui.side_panel_view,
+            status_tasks: self.signals().to_status_tasks(),
+            status_err: self.signals().stream.status_err,
             stream_busy_memos: self.chat_column.stream_busy_memos,
         }
     }
 
     pub fn approval_modal_signals(&self) -> ApprovalModalSignals {
         ApprovalModalSignals {
-            pending_approval: self.signals.approval.pending_approval,
-            busy: self.signals.approval.approval_busy,
+            pending_approval: self.signals().approval.pending_approval,
+            busy: self.signals().approval.approval_busy,
             // #561 §8.4：审批弹窗按 lane 阶段门控（单 lane 恒 Foreground，不改变行为）。
-            phase: self.signals.phase,
-            error: self.signals.approval.approval_error,
-            locale: self.signals.shell_ui.locale,
+            phase: self.signals().phase,
+            error: self.signals().approval.approval_error,
+            locale: self.signals().shell_ui.locale,
         }
     }
 
     /// 设置页全屏视图：`settings_page` 开关 + 表单信号（阶段 B：单行传入 `SettingsPageView`）。
     pub fn settings_page_view_input(&self) -> SettingsPageViewInput {
         SettingsPageViewInput {
-            settings_page: self.signals.modal.settings_page,
+            settings_page: self.signals().modal.settings_page,
             form: self.settings_page_form_signals(),
-            status_data: self.signals.status.status_data,
+            status_data: self.signals().status.status_data,
             refresh_status: Arc::clone(&self.refresh_status),
         }
     }
 
     /// 设置页表单所需 `RwSignal` 聚合（阶段 B：避免在 `App` 的 `view!` 中重复罗列字段）。
     pub fn settings_page_form_signals(&self) -> SettingsPageFormSignals {
-        SettingsPageFormSignals::from_app_signals(&self.signals)
+        SettingsPageFormSignals::from_app_signals(&self.signals())
     }
 
     /// IDE 编辑器设置全屏页入参。
     pub fn ide_settings_page_view_input(&self) -> IdeSettingsPageViewInput {
         IdeSettingsPageViewInput {
-            ide_settings_page: self.signals.modal.ide_settings_page,
-            locale: self.signals.shell_ui.locale,
-            editor: self.signals.ide_editor,
+            ide_settings_page: self.signals().modal.ide_settings_page,
+            locale: self.signals().shell_ui.locale,
+            editor: self.signals().ide_editor,
         }
     }
 
     /// 上下文用量可视化全屏页入参（与状态栏「会话」芯片同源信号）。
     pub fn context_usage_page_view_input(&self) -> ContextUsagePageViewInput {
         ContextUsagePageViewInput {
-            context_usage_page: self.signals.modal.context_usage_page,
-            st: self.signals.to_status_tasks(),
-            chat: self.signals.chat,
-            client_llm_storage_tick: self.signals.llm_settings.client_llm_storage_tick,
-            selected_agent_role: self.signals.llm_settings.selected_agent_role,
-            locale: self.signals.shell_ui.locale,
+            context_usage_page: self.signals().modal.context_usage_page,
+            st: self.signals().to_status_tasks(),
+            chat: self.signals().chat,
+            client_llm_storage_tick: self.signals().llm_settings.client_llm_storage_tick,
+            selected_agent_role: self.signals().llm_settings.selected_agent_role,
+            locale: self.signals().shell_ui.locale,
         }
     }
 }
