@@ -20,8 +20,9 @@
 
 **核心原则**：纯前端行为的回归测试优选 Playwright，Tauri 特有行为留 victauri_test。
 
-> **迁移进行中（#152）**：Victauri 侧现存用例几乎全是页面行为（0 个调用 Tauri IPC），正分批迁入本目录；迁完 Victauri 只保留壳冒烟。已迁：`status-bar` / `visible-messages` / `prefs-theme` / `session-crud` / `settings-page` / `keyboard-scroll` / `sse-control` / `ui-layout` / `user-data-api` / `turn-layout` / `side-toolbar` / `scroll-send`。
-> 仍在 Victauri 的：`victauri_settings2`（直读设备钥匙串，浏览器无等价物）、`victauri_conversation` / `victauri_pagination`（依赖 `CM_E2E_FIXTURES=1`）。
+> **迁移进行中（#152 / #548）**：Victauri 侧用例几乎全是页面行为（0 个调用 Tauri IPC），正分批迁入本目录；迁完 Victauri 只保留壳冒烟。已迁（Wave 1–4）：`status-bar` / `visible-messages` / `prefs-theme` / `session-crud` / `settings-page` / `keyboard-scroll` / `sse-control` / `ui-layout` / `user-data-api` / `turn-layout` / `side-toolbar` / `scroll-send` / `conversation-pagination`。
+> 仍在 Victauri 的只剩：`victauri_settings2`（直读设备钥匙串，浏览器无等价物）与 `victauri_e2e`（壳冒烟）。
+> `conversation` / `pagination` 迁入后**不再需要 `CM_E2E_FIXTURES=1`**：`mock-conversation-pagination.spec.ts` 用 `page.route` 按 query 造分页响应；`GET /conversation/messages` 的响应形状（全量 / `limit` 截尾 / `before_index` / 404）归 Server 仓集成测试。
 > 已**删除**（测试对象已不存在，非迁移）：`victauri_ide_layout`（入口 testid `layout-mode-toggle` / `ide-layout-root` 随 UI 重构消失）与 `victauri_turn_layout` 的多工具用例（需按 AG-UI V2 时序重写）——因此 IDE 往返与多工具交错目前**没有自动化覆盖**。
 
 ## 前置条件
@@ -192,7 +193,7 @@ REAL_LLM_E2E=1 npx playwright test specs/real-llm-three-turn-scroll.spec.ts
 
 ### 注意事项
 
-- **持久化验证**：mock SSE 不包含 `conversation_saved` 事件，无法验证消息持久化。持久化回归由 `victauri_turn_layout.rs` 覆盖。
+- **持久化验证**：mock SSE 不包含 `conversation_saved` 事件，无法验证消息持久化。持久化 / v2 投影回归由 `specs/mock-hydrate-layout-v2-projection.spec.ts`、`specs/mock-mid-process-commentary-duplicate.spec.ts`（重载后再断言）与 `specs/mock-conversation-pagination.spec.ts`（分页水合）覆盖。
 - **第二次 answer_phase**：无 delta 的第二次 `assistant_answer_phase` 后紧跟 `RUN_FINISHED`，可触发 `followup_pending` 在 `on_done` 中处理的路径（PR #678 修复二的精确场景）。
 - **状态栏等待**：`[data-testid="status-bar"]` 现位于右列（工作区列）的状态栈内；栈在右列收起时保留 DOM 但视觉隐藏，故只用 `toContainText`（读 textContent，对隐藏元素仍生效）判断流完成。需要 `toBeVisible` / 点击的用例须先展开右列（`seedSession(..., { sidePanelView: "workspace" })`）。
 - **选择器偏好**：优先使用 `data-testid` 属性选择器，避免依赖文本或 CSS 类名。
@@ -257,6 +258,7 @@ GitHub Actions：本仓 `.github/workflows/e2e-playwright.yml`（PR → `main`�
 - `specs/mock-turn-layout.spec.ts`（由 Victauri 迁入，#152）
 - `specs/mock-side-toolbar.spec.ts`（由 Victauri 迁入，#152）
 - `specs/mock-scroll-send.spec.ts`（由 Victauri 迁入，#152）
+- `specs/mock-conversation-pagination.spec.ts`（由 Victauri 迁入，#548；分页响应走 `page.route` mock，不需要 `CM_E2E_FIXTURES`）
 
 本地全量 mock：`make frontend` 后 `./scripts/e2e-playwright.sh`（自动起纯 API serve + `crabmate-web`；或手动起两者后 `cd e2e && CRABMATE_API_BASE=http://127.0.0.1:8080 no_proxy=127.0.0.1,localhost npx playwright test`）。
 
