@@ -35,7 +35,7 @@ pub use github_oauth::{
 #[allow(unused_imports)] // 对外 re-export；handoff / 设置页等按需引用
 pub use browser::{
     api_base_host_is_loopback, api_base_url, api_url, is_web_api_credential_error,
-    set_api_base_url, set_web_api_bearer_token, web_api_bearer_token_is_set,
+    set_api_base_url, set_api_base_url_with, set_web_api_bearer_token, web_api_bearer_token_is_set,
 };
 pub use chat_stream::{ChatStreamCallbacks, OnToolCallFn, SendChatStreamParams, send_chat_stream};
 pub use client_llm_cache::load_llm_thinking_mode_initial;

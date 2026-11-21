@@ -333,9 +333,17 @@ pub fn web_api_bearer_token_is_set() -> bool {
 
 /// 设置远程 `serve` API 基址（空 = 同 Origin）。写入内存 + `localStorage`（空串仍保留键）。
 pub fn set_api_base_url(base: &str) {
+    set_api_base_url_with(&connection_scope::active_holder(), base);
+}
+
+/// [`set_api_base_url`] 的**显式 holder** 版本（#558）：写进指定的那一份 scope。
+///
+/// 设置页走这条：它是「前台天然唯一」的调用点，所以取 `active_holder()` 传进来 ——
+/// 但写成显式参数之后，将来每条 lane 各带自己的 holder 也只改调用方一处。
+pub fn set_api_base_url_with(holder: &connection_scope::ScopeHolder, base: &str) {
     let t = normalize_api_base_url(base);
     // `set_api_base` 同时置「已决定」：调用方不用记得两步都做。
-    connection_scope::set_api_base(&t);
+    holder.set_api_base(&t);
     write_api_base_local_storage(&t);
 }
 

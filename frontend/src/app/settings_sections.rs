@@ -349,7 +349,11 @@ pub(crate) fn SettingsWebApiBearerBlock(
 }
 
 /// 校验（http/https 前缀）并保存 API 基址；反馈与 dirty nonce 一并更新。
+///
+/// `scope` 是**显式**带进来的那一份 holder（#558）：调用方传前台默认的那份，将来每条
+/// lane 各传自己的，这一层不用改。
 fn save_api_base_click(
+    scope: crate::api::connection_scope::ScopeHolder,
     locale: RwSignal<Locale>,
     draft: RwSignal<String>,
     feedback: RwSignal<Option<String>>,
@@ -362,8 +366,8 @@ fn save_api_base_click(
         feedback.set(Some(i18n::settings_api_base_invalid(loc).to_string()));
         return;
     }
-    crate::api::set_api_base_url(trimmed);
-    let normalized = crate::api::api_base_url();
+    crate::api::set_api_base_url_with(&scope, trimmed);
+    let normalized = scope.api_base();
     // 同步响应式镜像：状态栈的「连接」chip 据此换字。真源是 `api::connection_scope`
     // 的 `ScopeHolder`（#558 起值住在它里面，不再直接躺在 thread_local）—— 这里只把
     // 「刚改过」这件事广播出去，避免两处各读一份。
@@ -389,6 +393,9 @@ pub(crate) fn SettingsApiBaseBlock(
 ) -> impl IntoView {
     let draft = RwSignal::new(crate::api::api_base_url());
     let feedback = RwSignal::new(None::<String>);
+    // #558：设置页是「前台天然唯一」的调用点，所以取前台默认的那一份 holder。
+    // 写成显式参数之后，将来每条 lane 各带自己的 holder 只改这一行。
+    let scope = crate::api::connection_scope::active_holder();
 
     view! {
         <div
@@ -416,7 +423,7 @@ pub(crate) fn SettingsApiBaseBlock(
                 class="btn btn-primary btn-sm"
                 data-testid="settings-api-base-save"
                 on:click=move |_| {
-                    save_api_base_click(locale, draft, feedback, save_nonce);
+                    save_api_base_click(scope.clone(), locale, draft, feedback, save_nonce);
                 }
             >
                 {move || i18n::settings_api_base_save(locale.get())}
