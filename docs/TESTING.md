@@ -7,7 +7,7 @@ make test-web-host   # crabmate-web 回环静态服务单测
 make test            # frontend → tauri → tui → web-host
 ```
 
-Victauri 全量 E2E（需 WebView / 外部 serve）另跑：`make victauri-e2e`。  
+桌面壳冒烟（真实 WebKitGTK + 外部 serve，xvfb）：`make smoke-desktop-shell`。  
 Playwright（浏览器 UI，需纯 API `serve` + 客户端 `crabmate-web` 自托管）：`make e2e-playwright`。
 
 失败时先取 CI 的 `playwright-report` artifact —— 里面既有 html 报告，也有 `test-results/` 的失败截图与 trace。workflow 在开跑前会探活 `:8080/health` 与 `:4173/`，不可达时打印监听端口与进程存活情况，用来把「服务在测试前就已失联」与「测试自身失败」分开。页面就绪统一等 `domcontentloaded` + composer 选择器，**不要**用 `networkidle`：SPA 首屏后会挂水合 / 轮询请求，它永远等不到，超时错误还会盖住真正的原因。
@@ -48,7 +48,7 @@ pre-commit run --all-files
 | `e2e-format` / `e2e-lint` | Playwright：`cd e2e && npm run format:check` / `lint`（需先 `cd e2e && npm ci`） |
 | `conventional-pre-commit` | commit-msg |
 
-**不含** Victauri 全量 E2E（默认 CI）。**含** Playwright mock E2E（见下节与 `.github/workflows/e2e-playwright.yml`）。
+**不含** 桌面壳冒烟与 Playwright 运行本身（CI 里另有 `E2E Playwright` 工作流；壳冒烟不进 CI）。
 
 未装 `pre-commit` 时至少：
 
@@ -63,17 +63,15 @@ bash scripts/check.sh
 | Job / 工作流 | 内容 |
 |--------------|------|
 | `CI` / `check` | `check-no-main-path`、`scripts/check.sh`（含 `check-boundaries` 边界检查 + frontend wasm32 clippy + 复杂度）、`make frontend`（trunk）、`make test-frontend`、`make test-tui`、`make test-web-host`、connect/desktop **unit** test（desktop `cargo test --bins`）、mobile check |
-| `CI` / `victauri-e2e` | **Skipped**（`if: false`）；壳 E2E 见 nightly |
 | `CI` / `build-desktop-deb` | `CM_PREPARE_SKIP_FRONTEND=1` + stub；`make desktop-release`；校验 `Package: crabmate-desktop`、无 serve sidecar、无 `/etc/crabmate` |
 | `CI` / `build-web-deb` | `CM_WEB_SKIP_FRONTEND=1` + stub dist；`make web-release`；校验 `Package: crabmate-web`、菜单图标、无 serve sidecar、无 `/etc/crabmate` |
 | `CI` / `build-tui-deb` | `make tui-release`；校验 `Package: crabmate-tui`、仅 `/usr/bin/crabmate-tui`、无图标/配置、无 serve sidecar、无 `/etc/crabmate` |
 | `Release`（推 `v*` tag） | guard：tag 须可达自 `origin/main` → `build-frontend`（`make frontend-release`，真实 UI，装 trunk + wasm-opt）→ 分别 `make desktop-release`（`CRABMATE_FRONTEND_DIST` 复用 dist）/ `make web-release`（`CM_WEB_SKIP_FRONTEND=1` + 真 dist）/ `make tui-release`；校验同 CI 三个 deb job → 上传三 .deb，notes 取 `CHANGELOG.md` 对应版本段发 GitHub Release（`.github/workflows/release.yml`） |
 | `E2E Playwright` | 本仓 `make frontend` + checkout Server 编纯 API `serve` + 本仓编 `crabmate-web`（回环托管 UI）；mock SSE 基线 |
-| `Victauri E2E Nightly` | `make frontend` + Server `serve` + `./scripts/victauri-e2e.sh all`（xvfb；不含 `real_llm`）；失败上传桌面/serve 日志 |
 | `code-complexity` | 独立门禁：`lizard-rust` / `fn-param` / `fn-nloc` |
 | `Dependency security` | 各 Cargo workspace：`cargo audit` + `cargo deny check licenses bans sources`（`deny.toml`）；**不进** pre-commit |
 
-Victauri 全量 E2E **不进** PR 默认 CI（`e2e_test!` 未设 `VICTAURI_E2E` 时会 0 秒假通过）；见 nightly 或本地 `victauri-e2e.sh`。
+桌面壳冒烟**不进** CI：它要 xvfb + 真实 WebKitGTK + 一份 serve，比页面 E2E 贵得多；本地 / 发版前用 `make smoke-desktop-shell`。
 
 本地 UI / 打包：
 
@@ -136,19 +134,19 @@ make frontend
 `cd e2e && no_proxy=127.0.0.1,localhost,api.deepseek.com npx playwright test specs/real-llm-*.spec.ts`  
 （三轮滚动另需 `REAL_LLM_E2E=1`。）
 
-## Victauri（Desktop 壳 E2E）
+## 桌面壳冒烟（scripts/smoke-desktop-shell.sh）
 
 ```bash
-./scripts/victauri-e2e.sh all          # #548 后只剩壳冒烟（victauri_e2e）
-./scripts/victauri-e2e.sh victauri_e2e
-REAL_LLM_E2E=1 ./scripts/victauri-e2e.sh real_llm
+make smoke-desktop-shell          # 或 ./scripts/smoke-desktop-shell.sh
 ```
 
-页面行为（分页 / 设置页 / 模型注册等）已陆续迁入 Playwright（`e2e/specs`，随 PR 门禁跑，见 `e2e/README.md` 的分工表）；钥匙串往返由 `crates/crabmate-connect` 的单测覆盖。这里留下的只有「真实 WebView 能否起来」这一层。
+判据（按强度）：壳进程在观察窗内仍存活 → 日志无 `startup failed` / panic → 壳的**子进程**里出现 WebKit（`WebKitWebProcess` / `WebKitNetworkProcess`，= WebView 引擎真的初始化并开始加载页面）。
 
-`serve` 二进制解析顺序：`CM_DESKTOP_BACKEND_BIN` → `PATH` 中的 `crabmate` → 同级 `../crabmate_agent/target/debug/crabmate`（仅本地双轨）。正式验收应钉已发布/`PATH` 中的 `serve`。壳加载**包内** UI（Phase 2），脚本启动 `serve` 时**不传** `--with-web`（纯 API 即可）。
+不查 X11 窗口：在无窗口管理器的 xvfb 里，主窗口先以不可见状态创建、页面加载完才 `show()`，而 debug 构建的 WASM 有 160+ MiB —— 实测到 43s 仍 `xwininfo -root -tree` 报 0 children。把窗口当判据只会得到一条稳定假红。
 
-脚本在构建前会**临时**写入 `victauri:default` capability（JS bridge 必需），退出时恢复；**勿**把该权限长期留在无 `--features victauri` 的 `capabilities/default.json`（否则普通 `cargo check` 会失败）。
+页面行为（分页 / 设置页 / 模型注册…）在 Playwright（`e2e/specs`，随 PR 门禁）；钥匙串往返在 `crates/crabmate-connect` 的单测。壳冒烟只回答「打完包的壳在本机能起来吗」。
+
+`serve` 二进制解析顺序：`CM_DESKTOP_BACKEND_BIN` → `PATH` 中的 `crabmate` → 同级 `../crabmate_agent` / `../CrabMate` / `../server` 的 `target/{debug,release}/crabmate`。已有 serve 监听同端口时直接复用（不杀别人的）。壳以 `CM_DESKTOP_SKIP_CONNECT=1` + `CM_DESKTOP_SERVE_URL` 直接开包内 UI，启动 `serve` 时**不传** `--with-web`（纯 API 即可）。
 
 ## 人工壳冒烟
 

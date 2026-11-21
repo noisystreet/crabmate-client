@@ -21,8 +21,8 @@
 ├── frontend/                # Business UI; contract crabmate + protocol (crates.io semver or git rev pin)
 ├── e2e/                     # Playwright (browser UI)
 ├── fixtures/                # golden JSONL fixtures (sse_ag_ui / turn_web_v2_stored_sync)
-├── .github/                 # workflows/ (ci, code-complexity, dependency-security, e2e-playwright, release, victauri-e2e-nightly) + dependabot / PR template
-├── scripts/                 # one script per gate (check-*.sh, lizard / fn-param / fn-nloc ratchets, ktlint-android) + release / pack helpers, victauri-e2e, e2e-playwright, set-version; rust-pkg-dirs.txt = package list single source
+├── .github/                 # workflows/ (ci, code-complexity, dependency-security, e2e-playwright, release) + dependabot / PR template
+├── scripts/                 # one script per gate (check-*.sh, lizard / fn-param / fn-nloc ratchets, ktlint-android) + release / pack helpers, smoke-desktop-shell, e2e-playwright, set-version; rust-pkg-dirs.txt = package list single source
 ├── docs/
 │   ├── TESTING.md
 │   ├── design/
@@ -106,7 +106,7 @@ bash scripts/fn-param-ratchet.sh         # function param cap: lizard max params
 bash scripts/fn-nloc-ratchet.sh          # function nloc <= 200 and Rust file <= 920 lines
 bash scripts/dependency-security.sh      # cargo audit + cargo deny; not in pre-commit / check.sh
 bash scripts/ktlint-android.sh           # needs java; `--format` to fix
-make victauri-e2e                # or ./scripts/victauri-e2e.sh all; needs a usable crabmate serve binary; not in default CI
+make smoke-desktop-shell        # or ./scripts/smoke-desktop-shell.sh; needs a usable crabmate serve binary + xvfb; not in CI
 make e2e-playwright              # or ./scripts/e2e-playwright.sh; needs frontend/dist + serve; pre-commit only runs its format/lint
 ```
 
@@ -161,7 +161,7 @@ When updating docs:
 | UI issue backlog (shell-wide) | `docs/design/ui_issue_todo.md` |
 | Manual shell smoke steps | `docs/design/shell_smoke_runbook.md` |
 | Personal cloud (shell → remote API-only) | `docs/design/personal_cloud_runbook.md`; VPS/Caddy authority is Server |
-| Victauri / pre-commit / CI commands | `docs/TESTING.md` |
+| Shell smoke / pre-commit / CI commands | `docs/TESTING.md` |
 | Issue / PR templates | `.github/ISSUE_TEMPLATE/` (`bug_report.md` / `feature_request.md` / `config.yml`) + `.github/pull_request_template.md`; keep the three issue files and the PR template consistent in the same PR |
 | Dependency audit (`cargo audit` / `cargo deny`) | `deny.toml`; CI `.github/workflows/dependency-security.yml`; not in pre-commit |
 | User/maintainer release notes | `CHANGELOG.md` (English; Keep a Changelog; move Unreleased into a version section on release). **Entry style**: one `[Unreleased]` entry ≤ 800 characters — what changed, why it matters, what it costs; mechanisms / alternatives / verification counts go to the PR body, durable rationale goes to `docs/design/`. Released sections are **frozen** (they are the published release notes `release.yml` extracts verbatim): never rewrite them, add a `**Summary**` paragraph above a long section instead. Enforced by `scripts/check-changelog-style.sh` (hook + `scripts/check.sh`; `[Unreleased]` only) |
@@ -182,7 +182,7 @@ When updating docs:
 - Hook prerequisites: the three complexity hooks (`lizard-rust` / `fn-param-ratchet` / `fn-nloc-ratchet`) need `pip install lizard`; `ktlint-android` needs a local JDK 17+ (the first run downloads the pinned ktlint CLI); `taplo` hooks self-skip when taplo is absent
 - Cargo hooks and CI run whatever `rust-toolchain.toml` pins; if that toolchain is not installed yet, rustup downloads it on the first `cargo` call (slow once, then cached). Do not "fix" a clippy failure by `rustup default`-ing a different version locally — the point of the pin is that both sides see the same lints
 - Covered by pre-commit: every `check-*.sh` gate, `cargo fmt` + per-package clippy (incl. frontend wasm32), the three complexity ratchets, ktlint, typos, and the e2e format/lint (`e2e-format` / `e2e-lint`)
-- Not covered by pre-commit (run separately or in CI): `cargo test`, Victauri E2E, the Playwright run itself (`./scripts/e2e-playwright.sh`; only its format/lint is gated), `make dependency-security`
+- Not covered by pre-commit (run separately or in CI): `cargo test`, the desktop shell smoke (`./scripts/smoke-desktop-shell.sh`), the Playwright run itself (`./scripts/e2e-playwright.sh`; only its format/lint is gated), `make dependency-security`
 
 ### Commit subjects
 

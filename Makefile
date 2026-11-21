@@ -36,7 +36,7 @@ CM_MOBILE_SKIP_FRONTEND ?= 0
 	apk mobile-apk \
 	tui tui-release \
 	test test-frontend test-tauri test-tui test-web-host test-tool-card check dependency-security fmt clippy ktlint-android \
-	victauri-e2e victauri-e2e-real e2e-playwright \
+	e2e-playwright smoke-desktop-shell \
 	clean clean-desktop clean-mobile clean-connect clean-client-api clean-tool-card clean-tui clean-web-host clean-frontend
 
 help:
@@ -64,7 +64,7 @@ help:
 	@echo "  make frontend-check      cargo check --target wasm32-unknown-unknown"
 	@echo "  make frontend-clippy     frontend clippy -D warnings"
 	@echo "  make test-frontend       frontend：wasm check + lib 单测（与 Tauri 分开）"
-	@echo "  make test-tauri          connect + desktop unit tests (--bins) + mobile check（不含 Victauri E2E）"
+	@echo "  make test-tauri          connect + desktop unit tests (--bins) + mobile check"
 	@echo "  make test-tui            crabmate-tui 测试"
 	@echo "  make test-web-host       crabmate-web 回环静态服务单测"
 	@echo "  make test-tool-card      crabmate-tool-card 金样（独立 workspace）"
@@ -73,7 +73,7 @@ help:
 	@echo "  make ktlint-android      手改 Android Kotlin ktlint（edu/crabmate）"
 	@echo "  make fmt                 全部 Rust 包 cargo fmt（列表见 scripts/rust-pkg-dirs.txt）"
 	@echo "  make clippy              全部 Rust 包 clippy -D warnings（frontend 走 wasm32）"
-	@echo "  make victauri-e2e        全量 Victauri（需外部 crabmate serve）"
+	@echo "  make smoke-desktop-shell 桌面壳冒烟（xvfb + 外部 serve；替代原 Victauri 壳冒烟）"
 	@echo "  make e2e-playwright      Playwright（需 frontend/dist + 纯 API serve + crabmate-web 托管 UI）"
 	@echo ""
 	@echo "清理："
@@ -192,7 +192,7 @@ test-client-api:
 test-frontend: frontend-check
 	cd "$(FRONTEND_DIR)" && $(CARGO) test --lib -- --nocapture --skip golden_
 
-# Tauri / 壳：connect 逻辑 + desktop 单测；mobile 仅 check（默认无显示则跳过 Victauri）
+# Tauri / 壳：connect 逻辑 + desktop 单测；mobile 仅 check
 test-tauri:
 	cd "$(CONNECT_DIR)" && $(CARGO) test -- --nocapture
 	@mkdir -p "$(DESKTOP_ROOT)/dist"
@@ -234,14 +234,11 @@ clippy: prepare-sidecar
 	rustup target add wasm32-unknown-unknown 2>/dev/null || true
 	cd "$(FRONTEND_DIR)" && $(CARGO) clippy --target wasm32-unknown-unknown --all-targets --all-features -- -D warnings
 
-victauri-e2e:
-	./scripts/victauri-e2e.sh all
-
-victauri-e2e-real:
-	REAL_LLM_E2E=1 ./scripts/victauri-e2e.sh real_llm
-
 e2e-playwright:
 	./scripts/e2e-playwright.sh
+
+smoke-desktop-shell:
+	./scripts/smoke-desktop-shell.sh
 
 # --- 清理 ---
 

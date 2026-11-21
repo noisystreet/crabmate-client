@@ -36,8 +36,8 @@ Connects to a compatible **`crabmate serve`** (local or remote). Does **not** sp
 ├── web-host/                  # Binary crabmate-web (loopback static UI host)
 ├── frontend/                  # Business UI (Leptos CSR + WASM; contracts via crates.io crabmate)
 ├── e2e/                       # Playwright (browser UI; mock SSE in CI)
-├── scripts/                   # check / connect sync / Victauri / Playwright
-└── .github/workflows/         # CI (check + frontend tests + Playwright + desktop deb + Victauri nightly + dependency-security)
+├── scripts/                   # check / connect sync / shell smoke / Playwright
+└── .github/workflows/         # CI (check + frontend tests + Playwright + desktop deb + dependency-security)
 ```
 
 ## Relationship to the Server repo
@@ -157,7 +157,7 @@ Expose only `api.…` → Caddy → loopback `serve` (no `--with-web`); the shel
 | [AGENTS.md](./AGENTS.md) | Agent constraints, commands, doc-sync rules (English only) |
 | [CHANGELOG.md](./CHANGELOG.md) | User/maintainer-facing changes (Keep a Changelog; English) |
 | [README.zh-CN.md](./README.zh-CN.md) | Chinese README |
-| [docs/TESTING.md](./docs/TESTING.md) | pre-commit / Victauri / CI |
+| [docs/TESTING.md](./docs/TESTING.md) | pre-commit / shell smoke / CI |
 | [docs/design/tauri_gui_mvp_design.md](./docs/design/tauri_gui_mvp_design.md) | Shell architecture (path A) |
 | [docs/design/shell_smoke_runbook.md](./docs/design/shell_smoke_runbook.md) | Desktop/Android manual smoke |
 | [docs/design/remote_cli_tui.md](./docs/design/remote_cli_tui.md) | Remote terminal crabmate-tui |
@@ -174,7 +174,7 @@ Expose only `api.…` → Caddy → loopback `serve` (no `--with-web`); the shel
 | [docs/design/contract_pin.md](./docs/design/contract_pin.md) | Contract git tag / rev pinning |
 | [frontend/README.md](./frontend/README.md) | UI build (trunk) |
 
-Before commit: `pre-commit run --all-files` or `make check`. CI: `.github/workflows/ci.yml` (includes **frontend wasm**, **frontend/TUI unit tests**, **desktop / web / tui release .deb**); dependency audit: `.github/workflows/dependency-security.yml` (`make dependency-security`); Victauri shell E2E: nightly workflow or `./scripts/victauri-e2e.sh`.
+Before commit: `pre-commit run --all-files` or `make check`. CI: `.github/workflows/ci.yml` (includes **frontend wasm**, **frontend/TUI unit tests**, **desktop / web / tui release .deb**); dependency audit: `.github/workflows/dependency-security.yml` (`make dependency-security`); desktop shell smoke: `./scripts/smoke-desktop-shell.sh` (local, not in CI).
 
 ## Conventions
 

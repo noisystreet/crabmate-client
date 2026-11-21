@@ -6,22 +6,10 @@
 
 ## 定位
 
-与本仓 `desktop-tauri/src-tauri/tests/` 中 victauri_test 的分工：
+本目录是**唯一**的自动化 E2E：页面行为（布局 / 流式渲染 / 设置页 / 分页…）都在这里跑 —— headless Chromium + 外部纯 API `crabmate serve`，随 PR 门禁（`.github/workflows/e2e-playwright.yml`）。
 
-| 维度 | 本目录（Playwright） | victauri_test（Rust） |
-|------|---------------------|----------------------|
-| 运行环境 | headless Chromium + 外部 `crabmate serve` | 真实 Tauri WebView |
-| 覆盖范围 | 纯前端逻辑（overlay 消费、气泡布局） | Tauri 特有行为（IPC、对话框、窗口） |
-| mock SSE | ✅ `page.route()` 拦截 | ✅ `eval_js` 注入 fetch |
-| 真实 LLM | ✅ 支持 | ✅ 需 `REAL_LLM_E2E=1` |
-| console.log | ✅ `page.on('console')` | ❌ 不支持 |
-| CI 友好度 | 高（headless，无 GUI 依赖） | 低（需 X display + Tauri debug 编译） |
-| 编译开销 | 仅编译后端 | 需编译 Tauri |
-
-**核心原则**：纯前端行为的回归测试优选 Playwright，Tauri 特有行为留 victauri_test。
-
-> **迁移进行中（#152 / #548）**：Victauri 侧用例几乎全是页面行为（0 个调用 Tauri IPC），正分批迁入本目录；迁完 Victauri 只保留壳冒烟。已迁（Wave 1–5）：`status-bar` / `visible-messages` / `prefs-theme` / `session-crud` / `settings-page` / `keyboard-scroll` / `sse-control` / `ui-layout` / `user-data-api` / `turn-layout` / `side-toolbar` / `scroll-send` / `conversation-pagination` / `settings-model-registry`。
-> 仍在 Victauri 的只剩 `victauri_e2e`（壳冒烟；Wave 6 用脚本替代后即可摘依赖）。`victauri_settings2` 已在 Wave 5 拆解：钥匙串往返由 `crates/crabmate-connect` 的 keyring 单测覆盖（内存后端，`cargo test` 里真做写入 → 读回），模型注册的页面行为见 `mock-settings-model-registry.spec.ts`。
+> **Victauri 已摘除（#152 / #548）**：原来的 54 个 Victauri 用例全是页面行为（0 个调用 Tauri IPC），却跑在最贵的 runner 上（编译 Tauri + 映射 WebView + xvfb）。已迁入本目录（Wave 1–5）：`status-bar` / `visible-messages` / `prefs-theme` / `session-crud` / `settings-page` / `keyboard-scroll` / `sse-control` / `ui-layout` / `user-data-api` / `turn-layout` / `side-toolbar` / `scroll-send` / `conversation-pagination` / `settings-model-registry`；`victauri-plugin` / `victauri-test` / nightly workflow / 临时 capability 注入一并删除。
+> 三类**不**在这里跑：**壳能不能起来** → `scripts/smoke-desktop-shell.sh`（xvfb + 外部 serve；判据是壳进程存活 + 无 startup failed + 出现 WebKit 子进程）；**钥匙串往返** → `crates/crabmate-connect` 的 keyring 单测（内存后端，`cargo test` 里真做写入 → 读回）；**真实模型** → `specs/real-llm-*.spec.ts`（需 `API_KEY`，不进 CI）。
 > `conversation` / `pagination` 迁入后**不再需要 `CM_E2E_FIXTURES=1`**：`mock-conversation-pagination.spec.ts` 用 `page.route` 按 query 造分页响应；`GET /conversation/messages` 的响应形状（全量 / `limit` 截尾 / `before_index` / 404）归 Server 仓集成测试。
 > 已**删除**（测试对象已不存在，非迁移）：`victauri_ide_layout`（入口 testid `layout-mode-toggle` / `ide-layout-root` 随 UI 重构消失）与 `victauri_turn_layout` 的多工具用例（需按 AG-UI V2 时序重写）——因此 IDE 往返与多工具交错目前**没有自动化覆盖**。
 

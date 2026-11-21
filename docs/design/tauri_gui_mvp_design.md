@@ -78,6 +78,6 @@ cargo install tauri-cli --version "^2"
 | 风险 | 缓解 |
 |------|------|
 | 误以为壳会起后端 | README / 连接页文案；E2E 须自备 `serve` |
-| monorepo E2E 假设 | `scripts/victauri-e2e.sh` 经 `CM_DESKTOP_BACKEND_BIN` / PATH / 同级主仓解析 `crabmate` |
+| 壳冒烟假设 | `scripts/smoke-desktop-shell.sh` 经 `CM_DESKTOP_BACKEND_BIN` / PATH / 同级仓解析 `crabmate` |
 | 无托盘环境窗口不可恢复 | 托盘失败时保留普通最小化 |
 | Android 后台杀进程 / 丢工具审批 | [ADR-0002](../adr/0002-android-approval-notification-foreground-keepalive.md)：attach 时 `dataSync` FGS + 审批通知；`visibilitychange` 续传仍为退路 |
