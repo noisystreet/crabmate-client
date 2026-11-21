@@ -253,7 +253,7 @@ Web 侧没有「帧」，只有「挂载 / 卸载」，所以要先说清卸载�
 
 | 步 | 内容 | 验证 |
 |---|---|---|
-| **S1** | 把 `App` 的视图抽成 `app_body(rt: &LaneRuntime) -> AnyView`；`AppShellCtx` 的 ~14 个 `*_signals()` / `view_input()` 构造方法改成「**为指定 lane 生成**」（内部 96 处 `self.signals()` → 用传入的 lane） | N=1 等价：826 测试 + 桌面冒烟（本机可跑） |
+| **S1**（已完成） | `App` 只剩「取当前 lane → 交给 `app_body(rt: Rc<LaneRuntime>)`」；14 个 `*_signals()` / `*_view_input()` 搬到 `LaneRuntime`（`app_signals/lane_view_inputs.rs`），视图与 `provide_context` 进 `app/app_body.rs` | N=1 等价：826 测试 + wasm32 clippy + 桌面冒烟（xvfb + 真实 WebKitGTK）**均已通过** |
 | **S2** | `LaneSet::add_lane(holder)`；两个入口按钮的 `on:click` 里 `add_lane` + `mount_to` 挂载 + 存 `UnmountHandle` | 冒烟能起 + 手测「点两次得到两条 lane」 |
 | **S3** | 切换只改 `display`（不再重建）；左栏画本窗口 lane 列表（§6.5 方案 B）；键位（§6.6） | **必须图形会话手测**：会话/草稿不串、后台流不中断 |
 
@@ -267,9 +267,16 @@ Web 侧没有「帧」，只有「挂载 / 卸载」，所以要先说清卸载�
 | 每帧按 `active` 取 `lane_mut()` | 每棵子树各自绑定建出来那一刻的句柄，切换只改 `display` |
 | `FocusChanged` → `LanePhase` 转移 | 同一份 `lane_phase`（已在 `client-api`）+ 写回 `signals.phase` |
 
-**已知风险（S1 就要处理）**：`App` 顶层的 `provide_context(ChatShellLeptosContext)` 必须
-**移进每棵子树**，否则第二条 lane 的视图会读到第一条的 ctx；`IdeSession` 这类「窗口级还是
-lane 级」混用的对象要逐个判定归属。
+**S1 已处理**：`provide_context(ChatShellLeptosContext)` 已随视图一起搬进 `app_body`，按 owner
+生效 —— `mount_to` 为新子树建 owner，ctx 就属于那条 lane。N=1 时 owner 仍是 `App` 的，行为与
+改造前一致。
+
+**S2 还要回来改两处**（`app_body` 头部注释里也记了）：
+
+- `wire_layout_toggle_hotkey` 现在**每条 lane 各注册一次**全局监听，挂到第二条 lane 后会一次
+  按键 toggle 两次 —— 热键是窗口级的（toggle 的是 `shell_ui.editor_layout_mode`），届时应上移回 `App`。
+- `IdeSession` 暂按 lane 建（它绑着这条 lane 的 chat 信号）；若确认编辑器状态该是窗口级
+  （切 lane 不该丢编辑器标签），再上移。
 
 ## 6. 左栏「连接」区
 

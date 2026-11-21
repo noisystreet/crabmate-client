@@ -8,7 +8,8 @@
 //! 把先建的挤掉，切回去时第一条的发送闭包已经丢了）。
 //!
 //! 现在一条 lane 的运行时整体打包成 [`LaneRuntime`]，容器持 `Vec<Rc<LaneRuntime>>`；壳一律
-//! 经 [`AppShellCtx::signals`](super::super::AppShellCtx::signals) 等访问器取当前那条。
+//! 经 [`AppShellCtx::current_runtime`](super::super::AppShellCtx::current_runtime) 取当前那条，
+//! 之后按 lane 生成视图入参（`app_signals::lane_view_inputs`）。
 //!
 //! 本步仍是 **N=1 等价重构**：容器恒一条，取到的就是改造前那份，单连接零行为变化
 //! （frontend 826 条测试守这条）。
@@ -104,10 +105,5 @@ impl LaneSet {
         let last = lanes.len().saturating_sub(1);
         let index = self.active.get_untracked().min(last);
         Rc::clone(lanes.get(index).expect("LaneSet 至少持有一条 lane"))
-    }
-
-    /// 当前前台那条 lane 的信号（唯一高频入口，单独开一个省一次闭包）。
-    pub(crate) fn current_signals(&self) -> AppSignals {
-        self.current_runtime().signals.clone()
     }
 }
