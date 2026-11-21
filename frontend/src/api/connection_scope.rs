@@ -82,11 +82,13 @@ impl ScopeHolder {
         self.0.borrow().base_settled
     }
 
-    fn mark_bearer_settled(&self) {
+    /// 标记「这一份的 Bearer 已经读过盘」——水合失败也要标，否则每次请求都重读钥匙串。
+    pub(crate) fn mark_bearer_settled(&self) {
         self.0.borrow_mut().bearer_settled = true;
     }
 
-    fn is_bearer_settled(&self) -> bool {
+    /// Bearer 是否已经水合过一次（幂等开关，**per-holder**：A 读过不代表 B 读过）。
+    pub(crate) fn is_bearer_settled(&self) -> bool {
         self.0.borrow().bearer_settled
     }
 
