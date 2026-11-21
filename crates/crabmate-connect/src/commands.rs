@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use tauri::{AppHandle, Manager, State};
 use url::Url;
 
+use crabmate_client_api::connection_scope::api_base_fingerprint;
 use crabmate_client_api::url::api_base_authority;
 
 use crate::allowed_origin::AllowedServeOrigin;
@@ -13,7 +14,8 @@ use crate::connect_home::{SuggestedServerUrl, connect_home_url, remember_connect
 use crate::existing_connection::ExistingConnectionProbe;
 use crate::handoff::{build_local_ui_handoff_url, local_business_ui_url, normalize_base_url};
 use crate::keyring_bearer::{
-    clear_connect_bearer_for, read_connect_bearer_for, write_connect_bearer_for,
+    clear_all_connect_bearers_for, clear_connect_bearer_for_conn, read_connect_bearer_for,
+    read_connect_bearer_for_conn, write_connect_bearer_for, write_connect_bearer_for_conn,
 };
 use crate::keyring_llm::{LlmSecretSlot, read_llm_secret, write_llm_secret};
 use crate::probe::probe_server;
@@ -59,8 +61,10 @@ pub async fn connect_remote(
 
     // 空串删除钥匙串条目；非空覆盖写入（Android 无后端时由连接页写 Keystore）。
     // 按发起连接的窗口写各自的槽：别的窗口还连着它们各自的 serve，不能覆盖（见
-    // `keyring_bearer` 模块文档）。
-    if let Err(e) = write_connect_bearer_for(window.label(), bearer.trim()) {
+    // `keyring_bearer` 模块文档）。**同时按这一台 serve 记**（指纹后缀）：同一窗口换连
+    // 另一台时不覆盖上一台的凭据，切回来才不会拿着别台的 Bearer 去连（#457）。
+    let fp = api_base_fingerprint(api_base.as_str());
+    if let Err(e) = write_connect_bearer_for_conn(window.label(), &fp, bearer.trim()) {
         eprintln!("[crabmate-connect] keyring write skipped: {e}");
     }
 
@@ -87,7 +91,8 @@ pub async fn disconnect_remote(app: AppHandle, window: tauri::WebviewWindow) -> 
         // 只摘本窗口：别的窗口还连着它们各自的 serve。
         allowed.clear_label(window.label());
     }
-    if let Err(e) = clear_connect_bearer_for(window.label()) {
+    // 这个窗口不再连任何 serve：一级槽与连接级槽一起清（只断某一台时才用 for_conn）。
+    if let Err(e) = clear_all_connect_bearers_for(window.label()) {
         eprintln!("[crabmate-connect] keyring clear on disconnect skipped: {e}");
     }
     let mut home = connect_home_url();
@@ -179,9 +184,19 @@ pub fn remove_recent_connect_url(app: AppHandle, url: String) -> Result<(), Stri
 ///
 /// 按调用它的窗口读各自的槽：这个值会被拿去水合该窗口的会话，读错了就会拿着别的
 /// `serve` 的凭据连过去。
+///
+/// `fp` 是基址指纹（前端算，见 `crabmate_client_api::connection_scope`）：给了就按
+/// 「这个窗口 + 这一台 serve」读，切回上一台时拿到的还是那一台的凭据；省略/空串则读
+/// 一级槽（= 这个窗口最近一次连接，单连接语义与旧调用方都不变）。
 #[tauri::command]
-pub fn get_connect_bearer(window: tauri::WebviewWindow) -> Option<String> {
-    match read_connect_bearer_for(window.label()) {
+pub fn get_connect_bearer(window: tauri::WebviewWindow, fp: Option<String>) -> Option<String> {
+    let fp = fp.unwrap_or_default();
+    let read = if fp.trim().is_empty() {
+        read_connect_bearer_for(window.label())
+    } else {
+        read_connect_bearer_for_conn(window.label(), &fp)
+    };
+    match read {
         Ok(v) => v,
         Err(e) => {
             eprintln!("[crabmate-connect] keyring read skipped: {e}");
@@ -193,9 +208,24 @@ pub fn get_connect_bearer(window: tauri::WebviewWindow) -> Option<String> {
 /// 写入或清除该窗口的连接用 Web API Bearer（空串删除钥匙串条目）。
 ///
 /// 供包内业务 UI 设置页保存/清除；连接成功路径仍走 [`connect_remote`]。
+/// `fp` 语义同 [`get_connect_bearer`]：给指纹就只动这一台连接的槽，省略则动一级槽。
 #[tauri::command]
-pub fn set_connect_bearer(window: tauri::WebviewWindow, bearer: String) -> Result<(), String> {
-    write_connect_bearer_for(window.label(), &bearer)
+pub fn set_connect_bearer(
+    window: tauri::WebviewWindow,
+    bearer: String,
+    fp: Option<String>,
+) -> Result<(), String> {
+    let label = window.label();
+    let fp = fp.unwrap_or_default();
+    if fp.trim().is_empty() {
+        return write_connect_bearer_for(label, &bearer);
+    }
+    if bearer.trim().is_empty() {
+        // 清空要走 clear 分支：否则写入路径会把锚留在这一台上，读侧就会以为
+        // 「这一台本来就没有凭据」而不是「没配过」——两者对 UI 的提示不同。
+        return clear_connect_bearer_for_conn(label, &fp);
+    }
+    write_connect_bearer_for_conn(label, &fp, &bearer)
 }
 
 /// 系统钥匙串中的密钥槽（`client_llm` / `executor_llm` / `saved_models` / `github`）。

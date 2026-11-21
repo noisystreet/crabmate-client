@@ -9,6 +9,7 @@
 #   - crabmate-api-base-url          （serve 基址）
 #   - crabmate-api-bearer-token      （纯浏览器弱存储的 Web API Bearer）
 #   - crabmate-llm-thinking-mode     （思考模式两态）
+#   - crabmate-conn-fp               （「一级键当前对应哪个连接」的锚，指纹）
 #   - __CM_CONN_KEY__                （壳注入的连接标识）
 #
 # 例外：无。新加「与连接绑定」的存储键时，先在本模块登记常量，再由 `api::browser`
@@ -22,7 +23,7 @@ cd "$ROOT"
 
 OWNER="frontend/src/api/storage_scope.rs"
 INJECTOR="desktop-tauri/src-tauri/src/desktop_main_window.rs"
-PATTERN='crabmate-api-base-url|crabmate-api-bearer-token|crabmate-llm-thinking-mode|__CM_CONN_KEY__'
+PATTERN='crabmate-api-base-url|crabmate-api-bearer-token|crabmate-llm-thinking-mode|crabmate-conn-fp|__CM_CONN_KEY__'
 
 if [ ! -f "$OWNER" ]; then
   echo "缺少 $OWNER：连接分域键名的唯一来源" >&2

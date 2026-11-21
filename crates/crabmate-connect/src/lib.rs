@@ -38,8 +38,9 @@ pub use handoff::{
     local_business_ui_url, normalize_base_url,
 };
 pub use keyring_bearer::{
-    clear_connect_bearer_for, read_connect_bearer_for, write_connect_bearer_for,
-    write_connect_bearer_on_connect,
+    clear_all_connect_bearers_for, clear_connect_bearer_for, clear_connect_bearer_for_conn,
+    read_connect_bearer_for, read_connect_bearer_for_conn, write_connect_bearer_for,
+    write_connect_bearer_for_conn, write_connect_bearer_on_connect,
 };
 pub use keyring_llm::{LlmSecretSlot, read_llm_secret, write_llm_secret};
 pub use navigation::{

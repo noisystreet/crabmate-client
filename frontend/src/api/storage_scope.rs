@@ -24,9 +24,17 @@
 //!
 //! # 键名单一来源
 //!
-//! 四个「与连接绑定」的键只在本模块出现（`scripts/check-storage-scope.sh` 守这条）：
+//! 五个「与连接绑定」的键只在本模块出现（`scripts/check-storage-scope.sh` 守这条）：
 //! 其它模块必须经 [`API_BASE_URL_KEY`] / [`WEB_API_BEARER_TOKEN_KEY`] /
-//! [`LLM_THINKING_MODE_KEY`] 取名字，再交给 `api::browser` 的分域读写。
+//! [`LLM_THINKING_MODE_KEY`] / [`CONN_FP_ANCHOR_KEY`] 取名字，再交给 `api::browser`
+//! 的两级读写。
+//!
+//! # 两级键（`<基础键>#<label>@<指纹>`）
+//!
+//! 一级键 `<基础键>#<label>` = 「**这个窗口最近一次连接**」；连接级键
+//! `<基础键>#<label>@<fp>` = 「这个窗口连**这一台**时的值」。所以要「切回上一台、配置还在」，
+//! 读的时候必须知道一级键属于哪台 —— 那就是 [`CONN_FP_ANCHOR_KEY`]（锚）。
+//! 回落规则见 [`resolve_conn_read`]，与钥匙串侧 `read_connect_bearer_for_conn` 同构。
 //! **应用级偏好**（语言、主题、列宽、会话草稿）刻意**不**分域：它们描述这台机器 /
 //! 这个用户，不描述某台 `serve`。
 
@@ -40,6 +48,13 @@ pub(crate) const API_BASE_URL_KEY: &str = "crabmate-api-base-url";
 /// （换成另一台 serve 时两台的模型配置本来就不同），因此按连接分域。
 pub(crate) const LLM_THINKING_MODE_KEY: &str = "crabmate-llm-thinking-mode";
 
+/// 「一级键当前对应哪个连接」的锚（同样按 `<基础键>#<label>` 分域）。
+///
+/// 没有它就分不清 `crabmate-api-base-url#<label>` 里存的是哪台 `serve` 的值 ——
+/// 那正是「切回上一台却拿到别台配置」的成因。与钥匙串侧的 `:fp` 锚同一个理由，
+/// 两侧的回落链必须同构。
+pub(crate) const CONN_FP_ANCHOR_KEY: &str = "crabmate-conn-fp";
+
 /// 壳注入的连接标识所在的 JS 全局名（`desktop-tauri` 的 `desktop_main_window` 写入）。
 pub(crate) const INJECTED_GLOBAL: &str = "__CM_CONN_KEY__";
 
@@ -49,6 +64,12 @@ pub(crate) const INJECTED_GLOBAL: &str = "__CM_CONN_KEY__";
 /// 分隔符撞。`#` 不在 label 里，也不影响 `localStorage` 的键合法性；本模块只拼不拆，
 /// 所以不需要转义。
 const SCOPE_SEP: char = '#';
+
+/// 连接级后缀的分隔符：`<基础键>#<label>@<fp>`。
+///
+/// `@` 只出现在指纹之前，指纹本身是 `[0-9a-f]`（见
+/// `crabmate_client_api::connection_scope::api_base_fingerprint`），所以拼接不必转义。
+const SCOPE_FP_SEP: char = '@';
 
 /// 本页所属连接的标识；`None` = 不按连接分域（单连接语义）。
 ///
@@ -85,10 +106,45 @@ pub(crate) fn scoped_key_with(base: &str, key: Option<&str>) -> String {
     }
 }
 
-/// [`scoped_key_with`] 的当前环境版本。
+/// 连接级键（纯函数）：`base#label@fp`；`fp` 为空时退回一级键 `base#label`，
+/// 无连接标识时退回历史键名 `base`。
+///
+/// 两级的分工：一级键（`#<label>`）=「这个窗口最近一次连接」，连接级键（`@<fp>`）=
+/// 「这个窗口连这一台时的值」。#457 要的「切回上一台，配置还在」靠的就是第二级。
 #[must_use]
-pub(crate) fn scoped_key(base: &str) -> String {
-    scoped_key_with(base, connection_key().as_deref())
+pub(crate) fn scoped_key_with_fp(base: &str, label: Option<&str>, fp: &str) -> String {
+    let one_level = scoped_key_with(base, label);
+    match label {
+        Some(_) if !fp.trim().is_empty() => format!("{one_level}{SCOPE_FP_SEP}{}", fp.trim()),
+        _ => one_level,
+    }
+}
+
+/// 连接级读的判定（纯函数）：返回 `(采用的值, 是否需要回填连接级键)`。
+///
+/// 回落顺序与钥匙串侧（`crabmate_connect::keyring_bearer::read_connect_bearer_for_conn`）
+/// 一一对应 —— 两侧判据分叉就会出现「配置是这台的、凭据是别台的」。
+///
+/// - 连接级键存在 → 用它；
+/// - 锚指向**别的**连接 → 不借用一级键（那是别台的值）；
+/// - 锚缺失（升级前写入）或指向本连接 → 用一级键，并要求调用方回填。
+#[must_use]
+pub(crate) fn resolve_conn_read(
+    conn_level: Option<String>,
+    window_level: Option<String>,
+    anchor: Option<&str>,
+    fp: &str,
+) -> (Option<String>, bool) {
+    if conn_level.is_some() {
+        return (conn_level, false);
+    }
+    if anchor.is_some_and(|a| a != fp.trim()) {
+        return (None, false);
+    }
+    match window_level {
+        Some(v) => (Some(v), true),
+        None => (None, false),
+    }
 }
 
 /// 读侧的迁移判定（纯函数）：分域键存在就用它；缺失才回落到旧键，并提示调用方回填。
@@ -173,5 +229,62 @@ mod tests {
     #[test]
     fn nothing_to_migrate_when_both_sides_are_absent() {
         assert_eq!(resolve_scoped_read(None, None), (None, false));
+    }
+
+    #[test]
+    fn connection_level_key_appends_the_fingerprint() {
+        assert_eq!(
+            scoped_key_with_fp("crabmate-api-base-url", Some("main"), "0a1b2c3d"),
+            "crabmate-api-base-url#main@0a1b2c3d"
+        );
+        // 没有指纹时退回一级键：单连接语义与已升级用户的数据都不变。
+        assert_eq!(
+            scoped_key_with_fp("crabmate-api-base-url", Some("main"), "  "),
+            "crabmate-api-base-url#main"
+        );
+        // 无连接标识（纯浏览器 / Android / 未注入的主窗口）时连一级后缀都不加。
+        assert_eq!(
+            scoped_key_with_fp("crabmate-api-base-url", None, "0a1b2c3d"),
+            "crabmate-api-base-url"
+        );
+    }
+
+    #[test]
+    fn connection_level_value_wins_over_the_window_level_one() {
+        let (value, backfill) = resolve_conn_read(
+            Some("http://b".into()),
+            Some("http://a".into()),
+            Some("0a1b2c3d"),
+            "0a1b2c3d",
+        );
+        assert_eq!(value.as_deref(), Some("http://b"));
+        assert!(!backfill);
+    }
+
+    #[test]
+    fn window_level_value_is_borrowed_only_when_the_anchor_agrees() {
+        // 锚指向本连接（或缺失 = 升级前）：可以借用一级值并回填。
+        for anchor in [Some("0a1b2c3d"), None] {
+            let (value, backfill) =
+                resolve_conn_read(None, Some("http://a".into()), anchor, "0a1b2c3d");
+            assert_eq!(value.as_deref(), Some("http://a"));
+            assert!(backfill, "借用后必须回填，否则每次读都重跑回落链");
+        }
+    }
+
+    #[test]
+    fn window_level_value_is_not_borrowed_when_the_anchor_points_elsewhere() {
+        // 一级键属于别台 serve：借用它会让「设置跟着串台」重新出现。
+        let (value, backfill) =
+            resolve_conn_read(None, Some("http://a".into()), Some("ffffffff"), "0a1b2c3d");
+        assert_eq!(value, None);
+        assert!(!backfill);
+    }
+
+    #[test]
+    fn nothing_to_borrow_when_both_levels_are_absent() {
+        let (value, backfill) = resolve_conn_read(None, None, None, "0a1b2c3d");
+        assert_eq!(value, None);
+        assert!(!backfill);
     }
 }

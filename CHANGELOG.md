@@ -17,6 +17,8 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Changed
 
+- **Each serve keeps its own base URL, thinking mode and Bearer after switching connections.**
+
 - **Hydration is one rule now; the v1 tool-pool replay adapter is gone.**
 
 - **Hydration no longer re-inserts timeline cards the Server never persisted.**
