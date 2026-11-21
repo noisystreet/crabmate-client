@@ -73,8 +73,10 @@ impl LaneRuntime {
 /// 窗口内的 lane 集合 + 当前前台下标。
 #[derive(Clone)]
 pub(crate) struct LaneSet {
-    /// 每条 lane 一份完整运行时。
-    lanes: Rc<RefCell<Vec<LaneRuntime>>>,
+    /// 每条 lane 一份完整运行时。**外面再套一层 `Rc`**：`App` 需要「取一次、传给多个
+    /// 方法」（S1 的 14 个信号构造方法都要按指定 lane 生成），而 `with_current` 的
+    /// `RefCell` 借用无法跨多次调用持有；`Rc::clone` 是常数开销且不持借用。
+    lanes: Rc<RefCell<Vec<Rc<LaneRuntime>>>>,
     /// 当前前台下标。**唯一真源**：所有「我现在看的是哪条」都从这里读（现在恒 0）。
     active: RwSignal<usize>,
 }
@@ -86,28 +88,32 @@ impl LaneSet {
     /// `wiring` 是对它的 `run_shell_wiring_in_order` —— 与改造前的启动路径逐字等价。
     pub(crate) fn new_single(signals: AppSignals, wiring: ShellWiringOutput) -> Self {
         Self {
-            lanes: Rc::new(RefCell::new(vec![LaneRuntime::new(signals, wiring)])),
+            lanes: Rc::new(RefCell::new(vec![Rc::new(LaneRuntime::new(
+                signals, wiring,
+            ))])),
             active: RwSignal::new(0),
         }
     }
 
-    /// 对**当前前台**那条 lane 的运行时借用一次。
-    ///
-    /// 用借用而不是 clone 整份：`LaneRuntime` 里的 `ChatColumnShell` 含一堆 `Arc`，
-    /// 而壳内要在 121 处取信号 —— 每处都 clone 一份运行时等于把「便宜」变成「不便宜」。
+    /// 取当前前台那条 lane 的运行时（`Rc` 句柄，常数开销）。
     ///
     /// 下标越界（理论上不可能：现在没有改下标的入口）时退回第一条 —— 宁可画错一条，
     /// 也别让一处 panic 把整屏打空。
-    pub(crate) fn with_current<R>(&self, f: impl FnOnce(&LaneRuntime) -> R) -> R {
+    pub(crate) fn current_runtime(&self) -> Rc<LaneRuntime> {
         let lanes = self.lanes.borrow();
         let last = lanes.len().saturating_sub(1);
         let index = self.active.get_untracked().min(last);
-        let lane = lanes.get(index).expect("LaneSet 至少持有一条 lane");
-        f(lane)
+        Rc::clone(lanes.get(index).expect("LaneSet 至少持有一条 lane"))
+    }
+
+    /// 对当前前台那条 lane 的运行时借一次（`S1` 之后大部分调用点应改用
+    /// [`Self::current_runtime`] + 按 lane 参数化的方法）。
+    pub(crate) fn with_current<R>(&self, f: impl FnOnce(&LaneRuntime) -> R) -> R {
+        f(&self.current_runtime())
     }
 
     /// 当前前台那条 lane 的信号（唯一高频入口，单独开一个省一次闭包）。
     pub(crate) fn current_signals(&self) -> AppSignals {
-        self.with_current(|lane| lane.signals.clone())
+        self.current_runtime().signals.clone()
     }
 }
