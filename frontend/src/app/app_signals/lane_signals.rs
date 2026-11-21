@@ -51,6 +51,14 @@ pub struct LaneSignals {
     pub workspace: WorkspaceSignals,
     pub status: StatusSignals,
     pub llm_settings: LLMSettingsSignals,
+    /// 这条 lane 的生命周期阶段（#561）：前台 / 后台 / 关闭中 / 已关闭。
+    ///
+    /// 判据同其余字段 —— 切 lane 时它**该**变。单 lane 时恒 `Foreground`，所以
+    /// 所有「只在前台才做」的门控都退化成改动前的行为。
+    ///
+    /// 转移规则与查询在 `crabmate_client_api::lane_phase`（纯逻辑 + 单测），
+    /// 本字段只是它的响应式镜像。
+    pub phase: RwSignal<crabmate_client_api::lane_phase::LanePhase>,
 }
 
 impl LaneSignals {
@@ -89,6 +97,8 @@ impl LaneSignals {
             workspace: WorkspaceSignals::new(),
             status: StatusSignals::new(),
             llm_settings: LLMSettingsSignals::new(),
+            // 新建的 lane 就是用户正要看的那条（`LanePhase::default()` = Foreground）。
+            phase: RwSignal::new(Default::default()),
         }
     }
 }

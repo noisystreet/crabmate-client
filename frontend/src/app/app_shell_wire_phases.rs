@@ -392,5 +392,7 @@ fn wire_phase5_connection_report(app: &AppSignals) {
         status: app.to_status_tasks(),
         client_llm_storage_tick: app.llm_settings.client_llm_storage_tick,
         selected_agent_role: app.llm_settings.selected_agent_role,
+        // #561：未读 / 审批可见性要判「这条 lane 是不是前台」，单 lane 时恒 Foreground。
+        phase: app.phase,
     });
 }
