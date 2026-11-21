@@ -217,6 +217,19 @@ pub(crate) fn install_new_holder() {
     activate(&ScopeHolder::new());
 }
 
+/// 造一份**新的**、可指定存储域后缀与基址的空 scope（新 lane 的起点，#561 S2）。
+///
+/// 不移动 `ACTIVE` 指针 —— 那是「切 lane」时才动的事（[`activate`]）：新建的 lane 先待在
+/// 后台，前台仍是原来那条。`base` 给定时直接用它做这条 lane 的基址（左栏「连接」要从目标
+/// 实例的地址起步，而不是从「同 Origin」起步）。
+pub(crate) fn new_holder(storage_label: Option<String>, base: Option<&str>) -> ScopeHolder {
+    let holder = ScopeHolder::new_with_storage_label(storage_label);
+    if let Some(base) = base {
+        holder.set_api_base(base);
+    }
+    holder
+}
+
 /// 当前基址（空 = 同 Origin）。**不**触发任何磁盘读取。
 ///
 /// 这是「**前台默认** holder」的读取口（#558 收窄后的口径）：跨 lane 的路径不要用它，

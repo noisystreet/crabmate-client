@@ -38,7 +38,7 @@ pub fn bootstrap_app_shell() -> AppShellCtx {
     let wiring = run_shell_wiring_in_order(&app_signals);
 
     // 接线产物与聊天列壳按 lane 存进容器（组装表达式见 `LaneRuntime::new`）。
-    let lanes = super::app_signals::LaneSet::new_single(app_signals, wiring);
+    let lanes = super::app_signals::LaneSet::new_single(window, app_signals, wiring);
 
     AppShellCtx { lanes }
 }

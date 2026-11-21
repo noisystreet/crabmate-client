@@ -13,11 +13,10 @@
 //! 那条 lane 自己；反过来若留在 `App` 顶部，第二条 lane 会读到第一条的 ctx（§5.2「已知
 //! 风险」）。N=1 时两者等价 —— 只有一条 lane，owner 就是 `App` 的。
 //!
-//! # S2 要回来改的两处
+//! # 归属（S2 落地时已按这条口径分好）
 //!
-//! - `wire_layout_toggle_hotkey` 现在**每条 lane 各注册一次**全局键盘监听；S2 之后重复
-//!   注册会让一次按键 toggle 两次。热键本身是窗口级的（toggle 的是 `shell_ui` 里的
-//!   `editor_layout_mode`），届时应上移到 `App`。
+//! - `wire_layout_toggle_hotkey` **不在**这里：热键是窗口级的，`App` 只注册一次。放进本函数会
+//!   让每条 lane 各注册一份全局监听，第二条 lane 建出来后一次按键就 toggle 两次。
 //! - `IdeSession` 暂按 lane 建（它绑着这条 lane 的 chat 信号）。若确认编辑器状态该是窗口级
 //!   （切 lane 不该丢编辑器标签），再上移 —— §5.2 要求这类对象逐个判定归属。
 
@@ -36,7 +35,6 @@ use super::ide_editor_body::IdeEditorBody;
 use super::ide_layout_switch::IdeLayoutToggleSignals;
 use super::ide_session::{IdeSession, IdeSessionInput};
 use super::ide_settings_page::IdeSettingsPageView;
-use super::layout_toggle_hotkey::wire_layout_toggle_hotkey;
 use super::mobile_shell_header::mobile_shell_header_view;
 use super::session_list_modal::session_list_modal_view;
 use super::settings_page::SettingsPageView;
@@ -75,7 +73,6 @@ pub(crate) fn app_body(rt: Rc<LaneRuntime>) -> AnyView {
 
     // IDE 会话（状态 + 副作用）在这里建一次：视图挂在聊天列主区里，切回聊天也不丢状态。
     let layout_toggle = IdeLayoutToggleSignals::from_app_signals(&signals);
-    wire_layout_toggle_hotkey(layout_toggle);
     let ide_session = IdeSession::new(IdeSessionInput {
         locale: signals.shell_ui.locale,
         shell_ui: signals.shell_ui,

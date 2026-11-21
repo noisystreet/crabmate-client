@@ -254,7 +254,7 @@ Web 侧没有「帧」，只有「挂载 / 卸载」，所以要先说清卸载�
 | 步 | 内容 | 验证 |
 |---|---|---|
 | **S1**（已完成） | `App` 只剩「取当前 lane → 交给 `app_body(rt: Rc<LaneRuntime>)`」；14 个 `*_signals()` / `*_view_input()` 搬到 `LaneRuntime`（`app_signals/lane_view_inputs.rs`），视图与 `provide_context` 进 `app/app_body.rs` | N=1 等价：826 测试 + wasm32 clippy + 桌面冒烟（xvfb + 真实 WebKitGTK）**均已通过** |
-| **S2** | `LaneSet::add_lane(holder)`；两个入口按钮的 `on:click` 里 `add_lane` + `mount_to` 挂载 + 存 `UnmountHandle` | 冒烟能起 + 手测「点两次得到两条 lane」 |
+| **S2**（已完成，挂载后隐藏） | `LaneSet::add_lane(scope)` + 窗口级动作注册表 `app/lane_actions.rs`；两处「连接」入口改调它，`App` 在 `.lane-layer` 容器上 `mount_to(app_body(rt))` | 冒烟能起 + 手测「点两次得到两条 lane」 |
 | **S3** | 切换只改 `display`（不再重建）；左栏画本窗口 lane 列表（§6.5 方案 B）；键位（§6.6） | **必须图形会话手测**：会话/草稿不串、后台流不中断 |
 
 与 TUI 的对应：
@@ -360,8 +360,14 @@ Desktop 同样要求：**列表渲染顺序**与**点击命中换算**共用一�
 
 | 位置 | 现状 | 改动 |
 |---|---|---|
-| `settings_sections.rs` 的 `SettingsConnectionNewWindowBlock` | `tauri_open_connect_window(None)` 建窗 | 改为在当前窗口 `add_lane`（依赖 §5 的视图渲染） |
-| 左栏「可连实例」行的「连接」 | 建窗并交接基址 | 同上 |
+| `settings_sections.rs` 的 `SettingsConnectionNewWindowBlock` | `tauri_open_connect_window(None)` 建窗 | ✅ 改调 `lane_actions::new_lane(None)` |
+| 左栏「可连实例」行的「连接」 | 建窗并交接基址 | ✅ 改调 `lane_actions::new_lane(Some(base))`，基址作为那条 lane 的起点 |
+
+**落地（2026-11-21，S2）**：两处入口都只改 `on:click` 一行，动作经窗口级注册表
+`app/lane_actions.rs` 转发 —— 每窗口唯一，同 `confirm_dialog::register_shell_confirm` 的形状；
+两个入口都藏在 `SettingsPageViewInput` / `CtlRow` 深处，穿参要改 6 处签名。前端那两个 wrapper
+（`tauri_open_connect_window` / `tauri_open_connection`）连同它们的 `invoke` 声明已删除，壳侧
+命令与注册保留（调试期退路）。
 
 **为什么现在就定**：它决定了第 2 步（`add_lane`）的唯一调用者，也决定了 §5 的视图渲染
 必须支持「lane 数会变」—— 如果留着开新窗口，「新建 lane」就没有必然的入口。
@@ -392,6 +398,12 @@ Desktop 同样要求：**列表渲染顺序**与**点击命中换算**共用一�
 - 需要补的正是 #558 项 3b：`read_scoped_local_storage_raw` / `write_api_base_local_storage`
   / `clear_local_storage_web_api_bearer` 补 `*_on(holder, …)`。键拼接是纯逻辑可单测。
 - **别把签名读成「全隔离」**：只覆盖 base URL 与 Web API Bearer；GitHub token 与模型密钥是账号级。
+
+**落地（2026-11-21，S2）**：`-l<n>` 已在 `LaneSet::lane_storage_label` 实现（第一条新 lane 是
+`<注入 key>-l1`；没有注入 key 时不分域，与主 lane 同口径），读写侧的 holder 维度
+（`read_scoped_local_storage_raw_on` / `write_api_base_local_storage_on` /
+`clear_local_storage_web_api_bearer_on`）此前已随 #558 项 3b 落地 —— 所以新 lane 不会与主 lane
+抢同一批键。
 
 ## 8. 状态、未读与退出
 

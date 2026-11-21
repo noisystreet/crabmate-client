@@ -29,6 +29,7 @@ mod ide_new_file_modal;
 mod ide_session;
 mod ide_settings_page;
 mod ide_tabs_bar;
+pub(crate) mod lane_actions;
 mod layout_toggle_hotkey;
 mod mobile_shell_header;
 mod nav_rail_connections;
@@ -78,12 +79,18 @@ mod workspace_project_modal_body;
 mod workspace_project_modal_parts;
 mod workspace_root_actions;
 
+use std::rc::Rc;
+
 use crate::i18n::{self, Locale};
 use crate::icon::icon_chevron_right;
 use app_body::app_body;
+use app_shell_ctx::AppShellCtx;
 use app_shell_init::init_app_shell;
+use ide_layout_switch::IdeLayoutToggleSignals;
+use layout_toggle_hotkey::wire_layout_toggle_hotkey;
 
 use leptos::prelude::*;
+use wasm_bindgen::JsCast;
 
 /// 根容器类名：随侧栏折叠 / 贴边变化（集中计算，减少 App 内 reactive 闭包数）。
 ///
@@ -129,12 +136,46 @@ fn SidebarRailRevealBtn(
 #[component]
 pub fn App() -> impl IntoView {
     let app_ctx = init_app_shell();
-    // `app_ctx` 只用来「取一次当前 lane」：视图捕获的是 `Rc<LaneRuntime>` 与其中的 Copy
-    // 信号句柄，**不持有** ctx，所以它随本函数返回被 drop 是安全的（N=1 时没有第二个读者）。
-    // **S2 的 `add_lane` 必须让 `App` 长期持有 `app_ctx`**，否则事件回调里拿不到 `LaneSet`。
     // #561 S1b-3：`App` 只做「取当前前台那条 lane 的运行时 → 交给视图主体」。视图与
-    // `provide_context` 都搬进了 `app_body`，于是 S2 用 `mount_to` 挂第二条 lane 时 owner
+    // `provide_context` 都在 `app_body` 里，所以 S2 用 `mount_to` 挂第二条 lane 时 owner
     // 就是新子树的，ctx 不会串到第一条（§5.2「已知风险」）。
+    //
+    // #561 S2：`App` 从此**长期持有** `app_ctx` —— 事件回调要靠它建新 lane。
+    // 挂载容器也放在这一层：它不属于任何一条 lane 的内容。
+    let lanes_host = NodeRef::<leptos::html::Div>::new();
+    register_new_lane_action(&app_ctx, lanes_host);
+
     let rt = app_ctx.current_runtime();
-    app_body(rt)
+    // 热键是**窗口级**的：只在这里注册一次。放进 `app_body` 会让每条 lane 各注册一份全局
+    // 监听 —— 第二条 lane 建出来后，一次按键就 toggle 两次。
+    wire_layout_toggle_hotkey(IdeLayoutToggleSignals::from_app_signals(&rt.signals));
+
+    view! {
+        {app_body(rt)}
+        // 新 lane 的挂载点；S3 之前它一直隐藏（`styles/shell-ds.css` 的 `.lane-layer`）。
+        <div class="lane-layer" node_ref=lanes_host></div>
+    }
+    .into_any()
+}
+
+/// 把「新建一条 lane」注册进窗口级动作表（#561 S2）。
+///
+/// 闭包由**事件回调**触发，那时没有「这条 lane 的 owner」；所以真正的构造（含
+/// `run_shell_wiring_in_order` 里那约 29 个 `Effect::new`）放进 `mount_to` 的闭包里跑 ——
+/// 这是唯一会给新子树建 owner 的地方，也是 `provide_context` 能按 lane 生效的原因。
+fn register_new_lane_action(app_ctx: &AppShellCtx, host: NodeRef<leptos::html::Div>) {
+    let ctx = app_ctx.clone();
+    lane_actions::register_new_lane(Rc::new(move |base: Option<String>| {
+        let Some(host_el) = host.get() else {
+            // 视图还没挂上。动作只可能由页面里的按钮触发，理论上到不了这里。
+            return;
+        };
+        let ctx = ctx.clone();
+        let handle = leptos::mount::mount_to(host_el.unchecked_into(), move || {
+            app_body(ctx.add_lane(base.as_deref()))
+        });
+        // S2 还没有「关 lane」入口，先放弃句柄（与 `mount_to_body` 同一取舍）。S3 加关 lane
+        // 时改成把 handle 存进 `LaneSet`，关闭时 drop 以清理那条 lane 的反应式系统。
+        handle.forget();
+    }));
 }

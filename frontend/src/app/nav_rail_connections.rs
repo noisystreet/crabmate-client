@@ -334,7 +334,6 @@ fn ctl_row(
     let connectable = state == CtlRowState::Ready;
     let api_base_for_title = api_base.clone();
     let base_for_click = api_base;
-    let name_for_click = name.clone();
     let name_for_title = name.clone();
     let name_for_busy = name.clone();
     let name_for_restart = name.clone();
@@ -391,18 +390,10 @@ fn ctl_row(
                     data-testid="nav-rail-ctl-connect"
                     on:click={
                         let base = base_for_click.clone();
-                        let name = name_for_click.clone();
                         move |_| {
-                            let base = base.clone();
-                            let name = name.clone();
-                            // 失败不弹错：地址不合法 / 建窗失败只落在壳日志，用户能再点一次。
-                            leptos::task::spawn_local(async move {
-                                let _ = crate::tauri_shell::tauri_open_connection(
-                                    &base,
-                                    Some(name.as_str()),
-                                )
-                                .await;
-                            });
+                            // #561 S2：连接 = 在当前窗口新建一条 lane（不再开新 WebView），
+                            // 目标实例的地址作为这条 lane 的基址交接过去。
+                            crate::app::lane_actions::new_lane(Some(base.clone()));
                         }
                     }
                 >

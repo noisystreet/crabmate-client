@@ -1400,3 +1400,9 @@ img[data-cm-ws-hydrated="1"] {
 .session-ctx-item-danger:hover {
   background: var(--error-bg);
 }
+
+/* #561 S2：新 lane 的挂载容器。S3 之前一直隐藏 —— 点「连接」建出来的第二条 lane 在后台
+   照常接线、照常轮询，只是还没被切到前台（那一步是 S3 的 display 切换）。 */
+.lane-layer {
+  display: none;
+}

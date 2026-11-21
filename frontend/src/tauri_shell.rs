@@ -240,8 +240,6 @@ extern "C" {
         context: Option<String>,
         busy: bool,
     ) -> js_sys::Promise;
-    #[wasm_bindgen(js_name = invokeTauriOpenConnectWindow)]
-    fn invoke_tauri_open_connect_window(display_name: Option<String>) -> js_sys::Promise;
     #[wasm_bindgen(js_name = invokeTauriCtlListInstances)]
     fn invoke_tauri_ctl_list_instances() -> js_sys::Promise;
     #[wasm_bindgen(js_name = invokeTauriCtlRestartInstance)]
@@ -249,11 +247,6 @@ extern "C" {
         name: &str,
         grace: Option<f64>,
         timeout: Option<f64>,
-    ) -> js_sys::Promise;
-    #[wasm_bindgen(js_name = invokeTauriOpenConnection)]
-    fn invoke_tauri_open_connection(
-        api_base: &str,
-        display_name: Option<String>,
     ) -> js_sys::Promise;
     #[wasm_bindgen(js_name = invokeTauriCloseConnection)]
     fn invoke_tauri_close_connection(key: &str) -> js_sys::Promise;
@@ -547,29 +540,6 @@ pub fn tauri_report_connection_metrics(context: Option<String>, busy: bool) {
     });
 }
 
-/// 开一个**只载连接页**的新窗口（桌面多窗口）。
-///
-/// 与 [`tauri_focus_connection`] 同为 fire-and-forget：建窗失败（注册表未就绪、同名 label）
-/// 只落在壳日志里。所以调用方要把按钮的渲染条件绑在 [`tauri_shell_available`] 上 ——
-/// 非桌面壳里这条命令根本不存在，点了只会静默无事。
-#[cfg(target_arch = "wasm32")]
-pub fn tauri_open_connect_window(display_name: Option<&str>) {
-    if !tauri_shell_available() {
-        return;
-    }
-    let name = display_name.map(str::to_string);
-    spawn_local(async move {
-        let _ = tauri_invoke_void(invoke_tauri_open_connect_window(name)).await;
-    });
-}
-
-/// 非 wasm（测试 / SSR）下开窗是 no-op。
-///
-/// 与 [`tauri_focus_connection`] 同理：它被设置页 `view!` 的点击处理引用，而那段代码在
-/// 两个目标下都编译。
-#[cfg(not(target_arch = "wasm32"))]
-pub fn tauri_open_connect_window(_: Option<&str>) {}
-
 /// 控制面里声明过的实例（JSON 文本）。
 ///
 /// 与 [`tauri_list_connections_json`] 同一套约定：壳回 `Vec<CtlInstance>`（JS 数组），
@@ -627,34 +597,10 @@ pub async fn tauri_ctl_restart_instance_json(_: &str) -> Result<String, String> 
     Err("not in tauri shell".to_string())
 }
 
-/// 按地址开一条新连接（左栏「可连实例」那行的「连接」按钮）。
-///
-/// 返回 `Result` 而不是 fire-and-forget：地址不合法或建窗失败都要说得出原因，
-/// 而这是一次用户点击，有地方显示它。
-#[cfg(target_arch = "wasm32")]
-pub async fn tauri_open_connection(
-    api_base: &str,
-    display_name: Option<&str>,
-) -> Result<(), String> {
-    if !tauri_shell_available() {
-        return Err("not in tauri shell".to_string());
-    }
-    tauri_invoke_void(invoke_tauri_open_connection(
-        api_base,
-        display_name.map(str::to_string),
-    ))
-    .await
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-pub async fn tauri_open_connection(_: &str, _: Option<&str>) -> Result<(), String> {
-    Err("not in tauri shell".to_string())
-}
-
 /// 关掉一条连接窗口（Desktop 的「断开」= 关窗 = 注销）。
 ///
 /// fire-and-forget：失败只意味着那个窗口还在，用户能再点一次；调用方是点击处理，
-/// 没有能显示错误的稳定位置（与 [`tauri_open_connect_window`] 同一取舍）。
+/// 没有能显示错误的稳定位置。
 #[cfg(target_arch = "wasm32")]
 pub fn tauri_close_connection(key: &str) {
     if !tauri_shell_available() {
