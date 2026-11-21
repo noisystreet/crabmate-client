@@ -233,6 +233,44 @@ Web 侧没有「帧」，只有「挂载 / 卸载」，所以要先说清卸载�
 
 一句话：**实验排除了「8 条预建会崩」，但把矛盾从「资源够不够」推到了「视图能不能动态重建」**。后者是设计选择，不是性能问题。
 
+#### 5.2 已定：懒建，形状对齐 TUI
+
+**决定（2026-11-21）**：不预建，**用户点「连接」时才建那条 lane**；形状对齐 TUI 的
+「一条 lane 一棵子树 + 切换只换显示」。
+
+一个决定方案形状的技术事实（实测，两个方向都验过）：
+
+| 形态 | 能否捕获含 `Rc` 的值 | 证据 |
+|---|---|---|
+| `on:click=move \|_\| …` 等**事件回调** | ✅ **可以** | `settings_sections.rs` 的 `save_api_base_click(scope.clone(), …)`，`ScopeHolder` 含 `Rc`，编译通过 |
+| `<Show when=move \|\| …>` / `key=` 等**响应式闭包** | ❌ **不行** | 把 `app_ctx.signals().chat` 写进闭包后报 9 处 `Rc<(dyn Fn)> cannot be sent between threads safely` |
+
+**推论**：「新建 lane」这件事**只能在事件回调里做**，而视图挂载要绕开响应式闭包 →
+必须用 **`leptos::mount::mount_to(host, || app_body(rt))`** 手工挂到占位容器上，并保留
+`UnmountHandle` 供关 lane 时卸载。这也是懒建唯一可行的形状。
+
+三步（每步都可独立验证）：
+
+| 步 | 内容 | 验证 |
+|---|---|---|
+| **S1** | 把 `App` 的视图抽成 `app_body(rt: &LaneRuntime) -> AnyView`；`AppShellCtx` 的 ~14 个 `*_signals()` / `view_input()` 构造方法改成「**为指定 lane 生成**」（内部 96 处 `self.signals()` → 用传入的 lane） | N=1 等价：826 测试 + 桌面冒烟（本机可跑） |
+| **S2** | `LaneSet::add_lane(holder)`；两个入口按钮的 `on:click` 里 `add_lane` + `mount_to` 挂载 + 存 `UnmountHandle` | 冒烟能起 + 手测「点两次得到两条 lane」 |
+| **S3** | 切换只改 `display`（不再重建）；左栏画本窗口 lane 列表（§6.5 方案 B）；键位（§6.6） | **必须图形会话手测**：会话/草稿不串、后台流不中断 |
+
+与 TUI 的对应：
+
+| TUI | Web（懒建方案） |
+|---|---|
+| `TuiApp.lanes: Vec<LaneApp>` | `LaneSet.lanes: Rc<RefCell<Vec<LaneRuntime>>>` |
+| `active: usize` | `active: RwSignal<usize>` |
+| `/lane attach` → 造 `LaneApp` 并 push | `add_lane` → 造 `LaneRuntime` + `mount_to` 挂一棵树 |
+| 每帧按 `active` 取 `lane_mut()` | 每棵子树各自绑定建出来那一刻的句柄，切换只改 `display` |
+| `FocusChanged` → `LanePhase` 转移 | 同一份 `lane_phase`（已在 `client-api`）+ 写回 `signals.phase` |
+
+**已知风险（S1 就要处理）**：`App` 顶层的 `provide_context(ChatShellLeptosContext)` 必须
+**移进每棵子树**，否则第二条 lane 的视图会读到第一条的 ctx；`IdeSession` 这类「窗口级还是
+lane 级」混用的对象要逐个判定归属。
+
 ## 6. 左栏「连接」区
 
 ### 6.1 现状（已核对）
