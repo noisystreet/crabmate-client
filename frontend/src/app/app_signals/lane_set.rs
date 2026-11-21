@@ -7,7 +7,7 @@
 //! `AppShellCtx` 上的**单个字段** —— 只要再开一条 lane，这些产物就会互相覆盖（后建的
 //! 把先建的挤掉，切回去时第一条的发送闭包已经丢了）。
 //!
-//! 现在一条 lane 的运行时整体打包成 [`LaneRuntime`]，容器持 `Vec<LaneRuntime>`；壳一律
+//! 现在一条 lane 的运行时整体打包成 [`LaneRuntime`]，容器持 `Vec<Rc<LaneRuntime>>`；壳一律
 //! 经 [`AppShellCtx::signals`](super::super::AppShellCtx::signals) 等访问器取当前那条。
 //!
 //! 本步仍是 **N=1 等价重构**：容器恒一条，取到的就是改造前那份，单连接零行为变化
@@ -97,19 +97,13 @@ impl LaneSet {
 
     /// 取当前前台那条 lane 的运行时（`Rc` 句柄，常数开销）。
     ///
-    /// 下标越界（理论上不可能：现在没有改下标的入口）时退回第一条 —— 宁可画错一条，
+    /// 下标越界（理论上不可能：现在没有改下标的入口）时退回**最后一条** —— 宁可画错一条，
     /// 也别让一处 panic 把整屏打空。
     pub(crate) fn current_runtime(&self) -> Rc<LaneRuntime> {
         let lanes = self.lanes.borrow();
         let last = lanes.len().saturating_sub(1);
         let index = self.active.get_untracked().min(last);
         Rc::clone(lanes.get(index).expect("LaneSet 至少持有一条 lane"))
-    }
-
-    /// 对当前前台那条 lane 的运行时借一次（`S1` 之后大部分调用点应改用
-    /// [`Self::current_runtime`] + 按 lane 参数化的方法）。
-    pub(crate) fn with_current<R>(&self, f: impl FnOnce(&LaneRuntime) -> R) -> R {
-        f(&self.current_runtime())
     }
 
     /// 当前前台那条 lane 的信号（唯一高频入口，单独开一个省一次闭包）。

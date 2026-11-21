@@ -155,18 +155,21 @@ pub fn App() -> impl IntoView {
     provide_context(ChatShellLeptosContext::from_app_signals(&signals));
 
     // `AppShellCtx` 含 `Rc` 等，不满足 `Send`；子组件闭包不得捕获整 ctx（见 Leptos `ToChildren` 约束）。
-    let approval_modal_signals = app_ctx.approval_modal_signals();
-    let settings_page_view_input = app_ctx.settings_page_view_input();
-    let ide_settings_page_view_input = app_ctx.ide_settings_page_view_input();
-    let context_usage_page_view_input = app_ctx.context_usage_page_view_input();
-    let mobile_shell_header_signals = app_ctx.mobile_shell_header_signals();
-    let changelist_modal_signals = app_ctx.changelist_modal_signals();
-    let session_list_modal_signals = app_ctx.session_list_modal_signals();
-    let workspace_project_modal_signals = app_ctx.workspace_project_modal_signals();
-    let workspace_clone_modal_signals = app_ctx.workspace_clone_modal_signals();
-    let workspace_browser_pick_modal_signals = app_ctx.workspace_browser_pick_modal_signals();
-    let sidebar_nav_signals = app_ctx.sidebar_nav_signals();
-    let side_column_view_signals = app_ctx.side_column_view_signals();
+    // #561 S1：视图入参一律由「这条 lane」生成（`rt` 的 `signals` / `wiring` 字段），
+    // 不再经 `active` 指针 —— 这是 S1b-3 把视图抽成 `app_body(rt)` 的前提。
+    let rt = app_ctx.current_runtime();
+    let approval_modal_signals = rt.approval_modal_signals();
+    let settings_page_view_input = rt.settings_page_view_input();
+    let ide_settings_page_view_input = rt.ide_settings_page_view_input();
+    let context_usage_page_view_input = rt.context_usage_page_view_input();
+    let mobile_shell_header_signals = rt.mobile_shell_header_signals();
+    let changelist_modal_signals = rt.changelist_modal_signals();
+    let session_list_modal_signals = rt.session_list_modal_signals();
+    let workspace_project_modal_signals = rt.workspace_project_modal_signals();
+    let workspace_clone_modal_signals = rt.workspace_clone_modal_signals();
+    let workspace_browser_pick_modal_signals = rt.workspace_browser_pick_modal_signals();
+    let sidebar_nav_signals = rt.sidebar_nav_signals();
+    let side_column_view_signals = rt.side_column_view_signals();
 
     // IDE 会话（状态 + 副作用）在这里建一次：视图挂在聊天列主区里，切回聊天也不丢状态。
     let layout_toggle = IdeLayoutToggleSignals::from_app_signals(&signals);
@@ -181,7 +184,7 @@ pub fn App() -> impl IntoView {
         chat: signals.chat,
         composer_draft: signals.chat_composer.draft,
         workspace_panel: signals.to_workspace_panel(),
-        refresh_workspace: app_ctx.refresh_workspace(),
+        refresh_workspace: rt.wiring.refresh_workspace.clone(),
         initialized: signals.initialized,
         editor_visible: signals.shell_ui.editor_layout_mode,
     });
@@ -222,7 +225,7 @@ pub fn App() -> impl IntoView {
                     class="main-row"
                 >
                     <div class="main-row-chat-layer">
-                        {chat_column_view(app_ctx.chat_column(), ide_body_view)}
+                        {chat_column_view(rt.chat_column.clone(), ide_body_view)}
                         {side_column_view(side_column_view_signals.clone())}
                     </div>
                 </div>
