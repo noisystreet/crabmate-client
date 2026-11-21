@@ -20,6 +20,7 @@ pub mod conversation_state;
 pub mod ctl;
 pub mod handoff;
 pub mod health;
+pub mod layout_projection;
 pub mod markdown_inline;
 pub mod markdown_normalize;
 pub mod messages;

@@ -40,6 +40,7 @@ fn revision_response(revision: u64) -> ConversationMessagesResponse {
         active_session_mode: None,
         tiktoken_prompt_tokens: None,
         context_artifacts: vec![],
+        layout: None,
     }
 }
 
@@ -226,9 +227,10 @@ fn merge_tail_page_replaces_local_draft_with_server_snapshot() {
         active_session_mode: None,
         tiktoken_prompt_tokens: None,
         context_artifacts: vec![],
+        layout: None,
     };
     let merged = merge_tail_page_into_session_messages(&session, hydrated, &resp);
-    let ids: Vec<_> = merged.iter().map(|m| m.id.as_str()).collect();
+    let ids: Vec<_> = merged.messages.iter().map(|m| m.id.as_str()).collect();
     assert_eq!(ids, vec!["u1", "a-srv"]);
 }
 
@@ -271,9 +273,10 @@ fn merge_tail_page_does_not_resurrect_user_the_server_omits() {
         active_session_mode: None,
         tiktoken_prompt_tokens: None,
         context_artifacts: vec![],
+        layout: None,
     };
     let merged = merge_tail_page_into_session_messages(&session, hydrated.clone(), &resp);
-    let roles: Vec<_> = merged.iter().map(|m| m.role.as_str()).collect();
+    let roles: Vec<_> = merged.messages.iter().map(|m| m.role.as_str()).collect();
     assert_eq!(
         roles,
         vec!["assistant"],
@@ -491,4 +494,131 @@ fn idless_hydrate_stub_is_dropped_only_when_the_same_name_result_is_unique() {
         ["stub", "result", "result-2"],
         "同名结果不唯一时必须保守保留短卡"
     );
+}
+
+/// 每回合「旁白 + 工具」两段的 layout（`tcids[i]` 对应 `u{i}`）。
+fn tool_layout(tcids: &[&str]) -> crabmate::cm_api_contract::chat::ConversationLayoutMeta {
+    use crabmate::cm_api_contract::chat::{ConversationLayoutMeta, ConversationLayoutSegment};
+    let mut segments = Vec::new();
+    for (turn, tcid) in tcids.iter().enumerate() {
+        let turn_id = format!("u{turn}");
+        let seq = segments.len() as u32;
+        segments.push(ConversationLayoutSegment {
+            turn_id: Some(turn_id.clone()),
+            segment_id: format!("seg-before-{tcid}"),
+            segment_kind: "assistant_commentary".into(),
+            before_tool_call_id: Some((*tcid).into()),
+            sequence: seq,
+        });
+        segments.push(ConversationLayoutSegment {
+            turn_id: Some(turn_id),
+            segment_id: (*tcid).into(),
+            segment_kind: "tool".into(),
+            before_tool_call_id: None,
+            sequence: seq + 1,
+        });
+    }
+    ConversationLayoutMeta {
+        layout_schema_version: 2,
+        projection_hash: Some("deadbeef".into()),
+        segments,
+    }
+}
+
+fn tool_row(id: &str, tool_call_id: &str) -> StoredMessage {
+    StoredMessage {
+        is_tool: true,
+        tool_call_id: Some(tool_call_id.into()),
+        ..plain_message(id, "tool", "read")
+    }
+}
+
+fn tool_turn(user_id: &str, text: &str, commentary: &str, tcid: &str) -> Vec<StoredMessage> {
+    vec![
+        plain_message(user_id, "user", text),
+        plain_message(&format!("h_{tcid}_c"), "assistant", commentary),
+        tool_row(&format!("h_{tcid}_t"), tcid),
+    ]
+}
+
+/// 服务端已有 `layout` 的会话：历史行升级成 v2 行键并 stamp，刷新不再整段重建。
+#[test]
+fn hydration_layout_mapping_stamps_v2_and_stays_stable_across_refreshes() {
+    let hydrated = tool_turn("h_u", "go", "先读。", "tc1");
+    let mut resp = revision_response(4);
+    resp.layout = Some(tool_layout(&["tc1"]));
+    let mut session = revision_session(vec![], Some(0));
+
+    apply_hydrated_tail_if_newer(&mut session, hydrated.clone(), &resp);
+
+    assert_eq!(
+        session
+            .messages
+            .iter()
+            .map(|m| m.id.as_str())
+            .collect::<Vec<_>>(),
+        ["h_u", "turn-commentary-tc1", "turn-tool-tc1"]
+    );
+    assert_eq!(session.layout_schema_version, CURRENT_LAYOUT_SCHEMA_VERSION);
+    assert!(session.has_v2_finalized_rows());
+
+    // 同一 revision 再刷新：映射幂等 → 内容不变 → 不重新赋值（也就不会触发持久化）。
+    let first = session.messages.clone();
+    apply_hydrated_tail_if_newer(&mut session, hydrated, &resp);
+    assert_eq!(session.messages, first);
+}
+
+/// 映射成功后的追加路径：新回合也只追加，且新回合带 v2 行键。
+#[test]
+fn hydration_layout_mapping_appends_new_turn_with_v2_keys() {
+    let mut resp = revision_response(4);
+    resp.layout = Some(tool_layout(&["tc1"]));
+    let mut session = revision_session(vec![], Some(0));
+    apply_hydrated_tail_if_newer(
+        &mut session,
+        tool_turn("h_u1", "q1", "先读。", "tc1"),
+        &resp,
+    );
+    let local = session.messages.clone();
+
+    let mut next_resp = revision_response(5);
+    next_resp.layout = Some(tool_layout(&["tc1", "tc2"]));
+    let mut hydrated = tool_turn("h_u1", "q1", "先读。", "tc1");
+    hydrated.extend(tool_turn("h_u2", "q2", "再读。", "tc2"));
+    next_resp.window_start_index = 0;
+    apply_hydrated_tail_if_newer(&mut session, hydrated, &next_resp);
+
+    let ids: Vec<_> = session.messages.iter().map(|m| m.id.as_str()).collect();
+    assert_eq!(
+        ids[..local.len()],
+        local.iter().map(|m| m.id.as_str()).collect::<Vec<_>>()[..]
+    );
+    assert_eq!(
+        &ids[local.len()..],
+        ["h_u2", "turn-commentary-tc2", "turn-tool-tc2"]
+    );
+}
+
+/// 段序列对不齐（服务端 layout 与本地快照不同步）时不得 stamp v2，保持 legacy。
+#[test]
+fn hydration_layout_mismatch_keeps_legacy_ids() {
+    let hydrated = vec![
+        plain_message("h_u", "user", "go"),
+        plain_message("h_a", "assistant", "不是旁白"),
+    ];
+    let mut resp = revision_response(4);
+    resp.layout = Some(tool_layout(&["tc1"]));
+    let mut session = revision_session(vec![], Some(0));
+
+    apply_hydrated_tail_if_newer(&mut session, hydrated, &resp);
+
+    assert_eq!(
+        session
+            .messages
+            .iter()
+            .map(|m| m.id.as_str())
+            .collect::<Vec<_>>(),
+        ["h_u", "h_a"]
+    );
+    assert_eq!(session.layout_schema_version, LEGACY_LAYOUT_SCHEMA_VERSION);
 }

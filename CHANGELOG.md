@@ -13,6 +13,8 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Added
 
+- **History rows now get stable v2 projection keys, so a reload stops rebuilding the whole tail page.** `GET /conversation/messages` already carries a conversation-level `layout` (`layout_schema_version = 2`) the UI ignored, so every hydrate re-created the visible page with fresh `h_{ms}_{i}` ids and — for tool turns — replaced the tail wholesale. The page is now aligned segment by segment against `layout` and rewritten to `turn-commentary-*` / `turn-tool-*` / `turn-timeline-*`; only then is the session stamped v2, after which hydration appends new Server turns instead of replacing. Any misalignment (segment count, kind order, tool id, anchor) falls back to the legacy snapshot path for the whole page. Sessions without `layout` are unaffected. No wire change.
+
 ### Changed
 
 - **Session hydration is one rule now, and the E4 compatibility reading is gone.** The Web UI drops post-terminal business frames (the event id is still recorded, so `stream_resume` keeps advancing), merges at equal revision too (re-applying a snapshot is idempotent), and deletes `session_merge.rs` — the v1 tool-pool / call-stub replay adapter — together with the B3 dual-read observer. Non-v2 sessions take the Server snapshot as authoritative: keep the already-loaded older prefix, replace the overlapping tail, and drop call stubs a result card already represents. Cost: a local user bubble the Server omits is no longer re-inserted (the existing user-regression guard skips that page instead). No wire change.
