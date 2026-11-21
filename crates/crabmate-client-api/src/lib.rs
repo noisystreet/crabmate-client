@@ -21,6 +21,7 @@ pub mod ctl;
 pub mod handoff;
 pub mod health;
 pub mod lane_attach;
+pub mod lane_phase;
 pub mod layout_projection;
 pub mod markdown_inline;
 pub mod markdown_normalize;
