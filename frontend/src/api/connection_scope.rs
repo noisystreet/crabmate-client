@@ -197,9 +197,24 @@ pub(crate) fn is_active(holder: &ScopeHolder) -> bool {
     })
 }
 
+/// 把**已有的**那一份设为前台默认（切 lane 的唯一入口，#561 / #558）。
+///
+/// 与 [`install_new_holder`] 的分工：那个是「造一份空的再设为前台」（启动 / 新 lane
+/// 的起点），这个只移动指针 —— 值、水合标记、存储域都留在原来那份里，所以切回上一
+/// 条 lane 时配置与凭据不用重新读盘。
+///
+/// 单 lane 时调用它等于没动（零行为变化）。
+///
+/// **为什么现在就加**：它让「谁当前台」只有一条写入路径。将来 lane 容器的
+/// `set_active` 直接调这里，不必再碰 `ACTIVE` 这个 `thread_local` —— 否则「切换」
+/// 会散成两处（容器改下标一处、指针另一处），漏一处就是「下标说 A、请求发到 B」。
+pub(crate) fn activate(holder: &ScopeHolder) {
+    ACTIVE.with(|cell| *cell.borrow_mut() = Some(holder.clone()));
+}
+
 /// 换一份新的空 scope（bootstrap / 新 lane 的起点）；旧的那份随之丢弃。
 pub(crate) fn install_new_holder() {
-    ACTIVE.with(|cell| *cell.borrow_mut() = Some(ScopeHolder::new()));
+    activate(&ScopeHolder::new());
 }
 
 /// 当前基址（空 = 同 Origin）。**不**触发任何磁盘读取。
@@ -343,5 +358,34 @@ mod tests {
 
         let lookalike = ScopeHolder::new_with_storage_label(None);
         assert!(!is_active(&lookalike), "值相同也不是前台那一份");
+    }
+
+    /// 切前台的唯一入口：只移动指针，不动值、不动水合标记、不动域。
+    ///
+    /// 这是「切回上一条 lane 不用重新读盘」的地基。若 `activate` 顺手重置 settled
+    /// 或换掉域后缀，切回来就会重新水合（多打一次钥匙串），甚至读写到别人的键。
+    #[test]
+    fn activating_a_holder_moves_the_pointer_without_touching_state() {
+        // 先记住原先前台那一份：测完要放回去，否则同线程后续用例会看到被切走的指针。
+        let original = active_holder();
+
+        let other = ScopeHolder::new_with_storage_label(Some("lane-2".to_string()));
+        other.set_api_base("http://other:9000");
+        activate(&other);
+
+        assert!(is_active(&other), "activate 之后它就是前台那一份");
+        assert!(!is_active(&original), "切走之后原来那份不再是前台");
+        assert_eq!(
+            other.storage_label().as_deref(),
+            Some("lane-2"),
+            "域后缀跟着 holder 走，activate 不该改它"
+        );
+        assert!(other.is_base_settled(), "水合标记原样保留");
+
+        // 切回去：状态仍然原样。
+        activate(&original);
+        assert!(is_active(&original));
+        assert!(!is_active(&other));
+        assert_eq!(other.storage_label().as_deref(), Some("lane-2"));
     }
 }
