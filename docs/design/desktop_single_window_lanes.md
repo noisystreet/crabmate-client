@@ -366,6 +366,17 @@ next_unread = connection_unread_after(可见, busy, prev)
 | 6 | `ACTIVE` 收窄门禁（#558 项 5/6） | 门禁脚本进 `check.sh` | 4 完成（否则一加就红） |
 | 7 | 收尾：capability matrix、`shell_smoke_runbook.md`、CHANGELOG | — | 全部完成 |
 
+**阶段 3 的约束（实测，别重走）**：容器（`LaneSet` + `current` / `set_active`）在没有
+第二条 lane 之前**没有任何消费者** —— `clippy -D warnings` 会把它们判成 `dead_code`，
+而补 `#[expect(dead_code)]` 正是 #558 当初把 1b 标为「故意没做」要避开的形态。所以
+阶段 3 必须**与「第二条 lane 从哪来」同批**落地（左栏点击 → 新建 lane 的入口，也就是
+阶段 4 的前半），不能先落一个空容器再等消费者。
+
+可独立先做的只有「**切前台的唯一写入口**」：`connection_scope::activate(holder)`
+（已被 `install_new_holder` 消费，单 lane 时等于没动）。它把「谁当前台」收成一条写入
+路径 —— 将来 `set_active` 直接调它，不必再碰 `ACTIVE` 这个 `thread_local`，否则切换
+会散成两处（容器改下标一处、指针另一处），漏一处就是「下标说 A、请求发到 B」。
+
 CHANGELOG 从阶段 4 起才需要条目（用户可见行为从这里开始）；阶段 2、3 是纯内部重构。
 
 ## 10. 风险清单
