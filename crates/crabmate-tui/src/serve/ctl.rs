@@ -19,8 +19,6 @@ use crabmate_client_api::ctl::{
     parse_status_response, parse_toggle_response,
 };
 
-use super::url::normalize_api_base;
-
 /// 单次读写超时：与 Server 侧 `IO_TIMEOUT`（5 s）对齐。
 ///
 /// 不设成 60 s（那是 Server 的 `HANDLE_TIMEOUT`）：超时太长会把界面冻在一个已经不响应的
@@ -286,21 +284,16 @@ pub fn name_for_base_url(items: &[CtlInstance], api_base: &str) -> Option<String
 /// 与 [`name_for_base_url`] 同一套比较口径，且同样不把 `localhost` 与 `127.0.0.1` 合并。
 #[must_use]
 pub fn same_api_base(a: &str, b: &str) -> bool {
-    match (url_key(a), url_key(b)) {
-        // 空串（没有 URL / 非绝对 http(s)）不构成「同一台」的证据，宁可放行让调用方去连。
-        (Some(x), Some(y)) => x == y,
-        _ => false,
-    }
+    // 判据只有一份，在共享层（`crabmate_client_api::serve_identity`）：Web 侧按 `api_base`
+    // 去重时用的是同一份，两处各写一遍就会「TUI 判同一条、Web 判两条」。
+    crabmate_client_api::serve_identity::same_api_base(a, b)
 }
 
 /// 归一化后的比较键；空串（没有 `base_url` / 非绝对 http(s) URL）返回 `None`。
 ///
-/// 先整体转小写再交给 [`normalize_api_base`]：后者用 `starts_with("http://")` 判绝对
-/// URL，大写的 `HTTP://` 会被它当成非法并返回空串。base_url 不携带路径，整体小写不改变
-/// 语义（scheme / host 本就不区分大小写）。
+/// 委托共享层：与 `same_api_base` 必须同一份算法，否则「查找」和「比较」会给出不同答案。
 fn url_key(url: &str) -> Option<String> {
-    let normalized = normalize_api_base(&url.trim().to_ascii_lowercase());
-    (!normalized.is_empty()).then_some(normalized)
+    crabmate_client_api::serve_identity::api_base_key(url)
 }
 
 /// 写一行、读一行。

@@ -195,7 +195,8 @@ fn announce_ctl_socket(ctl_socket: Option<&std::path::Path>) {
 /// 一个 worker 线程 + 一个 `current_thread` runtime + 一份连接池，serve 那侧还各有自己的
 /// 并发上限（`chat_queue_max_concurrent` 默认 2）。它**不是**性能目标 —— 真要 8 路并行
 /// 得配 8 个 serve，见 `docs/design/tui_multi_server.md` §5.2。
-pub(super) const MAX_LANES: usize = 8;
+/// lane 数量上限：与 Web 侧共用同一份口径（`crabmate_client_api::lane_attach::MAX_LANES`）。
+pub(super) const MAX_LANES: usize = crabmate_client_api::lane_attach::MAX_LANES;
 
 /// 还能不能再加一条 lane：超限时返回**可照抄**的提示。
 ///
@@ -416,38 +417,51 @@ impl<'a> super::TuiApp<'a> {
     /// 来自 `--api-base` 反查，也可能是 `local`），重复连接会让同一台 serve 各开一条
     /// SSE、各读一份会话，左栏连接数还与 ctl 的进程数对不上。
     pub(super) fn attach_lane(&mut self, name: &str, base_url: &str) {
-        // 地址形态先拦一道：`ServeClient::new` **不校验** `api_base`，而
-        // `normalize_api_base` 对非 `http(s)://` 前缀返回空串 —— 不拦就会造出一条
-        // `api_base = ""` 的「已连接」lane，之后每个请求才以「API base must be an
-        // absolute http(s) URL」失败。`/lane attach-url` 是手打地址，漏 scheme 极常见。
-        if crate::serve::normalize_api_base(base_url).is_empty() {
-            self.shell_line(&format!(
-                "`{name}` 的地址不是绝对 http(s) URL：`{base_url}`（是不是漏了 `http://`？）"
-            ));
-            return;
-        }
-        if let Some(idx) = self.lanes.iter().position(|l| l.label == name) {
-            self.active = idx;
-            self.shell_line(&format!("`{name}` 已经是本进程的连接（已切过去）"));
-            return;
-        }
-        if let Some(idx) = self
-            .lanes
-            .iter()
-            .position(|l| crate::serve::same_api_base(&l.client.config().api_base, base_url))
-        {
-            self.active = idx;
-            let existing = self.lanes[idx].label.clone();
-            self.shell_line(&format!(
-                "`{existing}` 已经连着 {base_url}（同一条 serve 不重复连，已切过去）"
-            ));
-            return;
-        }
-        // 名额检查刻意放在两道去重**之后**：已达上限时 `/lane attach <现有名字>`
-        // 仍要能切过去 —— 那并不新增线程或连接，被上限挡住只会让人以为「连接坏了」。
-        if let Some(notice) = capacity_notice(self.lanes.len()) {
-            self.shell_line(&notice);
-            return;
+        // 判定顺序（地址形态 → 同名 → 同 api_base → 名额）收在共享层
+        // `crabmate_client_api::lane_attach::decide_attach`：Web 侧点「连接」某一行走的是
+        // 同一个函数，两处各写一遍就会出现「TUI 判同一条、Web 判两条」。
+        //
+        // 先把判定算完再动 `self`：`slots` 借用了 `self.lanes`，而下面要写 `self.active`。
+        let decision = {
+            let slots: Vec<crabmate_client_api::lane_attach::LaneSlot<'_>> = self
+                .lanes
+                .iter()
+                .map(|l| {
+                    crabmate_client_api::lane_attach::LaneSlot::new(
+                        &l.label,
+                        l.client.config().api_base.as_str(),
+                    )
+                })
+                .collect();
+            crabmate_client_api::lane_attach::decide_attach(&slots, name, base_url, MAX_LANES)
+        };
+        match decision {
+            crabmate_client_api::lane_attach::AttachDecision::Append => {}
+            crabmate_client_api::lane_attach::AttachDecision::InvalidBase => {
+                self.shell_line(&format!(
+                    "`{name}` 的地址不是绝对 http(s) URL：`{base_url}`（是不是漏了 `http://`？）"
+                ));
+                return;
+            }
+            crabmate_client_api::lane_attach::AttachDecision::SwitchToSameName { index } => {
+                self.active = index;
+                self.shell_line(&format!("`{name}` 已经是本进程的连接（已切过去）"));
+                return;
+            }
+            crabmate_client_api::lane_attach::AttachDecision::SwitchToSameBase { index } => {
+                self.active = index;
+                let existing = self.lanes[index].label.clone();
+                self.shell_line(&format!(
+                    "`{existing}` 已经连着 {base_url}（同一条 serve 不重复连，已切过去）"
+                ));
+                return;
+            }
+            crabmate_client_api::lane_attach::AttachDecision::CapacityFull { current } => {
+                if let Some(notice) = capacity_notice(current) {
+                    self.shell_line(&notice);
+                }
+                return;
+            }
         }
         let cfg = ConnectionConfig::new(base_url, self.template.bearer.clone())
             .with_bearer_source(self.template.bearer_source);

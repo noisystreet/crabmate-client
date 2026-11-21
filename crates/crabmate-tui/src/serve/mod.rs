@@ -56,7 +56,6 @@ pub use sessions::{
     apply_web_session_op, conversation_id_for_resume, fetch_web_sessions, is_default_session_title,
     title_from_user_prompt,
 };
-pub use url::normalize_api_base;
 pub use user_data::{
     LlmOverridesDto, McpServersFileDto, UserPrefsDto, fetch_llm_overrides, fetch_mcp_servers,
     fetch_user_data_prefs, put_llm_overrides, put_mcp_servers, put_user_data_prefs,
