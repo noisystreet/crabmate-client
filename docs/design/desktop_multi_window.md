@@ -90,6 +90,12 @@ snapshot.key = ConnectionKey::from_raw(window.label());
 只有 `open_connection` 需要**分配**新 label（窗口还不存在），那一步用
 `unique_key(可选名字, 基址)`，撞名时依次尝试 `-2`、`-3`。
 
+**与存储分域的关系**（#457 W0-2/W0-3）：页面里的 `__CM_CONN_KEY__` 由壳按同一个 label 注入
+（`desktop_main_window::connection_scope_init_script`），`localStorage` 的连接键因此拼成
+`<基础键>#<label>` —— 「一个窗口一个存储域」是这条等式的副产物，不是另一套身份体系。若将来改走
+单窗口多 lane（`tui_multi_server.md` §9.4.2 的路线 B），存储域必须跟着**连接作用域**走而不是跟着
+窗口走，那时这条等式本身也要拆。
+
 ## 5. 几何、遮挡与审批通知
 
 窗口都铺满工作区（复用 `apply_main_ui_geometry`：maximize，失败则填满工作区）。

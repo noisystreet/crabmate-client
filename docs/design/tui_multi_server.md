@@ -369,7 +369,7 @@ URL 有**三种来源**，三者并存而不是互相替代：
 | 前端的 API 基址与 Bearer 已收敛成一个 `ConnectionScope`（`frontend/src/api/connection_scope.rs` 唯一持有，规则与不变量在 `crabmate-client-api::connection_scope`）；`api_base_url()` / `web_api_bearer_token()` 仍是零参「读当前那一份」 | `frontend/src/api/connection_scope.rs`、`crates/crabmate-client-api/src/connection_scope.rs` |
 | 持久化曾是**固定 localStorage 键**（两个连接窗口互踩）：现已按连接标识分域 `<基础键>#<连接标识>`，无标识时沿用旧键名 | `frontend/src/api/storage_scope.rs`；标识由 `desktop-tauri/src-tauri/src/desktop_main_window.rs` 注入 `__CM_CONN_KEY__` |
 | 前端另有若干 thread_local 全局状态（llm secrets、locale、滚动跟随、图片灯箱、github secrets、连接名单…）—— **连接作用域已不在此列**（见上一行）；它们要么是应用级偏好，要么是每窗口一份的 UI 单例 | `frontend/src/**` |
-| 连接 bearer 是**单钥匙串槽** `tauri_connect_web_api_bearer`，连接成功即覆盖写 | `crates/crabmate-connect/src/lib.rs:5` |
+| 连接 bearer **不是单槽**：钥匙串账户名按「窗口」分槽（`<account>:<label>`），再按「这一台 serve」加指纹（`<account>:<label>@<fp>`）；写侧同时刷新一级槽，TUI 的钥匙串回退读的仍是 `:main` | `crates/crabmate-connect/src/keyring_bearer.rs`、`crates/crabmate-client-api/src/secrets.rs` |
 
 即：**Desktop/Web 的「单连接」假设原本渗透在十余处 thread_local 全局里**，比 TUI 更分散——TUI 只是 `TuiApp` 一个结构体持有 `client`，所以 TUI 能用「改结构归属」的手法低成本解耦，Desktop 不能照搬。连接作用域（基址 + Bearer）现已收成一处 `ConnectionScope`，但**读取口仍是零参**（`api_base_url()`），所以「这一次请求用哪一份」还没被回答 —— 那要等 W1 的显式传参。
 
@@ -388,7 +388,7 @@ URL 有**三种来源**，三者并存而不是互相替代：
 
 #### 9.4.1 路线 A：多 WebView 窗口（推荐）
 
-每个窗口 = 独立 JS 堆 ⇒ **§9.2 那 12 处 thread_local 天然隔离**，一行都不用改。
+每个窗口 = 独立 JS 堆 ⇒ **§9.2 那些 thread_local（实测 17 块）天然隔离**，一行都不用改。
 
 必须解决的三点：
 
@@ -398,11 +398,11 @@ URL 有**三种来源**，三者并存而不是互相替代：
 
 #### 9.4.2 路线 B：单窗口内多 lane（对齐 TUI）
 
-要把 §9.2 的 12 处 thread_local 全部改成 per-lane context，再把会话 / 工作区 / 审批 / 设置状态树按 lane 切分。状态层是单连接长出来的，改造量显著大于 TUI 的 W1 + W1b，且**没有 W1b 那种「加个包装变体」的省力路径**（Leptos 的状态分散在各 `RwSignal`）。除非有「单窗口内必须并排看两路」的硬需求，不建议。
+要把 `frontend/src` 的 `thread_local`（实测 17 块）里**与连接相关的那一块**改成 per-lane context（`api::connection_scope` 的唯一实例；W0-2 之前是 `api::browser` 里的四个值 + 水合标记），再把会话 / 工作区 / 审批 / 设置状态树按 lane 切分。其余 16 块是应用级偏好与每窗口 UI 单例（llm secrets、locale、滚动跟随、图片灯箱、连接名单…），不必 per-lane。状态层是单连接长出来的，改造量显著大于 TUI 的 W1 + W1b，且**没有 W1b 那种「加个包装变体」的省力路径**（Leptos 的状态分散在各 `RwSignal`）。除非有「单窗口内必须并排看两路」的硬需求，不建议。
 
 它估的成本在 #457 里被拆成三段，其中一段已经完成：
 
-1. **连接作用域收成一处**（`ConnectionScope`，= #457 W0-1，未做）—— 现在 `api_base` / bearer 仍散在 thread_local；
+1. **连接作用域收成一处**（`ConnectionScope`，= #457 W0-1，**已落地**）—— `api_base` / bearer 只剩一个实例，`api_base_url()` / `web_api_bearer_token()` 读它。**但拦路条件并未完全解除**：实例本身仍是这一页的 `thread_local`，读取口仍是零参「读当前那一份」；要让调用点知道「这一次请求用哪一份」，得给 `api_url()` / `prepare_api_auth()` 显式传 scope —— 实测 `frontend/src` 里这两个函数的调用点是 43 处、14 个文件，属 W1，不在 W0 内；
 2. **存储键按连接分域**（= #457 W0-2/W0-3，**已落地**）—— `localStorage` 属于 origin，这一条无论走 A 还是 B 都挡在前面，已按连接标识分键并带回一次性迁移；
 3. **每条 lane 一棵组件子树**（W1）—— 状态树按 lane 切分，这才是真正的大头。
 
