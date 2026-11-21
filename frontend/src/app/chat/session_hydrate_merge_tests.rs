@@ -662,3 +662,71 @@ fn hydration_layout_mapping_without_tools_keeps_legacy_schema_but_stable_ids() {
     apply_hydrated_tail_if_newer(&mut session, hydrated, &resp);
     assert_eq!(session.messages, first);
 }
+
+/// 翻更早一页：行也拿确定性 id（页内命名空间），且重复拉同一页不会重复插入（#547）。
+#[test]
+fn prepend_older_page_uses_page_scoped_ids_and_stays_idempotent() {
+    use super::prepend_older_page_into_session;
+
+    let mut session = revision_session(
+        vec![
+            plain_message("turn-user-u2", "user", "q2"),
+            plain_message("turn-final-answer#prev2", "assistant", "a2"),
+        ],
+        Some(7),
+    );
+    session.history_window_start = Some(40);
+
+    let older = vec![
+        plain_message("h_old_u", "user", "q1"),
+        plain_message("h_old_a", "assistant", "a1"),
+    ];
+    let mut resp = revision_response(7);
+    resp.layout = Some(tool_layout(&["tc1"]));
+    resp.window_start_index = 40;
+
+    prepend_older_page_into_session(&mut session, older.clone(), &resp);
+    assert_eq!(
+        session
+            .messages
+            .iter()
+            .map(|m| m.id.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "turn-prev-40-0",
+            "turn-prev-40-1",
+            "turn-user-u2",
+            "turn-final-answer#prev2",
+        ]
+    );
+
+    // 同一窗口再拉一次 → id 相同 → 全部被去重，不会重复插入。
+    let len_after_first = session.messages.len();
+    prepend_older_page_into_session(&mut session, older, &resp);
+    assert_eq!(session.messages.len(), len_after_first);
+}
+
+/// 无 `layout` 的老会话：prepend 保持原样（不改 id），行为与合入前一致。
+#[test]
+fn prepend_older_page_keeps_ids_without_layout() {
+    use super::prepend_older_page_into_session;
+
+    let mut session = revision_session(vec![plain_message("turn-user-u2", "user", "q2")], Some(7));
+    session.history_window_start = Some(40);
+    let mut resp = revision_response(7);
+    resp.window_start_index = 40;
+
+    prepend_older_page_into_session(
+        &mut session,
+        vec![plain_message("h_old_u", "user", "q1")],
+        &resp,
+    );
+    assert_eq!(
+        session
+            .messages
+            .iter()
+            .map(|m| m.id.as_str())
+            .collect::<Vec<_>>(),
+        ["h_old_u", "turn-user-u2"]
+    );
+}

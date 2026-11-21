@@ -566,3 +566,24 @@ pub fn tool_display_line(input: &ToolDisplayInput<'_>) -> Option<String>;
 合并侧（`frontend/src/app/chat/session_hydrate.rs`）：先丢「已被结果卡代表的调用短卡」再映射
 （否则段数与本地工具行数必然对不上），映射成功**且真的落了 v2 键**才 stamp v2，此后同一会话
 只追加服务端新回合（按「本页覆盖的 local user 数」对齐，翻过更早页后仍能追加）。
+
+### 11.1 更早一页（`before_index`）为什么只做页内编号
+
+尾页那套「按 `layout` 逐段对齐」依赖**回合序号可从尾部倒推**；`before_index` 拉回来的页只带
+`window_start_index`（消息下标），拿不到「这一页首条属于第几个回合」，硬按尾部对齐会配上错误的
+`turn_id`。因此更早页的行统一取 `turn-prev-{window_start_index}-{n}`：
+
+- 同一窗口重复加载 → 同一批 id → prepend 的 id 去重幂等（以前每次都是新的 `h_{…}`，同一页会被
+  插入两次）；
+- 窗口下标进键名 → 两个不同的页不会撞键；
+- **无 `layout` 的老会话不改**（保持「无元数据、行为不变」的既有承诺）。
+
+真要做成语义键，需要 Server 侧在分页响应里给出「本页首条对应的回合序号」——属契约增强，
+不在本仓单方面决定。
+
+### 11.2 `turn-final-answer` 规范键的独占语义（待 Server 侧确认）
+
+客户端约定：规范键只属于**流式路径当前那一行**；历史终答一律归档成 `#prev{n}`，回合收尾的
+`detach_final_answer_row_in_messages` 也按序归档。该约定是本仓保证的（`detach` 在 `sync` 之前），
+但 Server 侧文档尚未写明「同一 `tool_call` 的终答行在持久化投影里不再重写」是否成立——
+若 Server 未来要回填/重放终答行，需先与本约定对齐。
