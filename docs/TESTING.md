@@ -29,7 +29,7 @@ pre-commit run --all-files
 | `check-boundaries` | 依赖边界机械检查：client-api 纯度（禁 reqwest / tokio / tauri / web-sys / wasm-bindgen）、connect 默认 feature 无 Tauri、契约钉形状唯一、全部包版本一致（`scripts/check-boundaries.sh`） |
 | `check-css-breakpoints` | 响应式断点单源检查：样式层 `@media` 窄屏 `max-width: N` 与互补 `min-width: N+1` 必须匹配 `frontend/src/app_prefs.rs` 的 `MOBILE_LAYOUT_BREAKPOINT_PX`；其他断点须在脚本 `EXTRA_BREAKPOINTS` 登记；e2e 移动视口须落在窄屏侧（`scripts/check-css-breakpoints.sh`） |
 | `check-css-contract` | 类名契约门禁：本仓 Rust / HTML 消费方产出的类名必须在同作用域 CSS（frontend / connect；第三方 vendor JS 运行时类名不在契约内）有规则，否则须在 `scripts/css_contract_allowlist.txt` 登记并写理由；白名单失效（CSS 已定义 / 消费方已移除 / scope 笔误）同样失败（`scripts/check-css-contract.sh`） |
-| `check-css-tokens` | 设计 token 门禁（`frontend/styles` + `frontend/themes`）：`var(--x)` 引用的 token 必须在同范围有定义，`var()` 兜底禁止颜色字面量（兜底不生效，会掩盖主题回归），且**主题覆盖必须完整**——任一主题覆盖过的 token，其余主题（`themes/*.css`，排除 `*.example.css`）必须同样显式覆盖，否则该主题静默沿用默认深色值；主题身份差异（字体族 / 圆角档）登记 `css_tokens_check.py` 的 `THEME_IDENTITY_TOKENS`；运行时注入属性（Rust `setProperty` / Android IME / 内联 `style`）须在 `scripts/css_tokens_allowlist.txt` 登记并写理由，白名单失效（已定义 / 已无引用）同样失败（`scripts/check-css-tokens.sh`） |
+| `check-css-tokens` | 注 1（见文末） |
 | `check-css-literals` | 字面量预算门禁（`frontend/styles/*.css`，排除 `tokens.css`）：逐文件统计 `font-size`、颜色（`#hex` / `rgb()` / `hsl()` / `white` / `black`）与 `border-radius`（`px` / `rem` / `em` / `%`；裸 `0` 不计，`var(--radius-x, 5px)` 兜底计入）字面量个数，**实际值必须等于** `scripts/css_literals_budget.txt` 的逐文件预算（新增即失败，清理后未同步下调预算也失败）；预算条目失效（文件不存在 / 不在扫描范围 / 三项均为 0）同样失败（`scripts/check-css-literals.sh`） |
 | `check-token-mirrors` | 见 `scripts/check-token-mirrors.sh`（七条精确相等规则，无白名单；逐条说明见 `AGENTS.md`） |
 | `check-xml-comments` | XML 注释门禁：全仓 `*.xml`（剪枝构建产物与依赖目录）的注释正文**不得出现连续两个减号**（`--`）—— XML 1.0 §2.5 禁止，aapt2 资源合并器会直接报「注释中不允许出现字符串 "--"」；典型踩坑是在注释里写 CSS 自定义属性（`--bg`）或命令行选项（`--release`），改写成不带连字符前缀或纯文字描述即可；`mobile-tauri/src-tauri/gen/android/**/res/**` 是提交进仓库的 Tauri 移动端资源，**在扫描范围内**（`scripts/check-xml-comments.sh`） |
@@ -46,7 +46,7 @@ pre-commit run --all-files
 | `ktlint-android` | 手改 Android Kotlin（`edu/crabmate`，排除 `generated/`）；需 **java**；首次下载钉死的 ktlint CLI 到缓存。格式化：`bash scripts/ktlint-android.sh --format` |
 | `typos` | 拼写 |
 | `e2e-format` / `e2e-lint` | Playwright：`cd e2e && npm run format:check` / `lint`（需先 `cd e2e && npm ci`） |
-| `check-md-line-length` | Markdown **逐行**上限：任何一行都不得超过 `MAX_COLS` 显示列（东亚宽字符按 2 列，约 80 汉字）。唯一豁免是围栏代码块（折行会改语义），表格行同样受约束；`CHANGELOG.md` 整文件不计（条目单行 ≤800 字符、已发布段冻结）。`MAX_COLS` 当前 1000，目标 160，**只许下调**（`--list` 按列数列出各文件最长行，便于挑下一档）（`scripts/check-md-line-length.sh`） |
+| `check-md-line-length` | Markdown **逐行**上限：任何一行都不得超过 `MAX_COLS` 显示列（东亚宽字符按 2 列，约 80 汉字）。唯一豁免是围栏代码块（折行会改语义），表格行同样受约束；`CHANGELOG.md` 整文件不计（条目单行 ≤800 字符、已发布段冻结）。`MAX_COLS` 当前 600，目标 160，**只许下调**（`--list` 按列数列出各文件最长行，便于挑下一档）（`scripts/check-md-line-length.sh`） |
 | `conventional-pre-commit` | commit-msg |
 
 **不含** 桌面壳冒烟与 Playwright 运行本身（CI 里另有 `E2E Playwright` 工作流；壳冒烟不进 CI）。
@@ -156,3 +156,8 @@ make smoke-desktop-shell          # 或 ./scripts/smoke-desktop-shell.sh
 ## Server / 协议
 
 主仓：`docs/测试指南.md`、`crabmate e2e`（编排真 LLM）、`client-contract` CI。Playwright **在本仓** `e2e/`。
+
+## 表格长备注
+### 注 1 · `check-css-tokens`
+
+设计 token 门禁（`frontend/styles` + `frontend/themes`）：`var(--x)` 引用的 token 必须在同范围有定义，`var()` 兜底禁止颜色字面量（兜底不生效，会掩盖主题回归），且**主题覆盖必须完整**——任一主题覆盖过的 token，其余主题（`themes/*.css`，排除 `*.example.css`）必须同样显式覆盖，否则该主题静默沿用默认深色值；主题身份差异（字体族 / 圆角档）登记 `css_tokens_check.py` 的 `THEME_IDENTITY_TOKENS`；运行时注入属性（Rust `setProperty` / Android IME / 内联 `style`）须在 `scripts/css_tokens_allowlist.txt` 登记并写理由，白名单失效（已定义 / 已无引用）同样失败（`scripts/check-css-tokens.sh`）
