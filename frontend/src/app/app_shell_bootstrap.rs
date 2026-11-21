@@ -17,10 +17,6 @@ pub fn bootstrap_app_shell() -> AppShellCtx {
     crate::api::connection_scope::install_new_holder();
     // 移动薄客户端：先消费 URL hash 中的 Web API Bearer，再挂接会打 `/status` 的 Effect。
     crate::api::consume_mobile_connect_handoff();
-    // 官方壳：尽早从钥匙串 / Keystore 水合（hash 已写入内存时仅清明文 LS）。
-    leptos::task::spawn_local(async {
-        crate::api::hydrate_web_api_bearer_from_secure_store().await;
-    });
     // Android 壳：尽早写入 --cm-safe-top，避免顶栏贴系统状态栏难点选。
     crate::mobile_remote::apply_mobile_remote_safe_top();
     // 仅移动远程壳需要在此安装外链桥；桌面 Tauri 仍由 frameless chrome 安装。
@@ -29,6 +25,15 @@ pub fn bootstrap_app_shell() -> AppShellCtx {
     }
 
     let app_signals = AppSignals::new();
+    // 官方壳：尽早从钥匙串 / Keystore 水合（hash 已写入内存时仅清明文 LS）。
+    //
+    // #558 项 1b：水合显式走「**这条 lane 自己的** holder」，不再靠零参口回落到 `ACTIVE`。
+    // 单 lane 时两者是同一份（`AppSignals::new()` 刚取的就是 `install_new_holder()` 装的那份），
+    // 行为与改动前一致；多 lane 时每条 lane 各自水合自己那份，不会把凭据写进别人的 scope。
+    let scope = app_signals.scope.clone();
+    leptos::task::spawn_local(async move {
+        crate::api::web_api_bearer_local::hydrate_web_api_bearer_into(&scope).await;
+    });
     crate::confirm_dialog::register_shell_confirm(app_signals.modal.confirm_signals());
     let wiring = run_shell_wiring_in_order(&app_signals);
 

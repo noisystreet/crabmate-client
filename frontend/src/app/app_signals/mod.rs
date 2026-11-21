@@ -24,6 +24,8 @@ mod workspace;
 
 use leptos::prelude::*;
 
+use crate::api::connection_scope;
+
 pub use approval::ApprovalSignals;
 pub use chat_composer::ChatComposerSignals;
 pub use connection::ConnSignals;
@@ -67,6 +69,12 @@ pub struct AppSignals {
     //
     // `LaneSignals` 仍是这组字段的唯一构造来源（见 [`Self::new_lane`]），也是将来
     // 「每 lane 一份」的载体。
+    /// 这条 lane 的连接作用域（#558 项 1b）：`api_base` / Web API Bearer 的真源。
+    ///
+    /// **每 lane 一份**：`new_lane` 收一份 holder 存进来，lane 容器造第二条 lane 时传它
+    /// 自己那份。`ACTIVE` 仍只是「当前前台用哪一份」的指针，这里存的才是「**这条** lane
+    /// 用哪一份」—— 跨 lane 路径读这里，不读 `ACTIVE`。
+    pub(crate) scope: connection_scope::ScopeHolder,
     pub connection: ConnSignals,
     pub chat: ChatSessionSignals,
     pub chat_composer: ChatComposerSignals,
@@ -86,7 +94,7 @@ impl AppSignals {
     }
 
     pub fn new() -> Self {
-        Self::new_lane(&WindowSignals::new())
+        Self::new_lane(&WindowSignals::new(), connection_scope::active_holder())
     }
 
     /// 建一条 lane 的 [`AppSignals`]：连接级全新建，**窗口级复用 `window` 的那批句柄**。
@@ -94,11 +102,15 @@ impl AppSignals {
     /// `RwSignal` 是 Copy、`ResizeSignals` 内部是 `Rc`，所以复制出来的每一份 lane 共享同一个
     /// 窗口级 signal —— 切 lane 时主题 / 语言 / 列宽不会跳，而连接级状态天然隔离。
     /// 单 lane 用法（当前的全部用法）与 `Self::new()` 完全等价。
-    pub fn new_lane(window: &WindowSignals) -> Self {
+    ///
+    /// `scope` 是**这一条 lane 自己的**连接作用域（#558 项 1b）：`new()` 传前台默认那份，
+    /// lane 容器造第二条 lane 时传它新建的那份 —— 于是「这条 lane 连的是谁」跟着 lane 走，
+    /// 而不是跟着 thread_local 指针走。
+    pub(crate) fn new_lane(window: &WindowSignals, scope: connection_scope::ScopeHolder) -> Self {
         // 先建 lane 内容、再取窗口级句柄：两边都会碰 `localStorage`（`ConnSignals::new`
         // 读基址分域键，`ShellUISignals::new` 读 shell prefs），但**键不重叠、顺序无关**。
         // 若将来某一边开始读对方的键，这里就要重新排。
-        let lane = LaneSignals::new();
+        let lane = LaneSignals::new(&scope);
         Self {
             initialized: RwSignal::new(false),
             shell_ui: window.shell_ui,
@@ -107,6 +119,7 @@ impl AppSignals {
             ide_editor: window.ide_editor,
             ide_chrome: window.ide_chrome,
             resize: window.resize.clone(),
+            scope,
             connection: lane.connection,
             chat: lane.chat,
             chat_composer: lane.chat_composer,

@@ -81,6 +81,6 @@ pub use saved_models::{
 pub use session_store::post_session_conversation_store;
 #[allow(unused_imports)] // 对外 re-export；壳内设置/断开等按需引用
 pub use web_api_bearer_local::{
-    clear_web_api_bearer_on_disconnect, hydrate_web_api_bearer_from_secure_store,
-    secure_web_api_bearer_backend_available, set_web_api_bearer_token_async,
+    clear_web_api_bearer_on_disconnect, secure_web_api_bearer_backend_available,
+    set_web_api_bearer_token_async,
 };

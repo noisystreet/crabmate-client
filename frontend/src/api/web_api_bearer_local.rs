@@ -196,14 +196,7 @@ async fn persist_secure_bearer(value: &str) -> Result<PersistKind, String> {
     Ok(PersistKind::BrowserInsecure)
 }
 
-/// 从钥匙串 / Keystore 水合**前台默认**那份 scope；内存已有值时不覆盖。
-///
-/// 壳内若发现 legacy localStorage，成功迁入安全存储后删除明文键。
-pub async fn hydrate_web_api_bearer_from_secure_store() {
-    hydrate_web_api_bearer_into(&super::connection_scope::active_holder()).await;
-}
-
-/// 从钥匙串 / Keystore 水合**指定的**那一份 scope（#558）。
+/// 从钥匙串 / Keystore 水合**指定的**那一份 scope（#558）；内存已有值时不覆盖。
 ///
 /// 多 lane 时必须走这个：写进**哪个** holder 决定「哪条 lane 拿到凭据」。#558 之前唯一
 /// 的坑就是「水合写进全局、header 取自别处」→ 拿空 Bearer 发请求 → 401。

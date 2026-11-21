@@ -13,6 +13,8 @@
 
 use leptos::prelude::*;
 
+use crate::api::connection_scope;
+
 #[derive(Clone, Copy)]
 pub struct ConnSignals {
     /// 当前这条 lane 连的 `serve` 基址（`api_base_url()` 的**响应式镜像**）。
@@ -26,15 +28,26 @@ pub struct ConnSignals {
 }
 
 impl ConnSignals {
-    pub fn new() -> Self {
+    /// `scope` 是这条 lane 的连接作用域（#558 项 1b）：基址的真源在它里面，这里只做
+    /// 响应式镜像。
+    ///
+    /// 前台那一份仍走 [`crate::api::api_base_url`]（含一次性 `localStorage` 水合），
+    /// 与改动前**完全等价**；后台 lane 取自己 holder 的值 —— 未水合时为空，由它自己
+    /// 的启动路径填（跨 lane 顺手读别人的盘就会串台）。
+    pub fn new(scope: &connection_scope::ScopeHolder) -> Self {
+        let api_base = if connection_scope::is_active(scope) {
+            crate::api::api_base_url()
+        } else {
+            scope.api_base()
+        };
         Self {
-            api_base: RwSignal::new(crate::api::api_base_url()),
+            api_base: RwSignal::new(api_base),
         }
     }
 }
 
 impl Default for ConnSignals {
     fn default() -> Self {
-        Self::new()
+        Self::new(&connection_scope::active_holder())
     }
 }

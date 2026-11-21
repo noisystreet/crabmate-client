@@ -32,6 +32,8 @@ use std::collections::HashMap;
 
 use leptos::prelude::*;
 
+use crate::api::connection_scope;
+
 use super::{
     ApprovalSignals, ChatComposerSignals, ConnSignals, LLMSettingsSignals, StatusSignals,
     StreamControlSignals, WorkspaceSignals,
@@ -52,10 +54,12 @@ pub struct LaneSignals {
 }
 
 impl LaneSignals {
-    pub fn new() -> Self {
+    /// `scope` 是这条 lane 的连接作用域（#558 项 1b）：8 个字段里唯一读它的是
+    /// [`ConnSignals::new`]，其余 lane 级字段与连接作用域无关。
+    pub fn new(scope: &connection_scope::ScopeHolder) -> Self {
         let session_sync = RwSignal::new(SessionSyncState::local_only());
         Self {
-            connection: ConnSignals::new(),
+            connection: ConnSignals::new(scope),
             chat: ChatSessionSignals {
                 sessions: RwSignal::new(Vec::new()),
                 active_id: RwSignal::new(String::new()),
@@ -91,6 +95,6 @@ impl LaneSignals {
 
 impl Default for LaneSignals {
     fn default() -> Self {
-        Self::new()
+        Self::new(&connection_scope::active_holder())
     }
 }
