@@ -536,3 +536,33 @@ pub fn tool_display_line(input: &ToolDisplayInput<'_>) -> Option<String>;
 **行为变化（有意）**：`run_command` 的展示文本由「args 优先」改为「非占位 summary 优先」。以前 Web
 在 `summary` 与 args 都给得出内容时取 args，TUI 取 `summary`；统一后两端一致取 `summary`——
 它由 Server 的摘要推导产生，通常比原始参数更贴近「做了什么」。
+
+## 11. 水合行 → v2 投影键映射（`layout_projection`，#545）
+
+`GET /conversation/messages` 的 `layout` 是**会话级**元数据（不随 `limit` / `before_index`
+切片），服务端对 v2 会话稳定写 `layout_schema_version = 2` 并逐段给出
+`segment_kind` / `before_tool_call_id` / `turn_id`。`crates/crabmate-client-api/src/layout_projection.rs`
+把它当**校验器 + 行键来源**用，规则如下（纯函数、无 IO，Web 已接，TUI 可复用）：
+
+1. 只有 `layout_schema_version >= 2` 才参与；`None` / 老版本直接回落 legacy。
+2. 本地行按 user 行切回合，服务端段按相邻同 `turn_id` 分组；页首那个 user 行不在本页的
+   **不完整回合**不参与校验（`window_start_index > 0` 时只尾部对齐完整回合）。
+3. 每回合比：时间线段**只比数量**（服务端把时间线一律提到回合首，顺序不可比）、非时间线段
+   逐项比 kind + 锚点（`before_tool_call_id` / `tool_call_id`）。任一处不符 → 整页 `Fallback`。
+4. 对齐成功才改键：旁白 `turn-commentary-{tool_call_id}`、工具 `turn-tool-{segment_id}`、
+   时间线 `turn-timeline-{turn_id}-{n}`、终答 `turn-final-answer#prev{n}`；user 行
+   `turn-user-{turn_id}`、「服务端不产段」的行（`assistant` 空正文只带 reasoning 等）
+   `turn-row-{turn_id}-{回合内下标}`、窗口页首半截回合 `turn-prev-{页内下标}`。同键跨回合
+   复用按时间序归档（更早的拿 `#prev1`、`#prev2`…），与流式路径
+   `archive_stale_projection_rows` 的产物同形，因此刷新前后 id 一致。
+5. **对齐成功后整页不得残留 `h_{毫秒}_{序号}`**：留一条没改，纯问答会话就会每次刷新重新赋值
+   并重写持久化（用户行 / reasoning-only 行也是 `h_` 时间戳 id），`#545` 的「刷新 N 次 id
+   序列不变」就名存实亡。真正保持原 id 的只有「整页回落 legacy」。
+6. **终答不占规范键**：`turn-final-answer` 是流式路径当前那一行的独占键，水合历史行占用它
+   会让下一回合 `sync_turn_projection` upsert 到历史行、挤掉已显示的旧正文。因此
+   `ChatSession::has_v2_finalized_rows` 仍只认规范键——**纯问答会话 id 稳定了，但仍走 legacy
+   的服务端快照替换路径**（不 append-only：上下文压缩会真改历史，只追加会显示陈旧内容）。
+
+合并侧（`frontend/src/app/chat/session_hydrate.rs`）：先丢「已被结果卡代表的调用短卡」再映射
+（否则段数与本地工具行数必然对不上），映射成功**且真的落了 v2 键**才 stamp v2，此后同一会话
+只追加服务端新回合（按「本页覆盖的 local user 数」对齐，翻过更早页后仍能追加）。

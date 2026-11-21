@@ -4,8 +4,8 @@
 //! `before_index` 对 `messages` 切片），服务端对 v2 会话稳定写入
 //! `layout_schema_version = 2`，并逐段给出 `segment_kind` / `before_tool_call_id` / `turn_id`。
 //! 本模块只做一件事：把同一页的历史行**按段对齐**后改写成稳定行键
-//! （`turn-commentary-*` / `turn-tool-*` / `turn-timeline-*`），让刷新既不整段重建、也不再把
-//! 整页 id 换成本次加载的 `h_{毫秒}_{序号}`。
+//! （`turn-commentary-*` / `turn-tool-*` / `turn-timeline-*` / `turn-final-answer#prev{n}`），
+//! 让刷新既不整段重建、也不再把整页 id 换成本次加载的 `h_{毫秒}_{序号}`。
 //!
 //! # 严格全有或全无
 //!
@@ -13,20 +13,28 @@
 //! [`LayoutProjection::Fallback`]，调用方继续走 legacy（服务端快照权威）路径。**不**做部分
 //! 映射：半信半疑地 stamp v2 会让后续水合误判「本地已有可复用投影」，比不映射更糟。
 //!
-//! # 不动的行
+//! # 不动的行：只剩「无法对齐」的那一段
 //!
-//! - `assistant` 空正文行（只带 reasoning）：服务端 `layout` 不产段，无法对齐，保持原 id。
-//! - 页首那个**不完整回合**（其 user 行不在本页，`window_start_index > 0`）：无法校验，
-//!   整段保持原 id。
-//! - 终答行：键的规范化独立于旁白（见 [`V2_FINAL_ANSWER_ROW_ID`] 的回合独占语义）。
+//! 对齐成功时**本页所有行**都会拿到确定性 id：user 行 `turn-user-{turn_id}`、服务端不产段的
+//! 行（`assistant` 空正文只带 reasoning 等）`turn-row-{turn_id}-{回合内下标}`、窗口页首半截
+//! 回合 `turn-prev-{页内下标}`。留着 `h_{毫秒}_{序号}` 的话，纯问答会话每次刷新都会重新赋值并
+//! 重写持久化——「刷新 N 次 id 序列不变」就不成立了。真正保持原 id 的只有「整页回落 legacy」
+//! 这一种情况。
+//!
+//! # 终答行不占规范键：`turn-final-answer` 是流式路径**当前那一行**的独占键，水合历史行
+//!   若也占用它，下一回合 `sync_turn_projection` 会 upsert 到历史行上，把已显示的旧正文挤掉。
+//!   历史终答因此一律归档成 `turn-final-answer#prev{n}`（与回合收尾的
+//!   `detach_final_answer_row_in_messages` 产物同形，故刷新前后 id 一致）；也正因为如此，
+//!   `ChatSession::has_v2_finalized_rows` 只认规范键——纯问答会话 id 稳定了，但仍走 legacy
+//!   的服务端快照替换路径（不 append-only，因为上下文压缩会真改历史）。
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crabmate::cm_api_contract::chat::{
     CONVERSATION_LAYOUT_SCHEMA_VERSION_V2, ConversationLayoutMeta, ConversationLayoutSegment,
 };
 
-use crate::session_model::{StoredMessage, V2_COMMENTARY_ROW_ID_PREFIX};
+use crate::session_model::{StoredMessage, V2_COMMENTARY_ROW_ID_PREFIX, V2_FINAL_ANSWER_ROW_ID};
 
 /// 服务端 `layout` 里「首条计次用户之前」那一组的 `turn_id`。
 const LEAD_TURN_ID: &str = "lead";
@@ -42,6 +50,14 @@ const SEGMENT_KIND_TIMELINE: &str = "assistant_timeline";
 const V2_TOOL_ROW_ID_PREFIX: &str = "turn-tool-";
 /// 水合侧自建的时间线行前缀（按 `turn_id` 分段，故跨回合不撞键）。
 const V2_TIMELINE_ROW_ID_PREFIX: &str = "turn-timeline-";
+/// 水合侧自建的 user 行前缀（`turn-user-{turn_id}`）：让 user 行也有确定性 id。
+const V2_USER_ROW_ID_PREFIX: &str = "turn-user-";
+/// 水合侧自建的兜底行前缀（`turn-row-{turn_id}-{回合内下标}`）：服务端 `layout` 不为这类行产段
+/// （`assistant` 空正文只带 reasoning、未知 role 等）。
+const V2_SCAFFOLD_ROW_ID_PREFIX: &str = "turn-row-";
+/// 窗口页首那个**不完整回合**的前缀：其 user 行不在本页，`turn_id` 无从得知，故按页内下标编号。
+/// 同一窗口重复加载产出同一批 id；窗口前移（新回合入页）时本就会换页。
+const V2_PARTIAL_TURN_ROW_ID_PREFIX: &str = "turn-prev-";
 /// 同一投影键在更早回合出现时的归档后缀（与流式路径 `turn_row_queue` 同形）。
 const ARCHIVED_ROW_SUFFIX: &str = "#prev";
 
@@ -88,12 +104,8 @@ struct LocalRow {
     tool_call_id: Option<String>,
 }
 
-/// 一条被判定过的投影键：要么改写，要么保持原 id（如终答）。
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum KeyDecision {
-    Key(String),
-    Keep,
-}
+/// 一条被判定过的投影键（`None` 表示形状不符，整页回落）。
+type KeyDecision = String;
 
 /// `layout` 的回合分组（相邻同 `turn_id` 的段归一组）。
 struct LayoutTurn<'a> {
@@ -189,6 +201,8 @@ fn plan_page(
             .filter(|turn| turn.turn_id == Some(LEAD_TURN_ID))
             .ok_or(LayoutProjectionFallback::TurnCountMismatch)?;
         projectable += plan_turn(rows, lead, lead_turn, &mut plan)?;
+    } else if !lead.is_empty() {
+        push_partial_turn_keys(lead, &mut plan);
     }
     for (index, group) in turns.iter().enumerate() {
         let layout_turn = layout_turns
@@ -197,6 +211,14 @@ fn plan_page(
         projectable += plan_turn(rows, group, layout_turn, &mut plan)?;
     }
     Ok((plan, projectable))
+}
+
+/// 窗口页首那个**不完整回合**（user 行不在本页）的确定性键：无法校验，但也不能留时间戳 id，
+/// 否则这半截回合每次刷新都换 id，映射就白做了。
+fn push_partial_turn_keys(lead: &[usize], plan: &mut Vec<(usize, String)>) {
+    for (position, &index) in lead.iter().enumerate() {
+        plan.push((index, format!("{V2_PARTIAL_TURN_ROW_ID_PREFIX}{position}")));
+    }
 }
 
 /// 本地回合窗口在 `layout` 回合列表里的起点。
@@ -218,6 +240,8 @@ fn align_offset(
     Err(LayoutProjectionFallback::TurnCountMismatch)
 }
 
+/// 每回合：校验（时间线只比数量、其余逐项比 kind + 锚点）后产出行键；
+/// 末了补上 user 行与服务端不产段的行的确定性键（见 [`push_scaffold_keys`]）。
 fn plan_turn(
     rows: &[StoredMessage],
     group: &[usize],
@@ -237,9 +261,39 @@ fn plan_turn(
     if local_timelines != layout_timelines {
         return Err(LayoutProjectionFallback::TurnShapeMismatch);
     }
+    let planned_from = plan.len();
     push_timeline_keys(&local, layout_turn, plan);
     plan_sequence(&local, layout_turn, plan)?;
+    push_scaffold_keys(rows, group, layout_turn, plan, planned_from);
     Ok(local.len())
+}
+
+/// user 行与「服务端 `layout` 不产段」的行的确定性键。
+///
+/// 没有这一步，映射后的页里仍会留 `h_{毫秒}_{序号}`：纯问答会话（无旁白行 → 不 stamp v2）
+/// 每次刷新都重新赋值 + 重写持久化，`#545` 的「刷新 N 次 id 序列不变」就名存实亡。
+/// 键按**回合**（不是页内位置）派生：`turn-user-u2` / `turn-row-u2-3`（`3` 是该行在回合内
+/// 的下标，与哪些行可投影无关，因此将来行种类变化也不会错位）。
+fn push_scaffold_keys(
+    rows: &[StoredMessage],
+    group: &[usize],
+    layout_turn: &LayoutTurn<'_>,
+    plan: &mut Vec<(usize, String)>,
+    planned_from: usize,
+) {
+    let turn_id = layout_turn.turn_id.unwrap_or(LEAD_TURN_ID);
+    let planned: HashSet<usize> = plan[planned_from..].iter().map(|(idx, _)| *idx).collect();
+    for (position, &index) in group.iter().enumerate() {
+        if planned.contains(&index) {
+            continue;
+        }
+        let key = if position == 0 && is_user_row(&rows[index]) {
+            format!("{V2_USER_ROW_ID_PREFIX}{turn_id}")
+        } else {
+            format!("{V2_SCAFFOLD_ROW_ID_PREFIX}{turn_id}-{position}")
+        };
+        plan.push((index, key));
+    }
 }
 
 /// 时间线行按 `turn_id` + 回合内序号取键：跨回合不会撞键，故无需归档编号。
@@ -280,11 +334,10 @@ fn plan_sequence(
         return Err(LayoutProjectionFallback::TurnShapeMismatch);
     }
     for (row, segment) in local_seq.iter().zip(layout_seq) {
-        match decide_key(row, segment) {
-            Some(KeyDecision::Key(key)) => plan.push((row.index, key)),
-            Some(KeyDecision::Keep) => {}
-            None => return Err(LayoutProjectionFallback::TurnShapeMismatch),
-        }
+        let Some(key) = decide_key(row, segment) else {
+            return Err(LayoutProjectionFallback::TurnShapeMismatch);
+        };
+        plan.push((row.index, key));
     }
     Ok(())
 }
@@ -294,7 +347,7 @@ fn decide_key(row: &LocalRow, segment: &ConversationLayoutSegment) -> Option<Key
     match (row.kind, segment.segment_kind.as_str()) {
         (LocalKind::Tool, SEGMENT_KIND_TOOL) => tool_key(row, segment),
         (LocalKind::Commentary, SEGMENT_KIND_COMMENTARY) => commentary_key(row, segment),
-        (LocalKind::Answer, SEGMENT_KIND_ANSWER) => Some(KeyDecision::Keep),
+        (LocalKind::Answer, SEGMENT_KIND_ANSWER) => Some(V2_FINAL_ANSWER_ROW_ID.to_string()),
         _ => None,
     }
 }
@@ -306,9 +359,7 @@ fn tool_key(row: &LocalRow, segment: &ConversationLayoutSegment) -> Option<KeyDe
     }
     match trimmed(row.tool_call_id.as_deref()) {
         Some(local_id) if local_id != server_id => None,
-        _ => Some(KeyDecision::Key(format!(
-            "{V2_TOOL_ROW_ID_PREFIX}{server_id}"
-        ))),
+        _ => Some(format!("{V2_TOOL_ROW_ID_PREFIX}{server_id}")),
     }
 }
 
@@ -318,9 +369,7 @@ fn commentary_key(row: &LocalRow, segment: &ConversationLayoutSegment) -> Option
     if trimmed(row.tool_call_id.as_deref()) != Some(anchor) {
         return None;
     }
-    Some(KeyDecision::Key(format!(
-        "{V2_COMMENTARY_ROW_ID_PREFIX}{anchor}"
-    )))
+    Some(format!("{V2_COMMENTARY_ROW_ID_PREFIX}{anchor}"))
 }
 
 fn projectable_rows(rows: &[StoredMessage], group: &[usize]) -> Vec<LocalRow> {
@@ -367,11 +416,27 @@ fn classify_row(message: &StoredMessage) -> Option<(LocalKind, Option<String>)> 
 }
 
 fn apply_plan(rows: &[StoredMessage], plan: Vec<(usize, String)>) -> Vec<StoredMessage> {
-    let numbered = number_duplicate_keys(plan);
+    let numbered = number_duplicate_keys(number_answer_keys(plan));
     let mut out: Vec<StoredMessage> = rows.to_vec();
     for (index, key) in numbered {
         if let Some(row) = out.get_mut(index) {
             row.id = key;
+        }
+    }
+    out
+}
+
+/// 终答行**永不**占用规范键 `turn-final-answer`：那是流式路径当前那一行的独占键，水合若也占用，
+/// 下一回合 `sync_turn_projection` 会 upsert 到历史行、把旧正文挤掉。历史终答一律按时间序
+/// 归档为 `turn-final-answer#prev{n}`——与回合收尾的
+/// `detach_final_answer_row_in_messages` 产物同形，故刷新前后 id 一致。
+fn number_answer_keys(plan: Vec<(usize, String)>) -> Vec<(usize, String)> {
+    let mut ordinal = 1usize;
+    let mut out = plan;
+    for (_, key) in out.iter_mut() {
+        if key == V2_FINAL_ANSWER_ROW_ID {
+            *key = format!("{V2_FINAL_ANSWER_ROW_ID}{ARCHIVED_ROW_SUFFIX}{ordinal}");
+            ordinal += 1;
         }
     }
     out
@@ -513,11 +578,14 @@ mod tests {
         ];
         let layout = meta(one_tool_turn("u0", "tc1", 0));
         let out = mapped(&rows, &layout, true);
-        assert_eq!(ids(&out), vec!["u", "turn-commentary-tc1", "turn-tool-tc1"]);
+        assert_eq!(
+            ids(&out),
+            vec!["turn-user-u0", "turn-commentary-tc1", "turn-tool-tc1"]
+        );
     }
 
     #[test]
-    fn answer_row_keeps_hydration_id() {
+    fn answer_row_gets_archived_key_not_the_canonical_one() {
         let rows = vec![
             message("u", "user", "go"),
             message("h_1", "assistant", "答"),
@@ -530,7 +598,31 @@ mod tests {
             0,
         )]);
         let out = mapped(&rows, &layout, true);
-        assert_eq!(ids(&out), vec!["u", "h_1"]);
+        assert_eq!(ids(&out), vec!["turn-user-u0", "turn-final-answer#prev1"]);
+    }
+
+    #[test]
+    fn answers_are_numbered_in_time_order() {
+        let rows = vec![
+            message("u1", "user", "q1"),
+            message("h_1", "assistant", "a1"),
+            message("u2", "user", "q2"),
+            message("h_2", "assistant", "a2"),
+        ];
+        let layout = meta(vec![
+            segment("u0", "assistant_answer", "assistant_answer-0", None, 0),
+            segment("u1", "assistant_answer", "assistant_answer-1", None, 1),
+        ]);
+        let out = mapped(&rows, &layout, true);
+        assert_eq!(
+            ids(&out),
+            vec![
+                "turn-user-u0",
+                "turn-final-answer#prev1",
+                "turn-user-u1",
+                "turn-final-answer#prev2"
+            ]
+        );
     }
 
     #[test]
@@ -555,7 +647,12 @@ mod tests {
         let out = mapped(&rows, &layout, true);
         assert_eq!(
             ids(&out),
-            vec!["turn-timeline-lead-0", "u", "turn-timeline-u0-0", "h_a"]
+            vec![
+                "turn-timeline-lead-0",
+                "turn-user-u0",
+                "turn-timeline-u0-0",
+                "turn-final-answer#prev1"
+            ]
         );
     }
 
@@ -577,7 +674,10 @@ mod tests {
             0,
         )]);
         let out = mapped(&rows, &layout, true);
-        assert_eq!(ids(&out), vec!["u", "h_think", "h_a"]);
+        assert_eq!(
+            ids(&out),
+            vec!["turn-user-u0", "turn-row-u0-1", "turn-final-answer#prev1"]
+        );
     }
 
     #[test]
@@ -655,10 +755,10 @@ mod tests {
         assert_eq!(
             ids(&out),
             vec![
-                "u1",
+                "turn-user-u0",
                 "turn-commentary-tc1#prev1",
                 "turn-tool-tc1#prev1",
-                "u2",
+                "turn-user-u1",
                 "turn-commentary-tc1",
                 "turn-tool-tc1",
             ]
@@ -667,7 +767,7 @@ mod tests {
 
     #[test]
     fn windowed_page_maps_only_aligned_tail_turns() {
-        // 页首是上一回合的尾巴（user 行不在本页）：整段保持原 id，只映射完整回合。
+        // 页首是上一回合的尾巴（user 行不在本页）：不参与校验，但仍拿确定性 `turn-prev-*`。
         let rows = vec![
             message("h_old_1", "assistant", "旧旁白"),
             tool_row("h_old_2", "tc0"),
@@ -682,9 +782,9 @@ mod tests {
         assert_eq!(
             ids(&out),
             vec![
-                "h_old_1",
-                "h_old_2",
-                "u2",
+                "turn-prev-0",
+                "turn-prev-1",
+                "turn-user-u1",
                 "turn-commentary-tc1",
                 "turn-tool-tc1",
             ]
@@ -720,6 +820,48 @@ mod tests {
         assert_eq!(
             project_hydrated_rows(&rows, Some(&layout), true),
             LayoutProjection::Fallback(LayoutProjectionFallback::TurnShapeMismatch)
+        );
+    }
+
+    /// 回归锁（#545 review High）：映射成功后**整页**不得残留 `h_{毫秒}_{序号}`。
+    ///
+    /// 之前只改可投影行，user 行与「只带 reasoning 的 assistant 行」仍是每次水合新生成的
+    /// 时间戳 id → 纯问答会话每次刷新都重新赋值并重写持久化，「刷新 N 次 id 序列不变」不成立。
+    #[test]
+    fn mapping_leaves_no_hydration_ids_behind() {
+        let rows = vec![
+            message("h_u", "user", "go"),
+            message("h_c", "assistant", "先读。"),
+            tool_row("h_t", "tc1"),
+            StoredMessage {
+                reasoning_text: "想一想".into(),
+                ..message("h_think", "assistant", "")
+            },
+            message("h_a", "assistant", "答"),
+        ];
+        let mut segments = one_tool_turn("u0", "tc1", 0);
+        segments.push(segment(
+            "u0",
+            "assistant_answer",
+            "assistant_answer-2",
+            None,
+            2,
+        ));
+        let out = mapped(&rows, &meta(segments), true);
+        assert_eq!(
+            ids(&out),
+            vec![
+                "turn-user-u0",
+                "turn-commentary-tc1",
+                "turn-tool-tc1",
+                "turn-row-u0-3",
+                "turn-final-answer#prev1",
+            ]
+        );
+        assert!(
+            out.iter().all(|row| !row.id.starts_with("h_")),
+            "映射后不得残留水合时间戳 id: {:?}",
+            ids(&out)
         );
     }
 }

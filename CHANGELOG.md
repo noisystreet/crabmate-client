@@ -13,7 +13,7 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Added
 
-- **History rows now get stable v2 projection keys, so a reload stops rebuilding the whole tail page.** `GET /conversation/messages` already carries a conversation-level `layout` (`layout_schema_version = 2`) the UI ignored, so every hydrate re-created the visible page with fresh `h_{ms}_{i}` ids and — for tool turns — replaced the tail wholesale. The page is now aligned segment by segment against `layout` and rewritten to `turn-commentary-*` / `turn-tool-*` / `turn-timeline-*`; only then is the session stamped v2, after which hydration appends new Server turns instead of replacing. Any misalignment (segment count, kind order, tool id, anchor) falls back to the legacy snapshot path for the whole page. Sessions without `layout` are unaffected. No wire change.
+- **History rows now get stable v2 projection keys, so a reload stops rebuilding the whole tail page.** `GET /conversation/messages` already carries a conversation-level `layout` (`layout_schema_version = 2`) the UI ignored, so every hydrate re-created the page with fresh `h_{ms}_{i}` ids and, for tool turns, replaced the tail wholesale. Rows are now aligned segment by segment against `layout` and rewritten to `turn-user-*` / `turn-commentary-*` / `turn-tool-*` / `turn-timeline-*` / `turn-final-answer#prev{n}` — including user and reasoning-only rows, so a page keeps its ids across reloads. Tool-turn sessions are stamped v2 and then only append new Server turns. The canonical `turn-final-answer` key stays live-only, so history can never be overwritten by the next turn. No wire change.
 
 ### Changed
 

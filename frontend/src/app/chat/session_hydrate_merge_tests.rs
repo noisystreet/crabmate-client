@@ -557,7 +557,7 @@ fn hydration_layout_mapping_stamps_v2_and_stays_stable_across_refreshes() {
             .iter()
             .map(|m| m.id.as_str())
             .collect::<Vec<_>>(),
-        ["h_u", "turn-commentary-tc1", "turn-tool-tc1"]
+        ["turn-user-u0", "turn-commentary-tc1", "turn-tool-tc1"]
     );
     assert_eq!(session.layout_schema_version, CURRENT_LAYOUT_SCHEMA_VERSION);
     assert!(session.has_v2_finalized_rows());
@@ -595,7 +595,7 @@ fn hydration_layout_mapping_appends_new_turn_with_v2_keys() {
     );
     assert_eq!(
         &ids[local.len()..],
-        ["h_u2", "turn-commentary-tc2", "turn-tool-tc2"]
+        ["turn-user-u1", "turn-commentary-tc2", "turn-tool-tc2"]
     );
 }
 
@@ -621,4 +621,44 @@ fn hydration_layout_mismatch_keeps_legacy_ids() {
         ["h_u", "h_a"]
     );
     assert_eq!(session.layout_schema_version, LEGACY_LAYOUT_SCHEMA_VERSION);
+}
+
+/// 纯问答会话：终答不占规范键 → 仍是 legacy，但 id 已确定（刷新不再整页换 id）。
+#[test]
+fn hydration_layout_mapping_without_tools_keeps_legacy_schema_but_stable_ids() {
+    use crabmate::cm_api_contract::chat::{ConversationLayoutMeta, ConversationLayoutSegment};
+    let layout = ConversationLayoutMeta {
+        layout_schema_version: 2,
+        projection_hash: Some("deadbeef".into()),
+        segments: vec![ConversationLayoutSegment {
+            turn_id: Some("u0".into()),
+            segment_id: "assistant_answer-0".into(),
+            segment_kind: "assistant_answer".into(),
+            before_tool_call_id: None,
+            sequence: 0,
+        }],
+    };
+    let hydrated = vec![
+        plain_message("h_u", "user", "go"),
+        plain_message("h_a", "assistant", "答"),
+    ];
+    let mut resp = revision_response(4);
+    resp.layout = Some(layout);
+    let mut session = revision_session(vec![], Some(0));
+
+    apply_hydrated_tail_if_newer(&mut session, hydrated.clone(), &resp);
+
+    assert_eq!(
+        session
+            .messages
+            .iter()
+            .map(|m| m.id.as_str())
+            .collect::<Vec<_>>(),
+        ["turn-user-u0", "turn-final-answer#prev1"]
+    );
+    assert_eq!(session.layout_schema_version, LEGACY_LAYOUT_SCHEMA_VERSION);
+
+    let first = session.messages.clone();
+    apply_hydrated_tail_if_newer(&mut session, hydrated, &resp);
+    assert_eq!(session.messages, first);
 }
