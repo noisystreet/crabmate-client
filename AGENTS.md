@@ -98,6 +98,7 @@ bash scripts/check-icons.sh              # no literal <svg> outside icon.rs; svg
 bash scripts/check-modal-shell.sh        # role / aria-modal only emitted by app/focusable_menu.rs
 bash scripts/check-xml-comments.sh       # no `--` inside XML comment bodies (XML 1.0 §2.5; aapt2 fails resource merging)
 bash scripts/check-changelog-style.sh    # `[Unreleased]` entries ≤ 800 chars; released sections are frozen
+bash scripts/check-md-line-length.sh     # every Markdown line <= MAX_COLS display cols (currently the longest existing line, ratcheting down to 160; only fenced code blocks exempt)
 bash scripts/check-toolchain-pin.sh      # rust-toolchain.toml channel must equal every workflow's pinned toolchain
 bash scripts/ensure-tauri-dist-stubs.sh  # desktop/mobile dist stubs for tauri codegen
 bash scripts/set-version.sh 0.5.1        # bump all Rust package versions (+ Cargo.locks + shell tauri.conf.json) in one step

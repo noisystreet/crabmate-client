@@ -46,6 +46,7 @@ pre-commit run --all-files
 | `ktlint-android` | 手改 Android Kotlin（`edu/crabmate`，排除 `generated/`）；需 **java**；首次下载钉死的 ktlint CLI 到缓存。格式化：`bash scripts/ktlint-android.sh --format` |
 | `typos` | 拼写 |
 | `e2e-format` / `e2e-lint` | Playwright：`cd e2e && npm run format:check` / `lint`（需先 `cd e2e && npm ci`） |
+| `check-md-line-length` | Markdown **逐行**上限：任何一行都不得超过 `MAX_COLS` 显示列（东亚宽字符按 2 列，约 80 汉字）。`MAX_COLS` 当前等于存量最长行（24501），目标 160，**只许下调**（`--list` 按列数列出各文件最长行，便于挑下一档）。唯一豁免是围栏代码块 —— 折行会改语义；表格行同样受约束（`scripts/check-md-line-length.sh`） |
 | `conventional-pre-commit` | commit-msg |
 
 **不含** 桌面壳冒烟与 Playwright 运行本身（CI 里另有 `E2E Playwright` 工作流；壳冒烟不进 CI）。

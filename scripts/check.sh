@@ -44,6 +44,9 @@ bash "$ROOT/scripts/check-modal-shell.sh"
 echo "[check] xml comments (no double-dash inside XML comments)"
 bash "$ROOT/scripts/check-xml-comments.sh"
 
+echo "[check] markdown line length (every line <= MAX_COLS display cols)"
+bash "$ROOT/scripts/check-md-line-length.sh"
+
 echo "[check] changelog entry style ([Unreleased] entries stay short; released sections are frozen)"
 bash "$ROOT/scripts/check-changelog-style.sh"
 

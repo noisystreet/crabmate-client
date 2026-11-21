@@ -114,6 +114,17 @@ repos:
         always_run: true
         stages: [pre-commit]
 
+      # Markdown 逐行上限：任何一行都不得超过 MAX_COLS 显示列（东亚宽字符按 2 列）。
+      # 唯一豁免是围栏代码块（折行会改语义）；表格行同样受约束。MAX_COLS 当前等于
+      # 存量最长行（24501），只许往下调，目标 160。
+      - id: check-md-line-length
+        name: markdown line length (every line <= MAX_COLS display cols; only fenced code blocks exempt)
+        entry: bash scripts/check-md-line-length.sh
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
+
       - id: check-toolchain-pin
         name: toolchain pin (rust-toolchain.toml channel == every workflow's dtolnay/rust-toolchain)
         entry: bash scripts/check-toolchain-pin.sh
