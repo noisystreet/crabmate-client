@@ -9,9 +9,8 @@ use gloo_timers::future::TimeoutFuture;
 use wasm_bindgen_futures::JsFuture;
 
 use super::browser::{
-    clear_local_storage_web_api_bearer, clear_local_storage_web_api_bearer_on,
-    read_local_storage_web_api_bearer_on, set_web_api_bearer_token_memory_only,
-    write_local_storage_web_api_bearer,
+    clear_local_storage_web_api_bearer_on, read_local_storage_web_api_bearer_on,
+    write_local_storage_web_api_bearer_on,
 };
 use super::connection_scope::ScopeHolder;
 use super::llm_secrets_local::PersistKind;
@@ -139,7 +138,8 @@ pub fn should_persist_web_api_bearer_to_local_storage(secure_backend: bool) -> b
     !secure_backend
 }
 
-async fn load_secure_bearer() -> Option<String> {
+/// 读**这一份 holder** 对应的钥匙串槽位（#558 项 7）：槽名按它自己的基址指纹分域。
+async fn load_secure_bearer_for(holder: &ScopeHolder) -> Option<String> {
     if bridge::has_mobile_secure_bearer_bridge() {
         for attempt in 0..4u32 {
             let mobile = bridge::mobile_get_secure_bearer();
@@ -152,9 +152,9 @@ async fn load_secure_bearer() -> Option<String> {
         }
     }
     if bridge::has_tauri_connect_bearer_invoke() {
-        // 带上连接指纹：同一个窗口连过几台 serve 就有几个槽，切回上一台仍能水合到
-        // 那一台的凭据（#457）。
-        let fp = super::browser::current_conn_fp();
+        // 带上**这条 lane 的**指纹：同一个窗口连过几台 serve 就有几个槽，切回上一台
+        // 仍能水合到那一台的凭据（#457）；多 lane 时各取各的槽，不会互相覆盖。
+        let fp = super::browser::current_conn_fp_on(holder);
         if let Ok(val) = JsFuture::from(bridge::invoke_get_connect_bearer(&fp)).await {
             if let Some(s) = val.as_string() {
                 let t = s.trim().to_string();
@@ -167,7 +167,11 @@ async fn load_secure_bearer() -> Option<String> {
     None
 }
 
-async fn persist_secure_bearer(value: &str) -> Result<PersistKind, String> {
+/// 写**这一份 holder** 对应的钥匙串槽位（#558 项 7）。
+async fn persist_secure_bearer_for(
+    holder: &ScopeHolder,
+    value: &str,
+) -> Result<PersistKind, String> {
     let v = value.trim();
     if bridge::has_mobile_secure_bearer_bridge() {
         for attempt in 0..4u32 {
@@ -181,7 +185,7 @@ async fn persist_secure_bearer(value: &str) -> Result<PersistKind, String> {
         return Err(i18n::api_err_keystore_write_bearer_failed(load_locale_from_storage()).into());
     }
     if bridge::has_tauri_connect_bearer_invoke() {
-        let fp = super::browser::current_conn_fp();
+        let fp = super::browser::current_conn_fp_on(holder);
         JsFuture::from(bridge::invoke_set_connect_bearer(v, &fp))
             .await
             .map_err(|e| {
@@ -192,7 +196,9 @@ async fn persist_secure_bearer(value: &str) -> Result<PersistKind, String> {
             })?;
         return Ok(PersistKind::Durable);
     }
-    write_local_storage_web_api_bearer(v);
+    // 浏览器弱存储也按这条 lane 的域写（#558 项 3b）：否则纯浏览器路径下两条 lane
+    // 会共用一个明文键。
+    write_local_storage_web_api_bearer_on(holder, v);
     Ok(PersistKind::BrowserInsecure)
 }
 
@@ -206,10 +212,10 @@ pub async fn hydrate_web_api_bearer_into(holder: &ScopeHolder) {
         return;
     }
     if holder.bearer().trim().is_empty() {
-        if let Some(t) = load_secure_bearer().await {
+        if let Some(t) = load_secure_bearer_for(holder).await {
             holder.set_bearer(&t);
         } else if let Some(legacy) = read_local_storage_web_api_bearer_on(holder) {
-            match persist_secure_bearer(&legacy).await {
+            match persist_secure_bearer_for(holder, &legacy).await {
                 Ok(PersistKind::Durable) => {
                     holder.set_bearer(&legacy);
                     clear_local_storage_web_api_bearer_on(holder);
@@ -237,22 +243,37 @@ pub async fn ensure_web_api_bearer_hydrated_into(holder: &ScopeHolder) {
 }
 
 /// 设置页保存/清除：先落盘再改内存；壳内清除明文 LS。
+///
+/// 零参版本操作**前台**那一份 —— 设置页是「前台天然唯一」的调用点（#558 收窄口径）。
 pub async fn set_web_api_bearer_token_async(token: &str) -> Result<PersistKind, String> {
+    set_web_api_bearer_token_async_for(&super::connection_scope::active_holder(), token).await
+}
+
+/// 显式 holder 版本（#558 项 7）：凭据与它的钥匙串槽位都落在**这一份**上。
+pub async fn set_web_api_bearer_token_async_for(
+    holder: &ScopeHolder,
+    token: &str,
+) -> Result<PersistKind, String> {
     let t = token.trim().to_string();
-    let kind = persist_secure_bearer(&t).await?;
-    set_web_api_bearer_token_memory_only(&t);
+    let kind = persist_secure_bearer_for(holder, &t).await?;
+    holder.set_bearer(&t);
     if kind == PersistKind::Durable {
-        clear_local_storage_web_api_bearer();
+        clear_local_storage_web_api_bearer_on(holder);
     }
     Ok(kind)
 }
 
-/// 断开连接：清内存，并尽力清安全存储 / 浏览器 LS。
+/// 断开连接：清内存，并尽力清安全存储 / 浏览器 LS。零参版本作用于**前台**那一份。
 pub async fn clear_web_api_bearer_on_disconnect() {
-    set_web_api_bearer_token_memory_only("");
-    clear_local_storage_web_api_bearer();
+    clear_web_api_bearer_on_disconnect_for(&super::connection_scope::active_holder()).await;
+}
+
+/// 显式 holder 版本（#558 项 7）：只清**这一条 lane** 的内存、分域 LS 与钥匙串槽位。
+pub async fn clear_web_api_bearer_on_disconnect_for(holder: &ScopeHolder) {
+    holder.set_bearer("");
+    clear_local_storage_web_api_bearer_on(holder);
     if secure_web_api_bearer_backend_available() {
-        let _ = persist_secure_bearer("").await;
+        let _ = persist_secure_bearer_for(holder, "").await;
     }
 }
 

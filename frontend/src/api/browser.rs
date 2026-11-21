@@ -53,23 +53,21 @@ fn write_local_storage_item(key: &str, value: &str) {
     }
 }
 
-/// 当前连接的基址指纹（读内存里的 scope，**不**触发磁盘读取）。
+/// 基址指纹（读内存里的 scope，**不**触发磁盘读取）。
 ///
 /// 「除基址以外」的连接绑定键用它定域：那些键的域依赖基址，而基址本身要读盘。基址键
-/// 因此单独走锚（见 [`read_api_base_local_storage_raw`]），其余键读内存里已决定的基址 ——
-/// 否则就是「读基址要先知道基址」的循环。
-#[must_use]
-pub(crate) fn current_conn_fp() -> String {
-    current_conn_fp_on(&connection_scope::active_holder())
-}
-
-/// [`current_conn_fp`] 的**显式 holder** 版本（#558 项 3b）：指纹取自这一份的基址。
+/// 因此单独走锚（见 [`read_api_base_local_storage_raw_on`]），其余键读内存里已决定的
+/// 基址 —— 否则就是「读基址要先知道基址」的循环。
 ///
-/// 零参路径隐含一步「先把基址水合出来」，这里必须复现 —— 否则拿一份还没定基址的
+/// #558 项 7 起它只以**显式 holder** 形式存在：指纹属于某一条 lane（钥匙串槽位与
+/// `localStorage` 域都按它分域），读 `ACTIVE` 的零参口会让后台 lane 拿到前台的指纹。
+///
+/// 零参路径原本隐含一步「先把基址水合出来」，这里必须复现 —— 否则拿一份还没定基址的
 /// holder 算指纹会得到「同 Origin」，把别台的值读成自己的（#558 记录的那个坑）。
 /// 只对 ACTIVE 那一份补这步：别的 lane 的基址由它自己的启动路径决定，跨 lane 顺手
 /// 水合别人等于把「这条 lane 连的是谁」改掉了。
-fn current_conn_fp_on(holder: &connection_scope::ScopeHolder) -> String {
+#[must_use]
+pub(crate) fn current_conn_fp_on(holder: &connection_scope::ScopeHolder) -> String {
     if !holder.is_base_settled() && connection_scope::is_active(holder) {
         hydrate_api_base_once();
     }
