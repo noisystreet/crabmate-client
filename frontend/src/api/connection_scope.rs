@@ -330,4 +330,18 @@ mod tests {
             "换前台不该重写别条 lane 的域"
         );
     }
+
+    /// #558 项 1b 的地基：`is_active` 认的是**同一份 `Rc`**，不是「值相等」。
+    ///
+    /// `AppSignals` 存的就是这一份（`new()` 传 `active_holder()`），而 `ConnSignals::new`
+    /// 用它决定「要不要走零参水合路径」。判定若不严，两条一模一样的 lane 会互相认错。
+    #[test]
+    fn active_identity_is_the_same_rc_not_equal_values() {
+        let first = active_holder();
+        assert!(is_active(&first), "多次取到的应是同一份");
+        assert_eq!(first.storage_label(), None, "host 无注入标识");
+
+        let lookalike = ScopeHolder::new_with_storage_label(None);
+        assert!(!is_active(&lookalike), "值相同也不是前台那一份");
+    }
 }
