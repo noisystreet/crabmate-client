@@ -8,6 +8,7 @@
 
 mod approval;
 mod chat_composer;
+mod connection;
 mod ide_chrome;
 mod ide_editor;
 mod llm_settings;
@@ -25,6 +26,7 @@ use leptos::prelude::*;
 
 pub use approval::ApprovalSignals;
 pub use chat_composer::ChatComposerSignals;
+pub use connection::ConnSignals;
 pub use ide_chrome::IdeChromeSignals;
 pub use ide_editor::IdeEditorSignals;
 pub use llm_settings::LLMSettingsSignals;
@@ -47,6 +49,8 @@ use crate::session_sync::SessionSyncState;
 #[derive(Clone)]
 pub struct AppSignals {
     pub initialized: RwSignal<bool>,
+    /// **连接级**状态（#561）：切 lane 时该跟着 lane 变的那组值。
+    pub connection: ConnSignals,
     pub chat: ChatSessionSignals,
     pub shell_ui: ShellUISignals,
     pub chat_composer: ChatComposerSignals,
@@ -71,6 +75,7 @@ impl AppSignals {
     }
 
     pub fn new() -> Self {
+        let connection = ConnSignals::new();
         let shell_ui = ShellUISignals::new();
         let chat_composer = ChatComposerSignals::new();
         let approval = ApprovalSignals::new();
@@ -111,6 +116,7 @@ impl AppSignals {
 
         Self {
             initialized: RwSignal::new(false),
+            connection,
             chat,
             shell_ui,
             chat_composer,
