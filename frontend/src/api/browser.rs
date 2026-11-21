@@ -53,26 +53,31 @@ fn write_local_storage_item(key: &str, value: &str) {
     }
 }
 
-/// 当前连接的基址指纹（读内存里的 scope，**不**触发磁盘读取）。
+/// 基址指纹（读内存里的 scope，**不**触发磁盘读取）。
 ///
 /// 「除基址以外」的连接绑定键用它定域：那些键的域依赖基址，而基址本身要读盘。基址键
-/// 因此单独走锚（见 [`read_api_base_local_storage_raw`]），其余键读内存里已决定的基址 ——
-/// 否则就是「读基址要先知道基址」的循环。
-#[must_use]
-pub(crate) fn current_conn_fp() -> String {
-    current_conn_fp_on(&connection_scope::active_holder())
-}
-
-/// [`current_conn_fp`] 的**显式 holder** 版本（#558 项 3b）：指纹取自这一份的基址。
+/// 因此单独走锚（见 [`read_api_base_local_storage_raw_on`]），其余键读内存里已决定的
+/// 基址 —— 否则就是「读基址要先知道基址」的循环。
 ///
-/// 零参路径隐含一步「先把基址水合出来」，这里必须复现 —— 否则拿一份还没定基址的
+/// #558 项 7 起它只以**显式 holder** 形式存在：指纹属于某一条 lane（钥匙串槽位与
+/// `localStorage` 域都按它分域），读 `ACTIVE` 的零参口会让后台 lane 拿到前台的指纹。
+///
+/// 零参路径原本隐含一步「先把基址水合出来」，这里必须复现 —— 否则拿一份还没定基址的
 /// holder 算指纹会得到「同 Origin」，把别台的值读成自己的（#558 记录的那个坑）。
 /// 只对 ACTIVE 那一份补这步：别的 lane 的基址由它自己的启动路径决定，跨 lane 顺手
 /// 水合别人等于把「这条 lane 连的是谁」改掉了。
-fn current_conn_fp_on(holder: &connection_scope::ScopeHolder) -> String {
+#[must_use]
+pub(crate) fn current_conn_fp_on(holder: &connection_scope::ScopeHolder) -> String {
     if !holder.is_base_settled() && connection_scope::is_active(holder) {
         hydrate_api_base_once();
     }
+    // 契约：**非前台**的 holder 必须已由它自己的启动路径定过基址。没有这道断言时，
+    // 一条还没 `set_api_base` 的后台 lane 会拿空基址算出「同 Origin」的指纹 —— 于是
+    // 静默读写到错误的分域键与钥匙串槽位，症状是「配置/凭据串了台」，离原因很远。
+    debug_assert!(
+        holder.is_base_settled(),
+        "非前台的 holder 必须先 set_api_base（或水合）再读写分域键"
+    );
     crabmate_client_api::connection_scope::api_base_fingerprint(&holder.api_base())
 }
 
@@ -279,12 +284,17 @@ pub(crate) fn clear_local_storage_web_api_bearer() {
 
 /// [`clear_local_storage_web_api_bearer`] 的**显式 holder** 版本（#558 项 3b）。
 ///
-/// 两处都清：这条 lane 的分域键 + 旧裸键（分域之前写下的同名键）。裸键是**整页共享**
-/// 的，任何一条 lane 清了它就够；多清一次是幂等冗余，不会删到别的 lane 的分域键
-/// （键名不同）。
+/// 两处都清：这条 lane 的分域键 + 旧裸键（分域之前写下的同名键）。
+///
+/// **裸键是整页共享的**，不是 per-lane：它只承载「分域之前的那一份」值，两条 lane
+/// 期望不同 Bearer 这件事它从来表达不了。所以只有**前台**那一份负责收尾 —— 否则
+/// 后台 lane 还没迁移时，它唯一的迁移源就被别的 lane 删掉了。单 lane 时 `holder`
+/// 就是 ACTIVE，行为与改动前一致。
 pub(crate) fn clear_local_storage_web_api_bearer_on(holder: &connection_scope::ScopeHolder) {
     write_scoped_local_storage_raw_on(holder, WEB_API_BEARER_TOKEN_KEY, "");
-    write_local_storage_item(WEB_API_BEARER_TOKEN_KEY, "");
+    if connection_scope::is_active(holder) {
+        write_local_storage_item(WEB_API_BEARER_TOKEN_KEY, "");
+    }
 }
 
 /// 仅写进程内内存（及已水合标记）；不触碰 localStorage。
@@ -306,7 +316,7 @@ fn hydrate_web_api_bearer_once_on(holder: &connection_scope::ScopeHolder) {
         return;
     }
     holder.mark_bearer_settled();
-    // 官方壳：不从明文 LS 水合（由 `hydrate_web_api_bearer_from_secure_store` 异步补齐）。
+    // 官方壳：不从明文 LS 水合（由启动路径的 `hydrate_web_api_bearer_into(&scope)` 异步补齐）。
     if super::web_api_bearer_local::secure_web_api_bearer_backend_available() {
         return;
     }
