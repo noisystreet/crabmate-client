@@ -1,7 +1,9 @@
 # 远程 CLI / TUI（路径 B）
 
-> **状态**：方案（已拍板走 **远程客户端**；**P3 已落地** `repl` 斜杠 `/help` `/workspace` `/conv`；**P4 已落地（M1–M4）**：全屏 `tui` 流式 transcript + 状态（宽屏为右栏底部纵栈、`F3` 折叠；窄屏为底部单行） + 单行/多行输入 + Ctrl+C 取消 + 左栏会话与 `/status` 联动 + 审批浮层 + thinking 折叠 + 工具行摘要 + `/find` 搜索 + 翻页滚动 + 助手正文行内 Markdown 轻渲染 + `/background` 全屏背景（kitty 像素 / 每格底色两档，`crabmate-tui caps` 打印终端探针） + 工作区目录树浏览（右栏仿 Desktop 默认显示；Ctrl+W 聚焦，含未设置时按 p 从项目池选择） + **多 serve 连接**（`--connect <name>=<url>` 追加 lane，主连接恒为首条、名为 `local`、bearer 复用；左栏下半列出全部连接，**单条也显示**，`Alt+←/→` 或点行切换 —— 只换视图，不打断在途回合；每条 lane 行还带该 serve 当前的工作区末段，`POST /workspace` 的 409 `WORKSPACE_ALREADY_SET`（一实例一工作区）单独提示「另起 lane」而不是「切换失败」；审批浮层随 lane 隔离，但无排队、非活动 lane 提示与全局计数） + 状态行**上下文用量**段（`ctx 116.9k / 1000k (11.7%)`，取自
-> `tiktokenPromptTokens`（**任意携带该键的帧** —— TUI 不按帧类型过滤，`RUN_FINISHED` / `conversation_saved` 是常见来源，故一轮中途也可能刷新，见 issue #476）；分母优先本机 `context_tokens`，数据来自 `GET /conversation/messages` 水合（新会话即有初始占用）与携带该键的流帧；会话内水位单调，但 `timeline_log` 的 `context_trim`（历史压缩 / 工具输出裁剪 / 摘要）会让它**回落**到服务端给的 `after_tokens`（ADR 0005 的后半句）；`/conv new` 与切换会话会清空用量快照；新会话尚无服务端 `conversation_id` 时回落 `GET /status?view=shell` 的 `tiktoken_new_session_baseline_by_agent_role`（system-only 粗估，按 agent role 取：显式角色 → 默认角色 → `""` 档），显示为带 `~` 前缀的估算值；首轮结束回填 `conversation_id` 后基线失效，此时若这一轮仍无实测，回合末补拉一次 `GET /conversation/messages` 的 `tiktoken_prompt_tokens`（与 Desktop 流收尾水合同路，回包按 cid 门控），所以不会从 `~12k` 掉回 `—`；既无实测也无基线时才是占位 `—`）；设置面板 W1+W2+W4 已落地（W3 后置项未落地）；**P5 已落地**：README
+> **状态**：方案（已拍板走 **远程客户端**；**P3 已落地** `repl` 斜杠 `/help` `/workspace` `/conv`；**P4 已落地（M1–M4）**：全屏 `tui` 流式 transcript + 状态（宽屏为右栏底部纵栈、`F3` 折叠；窄屏为底部单行） + 单行/多行输入 + Ctrl+C 取消 + 左栏会话与 `/status` 联动 + 审批浮层 + thinking 折叠 + 工具行摘要 + `/find` 搜索 + 翻页滚动 + 助手正文行内 Markdown 轻渲染 + `/background` 全屏背景（kitty 像素 / 每格底色两档，`crabmate-tui caps` 打印终端探针） + 工作区目录树浏览（右栏仿 Desktop 默认显示；Ctrl+W 聚焦，含未设置时按 p 从项目池选择） + **多 serve 连接**（`--connect <name>=<url>` 追加
+> lane，主连接恒为首条、名为 `local`、bearer 复用；左栏下半列出全部连接，**单条也显示**，`Alt+←/→` 或点行切换 —— 只换视图，不打断在途回合；每条 lane 行还带该 serve 当前的工作区末段，`POST /workspace` 的 409 `WORKSPACE_ALREADY_SET`（一实例一工作区）单独提示「另起 lane」而不是「切换失败」；审批浮层随 lane 隔离，但无排队、非活动 lane 提示与全局计数） + 状态行**上下文用量**段（`ctx 116.9k / 1000k (11.7%)`，取自
+> `tiktokenPromptTokens`（**任意携带该键的帧** —— TUI 不按帧类型过滤，`RUN_FINISHED` / `conversation_saved` 是常见来源，故一轮中途也可能刷新，见 issue #476）；分母优先本机 `context_tokens`，数据来自 `GET /conversation/messages` 水合（新会话即有初始占用）与携带该键的流帧；会话内水位单调，但 `timeline_log` 的 `context_trim`（历史压缩 / 工具输出裁剪 / 摘要）会让它**回落**到服务端给的 `after_tokens`（ADR 0005 的后半句）；`/conv new` 与切换会话会清空用量快照；新会话尚无服务端 `conversation_id` 时回落 `GET /status?view=shell` 的 `tiktoken_new_session_baseline_by_agent_role`（system-only 粗估，按
+> agent role 取：显式角色 → 默认角色 → `""` 档），显示为带 `~` 前缀的估算值；首轮结束回填 `conversation_id` 后基线失效，此时若这一轮仍无实测，回合末补拉一次 `GET /conversation/messages` 的 `tiktoken_prompt_tokens`（与 Desktop 流收尾水合同路，回包按 cid 门控），所以不会从 `~12k` 掉回 `—`；既无实测也无基线时才是占位 `—`）；设置面板 W1+W2+W4 已落地（W3 后置项未落地）；**P5 已落地**：README
 > 双语安装/用法同步，`make tui-release` 产出仅二进制的 `crabmate-tui_*.deb`（无图标、无配置；v* tag 的 GitHub Release 亦附带））
 > **范围**：`crabmate-client` 新增终端面；`crabmate serve` 仍为执行权威  
 > **关联**：Server [`client_shell_split.md`](https://github.com/noisystreet/CrabMate/blob/main/docs/design/client_shell_split.md)、[`命令行与路由.md`](https://github.com/noisystreet/CrabMate/blob/main/docs/命令行与路由.md)、本仓 [`contract_pin.md`](./contract_pin.md) / [`personal_cloud_runbook.md`](./personal_cloud_runbook.md)
@@ -71,7 +73,7 @@ crates/
 | 能力 | Server 现状 | 远程 `crabmate-tui` |
 |------|-------------|----------------------|
 | 一轮对话 | `run_agent_turn` | `POST /chat/stream`（主路径）或 `/chat` |
-| 断线续传 | TUI SSE mirror | 传输层中断（`TermError::InterruptedStream`，已拿到 job 句柄）时**自动续流**：`chat` / `repl` 自动重发 `stream_resume:{job_id,after_seq}`，上限 2 次、退避 `0.5s × 第 n 次`（`src/turn.rs`）；用尽后仍可 repl `/resume` 手动续（job 取响应头 `x-stream-job-id`；cancel 已送达的回合不可续，cancel 未送达时 job 可能仍在跑、仍可续）。全屏 `tui` **不自动续流**（事件循环里没有重试循环），但同样可 `/resume` 手动续：断点在 `tui_mode/resume.rs` 里按同一规则保留（传输中断，或 Ctrl+C 且 cancel 未送达），续流时复用普通回合的 `ChatStreamOptions` 装配、只多一个 `stream_resume`，且不重发用户消息那一行；切会话 / `/conv new` 会作废断点（transcript 已换） |
+| 断线续传 | TUI SSE mirror | 注 3（见文末） |
 | 审批 | 进程内 dialoguer | SSE 控制面 + `POST /chat/approval` |
 | 回合取消 | 进程内中断 | Ctrl+C → `POST /chat/stream/{job_id}/cancel`（job 取响应头 `x-stream-job-id`；旧 serve 无路由时降级为本地中断） |
 | 斜杠 /skills | 同进程 | `GET /skills`（与 `/` 补全菜单同一份缓存） |
@@ -82,7 +84,8 @@ crates/
 
 > **HTTP / SSE 超时预算（TUI 侧）**：建连 10s、非流式请求（health / 审批 / JSON API）30s、取消 5s（`src/serve/client.rs`、`src/serve/json_api.rs`）；`/chat/stream` **不设**请求级总超时（长回合会被掐断），改由字节级空闲上限 90s（≈ serve `KeepAlive` 6 个心跳）判定 NAT / 代理黑洞，并在已拿 `x-stream-job-id` 时按上表「断线续传」自动续流（`src/serve/chat_stream.rs`）。
 
-> **模型密钥 / Web Bearer（CLI/env + 壳钥匙串回退，P3 已落地）**：`crabmate-tui chat|repl` 支持 `--llm-api-key` / `--llm-model` / `--llm-api-base`（env 沿用 serve 侧模型 env 名：`CM_API_KEY` / `CM_MODEL` / `CM_API_BASE`），有任一非空时随 `POST /chat/stream` 发送 `client_llm.{api_key,model,api_base}`，语义同 WASM UI「设置 → API 密钥/模型」——供 bearer 鉴权且服务端未设 `API_KEY` 的 serve（如个人云）使用；密钥仅存进程内、不落盘。`--bearer` 仍是 Web Bearer（≠ 模型 API_KEY）。**`--bearer` / `--llm-api-key`（或对应 env）缺省时**，TUI read-only 回退读取桌面壳已写入同一系统钥匙串（service `com.crabmate.credentials`）的槽位：`tauri_connect_web_api_bearer` / `tauri_client_llm_api_key`，不写壳槽位；`--no-keyring` 关闭回退（无条目或钥匙串不可用时静默跳过）。
+> **模型密钥 / Web Bearer（CLI/env + 壳钥匙串回退，P3 已落地）**：`crabmate-tui chat|repl` 支持 `--llm-api-key` / `--llm-model` / `--llm-api-base`（env 沿用 serve 侧模型 env 名：`CM_API_KEY` / `CM_MODEL` / `CM_API_BASE`），有任一非空时随 `POST /chat/stream` 发送 `client_llm.{api_key,model,api_base}`，语义同 WASM UI「设置 → API 密钥/模型」——供 bearer 鉴权且服务端未设 `API_KEY` 的 serve（如个人云）使用；密钥仅存进程内、不落盘。`--bearer` 仍是 Web Bearer（≠ 模型 API_KEY）。**`--bearer` / `--llm-api-key`（或对应 env）缺省时**，TUI read-only 回退读取桌面壳已写入同一系统钥匙串（service
+> `com.crabmate.credentials`）的槽位：`tauri_connect_web_api_bearer` / `tauri_client_llm_api_key`，不写壳槽位；`--no-keyring` 关闭回退（无条目或钥匙串不可用时静默跳过）。
 
 ---
 
@@ -135,7 +138,8 @@ crates/
 
 全屏 `tui` 的 `/resume` 落地时复核出的两处遗留，均**不阻塞**当前用法，按影响排序：
 
-1. **传输中断会丢掉 `conversation_id`**（`crates/crabmate-tui/src/tui_mode/worker.rs`）。`run_chat_stream_sink` 里 `consume_sse_response(...).await?` 用 `?` 直接抛出，而 `TermError::InterruptedStream` 只带 `job_id` / `after_seq`，那时已填好的 `conversation_id` 随 `ChatStreamOutcome` 一起丢弃（错误分支统一返回 `ChatStreamOutcome::default()`）。后果：首轮传输中断后 `st.conversation_id` 不会绑定、`bind_new_session` 不执行，左栏那行继续没有 server id，要到下一条消息才绑上，Web / Desktop 侧也看不到这一轮。修法要给 `TermError::InterruptedStream` 增加 `conversation_id`（或让 sink 返回部分 outcome），会牵动 `src/turn.rs` 的自动续流与 repl，故单列一项。
+1. **传输中断会丢掉 `conversation_id`**（`crates/crabmate-tui/src/tui_mode/worker.rs`）。`run_chat_stream_sink` 里 `consume_sse_response(...).await?` 用 `?` 直接抛出，而 `TermError::InterruptedStream` 只带 `job_id` / `after_seq`，那时已填好的 `conversation_id` 随 `ChatStreamOutcome` 一起丢弃（错误分支统一返回 `ChatStreamOutcome::default()`）。后果：首轮传输中断后 `st.conversation_id` 不会绑定、`bind_new_session` 不执行，左栏那行继续没有 server id，要到下一条消息才绑上，Web / Desktop 侧也看不到这一轮。修法要给 `TermError::InterruptedStream` 增加 `conversation_id`（或让 sink 返回部分
+outcome），会牵动 `src/turn.rs` 的自动续流与 repl，故单列一项。
 2. **全屏不自动续流**。`repl` / `chat` 在已拿到 job 句柄的传输中断上会静默重试 2 次（`0.5s × 第 n 次` 退避，见 §4 能力映射），全屏 `tui` 的事件循环没有重试结构，只能由用户敲 `/resume`。若要与行模式对齐，需在 worker 里补一层重试循环，并决定「正在重试」在状态栏如何呈现（现有 `✳ 取消中` 之外是否需要第四个状态）。
 
 ---
@@ -164,10 +168,18 @@ crates/
 
 ### 注 1 · **P4**
 
-实验性 `tui`（ratatui）：流式 transcript + 状态行 + 左栏会话 + 多行底栏输入（**M1 已落地**）；左栏会话 + 状态行联动（**M2 已落地**）；审批浮层 / thinking 折叠 / 工具行摘要 / 滚动搜索 / 多行输入（**M3 已落地**）；工作区目录树浏览（**M4 已落地**：右栏仿 Desktop 默认显示；目录树聚焦时可按 p 从项目池选择/切换工作区）；只读文件视图（**M4 已落地**：`/editor [--md|--src] [<相对路径>]` 把聊天列切成只读文件视图、`/chat`（或输入框为空时 `Esc`）切回，视图开着时目录树 `Enter` 改为打开该文件而不是插路径；源码视图有行号 + 制表位展开；`.md` / `.markdown` 默认改走 **markdown 预览**（无行号栏 —— 围栏行不上屏、代码块插语言标签、连续空行折叠、一行源码可能折成多物理行，行号只会指错地方；复用聊天区的 `assistant_styled` → `wrap_styled_rows` → `styled_row_spans`，缓存按宽度 + 主题 + 内容版本失效、滚动按物理行计数；超过 4 000 源码行只渲染前 4 000 并在提示行说明；链接保留样式但暂不可点；`--src` 强制源码、`--md` 对任意文件强制预览），鼠标滚轮（一格 3 行，指针在聊天列时滚的是文件而不是被遮住的
-transcript）、`PgUp`/`PgDn` · `Alt+↑/↓` · `Ctrl+Home`/`Ctrl+End` 滚动；`Ctrl+F` 是**文件内**查找（只搜当前这个文件，与聊天区搜 transcript 的 `/find` 两份状态互不影响：`Enter`/`Shift+Enter` 跳下/上一处、`Esc` 只关查找不退视图，有正文时提示行常驻「第 n / N 处」或「无匹配」，源码视图按源码行定位、md 预览按折行后的物理行定位）、`Ctrl+Y`（或 `/copy path`）把当前文件的**相对路径**送进剪贴板（内容仍走终端原生选择）、多 lane 时视图第二行标题补 `lane <名字>`（单 lane 省掉，恒等于当前这条）；状态跟 lane 走并按 `ws_generation` 丢弃过期回包，切工作区不会把别人的文件画在当前标题下；只读，不做保存）；设置面板（**W1+W2+W4 已落地**：`/settings` / F6 打开**全屏设置页**，分区为外观（`theme`）/ 模型（模型名 / API Base（网关预设下拉 + 自定义 URL）/ 温度 / 上下文长度 / 思考模式 / API 密钥）/ 会话（Agent role / 会话模式 / 只读工具缓存开关），三层显示并合并保存到 serve user-data，密钥写本机钥匙串；**W3 后置项未落地**：MCP 全局开关 / `tool_timeout_secs`、Session SQLite 开关，见
+实验性 `tui`（ratatui）：流式 transcript + 状态行 + 左栏会话 + 多行底栏输入（**M1 已落地**）；左栏会话 + 状态行联动（**M2 已落地**）；审批浮层 / thinking 折叠 / 工具行摘要 / 滚动搜索 / 多行输入（**M3 已落地**）；工作区目录树浏览（**M4 已落地**：右栏仿 Desktop 默认显示；目录树聚焦时可按 p 从项目池选择/切换工作区）；只读文件视图（**M4 已落地**：`/editor [--md|--src] [<相对路径>]` 把聊天列切成只读文件视图、`/chat`（或输入框为空时 `Esc`）切回，视图开着时目录树 `Enter` 改为打开该文件而不是插路径；源码视图有行号 + 制表位展开；`.md` / `.markdown` 默认改走 **markdown 预览**（无行号栏 ——
+围栏行不上屏、代码块插语言标签、连续空行折叠、一行源码可能折成多物理行，行号只会指错地方；复用聊天区的 `assistant_styled` → `wrap_styled_rows` → `styled_row_spans`，缓存按宽度 + 主题 + 内容版本失效、滚动按物理行计数；超过 4 000 源码行只渲染前 4 000 并在提示行说明；链接保留样式但暂不可点；`--src` 强制源码、`--md` 对任意文件强制预览），鼠标滚轮（一格 3 行，指针在聊天列时滚的是文件而不是被遮住的
+transcript）、`PgUp`/`PgDn` · `Alt+↑/↓` · `Ctrl+Home`/`Ctrl+End` 滚动；`Ctrl+F` 是**文件内**查找（只搜当前这个文件，与聊天区搜 transcript 的 `/find` 两份状态互不影响：`Enter`/`Shift+Enter` 跳下/上一处、`Esc` 只关查找不退视图，有正文时提示行常驻「第 n / N 处」或「无匹配」，源码视图按源码行定位、md 预览按折行后的物理行定位）、`Ctrl+Y`（或 `/copy path`）把当前文件的**相对路径**送进剪贴板（内容仍走终端原生选择）、多 lane 时视图第二行标题补 `lane <名字>`（单 lane 省掉，恒等于当前这条）；状态跟 lane 走并按 `ws_generation`
+丢弃过期回包，切工作区不会把别人的文件画在当前标题下；只读，不做保存）；设置面板（**W1+W2+W4 已落地**：`/settings` / F6 打开**全屏设置页**，分区为外观（`theme`）/ 模型（模型名 / API Base（网关预设下拉 + 自定义 URL）/ 温度 / 上下文长度 / 思考模式 / API 密钥）/ 会话（Agent role / 会话模式 / 只读工具缓存开关），三层显示并合并保存到 serve user-data，密钥写本机钥匙串；**W3 后置项未落地**：MCP 全局开关 / `tool_timeout_secs`、Session SQLite 开关，见
 [tui_settings_panel.md](./tui_settings_panel.md)）
-### 注 2
+### 注 2 · **P5**
 
-TTY 全屏可用；非白名单命令浮层审批（Esc=拒绝；Ctrl+E 展开看完整命令，展开后 ↑/↓、PgUp/PgDn、Home/End 滚动）；长对话可滚动（会话有更早历史时 `/older` 按 `before_index` 前插更早页，80 条/页，不清屏；已在顶部时新页保持贴顶，滚到顶再按 PgUp 会自动续翻）；多行可编辑发送（Alt+Enter 换行；粘贴整段文本经括号粘贴一次落进输入框，`CM_TUI_PASTE=off` 可关）；输入 `/` 弹出补全菜单（内建命令 + `GET /skills` 的 skill；↑↓ 选择 · Tab/Enter 补全 · Esc 关闭，候选为空时底部说明 skill 为何缺失）；左右两栏的列宽可按住分隔线拖拽调整，宽度记在**本机**（`$XDG_STATE_HOME/crabmate/tui-panes.json`，`CM_TUI_PANES_FILE` 可覆盖路径，见 #407）；窄终端（<120 列）自动隐藏左右栏；Ctrl+W 聚焦右栏工作区目录树（↑↓ 选择 · Enter 展开/收起或把文件相对路径插入输入框 · → 只展开 · ← 收起/回父 · Home/End/PgUp/PgDn 跳转翻页 · r 刷新并保留展开态（子列表重载后光标归位） · w 回会话 · 鼠标点击/滚轮同样可用，`CM_TUI_MOUSE=off` 关闭鼠标捕获；窄栏下文件名做**中段省略**（保留开头与扩展名，深层目录不再只剩
-`…xx.rs`），光标行画不全时底部提示行改显示该行的完整相对路径）；左栏会话列也支持鼠标：单击某行即选中并切换（与 Enter 同一条 `use_selected`，所以回合进行中照样拒绝、未绑定的行照样给提示），点标题行 / 底部提示行只切焦点，点本栏任意处会作废待确认删除（删除本身是 `Delete` 先确认、`Shift+Delete` 免确认，在途回合拒绝）；滚轮**不碰会话列表**（列表窗口跟着选中行走，滚起来只能表现成「改选中」，而选中即切换），仍是滚 transcript；工作区目录树聚焦时按 p 从服务端项目池选择/切换（未设置=选择，已设置=切到另一项目）；多 serve 时 `--connect name=url` 追加连接，左栏下半列出全部连接（单条也显示），`Alt+←/→` 或点击行切换视图
+TTY 全屏可用；非白名单命令浮层审批（Esc=拒绝；Ctrl+E 展开看完整命令，展开后 ↑/↓、PgUp/PgDn、Home/End 滚动）；长对话可滚动（会话有更早历史时 `/older` 按 `before_index` 前插更早页，80 条/页，不清屏；已在顶部时新页保持贴顶，滚到顶再按 PgUp 会自动续翻）；多行可编辑发送（Alt+Enter 换行；粘贴整段文本经括号粘贴一次落进输入框，`CM_TUI_PASTE=off` 可关）；输入 `/` 弹出补全菜单（内建命令 + `GET /skills` 的 skill；↑↓ 选择 · Tab/Enter 补全 · Esc 关闭，候选为空时底部说明 skill 为何缺失）；左右两栏的列宽可按住分隔线拖拽调整，宽度记在**本机**（`$XDG_STATE_HOME/crabmate/tui-panes.json`，`CM_TUI_PANES_FILE`
+可覆盖路径，见 #407）；窄终端（<120 列）自动隐藏左右栏；Ctrl+W 聚焦右栏工作区目录树（↑↓ 选择 · Enter 展开/收起或把文件相对路径插入输入框 · → 只展开 · ← 收起/回父 · Home/End/PgUp/PgDn 跳转翻页 · r 刷新并保留展开态（子列表重载后光标归位） · w 回会话 · 鼠标点击/滚轮同样可用，`CM_TUI_MOUSE=off` 关闭鼠标捕获；窄栏下文件名做**中段省略**（保留开头与扩展名，深层目录不再只剩
+`…xx.rs`），光标行画不全时底部提示行改显示该行的完整相对路径）；左栏会话列也支持鼠标：单击某行即选中并切换（与 Enter 同一条 `use_selected`，所以回合进行中照样拒绝、未绑定的行照样给提示），点标题行 / 底部提示行只切焦点，点本栏任意处会作废待确认删除（删除本身是 `Delete` 先确认、`Shift+Delete` 免确认，在途回合拒绝）；滚轮**不碰会话列表**（列表窗口跟着选中行走，滚起来只能表现成「改选中」，而选中即切换），仍是滚 transcript；工作区目录树聚焦时按 p 从服务端项目池选择/切换（未设置=选择，已设置=切到另一项目）；多 serve 时 `--connect name=url` 追加连接，左栏下半列出全部连接（单条也显示），`Alt+←/→`
+或点击行切换视图
+### 注 3 · 断线续传
+
+传输层中断（`TermError::InterruptedStream`，已拿到 job 句柄）时**自动续流**：`chat` / `repl` 自动重发 `stream_resume:{job_id,after_seq}`，上限 2 次、退避 `0.5s × 第 n 次`（`src/turn.rs`）；用尽后仍可 repl `/resume` 手动续（job 取响应头 `x-stream-job-id`；cancel 已送达的回合不可续，cancel 未送达时 job 可能仍在跑、仍可续）。全屏 `tui` **不自动续流**（事件循环里没有重试循环），但同样可 `/resume` 手动续：断点在 `tui_mode/resume.rs` 里按同一规则保留（传输中断，或 Ctrl+C 且 cancel 未送达），续流时复用普通回合的 `ChatStreamOptions` 装配、只多一个 `stream_resume`，且不重发用户消息那一行；切会话 /
+`/conv new` 会作废断点（transcript 已换）

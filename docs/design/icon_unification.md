@@ -155,7 +155,8 @@ fn svg_common() -> (&'static str, &'static str, &'static str, &'static str, &'st
 
 判据：**能进 DOM 且需要随主题变色的 → 换 SVG；作为排版符号或伪元素内容的 → 保留**。
 
-风险：`×` 的原生 DOM 那处（`chat_image_lightbox.rs:270`）——「在 WASM 外的 JS 片段里」的判断**有误**，实测是 WASM 内的 `web_sys` 建 DOM（`doc.create_element("button")` + `set_text_content(Some("×"))`），与 Leptos 同 crate，`Icon` 组件可达。但替换需在命令式子树里挂载 Leptos 视图，`UnmountHandle` 的类型参数是 `icon_x` 的 `impl IntoView::State`、**无法命名**从而存不进 `LightboxBind`，只能 `.forget()`（每次开灯箱泄漏一个 Owner）或用 `create_element_ns` 手写第二份模板；而该按钮已有 `aria-label`（字形仅装饰）、颜色经 `color: var(--text)` 已随主题变化，故**保留文本**。完整权衡见「实施记录 · 第 3 步」。
+风险：`×` 的原生 DOM 那处（`chat_image_lightbox.rs:270`）——「在 WASM 外的 JS 片段里」的判断**有误**，实测是 WASM 内的 `web_sys` 建 DOM（`doc.create_element("button")` + `set_text_content(Some("×"))`），与 Leptos 同 crate，`Icon` 组件可达。但替换需在命令式子树里挂载 Leptos 视图，`UnmountHandle` 的类型参数是 `icon_x` 的 `impl IntoView::State`、**无法命名**从而存不进 `LightboxBind`，只能 `.forget()`（每次开灯箱泄漏一个 Owner）或用 `create_element_ns` 手写第二份模板；而该按钮已有 `aria-label`（字形仅装饰）、颜色经 `color: var(--text)` 已随主题变化，故**保留文本**。完整权衡见「实施记录 · 第 3
+步」。
 
 ### 第 4 步：CSS mask 替代 data-URI
 

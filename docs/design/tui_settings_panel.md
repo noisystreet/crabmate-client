@@ -1,6 +1,7 @@
 # TUI 设置面板（对齐 Desktop 设置）
 
-> **状态**：**W1 / W2 / W3 / W4 已全部落地**（`/settings` + F6，七个分区）。**可写四栏**：外观 `theme`；模型 `model` / `api_base` / `temperature` / `llm_context_tokens` / `llm_thinking_mode` / API 密钥；会话 `role` / `session_mode` / 只读工具缓存开关 / 会话存储 SQLite 开关；MCP `global_enabled` / `tool_timeout_secs`。**只读三栏**：连接（本连接 `api_base` / lane 名与序号 / Web Bearer 来源 + serve 默认模型 + 生效权限档）、快捷键（由 `hotkey_docs.rs` 的键位表生成）、本地行为（`CM_TUI_*` 开关的当前生效值 + 三条行为事实）；值即事实，Enter 无动作。仍**不做**的：MCP 服务器行编辑、GitHub、字体/背景/IDE、`locale`。
+> **状态**：**W1 / W2 / W3 / W4 已全部落地**（`/settings` + F6，七个分区）。**可写四栏**：外观 `theme`；模型 `model` / `api_base` / `temperature` / `llm_context_tokens` / `llm_thinking_mode` / API 密钥；会话 `role` / `session_mode` / 只读工具缓存开关 / 会话存储 SQLite 开关；MCP `global_enabled` / `tool_timeout_secs`。**只读三栏**：连接（本连接 `api_base` / lane 名与序号 / Web Bearer 来源 + serve 默认模型 + 生效权限档）、快捷键（由 `hotkey_docs.rs` 的键位表生成）、本地行为（`CM_TUI_*` 开关的当前生效值 + 三条行为事实）；值即事实，Enter 无动作。仍**不做**的：MCP
+> 服务器行编辑、GitHub、字体/背景/IDE、`locale`。
 > **范围**：`crabmate-tui`（`tui` 全屏为主，`repl` 仅入口引导）；设置**选项字段与语义尽量对齐 Desktop**（`frontend/` Settings），不追求 UI 像素一致。
 > **关联**：[`remote_cli_tui.md`](./remote_cli_tui.md)（TUI 母方案）、[`client_capability_matrix.md`](./client_capability_matrix.md)（能力单元格，改动须同 PR 更新）、[`contract_pin.md`](./contract_pin.md)（契约钉点）、Server `docs/`（SSE / user-data / 配置权威）
 
@@ -87,7 +88,7 @@ Desktop 设置共 8 个分区（`settings_page`）。逐区对齐结论见下表
 
 | 字段 | Desktop 对照键 | 控件 | 空值 / 默认 | 说明 |
 |---|---|---|---|---|
-| 主题 | `prefs.theme` | Enter 展开候选列表，↑/↓ 选择（默认（透明）/ shadcn-transparent / default-dark / crabmate-dark / shadcn-dark / material-dark / high-contrast-dark / crabmate-light / shadcn-light） | 空 = 清除键 = TUI 产品默认透明；保存后立即重解析配色 | 选项全部来自 `palette.rs` 的 `THEME_OPTIONS`（与 `THEME_NAMES` 同源，有 `theme_options_and_theme_names_stay_in_lockstep` 守着），因此选中即有可见变化。候选多于 7 项时开窗滚动（窗口跟着选中项走，首尾用 `⋯ 还有 N 项` 示意），避免小终端里被内容区高度裁掉。**不含 `system`**：终端拿不到 Desktop 的 `matchMedia` / Tauri 明暗提示，选它只会退成实底深色，与浅色系统下的 Desktop 表现相反；读到 Desktop 写的 `system` 时按原值展示、编辑起点回落「默认」，不主动改写该键 |
+| 主题 | `prefs.theme` | Enter 展开候选列表，↑/↓ 选择（默认（透明）/ shadcn-transparent / default-dark / crabmate-dark / shadcn-dark / material-dark / high-contrast-dark / crabmate-light / shadcn-light） | 空 = 清除键 = TUI 产品默认透明；保存后立即重解析配色 | 注 1（见文末） |
 
 **会话（写 `/user-data/prefs`，合并保真）**
 
@@ -223,7 +224,8 @@ Desktop 设置共 8 个分区（`settings_page`）。逐区对齐结论见下表
 
 ### 6.4 随轮发送
 
-保存到 user-data 后，新一轮回合仍按 Desktop 同规则随 body 发送（空值不发送）：`client_llm.{api_key?,api_base,model,llm_context_tokens?,llm_thinking_mode?}`、顶层 `temperature?`、`readonly_tool_ttl_cache_secs?`。**已实现**：顶层 `temperature`（f64，仅 0.0..=2.0）、`client_llm.llm_thinking_mode`（仅 on/off）与 `client_llm.llm_context_tokens`（仅 >0 的 JSON 数值）、顶层 `readonly_tool_ttl_cache_secs`（缓存开关关时 = 0）均已随 W2 落地；字段名与校验区间以**契约 crate**（当前钉点见 [`contract_pin.md`](./contract_pin.md)；此处不写死版本号，随钉点演进）与前端 `http_request.rs` L77-86 / `client_llm_storage.rs`（`client_llm_json_for_chat_body`、`readonly_tool_ttl_cache_secs_for_chat_body`）为准。
+保存到 user-data 后，新一轮回合仍按 Desktop 同规则随 body 发送（空值不发送）：`client_llm.{api_key?,api_base,model,llm_context_tokens?,llm_thinking_mode?}`、顶层 `temperature?`、`readonly_tool_ttl_cache_secs?`。**已实现**：顶层 `temperature`（f64，仅 0.0..=2.0）、`client_llm.llm_thinking_mode`（仅 on/off）与 `client_llm.llm_context_tokens`（仅 >0 的 JSON 数值）、顶层 `readonly_tool_ttl_cache_secs`（缓存开关关时 = 0）均已随 W2 落地；字段名与校验区间以**契约 crate**（当前钉点见 [`contract_pin.md`](./contract_pin.md)；此处不写死版本号，随钉点演进）与前端 `http_request.rs` L77-86 /
+`client_llm_storage.rs`（`client_llm_json_for_chat_body`、`readonly_tool_ttl_cache_secs_for_chat_body`）为准。
 
 ---
 
@@ -273,3 +275,8 @@ Desktop 设置共 8 个分区（`settings_page`）。逐区对齐结论见下表
 - 单测：字段校验（温度区间/上下文上限/思考枚举，对齐 Desktop）、合并 PUT 构造（不丢 `saved_models`/非管理 prefs 键）、三层显示合成、`/settings` 解析与脏确认逻辑。沿用现有 CCN/行数门禁（大逻辑拆 `settings_panel.rs`，避免 `mod.rs` 超限）。
 - 只读三栏（#433）：快捷键栏的每个条目都来自热键表（`shortcut_rows_come_from_the_hotkey_table`）、80 列不截断、`CM_TUI_*` 生效值与环境变量名同行、连接栏三种 Bearer 来源各自成句、`EnvSwitch::ALL` 与 `Section::Local` 同序。
 - 冒烟（`docs/design/shell_smoke_runbook.md` 同风格）：连本地 serve → F6 开面板 → 改模型 → F2 保存 → `/status` 变化 + 请求体含 `client_llm`；改 role/mode 同验；重启 TUI 仍在；Desktop 设置页可见同值；密钥保存后 `--no-keyring` 不读。
+
+## 表格长备注
+### 注 1 · 主题
+
+选项全部来自 `palette.rs` 的 `THEME_OPTIONS`（与 `THEME_NAMES` 同源，有 `theme_options_and_theme_names_stay_in_lockstep` 守着），因此选中即有可见变化。候选多于 7 项时开窗滚动（窗口跟着选中项走，首尾用 `⋯ 还有 N 项` 示意），避免小终端里被内容区高度裁掉。**不含 `system`**：终端拿不到 Desktop 的 `matchMedia` / Tauri 明暗提示，选它只会退成实底深色，与浅色系统下的 Desktop 表现相反；读到 Desktop 写的 `system` 时按原值展示、编辑起点回落「默认」，不主动改写该键
