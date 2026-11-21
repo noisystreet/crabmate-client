@@ -45,6 +45,7 @@ SERVE_LOG="$LOG_DIR/crabmate-serve-smoke.log"
 
 DESKTOP_PID=""
 SERVE_PID=""
+SERVE_REUSED=0
 
 should_use_xvfb() {
     case "${CM_SMOKE_USE_XVFB:-1}" in
@@ -144,9 +145,29 @@ wait_http_health() {
 
 dump_logs() {
     echo "   --- tail -40 ${DESKTOP_LOG} ---" >&2
-    tail -40 "$DESKTOP_LOG" 2>/dev/null >&2 || true
-    echo "   --- tail -40 ${SERVE_LOG} ---" >&2
-    tail -40 "$SERVE_LOG" 2>/dev/null >&2 || true
+    # 注意重定向顺序：先 2>/dev/null 再把 stdout 接到 stderr，会连 stdout 一起丢进
+    # /dev/null（两者都指向 /dev/null）。失败时看不到日志 —— 正是老 scripts/victauri-e2e.sh
+    # 踩过的「失败零诊断」坑。
+    tail -40 "$DESKTOP_LOG" >&2 2>/dev/null || true
+    if [ "$SERVE_REUSED" = "1" ]; then
+        echo "   (serve 是复用的已运行实例，它的日志不归本脚本)" >&2
+    else
+        echo "   --- tail -40 ${SERVE_LOG} ---" >&2
+        tail -40 "$SERVE_LOG" >&2 2>/dev/null || true
+    fi
+}
+
+# 壳是否还活着。`kill -0` 对**僵尸**也返回成功（父进程尚未 wait），单用它会把
+# 「已经崩了、只是还没被回收」判成存活，把诊断引向错误方向。
+desktop_alive() {
+    kill -0 "$DESKTOP_PID" 2>/dev/null || return 1
+    local stat
+    stat="$(ps -o stat= -p "$DESKTOP_PID" 2>/dev/null || true)"
+    [ -n "$stat" ] || return 1
+    case "$stat" in
+        Z*) return 1 ;;
+    esac
+    return 0
 }
 
 # 壳的子进程里出现 WebKit 引擎 = WebView 初始化并开始加载页面。
@@ -185,8 +206,11 @@ if [ ! -x "$DESKTOP_BIN" ]; then
 fi
 
 # ── serve：已就绪则复用，否则自己起 ────────────────────────
+# 先清空桌面日志：serve 阶段就失败时，别把**上一轮**的壳日志当成本轮证据打出来。
+: >"$DESKTOP_LOG"
 if serve_healthy; then
     echo ">>> 复用已在监听的 serve（${PORT}）"
+    SERVE_REUSED=1
 else
     echo ">>> 启动 serve (${PORT}) ..."
     : >"$SERVE_LOG"
@@ -208,7 +232,6 @@ fi
 
 # ── 起壳：跳过连接页，直接开包内 UI ─────────────────────────
 echo ">>> 启动壳（CM_DESKTOP_SKIP_CONNECT=1 → ${SERVE_URL}）..."
-: >"$DESKTOP_LOG"
 env -u WAYLAND_DISPLAY -u WAYLAND_SOCKET -u GDK_BACKEND \
     WINIT_UNIX_BACKEND=x11 \
     LIBGL_ALWAYS_SOFTWARE=1 \
@@ -223,7 +246,7 @@ echo ">>> 观察（最多 ${SETTLE}s，WebKit 子进程出现即通过）..."
 elapsed_ms=0
 webkit_seen=""
 while [ "$elapsed_ms" -lt "$((SETTLE * 1000))" ]; do
-    if ! kill -0 "$DESKTOP_PID" 2>/dev/null; then
+    if ! desktop_alive; then
         echo "!!! 壳进程在 $((elapsed_ms / 1000))s 就退出了" >&2
         dump_logs
         exit 1
