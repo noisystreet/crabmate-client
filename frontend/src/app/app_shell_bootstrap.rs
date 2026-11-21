@@ -24,7 +24,10 @@ pub fn bootstrap_app_shell() -> AppShellCtx {
         crate::tauri_shell::ensure_external_link_handler();
     }
 
-    let app_signals = AppSignals::new();
+    // #561 阶段 3：先立 lane 容器（现在恒一条）。`current()` 拿到的就是改造前那份
+    // `AppSignals` —— 单连接行为零变化；容器只是把「当前是哪条」收成一个入口。
+    let lanes = super::app_signals::LaneSet::new_single(&super::app_signals::WindowSignals::new());
+    let app_signals: AppSignals = lanes.current();
     // 官方壳：尽早从钥匙串 / Keystore 水合（hash 已写入内存时仅清明文 LS）。
     //
     // #558 项 1b：水合显式走「**这条 lane 自己的** holder」，不再靠零参口回落到 `ACTIVE`。
@@ -40,7 +43,7 @@ pub fn bootstrap_app_shell() -> AppShellCtx {
     let new_session = Rc::clone(&wiring.chat_wires.new_session);
 
     AppShellCtx {
-        signals: app_signals.clone(),
+        lanes,
         new_session,
         refresh_workspace: Arc::clone(&wiring.refresh_workspace),
         refresh_tasks: Arc::clone(&wiring.refresh_tasks),

@@ -148,7 +148,11 @@ fn SidebarRailRevealBtn(
 #[component]
 pub fn App() -> impl IntoView {
     let app_ctx = init_app_shell();
-    provide_context(ChatShellLeptosContext::from_app_signals(&app_ctx.signals));
+    // #561：当前前台那条 lane 的信号**在组件顶部取一次**，之后闭包只捕获其中的
+    // Copy 句柄。写成 `app_ctx.signals().chat` 会让 `move ||` 捕获整个 `AppShellCtx`
+    // （含 `Rc`），当场被 `Send + Sync` 打回 —— 与 #563 记录的 `Deref` 坑同源。
+    let signals = app_ctx.signals();
+    provide_context(ChatShellLeptosContext::from_app_signals(&signals));
 
     // `AppShellCtx` 含 `Rc` 等，不满足 `Send`；子组件闭包不得捕获整 ctx（见 Leptos `ToChildren` 约束）。
     let approval_modal_signals = app_ctx.approval_modal_signals();
@@ -165,35 +169,35 @@ pub fn App() -> impl IntoView {
     let side_column_view_signals = app_ctx.side_column_view_signals();
 
     // IDE 会话（状态 + 副作用）在这里建一次：视图挂在聊天列主区里，切回聊天也不丢状态。
-    let layout_toggle = IdeLayoutToggleSignals::from_app_signals(&app_ctx.signals);
+    let layout_toggle = IdeLayoutToggleSignals::from_app_signals(&signals);
     wire_layout_toggle_hotkey(layout_toggle);
     let ide_session = IdeSession::new(IdeSessionInput {
-        locale: app_ctx.signals.shell_ui.locale,
-        shell_ui: app_ctx.signals.shell_ui,
-        chrome: app_ctx.signals.ide_chrome,
-        editor: app_ctx.signals.ide_editor,
+        locale: signals.shell_ui.locale,
+        shell_ui: signals.shell_ui,
+        chrome: signals.ide_chrome,
+        editor: signals.ide_editor,
         layout_toggle,
-        ide_settings_page: app_ctx.signals.modal.ide_settings_page,
-        chat: app_ctx.signals.chat,
-        composer_draft: app_ctx.signals.chat_composer.draft,
-        workspace_panel: app_ctx.signals.to_workspace_panel(),
+        ide_settings_page: signals.modal.ide_settings_page,
+        chat: signals.chat,
+        composer_draft: signals.chat_composer.draft,
+        workspace_panel: signals.to_workspace_panel(),
         refresh_workspace: app_ctx.refresh_workspace.clone(),
-        initialized: app_ctx.signals.initialized,
-        editor_visible: app_ctx.signals.shell_ui.editor_layout_mode,
+        initialized: signals.initialized,
+        editor_visible: signals.shell_ui.editor_layout_mode,
     });
     let ide_body_view: AnyView = view! { <IdeEditorBody signals=ide_session.body() /> }.into_any();
 
     view! {
         <div
             class=move || {
-                app_root_class_name(app_ctx.signals.sidebar.sidebar_rail_collapsed.get())
+                app_root_class_name(signals.sidebar.sidebar_rail_collapsed.get())
             }
         >
             {sidebar_nav_view(sidebar_nav_signals)}
 
             <SidebarRailRevealBtn
-                sidebar_rail_collapsed=app_ctx.signals.sidebar.sidebar_rail_collapsed
-                locale=app_ctx.signals.shell_ui.locale
+                sidebar_rail_collapsed=signals.sidebar.sidebar_rail_collapsed
+                locale=signals.shell_ui.locale
             />
 
             <div
@@ -201,20 +205,20 @@ pub fn App() -> impl IntoView {
                 id="layout-mode-panel-main"
                 class:settings-page-hidden=move || {
                     shell_main_hidden(
-                        app_ctx.signals.modal.settings_page,
-                        app_ctx.signals.modal.ide_settings_page,
-                        app_ctx.signals.modal.context_usage_page,
+                        signals.modal.settings_page,
+                        signals.modal.ide_settings_page,
+                        signals.modal.context_usage_page,
                     )
                 }
             >
                 {mobile_shell_header_view(mobile_shell_header_signals)}
 
-                <Show when=move || app_ctx.signals.chat_composer.chat_find_panel_open.get()>
+                <Show when=move || signals.chat_composer.chat_find_panel_open.get()>
                     <ChatFindBar />
                 </Show>
 
                 <div
-                    class:main-row-resizing=move || app_ctx.signals.resize.side_resize_dragging.get()
+                    class:main-row-resizing=move || signals.resize.side_resize_dragging.get()
                     class="main-row"
                 >
                     <div class="main-row-chat-layer">
@@ -242,12 +246,12 @@ pub fn App() -> impl IntoView {
             <IdeSettingsPageView input=ide_settings_page_view_input />
             <ContextUsagePageView input=context_usage_page_view_input />
             <IdeConfirmDialog
-                locale=app_ctx.signals.shell_ui.locale
-                chrome=app_ctx.signals.ide_chrome
+                locale=signals.shell_ui.locale
+                chrome=signals.ide_chrome
             />
             <ShellConfirmDialog
-                locale=app_ctx.signals.shell_ui.locale
-                modal=app_ctx.signals.modal
+                locale=signals.shell_ui.locale
+                modal=signals.modal
             />
         </div>
     }
