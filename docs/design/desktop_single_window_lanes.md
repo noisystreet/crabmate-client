@@ -261,7 +261,7 @@ Web 侧没有「帧」，只有「挂载 / 卸载」，所以要先说清卸载�
 
 | TUI | Web（懒建方案） |
 |---|---|
-| `TuiApp.lanes: Vec<LaneApp>` | `LaneSet.lanes: Rc<RefCell<Vec<LaneRuntime>>>` |
+| `TuiApp.lanes: Vec<LaneApp>` | `LaneSet.lanes: Rc<RefCell<Vec<Rc<LaneRuntime>>>>` |
 | `active: usize` | `active: RwSignal<usize>` |
 | `/lane attach` → 造 `LaneApp` 并 push | `add_lane` → 造 `LaneRuntime` + `mount_to` 挂一棵树 |
 | 每帧按 `active` 取 `lane_mut()` | 每棵子树各自绑定建出来那一刻的句柄，切换只改 `display` |
