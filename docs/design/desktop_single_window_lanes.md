@@ -255,7 +255,8 @@ Web 侧没有「帧」，只有「挂载 / 卸载」，所以要先说清卸载�
 |---|---|---|
 | **S1**（已完成） | `App` 只剩「取当前 lane → 交给 `app_body(rt: Rc<LaneRuntime>)`」；14 个 `*_signals()` / `*_view_input()` 搬到 `LaneRuntime`（`app_signals/lane_view_inputs.rs`），视图与 `provide_context` 进 `app/app_body.rs` | N=1 等价：826 测试 + wasm32 clippy + 桌面冒烟（xvfb + 真实 WebKitGTK）**均已通过** |
 | **S2**（已完成，挂载后隐藏） | `LaneSet::add_lane(scope)` + 窗口级动作注册表 `app/lane_actions.rs`；两处「连接」入口改调它，`App` 在 `.lane-layer` 容器上 `mount_to(app_body(rt))` | 冒烟能起 + 手测「点两次得到两条 lane」 |
-| **S3** | 切换只改 `display`（不再重建）；左栏画本窗口 lane 列表（§6.5 方案 B）；键位（§6.6） | **必须图形会话手测**：会话/草稿不串、后台流不中断 |
+| **S3a**（已完成） | 切换只换 class（`lane-slot--active`，不重建子树）；键位 §6.6 全表 | 冒烟 + Playwright 布局用例；**切 lane 的行为需图形会话手测** |
+| **S3b**（待做） | 左栏「本窗口 lane 列表」（§6.5 方案 B）+ 点击切换；§6.5 的单窗口降级写进能力矩阵 | 手测：列表条数与当前前台一致 |
 
 与 TUI 的对应：
 
@@ -352,6 +353,11 @@ Desktop 同样要求：**列表渲染顺序**与**点击命中换算**共用一�
 实现注意：TUI 这些键是**精确匹配修饰符**（不放宽成 `contains`），且都在「进入 lane 之前」拦截 ——
 不能让切换键漏进输入框。桌面同理：全局监听，输入框获得焦点时也不放行给输入框。
 `Alt+数字` 在部分 Linux 桌面环境被窗口管理器占用（TUI 不受影响），这一点要进冒烟检查项。
+
+**落地（2026-11-21，S3a）**：`app/lane_hotkeys.rs`。按键 → 意图是**纯函数** `intent_for`
+（修饰符用 `KeyMods` 判定，精确匹配，四组用例钉住 `Alt+9` / `Alt+Shift+→` / 输入法组合都不算），
+`web_sys::Event` 那层只做提取。一处偏离上表：**只有真的换了前台才 `preventDefault`** —— 越界与
+单 lane 时没有动作，就不该顺手把按键的默认行为吞掉。
 
 ### 6.7 入口口径（已定：不保留「开新窗口」）
 

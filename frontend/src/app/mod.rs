@@ -30,6 +30,8 @@ mod ide_session;
 mod ide_settings_page;
 mod ide_tabs_bar;
 pub(crate) mod lane_actions;
+mod lane_hotkeys;
+mod lane_view;
 mod layout_toggle_hotkey;
 mod mobile_shell_header;
 mod nav_rail_connections;
@@ -87,6 +89,8 @@ use app_body::app_body;
 use app_shell_ctx::AppShellCtx;
 use app_shell_init::init_app_shell;
 use ide_layout_switch::IdeLayoutToggleSignals;
+use lane_hotkeys::wire_lane_hotkeys;
+use lane_view::LaneSlots;
 use layout_toggle_hotkey::wire_layout_toggle_hotkey;
 
 use leptos::prelude::*;
@@ -137,13 +141,28 @@ fn SidebarRailRevealBtn(
 pub fn App() -> impl IntoView {
     let app_ctx = init_app_shell();
     // #561 S1b-3：`App` 只做「取当前前台那条 lane 的运行时 → 交给视图主体」。视图与
-    // `provide_context` 都在 `app_body` 里，所以 S2 用 `mount_to` 挂第二条 lane 时 owner
-    // 就是新子树的，ctx 不会串到第一条（§5.2「已知风险」）。
+    // `provide_context` 都在 `app_body` 里，所以 `mount_to` 挂第二条 lane 时 owner 就是新子树
+    // 的，ctx 不会串到第一条（§5.2「已知风险」）。
     //
-    // #561 S2：`App` 从此**长期持有** `app_ctx` —— 事件回调要靠它建新 lane。
-    // 挂载容器也放在这一层：它不属于任何一条 lane 的内容。
+    // #561 S2/S3：`App` **长期持有** `app_ctx`（事件回调靠它建新 lane），并持有 lane 的挂载
+    // 容器。容器里一条 lane 一个 `.lane-slot`；切换只换 class，不重建子树（`lane_view.rs`）。
     let lanes_host = NodeRef::<leptos::html::Div>::new();
-    register_new_lane_action(&app_ctx, lanes_host);
+    let lane0_slot = NodeRef::<leptos::html::Div>::new();
+    let slots = LaneSlots::new();
+    {
+        let slots = slots.clone();
+        let active = app_ctx.lanes.active_signal();
+        // 前台下标一变就重挂 class。`lane0_slot.get()` 是响应式读：lane 0 的 slot 挂上之后
+        // 这条 Effect 会再跑一次，把它登记进 `slots`。
+        Effect::new(move |_| {
+            if let Some(el) = lane0_slot.get() {
+                slots.set_slot(0, el.unchecked_into());
+            }
+            slots.apply_active(active.get());
+        });
+    }
+    register_new_lane_action(&app_ctx, lanes_host, slots.clone());
+    wire_lane_hotkeys(app_ctx.lanes.clone());
 
     let rt = app_ctx.current_runtime();
     // 热键是**窗口级**的：只在这里注册一次。放进 `app_body` 会让每条 lane 各注册一份全局
@@ -151,9 +170,11 @@ pub fn App() -> impl IntoView {
     wire_layout_toggle_hotkey(IdeLayoutToggleSignals::from_app_signals(&rt.signals));
 
     view! {
-        {app_body(rt)}
-        // 新 lane 的挂载点；S3 之前它一直隐藏（`styles/shell-ds.css` 的 `.lane-layer`）。
-        <div class="lane-layer" node_ref=lanes_host></div>
+        <div class="lane-layer" node_ref=lanes_host>
+            <div class="lane-slot lane-slot--active" data-lane="0" node_ref=lane0_slot>
+                {app_body(rt)}
+            </div>
+        </div>
     }
     .into_any()
 }
@@ -163,19 +184,29 @@ pub fn App() -> impl IntoView {
 /// 闭包由**事件回调**触发，那时没有「这条 lane 的 owner」；所以真正的构造（含
 /// `run_shell_wiring_in_order` 里那约 29 个 `Effect::new`）放进 `mount_to` 的闭包里跑 ——
 /// 这是唯一会给新子树建 owner 的地方，也是 `provide_context` 能按 lane 生效的原因。
-fn register_new_lane_action(app_ctx: &AppShellCtx, host: NodeRef<leptos::html::Div>) {
+///
+/// 新 lane 先挂进一个**自己**的 `.lane-slot`（默认隐藏）。它建出来时不是前台，所以不抢
+/// `lane-slot--active`；切过去由 `Effect` 把 class 挪过去。
+fn register_new_lane_action(
+    app_ctx: &AppShellCtx,
+    layer: NodeRef<leptos::html::Div>,
+    slots: LaneSlots,
+) {
     let ctx = app_ctx.clone();
     lane_actions::register_new_lane(Rc::new(move |base: Option<String>| {
-        let Some(host_el) = host.get() else {
+        let Some(layer_el) = layer.get() else {
             // 视图还没挂上。动作只可能由页面里的按钮触发，理论上到不了这里。
             return;
         };
+        // 下标先取：`create_slot` 与 `add_lane` 必须落在同一个 index 上。
+        let index = ctx.lanes.len();
+        let Some(slot) = slots.create_slot(&layer_el.unchecked_into(), index) else {
+            return;
+        };
         let ctx = ctx.clone();
-        let handle = leptos::mount::mount_to(host_el.unchecked_into(), move || {
-            app_body(ctx.add_lane(base.as_deref()))
-        });
-        // S2 还没有「关 lane」入口，先放弃句柄（与 `mount_to_body` 同一取舍）。S3 加关 lane
-        // 时改成把 handle 存进 `LaneSet`，关闭时 drop 以清理那条 lane 的反应式系统。
+        let handle = leptos::mount::mount_to(slot, move || app_body(ctx.add_lane(base.as_deref())));
+        // 还没有「关 lane」入口，先放弃句柄（与 `mount_to_body` 同一取舍）。关 lane 落地时
+        // 改成把 handle 存进 `LaneSet`，关闭时 drop 以清理那条 lane 的反应式系统。
         handle.forget();
     }));
 }

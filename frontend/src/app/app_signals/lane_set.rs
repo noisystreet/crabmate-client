@@ -33,6 +33,8 @@ use std::sync::Arc;
 
 use leptos::prelude::*;
 
+use crabmate_client_api::lane_phase::LaneEvent;
+
 use crate::api::connection_scope;
 
 use super::super::app_shell_wire_phases::{ShellWiringOutput, run_shell_wiring_in_order};
@@ -147,6 +149,87 @@ impl LaneSet {
         self.lanes.borrow_mut().push(Rc::clone(&runtime));
         runtime
     }
+
+    /// 当前前台下标（响应式句柄，给视图层的 `display` 切换订阅）。
+    pub(crate) fn active_signal(&self) -> RwSignal<usize> {
+        self.active
+    }
+
+    /// 切到第 `index` 条 lane（#561 S3）。越界不切，返回 `false`。
+    ///
+    /// 三件事一起做，**顺序无关但必须都在**：移动「前台默认基址」的指针
+    /// （[`connection_scope::activate`]）、改 `active` 下标（视图据此只换 `display`）、
+    /// 给两条 lane 各推进一次 `LanePhase`（旧的 → `Background`，新的 → `Foreground`）。
+    /// 少了最后一步，「后台降频 / 后台审批」就会读到错的阶段。
+    pub(crate) fn set_active(&self, index: usize) -> bool {
+        let target = {
+            let lanes = self.lanes.borrow();
+            if index >= lanes.len() {
+                return false;
+            }
+            Rc::clone(&lanes[index])
+        };
+        {
+            let lanes = self.lanes.borrow();
+            for (i, runtime) in lanes.iter().enumerate() {
+                let phase = runtime.signals.phase;
+                let next = phase.get_untracked().next(LaneEvent::FocusChanged {
+                    foreground: i == index,
+                });
+                if phase.get_untracked() != next {
+                    phase.set(next);
+                }
+            }
+        }
+        connection_scope::activate(&target.signals.scope);
+        self.active.set(index);
+        true
+    }
+
+    /// 相对切换（`Alt+→` / `Alt+←` / `Ctrl+N`）；单 lane 时返回 `false`（no-op）。
+    pub(crate) fn cycle(&self, delta: isize) -> bool {
+        let len = self.len();
+        if len <= 1 {
+            return false;
+        }
+        let next = next_index(self.active.get_untracked(), delta, len);
+        self.set_active(next)
+    }
+
+    /// 跳到下一条**在等审批**的 lane（`F4`）；没有就返回 `false`（留在原地）。
+    ///
+    /// 后台审批是这条 lane 上唯一「用户看不见但必须能被叫出来」的事件，所以它单独一键。
+    pub(crate) fn focus_next_pending_approval(&self) -> bool {
+        let len = self.len();
+        if len <= 1 {
+            return false;
+        }
+        let current = self.active.get_untracked();
+        let target = {
+            let lanes = self.lanes.borrow();
+            (1..=len).map(|step| (current + step) % len).find(|index| {
+                lanes[*index]
+                    .signals
+                    .approval
+                    .pending_approval
+                    .get_untracked()
+                    .is_some()
+            })
+        };
+        match target {
+            Some(index) => self.set_active(index),
+            None => false,
+        }
+    }
+}
+
+/// 循环取模的下一格（纯函数，便于单测）：`current + delta` 落在 `[0, len)`。
+#[must_use]
+fn next_index(current: usize, delta: isize, len: usize) -> usize {
+    if len == 0 {
+        return 0;
+    }
+    (current as isize + delta).rem_euclid(len as isize) as usize
 }
 
 /// 新 lane 的存储域后缀（§7）：`<注入 key>-l<index>`。
@@ -160,7 +243,17 @@ fn lane_storage_label(base_key: Option<&str>, index: usize) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::lane_storage_label;
+    use super::{lane_storage_label, next_index};
+
+    #[test]
+    fn next_index_wraps_both_ways() {
+        assert_eq!(next_index(0, 1, 3), 1);
+        assert_eq!(next_index(2, 1, 3), 0, "末条 → 第一条（循环）");
+        assert_eq!(next_index(0, -1, 3), 2, "第一条 → 末条（循环）");
+        assert_eq!(next_index(1, -1, 2), 0);
+        assert_eq!(next_index(0, 1, 1), 0, "单 lane 原地");
+        assert_eq!(next_index(0, 1, 0), 0, "空容器不 panic");
+    }
 
     #[test]
     fn new_lane_label_appends_the_lane_suffix_to_the_injected_key() {
