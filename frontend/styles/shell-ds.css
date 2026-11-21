@@ -1401,8 +1401,17 @@ img[data-cm-ws-hydrated="1"] {
   background: var(--error-bg);
 }
 
-/* #561 S2：新 lane 的挂载容器。S3 之前一直隐藏 —— 点「连接」建出来的第二条 lane 在后台
-   照常接线、照常轮询，只是还没被切到前台（那一步是 S3 的 display 切换）。 */
+/* #561 S2/S3：一条 lane 一个 slot，切换只换 class（不重建子树 —— 流式输出、草稿、滚动
+   位置都在 DOM 里）。`display: contents` 让这两层包装对布局透明，视觉与改造前一致；
+   非前台那条 `display: none`，接线与轮询照常在后台跑。 */
 .lane-layer {
+  display: contents;
+}
+
+.lane-slot {
   display: none;
+}
+
+.lane-slot--active {
+  display: contents;
 }
