@@ -16,13 +16,15 @@
 表都行），所以它跟正文一样受约束。这条是刻意收紧过的：早期版本把表格当豁免，结果
 `client_capability_matrix.md` 里一张表成了全仓最长的一行（24501 列）而门禁看不见。
 
-# 上限当前取「存量最长行」= 24501
+# 上限当前取 2000（下一档目标 160）
 
-目标值是 160 显示列（与 Server 仓 `scripts/md_line_length_ratchet.py` 同口径），但
-仓库已有 1200+ 行超过 160（CHANGELOG 的已发布段是冻结的，不能重排），一次性压到 160
-不现实。所以第一版把天花板架在现状最高处：`MAX_COLS = 24501`，即当前参与判定的最长
-一行（`docs/design/client_capability_matrix.md` 的一张表）。含义是「不许写出比现有最长
-还长的行」。
+目标值是 160 显示列（与 Server 仓 `scripts/md_line_length_ratchet.py` 同口径），但仓库里
+存量长行太多（1000+ 行超过 160），一次性压到 160 不现实。所以分档降：每轮把超过上限的
+行清掉，再把 `MAX_COLS` 调到新的存量最长值。
+
+当前值 2000 是 2026-11 那一轮重构后的实测最长（`client_capability_matrix.md` 的表头
+与 `tui_usability.md` 的引用段）。上一轮它是 24501（同一张表的 Notes 单元格），那一轮把
+超长 Notes 从表格里移到了文末的「表格长备注」并折行。
 
 **这个数字只许往下改**：清理掉一批长行后就把它调到新的存量最长值（`--list` 会按列数
 降序列出每个文件的最长行，便于挑下一档目标），逐步收敛到 160。上调等于放松约束，
@@ -35,8 +37,13 @@ PR review 与门禁 `ok` 行打印的上限值都能看见。
 
 # 扫描范围
 
-仓库内全部 `*.md`，排除 `agent_space/`（gitignored 草稿，本地随便写）、任意
-`node_modules/`（第三方 README）、`target/`、`.git/`、`.crabmate/`。
+仓库内全部 `*.md`，排除：
+
+  - 目录：`agent_space/`（gitignored 草稿，本地随便写）、任意 `node_modules/`
+    （第三方 README）、`target/`、`.git/`、`.crabmate/`；
+  - 文件：`CHANGELOG.md` —— 它的条目被 `scripts/check-changelog-style.sh` 要求
+    **单条一行且 ≤ 800 字符**，已发布段又冻结不可重排，因此它的长行无解，只能
+    整文件不计。它的行宽另由那个门禁把关。
 
 用法：
     python3 scripts/md_line_length_check.py        # 检查
@@ -52,14 +59,17 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
-# 当前上限 = 存量最长行（client_capability_matrix.md 的一张表，24501 列）。
+# 当前上限 = 2000 显示列（2026-11 重构后的存量最长）。
 # 目标 160；只许往下调，每轮清理后重新取存量最长值。
-MAX_COLS = 24501
+MAX_COLS = 2000
 # 目标值，仅用于提示与文档（不参与判定）。
 TARGET_COLS = 160
 
 # 排除目录（命中路径任一分量即跳过）。
 EXCLUDED_DIRS = frozenset({"agent_space", "node_modules", "target", ".git", ".crabmate"})
+# 整文件不计（理由见文件头「扫描范围」）：CHANGELOG 的条目必须单行且 ≤ 800 字符，
+# 已发布段又冻结，压不下来；它的行宽由 check-changelog-style.sh 把关。
+EXCLUDED_FILES = frozenset({"CHANGELOG.md"})
 # 违规时最多列多少条（其余只报总数，避免刷屏）。
 MAX_REPORTED = 40
 SNIPPET_CHARS = 70
@@ -97,7 +107,8 @@ def gated_lines(text: str) -> list[tuple[int, int, str]]:
 def scanned_files() -> list[Path]:
     found: list[Path] = []
     for path in sorted(ROOT.rglob("*.md")):
-        if EXCLUDED_DIRS.intersection(path.relative_to(ROOT).parts):
+        rel = path.relative_to(ROOT)
+        if EXCLUDED_DIRS.intersection(rel.parts) or rel.as_posix() in EXCLUDED_FILES:
             continue
         found.append(path)
     return found
