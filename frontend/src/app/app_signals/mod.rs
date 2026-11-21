@@ -83,6 +83,10 @@ pub struct AppSignals {
     pub workspace: WorkspaceSignals,
     pub status: StatusSignals,
     pub llm_settings: LLMSettingsSignals,
+    /// 这条 lane 的生命周期阶段（#561）：由 `crabmate_client_api::lane_phase` 的转移表
+    /// 决定，本字段是它的响应式镜像。单 lane 时恒 `Foreground` —— 所以所有
+    /// 「只在前台才做」的门控都退化成改动前的行为。
+    pub phase: RwSignal<crabmate_client_api::lane_phase::LanePhase>,
 }
 
 impl AppSignals {
@@ -128,6 +132,7 @@ impl AppSignals {
             workspace: lane.workspace,
             status: lane.status,
             llm_settings: lane.llm_settings,
+            phase: lane.phase,
         }
     }
 

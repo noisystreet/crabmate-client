@@ -59,6 +59,18 @@ pub struct ConnectionReportSignals {
     pub client_llm_storage_tick: RwSignal<u64>,
     /// 当前 agent 角色：`/status` 的基线按角色给。
     pub selected_agent_role: RwSignal<Option<String>>,
+    /// 这条 lane 的生命周期阶段（#561 §8.2）：未读要判「窗口在前台 **且** 这条 lane
+    /// 是前台那条」。单 lane 时恒 `Foreground`，退化成原来的「窗口是否失焦」。
+    pub phase: RwSignal<crabmate_client_api::lane_phase::LanePhase>,
+}
+
+/// lane 是否**真正可见**（#561 §8.2 的口径）：窗口在前台 **且** 这条 lane 是前台那条。
+///
+/// 抽成纯函数是为了能测：`Effect` 在 host 目标第一句就 `tauri_shell_available()` 早退，
+/// 判断藏在闭包里就永远没有测试 —— 而「后台 lane 即使窗口有焦点也不算可见」正是
+/// 多 lane 下最容易写错的一条（照旧只判窗口焦点，后台 lane 的新输出就永远不会置未读）。
+fn lane_visible(window_focused: bool, phase: crabmate_client_api::lane_phase::LanePhase) -> bool {
+    window_focused && phase.is_foreground()
 }
 
 /// 行尾读数：`(上下文占比短文本, 在途开关)`。
@@ -107,7 +119,10 @@ pub fn wire_connection_status_report(sig: ConnectionReportSignals) {
     Effect::new(move |_| {
         let turn_busy = turn_lifecycle_coarse_busy(sig.turn_lifecycle.get());
         let status = connection_status_from_turn(turn_busy, sig.pending_approval.get().is_some());
-        let next_unread = connection_unread_after(focused.get(), turn_busy, unread.get_value());
+        // #561 §8.2：可见 = 窗口在前台 **且** 这条 lane 是前台那条。
+        // 单 lane 时 phase 恒 Foreground，这里退化成改动前的「只看窗口焦点」。
+        let visible = lane_visible(focused.get(), sig.phase.get());
+        let next_unread = connection_unread_after(visible, turn_busy, unread.get_value());
         unread.set_value(next_unread);
         let (context, busy) = rail_metrics(
             sig.chat,
@@ -178,4 +193,34 @@ fn document_has_focus() -> bool {
         .and_then(|window| window.document())
         .and_then(|document| document.has_focus().ok())
         .unwrap_or(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::lane_visible;
+    use crabmate_client_api::lane_phase::LanePhase;
+
+    /// 单 lane 的既有行为：只看窗口焦点（`phase` 恒 `Foreground`，等于改动前）。
+    #[test]
+    fn a_single_lane_falls_back_to_window_focus() {
+        assert!(lane_visible(true, LanePhase::Foreground));
+        assert!(!lane_visible(false, LanePhase::Foreground));
+    }
+
+    /// 多 lane 的关键一条：窗口有焦点，但**不是前台那条** → 看不见，新输出要置未读。
+    ///
+    /// 照旧只判窗口焦点的话，后台 lane 的未读永远不会亮（用户永远不知道它说了话）。
+    #[test]
+    fn a_background_lane_is_not_visible_even_with_window_focus() {
+        assert!(!lane_visible(true, LanePhase::Background));
+    }
+
+    /// 关闭中 / 已关闭的 lane 也不可见：它的输出不该再点亮任何东西。
+    #[test]
+    fn closing_and_closed_lanes_are_never_visible() {
+        for phase in [LanePhase::Closing, LanePhase::Closed] {
+            assert!(!lane_visible(true, phase), "{phase:?}");
+            assert!(!lane_visible(false, phase), "{phase:?}");
+        }
+    }
 }
