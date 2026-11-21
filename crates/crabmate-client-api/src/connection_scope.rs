@@ -97,6 +97,36 @@ impl ConnectionScope {
     }
 }
 
+/// 空基址（= 同 Origin）的固定指纹。
+///
+/// 它表示「连的就是本页自己这一份」，不是「没有连接」—— 所以给常量而不是空串，
+/// 否则分域键会退化成 `<基础键>#<label>#`（尾部分隔符悬空）。
+pub const SAME_ORIGIN_FINGERPRINT: &str = "same-origin";
+
+/// 基址短指纹（8 个十六进制字符）：把「同一窗口连过的不同 `serve`」分成不同的
+/// 存储域 / 钥匙串槽（#457）。
+///
+/// 输入先按全仓同一套规则规范化（[`normalize_api_base`]），所以 `http://h:1` 与
+/// ` http://h:1/ ` 得到同一个指纹 —— 否则同一台 serve 会因一个尾斜杠分裂成两份配置，
+/// 而症状只是「设置回到了默认值」，查不到分域头上。
+///
+/// 用 FNV-1a 而不是 SHA-256：这里要的是「撞不上就好」的去重，不是抗篡改；共享层不为
+/// 一个哈希拉加密依赖。指纹会出现在 `localStorage` 键名与钥匙串账户名里，所以只输出
+/// `[0-9a-f]` —— 不含分域分隔符 `#` 与 `@`，拼接方不必转义。
+#[must_use]
+pub fn api_base_fingerprint(api_base: &str) -> String {
+    let normalized = normalize_api_base(api_base);
+    if normalized.is_empty() {
+        return SAME_ORIGIN_FINGERPRINT.to_string();
+    }
+    let mut hash: u32 = 0x811c_9dc5;
+    for byte in normalized.as_bytes() {
+        hash ^= u32::from(*byte);
+        hash = hash.wrapping_mul(0x0100_0193);
+    }
+    format!("{hash:08x}")
+}
+
 impl fmt::Debug for ConnectionScope {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ConnectionScope")
@@ -172,5 +202,48 @@ mod tests {
 
         let empty = ConnectionScope::new(key(), "http://a:1", "");
         assert!(format!("{empty:?}").contains("<empty>"));
+    }
+
+    #[test]
+    fn fingerprint_ignores_the_normalization_noise() {
+        // 同一台 serve 的四种写法必须落到同一个域，否则「设置回到了默认值」。
+        let a = api_base_fingerprint("http://127.0.0.1:8080");
+        assert_eq!(a, api_base_fingerprint(" http://127.0.0.1:8080/ "));
+        assert_eq!(a, api_base_fingerprint("http://127.0.0.1:8080///"));
+    }
+
+    #[test]
+    fn different_serves_get_different_fingerprints() {
+        assert_ne!(
+            api_base_fingerprint("http://127.0.0.1:8080"),
+            api_base_fingerprint("http://127.0.0.1:8081")
+        );
+        // 协议差一个字符也算不同连接：这正是两级键要分开记的那种情况。
+        assert_ne!(
+            api_base_fingerprint("http://a:1"),
+            api_base_fingerprint("https://a:1")
+        );
+    }
+
+    #[test]
+    fn same_origin_has_its_own_constant_fingerprint() {
+        // 空 = 同 Origin，是「一份真实配置」，不是「没有连接」。
+        assert_eq!(api_base_fingerprint(""), SAME_ORIGIN_FINGERPRINT);
+        assert_eq!(api_base_fingerprint("   "), SAME_ORIGIN_FINGERPRINT);
+        assert_ne!(api_base_fingerprint(""), api_base_fingerprint("http://a:1"));
+    }
+
+    #[test]
+    fn fingerprint_never_carries_a_separator() {
+        // 它要拼进 `localStorage` 键名与钥匙串账户名（`#` / `@` 是分隔符）。
+        for base in ["http://127.0.0.1:8080", "https://serve.example/sub/path"] {
+            let fp = api_base_fingerprint(base);
+            assert_eq!(fp.len(), 8, "{fp}");
+            assert!(
+                fp.bytes()
+                    .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()),
+                "{fp}"
+            );
+        }
     }
 }

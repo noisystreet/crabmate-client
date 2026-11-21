@@ -53,56 +53,164 @@ fn write_local_storage_item(key: &str, value: &str) {
     }
 }
 
-/// 连接分域读：分域键优先；缺失时回落到旧键**并回填**（一次性迁移）。
+/// 当前连接的基址指纹（读内存里的 scope，**不**触发磁盘读取）。
 ///
-/// 回填不是可选项：`localStorage` 里已有的基址键与思考模式键是分域之前写下的，
-/// 不搬过来等于把用户的基址与偏好重置成默认值。幂等性由
-/// [`storage_scope::resolve_scoped_read`] 保证（分域键存在就不看旧键）。
+/// 「除基址以外」的连接绑定键用它定域：那些键的域依赖基址，而基址本身要读盘。基址键
+/// 因此单独走锚（见 [`read_api_base_local_storage_raw`]），其余键读内存里已决定的基址 ——
+/// 否则就是「读基址要先知道基址」的循环。
+#[must_use]
+pub(crate) fn current_conn_fp() -> String {
+    // 先确保基址已决定：`hydrate_api_base_once` 只读基址键（走锚的那条路，不读指纹），
+    // 所以这里不会绕回自己。若跳过这步，早期调用会拿空基址算出「同 Origin」的指纹，
+    // 把别的连接的值读成自己的。
+    let base = api_base_url();
+    crabmate_client_api::connection_scope::api_base_fingerprint(&base)
+}
+
+fn local_storage() -> Option<web_sys::Storage> {
+    window()?.local_storage().ok().flatten()
+}
+
+/// 写一个条目（空值 = 删除该键），与 `write_local_storage_item` 同口径但复用已取的
+/// `storage`，避免一次写多个键时反复 `local_storage()`。
+fn write_item(storage: &web_sys::Storage, key: &str, value: &str) {
+    let t = value.trim();
+    if t.is_empty() {
+        let _ = storage.remove_item(key);
+    } else {
+        let _ = storage.set_item(key, t);
+    }
+}
+
+/// 连接分域读：连接级键（`base#label@fp`）优先；缺失才回落到一级键（`base#label`）
+/// 与旧裸键，命中就回填连接级键（一次性迁移）。
 ///
-/// 不分域（纯浏览器 / Android / Desktop 主窗口）时两个键名相同，一次读取就是全部答案 ——
+/// 回填不是可选项：分域之前写下的基址键与思考模式键若不搬过来，等于把用户的配置重置
+/// 成默认值。幂等性由「连接级键存在即不再回落」保证。
+///
+/// 不分域（纯浏览器 / Android / 未注入标识）时用历史键名，一次读取就是全部答案 ——
 /// 这条分支让单连接语义与迁移前的字节完全一致。
 #[must_use]
 pub(crate) fn read_scoped_local_storage_raw(base_key: &str) -> Option<String> {
-    let w = window()?;
-    let storage = w.local_storage().ok().flatten()?;
-    let key = storage_scope::scoped_key(base_key);
-    let scoped = storage.get_item(&key).ok().flatten();
-    if key == base_key {
-        return scoped;
+    let storage = local_storage()?;
+    let Some(label) = storage_scope::connection_key() else {
+        return storage.get_item(base_key).ok().flatten();
+    };
+    let conn_key = storage_scope::scoped_key_with_fp(base_key, Some(&label), &current_conn_fp());
+    if let Some(found) = storage.get_item(&conn_key).ok().flatten() {
+        return Some(found);
     }
+    let window_key = storage_scope::scoped_key_with_fp(base_key, Some(&label), "");
+    let window_level = storage.get_item(&window_key).ok().flatten();
     let legacy = storage.get_item(base_key).ok().flatten();
-    let (value, backfill) = storage_scope::resolve_scoped_read(scoped, legacy);
+    let (value, backfill) = storage_scope::resolve_scoped_read(window_level, legacy);
     if backfill && let Some(v) = value.as_deref() {
-        // 不要换成 `write_local_storage_item`：它把空串折成删除，而这里的空串是
-        // 「显式同 Origin」的**值**，折掉就等于把用户「清空过基址」这件事丢了 ——
-        // 下次启动会回落成构建期默认。`resolve_scoped_read` 的单测只覆盖纯函数，
-        // 守不住这一行。
-        let _ = storage.set_item(&key, v);
+        // 不要换成 `write_item`：它把空串折成删除，而这里的空串是「显式同 Origin」的
+        // **值**，折掉就等于把用户「清空过基址」这件事丢了 —— 下次启动会回落成构建期
+        // 默认。`resolve_scoped_read` 的单测只覆盖纯函数，守不住这一行。
+        let _ = storage.set_item(&conn_key, v);
     }
     value
 }
 
-/// 连接分域写：空值删除该键（与 [`write_local_storage_item`] 同口径）。
+/// 连接分域写：写连接级键 + 一级键（空值删除，与 [`write_local_storage_item`] 同口径）。
+///
+/// 一级键写的是「这个窗口最近一次连接」：旧版本读它，指纹概念之前的回退路径也读它。
 pub(crate) fn write_scoped_local_storage_raw(base_key: &str, value: &str) {
-    let key = storage_scope::scoped_key(base_key);
-    write_local_storage_item(&key, value);
+    let Some(storage) = local_storage() else {
+        return;
+    };
+    let Some(label) = storage_scope::connection_key() else {
+        write_local_storage_item(base_key, value);
+        return;
+    };
+    let conn_key = storage_scope::scoped_key_with_fp(base_key, Some(&label), &current_conn_fp());
+    let window_key = storage_scope::scoped_key_with_fp(base_key, Some(&label), "");
+    write_item(&storage, &conn_key, value);
+    write_item(&storage, &window_key, value);
+}
+
+fn base_window_key(label: &str) -> String {
+    storage_scope::scoped_key_with_fp(API_BASE_URL_KEY, Some(label), "")
+}
+
+fn base_conn_key(label: &str, fp: &str) -> String {
+    storage_scope::scoped_key_with_fp(API_BASE_URL_KEY, Some(label), fp)
+}
+
+fn base_anchor_key(label: &str) -> String {
+    storage_scope::scoped_key_with_fp(storage_scope::CONN_FP_ANCHOR_KEY, Some(label), "")
+}
+
+/// 一级基址键当前属于哪一台（锚）；`None` = 还没写过（升级前 / 首次）。
+fn read_base_anchor(storage: &web_sys::Storage, label: &str) -> Option<String> {
+    storage
+        .get_item(&base_anchor_key(label))
+        .ok()
+        .flatten()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+}
+
+/// 已有锚：按锚定域读连接级键；缺失时按判定决定是否借用一级值并回填。
+fn read_base_with_anchor(storage: &web_sys::Storage, label: &str, fp: &str) -> Option<String> {
+    let conn_key = base_conn_key(label, fp);
+    let conn_level = storage.get_item(&conn_key).ok().flatten();
+    let window_level = storage.get_item(&base_window_key(label)).ok().flatten();
+    let (value, backfill) =
+        storage_scope::resolve_conn_read(conn_level, window_level, Some(fp), fp);
+    if backfill && let Some(v) = value.as_deref() {
+        let _ = storage.set_item(&conn_key, v);
+    }
+    value
+}
+
+/// 还没有锚（升级 / 首次）：一级键 → 旧裸键；读到值就按它的指纹建连接级键并落锚。
+///
+/// 这一步是「读基址要先知道基址」的破局点：基址的域**由它自己的值算出来**，所以只能
+/// 先读到一个候选值，再用它定域。完成一次之后就有锚了，后续读都走
+/// [`read_base_with_anchor`]。
+fn adopt_unanchored_base(storage: &web_sys::Storage, label: &str) -> Option<String> {
+    let window_level = storage.get_item(&base_window_key(label)).ok().flatten();
+    let legacy = storage.get_item(API_BASE_URL_KEY).ok().flatten();
+    let (value, backfill_window) = storage_scope::resolve_scoped_read(window_level, legacy);
+    let v = value.as_deref()?;
+    let fp = crabmate_client_api::connection_scope::api_base_fingerprint(v);
+    let _ = storage.set_item(&base_conn_key(label, &fp), v);
+    let _ = storage.set_item(&base_anchor_key(label), &fp);
+    if backfill_window {
+        let _ = storage.set_item(&base_window_key(label), v);
+    }
+    value
 }
 
 /// `None` = 无 storage / 键缺失；`Some` = 键存在（值可为空白，表示显式同 Origin）。
 fn read_api_base_local_storage_raw() -> Option<String> {
-    read_scoped_local_storage_raw(API_BASE_URL_KEY)
+    let storage = local_storage()?;
+    let Some(label) = storage_scope::connection_key() else {
+        return storage.get_item(API_BASE_URL_KEY).ok().flatten();
+    };
+    match read_base_anchor(&storage, &label) {
+        Some(fp) => read_base_with_anchor(&storage, &label, &fp),
+        None => adopt_unanchored_base(&storage, &label),
+    }
 }
 
 fn write_api_base_local_storage(normalized: &str) {
-    let Some(w) = window() else {
+    let Some(storage) = local_storage() else {
         return;
     };
-    let Ok(Some(storage)) = w.local_storage() else {
+    let Some(label) = storage_scope::connection_key() else {
+        // 显式空串保留键，避免刷新后回落到 `CRABMATE_API_BASE`。
+        let _ = storage.set_item(API_BASE_URL_KEY, normalized);
         return;
     };
-    // 显式空串保留键，避免刷新后回落到 `CRABMATE_API_BASE`。
-    let scoped = storage_scope::scoped_key(API_BASE_URL_KEY);
-    let _ = storage.set_item(&scoped, normalized);
+    // 三个键一起写：连接级（本次的真值）、一级（「最近一次连接」，旧版本与 TUI 之外
+    // 的回退路径读它）、锚（告诉下一次读「一级键现在指向哪台」）。
+    let fp = crabmate_client_api::connection_scope::api_base_fingerprint(normalized);
+    let _ = storage.set_item(&base_conn_key(&label, &fp), normalized);
+    let _ = storage.set_item(&base_window_key(&label), normalized);
+    let _ = storage.set_item(&base_anchor_key(&label), &fp);
 }
 
 pub(crate) fn read_local_storage_web_api_bearer() -> Option<String> {

@@ -92,7 +92,13 @@ pub(crate) fn create_main_window_from_url(
     }
     let bearer = std::env::var("CM_WEB_API_BEARER_TOKEN").unwrap_or_default();
     // 与 connect_remote 一致：非空 Bearer 写入钥匙串，供包内 UI 刷新后水合（不落明文 LS）。
-    if let Err(e) = crabmate_connect::write_connect_bearer_on_connect(MAIN_WINDOW_LABEL, &bearer) {
+    // 这里目标基址是已知的，所以写**连接级**槽（`<account>:<label>@<fp>`）：同一个窗口
+    // 之后换连别的 serve 也不会把它覆盖掉（#457）。
+    let fp = crabmate_client_api::connection_scope::api_base_fingerprint(api_base.as_str());
+    if !bearer.trim().is_empty()
+        && let Err(e) =
+            crabmate_connect::write_connect_bearer_for_conn(MAIN_WINDOW_LABEL, &fp, &bearer)
+    {
         eprintln!("[crabmate-desktop] e2e keyring write skipped: {e}");
     }
     // 包内资产的 Origin 随平台不同（Linux / macOS 是 `tauri://localhost`），所以这里

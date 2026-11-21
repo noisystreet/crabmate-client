@@ -56,12 +56,12 @@ export function hasMobileSecureBearerBridge() {
   }
 }
 
-export function invokeGetConnectBearer() {
-  return tauriInvoke("get_connect_bearer", {});
+export function invokeGetConnectBearer(fp) {
+  return tauriInvoke("get_connect_bearer", { fp: String(fp || "") });
 }
 
-export function invokeSetConnectBearer(bearer) {
-  return tauriInvoke("set_connect_bearer", { bearer: String(bearer || "") });
+export function invokeSetConnectBearer(bearer, fp) {
+  return tauriInvoke("set_connect_bearer", { bearer: String(bearer || ""), fp: String(fp || "") });
 }
 
 export function mobileGetSecureBearer() {
@@ -90,9 +90,9 @@ export function mobileSetSecureBearer(bearer) {
         #[wasm_bindgen(js_name = hasMobileSecureBearerBridge)]
         pub fn has_mobile_secure_bearer_bridge() -> bool;
         #[wasm_bindgen(js_name = invokeGetConnectBearer)]
-        pub fn invoke_get_connect_bearer() -> js_sys::Promise;
+        pub fn invoke_get_connect_bearer(fp: &str) -> js_sys::Promise;
         #[wasm_bindgen(js_name = invokeSetConnectBearer)]
-        pub fn invoke_set_connect_bearer(bearer: &str) -> js_sys::Promise;
+        pub fn invoke_set_connect_bearer(bearer: &str, fp: &str) -> js_sys::Promise;
         #[wasm_bindgen(js_name = mobileGetSecureBearer)]
         pub fn mobile_get_secure_bearer() -> String;
         #[wasm_bindgen(js_name = mobileSetSecureBearer)]
@@ -108,10 +108,10 @@ mod bridge {
     pub fn has_mobile_secure_bearer_bridge() -> bool {
         false
     }
-    pub fn invoke_get_connect_bearer() -> js_sys::Promise {
+    pub fn invoke_get_connect_bearer(_: &str) -> js_sys::Promise {
         js_sys::Promise::resolve(&wasm_bindgen::JsValue::NULL)
     }
-    pub fn invoke_set_connect_bearer(_: &str) -> js_sys::Promise {
+    pub fn invoke_set_connect_bearer(_: &str, _: &str) -> js_sys::Promise {
         js_sys::Promise::resolve(&wasm_bindgen::JsValue::UNDEFINED)
     }
     pub fn mobile_get_secure_bearer() -> String {
@@ -157,7 +157,10 @@ async fn load_secure_bearer() -> Option<String> {
         }
     }
     if bridge::has_tauri_connect_bearer_invoke() {
-        if let Ok(val) = JsFuture::from(bridge::invoke_get_connect_bearer()).await {
+        // 带上连接指纹：同一个窗口连过几台 serve 就有几个槽，切回上一台仍能水合到
+        // 那一台的凭据（#457）。
+        let fp = super::browser::current_conn_fp();
+        if let Ok(val) = JsFuture::from(bridge::invoke_get_connect_bearer(&fp)).await {
             if let Some(s) = val.as_string() {
                 let t = s.trim().to_string();
                 if !t.is_empty() {
@@ -183,7 +186,8 @@ async fn persist_secure_bearer(value: &str) -> Result<PersistKind, String> {
         return Err(i18n::api_err_keystore_write_bearer_failed(load_locale_from_storage()).into());
     }
     if bridge::has_tauri_connect_bearer_invoke() {
-        JsFuture::from(bridge::invoke_set_connect_bearer(v))
+        let fp = super::browser::current_conn_fp();
+        JsFuture::from(bridge::invoke_set_connect_bearer(v, &fp))
             .await
             .map_err(|e| {
                 i18n::api_err_keychain_write_failed(

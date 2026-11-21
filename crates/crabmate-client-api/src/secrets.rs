@@ -25,6 +25,24 @@ pub fn scoped_bearer_account(label: &str) -> String {
     format!("{WEB_API_BEARER_KEYRING_ACCOUNT}:{label}")
 }
 
+/// Bearer 分槽后的**连接级**账户名：`<account>:<label>@<fp>`。
+///
+/// 为什么还要第二级：`<account>:<label>` 只做到「一窗口一槽」（#391）。同一个窗口换连
+/// 另一台 `serve` 时仍会覆盖那一槽，切回上一台就拿着新凭据去连 —— 401，且看起来像
+/// 「serve 的 Bearer 配错了」。`fp`（基址指纹，见
+/// [`crate::connection_scope::api_base_fingerprint`]）把「这个窗口连过的每一台」分开记。
+///
+/// `fp` 为空串时退回一级名：TUI 的钥匙串回退、以及不区分连接的调用方都走这一支，
+/// 语义是「这个窗口最近一次连接」——写侧同时更新一级槽就是为了保住它。
+#[must_use]
+pub fn scoped_bearer_account_with_fp(label: &str, fp: &str) -> String {
+    let fp = fp.trim();
+    if fp.is_empty() {
+        return scoped_bearer_account(label);
+    }
+    format!("{}@{fp}", scoped_bearer_account(label))
+}
+
 /// 主模型 / 执行器 / 已保存模型密钥表 / GitHub user token 槽。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SecretSlot {
@@ -115,6 +133,37 @@ mod tests {
         // 分槽槽名必须异于裸槽：相同就又回到「所有窗口共用一份凭据」。
         assert_ne!(
             scoped_bearer_account(DESKTOP_MAIN_WINDOW_LABEL),
+            WEB_API_BEARER_KEYRING_ACCOUNT
+        );
+    }
+
+    #[test]
+    fn scoped_bearer_account_with_fp_separates_serves_within_one_window() {
+        let main = DESKTOP_MAIN_WINDOW_LABEL;
+        let a = scoped_bearer_account_with_fp(main, "0a1b2c3d");
+        let b = scoped_bearer_account_with_fp(main, "0a1b2c3e");
+        // 同一个窗口连两台 serve：一级槽相同，二级槽必须不同，否则切回上一台就是 401。
+        assert_ne!(a, b);
+        assert_eq!(a, "tauri_connect_web_api_bearer:main@0a1b2c3d");
+    }
+
+    #[test]
+    fn empty_fp_falls_back_to_the_window_level_account() {
+        // 没有指纹 = 「这个窗口最近一次连接」：TUI 的回退路径读的就是它。
+        assert_eq!(
+            scoped_bearer_account_with_fp(DESKTOP_MAIN_WINDOW_LABEL, ""),
+            scoped_bearer_account(DESKTOP_MAIN_WINDOW_LABEL)
+        );
+        assert_eq!(
+            scoped_bearer_account_with_fp(DESKTOP_MAIN_WINDOW_LABEL, "  "),
+            scoped_bearer_account(DESKTOP_MAIN_WINDOW_LABEL)
+        );
+    }
+
+    #[test]
+    fn the_connection_level_account_differs_from_the_bare_legacy_slot() {
+        assert_ne!(
+            scoped_bearer_account_with_fp("main", "0a1b2c3d"),
             WEB_API_BEARER_KEYRING_ACCOUNT
         );
     }
