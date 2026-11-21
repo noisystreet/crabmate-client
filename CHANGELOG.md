@@ -7,33 +7,33 @@ Server-side changes (contracts / SSE / CORS, etc.) live in [CrabMate](https://gi
 
 On release: move `[Unreleased]` entries into a new version section and tag (e.g. `v0.1.1`). Write maintainer-readable summaries; do not list every internal commit.
 
-**Entry style** (enforced for `[Unreleased]` by `scripts/check-changelog-style.sh`, one entry ≤ 800 characters): what changed, why it matters to a user or maintainer, and what it costs — mechanisms, alternatives weighed and verification counts belong in the PR description, and rationale that should outlive the PR belongs in `docs/design/`. Released sections are **frozen**: they are the notes that were published (`release.yml` extracts them verbatim), so do not rewrite them — put a `**Summary**` paragraph above a long section instead.
+**Entry style** (enforced for `[Unreleased]` by `scripts/check-changelog-style.sh`, **one entry ≤ 100 characters**): one short sentence — what changed. The why, the cost, mechanisms, alternatives and verification counts go to the PR description; durable rationale goes to `docs/design/`. Released sections are **frozen** (the published notes `release.yml` extracts verbatim) — never rewrite them; add a `**Summary**` paragraph above a long section instead.
 
 ## [Unreleased]
 
 ### Added
 
-- **History rows now get stable v2 projection keys, so a reload stops rebuilding the whole tail page.** `GET /conversation/messages` already carries a conversation-level `layout` (`layout_schema_version = 2`) the UI ignored, so every hydrate re-created the page with fresh `h_{ms}_{i}` ids and, for tool turns, replaced the tail wholesale. Rows are now aligned segment by segment against `layout` and rewritten to `turn-user-*` / `turn-commentary-*` / `turn-tool-*` / `turn-timeline-*` / `turn-final-answer#prev{n}` — including user and reasoning-only rows, so a page keeps its ids across reloads. Tool-turn sessions are stamped v2 and then only append new Server turns. The canonical `turn-final-answer` key stays live-only, so history can never be overwritten by the next turn. No wire change.
+- **Hydrated history rows keep stable v2 ids, so reloads stop rebuilding the tail.**
 
 ### Changed
 
-- **Session hydration is one rule now, and the E4 compatibility reading is gone.** The Web UI drops post-terminal business frames (the event id is still recorded, so `stream_resume` keeps advancing), merges at equal revision too (re-applying a snapshot is idempotent), and deletes `session_merge.rs` — the v1 tool-pool / call-stub replay adapter — together with the B3 dual-read observer. Non-v2 sessions take the Server snapshot as authoritative: keep the already-loaded older prefix, replace the overlapping tail, and drop call stubs a result card already represents. Cost: a local user bubble the Server omits is no longer re-inserted (the existing user-regression guard skips that page instead). No wire change.
+- **Hydration is one rule now; the v1 tool-pool replay adapter is gone.**
 
-- **Hydration no longer re-inserts timeline cards the Server never persisted.** A slash-skill inject path or a local-only `context_inject` / `context_trim` note now leaves with the replaced tail, so a reload shows exactly what a cold start shows — that equality is the point of the shrink. Cost: such a card lives only in the tab that streamed it.
+- **Hydration no longer re-inserts timeline cards the Server never persisted.**
 
-- **Fourth Victauri wave moved to Playwright; pagination no longer needs `CM_E2E_FIXTURES`.** `victauri_conversation` / `victauri_pagination` (6 cases) used the fixture route only to seed 100 messages, then drove the UI — the seeding was unrelated to what they asserted. `e2e/specs/mock-conversation-pagination.spec.ts` now mocks `/conversation/messages` per query (tail page → `chat-load-older` → click → older page prepended → button gone, plus the `has_older=false` reverse case) and runs on every PR; the two Rust suites are deleted and dropped from `scripts/victauri-e2e.sh`. `/conversation/messages` response shapes stay Server-side. Cost: none.
+- **Fourth Victauri wave moved to Playwright; pagination drops `CM_E2E_FIXTURES`.**
 
-- **Fifth wave: the last keyring suite leaves Victauri, and the keychain finally has tests.** `victauri_settings2`'s cases called `invoke('get_llm_secret')` to assert a secret reached the OS keychain — untestable off-device, so that round-trip was never covered. `crabmate-connect` now routes keychain access through a `SecretBackend` (production: `keyring`; tests: in-memory) and gains 9 tests: round-trip, per-window isolation, legacy-slot migration, blank-write clears. Model-registry UI moved to `e2e/specs/mock-settings-model-registry.spec.ts` (list row + no plaintext key in server `saved_models`); "key not in localStorage" is dropped as a browser non-goal. Only `victauri_e2e` remains. Cost: one injectable seam.
+- **Fifth wave: the last keyring suite leaves Victauri; the keychain gets tests.**
 
-- **Victauri is gone: plugin, nightly workflow and the last two suites deleted.** Waves 4–5 emptied every suite but the shell smoke, so the dependency only bought a `window_state_check` that asked the plugin which windows existed. `scripts/smoke-desktop-shell.sh` replaces it from outside — xvfb + real `serve`, asserting process survival, no `startup failed`/panic, and a WebKit child process. X11 window probing is unusable: the main window is created invisible and only shown after page load, and a debug WASM is 160+ MiB (0 children at 43s). `CM_E2E_FIXTURES` / `CM_E2E_SHOW_WINDOWS` / `VICTAURI_INSIDE_XVFB` and the `victauri:default` capability dance go too; `CM_DESKTOP_SKIP_CONNECT` is the only skip switch. Cost: shell-level real-LLM coverage is gone (Playwright covers the UI path).
+- **Victauri is gone: plugin, nightly workflow and the last two suites deleted.**
 
-- **Maintainer tooling: the Markdown line cap is down to 600.** Third pass: 24501 → 2000 → 1000 → 600. `scripts/check-md-line-length.sh` gates every line on `MAX_COLS` display columns (East Asian width counts 2); only fenced code blocks are exempt (wrapping changes semantics), and table rows are gated too. Table cells cannot wrap, so long Notes keep moving to a trailing 「表格长备注」 section (now 注 1–13 in `client_capability_matrix.md`); a row whose several columns are all long drops the tail columns into that note and keeps `—` placeholders, so the row still matches the header's column count. ~158 long paragraphs / list items / quotes were rewrapped at their own prefix. `CHANGELOG.md` stays exempt (one line ≤ 800 chars, released sections frozen). Cost: tables now read `注 N（见文末）`.
+- **Markdown line cap ratchets to 600 display cols (24501 → 2000 → 1000 → 600).**
 
 ### Fixed
 
-- **Scrolling back through history no longer re-keys the older page on every fetch.** `before_index` pages used to come back with fresh `h_{ms}_{i}` ids each time, so the same older page could be inserted twice (id-based de-duplication never matched) and any reload re-created that block. With a v2 `layout` those rows now get page-scoped ids (`turn-prev-{window_start_index}-{n}`), stable per window and namespaced so two different windows cannot collide — the same page fetched again de-duplicates away. Sessions without `layout` keep the old behaviour (no metadata, no change). Also adds a distinct fallback counter value for the "Server declares a tool row the page does not hydrate" shape, the common way a mid-tool turn silently skips the upgrade. No wire change.
+- **Scrolling back no longer re-keys the older page on every fetch.**
 
-- **A turn's final answer no longer gets a fresh random row id whenever the next turn starts.** `detach_final_answer_row_in_messages` renamed the already-displayed answer to a random id at every turn boundary, so a session's local row identities changed on each turn (persisted copies included) and no reload could ever see a stable id sequence. It now archives to `turn-final-answer#prev{n}` in order — the shape the hydration mapping and the commentary archiving already use, so the canonical key stays with the newest answer only. No wire change.
+- **A turn's final answer keeps a stable row id instead of a random one per turn.**
 
 ## [0.9.1-alpha.0] - 2026-11-19
 

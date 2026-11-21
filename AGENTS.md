@@ -114,7 +114,7 @@ bash scripts/check-storage-scope.sh      # connection-scoped localStorage keys l
 bash scripts/check-icons.sh              # no literal <svg> outside icon.rs; svg rule sizes must be var(--icon-*)
 bash scripts/check-modal-shell.sh        # role / aria-modal only emitted by app/focusable_menu.rs
 bash scripts/check-xml-comments.sh       # no `--` inside XML comment bodies (XML 1.0 §2.5; aapt2 fails resource merging)
-bash scripts/check-changelog-style.sh    # `[Unreleased]` entries ≤ 800 chars; released sections are frozen
+bash scripts/check-changelog-style.sh    # `[Unreleased]` entries ≤ 100 chars; released sections are frozen
 bash scripts/check-md-line-length.sh     # every Markdown line <= MAX_COLS display cols (currently the longest existing line, ratcheting down to 160; only fenced code blocks exempt)
 bash scripts/check-toolchain-pin.sh      # rust-toolchain.toml channel must equal every workflow's pinned toolchain
 bash scripts/ensure-tauri-dist-stubs.sh  # desktop/mobile dist stubs for tauri codegen
@@ -227,4 +227,4 @@ When updating docs:
 ## 表格长备注
 ### 注 1 · User/maintainer release notes
 
-`CHANGELOG.md` (English; Keep a Changelog; move Unreleased into a version section on release). **Entry style**: one `[Unreleased]` entry ≤ 800 characters — what changed, why it matters, what it costs; mechanisms / alternatives / verification counts go to the PR body, durable rationale goes to `docs/design/`. Released sections are **frozen** (they are the published release notes `release.yml` extracts verbatim): never rewrite them, add a `**Summary**` paragraph above a long section instead. Enforced by `scripts/check-changelog-style.sh` (hook + `scripts/check.sh`; `[Unreleased]` only)
+`CHANGELOG.md` (English; Keep a Changelog; move Unreleased into a version section on release). **Entry style**: one `[Unreleased]` entry ≤ 100 characters — a single sentence of what changed; the why / cost / mechanisms / alternatives / verification counts go to the PR body, durable rationale goes to `docs/design/`. Released sections are **frozen** (they are the published release notes `release.yml` extracts verbatim): never rewrite them, add a `**Summary**` paragraph above a long section instead. Enforced by `scripts/check-changelog-style.sh` (hook + `scripts/check.sh`; `[Unreleased]` only)

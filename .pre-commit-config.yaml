@@ -116,7 +116,7 @@ repos:
 
       # Markdown 逐行上限：任何一行都不得超过 MAX_COLS 显示列（东亚宽字符按 2 列）。
       # 唯一豁免是围栏代码块（折行会改语义）；表格行同样受约束。CHANGELOG.md 整文件
-      # 不计（条目单行 ≤800 字符、已发布段冻结）。MAX_COLS 当前 2000，只许往下调。
+      # 不计（条目单行 ≤100 字符、已发布段冻结）。MAX_COLS 当前 600，只许往下调。
       - id: check-md-line-length
         name: markdown line length (every line <= MAX_COLS display cols; only fenced code blocks exempt)
         entry: bash scripts/check-md-line-length.sh
