@@ -198,9 +198,21 @@ fn insert_index_for_final_row(messages: &[StoredMessage], loading_tail_id: Optio
 // —— loading 行生命周期（原 TurnLayout 内联，收口到 reconciler）——
 
 /// 将 `turn-final-answer` 投影行脱钩为普通 assistant 行。
+///
+/// 归档成 `turn-final-answer#prev{n}`（与 [`super::turn_row_queue::TurnRowQueue`] 的
+/// `archive_stale_projection_rows` 同形），**不用**随机 id：随机 id 会让历史终答在每开
+/// 新回合时换一次 id —— 持久化来回写、e2e 里「刷新前后 id 序列不变」也断言不出来；
+/// 而顺序编号与「同一投影键至多一条行」的水合映射规则一致。
 pub(super) fn detach_final_answer_row_in_messages(messages: &mut [StoredMessage]) {
-    if let Some(idx) = messages.iter().position(|m| m.id == FINAL_ANSWER_ROW_ID) {
-        messages[idx].id = make_message_id();
+    let canonical: Vec<usize> = messages
+        .iter()
+        .enumerate()
+        .filter(|(_, message)| message.id == FINAL_ANSWER_ROW_ID)
+        .map(|(idx, _)| idx)
+        .collect();
+    for idx in canonical {
+        messages[idx].id =
+            super::turn_row_queue::next_archived_row_id(messages, FINAL_ANSWER_ROW_ID);
     }
 }
 

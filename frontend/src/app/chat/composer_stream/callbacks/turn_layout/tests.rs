@@ -418,3 +418,30 @@ fn should_clear_overlay_during_tool_phase_when_commentary_owns_text() {
         "must keep overlay when commentary does not own this live text"
     );
 }
+
+/// 终答脱钩按顺序归档成 `#prev{n}`：历史终答不会每开新回合就换一次随机 id。
+#[test]
+fn detach_final_answer_archives_to_ordered_prev_ids() {
+    use super::projection_reconciler::detach_final_answer_row_in_messages;
+
+    let mut msgs = vec![
+        empty_msg("u1", "user", "q1", false),
+        empty_msg("turn-final-answer", "assistant", "a1", false),
+    ];
+    detach_final_answer_row_in_messages(&mut msgs);
+    assert_eq!(msgs[1].id, "turn-final-answer#prev1");
+
+    // 第二回合：新终答占规范键，再脱钩 → 顺序号递增，旧行 id 不变。
+    msgs.push(empty_msg("u2", "user", "q2", false));
+    msgs.push(empty_msg("turn-final-answer", "assistant", "a2", false));
+    detach_final_answer_row_in_messages(&mut msgs);
+    assert_eq!(
+        msgs.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
+        [
+            "u1",
+            "turn-final-answer#prev1",
+            "u2",
+            "turn-final-answer#prev2"
+        ]
+    );
+}
