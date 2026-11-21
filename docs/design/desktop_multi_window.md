@@ -94,7 +94,8 @@ snapshot.key = ConnectionKey::from_raw(window.label());
 （`desktop_main_window::connection_scope_init_script`），`localStorage` 的连接键因此拼成
 `<基础键>#<label>` —— 「一个窗口一个存储域」是这条等式的副产物，不是另一套身份体系。若将来改走
 单窗口多 lane（`tui_multi_server.md` §9.4.2 的路线 B），存储域必须跟着**连接作用域**走而不是跟着
-窗口走，那时这条等式本身也要拆。
+窗口走，那时这条等式本身也要拆。拆法与 lane 的键后缀见
+[`desktop_single_window_lanes.md`](desktop_single_window_lanes.md) §7。
 
 ## 5. 几何、遮挡与审批通知
 
@@ -207,7 +208,8 @@ signal」这个问题**不存在**，而不是被兜住。
 
 - **单窗口内并排多 lane**（同屏同时看两份 transcript，理由见 §2；§9.4.2 明确禁止为「对齐」而加）。
   注意与 §13 的区别：左栏连接区是**导航器**（同一时刻只显示一个窗口的会话），不改变
-  「一个窗口一份 JS 堆」这条前提。
+  「一个窗口一份 JS 堆」这条前提。**标签式互斥切换**（不做分栏）是另一个目标，设计见
+  [`desktop_single_window_lanes.md`](desktop_single_window_lanes.md)。
 - 跨窗口共享会话状态（各窗口的 `thread_local` 就该各管各的）。
 - Android 多连接：没有窗口管理器，不适用。
 
@@ -229,7 +231,8 @@ TUI 在左栏下半画 lane 区（`tui_multi_server.md` §4.6），Desktop 现�
 | 窄屏 | 不需要额外媒体查询：DOM 在 `.nav-rail` 内，抽屉打开时自动跟着进去 |
 
 **这不是 §12 说的「单窗口内并排多 lane」。** 同一时刻只显示一个窗口的会话；行是导航，
-不是分区视图。
+不是分区视图。标签式互斥切换（一窗口内多条 lane，仍不看并排）的设计另见
+[`desktop_single_window_lanes.md`](desktop_single_window_lanes.md)。
 
 ### 新建连接的入口
 
