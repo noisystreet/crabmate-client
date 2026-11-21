@@ -12,6 +12,7 @@ use super::browser::{
     clear_local_storage_web_api_bearer, read_local_storage_web_api_bearer,
     set_web_api_bearer_token_memory_only, write_local_storage_web_api_bearer,
 };
+use super::connection_scope::ScopeHolder;
 use super::llm_secrets_local::PersistKind;
 use crate::i18n::{self, load_locale_from_storage};
 
@@ -205,7 +206,7 @@ pub async fn hydrate_web_api_bearer_from_secure_store() {
 ///
 /// 多 lane 时必须走这个：写进**哪个** holder 决定「哪条 lane 拿到凭据」。#558 之前唯一
 /// 的坑就是「水合写进全局、header 取自别处」→ 拿空 Bearer 发请求 → 401。
-pub async fn hydrate_web_api_bearer_into(holder: &super::connection_scope::ScopeHolder) {
+pub async fn hydrate_web_api_bearer_into(holder: &ScopeHolder) {
     if !secure_web_api_bearer_backend_available() {
         holder.mark_bearer_settled();
         return;
@@ -234,7 +235,7 @@ pub async fn hydrate_web_api_bearer_into(holder: &super::connection_scope::Scope
 /// [`hydrate_web_api_bearer_from_secure_store`] 的**显式 holder** 版本（#558）。
 ///
 /// 幂等标记在 holder 上（per-holder）：A 那条 lane 读过盘，不代表 B 读过。
-pub async fn ensure_web_api_bearer_hydrated_into(holder: &super::connection_scope::ScopeHolder) {
+pub async fn ensure_web_api_bearer_hydrated_into(holder: &ScopeHolder) {
     if holder.is_bearer_settled() {
         return;
     }
