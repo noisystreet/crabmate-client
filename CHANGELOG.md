@@ -17,6 +17,8 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Changed
 
+- **"Connect" adds a hidden lane to the current window instead of opening a new one.**
+
 - **Each serve keeps its own base URL, thinking mode and Bearer after switching connections.**
 
 - **Hydration is one rule now; the v1 tool-pool replay adapter is gone.**

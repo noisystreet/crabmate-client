@@ -181,4 +181,15 @@ impl AppShellCtx {
     pub fn current_runtime(&self) -> Rc<super::app_signals::LaneRuntime> {
         self.lanes.current_runtime()
     }
+
+    /// 新建一条 lane（#561 S2）：存储域后缀按 §7 取 `-l<n>`，`base` 给定时作为这条 lane 的
+    /// 基址（左栏「连接」要从目标实例的地址起步，而不是「同 Origin」）。
+    ///
+    /// **调用点必须在 `mount_to` 的闭包里**（见 [`super::app_signals::LaneSet::add_lane`]）：
+    /// 接线里那约 29 个 `Effect::new` 需要一个新子树的 owner。
+    pub fn add_lane(&self, base: Option<&str>) -> Rc<super::app_signals::LaneRuntime> {
+        let label = self.lanes.next_storage_label();
+        let scope = crate::api::connection_scope::new_holder(label, base);
+        self.lanes.add_lane(scope)
+    }
 }
