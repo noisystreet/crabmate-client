@@ -36,8 +36,8 @@
 ├── web-host/                  # 二进制 crabmate-web（回环静态 UI 托管）
 ├── frontend/                  # 业务 UI（Leptos CSR + WASM；契约 crates.io crabmate）
 ├── e2e/                       # Playwright（浏览器 UI；mock SSE CI）
-├── scripts/                   # check / connect 同步 / Victauri / Playwright
-└── .github/workflows/         # CI（check + frontend 单测 + Playwright + desktop deb + Victauri nightly + dependency-security）
+├── scripts/                   # check / connect 同步 / 壳冒烟 / Playwright
+└── .github/workflows/         # CI（check + frontend 单测 + Playwright + desktop deb + dependency-security）
 ```
 
 ## 与主仓关系
@@ -156,7 +156,7 @@ sudo dpkg -i crates/crabmate-tui/target/debian/crabmate-tui_*.deb
 |------|------|
 | [AGENTS.md](./AGENTS.md) | Agent 约束、命令、文档同步规则（仅英文） |
 | [CHANGELOG.md](./CHANGELOG.md) | 用户/维护者可见变更（Keep a Changelog；仅英文） |
-| [docs/TESTING.md](./docs/TESTING.md) | pre-commit / Victauri / CI |
+| [docs/TESTING.md](./docs/TESTING.md) | pre-commit / 壳冒烟 / CI |
 | [docs/design/tauri_gui_mvp_design.md](./docs/design/tauri_gui_mvp_design.md) | 壳架构（路径 A） |
 | [docs/design/shell_smoke_runbook.md](./docs/design/shell_smoke_runbook.md) | Desktop/Android 人工冒烟 |
 | [docs/design/remote_cli_tui.md](./docs/design/remote_cli_tui.md) | 远程终端 crabmate-tui |
@@ -173,7 +173,7 @@ sudo dpkg -i crates/crabmate-tui/target/debian/crabmate-tui_*.deb
 | [docs/design/ui_issue_todo.md](./docs/design/ui_issue_todo.md) | UI 问题待办清单（壳层通用） |
 | [frontend/README.md](./frontend/README.md) | UI 构建（trunk） |
 
-提交前：`pre-commit run --all-files` 或 `make check`。CI：`.github/workflows/ci.yml`（含 **frontend wasm**、**frontend/TUI 单测**、**desktop / web / tui release .deb**）；依赖审计：`.github/workflows/dependency-security.yml`（`make dependency-security`）；Victauri 壳 E2E：nightly 工作流或 `./scripts/victauri-e2e.sh`。
+提交前：`pre-commit run --all-files` 或 `make check`。CI：`.github/workflows/ci.yml`（含 **frontend wasm**、**frontend/TUI 单测**、**desktop / web / tui release .deb**）；依赖审计：`.github/workflows/dependency-security.yml`（`make dependency-security`）；桌面壳冒烟：`./scripts/smoke-desktop-shell.sh`（本地跑，不进 CI）。
 
 ## 开发约定
 

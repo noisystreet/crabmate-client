@@ -31,12 +31,11 @@ updates:
         patterns:
           - "serde_json"
         group-by: dependency-name
-      # Tauri 生态须版本对齐（tauri / tauri-build / tauri-plugin-* / victauri*），
+      # Tauri 生态须版本对齐（tauri / tauri-build / tauri-plugin-*），
       # 一条 PR 升一组，避免单包 PR 互相拆散与 lockstep 手工对齐。
       tauri-ecosystem:
         patterns:
           - "tauri*"
-          - "victauri*"
     labels:
       - dependencies
       - rust

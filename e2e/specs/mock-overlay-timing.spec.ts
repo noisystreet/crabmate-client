@@ -9,7 +9,7 @@
  *   cd e2e && npm install && npx playwright test
  *
  * 注意：mock SSE 无法覆盖持久化验证（需 `conversation_saved` SSE 事件），
- *       持久化回归由 victauri_turn_layout.rs 覆盖。
+ *       持久化 / v2 投影回归由 mock-hydrate-layout-v2-projection / mock-mid-process-commentary-duplicate 覆盖。
  */
 
 import { test, expect } from "@playwright/test";

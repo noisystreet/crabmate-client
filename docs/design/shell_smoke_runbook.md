@@ -31,7 +31,7 @@ cargo tauri dev
 - [x] 一轮对话（同日：干净克隆 release 壳对接本仓/主仓 `:18080` UI/`serve`；`POST /chat/stream` v2 得助手终答）  
 - [ ] （可选）改填 LAN 上另一台 `serve`；非回环时桌面 IPC 受限符合预期  
 
-跳过连接页（E2E）：`CM_E2E_FIXTURES=1` 或 `CM_DESKTOP_SKIP_CONNECT=1`，且必须 `CM_DESKTOP_SERVE_URL=…`。
+跳过连接页（自动化）：`CM_DESKTOP_SKIP_CONNECT=1`，且必须 `CM_DESKTOP_SERVE_URL=…`。
 
 ## 2b. 个人云（远程纯 API）
 
@@ -57,13 +57,11 @@ cargo tauri dev
 - [ ] Android：发送后按 Home，状态栏出现「对话进行中」常驻通知；触发需审批的工具时通知升级，点按回到审批弹窗并可允许/拒绝；流结束或断开后通知消失  
 - [ ] Android 13+：首次发送弹出通知权限；拒绝后状态栏提示保活/审批提醒不可用，进程不崩溃
 
-## 4. 自动化（Victauri）
+## 4. 自动化
 
-```bash
-# 须能解析到 crabmate 二进制（优先级见脚本头注释）
-./scripts/victauri-e2e.sh all
-# 真实 LLM：REAL_LLM_E2E=1 ./scripts/victauri-e2e.sh real_llm
-```
+壳能不能起来：`./scripts/smoke-desktop-shell.sh`（xvfb + 外部 serve；判据是壳进程存活 + 无 startup failed + 出现 WebKit 子进程）。
+
+页面行为：`./scripts/e2e-playwright.sh`（Playwright，随 PR 门禁）。
 
 详见 [`docs/TESTING.md`](../TESTING.md)。
 

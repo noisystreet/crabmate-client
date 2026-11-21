@@ -24,7 +24,7 @@ PR 标题：Conventional Commits + 中英双语，例如：
 - [ ] `make test` 通过
 - [ ] `bash scripts/check-boundaries.sh` 通过
 - [ ] 涉及复杂度 / 规模时：`scripts/lizard-rust.sh`、`scripts/fn-param-ratchet.sh`、`scripts/fn-nloc-ratchet.sh` 通过
-- [ ] 涉及浏览器 / 壳交互时：`./scripts/e2e-playwright.sh` 或 `./scripts/victauri-e2e.sh all` 通过
+- [ ] 涉及浏览器 / 壳交互时：`./scripts/e2e-playwright.sh`（页面行为）或 `./scripts/smoke-desktop-shell.sh`（壳能起来）通过
 - [ ] 手动冒烟步骤（如适用，见 `docs/design/shell_smoke_runbook.md`）：
 
 ## 自检 / Checklist

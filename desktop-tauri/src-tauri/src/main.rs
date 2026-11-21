@@ -19,25 +19,11 @@ pub(crate) fn desktop_window_state_flags() -> StateFlags {
 /// 连接页默认建议地址（本机常见 `serve` 端口；用户可改）。
 const DEFAULT_SUGGESTED_SERVE_URL: &str = "http://127.0.0.1:8080/";
 
-/// `CM_E2E_FIXTURES=1` 时默认隐藏 main，避免 Wayland 上在 xvfb 外仍弹窗。
+/// 自动化 / 显式跳过：不展示连接页，直接打开 **`CM_DESKTOP_SERVE_URL`**（须已有 `serve`）。
 ///
-/// WebKitGTK 在 `visible(false)` 时往往不跑页面 JS，Victauri bridge/`eval_js` 会失败
-///（`bridge not responding`）。在 xvfb 内或显式 `CM_E2E_SHOW_WINDOWS=1` 时改为显示
-///（窗口只在虚拟屏上，不打扰本机桌面）。
-pub(crate) fn e2e_hide_app_windows() -> bool {
-    if std::env::var("CM_E2E_SHOW_WINDOWS").is_ok_and(|v| !v.is_empty() && v != "0") {
-        return false;
-    }
-    if std::env::var("VICTAURI_INSIDE_XVFB").is_ok_and(|v| !v.is_empty() && v != "0") {
-        return false;
-    }
-    std::env::var("CM_E2E_FIXTURES").is_ok_and(|v| !v.is_empty() && v != "0")
-}
-
-/// E2E 或显式跳过时：不展示连接页，直接打开 **`CM_DESKTOP_SERVE_URL`**（须已有 `serve`）。
+/// 同时是「无人工可点对话框」的信号：启动失败时不弹阻塞框，否则自动化会永远卡在那里。
 pub(crate) fn skip_connect_page() -> bool {
-    e2e_hide_app_windows()
-        || std::env::var("CM_DESKTOP_SKIP_CONNECT").is_ok_and(|v| !v.is_empty() && v != "0")
+    std::env::var("CM_DESKTOP_SKIP_CONNECT").is_ok_and(|v| !v.is_empty() && v != "0")
 }
 
 fn env_nonempty(name: &str) -> Option<String> {
@@ -278,8 +264,7 @@ fn open_main_window(app: &tauri::AppHandle) -> Result<(), String> {
 }
 
 fn main() {
-    #[allow(unused_mut)]
-    let mut builder = tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             desktop_lifecycle::focus_existing_instance(app);
         }))
@@ -294,15 +279,6 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init());
-    #[cfg(feature = "victauri")]
-    {
-        builder = builder.plugin(
-            victauri_plugin::VictauriBuilder::new()
-                .auth_disabled()
-                .build()
-                .unwrap(),
-        );
-    }
     builder
         .invoke_handler(tauri::generate_handler![
             save_text_file_via_dialog,
@@ -377,7 +353,7 @@ fn main() {
 
             if let Err(e) = open_main_window(app.handle()) {
                 eprintln!("[crabmate-desktop] startup failed: {e}");
-                if !e2e_hide_app_windows() {
+                if !skip_connect_page() {
                     app.dialog()
                         .message(format!(
                             "{e}\n\n请先在本机或远程启动 crabmate serve，再在连接页填写地址。"

@@ -11,7 +11,6 @@ use tauri::{Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 use tauri_plugin_opener::OpenerExt;
 use url::Url;
 
-use crate::e2e_hide_app_windows;
 use crate::os_theme;
 
 /// 主 UI（连上 `serve` 后）默认逻辑尺寸。
@@ -516,22 +515,20 @@ fn reveal_main_window_once(window: &WebviewWindow, revealed: &AtomicBool) {
     if revealed.swap(true, Ordering::SeqCst) {
         return;
     }
-    if !e2e_hide_app_windows() {
-        let on_connect = window.url().ok().as_ref().is_some_and(is_connect_page_url);
-        if on_connect {
-            apply_connect_page_geometry(window);
-        }
-        if let Err(e) = window.show() {
-            eprintln!("[crabmate-desktop] failed to show main window: {e}");
-        }
-        // 映射后再钉几何 / 最大化：部分合成器忽略未映射时的定位与尺寸。
-        if on_connect {
-            apply_connect_page_geometry(window);
-        } else {
-            apply_main_ui_geometry(window);
-        }
-        if let Err(e) = window.set_focus() {
-            eprintln!("[crabmate-desktop] failed to focus main window: {e}");
-        }
+    let on_connect = window.url().ok().as_ref().is_some_and(is_connect_page_url);
+    if on_connect {
+        apply_connect_page_geometry(window);
+    }
+    if let Err(e) = window.show() {
+        eprintln!("[crabmate-desktop] failed to show main window: {e}");
+    }
+    // 映射后再钉几何 / 最大化：部分合成器忽略未映射时的定位与尺寸。
+    if on_connect {
+        apply_connect_page_geometry(window);
+    } else {
+        apply_main_ui_geometry(window);
+    }
+    if let Err(e) = window.set_focus() {
+        eprintln!("[crabmate-desktop] failed to focus main window: {e}");
     }
 }
