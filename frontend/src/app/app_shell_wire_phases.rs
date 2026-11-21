@@ -200,6 +200,7 @@ fn wire_phase3_escape_layered_dismiss(app: &AppSignals) {
             busy: app.approval.approval_busy,
             error: app.approval.approval_error,
             locale: app.shell_ui.locale,
+            phase: app.phase,
         },
     };
     wire_escape_key_layered_dismiss(shell_escape);

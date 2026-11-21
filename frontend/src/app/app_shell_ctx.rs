@@ -328,6 +328,8 @@ impl AppShellCtx {
         ApprovalModalSignals {
             pending_approval: self.signals.approval.pending_approval,
             busy: self.signals.approval.approval_busy,
+            // #561 §8.4：审批弹窗按 lane 阶段门控（单 lane 恒 Foreground，不改变行为）。
+            phase: self.signals.phase,
             error: self.signals.approval.approval_error,
             locale: self.signals.shell_ui.locale,
         }
