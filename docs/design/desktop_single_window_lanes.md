@@ -393,15 +393,27 @@ CHANGELOG 从阶段 4 起才需要条目（用户可见行为从这里开始）�
 - **门禁**：新代码守 CCN ≤ 10、函数 nloc ≤ 200、Rust 文件 ≤ 920 行；容器与接线拆分容易把
   `app/mod.rs` 与 `app_shell_wiring` 顶穿，优先新开文件。
 - **门禁顺序**：#558 项 6 的门禁必须等 3b/4 迁完再落地，否则 CI 立刻红。
-- **`connection_feed` 的 `api_base` 前提**：注释写明「同一窗口内 `api_base` 不变」——
-  多 lane 后这条前提失效，需按 lane 取值或去掉该参数（§11）。
 
-## 11. 开放问题（实施前需答复）
+## 11. 开放问题
 
-1. `AppSignals::initialized` 是窗口级还是 lane 级？
-2. `connection_feed(api_base)` 在多 lane 下取谁的 `api_base`？是否改成 `feed()` + 按 lane 读 holder？
-3. 后台 lane 的降频粒度：哪些 Effect 保留、哪些只在切前台时补跑？
-4. 关闭 lane 时选「立即 abort」还是「等本轮结束」？（§8.3 建议前者）
+### 已决（2026-11-21 实测）
+
+1. **`AppSignals::initialized` → lane 级（保持现状，不改归属）**。
+   全仓唯一把它置 `true` 的地方是 `chat/session_storage.rs` 的会话水合完成回调；
+   它门控的是 composer 发送按钮、workspace / `/status` / tasks 的首次拉取与 GitHub
+   刷新 —— 全是「这个壳的**会话域**就绪了吗」。窗口级消费者（`user_prefs_sync`）借用
+   第一条 lane 的就绪信号即可，不必为它新增一个窗口级标志。
+2. **`connection_feed()` 不再收 `api_base`**（已改）。注册那一刻读前台默认
+   （`api_base_url()`，会顺手完成基址水合），语义变成「壳里这一行代表本窗口**当前
+   前台**那条 lane」。原注释写着「同一窗口内 `api_base` 不变」——多 lane 下这条前提
+   不成立，去掉入参顺带消掉了「谁先调用谁决定基址」这个隐含时序依赖。切 lane 后由
+   容器重新登记（§6.5），壳侧 `register_connection` 是幂等覆盖。
+
+### 仍需答复
+
+3. 后台 lane 的降频粒度：哪些 Effect 保留、哪些只在切前台时补跑？—— 要按 Effect
+   逐个分类（轮询类可降频，事件驱动类不能停），只能等第二条 lane 存在时实测定。
+4. 关闭一条 lane 时选「立即 abort」还是「等本轮结束」？（§8.3 建议前者）
 5. 后台审批要不要补「在当前 lane 留一句提示」这第三处表达？（§8.4）
 
 ## 12. 非目标

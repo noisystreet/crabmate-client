@@ -423,7 +423,7 @@ pub(super) fn NavRailConnections(
         .map(|shell| shell.api_base)
         .unwrap_or_else(|| RwSignal::new(api_base_url()));
     let own_authority = StoredValue::new(api_base_authority(&api_base.get_untracked()));
-    let connections = StoredValue::new(connection_feed(api_base.get_untracked()));
+    let connections = StoredValue::new(connection_feed());
     let rows = Signal::derive(move || connections.get_value().get());
     // 控制面实例：只在桌面壳里才有来源；非桌面壳下壳没有这条命令，这份 signal 恒为空。
     let instances = StoredValue::new(ctl_instances_feed());
