@@ -11,6 +11,7 @@ mod chat_composer;
 mod connection;
 mod ide_chrome;
 mod ide_editor;
+mod lane_signals;
 mod llm_settings;
 mod modal;
 mod resize;
@@ -18,9 +19,8 @@ mod shell_ui;
 mod sidebar;
 mod status;
 mod stream_control;
+mod window_signals;
 mod workspace;
-
-use std::collections::HashMap;
 
 use leptos::prelude::*;
 
@@ -29,6 +29,7 @@ pub use chat_composer::ChatComposerSignals;
 pub use connection::ConnSignals;
 pub use ide_chrome::IdeChromeSignals;
 pub use ide_editor::IdeEditorSignals;
+pub use lane_signals::LaneSignals;
 pub use llm_settings::LLMSettingsSignals;
 pub use modal::ModalSignals;
 pub use resize::ResizeSignals;
@@ -36,6 +37,7 @@ pub use shell_ui::ShellUISignals;
 pub use sidebar::SidebarSignals;
 pub use status::StatusSignals;
 pub use stream_control::StreamControlSignals;
+pub use window_signals::WindowSignals;
 pub use workspace::WorkspaceSignals;
 
 pub use super::status_tasks_state::StatusTasksSignals;
@@ -44,26 +46,35 @@ pub use crate::chat_session_state::ChatSessionSignals;
 
 use crate::clarification_form::PendingClarificationForm;
 use crate::i18n::Locale;
-use crate::session_sync::SessionSyncState;
 
 #[derive(Clone)]
 pub struct AppSignals {
     pub initialized: RwSignal<bool>,
-    /// **连接级**状态（#561）：切 lane 时该跟着 lane 变的那组值。
-    pub connection: ConnSignals,
-    pub chat: ChatSessionSignals,
+    /// **窗口级**状态（#561）：切 lane 不该变的那组值（locale / 主题 / 列宽 / 设置面板 …）。
     pub shell_ui: ShellUISignals,
-    pub chat_composer: ChatComposerSignals,
-    pub approval: ApprovalSignals,
-    pub stream: StreamControlSignals,
     pub sidebar: SidebarSignals,
     pub modal: ModalSignals,
     pub ide_editor: IdeEditorSignals,
     pub ide_chrome: IdeChromeSignals,
-    pub llm_settings: LLMSettingsSignals,
     pub resize: ResizeSignals,
+    // ---- 以下是 **lane 级**（#561）：切 lane 该跟着变的那组值 ----
+    //
+    // 它们在这里**平铺**而不是嵌成 `lane: LaneSignals`，理由是闭包捕获粒度：
+    // 一旦经 `Deref` 访问，`move ||` 闭包捕获的会是整个 `AppSignals`，把
+    // `ResizeSignals` 的 `Rc` 与 `StreamControlSignals` 的 `Arc<Mutex<AbortController>>`
+    // 一并拖进 Leptos 的 `Send + Sync` 要求里（实测报 `Rc cannot be sent between threads`）。
+    // 平铺则保持「闭包只捕获那个 Copy 句柄」的现状。
+    //
+    // `LaneSignals` 仍是这组字段的唯一构造来源（见 [`Self::new_lane`]），也是将来
+    // 「每 lane 一份」的载体。
+    pub connection: ConnSignals,
+    pub chat: ChatSessionSignals,
+    pub chat_composer: ChatComposerSignals,
+    pub approval: ApprovalSignals,
+    pub stream: StreamControlSignals,
     pub workspace: WorkspaceSignals,
     pub status: StatusSignals,
+    pub llm_settings: LLMSettingsSignals,
 }
 
 impl AppSignals {
@@ -75,61 +86,35 @@ impl AppSignals {
     }
 
     pub fn new() -> Self {
-        let connection = ConnSignals::new();
-        let shell_ui = ShellUISignals::new();
-        let chat_composer = ChatComposerSignals::new();
-        let approval = ApprovalSignals::new();
-        let stream = StreamControlSignals::new();
-        let sidebar = SidebarSignals::new();
-        let modal = ModalSignals::new();
-        let ide_editor = IdeEditorSignals::new();
-        let ide_chrome = IdeChromeSignals::new();
-        let llm_settings = LLMSettingsSignals::new();
-        let resize = ResizeSignals::new();
-        let workspace = WorkspaceSignals::new();
-        let status = StatusSignals::new();
+        Self::new_lane(&WindowSignals::new())
+    }
 
-        let session_sync = RwSignal::new(SessionSyncState::local_only());
-        let chat = ChatSessionSignals {
-            sessions: RwSignal::new(Vec::new()),
-            active_id: RwSignal::new(String::new()),
-            session_sync,
-            session_hydrate_nonce: RwSignal::new(0),
-            stream_transport: RwSignal::new(
-                crate::chat_session_state::ChatStreamTransport::default(),
-            ),
-            stream_last_sse_event_seq: RwSignal::new(0),
-            reasoning_preserved: RwSignal::new(HashMap::new()),
-            stream_text_overlay: RwSignal::new(None),
-            stream_overlay_display_mid: RwSignal::new(None),
-            stream_overlay_revision: RwSignal::new(0),
-            tool_output_chunks: RwSignal::new(HashMap::new()),
-            tool_job_states: RwSignal::new(HashMap::new()),
-            tool_file_paths: RwSignal::new(HashMap::new()),
-            conversation_prompt_tokens: RwSignal::new(None),
-            history_loading_older: RwSignal::new(false),
-            conversation_hydration_err: RwSignal::new(None),
-            context_used_watermark: RwSignal::new(
-                crate::chat_session_state::ContextUsedWatermark::default(),
-            ),
-        };
-
+    /// 建一条 lane 的 [`AppSignals`]：连接级全新建，**窗口级复用 `window` 的那批句柄**。
+    ///
+    /// `RwSignal` 是 Copy、`ResizeSignals` 内部是 `Rc`，所以复制出来的每一份 lane 共享同一个
+    /// 窗口级 signal —— 切 lane 时主题 / 语言 / 列宽不会跳，而连接级状态天然隔离。
+    /// 单 lane 用法（当前的全部用法）与 `Self::new()` 完全等价。
+    pub fn new_lane(window: &WindowSignals) -> Self {
+        // 先建 lane 内容、再取窗口级句柄：两边都会碰 `localStorage`（`ConnSignals::new`
+        // 读基址分域键，`ShellUISignals::new` 读 shell prefs），但**键不重叠、顺序无关**。
+        // 若将来某一边开始读对方的键，这里就要重新排。
+        let lane = LaneSignals::new();
         Self {
             initialized: RwSignal::new(false),
-            connection,
-            chat,
-            shell_ui,
-            chat_composer,
-            approval,
-            stream,
-            sidebar,
-            modal,
-            ide_editor,
-            ide_chrome,
-            llm_settings,
-            resize,
-            workspace,
-            status,
+            shell_ui: window.shell_ui,
+            sidebar: window.sidebar,
+            modal: window.modal,
+            ide_editor: window.ide_editor,
+            ide_chrome: window.ide_chrome,
+            resize: window.resize.clone(),
+            connection: lane.connection,
+            chat: lane.chat,
+            chat_composer: lane.chat_composer,
+            approval: lane.approval,
+            stream: lane.stream,
+            workspace: lane.workspace,
+            status: lane.status,
+            llm_settings: lane.llm_settings,
         }
     }
 
