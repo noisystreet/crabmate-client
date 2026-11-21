@@ -101,16 +101,16 @@ pub(crate) fn wire_lane_hotkeys(lanes: LaneSet) {
             let Some(intent) = intent_for(&ev.key(), mods) else {
                 return;
             };
-            let switched = match intent {
+            // **意图命中就拦默认行为**，与是否真的切了无关：`Alt+←` / `Alt+→` 在浏览器里是
+            // 「后退 / 前进」，单 lane 时我们明明不切，却不能让页面被导航走 —— 那比不响应更糟。
+            // （越界数字键同理：`Alt+3` 在只有两条 lane 时不该有任何副作用。）
+            ev.prevent_default();
+            match intent {
                 LaneIntent::Next => lanes.cycle(1),
                 LaneIntent::Prev => lanes.cycle(-1),
                 LaneIntent::Goto(index) => lanes.set_active(index),
                 LaneIntent::FocusPendingApproval => lanes.focus_next_pending_approval(),
             };
-            // 只有真的换了前台才拦默认行为：越界 / 单 lane 时没有动作，别顺手吞掉按键。
-            if switched {
-                ev.prevent_default();
-            }
         });
     let _ = win.add_event_listener_with_callback("keydown", cb.as_ref().unchecked_ref());
     cb.forget();
