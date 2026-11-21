@@ -43,7 +43,7 @@ PR review 与门禁 `ok` 行打印的上限值都能看见。
   - 目录：`agent_space/`（gitignored 草稿，本地随便写）、任意 `node_modules/`
     （第三方 README）、`target/`、`.git/`、`.crabmate/`；
   - 文件：`CHANGELOG.md` —— 它的条目被 `scripts/check-changelog-style.sh` 要求
-    **单条一行且 ≤ 800 字符**，已发布段又冻结不可重排，因此它的长行无解，只能
+    **单条一行且 ≤ 100 字符**，已发布段又冻结不可重排，因此它的长行无解，只能
     整文件不计。它的行宽另由那个门禁把关。
 
 用法：
@@ -68,7 +68,7 @@ TARGET_COLS = 160
 
 # 排除目录（命中路径任一分量即跳过）。
 EXCLUDED_DIRS = frozenset({"agent_space", "node_modules", "target", ".git", ".crabmate"})
-# 整文件不计（理由见文件头「扫描范围」）：CHANGELOG 的条目必须单行且 ≤ 800 字符，
+# 整文件不计（理由见文件头「扫描范围」）：CHANGELOG 的条目必须单行且 ≤ 100 字符，
 # 已发布段又冻结，压不下来；它的行宽由 check-changelog-style.sh 把关。
 EXCLUDED_FILES = frozenset({"CHANGELOG.md"})
 # 违规时最多列多少条（其余只报总数，避免刷屏）。

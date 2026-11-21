@@ -6,9 +6,10 @@
 # 改写它们会让文件与 GitHub 上已固化的 Release notes 永久不一致。所以历史段一律不动，
 # 门禁只拦「新写进去的条目」——从下一个版本切段起，条目自然都是短的。
 #
-# 为什么是 800：历史条目平均 2900 字符、96 条超过 2000，文件已到 51 万字符无法通读。
-# 800 字符能放下「改了什么 + 为什么 + 用户可见影响」，而机制、备选方案、验证清单都该进
-# PR 描述；能长期留存的理由进 docs/design/。上限比目标（约 600）宽一点，避免边界摩擦。
+# 为什么是 100：条目只留「改了什么」的一句话摘要，发布时能一眼读完；为什么 / 代价 /
+# 机制 / 备选方案 / 验证清单进 PR 描述，长期有效的理由进 docs/design/。上限从 800 收到
+# 100 后，`[Unreleased]` 原有的 9 条（347–795 字符）已按同一口径压成单句 —— 细节留在
+# 各自的 PR 与 git 历史里，不再堆进发布说明。
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -17,7 +18,7 @@ python3 - "$ROOT/CHANGELOG.md" <<'PY'
 import pathlib
 import sys
 
-MAX_CHARS = 800
+MAX_CHARS = 100
 path = pathlib.Path(sys.argv[1])
 if not path.is_file():
     print(f"check-changelog-style: 找不到 {path}", file=sys.stderr)
@@ -55,7 +56,7 @@ if too_long:
     for lineno, chars, head in too_long:
         print(f"  CHANGELOG.md:{lineno}  {chars} 字符：{head}…", file=sys.stderr)
     print(
-        "  条目只写「改了什么 + 为什么 + 用户可见影响」；机制 / 备选方案 / 验证清单进 PR 描述，"
+        "  条目只写「改了什么」的一句话摘要；为什么 / 代价 / 机制 / 备选方案 / 验证清单进 PR 描述，"
         "长期有效的设计理由进 docs/design/。",
         file=sys.stderr,
     )
