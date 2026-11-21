@@ -208,6 +208,11 @@ fn register_new_lane_action(
 ) {
     let ctx = app_ctx.clone();
     lane_actions::register_new_lane(Rc::new(move |base: Option<String>| {
+        // 上限与 TUI 同源（`MAX_LANES = 8`，`Alt+1..8` 也只到 8）：满了就不再建 —— 每条 lane
+        // 都带一整套接线与后台轮询，「点几次就堆几条」的代价没人想要。
+        if ctx.lanes.is_full() {
+            return;
+        }
         let Some(layer_el) = layer.get() else {
             // 视图还没挂上。动作只可能由页面里的按钮触发，理论上到不了这里。
             return;

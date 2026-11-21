@@ -33,6 +33,7 @@ use std::sync::Arc;
 
 use leptos::prelude::*;
 
+use crabmate_client_api::lane_attach::MAX_LANES;
 use crabmate_client_api::lane_phase::LaneEvent;
 
 use crate::api::connection_scope;
@@ -124,6 +125,15 @@ impl LaneSet {
         self.lanes.borrow().len()
     }
 
+    /// 还能再建一条 lane 吗（`MAX_LANES` 已达）。
+    ///
+    /// 上限与 TUI 同源：`crabmate_client_api::lane_attach::MAX_LANES`（那份注释写着「Web 沿用
+    /// 同一值」），`Alt+1..8` 也只到 8。不设上限的话，点「连接」能堆出任意多条 lane ——
+    /// 每条都带一整套接线与后台轮询。
+    pub(crate) fn is_full(&self) -> bool {
+        self.len() >= MAX_LANES
+    }
+
     /// 下一条新 lane 的 `localStorage` 域后缀（§7 的 `-l<n>`）。
     ///
     /// 取「壳注入的连接标识」做基；没有注入（纯浏览器 / Android）时给 `None` —— 与主 lane
@@ -162,24 +172,30 @@ impl LaneSet {
     /// 给两条 lane 各推进一次 `LanePhase`（旧的 → `Background`，新的 → `Foreground`）。
     /// 少了最后一步，「后台降频 / 后台审批」就会读到错的阶段。
     pub(crate) fn set_active(&self, index: usize) -> bool {
-        let target = {
+        // 先把要写的 `(phase, 新值)` 收集出来，**释放 `lanes` 借用之后**再写信号：
+        // `phase` 有真实订阅者（`connection_report` 的 Effect 读它定可见性），若在持借用
+        // 时写信号、而重算路径又碰容器，就是一次重入 panic。
+        let (target, phase_updates) = {
             let lanes = self.lanes.borrow();
             if index >= lanes.len() {
                 return false;
             }
-            Rc::clone(&lanes[index])
+            let updates: Vec<_> = lanes
+                .iter()
+                .enumerate()
+                .map(|(i, runtime)| {
+                    let phase = runtime.signals.phase;
+                    let next = phase.get_untracked().next(LaneEvent::FocusChanged {
+                        foreground: i == index,
+                    });
+                    (phase, next)
+                })
+                .filter(|(phase, next)| phase.get_untracked() != *next)
+                .collect();
+            (Rc::clone(&lanes[index]), updates)
         };
-        {
-            let lanes = self.lanes.borrow();
-            for (i, runtime) in lanes.iter().enumerate() {
-                let phase = runtime.signals.phase;
-                let next = phase.get_untracked().next(LaneEvent::FocusChanged {
-                    foreground: i == index,
-                });
-                if phase.get_untracked() != next {
-                    phase.set(next);
-                }
-            }
+        for (phase, next) in phase_updates {
+            phase.set(next);
         }
         connection_scope::activate(&target.signals.scope);
         self.active.set(index);
