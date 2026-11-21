@@ -181,7 +181,7 @@ pub fn App() -> impl IntoView {
         chat: signals.chat,
         composer_draft: signals.chat_composer.draft,
         workspace_panel: signals.to_workspace_panel(),
-        refresh_workspace: app_ctx.refresh_workspace.clone(),
+        refresh_workspace: app_ctx.refresh_workspace(),
         initialized: signals.initialized,
         editor_visible: signals.shell_ui.editor_layout_mode,
     });
@@ -222,7 +222,7 @@ pub fn App() -> impl IntoView {
                     class="main-row"
                 >
                     <div class="main-row-chat-layer">
-                        {chat_column_view(app_ctx.chat_column.clone(), ide_body_view)}
+                        {chat_column_view(app_ctx.chat_column(), ide_body_view)}
                         {side_column_view(side_column_view_signals.clone())}
                     </div>
                 </div>

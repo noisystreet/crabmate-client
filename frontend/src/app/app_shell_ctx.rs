@@ -168,16 +168,11 @@ pub struct SideColumnViewSignals {
 pub struct AppShellCtx {
     /// 窗口内的 lane 容器（#561 阶段 3）：现在恒一条。
     ///
-    /// 壳内取信号一律经 [`Self::signals`]，于是「当前是哪条 lane」只有一个入口 ——
-    /// 将来切 lane 只改容器，不动 121 处调用点。
+    /// **一条 lane 的全部运行时都在这里** —— 信号、接线产物（`refresh_*` /
+    /// `new_session`）与聊天列壳（`ChatColumnShell`）。改造前它们是本结构上的单个
+    /// 字段，只要再开一条 lane 就会互相覆盖；现在按 lane 各存一份，经 [`Self::signals`]
+    /// 等访问器取当前那条。
     pub(crate) lanes: super::app_signals::LaneSet,
-    pub new_session: Rc<dyn Fn()>,
-    pub refresh_workspace: Arc<dyn Fn() + Send + Sync>,
-    pub refresh_tasks: Arc<dyn Fn() + Send + Sync>,
-    pub toggle_task: Arc<dyn Fn(String) + Send + Sync>,
-    pub refresh_status: Arc<dyn Fn() + Send + Sync>,
-    pub insert_workspace_file_ref: StoredValue<Arc<dyn Fn(String) + Send + Sync>>,
-    pub chat_column: ChatColumnShell,
 }
 
 impl AppShellCtx {
@@ -187,7 +182,47 @@ impl AppShellCtx {
     /// 语义因此只落在一处 —— 容器换当前下标，全壳跟着换。
     #[must_use]
     pub fn signals(&self) -> AppSignals {
-        self.lanes.current()
+        self.lanes.current_signals()
+    }
+
+    // ---- 以下是**当前 lane 的**接线产物（#561 阶段 3）----
+    //
+    // 改造前它们是 `AppShellCtx` 的字段。改成访问器是这一步的关键：只要再开一条 lane，
+    // 字段就会被后建的那条挤掉，而访问器永远读「当前前台那条」。
+
+    /// 新建会话的闭包（依赖这条 lane 的会话域）。
+    pub fn new_session(&self) -> Rc<dyn Fn()> {
+        self.lanes
+            .with_current(|lane| lane.wiring.chat_wires.new_session.clone())
+    }
+
+    pub fn refresh_workspace(&self) -> Arc<dyn Fn() + Send + Sync> {
+        self.lanes
+            .with_current(|lane| Arc::clone(&lane.wiring.refresh_workspace))
+    }
+
+    pub fn refresh_tasks(&self) -> Arc<dyn Fn() + Send + Sync> {
+        self.lanes
+            .with_current(|lane| Arc::clone(&lane.wiring.refresh_tasks))
+    }
+
+    pub fn toggle_task(&self) -> Arc<dyn Fn(String) + Send + Sync> {
+        self.lanes
+            .with_current(|lane| Arc::clone(&lane.wiring.toggle_task))
+    }
+
+    pub fn refresh_status(&self) -> Arc<dyn Fn() + Send + Sync> {
+        self.lanes
+            .with_current(|lane| Arc::clone(&lane.wiring.refresh_status))
+    }
+
+    pub fn insert_workspace_file_ref(&self) -> StoredValue<Arc<dyn Fn(String) + Send + Sync>> {
+        self.lanes
+            .with_current(|lane| lane.wiring.insert_workspace_file_ref)
+    }
+
+    pub fn chat_column(&self) -> ChatColumnShell {
+        self.lanes.with_current(|lane| lane.chat_column.clone())
     }
 
     pub fn sidebar_nav_signals(&self) -> SidebarNavSignals {
@@ -195,7 +230,7 @@ impl AppShellCtx {
             locale: self.signals().shell_ui.locale,
             mobile_nav_open: self.signals().sidebar.mobile_nav_open,
             session_modal: self.signals().modal.session_modal,
-            new_session: self.new_session.clone(),
+            new_session: self.new_session(),
             sidebar_session_query: self.signals().sidebar.sidebar_session_query,
             global_message_query: self.signals().sidebar.global_message_query,
             sidebar_search_panel_open: self.signals().sidebar.sidebar_search_panel_open,
@@ -219,12 +254,12 @@ impl AppShellCtx {
             settings_page: self.signals().modal.settings_page,
             workspace_panel: self.signals().to_workspace_panel(),
             status_tasks: self.signals().to_status_tasks(),
-            refresh_workspace: Arc::clone(&self.refresh_workspace),
-            refresh_tasks: Arc::clone(&self.refresh_tasks),
-            toggle_task: Arc::clone(&self.toggle_task),
+            refresh_workspace: self.refresh_workspace(),
+            refresh_tasks: self.refresh_tasks(),
+            toggle_task: self.toggle_task(),
             changelist_modal_open: self.signals().modal.changelist_modal_open,
             changelist_fetch_nonce: self.signals().modal.changelist_fetch_nonce,
-            insert_workspace_file_ref: self.insert_workspace_file_ref,
+            insert_workspace_file_ref: self.insert_workspace_file_ref(),
             thinking_trace_log: self.signals().approval.thinking_trace_log,
             is_narrow_viewport: self.signals().shell_ui.is_narrow_viewport,
             ide_open_file_nonce: self.signals().shell_ui.ide_open_file_nonce,
@@ -288,14 +323,14 @@ impl AppShellCtx {
         StatusBarFooterSignals {
             status_tasks: self.signals().to_status_tasks(),
             status_err: self.signals().stream.status_err,
-            stream_busy_memos: self.chat_column.stream_busy_memos,
+            stream_busy_memos: self.chat_column().stream_busy_memos,
             client_llm_storage_tick: self.signals().llm_settings.client_llm_storage_tick,
             selected_agent_role: self.signals().llm_settings.selected_agent_role,
             agent_role_user_override: self.signals().llm_settings.agent_role_user_override,
             selected_session_mode: self.signals().llm_settings.selected_session_mode,
             session_mode_user_override: self.signals().llm_settings.session_mode_user_override,
             llm_thinking_mode: self.signals().llm_settings.llm_thinking_mode_draft,
-            refresh_status: Arc::clone(&self.refresh_status),
+            refresh_status: self.refresh_status(),
             user_prefs_reload_nonce: self.signals().workspace.user_prefs_reload_nonce,
             user_prefs_sync_phase: self.signals().workspace.user_prefs_sync_phase,
             user_prefs_load_err: self.signals().workspace.user_prefs_load_err,
@@ -333,7 +368,7 @@ impl AppShellCtx {
             side_panel_view: self.signals().shell_ui.side_panel_view,
             status_tasks: self.signals().to_status_tasks(),
             status_err: self.signals().stream.status_err,
-            stream_busy_memos: self.chat_column.stream_busy_memos,
+            stream_busy_memos: self.chat_column().stream_busy_memos,
         }
     }
 
@@ -354,7 +389,7 @@ impl AppShellCtx {
             settings_page: self.signals().modal.settings_page,
             form: self.settings_page_form_signals(),
             status_data: self.signals().status.status_data,
-            refresh_status: Arc::clone(&self.refresh_status),
+            refresh_status: self.refresh_status(),
         }
     }
 
