@@ -60,11 +60,20 @@ fn write_local_storage_item(key: &str, value: &str) {
 /// 否则就是「读基址要先知道基址」的循环。
 #[must_use]
 pub(crate) fn current_conn_fp() -> String {
-    // 先确保基址已决定：`hydrate_api_base_once` 只读基址键（走锚的那条路，不读指纹），
-    // 所以这里不会绕回自己。若跳过这步，早期调用会拿空基址算出「同 Origin」的指纹，
-    // 把别的连接的值读成自己的。
-    let base = api_base_url();
-    crabmate_client_api::connection_scope::api_base_fingerprint(&base)
+    current_conn_fp_on(&connection_scope::active_holder())
+}
+
+/// [`current_conn_fp`] 的**显式 holder** 版本（#558 项 3b）：指纹取自这一份的基址。
+///
+/// 零参路径隐含一步「先把基址水合出来」，这里必须复现 —— 否则拿一份还没定基址的
+/// holder 算指纹会得到「同 Origin」，把别台的值读成自己的（#558 记录的那个坑）。
+/// 只对 ACTIVE 那一份补这步：别的 lane 的基址由它自己的启动路径决定，跨 lane 顺手
+/// 水合别人等于把「这条 lane 连的是谁」改掉了。
+fn current_conn_fp_on(holder: &connection_scope::ScopeHolder) -> String {
+    if !holder.is_base_settled() && connection_scope::is_active(holder) {
+        hydrate_api_base_once();
+    }
+    crabmate_client_api::connection_scope::api_base_fingerprint(&holder.api_base())
 }
 
 fn local_storage() -> Option<web_sys::Storage> {
@@ -82,6 +91,8 @@ fn write_item(storage: &web_sys::Storage, key: &str, value: &str) {
     }
 }
 
+/// 读**指定 holder** 存储域里的一个键（#558 项 3b）。
+///
 /// 连接分域读：连接级键（`base#label@fp`）优先；缺失才回落到一级键（`base#label`）
 /// 与旧裸键，命中就回填连接级键（一次性迁移）。
 ///
@@ -90,13 +101,21 @@ fn write_item(storage: &web_sys::Storage, key: &str, value: &str) {
 ///
 /// 不分域（纯浏览器 / Android / 未注入标识）时用历史键名，一次读取就是全部答案 ——
 /// 这条分支让单连接语义与迁移前的字节完全一致。
+///
+/// 域后缀取自 `holder`，不再问壳注入的那个连接标识：单窗口多 lane 时一个页面
+/// 有多份 holder，而注入值只有一个 —— 用全局值定域会让两条 lane 读写同一个命名空间。
+/// 单 lane 时 `holder.storage_label()` 就等于注入值，字节与改动前一致。
 #[must_use]
-pub(crate) fn read_scoped_local_storage_raw(base_key: &str) -> Option<String> {
+pub(crate) fn read_scoped_local_storage_raw_on(
+    holder: &connection_scope::ScopeHolder,
+    base_key: &str,
+) -> Option<String> {
     let storage = local_storage()?;
-    let Some(label) = storage_scope::connection_key() else {
+    let Some(label) = holder.storage_label() else {
         return storage.get_item(base_key).ok().flatten();
     };
-    let conn_key = storage_scope::scoped_key_with_fp(base_key, Some(&label), &current_conn_fp());
+    let conn_key =
+        storage_scope::scoped_key_with_fp(base_key, Some(&label), &current_conn_fp_on(holder));
     if let Some(found) = storage.get_item(&conn_key).ok().flatten() {
         return Some(found);
     }
@@ -113,18 +132,24 @@ pub(crate) fn read_scoped_local_storage_raw(base_key: &str) -> Option<String> {
     value
 }
 
-/// 连接分域写：写连接级键 + 一级键（空值删除，与 [`write_local_storage_item`] 同口径）。
+/// 写**指定 holder** 的存储域：连接级键 + 一级键（空值删除，与
+/// [`write_local_storage_item`] 同口径）。
 ///
 /// 一级键写的是「这个窗口最近一次连接」：旧版本读它，指纹概念之前的回退路径也读它。
-pub(crate) fn write_scoped_local_storage_raw(base_key: &str, value: &str) {
+pub(crate) fn write_scoped_local_storage_raw_on(
+    holder: &connection_scope::ScopeHolder,
+    base_key: &str,
+    value: &str,
+) {
     let Some(storage) = local_storage() else {
         return;
     };
-    let Some(label) = storage_scope::connection_key() else {
+    let Some(label) = holder.storage_label() else {
         write_local_storage_item(base_key, value);
         return;
     };
-    let conn_key = storage_scope::scoped_key_with_fp(base_key, Some(&label), &current_conn_fp());
+    let conn_key =
+        storage_scope::scoped_key_with_fp(base_key, Some(&label), &current_conn_fp_on(holder));
     let window_key = storage_scope::scoped_key_with_fp(base_key, Some(&label), "");
     write_item(&storage, &conn_key, value);
     write_item(&storage, &window_key, value);
@@ -186,8 +211,16 @@ fn adopt_unanchored_base(storage: &web_sys::Storage, label: &str) -> Option<Stri
 
 /// `None` = 无 storage / 键缺失；`Some` = 键存在（值可为空白，表示显式同 Origin）。
 fn read_api_base_local_storage_raw() -> Option<String> {
+    read_api_base_local_storage_raw_on(&connection_scope::active_holder())
+}
+
+/// [`read_api_base_local_storage_raw`] 的**显式 holder** 版本（#558 项 3b）。
+///
+/// 基址键的域**由它自己的值算出来**（[`adopt_unanchored_base`]），所以这里只换
+/// 「域后缀」与「指纹」，回退链一行不动。
+fn read_api_base_local_storage_raw_on(holder: &connection_scope::ScopeHolder) -> Option<String> {
     let storage = local_storage()?;
-    let Some(label) = storage_scope::connection_key() else {
+    let Some(label) = holder.storage_label() else {
         return storage.get_item(API_BASE_URL_KEY).ok().flatten();
     };
     match read_base_anchor(&storage, &label) {
@@ -196,11 +229,16 @@ fn read_api_base_local_storage_raw() -> Option<String> {
     }
 }
 
-fn write_api_base_local_storage(normalized: &str) {
+/// 把基址写进**指定 holder** 的存储域（#558 项 3b）。
+///
+/// 这是 3b 真正修掉的那一处：`set_api_base_url_with(holder, …)` 过去把值写进指定的
+/// holder，却按**全局注入值**决定写哪个 `localStorage` 域 —— 多 lane 时就成了
+/// 「内存是这条 lane 的、盘是那个窗口的」。
+fn write_api_base_local_storage_on(holder: &connection_scope::ScopeHolder, normalized: &str) {
     let Some(storage) = local_storage() else {
         return;
     };
-    let Some(label) = storage_scope::connection_key() else {
+    let Some(label) = holder.storage_label() else {
         // 显式空串保留键，避免刷新后回落到 `CRABMATE_API_BASE`。
         let _ = storage.set_item(API_BASE_URL_KEY, normalized);
         return;
@@ -213,23 +251,39 @@ fn write_api_base_local_storage(normalized: &str) {
     let _ = storage.set_item(&base_anchor_key(&label), &fp);
 }
 
-pub(crate) fn read_local_storage_web_api_bearer() -> Option<String> {
-    read_scoped_local_storage_raw(WEB_API_BEARER_TOKEN_KEY).and_then(|v| {
+/// 读**指定 holder** 存储域里的 Bearer（#558 项 3b）。
+pub(crate) fn read_local_storage_web_api_bearer_on(
+    holder: &connection_scope::ScopeHolder,
+) -> Option<String> {
+    read_scoped_local_storage_raw_on(holder, WEB_API_BEARER_TOKEN_KEY).and_then(|v| {
         let t = v.trim().to_string();
         if t.is_empty() { None } else { Some(t) }
     })
 }
 
 pub(crate) fn write_local_storage_web_api_bearer(token: &str) {
-    write_scoped_local_storage_raw(WEB_API_BEARER_TOKEN_KEY, token);
+    write_local_storage_web_api_bearer_on(&connection_scope::active_holder(), token);
+}
+
+/// [`write_local_storage_web_api_bearer`] 的**显式 holder** 版本（#558 项 3b）。
+pub(crate) fn write_local_storage_web_api_bearer_on(
+    holder: &connection_scope::ScopeHolder,
+    token: &str,
+) {
+    write_scoped_local_storage_raw_on(holder, WEB_API_BEARER_TOKEN_KEY, token);
 }
 
 pub(crate) fn clear_local_storage_web_api_bearer() {
-    // 两处都清：分域键（本页真正在用的那个）+ 旧键（分域之前写下的同名键）。
-    // 不分域时两者是同一个键，第二次 remove 只是幂等冗余 —— 不值得为省它加一个
-    // `connection_key().is_some()` 判断：那个判断读起来像安全门，实际只关乎
-    // 「此刻存不存在两个键」。
-    write_scoped_local_storage_raw(WEB_API_BEARER_TOKEN_KEY, "");
+    clear_local_storage_web_api_bearer_on(&connection_scope::active_holder());
+}
+
+/// [`clear_local_storage_web_api_bearer`] 的**显式 holder** 版本（#558 项 3b）。
+///
+/// 两处都清：这条 lane 的分域键 + 旧裸键（分域之前写下的同名键）。裸键是**整页共享**
+/// 的，任何一条 lane 清了它就够；多清一次是幂等冗余，不会删到别的 lane 的分域键
+/// （键名不同）。
+pub(crate) fn clear_local_storage_web_api_bearer_on(holder: &connection_scope::ScopeHolder) {
+    write_scoped_local_storage_raw_on(holder, WEB_API_BEARER_TOKEN_KEY, "");
     write_local_storage_item(WEB_API_BEARER_TOKEN_KEY, "");
 }
 
@@ -240,17 +294,25 @@ pub(crate) fn set_web_api_bearer_token_memory_only(token: &str) {
 }
 
 fn hydrate_web_api_bearer_once() {
-    if connection_scope::bearer_settled() {
+    hydrate_web_api_bearer_once_on(&connection_scope::active_holder());
+}
+
+/// [`hydrate_web_api_bearer_once`] 的**显式 holder** 版本（#558 项 3b）。
+///
+/// 「已水合」标记与读取都在这一份上：A 读过盘不代表 B 读过（标记 per-holder），
+/// 读的也是这一份的存储域（域 per-holder）。
+fn hydrate_web_api_bearer_once_on(holder: &connection_scope::ScopeHolder) {
+    if holder.is_bearer_settled() {
         return;
     }
-    connection_scope::mark_bearer_settled();
+    holder.mark_bearer_settled();
     // 官方壳：不从明文 LS 水合（由 `hydrate_web_api_bearer_from_secure_store` 异步补齐）。
     if super::web_api_bearer_local::secure_web_api_bearer_backend_available() {
         return;
     }
-    if let Some(t) = read_local_storage_web_api_bearer() {
-        if connection_scope::bearer().is_empty() {
-            connection_scope::set_bearer(&t);
+    if let Some(t) = read_local_storage_web_api_bearer_on(holder) {
+        if holder.bearer().is_empty() {
+            holder.set_bearer(&t);
         }
     }
 }
@@ -339,7 +401,9 @@ pub fn set_api_base_url_with(holder: &connection_scope::ScopeHolder, base: &str)
     let t = normalize_api_base_url(base);
     // `set_api_base` 同时置「已决定」：调用方不用记得两步都做。
     holder.set_api_base(&t);
-    write_api_base_local_storage(&t);
+    // 盘上的域也跟这份 holder 走（#558 项 3b）：否则「内存是这条 lane 的、盘是那个
+    // 窗口的」，多 lane 时会互相覆盖。
+    write_api_base_local_storage_on(holder, &t);
 }
 
 /// 当前 API 基址（无尾 `/`）；空表示同 Origin 相对路径。
