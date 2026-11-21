@@ -9,8 +9,9 @@ use gloo_timers::future::TimeoutFuture;
 use wasm_bindgen_futures::JsFuture;
 
 use super::browser::{
-    clear_local_storage_web_api_bearer, read_local_storage_web_api_bearer,
-    set_web_api_bearer_token_memory_only, write_local_storage_web_api_bearer,
+    clear_local_storage_web_api_bearer, clear_local_storage_web_api_bearer_on,
+    read_local_storage_web_api_bearer_on, set_web_api_bearer_token_memory_only,
+    write_local_storage_web_api_bearer,
 };
 use super::connection_scope::ScopeHolder;
 use super::llm_secrets_local::PersistKind;
@@ -214,11 +215,11 @@ pub async fn hydrate_web_api_bearer_into(holder: &ScopeHolder) {
     if holder.bearer().trim().is_empty() {
         if let Some(t) = load_secure_bearer().await {
             holder.set_bearer(&t);
-        } else if let Some(legacy) = read_local_storage_web_api_bearer() {
+        } else if let Some(legacy) = read_local_storage_web_api_bearer_on(holder) {
             match persist_secure_bearer(&legacy).await {
                 Ok(PersistKind::Durable) => {
                     holder.set_bearer(&legacy);
-                    clear_local_storage_web_api_bearer();
+                    clear_local_storage_web_api_bearer_on(holder);
                 }
                 Ok(PersistKind::BrowserInsecure) | Err(_) => {
                     holder.set_bearer(&legacy);
@@ -227,7 +228,7 @@ pub async fn hydrate_web_api_bearer_into(holder: &ScopeHolder) {
         }
     } else {
         // hash 交接已写入内存：确保明文 LS 不残留
-        clear_local_storage_web_api_bearer();
+        clear_local_storage_web_api_bearer_on(holder);
     }
     holder.mark_bearer_settled();
 }
