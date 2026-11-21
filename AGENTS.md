@@ -163,6 +163,7 @@ When updating docs:
 | UI build / trunk | `frontend/README.md` |
 | Shell architecture / lifecycle / connect model | `docs/design/tauri_gui_mvp_design.md` |
 | Desktop multi-window / multi-connection (open / registry / focus / approval notify / per-window allowlist + bearer) | `docs/design/desktop_multi_window.md` |
+| Single-window multi-lane, route B (tag switching only — no split view; lane container / keep-alive / left-rail lane rows) | `docs/design/desktop_single_window_lanes.md` (Proposed) |
 | Android stream FGS / approval notifications | `docs/adr/0002-android-approval-notification-foreground-keepalive.md` (Accepted) |
 | Chat cards for file-backed context inject / skill path | `docs/adr/0003-chat-file-context-inject-cards.md` (Proposed — no fake cards without Server metadata; slash skill path is Client-only) |
 | Shared pure logic extract (WASM / connect / tui) | `docs/design/client_shared_logic.md` |
