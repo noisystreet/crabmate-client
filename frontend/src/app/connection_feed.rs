@@ -66,10 +66,12 @@ fn parse_connection_list(json: &str) -> Option<Vec<ConnectionSnapshot>> {
 /// - 订阅与 signal 同寿（都到页面结束），所以**不需要** unlisten：回调永远不会
 ///   `set` 一个已经 drop 的 signal。
 ///
-/// 代价是这一份在 `api_base` 上取了首次调用者的值。同一窗口内 `api_base` 不变
-/// （换 serve = 换窗口或重载页面），所以这个前提成立。
+/// 注册用的基址在**注册那一刻**读前台那份 scope（`tauri_register_connection` 随后
+/// 上报它）。#561 之前这里是「首次调用者传进来的 `api_base`」，注释里写着「同一窗口内
+/// `api_base` 不变」——单窗口多 lane 之后这条前提不成立（一个窗口会有 N 份基址），
+/// 所以改成在调用时读前台默认，语义变成「这一行代表本窗口**当前前台**那条 lane」。
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn connection_feed(api_base: String) -> ArcRwSignal<Vec<ConnectionSnapshot>> {
+pub(crate) fn connection_feed() -> ArcRwSignal<Vec<ConnectionSnapshot>> {
     thread_local! {
         static FEED: std::cell::OnceCell<ArcRwSignal<Vec<ConnectionSnapshot>>> =
             const { std::cell::OnceCell::new() };
@@ -79,7 +81,7 @@ pub(crate) fn connection_feed(api_base: String) -> ArcRwSignal<Vec<ConnectionSna
         cell.get_or_init(|| {
             let feed = ArcRwSignal::new(Vec::new());
             // `ArcRwSignal` 不是 `Copy`：订阅拿到的是同一信号的另一句柄。
-            install_connections_feed(feed.clone(), api_base);
+            install_connections_feed(feed.clone());
             feed
         })
         .clone()
@@ -88,7 +90,7 @@ pub(crate) fn connection_feed(api_base: String) -> ArcRwSignal<Vec<ConnectionSna
 
 /// 非 wasm（测试 / SSR）：没有壳，也就没有名单来源。
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn connection_feed(_: String) -> ArcRwSignal<Vec<ConnectionSnapshot>> {
+pub(crate) fn connection_feed() -> ArcRwSignal<Vec<ConnectionSnapshot>> {
     ArcRwSignal::new(Vec::new())
 }
 
@@ -125,7 +127,7 @@ pub(crate) fn connections_registered() -> RwSignal<bool> {
 ///   覆盖回去会让状态往回倒一帧（这也是 `as_string()` 那条老 bug 之外的第二重保险，
 ///   首帧读不到不再是致命的）。
 #[cfg(target_arch = "wasm32")]
-fn install_connections_feed(feed: ArcRwSignal<Vec<ConnectionSnapshot>>, api_base: String) {
+fn install_connections_feed(feed: ArcRwSignal<Vec<ConnectionSnapshot>>) {
     use wasm_bindgen::JsCast;
     use wasm_bindgen::closure::Closure;
     use wasm_bindgen_futures::spawn_local;
@@ -148,6 +150,10 @@ fn install_connections_feed(feed: ArcRwSignal<Vec<ConnectionSnapshot>>, api_base
 
         // 登记成功才置位：上报方据此补发第一帧状态。失败（老壳不认识这条命令）时
         // 保持 `false` —— 那种壳里也没有第二个窗口要读它，停在不上报是对的。
+        // 注册用的是**注册那一刻**的前台基址：`api_base_url()` 会顺手完成基址水合，
+        // 所以不必依赖「谁先调用」。单 lane 时它与旧的入参逐字节相同；多 lane 时这一
+        // 行代表「本窗口当前前台那条」，切 lane 后由容器重新登记（设计文档 §6.5）。
+        let api_base = crate::api::api_base_url();
         let registered = crate::tauri_shell::tauri_register_connection(&api_base, None).await;
         if registered.is_ok() && crate::tauri_shell::tauri_shell_available() {
             connections_registered().set(true);
