@@ -89,6 +89,33 @@ impl ScopeHolder {
     fn is_bearer_settled(&self) -> bool {
         self.0.borrow().bearer_settled
     }
+
+    /// 这一份的基址（空 = 同 Origin）。
+    ///
+    /// #558 的显式入口：拿到 holder 的调用方（UI 层、将来的每条 lane）直接问它，
+    /// 不必经过 `ACTIVE`。
+    #[must_use]
+    pub(crate) fn api_base(&self) -> String {
+        self.read(|s| s.api_base().to_string())
+    }
+
+    /// 这一份的 Bearer（空 = 没有）。**不要写进日志**。
+    #[must_use]
+    pub(crate) fn bearer(&self) -> String {
+        self.read(|s| s.bearer().to_string())
+    }
+
+    /// 换这一份的基址：值 + 标记一起更新。
+    pub(crate) fn set_api_base(&self, raw: &str) {
+        self.update(|s| s.with_api_base(raw));
+        self.mark_base_settled();
+    }
+
+    /// 换这一份的 Bearer（`memory_only` 与「从钥匙串水合」共用这一条路径）。
+    pub(crate) fn set_bearer(&self, raw: &str) {
+        self.update(|s| s.with_bearer(raw));
+        self.mark_bearer_settled();
+    }
 }
 
 thread_local! {
@@ -125,35 +152,29 @@ pub(crate) fn install_new_holder() {
     ACTIVE.with(|cell| *cell.borrow_mut() = Some(ScopeHolder::new()));
 }
 
-/// 读当前 scope（第一次访问时建立空实例）。
-pub(crate) fn with_scope<R>(f: impl FnOnce(&ConnectionScope) -> R) -> R {
-    active_holder().read(f)
-}
-
 /// 当前基址（空 = 同 Origin）。**不**触发任何磁盘读取。
+///
+/// 这是「**前台默认** holder」的读取口（#558 收窄后的口径）：跨 lane 的路径不要用它，
+/// 改问自己那条 lane 的 [`ScopeHolder`]。
 #[must_use]
 pub(crate) fn api_base() -> String {
-    with_scope(|s| s.api_base().to_string())
+    active_holder().api_base()
 }
 
-/// 当前 Bearer（空 = 没有）。**不**触发任何水合。
+/// 当前 Bearer（空 = 没有）。**不**触发任何水合。口径同 [`api_base`]。
 #[must_use]
 pub(crate) fn bearer() -> String {
-    with_scope(|s| s.bearer().to_string())
+    active_holder().bearer()
 }
 
 /// 换基址：值 + 标记一起更新，调用方不必记得「改完还要置 settled」。
 pub(crate) fn set_api_base(raw: &str) {
-    let holder = active_holder();
-    holder.update(|s| s.with_api_base(raw));
-    holder.mark_base_settled();
+    active_holder().set_api_base(raw);
 }
 
 /// 换 Bearer（`memory_only` 与「从钥匙串水合」共用这一条路径）。
 pub(crate) fn set_bearer(raw: &str) {
-    let holder = active_holder();
-    holder.update(|s| s.with_bearer(raw));
-    holder.mark_bearer_settled();
+    active_holder().set_bearer(raw);
 }
 
 #[must_use]
