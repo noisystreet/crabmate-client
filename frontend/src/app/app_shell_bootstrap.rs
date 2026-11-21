@@ -12,6 +12,9 @@ use super::chat::ChatColumnShell;
 
 /// 执行所有 `wire_*` 注册、闭包构建与 [`AppShellCtx`] 组装（推荐新代码直接调用本函数）。
 pub fn bootstrap_app_shell() -> AppShellCtx {
+    // #558：先把「当前 lane 的 scope 持有者」立起来 —— 值住在这个持有者里，不再直接
+    // 躺在 `thread_local` 中。启动从「未连接」开始，随后由水合 / handoff 填值。
+    crate::api::connection_scope::install_new_holder();
     // 移动薄客户端：先消费 URL hash 中的 Web API Bearer，再挂接会打 `/status` 的 Effect。
     crate::api::consume_mobile_connect_handoff();
     // 官方壳：尽早从钥匙串 / Keystore 水合（hash 已写入内存时仅清明文 LS）。

@@ -22,18 +22,78 @@
 //! Leptos 的 `expect_context`。把值搬进 ctx 会让这 40+ 处全部改签名 —— 那是 W1 的事，且要
 //! 和「每 lane 一棵组件子树」一起做才有意义。
 
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
+use std::rc::Rc;
 
 use crabmate_client_api::ConnectionKey;
 use crabmate_client_api::connection_scope::ConnectionScope;
 
-thread_local! {
-    /// 唯一实例。`None` = 还没建（第一次读时按空值建，具体值由水合 / setter 填）。
-    static SCOPE: RefCell<Option<ConnectionScope>> = const { RefCell::new(None) };
+/// 一份连接作用域的**持有者**（#558）。
+///
+/// 值活在这里，**不再直接躺在 `thread_local` 里**：一条 lane / 一个窗口各持一份，
+/// 将来由组件 ctx 提供，`join_api_path(scope.api_base(), …)` 那一族入口就能显式拿到它。
+///
+/// 本步只做「搬家」：`ACTIVE` 记的是「当前这条 lane 用哪一份」的**指针**，零参读取口
+/// （`api_base()` / `bearer()`）经它转发 —— 所以 43 处调用点一行不用改。删掉 `ACTIVE`、
+/// 改成从 ctx 取，是 #558 的下一步（那一步才需要改调用点）。
+#[derive(Clone)]
+pub(crate) struct ScopeHolder(Rc<RefCell<ScopeState>>);
+
+#[derive(Default)]
+struct ScopeState {
+    /// `None` = 还没建（第一次读时按空值建，具体值由水合 / setter 填）。
+    scope: Option<ConnectionScope>,
     /// 基址是否已经决定过一次（决定过就不再读 `localStorage`，避免每次读都打盘）。
-    static BASE_SETTLED: Cell<bool> = const { Cell::new(false) };
+    base_settled: bool,
     /// Bearer 是否已经水合过一次。
-    static BEARER_SETTLED: Cell<bool> = const { Cell::new(false) };
+    bearer_settled: bool,
+}
+
+impl ScopeHolder {
+    fn new() -> Self {
+        Self(Rc::new(RefCell::new(ScopeState::default())))
+    }
+
+    /// 读这一份（第一次访问时建立空实例）。
+    fn read<R>(&self, f: impl FnOnce(&ConnectionScope) -> R) -> R {
+        {
+            let mut state = self.0.borrow_mut();
+            if state.scope.is_none() {
+                state.scope = Some(empty_scope());
+            }
+        }
+        // 只在取值这一步借用：`f` 内部若再读 scope 不会被挡住。
+        let state = self.0.borrow();
+        f(state.scope.as_ref().expect("上面刚建好"))
+    }
+
+    /// 用 `f` 产生下一版 scope（值语义替换，不做原地改字段）。
+    fn update(&self, f: impl FnOnce(&ConnectionScope) -> ConnectionScope) {
+        let mut state = self.0.borrow_mut();
+        let current = state.scope.take().unwrap_or_else(empty_scope);
+        state.scope = Some(f(&current));
+    }
+
+    fn mark_base_settled(&self) {
+        self.0.borrow_mut().base_settled = true;
+    }
+
+    fn is_base_settled(&self) -> bool {
+        self.0.borrow().base_settled
+    }
+
+    fn mark_bearer_settled(&self) {
+        self.0.borrow_mut().bearer_settled = true;
+    }
+
+    fn is_bearer_settled(&self) -> bool {
+        self.0.borrow().bearer_settled
+    }
+}
+
+thread_local! {
+    /// **当前这条 lane 用哪一份**（指针，不是值本身）。值在 [`ScopeHolder`] 里。
+    static ACTIVE: RefCell<Option<ScopeHolder>> = const { RefCell::new(None) };
 }
 
 /// 本页的连接标识。
@@ -50,25 +110,24 @@ fn empty_scope() -> ConnectionScope {
     ConnectionScope::new(identity(), "", "")
 }
 
-/// 读当前 scope（第一次访问时建立空实例）。
-pub(crate) fn with_scope<R>(f: impl FnOnce(&ConnectionScope) -> R) -> R {
-    SCOPE.with(|cell| {
+/// 当前 lane 的持有者；第一次访问时建一份空 scope 的。
+pub(crate) fn active_holder() -> ScopeHolder {
+    ACTIVE.with(|cell| {
         if cell.borrow().is_none() {
-            *cell.borrow_mut() = Some(empty_scope());
+            *cell.borrow_mut() = Some(ScopeHolder::new());
         }
-        let guard = cell.borrow();
-        f(guard.as_ref().expect("上面刚建好"))
+        cell.borrow().as_ref().expect("刚建好").clone()
     })
 }
 
-/// 用 `f` 产生下一版 scope（值语义替换，不做原地改字段）。
-fn update(f: impl FnOnce(&ConnectionScope) -> ConnectionScope) {
-    SCOPE.with(|cell| {
-        // `take()` 而不是嵌套 borrow：`ConnectionScope` 只有三个字段，克隆比
-        // 「borrow 一个字段改另一个字段」的借用体操更不容易写错。
-        let current = cell.borrow_mut().take().unwrap_or_else(empty_scope);
-        *cell.borrow_mut() = Some(f(&current));
-    });
+/// 换一份新的空 scope（bootstrap / 新 lane 的起点）；旧的那份随之丢弃。
+pub(crate) fn install_new_holder() {
+    ACTIVE.with(|cell| *cell.borrow_mut() = Some(ScopeHolder::new()));
+}
+
+/// 读当前 scope（第一次访问时建立空实例）。
+pub(crate) fn with_scope<R>(f: impl FnOnce(&ConnectionScope) -> R) -> R {
+    active_holder().read(f)
 }
 
 /// 当前基址（空 = 同 Origin）。**不**触发任何磁盘读取。
@@ -85,33 +144,35 @@ pub(crate) fn bearer() -> String {
 
 /// 换基址：值 + 标记一起更新，调用方不必记得「改完还要置 settled」。
 pub(crate) fn set_api_base(raw: &str) {
-    update(|s| s.with_api_base(raw));
-    BASE_SETTLED.with(|c| c.set(true));
+    let holder = active_holder();
+    holder.update(|s| s.with_api_base(raw));
+    holder.mark_base_settled();
 }
 
 /// 换 Bearer（`memory_only` 与「从钥匙串水合」共用这一条路径）。
 pub(crate) fn set_bearer(raw: &str) {
-    update(|s| s.with_bearer(raw));
-    BEARER_SETTLED.with(|c| c.set(true));
+    let holder = active_holder();
+    holder.update(|s| s.with_bearer(raw));
+    holder.mark_bearer_settled();
 }
 
 #[must_use]
 pub(crate) fn base_settled() -> bool {
-    BASE_SETTLED.with(Cell::get)
+    active_holder().is_base_settled()
 }
 
 /// 只置标记、不动值：水合路径要「先声明读过盘，再填值」，中途失败也不会反复重读。
 pub(crate) fn mark_base_settled() {
-    BASE_SETTLED.with(|c| c.set(true));
+    active_holder().mark_base_settled();
 }
 
 #[must_use]
 pub(crate) fn bearer_settled() -> bool {
-    BEARER_SETTLED.with(Cell::get)
+    active_holder().is_bearer_settled()
 }
 
 pub(crate) fn mark_bearer_settled() {
-    BEARER_SETTLED.with(|c| c.set(true));
+    active_holder().mark_bearer_settled();
 }
 
 #[cfg(test)]
@@ -144,5 +205,33 @@ mod tests {
         set_api_base("http://b:2");
         assert_eq!(bearer(), "tok", "换基址不该把凭证丢掉");
         assert_eq!(api_base(), "http://b:2");
+    }
+
+    /// #558 的验收地基：两个持有者必须有各自的基址 / Bearer / 水合标记。
+    ///
+    /// 这条用**两份独立的 holder** 直接验，不碰 `ACTIVE` —— 它是「同一窗口内两条 lane
+    /// 打不同 serve 而不串」的最小证据。哪天有人把状态又挪回全局，这条会红。
+    #[test]
+    fn two_holders_do_not_share_state() {
+        let a = ScopeHolder::new();
+        let b = ScopeHolder::new();
+
+        a.update(|s| s.with_api_base("http://a:1").with_bearer("tok-a"));
+        a.mark_base_settled();
+        b.update(|s| s.with_api_base("http://b:2"));
+
+        assert_eq!(a.read(|s| s.api_base().to_string()), "http://a:1");
+        assert_eq!(a.read(|s| s.bearer().to_string()), "tok-a");
+        assert_eq!(b.read(|s| s.api_base().to_string()), "http://b:2");
+        assert_eq!(
+            b.read(|s| s.bearer().to_string()),
+            "",
+            "B 不该拿到 A 的凭据"
+        );
+
+        // 水合标记也是 per-holder 的：A 决定过基址，不代表 B 决定过。
+        assert!(a.is_base_settled());
+        assert!(!b.is_base_settled());
+        assert!(!b.is_bearer_settled());
     }
 }
