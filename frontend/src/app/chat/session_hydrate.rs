@@ -24,7 +24,8 @@ mod layout_glue;
 
 pub(crate) use layout_glue::TailMergeOutcome;
 use layout_glue::{
-    append_server_only_turns_to_v2_projection, project_layout_rows, window_prefix_len,
+    append_server_only_turns_to_v2_projection, project_layout_rows, scope_older_page_row_ids,
+    window_prefix_len,
 };
 
 use leptos::prelude::*;
@@ -313,6 +314,10 @@ fn prepend_older_page_into_session(
     hydrated: Vec<StoredMessage>,
     resp: &ConversationMessagesResponse,
 ) {
+    // 更早页的行同样拿确定性 id（页内命名空间），否则每次翻页都整块换 id、
+    // 同一页重复加载还会因 id 变而重复插入。
+    let mut hydrated = hydrated;
+    scope_older_page_row_ids(&mut hydrated, resp);
     let existing_ids: HashSet<_> = session.messages.iter().map(|m| m.id.as_str()).collect();
     let older: Vec<StoredMessage> = hydrated
         .into_iter()

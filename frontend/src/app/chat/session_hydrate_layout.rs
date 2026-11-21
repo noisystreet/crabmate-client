@@ -4,7 +4,10 @@
 
 use std::collections::HashSet;
 
-use crabmate_client_api::layout_projection::{LayoutProjection, project_hydrated_rows};
+use crabmate::cm_api_contract::chat::CONVERSATION_LAYOUT_SCHEMA_VERSION_V2;
+use crabmate_client_api::layout_projection::{
+    LayoutProjection, assign_page_scoped_row_ids, project_hydrated_rows,
+};
 
 use super::ConversationMessagesResponse;
 use crate::storage::{ChatSession, StoredMessage};
@@ -21,16 +24,31 @@ pub(super) fn project_layout_rows(
     hydrated: Vec<StoredMessage>,
     resp: &ConversationMessagesResponse,
 ) -> (Vec<StoredMessage>, bool) {
-    let projection = project_hydrated_rows(
-        &hydrated,
-        resp.layout.as_ref(),
-        resp.window_start_index == 0,
-    );
+    let projection =
+        project_hydrated_rows(&hydrated, resp.layout.as_ref(), resp.window_start_index);
     match projection {
         LayoutProjection::Mapped(rows) => (rows, true),
         // 回落原因只进计数：`layout_debug_counters` 在非 wasm32 上是空操作，
         // 这里不能直接调 `web_sys::console`（宿主单测会 panic）。
         LayoutProjection::Fallback(_reason) => (hydrated, false),
+    }
+}
+
+/// 更早一页（`before_index`）的行只做页内确定性编号。
+///
+/// 只在会话级 `layout` 是 v2 时才动：无 `layout` 的老会话必须保持既有行为
+/// （每次 prepend 都用新 id、靠服务端快照语义兜底）。页内键带窗口下标命名空间，
+/// 所以「同一窗口重复加载 → 同 id → 不再重复插入」。
+pub(super) fn scope_older_page_row_ids(
+    rows: &mut [StoredMessage],
+    resp: &ConversationMessagesResponse,
+) {
+    let v2 = resp
+        .layout
+        .as_ref()
+        .is_some_and(|meta| meta.layout_schema_version >= CONVERSATION_LAYOUT_SCHEMA_VERSION_V2);
+    if v2 {
+        assign_page_scoped_row_ids(rows, resp.window_start_index);
     }
 }
 

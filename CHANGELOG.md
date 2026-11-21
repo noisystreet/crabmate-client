@@ -23,6 +23,8 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Fixed
 
+- **Scrolling back through history no longer re-keys the older page on every fetch.** `before_index` pages used to come back with fresh `h_{ms}_{i}` ids each time, so the same older page could be inserted twice (id-based de-duplication never matched) and any reload re-created that block. With a v2 `layout` those rows now get page-scoped ids (`turn-prev-{window_start_index}-{n}`), stable per window and namespaced so two different windows cannot collide — the same page fetched again de-duplicates away. Sessions without `layout` keep the old behaviour (no metadata, no change). Also adds a distinct fallback counter value for the "Server declares a tool row the page does not hydrate" shape, the common way a mid-tool turn silently skips the upgrade. No wire change.
+
 - **A turn's final answer no longer gets a fresh random row id whenever the next turn starts.** `detach_final_answer_row_in_messages` renamed the already-displayed answer to a random id at every turn boundary, so a session's local row identities changed on each turn (persisted copies included) and no reload could ever see a stable id sequence. It now archives to `turn-final-answer#prev{n}` in order — the shape the hydration mapping and the commentary archiving already use, so the canonical key stays with the newest answer only. No wire change.
 
 ## [0.9.1-alpha.0] - 2026-11-19
