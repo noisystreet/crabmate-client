@@ -13,6 +13,7 @@ mod ide_chrome;
 mod ide_editor;
 mod lane_set;
 mod lane_signals;
+mod lane_view_inputs;
 mod llm_settings;
 mod modal;
 mod resize;
@@ -34,7 +35,7 @@ pub use ide_chrome::IdeChromeSignals;
 pub use ide_editor::IdeEditorSignals;
 pub use lane_signals::LaneSignals;
 // 窗口内的 lane 容器（#561 阶段 3）：crate 内可见 —— 壳层用它取「当前前台那条」。
-pub(crate) use lane_set::LaneSet;
+pub(crate) use lane_set::{LaneRuntime, LaneSet};
 pub use llm_settings::LLMSettingsSignals;
 pub use modal::ModalSignals;
 pub use resize::ResizeSignals;
