@@ -12,11 +12,11 @@
  *
  * 根因：
  *   1. `conversation_hydrate` 把「空正文 + tool_calls」与 `role=tool` 各建成一条 is_tool
- *   2. legacy `merge_session_tail` 的 tool_pool FIFO：本地 1 工具先吃到调用短卡，
- *      结果卡被 append 到终答之后 → 导出双「## 工具」夹心
+ *   2. 水合快照里短卡与结果卡并存时，短卡未被结果卡收编 → 终答夹在两张工具卡之间，
+ *      导出双「## 工具」夹心
  *
- * 本文件用 **legacy layout + mock GET /conversation/messages** 复现水合路径
- * （不依赖真实 LLM）。期望（修复后应绿）：
+ * 本文件用 **mock GET /conversation/messages** 复现水合路径（不依赖真实 LLM）。
+ * 期望（修复后应绿）：
  *   - 同一次 get_current_time 仅 1 张工具卡
  *   - 工具在终答之前
  *   - 不得出现「工具短卡 → 终答 → 工具结果」三明治
@@ -153,7 +153,7 @@ test.describe("水合双工具卡 / 终答夹心（export 20260808）", () => {
             sessions: [
               {
                 id: sessionId,
-                // legacy：走 merge_session_tail，而非 v2 append-only
+                // 冷启动：无 v2 projection，走服务端快照替换
                 layout_schema_version: 1,
                 title: "e2e-hydrate-dup-cold",
                 draft: "",
@@ -216,7 +216,7 @@ test.describe("水合双工具卡 / 终答夹心（export 20260808）", () => {
     expect(answerIdx).toBeGreaterThan(toolIdx);
   });
 
-  test("legacy merge：本地 1 工具 + 服务端 call/result 双卡不得夹心", async ({
+  test("本地草稿被服务端快照替换：call/result 双卡不得夹心", async ({
     page,
   }) => {
     const sid = `s_e2e_hydrate_dup_merge_${Date.now()}`;
@@ -258,7 +258,7 @@ test.describe("水合双工具卡 / 终答夹心（export 20260808）", () => {
                     reasoning_text: "",
                     created_at: 1,
                   },
-                  // 流式结束后本地通常只剩 1 条结果工具行（与 export 前半一致）
+                  // 本地只有 1 条结果工具行（与 export 前半一致）；水合后被服务端快照替换
                   {
                     id: "sse-tool-result",
                     role: "system",

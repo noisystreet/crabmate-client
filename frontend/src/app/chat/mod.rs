@@ -30,7 +30,6 @@ mod scroll;
 mod scroll_follow;
 mod scroll_shell;
 mod session_hydrate;
-mod session_merge;
 mod session_storage;
 mod stream_follow_up_gates;
 mod stream_user_abort;

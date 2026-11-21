@@ -111,7 +111,7 @@ test("多轮助手正文不应合并为一条 stored_message", async ({ page, br
     { timeout: 25000 },
   );
 
-  // 流结束后立即刷新；v2 finalized 行应已进入会话缓存，水合不得走 legacy pool 重排。
+  // 流结束后立即刷新；v2 finalized 行应已进入会话缓存，水合只追加服务端新回合。
   await page.reload({ waitUntil: "networkidle", timeout: 20_000 });
   await page.waitForSelector('[data-testid="chat-composer-input"]');
   await openSessionInRail(page, sid);
@@ -206,7 +206,7 @@ test("多轮助手正文不应合并为一条 stored_message", async ({ page, br
       ]),
     });
 
-  // 独立浏览器上下文从同一服务端缓存加载，v2 ready 行不经 legacy pool 重排。
+  // 独立浏览器上下文从同一服务端缓存加载，v2 ready 行不经快照重排。
   // 新上下文 localStorage 为空：须带 `#cm_api_base=` 交接（跨 Origin 时 API 不在本页 Origin）。
   const secondContext = await browser.newContext();
   const secondPage = await secondContext.newPage();

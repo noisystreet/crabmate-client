@@ -15,6 +15,10 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Changed
 
+- **Session hydration is one rule now, and the E4 compatibility reading is gone.** The Web UI drops post-terminal business frames (the event id is still recorded, so `stream_resume` keeps advancing), merges at equal revision too (re-applying a snapshot is idempotent), and deletes `session_merge.rs` — the v1 tool-pool / call-stub replay adapter — together with the B3 dual-read observer. Non-v2 sessions take the Server snapshot as authoritative: keep the already-loaded older prefix, replace the overlapping tail, and drop call stubs a result card already represents. Cost: a local user bubble the Server omits is no longer re-inserted (the existing user-regression guard skips that page instead). No wire change.
+
+- **Hydration no longer re-inserts timeline cards the Server never persisted.** A slash-skill inject path or a local-only `context_inject` / `context_trim` note now leaves with the replaced tail, so a reload shows exactly what a cold start shows — that equality is the point of the shrink. Cost: such a card lives only in the tab that streamed it.
+
 ### Fixed
 
 ## [0.9.1-alpha.0] - 2026-11-19
