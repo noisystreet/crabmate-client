@@ -129,6 +129,9 @@ fn SidebarRailRevealBtn(
 #[component]
 pub fn App() -> impl IntoView {
     let app_ctx = init_app_shell();
+    // `app_ctx` 只用来「取一次当前 lane」：视图捕获的是 `Rc<LaneRuntime>` 与其中的 Copy
+    // 信号句柄，**不持有** ctx，所以它随本函数返回被 drop 是安全的（N=1 时没有第二个读者）。
+    // **S2 的 `add_lane` 必须让 `App` 长期持有 `app_ctx`**，否则事件回调里拿不到 `LaneSet`。
     // #561 S1b-3：`App` 只做「取当前前台那条 lane 的运行时 → 交给视图主体」。视图与
     // `provide_context` 都搬进了 `app_body`，于是 S2 用 `mount_to` 挂第二条 lane 时 owner
     // 就是新子树的，ctx 不会串到第一条（§5.2「已知风险」）。
