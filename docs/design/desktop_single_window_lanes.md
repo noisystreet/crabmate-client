@@ -330,12 +330,21 @@ next_unread = connection_unread_after(可见, busy, prev)
 ### 8.3 `Quitting`：桌面不产生，但要说明关闭语义
 
 共享枚举里 `Quitting`（`×`）的注释明确写「Desktop 的多窗口不产生这个状态：一个窗口要走就真的走了」。
-多 lane 后要回答「关闭一条 lane 时回合怎么办」，二选一：
+多 lane 后「关闭一条 lane 时回合怎么办」**已定案**：关闭 = **复用既有的用户中止链路**
+（`stream_user_abort` 的 `apply_user_abort_of_inflight_stream` + `POST /chat/stream/{job_id}/cancel`），
+不引入第三种关闭语义。
 
-| 选择 | 后果 | 备注 |
-|---|---|---|
-| **立即 abort**（建议） | 不产生 `Quitting`，`×` 在桌面永不出现；`status_glyph` 的 `×` 分支保留但走不到 | 复用既有 `stream_user_abort` 的中止链路与提示；与「关闭窗口就真的走」同一口径 |
-| 请求退出 → 等本轮结束 | 产生 `Quitting`，但**只有前台 lane 看得见** `×` | 后台 lane 的 `×` 在桌面没有承载物（左栏只画一行），等于实现一个看不见的状态 |
+理由是通用性而不是省事：让「关闭」与「用户按停止」走同一条链，桌面就不需要实现
+`Quitting`（`ConnectionStatus` 里那句「Desktop 的多窗口不产生这个状态」自然延续），
+`status_glyph` 的 `×` 分支保留但走不到；而 Android / Web 单连接、多窗口关窗口、多 lane
+关一条，全都成了同一件事：**中止 + 销毁**。
+
+阶段由 `crabmate_client_api::lane_phase::LanePhase` 表达：`CloseRequested` → `Closing`
+（收尾中，`keeps_background_work()` 已为 false）→ `CloseSettled` → `Closed`
+（终态，吸收一切迟到事件）。
+
+被否的替代方案是「请求退出 → 等本轮结束」：`Quitting` 的 `×` 在后台 lane 没有承载物
+（左栏只画一行），等于实现一个看不见的状态。
 
 选「立即 abort」时，还要照 TUI 的「最后一条 lane」特例：`client_capability_matrix.md` 记着
 「只有最后一条 lane 的后果要明说」—— 桌面这里对应「关掉最后一条 lane = 回到未连接 / 进设置页」，
@@ -408,13 +417,22 @@ CHANGELOG 从阶段 4 起才需要条目（用户可见行为从这里开始）�
    前台**那条 lane」。原注释写着「同一窗口内 `api_base` 不变」——多 lane 下这条前提
    不成立，去掉入参顺带消掉了「谁先调用谁决定基址」这个隐含时序依赖。切 lane 后由
    容器重新登记（§6.5），壳侧 `register_connection` 是幂等覆盖。
+3. **关闭一条 lane 的语义**（原问题 4）→ 复用用户中止链路，不产生 `Quitting`；
+   阶段用 `crabmate_client_api::lane_phase::LanePhase` 表达（`CloseRequested` →
+   `Closing` → `CloseSettled` → `Closed`）。详见 §8.3。
+4. **三个开放问题共享同一张表**：降频 / 关闭 / 审批可见性都是 `LanePhase` 上的查询
+   （`!is_foreground()` / `CloseRequested` / `can_present_modal()`），所以那张表已
+   先落在 `crates/crabmate-client-api/src/lane_phase.rs`（纯逻辑 + 9 条单测，TUI 可
+   按 `active` 映射）。它不需要第二条 lane 就有消费者，因此不落入「空容器 =
+   dead_code」那个坑。
 
 ### 仍需答复
 
-3. 后台 lane 的降频粒度：哪些 Effect 保留、哪些只在切前台时补跑？—— 要按 Effect
-   逐个分类（轮询类可降频，事件驱动类不能停），只能等第二条 lane 存在时实测定。
-4. 关闭一条 lane 时选「立即 abort」还是「等本轮结束」？（§8.3 建议前者）
-5. 后台审批要不要补「在当前 lane 留一句提示」这第三处表达？（§8.4）
+5. 后台 lane 的降频**力度**（后台轮询间隔 2× 还是 10×）与「哪些 Effect 属定时类」
+   的落地清单 —— 分类**规则**已定（事件驱动常驻 / 定时类受 `is_foreground()` 门控），
+   逐项清单要按 `wire_*` 填，且力度只能实测后定。
+6. 后台审批要不要补「在当前 lane 留一句提示」这第三处表达？（§8.4；通用性只回答
+   「加在哪」——事件 → 多 sink，不回答「要不要加」）
 
 ## 12. 非目标
 
