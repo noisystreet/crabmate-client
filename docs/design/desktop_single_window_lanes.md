@@ -212,6 +212,27 @@ Web 侧没有「帧」，只有「挂载 / 卸载」，所以要先说清卸载�
 
 **未核对**：本条只能由「两条 lane 各跑一轮流式、来回切换」的桌面手测确认（issue 验收第 2 条）。
 
+#### 5.1 预建 8 条的成本实验（2026-11-21，已跑）
+
+临时把容器改成「启动即建 8 条 `LaneRuntime`（各含完整 wiring，都指向同一条 serve）」，
+用 `scripts/smoke-desktop-shell.sh` 在 xvfb 里跑真实 WebKitGTK：
+
+| 项 | 结果 |
+|---|---|
+| 能否启动 | ✅ 两次冒烟均通过（进程存活 / 日志无 error·panic / WebKit 子进程起来） |
+| `debug_assert!(holder.is_base_settled())` | ✅ 未触发（8 条 lane 的 holder 都在 `new_lane` 前显式 `set_api_base`） |
+| 8 套接线互相踩 | ✅ 未见（`register_connection` 等无 panic） |
+| **serve 侧请求量** | ❌ **没测到**：serve 无 access log；冒烟判据是「WebKit 子进程出现即通过」，在页面真正发请求前就结束，`ss` 采样到 0 条到 18080 的连接 |
+| 静态量级（推断） | lane 级 wiring 约 **29 个 `Effect::new`**（`app_shell_effects` 22 + `wire_chat_session_lifecycle` 2 + `status_tasks_wiring` 2 + `github_wiring` 3）→ 8 条 ≈ **232 个常驻 Effect**，且每条都会各发一轮首帧请求（`/status`、`/sessions`、`/user-data`） |
+
+**结论（对 §5 的意义）**：
+
+1. **A 路径（预建 N 棵子树）在技术上可行** —— 启动不崩，这是最大的不确定项，已排除。
+2. 但**预建 8 条 = 8 倍冷启动请求**（8 × 首帧），这正是降频 10× 要治的病；而降频只作用于「后台轮询」，治不了「启动时 8 条各发一次首帧」。
+3. 因此「预建」必须换成「**懒建**」：只在用户真正新建 lane 时才 `add_lane`。而懒建要求视图树能**动态增删** —— 这正是 `Send + Sync` 阻塞所在（见 PR 描述「已知限制」）。
+
+一句话：**实验排除了「8 条预建会崩」，但把矛盾从「资源够不够」推到了「视图能不能动态重建」**。后者是设计选择，不是性能问题。
+
 ## 6. 左栏「连接」区
 
 ### 6.1 现状（已核对）
