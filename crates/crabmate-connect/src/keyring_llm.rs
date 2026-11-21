@@ -5,45 +5,73 @@
 //!
 //! 槽位短名 / 账户名常量见 [`crabmate_client_api::secrets`]。
 
-use crabmate_client_api::secrets::{KEYRING_SERVICE, SecretSlot};
+use crabmate_client_api::secrets::SecretSlot;
+
+use crate::secret_backend::{read_trimmed, write_trimmed};
 
 /// 主模型 / 执行器 / 已保存模型密钥表（JSON）/ GitHub user token 在钥匙串中的账户名。
 pub type LlmSecretSlot = SecretSlot;
 
-fn entry(slot: LlmSecretSlot) -> Result<keyring::Entry, String> {
-    keyring::Entry::new(KEYRING_SERVICE, slot.keyring_account())
-        .map_err(|e| format!("系统钥匙串不可用: {e}"))
-}
-
-/// 读取槽位；无条目或空串返回 `None`。
+/// 读取槽位；无条目或空白值返回 `None`。
 pub fn read_llm_secret(slot: LlmSecretSlot) -> Result<Option<String>, String> {
-    let entry = entry(slot)?;
-    match entry.get_password() {
-        Ok(secret) => {
-            let t = secret.trim();
-            if t.is_empty() {
-                Ok(None)
-            } else {
-                Ok(Some(t.to_string()))
-            }
-        }
-        Err(keyring::Error::NoEntry) => Ok(None),
-        Err(e) => Err(format!("读取系统钥匙串失败: {e}")),
-    }
+    read_trimmed(slot.keyring_account())
 }
 
 /// 写入或清除槽位（空串删除条目）。
 pub fn write_llm_secret(slot: LlmSecretSlot, value: &str) -> Result<(), String> {
-    let entry = entry(slot)?;
-    let b = value.trim();
-    if b.is_empty() {
-        match entry.delete_credential() {
-            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-            Err(e) => Err(format!("清除系统钥匙串失败: {e}")),
-        }
-    } else {
-        entry
-            .set_password(b)
-            .map_err(|e| format!("写入系统钥匙串失败: {e}"))
+    write_trimmed(slot.keyring_account(), value)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{LlmSecretSlot, read_llm_secret, write_llm_secret};
+    use crate::secret_backend::testing;
+
+    #[test]
+    fn written_secret_reads_back_trimmed() {
+        let _backend = testing::install();
+        write_llm_secret(LlmSecretSlot::ClientLlm, "  sk-e2e-key\n").unwrap();
+        assert_eq!(
+            read_llm_secret(LlmSecretSlot::ClientLlm)
+                .unwrap()
+                .as_deref(),
+            Some("sk-e2e-key")
+        );
+    }
+
+    #[test]
+    fn slots_do_not_share_one_entry() {
+        let _backend = testing::install();
+        write_llm_secret(LlmSecretSlot::ClientLlm, "main-key").unwrap();
+        write_llm_secret(LlmSecretSlot::ExecutorLlm, "exec-key").unwrap();
+
+        assert_eq!(
+            read_llm_secret(LlmSecretSlot::ClientLlm)
+                .unwrap()
+                .as_deref(),
+            Some("main-key")
+        );
+        assert_eq!(
+            read_llm_secret(LlmSecretSlot::ExecutorLlm)
+                .unwrap()
+                .as_deref(),
+            Some("exec-key")
+        );
+    }
+
+    #[test]
+    fn blank_write_clears_the_slot() {
+        let _backend = testing::install();
+        write_llm_secret(LlmSecretSlot::ClientLlm, "sk-e2e-key").unwrap();
+        write_llm_secret(LlmSecretSlot::ClientLlm, "   ").unwrap();
+
+        assert_eq!(read_llm_secret(LlmSecretSlot::ClientLlm).unwrap(), None);
+    }
+
+    #[test]
+    fn reading_an_empty_keystore_yields_none() {
+        let _backend = testing::install();
+
+        assert_eq!(read_llm_secret(LlmSecretSlot::SavedModels).unwrap(), None);
     }
 }

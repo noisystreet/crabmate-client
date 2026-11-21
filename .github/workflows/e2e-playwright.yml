@@ -160,7 +160,8 @@ jobs:
             specs/mock-turn-layout.spec.ts \
             specs/mock-side-toolbar.spec.ts \
             specs/mock-scroll-send.spec.ts \
-            specs/mock-conversation-pagination.spec.ts
+            specs/mock-conversation-pagination.spec.ts \
+            specs/mock-settings-model-registry.spec.ts
         working-directory: e2e
         env:
           no_proxy: 127.0.0.1,localhost

@@ -20,8 +20,8 @@
 
 **核心原则**：纯前端行为的回归测试优选 Playwright，Tauri 特有行为留 victauri_test。
 
-> **迁移进行中（#152 / #548）**：Victauri 侧用例几乎全是页面行为（0 个调用 Tauri IPC），正分批迁入本目录；迁完 Victauri 只保留壳冒烟。已迁（Wave 1–4）：`status-bar` / `visible-messages` / `prefs-theme` / `session-crud` / `settings-page` / `keyboard-scroll` / `sse-control` / `ui-layout` / `user-data-api` / `turn-layout` / `side-toolbar` / `scroll-send` / `conversation-pagination`。
-> 仍在 Victauri 的只剩：`victauri_settings2`（直读设备钥匙串，浏览器无等价物）与 `victauri_e2e`（壳冒烟）。
+> **迁移进行中（#152 / #548）**：Victauri 侧用例几乎全是页面行为（0 个调用 Tauri IPC），正分批迁入本目录；迁完 Victauri 只保留壳冒烟。已迁（Wave 1–5）：`status-bar` / `visible-messages` / `prefs-theme` / `session-crud` / `settings-page` / `keyboard-scroll` / `sse-control` / `ui-layout` / `user-data-api` / `turn-layout` / `side-toolbar` / `scroll-send` / `conversation-pagination` / `settings-model-registry`。
+> 仍在 Victauri 的只剩 `victauri_e2e`（壳冒烟；Wave 6 用脚本替代后即可摘依赖）。`victauri_settings2` 已在 Wave 5 拆解：钥匙串往返由 `crates/crabmate-connect` 的 keyring 单测覆盖（内存后端，`cargo test` 里真做写入 → 读回），模型注册的页面行为见 `mock-settings-model-registry.spec.ts`。
 > `conversation` / `pagination` 迁入后**不再需要 `CM_E2E_FIXTURES=1`**：`mock-conversation-pagination.spec.ts` 用 `page.route` 按 query 造分页响应；`GET /conversation/messages` 的响应形状（全量 / `limit` 截尾 / `before_index` / 404）归 Server 仓集成测试。
 > 已**删除**（测试对象已不存在，非迁移）：`victauri_ide_layout`（入口 testid `layout-mode-toggle` / `ide-layout-root` 随 UI 重构消失）与 `victauri_turn_layout` 的多工具用例（需按 AG-UI V2 时序重写）——因此 IDE 往返与多工具交错目前**没有自动化覆盖**。
 
@@ -259,6 +259,7 @@ GitHub Actions：本仓 `.github/workflows/e2e-playwright.yml`（PR → `main`�
 - `specs/mock-side-toolbar.spec.ts`（由 Victauri 迁入，#152）
 - `specs/mock-scroll-send.spec.ts`（由 Victauri 迁入，#152）
 - `specs/mock-conversation-pagination.spec.ts`（由 Victauri 迁入，#548；分页响应走 `page.route` mock，不需要 `CM_E2E_FIXTURES`）
+- `specs/mock-settings-model-registry.spec.ts`（由 Victauri 迁入，#548；新增模型预设 → 列表行 → 服务端 `saved_models` 不含明文密钥）
 
 本地全量 mock：`make frontend` 后 `./scripts/e2e-playwright.sh`（自动起纯 API serve + `crabmate-web`；或手动起两者后 `cd e2e && CRABMATE_API_BASE=http://127.0.0.1:8080 no_proxy=127.0.0.1,localhost npx playwright test`）。
 
