@@ -16,6 +16,11 @@ pub struct ApprovalModalSignals {
     /// 提交失败（弹窗保留并展示，允许重试）。
     pub error: RwSignal<Option<String>>,
     pub locale: RwSignal<Locale>,
+    /// 这条 lane 的生命周期阶段（#561 §8.4）：只有**前台**那条才弹框。
+    ///
+    /// 后台那条的浮层画在屏幕外，弹了等于没有（TUI 侧同一个理由，issue #337）。
+    /// 单 lane 时恒 `Foreground`，退化成改动前的「有 pending 就弹」。
+    pub phase: RwSignal<crabmate_client_api::lane_phase::LanePhase>,
 }
 
 /// 提交审批决定。提交中不重复提交；**失败时保留弹窗并回显错误**，由用户重试，
@@ -61,6 +66,7 @@ pub fn ApprovalModal(signals: ApprovalModalSignals) -> impl IntoView {
         busy,
         error,
         locale,
+        phase,
     } = signals;
 
     let deny = move |_| {
@@ -73,8 +79,11 @@ pub fn ApprovalModal(signals: ApprovalModalSignals) -> impl IntoView {
         submit_pending_approval_decision(signals, "allow_always");
     };
 
+    // #561 §8.4：只有前台那条 lane 弹框。后台那条的 pending 照常存在（左栏 `▲` 与
+    // 系统通知负责提示），只是不在这里弹 —— 否则用户会在别的 lane 上看到一个与当前
+    // 内容无关的遮罩。单 lane 时 `phase` 恒 Foreground，条件与改动前一致。
     view! {
-        <Show when=move || pending_approval.get().is_some()>
+        <Show when=move || pending_approval.get().is_some() && phase.get().can_present_modal()>
             <FocusableModalBackdrop class="approval-modal-backdrop">
                 <FocusableModalPanel
                     class="modal approval-modal"
