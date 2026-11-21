@@ -301,29 +301,36 @@ pub fn format_fetch_transport_error(e: &wasm_bindgen::JsValue) -> String {
     msg
 }
 
-/// 将以 `/` 开头的 API 路径接到基址上；基址为空则原样返回 `path`。
+/// 把 `/…` 路径接到 `base` 上（纯函数：无 IO、不读全局 current scope）。
 ///
-/// 已是 `http(s)://` 绝对 URL 时原样返回。
+/// 已是 `http(s)://` 绝对 URL 时原样返回；`path` 为空按 `/`；缺前导 `/` 时补上。
 #[must_use]
-pub fn api_url(path: &str) -> String {
+pub fn join_api_path(base: &str, path: &str) -> String {
     let p = path.trim();
     if p.starts_with("http://") || p.starts_with("https://") {
         return p.to_string();
     }
-    let path = if p.is_empty() {
+    let p = if p.is_empty() {
         "/"
     } else if p.starts_with('/') {
         p
     } else {
         // 容错：缺前导 `/` 时补上
-        return api_url(&format!("/{p}"));
+        return join_api_path(base, &format!("/{p}"));
     };
-    let base = api_base_url();
     if base.is_empty() {
-        path.to_string()
+        p.to_string()
     } else {
-        format!("{base}{path}")
+        format!("{base}{p}")
     }
+}
+
+/// 将以 `/` 开头的 API 路径接到基址上；基址为空则原样返回 `path`。
+///
+/// 已是 `http(s)://` 绝对 URL 时原样返回。首次调用会先决定基址（保持原有水合语义）。
+#[must_use]
+pub fn api_url(path: &str) -> String {
+    join_api_path(&api_base_url(), path)
 }
 
 /// 壳 Device Flow 成功后写入，供 `auth_headers` 附加 `X-CrabMate-GitHub-Token`。
@@ -359,8 +366,13 @@ pub async fn ensure_github_token_hydrated_for_request() {
 }
 
 pub fn auth_headers() -> Headers {
+    // 保持旧语义：零参路径会触发 Bearer 水合（纯浏览器冷启动仍靠它取引导键）。
+    auth_headers_with_bearer(&web_api_bearer_token())
+}
+
+fn auth_headers_with_bearer(bearer: &str) -> Headers {
     let h = Headers::new().expect("Headers::new");
-    if let Some(creds) = crabmate_client_api::web_api_credential_pair(&web_api_bearer_token()) {
+    if let Some(creds) = crabmate_client_api::web_api_credential_pair(bearer) {
         let _ = h.set(
             crabmate_client_api::HEADER_AUTHORIZATION,
             &creds.authorization,
@@ -392,6 +404,25 @@ pub fn is_web_api_credential_error(err: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn join_api_path_handles_the_four_shapes() {
+        // 空基址 = 同 Origin：原样给出路径。
+        assert_eq!(join_api_path("", "/status"), "/status");
+        // 有基址就拼上去（基址已规范化，无尾斜杠）。
+        assert_eq!(
+            join_api_path("http://127.0.0.1:8080", "/status"),
+            "http://127.0.0.1:8080/status"
+        );
+        // 绝对 URL 不拼。
+        assert_eq!(
+            join_api_path("http://a:1", "https://b:2/x"),
+            "https://b:2/x"
+        );
+        // 空路径按 `/`；缺前导斜杠补上（#558 之前的行为，不能漂）。
+        assert_eq!(join_api_path("http://a:1", "  "), "http://a:1/");
+        assert_eq!(join_api_path("http://a:1", "status"), "http://a:1/status");
+    }
 
     #[test]
     fn detects_server_web_api_credential_message() {
