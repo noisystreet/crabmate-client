@@ -379,17 +379,17 @@ elif [ "$TEST" = "all" ]; then
     # `mock-multi-turn` / `mock-v2-multi-turn-boundaries` 等价覆盖，见 e2e/README.md 分工），
     # 也不含 victauri_real_llm（需 REAL_LLM_E2E + 本机密钥，用 `./scripts/victauri-e2e.sh real_llm` 单跑）。
     MISSING=""
-    # 已迁到 Playwright（e2e/specs，随 PR 门禁跑）的 suite 不再列在这里：#152 的
-    # Wave 1–3 合计迁走 status_bar / visible_messages / session_crud / settings /
-    # prefs_theme / keyboard / scroll_send / sse_stub / sse_more / ui_layout /
-    # side_toolbar / user_data。
+    # 已迁到 Playwright（e2e/specs，随 PR 门禁跑）的 suite 不再列在这里：#152 / #548
+    # 合计迁走 status_bar / visible_messages / session_crud / settings / prefs_theme /
+    # keyboard / scroll_send / sse_stub / sse_more / ui_layout / side_toolbar /
+    # user_data / conversation / pagination。
     # 已删除（不是迁移）：ide_layout 的 `layout-mode-toggle` / `ide-layout-root` 随 UI
     # 重构消失、turn_layout 的多工具用例需按 AG-UI（V2）重写 —— 两者原处即为红，
     # 留着只是噪音（见 #152）。
-    # 剩下的：壳冒烟（e2e）、壳专属钥匙串（settings2）、以及依赖
-    # `CM_E2E_FIXTURES=1` 的 conversation / pagination（阻塞待定）。
-    for name in victauri_e2e victauri_settings2 victauri_conversation \
-        victauri_pagination; do
+    # 剩下的：壳冒烟（e2e）与壳专属钥匙串（settings2）。conversation / pagination 的
+    # 分页用例已由 `e2e/specs/mock-conversation-pagination.spec.ts` 用 `page.route`
+    # 覆盖，不再需要 `CM_E2E_FIXTURES=1` 的播种路由（#548）。
+    for name in victauri_e2e victauri_settings2; do
         BIN=$(find_test_bin "$name")
         if [ -z "$BIN" ]; then
             # 原先静默跳过：全部 suite 缺席也会走到 ALL PASSED（假绿）
