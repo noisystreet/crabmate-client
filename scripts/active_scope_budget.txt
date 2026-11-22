@@ -1,0 +1,30 @@
+# 零参作用域包装的**每文件调用面**预算 —— #558 项 6 门禁的数据文件，
+# 判定逻辑见 scripts/active_scope_check.py。
+#
+# 语义是 ratchet（与 css_literals_budget.txt 同风格）：
+#   - 多一处 → 失败：会被后台 lane 并发触发的路径必须改用收 holder 的 *_on(holder) 版本；
+#   - 少一处 → 也失败：预算只收紧不放松，改少了就同步下调这里的数字。
+# 重新盘点当前值：python3 scripts/active_scope_check.py --print-baseline
+#
+# 统计口径：api_base_url / api_url / prepare_api_auth / auth_headers / web_api_bearer_token
+# 的调用点，排除注释、字符串字面量、定义行与方法调用（x.name( )），带 :: 限定的算命中。
+
+frontend/src/api/browser.rs                    3
+# 已知待收窄：SSE 请求构造（auth_headers / api_url）仍取前台那份；后台 lane 断线重连
+# （Last-Event-ID）会打到前台 lane 的 serve。收窄时这条数字应归 0。
+frontend/src/api/chat_stream/http_request.rs   2
+frontend/src/api/github_oauth.rs               8
+frontend/src/api/http.rs                      12
+frontend/src/api/http_conversation_state.rs    3
+frontend/src/api/http_permission.rs            2
+frontend/src/api/http_workspace_clone.rs       3
+frontend/src/api/http_workspace_fs_extra.rs    3
+frontend/src/api/http_workspace_projects.rs    3
+frontend/src/api/http_workspace_raw.rs         6
+frontend/src/api/session_store.rs              3
+frontend/src/api/user_data.rs                  3
+frontend/src/app/app_signals/connection.rs     1
+frontend/src/app/connection_feed.rs            1
+frontend/src/app/nav_rail_connections.rs       1
+frontend/src/app/settings_sections.rs          1
+frontend/src/app/workspace_root_actions.rs     1

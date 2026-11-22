@@ -35,6 +35,9 @@ bash "$ROOT/scripts/check-tui-palette-usage.sh"
 echo "[check] storage scope (connection-scoped localStorage keys have one source)"
 bash "$ROOT/scripts/check-storage-scope.sh"
 
+echo "[check] active scope (readers of ACTIVE are registered; zero-arg wrapper call budget matches)"
+bash "$ROOT/scripts/check-active-scope.sh"
+
 echo "[check] icons (no literal <svg> outside icon.rs; svg rule sizes must be var(--icon-*))"
 bash "$ROOT/scripts/check-icons.sh"
 

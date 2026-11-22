@@ -1,0 +1,18 @@
+# 读 `ACTIVE`（当前前台 lane 的那份作用域）的白名单 —— #558 项 6 门禁的数据文件，
+# 判定逻辑见 scripts/active_scope_check.py。
+#
+# 格式：<frontend/src 下的相对路径> :: <ident>   # <理由>
+# 理由必填：没有理由的条目不算豁免（直接判失败）。
+#
+# 只登记「前台天然唯一」的调用面：零参包装本身、用户操作直接触发的设置 / 凭据 / 用户数据
+# 路径、以及判断「这份是不是前台那份」的水合兜底。跨 lane 的路径一律改用显式收 holder 的
+# 版本（api_url_on / prepare_api_auth_on / auth_headers_for / *_scoped_local_storage_raw_on /
+# fetch_json_on），不要往这里加条目。
+
+api/browser.rs :: active_holder      # 零参包装 api_base_url / api_url / prepare_api_auth / auth_headers / web_api_bearer_token 与首次水合的实现
+api/browser.rs :: bearer             # web_api_bearer_token() 读前台 Bearer（零参口，只有前台唯一调用方）
+api/browser.rs :: is_active          # current_conn_fp_on / 水合里判断「这份是不是前台那份」，据此决定要不要顺手水合
+api/http_scoped.rs :: active_holder  # fetch_json / fetch_json_with_body 是前台口径包装；跨 lane 走 fetch_json_on(holder)
+api/user_data.rs :: active_holder    # 用户数据 / 凭据读写由设置页与启动期直接触发，前台天然唯一
+api/web_api_bearer_local.rs :: active_holder  # set/clear_web_api_bearer_token_async 的零参版本，注释已写明「设置页是前台唯一调用点」
+api/client_llm_cache.rs :: active_holder      # 已知待收窄：thinking mode 的分域键应按 lane 走，当前仍取前台（#558 项 4 残留）

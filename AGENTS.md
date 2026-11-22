@@ -76,6 +76,16 @@
   are deliberately **not** scoped and stay out of this list. No allowlist; enforced by `scripts/check-storage-scope.sh` (hook + `scripts/check.sh`)
   The same gate covers the two-level anchor `crabmate-conn-fp`, which records which connection the window-level key
   currently belongs to — without it the app would borrow the other serve's setting instead of starting from defaults.
+- Active-scope **gate**: reading `connection_scope::ACTIVE` (the *foreground* lane's scope) must stay an explicit,
+  registered decision — inside `frontend/src/api/**` the zero-arg readers (`active_holder` / `bearer` / `is_active`)
+  are only allowed for entries in `scripts/active_scope_allowlist.txt` (reason required; a stale entry fails too),
+  and every file's count of zero-arg wrappers (`api_base_url` / `api_url` / `prepare_api_auth` / `auth_headers` /
+  `web_api_bearer_token`) must **equal** its line in `scripts/active_scope_budget.txt` — one more fails (a
+  background-lane path must take a `holder`), and one fewer fails as well (the budget ratchets down, it is not a
+  floor). Reason: a request that resolves its base URL / Bearer through `ACTIVE` is served by whichever lane
+  happens to be in front, which is exactly the 2026-11-22 report where switching lanes showed the other serve's
+  data. `python3 scripts/active_scope_check.py --print-baseline` re-lists current values; enforced by
+  `scripts/check-active-scope.sh` (hook + `scripts/check.sh`)
 - Icons **gate**: frontend icons must come from one template source and one size source — no literal `<svg` in `frontend/src/**/*.rs` except `frontend/src/icon.rs` (use the `Icon` component / `icon_*` helpers), and inside `frontend/styles/*.css` any `svg` type-selector rule's `width` / `height` (incl. `min-` / `max-`) must be `var(--icon-*)` (three tiers in `tokens.css`); opt out in place with `icon-gate: allow <reason>` on the rule's line (Rust) or in the rule's leading comment (CSS); known blind spot: it does **not** verify that a class name and the `<svg>` element are the same element, so
   `.container svg` still counts as evidence for `.container` — that regression class (e.g. the 2026-09-25 `workspace-tree-chevron` one) needs code review; enforced by `scripts/check-icons.sh` (hook + `scripts/check.sh`)
 - Modal shell **gate**: `role="dialog"` / `role="alertdialog"` and `aria-modal` may only be emitted by the shared shell — no such literal in `frontend/src/**/*.rs` except `frontend/src/app/focusable_menu.rs` (which owns `FocusableModalPanel` with `dialog_role` / `labelledby` / `testid` / `stop_pointerdown` / `on_escape`); the imperative equivalent (`set_attribute("role", "dialog")`) is caught too, passing `dialog_role="dialog"` to the shell is not; opt out in place with `modal-gate: allow <reason>` on the offending line (the image lightbox builds DOM imperatively and is the one current
