@@ -110,7 +110,13 @@ pub(super) fn wire_changelist_fetch_effects(
             let md_on = markdown_render.get_untracked();
             spawn_local(async move {
                 let loc = load_locale_from_storage();
-                match fetch_workspace_changelog(cid.as_deref(), loc).await {
+                match fetch_workspace_changelog(
+                    &crate::api::connection_scope::active_holder(),
+                    cid.as_deref(),
+                    loc,
+                )
+                .await
+                {
                     Ok(r) => {
                         if let Some(e) = r.error {
                             changelist_modal_body

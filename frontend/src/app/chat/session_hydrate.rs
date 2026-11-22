@@ -580,6 +580,7 @@ pub(crate) mod conversation_hydration_cycle {
             &apply,
             locale,
             fetch_conversation_messages(
+                &crate::api::connection_scope::active_holder(),
                 &cid,
                 crate::conversation_messages_page::ConversationMessagesFetchParams::tail_page(),
                 locale,
@@ -732,6 +733,7 @@ pub(crate) fn try_load_older_messages_for_active_session(
     let chat2 = chat;
     spawn_local(async move {
         let resp = match crate::api::fetch_conversation_messages(
+            &crate::api::connection_scope::active_holder(),
             &snap.cid,
             crate::conversation_messages_page::ConversationMessagesFetchParams::older_before(
                 window_start,

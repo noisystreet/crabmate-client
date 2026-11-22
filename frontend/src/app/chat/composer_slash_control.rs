@@ -302,7 +302,7 @@ fn handle_workspace(
     let stream = shell.stream.clone();
     if args.is_empty() {
         spawn_local(async move {
-            match fetch_workspace(None, loc).await {
+            match fetch_workspace(&crate::api::connection_scope::active_holder(), None, loc).await {
                 Ok(w) => {
                     stream.status_err.set(None);
                     push_control_slash_notice(chat, format!("工作区: {}", w.path));
@@ -338,7 +338,7 @@ fn handle_agent(args: &[&str], shell: &ComposerStreamShell, ctx: WebSlashControl
             let loc = ctx.locale.get_untracked();
             let cur = ctx.selected_agent_role.get_untracked();
             spawn_local(async move {
-                match fetch_status(loc).await {
+                match fetch_status(&crate::api::connection_scope::active_holder(), loc).await {
                     Ok(s) => {
                         let ids = if s.agent_role_ids.is_empty() {
                             "（未配置多角色；可用 default）".to_string()
@@ -560,7 +560,7 @@ fn handle_config(
     }
     let stream = shell.stream.clone();
     spawn_local(async move {
-        match fetch_status(loc).await {
+        match fetch_status(&crate::api::connection_scope::active_holder(), loc).await {
             Ok(s) => {
                 stream.status_err.set(None);
                 push_control_slash_notice(
@@ -662,7 +662,7 @@ fn handle_api_base(
 fn handle_context(shell: &ComposerStreamShell, chat: ChatSessionSignals, loc: Locale) {
     let stream = shell.stream.clone();
     spawn_local(async move {
-        match fetch_status(loc).await {
+        match fetch_status(&crate::api::connection_scope::active_holder(), loc).await {
             Ok(s) => {
                 stream.status_err.set(None);
                 push_control_slash_notice(

@@ -69,7 +69,7 @@ fn write_local_storage_item(key: &str, value: &str) {
 #[must_use]
 pub(crate) fn current_conn_fp_on(holder: &connection_scope::ScopeHolder) -> String {
     if !holder.is_base_settled() && connection_scope::is_active(holder) {
-        hydrate_api_base_once();
+        hydrate_api_base_once_on(holder);
     }
     // 契约：**非前台**的 holder 必须已由它自己的启动路径定过基址。没有这道断言时，
     // 一条还没 `set_api_base` 的后台 lane 会拿空基址算出「同 Origin」的指纹 —— 于是
@@ -214,12 +214,7 @@ fn adopt_unanchored_base(storage: &web_sys::Storage, label: &str) -> Option<Stri
     value
 }
 
-/// `None` = 无 storage / 键缺失；`Some` = 键存在（值可为空白，表示显式同 Origin）。
-fn read_api_base_local_storage_raw() -> Option<String> {
-    read_api_base_local_storage_raw_on(&connection_scope::active_holder())
-}
-
-/// [`read_api_base_local_storage_raw`] 的**显式 holder** 版本（#558 项 3b）。
+/// 读**指定 holder** 存储域里的基址原始值（#558 项 3b；`None` = 无 storage / 键缺失）。
 ///
 /// 基址键的域**由它自己的值算出来**（[`adopt_unanchored_base`]），所以这里只换
 /// 「域后缀」与「指纹」，回退链一行不动。
@@ -351,20 +346,24 @@ pub fn resolve_api_base_url(ls_raw: Option<&str>, build_default: &str) -> String
     }
 }
 
-fn hydrate_api_base_once() {
-    if connection_scope::base_settled() {
+/// 决定**这一份**作用域的基址（首次访问时才读盘）。
+///
+/// #569：基址必须按 holder 决定。多 lane 时如果还问「当前前台那份 settle 了吗」，
+/// 第二条 lane 的请求会一直用第一条的基址 —— 它的 UI 上写着 B 台地址，数据全是 A 台的。
+fn hydrate_api_base_once_on(holder: &connection_scope::ScopeHolder) {
+    if holder.is_base_settled() {
         return;
     }
     // 先置「已决定」再读盘：后面不管读到什么都算数（包括「读到空、用构建期默认」），
     // 不该因为一次空的读取就每次访问都重打一次 `localStorage`。
-    connection_scope::mark_base_settled();
+    holder.mark_base_settled();
     let chosen = resolve_api_base_url(
-        read_api_base_local_storage_raw().as_deref(),
+        read_api_base_local_storage_raw_on(holder).as_deref(),
         &build_time_api_base_default(),
     );
     // 已经把值写进来的路径（URL hash 交接 / 设置页）不能被这里覆盖。
-    if connection_scope::api_base().is_empty() {
-        connection_scope::set_api_base(&chosen);
+    if holder.api_base().is_empty() {
+        holder.set_api_base(&chosen);
     }
 }
 
@@ -416,11 +415,22 @@ pub fn set_api_base_url_with(holder: &connection_scope::ScopeHolder, base: &str)
     write_api_base_local_storage_on(holder, &t);
 }
 
+/// **指定作用域**的 API 基址（无尾 `/`）；空表示同 Origin 相对路径。
+///
+/// #569 的正解入口：每条 lane 传自己那份 holder，请求才不会漏到前台的另一条 lane。
+#[must_use]
+pub fn api_base_url_on(holder: &connection_scope::ScopeHolder) -> String {
+    hydrate_api_base_once_on(holder);
+    holder.api_base()
+}
+
 /// 当前 API 基址（无尾 `/`）；空表示同 Origin 相对路径。
+///
+/// 这是「**前台默认** holder」的口径（#558 收窄后）：跨 lane 的请求走
+/// [`api_base_url_on`]，别用这一条。
 #[must_use]
 pub fn api_base_url() -> String {
-    hydrate_api_base_once();
-    connection_scope::api_base()
+    api_base_url_on(&connection_scope::active_holder())
 }
 
 /// 从已规范化的 `http(s)://` API 基址取出 host（不含端口）。
@@ -510,12 +520,22 @@ pub fn join_api_path(base: &str, path: &str) -> String {
     }
 }
 
-/// 将以 `/` 开头的 API 路径接到基址上；基址为空则原样返回 `path`。
+/// 把 API 路径接到**这一份**作用域的基址上（#569）。
+///
+/// 每条 lane 的请求都该走这条：`api_url` 那份零参口径读的是「当前前台」，后台 lane
+/// 的轮询借它就打到别人家的 serve 上。
+#[must_use]
+pub fn api_url_on(holder: &connection_scope::ScopeHolder, path: &str) -> String {
+    join_api_path(&api_base_url_on(holder), path)
+}
+
+/// 将以 `/` 开头的 API 路径接到**前台**基址上；基址为空则原样返回 `path`。
 ///
 /// 已是 `http(s)://` 绝对 URL 时原样返回。首次调用会先决定基址（保持原有水合语义）。
+/// 跨 lane 的调用点请用 [`api_url_on`]。
 #[must_use]
 pub fn api_url(path: &str) -> String {
-    join_api_path(&api_base_url(), path)
+    api_url_on(&connection_scope::active_holder(), path)
 }
 
 /// 壳 Device Flow 成功后写入，供 `auth_headers` 附加 `X-CrabMate-GitHub-Token`。

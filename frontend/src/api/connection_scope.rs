@@ -23,7 +23,7 @@
 //! 和「每 lane 一棵组件子树」一起做才有意义。
 
 use std::cell::RefCell;
-use std::rc::Rc;
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use crabmate_client_api::ConnectionKey;
 use crabmate_client_api::connection_scope::ConnectionScope;
@@ -31,13 +31,21 @@ use crabmate_client_api::connection_scope::ConnectionScope;
 /// 一份连接作用域的**持有者**（#558）。
 ///
 /// 值活在这里，**不再直接躺在 `thread_local` 里**：一条 lane / 一个窗口各持一份，
-/// 将来由组件 ctx 提供，`join_api_path(scope.api_base(), …)` 那一族入口就能显式拿到它。
+/// 由 lane 的视图入参显式传下去，`api_url_on(holder, …)` 那一族入口直接问它。
 ///
 /// 本步只做「搬家」：`ACTIVE` 记的是「当前这条 lane 用哪一份」的**指针**，零参读取口
-/// （`api_base()` / `bearer()`）经它转发 —— 所以 43 处调用点一行不用改。删掉 `ACTIVE`、
-/// 改成从 ctx 取，是 #558 的下一步（那一步才需要改调用点）。
+/// （`api_base()` / `bearer()`）经它转发 —— 所以 43 处调用点一行不用改。
+///
+/// # 为什么是 `Arc<Mutex<_>>` 而不是 `Rc<RefCell<_>>`
+///
+/// 接线层（`run_shell_wiring_in_order`）里的请求闭包是 `Arc<dyn Fn() + Send + Sync>`，
+/// 而 `Rc<RefCell<_>>` 不满足 `Send`。多 lane 要求「每条 lane 的请求带它自己的 holder」，
+/// 那个 holder 必须能被这些闭包捕获 —— 于是内部换成 `Arc<Mutex<_>>`。单线程使用照旧
+/// （`Mutex` 未争用时就是一次原子读），方法签名没变。
+///
+/// 代价：`Mutex` **不可重入**，所以 `read` / `update` 一律在锁外调用回调（见各自注释）。
 #[derive(Clone)]
-pub(crate) struct ScopeHolder(Rc<RefCell<ScopeState>>);
+pub(crate) struct ScopeHolder(Arc<Mutex<ScopeState>>);
 
 #[derive(Default)]
 struct ScopeState {
@@ -74,56 +82,71 @@ impl ScopeHolder {
     /// 多 lane 时由 lane 容器给（`None` = 该 lane 不分域，等于历史键名）；这样
     /// 「值写进哪份 holder」与「读写哪个存储域」是同一个答案，不会一半一半。
     pub(crate) fn new_with_storage_label(storage_label: Option<String>) -> Self {
-        Self(Rc::new(RefCell::new(ScopeState {
+        Self(Arc::new(Mutex::new(ScopeState {
             storage_label,
             ..ScopeState::default()
         })))
     }
 
+    /// 短锁：字段读写都经它，省得每处各写一遍 `lock().expect(..)`。
+    ///
+    /// 永不 `unwrap`：`panic` 会污染这把锁，而调用方拿到 `PoisonError` 也无从恢复 ——
+    /// 这里说清楚「持锁期间不做可能 panic 的事」，把中毒面收到最小。
+    fn lock(&self) -> MutexGuard<'_, ScopeState> {
+        self.0
+            .lock()
+            .expect("scope 锁不该被毒化：持锁期间只做赋值与克隆")
+    }
+
     /// 这一份的存储域后缀；`None` = 用历史键名（纯浏览器 / Android / 未注入）。
     #[must_use]
     pub(crate) fn storage_label(&self) -> Option<String> {
-        self.0.borrow().storage_label.clone()
+        self.lock().storage_label.clone()
     }
 
     /// 读这一份（第一次访问时建立空实例）。
+    ///
+    /// **回调在锁外调用**：`Mutex` 不可重入，而 `f` 里完全可能顺手再问这个 holder
+    /// 一次（例如 `api_base_fingerprint(&holder.api_base())` 那种组合）—— 持锁回调
+    /// 就是死锁。`ConnectionScope` 只是几个 `String`，克隆一份比排查死锁便宜。
     fn read<R>(&self, f: impl FnOnce(&ConnectionScope) -> R) -> R {
-        {
-            let mut state = self.0.borrow_mut();
+        let scope = {
+            let mut state = self.lock();
             if state.scope.is_none() {
                 state.scope = Some(empty_scope());
             }
-        }
-        // 只在取值这一步借用：`f` 内部若再读 scope 不会被挡住。
-        let state = self.0.borrow();
-        f(state.scope.as_ref().expect("上面刚建好"))
+            state.scope.clone().expect("上面刚建好")
+        };
+        f(&scope)
     }
 
     /// 用 `f` 产生下一版 scope（值语义替换，不做原地改字段）。
+    ///
+    /// 与 [`Self::read`] 同理：先把当前值**取出来**、放锁、再调 `f`、最后写回。
     fn update(&self, f: impl FnOnce(&ConnectionScope) -> ConnectionScope) {
-        let mut state = self.0.borrow_mut();
-        let current = state.scope.take().unwrap_or_else(empty_scope);
-        state.scope = Some(f(&current));
+        let current = self.lock().scope.take().unwrap_or_else(empty_scope);
+        let next = f(&current);
+        self.lock().scope = Some(next);
     }
 
-    fn mark_base_settled(&self) {
-        self.0.borrow_mut().base_settled = true;
+    pub(crate) fn mark_base_settled(&self) {
+        self.lock().base_settled = true;
     }
 
     /// 这一份的基址是否已经决定过（per-holder；`api::browser` 算指纹前要判它）。
     #[must_use]
     pub(crate) fn is_base_settled(&self) -> bool {
-        self.0.borrow().base_settled
+        self.lock().base_settled
     }
 
     /// 标记「这一份的 Bearer 已经读过盘」——水合失败也要标，否则每次请求都重读钥匙串。
     pub(crate) fn mark_bearer_settled(&self) {
-        self.0.borrow_mut().bearer_settled = true;
+        self.lock().bearer_settled = true;
     }
 
     /// Bearer 是否已经水合过一次（幂等开关，**per-holder**：A 读过不代表 B 读过）。
     pub(crate) fn is_bearer_settled(&self) -> bool {
-        self.0.borrow().bearer_settled
+        self.lock().bearer_settled
     }
 
     /// 这一份的基址（空 = 同 Origin）。
@@ -193,7 +216,7 @@ pub(crate) fn is_active(holder: &ScopeHolder) -> bool {
     ACTIVE.with(|cell| {
         cell.borrow()
             .as_ref()
-            .is_some_and(|a| Rc::ptr_eq(&a.0, &holder.0))
+            .is_some_and(|a| Arc::ptr_eq(&a.0, &holder.0))
     })
 }
 
@@ -230,24 +253,13 @@ pub(crate) fn new_holder(storage_label: Option<String>, base: Option<&str>) -> S
     holder
 }
 
-/// 当前基址（空 = 同 Origin）。**不**触发任何磁盘读取。
+/// 当前 Bearer（空 = 没有）。**不**触发任何水合。
 ///
-/// 这是「**前台默认** holder」的读取口（#558 收窄后的口径）：跨 lane 的路径不要用它，
-/// 改问自己那条 lane 的 [`ScopeHolder`]。
-#[must_use]
-pub(crate) fn api_base() -> String {
-    active_holder().api_base()
-}
-
-/// 当前 Bearer（空 = 没有）。**不**触发任何水合。口径同 [`api_base`]。
+/// 口径同 [`active_holder`]：这是「前台那份」。跨 lane 的路径请用 holder 自己的方法，
+/// 或 [`crate::api::browser::auth_headers_for`]。
 #[must_use]
 pub(crate) fn bearer() -> String {
     active_holder().bearer()
-}
-
-/// 换基址：值 + 标记一起更新，调用方不必记得「改完还要置 settled」。
-pub(crate) fn set_api_base(raw: &str) {
-    active_holder().set_api_base(raw);
 }
 
 /// 换 Bearer（`memory_only` 与「从钥匙串水合」共用这一条路径）。
@@ -255,15 +267,9 @@ pub(crate) fn set_bearer(raw: &str) {
     active_holder().set_bearer(raw);
 }
 
-#[must_use]
-pub(crate) fn base_settled() -> bool {
-    active_holder().is_base_settled()
-}
-
-/// 只置标记、不动值：水合路径要「先声明读过盘，再填值」，中途失败也不会反复重读。
-pub(crate) fn mark_base_settled() {
-    active_holder().mark_base_settled();
-}
+// #569：`api_base()` / `set_api_base()` / `base_settled()` / `mark_base_settled()` 的
+// 零参包装已删 —— 它们只会把「用哪一份作用域」这个问题又推回给 `ACTIVE`。基址一律按
+// holder 取：`browser::api_base_url_on` / `api_url_on` / `holder.api_base()`。
 
 #[cfg(test)]
 mod tests {
@@ -272,9 +278,13 @@ mod tests {
     /// 同一个 `thread_local` 在同一测试线程内跨用例共享 —— 每条用例只断言自己写过的部分。
     #[test]
     fn setters_replace_the_value_and_settle_it() {
-        set_api_base("  http://127.0.0.1:8080/ ");
-        assert_eq!(api_base(), "http://127.0.0.1:8080", "规范化在 scope 内完成");
-        assert!(base_settled());
+        active_holder().set_api_base("  http://127.0.0.1:8080/ ");
+        assert_eq!(
+            active_holder().api_base(),
+            "http://127.0.0.1:8080",
+            "规范化在 scope 内完成"
+        );
+        assert!(active_holder().is_base_settled());
 
         set_bearer("  tok  ");
         assert_eq!(bearer(), "tok");
@@ -292,11 +302,11 @@ mod tests {
 
     #[test]
     fn swapping_one_field_keeps_the_other() {
-        set_api_base("http://a:1");
+        active_holder().set_api_base("http://a:1");
         set_bearer("tok");
-        set_api_base("http://b:2");
+        active_holder().set_api_base("http://b:2");
         assert_eq!(bearer(), "tok", "换基址不该把凭证丢掉");
-        assert_eq!(api_base(), "http://b:2");
+        assert_eq!(active_holder().api_base(), "http://b:2");
     }
 
     /// #558 的验收地基：两个持有者必须有各自的基址 / Bearer / 水合标记。

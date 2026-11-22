@@ -227,7 +227,8 @@ pub async fn reload_workspace_panel(
     workspace_subtree_cache.set(HashMap::new());
     workspace_subtree_loading.set(HashSet::new());
     workspace_loading.set(true);
-    let outcome = fetch_workspace(None, locale).await;
+    let outcome =
+        fetch_workspace(&crate::api::connection_scope::active_holder(), None, locale).await;
     if WORKSPACE_PANEL_FETCH_GEN.load(Ordering::Acquire) != my_gen {
         return;
     }
@@ -276,7 +277,7 @@ pub async fn refresh_workspace_panel_after_mutation(
         crate::workspace_tree::workspace_expand_ancestor_dirs(expanded, hint.parent_rel.as_str());
     });
 
-    match fetch_workspace(None, locale).await {
+    match fetch_workspace(&crate::api::connection_scope::active_holder(), None, locale).await {
         Ok(d) => {
             if WORKSPACE_PANEL_FETCH_GEN.load(Ordering::Acquire) != my_gen {
                 return;
@@ -305,7 +306,12 @@ pub async fn refresh_workspace_panel_after_mutation(
             return;
         }
         subtree_loading_path(rel.clone(), workspace_subtree_loading);
-        let res = fetch_workspace(Some(rel.as_str()), locale).await;
+        let res = fetch_workspace(
+            &crate::api::connection_scope::active_holder(),
+            Some(rel.as_str()),
+            locale,
+        )
+        .await;
         subtree_loading_path_done(rel.as_str(), workspace_subtree_loading);
         if WORKSPACE_PANEL_FETCH_GEN.load(Ordering::Acquire) != my_gen {
             return;

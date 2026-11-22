@@ -136,7 +136,12 @@ fn fetch_workspace_subtree_if_needed(
     });
     spawn_local(async move {
         let path_key = rel.clone();
-        let res = fetch_workspace(Some(&path_key), locale.get_untracked()).await;
+        let res = fetch_workspace(
+            &crate::api::connection_scope::active_holder(),
+            Some(&path_key),
+            locale.get_untracked(),
+        )
+        .await;
         subtree_loading.update(|s| {
             s.remove(&path_key);
         });
