@@ -46,6 +46,7 @@ pub mod tool_display;
 pub mod turn_lifecycle;
 pub mod url;
 pub mod workspace;
+pub mod workspace_git;
 pub mod workspace_rel;
 
 pub use ag_ui_parser::{format_user_error_with_meta, parse_ag_ui_line};
@@ -116,4 +117,9 @@ pub use workspace::{
     WORKSPACE_ALREADY_SET, WorkspaceDirData, WorkspaceDirEntry, WorkspaceInfo,
     WorkspaceProjectsData, WorkspaceSetError, WorkspaceSetErrorKind,
     classify_workspace_set_failure, parse_workspace_project_open_body, parse_workspace_set_ok_body,
+};
+
+pub use workspace_git::{
+    DETACHED_LABEL_PREFIX, DIRTY_MARKER, badge_text, badge_text_fit, counts, dirty_marker,
+    display_width, head_label, is_stale, short_oid, truncate_ellipsis,
 };
