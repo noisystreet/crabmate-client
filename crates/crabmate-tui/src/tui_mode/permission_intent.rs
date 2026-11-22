@@ -41,16 +41,11 @@ use crate::tui_mode::state::LineKind;
 /// 的读数都能当「此刻生效」。
 #[must_use]
 pub(super) fn perm_value(intent: Option<&str>, effective: Option<&str>) -> Option<String> {
-    let intent = intent.map(str::trim).filter(|s| !s.is_empty());
-    let effective = effective.map(str::trim).filter(|s| !s.is_empty());
-    match (intent, effective) {
-        (Some(i), Some(e)) if i == e => Some(i.to_string()),
-        // 终端宽度紧张：`→` 两侧不留空格（`read→approved` 仍是 14 列，`read → approved` 是 16）。
-        (Some(i), Some(e)) => Some(format!("{i}→{e}")),
-        (Some(i), None) => Some(i.to_string()),
-        (None, Some(e)) => Some(e.to_string()),
-        (None, None) => None,
-    }
+    // 「相同→单值 / 不同→`意图→生效` / 只有一侧→那一侧」的规则在共享层：桌面底栏那颗 chip
+    // 用的是同一个函数，两处各写一遍迟早出现「TUI 显示并列、Web 只显示一个」。
+    // `bound` 这里传 `true`：有没有已持久化会话已由 [`status_values`] 判过（无会话时它把
+    // effective 折成 `None` 或估算记号 `~x`，传给本函数的就是终值）。
+    crabmate_client_api::permission::perm_display(true, intent, effective).map(|d| d.plain())
 }
 
 /// 状态行 `perm` 段两个字段的取值：`(生效侧, 意图侧)`，交给 [`perm_value`] 组合。

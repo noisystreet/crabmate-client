@@ -38,11 +38,16 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 - **Lane polling and session loads now use their own serve scope, not the front lane's.**
 
 - **Bump `url` to 2.5.9 for RUSTSEC-2026-0592; allow `paste`'s unmaintained advisory.**
+
 - **The window no longer goes inert from a boot-time wasm panic over the connection feed.**
 
 - **A new lane's reactive owner no longer dies with the button that created it.**
 
 - **The status-bar serve chip now follows the lane you switch to.**
+
+- **The left-rail lane list now shows the TUI's status glyph, name, counts and readouts.**
+
+- **The permission chip no longer shows an arrow before a session is bound (matches the TUI).**
 
 - **Scrolling back no longer re-keys the older page on every fetch.**
 

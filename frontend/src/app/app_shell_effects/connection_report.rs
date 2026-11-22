@@ -62,6 +62,11 @@ pub struct ConnectionReportSignals {
     /// 这条 lane 的生命周期阶段（#561 §8.2）：未读要判「窗口在前台 **且** 这条 lane
     /// 是前台那条」。单 lane 时恒 `Foreground`，退化成原来的「窗口是否失焦」。
     pub phase: RwSignal<crabmate_client_api::lane_phase::LanePhase>,
+    /// 左栏那一行的读数（#569 对齐 TUI 的 lane 行）。
+    ///
+    /// 状态 / 未读 / 上下文占比**就在这里一起算**：这四项本来就由本模块产出（同一根轴线、
+    /// 同一套 `connection_*` 谓词），再在左栏算一遍就会出现「同一台 serve 两个读数」。
+    pub row: crate::app::app_signals::LaneRailRow,
 }
 
 /// lane 是否**真正可见**（#561 §8.2 的口径）：窗口在前台 **且** 这条 lane 是前台那条。
@@ -103,9 +108,9 @@ fn rail_metrics(
 /// `context` 与 `busy` 合成一条命令、且**同一条记账**：两个字段分开记，会出现「context
 /// 变了但 busy 没变」时多报一次、或反过来漏报一次。
 pub fn wire_connection_status_report(sig: ConnectionReportSignals) {
-    if !tauri_shell_available() {
-        return;
-    }
+    // **读数照算，只有上报依赖壳**（#569）：左栏那条 lane 行要显示状态 / 未读 / 上下文占比，
+    // 它和「上报给桌面壳」是同一批数字。整段早退会让左栏那行永远停在 Invariant（Idle · 无读数）。
+    let shell = tauri_shell_available();
 
     let registered = Memo::new(move |_| connections_registered().get());
     let focused = window_focused_signal();
@@ -132,9 +137,14 @@ pub fn wire_connection_status_report(sig: ConnectionReportSignals) {
             turn_busy,
         );
 
+        // 左栏那条 lane 行：同一批数字顺带写进去（#569）。
+        sig.row.status.set(status);
+        sig.row.unread.set(next_unread);
+        sig.row.context.set(context.clone());
+
         // 还没进注册表：**不能**把想报的值记成「已上报」—— 否则登记完成那一刻若
         // 状态再没变过，就永远不会发，症状与「从来没上报」一模一样。
-        if !registered.get() {
+        if !shell || !registered.get() {
             return;
         }
         if reported_status.get_value() != Some(status) {

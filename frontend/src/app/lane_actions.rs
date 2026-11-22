@@ -22,14 +22,17 @@ use std::rc::Rc;
 use leptos::prelude::RwSignal;
 
 /// 「新建 lane」动作的句柄：参数是这条 lane 要连的基址（`None` = 沿用当前基址 / 同 Origin）。
-type NewLaneAction = Rc<dyn Fn(Option<String>)>;
+type NewLaneAction = Rc<dyn Fn(Option<String>, Option<String>)>;
 
-/// 左栏 lane 列表的数据源（#561 S3b）：每条 lane 的展示地址 + 当前前台下标。
+/// 左栏 lane 列表的数据源（#561 S3b）：每条 lane 的行读数 + 当前前台下标。
 ///
 /// 两个都是 `RwSignal`（`Copy` 且 `Send + Sync`），所以能直接进 `move ||` 响应式闭包 ——
 /// 换成 `Rc<RefCell<Vec<_>>>` 会在那里报 `Rc cannot be sent between threads safely`
 /// （§5.2 实测的那道边界）。切换动作走 [`switch_to`]，同样不进闭包。
-type LaneRailSignals = (RwSignal<Vec<String>>, RwSignal<usize>);
+type LaneRailSignals = (
+    RwSignal<Vec<super::app_signals::LaneRailRow>>,
+    RwSignal<usize>,
+);
 
 /// 点左栏某一行时切过去。
 type SwitchToAction = Rc<dyn Fn(usize)>;
@@ -52,16 +55,16 @@ pub(crate) fn register_new_lane(action: NewLaneAction) {
 ///
 /// 未注册时静默返回：非桌面壳（Android / 纯浏览器）与单测里没有 `App` 挂载，入口本来也不
 /// 该出现在那条路径上（`NavRailConnections` 只在桌面壳渲染）。
-pub(crate) fn new_lane(base: Option<String>) {
+pub(crate) fn new_lane(name: Option<String>, base: Option<String>) {
     let action = NEW_LANE.with(|cell| cell.borrow().clone());
     if let Some(action) = action {
-        action(base);
+        action(name, base);
     }
 }
 
 /// 注册左栏 lane 列表的数据源与切换动作（`App` 调一次）。
 pub(crate) fn register_rail(
-    labels: RwSignal<Vec<String>>,
+    labels: RwSignal<Vec<super::app_signals::LaneRailRow>>,
     active: RwSignal<usize>,
     switch_to: Rc<dyn Fn(usize)>,
 ) {
@@ -89,6 +92,9 @@ mod tests {
     #[test]
     fn running_without_registration_is_a_no_op() {
         // 注册表是 thread_local：本线程没注册过，调用必须不 panic。
-        new_lane(Some("http://127.0.0.1:18080".to_string()));
+        new_lane(
+            Some("local".to_string()),
+            Some("http://127.0.0.1:18080".to_string()),
+        );
     }
 }

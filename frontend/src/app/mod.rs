@@ -165,18 +165,17 @@ pub fn App() -> impl IntoView {
     // #561 S3b：左栏「本窗口 lane」列表的数据源 —— 每条 lane 的地址（空 = 同 Origin）与当前
     // 前台下标。两个都是 `RwSignal`（`Copy` + `Send + Sync`），能进左栏的响应式闭包；
     // 点击切换走 `lane_actions::switch_to`（thread_local，零捕获）。
-    let lane_labels = RwSignal::new(vec![rt.signals.scope.api_base()]);
     {
         let lanes = app_ctx.lanes.clone();
         lane_actions::register_rail(
-            lane_labels,
+            app_ctx.lanes.rail_rows(),
             app_ctx.lanes.active_signal(),
             Rc::new(move |index: usize| {
                 lanes.set_active(index);
             }),
         );
     }
-    register_new_lane_action(&app_ctx, lanes_host, slots.clone(), lane_labels);
+    register_new_lane_action(&app_ctx, lanes_host, slots.clone());
     wire_lane_hotkeys(app_ctx.lanes.clone());
     // 热键是**窗口级**的：只在这里注册一次。放进 `app_body` 会让每条 lane 各注册一份全局
     // 监听 —— 第二条 lane 建出来后，一次按键就 toggle 两次。
@@ -217,42 +216,42 @@ fn register_new_lane_action(
     app_ctx: &AppShellCtx,
     layer: NodeRef<leptos::html::Div>,
     slots: LaneSlots,
-    labels: RwSignal<Vec<String>>,
 ) {
     let ctx = app_ctx.clone();
     // 此刻的当前 owner 就是 `App` 组件自己的 owner（由 `App` 的 body 调用过来）。
     let root_owner = Owner::current();
-    lane_actions::register_new_lane(Rc::new(move |base: Option<String>| {
-        // 上限与 TUI 同源（`MAX_LANES = 8`，`Alt+1..8` 也只到 8）：满了就不再建 —— 每条 lane
-        // 都带一整套接线与后台轮询，「点几次就堆几条」的代价没人想要。
-        if ctx.lanes.is_full() {
-            return;
-        }
-        let Some(layer_el) = layer.get() else {
-            // 视图还没挂上。动作只可能由页面里的按钮触发，理论上到不了这里。
-            return;
-        };
-        // 下标先取：`create_slot` 与 `add_lane` 必须落在同一个 index 上。
-        let index = ctx.lanes.len();
-        let Some(slot) = slots.create_slot(&layer_el.unchecked_into(), index) else {
-            return;
-        };
-        let ctx = ctx.clone();
-        let mount = move || {
-            leptos::mount::mount_to(slot, move || {
-                let rt = ctx.add_lane(base.as_deref());
-                // 左栏列表立刻能看到这一条：地址留空表示「同 Origin」。
-                labels.update(|list| list.push(rt.signals.scope.api_base()));
-                app_body(rt)
-            })
-        };
-        // 在 `App` 的 owner 下挂载 —— 不是在「当前 owner（点击所在的 DOM 分支）」下。
-        let handle = match root_owner.clone() {
-            Some(owner) => owner.with(mount),
-            None => mount(),
-        };
-        // 还没有「关 lane」入口，先放弃句柄（与 `mount_to_body` 同一取舍）。关 lane 落地时
-        // 改成把 handle 存进 `LaneSet`，关闭时 drop 以清理那条 lane 的反应式系统。
-        handle.forget();
-    }));
+    lane_actions::register_new_lane(Rc::new(
+        move |name: Option<String>, base: Option<String>| {
+            // 上限与 TUI 同源（`MAX_LANES = 8`，`Alt+1..8` 也只到 8）：满了就不再建 —— 每条 lane
+            // 都带一整套接线与后台轮询，「点几次就堆几条」的代价没人想要。
+            if ctx.lanes.is_full() {
+                return;
+            }
+            let Some(layer_el) = layer.get() else {
+                // 视图还没挂上。动作只可能由页面里的按钮触发，理论上到不了这里。
+                return;
+            };
+            // 下标先取：`create_slot` 与 `add_lane` 必须落在同一个 index 上。
+            let index = ctx.lanes.len();
+            let Some(slot) = slots.create_slot(&layer_el.unchecked_into(), index) else {
+                return;
+            };
+            let ctx = ctx.clone();
+            let mount = move || {
+                leptos::mount::mount_to(slot, move || {
+                    // 行数据由 `add_lane` 一并推进容器（名字 + 基址），左栏立刻能看到这一条。
+                    let rt = ctx.add_lane(name.as_deref(), base.as_deref());
+                    app_body(rt)
+                })
+            };
+            // 在 `App` 的 owner 下挂载 —— 不是在「当前 owner（点击所在的 DOM 分支）」下。
+            let handle = match root_owner.clone() {
+                Some(owner) => owner.with(mount),
+                None => mount(),
+            };
+            // 还没有「关 lane」入口，先放弃句柄（与 `mount_to_body` 同一取舍）。关 lane 落地时
+            // 改成把 handle 存进 `LaneSet`，关闭时 drop 以清理那条 lane 的反应式系统。
+            handle.forget();
+        },
+    ));
 }
