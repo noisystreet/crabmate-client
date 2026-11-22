@@ -38,6 +38,7 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 - **Lane polling and session loads now use their own serve scope, not the front lane's.**
 
 - **Bump `url` to 2.5.9 for RUSTSEC-2026-0592; allow `paste`'s unmaintained advisory.**
+- **The window no longer goes inert from a boot-time wasm panic over the connection feed.**
 
 - **Scrolling back no longer re-keys the older page on every fetch.**
 

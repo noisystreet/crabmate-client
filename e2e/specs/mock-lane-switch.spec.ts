@@ -6,9 +6,12 @@
  *   1. **数据面**（已修）：请求基址只有 `ACTIVE` 一个出口，后台那条的请求打到了前台那条的
  *      serve 上。现在每条 lane 的会话桶按它自己的 `ScopeHolder` 读 —— 用例断言「第二条
  *      lane 的请求命中了它自己那个 origin」。
- *   2. **切换本身**（已知未修，见下面 `test.fixme`）：`LaneSet::set_active` 写回 `LanePhase`
- *      时，某个订阅者访问了已 dispose 的反应式值 → wasm panic → `self.active.set(index)`
- *      根本没执行，所以界面上「点了没反应」。
+ *   2. **整屏交互**（已修）：`connection_report` 第一帧读 `connections_registered()` 时，那份
+ *      「全局」signal 被建在 memo 的 computation 作用域里 —— run 完即被 dispose，此后每次读都
+ *      wasm panic；wasm32 上 panic 是 trap（`unreachable`），`js-sys` 任务的 `RefCell` 借用
+ *      永久不还，`spawn_local` 那条链一起死，表现就是「页面还画着，切 lane / 点会话都没反应」。
+ *      现在这三个应用级单例在 `bootstrap_app_shell` 里建在 `App` 的 owner 上。
+ *      用例断言「点 #2 前台切过去且主区换成 B 台的内容」——修之前必红。
  *
  * 浏览器里没有 Tauri 壳，所以这里装一个**最小假壳**：只实现 `ctl_list_instances`（两个可连
  * 实例）与 `list_connections`（本窗口那一行）。与 `mock-storage-scope.spec.ts` 同一范式 ——
@@ -157,11 +160,8 @@ test("第二条 lane 的会话桶按它自己的 serve 取（#569）", async ({ 
     .toBeGreaterThan(0);
 });
 
-// 切换本身仍红：`set_active` 写 `LanePhase` 时 panic（disposed 反应式值），
-// 于是 `active` 从未被写入，前台 slot 停在 0。修好后把 `test.fixme` 改回 `test`。
-test.fixme("点第二条 lane 会把前台切过去（#569 已知未修）", async ({
-  page,
-}) => {
+// 切换本身已修（见文件头 §2），从 `test.fixme` 恢复。
+test("点第二条 lane 会把前台切过去（#569）", async ({ page }) => {
   const hits: string[] = [];
   await routeLaneB(page, hits);
   const { activeSlot, laneRows } = await openSecondLane(page);

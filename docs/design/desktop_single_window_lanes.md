@@ -263,9 +263,18 @@ Web 侧没有「帧」，只有「挂载 / 卸载」，所以要先说清卸载�
 > 1. **数据面** —— 请求基址只经 `ACTIVE` 指针取（`api_url` / `prepare_api_auth` 的零参口径），
 >    后台那条的请求打到前台那台。**已修**：`api_url_on` / `prepare_api_auth_on` / `auth_headers_for`
 >    加每条 lane 自己的 `ScopeHolder`，`/status`、`/tasks` 与首屏会话桶已改用它。
-> 2. **切换本身** —— `LaneSet::set_active` 写回 `LanePhase` 时，某个订阅者访问了**已 dispose**
->    的反应式值，wasm panic 让 `self.active.set(index)` 从未执行 → 界面「点了没反应」。
->    **仍未修**；`e2e/specs/mock-lane-switch.spec.ts` 的第二个 `test.fixme` 是它的复现。
+> 2. **整屏交互** —— 一开始记成「`set_active` 写 `LanePhase` 时 panic，`active` 从未写入」，**这条
+>    判断是错的**：`reactive_graph` 的 effect 走 `Executor::spawn_local` + 通道异步执行，订阅者
+>    panic 拦不住同一函数里后面的 `active.set(index)`。实测到的是一条更早、更凶的 panic：
+>    `connection_report` 第一帧读 `connections_registered()` 时，那份「全局」signal 被建在 memo 的
+>    computation 作用域里（`with_cleanup` 在每次 run 后清掉本次创建的节点）→ 建完即 dispose →
+>    之后每次读都 panic；wasm32 上 panic 是 trap 而不是 unwind（`pageerror: unreachable`），
+>    Rust 栈不展开、`Drop` 全跳过，`js-sys` 任务里的 `RefCell` 借用永久不还
+>    （第二条 panic：`RefCell already borrowed`），`spawn_local` 那条链一起死 —— 界面「页面还画着，
+>    切 lane / 点会话都没反应」。
+>    **已修**：三个应用级单例（连接名单 / 已登记标记 / 可连实例）改在 `bootstrap_app_shell` 里建在
+>    `App` 的 owner 上（`connection_feed::init_app_signal_singletons`）。
+>    `e2e/specs/mock-lane-switch.spec.ts` 的第二个用例已从 `test.fixme` 恢复为 `test` 并通过。
 
 **上限**：`MAX_LANES = 8`（`crabmate_client_api::lane_attach`，与 TUI 同源，也与 `Alt+1..8` 对齐）。
 满了之后新建动作直接拒绝 —— 不建 slot、不接线；每条 lane 都带一整套 Effect 与后台轮询，

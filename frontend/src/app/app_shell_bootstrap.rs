@@ -20,6 +20,15 @@ pub fn bootstrap_app_shell() -> AppShellCtx {
         crate::tauri_shell::ensure_external_link_handler();
     }
 
+    // 应用级 signal 单例（连接名单 / 已登记标记 / 可连实例）必须**在这里**建：此刻 owner 是
+    // `App` 组件（稳定、与页面同寿），而它们的首次读取发生在 `connection_report` 的 memo 里 ——
+    // memo / effect 的 computation 作用域 run 完就 dispose 自己建出来的节点，那份「全局」signal
+    // 会建完即死，之后每次读都 panic（wasm 上 panic 是 trap，连带 `js-sys` 任务永久卡住借用，
+    // 整屏「点了没反应」）。详见 `connection_feed::init_app_signal_singletons`。
+    //
+    // 位置放在 handoff 之后：注册连接要用这里已经落到 scope 的基址。
+    super::connection_feed::init_app_signal_singletons();
+
     // #561 阶段 3：第一刀把「当前 lane 的运行时」收进容器 —— 先建信号，跑完接线，
     // 再把信号 + 接线产物 + 聊天列壳**一起**交给容器（每条 lane 一份）。
     let window = super::app_signals::WindowSignals::new();
