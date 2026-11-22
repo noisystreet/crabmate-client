@@ -37,8 +37,8 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: noisystreet/CrabMate
-          # Server 产品 tag；同一提交即 crates.io crabmate 0.9.1（当前契约钉点），故覆盖 context_budget
-          ref: v0.9.1
+          # 契约钉点 = Server main 的 e3f56e6e（PR #1463 合入；client-contract-v0.4.0 未打）；serve 与 pin 同源
+          ref: e3f56e6ed2a8d4a0404af75d1f6acf23dd5bde6b
           path: crabmate-server
 
       - name: Install system deps (OpenSSL / libssh2)

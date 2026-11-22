@@ -45,10 +45,17 @@
 
 - **Forbidden**: `path = "../crabmate_agent/..."` or any Cargo path dependency back into the Server monorepo tree
 - **Forbidden**: shell spawning / bundling a `crabmate serve` sidecar
-- Contract crate: **`crabmate`** with `default-features = false, features = ["protocol"]` (see `frontend/Cargo.toml`). Pin it **either** to crates.io semver (default) or — while Server has not published the needed version — to an immutable `git = <url>, rev = <sha>`; every manifest must carry the *same* pin line, and `path =` / `tag =` are forbidden (`tag` is movable, so not reproducible). Current pin: **crates.io `crabmate` `0.9.1`** with `default-features = false, features = ["protocol"]` — the semver shape, bumped 2026-11-19; `0.9.1` removes the `PlanStepV1` acceptance/retry/transition
-  fields and the `AcceptanceSpec` kernel from the `protocol` face (no SSE / HTTP wire change) and drops `cm_turn_layout::try_split_combined_post_tool_answer`, whose marker-split rule now lives in the Web UI. History: the semver pin `0.8.0` held 2026-11-01 … 2026-11-11, then two transition git revs (`630cd3b0`, then `817157e0` = contract tag `client-contract-v0.3.0`) until `0.9.0` shipped (2026-11-15 …
-  2026-11-19, carrying `StatusShellView.context_budget` and the estimate-only `used_input_tokens`). Do not pin old package names (`crabmate-sse-protocol`, …) and do not enable `server`.
-- Playwright E2E CI checkouts Server `serve` at git tag **`v0.9.1`** (the commit published as crates.io `crabmate` `0.9.1`, i.e. the pinned contract — see `docs/design/contract_pin.md`)
+- Contract crate: **`crabmate`** with `default-features = false, features = ["protocol"]` (see `frontend/Cargo.toml`). Pin it **either** to crates.io semver (default)
+  or — while Server has not published the needed version — to an immutable `git = <url>, rev = <sha>`; every manifest must carry the *same* pin line,
+  and `path =` / `tag =` are forbidden (`tag` is movable, so not reproducible). Current pin: **git rev `e3f56e6ed2a8d4a0404af75d1f6acf23dd5bde6b`**
+  (Server `main`, the merge of PR #1463) with `default-features = false, features = ["protocol"]` — the git-rev shape, in force since 2026-11-21
+  because the contract tag `client-contract-v0.4.0` is not cut and crates.io is still `0.9.1` (published 2026-11-18, before the merge, so it lacks
+  `GET /workspace/git`); the last semver pin, `0.9.1`, removes the `PlanStepV1` acceptance/retry/transition fields and the `AcceptanceSpec` kernel
+  from the `protocol` face (no SSE / HTTP wire change) and drops `cm_turn_layout::try_split_combined_post_tool_answer`, whose marker-split rule now
+  lives in the Web UI. History: the semver pin `0.8.0` held 2026-11-01 … 2026-11-11, then two transition git revs (`630cd3b0`, then `817157e0` =
+  contract tag `client-contract-v0.3.0`) until `0.9.0` shipped (2026-11-15 … 2026-11-19, carrying `StatusShellView.context_budget` and the
+  estimate-only `used_input_tokens`). Do not pin old package names (`crabmate-sse-protocol`, …) and do not enable `server`.
+- Playwright E2E CI checkouts Server `serve` at git rev **`e3f56e6ed2a8d4a0404af75d1f6acf23dd5bde6b`** (the commit the contract pin names, i.e. the pinned contract — see `docs/design/contract_pin.md`)
 - `crabmate-connect` is in-repo path only (`crates/crabmate-connect`); default features have **no** Tauri. Desktop/Android enable `features = ["tauri"]`
 - `crabmate-client-api` is in-repo path only (`crates/crabmate-client-api`); no Tauri / `web-sys` / `reqwest` / `tokio`
 - `crabmate-tool-card` is in-repo path only (`crates/crabmate-tool-card`); do not git-pin Server `crabmate-tool-card`
