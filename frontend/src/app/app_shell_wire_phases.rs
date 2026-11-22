@@ -252,14 +252,19 @@ fn wire_phase4a_workspace_domain(app: &AppSignals, refresh_workspace: &RefreshWo
 
 /// 阶段 4b：`/status`、`/tasks` 与侧栏任务面可见时的 `Effect`（须在 4a 之后，以便与初始化顺序一致）。
 fn wire_phase4b_status_tasks_domain(app: &AppSignals) -> StatusTasksSpawn {
+    // #569：`/status`、`/tasks` 的定时拉取按**这条 lane 自己的**作用域发请求。
     let refresh_status = make_refresh_status(
         app.to_status_tasks(),
         app.llm_settings.selected_agent_role,
         app.llm_settings.agent_role_user_override,
+        app.scope.clone(),
         app.shell_ui.locale.get_untracked(),
     );
-    let refresh_tasks =
-        make_refresh_tasks(app.to_status_tasks(), app.shell_ui.locale.get_untracked());
+    let refresh_tasks = make_refresh_tasks(
+        app.to_status_tasks(),
+        app.scope.clone(),
+        app.shell_ui.locale.get_untracked(),
+    );
     let toggle_task = make_toggle_task(app.to_status_tasks(), app.shell_ui.locale.get_untracked());
     let refresh_github_repo = make_refresh_github_repo_context(
         app.to_status_tasks(),

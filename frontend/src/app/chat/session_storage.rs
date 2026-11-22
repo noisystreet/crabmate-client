@@ -69,7 +69,10 @@ pub fn wire_initial_sessions_from_storage(app: crate::app::app_signals::AppSigna
             // LLM 覆盖 / 密钥状态 与 会话列表并行，缩短门闸；prefs（含只读 TTL）另路由行。
             let ((), ((list, _aid), ws_outcome)) = futures_util::future::join(
                 hydrate_client_llm_from_server(loc),
-                futures_util::future::join(load_web_sessions(loc), fetch_workspace(None, loc)),
+                futures_util::future::join(
+                    load_web_sessions(loc),
+                    fetch_workspace(&crate::api::connection_scope::active_holder(), None, loc),
+                ),
             )
             .await;
             if let Ok(wd) = ws_outcome {

@@ -15,6 +15,7 @@ use crabmate_client_api::{http_error_text, paths};
 use super::browser::{
     api_url, auth_headers, format_fetch_transport_error, prepare_api_auth, window,
 };
+use super::connection_scope::ScopeHolder;
 
 fn truncate_to_char_boundary(s: &str, max_bytes: usize) -> &str {
     if s.len() <= max_bytes {
@@ -100,14 +101,18 @@ pub struct WebUiConfig {
     pub apply_assistant_display_filters: bool,
 }
 
-pub async fn fetch_workspace(path: Option<&str>, loc: Locale) -> Result<WorkspaceData, String> {
+pub async fn fetch_workspace(
+    scope: &ScopeHolder,
+    path: Option<&str>,
+    loc: Locale,
+) -> Result<WorkspaceData, String> {
     let url = match path {
         Some(p) if !p.trim().is_empty() => {
             format!("{}?path={}", paths::WORKSPACE, urlencoding::encode(p))
         }
         _ => paths::WORKSPACE.to_string(),
     };
-    fetch_json("GET", &url, None, loc).await
+    fetch_json_on(scope, "GET", &url, None, loc).await
 }
 
 /// `GET /workspace/file?path=…`：读取工作区内文本文件（与后端 `WorkspaceFileReadResponse` 一致）。
@@ -388,6 +393,7 @@ pub struct WorkspaceChangelogResponse {
 
 /// `GET /workspace/changelog`：可选 `conversation_id` 与 Web 会话作用域对齐。
 pub async fn fetch_workspace_changelog(
+    scope: &ScopeHolder,
     conversation_id: Option<&str>,
     loc: Locale,
 ) -> Result<WorkspaceChangelogResponse, String> {
@@ -398,7 +404,7 @@ pub async fn fetch_workspace_changelog(
         ),
         _ => "/workspace/changelog".to_string(),
     };
-    fetch_json("GET", &url, None, loc).await
+    fetch_json_on(scope, "GET", &url, None, loc).await
 }
 
 /// `POST /workspace`：设置当前 Web 会话工作区根。`path: None` 表示恢复服务端默认（`run_command_working_dir`）。
@@ -437,28 +443,30 @@ pub async fn fetch_skills(loc: Locale) -> Result<SkillsListData, String> {
     fetch_json("GET", paths::SKILLS, None, loc).await
 }
 
-pub async fn fetch_tasks(loc: Locale) -> Result<TasksData, String> {
-    fetch_json("GET", "/tasks", None, loc).await
+pub async fn fetch_tasks(scope: &ScopeHolder, loc: Locale) -> Result<TasksData, String> {
+    fetch_json_on(scope, "GET", "/tasks", None, loc).await
 }
 
-pub async fn fetch_status(loc: Locale) -> Result<StatusData, String> {
-    fetch_json("GET", paths::STATUS_SHELL, None, loc).await
+pub async fn fetch_status(scope: &ScopeHolder, loc: Locale) -> Result<StatusData, String> {
+    fetch_json_on(scope, "GET", paths::STATUS_SHELL, None, loc).await
 }
 
 /// `GET /tools/jobs/{id}`：轮询后台任务状态（`run_command` 的 `async:true`）。
 /// `404`/`410`（不存在/已过期）与网络错误均以 `Err` 返回，由调用方停止轮询。
 pub async fn fetch_tool_job_status(
+    scope: &ScopeHolder,
     tool_job_id: &str,
     loc: Locale,
 ) -> Result<crate::sse_dispatch::ToolJobState, String> {
     let url = format!("/tools/jobs/{tool_job_id}");
-    fetch_json("GET", &url, None, loc).await
+    fetch_json_on(scope, "GET", &url, None, loc).await
 }
 
 /// `GET /tools/jobs/{id}/output?cursor=`：后台任务实时输出增量轮询（`tail -f`）。
 /// `cursor=None` 从最早可用起；服务端按 `cursor` 返回 `items`/`truncated`/`eof`。
 /// `404`/`410`（不存在/已过期）与网络错误均以 `Err` 返回，由调用方停止轮询。
 pub async fn fetch_tool_job_output(
+    scope: &ScopeHolder,
     tool_job_id: &str,
     cursor: Option<u64>,
     loc: Locale,
@@ -467,18 +475,22 @@ pub async fn fetch_tool_job_output(
         Some(c) => format!("/tools/jobs/{tool_job_id}/output?cursor={c}"),
         None => format!("/tools/jobs/{tool_job_id}/output"),
     };
-    fetch_json("GET", &url, None, loc).await
+    fetch_json_on(scope, "GET", &url, None, loc).await
 }
 
 /// `POST /tools/jobs/{id}/cancel`：取消后台任务。返回取消后状态
 /// （`cancelled`）；已是 `cancelled` 幂等 200，其它终态 409 不覆盖。
-pub async fn post_tool_job_cancel(tool_job_id: &str, loc: Locale) -> Result<String, String> {
+pub async fn post_tool_job_cancel(
+    scope: &ScopeHolder,
+    tool_job_id: &str,
+    loc: Locale,
+) -> Result<String, String> {
     #[derive(Deserialize)]
     struct CancelBody {
         status: String,
     }
     let url = format!("/tools/jobs/{tool_job_id}/cancel");
-    let body: CancelBody = fetch_json_with_body("POST", &url, "{}", loc).await?;
+    let body: CancelBody = fetch_json_with_body_on(scope, "POST", &url, "{}", loc).await?;
     Ok(body.status)
 }
 
@@ -537,39 +549,10 @@ pub async fn save_tasks(data: &TasksData, loc: Locale) -> Result<TasksData, Stri
     fetch_json_with_body("POST", "/tasks", &body, loc).await
 }
 
-pub(crate) async fn fetch_json<T: for<'de> Deserialize<'de>>(
-    method: &str,
-    url: &str,
-    _body: Option<&str>,
-    loc: Locale,
-) -> Result<T, String> {
-    let init = RequestInit::new();
-    init.set_method(method);
-    prepare_api_auth(&init).await;
-    let url = api_url(url);
-    let req =
-        Request::new_with_str_and_init(&url, &init).map_err(|e| format!("request: {:?}", e))?;
-    do_fetch_json(req, loc).await
-}
-
-pub(crate) async fn fetch_json_with_body<T: for<'de> Deserialize<'de>>(
-    method: &str,
-    url: &str,
-    body: &str,
-    loc: Locale,
-) -> Result<T, String> {
-    let init = RequestInit::new();
-    init.set_method(method);
-    prepare_api_auth(&init).await;
-    let h = auth_headers();
-    let _ = h.set("Content-Type", "application/json");
-    init.set_headers(&h);
-    init.set_body(&wasm_bindgen::JsValue::from_str(body));
-    let url = api_url(url);
-    let req =
-        Request::new_with_str_and_init(&url, &init).map_err(|e| format!("request: {:?}", e))?;
-    do_fetch_json(req, loc).await
-}
+// #569：按作用域发请求的四个入口单独成文件（本文件贴着 920 行门禁）。
+pub(crate) use super::http_scoped::{
+    fetch_json, fetch_json_on, fetch_json_with_body, fetch_json_with_body_on,
+};
 
 pub(crate) fn http_error_detail_from_body(body: &str) -> String {
     let trimmed = body.trim();
@@ -633,7 +616,7 @@ pub(crate) fn http_status_error(status: u16, body: &str, loc: Locale) -> String 
     crate::i18n::api_err_http_status(loc, status, http_error_detail_from_body(body).as_str())
 }
 
-async fn do_fetch_json<T: for<'de> Deserialize<'de>>(
+pub(super) async fn do_fetch_json<T: for<'de> Deserialize<'de>>(
     req: Request,
     loc: Locale,
 ) -> Result<T, String> {
@@ -757,6 +740,7 @@ impl std::error::Error for ChatBranchError {}
 /// `POST /chat/branch`：服务端按 `before_user_ordinal` 截断持久化会话（须 `conversation_store_sqlite_path` 等已启用）。
 /// `GET /conversation/messages`：拉取服务端已持久化会话（与 `conversation_id` + `revision` 对齐）。
 pub async fn fetch_conversation_messages(
+    scope: &ScopeHolder,
     conversation_id: &str,
     params: crate::conversation_messages_page::ConversationMessagesFetchParams,
     loc: Locale,
@@ -769,7 +753,7 @@ pub async fn fetch_conversation_messages(
             url.push_str(&format!("&before_index={before}"));
         }
     }
-    fetch_json("GET", &url, None, loc).await
+    fetch_json_on(scope, "GET", &url, None, loc).await
 }
 
 fn parse_chat_branch_ok_body(body: &str, loc: Locale) -> Result<u64, ChatBranchError> {

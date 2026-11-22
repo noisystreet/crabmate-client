@@ -125,6 +125,7 @@ async fn regenerate_after_revision_refresh(
     loc: Locale,
 ) {
     if let Ok(resp) = fetch_conversation_messages(
+        &crate::api::connection_scope::active_holder(),
         &conversation_id,
         ConversationMessagesFetchParams::tail_page(),
         loc,

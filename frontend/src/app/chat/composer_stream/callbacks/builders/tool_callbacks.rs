@@ -91,7 +91,14 @@ fn spawn_tool_job_polling(
         loop {
             // 1) 实时输出增量（游标续读；环形截断时服务端标 truncated）。
             let poll = if output_ok {
-                match fetch_tool_job_output(&job_id, cursor, loc).await {
+                match fetch_tool_job_output(
+                    &crate::api::connection_scope::active_holder(),
+                    &job_id,
+                    cursor,
+                    loc,
+                )
+                .await
+                {
                     Ok(p) => {
                         saw_output = true;
                         Some(p)
@@ -112,7 +119,13 @@ fn spawn_tool_job_polling(
             let got_new = poll.as_ref().is_some_and(|p| !p.items.is_empty());
             let poll_present = poll.is_some();
             // 2) 状态快照（终态 exit/summary 等；与输出增量合并后整体入 map）。
-            let state = match fetch_tool_job_status(&job_id, loc).await {
+            let state = match fetch_tool_job_status(
+                &crate::api::connection_scope::active_holder(),
+                &job_id,
+                loc,
+            )
+            .await
+            {
                 Ok(s) => s,
                 Err(_) => break,
             };

@@ -15,6 +15,7 @@ pub(crate) mod github_secrets_local;
 mod http;
 mod http_conversation_state;
 mod http_permission;
+mod http_scoped;
 mod http_uploads;
 mod http_workspace_clone;
 mod http_workspace_fs_extra;
