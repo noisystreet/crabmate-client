@@ -26,11 +26,14 @@
 //! 比对。唯一会让两行同时亮的场景（两个窗口连同一台 serve）已在连接时被
 //! `ExistingConnectionProbe` 挡住 —— 同一个 `base_url` 只切过去、不新增第二条。
 //!
-//! # 两个分组：已连的窗口 / 可连的实例
+//! # 三个分组：lane / 其它窗口 / 可连实例（对齐 TUI 的 lane 列表）
 //!
-//! 上半是**已经连上的窗口**（每行一个窗口，右侧「关闭」）；下半是**控制面里声明过、
-//! 还没连的实例**（右侧「连接」）—— 后者见 [`ctl_rows_for_rail`]。没有可连实例时
-//! 整个下半组不渲染（「本机没跑 `crabmatectl`」是常态，不是告警）。
+//! 1. **本窗口的每条 lane**（`连接 [n/8] ▲k`，见 [`LaneRailGroup`]）—— 与 TUI 的
+//!    `lane_list` 同口径：单窗口多 lane 之后，这里才是「我在跟哪些 serve 说话」的回答；
+//! 2. **其它窗口** —— 只有壳侧还挂着别的 Desktop 窗口时才出现。前端已经没有开新窗口的
+//!    入口（#561 S2：连接 = 在当前窗口新建 lane），所以单窗口下整组不渲染；
+//! 3. **控制面里声明过、还没连的实例**（右侧「连接」）—— 见 [`ctl_rows_for_rail`]，
+//!    空则整组不渲染（「本机没跑 `crabmatectl`」是常态，不是告警）。
 //!
 //! 两个按钮都只是**已有的**壳动作：连接 = `open_connection`（撞 authority 时壳只聚焦），
 //! 关闭 = `close_connection`（关窗 = 注销）。不存在「断开但保留窗口」的中间态，见
@@ -206,6 +209,15 @@ fn lane_authorities(rows: &[super::app_signals::LaneRailRow], fallback: &str) ->
             api_base_authority(&base)
         })
         .filter(|authority| !authority.is_empty())
+        .collect()
+}
+
+/// 窗口注册表里**除本窗口**以外的那些（「其它窗口」分组）。
+fn other_window_rows(snapshots: &[ConnectionSnapshot], own: &str) -> Vec<ConnectionSnapshot> {
+    snapshots
+        .iter()
+        .filter(|snapshot| snapshot.authority != own)
+        .cloned()
         .collect()
 }
 
@@ -465,6 +477,13 @@ pub(super) fn NavRailConnections(
     // #561 S2 起「连接」= 在当前窗口新建一条 lane，那条 lane 不在窗口注册表里 —— 只看注册表，
     // 刚连上的实例会继续留在「可连实例」里（再点一次就多一条同 serve 的 lane）。
     let taken = taken_authorities_signal(rows, api_base);
+    // 「其它窗口」：窗口注册表里**除本窗口**以外的那些。
+    //
+    // 单窗口多 lane 的常态下这里恒为空 —— 前端已经没有开新窗口的入口，#561 S2 之后
+    // 「连接」= 在当前窗口新建 lane。只有壳侧还挂着别的窗口（老路径 / 调试）时才有内容，
+    // 那时它们仍要能切、能关。
+    let other_rows =
+        Signal::derive(move || other_window_rows(&rows.get(), &own_authority.get_value()));
     // 控制面实例：只在桌面壳里才有来源；非桌面壳下壳没有这条命令，这份 signal 恒为空。
     let instances = StoredValue::new(ctl_instances_feed());
     let ctl_rows =
@@ -482,33 +501,18 @@ pub(super) fn NavRailConnections(
 
     view! {
         <Show when=move || tauri_shell_available()>
-            <Show when=move || !rows.get().is_empty()>
-                <div class="nav-rail-connections" data-testid="nav-rail-connections">
-                    <div class="nav-rail-connections-label">
-                        // 条数与 TUI 的 `连接 [n/8]` 同一个位置、同一种写法。这里不带
-                        // `/上限`：窗口数没有上限，那个数字在桌面壳里不存在。
-                        {move || format!(
-                            "{} [{}]",
-                            i18n::connections_pane_label(locale.get()),
-                            rows.get().len(),
-                        )}
-                    </div>
-                    <For
-                        each=move || rows.get()
-                        key=|snapshot| snapshot.key.clone()
-                        children=move |snapshot| {
-                            let multi = rows.get().len() > 1;
-                            connection_row(
-                                snapshot,
-                                own_authority.get_value(),
-                                multi,
-                                settings_page,
-                                locale,
-                                rename_menu,
-                            )
-                        }
-                    />
+            <div class="nav-rail-connections" data-testid="nav-rail-connections">
+                    // 与 TUI 的 lane 列表对齐：第一组就是 `连接 [n/8] ▲k` + 每条 lane 一行
+                    // （状态符 / 名字 / 行尾读数都同一份口径）。
                     <LaneRailGroup locale=locale />
+                    // 「其它窗口」：常态下为空、整组不渲染。
+                    <OtherWindowsGroup
+                        locale=locale
+                        rows=other_rows
+                        own_authority=own_authority
+                        settings_page=settings_page
+                        rename_menu=rename_menu
+                    />
                     // 「可连实例」：控制面里声明过、还没连的那些。空则整组不渲染 ——
                     // 没跑 `crabmatectl` 是常态，不该常驻一块空标题。
                     <Show when=move || !ctl_rows.get().is_empty()>
@@ -547,7 +551,6 @@ pub(super) fn NavRailConnections(
                     locale=locale
                 />
                 <ConnectionRenameModal target=rename_target locale=locale />
-            </Show>
         </Show>
     }
 }
@@ -555,6 +558,10 @@ pub(super) fn NavRailConnections(
 #[path = "nav_rail_lanes.rs"]
 mod lanes;
 use lanes::LaneRailGroup;
+
+#[path = "nav_rail_other_windows.rs"]
+mod other_windows;
+use other_windows::OtherWindowsGroup;
 
 /// 连接行的右键菜单：坐标锚点 + 遮罩 + 共享的 `role=menu` 容器（与左栏会话行同一套）。
 ///

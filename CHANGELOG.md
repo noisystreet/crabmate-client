@@ -33,6 +33,8 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 - **Markdown line cap ratchets to 600 display cols (24501 → 2000 → 1000 → 600).**
 
+- **The rail's lane list follows the TUI: one "Lanes [n/8]" group, no duplicate window row.**
+
 - **A gate pins who may read the foreground lane's scope, plus a zero-arg wrapper call budget.**
 
 - **The permission chip matches the TUI: English level names, and it reads as text, not a button.**
