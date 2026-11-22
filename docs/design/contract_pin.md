@@ -2,7 +2,7 @@
 
 > **权威发版策略**：Server 主仓 [`client_contract_versioning.md`](https://github.com/noisystreet/CrabMate/blob/main/docs/design/client_contract_versioning.md)  
 > **展示 crate 下沉**：Server [`client_display_crate_sink.md`](https://github.com/noisystreet/CrabMate/blob/main/docs/design/client_display_crate_sink.md)；本仓勾选 [`display_crate_sink.md`](./display_crate_sink.md)  
-> **单包 crates.io**：Server [`crates_io_single_package.md`](https://github.com/noisystreet/CrabMate/blob/main/docs/design/crates_io_single_package.md) — 正式口径钉 crates.io **`crabmate`** + `features = ["protocol"]`；**当前按正式口径钉 crates.io `0.9.1`**（2026-11-18 发布；`protocol` 面移除 `PlanStepV1` 的 acceptance / retry / transition 字段与 `AcceptanceSpec` 校验内核，SSE / HTTP 线格式不变）。
+> **单包 crates.io**：Server [`crates_io_single_package.md`](https://github.com/noisystreet/CrabMate/blob/main/docs/design/crates_io_single_package.md) — 正式口径钉 crates.io **`crabmate`** + `features = ["protocol"]`；**当前为过渡期 git rev 钉法**（见下方「钉主仓契约」；上一正式口径钉点是 crates.io `0.9.1`，2026-11-18 发布；`protocol` 面移除 `PlanStepV1` 的 acceptance / retry / transition 字段与 `AcceptanceSpec` 校验内核，SSE / HTTP 线格式不变）。
 > **UI 迁出计划**：[`frontend_migrate_plan.md`](https://github.com/noisystreet/CrabMate/blob/main/docs/design/frontend_migrate_plan.md) Phase B（本仓已迁入 `frontend/`）  
 > **本仓职责**：消费侧钉法 + 禁止 path 回主开发树。
 
@@ -22,35 +22,39 @@
 | 项 | 值 |
 |----|-----|
 | 源码迁入自 | 主仓 `eb0048bf…`（见 `frontend/SOURCE.md`） |
-| 契约 | **crates.io semver**：`crabmate` **`0.9.1`** + `features = ["protocol"]` |
-| Playwright `serve` checkout | git tag **`v0.9.1`**（与 crates.io `0.9.1` 同提交，即当前契约） |
+| 契约 | **过渡期 git rev**：`crabmate` **`e3f56e6e`** + `features = ["protocol"]` |
+| Playwright `serve` checkout | git rev **`e3f56e6e`**（与当前契约钉点同提交） |
 | lock | 提交 `frontend/Cargo.lock`、`crates/crabmate-tui/Cargo.lock`、`crates/crabmate-tool-card/Cargo.lock` |
 
-`PUT /workspace/file/raw`（工作区本机文件拖放上传）、**`GET /workspace/file/download`**（侧栏保存文件到本机）与 **`GET /workspace/dir/archive`**（保存文件夹为 zip）、**`POST /workspace/file/move`**（树内重命名文件）是 **HTTP 路由**，不在 crates.io `protocol` 面里。官方 UI 对接 **crates.io 契约 `0.9.1` 与 `v0.9.1` serve**；Playwright 默认 checkout **`v0.9.1`**。`GET /workspace/file/raw` 仍仅为聊天图片（png/jpg/jpeg/webp/gif）。
+`PUT /workspace/file/raw`（工作区本机文件拖放上传）、**`GET /workspace/file/download`**（侧栏保存文件到本机）与 **`GET /workspace/dir/archive`**（保存文件夹为 zip）、**`POST /workspace/file/move`**（树内重命名文件）是 **HTTP 路由**，不在 crates.io `protocol` 面里。官方 UI 对接 **过渡钉 rev `e3f56e6e` 与其 serve**；Playwright 默认 checkout 同一 rev。`GET /workspace/file/raw` 仍仅为聊天图片（png/jpg/jpeg/webp/gif）。
 
 壳打包 UI 同步：`make desktop-release` / `before-desktop-build.sh` 默认 **`trunk build --release`** 再同步本仓 `frontend/dist`（拒绝 debug 大 WASM）；`CM_PREPARE_SKIP_FRONTEND=1` 或 `CRABMATE_FRONTEND_DIST=-` 跳过；同级主仓回落需 `CRABMATE_ALLOW_SIBLING_FRONTEND=1`。
 
 ## 钉主仓契约
 
 ```toml
-# 正式口径（当前生效，2026-11-19 起）：crates.io semver
-crabmate = { version = "0.9.1", default-features = false, features = ["protocol"] }
+# 过渡期（当前生效，2026-11-21 起）：钉不可变 rev；tag 可移动，禁止
+crabmate = { git = "https://github.com/noisystreet/CrabMate", rev = "e3f56e6ed2a8d4a0404af75d1f6acf23dd5bde6b", default-features = false, features = ["protocol"] }
 
-# 过渡期（仅在 Server 尚未发布所需版本时临时启用）：钉不可变 rev；tag 可移动，禁止
-# 上一过渡钉点 = 契约 tag client-contract-v0.3.0（tag 对象 f02273e5，peel 到 817157e0）
-crabmate = { git = "https://github.com/noisystreet/CrabMate", rev = "<sha>", default-features = false, features = ["protocol"] }
+# 正式口径（0.10.0 发布后改回）：crates.io semver；上一正式钉点 = 0.9.1（2026-11-19 … 2026-11-21）
+crabmate = { version = "<semver>", default-features = false, features = ["protocol"] }
 ```
 
 `use` 只走 `crabmate::cm_types`、`cm_sse_protocol`、`cm_api_contract`、`cm_turn_layout`、`cm_display_rules`、`cm_chat_export`。不要 `crabmate::sse` / `crabmate::types`（仅 Server `server` feature 别名）。
 
 `crabmate-tool-card` 为本仓 path（W2：`crates/crabmate-tool-card`）；勿再 git 钉 Server 该包。
 
-**当前（2026-11-19 起）**：crates.io `crabmate` **`0.9.1`**（Server `v0.9.1`，同一提交）。`protocol` 面移除了 `PlanStepV1` 的 `acceptance` / `max_step_retries` / `transitions` 字段与 `AcceptanceSpec` 校验内核，**SSE / HTTP 线格式不变**（`SSE_PROTOCOL_VERSION` 仍是 v2）；本仓唯一的编译破坏是 `cm_turn_layout::try_split_combined_post_tool_answer` 被删（0.9.0 时已标 `#[allow(dead_code)]`、唯一消费者就是本仓 Web UI），拆分规则已原样下沉到 `frontend/src/app/chat/composer_stream/callbacks/delta_apply.rs`（含两条单测）。
+**当前（过渡期，2026-11-21 起）**：git rev `e3f56e6ed2a8d4a0404af75d1f6acf23dd5bde6b`（Server `main` 上 PR [#1463](https://github.com/noisystreet/CrabMate/pull/1463) 的合入提交），带 `GET /workspace/git` 只读 git 状态投影与
+`cm_api_contract::workspace::WorkspaceGitStatusResponse`。起因见 #324：契约 tag `client-contract-v0.4.0` 未打、crates.io 最新仍是 `0.9.1`（2026-11-18 发布，早于合并，故不含该类型），而 UI 侧栏要先接真源。
+只有「契约已进 main、尚未发版」才允许这样钉；`0.10.0` 一发布就改回 semver 并删掉 git 源。已验证：三处 manifest 同一行、7 份 lock 指向该 rev、`cargo check --examples` 能 `use` 到该类型。
 
-**上一钉点（2026-11-15 … 2026-11-19）**：crates.io `crabmate` **`0.9.0`**（Server `v0.9.0`，同一提交）。它带上了过渡期在等的两件事：可选 `StatusShellView.context_budget`，与「`tiktokenPromptTokens.used_input_tokens` 恒为 tiktoken 估算、上游 usage 只走 `provider_input_tokens`」这条语义变更。客户端行为不变：状态栏分母**仍是会话窗口**，不用 `context_budget.max_input_tokens`（窗口分母在会话内恒定，见 `crates/crabmate-client-api/src/context_axis.rs` 头部论证，Server 设计稿 `context_usage_single_source.md` 同结论）。**历史留档**：过渡期（2026-11-11 起）曾钉 git rev `817157e0`（语义等于契约 tag
+**上一钉点（2026-11-19 … 2026-11-21）**：crates.io `crabmate` **`0.9.1`**（Server `v0.9.1`，同一提交）。`protocol` 面移除了 `PlanStepV1` 的 `acceptance` / `max_step_retries` / `transitions` 字段与 `AcceptanceSpec` 校验内核，**SSE / HTTP 线格式不变**（`SSE_PROTOCOL_VERSION` 仍是 v2）；本仓唯一的编译破坏是 `cm_turn_layout::try_split_combined_post_tool_answer` 被删（0.9.0 时已标 `#[allow(dead_code)]`、唯一消费者就是本仓 Web UI），拆分规则已原样下沉到 `frontend/src/app/chat/composer_stream/callbacks/delta_apply.rs`（含两条单测）。
+
+**更早钉点（2026-11-15 … 2026-11-19）**：crates.io `crabmate` **`0.9.0`**（Server `v0.9.0`，同一提交）。它带上了过渡期在等的两件事：可选 `StatusShellView.context_budget`，与「`tiktokenPromptTokens.used_input_tokens` 恒为 tiktoken 估算、上游 usage 只走 `provider_input_tokens`」这条语义变更。客户端行为不变：状态栏分母**仍是会话窗口**，不用 `context_budget.max_input_tokens`（窗口分母在会话内恒定，见 `crates/crabmate-client-api/src/context_axis.rs` 头部论证，Server 设计稿 `context_usage_single_source.md` 同结论）。**历史留档**：过渡期（2026-11-11 起）曾钉 git rev `817157e0`（语义等于契约 tag
 `client-contract-v0.3.0`，Server #1347 S3b / PR #1351），因为 crates.io 当时仍是 `0.8.0`、不含上述两项；过渡期客户端只动过一处测试夹具（`frontend/src/app_prefs.rs` 的 `StatusShellView` 字面量补 `context_budget: None`）。换回 semver 后，各包 lock 由 `cargo fetch` / `cargo check` 自动把 `git+…` 源改写为 registry 源（本次已改 7 份 lock），仍须一并提交。
 
-crates.io **`crabmate`** 为正式渠道。当前钉 **`0.9.1`**（2026-11-19 起）。时间线：`0.8.0`（2026-11-01 … 2026-11-11，含 permission-levels 与空闲态会话状态写入口 `cm_api_contract/session_state.rs` / `POST /conversation/state`）→ 过渡 git rev `630cd3b0` → 过渡 git rev `817157e0`（契约 tag `client-contract-v0.3.0`，2026-11-11 … 2026-11-15）→ `0.9.0`（2026-11-15 … 2026-11-19，含 `context_budget` 与估算口径的 `used_input_tokens`）→ `0.9.1`。历史留档：过渡 rev `630cd3b0` 相对上一钉点（`f0a1bc06`）只多了三件事，都在会话状态写入口这条线上：新增该路由（`3d080382`）、缺 `conversation_id` 回 400 而非
+crates.io **`crabmate`** 为正式渠道；当前是过渡期 git rev（见上），最近一个正式钉点 **`0.9.1`**（2026-11-19 … 2026-11-21）。时间线：
+`0.8.0`（2026-11-01 … 2026-11-11，含 permission-levels 与空闲态会话状态写入口 `cm_api_contract/session_state.rs` / `POST /conversation/state`）→ 过渡 git rev `630cd3b0` → 过渡 git rev `817157e0`（契约 tag `client-contract-v0.3.0`，2026-11-11 … 2026-11-15）→ `0.9.0`（2026-11-15 … 2026-11-19，含 `context_budget` 与估算口径的 `used_input_tokens`）→ `0.9.1` → 过渡 git rev `e3f56e6e`（2026-11-21 起，Server #1463）。历史留档：过渡 rev `630cd3b0` 相对上一钉点（`f0a1bc06`）只多了三件事，都在会话状态写入口这条线上：新增该路由（`3d080382`）、缺 `conversation_id` 回 400 而非
 422（`021d4606`）、库写失败回 500 而不是伪装成 404（`630cd3b0`）——最后一条尤其重要：客户端按 `error.code` 分流 404 的两义，若库故障回 404，客户端会把「写失败、可重试」显示成「会话不存在，请重新绑定」。升级时先只验证契约可见性（`cargo check --manifest-path crates/crabmate-client-api/Cargo.toml` + 一句 `use
 crabmate::cm_api_contract::session_state::ConversationStateView;`），再动业务代码；卡在那一步通常是 pin 没生效或 feature 未覆盖，**不要**误判成「服务端没实现」。未升级的 Client 仍可钉 crates.io **`0.4.0` / `0.5.0` / `0.5.1` / `0.5.2` / `0.6.0` / `0.7.0` / `0.8.0` / `0.9.0`**（或过渡 git rev `817157e0` / `630cd3b0`）；更旧版本可继续使用产品 tag **`v0.3.0`** / `client-contract-v0.2.0` 的旧多包名。
 

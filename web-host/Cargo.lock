@@ -119,8 +119,7 @@ checksum = "1d07550c9036bf2ae0c684c4297d503f838287c83c53686d05370d0e139ae570"
 [[package]]
 name = "crabmate"
 version = "0.9.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b691d600729049345b4a340142962bc243466c6b6e960c4b95dc7f192392d3a9"
+source = "git+https://github.com/noisystreet/CrabMate?rev=e3f56e6ed2a8d4a0404af75d1f6acf23dd5bde6b#e3f56e6ed2a8d4a0404af75d1f6acf23dd5bde6b"
 dependencies = [
  "getrandom",
  "log",
