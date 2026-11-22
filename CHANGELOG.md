@@ -33,6 +33,8 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 - **Markdown line cap ratchets to 600 display cols (24501 → 2000 → 1000 → 600).**
 
+- **A gate pins who may read the foreground lane's scope, plus a zero-arg wrapper call budget.**
+
 ### Fixed
 
 - **Lane polling and session loads now use their own serve scope, not the front lane's.**
