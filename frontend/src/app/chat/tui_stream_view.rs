@@ -101,7 +101,13 @@ fn try_handle_tool_job_cancel_click(
     }
     let states = chat.tool_job_states;
     spawn_local(async move {
-        if let Ok(status) = post_tool_job_cancel(&job_id, locale).await {
+        if let Ok(status) = post_tool_job_cancel(
+            &crate::api::connection_scope::active_holder(),
+            &job_id,
+            locale,
+        )
+        .await
+        {
             states.update(|m| {
                 if let Some(state) = m.values_mut().find(|s| s.id == job_id) {
                     state.status = status;

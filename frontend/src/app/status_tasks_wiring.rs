@@ -13,10 +13,15 @@ use crate::i18n::Locale;
 use super::status_fetch_state::StatusFetchPhase;
 use super::status_tasks_state::StatusTasksSignals;
 
+/// 拉一次 `/status`（#569：`scope` 是**这条 lane** 的作用域）。
+///
+/// 定时轮询是每条 lane 各跑一份的，所以它必须用自己的 scope —— 用前台的会让后台那条
+/// 打到别人家的 serve 上，两次切换之后两边的状态互相污染。
 pub fn make_refresh_status(
     st: StatusTasksSignals,
     selected_agent_role: RwSignal<Option<String>>,
     agent_role_user_override: RwSignal<bool>,
+    scope: crate::api::connection_scope::ScopeHolder,
     locale: Locale,
 ) -> Arc<dyn Fn() + Send + Sync> {
     Arc::new(move || {
@@ -26,8 +31,9 @@ pub fn make_refresh_status(
         st.status_fetch_phase.set(StatusFetchPhase::Fetching);
         st.status_loading.set(true);
         st.status_fetch_err.set(None);
+        let scope = scope.clone();
         spawn_local(async move {
-            match fetch_status(locale).await {
+            match fetch_status(&scope, locale).await {
                 Ok(d) => {
                     st.status_fetch_err.set(None);
                     if !agent_role_user_override.get_untracked() {
@@ -57,11 +63,16 @@ pub fn make_refresh_status(
     })
 }
 
-pub fn make_refresh_tasks(st: StatusTasksSignals, locale: Locale) -> Arc<dyn Fn() + Send + Sync> {
+pub fn make_refresh_tasks(
+    st: StatusTasksSignals,
+    scope: crate::api::connection_scope::ScopeHolder,
+    locale: Locale,
+) -> Arc<dyn Fn() + Send + Sync> {
     Arc::new(move || {
         st.tasks_loading.set(true);
+        let scope = scope.clone();
         spawn_local(async move {
-            match fetch_tasks(locale).await {
+            match fetch_tasks(&scope, locale).await {
                 Ok(d) => {
                     st.tasks_err.set(None);
                     st.tasks_data.set(d);
