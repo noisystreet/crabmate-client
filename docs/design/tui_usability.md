@@ -253,10 +253,12 @@
 | 队列/草稿与 running gate、Ctrl+C、切会话竞态 | 草稿/队列为纯状态字段，切换/取消时按单一顺序处理并加单测 |
 | 会话标题语义（Desktop 本地推导 vs serve 记录）影响 W2.2 重命名 | 确认标题落点后定重命名的持久化去向 |
 | 范围膨胀 | 按 Wave 顺序交付，每波独立 PR；非目标清单 §2 作为驳回依据 |
-- **W3.9 状态栏工作区 git 徽标** — **已落地**（#324）：`git` 段显示 `main ●5`（分支 + 未提交计数）、`HEAD@1a2b3c4`（detached）
-  或三态文案（`非 git 仓库` / `git 不可用` / `git 读取失败`）。值来自共享纯逻辑（`crabmate_client_api::workspace_git`，
-  与 Desktop 顶栏同一份），TUI 只负责自己的截断（`truncate_display`，20 列）与中文词表。数据由 state worker 在拉
-  `/status` + `/permission` 的**同一任务**里用 `get_json_optional` 取 `GET /workspace/git`：404（老 serve）与任何失败
-  都退成「没有这一段」，而不是画一个空分支名。与 `permission_view` 刻意相反 —— 那边失败保留旧值（配置事实），
-  这边失败即清空（即时事实，用户可能刚 commit）。口径：`dirty` 只代表**当前工作区根下**，与会话变更集
-  （`/workspace/changelog`）不是一个概念，不相加也不互相替代。
+- **W3.9 工作区名后的 git 括注** — **已落地**（#324）：工作区名后面括注分支，`client(main)` / `client(main ●3)`。
+  **不是独立段** —— 分支离开所属仓库没有意义，右栏标题（`ws_sidebar::workspace_title`）与窄屏 `ws` 段共用同一个
+  拼接点（`status::workspace_with_git`），各拼一份迟早漂成「标题里有分支、状态栏里没有」。detached 显示
+  `HEAD@1a2b3c4`；三态用短词 `非 git` / `git 不可用` / `git 读取失败`（括号里放不下整句）。值来自共享纯逻辑
+  （`crabmate_client_api::{head_label, dirty_marker}`，与 Desktop 顶栏同源），TUI 只做自己的截断（`truncate_display`，
+  含括注共 26 列）。数据由 state worker 在拉 `/status` + `/permission` 的**同一任务**里用 `get_json_optional` 取
+  `GET /workspace/git`：404（老 serve）与任何失败都不括注 —— 一对空括号或猜来的分支比没有更误导。与 `permission_view`
+  刻意相反 —— 那边失败保留旧值（配置事实），这边失败即清空（即时事实，用户可能刚 commit）。口径：`dirty` 只代表
+  **当前工作区根下**，与会话变更集（`/workspace/changelog`）不是一个概念，不相加也不互相替代。

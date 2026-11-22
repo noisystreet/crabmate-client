@@ -38,13 +38,23 @@ const WORKSPACE_PICK_HINT: &str = "↑↓ Enter切换 r刷 Esc返回";
 
 /// 工作区侧栏标题：`basename` 左对齐，`光标/总数` 右对齐（未就绪/空树时不显示计数）。
 fn workspace_title(st: &UiState, width: usize) -> Line<'static> {
-    let name = st
+    let basename = st
         .workspace_path
         .as_deref()
         .filter(|s| !s.trim().is_empty())
         .map(workspace_basename)
-        .filter(|n| !n.is_empty())
-        .unwrap_or_else(|| "（未获取）".to_string());
+        .filter(|n| !n.is_empty());
+    // git 括注只跟着**真工作区名**走：还没拿到工作区时不该显示分支 —— 那会读成
+    // 「这个空壳在 main 上」。拼接规则与窄屏 `ws` 段同一份（[`super::status::workspace_with_git`]）。
+    let defaults = st.serve_defaults.as_ref();
+    let name = match basename {
+        Some(base) => super::status::workspace_with_git(
+            &base,
+            defaults.and_then(|d| d.git_branch.as_deref()),
+            defaults.and_then(|d| d.git_dirty.as_deref()),
+        ),
+        None => "（未获取）".to_string(),
+    };
     let total = st.ws_rows.iter().filter(|r| !r.placeholder).count();
     let counter = if st.ws_ready && total > 0 {
         let pos = st

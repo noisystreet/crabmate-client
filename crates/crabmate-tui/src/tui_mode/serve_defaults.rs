@@ -34,12 +34,15 @@ pub struct ServeDefaults {
     /// 存整个投影而不是只存 `level`：切换菜单要的 `available` 也在这里。只留 level 的话，
     /// 每次开菜单都得再打一次 `/permission`（Desktop chip 吃的也是同一份 view）。
     pub permission_view: Option<PermissionView>,
-    /// 工作区 git 状态的一行徽标（`GET /workspace/git`；分支名 + 未提交脏计数，或三态降级文案）。
+    /// 工作区 git 的分支标签：`main` / `HEAD@1a2b3c4` / `非 git` / `git 不可用` / `git 读取失败`。
     ///
-    /// **已渲染文本**：技术标识来自共享纯逻辑（`crabmate_client_api::workspace_git`），与
-    /// Desktop 顶栏徽标一字不差；三态文案走 TUI 自己的中文词表。worker 在拉默认偏好的
-    /// 同一任务里另拉这条路由；404（老 serve 没这条路由）/ 拉取失败时保持 `None`，
-    /// 状态栏就不显示这段 —— 空的分支名读起来像「工作区干净」，比没有更误导。
+    /// 渲染成「仓库名后括注」的形态（`client(main)`），不是独立段：分支离开它所属的仓库
+    /// 就没有意义，两处渲染点（右栏标题、窄屏 `ws` 段）都读这里。
+    ///
+    /// `None` = 没拉到 / 老 serve 没这条路由 —— 那时只显示工作区名，**不括注**任何东西
+    /// （括注一个猜来的分支比没有更糟，与 `git_badge` 时代的判断一致）。
+    pub git_branch: Option<String>,
+    /// 未提交改动标记（`●3`）；干净时 `None`。与 [`Self::git_branch`] 一起渲染成 `client(main ●3)`。
     ///
     /// 与会话变更集（`GET /workspace/changelog`）**不是一个东西**：这里回答「仓库里有没有
     /// 未提交改动」，那里回答「本会话改了什么」，措辞与数据都不得互相替代。
@@ -48,7 +51,7 @@ pub struct ServeDefaults {
     /// （`keep_known_view`），因为「此刻是哪一档」是配置事实，丢掉一次就永久缺席；这里
     /// 失败即清空 —— git 状态是**即时**事实，用户可能刚 `git commit`，继续显示旧值就成了
     /// 骗人的「还脏着」。两者方向相反，别照着那边抄。
-    pub git_badge: Option<String>,
+    pub git_dirty: Option<String>,
     /// 会话存储当前是否走 SQLite（`/status.conversation_store_sqlite_active`）。
     ///
     /// `None` = 这个 serve 的 `/status` 没有该字段（老版本）：面板行显示「未提供」
@@ -85,7 +88,8 @@ impl ServeDefaults {
             // `/status` 不提供生效等级；由 worker 另拉 `/permission` 后回填。
             permission_view: None,
             // 同理：`/status` 没有任何 git 信息，由 worker 另拉 `/workspace/git` 后回填。
-            git_badge: None,
+            git_branch: None,
+            git_dirty: None,
             conversation_store_sqlite_active: v
                 .get("conversation_store_sqlite_active")
                 .and_then(Value::as_bool),
