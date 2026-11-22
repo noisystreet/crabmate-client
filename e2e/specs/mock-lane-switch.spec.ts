@@ -13,6 +13,11 @@
  *      现在这三个应用级单例在 `bootstrap_app_shell` 里建在 `App` 的 owner 上。
  *      用例断言「点 #2 前台切过去且主区换成 B 台的内容」——修之前必红。
  *
+ *      同一族还有一条**只在这条浏览器里测不出来**的：`mount_to` 的 owner 会注册为「当前 owner」
+ *      的子节点，而「新建 lane」是从某个 DOM 分支的点击回调里调用的 —— 那个分支一 cleanup，
+ *      新 lane 的信号与接线 `Effect` 全部连带 dispose。修法是在 `App` 的 owner 下挂载。
+ *      它需要真 WebKitGTK + 真壳才复现（Chromium 里点了就建好，不会露）。
+ *
  * 浏览器里没有 Tauri 壳，所以这里装一个**最小假壳**：只实现 `ctl_list_instances`（两个可连
  * 实例）与 `list_connections`（本窗口那一行）。与 `mock-storage-scope.spec.ts` 同一范式 ——
  * 初始化脚本先于前端模块执行，等价于壳的 `initialization_script`。第二台 serve 用
