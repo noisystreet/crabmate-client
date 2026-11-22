@@ -11,16 +11,18 @@ use crabmate::cm_api_contract::workspace::{WorkspaceGitState, WorkspaceGitStatus
 use crate::i18n::{self, Locale};
 
 /// 徽标一行文本：优先技术标识（`main ●5`），`state` 非 `ok` 时给对应的降级文案。
-pub fn git_badge_line(resp: &WorkspaceGitStatusResponse, loc: Locale) -> String {
+///
+/// `state == Ok` 却没有 `head` 时返回 `None`：那是契约外情形，而「探测成功」绝不能被
+/// 说成「非 git 仓库」——这一帧宁可不显示，也不给一句假陈述。
+pub fn git_badge_line(resp: &WorkspaceGitStatusResponse, loc: Locale) -> Option<String> {
     if let Some(text) = crabmate_client_api::badge_text(resp) {
-        return text;
+        return Some(text);
     }
     match resp.state {
-        // `ok` 但没有 `head`：契约不该出现；给一句中性文案而不是空白。
-        WorkspaceGitState::Ok => i18n::ws_git_not_a_repo(loc).to_string(),
-        WorkspaceGitState::NotARepo => i18n::ws_git_not_a_repo(loc).to_string(),
-        WorkspaceGitState::GitUnavailable => i18n::ws_git_unavailable(loc).to_string(),
-        WorkspaceGitState::Failed => i18n::ws_git_failed(loc).to_string(),
+        WorkspaceGitState::Ok => None,
+        WorkspaceGitState::NotARepo => Some(i18n::ws_git_not_a_repo(loc).to_string()),
+        WorkspaceGitState::GitUnavailable => Some(i18n::ws_git_unavailable(loc).to_string()),
+        WorkspaceGitState::Failed => Some(i18n::ws_git_failed(loc).to_string()),
     }
 }
 
@@ -29,7 +31,7 @@ pub fn git_badge_line(resp: &WorkspaceGitStatusResponse, loc: Locale) -> String 
 /// 计数按分类给（同一文件可同时 staged 与 unstaged），与服务端 `counts` 口径一致；
 /// 明细里不展开文件名——文件列表留给将来独立端点。
 pub fn git_badge_title(resp: &WorkspaceGitStatusResponse, loc: Locale) -> String {
-    match crabmate_client_api::counts(resp) {
+    match resp.counts {
         Some(counts) if counts.total > 0 => i18n::ws_git_counts_title(
             loc,
             counts.staged,
@@ -72,7 +74,7 @@ mod tests {
     #[test]
     fn ok_state_uses_the_technical_label() {
         let mut r = base(WorkspaceGitState::Ok);
-        assert_eq!(git_badge_line(&r, Locale::En), "main");
+        assert_eq!(git_badge_line(&r, Locale::En).as_deref(), Some("main"));
         r.dirty = Some(true);
         r.counts = Some(WorkspaceGitCounts {
             staged: 1,
@@ -81,7 +83,7 @@ mod tests {
             conflicted: 0,
             total: 3,
         });
-        assert_eq!(git_badge_line(&r, Locale::En), "main ●3");
+        assert_eq!(git_badge_line(&r, Locale::En).as_deref(), Some("main ●3"));
     }
 
     #[test]
@@ -90,7 +92,19 @@ mod tests {
         r.head = Some(WorkspaceGitHead::Detached {
             oid: Some("1a2b3c4d5e6f".into()),
         });
-        assert_eq!(git_badge_line(&r, Locale::En), "HEAD@1a2b3c4");
+        assert_eq!(
+            git_badge_line(&r, Locale::En).as_deref(),
+            Some("HEAD@1a2b3c4")
+        );
+    }
+
+    #[test]
+    fn ok_without_head_shows_nothing_rather_than_a_wrong_claim() {
+        // 契约外情形：探测成功但没有 head。说「非 git 仓库」是假陈述，所以整帧不显示。
+        let mut r = base(WorkspaceGitState::Ok);
+        r.head = None;
+        assert_eq!(git_badge_line(&r, Locale::En), None);
+        assert_eq!(git_badge_line(&r, Locale::ZhHans), None);
     }
 
     #[test]
@@ -101,14 +115,13 @@ mod tests {
         failed.reason_code = Some("GIT_PROBE_TIMEOUT".into());
 
         for loc in [Locale::ZhHans, Locale::En] {
-            let a = git_badge_line(&not_repo, loc);
-            let b = git_badge_line(&unavailable, loc);
-            let c = git_badge_line(&failed, loc);
+            let a = git_badge_line(&not_repo, loc).expect("not_a_repo 有文案");
+            let b = git_badge_line(&unavailable, loc).expect("git_unavailable 有文案");
+            let c = git_badge_line(&failed, loc).expect("failed 有文案");
             // 三态文案必须两两不同（否则 UI 分不清该说哪句）。
             assert_ne!(a, b, "{loc:?}");
             assert_ne!(b, c, "{loc:?}");
             assert_ne!(a, c, "{loc:?}");
-            assert!(!a.is_empty() && !b.is_empty() && !c.is_empty());
         }
     }
 

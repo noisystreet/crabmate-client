@@ -373,7 +373,7 @@ fn shell_topbar_git_badge_view(
     view! {
         <Show when=move || git.get().is_some()>
             {move || match git.get() {
-                Some(resp) => git_badge_button(&resp, locale.get(), load_git).into_any(),
+                Some(resp) => git_badge_button(&resp, locale.get(), load_git),
                 None => ().into_any(),
             }}
         </Show>
@@ -381,16 +381,23 @@ fn shell_topbar_git_badge_view(
 }
 
 /// 单个徽标按钮：文本 / 提示 / 无障碍标签 / 脏着色。
+///
+/// `state == Ok` 却没有 `head` 时 `git_badge_line` 给 `None`：这一帧整体不画 ——
+/// 把「探测成功」说成「非 git 仓库」是假陈述。
 fn git_badge_button(
     resp: &WorkspaceGitStatusResponse,
     loc: Locale,
     load_git: impl Fn(bool) + Copy + Send + Sync + 'static,
-) -> impl IntoView {
-    let line = git_badge_line(resp, loc);
+) -> AnyView {
+    let Some(line) = git_badge_line(resp, loc) else {
+        return ().into_any();
+    };
     let title = git_badge_title(resp, loc);
     let aria = i18n::ws_git_badge_aria(loc);
     // 脏标记不靠颜色单独表达：`●N` 字符本身已带信息，class 只用于主题着色。
-    let dirty = resp.dirty.unwrap_or(false) || resp.counts.map(|c| c.total > 0).unwrap_or(false);
+    // 判定走共享的 `is_dirty`，与徽标文本里的 `●` 同一口径 —— 否则会出现
+    // 「有警示色却没有标记」这种自相矛盾的画面。
+    let dirty = crabmate_client_api::is_dirty(resp);
     let class = if dirty {
         "shell-topbar-git-badge shell-topbar-git-badge-dirty"
     } else {
@@ -406,6 +413,7 @@ fn git_badge_button(
             on:click=move |_| load_git(true)
         >{line}</button>
     }
+    .into_any()
 }
 
 /// 徽标状态与刷新时机（从 [`ShellTopbarWorkspaceRoot`] 拆出：组件本体只组装视图，

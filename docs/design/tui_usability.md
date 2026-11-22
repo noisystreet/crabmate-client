@@ -253,3 +253,10 @@
 | 队列/草稿与 running gate、Ctrl+C、切会话竞态 | 草稿/队列为纯状态字段，切换/取消时按单一顺序处理并加单测 |
 | 会话标题语义（Desktop 本地推导 vs serve 记录）影响 W2.2 重命名 | 确认标题落点后定重命名的持久化去向 |
 | 范围膨胀 | 按 Wave 顺序交付，每波独立 PR；非目标清单 §2 作为驳回依据 |
+- **W3.9 状态栏工作区 git 徽标** — **已落地**（#324）：`git` 段显示 `main ●5`（分支 + 未提交计数）、`HEAD@1a2b3c4`（detached）
+  或三态文案（`非 git 仓库` / `git 不可用` / `git 读取失败`）。值来自共享纯逻辑（`crabmate_client_api::workspace_git`，
+  与 Desktop 顶栏同一份），TUI 只负责自己的截断（`truncate_display`，20 列）与中文词表。数据由 state worker 在拉
+  `/status` + `/permission` 的**同一任务**里用 `get_json_optional` 取 `GET /workspace/git`：404（老 serve）与任何失败
+  都退成「没有这一段」，而不是画一个空分支名。与 `permission_view` 刻意相反 —— 那边失败保留旧值（配置事实），
+  这边失败即清空（即时事实，用户可能刚 commit）。口径：`dirty` 只代表**当前工作区根下**，与会话变更集
+  （`/workspace/changelog`）不是一个概念，不相加也不互相替代。

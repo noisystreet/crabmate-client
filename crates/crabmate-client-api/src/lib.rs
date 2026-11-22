@@ -120,6 +120,5 @@ pub use workspace::{
 };
 
 pub use workspace_git::{
-    DETACHED_LABEL_PREFIX, DIRTY_MARKER, badge_text, badge_text_fit, counts, dirty_marker,
-    display_width, head_label, is_stale, short_oid, truncate_ellipsis,
+    DETACHED_LABEL_PREFIX, DIRTY_MARKER, badge_text, dirty_marker, head_label, is_dirty, short_oid,
 };
