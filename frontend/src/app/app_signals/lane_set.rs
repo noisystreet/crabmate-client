@@ -36,6 +36,7 @@ use leptos::prelude::*;
 use crabmate_client_api::connections::ConnectionStatus;
 use crabmate_client_api::lane_attach::MAX_LANES;
 use crabmate_client_api::lane_phase::LaneEvent;
+use crabmate_client_api::url::api_base_authority;
 
 use crate::api::connection_scope;
 
@@ -73,6 +74,17 @@ impl LaneRailRow {
             context: RwSignal::new(None),
         }
     }
+}
+
+/// 在 lane 行里找 authority 命中的下标（纯函数，便于单测）。
+fn rail_index_for_base(rows: &[LaneRailRow], authority: &str) -> Option<usize> {
+    if authority.is_empty() {
+        return None;
+    }
+    rows.iter().position(|row| {
+        let base = row.api_base.get_untracked();
+        !base.trim().is_empty() && api_base_authority(&base) == authority
+    })
 }
 
 /// 一条 lane 的**全部**运行时：信号 + 接线产物 + 聊天列壳。
@@ -179,6 +191,19 @@ impl LaneSet {
         self.len() >= MAX_LANES
     }
 
+    /// 目标基址是否已经属于本窗口某条 lane；命中的话返回那条的下标。
+    ///
+    /// #561 决策「一台 serve 只占一条 lane」的落点：`new_lane` 先问这里，命中就**切过去**
+    /// 而不是再建一条。没有这道判重时，设置页那颗「新建 lane」按钮连点两次会得到两条同
+    /// Origin 的 lane —— 两条 lane 打同一台 serve，会话桶与凭据槽位都一样，用户看到的是
+    /// 「切了没反应」，排查时会以为是作用域又串了。
+    ///
+    /// 判据用 `api_base_authority`（不是原始字符串）：同一个 `host:port` 的不同写法
+    /// （尾部斜杠 / 路径前缀）必须算同一条。空 authority 一律不算命中。
+    pub(crate) fn index_of_base(&self, base: &str) -> Option<usize> {
+        rail_index_for_base(&self.rail_rows.get_untracked(), &api_base_authority(base))
+    }
+
     /// 下一条新 lane 的 `localStorage` 域后缀（§7 的 `-l<n>`）。
     ///
     /// 取「壳注入的连接标识」做基；没有注入（纯浏览器 / Android）时给 `None` —— 与主 lane
@@ -203,8 +228,18 @@ impl LaneSet {
         name: Option<&str>,
         api_base: &str,
     ) -> (Rc<LaneRuntime>, LaneRailRow) {
+        // 空基址 = 「同 Origin」：**创建这一刻**就解析成具体值再写进行。
+        //
+        // 留空的话，下游每一处「这条 lane 打的是哪台」都得在运行时拿**当前前台**基址兜底 ——
+        // 而那个值会随切 lane 变，于是同一条 lane 时而算占用、时而又不算。那正是
+        // 「切一下 lane 多出一个其它窗口」那一类 bug 的形状，别再给它第二次机会。
+        let api_base = if api_base.trim().is_empty() {
+            crate::api::api_base_url()
+        } else {
+            api_base.to_string()
+        };
         // 行先建：接线的 phase 5 要往里写读数（见 `run_shell_wiring_in_order`）。
-        let row = LaneRailRow::new(name.map(str::to_string), api_base.to_string());
+        let row = LaneRailRow::new(name.map(str::to_string), api_base);
         let signals = AppSignals::new_lane(&self.window, scope);
         let wiring = run_shell_wiring_in_order(&signals, row);
         let runtime = Rc::new(LaneRuntime::new(signals, wiring));
@@ -312,7 +347,8 @@ fn lane_storage_label(base_key: Option<&str>, index: usize) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{lane_storage_label, next_index};
+    use super::{LaneRailRow, lane_storage_label, next_index, rail_index_for_base};
+    use crabmate_client_api::url::api_base_authority;
 
     #[test]
     fn next_index_wraps_both_ways() {
@@ -340,5 +376,31 @@ mod tests {
     fn no_injected_key_means_no_lane_scoping() {
         // 纯浏览器 / Android 没有注入标识：不凭空造域，否则它们的键名会漂移。
         assert_eq!(lane_storage_label(None, 1), None);
+    }
+
+    /// 判重按 authority 比，不按原始字符串：同一个 `host:port` 的不同写法算同一条 lane。
+    ///
+    /// 回归口径来自 #561 的「一台 serve 只占一条 lane」：设置页那颗按钮连点两次不该得到
+    /// 两条同 Origin 的 lane。
+    #[test]
+    fn the_same_authority_written_differently_is_the_same_lane() {
+        let rows = vec![
+            LaneRailRow::new(Some("a".to_string()), "http://a:1".to_string()),
+            LaneRailRow::new(None, "http://b:2/".to_string()),
+        ];
+        assert_eq!(
+            rail_index_for_base(&rows, &api_base_authority("http://a:1/")),
+            Some(0)
+        );
+        assert_eq!(
+            rail_index_for_base(&rows, &api_base_authority("http://b:2/v1")),
+            Some(1)
+        );
+        assert_eq!(
+            rail_index_for_base(&rows, &api_base_authority("http://c:3")),
+            None
+        );
+        // 空 authority（没基址）一律不算命中 —— 否则会把「同 Origin」误判成任意一条。
+        assert_eq!(rail_index_for_base(&rows, ""), None);
     }
 }

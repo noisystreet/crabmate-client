@@ -36,7 +36,17 @@ pub fn bootstrap_app_shell() -> AppShellCtx {
         AppSignals::new_lane(&window, crate::api::connection_scope::active_holder());
     // 左栏那一行要在接线之前建好（phase 5 会往里写读数，#569）：
     // 名字留空（行上回退基址），基址取这条 lane 的 scope（与请求实际用的同一份）。
-    let first_row = super::app_signals::LaneRailRow::new(None, app_signals.scope.api_base());
+    // lane0 的基址同理：空 = 同 Origin，在这里定死（与 `LaneSet::add_lane` 同一口径），
+    // 免得下游把「空」当成「未知」再去拿前台基址猜。
+    let first_base = {
+        let base = app_signals.scope.api_base();
+        if base.trim().is_empty() {
+            crate::api::api_base_url()
+        } else {
+            base
+        }
+    };
+    let first_row = super::app_signals::LaneRailRow::new(None, first_base);
     // 官方壳：尽早从钥匙串 / Keystore 水合（hash 已写入内存时仅清明文 LS）。
     //
     // #558 项 1b：水合显式走「**这条 lane 自己的** holder」，不再靠零参口回落到 `ACTIVE`。

@@ -24,6 +24,11 @@ frontend/src/api/http_workspace_raw.rs         6
 frontend/src/api/session_store.rs              3
 frontend/src/api/user_data.rs                  3
 frontend/src/app/app_signals/connection.rs     1
+# 新建 lane 时读「当前前台基址」作为「同 Origin」的基址（#561）：这是语义要求，
+# 新 lane 继承的就是此刻前台那条的 serve。
+frontend/src/app/app_signals/lane_set.rs       1
+# 启动期给 lane0 的行定基址（同 Origin 兜底）：此刻 ACTIVE 就是 lane0 本身。
+frontend/src/app/app_shell_bootstrap.rs        1
 frontend/src/app/connection_feed.rs            1
 frontend/src/app/nav_rail_connections.rs       1
 frontend/src/app/settings_sections.rs          1
