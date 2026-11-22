@@ -8,6 +8,7 @@ make test            # frontend → tauri → tui → web-host
 ```
 
 桌面壳冒烟（真实 WebKitGTK + 外部 serve，xvfb）：`make smoke-desktop-shell`。  
+真桌面症状（Chromium / Playwright 全绿但桌面上点了没反应）的取证：`bash scripts/probe-desktop-shell.sh`（xvfb + 真 WebKitGTK；把探针注入壳侧，panic 与「状态是否变化 / 元素是否被遮挡」POST 回本地收集端，有 panic 时退出码 1）。方法与坑见 `docs/design/desktop_shell_debugging.md`。
 Playwright（浏览器 UI，需纯 API `serve` + 客户端 `crabmate-web` 自托管）：`make e2e-playwright`。
 
 失败时先取 CI 的 `playwright-report` artifact —— 里面既有 html 报告，也有 `test-results/` 的失败截图与 trace。workflow 在开跑前会探活 `:8080/health` 与 `:4173/`，不可达时打印监听端口与进程存活情况，用来把「服务在测试前就已失联」与「测试自身失败」分开。页面就绪统一等 `domcontentloaded` + composer 选择器，**不要**用 `networkidle`：SPA 首屏后会挂水合 / 轮询请求，它永远等不到，超时错误还会盖住真正的原因。

@@ -127,6 +127,7 @@ bash scripts/fn-nloc-ratchet.sh          # function nloc <= 200 and Rust file <=
 bash scripts/dependency-security.sh      # cargo audit + cargo deny; not in pre-commit / check.sh
 bash scripts/ktlint-android.sh           # needs java; `--format` to fix
 make smoke-desktop-shell        # or ./scripts/smoke-desktop-shell.sh; needs a usable crabmate serve binary + xvfb; not in CI
+bash scripts/probe-desktop-shell.sh   # headless probe of the REAL shell (xvfb + injected self-check; panic in the probe log -> exit 1); not in CI
 make e2e-playwright              # or ./scripts/e2e-playwright.sh; needs frontend/dist + serve; pre-commit only runs its format/lint
 ```
 
@@ -181,6 +182,7 @@ When updating docs:
 | Markdown rendering follow-ups | `docs/design/markdown_render_todo.md` |
 | UI issue backlog (shell-wide) | `docs/design/ui_issue_todo.md` |
 | Manual shell smoke steps | `docs/design/shell_smoke_runbook.md` |
+| Debugging the desktop shell headless (xvfb + shell-injected self-check probe; single-instance / embedded-asset / WebKit-cache traps; why a Chromium-green suite can still be broken on the desktop) | `docs/design/desktop_shell_debugging.md`; runnable as `scripts/probe-desktop-shell.sh` |
 | Personal cloud (shell → remote API-only) | `docs/design/personal_cloud_runbook.md`; VPS/Caddy authority is Server |
 | Shell smoke / pre-commit / CI commands | `docs/TESTING.md` |
 | Issue / PR templates | `.github/ISSUE_TEMPLATE/` (`bug_report.md` / `feature_request.md` / `config.yml`) + `.github/pull_request_template.md`; keep the three issue files and the PR template consistent in the same PR |
