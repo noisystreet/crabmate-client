@@ -94,7 +94,7 @@ Android / 窄屏：2.1 至少是可滚动文件列表 + 摘要；**不要**为�
 
 | # | 项 | 说明 |
 |---|-----|------|
-| 3.1 | 侧栏 git status（脏文件与变更集对齐或明确分工） | 权威仍在 Server 工作区 |
+| 3.1 | 侧栏 git status（脏文件与变更集对齐或明确分工） | ✅ 分支 + 未提交脏计数：Desktop 顶栏徽标、TUI 状态栏 `git` 段。真源 = Server `GET /workspace/git`（`#1457`）；**口径已定**：会话改动（`/workspace/changelog`）与未提交改动并存、分措辞，不相加不替代。脏**文件列表**仍未做（Server 只给分类计数） |
 | 3.2 | 暂存 + 提交说明 | 提交动作是 Server 工具或专用 API，Client 只收集说明与确认 |
 | 3.3 | 用已有 GitHub Device Flow 开 PR | 不新做 OAuth 网页 |
 
