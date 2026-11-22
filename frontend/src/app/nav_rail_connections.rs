@@ -61,7 +61,6 @@ use super::connection_feed::{
     connection_display_name, connection_feed, ctl_instances_feed, refresh_ctl_instances,
 };
 use super::focusable_menu::{FocusableModalBackdrop, FocusableModalPanel, FocusableRoleMenu};
-use super::lane_actions;
 use super::settings_page::{SettingsSection, navigate_to_settings};
 use super::shell_runtime_context::try_chat_shell_ctx;
 
@@ -180,62 +179,6 @@ pub(crate) fn ctl_rows_for_rail(instances: &[CtlInstance], taken: &[String]) -> 
         });
     }
     rows
-}
-
-/// 窗口级连接注册表里已占用的 authority。
-fn snapshot_authorities(snapshots: &[ConnectionSnapshot]) -> Vec<String> {
-    snapshots
-        .iter()
-        .map(|snapshot| snapshot.authority.clone())
-        .filter(|authority| !authority.is_empty())
-        .collect()
-}
-
-/// 本窗口每条 lane 已占用的 authority。
-///
-/// 空基址 = 同 Origin（设置页那颗按钮新建的 lane），用 `fallback`（窗口当前基址）兜底 ——
-/// 否则那条 lane 会被算成「没占用」，同一个 Origin 的实例又出现在「可连实例」里。
-///
-/// 抽成自由函数而不是写在组件里：`NavRailConnections` 贴着 `lizard` 的 CCN>10 门禁。
-fn lane_authorities(rows: &[super::app_signals::LaneRailRow], fallback: &str) -> Vec<String> {
-    rows.iter()
-        .map(|row| {
-            let base = row.api_base.get();
-            let base = if base.trim().is_empty() {
-                fallback.to_string()
-            } else {
-                base
-            };
-            api_base_authority(&base)
-        })
-        .filter(|authority| !authority.is_empty())
-        .collect()
-}
-
-/// 窗口注册表里**除本窗口**以外的那些（「其它窗口」分组）。
-fn other_window_rows(snapshots: &[ConnectionSnapshot], own: &str) -> Vec<ConnectionSnapshot> {
-    snapshots
-        .iter()
-        .filter(|snapshot| snapshot.authority != own)
-        .cloned()
-        .collect()
-}
-
-/// 已占用的 authority（响应式）：窗口级注册表 + 本窗口每条 lane 的基址。
-///
-/// 两个来源缺一不可：#561 S2 之后「连接」= 在当前窗口新建一条 lane，它不在窗口注册表里；
-/// 而别的窗口 / 老路径仍只体现在注册表里。组装留在这里而不是组件体内 ——
-/// `NavRailConnections` 贴着 `lizard` 的 CCN>10 门禁。
-fn taken_authorities_signal(
-    rows: Signal<Vec<ConnectionSnapshot>>,
-    fallback: RwSignal<String>,
-) -> Signal<Vec<String>> {
-    Signal::derive(move || {
-        let lane_rows = lane_actions::rail().map_or_else(Vec::new, |(r, _)| r.get());
-        let mut out = snapshot_authorities(&rows.get());
-        out.extend(lane_authorities(&lane_rows, &fallback.get()));
-        out
-    })
 }
 
 /// 连接行右键菜单的锚点：屏幕坐标 + 打开那一刻的名字。
@@ -476,14 +419,14 @@ pub(super) fn NavRailConnections(
     // 已被占用的 authority：窗口级注册表（别的窗口 / 老路径）**加上本窗口每条 lane 的基址**。
     // #561 S2 起「连接」= 在当前窗口新建一条 lane，那条 lane 不在窗口注册表里 —— 只看注册表，
     // 刚连上的实例会继续留在「可连实例」里（再点一次就多一条同 serve 的 lane）。
-    let taken = taken_authorities_signal(rows, api_base);
+    let lane_taken = lane_authority_signal(api_base);
+    let taken = taken_authorities_signal(rows, lane_taken);
     // 「其它窗口」：窗口注册表里**除本窗口**以外的那些。
     //
     // 单窗口多 lane 的常态下这里恒为空 —— 前端已经没有开新窗口的入口，#561 S2 之后
     // 「连接」= 在当前窗口新建 lane。只有壳侧还挂着别的窗口（老路径 / 调试）时才有内容，
     // 那时它们仍要能切、能关。
-    let other_rows =
-        Signal::derive(move || other_window_rows(&rows.get(), &own_authority.get_value()));
+    let other_rows = Signal::derive(move || other_window_rows(&rows.get(), &lane_taken.get()));
     // 控制面实例：只在桌面壳里才有来源；非桌面壳下壳没有这条命令，这份 signal 恒为空。
     let instances = StoredValue::new(ctl_instances_feed());
     let ctl_rows =
@@ -562,6 +505,10 @@ use lanes::LaneRailGroup;
 #[path = "nav_rail_other_windows.rs"]
 mod other_windows;
 use other_windows::OtherWindowsGroup;
+
+#[path = "nav_rail_authorities.rs"]
+mod authorities;
+use authorities::{lane_authority_signal, other_window_rows, taken_authorities_signal};
 
 /// 连接行的右键菜单：坐标锚点 + 遮罩 + 共享的 `role=menu` 容器（与左栏会话行同一套）。
 ///
@@ -786,7 +733,7 @@ mod rename_wiring_source_tests {
 
 #[cfg(test)]
 mod tests {
-    use super::{CtlRowState, ctl_rows_for_rail, row_meta};
+    use super::{CtlRowState, ctl_rows_for_rail, other_window_rows, row_meta};
     use crabmate_client_api::connections::ConnectionSnapshot;
     use crabmate_client_api::ctl::CtlInstance;
     use crabmate_client_api::url::api_base_authority;
@@ -897,5 +844,28 @@ mod tests {
             &[api_base_authority("http://127.0.0.1:8080/v1/")],
         );
         assert!(rows.is_empty());
+    }
+
+    /// 切到另一条 lane 之后，窗口注册表里那条初始连接的记录**不该**被当成「另一个窗口」。
+    ///
+    /// 回归用例：判据曾经是「≠ 当前前台 lane 的基址」，而 `api_base` 随切 lane 而变 ——
+    /// 切到第二台 serve 之后，第一台那条窗口记录立刻「不等于前台基址」，左栏于是冒出一个
+    /// 「其它窗口」分组。判据必须落在「**本窗口任意一条 lane** 的基址」上。
+    #[test]
+    fn switching_lanes_does_not_turn_the_window_row_into_another_window() {
+        // 本窗口两条 lane（A、B）；窗口注册表里只有那条初始连接（A）。
+        let lanes = vec![
+            api_base_authority("http://a:1"),
+            api_base_authority("http://b:2"),
+        ];
+        let window_rows = vec![connected("http://a:1")];
+        assert!(other_window_rows(&window_rows, &lanes).is_empty());
+
+        // 真正的另一个窗口（C）才留下。
+        let mut with_other = window_rows;
+        with_other.push(connected("http://c:3"));
+        let rest = other_window_rows(&with_other, &lanes);
+        assert_eq!(rest.len(), 1);
+        assert_eq!(rest[0].authority, api_base_authority("http://c:3"));
     }
 }
