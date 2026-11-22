@@ -19,7 +19,7 @@ use crate::session_workspace_partition::{
     prepare_cold_start_session_list, record_memory_sessions_partition,
 };
 use crate::stream_text_overlay::sessions_snapshot_with_stream_overlay_merged;
-use crate::user_data_bootstrap::load_web_sessions;
+use crate::user_data_bootstrap::load_web_sessions_on;
 use crate::user_prefs_sync::wire_load_user_prefs_from_server;
 use crate::user_prefs_sync_state::user_prefs_load_attempt_finished;
 
@@ -57,6 +57,8 @@ pub fn wire_initial_sessions_from_storage(app: crate::app::app_signals::AppSigna
     let draft = app.chat_composer.draft;
     let locale = app.shell_ui.locale;
     let chat = app.chat;
+    // #569：每条 lane 首屏的会话桶要读**它自己那台** serve。
+    let scope = app.scope.clone();
 
     wire_load_user_prefs_from_server(app.clone());
     let prefs_sync_phase = app.workspace.user_prefs_sync_phase;
@@ -65,12 +67,13 @@ pub fn wire_initial_sessions_from_storage(app: crate::app::app_signals::AppSigna
             return;
         }
         let loc = locale.get_untracked();
+        let scope = scope.clone();
         spawn_local(async move {
             // LLM 覆盖 / 密钥状态 与 会话列表并行，缩短门闸；prefs（含只读 TTL）另路由行。
             let ((), ((list, _aid), ws_outcome)) = futures_util::future::join(
                 hydrate_client_llm_from_server(loc),
                 futures_util::future::join(
-                    load_web_sessions(loc),
+                    load_web_sessions_on(&scope, loc),
                     fetch_workspace(&crate::api::connection_scope::active_holder(), None, loc),
                 ),
             )

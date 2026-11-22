@@ -10,7 +10,10 @@ use web_sys::{Request, RequestInit, Response};
 use crate::i18n::{self, Locale};
 use crate::storage::ChatSession;
 
-use super::browser::{api_url, auth_headers, prepare_api_auth, window};
+use super::browser::{
+    api_url_on, auth_headers, auth_headers_for, prepare_api_auth, prepare_api_auth_on, window,
+};
+use super::connection_scope::{self, ScopeHolder};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UserPrefsDto {
@@ -116,12 +119,14 @@ async fn read_ok_json_body<T: for<'de> Deserialize<'de>>(
     serde_json::from_str(&s).map_err(|e| e.to_string())
 }
 
-async fn fetch_request_json<T: for<'de> Deserialize<'de>>(
+/// 带**显式作用域**的请求执行（#569）：URL 从这一份作用域拼。
+async fn fetch_request_json_on<T: for<'de> Deserialize<'de>>(
+    scope: &ScopeHolder,
     init: &RequestInit,
     url: &str,
     loc: Locale,
 ) -> Result<T, String> {
-    let url = api_url(url);
+    let url = api_url_on(scope, url);
     let req = Request::new_with_str_and_init(&url, init).map_err(|e| format!("request: {e:?}"))?;
     let w = window().ok_or_else(|| crate::i18n::api_err_no_window(loc).to_string())?;
     let resp_val = JsFuture::from(w.fetch_with_request(&req))
@@ -133,15 +138,32 @@ async fn fetch_request_json<T: for<'de> Deserialize<'de>>(
     read_ok_json_body(resp, loc).await
 }
 
-async fn fetch_json<T: for<'de> Deserialize<'de>>(
+async fn fetch_request_json<T: for<'de> Deserialize<'de>>(
+    init: &RequestInit,
+    url: &str,
+    loc: Locale,
+) -> Result<T, String> {
+    fetch_request_json_on(&connection_scope::active_holder(), init, url, loc).await
+}
+
+async fn fetch_json_on<T: for<'de> Deserialize<'de>>(
+    scope: &ScopeHolder,
     method: &str,
     url: &str,
     loc: Locale,
 ) -> Result<T, String> {
     let init = RequestInit::new();
     init.set_method(method);
-    prepare_api_auth(&init).await;
-    fetch_request_json(&init, url, loc).await
+    prepare_api_auth_on(scope, &init).await;
+    fetch_request_json_on(scope, &init, url, loc).await
+}
+
+async fn fetch_json<T: for<'de> Deserialize<'de>>(
+    method: &str,
+    url: &str,
+    loc: Locale,
+) -> Result<T, String> {
+    fetch_json_on(&connection_scope::active_holder(), method, url, loc).await
 }
 
 /// PUT 失败：尽力读服务器错误体并组装「HTTP {status}[: detail]」消息。
@@ -164,7 +186,9 @@ async fn put_no_content_error(resp: Response, loc: Locale) -> Result<String, Str
     Ok(msg)
 }
 
-async fn put_json_no_content_with_keepalive(
+/// 带**显式作用域**的 JSON PUT（#569）；`keepalive` 供流结束边界与页面离开时使用。
+async fn put_json_no_content_with_keepalive_on(
+    scope: &ScopeHolder,
     url: &str,
     body: &str,
     loc: Locale,
@@ -172,7 +196,7 @@ async fn put_json_no_content_with_keepalive(
 ) -> Result<(), String> {
     let init = RequestInit::new();
     init.set_method("PUT");
-    prepare_api_auth(&init).await;
+    prepare_api_auth_on(scope, &init).await;
     if keepalive {
         js_sys::Reflect::set(
             init.as_ref(),
@@ -181,11 +205,11 @@ async fn put_json_no_content_with_keepalive(
         )
         .map_err(|e| format!("request keepalive: {e:?}"))?;
     }
-    let h = auth_headers();
+    let h = auth_headers_for(scope);
     let _ = h.set("Content-Type", "application/json");
     init.set_headers(&h);
     init.set_body(&wasm_bindgen::JsValue::from_str(body));
-    let url = api_url(url);
+    let url = api_url_on(scope, url);
     let req = Request::new_with_str_and_init(&url, &init).map_err(|e| format!("request: {e:?}"))?;
     let w = window().ok_or_else(|| crate::i18n::api_err_no_window(loc).to_string())?;
     let resp_val = JsFuture::from(w.fetch_with_request(&req))
@@ -201,8 +225,17 @@ async fn put_json_no_content_with_keepalive(
     }
 }
 
+async fn put_json_no_content_on(
+    scope: &ScopeHolder,
+    url: &str,
+    body: &str,
+    loc: Locale,
+) -> Result<(), String> {
+    put_json_no_content_with_keepalive_on(scope, url, body, loc, false).await
+}
+
 async fn put_json_no_content(url: &str, body: &str, loc: Locale) -> Result<(), String> {
-    put_json_no_content_with_keepalive(url, body, loc, false).await
+    put_json_no_content_on(&connection_scope::active_holder(), url, body, loc).await
 }
 
 pub async fn fetch_user_data_prefs(loc: Locale) -> Result<UserPrefsDto, String> {
@@ -394,10 +427,13 @@ pub async fn put_mcp_server_remote_auth(
     .await
 }
 
-pub async fn fetch_current_web_sessions(
+/// 带**显式作用域**的会话列表读取（#569）：每条 lane 读自己那台 serve 的桶。
+pub async fn fetch_current_web_sessions_on(
+    scope: &ScopeHolder,
     loc: Locale,
 ) -> Result<(Vec<ChatSession>, Option<String>), String> {
-    let dto: WebSessionsDto = fetch_json("GET", paths::USER_DATA_WORKSPACE_SESSIONS, loc).await?;
+    let dto: WebSessionsDto =
+        fetch_json_on(scope, "GET", paths::USER_DATA_WORKSPACE_SESSIONS, loc).await?;
     let sessions: Vec<ChatSession> = match dto.sessions {
         Value::Array(arr) => {
             let mut out = Vec::new();
@@ -424,11 +460,33 @@ pub async fn put_current_web_sessions(
         active_session_id: active_id.map(str::to_string),
     };
     let json = serde_json::to_string(&body).map_err(|e| e.to_string())?;
-    put_json_no_content(paths::USER_DATA_WORKSPACE_SESSIONS, &json, loc).await
+    put_json_no_content_on(
+        &connection_scope::active_holder(),
+        paths::USER_DATA_WORKSPACE_SESSIONS,
+        &json,
+        loc,
+    )
+    .await
 }
 
 /// 流结束边界的 best-effort 持久化；`keepalive` 允许页面立即刷新时继续发送小型会话快照。
 pub async fn put_current_web_sessions_keepalive(
+    sessions: &[ChatSession],
+    active_id: Option<&str>,
+    loc: Locale,
+) -> Result<(), String> {
+    put_current_web_sessions_keepalive_on(
+        &connection_scope::active_holder(),
+        sessions,
+        active_id,
+        loc,
+    )
+    .await
+}
+
+/// 带**显式作用域**的流结束边界写回（#569）。
+pub async fn put_current_web_sessions_keepalive_on(
+    scope: &ScopeHolder,
     sessions: &[ChatSession],
     active_id: Option<&str>,
     loc: Locale,
@@ -439,5 +497,12 @@ pub async fn put_current_web_sessions_keepalive(
         active_session_id: active_id.map(str::to_string),
     };
     let json = serde_json::to_string(&body).map_err(|e| e.to_string())?;
-    put_json_no_content_with_keepalive(paths::USER_DATA_WORKSPACE_SESSIONS, &json, loc, true).await
+    put_json_no_content_with_keepalive_on(
+        scope,
+        paths::USER_DATA_WORKSPACE_SESSIONS,
+        &json,
+        loc,
+        true,
+    )
+    .await
 }
