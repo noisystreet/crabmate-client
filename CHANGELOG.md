@@ -35,6 +35,8 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Fixed
 
+- **Bump `url` to 2.5.9 for RUSTSEC-2026-0592; allow `paste`'s unmaintained advisory.**
+
 - **Scrolling back no longer re-keys the older page on every fetch.**
 
 - **A turn's final answer keeps a stable row id instead of a random one per turn.**

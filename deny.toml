@@ -9,6 +9,11 @@ all-features = true
 [advisories]
 version = 2
 
+# `paste` 只有编译期宏（token 粘贴），没有运行时攻击面；它由 leptos 栈传递引入
+# （either_of / tachys / reactive_graph / reactive_stores / leptos_server），上游尚未迁到
+# `pastey`，advisory 自己也写「No safe upgrade is available」。等 leptos 换掉后删除本条。
+ignore = ["RUSTSEC-2024-0436"]
+
 [licenses]
 version = 2
 confidence-threshold = 0.8
