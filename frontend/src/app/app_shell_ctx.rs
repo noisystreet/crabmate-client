@@ -185,11 +185,19 @@ impl AppShellCtx {
     /// 新建一条 lane（#561 S2）：存储域后缀按 §7 取 `-l<n>`，`base` 给定时作为这条 lane 的
     /// 基址（左栏「连接」要从目标实例的地址起步，而不是「同 Origin」）。
     ///
+    /// `name` 是**左栏那行的主体**（#569 对齐 TUI）：ctl 行给实例名、设置页给 `None`（回退基址）。
+    ///
     /// **调用点必须在 `mount_to` 的闭包里**（见 [`super::app_signals::LaneSet::add_lane`]）：
     /// 接线里那约 29 个 `Effect::new` 需要一个新子树的 owner。
-    pub fn add_lane(&self, base: Option<&str>) -> Rc<super::app_signals::LaneRuntime> {
+    pub fn add_lane(
+        &self,
+        name: Option<&str>,
+        base: Option<&str>,
+    ) -> Rc<super::app_signals::LaneRuntime> {
         let label = self.lanes.next_storage_label();
         let scope = crate::api::connection_scope::new_holder(label, base);
-        self.lanes.add_lane(scope)
+        // 行上显示规范化之后的基址（与请求实际用的同一份）。
+        let api_base = scope.api_base();
+        self.lanes.add_lane(scope, name, &api_base).0
     }
 }

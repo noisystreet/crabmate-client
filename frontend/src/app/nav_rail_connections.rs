@@ -63,7 +63,7 @@ use super::shell_runtime_context::try_chat_shell_ctx;
 
 /// 状态点字形。与 TUI 的 `·●▲` 同口径；呼吸动画不进共享层（见 `ConnectionSnapshot`
 /// 「刻意不含动画相位」），Web 侧靠 CSS transition。
-fn status_glyph(status: ConnectionStatus) -> &'static str {
+pub(super) fn status_glyph(status: ConnectionStatus) -> &'static str {
     match status {
         ConnectionStatus::Idle => "·",
         ConnectionStatus::Running => "●",
@@ -337,6 +337,7 @@ fn ctl_row(
     let name_for_title = name.clone();
     let name_for_busy = name.clone();
     let name_for_restart = name.clone();
+    let name_for_connect = name.clone();
     // 在途判定按名字：ctl 只有一个线程，同一时刻只可能有一条重启在跑。
     let busy = Memo::new(move |_| restart.get().busy.as_deref() == Some(name_for_busy.as_str()));
 
@@ -390,10 +391,12 @@ fn ctl_row(
                     data-testid="nav-rail-ctl-connect"
                     on:click={
                         let base = base_for_click.clone();
+                        // `Show` 的 children 必须是 `Fn`：名字先克隆进来，别把 `name` move 出外层。
+                        let name = name_for_connect.clone();
                         move |_| {
                             // #561 S2：连接 = 在当前窗口新建一条 lane（不再开新 WebView），
                             // 目标实例的地址作为这条 lane 的基址交接过去。
-                            crate::app::lane_actions::new_lane(Some(base.clone()));
+                            crate::app::lane_actions::new_lane(Some(name.clone()), Some(base.clone()));
                         }
                     }
                 >
@@ -503,68 +506,9 @@ pub(super) fn NavRailConnections(
     }
 }
 
-/// 左栏「本窗口 lane」分组（#561 S3b，§6.5 方案 B）。
-///
-/// 抽成独立组件而不是内联闭包：内联时整段会把 `NavRailConnections` 的 CCN 抬过门禁
-/// （14 > 10）。这里只画**本窗口**的 lane —— 别的窗口里有几条看不到（方案 B 的既定降级，
-/// 见 `client_capability_matrix.md` 注 3）；单 lane 时整组不渲染。
-#[component]
-fn LaneRailGroup(locale: RwSignal<Locale>) -> impl IntoView {
-    // 数据源与切换动作都走窗口级表：条数与前台下标是 `RwSignal`（`Copy`/`Send + Sync`），
-    // 能进响应式闭包；点击走 thread_local 函数，闭包里不捕获 `Rc`（§5.2 的那道边界）。
-    let rail = crate::app::lane_actions::rail();
-    view! {
-        {move || {
-            let Some((labels, active)) = rail else {
-                return ().into_any();
-            };
-            let all = labels.get();
-            if all.len() <= 1 {
-                return ().into_any();
-            }
-            view! {
-                <div class="nav-rail-ctl-group" data-testid="nav-rail-lane-group">
-                    <div class="nav-rail-ctl-head">
-                        <span class="nav-rail-ctl-title">
-                            {i18n::lane_rail_title(locale.get())}
-                        </span>
-                    </div>
-                    {(0..all.len())
-                        .map(|index| lane_rail_row(index, &all, active, locale))
-                        .collect_view()}
-                </div>
-            }
-            .into_any()
-        }}
-    }
-}
-
-/// 一行 lane：`#n` + 地址（空串 = 同 Origin）。点击切过去，前台那条高亮。
-fn lane_rail_row(
-    index: usize,
-    labels: &[String],
-    active: RwSignal<usize>,
-    locale: RwSignal<Locale>,
-) -> impl IntoView {
-    let label = labels.get(index).cloned().unwrap_or_default();
-    let text = if label.is_empty() {
-        i18n::status_chip_same_origin(locale.get_untracked()).to_string()
-    } else {
-        label
-    };
-    view! {
-        <button
-            type="button"
-            class="nav-rail-connection-row"
-            class:nav-rail-connection-row--active=move || active.get() == index
-            data-testid="nav-rail-lane-row"
-            on:click=move |_| crate::app::lane_actions::switch_to(index)
-        >
-            <span class="nav-rail-connection-name">{format!("#{}", index + 1)}</span>
-            <span class="nav-rail-connection-meta">{text}</span>
-        </button>
-    }
-}
+#[path = "nav_rail_lanes.rs"]
+mod lanes;
+use lanes::LaneRailGroup;
 
 /// 连接行的右键菜单：坐标锚点 + 遮罩 + 共享的 `role=menu` 容器（与左栏会话行同一套）。
 ///

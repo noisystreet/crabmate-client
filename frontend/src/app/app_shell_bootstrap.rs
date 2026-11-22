@@ -34,6 +34,9 @@ pub fn bootstrap_app_shell() -> AppShellCtx {
     let window = super::app_signals::WindowSignals::new();
     let app_signals: AppSignals =
         AppSignals::new_lane(&window, crate::api::connection_scope::active_holder());
+    // 左栏那一行要在接线之前建好（phase 5 会往里写读数，#569）：
+    // 名字留空（行上回退基址），基址取这条 lane 的 scope（与请求实际用的同一份）。
+    let first_row = super::app_signals::LaneRailRow::new(None, app_signals.scope.api_base());
     // 官方壳：尽早从钥匙串 / Keystore 水合（hash 已写入内存时仅清明文 LS）。
     //
     // #558 项 1b：水合显式走「**这条 lane 自己的** holder」，不再靠零参口回落到 `ACTIVE`。
@@ -44,10 +47,10 @@ pub fn bootstrap_app_shell() -> AppShellCtx {
         crate::api::web_api_bearer_local::hydrate_web_api_bearer_into(&scope).await;
     });
     crate::confirm_dialog::register_shell_confirm(app_signals.modal.confirm_signals());
-    let wiring = run_shell_wiring_in_order(&app_signals);
+    let wiring = run_shell_wiring_in_order(&app_signals, first_row);
 
     // 接线产物与聊天列壳按 lane 存进容器（组装表达式见 `LaneRuntime::new`）。
-    let lanes = super::app_signals::LaneSet::new_single(window, app_signals, wiring);
+    let lanes = super::app_signals::LaneSet::new_single(window, first_row, app_signals, wiring);
 
     AppShellCtx { lanes }
 }

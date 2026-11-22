@@ -6,7 +6,7 @@
 //! 版面口径全部来自 `layout`（`lane_shown_len` / `lane_index_at`）：
 //! 一行对应哪条 lane 与鼠标命中必须是同一份算法，否则会出现「点第 2 行切到第 3 条」。
 
-use crabmate_client_api::connections::busy_duration_text;
+use crabmate_client_api::lane_row::{self, LaneReadout};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
@@ -20,9 +20,6 @@ use super::pulse;
 use super::status::reduced_motion;
 use super::text::truncate_display;
 use super::worker::{LaneId, UiEvent};
-
-/// 名字至少留几列才值得画尾部读数：不足就整段尾部让位给名字。
-const LANE_LABEL_MIN: usize = 4;
 
 /// 外壳层算好的单条 lane 快照：只含**渲染需要**的字段。
 ///
@@ -175,14 +172,17 @@ fn lane_list_rows(
 ///
 /// `↓m` 与 `▲k` 并存：前者说「这里没画全」，后者说「有条目在等人」，两件事互不替代。
 fn lane_title(tally: LaneTally, shown: usize) -> String {
-    let mut text = format!("连接 [{}/{}]", tally.connected, super::shell::MAX_LANES);
-    if shown < tally.connected {
-        text.push_str(&format!(" ↓{}", tally.connected - shown));
-    }
-    if tally.pending_approvals > 0 {
-        text.push_str(&format!(" ▲{}", tally.pending_approvals));
-    }
-    text
+    // 数字与后缀的顺序在共享层（`lane_row::count_suffix`），与 Web 左栏同一份；
+    // 只有「连接」这个词留在各端。
+    format!(
+        "连接 {}",
+        lane_row::count_suffix(
+            tally.connected,
+            super::shell::MAX_LANES,
+            tally.connected.saturating_sub(shown),
+            tally.pending_approvals,
+        )
+    )
 }
 
 /// 一条 lane 的一行：整行宽的底色条，文字贴左。
@@ -216,11 +216,18 @@ fn lane_row(entry: &LaneEntry, width: usize, palette: &Palette) -> Line<'static>
     let head = truncate_display(entry.status.mark(), width);
     let head_w = UnicodeWidthStr::width(head.as_str());
     let rest_w = width.saturating_sub(head_w);
-    // 尾部读数最多占半行：这一行首先是「哪条 lane」，其次才是读数。
-    let tail_room = width
-        .saturating_sub(head_w + 1 + LANE_LABEL_MIN)
-        .min(width / 2);
-    let tail = lane_tail(entry, tail_room);
+    // 尾部读数最多占半行：这一行首先是「哪条 lane」，其次才是读数。算式在共享层，
+    // 与 Web 左栏同一份（`crabmate_client_api::lane_row::tail_room`）。
+    let tail_room = lane_row::tail_room(width, head_w);
+    let tail = lane_row::tail_within(
+        &lane_row::tail_parts(LaneReadout {
+            context: entry.context.as_deref(),
+            busy_secs: entry.busy_secs,
+            unread: entry.unread,
+        }),
+        tail_room,
+        UnicodeWidthStr::width,
+    );
     let tail_w = UnicodeWidthStr::width(tail.as_str());
     // 名字 + 尾部读数占满余下宽度；装不下时 `truncate_display` 从右切（名字优先）。
     let mut rest = format!(" {}", entry.label);
@@ -286,40 +293,6 @@ fn pending_text(item: &super::pending_lane::PendingLane, width: usize) -> String
     text.push_str(&" ".repeat(gap));
     text.push_str(&note);
     text
-}
-
-/// 行尾读数：`62% 12s •`，按重要性**从右往左**排 —— 最右的未读点最重要（它就是
-/// 「切过去看看」的理由），其次是耗时，再次是上下文占比。
-///
-/// 宽度不够时从**左边**丢：先丢 `ctx`，再丢耗时，未读点留到最后。宁可少一个数字，
-/// 也不能把「这条 lane 有话要说」丢掉。
-fn lane_tail(entry: &LaneEntry, room: usize) -> String {
-    let mut parts: Vec<String> = Vec::new();
-    if let Some(ctx) = entry.context.as_deref() {
-        parts.push(ctx.to_string());
-    }
-    if let Some(secs) = entry.busy_secs {
-        parts.push(busy_duration_text(secs));
-    }
-    if entry.unread {
-        parts.push("•".to_string());
-    }
-    while !parts.is_empty() && tail_width(&parts) > room {
-        parts.remove(0);
-    }
-    parts.join(" ")
-}
-
-/// 尾部文本占的列数（含分隔空格）。
-fn tail_width(parts: &[String]) -> usize {
-    if parts.is_empty() {
-        return 0;
-    }
-    let glyphs: usize = parts
-        .iter()
-        .map(|p| UnicodeWidthStr::width(p.as_str()))
-        .sum();
-    glyphs + parts.len() - 1
 }
 
 /// 底色条样式：当前 lane 走 `palette.selection`（无色模式自动退回反色），其余用

@@ -43,6 +43,10 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 - **The status-bar serve chip now follows the lane you switch to.**
 
+- **The left-rail lane list now shows the TUI's status glyph, name, counts and readouts.**
+
+- **The permission chip no longer shows an arrow before a session is bound (matches the TUI).**
+
 - **Scrolling back no longer re-keys the older page on every fetch.**
 
 - **A turn's final answer keeps a stable row id instead of a random one per turn.**

@@ -99,7 +99,10 @@ pub(crate) struct ShellWiringOutput {
 }
 
 /// 按固定顺序注册全部壳级 `wire_*` 并返回闭包 / 流式壳等产物。
-pub(crate) fn run_shell_wiring_in_order(app: &AppSignals) -> ShellWiringOutput {
+pub(crate) fn run_shell_wiring_in_order(
+    app: &AppSignals,
+    row: crate::app::app_signals::LaneRailRow,
+) -> ShellWiringOutput {
     wire_phase1_chat_session_lifecycle(app);
     wire_phase2_persisted_prefs_dom_and_settings_hooks(app);
     wire_phase3_escape_layered_dismiss(app);
@@ -107,7 +110,7 @@ pub(crate) fn run_shell_wiring_in_order(app: &AppSignals) -> ShellWiringOutput {
     let refresh_workspace = make_refresh_workspace_for_shell(app);
     let wiring_tail =
         wire_phase4_workspace_status_and_chat_domain(app, Arc::clone(&refresh_workspace));
-    wire_phase5_connection_report(app);
+    wire_phase5_connection_report(app, row);
 
     ShellWiringOutput {
         refresh_workspace,
@@ -389,7 +392,7 @@ fn make_refresh_workspace_for_shell(app: &AppSignals) -> RefreshWorkspaceFn {
 /// 放在最后：它只读阶段 1/4 已经装好的信号（回合生命周期、待审批、会话与 `/status`
 /// 用量），没有产物要交给别人；而**上报本身**由 `connections_registered` 把关 ——
 /// 壳登记完成之前不发，所以早跑晚跑都不会丢第一帧。
-fn wire_phase5_connection_report(app: &AppSignals) {
+fn wire_phase5_connection_report(app: &AppSignals, row: crate::app::app_signals::LaneRailRow) {
     wire_connection_status_report(ConnectionReportSignals {
         turn_lifecycle: app.stream.turn_lifecycle,
         pending_approval: app.approval.pending_approval,
@@ -400,5 +403,7 @@ fn wire_phase5_connection_report(app: &AppSignals) {
         selected_agent_role: app.llm_settings.selected_agent_role,
         // #561：未读 / 审批可见性要判「这条 lane 是不是前台」，单 lane 时恒 Foreground。
         phase: app.phase,
+        // #569：同一批数字顺带写进左栏那一行，左栏因此不必再算一遍。
+        row,
     });
 }
