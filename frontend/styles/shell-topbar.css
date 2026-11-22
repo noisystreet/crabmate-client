@@ -136,6 +136,33 @@ html[data-cm-mobile-shell] .shell-topbar {
   text-align: center;
 }
 
+/* 工作区标题旁的 git 徽标：分支名 + 未提交脏计数（纯文本表达，不靠颜色单独区分） */
+.shell-topbar-git-badge {
+  max-width: 100%;
+  margin: 0;
+  padding: 0 0.35rem;
+  border: 0;
+  background: none;
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  line-height: 1.2;
+  color: var(--muted);
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.shell-topbar-git-badge:hover {
+  text-decoration: underline;
+}
+
+.shell-topbar-git-badge-dirty {
+  color: var(--accent);
+  font-weight: 600;
+}
+
 /* 会话模式保持占位节点但不占宽；IDE 有路径时再放开上限 */
 .shell-topbar-file-status {
   flex: 0 0 auto;

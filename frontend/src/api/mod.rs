@@ -19,6 +19,7 @@ mod http_scoped;
 mod http_uploads;
 mod http_workspace_clone;
 mod http_workspace_fs_extra;
+mod http_workspace_git;
 mod http_workspace_projects;
 mod http_workspace_raw;
 pub(crate) mod llm_secrets_local;
@@ -70,6 +71,7 @@ pub use http_workspace_clone::{
     post_workspace_clone_stream,
 };
 pub use http_workspace_fs_extra::{fetch_workspace_dir_archive, post_workspace_file_move};
+pub use http_workspace_git::fetch_workspace_git;
 pub use http_workspace_projects::{fetch_workspace_projects, post_workspace_project};
 pub use http_workspace_raw::{fetch_workspace_file_download, put_workspace_file_raw};
 pub use llm_secrets_local::PersistKind;
