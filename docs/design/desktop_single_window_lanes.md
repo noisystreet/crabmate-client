@@ -420,6 +420,12 @@ Desktop 同样要求：**列表渲染顺序**与**点击命中换算**共用一�
 （`tauri_open_connect_window` / `tauri_open_connection`）连同它们的 `invoke` 声明已删除，壳侧
 命令与注册保留（调试期退路）。
 
+**连上之后要从「可连实例」里消失**（2026-11-22 修）：`ctl_rows_for_rail` 的「已连」判据原先只看
+**窗口级**连接注册表（`connection_feed`）的 authority。S2 之后「连接」不再建窗，那条 lane 根本不在
+窗口注册表里 —— 于是刚连上的实例继续留在下半组，再点一次就多出一条同 serve 的 lane。现在 `taken`
+由两处合并：窗口注册表 + **本窗口每条 lane 的 `LaneRailRow::api_base`**（空基址 = 同 Origin，用当前
+基址兜底）。判据是 `api_base_authority` 而不是原始字符串，尾部斜杠 / 路径前缀不会漏掉。
+
 **为什么现在就定**：它决定了第 2 步（`add_lane`）的唯一调用者，也决定了 §5 的视图渲染
 必须支持「lane 数会变」—— 如果留着开新窗口，「新建 lane」就没有必然的入口。
 

@@ -58,6 +58,7 @@ use super::connection_feed::{
     connection_display_name, connection_feed, ctl_instances_feed, refresh_ctl_instances,
 };
 use super::focusable_menu::{FocusableModalBackdrop, FocusableModalPanel, FocusableRoleMenu};
+use super::lane_actions;
 use super::settings_page::{SettingsSection, navigate_to_settings};
 use super::shell_runtime_context::try_chat_shell_ctx;
 
@@ -139,21 +140,15 @@ fn unavailable_reason(instance: &CtlInstance) -> String {
 /// 四条规则，都是为了「不显示点了会失败的东西」：
 ///
 /// 1. `enabled == Some(false)`：声明被软关闭（TUI 的 `/lane close`），连不上是预期；
-/// 2. **已经在窗口里连着**（authority 相同）：它在上半组，画两遍会让人以为有两条连接；
+/// 2. **已经在窗口里连着**（authority 相同）：它在上半组，画两遍会让人以为有两条连接。
+///    `taken` 由调用方合并**窗口级连接注册表**与**本窗口每条 lane 的基址** —— #561 S2 之后
+///    「连接」= 在当前窗口新建一条 lane，窗口注册表里根本没有那条 lane，只看注册表会让
+///    刚连上的实例继续留在「可连实例」里（点了会再建一条同 serve 的 lane）；
 /// 3. `ready` **但没基址**：开不了窗，落 `Unavailable` 而不是给一个点不动的「连接」；
 /// 4. 判可连性用 [`CtlInstance::can_connect`]，**不**看 `state` —— `stale` 是「记录说
 ///    在跑但连不上」，信它就会连到死端口。
 #[must_use]
-pub(crate) fn ctl_rows_for_rail(
-    instances: &[CtlInstance],
-    connected: &[ConnectionSnapshot],
-) -> Vec<CtlRow> {
-    let taken: Vec<String> = connected
-        .iter()
-        .map(|snapshot| snapshot.authority.clone())
-        .filter(|authority| !authority.is_empty())
-        .collect();
-
+pub(crate) fn ctl_rows_for_rail(instances: &[CtlInstance], taken: &[String]) -> Vec<CtlRow> {
     let mut rows = Vec::new();
     for instance in instances {
         if instance.enabled == Some(false) {
@@ -182,6 +177,53 @@ pub(crate) fn ctl_rows_for_rail(
         });
     }
     rows
+}
+
+/// 窗口级连接注册表里已占用的 authority。
+fn snapshot_authorities(snapshots: &[ConnectionSnapshot]) -> Vec<String> {
+    snapshots
+        .iter()
+        .map(|snapshot| snapshot.authority.clone())
+        .filter(|authority| !authority.is_empty())
+        .collect()
+}
+
+/// 本窗口每条 lane 已占用的 authority。
+///
+/// 空基址 = 同 Origin（设置页那颗按钮新建的 lane），用 `fallback`（窗口当前基址）兜底 ——
+/// 否则那条 lane 会被算成「没占用」，同一个 Origin 的实例又出现在「可连实例」里。
+///
+/// 抽成自由函数而不是写在组件里：`NavRailConnections` 贴着 `lizard` 的 CCN>10 门禁。
+fn lane_authorities(rows: &[super::app_signals::LaneRailRow], fallback: &str) -> Vec<String> {
+    rows.iter()
+        .map(|row| {
+            let base = row.api_base.get();
+            let base = if base.trim().is_empty() {
+                fallback.to_string()
+            } else {
+                base
+            };
+            api_base_authority(&base)
+        })
+        .filter(|authority| !authority.is_empty())
+        .collect()
+}
+
+/// 已占用的 authority（响应式）：窗口级注册表 + 本窗口每条 lane 的基址。
+///
+/// 两个来源缺一不可：#561 S2 之后「连接」= 在当前窗口新建一条 lane，它不在窗口注册表里；
+/// 而别的窗口 / 老路径仍只体现在注册表里。组装留在这里而不是组件体内 ——
+/// `NavRailConnections` 贴着 `lizard` 的 CCN>10 门禁。
+fn taken_authorities_signal(
+    rows: Signal<Vec<ConnectionSnapshot>>,
+    fallback: RwSignal<String>,
+) -> Signal<Vec<String>> {
+    Signal::derive(move || {
+        let lane_rows = lane_actions::rail().map_or_else(Vec::new, |(r, _)| r.get());
+        let mut out = snapshot_authorities(&rows.get());
+        out.extend(lane_authorities(&lane_rows, &fallback.get()));
+        out
+    })
 }
 
 /// 连接行右键菜单的锚点：屏幕坐标 + 打开那一刻的名字。
@@ -419,10 +461,14 @@ pub(super) fn NavRailConnections(
     let own_authority = StoredValue::new(api_base_authority(&api_base.get_untracked()));
     let connections = StoredValue::new(connection_feed());
     let rows = Signal::derive(move || connections.get_value().get());
+    // 已被占用的 authority：窗口级注册表（别的窗口 / 老路径）**加上本窗口每条 lane 的基址**。
+    // #561 S2 起「连接」= 在当前窗口新建一条 lane，那条 lane 不在窗口注册表里 —— 只看注册表，
+    // 刚连上的实例会继续留在「可连实例」里（再点一次就多一条同 serve 的 lane）。
+    let taken = taken_authorities_signal(rows, api_base);
     // 控制面实例：只在桌面壳里才有来源；非桌面壳下壳没有这条命令，这份 signal 恒为空。
     let instances = StoredValue::new(ctl_instances_feed());
     let ctl_rows =
-        Signal::derive(move || ctl_rows_for_rail(&instances.get_value().get(), &rows.get()));
+        Signal::derive(move || ctl_rows_for_rail(&instances.get_value().get(), &taken.get()));
     // 「重启」的界面状态：在途那条 + 最近一次结果（`notes` 必须画出来，不能只进控制台）。
     let restart = RwSignal::new(CtlRestartUi::default());
     // 重启成功后重新拉一次列表：这份数据是只读查询，壳不会推。
@@ -736,6 +782,7 @@ mod tests {
     use super::{CtlRowState, ctl_rows_for_rail, row_meta};
     use crabmate_client_api::connections::ConnectionSnapshot;
     use crabmate_client_api::ctl::CtlInstance;
+    use crabmate_client_api::url::api_base_authority;
 
     fn instance(name: &str, observed: &str, base: Option<&str>) -> CtlInstance {
         CtlInstance {
@@ -824,10 +871,23 @@ mod tests {
 
     #[test]
     fn an_instance_already_connected_is_not_listed_twice() {
-        // 它在上半组（已连窗口）里；再画一次会让人以为有两条连接。
+        // 它在上半组（已连窗口 / 本窗口的 lane）里；再画一次会让人以为有两条连接。
+        // `taken` 由调用方合并窗口注册表与本窗口每条 lane 的基址 —— 单窗口多 lane 之后
+        // 新连的 lane 只在这一侧（#561 S2），函数本身只看 authority 集合。
         let rows = ctl_rows_for_rail(
             &[instance("prod", "ready", Some("http://127.0.0.1:8080"))],
-            &[connected("http://127.0.0.1:8080")],
+            &[api_base_authority("http://127.0.0.1:8080")],
+        );
+        assert!(rows.is_empty());
+    }
+
+    /// 同一 authority 的不同写法（尾部斜杠 / 带路径前缀）也算同一条 —— 判据是
+    /// `api_base_authority`，不是原始字符串比较。
+    #[test]
+    fn the_same_authority_written_differently_still_counts_as_taken() {
+        let rows = ctl_rows_for_rail(
+            &[instance("prod", "ready", Some("http://127.0.0.1:8080"))],
+            &[api_base_authority("http://127.0.0.1:8080/v1/")],
         );
         assert!(rows.is_empty());
     }

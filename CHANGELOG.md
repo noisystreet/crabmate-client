@@ -39,6 +39,8 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Fixed
 
+- **A connected instance leaves the rail's "connectable" list instead of offering itself again.**
+
 - **Lane polling and session loads now use their own serve scope, not the front lane's.**
 
 - **Bump `url` to 2.5.9 for RUSTSEC-2026-0592; allow `paste`'s unmaintained advisory.**
