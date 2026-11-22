@@ -312,14 +312,6 @@ pub fn status_role_label(l: Locale) -> &'static str {
     }
 }
 
-/// 状态栏权限等级段的标签（值本身走 `settings_permission_level_label`，同一套词表）。
-pub fn status_perm_label(l: Locale) -> &'static str {
-    match l {
-        Locale::ZhHans => "权限",
-        Locale::En => "Perm",
-    }
-}
-
 /// 权限菜单的无障碍名。
 pub fn status_perm_menu_label(l: Locale) -> &'static str {
     match l {
