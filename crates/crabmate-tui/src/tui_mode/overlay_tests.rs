@@ -21,6 +21,7 @@ fn status_info() -> StatusInfo {
     StatusInfo {
         editor_open: false,
         workspace: None,
+        git: None,
         api_base: "http://probe".into(),
         model: None,
         role: None,

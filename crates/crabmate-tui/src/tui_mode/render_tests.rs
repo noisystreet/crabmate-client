@@ -377,6 +377,7 @@ fn finished_tool_row_without_verdict_is_not_running() {
     let info = StatusInfo {
         editor_open: false,
         workspace: None,
+        git: None,
         api_base: "http://x".into(),
         model: None,
         role: None,

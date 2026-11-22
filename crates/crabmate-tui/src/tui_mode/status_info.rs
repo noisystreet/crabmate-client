@@ -79,6 +79,10 @@ impl LaneApp<'_> {
             view_offset: self.st.view_offset,
             search_term: self.st.search_term().map(str::to_string),
             search_total: self.st.search_total,
+            // git 徽标：worker 在拉 `/status` + `/permission` 的同一任务里也拉了
+            // `GET /workspace/git`（与 Desktop 顶栏同一个真源）。404（老 serve）/ 失败 →
+            // `None` → 整段不画，不留空气泡。
+            git: defaults.and_then(|d| d.git_badge.clone()),
             // 窄屏工作区指示（issue #425）：左右栏一藏，右栏标题里的工作区名就没了。取值与
             // 「什么情况下才显示」都在 `status::narrow_workspace_text`，这里只传两个实况。
             workspace: status::narrow_workspace_text(

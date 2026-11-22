@@ -11,6 +11,7 @@ fn base_info(api_base: &str) -> StatusInfo {
     StatusInfo {
         editor_open: false,
         workspace: None,
+        git: None,
         api_base: api_base.into(),
         model: None,
         role: None,

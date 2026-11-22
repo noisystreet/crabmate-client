@@ -318,6 +318,7 @@ mod tests {
         StatusInfo {
             editor_open: false,
             workspace: None,
+            git: None,
             api_base: "http://127.0.0.1:8080".into(),
             model: Some("gpt-x".into()),
             role: Some("coder".into()),

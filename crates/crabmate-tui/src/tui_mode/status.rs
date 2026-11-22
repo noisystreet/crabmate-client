@@ -47,6 +47,9 @@ mod priority {
     /// 与审批弹窗里都还有别的出路。
     pub(super) const WORKSPACE: u8 = 2;
     pub(super) const MODEL: u8 = 3;
+    /// 工作区 git 徽标（分支 + 未提交脏计数）。只在有值时成段，与 `ctx` 同档：
+    /// 它是环境事实而非安全读数，但「我在哪个分支 / 有没有未提交」比 `mode` / `role` 更常被瞄一眼。
+    pub(super) const GIT: u8 = 4;
     // 上下文用量比 mode / role 更常被盯：窄屏时先丢后两者。
     pub(super) const CONTEXT: u8 = 4;
     pub(super) const MODE: u8 = 5;
@@ -128,6 +131,18 @@ pub(super) const WS_UNSET_TEXT: &str = "未设置";
 /// 超长目录名先截自己：状态行是「装不下就整段丢掉」的按优先级竞争，不截的话一个
 /// `my-really-long-project-name` 会把 `perm` 挤出去 —— 拿安全读数换一个目录名不划算。
 const WS_MAX_W: usize = 14;
+
+/// `git` 段的文案标签（3 列，落在 5 列定宽 label 列内）。
+///
+/// 值与 Desktop 顶栏徽标同源（`crabmate_client_api::workspace_git`）：技术标识两边一字不差，
+/// 只有三态降级文案走各自的词表（TUI 只有中文）。
+pub(super) const GIT_LABEL: &str = "git";
+
+/// `git` 段值的最大显示宽。
+///
+/// 脏计数后面还有 `ctx` / `find` 这些更该保住的段，而 `feature/a-really-long-branch ●12`
+/// 足够把一个分支名变成整行主角。先截自己（20 列够放下 `HEAD@1a2b3c4 ●3`）。
+const GIT_MAX_W: usize = 20;
 
 /// 窄屏工作区段的取值：`None` = 不显示这一段。
 ///
@@ -292,6 +307,17 @@ pub(super) fn environment_segments(info: &StatusInfo, budget: usize) -> Vec<Segm
         value: serve_value(&info.api_base, budget),
         priority: priority::SERVE,
     });
+    // git 徽标：分支名 + 未提交脏计数（`main ●5`）或三态降级文案。与 `ws` 同属「这一屏
+    // 在哪儿」的定位信息，所以紧跟 `serve` / `ws`。值本身已由共享纯逻辑渲染好
+    // （见 `status_view::StatusInfo::git` 的注释），这里只做窄宽截断：状态行是「装不下就
+    // 整段丢掉」的按优先级竞争，先截自己才不会把 `ctx` / `find` 顶掉。
+    if let Some(v) = info.git.as_deref() {
+        out.push(Segment {
+            label: GIT_LABEL,
+            value: truncate_display(v, GIT_MAX_W),
+            priority: priority::GIT,
+        });
+    }
     // 窄屏才有值（宽屏 `narrow_workspace_text` 返回 `None`）：显示顺序紧挨 `serve`，
     // 两者都是「这一屏在哪儿」的定位信息，放在一起才不用扫两遍。
     if let Some(v) = info.workspace.as_deref() {

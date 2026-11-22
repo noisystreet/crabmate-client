@@ -34,6 +34,16 @@ pub struct ServeDefaults {
     /// 存整个投影而不是只存 `level`：切换菜单要的 `available` 也在这里。只留 level 的话，
     /// 每次开菜单都得再打一次 `/permission`（Desktop chip 吃的也是同一份 view）。
     pub permission_view: Option<PermissionView>,
+    /// 工作区 git 状态的一行徽标（`GET /workspace/git`；分支名 + 未提交脏计数，或三态降级文案）。
+    ///
+    /// **已渲染文本**：技术标识来自共享纯逻辑（`crabmate_client_api::workspace_git`），与
+    /// Desktop 顶栏徽标一字不差；三态文案走 TUI 自己的中文词表。worker 在拉默认偏好的
+    /// 同一任务里另拉这条路由；404（老 serve 没这条路由）/ 拉取失败时保持 `None`，
+    /// 状态栏就不显示这段 —— 空的分支名读起来像「工作区干净」，比没有更误导。
+    ///
+    /// 与会话变更集（`GET /workspace/changelog`）**不是一个东西**：这里回答「仓库里有没有
+    /// 未提交改动」，那里回答「本会话改了什么」，措辞与数据都不得互相替代。
+    pub git_badge: Option<String>,
     /// 会话存储当前是否走 SQLite（`/status.conversation_store_sqlite_active`）。
     ///
     /// `None` = 这个 serve 的 `/status` 没有该字段（老版本）：面板行显示「未提供」
@@ -69,6 +79,8 @@ impl ServeDefaults {
             baseline_prompt_tokens_by_role: baseline_by_role(v),
             // `/status` 不提供生效等级；由 worker 另拉 `/permission` 后回填。
             permission_view: None,
+            // 同理：`/status` 没有任何 git 信息，由 worker 另拉 `/workspace/git` 后回填。
+            git_badge: None,
             conversation_store_sqlite_active: v
                 .get("conversation_store_sqlite_active")
                 .and_then(Value::as_bool),
