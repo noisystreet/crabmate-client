@@ -198,6 +198,19 @@ pub fn App() -> impl IntoView {
 /// `run_shell_wiring_in_order` 里那约 29 个 `Effect::new`）放进 `mount_to` 的闭包里跑 ——
 /// 这是唯一会给新子树建 owner 的地方，也是 `provide_context` 能按 lane 生效的原因。
 ///
+/// # 新 lane 的 owner 必须挂在 **`App` 的 owner** 下（实测踩过）
+///
+/// `mount_to` 内部用 `Owner::new()`，而它的文档写明「新 owner **注册为当前 owner 的子节点**」。
+/// 事件回调执行时的当前 owner 是**触发这次点击的那条 DOM 分支**（`For` / `Show` 的一支），
+/// 它在本帧稍后完全可能被 cleanup —— 一旦被 cleanup，新 lane 的整棵子树（信号 + 全部接线
+/// `Effect`）会作为它的子孙被连带 dispose。症状是：建出第二条 lane 的那一刻起成串
+/// `Tried to access a reactive value that has already been disposed`，wasm32 上 panic 是 trap
+/// （不是 unwind，`Drop` 全跳过），`js-sys` 任务的 `RefCell` 借用不还 → `spawn_local` 那条链
+/// 一起死 → 之后**点什么都**没反应（切 lane、点「项目」菜单、点会话都不动）。
+///
+/// 所以这里先把 `App` 的 owner 抓下来，挂载时在它之下跑：既与页面同寿，又能照原样继承
+/// `App` 那一层提供的 context（换成 `Owner::new_root` 会断掉这条链）。
+///
 /// 新 lane 先挂进一个**自己**的 `.lane-slot`（默认隐藏）。它建出来时不是前台，所以不抢
 /// `lane-slot--active`；切过去由 `Effect` 把 class 挪过去。
 fn register_new_lane_action(
@@ -207,6 +220,8 @@ fn register_new_lane_action(
     labels: RwSignal<Vec<String>>,
 ) {
     let ctx = app_ctx.clone();
+    // 此刻的当前 owner 就是 `App` 组件自己的 owner（由 `App` 的 body 调用过来）。
+    let root_owner = Owner::current();
     lane_actions::register_new_lane(Rc::new(move |base: Option<String>| {
         // 上限与 TUI 同源（`MAX_LANES = 8`，`Alt+1..8` 也只到 8）：满了就不再建 —— 每条 lane
         // 都带一整套接线与后台轮询，「点几次就堆几条」的代价没人想要。
@@ -223,12 +238,19 @@ fn register_new_lane_action(
             return;
         };
         let ctx = ctx.clone();
-        let handle = leptos::mount::mount_to(slot, move || {
-            let rt = ctx.add_lane(base.as_deref());
-            // 左栏列表立刻能看到这一条：地址留空表示「同 Origin」。
-            labels.update(|list| list.push(rt.signals.scope.api_base()));
-            app_body(rt)
-        });
+        let mount = move || {
+            leptos::mount::mount_to(slot, move || {
+                let rt = ctx.add_lane(base.as_deref());
+                // 左栏列表立刻能看到这一条：地址留空表示「同 Origin」。
+                labels.update(|list| list.push(rt.signals.scope.api_base()));
+                app_body(rt)
+            })
+        };
+        // 在 `App` 的 owner 下挂载 —— 不是在「当前 owner（点击所在的 DOM 分支）」下。
+        let handle = match root_owner.clone() {
+            Some(owner) => owner.with(mount),
+            None => mount(),
+        };
         // 还没有「关 lane」入口，先放弃句柄（与 `mount_to_body` 同一取舍）。关 lane 落地时
         // 改成把 handle 存进 `LaneSet`，关闭时 drop 以清理那条 lane 的反应式系统。
         handle.forget();

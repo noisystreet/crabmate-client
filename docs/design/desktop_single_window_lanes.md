@@ -258,7 +258,8 @@ Web 侧没有「帧」，只有「挂载 / 卸载」，所以要先说清卸载�
 | **S3a**（已完成） | 切换只换 class（`lane-slot--active`，不重建子树）；键位 §6.6 全表 | 冒烟 + Playwright 布局用例；**切 lane 的行为需图形会话手测** |
 | **S3b**（已完成） | 左栏「本窗口 lane 列表」（§6.5 方案 B）+ 点击切换；§6.5 的单窗口降级写进能力矩阵（注 3） | 单 lane 时整组不渲染；条数与前台高亮跟 `labels` / `active` 走 |
 
-> **#569 手测结果（2026-11-22）**：连两台不同 serve 后点另一条 lane，主区内容不变。两个独立成因：
+> **#569 手测结果（2026-11-22）**：连两台不同 serve 后点另一条 lane，主区内容不变。三个独立成因
+> （后两个同属 wasm panic 家族，但触发点不同）：
 >
 > 1. **数据面** —— 请求基址只经 `ACTIVE` 指针取（`api_url` / `prepare_api_auth` 的零参口径），
 >    后台那条的请求打到前台那台。**已修**：`api_url_on` / `prepare_api_auth_on` / `auth_headers_for`
@@ -275,6 +276,17 @@ Web 侧没有「帧」，只有「挂载 / 卸载」，所以要先说清卸载�
 >    **已修**：三个应用级单例（连接名单 / 已登记标记 / 可连实例）改在 `bootstrap_app_shell` 里建在
 >    `App` 的 owner 上（`connection_feed::init_app_signal_singletons`）。
 >    `e2e/specs/mock-lane-switch.spec.ts` 的第二个用例已从 `test.fixme` 恢复为 `test` 并通过。
+>
+> 3. **建出来的那条 lane 会被打死**（与 1、2 独立）：`mount_to` 内部用 `Owner::new()`，而它「注册为
+>    **当前** owner 的子节点」。点「连接」时当前 owner 是**那颗按钮所在的 DOM 分支**（`For` / `Show`
+>    的一支），分支一 cleanup，新 lane 的整棵子树（信号 + 全部接线 `Effect`）作为子孙一起被 dispose
+>    —— 于是**从建第二条 lane 的那一刻起**成串 `already disposed` panic：`set_active` 里读 `phase`
+>    就 panic（切 lane 不动），`toggle_file_menu` 第一步的 `spawn_local` 也 panic（点「项目」没反应）。
+>    **已修**：先把 `App` 的 owner 抓下来，`owner.with(|| mount_to(...))` —— 与页面同寿，且照原样
+>    继承 `App` 那一层提供的 context（`Owner::new_root` 会断掉这条链）。
+>    **这条在 Chromium 里测不出来**（同一份 dist、同样两步点击，点了就建好）；必须真 WebKitGTK +
+>    真壳：`CM_DESKTOP_SKIP_CONNECT=1` + xvfb + 壳侧 `initialization_script` 注入自检脚本，才能看到
+>    「修复前 panic=13 / 切 lane 停在 lane 0」与「修复后 panic=0 / `activeLane` 到位」。
 
 **上限**：`MAX_LANES = 8`（`crabmate_client_api::lane_attach`，与 TUI 同源，也与 `Alt+1..8` 对齐）。
 满了之后新建动作直接拒绝 —— 不建 slot、不接线；每条 lane 都带一整套 Effect 与后台轮询，

@@ -39,6 +39,8 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 - **The window no longer goes inert from a boot-time wasm panic over the connection feed.**
 
+- **A new lane's reactive owner no longer dies with the button that created it.**
+
 - **Scrolling back no longer re-keys the older page on every fetch.**
 
 - **A turn's final answer keeps a stable row id instead of a random one per turn.**
