@@ -2,16 +2,27 @@
 
 use leptos::prelude::*;
 
-use crate::api::user_data::{UserPrefsDto, fetch_current_web_sessions};
+use crate::api::connection_scope::ScopeHolder;
+use crate::api::user_data::{UserPrefsDto, fetch_current_web_sessions_on};
 use crate::i18n::Locale;
 use crate::storage::{ChatSession, normalize_workspace_partition_path};
 
 /// 与后端 `RECENT_WORKSPACE_ROOTS_MAX` 一致。
 pub const RECENT_WORKSPACE_ROOTS_MAX: usize = 10;
 
-/// 从服务端当前工作区桶加载侧栏会话。
+/// 从服务端当前工作区桶加载侧栏会话（**前台**口径；跨 lane 的用 [`load_web_sessions_on`]）。
 pub async fn load_web_sessions(loc: Locale) -> (Vec<ChatSession>, Option<String>) {
-    fetch_current_web_sessions(loc).await.unwrap_or_default()
+    load_web_sessions_on(&crate::api::connection_scope::active_holder(), loc).await
+}
+
+/// 带**显式作用域**的会话列表加载（#569）：每条 lane 首屏读自己那台 serve 的桶。
+pub async fn load_web_sessions_on(
+    scope: &ScopeHolder,
+    loc: Locale,
+) -> (Vec<ChatSession>, Option<String>) {
+    fetch_current_web_sessions_on(scope, loc)
+        .await
+        .unwrap_or_default()
 }
 
 /// 将规范路径推到最近列表最前（去重、截断）；空路径忽略。
