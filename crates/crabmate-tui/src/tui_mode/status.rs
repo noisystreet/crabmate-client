@@ -47,9 +47,6 @@ mod priority {
     /// 与审批弹窗里都还有别的出路。
     pub(super) const WORKSPACE: u8 = 2;
     pub(super) const MODEL: u8 = 3;
-    /// 工作区 git 徽标（分支 + 未提交脏计数）。只在有值时成段，与 `ctx` 同档：
-    /// 它是环境事实而非安全读数，但「我在哪个分支 / 有没有未提交」比 `mode` / `role` 更常被瞄一眼。
-    pub(super) const GIT: u8 = 4;
     // 上下文用量比 mode / role 更常被盯：窄屏时先丢后两者。
     pub(super) const CONTEXT: u8 = 4;
     pub(super) const MODE: u8 = 5;
@@ -126,23 +123,26 @@ pub(super) const WS_LABEL: &str = "ws";
 /// 「没设」，窄屏就不能退回一片空白 —— 那读起来像「程序不知道」，而实际是「确实没设」。
 pub(super) const WS_UNSET_TEXT: &str = "未设置";
 
-/// 窄屏工作区名的最大显示宽。
+/// 窄屏工作区名的最大显示宽（**含** `(main ●3)` 括注）。
 ///
 /// 超长目录名先截自己：状态行是「装不下就整段丢掉」的按优先级竞争，不截的话一个
 /// `my-really-long-project-name` 会把 `perm` 挤出去 —— 拿安全读数换一个目录名不划算。
-const WS_MAX_W: usize = 14;
+/// 26 列够放下 `client(main ●3)` 这类常见组合。
+const WS_MAX_W: usize = 26;
 
-/// `git` 段的文案标签（3 列，落在 5 列定宽 label 列内）。
+/// 把 git 括注挂到工作区名后：`client(main)` / `client(main ●3)`。
 ///
-/// 值与 Desktop 顶栏徽标同源（`crabmate_client_api::workspace_git`）：技术标识两边一字不差，
-/// 只有三态降级文案走各自的词表（TUI 只有中文）。
-pub(super) const GIT_LABEL: &str = "git";
-
-/// `git` 段值的最大显示宽。
-///
-/// 脏计数后面还有 `ctx` / `find` 这些更该保住的段，而 `feature/a-really-long-branch ●12`
-/// 足够把一个分支名变成整行主角。先截自己（20 列够放下 `HEAD@1a2b3c4 ●3`）。
-const GIT_MAX_W: usize = 20;
+/// **两处渲染点共用**（右栏标题 `ws_sidebar::workspace_title` 与窄屏 `ws` 段）：各拼一份
+/// 迟早会漂成「标题里有分支、状态栏里没有」。没有分支就是裸名字 —— 不括注一对空括号。
+pub(super) fn workspace_with_git(name: &str, branch: Option<&str>, dirty: Option<&str>) -> String {
+    match branch.map(str::trim).filter(|b| !b.is_empty()) {
+        Some(branch) => match dirty.map(str::trim).filter(|d| !d.is_empty()) {
+            Some(dirty) => format!("{name}({branch} {dirty})"),
+            None => format!("{name}({branch})"),
+        },
+        None => name.to_string(),
+    }
+}
 
 /// 窄屏工作区段的取值：`None` = 不显示这一段。
 ///
@@ -153,8 +153,14 @@ const GIT_MAX_W: usize = 20;
 /// 判断条件与取值放在同一个函数里，调用方只传实况：两处各判一次，第一天就会漂成
 /// 「宽屏也冒出一段 ws」。
 ///
-/// 取 `basename`（与右栏标题同一份规则，见 [`workspace_basename`]），不硬塞绝对路径。
-pub(super) fn narrow_workspace_text(sidebars_visible: bool, path: Option<&str>) -> Option<String> {
+/// 取 `basename`（与右栏标题同一份规则，见 [`workspace_basename`]），不硬塞绝对路径；
+/// git 分支以括注形式跟在名字后（[`workspace_with_git`]），不另开一段。
+pub(super) fn narrow_workspace_text(
+    sidebars_visible: bool,
+    path: Option<&str>,
+    branch: Option<&str>,
+    dirty: Option<&str>,
+) -> Option<String> {
     if sidebars_visible {
         return None;
     }
@@ -163,7 +169,10 @@ pub(super) fn narrow_workspace_text(sidebars_visible: bool, path: Option<&str>) 
         .filter(|p| !p.is_empty())
         .map(workspace_basename)
         .unwrap_or_else(|| WS_UNSET_TEXT.to_string());
-    Some(truncate_display(&name, WS_MAX_W))
+    Some(truncate_display(
+        &workspace_with_git(&name, branch, dirty),
+        WS_MAX_W,
+    ))
 }
 
 /// 段间分隔符（极暗竖线，与 A6 的分隔线同色系）。
@@ -307,17 +316,6 @@ pub(super) fn environment_segments(info: &StatusInfo, budget: usize) -> Vec<Segm
         value: serve_value(&info.api_base, budget),
         priority: priority::SERVE,
     });
-    // git 徽标：分支名 + 未提交脏计数（`main ●5`）或三态降级文案。与 `ws` 同属「这一屏
-    // 在哪儿」的定位信息，所以紧跟 `serve` / `ws`。值本身已由共享纯逻辑渲染好
-    // （见 `status_view::StatusInfo::git` 的注释），这里只做窄宽截断：状态行是「装不下就
-    // 整段丢掉」的按优先级竞争，先截自己才不会把 `ctx` / `find` 顶掉。
-    if let Some(v) = info.git.as_deref() {
-        out.push(Segment {
-            label: GIT_LABEL,
-            value: truncate_display(v, GIT_MAX_W),
-            priority: priority::GIT,
-        });
-    }
     // 窄屏才有值（宽屏 `narrow_workspace_text` 返回 `None`）：显示顺序紧挨 `serve`，
     // 两者都是「这一屏在哪儿」的定位信息，放在一起才不用扫两遍。
     if let Some(v) = info.workspace.as_deref() {

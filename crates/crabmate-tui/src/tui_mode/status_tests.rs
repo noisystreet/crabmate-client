@@ -11,7 +11,6 @@ fn base_info(api_base: &str) -> StatusInfo {
     StatusInfo {
         editor_open: false,
         workspace: None,
-        git: None,
         api_base: api_base.into(),
         model: None,
         role: None,
@@ -656,18 +655,18 @@ fn status_bar_has_no_lanes_segment() {
 #[test]
 fn narrow_workspace_text_only_fires_when_sidebars_are_hidden() {
     assert_eq!(
-        narrow_workspace_text(true, Some("/data/proj")),
+        narrow_workspace_text(true, Some("/data/proj"), None, None),
         None,
         "宽屏不重复：标题里已经有了"
     );
     assert_eq!(
-        narrow_workspace_text(false, Some("/data/proj")).as_deref(),
+        narrow_workspace_text(false, Some("/data/proj"), None, None).as_deref(),
         Some("proj"),
         "取 basename，不把绝对路径塞进底栏"
     );
     // 尾斜杠与首尾空白：与右栏标题共用 `workspace_basename` + trim 的口径。
     assert_eq!(
-        narrow_workspace_text(false, Some("  /data/proj/  ")).as_deref(),
+        narrow_workspace_text(false, Some("  /data/proj/  "), None, None).as_deref(),
         Some("proj")
     );
 }
@@ -677,7 +676,7 @@ fn narrow_workspace_text_only_fires_when_sidebars_are_hidden() {
 fn narrow_workspace_text_says_unset_instead_of_blank() {
     for path in [None, Some(""), Some("   ")] {
         assert_eq!(
-            narrow_workspace_text(false, path).as_deref(),
+            narrow_workspace_text(false, path, None, None).as_deref(),
             Some(WS_UNSET_TEXT),
             "空值要画成「未设置」，不是一片空白（那读起来像程序不知道）"
         );
@@ -688,7 +687,7 @@ fn narrow_workspace_text_says_unset_instead_of_blank() {
 #[test]
 fn narrow_workspace_text_truncates_long_names() {
     let long = format!("/data/{}", "a".repeat(60));
-    let text = narrow_workspace_text(false, Some(&long)).expect("窄屏有值");
+    let text = narrow_workspace_text(false, Some(&long), None, None).expect("窄屏有值");
     assert!(
         unicode_width::UnicodeWidthStr::width(text.as_str()) <= WS_MAX_W,
         "截到 {WS_MAX_W} 列以内，实际 {text}"
@@ -699,7 +698,7 @@ fn narrow_workspace_text_truncates_long_names() {
 #[test]
 fn status_line_shows_the_workspace_segment_on_narrow_screens() {
     let mut info = base_info("http://127.0.0.1:8080");
-    info.workspace = narrow_workspace_text(false, Some("/data/proj"));
+    info.workspace = narrow_workspace_text(false, Some("/data/proj"), None, None);
     let text = status_text(&info, 200);
     assert!(text.contains("ws proj"), "{text}");
 }
@@ -721,7 +720,7 @@ fn the_workspace_segment_is_the_only_extra_one_on_narrow_screens() {
     let mut info = base_info("http://127.0.0.1:8080");
     info.permission = Some("read".into());
     let wide = environment_segments(&info, 200);
-    info.workspace = narrow_workspace_text(false, Some("/p"));
+    info.workspace = narrow_workspace_text(false, Some("/p"), None, None);
     let narrow = environment_segments(&info, 200);
     assert_eq!(narrow.len(), wide.len() + 1, "窄屏多且只多一段");
     assert_eq!(
@@ -739,7 +738,7 @@ fn the_workspace_segment_is_the_only_extra_one_on_narrow_screens() {
 fn at_eighty_columns_workspace_and_perm_both_fit() {
     let mut info = base_info("http://127.0.0.1:8080");
     info.permission = Some("approved".into());
-    info.workspace = narrow_workspace_text(false, Some("/data/crabmate-client"));
+    info.workspace = narrow_workspace_text(false, Some("/data/crabmate-client"), None, None);
     let text = status_text(&info, 80);
     assert!(text.contains("ws crabmate-clie"), "{text}");
     assert!(text.contains("perm approved"), "{text}");
@@ -754,7 +753,7 @@ fn at_eighty_columns_workspace_and_perm_both_fit() {
 fn at_sixty_columns_the_budget_cannot_hold_both() {
     let mut info = base_info("http://127.0.0.1:8080");
     info.permission = Some("approved".into());
-    info.workspace = narrow_workspace_text(false, Some("/data/crabmate-client"));
+    info.workspace = narrow_workspace_text(false, Some("/data/crabmate-client"), None, None);
     let text = status_text(&info, 60);
     assert!(
         text.contains("ws crabmate-clie"),
@@ -764,4 +763,49 @@ fn at_sixty_columns_the_budget_cannot_hold_both() {
         !text.contains("perm approved"),
         "60 列放不下 `perm`（已知下限，取舍见 `priority::PERM`）：{text}"
     );
+}
+
+// ---- git 括注（issue #324）----
+
+/// 分支以括注跟在仓库名后：`client(main)`，脏时 `client(main ●3)`。
+#[test]
+fn workspace_with_git_appends_the_branch_in_parentheses() {
+    assert_eq!(
+        workspace_with_git("client", Some("main"), None),
+        "client(main)"
+    );
+    assert_eq!(
+        workspace_with_git("client", Some("main"), Some("●3")),
+        "client(main ●3)"
+    );
+    // detached 与三态短词走同一形态（值本身由 `head_label` / worker 给）。
+    assert_eq!(
+        workspace_with_git("client", Some("HEAD@1a2b3c4"), None),
+        "client(HEAD@1a2b3c4)"
+    );
+    assert_eq!(
+        workspace_with_git("client", Some("非 git"), None),
+        "client(非 git)"
+    );
+}
+
+/// 没有分支（老 serve / 拉取失败）时不括注 —— 一对空括号比没有更糟。
+#[test]
+fn workspace_with_git_omits_empty_suffix() {
+    assert_eq!(workspace_with_git("client", None, None), "client");
+    // 空白分支名同样视为没有。
+    assert_eq!(
+        workspace_with_git("client", Some("  "), Some("●3")),
+        "client"
+    );
+    // 脏计数单独存在也不括注：分支是括号的锚点。
+    assert_eq!(workspace_with_git("client", None, Some("●3")), "client");
+}
+
+/// 窄屏段连括注一起截在 `WS_MAX_W` 内。
+#[test]
+fn narrow_workspace_text_fits_the_git_suffix() {
+    let text = narrow_workspace_text(false, Some("/data/client"), Some("main"), Some("●3"))
+        .expect("窄屏有值");
+    assert_eq!(text, "client(main ●3)");
 }
