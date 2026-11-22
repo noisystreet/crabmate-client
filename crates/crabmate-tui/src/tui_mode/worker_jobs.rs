@@ -195,8 +195,12 @@ pub(super) async fn job_refresh_status(
 ) {
     let mut result = fetch_serve_defaults(client).await;
     let view = fetch_permission_view(client, conversation_id).await;
+    // 同批拉工作区 git 状态：两者都是「这一屏此刻是什么样」的侧栏读数，拆成两次请求
+    // 只会让状态行在半成品状态上闪一下。
+    let git = fetch_workspace_git_badge(client).await;
     if let Ok(defaults) = result.as_mut() {
         defaults.permission_view = view;
+        defaults.git_badge = git;
     }
     let _ = out.send(UiEvent::Status {
         conversation_id: conversation_id.map(str::to_string),
@@ -234,6 +238,32 @@ async fn fetch_permission_view(
         .ok()
         .flatten()?;
     (!view.level.trim().is_empty()).then_some(view)
+}
+
+/// `GET /workspace/git` 的一行徽标：技术标识走共享纯逻辑（与 Desktop 顶栏同源），
+/// 三态文案走 TUI 自己的中文词表。
+///
+/// **404（老 serve 没这条路由）与任何失败都返回 `None`**：状态栏少一段，而不是画一个
+/// 空分支名 —— 那读起来像「工作区干净」，比没有更误导。也不需要在这里判「是不是 git
+/// 仓库」：那是响应 `state` 的事，服务端四种状态互不相同。
+async fn fetch_workspace_git_badge(client: &ServeClient) -> Option<String> {
+    use crabmate::cm_api_contract::workspace::{WorkspaceGitState, WorkspaceGitStatusResponse};
+
+    let resp = client
+        .get_json_optional::<WorkspaceGitStatusResponse>(&paths::workspace_git(false))
+        .await
+        .ok()
+        .flatten()?;
+    if let Some(text) = crabmate_client_api::badge_text(&resp) {
+        return Some(text);
+    }
+    match resp.state {
+        WorkspaceGitState::NotARepo => Some("非 git 仓库".to_string()),
+        WorkspaceGitState::GitUnavailable => Some("git 不可用".to_string()),
+        WorkspaceGitState::Failed => Some("git 读取失败".to_string()),
+        // `ok` 却没有 `head`：契约不该出现，宁可整段不显示也不猜一个分支名。
+        WorkspaceGitState::Ok => None,
+    }
 }
 
 /// 权限等级意图落盘（`POST /conversation/state`）。

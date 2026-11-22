@@ -31,6 +31,15 @@ pub struct StatusInfo {
     /// 搜索命中逻辑行数。
     pub search_total: usize,
     pub context: String,
+    /// 工作区 git 状态的一行徽标（`main ●5` / `HEAD@1a2b3c4` / 三态降级文案）。
+    ///
+    /// **已渲染文本**：技术标识由 `crabmate_client_api::workspace_git` 统一产出（与 Desktop
+    /// 顶栏徽标同源），三态文案走 TUI 自己的词表。`None` = 没拉到 / 老 serve 没有这条路由
+    /// —— 这时**不显示这一段**，而不是画一个空气泡：空的分支名读起来像「工作区干净」。
+    ///
+    /// 注意口径：`dirty` 指**当前工作区根下**有未提交改动，与会话变更集
+    /// （`GET /workspace/changelog`）是两件事，不许互相替代或相加。
+    pub git: Option<String>,
     /// 当前生效权限等级（线格式：`chat` / `read` / `workspace` / `approved` / `unrestricted`）。
     ///
     /// `None` = 不知道（老 serve 没有 `/permission`，或还没拉到）。**不要**回落到
