@@ -70,6 +70,9 @@ fn parse_connection_list(json: &str) -> Option<Vec<ConnectionSnapshot>> {
 /// 上报它）。#561 之前这里是「首次调用者传进来的 `api_base`」，注释里写着「同一窗口内
 /// `api_base` 不变」——单窗口多 lane 之后这条前提不成立（一个窗口会有 N 份基址），
 /// 所以改成在调用时读前台默认，语义变成「这一行代表本窗口**当前前台**那条 lane」。
+///
+/// 这一份由 [`init_app_signal_singletons`] 在启动期建好（owner = `App`）。**别让它第一次被读
+/// 发生在 memo / effect 里** —— 那样建出来的节点 run 完即被 dispose，详见该函数注释。
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn connection_feed() -> ArcRwSignal<Vec<ConnectionSnapshot>> {
     thread_local! {
@@ -94,6 +97,38 @@ pub(crate) fn connection_feed() -> ArcRwSignal<Vec<ConnectionSnapshot>> {
     ArcRwSignal::new(Vec::new())
 }
 
+/// 启动期一次性建好应用级 signal 单例。**必须在 `App` 组件体、任何 memo / effect 之前**调用
+/// （`bootstrap_app_shell` 里就有这一行）。
+///
+/// # 为什么不能靠 lazy init
+///
+/// 这三份 signal 都建在「第一次调用者所在的 owner」里。此前它们的首次读取发生在
+/// `connection_report` 的 `Memo::new(move |_| connections_registered().get())` 中 —— 而
+/// `reactive_graph` 的 memo / effect 每次 run 都在**它自己的 computation 作用域**里
+/// `with_cleanup`（`effect/effect.rs`），run 完就把这次创建的节点 dispose 掉。于是这份
+/// 「全局」signal 建完即死，之后任何一次读都 panic
+/// （`you tried to access a reactive value ... already disposed`）。
+///
+/// wasm 上这个 panic 尤其致命：wasm32 的 panic 是 trap 而不是 unwind
+/// （浏览器里报 `unreachable`），Rust 栈不展开、`Drop` 全被跳过，`js-sys` 任务里的
+/// `RefCell` 借用就永久不还 —— 该任务此后每次唤醒都再 panic（`RefCell already borrowed`）。
+/// 界面上看到的是「页面还画着，点什么都没反应」。
+///
+/// 建在稳定的 owner（`App` 组件，与页面同寿）上之后，memo / effect 只读到稳定句柄，
+/// 这条 panic 链从源头消失。
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn init_app_signal_singletons() {
+    // 顺序无关，但三份都要建：漏一份就等于把它那记 panic 留给下一个首次读取者。
+    let _ = connection_feed();
+    let _ = connections_registered();
+    let _ = ctl_instances_feed();
+}
+
+/// 非 wasm（测试 / SSR）：`connection_feed` / `ctl_instances_feed` 每次新建普通信号，
+/// 不存在「共享单例死于 computation 作用域」这件事，无需预热。
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn init_app_signal_singletons() {}
+
 /// 「本窗口已进壳的注册表」。
 ///
 /// 上报方（`app_shell_effects::connection_report`）必须在**登记之后**才发第一帧状态：
@@ -106,6 +141,9 @@ pub(crate) fn connection_feed() -> ArcRwSignal<Vec<ConnectionSnapshot>> {
 ///
 /// 非 wasm（浏览器 / 测试）初值即 `true`：那里没有注册表，也就没有「等登记」这件事，
 /// 让它停在 `false` 只会让将来的订阅方永远不发。
+///
+/// 与 [`connection_feed`] 同一处置：由 [`init_app_signal_singletons`] 在启动期建好，
+/// 首次读取**不能**发生在 memo / effect 里。
 pub(crate) fn connections_registered() -> RwSignal<bool> {
     thread_local! {
         static REGISTERED: std::cell::OnceCell<RwSignal<bool>> =
@@ -172,6 +210,8 @@ fn install_connections_feed(feed: ArcRwSignal<Vec<ConnectionSnapshot>>) {
 ///
 /// 与 [`connection_feed`] 同一套「应用级 signal」的理由：它描述的是「本机有哪些 serve
 /// 可连」，不是某个组件自己的状态 —— 全局一份，左栏重挂载不重复拉取，也无需退订。
+///
+/// 由 [`init_app_signal_singletons`] 在启动期建好，首次读取**不能**发生在 memo / effect 里。
 ///
 /// 数据来自壳的 `ctl_list_instances`（unix socket，见 `desktop_ctl.rs`）。壳把
 /// 「socket 不存在 / 连不上 / 超时」都收成空表，所以这里**没有错误态**：一块空分组
