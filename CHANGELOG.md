@@ -35,6 +35,8 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Fixed
 
+- **Lane polling and session loads now use their own serve scope, not the front lane's.**
+
 - **Scrolling back no longer re-keys the older page on every fetch.**
 
 - **A turn's final answer keeps a stable row id instead of a random one per turn.**
