@@ -17,7 +17,7 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Changed
 
-- **Contract pin moves to Server rev `e3f56e6e` so the git-status route is visible.**
+- **The workspace shows its branch and an uncommitted-changes badge.**
 
 - **"Connect" adds a lane in this window; the rail lists lanes, `Alt+←/→` switches.**
 
