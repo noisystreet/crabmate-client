@@ -461,7 +461,7 @@ pub(crate) fn SettingsConnectionNewWindowBlock(locale: RwSignal<Locale>) -> impl
                     class="btn btn-primary btn-sm"
                     data-testid="settings-connection-new-window"
                     // #561 S2：连接 = 在当前窗口新建一条 lane（不再开新 WebView，§6.7）。
-                    on:click=move |_| crate::app::lane_actions::new_lane(None)
+                    on:click=move |_| crate::app::lane_actions::new_lane(None, None)
                 >
                     {move || i18n::settings_connection_new_window(locale.get())}
                 </button>

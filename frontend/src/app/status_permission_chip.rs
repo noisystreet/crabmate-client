@@ -56,23 +56,32 @@ struct LevelSelect {
 
 /// chip 上显示什么。`None` = 整段不渲染。
 ///
-/// 三条与设置页共享的判定：意图优先于生效；两者不同都要显示；都不知道就不显示
-/// （`.` 而不是猜一个档）。
+/// 判定与 TUI 状态行的 `perm` 段**共用** `crabmate_client_api::permission::perm_display`：
+/// 意图优先、两者不同则并列（`意图 → 生效`）、都不知道就不显示（`.` 而不是猜一个档）。
+/// 这里只加本地化：`Single` / 并列两侧都换成本机词表；`Estimated` 加 `~`（与 TUI 同一个记号，
+/// 表示「这是没意图时会落到哪」，不是「此刻生效」）。
+///
+/// `bound` = 有没有已持久化会话 —— 没有会话时**不能**把生效侧摆到箭头右边，否则会把
+/// 「意图随下一条消息生效」读成「服务端把我钳制到了某档」（见共享层文档）。
 #[must_use]
-fn chip_text(intent: Option<&str>, effective: Option<&str>, loc: Locale) -> Option<String> {
-    let intent = intent.map(str::trim).filter(|s| !s.is_empty());
-    let effective = effective.map(str::trim).filter(|s| !s.is_empty());
-    match (intent, effective) {
-        (Some(i), Some(e)) if i == e => Some(i18n::settings_permission_level_label(loc, i)),
-        (Some(i), Some(e)) => Some(format!(
+fn chip_text(
+    bound: bool,
+    intent: Option<&str>,
+    effective: Option<&str>,
+    loc: Locale,
+) -> Option<String> {
+    use crabmate_client_api::permission::{PermDisplay, perm_display};
+    perm_display(bound, intent, effective).map(|display| match display {
+        PermDisplay::Single(level) => i18n::settings_permission_level_label(loc, &level),
+        PermDisplay::IntentThenEffective { intent, effective } => format!(
             "{} → {}",
-            i18n::settings_permission_level_label(loc, i),
-            i18n::settings_permission_level_label(loc, e)
-        )),
-        (Some(i), None) => Some(i18n::settings_permission_level_label(loc, i)),
-        (None, Some(e)) => Some(i18n::settings_permission_level_label(loc, e)),
-        (None, None) => None,
-    }
+            i18n::settings_permission_level_label(loc, &intent),
+            i18n::settings_permission_level_label(loc, &effective)
+        ),
+        PermDisplay::Estimated(level) => {
+            format!("~{}", i18n::settings_permission_level_label(loc, &level))
+        }
+    })
 }
 
 fn menu_fixed_style_for_trigger(trigger: &web_sys::HtmlElement) -> String {
@@ -422,7 +431,13 @@ pub fn StatusPermissionChip(locale: RwSignal<Locale>) -> impl IntoView {
 
     let text = Memo::new(move |_| {
         let effective = view.get().map(|v| v.level);
+        // 有没有已持久化的会话：决定「意图 → 生效」能不能并列（共享层 `perm_display` 的口径）。
+        let bound = level_select
+            .chat
+            .and_then(|c| c.session_sync.with(|s| s.stream_conversation_id()))
+            .is_some();
         chip_text(
+            bound,
             level_select.selected.get().as_deref(),
             effective.as_deref(),
             locale.get(),
@@ -468,6 +483,7 @@ pub fn StatusPermissionChip(locale: RwSignal<Locale>) -> impl IntoView {
 #[cfg(test)]
 mod tests {
     use super::chip_text;
+    use crate::i18n;
     use crate::i18n::Locale;
 
     /// 回合进行中：chip 不换档、**不写意图**，只把原因挂到 `note`（chip 的 title）。
@@ -537,32 +553,59 @@ mod tests {
     fn intent_wins_and_both_values_show_when_they_differ() {
         // 一致：单值（与改动前的观感一致）。
         assert_eq!(
-            chip_text(Some("workspace"), Some("workspace"), Locale::ZhHans),
+            chip_text(true, Some("workspace"), Some("workspace"), Locale::ZhHans),
             Some("工作区".to_string())
         );
         // 意图高于生效：两个值都要出现，否则用户以为切换没生效。
         assert_eq!(
-            chip_text(Some("unrestricted"), Some("read"), Locale::ZhHans),
+            chip_text(true, Some("unrestricted"), Some("read"), Locale::ZhHans),
             Some("不受限 → 只读".to_string())
         );
+    }
+
+    /// 没有已持久化会话时（`bound = false`）：同一份 `GET /permission` 回答的是「配置默认档」，
+    /// 摆到箭头右边就会被读成「服务端把我钳制到了某档」。所以有意图只给意图、无意图标成估算 `~`。
+    /// 与 TUI 状态行同一份判定（`crabmate_client_api::permission::perm_display`）。
+    #[test]
+    fn an_unbound_session_never_shows_an_arrow() {
+        assert_eq!(
+            chip_text(
+                false,
+                Some("unrestricted"),
+                Some("approved"),
+                Locale::ZhHans
+            ),
+            Some(i18n::settings_permission_level_label(
+                Locale::ZhHans,
+                "unrestricted"
+            ))
+        );
+        assert_eq!(
+            chip_text(false, None, Some("approved"), Locale::ZhHans),
+            Some(format!(
+                "~{}",
+                i18n::settings_permission_level_label(Locale::ZhHans, "approved")
+            ))
+        );
+        assert_eq!(chip_text(false, None, None, Locale::ZhHans), None);
     }
 
     #[test]
     fn no_intent_shows_the_effective_level_and_unknown_shows_nothing() {
         assert_eq!(
-            chip_text(None, Some("approved"), Locale::ZhHans),
+            chip_text(true, None, Some("approved"), Locale::ZhHans),
             Some("已批准".to_string())
         );
         // 两者都不知道 → 整段不渲染（不猜默认档）。
-        assert_eq!(chip_text(None, None, Locale::ZhHans), None);
+        assert_eq!(chip_text(true, None, None, Locale::ZhHans), None);
         // 空白意图等同没有。
         assert_eq!(
-            chip_text(Some("  "), Some("read"), Locale::En),
+            chip_text(true, Some("  "), Some("read"), Locale::En),
             Some("Read".to_string())
         );
         // 只有意图、还没有投影（首次拉取未回）：仍显示意图，别让 chip 闪没。
         assert_eq!(
-            chip_text(Some("read"), None, Locale::En),
+            chip_text(true, Some("read"), None, Locale::En),
             Some("Read".to_string())
         );
     }

@@ -33,6 +33,7 @@ use std::sync::Arc;
 
 use leptos::prelude::*;
 
+use crabmate_client_api::connections::ConnectionStatus;
 use crabmate_client_api::lane_attach::MAX_LANES;
 use crabmate_client_api::lane_phase::LaneEvent;
 
@@ -41,6 +42,38 @@ use crate::api::connection_scope;
 use super::super::app_shell_wire_phases::{ShellWiringOutput, run_shell_wiring_in_order};
 use super::super::chat::ChatColumnShell;
 use super::{AppSignals, WindowSignals};
+
+/// 一条 lane 在**左栏那一行**上要显示的东西（#569 对齐 TUI 的 lane 行）。
+///
+/// 全是 `RwSignal`（`Copy` + `Send + Sync`），所以能塞进 `RwSignal<Vec<_>>` 再进视图闭包 ——
+/// 换成 `Rc<LaneRuntime>` 会当场撞上 §5.2 那道 `Rc cannot be sent between threads safely`。
+/// 写入面同样只有一处：`app_shell_effects::connection_report`（它已经在算同一批数字，
+/// 再算一遍就是「左栏与连接区两个读数」的老问题）。
+#[derive(Clone, Copy)]
+pub(crate) struct LaneRailRow {
+    /// 行主体：连接名（ctl 实例名 / 用户给的名字）；空 = 用基址兜底。
+    pub name: RwSignal<String>,
+    /// 基址（空 = 同 Origin）。行上不显示，进 `title`。
+    pub api_base: RwSignal<String>,
+    /// 这条 lane 此刻在做什么（`·●▲×`）。
+    pub status: RwSignal<ConnectionStatus>,
+    /// 后台有新输出、用户还没切过去看。
+    pub unread: RwSignal<bool>,
+    /// 上下文占比短文本（`62%`），与状态栈同一根轴线。
+    pub context: RwSignal<Option<String>>,
+}
+
+impl LaneRailRow {
+    pub(crate) fn new(name: Option<String>, api_base: String) -> Self {
+        Self {
+            name: RwSignal::new(name.unwrap_or_default()),
+            api_base: RwSignal::new(api_base),
+            status: RwSignal::new(ConnectionStatus::Idle),
+            unread: RwSignal::new(false),
+            context: RwSignal::new(None),
+        }
+    }
+}
 
 /// 一条 lane 的**全部**运行时：信号 + 接线产物 + 聊天列壳。
 ///
@@ -88,6 +121,11 @@ pub(crate) struct LaneSet {
     lanes: Rc<RefCell<Vec<Rc<LaneRuntime>>>>,
     /// 当前前台下标。**唯一真源**：所有「我现在看的是哪条」都从这里读（现在恒 0）。
     active: RwSignal<usize>,
+    /// 左栏每行要显示的读数；下标与 `lanes` 对齐（`rail_rows[i]` 描述 `lanes[i]`）。
+    ///
+    /// 与 `lanes` 分开存的原因：`LaneRuntime` 含 `Rc`，进不了响应式系统与视图闭包；
+    /// 这里只放 `Copy` 信号句柄，视图读它就能跟着每条 lane 的状态变。
+    rail_rows: RwSignal<Vec<LaneRailRow>>,
 }
 
 impl LaneSet {
@@ -97,6 +135,7 @@ impl LaneSet {
     /// `wiring` 是对它的 `run_shell_wiring_in_order` —— 与改造前的启动路径逐字等价。
     pub(crate) fn new_single(
         window: WindowSignals,
+        row: LaneRailRow,
         signals: AppSignals,
         wiring: ShellWiringOutput,
     ) -> Self {
@@ -106,7 +145,13 @@ impl LaneSet {
                 signals, wiring,
             ))])),
             active: RwSignal::new(0),
+            rail_rows: RwSignal::new(vec![row]),
         }
+    }
+
+    /// 左栏行数据的响应式来源（下标与 [`Self::len`] 对齐）。
+    pub(crate) fn rail_rows(&self) -> RwSignal<Vec<LaneRailRow>> {
+        self.rail_rows
     }
 
     /// 取当前前台那条 lane 的运行时（`Rc` 句柄，常数开销）。
@@ -152,12 +197,20 @@ impl LaneSet {
     /// 本方法，那些 Effect 会挂到 `App` 的 owner 上 —— 关 lane 时清不掉。
     ///
     /// 前台下标不动：新 lane 先在后台，切前台是 S3 的事。
-    pub(crate) fn add_lane(&self, scope: connection_scope::ScopeHolder) -> Rc<LaneRuntime> {
+    pub(crate) fn add_lane(
+        &self,
+        scope: connection_scope::ScopeHolder,
+        name: Option<&str>,
+        api_base: &str,
+    ) -> (Rc<LaneRuntime>, LaneRailRow) {
+        // 行先建：接线的 phase 5 要往里写读数（见 `run_shell_wiring_in_order`）。
+        let row = LaneRailRow::new(name.map(str::to_string), api_base.to_string());
         let signals = AppSignals::new_lane(&self.window, scope);
-        let wiring = run_shell_wiring_in_order(&signals);
+        let wiring = run_shell_wiring_in_order(&signals, row);
         let runtime = Rc::new(LaneRuntime::new(signals, wiring));
         self.lanes.borrow_mut().push(Rc::clone(&runtime));
-        runtime
+        self.rail_rows.update(|rows| rows.push(row));
+        (runtime, row)
     }
 
     /// 当前前台下标（响应式句柄，给视图层的 `display` 切换订阅）。

@@ -287,6 +287,17 @@ Web 侧没有「帧」，只有「挂载 / 卸载」，所以要先说清卸载�
 >    **这条在 Chromium 里测不出来**（同一份 dist、同样两步点击，点了就建好）；必须真 WebKitGTK +
 >    真壳：`CM_DESKTOP_SKIP_CONNECT=1` + xvfb + 壳侧 `initialization_script` 注入自检脚本，才能看到
 >    「修复前 panic=13 / 切 lane 停在 lane 0」与「修复后 panic=0 / `activeLane` 到位」。
+>
+> 4. **左栏 lane 行与 TUI 对齐**（接 1–3 之后的一轮）：行 = 状态点 `·●▲×` + **名字**
+>    （ctl 实例名；空则回退 `host:port`，基址也空才说「同源」）+ 行尾读数（上下文占比、未读点 `•`）；
+>    标题 `本窗口 lane [n/8] ▲k`（`▲k` 只在有 lane 等审批时出现）；**单 lane 也显示**（与 TUI 同一口径：
+>    不显示就看不出这条 lane 连的是哪台）；地址不进行内、只进 `title`（TUI 同样只写名字）。
+>    读数**顺序与降级规则**抽到共享层 `crabmate_client_api::lane_row`（`tail_parts` / `tail_room` /
+>    `tail_within` / `count_suffix`），TUI 的 `lane_list` 改为调用它 —— 两端同一份，否则窄栏下
+>    「TUI 留着耗时、Web 先丢它」这种偏差只在窗口变窄时才露头。desktop 侧的行数据是
+>    `LaneRailRow`（全 `Copy` 信号），由 `connection_report` 的同一批计算顺带写入（不再算第二遍）。
+>    **尚未接上**：在途耗时（要 per-lane 回合起点 + 窗口级 1s ticker）与关闭 lane（`/lane detach`
+>    等价物，要动 `UnmountHandle` 的所有权）。
 
 **上限**：`MAX_LANES = 8`（`crabmate_client_api::lane_attach`，与 TUI 同源，也与 `Alt+1..8` 对齐）。
 满了之后新建动作直接拒绝 —— 不建 slot、不接线；每条 lane 都带一整套 Effect 与后台轮询，
