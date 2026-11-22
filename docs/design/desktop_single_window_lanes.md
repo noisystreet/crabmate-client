@@ -258,6 +258,15 @@ Web 侧没有「帧」，只有「挂载 / 卸载」，所以要先说清卸载�
 | **S3a**（已完成） | 切换只换 class（`lane-slot--active`，不重建子树）；键位 §6.6 全表 | 冒烟 + Playwright 布局用例；**切 lane 的行为需图形会话手测** |
 | **S3b**（已完成） | 左栏「本窗口 lane 列表」（§6.5 方案 B）+ 点击切换；§6.5 的单窗口降级写进能力矩阵（注 3） | 单 lane 时整组不渲染；条数与前台高亮跟 `labels` / `active` 走 |
 
+> **#569 手测结果（2026-11-22）**：连两台不同 serve 后点另一条 lane，主区内容不变。两个独立成因：
+>
+> 1. **数据面** —— 请求基址只经 `ACTIVE` 指针取（`api_url` / `prepare_api_auth` 的零参口径），
+>    后台那条的请求打到前台那台。**已修**：`api_url_on` / `prepare_api_auth_on` / `auth_headers_for`
+>    加每条 lane 自己的 `ScopeHolder`，`/status`、`/tasks` 与首屏会话桶已改用它。
+> 2. **切换本身** —— `LaneSet::set_active` 写回 `LanePhase` 时，某个订阅者访问了**已 dispose**
+>    的反应式值，wasm panic 让 `self.active.set(index)` 从未执行 → 界面「点了没反应」。
+>    **仍未修**；`e2e/specs/mock-lane-switch.spec.ts` 的第二个 `test.fixme` 是它的复现。
+
 **上限**：`MAX_LANES = 8`（`crabmate_client_api::lane_attach`，与 TUI 同源，也与 `Alt+1..8` 对齐）。
 满了之后新建动作直接拒绝 —— 不建 slot、不接线；每条 lane 都带一整套 Effect 与后台轮询，
 没有上限就是「点几次堆几条」。
