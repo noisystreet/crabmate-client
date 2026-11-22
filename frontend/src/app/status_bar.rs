@@ -8,7 +8,6 @@ use std::sync::Arc;
 use crabmate_client_api::url::api_base_authority;
 use leptos::prelude::*;
 
-use crate::api::api_base_url;
 use crate::api::load_client_llm_text_fields_from_storage;
 use crate::app_prefs::status_bar_effective_model;
 use crate::chat_session_state::ChatStreamBusyMemos;
@@ -269,19 +268,28 @@ fn serve_title(api_base: &str, locale: Locale) -> String {
 /// 与 TUI 状态栈的 `serve` 段是同一件事、同一个词（`crates/crabmate-tui/src/tui_mode/status.rs`
 /// 的 `environment_segments`）。位置也在同一处：`view` / `perm` 之后、`model` 之前 ——
 /// 「我在哪个视图、能动到什么、连的是哪台」这三件事挨着，跨客户端对照时不用挪眼睛。
+///
+/// # 为什么读 ctx 里的信号，而不是零参 `api_base_url()`
+///
+/// `api_base_url()` 读的是**前台** holder（thread_local `ACTIVE`），而且它不是响应式值：
+/// 状态栈是**每条 lane 各渲染一份**的，用它在建树那一刻取到的字面量就定死了 —— 切 lane 之后
+/// 右下角仍显示上一条 lane 的 host（#569 的残留症状；TUI 每帧重绘所以看不出来）。
+/// [`ChatShellLeptosContext::api_base`] 是「**本 lane** 基址」的响应式镜像（写入面只有
+/// 「设置 → 连接」一处），与设置页的「连接」区块读的是同一个值。
 #[component]
 fn StatusBarServeChip(locale: RwSignal<Locale>) -> impl IntoView {
+    let api_base = expect_chat_shell_ctx().api_base;
     view! {
         <span
             class="status-chip"
             data-testid="status-serve-chip"
-            prop:title=move || serve_title(&api_base_url(), locale.get())
+            prop:title=move || serve_title(&api_base.get(), locale.get())
         >
             <span class="status-chip-label">
                 {move || i18n::status_chip_serve(locale.get())}
             </span>
             <span class="status-chip-value">
-                {move || serve_short_value(&api_base_url(), locale.get())}
+                {move || serve_short_value(&api_base.get(), locale.get())}
             </span>
         </span>
     }
@@ -778,6 +786,33 @@ mod serve_chip_tests {
         let same = i18n::status_chip_same_origin(Locale::ZhHans).to_string();
         assert_eq!(serve_short_value("", Locale::ZhHans), same);
         assert_eq!(serve_title("   ", Locale::ZhHans), same);
+    }
+}
+
+/// 源码守卫：`serve` chip 必须读**本 lane** 的 ctx 信号。
+///
+/// 写坏的方式很隐蔽、症状又只在多 lane 下出现：改回零参 `api_base_url()` 后，状态栈是每条 lane
+/// 各渲染一份的，chip 的字面量在建树那一刻就定死 —— 切 lane 后右下角继续显示上一条 lane 的 host
+/// （#569）。这类「读错了源、但单 lane 完全正常」的回归只能靠源码级断言拦住。
+#[cfg(test)]
+mod serve_chip_source_tests {
+    #[test]
+    fn the_serve_chip_reads_this_lanes_scope_not_the_active_holder() {
+        let src = include_str!("status_bar.rs");
+        let start = src
+            .find("fn StatusBarServeChip(")
+            .expect("serve chip 改名或挪走了：同步更新本守卫");
+        let body = &src[start..];
+        let end = body.find("\n}\n").map_or(body.len(), |e| e + 3);
+        let body = &body[..end];
+        assert!(
+            body.contains("expect_chat_shell_ctx"),
+            "serve chip 必须从 ctx（本 lane）取基址"
+        );
+        assert!(
+            !body.contains("api_base_url("),
+            "别读零参 api_base_url()：那是前台 holder，且非响应式，切 lane 不会跟着变"
+        );
     }
 }
 

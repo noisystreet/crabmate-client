@@ -42,6 +42,8 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 - **A new lane's reactive owner no longer dies with the button that created it.**
 
+- **The status-bar serve chip now follows the lane you switch to.**
+
 - **Scrolling back no longer re-keys the older page on every fetch.**
 
 - **A turn's final answer keeps a stable row id instead of a random one per turn.**
