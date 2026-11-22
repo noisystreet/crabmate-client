@@ -43,6 +43,11 @@ pub struct ServeDefaults {
     ///
     /// 与会话变更集（`GET /workspace/changelog`）**不是一个东西**：这里回答「仓库里有没有
     /// 未提交改动」，那里回答「本会话改了什么」，措辞与数据都不得互相替代。
+    ///
+    /// **与 `permission_view` 的策略相反，这是刻意的**：那边一次瞬时失败要保住旧投影
+    /// （`keep_known_view`），因为「此刻是哪一档」是配置事实，丢掉一次就永久缺席；这里
+    /// 失败即清空 —— git 状态是**即时**事实，用户可能刚 `git commit`，继续显示旧值就成了
+    /// 骗人的「还脏着」。两者方向相反，别照着那边抄。
     pub git_badge: Option<String>,
     /// 会话存储当前是否走 SQLite（`/status.conversation_store_sqlite_active`）。
     ///
