@@ -1,9 +1,11 @@
 //! 工作区根目录选择 / 提交（顶栏只读路径与「项目」菜单共用）。
 
+use crabmate::cm_api_contract::workspace::WorkspaceGitStatusResponse;
 use gloo_timers::future::TimeoutFuture;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
+use crate::api::fetch_workspace_git;
 use crate::api::post_workspace_set;
 use crate::api::user_data::put_current_web_sessions;
 use crate::app_prefs::SidePanelView;
@@ -20,6 +22,7 @@ use crate::tauri_shell::tauri_shell_available;
 use crate::user_data_bootstrap::{remember_workspace_root, workspace_recent_menu_label};
 use crate::workspace_shell::reload_workspace_panel;
 
+use super::git_badge::{git_badge_line, git_badge_title};
 use super::workspace_panel_state::WorkspacePanelSignals;
 
 /// 切换工作区后的会话交接策略。
@@ -320,6 +323,7 @@ impl WorkspaceRootPickHandle {
 #[component]
 pub(crate) fn ShellTopbarWorkspaceRoot(pick: WorkspaceRootPickHandle) -> impl IntoView {
     let WorkspaceRootPickHandle { locale, ws, .. } = pick;
+    let (git, load_git) = shell_topbar_git_state(locale, ws);
     view! {
         <div class="shell-topbar-workspace" data-testid="shell-topbar-workspace">
             <span
@@ -354,6 +358,90 @@ pub(crate) fn ShellTopbarWorkspaceRoot(pick: WorkspaceRootPickHandle) -> impl In
                     {move || ws.workspace_set_err.get().unwrap_or_default()}
                 </span>
             </Show>
+            {shell_topbar_git_badge_view(locale, git, load_git)}
         </div>
     }
+}
+
+/// 徽标视图（从 [`ShellTopbarWorkspaceRoot`] 拆出：组件本体只保留状态与刷新时机，
+/// 否则渲染分支一多就撞 `CCN>10` 门禁）。`load_git(true)` 是手动刷新手势。
+fn shell_topbar_git_badge_view(
+    locale: RwSignal<Locale>,
+    git: RwSignal<Option<WorkspaceGitStatusResponse>>,
+    load_git: impl Fn(bool) + Copy + Send + Sync + 'static,
+) -> impl IntoView {
+    view! {
+        <Show when=move || git.get().is_some()>
+            {move || match git.get() {
+                Some(resp) => git_badge_button(&resp, locale.get(), load_git).into_any(),
+                None => ().into_any(),
+            }}
+        </Show>
+    }
+}
+
+/// 单个徽标按钮：文本 / 提示 / 无障碍标签 / 脏着色。
+fn git_badge_button(
+    resp: &WorkspaceGitStatusResponse,
+    loc: Locale,
+    load_git: impl Fn(bool) + Copy + Send + Sync + 'static,
+) -> impl IntoView {
+    let line = git_badge_line(resp, loc);
+    let title = git_badge_title(resp, loc);
+    let aria = i18n::ws_git_badge_aria(loc);
+    // 脏标记不靠颜色单独表达：`●N` 字符本身已带信息，class 只用于主题着色。
+    let dirty = resp.dirty.unwrap_or(false) || resp.counts.map(|c| c.total > 0).unwrap_or(false);
+    let class = if dirty {
+        "shell-topbar-git-badge shell-topbar-git-badge-dirty"
+    } else {
+        "shell-topbar-git-badge"
+    };
+    view! {
+        <button
+            type="button"
+            class=class
+            data-testid="workspace-git-badge"
+            prop:title=title
+            prop:aria-label=aria
+            on:click=move |_| load_git(true)
+        >{line}</button>
+    }
+}
+
+/// 徽标状态与刷新时机（从 [`ShellTopbarWorkspaceRoot`] 拆出：组件本体只组装视图，
+/// 否则分支一多就撞 `CCN>10` 门禁）。
+///
+/// 零参 `fetch_json` 走前台作用域：徽标只渲染在当前可见的那条 lane 上，用户看到的
+/// 就是它自己的 serve。拉取失败（老 serve 的 404 / 离线 / Bearer 失效）时**清空徽标**
+/// ——宁可没有，也不要渲染一个看起来干净的分支名。
+fn shell_topbar_git_state(
+    locale: RwSignal<Locale>,
+    ws: WorkspacePanelSignals,
+) -> (
+    RwSignal<Option<WorkspaceGitStatusResponse>>,
+    impl Fn(bool) + Copy + Send + Sync + 'static,
+) {
+    let git = RwSignal::new(None::<WorkspaceGitStatusResponse>);
+    let load_git = move |force: bool| {
+        let loc = locale.get_untracked();
+        spawn_local(async move {
+            match fetch_workspace_git(force, loc).await {
+                Ok(resp) => git.set(Some(resp)),
+                Err(_) => git.set(None),
+            }
+        });
+    };
+    // 刷新时机 = 工作区切换（路径变化）+ 树重载（SSE `on_workspace_changed` 触发，
+    // 即回合内工具改过文件之后）。**不做轮询**：服务端已有 2s TTL，「侧栏可见性」
+    // 优先于实时性。
+    Effect::new(move |_| {
+        let path = ws.workspace_path_draft.get();
+        let _tree_stamp = ws.workspace_data.get();
+        if path.trim().is_empty() {
+            git.set(None);
+            return;
+        }
+        load_git(false);
+    });
+    (git, load_git)
 }

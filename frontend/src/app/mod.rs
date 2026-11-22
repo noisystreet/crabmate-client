@@ -17,6 +17,7 @@ pub(crate) use chat::turn_lifecycle;
 mod connection_feed;
 mod context_usage_page;
 pub(crate) mod focusable_menu;
+mod git_badge;
 mod github_embed_page;
 mod github_wiring;
 mod ide_confirm_dialog;

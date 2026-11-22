@@ -313,3 +313,63 @@ pub fn ws_changelog_btn(l: Locale) -> &'static str {
         Locale::En => "Change preview",
     }
 }
+
+// --- 工作区 git 徽标（`GET /workspace/git`；Desktop 顶栏与 TUI 共用口径） ---
+
+/// 非 git 工作区（工作区根不是 git 工作树）。
+pub fn ws_git_not_a_repo(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "非 git 仓库",
+        Locale::En => "not a git repo",
+    }
+}
+
+/// `git` 命令不可用（未安装或不在 PATH）。
+pub fn ws_git_unavailable(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "git 不可用",
+        Locale::En => "git unavailable",
+    }
+}
+
+/// 读取失败（超时 / 非零退出 / 输出不可解析）——与上面两态**必须**不同。
+pub fn ws_git_failed(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "git 状态读取失败",
+        Locale::En => "git status unavailable",
+    }
+}
+
+/// 徽标的无障碍标签（只说分支名，屏幕阅读器不知道那是什么）。
+pub fn ws_git_badge_aria(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "当前分支与未提交改动（点击刷新）",
+        Locale::En => "Current branch and uncommitted changes (click to refresh)",
+    }
+}
+
+/// 干净：写清「当前工作区根下」，不说「仓库干净」（仓库根可能在工作区根之上）。
+pub fn ws_git_clean_title(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "当前工作区根下无未提交改动",
+        Locale::En => "No uncommitted changes under this workspace root",
+    }
+}
+
+/// 脏计数明细（分类计数：同一文件可同时计入已暂存与未暂存）。
+pub fn ws_git_counts_title(
+    l: Locale,
+    staged: u32,
+    unstaged: u32,
+    untracked: u32,
+    conflicted: u32,
+) -> String {
+    match l {
+        Locale::ZhHans => format!(
+            "当前工作区根下未提交改动：已暂存 {staged} · 未暂存 {unstaged} · 未跟踪 {untracked} · 冲突 {conflicted}"
+        ),
+        Locale::En => format!(
+            "Uncommitted under this workspace root — staged {staged} · unstaged {unstaged} · untracked {untracked} · conflicted {conflicted}"
+        ),
+    }
+}

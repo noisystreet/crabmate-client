@@ -22,6 +22,21 @@ pub const WORKSPACE: &str = "/workspace";
 pub const WORKSPACE_PROJECTS: &str = "/workspace/projects";
 /// 工作区克隆流（frontend）。
 pub const WORKSPACE_CLONE_STREAM: &str = "/workspace/clone/stream";
+/// 工作区 git 状态只读投影（tui / frontend）。
+///
+/// 一律 HTTP 200：可用性看响应里的 `state`（`ok` / `not_a_repo` / `git_unavailable` / `failed`），
+/// 不是错误码。`refresh=true` 只跳过服务端 2s 缓存读（仍回写缓存），GET 语义不变。
+pub const WORKSPACE_GIT: &str = "/workspace/git";
+
+/// `GET /workspace/git` 的路径；`refresh=true` 供「手动刷新」手势（读穿透服务端缓存）。
+#[must_use]
+pub fn workspace_git(refresh: bool) -> String {
+    if refresh {
+        format!("{WORKSPACE_GIT}?refresh=true")
+    } else {
+        WORKSPACE_GIT.to_string()
+    }
+}
 /// 当前工作区会话列表（tui / frontend）。
 pub const USER_DATA_WORKSPACE_SESSIONS: &str = "/user-data/workspaces/current/sessions";
 /// 用户偏好（tui / connect / frontend）。
@@ -207,5 +222,13 @@ mod tests {
         );
         // 空白等同未指定，避免发出 `agent_role=` 这种空值。
         assert_eq!(permission(Some("  "), Some("")), "/permission");
+    }
+
+    #[test]
+    fn workspace_git_path_carries_refresh_flag() {
+        // 与 `/permission` 同理：GET 只读，`refresh` 只跳过服务端缓存读，不改语义。
+        assert_eq!(super::WORKSPACE_GIT, "/workspace/git");
+        assert_eq!(super::workspace_git(false), "/workspace/git");
+        assert_eq!(super::workspace_git(true), "/workspace/git?refresh=true");
     }
 }
