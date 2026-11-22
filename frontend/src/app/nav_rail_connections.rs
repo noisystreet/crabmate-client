@@ -419,7 +419,7 @@ pub(super) fn NavRailConnections(
     // 已被占用的 authority：窗口级注册表（别的窗口 / 老路径）**加上本窗口每条 lane 的基址**。
     // #561 S2 起「连接」= 在当前窗口新建一条 lane，那条 lane 不在窗口注册表里 —— 只看注册表，
     // 刚连上的实例会继续留在「可连实例」里（再点一次就多一条同 serve 的 lane）。
-    let lane_taken = lane_authority_signal(api_base);
+    let lane_taken = lane_authority_signal();
     let taken = taken_authorities_signal(rows, lane_taken);
     // 「其它窗口」：窗口注册表里**除本窗口**以外的那些。
     //
@@ -441,10 +441,15 @@ pub(super) fn NavRailConnections(
     let rename_target = RwSignal::new(None::<String>);
     // 右键菜单的锚点（`Some` = 菜单打开）。只有本窗口那行会写它。
     let rename_menu = RwSignal::new(None::<ConnectionMenuAnchor>);
+    // #561 决策：多 lane 只给**宽屏**。窄屏（含 Android 手机）保持单连接语义，这一块
+    // 整个不渲染 —— 与 `docs/design/client_capability_matrix.md` 里 Android 那格的 `no`
+    // 一致。用视口判定而不是平台判定：两端共用同一份 WASM，壳没有注入平台标识。
+    let narrow = crate::app::shell_runtime_context::narrow_viewport_or_wide();
 
     view! {
         <Show when=move || tauri_shell_available()>
-            <div class="nav-rail-connections" data-testid="nav-rail-connections">
+            <Show when=move || !narrow.get()>
+                <div class="nav-rail-connections" data-testid="nav-rail-connections">
                     // 与 TUI 的 lane 列表对齐：第一组就是 `连接 [n/8] ▲k` + 每条 lane 一行
                     // （状态符 / 名字 / 行尾读数都同一份口径）。
                     <LaneRailGroup locale=locale />
@@ -494,6 +499,7 @@ pub(super) fn NavRailConnections(
                     locale=locale
                 />
                 <ConnectionRenameModal target=rename_target locale=locale />
+            </Show>
         </Show>
     }
 }

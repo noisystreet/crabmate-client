@@ -25,21 +25,15 @@ fn snapshot_authorities(snapshots: &[ConnectionSnapshot]) -> Vec<String> {
 
 /// 本窗口每条 lane 已占用的 authority。
 ///
-/// 空基址 = 同 Origin（设置页那颗按钮新建的 lane），用 `fallback`（窗口当前基址）兜底 ——
-/// 否则那条 lane 会被算成「没占用」，同一个 Origin 的实例又出现在「可连实例」里。
+/// 空 authority 直接丢弃 —— 与 `rail_index_for_base` 同一口径。空基址本来就不该出现在行里：
+/// `LaneSet::add_lane` 与 lane0 的启动路径都在**创建时**把「同 Origin」解析成了具体基址。
+/// 若这里再拿「当前前台基址」兜底，同一条 lane 的 authority 会随切 lane 变 —— 那正是
+/// 「切一下冒出其它窗口」那一类 bug 的来源，所以**不给**兜底。
 ///
 /// 抽成自由函数而不是写在组件里：`NavRailConnections` 贴着 `lizard` 的 CCN>10 门禁。
-fn lane_authorities(rows: &[crate::app::app_signals::LaneRailRow], fallback: &str) -> Vec<String> {
+fn lane_authorities(rows: &[crate::app::app_signals::LaneRailRow]) -> Vec<String> {
     rows.iter()
-        .map(|row| {
-            let base = row.api_base.get();
-            let base = if base.trim().is_empty() {
-                fallback.to_string()
-            } else {
-                base
-            };
-            api_base_authority(&base)
-        })
+        .map(|row| api_base_authority(&row.api_base.get()))
         .filter(|authority| !authority.is_empty())
         .collect()
 }
@@ -61,11 +55,11 @@ pub(super) fn other_window_rows(
         .collect()
 }
 
-/// 本窗口每条 lane 占用的 authority（响应式）。空基址 = 同 Origin，用窗口当前基址兜底。
-pub(super) fn lane_authority_signal(fallback: RwSignal<String>) -> Signal<Vec<String>> {
+/// 本窗口每条 lane 占用的 authority（响应式）。
+pub(super) fn lane_authority_signal() -> Signal<Vec<String>> {
     Signal::derive(move || {
         let lane_rows = lane_actions::rail().map_or_else(Vec::new, |(r, _)| r.get());
-        lane_authorities(&lane_rows, &fallback.get())
+        lane_authorities(&lane_rows)
     })
 }
 

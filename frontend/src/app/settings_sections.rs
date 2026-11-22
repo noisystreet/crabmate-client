@@ -447,25 +447,30 @@ pub(crate) fn SettingsApiBaseBlock(
 /// 浏览器里没有 `__TAURI__`，点了就是静默无事 —— 藏起来比留一个没反应的按钮好。
 #[component]
 pub(crate) fn SettingsConnectionNewWindowBlock(locale: RwSignal<Locale>) -> impl IntoView {
+    // #561 决策：多 lane 只给宽屏 —— 窄屏（含 Android）不留这条入口，否则「保持单连接
+    // 语义」只剩一句口号（左栏已 gate 掉，这里还能建第二条）。
+    let narrow = crate::app::shell_runtime_context::narrow_viewport_or_wide();
     view! {
         <Show when=move || crate::tauri_shell::tauri_shell_available()>
-            <div class="settings-block" data-testid="settings-connection-new-window-block">
-                <h3 class="settings-block-title">
-                    {move || i18n::settings_connection_new_window_title(locale.get())}
-                </h3>
-                <p class="settings-hint">
-                    {move || i18n::settings_connection_new_window_hint(locale.get())}
-                </p>
-                <button
-                    type="button"
-                    class="btn btn-primary btn-sm"
-                    data-testid="settings-connection-new-window"
-                    // #561 S2：连接 = 在当前窗口新建一条 lane（不再开新 WebView，§6.7）。
-                    on:click=move |_| crate::app::lane_actions::new_lane(None, None)
-                >
-                    {move || i18n::settings_connection_new_window(locale.get())}
-                </button>
-            </div>
+            <Show when=move || !narrow.get()>
+                <div class="settings-block" data-testid="settings-connection-new-window-block">
+                    <h3 class="settings-block-title">
+                        {move || i18n::settings_connection_new_window_title(locale.get())}
+                    </h3>
+                    <p class="settings-hint">
+                        {move || i18n::settings_connection_new_window_hint(locale.get())}
+                    </p>
+                    <button
+                        type="button"
+                        class="btn btn-primary btn-sm"
+                        data-testid="settings-connection-new-window"
+                        // #561 S2：连接 = 在当前窗口新建一条 lane（不再开新 WebView，§6.7）。
+                        on:click=move |_| crate::app::lane_actions::new_lane(None, None)
+                    >
+                        {move || i18n::settings_connection_new_window(locale.get())}
+                    </button>
+                </div>
+            </Show>
         </Show>
     }
 }

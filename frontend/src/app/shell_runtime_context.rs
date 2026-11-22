@@ -40,6 +40,14 @@ pub struct ChatShellLeptosContext {
     /// 因为本轮 `/chat` 早已带着开跑时的档位发出去了，飞行中的工具不该在一轮内看到两个档位。
     /// 与 TUI 的 `permission_intent::apply_permission_level` 是同一条守卫。
     pub perm_turn_in_flight: Memo<bool>,
+    /// 视口是否窄于 [`crate::app_prefs::MOBILE_LAYOUT_BREAKPOINT_PX`]（同源
+    /// `AppSignals::shell_ui.is_narrow_viewport`）。
+    ///
+    /// 左栏 lane 分组与设置页「新建 lane」按钮用它 gate：#561 的决策是「多 lane 只给
+    /// 宽屏 Desktop」，窄屏（含手机）保持单连接语义 —— 与
+    /// `docs/design/client_capability_matrix.md` 里 Android 那格写的 `no` 一致。
+    pub is_narrow_viewport: RwSignal<bool>,
+
     /// 对话 / 编辑器主区切换（同源 `AppSignals::shell_ui.editor_layout_mode`）。
     ///
     /// 状态栈的 `view` chip 与 TUI 的 `view` 段是同一个开关：读它决定显示 `chat` / `file`，
@@ -69,6 +77,7 @@ impl ChatShellLeptosContext {
             selected_permission_level: app.llm_settings.selected_permission_level,
             permission_intent_owner: app.llm_settings.permission_intent_owner,
             api_base: app.connection.api_base,
+            is_narrow_viewport: app.shell_ui.is_narrow_viewport,
             perm_turn_in_flight,
             layout_toggle: IdeLayoutToggleSignals::from_app_signals(app),
         }
@@ -80,6 +89,18 @@ impl ChatShellLeptosContext {
 pub fn expect_chat_shell_ctx() -> ChatShellLeptosContext {
     try_chat_shell_ctx()
         .expect("ChatShellLeptosContext: provide ChatShellLeptosContext in App root")
+}
+
+/// 窄屏判定（#561「多 lane 只给宽屏」的唯一取用口）。
+///
+/// 没有壳层 ctx（单测 / Story）时按「不窄」处理，也就是**不** gate —— 那种环境本来也没有
+/// 真实的左栏与设置页入口。抽成一处而不是两处各写一遍：以后再加第三个「新建 lane」入口时，
+/// 忘了 gate 就等于窄屏又能建第二条，而那个后果只有真机才看得见。
+#[must_use]
+pub fn narrow_viewport_or_wide() -> RwSignal<bool> {
+    try_chat_shell_ctx()
+        .map(|shell| shell.is_narrow_viewport)
+        .unwrap_or_else(|| RwSignal::new(false))
 }
 
 /// 与 [`expect_chat_shell_ctx`] 同源；无上下文时返回 `None`（便于单测 / 可选子树）。

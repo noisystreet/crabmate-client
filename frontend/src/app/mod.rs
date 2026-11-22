@@ -222,6 +222,24 @@ fn register_new_lane_action(
     let root_owner = Owner::current();
     lane_actions::register_new_lane(Rc::new(
         move |name: Option<String>, base: Option<String>| {
+            // #561 决策「一台 serve 只占一条 lane」：目标基址已经有一条 lane 就**切过去**，
+            // 不再建第二条。少了这道判重，设置页那颗「新建 lane」按钮连点两次会得到两条同
+            // Origin 的 lane —— 两条打同一台 serve、会话桶与凭据槽位都一样，用户看到的是
+            // 「切了没反应」，排查时很容易误判成作用域又串了（#569 那个症状）。
+            //
+            // 基址缺省（`None`）= 沿用当前基址，与 `add_lane` 侧的兜底口径一致。
+            let target_base = base
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map_or_else(crate::api::api_base_url, str::to_string);
+            if let Some(index) = ctx.lanes.index_of_base(&target_base) {
+                // index 来自同一份 `rail_rows` 快照，越界不可能。真越界说明容器与行不一致，
+                // 那时新建一条只会让状态更歪 —— 所以两种情况都直接返回，但要在 debug 下叫出来。
+                let switched = ctx.lanes.set_active(index);
+                debug_assert!(switched, "命中 lane 下标应当可切换");
+                return;
+            }
             // 上限与 TUI 同源（`MAX_LANES = 8`，`Alt+1..8` 也只到 8）：满了就不再建 —— 每条 lane
             // 都带一整套接线与后台轮询，「点几次就堆几条」的代价没人想要。
             if ctx.lanes.is_full() {

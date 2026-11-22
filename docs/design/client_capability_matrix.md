@@ -202,6 +202,17 @@ approval). **Degradation (route B, deliberate)**: the left rail's lane list cove
 many lanes other windows hold is not visible here; switch windows first. The WASM `thread_local` singletons
 are still keyed by connection through `ScopeHolder`, which is what makes the single-window shape possible.
 
+**Two #561 decisions landed with it.** *Cap*: `MAX_LANES = 8`, the same constant the TUI uses
+(`lane_attach::MAX_LANES`), checked before every `new_lane`. *One lane per serve*: `new_lane` asks the
+container for an existing lane with the same `api_base_authority` first and **switches to it** instead of
+mounting a second one — without that, the settings-page button clicked twice produced two lanes against the
+same serve (identical session bucket and credential slot), which reads exactly like “switching does nothing”
+and sends the next person hunting for a scope bug. *Wide screen only*: the rail's lane group **and** the
+settings-page “new lane” button are gated on `is_narrow_viewport`, so a phone-sized viewport keeps the
+single-connection semantics the Android column above promises — the frontend is one WASM build for both
+shells and the shell injects no platform flag, so the viewport breakpoint (`MOBILE_LAYOUT_BREAKPOINT_PX`) is
+the single source rather than a platform check.
+
 ### 注 4 · Settings panel editing serve user-data files
 
 
