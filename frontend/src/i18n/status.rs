@@ -76,17 +76,6 @@ pub fn status_chip_context(l: Locale) -> &'static str {
     }
 }
 
-/// 左栏「连接」区的标题词：会话列表下方那一块名单。
-///
-/// 用「连接」而不是「服务端 / API Base」：前者是 TUI lane 区的同一个词
-/// （`连接 [n/8]`），两端的用户在说同一件事时用同一个词。
-pub fn connections_pane_label(l: Locale) -> &'static str {
-    match l {
-        Locale::ZhHans => "连接",
-        Locale::En => "Connection",
-    }
-}
-
 /// 左栏第二个分组的标题：控制面里声明过、还没连上的实例。
 ///
 /// 与「连接」并列但语义不同 —— 上面那组是**已经连上的窗口**，这组是**还能连的实例**。
@@ -104,9 +93,19 @@ pub fn ctl_group_label(l: Locale) -> &'static str {
 /// 措辞带「本窗口」是刻意的：别的窗口里有几条 lane，这里看不到（§6.5 方案 B 的降级，
 /// 已写进 `client_capability_matrix.md`）。
 pub fn lane_rail_title(l: Locale) -> &'static str {
+    // 与 TUI 的 lane 列表标题同词（`crates/crabmate-tui/src/tui_mode/lane_list.rs` 的
+    // `连接 [n/8] ▲k`）：同一个读数在两端不能叫两个名字。
     match l {
-        Locale::ZhHans => "本窗口 lane",
-        Locale::En => "Lanes in this window",
+        Locale::ZhHans => "连接",
+        Locale::En => "Lanes",
+    }
+}
+
+/// 左栏「其它窗口」分组：只有壳侧还挂着别的 Desktop 窗口时才出现（单窗口多 lane 的常态下没有）。
+pub fn other_windows_label(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "其它窗口",
+        Locale::En => "Other windows",
     }
 }
 
