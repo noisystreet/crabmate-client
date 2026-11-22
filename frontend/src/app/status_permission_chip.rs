@@ -3,7 +3,8 @@
 //! 为什么放底栏而不只在设置页：等级是**每个回合都生效**的东西，用户判断「这句话要不要
 //! 让它动文件」发生在聊天现场；切个档要跳两次页面，实际结果就是没人切、一路用默认档。
 //!
-//! 显示口径与设置页一致（[`i18n::settings_permission_level_label`] 同一套词表）：
+//! 显示口径与 TUI 状态行的 `perm:…` 段一致（`crabmate_client_api::permission::PermDisplay::plain`）：
+//! **英文原值、不本地化** —— 设置页是表单，那里仍用本地化词表（[`i18n::settings_permission_level_label`]）。
 //! - 有意图且与生效相同 → 只显示该档；不同 → `意图 → 生效`（服务端允许意图高于生效，
 //!   客户端**不得**把意图改写成生效值，否则下次 `/chat` 会把被钳制的低档写回）；
 //! - 没表达意图 → 显示生效档（`GET /permission` 的 `level`）；两者都不知道 → 整段不渲染
@@ -56,32 +57,19 @@ struct LevelSelect {
 
 /// chip 上显示什么。`None` = 整段不渲染。
 ///
-/// 判定与 TUI 状态行的 `perm` 段**共用** `crabmate_client_api::permission::perm_display`：
-/// 意图优先、两者不同则并列（`意图 → 生效`）、都不知道就不显示（`.` 而不是猜一个档）。
-/// 这里只加本地化：`Single` / 并列两侧都换成本机词表；`Estimated` 加 `~`（与 TUI 同一个记号，
-/// 表示「这是没意图时会落到哪」，不是「此刻生效」）。
+/// 判定与**显示词**都来自 `crabmate_client_api::permission`：`perm_display` 决定显示哪几个值，
+/// `PermDisplay::plain` 决定线格式（`workspace` / `unrestricted→read` / `~approved`）—— 正是
+/// TUI 状态行 `perm:…` 段的同一份输出，两端不会出现「TUI 显示并列、Web 只显示一个」。
+///
+/// **不做本地化**：档位名是服务端词表里的标识符（`read` / `approved` / `unrestricted`），
+/// 翻成中文会让「界面上看到的档」与 `/perm` 命令、服务端文档、错误信息里的词对不上；TUI
+/// 一直显示原值，Desktop 与它对齐。
 ///
 /// `bound` = 有没有已持久化会话 —— 没有会话时**不能**把生效侧摆到箭头右边，否则会把
 /// 「意图随下一条消息生效」读成「服务端把我钳制到了某档」（见共享层文档）。
 #[must_use]
-fn chip_text(
-    bound: bool,
-    intent: Option<&str>,
-    effective: Option<&str>,
-    loc: Locale,
-) -> Option<String> {
-    use crabmate_client_api::permission::{PermDisplay, perm_display};
-    perm_display(bound, intent, effective).map(|display| match display {
-        PermDisplay::Single(level) => i18n::settings_permission_level_label(loc, &level),
-        PermDisplay::IntentThenEffective { intent, effective } => format!(
-            "{} → {}",
-            i18n::settings_permission_level_label(loc, &intent),
-            i18n::settings_permission_level_label(loc, &effective)
-        ),
-        PermDisplay::Estimated(level) => {
-            format!("~{}", i18n::settings_permission_level_label(loc, &level))
-        }
-    })
+fn chip_text(bound: bool, intent: Option<&str>, effective: Option<&str>) -> Option<String> {
+    crabmate_client_api::permission::perm_display(bound, intent, effective).map(|d| d.plain())
 }
 
 fn menu_fixed_style_for_trigger(trigger: &web_sys::HtmlElement) -> String {
@@ -371,10 +359,8 @@ fn StatusPermissionMenu(props: PermissionMenuProps) -> impl IntoView {
                         .map(|raw| {
                             let raw_for_active = raw.clone();
                             let raw_for_click = raw.clone();
-                            let label = i18n::settings_permission_level_label(
-                                locale.get_untracked(),
-                                &raw,
-                            );
+                            // 选项也显示服务端原值（与 chip、与 TUI 菜单同一套词，不本地化）。
+                            let label = raw.clone();
                             view! {
                                 <button
                                     type="button"
@@ -440,19 +426,18 @@ pub fn StatusPermissionChip(locale: RwSignal<Locale>) -> impl IntoView {
             bound,
             level_select.selected.get().as_deref(),
             effective.as_deref(),
-            locale.get(),
         )
     });
 
+    // 段名与 TUI 状态栈的 `PERM_LABEL` 同词（`crates/crabmate-tui/src/tui_mode/status.rs`）：
+    // 两端都显示英文原值，不随界面语言变。
     view! {
         <Show when=move || text.get().is_some()>
             <span
                 class="status-chip status-chip-perm"
                 prop:title=move || chip_title(note.get(), locale.get())
             >
-                <span class="status-chip-label">
-                    {move || i18n::status_perm_label(locale.get())}
-                </span>
+                <span class="status-chip-label">"perm"</span>
                 <button
                     type="button"
                     class="status-mode-trigger"
@@ -483,7 +468,6 @@ pub fn StatusPermissionChip(locale: RwSignal<Locale>) -> impl IntoView {
 #[cfg(test)]
 mod tests {
     use super::chip_text;
-    use crate::i18n;
     use crate::i18n::Locale;
 
     /// 回合进行中：chip 不换档、**不写意图**，只把原因挂到 `note`（chip 的 title）。
@@ -553,13 +537,13 @@ mod tests {
     fn intent_wins_and_both_values_show_when_they_differ() {
         // 一致：单值（与改动前的观感一致）。
         assert_eq!(
-            chip_text(true, Some("workspace"), Some("workspace"), Locale::ZhHans),
-            Some("工作区".to_string())
+            chip_text(true, Some("workspace"), Some("workspace")),
+            Some("workspace".to_string())
         );
         // 意图高于生效：两个值都要出现，否则用户以为切换没生效。
         assert_eq!(
-            chip_text(true, Some("unrestricted"), Some("read"), Locale::ZhHans),
-            Some("不受限 → 只读".to_string())
+            chip_text(true, Some("unrestricted"), Some("read")),
+            Some("unrestricted→read".to_string())
         );
     }
 
@@ -569,44 +553,33 @@ mod tests {
     #[test]
     fn an_unbound_session_never_shows_an_arrow() {
         assert_eq!(
-            chip_text(
-                false,
-                Some("unrestricted"),
-                Some("approved"),
-                Locale::ZhHans
-            ),
-            Some(i18n::settings_permission_level_label(
-                Locale::ZhHans,
-                "unrestricted"
-            ))
+            chip_text(false, Some("unrestricted"), Some("approved")),
+            Some("unrestricted".to_string())
         );
         assert_eq!(
-            chip_text(false, None, Some("approved"), Locale::ZhHans),
-            Some(format!(
-                "~{}",
-                i18n::settings_permission_level_label(Locale::ZhHans, "approved")
-            ))
+            chip_text(false, None, Some("approved")),
+            Some("~approved".to_string())
         );
-        assert_eq!(chip_text(false, None, None, Locale::ZhHans), None);
+        assert_eq!(chip_text(false, None, None), None);
     }
 
     #[test]
     fn no_intent_shows_the_effective_level_and_unknown_shows_nothing() {
         assert_eq!(
-            chip_text(true, None, Some("approved"), Locale::ZhHans),
-            Some("已批准".to_string())
+            chip_text(true, None, Some("approved")),
+            Some("approved".to_string())
         );
         // 两者都不知道 → 整段不渲染（不猜默认档）。
-        assert_eq!(chip_text(true, None, None, Locale::ZhHans), None);
+        assert_eq!(chip_text(true, None, None), None);
         // 空白意图等同没有。
         assert_eq!(
-            chip_text(true, Some("  "), Some("read"), Locale::En),
-            Some("Read".to_string())
+            chip_text(true, Some("  "), Some("read")),
+            Some("read".to_string())
         );
         // 只有意图、还没有投影（首次拉取未回）：仍显示意图，别让 chip 闪没。
         assert_eq!(
-            chip_text(true, Some("read"), None, Locale::En),
-            Some("Read".to_string())
+            chip_text(true, Some("read"), None),
+            Some("read".to_string())
         );
     }
 }

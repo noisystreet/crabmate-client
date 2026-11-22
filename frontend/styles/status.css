@@ -178,11 +178,27 @@
   z-index: 45;
 }
 
-/* 权限等级段：标签 + 可点的档位触发器（菜单复用 .status-mode-menu-*，故这里只管排版） */
+/* 权限等级段：与 TUI 状态栈的 `perm:…` 段对齐 —— 它就是**一段文字**，不是按钮。
+   外壳剔掉 chip 的边框与底色（`transparent` 是主题中立的，不算颜色字面量）；
+   内层仍是 <button>（可聚焦、有可访问名、点开档位菜单），按钮外观由下面那条抹掉。
+   菜单复用 .status-mode-menu-*，这里只管排版。 */
 .status-chip-perm {
   padding: 0 4px 0 8px;
   gap: 4px;
   overflow: visible;
+  border-color: transparent;
+  background: transparent;
+}
+
+/* 档位触发器：去掉按钮外观（内边距 / 边框 / 底色 / 字体），只留可点的文字。 */
+.status-chip-perm .status-mode-trigger {
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  height: auto;
+  cursor: pointer;
 }
 
 .status-chip-perm:has(.status-mode-trigger-open) {

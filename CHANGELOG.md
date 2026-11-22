@@ -35,6 +35,8 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 - **A gate pins who may read the foreground lane's scope, plus a zero-arg wrapper call budget.**
 
+- **The permission chip matches the TUI: English level names, and it reads as text, not a button.**
+
 ### Fixed
 
 - **Lane polling and session loads now use their own serve scope, not the front lane's.**
