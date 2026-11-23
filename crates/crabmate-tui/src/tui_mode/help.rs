@@ -16,6 +16,7 @@ use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use unicode_width::UnicodeWidthStr;
 
 use super::LaneApp;
 use super::hotkeys::{self, HotkeyGroup};
@@ -52,6 +53,15 @@ const AREA_LINES: &[(&str, &str)] = &[
         "Tab/↑↓ 换题 · Enter 提交 · Esc 收起（等于没答）· F7 重开",
     ),
 ];
+
+/// 左列的渲染文本：前置 2 空格 + 按**显示宽度**补到 `USAGE_COL` 列。
+///
+/// 不能用 `format!("{left:<USAGE_COL$}")` —— 那个按**字符数**补，而汉字占两格，于是
+/// `/workspace [<路径>|off]` 这类含中文的 usage 会把右列顶歪，扫读时对不齐。
+fn left_cell(left: &str) -> String {
+    let pad = USAGE_COL.saturating_sub(UnicodeWidthStr::width(left));
+    format!("  {left}{}", " ".repeat(pad))
+}
 
 /// 浮层的非正文行数：**只有上下边框** —— 标题画在边框上、没有独立页脚行。
 ///
@@ -162,7 +172,7 @@ pub(super) fn render_help_overlay(frame: &mut Frame, st: &UiState, area: Rect) {
             )),
             HelpRow::Pair { left, right } => Line::from(vec![
                 // 左列淡色、右列正文色：与状态行「label / value」同一套层级，扫读时才分得开。
-                Span::styled(format!("  {left:<USAGE_COL$}"), Style::new().fg(pal.muted)),
+                Span::styled(left_cell(&left), Style::new().fg(pal.muted)),
                 Span::styled(right, Style::new().fg(pal.fg)),
             ]),
             HelpRow::Note(text) => Line::from(Span::styled(
@@ -221,6 +231,7 @@ impl<'a> LaneApp<'a> {
 #[cfg(test)]
 mod tests {
     use crabmate_client_api::slash_caps::{Surface, supported};
+    use unicode_width::UnicodeWidthStr;
 
     use super::{AREA_LINES, HelpRow, USAGE_COL, help_rows};
 
@@ -292,20 +303,43 @@ mod tests {
     }
 
     /// 左列宽度要容得下最长的那条 usage / 区域名，否则右列被顶歪 —— 对齐一失效就退回「文字墙」。
+    ///
+    /// 按**显示宽度**量（汉字占两格），不是字符数：最长那条 `/copy [assistant|user|path|code]`
+    /// 正好 32 列，而中文 usage 的字符数与显示宽度差着若干列。
     #[test]
     fn usage_column_fits_the_longest_entry() {
+        let width = |s: &str| UnicodeWidthStr::width(s);
         for e in crabmate_client_api::help::entries(Surface::Tui) {
             assert!(
-                e.usage.chars().count() < USAGE_COL,
+                width(e.usage) < USAGE_COL,
                 "{} 超出左列宽度 {USAGE_COL}，右列会错位",
                 e.usage
             );
         }
         for (area, _) in AREA_LINES {
-            assert!(
-                area.chars().count() < USAGE_COL,
-                "区域名 {area} 超出左列宽度"
+            assert!(width(area) < USAGE_COL, "区域名 {area} 超出左列宽度");
+        }
+    }
+
+    /// 每对行的左列渲染后**恒为同一列宽**：含中文的 usage 与纯 ASCII 的必须对齐。
+    ///
+    /// 回归要点：曾用 `{left:<USAGE_COL$}` 按字符数补齐，而汉字占两格 ——
+    /// `/workspace [<路径>|off]` 那一行的右列因此被推右，扫读时整表参差。
+    #[test]
+    fn pair_cells_align_by_display_width() {
+        for left in [
+            "/help",
+            "/workspace [<路径>|off]",
+            "/conv <子命令>",
+            "会话栏",
+        ] {
+            let cell = super::left_cell(left);
+            assert_eq!(
+                UnicodeWidthStr::width(cell.as_str()),
+                2 + USAGE_COL,
+                "{left} 的左列渲染宽度必须是 2 + {USAGE_COL}"
             );
+            assert!(cell.ends_with(' '), "{left} 的左列必须给右列留出间距");
         }
     }
 }
