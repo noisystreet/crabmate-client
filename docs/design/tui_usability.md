@@ -56,7 +56,20 @@
 > 段时按优先级先丢 `lanes`，安全相关的 `perm` 保住。落点：`status.rs`（`VIEW_LABEL` / `priority::VIEW_MODE` / `view_text`）、`status_stack.rs`（裁剪路径首次生效，含溢出用例）、`mouse.rs`（`hit_status_segment` 统一三段命中，免得每加一个开关就多付一份圈复杂度）、`editor_view.rs::toggle_view`、`hotkeys.rs`、`help.rs`。
 
 > **2026-11-03 补记**：`perm` 段与 `/perm <level>` 在**回合进行中一律拒绝换档**，与 `/workspace <路径>` / 项目池切换同一条守卫（`st.running`，见 `workspace_cmd.rs`）。理由与本轮 `/chat` 的快照一致：档位在 `start_turn` 时已随请求体发出（`turn_send.rs`），飞行中的工具按哪一档判定不该在一轮内前后不一致。**不做**「先改意图、等回合结束再落盘」——那正是旧行为的症状：意图立刻变、生效投影要等落盘回包，而 worker 是单线程串行消费（回合 `block_on` 占着它），于是状态行整个回合都挂着 `unrestricted→approved`，读起来像「服务端把我钳制了」，实际只是请求还排在队里没出站。拒绝时给一句原因（「a turn is running —
-> switch after it finishes」）；点 `perm` 段同样只给这句、不开菜单——菜单是纯写入入口，选不动的菜单比直接说明更困惑。**Desktop 同源**：底栏 chip 与设置页选择器读 `ChatShellLeptosContext::perm_turn_in_flight`（与「停止」门闩同一谓词 `turn_lifecycle_stream_turn_busy`），忙时同样只写就地提示、不动意图信号。**未覆盖**：`WritePermission` / `RefreshStatus`
+> switch after it finishes」）；点 `perm` 段同样只给这句、不开菜单——菜单是纯写入入口，选不动的菜单比直接说明更困惑。**2026-11-23 补记（同一病根的另一半）**：回合守卫只挡住了「回合进行中换档」，空闲时按下
+`/perm` 仍然先把意图写进 override、而生效侧要等写回包 —— 请求在途（worker 队列有前序 job
+时更久）或写失败时，状态行照样挂着 `unrestricted→approved`；后者的四种失败分支
+（`NotFound` / `Unsupported` / `Failed` / `Err`）原先既不更新也不重拉投影，箭头会一直不散。
+
+现在把「意图已提交、尚未确认」建成共享层的正式状态（`permission::perm_display_with` 的
+`pending`）：pending 期间只显示 `~<意图>`（与「无会话 + 有意图」同一含义 —— 随下一次提交
+生效），成功写回才清；写失败时同时折掉那份过期投影。**两端同一口径**：TUI 状态行
+（`tui_mode/status_info.rs::perm_value`）与 Desktop chip（`status_permission_chip::chip_text`）
+都传这个标记。Desktop 另把**读 / 写代数拆开**（`LevelSelect::generation` vs `read_generation`）：
+`selected` 变化会触发一次读请求，两者共用一个代数时会把在途的写回包判成 stale，`done()` 与
+`pending` 清理都跟着失效 —— 只能靠读请求兜底纠正。
+
+**Desktop 同源**：底栏 chip 与设置页选择器读 `ChatShellLeptosContext::perm_turn_in_flight`（与「停止」门闩同一谓词 `turn_lifecycle_stream_turn_busy`），忙时同样只写就地提示、不动意图信号。**未覆盖**：`WritePermission` / `RefreshStatus`
 > 这类轻任务仍会被回合挡住，要让它们在回合中真正并发得改 worker 的调度模型（另议，见任务单）。
 
 ---

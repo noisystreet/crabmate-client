@@ -43,6 +43,8 @@ pub struct StatusInfo {
     /// 服务端允许意图高于生效（min 链钳制），只显示生效档会让用户以为切换没生效；
     /// 而把意图改写成生效值又会让下一条 `/chat` 把被钳制的低档写回会话。
     pub permission_intent: Option<String>,
+    /// 意图已提交、尚未确认生效：`perm` 段据此不并列（`status_info::perm_value`）。
+    pub permission_pending: bool,
     /// 主区是不是只读文件视图（`st.editor.open`）：`bool` 无「不知道」态，`Default` = 聊天。
     pub editor_open: bool,
     /// 窄屏工作区指示（issue #425）：左右栏一藏，右栏标题里的工作区名就没有第二处可看。

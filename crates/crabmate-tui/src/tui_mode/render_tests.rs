@@ -391,6 +391,7 @@ fn finished_tool_row_without_verdict_is_not_running() {
         context: "—".to_string(),
         permission: None,
         permission_intent: None,
+        permission_pending: false,
     };
     assert_eq!(
         progress_mark_frame(&st, &info),

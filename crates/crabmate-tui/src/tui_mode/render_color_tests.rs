@@ -38,6 +38,7 @@ fn status_info() -> StatusInfo {
         context: "—".to_string(),
         permission: None,
         permission_intent: None,
+        permission_pending: false,
     }
 }
 

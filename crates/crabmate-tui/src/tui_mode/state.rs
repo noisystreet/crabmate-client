@@ -552,6 +552,8 @@ pub struct UiState {
     pub body_links: Vec<Vec<crate::tui_mode::links::RowLink>>,
     /// 权限写入代数（连选两档只认最后一次回包）与 `perm` 段菜单（`None` = 未打开）。
     pub permission_generation: u64,
+    /// 意图已提交、尚未拿到成功回包：`perm` 段据此不并列（见 `permission::perm_display_with`）。
+    pub permission_pending: bool,
     pub permission_menu: Option<crate::tui_mode::permission_intent::PermissionMenu>,
 }
 

@@ -7,7 +7,8 @@
 //!    不碰渲染，与 `permission_intent` / `status_thinking` 同一手法（`impl LaneApp` 扩展块）。
 //!
 //! 「值从哪来」的优先级（override ＞ user-data 已存值 ＞ serve 默认）是本模块唯一的规则，
-//! 两端口径见 `normalize` 与 `permission_intent::perm_status_values`。
+//! 两端口径见 `normalize` 与 `permission_intent::perm_status_values`；`perm` 段的最终显示值
+//! 由本模块的 [`perm_value`] 给出（与 Desktop chip 共用共享层同一函数）。
 
 use super::render::StatusInfo;
 use super::settings::normalize;
@@ -75,6 +76,7 @@ impl LaneApp<'_> {
             // 见 `perm_status_values`，不同时渲染成 `意图→生效`（与 Desktop chip 同口径）。
             permission: perm_effective,
             permission_intent: perm_intent,
+            permission_pending: self.st.permission_pending,
             spinner: spinner::frame_at(self.turn_elapsed()),
             view_offset: self.st.view_offset,
             search_term: self.st.search_term().map(str::to_string),
@@ -90,4 +92,27 @@ impl LaneApp<'_> {
             ),
         }
     }
+}
+
+/// 状态行 `perm` 段显示什么。`None` = 整段不显示。
+///
+/// 与 Desktop `chip_text`（`frontend/src/app/status_permission_chip.rs`）同一口径，
+/// 只去掉本地化标签（TUI 一贯显示线格式）：
+/// - 意图与生效相同 → 单值；
+/// - 不同 → `意图→生效`（服务端允许意图高于生效，两个都要显示，否则用户以为切换没生效）；
+/// - 没有意图 → 生效档；
+/// - 两者都不知道 → 不显示（**不**拿 `permission_level_default` 顶替：那是「没意图时会
+///   落到哪」，不是「此刻是哪」）。
+///
+/// `effective` 该传什么由 [`super::permission_intent::status_values`] 决定 —— 不是所有
+/// `GET /permission` 的读数都能当「此刻生效」；`pending` 由写入路径给（意图已提交、
+/// 尚未确认）。两者与 Desktop chip 共用共享层 `perm_display_with`。
+#[must_use]
+pub(super) fn perm_value(
+    intent: Option<&str>,
+    effective: Option<&str>,
+    pending: bool,
+) -> Option<String> {
+    crabmate_client_api::permission::perm_display_with(true, intent, effective, pending)
+        .map(|d| d.plain())
 }

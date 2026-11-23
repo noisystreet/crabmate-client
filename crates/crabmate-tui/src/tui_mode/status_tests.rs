@@ -25,6 +25,7 @@ fn base_info(api_base: &str) -> StatusInfo {
         context: "—".to_string(),
         permission: None,
         permission_intent: None,
+        permission_pending: false,
     }
 }
 
