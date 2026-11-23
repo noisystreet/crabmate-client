@@ -423,3 +423,42 @@ fn permission_menu_rect_stays_inside_a_short_screen() {
         "右下界：{rect:?} 必须落在 {area:?} 内"
     );
 }
+
+/// `/help` 浮层必须真的落到屏幕上。
+///
+/// 回归要点：`render_help_overlay` 曾被塞进 `detail.is_some()` 分支里，而两个浮层互斥
+/// （打开帮助时 `detail` 必为 `None`）—— 于是 `/help` 打开后屏幕毫无变化、按键却已被
+/// `consume_help_key` 全部吃掉，用户看到的就是「敲 /help 之后整个 TUI 卡死」。
+#[test]
+fn help_overlay_is_painted_when_open() {
+    let mut st = UiState::new();
+    st.set_palette(Palette::default());
+    st.sidebar_visible = false;
+    st.push_line(LineKind::Assistant, "UNIQUE-CHAT-MARKER");
+
+    let closed = render_frame(&mut st, None);
+    assert!(
+        (0..H).all(|y| !row_text(&closed, y).contains("命令 / commands")),
+        "没打开时不该画帮助"
+    );
+
+    st.show_help();
+    let opened = render_frame(&mut st, None);
+    let screen: String = (0..H)
+        .map(|y| row_text(&opened, y))
+        .collect::<Vec<_>>()
+        .join("\n");
+    // 帮助是模态：必须压住对话，否则「打开了」与「没打开」在屏幕上分不开。
+    assert!(
+        !screen.contains("UNIQUE-CHAT-MARKER"),
+        "浮层没盖住正文区：{screen}"
+    );
+    assert!(
+        screen.contains("帮助 · Esc 关闭"),
+        "标题行缺失：/help 打开了却没有画面\n{screen}"
+    );
+    assert!(
+        screen.contains("命令 / commands"),
+        "命令分组缺失：帮助浮层根本没画出来\n{screen}"
+    );
+}

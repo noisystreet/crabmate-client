@@ -617,11 +617,15 @@ pub(super) fn render_body_and_overlays(
         render_approval_overlay(frame, st, body_area);
     } else if st.clarify_open && st.clarify.is_some() {
         super::clarify::render_clarify_overlay(frame, st, body_area);
+    } else if st.help.is_some() {
+        // `/help` 是**并列**分支，不是 `detail` 分支的子句：两个浮层互斥（各自打开时清掉
+        // 对方），写进 `detail` 分支里就只在详情开着时才画 —— 帮助打开时屏幕毫无变化，
+        // 而按键已被 `consume_help_key` 全部吃掉，表现就是「敲 /help 之后整个 TUI 卡死」。
+        super::help::render_help_overlay(frame, st, body_area);
     } else if st.detail.is_some() {
         // 工具详情（`/detail`）：只读浏览，压住 transcript、也让 `/` 菜单让位 ——
         // 浮层开着时按键全归它（见 `consume_detail_key`），菜单画出来也选不动。
         super::detail::render_detail_overlay(frame, st, body_area);
-        super::help::render_help_overlay(frame, st, body_area);
     } else {
         super::slash_menu::render_slash_menu(frame, st, body_area);
     }
