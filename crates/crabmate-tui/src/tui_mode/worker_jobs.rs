@@ -10,6 +10,13 @@
 //! 因此本文件的函数**一律是 `async fn` 且不碰 runtime**：`block_on` 只出现在调用方
 //! `worker::spawn_worker` 那一层。一个 job 内部若被中断，**已发出的**事件保留、
 //! 后面的不再发 —— 与「某一步请求失败」的现状同构，UI 侧本来就要容忍半截结果。
+//!
+//! ## `let _ = tx.send(..)` 的约定
+//!
+//! 本文件（以及 `session_index` / `read_jobs` 等 worker 侧）向事件循环发 `UiEvent` /
+//! `WorkerJob` 一律写 `let _ = tx.send(..)`：`SendError` 只意味着接收端（事件循环）已经结束，
+//! 也就是整个进程正在退出 —— 此时把错误往上传，只会让每个任务的收尾路径多一条没人会读的
+//! 错误分支。需要感知「send 失败」的地方用返回值判定，不写 `let _ =`。
 
 use crabmate_client_api::chat_branch::{BranchFailure, user_ordinal_of_last_turn};
 use crabmate_client_api::chat_export::{ExportFormat, export_messages};

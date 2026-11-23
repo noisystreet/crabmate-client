@@ -6,6 +6,16 @@
 #![allow(clippy::redundant_locals)]
 #![allow(clippy::clone_on_copy)]
 
+// ## `let _ =` 与 web-sys 的约定
+//
+// DOM / storage 写操作（`set_attribute`、`class_list().add_1/remove_1`、`append_child`、
+// `remove_child`、`set_property`、`storage.set_item/remove_item`）在 web-sys 里返回
+// `Result<_, JsValue>`，失败原因只有一种：目标节点 / 键在这期间已不可用。这类调用一律写
+// `let _ =` —— UI 已经不在了，报错既没有接收方也没有恢复动作。
+//
+// 与之相对，**必须感知失败**的调用（HTTP 请求、鉴权、钥匙串 / 密钥持久化）一律传播错误，
+// 那里不允许出现 `let _ =`。
+
 mod a11y;
 mod api;
 mod app;

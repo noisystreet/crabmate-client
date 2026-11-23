@@ -20,7 +20,12 @@ use crate::message_loading::messages_have_loading_tool;
 use crate::storage::StoredMessageState;
 
 fn stream_abort_present(shell: &ComposerStreamShell) -> bool {
-    shell.stream.abort_cell.lock().unwrap().is_some()
+    shell
+        .stream
+        .abort_cell
+        .lock()
+        .expect("流控制 Mutex 未中毒")
+        .is_some()
 }
 
 fn looks_stream_busy(chat: ChatSessionSignals) -> bool {

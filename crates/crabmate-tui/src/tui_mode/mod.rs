@@ -1,4 +1,4 @@
-//! `crabmate-tui tui`：全屏模式（M3–M4）。
+//! `crabmate-tui tui`：全屏模式（M3–M4）；`let _ = tx.send(..)` 的约定见 [`worker_jobs`]。
 //!
 //! 布局（仿 Desktop）：左栏会话 + 主区流式 transcript +
 //! **右栏工作区目录树（宽屏默认显示；Ctrl+W 聚焦右栏浏览）** + 底栏（多行）输入 +

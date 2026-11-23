@@ -837,6 +837,7 @@ async fn maybe_probe(client: &ServeClient, no_probe: bool) -> Result<()> {
 }
 
 fn finish_turn_stdout(outcome: &ChatStreamOutcome) {
+    // 一次性输出：写失败只可能是终端已关闭，报错同样无处可写。
     let _ = writeln!(io::stdout());
     if let Some(cid) = outcome.conversation_id.as_deref() {
         let _ = writeln!(io::stderr(), "conversation_id={cid}");

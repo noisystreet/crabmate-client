@@ -54,6 +54,8 @@ struct ScreenGuard {
 
 impl Drop for ScreenGuard {
     fn drop(&mut self) {
+        // Drop 里不能传播错误：终端可能已关闭，恢复序列失败无人可报，
+        // 且 panic 会掩盖真正的退出原因 —— 故以下写入 / 复位一律忽略错误。
         if self.mouse {
             let _ = execute!(io::stdout(), Print(MOUSE_OFF));
         }

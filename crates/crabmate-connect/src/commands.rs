@@ -118,6 +118,7 @@ fn focus_existing_window(app: &AppHandle, label: &str) {
         // `unminimize` 只有桌面端有（Android 的 WebviewWindow 没有最小化这一说）。
         // 本 crate 没有 `build.rs`，拿不到 tauri 的 `desktop` / `mobile` cfg 别名，
         // 所以这里按 `target_os` 判 —— 与 `connect_home.rs` 同一手法。
+        // 窗口可能已销毁（连接窗关闭的竞态）：唤起/聚焦失败没有补救动作，忽略即可。
         #[cfg(not(any(target_os = "android", target_os = "ios")))]
         let _ = target.unminimize();
         let _ = target.set_focus();

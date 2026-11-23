@@ -13,6 +13,7 @@ pub fn open_browser(url: &str) -> io::Result<()> {
         .spawn()?;
     // Reap without blocking the HTTP loop (`xdg-open` may wait until the browser exits).
     thread::spawn(move || {
+        // 一次性子进程：wait 失败不影响已完成的打开动作。
         let _ = child.wait();
     });
     Ok(())

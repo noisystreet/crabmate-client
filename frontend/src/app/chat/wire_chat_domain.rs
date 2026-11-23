@@ -95,7 +95,7 @@ pub(crate) fn wire_chat_domain_effects(
         args.domain.chat,
         stream_shell.stream.turn_lifecycle,
         stream_shell.stream.stream_abort_epoch,
-        std::sync::Arc::new(move || abort_cell.lock().unwrap().is_some()),
+        std::sync::Arc::new(move || abort_cell.lock().expect("流控制 Mutex 未中毒").is_some()),
     );
     wire_chat_domain_auxiliary_sequence(&args);
 

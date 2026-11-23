@@ -167,6 +167,7 @@ impl StreamCancel {
     /// 请求取消当前回合；第 2 次调用 = 强退。
     pub fn cancel(&self) {
         let n = *self.tx.borrow();
+        // watch 通道无接收者 = 事件循环已退出，此时取消请求已无意义。
         let _ = self.tx.send(n.saturating_add(1));
     }
 

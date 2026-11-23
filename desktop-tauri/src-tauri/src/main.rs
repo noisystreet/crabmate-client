@@ -1,5 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+// 原生对话框等一次性 channel 的 `let _ = tx.send(..)`：接收端若已放弃等待
+// （用户取消 / 窗口关闭），`send` 必然失败且没有恢复手段，忽略是预期行为。
+
 mod desktop_connections;
 mod desktop_ctl;
 mod desktop_lifecycle;
