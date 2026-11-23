@@ -17,6 +17,8 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Changed
 
+- **`/help` is a scrollable overlay now; its command table is shared with the desktop help.**
+
 - **The workspace shows its branch and an uncommitted-changes badge.**
 
 - **"Connect" adds a lane in this window; the rail lists lanes, `Alt+←/→` switches.**

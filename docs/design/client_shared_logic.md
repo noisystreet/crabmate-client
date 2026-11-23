@@ -603,3 +603,27 @@ pub fn tool_display_line(input: &ToolDisplayInput<'_>) -> Option<String>;
 `detach_final_answer_row_in_messages` 也按序归档。该约定是本仓保证的（`detach` 在 `sync` 之前），
 但 Server 侧文档尚未写明「同一 `tool_call` 的终答行在持久化投影里不再重写」是否成立——
 若 Server 未来要回填/重放终答行，需先与本约定对齐。
+
+## 12. `/help` 共享条目表（`help`）
+
+`crates/crabmate-client-api/src/help.rs` 给三端 `/help` 的**命令集 + usage 签名 + 一句话摘要**。
+落点选择的理由：`/help` 杂乱的根源不是排版，而是两份文案各自生长 —— Desktop 在
+`i18n/chat_column.rs` 有 18 条一行摘要（补全菜单的描述），TUI 另写了三十条 200~600 字符的长句
+（一条塞十几个子命令）。加一个命令要改两处，漏一处就是「能敲但 help 不写」（`/version` 曾如此）。
+
+共享什么、不共享什么：
+
+| 内容 | 归属 |
+|---|---|
+| 命令集（`Head`）、usage 签名、显示顺序 | `help::ENTRIES` + `entries(Surface)`，按 `slash_caps` 过滤 |
+| 摘要文本 | 共享层给中文；Desktop 用既有 i18n 覆盖同 `head`，缺翻译回落中文 |
+| 键位 | 各端自有（TUI 在 `hotkey_docs`；Web 键位不同） |
+| 端独占命令 | 各端补（TUI 的 `/lane` 子命令细节；Web 的 `/api-base` / `/api-key` / `/clear`） |
+| 区域操作 | TUI 是键盘导航，Web 是鼠标，没有共同形态 |
+
+反漂移：`every_supported_head_is_documented_per_surface` 把「某端 supported 但 help 没条目」
+变成测试红；两端各自的覆盖用例（TUI `help_lists_every_tui_head`、Web
+`help_text_lists_every_intercepted_head`）继续钉本端拦截集。
+
+呈现差异（有意）：TUI 是**可滚动浮层**（与 `/detail` 同一套手感：Esc 关、↑↓/PgUp/PgDn 滚，
+不再往 transcript 灌三十行）；Web 仍是消息气泡里的多行文本 —— 它有滚动容器托底。
