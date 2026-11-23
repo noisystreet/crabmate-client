@@ -24,9 +24,6 @@ use super::state::UiState;
 /// 左列宽度：最长 usage 是 `/copy [assistant|user|path|code]`（32 列）。
 pub(super) const USAGE_COL: usize = 34;
 
-/// 键位分组的小标题前缀（`hotkey_docs` 的分组名接在后面）。
-const KEY_GROUP_PREFIX: &str = "";
-
 /// 判定散在别的模块、没有热键条目的键（快捷键分组之外的那些）。
 const MISC_KEYS_LINE: &str =
     "其它键：Ctrl+G 折叠导航 · PgUp/PgDn 翻页 · Ctrl+End 回底部 · 回合中 Enter 排队发送";
@@ -56,8 +53,11 @@ const AREA_LINES: &[(&str, &str)] = &[
     ),
 ];
 
-/// 浮层的非正文行数：上下边框 + 标题 / 页脚提示。
-const OVERLAY_CHROME_ROWS: u16 = 4;
+/// 浮层的非正文行数：**只有上下边框** —— 标题画在边框上、没有独立页脚行。
+///
+/// 算多了会让 `take(view)` 多取几行、被 `Paragraph` 按 inner 高度裁掉，表现为
+/// 「滚到最底也看不到最后两行」。
+const OVERLAY_CHROME_ROWS: u16 = 2;
 
 /// `/help` 浮层的滚动状态（`total` 在打开时算一次，按键时不必重建整张表）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -68,7 +68,7 @@ pub struct HelpOverlay {
 
 /// 帮助正文的一行。
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum HelpRow {
+pub(super) enum HelpRow {
     /// 分组标题（渲染成 accent 色）。
     Group(&'static str),
     /// 左列 + 右列（命令 / 摘要、区域 / 按键、键组 / 键位）。
@@ -86,7 +86,7 @@ pub(super) fn help_view_rows(screen_h: u16) -> usize {
 ///
 /// 每次打开重建（约 35 行、无 IO）。`Simple` 是刻意的：帮助是**静态表**，不值得为它缓存。
 #[must_use]
-pub fn help_rows() -> Vec<HelpRow> {
+pub(super) fn help_rows() -> Vec<HelpRow> {
     let mut rows = Vec::new();
     rows.push(HelpRow::Group("命令 / commands"));
     for e in api_help::entries(Surface::Tui) {
@@ -98,7 +98,7 @@ pub fn help_rows() -> Vec<HelpRow> {
     rows.push(HelpRow::Group("快捷键 / keys"));
     for group in HotkeyGroup::ALL {
         rows.push(HelpRow::Pair {
-            left: format!("{KEY_GROUP_PREFIX}{}", group.label()),
+            left: group.label().to_string(),
             right: hotkeys::group_line(group).to_string(),
         });
     }
@@ -189,8 +189,13 @@ impl<'a> LaneApp<'a> {
             self.st.help = None;
             return true;
         }
-        // 可见行数与渲染共用 `help_view_rows`：各算一遍就会出现「滚不到底 / 滚过头」。
-        let view = help_view_rows(self.last_size.1);
+        // 几何取自**渲染层回写的正文矩形**（与 `detail_view_bounds` 同口径）：浮层画在
+        // 正文区里，用整屏高度会让 `max_scroll` 偏大 —— 滚到底时尾部内容还在屏外。
+        let area = self.st.body_area.unwrap_or_else(|| {
+            let (w, h) = self.last_size;
+            Rect::new(0, 0, w, h.saturating_sub(6))
+        });
+        let view = help_view_rows(area.height);
         let Some(overlay) = self.st.help.as_mut() else {
             return true;
         };
@@ -239,6 +244,51 @@ mod tests {
                 "/help 命令清单漏了 {needle}"
             );
         }
+    }
+
+    /// 可见行数必须**等于内框高度**，且滚到底要能看见最后一行。
+    ///
+    /// 回归要点：`OVERLAY_CHROME_ROWS` 曾按「边框 + 标题 + 页脚」算成 4，实际只有上下边框
+    /// 占行（标题画在边框上），于是 `take(view)` 多取两行被 `Paragraph` 裁掉 —— 表现为
+    /// 「滚到最底也看不到最后两行」。
+    #[test]
+    fn scrolling_to_the_end_reveals_the_last_row() {
+        let rows = help_rows();
+        for screen_h in [8u16, 24, 40] {
+            let view = super::help_view_rows(screen_h);
+            // 内框 = 地区高 - 上下边框（与渲染侧的 `block.inner` 同口径）。
+            let inner = usize::from(screen_h.saturating_sub(2)).max(1);
+            assert_eq!(
+                view, inner,
+                "可见行数必须等于内框高度（screen_h={screen_h}）"
+            );
+            let max = rows.len().saturating_sub(view);
+            let shown: Vec<_> = rows.iter().skip(max).take(view).collect();
+            assert_eq!(
+                shown.last().copied(),
+                rows.last(),
+                "滚到底必须能看见最后一行（screen_h={screen_h}）"
+            );
+        }
+    }
+
+    /// `/help` 不再往 transcript 写行（旧行为是灌三十条，把上下文顶走且不可回看）。
+    #[test]
+    fn opening_help_does_not_touch_the_transcript() {
+        use std::sync::mpsc;
+
+        use crate::tui_mode::test_support::{test_app, test_client, test_prefs};
+
+        let client = test_client();
+        let mut prefs = test_prefs();
+        let (ui_tx, ui_rx) = mpsc::channel();
+        let (job_tx, _job_rx) = mpsc::channel();
+        let mut app = test_app(&client, &mut prefs, ui_rx, ui_tx, job_tx);
+
+        let before = app.st.lines.len();
+        app.st.show_help();
+        assert!(app.st.help.is_some(), "浮层要打开");
+        assert_eq!(app.st.lines.len(), before, "/help 不该再往 transcript 写行");
     }
 
     /// 左列宽度要容得下最长的那条 usage / 区域名，否则右列被顶歪 —— 对齐一失效就退回「文字墙」。

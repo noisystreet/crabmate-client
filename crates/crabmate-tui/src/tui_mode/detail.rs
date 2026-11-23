@@ -238,6 +238,8 @@ impl UiState {
         let Some((&line, _)) = self.tool_details.iter().rev().nth(n - 1) else {
             return;
         };
+        // 与 `/help` 互斥（那边打开时也清 detail）：两个都占主区，叠着画会互相盖住。
+        self.help = None;
         self.detail = Some(DetailOverlay { line, scroll: 0 });
         // 搜索锚点让位：浮层开着时 ↑↓ 是滚动，画面不该还被 `/find` 钉在命中行上。
         self.search_cursor = None;
