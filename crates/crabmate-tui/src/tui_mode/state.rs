@@ -498,16 +498,15 @@ pub struct UiState {
     /// 工具行行号 → 输出全文（`/detail`，issue #428 第 3 条）。
     ///
     /// 键是**行号**而不是 `tool_call_id`：结果到达时 `tool_pending` 正好持有那一行的行号，
-    /// 而「行号跟着前插一起平移」已经有现成的一处（`state_history::prepend_replayed`）。
-    /// 按 id 存就得在 `LogLine` 上挂 id，那是每一行都要改的结构体变动。
-    ///
-    /// `BTreeMap` 而不是 `HashMap`：`/detail` 的「从底部数第 n 条」与总量淘汰都要按行号
-    /// 顺序取，有序表省掉每次先排序。
+    /// 且「行号跟着前插平移」已有现成一处（`state_history::prepend_replayed`）。`BTreeMap`
+    /// 而不是 `HashMap`：从底部数第 n 条与总量淘汰都要按行号顺序取。
     pub(super) tool_details: BTreeMap<usize, ToolDetail>,
     /// `tool_details` 当前占用的字符数（与被截断的那个量同口径：**字符**，不是字节）。
     pub(super) detail_chars: usize,
     /// `/detail` 浮层（`Some` 时占住主区，按键只认滚动与关闭）。
     pub detail: Option<DetailOverlay>,
+    /// `/help` 浮层（同上；与 `/detail` 互斥，打开时清掉对方）。
+    pub help: Option<crate::tui_mode::help::HelpOverlay>,
     /// 全局 thinking 展开开关（默认折叠）。
     thinking_visible: bool,
     /// 搜索词（/find；lowercase，trim）。

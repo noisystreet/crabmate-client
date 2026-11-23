@@ -122,7 +122,7 @@ impl LaneApp<'_> {
     /// 自己的模块里（问卷在本文件，详情在 `detail`）。问卷优先：它是等着作答的表单，
     /// 而详情只是只读浏览。
     pub(super) fn consume_modal_key(&mut self, key: &KeyEvent) -> bool {
-        self.consume_clarify_key(key) || self.consume_detail_key(key)
+        self.consume_clarify_key(key) || self.consume_help_key(key) || self.consume_detail_key(key)
     }
 
     /// 浮层按键。返回 `true` = 已消费（否则交回常规分发）。
