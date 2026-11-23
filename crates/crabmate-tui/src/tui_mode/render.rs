@@ -621,6 +621,7 @@ pub(super) fn render_body_and_overlays(
         // 工具详情（`/detail`）：只读浏览，压住 transcript、也让 `/` 菜单让位 ——
         // 浮层开着时按键全归它（见 `consume_detail_key`），菜单画出来也选不动。
         super::detail::render_detail_overlay(frame, st, body_area);
+        super::help::render_help_overlay(frame, st, body_area);
     } else {
         super::slash_menu::render_slash_menu(frame, st, body_area);
     }
