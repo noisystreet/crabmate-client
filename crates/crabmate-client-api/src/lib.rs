@@ -20,6 +20,7 @@ pub mod conversation_state;
 pub mod ctl;
 pub mod handoff;
 pub mod health;
+pub mod help;
 pub mod lane_attach;
 pub mod lane_phase;
 pub mod lane_row;
