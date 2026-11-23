@@ -78,20 +78,18 @@ test("已有消息的会话里发送新消息会滚到底", async ({ page }) => 
     ].join(""),
   );
 
-  // 先滚到顶：用 scrollTop===0 判定，而不是「不在底部」——
-  // 后者在内容不足以滚动时会与 atBottom 的「就在底部」互为矛盾。
-  await page.evaluate((sel) => {
-    (document.querySelector(sel) as HTMLElement | null)?.scrollTo(0, 0);
-  }, SCROLLER);
-  await expect
-    .poll(() =>
-      page.evaluate(
-        (sel) =>
-          (document.querySelector(sel) as HTMLElement | null)?.scrollTop ?? -1,
-        SCROLLER,
-      ),
-    )
-    .toBe(0);
+  // 先滚离底部。**必须用真实滚轮**：产品刻意不用「scrollTop 下降」判上滑
+  // （见 `scroll_shell::on_messages_stick_scroll_event` 的注释 —— DOM 重写会误关跟底），
+  // 解除贴底只有「向上滚轮」与「指针拖离」两条路。所以程序化 `scrollTo(0, 0)` 并不解除
+  // 贴底：水合稍慢时下一次 rAF 就把视图 snap 回底部，断言 `scrollTop === 0` 会一直读到底部
+  // 位置（CI 曾因此偶发红，15s 轮询恒为非零）。
+  const box = await page.locator(SCROLLER).boundingBox();
+  expect(box).not.toBeNull();
+  await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+  await page.mouse.wheel(0, -600);
+  // 断言「已脱离底部」而不是「滚到顶」：滚轮的滚动量取决于内容高度，钉死 scrollTop
+  // 等于把视口高度也钉死，换个字体/行高就假红。语义要的正是「离底超过阈值」。
+  await expect.poll(() => scrollGap(page)).toBeGreaterThan(FOLLOW_GAP_MAX_PX);
 
   await sendMessage(page, "e2e scroll send test");
 
