@@ -35,7 +35,7 @@ pub fn split_user_file_ref_segs(raw: &str) -> Vec<UserTextSeg> {
         }
     };
     while i < raw.len() {
-        let ch = raw[i..].chars().next().unwrap();
+        let ch = raw[i..].chars().next().expect("i 在 char 边界且未越界");
         let clen = ch.len_utf8();
         // `file://./` 须先于 `file:///`，否则会被后者吞掉。
         if raw[i..].starts_with("file://./") {

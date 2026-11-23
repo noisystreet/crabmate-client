@@ -37,7 +37,7 @@ pub fn composer_workspace_at_refs_html(raw: &str) -> String {
     let mut out = String::with_capacity(raw.len().saturating_mul(2));
     let mut i = 0usize;
     while i < raw.len() {
-        let ch = raw[i..].chars().next().unwrap();
+        let ch = raw[i..].chars().next().expect("i 在 char 边界且未越界");
         let clen = ch.len_utf8();
         if raw[i..].starts_with("file://./") {
             let prefix_len = "file://./".len();

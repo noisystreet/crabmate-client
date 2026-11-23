@@ -94,6 +94,7 @@ pub(crate) fn show_and_focus<R: Runtime>(window: &tauri::WebviewWindow<R>) {
         eprintln!("[crabmate-desktop] failed to show window: {error}");
         return;
     }
+    // 窗口可能已销毁：唤起失败无补救动作。
     let _ = window.unminimize();
     if let Err(error) = window.set_focus() {
         eprintln!("[crabmate-desktop] failed to focus window: {error}");

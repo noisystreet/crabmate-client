@@ -129,6 +129,7 @@ fn launch(tool: &str, url: &str) -> Result<(), String> {
         .map_err(|e| format!("拉起 {tool} 失败：{e}"))?;
     std::thread::spawn(move || {
         let mut child = child;
+        // 子进程回收：wait 失败（已被回收）不影响本轮结果。
         let _ = child.wait();
     });
     Ok(())

@@ -428,6 +428,7 @@ async fn list_web_sessions(client: &ServeClient, conversation_id: &Option<String
     } else {
         println!("hint: /conv use <resume_id>   (> current repl, * web active)");
     }
+    // 收尾刷新：stdout 可能已关闭（管道断开），此时报错也没有接收方。
     let _ = io::stdout().flush();
     Ok(())
 }

@@ -115,6 +115,7 @@ fn dump_frame(line: &str) {
     );
     append_diag("frame", Value::Object(fields));
     if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(path) {
+        // 诊断 dump（CM_TUI_SSE_DUMP）：写盘失败不得中断正在跑的流。
         let _ = writeln!(f, "{line}");
     }
 }
@@ -145,6 +146,7 @@ pub(crate) fn append_diag(kind: &str, fields: Value) {
     };
     map.insert("kind".to_string(), Value::String(kind.to_string()));
     if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(path) {
+        // 同上：诊断写入失败不影响主流程。
         let _ = writeln!(f, "{}", Value::Object(map));
     }
 }

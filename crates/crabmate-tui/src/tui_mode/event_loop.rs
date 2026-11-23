@@ -373,6 +373,7 @@ impl LaneApp<'_> {
         // 背景要在 draw 之后重放：kitty 让图像跟着文本一起滚动（规范明确），
         // 而 ratatui 的差分绘制只认字符网格，不会替我们维持图像层。
         self.paint_background(screen);
+        // 重绘前的 flush：失败只可能是终端已关闭，下一帧会再刷一次。
         let _ = io::stdout().flush();
         Ok(())
     }

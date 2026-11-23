@@ -190,12 +190,14 @@ fn child_stdout_timeout(mut child: std::process::Child, limit: Duration) -> Opti
     let (tx, rx) = std::sync::mpsc::channel();
     thread::spawn(move || {
         let mut buf = String::new();
+        // 子进程输出：读失败时 buf 为空，按「探测不到」处理；send 失败说明主线程已放弃等待。
         let _ = stdout.read_to_string(&mut buf);
         let _ = tx.send(buf);
     });
     match rx.recv_timeout(limit) {
         Ok(buf) => finish_child_ok(&mut child, buf),
         Err(_) => {
+            // 超时收尾：进程可能已自行退出，kill/wait 失败无需上报。
             let _ = child.kill();
             let _ = child.wait();
             None
@@ -303,6 +305,7 @@ fn apply_detected_theme(app: &AppHandle) {
     // 主窗可能已关；忽略回调失败。
     let _ = app.run_on_main_thread(move || {
         if let Some(win) = handle.get_webview_window(MAIN_WINDOW_LABEL) {
+            // 主窗可能已关：设置主题失败不影响其余 UI。
             let _ = win.set_theme(Some(theme));
         }
     });

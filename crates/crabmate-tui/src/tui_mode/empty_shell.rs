@@ -370,6 +370,7 @@ impl TuiApp<'_> {
                 f.set_cursor_position((x, chunks[1].y));
             })
             .context("empty draw failed")?;
+        // 同 event_loop：终端已关闭时 flush 失败无需上抛。
         let _ = io::stdout().flush();
         Ok(())
     }

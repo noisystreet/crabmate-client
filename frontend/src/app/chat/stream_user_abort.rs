@@ -70,7 +70,12 @@ pub(crate) fn stream_ui_inflight_untracked(
     let _ = chat;
     turn_lifecycle_stream_turn_busy(
         shell.stream.turn_lifecycle.get_untracked(),
-        shell.stream.abort_cell.lock().unwrap().is_some(),
+        shell
+            .stream
+            .abort_cell
+            .lock()
+            .expect("流控制 Mutex 未中毒")
+            .is_some(),
     )
 }
 
