@@ -85,13 +85,60 @@ fn slash_head(trimmed: &str) -> Option<String> {
 
 /// `/help` 的正文。列全本端拦截集，否则「敲了有用但 help 没写」与「help 写了却没用」
 /// 一样难查（`/version` 曾漏在这里）。
-const HELP_TEXT: &str = "常用控制命令（不经模型）：\n\
-/help · /version · /workspace · /agent · /model\n\
-/api-base · /export · /config · /context\n\
-/skills · /clear · /api-key（密钥不进对话）\n\
-/model set <id> 存本机（TUI 的 /model 只在那个进程有效）；/clear 只清本屏，服务端历史还在\n\
-/mode ask|plan|act · /role <id> · /perm <level> · /status（与底栏同一组开关）\n\
-/settings [<section>] 打开设置页（llm / mcp / tools …，与顶栏按钮同一个路由）";
+/// `/help` 正文：**命令集与 usage 来自共享条目表**（`crabmate_client_api::help`，按
+/// `Surface::Desktop` 过滤），摘要走本端 i18n（缺翻译时回落共享表里的中文）。
+///
+/// 为什么不再手写：旧版是一串按主题拼的长行，和 TUI 那份各自生长 —— 加一个命令要改两处，
+/// 漏了一处就变成「能敲但 help 不写」（`/version` 曾如此）。现在两端只共用一份命令集。
+fn help_text(loc: Locale) -> String {
+    /// 左列宽度（与 TUI 同一套对齐口径）。
+    const HELP_COL: usize = 34;
+    let mut out = String::from("常用控制命令（不经模型）：");
+    for e in crabmate_client_api::help::entries(crabmate_client_api::slash_caps::Surface::Desktop) {
+        out.push_str(&format!(
+            "\n{:<HELP_COL$}{}",
+            e.usage,
+            desktop_summary(e.head, loc)
+        ));
+    }
+    // Web 独占命令：菜单与这里都从 `WebOnly::ALL` 派生，不再手抄第四遍。
+    for w in WebOnly::ALL {
+        let summary = match w {
+            WebOnly::ApiBase => i18n::composer_slash_builtin_api_base(loc),
+            WebOnly::Clear => i18n::composer_slash_builtin_clear(loc),
+            WebOnly::ApiKey => i18n::composer_slash_builtin_api_key(loc),
+        };
+        out.push_str(&format!(
+            "\n{:<HELP_COL$}{summary}",
+            format!("/{}", w.as_str())
+        ));
+    }
+    out.push_str("\n\n/model set <id> 存本机；/clear 只清本屏，服务端历史仍在");
+    out
+}
+
+/// 共享 head 的摘要：优先本端 i18n，缺翻译回落共享表的中文（不是空白）。
+fn desktop_summary(head: Head, loc: Locale) -> &'static str {
+    use Head as H;
+    match head {
+        H::Help => i18n::composer_slash_builtin_help(loc),
+        H::Status => i18n::composer_slash_builtin_status(loc),
+        H::Settings => i18n::composer_slash_builtin_settings(loc),
+        H::Model => i18n::composer_slash_builtin_model(loc),
+        H::Mode => i18n::composer_slash_builtin_mode(loc),
+        H::Role => i18n::composer_slash_builtin_role(loc),
+        H::Perm => i18n::composer_slash_builtin_perm(loc),
+        H::Workspace => i18n::composer_slash_builtin_workspace(loc),
+        H::Version => i18n::composer_slash_builtin_version(loc),
+        H::Skills => i18n::composer_slash_builtin_skills(loc),
+        H::Context => i18n::composer_slash_builtin_context(loc),
+        H::Config => i18n::composer_slash_builtin_config(loc),
+        H::Agent => i18n::composer_slash_builtin_agent(loc),
+        H::Export => i18n::composer_slash_builtin_export(loc),
+        // 端独占 head（Desktop 不该走到）或将来新增而暂无翻译：回落共享中文。
+        _ => crabmate_client_api::help::entry(head).map_or("", |e| e.summary),
+    }
+}
 
 /// 是否为 Web 控制斜杠（应拦截，不发送给模型）。`/<skill-id>` 除外。
 ///
@@ -166,7 +213,7 @@ fn dispatch_shared(
     loc: Locale,
 ) -> bool {
     match head {
-        Head::Help => set_ok(ctx.chat, shell, HELP_TEXT),
+        Head::Help => set_ok(ctx.chat, shell, help_text(loc)),
         Head::Workspace => handle_workspace(args, shell, ctx.chat, loc),
         Head::Model => handle_model(args, shell, ctx.chat, loc),
         // issue #444 PR-A：这四条一直有 UI 入口，命令形式只是第二个入口 ——
@@ -846,7 +893,10 @@ mod tests {
     fn help_text_lists_every_intercepted_head() {
         for head in supported(Surface::Desktop) {
             let needle = format!("/{}", head.as_str());
-            assert!(HELP_TEXT.contains(&needle), "help 漏了 {needle}");
+            assert!(
+                help_text(Locale::ZhHans).contains(&needle),
+                "help 漏了 {needle}"
+            );
         }
         for name in [
             "/agent",
@@ -863,7 +913,7 @@ mod tests {
             "/perm",
             "/status",
         ] {
-            assert!(HELP_TEXT.contains(name), "help 漏了 {name}");
+            assert!(help_text(Locale::ZhHans).contains(name), "help 漏了 {name}");
         }
     }
 }
