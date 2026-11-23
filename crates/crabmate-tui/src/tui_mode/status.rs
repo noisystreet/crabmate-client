@@ -299,11 +299,12 @@ pub(super) fn environment_segments(info: &StatusInfo, budget: usize) -> Vec<Segm
     });
     // 第 2 段是 `perm`，但**它不是恒在的**：`None` = 意图与实测都拿不到（老 serve / 未拉到
     // user-data）→ 整段不 push，第二行让给 `serve`。画成某个具体档位等于把「不知道」说成
-    // 「没权限」。显示口径（意图优先、两者不同则并列）在 `permission_intent::perm_value`，
+    // 「没权限」。显示口径（含「写未确认时不并列」）在 `status_info::perm_value`，
     // 与 Desktop 底栏 chip 共用同一套判定。
-    if let Some(value) = super::permission_intent::perm_value(
+    if let Some(value) = super::status_info::perm_value(
         info.permission_intent.as_deref(),
         info.permission.as_deref(),
+        info.permission_pending,
     ) {
         out.push(Segment {
             label: PERM_LABEL,

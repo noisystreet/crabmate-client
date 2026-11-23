@@ -544,6 +544,7 @@ fn handle_perm(args: &[&str], shell: &ComposerStreamShell, ctx: WebSlashControlC
             turn_in_flight: Some(shell_ctx.perm_turn_in_flight),
             // 命令层不维护 chip 那份「丢弃过期响应」的代次：连打两次时后一次本来就该赢。
             generation: None,
+            pending: None,
         },
         loc,
         move |outcome| push_control_slash_notice(chat, perm_outcome_text(outcome, loc)),

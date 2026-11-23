@@ -79,6 +79,12 @@ pub enum PermDisplay {
     IntentThenEffective { intent: String, effective: String },
     /// 估算：没有已持久化会话，这个值是「没意图时会落到哪」。渲染时加 `~` 前缀。
     Estimated(String),
+    /// 意图已提交、服务端尚未确认生效（写请求在途，或已写失败）。
+    ///
+    /// 与 [`Self::Estimated`] 渲染成同一个 `~` 记号（「不是此刻生效」），成因却不同：这里是
+    /// 「意图记下了、还没被确认」，那里是「没有会话、那只是配置默认档」。分开建模是为了让
+    /// 调用端能区分两者（将来要加 tooltip / 文案时不必再拆枚举）。
+    Pending(String),
 }
 
 impl PermDisplay {
@@ -89,14 +95,41 @@ impl PermDisplay {
             Self::Single(v) => v.clone(),
             Self::IntentThenEffective { intent, effective } => format!("{intent}→{effective}"),
             Self::Estimated(v) => format!("~{v}"),
+            Self::Pending(v) => format!("~{v}"),
         }
     }
 }
 
 /// 见 [`PermDisplay`] 的文档：`bound` = 有没有已持久化的 `conversation_id`。
+///
+/// 便捷入口：等价于 `pending = false` 的 [`perm_display_with`]。
 #[must_use]
 pub fn perm_display(bound: bool, intent: Option<&str>, level: Option<&str>) -> Option<PermDisplay> {
+    perm_display_with(bound, intent, level, false)
+}
+
+/// [`perm_display`] 的完整口径：多一个 `pending` 维度。
+///
+/// `pending` = 意图已经交给服务端、但**还没收到成功回包**（在途，或已写失败）。
+///
+/// 为什么它必须参与判定：意图侧（本地 override / 选择信号）是**立刻**变的，而生效侧来自
+/// `/permission`（或写后回包）那份投影，只在成功时才刷新。pending 期间两者不同步，并列成
+/// `意图 → 生效` 就会被读成「服务端把我钳制到了那一档」—— 实际只是请求还没落地，或者
+/// 已经失败，右侧那个值是**上一次**的读数。写失败时若不处理，箭头会一直挂着不散。
+///
+/// 所以 pending 且有意图时只给意图，并标成 [`PermDisplay::Pending`]（渲染 `~x`）：与
+/// 「没有会话 + 有意图」同一个含义 —— 这条意图随下一次提交生效，此刻尚未确认。
+#[must_use]
+pub fn perm_display_with(
+    bound: bool,
+    intent: Option<&str>,
+    level: Option<&str>,
+    pending: bool,
+) -> Option<PermDisplay> {
     let intent = intent.map(str::trim).filter(|s| !s.is_empty());
+    if pending && let Some(i) = intent {
+        return Some(PermDisplay::Pending(i.to_string()));
+    }
     let level = level.map(str::trim).filter(|s| !s.is_empty());
     if !bound {
         return match intent {
@@ -120,7 +153,7 @@ pub fn perm_display(bound: bool, intent: Option<&str>, level: Option<&str>) -> O
 mod tests {
     use super::{
         CLAMP_ORDER, DEFAULT_LEVEL, LEVELS, PermDisplay, is_known_level, normalize_level,
-        ordered_clamped_axes, perm_display,
+        ordered_clamped_axes, perm_display, perm_display_with,
     };
 
     #[test]
@@ -210,5 +243,39 @@ mod tests {
             Some("~approved".to_string())
         );
         assert_eq!(perm_display(false, None, None), None);
+    }
+
+    /// `pending`（意图已提交、尚未获确认）：**不并列**，标成 `~`。
+    ///
+    /// 回归要点：写请求在途或已失败时，右侧那次读数已不代表「此刻生效」，并列成
+    /// `意图→生效` 会被读成「服务端把我钳制了」，且失败后箭头会一直挂着不散。
+    #[test]
+    fn pending_intent_is_shown_alone_and_marked_unconfirmed() {
+        assert_eq!(
+            perm_display_with(true, Some("unrestricted"), Some("approved"), true)
+                .map(|d| d.plain()),
+            Some("~unrestricted".to_string())
+        );
+        // 未绑定会话时也是「尚未确认」：两种 bound 下输出同形，免得箭头随 bound 忽隐忽现。
+        assert_eq!(
+            perm_display_with(false, Some("unrestricted"), Some("approved"), true)
+                .map(|d| d.plain()),
+            Some("~unrestricted".to_string())
+        );
+        // 没有意图时 pending 无从表达（pending 描述的是「这条意图待确认」）：退回正常口径。
+        assert_eq!(
+            perm_display_with(true, None, Some("approved"), true).map(|d| d.plain()),
+            Some("approved".to_string())
+        );
+        // `pending = false` 与旧入口逐值等价。
+        assert_eq!(
+            perm_display_with(true, Some("unrestricted"), Some("approved"), false),
+            perm_display(true, Some("unrestricted"), Some("approved"))
+        );
+        // 变体可区分：与 `Estimated`（无会话的估算）渲染相同但成因不同，将来可分别做文案。
+        assert!(matches!(
+            perm_display_with(true, Some("read"), Some("approved"), true),
+            Some(PermDisplay::Pending(_))
+        ));
     }
 }

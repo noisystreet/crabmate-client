@@ -49,15 +49,24 @@ struct LevelSelect {
     turn_in_flight: Option<Memo<bool>>,
     /// 生效投影（本 chip 自己的缓存，成功写入后用响应刷新）。
     view: RwSignal<Option<PermissionView>>,
-    /// 丢弃过期响应（连点两档时只有最后一次落地）。
+    /// **写**代数：丢弃过期写回包（连点两档时只有最后一次落地）。
+    ///
+    /// 与 [`Self::read_generation`] 分开：写请求与「读当前生效档」是两件事，共用一个代数时
+    /// 先发的写回包会被后发的读请求推开一代、判成 stale 丢弃 —— 那样 `done()` 不执行、
+    /// `pending` 也清不掉，只能靠读请求兜底纠正。
     generation: RwSignal<u32>,
+    /// **读**代数：丢弃过期读回包（慢读不能覆盖新读）。见 [`Self::generation`]。
+    read_generation: RwSignal<u32>,
     /// 就地错误提示（一行，显示在 chip 的 `title` 上，不占底栏宽度）。
     note: RwSignal<Option<String>>,
+    /// 意图已提交、尚未确认生效（写请求在途，或写失败）：据此不并列（共享层口径）。
+    /// 成功写回才清；失败保持 —— 那时意图确实还没被服务端确认。
+    pending: RwSignal<bool>,
 }
 
 /// chip 上显示什么。`None` = 整段不渲染。
 ///
-/// 判定与**显示词**都来自 `crabmate_client_api::permission`：`perm_display` 决定显示哪几个值，
+/// 判定与**显示词**都来自 `crabmate_client_api::permission`：`perm_display_with` 决定显示哪几个值，
 /// `PermDisplay::plain` 决定线格式（`workspace` / `unrestricted→read` / `~approved`）—— 正是
 /// TUI 状态行 `perm:…` 段的同一份输出，两端不会出现「TUI 显示并列、Web 只显示一个」。
 ///
@@ -68,8 +77,14 @@ struct LevelSelect {
 /// `bound` = 有没有已持久化会话 —— 没有会话时**不能**把生效侧摆到箭头右边，否则会把
 /// 「意图随下一条消息生效」读成「服务端把我钳制到了某档」（见共享层文档）。
 #[must_use]
-fn chip_text(bound: bool, intent: Option<&str>, effective: Option<&str>) -> Option<String> {
-    crabmate_client_api::permission::perm_display(bound, intent, effective).map(|d| d.plain())
+fn chip_text(
+    bound: bool,
+    intent: Option<&str>,
+    effective: Option<&str>,
+    pending: bool,
+) -> Option<String> {
+    crabmate_client_api::permission::perm_display_with(bound, intent, effective, pending)
+        .map(|d| d.plain())
 }
 
 fn menu_fixed_style_for_trigger(trigger: &web_sys::HtmlElement) -> String {
@@ -128,15 +143,20 @@ fn spawn_effective_refresh(sel: LevelSelect, loc: Locale) {
     let cid = sel
         .chat
         .and_then(|c| c.session_sync.with(|s| s.stream_conversation_id()));
-    let mine = sel.generation.get_untracked().wrapping_add(1);
-    sel.generation.set(mine);
+    // 用**读**代数：推进它不该让在途的写回包变成 stale。
+    let mine = sel.read_generation.get_untracked().wrapping_add(1);
+    sel.read_generation.set(mine);
     spawn_local(async move {
         let result = fetch_permission(None, cid.as_deref(), loc).await;
-        if sel.generation.get_untracked() != mine {
+        if sel.read_generation.get_untracked() != mine {
             return;
         }
         match result {
-            PermissionFetch::Ok(v) => sel.view.set(Some(v)),
+            PermissionFetch::Ok(v) => {
+                sel.view.set(Some(v));
+                // 权威读数到手 = 意图已被确认（TUI `on_serve_status` 同一条规则）。
+                sel.pending.set(false);
+            }
             PermissionFetch::Unsupported | PermissionFetch::Err(_) => sel.view.set(None),
         }
     });
@@ -193,6 +213,8 @@ pub(crate) struct PermTarget {
     pub turn_in_flight: Option<Memo<bool>>,
     /// 丢弃过期响应；`None` = 调用方不关心（斜杠命令）。
     pub generation: Option<RwSignal<u32>>,
+    /// 在途 / 未确认标记；`None` = 调用方不显示 chip（斜杠命令），无需维护。
+    pub pending: Option<RwSignal<bool>>,
 }
 
 /// 点一个档位：写意图（含归属）→ 有会话则落盘 → 把结论交给 `done`。
@@ -236,6 +258,9 @@ pub(crate) fn apply_permission_level(
         session_mode: None,
         agent_role: None,
     };
+    if let Some(p) = target.pending {
+        p.set(true);
+    }
     let mine = target.generation.map(|g| {
         let m = g.get_untracked().wrapping_add(1);
         g.set(m);
@@ -247,6 +272,10 @@ pub(crate) fn apply_permission_level(
             matches!((target.generation, mine), (Some(g), Some(m)) if g.get_untracked() != m);
         if stale {
             return;
+        }
+        if let Some(p) = target.pending {
+            // 只有成功写回才算「确认」；失败时意图仍未被服务端确认，标记保留。
+            p.set(!matches!(outcome, Ok(ConversationStateOutcome::Ok(_))));
         }
         done(match outcome {
             Ok(ConversationStateOutcome::Ok(view)) => LevelOutcome::Applied(view.permission),
@@ -271,6 +300,7 @@ fn apply_level(level: &str, sel: LevelSelect) {
             chat: sel.chat,
             turn_in_flight: sel.turn_in_flight,
             generation: Some(sel.generation),
+            pending: Some(sel.pending),
         },
         loc,
         move |outcome| apply_level_note(sel, outcome, loc),
@@ -292,9 +322,14 @@ fn apply_level_note(sel: LevelSelect, outcome: LevelOutcome, loc: Locale) {
         LevelOutcome::TurnRunning => sel.note.set(Some(
             i18n::settings_permission_turn_running(loc).to_string(),
         )),
-        LevelOutcome::ConversationGone => sel.note.set(Some(
-            i18n::settings_permission_conversation_gone(loc).to_string(),
-        )),
+        LevelOutcome::ConversationGone => {
+            // 会话已不在（TTL 淘汰）：这份投影属于一个不存在的会话，折掉；
+            // 与 TUI 的「非 Ok 分支一律折 view」同一条规则。
+            sel.view.set(None);
+            sel.note.set(Some(
+                i18n::settings_permission_conversation_gone(loc).to_string(),
+            ));
+        }
         LevelOutcome::Unsupported => {
             // 老 serve：连读都做不到，chip 本就不该显示；清空缓存让它消失。
             sel.note
@@ -302,6 +337,9 @@ fn apply_level_note(sel: LevelSelect, outcome: LevelOutcome, loc: Locale) {
             sel.view.set(None);
         }
         LevelOutcome::WriteFailed { status, code } => {
+            // 写没成功：这份「生效档」已不代表此刻生效，折掉 —— 否则 chip 会一直挂着
+            // `意图→旧档`（与 TUI 状态行同一条规则）。
+            sel.view.set(None);
             let base = if status == 500 {
                 i18n::settings_permission_write_retry(loc)
             } else {
@@ -310,10 +348,13 @@ fn apply_level_note(sel: LevelSelect, outcome: LevelOutcome, loc: Locale) {
             let detail = code.unwrap_or_else(|| format!("HTTP {status}"));
             sel.note.set(Some(format!("{base} ({detail})")));
         }
-        LevelOutcome::IoError(e) => sel.note.set(Some(format!(
-            "{} {e}",
-            i18n::settings_permission_write_failed(loc)
-        ))),
+        LevelOutcome::IoError(e) => {
+            sel.view.set(None);
+            sel.note.set(Some(format!(
+                "{} {e}",
+                i18n::settings_permission_write_failed(loc)
+            )));
+        }
     }
 }
 
@@ -392,7 +433,9 @@ pub fn StatusPermissionChip(locale: RwSignal<Locale>) -> impl IntoView {
     let shell = try_chat_shell_ctx();
     let view = RwSignal::new(None::<PermissionView>);
     let generation = RwSignal::new(0_u32);
+    let read_generation = RwSignal::new(0_u32);
     let note = RwSignal::<Option<String>>::new(None);
+    let pending = RwSignal::new(false);
     let menu_open = RwSignal::new(false);
     let menu_fixed_style = RwSignal::<Option<String>>::new(None);
     let trigger_ref = NodeRef::<html::Button>::new();
@@ -408,7 +451,9 @@ pub fn StatusPermissionChip(locale: RwSignal<Locale>) -> impl IntoView {
         turn_in_flight: shell.map(|c| c.perm_turn_in_flight),
         view,
         generation,
+        read_generation,
         note,
+        pending,
     };
 
     // 拉当前生效档：会话切换、意图变化、语言切换都重拉一次（不轮询）。
@@ -426,6 +471,7 @@ pub fn StatusPermissionChip(locale: RwSignal<Locale>) -> impl IntoView {
             bound,
             level_select.selected.get().as_deref(),
             effective.as_deref(),
+            level_select.pending.get(),
         )
     });
 
@@ -490,6 +536,8 @@ mod tests {
             turn_in_flight: Some(Memo::new(move |_| true)),
             view: RwSignal::new(None),
             generation: RwSignal::new(0_u32),
+            read_generation: RwSignal::new(0_u32),
+            pending: RwSignal::new(false),
             note,
         };
 
@@ -525,6 +573,8 @@ mod tests {
             turn_in_flight: Some(Memo::new(move |_| false)),
             view: RwSignal::new(None),
             generation: RwSignal::new(0_u32),
+            read_generation: RwSignal::new(0_u32),
+            pending: RwSignal::new(false),
             note: RwSignal::new(None::<String>),
         };
 
@@ -537,12 +587,12 @@ mod tests {
     fn intent_wins_and_both_values_show_when_they_differ() {
         // 一致：单值（与改动前的观感一致）。
         assert_eq!(
-            chip_text(true, Some("workspace"), Some("workspace")),
+            chip_text(true, Some("workspace"), Some("workspace"), false),
             Some("workspace".to_string())
         );
         // 意图高于生效：两个值都要出现，否则用户以为切换没生效。
         assert_eq!(
-            chip_text(true, Some("unrestricted"), Some("read")),
+            chip_text(true, Some("unrestricted"), Some("read"), false),
             Some("unrestricted→read".to_string())
         );
     }
@@ -550,35 +600,85 @@ mod tests {
     /// 没有已持久化会话时（`bound = false`）：同一份 `GET /permission` 回答的是「配置默认档」，
     /// 摆到箭头右边就会被读成「服务端把我钳制到了某档」。所以有意图只给意图、无意图标成估算 `~`。
     /// 与 TUI 状态行同一份判定（`crabmate_client_api::permission::perm_display`）。
+    /// 读请求只推进 `read_generation`：写代数不动，在途写回包就不会被读请求判成 stale。
+    ///
+    /// 回归要点：两者共用一个代数时，`selected` 变化触发的读请求会把先发的写回包作废 ——
+    /// `done()` 不执行、`pending` 清不掉，只能靠读请求兜底纠正。
+    #[test]
+    fn a_read_refresh_does_not_bump_the_write_generation() {
+        use leptos::prelude::*;
+
+        use super::LevelSelect;
+
+        let sel = LevelSelect {
+            locale: RwSignal::new(Locale::ZhHans),
+            selected: RwSignal::new(Some("unrestricted".to_string())),
+            owner: RwSignal::new(None),
+            chat: None,
+            turn_in_flight: None,
+            view: RwSignal::new(None),
+            generation: RwSignal::new(7_u32),
+            read_generation: RwSignal::new(0_u32),
+            note: RwSignal::new(None::<String>),
+            pending: RwSignal::new(true),
+        };
+        // 一次读请求：只动读代数。
+        sel.read_generation
+            .set(sel.read_generation.get_untracked() + 1);
+        assert_eq!(sel.read_generation.get_untracked(), 1);
+        assert_eq!(
+            sel.generation.get_untracked(),
+            7,
+            "读请求不得推进写代数，否则在途写回包会被判 stale"
+        );
+    }
+
+    /// 意图已提交、尚未确认（写请求在途或已失败）：只显示意图并标 `~`，**不**并列。
+    ///
+    /// 回归场景：点 chip 切到 `unrestricted` 后，右侧仍是上一次读到的 `approved`，
+    /// 拼成 `unrestricted→approved` 会被读成「服务端把我钳制了」。
+    #[test]
+    fn a_pending_intent_never_pairs_with_the_stale_level() {
+        assert_eq!(
+            chip_text(true, Some("unrestricted"), Some("approved"), true),
+            Some("~unrestricted".to_string())
+        );
+        // 写失败后 `view` 被折成 `None`，pending 仍为真：结论同上，不会退回「已是这档」。
+        assert_eq!(
+            chip_text(true, Some("unrestricted"), None, true),
+            Some("~unrestricted".to_string())
+        );
+    }
+
     #[test]
     fn an_unbound_session_never_shows_an_arrow() {
         assert_eq!(
-            chip_text(false, Some("unrestricted"), Some("approved")),
+            chip_text(false, Some("unrestricted"), Some("approved"), false),
             Some("unrestricted".to_string())
         );
         assert_eq!(
-            chip_text(false, None, Some("approved")),
+            chip_text(false, None, Some("approved"), false),
             Some("~approved".to_string())
         );
-        assert_eq!(chip_text(false, None, None), None);
+        assert_eq!(chip_text(false, None, None, false), None);
     }
 
     #[test]
     fn no_intent_shows_the_effective_level_and_unknown_shows_nothing() {
         assert_eq!(
-            chip_text(true, None, Some("approved")),
+            chip_text(true, None, Some("approved"), false),
             Some("approved".to_string())
         );
         // 两者都不知道 → 整段不渲染（不猜默认档）。
-        assert_eq!(chip_text(true, None, None), None);
+        assert_eq!(chip_text(true, None, None, false), None);
         // 空白意图等同没有。
         assert_eq!(
-            chip_text(true, Some("  "), Some("read")),
+            chip_text(true, Some("  "), Some("read"), false),
             Some("read".to_string())
         );
         // 只有意图、还没有投影（首次拉取未回）：仍显示意图，别让 chip 闪没。
         assert_eq!(
-            chip_text(true, Some("read"), None),
+            chip_text(true, Some("read"), None, false),
             Some("read".to_string())
         );
     }

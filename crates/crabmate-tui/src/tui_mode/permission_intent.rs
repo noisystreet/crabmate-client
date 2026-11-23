@@ -27,28 +27,7 @@ use super::worker::WorkerJob;
 use crate::tui_mode::controls::clear_word;
 use crate::tui_mode::state::LineKind;
 
-/// 状态行 `perm` 段显示什么。`None` = 整段不显示。
-///
-/// 与 Desktop `chip_text`（`frontend/src/app/status_permission_chip.rs`）同一口径，
-/// 只去掉本地化标签（TUI 一贯显示线格式）：
-/// - 意图与生效相同 → 单值；
-/// - 不同 → `意图→生效`（服务端允许意图高于生效，两个都要显示，否则用户以为切换没生效）；
-/// - 没有意图 → 生效档；
-/// - 两者都不知道 → 不显示（**不**拿 `permission_level_default` 顶替：那是「没意图时会
-///   落到哪」，不是「此刻是哪」）。
-///
-/// `effective` 该传什么由 [`status_values`] 决定 —— 不是所有 `GET /permission`
-/// 的读数都能当「此刻生效」。
-#[must_use]
-pub(super) fn perm_value(intent: Option<&str>, effective: Option<&str>) -> Option<String> {
-    // 「相同→单值 / 不同→`意图→生效` / 只有一侧→那一侧」的规则在共享层：桌面底栏那颗 chip
-    // 用的是同一个函数，两处各写一遍迟早出现「TUI 显示并列、Web 只显示一个」。
-    // `bound` 这里传 `true`：有没有已持久化会话已由 [`status_values`] 判过（无会话时它把
-    // effective 折成 `None` 或估算记号 `~x`，传给本函数的就是终值）。
-    crabmate_client_api::permission::perm_display(true, intent, effective).map(|d| d.plain())
-}
-
-/// 状态行 `perm` 段两个字段的取值：`(生效侧, 意图侧)`，交给 [`perm_value`] 组合。
+/// 状态行 `perm` 段两个字段的取值：`(生效侧, 意图侧)`，交给 `status_info::perm_value` 组合。
 ///
 /// `bound` = 有没有已持久化 `conversation_id`。这件事**必须**参与判断，因为同一句
 /// `GET /permission` 在两种状态下回答的是两个问题：
@@ -165,6 +144,7 @@ impl LaneApp<'_> {
             );
             return;
         };
+        self.st.permission_pending = true;
         self.st.permission_generation = self.st.permission_generation.wrapping_add(1);
         let generation = self.st.permission_generation;
         let _ = self.job_tx.send(WorkerJob::WritePermission {
@@ -184,6 +164,14 @@ impl LaneApp<'_> {
         // 连选两档：只认最后一次（慢回包不能把界面刷回旧档）。
         if generation != self.st.permission_generation {
             return;
+        }
+        if matches!(outcome, Ok(ConversationStateOutcome::Ok(_))) {
+            self.st.permission_pending = false;
+        } else if let Some(d) = self.st.serve_defaults.as_mut() {
+            // 写没成功：那份「生效档」已不代表此刻生效（请求没落地 / 会话不在 / 老 serve），
+            // 折掉它 —— 否则状态行会一直挂着 `意图→旧档`，读起来像「服务端把我钳制了」。
+            // pending **不**清：这条意图确实还没被确认，状态行继续显示 `~<意图>`。
+            d.permission_view = None;
         }
         match outcome {
             Ok(ConversationStateOutcome::Ok(view)) => {
@@ -234,13 +222,18 @@ impl LaneApp<'_> {
 mod read_failure_tests;
 
 #[cfg(test)]
+#[path = "permission_pending_tests.rs"]
+mod pending_tests;
+
+#[cfg(test)]
 mod tests {
-    use super::{perm_value, status_values};
+    use super::super::status_info::perm_value;
+    use super::status_values;
 
     #[test]
     fn same_intent_and_effective_collapse_to_one_value() {
         assert_eq!(
-            perm_value(Some("workspace"), Some("workspace")),
+            perm_value(Some("workspace"), Some("workspace"), false),
             Some("workspace".to_string())
         );
     }
@@ -249,7 +242,7 @@ mod tests {
     fn higher_intent_shows_both_sides() {
         // 意图被 ceiling 钳制：两个值都要出现，否则用户以为切换没生效。
         assert_eq!(
-            perm_value(Some("unrestricted"), Some("read")),
+            perm_value(Some("unrestricted"), Some("read"), false),
             Some("unrestricted→read".to_string())
         );
     }
@@ -257,18 +250,21 @@ mod tests {
     #[test]
     fn no_intent_shows_effective_and_unknown_shows_nothing() {
         assert_eq!(
-            perm_value(None, Some("approved")),
+            perm_value(None, Some("approved"), false),
             Some("approved".to_string())
         );
         // 两者都不知道 → 整段不显示（不猜默认档）。
-        assert_eq!(perm_value(None, None), None);
+        assert_eq!(perm_value(None, None, false), None);
         // 空白意图等同没有。
         assert_eq!(
-            perm_value(Some("  "), Some("read")),
+            perm_value(Some("  "), Some("read"), false),
             Some("read".to_string())
         );
         // 只有意图、投影还没回来：仍显示意图，别让状态行闪没一次。
-        assert_eq!(perm_value(Some("read"), None), Some("read".to_string()));
+        assert_eq!(
+            perm_value(Some("read"), None, false),
+            Some("read".to_string())
+        );
     }
 
     /// 没有已绑定会话：裸 `/permission` 的档位不是「此刻生效」，绝不与意图并列。
@@ -283,7 +279,7 @@ mod tests {
         assert_eq!(effective, None);
         assert_eq!(intent.as_deref(), Some("unrestricted"));
         assert_eq!(
-            perm_value(intent.as_deref(), effective.as_deref()),
+            perm_value(intent.as_deref(), effective.as_deref(), false),
             Some("unrestricted".to_string())
         );
         // 没意图：读数标成估算（同一个 `~` 记号，说明「下一条消息会落到哪」而不是
@@ -291,12 +287,15 @@ mod tests {
         let (effective, intent) = status_values(false, None, Some("approved"));
         assert_eq!(intent, None);
         assert_eq!(
-            perm_value(intent.as_deref(), effective.as_deref()),
+            perm_value(intent.as_deref(), effective.as_deref(), false),
             Some("~approved".to_string())
         );
         // 读数都没有：整段不显示。
         let (effective, intent) = status_values(false, Some("  "), None);
-        assert_eq!(perm_value(intent.as_deref(), effective.as_deref()), None);
+        assert_eq!(
+            perm_value(intent.as_deref(), effective.as_deref(), false),
+            None
+        );
     }
 
     /// 已绑定会话：两侧照旧并列（这是箭头唯一有意义的场合）。
@@ -305,19 +304,19 @@ mod tests {
         let (effective, intent) = status_values(true, Some("unrestricted"), Some(" approved "));
         assert_eq!(effective.as_deref(), Some("approved"));
         assert_eq!(
-            perm_value(intent.as_deref(), effective.as_deref()),
+            perm_value(intent.as_deref(), effective.as_deref(), false),
             Some("unrestricted→approved".to_string())
         );
         // 无意图：只显示生效档，且不带 `~`（会话已存在，这就是此刻的档）。
         let (effective, intent) = status_values(true, None, Some("approved"));
         assert_eq!(
-            perm_value(intent.as_deref(), effective.as_deref()),
+            perm_value(intent.as_deref(), effective.as_deref(), false),
             Some("approved".to_string())
         );
         // 空白读数当未知（老 serve / 解析出空串），不当成一个档位。
         let (effective, intent) = status_values(true, Some("read"), Some("   "));
         assert_eq!(
-            perm_value(intent.as_deref(), effective.as_deref()),
+            perm_value(intent.as_deref(), effective.as_deref(), false),
             Some("read".to_string())
         );
     }
@@ -377,6 +376,7 @@ impl LaneApp<'_> {
         // 已开的菜单同理：选项集是上一个会话的 `available`，留着让 Enter 一下就把那档写进新
         // 会话。（正常路径切不了会话 —— 模态菜单会吞掉按键 —— 但鼠标点左栏同样不该留下它。）
         self.st.permission_menu = None;
+        self.st.permission_pending = false;
         if let Some(defaults) = self.st.serve_defaults.as_mut() {
             defaults.permission_view = None;
         }
@@ -432,6 +432,13 @@ impl LaneApp<'_> {
             // 跨会话失效**不走这里**：切会话 / `/conv new` 走 `forget_permission_view`，它显式
             // 把 view 置 `None` 再重拉，那时没有旧值可保。
             Ok(defaults) => {
+                // 拿到**同会话的权威读数**就等于意图已被确认（无论它等于意图，还是被
+                // ceiling / role 钳制到某一档 —— 那时该显示 `意图→生效`，箭头才有意义）。
+                // 不清的话，一次写失败留下的 pending 会让状态行永远停在 `~intent`。
+                // 读失败（`permission_view` 为 `None`，下面会保住旧值）不算确认，不清。
+                if defaults.permission_view.is_some() {
+                    self.st.permission_pending = false;
+                }
                 let kept = keep_known_view(self.st.serve_defaults.as_ref(), defaults);
                 self.st.serve_defaults = Some(kept);
             }
