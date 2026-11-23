@@ -45,6 +45,8 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Fixed
 
+- **Bump `cookie` to 0.18.3 for RUSTSEC-2026-0594.**
+
 - **A connected instance leaves the rail's "connectable" list instead of offering itself again.**
 
 - **Lane polling and session loads now use their own serve scope, not the front lane's.**
