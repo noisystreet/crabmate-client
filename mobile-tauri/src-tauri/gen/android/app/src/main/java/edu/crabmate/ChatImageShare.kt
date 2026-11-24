@@ -8,20 +8,32 @@ internal class ChatImageShare {
   private var buf: StringBuilder? = null
   private var filename: String = DEFAULT_NAME
 
+  /**
+   * 最近一次调用的失败原因码（`""` = 成功），供 JS 桥把「为什么没存成」带回前端。
+   *
+   * 原先只返回 `Boolean`，前端只能弹一句「保存失败」，无法区分「文件过大」这类可解释的失败。
+   */
+  @Volatile
+  var lastError: String = ""
+    private set
+
   fun begin(
     originOk: Boolean,
     rawName: String,
     asImage: Boolean = true,
   ): Boolean {
     if (!originOk) {
+      lastError = ERR_ORIGIN
       return false
     }
     synchronized(lock) {
       if (buf != null) {
+        lastError = ERR_BUSY
         return false
       }
       buf = StringBuilder()
       filename = if (asImage) safeImageFileName(rawName) else safeFileName(rawName)
+      lastError = ""
     }
     return true
   }
@@ -30,29 +42,35 @@ internal class ChatImageShare {
     originOk: Boolean,
     chunk: String,
   ): Boolean {
-    if (!originOk || chunk.isEmpty()) {
-      return false
-    }
-    if (chunk.length > MAX_CHUNK_CHARS) {
+    if (!originOk || chunk.isEmpty() || chunk.length > MAX_CHUNK_CHARS) {
+      lastError = ERR_CHUNK
       return false
     }
     if (!chunk.all { it.isLetterOrDigit() || it == '+' || it == '/' || it == '=' }) {
+      lastError = ERR_CHUNK
       return false
     }
     synchronized(lock) {
-      val b = buf ?: return false
+      val b = buf
+      if (b == null) {
+        lastError = ERR_NOT_BEGUN
+        return false
+      }
       if (b.length + chunk.length > MAX_B64_CHARS) {
         buf = null
+        lastError = ERR_TOO_LARGE
         return false
       }
       b.append(chunk)
     }
+    lastError = ""
     return true
   }
 
   fun finish(originOk: Boolean): Pair<String, ByteArray>? {
     if (!originOk) {
       cancel()
+      lastError = ERR_ORIGIN
       return null
     }
     val payload =
@@ -62,16 +80,23 @@ internal class ChatImageShare {
         val name = filename
         Pair(b, name)
       }
-    val b64 = payload.first ?: return null
+    val b64 = payload.first
+    if (b64 == null) {
+      lastError = ERR_NOT_BEGUN
+      return null
+    }
     val bytes =
       try {
         Base64.decode(b64, Base64.DEFAULT)
       } catch (_: Exception) {
+        lastError = ERR_DECODE
         return null
       }
     if (bytes.size > MAX_DECODED_BYTES) {
+      lastError = ERR_TOO_LARGE
       return null
     }
+    lastError = ""
     return Pair(payload.second, bytes)
   }
 
@@ -79,6 +104,7 @@ internal class ChatImageShare {
     synchronized(lock) {
       buf = null
     }
+    lastError = ""
   }
 
   companion object {
@@ -87,6 +113,14 @@ internal class ChatImageShare {
     const val MAX_DECODED_BYTES: Int = 16 * 1024 * 1024
     const val MAX_B64_CHARS: Int = MAX_DECODED_BYTES * 2
     const val MAX_CHUNK_CHARS: Int = 240_000
+
+    /** 桥把 `lastError` 原样回传；前端按这组稳定码选提示文案（勿改字面量，见 issue #29）。 */
+    const val ERR_ORIGIN: String = "origin"
+    const val ERR_BUSY: String = "busy"
+    const val ERR_CHUNK: String = "chunk"
+    const val ERR_NOT_BEGUN: String = "not_begun"
+    const val ERR_TOO_LARGE: String = "too_large"
+    const val ERR_DECODE: String = "decode"
 
     /** `isLetterOrDigit` keeps CJK; spaces become `_`. Empty / dots-only → [fallback]. */
     fun safeFileName(
