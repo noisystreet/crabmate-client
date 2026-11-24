@@ -1,6 +1,6 @@
 # 编程 Agent 客户端规划
 
-> **状态**：Wave 1（对话 P2）已落地；Wave 2.2「打开此文件」已落地（宽屏）；其余 Wave 2–3 未开工  
+> **状态**：Wave 1（对话 P2）已落地；Wave 2.2「打开此文件」+「看 hunk」已落地（宽屏）；其余 Wave 2–3 未开工  
 > **范围**：本仓 `frontend/`（对话、变更集、工作区/IDE 审查面）；官方壳只做连接与保活  
 > **读者**：本仓贡献者；Wave 2 还原/结构化 changelog 需 Server 仓配合  
 > **关联**：[`chat_ui_todo.md`](./chat_ui_todo.md)（Wave 1 勾选权威）、[`ui_issue_todo.md`](./ui_issue_todo.md)、[`tauri_gui_mvp_design.md`](./tauri_gui_mvp_design.md)、端能力对照 [`client_capability_matrix.md`](./client_capability_matrix.md)、[`ADR-0003`](../adr/0003-chat-file-context-inject-cards.md)（从文件注入的上下文卡；非本规划 Wave 2）；路径 A：[client_shell_split.md](https://github.com/noisystreet/CrabMate/blob/main/docs/design/client_shell_split.md)
@@ -50,7 +50,7 @@
 | 变更集 | `GET /workspace/changelog` → Markdown 弹窗（[`changelist_modal.rs`](../../frontend/src/app/changelist_modal.rs)） | 只读摘要；不能点文件进 IDE；不能还原 |
 | 编辑器 | 宽屏轻量 CodeMirror；可写工作区文件 | 不是 LSP IDE；与变更集未打通 |
 | Git | 克隆弹窗、GitHub Device Flow | 无 status / 暂存 / 提交 / 从审查面开 PR |
-| 工具写盘 | `apply_patch` 等走 Server；UI 为工具卡；写盘卡行尾有「打开此文件」路径链接（宽屏进 IDE，SSE 期捕获路径）；摘要行不再重复同一路径 | 卡上无「看 hunk」 |
+| 工具写盘 | `apply_patch` 等走 Server；UI 为工具卡；写盘卡行尾有「打开此文件」路径链接（宽屏进 IDE，SSE 期捕获路径）；展开区把正文首行 `crabmate_tool_output` 的 `files[].unified_diff` 渲染成着色 diff（>40 行折叠） | 无 |
 
 编码闭环完整度（作者判断，0–10；不是基准测试）：提需求 8、模式 8、看清改动 4、打开核对 5、打回还原 1、再跑一轮 7、提交 PR 3。
 
@@ -80,7 +80,7 @@
 | # | 项 | 落点 | 依赖 |
 |---|-----|------|------|
 | 2.1 | 变更集：文件列表；点路径在 IDE 打开（宽屏） | Client；changelog **最好**改为结构化 JSON | 过渡期可解析现有 Markdown 中的路径，但不得把解析启发式写成契约 |
-| 2.2 | 写盘工具卡：「打开此文件」/ 看 hunk | Client（路径已在工具参数里）**「打开」已勾**；看 hunk 未做 | 无新 API 也可做最小「打开」 |
+| 2.2 | 写盘工具卡：「打开此文件」/ 看 hunk | Client（路径在工具参数里，diff 在正文首行信封里）**两项均已勾** | 无新 API |
 | 2.3 | 会话工作区还原（整次会话；可选按文件打回） | **必须先有 Server API** | 见 §5；未 pin 之前 Client 只做设计，不上按钮 |
 | 2.4 | Plan 产物一等公民：展示计划，用户确认后再 Act | Client 展示；Plan 语义在 Server | 不新造 SSE 事件类型，除非 Server 已有 |
 
@@ -132,7 +132,14 @@ Client **需要**的能力（验收语言，不是 schema）：
 ## 7. 验证
 
 - Wave 1：跟随 [`chat_ui_todo.md`](./chat_ui_todo.md)「验证」；手测就地编辑、排队、composer 旁模式。
-- Wave 2.1–2.2：宽屏点变更/工具卡打开对应 tab；窄屏列表不打开 IDE。2.2「打开此文件」已落地：行尾以工作区相对路径作链接文字，摘要行剥掉重复路径（全量渲染与增量 patch 两条路径共用同一去重口径），单测覆盖路径提取与渲染；SSE 捕获 → nonce 桥接 → IDE 打开的端到端链路需 Desktop 手测（点 `create_file` / `apply_patch` 卡上的路径链接 → IDE 新 tab）。Playwright 能 mock changelog / 工具卡则补一条；不能替代 Desktop 手测。
+- Wave 2.1–2.2：宽屏点变更/工具卡打开对应 tab；窄屏列表不打开 IDE。2.2「打开此文件」已落地：行尾以工作区相对路径作链接文字，
+  摘要行剥掉重复路径（全量渲染与增量 patch 两条路径共用同一去重口径），单测覆盖路径提取与渲染；
+  SSE 捕获 → nonce 桥接 → IDE 打开的端到端链路需 Desktop 手测（点 `create_file` / `apply_patch` 卡上的路径链接 → IDE 新 tab）。
+  Playwright 能 mock changelog / 工具卡则补一条；不能替代 Desktop 手测。
+  2.2「看 hunk」已落地（#323）：diff 来源是正文首行 `crabmate_tool_output` 的 `files[].unified_diff`
+  （AG-UI 面不下发 `structured_preview`，故不依赖它），行模型与切段在 `crabmate-tool-card`、DOM 留在 `frontend`
+  （`tui_diff_render.rs`），超过 40 行收进原生 `<details>`；单测覆盖增删/上下文/hunk、空 patch、非 diff 降级、
+  截断、CRLF 与转义；桌面手测展开 `apply_patch` 卡看着色与折叠，窄屏只看卡内滚动。
 - Wave 2.3：契约 pin 升级后的 mock + 一次真实 `serve` 还原手测（步骤进 [`shell_smoke_runbook.md`](./shell_smoke_runbook.md)）。
 - Wave 3：手测提交不把密钥写进 commit message UI 日志。
 

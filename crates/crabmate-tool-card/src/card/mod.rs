@@ -128,21 +128,27 @@ pub fn tool_detail_scrub_row_redundancy(
 
 const COMPACT_SEPARATOR: &str = " ";
 
+/// 正文首行的 `crabmate_tool_output` 信封（写盘工具必带；Server 侧见 `write_sse_preview`）。
+fn first_line_tool_output_header(raw: &str) -> Option<Value> {
+    let first = raw.lines().next().map(str::trim)?;
+    if !first.starts_with('{') {
+        return None;
+    }
+    let v = serde_json::from_str::<Value>(first).ok()?;
+    (v.get("kind").and_then(|k| k.as_str()) == Some("crabmate_tool_output")).then_some(v)
+}
+
+fn is_workspace_write_diff_header(v: &Value) -> bool {
+    v.get("preview").and_then(|p| p.as_str()) == Some("workspace_write_diff")
+}
+
 fn strip_leading_workspace_write_json_header(raw: &str) -> String {
-    let first = raw.lines().next().map(str::trim).unwrap_or("");
-    if first.is_empty() || !first.starts_with('{') {
-        return raw.to_string();
+    match first_line_tool_output_header(raw) {
+        Some(v) if is_workspace_write_diff_header(&v) => {
+            raw.lines().skip(1).collect::<Vec<&str>>().join("\n")
+        }
+        _ => raw.to_string(),
     }
-    let Ok(v) = serde_json::from_str::<Value>(first) else {
-        return raw.to_string();
-    };
-    if v.get("kind").and_then(|k| k.as_str()) != Some("crabmate_tool_output") {
-        return raw.to_string();
-    }
-    if v.get("preview").and_then(|p| p.as_str()) != Some("workspace_write_diff") {
-        return raw.to_string();
-    }
-    raw.lines().skip(1).collect::<Vec<&str>>().join("\n")
 }
 
 fn structured_preview_write_diff_root(sp: &Value) -> Option<&Value> {
@@ -153,9 +159,20 @@ fn structured_preview_write_diff_root(sp: &Value) -> Option<&Value> {
     (sp.get("preview").and_then(|p| p.as_str()) == Some("workspace_write_diff")).then_some(sp)
 }
 
+/// 写盘 diff 预览根：`structured_preview`（自身或 `tool_output_header`）优先，
+/// 否则取**正文首行信封**——AG-UI SSE 面不下发 `structured_preview`，首行是唯一来源。
+fn workspace_write_diff_root(info: &ToolCardInput) -> Option<Value> {
+    if let Some(sp) = info.structured_preview.as_ref()
+        && let Some(root) = structured_preview_write_diff_root(sp)
+    {
+        return Some(root.clone());
+    }
+    let v = first_line_tool_output_header(&info.output)?;
+    is_workspace_write_diff_header(&v).then_some(v)
+}
+
 fn workspace_write_diff_section(info: &ToolCardInput, loc: ToolCardLocale) -> Option<String> {
-    let sp = info.structured_preview.as_ref()?;
-    let root = structured_preview_write_diff_root(sp)?;
+    let root = workspace_write_diff_root(info)?;
     let files = root.get("files")?.as_array()?;
     if files.is_empty() {
         return None;

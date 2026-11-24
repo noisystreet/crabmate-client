@@ -851,6 +851,47 @@
   border-radius: var(--radius-md);
 }
 
+/* —— 写盘工具卡：diff 行着色（颜色全部走 tokens；窄屏只在这块内部横滚） —— */
+.chat-tui-diff {
+  margin: 2px 0 0;
+}
+
+.chat-tui-diff-line {
+  display: block;
+  white-space: pre;
+}
+
+.chat-tui-diff-add {
+  color: var(--success);
+  background: var(--success-bg);
+}
+
+.chat-tui-diff-del {
+  color: var(--error);
+  background: var(--error-bg);
+}
+
+.chat-tui-diff-hunk {
+  color: var(--info);
+}
+
+.chat-tui-diff-ctx {
+  color: var(--text);
+}
+
+.chat-tui-diff-meta {
+  color: var(--muted);
+}
+
+.chat-tui-diff-more {
+  margin: 2px 0 0;
+}
+
+.chat-tui-diff-more-label {
+  cursor: pointer;
+  color: var(--muted);
+}
+
 /* —— 上下文压缩 / 裁剪卡：与工具回合同构（扁平透明底 + 单行折叠 + 详情） —— */
 .chat-tui-turn--trim {
   align-self: stretch;

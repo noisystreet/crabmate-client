@@ -491,3 +491,53 @@ fn detail_scrub_drops_title_and_matching_one_line() {
     );
     assert!(scrubbed.contains("stderr here"), "{scrubbed}");
 }
+
+/// AG-UI SSE 面不下发 `structured_preview`：正文首行信封本身就是 diff 来源（#323）。
+#[test]
+fn create_file_detail_uses_first_line_header_without_structured_preview() {
+    let mut info = mk("✅ create_file 成功");
+    info.name = "create_file".to_string();
+    let header = json!({
+        "kind": "crabmate_tool_output",
+        "tool": "create_file",
+        "version": 1,
+        "ok": true,
+        "preview": "workspace_write_diff",
+        "files": [{
+            "path": "a.rs",
+            "unified_diff": "--- a/a.rs\n+++ b/a.rs\n@@ -0,0 +1 @@\n+fn x() {}\n",
+            "truncated": false
+        }],
+        "preview_truncated": false
+    });
+    info.structured_preview = None;
+    info.output = format!(
+        "{}\n路径：a.rs\n已创建",
+        serde_json::to_string(&header).unwrap()
+    );
+    let out = tool_card_text(&info, ToolCardLocale::ZhHans);
+    assert!(out.contains("变更预览"), "detail={out}");
+    assert!(out.contains("```diff"), "detail={out}");
+    assert!(out.contains("+fn x() {}"), "detail={out}");
+    assert!(!out.contains("crabmate_tool_output"), "detail={out}");
+}
+
+/// 非写盘工具的首行信封（如 `read_file`）不得被当成 diff 区块。
+#[test]
+fn read_file_header_does_not_render_diff_section() {
+    let mut info = mk("✅ read_file 成功");
+    info.name = "read_file".to_string();
+    let header = json!({
+        "kind": "crabmate_tool_output",
+        "tool": "read_file",
+        "version": 1,
+        "path": "a.rs"
+    });
+    info.output = format!(
+        "{}\nfn main() {{}}",
+        serde_json::to_string(&header).unwrap()
+    );
+    let out = tool_card_text(&info, ToolCardLocale::ZhHans);
+    assert!(!out.contains("变更预览"), "detail={out}");
+    assert!(!out.contains("```diff"), "detail={out}");
+}

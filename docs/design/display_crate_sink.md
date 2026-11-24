@@ -33,6 +33,9 @@ crabmate-tool-card = { path = "../crates/crabmate-tool-card" }
 
 **不要做**：`path = "../../crabmate_agent/crates/…"`；把 `sse-protocol` 源码拷进本仓；为发 crates.io 去 vendor `turn-layout`。
 
+> `crabmate-tool-card` 的写盘 diff 视图（`split_detail_segments` / `parse_unified_diff` / `collapse_diff_lines`，见 #323）留在此 crate：
+> 行模型与围栏切段是纯逻辑，DOM 只在 `frontend/src/app/chat/tui_diff_render.rs`，别把着色搬回 crate。
+
 ## 验收命令
 
 ```bash
