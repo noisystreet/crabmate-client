@@ -303,8 +303,7 @@ pub fn wire_load_user_prefs_from_server(app: AppSignals) {
         }
     });
     wire_role_default_session_mode_when_status_ready(app.clone(), prefs_session_mode_present);
-    wire_user_prefs_auto_retry_on_init(app.clone());
-    wire_user_prefs_online_retry(app);
+    wire_user_prefs_auto_retry_on_init(app);
 }
 
 /// `initialized` 后若首启 GET 仍失败，自动再试一次（不阻塞聊天门闸）。
@@ -325,26 +324,6 @@ fn wire_user_prefs_auto_retry_on_init(app: AppSignals) {
             .user_prefs_reload_nonce
             .update(|n| *n = n.wrapping_add(1));
     });
-}
-
-/// 浏览器 `online` 时若仍处于 `LoadFailed`，重试 GET。
-fn wire_user_prefs_online_retry(app: AppSignals) {
-    use wasm_bindgen::JsCast;
-    use wasm_bindgen::closure::Closure;
-
-    let Some(window) = web_sys::window() else {
-        return;
-    };
-    let closure = Closure::wrap(Box::new(move || {
-        if app.workspace.user_prefs_sync_phase.get_untracked() != UserPrefsSyncPhase::LoadFailed {
-            return;
-        }
-        app.workspace
-            .user_prefs_reload_nonce
-            .update(|n| *n = n.wrapping_add(1));
-    }) as Box<dyn FnMut()>);
-    let _ = window.add_event_listener_with_callback("online", closure.as_ref().unchecked_ref());
-    closure.forget();
 }
 
 /// prefs 未记忆 mode 时，待 `/status` 就绪后按当前角色补默认一次（companion → ask 等）。

@@ -186,6 +186,7 @@ fn StatusFetchErrorPanel(
             <button
                 type="button"
                 class="btn btn-secondary btn-sm"
+                data-testid="status-fetch-retry"
                 on:click=move |_| refresh_status()
             >
                 {move || i18n::status_retry(locale.get())}
