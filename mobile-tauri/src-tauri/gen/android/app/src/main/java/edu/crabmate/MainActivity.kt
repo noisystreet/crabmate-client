@@ -20,6 +20,15 @@ import kotlin.math.roundToInt
 class MainActivity : TauriActivity() {
   /** 与 Tauri Android 默认资产源一致（`useHttpsScheme=false` → http）。启动页为包内 connect.html。 */
   private var connectHomeUrl: String = DEFAULT_CONNECT_HOME
+
+  /**
+   * WebView 句柄。
+   *
+   * `@Volatile` 不是装饰：另存为的终态由 `cm-device-save` io 线程经 [dispatchDeviceSaveResult] 回调，
+   * 那里会读这个字段；非 volatile 时可能读到 null 而直接返回，结果就再也回不到前端
+   * （与 [cachedWebViewUrl] 同一类可见性问题）。
+   */
+  @Volatile
   private var appWebView: WebView? = null
   private var exitConfirmDialog: AlertDialog? = null
 
@@ -62,7 +71,7 @@ class MainActivity : TauriActivity() {
 
   private val createDocumentLauncher =
     registerForActivityResult(CreateNamedDocument()) { uri ->
-      pendingDeviceSave.complete(uri, applicationContext.contentResolver)
+      pendingDeviceSave.complete(uri, applicationContext.contentResolver, ::dispatchDeviceSaveResult)
     }
 
   /**
@@ -106,31 +115,51 @@ class MainActivity : TauriActivity() {
     resumeWebViewTimersIfKeepAlive()
   }
 
-  private fun finishDecodedSave(share: ChatImageShare): Boolean {
-    val decoded = share.finish(true) ?: return false
-    return queueCreateDocument(decoded.first, decoded.second)
-  }
-
-  private fun queueCreateDocument(
-    filename: String,
-    bytes: ByteArray,
-  ): Boolean {
-    if (!pendingDeviceSave.tryBeginWrite(bytes)) {
-      return false
+  /**
+   * 把已解码的字节转交系统另存为。
+   *
+   * 返回 `""` 表示对话框已拉起（终态稍后经 [dispatchDeviceSaveResult] 回传），否则是稳定原因码
+   * （`origin` / `not_begun` / `decode` / `too_large` / `busy` / `write`），供前端说明问题。
+   */
+  private fun finishDecodedSave(share: ChatImageShare): String {
+    val decoded =
+      share.finish(true) ?: return share.lastError.ifEmpty { ChatImageShare.ERR_NOT_BEGUN }
+    if (!pendingDeviceSave.tryBeginWrite(decoded.second)) {
+      return pendingDeviceSave.lastError.ifEmpty { PendingDeviceSave.ERR_WRITE }
     }
     val req =
       CreateNamedDocument.Request(
-        mime = ChatImageShare.mimeForName(filename),
-        displayName = filename,
+        mime = ChatImageShare.mimeForName(decoded.first),
+        displayName = decoded.first,
       )
     runOnUiThread {
       try {
         createDocumentLauncher.launch(req)
       } catch (_: Exception) {
         pendingDeviceSave.abort()
+        dispatchDeviceSaveResult(PendingDeviceSave.FAILED)
       }
     }
-    return true
+    return ""
+  }
+
+  /**
+   * 另存为终态回传前端（`saved` / `cancelled` / `failed`）。
+   *
+   * picker 取消与写盘失败原先完全静默：`finishDeviceFileSave()` 只要对话框拉起来就算成功，
+   * 于是用户点了取消、或存储写入失败时界面一声不响。状态值只取 [PendingDeviceSave] 的常量，
+   * 不含外部输入，拼 JS 时无需转义。
+   */
+  private fun dispatchDeviceSaveResult(status: String) {
+    val view = appWebView ?: return
+    view.post {
+      val js = "window.__cmDeviceSaveResult&&window.__cmDeviceSaveResult('$status')"
+      try {
+        view.evaluateJavascript(js, null)
+      } catch (_: Exception) {
+        // WebView 已销毁：前端收不到结果，下次导出会重新发起
+      }
+    }
   }
 
   /** 必须在 UI 线程调用。 */
@@ -695,35 +724,41 @@ class MainActivity : TauriActivity() {
 
     /** 聊天灯箱：开始接收分块 base64（仅包内 App Origin）。 */
     @JavascriptInterface
-    fun beginChatImageSave(filename: String): Boolean {
-      if (!allowSecureBearerBridge()) {
-        return false
-      }
-      return chatImageShare.begin(true, filename, asImage = true)
-    }
+    fun beginChatImageSave(filename: String): Boolean = beginForSave(chatImageShare, filename, asImage = true).isEmpty()
 
     /** 工作区「保存到本机」等：系统另存为（WebView 无可靠 `<a download>`）。 */
     @JavascriptInterface
-    fun beginDeviceFileSave(filename: String): Boolean {
+    fun beginDeviceFileSave(filename: String): String = beginForSave(deviceFileShare, filename, asImage = false)
+
+    /** `""` = 已开始接收分块；否则为原因码（仅包内 App Origin 可调）。 */
+    private fun beginForSave(
+      share: ChatImageShare,
+      filename: String,
+      asImage: Boolean,
+    ): String {
       if (!allowSecureBearerBridge()) {
-        return false
+        return ChatImageShare.ERR_ORIGIN
       }
-      return deviceFileShare.begin(true, filename, asImage = false)
+      return if (share.begin(true, filename, asImage)) "" else share.lastError
     }
 
     @JavascriptInterface
-    fun appendDeviceFileSave(chunk: String): Boolean {
+    fun appendDeviceFileSave(chunk: String): String {
       if (!allowSecureBearerBridge()) {
-        return false
+        return ChatImageShare.ERR_ORIGIN
       }
-      return deviceFileShare.append(true, chunk)
+      return if (deviceFileShare.append(true, chunk)) "" else deviceFileShare.lastError
     }
 
+    /**
+     * 返回 `""` 表示已拉起系统另存为；终态（保存 / 取消 / 失败）随后经 `__cmDeviceSaveResult` 回传。
+     * 其余取值为原因码，前端据此选文案。
+     */
     @JavascriptInterface
-    fun finishDeviceFileSave(): Boolean {
+    fun finishDeviceFileSave(): String {
       if (!allowSecureBearerBridge()) {
         deviceFileShare.cancel()
-        return false
+        return ChatImageShare.ERR_ORIGIN
       }
       return this@MainActivity.finishDecodedSave(deviceFileShare)
     }
@@ -750,7 +785,7 @@ class MainActivity : TauriActivity() {
         chatImageShare.cancel()
         return false
       }
-      return this@MainActivity.finishDecodedSave(chatImageShare)
+      return this@MainActivity.finishDecodedSave(chatImageShare).isEmpty()
     }
   }
 
