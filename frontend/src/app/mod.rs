@@ -171,11 +171,15 @@ pub fn App() -> impl IntoView {
         lane_actions::register_rail(
             app_ctx.lanes.rail_rows(),
             app_ctx.lanes.active_signal(),
+            app_ctx.lanes.busy_now(),
             Rc::new(move |index: usize| {
                 lanes.set_active(index);
             }),
         );
     }
+    // 左栏行尾「在途耗时」的窗口级心跳（#577）：**只在这里起一次**。放进 lane 接线里会变成
+    // 每条 lane 一个定时器（8 条 = 每秒醒 8 次），而它们读的是同一个刻度。
+    app_shell_effects::wire_lane_busy_clock(app_ctx.lanes.rail_rows(), app_ctx.lanes.busy_now());
     register_new_lane_action(&app_ctx, lanes_host, slots.clone());
     wire_lane_hotkeys(app_ctx.lanes.clone());
     // 热键是**窗口级**的：只在这里注册一次。放进 `app_body` 会让每条 lane 各注册一份全局

@@ -58,7 +58,7 @@ pub(super) fn other_window_rows(
 /// 本窗口每条 lane 占用的 authority（响应式）。
 pub(super) fn lane_authority_signal() -> Signal<Vec<String>> {
     Signal::derive(move || {
-        let lane_rows = lane_actions::rail().map_or_else(Vec::new, |(r, _)| r.get());
+        let lane_rows = lane_actions::rail().map_or_else(Vec::new, |(r, _, _)| r.get());
         lane_authorities(&lane_rows)
     })
 }

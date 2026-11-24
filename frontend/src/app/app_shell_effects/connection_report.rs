@@ -22,6 +22,11 @@
 //!   `started_at` 推进（`desktop_connections::spawn_busy_ticker`）—— 前端不每秒发 IPC，
 //!   因为「别人那条连接」的开始时刻本来也不在它手上。
 //!
+//!   **左栏那条 lane 行的秒数走另一条路**（#577）：壳侧的 `started_at` 按 window label 记，
+//!   一个窗口 N 条 lane 时只有一个秒表，秒数会混（`docs/design/desktop_single_window_lanes.md`
+//!   §8.1）。所以起点在这里写进 `row.turn_started_at`，本窗口自己按行推进
+//!   （`lane_busy_clock`）—— 壳那条 ticker 保留给「别的窗口读我这一行」的单 lane 路径。
+//!
 //! 刻意**不做**的一件事（留给后续 issue，需要新的壳命令或 UI 入口）：
 //!
 //! - `rename_connection`：入口是左栏本窗口那行的右键菜单（#415）。它只改显示名、与状态上报
@@ -44,6 +49,7 @@ use crate::tauri_shell::{
 use super::super::connection_feed::connections_registered;
 use super::super::status_context::{context_axis_apply_watermark, status_bar_context_axis};
 use super::super::status_tasks_state::StatusTasksSignals;
+use super::lane_busy_clock::{next_turn_started, now_ms};
 
 /// 上报所需的信号（都是「本窗口此刻在干什么」的既有来源）。
 pub struct ConnectionReportSignals {
@@ -141,6 +147,16 @@ pub fn wire_connection_status_report(sig: ConnectionReportSignals) {
         sig.row.status.set(status);
         sig.row.unread.set(next_unread);
         sig.row.context.set(context.clone());
+        // #577：行尾在途耗时的**起点**。与上面三行同批、且在下面「上报」的 early-return 之前
+        // —— 非桌面壳（Android / Web）也要有这个读数；写到早退之后，左栏那行就永远没有秒数。
+        // 幂等由 `next_turn_started` 保证：流式期间 `context` 每帧都在变、这条 Effect 会重跑
+        // 很多次，每次覆盖成「现在」会让秒数永远停在 0。刻度与推进见 `lane_busy_clock`。
+        let previous_start = sig.row.turn_started_at.get_untracked();
+        let started = next_turn_started(previous_start, turn_busy, now_ms());
+        // 只在与上一帧不同时写：这个信号是本 Effect 自己写的，无脑 `set` 会白跑一遍重算。
+        if previous_start != started {
+            sig.row.turn_started_at.set(started);
+        }
 
         // 还没进注册表：**不能**把想报的值记成「已上报」—— 否则登记完成那一刻若
         // 状态再没变过，就永远不会发，症状与「从来没上报」一模一样。

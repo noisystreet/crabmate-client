@@ -15,6 +15,7 @@ mod connection_report;
 mod escape;
 mod ide_hotkeys;
 mod keyboard_inset;
+mod lane_busy_clock;
 mod mobile_nav_swipe;
 mod mobile_side_swipe;
 mod persist_prefs;
@@ -29,6 +30,9 @@ pub use escape::{ShellEscapeSignals, wire_escape_key_layered_dismiss};
 pub use ide_hotkeys::{IdeEditorHotkeySignals, wire_ide_editor_hotkeys};
 pub use keyboard_inset::wire_visual_viewport_keyboard_inset;
 pub(crate) use keyboard_inset::{on_composer_focus_keep_visible, on_mobile_focus_keep_visible};
+// 只转出跨模块要用的两个：`next_turn_started` / `now_ms` 由 `connection_report` 直接从子模块取，
+// 在这里再转一手会被 `unused_imports` 判成死代码。
+pub(crate) use lane_busy_clock::{busy_secs_from, wire_lane_busy_clock};
 pub use mobile_nav_swipe::{WireMobileNavEdgeSwipeSignals, wire_mobile_nav_edge_swipe};
 pub use mobile_side_swipe::{WireMobileSideEdgeSwipeSignals, wire_mobile_side_edge_swipe};
 pub use persist_prefs::wire_close_shell_chrome_when_ide_layout;
