@@ -2,6 +2,9 @@
 //!
 //! 行模型与切段在 `crabmate-tool-card`（纯逻辑、可单测）；本模块只把段映射成 HTML，
 //! **所有文本一律经 [`plaintext_to_safe_html`] 转义后再拼接**，不引入未转义片段。
+//!
+//! 作用域是**任意工具的详情**：围栏内容要解析出增删 / hunk 行才着色（写盘工具的围栏由
+//! crate 生成）；`run_command` 输出里自带的 ```` ```diff ```` 一样会着色，解析不出变化则原样不动。
 
 use crate::i18n::{self, Locale};
 use crate::markdown::plaintext_to_safe_html;
