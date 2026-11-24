@@ -163,6 +163,13 @@ internal class ChatImageShare {
       return mimeForNonImageExt(ext)
     }
 
+    /**
+     * 非图片扩展名 → MIME。
+     *
+     * `json` / `md` 用注册类型而不是 `text/plain`：另存为的类型会落到 DocumentsProvider /
+     * MediaStore，之后「用其它 App 打开」或分享时按它挑应用，`text/plain` 会把 `.json`
+     * 送进纯文本编辑器。代价是部分第三方 provider 会按类型过滤掉目标位置（见 runbook §3b）。
+     */
     private fun mimeForNonImageExt(ext: String): String {
       if (ext == "pdf") {
         return "application/pdf"
@@ -170,13 +177,17 @@ internal class ChatImageShare {
       if (ext == "zip") {
         return "application/zip"
       }
+      if (ext == "json") {
+        return "application/json"
+      }
+      if (ext == "md" || ext == "markdown") {
+        return "text/markdown"
+      }
       val text =
         setOf(
           "txt",
-          "md",
           "rs",
           "toml",
-          "json",
           "css",
           "html",
           "xml",
