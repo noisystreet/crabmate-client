@@ -49,6 +49,8 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Fixed
 
+- **Status and prefs retry themselves on `online` / foreground, with cooldown and backoff.**
+
 - **`perm` reads `~intent` while a level write is unconfirmed, not `intent→level`.**
 
 - **Bump `cookie` to 0.18.3 for RUSTSEC-2026-0594.**

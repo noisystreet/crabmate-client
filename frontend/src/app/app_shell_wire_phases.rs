@@ -41,6 +41,7 @@ use super::chat::{
         WireChatSessionLifecycleEffectsArgs, wire_chat_session_lifecycle_effects,
     },
 };
+use super::connectivity_recovery::{ConnectivityRecoveryArgs, wire_connectivity_recovery};
 use super::github_wiring::{
     make_refresh_github_repo_context, wire_github_refresh_on_auth_nonce,
     wire_github_refresh_when_workspace_changes, wire_github_repo_after_init,
@@ -281,6 +282,14 @@ fn wire_phase4b_status_tasks_domain(app: &AppSignals) -> StatusTasksSpawn {
         app.shell_ui.side_panel_view,
         Arc::clone(&refresh_tasks),
     );
+    // issue #23：网络 / 前台恢复后只补失败项（前台 lane，带冷却与退避）。
+    wire_connectivity_recovery(ConnectivityRecoveryArgs {
+        status: app.to_status_tasks(),
+        refresh_status: Arc::clone(&refresh_status),
+        prefs_phase: app.workspace.user_prefs_sync_phase,
+        prefs_reload_nonce: app.workspace.user_prefs_reload_nonce,
+        phase: app.phase,
+    });
     wire_web_api_bearer_save_recovery(
         app.shell_ui.web_api_bearer_save_nonce,
         Arc::clone(&refresh_status),

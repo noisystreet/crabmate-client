@@ -15,6 +15,7 @@ mod changelist_modal;
 mod chat;
 pub(crate) use chat::turn_lifecycle;
 mod connection_feed;
+mod connectivity_recovery;
 mod context_usage_page;
 pub(crate) mod focusable_menu;
 mod git_badge;
