@@ -1,5 +1,6 @@
 //! 终端流工具过程：一行摘要 + 可选折叠详情（Phase 3）。
 
+use super::tui_diff_render::detail_body_inner_html;
 use crate::i18n::{self, Locale};
 use crate::markdown::plaintext_to_safe_html;
 use crate::message_format::{
@@ -426,9 +427,11 @@ pub(crate) fn tool_process_body_html(
         html.push_str(&open_file_bar);
         html.push_str("<span class=\"chat-tui-tool-expand\" aria-hidden=\"true\">▸</span>");
         html.push_str("</summary>");
-        html.push_str("<pre class=\"chat-tui-tool-detail-body\">");
-        html.push_str(&plaintext_to_safe_html(detail_trim));
-        html.push_str("</pre></details>");
+        // 容器用 `<div>` 而非 `<pre>`：diff 段要逐行 `<span>`，而 `<pre>` 只容 phrasing content。
+        // innerHTML 仍由 Rust 逐段转义后拼接（见 `detail_body_inner_html`）。
+        html.push_str("<div class=\"chat-tui-tool-detail-body\">");
+        html.push_str(&detail_body_inner_html(detail_trim, locale));
+        html.push_str("</div></details>");
     } else {
         html.push_str("<div class=\"chat-tui-tool-row\">");
         html.push_str(&row_inner);

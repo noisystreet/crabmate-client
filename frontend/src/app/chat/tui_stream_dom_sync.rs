@@ -28,6 +28,7 @@ use crate::session_search::normalize_search_query;
 use crate::sse_dispatch::ToolJobState;
 use crate::storage::ChatSession;
 use crate::stream_text_overlay::StreamTextOverlay;
+use crabmate_tool_card::{DetailSegment, split_detail_segments};
 use std::collections::{HashMap, HashSet};
 
 struct PlanActiveSessionArgs<'a> {
@@ -97,6 +98,12 @@ fn plan_for_active_session(args: PlanActiveSessionArgs<'_>) -> TuiSyncPlan {
     }
 }
 
+fn detail_has_diff_segment(text: &str) -> bool {
+    split_detail_segments(text)
+        .into_iter()
+        .any(|seg| matches!(seg, DetailSegment::Diff(_)))
+}
+
 fn apply_tool_row_patch(
     body: &web_sys::HtmlElement,
     status: &str,
@@ -126,6 +133,11 @@ fn apply_tool_row_patch(
     one_el.set_text_content(Some(one_line));
     match detail {
         Some(text) => {
+            // 含 diff 段的详情要逐行 `<span>` 着色；此处是纯文本写入，会把结构化段抹回原文，
+            // 故直接要求上层整段重建（写盘工具的 diff 在结果落地后才出现，不会每帧触发）。
+            if detail_has_diff_segment(text) {
+                return false;
+            }
             let Some(pre) = body
                 .query_selector(".chat-tui-tool-detail-body")
                 .ok()

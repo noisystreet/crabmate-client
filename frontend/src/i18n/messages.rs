@@ -37,6 +37,14 @@ pub fn msg_tool_detail_expand_title(l: Locale) -> &'static str {
     }
 }
 
+/// 工具卡 diff 折叠：还有 `n` 行未展示（原生 `<details>` 展开/收起复用同一文案）。
+pub fn msg_diff_more_lines(l: Locale, n: usize) -> String {
+    match l {
+        Locale::ZhHans => format!("展开其余 {n} 行 diff"),
+        Locale::En => format!("Show {n} more diff lines"),
+    }
+}
+
 /// 服务端注入的 `### 分阶段规划 · …` 首行剥除后正文为空时的短标签（与 [`crate::message_format::display::message_ex`] 序号配合）。
 pub fn staged_coach_injection_fallback(l: Locale, ordinal: usize) -> &'static str {
     match l {

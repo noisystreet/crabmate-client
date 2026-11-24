@@ -15,6 +15,8 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 - **Hydrated history rows keep stable v2 ids, so reloads stop rebuilding the tail.**
 
+- **Write tool cards now show the unified diff they changed, with add/remove colours.**
+
 - **Lane rows show the in-flight turn duration, matching the TUI tail.**
 
 ### Changed
