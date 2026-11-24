@@ -105,6 +105,38 @@ function cancelAndroidDeviceFileSave() {
   }
 }
 
+// Android 另存为的终态由原生**异步**回传：`finishDeviceFileSave()` 只表示系统对话框已拉起，
+// 用户取消 / 写盘失败都发生在它之后，原先一律静默（issue #29）。
+let pendingAndroidSave = null;
+let pendingAndroidSaveTimer = null;
+
+// 原生回调丢失时（Activity 被销毁 / 进程回收 / 页面已导航走）不能永久挂起：
+// 超时按「已取消」静默收尾，否则调用方既等不到成功也等不到失败。
+const ANDROID_SAVE_TIMEOUT_MS = 600000;
+
+function clearAndroidSaveWait() {
+  if (pendingAndroidSaveTimer !== null) {
+    clearTimeout(pendingAndroidSaveTimer);
+    pendingAndroidSaveTimer = null;
+  }
+  pendingAndroidSave = null;
+}
+
+function settleAndroidSave(status) {
+  const p = pendingAndroidSave;
+  clearAndroidSaveWait();
+  if (!p) {
+    return;
+  }
+  if (status === "saved" || status === "cancelled") {
+    p.resolve(status);
+  } else {
+    p.reject(new Error("write"));
+  }
+}
+
+globalThis.__cmDeviceSaveResult = settleAndroidSave;
+
 export async function saveUtf8ViaAndroidShare(filename, body) {
   return saveB64ViaAndroidShare(filename, utf8ToBase64(body));
 }
@@ -113,21 +145,37 @@ export async function saveBytesViaAndroidShare(filename, bytes) {
   return saveB64ViaAndroidShare(filename, bytesToBase64(asUint8Array(bytes)));
 }
 
+// 桥方法返回 "" 表示这一步成功，否则是原生给出的原因码（`too_large` / `busy` / `write` …）。
 async function saveB64ViaAndroidShare(filename, b64) {
-  if (!globalThis.CrabMateMobile.beginDeviceFileSave(filename)) {
-    throw new Error("beginDeviceFileSave");
+  const b = globalThis.CrabMateMobile;
+  const beginReason = b.beginDeviceFileSave(filename);
+  if (beginReason !== "") {
+    throw new Error(beginReason);
   }
   try {
     const step = 240000;
     for (let i = 0; i < b64.length; i += step) {
-      if (!globalThis.CrabMateMobile.appendDeviceFileSave(b64.slice(i, i + step))) {
-        throw new Error("appendDeviceFileSave");
+      const appendReason = b.appendDeviceFileSave(b64.slice(i, i + step));
+      if (appendReason !== "") {
+        throw new Error(appendReason);
       }
     }
-    if (!globalThis.CrabMateMobile.finishDeviceFileSave()) {
-      throw new Error("finishDeviceFileSave");
+    // 先挂上 promise 再 finish：结果可能在 finish 返回后才由原生回传。
+    const settled = new Promise((resolve, reject) => {
+      pendingAndroidSaveTimer = setTimeout(() => {
+        pendingAndroidSaveTimer = null;
+        pendingAndroidSave = null;
+        resolve("cancelled");
+      }, ANDROID_SAVE_TIMEOUT_MS);
+      pendingAndroidSave = { resolve, reject };
+    });
+    const finishReason = b.finishDeviceFileSave();
+    if (finishReason !== "") {
+      throw new Error(finishReason);
     }
+    return await settled;
   } catch (e) {
+    clearAndroidSaveWait();
     cancelAndroidDeviceFileSave();
     throw e;
   }
@@ -411,10 +459,13 @@ fn trigger_bytes_via_android(
         return Err("no window".to_string());
     };
     spawn_local(async move {
+        // `cancelled` 是用户主动放弃，不弹窗；失败按原生原因码选文案。
         match JsFuture::from(js_save_bytes_via_android_share(&default_name, &content)).await {
             Ok(_) => {}
-            Err(_) => {
-                let _ = w.alert_with_message(crate::i18n::export_android_save_failed(loc));
+            Err(e) => {
+                let code = js_err_user_message(&e);
+                let msg = crate::i18n::export_android_save_failed_alert(loc, &code);
+                let _ = w.alert_with_message(&msg);
             }
         }
     });
@@ -461,10 +512,13 @@ fn trigger_download_via_android(
         return Err("no window".to_string());
     };
     spawn_local(async move {
+        // `cancelled` 是用户主动放弃，不弹窗；失败按原生原因码选文案。
         match JsFuture::from(js_save_utf8_via_android_share(&default_name, &content)).await {
             Ok(_) => {}
-            Err(_) => {
-                let _ = w.alert_with_message(crate::i18n::export_android_save_failed(loc));
+            Err(e) => {
+                let code = js_err_user_message(&e);
+                let msg = crate::i18n::export_android_save_failed_alert(loc, &code);
+                let _ = w.alert_with_message(&msg);
             }
         }
     });
