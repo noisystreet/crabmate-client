@@ -73,6 +73,10 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 - **A turn's final answer keeps a stable row id instead of a random one per turn.**
 
+- **Android saves now report a cancel or write failure instead of failing silently.**
+
+- **Android JSON/Markdown exports keep `application/json` / `text/markdown` MIME.**
+
 ## [0.9.1-alpha.0] - 2026-11-19
 
 ### Changed

@@ -34,6 +34,15 @@ composer。**这份兜底是「净」的（#321）**：窗口若已被 `adjustRe
 
 顶栏安全区：`CrabMateMobile.getStatusBarInsetPx()` 写入 CSS `--cm-safe-top`（状态栏/刘海 + 少量触控余量，至少约 24px；Web 侧 `--cm-safe-top-floor` 同保底）；原生还会在页面侧注入该变量。包内前端与连接页共用。
 
+**保存到本机**（会话导出 / 工作区文件 / 聊天灯箱）：走系统另存为 `ACTION_CREATE_DOCUMENT`（`CreateNamedDocument`），**不用分享页**——小米/红米等机型的分享面板常没有「文件」目标。
+前端 `session_export::trigger_download*` 先探测 `CrabMateMobile.beginDeviceFileSave`，有桥走原生（分块 base64 交 `ChatImageShare`，解码上限 16 MiB），否则退回 `<a download>`；
+字节先落 `cacheDir`（`PendingDeviceSave`）再由 `cm-device-save` 线程拷贝，进程中途被杀不会留下一个空文件冒充成果。
+三个 `*DeviceFileSave` 桥方法返回 `""` 表示这一步成功、否则是原因码（`origin` / `busy` / `chunk` / `not_begun` / `too_large` / `decode` / `write`）；
+终态（`saved` / `cancelled` / `failed`）由原生经 `window.__cmDeviceSaveResult` **异步**回传——所以用户取消不弹窗，而写盘失败会在应用内说明原因（issue #29）。
+JSON / Markdown 的类型分别是 `application/json` / `text/markdown`。
+原生回调丢失（Activity 销毁 / 进程回收）时前端 10 分钟后按「已取消」静默收尾，不会永久等待。
+聊天灯箱的「保存图片」共用这条路，但它的桥仍只返回布尔值，失败时只有一句通用提示、没有原因码。
+
 **原生层设计令牌镜像**：WebView 内的业务 UI 自动跟随 `frontend/styles/tokens.css`，但 WebView 之外的壳（主题、系统栏、通知）无法引用 CSS 变量，只能把色值各抄一份——故 `res/values/colors.xml` **只**放 `cm_<token>` 镜像（`cm_bg` / `cm_surface` / `cm_text` / `cm_muted` / `cm_accent` / `cm_error`，下划线代替连字符，逐项等于 `tokens.css` 的 `--<token>`）；`Theme.crabmate_mobile`（`res/values/` 与 `res/values-night/` 各自自包含——同名 style 是**整体替换**而非逐项合并）四个底色槽引用 `@color/cm_bg`，并显式声明 `android:windowLightStatusBar` / `android:windowLightNavigationBar =
 false`（底色恒深色，`DayNight` 浅色变体默认给**深色**图标，在深色状态栏上不可见；不依赖 parent 继承）——该两个标志由门禁冻结、运行时再按 Web 主题明暗覆盖（见上）。一致性由 `scripts/check-token-mirrors.sh`（pre-commit + `scripts/check.sh`）冻结，**六条不变量**精确相等、无白名单（第六条为桌面 WebView 底色 `BOOT_SHELL_BG` 与 `--bg` 相等，属 `desktop-tauri/`）：`colors.xml` 只放逐项相等的 `cm_*` 镜像；`themes.xml`
 不出现颜色字面量、四个底色槽引用 `@color/cm_bg` 且两个 light 标志为 `false`；两处启动页底色等于 `--bg`；`themes.xml` 引用的每个 `@color/<name>` 都必须在 `colors.xml` 里有定义（拼错否则只在 AAPT 构建期报错）；手写 Kotlin（`java/edu/crabmate`，与 `ktlint-android.sh` 同范围）只许消费 `R.color.cm_*`，用别的颜色资源即绕过整条镜像链。改 `tokens.css` 的值必须同步改 `colors.xml`，反之亦然。**浅色首帧深闪已修（#322）**：`index.html` 的 `<head>` 预绘脚本在首绘前读本机主题镜像（`crabmate.theme.pref`，由 `frontend/src/app/shell_prefs_storage.rs` 的 `persist_theme_to_storage_and_dom` 单点写入，只存偏好

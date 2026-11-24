@@ -57,6 +57,21 @@ cargo tauri dev
 - [ ] Android：发送后按 Home，状态栏出现「对话进行中」常驻通知；触发需审批的工具时通知升级，点按回到审批弹窗并可允许/拒绝；流结束或断开后通知消失  
 - [ ] Android 13+：首次发送弹出通知权限；拒绝后状态栏提示保活/审批提醒不可用，进程不崩溃
 
+## 3b. Android 保存到本机（issue #29）
+
+系统另存为（SAF `ACTION_CREATE_DOCUMENT`），不是分享页：小米/红米等机型的分享面板常没有「文件」目标。
+前端 `session_export::trigger_download*` 先探测 `CrabMateMobile.beginDeviceFileSave`，有桥走原生，否则退回 `<a download>`。
+
+- [ ] 会话**导出 JSON**：文件选择器弹出，`EXTRA_TITLE` 为 `chat_export_<时间戳>.json`；存盘后文件能被文本编辑器打开，`application/json` 类型（长按 → 详情 / 其它 App 打开时可见）
+- [ ] 会话**导出 Markdown**：同上，`.md` 且内容为 UTF-8（中文不乱码），类型 `text/markdown`
+- [ ] 工作区文件「保存到本机」与聊天灯箱「保存图片」仍正常（走同一个 `PendingDeviceSave`，写盘在 `cm-device-save` 线程）
+- [ ] **点取消**：界面无报错、不提示「保存失败」，App 不卡住，可立即重新导出
+- [ ] **写盘失败**（可先占满存储，或选一个只读目标）：App 内弹「写入失败，文件未保存到本机。」
+- [ ] **超过 16 MiB** 的会话 JSON：弹「文件超过 16 MB，未能保存到本机」，而不是「无法打开系统保存对话框」
+- [ ] 另存到 **非 Downloads 目录 / 第三方 provider**（网盘类）也能列出目标：`application/json` / `text/markdown` 会让部分 provider 被类型过滤掉，届时考虑退回 `text/plain`
+- [ ] 保存中途按 Home / 杀进程：缓存目录不留半截文件被误当成果（`PendingDeviceSave` 先落 cache 再拷贝，`abort()` 清理）
+- [ ] 保存中途导航走 / 杀进程导致原生回调丢失：10 分钟后按「已取消」静默收尾，界面不永久停留在等待（`ANDROID_SAVE_TIMEOUT_MS`）
+
 ## 4. 自动化
 
 壳能不能起来：`./scripts/smoke-desktop-shell.sh`（xvfb + 外部 serve；判据是壳进程存活 + 无 startup failed + 出现 WebKit 子进程）。
