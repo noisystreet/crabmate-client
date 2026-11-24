@@ -114,7 +114,9 @@ fn is_fence_open(line: &str) -> bool {
 }
 
 fn is_fence_close(line: &str) -> bool {
-    line.trim_end().trim_start() == FENCE_CLOSE
+    // **不 trim 前导空白**：改 markdown 代码块时，diff 的上下文行正是 ` ``` `（一个前导空格），
+    // 一旦 trim_start 就会被当成围栏闭合，把后半个 hunk 切成普通文本。
+    line.trim_end() == FENCE_CLOSE
 }
 
 /// 把详情文本按 ```` ```diff ```` 围栏切成「文本 / diff」交替段。
@@ -249,6 +251,27 @@ mod tests {
         let lines = parse_unified_diff(text).expect("diff");
         assert_eq!(lines.last().map(|l| l.kind), Some(DiffLineKind::Meta));
         assert_eq!(lines[lines.len() - 2].kind, DiffLineKind::Meta);
+    }
+
+    #[test]
+    fn fence_close_requires_column_zero() {
+        // 改 markdown 代码块时，diff 的上下文行是 ` ``` `（一个前导空格），
+        // 不能被当成围栏闭合，否则后半个 hunk 会退化成普通文本。
+        let detail =
+            "```diff\n--- a/doc.md\n+++ b/doc.md\n@@ -1,2 +1,2 @@\n ```\n-old\n+new\n```\n\n尾注";
+        let segs = split_detail_segments(detail);
+        assert_eq!(segs.len(), 2, "{segs:?}");
+        match &segs[0] {
+            DetailSegment::Diff(lines) => {
+                assert!(
+                    lines.iter().any(|l| l.text == " ```"),
+                    "缩进围栏应留在 diff 内"
+                );
+                assert_eq!(lines.last().map(|l| l.text.as_str()), Some("+new"));
+            }
+            other => panic!("expected diff, got {other:?}"),
+        }
+        assert!(matches!(&segs[1], DetailSegment::Text(t) if t.contains("尾注")));
     }
 
     #[test]
