@@ -214,6 +214,12 @@ single-connection semantics the Android column above promises — the frontend i
 shells and the shell injects no platform flag, so the viewport breakpoint (`MOBILE_LAYOUT_BREAKPOINT_PX`) is
 the single source rather than a platform check.
 
+Each lane row's tail is the TUI's sequence (`lane_row::tail_parts`: context → elapsed → unread dot),
+and the elapsed seconds come from a **per-lane** start (#577) driven by one window-level 1 s ticker
+that stops when nothing is in flight — a background lane's counter keeps running after you switch
+away, which is the whole point of the reading. The shell's `busy_secs` (per window label, one clock
+for N lanes) is no longer what the rail shows; it stays for the cross-window row.
+
 ### 注 4 · Settings panel editing serve user-data files
 
 

@@ -21,8 +21,9 @@ use super::status_glyph;
 /// - 标题带 `[n/8]` 与 `▲k`（有 lane 在等审批时），数字口径来自共享层
 ///   `lane_row::count_suffix`，与 TUI 同一份；
 /// - 每行 = 状态点（`·●▲×`）+ **名字**（空则回退基址 /「同源」）+ 行尾读数；
-/// - 行尾读数（上下文占比 / 未读点）用共享层 `lane_row::tail_parts`，顺序与降级规则同 TUI；
-///   耗时这一项要 per-lane 回合起点，尚未接上（见 `LaneRailRow` 注释）。
+/// - 行尾读数（上下文占比 / 在途耗时 / 未读点）用共享层 `lane_row::tail_parts`，顺序与降级
+///   规则同 TUI。耗时读**本行自己的起点**、由窗口级心跳推进（#577）—— 所以切到别的 lane
+///   之后，原来那条的秒数继续走（它仍在跑，切走不等于停）；
 ///
 /// 地址不进行内、只进 `title`（TUI 同样只写名字：窄条里地址会把名字挤掉）。
 /// 仍只列**本窗口**的 lane —— 别的窗口有几条看不到（方案 B 的既定降级，见能力矩阵注 3）。
@@ -33,7 +34,7 @@ pub(super) fn LaneRailGroup(locale: RwSignal<Locale>) -> impl IntoView {
     let rail = crate::app::lane_actions::rail();
     view! {
         {move || {
-            let Some((rows, active)) = rail else {
+            let Some((rows, active, now)) = rail else {
                 return ().into_any();
             };
             let all = rows.get();
@@ -61,7 +62,7 @@ pub(super) fn LaneRailGroup(locale: RwSignal<Locale>) -> impl IntoView {
                         </span>
                     </div>
                     {(0..all.len())
-                        .map(|index| lane_rail_row(index, all[index], active, locale))
+                        .map(|index| lane_rail_row(index, all[index], active, now, locale))
                         .collect_view()}
                 </div>
             }
@@ -75,6 +76,7 @@ fn lane_rail_row(
     index: usize,
     row: crate::app::app_signals::LaneRailRow,
     active: RwSignal<usize>,
+    now: RwSignal<f64>,
     locale: RwSignal<Locale>,
 ) -> impl IntoView {
     // 名字优先：空名回退 `host:port`，基址也空（同 Origin）才说「同源」——
@@ -92,11 +94,12 @@ fn lane_rail_row(
         }
     };
     // 行尾读数：顺序与降级规则在共享层（TUI 同一份）。浏览器不做宽度裁剪，CSS 自己截。
+    // 耗时读本行的起点（`now` 由窗口级心跳推进）：切走不等于停，后台那条也在走。
     let tail = move || {
         let context = row.context.get();
         crabmate_client_api::lane_row::tail_parts(crabmate_client_api::lane_row::LaneReadout {
             context: context.as_deref(),
-            busy_secs: None,
+            busy_secs: row.busy_secs(now.get()),
             unread: row.unread.get(),
         })
         .join(" ")

@@ -62,6 +62,13 @@ pub(crate) struct LaneRailRow {
     pub unread: RwSignal<bool>,
     /// 上下文占比短文本（`62%`），与状态栈同一根轴线。
     pub context: RwSignal<Option<String>>,
+    /// 在途回合的起点（毫秒，`performance.now()` 刻度）；`None` = 本行空闲。
+    ///
+    /// 起点由 `app_shell_effects::connection_report` 写（那条 Effect 已经在算「这一帧有没有回合
+    /// 在跑」），刻度由窗口级心跳（`app_shell_effects::lane_busy_clock`）推进 —— 行上只留一次
+    /// 减法。多 lane 时这是**唯一**正确的秒数来源：壳侧按 window label 只记一个 `started_at`
+    /// （`docs/design/desktop_single_window_lanes.md` §8.1）。
+    pub turn_started_at: RwSignal<Option<f64>>,
 }
 
 impl LaneRailRow {
@@ -72,7 +79,16 @@ impl LaneRailRow {
             status: RwSignal::new(ConnectionStatus::Idle),
             unread: RwSignal::new(false),
             context: RwSignal::new(None),
+            turn_started_at: RwSignal::new(None),
         }
+    }
+
+    /// 在途已耗时（秒）；本行空闲时 `None`（行尾那一段整个不出现，不是 `0s`）。
+    ///
+    /// 减法本身在 `lane_busy_clock::busy_secs_from`（host 目标上可测）：写它的那条 `Effect` 在
+    /// 非桌面壳 / 测试里跑不到，判断写在闭包里就永远没有测试。
+    pub(crate) fn busy_secs(&self, now_ms: f64) -> Option<u64> {
+        crate::app::app_shell_effects::busy_secs_from(self.turn_started_at.get(), now_ms)
     }
 }
 
@@ -138,6 +154,11 @@ pub(crate) struct LaneSet {
     /// 与 `lanes` 分开存的原因：`LaneRuntime` 含 `Rc`，进不了响应式系统与视图闭包；
     /// 这里只放 `Copy` 信号句柄，视图读它就能跟着每条 lane 的状态变。
     rail_rows: RwSignal<Vec<LaneRailRow>>,
+    /// 在途耗时的**窗口级刻度**（毫秒，#577）。
+    ///
+    /// 一个刻度服务窗口内全部 lane：每条 lane 各起一个定时器，8 条时就是每秒醒 8 次。推进归
+    /// `app_shell_effects::wire_lane_busy_clock`（有 lane 在跑才起，全空闲就停）。
+    busy_now: RwSignal<f64>,
 }
 
 impl LaneSet {
@@ -158,12 +179,18 @@ impl LaneSet {
             ))])),
             active: RwSignal::new(0),
             rail_rows: RwSignal::new(vec![row]),
+            busy_now: RwSignal::new(0.0),
         }
     }
 
     /// 左栏行数据的响应式来源（下标与 [`Self::len`] 对齐）。
     pub(crate) fn rail_rows(&self) -> RwSignal<Vec<LaneRailRow>> {
         self.rail_rows
+    }
+
+    /// 在途耗时的窗口级刻度（毫秒）；秒数 = 本行起点与它之差。
+    pub(crate) fn busy_now(&self) -> RwSignal<f64> {
+        self.busy_now
     }
 
     /// 取当前前台那条 lane 的运行时（`Rc` 句柄，常数开销）。
@@ -349,6 +376,9 @@ fn lane_storage_label(base_key: Option<&str>, index: usize) -> Option<String> {
 mod tests {
     use super::{LaneRailRow, lane_storage_label, next_index, rail_index_for_base};
     use crabmate_client_api::url::api_base_authority;
+    // `set` 来自 `leptos::prelude::Set`；上面那行 `use leptos::prelude::*` 是模块私有的，
+    // 不会被 `use super::…` 带进来。
+    use leptos::prelude::Set;
 
     #[test]
     fn next_index_wraps_both_ways() {
@@ -402,5 +432,27 @@ mod tests {
         );
         // 空 authority（没基址）一律不算命中 —— 否则会把「同 Origin」误判成任意一条。
         assert_eq!(rail_index_for_base(&rows, ""), None);
+    }
+
+    /// 行尾的「在途耗时」只看本行自己的起点（#577）。
+    ///
+    /// 多 lane 的关键一条：切走的 lane **仍在跑**，秒数不能跟着前台下标变 —— 所以起点挂在行上，
+    /// 而不是「当前 lane」上。切过去 / 切回来都不影响另一条的读数。
+    #[test]
+    fn the_tail_seconds_belong_to_the_row_not_to_the_foreground_lane() {
+        let running = LaneRailRow::new(Some("a".to_string()), "http://a:1".to_string());
+        let idle = LaneRailRow::new(Some("b".to_string()), "http://b:2".to_string());
+        // 空闲：行尾没有这一段（不是 `0s`）。
+        assert_eq!(idle.busy_secs(30_000.0), None);
+
+        running.turn_started_at.set(Some(10_000.0));
+        assert_eq!(running.busy_secs(12_000.0), Some(2));
+        assert_eq!(running.busy_secs(70_000.0), Some(60));
+        // 另一条不受影响。
+        assert_eq!(idle.busy_secs(70_000.0), None);
+
+        // 回合结束 → 起点清掉，读数整个消失。
+        running.turn_started_at.set(None);
+        assert_eq!(running.busy_secs(70_000.0), None);
     }
 }

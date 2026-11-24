@@ -485,6 +485,15 @@ Desktop 同样要求：**列表渲染顺序**与**点击命中换算**共用一�
   壳侧 ticker 只保留给「别的窗口读我这一行」的单 lane 路径。
   单 lane 时两者同源（同一个开始时刻），仍可零行为变化。
 
+**落地（#577）**：起点挂在 lane 行上（`LaneRailRow::turn_started_at`，由
+`app_shell_effects::connection_report` 那条 Effect 写、且幂等 —— 流式期间它会因为上下文变化
+反复重跑）；刻度是**窗口级**的一个 `now`（`app_shell_effects::lane_busy_clock`），只在至少一条
+lane 在跑时起 1 s 定时器、全空闲就 `clear`。秒数仍交给共享层 `tail_parts` →
+`busy_duration_text`（与 TUI 同一份格式，不新写一套）。时钟取 `performance.now()`（单调）而不是
+`Date::now()`：后者是墙钟，NTP 校时或改系统时间会让读数跳一格，而 TUI 为此用的是 `Instant`。
+壳侧 `spawn_busy_ticker` 原样保留 —— 本窗口那条连接行已不再渲染（#569），它只剩「别的窗口读我
+这一行」这一个读者。
+
 ### 8.2 未读：`active` 也算一种「失焦」
 
 现在：`connection_unread_after(窗口focused, busy, prev)`。多 lane 后：

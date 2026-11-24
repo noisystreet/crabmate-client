@@ -24,14 +24,19 @@ use leptos::prelude::RwSignal;
 /// 「新建 lane」动作的句柄：参数是这条 lane 要连的基址（`None` = 沿用当前基址 / 同 Origin）。
 type NewLaneAction = Rc<dyn Fn(Option<String>, Option<String>)>;
 
-/// 左栏 lane 列表的数据源（#561 S3b）：每条 lane 的行读数 + 当前前台下标。
+/// 左栏 lane 列表的数据源（#561 S3b）：每条 lane 的行读数 + 当前前台下标 + 在途心跳刻度。
 ///
-/// 两个都是 `RwSignal`（`Copy` 且 `Send + Sync`），所以能直接进 `move ||` 响应式闭包 ——
+/// 三个都是 `RwSignal`（`Copy` 且 `Send + Sync`），所以能直接进 `move ||` 响应式闭包 ——
 /// 换成 `Rc<RefCell<Vec<_>>>` 会在那里报 `Rc cannot be sent between threads safely`
 /// （§5.2 实测的那道边界）。切换动作走 [`switch_to`]，同样不进闭包。
+///
+/// 第三个（`now`，毫秒）是 #577 加上的：行尾的「在途耗时」要靠它推进，而它是**窗口级**的
+/// 一个刻度 —— 每条 lane 各起一个定时器只会在 8 条 lane 时每秒醒 8 次
+/// （见 `app_shell_effects::lane_busy_clock`）。
 type LaneRailSignals = (
     RwSignal<Vec<super::app_signals::LaneRailRow>>,
     RwSignal<usize>,
+    RwSignal<f64>,
 );
 
 /// 点左栏某一行时切过去。
@@ -66,9 +71,10 @@ pub(crate) fn new_lane(name: Option<String>, base: Option<String>) {
 pub(crate) fn register_rail(
     labels: RwSignal<Vec<super::app_signals::LaneRailRow>>,
     active: RwSignal<usize>,
+    busy_now: RwSignal<f64>,
     switch_to: Rc<dyn Fn(usize)>,
 ) {
-    RAIL.with(|cell| *cell.borrow_mut() = Some((labels, active)));
+    RAIL.with(|cell| *cell.borrow_mut() = Some((labels, active, busy_now)));
     SWITCH_TO.with(|cell| *cell.borrow_mut() = Some(switch_to));
 }
 
