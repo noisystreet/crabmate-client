@@ -96,7 +96,7 @@ Blank cells are forbidden.
 | Open write-tool-card path in IDE | yes | no | reduced | no | 注 11（见文末） |
 | Open changelog path in IDE | planned | no | planned | no | Wave 2.1; wide layout only. |
 | Session restore / accept-reject hunks | planned | planned | planned | no | Server contract first; no fake buttons. |
-| Show branch + uncommitted badge (`GET /workspace/git`) | yes | no | yes | reduced | Desktop: topbar badge next to the workspace title (click = refresh, CSS ellipsis). TUI: appended to the workspace name in the sidebar title and the narrow `ws` segment — `client(main ●3)` — one shared join point, pre-truncated to 26 cols. **Not** the session changelog — that answers a different question. Needs a serve with the route. |
+| Show branch + uncommitted badge (`GET /workspace/git`) | yes | yes | yes | reduced | Topbar badge beside the workspace title on every shell — one component, no platform gate and no media query, so Android/narrow gets it too (CSS ellipsis handles width; this cell used to say `no`, a doc bug). Click = refresh (`?refresh=true`). TUI appends it to the workspace name in the sidebar title and the narrow `ws` segment — `client(main ●3)` — one join point, 26 cols. **Not** the session changelog (different question). 404 renders nothing. DOM: `e2e/specs/mock-workspace-git-badge.spec.ts`. |
 | Commit / open PR from review | planned | no | planned | no | Wave 3.2 / 3.3; Android stays list-oriented. |
 
 ## Out of this matrix
