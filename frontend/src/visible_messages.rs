@@ -161,6 +161,57 @@ mod tests {
         assert_eq!(tui_visible_ids(&messages), ["u", "a1", "a2"]);
     }
 
+    /// Serve 新契约（#593）：技能注入卡默认在主列可见，纯注入旁注默认隐藏；导出跟随同一个开关。
+    #[test]
+    fn skill_card_is_visible_by_default_while_kinds_only_notes_hide() {
+        let skill = "本轮已注入上下文\n{\"kinds\":[],\"skills\":[{\"id\":\"rust-style\",\"source\":\"forced\"}]}";
+        let note = "本轮已注入上下文\n{\"kinds\":[\"memory\"]}";
+        let messages = vec![
+            msg("u", "user", "q", false),
+            msg("sk", "assistant", skill, false),
+            msg("note", "assistant", note, false),
+        ];
+        // 开关关（默认）：技能卡在，纯旁注不在。
+        assert_eq!(tui_visible_ids(&messages), ["u", "sk"]);
+        // 开关开：两者都在。
+        let shown: Vec<&str> = messages
+            .iter()
+            .filter(|m| tui_should_render_message(m, &messages, "s", None, true))
+            .map(|m| m.id.as_str())
+            .collect();
+        assert_eq!(shown, ["u", "sk", "note"]);
+        // 导出仍跟随开关（关时两类旁注都省略，开时都写入）。
+        assert_eq!(
+            visible_message_indices_for_export(&messages, false),
+            vec![0]
+        );
+        assert_eq!(
+            visible_message_indices_for_export(&messages, true),
+            vec![0, 1, 2]
+        );
+    }
+
+    /// 用户自己打的、长得像 detail 的 JSON 不得被当旁注：否则用户看不见自己刚发的消息，
+    /// 示例里第二条连 skill 卡都会被画出来并吞掉原文。
+    #[test]
+    fn user_text_that_looks_like_an_inject_detail_stays_visible() {
+        for raw in [
+            r#"{"kinds":["memory"]}"#,
+            r#"{"kinds":[],"skills":[{"id":"rust-style","source":"forced"}]}"#,
+        ] {
+            let messages = vec![msg("u", "user", raw, false)];
+            assert!(
+                tui_should_render_message(&messages[0], &messages, "s", None, false),
+                "user 消息被当成旁注隐藏：{raw}"
+            );
+            assert_eq!(
+                visible_message_indices_for_export(&messages, false),
+                vec![0],
+                "user 消息被排除出导出：{raw}"
+            );
+        }
+    }
+
     #[test]
     fn export_and_tui_skip_empty_loading_shell() {
         let messages = vec![

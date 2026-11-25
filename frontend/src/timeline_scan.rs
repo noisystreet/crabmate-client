@@ -42,15 +42,24 @@ fn json_object_kind_is_inject(text: &str) -> bool {
         .is_some_and(is_turn_context_inject_kind)
 }
 
+/// 本轮旁注的 detail 判定：注入半边**复用共享层**，裁剪半边留在这里。
+///
+/// 注入半边曾经是这个文件的一份副本（`skills` + `forced` 同时存在才认），而 Serve 的新形状
+/// （`{kinds, skills:[{id,source}]}`，`forced` 不再下发）会让它恒 false —— 于是流式旁注既不被
+/// 隐藏、也不画卡，原始 detail JSON 直接当正文露出来。判定已下沉到
+/// [`crabmate_client_api::timeline_skill::detail_looks_like_context_inject`]（与 TUI 同一份口径，
+/// 按 Serve 真实字节：`kinds` 恒序列化）。
+///
+/// 裁剪半边仍在本文件（[`detail_looks_like_context_trim`]）：本函数同时供裁剪卡与
+/// 「显示每轮注入与窗口裁剪信息」开关使用。
 fn json_looks_like_context_inject_detail(text: &str) -> bool {
+    if crabmate_client_api::timeline_skill::detail_looks_like_context_inject(text) {
+        return true;
+    }
     let Ok(v) = serde_json::from_str::<serde_json::Value>(text.trim()) else {
         return false;
     };
-    let Some(obj) = v.as_object() else {
-        return false;
-    };
-    (obj.contains_key("skills") && obj.contains_key("forced"))
-        || (obj.contains_key("count_hit") && obj.contains_key("n_before"))
+    detail_looks_like_context_trim(&v)
 }
 
 /// 本轮上下文压缩 / 裁剪信息（Server `context_trim` 的 `detail`）。
@@ -235,9 +244,14 @@ pub fn is_turn_context_inject_timeline_text(text: &str) -> bool {
 }
 
 /// 主列 / 导出：本轮注入或裁剪旁注（system 水合行或 assistant 本地 snapshot）。
+///
+/// **`user` 行一律不算**：正文恰为 `{"kinds":[…]}` 的用户消息是用户自己打的字，把它当旁注
+/// 隐藏就等于让用户看不见自己刚发的消息。门控放宽到「含 `kinds`」之后（#593），这条角色
+/// 约束就是「`skills` + `forced`」那层旧防护的对称替代；服务端的两种形态分别是 `system`
+/// （水合 marker）与 `assistant`（流式快照），不会落在 `user` 上。
 #[must_use]
 pub fn is_turn_context_inject_timeline_message(m: &StoredMessage) -> bool {
-    if m.is_tool {
+    if m.is_tool || m.role == "user" {
         return false;
     }
     is_turn_context_inject_timeline_text(&m.text)
@@ -255,9 +269,12 @@ pub use crabmate_client_api::timeline_skill::{
 };
 
 /// 含 skill 调用的上下文注入旁注（主列默认可见）。
+///
+/// `user` 行同样不算：用户手打一段 skill JSON 不是「本轮调用了 skill」，画成卡会连带吞掉原文
+/// 与角色标签（理由同 [`is_turn_context_inject_timeline_message`]）。
 #[must_use]
 pub fn is_skill_inject_timeline_message(m: &StoredMessage) -> bool {
-    !m.is_tool && skill_inject_from_timeline_text(&m.text).is_some()
+    !m.is_tool && m.role != "user" && skill_inject_from_timeline_text(&m.text).is_some()
 }
 
 /// 已落盘的编排路由旁注：导出与聊天列均跳过。

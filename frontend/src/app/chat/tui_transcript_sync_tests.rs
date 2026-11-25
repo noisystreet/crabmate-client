@@ -293,6 +293,36 @@ fn skill_inject_turn_renders_dedicated_card_without_role_label() {
     assert!(!output.contains("chat-tui-tool-process"), "got {output}");
 }
 
+/// Serve 新契约（#593）：`detail.skills` 是对象数组、`forced` 由 `source` 推出——卡片仍要出现。
+///
+/// 这条直接对应 issue 的验收项「带 `/<id>` 的回合 skill 卡恢复出现」；上面那条是旧形状，
+/// 两者都留着，是因为历史落盘会话与新 serve 会同时存在。
+#[test]
+fn skill_inject_card_renders_for_the_structured_contract() {
+    let inject = message(
+        "sk2",
+        "system",
+        r#"{"detail":"{\"kinds\":[],\"skills\":[{\"id\":\"rust-style\",\"source\":\"forced\"}]}","kind":"context_inject","title":"本轮已注入上下文"}"#,
+    );
+    let output = build_html(&[inject], None, &HashSet::new());
+    assert!(output.contains("chat-tui-turn--skill"), "got {output}");
+    assert!(
+        output.contains("data-testid=\"chat-tui-skill-inject\""),
+        "got {output}"
+    );
+    assert!(
+        output.contains("chat-tui-skill-inject-chip"),
+        "got {output}"
+    );
+    assert!(
+        output.contains("chat-tui-skill-inject-forced"),
+        "got {output}"
+    );
+    assert!(!output.contains("chat-tui-role-label"), "got {output}");
+    // 结构化字段不得原样漏进卡片（否则又回到「正文里显示 JSON」的老问题）。
+    assert!(!output.contains("source"), "got {output}");
+}
+
 #[test]
 fn plain_skills_json_message_keeps_role_label_and_no_skill_card() {
     // 普通消息正文恰为 skills JSON：不得画 skill 卡，原文与角色标签都要保留。

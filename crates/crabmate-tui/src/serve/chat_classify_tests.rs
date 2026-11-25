@@ -33,12 +33,15 @@ fn other_timeline_log_kinds_do_not_reset_usage() {
 
 /// `kind=context_inject` 且 `detail.skills` 非空：这一轮确实调用了 skill，要成一行技能行
 /// （对齐 Desktop 的 skill 卡；路径 / `.md` 归一在共享层做）。
+///
+/// Serve #1502 起 `skills` 是对象数组 `{id, source}`，`forced` 由 `source` 推出；技能-only 回合
+/// 的 `kinds` 是空数组（键仍在）。
 #[test]
 fn context_inject_with_skills_yields_skill_line() {
     let line = concat!(
         r#"{"type":"CUSTOM","customType":"timeline_log","data":{"kind":"context_inject","#,
         r#""title":"本轮已注入上下文","#,
-        r#""detail":"{\"skills\":[\"rust-style\",\".crabmate/skills/code-review.md\"],\"forced\":true}"}}"#
+        r#""detail":"{\"kinds\":[],\"skills\":[{\"id\":\"rust-style\",\"source\":\"forced\"},{\"id\":\".crabmate/skills/code-review.md\",\"source\":\"forced\"}]}"}}"#
     );
     match classify_line(line) {
         Ok(LineAction::SkillInject(info)) => {
@@ -47,6 +50,39 @@ fn context_inject_with_skills_yields_skill_line() {
         }
         other => panic!("期望 SkillInject，得到 {other:?}"),
     }
+}
+
+/// 旧形状（`skills` 是字符串数组 + `forced: bool`）：历史落盘 / 旧 serve 仍要成行。
+///
+/// 这条是长期约束而不是过渡代码：历史会话里存的 detail 就是这个形状。
+#[test]
+fn legacy_string_array_skills_still_yield_skill_line() {
+    let line = concat!(
+        r#"{"type":"CUSTOM","customType":"timeline_log","data":{"kind":"context_inject","#,
+        r#""title":"本轮注入","#,
+        r#""detail":"{\"kinds\":[\"memory\"],\"skills\":[\"rust-style\"],\"forced\":true}"}}"#
+    );
+    match classify_line(line) {
+        Ok(LineAction::SkillInject(info)) => {
+            assert_eq!(info.skills, vec!["rust-style"]);
+            assert!(info.forced);
+        }
+        other => panic!("期望 SkillInject，得到 {other:?}"),
+    }
+}
+
+/// 不带 `/<id>` 的回合：`detail` 只有 `kinds`，**不出**技能行（#593 验收项 2）。
+#[test]
+fn context_inject_without_skills_stays_silent() {
+    let line = concat!(
+        r#"{"type":"CUSTOM","customType":"timeline_log","data":{"kind":"context_inject","#,
+        r#""title":"本轮已注入上下文","#,
+        r#""detail":"{\"kinds\":[\"memory\"]}"}}"#
+    );
+    assert!(
+        matches!(classify_line(line), Ok(LineAction::Skip)),
+        "没有 skills 就不该有技能行"
+    );
 }
 
 /// `CUSTOM clarification_questionnaire`：显式注册钩子后必须变成 `LineAction::Clarify`。
