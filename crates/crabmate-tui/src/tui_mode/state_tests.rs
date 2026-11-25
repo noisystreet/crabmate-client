@@ -385,3 +385,37 @@ fn serve_defaults_skip_blank() {
     let d = ServeDefaults::from_status(&v);
     assert_eq!(d.model, None);
 }
+
+/// placeholder 判据换成「不构造整串」的版本后，语义必须与 `trim().is_empty()` 逐字等价
+/// （含全角空格：`char::is_whitespace` 与 `str::trim` 用的是同一套定义）。
+#[test]
+fn input_is_blank_matches_trim_is_empty() {
+    let mut s = UiState::new();
+    assert!(s.input_is_blank(), "空输入算空白");
+    for text in [" ", "\t\n", "\u{3000}", "  \u{3000} \n"] {
+        s.set_input(text);
+        assert!(s.input_is_blank(), "{text:?} 全是空白");
+        assert!(s.current_input().trim().is_empty(), "{text:?} 旧口径同结论");
+    }
+    for text in ["a", " a ", "/", "\u{3000}x"] {
+        s.set_input(text);
+        assert!(!s.input_is_blank(), "{text:?} 含非空白");
+        assert!(
+            !s.current_input().trim().is_empty(),
+            "{text:?} 旧口径同结论"
+        );
+    }
+}
+
+/// 斜杠菜单的「可能前缀」短路是**必要**条件，不能把前导空白后的 `/` 漏掉 —— 那正是
+/// `slash_prefix` 的 `trim_start` 允许的形态。判定本身仍归 `slash_prefix`。
+#[test]
+fn slash_menu_open_keeps_prefix_rules_after_the_cheap_guard() {
+    let mut s = UiState::new();
+    s.set_input("  /he");
+    assert!(s.slash_menu_open(), "前导空白之后仍是前缀态");
+    s.set_input("/he lp");
+    assert!(!s.slash_menu_open(), "前缀里出现空白即不再是候选态");
+    s.set_input("  x/");
+    assert!(!s.slash_menu_open(), "不以 / 开头就不是前缀态");
+}

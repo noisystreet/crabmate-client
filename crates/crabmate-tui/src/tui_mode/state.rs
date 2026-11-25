@@ -615,12 +615,6 @@ impl UiState {
         self.input.iter().collect()
     }
 
-    /// 输入缓冲是否多行（含 `\n`）。
-    #[must_use]
-    pub fn is_multiline(&self) -> bool {
-        self.input.contains(&'\n')
-    }
-
     /// 取走输入并清空（发送后调用）。
     pub fn take_input(&mut self) -> String {
         let s: String = self.input.drain(..).collect();
@@ -704,7 +698,9 @@ impl UiState {
     /// 草稿处于候选态、且没被 Esc 关掉。
     #[must_use]
     pub fn slash_menu_open(&self) -> bool {
-        !self.slash.dismissed && slash_prefix(&self.current_input()).is_some()
+        !self.slash.dismissed
+            && self.draft_may_be_slash()
+            && slash_prefix(&self.current_input()).is_some()
     }
 
     /// 当前候选；菜单关闭 / 非前缀态时为空。
