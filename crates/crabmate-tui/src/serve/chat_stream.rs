@@ -542,6 +542,10 @@ async fn drain_sse_buffer(
         };
         handle_sse_data(client, opts, &data, sink, approval).await?;
     }
+    // 本 chunk 的帧都处理完了：通知攒批的实现方（全屏 TUI）把增量发出去。
+    // 放在 drain 的末尾而不是每个 `handle_sse_data` 之后 —— 一批 = 一个 chunk，
+    // 这样才能真的合并同一 chunk 里的多个增量。
+    sink.on_batch_end()?;
     Ok(())
 }
 
