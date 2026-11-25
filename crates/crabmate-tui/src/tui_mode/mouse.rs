@@ -302,7 +302,9 @@ impl LaneApp<'_> {
         self.st.confirm_delete = None;
         // 列内左右各留 1 列：与 `render_pane` 的内宽口径必须是同一个值。
         let content_width = left.width.saturating_sub(2) as usize;
-        let (rows, cursor, _hint) = sessions_content(&self.st, content_width);
+        // 行数**必须与渲染同一来源**，否则会在「列表够长且光标接近底部」时悄悄错开一行，
+        // 症状是点到的行与反色高亮不同行（见 `sidebar_window` 的模块头）。
+        let (rows, cursor, _hint) = sessions_content(&mut self.st, content_width);
         let Some(pos) = hit_item(
             left,
             column,

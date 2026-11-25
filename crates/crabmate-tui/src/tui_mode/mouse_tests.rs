@@ -214,7 +214,7 @@ fn clicking_a_pane_hides_the_key_hint_until_a_key_arrives() {
         assert_eq!(app.st.focus, Focus::Sidebar);
         assert!(app.st.focus_by_pointer, "鼠标点出来的焦点要打标记");
         assert!(
-            sessions_content(&app.st, 20).2.is_none(),
+            sessions_content(&mut app.st, 20).2.is_none(),
             "鼠标点进会话栏时不显示按键提示"
         );
 

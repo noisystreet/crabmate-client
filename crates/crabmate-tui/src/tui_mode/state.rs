@@ -493,6 +493,8 @@ pub struct UiState {
     /// 放 `UiState` 而不是 `LaneApp`：只有渲染层读它，这样 `draw` 的签名不必多一个参数
     /// （那会波及 `render_tests` 里几十处调用）。图像本身仍由 `background::Background` 持有。
     pub bg_cells: Option<super::background::BgCells>,
+    /// 会话栏条目行的文本缓存（渲染层用；只重建变了的行，见 `sidebar_window::SessionRows`）。
+    pub session_rows: super::sidebar_window::SessionRows,
     /// 工具调用 id → transcript 行号（结果到达时原位更新摘要行）。
     tool_pending: HashMap<String, usize>,
     /// 工具行行号 → 输出全文（`/detail`，issue #428 第 3 条）。
@@ -805,9 +807,9 @@ impl UiState {
     /// 会话行是否正是当前 `conversation_id`（左栏标记 `>`）。
     #[must_use]
     pub fn row_in_use(&self, row: &SessionListRow) -> bool {
-        self.conversation_id
-            .as_deref()
-            .is_some_and(|c| row.server_conversation_id.as_deref() == Some(c))
+        // 判定本身在 `sidebar_window`（那边是自由函数：侧栏缓存拿不到 `&UiState`）。
+        // 两处各写一份就会漂，`>` 标记的语义只该有一处定义。
+        super::sidebar_window::row_in_use(row, self.conversation_id.as_deref())
     }
 
     // ── 审批浮层 ─────────────────────────────────────────────

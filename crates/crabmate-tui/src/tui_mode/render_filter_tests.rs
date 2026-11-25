@@ -30,7 +30,7 @@ fn sidebar_rows_report_filtered_counts_and_the_term() {
     ]);
     st.set_session_filter(Some("登录".into()));
 
-    let rows = sidebar_rows_visible(&st, 40, &st.visible_indices());
+    let rows = sidebar_rows_rebuild(&st, 40, &st.visible_indices());
     let title = rows[0].to_string();
     assert!(title.contains("会话 [2/3]"), "过滤态要报可见/总数：{title}");
     assert!(title.contains("filter: 登录"), "过滤词必须看得见：{title}");
@@ -39,7 +39,7 @@ fn sidebar_rows_report_filtered_counts_and_the_term() {
     assert!(rows[2].to_string().contains("重写登录页"));
 
     st.set_session_filter(Some("压根没有这个词".into()));
-    let rows = sidebar_rows_visible(&st, 40, &st.visible_indices());
+    let rows = sidebar_rows_rebuild(&st, 40, &st.visible_indices());
     assert!(rows[0].to_string().contains("会话 [0/3]"));
     assert!(
         rows[1].to_string().contains("（无匹配）"),
@@ -54,7 +54,7 @@ fn hint_line_switches_to_the_clear_command_while_filtered() {
     st.set_palette(Palette::default());
     st.replace_sessions(vec![row("a", "会话 A", Some("c1"))]);
     st.focus = Focus::Sidebar;
-    let (_, _, hint) = sessions_content(&st, 25);
+    let (_, _, hint) = sessions_content(&mut st, 25);
     assert_eq!(
         hint.map(|h| h.to_string()).unwrap_or_default(),
         SIDEBAR_HINT,
@@ -62,7 +62,7 @@ fn hint_line_switches_to_the_clear_command_while_filtered() {
     );
 
     st.set_session_filter(Some("会话".into()));
-    let (_, _, hint) = sessions_content(&st, 25);
+    let (_, _, hint) = sessions_content(&mut st, 25);
     assert_eq!(
         hint.map(|h| h.to_string()).unwrap_or_default(),
         SIDEBAR_FILTER_HINT,
