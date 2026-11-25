@@ -462,7 +462,7 @@ fn sidebar_rows_marks_current_and_active() {
     ]);
     st.conversation_id = Some("c1".into());
     st.active_session_id = Some("b".into());
-    let rows = sidebar_rows(&st, 20);
+    let rows = sidebar_rows_visible(&st, 20, &st.visible_indices());
     assert_eq!(rows.len(), 3);
     assert!(rows[1].to_string().contains("> Alpha"));
     assert!(rows[2].to_string().contains("* Beta"));
@@ -472,7 +472,7 @@ fn sidebar_rows_marks_current_and_active() {
 fn sidebar_rows_untitled_and_truncate() {
     let mut st = UiState::new();
     st.replace_sessions(vec![row("a", "这是一个很长的会话标题标题", None)]);
-    let rows = sidebar_rows(&st, 10);
+    let rows = sidebar_rows_visible(&st, 10, &st.visible_indices());
     assert!(rows[1].to_string().contains("(untitled)") || rows[1].to_string().contains("…"));
 }
 
@@ -484,7 +484,7 @@ fn sidebar_selected_row_gets_selection_bg_without_a_bar() {
     st.replace_sessions(vec![row("a", "Alpha", Some("c1")), row("b", "Beta", None)]);
     st.selected = 1;
     let width = 20;
-    let rows = sidebar_rows(&st, width);
+    let rows = sidebar_rows_visible(&st, width, &st.visible_indices());
     // 焦点在输入框：底色更淡，但补 BOLD 仍能扫到。
     assert_eq!(rows[2].spans.len(), 1, "选中行不再拆出竖条 span");
     assert!(!rows[2].spans[0].content.contains('▎'), "不画竖条");
@@ -496,7 +496,7 @@ fn sidebar_selected_row_gets_selection_bg_without_a_bar() {
     assert_eq!(rows[1].spans.len(), 1, "未选中行同样只有一个 span");
     // 焦点移到左栏：底色照旧，BOLD 去掉。
     st.focus = Focus::Sidebar;
-    let rows = sidebar_rows(&st, width);
+    let rows = sidebar_rows_visible(&st, width, &st.visible_indices());
     assert_eq!(rows[2].spans[0].style.bg, Some(st.palette.selection_bg));
     assert!(!rows[2].spans[0].style.add_modifier.contains(Modifier::BOLD));
     // 选中行文本吃满整份宽度（不再为竖条扣一列）。

@@ -30,7 +30,7 @@ fn sidebar_rows_report_filtered_counts_and_the_term() {
     ]);
     st.set_session_filter(Some("登录".into()));
 
-    let rows = sidebar_rows(&st, 40);
+    let rows = sidebar_rows_visible(&st, 40, &st.visible_indices());
     let title = rows[0].to_string();
     assert!(title.contains("会话 [2/3]"), "过滤态要报可见/总数：{title}");
     assert!(title.contains("filter: 登录"), "过滤词必须看得见：{title}");
@@ -39,7 +39,7 @@ fn sidebar_rows_report_filtered_counts_and_the_term() {
     assert!(rows[2].to_string().contains("重写登录页"));
 
     st.set_session_filter(Some("压根没有这个词".into()));
-    let rows = sidebar_rows(&st, 40);
+    let rows = sidebar_rows_visible(&st, 40, &st.visible_indices());
     assert!(rows[0].to_string().contains("会话 [0/3]"));
     assert!(
         rows[1].to_string().contains("（无匹配）"),

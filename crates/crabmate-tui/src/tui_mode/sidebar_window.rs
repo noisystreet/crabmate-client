@@ -94,7 +94,8 @@ pub(super) fn render_pane(
     // 窗口起点**粘住**：只在光标越出窗口时最小滚动，结果写回状态供命中检测读。
     let (start, end) = sidebar_window(rows.len(), list_area.height as usize, cursor, *list_start);
     *list_start = start;
-    let shown = sidebar_view(&rows, start, end, width, pal);
+    // 行是**移动**进去的：窗口覆盖全部时 `sidebar_view` 原样交还，不必整表复制一遍。
+    let shown = sidebar_view(rows, start, end, width, pal);
     let list = Paragraph::new(shown).style(Style::new().fg(pal.fg));
     frame.render_widget(list, list_area);
     // 提示行占列内最后一行（高度不足 2 行时没有提示位）。内容自带样式：会话栏是静态

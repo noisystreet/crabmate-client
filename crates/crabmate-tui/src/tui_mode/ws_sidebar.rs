@@ -10,7 +10,7 @@ use unicode_width::UnicodeWidthStr;
 
 use super::palette::Palette;
 use super::render::{
-    SIDEBAR_DELETE_HINT, SIDEBAR_FILTER_HINT, SIDEBAR_HINT, sidebar_rows, truncate_display,
+    SIDEBAR_DELETE_HINT, SIDEBAR_FILTER_HINT, SIDEBAR_HINT, sidebar_rows_visible, truncate_display,
     workspace_basename,
 };
 use super::state::{Focus, UiState};
@@ -165,31 +165,47 @@ fn workspace_sidebar_rows(st: &UiState, width: usize) -> Vec<Line<'static>> {
 ///
 /// 溢出时在标题行尾补 `↑n` / `↓n`（被藏起来的条数）。放标题行而不是上下沿：条目区一行都
 /// 不能浪费，标题行本来就在，且计数与裁剪共用 [`sidebar_window`] 的同一份窗口。
-pub(super) fn sidebar_view<'a>(
-    rows: &[Line<'a>],
+///
+/// **收 owned 的行**：调用方（`render_pane`）拿到的是本帧刚构建的临时量，窗口覆盖全部时
+/// 直接原样交还即可。旧签名收 `&[Line]`，那条路径只能 `to_vec()` —— 每帧把整列每个
+/// `Span` 的 `String` 再复制一遍，而屏幕上只画得下二十来行。
+pub(super) fn sidebar_view(
+    rows: Vec<Line<'static>>,
     start: usize,
     end: usize,
     width: usize,
     pal: &Palette,
-) -> Vec<Line<'a>> {
+) -> Vec<Line<'static>> {
     if rows.is_empty() {
         return Vec::new();
     }
     let items_len = rows.len() - 1;
     if start == 0 && end >= items_len {
-        return rows.to_vec();
+        return rows;
     }
+    let mut items = rows.into_iter();
+    // 标题单独取出：它要按窗口补 `↑n` / `↓n`，而 `title_with_overflow` 返回的是**借用**
+    // 标题 span 的 `Line`，标题一旦在函数末尾 drop 就借不动了 —— 所以这里把它转成 owned
+    // （每帧只有一行，代价可忽略）。
+    let title = items.next().expect("rows 非空已判");
+    let shown = title_with_overflow(&title, start, items_len.saturating_sub(end), width, pal);
     let mut out = Vec::with_capacity(end.saturating_sub(start) + 1);
-    // `end` 是条目区右开区间，标题行占 `rows[0]`，故条目总数为 `rows.len() - 1`。
-    out.push(title_with_overflow(
-        &rows[0],
-        start,
-        items_len.saturating_sub(end),
-        width,
-        pal,
-    ));
-    out.extend(rows[start + 1..=end].iter().cloned());
+    out.push(into_owned_line(shown));
+    // 条目区 `[start, end)`：逐个**移动**（零克隆）。
+    out.extend(items.skip(start).take(end.saturating_sub(start)));
     out
+}
+
+/// 把借用来的 `Line` 转成 `'static`（`Span` 内容 `Cow` → owned）。
+///
+/// 只用在窗口裁剪后的标题行上：它是本模块唯一需要「借用后存活到返回」的行。
+fn into_owned_line(line: Line<'_>) -> Line<'static> {
+    Line::from(
+        line.spans
+            .into_iter()
+            .map(|span| Span::styled(span.content.into_owned(), span.style))
+            .collect::<Vec<_>>(),
+    )
 }
 
 /// 标题行 + 溢出计数（上下都没有隐藏时原样返回，仅多一次 clone）。
@@ -339,12 +355,13 @@ pub(super) fn sessions_content(
         };
         hint_line(text, &st.palette)
     });
-    (
-        sidebar_rows(st, width),
-        // 光标是「可见列表里的位置」：过滤后行号已经不是会话下标了。
-        st.selected_visible_pos().unwrap_or(0),
-        hint,
-    )
+    // 可见集合**只算一次**：`sidebar_rows_visible` 与光标位置吃同一份。
+    // 旧写法在这里各算一次（`sidebar_rows` 内部 + `selected_visible_pos` 内部），
+    // 是每帧路径上多出来的一个 `Vec<usize>` 与一次 O(n) 扫描。
+    let visible = st.visible_indices();
+    // 光标是「可见列表里的位置」：过滤后行号已经不是会话下标了。
+    let cursor = st.selected_visible_pos_in(&visible).unwrap_or(0);
+    (sidebar_rows_visible(st, width, &visible), cursor, hint)
 }
 
 /// 右栏工作区可视内容：返回（行、光标、键盘聚焦时提示行）。
@@ -597,7 +614,7 @@ mod tests {
         let mut rows: Vec<Line<'static>> = vec![Line::from("header")];
         rows.extend((0..10).map(|i| Line::from(format!("item{i}"))));
         let (s, e) = sidebar_window(rows.len(), 4, 7, 0);
-        let v = sidebar_view(&rows, s, e, 20, &pal);
+        let v = sidebar_view(rows, s, e, 20, &pal);
         assert_eq!(v.len(), 4);
         assert!(v.last().unwrap().to_string().contains("item7"));
         assert!(v.first().unwrap().to_string().contains("header"));
@@ -610,7 +627,7 @@ mod tests {
         rows.extend((0..10).map(|i| Line::from(format!("item{i}"))));
         // 高 4 行 = 标题 + 3 条；选中第 7 条 → 上方藏 5 条、下方藏 2 条。
         let (s, e) = sidebar_window(rows.len(), 4, 7, 0);
-        let v = sidebar_view(&rows, s, e, 20, &pal);
+        let v = sidebar_view(rows, s, e, 20, &pal);
         let title = v[0].to_string();
         assert!(title.contains("↑5"), "上方隐藏计数：{title}");
         assert!(title.contains("↓2"), "下方隐藏计数：{title}");
@@ -623,7 +640,7 @@ mod tests {
         let mut rows: Vec<Line<'static>> = vec![Line::from("header")];
         rows.extend((0..3).map(|i| Line::from(format!("item{i}"))));
         let (s, e) = sidebar_window(rows.len(), 5, 1, 0);
-        let v = sidebar_view(&rows, s, e, 20, &pal);
+        let v = sidebar_view(rows, s, e, 20, &pal);
         assert_eq!(v.len(), 4);
         assert!(!v[0].to_string().contains('↑'), "没有隐藏行时不该出现计数");
     }
@@ -644,7 +661,7 @@ mod tests {
         rows.extend((0..5).map(|i| Line::from(format!("item{i}"))));
         // 高 2 行 = 标题 + 1 条；选中第 0 条 → 下方藏 4 条。
         let (s, e) = sidebar_window(rows.len(), 2, 0, 0);
-        let v = sidebar_view(&rows, s, e, 20, &pal);
+        let v = sidebar_view(rows, s, e, 20, &pal);
         let head = &v[0];
         let text = head.to_string();
         assert!(text.contains("2/3"), "计数器该留下：{text}");
