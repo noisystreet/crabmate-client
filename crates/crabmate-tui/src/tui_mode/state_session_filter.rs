@@ -67,9 +67,18 @@ impl UiState {
     /// 选中项在**可见列表**里的位置（渲染光标与鼠标命中都用这个口径）。
     ///
     /// 选中项被过滤掉时返回 `None`：调用方据此避免「光标停在看不见的行上」。
-    #[must_use]
+    ///
+    /// 只给测试与「手上没有可见集合」的调用方用：渲染每帧已经算好了 `visible`，走
+    /// [`Self::selected_visible_pos_in`] 复用同一份 —— 别在这里再跑一遍 `visible_indices`。
+    #[cfg(test)]
     pub fn selected_visible_pos(&self) -> Option<usize> {
         let visible = self.visible_indices();
+        self.selected_visible_pos_in(&visible)
+    }
+
+    /// [`Self::selected_visible_pos`] 的复用版本：可见集合由调用方给。
+    #[must_use]
+    pub fn selected_visible_pos_in(&self, visible: &[usize]) -> Option<usize> {
         visible.iter().position(|&i| i == self.selected)
     }
 

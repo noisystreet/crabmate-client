@@ -369,9 +369,15 @@ pub(super) fn workspace_basename(path: &str) -> String {
 }
 
 /// 左栏内容行：首行标题，其后每会话一行（`>` 当前，`*` serve 活跃，选中高亮）。
-pub(super) fn sidebar_rows(st: &UiState, width: usize) -> Vec<Line<'static>> {
+///
+/// 可见集合由调用方给：`sessions_content` 还要用同一份去定位光标位置
+/// （`selected_visible_pos_in`），每帧只算一次 `visible_indices`。
+pub(super) fn sidebar_rows_visible(
+    st: &UiState,
+    width: usize,
+    visible: &[usize],
+) -> Vec<Line<'static>> {
     let mut rows: Vec<Line<'static>> = Vec::new();
-    let visible = st.visible_indices();
     // 过滤态把条数写成 `[可见/总数]`：只报总数的话，「怎么只剩两条」会像 bug。
     let title = if st.session_filter_active() {
         format!("会话 [{}/{}]", visible.len(), st.sessions.len())
@@ -402,7 +408,7 @@ pub(super) fn sidebar_rows(st: &UiState, width: usize) -> Vec<Line<'static>> {
         )));
         return rows;
     }
-    for &i in &visible {
+    for &i in visible {
         let row = &st.sessions[i];
         let mark = if st.row_in_use(row) {
             ">"
