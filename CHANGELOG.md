@@ -21,6 +21,8 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Changed
 
+- **Sidebar and status-stack rendering stop rebuilding every frame (row + plan caches).**
+
 - **Streamed answers batch per SSE chunk; TUI status refresh runs in parallel.**
 
 - **`/help` is a scrollable overlay now; its command table is shared with the desktop help.**

@@ -368,64 +368,42 @@ pub(super) fn workspace_basename(path: &str) -> String {
     }
 }
 
-/// 左栏内容行：首行标题，其后每会话一行（`>` 当前，`*` serve 活跃，选中高亮）。
+/// 左栏内容行的**无条件重建参照**（仅测试）。
 ///
-/// 可见集合由调用方给：`sessions_content` 还要用同一份去定位光标位置
-/// （`selected_visible_pos_in`），每帧只算一次 `visible_indices`。
-pub(super) fn sidebar_rows_visible(
+/// 生产路径走 `ws_sidebar::sessions_content`（行文本来自 `SessionRows` 缓存）。这里是它
+/// 的「每帧全量重建」等价实现，两条路共用 `session_title_line` / `placeholder_line` /
+/// `cell_text` / `selected_row` —— 所以对照测试断言的是「缓存没漏更新」，而不是某段文字
+/// 长什么样。
+#[cfg(test)]
+pub(super) fn sidebar_rows_rebuild(
     st: &UiState,
     width: usize,
     visible: &[usize],
 ) -> Vec<Line<'static>> {
     let mut rows: Vec<Line<'static>> = Vec::new();
-    // 过滤态把条数写成 `[可见/总数]`：只报总数的话，「怎么只剩两条」会像 bug。
-    let title = if st.session_filter_active() {
-        format!("会话 [{}/{}]", visible.len(), st.sessions.len())
-    } else {
-        format!("会话 [{}]", st.sessions.len())
-    };
-    // 过滤词挂在**标题行**而不是另起一行：`sidebar_window` 假定「首行标题、其余都是条目」，
-    // 多插一行会让滚动窗口与鼠标命中一起偏一行。
-    let title = match st.filter_term() {
-        Some(term) => format!("{title} · filter: {term}"),
-        None => title,
-    };
-    rows.push(Line::from(Span::styled(
-        truncate_display(&title, width),
-        Style::new().fg(st.palette.fg).add_modifier(Modifier::BOLD),
-    )));
+    rows.push(super::ws_sidebar::session_title_line(st, width, visible));
     if st.sessions.is_empty() {
-        rows.push(Line::from(Span::styled(
-            truncate_display("（空）发一条消息后出现", width),
-            Style::new().fg(st.palette.muted),
-        )));
+        rows.push(super::ws_sidebar::placeholder_line(
+            "（空）发一条消息后出现",
+            width,
+            &st.palette,
+        ));
         return rows;
     }
     if visible.is_empty() {
-        rows.push(Line::from(Span::styled(
-            truncate_display("（无匹配）", width),
-            Style::new().fg(st.palette.muted),
-        )));
+        rows.push(super::ws_sidebar::placeholder_line(
+            "（无匹配）",
+            width,
+            &st.palette,
+        ));
         return rows;
     }
     for &i in visible {
         let row = &st.sessions[i];
-        let mark = if st.row_in_use(row) {
-            ">"
-        } else if st.active_session_id.as_deref() == Some(row.id.as_str()) {
-            "*"
-        } else {
-            " "
-        };
-        let title = if row.title.trim().is_empty() {
-            "(untitled)"
-        } else {
-            row.title.trim()
-        };
-        let selected = st.selected == i;
-        // 选中只换底色、不占额外列：文本预算就是整份 `width`（不再为竖条扣一列）。
-        let text = truncate_display(&format!("{mark} {title}"), width);
-        rows.push(selected_row(st, text, selected));
+        let in_use = st.row_in_use(row);
+        let active = st.active_session_id.as_deref() == Some(row.id.as_str());
+        let text = super::sidebar_window::cell_text(row, in_use, active, width);
+        rows.push(selected_row(st, text, st.selected == i));
     }
     rows
 }
@@ -437,12 +415,28 @@ pub(super) fn sidebar_rows_visible(
 /// 焦点是否在本栏靠 `BOLD` —— 底色在失焦时本来就淡一档。
 ///
 /// 未选中行保持裸文本（不设前景色，跟随终端默认），避免整列被 palette 接管。
-fn selected_row(st: &UiState, text: String, selected: bool) -> Line<'static> {
+/// 只给「全量重建参照」与测试用：生产路径拿到的已经是 `&pal` / `focus_sidebar` 两个值
+/// （侧栏渲染期正可变借着 `UiState`），走 [`selected_row_in`]。
+#[cfg(test)]
+pub(super) fn selected_row(st: &UiState, text: String, selected: bool) -> Line<'static> {
+    selected_row_in(&st.palette, st.focus == Focus::Sidebar, text, selected)
+}
+
+/// [`selected_row`] 的「不依赖 `&UiState`」版本。
+///
+/// 侧栏渲染正处于「已可变借出 `st.session_rows`」的借用期内，那时连只读借用 `&st` 都
+/// 不行 —— 所以把用得到的两个值（配色板、焦点是否在本栏）传进来。
+pub(super) fn selected_row_in(
+    pal: &Palette,
+    focus_sidebar: bool,
+    text: String,
+    selected: bool,
+) -> Line<'static> {
     if !selected {
         return Line::from(Span::styled(text, Style::new()));
     }
-    let mut body = st.palette.selection(st.palette.fg);
-    if st.focus != Focus::Sidebar {
+    let mut body = pal.selection(pal.fg);
+    if !focus_sidebar {
         body = body.add_modifier(Modifier::BOLD);
     }
     Line::from(Span::styled(text, body))
