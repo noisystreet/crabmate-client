@@ -77,11 +77,23 @@ async fn save_text_file_via_dialog(
             .to_file_path()
             .map_err(|_| "save dialog returned a non-file URL".to_string())?,
     };
-    std::fs::write(&path, content).map_err(|e| format!("write file failed: {e}"))?;
+    write_file_blocking(path, content.into_bytes()).await?;
     Ok(true)
 }
 
 const MAX_SAVE_BYTES: usize = 16 * 1024 * 1024;
+
+/// 落盘放到阻塞线程池。
+///
+/// 两个保存命令都在 Tauri 的异步 executor 上跑，而一次 `std::fs::write` 最多要写
+/// `MAX_SAVE_BYTES`（16 MiB，图片保存）；磁盘慢时那几百毫秒里，同一 executor 上的其它
+/// 命令（各窗口的 IPC）都得排队。处理方式与 `desktop_ctl` 的 ctl 命令一致。
+async fn write_file_blocking(path: std::path::PathBuf, bytes: Vec<u8>) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || std::fs::write(&path, bytes))
+        .await
+        .map_err(|e| format!("write task failed: {e}"))?
+        .map_err(|e| format!("write file failed: {e}"))
+}
 
 fn save_dialog_basename(name: &str) -> String {
     let Some(last) = name.rsplit(['/', '\\']).find(|s| !s.is_empty()) else {
@@ -127,7 +139,7 @@ async fn save_bytes_file_via_dialog(
             .to_file_path()
             .map_err(|_| "save dialog returned a non-file URL".to_string())?,
     };
-    std::fs::write(&path, bytes).map_err(|e| format!("write file failed: {e}"))?;
+    write_file_blocking(path, bytes).await?;
     Ok(true)
 }
 
