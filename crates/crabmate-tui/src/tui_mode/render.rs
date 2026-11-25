@@ -501,11 +501,16 @@ pub fn draw(
     // 夹取与 `panes_with_lanes` 同一份（幂等），否则「按 34 列算行数、按 20 列画栈」
     // 会让栈里多出或少掉一行，而鼠标点段用的是行数，一漂就点到别的段。
     let layout = st.pane_layout().clamped(area.width);
-    let stack_rows = status_stack::stack_rows(
+    // 配色板先拷出来：`stack_plan` 要用它，而下面回写 `body_at_top` 时也不能同时借 `st`。
+    let pal = st.palette;
+    // 段只建一次：排版取行数、绘制取内容，同一份 plan（见 `status_stack::StackPlan`）。
+    let stack = status_stack::stack_plan(
         info,
         layout.widths.right.saturating_sub(2) as usize,
+        &pal,
         st.status_stack_collapsed,
     );
+    let stack_rows = stack.rows_len();
     // lane 列表**单 lane 也占位**：否则用户在界面上完全看不出自己连的是哪台 serve、
     // 有没有别的连接。高度是左栏的一半（`layout::lane_pane_height`），与条数无关，
     // 条数只影响区内画得出几条（放不下的在标题补 `↓n`）；鼠标命中用的是同一份口径。
@@ -514,7 +519,6 @@ pub fn draw(
     let p = panes_with_lanes(area, layout, stack_rows, lanes.len());
 
     let spin = progress_mark_frame(st, info);
-    let pal = st.palette; // 拷贝：下面要 `&mut st` 回写 `body_at_top`，底栏/浮层仍要调色板
 
     // 宽屏三列；窄屏 `left`/`right` 为 None，聊天列即整个主体。
     if let (Some(left), Some(right)) = (p.left, p.right) {
@@ -558,7 +562,7 @@ pub fn draw(
         super::lane_list::render_lane_list(frame, lane_pane, lanes, pending, &pal);
     }
     if let Some(rs) = p.right_status {
-        render_status_stack(frame, rs, st, info, &pal);
+        render_status_stack(frame, rs, &stack, &pal);
     }
     // 两栏各一条分隔线：画在内容之后，落点是列内本来就空着的留白列，不影响排版。
     // 具体理由与「上下两段贯穿」的口径见 `pane_render::paint_pane_dividers`。
@@ -593,13 +597,13 @@ pub fn draw(
 fn render_status_stack(
     frame: &mut Frame,
     area: Rect,
-    st: &UiState,
-    info: &StatusInfo,
+    plan: &status_stack::StackPlan,
     pal: &Palette,
 ) {
     paint_bg(frame, area, pal.chrome_bg);
     let width = area.width.saturating_sub(2) as usize;
-    let lines = status_stack::stack_lines(info, width, pal, st.status_stack_collapsed);
+    // 内容直接取排版时那一份 plan：不再重算段列表（见 `status_stack::StackPlan`）。
+    let lines = plan.lines();
     // 列内左右各留 1 列，与左右两栏的内容对齐（`render_pane` 同一口径）。
     let inner = Rect::new(area.x.saturating_add(1), area.y, width as u16, area.height);
     frame.render_widget(Paragraph::new(lines), inner);
