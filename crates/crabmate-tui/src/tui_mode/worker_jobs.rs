@@ -200,11 +200,14 @@ pub(super) async fn job_refresh_status(
     conversation_id: Option<&str>,
     out: &LaneTx,
 ) {
-    let mut result = fetch_serve_defaults(client).await;
-    let view = fetch_permission_view(client, conversation_id).await;
-    // 同批拉工作区 git 状态：两者都是「这一屏此刻是什么样」的侧栏读数，拆成两次请求
-    // 只会让状态行在半成品状态上闪一下。
-    let git = fetch_workspace_git(client).await;
+    // 三个 GET 互不依赖，串行 `await` 会把三段延迟直接相加，远端 serve 上就是「状态行要等
+    // 三个 RTT」。合进一次 `join!` 后仍然是**一次** `UiEvent::Status` —— 下面那条「不能在半
+    // 成品状态上闪一下」的约束说的是别分两次 emit，不是要求串行请求。
+    let (mut result, view, git) = tokio::join!(
+        fetch_serve_defaults(client),
+        fetch_permission_view(client, conversation_id),
+        fetch_workspace_git(client),
+    );
     if let Ok(defaults) = result.as_mut() {
         defaults.permission_view = view;
         if let Some((branch, dirty)) = git {
