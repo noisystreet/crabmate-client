@@ -719,7 +719,7 @@ fn run_turn_job(
     out: &LaneTx,
 ) {
     let result = rt.block_on(async {
-        let mut sink = UiSink { out: out.clone() };
+        let mut sink = UiSink::new(out.clone());
         let mut gate: Box<dyn ApprovalGate> = if job.yes {
             Box::new(AutoAllowOnce)
         } else {

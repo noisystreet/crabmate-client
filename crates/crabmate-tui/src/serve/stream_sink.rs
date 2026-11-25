@@ -81,6 +81,15 @@ pub trait StreamSink {
     ) -> Result<(), TermError> {
         Ok(())
     }
+    /// 一批事件的边界（一个 HTTP chunk 里解析出的事件已处理完）。
+    ///
+    /// 存在的理由只有一条：让**攒批**的实现方（全屏 TUI 的 `UiSink`）有个确定的 flush 点。
+    /// 用 chunk 边界而不是时间窗，是因为这里没有定时器可依赖 —— 而 chunk 边界既天然存在，
+    /// 又保证「攒着的东西绝不会跨 chunk 停留」，延迟上限就是一个 chunk 的到达间隔。
+    /// 逐条转发的实现方（文本模式）不需要它，默认空实现即可。
+    fn on_batch_end(&mut self) -> Result<(), TermError> {
+        Ok(())
+    }
     /// 流收尾（flush 等）。
     fn on_finished(&mut self) -> Result<(), TermError> {
         Ok(())
