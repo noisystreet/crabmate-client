@@ -85,6 +85,9 @@ pub(crate) enum LineAction {
     },
     /// `CUSTOM timeline_log` 里 `kind=context_inject` 且 `detail.skills` 非空：
     /// 这一轮确实调用了 skill。Desktop 画 skill 卡，TUI 画一行技能行（ADR 0003）。
+    ///
+    /// `skills` 的两种形状（新对象数组 `{id, source}` / 旧字符串数组 + `forced`）都在共享层
+    /// `crabmate_client_api::timeline_skill` 解析，这里只消费结果。
     SkillInject(SkillInjectInfo),
     /// `CUSTOM clarification_questionnaire`：模型要澄清，下发一份 1～12 题的问卷。
     ///

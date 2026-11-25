@@ -18,6 +18,33 @@ fn context_inject_kind_and_json_body_detected() {
         r#"{"count_hit":true,"n_before":40,"n_after":12}"#
     ));
     assert!(!is_turn_context_inject_timeline_text("hello"));
+    // Serve 新形状（#593）：detail 不再下发 `forced`，注入半边仍必须认出来 —— 否则流式旁注
+    // 既不隐藏也不画卡，原始 detail JSON 会当普通正文露出来。
+    assert!(is_turn_context_inject_timeline_text(
+        "本轮已注入上下文\n{\"kinds\":[],\"skills\":[{\"id\":\"rust-style\",\"source\":\"forced\"}]}"
+    ));
+    assert!(is_turn_context_inject_timeline_text(
+        "本轮已注入上下文\n{\"kinds\":[\"memory\"]}"
+    ));
+}
+
+/// Serve 新形状的技能行/卡：`{kinds, skills:[{id, source}]}`，`forced` 由 `source` 推出。
+#[test]
+fn new_structured_skill_refs_are_recognised() {
+    let streamed = "本轮已注入上下文\n{\"kinds\":[],\"skills\":[{\"id\":\"rust-style\",\"source\":\"forced\"}]}";
+    let info = skill_inject_from_timeline_text(streamed).expect("技能-only 回合也要出卡");
+    assert_eq!(info.skills, vec!["rust-style".to_string()]);
+    assert!(info.forced);
+
+    let hydrated = r#"{"kind":"context_inject","title":"本轮已注入上下文","detail":"{\"kinds\":[\"memory\"],\"skills\":[{\"id\":\"code-review\",\"source\":\"forced\"}]}"}"#;
+    let info = skill_inject_from_timeline_text(hydrated).expect("水合新形状");
+    assert_eq!(info.skills, vec!["code-review".to_string()]);
+    assert!(info.forced);
+
+    // 不带 `/<id>` 的回合：旁注（受「显示每轮注入」开关约束），但**不得**出卡。
+    let kinds_only = "本轮已注入上下文\n{\"kinds\":[\"memory\"]}";
+    assert!(is_turn_context_inject_timeline_text(kinds_only));
+    assert!(skill_inject_from_timeline_text(kinds_only).is_none());
 }
 
 #[test]

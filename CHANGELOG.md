@@ -51,6 +51,8 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Fixed
 
+- **Skill cards and TUI skill rows read `detail.skills` as objects, not strings.**
+
 - **Status and prefs retry themselves on `online` / foreground, with cooldown and backoff.**
 
 - **`perm` reads `~intent` while a level write is unconfirmed, not `intent→level`.**

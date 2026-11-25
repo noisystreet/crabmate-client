@@ -10,7 +10,15 @@ Proposed
 
 **代码事实（Client + 已钉 `crabmate` 0.6.0）**：
 
-- Skill **不是** `tool_call`。L2 把 skills 目录编成索引写入 `system`；L5 按本轮用户消息 Top-K（或 `/<skill-id>` 强制）把 skill **正文**叠进 `system`。聊天 SSE（[Server `SSE协议.md`](https://github.com/noisystreet/CrabMate/blob/main/docs/SSE协议.md)）无 `skill_*` 事件；但已钉 `crabmate` 0.6.0 的 `timeline_log` 在 `kind=context_inject` 时下发结构化 `detail`：`{"kinds":[…],"skills":[…],"forced":bool}`，`skills` 可能同时包含 id 与 `.crabmate/skills/<id>.md` 路径。Client 只吃该结构化字段，不解析 `system` 正文。
+- Skill **不是** `tool_call`。L2 把 skills 目录编成索引写入 `system`；L5 按本轮用户消息 Top-K（或 `/<skill-id>` 强制）把
+  skill **正文**叠进 `system`。聊天 SSE（[Server `SSE协议.md`](https://github.com/noisystreet/CrabMate/blob/main/docs/SSE协议.md)）
+  无 `skill_*` 事件；但 `timeline_log` 在 `kind=context_inject` 时下发结构化 `detail`，Client 两种形状都要认：
+  - **新形状**（Server #1502 起）：`{"kinds":[…],"skills":[{"id":…,"source":"forced"}]}`。`skills` 为空时**该键不出现**；
+    `kinds` 恒在（技能-only 回合是 `kinds: []`）。
+  - **旧形状**（#1478 之前，**含当前契约 pin 的 rev**，历史落盘也是它）：`{"kinds":[…],"skills":["rust-style"],"forced":bool}`；
+    其中的 `skills` 可能同时包含 id 与 `.crabmate/skills/<id>.md` 路径。
+  Serve 侧 detail struct 是 `deny_unknown_fields` 且只写不读，所以旧值的读侧责任全在 client（#593）。
+  Client 只吃该结构化字段，不解析 `system` 正文。
 - 用户显式 `/<id> [任务]`：存盘仍是斜杠原文；展示侧已有用户气泡内联 chip（[`skill_slash_display.rs`](../../frontend/src/message_format/skill_slash_display.rs)、[`tui_transcript_sync.rs`](../../frontend/src/app/chat/tui_transcript_sync.rs) `skill_slash_body_chunks`）。Composer `/` 浮层来自 `GET /skills`（含 `id` / `description` / `path`）。
 - 首轮工作区上下文（活文档、备忘文件、项目画像、依赖摘要）合成 **一条** `role=user`，`name=crabmate_first_turn_workspace_context`（Server `cm_types`）。其中 **从文件读** 的是：
   - `.crabmate/living_docs/` 下 `SUMMARY.md` / `map.md` / `pitfalls.md` / `build.md`（可改相对目录）
@@ -42,13 +50,18 @@ Proposed
 
 **已落地（软字段，非本仓发明契约）**：钉 pin 的 Server `timeline_log` 可带 `kind=context_inject` / `context_trim`（`detail` 形状见 Server `SSE协议.md`）。Client **默认不**把这些旁注画进主列；设置「外观 → 显示每轮注入与窗口裁剪信息」打开后才显示。会话导出（Markdown / JSON）同样**跟随该开关**：关闭时省略，开启时按助手段落导出（水合行可能为 `system`，导出统一按 `assistant` 输出以避免被 `system` 过滤跳过）。这不是阶段 B 的 living_docs 文件路径卡。
 
-**例外（skill 调用卡，本 ADR 阶段 C 的落地形态）**：`context_inject.detail` 含非空 `skills` 时，Client 渲染一张**独立**的 skill 调用卡（label「已调用 skill」/「Skill invoked」，`forced=true` 时附「显式 / explicit」标记，skills 归一化为 skill id 后保序去重（普通路径取 basename 去 `.md`；`<id>/SKILL.md` 这种约定布局取**所在目录名**，因为 `SKILL.md` 每张卡都一样、看不出是哪个 skill；只有上一层目录本身就是 `skills` 时才回退文件名，否则会显示成 `skills`））。该卡：
+**例外（skill 调用卡，本 ADR 阶段 C 的落地形态）**：`context_inject.detail` 含非空 `skills` 时，Client 渲染一张**独立**的 skill 调用卡（label「已调用 skill」/「Skill invoked」，`forced` 时附「显式 / explicit」标记 —— 新形状由 `any(skills[].source == "forced")` 推出，旧形状直接取 `detail.forced`，skills 归一化为 skill id 后保序去重（普通路径取 basename 去 `.md`；`<id>/SKILL.md` 这种约定布局取**所在目录名**，因为 `SKILL.md` 每张卡都一样、看不出是哪个 skill；只有上一层目录本身就是 `skills` 时才回退文件名，否则会显示成 `skills`））。该卡：
 
 - **默认在主列可见**，不受上述「显示每轮注入」开关影响——用户必须能明确确认 skill 确实被调用；导出仍随该开关（避免导出原始 JSON 旁注）。
 - **语义独立于工具卡**：不复用 `ToolCardInput` / `tool_process_body_html`，不显示「助手 / 系统」角色标签，回合 class 为 `chat-tui-turn--skill`；因为 skill 不是 `tool_call`，不得伪装成工具调用。
-- **流式与水合同形**：流式 `title + "\n" + detail` 的 assistant 快照与服务端 `system` marker（`{kind,title,detail}`，`detail` 为 JSON 字符串）共用 `timeline_scan::context_inject_skills` 解析；水合时若服务端已有等价 skill 注入行则丢弃本地快照，避免双卡。
-- **终端形态（TUI）**：解析已下沉 `crates/crabmate-client-api/src/timeline_skill.rs`（Desktop 与 TUI 同一份口径）。TUI 没有卡片，落一行 `✦ 已调用 skill：code-review`（`LineKind::Skill`，前缀 `✦ `、accent 色；多技能按注入顺序以 `、` 连接，`forced` 时尾部「（显式）」）：实时由 `timeline_log` 的 `kind=context_inject` 进 `StreamSink::on_skill_inject`，历史回放由 `ReplayRow::SkillInject` 落同一行文案，两者共用 `tui_mode::skill_line`。技能行**不**进 `/conv export`（导出仍是对话存档）。未对齐项：TUI 的 `show_turn_context_inject` 偏好目前只反序列化、未接线——技能行无条件显示，而无 `skills` 的注入旁注在
-  TUI 不显示。
+- **流式与水合同形**：流式 `title + "\n" + detail` 的 assistant 快照与服务端 `system` marker（`{kind,title,detail}`，`detail` 为 JSON 字符串）共用共享层解析（`timeline_skill::{skill_inject_from_timeline_text, detail_looks_like_context_inject}`）；门控只能靠 detail 的字段集合（流式形态没有 `kind`），故「含 `kinds`」（新旧两代 detail 恒带该键）是主判据，旧形状的 `skills` + `forced` 留作兜底。**未核对**：水合时是否丢弃本地快照以避免双卡——`frontend/src` 里只找到按文本相等的去重，而两种形态的正文文本并不同（#593）。
+- **终端形态（TUI）**：解析已下沉 `crates/crabmate-client-api/src/timeline_skill.rs`（Desktop 与 TUI 同一份口径）。
+  TUI 没有卡片，落一行 `✦ 已调用 skill：code-review`（`LineKind::Skill`，前缀 `✦ `、accent 色；多技能按注入顺序以 `、` 连接，
+  `forced` 时尾部「（显式）」）。注意 Serve 每回合至多写**一条**强制注入（`skill_refs_in_messages` 只取窗口内最后一条），
+  真机上恒单元素，多元素形态只为契约与历史兼容。实时由 `timeline_log` 的 `kind=context_inject` 进 `StreamSink::on_skill_inject`，
+  历史回放由 `ReplayRow::SkillInject` 落同一行文案，两者共用 `tui_mode::skill_line`。技能行**不**进 `/conv export`
+  （导出仍是对话存档）。未对齐项：TUI 的 `show_turn_context_inject` 偏好目前只反序列化、未接线——技能行无条件显示，
+  而无 `skills` 的注入旁注在 TUI 不显示。
 - **无结构化 `skills` 不画卡**：仅 `kinds`（如 `count_hit`）仍走上面的开关旁注路径。
 
 ### 契约与依赖方向
