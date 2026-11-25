@@ -870,7 +870,7 @@ pub(super) fn render_input(frame: &mut Frame, st: &UiState, area: Rect, cursor_a
     let Some(inner) = composer_inner(frame, area, focused, pal) else {
         return;
     };
-    if composer_hint_enabled() && st.current_input().trim().is_empty() {
+    if composer_hint_enabled() && st.input_is_blank() {
         render_composer_placeholder(frame, inner, pal);
     }
     let rows = (composer_rows(st) as usize).min(inner.height as usize);

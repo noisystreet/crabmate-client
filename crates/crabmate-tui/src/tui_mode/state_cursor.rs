@@ -1,8 +1,12 @@
-//! 输入框的光标与按行导航（`backspace` / `delete_forward` / 方向键 / 行首行尾 / 上下行）。
+//! 输入缓冲的只读投影与光标导航（判空 / `/` 前缀必要条件 / `backspace` /
+//! `delete_forward` / 方向键 / 行首行尾 / 上下行）。
 //!
 //! 从 `state.rs` 搬出：`UiState` 的主 `impl` 已经四百多行，而这一组是纯光标算术 ——
 //! 只碰 `input` / `cursor` 两个私有字段，与其余状态无关。搬出去是因为 issue #424 要往
 //! `UiState` 加 `clarify` 字段，而 `state.rs` 正贴着 920 行的文件门禁。
+//!
+//! 两个**只读**投影（`input_is_blank` / `draft_may_be_slash`）也放这里：它们同样是
+//! 「只碰 `input`」的读法，且都是渲染每帧要问的判据 —— 与 `input_line_count` 同一组。
 //!
 //! 子模块才能直接写私有字段（与 `state_paste` / `state_search` 同一手法）。
 
@@ -117,6 +121,37 @@ impl UiState {
     #[must_use]
     pub fn input_line_count(&self) -> usize {
         self.input.iter().filter(|&&c| c == '\n').count() + 1
+    }
+
+    /// 输入缓冲是否多行（含 `\n`）。在 `input_keys` 里决定 ↑/↓ 是「移光标」还是「历史」。
+    #[must_use]
+    pub fn is_multiline(&self) -> bool {
+        self.input.contains(&'\n')
+    }
+
+    /// 输入缓冲是否只有空白（composer 占位提示的判据）。
+    ///
+    /// 与 `current_input().trim().is_empty()` 等价，但**不构造整个字符串**：这个判断每帧
+    /// 都要问一次，长输入下就是每帧一次 O(n) 分配。
+    ///
+    /// 判据用 `char::is_whitespace`，与 `str::trim` 同一套定义 —— 「只有空白」不存在
+    /// 两种口径。
+    #[must_use]
+    pub fn input_is_blank(&self) -> bool {
+        self.input.iter().all(|c| c.is_whitespace())
+    }
+
+    /// 草稿**可能**处于 `/` 前缀态的必要条件：跳过前导空白后首字符是 `/`。
+    ///
+    /// 只是必要条件，不是判定本身 —— 真正的规则仍然只有 `slash_prefix` 一份（还要看
+    /// 后续有没有空白或第二个 `/`）。它挡掉的是「绝大多数时候草稿根本不是斜杠命令」，
+    /// 那一路不必为此把整个输入缓冲 collect 成 `String`。
+    #[must_use]
+    pub(super) fn draft_may_be_slash(&self) -> bool {
+        self.input
+            .iter()
+            .find(|c| !c.is_whitespace())
+            .is_some_and(|c| *c == '/')
     }
 
     /// 上/下行移动光标（列尽量保持，超出 clamp 到行尾）。
