@@ -33,6 +33,8 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 - **Session trim/regenerate rules moved out of the file that also does DOM and IO.**
 
+- **Branching from a user message no longer fails silently when the local session moved on.**
+
 - **"Connect" adds a lane in this window; the rail lists lanes, `Alt+←/→` switches.**
 
 - **Each serve keeps its own base URL, thinking mode and Bearer after switching connections.**

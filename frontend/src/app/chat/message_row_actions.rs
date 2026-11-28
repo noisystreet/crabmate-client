@@ -43,9 +43,14 @@ fn regenerate_dispatch_snapshot(
 }
 
 /// PATH B：仅本地截断当前用户行，并排队 [`ComposerStreamFollowUp::RegenerateAfterTruncate`]。
+///
+/// 截断失败（会话或消息已不在列表里）**必须说出来**：这条路径没有发出任何请求，
+/// 只打日志的结果就是用户在界面上看到「点了没反应」。
 fn local_regenerate_then_stream(
     chat: ChatSessionSignals,
     stream_follow_up: RwSignal<ComposerStreamFollowUp>,
+    status_err: RwSignal<Option<String>>,
+    loc: Locale,
     user_message_id: String,
 ) {
     let mut prep: Option<(String, Vec<String>, String)> = None;
@@ -62,6 +67,9 @@ fn local_regenerate_then_stream(
         });
     } else {
         dbg_log("local regen prep was None");
+        status_err.set(Some(
+            crate::i18n::api_err_local_target_missing(loc).to_string(),
+        ));
     }
 }
 
@@ -93,12 +101,24 @@ async fn post_branch_for_regenerate(
             dbg_log_with("post_chat_branch ok, new_rev", &new_rev.to_string());
             let aid = chat.active_id.get_untracked();
             apply_branch_success_revision(chat, &aid, new_rev);
-            local_regenerate_then_stream(chat, stream_follow_up, req.user_message_id);
+            local_regenerate_then_stream(
+                chat,
+                stream_follow_up,
+                status_err,
+                loc,
+                req.user_message_id,
+            );
         }
         Err(ChatBranchError::NotFound(_)) => {
             // 会话在服务端不存在（server 重启/过期）：清除绑定，降级为本地截断。
             chat.session_sync.update(|s| s.invalidate_conversation_id());
-            local_regenerate_then_stream(chat, stream_follow_up, req.user_message_id);
+            local_regenerate_then_stream(
+                chat,
+                stream_follow_up,
+                status_err,
+                loc,
+                req.user_message_id,
+            );
         }
         Err(e) => {
             dbg_log_with("post_chat_branch err", e.as_deref());
@@ -154,7 +174,7 @@ async fn regenerate_after_revision_refresh(
         }
         _ => {
             dbg_log("revision refresh fell back to local truncate");
-            local_regenerate_then_stream(chat, stream_follow_up, user_message_id);
+            local_regenerate_then_stream(chat, stream_follow_up, status_err, loc, user_message_id);
         }
     }
 }
@@ -216,7 +236,13 @@ impl MessageRowActionSignals {
             }
             _ => {
                 dbg_log("PATH B: local-only (cid or ord is None)");
-                local_regenerate_then_stream(chat, stream_follow_up, user_message_id);
+                local_regenerate_then_stream(
+                    chat,
+                    stream_follow_up,
+                    status_err,
+                    loc,
+                    user_message_id,
+                );
             }
         }
     }
@@ -249,9 +275,19 @@ impl MessageRowActionSignals {
                         Ok(new_rev) => {
                             let aid = chat.active_id.get_untracked();
                             apply_branch_success_revision(chat, &aid, new_rev);
+                            // 服务端已经截断，本地镜像必须跟上：`truncate_at_user_message_branch_local`
+                            // 的文档警告的正是「服务端已截断、本地没截断 → 下次水合把旧尾条带回来」。
+                            let mut truncated = false;
                             chat.update_sessions_message_row(|list| {
-                                let _ = truncate_at_user_message_branch_local(list, &aid, &uid);
+                                truncated = truncate_at_user_message_branch_local(list, &aid, &uid);
                             });
+                            if !truncated {
+                                dbg_log("branch ok but local mirror truncate failed");
+                                status_err.set(Some(
+                                    crate::i18n::api_err_branch_local_mirror_failed(loc_b)
+                                        .to_string(),
+                                ));
+                            }
                         }
                         Err(e) => {
                             let err_display = match &e {
@@ -270,10 +306,19 @@ impl MessageRowActionSignals {
                 });
             }
             _ => {
+                // 纯本地路径：没有请求发出，失败就是「点了没反应」，必须说清原因。
+                let mut truncated = false;
                 chat.update_sessions_message_row(|list| {
                     let aid = chat.active_id.get_untracked();
-                    let _ = truncate_at_user_message_branch_local(list, &aid, &uid);
+                    truncated = truncate_at_user_message_branch_local(list, &aid, &uid);
                 });
+                if !truncated {
+                    dbg_log("local-only branch truncate failed");
+                    status_err.set(Some(
+                        crate::i18n::api_err_local_target_missing(locale.get_untracked())
+                            .to_string(),
+                    ));
+                }
             }
         }
     }
