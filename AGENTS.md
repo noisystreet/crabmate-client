@@ -222,6 +222,7 @@ When updating docs:
 | Chat UI follow-ups (composer / transcript / a11y) | `docs/design/chat_ui_todo.md` |
 | Coding-agent client (review / revert loop; not full IDE) | `docs/design/coding_agent_client.md` (Wave 1 checkboxes stay in `chat_ui_todo.md`; restore/changelog JSON authority is Server) |
 | TUI usability plan (align with Desktop chat) | `docs/design/tui_usability.md` |
+| Session switch while a turn is running (TUI: event session tag + parked slot) | `docs/design/tui_session_switch.md` |
 | TUI settings panel (align with Desktop settings) | `docs/design/tui_settings_panel.md` |
 | TUI multi-server / multi-lane parallel agents | `docs/design/tui_multi_server.md` |
 | Display-crate sink checklist (consumer side) | `docs/design/display_crate_sink.md` |
