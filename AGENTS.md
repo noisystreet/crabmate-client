@@ -102,7 +102,11 @@
   generate ids: the caller injects them (`crate::session_ops` does the Web-side injection and re-exports the rules, so call sites
   do not move). Reason: that is what lets `make test-frontend` (`cargo test --lib` on the **host** target, not wasm) cover them —
   the two regenerate / retry rules had **zero** coverage for as long as they read `js_sys` inline. DOM, logging, clipboard and
-  async timing belong to the call site. No gate script yet — establish the shape first, then gate it (#598)
+  async timing belong to the call site — including the `web_sys::console` debug lines that used to sit inside a hydration closure
+  (the rule now returns what it restored and the call site logs it). Enforced by `scripts/check-domain-purity.sh` (hook +
+  `scripts/check.sh`): a banned token in that tree fails, with `domain-gate: allow <reason>` as the in-place opt-out.
+  Known non-goals: stream-overlay flush, hydration nonce gating and `spawn_local` snapshots stay at the wiring (signals + timing),
+  and rules the TUI shares (`crabmate-client-api`) are not duplicated here
 - XML comment **gate**: no `--` inside the body of any XML comment across the repo (pruned of build output / deps) — XML 1.0 §2.5 forbids it and aapt2 fails resource merging with `注释中不允许出现字符串 "--"`; the usual trap is writing a CSS custom property (`--bg`) or a CLI flag (`--release`) inside a comment — drop the dashed prefix or use plain words; `mobile-tauri/src-tauri/gen/android/**/res/**` is committed Tauri mobile resource source and **is** scanned; enforced by `scripts/check-xml-comments.sh` (hook + `scripts/check.sh`)
 - Toolchain **single source**: the `channel` in `rust-toolchain.toml`, and every `.github/workflows/*.yml` must pin the same compiler via `dtolnay/rust-toolchain@master` + `with: toolchain: <same version>` (never a floating `@stable` / `@beta` / `@nightly`); enforced by `scripts/check-toolchain-pin.sh` (hook + `scripts/check.sh`). Reason: the cargo hooks run the **same** commands as CI's `check` job, so a floating CI toolchain means the local clippy can be older and silently miss a newly added lint — the 2026-11-13 case was `needless_bool` on clippy 1.100 passing under a local 1.98, i.e. green
   pre-commit and a red PR. rustup resolves the file from any sub-package, so do not add a per-package `rust-toolchain.toml`
@@ -144,6 +148,7 @@ bash scripts/check-css-literals.sh       # per-file font-size / color / border-r
 bash scripts/check-token-mirrors.sh      # Android res + boot pages + the desktop window bg + TUI palette must mirror tokens.css (exact-equality, no allowlist)
 bash scripts/check-tui-palette-usage.sh  # tui_mode must not hard-code named / literal colors outside palette.rs
 bash scripts/check-storage-scope.sh      # connection-scoped localStorage keys live only in api/storage_scope.rs; __CM_CONN_KEY__ must match shell ↔ frontend
+bash scripts/check-domain-purity.sh      # frontend/src/domain stays free of DOM / signals / clock / ids (host-testable rules)
 bash scripts/check-icons.sh              # no literal <svg> outside icon.rs; svg rule sizes must be var(--icon-*)
 bash scripts/check-modal-shell.sh        # role / aria-modal only emitted by app/focusable_menu.rs
 bash scripts/check-xml-comments.sh       # no `--` inside XML comment bodies (XML 1.0 §2.5; aapt2 fails resource merging)
