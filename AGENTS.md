@@ -100,6 +100,14 @@
 - XML comment **gate**: no `--` inside the body of any XML comment across the repo (pruned of build output / deps) — XML 1.0 §2.5 forbids it and aapt2 fails resource merging with `注释中不允许出现字符串 "--"`; the usual trap is writing a CSS custom property (`--bg`) or a CLI flag (`--release`) inside a comment — drop the dashed prefix or use plain words; `mobile-tauri/src-tauri/gen/android/**/res/**` is committed Tauri mobile resource source and **is** scanned; enforced by `scripts/check-xml-comments.sh` (hook + `scripts/check.sh`)
 - Toolchain **single source**: the `channel` in `rust-toolchain.toml`, and every `.github/workflows/*.yml` must pin the same compiler via `dtolnay/rust-toolchain@master` + `with: toolchain: <same version>` (never a floating `@stable` / `@beta` / `@nightly`); enforced by `scripts/check-toolchain-pin.sh` (hook + `scripts/check.sh`). Reason: the cargo hooks run the **same** commands as CI's `check` job, so a floating CI toolchain means the local clippy can be older and silently miss a newly added lint — the 2026-11-13 case was `needless_bool` on clippy 1.100 passing under a local 1.98, i.e. green
   pre-commit and a red PR. rustup resolves the file from any sub-package, so do not add a per-package `rust-toolchain.toml`
+- Dependency **lockstep** across the 8 per-package lockfiles: a crate declared **directly** by more than one package must carry the *same* `version` req in
+  every manifest, and one manifest may not declare the same crate twice with different reqs (`dependencies` / `dev-dependencies` / `build-dependencies` /
+  `target.'cfg(..)'.dependencies`); enforced by `scripts/check-dep-lockstep.sh` (hook + `scripts/check.sh`). The contract crate `crabmate` is exempt —
+  its byte-identical pin is `check-boundaries.sh`'s job. Patch-level drift inside a lockfile is **reported only, never fatal**: the eight packages target
+  different platforms (wasm32 / Android / desktop), so `cargo update` lands on different patches, and failing on that would turn every dependency bump into
+  an 8-lockfile edit. Reason: the **declaration** dimension is what a human can get wrong, and it is what duplicates a whole HTTP / TLS stack inside one
+  binary (`reqwest` 0.12 in one package, 0.13 in another); cross-lockfile differences in *transitive* trees are normal — measured 50+ crates differ
+  (`windows-sys` has four versions across packages), so "same crate, same major, repo-wide" would red 50+ crates at once and the gate would lose meaning
 - Web Bearer ≠ model `API_KEY`（Web Bearer：官方壳仅内存 + 本机钥匙串/Android Keystore，**禁止**明文 `localStorage`；model keys 同样走钥匙串/Keystore；chat 经 HTTPS 发送 `client_llm.api_key` — do not `PUT /user-data/secrets/client-llm` from the UI；plain browser may keep weak localStorage with an explicit warning）
 - **Split decision / contracts / SSE / CORS** are authoritative in the Server repo; this repo documents shell behavior and links out
 - Scratch drafts go in **`agent_space/`** (gitignored); **do not** treat `agent_space/` as committed documentation
@@ -136,6 +144,7 @@ bash scripts/check-xml-comments.sh       # no `--` inside XML comment bodies (XM
 bash scripts/check-changelog-style.sh    # `[Unreleased]` entries ≤ 100 chars; released sections are frozen
 bash scripts/check-md-line-length.sh     # every Markdown line <= MAX_COLS display cols (currently the longest existing line, ratcheting down to 160; only fenced code blocks exempt)
 bash scripts/check-toolchain-pin.sh      # rust-toolchain.toml channel must equal every workflow's pinned toolchain
+bash scripts/check-dep-lockstep.sh       # direct deps share one version req across the 8 packages; patch drift is reported, not fatal
 bash scripts/ensure-tauri-dist-stubs.sh  # desktop/mobile dist stubs for tauri codegen
 bash scripts/set-version.sh 0.5.1        # bump all Rust package versions (+ Cargo.locks + shell tauri.conf.json) in one step
 bash scripts/lizard-rust.sh              # any function with CCN>10 fails (global zero rule; no per-module caps)
@@ -204,6 +213,7 @@ When updating docs:
 | Shell smoke / pre-commit / CI commands | `docs/TESTING.md` |
 | Issue / PR templates | `.github/ISSUE_TEMPLATE/` (`bug_report.md` / `feature_request.md` / `config.yml`) + `.github/pull_request_template.md`; keep the three issue files and the PR template consistent in the same PR |
 | Dependency audit (`cargo audit` / `cargo deny`) | `deny.toml`; CI `.github/workflows/dependency-security.yml`; not in pre-commit |
+| Cross-package dependency lockstep (manifest reqs + lockfile report) | `scripts/check-dep-lockstep.sh`; rationale in `AGENTS.md` Hard Constraints |
 | User/maintainer release notes | 注 1（见文末） |
 | Contract pin tag / rev | `docs/design/contract_pin.md`; policy authority is Server |
 | SSE / CORS / Bearer / API base / `CM_WEB_*` / error codes + `request_id` / contract semver | **Server** `docs/`; this repo only links |
