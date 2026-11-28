@@ -4,7 +4,7 @@ use leptos::prelude::*;
 use leptos_dom::helpers::event_target_value;
 
 use crate::app::app_signals::IdeEditorSignals;
-use crate::app::settings_toggle_switch::SettingsToggleSwitch;
+use crate::app::settings::toggle_switch::SettingsToggleSwitch;
 use crate::i18n::{self, Locale};
 
 /// 单个布尔编辑偏好开关（避免组件内重复闭包抬高 CCN）。

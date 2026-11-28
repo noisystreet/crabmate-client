@@ -5,7 +5,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::app::github_embed_page::{github_repo_can_open, try_open_github_embed_from_repo};
-use crate::app::settings_page::{SettingsSection, navigate_to_settings};
+use crate::app::settings::page::{SettingsSection, navigate_to_settings};
 use crate::app_prefs::SidePanelView;
 use crate::chat_session_state::ChatStreamBusyMemos;
 use crate::i18n::{self, Locale};

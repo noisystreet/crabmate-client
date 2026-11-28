@@ -3,11 +3,11 @@
 use leptos::prelude::*;
 
 use super::form_snapshot::{SettingsPageDraftSignals, form_current_untracked};
-use crate::app::settings_commit::{
+use crate::app::settings::commit::{
     CommitAllSettingsInput, commit_all_settings, commit_settings_success_message,
 };
-use crate::app::settings_form_state::SettingsDirtyBaselines;
-use crate::app::settings_mcp_status::{McpSaveJob, McpSettingsPageState, spawn_save_mcp};
+use crate::app::settings::form_state::SettingsDirtyBaselines;
+use crate::app::settings::mcp_status::{McpSaveJob, McpSettingsPageState, spawn_save_mcp};
 use crate::i18n::{self, Locale};
 
 /// `discard_to_baselines` 入参（单结构体以满足 `fn-param` 棘轮）。

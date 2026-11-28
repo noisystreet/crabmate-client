@@ -6,7 +6,7 @@ use wasm_bindgen::JsCast;
 
 use crate::app::app_signals::IdeChromeSignals;
 use crate::app::approval_modal::{ApprovalModalSignals, deny_pending_approval};
-use crate::app::settings_page::navigate_to_chat;
+use crate::app::settings::page::navigate_to_chat;
 use crate::ide_confirm::{IdeConfirmSignals, dismiss_ide_confirm};
 use crate::session_ops::SessionContextAnchor;
 
@@ -163,7 +163,7 @@ fn dismiss_modal_escape_layers(shell: ShellEscapeSignals) -> bool {
         return true;
     }
     if shell.settings_page.get_untracked() {
-        if !crate::app::settings_close_guard::request_settings_page_close() {
+        if !crate::app::settings::close_guard::request_settings_page_close() {
             navigate_to_chat(shell.settings_page);
         }
         return true;

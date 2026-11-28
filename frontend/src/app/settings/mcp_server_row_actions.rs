@@ -3,7 +3,7 @@
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
-use super::settings_mcp_status::{McpSettingsSignals, spawn_probe_mcp_server};
+use super::mcp_status::{McpSettingsSignals, spawn_probe_mcp_server};
 use crate::i18n::{self, Locale};
 
 #[component]

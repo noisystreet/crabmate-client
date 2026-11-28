@@ -4,7 +4,7 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use leptos_dom::helpers::event_target_value;
 
-use super::settings_toggle_switch::SettingsToggleSwitch;
+use super::toggle_switch::SettingsToggleSwitch;
 use crate::api::MainLlmDraftSignals;
 use crate::app_prefs::THEME_SLUGS;
 use crate::i18n::{self, Locale};
@@ -901,5 +901,5 @@ pub(crate) fn SettingsShortcutsBlock(
 }
 
 #[cfg(test)]
-#[path = "settings_sections_tests.rs"]
+#[path = "sections_tests.rs"]
 mod tests;

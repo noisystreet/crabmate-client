@@ -2,10 +2,10 @@
 
 use leptos::prelude::*;
 
-use super::settings_mcp_block_toolbar::SettingsMcpBlockToolbar;
-use super::settings_mcp_json_import::SettingsMcpJsonImportPanel;
-use super::settings_mcp_server_row::SettingsMcpServerRow;
-use super::settings_mcp_status::McpSettingsPageState;
+use super::mcp_block_toolbar::SettingsMcpBlockToolbar;
+use super::mcp_json_import::SettingsMcpJsonImportPanel;
+use super::mcp_server_row::SettingsMcpServerRow;
+use super::mcp_status::McpSettingsPageState;
 use crate::api::user_data::McpServerEntryDto;
 use crate::i18n::{self, Locale};
 

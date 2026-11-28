@@ -66,9 +66,12 @@ DOMAIN_ROOT = "frontend/src/app"
 # 「其它根」**按需登记**：选哪些由评审判断，数字永远实测。
 # 例如 `crates/crabmate-tui/src`（66,459）与其中的 `tui_mode`（57,503）是嵌套关系，
 # 只有后者有意义（11 个 `#[path]` 旁路，见 #597）—— 阈值算不出这种取舍。
+# 注意：手工往 `layout_budget.txt` 增条目时**必须同步加到下面**，否则 `--print-baseline`
+# 会把它漏掉（重新生成基线时等于静默删条目）。
 OTHER_ROOTS = (
     "crates/crabmate-client-api/src",
     "crates/crabmate-tool-card/src",
+    "crates/crabmate-tui/src/serve",
     "crates/crabmate-tui/src/tui_mode",
     "frontend/src/api",
     "frontend/src/i18n",

@@ -19,7 +19,7 @@ use crate::api::{
 };
 use crate::i18n::{self, Locale};
 
-use super::settings_sections::SettingsInstantApplyHint;
+use super::sections::SettingsInstantApplyHint;
 use crate::tauri_shell::tauri_open_external_url;
 
 #[derive(Clone, Copy)]

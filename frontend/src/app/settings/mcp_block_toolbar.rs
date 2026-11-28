@@ -3,10 +3,8 @@
 use leptos::prelude::*;
 use wasm_bindgen::JsCast;
 
-use super::settings_mcp_status::{
-    McpSaveJob, McpSettingsSignals, spawn_probe_all_mcp, spawn_save_mcp,
-};
-use super::settings_toggle_switch::SettingsToggleSwitch;
+use super::mcp_status::{McpSaveJob, McpSettingsSignals, spawn_probe_all_mcp, spawn_save_mcp};
+use super::toggle_switch::SettingsToggleSwitch;
 use crate::api::user_data::McpServersFileDto;
 use crate::i18n::{self, Locale};
 

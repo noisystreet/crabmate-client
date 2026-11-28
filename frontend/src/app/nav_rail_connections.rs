@@ -61,7 +61,7 @@ use super::connection_feed::{
     connection_display_name, connection_feed, ctl_instances_feed, refresh_ctl_instances,
 };
 use super::focusable_menu::{FocusableModalBackdrop, FocusableModalPanel, FocusableRoleMenu};
-use super::settings_page::{SettingsSection, navigate_to_settings};
+use super::settings::page::{SettingsSection, navigate_to_settings};
 use super::shell_runtime_context::try_chat_shell_ctx;
 
 /// 状态点字形。与 TUI 的 `·●▲` 同口径；呼吸动画不进共享层（见 `ConnectionSnapshot`

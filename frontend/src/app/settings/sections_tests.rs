@@ -1,4 +1,4 @@
-//! `settings_sections` 的单测（经 `#[path]` 挂载为 `settings_sections::tests`）。
+//! `sections` 的单测（经 `#[path]` 挂载为 `sections::tests`）。
 //!
 //! 独立成文件是因为 `settings_sections.rs` 已接近 920 行的单文件上限。
 

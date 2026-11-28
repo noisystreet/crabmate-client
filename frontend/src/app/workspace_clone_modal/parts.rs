@@ -143,9 +143,9 @@ fn WorkspaceCloneFailedActions(
                         data-testid="workspace-clone-connect-github"
                         on:click=move |_| {
                             clone_open.set(false);
-                            crate::app::settings_page::navigate_to_settings(
+                            crate::app::settings::page::navigate_to_settings(
                                 settings_page,
-                                crate::app::settings_page::SettingsSection::Github,
+                                crate::app::settings::page::SettingsSection::Github,
                             );
                         }
                     >
