@@ -12,8 +12,8 @@ mod background;
 mod background_cmd;
 mod body_cache;
 // 正文区左键点击的分派（链接 / 折叠 / 兜底）：`on_mouse` 与本文件都贴着门禁，
-// 单独成文件后两边都有余量。
-#[path = "body_click.rs"]
+// 单独成文件后两边都有余量。这里不需要 `#[path]`：模块名与文件名一致（`body_click.rs`），
+// 目录模块（本文件）的同级 `mod` 声明默认就解析到它 —— 属性只是冗余。
 mod body_click;
 // 澄清问卷浮层（issue #424）：绘制 + 多题编辑 + 必填校验，独立成文件
 // 以免 `overlay.rs` / `state.rs` 撞 920 行门禁。
