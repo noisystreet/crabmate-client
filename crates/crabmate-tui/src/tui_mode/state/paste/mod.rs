@@ -1,7 +1,7 @@
 //! 粘贴文本写进输入缓冲：归一化换行 / 制表符、丢弃控制符，再一次性插入。
 //!
-//! 挂在 `state` 下（`#[path]` 子模块）是为了直接操作私有字段 `input` / `cursor`，
-//! 同时压住 `state.rs` 的单文件行数门禁（fn-nloc ≤ 920；`state_tests.rs` 同理）。
+//! 挂在 `state` 下（`state::paste` 子模块）是为了直接操作私有字段 `input` / `cursor`，
+//! 同时压住 `state/mod.rs` 的单文件行数门禁（fn-nloc ≤ 920；`state/tests.rs` 同理）。
 
 use super::UiState;
 
@@ -60,5 +60,4 @@ impl UiState {
 }
 
 #[cfg(test)]
-#[path = "state_paste_tests.rs"]
 mod tests;

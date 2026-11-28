@@ -1,4 +1,4 @@
-//! `state.rs` 的单测（`#[path]` 子模块）：压住单文件行数门禁。
+//! `state/mod.rs` 的单测（同目录 `tests.rs`）：压住单文件行数门禁。
 
 use super::*;
 

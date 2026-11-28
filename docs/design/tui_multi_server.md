@@ -18,7 +18,7 @@
 | 1 | CLI 只有一组全局参数（`--api-base` / `--bearer` / `--llm-*`，均 `global = true` 单值） | `src/main.rs:32-93` | 一次只能连一个 serve |
 | 2 | `run_tui` 只收一个 `&ServeClient` | `src/main.rs:276` | 入口层无法表达多连接 |
 | 3 | `TuiApp` 持单 `client` / `st` / `persisted` / `index` / `resume` / `sent_turn` / `cancel` | `src/tui_mode/mod.rs:86-120` | 状态无归属维度 |
-| 4 | 会话域状态全在 `UiState`（`conversation_id` / `sessions` / 工作区树 / `running` / `cancel_sent`） | `src/tui_mode/state.rs:258-376` | 一份状态只能服务一条会话流 |
+| 4 | 会话域状态全在 `UiState`（`conversation_id` / `sessions` / 工作区树 / `running` / `cancel_sent`） | `src/tui_mode/state/mod.rs` | 一份状态只能服务一条会话流 |
 | 5 | `UiEvent` 各变体**不带来源标识**，`on_msg` 直接写 `self.st` | `src/tui_mode/worker.rs:32-162`、`mod.rs:620` | 无法区分事件属于哪一路 |
 | 6 | 单个 worker 线程 + `current_thread` runtime `block_on` 串行消费 | `src/tui_mode/worker.rs:369-414` | **连同一 serve 的两轮都不能重叠**；回合期间刷新任务全部排队 |
 | 7 | 单取消 `cancel: Option<StreamCancel>` + 单布尔 `st.running` | `mod.rs:101`、`state.rs:274` | 只能取消一路 |

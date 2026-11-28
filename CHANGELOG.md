@@ -27,6 +27,8 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Changed
 
+- **TUI's `UiState` slices move into `state/`; the 11 `#[path]` modules are gone.**
+
 - **Shell UI files move into `app/shell/`; the flat `app/` root shrinks 54 → 21.**
 
 - **Workspace UI files move into `app/workspace/`; the flat `app/` root shrinks 61 → 54.**

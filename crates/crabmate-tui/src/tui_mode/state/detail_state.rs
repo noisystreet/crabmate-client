@@ -1,9 +1,11 @@
 //! `/detail` 的两个类型：侧表的值（`ToolDetail`）与浮层状态（`DetailOverlay`）。
 //!
-//! 拆成 `state.rs` 的子模块只为压那里贴着 920 行的门禁；语义上它们是 `UiState` 的
+//! 拆成 `state` 的子模块只为压那里贴着 920 行的门禁；语义上它们是 `UiState` 的
 //! `tool_details` / `detail` 两个字段的载荷，所以仍然从 `state` re-export。
 //!
-//! 与 `state_fold.rs` 的分工：折叠改「哪些行可见」（可逆开合），详情只读一行现成文本。
+//! 与 `fold` 的分工：折叠改「哪些行可见」（可逆开合），详情只读一行现成文本。
+//! 行为测试在 `tools/tests.rs`：侧表的写入、截断与淘汰都是 `tool_end` 做的，那里才拿得到
+//! 私有 `evict_details` 与 `DETAIL_MAX_CHARS`。
 
 /// 一次工具调用的完整输出（`/detail` 的数据源，issue #428 第 3 条）。
 #[derive(Debug, Clone)]

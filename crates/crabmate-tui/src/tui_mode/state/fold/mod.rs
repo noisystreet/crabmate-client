@@ -556,5 +556,4 @@ impl UiState {
 // 测试拆到独立文件：生产部分已经贴着 920 行门禁，再留 ~590 行测试必然越线
 // （同 render / md / settings_panel 的拆法）。
 #[cfg(test)]
-#[path = "state_fold_tests.rs"]
 mod tests;

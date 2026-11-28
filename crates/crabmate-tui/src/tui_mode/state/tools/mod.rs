@@ -134,6 +134,7 @@ impl UiState {
     }
 }
 
+// `/detail` 侧表的测试挂在本模块内（`tools/tests.rs`）：它要调私有 `evict_details`
+// 与 `DETAIL_MAX_CHARS`，同级目录里没有第二处能拿到。
 #[cfg(test)]
-#[path = "state_detail_tests.rs"]
-mod detail_tests;
+mod tests;
