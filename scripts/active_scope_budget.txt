@@ -30,6 +30,6 @@ frontend/src/app/app_signals/lane_set.rs       1
 # 启动期给 lane0 的行定基址（同 Origin 兜底）：此刻 ACTIVE 就是 lane0 本身。
 frontend/src/app/app_shell_bootstrap.rs        1
 frontend/src/app/connection_feed.rs            1
-frontend/src/app/nav_rail_connections.rs       1
+frontend/src/app/shell/rail/mod.rs               1
 frontend/src/app/settings/sections.rs           1
 frontend/src/app/workspace/root_actions.rs       1

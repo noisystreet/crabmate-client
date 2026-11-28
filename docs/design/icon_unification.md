@@ -38,7 +38,7 @@
 | 文件 | 处数 | 说明 |
 |---|---|---|
 | [workspace_shell.rs](../../frontend/src/workspace_shell.rs) | 10 | 全部经 `svg_common()` 生成 |
-| [side_column_toolbar.rs](../../frontend/src/app/side_column_toolbar.rs) | 6 | 手写 |
+| [shell/side_column/toolbar.rs](../../frontend/src/app/shell/side_column/toolbar.rs) | 6 | 手写 |
 | [chat/column.rs](../../frontend/src/app/chat/column.rs) | 3 | 手写 |
 | [layout_mode_segment.rs](../../frontend/src/app/layout_mode_segment.rs) | 2 | 手写 |
 | [settings/models_registry/preset_list.rs](../../frontend/src/app/settings/models_registry/preset_list.rs) | 2 | 手写 |

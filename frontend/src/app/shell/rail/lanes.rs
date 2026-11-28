@@ -2,7 +2,7 @@
 //!
 //! 单独成文件是行数门禁的要求（`nav_rail_connections.rs` 贴着 920 行），与
 //! `nav_rail_ctl_restart.rs` 同一处置：`#[path]` 只换文件，模块路径仍是
-//! `nav_rail_connections::lanes`。
+//! `rail::lanes`。
 
 use leptos::prelude::*;
 

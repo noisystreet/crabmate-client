@@ -53,20 +53,20 @@ use crate::tauri_shell::{
 };
 
 // 「重启」按钮的状态与提示行单独成文件：本文件贴着 920 行门禁（`fn-nloc`）。
-#[path = "nav_rail_ctl_restart.rs"]
+#[path = "ctl_restart.rs"]
 mod ctl_restart;
 use ctl_restart::{CtlRestartNoticeLine, CtlRestartUi, run_ctl_restart};
 
-use super::connection_feed::{
+use crate::app::connection_feed::{
     connection_display_name, connection_feed, ctl_instances_feed, refresh_ctl_instances,
 };
-use super::focusable_menu::{FocusableModalBackdrop, FocusableModalPanel, FocusableRoleMenu};
-use super::settings::page::{SettingsSection, navigate_to_settings};
-use super::shell_runtime_context::try_chat_shell_ctx;
+use crate::app::focusable_menu::{FocusableModalBackdrop, FocusableModalPanel, FocusableRoleMenu};
+use crate::app::settings::page::{SettingsSection, navigate_to_settings};
+use crate::app::shell_runtime_context::try_chat_shell_ctx;
 
 /// 状态点字形。与 TUI 的 `·●▲` 同口径；呼吸动画不进共享层（见 `ConnectionSnapshot`
 /// 「刻意不含动画相位」），Web 侧靠 CSS transition。
-pub(super) fn status_glyph(status: ConnectionStatus) -> &'static str {
+pub(in crate::app) fn status_glyph(status: ConnectionStatus) -> &'static str {
     match status {
         ConnectionStatus::Idle => "·",
         ConnectionStatus::Running => "●",
@@ -406,7 +406,7 @@ fn ctl_row(
 
 /// 左栏连接区。非桌面壳（Android / Web）整段不渲染：那边没有窗口可以切。
 #[component]
-pub(super) fn NavRailConnections(
+pub(in crate::app) fn NavRailConnections(
     locale: RwSignal<Locale>,
     settings_page: RwSignal<bool>,
 ) -> impl IntoView {
@@ -504,15 +504,15 @@ pub(super) fn NavRailConnections(
     }
 }
 
-#[path = "nav_rail_lanes.rs"]
+#[path = "lanes.rs"]
 mod lanes;
 use lanes::LaneRailGroup;
 
-#[path = "nav_rail_other_windows.rs"]
+#[path = "other_windows.rs"]
 mod other_windows;
 use other_windows::OtherWindowsGroup;
 
-#[path = "nav_rail_authorities.rs"]
+#[path = "authorities.rs"]
 mod authorities;
 use authorities::{lane_authority_signal, other_window_rows, taken_authorities_signal};
 
@@ -717,7 +717,7 @@ mod rename_tests {
 mod rename_wiring_source_tests {
     #[test]
     fn the_rename_entry_is_a_right_click_menu_on_the_own_row() {
-        let src = include_str!("nav_rail_connections.rs");
+        let src = include_str!("mod.rs");
         // 壳侧只能改自己：右键处理器必须先判 is_active（别人那行不弹空菜单）
         assert!(src.contains("on:contextmenu="));
         assert!(src.contains("if !is_active {"));
