@@ -25,7 +25,7 @@ frontend/src/app/settings                     lines=7285   scope=recursive  # �
 frontend/src/app/workspace                    lines=2055   scope=recursive  # 工作区域（panel/ + clone_modal/ + 各弹窗）；搬入时只改路径不改逻辑（PR-3）
 frontend/src/app/shell                        lines=6738   scope=recursive  # Shell 域（status/ + rail/ + side_column/ + bootstrap/ctx/init/wire_phases）；只搬不改逻辑（PR-4）
 frontend/src/app/ide                          lines=2652   scope=recursive  # IDE 域（编辑器列 + menu_bar/ + settings_page/）；只搬不改逻辑（PR-5）
-frontend/src/app/chat                         lines=25613  scope=recursive  # 全仓最大域；第二层划分待做（composer_stream 的 delta / timeline / callbacks）；+2 是 PR-4 路径改写后 rustfmt 换行
+frontend/src/app/chat                         lines=25683  scope=recursive  # 全仓最大域；第二层划分待做（composer_stream 的 delta / timeline / callbacks）；+2 是 PR-4 路径改写后 rustfmt 换行；+70 = #616 的 A（执行中改走共享渲染器）/ C（剥机器状态行）+ 两条用例，已扣除删掉的 `to_single_line` 副本
 frontend/src/app/app_shell_effects            lines=2008   scope=recursive  # shell 阶段效应，与 app_shell_wire_phases 同生命周期
 frontend/src/app/app_signals                  lines=1783   scope=recursive  # 信号定义；lane_set / owner-dispose 高风险区，不参与首轮搬家
 frontend/src/app/sidebar_nav                  lines=1321   scope=recursive  # 与根级 nav_rail* / side_column* 合并进 shell 域（PR-4）
@@ -36,4 +36,4 @@ crates/crabmate-client-api/src                lines=14677  scope=recursive  # TU
 frontend/src/api                              lines=8484   scope=recursive  # HTTP / SSE / 存储作用域
 frontend/src/i18n                             lines=6108   scope=recursive  # 文案表，已按域分文件
 crates/crabmate-tui/src/serve                 lines=5911   scope=recursive  # 远程 serve 客户端，与 tui_mode 平级
-crates/crabmate-tool-card/src                 lines=3088   scope=recursive  # 工具卡 compact / detail，与 Server 契约同源
+crates/crabmate-tool-card/src                 lines=3100   scope=recursive  # 工具卡 compact / detail，与 Server 契约同源；+12 = 导出 `COMPACT_MAX_CHARS` / `compact_one_line` 供两态共用（#616 的 D）

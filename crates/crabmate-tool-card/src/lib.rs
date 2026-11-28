@@ -23,5 +23,8 @@ pub use diff_view::{
 pub use input::{NormalizedToolSnapshotFields, ToolCardInput};
 pub use locale::{ToolCardLocale, tool_human_name};
 pub use parse::{looks_like_crabmate_tool_envelope, parse_tool_envelope};
-pub use stored::{ToolStoredText, tool_stored_text, tool_stored_text_from_envelope};
+pub use stored::{
+    COMPACT_MAX_CHARS, ToolStoredText, compact_one_line, tool_stored_text,
+    tool_stored_text_from_envelope,
+};
 pub use strip_ansi::strip_ansi_codes;

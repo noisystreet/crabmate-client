@@ -17,6 +17,10 @@ use crate::sse_dispatch::{ToolJobState, ToolOutputChunkInfo, ToolResultInfo};
 use crate::storage::{StoredMessage, StoredMessageState};
 use crate::timeline_scan::timeline_state_tool;
 use crabmate_client_api::tool_display::{ToolDisplayInput, tool_display_line};
+use crabmate_tool_card::{
+    ToolCardInput, ToolCardLocale, compact_one_line, tool_card_compact_text, tool_card_text,
+    tool_human_name,
+};
 
 use super::super::super::context::ChatStreamCallbackCtx;
 use super::super::super::per_stream_accum::PerStreamAccum;
@@ -348,6 +352,14 @@ fn capture_write_tool_file_path(
     });
 }
 
+/// 共享渲染器的 locale（工具卡文案在 `crabmate-tool-card`，与 TUI 同一份）。
+fn tool_card_locale(locale: Locale) -> ToolCardLocale {
+    match locale {
+        Locale::ZhHans => ToolCardLocale::ZhHans,
+        Locale::En => ToolCardLocale::En,
+    }
+}
+
 /// 共享推导的薄封装：`full`（完整参数）与 `preview`（截断预览）分别试一次。
 fn tool_display_line_for(name: &str, summary: &str, args: Option<&str>) -> Option<String> {
     tool_display_line(&ToolDisplayInput {
@@ -377,8 +389,8 @@ pub(in super::super) fn chat_stream_on_tool_call_builder(
                 &stream_ctx.shell.stream,
                 StreamControlEvent::ToolCallDeclared,
             );
-            let _ = goal_id;
             let loc = stream_ctx.locale.get_untracked();
+            let card_loc = tool_card_locale(loc);
             // 展示文本推导统一走 `crabmate-client-api` 的共享纯逻辑（TUI 同一份）：它会认出
             // Server 的 `tool: <name>` 占位串，改从参数 JSON 取 `command`/`path`/`pattern`。
             let derived = tool_display_line_for(&name, &summary, full.as_deref())
@@ -390,18 +402,41 @@ pub(in super::super) fn chat_stream_on_tool_call_builder(
                     format!("{}{}", i18n::tool_card_prefix(loc), name.trim())
                 }
             });
-            let text = to_single_line(&core, 180);
-            // `$ …` 只在真有命令行时加：core 落到 i18n 兜底（`工具：run_command`）时，
-            // 再加提示符就成了 `$ 工具：run_command` 这种错位。
-            let detail = if name.trim() == "run_command" {
-                match derived {
-                    Some(cmd) => format!("tool: {name}\nstatus: running\n$ {cmd}"),
-                    None => format!("tool: {name}\nstatus: running"),
-                }
-            } else if !name.trim().is_empty() {
-                format!("tool: {name}\nstatus: running")
+            // 单行与展开区**都交给共享渲染器**（issue #616 的 A）：执行中只是「同一份输入 +
+            // `ok = None` + 空 output」；`on_tool_result` 用 `ok = Some(..)` + output 调同一对
+            // 函数 —— 两态因此同句式，展开区只追加结果段，而不是换一套模板重画。
+            //
+            // 名字用共享层的**人类名**（未知工具回落原名）：完成态本来就显示人类名，执行中
+            // 不跟上的话，同一张卡会在完成那一刻把「命令执行」换成 `run_command`。
+            // 名字为空（异常流 / 旧数据）时**不能**交给渲染器 —— 它对空 name 返回空串，
+            // 卡片会一片空白；用 `tool_card_fallback` 兜底。
+            let name_trim = name.trim();
+            let (text, detail) = if name_trim.is_empty() {
+                (
+                    compact_one_line(i18n::tool_card_fallback(loc)),
+                    String::new(),
+                )
             } else {
-                "status: running".to_string()
+                let running = ToolCardInput {
+                    name: tool_human_name(card_loc, name_trim),
+                    goal_id,
+                    tool_call_id: tool_call_id.clone(),
+                    result_version: 1,
+                    summary: Some(summary.clone()),
+                    output: String::new(),
+                    ok: None,
+                    exit_code: None,
+                    error_code: None,
+                    failure_category: None,
+                    structured_preview: None,
+                    tool_job_id: None,
+                    tool_job_poll_url: None,
+                    tool_job_status: None,
+                };
+                (
+                    compact_one_line(&tool_card_compact_text(&running, card_loc)),
+                    tool_card_text(&running, card_loc),
+                )
             };
             let id = make_message_id();
             let tcid = tool_call_id

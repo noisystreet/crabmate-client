@@ -171,7 +171,7 @@ fn tool_summary_line(
     }
     // 工具名已在 `.chat-tui-tool-name`；勿把 compact 里的 id / 人类名再拼进 one-line。
     tool_signal_beside_tool(&id, &compact, tool_card_locale(locale))
-        .map(|s| truncate_one_line(&s, 180))
+        .map(|s| truncate_one_line(&s, crabmate_tool_card::COMPACT_MAX_CHARS))
         .unwrap_or_default()
 }
 
@@ -190,6 +190,14 @@ fn tool_detail_body(
             detail = format!("{detail}\n{chunk}");
         }
     }
+    // 机器状态行不进展开区（issue #616 的 C）：`status: running` 在非 Loading 态是没走到收口的
+    // 残留，`status: stopped/interrupted` 是收口写的数据层标记 —— 状态符与 label 已表达同一件
+    // 事，展开区再显示一行未本地化的英文只会中英混杂。
+    let loading = matches!(
+        message.state,
+        Some(crate::storage::StoredMessageState::Loading)
+    );
+    detail = crate::message_loading::strip_machine_status_lines(&detail, loading);
     tool_detail_scrub_row_redundancy(
         &tool_id(message),
         &detail,
@@ -501,6 +509,50 @@ mod tests {
         let fields = tool_row_live_fields(&message, Locale::ZhHans, None, None);
         assert_eq!(fields.status, "⚠️");
         assert_eq!(fields.status_label, "已中断");
+    }
+
+    #[test]
+    fn a_finished_tool_row_drops_the_stale_running_line() {
+        let message = StoredMessage {
+            id: "t2".into(),
+            role: "system".into(),
+            text: "命令执行 cargo test".into(),
+            reasoning_text: "tool: run_command\nstatus: running\n$ cargo test".into(),
+            image_urls: vec![],
+            // 非 Loading = 已完成 / 已中断，占位模板里那一行是残留。
+            state: None,
+            is_tool: true,
+            tool_call_id: Some("tc2".into()),
+            tool_name: Some("run_command".into()),
+            created_at: 0,
+        };
+        let html = tool_process_body_html(&message, Locale::ZhHans, None, None, None);
+        assert!(
+            !html.contains("status: running"),
+            "残留的占位行必须被剥掉：{html}"
+        );
+        assert!(html.contains("cargo test"), "其余内容要保留：{html}");
+    }
+
+    #[test]
+    fn a_running_tool_row_keeps_its_status_line() {
+        let message = StoredMessage {
+            id: "t3".into(),
+            role: "system".into(),
+            text: "命令执行 cargo test".into(),
+            reasoning_text: "tool: run_command\nstatus: running\n$ cargo test".into(),
+            image_urls: vec![],
+            state: Some(crate::storage::StoredMessageState::Loading),
+            is_tool: true,
+            tool_call_id: Some("tc3".into()),
+            tool_name: Some("run_command".into()),
+            created_at: 0,
+        };
+        let html = tool_process_body_html(&message, Locale::ZhHans, None, None, None);
+        assert!(
+            html.contains("status: running"),
+            "Loading 态那一行是真的，不能剥：{html}"
+        );
     }
 
     #[test]

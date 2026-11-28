@@ -43,6 +43,35 @@ fn apply_tool_status_line(reasoning: &mut String, status_line: &str) {
     }
 }
 
+/// 去掉渲染层不该出现的**机器状态行**。
+///
+/// - `status: running`：只在非 Loading 态剥 —— Loading 时它还是真的；非 Loading 时它是
+///   「没走到收口」的残留（崩溃 / 旧版本写入的会话）。
+/// - `status: stopped (user)` / `status: interrupted (stale)`：这两个是收口写进
+///   `reasoning_text` 的**数据层标记**（见 [`apply_tool_status_line`] /
+///   [`ToolLoadingFinalizeKind`]），行首状态符与 `status_label` 已经表达了同一件事；
+///   展开区再显示一行未本地化的英文，会让中文卡片中英混杂。
+pub(crate) fn strip_machine_status_lines(detail: &str, loading: bool) -> String {
+    let has_machine_line = detail.contains("status: running")
+        || detail.contains("status: stopped (user)")
+        || detail.contains("status: interrupted (stale)");
+    if !has_machine_line {
+        return detail.to_string();
+    }
+    detail
+        .lines()
+        .filter(|line| {
+            let t = line.trim();
+            let running = t == "status: running";
+            let terminal = t == "status: stopped (user)" || t == "status: interrupted (stale)";
+            !((running && !loading) || terminal)
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim_end()
+        .to_string()
+}
+
 /// 将仍处 `Loading` 的工具时间线占位收口（清 `Loading`、替换「执行中」文案与 `status: running`）。
 pub fn finalize_loading_tool_placeholders(
     messages: &mut [StoredMessage],
