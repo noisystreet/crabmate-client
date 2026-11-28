@@ -16,7 +16,8 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = "1"
-# 背景图走 kitty 协议要以 base64 传输；用锁文件里已有的 0.22，不再多拉一份。
+# 背景图走 kitty 协议要以 base64 传输；与 reqwest 0.13 的 ^0.23 共用一份。
+# 不要再降到 0.22：那是 hyper-util 侧要的，reqwest 仍需 ^0.23，降级只会让本包也多出一份。
 base64 = "0.23"
 clap = { version = "4", features = ["derive", "env"] }
 crabmate = { git = "https://github.com/noisystreet/CrabMate", rev = "e3f56e6ed2a8d4a0404af75d1f6acf23dd5bde6b", default-features = false, features = ["protocol"] }
