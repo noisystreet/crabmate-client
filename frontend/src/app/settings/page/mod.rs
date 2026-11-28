@@ -1,4 +1,4 @@
-//! 设置页面：全屏视图与路由/布局子模块（`SettingsPageView` 实现在 `settings_page/view.rs`；壳级 `Effect` 在 **`effects.rs`**，顶栏在 **`header.rs`**）。
+//! 设置页面：全屏视图与路由/布局子模块（`SettingsPageView` 实现在 `page/view.rs`；壳级 `Effect` 在 **`effects.rs`**，顶栏在 **`header.rs`**）。
 
 pub(crate) mod chrome;
 pub(crate) mod dom_preview;

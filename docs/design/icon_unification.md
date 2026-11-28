@@ -41,12 +41,12 @@
 | [side_column_toolbar.rs](../../frontend/src/app/side_column_toolbar.rs) | 6 | 手写 |
 | [chat/column.rs](../../frontend/src/app/chat/column.rs) | 3 | 手写 |
 | [layout_mode_segment.rs](../../frontend/src/app/layout_mode_segment.rs) | 2 | 手写 |
-| [settings_models_registry/preset_list.rs](../../frontend/src/app/settings_models_registry/preset_list.rs) | 2 | 手写 |
+| [settings/models_registry/preset_list.rs](../../frontend/src/app/settings/models_registry/preset_list.rs) | 2 | 手写 |
 | [status_agent_role_menu.rs](../../frontend/src/app/status_agent_role_menu.rs) | 1 | 手写 |
-| [settings_page/header.rs](../../frontend/src/app/settings_page/header.rs) | 1 | 手写，**无 `class`** |
+| [settings/page/header.rs](../../frontend/src/app/settings/page/header.rs) | 1 | 手写，**无 `class`** |
 | `ide_settings_page/view_header.rs`（已重构，现为 `ide_settings_page/view.rs` 等） | 1 | 手写，**无 `class`** |
 | [status_session_mode_seg.rs](../../frontend/src/app/status_session_mode_seg.rs) | 1 | 手写 |
-| [settings_models_registry/mod.rs](../../frontend/src/app/settings_models_registry/mod.rs) | 1 | 手写 |
+| [settings/models_registry/mod.rs](../../frontend/src/app/settings/models_registry/mod.rs) | 1 | 手写 |
 
 `workspace_shell.rs` 已有局部工厂函数，但只服务自己的 10 个图标：
 
@@ -246,7 +246,7 @@ fn svg_common() -> (&'static str, &'static str, &'static str, &'static str, &'st
   2. `…` @ `chat/tui_stream_dom_sync.rs:747` —— 文档清单此处有误，实测是 `#[test]` 内的测试桩数据 → 保留。
   3. `×` @ `chat/chat_image_lightbox.rs:270` —— 命令式 `web_sys` 建 DOM。原文档（第 158 行）记为「WASM 外的 JS 片段、可能访问不到组件」**有误**：该函数是 WASM 内的 Rust，与 Leptos 同 crate、组件可达。但实测替换代价高于收益，故仍保留文本，理由见下方「第 3 步补：原生 DOM 路径复评」。
   4. `●`（脏标记，本质小圆点）、`—`（空值占位，排版符号）、CSS `content` 的 `◈`（`layout-chat.css:365`）与 `▾`（`layout-chat.css:371`，伪元素放不下 SVG）。
-  5. 文档盘点未列、审查阶段一并登记为「保留」的同类项：`▸` @ [chat/tui_tool_process.rs](../../frontend/src/app/chat/tui_tool_process.rs)（**HTML 字符串**经 `set_inner_html` 注入，无元素句柄；`layout-chat.css` 靠 `transform: rotate(90deg)` 表达展开态，复评见下）、` ✓` @ [settings_mcp_status.rs](../../frontend/src/app/settings_mcp_status.rs)（保存成功反馈文案的后缀排版符号）、`⚙️` 等工具卡 emoji @ [i18n/tool_cards.rs](../../frontend/src/i18n/tool_cards.rs)（工具种类的彩色 emoji 体系，属另一议题）。
+  5. 文档盘点未列、审查阶段一并登记为「保留」的同类项：`▸` @ [chat/tui_tool_process.rs](../../frontend/src/app/chat/tui_tool_process.rs)（**HTML 字符串**经 `set_inner_html` 注入，无元素句柄；`layout-chat.css` 靠 `transform: rotate(90deg)` 表达展开态，复评见下）、` ✓` @ [settings/mcp_status.rs](../../frontend/src/app/settings/mcp_status.rs)（保存成功反馈文案的后缀排版符号）、`⚙️` 等工具卡 emoji @ [i18n/tool_cards.rs](../../frontend/src/i18n/tool_cards.rs)（工具种类的彩色 emoji 体系，属另一议题）。
 
 ### 第 3 步补：原生 DOM 路径的 `×` / `▸` 复评 —— 结论为「保留文本」
 
