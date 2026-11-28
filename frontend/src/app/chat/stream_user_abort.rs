@@ -11,14 +11,14 @@
 
 use crate::app::turn_lifecycle::turn_lifecycle_stream_turn_busy;
 use crate::chat_session_state::{ChatSessionSignals, session_has_loading_tool_message};
-use crate::i18n;
-use crate::i18n::Locale;
-use crate::message_loading::{
-    ToolLoadingFinalizeKind, is_loading_plain_assistant, messages_have_loading_tool,
+use crate::domain::session::{
+    finalize_user_abort_in_session, last_loading_assistant_id, stop_loading_tool_rows_if_any,
+    stop_superseded_assistant_loading_rows, superseded_loading_assistant_ids,
 };
-use crate::storage::StoredMessage;
-use crate::stream_text_overlay::stream_overlay_take_into_stored_message;
-use leptos::prelude::GetUntracked;
+use crate::i18n::Locale;
+use crate::storage::{ChatSession, StoredMessage};
+use crate::stream_text_overlay::{StreamTextOverlay, stream_overlay_take_into_stored_message};
+use leptos::prelude::{GetUntracked, RwSignal};
 
 use super::composer_stream::{
     abort_in_flight_stream, mark_user_cancelled, spawn_post_chat_stream_cancel,
@@ -34,31 +34,32 @@ pub(crate) fn finalize_superseded_assistant_loading_rows_except(
     loc: Locale,
 ) {
     chat.update_sessions_composer(|list| {
-        let Some(session) = list.iter_mut().find(|s| s.id == session_id) else {
-            return;
-        };
-        for m in session.messages.iter_mut() {
-            if !is_loading_plain_assistant(m) {
-                continue;
-            }
-            if m.id == keep_asst_id {
-                continue;
-            }
-            let mid = m.id.clone();
-            stream_overlay_take_into_stored_message(
-                chat.stream_text_overlay,
-                session_id,
-                mid.as_str(),
-                m,
-            );
-            m.state = None;
-            if m.text.trim().is_empty() && m.reasoning_text.trim().is_empty() {
-                m.text = i18n::stream_stopped_inline(loc).to_string();
-            } else {
-                m.text.push_str(i18n::stream_stopped_suffix(loc));
-            }
+        // overlay 是信号（副作用），只能在这一层 flush；顺序上必须在前 ——
+        // 域层按 `text` 判断「已有内容」，反了就会把已经流出来的正文换成「已终止」。
+        for mid in superseded_loading_assistant_ids(list, session_id, keep_asst_id) {
+            flush_stream_overlay_for_message(list, session_id, &mid, chat.stream_text_overlay);
         }
+        let _ = stop_superseded_assistant_loading_rows(list, session_id, keep_asst_id, loc);
     });
+}
+
+/// 把流式旁路缓冲 flush 进指定的那条消息。
+///
+/// 这是本模块唯一保留的「就地改消息」动作：`stream_text_overlay` 是信号，而
+/// [`crate::domain::session`] 不允许接触信号 —— 规则与副作用因此分在两处，由调用点定序。
+fn flush_stream_overlay_for_message(
+    list: &mut [ChatSession],
+    session_id: &str,
+    message_id: &str,
+    overlay: RwSignal<Option<StreamTextOverlay>>,
+) {
+    let Some(s) = list.iter_mut().find(|s| s.id == session_id) else {
+        return;
+    };
+    let Some(m) = s.messages.iter_mut().find(|m| m.id == message_id) else {
+        return;
+    };
+    stream_overlay_take_into_stored_message(overlay, session_id, message_id, m);
 }
 
 /// 单轮流式 UI 是否仍视为「在途」；与 [`crate::chat_session_state::make_chat_stream_busy_memos`] 的 **`stream_turn_busy_ui`** 同源（`get_untracked`）。
@@ -126,21 +127,12 @@ pub(crate) fn apply_user_abort_of_inflight_stream(
         return false;
     }
     let sid = chat.effective_stream_message_session_id();
+    let mut stopped = false;
     chat.update_sessions_composer(|list| {
-        let Some(s) = list.iter_mut().find(|sess| sess.id == sid) else {
-            return;
-        };
-        if !messages_have_loading_tool(&s.messages) {
-            return;
-        }
-        // 用户主动点「停止」：即使用户文案「已终止」，勿标成重启语义的 OrphanStale。
-        crate::message_loading::finalize_loading_tool_placeholders(
-            &mut s.messages,
-            loc,
-            ToolLoadingFinalizeKind::UserStopped,
-        );
+        // 用户主动点「停止」：即使用户文案「已终止」，勿标成重启语义的 OrphanStale（见域层函数注释）。
+        stopped = stop_loading_tool_rows_if_any(list, &sid, loc);
     });
-    true
+    stopped
 }
 
 fn finalize_loading_placeholders_after_user_abort_on_session(
@@ -149,48 +141,20 @@ fn finalize_loading_placeholders_after_user_abort_on_session(
     loc: Locale,
 ) {
     chat.update_sessions_composer(|list| {
-        let Some(s) = list.iter_mut().find(|s| s.id == session_id) else {
-            return;
-        };
-        if let Some(m) = s
-            .messages
-            .iter_mut()
-            .rev()
-            .find(|m| is_loading_plain_assistant(m))
-        {
-            let mid_flush = m.id.clone();
-            stream_overlay_take_into_stored_message(
-                chat.stream_text_overlay,
-                session_id,
-                mid_flush.as_str(),
-                m,
-            );
+        // flush 在前：域层按 `text` 判断「已有内容」，顺序反了就会把已流出的正文换成「已终止」。
+        if let Some(mid) = last_loading_assistant_id(list, session_id) {
+            flush_stream_overlay_for_message(list, session_id, &mid, chat.stream_text_overlay);
         }
-        apply_abort_finalization_to_messages(&mut s.messages, loc);
+        let _ = finalize_user_abort_in_session(list, session_id, loc);
     });
     chat.clear_stream_text_overlay();
 }
 
-fn apply_abort_finalization_to_messages(messages: &mut [StoredMessage], loc: Locale) {
-    if let Some(m) = messages
-        .iter_mut()
-        .rev()
-        .find(|m| is_loading_plain_assistant(m))
-    {
-        m.state = None;
-        if m.text.trim().is_empty() {
-            m.text = i18n::stream_stopped_inline(loc).to_string();
-        } else {
-            m.text.push_str(i18n::stream_stopped_suffix(loc));
-        }
-    }
-    finalize_loading_tool_placeholders_to_stopped(messages, loc);
-}
-
 /// 将仍处 `Loading` 的工具时间线占位收口为「已终止」展示（与用户点击停止的文案/语义对齐）。
 ///
-/// **调用方**：用户中止经 [`apply_abort_finalization_to_messages`] 间接调用；流式错误路径由
-/// `callbacks::error_session::apply_stream_error_on_messages` 在写回尾助手错误时**一并**调用本函数。
+/// **调用方**：流式错误路径由 `callbacks::error_session::apply_stream_error_on_messages`
+/// 在写回尾助手错误时**一并**调用本函数（用户中止路径走
+/// [`crate::domain::session::finalize_user_abort_in_session`]）。
 /// 若只 dispatch lifecycle 收尾而不改消息，
 /// `Loading` 工具泡仍会使 [`crate::chat_session_state::session_has_loading_tool_message`] 长期为真，状态栏/停止按钮语义卡住。
 pub(crate) fn finalize_loading_tool_placeholders_to_stopped(
@@ -206,7 +170,7 @@ pub(crate) fn finalize_loading_tool_placeholders_to_stopped(
 
 #[cfg(test)]
 mod tests {
-    use super::{apply_abort_finalization_to_messages, should_defer_sse_abort_until_job_id};
+    use super::should_defer_sse_abort_until_job_id;
     use crate::i18n::Locale;
     use crate::storage::{StoredMessage, StoredMessageState};
 
@@ -223,16 +187,6 @@ mod tests {
             tool_name: Some("git".to_string()),
             created_at: 0,
         }
-    }
-
-    #[test]
-    fn abort_clears_tool_loading_and_replaces_running_detail() {
-        let mut msgs = vec![loading_tool("摘要 · 工具执行中…")];
-        apply_abort_finalization_to_messages(&mut msgs, Locale::ZhHans);
-        let m = &msgs[0];
-        assert!(!m.state.as_ref().is_some_and(|s| s.is_loading()));
-        assert!(m.reasoning_text.contains("stopped"));
-        assert!(m.text.contains("已终止") || m.text.contains("Stopped"));
     }
 
     #[test]

@@ -38,6 +38,7 @@ use crate::chat_session_state::ChatSessionSignals;
 use crate::conversation_hydrate::{
     ConversationMessagesResponse, stored_messages_for_hydration_or_parse_failed,
 };
+use crate::domain::session::restore_reasoning_texts;
 use crate::i18n::{self, Locale};
 use crate::message_loading::messages_have_any_loading;
 use crate::session_ops::title_from_user_prompt;
@@ -426,24 +427,21 @@ fn restore_reasoning_after_hydration(chat: &ChatSessionSignals, aid: &str, nonce
     if preserved.is_empty() {
         return;
     }
+    let mut restored: Vec<(String, usize)> = Vec::new();
     chat.update_sessions_hydration(|list| {
-        if let Some(s) = list.iter_mut().find(|x| x.id == aid) {
-            for m in s.messages.iter_mut() {
-                if let Some(rt) = preserved.get(&m.id) {
-                    #[cfg(debug_assertions)]
-                    web_sys::console::log_1(
-                        &format!(
-                            "[hydration] restored reasoning_text len={} for mid={}",
-                            rt.len(),
-                            m.id
-                        )
-                        .into(),
-                    );
-                    m.reasoning_text = rt.clone();
-                }
-            }
-        }
+        // 规则在 `crate::domain::session`（可 host 单测）；日志挪到闭包外 ——
+        // 控制台副作用一旦留在闭包里，这条路径就又变回「只能靠 e2e 兜」。
+        restored = restore_reasoning_texts(list, aid, &preserved);
     });
+    #[cfg(debug_assertions)]
+    for (mid, len) in &restored {
+        web_sys::console::log_1(
+            &format!("[hydration] restored reasoning_text len={len} for mid={mid}").into(),
+        );
+    }
+    // release 下这份列表只为拿到上面的返回值而存在
+    #[cfg(not(debug_assertions))]
+    let _ = restored;
     chat.reasoning_preserved
         .update(|map| map.retain(|k, _| !preserved.contains_key(k)));
 }
