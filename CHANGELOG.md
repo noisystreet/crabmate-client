@@ -31,7 +31,7 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 - **The workspace shows its branch and an uncommitted-changes badge.**
 
-- **Session trim/regenerate rules moved out of the DOM file, so they are unit-tested.**
+- **Session trim/regenerate rules moved out of the file that also does DOM and IO.**
 
 - **"Connect" adds a lane in this window; the rail lists lanes, `Alt+←/→` switches.**
 
