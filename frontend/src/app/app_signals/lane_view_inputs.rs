@@ -23,12 +23,12 @@ use super::lane_set::LaneRuntime;
 
 use super::super::approval_modal::ApprovalModalSignals;
 use super::super::context_usage_page::ContextUsagePageViewInput;
-use super::super::ide_settings_page::IdeSettingsPageViewInput;
 use super::super::settings::page::{SettingsPageFormSignals, SettingsPageViewInput};
 use super::super::workspace::browser_pick_modal::WorkspaceBrowserPickModalSignals;
 use super::super::workspace::clone_modal::WorkspaceCloneModalSignals;
 use super::super::workspace::project_modal::WorkspaceProjectModalSignals;
 use super::super::workspace::root_actions::WorkspaceRootPickHandle;
+use crate::app::ide::settings_page::IdeSettingsPageViewInput;
 use crate::app::shell::ctx::{
     ChangelistModalSignals, MobileShellHeaderSignals, SessionListModalSignals,
     SideColumnViewSignals, SidebarNavSignals, StatusBarFooterSignals,

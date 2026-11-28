@@ -5,7 +5,7 @@
 //! 未保存的缓冲与 CodeMirror 句柄一起丢掉。所以三件事分开：
 //!
 //! - 本模块：建状态、装副作用（刷新工作区 / 保存 / 磁盘同步 / 打开文件 / 关标签 / 菜单桥）；
-//! - [`super::ide_editor_body::IdeEditorBody`]：只画，信号束由 [`IdeSession::body`] 给出；
+//! - [`crate::app::ide::editor_body::IdeEditorBody`]：只画，信号束由 [`IdeSession::body`] 给出；
 //! - 顶栏菜单：只读 `IdeMenuBarBridge`（`wire_ide_menu_bar_bridge` 在本模块挂）。
 //!
 //! 两侧拿到的都是信号句柄（`Copy`）：状态只有一份，不会长出第二套 tabs。
@@ -27,11 +27,11 @@ use crate::ide_tabs::{
     wire_ide_editor_sync_to_active_tab,
 };
 
-use super::ide_editor_body::IdeEditorBodySignals;
-use super::ide_layout_switch::{IdeLayoutToggleSignals, enter_editor_layout};
-use super::ide_menu_bar::{IdeMenuBarSignals, wire_ide_menu_bar_bridge};
-use super::ide_new_file_modal::{IdeNewFileModal, IdeNewFileModalInput};
-use super::workspace::panel_state::WorkspacePanelSignals;
+use crate::app::ide::editor_body::IdeEditorBodySignals;
+use crate::app::ide::layout_switch::{IdeLayoutToggleSignals, enter_editor_layout};
+use crate::app::ide::menu_bar::{IdeMenuBarSignals, wire_ide_menu_bar_bridge};
+use crate::app::ide::new_file_modal::{IdeNewFileModal, IdeNewFileModalInput};
+use crate::app::workspace::panel_state::WorkspacePanelSignals;
 
 /// 建会话所需的输入（`Arc` 等非 `Copy` 项只在这里出现一次）。
 #[derive(Clone)]

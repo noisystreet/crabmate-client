@@ -38,7 +38,7 @@ pub struct MobileShellHeaderSignals {
     pub locale: RwSignal<Locale>,
     pub editor_layout_mode: RwSignal<bool>,
     pub is_narrow_viewport: RwSignal<bool>,
-    pub ide_menu_bar_bridge: RwSignal<Option<crate::app::ide_menu_bar::IdeMenuBarBridge>>,
+    pub ide_menu_bar_bridge: RwSignal<Option<crate::app::ide::menu_bar::IdeMenuBarBridge>>,
     pub workspace_pick: crate::app::workspace::root_actions::WorkspaceRootPickHandle,
     pub ide_menubar_dropdown_open: RwSignal<bool>,
     /// 迷你运行点兜底：右列抽屉收起时在顶栏展示运行态色点，点击打开工作区抽屉。

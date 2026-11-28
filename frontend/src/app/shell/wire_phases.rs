@@ -46,7 +46,7 @@ use crate::app::github_wiring::{
     make_refresh_github_repo_context, wire_github_refresh_on_auth_nonce,
     wire_github_refresh_when_workspace_changes, wire_github_repo_after_init,
 };
-use crate::app::ide_layout_switch::IdeLayoutToggleSignals;
+use crate::app::ide::layout_switch::IdeLayoutToggleSignals;
 use crate::app::shell::status::tasks_wiring::{
     make_refresh_status, make_refresh_tasks, make_toggle_task, wire_status_tasks_domain_effects,
 };

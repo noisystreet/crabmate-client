@@ -2,7 +2,7 @@
 
 use leptos::prelude::*;
 
-use crate::app::ide_menu_bar::IdeMenuBarBridge;
+use crate::app::ide::menu_bar::IdeMenuBarBridge;
 use crate::app::shell::prefs_storage;
 use crate::app_prefs::SidePanelView;
 use crate::i18n::Locale;

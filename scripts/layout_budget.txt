@@ -20,16 +20,15 @@
 # 其它根按需登记（不套守恒），理由见脚本头注释。
 
 # --- frontend/src/app：试点域树（Rule B 冻结根级文件、Rule C 守恒）---
-frontend/src/app                              lines=4643   scope=direct     # 根级平铺 29 个文件（settings / workspace / shell 域已搬走）；目标是只剩 app 级基础设施，见 layout_root_flat.txt
+frontend/src/app                              lines=3223   scope=direct     # 根级平铺 21 个文件（settings / workspace / shell 域已搬走）；目标是只剩 app 级基础设施，见 layout_root_flat.txt
 frontend/src/app/settings                     lines=7285   scope=recursive  # 设置域（page/ + models_registry/ + 各分区）；搬入时只改路径不改逻辑（PR-2）
 frontend/src/app/workspace                    lines=2055   scope=recursive  # 工作区域（panel/ + clone_modal/ + 各弹窗）；搬入时只改路径不改逻辑（PR-3）
 frontend/src/app/shell                        lines=6738   scope=recursive  # Shell 域（status/ + rail/ + side_column/ + bootstrap/ctx/init/wire_phases）；只搬不改逻辑（PR-4）
+frontend/src/app/ide                          lines=2652   scope=recursive  # IDE 域（编辑器列 + menu_bar/ + settings_page/）；只搬不改逻辑（PR-5）
 frontend/src/app/chat                         lines=25613  scope=recursive  # 全仓最大域；第二层划分待做（composer_stream 的 delta / timeline / callbacks）；+2 是 PR-4 路径改写后 rustfmt 换行
 frontend/src/app/app_shell_effects            lines=2008   scope=recursive  # shell 阶段效应，与 app_shell_wire_phases 同生命周期
 frontend/src/app/app_signals                  lines=1783   scope=recursive  # 信号定义；lane_set / owner-dispose 高风险区，不参与首轮搬家
 frontend/src/app/sidebar_nav                  lines=1321   scope=recursive  # 与根级 nav_rail* / side_column* 合并进 shell 域（PR-4）
-frontend/src/app/ide_menu_bar                 lines=888    scope=recursive  # 与根级 ide_* 合并进 ide 域（PR-5）
-frontend/src/app/ide_settings_page            lines=328    scope=recursive  # 同上，并入 ide 域
 
 # --- 其它根：按需登记（不套守恒）---
 crates/crabmate-tui/src/tui_mode              lines=57503  scope=recursive  # 11 个 #[path] 旁路待按域拆结构体（PR-6）；全仓最大单块

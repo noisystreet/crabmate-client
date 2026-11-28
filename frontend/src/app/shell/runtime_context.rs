@@ -10,7 +10,7 @@
 use leptos::prelude::*;
 
 use crate::app::app_signals::{AppSignals, ChatComposerSignals};
-use crate::app::ide_layout_switch::IdeLayoutToggleSignals;
+use crate::app::ide::layout_switch::IdeLayoutToggleSignals;
 use crate::chat_session_state::ChatSessionSignals;
 
 /// 聊天域：会话 / 作曲器、界面语言与助手正文过滤（与 [`AppSignals`] 内对应字段同源）。

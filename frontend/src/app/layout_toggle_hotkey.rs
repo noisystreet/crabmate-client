@@ -10,7 +10,7 @@
 use wasm_bindgen::JsCast;
 use wasm_bindgen::closure::Closure;
 
-use super::ide_layout_switch::{IdeLayoutToggleSignals, toggle_editor_layout};
+use crate::app::ide::layout_switch::{IdeLayoutToggleSignals, toggle_editor_layout};
 
 /// 是否 `Ctrl+T`：排除 `Shift` / `Alt` / `Meta` 与输入法组合中，避免与相邻组合键撞车。
 fn is_toggle_view_key(ev: &web_sys::KeyboardEvent) -> bool {

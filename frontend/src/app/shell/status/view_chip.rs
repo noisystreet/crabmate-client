@@ -13,7 +13,7 @@ use leptos::prelude::*;
 
 use crate::i18n;
 
-use crate::app::ide_layout_switch::toggle_editor_layout;
+use crate::app::ide::layout_switch::toggle_editor_layout;
 use crate::app::shell::runtime_context::expect_chat_shell_ctx;
 
 /// chip 的值：`chat` / `file`（与 TUI `status::view_text` 同词同序）。

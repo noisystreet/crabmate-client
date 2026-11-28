@@ -8,7 +8,7 @@ use wasm_bindgen::JsCast;
 use super::menu_id::IdeMenuId;
 use super::props::IdeMenuBarSignals;
 use crate::app::app_signals::IdeChromeSignals;
-use crate::app::ide_layout_switch::{IdeLayoutToggleSignals, exit_editor_layout};
+use crate::app::ide::layout_switch::{IdeLayoutToggleSignals, exit_editor_layout};
 use crate::app::workspace::root_actions::WorkspaceRootPickHandle;
 use crate::i18n::{self, Locale};
 use crate::icon::icon_chevron_right;

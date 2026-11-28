@@ -669,7 +669,7 @@ mod tests {
 
     #[test]
     fn ide_editor_pane_does_not_use_nonreactive_cm_available() {
-        let src = include_str!("app/ide_editor_pane.rs");
+        let src = include_str!("app/ide/editor_pane.rs");
         assert!(
             !src.contains("cm_available"),
             "missing banner must subscribe to IdeCmScriptState, not cm_available()"
