@@ -4,7 +4,7 @@ use leptos::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::closure::Closure;
 
-use crate::app::ide_layout_switch::{IdeLayoutToggleSignals, exit_editor_layout};
+use crate::app::ide::layout_switch::{IdeLayoutToggleSignals, exit_editor_layout};
 use crate::app::shell::prefs_storage;
 use crate::app_prefs::{SidePanelView, mobile_layout_media_query};
 use crate::mobile_remote::mobile_remote_client;

@@ -4,7 +4,7 @@
 //! 聊天主区（与 TUI `/editor` 视图同一位置口径），因此状态宿主与视图不能再住在同一个
 //! 组件里 —— 视图必须是能被别处（聊天列的 body 区）挂载的独立组件。
 //!
-//! 信号全部是句柄（`Copy`）：宿主 [`super::ide_session::IdeSession`] 建一份、这里复制一份，
+//! 信号全部是句柄（`Copy`）：宿主 [`crate::app::ide::session::IdeSession`] 建一份、这里复制一份，
 //! 状态只有一处，不会出现「两套 tabs」。
 
 use leptos::prelude::*;
@@ -15,9 +15,9 @@ use crate::ide_codemirror::IdeEditorHost;
 use crate::ide_confirm::IdeConfirmSignals;
 use crate::ide_tabs::{IdeTabsEditorSignals, IdeTabsHandle};
 
-use super::ide_editor_pane::IdeEditorPane;
-use super::ide_find_bar::{IdeFindBar, IdeFindBarInput, IdeGotoLineBar};
-use super::ide_tabs_bar::{IdeTabsBar, IdeTabsBarInput};
+use crate::app::ide::editor_pane::IdeEditorPane;
+use crate::app::ide::find_bar::{IdeFindBar, IdeFindBarInput, IdeGotoLineBar};
+use crate::app::ide::tabs_bar::{IdeTabsBar, IdeTabsBarInput};
 
 /// 编辑器体需要的信号束。
 ///

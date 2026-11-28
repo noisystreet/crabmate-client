@@ -5,7 +5,7 @@ use leptos::prelude::*;
 use crate::ide_codemirror::IdeEditorHost;
 
 use crate::app::app_signals::{IdeChromeSignals, IdeEditorSignals};
-use crate::app::ide_layout_switch::IdeLayoutToggleSignals;
+use crate::app::ide::layout_switch::IdeLayoutToggleSignals;
 use crate::app::workspace::root_actions::WorkspaceRootPickHandle;
 use crate::i18n::Locale;
 use crate::ide_save::IdeSaveContext;
@@ -13,7 +13,7 @@ use crate::ide_tabs::IdeTabsHandle;
 
 use super::menu_id::IdeMenuId;
 
-/// IDE 顶栏菜单状态（由 [`super::IdeLayoutView`](crate::app::ide_layout::IdeLayoutView) 注册，供统一顶栏读取）。
+/// IDE 顶栏菜单状态（由 [`crate::app::ide::session`] 构造并注册，供统一顶栏读取）。
 #[derive(Clone, Copy)]
 pub struct IdeMenuBarBridge {
     pub signals: IdeMenuBarSignals,

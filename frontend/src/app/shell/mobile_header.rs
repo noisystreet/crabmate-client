@@ -8,7 +8,7 @@ use crate::i18n::{self, Locale};
 use crate::mobile_remote::mobile_remote_client;
 use crate::tauri_shell::tauri_shell_available;
 
-use crate::app::ide_menu_bar::{
+use crate::app::ide::menu_bar::{
     IdeMenuBarBridge, IdeMenuBarTopbarContent, IdeMenuId, ShellTopbarFileMenu,
     ShellTopbarMenuBackdrop,
 };

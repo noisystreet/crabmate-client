@@ -44,7 +44,7 @@
 | [settings/models_registry/preset_list.rs](../../frontend/src/app/settings/models_registry/preset_list.rs) | 2 | 手写 |
 | [shell/status/agent_role_menu.rs](../../frontend/src/app/shell/status/agent_role_menu.rs) | 1 | 手写 |
 | [settings/page/header.rs](../../frontend/src/app/settings/page/header.rs) | 1 | 手写，**无 `class`** |
-| `ide_settings_page/view_header.rs`（已重构，现为 `ide_settings_page/view.rs` 等） | 1 | 手写，**无 `class`** |
+| `ide/settings_page/view.rs`（页头已删，改用常规页 `SettingsPageHeader`） | 1 | 手写，**无 `class`** |
 | [shell/status/session_mode_seg.rs](../../frontend/src/app/shell/status/session_mode_seg.rs) | 1 | 手写 |
 | [settings/models_registry/mod.rs](../../frontend/src/app/settings/models_registry/mod.rs) | 1 | 手写 |
 
@@ -87,12 +87,12 @@ fn svg_common() -> (&'static str, &'static str, &'static str, &'static str, &'st
 
 | 字形 | 用途 | 位置 |
 |---|---|---|
-| `×` | 关闭 | `ide_find_bar.rs:161,254`、`ide_tabs_bar.rs:283`、`chat/composer_pending_images.rs:36`、`chat/find_bar.rs:170`、`chat/chat_image_lightbox.rs:270`（**JS 侧** `set_text_content`）、`tauri_window_controls.rs:45`（`.tauri-win-ctrl-glyph`）——共 **7 处，跨 Rust 与 JS** |
-| `‹` `›` | 左右/前进后退 | `sidebar_nav/mode_actions.rs:112`、`app/mod.rs:128`、`ide_find_bar.rs:96,105`、`ide_menu_bar/file_menu.rs:209`（`.ide-menu-submenu-chevron`） |
+| `×` | 关闭 | `ide/find_bar.rs:161,254`、`ide/tabs_bar.rs:283`、`chat/composer_pending_images.rs:36`、`chat/find_bar.rs:170`、`chat/chat_image_lightbox.rs:270`（**JS 侧** `set_text_content`）、`tauri_window_controls.rs:45`（`.tauri-win-ctrl-glyph`）——共 **7 处，跨 Rust 与 JS** |
+| `‹` `›` | 左右/前进后退 | `sidebar_nav/mode_actions.rs:112`、`app/mod.rs:128`、`ide/find_bar.rs:96,105`、`ide/menu_bar/file_menu.rs:209`（`.ide-menu-submenu-chevron`） |
 | `▾` | 展开 | `workspace_tree.rs:637`、`layout-chat.css:371`（`content:`） |
 | `▸` | 折叠 | `workspace_tree.rs:639` |
-| `✓` | 勾选 | `ide_menu_bar/view_menu.rs:63,78` |
-| `●` | 脏标记 | `ide_tabs_bar.rs:265`、`shell/mobile_header.rs:94` |
+| `✓` | 勾选 | `ide/menu_bar/view_menu.rs:63,78` |
+| `●` | 脏标记 | `ide/tabs_bar.rs:265`、`shell/mobile_header.rs:94` |
 | `−` | 最小化 | `tauri_window_controls.rs:29`、`settings_sections.rs:693` |
 | `…` | 更多 | `ide_layout.rs:112`、`chat/tui_stream_dom_sync.rs:747` |
 | `◈` | 装饰 | `layout-chat.css:365`（`content:`） |
@@ -111,7 +111,7 @@ fn svg_common() -> (&'static str, &'static str, &'static str, &'static str, &'st
 
 3. **`xmlns` 有无不一**：`chat/column.rs:530`（`fill="currentColor"` 那处）与 `:569` 带 `xmlns`，`workspace_shell.rs` 带；其余手写多数**不带**。HTML5 解析器内联 SVG 可不写，但现状是无标准的随机分布。
 
-4. **2 处 SVG 完全没有 `class`**（`settings_page/header.rs`、`ide_settings_page/view_header.rs`，后者已重构为 `ide_settings_page/view.rs` 等），靠父选择器 `.settings-page-back svg`（`modal.css:902`）命中。这两处还是**同一个左箭头 chevron**（`<polyline points="15 18 9 12 15 6" />`）的重复实现。注意此形态处于 `check-css-contract.sh` 的灰度区：消费者没有类名，门禁自然不报警。
+4. **2 处 SVG 完全没有 `class`**（`settings_page/header.rs`、`ide/settings_page/view.rs`），靠父选择器 `.settings-page-back svg`（`modal.css:902`）命中。这两处还是**同一个左箭头 chevron**（`<polyline points="15 18 9 12 15 6" />`）的重复实现。注意此形态处于 `check-css-contract.sh` 的灰度区：消费者没有类名，门禁自然不报警。
 
 5. **全仓无 `--icon-*` token**（`grep --icon-` 仅命中本方案新建的门禁脚本注释，正式代码 0 处）。图标尺寸是字面量且大量重复：
 

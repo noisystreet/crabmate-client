@@ -18,14 +18,6 @@ frontend/src/app/focusable_menu.rs
 frontend/src/app/git_badge.rs
 frontend/src/app/github_embed_page.rs
 frontend/src/app/github_wiring.rs
-frontend/src/app/ide_confirm_dialog.rs
-frontend/src/app/ide_editor_body.rs
-frontend/src/app/ide_editor_pane.rs
-frontend/src/app/ide_find_bar.rs
-frontend/src/app/ide_layout_switch.rs
-frontend/src/app/ide_new_file_modal.rs
-frontend/src/app/ide_session.rs
-frontend/src/app/ide_tabs_bar.rs
 frontend/src/app/lane_actions.rs
 frontend/src/app/lane_hotkeys.rs
 frontend/src/app/lane_view.rs
