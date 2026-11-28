@@ -10,8 +10,8 @@ use crate::app_prefs::SidePanelView;
 use crate::app_prefs::status_bar_selected_agent_role_from_persisted;
 use crate::i18n::Locale;
 
-use super::status_fetch_state::StatusFetchPhase;
-use super::status_tasks_state::StatusTasksSignals;
+use crate::app::shell::status::fetch_state::StatusFetchPhase;
+use crate::app::shell::status::tasks_state::StatusTasksSignals;
 
 /// 拉一次 `/status`（#569：`scope` 是**这条 lane** 的作用域）。
 ///

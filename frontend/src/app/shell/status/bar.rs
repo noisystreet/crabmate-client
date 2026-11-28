@@ -15,16 +15,16 @@ use crate::i18n::{self, Locale};
 use crate::icon::icon_chevron_down;
 use crate::user_prefs_sync_state::UserPrefsSyncPhase;
 
-use super::app_shell_ctx::StatusBarFooterSignals;
-use super::chat::bump_session_hydrate_nonce;
-use super::settings::page::{SettingsSection, navigate_to_settings};
-use super::shell_runtime_context::expect_chat_shell_ctx;
-use super::status_agent_role_menu::{AgentRoleMenuProps, StatusAgentRoleMenu};
-use super::status_context::{StatusBarContextChip, observe_context_watermark};
-use super::status_fetch_state::status_bar_should_show_skeleton;
-use super::status_session_mode_seg::{SessionModeSegProps, StatusSessionModeSeg};
-use super::status_tasks_state::StatusTasksSignals;
-use super::status_view_chip::StatusViewChip;
+use crate::app::app_shell_ctx::StatusBarFooterSignals;
+use crate::app::chat::bump_session_hydrate_nonce;
+use crate::app::settings::page::{SettingsSection, navigate_to_settings};
+use crate::app::shell::status::agent_role_menu::{AgentRoleMenuProps, StatusAgentRoleMenu};
+use crate::app::shell::status::context::{StatusBarContextChip, observe_context_watermark};
+use crate::app::shell::status::fetch_state::status_bar_should_show_skeleton;
+use crate::app::shell::status::session_mode_seg::{SessionModeSegProps, StatusSessionModeSeg};
+use crate::app::shell::status::tasks_state::StatusTasksSignals;
+use crate::app::shell::status::view_chip::StatusViewChip;
+use crate::app::shell_runtime_context::expect_chat_shell_ctx;
 
 // ---- 类名契约（状态 → 类名）----
 // 集中构造，避免同一类名在多个组件里就地手写；与 `styles/status.css` 选择器一一对应，改动须同步下方单测。
@@ -383,7 +383,7 @@ fn StatusBarChipsLoaded(
             // 这两项回答「我在哪个视图」与「这一轮最多能动到什么」，比 model / role 这类环境
             // 事实更常被扫到；两端位置一致，才不会出现同一个开关一端排第一、一端排最后。
             <StatusViewChip />
-            <crate::app::status_permission_chip::StatusPermissionChip locale=locale />
+            <crate::app::shell::status::permission_chip::StatusPermissionChip locale=locale />
             <StatusBarServeChip locale=locale />
             <span class="status-chip">
                 <span class="status-chip-label">
@@ -799,7 +799,7 @@ mod serve_chip_tests {
 mod serve_chip_source_tests {
     #[test]
     fn the_serve_chip_reads_this_lanes_scope_not_the_active_holder() {
-        let src = include_str!("status_bar.rs");
+        let src = include_str!("bar.rs");
         let start = src
             .find("fn StatusBarServeChip(")
             .expect("serve chip 改名或挪走了：同步更新本守卫");

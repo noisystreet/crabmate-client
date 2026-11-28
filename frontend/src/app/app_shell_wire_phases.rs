@@ -47,12 +47,12 @@ use super::github_wiring::{
     wire_github_refresh_when_workspace_changes, wire_github_repo_after_init,
 };
 use super::ide_layout_switch::IdeLayoutToggleSignals;
-use super::status_tasks_wiring::{
-    make_refresh_status, make_refresh_tasks, make_toggle_task, wire_status_tasks_domain_effects,
-};
 use super::web_api_bearer_recovery::wire_web_api_bearer_save_recovery;
 use super::wire_workspace_domain::{WireWorkspaceDomainEffectsArgs, wire_workspace_domain_effects};
 use super::workspace::panel::{make_insert_workspace_path_into_composer, make_refresh_workspace};
+use crate::app::shell::status::tasks_wiring::{
+    make_refresh_status, make_refresh_tasks, make_toggle_task, wire_status_tasks_domain_effects,
+};
 use crate::chat_session_state::ChatStreamBusyMemos;
 
 type RefreshWorkspaceFn = Arc<dyn Fn() + Send + Sync>;

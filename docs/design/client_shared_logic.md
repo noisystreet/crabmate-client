@@ -319,7 +319,7 @@ Web 的 `api_base_preset_select` 字符串链路（写入已保存模型预设�
 
 | 端 | 路径 |
 |----|------|
-| frontend | `app/status_context.rs`（轴线与文本，已改为消费共享实现并 re-export）、`chat_session_state.rs`（`ContextUsedWatermark` 改 re-export）、`app/context_usage_page.rs` |
+| frontend | `app/shell/status/context.rs`（轴线与文本，已改为消费共享实现并 re-export）、`chat_session_state.rs`（`ContextUsedWatermark` 改 re-export）、`app/context_usage_page.rs` |
 | tui | `tui_mode/state_context.rs`（`set_prompt_tokens` / `context_text`，状态行 `ctx` 段）、`serve/chat_classify.rs`（从 `RUN_FINISHED` / `conversation_saved` 帧摘 `tiktokenPromptTokens` → `LineAction::PromptTokens`；并从 `timeline_log` 的 `kind=context_trim` 取 `after_tokens` → `LineAction::ContextTrim` 回落水位） |
 
 共享实现（`crabmate_client_api::context_axis`）：
@@ -394,7 +394,7 @@ Web 的 `api_base_preset_select` 字符串链路（写入已保存模型预设�
 
 **状态**：共享层（路径常量 / `api_error_code` / 四态分类）已落地并有单测；**前端（Desktop / Android / Web）已接意图选择器**——设置页「工具」分区的权限块升级为「只读投影 + 档位选择器」（`frontend/src/app/settings_permission_block.rs`，请求层 `frontend/src/api/http_conversation_state.rs`）：选项只列服务端给的 `available`，点一下先写**同一个**意图信号（与 `/chat` 发送路径同源，经 `ChatShellLeptosContext` 提供），已绑定会话时再 `POST /conversation/state` 立刻落盘并用响应自带的写后投影刷新显示；没有已持久化会话时只写本地意图并提示「发送后生效」（服务端不做 upsert）。四态落地：`Ok`
 刷新投影、`NotFound` 提示会话过期、`Unsupported` 并入 `GET /permission` 的同一个 capability 状态、`Failed{500}` 说「可重试」而不是「会话不存在」。`/chat` 现在总是带用户当前选的意图（`permission_level` 省略 = 沿用会话持久值）。TUI 只有状态栏 `perm` 读数（§4.16），另加 `/perm [<level>]` 斜杠命令（repl 与全屏 `tui` 共用同一个 `/perm` head；issue #444 PR-A 之后 Web 也有这条命令）：与 `/mode` `/role` 同一套客户端
-override，随**下一条**消息进 `permission_level`，`off` 清除；**不在客户端校验档位名**——可选集由 `GET /permission` 的 `available` 决定，写死词表只会在服务端新增档位时误拒，未知值交给服务端拒绝更准确。**底栏 chip 已补上**（`frontend/src/app/status_permission_chip.rs`）：显示 `意图 → 生效`（没表达意图就只显示生效档；两者都不知道则整段不渲染，不拿 `/status` 的 `permission_level_default` 顶替），点开复用 `.status-mode-menu-*` 的 Portal 菜单就地切档，写路径与设置页同规则。**会话切换清空意图**也做了：`permission_intent_owner` 记住这份意图是为哪个本地会话选的，壳层 effect 只看「当前会话 id
+override，随**下一条**消息进 `permission_level`，`off` 清除；**不在客户端校验档位名**——可选集由 `GET /permission` 的 `available` 决定，写死词表只会在服务端新增档位时误拒，未知值交给服务端拒绝更准确。**底栏 chip 已补上**（`frontend/src/app/shell/status/permission_chip.rs`）：显示 `意图 → 生效`（没表达意图就只显示生效档；两者都不知道则整段不渲染，不拿 `/status` 的 `permission_level_default` 顶替），点开复用 `.status-mode-menu-*` 的 Portal 菜单就地切档，写路径与设置页同规则。**会话切换清空意图**也做了：`permission_intent_owner` 记住这份意图是为哪个本地会话选的，壳层 effect 只看「当前会话 id
 是否仍是归属」，与请求时序无关——刻意不挂在水合回调里，因为同一会话的回前台 / 流收尾都会重新水合，在那里清会把用户刚选的档误清。**不需要**水合 `active_permission_level`：意图是 `Option`，`None` 的语义就是「沿用该会话已保存的值」，把服务端值写进意图等于「没选过也被记成选过」，此后切会话清理就无从判断。
 
 ### 4.18 会话模式词表（S13 已落地；仅词表与判定）

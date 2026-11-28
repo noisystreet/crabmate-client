@@ -8,7 +8,7 @@ use crate::api::{
 };
 
 use crate::app::app_signals::LLMSettingsSignals;
-use crate::app::status_tasks_state::StatusTasksSignals;
+use crate::app::shell::status::tasks_state::StatusTasksSignals;
 
 /// 刻意 **不** 把 `status_data` 的变更订阅进设置填充 `Effect`：仅在设置 UI 打开时读取快照，
 /// 避免 `/status` 轮询导致草稿被反复重置。

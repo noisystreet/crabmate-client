@@ -79,7 +79,7 @@ Accepted
 
 ## 关联
 
-- 状态栏实现：[`frontend/src/app/status_context.rs`](../../frontend/src/app/status_context.rs)
+- 状态栏实现：[`frontend/src/app/shell/status/context.rs`](../../frontend/src/app/shell/status/context.rs)
 - 水位结构：[`frontend/src/chat_session_state.rs`](../../frontend/src/chat_session_state.rs)
 - 解析与判定纯函数：[`frontend/src/timeline_scan.rs`](../../frontend/src/timeline_scan.rs)
 - `context_trim` 接线：[`timeline_dispatch.rs`](../../frontend/src/app/chat/composer_stream/callbacks/builders/timeline_dispatch.rs)

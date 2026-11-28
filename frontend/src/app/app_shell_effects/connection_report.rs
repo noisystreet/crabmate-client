@@ -47,9 +47,9 @@ use crate::tauri_shell::{
 };
 
 use super::super::connection_feed::connections_registered;
-use super::super::status_context::{context_axis_apply_watermark, status_bar_context_axis};
-use super::super::status_tasks_state::StatusTasksSignals;
 use super::lane_busy_clock::{next_turn_started, now_ms};
+use crate::app::shell::status::context::{context_axis_apply_watermark, status_bar_context_axis};
+use crate::app::shell::status::tasks_state::StatusTasksSignals;
 
 /// 上报所需的信号（都是「本窗口此刻在干什么」的既有来源）。
 pub struct ConnectionReportSignals {

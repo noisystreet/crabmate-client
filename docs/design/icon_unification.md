@@ -42,10 +42,10 @@
 | [chat/column.rs](../../frontend/src/app/chat/column.rs) | 3 | 手写 |
 | [layout_mode_segment.rs](../../frontend/src/app/layout_mode_segment.rs) | 2 | 手写 |
 | [settings/models_registry/preset_list.rs](../../frontend/src/app/settings/models_registry/preset_list.rs) | 2 | 手写 |
-| [status_agent_role_menu.rs](../../frontend/src/app/status_agent_role_menu.rs) | 1 | 手写 |
+| [shell/status/agent_role_menu.rs](../../frontend/src/app/shell/status/agent_role_menu.rs) | 1 | 手写 |
 | [settings/page/header.rs](../../frontend/src/app/settings/page/header.rs) | 1 | 手写，**无 `class`** |
 | `ide_settings_page/view_header.rs`（已重构，现为 `ide_settings_page/view.rs` 等） | 1 | 手写，**无 `class`** |
-| [status_session_mode_seg.rs](../../frontend/src/app/status_session_mode_seg.rs) | 1 | 手写 |
+| [shell/status/session_mode_seg.rs](../../frontend/src/app/shell/status/session_mode_seg.rs) | 1 | 手写 |
 | [settings/models_registry/mod.rs](../../frontend/src/app/settings/models_registry/mod.rs) | 1 | 手写 |
 
 `workspace_shell.rs` 已有局部工厂函数，但只服务自己的 10 个图标：

@@ -32,7 +32,7 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 
 use crate::app::app_bootstrap_phase::AppBootstrapPhase;
-use crate::app::status_tasks_state::StatusTasksSignals;
+use crate::app::shell::status::tasks_state::StatusTasksSignals;
 use crate::app_prefs::status_bar_selected_agent_role_from_persisted;
 use crate::chat_session_state::ChatSessionSignals;
 use crate::conversation_hydrate::{
