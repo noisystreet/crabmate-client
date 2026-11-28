@@ -15,6 +15,8 @@
 //! - **副作用留在调用侧**：DOM、日志、剪贴板、下载一律不进本层；
 //! - **异步时序不进本层**：水合 nonce 门闩、`spawn_local` 快照属于接线职责；
 //! - **时间 / 随机源由调用方注入**：本层不读时钟、不生成 id —— 否则又变成不可测；
+//! - 本层的纯度由 `scripts/check-domain-purity.sh` 机械校验（DOM / 信号 / IO / 时钟 / 随机源一律失败，
+//!   `domain-gate: allow <理由>` 是唯一的就地豁免）；
 //! - 各端调用点**不用改**：`crate::session_ops` 对**签名未变**的规则用 `pub use` 转发；对改为
 //!   注入时间 / id 的规则（`truncate_at_user_message_and_prepare_regenerate` 等）保留**同名薄包装**
 //!   并在那层注入 Web 的时钟与 id 源。两条路都不动调用点。
