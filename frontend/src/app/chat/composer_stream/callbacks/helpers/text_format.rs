@@ -17,20 +17,3 @@ pub(crate) fn build_final_response_text(title: &str, detail: Option<&str>) -> St
     }
     final_text
 }
-
-pub(crate) fn to_single_line(s: &str, max_chars: usize) -> String {
-    let compact = s
-        .split_whitespace()
-        .filter(|seg| !seg.is_empty())
-        .collect::<Vec<_>>()
-        .join(" ");
-    if compact.chars().count() <= max_chars {
-        return compact;
-    }
-    let mut out = String::new();
-    for ch in compact.chars().take(max_chars.saturating_sub(1)) {
-        out.push(ch);
-    }
-    out.push('…');
-    out
-}
