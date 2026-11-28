@@ -188,6 +188,7 @@ fn index_failure_notice(op: &SessionIndexOp) -> Option<&'static str> {
         SessionIndexOp::RemoveBlank { .. } => None,
         SessionIndexOp::SetTitle { .. } => Some("会话标题未写入会话列表"),
         SessionIndexOp::SetTitleByServer { .. } => Some("会话标题未写入会话列表"),
+        SessionIndexOp::EnsureListed { .. } => Some("会话未能登记到会话列表"),
         SessionIndexOp::FlushExit { .. } => Some("退出前的会话落盘未完成"),
         SessionIndexOp::Delete { .. } => Some("删除会话未写入会话列表"),
     }
@@ -296,7 +297,7 @@ impl LaneApp<'_> {
     ///
     /// 行 id 还没到（`NewBlank` 在途）时先记下这一轮的 `conversation_id`，等行 id 到手
     /// 再补发绑定：与 Web 一致，`conversation_id` 必须落到「这一轮所属的会话行」上。
-    /// 没有待绑定的行（未用 `/conv new`、或已绑定过）时什么都不做。
+    /// 没有待绑定的行（未用 `/conv new`、或已绑定过）时转为「保证它出现在索引里」。
     pub(super) fn bind_new_session(&mut self, conversation_id: &str) {
         let local_id = self.index.local_new_session.clone();
         match plan_deferred_action(local_id.as_deref(), self.index.new_session_pending) {
@@ -315,7 +316,9 @@ impl LaneApp<'_> {
             DeferredAction::Defer => {
                 self.index.pending_bind_conversation = Some(conversation_id.to_string());
             }
-            DeferredAction::Skip => {}
+            // 没有待认领的行：这条会话可能根本不在索引里（新工作区空桶 / 从没
+            // `/conv new` / 行被别的端删掉）—— 补一行，否则左栏永远空着（#618）。
+            DeferredAction::Skip => self.ensure_session_listed(conversation_id),
         }
     }
 
@@ -398,6 +401,9 @@ impl LaneApp<'_> {
         let applied = match result {
             Ok(applied) => applied,
             Err(e) => {
+                // 建行失败：标题要还回去，否则这条会话永久停在默认标题上（见
+                // `restore_listing_title`）。
+                self.restore_listing_title(&op);
                 // 回收是顺手动作：失败只留下一条可丢弃的空行，而它最常见的成因（行已被别的
                 // 端删掉）本来就无需用户知晓；切工作区路径上这条提示更与当前操作无关——
                 // 用户刚切了工作区，却收到一句讲回收失败的话。静默失败，残留行由 `NewBlank`
@@ -490,6 +496,8 @@ impl LaneApp<'_> {
             SessionIndexOp::SetTitle { .. } => {}
             // 按 cid 补名也是静默的：标题在左栏刷新后自然出现。
             SessionIndexOp::SetTitleByServer { .. } => {}
+            // 补行同理：左栏刷新后那一行自然出现。
+            SessionIndexOp::EnsureListed { .. } => {}
             // 退出落盘发生在退出路径上，屏幕上已经没有可看的地方，静默即可。
             SessionIndexOp::FlushExit { .. } => {}
             // 删除：左栏刷新后那行自然消失，不必额外打一行（发起时已提示「正在删除…」）。

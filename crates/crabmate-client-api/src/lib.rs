@@ -33,6 +33,7 @@ pub mod permission;
 pub mod prompt_tokens;
 pub mod secrets;
 pub mod serve_identity;
+pub mod session_ensure;
 pub mod session_mode;
 pub mod session_model;
 pub mod sessions;
@@ -101,6 +102,7 @@ pub use secrets::{
     DESKTOP_MAIN_WINDOW_LABEL, KEYRING_SERVICE, SecretSlot, WEB_API_BEARER_KEYRING_ACCOUNT,
     scoped_bearer_account,
 };
+pub use session_ensure::{SessionEnsure, plan_session_ensure};
 pub use session_model::{
     CURRENT_LAYOUT_SCHEMA_VERSION, ChatSession, DEFAULT_CHAT_SESSION_TITLE,
     LEGACY_LAYOUT_SCHEMA_VERSION, StoredMessage, StoredMessageState, TIMELINE_UI_STATE_KEY,

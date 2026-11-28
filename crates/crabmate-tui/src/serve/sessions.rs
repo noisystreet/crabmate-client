@@ -10,6 +10,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 
 pub use crabmate_client_api::SessionListRow;
+pub use crabmate_client_api::session_ensure::{SessionEnsure, plan_session_ensure};
 /// 标题是否仍是「还没起名」的默认值。判定已下沉到共享层（Web `i18n::is_default_session_title`
 /// 用同一份）；空串**不算**默认标题。这里 re-export 保住 `serve::is_default_session_title`。
 pub use crabmate_client_api::session_model::is_default_session_title;
@@ -74,6 +75,22 @@ pub enum SessionIndexOp {
         /// 本地会话行 id（`sessions[].id`）。
         local_id: String,
         conversation_id: String,
+    },
+
+    /// 保证这一轮的会话在列表里有一行（issue #618）。
+    ///
+    /// 与 [`SessionIndexOp::BindServer`] 的分工：那个只给**已存在的本地行**补 cid（行由
+    /// `/conv new` 建好）；本 op 在**没有任何行**带着这个 cid 时插一行并绑定。触发面是
+    /// 新工作区空桶 / 从没 `/conv new` 就发消息 / 行被别的端删掉 —— 这三条下会话在 serve
+    /// 里真实存在，左栏却永远空着（TUI 只读服务端索引，不自己造行）。
+    ///
+    /// **幂等**：已有行带着该 cid 就原样返回那行，不插第二行、不改标题（起名归
+    /// [`SessionIndexOp::SetTitleByServer`]）。所以每轮都可以无脑触发。
+    EnsureListed {
+        /// 服务端对话 id。
+        conversation_id: String,
+        /// 新行的标题（首条消息摘要；没有则用默认标题）。
+        title: String,
     },
     /// 切走时回收空白会话行（对齐 Web `reclaim_disposable_blank_session`）。
     RemoveBlank {
@@ -247,6 +264,17 @@ pub fn apply_index_op(
                 created_blank_id: None,
             })
         }
+
+        SessionIndexOp::EnsureListed {
+            conversation_id,
+            title,
+        } => Ok(ensure_listed_row(
+            &mut rows,
+            active,
+            conversation_id,
+            title,
+            stamp,
+        )),
         SessionIndexOp::RemoveBlank {
             local_id,
             next_active,
@@ -336,9 +364,18 @@ pub fn apply_index_op(
 /// 对象上加字段时必须同步这里。
 #[must_use]
 pub fn put_sessions_body(applied: &AppliedIndex) -> Value {
+    sessions_body(&applied.sessions, applied.active_session_id.as_deref())
+}
+
+/// `PUT` 体的任意形态：写前（`GET` 回来的原样）与写后（[`put_sessions_body`]）共用同一份
+/// 拼装，好让「这次到底改没改」退化成一次 `Value` 相等比较（见 [`apply_web_session_op`]）。
+///
+/// 两处必须同形，所以不允许各写一遍 —— 少写一个 `active_session_id` 就会让每次写入都被
+/// 判成「有变化」，空写照样发出去。
+fn sessions_body(sessions: &Value, active: Option<&str>) -> Value {
     let mut body = serde_json::Map::new();
-    body.insert("sessions".into(), applied.sessions.clone());
-    if let Some(active) = applied.active_session_id.as_deref() {
+    body.insert("sessions".into(), sessions.clone());
+    if let Some(active) = active {
         body.insert(
             "active_session_id".into(),
             Value::String(active.to_string()),
@@ -364,12 +401,16 @@ pub async fn apply_web_session_op(
         op,
         &IndexStamp::now(),
     )?;
-    client
-        .put_json_no_content(
-            paths::USER_DATA_WORKSPACE_SESSIONS,
-            &put_sessions_body(&applied),
-        )
-        .await?;
+    // 没改东西就不写：索引是「GET → 改 → 全量 PUT」，没有版本号 / CAS，每次写入都有一个
+    // 覆盖别的端写入的窗口。`EnsureListed` 每轮都会试一次、`SetTitleByServer` 找不到行
+    // 也是空操作，无条件 PUT 会把这类空写变成常态。这里比的是 PUT 体本身，所以「行已存在 /
+    // 标题已是真名 / 已是那条空白行」都会落到这条分支上。
+    let body = put_sessions_body(&applied);
+    if body != sessions_body(&list.raw_sessions, list.active_session_id.as_deref()) {
+        client
+            .put_json_no_content(paths::USER_DATA_WORKSPACE_SESSIONS, &body)
+            .await?;
+    }
     if let SessionIndexOp::Delete {
         server_conversation_id: Some(cid),
         ..
@@ -452,6 +493,56 @@ fn bind_row(row: &mut Value, conversation_id: &str, now_ms: i64) {
         Value::String(conversation_id.to_string()),
     );
     obj.insert("updated_at".into(), Value::from(now_ms));
+}
+
+/// 「这一轮的会话必须在索引里有一行」（issue #618）。
+///
+/// 与 [`SessionIndexOp::BindServer`] 的分工见该变体的注释。这里只做两件事：已有行带着
+/// 这个 cid 就原样返回（幂等），否则插一行并绑定。单独成函数是为了不让 `apply_index_op`
+/// 的 CCN 再涨（门禁 CCN>10 全局零容忍）。
+fn ensure_listed_row(
+    rows: &mut Vec<Value>,
+    active: Option<&str>,
+    conversation_id: &str,
+    title: &str,
+    stamp: &IndexStamp,
+) -> AppliedIndex {
+    let cid = conversation_id.trim();
+    // 空 cid 不写：`bind_row` 会落一个空的 `server_conversation_id`，而下一次调用又匹配
+    // 不到它（`row_server_conversation_id` 过滤空串）→ 每轮堆一行。上游已经拦过一次
+    // （`plan_session_ensure` 的 `NoConversationId`），这里是写入层自己的防线。
+    if cid.is_empty() {
+        return applied_without_removal(rows, active, "");
+    }
+    let existing = rows
+        .iter()
+        .find(|r| row_server_conversation_id(r) == Some(cid))
+        .and_then(|r| row_id(r))
+        .map(str::to_string);
+    if let Some(local_id) = existing {
+        return AppliedIndex {
+            sessions: Value::Array(std::mem::take(rows)),
+            active_session_id: active.map(str::to_string),
+            local_id,
+            reused_blank: false,
+            created_blank_id: None,
+        };
+    }
+    let mut row = blank_row(&stamp.new_local_id, title, stamp.now_ms);
+    bind_row(&mut row, cid, stamp.now_ms);
+    rows.insert(0, row);
+    // 桶原本是空的（active 缺失）就顺手把 active 指过去：否则服务端没有正在用的会话，
+    // 别的端打开这个工作区会看到「一无所有」。active 已指向别的行时保持不动。
+    let active_after = active
+        .map(str::to_string)
+        .or_else(|| Some(stamp.new_local_id.clone()));
+    AppliedIndex {
+        sessions: Value::Array(std::mem::take(rows)),
+        active_session_id: active_after,
+        local_id: stamp.new_local_id.clone(),
+        reused_blank: false,
+        created_blank_id: None,
+    }
 }
 
 /// Web 侧「默认会话标题」（`i18n::default_session_title(ZhHans)`）：TUI 界面文案固定中文，
