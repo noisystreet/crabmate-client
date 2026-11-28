@@ -216,7 +216,7 @@ signal」这个问题**不存在**，而不是被兜住。
 ## 13. 左栏「连接」区（导航器）与「新建连接窗口」入口
 
 TUI 在左栏下半画 lane 区（`tui_multi_server.md` §4.6），Desktop 现在在同一位置画
-**连接导航**：会话列表下方常驻，每个窗口一行（实现：`frontend/src/app/nav_rail_connections.rs`）。
+**连接导航**：会话列表下方常驻，每个窗口一行（实现：`frontend/src/app/shell/rail/mod.rs`）。
 
 | 项 | 设计 |
 |---|---|

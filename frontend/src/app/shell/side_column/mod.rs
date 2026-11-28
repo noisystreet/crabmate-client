@@ -1,5 +1,8 @@
 //! 右列：拖拽分隔条、视图工具栏、工作区与任务侧栏。
 
+pub(crate) mod toolbar;
+pub(crate) mod workspace_scroll;
+
 use crate::api::{TaskItem, TasksData};
 use crate::app_prefs::SidePanelView;
 use crate::i18n::{self, Locale};
@@ -7,12 +10,12 @@ use crate::sse_dispatch::ThinkingTraceInfo;
 use leptos::prelude::*;
 use std::sync::Arc;
 
-use super::app_shell_ctx::SideColumnViewSignals;
-use super::side_column_toolbar::{SideColumnResizeAndShellToolbar, SideColumnResizeToolbarSignals};
-use super::side_column_workspace_scroll::WorkspaceSideCardScrollInner;
-use super::workspace::panel::make_refresh_workspace_after_mutation;
-use super::workspace::panel_state::WorkspacePanelSignals;
+use self::toolbar::{SideColumnResizeAndShellToolbar, SideColumnResizeToolbarSignals};
+use self::workspace_scroll::WorkspaceSideCardScrollInner;
+use crate::app::app_shell_ctx::SideColumnViewSignals;
 use crate::app::shell::status::bar::side_status_stack_view;
+use crate::app::workspace::panel::make_refresh_workspace_after_mutation;
+use crate::app::workspace::panel_state::WorkspacePanelSignals;
 use crate::workspace_context_menu::{WorkspaceContextMenuActions, WorkspaceOpenInEditorSignals};
 
 #[component]

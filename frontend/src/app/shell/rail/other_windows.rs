@@ -2,7 +2,7 @@
 //!
 //! 单独成文件是行数门禁的要求（`nav_rail_connections.rs` 贴着 920 行），与
 //! `nav_rail_lanes.rs` / `nav_rail_ctl_restart.rs` 同一处置：`#[path]` 只换文件，
-//! 模块路径仍是 `nav_rail_connections::other_windows`。
+//! 模块路径仍是 `rail::other_windows`。
 //!
 //! 单窗口多 lane 的常态下这一组**恒空、整组不渲染** —— 前端已经没有开新窗口的入口
 //! （#561 S2：连接 = 在当前窗口新建 lane），只有壳侧还挂着别的 Desktop 窗口（老路径 /

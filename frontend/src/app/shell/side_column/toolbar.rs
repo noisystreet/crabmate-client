@@ -26,7 +26,7 @@ pub(crate) fn side_toolbar_in_side_column(view: SidePanelView) -> bool {
     !matches!(view, SidePanelView::None)
 }
 
-pub(super) type SideResizeHandlesCell = Rc<
+pub(in crate::app) type SideResizeHandlesCell = Rc<
     RefCell<
         Option<(
             leptos_dom::helpers::WindowListenerHandle,
@@ -36,7 +36,7 @@ pub(super) type SideResizeHandlesCell = Rc<
 >;
 
 #[derive(Clone)]
-pub(super) struct SideColumnResizeToolbarSignals {
+pub(in crate::app) struct SideColumnResizeToolbarSignals {
     pub locale: RwSignal<Locale>,
     pub side_resize_dragging: RwSignal<bool>,
     pub side_panel_view: RwSignal<SidePanelView>,
@@ -446,7 +446,7 @@ fn SideColumnShellColumn(
 }
 
 #[component]
-pub(super) fn SideColumnResizeAndShellToolbar(
+pub(in crate::app) fn SideColumnResizeAndShellToolbar(
     toolbar: SideColumnResizeToolbarSignals,
     children: Children,
 ) -> impl IntoView {
