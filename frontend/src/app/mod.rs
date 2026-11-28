@@ -59,14 +59,7 @@ mod status_view_chip;
 mod tauri_window_controls;
 mod web_api_bearer_recovery;
 mod wire_workspace_domain;
-mod workspace_browser_pick_modal;
-mod workspace_clone_modal;
-mod workspace_panel;
-pub(crate) mod workspace_panel_state;
-mod workspace_project_modal;
-mod workspace_project_modal_body;
-mod workspace_project_modal_parts;
-mod workspace_root_actions;
+pub(crate) mod workspace;
 
 use std::rc::Rc;
 

@@ -15,7 +15,7 @@ use super::ide_menu_bar::{
 };
 use super::status_bar::StatusRunDotButton;
 use super::tauri_window_controls::TauriWindowControls;
-use super::workspace_root_actions::{ShellTopbarWorkspaceRoot, WorkspaceRootPickHandle};
+use super::workspace::root_actions::{ShellTopbarWorkspaceRoot, WorkspaceRootPickHandle};
 
 fn shell_topbar_a11y(ide: bool, locale: Locale) -> (&'static str, &'static str, &'static str) {
     if ide {

@@ -1,6 +1,6 @@
 # frontend/src/app 根级 .rs 冻结清单（门禁：scripts/check-layout-budget.sh 的 Rule B，#597）
 #
-# 为什么：根级平铺 77 个文件里，`settings_mcp_block_toolbar.rs` / `workspace_project_modal_parts.rs`
+# 为什么：根级平铺的文件里，`settings_mcp_block_toolbar.rs` / `side_column_toolbar.rs`
 # 这类名字不是领域概念，是「哪个文件还有 920 行余量」的产物。本清单**只减不增**：
 #   - 新增根级 .rs → fail（新文件必须落在域目录，例如 app/settings/）；
 #   - 清单里的文件消失（已搬走 / 改名）→ 也 fail，请从清单删除该行（双向 stale 检查）。
@@ -61,10 +61,3 @@ frontend/src/app/status_view_chip.rs
 frontend/src/app/tauri_window_controls.rs
 frontend/src/app/web_api_bearer_recovery.rs
 frontend/src/app/wire_workspace_domain.rs
-frontend/src/app/workspace_browser_pick_modal.rs
-frontend/src/app/workspace_panel.rs
-frontend/src/app/workspace_panel_state.rs
-frontend/src/app/workspace_project_modal.rs
-frontend/src/app/workspace_project_modal_body.rs
-frontend/src/app/workspace_project_modal_parts.rs
-frontend/src/app/workspace_root_actions.rs

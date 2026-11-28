@@ -8,13 +8,11 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 
 use crate::app::focusable_menu::{FocusableModalBackdrop, FocusableModalPanel};
-use crate::app::workspace_root_actions::WorkspaceRootPickHandle;
+use crate::app::workspace::root_actions::WorkspaceRootPickHandle;
 use crate::i18n;
 
-use super::workspace_project_modal_body::{
-    WorkspaceProjectModalBody, spawn_reload_workspace_projects,
-};
-use super::workspace_project_modal_parts::{
+use super::project_modal_body::{WorkspaceProjectModalBody, spawn_reload_workspace_projects};
+use super::project_modal_parts::{
     WorkspaceProjectNewRow, WorkspaceProjectOpenArgs, spawn_workspace_project_open,
 };
 

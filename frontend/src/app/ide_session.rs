@@ -16,7 +16,7 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 
 use crate::app::app_signals::{IdeChromeSignals, IdeEditorSignals, ShellUISignals};
-use crate::app::workspace_root_actions::WorkspaceRootPickHandle;
+use crate::app::workspace::root_actions::WorkspaceRootPickHandle;
 use crate::chat_session_state::ChatSessionSignals;
 use crate::i18n::Locale;
 use crate::ide_codemirror::IdeEditorHost;
@@ -31,7 +31,7 @@ use super::ide_editor_body::IdeEditorBodySignals;
 use super::ide_layout_switch::{IdeLayoutToggleSignals, enter_editor_layout};
 use super::ide_menu_bar::{IdeMenuBarSignals, wire_ide_menu_bar_bridge};
 use super::ide_new_file_modal::{IdeNewFileModal, IdeNewFileModalInput};
-use super::workspace_panel_state::WorkspacePanelSignals;
+use super::workspace::panel_state::WorkspacePanelSignals;
 
 /// 建会话所需的输入（`Arc` 等非 `Copy` 项只在这里出现一次）。
 #[derive(Clone)]

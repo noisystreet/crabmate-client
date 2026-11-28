@@ -124,7 +124,7 @@ pub(crate) fn wire_stream_visibility_resume(
                     let loc = locale.get_untracked();
                     leptos::task::spawn_local(async move {
                         let _ =
-                            crate::app::workspace_root_actions::flush_current_workspace_sessions(
+                            crate::app::workspace::root_actions::flush_current_workspace_sessions(
                                 chat, loc,
                             )
                             .await;

@@ -9,7 +9,7 @@ use super::menu_id::IdeMenuId;
 use super::props::IdeMenuBarSignals;
 use crate::app::app_signals::IdeChromeSignals;
 use crate::app::ide_layout_switch::{IdeLayoutToggleSignals, exit_editor_layout};
-use crate::app::workspace_root_actions::WorkspaceRootPickHandle;
+use crate::app::workspace::root_actions::WorkspaceRootPickHandle;
 use crate::i18n::{self, Locale};
 use crate::icon::icon_chevron_right;
 use crate::ide_save::{IdeSaveContext, spawn_save_active_tab, spawn_save_all_dirty_tabs};
@@ -24,7 +24,7 @@ fn toggle_file_menu(
         open_menu.set(None);
         ide_menubar_dropdown_open.set(false);
     } else {
-        crate::app::workspace_clone_modal::spawn_refresh_workspace_pool_enabled(
+        crate::app::workspace::clone_modal::spawn_refresh_workspace_pool_enabled(
             workspace_pick.ws.workspace_pool_enabled,
             workspace_pick.locale,
         );

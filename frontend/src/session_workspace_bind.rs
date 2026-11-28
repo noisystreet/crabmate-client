@@ -8,7 +8,7 @@ use gloo_timers::future::TimeoutFuture;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
-use crate::app::workspace_panel_state::WorkspacePanelSignals;
+use crate::app::workspace::panel_state::WorkspacePanelSignals;
 use crate::chat_session_state::ChatSessionSignals;
 use crate::i18n::Locale;
 use crate::storage::ChatSession;

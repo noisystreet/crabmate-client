@@ -52,7 +52,7 @@ use super::status_tasks_wiring::{
 };
 use super::web_api_bearer_recovery::wire_web_api_bearer_save_recovery;
 use super::wire_workspace_domain::{WireWorkspaceDomainEffectsArgs, wire_workspace_domain_effects};
-use super::workspace_panel::{make_insert_workspace_path_into_composer, make_refresh_workspace};
+use super::workspace::panel::{make_insert_workspace_path_into_composer, make_refresh_workspace};
 use crate::chat_session_state::ChatStreamBusyMemos;
 
 type RefreshWorkspaceFn = Arc<dyn Fn() + Send + Sync>;
@@ -243,14 +243,14 @@ fn wire_phase4a_workspace_domain(app: &AppSignals, refresh_workspace: &RefreshWo
         if !initialized.get() {
             return;
         }
-        super::workspace_clone_modal::spawn_refresh_workspace_pool_enabled(pool_enabled, locale);
+        super::workspace::clone_modal::spawn_refresh_workspace_pool_enabled(pool_enabled, locale);
     });
     Effect::new(move |_| {
         let n = bearer_nonce.get();
         if n == 0 {
             return;
         }
-        super::workspace_clone_modal::spawn_refresh_workspace_pool_enabled(pool_enabled, locale);
+        super::workspace::clone_modal::spawn_refresh_workspace_pool_enabled(pool_enabled, locale);
     });
 }
 

@@ -42,9 +42,9 @@ use super::shell_confirm_dialog::ShellConfirmDialog;
 use super::shell_runtime_context::ChatShellLeptosContext;
 use super::side_column::side_column_view;
 use super::sidebar_nav::sidebar_nav_view;
-use super::workspace_browser_pick_modal::workspace_browser_pick_modal_view;
-use super::workspace_clone_modal::workspace_clone_modal_view;
-use super::workspace_project_modal::workspace_project_modal_view;
+use super::workspace::browser_pick_modal::workspace_browser_pick_modal_view;
+use super::workspace::clone_modal::workspace_clone_modal_view;
+use super::workspace::project_modal::workspace_project_modal_view;
 use super::{SidebarRailRevealBtn, app_root_class_name, shell_main_hidden};
 
 /// 一条 lane 的完整视图：侧栏 + 主区 + 各模态 + 全屏页。

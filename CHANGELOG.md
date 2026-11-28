@@ -27,6 +27,8 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Changed
 
+- **Workspace UI files move into `app/workspace/`; the flat `app/` root shrinks 61 → 54.**
+
 - **Settings UI files move into `app/settings/`; the flat `app/` root shrinks 77 → 61.**
 
 - **Session abort and hydration-restore rules leave the app closures.**

@@ -4,7 +4,7 @@
 //! 子模块按域拆分文件；[`AppSignals`] 与 [`ChatDomainWiringSignals`] 仍在本 `mod` 根聚合导出。
 //! 已有的聚合类型：[`ChatSessionSignals`](crate::chat_session_state::ChatSessionSignals)、
 //! [`StatusTasksSignals`](super::status_tasks_state::StatusTasksSignals)、
-//! [`WorkspacePanelSignals`](super::workspace_panel_state::WorkspacePanelSignals)。
+//! [`WorkspacePanelSignals`](super::workspace::panel_state::WorkspacePanelSignals)。
 
 mod approval;
 mod chat_composer;
@@ -47,7 +47,7 @@ pub use window_signals::WindowSignals;
 pub use workspace::WorkspaceSignals;
 
 pub use super::status_tasks_state::StatusTasksSignals;
-pub use super::workspace_panel_state::WorkspacePanelSignals;
+pub use super::workspace::panel_state::WorkspacePanelSignals;
 pub use crate::chat_session_state::ChatSessionSignals;
 
 use crate::clarification_form::PendingClarificationForm;

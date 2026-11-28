@@ -7,8 +7,8 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 
 use crate::api::post_workspace_project;
-use crate::app::workspace_panel_state::WorkspacePanelSignals;
-use crate::app::workspace_root_actions::{
+use crate::app::workspace::panel_state::WorkspacePanelSignals;
+use crate::app::workspace::root_actions::{
     WorkspaceSessionHandoff, finish_workspace_root_ui, flush_current_workspace_sessions,
 };
 use crate::app_prefs::SidePanelView;
