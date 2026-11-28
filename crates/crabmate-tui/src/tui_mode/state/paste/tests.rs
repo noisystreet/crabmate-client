@@ -1,6 +1,6 @@
-//! `state_paste.rs` 的单测（`#[path]` 子模块）。
+//! `paste/mod.rs` 的单测（同目录 `tests.rs`）。
 //!
-//! 与 `state_tests.rs` 分开：那个文件开头已被 lizard 解析成一整段大函数体，
+//! 与 `state/tests.rs` 分开：那个文件开头已被 lizard 解析成一整段大函数体，
 //! 再往里加测试会顶到 fn-nloc 门禁（≤ 200 行）。
 
 use super::{PASTE_MAX_CHARS, UiState};

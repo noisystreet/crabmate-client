@@ -320,7 +320,7 @@ Web 的 `api_base_preset_select` 字符串链路（写入已保存模型预设�
 | 端 | 路径 |
 |----|------|
 | frontend | `app/shell/status/context.rs`（轴线与文本，已改为消费共享实现并 re-export）、`chat_session_state.rs`（`ContextUsedWatermark` 改 re-export）、`app/context_usage_page.rs` |
-| tui | `tui_mode/state_context.rs`（`set_prompt_tokens` / `context_text`，状态行 `ctx` 段）、`serve/chat_classify.rs`（从 `RUN_FINISHED` / `conversation_saved` 帧摘 `tiktokenPromptTokens` → `LineAction::PromptTokens`；并从 `timeline_log` 的 `kind=context_trim` 取 `after_tokens` → `LineAction::ContextTrim` 回落水位） |
+| tui | `tui_mode/state/context.rs`（`set_prompt_tokens` / `context_text`，状态行 `ctx` 段）、`serve/chat_classify.rs`（从 `RUN_FINISHED` / `conversation_saved` 帧摘 `tiktokenPromptTokens` → `LineAction::PromptTokens`；并从 `timeline_log` 的 `kind=context_trim` 取 `after_tokens` → `LineAction::ContextTrim` 回落水位） |
 
 共享实现（`crabmate_client_api::context_axis`）：
 

@@ -25,7 +25,7 @@
 | G3 | ~~composer 为全局单缓冲，不保存/不恢复各会话草稿~~ → **已落地**：按 `conversation_id` 换入换出，`/conv new` 起空白（`tui_mode/drafts.rs`） | 每次切会话 flush 当前草稿、回来恢复（`composer.rs`、`session_ops.rs::flush_active_composer_draft`） | 遗留草稿会“串”到下一个会话；切走再回来内容丢失 |
 | G4 | ~~无任何复制路径~~ → **已落地**（`tui_mode/clipboard.rs`）：`/copy [assistant\|user]`（别名 `/yank`）与 `Ctrl+Y`。**残余**：粒度固定为「最近一条非空消息」，不能指定中间某条；鼠标捕获占用了终端原生拖选（需 Shift+拖） | 消息 copy + 代码块「复制」按钮（`md_code_copy.rs`、`tui_actions_bar.rs`） | 终端里想取走一段代码/回复只能手工选中或重打 |
 | G5 | 会话列表：左栏 use/new/refresh + **删除**（`Delete` 先确认 / `Shift+Delete` 直删，`tui_mode/sidebar_keys.rs`）；`/conv new` 已改为**写**服务端会话索引（`serve/sessions.rs`：`GET` → 复用或插入空白行 → 全量 `PUT`，首轮结束回填 `server_conversation_id`，切走回收空白行，首条消息按 Web 规则起名），左栏与 Web/Desktop 同步可见；仍缺重命名（**无 serve 端点**）、标题过滤、跨会话搜索、导出 | 排序 + 标题过滤 + 全文搜索 + 重命名/删除/导出（`session_rail.rs`、`session_list_modal.rs`） | 会话一多靠翻，无过滤手段 |
-| G6 | ~~切换会话后 transcript 从空开始~~ → **已落地**：切换 / 启动回放 `GET /conversation/messages` 的**最新一页**；`/older`（别名 `/history`，也在 `/` 补全菜单里）按 `before_index` 前插更早一页（80 条/页），并**同时平移**工具行映射 / 搜索命中 / 搜索锚点（`tui_mode/history.rs`、`tui_mode/state_history.rs`、`tui_mode/body_cache.rs`）。**残余**：视口未补偿（前插后画面整体下移一页高度），滚动锚定留待下一个 PR | 会话水合 + 顶部「加载更早」prepend（`session_hydrate.rs`、`tui_stream_view.rs`） | 续聊时看不到前文，须先切到别的壳回顾 |
+| G6 | ~~切换会话后 transcript 从空开始~~ → **已落地**：切换 / 启动回放 `GET /conversation/messages` 的**最新一页**；`/older`（别名 `/history`，也在 `/` 补全菜单里）按 `before_index` 前插更早一页（80 条/页），并**同时平移**工具行映射 / 搜索命中 / 搜索锚点（`tui_mode/history.rs`、`tui_mode/state/history_page.rs`、`tui_mode/body_cache.rs`）。**残余**：视口未补偿（前插后画面整体下移一页高度），滚动锚定留待下一个 PR | 会话水合 + 顶部「加载更早」prepend（`session_hydrate.rs`、`tui_stream_view.rs`） | 续聊时看不到前文，须先切到别的壳回顾 |
 | G7 | 无 retry / regen / branch / 编辑用户消息（`controls.rs` 无对应命令，`tui_mode` 里无 `regen`/`branch`） | 消息回合菜单（`message_row_actions.rs`、`user_message_edit.rs`） | 模型答错只能整轮重发或手动复制改写 |
 | G8 | ~~审批浮层把命令截成一行且无法展开~~ → **已落地**：`Ctrl+E` 在 78×9 收起档与铺满主体区的展开档之间切换，展开档按显示宽折行（`text::wrap_display`）并支持 ↑/↓、PgUp/PgDn、Home/End 滚动，提示行显示「第 x-y / N 行」（`overlay.rs`） | 底部审批条可展开完整命令 + 失败保留重试（`approval_modal.rs`） | 长命令看不到全貌，易误判 |
 | G9 | 澄清问卷（`clarification_questionnaire`）在 TUI 无交互 UI：`serve/chat_classify.rs` 只有 `clarify_trace` 钩子，没有表单 | 问卷表单（Web `frontend`） | 模型需要澄清时 TUI 这侧拿不到结构化提问 |
@@ -38,7 +38,7 @@
 
 > **2026-10-31 补记**：新增缺口 G12「一轮的执行过程把 transcript 撑长」已落地（issue #369）——一轮的 `Thinking` / 工具行在回合结束时折成一条 `Process` 摘要行，`/older` 回放与滚动回看同样折叠。折叠单元是「**连续过程行段**」而不是回合区间（回放没有回合边界，区间会被前插错位）；`Assistant` / `System` 行永不折叠。**展开是可逆的**：摘要行始终保留，`/fold [n|all|close]` 切换它的开合（前缀 `▸ ` 收起 / `▾ ` 已展开；无参=最近一条，`n` 从底部数，`all` 全展开，`close` 全折回），`sticky` 随开合双向设置，所以折回的段下一轮仍会被自动折叠。**也能用光标挑**（`Ctrl+G`，任何焦点都能进）：摘要之间 `↑/↓`、`Enter`
 > 开合、`Esc` 退出，左键点摘要同义（并把焦点带回输入框，否则接着按 `↑↓` 走的是侧栏）；空格与 `Alt+Enter` **不**归导航（前者是可打印字符、后者是换行）。进导航 = 接管方向键与视口：`/find` 锚点与 `/` 补全菜单都必须让位，否则就是「↑↓ 在动、画面钉在命中行」；`/fold <n>` 在导航开着时把光标带到它刚切过的那条。`/older` 前插与回合结束插入摘要行时，光标按插入量重映射（与视口锚点同一份
-> `remap_after_fold`），否则「按了 Enter 之后 ↑↓ 好像卡住」就是它指到了别的段。落点见 `crates/crabmate-tui/src/tui_mode/state_fold.rs` 与 `CHANGELOG.md` 的 `[Unreleased]` 条目。
+> `remap_after_fold`），否则「按了 Enter 之后 ↑↓ 好像卡住」就是它指到了别的段。落点见 `crates/crabmate-tui/src/tui_mode/state/fold/mod.rs` 与 `CHANGELOG.md` 的 `[Unreleased]` 条目。
 
 > **2026-11-02 补记**：新增缺口 G13「左右两栏列宽写死在编译期」——`pane_width.rs` 的 `SIDEBAR_WIDTH = 26` / `WORKSPACE_PANE_WIDTH = 34`：窄终端下两栏挤掉正文，宽终端下两栏又白占几十列，而两栏**没有边框**（边界只是聊天列的留白，用户看不出边界在哪）。Desktop 的侧栏可拖拽（`frontend/src/app_prefs.rs`：`side_width` 默认 280px、区间 200..560）。**P0 已落地**（issue #407）：`PaneWidths { left, right }` + `MIN/MAX` 边界 + **幂等**的 `clamped(terminal_width)`（聊天列 `MIN_CHAT_COLS = 40` 保底；超预算时先压右栏、再压左栏，因为右栏挤窄只是把 `ctx`
 > 行截断，左栏挤窄就读不出会话标题了）；`layout::panes_with_lanes` 改收 `PaneLayout { visible, widths }` 并在函数内再夹一次（幂等），于是它仍是**全部矩形**（两栏 / lane 区 / 状态栈 / 聊天列）的唯一来源 —— 渲染与鼠标命中不可能出现「画的是夹取后的、点的是夹取前的」。`chat_body_width` 与 `LaneApp::status_stack_rows` 同口径读**右栏内宽**：状态栈的行数取决于内宽，两处不同源的症状是「点状态栈点到别的段」，而不是画面上的错位。两栏各画一列 `Palette::border`
@@ -103,7 +103,7 @@
 
 - **参照**：repl `/resume`（`main.rs:499-594` 断点记录 + `stream_resume:{job_id,after_seq}` 重挂）；Desktop in-app resume（矩阵 L62）。
 - **方案**：把「断点记录」从 repl 提升为 turn 层通用状态——全屏回合意外中断（网络 `InterruptedStream` / 取消未送达）时在 `state.rs` 记录 `{text, conversation_id, job_id, after_seq}`，状态栏/系统行提示「断线：输入 /resume 续传」；新增 `/resume` 控制斜杠（`controls.rs` 解析 → `mod.rs` 以 `stream_resume` 重新 attach）。已确认取消/正常结束的回合不可续，与 repl 一致。
-- **落点**：`tui_mode/controls.rs`、`tui_mode/mod.rs`（`start_turn`）、`tui_mode/state.rs`、`tui_mode/worker.rs`。
+- **落点**：`tui_mode/controls.rs`、`tui_mode/mod.rs`（`start_turn`）、`tui_mode/state/mod.rs`、`tui_mode/worker.rs`。
 - **风险**：与 Ctrl+C「第一次取消回合」现有语义的边界（repl 已定义，沿用即可）。
 
 #### W1.2 忙时排队发送（G2）— 已落地（`tui_mode/drafts.rs`）
@@ -141,16 +141,16 @@
 - **参照**：Desktop 侧栏搜索面板标题过滤（`search_panel.rs`）。
 - **v1 已落地（命令入口）**：`/conv filter <词>`（`/conv list <词>` / `ls` / `show` 同义）按标题做大小写不敏感子串过滤，空标题按 `(untitled)` 参与匹配；空参或 `off`/`none`/`clear` 清除。左栏标题写成 `会话 [可见/总数] · filter: 词`，无匹配给 `（无匹配）` 占位行；`↑/↓` 只在可见行间走、`Enter` 使用，鼠标点击同样过可见映射。过滤生效时侧栏提示换成「`/conv filter off` 清过滤」。切会话（`/conv use`）与新建会话会清掉过滤 —— 否则会出现「切过去了但左栏看不见」。
 - **为什么不做「左栏内逐字收窄」**：左栏的裸字母键已占用（`n` 新建 / `r` 刷新 / `w` 跳右栏），字母即过滤会让它们随上下文变义且不可发现。状态模型（`session_filter` + 可见映射）与它完全兼容，将来只是多一层按键分流（见 issue #423 的评论）。
-- **落点**：`tui_mode/state_session_filter.rs`（过滤词 / 可见映射 / 选中吸附 / `move_selection`）、`controls.rs`（`/conv filter` 解析）、`conv_cmd.rs`（落地 + 回执）、`render.rs`（标题与占位行）、`ws_sidebar.rs`（光标口径 + 提示）、`mouse.rs`（点击过可见映射）。
+- **落点**：`tui_mode/state/session_filter.rs`（过滤词 / 可见映射 / 选中吸附 / `move_selection`）、`controls.rs`（`/conv filter` 解析）、`conv_cmd.rs`（落地 + 回执）、`render.rs`（标题与占位行）、`ws_sidebar.rs`（光标口径 + 提示）、`mouse.rs`（点击过可见映射）。
 - **风险**：小。过滤只影响「显示 / 移动 / 鼠标命中」，`selected` 仍是全量下标，删除与切换链路未变；窄屏左栏不可见时过滤无副作用。
 
-#### W1.6 多行粘贴（bracketed paste）— 已落地（`tui_mode/paste.rs`、`tui_mode/state_paste.rs`）
+#### W1.6 多行粘贴（bracketed paste）— 已落地（`tui_mode/paste.rs`、`tui_mode/state/paste/mod.rs`）
 
 > **实现**：启动时下发 `EnableBracketedPaste`（`ScreenGuard` 退出时对称关闭；`CM_TUI_PASTE=off` 可关），键盘线程把 `Event::Paste` 转成 `UiEvent::Paste`，`on_paste` 一次性写进输入框（**不提交**）。归一化在 `UiState::insert_paste`：`\r\n` / 裸 `\r` 统一成 `\n`（多行判定只认 `\n`）、`\t` 展开四空格、其余 C0 控制符丢弃（裸 `\x1b` 会被渲染层当成未闭合转义序列）、单次上限 32K 字符（超出截断并在 transcript 提示）。落地前的问题：终端把粘贴当逐字符按键，换行变成 `KeyCode::Enter` 被当成提交，多行内容只发出第一行、剩下的落进新草稿；夹带的 `Tab`
 > 还会被当成焦点切换。**未做**：图片/文件粘贴、多行粘贴后自动折叠成「已粘贴 N 行」占位。
 
 - **参照**：Desktop composer 的粘贴（浏览器原生 `paste` 事件，整段进 textarea）。
-- **落点**：`tui_mode/mod.rs`（开关 + `ScreenGuard`）、`tui_mode/event_loop.rs`（`paste_capture_enabled` / `enable_captures`）、`tui_mode/worker.rs`（事件转发）、`tui_mode/paste.rs`、`tui_mode/state_paste.rs`。
+- **落点**：`tui_mode/mod.rs`（开关 + `ScreenGuard`）、`tui_mode/event_loop.rs`（`paste_capture_enabled` / `enable_captures`）、`tui_mode/worker.rs`（事件转发）、`tui_mode/paste.rs`、`tui_mode/state/paste/mod.rs`。
 - **风险**：小。关掉括号粘贴即回到改造前行为（逐字符按键）。
 
 ### Wave 2 · 需确认 serve 会话/消息契约
@@ -167,7 +167,7 @@
 > **依赖修正**：原方案写「依赖 serve 消息分页端点」——核对后该端点与 `before_index` 参数**早已就绪**（`serve/conversation.rs` 一直传 `CONVERSATION_MESSAGES_PAGE_LIMIT`，`ConversationMessagesResponse` 已带 `window_start_index`/`has_older`），TUI 只是永远传 `None`，所以本项属纯客户端改动，无新契约。
 
 - **参照**：Desktop `session_hydrate.rs` 水合 + 顶部「加载更早」prepend 且滚动锚定不跳（`scroll_shell.rs::compensate_after_prepend`）。
-- **落点**：`tui_mode/history.rs`（门控 / 前插回包）、`tui_mode/state_history.rs`（游标 + `prepend_replayed`，压 `state.rs` 行数）、`tui_mode/body_cache.rs`（顶部提示行）、`tui_mode/controls.rs` + `slash_menu.rs`（`/older`）、`tui_mode/worker.rs`（回包带 `before_index`）。
+- **落点**：`tui_mode/history.rs`（门控 / 前插回包）、`tui_mode/state/history_page.rs`（游标 + `prepend_replayed`，压 `state.rs` 行数）、`tui_mode/body_cache.rs`（顶部提示行）、`tui_mode/controls.rs` + `slash_menu.rs`（`/older`）、`tui_mode/worker.rs`（回包带 `before_index`）。
 
 #### W2.2 会话重命名/删除（G5 的一部分）— 删除已落地，重命名待端点
 
@@ -180,7 +180,7 @@
 
 - **参照**：Desktop `message_row_actions.rs`（regen/branch 优先 `POST /chat/branch`，NotFound/Conflict 走本地截断重试）、`user_message_edit.rs`。
 - **已落地**：`/conv retry` 重跑上一轮 —— 服务端 `POST /chat/branch` 先把会话截到该轮用户消息之前，本地 `truncate_to_last_user_turn` 截到同一位置，再重发同一句；`/conv edit` 只把该句放回输入框，**提交时**才 branch，所以「打开来改又不改」不会动服务端历史。序号（`before_user_ordinal`）在客户端按分页历史现数并**跳过首轮工作区上下文注入条**；有归档回合时拒绝而不是猜（猜错会把会话截到别处）。`NotFound` 解开 `conversation_id` 绑定，`Conflict` 只提示先刷新、不动本地 transcript；流式中 / 有排队消息 / 上一发还在路上都拒绝并说明原因。
-- **落点**：`crabmate-client-api::chat_branch`（分类 + 序号）、`serve/branch.rs`（HTTP）、`state_truncate.rs`（截断原语）、`conv_cmd.rs`（命令与回包）、`worker_jobs::job_conv_branch`。
+- **落点**：`crabmate-client-api::chat_branch`（分类 + 序号）、`serve/branch.rs`（HTTP）、`tui_mode/state/truncate.rs`（截断原语）、`conv_cmd.rs`（命令与回包）、`worker_jobs::job_conv_branch`。
 - **不做**：回合段数据结构（本 issue 只到「最近一个回合」，回扫 + 截断已够；任意历史回合的重跑是另一件事）、分支树浏览、编辑 assistant 消息。
 
 #### W2.4 会话导出（Markdown / JSON）— **已落地**
@@ -202,7 +202,7 @@
 - **W3.3 阅读增强** — **链接部分已落地（应用内，不是 OSC 8）**：正文里的 `[文字](url)` 与裸 `http(s)://…` 都能打开（**`Ctrl+单击`** 命中链接文字即拉起系统浏览器（`xdg-open` → `gio open` → `sensible-browser` → `open`），普通单击仍是「回到输入框」；裸地址按 `[url](url)` 登记 —— 显示文本就是地址本身，屏幕上逐字不变，尾随标点会剥掉，行内代码与代码块里的地址保持字面量）。**OSC 8 明确不做**：本程序开着鼠标上报（`shell.rs` 的 1000/1002/1006），点击会被送进本进程、终端自己的链接处理器收不到，OSC 8 在这套捕获模式下收益为零；应用内命中表不依赖终端能力，长 URL
   折行后逐段都能点。落点：`tui_mode/links.rs`（URL 校验 / 打开器 / `click_link`）、`body_click.rs`（链接 → 折叠 → 「回输入框」的分派）、`body_row.rs`（`BodyRow` + 热区）、`md_links.rs`（`PartChars` + 折行换算列）；`render_body` 每帧回写 `UiState::body_links`（与 `body_rows_log` 逐行对齐，鼠标侧只做减法）。边界：只放行 `http(s)`（拒 `javascript:` / `data:` / `file:` / 控制字符 / >2048 字节）；SSH 会话降级为「已复制链接 + 说明」（复用
   `clipboard::in_ssh_session` 与 OSC52），无打开器或拉起失败同样回落复制；表格单元格内的链接**也可点**（issue #428：`md_table` 的 `render_row` 保留单元格 `PartChars` 的链接区间 —— 「按列截断没有稳定列」这个理由不成立，屏幕列从来不是这一层算的；`pad_cell` 的左填充经 `absorb` 右移区间，`truncate_cell` 的 `clip_links` 把越过 `…` 的段裁掉，列换算仍由 `wrap_styled_rows` 统一做，热区因此与看到的字对齐）；**每种结果都写一行回执**，因为静默失败就是「点了没反应」。**工具详情整段展开已落地**（issue #428 第 3 条）：`/detail [n]` 把某次工具调用的输出全文铺成只读浮层（`↑↓`/`PgUp`/`PgDn`/`Home`/`End`
-  滚动、`Esc` / `q` 关闭）。前提是 `ToolResultInfo.output` 本来就带全量（上界是 Server 的工具输出长度上限，不是 SSE 流式截断）—— 卡点在 `chat_classify::tool_result_action` 把它压成一行；现在 `output` 随结果帧一起下发，由 `state_tools::tool_end` 写进「行号 → 全文」侧表（单条 64K 字符、总量 4M 字符，超出按行号从旧到新淘汰），`/older` 前插时与工具行映射一起平移。刻意**不复用** `/fold`
+  滚动、`Esc` / `q` 关闭）。前提是 `ToolResultInfo.output` 本来就带全量（上界是 Server 的工具输出长度上限，不是 SSE 流式截断）—— 卡点在 `chat_classify::tool_result_action` 把它压成一行；现在 `output` 随结果帧一起下发，由 `tui_mode/state/tools/mod.rs::tool_end` 写进「行号 → 全文」侧表（单条 64K 字符、总量 4M 字符，超出按行号从旧到新淘汰），`/older` 前插时与工具行映射一起平移。刻意**不复用** `/fold`
   的折叠状态机：折叠管「哪些行可见」，详情只读一行现成文本，关掉即无痕。边界：只有**本进程跑过**的工具带结构化输出，回放出来的历史 tool 行没有 —— 那时命令写一行说明而不是开空壳；thinking 详情不在此列（同一份逻辑没有对应字段，另议）。
 - **W3.4 设置面板补齐 W3 遗留**：MCP 全局开关与 `tool_timeout_secs`、Session SQLite 开关——实现归属 [`tui_settings_panel.md`](./tui_settings_panel.md) §7，本规划仅列入口不展开。
 - **W3.7 工作区树按文件类型着色与标记** — **已落地**（#508；后继细分了色板）：右栏每个条目按类型取色（目录 / 代码 / 配置 / 文档 / 图片 / 其它）并在名字前带 2 列标记（`{` `=` `"` `*` `·`）；目录仍用 `▸/▾` 折叠箭头——一列不承载两个语义。分类器是纯函数（`ws_file_kind.rs`），**按名优先于扩展名**（`CMakeLists.txt` 是构建配置，不是 `.txt` 文档；`.bashrc` 的点开头不算扩展名）；色板随后细分成十五档语言 / 资产槽（Rust / Python / JS / TS / Go / JVM / C 系 / 脚本 / Web / 配置 / 锁文件 / 数据 / 文档 / 图片 / 字体音视频），每档一深一浅两套值（色相是文件身份，不该随主题漂），**均为终端专用色阶**（不绑 CSS

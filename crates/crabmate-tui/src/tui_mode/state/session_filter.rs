@@ -1,8 +1,8 @@
 //! 左栏会话标题过滤（issue #423 的 v1）：过滤词、可见行映射与选中吸附。
 //!
-//! 从 `state.rs` 搬出：那个文件贴着 920 行门禁，而这里是一组纯映射算术 —— 只有
-//! `sessions` / `selected` / `session_filter` 三个字段参与（与 `state_cursor.rs` 同一手法：
-//! `state` 的 `#[path]` 子模块，因此能直接读写私有字段）。
+//! 从 `state/mod.rs` 搬出：那个文件贴着 920 行门禁，而这里是一组纯映射算术 —— 只有
+//! `sessions` / `selected` / `session_filter` 三个字段参与（与 `cursor_edit` 同一手法：
+//! `state` 的子模块，因此能直接读写私有字段）。
 //!
 //! **选中项仍是全量下标**：`selected` 继续指向 `sessions` 里的行，过滤只派生出
 //! [`UiState::visible_indices`]。这样做的好处是 `use_selected` / `delete_*` /

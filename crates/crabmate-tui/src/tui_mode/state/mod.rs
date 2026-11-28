@@ -1,7 +1,13 @@
 //! 全屏 TUI 的 UI 状态：transcript 行 + 输入缓冲 + 回合/会话指示 +
 //! 审批浮层 / 工具行 / 搜索 / thinking 折叠等交互状态。
 //!
-//! 工作区目录树的状态逻辑在 [`super::workspace_tree`]（拆分以控制单文件行数）。
+//! 工作区目录树的状态逻辑在 [`super::workspace_tree`]。
+//!
+//! 本模块是**目录**（`state/`）：域状态的 `impl` 分片各自成文件（`search` / `paste` /
+//! `context` / `history_page` / `fold` / `tools` / `detail_state` / `cursor_edit` /
+//! `session_filter` / `truncate`），单元测试在 `tests`。文件位置是这一层唯一的约定 ——
+//! 模块路径仍是 `tui_mode::state::<名>`，因此各分片直接读写 `UiState` 私有字段的能力
+//! 与搬家前一致（`#[path]` 挂载时代就是同一模块树，这次只是把文件收进目录）。
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -16,46 +22,41 @@ use super::workspace_tree::{WsPickState, WsRow};
 use super::{approve::ApprovalChoice, editor_view::EditorState, palette::Palette};
 use super::{pane_width::PaneWidths, serve_defaults::ServeDefaults};
 
-// 搜索的命中集合与跳转：拆出去是为了增量维护（旧实现每个流式增量全量重扫，见文件头）。
-#[path = "state_search.rs"]
+// 分片的代价与边界：一块域状态 = 一个文件 + 一个 `impl UiState` 块。之所以还没有按域
+// 拆结构体（issue #597 的 PR-6 原计划）：实测只有 `session_filter` 与 `cursor_edit` /
+// `paste` 的方法只碰自己的字段（能自洽成结构体），`fold` / `history_page` / `search` /
+// `tools` 的方法都必须读写 `lines` 或行上状态（`LogLine::hidden` / `sticky_visible` /
+// `run_open`），提出来只会得到「只装字段、方法仍留在 `UiState` 上」的壳。
+
+// 搜索的命中集合与跳转：拆出来是为了增量维护（旧实现每个流式增量全量重扫，见文件头）。
 mod search;
 
-// 粘贴落地（`insert_paste`）：子模块才能直接写私有字段 `input` / `cursor`，顺带压住本文件行数。
-#[path = "state_paste.rs"]
+// 粘贴落地（`insert_paste`）：子模块才能直接写私有字段 `input` / `cursor`。
 mod paste;
 
-// 上下文用量（`tiktokenPromptTokens` 快照 → 状态行 `ctx` 段）：同上，拆出去压 `state.rs` 行数。
-#[path = "state_context.rs"]
+// 上下文用量（`tiktokenPromptTokens` 快照 → 状态行 `ctx` 段）。
 mod context;
 
-// 历史分页（`/older` 前插）：与回放同源，单独成文件压 `state.rs` 行数。
-#[path = "state_history.rs"]
+// 历史分页（`/older` 前插）：与回放同源。
 mod history_page;
 
-// 执行过程的折叠 / 展开（issue #369）：纯结构操作，与搜索一样独立成文件压 `state.rs` 行数。
-#[path = "state_fold.rs"]
+// 执行过程的折叠 / 展开（issue #369）：纯结构操作。
 mod fold;
 
-// 工具行的开始 / 结果回填（按 id 原位更新）：同上，拆出去压 `state.rs` 行数。
-#[path = "state_tools.rs"]
+// 工具行的开始 / 结果回填（按 id 原位更新）：与「整段折叠」相邻但不同层。
 mod tools;
 
-// `/detail` 的载荷类型（侧表值 + 浮层状态）：只为压本文件行数，仍从这里 re-export。
-#[path = "state_detail.rs"]
+// `/detail` 的载荷类型（侧表值 + 浮层状态），仍从这里 re-export。
 mod detail_state;
 pub use detail_state::{DetailOverlay, ToolDetail};
 
-// 输入框的光标与按行导航（`backspace` / `delete_forward` / 方向键 / 行首行尾 / 上下行）：纯光标算术，
-// 只碰 `input` / `cursor`，拆出去压 `state.rs` 行数（issue #424 要加 `clarify` 字段）。
-#[path = "state_cursor.rs"]
+// 输入框的光标与按行导航（`backspace` / `delete_forward` / 方向键 / 行首行尾 / 上下行）：
+// 纯光标算术，只碰 `input` / `cursor`（issue #424 要加 `clarify` 字段）。
 mod cursor_edit;
 
-// 左栏会话标题过滤（issue #423）：过滤词 / 可见行映射 / 选中吸附，纯算术 ——
-// 与上面几块同一手法搬出去，压住本文件的行数门禁。
-#[path = "state_session_filter.rs"]
+// 左栏会话标题过滤（issue #423）：过滤词 / 可见行映射 / 选中吸附，纯算术。
 mod session_filter;
 
-#[path = "state_truncate.rs"]
 mod truncate;
 
 pub use history_page::HistoryPage;
@@ -879,7 +880,7 @@ impl UiState {
         self.status_stack_collapsed = !self.status_stack_collapsed;
     }
 
-    // 搜索（`/find`）的状态与跳转见 `state_search.rs`：命中集合增量维护，
+    // 搜索（`/find`）的状态与跳转见 `search` 子模块：命中集合增量维护，
     // 不再在 `stream_delta` 里全量重扫。
 
     pub fn scroll_page(&mut self, up: bool) {
@@ -913,5 +914,4 @@ impl UiState {
 }
 
 #[cfg(test)]
-#[path = "state_tests.rs"]
 mod tests;

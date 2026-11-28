@@ -9,7 +9,7 @@
 //! 的键全是**行下标**；截断只会删尾部，所以保留行的下标不变，需要重算的只有「尾部指向」
 //! 的那几份状态（`reset_transcript` 已经在那几份上走过一遍，这里复用同一组清理）。
 //!
-//! 单独成文件是 `state.rs` 贴着 920 行门禁（与 `state_cursor.rs` / `state_history.rs` 同一手法）。
+//! 单独成文件是 `state/mod.rs` 贴着 920 行门禁（与 `cursor_edit` / `history_page` 同一手法）。
 
 use super::{LineKind, UiState};
 
