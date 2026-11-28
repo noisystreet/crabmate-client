@@ -64,6 +64,7 @@ Blank cells are forbidden.
 | Control slashes (not sent to the model) | yes | yes | yes | reduced | 注 5（见文末「表格长备注」） |
 | `/btw` side question (model-side; serve short-circuits) | yes | yes | yes | yes | Not a control slash: the line is sent to `POST /chat/stream` and serve answers without tools, **without** persisting it to the conversation or growing context. Web: composer slash menu + reserved slash head. TUI: passes through as a normal turn; repl `/help` documents it. `POST /chat/async` rejects it with 400 `ASYNC_BUILTIN_UNSUPPORTED`. |
 | Web session list + resume by `server_conversation_id` | yes | yes | yes | reduced | TUI: repl `/conv list` / `use` / `delete`; full-screen `tui` shows the list in a sidebar (Tab → ↑/↓ select, Enter use, n new, r refresh, `Delete` asks first and `Shift+Delete` deletes without asking — a running turn refuses the delete). No full WASM session CRUD/export. Deleting a session best-effort sends `DELETE /conversation/{id}` (idempotent 204) when a server id is bound; failure never blocks the local sidebar delete and is silent. |
+| Switch session while a turn is running | yes | yes | yes | yes | 注 14（见文末「表格长备注」） |
 | Export session as JSON / Markdown | yes | yes | yes | yes | Display projection only (`projection=display`), **not** the CLI/TUI `projection=raw` file (that one feeds `tool-replay`). Desktop: native save dialog. Android: SAF picker over the chunked base64 bridge, 16 MiB decoded cap; JSON keeps `application/json`, Markdown `text/markdown`; a picker cancel is silent and a write failure is reported in-app (issue #29). Web: browser download. TUI: `/conv export`. |
 | In-app stream resume after background | yes | yes | reduced | yes | 注 13（见文末） |
 | Per-turn inject / trim transcript notes | yes | yes | yes | partial | 注 12（见文末） |
@@ -291,5 +292,26 @@ WASM: Server `timeline_log` `context_inject` / `context_trim`; **hidden by defau
 
 ### 注 13 · In-app stream resume after background
 
-TUI: repl records a dropped run's `x-stream-job-id` + `last_event_id` and `/resume` re-attaches with `stream_resume:{job_id,after_seq}`; the full-screen `tui` keeps the same kind of resume point (a transport interruption, or Ctrl+C whose cancel request was not acknowledged) and `/resume` in the composer re-sends the same message with `stream_resume`, without echoing the user line again — switching sessions or `/conv new` drops the point because the transcript is no longer the one that broke. The full-screen client does **not** auto-resume (its event loop has no retry loop); only the line modes
+TUI: repl records a dropped run's `x-stream-job-id` + `last_event_id` and `/resume` re-attaches with `stream_resume:{job_id,after_seq}`; the full-screen `tui` keeps the same kind of resume point (a transport interruption, or Ctrl+C whose cancel request was not acknowledged) and `/resume` in the composer re-sends the same message with `stream_resume`, without echoing the user line again — `/conv new` drops the point because the transcript is no longer the one that broke,
+while switching sessions **keeps** it with that session: the whole conversation (including the resume point) parks in a
+per-lane slot, so `/resume` still applies after coming back (注 14). The full-screen client does **not** auto-resume (its event loop has no retry loop); only the line modes
 retry automatically. Ctrl+C stops the run; if the cancel request is not acknowledged the job may stay alive and `/resume` still applies. Cleanly finished turns are not resumable.
+
+### 注 14 · Switch session while a turn is running
+
+All four shells let you leave a streaming conversation and come back to it; the full-screen TUI used to refuse the switch
+outright (`回合进行中：结束后再切换会话`) because its transcript was a single `Vec` on the lane. It now parks the
+conversation it is leaving — transcript, in-flight `StreamCancel`, resume point, turn start time — in a per-lane slot
+(`tui_mode/parked.rs`), and returning to it re-attaches that slot instead of re-fetching `GET /conversation/messages`
+(the slot already holds the newest content, including a live stream).
+
+Two rules make the split safe. First, every turn event carries its **session** (`UiEvent::Turn { session, ev }`, applied by
+`LaneTx::with_session` in `tui_mode/lane_route.rs`), so a delta that arrives after the switch is written back into its own
+slot and never into whatever is on screen; an event for a session no longer in memory is dropped rather than re-routed. The
+wrapper keeps `UiEvent`'s 25+ variants and their 70+ dispatch sites untouched. Second, the session list (and its cursor)
+stays with the connection, not the conversation — it is one fact per `serve`, so parking must not take the sidebar with it.
+
+Sending a new turn in another session first stops the parked one (`abandon_parked_turns`: drop the approval overlay, one
+`StreamCancel` cancel, no connection-level `JobCancel`). This is Desktop's rule too — `reset_abort_state_for_new_attach`
+calls `ac.abort()` and bumps `attach_generation`, i.e. one turn at a time per connection — and it matters more for the TUI
+because its worker is serial: without it the new turn would queue behind a run the user can no longer see.
