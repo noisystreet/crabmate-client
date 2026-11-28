@@ -21,7 +21,7 @@ pub struct ConnSignals {
     ///
     /// 基址的唯一真源是 `api::connection_scope` 的 `ScopeHolder`（所有请求都读那里）；
     /// 这里只是让界面能在「设置 → 连接」改完基址后立刻换字。写入面因此只有一处：
-    /// `save_api_base_click`（`settings_sections.rs`）。启动交接（URL hash）**不需要**额外
+    /// `save_api_base_click`（`settings/sections.rs`）。启动交接（URL hash）**不需要**额外
     /// 写 —— `bootstrap_app_shell` 在 `AppSignals::new` 之前就消费完它，所以 `new()` 里读到
     /// 的 scope 已经是终值，不必先空后闪。
     pub api_base: RwSignal<String>,

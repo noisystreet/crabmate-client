@@ -83,7 +83,7 @@
 
 - **外壳**：`.settings-page*` 系列（[`modal.css`](../../frontend/styles/modal.css) 内），提供全屏铺满 + 头部（标题 + 返回/关闭）+ 内容滚动区。
 - **模态语义**：如需 `role="dialog"` / `aria-modal`，**必须**经共享壳 [`FocusableModalPanel`](../../frontend/src/app/focusable_menu.rs#L60-L101) 发出（`check-modal-shell.sh` 门禁：`role="dialog"` 只允许在该文件出现）。
-- **视图组件**：新增 `ContextUsagePageView`（单文件 [`frontend/src/app/context_usage_page.rs`](../../frontend/src/app/context_usage_page.rs)），结构对齐 [`SettingsPageView`](../../frontend/src/app/settings_page/view.rs#L29-L139)。
+- **视图组件**：新增 `ContextUsagePageView`（单文件 [`frontend/src/app/context_usage_page.rs`](../../frontend/src/app/context_usage_page.rs)），结构对齐 [`SettingsPageView`](../../frontend/src/app/settings/page/view.rs#L29-L139)。
 - **页面信号**：在 [`ModalSignals`](../../frontend/src/app/app_signals/modal.rs) 增设 `context_usage_page: RwSignal<bool>`（与既有 `settings_page` 同构），在 [`App`](../../frontend/src/app/mod.rs) 里与设置页一致**常驻挂载**，以 `class:settings-page-visible` 控制显隐（复用设置页范式，非 `<Show>` 条件挂载）。
 
 > 与方案 A（侧栏 `SidePanelView` 变体）的取舍：侧栏空间窄、不适合放占比图与图例；本方案按用户指定采用全屏页（方案 B），侧栏方案仅作记录、不实施。
