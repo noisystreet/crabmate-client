@@ -108,6 +108,7 @@ impl LaneApp<'_> {
         let cancel = StreamCancel::new();
         self.cancel = Some(cancel.clone());
         let job = TurnRequest {
+            session: opts.conversation_id.clone(),
             opts,
             cancel,
             yes: self.yes,
