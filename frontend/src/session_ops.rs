@@ -15,6 +15,13 @@ use crate::storage::{
     ensure_at_least_one, make_session_id,
 };
 
+// 会话域的**纯规则**已下沉到 `crate::domain::session`（#598）：转发保住既有引用路径
+// （侧栏、composer、消息行操作等 8 个文件共 14 处调用点零改动），并使规则脱离本文件的
+// `web_sys` / `js_sys` 副作用而可 host 单测。
+pub use crate::domain::session::{
+    set_user_message_text, truncate_at_user_message_branch_local, user_ordinal_for_message_index,
+};
+
 /// 待删除会话是否仍被在途流（Bound）占用；此时删除会让 SSE 收尾找不到写入目标而静默丢内容。
 fn delete_blocked_by_stream(
     stream_transport: RwSignal<crate::chat_session_state::ChatStreamTransport>,
@@ -95,45 +102,6 @@ pub fn make_message_id() -> String {
     make_session_id()
 }
 
-/// 去掉失败助手泡及其后消息，挂上新的 loading 助手泡；返回本回合用户原文与新助手 id。
-/// 第 `idx` 条消息若为普通用户消息，返回其在本会话中的 **0-based 用户序号**（与 `POST /chat/branch` 的 `before_user_ordinal` 一致）。
-pub fn user_ordinal_for_message_index(messages: &[StoredMessage], idx: usize) -> Option<u64> {
-    let m = messages.get(idx)?;
-    if m.role != "user" || m.is_tool {
-        return None;
-    }
-    let mut ord = 0_u64;
-    for (i, x) in messages.iter().enumerate() {
-        if i >= idx {
-            break;
-        }
-        if x.role == "user" && !x.is_tool {
-            ord = ord.saturating_add(1);
-        }
-    }
-    Some(ord)
-}
-
-/// 就地改用户气泡正文（不截断、不再生）。随后应走 [`truncate_at_user_message_and_prepare_regenerate`]。
-pub fn set_user_message_text(
-    sessions: &mut [ChatSession],
-    active_id: &str,
-    user_msg_id: &str,
-    new_text: &str,
-) -> bool {
-    let Some(s) = sessions.iter_mut().find(|sess| sess.id == active_id) else {
-        return false;
-    };
-    let Some(um) = s.messages.iter_mut().find(|m| m.id == user_msg_id) else {
-        return false;
-    };
-    if um.role != "user" || um.is_tool {
-        return false;
-    }
-    um.text = new_text.to_string();
-    true
-}
-
 /// 保留指定用户气泡（同 id），删除其后的消息，并挂上新的 loading 助手泡；返回用户原文与新助手 id。
 pub fn truncate_at_user_message_and_prepare_regenerate(
     sessions: &mut [ChatSession],
@@ -168,29 +136,7 @@ pub fn truncate_at_user_message_and_prepare_regenerate(
     Some((user_text, user_images, new_asst_id))
 }
 
-/// 截断到指定用户消息之前（含该条及之后全部移除），不追加助手泡。
-pub fn truncate_at_user_message_branch_local(
-    sessions: &mut [ChatSession],
-    active_id: &str,
-    user_msg_id: &str,
-) -> bool {
-    let Some(s) = sessions.iter_mut().find(|sess| sess.id == active_id) else {
-        return false;
-    };
-    let Some(idx) = s.messages.iter().position(|m| m.id == user_msg_id) else {
-        return false;
-    };
-    let um = match s.messages.get(idx) {
-        Some(m) => m,
-        None => return false,
-    };
-    if um.role != "user" || um.is_tool {
-        return false;
-    }
-    s.messages.truncate(idx);
-    true
-}
-
+/// 去掉失败助手泡及其后消息，挂上新的 loading 助手泡；返回本回合用户原文与新助手 id。
 pub fn prepare_retry_failed_assistant_turn(
     sessions: &mut [ChatSession],
     active_id: &str,
@@ -541,156 +487,6 @@ pub struct SessionContextAnchor {
     pub session_id: String,
     pub x: f64,
     pub y: f64,
-}
-
-#[cfg(test)]
-mod message_branch_tests {
-    use super::*;
-
-    #[test]
-    fn user_ordinal_matches_backend_semantics() {
-        let messages = vec![
-            StoredMessage {
-                id: "1".into(),
-                role: "user".into(),
-                text: "a".into(),
-                reasoning_text: String::new(),
-                image_urls: vec![],
-                state: None,
-                is_tool: false,
-                tool_call_id: None,
-                tool_name: None,
-                created_at: 0,
-            },
-            StoredMessage {
-                id: "2".into(),
-                role: "assistant".into(),
-                text: "b".into(),
-                reasoning_text: String::new(),
-                image_urls: vec![],
-                state: None,
-                is_tool: false,
-                tool_call_id: None,
-                tool_name: None,
-                created_at: 0,
-            },
-            StoredMessage {
-                id: "3".into(),
-                role: "user".into(),
-                text: "c".into(),
-                reasoning_text: String::new(),
-                image_urls: vec![],
-                state: None,
-                is_tool: false,
-                tool_call_id: None,
-                tool_name: None,
-                created_at: 0,
-            },
-        ];
-        assert_eq!(user_ordinal_for_message_index(&messages, 0), Some(0));
-        assert_eq!(user_ordinal_for_message_index(&messages, 2), Some(1));
-        assert!(user_ordinal_for_message_index(&messages, 1).is_none());
-    }
-
-    #[test]
-    fn truncate_branch_local_drops_from_user_onwards() {
-        let mut sessions = vec![ChatSession {
-            id: "s1".into(),
-            layout_schema_version: crate::storage::CURRENT_LAYOUT_SCHEMA_VERSION,
-            title: "t".into(),
-            draft: String::new(),
-            pinned: false,
-            starred: false,
-            server_conversation_id: None,
-            server_revision: None,
-            workspace_root: None,
-            history_total: None,
-            history_window_start: None,
-            history_has_older: None,
-            messages: vec![
-                StoredMessage {
-                    id: "u0".into(),
-                    role: "user".into(),
-                    text: "first".into(),
-                    reasoning_text: String::new(),
-                    image_urls: vec![],
-                    state: None,
-                    is_tool: false,
-                    tool_call_id: None,
-                    tool_name: None,
-                    created_at: 0,
-                },
-                StoredMessage {
-                    id: "a0".into(),
-                    role: "assistant".into(),
-                    text: "ok".into(),
-                    reasoning_text: String::new(),
-                    image_urls: vec![],
-                    state: None,
-                    is_tool: false,
-                    tool_call_id: None,
-                    tool_name: None,
-                    created_at: 0,
-                },
-                StoredMessage {
-                    id: "u1".into(),
-                    role: "user".into(),
-                    text: "retry me".into(),
-                    reasoning_text: String::new(),
-                    image_urls: vec![],
-                    state: None,
-                    is_tool: false,
-                    tool_call_id: None,
-                    tool_name: None,
-                    created_at: 0,
-                },
-            ],
-            updated_at: 0,
-        }];
-        assert!(truncate_at_user_message_branch_local(
-            &mut sessions,
-            "s1",
-            "u1"
-        ));
-        // 与后端一致：`before_user_ordinal`=1 时保留第 0 条用户及其后直到下一条用户之前（含中间助手）。
-        assert_eq!(sessions[0].messages.len(), 2);
-        assert_eq!(sessions[0].messages[0].id, "u0");
-        assert_eq!(sessions[0].messages[1].id, "a0");
-    }
-
-    #[test]
-    fn set_user_message_text_updates_only_that_user_line() {
-        let mut sessions = vec![ChatSession {
-            id: "s1".into(),
-            layout_schema_version: crate::storage::CURRENT_LAYOUT_SCHEMA_VERSION,
-            title: "t".into(),
-            draft: String::new(),
-            pinned: false,
-            starred: false,
-            server_conversation_id: None,
-            server_revision: None,
-            workspace_root: None,
-            history_total: None,
-            history_window_start: None,
-            history_has_older: None,
-            messages: vec![StoredMessage {
-                id: "u0".into(),
-                role: "user".into(),
-                text: "old".into(),
-                reasoning_text: String::new(),
-                image_urls: vec![],
-                state: None,
-                is_tool: false,
-                tool_call_id: None,
-                tool_name: None,
-                created_at: 0,
-            }],
-            updated_at: 0,
-        }];
-        assert!(set_user_message_text(&mut sessions, "s1", "u0", "new"));
-        assert_eq!(sessions[0].messages[0].text, "new");
-        assert!(!set_user_message_text(&mut sessions, "s1", "missing", "x"));
-    }
 }
 
 pub fn clamp_session_ctx_menu_pos(cx: i32, cy: i32) -> (f64, f64) {

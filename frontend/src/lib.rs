@@ -32,6 +32,7 @@ mod conversation_hydrate_timeline;
 mod conversation_messages_page;
 mod conversation_prompt_tokens_apply;
 mod debounce_schedule;
+mod domain;
 mod i18n;
 mod icon;
 mod ide_codemirror;
