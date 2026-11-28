@@ -5,6 +5,13 @@
 //!
 //! 由 `crate::session_ops` 用 `pub use` 转发，因此各端调用点无需改动。
 
+use std::collections::HashMap;
+
+use crate::i18n::{self, Locale};
+use crate::message_loading::{
+    ToolLoadingFinalizeKind, finalize_loading_tool_placeholders, is_loading_plain_assistant,
+    messages_have_loading_tool,
+};
 use crate::storage::{ChatSession, StoredMessage, StoredMessageState};
 
 /// 第 `idx` 条消息若为普通用户消息，返回其在本会话中的 **0-based 用户序号**
@@ -185,6 +192,146 @@ pub fn clear_session_local(sessions: &mut [ChatSession], session_id: &str) -> bo
     s.history_window_start = None;
     s.history_has_older = None;
     true
+}
+
+/// 会话内仍 `Loading` 的普通助手泡 id（可排除一个），按时间线顺序。
+///
+/// 调用方按这份 id 先把流式旁路缓冲 flush 进消息，再调
+/// [`stop_superseded_assistant_loading_rows`] —— overlay 是一个信号（副作用），
+/// 只能留在接线侧，本层只认消息本身。
+pub fn superseded_loading_assistant_ids(
+    sessions: &[ChatSession],
+    session_id: &str,
+    keep_asst_id: &str,
+) -> Vec<String> {
+    let Some(s) = sessions.iter().find(|s| s.id == session_id) else {
+        return Vec::new();
+    };
+    s.messages
+        .iter()
+        .filter(|m| is_loading_plain_assistant(m) && m.id != keep_asst_id)
+        .map(|m| m.id.clone())
+        .collect()
+}
+
+/// 会话内**最后一条**仍 `Loading` 的普通助手泡 id（中止时要 flush 的那条）。
+pub fn last_loading_assistant_id(sessions: &[ChatSession], session_id: &str) -> Option<String> {
+    let s = sessions.iter().find(|s| s.id == session_id)?;
+    s.messages
+        .iter()
+        .rev()
+        .find(|m| is_loading_plain_assistant(m))
+        .map(|m| m.id.clone())
+}
+
+/// 单条 `Loading` 助手泡收口为「已停止」：清 `Loading`，空正文补文案、已有正文追加后缀。
+///
+/// `reasoning_counts_as_content` 是两条路径的真实差异：中止路径把「只到了思维链」的泡也算有内容
+/// （否则一句「已中断」会把已经流出来的 reasoning 正文抹掉）；顶替路径只看正文。
+fn stop_loading_assistant_row(
+    m: &mut StoredMessage,
+    loc: Locale,
+    reasoning_counts_as_content: bool,
+) {
+    m.state = None;
+    let has_content = !m.text.trim().is_empty()
+        || (reasoning_counts_as_content && !m.reasoning_text.trim().is_empty());
+    if has_content {
+        m.text.push_str(i18n::stream_stopped_suffix(loc));
+    } else {
+        m.text = i18n::stream_stopped_inline(loc).to_string();
+    }
+}
+
+/// 把同会话内除 `keep_asst_id` 外仍 `Loading` 的普通助手泡收口为「已停止」，返回收口条数。
+///
+/// 新一轮流已 `push` 新尾泡时，上一轮被 abort 后迟到的回调会留下僵尸尾泡；
+/// 收口它们，`session_has_loading_tool_message` 一类判据才会回到「没有在途」。
+pub fn stop_superseded_assistant_loading_rows(
+    sessions: &mut [ChatSession],
+    session_id: &str,
+    keep_asst_id: &str,
+    loc: Locale,
+) -> usize {
+    let Some(s) = sessions.iter_mut().find(|s| s.id == session_id) else {
+        return 0;
+    };
+    let mut stopped = 0;
+    for m in s.messages.iter_mut() {
+        if !is_loading_plain_assistant(m) || m.id == keep_asst_id {
+            continue;
+        }
+        stop_loading_assistant_row(m, loc, true);
+        stopped += 1;
+    }
+    stopped
+}
+
+/// 用户点了「停止」：最后一条 `Loading` 助手泡收口，并把残留的工具占位一并收口为「已终止」。
+///
+/// 两件事一起做才是「停止」的语义：只收助手泡、留着工具 `Loading`，状态栏会继续显示在途。
+pub fn finalize_user_abort_messages(messages: &mut [StoredMessage], loc: Locale) {
+    if let Some(m) = messages
+        .iter_mut()
+        .rev()
+        .find(|m| is_loading_plain_assistant(m))
+    {
+        stop_loading_assistant_row(m, loc, false);
+    }
+    finalize_loading_tool_placeholders(messages, loc, ToolLoadingFinalizeKind::UserStopped);
+}
+
+/// 同上，但按会话 id 定位；会话不存在时返回 `false`（什么都没改）。
+pub fn finalize_user_abort_in_session(
+    sessions: &mut [ChatSession],
+    session_id: &str,
+    loc: Locale,
+) -> bool {
+    let Some(s) = sessions.iter_mut().find(|s| s.id == session_id) else {
+        return false;
+    };
+    finalize_user_abort_messages(&mut s.messages, loc);
+    true
+}
+
+/// 该会话仍有 `Loading` 工具行时收口为「已终止」；没有则一条不动，返回是否收口过。
+///
+/// 返回 `bool` 而不只是 `()`：调用方据此判断这次停止是否真的改了会话。
+pub fn stop_loading_tool_rows_if_any(
+    sessions: &mut [ChatSession],
+    session_id: &str,
+    loc: Locale,
+) -> bool {
+    let Some(s) = sessions.iter_mut().find(|s| s.id == session_id) else {
+        return false;
+    };
+    if !messages_have_loading_tool(&s.messages) {
+        return false;
+    }
+    finalize_loading_tool_placeholders(&mut s.messages, loc, ToolLoadingFinalizeKind::UserStopped);
+    true
+}
+
+/// 把水合前保存的 `reasoning_text` 按消息 id 回灌；返回 `(消息 id, 文本长度)`。
+///
+/// 返回这份列表而不是就地打日志：日志要 `web_sys::console`，带副作用的东西一旦进了本层，
+/// host 单测立刻失效（这正是 #598 §2 记录的那处成因）。
+pub fn restore_reasoning_texts(
+    sessions: &mut [ChatSession],
+    session_id: &str,
+    preserved: &HashMap<String, String>,
+) -> Vec<(String, usize)> {
+    let Some(s) = sessions.iter_mut().find(|s| s.id == session_id) else {
+        return Vec::new();
+    };
+    let mut restored = Vec::new();
+    for m in s.messages.iter_mut() {
+        if let Some(rt) = preserved.get(&m.id) {
+            restored.push((m.id.clone(), rt.len()));
+            m.reasoning_text = rt.clone();
+        }
+    }
+    restored
 }
 
 /// 测试夹具：两个测试模块共用（原先各自定义一份，字段漂移会静默失效）。
@@ -472,5 +619,191 @@ mod regenerate_tests {
             vec![msg("u0", "user", "q"), msg("a0", "assistant", "fine")],
         )];
         assert!(prepare_retry_failed_assistant_turn(&mut ok, "s1", "a0", "n", 0).is_none());
+    }
+}
+
+/// 中止 / 水合回灌规则的边界（#598 第二轮：把原先写在 `app/chat` 闭包里的分支钉住）。
+#[cfg(test)]
+mod abort_tests {
+    use super::test_support::{msg, session_with};
+    use super::*;
+
+    fn tool_loading(id: &str) -> StoredMessage {
+        let mut m = msg(id, "system", "工具：git");
+        m.is_tool = true;
+        m.state = Some(StoredMessageState::Loading);
+        m.reasoning_text = "tool: git\nstatus: running".into();
+        m
+    }
+
+    fn assistant_loading(id: &str, text: &str) -> StoredMessage {
+        let mut m = msg(id, "assistant", text);
+        m.state = Some(StoredMessageState::Loading);
+        m
+    }
+
+    #[test]
+    fn superseded_ids_skip_the_new_tail_and_non_loading_rows() {
+        let sessions = vec![session_with(
+            "s1",
+            vec![
+                assistant_loading("old", "半句"),
+                msg("done", "assistant", "已答完"),
+                assistant_loading("new", ""),
+            ],
+        )];
+        // 只收「仍 Loading 且不是新尾泡」的那条；已定格的助手行不能被动
+        assert_eq!(
+            superseded_loading_assistant_ids(&sessions, "s1", "new"),
+            vec!["old".to_string()]
+        );
+        // 会话不存在 → 空列表（不能退化成「所有会话都收」）
+        assert!(superseded_loading_assistant_ids(&sessions, "gone", "new").is_empty());
+    }
+
+    #[test]
+    fn superseded_rows_keep_partial_text_and_append_suffix() {
+        let mut sessions = vec![session_with(
+            "s1",
+            vec![
+                assistant_loading("old", "已经写了一半"),
+                assistant_loading("new", ""),
+            ],
+        )];
+        assert_eq!(
+            stop_superseded_assistant_loading_rows(&mut sessions, "s1", "new", Locale::ZhHans),
+            1
+        );
+        let old = &sessions[0].messages[0];
+        assert_eq!(old.state, None);
+        assert_eq!(
+            old.text,
+            format!(
+                "已经写了一半{}",
+                i18n::stream_stopped_suffix(Locale::ZhHans)
+            )
+        );
+        // 新尾泡一个字都不动
+        assert_eq!(sessions[0].messages[1].text, "");
+        assert_eq!(
+            sessions[0].messages[1].state,
+            Some(StoredMessageState::Loading)
+        );
+    }
+
+    #[test]
+    fn superseded_row_with_only_reasoning_is_not_wiped() {
+        // 流式只到了思维链：这条也算有内容，否则一句「已终止」会把 reasoning 之外的正文抹平
+        let mut m = assistant_loading("old", "");
+        m.reasoning_text = "思考了一大段".into();
+        let mut sessions = vec![session_with("s1", vec![m, assistant_loading("new", "")])];
+        stop_superseded_assistant_loading_rows(&mut sessions, "s1", "new", Locale::ZhHans);
+        let old = &sessions[0].messages[0];
+        assert_eq!(old.reasoning_text, "思考了一大段");
+        assert!(
+            old.text
+                .contains(i18n::stream_stopped_suffix(Locale::ZhHans))
+        );
+    }
+
+    #[test]
+    fn user_abort_stops_last_assistant_and_tool_rows() {
+        let mut messages = vec![assistant_loading("a1", ""), tool_loading("t1")];
+        finalize_user_abort_messages(&mut messages, Locale::ZhHans);
+        assert_eq!(messages[0].state, None);
+        assert_eq!(
+            messages[0].text,
+            i18n::stream_stopped_inline(Locale::ZhHans)
+        );
+        // 工具占位也要一起收口，否则状态栏会继续显示在途
+        assert_eq!(messages[1].state, None);
+        assert!(
+            messages[1]
+                .reasoning_text
+                .contains("status: stopped (user)")
+        );
+    }
+
+    #[test]
+    fn user_abort_with_only_reasoning_keeps_the_reasoning() {
+        let mut m = assistant_loading("a1", "");
+        m.reasoning_text = "只到了思维链".into();
+        let mut messages = vec![m];
+        finalize_user_abort_messages(&mut messages, Locale::ZhHans);
+        // 中止路径只看正文（`reasoning_counts_as_content = false`）：正文为空就写「已终止」，
+        // 但思维链本身一个字都不能丢 —— 这是它与顶替路径的真实差别。
+        assert_eq!(
+            messages[0].text,
+            i18n::stream_stopped_inline(Locale::ZhHans)
+        );
+        assert_eq!(messages[0].reasoning_text, "只到了思维链");
+    }
+
+    #[test]
+    fn user_abort_on_unknown_session_changes_nothing() {
+        let mut sessions = vec![session_with("s1", vec![assistant_loading("a1", "")])];
+        assert!(!finalize_user_abort_in_session(
+            &mut sessions,
+            "gone",
+            Locale::ZhHans
+        ));
+        assert_eq!(
+            sessions[0].messages[0].state,
+            Some(StoredMessageState::Loading)
+        );
+    }
+
+    #[test]
+    fn tool_stop_is_reported_only_when_something_was_loading() {
+        let mut with_tool = vec![session_with("s1", vec![tool_loading("t1")])];
+        assert!(stop_loading_tool_rows_if_any(
+            &mut with_tool,
+            "s1",
+            Locale::ZhHans
+        ));
+        // 没有 loading 工具 → false，且不改消息
+        let mut no_tool = vec![session_with("s1", vec![msg("u0", "user", "hi")])];
+        assert!(!stop_loading_tool_rows_if_any(
+            &mut no_tool,
+            "s1",
+            Locale::ZhHans
+        ));
+        assert!(!stop_loading_tool_rows_if_any(
+            &mut no_tool,
+            "gone",
+            Locale::ZhHans
+        ));
+    }
+
+    #[test]
+    fn reasoning_restore_reports_each_restored_row() {
+        let mut sessions = vec![session_with(
+            "s1",
+            vec![msg("a0", "assistant", "x"), msg("a1", "assistant", "y")],
+        )];
+        let mut preserved = HashMap::new();
+        preserved.insert("a1".to_string(), "想了两句".to_string());
+        preserved.insert("gone".to_string(), "无关".to_string());
+        let restored = restore_reasoning_texts(&mut sessions, "s1", &preserved);
+        // 只报真正落地的那条；长度就是调用方原先在闭包里打的那行日志
+        assert_eq!(restored, vec![("a1".to_string(), "想了两句".len())]);
+        assert_eq!(sessions[0].messages[1].reasoning_text, "想了两句");
+        assert_eq!(sessions[0].messages[0].reasoning_text, "");
+        // 会话不存在 → 空列表
+        assert!(restore_reasoning_texts(&mut sessions, "gone", &preserved).is_empty());
+    }
+
+    #[test]
+    fn last_loading_assistant_is_the_tail_row() {
+        let sessions = vec![session_with(
+            "s1",
+            vec![assistant_loading("a1", ""), msg("a2", "assistant", "done")],
+        )];
+        // 后面已有定格行时，中止要 flush 的仍然是那条 Loading
+        assert_eq!(
+            last_loading_assistant_id(&sessions, "s1"),
+            Some("a1".to_string())
+        );
+        assert!(last_loading_assistant_id(&sessions, "gone").is_none());
     }
 }
