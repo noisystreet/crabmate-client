@@ -61,6 +61,15 @@
 - `crabmate-tool-card` is in-repo path only (`crates/crabmate-tool-card`); do not git-pin Server `crabmate-tool-card`
 - Boundary rules above are **mechanically enforced** by `scripts/check-boundaries.sh` (pre-commit hook + `scripts/check.sh`): client-api dependency purity, `crabmate-connect` default features stay Tauri-free, a single contract-pin shape (crates.io semver or git rev, byte-identical across all manifests), and version consistency across all Rust packages plus the shells' `tauri.conf.json` top-level `version`
 - Complexity **gates**: `lizard` CCN>10 fails globally (zero rule, no per-module caps); function params ≤ 9 (`fn-param-ratchet`); function nloc ≤ 200 and Rust file ≤ 920 lines (`fn-nloc-ratchet`) — enforced by pre-commit + `scripts/check.sh`
+- Layout **budget** (`#597`): a *domain* has a size ceiling too — every directory in `scripts/layout_budget.txt` must have `.rs` lines **equal**
+  to its budget (growing *or* shrinking without updating the file fails; a `scope=recursive` entry may not be an ancestor of another),
+  `frontend/src/app/*.rs` is frozen file-by-file in `scripts/layout_root_flat.txt` (a new root file fails; a listed one that vanished
+  fails too), and for `frontend/src/app` the recursive total must equal `root direct + Σ child recursive` — an unregistered sub-directory
+  surfaces as unclaimed lines. Reason: the 920-line file cap had become the de-facto module-split rule (26 files sat at 850–920;
+  `tui_mode/worker.rs` and `tui_mode/mod.rs` were **exactly** 920), so splitting into eight 900-line files was free. Baselines come from
+  `--print-baseline` (never hand-pick a number), `--print-candidates` lists dirs ≥ 3,000 lines; coverage runs for `frontend/src/app` only —
+  elsewhere register on demand, since a threshold cannot choose between `crates/crabmate-tui/src` and its `tui_mode`. Enforced by
+  `scripts/check-layout-budget.sh` (hook + `scripts/check.sh`)
 - Package versions move in **lockstep** across all Rust packages **and the shells' `tauri.conf.json`**, which Tauri stamps the .deb / APK version from; bump via `bash scripts/set-version.sh <semver>` (never hand-edit one Cargo.toml or one tauri.conf.json version)
 - Package list **single source**: `scripts/rust-pkg-dirs.txt` — consumed by the `Makefile` `fmt` / `clippy` / `clean` loops, `scripts/check.sh`, and `scripts/check-boundaries.sh`; adding a package only touches this file (plus Makefile `test-*` grouping / CI cache if needed)
 - Responsive breakpoint **single source**: `MOBILE_LAYOUT_BREAKPOINT_PX` in `frontend/src/app_prefs.rs`; `@media` cannot use `var()`, so CSS repeats the value under constraint — narrow `max-width: N` pairs with complementary `min-width: N + 1` (never cross-written) and other breakpoints are registered in `scripts/check-css-breakpoints.sh`; enforced by that hook + `scripts/check.sh`
@@ -161,6 +170,7 @@ bash scripts/set-version.sh 0.5.1        # bump all Rust package versions (+ Car
 bash scripts/lizard-rust.sh              # any function with CCN>10 fails (global zero rule; no per-module caps)
 bash scripts/fn-param-ratchet.sh         # function param cap: lizard max params <= 9
 bash scripts/fn-nloc-ratchet.sh          # function nloc <= 200 and Rust file <= 920 lines
+bash scripts/check-layout-budget.sh      # domain lines must equal scripts/layout_budget.txt; app/ flat files frozen (#597)
 bash scripts/dependency-security.sh      # cargo audit + cargo deny; not in pre-commit / check.sh
 bash scripts/ktlint-android.sh           # needs java; `--format` to fix
 make smoke-desktop-shell        # or ./scripts/smoke-desktop-shell.sh; needs a usable crabmate serve binary + xvfb; not in CI
@@ -234,6 +244,7 @@ When updating docs:
 ## Coding Rules
 
 - Follow existing shell code style
+- **New code lands in a domain directory** — `frontend/src/app/<domain>/`, not a new flat file with a `_toolbar` / `_parts` suffix; a domain's total lines are budgeted in `scripts/layout_budget.txt`, and `frontend/src/app/*.rs` only shrinks (`#597`)
 
 ### Before committing
 

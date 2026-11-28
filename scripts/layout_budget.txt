@@ -1,0 +1,40 @@
+# 目录聚合行数预算（门禁：scripts/check-layout-budget.sh → scripts/layout_budget_check.py）
+#
+# 为什么：920 行单文件硬帽（fn-nloc）只防巨型文件，却成了事实上的模块划分依据 ——
+# 全仓 651 个 .rs 里 26 个落在 850–920 行、16 个 ≥900 行，`worker.rs` 与 `tui_mode/mod.rs`
+# 正好 920 行整。拆成 8 个 900 行文件曾是免费通行证；本文件给「一个域」也设上限（#597）。
+#
+# 格式：<dir>  lines=<n>  scope=<recursive|direct>   # <理由 / 目标>
+#   - 实际 .rs 物理行数必须**等于** lines：写多写少都 fail
+#     （少写 = 给后续增长留免费额度，这正是要堵的口子；变瘦了就同步下调，ratchet）；
+#   - scope=recursive 递归统计、scope=direct 只统计直接子文件；
+#   - recursive 条目不得是另一条目的祖先（嵌套登记 = 重复计数，门禁会拒）；
+#   - 理由必填且不许留 TODO；条目陈旧（目录没了 / 已无 .rs）同样 fail。
+#
+# 基线由 `python3 scripts/layout_budget_check.py --print-baseline` 生成（数字永远实测），
+# 候选目录（≥ 3,000 行）用 `--print-candidates` 列。选哪些登记是评审判断：
+# 例如 crates/crabmate-tui/src（66,459）与其中的 tui_mode（57,503）嵌套，只登记后者更有意义。
+#
+# 归属守恒（Rule C）目前只对 frontend/src/app 生效：app 递归总行数必须等于
+# 「根级 direct 预算 + 各直接子目录 recursive 预算」之和 —— 任何新目录都会以「未归属行数」暴露。
+# 其它根按需登记（不套守恒），理由见脚本头注释。
+
+# --- frontend/src/app：试点域树（Rule B 冻结根级文件、Rule C 守恒）---
+frontend/src/app                              lines=16933  scope=direct     # 根级平铺 77 个文件（含 *_toolbar / *_parts 这类行数余量产物）；目标 0，每搬一个域下调
+frontend/src/app/chat                         lines=25611  scope=recursive  # 全仓最大域；第二层划分待做（composer_stream 的 delta / timeline / callbacks）
+frontend/src/app/app_shell_effects            lines=2008   scope=recursive  # shell 阶段效应，与 app_shell_wire_phases 同生命周期
+frontend/src/app/app_signals                  lines=1783   scope=recursive  # 信号定义；lane_set / owner-dispose 高风险区，不参与首轮搬家
+frontend/src/app/settings_page                lines=1635   scope=recursive  # 与根级 settings*.rs 合并进 app/settings/（#597 PR-2）
+frontend/src/app/settings_models_registry     lines=1435   scope=recursive  # 同上，并入 app/settings/
+frontend/src/app/sidebar_nav                  lines=1321   scope=recursive  # 与根级 nav_rail* / side_column* 合并进 shell 域（PR-4）
+frontend/src/app/ide_menu_bar                 lines=888    scope=recursive  # 与根级 ide_* 合并进 ide 域（PR-5）
+frontend/src/app/workspace_clone_modal        lines=649    scope=recursive  # 与根级 workspace* 合并进 workspace 域（PR-3）
+frontend/src/app/ide_settings_page            lines=328    scope=recursive  # 同上，并入 ide 域
+
+# --- 其它根：按需登记（不套守恒）---
+crates/crabmate-tui/src/tui_mode              lines=57503  scope=recursive  # 11 个 #[path] 旁路待按域拆结构体（PR-6）；全仓最大单块
+crates/crabmate-client-api/src                lines=14677  scope=recursive  # TUI 与 Web 共用的纯逻辑；新增规则先看能否复用既有函数
+frontend/src/api                              lines=8484   scope=recursive  # HTTP / SSE / 存储作用域
+frontend/src/i18n                             lines=6108   scope=recursive  # 文案表，已按域分文件
+crates/crabmate-tui/src/serve                 lines=5911   scope=recursive  # 远程 serve 客户端，与 tui_mode 平级
+crates/crabmate-tool-card/src                 lines=3088   scope=recursive  # 工具卡 compact / detail，与 Server 契约同源

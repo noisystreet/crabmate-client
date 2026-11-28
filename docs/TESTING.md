@@ -45,6 +45,7 @@ pre-commit run --all-files
 | `lizard-rust` | 全局硬门禁：任何函数 **CCN>10** 即失败（列出命中；无按模块的个数上限配置） |
 | `fn-param-ratchet` | 形参 ≤ 9 |
 | `fn-nloc-ratchet` | 函数 nloc ≤ 200、单文件 ≤ 920 |
+| `check-layout-budget` | 目录聚合预算 + 根级冻结（#597）：`layout_budget.txt` 每条实际行数必须**等于**预算（涨落都同步；`recursive` 不得嵌套），`layout_root_flat.txt` 冻结 `frontend/src/app/*.rs`（新增即失败、消失也失败），`app/` 递归总行数须等于 direct + 各子目录之和（未登记子目录 = 未归属行数）。基线用 `--print-baseline`（`scripts/check-layout-budget.sh`） |
 | `taplo-format` / `taplo-lint` | 有 `taplo` 才跑，否则跳过 |
 | `ktlint-android` | 手改 Android Kotlin（`edu/crabmate`，排除 `generated/`）；需 **java**；首次下载钉死的 ktlint CLI 到缓存。格式化：`bash scripts/ktlint-android.sh --format` |
 | `typos` | 拼写 |

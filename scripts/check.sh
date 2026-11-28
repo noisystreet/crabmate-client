@@ -87,6 +87,9 @@ bash "$ROOT/scripts/lizard-rust.sh"
 bash "$ROOT/scripts/fn-param-ratchet.sh"
 bash "$ROOT/scripts/fn-nloc-ratchet.sh"
 
+echo "[check] layout budget (domain lines must equal scripts/layout_budget.txt; app/ flat files frozen)"
+bash "$ROOT/scripts/check-layout-budget.sh"
+
 if command -v taplo >/dev/null 2>&1; then
   echo "[check] taplo format + lint"
   taplo format --check .
