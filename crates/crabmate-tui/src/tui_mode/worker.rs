@@ -252,6 +252,18 @@ pub(super) enum UiEvent {
     SaveInterrupted,
     /// skill 目录（`GET /skills`，供 `/` 补全菜单的 skill 候选）。
     Skills(Result<SkillsPayload, String>),
+    /// 回合类事件 + **归属会话**（见 [`TurnSession`]）。
+    ///
+    /// 只由 [`LaneTx::with_session`] 产生：回合的正文 / 工具行 / 审批 / 收尾全部经它包一层，
+    /// 于是「用户切到别的会话之后才到达的增量」有归属可认（`TuiApp::on_turn_event`）。
+    /// 为什么用包装变体而不拆 `LaneEvent`：`UiEvent` 有 25+ 变体、70+ 处构造与匹配，
+    /// 拆开会让每个 struct 变体多补一层括号 —— 与 `Inbound` 用 `FromLane(LaneId, …)`
+    /// 包装是同一个理由（issue #347）。
+    Turn {
+        /// 归属的会话 id（`None` = 首轮还没绑定）。
+        session: Option<String>,
+        ev: Box<UiEvent>,
+    },
 }
 
 /// 一条 lane（连接）的稳定标识：单调递增、不回收（避免 ABA）。
@@ -266,6 +278,8 @@ pub(super) struct TurnRequest {
     pub opts: ChatStreamOptions,
     pub cancel: StreamCancel,
     pub yes: bool,
+    /// 本轮归属的会话：由 [`LaneTx::with_session`] 贴到每条出站事件上。
+    pub session: Option<String>,
 }
 
 /// worker 任务：回合 / 会话与工作区刷新 / 状态刷新（复用同一 runtime 与连接池）。
@@ -355,34 +369,9 @@ pub(super) enum WorkerJob {
     },
 }
 
-/// 带来源 lane 的事件发送端：**lane 自己的出站事件一律经它发**。
-///
-/// 通道收 [`Inbound`]，`LaneTx` 是 [`Inbound::FromLane`] 的**唯一构造入口**：「忘记
-/// 包一层来源」这个错误曾经只靠注释约定，漏一次就把 lane-2 的回合结束写进 lane-1 的
-/// transcript —— 静默串台，不崩溃、不报错（issue #347）。外壳动作走 [`Inbound::Shell`]，
-/// 那条路径不经过这里。
-///
-/// **这不是封装边界**：持有 `Sender<Inbound>` 的地方（`LaneApp::tx` / `LaneTemplate::tx`
-/// / `spawn_worker` 的参数）仍能手写 `FromLane` 或把 lane 事件塞进 `Input`。类型消除的是
-/// 旧形态（`Sender<UiEvent>` + 全凭约定打标签），不是所有绕过路径。
-#[derive(Clone)]
-pub(super) struct LaneTx {
-    lane: LaneId,
-    tx: Sender<Inbound>,
-}
-
-impl LaneTx {
-    pub(super) fn new(lane: LaneId, tx: Sender<Inbound>) -> Self {
-        Self { lane, tx }
-    }
-
-    /// 打上来源 lane 后发出；通道关闭即视为 UI 已退出。
-    pub(super) fn send(&self, ev: UiEvent) -> Result<(), TermError> {
-        self.tx
-            .send(Inbound::FromLane(self.lane, ev))
-            .map_err(|_| TermError::Message("ui channel closed".into()))
-    }
-}
+/// 发送端与「回合归属」的实现在 `lane_route`：本文件贴着 920 行门禁，而归属既不属于
+/// job 调度也不属于事件分派（见该模块头注释）。这里只重导出，调用点路径不变。
+pub(super) use super::lane_route::LaneTx;
 
 /// 键盘/鼠标读取线程：阻塞在 `event::read()`，按键与鼠标事件转为 `UiEvent`。
 ///
@@ -718,6 +707,9 @@ fn run_turn_job(
     job: TurnRequest,
     out: &LaneTx,
 ) {
+    // 本轮回合的**每一条**出站事件（正文 / 思维链 / 工具行 / 审批 / 收尾）都贴会话归属：
+    // 用户切走之后到达的增量因此认得出自己的槽（见 `worker::split_turn`）。
+    let out = &out.with_session(job.session.clone());
     let result = rt.block_on(async {
         let mut sink = UiSink::new(out.clone());
         let mut gate: Box<dyn ApprovalGate> = if job.yes {

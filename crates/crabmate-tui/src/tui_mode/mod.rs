@@ -79,6 +79,7 @@ mod status_info;
 mod status_stack;
 mod status_thinking;
 // `caps` 子命令要打印探测结果，`main` 侧需直接读（见 `term_image.rs` 头注释）。
+mod lane_route;
 pub(crate) mod term_image;
 #[cfg(test)]
 mod test_support;
@@ -111,6 +112,7 @@ use self::approve::decision_summary;
 use self::controls::{Control, clear_word, parse_control, set_mode_field, set_override_field};
 use self::hotkeys::is_ctrl_c;
 use self::inbound::Inbound;
+use self::lane_route::TurnSession;
 use self::pending_lane::PendingLanes;
 use self::settings::PersistedSettings;
 use self::settings_panel::SettingsPanel;
@@ -286,23 +288,8 @@ impl<'a> TuiApp<'a> {
                 }
                 self.lane_mut().on_msg(ev);
             }
-            // 某条 lane 的出站事件：按 id 分发。
-            Inbound::FromLane(id, ev) => {
-                // 后台 lane 弹审批先在本 lane 留一句提示：浮层只画当前 lane，不说一声
-                // 就是最长 600s 的静默停摆（见 issue #337）。提示归提示，事件仍要
-                // 分派给**它自己**那条 lane —— 浮层建在它的 `st` 上。
-                self.announce_background_approval(id, &ev);
-                // 同一台 serve 的其它 lane 也要拿到这份事实：刷新已按 serve 去重，回包
-                // 得复制过去，否则被跳过的那条会话列表就再也不更新（issue #349）。
-                self.fanout_shared_refresh(id, &ev);
-                // 后台 lane 说了话、用户还没看：点亮左栏那一行（切过去即熄）。
-                self.mark_background_unread(id, &ev);
-                // 目标 lane 已关闭：丢弃，绝不把增量写进别的 transcript —— 串台比丢一条
-                // 增量难查得多，而这正是 `Inbound` 存在的理由。
-                if let Some(lane) = self.lanes.iter_mut().find(|l| l.id == id) {
-                    lane.on_msg(ev);
-                }
-            }
+            // 某条 lane 的出站事件：拆归属 + 三件全局动作 + 按 id 分发，全在 `lane_route`。
+            Inbound::FromLane(id, ev) => self.on_lane_event(id, ev),
             Inbound::Shell(ev) => self.on_shell(ev),
         }
     }
@@ -747,6 +734,10 @@ impl LaneApp<'_> {
 
     fn on_msg(&mut self, msg: UiEvent) {
         match msg {
+            // 回合归属包装：外层（`TuiApp::on_msg`）已用 `lane_route::split_turn` 拆过；
+            // 走到这里说明某条路径漏拆，就地拆开交给归属分派 —— 静默丢弃会让那一轮的
+            // 正文凭空消失，比多一次递归难查得多。
+            UiEvent::Turn { session, ev } => self.on_turn_event(TurnSession::Of(session), *ev),
             UiEvent::Key(key) => self.on_key(key),
             // 粘贴整段进输入框（不改焦点、不提交）：见 `paste` 模块头注释。
             UiEvent::Paste(text) => self.on_paste(text),
