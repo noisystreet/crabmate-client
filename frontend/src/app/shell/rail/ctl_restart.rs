@@ -1,6 +1,6 @@
 //! 左栏「重启」按钮的状态与提示行（`crabmatectl` 的 `restart`）。
 //!
-//! 单独成文件只有一个理由：`nav_rail_connections.rs` 贴着 920 行门禁（`fn-nloc`）。
+//! 单独成文件只有一个理由：`mod.rs`（原 `nav_rail_connections`）贴着 920 行门禁（`fn-nloc`）。
 //! 这块与「怎么画连接行」无关 —— 它只负责**一个同步动作**的在途标记与回执文案。
 //!
 //! `restart` 是**同步** op（down → up → 等就绪才回一行，最长约 50 s，见
