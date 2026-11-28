@@ -5,6 +5,7 @@
 use leptos::prelude::*;
 
 use crate::chat_session_state::ChatSessionSignals;
+use crate::domain::session::apply_branch_revision;
 
 /// `POST /chat/branch` 成功后，更新 `session_sync` 与活动会话的 `server_revision`。
 pub fn apply_branch_success_revision(
@@ -15,8 +16,7 @@ pub fn apply_branch_success_revision(
     chat.session_sync
         .update(|s| s.set_revision_after_branch(new_revision));
     chat.update_sessions_branch(|list| {
-        if let Some(s) = list.iter_mut().find(|x| x.id == active_session_id) {
-            s.server_revision = Some(new_revision);
-        }
+        // 规则在 `crate::domain::session`（可 host 单测）；这里只负责把它挂到信号上。
+        let _ = apply_branch_revision(list, active_session_id, new_revision);
     });
 }

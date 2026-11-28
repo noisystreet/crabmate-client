@@ -25,6 +25,7 @@ use crate::app::shell_runtime_context::try_chat_shell_ctx;
 use crate::app::status_permission_chip::{LevelOutcome, PermTarget, apply_permission_level};
 use crate::app::status_session_mode_seg::apply_session_mode_selection;
 use crate::chat_session_state::ChatSessionSignals;
+use crate::domain::session::clear_session_local;
 use crate::i18n::{self, Locale};
 use crate::session_ops::{
     export_session_json_for_id, export_session_markdown_for_id, make_message_id,
@@ -265,13 +266,8 @@ fn dispatch_web_only(
 fn handle_clear(shell: &ComposerStreamShell, ctx: WebSlashControlCtx) {
     let id = ctx.chat.active_id.get_untracked();
     ctx.chat.update_sessions_composer(|list| {
-        if let Some(s) = list.iter_mut().find(|s| s.id == id) {
-            s.messages.clear();
-            s.draft.clear();
-            s.history_total = None;
-            s.history_window_start = None;
-            s.history_has_older = None;
-        }
+        // 规则在 `crate::domain::session`；会话已切走时没有本地 transcript 可清，草稿照常清。
+        let _ = clear_session_local(list, &id);
     });
     ctx.draft.set(String::new());
     set_ok(ctx.chat, shell, "已清空当前会话消息。");
