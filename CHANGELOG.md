@@ -31,6 +31,8 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 - **The workspace shows its branch and an uncommitted-changes badge.**
 
+- **Session trim/regenerate rules moved out of the DOM file, so they are unit-tested.**
+
 - **"Connect" adds a lane in this window; the rail lists lanes, `Alt+←/→` switches.**
 
 - **Each serve keeps its own base URL, thinking mode and Bearer after switching connections.**
