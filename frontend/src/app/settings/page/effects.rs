@@ -11,7 +11,7 @@ use super::hash_routing::{
     SettingsSection, clear_settings_hash_if_present, write_settings_section_to_hash,
 };
 use super::page_actions::{DiscardToBaselinesCtx, discard_to_baselines};
-use crate::app::settings_form_state::{SettingsDirtyBaselines, sync_appearance_drafts_from_shell};
+use crate::app::settings::form_state::{SettingsDirtyBaselines, sync_appearance_drafts_from_shell};
 use crate::i18n::Locale;
 
 /// 打开设置页时刷新 baseline 与外观草稿所需的信号（[`wire_settings_page_open_snapshot_effect`] 形参打包）。

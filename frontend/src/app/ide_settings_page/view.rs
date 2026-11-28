@@ -7,7 +7,7 @@ use leptos::prelude::*;
 use super::draft::wire_ide_settings_draft;
 use super::section_editor::IdeSettingsEditorBlock;
 use crate::app::app_signals::IdeEditorSignals;
-use crate::app::settings_page::{
+use crate::app::settings::page::{
     SettingsContentIntro, SettingsNavItem, SettingsPageHeader, SettingsPageHeaderSpec,
 };
 use crate::i18n::{self, Locale};

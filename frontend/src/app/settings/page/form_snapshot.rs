@@ -2,7 +2,7 @@
 
 use leptos::prelude::*;
 
-use super::super::settings_form_state::SettingsFormCurrent;
+use super::super::form_state::SettingsFormCurrent;
 use crate::api::SavedModelPreset;
 use crate::i18n::Locale;
 

@@ -37,7 +37,7 @@ use super::ide_session::{IdeSession, IdeSessionInput};
 use super::ide_settings_page::IdeSettingsPageView;
 use super::mobile_shell_header::mobile_shell_header_view;
 use super::session_list_modal::session_list_modal_view;
-use super::settings_page::SettingsPageView;
+use super::settings::page::SettingsPageView;
 use super::shell_confirm_dialog::ShellConfirmDialog;
 use super::shell_runtime_context::ChatShellLeptosContext;
 use super::side_column::side_column_view;

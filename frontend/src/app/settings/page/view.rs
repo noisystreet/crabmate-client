@@ -14,8 +14,8 @@ use super::form_snapshot::{SettingsPageDraftSignals, form_current_untracked};
 use super::hash_routing::{
     SettingsSection, read_settings_section_from_hash, settings_page_install_hashchange_listener,
 };
-use crate::app::settings_form_state::SettingsDirtyBaselines;
-use crate::app::settings_mcp_status::{McpSettingsPageState, spawn_reload_mcp};
+use crate::app::settings::form_state::SettingsDirtyBaselines;
+use crate::app::settings::mcp_status::{McpSettingsPageState, spawn_reload_mcp};
 
 /// 设置页全屏视图入参（阶段 B：`App` 单行传入）。
 #[derive(Clone)]

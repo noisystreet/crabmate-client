@@ -17,7 +17,7 @@ use crate::user_prefs_sync_state::UserPrefsSyncPhase;
 
 use super::app_shell_ctx::StatusBarFooterSignals;
 use super::chat::bump_session_hydrate_nonce;
-use super::settings_page::{SettingsSection, navigate_to_settings};
+use super::settings::page::{SettingsSection, navigate_to_settings};
 use super::shell_runtime_context::expect_chat_shell_ctx;
 use super::status_agent_role_menu::{AgentRoleMenuProps, StatusAgentRoleMenu};
 use super::status_context::{StatusBarContextChip, observe_context_watermark};

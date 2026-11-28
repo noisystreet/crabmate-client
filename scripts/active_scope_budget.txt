@@ -31,5 +31,5 @@ frontend/src/app/app_signals/lane_set.rs       1
 frontend/src/app/app_shell_bootstrap.rs        1
 frontend/src/app/connection_feed.rs            1
 frontend/src/app/nav_rail_connections.rs       1
-frontend/src/app/settings_sections.rs          1
+frontend/src/app/settings/sections.rs            1
 frontend/src/app/workspace_root_actions.rs     1

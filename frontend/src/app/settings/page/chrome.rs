@@ -17,10 +17,10 @@ use super::page_actions::{
     DiscardToBaselinesCtx, SaveAllSettingsCtx, discard_to_baselines, try_save_all_settings,
 };
 use super::{SETTINGS_PAGE_HEADER_SPEC, SettingsPageHeader};
-use crate::app::settings_form_state::{
+use crate::app::settings::form_state::{
     SettingsDirtyBaselines, SettingsFormCurrent, SettingsFormUiPhase, derive_settings_form_ui_phase,
 };
-use crate::app::settings_mcp_status::McpSettingsPageState;
+use crate::app::settings::mcp_status::McpSettingsPageState;
 use crate::i18n::Locale;
 
 /// `SettingsPageChrome` 所需的信号（`SettingsPageView` 在挂接 `wire_*` 后传入）。
@@ -57,7 +57,7 @@ fn close_settings_page_guarded(
     }
     let loc = locale.get_untracked();
     spawn_local(async move {
-        if crate::app::settings_close_guard::confirm_discard_unsaved(loc).await {
+        if crate::app::settings::close_guard::confirm_discard_unsaved(loc).await {
             discard();
             navigate_to_chat(settings_page);
         }
@@ -174,7 +174,7 @@ pub(super) fn SettingsPageChrome(ctx: SettingsPageChromeCtx) -> impl IntoView {
     };
 
     // 全局 Escape 关闭设置页也走同一套「脏表单先确认」语义。
-    crate::app::settings_close_guard::register_settings_page_close_handler(Arc::new({
+    crate::app::settings::close_guard::register_settings_page_close_handler(Arc::new({
         let dirty = dirty;
         let discard_send = Arc::clone(&discard_send);
         let settings_page = settings_page;

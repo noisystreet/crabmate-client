@@ -5,13 +5,11 @@ use std::sync::Arc;
 
 use leptos::prelude::*;
 
-use super::super::settings_mcp_block::SettingsMcpBlock;
-use super::super::settings_mcp_status::McpSettingsPageState;
-use super::super::settings_models_registry::{
-    SettingsModelsRegistryBundle, SettingsModelsRegistryPanel,
-};
-use super::super::settings_permission_block::SettingsPermissionBlock;
-use super::super::settings_sections::{
+use super::super::mcp_block::SettingsMcpBlock;
+use super::super::mcp_status::McpSettingsPageState;
+use super::super::models_registry::{SettingsModelsRegistryBundle, SettingsModelsRegistryPanel};
+use super::super::permission_block::SettingsPermissionBlock;
+use super::super::sections::{
     SettingsApiBaseBlock, SettingsAppearanceBlock, SettingsConnectionNewWindowBlock,
     SettingsExecutorLlmBlock, SettingsExecutorLlmBlockBundle, SettingsLlmBlock,
     SettingsLlmBlockBundle, SettingsSessionBlock, SettingsSessionTypographyBundle,
@@ -320,7 +318,7 @@ pub(super) fn SettingsPageContentPanels(
             </Show>
 
             <Show when=move || active_section.get() == SettingsSection::Github>
-                <crate::app::settings_github_block::SettingsGithubBlock
+                <crate::app::settings::github_block::SettingsGithubBlock
                     locale=appearance_locale
                     input_id="settings-page-github-oauth-client-id"
                     show_title=false

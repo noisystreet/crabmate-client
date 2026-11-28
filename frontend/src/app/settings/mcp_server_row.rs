@@ -1,9 +1,9 @@
 //! MCP 设置页：单条服务器编辑行。
 
-use super::settings_mcp_server_row_actions::SettingsMcpServerRowActions;
-use super::settings_mcp_status::McpSettingsSignals;
-use super::settings_mcp_tools_list::SettingsMcpServerToolsList;
-use super::settings_toggle_switch::SettingsToggleSwitch;
+use super::mcp_server_row_actions::SettingsMcpServerRowActions;
+use super::mcp_status::McpSettingsSignals;
+use super::mcp_tools_list::SettingsMcpServerToolsList;
+use super::toggle_switch::SettingsToggleSwitch;
 use crate::api::user_data::McpServersFileDto;
 use crate::i18n::{self, Locale};
 use leptos::prelude::*;

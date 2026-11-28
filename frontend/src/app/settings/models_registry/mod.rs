@@ -16,7 +16,7 @@ use crate::i18n::{self, Locale};
 use crate::icon::Icon;
 use submit::{RegistryAddFormActionSignals, submit_registry_add_form};
 
-use super::settings_sections::SettingsInstantApplyHint;
+use super::sections::SettingsInstantApplyHint;
 
 /// 模型注册表接线（单组件形参，满足 fn-param 棘轮）。
 #[derive(Clone)]

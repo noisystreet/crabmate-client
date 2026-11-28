@@ -20,7 +20,7 @@ use crate::api::{
     post_workspace_set,
 };
 use crate::app::chat::handles::ComposerStreamShell;
-use crate::app::settings_page::{SettingsSection, open_settings_from_hash};
+use crate::app::settings::page::{SettingsSection, open_settings_from_hash};
 use crate::app::shell_runtime_context::try_chat_shell_ctx;
 use crate::app::status_permission_chip::{LevelOutcome, PermTarget, apply_permission_level};
 use crate::app::status_session_mode_seg::apply_session_mode_selection;
