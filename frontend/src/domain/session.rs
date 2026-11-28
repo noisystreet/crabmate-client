@@ -11,6 +11,10 @@ use crate::storage::{ChatSession, StoredMessage, StoredMessageState};
 /// （与 `POST /chat/branch` 的 `before_user_ordinal` 一致）。
 ///
 /// 工具结果气泡（`is_tool`）不计入序号，也不视为用户消息 —— 与后端一致。
+///
+/// 只有本函数带 `#[must_use]`：它的返回值就是调用方要的东西（序号），丢了必然写错。
+/// 而 `truncate_*` / `set_user_message_text` 的 `bool` 在既有调用点上有意被 `let _ =` 忽略
+/// （见 `app::chat::message_row_actions`），给它们加 `#[must_use]` 会直接把 clippy 打红。
 #[must_use]
 pub fn user_ordinal_for_message_index(messages: &[StoredMessage], idx: usize) -> Option<u64> {
     let m = messages.get(idx)?;
@@ -155,18 +159,20 @@ pub fn prepare_retry_failed_assistant_turn(
     Some((user_text, user_images, new_asst_id.to_string()))
 }
 
+/// 测试夹具：两个测试模块共用（原先各自定义一份，字段漂移会静默失效）。
 #[cfg(test)]
-mod tests {
+mod test_support {
     use super::*;
     use crate::storage::CURRENT_LAYOUT_SCHEMA_VERSION;
 
-    fn msg(id: &str, role: &str, text: &str) -> StoredMessage {
+    /// 带附件的消息。「带图重发」时附件必须原样带回 —— 用空图片构造会让那条断言恒真。
+    pub(super) fn msg_with(id: &str, role: &str, text: &str, image_urls: &[&str]) -> StoredMessage {
         StoredMessage {
             id: id.into(),
             role: role.into(),
             text: text.into(),
             reasoning_text: String::new(),
-            image_urls: vec![],
+            image_urls: image_urls.iter().map(|u| (*u).to_string()).collect(),
             state: None,
             is_tool: false,
             tool_call_id: None,
@@ -175,7 +181,17 @@ mod tests {
         }
     }
 
-    fn session_with(id: &str, messages: Vec<StoredMessage>) -> ChatSession {
+    pub(super) fn msg(id: &str, role: &str, text: &str) -> StoredMessage {
+        msg_with(id, role, text, &[])
+    }
+
+    pub(super) fn failed_assistant(id: &str) -> StoredMessage {
+        let mut m = msg(id, "assistant", "boom");
+        m.state = Some(StoredMessageState::Error);
+        m
+    }
+
+    pub(super) fn session_with(id: &str, messages: Vec<StoredMessage>) -> ChatSession {
         ChatSession {
             id: id.into(),
             layout_schema_version: CURRENT_LAYOUT_SCHEMA_VERSION,
@@ -193,6 +209,12 @@ mod tests {
             updated_at: 0,
         }
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::test_support::{msg, session_with};
+    use super::*;
 
     #[test]
     fn user_ordinal_matches_backend_semantics() {
@@ -284,55 +306,15 @@ mod tests {
 /// 把时间与 id 改成注入后，第一次可以在 host target 钉住消息序列。
 #[cfg(test)]
 mod regenerate_tests {
+    use super::test_support::{failed_assistant, msg, msg_with, session_with};
     use super::*;
-    use crate::storage::CURRENT_LAYOUT_SCHEMA_VERSION;
-
-    fn msg(id: &str, role: &str, text: &str) -> StoredMessage {
-        StoredMessage {
-            id: id.into(),
-            role: role.into(),
-            text: text.into(),
-            reasoning_text: String::new(),
-            image_urls: vec![],
-            state: None,
-            is_tool: false,
-            tool_call_id: None,
-            tool_name: None,
-            created_at: 0,
-        }
-    }
-
-    fn failed_assistant(id: &str) -> StoredMessage {
-        let mut m = msg(id, "assistant", "boom");
-        m.state = Some(StoredMessageState::Error);
-        m
-    }
-
-    fn session_with(id: &str, messages: Vec<StoredMessage>) -> ChatSession {
-        ChatSession {
-            id: id.into(),
-            layout_schema_version: CURRENT_LAYOUT_SCHEMA_VERSION,
-            title: "t".into(),
-            draft: String::new(),
-            pinned: false,
-            starred: false,
-            server_conversation_id: None,
-            server_revision: None,
-            workspace_root: None,
-            history_total: None,
-            history_window_start: None,
-            history_has_older: None,
-            messages,
-            updated_at: 0,
-        }
-    }
 
     #[test]
     fn regenerate_keeps_user_row_then_appends_loading_assistant() {
         let mut sessions = vec![session_with(
             "s1",
             vec![
-                msg("u0", "user", "keep"),
+                msg_with("u0", "user", "keep", &["blob:one", "blob:two"]),
                 msg("a0", "assistant", "old"),
                 msg("a1", "assistant", "tail"),
             ],
@@ -346,11 +328,17 @@ mod regenerate_tests {
         )
         .expect("user row exists");
         assert_eq!(text, "keep");
-        assert!(imgs.is_empty());
+        // 带图重发：附件必须原样带回，否则「重新生成」会丢附件（旧测试用空图，该断言恒真）
+        assert_eq!(imgs, vec!["blob:one".to_string(), "blob:two".to_string()]);
         assert_eq!(asst, "new-a");
         // 用户行保留 + 新 loading 助手；其后的旧行全部丢弃
         assert_eq!(sessions[0].messages.len(), 2);
         assert_eq!(sessions[0].messages[0].id, "u0");
+        // 会话里保留的那条用户消息也必须仍带图
+        assert_eq!(
+            sessions[0].messages[0].image_urls,
+            vec!["blob:one".to_string(), "blob:two".to_string()]
+        );
         assert_eq!(sessions[0].messages[1].id, "new-a");
         assert_eq!(
             sessions[0].messages[1].state,
@@ -388,15 +376,17 @@ mod regenerate_tests {
         let mut sessions = vec![session_with(
             "s1",
             vec![
-                msg("u0", "user", "question"),
+                msg_with("u0", "user", "question", &["blob:one"]),
                 failed_assistant("a0"),
                 msg("a1", "assistant", "tail"),
             ],
         )];
-        let (text, _imgs, asst) =
+        let (text, imgs, asst) =
             prepare_retry_failed_assistant_turn(&mut sessions, "s1", "a0", "new-a", 222)
                 .expect("failed row has a preceding user row");
         assert_eq!(text, "question");
+        // 重试与重新生成同一条契约：附件必须原样带回
+        assert_eq!(imgs, vec!["blob:one".to_string()]);
         assert_eq!(asst, "new-a");
         assert_eq!(sessions[0].messages.len(), 2);
         assert_eq!(sessions[0].messages[1].id, "new-a");
