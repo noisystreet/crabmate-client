@@ -1,0 +1,86 @@
+# frontend/src/app 根级 .rs 冻结清单（门禁：scripts/check-layout-budget.sh 的 Rule B，#597）
+#
+# 为什么：根级平铺 77 个文件里，`settings_mcp_block_toolbar.rs` / `workspace_project_modal_parts.rs`
+# 这类名字不是领域概念，是「哪个文件还有 920 行余量」的产物。本清单**只减不增**：
+#   - 新增根级 .rs → fail（新文件必须落在域目录，例如 app/settings/）；
+#   - 清单里的文件消失（已搬走 / 改名）→ 也 fail，请从清单删除该行（双向 stale 检查）。
+#
+# 内容由 `python3 scripts/layout_budget_check.py --print-flat` 生成（实测，手改易漏）。
+# 每搬一个域就删掉对应几行，同时下调 layout_budget.txt 里 `frontend/src/app` 的 direct 预算。
+frontend/src/app/app_body.rs
+frontend/src/app/app_bootstrap_phase.rs
+frontend/src/app/app_shell_bootstrap.rs
+frontend/src/app/app_shell_ctx.rs
+frontend/src/app/app_shell_init.rs
+frontend/src/app/app_shell_wire_phases.rs
+frontend/src/app/approval_modal.rs
+frontend/src/app/changelist_modal.rs
+frontend/src/app/connection_feed.rs
+frontend/src/app/connectivity_recovery.rs
+frontend/src/app/context_usage_page.rs
+frontend/src/app/focusable_menu.rs
+frontend/src/app/git_badge.rs
+frontend/src/app/github_embed_page.rs
+frontend/src/app/github_wiring.rs
+frontend/src/app/ide_confirm_dialog.rs
+frontend/src/app/ide_editor_body.rs
+frontend/src/app/ide_editor_pane.rs
+frontend/src/app/ide_find_bar.rs
+frontend/src/app/ide_layout_switch.rs
+frontend/src/app/ide_new_file_modal.rs
+frontend/src/app/ide_session.rs
+frontend/src/app/ide_tabs_bar.rs
+frontend/src/app/lane_actions.rs
+frontend/src/app/lane_hotkeys.rs
+frontend/src/app/lane_view.rs
+frontend/src/app/layout_toggle_hotkey.rs
+frontend/src/app/mobile_shell_header.rs
+frontend/src/app/mod.rs
+frontend/src/app/nav_rail_authorities.rs
+frontend/src/app/nav_rail_connections.rs
+frontend/src/app/nav_rail_ctl_restart.rs
+frontend/src/app/nav_rail_lanes.rs
+frontend/src/app/nav_rail_other_windows.rs
+frontend/src/app/session_list_modal.rs
+frontend/src/app/session_mode_defaults.rs
+frontend/src/app/settings_close_guard.rs
+frontend/src/app/settings_commit.rs
+frontend/src/app/settings_form_state.rs
+frontend/src/app/settings_github_block.rs
+frontend/src/app/settings_mcp_block.rs
+frontend/src/app/settings_mcp_block_toolbar.rs
+frontend/src/app/settings_mcp_json_import.rs
+frontend/src/app/settings_mcp_server_row.rs
+frontend/src/app/settings_mcp_server_row_actions.rs
+frontend/src/app/settings_mcp_status.rs
+frontend/src/app/settings_mcp_tools_list.rs
+frontend/src/app/settings_page.rs
+frontend/src/app/settings_permission_block.rs
+frontend/src/app/settings_sections.rs
+frontend/src/app/settings_sections_tests.rs
+frontend/src/app/settings_toggle_switch.rs
+frontend/src/app/shell_confirm_dialog.rs
+frontend/src/app/shell_prefs_storage.rs
+frontend/src/app/shell_runtime_context.rs
+frontend/src/app/side_column.rs
+frontend/src/app/side_column_toolbar.rs
+frontend/src/app/side_column_workspace_scroll.rs
+frontend/src/app/status_agent_role_menu.rs
+frontend/src/app/status_bar.rs
+frontend/src/app/status_context.rs
+frontend/src/app/status_fetch_state.rs
+frontend/src/app/status_permission_chip.rs
+frontend/src/app/status_session_mode_seg.rs
+frontend/src/app/status_tasks_state.rs
+frontend/src/app/status_tasks_wiring.rs
+frontend/src/app/status_view_chip.rs
+frontend/src/app/tauri_window_controls.rs
+frontend/src/app/web_api_bearer_recovery.rs
+frontend/src/app/wire_workspace_domain.rs
+frontend/src/app/workspace_browser_pick_modal.rs
+frontend/src/app/workspace_panel.rs
+frontend/src/app/workspace_panel_state.rs
+frontend/src/app/workspace_project_modal.rs
+frontend/src/app/workspace_project_modal_body.rs
+frontend/src/app/workspace_project_modal_parts.rs
+frontend/src/app/workspace_root_actions.rs

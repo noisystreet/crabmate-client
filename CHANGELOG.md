@@ -13,6 +13,8 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Added
 
+- **A gate budgets a domain's total lines and freezes `app/`'s flat files.**
+
 - **A gate keeps `frontend/src/domain` free of DOM, signals, clock and ids.**
 
 - **Hydrated history rows keep stable v2 ids, so reloads stop rebuilding the tail.**
