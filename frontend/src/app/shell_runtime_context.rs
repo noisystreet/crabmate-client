@@ -1,6 +1,6 @@
 //! Leptos [`provide_context`]：向子树提供**可 `Copy`** 的聊天域句柄，减轻与 [`AppSignals`](super::app_signals::AppSignals) 同源的长 props 传递。
 //!
-//! 全量壳层仍用 [`super::app_shell_ctx::AppShellCtx`]（含 `Rc` / `StoredValue` 等）；此处仅收敛满足
+//! 全量壳层仍用 [`crate::app::shell::ctx::AppShellCtx`]（含 `Rc` / `StoredValue` 等）；此处仅收敛满足
 //! `Send + Sync + 'static` 的聊天切片。典型消费方：**`sidebar_nav_view`**、**`session_list_modal_view`**、
 //! **`side_status_stack_view`**、**`SessionContextMenuLayer`**、**[`crate::app::chat::find_bar::ChatFindBar`]**（见各自模块）。
 //!

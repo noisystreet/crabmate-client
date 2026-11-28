@@ -12,6 +12,10 @@
 //! 迁移方式：只搬不改逻辑。跨层改动的两类（`super::<app 级模块>` → `crate::app::…`、
 //! `pub(super)` → `pub(in crate::app)`）在各子域 `mod.rs` 里也各记了一遍。
 
+pub(crate) mod bootstrap;
+pub(crate) mod ctx;
+pub(crate) mod init;
 pub(crate) mod rail;
 pub(crate) mod side_column;
 pub(crate) mod status;
+pub(crate) mod wire_phases;

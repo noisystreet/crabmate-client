@@ -17,7 +17,7 @@ use crate::app::shell::status::context::{
 };
 use crate::app::shell::status::tasks_state::StatusTasksSignals;
 
-/// 全屏页输入（与设置页同构，便于在 `app_shell_ctx` 统一装配）。
+/// 全屏页输入（与设置页同构，便于在 `shell::ctx` 统一装配）。
 #[derive(Clone, Copy)]
 pub struct ContextUsagePageViewInput {
     pub context_usage_page: RwSignal<bool>,

@@ -9,10 +9,6 @@
 # 每搬一个域就删掉对应几行，同时下调 layout_budget.txt 里 `frontend/src/app` 的 direct 预算。
 frontend/src/app/app_body.rs
 frontend/src/app/app_bootstrap_phase.rs
-frontend/src/app/app_shell_bootstrap.rs
-frontend/src/app/app_shell_ctx.rs
-frontend/src/app/app_shell_init.rs
-frontend/src/app/app_shell_wire_phases.rs
 frontend/src/app/approval_modal.rs
 frontend/src/app/changelist_modal.rs
 frontend/src/app/connection_feed.rs

@@ -15,9 +15,9 @@ use crate::i18n::{self, Locale};
 use crate::icon::icon_chevron_down;
 use crate::user_prefs_sync_state::UserPrefsSyncPhase;
 
-use crate::app::app_shell_ctx::StatusBarFooterSignals;
 use crate::app::chat::bump_session_hydrate_nonce;
 use crate::app::settings::page::{SettingsSection, navigate_to_settings};
+use crate::app::shell::ctx::StatusBarFooterSignals;
 use crate::app::shell::status::agent_role_menu::{AgentRoleMenuProps, StatusAgentRoleMenu};
 use crate::app::shell::status::context::{StatusBarContextChip, observe_context_watermark};
 use crate::app::shell::status::fetch_state::status_bar_should_show_skeleton;

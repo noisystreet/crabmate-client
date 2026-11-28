@@ -21,10 +21,6 @@ use std::sync::Arc;
 
 use super::lane_set::LaneRuntime;
 
-use super::super::app_shell_ctx::{
-    ChangelistModalSignals, MobileShellHeaderSignals, SessionListModalSignals,
-    SideColumnViewSignals, SidebarNavSignals, StatusBarFooterSignals,
-};
 use super::super::approval_modal::ApprovalModalSignals;
 use super::super::context_usage_page::ContextUsagePageViewInput;
 use super::super::ide_settings_page::IdeSettingsPageViewInput;
@@ -33,6 +29,10 @@ use super::super::workspace::browser_pick_modal::WorkspaceBrowserPickModalSignal
 use super::super::workspace::clone_modal::WorkspaceCloneModalSignals;
 use super::super::workspace::project_modal::WorkspaceProjectModalSignals;
 use super::super::workspace::root_actions::WorkspaceRootPickHandle;
+use crate::app::shell::ctx::{
+    ChangelistModalSignals, MobileShellHeaderSignals, SessionListModalSignals,
+    SideColumnViewSignals, SidebarNavSignals, StatusBarFooterSignals,
+};
 
 impl LaneRuntime {
     /// 「选工作区」句柄：三处模态框入参与顶栏共用一份构造。

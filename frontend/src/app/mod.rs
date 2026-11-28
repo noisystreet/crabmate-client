@@ -4,11 +4,7 @@
 
 mod app_body;
 mod app_bootstrap_phase;
-mod app_shell_bootstrap;
-mod app_shell_ctx;
 pub(crate) mod app_shell_effects;
-mod app_shell_init;
-mod app_shell_wire_phases;
 pub(crate) mod app_signals;
 mod approval_modal;
 mod changelist_modal;
@@ -54,12 +50,12 @@ use std::rc::Rc;
 use crate::i18n::{self, Locale};
 use crate::icon::icon_chevron_right;
 use app_body::app_body;
-use app_shell_ctx::AppShellCtx;
-use app_shell_init::init_app_shell;
 use ide_layout_switch::IdeLayoutToggleSignals;
 use lane_hotkeys::wire_lane_hotkeys;
 use lane_view::LaneSlots;
 use layout_toggle_hotkey::wire_layout_toggle_hotkey;
+use shell::ctx::AppShellCtx;
+use shell::init::init_app_shell;
 
 use leptos::prelude::*;
 use wasm_bindgen::JsCast;

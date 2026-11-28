@@ -7,8 +7,8 @@ use crate::i18n;
 use crate::session_modal_row::{SessionModalRow, SessionModalRowBundle};
 use crate::session_sort::sorted_sessions_clone;
 
-use super::app_shell_ctx::SessionListModalSignals;
 use super::shell_runtime_context::expect_chat_shell_ctx;
+use crate::app::shell::ctx::SessionListModalSignals;
 
 #[component]
 fn SessionListModalPanel(session_modal: RwSignal<bool>) -> impl IntoView {
