@@ -156,6 +156,28 @@ pub fn api_err_branch_failed(l: Locale) -> &'static str {
     }
 }
 
+/// 服务端已按分支截断，但本地镜像没跟上 —— 下一次水合会把服务端已丢弃的尾条带回本地。
+#[must_use]
+pub fn api_err_branch_local_mirror_failed(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "服务端已切换分支，但本地会话未能同步；请刷新页面重新加载会话",
+        Locale::En => {
+            "The server switched the branch, but the local session did not sync; reload the page"
+        }
+    }
+}
+
+/// 本地侧找不到目标会话或消息（并发切换 / 列表已变）：请求都没发出，用户只会看到「点了没反应」。
+#[must_use]
+pub fn api_err_local_target_missing(l: Locale) -> &'static str {
+    match l {
+        Locale::ZhHans => "会话或消息已变化，未能完成操作；请重试",
+        Locale::En => {
+            "The session or message has changed, so the action did not complete; try again"
+        }
+    }
+}
+
 pub fn api_err_approval_failed(l: Locale, status: u16) -> String {
     match l {
         Locale::ZhHans => format!("审批请求失败 {status}"),
