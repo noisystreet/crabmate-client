@@ -34,6 +34,10 @@ impl LaneApp<'_> {
     pub(super) fn wind_down(&mut self) -> WindDown {
         let job = self.job_cancel.is_armed();
         self.job_cancel.cancel();
+        // 停泊会话里还在跑的回合也一起收：那是同一条 lane 的活。留着它正是这份注释开头
+        // 说的那种窗口 —— serve 侧白跑一轮，worker 还要等整轮跑完才回到 `recv`，
+        // `/lane detach` 与 `/quit` 因此变慢（用户看到的是「退出了但进程还赖着」）。
+        self.abandon_parked_turns("已请求取消（这条连接正在收尾）");
         if !self.st.running {
             // 没有在跑的回合：`cancel` 与浮层此时不该在（`on_turn_done` 会清），
             // 真在也是上一轮收尾的残留，不动它。

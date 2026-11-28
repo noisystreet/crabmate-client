@@ -31,7 +31,7 @@ frontend/src/app/app_signals                  lines=1783   scope=recursive  # �
 frontend/src/app/sidebar_nav                  lines=1321   scope=recursive  # 与根级 nav_rail* / side_column* 合并进 shell 域（PR-4）
 
 # --- 其它根：按需登记（不套守恒）---
-crates/crabmate-tui/src/tui_mode              lines=57504  scope=recursive  # TUI 状态与渲染；state/ 子树内无 #[path]，根级其余 #[path] 是子模块扁平化的必需写法而非旁路；+2 = detail_state 注释指明行为测试在 tools/tests.rs
+crates/crabmate-tui/src/tui_mode              lines=58097  scope=recursive  # TUI 状态与渲染；state/ 已收口 10 个域分片、无 #[path] 旁路（+2 = detail_state 注释指明行为测试在 tools/tests.rs）；全仓最大单块；+535 = 回合事件的会话归属（lane_route）+ 会话停泊槽（parked）与视图级字段的保留，运行中切会话所需
 crates/crabmate-client-api/src                lines=14677  scope=recursive  # TUI 与 Web 共用的纯逻辑；新增规则先看能否复用既有函数
 frontend/src/api                              lines=8484   scope=recursive  # HTTP / SSE / 存储作用域
 frontend/src/i18n                             lines=6108   scope=recursive  # 文案表，已按域分文件
