@@ -24,6 +24,7 @@ use std::sync::mpsc::Sender;
 use crate::serve::TermError;
 
 use super::inbound::Inbound;
+use super::state::LineKind;
 use super::worker::{LaneId, UiEvent};
 use super::{LaneApp, TuiApp};
 
@@ -106,10 +107,25 @@ pub(super) fn split_turn(ev: UiEvent) -> (TurnSession, UiEvent) {
 impl LaneApp<'_> {
     /// 回合类事件入口：`session` 是它**归属的会话**。
     ///
-    /// 这一步只做「解包 + 交回既有分派」：回合期间还允许切会话之前，归属必然等于
-    /// 当前会话，于是行为与改动前逐字相同（可回归的前提）。
-    pub(super) fn on_turn_event(&mut self, _session: TurnSession, ev: UiEvent) {
-        self.on_msg(ev);
+    /// - 归属等于当前会话（或非回合事件）→ 走既有分派；
+    /// - 归属是**已停泊**的会话（用户切走的那条）→ 借位应用到它自己那份状态上，
+    ///   于是后台回合的正文完整累积，切回来即见；
+    /// - 其余（那条会话已不在内存里）→ 丢弃。写进当前会话就是串台，而串台比丢一条
+    ///   增量难查得多（`mod.rs` 的 `FromLane` 分支写的是同一句）。
+    pub(super) fn on_turn_event(&mut self, session: TurnSession, ev: UiEvent) {
+        match session {
+            TurnSession::Global => self.on_msg(ev),
+            // 「归属相同」还要**这一条视图正在跑**才算数。只比 `conversation_id` 会把
+            // 「A 的首轮」（未绑定，`None`）和「`/conv new` 出来的空会话」（同样 `None`）
+            // 当成同一条：A 的增量就会写进那个空会话的首屏。同一条 lane 串行只跑一轮，
+            // 所以「当前视图没在跑」时到达的回合事件一定是停泊会话的。
+            TurnSession::Of(id) if id == self.st.conversation_id && self.st.running => {
+                self.on_msg(ev);
+            }
+            TurnSession::Of(id) => {
+                self.apply_to_parked(&id, ev);
+            }
+        }
     }
 }
 
@@ -130,8 +146,34 @@ impl TuiApp<'_> {
         self.fanout_shared_refresh(id, &ev);
         // 后台 lane 说了话、用户还没看：点亮左栏那一行（切过去即熄）。
         self.mark_background_unread(id, &ev);
+        // 停泊**会话**弹审批同理：浮层画在它自己的 `st` 上，屏幕上完全不可见。
+        if matches!(&ev, UiEvent::Approval { .. })
+            && let TurnSession::Of(parked) = &session
+        {
+            self.announce_parked_approval(id, parked);
+        }
         if let Some(lane) = self.lanes.iter_mut().find(|l| l.id == id) {
             lane.on_turn_event(session, ev);
         }
+    }
+
+    /// 停泊会话弹审批时，在当前会话留一条提示。
+    ///
+    /// 与 [`Self::announce_background_approval`]（跨 lane）同一条理由（issue #337）：浮层只画
+    /// 当前 `st`，不说一声就是最长 `APPROVAL_WAIT`（600 s）的静默停摆，最后按拒绝收尾 ——
+    /// 用户看到的只是「我刚切走的那条会话卡住了」。
+    fn announce_parked_approval(&mut self, from: LaneId, parked: &Option<String>) {
+        let Some(idx) = self.lanes.iter().position(|l| l.id == from) else {
+            return;
+        };
+        // 归属就是当前会话时不需要提示：浮层本来就在眼前（`on_turn_event` 直派那条路）。
+        if self.lanes[idx].st.conversation_id == *parked {
+            return;
+        }
+        let label = self.lanes[idx].label.clone();
+        self.lane_mut().st.push_line(
+            LineKind::System,
+            &format!("`{label}` 里另一条会话正在等待审批：切回那条会话处理（Ctrl+C 只停当前会话）"),
+        );
     }
 }

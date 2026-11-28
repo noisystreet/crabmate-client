@@ -203,6 +203,13 @@ impl LaneApp<'_> {
     /// `failed` / `cancelled` 由 `on_turn_done` 在**复位标志前**算好传入（那里会清
     /// `cancel_sent`、并 `move` 走 `error`）。
     pub(super) fn flush_queued_after_turn(&mut self, failed: bool, cancelled: bool) {
+        // 借位态（这条 `TurnDone` 属于停泊槽里的会话）：**不自动发下一条**。那会在用户
+        // 看不见的会话里开一轮新回合，抢占串行 worker，还会连带触发 `dispatch_turn` 的
+        // 「已在别的会话发出新回合」提示。文本留在槽的排队位，切回去再按 Enter —— 槽是
+        // 会话自己的，排队消息不会丢。
+        if self.in_borrow {
+            return;
+        }
         let has_queued = self.st.has_queued();
         match queued_outcome(has_queued, failed, cancelled) {
             QueuedOutcome::Nothing => {}

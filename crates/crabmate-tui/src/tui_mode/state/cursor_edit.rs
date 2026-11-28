@@ -13,6 +13,19 @@
 use super::UiState;
 
 impl UiState {
+    /// 把输入框（内容 + 光标位置）与另一份 `UiState` 整体交换。
+    ///
+    /// 切会话 / 停泊槽换进换出时，输入框必须**留在视图上**：改用 `set_input` 会把光标弹到
+    /// 行尾（`set_input` 里 `cursor = input.len()`），而后台会话每来一批流式增量都要走一次
+    /// 换进换出 —— 用户正在打字时会被连续打断，敲进去的字落在错位置。
+    ///
+    /// 放这里而不是 `state.rs`：那边贴着 920 行门禁，而这是「只碰 `input` / `cursor`」的
+    /// 一组算术之一（见模块头注释）。
+    pub(crate) fn swap_input_with(&mut self, other: &mut Self) {
+        std::mem::swap(&mut self.input, &mut other.input);
+        std::mem::swap(&mut self.cursor, &mut other.cursor);
+    }
+
     pub fn backspace(&mut self) {
         if self.cursor == 0 {
             return;

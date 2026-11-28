@@ -77,6 +77,18 @@ impl LaneApp<'_> {
 
     /// 把已组装好的回合交给 worker：重置运行态、记下原始输入、建取消通道。
     pub(super) fn dispatch_turn(&mut self, opts: ChatStreamOptions) {
+        // 与 Desktop 同口径：在**别的**会话发新回合 = 先停掉那边还在跑的那一轮
+        // （Desktop 是 `ac.abort()` + 抬 `attach_generation`，旧流不再写 UI）。TUI 的 worker
+        // 是串行的，不停它的话新回合只能排在后面，而屏幕上看起来「已经在跑」。
+        let abandoned = self.abandon_parked_turns(
+            "已在别的会话发出新回合：这一轮已请求取消（一个连接同时只跑一轮）",
+        );
+        if abandoned > 0 {
+            self.st.push_line(
+                LineKind::System,
+                &format!("已停掉 {abandoned} 条后台会话的在途回合（一个连接同时只跑一轮）"),
+            );
+        }
         // 新回合先收起问卷浮层（问卷本身不丢，`F7` 能重开）：否则它盖住这一段
         // transcript，而浮层上的 `Enter` 是一条能再发一轮的模态 —— 两个 SSE 流会
         // 并发写同一条 lane，`cancel` / `sent_turn` 也会被后发的那一轮顶掉。

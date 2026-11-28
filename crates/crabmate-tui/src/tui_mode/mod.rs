@@ -52,6 +52,7 @@ mod pane_drag;
 mod pane_render;
 mod pane_store;
 mod pane_width;
+mod parked;
 mod paste;
 mod pending_lane;
 mod permission_intent;
@@ -221,6 +222,10 @@ struct LaneApp<'a> {
     unread: bool,
     /// 在途回合的开始时刻（左栏显示耗时）；`None` = 空闲。从**发出**算起：首 token 之前的排队与建连同样是等。
     turn_started: Option<std::time::Instant>,
+    /// 被切走的会话：transcript 与在途回合都留在这里继续接收事件（见 [`parked`]）。
+    parked: parked::ParkedSessionMap,
+    /// 借位态（停泊槽的会话正换进 `st` 处理事件）：`TurnDone` 据此不自动发排队消息。
+    in_borrow: bool,
 }
 
 /// 多 lane 外壳：持有 N 条 lane 与当前聚焦的那条。
@@ -348,25 +353,27 @@ impl LaneApp<'_> {
         self.switch_to_conv(resume, Some(&title));
     }
 
-    /// 切到指定 `conversation_id`：回合在跑时拒绝；否则清 transcript 从空开始。
+    /// 切到指定 `conversation_id`：**回合进行中也允许切走**（与 Desktop 同口径）。
+    ///
+    /// 在途回合连同它的 transcript 一起进停泊槽（见 [`parked`]）：之后到达的增量按归属
+    /// 写回槽里，切回来直接接上，不重发历史请求。
     fn switch_to_conv(&mut self, resume: String, title: Option<&str>) {
-        if self.st.running {
-            self.st
-                .push_line(LineKind::System, "回合进行中：结束后再切换会话");
-            return;
-        }
         // 切走前回收「/conv new 建的空行」并把服务端 active 指过去（对齐 Web reclaim）。
         self.leave_current_for_switch(&resume);
         // 权限意图属于**上一个**会话：切走即清（同 Desktop 的 owner 规则）。留着它等于把
         // 「为 A 选的档」静默用到 B —— 选低了会报错，选高了不会。`/mode` `/role` 不清。
         self.overrides.permission_level = None;
-        // 断点属于上一个会话的 transcript：换会话后不可续，避免正文落到别人的记录里。
-        self.drop_resume_point();
-        self.st.focus = Focus::Input;
         // 草稿按会话换入换出：当前内容存回旧会话，再取目标会话那一份（见 `drafts`）。
+        // **必须在停泊之前**：`swap_draft_in` 用当前的 `st.conversation_id` 判定存回谁的槽。
         self.swap_draft_in(Some(&resume));
-        // 切换 = 换一份 transcript（同 Desktop）：清空后回放该会话的历史。
-        history::replay_into(self, resume, title);
+        // 旧会话整体进停泊槽（transcript / 在途 cancel / 断点 / 起跑时刻一起走），
+        // 于是回合进行中切走也不会把它的增量丢进新会话的屏幕。
+        self.park_current_session();
+        self.st.focus = Focus::Input;
+        // 目标会话若正在停泊槽里（刚从这里切走）→ 直接接上；否则清空后回放它的历史。
+        if !self.restore_parked_session(&Some(resume.clone())) {
+            history::replay_into(self, resume, title);
+        }
         // 权限投影同样是**按会话**算的：宁可短暂不显示，也别拿上一个会话的档位撑场面。
         self.forget_permission_view();
     }

@@ -147,6 +147,8 @@ pub(super) fn lane_with_tx<'a>(
         export_in_flight: false,
         unread: false,
         turn_started: None,
+        parked: Default::default(),
+        in_borrow: false,
     }
 }
 

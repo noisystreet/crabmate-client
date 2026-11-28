@@ -119,6 +119,8 @@ impl<'a> LaneApp<'a> {
             export_in_flight: false,
             unread: false,
             turn_started: None,
+            parked: Default::default(),
+            in_borrow: false,
         }
     }
 
