@@ -13,6 +13,8 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 ### Added
 
+- **A gate keeps `frontend/src/domain` free of DOM, signals, clock and ids.**
+
 - **Hydrated history rows keep stable v2 ids, so reloads stop rebuilding the tail.**
 
 - **Write tool cards now show the unified diff they changed, with add/remove colours.**
@@ -22,6 +24,8 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 - **A gate keeps every package's direct dependency on one shared version req.**
 
 ### Changed
+
+- **Session abort and hydration-restore rules leave the app closures.**
 
 - **Sidebar and status-stack rendering stop rebuilding every frame (row + plan caches).**
 
