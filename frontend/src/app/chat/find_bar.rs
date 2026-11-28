@@ -1,10 +1,10 @@
-//! 当前会话内查找工具条（句柄来自 [`crate::app::shell_runtime_context::ChatShellLeptosContext`]）。
+//! 当前会话内查找工具条（句柄来自 [`crate::app::shell::runtime_context::ChatShellLeptosContext`]）。
 
 use leptos::prelude::*;
 use leptos_dom::helpers::event_target_value;
 
 use crate::a11y::{capture_focus, restore_focus_to};
-use crate::app::shell_runtime_context::expect_chat_shell_ctx;
+use crate::app::shell::runtime_context::expect_chat_shell_ctx;
 use crate::i18n::{self, Locale};
 use crate::icon::{icon_arrow_down, icon_arrow_up, icon_x};
 use crate::session_search::scroll_message_into_view;

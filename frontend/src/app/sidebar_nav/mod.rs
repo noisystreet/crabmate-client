@@ -18,7 +18,7 @@ use crate::session_ops::clamp_session_ctx_menu_pos;
 use crate::app::shell::ctx::SidebarNavSignals;
 use crate::app::shell::rail::NavRailConnections;
 
-use super::shell_runtime_context::expect_chat_shell_ctx;
+use crate::app::shell::runtime_context::expect_chat_shell_ctx;
 
 use context_menus::{RailContextMenuLayer, SessionContextMenuLayer};
 use debounce::{

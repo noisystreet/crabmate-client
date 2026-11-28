@@ -18,13 +18,13 @@ use crate::user_prefs_sync_state::UserPrefsSyncPhase;
 use crate::app::chat::bump_session_hydrate_nonce;
 use crate::app::settings::page::{SettingsSection, navigate_to_settings};
 use crate::app::shell::ctx::StatusBarFooterSignals;
+use crate::app::shell::runtime_context::expect_chat_shell_ctx;
 use crate::app::shell::status::agent_role_menu::{AgentRoleMenuProps, StatusAgentRoleMenu};
 use crate::app::shell::status::context::{StatusBarContextChip, observe_context_watermark};
 use crate::app::shell::status::fetch_state::status_bar_should_show_skeleton;
 use crate::app::shell::status::session_mode_seg::{SessionModeSegProps, StatusSessionModeSeg};
 use crate::app::shell::status::tasks_state::StatusTasksSignals;
 use crate::app::shell::status::view_chip::StatusViewChip;
-use crate::app::shell_runtime_context::expect_chat_shell_ctx;
 
 // ---- 类名契约（状态 → 类名）----
 // 集中构造，避免同一类名在多个组件里就地手写；与 `styles/status.css` 选择器一一对应，改动须同步下方单测。

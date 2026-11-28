@@ -1,7 +1,7 @@
 //! 设置页主题 / 背景预览写 DOM（从 `settings_page` 拆出以降低 nloc 棘轮）。
 
 pub(crate) fn apply_theme_preview_to_dom(theme_pref: &str) {
-    crate::app::shell_prefs_storage::persist_theme_to_storage_and_dom(theme_pref);
+    crate::app::shell::prefs_storage::persist_theme_to_storage_and_dom(theme_pref);
 }
 
 pub(crate) fn apply_bg_decor_preview_to_dom(bg_decor: bool) {

@@ -62,11 +62,11 @@ use crate::app::connection_feed::{
 };
 use crate::app::focusable_menu::{FocusableModalBackdrop, FocusableModalPanel, FocusableRoleMenu};
 use crate::app::settings::page::{SettingsSection, navigate_to_settings};
-use crate::app::shell_runtime_context::try_chat_shell_ctx;
+use crate::app::shell::runtime_context::try_chat_shell_ctx;
 
 /// 状态点字形。与 TUI 的 `·●▲` 同口径；呼吸动画不进共享层（见 `ConnectionSnapshot`
 /// 「刻意不含动画相位」），Web 侧靠 CSS transition。
-pub(in crate::app) fn status_glyph(status: ConnectionStatus) -> &'static str {
+pub(crate) fn status_glyph(status: ConnectionStatus) -> &'static str {
     match status {
         ConnectionStatus::Idle => "·",
         ConnectionStatus::Running => "●",
@@ -406,7 +406,7 @@ fn ctl_row(
 
 /// 左栏连接区。非桌面壳（Android / Web）整段不渲染：那边没有窗口可以切。
 #[component]
-pub(in crate::app) fn NavRailConnections(
+pub(crate) fn NavRailConnections(
     locale: RwSignal<Locale>,
     settings_page: RwSignal<bool>,
 ) -> impl IntoView {
@@ -444,7 +444,7 @@ pub(in crate::app) fn NavRailConnections(
     // #561 决策：多 lane 只给**宽屏**。窄屏（含 Android 手机）保持单连接语义，这一块
     // 整个不渲染 —— 与 `docs/design/client_capability_matrix.md` 里 Android 那格的 `no`
     // 一致。用视口判定而不是平台判定：两端共用同一份 WASM，壳没有注入平台标识。
-    let narrow = crate::app::shell_runtime_context::narrow_viewport_or_wide();
+    let narrow = crate::app::shell::runtime_context::narrow_viewport_or_wide();
 
     view! {
         <Show when=move || tauri_shell_available()>

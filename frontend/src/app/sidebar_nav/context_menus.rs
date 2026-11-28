@@ -6,7 +6,7 @@ use crate::session_ops::{
     export_session_markdown_for_id, set_session_pinned, set_session_starred,
 };
 
-use crate::app::shell_runtime_context::expect_chat_shell_ctx;
+use crate::app::shell::runtime_context::expect_chat_shell_ctx;
 
 #[component]
 pub(super) fn SessionContextMenuLayer(

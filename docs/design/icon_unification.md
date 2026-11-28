@@ -92,7 +92,7 @@ fn svg_common() -> (&'static str, &'static str, &'static str, &'static str, &'st
 | `▾` | 展开 | `workspace_tree.rs:637`、`layout-chat.css:371`（`content:`） |
 | `▸` | 折叠 | `workspace_tree.rs:639` |
 | `✓` | 勾选 | `ide_menu_bar/view_menu.rs:63,78` |
-| `●` | 脏标记 | `ide_tabs_bar.rs:265`、`mobile_shell_header.rs:94` |
+| `●` | 脏标记 | `ide_tabs_bar.rs:265`、`shell/mobile_header.rs:94` |
 | `−` | 最小化 | `tauri_window_controls.rs:29`、`settings_sections.rs:693` |
 | `…` | 更多 | `ide_layout.rs:112`、`chat/tui_stream_dom_sync.rs:747` |
 | `◈` | 装饰 | `layout-chat.css:365`（`content:`） |

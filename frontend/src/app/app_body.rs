@@ -35,16 +35,16 @@ use super::ide_editor_body::IdeEditorBody;
 use super::ide_layout_switch::IdeLayoutToggleSignals;
 use super::ide_session::{IdeSession, IdeSessionInput};
 use super::ide_settings_page::IdeSettingsPageView;
-use super::mobile_shell_header::mobile_shell_header_view;
 use super::session_list_modal::session_list_modal_view;
 use super::settings::page::SettingsPageView;
-use super::shell_confirm_dialog::ShellConfirmDialog;
-use super::shell_runtime_context::ChatShellLeptosContext;
 use super::sidebar_nav::sidebar_nav_view;
 use super::workspace::browser_pick_modal::workspace_browser_pick_modal_view;
 use super::workspace::clone_modal::workspace_clone_modal_view;
 use super::workspace::project_modal::workspace_project_modal_view;
 use super::{SidebarRailRevealBtn, app_root_class_name, shell_main_hidden};
+use crate::app::shell::confirm_dialog::ShellConfirmDialog;
+use crate::app::shell::mobile_header::mobile_shell_header_view;
+use crate::app::shell::runtime_context::ChatShellLeptosContext;
 use crate::app::shell::side_column::side_column_view;
 
 /// 一条 lane 的完整视图：侧栏 + 主区 + 各模态 + 全屏页。

@@ -3,7 +3,7 @@
 use leptos::prelude::*;
 
 use crate::app::ide_menu_bar::IdeMenuBarBridge;
-use crate::app::shell_prefs_storage;
+use crate::app::shell::prefs_storage;
 use crate::app_prefs::SidePanelView;
 use crate::i18n::Locale;
 
@@ -54,7 +54,7 @@ pub struct ShellUISignals {
 
 impl ShellUISignals {
     pub fn new() -> Self {
-        let s = shell_prefs_storage::read_shell_ui_initial_snapshot();
+        let s = prefs_storage::read_shell_ui_initial_snapshot();
         Self {
             theme: RwSignal::new(s.theme),
             bg_decor: RwSignal::new(s.bg_decor),

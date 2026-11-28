@@ -3,7 +3,7 @@
 //! # 与其它模块分工
 //!
 //! - **主题 slug 白名单**：[`crate::app_prefs::THEME_SLUGS`] / [`normalize_theme_slug`]；DOM 用 [`resolve_data_theme_slug`]（`system` → `crabmate-dark`/`crabmate-light`）。加载偏好时在 [`crate::user_prefs_sync`] 中规范化。
-//! - **首屏壳 UI 快照**：[`read_shell_ui_initial_snapshot`] 聚合主题/语言/侧栏宽度等读路径，供 [`super::app_signals::ShellUISignals::new`] 单点消费。
+//! - **首屏壳 UI 快照**：[`read_shell_ui_initial_snapshot`] 聚合主题/语言/侧栏宽度等读路径，供 [`crate::app::app_signals::ShellUISignals::new`] 单点消费。
 //! - **首帧主题镜像**：[`THEME_PREF_MIRROR_KEY`] 把**偏好 slug**（含 `system`）落 `localStorage`，供 `frontend/index.html` 的预绘脚本与 [`read_shell_ui_initial_snapshot`] 在 `/user-data/prefs` 到达前还原主题；主题非机密，与本仓「官方壳禁明文 `localStorage`」的 Bearer / model key 规则无关。
 //! - **会话 JSON**：[`crate::storage`] / [`crate::app::chat::session_storage`]。
 //! - **`client_llm.*` / Bearer**：[`crate::api::client_llm_storage`]。

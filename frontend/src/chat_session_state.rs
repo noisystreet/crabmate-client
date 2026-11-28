@@ -194,7 +194,7 @@ pub struct ChatStreamBusyMemos {
 ///
 /// 「停止」门闩、合成器可用性、权限换档守卫必须给出**同一个答案**。此前两处各自手写同形
 /// closure（本文件 [`make_chat_stream_busy_memos`] 与
-/// [`crate::app::shell_runtime_context`] 的 `perm_turn_in_flight`），只能靠注释「改一边必须
+/// [`crate::app::shell::runtime_context`] 的 `perm_turn_in_flight`），只能靠注释「改一边必须
 /// 同时改另一边」约束；抽成这里后只剩一份。
 ///
 /// `abort_present` 在 `stream_abort_epoch` 变化时才重算：槽位是 `Mutex`（非 signal），

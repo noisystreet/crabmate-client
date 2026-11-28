@@ -9,7 +9,7 @@ use leptos::task::spawn_local;
 use crate::api::{SendChatStreamParams, send_chat_stream};
 use crate::app::chat::session_hydrate::bump_session_hydrate_nonce;
 use crate::app::chat::turn_lifecycle::TurnLifecycleEvent;
-use crate::app::shell_runtime_context::try_chat_shell_ctx;
+use crate::app::shell::runtime_context::try_chat_shell_ctx;
 use crate::chat_session_state::ChatSessionSignals;
 use crate::i18n::Locale;
 

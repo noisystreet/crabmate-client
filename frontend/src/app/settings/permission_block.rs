@@ -19,7 +19,7 @@ use crabmate_client_api::ordered_clamped_axes;
 use crabmate_client_api::permission::{PermissionLevelSource, PermissionView, normalize_level};
 
 use crate::api::{PermissionFetch, fetch_permission, post_conversation_state};
-use crate::app::shell_runtime_context::try_chat_shell_ctx;
+use crate::app::shell::runtime_context::try_chat_shell_ctx;
 use crate::chat_session_state::ChatSessionSignals;
 use crate::i18n::{self, Locale};
 

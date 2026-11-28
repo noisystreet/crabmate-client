@@ -426,7 +426,7 @@ override，随**下一条**消息进 `permission_level`，`off` 清除；**不�
 | `turn_lifecycle_tool_ui_busy` | 状态栏「工具执行中」与时间线门闩：仅 `Streaming` 的 `ToolUiBusy` 子阶段 |
 | `turn_lifecycle_stream_turn_busy(state, abort_present)` | `coarse_busy ∨ abort_present`：合成器可用性与「停止」按钮门闩 |
 
-**第二步：busy 判定从两份闭包收成一份实现。** 构造点只有 `chat_session_state::make_stream_turn_busy_memo`；`make_chat_stream_busy_memos` 与 `ChatShellLeptosContext::perm_turn_in_flight`（`app/shell_runtime_context.rs`）都改调它。此前两处各写一个同形 `Memo::new`，一致性只靠注释「改一边必须同时改另一边」维持。
+**第二步：busy 判定从两份闭包收成一份实现。** 构造点只有 `chat_session_state::make_stream_turn_busy_memo`；`make_chat_stream_busy_memos` 与 `ChatShellLeptosContext::perm_turn_in_flight`（`app/shell/runtime_context.rs`）都改调它。此前两处各写一个同形 `Memo::new`，一致性只靠注释「改一边必须同时改另一边」维持。
 
 **一个谓词、四个界面**：`perm_turn_in_flight` 被设置页权限块、底栏 `perm` chip、`/perm` 命令的参数层共同读取。所以 `turn_lifecycle_stream_turn_busy` 同时是「停止」门闩与「回合进行中不许换档」的守卫 —— 改它等于同时改两个产品行为，不变量是「停止可点」与「换档被拒」永远同真同假。
 
