@@ -59,6 +59,14 @@ frontend & tui (serve/) ──┴── crabmate（protocol feature；crates.io 
 **2026-11**：桌面壳 Web Bearer 的**分槽账户名**拼接下沉为 `crabmate-client-api::secrets::scoped_bearer_account`（配 `DESKTOP_MAIN_WINDOW_LABEL` 常量）。此前 `crabmate-connect` 自己 `format!` 一份（`<account>:<label>`，多窗口按窗口分槽），TUI 的钥匙串回退读的却是不分槽的旧槽——而 connect 的迁移逻辑会把旧槽搬进分槽槽后删掉它，于是桌面跑过一次之后 TUI 永远读到 `None`，请求不带 `Authorization`，`serve` 回 401（失败静默，症状指向服务端配置而非客户端槽名）。现在写方与读方共用同一份拼接；TUI 按「分槽主窗口槽 → 不分槽旧槽」探测、首个命中即停，并在 stderr 说明取自哪个槽。仍属「只共享名字常量 +
 纯拼接」这一档：读写 IO 各端自实现（见 §1 非目标）。窗口 label 本身也是同一份来源：`desktop-tauri` 的 `desktop_main_window` / `desktop_lifecycle` 与两处 `get_webview_window` 都引用 `DESKTOP_MAIN_WINDOW_LABEL`，不再各写一遍 `"main"`——否则改名时桌面照常编译，而 TUI 的钥匙串回退会静默 miss。
 
+**2026-11**：首轮结束「这一轮的会话必须出现在侧栏」的判定下沉为 `crabmate-client-api::session_ensure`
+（`plan_session_ensure` → `NoConversationId` / `PendingLocalRow` / `AlreadyListed { row_id }` / `InsertAndBind`）。
+成因是侧栏索引只由客户端维护、服务端对它透传存储：新工作区空桶 + 用户没按「新建会话」直接发消息时，
+会话在 serve 里真实存在、左栏却一直空着——TUI 首轮结束只对「已存在的行」做绑定与起名，从不建行。
+共享层只回答「该不该写」，落盘与幂等在各端写入层（TUI 为 `SessionIndexOp::EnsureListed`：`GET` 之后
+已有行带着该 cid 就原样返回，否则插一行并绑定，所以每轮都可以无脑触发）。Web 侧的 `ensure_at_least_one`
+属同一族但时机不同（加载空桶时补一条空白行），本次未合并。
+
 ---
 
 ## 3. 拟建布局

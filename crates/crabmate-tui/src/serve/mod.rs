@@ -52,9 +52,9 @@ pub use ctl::{
 pub use error::TermError;
 pub use session_store::set_session_conversation_store;
 pub use sessions::{
-    DEFAULT_SESSION_TITLE, SessionIndexApplied, SessionIndexOp, SessionListRow, WebSessionsList,
-    apply_web_session_op, conversation_id_for_resume, fetch_web_sessions, is_default_session_title,
-    title_from_user_prompt,
+    DEFAULT_SESSION_TITLE, SessionEnsure, SessionIndexApplied, SessionIndexOp, SessionListRow,
+    WebSessionsList, apply_web_session_op, conversation_id_for_resume, fetch_web_sessions,
+    is_default_session_title, plan_session_ensure, title_from_user_prompt,
 };
 pub use user_data::{
     LlmOverridesDto, McpServersFileDto, UserPrefsDto, fetch_llm_overrides, fetch_mcp_servers,

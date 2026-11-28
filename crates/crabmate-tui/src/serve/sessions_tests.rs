@@ -751,3 +751,100 @@ fn set_title_by_server_missing_row_is_silent() {
     );
     assert_eq!(applied.local_id, "", "没命中行时 local_id 为空");
 }
+
+#[test]
+fn ensure_listed_creates_the_row_on_an_empty_bucket() {
+    // 新工作区：桶为空，这一轮的会话在别处真实存在 —— 必须补一行并绑定。
+    let applied = apply_index_op(
+        &json!([]),
+        None,
+        &SessionIndexOp::EnsureListed {
+            conversation_id: "c1".into(),
+            title: "第一条消息".into(),
+        },
+        &stamp("s_new"),
+    )
+    .expect("apply");
+    let rows = applied.sessions.as_array().expect("array");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["id"], json!("s_new"));
+    assert_eq!(rows[0]["title"], json!("第一条消息"));
+    assert_eq!(rows[0]["server_conversation_id"], json!("c1"), "建行即绑定");
+    assert_eq!(applied.local_id, "s_new");
+    // 桶原本没有 active：顺手指过去，否则服务端没有「正在用的会话」。
+    assert_eq!(applied.active_session_id.as_deref(), Some("s_new"));
+}
+
+#[test]
+fn ensure_listed_is_idempotent_for_an_already_listed_conversation() {
+    // 已有行带着这条会话：什么都不改（不插第二行、不改标题、不动 active）。
+    let raw = json!([
+        {"id":"s1","title":"old","server_conversation_id":"c-old"},
+        {"id":"s2","title":"mine","server_conversation_id":"c1"},
+    ]);
+    let applied = apply_index_op(
+        &raw,
+        Some("s2"),
+        &SessionIndexOp::EnsureListed {
+            conversation_id: "c1".into(),
+            title: "不该覆盖".into(),
+        },
+        &stamp("s_new"),
+    )
+    .expect("apply");
+    let rows = applied.sessions.as_array().expect("array");
+    assert_eq!(rows.len(), 2, "幂等：不插第二行");
+    assert_eq!(rows[1]["title"], json!("mine"), "不改已有标题");
+    assert_eq!(applied.local_id, "s2", "返回命中的行");
+    assert_eq!(applied.active_session_id.as_deref(), Some("s2"));
+}
+
+#[test]
+fn ensure_listed_keeps_other_rows_byte_identical() {
+    // 服务端透传存储：别人的 messages / 自定义字段一个都不能动，新行插在最前。
+    let other = json!({
+        "id":"s1",
+        "title":"keep",
+        "messages":[{"role":"user","content":"hi"}],
+        "layout_schema_version":2,
+        "history_total":42,
+    });
+    let raw = json!([other.clone()]);
+    let applied = apply_index_op(
+        &raw,
+        Some("s1"),
+        &SessionIndexOp::EnsureListed {
+            conversation_id: "c1".into(),
+            title: "t".into(),
+        },
+        &stamp("s_new"),
+    )
+    .expect("apply");
+    let rows = applied.sessions.as_array().expect("array");
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0]["id"], json!("s_new"));
+    assert_eq!(rows[1], other, "整行原样保留");
+    assert_eq!(
+        applied.active_session_id.as_deref(),
+        Some("s1"),
+        "active 不抢"
+    );
+}
+
+#[test]
+fn ensure_listed_trims_the_conversation_id() {
+    // 透传存储不做归一：行上的 id 可能带空白，比较前必须 trim，否则重复建行。
+    let raw = json!([{"id":"s1","server_conversation_id":"  c1  "}]);
+    let applied = apply_index_op(
+        &raw,
+        Some("s1"),
+        &SessionIndexOp::EnsureListed {
+            conversation_id: "c1".into(),
+            title: "t".into(),
+        },
+        &stamp("s_new"),
+    )
+    .expect("apply");
+    assert_eq!(applied.sessions.as_array().map(Vec::len), Some(1));
+    assert_eq!(applied.local_id, "s1");
+}

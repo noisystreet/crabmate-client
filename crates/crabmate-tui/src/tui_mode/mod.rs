@@ -62,6 +62,7 @@ mod render;
 mod resume;
 mod serve_defaults;
 mod session_index;
+mod session_listing;
 mod session_refresh;
 mod settings;
 mod settings_panel;

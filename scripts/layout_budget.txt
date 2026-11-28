@@ -31,9 +31,9 @@ frontend/src/app/app_signals                  lines=1783   scope=recursive  # �
 frontend/src/app/sidebar_nav                  lines=1321   scope=recursive  # 与根级 nav_rail* / side_column* 合并进 shell 域（PR-4）
 
 # --- 其它根：按需登记（不套守恒）---
-crates/crabmate-tui/src/tui_mode              lines=58097  scope=recursive  # TUI 状态与渲染；state/ 已收口 10 个域分片、无 #[path] 旁路（+2 = detail_state 注释指明行为测试在 tools/tests.rs）；全仓最大单块；+535 = 回合事件的会话归属（lane_route）+ 会话停泊槽（parked）与视图级字段的保留，运行中切会话所需
-crates/crabmate-client-api/src                lines=14677  scope=recursive  # TUI 与 Web 共用的纯逻辑；新增规则先看能否复用既有函数
+crates/crabmate-tui/src/tui_mode              lines=58254  scope=recursive  # TUI 状态与渲染；state/ 已收口 10 个域分片、无 #[path] 旁路（+2 = detail_state 注释指明行为测试在 tools/tests.rs）；全仓最大单块；+535 = 回合事件的会话归属（lane_route）+ 会话停泊槽（parked）与视图级字段的保留，运行中切会话所需；+157 = 首轮补行接线与失败回填标题（session_listing + 3 条接线测试，#618）
+crates/crabmate-client-api/src                lines=14814  scope=recursive  # TUI 与 Web 共用的纯逻辑；新增规则先看能否复用既有函数；+137 = session_ensure（首轮补齐会话行的共享判定，#618）
 frontend/src/api                              lines=8484   scope=recursive  # HTTP / SSE / 存储作用域
 frontend/src/i18n                             lines=6108   scope=recursive  # 文案表，已按域分文件
-crates/crabmate-tui/src/serve                 lines=5911   scope=recursive  # 远程 serve 客户端，与 tui_mode 平级
+crates/crabmate-tui/src/serve                 lines=6099   scope=recursive  # 远程 serve 客户端，与 tui_mode 平级；+188 = EnsureListed 写入（幂等补行、无变化不 PUT）与单测（#618）
 crates/crabmate-tool-card/src                 lines=3100   scope=recursive  # 工具卡 compact / detail，与 Server 契约同源；+12 = 导出 `COMPACT_MAX_CHARS` / `compact_one_line` 供两态共用（#616 的 D）

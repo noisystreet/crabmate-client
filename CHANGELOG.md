@@ -27,6 +27,10 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 - **TUI switches sessions while a turn is still running, matching Desktop.**
 
+### Fixed
+
+- **The TUI lists a fresh workspace's first session instead of leaving the sidebar empty.**
+
 ### Changed
 
 - **TUI's `UiState` slices move into `state/`; the 11 `#[path]` modules are gone.**
