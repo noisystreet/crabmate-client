@@ -56,6 +56,9 @@ bash "$ROOT/scripts/check-changelog-style.sh"
 echo "[check] toolchain pin (rust-toolchain.toml channel == every workflow's dtolnay/rust-toolchain)"
 bash "$ROOT/scripts/check-toolchain-pin.sh"
 
+echo "[check] dependency lockstep (direct deps share one version req across the 8 packages)"
+bash "$ROOT/scripts/check-dep-lockstep.sh"
+
 echo "[check] cargo fmt (all packages in scripts/rust-pkg-dirs.txt)"
 while IFS= read -r dir; do
   echo "[check] cargo fmt $dir"

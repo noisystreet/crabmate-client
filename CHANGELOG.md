@@ -19,6 +19,8 @@ On release: move `[Unreleased]` entries into a new version section and tag (e.g.
 
 - **Lane rows show the in-flight turn duration, matching the TUI tail.**
 
+- **A gate keeps every package's direct dependency on one shared version req.**
+
 ### Changed
 
 - **Sidebar and status-stack rendering stop rebuilding every frame (row + plan caches).**
