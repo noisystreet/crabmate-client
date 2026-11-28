@@ -1,6 +1,6 @@
 //! App 壳层 `wire_*` 的**分阶段**注册。
 //!
-//! **唯一对外入口**：[`run_shell_wiring_in_order`]（由 [`super::app_shell_bootstrap::bootstrap_app_shell`] 调用）。
+//! **唯一对外入口**：[`run_shell_wiring_in_order`]（由 [`crate::app::shell::bootstrap::bootstrap_app_shell`] 调用）。
 //! 阶段子函数均为本模块**私有**，避免在其它模块零散调用导致顺序漂移。
 //!
 //! | 阶段 | 职责 |
@@ -13,13 +13,13 @@
 //! | 4c | 工作区路径插入 composer、流式壳、聊天列 `wire_*`（与 4a 共用 `refresh_workspace`）。 |
 //! | 5 | 本窗口的连接状态 / 未读上报给桌面壳（左栏「连接」区读它）。 |
 //!
-//! 聊天主列内部顺序见 [`super::chat::wire_chat_domain`]。
+//! 聊天主列内部顺序见 [`crate::app::chat::wire_chat_domain`]。
 
 use std::sync::Arc;
 
 use leptos::prelude::*;
 
-use super::app_shell_effects::{
+use crate::app::app_shell_effects::{
     ConnectionReportSignals, IdeEditorHotkeySignals, SessionDeleteHotkeySignals,
     ShellEscapeSignals, WireMobileNavEdgeSwipeSignals, WireMobileSideEdgeSwipeSignals,
     WireNarrowViewportSignals, WireSettingsLlmDraftsSignals, WireSyncThemeSignals,
@@ -31,27 +31,31 @@ use super::app_shell_effects::{
     wire_sync_session_typography_to_storage_and_dom, wire_sync_tauri_shell_dom,
     wire_sync_theme_to_storage_and_dom, wire_visual_viewport_keyboard_inset,
 };
-use super::app_signals::AppSignals;
-use super::approval_modal::ApprovalModalSignals;
-use super::chat::ChatComposerWires;
-use super::chat::{
+use crate::app::app_signals::AppSignals;
+use crate::app::approval_modal::ApprovalModalSignals;
+use crate::app::chat::ChatComposerWires;
+use crate::app::chat::{
     ComposerStreamShell,
     wire_chat_domain::{WireChatDomainEffectsArgs, wire_chat_domain_effects},
     wire_chat_session_lifecycle::{
         WireChatSessionLifecycleEffectsArgs, wire_chat_session_lifecycle_effects,
     },
 };
-use super::connectivity_recovery::{ConnectivityRecoveryArgs, wire_connectivity_recovery};
-use super::github_wiring::{
+use crate::app::connectivity_recovery::{ConnectivityRecoveryArgs, wire_connectivity_recovery};
+use crate::app::github_wiring::{
     make_refresh_github_repo_context, wire_github_refresh_on_auth_nonce,
     wire_github_refresh_when_workspace_changes, wire_github_repo_after_init,
 };
-use super::ide_layout_switch::IdeLayoutToggleSignals;
-use super::web_api_bearer_recovery::wire_web_api_bearer_save_recovery;
-use super::wire_workspace_domain::{WireWorkspaceDomainEffectsArgs, wire_workspace_domain_effects};
-use super::workspace::panel::{make_insert_workspace_path_into_composer, make_refresh_workspace};
+use crate::app::ide_layout_switch::IdeLayoutToggleSignals;
 use crate::app::shell::status::tasks_wiring::{
     make_refresh_status, make_refresh_tasks, make_toggle_task, wire_status_tasks_domain_effects,
+};
+use crate::app::web_api_bearer_recovery::wire_web_api_bearer_save_recovery;
+use crate::app::wire_workspace_domain::{
+    WireWorkspaceDomainEffectsArgs, wire_workspace_domain_effects,
+};
+use crate::app::workspace::panel::{
+    make_insert_workspace_path_into_composer, make_refresh_workspace,
 };
 use crate::chat_session_state::ChatStreamBusyMemos;
 
@@ -87,7 +91,7 @@ struct Phase4WiringTail {
     stream_busy_memos: ChatStreamBusyMemos,
 }
 
-/// [`run_shell_wiring_in_order`] 的解构产物；[`super::app_shell_bootstrap::bootstrap_app_shell`] 唯一消费。
+/// [`run_shell_wiring_in_order`] 的解构产物；[`crate::app::shell::bootstrap::bootstrap_app_shell`] 唯一消费。
 pub(crate) struct ShellWiringOutput {
     pub refresh_workspace: Arc<dyn Fn() + Send + Sync>,
     pub refresh_status: Arc<dyn Fn() + Send + Sync>,
@@ -243,14 +247,20 @@ fn wire_phase4a_workspace_domain(app: &AppSignals, refresh_workspace: &RefreshWo
         if !initialized.get() {
             return;
         }
-        super::workspace::clone_modal::spawn_refresh_workspace_pool_enabled(pool_enabled, locale);
+        crate::app::workspace::clone_modal::spawn_refresh_workspace_pool_enabled(
+            pool_enabled,
+            locale,
+        );
     });
     Effect::new(move |_| {
         let n = bearer_nonce.get();
         if n == 0 {
             return;
         }
-        super::workspace::clone_modal::spawn_refresh_workspace_pool_enabled(pool_enabled, locale);
+        crate::app::workspace::clone_modal::spawn_refresh_workspace_pool_enabled(
+            pool_enabled,
+            locale,
+        );
     });
 }
 

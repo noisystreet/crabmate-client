@@ -8,13 +8,13 @@ use crate::i18n::{self, Locale};
 use crate::mobile_remote::mobile_remote_client;
 use crate::tauri_shell::tauri_shell_available;
 
-use super::app_shell_ctx::MobileShellHeaderSignals;
 use super::ide_menu_bar::{
     IdeMenuBarBridge, IdeMenuBarTopbarContent, IdeMenuId, ShellTopbarFileMenu,
     ShellTopbarMenuBackdrop,
 };
 use super::tauri_window_controls::TauriWindowControls;
 use super::workspace::root_actions::{ShellTopbarWorkspaceRoot, WorkspaceRootPickHandle};
+use crate::app::shell::ctx::MobileShellHeaderSignals;
 use crate::app::shell::status::bar::StatusRunDotButton;
 
 fn shell_topbar_a11y(ide: bool, locale: Locale) -> (&'static str, &'static str, &'static str) {

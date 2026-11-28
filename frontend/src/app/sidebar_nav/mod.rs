@@ -15,7 +15,7 @@ use leptos::prelude::*;
 
 use crate::session_ops::clamp_session_ctx_menu_pos;
 
-use super::app_shell_ctx::SidebarNavSignals;
+use crate::app::shell::ctx::SidebarNavSignals;
 use crate::app::shell::rail::NavRailConnections;
 
 use super::shell_runtime_context::expect_chat_shell_ctx;

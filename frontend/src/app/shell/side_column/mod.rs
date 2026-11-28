@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use self::toolbar::{SideColumnResizeAndShellToolbar, SideColumnResizeToolbarSignals};
 use self::workspace_scroll::WorkspaceSideCardScrollInner;
-use crate::app::app_shell_ctx::SideColumnViewSignals;
+use crate::app::shell::ctx::SideColumnViewSignals;
 use crate::app::shell::status::bar::side_status_stack_view;
 use crate::app::workspace::panel::make_refresh_workspace_after_mutation;
 use crate::app::workspace::panel_state::WorkspacePanelSignals;

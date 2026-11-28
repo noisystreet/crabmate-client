@@ -5,12 +5,12 @@
 //! **未使用** Leptos `Context` / `<Provider>` 承载整份壳层：状态含 `Rc<RefCell<…>>`、`Rc<dyn Fn()>` 等，
 //! 不满足 `provide_context` 的 `Send + Sync + 'static` 约束；以结构体 **`Clone`**（内部多为
 //! `Copy` / `Rc::clone` / `Arc::clone`）在 `*_view` 间传递即可。
-//! 聊天域中已满足边界的切片见 [`super::shell_runtime_context::ChatShellLeptosContext`]（由 [`super::App`] 根
-//! [`provide_context`]，侧栏等用 [`super::shell_runtime_context::expect_chat_shell_ctx`] 读取）。
+//! 聊天域中已满足边界的切片见 [`crate::app::shell_runtime_context::ChatShellLeptosContext`]（由 [`crate::app::App`] 根
+//! [`provide_context`]，侧栏等用 [`crate::app::shell_runtime_context::expect_chat_shell_ctx`] 读取）。
 //!
-//! 根壳层 `wire_*` 的**注册顺序**影响隐式时序依赖；见 [`app_shell_wire_phases`](super::app_shell_wire_phases)
-//! 与 [`bootstrap_app_shell`](super::app_shell_bootstrap::bootstrap_app_shell)（[`init_app_shell`](super::app_shell_init::init_app_shell)）；聊天列内部顺序见 [`wire_chat_domain`](super::chat::wire_chat_domain)。
-//! 聊天域信号切片见 [`ChatDomainWiringSignals`](super::app_signals::ChatDomainWiringSignals)（与 [`AppSignals`] 同源，供接线单点组装）。
+//! 根壳层 `wire_*` 的**注册顺序**影响隐式时序依赖；见 [`wire_phases`](crate::app::shell::wire_phases)
+//! 与 [`bootstrap_app_shell`](crate::app::shell::bootstrap::bootstrap_app_shell)（[`init_app_shell`](crate::app::shell::init::init_app_shell)）；聊天列内部顺序见 [`wire_chat_domain`](crate::app::chat::wire_chat_domain)。
+//! 聊天域信号切片见 [`ChatDomainWiringSignals`](crate::app::app_signals::ChatDomainWiringSignals)（与 [`AppSignals`] 同源，供接线单点组装）。
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -26,11 +26,11 @@ use crate::sse_dispatch::ThinkingTraceInfo;
 
 use crate::app_prefs::SidePanelView;
 
-use super::app_signals::AppSignals;
-use super::workspace::panel_state::WorkspacePanelSignals;
+use crate::app::app_signals::AppSignals;
 use crate::app::shell::status::tasks_state::StatusTasksSignals;
+use crate::app::workspace::panel_state::WorkspacePanelSignals;
 
-use super::changelist_modal::ChangelistModalBodyState;
+use crate::app::changelist_modal::ChangelistModalBodyState;
 
 /// 壳顶栏所需句柄（阶段 B：避免向 `mobile_shell_header_view` 传递整份 [`AppShellCtx`]）。
 #[derive(Clone, Copy)]
@@ -38,8 +38,8 @@ pub struct MobileShellHeaderSignals {
     pub locale: RwSignal<Locale>,
     pub editor_layout_mode: RwSignal<bool>,
     pub is_narrow_viewport: RwSignal<bool>,
-    pub ide_menu_bar_bridge: RwSignal<Option<super::ide_menu_bar::IdeMenuBarBridge>>,
-    pub workspace_pick: super::workspace::root_actions::WorkspaceRootPickHandle,
+    pub ide_menu_bar_bridge: RwSignal<Option<crate::app::ide_menu_bar::IdeMenuBarBridge>>,
+    pub workspace_pick: crate::app::workspace::root_actions::WorkspaceRootPickHandle,
     pub ide_menubar_dropdown_open: RwSignal<bool>,
     /// 迷你运行点兜底：右列抽屉收起时在顶栏展示运行态色点，点击打开工作区抽屉。
     pub side_panel_view: RwSignal<SidePanelView>,
@@ -59,7 +59,7 @@ pub struct ChangelistModalSignals {
 }
 
 /// 会话列表模态所需句柄（阶段 B：避免向 `session_list_modal_view` 传递整份 [`AppShellCtx`]）。
-/// 会话 / 草稿 / 语言 / 过滤开关经 [`super::shell_runtime_context::ChatShellLeptosContext`]。
+/// 会话 / 草稿 / 语言 / 过滤开关经 [`crate::app::shell_runtime_context::ChatShellLeptosContext`]。
 #[derive(Clone, Copy)]
 pub struct SessionListModalSignals {
     pub session_modal: RwSignal<bool>,
@@ -75,7 +75,7 @@ impl SessionListModalSignals {
 }
 
 /// 底栏状态条所需句柄（阶段 B：避免向 `side_status_stack_view` 传递整份 [`AppShellCtx`]）。
-/// 会话句柄与界面语言经 [`super::shell_runtime_context::ChatShellLeptosContext`]（角色切换时清流式句柄等）。
+/// 会话句柄与界面语言经 [`crate::app::shell_runtime_context::ChatShellLeptosContext`]（角色切换时清流式句柄等）。
 #[derive(Clone)]
 pub struct StatusBarFooterSignals {
     pub status_tasks: StatusTasksSignals,
@@ -108,7 +108,7 @@ type SideResizeHandlesCell = Rc<
 >;
 
 /// 左侧导航轨所需句柄（阶段 B：避免向 `sidebar_nav_view` 传递整份 [`AppShellCtx`]）。
-/// 会话列表 / 草稿 / 查找后焦点等经 [`super::shell_runtime_context::ChatShellLeptosContext`] 注入子树。
+/// 会话列表 / 草稿 / 查找后焦点等经 [`crate::app::shell_runtime_context::ChatShellLeptosContext`] 注入子树。
 #[derive(Clone)]
 pub struct SidebarNavSignals {
     pub locale: RwSignal<Locale>,
@@ -159,8 +159,8 @@ pub struct SideColumnViewSignals {
 /// 根壳 `App` 与侧栏、底栏、各模态之间共享的一组句柄（由 `App` 构造一次，按需 `clone()`）。
 ///
 /// **Step 1**：扁平字段已并入 [`AppSignals`]；此处仅保留初始化阶段构造的闭包与 [`ChatColumnShell`]，
-/// 新增全局 `RwSignal` 时只需改 [`AppSignals`] 与（按需）[`bootstrap_app_shell`](super::app_shell_bootstrap::bootstrap_app_shell) /
-/// [`init_app_shell`](super::app_shell_init::init_app_shell) 中的 wire 实参，不必再维护超长「逐字段拷贝」列表。
+/// 新增全局 `RwSignal` 时只需改 [`AppSignals`] 与（按需）[`bootstrap_app_shell`](crate::app::shell::bootstrap::bootstrap_app_shell) /
+/// [`init_app_shell`](crate::app::shell::init::init_app_shell) 中的 wire 实参，不必再维护超长「逐字段拷贝」列表。
 #[derive(Clone)]
 pub struct AppShellCtx {
     /// 窗口内的 lane 容器（#561 阶段 3）：现在恒一条。
@@ -169,7 +169,7 @@ pub struct AppShellCtx {
     /// `new_session`）与聊天列壳（`ChatColumnShell`）。改造前它们是本结构上的单个
     /// 字段，只要再开一条 lane 就会互相覆盖；现在按 lane 各存一份，经
     /// [`Self::current_runtime`] 取当前那条。
-    pub(crate) lanes: super::app_signals::LaneSet,
+    pub(crate) lanes: crate::app::app_signals::LaneSet,
 }
 
 impl AppShellCtx {
@@ -178,7 +178,7 @@ impl AppShellCtx {
     /// S1 起视图入参一律由它生成（`rt.xxx_signals()`），`active` 只在**取这一次**
     /// 生效 —— 拿到的是那条 lane 的句柄，切 lane 不会改写已取出的这一份。
     #[must_use]
-    pub fn current_runtime(&self) -> Rc<super::app_signals::LaneRuntime> {
+    pub fn current_runtime(&self) -> Rc<crate::app::app_signals::LaneRuntime> {
         self.lanes.current_runtime()
     }
 
@@ -187,13 +187,13 @@ impl AppShellCtx {
     ///
     /// `name` 是**左栏那行的主体**（#569 对齐 TUI）：ctl 行给实例名、设置页给 `None`（回退基址）。
     ///
-    /// **调用点必须在 `mount_to` 的闭包里**（见 [`super::app_signals::LaneSet::add_lane`]）：
+    /// **调用点必须在 `mount_to` 的闭包里**（见 [`crate::app::app_signals::LaneSet::add_lane`]）：
     /// 接线里那约 29 个 `Effect::new` 需要一个新子树的 owner。
     pub fn add_lane(
         &self,
         name: Option<&str>,
         base: Option<&str>,
-    ) -> Rc<super::app_signals::LaneRuntime> {
+    ) -> Rc<crate::app::app_signals::LaneRuntime> {
         let label = self.lanes.next_storage_label();
         let scope = crate::api::connection_scope::new_holder(label, base);
         // 行上显示规范化之后的基址（与请求实际用的同一份）。

@@ -15,7 +15,7 @@ use crate::md_code_copy::try_copy_md_code_block;
 use crate::message_render::fragment_to_chat_safe_html;
 use crate::session_sync::SessionSyncState;
 
-use super::app_shell_ctx::ChangelistModalSignals;
+use crate::app::shell::ctx::ChangelistModalSignals;
 
 /// 变更集正文区：与 `GET /workspace/changelog` 请求生命周期一致的状态机。
 #[derive(Clone, Debug, Default)]

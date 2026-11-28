@@ -40,9 +40,9 @@ use crabmate_client_api::url::api_base_authority;
 
 use crate::api::connection_scope;
 
-use super::super::app_shell_wire_phases::{ShellWiringOutput, run_shell_wiring_in_order};
 use super::super::chat::ChatColumnShell;
 use super::{AppSignals, WindowSignals};
+use crate::app::shell::wire_phases::{ShellWiringOutput, run_shell_wiring_in_order};
 
 /// 一条 lane 在**左栏那一行**上要显示的东西（#569 对齐 TUI 的 lane 行）。
 ///
