@@ -1,7 +1,7 @@
 //! 左栏「其它窗口」分组（对齐 TUI 之后剩下的唯一窗口级分组）。
 //!
-//! 单独成文件是行数门禁的要求（`nav_rail_connections.rs` 贴着 920 行），与
-//! `nav_rail_lanes.rs` / `nav_rail_ctl_restart.rs` 同一处置：`#[path]` 只换文件，
+//! 单独成文件是行数门禁的要求（`mod.rs`（原 `nav_rail_connections`）贴着 920 行），与
+//! `lanes.rs` / `ctl_restart.rs` 同一处置：`#[path]` 只换文件，
 //! 模块路径仍是 `rail::other_windows`。
 //!
 //! 单窗口多 lane 的常态下这一组**恒空、整组不渲染** —— 前端已经没有开新窗口的入口

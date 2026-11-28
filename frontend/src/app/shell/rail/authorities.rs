@@ -1,7 +1,7 @@
 //! 左栏连接区用到的 authority 计算（窗口注册表 + 本窗口每条 lane）。
 //!
-//! 单独成文件是行数门禁的要求（`nav_rail_connections.rs` 贴着 920 行），与
-//! `nav_rail_lanes.rs` / `nav_rail_other_windows.rs` 同一处置：`#[path]` 只换文件，
+//! 单独成文件是行数门禁的要求（`mod.rs`（原 `nav_rail_connections`）贴着 920 行），与
+//! `lanes.rs` / `other_windows.rs` 同一处置：`#[path]` 只换文件，
 //! 模块路径仍是 `rail::authorities`。
 //!
 //! 全在这里的理由：「什么算已占用」的口径只该有一份 —— 可连实例的剔除
