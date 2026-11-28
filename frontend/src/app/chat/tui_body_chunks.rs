@@ -220,9 +220,9 @@ fn skill_inject_card_html(info: &crate::timeline_scan::SkillInjectInfo, locale: 
 /// 上下文压缩 / 裁剪卡的单行摘要：优先已用 / 可用上下文，其次消息条数区间。
 fn context_trim_one_line(info: &crate::timeline_scan::ContextTrimInfo, locale: Locale) -> String {
     if let Some(used_tokens) = info.after_tokens {
-        let used = super::super::status_context::format_compact_tokens(used_tokens);
+        let used = crate::app::shell::status::context::format_compact_tokens(used_tokens);
         if let Some(cap) = info.max_input_tokens {
-            let available = super::super::status_context::format_compact_tokens(
+            let available = crate::app::shell::status::context::format_compact_tokens(
                 cap.saturating_sub(used_tokens),
             );
             let used_pct = (u64::from(used_tokens) * 100 / u64::from(cap.max(1))).min(100) as u32;
@@ -263,8 +263,8 @@ fn context_trim_token_fact(info: &crate::timeline_scan::ContextTrimInfo, locale:
     let (Some(before), Some(after)) = (info.before_tokens, info.after_tokens) else {
         return String::new();
     };
-    let before = super::super::status_context::format_compact_tokens(before);
-    let after = super::super::status_context::format_compact_tokens(after);
+    let before = crate::app::shell::status::context::format_compact_tokens(before);
+    let after = crate::app::shell::status::context::format_compact_tokens(after);
     trim_fact_row(
         trim_fact_label(locale, crate::i18n::ContextTrimFact::Tokens),
         &format!("{before} → {after} tokens"),
@@ -279,10 +279,10 @@ fn context_trim_window_fact(
     let Some(cap) = info.max_input_tokens else {
         return String::new();
     };
-    let cap = super::super::status_context::format_compact_cap_tokens(cap);
+    let cap = crate::app::shell::status::context::format_compact_cap_tokens(cap);
     let reserved = info
         .reserved_output_tokens
-        .map(super::super::status_context::format_compact_tokens);
+        .map(crate::app::shell::status::context::format_compact_tokens);
     trim_fact_row(
         trim_fact_label(locale, crate::i18n::ContextTrimFact::Window),
         &crate::i18n::msg_context_trim_window(locale, &cap, reserved.as_deref()),
@@ -328,13 +328,13 @@ fn context_trim_breakdown_fact(
 ) -> String {
     let messages = info
         .message_tokens
-        .map(super::super::status_context::format_compact_tokens);
+        .map(crate::app::shell::status::context::format_compact_tokens);
     let schema = info
         .tool_schema_tokens
-        .map(super::super::status_context::format_compact_tokens);
+        .map(crate::app::shell::status::context::format_compact_tokens);
     let attachments = info
         .attachment_tokens
-        .map(super::super::status_context::format_compact_tokens);
+        .map(crate::app::shell::status::context::format_compact_tokens);
     trim_fact_row(
         trim_fact_label(locale, crate::i18n::ContextTrimFact::Breakdown),
         &crate::i18n::msg_context_trim_breakdown(

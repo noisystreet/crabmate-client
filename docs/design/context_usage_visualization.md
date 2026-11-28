@@ -7,12 +7,12 @@
 
 ## 背景
 
-状态栏的「会话上下文」芯片（[`StatusBarContextChip`](../../frontend/src/app/status_context.rs#L321-L382)）目前是一个**纯展示**元素：根节点是 `<span class="status-chip status-chip-context">`，只有 `prop:title` tooltip，**没有任何点击事件或回调**。用户希望点击它跳转到一个「上下文窗口用量可视化页面」，像 GNOME 磁盘用量分析器（baobab）那样直观看到各部分占比。
+状态栏的「会话上下文」芯片（[`StatusBarContextChip`](../../frontend/src/app/shell/status/context.rs#L321-L382)）目前是一个**纯展示**元素：根节点是 `<span class="status-chip status-chip-context">`，只有 `prop:title` tooltip，**没有任何点击事件或回调**。用户希望点击它跳转到一个「上下文窗口用量可视化页面」，像 GNOME 磁盘用量分析器（baobab）那样直观看到各部分占比。
 
 同时，`frontend/` 现状有两个硬约束决定实现形态：
 
 1. **无路由库**（无 `leptos_router`）：多视图是自研的「`RwSignal` + `<Show>` 条件渲染」；唯一的自研 hash 路由只服务设置页（`#/settings/<section>`）。
-2. **无图表库**（无 plotters / chart.js / d3）：唯一可视化是 CSS `<div>` 进度条（[`StatusBarContextMeter`](../../frontend/src/app/status_context.rs#L281-L313) + [`status.css`](../../frontend/styles/status.css#L326-L361)）。
+2. **无图表库**（无 plotters / chart.js / d3）：唯一可视化是 CSS `<div>` 进度条（[`StatusBarContextMeter`](../../frontend/src/app/shell/status/context.rs#L281-L313) + [`status.css`](../../frontend/styles/status.css#L326-L361)）。
 
 因此本方案的形态是「**新增一个全屏页（复用设置页外壳）+ 纯 CSS 矩形图**」，不引任何新依赖。
 
@@ -52,7 +52,7 @@
 
 ### 客户端反推的两个派生量
 
-- **固定开销** `F = used − (message_tokens + attachment_tokens)`（见 [`context_axis_split`](../../frontend/src/app/status_context.rs#L153-L160)）。服务端 `used = message + tool_schema + attachment + vendor_overhead`，但 DTO 不含 `vendor_overhead`，故只能反推。
+- **固定开销** `F = used − (message_tokens + attachment_tokens)`（见 [`context_axis_split`](../../frontend/src/app/shell/status/context.rs#L153-L160)）。服务端 `used = message + tool_schema + attachment + vendor_overhead`，但 DTO 不含 `vendor_overhead`，故只能反推。
 - **「其余固定开销」** = `F − tool_schema_tokens`（当 `tool_schema_tokens` 可用时）。**这是本方案相对现状的细分增量**：把原来一个灰段 `F` 再拆成「工具 schema（显式字段）」+「网关 / 其余开销（反推）」。
 
 > ✅ **已确认（Server 口径）**：`max_input_tokens = 上下文窗口 − reserved_output_tokens(max_tokens) − safety_margin`（见 Server `src/agent/context_compaction.rs` 的 `ContextTokenBudget::from_config`），即输出预留**已从 `max_input_tokens` 中扣除**。故「预留输出」**不**是堆叠条的一段，只能作为页面旁注指标。
@@ -69,7 +69,7 @@
 
 ### 1）入口改造 —— 让芯片可点击
 
-把 [`StatusBarContextChip`](../../frontend/src/app/status_context.rs#L321-L382) 从纯展示改为可点击，**对齐状态栏既有可点击 chip 范式**（如 agent 角色菜单触发按钮），而非自创交互：
+把 [`StatusBarContextChip`](../../frontend/src/app/shell/status/context.rs#L321-L382) 从纯展示改为可点击，**对齐状态栏既有可点击 chip 范式**（如 agent 角色菜单触发按钮），而非自创交互：
 
 - 保持 `<span class="status-chip status-chip-context">` 的视觉不变；
 - 增加 `on:click`（置位页面信号）、`role="button"`、`tabindex="0"`、`on:keydown`（Enter / Space 触发，关闭时 Esc 返回）；
@@ -92,8 +92,8 @@
 
 页面不重算任何口径，直接调用现有实现，保证与状态栏芯片**同口径**：
 
-- [`status_bar_context_axis`](../../frontend/src/app/status_context.rs#L194-L213) → 取 `ContextAxis { used, fixed, raw_cap, baseline_estimate }`；
-- [`context_axis_apply_watermark`](../../frontend/src/app/status_context.rs#L242-L257) → 施加会话内滚动水位（单调不减）；
+- [`status_bar_context_axis`](../../frontend/src/app/shell/status/context.rs#L194-L213) → 取 `ContextAxis { used, fixed, raw_cap, baseline_estimate }`；
+- [`context_axis_apply_watermark`](../../frontend/src/app/shell/status/context.rs#L242-L257) → 施加会话内滚动水位（单调不减）；
 - 快照 [`TiktokenPromptTokensSnapshot`](../../crates/crabmate-client-api/src/prompt_tokens.rs) → 取 `tool_schema_tokens` / `reserved_output_tokens` 等附加桶。
 
 **分母口径（`raw_cap`）优先级**：本机设置「上下文长度」(`client_llm.llm_context_tokens`) → `GET /status` 的 `llm_context_tokens` → 服务端 `max_input_tokens`。前两者都是「上下文窗口」口径（本机是用户设定，`/status` 是服务端同字段回读），服务端 `max_input_tokens` 则是「窗口 − 输出预留 − 安全余量」的派生预算、口径不同。若首轮前用窗口（如 `1000k`）、首轮后切成 `max_input_tokens`（如 `993k`），分母会在两值间跳变，引起困惑，也违背「最大可用量应恒定」的预期；故把 `max_input_tokens` 降为上限未知时的最后回退，让分母在整个会话内恒定。
@@ -153,7 +153,7 @@
 
 | 文件 | 改动 |
 |---|---|
-| [`frontend/src/app/status_context.rs`](../../frontend/src/app/status_context.rs) | `StatusBarContextChip` 增点击入口（on:click / role / tabindex / on:keydown）；暴露只读取数 helper 供页面复用（避免口径分叉） |
+| [`frontend/src/app/shell/status/context.rs`](../../frontend/src/app/shell/status/context.rs) | `StatusBarContextChip` 增点击入口（on:click / role / tabindex / on:keydown）；暴露只读取数 helper 供页面复用（避免口径分叉） |
 | [`frontend/src/app/context_usage_page.rs`](../../frontend/src/app/context_usage_page.rs)（新增） | `ContextUsagePageView` 组件 + 矩形图子组件（纯 CSS） |
 | [`frontend/src/app/app_signals/modal.rs`](../../frontend/src/app/app_signals/modal.rs) | 增 `context_usage_page: RwSignal<bool>` |
 | [`frontend/src/app/mod.rs`](../../frontend/src/app/mod.rs) | 与 `SettingsPageView` 一致**常驻挂载**，以 `class:settings-page-visible` 控制显隐；并加入 `.shell-main` 隐藏联动 |

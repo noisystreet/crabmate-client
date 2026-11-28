@@ -13,9 +13,9 @@ use super::ide_menu_bar::{
     IdeMenuBarBridge, IdeMenuBarTopbarContent, IdeMenuId, ShellTopbarFileMenu,
     ShellTopbarMenuBackdrop,
 };
-use super::status_bar::StatusRunDotButton;
 use super::tauri_window_controls::TauriWindowControls;
 use super::workspace::root_actions::{ShellTopbarWorkspaceRoot, WorkspaceRootPickHandle};
+use crate::app::shell::status::bar::StatusRunDotButton;
 
 fn shell_topbar_a11y(ide: bool, locale: Locale) -> (&'static str, &'static str, &'static str) {
     if ide {

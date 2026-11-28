@@ -12,8 +12,8 @@ use crate::i18n::{self, Locale};
 use crate::icon::{Icon, icon_chevron_down};
 use crate::workspace_shell::begin_side_column_resize;
 
-use super::status_bar::StatusRunDotButton;
-use super::status_tasks_state::StatusTasksSignals;
+use crate::app::shell::status::bar::StatusRunDotButton;
+use crate::app::shell::status::tasks_state::StatusTasksSignals;
 
 /// 侧栏隐藏时工具栏是否以浮动条渲染（须脱出 `side-column-rail-only` 父节点）。
 /// 窄屏主屏不展示浮动条（入口改在右侧工作区抽屉顶部）。

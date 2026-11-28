@@ -10,7 +10,7 @@ use leptos::prelude::*;
 use leptos_dom::helpers::request_animation_frame;
 use wasm_bindgen::JsCast;
 
-use crate::app::status_tasks_state::StatusTasksSignals;
+use crate::app::shell::status::tasks_state::StatusTasksSignals;
 use crate::chat_session_state::ChatSessionSignals;
 use crate::i18n::{self, Locale};
 use crate::icon::icon_chevron_down;

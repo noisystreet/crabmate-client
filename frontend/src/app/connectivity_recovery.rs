@@ -27,8 +27,8 @@ use leptos::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::closure::Closure;
 
-use super::status_fetch_state::StatusFetchPhase;
-use super::status_tasks_state::StatusTasksSignals;
+use crate::app::shell::status::fetch_state::StatusFetchPhase;
+use crate::app::shell::status::tasks_state::StatusTasksSignals;
 use crate::user_prefs_sync_state::UserPrefsSyncPhase;
 
 /// 两次恢复动作之间的最小间隔（毫秒）：`online` 与 `visibilitychange` 常同时到达。
@@ -214,7 +214,7 @@ mod tests {
     /// `LoadFailed` 一起挡掉 —— 表现为「网络回来了但偏好仍是错误态」。
     #[test]
     fn a_fetching_status_does_not_block_prefs_recovery() {
-        use crate::app::status_fetch_state::StatusFetchPhase as S;
+        use crate::app::shell::status::fetch_state::StatusFetchPhase as S;
         use crate::user_prefs_sync_state::UserPrefsSyncPhase as P;
 
         assert_eq!(recovery_targets(S::Fetching, P::LoadFailed), (false, true));

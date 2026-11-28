@@ -10,9 +10,9 @@ use std::sync::Arc;
 use super::app_shell_ctx::SideColumnViewSignals;
 use super::side_column_toolbar::{SideColumnResizeAndShellToolbar, SideColumnResizeToolbarSignals};
 use super::side_column_workspace_scroll::WorkspaceSideCardScrollInner;
-use super::status_bar::side_status_stack_view;
 use super::workspace::panel::make_refresh_workspace_after_mutation;
 use super::workspace::panel_state::WorkspacePanelSignals;
+use crate::app::shell::status::bar::side_status_stack_view;
 use crate::workspace_context_menu::{WorkspaceContextMenuActions, WorkspaceOpenInEditorSignals};
 
 #[component]

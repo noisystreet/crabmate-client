@@ -9,7 +9,7 @@ use crate::api::github_secrets_local::{looks_like_github_auth_failure, try_refre
 use crate::api::{WorkspaceData, fetch_github_repo_context};
 use crate::i18n::Locale;
 
-use super::status_tasks_state::StatusTasksSignals;
+use crate::app::shell::status::tasks_state::StatusTasksSignals;
 
 /// 拉取仓库上下文；鉴权失效（如壳钥匙串 `ghu_` 过期）时先用 refresh token 换新再重试一次。
 async fn fetch_github_repo_context_with_refresh(

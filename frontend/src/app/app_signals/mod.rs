@@ -3,7 +3,7 @@
 //! 减少 `App` 中平铺的 40+ `RwSignal` 声明，使 `App` 更贴近「声明信号 + 调用 `wire_*`」的壳层职责。
 //! 子模块按域拆分文件；[`AppSignals`] 与 [`ChatDomainWiringSignals`] 仍在本 `mod` 根聚合导出。
 //! 已有的聚合类型：[`ChatSessionSignals`](crate::chat_session_state::ChatSessionSignals)、
-//! [`StatusTasksSignals`](super::status_tasks_state::StatusTasksSignals)、
+//! [`StatusTasksSignals`](crate::app::shell::status::tasks_state::StatusTasksSignals)、
 //! [`WorkspacePanelSignals`](super::workspace::panel_state::WorkspacePanelSignals)。
 
 mod approval;
@@ -46,8 +46,8 @@ pub use stream_control::StreamControlSignals;
 pub use window_signals::WindowSignals;
 pub use workspace::WorkspaceSignals;
 
-pub use super::status_tasks_state::StatusTasksSignals;
 pub use super::workspace::panel_state::WorkspacePanelSignals;
+pub use crate::app::shell::status::tasks_state::StatusTasksSignals;
 pub use crate::chat_session_state::ChatSessionSignals;
 
 use crate::clarification_form::PendingClarificationForm;

@@ -11,11 +11,11 @@ use crate::conversation_hydrate::TiktokenPromptTokensSnapshot;
 use crate::i18n::{self, Locale};
 use crate::icon::icon_chevron_left;
 
-use super::status_context::{
+use crate::app::shell::status::context::{
     ContextAxis, context_axis_apply_watermark, context_axis_used_pct, context_value_text,
     format_compact_tokens, status_bar_context_axis, status_bar_context_snapshot_for_active_session,
 };
-use super::status_tasks_state::StatusTasksSignals;
+use crate::app::shell::status::tasks_state::StatusTasksSignals;
 
 /// 全屏页输入（与设置页同构，便于在 `app_shell_ctx` 统一装配）。
 #[derive(Clone, Copy)]

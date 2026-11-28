@@ -89,6 +89,6 @@ Leptos 视图），已就地豁免。
 
 - [ ] 文件树不支持树内拖拽移动（能力矩阵未承诺，可选增强）：`frontend/src/workspace_file_drop.rs`。
 
-- [ ] 状态栏上下文水位的回落延迟到回合末才可见（`context_trim` 回合中途到达，`axis.used` 回合末才刷新）；若需中途即可见，须为重算灰段固定开销 `F` 另想办法（ADR-0005 备选 C）：`frontend/src/app/status_context.rs`。
+- [ ] 状态栏上下文水位的回落延迟到回合末才可见（`context_trim` 回合中途到达，`axis.used` 回合末才刷新）；若需中途即可见，须为重算灰段固定开销 `F` 另想办法（ADR-0005 备选 C）：`frontend/src/app/shell/status/context.rs`。
 
 - [ ] 状态栏上下文水位按会话单槽记忆，切换会话即重置，跨会话峰值不保留（ADR-0005 备选 D，按需再加）：`frontend/src/chat_session_state.rs`。

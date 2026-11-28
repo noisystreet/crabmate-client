@@ -9,7 +9,7 @@ use super::session_storage::{
     wire_initial_sessions_from_storage, wire_persist_chat_sessions,
     wire_web_ui_config_once_after_init,
 };
-use crate::app::status_tasks_state::StatusTasksSignals;
+use crate::app::shell::status::tasks_state::StatusTasksSignals;
 use crate::chat_session_state::ChatSessionSignals;
 use crate::i18n::Locale;
 /// `wire_chat_session_lifecycle_effects` 的输入（聚合壳级 RwSignal，避免长参数列表）。

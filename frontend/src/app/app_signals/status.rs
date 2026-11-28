@@ -4,7 +4,7 @@ use leptos::prelude::*;
 
 use crate::api::{GithubRepoContextData, StatusData, TasksData};
 
-use crate::app::status_fetch_state::StatusFetchPhase;
+use crate::app::shell::status::fetch_state::StatusFetchPhase;
 
 #[derive(Clone, Copy)]
 pub struct StatusSignals {

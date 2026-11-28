@@ -27,8 +27,8 @@ use crate::sse_dispatch::ThinkingTraceInfo;
 use crate::app_prefs::SidePanelView;
 
 use super::app_signals::AppSignals;
-use super::status_tasks_state::StatusTasksSignals;
 use super::workspace::panel_state::WorkspacePanelSignals;
+use crate::app::shell::status::tasks_state::StatusTasksSignals;
 
 use super::changelist_modal::ChangelistModalBodyState;
 

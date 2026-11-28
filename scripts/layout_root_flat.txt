@@ -49,15 +49,6 @@ frontend/src/app/shell_runtime_context.rs
 frontend/src/app/side_column.rs
 frontend/src/app/side_column_toolbar.rs
 frontend/src/app/side_column_workspace_scroll.rs
-frontend/src/app/status_agent_role_menu.rs
-frontend/src/app/status_bar.rs
-frontend/src/app/status_context.rs
-frontend/src/app/status_fetch_state.rs
-frontend/src/app/status_permission_chip.rs
-frontend/src/app/status_session_mode_seg.rs
-frontend/src/app/status_tasks_state.rs
-frontend/src/app/status_tasks_wiring.rs
-frontend/src/app/status_view_chip.rs
 frontend/src/app/tauri_window_controls.rs
 frontend/src/app/web_api_bearer_recovery.rs
 frontend/src/app/wire_workspace_domain.rs

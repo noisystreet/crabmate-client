@@ -1,13 +1,13 @@
 //! `GET /status` 与侧栏任务清单（`/tasks`）相关的 **`RwSignal`** 聚合。
 //!
-//! 与 [`crate::chat_session_state::ChatSessionSignals`]、[`super::workspace::panel_state::WorkspacePanelSignals`]
+//! 与 [`crate::chat_session_state::ChatSessionSignals`]、[`crate::app::workspace::panel_state::WorkspacePanelSignals`]
 //! 并列，减少 `App` 向底栏、右栏逐项传参。
 
 use leptos::prelude::*;
 
 use crate::api::{GithubRepoContextData, StatusData, TasksData};
 
-use super::status_fetch_state::StatusFetchPhase;
+use crate::app::shell::status::fetch_state::StatusFetchPhase;
 
 /// 服务端状态快照 + 任务列表的响应式句柄（不含「流式对话错误」`status_err`，仍单独传递）。
 #[derive(Clone, Copy)]

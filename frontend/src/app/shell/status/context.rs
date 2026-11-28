@@ -13,16 +13,16 @@ use crate::chat_session_state::ChatSessionSignals;
 use crate::conversation_hydrate::TiktokenPromptTokensSnapshot;
 use crate::i18n::{self, Locale};
 
-use super::status_tasks_state::StatusTasksSignals;
+use crate::app::shell::status::tasks_state::StatusTasksSignals;
 
 use crabmate_client_api::context_axis::{
     CONTEXT_WARN_PCT, context_axis_apply_watermark as shared_axis_apply_watermark,
     context_axis_from_snapshot, context_axis_whole, context_placeholder_text,
 };
 /// 轴线与紧凑 token 文本已下沉到 `crabmate_client_api::context_axis`（S11，与 TUI 共用同一口径）。
-/// 这里 re-export，保住 `super::status_context::…` 的既有引用路径（`context_usage_page`、
+/// 这里 re-export，保住 `crate::app::shell::status::context::…` 的既有引用路径（`context_usage_page`、
 /// `chat::tui_body_chunks` 等）。
-pub(super) use crabmate_client_api::context_axis::{
+pub(in crate::app) use crabmate_client_api::context_axis::{
     ContextAxis, context_axis_used_pct, context_value_text, format_compact_cap_tokens,
     format_compact_tokens,
 };
@@ -43,7 +43,7 @@ fn status_bar_context_chip_visible(chat: ChatSessionSignals) -> bool {
     !chat.active_id.get().is_empty()
 }
 
-pub(super) fn status_bar_context_snapshot_for_active_session(
+pub(in crate::app) fn status_bar_context_snapshot_for_active_session(
     chat: ChatSessionSignals,
 ) -> Option<TiktokenPromptTokensSnapshot> {
     let snap = chat.conversation_prompt_tokens.get()?;
@@ -102,7 +102,7 @@ fn status_bar_context_is_baseline_estimate(chat: ChatSessionSignals, used: Optio
         && !active_session_has_server_conversation_id(chat)
 }
 
-pub(super) fn status_bar_context_cap_and_used(
+pub(in crate::app) fn status_bar_context_cap_and_used(
     chat: ChatSessionSignals,
     st: StatusTasksSignals,
     client_llm_storage_tick: RwSignal<u64>,
@@ -129,7 +129,7 @@ pub(super) fn status_bar_context_cap_and_used(
 }
 
 /// 计算当前活动会话的上下文轴线（`None` = 无活动会话 / 无用量）。
-pub(super) fn status_bar_context_axis(
+pub(in crate::app) fn status_bar_context_axis(
     chat: ChatSessionSignals,
     st: StatusTasksSignals,
     client_llm_storage_tick: RwSignal<u64>,
@@ -154,7 +154,7 @@ pub(super) fn status_bar_context_axis(
 ///
 /// 基线估算（无服务端实测）不参与水位；水位按服务端 `conversation_id` 归属（`ContextUsedWatermark`
 /// 内部按 key 重置），故重发流换新 cid 时旧峰值不会沿用。
-pub(super) fn observe_context_watermark(
+pub(in crate::app) fn observe_context_watermark(
     chat: ChatSessionSignals,
     st: StatusTasksSignals,
     client_llm_storage_tick: RwSignal<u64>,
@@ -179,7 +179,7 @@ pub(super) fn observe_context_watermark(
 /// 避免切会话 / 重发流换 cid 的瞬间把旧峰值施加到新会话上。
 ///
 /// 口径实现在 `crabmate_client_api::context_axis`；这里只负责从会话信号取出当前 cid 与水位。
-pub(super) fn context_axis_apply_watermark(
+pub(in crate::app) fn context_axis_apply_watermark(
     axis: ContextAxis,
     chat: ChatSessionSignals,
 ) -> ContextAxis {
