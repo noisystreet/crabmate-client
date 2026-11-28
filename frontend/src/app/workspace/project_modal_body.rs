@@ -4,10 +4,10 @@ use std::sync::Arc;
 
 use leptos::prelude::*;
 
-use crate::app::workspace_panel_state::WorkspacePanelSignals;
+use crate::app::workspace::panel_state::WorkspacePanelSignals;
 use crate::i18n::{self, Locale};
 
-use super::workspace_project_modal_parts::WorkspaceProjectListRows;
+use super::project_modal_parts::WorkspaceProjectListRows;
 
 /// 顶部横幅区（池路径 + 各类错误），独立以降低 body CCN。
 #[component]

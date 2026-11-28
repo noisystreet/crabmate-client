@@ -5,7 +5,7 @@ use leptos_dom::helpers::event_target_value;
 use wasm_bindgen::JsCast;
 
 use crate::api::infer_project_name_from_clone_url;
-use crate::app::workspace_root_actions::{WorkspaceRootPickHandle, workspace_inputs_blocked};
+use crate::app::workspace::root_actions::{WorkspaceRootPickHandle, workspace_inputs_blocked};
 use crate::i18n::{self, Locale};
 
 use super::{CloneFormSignals, CloneProgressSignals, CloneUiPhase, start_clone};

@@ -6,7 +6,7 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 
 use crate::app::focusable_menu::{FocusableModalBackdrop, FocusableModalPanel};
-use crate::app::workspace_root_actions::{
+use crate::app::workspace::root_actions::{
     WorkspaceRootPickHandle, commit_workspace_root, workspace_inputs_blocked,
 };
 use crate::i18n;

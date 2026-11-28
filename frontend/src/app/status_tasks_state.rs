@@ -1,6 +1,6 @@
 //! `GET /status` 与侧栏任务清单（`/tasks`）相关的 **`RwSignal`** 聚合。
 //!
-//! 与 [`crate::chat_session_state::ChatSessionSignals`]、[`super::workspace_panel_state::WorkspacePanelSignals`]
+//! 与 [`crate::chat_session_state::ChatSessionSignals`]、[`super::workspace::panel_state::WorkspacePanelSignals`]
 //! 并列，减少 `App` 向底栏、右栏逐项传参。
 
 use leptos::prelude::*;

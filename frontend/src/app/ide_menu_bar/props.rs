@@ -6,7 +6,7 @@ use crate::ide_codemirror::IdeEditorHost;
 
 use crate::app::app_signals::{IdeChromeSignals, IdeEditorSignals};
 use crate::app::ide_layout_switch::IdeLayoutToggleSignals;
-use crate::app::workspace_root_actions::WorkspaceRootPickHandle;
+use crate::app::workspace::root_actions::WorkspaceRootPickHandle;
 use crate::i18n::Locale;
 use crate::ide_save::IdeSaveContext;
 use crate::ide_tabs::IdeTabsHandle;

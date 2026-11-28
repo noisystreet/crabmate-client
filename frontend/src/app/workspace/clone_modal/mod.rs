@@ -11,7 +11,7 @@ use crate::api::{
     post_workspace_clone_stream,
 };
 use crate::app::focusable_menu::{FocusableModalBackdrop, FocusableModalPanel};
-use crate::app::workspace_root_actions::{
+use crate::app::workspace::root_actions::{
     WorkspaceRootPickHandle, WorkspaceSessionHandoff, finish_workspace_root_ui,
     flush_current_workspace_sessions, workspace_inputs_blocked,
 };
@@ -23,7 +23,7 @@ use crate::session_workspace_partition::{
 use parts::{CloneFormViewSignals, WorkspaceCloneFormBody, WorkspaceCloneProgressBody};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) enum CloneUiPhase {
+pub(in crate::app) enum CloneUiPhase {
     Form,
     Running,
     Failed,
@@ -47,7 +47,7 @@ fn phase_label(locale: Locale, phase: &str) -> &'static str {
 }
 
 #[derive(Clone, Copy)]
-pub(super) struct CloneFormSignals {
+pub(in crate::app) struct CloneFormSignals {
     pub open: RwSignal<bool>,
     pub pick: WorkspaceRootPickHandle,
     pub url: RwSignal<String>,
@@ -57,7 +57,7 @@ pub(super) struct CloneFormSignals {
 }
 
 #[derive(Clone, Copy)]
-pub(super) struct CloneProgressSignals {
+pub(in crate::app) struct CloneProgressSignals {
     pub ui_phase: RwSignal<CloneUiPhase>,
     pub status_text: RwSignal<String>,
     pub log_lines: RwSignal<Vec<String>>,
@@ -149,7 +149,7 @@ async fn finish_clone_success(
     ui_phase.set(CloneUiPhase::Form);
 }
 
-pub(super) fn start_clone(form: CloneFormSignals, progress: CloneProgressSignals) {
+pub(in crate::app) fn start_clone(form: CloneFormSignals, progress: CloneProgressSignals) {
     let CloneFormSignals {
         open,
         pick,

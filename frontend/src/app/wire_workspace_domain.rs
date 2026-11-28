@@ -11,7 +11,7 @@ use crate::session_sync::SessionSyncState;
 use super::changelist_modal::ChangelistModalBodyState;
 
 use super::changelist_modal::{wire_changelist_body_inner_html, wire_changelist_fetch_effects};
-use super::workspace_panel::wire_workspace_refresh_when_visible;
+use super::workspace::panel::wire_workspace_refresh_when_visible;
 
 /// 注册变更集 fetch / DOM 绑定与工作区可见刷新（缩短 [`wire_workspace_domain_effects`] 形参列表）。
 #[derive(Clone)]

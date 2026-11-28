@@ -12,10 +12,10 @@ use crate::i18n::Locale;
 use crate::workspace_context_menu::WorkspaceTreeRefreshHint;
 use crate::workspace_shell::{refresh_workspace_panel_after_mutation, reload_workspace_panel};
 
-use super::workspace_panel_state::WorkspacePanelSignals;
+use super::panel_state::WorkspacePanelSignals;
 
 /// 返回与历史行为一致的 `reload_workspace_panel` 封装（供 SSE `on_workspace_changed`、侧栏等复用）。
-pub(super) fn make_refresh_workspace(
+pub(in crate::app) fn make_refresh_workspace(
     ws: WorkspacePanelSignals,
     locale: Locale,
 ) -> Arc<dyn Fn() + Send + Sync> {
@@ -37,7 +37,7 @@ pub(super) fn make_refresh_workspace(
 }
 
 /// 文件树新建/删除后刷新（保留展开状态、不重载骨架屏）。
-pub(super) fn make_refresh_workspace_after_mutation(
+pub(in crate::app) fn make_refresh_workspace_after_mutation(
     ws: WorkspacePanelSignals,
     locale: Locale,
 ) -> Arc<dyn Fn(WorkspaceTreeRefreshHint) + Send + Sync> {
@@ -59,7 +59,7 @@ pub(super) fn make_refresh_workspace_after_mutation(
 }
 
 /// 工作区树双击文件时，将 **`@{rel}`** 插入 composer 草稿并聚焦输入框。
-pub(super) fn make_insert_workspace_path_into_composer(
+pub(in crate::app) fn make_insert_workspace_path_into_composer(
     draft: RwSignal<String>,
     status_err: RwSignal<Option<String>>,
     locale: RwSignal<Locale>,
@@ -131,7 +131,7 @@ pub(crate) fn take_workspace_visible_auto_refresh(
 }
 
 /// 初始化完成且侧栏为 Workspace 时拉取一次（冷启动已是 Workspace 则跳过）。
-pub(super) fn wire_workspace_refresh_when_visible(
+pub(in crate::app) fn wire_workspace_refresh_when_visible(
     side_panel_view: RwSignal<SidePanelView>,
     initialized: RwSignal<bool>,
     refresh_workspace: Arc<dyn Fn() + Send + Sync>,

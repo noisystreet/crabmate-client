@@ -22,8 +22,8 @@ use crate::tauri_shell::tauri_shell_available;
 use crate::user_data_bootstrap::{remember_workspace_root, workspace_recent_menu_label};
 use crate::workspace_shell::reload_workspace_panel;
 
-use super::git_badge::{git_badge_line, git_badge_title};
-use super::workspace_panel_state::WorkspacePanelSignals;
+use super::panel_state::WorkspacePanelSignals;
+use crate::app::git_badge::{git_badge_line, git_badge_title};
 
 /// 切换工作区后的会话交接策略。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

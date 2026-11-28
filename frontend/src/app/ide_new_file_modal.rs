@@ -7,8 +7,8 @@ use leptos_dom::helpers::event_target_value;
 
 use crate::app::app_signals::IdeChromeSignals;
 use crate::app::focusable_menu::{FocusableModalBackdrop, FocusableModalPanel};
-use crate::app::workspace_panel::make_refresh_workspace_after_mutation;
-use crate::app::workspace_panel_state::WorkspacePanelSignals;
+use crate::app::workspace::panel::make_refresh_workspace_after_mutation;
+use crate::app::workspace::panel_state::WorkspacePanelSignals;
 use crate::i18n::{self, Locale};
 use crate::ide_save::{IdeSaveContext, spawn_create_and_open_file};
 use crate::workspace_context_menu::WorkspaceTreeRefreshHint;
