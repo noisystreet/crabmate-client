@@ -159,6 +159,34 @@ pub fn prepare_retry_failed_assistant_turn(
     Some((user_text, user_images, new_asst_id.to_string()))
 }
 
+/// `POST /chat/branch` 成功后把服务端新 revision 镜像到活动会话。
+///
+/// 会话不存在（用户已切走、或本地条目已被回收）时返回 `false` —— 静默写入一个不存在的会话
+/// 会让「分支已成功、本地没跟上」看不出来，下一次水合把旧尾条带回来时就只剩一个无因可查的现象。
+pub fn apply_branch_revision(sessions: &mut [ChatSession], active_id: &str, revision: u64) -> bool {
+    let Some(s) = sessions.iter_mut().find(|s| s.id == active_id) else {
+        return false;
+    };
+    s.server_revision = Some(revision);
+    true
+}
+
+/// `/clear`：只清本地这段 transcript 与分页窗口，**不**动 serve 上的会话记录。
+///
+/// 五个字段必须一起清：只清 `messages` 会让旧的分页水位继续生效，下一次「加载更早」
+/// 从错误的 offset 开始（与 `history_*` 三个字段的写入侧同源）。
+pub fn clear_session_local(sessions: &mut [ChatSession], session_id: &str) -> bool {
+    let Some(s) = sessions.iter_mut().find(|s| s.id == session_id) else {
+        return false;
+    };
+    s.messages.clear();
+    s.draft.clear();
+    s.history_total = None;
+    s.history_window_start = None;
+    s.history_has_older = None;
+    true
+}
+
 /// 测试夹具：两个测试模块共用（原先各自定义一份，字段漂移会静默失效）。
 #[cfg(test)]
 mod test_support {
@@ -297,6 +325,41 @@ mod tests {
         let mut other = vec![session_with("s1", vec![msg("a0", "assistant", "keep")])];
         assert!(!set_user_message_text(&mut other, "s1", "a0", "x"));
         assert_eq!(other[0].messages[0].text, "keep");
+    }
+
+    #[test]
+    fn branch_revision_writes_only_the_target_session() {
+        let mut sessions = vec![session_with("s1", vec![]), session_with("s2", vec![])];
+        assert!(apply_branch_revision(&mut sessions, "s2", 7));
+        assert_eq!(sessions[0].server_revision, None);
+        assert_eq!(sessions[1].server_revision, Some(7));
+        // 会话已不在（用户切走 / 本地条目被回收）→ false，且不改动任何会话
+        assert!(!apply_branch_revision(&mut sessions, "gone", 9));
+        assert_eq!(sessions[1].server_revision, Some(7));
+    }
+
+    #[test]
+    fn clear_session_local_resets_transcript_and_pagination_window() {
+        let mut sessions = vec![session_with("s1", vec![msg("u0", "user", "hi")])];
+        sessions[0].draft = "半句".into();
+        sessions[0].history_total = Some(40);
+        sessions[0].history_window_start = Some(20);
+        sessions[0].history_has_older = Some(true);
+        assert!(clear_session_local(&mut sessions, "s1"));
+        assert!(sessions[0].messages.is_empty());
+        assert!(sessions[0].draft.is_empty());
+        // 三个分页水位必须一起清：留着会让下一次「加载更早」从错的 offset 开始
+        assert_eq!(sessions[0].history_total, None);
+        assert_eq!(sessions[0].history_window_start, None);
+        assert_eq!(sessions[0].history_has_older, None);
+    }
+
+    #[test]
+    fn clear_session_local_ignores_unknown_session() {
+        let mut sessions = vec![session_with("s1", vec![msg("u0", "user", "hi")])];
+        assert!(!clear_session_local(&mut sessions, "gone"));
+        // 不存在时一条也不动（不能退化成「清空所有会话」）
+        assert_eq!(sessions[0].messages.len(), 1);
     }
 }
 
