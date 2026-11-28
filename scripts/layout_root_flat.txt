@@ -30,13 +30,9 @@ frontend/src/app/lane_actions.rs
 frontend/src/app/lane_hotkeys.rs
 frontend/src/app/lane_view.rs
 frontend/src/app/layout_toggle_hotkey.rs
-frontend/src/app/mobile_shell_header.rs
 frontend/src/app/mod.rs
 frontend/src/app/session_list_modal.rs
 frontend/src/app/session_mode_defaults.rs
-frontend/src/app/shell_confirm_dialog.rs
-frontend/src/app/shell_prefs_storage.rs
-frontend/src/app/shell_runtime_context.rs
 frontend/src/app/tauri_window_controls.rs
 frontend/src/app/web_api_bearer_recovery.rs
 frontend/src/app/wire_workspace_domain.rs

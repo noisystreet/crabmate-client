@@ -48,7 +48,7 @@ fn shell_layout_fields_for_prefs_sync(
     narrow_or_mobile: bool,
     side_panel: SidePanelView,
 ) -> Option<String> {
-    if crate::app::shell_prefs_storage::shell_layout_prefs_sync_to_server(narrow_or_mobile) {
+    if crate::app::shell::prefs_storage::shell_layout_prefs_sync_to_server(narrow_or_mobile) {
         Some(side_panel_slug(side_panel).to_string())
     } else {
         None
@@ -56,7 +56,7 @@ fn shell_layout_fields_for_prefs_sync(
 }
 
 pub fn build_prefs_dto(app: &AppSignals) -> UserPrefsDto {
-    let narrow_or_mobile = crate::app::shell_prefs_storage::narrow_or_mobile_shell_layout(
+    let narrow_or_mobile = crate::app::shell::prefs_storage::narrow_or_mobile_shell_layout(
         app.shell_ui.is_narrow_viewport.get_untracked(),
     );
     let side_panel_view = shell_layout_fields_for_prefs_sync(
@@ -275,7 +275,7 @@ fn spawn_user_prefs_load(app: &AppSignals, prefs_session_mode_present: StoredVal
         match fetch_user_data_prefs(loc).await {
             Ok(dto) => {
                 apply_prefs_dto(&app, &dto, prefs_session_mode_present);
-                crate::app::shell_prefs_storage::apply_loaded_prefs_to_dom(&app);
+                crate::app::shell::prefs_storage::apply_loaded_prefs_to_dom(&app);
                 app.workspace.user_prefs_load_err.set(None);
                 app.workspace
                     .user_prefs_sync_phase
@@ -288,7 +288,7 @@ fn spawn_user_prefs_load(app: &AppSignals, prefs_session_mode_present: StoredVal
                     .set(UserPrefsSyncPhase::LoadFailed);
             }
         }
-        crate::app::shell_prefs_storage::apply_platform_shell_ui_on_entry(&app);
+        crate::app::shell::prefs_storage::apply_platform_shell_ui_on_entry(&app);
     });
 }
 
@@ -444,7 +444,7 @@ mod tests {
     #[test]
     fn cross_client_get_platform_apply_put_omits_device_local_layout_on_mobile() {
         use super::shell_layout_fields_for_prefs_sync;
-        use crate::app::shell_prefs_storage::{
+        use crate::app::shell::prefs_storage::{
             platform_side_panel_on_entry, shell_layout_prefs_sync_to_server,
         };
 
@@ -462,7 +462,7 @@ mod tests {
     #[test]
     fn desktop_layout_prefs_still_sync_to_server() {
         use super::shell_layout_fields_for_prefs_sync;
-        use crate::app::shell_prefs_storage::platform_side_panel_on_entry;
+        use crate::app::shell::prefs_storage::platform_side_panel_on_entry;
 
         let server_side = SidePanelView::Tasks;
         let narrow_or_mobile = false;

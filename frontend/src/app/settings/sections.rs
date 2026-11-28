@@ -371,7 +371,7 @@ fn save_api_base_click(
     // 同步响应式镜像：状态栈的「连接」chip 据此换字。真源是 `api::connection_scope`
     // 的 `ScopeHolder`（#558 起值住在它里面，不再直接躺在 thread_local）—— 这里只把
     // 「刚改过」这件事广播出去，避免两处各读一份。
-    if let Some(shell) = crate::app::shell_runtime_context::try_chat_shell_ctx() {
+    if let Some(shell) = crate::app::shell::runtime_context::try_chat_shell_ctx() {
         shell.api_base.set(normalized.clone());
     }
     draft.set(normalized.clone());
@@ -449,7 +449,7 @@ pub(crate) fn SettingsApiBaseBlock(
 pub(crate) fn SettingsConnectionNewWindowBlock(locale: RwSignal<Locale>) -> impl IntoView {
     // #561 决策：多 lane 只给宽屏 —— 窄屏（含 Android）不留这条入口，否则「保持单连接
     // 语义」只剩一句口号（左栏已 gate 掉，这里还能建第二条）。
-    let narrow = crate::app::shell_runtime_context::narrow_viewport_or_wide();
+    let narrow = crate::app::shell::runtime_context::narrow_viewport_or_wide();
     view! {
         <Show when=move || crate::tauri_shell::tauri_shell_available()>
             <Show when=move || !narrow.get()>

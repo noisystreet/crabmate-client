@@ -21,11 +21,11 @@ use crate::api::{
 };
 use crate::app::chat::handles::ComposerStreamShell;
 use crate::app::settings::page::{SettingsSection, open_settings_from_hash};
+use crate::app::shell::runtime_context::try_chat_shell_ctx;
 use crate::app::shell::status::permission_chip::{
     LevelOutcome, PermTarget, apply_permission_level,
 };
 use crate::app::shell::status::session_mode_seg::apply_session_mode_selection;
-use crate::app::shell_runtime_context::try_chat_shell_ctx;
 use crate::chat_session_state::ChatSessionSignals;
 use crate::domain::session::clear_session_local;
 use crate::i18n::{self, Locale};

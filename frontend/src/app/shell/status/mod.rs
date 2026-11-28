@@ -6,7 +6,7 @@
 //!
 //! 迁移方式：从 `app/` 根级整批搬入，**只改路径不改逻辑**。两条只能靠编译发现的改动：
 //! - 原 `super::<app 级模块>` 全部改成 `crate::app::…`（层级深了一级）；
-//! - 原 `pub(super)`（= 可见于 `app`）改成 `pub(in crate::app)`，否则会被静默收紧到本目录。
+//! - 原 `pub(super)`（= 可见于 `app`）改成 `pub(crate)`，否则会被静默收紧到本目录。
 
 pub(crate) mod agent_role_menu;
 pub(crate) mod bar;

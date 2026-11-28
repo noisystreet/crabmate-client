@@ -5,8 +5,8 @@
 //! **未使用** Leptos `Context` / `<Provider>` 承载整份壳层：状态含 `Rc<RefCell<…>>`、`Rc<dyn Fn()>` 等，
 //! 不满足 `provide_context` 的 `Send + Sync + 'static` 约束；以结构体 **`Clone`**（内部多为
 //! `Copy` / `Rc::clone` / `Arc::clone`）在 `*_view` 间传递即可。
-//! 聊天域中已满足边界的切片见 [`crate::app::shell_runtime_context::ChatShellLeptosContext`]（由 [`crate::app::App`] 根
-//! [`provide_context`]，侧栏等用 [`crate::app::shell_runtime_context::expect_chat_shell_ctx`] 读取）。
+//! 聊天域中已满足边界的切片见 [`crate::app::shell::runtime_context::ChatShellLeptosContext`]（由 [`crate::app::App`] 根
+//! [`provide_context`]，侧栏等用 [`crate::app::shell::runtime_context::expect_chat_shell_ctx`] 读取）。
 //!
 //! 根壳层 `wire_*` 的**注册顺序**影响隐式时序依赖；见 [`wire_phases`](crate::app::shell::wire_phases)
 //! 与 [`bootstrap_app_shell`](crate::app::shell::bootstrap::bootstrap_app_shell)（[`init_app_shell`](crate::app::shell::init::init_app_shell)）；聊天列内部顺序见 [`wire_chat_domain`](crate::app::chat::wire_chat_domain)。
@@ -59,7 +59,7 @@ pub struct ChangelistModalSignals {
 }
 
 /// 会话列表模态所需句柄（阶段 B：避免向 `session_list_modal_view` 传递整份 [`AppShellCtx`]）。
-/// 会话 / 草稿 / 语言 / 过滤开关经 [`crate::app::shell_runtime_context::ChatShellLeptosContext`]。
+/// 会话 / 草稿 / 语言 / 过滤开关经 [`crate::app::shell::runtime_context::ChatShellLeptosContext`]。
 #[derive(Clone, Copy)]
 pub struct SessionListModalSignals {
     pub session_modal: RwSignal<bool>,
@@ -75,7 +75,7 @@ impl SessionListModalSignals {
 }
 
 /// 底栏状态条所需句柄（阶段 B：避免向 `side_status_stack_view` 传递整份 [`AppShellCtx`]）。
-/// 会话句柄与界面语言经 [`crate::app::shell_runtime_context::ChatShellLeptosContext`]（角色切换时清流式句柄等）。
+/// 会话句柄与界面语言经 [`crate::app::shell::runtime_context::ChatShellLeptosContext`]（角色切换时清流式句柄等）。
 #[derive(Clone)]
 pub struct StatusBarFooterSignals {
     pub status_tasks: StatusTasksSignals,
@@ -108,7 +108,7 @@ type SideResizeHandlesCell = Rc<
 >;
 
 /// 左侧导航轨所需句柄（阶段 B：避免向 `sidebar_nav_view` 传递整份 [`AppShellCtx`]）。
-/// 会话列表 / 草稿 / 查找后焦点等经 [`crate::app::shell_runtime_context::ChatShellLeptosContext`] 注入子树。
+/// 会话列表 / 草稿 / 查找后焦点等经 [`crate::app::shell::runtime_context::ChatShellLeptosContext`] 注入子树。
 #[derive(Clone)]
 pub struct SidebarNavSignals {
     pub locale: RwSignal<Locale>,

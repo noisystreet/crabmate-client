@@ -5,7 +5,7 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen::closure::Closure;
 
 use crate::app::ide_layout_switch::{IdeLayoutToggleSignals, exit_editor_layout};
-use crate::app::shell_prefs_storage;
+use crate::app::shell::prefs_storage;
 use crate::app_prefs::{SidePanelView, mobile_layout_media_query};
 use crate::mobile_remote::mobile_remote_client;
 
@@ -56,7 +56,7 @@ fn on_viewport_narrow_change(
         return;
     }
     is_narrow_viewport.set(matches);
-    shell_prefs_storage::apply_narrow_viewport_dom_flag(matches);
+    prefs_storage::apply_narrow_viewport_dom_flag(matches);
     if matches || mobile_remote_client() {
         force_session_layout_if_mobile(layout_toggle, true);
         let current = side_panel_view.get_untracked();
@@ -151,7 +151,7 @@ pub fn wire_narrow_viewport_layout(sig: WireNarrowViewportSignals) {
                 }
             }
             is_narrow_viewport.set(initial);
-            shell_prefs_storage::apply_narrow_viewport_dom_flag(initial);
+            prefs_storage::apply_narrow_viewport_dom_flag(initial);
         } else if mobile_remote_client() {
             side_panel_view.set(SidePanelView::None);
         }

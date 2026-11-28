@@ -1,13 +1,13 @@
 //! 主题 / 语言 / 背景装饰：同步 `localStorage` 与 `document.documentElement`。
 //!
-//! 具体读写收口见 [`crate::app::shell_prefs_storage`]。
+//! 具体读写收口见 [`crate::app::shell::prefs_storage`]。
 
 use leptos::prelude::*;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen_futures::spawn_local;
 
-use crate::app::shell_prefs_storage;
+use crate::app::shell::prefs_storage;
 use crate::app_prefs::THEME_SYSTEM;
 use crate::i18n::Locale;
 use crate::tauri_shell::{tauri_fetch_os_prefers_dark_hint, tauri_shell_available};
@@ -28,7 +28,7 @@ fn should_refresh_system_theme(theme: RwSignal<String>, settings_page: RwSignal<
 
 fn refresh_system_theme_dom_if_idle(theme: RwSignal<String>, settings_page: RwSignal<bool>) {
     if should_refresh_system_theme(theme, settings_page) {
-        shell_prefs_storage::persist_theme_to_storage_and_dom(THEME_SYSTEM);
+        prefs_storage::persist_theme_to_storage_and_dom(THEME_SYSTEM);
     }
 }
 
@@ -71,7 +71,7 @@ fn attach_prefers_color_scheme_listener(theme: RwSignal<String>, settings_page: 
                 refresh_system_theme_dom_if_idle(theme, settings_page);
             });
         } else {
-            shell_prefs_storage::persist_theme_to_storage_and_dom(THEME_SYSTEM);
+            prefs_storage::persist_theme_to_storage_and_dom(THEME_SYSTEM);
         }
     });
     let _ = mql.add_event_listener_with_callback("change", cb.as_ref().unchecked_ref());
@@ -83,7 +83,7 @@ pub fn wire_sync_theme_to_storage_and_dom(sig: WireSyncThemeSignals) {
     let theme = sig.theme;
     let settings_page = sig.settings_page;
     Effect::new(move |_| {
-        shell_prefs_storage::persist_theme_to_storage_and_dom(&theme.get());
+        prefs_storage::persist_theme_to_storage_and_dom(&theme.get());
     });
     // Linux 桌面：WebKit matchMedia 常不可靠，用 Tauri OS 明暗提示（portal / gsettings 等）覆盖后再刷一次 DOM。
     if tauri_shell_available() {
@@ -102,13 +102,13 @@ pub fn wire_sync_theme_to_storage_and_dom(sig: WireSyncThemeSignals) {
 
 pub fn wire_sync_locale_html_lang(locale: RwSignal<Locale>) {
     Effect::new(move |_| {
-        shell_prefs_storage::apply_locale_html_lang(locale.get());
+        prefs_storage::apply_locale_html_lang(locale.get());
     });
 }
 
 pub fn wire_sync_bg_decor_to_storage_and_dom(bg_decor: RwSignal<bool>) {
     Effect::new(move |_| {
-        shell_prefs_storage::persist_bg_decor_to_storage_and_dom(bg_decor.get());
+        prefs_storage::persist_bg_decor_to_storage_and_dom(bg_decor.get());
     });
 }
 
@@ -118,7 +118,7 @@ pub fn wire_sync_session_typography_to_storage_and_dom(
     session_chat_font_size: RwSignal<f64>,
 ) {
     Effect::new(move |_| {
-        shell_prefs_storage::persist_session_typography_to_storage_and_dom(
+        prefs_storage::persist_session_typography_to_storage_and_dom(
             &session_ui_font.get(),
             &session_chat_font.get(),
             session_chat_font_size.get(),
@@ -129,7 +129,7 @@ pub fn wire_sync_session_typography_to_storage_and_dom(
 /// `<html>` 布局标记；Tauri 下始终无边框（Web 顶栏不受影响）。
 pub fn wire_sync_tauri_shell_dom() {
     Effect::new(|_| {
-        shell_prefs_storage::apply_shell_layout_dom_flags();
+        prefs_storage::apply_shell_layout_dom_flags();
     });
     Effect::new(|_| {
         crate::tauri_shell::tauri_apply_frameless_window_chrome();

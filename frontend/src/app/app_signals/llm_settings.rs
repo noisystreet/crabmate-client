@@ -3,7 +3,7 @@
 use leptos::prelude::*;
 
 use crate::api::load_saved_model_presets_from_storage;
-use crate::app::shell_prefs_storage;
+use crate::app::shell::prefs_storage;
 
 #[derive(Clone, Copy)]
 pub struct LLMSettingsSignals {
@@ -76,7 +76,7 @@ impl LLMSettingsSignals {
             readonly_tool_ttl_cache_follow_server: RwSignal::new(
                 crate::api::load_readonly_tool_ttl_cache_follow_server_from_storage(),
             ),
-            selected_agent_role: RwSignal::new(shell_prefs_storage::read_agent_role_initial()),
+            selected_agent_role: RwSignal::new(prefs_storage::read_agent_role_initial()),
             agent_role_user_override: RwSignal::new(false),
             selected_session_mode: RwSignal::new("act".to_string()),
             session_mode_user_override: RwSignal::new(false),
