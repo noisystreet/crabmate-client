@@ -35,7 +35,7 @@
 ## 用法
 
 - 默认：跑三条规则，全绿退出 0；
-- `--print-baseline`：按当前实测值打印两份基线（理由列是 `# TODO`，须人工补），
+- `--print-baseline`：按当前实测值打印两份基线（已有条目沿用原理由，新条目是 `# TODO`，须人工补），
   失败信息里会提示它；
 - 理由列**必填**且不许留 `TODO` —— 没有理由的预算，下一个人不知道它能不能降。
 """
@@ -178,12 +178,17 @@ def _check_budget(entries: list[Entry]) -> list[str]:
         if actual is None:
             problems.append(f"{e.rel} 已不存在（陈旧条目，请删除）")
             continue
-        if actual == 0 and e.lines > 0:
+        if actual == 0:
+            # 登记 0 行等于永久豁免该目录，不算「有预算」
             problems.append(f"{e.rel} 已无 .rs 文件（陈旧条目，请删除）")
             continue
         if actual != e.lines:
             delta = actual - e.lines
-            hint = "变胖了" if delta > 0 else "变瘦了，请把预算下调到实际值"
+            hint = (
+                "变胖了：确认该增长后上调预算，并在理由里写清为什么"
+                if delta > 0
+                else "变瘦了：请把预算下调到实际值"
+            )
             problems.append(f"{e.rel} 预算 {e.lines} ≠ 实际 {actual}（{delta:+d}，{hint}）")
     # Rule A2：递归条目不得是另一条目的祖先
     for a in entries:
@@ -214,25 +219,29 @@ def _check_conservation(entries: list[Entry]) -> list[str]:
     domain = ROOT / DOMAIN_ROOT
     if not domain.is_dir():
         return [f"试点域根不存在：{DOMAIN_ROOT}（改名了？请同步本脚本与预算文件）"]
-    total = _recursive_lines(domain)
-    accounted = 0
-    covered: set[str] = set()
+    root_entry = next((e for e in entries if e.rel == DOMAIN_ROOT), None)
+    if root_entry is None:
+        return [f"{DOMAIN_ROOT} 本身没有 direct 预算条目"]
+    registered: set[str] = set()
     for e in entries:
         if not e.rel.startswith(DOMAIN_ROOT + "/"):
             continue
         rest = e.rel[len(DOMAIN_ROOT) + 1 :]
         if "/" in rest:
             continue  # 孙目录由父条目覆盖
-        covered.add(rest)
-        accounted += e.lines
-    root_entry = next((e for e in entries if e.rel == DOMAIN_ROOT), None)
-    if root_entry is None:
-        return [f"{DOMAIN_ROOT} 本身没有 direct 预算条目"]
-    accounted += root_entry.lines
+        registered.add(rest)
+    # 求和用**实际**行数：预算漂移已由 Rule A 报过，这条只回答「是不是都登记了」，
+    # 否则 Rule A 一红，这里会连带报一个方向相反的「未归属 ±N 行」。
+    total = _recursive_lines(domain)
+    accounted = _direct_lines(domain)
+    for name in registered:
+        child = domain / name
+        if child.is_dir():
+            accounted += _recursive_lines(child)
     if accounted == total:
         return []
     known = {p.name for p in domain.iterdir() if p.is_dir()}
-    unregistered = sorted(known - covered)
+    unregistered = sorted(known - registered)
     detail = f"（未登记的子目录：{', '.join(unregistered)}）" if unregistered else ""
     return [
         f"{DOMAIN_ROOT} 有 {total - accounted:+d} 行未归属{detail}"
@@ -240,16 +249,46 @@ def _check_conservation(entries: list[Entry]) -> list[str]:
     ]
 
 
+def _existing_reasons() -> dict[str, str]:
+    """刷新基线时保留已有理由：`--print-baseline` 是失败信息里推荐的命令，
+    不该一跑就把 16 条手工理由变回 TODO（那会让门禁自己红，且丢掉「能不能降」的判断依据）。"""
+    if not BUDGET_FILE.is_file():
+        return {}
+    out: dict[str, str] = {}
+    for raw in BUDGET_FILE.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        body, _, reason = line.partition("#")
+        fields = body.split()
+        if len(fields) != 3:
+            continue
+        reason = reason.strip()
+        if reason and not reason.upper().startswith(TODO_REASON):
+            out[fields[0]] = reason
+    return out
+
+
 def _print_baseline() -> None:
-    print(f"# ===== {BUDGET_FILE.name}（实测基线；理由列须人工补）=====")
+    reasons = _existing_reasons()
+    print(f"# ===== {BUDGET_FILE.name}（实测基线；理由列沿用已有条目，新条目为 TODO）=====")
     print("# 格式：<dir>  lines=<n>  scope=<recursive|direct>   # <理由 / 目标>")
-    print(f"{DOMAIN_ROOT}  lines={_direct_lines(ROOT / DOMAIN_ROOT)}  scope=direct   # {TODO_REASON}")
+    print(
+        f"{DOMAIN_ROOT}  lines={_direct_lines(ROOT / DOMAIN_ROOT)}  scope=direct"
+        f"   # {reasons.get(DOMAIN_ROOT, TODO_REASON)}"
+    )
     for child in sorted(p for p in (ROOT / DOMAIN_ROOT).iterdir() if p.is_dir()):
         rel = f"{DOMAIN_ROOT}/{child.name}"
         if _rust_files(child):
-            print(f"{rel}  lines={_recursive_lines(child)}  scope=recursive   # {TODO_REASON}")
+            print(
+                f"{rel}  lines={_recursive_lines(child)}  scope=recursive"
+                f"   # {reasons.get(rel, TODO_REASON)}"
+            )
     for rel in OTHER_ROOTS:
-        print(f"{rel}  lines={_recursive_lines(ROOT / rel)}  scope=recursive   # {TODO_REASON}")
+        print(
+            f"{rel}  lines={_recursive_lines(ROOT / rel)}  scope=recursive"
+            f"   # {reasons.get(rel, TODO_REASON)}"
+        )
     print()
     print(f"# ===== {FLAT_FILE.name}（当前根级 .rs；只减不增）=====")
     _print_flat()
