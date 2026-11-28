@@ -5,7 +5,7 @@
 //!
 //! 由 `crate::session_ops` 用 `pub use` 转发，因此各端调用点无需改动。
 
-use crate::storage::{ChatSession, StoredMessage};
+use crate::storage::{ChatSession, StoredMessage, StoredMessageState};
 
 /// 第 `idx` 条消息若为普通用户消息，返回其在本会话中的 **0-based 用户序号**
 /// （与 `POST /chat/branch` 的 `before_user_ordinal` 一致）。
@@ -76,6 +76,83 @@ pub fn truncate_at_user_message_branch_local(
     }
     s.messages.truncate(idx);
     true
+}
+
+/// 新建的 loading 助手泡（两处「截断后重挂尾泡」共用的形状，避免两处字段漂移）。
+fn loading_assistant_message(id: &str, now_ms: i64) -> StoredMessage {
+    StoredMessage {
+        id: id.to_string(),
+        role: "assistant".to_string(),
+        text: String::new(),
+        reasoning_text: String::new(),
+        image_urls: vec![],
+        state: Some(StoredMessageState::Loading),
+        is_tool: false,
+        tool_call_id: None,
+        tool_name: None,
+        created_at: now_ms,
+    }
+}
+
+/// 保留指定用户气泡（同 id），删除其后的消息，并挂上新的 loading 助手泡；
+/// 返回用户原文、用户图片与新助手 id。
+///
+/// **时间与 id 由调用方注入**：本层不读时钟、不生成随机 id。Web 侧注入
+/// `js_sys::Date::now()` 与 `make_message_id()`。正因为解耦了这两个副作用，这条
+/// 「重新生成」路径（最容易把消息序列搞错的几条之一）才有 host 单测。
+pub fn truncate_at_user_message_and_prepare_regenerate(
+    sessions: &mut [ChatSession],
+    active_id: &str,
+    user_msg_id: &str,
+    new_asst_id: &str,
+    now_ms: i64,
+) -> Option<(String, Vec<String>, String)> {
+    let s = sessions.iter_mut().find(|sess| sess.id == active_id)?;
+    let idx = s.messages.iter().position(|m| m.id == user_msg_id)?;
+    let um = s.messages.get(idx)?;
+    if um.role != "user" || um.is_tool {
+        return None;
+    }
+    let user_msg = um.clone();
+    let user_text = user_msg.text.clone();
+    let user_images = user_msg.image_urls.clone();
+    s.messages.truncate(idx);
+    s.messages.push(user_msg);
+    s.messages
+        .push(loading_assistant_message(new_asst_id, now_ms));
+    Some((user_text, user_images, new_asst_id.to_string()))
+}
+
+/// 去掉失败助手泡及其后消息，挂上新的 loading 助手泡；返回本回合用户原文、用户图片与新助手 id。
+///
+/// 与 [`truncate_at_user_message_and_prepare_regenerate`] 同样注入时间与 id。前置条件是
+/// 失败泡之前必须紧邻一条用户消息 —— 否则无法确定「重试哪一轮」，返回 `None` 而不是猜。
+pub fn prepare_retry_failed_assistant_turn(
+    sessions: &mut [ChatSession],
+    active_id: &str,
+    failed_asst_id: &str,
+    new_asst_id: &str,
+    now_ms: i64,
+) -> Option<(String, Vec<String>, String)> {
+    let s = sessions.iter_mut().find(|sess| sess.id == active_id)?;
+    let idx = s.messages.iter().position(|m| {
+        m.id == failed_asst_id
+            && m.role == "assistant"
+            && !m.is_tool
+            && m.state.as_ref().is_some_and(|s| s.is_error())
+    })?;
+    if idx == 0 {
+        return None;
+    }
+    if s.messages[idx - 1].role != "user" {
+        return None;
+    }
+    let user_text = s.messages[idx - 1].text.clone();
+    let user_images = s.messages[idx - 1].image_urls.clone();
+    s.messages.truncate(idx);
+    s.messages
+        .push(loading_assistant_message(new_asst_id, now_ms));
+    Some((user_text, user_images, new_asst_id.to_string()))
 }
 
 #[cfg(test)]
@@ -198,5 +275,149 @@ mod tests {
         let mut other = vec![session_with("s1", vec![msg("a0", "assistant", "keep")])];
         assert!(!set_user_message_text(&mut other, "s1", "a0", "x"));
         assert_eq!(other[0].messages[0].text, "keep");
+    }
+}
+
+/// 注入版「重新生成 / 重试」规则的边界。
+///
+/// 这两条路径原先在函数体内直接读 `js_sys::Date::now()` 并生成随机 id，因此**没有任何单测**；
+/// 把时间与 id 改成注入后，第一次可以在 host target 钉住消息序列。
+#[cfg(test)]
+mod regenerate_tests {
+    use super::*;
+    use crate::storage::CURRENT_LAYOUT_SCHEMA_VERSION;
+
+    fn msg(id: &str, role: &str, text: &str) -> StoredMessage {
+        StoredMessage {
+            id: id.into(),
+            role: role.into(),
+            text: text.into(),
+            reasoning_text: String::new(),
+            image_urls: vec![],
+            state: None,
+            is_tool: false,
+            tool_call_id: None,
+            tool_name: None,
+            created_at: 0,
+        }
+    }
+
+    fn failed_assistant(id: &str) -> StoredMessage {
+        let mut m = msg(id, "assistant", "boom");
+        m.state = Some(StoredMessageState::Error);
+        m
+    }
+
+    fn session_with(id: &str, messages: Vec<StoredMessage>) -> ChatSession {
+        ChatSession {
+            id: id.into(),
+            layout_schema_version: CURRENT_LAYOUT_SCHEMA_VERSION,
+            title: "t".into(),
+            draft: String::new(),
+            pinned: false,
+            starred: false,
+            server_conversation_id: None,
+            server_revision: None,
+            workspace_root: None,
+            history_total: None,
+            history_window_start: None,
+            history_has_older: None,
+            messages,
+            updated_at: 0,
+        }
+    }
+
+    #[test]
+    fn regenerate_keeps_user_row_then_appends_loading_assistant() {
+        let mut sessions = vec![session_with(
+            "s1",
+            vec![
+                msg("u0", "user", "keep"),
+                msg("a0", "assistant", "old"),
+                msg("a1", "assistant", "tail"),
+            ],
+        )];
+        let (text, imgs, asst) = truncate_at_user_message_and_prepare_regenerate(
+            &mut sessions,
+            "s1",
+            "u0",
+            "new-a",
+            111,
+        )
+        .expect("user row exists");
+        assert_eq!(text, "keep");
+        assert!(imgs.is_empty());
+        assert_eq!(asst, "new-a");
+        // 用户行保留 + 新 loading 助手；其后的旧行全部丢弃
+        assert_eq!(sessions[0].messages.len(), 2);
+        assert_eq!(sessions[0].messages[0].id, "u0");
+        assert_eq!(sessions[0].messages[1].id, "new-a");
+        assert_eq!(
+            sessions[0].messages[1].state,
+            Some(StoredMessageState::Loading)
+        );
+        // 注入的时间原样落到新尾泡上（不再读 js 时钟）
+        assert_eq!(sessions[0].messages[1].created_at, 111);
+    }
+
+    #[test]
+    fn regenerate_rejects_missing_or_non_user_target() {
+        let mut sessions = vec![session_with(
+            "s1",
+            vec![msg("u0", "user", "x"), msg("a0", "assistant", "y")],
+        )];
+        assert!(
+            truncate_at_user_message_and_prepare_regenerate(&mut sessions, "nope", "u0", "n", 0)
+                .is_none()
+        );
+        assert!(
+            truncate_at_user_message_and_prepare_regenerate(&mut sessions, "s1", "zz", "n", 0)
+                .is_none()
+        );
+        // 助手行不能作为「重新生成」的目标
+        assert!(
+            truncate_at_user_message_and_prepare_regenerate(&mut sessions, "s1", "a0", "n", 0)
+                .is_none()
+        );
+        // 失败路径不改动原数据
+        assert_eq!(sessions[0].messages.len(), 2);
+    }
+
+    #[test]
+    fn retry_drops_failed_assistant_and_its_tail() {
+        let mut sessions = vec![session_with(
+            "s1",
+            vec![
+                msg("u0", "user", "question"),
+                failed_assistant("a0"),
+                msg("a1", "assistant", "tail"),
+            ],
+        )];
+        let (text, _imgs, asst) =
+            prepare_retry_failed_assistant_turn(&mut sessions, "s1", "a0", "new-a", 222)
+                .expect("failed row has a preceding user row");
+        assert_eq!(text, "question");
+        assert_eq!(asst, "new-a");
+        assert_eq!(sessions[0].messages.len(), 2);
+        assert_eq!(sessions[0].messages[1].id, "new-a");
+        assert_eq!(sessions[0].messages[1].created_at, 222);
+    }
+
+    #[test]
+    fn retry_refuses_without_preceding_user_row() {
+        // 失败泡前面是助手行 → 无法确定「重试哪一轮」，返回 None 而不是猜
+        let mut sessions = vec![session_with(
+            "s1",
+            vec![msg("a0", "assistant", "first"), failed_assistant("a1")],
+        )];
+        assert!(prepare_retry_failed_assistant_turn(&mut sessions, "s1", "a1", "n", 0).is_none());
+        assert_eq!(sessions[0].messages.len(), 2);
+
+        // 目标不是 error 态 → 不是「重试」对象
+        let mut ok = vec![session_with(
+            "s1",
+            vec![msg("u0", "user", "q"), msg("a0", "assistant", "fine")],
+        )];
+        assert!(prepare_retry_failed_assistant_turn(&mut ok, "s1", "a0", "n", 0).is_none());
     }
 }

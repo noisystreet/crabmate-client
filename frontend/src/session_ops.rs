@@ -11,8 +11,7 @@ use crate::session_export::{
 };
 use crate::session_sync::SessionSyncState;
 use crate::storage::{
-    ChatSession, DEFAULT_CHAT_SESSION_TITLE, StoredMessage, StoredMessageState,
-    ensure_at_least_one, make_session_id,
+    ChatSession, DEFAULT_CHAT_SESSION_TITLE, StoredMessage, ensure_at_least_one, make_session_id,
 };
 
 // 会话域的**纯规则**已下沉到 `crate::domain::session`（#598）：转发保住既有引用路径
@@ -103,76 +102,39 @@ pub fn make_message_id() -> String {
 }
 
 /// 保留指定用户气泡（同 id），删除其后的消息，并挂上新的 loading 助手泡；返回用户原文与新助手 id。
+///
+/// 规则本体在 `crate::domain::session`（可 host 单测）；本函数只负责注入 Web 的时钟与 id 源。
 pub fn truncate_at_user_message_and_prepare_regenerate(
     sessions: &mut [ChatSession],
     active_id: &str,
     user_msg_id: &str,
 ) -> Option<(String, Vec<String>, String)> {
-    let s = sessions.iter_mut().find(|sess| sess.id == active_id)?;
-    let idx = s.messages.iter().position(|m| m.id == user_msg_id)?;
-    let um = s.messages.get(idx)?;
-    if um.role != "user" || um.is_tool {
-        return None;
-    }
-    let user_msg = um.clone();
-    let user_text = user_msg.text.clone();
-    let user_images = user_msg.image_urls.clone();
-    s.messages.truncate(idx);
-    s.messages.push(user_msg);
     let new_asst_id = make_message_id();
-    let now = message_created_ms();
-    s.messages.push(StoredMessage {
-        id: new_asst_id.clone(),
-        role: "assistant".to_string(),
-        text: String::new(),
-        reasoning_text: String::new(),
-        image_urls: vec![],
-        state: Some(StoredMessageState::Loading),
-        is_tool: false,
-        tool_call_id: None,
-        tool_name: None,
-        created_at: now,
-    });
-    Some((user_text, user_images, new_asst_id))
+    crate::domain::session::truncate_at_user_message_and_prepare_regenerate(
+        sessions,
+        active_id,
+        user_msg_id,
+        &new_asst_id,
+        message_created_ms(),
+    )
 }
 
 /// 去掉失败助手泡及其后消息，挂上新的 loading 助手泡；返回本回合用户原文与新助手 id。
+///
+/// 规则本体在 `crate::domain::session`（可 host 单测）；本函数只负责注入 Web 的时钟与 id 源。
 pub fn prepare_retry_failed_assistant_turn(
     sessions: &mut [ChatSession],
     active_id: &str,
     failed_asst_id: &str,
 ) -> Option<(String, Vec<String>, String)> {
-    let s = sessions.iter_mut().find(|sess| sess.id == active_id)?;
-    let idx = s.messages.iter().position(|m| {
-        m.id == failed_asst_id
-            && m.role == "assistant"
-            && !m.is_tool
-            && m.state.as_ref().is_some_and(|s| s.is_error())
-    })?;
-    if idx == 0 {
-        return None;
-    }
-    if s.messages[idx - 1].role != "user" {
-        return None;
-    }
-    let user_text = s.messages[idx - 1].text.clone();
-    let user_images = s.messages[idx - 1].image_urls.clone();
-    s.messages.truncate(idx);
     let new_asst_id = make_message_id();
-    let now = message_created_ms();
-    s.messages.push(StoredMessage {
-        id: new_asst_id.clone(),
-        role: "assistant".to_string(),
-        text: String::new(),
-        reasoning_text: String::new(),
-        image_urls: vec![],
-        state: Some(StoredMessageState::Loading),
-        is_tool: false,
-        tool_call_id: None,
-        tool_name: None,
-        created_at: now,
-    });
-    Some((user_text, user_images, new_asst_id))
+    crate::domain::session::prepare_retry_failed_assistant_turn(
+        sessions,
+        active_id,
+        failed_asst_id,
+        &new_asst_id,
+        message_created_ms(),
+    )
 }
 
 pub fn message_created_ms() -> i64 {
